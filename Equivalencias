@@ -1,0 +1,189 @@
+import streamlit as st
+import pandas as pd
+import sqlite3
+import re
+
+# Configuración de página
+st.set_page_config(page_title="Equivalencias El Chavo", layout="centered")
+
+
+@st.cache_resource
+def get_connection():
+    """Conexión única y persistente entre reruns de Streamlit."""
+    conn = sqlite3.connect("equivalencias_app.db", check_same_thread=False)
+    c = conn.cursor()
+    c.execute("CREATE TABLE IF NOT EXISTS marcas (id INTEGER PRIMARY KEY AUTOINCREMENT, nombre TEXT UNIQUE, tipo TEXT)")
+    c.execute("""CREATE TABLE IF NOT EXISTS productos (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        codigo_raw TEXT,
+        codigo_clean TEXT,
+        descripcion TEXT,
+        marca_id INTEGER,
+        UNIQUE(codigo_clean, marca_id)
+    )""")
+    c.execute("CREATE TABLE IF NOT EXISTS equivalencias (producto_a_id INTEGER, producto_b_id INTEGER, PRIMARY KEY (producto_a_id, producto_b_id))")
+    # Índice para acelerar búsquedas por código
+    c.execute("CREATE INDEX IF NOT EXISTS idx_codigo_clean ON productos(codigo_clean)")
+    conn.commit()
+    return conn
+
+
+conn = get_connection()
+c = conn.cursor()
+
+# Encabezado visual
+st.image("https://upload.wikimedia.org/wikipedia/commons/f/f4/El_Chavo_del_8_Logo.svg", width=120)
+st.title("Equivalencias El Chavo")
+st.caption("¡Fue sin querer queriendo! Sistema de búsqueda de repuestos")
+
+
+def sanitizar(codigo):
+    """Limpia un código dejando solo letras y números en mayúscula."""
+    if codigo is None or (isinstance(codigo, float) and pd.isna(codigo)):
+        return ""
+    codigo = str(codigo).strip()
+    if codigo == "" or codigo.lower() == "nan":
+        return ""
+    return re.sub(r'[^A-Z0-9]', '', codigo.upper())
+
+
+def valor_o_vacio(row, col):
+    """Devuelve el valor de una celda como string, o '' si es NaN/None."""
+    if col is None:
+        return ""
+    val = row[col]
+    if val is None or (isinstance(val, float) and pd.isna(val)):
+        return ""
+    return str(val).strip()
+
+
+# PESTAÑAS PRINCIPALES
+tab1, tab2 = st.tabs(["🔍 Buscador", "📁 Cargar Excel"])
+
+# --- TAB 1: BUSCADOR ---
+with tab1:
+    st.image("https://i.ibb.co/L8mXjZd/chavo-del-8-png.png", width=100)
+    busqueda = st.text_input("Ingresá un código (OEM o Proveedor):", placeholder="Ej: W712/94, 036115561G...")
+
+    if st.button("Buscar Equivalencias", type="primary"):
+        clean = sanitizar(busqueda)
+        if not clean:
+            st.info("Ingresá un código válido para buscar.")
+        else:
+            query = '''
+            WITH RECURSIVE Red(id) AS (
+                SELECT id FROM productos WHERE codigo_clean = ?
+                UNION
+                SELECT CASE WHEN eq.producto_a_id = re.id THEN eq.producto_b_id ELSE eq.producto_a_id END
+                FROM equivalencias eq JOIN Red re ON (eq.producto_a_id = re.id OR eq.producto_b_id = re.id)
+            )
+            SELECT DISTINCT p.codigo_raw AS "Código", p.descripcion AS "Descripción", m.nombre AS "Marca", m.tipo AS "Tipo"
+            FROM Red r JOIN productos p ON p.id = r.id JOIN marcas m ON m.id = p.marca_id;
+            '''
+            res = pd.read_sql_query(query, conn, params=(clean,))
+            if not res.empty:
+                st.success(f"Se encontraron {len(res)} coincidencias:")
+                st.dataframe(res, use_container_width=True)
+            else:
+                st.warning("¡Se me chispoteó! No hay equivalencias registradas para ese código.")
+
+# --- TAB 2: CARGAR LISTA ---
+with tab2:
+    st.subheader("Cargar nueva planilla (.xlsx)")
+    nombre_prov = st.text_input("Nombre de la Marca / Proveedor:", placeholder="Ej: Mahle, Bosch, Mann...")
+    archivo = st.file_uploader("Seleccioná el archivo Excel", type=["xlsx", "xls"])
+
+    procesar = st.button("Procesar e Importar Lista", type="primary")
+
+    if procesar:
+        if not archivo:
+            st.warning("Subí un archivo Excel primero.")
+        elif not nombre_prov.strip():
+            st.warning("Ingresá el nombre de la marca / proveedor.")
+        else:
+            try:
+                with st.spinner("Procesando planilla..."):
+                    # Detectar fila de encabezado: primera fila con >=2 celdas
+                    # no numéricas y no vacías (más robusto que solo contar celdas llenas)
+                    df_temp = pd.read_excel(archivo, nrows=15, header=None)
+                    header_row = 0
+                    for idx, row in df_temp.iterrows():
+                        valores = row.dropna()
+                        texto = [v for v in valores if isinstance(v, str) and v.strip()]
+                        if len(texto) >= 2:
+                            header_row = idx
+                            break
+
+                    archivo.seek(0)
+                    df = pd.read_excel(archivo, skiprows=header_row)
+
+                    if df.shape[1] < 2:
+                        st.error("El archivo debe tener al menos 2 columnas (código proveedor y código OEM).")
+                        st.stop()
+
+                    # Mapeo de columnas
+                    cols = [str(c_).upper() for c_ in df.columns]
+                    col_prov, col_oem, col_desc = df.columns[0], df.columns[1], None
+
+                    for i, col_name in enumerate(cols):
+                        if any(x in col_name for x in ['COD', 'ART', 'REF']):
+                            col_prov = df.columns[i]
+                        elif any(x in col_name for x in ['OEM', 'ORIG', 'EQUIV']):
+                            col_oem = df.columns[i]
+                        elif any(x in col_name for x in ['DESC', 'DETALLE', 'PROD']):
+                            col_desc = df.columns[i]
+
+                    # Marcas
+                    c.execute("INSERT OR IGNORE INTO marcas (nombre, tipo) VALUES (?, 'PROVEEDOR')", (nombre_prov.upper(),))
+                    c.execute("SELECT id FROM marcas WHERE nombre = ?", (nombre_prov.upper(),))
+                    prov_id = c.fetchone()[0]
+
+                    c.execute("INSERT OR IGNORE INTO marcas (nombre, tipo) VALUES ('OEM / FABRICA', 'OEM')")
+                    c.execute("SELECT id FROM marcas WHERE nombre = 'OEM / FABRICA'")
+                    oem_id = c.fetchone()[0]
+
+                    cargados = 0
+                    omitidos = 0
+
+                    for _, row in df.iterrows():
+                        raw_p = valor_o_vacio(row, col_prov)
+                        raw_o = valor_o_vacio(row, col_oem)
+                        clean_p, clean_o = sanitizar(raw_p), sanitizar(raw_o)
+                        desc = valor_o_vacio(row, col_desc)
+
+                        if not clean_p or not clean_o:
+                            omitidos += 1
+                            continue
+
+                        # Insertar o ignorar (no pisa ids existentes -> no rompe equivalencias)
+                        c.execute(
+                            "INSERT OR IGNORE INTO productos (codigo_raw, codigo_clean, descripcion, marca_id) VALUES (?, ?, ?, ?)",
+                            (raw_p, clean_p, desc, prov_id)
+                        )
+                        # Si ya existía, actualizamos la descripción sin tocar el id
+                        c.execute(
+                            "UPDATE productos SET descripcion = ?, codigo_raw = ? WHERE codigo_clean = ? AND marca_id = ?",
+                            (desc, raw_p, clean_p, prov_id)
+                        )
+                        c.execute("SELECT id FROM productos WHERE codigo_clean = ? AND marca_id = ?", (clean_p, prov_id))
+                        pid = c.fetchone()[0]
+
+                        c.execute(
+                            "INSERT OR IGNORE INTO productos (codigo_raw, codigo_clean, descripcion, marca_id) VALUES (?, ?, ?, ?)",
+                            (raw_o, clean_o, desc, oem_id)
+                        )
+                        c.execute("SELECT id FROM productos WHERE codigo_clean = ? AND marca_id = ?", (clean_o, oem_id))
+                        oid = c.fetchone()[0]
+
+                        c.execute("INSERT OR IGNORE INTO equivalencias VALUES (?, ?)", (pid, oid))
+                        c.execute("INSERT OR IGNORE INTO equivalencias VALUES (?, ?)", (oid, pid))
+                        cargados += 1
+
+                    conn.commit()
+
+                st.balloons()
+                st.success(f"¡Eso, eso, eso! Se importaron {cargados} productos correctamente.")
+                if omitidos:
+                    st.info(f"Se omitieron {omitidos} filas por falta de código proveedor u OEM.")
+            except Exception as e:
+                st.error(f"Error procesando la lista: {e}")
