@@ -165,6 +165,34 @@ def depurar_huerfanos():
     return borrados
 
 
+def listar_productos_sin_equivalencias(marca_filtro="Todas", limite=500):
+    """Devuelve productos que no tienen ninguna equivalencia vinculada, sin borrarlos."""
+    query = """
+        SELECT p.id AS "ID", p.codigo_raw AS "Codigo", p.descripcion AS "Descripcion",
+               m.nombre AS "Marca", m.tipo AS "Tipo"
+        FROM productos p JOIN marcas m ON m.id = p.marca_id
+        WHERE p.id NOT IN (SELECT DISTINCT producto_a_id FROM equivalencias)
+          AND p.id NOT IN (SELECT DISTINCT producto_b_id FROM equivalencias)
+    """
+    params = []
+    if marca_filtro and marca_filtro != "Todas":
+        query += " AND UPPER(m.nombre) = ?"
+        params.append(marca_filtro.upper())
+    query += " ORDER BY m.nombre, p.codigo_raw LIMIT ?"
+    params.append(limite)
+    c.execute(query, params)
+    return filas_a_listas(c)
+
+
+def contar_productos_sin_equivalencias():
+    c.execute("""
+        SELECT COUNT(*) FROM productos
+        WHERE id NOT IN (SELECT DISTINCT producto_a_id FROM equivalencias)
+          AND id NOT IN (SELECT DISTINCT producto_b_id FROM equivalencias)
+    """)
+    return c.fetchone()[0]
+
+
 def get_or_create_producto(raw, clean, desc, marca_id):
     c.execute(
         "INSERT OR IGNORE INTO productos (codigo_raw, codigo_clean, descripcion, marca_id) VALUES (?, ?, ?, ?)",
@@ -206,21 +234,31 @@ def buscar_por_codigo(clean_code, marca_filtro="Todas"):
 
     c.execute(query, params)
     res = filas_a_listas(c)
-    # Marca qué filas están verificadas con un link directo hacia el producto buscado
+    if not res:
+        return res
+
+    # Marca qué filas están verificadas con un link directo hacia el producto buscado.
+    # Una sola consulta para todo el lote, en vez de una por fila (evita el problema N+1).
     c.execute("SELECT id FROM productos WHERE codigo_clean = ?", (clean_code,))
     origenes = [r["id"] for r in c.fetchall()]
+    verificados_set = set()
+    if origenes:
+        result_ids = [f["ID"] for f in res]
+        placeholders_o = ",".join("?" * len(origenes))
+        placeholders_r = ",".join("?" * len(result_ids))
+        c.execute(
+            f"""SELECT producto_a_id, producto_b_id FROM equivalencias
+                WHERE verificada = 1
+                  AND ((producto_a_id IN ({placeholders_o}) AND producto_b_id IN ({placeholders_r}))
+                    OR (producto_b_id IN ({placeholders_o}) AND producto_a_id IN ({placeholders_r})))""",
+            origenes + result_ids + origenes + result_ids
+        )
+        for a, b in c.fetchall():
+            verificados_set.add(a)
+            verificados_set.add(b)
+
     for fila in res:
-        verificada = False
-        for oid in origenes:
-            c.execute(
-                "SELECT 1 FROM equivalencias WHERE verificada = 1 AND "
-                "((producto_a_id = ? AND producto_b_id = ?) OR (producto_a_id = ? AND producto_b_id = ?))",
-                (oid, fila["ID"], fila["ID"], oid)
-            )
-            if c.fetchone():
-                verificada = True
-                break
-        fila["Verificada"] = "✅" if verificada else ""
+        fila["Verificada"] = "✅" if fila["ID"] in verificados_set else ""
     return res
 
 
@@ -809,6 +847,58 @@ with tab4:
             st.info("No había productos sueltos para borrar.")
 
     st.markdown("---")
+    st.markdown("**🧩 Productos sin equivalencias**")
+    st.caption(
+        "Esta sección puede ser pesada, así que se calcula solo cuando la pedís (no en cada búsqueda)."
+    )
+
+    if "mostrar_huerfanos" not in st.session_state:
+        st.session_state.mostrar_huerfanos = False
+
+    col_ver, col_ocultar = st.columns(2)
+    if col_ver.button("📋 Mostrar productos sin equivalencias"):
+        st.session_state.mostrar_huerfanos = True
+        st.rerun()
+    if st.session_state.mostrar_huerfanos and col_ocultar.button("🙈 Ocultar"):
+        st.session_state.mostrar_huerfanos = False
+        st.rerun()
+
+    if st.session_state.mostrar_huerfanos:
+        total_sin_eq = contar_productos_sin_equivalencias()
+        st.write(f"Total: **{total_sin_eq}** producto(s) sin ninguna equivalencia.")
+
+        if total_sin_eq == 0:
+            st.info("¡Todos los productos tienen al menos una equivalencia! 🎉")
+        else:
+            c.execute("SELECT nombre FROM marcas ORDER BY nombre")
+            marcas_para_filtro = ["Todas"] + [r["nombre"] for r in c.fetchall()]
+            marca_filtro_huerfanos = st.selectbox("Filtrar por marca:", marcas_para_filtro, key="filtro_huerfanos")
+            cantidad_mostrar = st.selectbox("Mostrar en pantalla:", [25, 50, 100], index=0,
+                                             help="La descarga en Excel siempre incluye todo, esto es solo lo que se dibuja en pantalla.")
+
+            pendientes_completo = listar_productos_sin_equivalencias(marca_filtro_huerfanos, limite=2000)
+            if pendientes_completo:
+                st.download_button(
+                    "⬇️ Descargar lista completa (Excel)",
+                    data=to_excel_bytes(quitar_id(pendientes_completo)),
+                    file_name="productos_sin_equivalencias.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                )
+                pendientes = pendientes_completo[:cantidad_mostrar]
+                st.caption(f"Mostrando {len(pendientes)} de {len(pendientes_completo)}.")
+                for fila in pendientes:
+                    colC, colM, colB = st.columns([3, 2, 1.2])
+                    colC.write(f"{fila['Codigo']}" + (f" — {fila['Descripcion']}" if fila.get('Descripcion') else ""))
+                    colM.write(fila['Marca'])
+                    if colB.button("🔗 Usar", key=f"usar_huerfano_{fila['ID']}"):
+                        st.session_state["cod_a"] = fila["Codigo"]
+                        st.session_state["marca_a"] = fila["Marca"]
+                        st.session_state["desc_a"] = fila.get("Descripcion") or ""
+                        st.success("Cargado. Andá a la pestaña '🔗 Vincular manual' para completar el Código B.")
+            else:
+                st.info("Sin resultados para esa marca.")
+
+    st.markdown("---")
     st.markdown("**Catálogos externos**")
     st.caption("Agregá los sitios de proveedores que querés que aparezcan como botones al buscar un código.")
 
@@ -876,8 +966,11 @@ with tab5:
         st.caption("Todavía no se registraron importaciones.")
 
     st.markdown("---")
-    with open(DB_PATH, "rb") as f:
-        st.download_button("⬇️ Descargar backup de la base de datos (.db)", data=f,
+    if st.button("🗄️ Preparar backup de la base de datos"):
+        with open(DB_PATH, "rb") as f:
+            st.session_state["backup_bytes"] = f.read()
+    if "backup_bytes" in st.session_state:
+        st.download_button("⬇️ Descargar backup (.db)", data=st.session_state["backup_bytes"],
                             file_name=f"equivalencias_backup_{datetime.now():%Y%m%d}.db")
 
 # ============================================================
