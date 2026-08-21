@@ -2,6 +2,7 @@ import streamlit as st
 import sqlite3
 import re
 import io
+import threading
 from datetime import datetime
 from openpyxl import load_workbook, Workbook
 
@@ -11,6 +12,41 @@ from openpyxl import load_workbook, Workbook
 st.set_page_config(page_title="Equivalencias El Chavo", page_icon="🔧", layout="wide")
 
 DB_PATH = "equivalencias_app.db"
+
+# La conexión a la base se comparte entre todas las personas que usan la app al mismo
+# tiempo (así funciona el hosting gratuito). Este candado evita que dos operaciones
+# (por ejemplo una importación larga y una búsqueda de otra persona) se pisen y
+# dejen todo trabado.
+db_lock = threading.Lock()
+
+
+def es_admin():
+    return st.session_state.get("es_admin", False)
+
+
+def pedir_password_admin(motivo=""):
+    """Muestra un formulario de contraseña. Devuelve True si ya está autenticado."""
+    if es_admin():
+        return True
+
+    st.warning(f"🔒 Esta sección está protegida{(' — ' + motivo) if motivo else ''}.")
+    with st.form(f"login_admin_{motivo}"):
+        clave = st.text_input("Contraseña de administrador:", type="password")
+        entrar = st.form_submit_button("Ingresar")
+
+    if entrar:
+        clave_correcta = st.secrets.get("admin_password") if hasattr(st, "secrets") else None
+        if not clave_correcta:
+            st.error(
+                "No configuraste todavía la contraseña de administrador en Streamlit Cloud "
+                "(Settings → Secrets). Sin eso, nadie puede entrar a esta sección."
+            )
+        elif clave == clave_correcta:
+            st.session_state.es_admin = True
+            st.rerun()
+        else:
+            st.error("Contraseña incorrecta.")
+    return False
 
 
 # ============================================================
@@ -144,24 +180,27 @@ def agregar_catalogo_externo(nombre, url):
     url = url.strip()
     if not url.startswith(("http://", "https://")):
         url = "https://" + url
-    c.execute("INSERT OR REPLACE INTO catalogos_externos (nombre, url) VALUES (?, ?)", (nombre, url))
-    conn.commit()
+    with db_lock:
+        c.execute("INSERT OR REPLACE INTO catalogos_externos (nombre, url) VALUES (?, ?)", (nombre, url))
+        conn.commit()
 
 
 def eliminar_catalogo_externo(catalogo_id):
-    c.execute("DELETE FROM catalogos_externos WHERE id = ?", (catalogo_id,))
-    conn.commit()
+    with db_lock:
+        c.execute("DELETE FROM catalogos_externos WHERE id = ?", (catalogo_id,))
+        conn.commit()
 
 
 def depurar_huerfanos():
     """Borra productos que no tienen ninguna equivalencia vinculada (quedaron sueltos)."""
-    c.execute("""
-        DELETE FROM productos
-        WHERE id NOT IN (SELECT DISTINCT producto_a_id FROM equivalencias)
-          AND id NOT IN (SELECT DISTINCT producto_b_id FROM equivalencias)
-    """)
-    borrados = c.rowcount
-    conn.commit()
+    with db_lock:
+        c.execute("""
+            DELETE FROM productos
+            WHERE id NOT IN (SELECT DISTINCT producto_a_id FROM equivalencias)
+              AND id NOT IN (SELECT DISTINCT producto_b_id FROM equivalencias)
+        """)
+        borrados = c.rowcount
+        conn.commit()
     return borrados
 
 
@@ -232,30 +271,31 @@ def buscar_por_codigo(clean_code, marca_filtro="Todas"):
         params.append(marca_filtro.upper())
     query += " ORDER BY m.tipo, m.nombre;"
 
-    c.execute(query, params)
-    res = filas_a_listas(c)
-    if not res:
-        return res
+    with db_lock:
+        c.execute(query, params)
+        res = filas_a_listas(c)
+        if not res:
+            return res
 
-    # Marca qué filas están verificadas con un link directo hacia el producto buscado.
-    # Una sola consulta para todo el lote, en vez de una por fila (evita el problema N+1).
-    c.execute("SELECT id FROM productos WHERE codigo_clean = ?", (clean_code,))
-    origenes = [r["id"] for r in c.fetchall()]
-    verificados_set = set()
-    if origenes:
-        result_ids = [f["ID"] for f in res]
-        placeholders_o = ",".join("?" * len(origenes))
-        placeholders_r = ",".join("?" * len(result_ids))
-        c.execute(
-            f"""SELECT producto_a_id, producto_b_id FROM equivalencias
-                WHERE verificada = 1
-                  AND ((producto_a_id IN ({placeholders_o}) AND producto_b_id IN ({placeholders_r}))
-                    OR (producto_b_id IN ({placeholders_o}) AND producto_a_id IN ({placeholders_r})))""",
-            origenes + result_ids + origenes + result_ids
-        )
-        for a, b in c.fetchall():
-            verificados_set.add(a)
-            verificados_set.add(b)
+        # Marca qué filas están verificadas con un link directo hacia el producto buscado.
+        # Una sola consulta para todo el lote, en vez de una por fila (evita el problema N+1).
+        c.execute("SELECT id FROM productos WHERE codigo_clean = ?", (clean_code,))
+        origenes = [r["id"] for r in c.fetchall()]
+        verificados_set = set()
+        if origenes:
+            result_ids = [f["ID"] for f in res]
+            placeholders_o = ",".join("?" * len(origenes))
+            placeholders_r = ",".join("?" * len(result_ids))
+            c.execute(
+                f"""SELECT producto_a_id, producto_b_id FROM equivalencias
+                    WHERE verificada = 1
+                      AND ((producto_a_id IN ({placeholders_o}) AND producto_b_id IN ({placeholders_r}))
+                        OR (producto_b_id IN ({placeholders_o}) AND producto_a_id IN ({placeholders_r})))""",
+                origenes + result_ids + origenes + result_ids
+            )
+            for a, b in c.fetchall():
+                verificados_set.add(a)
+                verificados_set.add(b)
 
     for fila in res:
         fila["Verificada"] = "✅" if fila["ID"] in verificados_set else ""
@@ -272,18 +312,21 @@ def buscar_por_texto(texto):
     WHERE UPPER(p.descripcion) LIKE ? OR UPPER(p.codigo_raw) LIKE ?
     ORDER BY m.nombre LIMIT 200;
     '''
-    c.execute(query, (like, like))
-    return filas_a_listas(c)
+    with db_lock:
+        c.execute(query, (like, like))
+        return filas_a_listas(c)
 
 
 def actualizar_precio_stock(producto_id, precio, stock):
-    c.execute("UPDATE productos SET precio = ?, stock = ? WHERE id = ?", (precio, stock, producto_id))
-    conn.commit()
+    with db_lock:
+        c.execute("UPDATE productos SET precio = ?, stock = ? WHERE id = ?", (precio, stock, producto_id))
+        conn.commit()
 
 
 def alternar_favorito(producto_id, valor):
-    c.execute("UPDATE productos SET favorito = ? WHERE id = ?", (1 if valor else 0, producto_id))
-    conn.commit()
+    with db_lock:
+        c.execute("UPDATE productos SET favorito = ? WHERE id = ?", (1 if valor else 0, producto_id))
+        conn.commit()
 
 
 def listar_favoritos():
@@ -384,6 +427,13 @@ def leer_excel(archivo, nrows=None):
 # ============================================================
 st.title("🔧 Equivalencias El Chavo")
 st.caption("¡Fue sin querer queriendo! Sistema de búsqueda de repuestos por equivalencia")
+
+if es_admin():
+    col_estado, col_salir = st.columns([4, 1])
+    col_estado.caption("🔓 Sesión de administrador activa.")
+    if col_salir.button("Salir"):
+        st.session_state.es_admin = False
+        st.rerun()
 
 if "lista_whatsapp" not in st.session_state:
     st.session_state.lista_whatsapp = []  # lista de códigos agregados para el mensaje
@@ -556,233 +606,246 @@ with tab2:
         elif clean_a == clean_b and marca_a.strip().upper() == marca_b.strip().upper():
             st.warning("Los dos códigos son idénticos, no hay nada para vincular.")
         else:
-            marca_a_id = get_or_create_marca(marca_a)
-            marca_b_id = get_or_create_marca(marca_b)
-            id_a = get_or_create_producto(codigo_a.strip(), clean_a, desc_a.strip(), marca_a_id)
-            id_b = get_or_create_producto(codigo_b.strip(), clean_b, desc_b.strip(), marca_b_id)
-            v = 1 if verificar else 0
-            c.execute(
-                "INSERT OR REPLACE INTO equivalencias (producto_a_id, producto_b_id, created_at, verificada) "
-                "VALUES (?, ?, datetime('now'), ?)", (id_a, id_b, v)
-            )
-            c.execute(
-                "INSERT OR REPLACE INTO equivalencias (producto_a_id, producto_b_id, created_at, verificada) "
-                "VALUES (?, ?, datetime('now'), ?)", (id_b, id_a, v)
-            )
-            conn.commit()
+            with db_lock:
+                marca_a_id = get_or_create_marca(marca_a)
+                marca_b_id = get_or_create_marca(marca_b)
+                id_a = get_or_create_producto(codigo_a.strip(), clean_a, desc_a.strip(), marca_a_id)
+                id_b = get_or_create_producto(codigo_b.strip(), clean_b, desc_b.strip(), marca_b_id)
+                v = 1 if verificar else 0
+                c.execute(
+                    "INSERT OR REPLACE INTO equivalencias (producto_a_id, producto_b_id, created_at, verificada) "
+                    "VALUES (?, ?, datetime('now'), ?)", (id_a, id_b, v)
+                )
+                c.execute(
+                    "INSERT OR REPLACE INTO equivalencias (producto_a_id, producto_b_id, created_at, verificada) "
+                    "VALUES (?, ?, datetime('now'), ?)", (id_b, id_a, v)
+                )
+                conn.commit()
             st.success(f"¡Eso, eso, eso! {codigo_a} ({marca_a}) y {codigo_b} ({marca_b}) quedaron vinculados.")
 
 # ============================================================
 # TAB 3: CARGAR EXCEL
 # ============================================================
 with tab3:
-    st.subheader("Cargar nueva planilla (.xlsx / .csv)")
-    nombre_prov = st.text_input("Nombre de la Marca / Proveedor:", placeholder="Ej: Mahle, Bosch, Mann...")
-
-    metodo = st.radio(
-        "¿Cómo querés indicar el archivo?",
-        ["Subir archivo", "Escribir la ruta en el teléfono"],
-        horizontal=True,
-        help="Si el botón de subir no responde en el navegador del celular, usá la opción de ruta."
-    )
-
-    archivo = None
-
-    if metodo == "Subir archivo":
-        archivo = st.file_uploader("Seleccioná el archivo", type=["xlsx", "csv"])
+    if not pedir_password_admin("cargar listas de proveedores"):
+        pass
     else:
-        st.caption(
-            "Ejemplo: /storage/emulated/0/Download/lista.xlsx "
-            "(si el archivo está en Descargas, esa es la ruta de siempre)."
+        st.subheader("Cargar nueva planilla (.xlsx / .csv)")
+        nombre_prov = st.text_input("Nombre de la Marca / Proveedor:", placeholder="Ej: Mahle, Bosch, Mann...")
+
+        metodo = st.radio(
+            "¿Cómo querés indicar el archivo?",
+            ["Subir archivo", "Escribir la ruta en el teléfono"],
+            horizontal=True,
+            help="Si el botón de subir no responde en el navegador del celular, usá la opción de ruta."
         )
-        ruta_archivo = st.text_input("Ruta completa del archivo (.xlsx o .csv) en el teléfono:",
-                                      placeholder="/storage/emulated/0/Download/lista.xlsx")
-        if ruta_archivo:
-            import os
-            if not os.path.isfile(ruta_archivo):
-                st.error("No se encontró un archivo en esa ruta. Revisá que esté bien escrita.")
-            elif not ruta_archivo.lower().endswith((".xlsx", ".csv")):
-                st.error("El archivo debe terminar en .xlsx o .csv")
-            else:
-                archivo = ruta_archivo
 
-    # --- Mapeo dinámico de columnas ---
-    todas_filas = None
-    idx_prov = idx_oem = 0
-    idx_desc = None
+        archivo = None
 
-    if archivo:
-        try:
-            todas_filas = leer_excel(archivo, nrows=200)
-            if isinstance(archivo, object) and not isinstance(archivo, str):
-                archivo.seek(0)
-        except Exception as e:
-            st.error(f"No se pudo leer el archivo: {e}")
-            todas_filas = None
-
-    if todas_filas:
-        # Detectar automáticamente la fila de encabezado como punto de partida
-        header_row = 0
-        for idx, fila in enumerate(todas_filas[:15]):
-            texto = [v for v in fila if isinstance(v, str) and v.strip()]
-            if len(texto) >= 2:
-                header_row = idx
-                break
-        encabezado = todas_filas[header_row]
-        preview_filas = todas_filas[header_row:header_row + 6]
-
-        st.write("Vista previa (primeras filas detectadas):")
-        st.dataframe(preview_filas, use_container_width=True)
-
-        if len(encabezado) < 2:
-            st.error("El archivo debe tener al menos 2 columnas (código proveedor y código OEM).")
+        if metodo == "Subir archivo":
+            archivo = st.file_uploader("Seleccioná el archivo", type=["xlsx", "csv"])
         else:
-            st.markdown("**Mapeo de columnas** — revisá que coincida con tu archivo (se sugiere automáticamente):")
-            cols_upper = [str(x).upper() if x else "" for x in encabezado]
-            idx_prov_auto, idx_oem_auto, idx_desc_auto = 0, min(1, len(encabezado) - 1), None
-            for i, col_name in enumerate(cols_upper):
-                if any(x in col_name for x in ['COD', 'ART', 'REF']):
-                    idx_prov_auto = i
-                elif any(x in col_name for x in ['OEM', 'ORIG', 'EQUIV']):
-                    idx_oem_auto = i
-                elif any(x in col_name for x in ['DESC', 'DETALLE', 'PROD']):
-                    idx_desc_auto = i
+            st.caption(
+                "Ejemplo: /storage/emulated/0/Download/lista.xlsx "
+                "(si el archivo está en Descargas, esa es la ruta de siempre)."
+            )
+            ruta_archivo = st.text_input("Ruta completa del archivo (.xlsx o .csv) en el teléfono:",
+                                          placeholder="/storage/emulated/0/Download/lista.xlsx")
+            if ruta_archivo:
+                import os
+                if not os.path.isfile(ruta_archivo):
+                    st.error("No se encontró un archivo en esa ruta. Revisá que esté bien escrita.")
+                elif not ruta_archivo.lower().endswith((".xlsx", ".csv")):
+                    st.error("El archivo debe terminar en .xlsx o .csv")
+                else:
+                    archivo = ruta_archivo
 
-            opciones_cols = [f"Columna {i}: {str(v)[:20] if v else '(sin título)'}"
-                              for i, v in enumerate(encabezado)]
+        # --- Mapeo dinámico de columnas ---
+        todas_filas = None
+        idx_prov = idx_oem = 0
+        idx_desc = None
 
-            c_p, c_o, c_d = st.columns(3)
-            with c_p:
-                idx_prov = st.selectbox("Código Proveedor:", range(len(opciones_cols)),
-                                         format_func=lambda x: opciones_cols[x], index=idx_prov_auto)
-            with c_o:
-                idx_oem = st.selectbox("Código OEM / Equivalente:", range(len(opciones_cols)),
-                                        format_func=lambda x: opciones_cols[x], index=idx_oem_auto)
-            with c_d:
-                opciones_desc = [None] + list(range(len(opciones_cols)))
-                idx_default_desc = opciones_desc.index(idx_desc_auto) if idx_desc_auto is not None else 0
-                idx_desc = st.selectbox("Descripción (opcional):", opciones_desc,
-                                         format_func=lambda x: "Ninguna" if x is None else opciones_cols[x],
-                                         index=idx_default_desc)
-
-    procesar = st.button("📥 Procesar e Importar Lista", type="primary")
-
-    if procesar:
-        if not archivo:
-            st.warning("Indicá un archivo primero (subilo o escribí su ruta).")
-        elif not nombre_prov.strip():
-            st.warning("Ingresá el nombre de la marca / proveedor.")
-        elif not todas_filas:
-            st.warning("No se pudo leer el archivo, revisá el formato.")
-        else:
+        if archivo:
             try:
-                header_row = 0
-                for idx, fila in enumerate(todas_filas[:15]):
-                    texto = [v for v in fila if isinstance(v, str) and v.strip()]
-                    if len(texto) >= 2:
-                        header_row = idx
-                        break
-
-                # Releer completo (leer_excel con nrows=200 antes era solo para la vista previa)
-                todas_filas_completas = leer_excel(archivo)
-                filas_datos = todas_filas_completas[header_row + 1:]
-
-                prov_id = get_or_create_marca(nombre_prov, "PROVEEDOR")
-                oem_id = get_or_create_marca("OEM / FABRICA", "OEM")
-
-                cargados = 0
-                omitidos = 0
-                filas_omitidas = []
-                eq_batch = set()  # inserción en lote: se acumulan los pares y se insertan todos juntos al final
-                progreso = st.progress(0, text="Procesando filas...")
-                total = len(filas_datos)
-
-                for n, fila in enumerate(filas_datos):
-                    def celda(idx):
-                        return fila[idx] if idx is not None and idx < len(fila) else None
-
-                    raw_p_cell = valor_o_vacio(celda(idx_prov))
-                    raw_o_cell = valor_o_vacio(celda(idx_oem))
-                    desc = valor_o_vacio(celda(idx_desc))
-
-                    codigos_prov = dividir_codigos(raw_p_cell) or ([raw_p_cell] if raw_p_cell else [])
-                    codigos_oem = dividir_codigos(raw_o_cell) or ([raw_o_cell] if raw_o_cell else [])
-
-                    if not codigos_prov or not codigos_oem:
-                        omitidos += 1
-                        filas_omitidas.append({"Proveedor": raw_p_cell, "OEM": raw_o_cell, "Descripcion": desc})
-                        if total and n % 25 == 0:
-                            progreso.progress(min((n + 1) / total, 1.0))
-                        continue
-
-                    ids_prov = []
-                    for raw_p in codigos_prov:
-                        clean_p = sanitizar(raw_p)
-                        if clean_p:
-                            ids_prov.append(get_or_create_producto(raw_p, clean_p, desc, prov_id))
-
-                    ids_oem = []
-                    for raw_o in codigos_oem:
-                        clean_o = sanitizar(raw_o)
-                        if clean_o:
-                            ids_oem.append(get_or_create_producto(raw_o, clean_o, desc, oem_id))
-
-                    if not ids_prov or not ids_oem:
-                        omitidos += 1
-                        filas_omitidas.append({"Proveedor": raw_p_cell, "OEM": raw_o_cell, "Descripcion": desc})
-                        if total and n % 25 == 0:
-                            progreso.progress(min((n + 1) / total, 1.0))
-                        continue
-
-                    for pid in ids_prov:
-                        for oid in ids_oem:
-                            eq_batch.add((pid, oid))
-                            eq_batch.add((oid, pid))
-                        for pid2 in ids_prov:
-                            if pid2 != pid:
-                                eq_batch.add((pid, pid2))
-
-                    cargados += 1
-                    if total and n % 25 == 0:
-                        progreso.progress(min((n + 1) / total, 1.0))
-
-                # Inserción en lote: mucho más rápido que insertar de a un vínculo por vez
-                if eq_batch:
-                    c.executemany(
-                        "INSERT OR IGNORE INTO equivalencias (producto_a_id, producto_b_id, created_at) "
-                        "VALUES (?, ?, datetime('now'))",
-                        list(eq_batch)
-                    )
-
-                c.execute(
-                    "INSERT INTO importaciones (marca, archivo, filas_cargadas, filas_omitidas) VALUES (?, ?, ?, ?)",
-                    (nombre_prov.upper(), getattr(archivo, "name", str(archivo)), cargados, omitidos)
-                )
-                conn.commit()
-                progreso.empty()
-
-                st.balloons()
-                st.success(f"¡Eso, eso, eso! Se importaron {cargados} filas correctamente.")
-                if omitidos:
-                    st.warning(f"Se omitieron {omitidos} filas por falta de código proveedor u OEM.")
-                    st.dataframe(filas_omitidas, use_container_width=True)
-                    st.download_button(
-                        "⬇️ Descargar filas omitidas",
-                        data=to_excel_bytes(filas_omitidas),
-                        file_name="filas_omitidas.xlsx",
-                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-                    )
-
-                # Detección de posibles duplicados / errores de tipeo dentro de la marca recién cargada
-                sospechosos = detectar_posibles_duplicados(prov_id)
-                if sospechosos:
-                    st.warning(
-                        f"⚠️ Encontré {len(sospechosos)} par(es) de códigos muy parecidos dentro de "
-                        f"'{nombre_prov}' — podrían ser errores de tipeo. Revisalos:"
-                    )
-                    st.dataframe(sospechosos, use_container_width=True, hide_index=True)
+                todas_filas = leer_excel(archivo, nrows=200)
+                if isinstance(archivo, object) and not isinstance(archivo, str):
+                    archivo.seek(0)
             except Exception as e:
-                st.error(f"Error procesando la lista: {e}")
+                st.error(f"No se pudo leer el archivo: {e}")
+                todas_filas = None
+
+        if todas_filas:
+            # Detectar automáticamente la fila de encabezado como punto de partida
+            header_row = 0
+            for idx, fila in enumerate(todas_filas[:15]):
+                texto = [v for v in fila if isinstance(v, str) and v.strip()]
+                if len(texto) >= 2:
+                    header_row = idx
+                    break
+            encabezado = todas_filas[header_row]
+            preview_filas = todas_filas[header_row:header_row + 6]
+
+            st.write("Vista previa (primeras filas detectadas):")
+            st.dataframe(preview_filas, use_container_width=True)
+
+            if len(encabezado) < 2:
+                st.error("El archivo debe tener al menos 2 columnas (código proveedor y código OEM).")
+            else:
+                st.markdown("**Mapeo de columnas** — revisá que coincida con tu archivo (se sugiere automáticamente):")
+                cols_upper = [str(x).upper() if x else "" for x in encabezado]
+                idx_prov_auto, idx_oem_auto, idx_desc_auto = 0, min(1, len(encabezado) - 1), None
+                for i, col_name in enumerate(cols_upper):
+                    if any(x in col_name for x in ['COD', 'ART', 'REF']):
+                        idx_prov_auto = i
+                    elif any(x in col_name for x in ['OEM', 'ORIG', 'EQUIV']):
+                        idx_oem_auto = i
+                    elif any(x in col_name for x in ['DESC', 'DETALLE', 'PROD']):
+                        idx_desc_auto = i
+
+                opciones_cols = [f"Columna {i}: {str(v)[:20] if v else '(sin título)'}"
+                                  for i, v in enumerate(encabezado)]
+
+                c_p, c_o, c_d = st.columns(3)
+                with c_p:
+                    idx_prov = st.selectbox("Código Proveedor:", range(len(opciones_cols)),
+                                             format_func=lambda x: opciones_cols[x], index=idx_prov_auto)
+                with c_o:
+                    idx_oem = st.selectbox("Código OEM / Equivalente:", range(len(opciones_cols)),
+                                            format_func=lambda x: opciones_cols[x], index=idx_oem_auto)
+                with c_d:
+                    opciones_desc = [None] + list(range(len(opciones_cols)))
+                    idx_default_desc = opciones_desc.index(idx_desc_auto) if idx_desc_auto is not None else 0
+                    idx_desc = st.selectbox("Descripción (opcional):", opciones_desc,
+                                             format_func=lambda x: "Ninguna" if x is None else opciones_cols[x],
+                                             index=idx_default_desc)
+
+        procesar = st.button("📥 Procesar e Importar Lista", type="primary")
+
+        if procesar:
+            if not archivo:
+                st.warning("Indicá un archivo primero (subilo o escribí su ruta).")
+            elif not nombre_prov.strip():
+                st.warning("Ingresá el nombre de la marca / proveedor.")
+            elif not todas_filas:
+                st.warning("No se pudo leer el archivo, revisá el formato.")
+            else:
+                try:
+                    header_row = 0
+                    for idx, fila in enumerate(todas_filas[:15]):
+                        texto = [v for v in fila if isinstance(v, str) and v.strip()]
+                        if len(texto) >= 2:
+                            header_row = idx
+                            break
+
+                    # Releer completo (leer_excel con nrows=200 antes era solo para la vista previa)
+                    todas_filas_completas = leer_excel(archivo)
+                    filas_datos = todas_filas_completas[header_row + 1:]
+
+                    cargados = 0
+                    omitidos = 0
+                    filas_omitidas = []
+                    eq_batch = set()  # inserción en lote: se acumulan los pares y se insertan todos juntos al final
+                    progreso = st.progress(0, text="Procesando filas...")
+                    total = len(filas_datos)
+
+                    # Todo el trabajo de escritura va con el candado tomado, para que ninguna otra
+                    # persona pueda buscar/escribir a mitad de una importación larga y quede todo trabado.
+                    with db_lock:
+                        prov_id = get_or_create_marca(nombre_prov, "PROVEEDOR")
+                        oem_id = get_or_create_marca("OEM / FABRICA", "OEM")
+
+                        for n, fila in enumerate(filas_datos):
+                            def celda(idx):
+                                return fila[idx] if idx is not None and idx < len(fila) else None
+
+                            raw_p_cell = valor_o_vacio(celda(idx_prov))
+                            raw_o_cell = valor_o_vacio(celda(idx_oem))
+                            desc = valor_o_vacio(celda(idx_desc))
+
+                            codigos_prov = dividir_codigos(raw_p_cell) or ([raw_p_cell] if raw_p_cell else [])
+                            codigos_oem = dividir_codigos(raw_o_cell) or ([raw_o_cell] if raw_o_cell else [])
+
+                            if not codigos_prov or not codigos_oem:
+                                omitidos += 1
+                                filas_omitidas.append({"Proveedor": raw_p_cell, "OEM": raw_o_cell, "Descripcion": desc})
+                                if total and n % 25 == 0:
+                                    progreso.progress(min((n + 1) / total, 1.0))
+                                continue
+
+                            ids_prov = []
+                            for raw_p in codigos_prov:
+                                clean_p = sanitizar(raw_p)
+                                if clean_p:
+                                    ids_prov.append(get_or_create_producto(raw_p, clean_p, desc, prov_id))
+
+                            ids_oem = []
+                            for raw_o in codigos_oem:
+                                clean_o = sanitizar(raw_o)
+                                if clean_o:
+                                    ids_oem.append(get_or_create_producto(raw_o, clean_o, desc, oem_id))
+
+                            if not ids_prov or not ids_oem:
+                                omitidos += 1
+                                filas_omitidas.append({"Proveedor": raw_p_cell, "OEM": raw_o_cell, "Descripcion": desc})
+                                if total and n % 25 == 0:
+                                    progreso.progress(min((n + 1) / total, 1.0))
+                                continue
+
+                            for pid in ids_prov:
+                                for oid in ids_oem:
+                                    eq_batch.add((pid, oid))
+                                    eq_batch.add((oid, pid))
+                                for pid2 in ids_prov:
+                                    if pid2 != pid:
+                                        eq_batch.add((pid, pid2))
+
+                            cargados += 1
+                            if total and n % 25 == 0:
+                                progreso.progress(min((n + 1) / total, 1.0))
+
+                            # Commit periódico: evita mantener una transacción gigante abierta
+                            # durante toda la importación (eso es lo que trababa las búsquedas).
+                            if n % 300 == 0 and n > 0:
+                                conn.commit()
+
+                        # Inserción en lote: mucho más rápido que insertar de a un vínculo por vez
+                        if eq_batch:
+                            c.executemany(
+                                "INSERT OR IGNORE INTO equivalencias (producto_a_id, producto_b_id, created_at) "
+                                "VALUES (?, ?, datetime('now'))",
+                                list(eq_batch)
+                            )
+
+                        c.execute(
+                            "INSERT INTO importaciones (marca, archivo, filas_cargadas, filas_omitidas) VALUES (?, ?, ?, ?)",
+                            (nombre_prov.upper(), getattr(archivo, "name", str(archivo)), cargados, omitidos)
+                        )
+                        conn.commit()
+
+                    progreso.empty()
+
+                    st.balloons()
+                    st.success(f"¡Eso, eso, eso! Se importaron {cargados} filas correctamente.")
+                    if omitidos:
+                        st.warning(f"Se omitieron {omitidos} filas por falta de código proveedor u OEM.")
+                        st.dataframe(filas_omitidas, use_container_width=True)
+                        st.download_button(
+                            "⬇️ Descargar filas omitidas",
+                            data=to_excel_bytes(filas_omitidas),
+                            file_name="filas_omitidas.xlsx",
+                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                        )
+
+                    # Detección de posibles duplicados / errores de tipeo dentro de la marca recién cargada
+                    sospechosos = detectar_posibles_duplicados(prov_id)
+                    if sospechosos:
+                        st.warning(
+                            f"⚠️ Encontré {len(sospechosos)} par(es) de códigos muy parecidos dentro de "
+                            f"'{nombre_prov}' — podrían ser errores de tipeo. Revisalos:"
+                        )
+                        st.dataframe(sospechosos, use_container_width=True, hide_index=True)
+                except Exception as e:
+                    st.error(f"Error procesando la lista: {e}")
 
 # ============================================================
 # TAB 4: ADMINISTRAR
@@ -807,10 +870,12 @@ with tab4:
         marca_a_borrar = st.selectbox("Elegí una marca", [m["nombre"] for m in marcas_info])
         confirmar = st.checkbox(f"Confirmo que quiero borrar '{marca_a_borrar}' y todo lo asociado")
         if st.button("🗑️ Eliminar marca", disabled=not confirmar):
-            c.execute("DELETE FROM marcas WHERE nombre = ?", (marca_a_borrar,))
-            conn.commit()
-            st.success(f"Marca '{marca_a_borrar}' eliminada.")
-            st.rerun()
+            if pedir_password_admin("eliminar una marca"):
+                with db_lock:
+                    c.execute("DELETE FROM marcas WHERE nombre = ?", (marca_a_borrar,))
+                    conn.commit()
+                st.success(f"Marca '{marca_a_borrar}' eliminada.")
+                st.rerun()
 
         st.markdown("---")
         st.markdown("**Buscar y eliminar un producto puntual**")
@@ -825,9 +890,10 @@ with tab4:
                 st.dataframe(res_admin, use_container_width=True, hide_index=True)
                 id_borrar = st.number_input("ID del producto a borrar", min_value=0, step=1)
                 if st.button("🗑️ Eliminar producto por ID"):
-                    if id_borrar:
-                        c.execute("DELETE FROM productos WHERE id = ?", (int(id_borrar),))
-                        conn.commit()
+                    if id_borrar and pedir_password_admin("eliminar un producto"):
+                        with db_lock:
+                            c.execute("DELETE FROM productos WHERE id = ?", (int(id_borrar),))
+                            conn.commit()
                         st.success(f"Producto ID {id_borrar} eliminado.")
                         st.rerun()
             else:
@@ -840,11 +906,12 @@ with tab4:
         "ninguna equivalencia. Este botón los borra."
     )
     if st.button("🧹 Borrar productos sin ninguna equivalencia"):
-        borrados = depurar_huerfanos()
-        if borrados:
-            st.success(f"Se borraron {borrados} producto(s) sin equivalencias.")
-        else:
-            st.info("No había productos sueltos para borrar.")
+        if pedir_password_admin("borrar productos sin equivalencias"):
+            borrados = depurar_huerfanos()
+            if borrados:
+                st.success(f"Se borraron {borrados} producto(s) sin equivalencias.")
+            else:
+                st.info("No había productos sueltos para borrar.")
 
     st.markdown("---")
     st.markdown("**🧩 Productos sin equivalencias**")
