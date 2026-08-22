@@ -100,6 +100,11 @@ html, body, [class*="css"] { font-family: 'Inter', -apple-system, sans-serif; }
 
 code { font-family: 'IBM Plex Mono', monospace; color: var(--accent-2); }
 hr { border-color: var(--border) !important; }
+
+/* Los gráficos (st.bar_chart / Vega-Lite) muestran un tooltip flotante al tocar una barra.
+   En celular no hay evento que lo "suelte" al hacer scroll con el dedo, y queda pegado en
+   pantalla tapando el contenido de abajo. Se desactiva: el dato ya se ve en las barras. */
+#vg-tooltip-element, .vg-tooltip { display: none !important; }
 </style>
 """
 st.markdown(CSS_CUSTOM, unsafe_allow_html=True)
