@@ -4,6 +4,7 @@ import re
 import io
 import threading
 from datetime import datetime
+from urllib.parse import quote
 from openpyxl import load_workbook, Workbook
 
 # ============================================================
@@ -176,8 +177,12 @@ def get_connection():
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         nombre TEXT UNIQUE NOT NULL,
         tipo TEXT NOT NULL DEFAULT 'PROVEEDOR',
+        url_ficha_template TEXT,
         created_at TEXT DEFAULT (datetime('now'))
     )""")
+    columnas_marcas = [f[1] for f in c.execute("PRAGMA table_info(marcas)").fetchall()]
+    if "url_ficha_template" not in columnas_marcas:
+        c.execute("ALTER TABLE marcas ADD COLUMN url_ficha_template TEXT")
 
     c.execute("""CREATE TABLE IF NOT EXISTS productos (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -720,7 +725,7 @@ def buscar_por_codigo(clean_code, marca_filtro="Todas"):
     )
     SELECT DISTINCT p.id AS "ID", p.codigo_raw AS "Codigo", p.descripcion AS "Descripcion",
            m.nombre AS "Marca", m.tipo AS "Tipo", p.precio AS "Precio", p.stock AS "Stock",
-           p.favorito AS "Favorito", p.imagen_url AS "Imagen"
+           p.favorito AS "Favorito", p.imagen_url AS "Imagen", m.url_ficha_template AS "_template"
     FROM Red r JOIN productos p ON p.id = r.id JOIN marcas m ON m.id = p.marca_id
     '''
     params = [clean_code]
@@ -764,6 +769,8 @@ def buscar_por_codigo(clean_code, marca_filtro="Todas"):
         rel = info_relacion.get(fila["ID"], {})
         fila["Nivel"] = rel.get("nivel") or ("Exacta" if fila["ID"] in verificados_set else "")
         fila["Nota"] = rel.get("nota") or ""
+        template = fila.pop("_template", None)
+        fila["Ficha"] = template.replace("{codigo}", quote(fila["Codigo"], safe="")) if template else ""
     return res
 
 
@@ -1548,7 +1555,8 @@ with tab1:
                         st.dataframe(
                             mostrar, use_container_width=True, hide_index=True,
                             column_config={
-                                "Imagen": st.column_config.ImageColumn("Imagen", width="small")
+                                "Imagen": st.column_config.ImageColumn("Imagen", width="small"),
+                                "Ficha": st.column_config.LinkColumn("Ficha", display_text="Ver en proveedor ↗")
                             }
                         )
 
@@ -2003,6 +2011,34 @@ with tab4:
         tabla_marcas = [{"Marca": m["nombre"], "Tipo": m["tipo"], "Productos cargados": m["productos"]}
                          for m in marcas_info]
         st.dataframe(tabla_marcas, use_container_width=True, hide_index=True)
+
+        st.markdown("---")
+        st.markdown("**🔗 Link a la ficha del proveedor (en vez de guardar la foto)**")
+        st.caption(
+            "Por cada marca/proveedor podés cargar un patrón de URL con `{codigo}` donde va el código del "
+            "producto. La app arma el link automáticamente para cada resultado de búsqueda, sin copiar "
+            "ninguna imagen — así podés sumar Taranto y cualquier otro proveedor que uses, cada uno con su "
+            "propio patrón. Ejemplo: `https://www.taranto.com.ar/busqueda?q={codigo}`"
+        )
+        nombres_para_link = [m["nombre"] for m in marcas_info]
+        marca_link = st.selectbox("Marca:", nombres_para_link, key="marca_link_ficha")
+        id_marca_link = next(m["id"] for m in marcas_info if m["nombre"] == marca_link)
+        c.execute("SELECT url_ficha_template FROM marcas WHERE id = ?", (id_marca_link,))
+        template_actual = c.fetchone()["url_ficha_template"] or ""
+        nuevo_template = st.text_input(
+            "Patrón de URL (usá {codigo} donde va el código):", value=template_actual,
+            placeholder="https://www.taranto.com.ar/busqueda?q={codigo}", key="input_template_link"
+        )
+        if st.button("💾 Guardar patrón de link"):
+            if nuevo_template.strip() and "{codigo}" not in nuevo_template:
+                st.warning("El patrón tiene que incluir '{codigo}' en algún lado, si no todos los links quedan iguales.")
+            else:
+                with db_lock:
+                    c.execute("UPDATE marcas SET url_ficha_template = ? WHERE id = ?",
+                              (nuevo_template.strip() or None, id_marca_link))
+                    conn.commit()
+                st.success(f"Patrón de link guardado para '{marca_link}'.")
+                st.rerun()
 
         st.markdown("---")
         st.markdown("**🔀 Fusionar marcas duplicadas**")
