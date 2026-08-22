@@ -1,2 +1,5 @@
 streamlit
 openpyxl
+google-genai
+pdfplumber
+fpdf2
