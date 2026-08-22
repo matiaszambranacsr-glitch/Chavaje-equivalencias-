@@ -4,6 +4,7 @@ import re
 import io
 import threading
 import unicodedata
+import random
 from datetime import datetime
 from urllib.parse import quote
 from openpyxl import load_workbook, Workbook
@@ -1657,20 +1658,57 @@ def guardar_esquema(titulo, marca_auto, modelo_auto, sistema, descripcion, image
         conn.commit()
 
 
+# Pistas de piezas típicas en inglés por sistema, para ayudar al modelo gratuito (Flux) a acertar
+# mejor el contenido — sin esto tiende a dibujar cualquier cosa genérica de "auto".
+PARTES_TIPICAS_POR_SISTEMA = {
+    "Motor": "engine block, pistons, cylinder head, timing chain, oil pan",
+    "Refrigeración": "radiator, water pump, thermostat, coolant hoses, coolant expansion tank, cooling fan",
+    "Retenes y juntas": "crankshaft seal, camshaft seal, gaskets, o-rings",
+    "Frenos": "brake disc, brake caliper, brake pads, brake drum, brake hose",
+    "Suspensión": "shock absorber, coil spring, control arm, ball joint, stabilizer bar",
+    "Dirección": "steering rack, tie rod, steering column, power steering pump",
+    "Transmisión": "gearbox, clutch disc, driveshaft, CV joint",
+    "Embrague": "clutch disc, clutch pressure plate, release bearing, clutch cable",
+    "Correas y distribución": "timing belt, timing belt tensioner, timing belt kit, pulleys",
+    "Eléctrico": "alternator, starter motor, battery, wiring harness, fuse box",
+    "Combustible": "fuel pump, fuel filter, fuel injectors, fuel tank, fuel lines",
+    "Escape": "exhaust manifold, muffler, catalytic converter, exhaust pipe",
+    "Aire acondicionado": "AC compressor, condenser, evaporator, AC hoses",
+}
+
+# Nombre del sistema en inglés, para no mezclar español dentro de un prompt en inglés.
+SISTEMA_EN = {
+    "Motor": "engine", "Refrigeración": "cooling", "Retenes y juntas": "seals and gaskets",
+    "Frenos": "brake", "Suspensión": "suspension", "Dirección": "steering",
+    "Transmisión": "transmission", "Embrague": "clutch", "Correas y distribución": "timing belt",
+    "Eléctrico": "electrical", "Combustible": "fuel", "Escape": "exhaust",
+    "Aire acondicionado": "air conditioning",
+}
+
+
 def generar_esquema_orientativo_ia(marca, modelo, motorizacion, sistema):
     """Genera una imagen orientativa/genérica (NO una foto real del vehículo) usando Pollinations.ai,
-    un servicio de generación de imágenes gratuito, sin API key ni facturación."""
+    un servicio de generación de imágenes gratuito, sin API key ni facturación. Al ser un modelo
+    gratuito y de código abierto, es bastante menos obediente con instrucciones técnicas específicas
+    que un modelo pago — puede no acertar el contenido, por eso conviene generar varias veces."""
     import requests
     from urllib.parse import quote as url_quote
 
+    sistema_en = SISTEMA_EN.get(sistema, sistema)
+    pistas = PARTES_TIPICAS_POR_SISTEMA.get(sistema, "")
+    pistas_txt = f", showing specifically: {pistas}" if pistas else ""
     prompt_en = (
         f"technical exploded view diagram, line art style, automotive parts catalog illustration, "
-        f"{sistema} system of a {marca} {modelo} {motorizacion} car, parts separated and clearly "
-        f"distinguishable, thin connecting lines, plain white background, black and white technical "
-        f"drawing, no text, no numbers, no letters, no logos, no watermark"
+        f"ONLY the {sistema_en} system components of a {marca} {modelo} {motorizacion} car{pistas_txt}. "
+        f"Do not draw the full car body or exterior — show only these mechanical parts, separated and "
+        f"clearly distinguishable, thin connecting lines, plain white background, black and white "
+        f"technical drawing, no text, no numbers, no letters, no logos, no watermark"
     )
+    # Semilla aleatoria: sin esto, Pollinations devuelve la MISMA imagen cacheada ante el mismo pedido,
+    # y "Generar otra vez" no cambiaría nada.
+    semilla = random.randint(0, 999_999_999)
     url = f"https://image.pollinations.ai/prompt/{url_quote(prompt_en)}"
-    params = {"width": 1024, "height": 768, "nologo": "true", "model": "flux"}
+    params = {"width": 1024, "height": 768, "nologo": "true", "model": "flux", "seed": semilla}
     try:
         respuesta = requests.get(url, params=params, timeout=60)
         content_type = respuesta.headers.get("content-type", "")
@@ -3327,7 +3365,9 @@ with tab8:
                 st.caption(
                     "Para cuando no tenés el auto físico enfrente (útil en el mostrador de una casa de "
                     "repuestos): la IA arma un dibujo genérico de referencia, **no una foto real de ese "
-                    "vehículo**. Sirve para orientar, no para identificar piezas con precisión milimétrica."
+                    "vehículo**. Sirve para orientar, no para identificar piezas con precisión milimétrica. "
+                    "Como es un servicio gratuito, a veces el resultado no tiene nada que ver con lo pedido — "
+                    "usá 'Generar otra vez' las veces que haga falta, o pasate a 'Subir foto real' si no da con nada útil."
                 )
                 motorizacion_ia = st.text_input("Motorización", placeholder="Ej: 1.6 MSI Nafta", key="esq_motorizacion_ia")
                 boton_label = "🔄 Generar otra vez" if st.session_state.get("esq_preview_ia") else "🤖 Generar imagen orientativa"
