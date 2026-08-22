@@ -3,6 +3,7 @@ import sqlite3
 import re
 import io
 import threading
+import unicodedata
 from datetime import datetime
 from urllib.parse import quote
 from openpyxl import load_workbook, Workbook
@@ -352,8 +353,53 @@ def get_connection():
         descripcion TEXT,
         imagen_blob BLOB,
         imagen_nombre TEXT,
+        generado_ia INTEGER DEFAULT 0,
         created_at TEXT DEFAULT (datetime('now'))
     )""")
+    columnas_esquemas = [f[1] for f in c.execute("PRAGMA table_info(esquemas)").fetchall()]
+    if "generado_ia" not in columnas_esquemas:
+        c.execute("ALTER TABLE esquemas ADD COLUMN generado_ia INTEGER DEFAULT 0")
+
+    # Catálogo de marca/vehículo para "Explorar por categoría", separado de los esquemas en sí:
+    # permite precargar la estructura (Volkswagen > Gol Trend) sin necesidad de subir ya una imagen.
+    c.execute("""CREATE TABLE IF NOT EXISTS esquemas_catalogo (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        marca TEXT NOT NULL,
+        modelo TEXT NOT NULL,
+        UNIQUE(marca, modelo)
+    )""")
+
+    # Piezas marcadas dentro de un esquema (número/nombre + código), para poder buscarlas
+    # directamente en el catálogo desde el diagrama — es lo que le da función de "despiece".
+    c.execute("""CREATE TABLE IF NOT EXISTS esquema_puntos (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        esquema_id INTEGER NOT NULL REFERENCES esquemas(id) ON DELETE CASCADE,
+        numero TEXT,
+        nombre_pieza TEXT NOT NULL,
+        codigo TEXT,
+        producto_id INTEGER REFERENCES productos(id) ON DELETE SET NULL,
+        pos_x REAL,
+        pos_y REAL,
+        orden INTEGER DEFAULT 0
+    )""")
+
+    # Combos de repuestos que suelen cambiarse juntos (ej: correa de distribución -> kit + tensor + bomba de agua).
+    # "disparador" es la palabra/frase que se busca dentro de la descripción del producto encontrado.
+    c.execute("""CREATE TABLE IF NOT EXISTS combos_sugeridos (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        disparador TEXT NOT NULL,
+        item TEXT NOT NULL
+    )""")
+    c.execute("SELECT COUNT(*) FROM combos_sugeridos")
+    if c.fetchone()[0] == 0:
+        c.executemany(
+            "INSERT INTO combos_sugeridos (disparador, item) VALUES (?, ?)",
+            [
+                ("correa de distribucion", "Kit de distribución"),
+                ("correa de distribucion", "Tensor de distribución"),
+                ("correa de distribucion", "Bomba de agua"),
+            ]
+        )
 
     # Semilla inicial de códigos DTC genéricos (estándar OBD-II / SAE J2012, no específicos de
     # marca), verificados contra fuentes de referencia. Es un punto de partida — sumá o corregí
@@ -491,6 +537,68 @@ def get_connection():
             ("P0740","Falla en el circuito del embrague del convertidor de par","Transmisión","Solenoide TCC, cableado"),
             ("P0750","Falla en el solenoide de cambios A","Transmisión","Solenoide, cableado"),
             ("P0755","Falla en el solenoide de cambios B","Transmisión","Solenoide, cableado"),
+            ("P0205","Falla eléctrica en el inyector del cilindro 5","Motor - Inyectores/Combustible","Inyector, cableado de ese cilindro"),
+            ("P0206","Falla eléctrica en el inyector del cilindro 6","Motor - Inyectores/Combustible","Inyector, cableado de ese cilindro"),
+            ("P0207","Falla eléctrica en el inyector del cilindro 7","Motor - Inyectores/Combustible","Inyector, cableado de ese cilindro"),
+            ("P0208","Falla eléctrica en el inyector del cilindro 8","Motor - Inyectores/Combustible","Inyector, cableado de ese cilindro"),
+            ("P0221","Sensor TPS B fuera de rango","Motor - Sensores/Admisión","Sensor descalibrado, cableado dañado"),
+            ("P0222","Señal baja en el sensor TPS B","Motor - Sensores/Admisión","Cortocircuito a masa, sensor dañado"),
+            ("P0223","Señal alta en el sensor TPS B","Motor - Sensores/Admisión","Circuito abierto, sensor dañado"),
+            ("P0224","Señal intermitente en el sensor TPS B","Motor - Sensores/Admisión","Conector flojo u oxidado, falso contacto"),
+            ("P0231","Señal baja en el circuito secundario de la bomba de combustible","Motor - Inyectores/Combustible","Cortocircuito a masa, bomba, relé"),
+            ("P0232","Señal alta en el circuito secundario de la bomba de combustible","Motor - Inyectores/Combustible","Circuito abierto, bomba, relé"),
+            ("P0234","Sobrepresión de sobrealimentación (turbo)","Motor - Sensores/Admisión","Válvula wastegate, actuador del turbo"),
+            ("P0261","Señal baja en el inyector del cilindro 1","Motor - Inyectores/Combustible","Cortocircuito a masa, inyector dañado"),
+            ("P0262","Señal alta en el inyector del cilindro 1","Motor - Inyectores/Combustible","Circuito abierto, inyector dañado"),
+            ("P0330","Falla eléctrica en el sensor de detonación 2, banco 2","Motor - Encendido/Combustión","Sensor, cableado"),
+            ("P0331","Sensor de detonación 2 fuera de rango","Motor - Encendido/Combustión","Sensor descalibrado, cableado"),
+            ("P0339","Señal intermitente en el sensor CKP","Motor - Encendido/Combustión","Conector flojo u oxidado, falso contacto"),
+            ("P0343","Señal alta en el sensor CMP","Motor - Encendido/Combustión","Circuito abierto, sensor dañado"),
+            ("P0344","Señal intermitente en el sensor CMP","Motor - Encendido/Combustión","Conector flojo u oxidado, falso contacto"),
+            ("P0350","Falla general en el circuito primario/secundario de bobina de encendido","Motor - Encendido/Combustión","Bobina, cableado, módulo"),
+            ("P0351","Falla en la bobina de encendido A","Motor - Encendido/Combustión","Bobina, cableado"),
+            ("P0352","Falla en la bobina de encendido B","Motor - Encendido/Combustión","Bobina, cableado"),
+            ("P0353","Falla en la bobina de encendido C","Motor - Encendido/Combustión","Bobina, cableado"),
+            ("P0354","Falla en la bobina de encendido D","Motor - Encendido/Combustión","Bobina, cableado"),
+            ("P0370","Falla en la señal de referencia de sincronización de alta resolución A","Motor - Encendido/Combustión","Sensor, cableado, rueda fónica"),
+            ("P0380","Falla en la bujía/circuito calefactor (motores diésel)","Motor - Encendido/Combustión","Bujía de precalentamiento, relé, cableado"),
+            ("P0410","Falla en el sistema de inyección de aire secundario","Emisiones","Bomba de aire secundario, válvulas, mangueras"),
+            ("P0411","Caudal incorrecto en la inyección de aire secundario","Emisiones","Bomba de aire secundario, fugas"),
+            ("P0480","Falla eléctrica en el circuito de control del ventilador de enfriamiento 1","Motor - Sensores/Admisión","Relé, motor del ventilador, cableado"),
+            ("P0481","Falla eléctrica en el circuito de control del ventilador de enfriamiento 2","Motor - Sensores/Admisión","Relé, motor del ventilador, cableado"),
+            ("P0510","Falla en el interruptor de mariposa en posición cerrada","Motor - Sensores/Admisión","Interruptor, cableado"),
+            ("P0520","Falla eléctrica en el circuito de presión de aceite del motor","Motor - Sensores/Admisión","Sensor, cableado"),
+            ("P0521","Presión de aceite del motor fuera de rango","Motor - Sensores/Admisión","Sensor descalibrado, nivel de aceite"),
+            ("P0522","Voltaje bajo en la señal de presión de aceite del motor","Motor - Sensores/Admisión","Cortocircuito a masa, sensor dañado"),
+            ("P0523","Voltaje alto en la señal de presión de aceite del motor","Motor - Sensores/Admisión","Circuito abierto, sensor dañado"),
+            ("P0530","Falla eléctrica en el sensor de presión del refrigerante de A/C","Motor - Sensores/Admisión","Sensor, cableado"),
+            ("P0532","Voltaje bajo en el sensor de presión del refrigerante de A/C","Motor - Sensores/Admisión","Cortocircuito a masa, sensor dañado"),
+            ("P0533","Voltaje alto en el sensor de presión del refrigerante de A/C","Motor - Sensores/Admisión","Circuito abierto, sensor dañado"),
+            ("P0534","Pérdida de carga de refrigerante del A/C","Motor - Sensores/Admisión","Fuga en el circuito de A/C"),
+            ("P0560","Falla en el voltaje del sistema","Módulo de control / Eléctrico","Batería, alternador, cableado"),
+            ("P0562","Voltaje del sistema bajo","Módulo de control / Eléctrico","Batería descargada, alternador"),
+            ("P0563","Voltaje del sistema alto","Módulo de control / Eléctrico","Regulador de tensión, alternador"),
+            ("P0602","Módulo de control sin programar","Módulo de control / Eléctrico","Requiere programación con equipo de diagnóstico"),
+            ("P0603","Falla en la memoria KAM (no borrable) del módulo de control","Módulo de control / Eléctrico","Módulo de control con falla interna"),
+            ("P0604","Falla en la memoria RAM del módulo de control","Módulo de control / Eléctrico","Módulo de control con falla interna"),
+            ("P0605","Falla en la memoria ROM del módulo de control","Módulo de control / Eléctrico","Módulo de control con falla interna"),
+            ("P0606","Falla en el procesador del módulo de control (PCM)","Módulo de control / Eléctrico","Módulo de control con falla interna"),
+            ("P0620","Falla eléctrica en el circuito de control del generador/alternador","Módulo de control / Eléctrico","Alternador, cableado, regulador"),
+            ("P0630","VIN no programado o no coincide con el ECM/PCM","Módulo de control / Eléctrico","Requiere reprogramación con equipo de diagnóstico"),
+            ("P0650","Falla eléctrica en el circuito de la luz indicadora de fallas (MIL)","Módulo de control / Eléctrico","Bombilla, cableado, módulo"),
+            ("P0703","Falla en el circuito del interruptor de freno / convertidor de par B","Transmisión","Interruptor de freno, cableado"),
+            ("P0706","Sensor de rango de la transmisión fuera de rango","Transmisión","Sensor PRNDL descalibrado, cableado"),
+            ("P0725","Falla en el circuito de entrada de velocidad del motor","Transmisión","Sensor, cableado"),
+            ("P0731","Relación de engranes incorrecta en primera marcha","Transmisión","Solenoides de cambio, fluido bajo o degradado"),
+            ("P0732","Relación de engranes incorrecta en segunda marcha","Transmisión","Solenoides de cambio, fluido bajo o degradado"),
+            ("P0733","Relación de engranes incorrecta en tercera marcha","Transmisión","Solenoides de cambio, fluido bajo o degradado"),
+            ("P0734","Relación de engranes incorrecta en cuarta marcha","Transmisión","Solenoides de cambio, fluido bajo o degradado"),
+            ("P0743","Problema eléctrico en el embrague del convertidor de par","Transmisión","Solenoide TCC, cableado"),
+            ("P0745","Falla en el solenoide de control de presión de la transmisión","Transmisión","Solenoide, cableado, fluido"),
+            ("P0760","Falla en el solenoide de cambios C","Transmisión","Solenoide, cableado"),
+            ("P0765","Falla en el solenoide de cambios D","Transmisión","Solenoide, cableado"),
+            ("P0770","Falla en el solenoide de cambios E","Transmisión","Solenoide, cableado"),
+            ("P0850","Falla en el interruptor de posición de estacionamiento/neutro","Transmisión","Interruptor, cableado"),
         ]
         c.executemany(
             "INSERT OR IGNORE INTO codigos_dtc (codigo, fabricante, descripcion, sistema, causas_posibles) "
@@ -519,6 +627,7 @@ def get_connection():
     c.execute("CREATE INDEX IF NOT EXISTS idx_auditoria_fecha ON auditoria_diaria(fecha)")
     c.execute("CREATE INDEX IF NOT EXISTS idx_dtc_codigo ON codigos_dtc(codigo)")
     c.execute("CREATE INDEX IF NOT EXISTS idx_vin_wmi ON fabricantes_vin(wmi)")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_esquema_puntos ON esquema_puntos(esquema_id)")
     conn.commit()
     return conn
 
@@ -800,6 +909,54 @@ def buscar_por_texto(texto):
         return filas_a_listas(c)
 
 
+# ============================================================
+# COMBOS DE REPUESTOS RELACIONADOS (ej: correa de distribución -> kit + tensor + bomba de agua)
+# ============================================================
+def normalizar_texto(texto):
+    """Mayúsculas y sin acentos, para poder comparar 'distribución' con 'distribucion'."""
+    texto = texto or ""
+    texto = unicodedata.normalize("NFKD", texto).encode("ascii", "ignore").decode("ascii")
+    return texto.upper().strip()
+
+
+def buscar_combos_para_descripcion(descripcion):
+    """Devuelve {disparador: [items]} para los disparadores que aparecen dentro de la descripción dada."""
+    desc_norm = normalizar_texto(descripcion)
+    c.execute("SELECT disparador, item FROM combos_sugeridos ORDER BY disparador, item")
+    resultado = {}
+    for row in c.fetchall():
+        if normalizar_texto(row["disparador"]) in desc_norm:
+            resultado.setdefault(row["disparador"], []).append(row["item"])
+    return resultado
+
+
+def listar_combos():
+    c.execute("SELECT DISTINCT disparador FROM combos_sugeridos ORDER BY disparador")
+    disparadores = [r["disparador"] for r in c.fetchall()]
+    resultado = []
+    for d in disparadores:
+        c.execute("SELECT item FROM combos_sugeridos WHERE disparador = ? ORDER BY item", (d,))
+        resultado.append({"disparador": d, "items": [r["item"] for r in c.fetchall()]})
+    return resultado
+
+
+def guardar_combo(disparador, items_lista):
+    disparador = disparador.strip().lower()
+    with db_lock:
+        c.execute("DELETE FROM combos_sugeridos WHERE disparador = ?", (disparador,))
+        c.executemany(
+            "INSERT INTO combos_sugeridos (disparador, item) VALUES (?, ?)",
+            [(disparador, item.strip()) for item in items_lista if item.strip()]
+        )
+        conn.commit()
+
+
+def eliminar_combo(disparador):
+    with db_lock:
+        c.execute("DELETE FROM combos_sugeridos WHERE disparador = ?", (disparador.strip().lower(),))
+        conn.commit()
+
+
 def identificar_pieza_por_foto(imagen_bytes):
     """Le manda una foto a Gemini y le pide que identifique la pieza. Devuelve texto libre."""
     from google import genai
@@ -944,6 +1101,75 @@ def generar_pdf_cotizacion(lista_productos, incluir_precio=True, incluir_stock=F
                 linea += " (" + " / ".join(extras) + ")"
             pdf.multi_cell(0, 6, limpiar(linea))
         pdf.ln(3)
+
+    return bytes(pdf.output())
+
+
+def generar_pdf_ficha_vehiculo(vehiculo, km_calc, alertas, proyeccion, historial):
+    """Genera un PDF con el resumen de la ficha digital del vehículo, para entregarle al cliente."""
+    from fpdf import FPDF
+
+    def limpiar(texto):
+        return str(texto).encode("latin-1", "replace").decode("latin-1")
+
+    pdf = FPDF()
+    pdf.add_page()
+    pdf.set_font("Helvetica", "B", 16)
+    pdf.cell(0, 10, "Equivalencias El Chavo - Ficha del vehiculo", new_x="LMARGIN", new_y="NEXT")
+    pdf.set_font("Helvetica", "", 10)
+    pdf.cell(0, 6, f"Fecha: {datetime.now():%d/%m/%Y %H:%M}", new_x="LMARGIN", new_y="NEXT")
+    pdf.ln(4)
+
+    pdf.set_font("Helvetica", "B", 13)
+    pdf.cell(0, 8, limpiar(f"Patente: {vehiculo['patente']}"), new_x="LMARGIN", new_y="NEXT")
+    pdf.set_font("Helvetica", "", 10)
+    nombre_auto = f"{vehiculo.get('marca_auto') or ''} {vehiculo.get('modelo_auto') or ''}".strip()
+    if nombre_auto:
+        pdf.cell(0, 6, limpiar(nombre_auto), new_x="LMARGIN", new_y="NEXT")
+    if vehiculo.get("cliente_nombre"):
+        pdf.cell(0, 6, limpiar(f"Cliente: {vehiculo['cliente_nombre']}"), new_x="LMARGIN", new_y="NEXT")
+    pdf.ln(2)
+
+    pdf.set_font("Helvetica", "B", 12)
+    pdf.cell(0, 7, "Kilometraje", new_x="LMARGIN", new_y="NEXT")
+    pdf.set_font("Helvetica", "", 10)
+    km_reg = vehiculo.get("km_registro")
+    km_act = vehiculo.get("km_actual")
+    pdf.cell(0, 6, limpiar(f"Km de registro: {km_reg if km_reg is not None else '-'}"), new_x="LMARGIN", new_y="NEXT")
+    pdf.cell(0, 6, limpiar(f"Km actual: {km_act if km_act is not None else '-'}"), new_x="LMARGIN", new_y="NEXT")
+    if km_calc.get("km_recorridos") is not None:
+        pdf.cell(0, 6, limpiar(f"Km recorridos: {km_calc['km_recorridos']:,}"), new_x="LMARGIN", new_y="NEXT")
+    if km_calc.get("promedio_mensual") is not None:
+        pdf.cell(0, 6, limpiar(f"Promedio aproximado: {km_calc['promedio_mensual']:,} km/mes"),
+                  new_x="LMARGIN", new_y="NEXT")
+    pdf.ln(2)
+
+    if alertas:
+        pdf.set_font("Helvetica", "B", 12)
+        pdf.cell(0, 7, "Alertas de mantenimiento", new_x="LMARGIN", new_y="NEXT")
+        pdf.set_font("Helvetica", "", 10)
+        for a in alertas:
+            linea = f"- {a['Pieza']} ({a.get('Marca') or 's/marca'}): {a['% consumido']}% de su vida util consumida"
+            pdf.multi_cell(0, 6, limpiar(linea))
+        pdf.ln(2)
+
+    if proyeccion:
+        pdf.set_font("Helvetica", "B", 12)
+        pdf.cell(0, 7, "Proyeccion de mantenimiento", new_x="LMARGIN", new_y="NEXT")
+        pdf.set_font("Helvetica", "", 10)
+        for p in proyeccion:
+            linea = (f"- {p['Pieza']}: cambiada {p['Veces cambiada']} vez/veces, "
+                      f"deberia {p['Veces que debería (según km)']} - atraso: {p['Atraso estimado']}")
+            pdf.multi_cell(0, 6, limpiar(linea))
+        pdf.ln(2)
+
+    if historial:
+        pdf.set_font("Helvetica", "B", 12)
+        pdf.cell(0, 7, "Historial de piezas cambiadas", new_x="LMARGIN", new_y="NEXT")
+        pdf.set_font("Helvetica", "", 10)
+        for h in historial:
+            linea = f"- {h['Pieza']} ({h.get('Marca') or ''}) - {h.get('Fecha') or ''} - {h.get('Km instalación') or '-'} km"
+            pdf.multi_cell(0, 6, limpiar(linea))
 
     return bytes(pdf.output())
 
@@ -1420,26 +1646,104 @@ def listar_fabricantes_vin():
 # ============================================================
 # MODO MECÁNICO — VISOR DE ESQUEMAS
 # ============================================================
-def guardar_esquema(titulo, marca_auto, modelo_auto, sistema, descripcion, imagen_bytes, imagen_nombre):
+def guardar_esquema(titulo, marca_auto, modelo_auto, sistema, descripcion, imagen_bytes, imagen_nombre, generado_ia=False):
     with db_lock:
         c.execute(
-            "INSERT INTO esquemas (titulo, marca_auto, modelo_auto, sistema, descripcion, imagen_blob, imagen_nombre) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?)",
+            "INSERT INTO esquemas (titulo, marca_auto, modelo_auto, sistema, descripcion, imagen_blob, "
+            "imagen_nombre, generado_ia) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
             (titulo.strip(), marca_auto.strip(), modelo_auto.strip(), sistema.strip(), descripcion.strip(),
-             imagen_bytes, imagen_nombre)
+             imagen_bytes, imagen_nombre, 1 if generado_ia else 0)
         )
+        conn.commit()
+
+
+def generar_esquema_orientativo_ia(marca, modelo, motorizacion, sistema):
+    """Genera una imagen orientativa/genérica (NO una foto real del vehículo) con Gemini.
+    Sirve para tener una referencia visual aproximada cuando no hay foto real disponible."""
+    from google import genai
+    from PIL import Image as PILImage
+
+    api_key = st.secrets.get("gemini_api_key") if hasattr(st, "secrets") else None
+    if not api_key:
+        return None, "No configuraste 'gemini_api_key' en Streamlit Cloud (Settings → Secrets)."
+
+    try:
+        client = genai.Client(api_key=api_key)
+        prompt = (
+            f"Genera un diagrama técnico de despiece ('exploded view') en estilo línea/dibujo técnico "
+            f"(como los planos de catálogos de repuestos), del sistema de {sistema} de un automóvil "
+            f"{marca} {modelo} {motorizacion}. Las piezas deben verse separadas entre sí (vista explosionada), "
+            f"unidas por líneas finas, sobre fondo blanco liso, en blanco y negro o con líneas oscuras simples. "
+            f"IMPORTANTE: no incluyas números, letras, flechas de referencia, texto ni logos de ninguna marca "
+            f"dentro del dibujo — esos se agregan después por separado. Es una referencia orientativa general "
+            f"de cómo se relacionan las piezas entre sí, no necesita ser exacto a ese modelo puntual."
+        )
+        response = client.models.generate_content(model="gemini-2.5-flash-image", contents=[prompt])
+        for part in response.candidates[0].content.parts:
+            if getattr(part, "inline_data", None) is not None:
+                img = PILImage.open(io.BytesIO(part.inline_data.data)).convert("RGB")
+                salida = io.BytesIO()
+                img.save(salida, format="JPEG", quality=90)
+                return salida.getvalue(), None
+        return None, "Gemini no devolvió ninguna imagen para ese pedido."
+    except Exception as e:
+        return None, f"Error generando la imagen: {e}"
+
+
+def listar_marcas_esquemas():
+    """Marcas con esquemas ya cargados, UNIDAS con las precargadas en el catálogo (sin imagen todavía)."""
+    c.execute("""SELECT marca_auto AS marca FROM esquemas WHERE marca_auto IS NOT NULL AND TRIM(marca_auto) != ''
+                 UNION
+                 SELECT marca FROM esquemas_catalogo
+                 ORDER BY marca""")
+    return [r["marca"] for r in c.fetchall()]
+
+
+def listar_modelos_esquemas(marca):
+    c.execute("""SELECT modelo_auto AS modelo FROM esquemas
+                 WHERE marca_auto = ? AND modelo_auto IS NOT NULL AND TRIM(modelo_auto) != ''
+                 UNION
+                 SELECT modelo FROM esquemas_catalogo WHERE marca = ?
+                 ORDER BY modelo""", (marca, marca))
+    return [r["modelo"] for r in c.fetchall()]
+
+
+def listar_sistemas_esquemas(marca, modelo):
+    c.execute("""SELECT DISTINCT sistema FROM esquemas
+                 WHERE marca_auto = ? AND modelo_auto = ? AND sistema IS NOT NULL AND TRIM(sistema) != ''
+                 ORDER BY sistema""", (marca, modelo))
+    return [r["sistema"] for r in c.fetchall()]
+
+
+def listar_esquemas_por_categoria(marca, modelo, sistema):
+    c.execute("""SELECT id, titulo, descripcion, generado_ia FROM esquemas
+                 WHERE marca_auto = ? AND modelo_auto = ? AND sistema = ? ORDER BY titulo""",
+              (marca, modelo, sistema))
+    return [dict(r) for r in c.fetchall()]
+
+
+def agregar_vehiculo_catalogo(marca, modelo):
+    with db_lock:
+        c.execute("INSERT OR IGNORE INTO esquemas_catalogo (marca, modelo) VALUES (?, ?)",
+                   (marca.strip(), modelo.strip()))
+        conn.commit()
+
+
+def eliminar_vehiculo_catalogo(marca, modelo):
+    with db_lock:
+        c.execute("DELETE FROM esquemas_catalogo WHERE marca = ? AND modelo = ?", (marca, modelo))
         conn.commit()
 
 
 def listar_esquemas(texto_filtro=""):
     if texto_filtro.strip():
         like = f"%{texto_filtro.strip().upper()}%"
-        c.execute("""SELECT id, titulo, marca_auto, modelo_auto, sistema, descripcion FROM esquemas
+        c.execute("""SELECT id, titulo, marca_auto, modelo_auto, sistema, descripcion, generado_ia FROM esquemas
                      WHERE UPPER(titulo) LIKE ? OR UPPER(marca_auto) LIKE ? OR UPPER(modelo_auto) LIKE ?
                         OR UPPER(sistema) LIKE ?
                      ORDER BY marca_auto, modelo_auto""", (like, like, like, like))
     else:
-        c.execute("SELECT id, titulo, marca_auto, modelo_auto, sistema, descripcion FROM esquemas "
+        c.execute("SELECT id, titulo, marca_auto, modelo_auto, sistema, descripcion, generado_ia FROM esquemas "
                    "ORDER BY marca_auto, modelo_auto")
     return [dict(row) for row in c.fetchall()]
 
@@ -1453,6 +1757,70 @@ def obtener_imagen_esquema(esquema_id):
 def eliminar_esquema(esquema_id):
     with db_lock:
         c.execute("DELETE FROM esquemas WHERE id = ?", (esquema_id,))
+        conn.commit()
+
+
+def agregar_punto_esquema(esquema_id, numero, nombre_pieza, codigo, pos_x=None, pos_y=None):
+    """Agrega una pieza marcada dentro de un esquema. Si el código coincide con un producto
+    ya cargado, lo vincula (producto_id); si no, igual guarda el código como texto de referencia.
+    pos_x/pos_y son porcentajes (0-100) de dónde está la pieza en la imagen, para dibujar el marcador."""
+    codigo = (codigo or "").strip()
+    producto_id = None
+    if codigo:
+        clean = sanitizar(codigo)
+        if clean:
+            c.execute("SELECT id FROM productos WHERE codigo_clean = ? LIMIT 1", (clean,))
+            fila = c.fetchone()
+            if fila:
+                producto_id = fila["id"]
+    with db_lock:
+        c.execute("SELECT COALESCE(MAX(orden), 0) + 1 FROM esquema_puntos WHERE esquema_id = ?", (esquema_id,))
+        siguiente_orden = c.fetchone()[0]
+        c.execute(
+            "INSERT INTO esquema_puntos (esquema_id, numero, nombre_pieza, codigo, producto_id, pos_x, pos_y, orden) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (esquema_id, (numero or "").strip(), nombre_pieza.strip(), codigo, producto_id, pos_x, pos_y, siguiente_orden)
+        )
+        conn.commit()
+    return producto_id is not None
+
+
+def listar_puntos_esquema(esquema_id):
+    c.execute("""SELECT id, numero, nombre_pieza, codigo, producto_id, pos_x, pos_y FROM esquema_puntos
+                 WHERE esquema_id = ? ORDER BY orden""", (esquema_id,))
+    return [dict(r) for r in c.fetchall()]
+
+
+def generar_imagen_con_marcadores(imagen_bytes, puntos):
+    """Dibuja círculos numerados sobre la imagen real, en las posiciones (%) que cargó el admin."""
+    from PIL import Image, ImageDraw
+
+    puntos_con_pos = [p for p in puntos if p.get("pos_x") is not None and p.get("pos_y") is not None]
+    if not puntos_con_pos:
+        return imagen_bytes
+
+    img = Image.open(io.BytesIO(imagen_bytes)).convert("RGB")
+    ancho, alto = img.size
+    draw = ImageDraw.Draw(img)
+    radio = max(min(ancho, alto) // 40, 12)
+
+    for i, p in enumerate(puntos_con_pos, start=1):
+        x = int(p["pos_x"] / 100 * ancho)
+        y = int(p["pos_y"] / 100 * alto)
+        etiqueta = p.get("numero") or str(i)
+        draw.ellipse([x - radio, y - radio, x + radio, y + radio], fill=(232, 163, 61), outline=(20, 20, 20), width=2)
+        bbox = draw.textbbox((0, 0), etiqueta)
+        tw, th = bbox[2] - bbox[0], bbox[3] - bbox[1]
+        draw.text((x - tw / 2, y - th / 2 - bbox[1]), etiqueta, fill=(20, 20, 20))
+
+    salida = io.BytesIO()
+    img.save(salida, format="JPEG", quality=90)
+    return salida.getvalue()
+
+
+def eliminar_punto_esquema(punto_id):
+    with db_lock:
+        c.execute("DELETE FROM esquema_puntos WHERE id = ?", (punto_id,))
         conn.commit()
 
 
@@ -1560,14 +1928,39 @@ with tab1:
                             }
                         )
 
-                        # Botones de link aparte, para no depender de scrollear la tabla al costado en el celular
+                        # Botones de link aparte, para no depender de scrollear la tabla al costado en el celular.
+                        # La key incluye el código buscado (clean) además del ID: si se buscan varios códigos
+                        # a la vez y dos están vinculados entre sí, el mismo producto puede aparecer en más de
+                        # un resultado — sin el prefijo de clean, la key se repetiría y Streamlit tira error.
                         con_ficha = [f for f in res if f.get("Ficha")]
                         if con_ficha:
                             for f in con_ficha:
                                 st.link_button(
                                     f"🔗 Ver {f['Codigo']} ({f['Marca']}) en el sitio del proveedor",
-                                    f["Ficha"], key=f"link_ficha_{f['ID']}"
+                                    f["Ficha"], key=f"link_ficha_{clean}_{f['ID']}"
                                 )
+
+                        # Combos: piezas que suelen cambiarse junto con lo que se encontró
+                        combos_encontrados = {}
+                        for f in res:
+                            for disp, items in buscar_combos_para_descripcion(f.get("Descripcion", "")).items():
+                                combos_encontrados.setdefault(disp, set()).update(items)
+                        if combos_encontrados:
+                            st.markdown("**💡 Suelen cambiarse junto con esto:**")
+                            for disp, items_set in combos_encontrados.items():
+                                items = sorted(items_set)
+                                st.caption(f"Relacionado con: {disp}")
+                                item_cols = st.columns(len(items))
+                                for col_item, item in zip(item_cols, items):
+                                    if col_item.button(f"🔍 {item}", key=f"combo_{clean}_{disp}_{item}"):
+                                        res_item = buscar_por_texto(item)
+                                        if res_item:
+                                            con_stock = any((r.get("Stock") or 0) > 0 for r in res_item)
+                                            if not con_stock:
+                                                st.error(f"⚠️ Tenés '{item}' cargado pero SIN STOCK en ningún proveedor.")
+                                            st.dataframe(quitar_id(res_item), use_container_width=True, hide_index=True)
+                                        else:
+                                            st.error(f"⚠️ No tenés '{item}' cargado en la base — vas a necesitar pedirlo.")
 
                         col_dl, col_add = st.columns(2)
                         with col_dl:
@@ -2091,6 +2484,43 @@ with tab4:
                 st.rerun()
 
         st.markdown("---")
+        st.markdown("---")
+        st.markdown("**🧩 Combos de repuestos relacionados**")
+        st.caption(
+            "Cuando alguien busca un producto cuya descripción contenga el 'disparador', la app va a "
+            "sugerir estos ítems relacionados con un botón para buscarlos también. Ej: disparador "
+            "'correa de distribucion' → ítems 'Kit de distribución', 'Tensor', 'Bomba de agua'."
+        )
+        combos_actuales = listar_combos()
+        if combos_actuales:
+            st.dataframe(
+                [{"Disparador": c_["disparador"], "Ítems sugeridos": ", ".join(c_["items"])} for c_ in combos_actuales],
+                use_container_width=True, hide_index=True
+            )
+        disparador_edit = st.text_input(
+            "Disparador (palabra/frase que aparece en la descripción del producto):",
+            placeholder="Ej: correa de distribucion", key="combo_disparador"
+        )
+        items_edit = st.text_area(
+            "Ítems sugeridos (uno por línea):",
+            placeholder="Kit de distribución\nTensor de distribución\nBomba de agua",
+            key="combo_items", height=100
+        )
+        cc1, cc2 = st.columns(2)
+        if cc1.button("💾 Guardar combo"):
+            if not disparador_edit.strip() or not items_edit.strip():
+                st.warning("Completá el disparador y al menos un ítem.")
+            else:
+                guardar_combo(disparador_edit, items_edit.strip().splitlines())
+                st.success(f"Combo para '{disparador_edit.strip()}' guardado.")
+                st.rerun()
+        if cc2.button("🗑️ Eliminar combo (según el disparador de arriba)"):
+            if disparador_edit.strip():
+                eliminar_combo(disparador_edit)
+                st.success(f"Combo para '{disparador_edit.strip()}' eliminado.")
+                st.rerun()
+
+        st.markdown("---")
         st.markdown("**Buscar y eliminar un producto puntual**")
         texto_prod = st.text_input("Buscar producto por código o descripción", key="admin_buscar")
         if texto_prod.strip():
@@ -2507,6 +2937,7 @@ with tab7:
                     st.success("Km de registro actualizado.")
                     st.rerun()
 
+            alertas = []
             if km_actual is not None:
                 alertas = calcular_alertas_vehiculo(vehiculo["id"], km_actual)
                 if alertas:
@@ -2552,6 +2983,7 @@ with tab7:
                 "realmente contra cuántas veces debería haberse cambiado según los km recorridos "
                 "totales desde que se registró el vehículo."
             )
+            proyeccion = []
             if km_calc["km_recorridos"] is None:
                 st.info(
                     "Para calcular esto hace falta el km de registro y el km actual del vehículo "
@@ -2566,6 +2998,37 @@ with tab7:
                     st.dataframe(proyeccion, use_container_width=True, hide_index=True)
                 else:
                     st.caption("Todavía no hay piezas con vida útil cargada para proyectar.")
+                    atrasadas = []
+
+            st.markdown("---")
+            st.markdown("**📤 Compartir con el cliente**")
+            col_pdf, col_wa = st.columns(2)
+            with col_pdf:
+                st.download_button(
+                    "📄 Descargar ficha en PDF",
+                    data=generar_pdf_ficha_vehiculo(vehiculo, km_calc, alertas, proyeccion, historial_vehiculo),
+                    file_name=f"ficha_{vehiculo['patente']}.pdf",
+                    mime="application/pdf",
+                    use_container_width=True
+                )
+            with col_wa:
+                if proyeccion and atrasadas:
+                    nombre_cliente = vehiculo.get("cliente_nombre") or ""
+                    nombre_auto_msg = f"{vehiculo.get('marca_auto') or ''} {vehiculo.get('modelo_auto') or ''}".strip()
+                    piezas_atrasadas_txt = ", ".join(p["Pieza"] for p in atrasadas)
+                    mensaje_wa = (
+                        f"Hola {nombre_cliente}! Te escribimos de El Chavo. Revisando el kilometraje de tu "
+                        f"{nombre_auto_msg} ({vehiculo['patente']}), notamos que tenés atrasado el cambio de: "
+                        f"{piezas_atrasadas_txt}. ¿Coordinamos un turno?"
+                    ).strip()
+                    tel_limpio = re.sub(r"\D", "", vehiculo.get("cliente_telefono") or "")
+                    url_wa_vehiculo = (
+                        f"https://wa.me/{tel_limpio}" if tel_limpio else "https://wa.me/"
+                    ) + "?text=" + quote(mensaje_wa)
+                    st.link_button("📲 Avisar atraso por WhatsApp", url_wa_vehiculo,
+                                    type="primary", use_container_width=True)
+                else:
+                    st.caption("Sin atrasos detectados todavía para avisar por WhatsApp.")
 
 # ============================================================
 # TAB 8: MODO MECÁNICO
@@ -2675,49 +3138,236 @@ with tab8:
                 st.dataframe(fabricantes_cargados, use_container_width=True, hide_index=True)
 
     # -------- Visor de esquemas --------
+    CATEGORIAS_ESQUEMA = [
+        "Motor", "Refrigeración", "Retenes y juntas", "Frenos", "Suspensión", "Dirección",
+        "Transmisión", "Embrague", "Correas y distribución", "Eléctrico", "Combustible",
+        "Escape", "Aire acondicionado", "Otro"
+    ]
+
+    def mostrar_lista_esquemas(lista_esq):
+        if not lista_esq:
+            st.caption("No hay esquemas cargados acá todavía.")
+            return
+        for esq in lista_esq:
+            titulo_expander = f"🗺️ {esq['titulo']}" + (" 🤖 (orientativo, generado por IA)" if esq.get("generado_ia") else "")
+            with st.expander(titulo_expander):
+                if esq.get("generado_ia"):
+                    st.warning(
+                        "🤖 Esta imagen fue generada por IA como referencia orientativa — "
+                        "NO es una foto real de este vehículo. No la uses para identificar piezas con precisión."
+                    )
+                if esq.get("descripcion"):
+                    st.write(esq["descripcion"])
+                img_bytes = obtener_imagen_esquema(esq["id"])
+                puntos = listar_puntos_esquema(esq["id"])
+                if img_bytes:
+                    imagen_a_mostrar = generar_imagen_con_marcadores(img_bytes, puntos)
+                    st.image(imagen_a_mostrar, use_container_width=True)
+                    if any(p.get("pos_x") is not None for p in puntos):
+                        st.caption("Los números marcados en la foto corresponden a la lista de piezas de abajo.")
+
+                # Piezas marcadas en el esquema, con búsqueda directa por código
+                if puntos:
+                    st.markdown("**🔩 Piezas de este esquema**")
+                    for punto in puntos:
+                        etiqueta = f"{punto['numero']}. " if punto.get("numero") else ""
+                        cp1, cp2 = st.columns([3, 1])
+                        cp1.write(f"{etiqueta}{punto['nombre_pieza']}" + (f" — `{punto['codigo']}`" if punto.get("codigo") else ""))
+                        if punto.get("codigo"):
+                            if cp2.button("🔍 Buscar", key=f"buscar_punto_{punto['id']}"):
+                                clean_punto = sanitizar(punto["codigo"])
+                                res_punto = buscar_por_codigo(clean_punto) if clean_punto else []
+                                if not res_punto:
+                                    res_punto = buscar_por_texto(punto["nombre_pieza"])
+                                if res_punto:
+                                    st.dataframe(quitar_id(res_punto), use_container_width=True, hide_index=True)
+                                else:
+                                    st.error(f"No encontré '{punto['codigo']}' ni '{punto['nombre_pieza']}' en la base.")
+                        if es_admin():
+                            if cp2.button("🗑️", key=f"del_punto_{punto['id']}"):
+                                eliminar_punto_esquema(punto["id"])
+                                st.rerun()
+
+                if es_admin():
+                    with st.expander("➕ Agregar pieza a este esquema"):
+                        if img_bytes:
+                            st.caption(
+                                "Mirá la foto de arriba y estimá en qué parte está la pieza: "
+                                "0% = borde izquierdo/superior, 100% = borde derecho/inferior."
+                            )
+                        cpp1, cpp2, cpp3 = st.columns([1, 2, 2])
+                        num_punto = cpp1.text_input("N°", key=f"num_punto_{esq['id']}", placeholder="1")
+                        nombre_punto = cpp2.text_input("Nombre de la pieza", key=f"nombre_punto_{esq['id']}")
+                        codigo_punto = cpp3.text_input("Código (opcional)", key=f"codigo_punto_{esq['id']}")
+                        marcar_posicion = st.checkbox(
+                            "Marcar posición en la foto", value=bool(img_bytes), key=f"marcar_pos_{esq['id']}",
+                            disabled=not img_bytes
+                        )
+                        pos_x_punto, pos_y_punto = None, None
+                        if marcar_posicion and img_bytes:
+                            cpx, cpy = st.columns(2)
+                            pos_x_punto = cpx.slider("Posición horizontal (%)", 0, 100, 50, key=f"posx_{esq['id']}")
+                            pos_y_punto = cpy.slider("Posición vertical (%)", 0, 100, 50, key=f"posy_{esq['id']}")
+                            vista_previa = generar_imagen_con_marcadores(
+                                img_bytes,
+                                puntos + [{"numero": num_punto or "?", "pos_x": pos_x_punto, "pos_y": pos_y_punto}]
+                            )
+                            st.image(vista_previa, use_container_width=True, caption="Vista previa de dónde quedaría el marcador")
+                        if st.button("💾 Agregar pieza", key=f"agregar_punto_{esq['id']}"):
+                            if not nombre_punto.strip():
+                                st.warning("Completá el nombre de la pieza.")
+                            else:
+                                vinculado = agregar_punto_esquema(
+                                    esq["id"], num_punto, nombre_punto, codigo_punto, pos_x_punto, pos_y_punto
+                                )
+                                if codigo_punto.strip() and not vinculado:
+                                    st.info(
+                                        "Pieza agregada. El código no coincide con ningún producto cargado "
+                                        "todavía, pero igual queda guardado como referencia."
+                                    )
+                                else:
+                                    st.success("Pieza agregada.")
+                                st.rerun()
+
+                    if st.button("🗑️ Eliminar este esquema", key=f"del_esq_{esq['id']}"):
+                        eliminar_esquema(esq["id"])
+                        st.rerun()
+
     with sub_esq:
         st.caption(
-            "Guardá diagramas o esquemas (fotos, planos, capturas) para consultarlos rápido. "
-            "La app solo los almacena y muestra — las imágenes las tenés que subir vos."
+            "Diagramas organizados por Marca › Vehículo › Sistema, donde cada pieza marcada tiene "
+            "su código vinculado al catálogo — así se busca directo desde el dibujo, ya sea en el "
+            "taller o en el mostrador de una casa de repuestos. Las imágenes las tenés que subir vos."
         )
-        filtro_esq = st.text_input("Buscar esquema (título, marca, modelo o sistema):", key="esq_filtro")
-        esquemas = listar_esquemas(filtro_esq)
-        if esquemas:
-            for esq in esquemas:
-                with st.expander(f"🗺️ {esq['titulo']} — {esq.get('marca_auto') or ''} {esq.get('modelo_auto') or ''}"):
-                    if esq.get("sistema"):
-                        st.caption(f"Sistema: {esq['sistema']}")
-                    if esq.get("descripcion"):
-                        st.write(esq["descripcion"])
-                    img_bytes = obtener_imagen_esquema(esq["id"])
-                    if img_bytes:
-                        st.image(img_bytes, use_container_width=True)
-                    if es_admin():
-                        if st.button("🗑️ Eliminar este esquema", key=f"del_esq_{esq['id']}"):
-                            eliminar_esquema(esq["id"])
-                            st.rerun()
+        modo_esq = st.radio(
+            "¿Cómo lo buscás?", ["📂 Explorar por categoría", "🔎 Buscar por texto"],
+            horizontal=True, key="modo_esquemas"
+        )
+
+        if modo_esq.startswith("📂"):
+            marcas_esq = listar_marcas_esquemas()
+            if not marcas_esq:
+                st.info("Todavía no hay esquemas cargados con marca definida. Subí el primero más abajo.")
+            else:
+                marca_sel = st.selectbox("Marca:", marcas_esq, key="esq_marca_sel")
+                modelos_esq = listar_modelos_esquemas(marca_sel)
+                if not modelos_esq:
+                    st.caption(f"No hay vehículos cargados todavía para {marca_sel}.")
+                else:
+                    modelo_sel = st.selectbox("Vehículo / modelo:", modelos_esq, key="esq_modelo_sel")
+                    sistemas_esq = listar_sistemas_esquemas(marca_sel, modelo_sel)
+                    if not sistemas_esq:
+                        st.caption("No hay esquemas con sistema/parte definida para este vehículo.")
+                    else:
+                        sistema_sel = st.selectbox("Sistema / parte:", sistemas_esq, key="esq_sistema_sel")
+                        mostrar_lista_esquemas(listar_esquemas_por_categoria(marca_sel, modelo_sel, sistema_sel))
         else:
-            st.caption("Todavía no hay esquemas cargados.")
+            filtro_esq = st.text_input("Buscar esquema (título, marca, modelo o sistema):", key="esq_filtro")
+            mostrar_lista_esquemas(listar_esquemas(filtro_esq))
 
         st.markdown("---")
         if not pedir_password_admin("subir esquemas nuevos"):
             pass
         else:
+            marcas_existentes = listar_marcas_esquemas()
+
+            st.markdown("**🚗 Precargar marca / vehículo (sin imagen todavía)**")
+            st.caption(
+                "Dejá lista la estructura del árbol aunque todavía no tengas ningún esquema para subir — "
+                "va a aparecer en 'Explorar por categoría' apenas la guardes."
+            )
+            cp1, cp2 = st.columns(2)
+            if marcas_existentes:
+                marca_pre_opcion = cp1.selectbox("Marca", marcas_existentes + ["➕ Nueva marca..."], key="pre_marca_opcion")
+                marca_pre = cp1.text_input("Nombre de la nueva marca", key="pre_marca_nueva") \
+                    if marca_pre_opcion == "➕ Nueva marca..." else marca_pre_opcion
+            else:
+                marca_pre = cp1.text_input("Marca", key="pre_marca_sola")
+            modelo_pre = cp2.text_input("Vehículo / modelo", placeholder="Ej: Corsa", key="pre_modelo")
+            if st.button("➕ Precargar"):
+                if not marca_pre.strip() or not modelo_pre.strip():
+                    st.warning("Completá marca y modelo.")
+                else:
+                    agregar_vehiculo_catalogo(marca_pre, modelo_pre)
+                    st.success(f"{marca_pre.strip()} {modelo_pre.strip()} precargado.")
+                    for k in ["pre_marca_nueva", "pre_marca_sola", "pre_modelo"]:
+                        st.session_state.pop(k, None)
+                    st.rerun()
+
+            st.markdown("---")
             st.markdown("**➕ Subir un esquema nuevo**")
-            with st.form("form_esquema", clear_on_submit=True):
-                titulo_esq = st.text_input("Título", placeholder="Ej: Esquema eléctrico bomba de combustible")
-                ce1, ce2, ce3 = st.columns(3)
-                marca_esq = ce1.text_input("Marca del auto (opcional)")
-                modelo_esq = ce2.text_input("Modelo (opcional)")
-                sistema_esq = ce3.text_input("Sistema (opcional)", placeholder="Ej: Eléctrico, Frenos")
-                desc_esq = st.text_input("Descripción (opcional)")
-                archivo_esq = st.file_uploader("Imagen del esquema", type=["png", "jpg", "jpeg"])
-                subir_esq_btn = st.form_submit_button("📥 Guardar esquema", type="primary")
+            marcas_existentes = listar_marcas_esquemas()  # puede haber cambiado si acabás de precargar una
+            titulo_esq = st.text_input("Título", placeholder="Ej: Esquema eléctrico bomba de combustible", key="esq_titulo")
+            ce1, ce2 = st.columns(2)
+            if marcas_existentes:
+                marca_opcion = ce1.selectbox("Marca", marcas_existentes + ["➕ Nueva marca..."], key="esq_marca_opcion")
+                marca_esq = ce1.text_input("Nombre de la nueva marca", key="esq_marca_nueva") \
+                    if marca_opcion == "➕ Nueva marca..." else marca_opcion
+            else:
+                marca_esq = ce1.text_input("Marca del auto", key="esq_marca_sola")
+            modelos_para_marca = listar_modelos_esquemas(marca_esq) if marca_esq else []
+            if modelos_para_marca:
+                modelo_opcion = ce2.selectbox("Vehículo / modelo", modelos_para_marca + ["➕ Nuevo modelo..."], key="esq_modelo_opcion")
+                modelo_esq = ce2.text_input("Nombre del nuevo modelo", key="esq_modelo_nuevo") \
+                    if modelo_opcion == "➕ Nuevo modelo..." else modelo_opcion
+            else:
+                modelo_esq = ce2.text_input("Vehículo / modelo", placeholder="Ej: Gol Trend", key="esq_modelo_solo")
+            sistema_opcion = st.selectbox("Sistema / parte:", CATEGORIAS_ESQUEMA, key="esq_sistema_opcion")
+            sistema_esq = st.text_input("Especificá el sistema/parte:", key="esq_sistema_nuevo") \
+                if sistema_opcion == "Otro" else sistema_opcion
+            desc_esq = st.text_input("Descripción (opcional)", key="esq_desc")
+
+            origen_imagen = st.radio(
+                "¿De dónde sale la imagen?",
+                ["📷 Subir foto real", "🤖 Generar orientativo con IA (sin foto real)"],
+                key="esq_origen_imagen"
+            )
+
+            archivo_esq = None
+            imagen_generada_bytes = None
+            if origen_imagen.startswith("📷"):
+                archivo_esq = st.file_uploader("Imagen del esquema", type=["png", "jpg", "jpeg"], key="esq_archivo")
+            else:
+                st.caption(
+                    "Para cuando no tenés el auto físico enfrente (útil en el mostrador de una casa de "
+                    "repuestos): la IA arma un dibujo genérico de referencia, **no una foto real de ese "
+                    "vehículo**. Sirve para orientar, no para identificar piezas con precisión milimétrica."
+                )
+                motorizacion_ia = st.text_input("Motorización", placeholder="Ej: 1.6 MSI Nafta", key="esq_motorizacion_ia")
+                boton_label = "🔄 Generar otra vez" if st.session_state.get("esq_preview_ia") else "🤖 Generar imagen orientativa"
+                if st.button(boton_label):
+                    if not marca_esq.strip() or not modelo_esq.strip():
+                        st.warning("Completá marca y modelo antes de generar.")
+                    else:
+                        with st.spinner("Generando..."):
+                            img_ia, error_ia = generar_esquema_orientativo_ia(
+                                marca_esq, modelo_esq, motorizacion_ia,
+                                sistema_esq if sistema_opcion == "Otro" else sistema_opcion
+                            )
+                        if error_ia:
+                            st.error(error_ia)
+                        else:
+                            st.session_state["esq_preview_ia"] = img_ia
+                            st.rerun()
+                if st.session_state.get("esq_preview_ia"):
+                    st.image(st.session_state["esq_preview_ia"], use_container_width=True,
+                              caption="Vista previa — orientativo, no es una foto real")
+                    imagen_generada_bytes = st.session_state["esq_preview_ia"]
+
+            subir_esq_btn = st.button("📥 Guardar esquema", type="primary")
             if subir_esq_btn:
-                if not titulo_esq.strip() or not archivo_esq:
-                    st.warning("Completá el título y subí una imagen.")
+                imagen_final = archivo_esq.getvalue() if archivo_esq else imagen_generada_bytes
+                nombre_final = archivo_esq.name if archivo_esq else "generado_ia.jpg"
+                if not titulo_esq.strip() or not imagen_final or not marca_esq.strip() or not modelo_esq.strip():
+                    st.warning("Completá título, marca, modelo, y subí o generá una imagen.")
+                elif sistema_opcion == "Otro" and not sistema_esq.strip():
+                    st.warning("Especificá el sistema/parte.")
                 else:
                     guardar_esquema(titulo_esq, marca_esq, modelo_esq, sistema_esq, desc_esq,
-                                     archivo_esq.getvalue(), archivo_esq.name)
+                                     imagen_final, nombre_final, generado_ia=(imagen_generada_bytes is not None))
                     st.success("Esquema guardado.")
+                    st.session_state.pop("esq_preview_ia", None)
+                    for k in ["esq_titulo", "esq_marca_nueva", "esq_modelo_nuevo", "esq_sistema_nuevo",
+                              "esq_desc", "esq_archivo", "esq_motorizacion_ia"]:
+                        st.session_state.pop(k, None)
                     st.rerun()
