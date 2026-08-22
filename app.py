@@ -1560,6 +1560,15 @@ with tab1:
                             }
                         )
 
+                        # Botones de link aparte, para no depender de scrollear la tabla al costado en el celular
+                        con_ficha = [f for f in res if f.get("Ficha")]
+                        if con_ficha:
+                            for f in con_ficha:
+                                st.link_button(
+                                    f"🔗 Ver {f['Codigo']} ({f['Marca']}) en el sitio del proveedor",
+                                    f["Ficha"], key=f"link_ficha_{f['ID']}"
+                                )
+
                         col_dl, col_add = st.columns(2)
                         with col_dl:
                             st.download_button(
