@@ -1658,34 +1658,30 @@ def guardar_esquema(titulo, marca_auto, modelo_auto, sistema, descripcion, image
 
 
 def generar_esquema_orientativo_ia(marca, modelo, motorizacion, sistema):
-    """Genera una imagen orientativa/genérica (NO una foto real del vehículo) con Gemini.
-    Sirve para tener una referencia visual aproximada cuando no hay foto real disponible."""
-    from google import genai
-    from PIL import Image as PILImage
+    """Genera una imagen orientativa/genérica (NO una foto real del vehículo) usando Pollinations.ai,
+    un servicio de generación de imágenes gratuito, sin API key ni facturación."""
+    import requests
+    from urllib.parse import quote as url_quote
 
-    api_key = st.secrets.get("gemini_api_key") if hasattr(st, "secrets") else None
-    if not api_key:
-        return None, "No configuraste 'gemini_api_key' en Streamlit Cloud (Settings → Secrets)."
-
+    prompt_en = (
+        f"technical exploded view diagram, line art style, automotive parts catalog illustration, "
+        f"{sistema} system of a {marca} {modelo} {motorizacion} car, parts separated and clearly "
+        f"distinguishable, thin connecting lines, plain white background, black and white technical "
+        f"drawing, no text, no numbers, no letters, no logos, no watermark"
+    )
+    url = f"https://image.pollinations.ai/prompt/{url_quote(prompt_en)}"
+    params = {"width": 1024, "height": 768, "nologo": "true", "model": "flux"}
     try:
-        client = genai.Client(api_key=api_key)
-        prompt = (
-            f"Genera un diagrama técnico de despiece ('exploded view') en estilo línea/dibujo técnico "
-            f"(como los planos de catálogos de repuestos), del sistema de {sistema} de un automóvil "
-            f"{marca} {modelo} {motorizacion}. Las piezas deben verse separadas entre sí (vista explosionada), "
-            f"unidas por líneas finas, sobre fondo blanco liso, en blanco y negro o con líneas oscuras simples. "
-            f"IMPORTANTE: no incluyas números, letras, flechas de referencia, texto ni logos de ninguna marca "
-            f"dentro del dibujo — esos se agregan después por separado. Es una referencia orientativa general "
-            f"de cómo se relacionan las piezas entre sí, no necesita ser exacto a ese modelo puntual."
+        respuesta = requests.get(url, params=params, timeout=60)
+        content_type = respuesta.headers.get("content-type", "")
+        if respuesta.status_code == 200 and content_type.startswith("image"):
+            return respuesta.content, None
+        return None, (
+            f"El servicio de generación de imágenes (Pollinations.ai) devolvió un error "
+            f"(código {respuesta.status_code}). Puede ser que esté saturado en este momento — probá de nuevo."
         )
-        response = client.models.generate_content(model="gemini-2.5-flash-image", contents=[prompt])
-        for part in response.candidates[0].content.parts:
-            if getattr(part, "inline_data", None) is not None:
-                img = PILImage.open(io.BytesIO(part.inline_data.data)).convert("RGB")
-                salida = io.BytesIO()
-                img.save(salida, format="JPEG", quality=90)
-                return salida.getvalue(), None
-        return None, "Gemini no devolvió ninguna imagen para ese pedido."
+    except requests.exceptions.Timeout:
+        return None, "El servicio de generación de imágenes tardó demasiado en responder. Probá de nuevo."
     except Exception as e:
         return None, f"Error generando la imagen: {e}"
 
