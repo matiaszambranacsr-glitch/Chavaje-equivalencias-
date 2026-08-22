@@ -238,6 +238,14 @@ def get_connection():
         c.execute("ALTER TABLE productos ADD COLUMN paso_rosca TEXT")
     if "cantidad_estrias" not in columnas_productos:
         c.execute("ALTER TABLE productos ADD COLUMN cantidad_estrias INTEGER")
+    if "estrias_internas" not in columnas_productos:
+        c.execute("ALTER TABLE productos ADD COLUMN estrias_internas INTEGER")
+    if "estrias_externas" not in columnas_productos:
+        c.execute("ALTER TABLE productos ADD COLUMN estrias_externas INTEGER")
+    if "posicion_seguro" not in columnas_productos:
+        c.execute("ALTER TABLE productos ADD COLUMN posicion_seguro TEXT")
+    if "tiene_abs" not in columnas_productos:
+        c.execute("ALTER TABLE productos ADD COLUMN tiene_abs INTEGER")
     if "ubicacion" not in columnas_productos:
         c.execute("ALTER TABLE productos ADD COLUMN ubicacion TEXT")
     if "veces_buscado" not in columnas_productos:
@@ -1118,7 +1126,8 @@ def calcular_alertas_vehiculo(vehiculo_id, km_actual):
 # ============================================================
 # IDEA 3: SUSTITUCIÓN INTELIGENTE POR MEDIDAS MECÁNICAS
 # ============================================================
-def buscar_por_medidas(diam_int=None, diam_ext=None, ancho=None, paso_rosca=None, estrias=None, tolerancia_pct=5):
+def buscar_por_medidas(diam_int=None, diam_ext=None, ancho=None, paso_rosca=None, estrias=None, tolerancia_pct=5,
+                        estrias_internas=None, estrias_externas=None, posicion_seguro=None, tiene_abs="Cualquiera"):
     condiciones = []
     params = []
 
@@ -1137,6 +1146,18 @@ def buscar_por_medidas(diam_int=None, diam_ext=None, ancho=None, paso_rosca=None
     if estrias:
         condiciones.append("p.cantidad_estrias = ?")
         params.append(estrias)
+    if estrias_internas:
+        condiciones.append("p.estrias_internas = ?")
+        params.append(estrias_internas)
+    if estrias_externas:
+        condiciones.append("p.estrias_externas = ?")
+        params.append(estrias_externas)
+    if posicion_seguro:
+        condiciones.append("UPPER(p.posicion_seguro) = ?")
+        params.append(posicion_seguro.strip().upper())
+    if tiene_abs != "Cualquiera":
+        condiciones.append("p.tiene_abs = ?")
+        params.append(1 if tiene_abs == "Sí" else 0)
 
     if not condiciones:
         return []
@@ -1144,6 +1165,9 @@ def buscar_por_medidas(diam_int=None, diam_ext=None, ancho=None, paso_rosca=None
     query = f"""SELECT p.id AS "ID", p.codigo_raw AS "Codigo", p.descripcion AS "Descripcion", m.nombre AS "Marca",
                 p.diametro_interno AS "Diám. interno", p.diametro_externo AS "Diám. externo", p.ancho AS "Ancho",
                 p.paso_rosca AS "Paso de rosca", p.cantidad_estrias AS "Estrías",
+                p.estrias_internas AS "Estrías internas", p.estrias_externas AS "Estrías externas",
+                p.posicion_seguro AS "Posición del seguro",
+                CASE WHEN p.tiene_abs = 1 THEN 'Sí' WHEN p.tiene_abs = 0 THEN 'No' ELSE '' END AS "ABS",
                 p.precio AS "Precio", p.stock AS "Stock"
                 FROM productos p JOIN marcas m ON m.id = p.marca_id
                 WHERE {" AND ".join(condiciones)} ORDER BY m.nombre LIMIT 100"""
@@ -1151,13 +1175,18 @@ def buscar_por_medidas(diam_int=None, diam_ext=None, ancho=None, paso_rosca=None
     return filas_a_listas(c)
 
 
-def actualizar_medidas(producto_id, diam_int, diam_ext, ancho, paso_rosca, estrias, ubicacion):
+def actualizar_medidas(producto_id, diam_int, diam_ext, ancho, paso_rosca, estrias, ubicacion,
+                        estrias_internas=None, estrias_externas=None, posicion_seguro=None, tiene_abs="Cualquiera"):
+    tiene_abs_valor = None if tiene_abs == "Cualquiera" else (1 if tiene_abs == "Sí" else 0)
     with db_lock:
         c.execute(
             "UPDATE productos SET diametro_interno=?, diametro_externo=?, ancho=?, paso_rosca=?, "
-            "cantidad_estrias=?, ubicacion=? WHERE id=?",
+            "cantidad_estrias=?, ubicacion=?, estrias_internas=?, estrias_externas=?, posicion_seguro=?, "
+            "tiene_abs=? WHERE id=?",
             (diam_int or None, diam_ext or None, ancho or None, (paso_rosca.strip() or None) if paso_rosca else None,
-             estrias or None, (ubicacion.strip() or None) if ubicacion else None, producto_id)
+             estrias or None, (ubicacion.strip() or None) if ubicacion else None,
+             estrias_internas or None, estrias_externas or None,
+             (posicion_seguro.strip() or None) if posicion_seguro else None, tiene_abs_valor, producto_id)
         )
         conn.commit()
 
@@ -1610,10 +1639,19 @@ with tab1:
         m_estrias = cm5.number_input("Cantidad de estrías (opcional)", min_value=0, step=1, value=0, key="med_estrias")
         m_tolerancia = cm6.slider("Tolerancia (%)", min_value=1, max_value=15, value=5, key="med_tol")
 
+        st.markdown("**🔩 Homocinéticas (opcional)**")
+        ch1, ch2 = st.columns(2)
+        m_estrias_int = ch1.number_input("Estrías internas", min_value=0, step=1, value=0, key="med_estrias_int")
+        m_estrias_ext = ch2.number_input("Estrías externas", min_value=0, step=1, value=0, key="med_estrias_ext")
+        ch3, ch4 = st.columns(2)
+        m_seguro = ch3.text_input("Posición del seguro", key="med_seguro", placeholder="Ej: 1er ranura, a 12mm")
+        m_abs = ch4.selectbox("¿Tiene ABS?", ["Cualquiera", "Sí", "No"], key="med_abs")
+
         if st.button("📐 Buscar por medidas"):
             res_medidas = buscar_por_medidas(
                 m_diam_int or None, m_diam_ext or None, m_ancho or None,
-                m_paso or None, m_estrias or None, m_tolerancia
+                m_paso or None, m_estrias or None, m_tolerancia,
+                m_estrias_int or None, m_estrias_ext or None, m_seguro or None, m_abs
             )
             if res_medidas:
                 st.success(f"Se encontraron {len(res_medidas)} pieza(s) con medidas compatibles:")
@@ -2032,7 +2070,8 @@ with tab4:
                 elegido_label = st.selectbox("Elegí el producto a editar:", list(opciones_prod.keys()), key="sel_medidas")
                 id_medidas = opciones_prod[elegido_label]
                 c.execute(
-                    "SELECT diametro_interno, diametro_externo, ancho, paso_rosca, cantidad_estrias, ubicacion "
+                    "SELECT diametro_interno, diametro_externo, ancho, paso_rosca, cantidad_estrias, ubicacion, "
+                    "estrias_internas, estrias_externas, posicion_seguro, tiene_abs "
                     "FROM productos WHERE id = ?", (id_medidas,)
                 )
                 actual = c.fetchone()
@@ -2049,8 +2088,23 @@ with tab4:
                                               value=int(actual["cantidad_estrias"] or 0), key="e_estrias")
                 e_ubicacion = em6.text_input("Ubicación en depósito", value=actual["ubicacion"] or "",
                                               placeholder="Ej: Pasillo 3, estante B", key="e_ubic")
+
+                st.markdown("**🔩 Homocinéticas**")
+                eh1, eh2 = st.columns(2)
+                e_estrias_int = eh1.number_input("Estrías internas", min_value=0, step=1,
+                                                  value=int(actual["estrias_internas"] or 0), key="e_estrias_int")
+                e_estrias_ext = eh2.number_input("Estrías externas", min_value=0, step=1,
+                                                  value=int(actual["estrias_externas"] or 0), key="e_estrias_ext")
+                eh3, eh4 = st.columns(2)
+                e_seguro = eh3.text_input("Posición del seguro", value=actual["posicion_seguro"] or "",
+                                           placeholder="Ej: 1er ranura, a 12mm", key="e_seguro")
+                abs_actual = "Cualquiera" if actual["tiene_abs"] is None else ("Sí" if actual["tiene_abs"] else "No")
+                e_abs = eh4.selectbox("¿Tiene ABS?", ["Cualquiera", "Sí", "No"],
+                                       index=["Cualquiera", "Sí", "No"].index(abs_actual), key="e_abs")
+
                 if st.button("💾 Guardar medidas y ubicación"):
-                    actualizar_medidas(id_medidas, e_diam_int, e_diam_ext, e_ancho, e_paso, e_estrias, e_ubicacion)
+                    actualizar_medidas(id_medidas, e_diam_int, e_diam_ext, e_ancho, e_paso, e_estrias, e_ubicacion,
+                                        e_estrias_int, e_estrias_ext, e_seguro, e_abs)
                     st.success("Guardado.")
             else:
                 st.info("Sin resultados.")
