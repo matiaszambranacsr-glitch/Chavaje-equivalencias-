@@ -246,10 +246,20 @@ def get_connection():
         cliente_telefono TEXT,
         marca_auto TEXT,
         modelo_auto TEXT,
+        km_registro INTEGER,
         km_actual INTEGER,
         km_actualizado_fecha TEXT,
         created_at TEXT DEFAULT (datetime('now'))
     )""")
+
+    # Migración: instalaciones existentes que no tenían km_registro (km de cuando se cargó
+    # el vehículo por primera vez, fijo, para poder calcular km recorridos).
+    columnas_vehiculos = [f[1] for f in c.execute("PRAGMA table_info(vehiculos)").fetchall()]
+    if "km_registro" not in columnas_vehiculos:
+        c.execute("ALTER TABLE vehiculos ADD COLUMN km_registro INTEGER")
+        # Para los vehículos que ya existían, se usa el km_actual que tengan como punto de partida
+        # (es lo mejor que se puede hacer sin el dato original; a partir de ahora queda fijo).
+        c.execute("UPDATE vehiculos SET km_registro = km_actual WHERE km_registro IS NULL")
 
     c.execute("""CREATE TABLE IF NOT EXISTS historial_piezas (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -277,13 +287,36 @@ def get_connection():
     )""")
 
     # ---- Modo Mecánico ----
+    # fabricante = '' significa código genérico (estándar OBD-II, válido para cualquier auto).
+    # Un mismo código (ej. P1105) puede repetirse con distinto fabricante, porque en los
+    # códigos específicos de marca el mismo número significa cosas distintas según el auto.
     c.execute("""CREATE TABLE IF NOT EXISTS codigos_dtc (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
-        codigo TEXT UNIQUE NOT NULL,
+        codigo TEXT NOT NULL,
+        fabricante TEXT NOT NULL DEFAULT '',
         descripcion TEXT NOT NULL,
         sistema TEXT,
-        causas_posibles TEXT
+        causas_posibles TEXT,
+        UNIQUE(codigo, fabricante)
     )""")
+
+    # Migración: las instalaciones que ya tenían la tabla vieja (sin columna fabricante,
+    # con UNIQUE solo en codigo) se convierten al esquema nuevo sin perder datos cargados.
+    columnas_dtc = [f[1] for f in c.execute("PRAGMA table_info(codigos_dtc)").fetchall()]
+    if "fabricante" not in columnas_dtc:
+        c.execute("ALTER TABLE codigos_dtc RENAME TO codigos_dtc_old")
+        c.execute("""CREATE TABLE codigos_dtc (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            codigo TEXT NOT NULL,
+            fabricante TEXT NOT NULL DEFAULT '',
+            descripcion TEXT NOT NULL,
+            sistema TEXT,
+            causas_posibles TEXT,
+            UNIQUE(codigo, fabricante)
+        )""")
+        c.execute("""INSERT INTO codigos_dtc (codigo, fabricante, descripcion, sistema, causas_posibles)
+                     SELECT codigo, '', descripcion, sistema, causas_posibles FROM codigos_dtc_old""")
+        c.execute("DROP TABLE codigos_dtc_old")
 
     c.execute("""CREATE TABLE IF NOT EXISTS fabricantes_vin (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -304,44 +337,146 @@ def get_connection():
         created_at TEXT DEFAULT (datetime('now'))
     )""")
 
-    # Semilla inicial de códigos DTC genéricos (estándar OBD-II, no específicos de marca).
-    # Es solo un punto de partida: sumá o corregí los que necesites desde la app.
+    # Semilla inicial de códigos DTC genéricos (estándar OBD-II / SAE J2012, no específicos de
+    # marca), verificados contra fuentes de referencia. Es un punto de partida — sumá o corregí
+    # los que necesites desde la app. Los códigos P1xxx específicos de fabricante se cargan
+    # aparte indicando la marca (ver Modo Mecánico → Códigos DTC).
     c.execute("SELECT COUNT(*) FROM codigos_dtc")
     if c.fetchone()[0] == 0:
         seed_dtc = [
-            ("P0100", "Circuito del medidor de caudal de aire (MAF)", "Motor", "Sensor sucio, cableado, conector"),
-            ("P0101", "Rango o rendimiento del sensor MAF", "Motor", "Filtro de aire sucio, fugas de vacío"),
-            ("P0110", "Circuito del sensor de temperatura de admisión", "Motor", "Sensor o cableado en mal estado"),
-            ("P0115", "Circuito del sensor de temperatura del refrigerante", "Motor", "Sensor, conector, cableado"),
-            ("P0120", "Circuito del sensor de posición del acelerador (TPS)", "Motor", "Sensor TPS, cableado"),
-            ("P0128", "Termostato no alcanza temperatura de funcionamiento", "Motor", "Termostato pegado en abierto"),
-            ("P0130", "Circuito del sensor de oxígeno (banco 1, sensor 1)", "Emisiones", "Sonda lambda, cableado"),
-            ("P0171", "Mezcla pobre (banco 1)", "Motor", "Fuga de vacío, inyector, sensor MAF"),
-            ("P0172", "Mezcla rica (banco 1)", "Motor", "Inyector, presión de combustible, sensor O2"),
-            ("P0174", "Mezcla pobre (banco 2)", "Motor", "Fuga de vacío, inyector, sensor MAF"),
-            ("P0175", "Mezcla rica (banco 2)", "Motor", "Inyector, presión de combustible, sensor O2"),
-            ("P0200", "Circuito de inyectores", "Motor", "Inyector, cableado, módulo"),
-            ("P0217", "Sobretemperatura del motor", "Motor", "Refrigerante, bomba de agua, termostato"),
-            ("P0230", "Circuito primario de la bomba de combustible", "Motor", "Bomba, relé, cableado"),
-            ("P0300", "Fallos de encendido detectados, cilindros aleatorios", "Motor", "Bujías, bobinas, compresión"),
-            ("P0301", "Fallo de encendido cilindro 1", "Motor", "Bujía, bobina, inyector de ese cilindro"),
-            ("P0302", "Fallo de encendido cilindro 2", "Motor", "Bujía, bobina, inyector de ese cilindro"),
-            ("P0303", "Fallo de encendido cilindro 3", "Motor", "Bujía, bobina, inyector de ese cilindro"),
-            ("P0304", "Fallo de encendido cilindro 4", "Motor", "Bujía, bobina, inyector de ese cilindro"),
-            ("P0325", "Circuito del sensor de detonación (knock sensor)", "Motor", "Sensor, cableado"),
-            ("P0335", "Circuito del sensor de posición del cigüeñal", "Motor", "Sensor CKP, cableado, tone wheel"),
-            ("P0340", "Circuito del sensor de posición del árbol de levas", "Motor", "Sensor CMP, cableado"),
-            ("P0420", "Eficiencia del catalizador por debajo del umbral (banco 1)", "Emisiones", "Catalizador, sonda lambda"),
-            ("P0440", "Sistema de control de emisiones evaporativas (EVAP)", "Emisiones", "Tapa de nafta, válvula, mangueras"),
-            ("P0442", "Fuga pequeña detectada en sistema EVAP", "Emisiones", "Tapa de nafta floja, manguera con fisura"),
-            ("P0455", "Fuga grande detectada en sistema EVAP", "Emisiones", "Tapa de nafta, manguera desconectada"),
-            ("P0500", "Circuito del sensor de velocidad del vehículo", "Transmisión", "Sensor VSS, cableado"),
-            ("P0505", "Sistema de control de ralentí", "Motor", "Válvula IAC, cuerpo de aceleración sucio"),
-            ("P0700", "Fallo en el sistema de control de transmisión", "Transmisión", "Ver códigos específicos de la TCM"),
-            ("P0715", "Circuito del sensor de velocidad de entrada de transmisión", "Transmisión", "Sensor, cableado"),
+            ("P0010","Falla eléctrica en el actuador de posición A del árbol de levas, banco 1","Motor - Sensores/Admisión","Cableado cortado o en corto, conector sucio/flojo, sensor o actuador dañado"),
+            ("P0011","Avance excesivo o mal desempeño en la posición A del árbol de levas, banco 1","Motor - Sensores/Admisión","Sensor descalibrado, obstrucción física, fuga, componente mecánico desgastado"),
+            ("P0012","Retardo excesivo en la posición A del árbol de levas, banco 1","Motor - Sensores/Admisión","Sensor descalibrado, obstrucción física, fuga, componente mecánico desgastado"),
+            ("P0013","Falla eléctrica en el actuador de posición B del árbol de levas, banco 1","Motor - Sensores/Admisión","Cableado cortado o en corto, conector sucio/flojo, sensor o actuador dañado"),
+            ("P0014","Avance excesivo o mal desempeño en la posición B del árbol de levas, banco 1","Motor - Sensores/Admisión","Sensor descalibrado, obstrucción física, fuga, componente mecánico desgastado"),
+            ("P0015","Retardo excesivo en la posición B del árbol de levas, banco 1","Motor - Sensores/Admisión","Sensor descalibrado, obstrucción física, fuga, componente mecánico desgastado"),
+            ("P0020","Falla eléctrica en el actuador de posición A del árbol de levas, banco 2","Motor - Sensores/Admisión","Cableado cortado o en corto, conector sucio/flojo, sensor o actuador dañado"),
+            ("P0021","Avance excesivo o mal desempeño en la posición A del árbol de levas, banco 2","Motor - Sensores/Admisión","Sensor descalibrado, obstrucción física, fuga, componente mecánico desgastado"),
+            ("P0022","Retardo excesivo en la posición A del árbol de levas, banco 2","Motor - Sensores/Admisión","Sensor descalibrado, obstrucción física, fuga, componente mecánico desgastado"),
+            ("P0030","Falla eléctrica en el calefactor del sensor de oxígeno, banco 1 sensor 1","Emisiones","Cableado cortado o en corto, conector sucio/flojo, sensor o actuador dañado"),
+            ("P0031","Señal baja en el calefactor del sensor de oxígeno, banco 1 sensor 1","Emisiones","Cortocircuito a masa, sensor en mal estado, cableado dañado"),
+            ("P0032","Señal alta en el calefactor del sensor de oxígeno, banco 1 sensor 1","Emisiones","Circuito abierto, cortocircuito a positivo, sensor en mal estado"),
+            ("P0036","Falla eléctrica en el calefactor del sensor de oxígeno, banco 1 sensor 2","Emisiones","Cableado cortado o en corto, conector sucio/flojo, sensor o actuador dañado"),
+            ("P0037","Señal baja en el calefactor del sensor de oxígeno, banco 1 sensor 2","Emisiones","Cortocircuito a masa, sensor en mal estado, cableado dañado"),
+            ("P0038","Señal alta en el calefactor del sensor de oxígeno, banco 1 sensor 2","Emisiones","Circuito abierto, cortocircuito a positivo, sensor en mal estado"),
+            ("P0050","Falla eléctrica en el calefactor del sensor de oxígeno, banco 2 sensor 1","Emisiones","Cableado cortado o en corto, conector sucio/flojo, sensor o actuador dañado"),
+            ("P0051","Señal baja en el calefactor del sensor de oxígeno, banco 2 sensor 1","Emisiones","Cortocircuito a masa, sensor en mal estado, cableado dañado"),
+            ("P0052","Señal alta en el calefactor del sensor de oxígeno, banco 2 sensor 1","Emisiones","Circuito abierto, cortocircuito a positivo, sensor en mal estado"),
+            ("P0056","Falla eléctrica en el calefactor del sensor de oxígeno, banco 2 sensor 2","Emisiones","Cableado cortado o en corto, conector sucio/flojo, sensor o actuador dañado"),
+            ("P0057","Señal baja en el calefactor del sensor de oxígeno, banco 2 sensor 2","Emisiones","Cortocircuito a masa, sensor en mal estado, cableado dañado"),
+            ("P0058","Señal alta en el calefactor del sensor de oxígeno, banco 2 sensor 2","Emisiones","Circuito abierto, cortocircuito a positivo, sensor en mal estado"),
+            ("P0070","Falla eléctrica en el sensor de temperatura de aire ambiente","Motor - Sensores/Admisión","Cableado cortado o en corto, conector sucio/flojo, sensor dañado"),
+            ("P0071","Sensor de temperatura de aire ambiente fuera de rango","Motor - Sensores/Admisión","Sensor descalibrado, cableado dañado"),
+            ("P0072","Señal baja en el sensor de temperatura de aire ambiente","Motor - Sensores/Admisión","Cortocircuito a masa, sensor en mal estado"),
+            ("P0073","Señal alta en el sensor de temperatura de aire ambiente","Motor - Sensores/Admisión","Circuito abierto, sensor en mal estado"),
+            ("P0074","Señal intermitente en el sensor de temperatura de aire ambiente","Motor - Sensores/Admisión","Conector flojo u oxidado, falso contacto"),
+            ("P0100","Falla eléctrica en el medidor de caudal de aire (MAF)","Motor - Sensores/Admisión","Sensor sucio, cableado, conector"),
+            ("P0101","Medidor de caudal de aire (MAF) fuera de rango","Motor - Sensores/Admisión","Filtro de aire sucio, fugas de vacío, sensor sucio"),
+            ("P0102","Señal baja en el medidor de caudal de aire (MAF)","Motor - Sensores/Admisión","Cortocircuito a masa, sensor sucio o dañado"),
+            ("P0103","Señal alta en el medidor de caudal de aire (MAF)","Motor - Sensores/Admisión","Circuito abierto, sensor dañado"),
+            ("P0104","Señal intermitente en el medidor de caudal de aire (MAF)","Motor - Sensores/Admisión","Conector flojo u oxidado, falso contacto"),
+            ("P0105","Falla eléctrica en el sensor de presión absoluta de múltiple / barométrica (MAP)","Motor - Sensores/Admisión","Manguera de vacío rota, sensor o cableado dañado"),
+            ("P0106","Sensor MAP fuera de rango","Motor - Sensores/Admisión","Fuga de vacío, sensor descalibrado"),
+            ("P0107","Señal baja en el sensor MAP","Motor - Sensores/Admisión","Cortocircuito a masa, sensor dañado"),
+            ("P0108","Señal alta en el sensor MAP","Motor - Sensores/Admisión","Circuito abierto, sensor dañado"),
+            ("P0109","Señal intermitente en el sensor MAP","Motor - Sensores/Admisión","Conector flojo u oxidado, falso contacto"),
+            ("P0110","Falla eléctrica en el sensor de temperatura del aire de admisión (IAT)","Motor - Sensores/Admisión","Sensor o cableado en mal estado"),
+            ("P0111","Sensor IAT fuera de rango","Motor - Sensores/Admisión","Sensor descalibrado, cableado dañado"),
+            ("P0112","Señal baja en el sensor IAT","Motor - Sensores/Admisión","Cortocircuito a masa, sensor dañado"),
+            ("P0113","Señal alta en el sensor IAT","Motor - Sensores/Admisión","Circuito abierto, sensor dañado"),
+            ("P0114","Señal intermitente en el sensor IAT","Motor - Sensores/Admisión","Conector flojo u oxidado, falso contacto"),
+            ("P0115","Falla eléctrica en el sensor de temperatura del refrigerante (ECT)","Motor - Sensores/Admisión","Sensor, conector, cableado"),
+            ("P0116","Sensor ECT fuera de rango","Motor - Sensores/Admisión","Sensor descalibrado, nivel de refrigerante bajo"),
+            ("P0117","Señal baja en el sensor ECT","Motor - Sensores/Admisión","Cortocircuito a masa, sensor dañado"),
+            ("P0118","Señal alta en el sensor ECT","Motor - Sensores/Admisión","Circuito abierto, sensor dañado"),
+            ("P0119","Señal intermitente en el sensor ECT","Motor - Sensores/Admisión","Conector flojo u oxidado, falso contacto"),
+            ("P0120","Falla eléctrica en el sensor de posición del acelerador/pedal A (TPS)","Motor - Sensores/Admisión","Sensor TPS, cableado"),
+            ("P0121","Sensor TPS A fuera de rango","Motor - Sensores/Admisión","Sensor descalibrado, cableado dañado"),
+            ("P0122","Señal baja en el sensor TPS A","Motor - Sensores/Admisión","Cortocircuito a masa, sensor dañado"),
+            ("P0123","Señal alta en el sensor TPS A","Motor - Sensores/Admisión","Circuito abierto, sensor dañado"),
+            ("P0124","Señal intermitente en el sensor TPS A","Motor - Sensores/Admisión","Conector flojo u oxidado, falso contacto"),
+            ("P0125","El refrigerante no llega a la temperatura necesaria para el lazo cerrado de combustible","Motor - Sensores/Admisión","Termostato pegado en abierto, sensor ECT"),
+            ("P0128","Termostato: el refrigerante no alcanza la temperatura de regulación","Motor - Sensores/Admisión","Termostato pegado en abierto"),
+            ("P0130","Falla eléctrica en el sensor de oxígeno, banco 1 sensor 1","Emisiones","Sonda lambda, cableado"),
+            ("P0131","Voltaje bajo en el sensor de oxígeno, banco 1 sensor 1","Emisiones","Cortocircuito a masa, sonda en mal estado"),
+            ("P0132","Voltaje alto en el sensor de oxígeno, banco 1 sensor 1","Emisiones","Circuito abierto, sonda en mal estado"),
+            ("P0133","Respuesta lenta en el sensor de oxígeno, banco 1 sensor 1","Emisiones","Sonda envejecida o contaminada"),
+            ("P0134","Sin actividad detectada en el sensor de oxígeno, banco 1 sensor 1","Emisiones","Sonda desconectada o sin actividad, cableado"),
+            ("P0135","Falla eléctrica en el calefactor del sensor de oxígeno, banco 1 sensor 1","Emisiones","Calefactor de la sonda dañado, fusible, cableado"),
+            ("P0136","Falla eléctrica en el sensor de oxígeno, banco 1 sensor 2","Emisiones","Sonda lambda, cableado"),
+            ("P0137","Voltaje bajo en el sensor de oxígeno, banco 1 sensor 2","Emisiones","Cortocircuito a masa, sonda en mal estado"),
+            ("P0138","Voltaje alto en el sensor de oxígeno, banco 1 sensor 2","Emisiones","Circuito abierto, sonda en mal estado"),
+            ("P0140","Sin actividad detectada en el sensor de oxígeno, banco 1 sensor 2","Emisiones","Sonda desconectada o sin actividad, cableado"),
+            ("P0141","Falla eléctrica en el calefactor del sensor de oxígeno, banco 1 sensor 2","Emisiones","Calefactor de la sonda dañado, fusible, cableado"),
+            ("P0150","Falla eléctrica en el sensor de oxígeno, banco 2 sensor 1","Emisiones","Sonda lambda, cableado"),
+            ("P0155","Falla eléctrica en el calefactor del sensor de oxígeno, banco 2 sensor 1","Emisiones","Calefactor de la sonda dañado, fusible, cableado"),
+            ("P0170","Ajuste de mezcla fuera de rango, banco 1","Motor - Sensores/Admisión","Sonda O2, inyectores, fugas de vacío"),
+            ("P0171","Mezcla demasiado pobre, banco 1","Motor - Sensores/Admisión","Fuga de vacío, inyector, sensor MAF"),
+            ("P0172","Mezcla demasiado rica, banco 1","Motor - Sensores/Admisión","Inyector, presión de combustible, sensor O2"),
+            ("P0173","Ajuste de mezcla fuera de rango, banco 2","Motor - Sensores/Admisión","Sonda O2, inyectores, fugas de vacío"),
+            ("P0174","Mezcla demasiado pobre, banco 2","Motor - Sensores/Admisión","Fuga de vacío, inyector, sensor MAF"),
+            ("P0175","Mezcla demasiado rica, banco 2","Motor - Sensores/Admisión","Inyector, presión de combustible, sensor O2"),
+            ("P0200","Falla eléctrica general en el circuito de inyectores","Motor - Inyectores/Combustible","Inyector, cableado, módulo"),
+            ("P0201","Falla eléctrica en el inyector del cilindro 1","Motor - Inyectores/Combustible","Inyector, cableado de ese cilindro"),
+            ("P0202","Falla eléctrica en el inyector del cilindro 2","Motor - Inyectores/Combustible","Inyector, cableado de ese cilindro"),
+            ("P0203","Falla eléctrica en el inyector del cilindro 3","Motor - Inyectores/Combustible","Inyector, cableado de ese cilindro"),
+            ("P0204","Falla eléctrica en el inyector del cilindro 4","Motor - Inyectores/Combustible","Inyector, cableado de ese cilindro"),
+            ("P0217","Sobretemperatura del motor","Motor - Encendido/Combustión","Refrigerante, bomba de agua, termostato"),
+            ("P0230","Falla eléctrica en el circuito primario de la bomba de combustible","Motor - Inyectores/Combustible","Bomba, relé, cableado"),
+            ("P0300","Fallos de encendido detectados en varios cilindros o aleatorios","Motor - Encendido/Combustión","Bujías, bobinas, compresión"),
+            ("P0301","Fallo de encendido en el cilindro 1","Motor - Encendido/Combustión","Bujía, bobina, inyector de ese cilindro"),
+            ("P0302","Fallo de encendido en el cilindro 2","Motor - Encendido/Combustión","Bujía, bobina, inyector de ese cilindro"),
+            ("P0303","Fallo de encendido en el cilindro 3","Motor - Encendido/Combustión","Bujía, bobina, inyector de ese cilindro"),
+            ("P0304","Fallo de encendido en el cilindro 4","Motor - Encendido/Combustión","Bujía, bobina, inyector de ese cilindro"),
+            ("P0325","Falla eléctrica en el sensor de detonación (knock sensor), banco 1 o único","Motor - Encendido/Combustión","Sensor, cableado"),
+            ("P0326","Sensor de detonación 1 fuera de rango","Motor - Encendido/Combustión","Sensor descalibrado, cableado"),
+            ("P0327","Señal baja en el sensor de detonación 1","Motor - Encendido/Combustión","Cortocircuito a masa, sensor dañado"),
+            ("P0328","Señal alta en el sensor de detonación 1","Motor - Encendido/Combustión","Circuito abierto, sensor dañado"),
+            ("P0335","Falla eléctrica en el sensor de posición del cigüeñal (CKP)","Motor - Encendido/Combustión","Sensor CKP, cableado, tone wheel"),
+            ("P0336","Sensor CKP fuera de rango","Motor - Encendido/Combustión","Sensor descalibrado, rueda fónica dañada"),
+            ("P0340","Falla eléctrica en el sensor de posición del árbol de levas (CMP)","Motor - Encendido/Combustión","Sensor CMP, cableado"),
+            ("P0341","Sensor CMP fuera de rango","Motor - Encendido/Combustión","Sensor descalibrado, cableado"),
+            ("P0400","Falla en el caudal de recirculación de gases de escape (EGR)","Emisiones","Válvula EGR, conductos obstruidos"),
+            ("P0401","Caudal insuficiente de EGR","Emisiones","Válvula EGR trabada cerrada, conducto obstruido"),
+            ("P0402","Caudal excesivo de EGR","Emisiones","Válvula EGR trabada abierta"),
+            ("P0420","Eficiencia del catalizador por debajo del umbral, banco 1","Emisiones","Catalizador, sonda lambda"),
+            ("P0430","Eficiencia del catalizador por debajo del umbral, banco 2","Emisiones","Catalizador, sonda lambda"),
+            ("P0440","Falla general en el sistema de control de emisiones evaporativas (EVAP)","Emisiones","Tapa de nafta, válvula, mangueras"),
+            ("P0441","Caudal de purga EVAP incorrecto","Emisiones","Válvula de purga, mangueras obstruidas"),
+            ("P0442","Fuga pequeña detectada en el sistema EVAP","Emisiones","Tapa de nafta floja, manguera con fisura"),
+            ("P0446","Falla eléctrica en la válvula de ventilación del sistema EVAP","Emisiones","Válvula de venteo, cableado"),
+            ("P0447","Circuito de ventilación EVAP abierto","Emisiones","Cableado cortado, válvula desconectada"),
+            ("P0448","Circuito de ventilación EVAP en corto","Emisiones","Cableado en corto, válvula dañada"),
+            ("P0451","Falla eléctrica en el sensor de presión del sistema EVAP","Emisiones","Sensor de presión, cableado"),
+            ("P0452","Señal baja en el sensor de presión del sistema EVAP","Emisiones","Cortocircuito a masa, sensor dañado"),
+            ("P0453","Señal alta en el sensor de presión del sistema EVAP","Emisiones","Circuito abierto, sensor dañado"),
+            ("P0455","Fuga grande detectada en el sistema EVAP","Emisiones","Tapa de nafta, manguera desconectada"),
+            ("P0456","Fuga muy pequeña detectada en el sistema EVAP","Emisiones","Tapa de nafta, fisura muy pequeña"),
+            ("P0457","Fuga detectada, posible tapa de combustible floja o mal cerrada","Emisiones","Tapa de nafta floja, dañada o mal puesta"),
+            ("P0461","Sensor de nivel de combustible fuera de rango","Motor - Inyectores/Combustible","Sensor de nivel, flotante"),
+            ("P0462","Señal baja en el sensor de nivel de combustible","Motor - Inyectores/Combustible","Cortocircuito a masa, sensor dañado"),
+            ("P0463","Señal alta en el sensor de nivel de combustible","Motor - Inyectores/Combustible","Circuito abierto, sensor dañado"),
+            ("P0500","Falla eléctrica en el sensor de velocidad del vehículo (VSS)","Transmisión","Sensor VSS, cableado"),
+            ("P0501","Sensor VSS fuera de rango","Transmisión","Sensor descalibrado, cableado"),
+            ("P0505","Falla en el sistema de control de marcha lenta (IAC)","Motor - Sensores/Admisión","Válvula IAC, cuerpo de aceleración sucio"),
+            ("P0506","RPM de marcha lenta por debajo de lo esperado","Motor - Sensores/Admisión","Válvula IAC, fuga de vacío"),
+            ("P0507","RPM de marcha lenta por encima de lo esperado","Motor - Sensores/Admisión","Válvula IAC trabada, fuga de vacío grande"),
+            ("P0600","Falla en el enlace serial de comunicaciones del módulo","Módulo de control / Eléctrico","Cableado del bus de datos, módulo"),
+            ("P0601","Error de suma de verificación en la memoria del módulo de control","Módulo de control / Eléctrico","Módulo de control con falla interna"),
+            ("P0700","Avería general en el sistema de control de la transmisión","Transmisión","Ver códigos específicos de la TCM"),
+            ("P0701","Sistema de control de la transmisión fuera de rango","Transmisión","Sensor o solenoide de la transmisión"),
+            ("P0705","Falla eléctrica en el sensor de rango de la transmisión (PRNDL)","Transmisión","Sensor, cableado"),
+            ("P0710","Falla eléctrica en el sensor de temperatura del fluido de la transmisión","Transmisión","Sensor, cableado"),
+            ("P0715","Falla eléctrica en el sensor de velocidad de entrada / turbina","Transmisión","Sensor, cableado"),
+            ("P0720","Falla eléctrica en el sensor de velocidad de salida de la transmisión","Transmisión","Sensor, cableado"),
+            ("P0730","Relación de engranes incorrecta","Transmisión","Solenoides de cambio, fluido bajo o degradado"),
+            ("P0740","Falla en el circuito del embrague del convertidor de par","Transmisión","Solenoide TCC, cableado"),
+            ("P0750","Falla en el solenoide de cambios A","Transmisión","Solenoide, cableado"),
+            ("P0755","Falla en el solenoide de cambios B","Transmisión","Solenoide, cableado"),
         ]
         c.executemany(
-            "INSERT OR IGNORE INTO codigos_dtc (codigo, descripcion, sistema, causas_posibles) VALUES (?, ?, ?, ?)",
+            "INSERT OR IGNORE INTO codigos_dtc (codigo, fabricante, descripcion, sistema, causas_posibles) "
+            "VALUES (?, '', ?, ?, ?)",
             seed_dtc
         )
 
@@ -853,17 +988,18 @@ def get_or_create_vehiculo(patente, cliente_nombre="", cliente_telefono="", marc
                 "marca_auto = COALESCE(NULLIF(?, ''), marca_auto), "
                 "modelo_auto = COALESCE(NULLIF(?, ''), modelo_auto), "
                 "km_actual = COALESCE(?, km_actual), "
+                "km_registro = COALESCE(km_registro, ?), "  # solo se fija si todavía no tenía uno
                 "km_actualizado_fecha = CASE WHEN ? IS NOT NULL THEN datetime('now') ELSE km_actualizado_fecha END "
                 "WHERE id = ?",
                 (cliente_nombre.strip(), cliente_telefono.strip(), marca_auto.strip(), modelo_auto.strip(),
-                 km_actual, km_actual, vid)
+                 km_actual, km_actual, km_actual, vid)
             )
         else:
             c.execute(
                 "INSERT INTO vehiculos (patente, cliente_nombre, cliente_telefono, marca_auto, modelo_auto, "
-                "km_actual, km_actualizado_fecha) VALUES (?, ?, ?, ?, ?, ?, datetime('now'))",
+                "km_registro, km_actual, km_actualizado_fecha) VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'))",
                 (patente, cliente_nombre.strip(), cliente_telefono.strip(), marca_auto.strip(),
-                 modelo_auto.strip(), km_actual)
+                 modelo_auto.strip(), km_actual, km_actual)
             )
             c.execute("SELECT id FROM vehiculos WHERE patente = ?", (patente,))
             vid = c.fetchone()["id"]
@@ -871,10 +1007,42 @@ def get_or_create_vehiculo(patente, cliente_nombre="", cliente_telefono="", marc
     return vid
 
 
+def actualizar_km_registro(vehiculo_id, km_registro):
+    """Corrige manualmente el km de registro (por si se cargó mal la primera vez)."""
+    with db_lock:
+        c.execute("UPDATE vehiculos SET km_registro = ? WHERE id = ?", (km_registro, vehiculo_id))
+        conn.commit()
+
+
 def buscar_vehiculo(patente):
     c.execute("SELECT * FROM vehiculos WHERE patente = ?", (patente.strip().upper(),))
     row = c.fetchone()
     return dict(row) if row else None
+
+
+def calcular_km_recorridos(vehiculo):
+    """A partir del km de registro y el km actual, calcula km recorridos y el promedio
+    aproximado por mes (usando la fecha de creación de la ficha como punto de partida)."""
+    km_registro = vehiculo.get("km_registro")
+    km_actual = vehiculo.get("km_actual")
+    resultado = {"km_recorridos": None, "promedio_mensual": None, "dias_transcurridos": None}
+    if km_registro is None or km_actual is None:
+        return resultado
+    recorridos = km_actual - km_registro
+    if recorridos < 0:
+        return resultado
+    resultado["km_recorridos"] = recorridos
+
+    creado = vehiculo.get("created_at")
+    if creado:
+        try:
+            fecha_creado = datetime.strptime(creado[:19], "%Y-%m-%d %H:%M:%S")
+            dias = max((datetime.now() - fecha_creado).days, 1)
+            resultado["dias_transcurridos"] = dias
+            resultado["promedio_mensual"] = round(recorridos / dias * 30)
+        except (ValueError, TypeError):
+            pass
+    return resultado
 
 
 def agregar_pieza_historial(vehiculo_id, descripcion, marca_pieza, codigo_pieza, km_instalacion, vida_util_km, nota):
@@ -894,6 +1062,31 @@ def listar_historial_vehiculo(vehiculo_id):
                  vida_util_km AS "Vida útil (km)", fecha_instalacion AS "Fecha", nota AS "Nota"
                  FROM historial_piezas WHERE vehiculo_id = ? ORDER BY fecha_instalacion DESC""", (vehiculo_id,))
     return filas_a_listas(c)
+
+
+def calcular_proyeccion_mantenimiento(vehiculo_id, km_recorridos):
+    """Para cada tipo de pieza con vida útil cargada, compara cuántas veces se cambió
+    realmente contra cuántas veces debería haberse cambiado según los km recorridos totales
+    del vehículo desde que se registró."""
+    if km_recorridos is None:
+        return []
+    c.execute("""SELECT descripcion_pieza, COUNT(*) AS veces_reales, AVG(vida_util_km) AS vida_util_prom
+                 FROM historial_piezas
+                 WHERE vehiculo_id = ? AND vida_util_km IS NOT NULL AND vida_util_km > 0
+                 GROUP BY UPPER(descripcion_pieza)""", (vehiculo_id,))
+    proyeccion = []
+    for row in c.fetchall():
+        vida_util_prom = row["vida_util_prom"]
+        veces_esperadas = int(km_recorridos // vida_util_prom)
+        atraso = veces_esperadas - row["veces_reales"]
+        proyeccion.append({
+            "Pieza": row["descripcion_pieza"],
+            "Vida útil prom. (km)": round(vida_util_prom),
+            "Veces cambiada": row["veces_reales"],
+            "Veces que debería (según km)": veces_esperadas,
+            "Atraso estimado": max(atraso, 0),
+        })
+    return sorted(proyeccion, key=lambda p: -p["Atraso estimado"])
 
 
 def calcular_alertas_vehiculo(vehiculo_id, km_actual):
@@ -1039,28 +1232,41 @@ def calcular_matriz_abc(limite=300):
 # ============================================================
 # MODO MECÁNICO — DICCIONARIO DE CÓDIGOS OBD2 / DTC
 # ============================================================
-def buscar_dtc(codigo):
+def buscar_dtc(codigo, fabricante_filtro="Todos"):
     codigo = codigo.strip().upper()
-    c.execute("""SELECT codigo AS "Código", descripcion AS "Descripción", sistema AS "Sistema",
-                 causas_posibles AS "Causas posibles" FROM codigos_dtc
-                 WHERE codigo = ? OR codigo LIKE ?""", (codigo, f"%{codigo}%"))
+    query = """SELECT codigo AS "Código",
+               CASE WHEN fabricante = '' THEN 'Genérico' ELSE fabricante END AS "Fabricante",
+               descripcion AS "Descripción", sistema AS "Sistema",
+               causas_posibles AS "Causas posibles" FROM codigos_dtc
+               WHERE (codigo = ? OR codigo LIKE ?)"""
+    params = [codigo, f"%{codigo}%"]
+    if fabricante_filtro == "Genérico":
+        query += " AND fabricante = ''"
+    elif fabricante_filtro and fabricante_filtro != "Todos":
+        query += " AND fabricante = ?"
+        params.append(fabricante_filtro)
+    query += " ORDER BY fabricante, codigo"
+    c.execute(query, params)
     return filas_a_listas(c)
 
 
-def agregar_dtc(codigo, descripcion, sistema, causas):
+def agregar_dtc(codigo, descripcion, sistema, causas, fabricante=""):
     codigo = codigo.strip().upper()
+    fabricante = fabricante.strip()
     with db_lock:
         c.execute(
-            "INSERT INTO codigos_dtc (codigo, descripcion, sistema, causas_posibles) VALUES (?, ?, ?, ?) "
-            "ON CONFLICT(codigo) DO UPDATE SET descripcion=excluded.descripcion, sistema=excluded.sistema, "
-            "causas_posibles=excluded.causas_posibles",
-            (codigo, descripcion.strip(), sistema.strip(), causas.strip())
+            "INSERT INTO codigos_dtc (codigo, fabricante, descripcion, sistema, causas_posibles) "
+            "VALUES (?, ?, ?, ?, ?) "
+            "ON CONFLICT(codigo, fabricante) DO UPDATE SET descripcion=excluded.descripcion, "
+            "sistema=excluded.sistema, causas_posibles=excluded.causas_posibles",
+            (codigo, fabricante, descripcion.strip(), sistema.strip(), causas.strip())
         )
         conn.commit()
 
 
 def importar_dtc_masivo(texto):
-    """Importa códigos DTC pegados como texto, una línea por código: codigo;descripcion;sistema;causas"""
+    """Importa códigos DTC pegados como texto, una línea por código:
+    codigo;descripcion;sistema;causas;fabricante (fabricante es opcional, vacío = código genérico)."""
     cargados = 0
     with db_lock:
         for linea in texto.strip().splitlines():
@@ -1071,11 +1277,13 @@ def importar_dtc_masivo(texto):
             descripcion = partes[1]
             sistema = partes[2] if len(partes) > 2 else ""
             causas = partes[3] if len(partes) > 3 else ""
+            fabricante = partes[4] if len(partes) > 4 else ""
             c.execute(
-                "INSERT INTO codigos_dtc (codigo, descripcion, sistema, causas_posibles) VALUES (?, ?, ?, ?) "
-                "ON CONFLICT(codigo) DO UPDATE SET descripcion=excluded.descripcion, sistema=excluded.sistema, "
-                "causas_posibles=excluded.causas_posibles",
-                (codigo, descripcion, sistema, causas)
+                "INSERT INTO codigos_dtc (codigo, fabricante, descripcion, sistema, causas_posibles) "
+                "VALUES (?, ?, ?, ?, ?) "
+                "ON CONFLICT(codigo, fabricante) DO UPDATE SET descripcion=excluded.descripcion, "
+                "sistema=excluded.sistema, causas_posibles=excluded.causas_posibles",
+                (codigo, fabricante, descripcion, sistema, causas)
             )
             cargados += 1
         conn.commit()
@@ -1085,6 +1293,11 @@ def importar_dtc_masivo(texto):
 def contar_dtc():
     c.execute("SELECT COUNT(*) FROM codigos_dtc")
     return c.fetchone()[0]
+
+
+def listar_fabricantes_dtc():
+    c.execute("SELECT DISTINCT fabricante FROM codigos_dtc WHERE fabricante != '' ORDER BY fabricante")
+    return [r["fabricante"] for r in c.fetchall()]
 
 
 # ============================================================
@@ -2146,7 +2359,7 @@ with tab7:
                 marca_auto = cv3.text_input("Marca del auto", value=(vehiculo or {}).get("marca_auto") or "")
                 modelo_auto = cv4.text_input("Modelo", value=(vehiculo or {}).get("modelo_auto") or "")
                 km_actual_input = cv5.number_input(
-                    "Kilometraje actual", min_value=0, step=1000,
+                    "Kilometraje actual (se actualiza cada vez)", min_value=0, step=1000,
                     value=int((vehiculo or {}).get("km_actual") or 0)
                 )
                 guardar_vehiculo = st.form_submit_button("💾 Guardar vehículo", type="primary")
@@ -2159,11 +2372,36 @@ with tab7:
         vehiculo = buscar_vehiculo(patente_input)
         if vehiculo:
             km_actual = vehiculo.get("km_actual")
+            km_registro = vehiculo.get("km_registro")
             st.write(
                 f"**{vehiculo.get('marca_auto') or ''} {vehiculo.get('modelo_auto') or ''}** — "
-                f"Cliente: {vehiculo.get('cliente_nombre') or 'sin nombre'} — "
-                f"Km actual: {km_actual if km_actual is not None else 'sin registrar'}"
+                f"Cliente: {vehiculo.get('cliente_nombre') or 'sin nombre'}"
             )
+
+            km_calc = calcular_km_recorridos(vehiculo)
+            mk1, mk2, mk3 = st.columns(3)
+            mk1.metric("Km de registro", km_registro if km_registro is not None else "—")
+            mk2.metric("Km actual", km_actual if km_actual is not None else "—")
+            mk3.metric("Km recorridos", km_calc["km_recorridos"] if km_calc["km_recorridos"] is not None else "—")
+            if km_calc["promedio_mensual"] is not None:
+                st.caption(
+                    f"📈 Promedio aproximado: **{km_calc['promedio_mensual']:,} km/mes** "
+                    f"(en base a {km_calc['dias_transcurridos']} día(s) desde que se registró el vehículo)."
+                )
+
+            with st.expander("✏️ Corregir km de registro (solo si se cargó mal la primera vez)"):
+                st.caption(
+                    "El km de registro queda fijo automáticamente la primera vez que cargás el vehículo. "
+                    "Usá esto solo para corregir un error de tipeo — cambiarlo afecta los cálculos de abajo."
+                )
+                nuevo_km_registro = st.number_input(
+                    "Km de registro correcto", min_value=0, step=1000,
+                    value=int(km_registro or 0), key="corregir_km_registro"
+                )
+                if st.button("💾 Corregir km de registro"):
+                    actualizar_km_registro(vehiculo["id"], nuevo_km_registro or None)
+                    st.success("Km de registro actualizado.")
+                    st.rerun()
 
             if km_actual is not None:
                 alertas = calcular_alertas_vehiculo(vehiculo["id"], km_actual)
@@ -2203,6 +2441,28 @@ with tab7:
             else:
                 st.caption("Todavía no hay piezas registradas para este vehículo.")
 
+            st.markdown("---")
+            st.markdown("**🔧 Proyección de mantenimiento**")
+            st.caption(
+                "Compara, para cada tipo de pieza con vida útil cargada, cuántas veces se cambió "
+                "realmente contra cuántas veces debería haberse cambiado según los km recorridos "
+                "totales desde que se registró el vehículo."
+            )
+            if km_calc["km_recorridos"] is None:
+                st.info(
+                    "Para calcular esto hace falta el km de registro y el km actual del vehículo "
+                    "(completá 'Kilometraje actual' arriba si todavía no lo cargaste)."
+                )
+            else:
+                proyeccion = calcular_proyeccion_mantenimiento(vehiculo["id"], km_calc["km_recorridos"])
+                if proyeccion:
+                    atrasadas = [p for p in proyeccion if p["Atraso estimado"] > 0]
+                    if atrasadas:
+                        st.warning(f"⚠️ {len(atrasadas)} pieza(s) con cambios atrasados según el kilometraje:")
+                    st.dataframe(proyeccion, use_container_width=True, hide_index=True)
+                else:
+                    st.caption("Todavía no hay piezas con vida útil cargada para proyectar.")
+
 # ============================================================
 # TAB 8: MODO MECÁNICO
 # ============================================================
@@ -2215,21 +2475,28 @@ with tab8:
     with sub_dtc:
         st.caption(
             f"Diccionario de códigos de falla OBD2/DTC. Arranca con {contar_dtc()} códigos genéricos "
-            "estándar (no específicos de marca) — sumá los que te falten con el formulario de abajo."
+            "estándar (no específicos de marca) — sumá los que te falten con el formulario de abajo. "
+            "Los códigos P1xxx u otros específicos de fabricante se cargan indicando la marca, porque "
+            "el mismo número puede significar algo distinto según el auto."
         )
-        codigo_buscar = st.text_input("Buscar código:", placeholder="Ej: P0301", key="dtc_buscar")
+        fabricantes_dtc = ["Todos", "Genérico"] + listar_fabricantes_dtc()
+        cdb1, cdb2 = st.columns([2, 1])
+        codigo_buscar = cdb1.text_input("Buscar código:", placeholder="Ej: P0301 o P1105", key="dtc_buscar")
+        filtro_fab_dtc = cdb2.selectbox("Fabricante:", fabricantes_dtc, key="dtc_filtro_fab")
         if codigo_buscar.strip():
-            res_dtc = buscar_dtc(codigo_buscar)
+            res_dtc = buscar_dtc(codigo_buscar, filtro_fab_dtc)
             if res_dtc:
                 st.dataframe(res_dtc, use_container_width=True, hide_index=True)
             else:
-                st.warning("No tengo ese código cargado todavía. Podés agregarlo abajo.")
+                st.warning("No tengo ese código cargado todavía (con ese filtro de fabricante). Podés agregarlo abajo.")
 
         with st.expander("➕ Agregar / corregir un código"):
+            st.caption("Dejá 'Fabricante' vacío si es un código genérico (P0xxx). Completalo si es específico de una marca (ej: Ford, Toyota).")
             with st.form("form_dtc", clear_on_submit=True):
-                cd1, cd2 = st.columns(2)
+                cd1, cd2, cd3 = st.columns(3)
                 nuevo_codigo = cd1.text_input("Código (ej: P0301)")
-                nuevo_sistema = cd2.text_input("Sistema (ej: Motor, Transmisión, Emisiones)")
+                nuevo_fabricante = cd2.text_input("Fabricante (opcional)", placeholder="Ej: Ford")
+                nuevo_sistema = cd3.text_input("Sistema (ej: Motor, Transmisión)")
                 nueva_desc = st.text_input("Descripción")
                 nuevas_causas = st.text_input("Causas posibles (opcional)")
                 guardar_dtc_btn = st.form_submit_button("💾 Guardar código", type="primary")
@@ -2237,14 +2504,19 @@ with tab8:
                 if not nuevo_codigo.strip() or not nueva_desc.strip():
                     st.warning("Completá al menos el código y la descripción.")
                 else:
-                    agregar_dtc(nuevo_codigo, nueva_desc, nuevo_sistema, nuevas_causas)
-                    st.success(f"Código {nuevo_codigo.upper()} guardado.")
+                    agregar_dtc(nuevo_codigo, nueva_desc, nuevo_sistema, nuevas_causas, nuevo_fabricante)
+                    etiqueta_fab = f" ({nuevo_fabricante.strip()})" if nuevo_fabricante.strip() else " (genérico)"
+                    st.success(f"Código {nuevo_codigo.upper()}{etiqueta_fab} guardado.")
                     st.rerun()
 
         with st.expander("📋 Carga masiva de códigos (pegar texto)"):
-            st.caption("Un código por línea, formato: `codigo;descripción;sistema;causas` (sistema y causas son opcionales).")
+            st.caption(
+                "Un código por línea, formato: `codigo;descripción;sistema;causas;fabricante` "
+                "(sistema, causas y fabricante son opcionales — dejá fabricante vacío para códigos genéricos)."
+            )
             texto_dtc = st.text_area("Pegá los códigos acá:", height=150, key="dtc_masivo",
-                                      placeholder="P0455;Fuga grande en sistema EVAP;Emisiones;Tapa de nafta, manguera")
+                                      placeholder="P0455;Fuga grande en sistema EVAP;Emisiones;Tapa de nafta, manguera\n"
+                                                   "P1105;Solenoide de presión de combustible;Motor;;Chrysler")
             if st.button("📥 Importar códigos"):
                 if texto_dtc.strip():
                     cargados_dtc = importar_dtc_masivo(texto_dtc)
