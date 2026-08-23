@@ -5,6 +5,8 @@ import io
 import threading
 import unicodedata
 import json
+import hashlib
+import os
 from datetime import datetime
 from urllib.parse import quote
 from openpyxl import load_workbook, Workbook
@@ -159,9 +161,100 @@ def es_operador_o_admin():
     return st.session_state.get("nivel_usuario") in ("admin", "operador")
 
 
+def hash_password(password, salt=None):
+    """Nunca guardamos la contraseña en texto plano — se guarda un hash junto con una sal
+    aleatoria distinta por usuario, para que ni siquiera dos personas con la misma clave
+    tengan el mismo hash guardado."""
+    if salt is None:
+        salt = os.urandom(16).hex()
+    h = hashlib.sha256((salt + password).encode("utf-8")).hexdigest()
+    return h, salt
+
+
+def crear_usuario(nombre, password, rol="operador"):
+    h, salt = hash_password(password)
+    with db_lock:
+        c.execute("INSERT INTO usuarios (nombre, password_hash, salt, rol) VALUES (?, ?, ?, ?)",
+                   (nombre.strip(), h, salt, rol))
+        conn.commit()
+
+
+def listar_usuarios():
+    c.execute("""SELECT id AS "ID", nombre AS "Nombre", rol AS "Rol",
+                 CASE WHEN activo=1 THEN 'Sí' ELSE 'No' END AS "Activo", creado_en AS "Creado"
+                 FROM usuarios ORDER BY nombre""")
+    return filas_a_listas(c)
+
+
+def validar_password_usuario(password):
+    c.execute("SELECT nombre, password_hash, salt, rol FROM usuarios WHERE activo = 1")
+    for fila in c.fetchall():
+        h, _ = hash_password(password, fila["salt"])
+        if h == fila["password_hash"]:
+            return fila["nombre"], fila["rol"]
+    return None, None
+
+
+def cambiar_password_usuario(usuario_id, nueva_password):
+    h, salt = hash_password(nueva_password)
+    with db_lock:
+        c.execute("UPDATE usuarios SET password_hash=?, salt=? WHERE id=?", (h, salt, usuario_id))
+        conn.commit()
+
+
+def activar_desactivar_usuario(usuario_id, activo):
+    with db_lock:
+        c.execute("UPDATE usuarios SET activo=? WHERE id=?", (1 if activo else 0, usuario_id))
+        conn.commit()
+
+
+def eliminar_usuario(usuario_id):
+    with db_lock:
+        c.execute("DELETE FROM usuarios WHERE id=?", (usuario_id,))
+        conn.commit()
+
+
+def crear_mecanico(nombre, password):
+    h, salt = hash_password(password)
+    with db_lock:
+        c.execute("INSERT INTO mecanicos (nombre, password_hash, salt) VALUES (?, ?, ?)",
+                   (nombre.strip(), h, salt))
+        conn.commit()
+
+
+def listar_mecanicos():
+    c.execute("""SELECT id AS "ID", nombre AS "Nombre",
+                 CASE WHEN activo=1 THEN 'Sí' ELSE 'No' END AS "Activo", creado_en AS "Creado"
+                 FROM mecanicos ORDER BY nombre""")
+    return filas_a_listas(c)
+
+
+def validar_password_mecanico(password):
+    c.execute("SELECT id, nombre, password_hash, salt FROM mecanicos WHERE activo = 1")
+    for fila in c.fetchall():
+        h, _ = hash_password(password, fila["salt"])
+        if h == fila["password_hash"]:
+            return fila["id"], fila["nombre"]
+    return None, None
+
+
+def activar_desactivar_mecanico(mecanico_id, activo):
+    with db_lock:
+        c.execute("UPDATE mecanicos SET activo=? WHERE id=?", (1 if activo else 0, mecanico_id))
+        conn.commit()
+
+
+def eliminar_mecanico(mecanico_id):
+    with db_lock:
+        c.execute("DELETE FROM mecanicos WHERE id=?", (mecanico_id,))
+        conn.commit()
+
+
 def validar_password(clave):
-    """Chequea la contraseña contra los secrets de admin y de operador. Devuelve
-    (nombre, nivel, error) — nivel es 'admin', 'operador', o None si no matcheó ninguna."""
+    """Chequea la contraseña contra los secrets de admin/operador Y contra las cuentas creadas
+    desde la propia app (tabla usuarios). Devuelve (nombre, nivel, error) — nivel es 'admin',
+    'operador', o None si no matcheó ninguna. Los mecánicos externos se validan aparte, con
+    validar_password_mecanico(), porque tienen su propio portal separado."""
     secretos = st.secrets if hasattr(st, "secrets") else {}
     # [admin_passwords] / [operador_passwords] en Streamlit Secrets, cada una con nombre:clave.
     # También soporta la forma anterior de una sola clave (admin_password) por compatibilidad.
@@ -171,17 +264,25 @@ def validar_password(clave):
         admin_passwords.setdefault("admin", clave_unica)
     operador_passwords = dict(secretos.get("operador_passwords", {}))
 
-    if not admin_passwords and not operador_passwords:
-        return None, None, (
-            "No configuraste todavía ninguna contraseña en Streamlit Cloud (Settings → Secrets). "
-            "Sin eso, nadie puede entrar a las secciones protegidas."
-        )
     nombre_admin = next((n for n, p in admin_passwords.items() if p == clave), None)
     if nombre_admin:
         return nombre_admin, "admin", None
     nombre_operador = next((n for n, p in operador_passwords.items() if p == clave), None)
     if nombre_operador:
         return nombre_operador, "operador", None
+
+    # Cuentas creadas desde la propia app (además de las de Secrets)
+    nombre_db, rol_db = validar_password_usuario(clave)
+    if nombre_db:
+        return nombre_db, rol_db, None
+
+    if not admin_passwords and not operador_passwords:
+        c.execute("SELECT COUNT(*) FROM usuarios")
+        if c.fetchone()[0] == 0:
+            return None, None, (
+                "No configuraste todavía ninguna contraseña en Streamlit Cloud (Settings → Secrets) "
+                "ni creaste ningún usuario desde la app. Sin eso, nadie puede entrar a las secciones protegidas."
+            )
     return None, None, None
 
 
@@ -235,15 +336,23 @@ def mostrar_login_inicial():
 
     if entrar:
         nombre, nivel, error = validar_password(clave)
-        if error:
-            st.error(error)
-        elif nivel:
+        if nivel:
             st.session_state.nivel_usuario = nivel
             st.session_state.admin_nombre = nombre
             st.session_state.saltar_login = True
             st.rerun()
         else:
-            st.error("Contraseña incorrecta.")
+            mecanico_id, nombre_mecanico = validar_password_mecanico(clave)
+            if mecanico_id:
+                st.session_state.nivel_usuario = "mecanico"
+                st.session_state.admin_nombre = nombre_mecanico
+                st.session_state.mecanico_id = mecanico_id
+                st.session_state.saltar_login = True
+                st.rerun()
+            elif error:
+                st.error(error)
+            else:
+                st.error("Contraseña incorrecta.")
     if seguir:
         st.session_state.usuario_nombre = nombre_usuario.strip() or "Invitado"
         st.session_state.saltar_login = True
@@ -552,6 +661,41 @@ def get_connection():
         producto_id INTEGER NOT NULL REFERENCES productos(id) ON DELETE CASCADE,
         precio REAL,
         fecha TEXT DEFAULT (datetime('now'))
+    )""")
+
+    # Cuentas de empleados creadas desde la propia app (además de las que se pueden cargar en
+    # Streamlit Secrets) — así el dueño no depende de tocar la configuración de Streamlit Cloud
+    # cada vez que entra o se va alguien del equipo. La contraseña nunca se guarda en texto plano.
+    c.execute("""CREATE TABLE IF NOT EXISTS usuarios (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        nombre TEXT NOT NULL UNIQUE,
+        password_hash TEXT NOT NULL,
+        salt TEXT NOT NULL,
+        rol TEXT NOT NULL DEFAULT 'operador',
+        activo INTEGER DEFAULT 1,
+        creado_en TEXT DEFAULT (datetime('now'))
+    )""")
+
+    # Mecánicos externos (no son empleados del local): tienen su propio login, pero solo ven
+    # el portal de armar presupuestos — nunca las secciones internas del negocio.
+    c.execute("""CREATE TABLE IF NOT EXISTS mecanicos (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        nombre TEXT NOT NULL UNIQUE,
+        password_hash TEXT NOT NULL,
+        salt TEXT NOT NULL,
+        activo INTEGER DEFAULT 1,
+        creado_en TEXT DEFAULT (datetime('now'))
+    )""")
+
+    # Presupuestos armados por mecánicos externos: repuestos elegidos + su propia mano de obra.
+    c.execute("""CREATE TABLE IF NOT EXISTS presupuestos_mecanico (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        mecanico_id INTEGER NOT NULL REFERENCES mecanicos(id) ON DELETE CASCADE,
+        cliente_nombre TEXT,
+        items_json TEXT NOT NULL,
+        mano_obra REAL DEFAULT 0,
+        total REAL,
+        creado_en TEXT DEFAULT (datetime('now'))
     )""")
 
     # Combos de repuestos que suelen cambiarse juntos (ej: correa de distribución -> kit + tensor + bomba de agua).
@@ -2805,6 +2949,151 @@ def eliminar_punto_esquema(punto_id):
         conn.commit()
 
 
+def guardar_presupuesto_mecanico(mecanico_id, cliente_nombre, items, mano_obra):
+    total = sum(it["precio"] * it["cantidad"] for it in items) + mano_obra
+    with db_lock:
+        c.execute(
+            "INSERT INTO presupuestos_mecanico (mecanico_id, cliente_nombre, items_json, mano_obra, total) "
+            "VALUES (?, ?, ?, ?, ?)",
+            (mecanico_id, cliente_nombre.strip(), json.dumps(items, ensure_ascii=False), mano_obra, total)
+        )
+        conn.commit()
+    return total
+
+
+def listar_presupuestos_mecanico(mecanico_id):
+    c.execute("""SELECT id AS "ID", cliente_nombre AS "Cliente", items_json, mano_obra AS "Mano de obra",
+                 total AS "Total", creado_en AS "Fecha" FROM presupuestos_mecanico
+                 WHERE mecanico_id = ? ORDER BY id DESC""", (mecanico_id,))
+    return filas_a_listas(c)
+
+
+def generar_pdf_presupuesto_mecanico(nombre_mecanico, cliente_nombre, items, mano_obra, total):
+    from fpdf import FPDF
+
+    def limpiar(texto):
+        return str(texto).encode("latin-1", "replace").decode("latin-1")
+
+    pdf = FPDF()
+    pdf.add_page()
+    pdf.set_font("Helvetica", "B", 16)
+    pdf.cell(0, 10, "Presupuesto", new_x="LMARGIN", new_y="NEXT")
+    pdf.set_font("Helvetica", "", 10)
+    pdf.cell(0, 6, limpiar(f"Mecánico: {nombre_mecanico}"), new_x="LMARGIN", new_y="NEXT")
+    if cliente_nombre:
+        pdf.cell(0, 6, limpiar(f"Cliente: {cliente_nombre}"), new_x="LMARGIN", new_y="NEXT")
+    pdf.cell(0, 6, f"Fecha: {datetime.now():%d/%m/%Y %H:%M}", new_x="LMARGIN", new_y="NEXT")
+    pdf.ln(4)
+
+    pdf.set_font("Helvetica", "B", 11)
+    pdf.cell(0, 7, "Repuestos", new_x="LMARGIN", new_y="NEXT")
+    pdf.set_font("Helvetica", "", 10)
+    for it in items:
+        subtotal = it["precio"] * it["cantidad"]
+        linea = f"- {it['codigo']} ({it['marca']}) x{it['cantidad']} - ${subtotal:,.0f}"
+        pdf.multi_cell(0, 6, limpiar(linea), new_x="LMARGIN", new_y="NEXT")
+    pdf.ln(2)
+    pdf.set_font("Helvetica", "", 10)
+    pdf.cell(0, 6, limpiar(f"Mano de obra: ${mano_obra:,.0f}"), new_x="LMARGIN", new_y="NEXT")
+    pdf.set_font("Helvetica", "B", 12)
+    pdf.cell(0, 8, limpiar(f"TOTAL: ${total:,.0f}"), new_x="LMARGIN", new_y="NEXT")
+
+    return bytes(pdf.output())
+
+
+def mostrar_portal_mecanico():
+    """Portal separado para mecánicos externos — no ven ninguna de las pestañas internas del
+    negocio, solo esto: buscar repuestos, armar su presupuesto con su propia mano de obra, y
+    ver sus presupuestos guardados anteriormente (nunca los de otros mecánicos)."""
+    mecanico_id = st.session_state.get("mecanico_id")
+    nombre_mecanico = st.session_state.get("admin_nombre", "")
+    st.markdown(f"### 🔧 Portal de mecánico — {nombre_mecanico}")
+    st.caption(
+        "Buscá repuestos del catálogo, armá tu presupuesto con tu propia mano de obra, y mandaselo "
+        "al cliente. Solo ves tus propios presupuestos guardados, no los de otros mecánicos."
+    )
+
+    if "presupuesto_mecanico_items" not in st.session_state:
+        st.session_state["presupuesto_mecanico_items"] = []
+
+    st.markdown("**🔍 Buscar repuesto**")
+    texto_busqueda_mec = st.text_input("Código o descripción:", key="mec_busqueda")
+    if texto_busqueda_mec.strip():
+        clean_mec = sanitizar(texto_busqueda_mec)
+        resultados_mec = buscar_por_codigo(clean_mec) if clean_mec else []
+        if not resultados_mec:
+            resultados_mec = buscar_por_texto(texto_busqueda_mec)
+        if resultados_mec:
+            for fila in resultados_mec[:20]:
+                colm1, colm2, colm3 = st.columns([3, 1, 1])
+                precio_txt = f"${fila['Precio']:,.0f}" if fila.get("Precio") else "s/precio"
+                colm1.write(f"{fila['Marca']} - {fila['Codigo']} — {fila.get('Descripcion') or ''} ({precio_txt})")
+                cantidad_mec = colm2.number_input("Cant.", min_value=1, value=1, step=1,
+                                                    key=f"cant_mec_{fila['ID']}", label_visibility="collapsed")
+                if colm3.button("➕", key=f"add_mec_{fila['ID']}"):
+                    st.session_state["presupuesto_mecanico_items"].append({
+                        "codigo": fila["Codigo"], "marca": fila["Marca"],
+                        "descripcion": fila.get("Descripcion") or "",
+                        "precio": float(fila.get("Precio") or 0), "cantidad": int(cantidad_mec)
+                    })
+                    st.rerun()
+        else:
+            st.caption("Sin resultados.")
+
+    items_actuales = st.session_state["presupuesto_mecanico_items"]
+    st.markdown("---")
+    st.markdown(f"**📋 Presupuesto actual ({len(items_actuales)} ítem(s))**")
+    if items_actuales:
+        subtotal_repuestos = 0.0
+        for i, it in enumerate(items_actuales):
+            subtotal_item = it["precio"] * it["cantidad"]
+            subtotal_repuestos += subtotal_item
+            coli1, coli2 = st.columns([4, 1])
+            coli1.write(f"{it['marca']} - {it['codigo']} x{it['cantidad']} — ${subtotal_item:,.0f}")
+            if coli2.button("🗑️", key=f"quitar_mec_{i}"):
+                items_actuales.pop(i)
+                st.rerun()
+
+        cliente_nombre_mec = st.text_input("Nombre del cliente (opcional):", key="mec_cliente")
+        mano_obra_mec = st.number_input("Mano de obra ($):", min_value=0.0, step=500.0, key="mec_mano_obra")
+        total_mec = subtotal_repuestos + mano_obra_mec
+        st.metric("Total", f"${total_mec:,.0f}")
+
+        colb1, colb2, colb3 = st.columns(3)
+        if colb1.button("💾 Guardar presupuesto", type="primary"):
+            guardar_presupuesto_mecanico(mecanico_id, cliente_nombre_mec, items_actuales, mano_obra_mec)
+            st.success("Presupuesto guardado.")
+            st.session_state["presupuesto_mecanico_items"] = []
+            st.rerun()
+
+        pdf_bytes_mec = generar_pdf_presupuesto_mecanico(
+            nombre_mecanico, cliente_nombre_mec, items_actuales, mano_obra_mec, total_mec
+        )
+        colb2.download_button("📄 PDF", data=pdf_bytes_mec, file_name="presupuesto.pdf", mime="application/pdf")
+
+        mensaje_mec = f"Presupuesto de {nombre_mecanico}:\n"
+        for it in items_actuales:
+            mensaje_mec += f"- {it['codigo']} ({it['marca']}) x{it['cantidad']} — ${it['precio']*it['cantidad']:,.0f}\n"
+        mensaje_mec += f"Mano de obra: ${mano_obra_mec:,.0f}\nTOTAL: ${total_mec:,.0f}"
+        url_wa_mec = "https://wa.me/?text=" + quote(mensaje_mec)
+        colb3.link_button("📲 WhatsApp", url_wa_mec)
+    else:
+        st.caption("Todavía no agregaste ningún repuesto al presupuesto.")
+
+    st.markdown("---")
+    st.markdown("**📁 Mis presupuestos anteriores**")
+    anteriores = listar_presupuestos_mecanico(mecanico_id)
+    if anteriores:
+        for p in anteriores[:20]:
+            with st.expander(f"{p['Fecha']} — {p['Cliente'] or 'sin nombre'} — ${p['Total']:,.0f}"):
+                items_p = json.loads(p["items_json"])
+                for it in items_p:
+                    st.write(f"- {it['codigo']} ({it['marca']}) x{it['cantidad']} — ${it['precio']*it['cantidad']:,.0f}")
+                st.write(f"Mano de obra: ${p['Mano de obra']:,.0f}")
+    else:
+        st.caption("Todavía no guardaste ningún presupuesto.")
+
+
 # ============================================================
 # ENCABEZADO
 # ============================================================
@@ -2824,17 +3113,23 @@ if not es_admin() and not st.session_state.get("saltar_login"):
     mostrar_login_inicial()
     st.stop()
 
-if es_admin() or es_operador_o_admin():
+if es_admin() or es_operador_o_admin() or st.session_state.get("nivel_usuario") == "mecanico":
     col_estado, col_salir = st.columns([4, 1])
     nombre_sesion = st.session_state.get("admin_nombre", "")
-    etiqueta_nivel = "administrador" if es_admin() else "operador"
+    etiquetas_nivel = {"admin": "administrador", "operador": "operador", "mecanico": "mecánico"}
+    etiqueta_nivel = etiquetas_nivel.get(st.session_state.get("nivel_usuario"), "administrador")
     col_estado.caption(f"🔓 Sesión de {etiqueta_nivel} activa ({nombre_sesion}).")
     if col_salir.button("Salir"):
         st.session_state.nivel_usuario = None
         st.session_state.admin_nombre = None
+        st.session_state.mecanico_id = None
         st.rerun()
 else:
     st.caption(f"👤 Usando como: {obtener_usuario_actual()}")
+
+if st.session_state.get("nivel_usuario") == "mecanico":
+    mostrar_portal_mecanico()
+    st.stop()
 
 if "lista_whatsapp" not in st.session_state:
     st.session_state.lista_whatsapp = []  # lista de códigos agregados para el mensaje
@@ -3781,8 +4076,8 @@ def exportar_configuracion_txt():
 with tab4:
     st.subheader("🗂️ Administrar")
 
-    sub_marcas, sub_productos, sub_mensajeria, sub_combos, sub_mantenimiento = st.tabs(
-        ["🏷️ Marcas", "📦 Productos", "💬 Mensajería y cobros", "🧩 Combos", "🧹 Mantenimiento"]
+    sub_marcas, sub_productos, sub_mensajeria, sub_combos, sub_mantenimiento, sub_usuarios = st.tabs(
+        ["🏷️ Marcas", "📦 Productos", "💬 Mensajería y cobros", "🧩 Combos", "🧹 Mantenimiento", "👥 Usuarios"]
     )
 
     c.execute("""SELECT m.id, m.nombre, m.tipo, COUNT(p.id) AS productos
@@ -4269,6 +4564,96 @@ with tab4:
             if st.button("🧹 Vaciar ahora lo de más de 30 días"):
                 vaciar_papelera_antigua(30)
                 st.rerun()
+
+    with sub_usuarios:
+        if not pedir_password_admin("gestionar usuarios"):
+            pass
+        else:
+            st.markdown("**👤 Empleados (admin / operador)**")
+            st.caption(
+                "Cuentas creadas desde acá, sin necesidad de tocar la configuración de Streamlit Cloud. "
+                "'Admin' puede todo, incluso borrar y configurar. 'Operador' puede usar las funciones "
+                "de IA y cargar cosas, pero no borrar ni configurar nada sensible."
+            )
+            usuarios_actuales = listar_usuarios()
+            if usuarios_actuales:
+                st.dataframe(usuarios_actuales, use_container_width=True, hide_index=True)
+
+            cu1, cu2 = st.columns(2)
+            nombre_nuevo_usuario = cu1.text_input("Nombre:", key="nuevo_usuario_nombre")
+            password_nuevo_usuario = cu2.text_input("Contraseña:", type="password", key="nuevo_usuario_pass")
+            rol_nuevo_usuario = st.selectbox("Rol:", ["operador", "admin"], key="nuevo_usuario_rol")
+            if st.button("➕ Crear empleado"):
+                if not nombre_nuevo_usuario.strip() or not password_nuevo_usuario:
+                    st.warning("Completá nombre y contraseña.")
+                else:
+                    try:
+                        crear_usuario(nombre_nuevo_usuario, password_nuevo_usuario, rol_nuevo_usuario)
+                        st.success(f"Empleado '{nombre_nuevo_usuario}' creado.")
+                        st.rerun()
+                    except sqlite3.IntegrityError:
+                        st.error("Ya existe un empleado con ese nombre.")
+
+            if usuarios_actuales:
+                st.markdown("**Gestionar un empleado existente**")
+                opciones_usuario = {u["Nombre"]: u["ID"] for u in usuarios_actuales}
+                usuario_elegido = st.selectbox("Elegí un empleado:", list(opciones_usuario.keys()), key="sel_usuario_gestionar")
+                usuario_id_sel = opciones_usuario[usuario_elegido]
+                cug1, cug2, cug3 = st.columns(3)
+                nueva_pass_usuario = cug1.text_input("Nueva contraseña (opcional):", type="password", key="usuario_nueva_pass")
+                if cug1.button("💾 Cambiar contraseña"):
+                    if nueva_pass_usuario:
+                        cambiar_password_usuario(usuario_id_sel, nueva_pass_usuario)
+                        st.success("Contraseña actualizada.")
+                    else:
+                        st.warning("Escribí la nueva contraseña primero.")
+                usuario_activo_actual = next(u["Activo"] == "Sí" for u in usuarios_actuales if u["ID"] == usuario_id_sel)
+                if cug2.button("🚫 Desactivar" if usuario_activo_actual else "✅ Reactivar"):
+                    activar_desactivar_usuario(usuario_id_sel, not usuario_activo_actual)
+                    st.rerun()
+                if cug3.button("🗑️ Eliminar empleado"):
+                    eliminar_usuario(usuario_id_sel)
+                    st.success("Empleado eliminado.")
+                    st.rerun()
+
+            st.markdown("---")
+            st.markdown("**🔧 Mecánicos externos**")
+            st.caption(
+                "Cuentas separadas para mecánicos que no son empleados tuyos — solo ven su propio "
+                "portal para armar presupuestos con su mano de obra, nunca las secciones internas."
+            )
+            mecanicos_actuales = listar_mecanicos()
+            if mecanicos_actuales:
+                st.dataframe(mecanicos_actuales, use_container_width=True, hide_index=True)
+
+            cm1, cm2 = st.columns(2)
+            nombre_nuevo_mecanico = cm1.text_input("Nombre:", key="nuevo_mecanico_nombre")
+            password_nuevo_mecanico = cm2.text_input("Contraseña:", type="password", key="nuevo_mecanico_pass")
+            if st.button("➕ Crear mecánico"):
+                if not nombre_nuevo_mecanico.strip() or not password_nuevo_mecanico:
+                    st.warning("Completá nombre y contraseña.")
+                else:
+                    try:
+                        crear_mecanico(nombre_nuevo_mecanico, password_nuevo_mecanico)
+                        st.success(f"Mecánico '{nombre_nuevo_mecanico}' creado.")
+                        st.rerun()
+                    except sqlite3.IntegrityError:
+                        st.error("Ya existe un mecánico con ese nombre.")
+
+            if mecanicos_actuales:
+                st.markdown("**Gestionar un mecánico existente**")
+                opciones_mecanico = {m["Nombre"]: m["ID"] for m in mecanicos_actuales}
+                mecanico_elegido = st.selectbox("Elegí un mecánico:", list(opciones_mecanico.keys()), key="sel_mecanico_gestionar")
+                mecanico_id_sel = opciones_mecanico[mecanico_elegido]
+                cmg1, cmg2 = st.columns(2)
+                mecanico_activo_actual = next(m["Activo"] == "Sí" for m in mecanicos_actuales if m["ID"] == mecanico_id_sel)
+                if cmg1.button("🚫 Desactivar" if mecanico_activo_actual else "✅ Reactivar", key="toggle_mecanico"):
+                    activar_desactivar_mecanico(mecanico_id_sel, not mecanico_activo_actual)
+                    st.rerun()
+                if cmg2.button("🗑️ Eliminar mecánico"):
+                    eliminar_mecanico(mecanico_id_sel)
+                    st.success("Mecánico eliminado.")
+                    st.rerun()
 
 # ============================================================
 # TAB 5: ESTADÍSTICAS
