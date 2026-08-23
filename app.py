@@ -4,6 +4,7 @@ import re
 import io
 import threading
 import unicodedata
+import json
 from datetime import datetime
 from urllib.parse import quote
 from openpyxl import load_workbook, Workbook
@@ -55,13 +56,23 @@ html, body, [class*="css"] { font-family: 'Inter', -apple-system, sans-serif; }
 }
 .app-header p { margin: 4px 0 0 0; color: var(--text-muted); font-size: 0.92rem; }
 
-/* Pestañas */
+/* Pestañas (nivel principal) */
 .stTabs [data-baseweb="tab-list"] { gap: 4px; border-bottom: 1px solid var(--border); }
 .stTabs [data-baseweb="tab"] {
   font-family: 'Space Grotesk', sans-serif; font-weight: 600; font-size: 0.86rem;
   color: var(--text-muted); background: transparent; border-radius: 8px 8px 0 0; padding: 10px 14px;
 }
 .stTabs [aria-selected="true"] { color: var(--accent) !important; border-bottom: 2px solid var(--accent) !important; }
+
+/* Sub-pestañas anidadas (ej: dentro de Administrar o Modo Mecánico) — más chicas y sutiles,
+   para que se note la jerarquía: esto es una subdivisión de la pestaña principal, no otra más. */
+.stTabs .stTabs [data-baseweb="tab-list"] {
+  border-bottom: 1px solid var(--border); gap: 2px; margin-top: 4px; margin-bottom: 8px;
+}
+.stTabs .stTabs [data-baseweb="tab"] {
+  font-size: 0.78rem; padding: 7px 11px; color: var(--text-muted); opacity: 0.85;
+}
+.stTabs .stTabs [aria-selected="true"] { opacity: 1; }
 
 /* Botones */
 .stButton > button, .stDownloadButton > button, .stLinkButton > a, .stFormSubmitButton > button {
@@ -73,6 +84,17 @@ html, body, [class*="css"] { font-family: 'Inter', -apple-system, sans-serif; }
 }
 .stButton > button[kind="primary"]:hover, .stFormSubmitButton > button[kind="primary"]:hover { background: var(--accent-hover); }
 .stButton > button:hover { border-color: var(--accent); color: var(--accent); }
+.stButton > button:disabled { opacity: 0.4; }
+
+/* Radios usados como selector de modo (ej: Código/Descripción, Foto real/IA) —
+   look de pastillas en vez del radio suelto por defecto, para que se sienta como
+   un selector de vista, no como un formulario más. */
+.stRadio [role="radiogroup"] { gap: 6px; flex-wrap: wrap; }
+.stRadio label {
+  background: var(--bg-panel); border: 1px solid var(--border); border-radius: 999px;
+  padding: 5px 14px 5px 10px !important; transition: all 0.15s ease;
+}
+.stRadio label:has(input:checked) { border-color: var(--accent); background: rgba(232, 163, 61, 0.12); }
 
 /* Inputs */
 .stTextInput input, .stNumberInput input, .stTextArea textarea,
@@ -83,9 +105,15 @@ html, body, [class*="css"] { font-family: 'Inter', -apple-system, sans-serif; }
 .stTextInput input:focus, .stNumberInput input:focus, .stTextArea textarea:focus {
   border-color: var(--accent) !important; box-shadow: 0 0 0 1px var(--accent) !important;
 }
+.stCheckbox input:checked, .stCheckbox [data-baseweb="checkbox"] svg { accent-color: var(--accent); }
+
+/* Subida de archivos */
+[data-testid="stFileUploaderDropzone"] {
+  background: var(--bg-panel) !important; border: 1px dashed var(--border) !important; border-radius: 8px !important;
+}
 
 /* Expanders */
-[data-testid="stExpander"] { border: 1px solid var(--border) !important; border-radius: 8px !important; }
+[data-testid="stExpander"] { border: 1px solid var(--border) !important; border-radius: 8px !important; margin-bottom: 4px; }
 .streamlit-expanderHeader, [data-testid="stExpander"] summary {
   background: var(--bg-panel) !important; border-radius: 8px !important; font-weight: 600;
 }
@@ -101,7 +129,7 @@ html, body, [class*="css"] { font-family: 'Inter', -apple-system, sans-serif; }
 [data-testid="stDataFrame"] { border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
 
 code { font-family: 'IBM Plex Mono', monospace; color: var(--accent-2); }
-hr { border-color: var(--border) !important; }
+hr { border-color: var(--border) !important; margin: 1.1rem 0 !important; }
 
 /* Los gráficos (st.bar_chart / Vega-Lite) muestran un tooltip flotante al tocar una barra.
    En celular no hay evento que lo "suelte" al hacer scroll con el dedo, y queda pegado en
@@ -121,35 +149,45 @@ db_lock = threading.Lock()
 
 
 def es_admin():
-    return st.session_state.get("es_admin", False)
+    return st.session_state.get("nivel_usuario") == "admin"
 
 
-def validar_password_admin(clave):
-    """Chequea la contraseña ingresada contra los secrets. Devuelve (nombre, error) —
-    nombre es el nombre de la clave que matcheó (o None), error es un mensaje si no hay
-    ninguna contraseña configurada todavía."""
+def es_operador_o_admin():
+    """Para acciones que un empleado de confianza puede hacer (usar funciones de IA, agregar
+    piezas a un esquema) sin necesitar la contraseña completa de administrador, que además
+    desbloquea borrados y configuración sensible."""
+    return st.session_state.get("nivel_usuario") in ("admin", "operador")
+
+
+def validar_password(clave):
+    """Chequea la contraseña contra los secrets de admin y de operador. Devuelve
+    (nombre, nivel, error) — nivel es 'admin', 'operador', o None si no matcheó ninguna."""
     secretos = st.secrets if hasattr(st, "secrets") else {}
-    # Soporta varias contraseñas con nombre, por ejemplo en Secrets:
-    # [admin_passwords]
-    # matias = "clave123"
-    # socio = "otraclave456"
+    # [admin_passwords] / [operador_passwords] en Streamlit Secrets, cada una con nombre:clave.
     # También soporta la forma anterior de una sola clave (admin_password) por compatibilidad.
-    passwords_nombradas = dict(secretos.get("admin_passwords", {}))
+    admin_passwords = dict(secretos.get("admin_passwords", {}))
     clave_unica = secretos.get("admin_password")
     if clave_unica:
-        passwords_nombradas.setdefault("admin", clave_unica)
+        admin_passwords.setdefault("admin", clave_unica)
+    operador_passwords = dict(secretos.get("operador_passwords", {}))
 
-    if not passwords_nombradas:
-        return None, (
-            "No configuraste todavía ninguna contraseña de administrador en Streamlit Cloud "
-            "(Settings → Secrets). Sin eso, nadie puede entrar a esta sección."
+    if not admin_passwords and not operador_passwords:
+        return None, None, (
+            "No configuraste todavía ninguna contraseña en Streamlit Cloud (Settings → Secrets). "
+            "Sin eso, nadie puede entrar a las secciones protegidas."
         )
-    nombre_coincidente = next((n for n, p in passwords_nombradas.items() if p == clave), None)
-    return nombre_coincidente, None
+    nombre_admin = next((n for n, p in admin_passwords.items() if p == clave), None)
+    if nombre_admin:
+        return nombre_admin, "admin", None
+    nombre_operador = next((n for n, p in operador_passwords.items() if p == clave), None)
+    if nombre_operador:
+        return nombre_operador, "operador", None
+    return None, None, None
 
 
 def pedir_password_admin(motivo=""):
-    """Muestra un formulario de contraseña. Devuelve True si ya está autenticado."""
+    """Muestra un formulario de contraseña de ADMINISTRADOR COMPLETO. Devuelve True si ya está
+    autenticado como admin — para borrados y configuración sensible, un 'operador' no alcanza."""
     if es_admin():
         return True
 
@@ -159,13 +197,15 @@ def pedir_password_admin(motivo=""):
         entrar = st.form_submit_button("Ingresar")
 
     if entrar:
-        nombre_coincidente, error = validar_password_admin(clave)
+        nombre, nivel, error = validar_password(clave)
         if error:
             st.error(error)
-        elif nombre_coincidente:
-            st.session_state.es_admin = True
-            st.session_state.admin_nombre = nombre_coincidente
+        elif nivel == "admin":
+            st.session_state.nivel_usuario = "admin"
+            st.session_state.admin_nombre = nombre
             st.rerun()
+        elif nivel == "operador":
+            st.error("Esa es una contraseña de operador — para esto hace falta la de administrador completo.")
         else:
             st.error("Contraseña incorrecta.")
     return False
@@ -173,32 +213,39 @@ def pedir_password_admin(motivo=""):
 
 def mostrar_login_inicial():
     """Pide la contraseña apenas se abre la app, con opción de seguir sin loguearse para
-    quien solo quiera buscar/consultar. Las acciones puntuales de carga/edición van a seguir
-    pidiendo la contraseña aparte, esto es solo la pantalla de entrada."""
-    st.markdown("### 🔒 Ingresar como administrador")
+    quien solo quiera buscar/consultar. Las acciones destructivas van a seguir pidiendo la
+    contraseña de administrador completo aparte, esto es solo la pantalla de entrada."""
+    st.markdown("### 👋 ¿Quién sos?")
     st.caption(
-        "Si sos administrador, ingresá tu contraseña. Si no, podés seguir sin loguearte para "
-        "buscar y consultar — las acciones de carga o edición te van a pedir la contraseña aparte "
-        "cuando corresponda."
+        "Poné tu nombre para que tus búsquedas recientes queden separadas de las de tus "
+        "compañeros — el resto de la información (catálogo, esquemas, etc.) la ven todos igual. "
+        "Es opcional, si lo dejás vacío vas a figurar como 'Invitado'."
     )
     with st.form("login_inicial"):
-        clave = st.text_input("Contraseña de administrador:", type="password", key="login_inicial_clave")
+        nombre_usuario = st.text_input("Tu nombre:", placeholder="Ej: Matías", key="login_inicial_nombre")
+        st.markdown("---")
+        st.caption(
+            "Si tenés contraseña (de administrador completo o de operador), ingresala acá. "
+            "Un operador puede usar las funciones de IA y cargar cosas, pero no borrar ni configurar."
+        )
+        clave = st.text_input("Contraseña (opcional):", type="password", key="login_inicial_clave")
         col_a, col_b = st.columns(2)
-        entrar = col_a.form_submit_button("🔓 Ingresar", type="primary", use_container_width=True)
-        seguir = col_b.form_submit_button("➡️ Seguir sin loguearse", use_container_width=True)
+        entrar = col_a.form_submit_button("🔓 Ingresar con contraseña", type="primary", use_container_width=True)
+        seguir = col_b.form_submit_button("➡️ Continuar", use_container_width=True)
 
     if entrar:
-        nombre_coincidente, error = validar_password_admin(clave)
+        nombre, nivel, error = validar_password(clave)
         if error:
             st.error(error)
-        elif nombre_coincidente:
-            st.session_state.es_admin = True
-            st.session_state.admin_nombre = nombre_coincidente
+        elif nivel:
+            st.session_state.nivel_usuario = nivel
+            st.session_state.admin_nombre = nombre
             st.session_state.saltar_login = True
             st.rerun()
         else:
             st.error("Contraseña incorrecta.")
     if seguir:
+        st.session_state.usuario_nombre = nombre_usuario.strip() or "Invitado"
         st.session_state.saltar_login = True
         st.rerun()
 
@@ -262,8 +309,12 @@ def get_connection():
     c.execute("""CREATE TABLE IF NOT EXISTS historial_busquedas (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         termino TEXT NOT NULL,
+        usuario TEXT,
         fecha TEXT DEFAULT (datetime('now'))
     )""")
+    columnas_historial = [f[1] for f in c.execute("PRAGMA table_info(historial_busquedas)").fetchall()]
+    if "usuario" not in columnas_historial:
+        c.execute("ALTER TABLE historial_busquedas ADD COLUMN usuario TEXT")
 
     # Migraciones: agregar columnas nuevas si no existen todavía
     columnas_productos = [f[1] for f in c.execute("PRAGMA table_info(productos)").fetchall()]
@@ -306,11 +357,18 @@ def get_connection():
         cliente_telefono TEXT,
         marca_auto TEXT,
         modelo_auto TEXT,
+        anio TEXT,
+        motorizacion TEXT,
         km_registro INTEGER,
         km_actual INTEGER,
         km_actualizado_fecha TEXT,
         created_at TEXT DEFAULT (datetime('now'))
     )""")
+    columnas_vehiculos_extra = [f[1] for f in c.execute("PRAGMA table_info(vehiculos)").fetchall()]
+    if "anio" not in columnas_vehiculos_extra:
+        c.execute("ALTER TABLE vehiculos ADD COLUMN anio TEXT")
+    if "motorizacion" not in columnas_vehiculos_extra:
+        c.execute("ALTER TABLE vehiculos ADD COLUMN motorizacion TEXT")
 
     # Migración: instalaciones existentes que no tenían km_registro (km de cuando se cargó
     # el vehículo por primera vez, fijo, para poder calcular km recorridos).
@@ -431,7 +489,37 @@ def get_connection():
         nombre TEXT NOT NULL,
         alias TEXT,
         cbu TEXT,
-        titular TEXT
+        titular TEXT,
+        qr_real_blob BLOB
+    )""")
+    columnas_alias = [f[1] for f in c.execute("PRAGMA table_info(alias_transferencia)").fetchall()]
+    if "qr_real_blob" not in columnas_alias:
+        c.execute("ALTER TABLE alias_transferencia ADD COLUMN qr_real_blob BLOB")
+
+    # Configuración simple de clave/valor (ej: encabezado/pie del mensaje de WhatsApp).
+    c.execute("""CREATE TABLE IF NOT EXISTS configuracion (
+        clave TEXT PRIMARY KEY,
+        valor TEXT
+    )""")
+
+    # Contador de uso de las funciones de IA — para ver de un vistazo cuánto se usa cada una
+    # y anticipar si alguna se está acercando a los límites gratuitos.
+    c.execute("""CREATE TABLE IF NOT EXISTS uso_ia (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        funcion TEXT NOT NULL,
+        usuario TEXT,
+        exito INTEGER,
+        fecha TEXT DEFAULT (datetime('now'))
+    )""")
+
+    # Papelera: guarda una copia de lo que se borra (marcas, productos, combos, alias) para
+    # poder restaurarlo si fue un error. No reemplaza el backup completo, es para el día a día.
+    c.execute("""CREATE TABLE IF NOT EXISTS papelera (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        tipo TEXT NOT NULL,
+        datos_json TEXT NOT NULL,
+        eliminado_por TEXT,
+        eliminado_en TEXT DEFAULT (datetime('now'))
     )""")
 
     # Combos de repuestos que suelen cambiarse juntos (ej: correa de distribución -> kit + tensor + bomba de agua).
@@ -1031,8 +1119,13 @@ def guardar_combo(disparador, items_lista):
 
 
 def eliminar_combo(disparador):
+    disparador = disparador.strip().lower()
+    c.execute("SELECT item FROM combos_sugeridos WHERE disparador = ?", (disparador,))
+    items = [r["item"] for r in c.fetchall()]
+    if items:
+        mover_a_papelera("combo", {"disparador": disparador, "items": items})
     with db_lock:
-        c.execute("DELETE FROM combos_sugeridos WHERE disparador = ?", (disparador.strip().lower(),))
+        c.execute("DELETE FROM combos_sugeridos WHERE disparador = ?", (disparador,))
         conn.commit()
 
 
@@ -1060,8 +1153,73 @@ def identificar_pieza_por_foto(imagen_bytes):
                 types.Part.from_bytes(data=imagen_bytes, mime_type="image/jpeg"),
             ],
         )
+        registrar_uso_ia("Identificar pieza por foto", True)
         return response.text, None
     except Exception as e:
+        registrar_uso_ia("Identificar pieza por foto", False)
+        return None, f"Error consultando a Gemini: {e}"
+
+
+def extraer_datos_cedula(imagen_bytes):
+    """Lee una foto de cédula verde/azul o título del auto y extrae patente, marca, modelo, año
+    y motorización con Gemini. SIEMPRE hay que revisar antes de guardar — el OCR puede confundir
+    caracteres parecidos (0/O, 1/I) y en la patente o el VIN eso es grave."""
+    from google import genai
+    from google.genai import types
+    import json
+
+    api_key = st.secrets.get("gemini_api_key") if hasattr(st, "secrets") else None
+    if not api_key:
+        return None, "No configuraste 'gemini_api_key' en Streamlit Cloud (Settings → Secrets)."
+
+    try:
+        client = genai.Client(api_key=api_key)
+        prompt = (
+            "Esta es una foto de una cédula verde/azul o título de un vehículo argentino. Extraé "
+            "ÚNICAMENTE un JSON válido (sin texto extra, sin markdown), con esta forma exacta: "
+            '{"patente": "...", "marca": "...", "modelo": "...", "anio": "...", "motorizacion": "..."}. '
+            "Si no podés leer algún campo con claridad, dejalo como null en vez de adivinar. No inventes datos."
+        )
+        response = client.models.generate_content(
+            model="gemini-flash-latest",
+            contents=[prompt, types.Part.from_bytes(data=imagen_bytes, mime_type="image/jpeg")],
+        )
+        texto = response.text.strip()
+        if texto.startswith("```"):
+            texto = texto.split("```")[1]
+            texto = texto[4:] if texto.lower().startswith("json") else texto
+        datos = json.loads(texto)
+        registrar_uso_ia("Leer cédula/título", True)
+        return datos, None
+    except json.JSONDecodeError:
+        registrar_uso_ia("Leer cédula/título", False)
+        return None, "No pude interpretar la respuesta como datos del vehículo — probá con una foto más clara."
+    except Exception as e:
+        registrar_uso_ia("Leer cédula/título", False)
+        return None, f"Error consultando a Gemini: {e}"
+
+
+def transcribir_audio(audio_bytes, mime_type="audio/wav"):
+    """Transcribe un audio a texto con Gemini — esto es solo 'hablar en vez de tipear', no un
+    asistente conversacional: el texto transcripto se busca con el buscador normal de siempre."""
+    from google import genai
+    from google.genai import types
+
+    api_key = st.secrets.get("gemini_api_key") if hasattr(st, "secrets") else None
+    if not api_key:
+        return None, "No configuraste 'gemini_api_key' en Streamlit Cloud (Settings → Secrets)."
+
+    try:
+        client = genai.Client(api_key=api_key)
+        prompt = "Transcribí exactamente lo que se dice en este audio, en español. Devolvé solo el texto transcripto, nada más — sin comillas, sin comentarios."
+        response = client.models.generate_content(
+            model="gemini-flash-latest",
+            contents=[prompt, types.Part.from_bytes(data=audio_bytes, mime_type=mime_type)],
+        )
+        registrar_uso_ia("Búsqueda por voz", True)
+        return response.text.strip(), None
+    except Exception as e:
+        registrar_uso_ia("Búsqueda por voz", False)
         return None, f"Error consultando a Gemini: {e}"
 
 
@@ -1096,11 +1254,15 @@ def leer_remito_por_foto(imagen_bytes):
             texto = texto[4:] if texto.lower().startswith("json") else texto
         items = json.loads(texto)
         if not isinstance(items, list):
+            registrar_uso_ia("Leer remito por foto", False)
             return None, "Gemini no devolvió una lista de ítems reconocible."
+        registrar_uso_ia("Leer remito por foto", True)
         return items, None
     except json.JSONDecodeError:
+        registrar_uso_ia("Leer remito por foto", False)
         return None, "No pude interpretar la respuesta como una lista de ítems — probá con una foto más clara."
     except Exception as e:
+        registrar_uso_ia("Leer remito por foto", False)
         return None, f"Error consultando a Gemini: {e}"
 
 
@@ -1162,14 +1324,105 @@ def listar_favoritos():
     return filas_a_listas(c)
 
 
+def obtener_config(clave, default=""):
+    c.execute("SELECT valor FROM configuracion WHERE clave = ?", (clave,))
+    fila = c.fetchone()
+    return fila["valor"] if fila and fila["valor"] is not None else default
+
+
+def guardar_config(clave, valor):
+    with db_lock:
+        c.execute(
+            "INSERT INTO configuracion (clave, valor) VALUES (?, ?) "
+            "ON CONFLICT(clave) DO UPDATE SET valor=excluded.valor",
+            (clave, valor)
+        )
+        conn.commit()
+
+
+def obtener_usuario_actual():
+    """Nombre que identifica a la persona para su historial personal: si está logueada como
+    admin usa ese nombre, si no usa el que puso al entrar, o 'Invitado' si no puso nada."""
+    return st.session_state.get("admin_nombre") or st.session_state.get("usuario_nombre") or "Invitado"
+
+
+def registrar_uso_ia(funcion, exito):
+    with db_lock:
+        c.execute("INSERT INTO uso_ia (funcion, usuario, exito) VALUES (?, ?, ?)",
+                   (funcion, obtener_usuario_actual(), 1 if exito else 0))
+        conn.commit()
+
+
+def resumen_uso_ia(dias=30):
+    c.execute("""SELECT funcion, COUNT(*) AS total, SUM(exito) AS exitosos
+                 FROM uso_ia WHERE fecha >= datetime('now', ?) GROUP BY funcion ORDER BY total DESC""",
+              (f"-{dias} days",))
+    return [{"Función": r["funcion"], "Usos": r["total"], "Exitosos": r["exitosos"],
+              "Con error": r["total"] - r["exitosos"]} for r in c.fetchall()]
+
+
+def mover_a_papelera(tipo, datos_dict):
+    with db_lock:
+        c.execute("INSERT INTO papelera (tipo, datos_json, eliminado_por) VALUES (?, ?, ?)",
+                   (tipo, json.dumps(datos_dict, ensure_ascii=False), obtener_usuario_actual()))
+        conn.commit()
+
+
+def listar_papelera():
+    c.execute("""SELECT id AS "ID", tipo AS "Tipo", eliminado_por AS "Eliminado por",
+                 eliminado_en AS "Fecha" FROM papelera ORDER BY id DESC LIMIT 100""")
+    return filas_a_listas(c)
+
+
+def vaciar_papelera_antigua(dias=30):
+    """Borra en forma permanente lo que ya lleva más de `dias` en la papelera."""
+    with db_lock:
+        c.execute("DELETE FROM papelera WHERE eliminado_en < datetime('now', ?)", (f"-{dias} days",))
+        conn.commit()
+
+
+def restaurar_de_papelera(item_id):
+    c.execute("SELECT tipo, datos_json FROM papelera WHERE id = ?", (item_id,))
+    row = c.fetchone()
+    if not row:
+        return False, "No se encontró ese ítem en la papelera (puede que ya se haya restaurado)."
+    tipo, datos = row["tipo"], json.loads(row["datos_json"])
+    with db_lock:
+        try:
+            if tipo == "combo":
+                for item in datos["items"]:
+                    c.execute("INSERT INTO combos_sugeridos (disparador, item) VALUES (?, ?)",
+                              (datos["disparador"], item))
+            elif tipo == "alias":
+                c.execute(
+                    "INSERT INTO alias_transferencia (nombre, alias, cbu, titular) VALUES (?, ?, ?, ?)",
+                    (datos["nombre"], datos["alias"], datos["cbu"], datos["titular"])
+                )
+            elif tipo == "producto":
+                columnas = ", ".join(datos.keys())
+                placeholders = ", ".join("?" * len(datos))
+                c.execute(f"INSERT INTO productos ({columnas}) VALUES ({placeholders})", list(datos.values()))
+            else:
+                return False, f"No sé cómo restaurar el tipo '{tipo}'."
+            c.execute("DELETE FROM papelera WHERE id = ?", (item_id,))
+            conn.commit()
+            return True, None
+        except Exception as e:
+            conn.rollback()
+            return False, f"No se pudo restaurar: {e}"
+
+
 def guardar_busqueda(termino):
     with db_lock:
-        c.execute("INSERT INTO historial_busquedas (termino) VALUES (?)", (termino,))
+        c.execute("INSERT INTO historial_busquedas (termino, usuario) VALUES (?, ?)",
+                   (termino, obtener_usuario_actual()))
         conn.commit()
 
 
 def historial_reciente(limite=10):
-    c.execute("SELECT DISTINCT termino FROM historial_busquedas ORDER BY id DESC LIMIT ?", (limite,))
+    """Solo las búsquedas de la persona actual — antes mezclaba las de todos los empleados."""
+    c.execute("""SELECT DISTINCT termino FROM historial_busquedas WHERE usuario = ?
+                 ORDER BY id DESC LIMIT ?""", (obtener_usuario_actual(), limite))
     return [r["termino"] for r in c.fetchall()]
 
 
@@ -1226,34 +1479,63 @@ def to_excel_bytes(filas, columnas=None):
 
 def listar_alias_transferencia():
     c.execute("""SELECT id AS "ID", nombre AS "Nombre", alias AS "Alias",
-                 cbu AS "CBU", titular AS "Titular" FROM alias_transferencia ORDER BY nombre""")
+                 cbu AS "CBU", titular AS "Titular",
+                 CASE WHEN qr_real_blob IS NOT NULL THEN 1 ELSE 0 END AS "TieneQrReal"
+                 FROM alias_transferencia ORDER BY nombre""")
     return filas_a_listas(c)
 
 
-def guardar_alias_transferencia(nombre, alias, cbu, titular, alias_id=None):
+def guardar_alias_transferencia(nombre, alias, cbu, titular, alias_id=None, qr_real_bytes=None):
     with db_lock:
         if alias_id:
-            c.execute(
-                "UPDATE alias_transferencia SET nombre=?, alias=?, cbu=?, titular=? WHERE id=?",
-                (nombre.strip(), alias.strip(), cbu.strip(), titular.strip(), alias_id)
-            )
+            if qr_real_bytes is not None:
+                c.execute(
+                    "UPDATE alias_transferencia SET nombre=?, alias=?, cbu=?, titular=?, qr_real_blob=? WHERE id=?",
+                    (nombre.strip(), alias.strip(), cbu.strip(), titular.strip(), qr_real_bytes, alias_id)
+                )
+            else:
+                c.execute(
+                    "UPDATE alias_transferencia SET nombre=?, alias=?, cbu=?, titular=? WHERE id=?",
+                    (nombre.strip(), alias.strip(), cbu.strip(), titular.strip(), alias_id)
+                )
         else:
             c.execute(
-                "INSERT INTO alias_transferencia (nombre, alias, cbu, titular) VALUES (?, ?, ?, ?)",
-                (nombre.strip(), alias.strip(), cbu.strip(), titular.strip())
+                "INSERT INTO alias_transferencia (nombre, alias, cbu, titular, qr_real_blob) VALUES (?, ?, ?, ?, ?)",
+                (nombre.strip(), alias.strip(), cbu.strip(), titular.strip(), qr_real_bytes)
             )
         conn.commit()
 
 
+def obtener_qr_real(alias_id):
+    c.execute("SELECT qr_real_blob FROM alias_transferencia WHERE id = ?", (alias_id,))
+    fila = c.fetchone()
+    return fila["qr_real_blob"] if fila else None
+
+
+def eliminar_qr_real(alias_id):
+    with db_lock:
+        c.execute("UPDATE alias_transferencia SET qr_real_blob = NULL WHERE id = ?", (alias_id,))
+        conn.commit()
+
+
 def eliminar_alias_transferencia(alias_id):
+    c.execute("SELECT nombre, alias, cbu, titular, qr_real_blob FROM alias_transferencia WHERE id = ?", (alias_id,))
+    fila = c.fetchone()
+    if fila:
+        mover_a_papelera("alias", {
+            "nombre": fila["nombre"], "alias": fila["alias"], "cbu": fila["cbu"], "titular": fila["titular"]
+        })
+        # El QR real (si tenía) no se puede guardar en la papelera como texto — si restaurás este
+        # alias vas a tener que volver a subirlo.
     with db_lock:
         c.execute("DELETE FROM alias_transferencia WHERE id = ?", (alias_id,))
         conn.commit()
 
 
+
 def generar_qr_bytes(texto):
     """Genera una imagen QR (PNG) con el texto dado — el alias/CBU/titular como texto plano.
-    No es un pago directo por QR (eso requiere ser comercio adherido a Mercado Pago/MODO):
+    No es un pago directo por QR (eso requiere ser comercio adherido a un sistema de cobro real):
     al escanearlo, la mayoría de las apps de billetera muestran ese texto para que el
     cliente confirme la transferencia, en vez de tener que tipear el alias a mano."""
     import qrcode
@@ -1263,7 +1545,7 @@ def generar_qr_bytes(texto):
     return salida.getvalue()
 
 
-def generar_pdf_cotizacion(lista_productos, incluir_precio=True, incluir_stock=False, alias_qr=None):
+def generar_pdf_cotizacion(lista_productos, incluir_precio=True, incluir_stock=False, alias_qr=None, qr_real_bytes=None):
     """Genera un PDF simple de cotización a partir de la lista armada para WhatsApp.
     Si se pasa alias_qr (un dict con nombre/alias/cbu/titular), agrega un QR con esos datos
     para transferencia — el cliente lo escanea y ve el alias/CBU listo para pegar, sin tipear."""
@@ -1300,8 +1582,9 @@ def generar_pdf_cotizacion(lista_productos, incluir_precio=True, incluir_stock=F
         pdf.ln(3)
 
     if alias_qr:
-        texto_qr = f"Alias: {alias_qr['Alias']}\nCBU: {alias_qr['CBU']}\nTitular: {alias_qr['Titular']}"
-        qr_bytes = generar_qr_bytes(texto_qr)
+        qr_bytes = qr_real_bytes if qr_real_bytes else generar_qr_bytes(
+            f"Alias: {alias_qr['Alias']}\nCBU: {alias_qr['CBU']}\nTitular: {alias_qr['Titular']}"
+        )
         pdf.ln(4)
         pdf.set_font("Helvetica", "B", 11)
         pdf.cell(0, 7, limpiar(f"Transferir a: {alias_qr['Nombre']}"), new_x="LMARGIN", new_y="NEXT")
@@ -1310,8 +1593,12 @@ def generar_pdf_cotizacion(lista_productos, incluir_precio=True, incluir_stock=F
                        new_x="LMARGIN", new_y="NEXT")
         pdf.image(io.BytesIO(qr_bytes), w=35)
         pdf.set_font("Helvetica", "I", 8)
-        pdf.multi_cell(0, 4, "Escaneá el QR para ver el alias/CBU y transferir desde tu banco o billetera virtual.",
-                       new_x="LMARGIN", new_y="NEXT")
+        if qr_real_bytes:
+            pdf.multi_cell(0, 4, "Escaneá el QR con tu app de Mercado Pago/MODO/banco para transferir.",
+                           new_x="LMARGIN", new_y="NEXT")
+        else:
+            pdf.multi_cell(0, 4, "Escaneá el QR para ver el alias/CBU y transferir desde tu banco o billetera virtual.",
+                           new_x="LMARGIN", new_y="NEXT")
 
     return bytes(pdf.output())
 
@@ -1431,7 +1718,8 @@ def leer_excel(archivo, nrows=None):
 # ============================================================
 # IDEA 2: FICHA DIGITAL DEL VEHÍCULO (patente + historial de piezas)
 # ============================================================
-def get_or_create_vehiculo(patente, cliente_nombre="", cliente_telefono="", marca_auto="", modelo_auto="", km_actual=None):
+def get_or_create_vehiculo(patente, cliente_nombre="", cliente_telefono="", marca_auto="", modelo_auto="",
+                            km_actual=None, anio="", motorizacion=""):
     patente = patente.strip().upper()
     with db_lock:
         c.execute("SELECT id FROM vehiculos WHERE patente = ?", (patente,))
@@ -1444,19 +1732,22 @@ def get_or_create_vehiculo(patente, cliente_nombre="", cliente_telefono="", marc
                 "cliente_telefono = COALESCE(NULLIF(?, ''), cliente_telefono), "
                 "marca_auto = COALESCE(NULLIF(?, ''), marca_auto), "
                 "modelo_auto = COALESCE(NULLIF(?, ''), modelo_auto), "
+                "anio = COALESCE(NULLIF(?, ''), anio), "
+                "motorizacion = COALESCE(NULLIF(?, ''), motorizacion), "
                 "km_actual = COALESCE(?, km_actual), "
                 "km_registro = COALESCE(km_registro, ?), "  # solo se fija si todavía no tenía uno
                 "km_actualizado_fecha = CASE WHEN ? IS NOT NULL THEN datetime('now') ELSE km_actualizado_fecha END "
                 "WHERE id = ?",
                 (cliente_nombre.strip(), cliente_telefono.strip(), marca_auto.strip(), modelo_auto.strip(),
-                 km_actual, km_actual, km_actual, vid)
+                 anio.strip(), motorizacion.strip(), km_actual, km_actual, km_actual, vid)
             )
         else:
             c.execute(
                 "INSERT INTO vehiculos (patente, cliente_nombre, cliente_telefono, marca_auto, modelo_auto, "
-                "km_registro, km_actual, km_actualizado_fecha) VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'))",
+                "anio, motorizacion, km_registro, km_actual, km_actualizado_fecha) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))",
                 (patente, cliente_nombre.strip(), cliente_telefono.strip(), marca_auto.strip(),
-                 modelo_auto.strip(), km_actual, km_actual)
+                 modelo_auto.strip(), anio.strip(), motorizacion.strip(), km_actual, km_actual)
             )
             c.execute("SELECT id FROM vehiculos WHERE patente = ?", (patente,))
             vid = c.fetchone()["id"]
@@ -1655,6 +1946,28 @@ def actualizar_medidas(producto_id, diam_int, diam_ext, ancho, paso_rosca, estri
              estrias_internas or None, estrias_externas or None,
              (posicion_seguro.strip() or None) if posicion_seguro else None, tiene_abs_valor, producto_id)
         )
+        conn.commit()
+
+
+def actualizar_imagen_producto(producto_id, imagen_bytes):
+    """Guarda la foto de un producto directo en la base (como data URI comprimida), para que
+    aparezca en la columna 'Imagen' del buscador y ayude a identificar la pieza exacta."""
+    from PIL import Image as PILImage
+    import base64
+    img = PILImage.open(io.BytesIO(imagen_bytes)).convert("RGB")
+    img.thumbnail((400, 400))
+    buffer = io.BytesIO()
+    img.save(buffer, format="JPEG", quality=80)
+    b64 = base64.b64encode(buffer.getvalue()).decode("ascii")
+    data_uri = f"data:image/jpeg;base64,{b64}"
+    with db_lock:
+        c.execute("UPDATE productos SET imagen_url = ? WHERE id = ?", (data_uri, producto_id))
+        conn.commit()
+
+
+def eliminar_imagen_producto(producto_id):
+    with db_lock:
+        c.execute("UPDATE productos SET imagen_url = NULL WHERE id = ?", (producto_id,))
         conn.commit()
 
 
@@ -1921,13 +2234,21 @@ SISTEMA_EN = {
 
 def generar_esquema_orientativo_ia(marca, modelo, motorizacion, sistema):
     """Genera una imagen orientativa/genérica (NO una foto real del vehículo) con Gemini.
-    Requiere facturación habilitada en la API key (el nivel gratuito no incluye generación de imágenes)."""
+    Requiere facturación habilitada en la API key (el nivel gratuito no incluye generación de imágenes).
+    Usa una key APARTE de la del resto de las funciones de IA (identificar_pieza_por_foto,
+    extraer_datos_cedula, transcribir_audio, leer_remito_por_foto) — así, aunque esas otras se usen
+    mucho y choquen contra el límite gratuito, nunca pueden generar un cobro por sí solas: la única
+    key con facturación habilitada es esta, y solo la usa esta función."""
     from google import genai
     from PIL import Image as PILImage
 
-    api_key = st.secrets.get("gemini_api_key") if hasattr(st, "secrets") else None
+    api_key = st.secrets.get("gemini_api_key_imagenes") if hasattr(st, "secrets") else None
     if not api_key:
-        return None, "No configuraste 'gemini_api_key' en Streamlit Cloud (Settings → Secrets)."
+        return None, (
+            "No configuraste 'gemini_api_key_imagenes' en Streamlit Cloud (Settings → Secrets). "
+            "A propósito es una key distinta de 'gemini_api_key' — esta es la única que necesita "
+            "facturación habilitada, para que el resto de las funciones de IA queden totalmente gratis."
+        )
 
     sistema_en = SISTEMA_EN.get(sistema, sistema)
     pistas = PARTES_TIPICAS_POR_SISTEMA.get(sistema, "")
@@ -1951,17 +2272,20 @@ def generar_esquema_orientativo_ia(marca, modelo, motorizacion, sistema):
                 img = PILImage.open(io.BytesIO(part.inline_data.data)).convert("RGB")
                 salida = io.BytesIO()
                 img.save(salida, format="JPEG", quality=90)
+                registrar_uso_ia("Generar imagen orientativa (paga)", True)
                 return salida.getvalue(), None
+        registrar_uso_ia("Generar imagen orientativa (paga)", False)
         return None, "Gemini no devolvió ninguna imagen para ese pedido."
     except Exception as e:
+        registrar_uso_ia("Generar imagen orientativa (paga)", False)
         texto_error = str(e)
         if "RESOURCE_EXHAUSTED" in texto_error or "429" in texto_error or "quota" in texto_error.lower():
             return None, (
                 "La generación de imágenes no está incluida en el nivel gratuito de la API de Gemini "
                 "(el error dice 'limit: 0' para ese modelo). Para usar esta función hay que habilitar "
-                "facturación en aistudio.google.com para esa API key — el costo ronda los US$0,04 por "
-                "imagen generada, no es una suscripción cara. La identificación de pieza por foto no se ve "
-                "afectada por esto, esa usa un modelo distinto que sí suele tener cupo gratis."
+                "facturación en aistudio.google.com para la API key 'gemini_api_key_imagenes' — el costo "
+                "ronda los US$0,04 por imagen generada. El resto de las funciones de IA usan una key "
+                "distinta y separada, así que no se ven afectadas por esto."
             )
         return None, f"Error generando la imagen: {texto_error}"
 
@@ -2132,14 +2456,17 @@ if not es_admin() and not st.session_state.get("saltar_login"):
     mostrar_login_inicial()
     st.stop()
 
-if es_admin():
+if es_admin() or es_operador_o_admin():
     col_estado, col_salir = st.columns([4, 1])
-    nombre_sesion = st.session_state.get("admin_nombre", "admin")
-    col_estado.caption(f"🔓 Sesión de administrador activa ({nombre_sesion}).")
+    nombre_sesion = st.session_state.get("admin_nombre", "")
+    etiqueta_nivel = "administrador" if es_admin() else "operador"
+    col_estado.caption(f"🔓 Sesión de {etiqueta_nivel} activa ({nombre_sesion}).")
     if col_salir.button("Salir"):
-        st.session_state.es_admin = False
+        st.session_state.nivel_usuario = None
         st.session_state.admin_nombre = None
         st.rerun()
+else:
+    st.caption(f"👤 Usando como: {obtener_usuario_actual()}")
 
 if "lista_whatsapp" not in st.session_state:
     st.session_state.lista_whatsapp = []  # lista de códigos agregados para el mensaje
@@ -2153,18 +2480,42 @@ tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs(
 # TAB 1: BUSCADOR
 # ============================================================
 with tab1:
+    with st.expander("❓ Guía rápida — cómo usar esta app"):
+        st.markdown("""
+- **🔍 Buscador** — el corazón de la app. Buscá por código (acepta varios separados por coma) o por
+  descripción. Los resultados muestran todas las marcas equivalentes, precio, stock y un link directo
+  a la ficha del proveedor si lo cargaste.
+- **🔗 Vincular manual** — cuando encontrás que dos o más códigos de distintos proveedores son la misma
+  pieza y todavía no están relacionados, los agrupás acá de una sola vez.
+- **📁 Cargar Excel** — subís la lista completa de un proveedor (Excel, CSV o PDF con tabla) y la app
+  arma las equivalencias sola comparando código OEM. También lee remitos por foto.
+- **🗂️ Administrar** — todo lo de mantenimiento: marcas, medidas de piezas, fotos de productos,
+  combos relacionados, mensajería y cobros.
+- **📊 Estadísticas** — números generales, backups, auditoría de stock y qué se buscó sin encontrar nada.
+- **📋 Lista WhatsApp** — armá una cotización con varios productos y mandala por WhatsApp o como PDF.
+- **🚗 Vehículos** — ficha por patente: historial de piezas, alertas de mantenimiento, y podés cargar
+  los datos sacándole una foto a la cédula.
+- **🛠️ Modo Mecánico** — diccionario de códigos de falla (DTC), lector de VIN, esquemas técnicos y
+  un conversor de unidades.
+
+Casi todo lo que edita o borra algo pide la contraseña de administrador la primera vez que lo usás.
+        """)
+
     # Si se tocó un botón de sugerencia rápida (favorito o búsqueda reciente), precargamos el
     # campo de búsqueda ANTES de crear el widget — si se hace después de creado, Streamlit tira error.
     if "sugerencia_busqueda" in st.session_state:
         st.session_state["busqueda_input"] = st.session_state.pop("sugerencia_busqueda")
 
-    if es_admin():
+    if es_operador_o_admin():
         with st.expander("📷 Identificar pieza por foto (con IA)"):
             st.caption(
-                "Sacale una foto a la pieza. La IA intenta leer códigos visibles o describir qué tipo de "
-                "repuesto es, y después podés buscar con eso."
+                "Sacale una foto a la pieza o subí una que ya tengas. La IA intenta leer códigos visibles "
+                "o describir qué tipo de repuesto es, y después podés buscar con eso."
             )
-            foto = st.camera_input("Sacar foto", label_visibility="collapsed")
+            foto = st.file_uploader(
+                "Foto de la pieza:", type=["png", "jpg", "jpeg"], key="foto_identificar_pieza",
+                label_visibility="collapsed"
+            )
             if foto and st.button("🔍 Identificar"):
                 with st.spinner("Consultando..."):
                     descripcion, error = identificar_pieza_por_foto(foto.getvalue())
@@ -2344,10 +2695,33 @@ with tab1:
                         st.dataframe(quitar_id(parcial)[:10], use_container_width=True, hide_index=True)
                 st.markdown("---")
     else:
+        with st.expander("🎙️ Buscar por voz"):
+            st.caption(
+                "Grabá diciendo lo que buscás — la IA lo transcribe y lo busca con el buscador de "
+                "siempre. No es un asistente que entienda pedidos complejos, es simplemente hablar "
+                "en vez de tipear."
+            )
+            audio_busqueda = st.audio_input("Grabar:", key="audio_busqueda_voz")
+            if audio_busqueda and st.button("🔍 Transcribir y buscar"):
+                with st.spinner("Transcribiendo..."):
+                    mime_audio = audio_busqueda.type or "audio/wav"
+                    texto_voz, error_voz = transcribir_audio(audio_busqueda.getvalue(), mime_audio)
+                if error_voz:
+                    st.error(error_voz)
+                else:
+                    st.session_state["texto_desde_voz"] = texto_voz
+                    st.rerun()
+
+        # Precargar el texto transcripto ANTES de crear el widget del form — si se hace después
+        # de que ya se dibujó en pantalla, Streamlit tira un error.
+        if "texto_desde_voz" in st.session_state:
+            st.session_state["texto_input"] = st.session_state.pop("texto_desde_voz")
+
         with st.form("form_buscar_texto"):
             texto = st.text_input(
                 "Ingresá parte de una descripción:",
-                placeholder="Ej: ruleman delantero gol (no hace falta el orden exacto)"
+                placeholder="Ej: ruleman delantero gol (no hace falta el orden exacto)",
+                key="texto_input"
             )
             buscar_texto_click = st.form_submit_button("🔍 Buscar por Descripción", type="primary")
 
@@ -2450,82 +2824,125 @@ with tab1:
 # ============================================================
 # TAB 2: VINCULAR MANUAL
 # ============================================================
+def vincular_grupo_equivalencias(productos_info, nivel, nota, verificar):
+    """Crea (o reutiliza) cada producto de la lista y los vincula a TODOS entre sí — así se puede
+    armar de una un grupo de equivalencias con productos de varios proveedores distintos,
+    en vez de tener que ir vinculando de a pares."""
+    ids = []
+    with db_lock:
+        for p in productos_info:
+            clean = sanitizar(p["codigo"])
+            marca_id = get_or_create_marca(p["marca"])
+            pid = get_or_create_producto(
+                p["codigo"].strip(), clean, p.get("descripcion", "").strip(),
+                marca_id, p.get("imagen_url", "").strip() or None
+            )
+            ids.append(pid)
+        v = 1 if verificar else 0
+        pares = 0
+        for i in range(len(ids)):
+            for j in range(len(ids)):
+                if i == j or ids[i] == ids[j]:
+                    continue
+                c.execute(
+                    "INSERT OR REPLACE INTO equivalencias "
+                    "(producto_a_id, producto_b_id, created_at, verificada, nivel, nota) "
+                    "VALUES (?, ?, datetime('now'), ?, ?, ?)",
+                    (ids[i], ids[j], v, nivel, nota.strip())
+                )
+                pares += 1
+        conn.commit()
+    return len(set(ids)), pares
+
+
 with tab2:
-    st.subheader("Vincular dos códigos como equivalentes")
-    st.caption("Usalo para corregir o agregar una equivalencia puntual sin subir un Excel entero.")
+    st.subheader("Vincular varios códigos como equivalentes")
+    st.caption(
+        "Armá un grupo de códigos — de la marca/proveedor que sea, se pueden mezclar — y vinculalos "
+        "todos entre sí de una sola vez. Antes había que hacerlo de a pares; ahora si tenés 5 productos "
+        "de 5 proveedores distintos que son lo mismo, los sumás todos a la tanda y los vinculás juntos."
+    )
 
     c.execute("SELECT id, nombre FROM marcas ORDER BY nombre")
-    marcas_disponibles = c.fetchall()
-    nombres_marcas = [m["nombre"] for m in marcas_disponibles]
+    nombres_marcas = [m["nombre"] for m in c.fetchall()]
+
+    if "grupo_equivalencia" not in st.session_state:
+        st.session_state["grupo_equivalencia"] = []
 
     # Si se vino desde "Productos sin equivalencias" (pestaña Administrar) con un código para
     # precargar, hay que fijar estos valores ANTES de crear los widgets de abajo — si se hace
     # después de que ya se dibujaron en pantalla, Streamlit tira un error.
     if "vincular_pendiente" in st.session_state:
         pendiente = st.session_state.pop("vincular_pendiente")
-        st.session_state["cod_a"] = pendiente.get("cod_a", "")
-        st.session_state["desc_a"] = pendiente.get("desc_a", "")
+        st.session_state["nuevo_codigo_grupo"] = pendiente.get("cod_a", "")
+        st.session_state["nueva_desc_grupo"] = pendiente.get("desc_a", "")
         if pendiente.get("marca_a") in nombres_marcas:
-            st.session_state["marca_a"] = pendiente["marca_a"]
+            st.session_state["nueva_marca_opcion_grupo"] = pendiente["marca_a"]
 
-    colA, colB = st.columns(2)
-    with colA:
-        st.markdown("**Código A**")
-        codigo_a = st.text_input("Código A", label_visibility="collapsed", key="cod_a")
-        marca_a = st.selectbox("Marca A", nombres_marcas + ["➕ Nueva marca..."], key="marca_a")
-        if marca_a == "➕ Nueva marca...":
-            marca_a = st.text_input("Nombre de la nueva marca (A)", key="nueva_marca_a")
-        desc_a = st.text_input("Descripción (opcional)", key="desc_a")
-        img_a = st.text_input("URL de foto (opcional)", key="img_a", placeholder="https://...")
+    st.markdown("**➕ Agregar un código a la tanda**")
+    cg1, cg2 = st.columns(2)
+    nuevo_codigo = cg1.text_input("Código", key="nuevo_codigo_grupo")
+    marca_opcion = cg2.selectbox("Marca", nombres_marcas + ["➕ Nueva marca..."], key="nueva_marca_opcion_grupo")
+    nueva_marca = st.text_input("Nombre de la nueva marca", key="nueva_marca_texto_grupo") \
+        if marca_opcion == "➕ Nueva marca..." else marca_opcion
+    cg3, cg4 = st.columns(2)
+    nueva_desc = cg3.text_input("Descripción (opcional)", key="nueva_desc_grupo")
+    nueva_img = cg4.text_input("URL de foto (opcional)", key="nueva_img_grupo", placeholder="https://...")
 
-    with colB:
-        st.markdown("**Código B**")
-        codigo_b = st.text_input("Código B", label_visibility="collapsed", key="cod_b")
-        marca_b = st.selectbox("Marca B", nombres_marcas + ["➕ Nueva marca..."], key="marca_b")
-        if marca_b == "➕ Nueva marca...":
-            marca_b = st.text_input("Nombre de la nueva marca (B)", key="nueva_marca_b")
-        desc_b = st.text_input("Descripción (opcional)", key="desc_b")
-        img_b = st.text_input("URL de foto (opcional)", key="img_b", placeholder="https://...")
-
-    nivel_equiv = st.selectbox(
-        "Nivel de equivalencia:",
-        ["Exacta", "Reemplazo con modificación", "Solo alternativa de menor calidad"],
-        help="Qué tan intercambiables son en la práctica."
-    )
-    nota_tecnica = st.text_input(
-        "Nota técnica (opcional):",
-        placeholder="Ej: Equivale pero requiere cambiar la ficha eléctrica"
-    )
-    verificar = st.checkbox("✅ Marcar esta equivalencia como verificada", value=True,
-                             help="Verificada = confirmaste vos mismo que son intercambiables.")
-
-    if st.button("🔗 Vincular como equivalentes", type="primary"):
-        clean_a, clean_b = sanitizar(codigo_a), sanitizar(codigo_b)
-        if not clean_a or not clean_b:
-            st.warning("Completá ambos códigos.")
-        elif not marca_a or not marca_b:
-            st.warning("Completá ambas marcas.")
-        elif clean_a == clean_b and marca_a.strip().upper() == marca_b.strip().upper():
-            st.warning("Los dos códigos son idénticos, no hay nada para vincular.")
+    if st.button("➕ Agregar a la tanda"):
+        clean = sanitizar(nuevo_codigo)
+        if not clean:
+            st.warning("Completá el código.")
+        elif not nueva_marca or not nueva_marca.strip():
+            st.warning("Completá la marca.")
         else:
-            with db_lock:
-                marca_a_id = get_or_create_marca(marca_a)
-                marca_b_id = get_or_create_marca(marca_b)
-                id_a = get_or_create_producto(codigo_a.strip(), clean_a, desc_a.strip(), marca_a_id, img_a.strip())
-                id_b = get_or_create_producto(codigo_b.strip(), clean_b, desc_b.strip(), marca_b_id, img_b.strip())
-                v = 1 if verificar else 0
-                c.execute(
-                    "INSERT OR REPLACE INTO equivalencias "
-                    "(producto_a_id, producto_b_id, created_at, verificada, nivel, nota) "
-                    "VALUES (?, ?, datetime('now'), ?, ?, ?)", (id_a, id_b, v, nivel_equiv, nota_tecnica.strip())
-                )
-                c.execute(
-                    "INSERT OR REPLACE INTO equivalencias "
-                    "(producto_a_id, producto_b_id, created_at, verificada, nivel, nota) "
-                    "VALUES (?, ?, datetime('now'), ?, ?, ?)", (id_b, id_a, v, nivel_equiv, nota_tecnica.strip())
-                )
-                conn.commit()
-            st.success(f"{codigo_a} ({marca_a}) y {codigo_b} ({marca_b}) quedaron vinculados.")
+            ya_esta = any(
+                sanitizar(it["codigo"]) == clean and it["marca"].strip().upper() == nueva_marca.strip().upper()
+                for it in st.session_state["grupo_equivalencia"]
+            )
+            if ya_esta:
+                st.warning("Ese código con esa marca ya está en la tanda.")
+            else:
+                st.session_state["grupo_equivalencia"].append({
+                    "codigo": nuevo_codigo.strip(), "marca": nueva_marca.strip(),
+                    "descripcion": nueva_desc.strip(), "imagen_url": nueva_img.strip()
+                })
+                for k in ["nuevo_codigo_grupo", "nueva_desc_grupo", "nueva_img_grupo"]:
+                    st.session_state.pop(k, None)
+                st.rerun()
+
+    grupo = st.session_state["grupo_equivalencia"]
+    if grupo:
+        st.markdown(f"**📋 Tanda actual ({len(grupo)} código{'s' if len(grupo) != 1 else ''}):**")
+        for i, it in enumerate(grupo):
+            colg1, colg2 = st.columns([5, 1])
+            colg1.write(f"{it['marca']}: {it['codigo']}" + (f" — {it['descripcion']}" if it['descripcion'] else ""))
+            if colg2.button("🗑️", key=f"quitar_grupo_{i}"):
+                grupo.pop(i)
+                st.rerun()
+
+        st.markdown("---")
+        nivel_equiv = st.selectbox(
+            "Nivel de equivalencia (aplica a todo el grupo):",
+            ["Exacta", "Reemplazo con modificación", "Solo alternativa de menor calidad"],
+            help="Qué tan intercambiables son en la práctica."
+        )
+        nota_tecnica = st.text_input(
+            "Nota técnica (opcional, aplica a todo el grupo):",
+            placeholder="Ej: Equivale pero requiere cambiar la ficha eléctrica"
+        )
+        verificar = st.checkbox("✅ Marcar como verificada", value=True,
+                                 help="Verificada = confirmaste vos mismo que son intercambiables.")
+
+        if len(grupo) < 2:
+            st.info("Agregá al menos 2 códigos a la tanda para poder vincularlos.")
+        elif st.button(f"🔗 Vincular los {len(grupo)} códigos entre sí", type="primary"):
+            cantidad_prod, cantidad_pares = vincular_grupo_equivalencias(grupo, nivel_equiv, nota_tecnica, verificar)
+            st.success(f"Listo: {cantidad_prod} productos quedaron vinculados entre sí ({cantidad_pares} relaciones creadas).")
+            st.session_state["grupo_equivalencia"] = []
+            st.rerun()
+    else:
+        st.caption("Todavía no agregaste ningún código a la tanda.")
 
 # ============================================================
 # TAB 3: CARGAR EXCEL
@@ -2835,169 +3252,123 @@ def exportar_configuracion_txt():
 
 
 with tab4:
-    st.subheader("Administrar marcas y productos")
+    st.subheader("🗂️ Administrar")
+
+    sub_marcas, sub_productos, sub_mensajeria, sub_combos, sub_mantenimiento = st.tabs(
+        ["🏷️ Marcas", "📦 Productos", "💬 Mensajería y cobros", "🧩 Combos", "🧹 Mantenimiento"]
+    )
 
     c.execute("""SELECT m.id, m.nombre, m.tipo, COUNT(p.id) AS productos
                  FROM marcas m LEFT JOIN productos p ON p.marca_id = m.id
                  GROUP BY m.id ORDER BY m.nombre""")
     marcas_info = c.fetchall()
 
-    if not marcas_info:
-        st.info("Todavía no hay marcas cargadas.")
-    else:
-        tabla_marcas = [{"Marca": m["nombre"], "Tipo": m["tipo"], "Productos cargados": m["productos"]}
-                         for m in marcas_info]
-        st.dataframe(tabla_marcas, use_container_width=True, hide_index=True)
+    with sub_marcas:
+        if not marcas_info:
+            st.info("Todavía no hay marcas cargadas.")
+        else:
+            tabla_marcas = [{"Marca": m["nombre"], "Tipo": m["tipo"], "Productos cargados": m["productos"]}
+                             for m in marcas_info]
+            st.dataframe(tabla_marcas, use_container_width=True, hide_index=True)
 
-        st.markdown("---")
-        st.markdown("**🔗 Link a la ficha del proveedor (en vez de guardar la foto)**")
-        st.caption(
-            "Por cada marca/proveedor podés cargar un patrón de URL con `{codigo}` donde va el código del "
-            "producto. La app arma el link automáticamente para cada resultado de búsqueda, sin copiar "
-            "ninguna imagen — así podés sumar Taranto y cualquier otro proveedor que uses, cada uno con su "
-            "propio patrón. Ejemplo: `https://www.taranto.com.ar/busqueda?q={codigo}`"
-        )
-        nombres_para_link = [m["nombre"] for m in marcas_info]
-        marca_link = st.selectbox("Marca:", nombres_para_link, key="marca_link_ficha")
-        id_marca_link = next(m["id"] for m in marcas_info if m["nombre"] == marca_link)
-        c.execute("SELECT url_ficha_template FROM marcas WHERE id = ?", (id_marca_link,))
-        template_actual = c.fetchone()["url_ficha_template"] or ""
-        nuevo_template = st.text_input(
-            "Patrón de URL (usá {codigo} donde va el código):", value=template_actual,
-            placeholder="https://www.taranto.com.ar/busqueda?q={codigo}", key="input_template_link"
-        )
-        if st.button("💾 Guardar patrón de link"):
-            if nuevo_template.strip() and "{codigo}" not in nuevo_template:
-                st.warning("El patrón tiene que incluir '{codigo}' en algún lado, si no todos los links quedan iguales.")
-            else:
-                with db_lock:
-                    c.execute("UPDATE marcas SET url_ficha_template = ? WHERE id = ?",
-                              (nuevo_template.strip() or None, id_marca_link))
-                    conn.commit()
-                st.success(f"Patrón de link guardado para '{marca_link}'.")
-                st.rerun()
-
-        st.markdown("---")
-        st.markdown("**🔀 Fusionar marcas duplicadas**")
-        st.caption(
-            "Útil cuando una marca quedó cargada con nombres distintos por error de tipeo "
-            "(ej: 'MANN' y 'MANN FILTER'). Mueve todos los productos de una a la otra."
-        )
-        nombres_para_fusion = [m["nombre"] for m in marcas_info]
-        colOrig, colDest = st.columns(2)
-        marca_origen = colOrig.selectbox("Marca a eliminar (origen):", nombres_para_fusion, key="fusion_origen")
-        marca_destino = colDest.selectbox("Marca a conservar (destino):", nombres_para_fusion, key="fusion_destino")
-        if st.button("🔀 Fusionar", disabled=(marca_origen == marca_destino)):
-            if pedir_password_admin("fusionar marcas"):
-                id_origen = next(m["id"] for m in marcas_info if m["nombre"] == marca_origen)
-                id_destino = next(m["id"] for m in marcas_info if m["nombre"] == marca_destino)
-                fusionar_marcas(id_origen, id_destino)
-                st.success(f"'{marca_origen}' se fusionó dentro de '{marca_destino}'.")
-                st.rerun()
-
-        st.markdown("---")
-        st.markdown("**💲 Aumentar/bajar precios por porcentaje**")
-        st.caption("Aplica el ajuste a todos los productos con precio cargado de la marca elegida.")
-        marca_precio = st.selectbox("Marca:", nombres_para_fusion, key="marca_ajuste_precio")
-        porcentaje = st.number_input("Porcentaje (usá negativo para bajar, ej: -5):", value=0.0, step=1.0)
-        if st.button("💲 Aplicar ajuste de precios", disabled=(porcentaje == 0)):
-            if pedir_password_admin("ajustar precios masivamente"):
-                id_marca_precio = next(m["id"] for m in marcas_info if m["nombre"] == marca_precio)
-                afectados = aumentar_precios_por_marca(id_marca_precio, porcentaje)
-                st.success(f"Se ajustaron {afectados} precio(s) de '{marca_precio}' en {porcentaje:+.1f}%.")
-
-        st.markdown("---")
-        st.markdown("**Eliminar una marca** (borra también sus productos y equivalencias asociadas)")
-        marca_a_borrar = st.selectbox("Elegí una marca", [m["nombre"] for m in marcas_info])
-        confirmar = st.checkbox(f"Confirmo que quiero borrar '{marca_a_borrar}' y todo lo asociado")
-        if st.button("🗑️ Eliminar marca", disabled=not confirmar):
-            if pedir_password_admin("eliminar una marca"):
-                with db_lock:
-                    c.execute("DELETE FROM marcas WHERE nombre = ?", (marca_a_borrar,))
-                    conn.commit()
-                st.success(f"Marca '{marca_a_borrar}' eliminada.")
-                st.rerun()
-
-        st.markdown("---")
-        st.markdown("**💳 Alias para QR de transferencia**")
-        st.caption(
-            "Cargá los alias/CBU que usás (Mercado Pago, distintos bancos, etc.). Al armar una "
-            "cotización en 'Lista WhatsApp' vas a poder elegir cuál de estos usar para el QR del PDF. "
-            "El QR solo muestra el alias/CBU como texto para que el cliente lo escanee y transfiera — "
-            "no es un cobro automático por QR, eso requiere estar adherido como comercio en Mercado Pago o MODO."
-        )
-        alias_cargados = listar_alias_transferencia()
-        if alias_cargados:
-            st.dataframe(quitar_id(alias_cargados), use_container_width=True, hide_index=True)
-
-        opciones_alias_edit = ["➕ Nuevo alias..."] + [f"{a['Nombre']} (editar)" for a in alias_cargados]
-        alias_opcion_edit = st.selectbox("Elegí qué hacer:", opciones_alias_edit, key="alias_opcion_edit")
-        alias_actual = None
-        if alias_opcion_edit != "➕ Nuevo alias...":
-            nombre_buscar = alias_opcion_edit.replace(" (editar)", "")
-            alias_actual = next(a for a in alias_cargados if a["Nombre"] == nombre_buscar)
-
-        cae1, cae2 = st.columns(2)
-        nombre_alias_in = cae1.text_input("Nombre (ej: Mercado Pago, Banco Galicia)",
-                                           value=(alias_actual or {}).get("Nombre", ""), key="alias_nombre_in")
-        alias_in = cae2.text_input("Alias", value=(alias_actual or {}).get("Alias", ""), key="alias_alias_in")
-        cae3, cae4 = st.columns(2)
-        cbu_in = cae3.text_input("CBU/CVU (opcional)", value=(alias_actual or {}).get("CBU", ""), key="alias_cbu_in")
-        titular_in = cae4.text_input("Titular (opcional)", value=(alias_actual or {}).get("Titular", ""), key="alias_titular_in")
-
-        cbtn1, cbtn2 = st.columns(2)
-        if cbtn1.button("💾 Guardar alias"):
-            if not nombre_alias_in.strip() or not alias_in.strip():
-                st.warning("Completá al menos el nombre y el alias.")
-            else:
-                guardar_alias_transferencia(
-                    nombre_alias_in, alias_in, cbu_in, titular_in,
-                    alias_id=(alias_actual["ID"] if alias_actual else None)
-                )
-                st.success("Alias guardado.")
-                st.rerun()
-        if alias_actual and cbtn2.button("🗑️ Eliminar este alias"):
-            eliminar_alias_transferencia(alias_actual["ID"])
-            st.success("Alias eliminado.")
-            st.rerun()
-
-        st.markdown("---")
-        st.markdown("**🧩 Combos de repuestos relacionados**")
-        st.caption(
-            "Cuando alguien busca un producto cuya descripción contenga el 'disparador', la app va a "
-            "sugerir estos ítems relacionados con un botón para buscarlos también. Ej: disparador "
-            "'correa de distribucion' → ítems 'Kit de distribución', 'Tensor', 'Bomba de agua'."
-        )
-        combos_actuales = listar_combos()
-        if combos_actuales:
-            st.dataframe(
-                [{"Disparador": c_["disparador"], "Ítems sugeridos": ", ".join(c_["items"])} for c_ in combos_actuales],
-                use_container_width=True, hide_index=True
+            st.markdown("---")
+            st.markdown("**🔗 Link a la ficha del proveedor (en vez de guardar la foto)**")
+            st.caption(
+                "Por cada marca/proveedor podés cargar un patrón de URL con `{codigo}` donde va el código del "
+                "producto. La app arma el link automáticamente para cada resultado de búsqueda, sin copiar "
+                "ninguna imagen — así podés sumar Taranto y cualquier otro proveedor que uses, cada uno con su "
+                "propio patrón. Ejemplo: `https://www.taranto.com.ar/busqueda?q={codigo}`"
             )
-        disparador_edit = st.text_input(
-            "Disparador (palabra/frase que aparece en la descripción del producto):",
-            placeholder="Ej: correa de distribucion", key="combo_disparador"
-        )
-        items_edit = st.text_area(
-            "Ítems sugeridos (uno por línea):",
-            placeholder="Kit de distribución\nTensor de distribución\nBomba de agua",
-            key="combo_items", height=100
-        )
-        cc1, cc2 = st.columns(2)
-        if cc1.button("💾 Guardar combo"):
-            if not disparador_edit.strip() or not items_edit.strip():
-                st.warning("Completá el disparador y al menos un ítem.")
-            else:
-                guardar_combo(disparador_edit, items_edit.strip().splitlines())
-                st.success(f"Combo para '{disparador_edit.strip()}' guardado.")
-                st.rerun()
-        if cc2.button("🗑️ Eliminar combo (según el disparador de arriba)"):
-            if disparador_edit.strip():
-                eliminar_combo(disparador_edit)
-                st.success(f"Combo para '{disparador_edit.strip()}' eliminado.")
-                st.rerun()
+            nombres_para_link = [m["nombre"] for m in marcas_info]
+            marca_link = st.selectbox("Marca:", nombres_para_link, key="marca_link_ficha")
+            id_marca_link = next(m["id"] for m in marcas_info if m["nombre"] == marca_link)
+            c.execute("SELECT url_ficha_template FROM marcas WHERE id = ?", (id_marca_link,))
+            template_actual = c.fetchone()["url_ficha_template"] or ""
+            nuevo_template = st.text_input(
+                "Patrón de URL (usá {codigo} donde va el código):", value=template_actual,
+                placeholder="https://www.taranto.com.ar/busqueda?q={codigo}", key="input_template_link"
+            )
+            if st.button("💾 Guardar patrón de link"):
+                if nuevo_template.strip() and "{codigo}" not in nuevo_template:
+                    st.warning("El patrón tiene que incluir '{codigo}' en algún lado, si no todos los links quedan iguales.")
+                else:
+                    with db_lock:
+                        c.execute("UPDATE marcas SET url_ficha_template = ? WHERE id = ?",
+                                  (nuevo_template.strip() or None, id_marca_link))
+                        conn.commit()
+                    st.success(f"Patrón de link guardado para '{marca_link}'.")
+                    st.rerun()
 
-        st.markdown("---")
+            st.markdown("---")
+            st.markdown("**🔀 Fusionar marcas duplicadas**")
+            st.caption(
+                "Útil cuando una marca quedó cargada con nombres distintos por error de tipeo "
+                "(ej: 'MANN' y 'MANN FILTER'). Mueve todos los productos de una a la otra."
+            )
+            nombres_para_fusion = [m["nombre"] for m in marcas_info]
+            colOrig, colDest = st.columns(2)
+            marca_origen = colOrig.selectbox("Marca a eliminar (origen):", nombres_para_fusion, key="fusion_origen")
+            marca_destino = colDest.selectbox("Marca a conservar (destino):", nombres_para_fusion, key="fusion_destino")
+            if st.button("🔀 Fusionar", disabled=(marca_origen == marca_destino)):
+                if pedir_password_admin("fusionar marcas"):
+                    id_origen = next(m["id"] for m in marcas_info if m["nombre"] == marca_origen)
+                    id_destino = next(m["id"] for m in marcas_info if m["nombre"] == marca_destino)
+                    fusionar_marcas(id_origen, id_destino)
+                    st.success(f"'{marca_origen}' se fusionó dentro de '{marca_destino}'.")
+                    st.rerun()
+
+            st.markdown("---")
+            st.markdown("**💲 Aumentar/bajar precios por porcentaje**")
+            st.caption("Aplica el ajuste a todos los productos con precio cargado de la marca elegida.")
+            marca_precio = st.selectbox("Marca:", nombres_para_fusion, key="marca_ajuste_precio")
+            porcentaje = st.number_input("Porcentaje (usá negativo para bajar, ej: -5):", value=0.0, step=1.0)
+            if st.button("💲 Aplicar ajuste de precios", disabled=(porcentaje == 0)):
+                if pedir_password_admin("ajustar precios masivamente"):
+                    id_marca_precio = next(m["id"] for m in marcas_info if m["nombre"] == marca_precio)
+                    afectados = aumentar_precios_por_marca(id_marca_precio, porcentaje)
+                    st.success(f"Se ajustaron {afectados} precio(s) de '{marca_precio}' en {porcentaje:+.1f}%.")
+
+            st.markdown("---")
+            st.markdown("**Eliminar una marca** (borra también sus productos y equivalencias asociadas)")
+            marca_a_borrar = st.selectbox("Elegí una marca", [m["nombre"] for m in marcas_info])
+            confirmar = st.checkbox(f"Confirmo que quiero borrar '{marca_a_borrar}' y todo lo asociado")
+            if st.button("🗑️ Eliminar marca", disabled=not confirmar):
+                if pedir_password_admin("eliminar una marca"):
+                    with db_lock:
+                        c.execute("DELETE FROM marcas WHERE nombre = ?", (marca_a_borrar,))
+                        conn.commit()
+                    st.success(f"Marca '{marca_a_borrar}' eliminada.")
+                    st.rerun()
+
+        st.markdown("**Catálogos externos**")
+        st.caption("Agregá los sitios de proveedores que querés que aparezcan como botones al buscar un código.")
+
+        catalogos = listar_catalogos_externos()
+        if catalogos:
+            for cat in catalogos:
+                colA, colB, colC = st.columns([2, 5, 1])
+                colA.write(cat["nombre"])
+                colB.write(cat["url"])
+                if colC.button("🗑️", key=f"del_cat_{cat['id']}"):
+                    eliminar_catalogo_externo(cat["id"])
+                    st.rerun()
+        else:
+            st.caption("Todavía no agregaste ningún catálogo externo.")
+
+        with st.form("nuevo_catalogo", clear_on_submit=True):
+            colN, colU = st.columns(2)
+            nombre_cat = colN.text_input("Nombre del proveedor", placeholder="Ej: Wega")
+            url_cat = colU.text_input("URL del catálogo", placeholder="Ej: wegamotors.com")
+            agregar = st.form_submit_button("➕ Agregar catálogo")
+            if agregar:
+                if not nombre_cat.strip() or not url_cat.strip():
+                    st.warning("Completá nombre y URL.")
+                else:
+                    agregar_catalogo_externo(nombre_cat, url_cat)
+                    st.success(f"'{nombre_cat}' agregado.")
+                    st.rerun()
+
+    with sub_productos:
         st.markdown("**Buscar y eliminar un producto puntual**")
         texto_prod = st.text_input("Buscar producto por código o descripción", key="admin_buscar")
         if texto_prod.strip():
@@ -3009,12 +3380,21 @@ with tab4:
             if res_admin:
                 st.dataframe(res_admin, use_container_width=True, hide_index=True)
                 id_borrar = st.number_input("ID del producto a borrar", min_value=0, step=1)
+                st.caption(
+                    "⚠️ Se borran también sus equivalencias con otros productos. Si lo restaurás desde "
+                    "la papelera, el producto vuelve pero **sin** esos vínculos — hay que volver a "
+                    "vincularlo manualmente."
+                )
                 if st.button("🗑️ Eliminar producto por ID"):
                     if id_borrar and pedir_password_admin("eliminar un producto"):
+                        c.execute("SELECT * FROM productos WHERE id = ?", (int(id_borrar),))
+                        fila_producto = c.fetchone()
+                        if fila_producto:
+                            mover_a_papelera("producto", dict(fila_producto))
                         with db_lock:
                             c.execute("DELETE FROM productos WHERE id = ?", (int(id_borrar),))
                             conn.commit()
-                        st.success(f"Producto ID {id_borrar} eliminado.")
+                        st.success(f"Producto ID {id_borrar} eliminado (podés restaurarlo desde la papelera).")
                         st.rerun()
 
                 st.markdown("**📐 Cargar medidas mecánicas / ubicación en depósito**")
@@ -3058,244 +3438,403 @@ with tab4:
                     actualizar_medidas(id_medidas, e_diam_int, e_diam_ext, e_ancho, e_paso, e_estrias, e_ubicacion,
                                         e_estrias_int, e_estrias_ext, e_seguro, e_abs)
                     st.success("Guardado.")
+
+                st.markdown("**📷 Foto del producto**")
+                c.execute("SELECT imagen_url FROM productos WHERE id = ?", (id_medidas,))
+                imagen_actual = c.fetchone()["imagen_url"]
+                if imagen_actual:
+                    st.image(imagen_actual, width=150)
+                foto_producto = st.file_uploader(
+                    "Subí una foto (se guarda comprimida, aparece en la columna 'Imagen' del buscador):",
+                    type=["png", "jpg", "jpeg"], key="foto_producto_admin"
+                )
+                cf1, cf2 = st.columns(2)
+                if foto_producto and cf1.button("💾 Guardar foto"):
+                    actualizar_imagen_producto(id_medidas, foto_producto.getvalue())
+                    st.success("Foto guardada.")
+                    st.rerun()
+                if imagen_actual and cf2.button("🗑️ Sacar la foto"):
+                    eliminar_imagen_producto(id_medidas)
+                    st.success("Foto eliminada.")
+                    st.rerun()
             else:
                 st.info("Sin resultados.")
 
-    st.markdown("---")
-    st.markdown("**Limpieza de la base**")
-    st.caption(
-        "Con el tiempo pueden quedar códigos cargados por error que no están vinculados a "
-        "ninguna equivalencia. Este botón los borra."
-    )
-    if st.button("🧹 Borrar productos sin ninguna equivalencia"):
-        if pedir_password_admin("borrar productos sin equivalencias"):
-            borrados = depurar_huerfanos()
-            if borrados:
-                st.success(f"Se borraron {borrados} producto(s) sin equivalencias.")
+        st.markdown("**🧩 Productos sin equivalencias**")
+        st.caption(
+            "Esta sección puede ser pesada, así que se calcula solo cuando la pedís (no en cada búsqueda)."
+        )
+
+        if "mostrar_huerfanos" not in st.session_state:
+            st.session_state.mostrar_huerfanos = False
+
+        col_ver, col_ocultar = st.columns(2)
+        if col_ver.button("📋 Mostrar productos sin equivalencias"):
+            st.session_state.mostrar_huerfanos = True
+            st.rerun()
+        if st.session_state.mostrar_huerfanos and col_ocultar.button("🙈 Ocultar"):
+            st.session_state.mostrar_huerfanos = False
+            st.rerun()
+
+        if st.session_state.mostrar_huerfanos:
+            total_sin_eq = contar_productos_sin_equivalencias()
+            st.write(f"Total: **{total_sin_eq}** producto(s) sin ninguna equivalencia.")
+
+            if total_sin_eq == 0:
+                st.info("¡Todos los productos tienen al menos una equivalencia! 🎉")
             else:
-                st.info("No había productos sueltos para borrar.")
+                c.execute("SELECT nombre FROM marcas ORDER BY nombre")
+                marcas_para_filtro = ["Todas"] + [r["nombre"] for r in c.fetchall()]
+                marca_filtro_huerfanos = st.selectbox("Filtrar por marca:", marcas_para_filtro, key="filtro_huerfanos")
+                cantidad_mostrar = st.selectbox("Mostrar en pantalla:", [25, 50, 100], index=0,
+                                                 help="La descarga en Excel siempre incluye todo, esto es solo lo que se dibuja en pantalla.")
 
-    st.markdown("---")
-    st.markdown("**🧩 Productos sin equivalencias**")
-    st.caption(
-        "Esta sección puede ser pesada, así que se calcula solo cuando la pedís (no en cada búsqueda)."
-    )
+                pendientes_completo = listar_productos_sin_equivalencias(marca_filtro_huerfanos, limite=2000)
+                if pendientes_completo:
+                    st.download_button(
+                        "⬇️ Descargar lista completa (Excel)",
+                        data=to_excel_bytes(quitar_id(pendientes_completo)),
+                        file_name="productos_sin_equivalencias.xlsx",
+                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                    )
+                    pendientes = pendientes_completo[:cantidad_mostrar]
+                    st.caption(f"Mostrando {len(pendientes)} de {len(pendientes_completo)}.")
+                    for fila in pendientes:
+                        colC, colM, colB = st.columns([3, 2, 1.2])
+                        colC.write(f"{fila['Codigo']}" + (f" — {fila['Descripcion']}" if fila.get('Descripcion') else ""))
+                        colM.write(fila['Marca'])
+                        if colB.button("🔗 Usar", key=f"usar_huerfano_{fila['ID']}"):
+                            st.session_state["vincular_pendiente"] = {
+                                "cod_a": fila["Codigo"],
+                                "marca_a": fila["Marca"],
+                                "desc_a": fila.get("Descripcion") or ""
+                            }
+                            st.success("Cargado. Andá a la pestaña '🔗 Vincular manual' para completar el Código B.")
+                            st.rerun()
+                else:
+                    st.info("Sin resultados para esa marca.")
 
-    if "mostrar_huerfanos" not in st.session_state:
-        st.session_state.mostrar_huerfanos = False
+    with sub_mensajeria:
+        st.markdown("**💬 Texto del mensaje de WhatsApp**")
+        st.caption(
+            "Personalizá el encabezado y el pie del mensaje que se arma en 'Lista WhatsApp' — por "
+            "ejemplo para poner el nombre real de tu local, un teléfono de contacto, horarios, etc."
+        )
+        encabezado_actual = obtener_config("whatsapp_encabezado", "🔧 *Equivalencias El Chavo*")
+        pie_actual = obtener_config("whatsapp_pie", "")
+        nuevo_encabezado = st.text_input("Encabezado del mensaje:", value=encabezado_actual, key="wa_encabezado_in")
+        nuevo_pie = st.text_area("Pie del mensaje (opcional):", value=pie_actual, key="wa_pie_in",
+                                  placeholder="Ej: 📍 Av. Siempreviva 742 - Horario: L a V 9 a 18hs")
+        if st.button("💾 Guardar textos del mensaje"):
+            guardar_config("whatsapp_encabezado", nuevo_encabezado.strip() or "🔧 *Equivalencias El Chavo*")
+            guardar_config("whatsapp_pie", nuevo_pie.strip())
+            st.success("Guardado.")
+            st.rerun()
 
-    col_ver, col_ocultar = st.columns(2)
-    if col_ver.button("📋 Mostrar productos sin equivalencias"):
-        st.session_state.mostrar_huerfanos = True
-        st.rerun()
-    if st.session_state.mostrar_huerfanos and col_ocultar.button("🙈 Ocultar"):
-        st.session_state.mostrar_huerfanos = False
-        st.rerun()
+        st.markdown("---")
+        st.markdown("**💳 Alias para QR de transferencia**")
+        st.caption(
+            "Cargá los alias/CBU que usás (Mercado Pago, distintos bancos, etc.). Al armar una "
+            "cotización en 'Lista WhatsApp' vas a poder elegir cuál de estos usar para el QR del PDF. "
+            "Si subís el QR real que te da tu banco/Mercado Pago/MODO, se usa ese (funciona de verdad "
+            "para transferir). Si no subís nada, se genera uno con el alias/CBU como texto plano — "
+            "sirve para no tipear a mano, pero no lo van a reconocer como QR de pago."
+        )
+        alias_cargados = listar_alias_transferencia()
+        if alias_cargados:
+            st.dataframe(
+                [{k: v for k, v in a.items() if k not in ("ID", "TieneQrReal")} | {"QR real": "✅" if a["TieneQrReal"] else "—"}
+                 for a in alias_cargados],
+                use_container_width=True, hide_index=True
+            )
 
-    if st.session_state.mostrar_huerfanos:
-        total_sin_eq = contar_productos_sin_equivalencias()
-        st.write(f"Total: **{total_sin_eq}** producto(s) sin ninguna equivalencia.")
+        opciones_alias_edit = ["➕ Nuevo alias..."] + [f"{a['Nombre']} (editar)" for a in alias_cargados]
+        alias_opcion_edit = st.selectbox("Elegí qué hacer:", opciones_alias_edit, key="alias_opcion_edit")
+        alias_actual = None
+        if alias_opcion_edit != "➕ Nuevo alias...":
+            nombre_buscar = alias_opcion_edit.replace(" (editar)", "")
+            alias_actual = next(a for a in alias_cargados if a["Nombre"] == nombre_buscar)
 
-        if total_sin_eq == 0:
-            st.info("¡Todos los productos tienen al menos una equivalencia! 🎉")
-        else:
-            c.execute("SELECT nombre FROM marcas ORDER BY nombre")
-            marcas_para_filtro = ["Todas"] + [r["nombre"] for r in c.fetchall()]
-            marca_filtro_huerfanos = st.selectbox("Filtrar por marca:", marcas_para_filtro, key="filtro_huerfanos")
-            cantidad_mostrar = st.selectbox("Mostrar en pantalla:", [25, 50, 100], index=0,
-                                             help="La descarga en Excel siempre incluye todo, esto es solo lo que se dibuja en pantalla.")
+        cae1, cae2 = st.columns(2)
+        nombre_alias_in = cae1.text_input("Nombre (ej: Mercado Pago, Banco Galicia)",
+                                           value=(alias_actual or {}).get("Nombre", ""), key="alias_nombre_in")
+        alias_in = cae2.text_input("Alias", value=(alias_actual or {}).get("Alias", ""), key="alias_alias_in")
+        cae3, cae4 = st.columns(2)
+        cbu_in = cae3.text_input("CBU/CVU (opcional)", value=(alias_actual or {}).get("CBU", ""), key="alias_cbu_in")
+        titular_in = cae4.text_input("Titular (opcional)", value=(alias_actual or {}).get("Titular", ""), key="alias_titular_in")
 
-            pendientes_completo = listar_productos_sin_equivalencias(marca_filtro_huerfanos, limite=2000)
-            if pendientes_completo:
-                st.download_button(
-                    "⬇️ Descargar lista completa (Excel)",
-                    data=to_excel_bytes(quitar_id(pendientes_completo)),
-                    file_name="productos_sin_equivalencias.xlsx",
-                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        archivo_qr_real = st.file_uploader(
+            "QR real (opcional — el que te dio tu banco/Mercado Pago/MODO):",
+            type=["png", "jpg", "jpeg"], key="alias_qr_real_archivo"
+        )
+        if alias_actual and alias_actual["TieneQrReal"]:
+            st.caption("✅ Este alias ya tiene un QR real cargado. Subí uno nuevo para reemplazarlo.")
+
+        cbtn1, cbtn2, cbtn3 = st.columns(3)
+        if cbtn1.button("💾 Guardar alias"):
+            if not nombre_alias_in.strip() or not alias_in.strip():
+                st.warning("Completá al menos el nombre y el alias.")
+            else:
+                guardar_alias_transferencia(
+                    nombre_alias_in, alias_in, cbu_in, titular_in,
+                    alias_id=(alias_actual["ID"] if alias_actual else None),
+                    qr_real_bytes=(archivo_qr_real.getvalue() if archivo_qr_real else None)
                 )
-                pendientes = pendientes_completo[:cantidad_mostrar]
-                st.caption(f"Mostrando {len(pendientes)} de {len(pendientes_completo)}.")
-                for fila in pendientes:
-                    colC, colM, colB = st.columns([3, 2, 1.2])
-                    colC.write(f"{fila['Codigo']}" + (f" — {fila['Descripcion']}" if fila.get('Descripcion') else ""))
-                    colM.write(fila['Marca'])
-                    if colB.button("🔗 Usar", key=f"usar_huerfano_{fila['ID']}"):
-                        st.session_state["vincular_pendiente"] = {
-                            "cod_a": fila["Codigo"],
-                            "marca_a": fila["Marca"],
-                            "desc_a": fila.get("Descripcion") or ""
-                        }
-                        st.success("Cargado. Andá a la pestaña '🔗 Vincular manual' para completar el Código B.")
-                        st.rerun()
-            else:
-                st.info("Sin resultados para esa marca.")
-
-    st.markdown("---")
-    st.markdown("**Catálogos externos**")
-    st.caption("Agregá los sitios de proveedores que querés que aparezcan como botones al buscar un código.")
-
-    catalogos = listar_catalogos_externos()
-    if catalogos:
-        for cat in catalogos:
-            colA, colB, colC = st.columns([2, 5, 1])
-            colA.write(cat["nombre"])
-            colB.write(cat["url"])
-            if colC.button("🗑️", key=f"del_cat_{cat['id']}"):
-                eliminar_catalogo_externo(cat["id"])
+                st.success("Alias guardado.")
                 st.rerun()
-    else:
-        st.caption("Todavía no agregaste ningún catálogo externo.")
+        if alias_actual and alias_actual["TieneQrReal"] and cbtn2.button("🗑️ Sacar el QR real"):
+            eliminar_qr_real(alias_actual["ID"])
+            st.success("QR real eliminado — vuelve a usar el de texto plano.")
+            st.rerun()
+        if alias_actual and cbtn3.button("🗑️ Eliminar este alias"):
+            eliminar_alias_transferencia(alias_actual["ID"])
+            st.success("Alias eliminado.")
+            st.rerun()
 
-    with st.form("nuevo_catalogo", clear_on_submit=True):
-        colN, colU = st.columns(2)
-        nombre_cat = colN.text_input("Nombre del proveedor", placeholder="Ej: Wega")
-        url_cat = colU.text_input("URL del catálogo", placeholder="Ej: wegamotors.com")
-        agregar = st.form_submit_button("➕ Agregar catálogo")
-        if agregar:
-            if not nombre_cat.strip() or not url_cat.strip():
-                st.warning("Completá nombre y URL.")
+    with sub_combos:
+        st.markdown("**🧩 Combos de repuestos relacionados**")
+        st.caption(
+            "Cuando alguien busca un producto cuya descripción contenga el 'disparador', la app va a "
+            "sugerir estos ítems relacionados con un botón para buscarlos también. Ej: disparador "
+            "'correa de distribucion' → ítems 'Kit de distribución', 'Tensor', 'Bomba de agua'."
+        )
+        combos_actuales = listar_combos()
+        if combos_actuales:
+            st.dataframe(
+                [{"Disparador": c_["disparador"], "Ítems sugeridos": ", ".join(c_["items"])} for c_ in combos_actuales],
+                use_container_width=True, hide_index=True
+            )
+        disparador_edit = st.text_input(
+            "Disparador (palabra/frase que aparece en la descripción del producto):",
+            placeholder="Ej: correa de distribucion", key="combo_disparador"
+        )
+        items_edit = st.text_area(
+            "Ítems sugeridos (uno por línea):",
+            placeholder="Kit de distribución\nTensor de distribución\nBomba de agua",
+            key="combo_items", height=100
+        )
+        cc1, cc2 = st.columns(2)
+        if cc1.button("💾 Guardar combo"):
+            if not disparador_edit.strip() or not items_edit.strip():
+                st.warning("Completá el disparador y al menos un ítem.")
             else:
-                agregar_catalogo_externo(nombre_cat, url_cat)
-                st.success(f"'{nombre_cat}' agregado.")
+                guardar_combo(disparador_edit, items_edit.strip().splitlines())
+                st.success(f"Combo para '{disparador_edit.strip()}' guardado.")
+                st.rerun()
+        if cc2.button("🗑️ Eliminar combo (según el disparador de arriba)"):
+            if disparador_edit.strip():
+                eliminar_combo(disparador_edit)
+                st.success(f"Combo para '{disparador_edit.strip()}' eliminado.")
+                st.rerun()
+
+    with sub_mantenimiento:
+        st.markdown("**Limpieza de la base**")
+        st.caption(
+            "Con el tiempo pueden quedar códigos cargados por error que no están vinculados a "
+            "ninguna equivalencia. Este botón los borra."
+        )
+        if st.button("🧹 Borrar productos sin ninguna equivalencia"):
+            if pedir_password_admin("borrar productos sin equivalencias"):
+                borrados = depurar_huerfanos()
+                if borrados:
+                    st.success(f"Se borraron {borrados} producto(s) sin equivalencias.")
+                else:
+                    st.info("No había productos sueltos para borrar.")
+
+        st.markdown("---")
+        st.markdown("**🗑️ Papelera**")
+        st.caption(
+            "Cuando borrás un combo, un alias de transferencia o un producto puntual (por ID), queda "
+            "acá guardado por si te equivocaste. Se borra en forma permanente solo cuando vos lo pedís "
+            "o pasan más de 30 días. (Los borrados masivos — eliminar una marca entera, fusionar marcas, "
+            "restaurar un backup — no pasan por acá, esos son irreversibles como siempre.)"
+        )
+        items_papelera = listar_papelera()
+        if not items_papelera:
+            st.caption("La papelera está vacía.")
+        else:
+            iconos_tipo = {"combo": "🧩", "alias": "💳", "producto": "📦"}
+            for item in items_papelera:
+                colp1, colp2, colp3 = st.columns([3, 1, 1])
+                icono = iconos_tipo.get(item["Tipo"], "🗑️")
+                colp1.write(f"{icono} {item['Tipo'].capitalize()} — eliminado por {item['Eliminado por'] or 'alguien'} el {item['Fecha']}")
+                if colp2.button("↩️ Restaurar", key=f"restaurar_papelera_{item['ID']}"):
+                    ok, error_restaurar = restaurar_de_papelera(item["ID"])
+                    if ok:
+                        st.success("Restaurado.")
+                        st.rerun()
+                    else:
+                        st.error(error_restaurar)
+                if colp3.button("🗑️", key=f"borrar_papelera_{item['ID']}", help="Borrar en forma permanente, sin restaurar"):
+                    with db_lock:
+                        c.execute("DELETE FROM papelera WHERE id = ?", (item["ID"],))
+                        conn.commit()
+                    st.rerun()
+
+            st.caption("También se limpia sola: lo que lleva más de 30 días acá se borra en forma permanente.")
+            if st.button("🧹 Vaciar ahora lo de más de 30 días"):
+                vaciar_papelera_antigua(30)
                 st.rerun()
 
 # ============================================================
 # TAB 5: ESTADÍSTICAS
 # ============================================================
 with tab5:
-    st.subheader("Estadísticas generales")
+    st.subheader("📊 Estadísticas")
 
-    c.execute("SELECT COUNT(*) FROM marcas")
-    total_marcas = c.fetchone()[0]
-    c.execute("SELECT COUNT(*) FROM productos")
-    total_productos = c.fetchone()[0]
-    c.execute("SELECT COUNT(*) FROM equivalencias")
-    total_equiv = c.fetchone()[0]
-
-    m1, m2, m3 = st.columns(3)
-    m1.metric("Marcas registradas", total_marcas)
-    m2.metric("Códigos cargados", total_productos)
-    m3.metric("Vínculos de equivalencia", total_equiv // 2 if total_equiv else 0)
-
-    st.markdown("---")
-    st.markdown("**📦 Favoritos con poco stock**")
-    umbral_stock = st.number_input("Alertar cuando el stock sea menor o igual a:", min_value=0, value=2, step=1)
-    stock_bajo = listar_favoritos_stock_bajo(umbral_stock)
-    if stock_bajo:
-        st.warning(f"{len(stock_bajo)} producto(s) favorito(s) con poco stock — considerá reponerlos:")
-        st.dataframe(quitar_id(stock_bajo), use_container_width=True, hide_index=True)
-    else:
-        st.caption("Ningún favorito con stock bajo por ahora.")
-
-    c.execute("""SELECT m.nombre, COUNT(p.id) AS productos
-                 FROM marcas m LEFT JOIN productos p ON p.marca_id = m.id
-                 GROUP BY m.id ORDER BY productos DESC LIMIT 15""")
-    top_marcas = c.fetchall()
-    if top_marcas:
-        chart_data = {"Marca": [t["nombre"] for t in top_marcas],
-                       "Productos": [t["productos"] for t in top_marcas]}
-        st.bar_chart(chart_data, x="Marca", y="Productos")
-
-    st.markdown("---")
-    st.markdown("**Historial de importaciones**")
-    c.execute("""SELECT marca AS Marca, archivo AS Archivo, filas_cargadas AS Cargadas,
-                 filas_omitidas AS Omitidas, fecha AS Fecha FROM importaciones
-                 ORDER BY fecha DESC LIMIT 20""")
-    imports = filas_a_listas(c)
-    if imports:
-        st.dataframe(imports, use_container_width=True, hide_index=True)
-    else:
-        st.caption("Todavía no se registraron importaciones.")
-
-    st.markdown("---")
-    if st.button("🗄️ Preparar backup de la base de datos"):
-        with open(DB_PATH, "rb") as f:
-            st.session_state["backup_bytes"] = f.read()
-    if "backup_bytes" in st.session_state:
-        st.download_button("⬇️ Descargar backup (.db)", data=st.session_state["backup_bytes"],
-                            file_name=f"equivalencias_backup_{datetime.now():%Y%m%d}.db")
-
-    st.markdown("---")
-    st.markdown("**📦 Exportar configuración (sin el catálogo de productos)**")
-    st.caption(
-        "Combos de repuestos, códigos DTC y fabricantes por WMI en un solo archivo de texto — útil "
-        "como respaldo liviano aparte del backup completo, o para copiarle la configuración a otra "
-        "sucursal sin duplicar todo el catálogo de productos."
-    )
-    st.download_button(
-        "⬇️ Descargar configuración (.txt)",
-        data=exportar_configuracion_txt(),
-        file_name=f"configuracion_{datetime.now():%Y%m%d}.txt",
-        mime="text/plain"
+    sub_resumen, sub_importaciones, sub_backup, sub_auditoria, sub_busquedas = st.tabs(
+        ["📈 Resumen", "📥 Importaciones", "💾 Backup y config", "🧮 Auditoría y depósito", "🔎 Búsquedas sin resultado"]
     )
 
-    st.markdown("---")
-    st.markdown("**♻️ Restaurar desde un backup**")
-    st.caption(
-        "⚠️ Esto reemplaza TODA la base actual por la del archivo que subas. "
-        "Usalo si el hosting se reinició y perdiste datos, o para volver a un backup anterior."
-    )
-    archivo_restaurar = st.file_uploader("Subí un archivo .db de backup:", type=["db"], key="restore_upload")
-    confirmar_restore = st.checkbox("Entiendo que esto borra los datos actuales y los reemplaza")
-    if st.button("♻️ Restaurar backup", disabled=not (archivo_restaurar and confirmar_restore)):
-        if pedir_password_admin("restaurar un backup"):
-            restaurar_backup(archivo_restaurar)
-            st.success("Backup restaurado. Recargando...")
-            st.rerun()
+    with sub_resumen:
+        st.subheader("Estadísticas generales")
 
-    st.markdown("---")
-    st.markdown("**🧮 Auditoría diaria de stock (muestreo aleatorio)**")
-    st.caption(
-        "Todas las mañanas se puede generar una lista corta de productos al azar (priorizando favoritos "
-        "y los que tienen precio cargado) para contarlos a mano en 5 minutos y detectar descalces antes de que se acumulen."
-    )
-    cant_auditoria = st.number_input("Cantidad de productos a auditar hoy:", min_value=3, max_value=20, value=8, step=1)
-    if st.button("🎲 Generar auditoría de hoy"):
-        generada = generar_auditoria_hoy(cant_auditoria)
-        if generada:
-            st.success("Auditoría de hoy generada.")
-            st.rerun()
+        c.execute("SELECT COUNT(*) FROM marcas")
+        total_marcas = c.fetchone()[0]
+        c.execute("SELECT COUNT(*) FROM productos")
+        total_productos = c.fetchone()[0]
+        c.execute("SELECT COUNT(*) FROM equivalencias")
+        total_equiv = c.fetchone()[0]
+
+        m1, m2, m3 = st.columns(3)
+        m1.metric("Marcas registradas", total_marcas)
+        m2.metric("Códigos cargados", total_productos)
+        m3.metric("Vínculos de equivalencia", total_equiv // 2 if total_equiv else 0)
+
+        st.markdown("---")
+        st.markdown("**📦 Favoritos con poco stock**")
+        umbral_stock = st.number_input("Alertar cuando el stock sea menor o igual a:", min_value=0, value=2, step=1)
+        stock_bajo = listar_favoritos_stock_bajo(umbral_stock)
+        if stock_bajo:
+            st.warning(f"{len(stock_bajo)} producto(s) favorito(s) con poco stock — considerá reponerlos:")
+            st.dataframe(quitar_id(stock_bajo), use_container_width=True, hide_index=True)
         else:
-            st.info("Ya había una auditoría generada para hoy (ver abajo).")
+            st.caption("Ningún favorito con stock bajo por ahora.")
 
-    auditoria_hoy = listar_auditoria_hoy()
-    if auditoria_hoy:
-        for item in auditoria_hoy:
-            colA1, colA2, colA3 = st.columns([3, 1.5, 1])
-            colA1.write(f"**{item['Codigo']}** ({item['Marca']}) — sistema: {item['Stock sistema']}")
-            if item["Resuelto"]:
-                signo = "✅ OK" if item["Diferencia"] == 0 else f"⚠️ Diferencia: {item['Diferencia']:+d}"
-                colA2.write(f"Contado: {item['Stock contado']} — {signo}")
+        c.execute("""SELECT m.nombre, COUNT(p.id) AS productos
+                     FROM marcas m LEFT JOIN productos p ON p.marca_id = m.id
+                     GROUP BY m.id ORDER BY productos DESC LIMIT 15""")
+        top_marcas = c.fetchall()
+        if top_marcas:
+            st.markdown("---")
+            st.markdown("**📊 Top marcas por cantidad de códigos cargados**")
+            chart_data = {"Marca": [t["nombre"] for t in top_marcas],
+                           "Productos": [t["productos"] for t in top_marcas]}
+            st.bar_chart(chart_data, x="Marca", y="Productos")
+
+        st.markdown("---")
+        st.markdown("**🤖 Uso de las funciones de IA (últimos 30 días)**")
+        st.caption(
+            "Las primeras 4 funciones usan una API key gratuita — nunca pueden generarte un cobro, "
+            "en el peor caso fallan por límite de uso. Solo 'Generar imagen orientativa' usa una key "
+            "aparte con facturación habilitada, y es la única que tiene costo real."
+        )
+        uso_ia_actual = resumen_uso_ia()
+        if uso_ia_actual:
+            st.dataframe(uso_ia_actual, use_container_width=True, hide_index=True)
+        else:
+            st.caption("Todavía no se usó ninguna función de IA.")
+
+    with sub_importaciones:
+        st.markdown("**Historial de importaciones**")
+        c.execute("""SELECT marca AS Marca, archivo AS Archivo, filas_cargadas AS Cargadas,
+                     filas_omitidas AS Omitidas, fecha AS Fecha FROM importaciones
+                     ORDER BY fecha DESC LIMIT 20""")
+        imports = filas_a_listas(c)
+        if imports:
+            st.dataframe(imports, use_container_width=True, hide_index=True)
+        else:
+            st.caption("Todavía no se registraron importaciones.")
+
+    with sub_backup:
+        if st.button("🗄️ Preparar backup de la base de datos"):
+            with open(DB_PATH, "rb") as f:
+                st.session_state["backup_bytes"] = f.read()
+        if "backup_bytes" in st.session_state:
+            st.download_button("⬇️ Descargar backup (.db)", data=st.session_state["backup_bytes"],
+                                file_name=f"equivalencias_backup_{datetime.now():%Y%m%d}.db")
+
+        st.markdown("---")
+        st.markdown("**📦 Exportar configuración (sin el catálogo de productos)**")
+        st.caption(
+            "Combos de repuestos, códigos DTC y fabricantes por WMI en un solo archivo de texto — útil "
+            "como respaldo liviano aparte del backup completo, o para copiarle la configuración a otra "
+            "sucursal sin duplicar todo el catálogo de productos."
+        )
+        st.download_button(
+            "⬇️ Descargar configuración (.txt)",
+            data=exportar_configuracion_txt(),
+            file_name=f"configuracion_{datetime.now():%Y%m%d}.txt",
+            mime="text/plain"
+        )
+
+        st.markdown("---")
+        st.markdown("**♻️ Restaurar desde un backup**")
+        st.caption(
+            "⚠️ Esto reemplaza TODA la base actual por la del archivo que subas. "
+            "Usalo si el hosting se reinició y perdiste datos, o para volver a un backup anterior."
+        )
+        archivo_restaurar = st.file_uploader("Subí un archivo .db de backup:", type=["db"], key="restore_upload")
+        confirmar_restore = st.checkbox("Entiendo que esto borra los datos actuales y los reemplaza")
+        if st.button("♻️ Restaurar backup", disabled=not (archivo_restaurar and confirmar_restore)):
+            if pedir_password_admin("restaurar un backup"):
+                restaurar_backup(archivo_restaurar)
+                st.success("Backup restaurado. Recargando...")
+                st.rerun()
+
+    with sub_auditoria:
+        st.markdown("**🧮 Auditoría diaria de stock (muestreo aleatorio)**")
+        st.caption(
+            "Todas las mañanas se puede generar una lista corta de productos al azar (priorizando favoritos "
+            "y los que tienen precio cargado) para contarlos a mano en 5 minutos y detectar descalces antes de que se acumulen."
+        )
+        cant_auditoria = st.number_input("Cantidad de productos a auditar hoy:", min_value=3, max_value=20, value=8, step=1)
+        if st.button("🎲 Generar auditoría de hoy"):
+            generada = generar_auditoria_hoy(cant_auditoria)
+            if generada:
+                st.success("Auditoría de hoy generada.")
+                st.rerun()
             else:
-                contado = colA2.number_input("Contado", min_value=0, step=1, key=f"conteo_{item['ID_auditoria']}",
-                                              label_visibility="collapsed")
-                if colA3.button("💾", key=f"guardar_conteo_{item['ID_auditoria']}"):
-                    registrar_conteo_auditoria(item["ID_auditoria"], contado)
-                    st.rerun()
-    else:
-        st.caption("Todavía no generaste la auditoría de hoy.")
+                st.info("Ya había una auditoría generada para hoy (ver abajo).")
 
-    st.markdown("---")
-    st.markdown("**📦 Matriz ABC — ubicación sugerida en depósito**")
-    st.caption(
-        "Como la app no tiene un módulo de ventas, la rotación se aproxima con la cantidad de veces que "
-        "se buscó cada código. Los más buscados (A) conviene tenerlos más a mano."
-    )
-    matriz = calcular_matriz_abc()
-    if matriz:
-        st.dataframe(quitar_id(matriz), use_container_width=True, hide_index=True)
-        st.caption("Para cargar o corregir la ubicación de un producto, andá a la pestaña 'Administrar'.")
-    else:
-        st.caption("Todavía no hay suficientes búsquedas registradas para armar la matriz.")
+        auditoria_hoy = listar_auditoria_hoy()
+        if auditoria_hoy:
+            for item in auditoria_hoy:
+                colA1, colA2, colA3 = st.columns([3, 1.5, 1])
+                colA1.write(f"**{item['Codigo']}** ({item['Marca']}) — sistema: {item['Stock sistema']}")
+                if item["Resuelto"]:
+                    signo = "✅ OK" if item["Diferencia"] == 0 else f"⚠️ Diferencia: {item['Diferencia']:+d}"
+                    colA2.write(f"Contado: {item['Stock contado']} — {signo}")
+                else:
+                    contado = colA2.number_input("Contado", min_value=0, step=1, key=f"conteo_{item['ID_auditoria']}",
+                                                  label_visibility="collapsed")
+                    if colA3.button("💾", key=f"guardar_conteo_{item['ID_auditoria']}"):
+                        registrar_conteo_auditoria(item["ID_auditoria"], contado)
+                        st.rerun()
+        else:
+            st.caption("Todavía no generaste la auditoría de hoy.")
 
-    st.markdown("---")
-    st.markdown("**🔎 Códigos buscados sin resultado**")
-    st.caption("Qué te están pidiendo los clientes que todavía no tenés cargado.")
-    fallidas = listar_busquedas_sin_resultado()
-    if fallidas:
-        st.dataframe(fallidas, use_container_width=True, hide_index=True)
-    else:
-        st.caption("Sin registros todavía.")
+        st.markdown("---")
+        st.markdown("**📦 Matriz ABC — ubicación sugerida en depósito**")
+        st.caption(
+            "Como la app no tiene un módulo de ventas, la rotación se aproxima con la cantidad de veces que "
+            "se buscó cada código. Los más buscados (A) conviene tenerlos más a mano."
+        )
+        matriz = calcular_matriz_abc()
+        if matriz:
+            st.dataframe(quitar_id(matriz), use_container_width=True, hide_index=True)
+            st.caption("Para cargar o corregir la ubicación de un producto, andá a la pestaña 'Administrar'.")
+        else:
+            st.caption("Todavía no hay suficientes búsquedas registradas para armar la matriz.")
+
+    with sub_busquedas:
+        st.markdown("**🔎 Códigos buscados sin resultado**")
+        st.caption("Qué te están pidiendo los clientes que todavía no tenés cargado.")
+        fallidas = listar_busquedas_sin_resultado()
+        if fallidas:
+            st.dataframe(fallidas, use_container_width=True, hide_index=True)
+        else:
+            st.caption("Sin registros todavía.")
 
 # ============================================================
 # TAB 6: LISTA PARA WHATSAPP
@@ -3325,7 +3864,9 @@ with tab6:
         incluir_stock = st.checkbox("Incluir stock en el mensaje", value=False)
 
         # Armado del texto del mensaje, agrupado por producto buscado
-        partes = ["🔧 *Equivalencias El Chavo*\n"]
+        encabezado_wa = obtener_config("whatsapp_encabezado", "🔧 *Equivalencias El Chavo*")
+        pie_wa = obtener_config("whatsapp_pie", "")
+        partes = [f"{encabezado_wa}\n"]
         for item in lista:
             partes.append(f"\n📦 *{item['codigo_buscado']}*")
             for fila in item["resultados"]:
@@ -3340,17 +3881,25 @@ with tab6:
                 if extras:
                     linea += " (" + " · ".join(extras) + ")"
                 partes.append(linea)
+        if pie_wa.strip():
+            partes.append(f"\n{pie_wa}")
         mensaje = "\n".join(partes)
 
         st.text_area("Vista previa del mensaje:", value=mensaje, height=300)
 
         alias_disponibles = listar_alias_transferencia()
         alias_elegido = None
+        qr_real_para_pdf = None
         if alias_disponibles:
             opciones_alias = ["Sin QR de transferencia"] + [a["Nombre"] for a in alias_disponibles]
             alias_sel = st.selectbox("Alias para el QR del PDF (opcional):", opciones_alias, key="alias_para_pdf")
             if alias_sel != "Sin QR de transferencia":
                 alias_elegido = next(a for a in alias_disponibles if a["Nombre"] == alias_sel)
+                if alias_elegido["TieneQrReal"]:
+                    qr_real_para_pdf = obtener_qr_real(alias_elegido["ID"])
+                    st.caption("✅ Se va a usar el QR real que subiste para este alias.")
+                else:
+                    st.caption("ℹ️ Este alias no tiene QR real cargado — se va a generar uno con el alias/CBU como texto.")
         else:
             st.caption(
                 "Todavía no cargaste ningún alias/CBU — podés hacerlo en 'Administrar' → "
@@ -3361,7 +3910,8 @@ with tab6:
         url_whatsapp = "https://wa.me/?text=" + urllib.parse.quote(mensaje)
         col_wa, col_pdf = st.columns(2)
         col_wa.link_button("📲 Abrir en WhatsApp", url_whatsapp, type="primary", use_container_width=True)
-        pdf_bytes = generar_pdf_cotizacion(lista, incluir_precio, incluir_stock, alias_qr=alias_elegido)
+        pdf_bytes = generar_pdf_cotizacion(lista, incluir_precio, incluir_stock,
+                                            alias_qr=alias_elegido, qr_real_bytes=qr_real_para_pdf)
         col_pdf.download_button(
             "📄 Descargar cotización (PDF)", data=pdf_bytes,
             file_name=f"cotizacion_{datetime.now():%Y%m%d_%H%M}.pdf",
@@ -3403,6 +3953,40 @@ with tab7:
 
     st.markdown("---")
     st.markdown("**Buscar / registrar un vehículo**")
+
+    with st.expander("📷 Cargar por foto de cédula/título (con IA)"):
+        st.caption(
+            "Sacale una foto a la cédula verde/azul o al título. La IA lee patente, marca, modelo, "
+            "año y motorización — **siempre revisá los datos antes de guardar**, un OCR puede "
+            "confundir letras o números parecidos."
+        )
+        foto_cedula = st.file_uploader("Foto de la cédula/título:", type=["png", "jpg", "jpeg"], key="foto_cedula")
+        if foto_cedula and st.button("🔍 Leer datos"):
+            with st.spinner("Leyendo..."):
+                datos_cedula, error_cedula = extraer_datos_cedula(foto_cedula.getvalue())
+            if error_cedula:
+                st.error(error_cedula)
+            else:
+                st.session_state["datos_cedula_leidos"] = datos_cedula
+        if st.session_state.get("datos_cedula_leidos"):
+            datos = st.session_state["datos_cedula_leidos"]
+            st.json(datos)
+            if st.button("✅ Usar estos datos"):
+                st.session_state["cedula_pendiente"] = datos
+                st.session_state.pop("datos_cedula_leidos", None)
+                st.rerun()
+
+    # Si se leyó una cédula, precargar los campos ANTES de crear los widgets — si se hace
+    # después de que ya se dibujaron en pantalla, Streamlit tira un error.
+    if "cedula_pendiente" in st.session_state:
+        datos = st.session_state.pop("cedula_pendiente")
+        if datos.get("patente"):
+            st.session_state["patente_buscar"] = str(datos["patente"]).strip().upper()
+        st.session_state["form_marca_auto"] = datos.get("marca") or ""
+        st.session_state["form_modelo_auto"] = datos.get("modelo") or ""
+        st.session_state["form_anio_auto"] = str(datos.get("anio") or "")
+        st.session_state["form_motorizacion_auto"] = datos.get("motorizacion") or ""
+
     patente_input = st.text_input("Patente:", placeholder="Ej: AB123CD", key="patente_buscar").strip().upper()
 
     if patente_input:
@@ -3413,17 +3997,23 @@ with tab7:
                 cv1, cv2 = st.columns(2)
                 cliente_nombre = cv1.text_input("Nombre del cliente", value=(vehiculo or {}).get("cliente_nombre") or "")
                 cliente_tel = cv2.text_input("Teléfono", value=(vehiculo or {}).get("cliente_telefono") or "")
-                cv3, cv4, cv5 = st.columns(3)
-                marca_auto = cv3.text_input("Marca del auto", value=(vehiculo or {}).get("marca_auto") or "")
-                modelo_auto = cv4.text_input("Modelo", value=(vehiculo or {}).get("modelo_auto") or "")
-                km_actual_input = cv5.number_input(
-                    "Kilometraje actual (se actualiza cada vez)", min_value=0, step=1000,
+                cv3, cv4 = st.columns(2)
+                marca_auto = cv3.text_input("Marca del auto", value=(vehiculo or {}).get("marca_auto") or "",
+                                             key="form_marca_auto")
+                modelo_auto = cv4.text_input("Modelo", value=(vehiculo or {}).get("modelo_auto") or "",
+                                              key="form_modelo_auto")
+                cv5, cv6, cv7 = st.columns(3)
+                anio_auto = cv5.text_input("Año", value=(vehiculo or {}).get("anio") or "", key="form_anio_auto")
+                motorizacion_auto = cv6.text_input("Motorización", value=(vehiculo or {}).get("motorizacion") or "",
+                                                    key="form_motorizacion_auto")
+                km_actual_input = cv7.number_input(
+                    "Km actual", min_value=0, step=1000,
                     value=int((vehiculo or {}).get("km_actual") or 0)
                 )
                 guardar_vehiculo = st.form_submit_button("💾 Guardar vehículo", type="primary")
             if guardar_vehiculo:
                 get_or_create_vehiculo(patente_input, cliente_nombre, cliente_tel, marca_auto, modelo_auto,
-                                        km_actual_input or None)
+                                        km_actual_input or None, anio_auto, motorizacion_auto)
                 st.success(f"Vehículo {patente_input} guardado.")
                 st.rerun()
 
@@ -3714,7 +4304,7 @@ with tab8:
                                 eliminar_punto_esquema(punto["id"])
                                 st.rerun()
 
-                if es_admin():
+                if es_operador_o_admin():
                     with st.expander("➕ Agregar pieza a este esquema"):
                         if img_bytes:
                             st.caption(
