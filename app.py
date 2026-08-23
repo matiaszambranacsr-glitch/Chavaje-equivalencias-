@@ -4,7 +4,6 @@ import re
 import io
 import threading
 import unicodedata
-import random
 from datetime import datetime
 from urllib.parse import quote
 from openpyxl import load_workbook, Workbook
@@ -382,6 +381,16 @@ def get_connection():
         pos_x REAL,
         pos_y REAL,
         orden INTEGER DEFAULT 0
+    )""")
+
+    # Alias/CBU para el QR de transferencia en las cotizaciones. Se pueden cargar varios
+    # (Mercado Pago, distintos bancos, etc.) y elegir cuál usar en cada cotización puntual.
+    c.execute("""CREATE TABLE IF NOT EXISTS alias_transferencia (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        nombre TEXT NOT NULL,
+        alias TEXT,
+        cbu TEXT,
+        titular TEXT
     )""")
 
     # Combos de repuestos que suelen cambiarse juntos (ej: correa de distribución -> kit + tensor + bomba de agua).
@@ -895,18 +904,46 @@ def incrementar_veces_buscado(clean_code):
         conn.commit()
 
 
+def armar_lista_picking(codigos_texto):
+    """Busca varios códigos a la vez y devuelve el resultado ordenado por ubicación en el
+    depósito, para que el que arma el pedido camine en un solo recorrido en vez de ir y volver."""
+    codigos = [sanitizar(x) for x in codigos_texto.split(",")]
+    codigos = [x for x in codigos if x]
+    if not codigos:
+        return []
+    placeholders = ",".join("?" * len(codigos))
+    c.execute(f'''SELECT p.codigo_raw AS "Codigo", p.descripcion AS "Descripcion", m.nombre AS "Marca",
+                  p.ubicacion AS "Ubicación", p.stock AS "Stock"
+                  FROM productos p JOIN marcas m ON m.id = p.marca_id
+                  WHERE p.codigo_clean IN ({placeholders})''', codigos)
+    resultado = filas_a_listas(c)
+    resultado.sort(key=lambda r: (not r["Ubicación"], r["Ubicación"] or ""))
+    return resultado
+
+
 def buscar_por_texto(texto):
-    like = f"%{texto.upper()}%"
-    query = '''
+    """Busca por descripción de forma flexible: cada palabra tiene que aparecer en algún lado
+    (descripción o código), sin importar el orden. Así 'ruleman delantero gol' encuentra
+    'Gol 1.6 - Ruleman de rueda delantero' aunque esté redactado distinto."""
+    palabras = [p.strip() for p in texto.upper().split() if p.strip()]
+    if not palabras:
+        return []
+    condiciones = []
+    params = []
+    for palabra in palabras:
+        condiciones.append('(UPPER(p.descripcion) LIKE ? OR UPPER(p.codigo_raw) LIKE ?)')
+        like = f"%{palabra}%"
+        params.extend([like, like])
+    query = f'''
     SELECT p.id AS "ID", p.codigo_raw AS "Codigo", p.descripcion AS "Descripcion",
            m.nombre AS "Marca", m.tipo AS "Tipo", p.precio AS "Precio", p.stock AS "Stock",
            p.favorito AS "Favorito"
     FROM productos p JOIN marcas m ON m.id = p.marca_id
-    WHERE UPPER(p.descripcion) LIKE ? OR UPPER(p.codigo_raw) LIKE ?
+    WHERE {" AND ".join(condiciones)}
     ORDER BY m.nombre LIMIT 200;
     '''
     with db_lock:
-        c.execute(query, (like, like))
+        c.execute(query, params)
         return filas_a_listas(c)
 
 
@@ -985,6 +1022,83 @@ def identificar_pieza_por_foto(imagen_bytes):
         return response.text, None
     except Exception as e:
         return None, f"Error consultando a Gemini: {e}"
+
+
+def leer_remito_por_foto(imagen_bytes):
+    """Le pide a Gemini que lea un remito/factura de proveedor y devuelva los ítems en JSON.
+    Devuelve (lista_items, error) — lista_items siempre queda para revisión manual antes de
+    tocar el stock, la IA nunca actualiza nada por sí sola."""
+    from google import genai
+    from google.genai import types
+    import json
+
+    api_key = st.secrets.get("gemini_api_key") if hasattr(st, "secrets") else None
+    if not api_key:
+        return None, "No configuraste 'gemini_api_key' en Streamlit Cloud (Settings → Secrets)."
+
+    try:
+        client = genai.Client(api_key=api_key)
+        prompt = (
+            "Esta es una foto de un remito o factura de un proveedor de repuestos. Extraé cada ítem "
+            "listado y devolvé ÚNICAMENTE un JSON válido (sin texto extra, sin markdown), con esta forma "
+            'exacta: [{"codigo": "...", "descripcion": "...", "cantidad": 0, "costo_unitario": 0.0}, ...]. '
+            "Si no podés leer algún campo con claridad, dejalo como null. No inventes datos que no estén "
+            "visibles en la imagen."
+        )
+        response = client.models.generate_content(
+            model="gemini-flash-latest",
+            contents=[prompt, types.Part.from_bytes(data=imagen_bytes, mime_type="image/jpeg")],
+        )
+        texto = response.text.strip()
+        if texto.startswith("```"):
+            texto = texto.split("```")[1]
+            texto = texto[4:] if texto.lower().startswith("json") else texto
+        items = json.loads(texto)
+        if not isinstance(items, list):
+            return None, "Gemini no devolvió una lista de ítems reconocible."
+        return items, None
+    except json.JSONDecodeError:
+        return None, "No pude interpretar la respuesta como una lista de ítems — probá con una foto más clara."
+    except Exception as e:
+        return None, f"Error consultando a Gemini: {e}"
+
+
+def cotejar_items_remito(items):
+    """Para cada ítem leído del remito, busca si el código ya existe en el catálogo."""
+    resultado = []
+    for item in items:
+        codigo = (item.get("codigo") or "").strip()
+        clean = sanitizar(codigo) if codigo else ""
+        producto_id, marca_actual, stock_actual = None, None, None
+        if clean:
+            c.execute("""SELECT p.id, m.nombre AS marca, p.stock FROM productos p
+                         JOIN marcas m ON m.id = p.marca_id WHERE p.codigo_clean = ? LIMIT 1""", (clean,))
+            fila = c.fetchone()
+            if fila:
+                producto_id, marca_actual, stock_actual = fila["id"], fila["marca"], fila["stock"]
+        resultado.append({
+            "Código": codigo or "(sin leer)",
+            "Descripción": item.get("descripcion") or "",
+            "Cantidad": item.get("cantidad") if item.get("cantidad") is not None else 0,
+            "Costo unitario": item.get("costo_unitario") if item.get("costo_unitario") is not None else 0.0,
+            "_producto_id": producto_id,
+            "Coincide con": f"{marca_actual} (stock actual: {stock_actual})" if producto_id else "❌ No está en el catálogo",
+        })
+    return resultado
+
+
+def aplicar_carga_remito(items_cotejados):
+    """Suma la cantidad recibida al stock de los ítems que sí coinciden con un producto ya cargado."""
+    actualizados = 0
+    with db_lock:
+        for item in items_cotejados:
+            if item.get("_producto_id"):
+                cantidad = item.get("Cantidad") or 0
+                c.execute("UPDATE productos SET stock = COALESCE(stock, 0) + ? WHERE id = ?",
+                          (cantidad, item["_producto_id"]))
+                actualizados += 1
+        conn.commit()
+    return actualizados
 
 
 def actualizar_precio_stock(producto_id, precio, stock):
@@ -1069,8 +1183,49 @@ def to_excel_bytes(filas, columnas=None):
     return buf.getvalue()
 
 
-def generar_pdf_cotizacion(lista_productos, incluir_precio=True, incluir_stock=False):
-    """Genera un PDF simple de cotización a partir de la lista armada para WhatsApp."""
+def listar_alias_transferencia():
+    c.execute("""SELECT id AS "ID", nombre AS "Nombre", alias AS "Alias",
+                 cbu AS "CBU", titular AS "Titular" FROM alias_transferencia ORDER BY nombre""")
+    return filas_a_listas(c)
+
+
+def guardar_alias_transferencia(nombre, alias, cbu, titular, alias_id=None):
+    with db_lock:
+        if alias_id:
+            c.execute(
+                "UPDATE alias_transferencia SET nombre=?, alias=?, cbu=?, titular=? WHERE id=?",
+                (nombre.strip(), alias.strip(), cbu.strip(), titular.strip(), alias_id)
+            )
+        else:
+            c.execute(
+                "INSERT INTO alias_transferencia (nombre, alias, cbu, titular) VALUES (?, ?, ?, ?)",
+                (nombre.strip(), alias.strip(), cbu.strip(), titular.strip())
+            )
+        conn.commit()
+
+
+def eliminar_alias_transferencia(alias_id):
+    with db_lock:
+        c.execute("DELETE FROM alias_transferencia WHERE id = ?", (alias_id,))
+        conn.commit()
+
+
+def generar_qr_bytes(texto):
+    """Genera una imagen QR (PNG) con el texto dado — el alias/CBU/titular como texto plano.
+    No es un pago directo por QR (eso requiere ser comercio adherido a Mercado Pago/MODO):
+    al escanearlo, la mayoría de las apps de billetera muestran ese texto para que el
+    cliente confirme la transferencia, en vez de tener que tipear el alias a mano."""
+    import qrcode
+    img = qrcode.make(texto)
+    salida = io.BytesIO()
+    img.save(salida, format="PNG")
+    return salida.getvalue()
+
+
+def generar_pdf_cotizacion(lista_productos, incluir_precio=True, incluir_stock=False, alias_qr=None):
+    """Genera un PDF simple de cotización a partir de la lista armada para WhatsApp.
+    Si se pasa alias_qr (un dict con nombre/alias/cbu/titular), agrega un QR con esos datos
+    para transferencia — el cliente lo escanea y ve el alias/CBU listo para pegar, sin tipear."""
     from fpdf import FPDF
 
     pdf = FPDF()
@@ -1102,6 +1257,18 @@ def generar_pdf_cotizacion(lista_productos, incluir_precio=True, incluir_stock=F
                 linea += " (" + " / ".join(extras) + ")"
             pdf.multi_cell(0, 6, limpiar(linea))
         pdf.ln(3)
+
+    if alias_qr:
+        texto_qr = f"Alias: {alias_qr['Alias']}\nCBU: {alias_qr['CBU']}\nTitular: {alias_qr['Titular']}"
+        qr_bytes = generar_qr_bytes(texto_qr)
+        pdf.ln(4)
+        pdf.set_font("Helvetica", "B", 11)
+        pdf.cell(0, 7, limpiar(f"Transferir a: {alias_qr['Nombre']}"), new_x="LMARGIN", new_y="NEXT")
+        pdf.set_font("Helvetica", "", 9)
+        pdf.multi_cell(0, 5, limpiar(f"Alias: {alias_qr['Alias']}  /  CBU: {alias_qr['CBU']}  /  Titular: {alias_qr['Titular']}"))
+        pdf.image(io.BytesIO(qr_bytes), w=35)
+        pdf.set_font("Helvetica", "I", 8)
+        pdf.multi_cell(0, 4, "Escaneá el QR para ver el alias/CBU y transferir desde tu banco o billetera virtual.")
 
     return bytes(pdf.output())
 
@@ -1334,6 +1501,29 @@ def calcular_proyeccion_mantenimiento(vehiculo_id, km_recorridos):
             "Atraso estimado": max(atraso, 0),
         })
     return sorted(proyeccion, key=lambda p: -p["Atraso estimado"])
+
+
+def listar_vehiculos_atrasados():
+    """Recorre todos los vehículos con km cargado y arma un ranking de los que tienen
+    mantenimiento atrasado, ordenados por urgencia (el atraso más grande primero)."""
+    c.execute("""SELECT id, patente, cliente_nombre, cliente_telefono, marca_auto, modelo_auto,
+                 km_registro, km_actual, created_at FROM vehiculos""")
+    vehiculos = [dict(r) for r in c.fetchall()]
+    resultado = []
+    for v in vehiculos:
+        km_calc = calcular_km_recorridos(v)
+        if km_calc["km_recorridos"] is None:
+            continue
+        proyeccion = calcular_proyeccion_mantenimiento(v["id"], km_calc["km_recorridos"])
+        atrasadas = [p for p in proyeccion if p["Atraso estimado"] > 0]
+        if atrasadas:
+            resultado.append({
+                "vehiculo": v,
+                "piezas_atrasadas": atrasadas,
+                "atraso_max": max(p["Atraso estimado"] for p in atrasadas),
+            })
+    resultado.sort(key=lambda r: -r["atraso_max"])
+    return resultado
 
 
 def calcular_alertas_vehiculo(vehiculo_id, km_actual):
@@ -1687,41 +1877,50 @@ SISTEMA_EN = {
 
 
 def generar_esquema_orientativo_ia(marca, modelo, motorizacion, sistema):
-    """Genera una imagen orientativa/genérica (NO una foto real del vehículo) usando Pollinations.ai,
-    un servicio de generación de imágenes gratuito, sin API key ni facturación. Al ser un modelo
-    gratuito y de código abierto, es bastante menos obediente con instrucciones técnicas específicas
-    que un modelo pago — puede no acertar el contenido, por eso conviene generar varias veces."""
-    import requests
-    from urllib.parse import quote as url_quote
+    """Genera una imagen orientativa/genérica (NO una foto real del vehículo) con Gemini.
+    Requiere facturación habilitada en la API key (el nivel gratuito no incluye generación de imágenes)."""
+    from google import genai
+    from PIL import Image as PILImage
+
+    api_key = st.secrets.get("gemini_api_key") if hasattr(st, "secrets") else None
+    if not api_key:
+        return None, "No configuraste 'gemini_api_key' en Streamlit Cloud (Settings → Secrets)."
 
     sistema_en = SISTEMA_EN.get(sistema, sistema)
     pistas = PARTES_TIPICAS_POR_SISTEMA.get(sistema, "")
-    pistas_txt = f", showing specifically: {pistas}" if pistas else ""
-    prompt_en = (
-        f"technical exploded view diagram, line art style, automotive parts catalog illustration, "
-        f"ONLY the {sistema_en} system components of a {marca} {modelo} {motorizacion} car{pistas_txt}. "
-        f"Do not draw the full car body or exterior — show only these mechanical parts, separated and "
-        f"clearly distinguishable, thin connecting lines, plain white background, black and white "
-        f"technical drawing, no text, no numbers, no letters, no logos, no watermark"
+    pistas_txt = f" Mostrá específicamente: {pistas}." if pistas else ""
+    prompt = (
+        f"Genera un diagrama técnico de despiece ('exploded view') en estilo línea/dibujo técnico "
+        f"(como los planos de catálogos de repuestos), mostrando ÚNICAMENTE los componentes del sistema "
+        f"de {sistema_en} de un automóvil {marca} {modelo} {motorizacion}.{pistas_txt} No dibujes la "
+        f"carrocería completa del auto — solo estas piezas mecánicas, separadas entre sí (vista "
+        f"explosionada), unidas por líneas finas, sobre fondo blanco liso, en blanco y negro o con líneas "
+        f"oscuras simples. IMPORTANTE: no incluyas números, letras, flechas de referencia, texto ni logos "
+        f"de ninguna marca dentro del dibujo — esos se agregan después por separado. Es una referencia "
+        f"orientativa general de cómo se relacionan las piezas entre sí, no necesita ser exacto a ese "
+        f"modelo puntual."
     )
-    # Semilla aleatoria: sin esto, Pollinations devuelve la MISMA imagen cacheada ante el mismo pedido,
-    # y "Generar otra vez" no cambiaría nada.
-    semilla = random.randint(0, 999_999_999)
-    url = f"https://image.pollinations.ai/prompt/{url_quote(prompt_en)}"
-    params = {"width": 1024, "height": 768, "nologo": "true", "model": "flux", "seed": semilla}
     try:
-        respuesta = requests.get(url, params=params, timeout=60)
-        content_type = respuesta.headers.get("content-type", "")
-        if respuesta.status_code == 200 and content_type.startswith("image"):
-            return respuesta.content, None
-        return None, (
-            f"El servicio de generación de imágenes (Pollinations.ai) devolvió un error "
-            f"(código {respuesta.status_code}). Puede ser que esté saturado en este momento — probá de nuevo."
-        )
-    except requests.exceptions.Timeout:
-        return None, "El servicio de generación de imágenes tardó demasiado en responder. Probá de nuevo."
+        client = genai.Client(api_key=api_key)
+        response = client.models.generate_content(model="gemini-2.5-flash-image", contents=[prompt])
+        for part in response.candidates[0].content.parts:
+            if getattr(part, "inline_data", None) is not None:
+                img = PILImage.open(io.BytesIO(part.inline_data.data)).convert("RGB")
+                salida = io.BytesIO()
+                img.save(salida, format="JPEG", quality=90)
+                return salida.getvalue(), None
+        return None, "Gemini no devolvió ninguna imagen para ese pedido."
     except Exception as e:
-        return None, f"Error generando la imagen: {e}"
+        texto_error = str(e)
+        if "RESOURCE_EXHAUSTED" in texto_error or "429" in texto_error or "quota" in texto_error.lower():
+            return None, (
+                "La generación de imágenes no está incluida en el nivel gratuito de la API de Gemini "
+                "(el error dice 'limit: 0' para ese modelo). Para usar esta función hay que habilitar "
+                "facturación en aistudio.google.com para esa API key — el costo ronda los US$0,04 por "
+                "imagen generada, no es una suscripción cara. La identificación de pieza por foto no se ve "
+                "afectada por esto, esa usa un modelo distinto que sí suele tener cupo gratis."
+            )
+        return None, f"Error generando la imagen: {texto_error}"
 
 
 def listar_marcas_esquemas():
@@ -1767,6 +1966,15 @@ def eliminar_vehiculo_catalogo(marca, modelo):
     with db_lock:
         c.execute("DELETE FROM esquemas_catalogo WHERE marca = ? AND modelo = ?", (marca, modelo))
         conn.commit()
+
+
+def listar_catalogo_precargado():
+    """Marca/modelo precargados sin ningún esquema real cargado todavía (candidatos a borrar)."""
+    c.execute("""SELECT marca, modelo FROM esquemas_catalogo ec
+                 WHERE NOT EXISTS (
+                     SELECT 1 FROM esquemas e WHERE e.marca_auto = ec.marca AND e.modelo_auto = ec.modelo
+                 ) ORDER BY marca, modelo""")
+    return [dict(r) for r in c.fetchall()]
 
 
 def listar_esquemas(texto_filtro=""):
@@ -1826,30 +2034,34 @@ def listar_puntos_esquema(esquema_id):
 
 
 def generar_imagen_con_marcadores(imagen_bytes, puntos):
-    """Dibuja círculos numerados sobre la imagen real, en las posiciones (%) que cargó el admin."""
-    from PIL import Image, ImageDraw
+    """Dibuja círculos numerados sobre la imagen real, en las posiciones (%) que cargó el admin.
+    Si la imagen está corrupta, devuelve la original sin marcadores en vez de romper la pantalla."""
+    from PIL import Image, ImageDraw, UnidentifiedImageError
 
     puntos_con_pos = [p for p in puntos if p.get("pos_x") is not None and p.get("pos_y") is not None]
     if not puntos_con_pos:
         return imagen_bytes
 
-    img = Image.open(io.BytesIO(imagen_bytes)).convert("RGB")
-    ancho, alto = img.size
-    draw = ImageDraw.Draw(img)
-    radio = max(min(ancho, alto) // 40, 12)
+    try:
+        img = Image.open(io.BytesIO(imagen_bytes)).convert("RGB")
+        ancho, alto = img.size
+        draw = ImageDraw.Draw(img)
+        radio = max(min(ancho, alto) // 40, 12)
 
-    for i, p in enumerate(puntos_con_pos, start=1):
-        x = int(p["pos_x"] / 100 * ancho)
-        y = int(p["pos_y"] / 100 * alto)
-        etiqueta = p.get("numero") or str(i)
-        draw.ellipse([x - radio, y - radio, x + radio, y + radio], fill=(232, 163, 61), outline=(20, 20, 20), width=2)
-        bbox = draw.textbbox((0, 0), etiqueta)
-        tw, th = bbox[2] - bbox[0], bbox[3] - bbox[1]
-        draw.text((x - tw / 2, y - th / 2 - bbox[1]), etiqueta, fill=(20, 20, 20))
+        for i, p in enumerate(puntos_con_pos, start=1):
+            x = int(p["pos_x"] / 100 * ancho)
+            y = int(p["pos_y"] / 100 * alto)
+            etiqueta = p.get("numero") or str(i)
+            draw.ellipse([x - radio, y - radio, x + radio, y + radio], fill=(232, 163, 61), outline=(20, 20, 20), width=2)
+            bbox = draw.textbbox((0, 0), etiqueta)
+            tw, th = bbox[2] - bbox[0], bbox[3] - bbox[1]
+            draw.text((x - tw / 2, y - th / 2 - bbox[1]), etiqueta, fill=(20, 20, 20))
 
-    salida = io.BytesIO()
-    img.save(salida, format="JPEG", quality=90)
-    return salida.getvalue()
+        salida = io.BytesIO()
+        img.save(salida, format="JPEG", quality=90)
+        return salida.getvalue()
+    except (UnidentifiedImageError, OSError):
+        return imagen_bytes
 
 
 def eliminar_punto_esquema(punto_id):
@@ -1893,6 +2105,11 @@ tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs(
 # TAB 1: BUSCADOR
 # ============================================================
 with tab1:
+    # Si se tocó un botón de sugerencia rápida (favorito o búsqueda reciente), precargamos el
+    # campo de búsqueda ANTES de crear el widget — si se hace después de creado, Streamlit tira error.
+    if "sugerencia_busqueda" in st.session_state:
+        st.session_state["busqueda_input"] = st.session_state.pop("sugerencia_busqueda")
+
     if es_admin():
         with st.expander("📷 Identificar pieza por foto (con IA)"):
             st.caption(
@@ -1928,7 +2145,8 @@ with tab1:
             with col_busq:
                 busqueda = st.text_input(
                     "Ingresá uno o varios códigos (separados por coma):",
-                    placeholder="Ej: W712/94, 036115561G..."
+                    placeholder="Ej: W712/94, 036115561G...",
+                    key="busqueda_input"
                 )
             with col_filt:
                 marca_filtro = st.selectbox("Filtrar por marca:", lista_marcas)
@@ -2054,7 +2272,10 @@ with tab1:
                     st.markdown("---")
     else:
         with st.form("form_buscar_texto"):
-            texto = st.text_input("Ingresá parte de una descripción:", placeholder="Ej: filtro de aceite, bomba...")
+            texto = st.text_input(
+                "Ingresá parte de una descripción:",
+                placeholder="Ej: ruleman delantero gol (no hace falta el orden exacto)"
+            )
             buscar_texto_click = st.form_submit_button("🔍 Buscar por Descripción", type="primary")
 
         if buscar_texto_click:
@@ -2068,6 +2289,33 @@ with tab1:
                     st.dataframe(quitar_id(res), use_container_width=True, hide_index=True)
                 else:
                     st.warning("No se encontraron productos con esa descripción.")
+
+    with st.expander("📦 Armar pedido (ordenado por ubicación en depósito)"):
+        st.caption(
+            "Pegá varios códigos separados por coma — te devuelve la lista ordenada por ubicación "
+            "en el depósito, para juntar todo en un solo recorrido en vez de ir y volver."
+        )
+        codigos_picking = st.text_input(
+            "Códigos del pedido (separados por coma):",
+            placeholder="Ej: W712/94, 036115561G, 24427...", key="picking_codigos"
+        )
+        if st.button("📦 Ordenar para picking"):
+            if not codigos_picking.strip():
+                st.info("Pegá al menos un código.")
+            else:
+                res_picking = armar_lista_picking(codigos_picking)
+                if res_picking:
+                    sin_ubicacion = [r for r in res_picking if not r["Ubicación"]]
+                    st.success(f"Se encontraron {len(res_picking)} de los códigos pedidos:")
+                    st.dataframe(res_picking, use_container_width=True, hide_index=True)
+                    if sin_ubicacion:
+                        st.caption(
+                            f"⚠️ {len(sin_ubicacion)} producto(s) todavía no tienen ubicación cargada "
+                            "(aparecen al final) — cargala desde 'Administrar' para que la próxima vez "
+                            "el orden sea completo."
+                        )
+                else:
+                    st.warning("No encontré ninguno de esos códigos en el catálogo.")
 
     with st.expander("📐 Buscar por medidas mecánicas (cuando no hay código ni equivalencia cargada)"):
         st.caption(
@@ -2108,11 +2356,22 @@ with tab1:
 
     historial = historial_reciente()
     if historial:
-        st.caption("Búsquedas recientes: " + " · ".join(historial))
+        st.caption("🕘 Búsquedas recientes:")
+        cols_hist = st.columns(min(len(historial), 5))
+        for i, termino in enumerate(historial[:5]):
+            if cols_hist[i % 5].button(termino, key=f"sugerencia_hist_{i}_{termino}", use_container_width=True):
+                st.session_state["sugerencia_busqueda"] = termino
+                st.rerun()
 
     favoritos = listar_favoritos()
     if favoritos:
         with st.expander(f"⭐ Favoritos ({len(favoritos)})"):
+            for fila_fav in favoritos[:8]:
+                colf1, colf2 = st.columns([4, 1])
+                colf1.write(f"{fila_fav.get('Codigo') or ''} — {fila_fav.get('Marca') or ''}")
+                if colf2.button("🔍", key=f"sugerencia_fav_{fila_fav['ID']}"):
+                    st.session_state["sugerencia_busqueda"] = fila_fav.get("Codigo") or ""
+                    st.rerun()
             st.dataframe(quitar_id(favoritos), use_container_width=True, hide_index=True)
 
 # ============================================================
@@ -2430,9 +2689,78 @@ with tab3:
                 except Exception as e:
                     st.error(f"Error procesando la lista: {e}")
 
+        st.markdown("---")
+        st.markdown("**📄 Cargar remito por foto (con IA)**")
+        st.caption(
+            "Sacale una foto o subí una imagen del remito/factura de un proveedor. La IA lee los "
+            "ítems y te arma una lista para revisar — no toca el stock hasta que vos confirmes. "
+            "Solo actualiza cantidad de los códigos que ya existen en tu catálogo; los que no "
+            "coincidan con nada, los tenés que cargar por 'Vincular manual' o con un Excel nuevo."
+        )
+        foto_remito = st.file_uploader("Foto del remito:", type=["png", "jpg", "jpeg"], key="foto_remito")
+        if foto_remito and st.button("🔍 Leer remito"):
+            with st.spinner("Leyendo remito..."):
+                items_leidos, error_remito = leer_remito_por_foto(foto_remito.getvalue())
+            if error_remito:
+                st.error(error_remito)
+            elif not items_leidos:
+                st.warning("No se pudo leer ningún ítem en esa imagen.")
+            else:
+                st.session_state["items_remito"] = cotejar_items_remito(items_leidos)
+
+        if st.session_state.get("items_remito"):
+            items_actuales = st.session_state["items_remito"]
+            coinciden = [i for i in items_actuales if i["_producto_id"]]
+            no_coinciden = [i for i in items_actuales if not i["_producto_id"]]
+            st.success(f"Se leyeron {len(items_actuales)} ítem(s) — {len(coinciden)} coinciden con tu catálogo.")
+            st.dataframe(
+                [{k: v for k, v in i.items() if not k.startswith("_")} for i in items_actuales],
+                use_container_width=True, hide_index=True
+            )
+            if no_coinciden:
+                st.caption(
+                    f"⚠️ {len(no_coinciden)} ítem(s) no coinciden con ningún código cargado — "
+                    "revisá si están mal leídos o si son productos nuevos para vos."
+                )
+            colr1, colr2 = st.columns(2)
+            if coinciden and colr1.button(f"💾 Sumar stock de los {len(coinciden)} que coinciden"):
+                actualizados = aplicar_carga_remito(items_actuales)
+                st.success(f"Stock actualizado en {actualizados} producto(s).")
+                st.session_state.pop("items_remito", None)
+                st.rerun()
+            if colr2.button("🗑️ Descartar esta lectura"):
+                st.session_state.pop("items_remito", None)
+                st.rerun()
+
 # ============================================================
 # TAB 4: ADMINISTRAR
 # ============================================================
+def exportar_configuracion_txt():
+    """Junta combos de repuestos, códigos DTC cargados y fabricantes VIN en un solo archivo de texto,
+    para respaldo aparte de la base completa o para copiarle la configuración a otra sucursal."""
+    lineas = []
+    lineas.append(f"# Exportación de configuración — Equivalencias El Chavo — {datetime.now():%d/%m/%Y %H:%M}")
+    lineas.append("")
+
+    lineas.append("## COMBOS DE REPUESTOS RELACIONADOS (disparador;item)")
+    for combo in listar_combos():
+        for item in combo["items"]:
+            lineas.append(f"{combo['disparador']};{item}")
+    lineas.append("")
+
+    lineas.append("## CÓDIGOS DTC (codigo;descripcion;sistema;causas;fabricante — mismo formato que la carga masiva)")
+    c.execute("SELECT codigo, descripcion, sistema, causas_posibles, fabricante FROM codigos_dtc ORDER BY fabricante, codigo")
+    for row in c.fetchall():
+        lineas.append(f"{row['codigo']};{row['descripcion']};{row['sistema'] or ''};{row['causas_posibles'] or ''};{row['fabricante'] or ''}")
+    lineas.append("")
+
+    lineas.append("## FABRICANTES POR WMI - lector de VIN (wmi;fabricante;pais)")
+    for f in listar_fabricantes_vin():
+        lineas.append(f"{f['WMI']};{f['Fabricante']};{f.get('País') or ''}")
+
+    return "\n".join(lineas)
+
+
 with tab4:
     st.subheader("Administrar marcas y productos")
 
@@ -2518,6 +2846,48 @@ with tab4:
                 st.rerun()
 
         st.markdown("---")
+        st.markdown("**💳 Alias para QR de transferencia**")
+        st.caption(
+            "Cargá los alias/CBU que usás (Mercado Pago, distintos bancos, etc.). Al armar una "
+            "cotización en 'Lista WhatsApp' vas a poder elegir cuál de estos usar para el QR del PDF. "
+            "El QR solo muestra el alias/CBU como texto para que el cliente lo escanee y transfiera — "
+            "no es un cobro automático por QR, eso requiere estar adherido como comercio en Mercado Pago o MODO."
+        )
+        alias_cargados = listar_alias_transferencia()
+        if alias_cargados:
+            st.dataframe(quitar_id(alias_cargados), use_container_width=True, hide_index=True)
+
+        opciones_alias_edit = ["➕ Nuevo alias..."] + [f"{a['Nombre']} (editar)" for a in alias_cargados]
+        alias_opcion_edit = st.selectbox("Elegí qué hacer:", opciones_alias_edit, key="alias_opcion_edit")
+        alias_actual = None
+        if alias_opcion_edit != "➕ Nuevo alias...":
+            nombre_buscar = alias_opcion_edit.replace(" (editar)", "")
+            alias_actual = next(a for a in alias_cargados if a["Nombre"] == nombre_buscar)
+
+        cae1, cae2 = st.columns(2)
+        nombre_alias_in = cae1.text_input("Nombre (ej: Mercado Pago, Banco Galicia)",
+                                           value=(alias_actual or {}).get("Nombre", ""), key="alias_nombre_in")
+        alias_in = cae2.text_input("Alias", value=(alias_actual or {}).get("Alias", ""), key="alias_alias_in")
+        cae3, cae4 = st.columns(2)
+        cbu_in = cae3.text_input("CBU/CVU (opcional)", value=(alias_actual or {}).get("CBU", ""), key="alias_cbu_in")
+        titular_in = cae4.text_input("Titular (opcional)", value=(alias_actual or {}).get("Titular", ""), key="alias_titular_in")
+
+        cbtn1, cbtn2 = st.columns(2)
+        if cbtn1.button("💾 Guardar alias"):
+            if not nombre_alias_in.strip() or not alias_in.strip():
+                st.warning("Completá al menos el nombre y el alias.")
+            else:
+                guardar_alias_transferencia(
+                    nombre_alias_in, alias_in, cbu_in, titular_in,
+                    alias_id=(alias_actual["ID"] if alias_actual else None)
+                )
+                st.success("Alias guardado.")
+                st.rerun()
+        if alias_actual and cbtn2.button("🗑️ Eliminar este alias"):
+            eliminar_alias_transferencia(alias_actual["ID"])
+            st.success("Alias eliminado.")
+            st.rerun()
+
         st.markdown("---")
         st.markdown("**🧩 Combos de repuestos relacionados**")
         st.caption(
@@ -2773,6 +3143,20 @@ with tab5:
                             file_name=f"equivalencias_backup_{datetime.now():%Y%m%d}.db")
 
     st.markdown("---")
+    st.markdown("**📦 Exportar configuración (sin el catálogo de productos)**")
+    st.caption(
+        "Combos de repuestos, códigos DTC y fabricantes por WMI en un solo archivo de texto — útil "
+        "como respaldo liviano aparte del backup completo, o para copiarle la configuración a otra "
+        "sucursal sin duplicar todo el catálogo de productos."
+    )
+    st.download_button(
+        "⬇️ Descargar configuración (.txt)",
+        data=exportar_configuracion_txt(),
+        file_name=f"configuracion_{datetime.now():%Y%m%d}.txt",
+        mime="text/plain"
+    )
+
+    st.markdown("---")
     st.markdown("**♻️ Restaurar desde un backup**")
     st.caption(
         "⚠️ Esto reemplaza TODA la base actual por la del archivo que subas. "
@@ -2887,11 +3271,24 @@ with tab6:
 
         st.text_area("Vista previa del mensaje:", value=mensaje, height=300)
 
+        alias_disponibles = listar_alias_transferencia()
+        alias_elegido = None
+        if alias_disponibles:
+            opciones_alias = ["Sin QR de transferencia"] + [a["Nombre"] for a in alias_disponibles]
+            alias_sel = st.selectbox("Alias para el QR del PDF (opcional):", opciones_alias, key="alias_para_pdf")
+            if alias_sel != "Sin QR de transferencia":
+                alias_elegido = next(a for a in alias_disponibles if a["Nombre"] == alias_sel)
+        else:
+            st.caption(
+                "Todavía no cargaste ningún alias/CBU — podés hacerlo en 'Administrar' → "
+                "'💳 Alias para QR de transferencia' si querés que la cotización incluya uno."
+            )
+
         import urllib.parse
         url_whatsapp = "https://wa.me/?text=" + urllib.parse.quote(mensaje)
         col_wa, col_pdf = st.columns(2)
         col_wa.link_button("📲 Abrir en WhatsApp", url_whatsapp, type="primary", use_container_width=True)
-        pdf_bytes = generar_pdf_cotizacion(lista, incluir_precio, incluir_stock)
+        pdf_bytes = generar_pdf_cotizacion(lista, incluir_precio, incluir_stock, alias_qr=alias_elegido)
         col_pdf.download_button(
             "📄 Descargar cotización (PDF)", data=pdf_bytes,
             file_name=f"cotizacion_{datetime.now():%Y%m%d_%H%M}.pdf",
@@ -2912,6 +3309,26 @@ with tab7:
         "La app avisa cuándo una pieza ya recorrió casi toda su vida útil estimada."
     )
 
+    vehiculos_atrasados = listar_vehiculos_atrasados()
+    with st.expander(f"⚠️ Vehículos con mantenimiento atrasado ({len(vehiculos_atrasados)})", expanded=bool(vehiculos_atrasados)):
+        if not vehiculos_atrasados:
+            st.caption(
+                "Ninguno detectado por ahora (o todavía no cargaste km de registro/actual en los vehículos)."
+            )
+        else:
+            st.caption("Ordenados por urgencia — el que tiene la pieza más atrasada aparece primero.")
+            for item in vehiculos_atrasados:
+                v = item["vehiculo"]
+                nombre_auto = f"{v.get('marca_auto') or ''} {v.get('modelo_auto') or ''}".strip()
+                piezas_txt = ", ".join(f"{p['Pieza']} (x{p['Atraso estimado']})" for p in item["piezas_atrasadas"])
+                colv1, colv2 = st.columns([4, 1])
+                colv1.write(f"**{v['patente']}** {nombre_auto} — {v.get('cliente_nombre') or 'sin nombre'}")
+                colv1.caption(f"Atrasado: {piezas_txt}")
+                if colv2.button("👁️ Ver", key=f"ver_atrasado_{v['id']}"):
+                    st.session_state["patente_buscar"] = v["patente"]
+                    st.rerun()
+
+    st.markdown("---")
     st.markdown("**Buscar / registrar un vehículo**")
     patente_input = st.text_input("Patente:", placeholder="Ej: AB123CD", key="patente_buscar").strip().upper()
 
@@ -3070,7 +3487,9 @@ with tab7:
 with tab8:
     st.subheader("🛠️ Modo Mecánico")
 
-    sub_dtc, sub_vin, sub_esq = st.tabs(["📖 Códigos DTC", "🔢 Lector de VIN", "🗺️ Esquemas"])
+    sub_dtc, sub_vin, sub_esq, sub_conv = st.tabs(
+        ["📖 Códigos DTC", "🔢 Lector de VIN", "🗺️ Esquemas", "🧮 Conversor de unidades"]
+    )
 
     # -------- Diccionario de códigos OBD2 / DTC --------
     with sub_dtc:
@@ -3328,6 +3747,16 @@ with tab8:
                         st.session_state.pop(k, None)
                     st.rerun()
 
+            precargados = listar_catalogo_precargado()
+            if precargados:
+                with st.expander(f"📋 Ver / borrar precargados sin esquema todavía ({len(precargados)})"):
+                    for pv in precargados:
+                        colp1, colp2 = st.columns([4, 1])
+                        colp1.write(f"{pv['marca']} — {pv['modelo']}")
+                        if colp2.button("🗑️", key=f"del_precarga_{pv['marca']}_{pv['modelo']}"):
+                            eliminar_vehiculo_catalogo(pv["marca"], pv["modelo"])
+                            st.rerun()
+
             st.markdown("---")
             st.markdown("**➕ Subir un esquema nuevo**")
             marcas_existentes = listar_marcas_esquemas()  # puede haber cambiado si acabás de precargar una
@@ -3366,8 +3795,8 @@ with tab8:
                     "Para cuando no tenés el auto físico enfrente (útil en el mostrador de una casa de "
                     "repuestos): la IA arma un dibujo genérico de referencia, **no una foto real de ese "
                     "vehículo**. Sirve para orientar, no para identificar piezas con precisión milimétrica. "
-                    "Como es un servicio gratuito, a veces el resultado no tiene nada que ver con lo pedido — "
-                    "usá 'Generar otra vez' las veces que haga falta, o pasate a 'Subir foto real' si no da con nada útil."
+                    "Usa Gemini — necesita facturación habilitada en la API key (no es gratis, pero el costo "
+                    "es bajo, ronda los US$0,04 por imagen)."
                 )
                 motorizacion_ia = st.text_input("Motorización", placeholder="Ej: 1.6 MSI Nafta", key="esq_motorizacion_ia")
                 boton_label = "🔄 Generar otra vez" if st.session_state.get("esq_preview_ia") else "🤖 Generar imagen orientativa"
@@ -3407,3 +3836,48 @@ with tab8:
                               "esq_desc", "esq_archivo", "esq_motorizacion_ia"]:
                         st.session_state.pop(k, None)
                     st.rerun()
+
+    # -------- Conversor de unidades --------
+    with sub_conv:
+        st.caption("Conversiones rápidas de unidades que se usan seguido en manuales de taller antiguos o importados.")
+
+        categoria_conv = st.radio("Categoría:", ["Torque", "Presión", "Longitud"], horizontal=True, key="conv_categoria")
+
+        if categoria_conv == "Torque":
+            direccion = st.radio("Convertir:", ["lb-ft → Nm", "Nm → lb-ft", "lb-in → Nm", "Nm → lb-in"],
+                                  key="conv_torque_dir")
+            valor = st.number_input("Valor a convertir:", min_value=0.0, step=0.1, key="conv_torque_valor")
+            factores = {
+                "lb-ft → Nm": (valor * 1.35582, "Nm"),
+                "Nm → lb-ft": (valor / 1.35582, "lb-ft"),
+                "lb-in → Nm": (valor * 0.112985, "Nm"),
+                "Nm → lb-in": (valor / 0.112985, "lb-in"),
+            }
+            resultado, unidad = factores[direccion]
+            st.metric("Resultado", f"{resultado:.2f} {unidad}")
+
+        elif categoria_conv == "Presión":
+            direccion = st.radio("Convertir:", ["PSI → Bar", "Bar → PSI", "PSI → kPa", "kPa → PSI"],
+                                  key="conv_presion_dir")
+            valor = st.number_input("Valor a convertir:", min_value=0.0, step=0.1, key="conv_presion_valor")
+            factores = {
+                "PSI → Bar": (valor * 0.0689476, "Bar"),
+                "Bar → PSI": (valor / 0.0689476, "PSI"),
+                "PSI → kPa": (valor * 6.89476, "kPa"),
+                "kPa → PSI": (valor / 6.89476, "PSI"),
+            }
+            resultado, unidad = factores[direccion]
+            st.metric("Resultado", f"{resultado:.2f} {unidad}")
+
+        else:  # Longitud
+            direccion = st.radio("Convertir:", ["Pulgadas → mm", "mm → Pulgadas", "Pulgadas → cm", "cm → Pulgadas"],
+                                  key="conv_longitud_dir")
+            valor = st.number_input("Valor a convertir:", min_value=0.0, step=0.1, key="conv_longitud_valor")
+            factores = {
+                "Pulgadas → mm": (valor * 25.4, "mm"),
+                "mm → Pulgadas": (valor / 25.4, "pulgadas"),
+                "Pulgadas → cm": (valor * 2.54, "cm"),
+                "cm → Pulgadas": (valor / 2.54, "pulgadas"),
+            }
+            resultado, unidad = factores[direccion]
+            st.metric("Resultado", f"{resultado:.3f} {unidad}")
