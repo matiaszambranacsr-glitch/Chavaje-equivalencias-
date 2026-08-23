@@ -2843,133 +2843,33 @@ Casi todo lo que edita o borra algo pide la contraseña de administrador la prim
         st.session_state["busqueda_input"] = st.session_state.pop("sugerencia_busqueda")
 
     if es_operador_o_admin():
-        with st.expander("📷 Identificar pieza por foto (con IA)"):
+        with st.expander("🖼️ Buscar por similitud visual (experimental)"):
             st.caption(
-                "Sacale una foto a la pieza o subí una que ya tengas. La IA busca un código visible "
-                "y, si lo encuentra, lo busca directo en tu catálogo."
+                "Compará una foto contra las fotos que ya tenés cargadas en el catálogo — "
+                "gratis, corre local, sin límite de uso. Es MUCHO menos confiable que un código "
+                "exacto: con piezas metálicas lisas sin marcas ni textura (rótulas, rulemanes, "
+                "bulones) va a rendir mal aunque la foto sea buena. Úsalo solo para acortar "
+                "candidatos a revisar a mano, nunca como confirmación."
             )
-            foto = st.file_uploader(
-                "Foto de la pieza:", type=["png", "jpg", "jpeg"], key="foto_identificar_pieza",
+            foto_visual = st.file_uploader(
+                "Foto de la pieza:", type=["png", "jpg", "jpeg"], key="foto_similitud_visual",
                 label_visibility="collapsed"
             )
-            if foto and st.button("🔍 Identificar"):
-                with st.spinner("Consultando..."):
-                    datos_pieza, error = identificar_pieza_por_foto(foto.getvalue())
-                if error:
-                    st.error(error)
-                elif datos_pieza:
-                    st.session_state["datos_pieza_foto"] = datos_pieza
-                    st.session_state["buscar_tipo_pieza_click"] = False
-
-            if st.session_state.get("datos_pieza_foto"):
-                datos_pieza = st.session_state["datos_pieza_foto"]
-                codigo_detectado = (datos_pieza.get("codigo") or "").strip()
-                confianza = (datos_pieza.get("confianza") or "").strip().lower()
-
-                if codigo_detectado:
-                    st.success(f"**Código detectado: `{codigo_detectado}`** (confianza de la IA: {confianza or 's/d'})")
-                    if confianza in ("media", "baja"):
-                        st.caption(
-                            "⚠️ La propia IA no está muy segura de haber leído bien el código — "
-                            "confirmalo mirando la pieza antes de vender."
-                        )
-                else:
-                    st.warning("No se distinguió ningún código legible en la foto.")
-                if datos_pieza.get("marca_visible"):
-                    st.caption(f"Marca visible en la pieza: {datos_pieza['marca_visible']}")
-                if datos_pieza.get("tipo_pieza"):
-                    st.caption(f"Tipo de pieza (según la IA): {datos_pieza['tipo_pieza']}")
-
-                if codigo_detectado:
-                    clean_foto = sanitizar(codigo_detectado)
-                    res_foto = buscar_por_codigo(clean_foto) if clean_foto else []
-                    if res_foto:
-                        incrementar_veces_buscado(clean_foto)
-                        st.success(f"✅ Coincidencia CONFIRMADA en tu catálogo — {len(res_foto)} resultado(s):")
-                        st.caption(
-                            "Esto es un match exacto por código, con las equivalencias que ya tenés "
-                            "cargadas — no es una suposición de la IA."
-                        )
-                        st.dataframe(quitar_id(res_foto), use_container_width=True, hide_index=True)
-                    else:
-                        st.info(
-                            f"El código `{codigo_detectado}` no coincide con nada cargado — puede que la "
-                            "IA haya leído mal algún carácter, o que sea un código que todavía no tenés."
-                        )
-                        if datos_pieza.get("tipo_pieza") and st.button("🔍 Buscar por el tipo de pieza en vez del código"):
-                            st.session_state["buscar_tipo_pieza_click"] = True
-
-                if (not codigo_detectado or (codigo_detectado and st.session_state.get("buscar_tipo_pieza_click"))) \
-                        and datos_pieza.get("tipo_pieza"):
-                    if not codigo_detectado:
-                        mostrar_tipo = st.button("🔍 Buscar por el tipo de pieza")
-                    else:
-                        mostrar_tipo = True
-                    if mostrar_tipo:
-                        tipo_pieza_texto = datos_pieza["tipo_pieza"]
-                        res_tipo = buscar_por_texto(tipo_pieza_texto)
-                        busqueda_usada = tipo_pieza_texto
-                        if not res_tipo:
-                            # La frase completa no encontró nada — reintenta con menos palabras
-                            # (más amplio), por si tus descripciones no usan las mismas palabras
-                            # exactas que eligió la IA (ej: "rótula de suspensión" vs "ROTULA DERECHA").
-                            palabras_tipo = tipo_pieza_texto.split()
-                            for n in range(len(palabras_tipo) - 1, 0, -1):
-                                intento = " ".join(palabras_tipo[:n])
-                                res_tipo = buscar_por_texto(intento)
-                                if res_tipo:
-                                    busqueda_usada = intento
-                                    break
-                        if res_tipo:
-                            if busqueda_usada != tipo_pieza_texto:
-                                st.caption(
-                                    f"No encontré nada con \"{tipo_pieza_texto}\" completo — probé de nuevo "
-                                    f"solo con \"{busqueda_usada}\" y esto apareció (todavía menos preciso, "
-                                    "revisá con más cuidado):"
-                                )
-                            if len(res_tipo) > 1:
-                                st.warning(
-                                    f"⚠️ Encontré {len(res_tipo)} pieza(s) parecida(s) por palabras clave — "
-                                    "NINGUNA está confirmada como la exacta, es solo una búsqueda por texto. "
-                                    "Si son piezas como rótulas, retenes, etc. que varían por modelo de auto, "
-                                    "comparalas físicamente (o por medidas, en '📐 Buscar por medidas mecánicas') "
-                                    "antes de vender la que sea."
-                                )
-                            else:
-                                st.info(
-                                    "Encontré 1 coincidencia por palabras clave — tampoco está confirmada, "
-                                    "revisala antes de vender."
-                                )
-                            st.dataframe(quitar_id(res_tipo)[:15], use_container_width=True, hide_index=True)
-                            if len(res_tipo) > 15:
-                                st.caption(f"Mostrando las primeras 15 de {len(res_tipo)} coincidencias.")
-                        else:
-                            st.caption("No encontré nada parecido en la base por ese tipo de pieza.")
-
-                st.markdown("---")
-                st.markdown("**🖼️ Buscar por similitud visual (experimental)**")
-                st.caption(
-                    "Compara la foto contra las fotos que ya tenés cargadas en el catálogo (no contra "
-                    "el texto ni el código). Es gratis y corre local, pero es MUCHO menos confiable que "
-                    "un código exacto — con piezas metálicas lisas sin marcas ni textura (rótulas, "
-                    "rulemanes, bulones) va a rendir mal aunque la foto sea buena, no hay suficiente "
-                    "detalle visual del que agarrarse. Úsalo solo para acortar candidatos a revisar a mano."
-                )
-                if foto and st.button("🖼️ Comparar con fotos del catálogo"):
-                    with st.spinner("Comparando..."):
-                        res_visual, error_visual = buscar_por_similitud_visual(foto.getvalue())
-                    if error_visual:
-                        st.info(error_visual)
-                    elif res_visual:
-                        st.warning(
-                            f"⚠️ {len(res_visual)} candidato(s) por parecido visual, de más a menos "
-                            "parecido — NINGUNO está confirmado, es una comparación aproximada. "
-                            "Compará físicamente antes de vender cualquiera de estos."
-                        )
-                        st.dataframe(
-                            [{k: v for k, v in r.items() if k != "ID"} for r in res_visual],
-                            use_container_width=True, hide_index=True
-                        )
+            if foto_visual and st.button("🖼️ Comparar con fotos del catálogo"):
+                with st.spinner("Comparando..."):
+                    res_visual, error_visual = buscar_por_similitud_visual(foto_visual.getvalue())
+                if error_visual:
+                    st.info(error_visual)
+                elif res_visual:
+                    st.warning(
+                        f"⚠️ {len(res_visual)} candidato(s) por parecido visual, de más a menos "
+                        "parecido — NINGUNO está confirmado, es una comparación aproximada. "
+                        "Compará físicamente antes de vender cualquiera de estos."
+                    )
+                    st.dataframe(
+                        [{k: v for k, v in r.items() if k != "ID"} for r in res_visual],
+                        use_container_width=True, hide_index=True
+                    )
 
     modo = st.radio("Buscar por:", ["Código", "Descripción"], horizontal=True)
 
@@ -3280,6 +3180,110 @@ Casi todo lo que edita o borra algo pide la contraseña de administrador la prim
                     "Sin resultados. Puede ser que no haya piezas con esas medidas cargadas todavía — "
                     "cargalas desde la pestaña 'Administrar' a medida que las vayas midiendo."
                 )
+
+    if es_operador_o_admin():
+        with st.expander("📷 Identificar pieza por foto (con IA)"):
+            st.caption(
+                "Sacale una foto a la pieza o subí una que ya tengas. La IA busca un código visible "
+                "y, si lo encuentra, lo busca directo en tu catálogo."
+            )
+            foto = st.file_uploader(
+                "Foto de la pieza:", type=["png", "jpg", "jpeg"], key="foto_identificar_pieza",
+                label_visibility="collapsed"
+            )
+            if foto and st.button("🔍 Identificar"):
+                with st.spinner("Consultando..."):
+                    datos_pieza, error = identificar_pieza_por_foto(foto.getvalue())
+                if error:
+                    st.error(error)
+                elif datos_pieza:
+                    st.session_state["datos_pieza_foto"] = datos_pieza
+                    st.session_state["buscar_tipo_pieza_click"] = False
+
+            if st.session_state.get("datos_pieza_foto"):
+                datos_pieza = st.session_state["datos_pieza_foto"]
+                codigo_detectado = (datos_pieza.get("codigo") or "").strip()
+                confianza = (datos_pieza.get("confianza") or "").strip().lower()
+
+                if codigo_detectado:
+                    st.success(f"**Código detectado: `{codigo_detectado}`** (confianza de la IA: {confianza or 's/d'})")
+                    if confianza in ("media", "baja"):
+                        st.caption(
+                            "⚠️ La propia IA no está muy segura de haber leído bien el código — "
+                            "confirmalo mirando la pieza antes de vender."
+                        )
+                else:
+                    st.warning("No se distinguió ningún código legible en la foto.")
+                if datos_pieza.get("marca_visible"):
+                    st.caption(f"Marca visible en la pieza: {datos_pieza['marca_visible']}")
+                if datos_pieza.get("tipo_pieza"):
+                    st.caption(f"Tipo de pieza (según la IA): {datos_pieza['tipo_pieza']}")
+
+                if codigo_detectado:
+                    clean_foto = sanitizar(codigo_detectado)
+                    res_foto = buscar_por_codigo(clean_foto) if clean_foto else []
+                    if res_foto:
+                        incrementar_veces_buscado(clean_foto)
+                        st.success(f"✅ Coincidencia CONFIRMADA en tu catálogo — {len(res_foto)} resultado(s):")
+                        st.caption(
+                            "Esto es un match exacto por código, con las equivalencias que ya tenés "
+                            "cargadas — no es una suposición de la IA."
+                        )
+                        st.dataframe(quitar_id(res_foto), use_container_width=True, hide_index=True)
+                    else:
+                        st.info(
+                            f"El código `{codigo_detectado}` no coincide con nada cargado — puede que la "
+                            "IA haya leído mal algún carácter, o que sea un código que todavía no tenés."
+                        )
+                        if datos_pieza.get("tipo_pieza") and st.button("🔍 Buscar por el tipo de pieza en vez del código"):
+                            st.session_state["buscar_tipo_pieza_click"] = True
+
+                if (not codigo_detectado or (codigo_detectado and st.session_state.get("buscar_tipo_pieza_click"))) \
+                        and datos_pieza.get("tipo_pieza"):
+                    if not codigo_detectado:
+                        mostrar_tipo = st.button("🔍 Buscar por el tipo de pieza")
+                    else:
+                        mostrar_tipo = True
+                    if mostrar_tipo:
+                        tipo_pieza_texto = datos_pieza["tipo_pieza"]
+                        res_tipo = buscar_por_texto(tipo_pieza_texto)
+                        busqueda_usada = tipo_pieza_texto
+                        if not res_tipo:
+                            # La frase completa no encontró nada — reintenta con menos palabras
+                            # (más amplio), por si tus descripciones no usan las mismas palabras
+                            # exactas que eligió la IA (ej: "rótula de suspensión" vs "ROTULA DERECHA").
+                            palabras_tipo = tipo_pieza_texto.split()
+                            for n in range(len(palabras_tipo) - 1, 0, -1):
+                                intento = " ".join(palabras_tipo[:n])
+                                res_tipo = buscar_por_texto(intento)
+                                if res_tipo:
+                                    busqueda_usada = intento
+                                    break
+                        if res_tipo:
+                            if busqueda_usada != tipo_pieza_texto:
+                                st.caption(
+                                    f"No encontré nada con \"{tipo_pieza_texto}\" completo — probé de nuevo "
+                                    f"solo con \"{busqueda_usada}\" y esto apareció (todavía menos preciso, "
+                                    "revisá con más cuidado):"
+                                )
+                            if len(res_tipo) > 1:
+                                st.warning(
+                                    f"⚠️ Encontré {len(res_tipo)} pieza(s) parecida(s) por palabras clave — "
+                                    "NINGUNA está confirmada como la exacta, es solo una búsqueda por texto. "
+                                    "Si son piezas como rótulas, retenes, etc. que varían por modelo de auto, "
+                                    "comparalas físicamente (o por medidas, en '📐 Buscar por medidas mecánicas') "
+                                    "antes de vender la que sea."
+                                )
+                            else:
+                                st.info(
+                                    "Encontré 1 coincidencia por palabras clave — tampoco está confirmada, "
+                                    "revisala antes de vender."
+                                )
+                            st.dataframe(quitar_id(res_tipo)[:15], use_container_width=True, hide_index=True)
+                            if len(res_tipo) > 15:
+                                st.caption(f"Mostrando las primeras 15 de {len(res_tipo)} coincidencias.")
+                        else:
+                            st.caption("No encontré nada parecido en la base por ese tipo de pieza.")
 
     historial = historial_reciente()
     if historial:
