@@ -330,6 +330,14 @@ def get_connection():
         c.execute("ALTER TABLE productos ADD COLUMN diametro_interno REAL")
     if "diametro_externo" not in columnas_productos:
         c.execute("ALTER TABLE productos ADD COLUMN diametro_externo REAL")
+    if "diametro_interno_cara_b" not in columnas_productos:
+        c.execute("ALTER TABLE productos ADD COLUMN diametro_interno_cara_b REAL")
+    if "diametro_externo_cara_b" not in columnas_productos:
+        c.execute("ALTER TABLE productos ADD COLUMN diametro_externo_cara_b REAL")
+    if "diametro_rosca_homocinetica" not in columnas_productos:
+        c.execute("ALTER TABLE productos ADD COLUMN diametro_rosca_homocinetica REAL")
+    if "diametro_copa" not in columnas_productos:
+        c.execute("ALTER TABLE productos ADD COLUMN diametro_copa REAL")
     if "ancho" not in columnas_productos:
         c.execute("ALTER TABLE productos ADD COLUMN ancho REAL")
     if "paso_rosca" not in columnas_productos:
@@ -1885,7 +1893,9 @@ def calcular_alertas_vehiculo(vehiculo_id, km_actual):
 # IDEA 3: SUSTITUCIÓN INTELIGENTE POR MEDIDAS MECÁNICAS
 # ============================================================
 def buscar_por_medidas(diam_int=None, diam_ext=None, ancho=None, paso_rosca=None, estrias=None, tolerancia_pct=5,
-                        estrias_internas=None, estrias_externas=None, posicion_seguro=None, tiene_abs="Cualquiera"):
+                        estrias_internas=None, estrias_externas=None, posicion_seguro=None, tiene_abs="Cualquiera",
+                        diam_int_cara_b=None, diam_ext_cara_b=None,
+                        diam_rosca_homocinetica=None, diam_copa=None):
     condiciones = []
     params = []
 
@@ -1897,6 +1907,10 @@ def buscar_por_medidas(diam_int=None, diam_ext=None, ancho=None, paso_rosca=None
 
     rango(diam_int, "diametro_interno")
     rango(diam_ext, "diametro_externo")
+    rango(diam_int_cara_b, "diametro_interno_cara_b")
+    rango(diam_ext_cara_b, "diametro_externo_cara_b")
+    rango(diam_rosca_homocinetica, "diametro_rosca_homocinetica")
+    rango(diam_copa, "diametro_copa")
     rango(ancho, "ancho")
     if paso_rosca:
         condiciones.append("UPPER(p.paso_rosca) = ?")
@@ -1921,7 +1935,10 @@ def buscar_por_medidas(diam_int=None, diam_ext=None, ancho=None, paso_rosca=None
         return []
 
     query = f"""SELECT p.id AS "ID", p.codigo_raw AS "Codigo", p.descripcion AS "Descripcion", m.nombre AS "Marca",
-                p.diametro_interno AS "Diám. interno", p.diametro_externo AS "Diám. externo", p.ancho AS "Ancho",
+                p.diametro_interno AS "Diám. interno (cara A)", p.diametro_interno_cara_b AS "Diám. interno (cara B)",
+                p.diametro_externo AS "Diám. externo (cara A)", p.diametro_externo_cara_b AS "Diám. externo (cara B)",
+                p.diametro_rosca_homocinetica AS "Diám. rosca homocinética", p.diametro_copa AS "Diám. copa",
+                p.ancho AS "Ancho",
                 p.paso_rosca AS "Paso de rosca", p.cantidad_estrias AS "Estrías",
                 p.estrias_internas AS "Estrías internas", p.estrias_externas AS "Estrías externas",
                 p.posicion_seguro AS "Posición del seguro",
@@ -1934,17 +1951,22 @@ def buscar_por_medidas(diam_int=None, diam_ext=None, ancho=None, paso_rosca=None
 
 
 def actualizar_medidas(producto_id, diam_int, diam_ext, ancho, paso_rosca, estrias, ubicacion,
-                        estrias_internas=None, estrias_externas=None, posicion_seguro=None, tiene_abs="Cualquiera"):
+                        estrias_internas=None, estrias_externas=None, posicion_seguro=None, tiene_abs="Cualquiera",
+                        diam_int_cara_b=None, diam_ext_cara_b=None,
+                        diam_rosca_homocinetica=None, diam_copa=None):
     tiene_abs_valor = None if tiene_abs == "Cualquiera" else (1 if tiene_abs == "Sí" else 0)
     with db_lock:
         c.execute(
             "UPDATE productos SET diametro_interno=?, diametro_externo=?, ancho=?, paso_rosca=?, "
             "cantidad_estrias=?, ubicacion=?, estrias_internas=?, estrias_externas=?, posicion_seguro=?, "
-            "tiene_abs=? WHERE id=?",
+            "tiene_abs=?, diametro_interno_cara_b=?, diametro_externo_cara_b=?, "
+            "diametro_rosca_homocinetica=?, diametro_copa=? WHERE id=?",
             (diam_int or None, diam_ext or None, ancho or None, (paso_rosca.strip() or None) if paso_rosca else None,
              estrias or None, (ubicacion.strip() or None) if ubicacion else None,
              estrias_internas or None, estrias_externas or None,
-             (posicion_seguro.strip() or None) if posicion_seguro else None, tiene_abs_valor, producto_id)
+             (posicion_seguro.strip() or None) if posicion_seguro else None, tiene_abs_valor,
+             diam_int_cara_b or None, diam_ext_cara_b or None,
+             diam_rosca_homocinetica or None, diam_copa or None, producto_id)
         )
         conn.commit()
 
@@ -2585,115 +2607,119 @@ Casi todo lo que edita o borra algo pide la contraseña de administrador la prim
 
         if st.session_state.get("ultima_busqueda_codigo"):
             catalogos = listar_catalogos_externos()
+            total_codigos_buscados = len(st.session_state["ultima_busqueda_codigo"])
             for item in st.session_state["ultima_busqueda_codigo"]:
                 codigo_individual = item["codigo_individual"]
                 clean = item["clean"]
                 res = item["res"]
-                st.markdown(f"#### 🔎 {codigo_individual}")
                 if not clean:
-                    st.info("Código no válido, se omitió.")
-                    st.markdown("---")
+                    st.warning(f"🔎 {codigo_individual} — código no válido, se omitió.")
                     continue
 
                 if res:
-                    st.success(f"Se encontraron {len(res)} coincidencias:")
-                    mostrar = quitar_id(res)
-                    st.dataframe(
-                        mostrar, use_container_width=True, hide_index=True,
-                        column_config={
-                            "Imagen": st.column_config.ImageColumn("Imagen", width="small"),
-                            "Ficha": st.column_config.LinkColumn("Ficha", display_text="Ver en proveedor ↗")
-                        }
-                    )
-
-                    # Botones de link aparte, para no depender de scrollear la tabla al costado en el celular.
-                    # La key incluye el código buscado (clean) además del ID: si se buscan varios códigos
-                    # a la vez y dos están vinculados entre sí, el mismo producto puede aparecer en más de
-                    # un resultado — sin el prefijo de clean, la key se repetiría y Streamlit tira error.
-                    con_ficha = [f for f in res if f.get("Ficha")]
-                    if con_ficha:
-                        for f in con_ficha:
-                            st.link_button(
-                                f"🔗 Ver {f['Codigo']} ({f['Marca']}) en el sitio del proveedor",
-                                f["Ficha"], key=f"link_ficha_{clean}_{f['ID']}"
-                            )
-
-                    # Combos: piezas que suelen cambiarse junto con lo que se encontró
-                    combos_encontrados = {}
-                    for f in res:
-                        for disp, items in buscar_combos_para_descripcion(f.get("Descripcion", "")).items():
-                            combos_encontrados.setdefault(disp, set()).update(items)
-                    if combos_encontrados:
-                        st.markdown("**💡 Suelen cambiarse junto con esto:**")
-                        for disp, items_set in combos_encontrados.items():
-                            items = sorted(items_set)
-                            st.caption(f"Relacionado con: {disp}")
-                            item_cols = st.columns(len(items))
-                            for col_item, item in zip(item_cols, items):
-                                if col_item.button(f"🔍 {item}", key=f"combo_{clean}_{disp}_{item}"):
-                                    res_item = buscar_por_texto(item)
-                                    if res_item:
-                                        con_stock = any((r.get("Stock") or 0) > 0 for r in res_item)
-                                        if not con_stock:
-                                            st.error(f"⚠️ Tenés '{item}' cargado pero SIN STOCK en ningún proveedor.")
-                                        st.dataframe(quitar_id(res_item), use_container_width=True, hide_index=True)
-                                    else:
-                                        st.error(f"⚠️ No tenés '{item}' cargado en la base — vas a necesitar pedirlo.")
-
-                    col_dl, col_add = st.columns(2)
-                    with col_dl:
-                        st.download_button(
-                            "⬇️ Descargar (Excel)",
-                            data=to_excel_bytes(mostrar),
-                            file_name=f"equivalencias_{clean}.xlsx",
-                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                            key=f"dl_{clean}"
-                        )
-                    with col_add:
-                        if st.button("📋 Agregar a lista de WhatsApp", key=f"add_wa_{clean}"):
-                            st.session_state.lista_whatsapp.append({
-                                "codigo_buscado": codigo_individual,
-                                "resultados": res
-                            })
-                            st.success("Agregado a la lista. Andá a la pestaña 'Lista WhatsApp' para armarla.")
-
-                    # Marcar favoritos / editar precio y stock
-                    with st.expander("✏️ Marcar favorito / editar precio y stock"):
-                        for fila in res:
-                            colF, colC, colP, colS, colG = st.columns([0.6, 2, 1.3, 1, 0.8])
-                            es_fav = bool(fila.get("Favorito"))
-                            nuevo_fav = colF.checkbox("⭐", value=es_fav, key=f"fav_{fila['ID']}_{clean}")
-                            if nuevo_fav != es_fav:
-                                alternar_favorito(fila["ID"], nuevo_fav)
-                            colC.write(f"{fila['Marca']} - {fila['Codigo']}")
-                            nuevo_precio = colP.number_input(
-                                "Precio", value=float(fila.get("Precio") or 0),
-                                key=f"precio_{fila['ID']}_{clean}", min_value=0.0, step=100.0,
-                                label_visibility="collapsed"
-                            )
-                            nuevo_stock = colS.number_input(
-                                "Stock", value=int(fila.get("Stock") or 0),
-                                key=f"stock_{fila['ID']}_{clean}", min_value=0, step=1,
-                                label_visibility="collapsed"
-                            )
-                            if colG.button("💾", key=f"save_{fila['ID']}_{clean}"):
-                                actualizar_precio_stock(fila["ID"], nuevo_precio, nuevo_stock)
-                                st.success("Guardado.")
-
-                    if catalogos:
-                        st.caption("Buscar este código también en:")
-                        cols = st.columns(len(catalogos))
-                        for col, cat in zip(cols, catalogos):
-                            with col:
-                                st.link_button(f"🌐 {cat['nombre']}", cat["url"],
-                                                use_container_width=True, key=f"link_{cat['id']}_{clean}")
+                    etiqueta_resultado = f"🔎 {codigo_individual} — {len(res)} coincidencia" + ("s" if len(res) != 1 else "")
                 else:
-                    st.warning("No hay equivalencias registradas para ese código.")
-                    parcial = buscar_por_texto(clean)
-                    if parcial:
-                        st.info("¿Quisiste decir alguno de estos códigos parecidos?")
-                        st.dataframe(quitar_id(parcial)[:10], use_container_width=True, hide_index=True)
-                st.markdown("---")
+                    etiqueta_resultado = f"🔎 {codigo_individual} — sin resultados"
+
+                with st.expander(etiqueta_resultado, expanded=(total_codigos_buscados == 1)):
+                    if res:
+                        st.success(f"Se encontraron {len(res)} coincidencias:")
+                        mostrar = quitar_id(res)
+                        st.dataframe(
+                            mostrar, use_container_width=True, hide_index=True,
+                            column_config={
+                                "Imagen": st.column_config.ImageColumn("Imagen", width="small"),
+                                "Ficha": st.column_config.LinkColumn("Ficha", display_text="Ver en proveedor ↗")
+                            }
+                        )
+
+                        # Botones de link aparte, para no depender de scrollear la tabla al costado en el celular.
+                        # La key incluye el código buscado (clean) además del ID: si se buscan varios códigos
+                        # a la vez y dos están vinculados entre sí, el mismo producto puede aparecer en más de
+                        # un resultado — sin el prefijo de clean, la key se repetiría y Streamlit tira error.
+                        con_ficha = [f for f in res if f.get("Ficha")]
+                        if con_ficha:
+                            for f in con_ficha:
+                                st.link_button(
+                                    f"🔗 Ver {f['Codigo']} ({f['Marca']}) en el sitio del proveedor",
+                                    f["Ficha"], key=f"link_ficha_{clean}_{f['ID']}"
+                                )
+
+                        # Combos: piezas que suelen cambiarse junto con lo que se encontró
+                        combos_encontrados = {}
+                        for f in res:
+                            for disp, items in buscar_combos_para_descripcion(f.get("Descripcion", "")).items():
+                                combos_encontrados.setdefault(disp, set()).update(items)
+                        if combos_encontrados:
+                            st.markdown("**💡 Suelen cambiarse junto con esto:**")
+                            for disp, items_set in combos_encontrados.items():
+                                items = sorted(items_set)
+                                st.caption(f"Relacionado con: {disp}")
+                                item_cols = st.columns(len(items))
+                                for col_item, item in zip(item_cols, items):
+                                    if col_item.button(f"🔍 {item}", key=f"combo_{clean}_{disp}_{item}"):
+                                        res_item = buscar_por_texto(item)
+                                        if res_item:
+                                            con_stock = any((r.get("Stock") or 0) > 0 for r in res_item)
+                                            if not con_stock:
+                                                st.error(f"⚠️ Tenés '{item}' cargado pero SIN STOCK en ningún proveedor.")
+                                            st.dataframe(quitar_id(res_item), use_container_width=True, hide_index=True)
+                                        else:
+                                            st.error(f"⚠️ No tenés '{item}' cargado en la base — vas a necesitar pedirlo.")
+
+                        col_dl, col_add = st.columns(2)
+                        with col_dl:
+                            st.download_button(
+                                "⬇️ Descargar (Excel)",
+                                data=to_excel_bytes(mostrar),
+                                file_name=f"equivalencias_{clean}.xlsx",
+                                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                                key=f"dl_{clean}"
+                            )
+                        with col_add:
+                            if st.button("📋 Agregar a lista de WhatsApp", key=f"add_wa_{clean}"):
+                                st.session_state.lista_whatsapp.append({
+                                    "codigo_buscado": codigo_individual,
+                                    "resultados": res
+                                })
+                                st.success("Agregado a la lista. Andá a la pestaña 'Lista WhatsApp' para armarla.")
+
+                        # Marcar favoritos / editar precio y stock
+                        with st.expander("✏️ Marcar favorito / editar precio y stock"):
+                            for fila in res:
+                                colF, colC, colP, colS, colG = st.columns([0.6, 2, 1.3, 1, 0.8])
+                                es_fav = bool(fila.get("Favorito"))
+                                nuevo_fav = colF.checkbox("⭐", value=es_fav, key=f"fav_{fila['ID']}_{clean}")
+                                if nuevo_fav != es_fav:
+                                    alternar_favorito(fila["ID"], nuevo_fav)
+                                colC.write(f"{fila['Marca']} - {fila['Codigo']}")
+                                nuevo_precio = colP.number_input(
+                                    "Precio", value=float(fila.get("Precio") or 0),
+                                    key=f"precio_{fila['ID']}_{clean}", min_value=0.0, step=100.0,
+                                    label_visibility="collapsed"
+                                )
+                                nuevo_stock = colS.number_input(
+                                    "Stock", value=int(fila.get("Stock") or 0),
+                                    key=f"stock_{fila['ID']}_{clean}", min_value=0, step=1,
+                                    label_visibility="collapsed"
+                                )
+                                if colG.button("💾", key=f"save_{fila['ID']}_{clean}"):
+                                    actualizar_precio_stock(fila["ID"], nuevo_precio, nuevo_stock)
+                                    st.success("Guardado.")
+
+                        if catalogos:
+                            st.caption("Buscar este código también en:")
+                            cols = st.columns(len(catalogos))
+                            for col, cat in zip(cols, catalogos):
+                                with col:
+                                    st.link_button(f"🌐 {cat['nombre']}", cat["url"],
+                                                    use_container_width=True, key=f"link_{cat['id']}_{clean}")
+                    else:
+                        st.warning("No hay equivalencias registradas para ese código.")
+                        parcial = buscar_por_texto(clean)
+                        if parcial:
+                            st.info("¿Quisiste decir alguno de estos códigos parecidos?")
+                            st.dataframe(quitar_id(parcial)[:10], use_container_width=True, hide_index=True)
     else:
         with st.expander("🎙️ Buscar por voz"):
             st.caption(
@@ -2778,6 +2804,16 @@ Casi todo lo que edita o borra algo pide la contraseña de administrador la prim
         m_estrias = cm5.number_input("Cantidad de estrías (opcional)", min_value=0, step=1, value=0, key="med_estrias")
         m_tolerancia = cm6.slider("Tolerancia (%)", min_value=1, max_value=15, value=5, key="med_tol")
 
+        st.markdown("**↔️ Segunda cara (opcional, para piezas con distinta medida de cada lado)**")
+        st.caption(
+            "Ej: un retén con labio interior de un diámetro de un lado y otro del otro, o un tensor "
+            "con el interior escalonado (17mm de una cara, 8mm de la otra)."
+        )
+        cb1, cb2 = st.columns(2)
+        m_diam_int_b = cb1.number_input("Diámetro interno cara B (mm)", min_value=0.0, step=0.1, value=0.0, key="med_di_b")
+        m_diam_ext_b = cb2.number_input("Diámetro externo / labio exterior cara B (mm)", min_value=0.0, step=0.1,
+                                         value=0.0, key="med_de_b")
+
         st.markdown("**🔩 Homocinéticas (opcional)**")
         ch1, ch2 = st.columns(2)
         m_estrias_int = ch1.number_input("Estrías internas", min_value=0, step=1, value=0, key="med_estrias_int")
@@ -2785,12 +2821,17 @@ Casi todo lo que edita o borra algo pide la contraseña de administrador la prim
         ch3, ch4 = st.columns(2)
         m_seguro = ch3.text_input("Posición del seguro", key="med_seguro", placeholder="Ej: 1er ranura, a 12mm")
         m_abs = ch4.selectbox("¿Tiene ABS?", ["Cualquiera", "Sí", "No"], key="med_abs")
+        ch5, ch6 = st.columns(2)
+        m_rosca_homo = ch5.number_input("Diámetro de rosca (mm)", min_value=0.0, step=0.1, value=0.0, key="med_rosca_homo")
+        m_copa = ch6.number_input("Diámetro de la copa (mm)", min_value=0.0, step=0.1, value=0.0, key="med_copa")
 
         if st.button("📐 Buscar por medidas"):
             res_medidas = buscar_por_medidas(
                 m_diam_int or None, m_diam_ext or None, m_ancho or None,
                 m_paso or None, m_estrias or None, m_tolerancia,
-                m_estrias_int or None, m_estrias_ext or None, m_seguro or None, m_abs
+                m_estrias_int or None, m_estrias_ext or None, m_seguro or None, m_abs,
+                m_diam_int_b or None, m_diam_ext_b or None,
+                m_rosca_homo or None, m_copa or None
             )
             if res_medidas:
                 st.success(f"Se encontraron {len(res_medidas)} pieza(s) con medidas compatibles:")
@@ -3403,14 +3444,16 @@ with tab4:
                 id_medidas = opciones_prod[elegido_label]
                 c.execute(
                     "SELECT diametro_interno, diametro_externo, ancho, paso_rosca, cantidad_estrias, ubicacion, "
-                    "estrias_internas, estrias_externas, posicion_seguro, tiene_abs "
+                    "estrias_internas, estrias_externas, posicion_seguro, tiene_abs, "
+                    "diametro_interno_cara_b, diametro_externo_cara_b, "
+                    "diametro_rosca_homocinetica, diametro_copa "
                     "FROM productos WHERE id = ?", (id_medidas,)
                 )
                 actual = c.fetchone()
                 em1, em2, em3 = st.columns(3)
-                e_diam_int = em1.number_input("Diám. interno (mm)", min_value=0.0, step=0.1,
+                e_diam_int = em1.number_input("Diám. interno cara A (mm)", min_value=0.0, step=0.1,
                                                value=float(actual["diametro_interno"] or 0), key="e_di")
-                e_diam_ext = em2.number_input("Diám. externo (mm)", min_value=0.0, step=0.1,
+                e_diam_ext = em2.number_input("Diám. externo cara A (mm)", min_value=0.0, step=0.1,
                                                value=float(actual["diametro_externo"] or 0), key="e_de")
                 e_ancho = em3.number_input("Ancho (mm)", min_value=0.0, step=0.1,
                                             value=float(actual["ancho"] or 0), key="e_an")
@@ -3420,6 +3463,17 @@ with tab4:
                                               value=int(actual["cantidad_estrias"] or 0), key="e_estrias")
                 e_ubicacion = em6.text_input("Ubicación en depósito", value=actual["ubicacion"] or "",
                                               placeholder="Ej: Pasillo 3, estante B", key="e_ubic")
+
+                st.markdown("**↔️ Segunda cara (opcional)**")
+                st.caption(
+                    "Para piezas con distinta medida de cada lado — retenes con labio interior/exterior "
+                    "escalonado, tensores con el interior de un diámetro de un lado y otro del otro, etc."
+                )
+                eb1, eb2 = st.columns(2)
+                e_diam_int_b = eb1.number_input("Diám. interno cara B (mm)", min_value=0.0, step=0.1,
+                                                 value=float(actual["diametro_interno_cara_b"] or 0), key="e_di_b")
+                e_diam_ext_b = eb2.number_input("Diám. externo / labio exterior cara B (mm)", min_value=0.0, step=0.1,
+                                                 value=float(actual["diametro_externo_cara_b"] or 0), key="e_de_b")
 
                 st.markdown("**🔩 Homocinéticas**")
                 eh1, eh2 = st.columns(2)
@@ -3433,10 +3487,16 @@ with tab4:
                 abs_actual = "Cualquiera" if actual["tiene_abs"] is None else ("Sí" if actual["tiene_abs"] else "No")
                 e_abs = eh4.selectbox("¿Tiene ABS?", ["Cualquiera", "Sí", "No"],
                                        index=["Cualquiera", "Sí", "No"].index(abs_actual), key="e_abs")
+                eh5, eh6 = st.columns(2)
+                e_rosca_homo = eh5.number_input("Diámetro de rosca (mm)", min_value=0.0, step=0.1,
+                                                 value=float(actual["diametro_rosca_homocinetica"] or 0), key="e_rosca_homo")
+                e_copa = eh6.number_input("Diámetro de la copa (mm)", min_value=0.0, step=0.1,
+                                           value=float(actual["diametro_copa"] or 0), key="e_copa")
 
                 if st.button("💾 Guardar medidas y ubicación"):
                     actualizar_medidas(id_medidas, e_diam_int, e_diam_ext, e_ancho, e_paso, e_estrias, e_ubicacion,
-                                        e_estrias_int, e_estrias_ext, e_seguro, e_abs)
+                                        e_estrias_int, e_estrias_ext, e_seguro, e_abs,
+                                        e_diam_int_b, e_diam_ext_b, e_rosca_homo, e_copa)
                     st.success("Guardado.")
 
                 st.markdown("**📷 Foto del producto**")
