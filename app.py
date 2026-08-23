@@ -530,6 +530,28 @@ def get_connection():
         eliminado_en TEXT DEFAULT (datetime('now'))
     )""")
 
+    # Cuando un empleado busca algo y no hay stock (o le falta), lo marca acá para que el dueño
+    # lo revise después y decida qué pedirle a cada proveedor. Un mismo producto pedido varias
+    # veces por distintos empleados suma en "veces_solicitado" en vez de duplicar filas.
+    c.execute("""CREATE TABLE IF NOT EXISTS pedidos_reposicion (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        producto_id INTEGER NOT NULL REFERENCES productos(id) ON DELETE CASCADE,
+        veces_solicitado INTEGER DEFAULT 1,
+        ultimo_solicitado_por TEXT,
+        ultima_fecha TEXT DEFAULT (datetime('now')),
+        estado TEXT DEFAULT 'pendiente',
+        UNIQUE(producto_id)
+    )""")
+
+    # Historial de precios: cada vez que se cambia el precio de un producto queda un registro,
+    # para poder ver cómo fue variando en el tiempo.
+    c.execute("""CREATE TABLE IF NOT EXISTS historial_precios (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        producto_id INTEGER NOT NULL REFERENCES productos(id) ON DELETE CASCADE,
+        precio REAL,
+        fecha TEXT DEFAULT (datetime('now'))
+    )""")
+
     # Combos de repuestos que suelen cambiarse juntos (ej: correa de distribución -> kit + tensor + bomba de agua).
     # "disparador" es la palabra/frase que se busca dentro de la descripción del producto encontrado.
     c.execute("""CREATE TABLE IF NOT EXISTS combos_sugeridos (
@@ -853,6 +875,55 @@ def depurar_huerfanos():
         borrados = c.rowcount
         conn.commit()
     return borrados
+
+
+def chequear_integridad_bd():
+    """Revisa la base en busca de datos rotos o inconsistentes — sobre todo útil para detectar
+    algo que se haya colado antes de que ciertas protecciones existieran, o algo que se rompió
+    a mano editando la base fuera de la app."""
+    resultados = []
+
+    c.execute("""SELECT COUNT(*) FROM productos p
+                 WHERE p.marca_id NOT IN (SELECT id FROM marcas)""")
+    n = c.fetchone()[0]
+    resultados.append({"Chequeo": "Productos con una marca que ya no existe", "Problemas": n})
+
+    c.execute("""SELECT COUNT(*) FROM equivalencias e
+                 WHERE e.producto_a_id NOT IN (SELECT id FROM productos)
+                    OR e.producto_b_id NOT IN (SELECT id FROM productos)""")
+    n = c.fetchone()[0]
+    resultados.append({"Chequeo": "Equivalencias que apuntan a un producto que ya no existe", "Problemas": n})
+
+    c.execute("""SELECT COUNT(*) FROM productos
+                 WHERE codigo_raw IS NULL OR TRIM(codigo_raw) = ''
+                    OR codigo_clean IS NULL OR TRIM(codigo_clean) = ''""")
+    n = c.fetchone()[0]
+    resultados.append({"Chequeo": "Productos con código vacío", "Problemas": n})
+
+    c.execute("SELECT COUNT(*) FROM productos WHERE precio IS NOT NULL AND precio < 0")
+    n = c.fetchone()[0]
+    resultados.append({"Chequeo": "Productos con precio negativo", "Problemas": n})
+
+    c.execute("SELECT COUNT(*) FROM productos WHERE stock IS NOT NULL AND stock < 0")
+    n = c.fetchone()[0]
+    resultados.append({"Chequeo": "Productos con stock negativo", "Problemas": n})
+
+    c.execute("""SELECT codigo_clean, marca_id, COUNT(*) AS repetidos FROM productos
+                 GROUP BY codigo_clean, marca_id HAVING COUNT(*) > 1""")
+    duplicados = c.fetchall()
+    resultados.append({"Chequeo": "Códigos duplicados dentro de la misma marca", "Problemas": len(duplicados)})
+
+    c.execute("""SELECT COUNT(*) FROM vehiculos
+                 WHERE km_registro IS NOT NULL AND km_actual IS NOT NULL AND km_actual < km_registro""")
+    n = c.fetchone()[0]
+    resultados.append({"Chequeo": "Vehículos con km actual menor al km de registro", "Problemas": n})
+
+    c.execute("""SELECT COUNT(*) FROM historial_piezas h
+                 WHERE h.vehiculo_id NOT IN (SELECT id FROM vehiculos)""")
+    n = c.fetchone()[0]
+    resultados.append({"Chequeo": "Piezas de historial que apuntan a un vehículo que ya no existe", "Problemas": n})
+
+    return resultados
 
 
 def listar_productos_sin_equivalencias(marca_filtro="Todas", limite=500):
@@ -1314,7 +1385,58 @@ def aplicar_carga_remito(items_cotejados):
 
 def actualizar_precio_stock(producto_id, precio, stock):
     with db_lock:
+        c.execute("SELECT precio FROM productos WHERE id = ?", (producto_id,))
+        fila = c.fetchone()
+        precio_anterior = fila["precio"] if fila else None
         c.execute("UPDATE productos SET precio = ?, stock = ? WHERE id = ?", (precio, stock, producto_id))
+        # Solo se guarda un registro nuevo en el historial si el precio realmente cambió
+        # (evita ensuciar el historial cada vez que se toca el stock sin tocar el precio).
+        if precio_anterior != precio:
+            c.execute("INSERT INTO historial_precios (producto_id, precio) VALUES (?, ?)", (producto_id, precio))
+        conn.commit()
+
+
+def historial_precio_producto(producto_id, limite=50):
+    c.execute("""SELECT precio AS "Precio", fecha AS "Fecha" FROM historial_precios
+                 WHERE producto_id = ? ORDER BY fecha DESC LIMIT ?""", (producto_id, limite))
+    return filas_a_listas(c)
+
+
+def solicitar_reposicion(producto_id):
+    with db_lock:
+        c.execute(
+            "INSERT INTO pedidos_reposicion (producto_id, veces_solicitado, ultimo_solicitado_por, ultima_fecha, estado) "
+            "VALUES (?, 1, ?, datetime('now'), 'pendiente') "
+            "ON CONFLICT(producto_id) DO UPDATE SET veces_solicitado = veces_solicitado + 1, "
+            "ultimo_solicitado_por = excluded.ultimo_solicitado_por, ultima_fecha = excluded.ultima_fecha, "
+            "estado = 'pendiente'",
+            (producto_id, obtener_usuario_actual())
+        )
+        conn.commit()
+
+
+def listar_pedidos_reposicion(estado="pendiente"):
+    c.execute("""SELECT pr.id AS "ID", p.id AS "ProductoID", p.codigo_raw AS "Codigo",
+                 p.descripcion AS "Descripcion", m.nombre AS "Marca", p.stock AS "Stock actual",
+                 pr.veces_solicitado AS "Veces pedido", pr.ultimo_solicitado_por AS "Último en pedirlo",
+                 pr.ultima_fecha AS "Fecha"
+                 FROM pedidos_reposicion pr
+                 JOIN productos p ON p.id = pr.producto_id
+                 JOIN marcas m ON m.id = p.marca_id
+                 WHERE pr.estado = ?
+                 ORDER BY pr.veces_solicitado DESC, pr.ultima_fecha DESC""", (estado,))
+    return filas_a_listas(c)
+
+
+def marcar_pedido_resuelto(pedido_id):
+    with db_lock:
+        c.execute("UPDATE pedidos_reposicion SET estado = 'resuelto' WHERE id = ?", (pedido_id,))
+        conn.commit()
+
+
+def descartar_pedido_reposicion(pedido_id):
+    with db_lock:
+        c.execute("DELETE FROM pedidos_reposicion WHERE id = ?", (pedido_id,))
         conn.commit()
 
 
@@ -1376,10 +1498,58 @@ def mover_a_papelera(tipo, datos_dict):
         conn.commit()
 
 
+def eliminar_marca_con_papelera(nombre_marca):
+    """Guarda la marca completa (con todos sus productos y las equivalencias que los tocan)
+    en la papelera antes de borrarla — es la operación más destructiva de la app, así que
+    ahora también tiene red de seguridad."""
+    c.execute("SELECT * FROM marcas WHERE nombre = ?", (nombre_marca,))
+    marca_row = c.fetchone()
+    if not marca_row:
+        return False
+    marca_id = marca_row["id"]
+    c.execute("SELECT * FROM productos WHERE marca_id = ?", (marca_id,))
+    productos_rows = [dict(r) for r in c.fetchall()]
+    producto_ids = [p["id"] for p in productos_rows]
+    equivalencias_rows = []
+    if producto_ids:
+        placeholders = ",".join("?" * len(producto_ids))
+        c.execute(
+            f"SELECT * FROM equivalencias WHERE producto_a_id IN ({placeholders}) "
+            f"OR producto_b_id IN ({placeholders})",
+            producto_ids + producto_ids
+        )
+        equivalencias_rows = [dict(r) for r in c.fetchall()]
+
+    snapshot = {"marca": dict(marca_row), "productos": productos_rows, "equivalencias": equivalencias_rows}
+    mover_a_papelera("marca", snapshot)
+
+    with db_lock:
+        c.execute("DELETE FROM marcas WHERE id = ?", (marca_id,))
+        conn.commit()
+    return True
+
+
 def listar_papelera():
-    c.execute("""SELECT id AS "ID", tipo AS "Tipo", eliminado_por AS "Eliminado por",
+    c.execute("""SELECT id AS "ID", tipo AS "Tipo", datos_json, eliminado_por AS "Eliminado por",
                  eliminado_en AS "Fecha" FROM papelera ORDER BY id DESC LIMIT 100""")
-    return filas_a_listas(c)
+    filas = []
+    for row in c.fetchall():
+        detalle = ""
+        if row["Tipo"] == "marca":
+            datos = json.loads(row["datos_json"])
+            detalle = f"{datos['marca']['nombre']} ({len(datos['productos'])} producto(s))"
+        elif row["Tipo"] == "producto":
+            datos = json.loads(row["datos_json"])
+            detalle = datos.get("codigo_raw", "")
+        elif row["Tipo"] == "combo":
+            datos = json.loads(row["datos_json"])
+            detalle = datos.get("disparador", "")
+        elif row["Tipo"] == "alias":
+            datos = json.loads(row["datos_json"])
+            detalle = datos.get("nombre", "")
+        filas.append({"ID": row["ID"], "Tipo": row["Tipo"], "Detalle": detalle,
+                       "Eliminado por": row["Eliminado por"], "Fecha": row["Fecha"]})
+    return filas
 
 
 def vaciar_papelera_antigua(dias=30):
@@ -1410,6 +1580,22 @@ def restaurar_de_papelera(item_id):
                 columnas = ", ".join(datos.keys())
                 placeholders = ", ".join("?" * len(datos))
                 c.execute(f"INSERT INTO productos ({columnas}) VALUES ({placeholders})", list(datos.values()))
+            elif tipo == "marca":
+                marca = datos["marca"]
+                columnas_marca = ", ".join(marca.keys())
+                placeholders_marca = ", ".join("?" * len(marca))
+                c.execute(f"INSERT INTO marcas ({columnas_marca}) VALUES ({placeholders_marca})",
+                          list(marca.values()))
+                for producto in datos["productos"]:
+                    columnas_p = ", ".join(producto.keys())
+                    placeholders_p = ", ".join("?" * len(producto))
+                    c.execute(f"INSERT INTO productos ({columnas_p}) VALUES ({placeholders_p})",
+                              list(producto.values()))
+                for equiv in datos["equivalencias"]:
+                    columnas_e = ", ".join(equiv.keys())
+                    placeholders_e = ", ".join("?" * len(equiv))
+                    c.execute(f"INSERT INTO equivalencias ({columnas_e}) VALUES ({placeholders_e})",
+                              list(equiv.values()))
             else:
                 return False, f"No sé cómo restaurar el tipo '{tipo}'."
             c.execute("DELETE FROM papelera WHERE id = ?", (item_id,))
@@ -2624,6 +2810,12 @@ Casi todo lo que edita o borra algo pide la contraseña de administrador la prim
                 with st.expander(etiqueta_resultado, expanded=(total_codigos_buscados == 1)):
                     if res:
                         st.success(f"Se encontraron {len(res)} coincidencias:")
+                        # Marca la opción más barata ENTRE LAS QUE TIENEN STOCK, para no tener que
+                        # comparar precios a ojo cuando hay varias marcas equivalentes.
+                        candidatos_precio = [f for f in res if f.get("Precio") and (f.get("Stock") or 0) > 0]
+                        id_mas_barato = min(candidatos_precio, key=lambda f: f["Precio"])["ID"] if candidatos_precio else None
+                        for f in res:
+                            f["💰"] = "🏆 Más barato en stock" if f["ID"] == id_mas_barato else ""
                         mostrar = quitar_id(res)
                         st.dataframe(
                             mostrar, use_container_width=True, hide_index=True,
@@ -2684,10 +2876,19 @@ Casi todo lo que edita o borra algo pide la contraseña de administrador la prim
                                 })
                                 st.success("Agregado a la lista. Andá a la pestaña 'Lista WhatsApp' para armarla.")
 
+                        st.markdown("**📌 ¿Falta stock de alguno? Marcalo para reposición**")
+                        st.caption("El dueño lo va a ver en Estadísticas → Para pedir, y decide qué comprarle a cada proveedor.")
+                        for fila_stock in res:
+                            colr1, colr2 = st.columns([3, 1])
+                            colr1.write(f"{fila_stock['Marca']} - {fila_stock['Codigo']} (stock actual: {fila_stock.get('Stock') if fila_stock.get('Stock') is not None else 's/d'})")
+                            if colr2.button("📌 Pedir", key=f"pedir_repo_{fila_stock['ID']}_{clean}"):
+                                solicitar_reposicion(fila_stock["ID"])
+                                st.success("Marcado para reposición.")
+
                         # Marcar favoritos / editar precio y stock
                         with st.expander("✏️ Marcar favorito / editar precio y stock"):
                             for fila in res:
-                                colF, colC, colP, colS, colG = st.columns([0.6, 2, 1.3, 1, 0.8])
+                                colF, colC, colP, colS, colG, colH = st.columns([0.5, 1.7, 1.1, 0.9, 0.7, 0.7])
                                 es_fav = bool(fila.get("Favorito"))
                                 nuevo_fav = colF.checkbox("⭐", value=es_fav, key=f"fav_{fila['ID']}_{clean}")
                                 if nuevo_fav != es_fav:
@@ -2706,6 +2907,14 @@ Casi todo lo que edita o borra algo pide la contraseña de administrador la prim
                                 if colG.button("💾", key=f"save_{fila['ID']}_{clean}"):
                                     actualizar_precio_stock(fila["ID"], nuevo_precio, nuevo_stock)
                                     st.success("Guardado.")
+                                if colH.button("📈", key=f"hist_precio_{fila['ID']}_{clean}", help="Ver historial de precio"):
+                                    st.session_state[f"mostrar_hist_{fila['ID']}"] = True
+                                if st.session_state.get(f"mostrar_hist_{fila['ID']}"):
+                                    historial_p = historial_precio_producto(fila["ID"])
+                                    if historial_p:
+                                        st.dataframe(historial_p, use_container_width=True, hide_index=True)
+                                    else:
+                                        st.caption("Todavía no hay cambios de precio registrados para este producto.")
 
                         if catalogos:
                             st.caption("Buscar este código también en:")
@@ -3375,10 +3584,8 @@ with tab4:
             confirmar = st.checkbox(f"Confirmo que quiero borrar '{marca_a_borrar}' y todo lo asociado")
             if st.button("🗑️ Eliminar marca", disabled=not confirmar):
                 if pedir_password_admin("eliminar una marca"):
-                    with db_lock:
-                        c.execute("DELETE FROM marcas WHERE nombre = ?", (marca_a_borrar,))
-                        conn.commit()
-                    st.success(f"Marca '{marca_a_borrar}' eliminada.")
+                    eliminar_marca_con_papelera(marca_a_borrar)
+                    st.success(f"Marca '{marca_a_borrar}' eliminada (podés restaurarla desde la papelera).")
                     st.rerun()
 
         st.markdown("**Catálogos externos**")
@@ -3688,6 +3895,27 @@ with tab4:
                 st.rerun()
 
     with sub_mantenimiento:
+        st.markdown("**🔍 Salud de los datos**")
+        st.caption(
+            "Revisa la base en busca de cosas rotas o inconsistentes — útil para detectar corrupción "
+            "de datos antes de encontrártela buscando un producto."
+        )
+        if st.button("🔍 Revisar salud de los datos"):
+            reporte_salud = chequear_integridad_bd()
+            total_problemas = sum(r["Problemas"] for r in reporte_salud)
+            if total_problemas == 0:
+                st.success("✅ Todo en orden, no se encontró ningún problema.")
+            else:
+                st.warning(f"⚠️ Se encontraron {total_problemas} problema(s) en total.")
+            st.dataframe(
+                [r for r in reporte_salud],
+                use_container_width=True, hide_index=True,
+                column_config={"Problemas": st.column_config.NumberColumn(
+                    "Problemas", help="0 está bien; más de 0 conviene revisarlo"
+                )}
+            )
+
+        st.markdown("---")
         st.markdown("**Limpieza de la base**")
         st.caption(
             "Con el tiempo pueden quedar códigos cargados por error que no están vinculados a "
@@ -3704,20 +3932,23 @@ with tab4:
         st.markdown("---")
         st.markdown("**🗑️ Papelera**")
         st.caption(
-            "Cuando borrás un combo, un alias de transferencia o un producto puntual (por ID), queda "
-            "acá guardado por si te equivocaste. Se borra en forma permanente solo cuando vos lo pedís "
-            "o pasan más de 30 días. (Los borrados masivos — eliminar una marca entera, fusionar marcas, "
-            "restaurar un backup — no pasan por acá, esos son irreversibles como siempre.)"
+            "Cuando borrás una marca entera, un combo, un alias de transferencia o un producto puntual "
+            "(por ID), queda acá guardado por si te equivocaste. Se borra en forma permanente solo cuando "
+            "vos lo pedís o pasan más de 30 días. (Fusionar marcas y restaurar un backup completo siguen "
+            "siendo irreversibles — esos no pasan por acá.)"
         )
         items_papelera = listar_papelera()
         if not items_papelera:
             st.caption("La papelera está vacía.")
         else:
-            iconos_tipo = {"combo": "🧩", "alias": "💳", "producto": "📦"}
+            iconos_tipo = {"combo": "🧩", "alias": "💳", "producto": "📦", "marca": "🏷️"}
             for item in items_papelera:
                 colp1, colp2, colp3 = st.columns([3, 1, 1])
                 icono = iconos_tipo.get(item["Tipo"], "🗑️")
-                colp1.write(f"{icono} {item['Tipo'].capitalize()} — eliminado por {item['Eliminado por'] or 'alguien'} el {item['Fecha']}")
+                colp1.write(
+                    f"{icono} {item['Tipo'].capitalize()}: **{item['Detalle']}** — "
+                    f"eliminado por {item['Eliminado por'] or 'alguien'} el {item['Fecha']}"
+                )
                 if colp2.button("↩️ Restaurar", key=f"restaurar_papelera_{item['ID']}"):
                     ok, error_restaurar = restaurar_de_papelera(item["ID"])
                     if ok:
@@ -3742,8 +3973,9 @@ with tab4:
 with tab5:
     st.subheader("📊 Estadísticas")
 
-    sub_resumen, sub_importaciones, sub_backup, sub_auditoria, sub_busquedas = st.tabs(
-        ["📈 Resumen", "📥 Importaciones", "💾 Backup y config", "🧮 Auditoría y depósito", "🔎 Búsquedas sin resultado"]
+    sub_resumen, sub_importaciones, sub_backup, sub_auditoria, sub_busquedas, sub_para_pedir = st.tabs(
+        ["📈 Resumen", "📥 Importaciones", "💾 Backup y config", "🧮 Auditoría y depósito",
+         "🔎 Búsquedas sin resultado", "📌 Para pedir"]
     )
 
     with sub_resumen:
@@ -3762,15 +3994,6 @@ with tab5:
         m3.metric("Vínculos de equivalencia", total_equiv // 2 if total_equiv else 0)
 
         st.markdown("---")
-        st.markdown("**📦 Favoritos con poco stock**")
-        umbral_stock = st.number_input("Alertar cuando el stock sea menor o igual a:", min_value=0, value=2, step=1)
-        stock_bajo = listar_favoritos_stock_bajo(umbral_stock)
-        if stock_bajo:
-            st.warning(f"{len(stock_bajo)} producto(s) favorito(s) con poco stock — considerá reponerlos:")
-            st.dataframe(quitar_id(stock_bajo), use_container_width=True, hide_index=True)
-        else:
-            st.caption("Ningún favorito con stock bajo por ahora.")
-
         c.execute("""SELECT m.nombre, COUNT(p.id) AS productos
                      FROM marcas m LEFT JOIN productos p ON p.marca_id = m.id
                      GROUP BY m.id ORDER BY productos DESC LIMIT 15""")
@@ -3895,6 +4118,71 @@ with tab5:
             st.dataframe(fallidas, use_container_width=True, hide_index=True)
         else:
             st.caption("Sin registros todavía.")
+
+    with sub_para_pedir:
+        st.markdown("**🙋 Pedidos marcados por empleados**")
+        st.caption(
+            "Cuando alguien busca algo y toca '📌 Pedir' en el buscador, aparece acá para que decidas "
+            "qué comprarle a cada proveedor."
+        )
+        pedidos = listar_pedidos_reposicion("pendiente")
+        seleccionados = []
+        if pedidos:
+            for p in pedidos:
+                colp1, colp2, colp3 = st.columns([4, 1, 1])
+                stock_txt = p["Stock actual"] if p["Stock actual"] is not None else "s/d"
+                marcado = colp1.checkbox(
+                    f"{p['Marca']} - {p['Codigo']} — {p['Descripcion'] or ''} "
+                    f"(stock: {stock_txt}, pedido {p['Veces pedido']}x, último: {p['Último en pedirlo']})",
+                    key=f"chk_pedido_{p['ID']}"
+                )
+                if marcado:
+                    seleccionados.append(p)
+                if colp2.button("✅", key=f"resuelto_{p['ID']}", help="Marcar como resuelto"):
+                    marcar_pedido_resuelto(p["ID"])
+                    st.rerun()
+                if colp3.button("🗑️", key=f"descartar_{p['ID']}", help="Descartar (no hace falta pedirlo)"):
+                    descartar_pedido_reposicion(p["ID"])
+                    st.rerun()
+        else:
+            st.caption("Ningún empleado marcó nada para pedir todavía.")
+
+        st.markdown("---")
+        st.markdown("**📦 Favoritos con poco stock**")
+        umbral_stock = st.number_input("Alertar cuando el stock sea menor o igual a:", min_value=0, value=2, step=1,
+                                        key="umbral_para_pedir")
+        stock_bajo = listar_favoritos_stock_bajo(umbral_stock)
+        if stock_bajo:
+            for f in stock_bajo:
+                stock_txt_f = f["Stock"] if f["Stock"] is not None else "s/d"
+                marcado_f = st.checkbox(
+                    f"{f['Marca']} - {f['Codigo']} — {f['Descripcion'] or ''} (stock: {stock_txt_f})",
+                    key=f"chk_stockbajo_{f['ID']}"
+                )
+                if marcado_f:
+                    seleccionados.append(f)
+        else:
+            st.caption("Ningún favorito con stock bajo por ahora.")
+
+        if seleccionados:
+            st.markdown("---")
+            st.markdown(f"**📲 Armar mensaje para el proveedor ({len(seleccionados)} ítem(s) elegidos)**")
+            por_marca = {}
+            for item in seleccionados:
+                por_marca.setdefault(item["Marca"], []).append(item)
+            for marca, items in por_marca.items():
+                lineas_msg = [f"Hola! Necesito reponer estos productos de {marca}:"]
+                for it in items:
+                    stock_it = it.get("Stock actual", it.get("Stock"))
+                    lineas_msg.append(
+                        f"- {it['Codigo']} ({it.get('Descripcion') or ''}) — "
+                        f"quedan {stock_it if stock_it is not None else 's/d'}"
+                    )
+                mensaje_reposicion = "\n".join(lineas_msg)
+                with st.expander(f"📨 {marca} ({len(items)} ítem(s))"):
+                    st.text_area("Mensaje:", value=mensaje_reposicion, height=120, key=f"msg_repo_{marca}")
+                    url_wa_repo = "https://wa.me/?text=" + quote(mensaje_reposicion)
+                    st.link_button(f"📲 Abrir WhatsApp para {marca}", url_wa_repo, key=f"wa_repo_{marca}")
 
 # ============================================================
 # TAB 6: LISTA PARA WHATSAPP
