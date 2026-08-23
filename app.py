@@ -3617,7 +3617,7 @@ with tab4:
                     st.rerun()
 
     with sub_productos:
-        st.markdown("**Buscar y eliminar un producto puntual**")
+        st.markdown("**Buscar y editar un producto puntual**")
         texto_prod = st.text_input("Buscar producto por código o descripción", key="admin_buscar")
         if texto_prod.strip():
             res_admin = buscar_por_texto(texto_prod)
@@ -3627,23 +3627,10 @@ with tab4:
                     res_admin = buscar_por_codigo(clean_admin)
             if res_admin:
                 st.dataframe(res_admin, use_container_width=True, hide_index=True)
-                id_borrar = st.number_input("ID del producto a borrar", min_value=0, step=1)
                 st.caption(
-                    "⚠️ Se borran también sus equivalencias con otros productos. Si lo restaurás desde "
-                    "la papelera, el producto vuelve pero **sin** esos vínculos — hay que volver a "
-                    "vincularlo manualmente."
+                    "¿Necesitás borrar un producto? Está en '🧹 Mantenimiento' → separado a propósito "
+                    "de la edición, para que un descuido acá no borre nada."
                 )
-                if st.button("🗑️ Eliminar producto por ID"):
-                    if id_borrar and pedir_password_admin("eliminar un producto"):
-                        c.execute("SELECT * FROM productos WHERE id = ?", (int(id_borrar),))
-                        fila_producto = c.fetchone()
-                        if fila_producto:
-                            mover_a_papelera("producto", dict(fila_producto))
-                        with db_lock:
-                            c.execute("DELETE FROM productos WHERE id = ?", (int(id_borrar),))
-                            conn.commit()
-                        st.success(f"Producto ID {id_borrar} eliminado (podés restaurarlo desde la papelera).")
-                        st.rerun()
 
                 st.markdown("**📐 Cargar medidas mecánicas / ubicación en depósito**")
                 opciones_prod = {f"{f['Codigo']} ({f['Marca']}) — ID {f['ID']}": f['ID'] for f in res_admin}
@@ -3895,6 +3882,45 @@ with tab4:
                 st.rerun()
 
     with sub_mantenimiento:
+        st.markdown("**🗑️ Eliminar un producto puntual**")
+        st.caption(
+            "Separado a propósito de la edición de medidas/fotos, para que buscar y editar un producto "
+            "no te deje el botón de borrar a mano por accidente."
+        )
+        texto_prod_borrar = st.text_input("Buscar el producto a borrar (por código o descripción):", key="mant_buscar_borrar")
+        if texto_prod_borrar.strip():
+            res_borrar = buscar_por_texto(texto_prod_borrar)
+            if not res_borrar:
+                clean_borrar = sanitizar(texto_prod_borrar)
+                if clean_borrar:
+                    res_borrar = buscar_por_codigo(clean_borrar)
+            if res_borrar:
+                opciones_borrar = {f"{f['Codigo']} ({f['Marca']}) — ID {f['ID']}": f['ID'] for f in res_borrar}
+                elegido_borrar_label = st.selectbox("Elegí el producto a eliminar:", list(opciones_borrar.keys()),
+                                                     key="mant_sel_borrar")
+                id_a_borrar = opciones_borrar[elegido_borrar_label]
+                st.caption(
+                    "⚠️ Se borran también sus equivalencias con otros productos. Si lo restaurás desde "
+                    "la papelera, el producto vuelve pero **sin** esos vínculos — hay que volver a "
+                    "vincularlo manualmente."
+                )
+                confirmar_borrado = st.checkbox(f"Confirmo que quiero borrar '{elegido_borrar_label}'",
+                                                 key="mant_confirmar_borrar")
+                if st.button("🗑️ Eliminar producto", disabled=not confirmar_borrado):
+                    if pedir_password_admin("eliminar un producto"):
+                        c.execute("SELECT * FROM productos WHERE id = ?", (id_a_borrar,))
+                        fila_producto = c.fetchone()
+                        if fila_producto:
+                            mover_a_papelera("producto", dict(fila_producto))
+                        with db_lock:
+                            c.execute("DELETE FROM productos WHERE id = ?", (id_a_borrar,))
+                            conn.commit()
+                        st.success("Producto eliminado (podés restaurarlo desde la papelera, más abajo).")
+                        st.rerun()
+            else:
+                st.caption("Sin resultados.")
+
+        st.markdown("---")
         st.markdown("**🔍 Salud de los datos**")
         st.caption(
             "Revisa la base en busca de cosas rotas o inconsistentes — útil para detectar corrupción "
