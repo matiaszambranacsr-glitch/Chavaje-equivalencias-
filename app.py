@@ -124,6 +124,30 @@ def es_admin():
     return st.session_state.get("es_admin", False)
 
 
+def validar_password_admin(clave):
+    """Chequea la contraseña ingresada contra los secrets. Devuelve (nombre, error) —
+    nombre es el nombre de la clave que matcheó (o None), error es un mensaje si no hay
+    ninguna contraseña configurada todavía."""
+    secretos = st.secrets if hasattr(st, "secrets") else {}
+    # Soporta varias contraseñas con nombre, por ejemplo en Secrets:
+    # [admin_passwords]
+    # matias = "clave123"
+    # socio = "otraclave456"
+    # También soporta la forma anterior de una sola clave (admin_password) por compatibilidad.
+    passwords_nombradas = dict(secretos.get("admin_passwords", {}))
+    clave_unica = secretos.get("admin_password")
+    if clave_unica:
+        passwords_nombradas.setdefault("admin", clave_unica)
+
+    if not passwords_nombradas:
+        return None, (
+            "No configuraste todavía ninguna contraseña de administrador en Streamlit Cloud "
+            "(Settings → Secrets). Sin eso, nadie puede entrar a esta sección."
+        )
+    nombre_coincidente = next((n for n, p in passwords_nombradas.items() if p == clave), None)
+    return nombre_coincidente, None
+
+
 def pedir_password_admin(motivo=""):
     """Muestra un formulario de contraseña. Devuelve True si ya está autenticado."""
     if es_admin():
@@ -135,31 +159,48 @@ def pedir_password_admin(motivo=""):
         entrar = st.form_submit_button("Ingresar")
 
     if entrar:
-        secretos = st.secrets if hasattr(st, "secrets") else {}
-        # Soporta varias contraseñas con nombre, por ejemplo en Secrets:
-        # [admin_passwords]
-        # matias = "clave123"
-        # socio = "otraclave456"
-        # También soporta la forma anterior de una sola clave (admin_password) por compatibilidad.
-        passwords_nombradas = dict(secretos.get("admin_passwords", {}))
-        clave_unica = secretos.get("admin_password")
-        if clave_unica:
-            passwords_nombradas.setdefault("admin", clave_unica)
-
-        if not passwords_nombradas:
-            st.error(
-                "No configuraste todavía ninguna contraseña de administrador en Streamlit Cloud "
-                "(Settings → Secrets). Sin eso, nadie puede entrar a esta sección."
-            )
+        nombre_coincidente, error = validar_password_admin(clave)
+        if error:
+            st.error(error)
+        elif nombre_coincidente:
+            st.session_state.es_admin = True
+            st.session_state.admin_nombre = nombre_coincidente
+            st.rerun()
         else:
-            nombre_coincidente = next((n for n, p in passwords_nombradas.items() if p == clave), None)
-            if nombre_coincidente:
-                st.session_state.es_admin = True
-                st.session_state.admin_nombre = nombre_coincidente
-                st.rerun()
-            else:
-                st.error("Contraseña incorrecta.")
+            st.error("Contraseña incorrecta.")
     return False
+
+
+def mostrar_login_inicial():
+    """Pide la contraseña apenas se abre la app, con opción de seguir sin loguearse para
+    quien solo quiera buscar/consultar. Las acciones puntuales de carga/edición van a seguir
+    pidiendo la contraseña aparte, esto es solo la pantalla de entrada."""
+    st.markdown("### 🔒 Ingresar como administrador")
+    st.caption(
+        "Si sos administrador, ingresá tu contraseña. Si no, podés seguir sin loguearte para "
+        "buscar y consultar — las acciones de carga o edición te van a pedir la contraseña aparte "
+        "cuando corresponda."
+    )
+    with st.form("login_inicial"):
+        clave = st.text_input("Contraseña de administrador:", type="password", key="login_inicial_clave")
+        col_a, col_b = st.columns(2)
+        entrar = col_a.form_submit_button("🔓 Ingresar", type="primary", use_container_width=True)
+        seguir = col_b.form_submit_button("➡️ Seguir sin loguearse", use_container_width=True)
+
+    if entrar:
+        nombre_coincidente, error = validar_password_admin(clave)
+        if error:
+            st.error(error)
+        elif nombre_coincidente:
+            st.session_state.es_admin = True
+            st.session_state.admin_nombre = nombre_coincidente
+            st.session_state.saltar_login = True
+            st.rerun()
+        else:
+            st.error("Contraseña incorrecta.")
+    if seguir:
+        st.session_state.saltar_login = True
+        st.rerun()
 
 
 # ============================================================
@@ -2084,6 +2125,11 @@ st.markdown(
     unsafe_allow_html=True
 )
 
+# Pantalla de login apenas se abre la app, con opción de seguir sin loguearse.
+if not es_admin() and not st.session_state.get("saltar_login"):
+    mostrar_login_inicial()
+    st.stop()
+
 if es_admin():
     col_estado, col_salir = st.columns([4, 1])
     nombre_sesion = st.session_state.get("admin_nombre", "admin")
@@ -2152,124 +2198,149 @@ with tab1:
                 marca_filtro = st.selectbox("Filtrar por marca:", lista_marcas)
             buscar_click = st.form_submit_button("🔍 Buscar Equivalencias", type="primary")
 
+        # La búsqueda en sí (con sus efectos de una sola vez: guardar historial, contar
+        # veces_buscado) se hace acá, solo cuando se tocó "Buscar". El resultado se guarda en
+        # session_state y el DESPLIEGUE se hace más abajo, FUERA de este "if", para que los
+        # botones de adentro (agregar a WhatsApp, favoritos, combos) sigan funcionando en los
+        # reruns siguientes — si el despliegue dependiera de "buscar_click", cualquier otro botón
+        # que se toque después haría que buscar_click vuelva a False y todo el bloque desaparezca
+        # antes de que el click en el botón de adentro llegue a registrarse.
         if buscar_click:
             codigos_buscados = [x.strip() for x in busqueda.split(",") if x.strip()]
             if not codigos_buscados:
                 st.info("Ingresá al menos un código válido para buscar.")
+                st.session_state.pop("ultima_busqueda_codigo", None)
             else:
                 guardar_busqueda(busqueda.strip())
-                catalogos = listar_catalogos_externos()
-
+                resultados_guardados = []
                 for codigo_individual in codigos_buscados:
                     clean = sanitizar(codigo_individual)
-                    st.markdown(f"#### 🔎 {codigo_individual}")
                     if not clean:
-                        st.info("Código no válido, se omitió.")
+                        resultados_guardados.append(
+                            {"codigo_individual": codigo_individual, "clean": None, "res": None}
+                        )
                         continue
-
                     res = buscar_por_codigo(clean, marca_filtro)
                     if res:
                         incrementar_veces_buscado(clean)
-                        st.success(f"Se encontraron {len(res)} coincidencias:")
-                        mostrar = quitar_id(res)
-                        st.dataframe(
-                            mostrar, use_container_width=True, hide_index=True,
-                            column_config={
-                                "Imagen": st.column_config.ImageColumn("Imagen", width="small"),
-                                "Ficha": st.column_config.LinkColumn("Ficha", display_text="Ver en proveedor ↗")
-                            }
-                        )
-
-                        # Botones de link aparte, para no depender de scrollear la tabla al costado en el celular.
-                        # La key incluye el código buscado (clean) además del ID: si se buscan varios códigos
-                        # a la vez y dos están vinculados entre sí, el mismo producto puede aparecer en más de
-                        # un resultado — sin el prefijo de clean, la key se repetiría y Streamlit tira error.
-                        con_ficha = [f for f in res if f.get("Ficha")]
-                        if con_ficha:
-                            for f in con_ficha:
-                                st.link_button(
-                                    f"🔗 Ver {f['Codigo']} ({f['Marca']}) en el sitio del proveedor",
-                                    f["Ficha"], key=f"link_ficha_{clean}_{f['ID']}"
-                                )
-
-                        # Combos: piezas que suelen cambiarse junto con lo que se encontró
-                        combos_encontrados = {}
-                        for f in res:
-                            for disp, items in buscar_combos_para_descripcion(f.get("Descripcion", "")).items():
-                                combos_encontrados.setdefault(disp, set()).update(items)
-                        if combos_encontrados:
-                            st.markdown("**💡 Suelen cambiarse junto con esto:**")
-                            for disp, items_set in combos_encontrados.items():
-                                items = sorted(items_set)
-                                st.caption(f"Relacionado con: {disp}")
-                                item_cols = st.columns(len(items))
-                                for col_item, item in zip(item_cols, items):
-                                    if col_item.button(f"🔍 {item}", key=f"combo_{clean}_{disp}_{item}"):
-                                        res_item = buscar_por_texto(item)
-                                        if res_item:
-                                            con_stock = any((r.get("Stock") or 0) > 0 for r in res_item)
-                                            if not con_stock:
-                                                st.error(f"⚠️ Tenés '{item}' cargado pero SIN STOCK en ningún proveedor.")
-                                            st.dataframe(quitar_id(res_item), use_container_width=True, hide_index=True)
-                                        else:
-                                            st.error(f"⚠️ No tenés '{item}' cargado en la base — vas a necesitar pedirlo.")
-
-                        col_dl, col_add = st.columns(2)
-                        with col_dl:
-                            st.download_button(
-                                "⬇️ Descargar (Excel)",
-                                data=to_excel_bytes(mostrar),
-                                file_name=f"equivalencias_{clean}.xlsx",
-                                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                                key=f"dl_{clean}"
-                            )
-                        with col_add:
-                            if st.button("📋 Agregar a lista de WhatsApp", key=f"add_wa_{clean}"):
-                                st.session_state.lista_whatsapp.append({
-                                    "codigo_buscado": codigo_individual,
-                                    "resultados": res
-                                })
-                                st.success("Agregado a la lista. Andá a la pestaña 'Lista WhatsApp' para armarla.")
-
-                        # Marcar favoritos / editar precio y stock
-                        with st.expander("✏️ Marcar favorito / editar precio y stock"):
-                            for fila in res:
-                                colF, colC, colP, colS, colG = st.columns([0.6, 2, 1.3, 1, 0.8])
-                                es_fav = bool(fila.get("Favorito"))
-                                nuevo_fav = colF.checkbox("⭐", value=es_fav, key=f"fav_{fila['ID']}_{clean}")
-                                if nuevo_fav != es_fav:
-                                    alternar_favorito(fila["ID"], nuevo_fav)
-                                colC.write(f"{fila['Marca']} - {fila['Codigo']}")
-                                nuevo_precio = colP.number_input(
-                                    "Precio", value=float(fila.get("Precio") or 0),
-                                    key=f"precio_{fila['ID']}_{clean}", min_value=0.0, step=100.0,
-                                    label_visibility="collapsed"
-                                )
-                                nuevo_stock = colS.number_input(
-                                    "Stock", value=int(fila.get("Stock") or 0),
-                                    key=f"stock_{fila['ID']}_{clean}", min_value=0, step=1,
-                                    label_visibility="collapsed"
-                                )
-                                if colG.button("💾", key=f"save_{fila['ID']}_{clean}"):
-                                    actualizar_precio_stock(fila["ID"], nuevo_precio, nuevo_stock)
-                                    st.success("Guardado.")
-                                    st.rerun()
-
-                        if catalogos:
-                            st.caption("Buscar este código también en:")
-                            cols = st.columns(len(catalogos))
-                            for col, cat in zip(cols, catalogos):
-                                with col:
-                                    st.link_button(f"🌐 {cat['nombre']}", cat["url"],
-                                                    use_container_width=True, key=f"link_{cat['id']}_{clean}")
                     else:
-                        st.warning("No hay equivalencias registradas para ese código.")
                         registrar_busqueda_sin_resultado(codigo_individual)
-                        parcial = buscar_por_texto(clean)
-                        if parcial:
-                            st.info("¿Quisiste decir alguno de estos códigos parecidos?")
-                            st.dataframe(quitar_id(parcial)[:10], use_container_width=True, hide_index=True)
+                    resultados_guardados.append(
+                        {"codigo_individual": codigo_individual, "clean": clean, "res": res}
+                    )
+                st.session_state["ultima_busqueda_codigo"] = resultados_guardados
+
+        if st.session_state.get("ultima_busqueda_codigo"):
+            catalogos = listar_catalogos_externos()
+            for item in st.session_state["ultima_busqueda_codigo"]:
+                codigo_individual = item["codigo_individual"]
+                clean = item["clean"]
+                res = item["res"]
+                st.markdown(f"#### 🔎 {codigo_individual}")
+                if not clean:
+                    st.info("Código no válido, se omitió.")
                     st.markdown("---")
+                    continue
+
+                if res:
+                    st.success(f"Se encontraron {len(res)} coincidencias:")
+                    mostrar = quitar_id(res)
+                    st.dataframe(
+                        mostrar, use_container_width=True, hide_index=True,
+                        column_config={
+                            "Imagen": st.column_config.ImageColumn("Imagen", width="small"),
+                            "Ficha": st.column_config.LinkColumn("Ficha", display_text="Ver en proveedor ↗")
+                        }
+                    )
+
+                    # Botones de link aparte, para no depender de scrollear la tabla al costado en el celular.
+                    # La key incluye el código buscado (clean) además del ID: si se buscan varios códigos
+                    # a la vez y dos están vinculados entre sí, el mismo producto puede aparecer en más de
+                    # un resultado — sin el prefijo de clean, la key se repetiría y Streamlit tira error.
+                    con_ficha = [f for f in res if f.get("Ficha")]
+                    if con_ficha:
+                        for f in con_ficha:
+                            st.link_button(
+                                f"🔗 Ver {f['Codigo']} ({f['Marca']}) en el sitio del proveedor",
+                                f["Ficha"], key=f"link_ficha_{clean}_{f['ID']}"
+                            )
+
+                    # Combos: piezas que suelen cambiarse junto con lo que se encontró
+                    combos_encontrados = {}
+                    for f in res:
+                        for disp, items in buscar_combos_para_descripcion(f.get("Descripcion", "")).items():
+                            combos_encontrados.setdefault(disp, set()).update(items)
+                    if combos_encontrados:
+                        st.markdown("**💡 Suelen cambiarse junto con esto:**")
+                        for disp, items_set in combos_encontrados.items():
+                            items = sorted(items_set)
+                            st.caption(f"Relacionado con: {disp}")
+                            item_cols = st.columns(len(items))
+                            for col_item, item in zip(item_cols, items):
+                                if col_item.button(f"🔍 {item}", key=f"combo_{clean}_{disp}_{item}"):
+                                    res_item = buscar_por_texto(item)
+                                    if res_item:
+                                        con_stock = any((r.get("Stock") or 0) > 0 for r in res_item)
+                                        if not con_stock:
+                                            st.error(f"⚠️ Tenés '{item}' cargado pero SIN STOCK en ningún proveedor.")
+                                        st.dataframe(quitar_id(res_item), use_container_width=True, hide_index=True)
+                                    else:
+                                        st.error(f"⚠️ No tenés '{item}' cargado en la base — vas a necesitar pedirlo.")
+
+                    col_dl, col_add = st.columns(2)
+                    with col_dl:
+                        st.download_button(
+                            "⬇️ Descargar (Excel)",
+                            data=to_excel_bytes(mostrar),
+                            file_name=f"equivalencias_{clean}.xlsx",
+                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                            key=f"dl_{clean}"
+                        )
+                    with col_add:
+                        if st.button("📋 Agregar a lista de WhatsApp", key=f"add_wa_{clean}"):
+                            st.session_state.lista_whatsapp.append({
+                                "codigo_buscado": codigo_individual,
+                                "resultados": res
+                            })
+                            st.success("Agregado a la lista. Andá a la pestaña 'Lista WhatsApp' para armarla.")
+
+                    # Marcar favoritos / editar precio y stock
+                    with st.expander("✏️ Marcar favorito / editar precio y stock"):
+                        for fila in res:
+                            colF, colC, colP, colS, colG = st.columns([0.6, 2, 1.3, 1, 0.8])
+                            es_fav = bool(fila.get("Favorito"))
+                            nuevo_fav = colF.checkbox("⭐", value=es_fav, key=f"fav_{fila['ID']}_{clean}")
+                            if nuevo_fav != es_fav:
+                                alternar_favorito(fila["ID"], nuevo_fav)
+                            colC.write(f"{fila['Marca']} - {fila['Codigo']}")
+                            nuevo_precio = colP.number_input(
+                                "Precio", value=float(fila.get("Precio") or 0),
+                                key=f"precio_{fila['ID']}_{clean}", min_value=0.0, step=100.0,
+                                label_visibility="collapsed"
+                            )
+                            nuevo_stock = colS.number_input(
+                                "Stock", value=int(fila.get("Stock") or 0),
+                                key=f"stock_{fila['ID']}_{clean}", min_value=0, step=1,
+                                label_visibility="collapsed"
+                            )
+                            if colG.button("💾", key=f"save_{fila['ID']}_{clean}"):
+                                actualizar_precio_stock(fila["ID"], nuevo_precio, nuevo_stock)
+                                st.success("Guardado.")
+
+                    if catalogos:
+                        st.caption("Buscar este código también en:")
+                        cols = st.columns(len(catalogos))
+                        for col, cat in zip(cols, catalogos):
+                            with col:
+                                st.link_button(f"🌐 {cat['nombre']}", cat["url"],
+                                                use_container_width=True, key=f"link_{cat['id']}_{clean}")
+                else:
+                    st.warning("No hay equivalencias registradas para ese código.")
+                    parcial = buscar_por_texto(clean)
+                    if parcial:
+                        st.info("¿Quisiste decir alguno de estos códigos parecidos?")
+                        st.dataframe(quitar_id(parcial)[:10], use_container_width=True, hide_index=True)
+                st.markdown("---")
     else:
         with st.form("form_buscar_texto"):
             texto = st.text_input(
