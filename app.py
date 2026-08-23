@@ -326,6 +326,8 @@ def get_connection():
         c.execute("ALTER TABLE productos ADD COLUMN favorito INTEGER DEFAULT 0")
     if "imagen_url" not in columnas_productos:
         c.execute("ALTER TABLE productos ADD COLUMN imagen_url TEXT")
+    if "imagen_orb_blob" not in columnas_productos:
+        c.execute("ALTER TABLE productos ADD COLUMN imagen_orb_blob BLOB")
     if "diametro_interno" not in columnas_productos:
         c.execute("ALTER TABLE productos ADD COLUMN diametro_interno REAL")
     if "diametro_externo" not in columnas_productos:
@@ -1129,17 +1131,33 @@ def armar_lista_picking(codigos_texto):
     return resultado
 
 
+def _sql_sin_acentos(columna):
+    """Arma una expresión SQL que le saca los acentos a una columna (funciona con mayúscula
+    y minúscula, porque SQLite no toca letras acentuadas al hacer UPPER())."""
+    reemplazos = [("á", "A"), ("Á", "A"), ("é", "E"), ("É", "E"), ("í", "I"), ("Í", "I"),
+                  ("ó", "O"), ("Ó", "O"), ("ú", "U"), ("Ú", "U"), ("ñ", "N"), ("Ñ", "N")]
+    expr = f"UPPER({columna})"
+    for viejo, nuevo in reemplazos:
+        expr = f"REPLACE({expr},'{viejo}','{nuevo}')"
+    return expr
+
+
 def buscar_por_texto(texto):
     """Busca por descripción de forma flexible: cada palabra tiene que aparecer en algún lado
-    (descripción o código), sin importar el orden. Así 'ruleman delantero gol' encuentra
-    'Gol 1.6 - Ruleman de rueda delantero' aunque esté redactado distinto."""
-    palabras = [p.strip() for p in texto.upper().split() if p.strip()]
+    (descripción o código), sin importar el orden ni las tildes. Así 'ruleman delantero gol'
+    encuentra 'Gol 1.6 - Ruleman de rueda delantero', y 'rótula' encuentra 'ROTULA' aunque el
+    catálogo la tenga cargada sin tilde (frecuente en listas de proveedores)."""
+    palabras = [normalizar_texto(p.strip()) for p in texto.upper().split() if p.strip()]
     if not palabras:
         return []
+    # Compara contra la descripción/código sin tildes de ningún lado, para que no importe si
+    # la búsqueda o el dato cargado tienen o no acentos.
+    desc_sin_acentos = _sql_sin_acentos("p.descripcion")
+    codigo_sin_acentos = _sql_sin_acentos("p.codigo_raw")
     condiciones = []
     params = []
     for palabra in palabras:
-        condiciones.append('(UPPER(p.descripcion) LIKE ? OR UPPER(p.codigo_raw) LIKE ?)')
+        condiciones.append(f"({desc_sin_acentos} LIKE ? OR {codigo_sin_acentos} LIKE ?)")
         like = f"%{palabra}%"
         params.extend([like, like])
     query = f'''
@@ -2187,25 +2205,105 @@ def actualizar_medidas(producto_id, diam_int, diam_ext, ancho, paso_rosca, estri
         conn.commit()
 
 
+def calcular_descriptores_orb(imagen_bytes):
+    """Calcula puntos característicos (ORB) de una imagen para poder compararla contra otras
+    sin depender tanto del ángulo o el fondo exacto. Devuelve bytes serializados para guardar
+    en la base, o None si la imagen no tiene puntos suficientes (muy lisa, borrosa o uniforme)."""
+    import cv2
+    import numpy as np
+    import pickle
+
+    arr = np.frombuffer(imagen_bytes, dtype=np.uint8)
+    img = cv2.imdecode(arr, cv2.IMREAD_GRAYSCALE)
+    if img is None:
+        return None
+    alto, ancho = img.shape
+    escala = 500 / max(alto, ancho)
+    if escala < 1:
+        img = cv2.resize(img, (int(ancho * escala), int(alto * escala)))
+    orb = cv2.ORB_create(nfeatures=300)
+    _, descriptores = orb.detectAndCompute(img, None)
+    if descriptores is None or len(descriptores) < 5:
+        return None
+    return pickle.dumps(descriptores)
+
+
+def comparar_descriptores_orb(desc_bytes_a, desc_bytes_b):
+    """Cuenta cuántos puntos característicos matchean bien entre dos fotos — cuanto más alto,
+    más parecidas. Es un puntaje relativo para ORDENAR candidatos, no un porcentaje de certeza."""
+    import cv2
+    import pickle
+
+    desc_a = pickle.loads(desc_bytes_a)
+    desc_b = pickle.loads(desc_bytes_b)
+    bf = cv2.BFMatcher(cv2.NORM_HAMMING)
+    matches = bf.knnMatch(desc_a, desc_b, k=2)
+    buenos = 0
+    for par in matches:
+        if len(par) == 2:
+            m, n = par
+            if m.distance < 0.75 * n.distance:  # test de razón de Lowe: descarta matches ambiguos
+                buenos += 1
+    return buenos
+
+
+def buscar_por_similitud_visual(imagen_bytes, top_n=8):
+    """Compara una foto contra todas las que ya tenés cargadas en el catálogo, y devuelve las
+    más parecidas ordenadas — son candidatos a revisar a mano, NUNCA una identificación confirmada.
+    Con piezas metálicas lisas y sin textura (muchas rótulas, rulemanes, bulones) va a rendir mal
+    por más buena que sea la foto — no hay suficiente detalle visual distintivo para agarrarse."""
+    descriptores_query = calcular_descriptores_orb(imagen_bytes)
+    if descriptores_query is None:
+        return None, (
+            "La foto no tiene suficientes detalles distintivos para comparar (muy lisa, borrosa, "
+            "poco iluminada, o la pieza es un objeto metálico simple sin textura marcada)."
+        )
+
+    c.execute("""SELECT p.id AS "ID", p.codigo_raw AS "Codigo", p.descripcion AS "Descripcion",
+                 m.nombre AS "Marca", p.precio AS "Precio", p.stock AS "Stock", p.imagen_orb_blob
+                 FROM productos p JOIN marcas m ON m.id = p.marca_id
+                 WHERE p.imagen_orb_blob IS NOT NULL""")
+    candidatos = c.fetchall()
+    if not candidatos:
+        return None, "Todavía no tenés ninguna foto de producto cargada en el catálogo para comparar."
+
+    resultados = []
+    for fila in candidatos:
+        try:
+            puntaje = comparar_descriptores_orb(descriptores_query, fila["imagen_orb_blob"])
+        except Exception:
+            continue
+        resultados.append({
+            "ID": fila["ID"], "Codigo": fila["Codigo"], "Descripcion": fila["Descripcion"],
+            "Marca": fila["Marca"], "Precio": fila["Precio"], "Stock": fila["Stock"], "Puntaje": puntaje
+        })
+    resultados.sort(key=lambda r: -r["Puntaje"])
+    return resultados[:top_n], None
+
+
 def actualizar_imagen_producto(producto_id, imagen_bytes):
-    """Guarda la foto de un producto directo en la base (como data URI comprimida), para que
-    aparezca en la columna 'Imagen' del buscador y ayude a identificar la pieza exacta."""
+    """Guarda la foto de un producto directo en la base (como data URI comprimida) para que
+    aparezca en la columna 'Imagen' del buscador, y calcula sus puntos característicos (ORB)
+    para poder compararla contra otras fotos con el buscador por similitud visual."""
     from PIL import Image as PILImage
     import base64
     img = PILImage.open(io.BytesIO(imagen_bytes)).convert("RGB")
     img.thumbnail((400, 400))
     buffer = io.BytesIO()
     img.save(buffer, format="JPEG", quality=80)
-    b64 = base64.b64encode(buffer.getvalue()).decode("ascii")
+    imagen_comprimida = buffer.getvalue()
+    b64 = base64.b64encode(imagen_comprimida).decode("ascii")
     data_uri = f"data:image/jpeg;base64,{b64}"
+    descriptores = calcular_descriptores_orb(imagen_comprimida)
     with db_lock:
-        c.execute("UPDATE productos SET imagen_url = ? WHERE id = ?", (data_uri, producto_id))
+        c.execute("UPDATE productos SET imagen_url = ?, imagen_orb_blob = ? WHERE id = ?",
+                   (data_uri, descriptores, producto_id))
         conn.commit()
 
 
 def eliminar_imagen_producto(producto_id):
     with db_lock:
-        c.execute("UPDATE productos SET imagen_url = NULL WHERE id = ?", (producto_id,))
+        c.execute("UPDATE productos SET imagen_url = NULL, imagen_orb_blob = NULL WHERE id = ?", (producto_id,))
         conn.commit()
 
 
@@ -2808,8 +2906,27 @@ Casi todo lo que edita o borra algo pide la contraseña de administrador la prim
                     else:
                         mostrar_tipo = True
                     if mostrar_tipo:
-                        res_tipo = buscar_por_texto(datos_pieza["tipo_pieza"])
+                        tipo_pieza_texto = datos_pieza["tipo_pieza"]
+                        res_tipo = buscar_por_texto(tipo_pieza_texto)
+                        busqueda_usada = tipo_pieza_texto
+                        if not res_tipo:
+                            # La frase completa no encontró nada — reintenta con menos palabras
+                            # (más amplio), por si tus descripciones no usan las mismas palabras
+                            # exactas que eligió la IA (ej: "rótula de suspensión" vs "ROTULA DERECHA").
+                            palabras_tipo = tipo_pieza_texto.split()
+                            for n in range(len(palabras_tipo) - 1, 0, -1):
+                                intento = " ".join(palabras_tipo[:n])
+                                res_tipo = buscar_por_texto(intento)
+                                if res_tipo:
+                                    busqueda_usada = intento
+                                    break
                         if res_tipo:
+                            if busqueda_usada != tipo_pieza_texto:
+                                st.caption(
+                                    f"No encontré nada con \"{tipo_pieza_texto}\" completo — probé de nuevo "
+                                    f"solo con \"{busqueda_usada}\" y esto apareció (todavía menos preciso, "
+                                    "revisá con más cuidado):"
+                                )
                             if len(res_tipo) > 1:
                                 st.warning(
                                     f"⚠️ Encontré {len(res_tipo)} pieza(s) parecida(s) por palabras clave — "
@@ -2828,6 +2945,31 @@ Casi todo lo que edita o borra algo pide la contraseña de administrador la prim
                                 st.caption(f"Mostrando las primeras 15 de {len(res_tipo)} coincidencias.")
                         else:
                             st.caption("No encontré nada parecido en la base por ese tipo de pieza.")
+
+                st.markdown("---")
+                st.markdown("**🖼️ Buscar por similitud visual (experimental)**")
+                st.caption(
+                    "Compara la foto contra las fotos que ya tenés cargadas en el catálogo (no contra "
+                    "el texto ni el código). Es gratis y corre local, pero es MUCHO menos confiable que "
+                    "un código exacto — con piezas metálicas lisas sin marcas ni textura (rótulas, "
+                    "rulemanes, bulones) va a rendir mal aunque la foto sea buena, no hay suficiente "
+                    "detalle visual del que agarrarse. Úsalo solo para acortar candidatos a revisar a mano."
+                )
+                if foto and st.button("🖼️ Comparar con fotos del catálogo"):
+                    with st.spinner("Comparando..."):
+                        res_visual, error_visual = buscar_por_similitud_visual(foto.getvalue())
+                    if error_visual:
+                        st.info(error_visual)
+                    elif res_visual:
+                        st.warning(
+                            f"⚠️ {len(res_visual)} candidato(s) por parecido visual, de más a menos "
+                            "parecido — NINGUNO está confirmado, es una comparación aproximada. "
+                            "Compará físicamente antes de vender cualquiera de estos."
+                        )
+                        st.dataframe(
+                            [{k: v for k, v in r.items() if k != "ID"} for r in res_visual],
+                            use_container_width=True, hide_index=True
+                        )
 
     modo = st.radio("Buscar por:", ["Código", "Descripción"], horizontal=True)
 

@@ -5,3 +5,6 @@ pdfplumber
 fpdf2
 Pillow
 qrcode
+opencv-python-headless
+numpy
+ImageHash
