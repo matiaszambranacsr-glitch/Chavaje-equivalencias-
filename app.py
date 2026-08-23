@@ -1209,7 +1209,8 @@ def eliminar_combo(disparador):
 
 
 def identificar_pieza_por_foto(imagen_bytes):
-    """Le manda una foto a Gemini y le pide que identifique la pieza. Devuelve texto libre."""
+    """Le manda una foto a Gemini y le pide que identifique la pieza, extrayendo el código
+    de forma estructurada (no solo texto libre) para poder buscarlo directo en el catálogo."""
     from google import genai
     from google.genai import types
 
@@ -1220,10 +1221,17 @@ def identificar_pieza_por_foto(imagen_bytes):
     try:
         client = genai.Client(api_key=api_key)
         prompt = (
-            "Esta es una foto de un repuesto de auto tomada en un taller o local de repuestos. "
-            "Identificá, si podés: 1) cualquier código o marca visible impresa/grabada en la pieza, "
-            "2) qué tipo de repuesto es (ej: filtro de aceite, bomba de agua, correa, etc). "
-            "Respondé corto y directo, en español, solo con esos datos. Si no distinguís nada con claridad, decilo."
+            "Esta es una foto de un repuesto de auto tomada en un taller o local de repuestos. Tu "
+            "tarea principal es ENCONTRAR EL CÓDIGO — mirá con mucha atención toda la superficie de "
+            "la pieza: suelen estar grabados en bajorrelieve sobre el metal (a veces se ven mejor con "
+            "el contraste de la luz, poco legibles a simple vista), impresos en una etiqueta pegada, "
+            "moldeados en el plástico/goma, o troquelados en el borde. Es una combinación de letras y "
+            "números, a veces con guiones, barras o puntos. Revisá TODOS los lados de la pieza que se "
+            "vean en la foto antes de rendirte. Devolvé ÚNICAMENTE un JSON válido (sin texto extra, "
+            'sin markdown), con esta forma exacta: {"codigo": "...", "marca_visible": "...", '
+            '"tipo_pieza": "...", "confianza": "alta/media/baja"}. Si después de mirar con atención en '
+            'serio no hay ningún código legible, dejá "codigo" como null — no inventes ni completes un '
+            "código que no se vea con claridad."
         )
         response = client.models.generate_content(
             model="gemini-flash-latest",
@@ -1232,11 +1240,19 @@ def identificar_pieza_por_foto(imagen_bytes):
                 types.Part.from_bytes(data=imagen_bytes, mime_type="image/jpeg"),
             ],
         )
+        texto = response.text.strip()
+        if texto.startswith("```"):
+            texto = texto.split("```")[1]
+            texto = texto[4:] if texto.lower().startswith("json") else texto
+        datos = json.loads(texto)
         registrar_uso_ia("Identificar pieza por foto", True)
-        return response.text, None
+        return datos, None
+    except json.JSONDecodeError:
+        registrar_uso_ia("Identificar pieza por foto", False)
+        return None, "No pude interpretar la respuesta — probá con una foto más clara y de más cerca."
     except Exception as e:
         registrar_uso_ia("Identificar pieza por foto", False)
-        return None, f"Error consultando a Gemini: {e}"
+        return None, traducir_error_gemini(e)
 
 
 def extraer_datos_cedula(imagen_bytes):
@@ -1275,7 +1291,7 @@ def extraer_datos_cedula(imagen_bytes):
         return None, "No pude interpretar la respuesta como datos del vehículo — probá con una foto más clara."
     except Exception as e:
         registrar_uso_ia("Leer cédula/título", False)
-        return None, f"Error consultando a Gemini: {e}"
+        return None, traducir_error_gemini(e)
 
 
 def transcribir_audio(audio_bytes, mime_type="audio/wav"):
@@ -1299,7 +1315,7 @@ def transcribir_audio(audio_bytes, mime_type="audio/wav"):
         return response.text.strip(), None
     except Exception as e:
         registrar_uso_ia("Búsqueda por voz", False)
-        return None, f"Error consultando a Gemini: {e}"
+        return None, traducir_error_gemini(e)
 
 
 def leer_remito_por_foto(imagen_bytes):
@@ -1342,7 +1358,7 @@ def leer_remito_por_foto(imagen_bytes):
         return None, "No pude interpretar la respuesta como una lista de ítems — probá con una foto más clara."
     except Exception as e:
         registrar_uso_ia("Leer remito por foto", False)
-        return None, f"Error consultando a Gemini: {e}"
+        return None, traducir_error_gemini(e)
 
 
 def cotejar_items_remito(items):
@@ -1481,6 +1497,20 @@ def registrar_uso_ia(funcion, exito):
         c.execute("INSERT INTO uso_ia (funcion, usuario, exito) VALUES (?, ?, ?)",
                    (funcion, obtener_usuario_actual(), 1 if exito else 0))
         conn.commit()
+
+
+def traducir_error_gemini(e):
+    """Convierte el JSON crudo de error de la API de Gemini en un mensaje legible en español.
+    El nivel gratuito de estas funciones tiene un límite MUY chico (a veces 5 consultas por
+    minuto compartidas entre todos los empleados) — esto es lo más común que se va a chocar."""
+    texto_error = str(e)
+    if "RESOURCE_EXHAUSTED" in texto_error or "429" in texto_error or "quota" in texto_error.lower():
+        return (
+            "⏳ Se alcanzó el límite de consultas gratuitas de la IA por ahora (es un límite por "
+            "minuto, compartido entre todos los que usan la app). Esperá un minuto y probá de nuevo — "
+            "no es un error, es solo que hay que esperar a que se libere cupo."
+        )
+    return f"Error consultando a Gemini: {texto_error}"
 
 
 def resumen_uso_ia(dias=30):
@@ -2717,8 +2747,8 @@ Casi todo lo que edita o borra algo pide la contraseña de administrador la prim
     if es_operador_o_admin():
         with st.expander("📷 Identificar pieza por foto (con IA)"):
             st.caption(
-                "Sacale una foto a la pieza o subí una que ya tengas. La IA intenta leer códigos visibles "
-                "o describir qué tipo de repuesto es, y después podés buscar con eso."
+                "Sacale una foto a la pieza o subí una que ya tengas. La IA busca un código visible "
+                "y, si lo encuentra, lo busca directo en tu catálogo."
             )
             foto = st.file_uploader(
                 "Foto de la pieza:", type=["png", "jpg", "jpeg"], key="foto_identificar_pieza",
@@ -2726,20 +2756,78 @@ Casi todo lo que edita o borra algo pide la contraseña de administrador la prim
             )
             if foto and st.button("🔍 Identificar"):
                 with st.spinner("Consultando..."):
-                    descripcion, error = identificar_pieza_por_foto(foto.getvalue())
+                    datos_pieza, error = identificar_pieza_por_foto(foto.getvalue())
                 if error:
                     st.error(error)
-                elif descripcion:
-                    st.session_state["descripcion_foto"] = descripcion
-                    st.info(descripcion)
-            if st.session_state.get("descripcion_foto"):
-                if st.button("🔍 Buscar con esta descripción"):
-                    res_foto = buscar_por_texto(st.session_state["descripcion_foto"])
+                elif datos_pieza:
+                    st.session_state["datos_pieza_foto"] = datos_pieza
+                    st.session_state["buscar_tipo_pieza_click"] = False
+
+            if st.session_state.get("datos_pieza_foto"):
+                datos_pieza = st.session_state["datos_pieza_foto"]
+                codigo_detectado = (datos_pieza.get("codigo") or "").strip()
+                confianza = (datos_pieza.get("confianza") or "").strip().lower()
+
+                if codigo_detectado:
+                    st.success(f"**Código detectado: `{codigo_detectado}`** (confianza de la IA: {confianza or 's/d'})")
+                    if confianza in ("media", "baja"):
+                        st.caption(
+                            "⚠️ La propia IA no está muy segura de haber leído bien el código — "
+                            "confirmalo mirando la pieza antes de vender."
+                        )
+                else:
+                    st.warning("No se distinguió ningún código legible en la foto.")
+                if datos_pieza.get("marca_visible"):
+                    st.caption(f"Marca visible en la pieza: {datos_pieza['marca_visible']}")
+                if datos_pieza.get("tipo_pieza"):
+                    st.caption(f"Tipo de pieza (según la IA): {datos_pieza['tipo_pieza']}")
+
+                if codigo_detectado:
+                    clean_foto = sanitizar(codigo_detectado)
+                    res_foto = buscar_por_codigo(clean_foto) if clean_foto else []
                     if res_foto:
-                        st.success(f"Se encontraron {len(res_foto)} coincidencias:")
+                        incrementar_veces_buscado(clean_foto)
+                        st.success(f"✅ Coincidencia CONFIRMADA en tu catálogo — {len(res_foto)} resultado(s):")
+                        st.caption(
+                            "Esto es un match exacto por código, con las equivalencias que ya tenés "
+                            "cargadas — no es una suposición de la IA."
+                        )
                         st.dataframe(quitar_id(res_foto), use_container_width=True, hide_index=True)
                     else:
-                        st.warning("No se encontró nada parecido en la base con esa descripción.")
+                        st.info(
+                            f"El código `{codigo_detectado}` no coincide con nada cargado — puede que la "
+                            "IA haya leído mal algún carácter, o que sea un código que todavía no tenés."
+                        )
+                        if datos_pieza.get("tipo_pieza") and st.button("🔍 Buscar por el tipo de pieza en vez del código"):
+                            st.session_state["buscar_tipo_pieza_click"] = True
+
+                if (not codigo_detectado or (codigo_detectado and st.session_state.get("buscar_tipo_pieza_click"))) \
+                        and datos_pieza.get("tipo_pieza"):
+                    if not codigo_detectado:
+                        mostrar_tipo = st.button("🔍 Buscar por el tipo de pieza")
+                    else:
+                        mostrar_tipo = True
+                    if mostrar_tipo:
+                        res_tipo = buscar_por_texto(datos_pieza["tipo_pieza"])
+                        if res_tipo:
+                            if len(res_tipo) > 1:
+                                st.warning(
+                                    f"⚠️ Encontré {len(res_tipo)} pieza(s) parecida(s) por palabras clave — "
+                                    "NINGUNA está confirmada como la exacta, es solo una búsqueda por texto. "
+                                    "Si son piezas como rótulas, retenes, etc. que varían por modelo de auto, "
+                                    "comparalas físicamente (o por medidas, en '📐 Buscar por medidas mecánicas') "
+                                    "antes de vender la que sea."
+                                )
+                            else:
+                                st.info(
+                                    "Encontré 1 coincidencia por palabras clave — tampoco está confirmada, "
+                                    "revisala antes de vender."
+                                )
+                            st.dataframe(quitar_id(res_tipo)[:15], use_container_width=True, hide_index=True)
+                            if len(res_tipo) > 15:
+                                st.caption(f"Mostrando las primeras 15 de {len(res_tipo)} coincidencias.")
+                        else:
+                            st.caption("No encontré nada parecido en la base por ese tipo de pieza.")
 
     modo = st.radio("Buscar por:", ["Código", "Descripción"], horizontal=True)
 
