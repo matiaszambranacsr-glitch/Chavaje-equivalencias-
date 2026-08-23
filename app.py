@@ -1296,7 +1296,7 @@ def generar_pdf_cotizacion(lista_productos, incluir_precio=True, incluir_stock=F
                 extras.append(f"Stock: {fila['Stock']}")
             if extras:
                 linea += " (" + " / ".join(extras) + ")"
-            pdf.multi_cell(0, 6, limpiar(linea))
+            pdf.multi_cell(0, 6, limpiar(linea), new_x="LMARGIN", new_y="NEXT")
         pdf.ln(3)
 
     if alias_qr:
@@ -1306,10 +1306,12 @@ def generar_pdf_cotizacion(lista_productos, incluir_precio=True, incluir_stock=F
         pdf.set_font("Helvetica", "B", 11)
         pdf.cell(0, 7, limpiar(f"Transferir a: {alias_qr['Nombre']}"), new_x="LMARGIN", new_y="NEXT")
         pdf.set_font("Helvetica", "", 9)
-        pdf.multi_cell(0, 5, limpiar(f"Alias: {alias_qr['Alias']}  /  CBU: {alias_qr['CBU']}  /  Titular: {alias_qr['Titular']}"))
+        pdf.multi_cell(0, 5, limpiar(f"Alias: {alias_qr['Alias']}  /  CBU: {alias_qr['CBU']}  /  Titular: {alias_qr['Titular']}"),
+                       new_x="LMARGIN", new_y="NEXT")
         pdf.image(io.BytesIO(qr_bytes), w=35)
         pdf.set_font("Helvetica", "I", 8)
-        pdf.multi_cell(0, 4, "Escaneá el QR para ver el alias/CBU y transferir desde tu banco o billetera virtual.")
+        pdf.multi_cell(0, 4, "Escaneá el QR para ver el alias/CBU y transferir desde tu banco o billetera virtual.",
+                       new_x="LMARGIN", new_y="NEXT")
 
     return bytes(pdf.output())
 
@@ -1359,7 +1361,7 @@ def generar_pdf_ficha_vehiculo(vehiculo, km_calc, alertas, proyeccion, historial
         pdf.set_font("Helvetica", "", 10)
         for a in alertas:
             linea = f"- {a['Pieza']} ({a.get('Marca') or 's/marca'}): {a['% consumido']}% de su vida util consumida"
-            pdf.multi_cell(0, 6, limpiar(linea))
+            pdf.multi_cell(0, 6, limpiar(linea), new_x="LMARGIN", new_y="NEXT")
         pdf.ln(2)
 
     if proyeccion:
@@ -1369,7 +1371,7 @@ def generar_pdf_ficha_vehiculo(vehiculo, km_calc, alertas, proyeccion, historial
         for p in proyeccion:
             linea = (f"- {p['Pieza']}: cambiada {p['Veces cambiada']} vez/veces, "
                       f"deberia {p['Veces que debería (según km)']} - atraso: {p['Atraso estimado']}")
-            pdf.multi_cell(0, 6, limpiar(linea))
+            pdf.multi_cell(0, 6, limpiar(linea), new_x="LMARGIN", new_y="NEXT")
         pdf.ln(2)
 
     if historial:
@@ -1378,7 +1380,7 @@ def generar_pdf_ficha_vehiculo(vehiculo, km_calc, alertas, proyeccion, historial
         pdf.set_font("Helvetica", "", 10)
         for h in historial:
             linea = f"- {h['Pieza']} ({h.get('Marca') or ''}) - {h.get('Fecha') or ''} - {h.get('Km instalación') or '-'} km"
-            pdf.multi_cell(0, 6, limpiar(linea))
+            pdf.multi_cell(0, 6, limpiar(linea), new_x="LMARGIN", new_y="NEXT")
 
     return bytes(pdf.output())
 
