@@ -177,6 +177,11 @@ if es_celular():
     .app-header p { font-size: 0.8rem !important; }
     [data-testid="stExpander"] summary { padding: 0.65rem 0.5rem !important; }
     h3 { font-size: 1.1rem !important; }
+    /* Navegación en pastillas: compactas para que las 8 secciones entren en pocas filas
+       sin comerse la pantalla, y con buen tamaño para tocar con el dedo. */
+    .stRadio [role="radiogroup"] { gap: 4px; }
+    .stRadio label { padding: 4px 10px 4px 6px !important; font-size: 0.82rem; }
+    .stRadio label p { font-size: 0.82rem !important; }
     </style>
     """, unsafe_allow_html=True)
 else:
@@ -483,6 +488,11 @@ def get_connection():
         c.execute("ALTER TABLE productos ADD COLUMN imagen_url TEXT")
     if "imagen_orb_blob" not in columnas_productos:
         c.execute("ALTER TABLE productos ADD COLUMN imagen_orb_blob BLOB")
+    # Miniatura chica aparte: la foto normal pesa bastante y la búsqueda la traía entera por
+    # cada resultado, aunque en la tabla se vea en chiquito. Acá se guarda una versión liviana
+    # solo para esas listas; la grande se sigue usando al ver el producto en Administrar.
+    if "imagen_thumb" not in columnas_productos:
+        c.execute("ALTER TABLE productos ADD COLUMN imagen_thumb TEXT")
     if "diametro_interno" not in columnas_productos:
         c.execute("ALTER TABLE productos ADD COLUMN diametro_interno REAL")
     if "diametro_externo" not in columnas_productos:
@@ -1250,7 +1260,8 @@ def buscar_por_codigo(clean_code, marca_filtro="Todas"):
     )
     SELECT DISTINCT p.id AS "ID", p.codigo_raw AS "Codigo", p.descripcion AS "Descripcion",
            m.nombre AS "Marca", m.tipo AS "Tipo", p.precio AS "Precio", p.stock AS "Stock",
-           p.favorito AS "Favorito", p.imagen_url AS "Imagen", m.url_ficha_template AS "_template"
+           p.favorito AS "Favorito", COALESCE(p.imagen_thumb, p.imagen_url) AS "Imagen",
+           m.url_ficha_template AS "_template"
     FROM Red r JOIN productos p ON p.id = r.id JOIN marcas m ON m.id = p.marca_id
     '''
     params = [clean_code]
@@ -2004,6 +2015,25 @@ def generar_qr_bytes(texto):
     return salida.getvalue()
 
 
+def pdf_con_cache(nombre, generador, *args):
+    """El botón de descarga de Streamlit necesita el archivo listo de antemano, así que el PDF
+    se arma en CADA refresco de pantalla aunque nadie lo descargue. Esto guarda el último
+    generado y lo reusa mientras los datos no cambien, en vez de rehacerlo cada vez.
+    Se usa un caché propio (y no st.cache_data) para no depender de cómo Streamlit compara
+    listas y diccionarios: acá la clave se calcula de forma explícita y predecible."""
+    try:
+        firma = json.dumps(args, default=str, sort_keys=True)
+    except Exception:
+        return generador(*args)  # si algo no se puede resumir, se genera sin cachear
+    clave = nombre + ":" + hashlib.md5(firma.encode("utf-8")).hexdigest()
+    guardado = st.session_state.get("_cache_pdf")
+    if guardado and guardado[0] == clave:
+        return guardado[1]
+    resultado = generador(*args)
+    st.session_state["_cache_pdf"] = (clave, resultado)
+    return resultado
+
+
 def generar_pdf_cotizacion(lista_productos, incluir_precio=True, incluir_stock=False, alias_qr=None, qr_real_bytes=None):
     """Genera un PDF simple de cotización a partir de la lista armada para WhatsApp.
     Si se pasa alias_qr (un dict con nombre/alias/cbu/titular), agrega un QR con esos datos
@@ -2498,6 +2528,22 @@ def buscar_por_similitud_visual(imagen_bytes, top_n=8):
     return resultados[:top_n], None
 
 
+def generar_miniatura(imagen_bytes, lado=110):
+    """Versión chiquita de la foto, para las listas de resultados. La foto normal (400px) pesa
+    unas 10 veces más y antes la búsqueda la traía entera por cada resultado, aunque en la tabla
+    se vea del tamaño de una uña — con muchos resultados eso se nota, sobre todo en el celular."""
+    from PIL import Image as PILImage
+    import base64
+    try:
+        img = PILImage.open(io.BytesIO(imagen_bytes)).convert("RGB")
+        img.thumbnail((lado, lado))
+        buffer = io.BytesIO()
+        img.save(buffer, format="JPEG", quality=70)
+        return "data:image/jpeg;base64," + base64.b64encode(buffer.getvalue()).decode("ascii")
+    except Exception:
+        return None
+
+
 def actualizar_imagen_producto(producto_id, imagen_bytes):
     """Guarda la foto de un producto directo en la base (como data URI comprimida) para que
     aparezca en la columna 'Imagen' del buscador, y calcula sus puntos característicos (ORB)
@@ -2512,45 +2558,67 @@ def actualizar_imagen_producto(producto_id, imagen_bytes):
     b64 = base64.b64encode(imagen_comprimida).decode("ascii")
     data_uri = f"data:image/jpeg;base64,{b64}"
     descriptores = calcular_descriptores_orb(imagen_comprimida)
+    thumb = generar_miniatura(imagen_comprimida)
     with db_lock:
-        c.execute("UPDATE productos SET imagen_url = ?, imagen_orb_blob = ? WHERE id = ?",
-                   (data_uri, descriptores, producto_id))
+        c.execute("UPDATE productos SET imagen_url = ?, imagen_thumb = ?, imagen_orb_blob = ? WHERE id = ?",
+                   (data_uri, thumb, descriptores, producto_id))
         conn.commit()
 
 
 def eliminar_imagen_producto(producto_id):
     with db_lock:
-        c.execute("UPDATE productos SET imagen_url = NULL, imagen_orb_blob = NULL WHERE id = ?", (producto_id,))
+        c.execute("UPDATE productos SET imagen_url = NULL, imagen_thumb = NULL, imagen_orb_blob = NULL "
+                   "WHERE id = ?", (producto_id,))
         conn.commit()
 
 
-def migrar_hashes_orb_pendientes():
-    """Calcula los descriptores ORB de fotos de producto que se cargaron ANTES de que existiera
-    la comparación visual (o que por algún motivo se quedaron sin calcular). Se salta las que ya
-    los tienen, así que en cada arranque solo procesa lo pendiente, no todo de nuevo."""
+def migrar_imagenes_pendientes():
+    """Prepara lo que falta de las fotos ya cargadas: los puntos característicos (ORB) para la
+    comparación visual y la miniatura para las listas. Se saltea lo que ya está hecho, así que
+    en cada arranque solo procesa lo pendiente. Las fotos que son un link externo (cargadas
+    desde Excel) se dejan como están: no hay nada local para achicar."""
     import base64
-    c.execute("SELECT id, imagen_url FROM productos WHERE imagen_url IS NOT NULL AND imagen_orb_blob IS NULL")
+    c.execute("""SELECT id, imagen_url, imagen_thumb, imagen_orb_blob FROM productos
+                 WHERE imagen_url IS NOT NULL
+                   AND (imagen_orb_blob IS NULL OR imagen_thumb IS NULL)""")
     pendientes = c.fetchall()
+    procesados = 0
     for fila in pendientes:
         try:
-            data_uri = fila["imagen_url"]
-            b64_data = data_uri.split(",", 1)[1] if "," in data_uri else data_uri
-            imagen_bytes = base64.b64decode(b64_data)
-            descriptores = calcular_descriptores_orb(imagen_bytes)
-            if descriptores:
+            imagen_url = fila["imagen_url"]
+            if not imagen_url.startswith("data:"):
+                # Es un link externo: la miniatura es el mismo link (lo carga el navegador)
+                if fila["imagen_thumb"] is None:
+                    with db_lock:
+                        c.execute("UPDATE productos SET imagen_thumb = ? WHERE id = ?", (imagen_url, fila["id"]))
+                        conn.commit()
+                continue
+            imagen_bytes = base64.b64decode(imagen_url.split(",", 1)[1])
+            nuevos = {}
+            if fila["imagen_orb_blob"] is None:
+                descriptores = calcular_descriptores_orb(imagen_bytes)
+                if descriptores:
+                    nuevos["imagen_orb_blob"] = descriptores
+            if fila["imagen_thumb"] is None:
+                thumb = generar_miniatura(imagen_bytes)
+                if thumb:
+                    nuevos["imagen_thumb"] = thumb
+            if nuevos:
+                sets = ", ".join(f"{k} = ?" for k in nuevos)
                 with db_lock:
-                    c.execute("UPDATE productos SET imagen_orb_blob = ? WHERE id = ?", (descriptores, fila["id"]))
+                    c.execute(f"UPDATE productos SET {sets} WHERE id = ?", list(nuevos.values()) + [fila["id"]])
                     conn.commit()
+                procesados += 1
         except Exception:
             continue
-    return len(pendientes)
+    return procesados
 
 
 @st.cache_resource
 def _ejecutar_migracion_orb_una_vez():
-    """Corre migrar_hashes_orb_pendientes() una sola vez por proceso (no en cada rerun de
+    """Corre migrar_imagenes_pendientes() una sola vez por proceso (no en cada rerun de
     Streamlit), con el mismo patrón que ya usa get_connection() para la conexión a la base."""
-    return migrar_hashes_orb_pendientes()
+    return migrar_imagenes_pendientes()
 
 
 _ejecutar_migracion_orb_una_vez()
@@ -2983,6 +3051,22 @@ def listar_puntos_esquema(esquema_id):
     return [dict(r) for r in c.fetchall()]
 
 
+@st.cache_data(show_spinner=False, max_entries=40)
+def imagen_esquema_lista_para_mostrar(imagen_bytes, firma_puntos, _puntos):
+    """Dibuja los marcadores sobre la imagen y guarda el resultado en caché. Sin esto, cada
+    refresco de pantalla vuelve a redibujar la imagen entera con Pillow — aunque el desplegable
+    esté cerrado, porque Streamlit igual arma el contenido.
+    El caché se invalida solo cuando cambia la imagen (se compara su contenido) o cuando cambian
+    los puntos marcados ('firma_puntos'). '_puntos' va con guion bajo adelante para que Streamlit
+    no intente usarlo como clave: es una lista de diccionarios y no le sirve para comparar."""
+    return generar_imagen_con_marcadores(imagen_bytes, _puntos)
+
+
+def firma_de_puntos(puntos):
+    """Resumen corto de los puntos, para usar como clave de caché."""
+    return tuple((p["id"], p.get("numero"), p.get("pos_x"), p.get("pos_y")) for p in puntos)
+
+
 def generar_imagen_con_marcadores(imagen_bytes, puntos):
     """Dibuja círculos numerados sobre la imagen real, en las posiciones (%) que cargó el admin.
     Si la imagen está corrupta, devuelve la original sin marcadores en vez de romper la pantalla."""
@@ -3136,7 +3220,8 @@ def mostrar_portal_mecanico():
             st.session_state["presupuesto_mecanico_items"] = []
             st.rerun()
 
-        pdf_bytes_mec = generar_pdf_presupuesto_mecanico(
+        pdf_bytes_mec = pdf_con_cache(
+            "presupuesto_mecanico", generar_pdf_presupuesto_mecanico,
             nombre_mecanico, cliente_nombre_mec, items_actuales, mano_obra_mec, total_mec
         )
         colb2.download_button("📄 PDF", data=pdf_bytes_mec, file_name="presupuesto.pdf", mime="application/pdf")
@@ -3226,11 +3311,11 @@ PAGINAS = ["🔍 Buscador", "🔗 Vincular manual", "📁 Cargar Excel", "🗂�
 if st.session_state.get("pagina_actual") not in PAGINAS:
     st.session_state["pagina_actual"] = PAGINAS[0]
 
-if es_celular():
-    # En el celular, 8 pestañas en fila obligan a scrollear de costado y se cortan los nombres.
-    st.selectbox("Sección:", PAGINAS, key="pagina_actual", label_visibility="collapsed")
-else:
-    st.radio("Sección:", PAGINAS, key="pagina_actual", horizontal=True, label_visibility="collapsed")
+# En los dos modos se usa st.radio en vez de un desplegable: el desplegable de Streamlit lleva
+# un campo de texto adentro para filtrar, y en el celular eso abre el teclado cada vez que lo
+# tocás, que es molesto para algo que se usa todo el tiempo. Con radio es un toque y listo.
+# El CSS los muestra como pastillas: en el celular se acomodan solas en varias filas.
+st.radio("Sección:", PAGINAS, key="pagina_actual", horizontal=True, label_visibility="collapsed")
 
 pagina = st.session_state["pagina_actual"]
 
@@ -3274,14 +3359,13 @@ Casi todo lo que edita o borra algo pide la contraseña de administrador la prim
             )
             c.execute("SELECT COUNT(*) FROM productos WHERE imagen_orb_blob IS NOT NULL")
             cantidad_listas = c.fetchone()[0]
-            c.execute("SELECT COUNT(*) FROM productos WHERE imagen_url IS NOT NULL AND imagen_orb_blob IS NULL")
+            c.execute("""SELECT COUNT(*) FROM productos WHERE imagen_url IS NOT NULL
+                         AND (imagen_orb_blob IS NULL OR imagen_thumb IS NULL)""")
             cantidad_pendientes = c.fetchone()[0]
             st.caption(f"📊 Fotos listas para comparar: {cantidad_listas}" +
                        (f" — {cantidad_pendientes} pendiente(s) de procesar" if cantidad_pendientes else ""))
-            if cantidad_pendientes and st.button("🔄 Procesar fotos pendientes ahora"):
-                with st.spinner("Procesando..."):
-                    migrar_hashes_orb_pendientes()
-                st.rerun()
+            st.button("🔄 Procesar fotos pendientes ahora", disabled=not cantidad_pendientes,
+                       on_click=migrar_imagenes_pendientes)
 
             foto_visual = st.file_uploader(
                 "Foto de la pieza:", type=["png", "jpg", "jpeg"], key="foto_similitud_visual",
@@ -4169,16 +4253,19 @@ def exportar_configuracion_txt():
 if pagina == PAGINAS[3]:
     st.subheader("🗂️ Administrar")
 
-    sub_marcas, sub_productos, sub_mensajeria, sub_combos, sub_mantenimiento, sub_usuarios = st.tabs(
-        ["🏷️ Marcas", "📦 Productos", "💬 Mensajería y cobros", "🧩 Combos", "🧹 Mantenimiento", "👥 Usuarios"]
-    )
+    SUB_ADMIN = ["🏷️ Marcas", "📦 Productos", "💬 Mensajería y cobros", "🧩 Combos", "🧹 Mantenimiento", "👥 Usuarios"]
+    if st.session_state.get("sub_admin") not in SUB_ADMIN:
+        st.session_state["sub_admin"] = SUB_ADMIN[0]
+    st.radio("Sub-sección:", SUB_ADMIN, key="sub_admin", horizontal=True,
+             label_visibility="collapsed")
+    sub_admin = st.session_state["sub_admin"]
 
     c.execute("""SELECT m.id, m.nombre, m.tipo, COUNT(p.id) AS productos
                  FROM marcas m LEFT JOIN productos p ON p.marca_id = m.id
                  GROUP BY m.id ORDER BY m.nombre""")
     marcas_info = c.fetchall()
 
-    with sub_marcas:
+    if sub_admin == SUB_ADMIN[0]:
         if not marcas_info:
             st.info("Todavía no hay marcas cargadas.")
         else:
@@ -4281,7 +4368,7 @@ if pagina == PAGINAS[3]:
                     st.success(f"'{nombre_cat}' agregado.")
                     st.rerun()
 
-    with sub_productos:
+    if sub_admin == SUB_ADMIN[1]:
         st.markdown("**Buscar y editar un producto puntual**")
         texto_prod = st.text_input("Buscar producto por código o descripción", key="admin_buscar")
         if texto_prod.strip():
@@ -4433,7 +4520,7 @@ if pagina == PAGINAS[3]:
                 else:
                     st.info("Sin resultados para esa marca.")
 
-    with sub_mensajeria:
+    if sub_admin == SUB_ADMIN[2]:
         st.markdown("**💬 Texto del mensaje de WhatsApp**")
         st.caption(
             "Personalizá el encabezado y el pie del mensaje que se arma en 'Lista WhatsApp' — por "
@@ -4510,7 +4597,7 @@ if pagina == PAGINAS[3]:
             st.success("Alias eliminado.")
             st.rerun()
 
-    with sub_combos:
+    if sub_admin == SUB_ADMIN[3]:
         st.markdown("**🧩 Combos de repuestos relacionados**")
         st.caption(
             "Cuando alguien busca un producto cuya descripción contenga el 'disparador', la app va a "
@@ -4546,7 +4633,7 @@ if pagina == PAGINAS[3]:
                 st.success(f"Combo para '{disparador_edit.strip()}' eliminado.")
                 st.rerun()
 
-    with sub_mantenimiento:
+    if sub_admin == SUB_ADMIN[4]:
         st.markdown("**🗑️ Eliminar un producto puntual**")
         st.caption(
             "Separado a propósito de la edición de medidas/fotos, para que buscar y editar un producto "
@@ -4653,7 +4740,7 @@ if pagina == PAGINAS[3]:
             st.caption("También se limpia sola: lo que lleva más de 30 días acá se borra en forma permanente.")
             st.button("🧹 Vaciar ahora lo de más de 30 días", on_click=vaciar_papelera_antigua, args=(30,))
 
-    with sub_usuarios:
+    if sub_admin == SUB_ADMIN[5]:
         if not pedir_password_admin("gestionar usuarios"):
             pass
         else:
@@ -4749,12 +4836,15 @@ if pagina == PAGINAS[3]:
 if pagina == PAGINAS[4]:
     st.subheader("📊 Estadísticas")
 
-    sub_resumen, sub_importaciones, sub_backup, sub_auditoria, sub_busquedas, sub_para_pedir = st.tabs(
-        ["📈 Resumen", "📥 Importaciones", "💾 Backup y config", "🧮 Auditoría y depósito",
-         "🔎 Búsquedas sin resultado", "📌 Para pedir"]
-    )
+    SUB_STATS = ["📈 Resumen", "📥 Importaciones", "💾 Backup y config", "🧮 Auditoría y depósito",
+               "🔎 Búsquedas sin resultado", "📌 Para pedir"]
+    if st.session_state.get("sub_stats") not in SUB_STATS:
+        st.session_state["sub_stats"] = SUB_STATS[0]
+    st.radio("Sub-sección:", SUB_STATS, key="sub_stats", horizontal=True,
+             label_visibility="collapsed")
+    sub_stats = st.session_state["sub_stats"]
 
-    with sub_resumen:
+    if sub_stats == SUB_STATS[0]:
         st.subheader("Estadísticas generales")
 
         c.execute("SELECT COUNT(*) FROM marcas")
@@ -4793,7 +4883,7 @@ if pagina == PAGINAS[4]:
         else:
             st.caption("Todavía no se usó ninguna función de IA.")
 
-    with sub_importaciones:
+    if sub_stats == SUB_STATS[1]:
         st.markdown("**Historial de importaciones**")
         c.execute("""SELECT marca AS Marca, archivo AS Archivo, filas_cargadas AS Cargadas,
                      filas_omitidas AS Omitidas, fecha AS Fecha FROM importaciones
@@ -4804,7 +4894,7 @@ if pagina == PAGINAS[4]:
         else:
             st.caption("Todavía no se registraron importaciones.")
 
-    with sub_backup:
+    if sub_stats == SUB_STATS[2]:
         if st.button("🗄️ Preparar backup de la base de datos"):
             with open(DB_PATH, "rb") as f:
                 st.session_state["backup_bytes"] = f.read()
@@ -4840,7 +4930,7 @@ if pagina == PAGINAS[4]:
                 st.success("Backup restaurado. Recargando...")
                 st.rerun()
 
-    with sub_auditoria:
+    if sub_stats == SUB_STATS[3]:
         st.markdown("**🧮 Auditoría diaria de stock (muestreo aleatorio)**")
         st.caption(
             "Todas las mañanas se puede generar una lista corta de productos al azar (priorizando favoritos "
@@ -4885,7 +4975,7 @@ if pagina == PAGINAS[4]:
         else:
             st.caption("Todavía no hay suficientes búsquedas registradas para armar la matriz.")
 
-    with sub_busquedas:
+    if sub_stats == SUB_STATS[4]:
         st.markdown("**🔎 Códigos buscados sin resultado**")
         st.caption("Qué te están pidiendo los clientes que todavía no tenés cargado.")
         fallidas = listar_busquedas_sin_resultado()
@@ -4894,7 +4984,7 @@ if pagina == PAGINAS[4]:
         else:
             st.caption("Sin registros todavía.")
 
-    with sub_para_pedir:
+    if sub_stats == SUB_STATS[5]:
         st.markdown("**🙋 Pedidos marcados por empleados**")
         st.caption(
             "Cuando alguien busca algo y toca '📌 Pedir' en el buscador, aparece acá para que decidas "
@@ -5034,8 +5124,8 @@ if pagina == PAGINAS[5]:
         url_whatsapp = "https://wa.me/?text=" + urllib.parse.quote(mensaje)
         col_wa, col_pdf = st.columns(2)
         col_wa.link_button("📲 Abrir en WhatsApp", url_whatsapp, type="primary", use_container_width=True)
-        pdf_bytes = generar_pdf_cotizacion(lista, incluir_precio, incluir_stock,
-                                            alias_qr=alias_elegido, qr_real_bytes=qr_real_para_pdf)
+        pdf_bytes = pdf_con_cache("cotizacion", generar_pdf_cotizacion, lista, incluir_precio,
+                                   incluir_stock, alias_elegido, qr_real_para_pdf)
         col_pdf.download_button(
             "📄 Descargar cotización (PDF)", data=pdf_bytes,
             file_name=f"cotizacion_{datetime.now():%Y%m%d_%H%M}.pdf",
@@ -5244,7 +5334,8 @@ if pagina == PAGINAS[6]:
             with col_pdf:
                 st.download_button(
                     "📄 Descargar ficha en PDF",
-                    data=generar_pdf_ficha_vehiculo(vehiculo, km_calc, alertas, proyeccion, historial_vehiculo),
+                    data=pdf_con_cache("ficha_vehiculo", generar_pdf_ficha_vehiculo,
+                                        vehiculo, km_calc, alertas, proyeccion, historial_vehiculo),
                     file_name=f"ficha_{vehiculo['patente']}.pdf",
                     mime="application/pdf",
                     use_container_width=True
@@ -5274,12 +5365,15 @@ if pagina == PAGINAS[6]:
 if pagina == PAGINAS[7]:
     st.subheader("🛠️ Modo Mecánico")
 
-    sub_dtc, sub_vin, sub_esq, sub_conv = st.tabs(
-        ["📖 Códigos DTC", "🔢 Lector de VIN", "🗺️ Esquemas", "🧮 Conversor de unidades"]
-    )
+    SUB_MEC = ["📖 Códigos DTC", "🔢 Lector de VIN", "🗺️ Esquemas", "🧮 Conversor de unidades"]
+    if st.session_state.get("sub_mec") not in SUB_MEC:
+        st.session_state["sub_mec"] = SUB_MEC[0]
+    st.radio("Sub-sección:", SUB_MEC, key="sub_mec", horizontal=True,
+             label_visibility="collapsed")
+    sub_mec = st.session_state["sub_mec"]
 
     # -------- Diccionario de códigos OBD2 / DTC --------
-    with sub_dtc:
+    if sub_mec == SUB_MEC[0]:
         st.caption(
             f"Diccionario de códigos de falla OBD2/DTC. Arranca con {contar_dtc()} códigos genéricos "
             "estándar (no específicos de marca) — sumá los que te falten con el formulario de abajo. "
@@ -5333,7 +5427,7 @@ if pagina == PAGINAS[7]:
                     st.warning("Pegá al menos un código.")
 
     # -------- Lector de VIN --------
-    with sub_vin:
+    if sub_mec == SUB_MEC[1]:
         st.caption(
             "Decodifica el país de fabricación y año a partir del VIN (estándar ISO 3779). "
             "El fabricante exacto por WMI (los primeros 3 caracteres) lo tenés que cargar vos, "
@@ -5401,7 +5495,9 @@ if pagina == PAGINAS[7]:
                 img_bytes = obtener_imagen_esquema(esq["id"])
                 puntos = listar_puntos_esquema(esq["id"])
                 if img_bytes:
-                    imagen_a_mostrar = generar_imagen_con_marcadores(img_bytes, puntos)
+                    imagen_a_mostrar = imagen_esquema_lista_para_mostrar(
+                        img_bytes, firma_de_puntos(puntos), puntos
+                    )
                     st.image(imagen_a_mostrar, use_container_width=True)
                     if any(p.get("pos_x") is not None for p in puntos):
                         st.caption("Los números marcados en la foto corresponden a la lista de piezas de abajo.")
@@ -5472,7 +5568,7 @@ if pagina == PAGINAS[7]:
                         eliminar_esquema(esq["id"])
                         st.rerun()
 
-    with sub_esq:
+    if sub_mec == SUB_MEC[2]:
         st.caption(
             "Diagramas organizados por Marca › Vehículo › Sistema, donde cada pieza marcada tiene "
             "su código vinculado al catálogo — así se busca directo desde el dibujo, ya sea en el "
@@ -5622,7 +5718,7 @@ if pagina == PAGINAS[7]:
                     st.rerun()
 
     # -------- Conversor de unidades --------
-    with sub_conv:
+    if sub_mec == SUB_MEC[3]:
         st.caption("Conversiones rápidas de unidades que se usan seguido en manuales de taller antiguos o importados.")
 
         categoria_conv = st.radio("Categoría:", ["Torque", "Presión", "Longitud"], horizontal=True, key="conv_categoria")
