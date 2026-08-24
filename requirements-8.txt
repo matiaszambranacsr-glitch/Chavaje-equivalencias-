@@ -1,0 +1,9 @@
+streamlit
+openpyxl
+google-genai
+pdfplumber
+fpdf2
+Pillow
+qrcode
+opencv-python-headless
+numpy

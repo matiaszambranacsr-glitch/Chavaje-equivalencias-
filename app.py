@@ -16,6 +16,28 @@ from openpyxl import load_workbook, Workbook
 # ============================================================
 st.set_page_config(page_title="Equivalencias El Chavo", page_icon="🔧", layout="wide")
 
+
+# ============================================================
+# MODO DE VISTA (celular / computadora)
+# ============================================================
+# En vez de mantener dos archivos separados (que habría que corregir dos veces cada vez que
+# se cambia algo, y terminarían desincronizándose), es la misma app con dos modos de vista.
+# Cada uno acomoda la pantalla distinto: el celular apila las cosas en vertical y usa un
+# selector compacto; la computadora aprovecha el ancho con columnas y pestañas en fila.
+def es_celular():
+    return st.session_state.get("modo_vista", "📱 Celular") == "📱 Celular"
+
+
+def cols(pesos, apilar_en_celular=True):
+    """Devuelve columnas como st.columns, pero en modo celular apila los elementos en vertical
+    (uno abajo del otro, a ancho completo) en vez de aplastarlos de costado. Para filas de 2
+    elementos simples se puede pasar apilar_en_celular=False y dejarlas lado a lado."""
+    cantidad = len(pesos) if isinstance(pesos, (list, tuple)) else pesos
+    if es_celular() and apilar_en_celular:
+        return [st.container() for _ in range(cantidad)]
+    return st.columns(pesos)
+
+
 CSS_CUSTOM = """
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap');
@@ -140,6 +162,30 @@ hr { border-color: var(--border) !important; margin: 1.1rem 0 !important; }
 </style>
 """
 st.markdown(CSS_CUSTOM, unsafe_allow_html=True)
+
+# Ajustes según el modo de vista elegido. En celular se agranda lo que hay que tocar con el
+# dedo y se achica el texto de las tablas para que entre; en computadora se aprovecha el ancho.
+if es_celular():
+    st.markdown("""
+    <style>
+    .block-container { padding: 0.8rem 0.7rem 3rem 0.7rem !important; max-width: 100% !important; }
+    .stButton > button, .stDownloadButton > button, .stLinkButton > a, .stFormSubmitButton > button {
+      min-height: 2.7rem; width: 100%;
+    }
+    [data-testid="stDataFrame"] { font-size: 0.78rem; }
+    .app-header h1 { font-size: 1.45rem !important; }
+    .app-header p { font-size: 0.8rem !important; }
+    [data-testid="stExpander"] summary { padding: 0.65rem 0.5rem !important; }
+    h3 { font-size: 1.1rem !important; }
+    </style>
+    """, unsafe_allow_html=True)
+else:
+    st.markdown("""
+    <style>
+    .block-container { padding: 1.6rem 3rem 4rem 3rem !important; max-width: 1500px !important; }
+    [data-testid="stDataFrame"] { font-size: 0.88rem; }
+    </style>
+    """, unsafe_allow_html=True)
 
 DB_PATH = "equivalencias_app.db"
 
@@ -943,6 +989,12 @@ def get_connection():
     c.execute("CREATE INDEX IF NOT EXISTS idx_dtc_codigo ON codigos_dtc(codigo)")
     c.execute("CREATE INDEX IF NOT EXISTS idx_vin_wmi ON fabricantes_vin(wmi)")
     c.execute("CREATE INDEX IF NOT EXISTS idx_esquema_puntos ON esquema_puntos(esquema_id)")
+    # Índices de las tablas más nuevas — se consultan seguido y no los tenían
+    c.execute("CREATE INDEX IF NOT EXISTS idx_hist_busq_usuario ON historial_busquedas(usuario)")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_hist_precios_prod ON historial_precios(producto_id)")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_pedidos_repo_estado ON pedidos_reposicion(estado)")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_uso_ia_fecha ON uso_ia(fecha)")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_presup_mecanico ON presupuestos_mecanico(mecanico_id)")
     conn.commit()
     return conn
 
@@ -1663,13 +1715,13 @@ def registrar_uso_ia(funcion, exito):
 
 def traducir_error_gemini(e):
     """Convierte el JSON crudo de error de la API de Gemini en un mensaje legible en español.
-    El nivel gratuito de estas funciones tiene un límite MUY chico (a veces 5 consultas por
-    minuto compartidas entre todos los empleados) — esto es lo más común que se va a chocar."""
+    Estas funciones tienen un límite de consultas por minuto compartido entre todos los
+    empleados — chocarse con ese límite es lo más común que puede pasar."""
     texto_error = str(e)
     if "RESOURCE_EXHAUSTED" in texto_error or "429" in texto_error or "quota" in texto_error.lower():
         return (
-            "⏳ Se alcanzó el límite de consultas gratuitas de la IA por ahora (es un límite por "
-            "minuto, compartido entre todos los que usan la app). Esperá un minuto y probá de nuevo — "
+            "⏳ Se alcanzó el límite de consultas de la IA por ahora (es un límite por minuto, "
+            "compartido entre todos los que usan la app). Esperá un minuto y probá de nuevo — "
             "no es un error, es solo que hay que esperar a que se libere cupo."
         )
     return f"Error consultando a Gemini: {texto_error}"
@@ -1742,6 +1794,27 @@ def listar_papelera():
         filas.append({"ID": row["ID"], "Tipo": row["Tipo"], "Detalle": detalle,
                        "Eliminado por": row["Eliminado por"], "Fecha": row["Fecha"]})
     return filas
+
+
+def quitar_item_lista_sesion(nombre_lista, indice):
+    """Saca un ítem de una lista guardada en la sesión (presupuesto del mecánico, tanda de
+    equivalencias). Va como callback para no tener que forzar un refresco de página."""
+    lista = st.session_state.get(nombre_lista)
+    if lista and 0 <= indice < len(lista):
+        lista.pop(indice)
+
+
+def borrar_papelera_definitivo(item_id):
+    with db_lock:
+        c.execute("DELETE FROM papelera WHERE id = ?", (item_id,))
+        conn.commit()
+
+
+def cb_restaurar_papelera(item_id):
+    """Callback para el botón de restaurar. Guarda el resultado en session_state para poder
+    mostrarlo después del refresco, ya que un callback corre antes de dibujar la pantalla."""
+    ok, error = restaurar_de_papelera(item_id)
+    st.session_state["resultado_papelera"] = ("ok", "Restaurado.") if ok else ("error", error)
 
 
 def vaciar_papelera_antigua(dias=30):
@@ -2746,7 +2819,7 @@ SISTEMA_EN = {
 
 def generar_esquema_orientativo_ia(marca, modelo, motorizacion, sistema):
     """Genera una imagen orientativa/genérica (NO una foto real del vehículo) con Gemini.
-    Requiere facturación habilitada en la API key (el nivel gratuito no incluye generación de imágenes).
+    Requiere que la generación de imágenes esté habilitada en la API key correspondiente.
     Usa una key APARTE de la del resto de las funciones de IA (identificar_pieza_por_foto,
     extraer_datos_cedula, transcribir_audio, leer_remito_por_foto) — así, aunque esas otras se usen
     mucho y choquen contra el límite gratuito, nunca pueden generar un cobro por sí solas: la única
@@ -2758,8 +2831,7 @@ def generar_esquema_orientativo_ia(marca, modelo, motorizacion, sistema):
     if not api_key:
         return None, (
             "No configuraste 'gemini_api_key_imagenes' en Streamlit Cloud (Settings → Secrets). "
-            "A propósito es una key distinta de 'gemini_api_key' — esta es la única que necesita "
-            "facturación habilitada, para que el resto de las funciones de IA queden totalmente gratis."
+            "A propósito es una key distinta de 'gemini_api_key', separada solo para esta función."
         )
 
     sistema_en = SISTEMA_EN.get(sistema, sistema)
@@ -2793,11 +2865,10 @@ def generar_esquema_orientativo_ia(marca, modelo, motorizacion, sistema):
         texto_error = str(e)
         if "RESOURCE_EXHAUSTED" in texto_error or "429" in texto_error or "quota" in texto_error.lower():
             return None, (
-                "La generación de imágenes no está incluida en el nivel gratuito de la API de Gemini "
-                "(el error dice 'limit: 0' para ese modelo). Para usar esta función hay que habilitar "
-                "facturación en aistudio.google.com para la API key 'gemini_api_key_imagenes' — el costo "
-                "ronda los US$0,04 por imagen generada. El resto de las funciones de IA usan una key "
-                "distinta y separada, así que no se ven afectadas por esto."
+                "Esta función no está habilitada en la API key configurada (el error dice 'limit: 0' "
+                "para ese modelo). Hay que habilitarla en aistudio.google.com para la key "
+                "'gemini_api_key_imagenes'. El resto de las funciones de IA usan una key distinta y "
+                "separada, así que no se ven afectadas por esto."
             )
         return None, f"Error generando la imagen: {texto_error}"
 
@@ -3050,9 +3121,8 @@ def mostrar_portal_mecanico():
             subtotal_repuestos += subtotal_item
             coli1, coli2 = st.columns([4, 1])
             coli1.write(f"{it['marca']} - {it['codigo']} x{it['cantidad']} — ${subtotal_item:,.0f}")
-            if coli2.button("🗑️", key=f"quitar_mec_{i}"):
-                items_actuales.pop(i)
-                st.rerun()
+            coli2.button("🗑️", key=f"quitar_mec_{i}",
+                          on_click=quitar_item_lista_sesion, args=("presupuesto_mecanico_items", i))
 
         cliente_nombre_mec = st.text_input("Nombre del cliente (opcional):", key="mec_cliente")
         mano_obra_mec = st.number_input("Mano de obra ($):", min_value=0.0, step=500.0, key="mec_mano_obra")
@@ -3114,18 +3184,25 @@ if not es_admin() and not st.session_state.get("saltar_login"):
     st.stop()
 
 if es_admin() or es_operador_o_admin() or st.session_state.get("nivel_usuario") == "mecanico":
-    col_estado, col_salir = st.columns([4, 1])
+    col_estado, col_modo, col_salir = st.columns([3, 1.4, 1])
     nombre_sesion = st.session_state.get("admin_nombre", "")
     etiquetas_nivel = {"admin": "administrador", "operador": "operador", "mecanico": "mecánico"}
     etiqueta_nivel = etiquetas_nivel.get(st.session_state.get("nivel_usuario"), "administrador")
     col_estado.caption(f"🔓 Sesión de {etiqueta_nivel} activa ({nombre_sesion}).")
+    col_modo.selectbox("Vista:", ["📱 Celular", "💻 Computadora"], key="modo_vista",
+                        label_visibility="collapsed",
+                        help="Acomoda la pantalla según el dispositivo desde el que estés entrando.")
     if col_salir.button("Salir"):
         st.session_state.nivel_usuario = None
         st.session_state.admin_nombre = None
         st.session_state.mecanico_id = None
         st.rerun()
 else:
-    st.caption(f"👤 Usando como: {obtener_usuario_actual()}")
+    col_estado, col_modo = st.columns([3, 1.4])
+    col_estado.caption(f"👤 Usando como: {obtener_usuario_actual()}")
+    col_modo.selectbox("Vista:", ["📱 Celular", "💻 Computadora"], key="modo_vista",
+                        label_visibility="collapsed",
+                        help="Acomoda la pantalla según el dispositivo desde el que estés entrando.")
 
 if st.session_state.get("nivel_usuario") == "mecanico":
     mostrar_portal_mecanico()
@@ -3134,15 +3211,33 @@ if st.session_state.get("nivel_usuario") == "mecanico":
 if "lista_whatsapp" not in st.session_state:
     st.session_state.lista_whatsapp = []  # lista de códigos agregados para el mensaje
 
-tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs(
-    ["🔍 Buscador", "🔗 Vincular manual", "📁 Cargar Excel", "🗂️ Administrar",
-     "📊 Estadísticas", "📋 Lista WhatsApp", "🚗 Vehículos", "🛠️ Modo Mecánico"]
-)
+# ============================================================
+# NAVEGACIÓN PRINCIPAL
+# ============================================================
+# Antes esto era st.tabs(). Se cambió por un selector guardado en la sesión por dos motivos:
+#  1) st.tabs pierde en qué pestaña estabas cada vez que la página se refresca, y te devolvía
+#     al Buscador (el problema de "me vuelve al inicio" al tocar un botón).
+#  2) st.tabs dibuja TODAS las pestañas en cada refresco, aunque no las estés mirando —
+#     con 8 pestañas haciendo consultas a la base, eso era trabajo al pedo. Ahora solo se
+#     arma la sección que estás viendo, así que la app responde bastante más rápido.
+PAGINAS = ["🔍 Buscador", "🔗 Vincular manual", "📁 Cargar Excel", "🗂️ Administrar",
+           "📊 Estadísticas", "📋 Lista WhatsApp", "🚗 Vehículos", "🛠️ Modo Mecánico"]
+
+if st.session_state.get("pagina_actual") not in PAGINAS:
+    st.session_state["pagina_actual"] = PAGINAS[0]
+
+if es_celular():
+    # En el celular, 8 pestañas en fila obligan a scrollear de costado y se cortan los nombres.
+    st.selectbox("Sección:", PAGINAS, key="pagina_actual", label_visibility="collapsed")
+else:
+    st.radio("Sección:", PAGINAS, key="pagina_actual", horizontal=True, label_visibility="collapsed")
+
+pagina = st.session_state["pagina_actual"]
 
 # ============================================================
-# TAB 1: BUSCADOR
+# BUSCADOR
 # ============================================================
-with tab1:
+if pagina == PAGINAS[0]:
     with st.expander("❓ Guía rápida — cómo usar esta app"):
         st.markdown("""
 - **🔍 Buscador** — el corazón de la app. Buscá por código (acepta varios separados por coma) o por
@@ -3172,11 +3267,10 @@ Casi todo lo que edita o borra algo pide la contraseña de administrador la prim
     if es_operador_o_admin():
         with st.expander("🖼️ Buscar por similitud visual (experimental)"):
             st.caption(
-                "Compará una foto contra las fotos que ya tenés cargadas en el catálogo — "
-                "gratis, corre local, sin límite de uso. Es MUCHO menos confiable que un código "
-                "exacto: con piezas metálicas lisas sin marcas ni textura (rótulas, rulemanes, "
-                "bulones) va a rendir mal aunque la foto sea buena. Úsalo solo para acortar "
-                "candidatos a revisar a mano, nunca como confirmación."
+                "Compará una foto contra las fotos que ya tenés cargadas en el catálogo. Es MUCHO "
+                "menos confiable que un código exacto: con piezas metálicas lisas sin marcas ni "
+                "textura (rótulas, rulemanes, bulones) va a rendir mal aunque la foto sea buena. "
+                "Úsalo solo para acortar candidatos a revisar a mano, nunca como confirmación."
             )
             c.execute("SELECT COUNT(*) FROM productos WHERE imagen_orb_blob IS NOT NULL")
             cantidad_listas = c.fetchone()[0]
@@ -3356,7 +3450,7 @@ Casi todo lo que edita o borra algo pide la contraseña de administrador la prim
                         # Marcar favoritos / editar precio y stock
                         with st.expander("✏️ Marcar favorito / editar precio y stock"):
                             for fila in res:
-                                colF, colC, colP, colS, colG, colH = st.columns([0.5, 1.7, 1.1, 0.9, 0.7, 0.7])
+                                colF, colC, colP, colS, colG, colH = cols([0.5, 1.7, 1.1, 0.9, 0.7, 0.7])
                                 es_fav = bool(fila.get("Favorito"))
                                 nuevo_fav = colF.checkbox("⭐", value=es_fav, key=f"fav_{fila['ID']}_{clean}")
                                 if nuevo_fav != es_fav:
@@ -3472,11 +3566,11 @@ Casi todo lo que edita o borra algo pide la contraseña de administrador la prim
             "Para piezas de autos antiguos, importados o fuera de catálogo: medí la pieza rota con un "
             "calibre y buscá alternativas que compartan esas cotas, aunque no tengan equivalencia registrada."
         )
-        cm1, cm2, cm3 = st.columns(3)
+        cm1, cm2, cm3 = cols(3)
         m_diam_int = cm1.number_input("Diámetro interno (mm)", min_value=0.0, step=0.1, value=0.0, key="med_di")
         m_diam_ext = cm2.number_input("Diámetro externo (mm)", min_value=0.0, step=0.1, value=0.0, key="med_de")
         m_ancho = cm3.number_input("Ancho (mm)", min_value=0.0, step=0.1, value=0.0, key="med_an")
-        cm4, cm5, cm6 = st.columns(3)
+        cm4, cm5, cm6 = cols(3)
         m_paso = cm4.text_input("Paso de rosca (opcional)", key="med_paso", placeholder="Ej: M12x1.5")
         m_estrias = cm5.number_input("Cantidad de estrías (opcional)", min_value=0, step=1, value=0, key="med_estrias")
         m_tolerancia = cm6.slider("Tolerancia (%)", min_value=1, max_value=15, value=5, key="med_tol")
@@ -3644,7 +3738,7 @@ Casi todo lo que edita o borra algo pide la contraseña de administrador la prim
             st.dataframe(quitar_id(favoritos), use_container_width=True, hide_index=True)
 
 # ============================================================
-# TAB 2: VINCULAR MANUAL
+# VINCULAR MANUAL
 # ============================================================
 def vincular_grupo_equivalencias(productos_info, nivel, nota, verificar):
     """Crea (o reutiliza) cada producto de la lista y los vincula a TODOS entre sí — así se puede
@@ -3677,7 +3771,7 @@ def vincular_grupo_equivalencias(productos_info, nivel, nota, verificar):
     return len(set(ids)), pares
 
 
-with tab2:
+if pagina == PAGINAS[1]:
     st.subheader("Vincular varios códigos como equivalentes")
     st.caption(
         "Armá un grupo de códigos — de la marca/proveedor que sea, se pueden mezclar — y vinculalos "
@@ -3739,9 +3833,8 @@ with tab2:
         for i, it in enumerate(grupo):
             colg1, colg2 = st.columns([5, 1])
             colg1.write(f"{it['marca']}: {it['codigo']}" + (f" — {it['descripcion']}" if it['descripcion'] else ""))
-            if colg2.button("🗑️", key=f"quitar_grupo_{i}"):
-                grupo.pop(i)
-                st.rerun()
+            colg2.button("🗑️", key=f"quitar_grupo_{i}",
+                          on_click=quitar_item_lista_sesion, args=("grupo_equivalencia", i))
 
         st.markdown("---")
         nivel_equiv = st.selectbox(
@@ -3767,9 +3860,9 @@ with tab2:
         st.caption("Todavía no agregaste ningún código a la tanda.")
 
 # ============================================================
-# TAB 3: CARGAR EXCEL
+# CARGAR EXCEL
 # ============================================================
-with tab3:
+if pagina == PAGINAS[2]:
     if not pedir_password_admin("cargar listas de proveedores"):
         pass
     else:
@@ -4045,7 +4138,7 @@ with tab3:
                 st.rerun()
 
 # ============================================================
-# TAB 4: ADMINISTRAR
+# ADMINISTRAR
 # ============================================================
 def exportar_configuracion_txt():
     """Junta combos de repuestos, códigos DTC cargados y fabricantes VIN en un solo archivo de texto,
@@ -4073,7 +4166,7 @@ def exportar_configuracion_txt():
     return "\n".join(lineas)
 
 
-with tab4:
+if pagina == PAGINAS[3]:
     st.subheader("🗂️ Administrar")
 
     sub_marcas, sub_productos, sub_mensajeria, sub_combos, sub_mantenimiento, sub_usuarios = st.tabs(
@@ -4216,14 +4309,14 @@ with tab4:
                     "FROM productos WHERE id = ?", (id_medidas,)
                 )
                 actual = c.fetchone()
-                em1, em2, em3 = st.columns(3)
+                em1, em2, em3 = cols(3)
                 e_diam_int = em1.number_input("Diám. interno cara A (mm)", min_value=0.0, step=0.1,
                                                value=float(actual["diametro_interno"] or 0), key="e_di")
                 e_diam_ext = em2.number_input("Diám. externo cara A (mm)", min_value=0.0, step=0.1,
                                                value=float(actual["diametro_externo"] or 0), key="e_de")
                 e_ancho = em3.number_input("Ancho (mm)", min_value=0.0, step=0.1,
                                             value=float(actual["ancho"] or 0), key="e_an")
-                em4, em5, em6 = st.columns(3)
+                em4, em5, em6 = cols(3)
                 e_paso = em4.text_input("Paso de rosca", value=actual["paso_rosca"] or "", key="e_paso")
                 e_estrias = em5.number_input("Cantidad de estrías", min_value=0, step=1,
                                               value=int(actual["cantidad_estrias"] or 0), key="e_estrias")
@@ -4547,23 +4640,18 @@ with tab4:
                     f"{icono} {item['Tipo'].capitalize()}: **{item['Detalle']}** — "
                     f"eliminado por {item['Eliminado por'] or 'alguien'} el {item['Fecha']}"
                 )
-                if colp2.button("↩️ Restaurar", key=f"restaurar_papelera_{item['ID']}"):
-                    ok, error_restaurar = restaurar_de_papelera(item["ID"])
-                    if ok:
-                        st.success("Restaurado.")
-                        st.rerun()
-                    else:
-                        st.error(error_restaurar)
-                if colp3.button("🗑️", key=f"borrar_papelera_{item['ID']}", help="Borrar en forma permanente, sin restaurar"):
-                    with db_lock:
-                        c.execute("DELETE FROM papelera WHERE id = ?", (item["ID"],))
-                        conn.commit()
-                    st.rerun()
+                colp2.button("↩️ Restaurar", key=f"restaurar_papelera_{item['ID']}",
+                              on_click=cb_restaurar_papelera, args=(item["ID"],))
+                colp3.button("🗑️", key=f"borrar_papelera_{item['ID']}", help="Borrar en forma permanente, sin restaurar",
+                              on_click=borrar_papelera_definitivo, args=(item["ID"],))
+
+            resultado_papelera = st.session_state.pop("resultado_papelera", None)
+            if resultado_papelera:
+                tipo_res, msg_res = resultado_papelera
+                (st.success if tipo_res == "ok" else st.error)(msg_res)
 
             st.caption("También se limpia sola: lo que lleva más de 30 días acá se borra en forma permanente.")
-            if st.button("🧹 Vaciar ahora lo de más de 30 días"):
-                vaciar_papelera_antigua(30)
-                st.rerun()
+            st.button("🧹 Vaciar ahora lo de más de 30 días", on_click=vaciar_papelera_antigua, args=(30,))
 
     with sub_usuarios:
         if not pedir_password_admin("gestionar usuarios"):
@@ -4599,7 +4687,7 @@ with tab4:
                 opciones_usuario = {u["Nombre"]: u["ID"] for u in usuarios_actuales}
                 usuario_elegido = st.selectbox("Elegí un empleado:", list(opciones_usuario.keys()), key="sel_usuario_gestionar")
                 usuario_id_sel = opciones_usuario[usuario_elegido]
-                cug1, cug2, cug3 = st.columns(3)
+                cug1, cug2, cug3 = cols(3)
                 nueva_pass_usuario = cug1.text_input("Nueva contraseña (opcional):", type="password", key="usuario_nueva_pass")
                 if cug1.button("💾 Cambiar contraseña"):
                     if nueva_pass_usuario:
@@ -4656,9 +4744,9 @@ with tab4:
                     st.rerun()
 
 # ============================================================
-# TAB 5: ESTADÍSTICAS
+# ESTADÍSTICAS
 # ============================================================
-with tab5:
+if pagina == PAGINAS[4]:
     st.subheader("📊 Estadísticas")
 
     sub_resumen, sub_importaciones, sub_backup, sub_auditoria, sub_busquedas, sub_para_pedir = st.tabs(
@@ -4696,9 +4784,8 @@ with tab5:
         st.markdown("---")
         st.markdown("**🤖 Uso de las funciones de IA (últimos 30 días)**")
         st.caption(
-            "Las primeras 4 funciones usan una API key gratuita — nunca pueden generarte un cobro, "
-            "en el peor caso fallan por límite de uso. Solo 'Generar imagen orientativa' usa una key "
-            "aparte con facturación habilitada, y es la única que tiene costo real."
+            "Las primeras 4 funciones usan una API key; en el peor caso fallan por límite de uso y "
+            "hay que reintentar. 'Generar imagen orientativa' usa una key aparte, configurada por separado."
         )
         uso_ia_actual = resumen_uso_ia()
         if uso_ia_actual:
@@ -4826,12 +4913,13 @@ with tab5:
                 )
                 if marcado:
                     seleccionados.append(p)
-                if colp2.button("✅", key=f"resuelto_{p['ID']}", help="Marcar como resuelto"):
-                    marcar_pedido_resuelto(p["ID"])
-                    st.rerun()
-                if colp3.button("🗑️", key=f"descartar_{p['ID']}", help="Descartar (no hace falta pedirlo)"):
-                    descartar_pedido_reposicion(p["ID"])
-                    st.rerun()
+                # on_click en vez de "if boton: accion + st.rerun()": el callback corre ANTES de
+                # que Streamlit refresque la página, así la lista ya sale actualizada sin tener que
+                # forzar un st.rerun() — que es lo que hacía perder la pestaña y volver al inicio.
+                colp2.button("✅", key=f"resuelto_{p['ID']}", help="Marcar como resuelto",
+                              on_click=marcar_pedido_resuelto, args=(p["ID"],))
+                colp3.button("🗑️", key=f"descartar_{p['ID']}", help="Descartar (no hace falta pedirlo)",
+                              on_click=descartar_pedido_reposicion, args=(p["ID"],))
         else:
             st.caption("Ningún empleado marcó nada para pedir todavía.")
 
@@ -4873,9 +4961,9 @@ with tab5:
                     st.link_button(f"📲 Abrir WhatsApp para {marca}", url_wa_repo, key=f"wa_repo_{marca}")
 
 # ============================================================
-# TAB 6: LISTA PARA WHATSAPP
+# LISTA PARA WHATSAPP
 # ============================================================
-with tab6:
+if pagina == PAGINAS[5]:
     st.subheader("Armar lista de productos para enviar por WhatsApp")
     st.caption(
         "Buscá códigos en la pestaña Buscador y tocá '📋 Agregar a lista de WhatsApp'. "
@@ -4959,9 +5047,9 @@ with tab6:
             st.rerun()
 
 # ============================================================
-# TAB 7: VEHÍCULOS (ficha digital / historial de piezas)
+# VEHÍCULOS (ficha digital / historial de piezas)
 # ============================================================
-with tab7:
+if pagina == PAGINAS[6]:
     st.subheader("🚗 Ficha digital del vehículo")
     st.caption(
         "Registrá la patente de un cliente frecuente junto con las piezas que le fuiste cambiando. "
@@ -5038,7 +5126,7 @@ with tab7:
                                              key="form_marca_auto")
                 modelo_auto = cv4.text_input("Modelo", value=(vehiculo or {}).get("modelo_auto") or "",
                                               key="form_modelo_auto")
-                cv5, cv6, cv7 = st.columns(3)
+                cv5, cv6, cv7 = cols(3)
                 anio_auto = cv5.text_input("Año", value=(vehiculo or {}).get("anio") or "", key="form_anio_auto")
                 motorizacion_auto = cv6.text_input("Motorización", value=(vehiculo or {}).get("motorizacion") or "",
                                                     key="form_motorizacion_auto")
@@ -5181,9 +5269,9 @@ with tab7:
                     st.caption("Sin atrasos detectados todavía para avisar por WhatsApp.")
 
 # ============================================================
-# TAB 8: MODO MECÁNICO
+# MODO MECÁNICO
 # ============================================================
-with tab8:
+if pagina == PAGINAS[7]:
     st.subheader("🛠️ Modo Mecánico")
 
     sub_dtc, sub_vin, sub_esq, sub_conv = st.tabs(
@@ -5336,9 +5424,8 @@ with tab8:
                                 else:
                                     st.error(f"No encontré '{punto['codigo']}' ni '{punto['nombre_pieza']}' en la base.")
                         if es_admin():
-                            if cp2.button("🗑️", key=f"del_punto_{punto['id']}"):
-                                eliminar_punto_esquema(punto["id"])
-                                st.rerun()
+                            cp2.button("🗑️", key=f"del_punto_{punto['id']}",
+                                        on_click=eliminar_punto_esquema, args=(punto["id"],))
 
                 if es_operador_o_admin():
                     with st.expander("➕ Agregar pieza a este esquema"):
@@ -5452,9 +5539,8 @@ with tab8:
                     for pv in precargados:
                         colp1, colp2 = st.columns([4, 1])
                         colp1.write(f"{pv['marca']} — {pv['modelo']}")
-                        if colp2.button("🗑️", key=f"del_precarga_{pv['marca']}_{pv['modelo']}"):
-                            eliminar_vehiculo_catalogo(pv["marca"], pv["modelo"])
-                            st.rerun()
+                        colp2.button("🗑️", key=f"del_precarga_{pv['marca']}_{pv['modelo']}",
+                                      on_click=eliminar_vehiculo_catalogo, args=(pv["marca"], pv["modelo"]))
 
             st.markdown("---")
             st.markdown("**➕ Subir un esquema nuevo**")
@@ -5494,8 +5580,7 @@ with tab8:
                     "Para cuando no tenés el auto físico enfrente (útil en el mostrador de una casa de "
                     "repuestos): la IA arma un dibujo genérico de referencia, **no una foto real de ese "
                     "vehículo**. Sirve para orientar, no para identificar piezas con precisión milimétrica. "
-                    "Usa Gemini — necesita facturación habilitada en la API key (no es gratis, pero el costo "
-                    "es bajo, ronda los US$0,04 por imagen)."
+                    "Usa Gemini, con una API key configurada por separado del resto de las funciones."
                 )
                 motorizacion_ia = st.text_input("Motorización", placeholder="Ej: 1.6 MSI Nafta", key="esq_motorizacion_ia")
                 boton_label = "🔄 Generar otra vez" if st.session_state.get("esq_preview_ia") else "🤖 Generar imagen orientativa"
