@@ -719,6 +719,43 @@ def get_connection():
         fecha TEXT DEFAULT (datetime('now'))
     )""")
 
+    # Ventas registradas desde el mostrador: qué se llevó el cliente y qué había pedido.
+    # Es la materia prima para descubrir equivalencias solas: si alguien pide el código A y
+    # termina llevándose el B, eso es una equivalencia que pasó en la vida real, aunque no
+    # figure en ningún catálogo.
+    c.execute("""CREATE TABLE IF NOT EXISTS ventas_registradas (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        producto_id INTEGER NOT NULL REFERENCES productos(id) ON DELETE CASCADE,
+        termino_pedido TEXT,
+        codigo_pedido_clean TEXT,
+        usuario TEXT,
+        fecha TEXT DEFAULT (datetime('now'))
+    )""")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_ventas_fecha ON ventas_registradas(fecha)")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_ventas_codigo ON ventas_registradas(codigo_pedido_clean)")
+
+    # Evidencia que respalda cada equivalencia sugerida. La idea es NO cargar nada solo:
+    # cada sugerencia llega al panel con el detalle de en qué se basa, para poder decidir
+    # con fundamento en vez de a ciegas.
+    c.execute("""CREATE TABLE IF NOT EXISTS evidencia_equivalencia (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        codigo_clean TEXT NOT NULL,
+        producto_id INTEGER NOT NULL,
+        tipo TEXT NOT NULL,
+        detalle TEXT,
+        fecha TEXT DEFAULT (datetime('now')),
+        UNIQUE(codigo_clean, producto_id, tipo)
+    )""")
+
+    # Sugerencias que el dueño ya miró y descartó, para no volver a proponérselas.
+    c.execute("""CREATE TABLE IF NOT EXISTS equivalencias_descartadas (
+        codigo_clean TEXT NOT NULL,
+        producto_id INTEGER NOT NULL,
+        descartado_por TEXT,
+        fecha TEXT DEFAULT (datetime('now')),
+        PRIMARY KEY (codigo_clean, producto_id)
+    )""")
+
     # Cuentas de empleados creadas desde la propia app (además de las que se pueden cargar en
     # Streamlit Secrets) — así el dueño no depende de tocar la configuración de Streamlit Cloud
     # cada vez que entra o se va alguien del equipo. La contraseña nunca se guarda en texto plano.
@@ -1037,6 +1074,49 @@ def dividir_codigos(celda):
     return [p.strip() for p in partes if p.strip()]
 
 
+def extraer_codigos_de_texto(texto, minimo=6):
+    """Busca códigos de fábrica escondidos dentro de una descripción.
+    Muchas listas de proveedor no traen una columna de OEM aparte, pero lo meten en el texto
+    ('ROTULA VW GOL - ORIG 6Q0407365'). Esto lo saca de ahí.
+    Es a propósito conservador — ante la duda, no lo toma — porque un código inventado ensucia
+    la base con equivalencias falsas, que es peor que no tener la equivalencia:
+      - descarta palabras sin números (ROTULA, DERECHA, DELANTERO)
+      - descarta números solos cortos: años, medidas, cilindradas (2005, 1.6, 16V)
+      - pide un largo mínimo, porque los códigos de fábrica son largos
+    """
+    if not texto:
+        return []
+    ruido = {"16V", "8V", "12V", "24V", "4X4", "4X2", "2WD", "4WD", "TDI", "TSI", "CRDI",
+             "16valv", "MM", "CM", "KG"}
+    encontrados = []
+    for token in re.split(r'[\s,;/|()\[\]]+', str(texto)):
+        limpio = token.strip().strip(".-_")
+        if len(limpio) < minimo:
+            continue
+        if limpio.upper() in ruido:
+            continue
+        if not any(ch.isdigit() for ch in limpio):
+            continue
+        tiene_letra = any(ch.isalpha() for ch in limpio)
+        # Números sueltos: solo se aceptan si son largos (un código de barras o de fábrica),
+        # así no se cuelan años ni medidas
+        if not tiene_letra and len(re.sub(r'\D', '', limpio)) < 7:
+            continue
+        # Descartar cosas tipo "1.6" o "2.0TDI" que empiezan con cilindrada
+        if re.match(r'^\d\.\d', limpio):
+            continue
+        if sanitizar(limpio):
+            encontrados.append(limpio)
+    # sin repetidos, conservando el orden
+    vistos, salida = set(), []
+    for cod in encontrados:
+        clave = sanitizar(cod)
+        if clave not in vistos:
+            vistos.add(clave)
+            salida.append(cod)
+    return salida
+
+
 def valor_o_vacio(valor):
     """Devuelve el valor de una celda como string, o '' si es None."""
     if valor is None:
@@ -1205,8 +1285,312 @@ def listar_favoritos_stock_bajo(umbral=2):
 
 def registrar_busqueda_sin_resultado(termino):
     with db_lock:
-        c.execute("INSERT INTO historial_busquedas (termino, sin_resultado) VALUES (?, 1)", (termino,))
+        c.execute("INSERT INTO historial_busquedas (termino, usuario, sin_resultado) VALUES (?, ?, 1)",
+                   (termino, obtener_usuario_actual()))
         conn.commit()
+
+
+# ============================================================
+# EQUIVALENCIAS DESCUBIERTAS DESDE LAS VENTAS
+# ============================================================
+# La idea: si un cliente pide el código A y termina llevándose el B, eso es una equivalencia
+# que pasó de verdad en el mostrador — aunque no figure en ningún catálogo. Cruzando lo que se
+# pidió contra lo que se vendió, el sistema propone equivalencias candidatas para que el dueño
+# las confirme. No inventa nada solo: propone, y una persona decide.
+
+def registrar_venta(producto_id, termino_pedido=""):
+    """Anota que un producto se vendió, y qué había pedido el cliente cuando lo pidió."""
+    with db_lock:
+        c.execute(
+            "INSERT INTO ventas_registradas (producto_id, termino_pedido, codigo_pedido_clean, usuario) "
+            "VALUES (?, ?, ?, ?)",
+            (producto_id, termino_pedido.strip(), sanitizar(termino_pedido), obtener_usuario_actual())
+        )
+        conn.commit()
+
+
+def red_de_equivalencias(codigo_clean):
+    """IDs de todos los productos que ya están vinculados a ese código (directa o
+    indirectamente). Sirve para no proponer como novedad algo que ya está cargado."""
+    if not codigo_clean:
+        return set()
+    c.execute("""
+    WITH RECURSIVE Red(id) AS (
+        SELECT id FROM productos WHERE codigo_clean = ?
+        UNION
+        SELECT CASE WHEN eq.producto_a_id = re.id THEN eq.producto_b_id ELSE eq.producto_a_id END
+        FROM equivalencias eq JOIN Red re ON (eq.producto_a_id = re.id OR eq.producto_b_id = re.id)
+    )
+    SELECT id FROM Red""", (codigo_clean,))
+    return {r["id"] for r in c.fetchall()}
+
+
+def descubrir_equivalencias_candidatas(min_veces=2, dias=180, minutos_ventana=20):
+    """Devuelve pares (código pedido → producto vendido) que se repitieron y que todavía NO
+    están cargados como equivalentes. Se arma de dos fuentes:
+      1) Directa: el empleado marcó "se llevó este" sobre el resultado de una búsqueda.
+      2) Deducida: se vendió algo justo después de que el mismo empleado buscara un código
+         que no dio resultado — el caso típico de "no lo tengo, pero le doy este que sirve".
+    Es solo una sugerencia: siempre la confirma una persona antes de que quede cargada."""
+    conteos = {}
+
+    def sumar(codigo_clean, termino, producto_id, veces, origen):
+        if not codigo_clean or not producto_id:
+            return
+        clave = (codigo_clean, producto_id)
+        actual = conteos.get(clave)
+        if actual:
+            actual["veces"] += veces
+            actual["origenes"].add(origen)
+        else:
+            conteos[clave] = {"termino": termino, "veces": veces, "origenes": {origen}}
+
+    # Fuente 1: marcado explícito en el mostrador
+    c.execute("""SELECT codigo_pedido_clean AS cod, MAX(termino_pedido) AS termino,
+                        producto_id AS pid, COUNT(*) AS veces
+                 FROM ventas_registradas
+                 WHERE codigo_pedido_clean IS NOT NULL AND codigo_pedido_clean <> ''
+                   AND fecha >= datetime('now', ?)
+                 GROUP BY codigo_pedido_clean, producto_id""", (f"-{dias} days",))
+    for f in c.fetchall():
+        sumar(f["cod"], f["termino"], f["pid"], f["veces"], "mostrador")
+
+    # Fuente 2: venta poco después de una búsqueda sin resultado del mismo empleado
+    c.execute("""SELECT h.termino AS termino, v.producto_id AS pid, COUNT(*) AS veces
+                 FROM ventas_registradas v
+                 JOIN historial_busquedas h
+                   ON h.usuario = v.usuario
+                  AND h.sin_resultado = 1
+                  AND h.fecha <= v.fecha
+                  AND h.fecha >= datetime(v.fecha, ?)
+                 WHERE v.fecha >= datetime('now', ?)
+                 GROUP BY h.termino, v.producto_id""",
+              (f"-{minutos_ventana} minutes", f"-{dias} days"))
+    for f in c.fetchall():
+        sumar(sanitizar(f["termino"]), f["termino"], f["pid"], f["veces"], "deducida")
+
+    if not conteos:
+        return []
+
+    descartadas = set()
+    c.execute("SELECT codigo_clean, producto_id FROM equivalencias_descartadas")
+    for f in c.fetchall():
+        descartadas.add((f["codigo_clean"], f["producto_id"]))
+
+    redes = {}
+    candidatas = []
+    for (codigo_clean, producto_id), datos in conteos.items():
+        if datos["veces"] < min_veces or (codigo_clean, producto_id) in descartadas:
+            continue
+        if codigo_clean not in redes:
+            redes[codigo_clean] = red_de_equivalencias(codigo_clean)
+        if producto_id in redes[codigo_clean]:
+            continue  # ya está cargado como equivalente, no es novedad
+
+        c.execute("""SELECT p.codigo_raw, p.codigo_clean, p.descripcion, m.nombre AS marca
+                     FROM productos p JOIN marcas m ON m.id = p.marca_id WHERE p.id = ?""", (producto_id,))
+        prod = c.fetchone()
+        if not prod or prod["codigo_clean"] == codigo_clean:
+            continue  # se llevó exactamente lo que pidió, no hay nada nuevo
+
+        c.execute("SELECT id FROM productos WHERE codigo_clean = ? LIMIT 1", (codigo_clean,))
+        existente = c.fetchone()
+
+        # Evidencia local que se puede calcular sola: si los dos productos tienen medidas
+        # cargadas, compararlas es prueba física, no una suposición.
+        if existente:
+            coinciden, detalle_medidas = comparar_medidas_productos(existente["id"], producto_id)
+            if coinciden is True:
+                guardar_evidencia(codigo_clean, producto_id, "medidas", detalle_medidas)
+            elif coinciden is False:
+                guardar_evidencia(codigo_clean, producto_id, "medidas_no_coinciden", detalle_medidas)
+
+        guardar_evidencia(codigo_clean, producto_id, "mostrador",
+                           f"Se repitió {datos['veces']} vez/veces en el mostrador")
+        evidencias = listar_evidencia(codigo_clean, producto_id)
+        etiqueta_confianza, puntaje = nivel_de_confianza(evidencias)
+
+        candidatas.append({
+            "codigo_pedido": datos["termino"] or codigo_clean,
+            "codigo_clean": codigo_clean,
+            "producto_id": producto_id,
+            "codigo_vendido": prod["codigo_raw"],
+            "marca_vendida": prod["marca"],
+            "descripcion": prod["descripcion"] or "",
+            "veces": datos["veces"],
+            "origen": "mostrador" if "mostrador" in datos["origenes"] else "deducida",
+            "pedido_ya_cargado": existente is not None,
+            "id_pedido": existente["id"] if existente else None,
+            "evidencias": evidencias,
+            "confianza": etiqueta_confianza,
+            "puntaje": puntaje,
+        })
+
+    # Primero lo mejor respaldado, y dentro de eso lo que más se repitió
+    candidatas.sort(key=lambda x: (-x["puntaje"], -x["veces"]))
+    return candidatas
+
+
+# ---- Evidencia que respalda (o descarta) una equivalencia sugerida ----------------
+# Regla de oro: NADA se carga solo. Cada sugerencia llega al panel con el detalle de en qué
+# se basa, y una persona decide. Las fuentes están ordenadas de más a menos confiable.
+
+PESOS_EVIDENCIA = {
+    "catalogo_oficial": 100,   # el código aparece escrito en la ficha oficial del proveedor
+    "lista_proveedor": 60,     # vinieron relacionados en un Excel del propio proveedor
+    "medidas": 45,             # las medidas mecánicas cargadas coinciden
+    "mostrador": 20,           # se repitió en ventas reales
+}
+
+
+def guardar_evidencia(codigo_clean, producto_id, tipo, detalle=""):
+    with db_lock:
+        c.execute("INSERT OR REPLACE INTO evidencia_equivalencia "
+                   "(codigo_clean, producto_id, tipo, detalle) VALUES (?, ?, ?, ?)",
+                   (codigo_clean, producto_id, tipo, detalle))
+        conn.commit()
+
+
+def listar_evidencia(codigo_clean, producto_id):
+    c.execute("""SELECT tipo, detalle, fecha FROM evidencia_equivalencia
+                 WHERE codigo_clean = ? AND producto_id = ?""", (codigo_clean, producto_id))
+    return [dict(r) for r in c.fetchall()]
+
+
+def comparar_medidas_productos(id_a, id_b, tolerancia_pct=3):
+    """Compara las medidas mecánicas cargadas de dos productos. Devuelve (coinciden, detalle).
+    Es evidencia física real, no una suposición: si un retén mide distinto, no entra, punto.
+    Si a alguno le faltan medidas cargadas, no dice nada — no es prueba ni a favor ni en contra."""
+    campos = [
+        ("diametro_interno", "diám. interno"), ("diametro_externo", "diám. externo"),
+        ("diametro_interno_cara_b", "diám. interno cara B"),
+        ("diametro_externo_cara_b", "diám. externo cara B"),
+        ("diametro_rosca_homocinetica", "diám. rosca"), ("diametro_copa", "diám. copa"),
+        ("ancho", "ancho"),
+    ]
+    columnas = ", ".join(cn for cn, _ in campos) + ", paso_rosca, cantidad_estrias"
+    c.execute(f"SELECT {columnas} FROM productos WHERE id = ?", (id_a,))
+    a = c.fetchone()
+    c.execute(f"SELECT {columnas} FROM productos WHERE id = ?", (id_b,))
+    b = c.fetchone()
+    if not a or not b:
+        return None, "No se pudo leer alguno de los dos productos."
+
+    comparadas, diferencias = [], []
+    for campo, etiqueta in campos:
+        va, vb = a[campo], b[campo]
+        if va is None or vb is None:
+            continue
+        comparadas.append(etiqueta)
+        if va == 0 or vb == 0:
+            continue
+        diferencia = abs(va - vb) / max(va, vb) * 100
+        if diferencia > tolerancia_pct:
+            diferencias.append(f"{etiqueta}: {va} vs {vb}")
+
+    for campo, etiqueta in (("paso_rosca", "paso de rosca"), ("cantidad_estrias", "estrías")):
+        va, vb = a[campo], b[campo]
+        if va in (None, "") or vb in (None, ""):
+            continue
+        comparadas.append(etiqueta)
+        if str(va).strip().upper() != str(vb).strip().upper():
+            diferencias.append(f"{etiqueta}: {va} vs {vb}")
+
+    if not comparadas:
+        return None, "Ninguno de los dos tiene medidas cargadas todavía."
+    if diferencias:
+        return False, "NO coinciden: " + "; ".join(diferencias)
+    return True, "Coinciden en " + ", ".join(comparadas)
+
+
+def verificar_en_catalogo_oficial(codigo_a_buscar, url_ficha, tiempo_maximo=8):
+    """Abre la ficha oficial del proveedor y fija si el otro código aparece escrito ahí.
+    Es la evidencia más fuerte que se puede conseguir sin que nadie opine: o el proveedor
+    lo lista en su propia página, o no. Compara sin guiones ni espacios, porque cada catálogo
+    los escribe distinto (6Q0 407 365 / 6Q0407365 / 6Q0-407-365).
+    Devuelve (encontrado, detalle). 'encontrado' es None si no se pudo consultar la página."""
+    import requests
+    if not url_ficha:
+        return None, "Esa marca no tiene cargada la dirección de su catálogo."
+    objetivo = sanitizar(codigo_a_buscar)
+    if not objetivo:
+        return None, "Código no válido."
+    try:
+        respuesta = requests.get(
+            url_ficha, timeout=tiempo_maximo,
+            headers={"User-Agent": "Mozilla/5.0 (compatible; EquivalenciasElChavo/1.0)"}
+        )
+        if respuesta.status_code != 200:
+            return None, f"La página respondió {respuesta.status_code} — no se pudo verificar."
+        texto_plano = sanitizar(re.sub(r"<[^>]+>", " ", respuesta.text))
+        if objetivo in texto_plano:
+            return True, f"El código {codigo_a_buscar} aparece en la ficha oficial del proveedor."
+        return False, (f"El código {codigo_a_buscar} NO aparece en esa ficha. Puede que el "
+                        "proveedor no lo liste, o que la página cargue los datos aparte.")
+    except Exception as e:
+        return None, f"No se pudo consultar la página ({type(e).__name__})."
+
+
+def nivel_de_confianza(evidencias):
+    """Traduce la evidencia acumulada a algo legible. Nunca da 'confirmada': eso lo decide
+    una persona. Si hay evidencia EN CONTRA (ej: las medidas no coinciden), lo marca."""
+    tipos = {e["tipo"] for e in evidencias}
+    if "medidas_no_coinciden" in tipos or "catalogo_no_lo_lista" in tipos:
+        return "⛔ Con evidencia en contra", 0
+    puntaje = sum(PESOS_EVIDENCIA.get(t, 0) for t in tipos)
+    if puntaje >= 100:
+        return "🟢 Respaldo fuerte", puntaje
+    if puntaje >= 45:
+        return "🟡 Respaldo medio", puntaje
+    return "🔴 Solo por repetición", puntaje
+
+
+def descartar_candidata(codigo_clean, producto_id):
+    with db_lock:
+        c.execute("INSERT OR REPLACE INTO equivalencias_descartadas "
+                   "(codigo_clean, producto_id, descartado_por) VALUES (?, ?, ?)",
+                   (codigo_clean, producto_id, obtener_usuario_actual()))
+        conn.commit()
+
+
+    with db_lock:
+        c.execute("INSERT OR REPLACE INTO equivalencias_descartadas "
+                   "(codigo_clean, producto_id, descartado_por) VALUES (?, ?, ?)",
+                   (codigo_clean, producto_id, obtener_usuario_actual()))
+        conn.commit()
+
+
+def confirmar_candidata(codigo_clean, producto_id, codigo_original, marca_para_nuevo=None):
+    """Convierte una sugerencia en una equivalencia real. Si el código que pedía el cliente
+    todavía no existe como producto (caso típico: un código de fábrica que no tenés cargado),
+    lo crea con la marca elegida y recién ahí los vincula."""
+    with db_lock:
+        c.execute("SELECT id FROM productos WHERE codigo_clean = ? LIMIT 1", (codigo_clean,))
+        fila = c.fetchone()
+        if fila:
+            id_pedido = fila["id"]
+        else:
+            if not marca_para_nuevo:
+                return False, "Elegí con qué marca cargar el código que pedía el cliente."
+            marca_id = get_or_create_marca(marca_para_nuevo)
+            c.execute("SELECT descripcion FROM productos WHERE id = ?", (producto_id,))
+            desc = (c.fetchone() or {"descripcion": ""})["descripcion"] or ""
+            id_pedido = get_or_create_producto(codigo_original.strip(), codigo_clean, desc, marca_id)
+
+        if id_pedido == producto_id:
+            return False, "Los dos códigos son el mismo producto."
+
+        for a, b in ((id_pedido, producto_id), (producto_id, id_pedido)):
+            c.execute(
+                "INSERT OR REPLACE INTO equivalencias "
+                "(producto_a_id, producto_b_id, created_at, verificada, nivel, nota) "
+                "VALUES (?, ?, datetime('now'), 1, ?, ?)",
+                (a, b, "Exacta", "Descubierta desde las ventas del mostrador")
+            )
+        c.execute("DELETE FROM equivalencias_descartadas WHERE codigo_clean = ? AND producto_id = ?",
+                   (codigo_clean, producto_id))
+        conn.commit()
+    return True, None
 
 
 def listar_busquedas_sin_resultado(limite=50):
@@ -3522,14 +3906,22 @@ Casi todo lo que edita o borra algo pide la contraseña de administrador la prim
                                 })
                                 st.success("Agregado a la lista. Andá a la pestaña 'Lista WhatsApp' para armarla.")
 
-                        st.markdown("**📌 ¿Falta stock de alguno? Marcalo para reposición**")
-                        st.caption("El dueño lo va a ver en Estadísticas → Para pedir, y decide qué comprarle a cada proveedor.")
+                        st.markdown("**🛒 ¿Se lo llevó? / 📌 ¿Falta stock?**")
+                        st.caption(
+                            "Marcá cuál se llevó el cliente: con eso el sistema va aprendiendo qué "
+                            "sirve para qué, y después te propone equivalencias nuevas en "
+                            "Estadísticas → Equivalencias sugeridas. Si falta stock, 'Pedir' lo manda "
+                            "a la lista de reposición."
+                        )
                         for fila_stock in res:
-                            colr1, colr2 = st.columns([3, 1])
+                            colr1, colr2, colr3 = st.columns([3, 1, 1])
                             colr1.write(f"{fila_stock['Marca']} - {fila_stock['Codigo']} (stock actual: {fila_stock.get('Stock') if fila_stock.get('Stock') is not None else 's/d'})")
-                            if colr2.button("📌 Pedir", key=f"pedir_repo_{fila_stock['ID']}_{clean}"):
-                                solicitar_reposicion(fila_stock["ID"])
-                                st.success("Marcado para reposición.")
+                            colr2.button("🛒 Se llevó", key=f"vendido_{fila_stock['ID']}_{clean}",
+                                          on_click=registrar_venta, args=(fila_stock["ID"], codigo_individual),
+                                          help="Anota la venta para ir descubriendo equivalencias solas")
+                            colr3.button("📌 Pedir", key=f"pedir_repo_{fila_stock['ID']}_{clean}",
+                                          on_click=solicitar_reposicion, args=(fila_stock["ID"],),
+                                          help="Marcar para reposición")
 
                         # Marcar favoritos / editar precio y stock
                         with st.expander("✏️ Marcar favorito / editar precio y stock"):
@@ -3606,17 +3998,38 @@ Casi todo lo que edita o borra algo pide la contraseña de administrador la prim
             )
             buscar_texto_click = st.form_submit_button("🔍 Buscar por Descripción", type="primary")
 
+        # Igual que en la búsqueda por código: los resultados se guardan en la sesión en vez de
+        # depender de que el botón "Buscar" haya sido lo último que se tocó. Si no, al apretar
+        # cualquier botón de adentro el bloque entero desaparece y el click se pierde.
         if buscar_texto_click:
             if not texto.strip():
                 st.info("Ingresá un texto para buscar.")
+                st.session_state.pop("ultima_busqueda_texto", None)
             else:
                 guardar_busqueda(texto.strip())
-                res = buscar_por_texto(texto)
-                if res:
-                    st.success(f"Se encontraron {len(res)} coincidencias:")
-                    st.dataframe(quitar_id(res), use_container_width=True, hide_index=True)
-                else:
-                    st.warning("No se encontraron productos con esa descripción.")
+                st.session_state["ultima_busqueda_texto"] = {
+                    "texto": texto.strip(), "res": buscar_por_texto(texto)
+                }
+
+        busqueda_texto_guardada = st.session_state.get("ultima_busqueda_texto")
+        if busqueda_texto_guardada:
+            res_texto = busqueda_texto_guardada["res"]
+            texto_pedido = busqueda_texto_guardada["texto"]
+            if res_texto:
+                st.success(f"Se encontraron {len(res_texto)} coincidencias:")
+                st.dataframe(quitar_id(res_texto), use_container_width=True, hide_index=True)
+                with st.expander("🛒 ¿Cuál se llevó el cliente?"):
+                    st.caption(
+                        "Si el cliente había pedido un código que no tenías y se termina llevando "
+                        "alguno de estos, marcalo: así el sistema va aprendiendo esa equivalencia solo."
+                    )
+                    for fila_txt in res_texto[:20]:
+                        colt1, colt2 = st.columns([4, 1])
+                        colt1.write(f"{fila_txt['Marca']} - {fila_txt['Codigo']} — {fila_txt.get('Descripcion') or ''}")
+                        colt2.button("🛒 Se llevó", key=f"vendido_txt_{fila_txt['ID']}",
+                                      on_click=registrar_venta, args=(fila_txt["ID"], texto_pedido))
+            else:
+                st.warning("No se encontraron productos con esa descripción.")
 
     with st.expander("📦 Armar pedido (ordenado por ubicación en depósito)"):
         st.caption(
@@ -4013,8 +4426,8 @@ if pagina == PAGINAS[2]:
             st.write("Vista previa (primeras filas detectadas):")
             st.dataframe(preview_filas, use_container_width=True)
 
-            if len(encabezado) < 2:
-                st.error("El archivo debe tener al menos 2 columnas (código proveedor y código OEM).")
+            if len(encabezado) < 1:
+                st.error("El archivo no tiene ninguna columna con datos.")
             else:
                 st.markdown("**Mapeo de columnas** — revisá que coincida con tu archivo (se sugiere automáticamente):")
                 cols_upper = [str(x).upper() if x else "" for x in encabezado]
@@ -4030,19 +4443,54 @@ if pagina == PAGINAS[2]:
                 opciones_cols = [f"Columna {i}: {str(v)[:20] if v else '(sin título)'}"
                                   for i, v in enumerate(encabezado)]
 
-                c_p, c_o, c_d = st.columns(3)
+                c_p, c_o, c_d = cols(3)
                 with c_p:
                     idx_prov = st.selectbox("Código Proveedor:", range(len(opciones_cols)),
                                              format_func=lambda x: opciones_cols[x], index=idx_prov_auto)
                 with c_o:
-                    idx_oem = st.selectbox("Código OEM / Equivalente:", range(len(opciones_cols)),
-                                            format_func=lambda x: opciones_cols[x], index=idx_oem_auto)
+                    opciones_oem = [None] + list(range(len(opciones_cols)))
+                    idx_oem = st.selectbox(
+                        "Código OEM / Equivalente:", opciones_oem,
+                        format_func=lambda x: "Ninguna (la lista no lo trae)" if x is None else opciones_cols[x],
+                        index=opciones_oem.index(idx_oem_auto),
+                        help="Si la lista no tiene columna de OEM, elegí 'Ninguna': los productos se "
+                             "cargan igual y quedan buscables, solo que sin equivalencia."
+                    )
                 with c_d:
                     opciones_desc = [None] + list(range(len(opciones_cols)))
                     idx_default_desc = opciones_desc.index(idx_desc_auto) if idx_desc_auto is not None else 0
                     idx_desc = st.selectbox("Descripción (opcional):", opciones_desc,
                                              format_func=lambda x: "Ninguna" if x is None else opciones_cols[x],
                                              index=idx_default_desc)
+
+                st.markdown("**Cuando la lista no trae el código de fábrica**")
+                buscar_oem_en_desc = st.checkbox(
+                    "🔎 Buscar códigos de fábrica dentro de la descripción",
+                    help="Muchas listas meten el OEM en el texto ('... ORIG 6Q0407365'). Esto lo saca de ahí. "
+                         "Es conservador a propósito: ante la duda no lo toma, para no ensuciar la base."
+                )
+                prov_es_oem = st.checkbox(
+                    "🏭 El código del proveedor YA es el código de fábrica",
+                    help="Para listas donde el proveedor usa directamente el código original. Se carga "
+                         "también como OEM y quedan vinculados, así engancha con las listas de otros proveedores."
+                )
+
+                if buscar_oem_en_desc and idx_desc is not None:
+                    muestras = []
+                    for fila_prev in todas_filas[header_row + 1:header_row + 60]:
+                        texto_desc = valor_o_vacio(fila_prev[idx_desc]) if idx_desc < len(fila_prev) else ""
+                        hallados = extraer_codigos_de_texto(texto_desc)
+                        if hallados:
+                            muestras.append({"Descripción": texto_desc[:60], "Detecta": ", ".join(hallados)})
+                        if len(muestras) >= 8:
+                            break
+                    if muestras:
+                        st.caption("Así quedaría (muestra de las primeras filas) — revisá antes de importar:")
+                        st.dataframe(muestras, use_container_width=True, hide_index=True)
+                    else:
+                        st.caption("En las primeras filas no encontré códigos dentro de la descripción.")
+                elif buscar_oem_en_desc and idx_desc is None:
+                    st.warning("Para buscar códigos en la descripción, elegí primero la columna de descripción.")
 
         procesar = st.button("📥 Procesar e Importar Lista", type="primary")
 
@@ -4053,8 +4501,8 @@ if pagina == PAGINAS[2]:
                 st.warning("Ingresá el nombre de la marca / proveedor.")
             elif not todas_filas:
                 st.warning("No se pudo leer el archivo, revisá el formato.")
-            elif len(encabezado) < 2:
-                st.warning("El archivo debe tener al menos 2 columnas (código proveedor y código OEM).")
+            elif len(encabezado) < 1:
+                st.warning("El archivo no tiene ninguna columna con datos.")
             else:
                 try:
                     header_row = 0
@@ -4069,6 +4517,7 @@ if pagina == PAGINAS[2]:
                     filas_datos = todas_filas_completas[header_row + 1:]
 
                     cargados = 0
+                    cargados_sin_equiv = 0
                     omitidos = 0
                     filas_omitidas = []
                     eq_batch = set()  # inserción en lote: se acumulan los pares y se insertan todos juntos al final
@@ -4086,15 +4535,21 @@ if pagina == PAGINAS[2]:
                                 return fila[idx] if idx is not None and idx < len(fila) else None
 
                             raw_p_cell = valor_o_vacio(celda(idx_prov))
-                            raw_o_cell = valor_o_vacio(celda(idx_oem))
+                            raw_o_cell = valor_o_vacio(celda(idx_oem)) if idx_oem is not None else ""
                             desc = valor_o_vacio(celda(idx_desc))
 
                             codigos_prov = dividir_codigos(raw_p_cell) or ([raw_p_cell] if raw_p_cell else [])
                             codigos_oem = dividir_codigos(raw_o_cell) or ([raw_o_cell] if raw_o_cell else [])
 
-                            if not codigos_prov or not codigos_oem:
+                            # Si la lista no trae OEM, se intenta sacarlo de la descripción
+                            if not codigos_oem and buscar_oem_en_desc and desc:
+                                codigos_oem = extraer_codigos_de_texto(desc)
+
+                            # Sin código de proveedor no hay nada que cargar: esa fila sí se omite
+                            if not codigos_prov:
                                 omitidos += 1
-                                filas_omitidas.append({"Proveedor": raw_p_cell, "OEM": raw_o_cell, "Descripcion": desc})
+                                filas_omitidas.append({"Proveedor": raw_p_cell, "OEM": raw_o_cell,
+                                                        "Descripcion": desc, "Motivo": "sin código de proveedor"})
                                 if total and n % 25 == 0:
                                     progreso.progress(min((n + 1) / total, 1.0))
                                 continue
@@ -4105,15 +4560,39 @@ if pagina == PAGINAS[2]:
                                 if clean_p:
                                     ids_prov.append(get_or_create_producto(raw_p, clean_p, desc, prov_id))
 
+                            if not ids_prov:
+                                omitidos += 1
+                                filas_omitidas.append({"Proveedor": raw_p_cell, "OEM": raw_o_cell,
+                                                        "Descripcion": desc, "Motivo": "código de proveedor no válido"})
+                                if total and n % 25 == 0:
+                                    progreso.progress(min((n + 1) / total, 1.0))
+                                continue
+
+                            # El código del proveedor ES el de fábrica: se carga también como OEM
+                            # para que enganche con las listas de otros proveedores.
+                            if prov_es_oem:
+                                for raw_p in codigos_prov:
+                                    clean_p = sanitizar(raw_p)
+                                    if clean_p and clean_p not in {sanitizar(x) for x in codigos_oem}:
+                                        codigos_oem.append(raw_p)
+
                             ids_oem = []
                             for raw_o in codigos_oem:
                                 clean_o = sanitizar(raw_o)
                                 if clean_o:
                                     ids_oem.append(get_or_create_producto(raw_o, clean_o, desc, oem_id))
 
-                            if not ids_prov or not ids_oem:
-                                omitidos += 1
-                                filas_omitidas.append({"Proveedor": raw_p_cell, "OEM": raw_o_cell, "Descripcion": desc})
+                            # ANTES: sin OEM se descartaba la fila entera y el producto ni se cargaba.
+                            # Ahora el producto queda cargado igual (buscable por código y por
+                            # descripción), solo que sin equivalencia hasta que aparezca de otra lista
+                            # o se vincule a mano.
+                            if not ids_oem:
+                                cargados_sin_equiv += len(ids_prov)
+                                # aunque no haya OEM, los códigos de la misma celda se vinculan entre sí
+                                for pid in ids_prov:
+                                    for pid2 in ids_prov:
+                                        if pid2 != pid:
+                                            eq_batch.add((pid, pid2))
                                 if total and n % 25 == 0:
                                     progreso.progress(min((n + 1) / total, 1.0))
                                 continue
@@ -4151,9 +4630,16 @@ if pagina == PAGINAS[2]:
 
                     progreso.empty()
 
-                    st.success(f"Se importaron {cargados} filas correctamente.")
+                    st.success(f"Se importaron {cargados} filas con equivalencia.")
+                    if cargados_sin_equiv:
+                        st.info(
+                            f"📦 Además se cargaron {cargados_sin_equiv} producto(s) que no traían código "
+                            "de fábrica. Quedan buscables por código y por descripción; les va a aparecer "
+                            "la equivalencia sola cuando el mismo código llegue desde la lista de otro "
+                            "proveedor, o podés vincularlos a mano desde 'Vincular manual'."
+                        )
                     if omitidos:
-                        st.warning(f"Se omitieron {omitidos} filas por falta de código proveedor u OEM.")
+                        st.warning(f"Se omitieron {omitidos} filas porque no tenían código de proveedor.")
                         st.dataframe(filas_omitidas, use_container_width=True)
                         st.download_button(
                             "⬇️ Descargar filas omitidas",
@@ -4837,7 +5323,7 @@ if pagina == PAGINAS[4]:
     st.subheader("📊 Estadísticas")
 
     SUB_STATS = ["📈 Resumen", "📥 Importaciones", "💾 Backup y config", "🧮 Auditoría y depósito",
-               "🔎 Búsquedas sin resultado", "📌 Para pedir"]
+               "🔎 Búsquedas sin resultado", "📌 Para pedir", "🔗 Equivalencias sugeridas"]
     if st.session_state.get("sub_stats") not in SUB_STATS:
         st.session_state["sub_stats"] = SUB_STATS[0]
     st.radio("Sub-sección:", SUB_STATS, key="sub_stats", horizontal=True,
@@ -5049,6 +5535,142 @@ if pagina == PAGINAS[4]:
                     st.text_area("Mensaje:", value=mensaje_reposicion, height=120, key=f"msg_repo_{marca}")
                     url_wa_repo = "https://wa.me/?text=" + quote(mensaje_reposicion)
                     st.link_button(f"📲 Abrir WhatsApp para {marca}", url_wa_repo, key=f"wa_repo_{marca}")
+
+    if sub_stats == SUB_STATS[6]:
+        st.markdown("**🔗 Equivalencias que aparecieron solas en el mostrador**")
+        st.caption(
+            "Cuando un cliente pide un código y termina llevándose otro, eso es una equivalencia "
+            "que pasó de verdad. **Nada se carga solo, nunca**: acá se juntan las sugerencias con "
+            "el detalle de en qué se basa cada una, y una persona decide. Están ordenadas por "
+            "cuánto respaldo tienen — mirá primero las verdes, y desconfiá de las que tengan "
+            "evidencia en contra."
+        )
+
+        cfg1, cfg2 = cols(2)
+        min_veces_cfg = cfg1.number_input("Mostrar cuando se repitió al menos:", min_value=1, value=2, step=1,
+                                           key="cfg_min_veces",
+                                           help="Con 1 vas a ver más sugerencias, pero también más ruido.")
+        dias_cfg = cfg2.number_input("Mirar los últimos (días):", min_value=7, value=180, step=30,
+                                      key="cfg_dias_equiv")
+
+        candidatas = descubrir_equivalencias_candidatas(int(min_veces_cfg), int(dias_cfg))
+
+        if not candidatas:
+            c.execute("SELECT COUNT(*) FROM ventas_registradas")
+            ventas_totales = c.fetchone()[0]
+            if ventas_totales == 0:
+                st.info(
+                    "Todavía no hay ventas marcadas. Cuando busques algo en el Buscador y el cliente "
+                    "se lleve una pieza, tocá '🛒 Se llevó' — con eso se empieza a alimentar esto."
+                )
+            else:
+                st.caption(
+                    f"Hay {ventas_totales} venta(s) registrada(s), pero todavía no se repitió ningún "
+                    "caso lo suficiente como para sugerirlo (o ya están todos cargados como equivalentes)."
+                )
+        else:
+            st.success(f"{len(candidatas)} sugerencia(s) para revisar:")
+            marcas_disponibles = [m["nombre"] for m in
+                                   c.execute("SELECT nombre FROM marcas ORDER BY nombre").fetchall()]
+
+            for cand in candidatas:
+                etiqueta_origen = ("marcado en el mostrador" if cand["origen"] == "mostrador"
+                                    else "deducida: se vendió justo después de buscar eso sin resultado")
+                with st.expander(
+                    f"{cand['confianza']}  ·  {cand['codigo_pedido']} → {cand['codigo_vendido']} "
+                    f"({cand['marca_vendida']}) — pasó {cand['veces']} vez/veces"
+                ):
+                    st.write(f"**Pidieron:** {cand['codigo_pedido']}")
+                    st.write(f"**Se llevaron:** {cand['codigo_vendido']} ({cand['marca_vendida']}) "
+                              f"{cand['descripcion']}")
+
+                    st.markdown("**En qué se basa esto:**")
+                    nombres_evidencia = {
+                        "catalogo_oficial": "🌐 Aparece en la ficha oficial del proveedor",
+                        "catalogo_no_lo_lista": "🌐 NO aparece en la ficha oficial",
+                        "lista_proveedor": "📄 Venían relacionados en una lista del proveedor",
+                        "medidas": "📐 Las medidas mecánicas coinciden",
+                        "medidas_no_coinciden": "📐 Las medidas NO coinciden",
+                        "mostrador": "🛒 Se repitió en el mostrador",
+                    }
+                    for ev in cand["evidencias"]:
+                        st.caption(f"- {nombres_evidencia.get(ev['tipo'], ev['tipo'])}: {ev['detalle']}")
+                    st.caption(f"({etiqueta_origen})")
+
+                    # Verificación contra el catálogo del proveedor: la evidencia más fuerte,
+                    # porque no depende de que nadie opine — el código está escrito en la
+                    # página del proveedor o no está.
+                    c.execute("""SELECT m.url_ficha_template, p.codigo_raw
+                                 FROM productos p JOIN marcas m ON m.id = p.marca_id
+                                 WHERE p.id = ?""", (cand["producto_id"],))
+                    info_ficha = c.fetchone()
+                    tiene_catalogo = bool(info_ficha and info_ficha["url_ficha_template"])
+                    if st.button("🌐 Verificar en el catálogo del proveedor",
+                                  key=f"verif_{cand['codigo_clean']}_{cand['producto_id']}",
+                                  disabled=not tiene_catalogo,
+                                  help=("Abre la ficha oficial y fija si el código pedido aparece ahí"
+                                        if tiene_catalogo else
+                                        f"La marca {cand['marca_vendida']} no tiene cargada la dirección "
+                                        "de su catálogo (se carga en Administrar → Marcas)")):
+                        url_ficha = info_ficha["url_ficha_template"].replace(
+                            "{codigo}", quote(info_ficha["codigo_raw"], safe="")
+                        )
+                        with st.spinner("Consultando la ficha del proveedor..."):
+                            encontrado, detalle_verif = verificar_en_catalogo_oficial(
+                                cand["codigo_pedido"], url_ficha
+                            )
+                        if encontrado is True:
+                            guardar_evidencia(cand["codigo_clean"], cand["producto_id"],
+                                               "catalogo_oficial", detalle_verif)
+                            st.success("✅ " + detalle_verif)
+                        elif encontrado is False:
+                            guardar_evidencia(cand["codigo_clean"], cand["producto_id"],
+                                               "catalogo_no_lo_lista", detalle_verif)
+                            st.warning("⚠️ " + detalle_verif)
+                        else:
+                            st.info(detalle_verif)
+
+                    marca_nueva = None
+                    if not cand["pedido_ya_cargado"]:
+                        st.warning(
+                            f"El código '{cand['codigo_pedido']}' no está cargado como producto. "
+                            "Si confirmás, se crea con la marca que elijas y recién ahí se vinculan."
+                        )
+                        marca_nueva = st.selectbox(
+                            "Marca para el código nuevo:", marcas_disponibles,
+                            key=f"marca_cand_{cand['codigo_clean']}_{cand['producto_id']}"
+                        ) if marcas_disponibles else None
+
+                    cb1, cb2 = st.columns(2)
+                    if cb1.button("✅ Confirmar equivalencia",
+                                   key=f"conf_cand_{cand['codigo_clean']}_{cand['producto_id']}",
+                                   type="primary"):
+                        ok, error_conf = confirmar_candidata(
+                            cand["codigo_clean"], cand["producto_id"], cand["codigo_pedido"], marca_nueva
+                        )
+                        if ok:
+                            st.success("Equivalencia cargada. Ya aparece al buscar cualquiera de los dos códigos.")
+                        else:
+                            st.error(error_conf)
+                    cb2.button("🚫 No es equivalente",
+                                key=f"desc_cand_{cand['codigo_clean']}_{cand['producto_id']}",
+                                on_click=descartar_candidata,
+                                args=(cand["codigo_clean"], cand["producto_id"]),
+                                help="No se vuelve a sugerir")
+
+        st.markdown("---")
+        st.markdown("**🛒 Últimas ventas marcadas**")
+        c.execute("""SELECT v.fecha AS "Fecha", v.termino_pedido AS "Pidieron",
+                            p.codigo_raw AS "Se llevaron", m.nombre AS "Marca", v.usuario AS "Empleado"
+                     FROM ventas_registradas v
+                     JOIN productos p ON p.id = v.producto_id
+                     JOIN marcas m ON m.id = p.marca_id
+                     ORDER BY v.id DESC LIMIT 25""")
+        ultimas_ventas = filas_a_listas(c)
+        if ultimas_ventas:
+            st.dataframe(ultimas_ventas, use_container_width=True, hide_index=True)
+        else:
+            st.caption("Todavía no se marcó ninguna venta.")
 
 # ============================================================
 # LISTA PARA WHATSAPP
