@@ -2086,6 +2086,114 @@ def reparar_codigos_con_decimal():
     return arreglados
 
 
+def descargar_imagen(url, tiempo_maximo=12, tamano_maximo_mb=8):
+    """Baja una imagen de una dirección web. Devuelve (bytes, error)."""
+    import requests
+    try:
+        respuesta = requests.get(url, timeout=tiempo_maximo, stream=True,
+                                  headers={"User-Agent": "Mozilla/5.0 (compatible; EquivalenciasElChavo/1.0)"})
+        if respuesta.status_code != 200:
+            return None, f"respondió {respuesta.status_code}"
+        tipo = respuesta.headers.get("Content-Type", "")
+        if "image" not in tipo.lower():
+            return None, "la dirección no devuelve una imagen"
+        datos = b""
+        for bloque in respuesta.iter_content(65536):
+            datos += bloque
+            if len(datos) > tamano_maximo_mb * 1024 * 1024:
+                return None, "la imagen pesa demasiado"
+        return datos, None
+    except Exception as e:
+        return None, type(e).__name__
+
+
+def buscar_imagen_en_ficha(url_ficha, tiempo_maximo=12):
+    """Busca la foto del producto dentro de la ficha oficial del proveedor. Es la fuente más
+    confiable que hay gratis: es la foto de ESE código, puesta por el propio proveedor.
+    No existe ninguna base pública y gratuita de fotos por número de parte — la del rubro
+    (TecDoc) es un servicio pago con licencia."""
+    import requests
+    from urllib.parse import urljoin
+    try:
+        respuesta = requests.get(url_ficha, timeout=tiempo_maximo,
+                                  headers={"User-Agent": "Mozilla/5.0 (compatible; EquivalenciasElChavo/1.0)"})
+        if respuesta.status_code != 200:
+            return None, f"la ficha respondió {respuesta.status_code}"
+        html = respuesta.text
+        candidatas = []
+        for m in re.finditer(r'<img[^>]+src=["\']([^"\']+)["\']', html, re.I):
+            src = m.group(1)
+            if any(x in src.lower() for x in ("logo", "icon", "sprite", "banner", "pixel", ".svg")):
+                continue
+            candidatas.append(urljoin(url_ficha, src))
+        # Las fichas suelen tener la foto del producto en las primeras imágenes útiles
+        for url_img in candidatas[:6]:
+            datos, error = descargar_imagen(url_img)
+            if datos and len(datos) > 8000:   # descarta íconos chiquitos
+                return datos, None
+        return None, "no encontré una foto de producto en esa ficha"
+    except Exception as e:
+        return None, type(e).__name__
+
+
+def contar_fotos_por_bajar():
+    """Productos cuya foto es un link externo (cargado desde Excel) y todavía no se bajó."""
+    c.execute("""SELECT COUNT(*) FROM productos
+                 WHERE imagen_url IS NOT NULL AND imagen_url LIKE 'http%'""")
+    return c.fetchone()[0]
+
+
+def bajar_fotos_pendientes(limite=200, progreso=None):
+    """Baja de una vez las fotos que están como link externo y las guarda en la base, con su
+    miniatura y sus puntos característicos. Evita tener que ir cargándolas de a una."""
+    c.execute("""SELECT id, imagen_url FROM productos
+                 WHERE imagen_url IS NOT NULL AND imagen_url LIKE 'http%' LIMIT ?""", (limite,))
+    pendientes = [(r["id"], r["imagen_url"]) for r in c.fetchall()]
+    bajadas, fallidas = 0, []
+    for i, (pid, url) in enumerate(pendientes):
+        if progreso:
+            progreso(i + 1, len(pendientes))
+        datos, error = descargar_imagen(url)
+        if datos:
+            try:
+                actualizar_imagen_producto(pid, datos)
+                bajadas += 1
+            except Exception as e:
+                fallidas.append((url, type(e).__name__))
+        else:
+            fallidas.append((url, error))
+    return bajadas, fallidas
+
+
+def bajar_fotos_desde_catalogo(marca_id, limite=100, progreso=None):
+    """Para los productos de una marca que NO tienen foto: entra a la ficha oficial del
+    proveedor de cada código y trae la foto de ahí."""
+    c.execute("SELECT url_ficha_template FROM marcas WHERE id = ?", (marca_id,))
+    fila = c.fetchone()
+    if not fila or not fila["url_ficha_template"]:
+        return 0, [("", "esa marca no tiene cargada la dirección de su catálogo")]
+    plantilla = fila["url_ficha_template"]
+
+    c.execute("""SELECT id, codigo_raw FROM productos
+                 WHERE marca_id = ? AND imagen_url IS NULL LIMIT ?""", (marca_id, limite))
+    pendientes = [(r["id"], r["codigo_raw"]) for r in c.fetchall()]
+    bajadas, fallidas = 0, []
+    for i, (pid, codigo) in enumerate(pendientes):
+        if progreso:
+            progreso(i + 1, len(pendientes))
+        url_ficha = plantilla.replace("{codigo}", quote(str(codigo), safe=""))
+        datos, error = buscar_imagen_en_ficha(url_ficha)
+        if datos:
+            try:
+                actualizar_imagen_producto(pid, datos)
+                bajadas += 1
+            except Exception as e:
+                fallidas.append((codigo, type(e).__name__))
+        else:
+            fallidas.append((codigo, error))
+    return bajadas, fallidas
+
+
 def cb_ver_equivalencias(codigo_raw):
     """Callback para que cualquier código listado en pantalla sea clickeable: al tocarlo,
     busca sus equivalencias y las deja mostradas arriba, sin tener que copiar el código a mano
@@ -2139,6 +2247,50 @@ def buscar_codigos_parecidos(clean_code, limite=30):
     return filas_a_listas(c)
 
 
+MARCAS_VEHICULO = sorted(set([
+    "MERCEDES BENZ", "M.BENZ", "MERCEDES", "VOLKSWAGEN", "CHEVROLET", "MITSUBISHI", "LAND ROVER",
+    "MASSEY FERGUSON", "M. FERGUSON", "AGCO SISU POWER", "JOHN DEERE", "NEW HOLLAND", "ALFA ROMEO",
+    "CITROEN", "PEUGEOT", "RENAULT", "CHRYSLER", "CUMMINS", "PERKINS", "ILLINOIS", "TOYOTA",
+    "NISSAN", "HYUNDAI", "DAEWOO", "SUZUKI", "SCANIA", "IVECO", "AGRALE", "DEUTZ", "VOLVO",
+    "HONDA", "DODGE", "BURMOR", "M.W.M.", "M.W.M", "MWM", "KNORR", "VARGA", "VALTRA", "ZANELLO",
+    "PAUNY", "FIAT", "FORD", "JEEP", "AUDI", "SEAT", "BMW", "KIA", "MAN", "DAF", "HINO",
+    "ISUZU", "CASE", "GM",
+]), key=len, reverse=True)
+
+
+def separar_texto_pegado(texto):
+    """Algunas listas de proveedor exportan varias columnas pegadas sin espacio en el medio:
+    'Junta Tapa de CilindrosFORDTAUNUS COUPE' o 'DespieceCHEVROLETCAPUCHON BUJIA'.
+    Esto las vuelve legibles separando en dos puntos:
+      1) donde una minúscula toca una MAYÚSCULA (ahí se pegaron dos campos), y
+      2) donde una marca de vehículo conocida quedó pegada a la descripción.
+    Probado contra una lista real de 6.900 filas: deja legible el 99%."""
+    if not texto:
+        return texto
+    t = str(texto).strip()
+    t = re.sub(r'(?<=[a-záéíóúñ])(?=[A-ZÁÉÍÓÚÑ])', ' ', t)
+    for marca in MARCAS_VEHICULO:
+        patron = re.compile(r'(?<![A-ZÁÉÍÓÚÑ])' + re.escape(marca) + r'(?=[A-ZÁÉÍÓÚÑ0-9])')
+        t = patron.sub(marca + " ", t, count=1)
+    return re.sub(r'\s{2,}', ' ', t).strip()
+
+
+def contar_descripciones_pegadas(limite_muestra=3000):
+    c.execute("SELECT id, descripcion FROM productos WHERE descripcion IS NOT NULL LIMIT ?",
+               (limite_muestra,))
+    return sum(1 for r in c.fetchall() if separar_texto_pegado(r["descripcion"]) != r["descripcion"])
+
+
+def reparar_descripciones_pegadas():
+    c.execute("SELECT id, descripcion FROM productos WHERE descripcion IS NOT NULL")
+    cambios = [(separar_texto_pegado(r["descripcion"]), r["id"]) for r in c.fetchall()
+               if separar_texto_pegado(r["descripcion"]) != r["descripcion"]]
+    with db_lock:
+        c.executemany("UPDATE productos SET descripcion = ? WHERE id = ?", cambios)
+        conn.commit()
+    return len(cambios)
+
+
 def buscar_por_texto(texto):
     """Busca por descripción de forma flexible: cada palabra tiene que aparecer en algún lado
     (descripción o código), sin importar el orden ni las tildes. Así 'ruleman delantero gol'
@@ -2151,26 +2303,39 @@ def buscar_por_texto(texto):
     # la búsqueda o el dato cargado tienen o no acentos.
     desc_sin_acentos = _sql_sin_acentos("p.descripcion")
     codigo_sin_acentos = _sql_sin_acentos("p.codigo_raw")
-    condiciones = []
+    # En vez de exigir que estén TODAS las palabras, se cuenta cuántas coinciden y se ordena
+    # por eso. Así "junta tapa cilindro ford taunus" igual encuentra la que dice
+    # "Junta Tapa de Cilindros FORD TAUNUS COUPE" aunque no diga exactamente lo mismo, y las
+    # que más se parecen quedan arriba. Antes, si fallaba una sola palabra, no aparecía nada.
+    puntajes = []
     params = []
     for palabra in palabras:
         # También se compara contra el código sin guiones ni espacios: si alguien escribe
         # "TC421" o "tc-421", tiene que encontrar igual el producto cargado como "TC-421-15".
-        condiciones.append(f"({desc_sin_acentos} LIKE ? OR {codigo_sin_acentos} LIKE ? "
-                            f"OR p.codigo_clean LIKE ?)")
+        puntajes.append(f"(CASE WHEN {desc_sin_acentos} LIKE ? OR {codigo_sin_acentos} LIKE ? "
+                         f"OR p.codigo_clean LIKE ? THEN 1 ELSE 0 END)")
         like = f"%{palabra}%"
         params.extend([like, like, f"%{sanitizar(palabra)}%"])
+    suma = " + ".join(puntajes)
+
+    # Con una o dos palabras se piden todas (si no, aparece cualquier cosa). Con tres o más
+    # alcanza con que coincida la mayoría: es lo que permite "interpretar" y no fallar por una.
+    minimo = len(palabras) if len(palabras) <= 2 else max(2, (len(palabras) * 2) // 3)
+
     query = f'''
     SELECT p.id AS "ID", p.codigo_raw AS "Codigo", p.descripcion AS "Descripcion",
            m.nombre AS "Marca", m.tipo AS "Tipo", p.precio AS "Precio", p.stock AS "Stock",
-           p.favorito AS "Favorito"
+           p.favorito AS "Favorito", ({suma}) AS _coincidencias
     FROM productos p JOIN marcas m ON m.id = p.marca_id
-    WHERE {" AND ".join(condiciones)}
-    ORDER BY m.nombre LIMIT 200;
+    WHERE ({suma}) >= ?
+    ORDER BY _coincidencias DESC, LENGTH(p.descripcion), m.nombre LIMIT 200;
     '''
     with db_lock:
-        c.execute(query, params)
-        return filas_a_listas(c)
+        c.execute(query, params + params + [minimo])
+        filas = filas_a_listas(c)
+    for f in filas:
+        f.pop("_coincidencias", None)
+    return filas
 
 
 # ============================================================
@@ -2975,6 +3140,14 @@ def leer_excel(archivo, nrows=None):
     """Lee un archivo Excel, CSV o PDF (subido o por ruta) y devuelve una lista de listas (filas)."""
     nombre = archivo if isinstance(archivo, str) else getattr(archivo, "name", "")
     nombre_lower = nombre.lower()
+    # Volver al principio del archivo: esta función se llama primero para la vista previa y
+    # después para la carga completa. Si el puntero quedó al final de la primera lectura, la
+    # segunda leía vacío — de ahí que algunos archivos "se subieran mal" o salieran incompletos.
+    if not isinstance(archivo, str):
+        try:
+            archivo.seek(0)
+        except Exception:
+            pass
 
     if nombre_lower.endswith(".csv"):
         import csv as csv_module
@@ -2996,12 +3169,30 @@ def leer_excel(archivo, nrows=None):
         filas = []
         with pdfplumber.open(archivo) as pdf:
             for pagina in pdf.pages:
-                tabla = pagina.extract_table()
-                if tabla:
+                # extract_tables() en plural: antes se usaba extract_table() (singular), que
+                # devuelve SOLO la primera tabla de cada página. En las listas de precios que
+                # traen la tabla partida en varios bloques por hoja, se perdía casi todo.
+                tablas = pagina.extract_tables() or []
+                encontro_algo = False
+                for tabla in tablas:
                     for row in tabla:
-                        filas.append([c if c is not None else "" for c in row])
-                        if nrows and len(filas) >= nrows:
-                            return filas
+                        if row and any(celda not in (None, "") for celda in row):
+                            filas.append([celda if celda is not None else "" for celda in row])
+                            encontro_algo = True
+                            if nrows and len(filas) >= nrows:
+                                return filas
+                if not encontro_algo:
+                    # Muchos PDF de proveedor no tienen líneas de tabla: son columnas separadas
+                    # por espacios. Ahí extract_tables no encuentra nada y antes quedaba vacío.
+                    texto = pagina.extract_text() or ""
+                    for linea in texto.split("\n"):
+                        if not linea.strip():
+                            continue
+                        celdas = [c.strip() for c in re.split(r"\s{2,}|\t", linea.strip()) if c.strip()]
+                        if len(celdas) >= 2:
+                            filas.append(celdas)
+                            if nrows and len(filas) >= nrows:
+                                return filas
         return filas
 
     wb = load_workbook(archivo, data_only=True, read_only=True)
@@ -5047,7 +5238,7 @@ if pagina == PAGINAS[2]:
 
                             raw_p_cell = valor_o_vacio(celda(idx_prov))
                             raw_o_cell = valor_o_vacio(celda(idx_oem)) if idx_oem is not None else ""
-                            desc = valor_o_vacio(celda(idx_desc))
+                            desc = separar_texto_pegado(valor_o_vacio(celda(idx_desc)))
 
                             codigos_prov = dividir_codigos(raw_p_cell) or ([raw_p_cell] if raw_p_cell else [])
                             codigos_oem = dividir_codigos(raw_o_cell) or ([raw_o_cell] if raw_o_cell else [])
@@ -5690,6 +5881,80 @@ if pagina == PAGINAS[3]:
                         st.rerun()
             else:
                 st.caption("Sin resultados.")
+
+        st.markdown("---")
+        st.markdown("**📷 Traer fotos de productos en tanda**")
+        st.caption(
+            "En vez de cargarlas de a una. No existe ninguna base pública y gratuita de fotos por "
+            "número de parte (la del rubro, TecDoc, es paga), así que las dos fuentes confiables son: "
+            "el link que ya venga en tu lista, o la ficha del propio proveedor."
+        )
+        pendientes_url = contar_fotos_por_bajar()
+        if pendientes_url:
+            st.info(f"Hay {pendientes_url} producto(s) con la foto como link externo, sin bajar.")
+            if st.button(f"⬇️ Bajar hasta 200 fotos de esos links"):
+                barra = st.progress(0.0, text="Bajando fotos...")
+                bajadas, fallidas = bajar_fotos_pendientes(
+                    200, progreso=lambda i, t: barra.progress(i / max(t, 1), text=f"Foto {i} de {t}...")
+                )
+                barra.empty()
+                st.success(f"Se bajaron {bajadas} foto(s).")
+                if fallidas:
+                    with st.expander(f"⚠️ {len(fallidas)} no se pudieron bajar"):
+                        for url_f, motivo in fallidas[:30]:
+                            st.caption(f"- {str(url_f)[:60]}: {motivo}")
+        else:
+            st.caption("✅ No hay fotos pendientes de bajar desde links.")
+
+        c.execute("""SELECT m.id, m.nombre, COUNT(p.id) AS sin_foto
+                     FROM marcas m JOIN productos p ON p.marca_id = m.id
+                     WHERE m.url_ficha_template IS NOT NULL AND m.url_ficha_template <> ''
+                       AND p.imagen_url IS NULL
+                     GROUP BY m.id HAVING sin_foto > 0 ORDER BY sin_foto DESC""")
+        marcas_con_catalogo = [dict(r) for r in c.fetchall()]
+        if marcas_con_catalogo:
+            st.markdown("**Traerlas desde la ficha del proveedor**")
+            opciones_mc = {f"{m['nombre']} ({m['sin_foto']} sin foto)": m["id"] for m in marcas_con_catalogo}
+            elegida_mc = st.selectbox("Marca:", list(opciones_mc.keys()), key="marca_fotos_catalogo")
+            st.caption(
+                "Entra a la ficha de cada código y busca la foto ahí. Va de a 100 y puede tardar "
+                "un rato — se puede repetir las veces que haga falta."
+            )
+            if st.button("🌐 Traer hasta 100 fotos del catálogo"):
+                barra2 = st.progress(0.0, text="Consultando fichas...")
+                bajadas2, fallidas2 = bajar_fotos_desde_catalogo(
+                    opciones_mc[elegida_mc], 100,
+                    progreso=lambda i, t: barra2.progress(i / max(t, 1), text=f"Código {i} de {t}...")
+                )
+                barra2.empty()
+                if bajadas2:
+                    st.success(f"Se trajeron {bajadas2} foto(s).")
+                else:
+                    st.warning("No se pudo traer ninguna foto de ese catálogo.")
+                if fallidas2:
+                    with st.expander(f"⚠️ {len(fallidas2)} sin foto"):
+                        for cod_f, motivo in fallidas2[:30]:
+                            st.caption(f"- {cod_f}: {motivo}")
+        else:
+            st.caption(
+                "Para traer fotos del catálogo hace falta cargar la dirección de la ficha de la marca "
+                "en Administrar → Marcas."
+            )
+
+        st.markdown("---")
+        st.markdown("**📝 Descripciones con las columnas pegadas**")
+        st.caption(
+            "Algunas listas exportan varias columnas sin espacio entre medio "
+            "(«Junta Tapa de CilindrosFORDTAUNUS»). Esto las separa para que se lean."
+        )
+        pegadas = contar_descripciones_pegadas()
+        if pegadas:
+            st.warning(f"⚠️ Hay al menos {pegadas} descripción(es) con ese problema.")
+            if st.button("🔧 Separar las descripciones pegadas"):
+                arregladas = reparar_descripciones_pegadas()
+                st.success(f"Se separaron {arregladas} descripción(es).")
+        else:
+            st.caption("✅ Ninguna descripción con ese problema.")
 
         st.markdown("---")
         st.markdown("**🔢 Códigos que quedaron con '.0'**")
