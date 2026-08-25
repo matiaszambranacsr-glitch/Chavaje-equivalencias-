@@ -2050,6 +2050,25 @@ def _sql_sin_acentos(columna):
     return expr
 
 
+def buscar_codigos_parecidos(clean_code, limite=30):
+    """Cuando el código exacto no aparece, busca códigos que EMPIECEN igual o que lo contengan.
+    Es el caso típico de las familias: pedís 'TC-421' y en la base están 'TC-421-15' y
+    'TC-421-20' (mismo repuesto, distinto espesor/variante). Antes eso no aparecía por ningún
+    lado, porque la búsqueda por código exige coincidencia exacta."""
+    if not clean_code or len(clean_code) < 3:
+        return []
+    c.execute("""SELECT p.id AS "ID", p.codigo_raw AS "Codigo", p.descripcion AS "Descripcion",
+                        m.nombre AS "Marca", m.tipo AS "Tipo", p.precio AS "Precio",
+                        p.stock AS "Stock", p.codigo_clean AS "_clean"
+                 FROM productos p JOIN marcas m ON m.id = p.marca_id
+                 WHERE p.codigo_clean LIKE ? OR p.codigo_clean LIKE ?
+                 ORDER BY CASE WHEN p.codigo_clean LIKE ? THEN 0 ELSE 1 END,
+                          LENGTH(p.codigo_clean), p.codigo_clean
+                 LIMIT ?""",
+              (f"{clean_code}%", f"%{clean_code}%", f"{clean_code}%", limite))
+    return filas_a_listas(c)
+
+
 def buscar_por_texto(texto):
     """Busca por descripción de forma flexible: cada palabra tiene que aparecer en algún lado
     (descripción o código), sin importar el orden ni las tildes. Así 'ruleman delantero gol'
@@ -2065,9 +2084,12 @@ def buscar_por_texto(texto):
     condiciones = []
     params = []
     for palabra in palabras:
-        condiciones.append(f"({desc_sin_acentos} LIKE ? OR {codigo_sin_acentos} LIKE ?)")
+        # También se compara contra el código sin guiones ni espacios: si alguien escribe
+        # "TC421" o "tc-421", tiene que encontrar igual el producto cargado como "TC-421-15".
+        condiciones.append(f"({desc_sin_acentos} LIKE ? OR {codigo_sin_acentos} LIKE ? "
+                            f"OR p.codigo_clean LIKE ?)")
         like = f"%{palabra}%"
-        params.extend([like, like])
+        params.extend([like, like, f"%{sanitizar(palabra)}%"])
     query = f'''
     SELECT p.id AS "ID", p.codigo_raw AS "Codigo", p.descripcion AS "Descripcion",
            m.nombre AS "Marca", m.tipo AS "Tipo", p.precio AS "Precio", p.stock AS "Stock",
@@ -4297,11 +4319,35 @@ Casi todo lo que edita o borra algo pide la contraseña de administrador la prim
                                     st.link_button(f"🌐 {cat['nombre']}", cat["url"],
                                                     use_container_width=True, key=f"link_{cat['id']}_{clean}")
                     else:
-                        st.warning("No hay equivalencias registradas para ese código.")
-                        parcial = buscar_por_texto(clean)
-                        if parcial:
-                            st.info("¿Quisiste decir alguno de estos códigos parecidos?")
-                            st.dataframe(quitar_id(parcial)[:10], use_container_width=True, hide_index=True)
+                        st.warning("No hay ningún producto con ese código exacto.")
+                        # Familias de códigos: pedís "TC-421" y en la base están "TC-421-15",
+                        # "TC-421-20", etc. Antes esto no aparecía por ningún lado.
+                        parecidos = buscar_codigos_parecidos(clean)
+                        if parecidos:
+                            st.info(
+                                f"🔎 Pero hay {len(parecidos)} código(s) que empiezan igual o lo "
+                                "contienen — puede ser una familia con variantes (espesor, lado, medida):"
+                            )
+                            for p in parecidos[:12]:
+                                equivalentes_p = buscar_por_codigo(p["_clean"])
+                                otros_p = [e for e in equivalentes_p if e["ID"] != p["ID"]]
+                                resumen_p = (f"{len(otros_p)} equivalencia(s)" if otros_p
+                                              else "sin equivalencias cargadas")
+                                with st.expander(f"🔎 {p['Marca']} · {p['Codigo']} — {resumen_p}"):
+                                    if p.get("Descripcion"):
+                                        st.caption(p["Descripcion"])
+                                    if equivalentes_p:
+                                        st.dataframe(quitar_id(equivalentes_p),
+                                                      use_container_width=True, hide_index=True)
+                                    else:
+                                        st.caption("Todavía no tiene equivalencias cargadas.")
+                            if len(parecidos) > 12:
+                                st.caption(f"(mostrando 12 de {len(parecidos)})")
+                        else:
+                            parcial = buscar_por_texto(clean)
+                            if parcial:
+                                st.info("¿Quisiste decir alguno de estos?")
+                                st.dataframe(quitar_id(parcial)[:10], use_container_width=True, hide_index=True)
     else:
         with st.expander("🎙️ Buscar por voz"):
             st.caption(
@@ -4351,18 +4397,48 @@ Casi todo lo que edita o borra algo pide la contraseña de administrador la prim
             res_texto = busqueda_texto_guardada["res"]
             texto_pedido = busqueda_texto_guardada["texto"]
             if res_texto:
-                st.success(f"Se encontraron {len(res_texto)} coincidencias:")
+                st.success(f"Se encontraron {len(res_texto)} coincidencia(s):")
                 st.dataframe(quitar_id(res_texto), use_container_width=True, hide_index=True)
-                with st.expander("🛒 ¿Cuál se llevó el cliente?"):
-                    st.caption(
-                        "Si el cliente había pedido un código que no tenías y se termina llevando "
-                        "alguno de estos, marcalo: así el sistema va aprendiendo esa equivalencia solo."
-                    )
-                    for fila_txt in res_texto[:20]:
-                        colt1, colt2 = st.columns([4, 1])
-                        colt1.write(f"{fila_txt['Marca']} - {fila_txt['Codigo']} — {fila_txt.get('Descripcion') or ''}")
-                        colt2.button("🛒 Se llevó", key=f"vendido_txt_{fila_txt['ID']}",
-                                      on_click=registrar_venta, args=(fila_txt["ID"], texto_pedido))
+
+                # La búsqueda por descripción solo hace coincidir texto: encuentra el producto,
+                # pero no sus equivalentes. Acá se abre la red de equivalencias de cada resultado,
+                # igual que hace la búsqueda por código, para no perder de vista las otras marcas.
+                st.markdown("**🔗 Equivalencias de cada resultado**")
+                st.caption("Cada uno abre las otras marcas que sirven, con precio y stock.")
+                for fila_txt in res_texto[:15]:
+                    clean_txt = sanitizar(fila_txt["Codigo"])
+                    equivalentes = buscar_por_codigo(clean_txt) if clean_txt else []
+                    otros = [e for e in equivalentes if e["ID"] != fila_txt["ID"]]
+                    resumen = (f"{len(otros)} equivalencia(s)" if otros else "sin equivalencias cargadas")
+                    with st.expander(f"🔎 {fila_txt['Marca']} · {fila_txt['Codigo']} — {resumen}"):
+                        if fila_txt.get("Descripcion"):
+                            st.caption(fila_txt["Descripcion"])
+                        if equivalentes:
+                            candidatos_precio = [f for f in equivalentes
+                                                  if f.get("Precio") and (f.get("Stock") or 0) > 0]
+                            id_barato = (min(candidatos_precio, key=lambda f: f["Precio"])["ID"]
+                                          if candidatos_precio else None)
+                            for f in equivalentes:
+                                f["💰"] = "🏆 Más barato en stock" if f["ID"] == id_barato else ""
+                            st.dataframe(quitar_id(equivalentes), use_container_width=True, hide_index=True)
+                        else:
+                            st.caption("Este producto todavía no tiene equivalencias cargadas.")
+
+                        st.markdown("**🛒 ¿Cuál se llevó el cliente?**")
+                        st.caption(
+                            "Marcá el que se lleva — vale también si se lleva un equivalente y no "
+                            "el que apareció en la búsqueda. Así el sistema aprende esa relación."
+                        )
+                        for f in (equivalentes or [fila_txt]):
+                            cv1, cv2 = st.columns([4, 1])
+                            precio_txt = f"${f['Precio']:,.0f}" if f.get("Precio") else "s/precio"
+                            cv1.write(f"{f['Marca']} - {f['Codigo']} ({precio_txt}, "
+                                       f"stock: {f.get('Stock') if f.get('Stock') is not None else 's/d'})")
+                            cv2.button("🛒 Se llevó", key=f"vendido_txt_{fila_txt['ID']}_{f['ID']}",
+                                        on_click=registrar_venta, args=(f["ID"], texto_pedido))
+                if len(res_texto) > 15:
+                    st.caption(f"(mostrando las primeras 15 de {len(res_texto)} — afiná la búsqueda "
+                                "para ver menos resultados)")
             else:
                 st.warning("No se encontraron productos con esa descripción.")
 
