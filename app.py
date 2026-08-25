@@ -734,6 +734,32 @@ def get_connection():
     c.execute("CREATE INDEX IF NOT EXISTS idx_ventas_fecha ON ventas_registradas(fecha)")
     c.execute("CREATE INDEX IF NOT EXISTS idx_ventas_codigo ON ventas_registradas(codigo_pedido_clean)")
 
+    # Decisiones ya tomadas sobre un vínculo puntual. Sirve para dos cosas: que lo revisado no
+    # vuelva a aparecer en la auditoría, y que lo rechazado no se vuelva a crear si más adelante
+    # se importa de nuevo la misma lista del proveedor.
+    c.execute("""CREATE TABLE IF NOT EXISTS equivalencias_revisadas (
+        producto_a_id INTEGER NOT NULL,
+        producto_b_id INTEGER NOT NULL,
+        decision TEXT NOT NULL,
+        revisado_por TEXT,
+        fecha TEXT DEFAULT (datetime('now')),
+        PRIMARY KEY (producto_a_id, producto_b_id)
+    )""")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_revisadas_decision ON equivalencias_revisadas(decision)")
+
+    # Vínculos que llegaron de una lista de proveedor y esperan revisión. Una importación puede
+    # generar miles de vínculos de una: si se cargaran solos, un error en la columna de código de
+    # fábrica te ensucia la base entera sin que nadie se entere.
+    c.execute("""CREATE TABLE IF NOT EXISTS equivalencias_pendientes (
+        producto_a_id INTEGER NOT NULL,
+        producto_b_id INTEGER NOT NULL,
+        origen TEXT,
+        lote TEXT,
+        fecha TEXT DEFAULT (datetime('now')),
+        PRIMARY KEY (producto_a_id, producto_b_id)
+    )""")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_pendientes_lote ON equivalencias_pendientes(lote)")
+
     # Evidencia que respalda cada equivalencia sugerida. La idea es NO cargar nada solo:
     # cada sugerencia llega al panel con el detalle de en qué se basa, para poder decidir
     # con fundamento en vez de a ciegas.
@@ -1543,6 +1569,236 @@ def nivel_de_confianza(evidencias):
     if puntaje >= 45:
         return "🟡 Respaldo medio", puntaje
     return "🔴 Solo por repetición", puntaje
+
+
+def marcar_revision(pares, decision):
+    """Recuerda la decisión tomada sobre un vínculo, en los dos sentidos. 'ok' = ya lo miré y
+    está bien (no volver a marcarlo en la auditoría). 'rechazada' = no es equivalente (además
+    de borrarlo, no se vuelve a crear aunque se reimporte la lista del proveedor)."""
+    if not pares:
+        return
+    filas = []
+    for a, b in pares:
+        filas.append((a, b, decision, obtener_usuario_actual()))
+        filas.append((b, a, decision, obtener_usuario_actual()))
+    with db_lock:
+        c.executemany(
+            "INSERT OR REPLACE INTO equivalencias_revisadas "
+            "(producto_a_id, producto_b_id, decision, revisado_por) VALUES (?, ?, ?, ?)", filas
+        )
+        conn.commit()
+
+
+def pares_rechazados():
+    c.execute("SELECT producto_a_id, producto_b_id FROM equivalencias_revisadas WHERE decision = 'rechazada'")
+    return {(r["producto_a_id"], r["producto_b_id"]) for r in c.fetchall()}
+
+
+def eliminar_equivalencia(par_a, par_b, recordar_rechazo=True):
+    """Borra el vínculo en los dos sentidos. Los productos quedan; solo se corta la relación."""
+    with db_lock:
+        c.execute("DELETE FROM equivalencias WHERE (producto_a_id = ? AND producto_b_id = ?) "
+                   "OR (producto_a_id = ? AND producto_b_id = ?)", (par_a, par_b, par_b, par_a))
+        conn.commit()
+    if recordar_rechazo:
+        marcar_revision([(par_a, par_b)], "rechazada")
+
+
+def auditar_equivalencias_existentes(limite=8000):
+    """Pasa las mismas alarmas por las equivalencias que YA están cargadas — las que entraron
+    de listas viejas, antes de que existiera la revisión previa. Se hace con una sola consulta
+    y el análisis en memoria: con miles de vínculos, ir preguntando de a uno sería eterno.
+    Lo que ya se revisó y quedó marcado como correcto no vuelve a aparecer."""
+    campos_medida = ["diametro_interno", "diametro_externo", "diametro_interno_cara_b",
+                      "diametro_externo_cara_b", "diametro_rosca_homocinetica", "diametro_copa", "ancho"]
+    etiquetas = {"diametro_interno": "diám. interno", "diametro_externo": "diám. externo",
+                  "diametro_interno_cara_b": "diám. interno cara B",
+                  "diametro_externo_cara_b": "diám. externo cara B",
+                  "diametro_rosca_homocinetica": "diám. rosca", "diametro_copa": "diám. copa",
+                  "ancho": "ancho"}
+    sel_a = ", ".join(f"pa.{campo} AS a_{campo}" for campo in campos_medida)
+    sel_b = ", ".join(f"pb.{campo} AS b_{campo}" for campo in campos_medida)
+
+    c.execute(f"""SELECT e.producto_a_id AS a, e.producto_b_id AS b,
+                         pa.codigo_raw AS cod_a, ma.nombre AS marca_a, ma.tipo AS tipo_a,
+                         pb.codigo_raw AS cod_b, mb.nombre AS marca_b, mb.tipo AS tipo_b,
+                         pa.paso_rosca AS a_paso, pb.paso_rosca AS b_paso,
+                         pa.cantidad_estrias AS a_estrias, pb.cantidad_estrias AS b_estrias,
+                         {sel_a}, {sel_b}
+                  FROM equivalencias e
+                  JOIN productos pa ON pa.id = e.producto_a_id
+                  JOIN productos pb ON pb.id = e.producto_b_id
+                  JOIN marcas ma ON ma.id = pa.marca_id
+                  JOIN marcas mb ON mb.id = pb.marca_id
+                  WHERE e.producto_a_id < e.producto_b_id
+                  LIMIT ?""", (limite,))
+    filas = [dict(r) for r in c.fetchall()]
+
+    c.execute("SELECT producto_a_id, producto_b_id FROM equivalencias_revisadas WHERE decision = 'ok'")
+    ya_revisadas = {(r["producto_a_id"], r["producto_b_id"]) for r in c.fetchall()}
+
+    # Un mismo código de fábrica no debería apuntar a dos productos distintos del mismo proveedor
+    apuntados = {}
+    for f in filas:
+        if f["tipo_a"] == "OEM":
+            oem, otro, marca_otro = f["cod_a"], f["b"], f["marca_b"]
+        elif f["tipo_b"] == "OEM":
+            oem, otro, marca_otro = f["cod_b"], f["a"], f["marca_a"]
+        else:
+            continue
+        apuntados.setdefault((sanitizar(oem), marca_otro), set()).add(otro)
+    ambiguos = {k for k, v in apuntados.items() if len(v) > 1}
+
+    problematicas = 0
+    revisadas_sin_alarma = 0
+    sospechosas = []
+    for f in filas:
+        if (f["a"], f["b"]) in ya_revisadas:
+            revisadas_sin_alarma += 1
+            continue
+        alarmas = []
+        diferencias = []
+        for campo in campos_medida:
+            va, vb = f[f"a_{campo}"], f[f"b_{campo}"]
+            if va is None or vb is None or not va or not vb:
+                continue
+            if abs(va - vb) / max(va, vb) * 100 > 3:
+                diferencias.append(f"{etiquetas[campo]}: {va} vs {vb}")
+        for clave, etiqueta in (("paso", "paso de rosca"), ("estrias", "estrías")):
+            va, vb = f[f"a_{clave}"], f[f"b_{clave}"]
+            if va in (None, "") or vb in (None, ""):
+                continue
+            if str(va).strip().upper() != str(vb).strip().upper():
+                diferencias.append(f"{etiqueta}: {va} vs {vb}")
+        if diferencias:
+            alarmas.append("📐 Las medidas cargadas no coinciden: " + "; ".join(diferencias))
+
+        if f["tipo_a"] == "OEM":
+            clave_amb = (sanitizar(f["cod_a"]), f["marca_b"])
+            texto_oem, texto_marca = f["cod_a"], f["marca_b"]
+        elif f["tipo_b"] == "OEM":
+            clave_amb = (sanitizar(f["cod_b"]), f["marca_a"])
+            texto_oem, texto_marca = f["cod_b"], f["marca_a"]
+        else:
+            clave_amb = None
+        if clave_amb and clave_amb in ambiguos:
+            alarmas.append(f"⚠️ El código {texto_oem} apunta a más de un producto de {texto_marca} — "
+                            "alguno de los dos está mal vinculado")
+
+        if alarmas:
+            problematicas += 1
+            sospechosas.append({"a": f["a"], "b": f["b"], "cod_a": f["cod_a"], "marca_a": f["marca_a"],
+                                 "cod_b": f["cod_b"], "marca_b": f["marca_b"], "alarmas": alarmas})
+
+    return {
+        "total_revisados": len(filas),
+        "con_alarma": problematicas,
+        "ya_revisados_ok": revisadas_sin_alarma,
+        "sospechosas": sospechosas,
+    }
+
+
+def guardar_equivalencias_pendientes(pares, origen, lote):
+    """Guarda vínculos para revisar en vez de cargarlos directo."""
+    if not pares:
+        return 0
+    with db_lock:
+        c.executemany(
+            "INSERT OR IGNORE INTO equivalencias_pendientes "
+            "(producto_a_id, producto_b_id, origen, lote) VALUES (?, ?, ?, ?)",
+            [(a, b, origen, lote) for a, b in pares]
+        )
+        conn.commit()
+    return len(pares)
+
+
+def resumen_lotes_pendientes():
+    c.execute("""SELECT lote, origen, COUNT(*) AS cantidad, MIN(fecha) AS fecha
+                 FROM equivalencias_pendientes GROUP BY lote, origen ORDER BY MIN(fecha) DESC""")
+    return [dict(r) for r in c.fetchall()]
+
+
+def analizar_lote_pendiente(lote, limite=400):
+    """Revisa los vínculos de una importación y marca los sospechosos. Dos alarmas:
+      - Las medidas mecánicas cargadas se contradicen (prueba física en contra).
+      - Un mismo código de fábrica termina apuntando a dos productos distintos del MISMO
+        proveedor: uno de los dos está mal, porque un proveedor no tiene dos piezas
+        distintas para el mismo código original.
+    Lo que no dispara ninguna alarma se considera limpio."""
+    c.execute("""SELECT ep.producto_a_id AS a, ep.producto_b_id AS b,
+                        pa.codigo_raw AS cod_a, ma.nombre AS marca_a, ma.tipo AS tipo_a,
+                        pb.codigo_raw AS cod_b, mb.nombre AS marca_b, mb.tipo AS tipo_b
+                 FROM equivalencias_pendientes ep
+                 JOIN productos pa ON pa.id = ep.producto_a_id
+                 JOIN productos pb ON pb.id = ep.producto_b_id
+                 JOIN marcas ma ON ma.id = pa.marca_id
+                 JOIN marcas mb ON mb.id = pb.marca_id
+                 WHERE ep.lote = ? AND ep.producto_a_id < ep.producto_b_id
+                 LIMIT ?""", (lote, limite))
+    filas = [dict(r) for r in c.fetchall()]
+
+    # Detectar códigos de fábrica que apuntan a varios productos del mismo proveedor
+    apuntados = {}
+    for f in filas:
+        oem, otro, marca_otro = ((f["cod_a"], f["b"], f["marca_b"]) if f["tipo_a"] == "OEM"
+                                  else (f["cod_b"], f["a"], f["marca_a"]))
+        apuntados.setdefault((sanitizar(oem), marca_otro), set()).add(otro)
+    ambiguos = {k for k, v in apuntados.items() if len(v) > 1}
+
+    limpias, sospechosas = [], []
+    for f in filas:
+        alarmas = []
+        coinciden, detalle = comparar_medidas_productos(f["a"], f["b"])
+        if coinciden is False:
+            alarmas.append(f"📐 {detalle}")
+        oem, marca_otro = ((f["cod_a"], f["marca_b"]) if f["tipo_a"] == "OEM"
+                            else (f["cod_b"], f["marca_a"]))
+        if (sanitizar(oem), marca_otro) in ambiguos:
+            alarmas.append(f"⚠️ El código {oem} apunta a más de un producto de {marca_otro} — "
+                            "alguno de los dos está mal cargado")
+        f["alarmas"] = alarmas
+        (sospechosas if alarmas else limpias).append(f)
+    return limpias, sospechosas
+
+
+def aprobar_pendientes(lote, solo_estos_pares=None):
+    """Pasa los vínculos pendientes a equivalencias reales."""
+    with db_lock:
+        if solo_estos_pares is None:
+            c.execute("SELECT producto_a_id, producto_b_id FROM equivalencias_pendientes WHERE lote = ?", (lote,))
+            pares = [(r["producto_a_id"], r["producto_b_id"]) for r in c.fetchall()]
+        else:
+            pares = list(solo_estos_pares)
+        if not pares:
+            return 0
+        c.executemany(
+            "INSERT OR IGNORE INTO equivalencias (producto_a_id, producto_b_id, created_at) "
+            "VALUES (?, ?, datetime('now'))", pares
+        )
+        c.executemany("DELETE FROM equivalencias_pendientes WHERE producto_a_id = ? AND producto_b_id = ?", pares)
+        conn.commit()
+    # Queda registrado que ya se revisó, así la auditoría de lo existente no lo vuelve a marcar
+    marcar_revision(pares, "ok")
+    return len(pares)
+
+
+def rechazar_pendientes(lote, solo_estos_pares=None):
+    with db_lock:
+        if solo_estos_pares is None:
+            # Hay que leer los pares ANTES de borrarlos, si no queda sin registrar el rechazo
+            c.execute("SELECT producto_a_id, producto_b_id FROM equivalencias_pendientes WHERE lote = ?", (lote,))
+            marcar_para_recordar = [(r["producto_a_id"], r["producto_b_id"]) for r in c.fetchall()]
+            c.execute("DELETE FROM equivalencias_pendientes WHERE lote = ?", (lote,))
+            borrados = c.rowcount
+        else:
+            pares = list(solo_estos_pares)
+            c.executemany("DELETE FROM equivalencias_pendientes WHERE producto_a_id = ? AND producto_b_id = ?", pares)
+            borrados = len(pares)
+            marcar_para_recordar = pares
+        conn.commit()
+    # Se recuerda el rechazo para que no vuelva a aparecer si se reimporta la misma lista
+    marcar_revision(marcar_para_recordar, "rechazada")
+    return borrados
 
 
 def descartar_candidata(codigo_clean, producto_id):
@@ -2397,6 +2653,23 @@ def generar_qr_bytes(texto):
     salida = io.BytesIO()
     img.save(salida, format="PNG")
     return salida.getvalue()
+
+
+def archivo_listo(archivo, etiqueta="archivo"):
+    """Muestra si el archivo terminó de subir. Antes los botones directamente no aparecían hasta
+    que el archivo estaba, así que con una conexión lenta parecía que no había pasado nada y la
+    gente volvía a tocar 2 o 3 veces pensando que había fallado. Ahora el botón está siempre,
+    apagado hasta que el archivo llega, y acá abajo se ve el estado."""
+    if archivo is None:
+        st.caption(
+            f"⏳ Todavía no llegó ningún {etiqueta}. Si ya lo elegiste y la conexión está lenta, "
+            "esperá unos segundos sin volver a tocar: cuando termine de subir se avisa acá."
+        )
+        return False
+    tamano = getattr(archivo, "size", None)
+    detalle = f" ({tamano/1024:,.0f} KB)" if tamano else ""
+    st.caption(f"✅ Recibido: {getattr(archivo, 'name', etiqueta)}{detalle}")
+    return True
 
 
 def pdf_con_cache(nombre, generador, *args):
@@ -3755,7 +4028,8 @@ Casi todo lo que edita o borra algo pide la contraseña de administrador la prim
                 "Foto de la pieza:", type=["png", "jpg", "jpeg"], key="foto_similitud_visual",
                 label_visibility="collapsed"
             )
-            if foto_visual and st.button("🖼️ Comparar con fotos del catálogo"):
+            visual_ok = archivo_listo(foto_visual, "foto")
+            if st.button("🖼️ Comparar con fotos del catálogo", disabled=not visual_ok):
                 with st.spinner("Comparando..."):
                     res_visual, error_visual = buscar_por_similitud_visual(foto_visual.getvalue())
                 if error_visual:
@@ -4120,7 +4394,8 @@ Casi todo lo que edita o borra algo pide la contraseña de administrador la prim
                 "Foto de la pieza:", type=["png", "jpg", "jpeg"], key="foto_identificar_pieza",
                 label_visibility="collapsed"
             )
-            if foto and st.button("🔍 Identificar"):
+            foto_ok = archivo_listo(foto, "foto")
+            if st.button("🔍 Identificar", disabled=not foto_ok):
                 with st.spinner("Consultando..."):
                     datos_pieza, error = identificar_pieza_por_foto(foto.getvalue())
                 if error:
@@ -4376,7 +4651,9 @@ if pagina == PAGINAS[2]:
         archivo = None
 
         if metodo == "Subir archivo":
-            archivo = st.file_uploader("Seleccioná el archivo", type=["xlsx", "csv", "pdf"])
+            archivo = st.file_uploader("Seleccioná el archivo", type=["xlsx", "csv", "pdf"],
+                                        key="archivo_carga_lista")
+            archivo_listo(archivo, "archivo")
             if archivo and archivo.name.lower().endswith(".pdf"):
                 st.caption(
                     "📄 PDF: funciona mejor con catálogos que tienen tablas reales (no una imagen escaneada). "
@@ -4491,6 +4768,26 @@ if pagina == PAGINAS[2]:
                         st.caption("En las primeras filas no encontré códigos dentro de la descripción.")
                 elif buscar_oem_en_desc and idx_desc is None:
                     st.warning("Para buscar códigos en la descripción, elegí primero la columna de descripción.")
+
+        st.markdown("**🔒 Antes de importar: ¿qué hacemos con las equivalencias?**")
+        cargar_directo = st.radio(
+            "Equivalencias de esta lista:",
+            ["Mandarlas a revisar (recomendado)", "Cargarlas directo"],
+            key="modo_carga_equivalencias", label_visibility="collapsed",
+            help="Una lista puede generar miles de vínculos de una sola vez."
+        ) == "Cargarlas directo"
+        if cargar_directo:
+            st.warning(
+                "⚠️ Se van a cargar sin revisar. Si la columna de código de fábrica tiene algún "
+                "error, esos vínculos equivocados quedan en la base y después es difícil encontrarlos. "
+                "Usalo solo con listas de proveedores en las que confiés plenamente."
+            )
+        else:
+            st.caption(
+                "Los productos y precios se cargan igual y quedan buscables enseguida. Lo único que "
+                "espera son las **equivalencias**: te esperan en Estadísticas → 🔗 Equivalencias "
+                "sugeridas, ya separadas entre las limpias y las que tienen algo raro."
+            )
 
         procesar = st.button("📥 Procesar e Importar Lista", type="primary")
 
@@ -4616,11 +4913,25 @@ if pagina == PAGINAS[2]:
 
                         # Inserción en lote: mucho más rápido que insertar de a un vínculo por vez
                         if eq_batch:
-                            c.executemany(
-                                "INSERT OR IGNORE INTO equivalencias (producto_a_id, producto_b_id, created_at) "
-                                "VALUES (?, ?, datetime('now'))",
-                                list(eq_batch)
-                            )
+                            # No revivir vínculos que ya fueron rechazados en una revisión anterior
+                            rechazados_antes = pares_rechazados()
+                            eq_batch = {p for p in eq_batch if p not in rechazados_antes}
+                        if eq_batch:
+                            if cargar_directo:
+                                c.executemany(
+                                    "INSERT OR IGNORE INTO equivalencias (producto_a_id, producto_b_id, created_at) "
+                                    "VALUES (?, ?, datetime('now'))",
+                                    list(eq_batch)
+                                )
+                            else:
+                                lote_importacion = (f"{nombre_prov.upper()} · "
+                                                     f"{getattr(archivo, 'name', 'lista')} · "
+                                                     f"{datetime.now():%d/%m %H:%M}")
+                                c.executemany(
+                                    "INSERT OR IGNORE INTO equivalencias_pendientes "
+                                    "(producto_a_id, producto_b_id, origen, lote) VALUES (?, ?, 'lista_proveedor', ?)",
+                                    [(a, b, lote_importacion) for a, b in eq_batch]
+                                )
 
                         c.execute(
                             "INSERT INTO importaciones (marca, archivo, filas_cargadas, filas_omitidas) VALUES (?, ?, ?, ?)",
@@ -4631,6 +4942,12 @@ if pagina == PAGINAS[2]:
                     progreso.empty()
 
                     st.success(f"Se importaron {cargados} filas con equivalencia.")
+                    if not cargar_directo and eq_batch:
+                        st.info(
+                            f"🔒 {len(eq_batch)} vínculo(s) quedaron **esperando tu revisión** — todavía "
+                            "no están cargados como equivalencias. Andá a Estadísticas → "
+                            "🔗 Equivalencias sugeridas para aprobarlos (podés hacerlo en bloque)."
+                        )
                     if cargados_sin_equiv:
                         st.info(
                             f"📦 Además se cargaron {cargados_sin_equiv} producto(s) que no traían código "
@@ -4673,7 +4990,8 @@ if pagina == PAGINAS[2]:
             "coincidan con nada, los tenés que cargar por 'Vincular manual' o con un Excel nuevo."
         )
         foto_remito = st.file_uploader("Foto del remito:", type=["png", "jpg", "jpeg"], key="foto_remito")
-        if foto_remito and st.button("🔍 Leer remito"):
+        remito_ok = archivo_listo(foto_remito, "foto del remito")
+        if st.button("🔍 Leer remito", disabled=not remito_ok):
             with st.spinner("Leyendo remito..."):
                 items_leidos, error_remito = leer_remito_por_foto(foto_remito.getvalue())
             if error_remito:
@@ -4940,8 +5258,9 @@ if pagina == PAGINAS[3]:
                     "Subí una foto (se guarda comprimida, aparece en la columna 'Imagen' del buscador):",
                     type=["png", "jpg", "jpeg"], key="foto_producto_admin"
                 )
+                producto_foto_ok = archivo_listo(foto_producto, "foto")
                 cf1, cf2 = st.columns(2)
-                if foto_producto and cf1.button("💾 Guardar foto"):
+                if cf1.button("💾 Guardar foto", disabled=not producto_foto_ok):
                     actualizar_imagen_producto(id_medidas, foto_producto.getvalue())
                     st.success("Foto guardada.")
                     st.rerun()
@@ -5537,7 +5856,103 @@ if pagina == PAGINAS[4]:
                     st.link_button(f"📲 Abrir WhatsApp para {marca}", url_wa_repo, key=f"wa_repo_{marca}")
 
     if sub_stats == SUB_STATS[6]:
-        st.markdown("**🔗 Equivalencias que aparecieron solas en el mostrador**")
+        st.markdown("**🔍 Revisar las equivalencias que ya están cargadas**")
+        st.caption(
+            "Pasa las mismas alarmas por todo lo que se cargó antes (listas viejas, vínculos hechos "
+            "a mano). Lo que marques como correcto no vuelve a aparecer; lo que borres queda "
+            "descartado para siempre, aunque vuelvas a importar la misma lista."
+        )
+        if st.button("🔍 Auditar lo ya cargado"):
+            with st.spinner("Revisando..."):
+                st.session_state["resultado_auditoria"] = auditar_equivalencias_existentes()
+
+        resultado_aud = st.session_state.get("resultado_auditoria")
+        if resultado_aud:
+            ma1, ma2, ma3 = st.columns(3)
+            ma1.metric("Vínculos revisados", resultado_aud["total_revisados"])
+            ma2.metric("Con alarma", resultado_aud["con_alarma"])
+            ma3.metric("Ya aprobados antes", resultado_aud["ya_revisados_ok"])
+
+            if not resultado_aud["sospechosas"]:
+                st.success("✅ No se encontró ningún vínculo sospechoso entre los que ya estaban cargados.")
+            else:
+                st.warning(
+                    f"⚠️ {len(resultado_aud['sospechosas'])} vínculo(s) para mirar. "
+                    "Ojo: una alarma no quiere decir que esté mal — puede que falten medidas o que "
+                    "estén cargadas con otro criterio. Vos decidís."
+                )
+                for s in resultado_aud["sospechosas"][:40]:
+                    st.markdown(f"**{s['marca_a']} {s['cod_a']} ↔ {s['marca_b']} {s['cod_b']}**")
+                    for alarma in s["alarmas"]:
+                        st.caption(f"   {alarma}")
+                    ab1, ab2 = st.columns(2)
+                    ab1.button("✅ Está bien, dejalo", key=f"aud_ok_{s['a']}_{s['b']}",
+                                on_click=marcar_revision, args=([(s["a"], s["b"])], "ok"),
+                                help="No vuelve a aparecer en la auditoría")
+                    ab2.button("🗑️ Borrar el vínculo", key=f"aud_del_{s['a']}_{s['b']}",
+                                on_click=eliminar_equivalencia, args=(s["a"], s["b"]),
+                                help="Los productos quedan; solo se corta la relación entre ellos")
+                if len(resultado_aud["sospechosas"]) > 40:
+                    st.caption(f"(mostrando 40 de {len(resultado_aud['sospechosas'])} — "
+                                "resolvé estos y volvé a auditar para ver los que siguen)")
+
+        st.markdown("---")
+
+        lotes_pendientes = resumen_lotes_pendientes()
+        if lotes_pendientes:
+            st.markdown("**📄 Vínculos de listas de proveedor esperando revisión**")
+            st.caption(
+                "Estos llegaron al importar una lista y todavía NO están cargados. Se separan solos "
+                "entre los que no tienen nada raro y los que dispararon alguna alarma, para que "
+                "apruebes en bloque los limpios y mires con lupa solo los pocos sospechosos."
+            )
+            for lote_info in lotes_pendientes:
+                with st.expander(f"📄 {lote_info['lote']} — {lote_info['cantidad']} vínculo(s)"):
+                    limpias, sospechosas = analizar_lote_pendiente(lote_info["lote"])
+                    ml1, ml2 = st.columns(2)
+                    ml1.metric("Sin nada raro", len(limpias))
+                    ml2.metric("Con alguna alarma", len(sospechosas))
+
+                    if sospechosas:
+                        st.warning(f"⚠️ {len(sospechosas)} vínculo(s) con algo raro — revisalos:")
+                        for s in sospechosas[:25]:
+                            st.markdown(f"**{s['marca_a']} {s['cod_a']} ↔ {s['marca_b']} {s['cod_b']}**")
+                            for alarma in s["alarmas"]:
+                                st.caption(f"   {alarma}")
+                            sb1, sb2 = st.columns(2)
+                            sb1.button("✅ Igual es correcto", key=f"apr_sosp_{s['a']}_{s['b']}",
+                                        on_click=aprobar_pendientes,
+                                        args=(lote_info["lote"], [(s["a"], s["b"]), (s["b"], s["a"])]))
+                            sb2.button("🚫 Descartar", key=f"rec_sosp_{s['a']}_{s['b']}",
+                                        on_click=rechazar_pendientes,
+                                        args=(lote_info["lote"], [(s["a"], s["b"]), (s["b"], s["a"])]))
+                        if len(sospechosas) > 25:
+                            st.caption(f"(mostrando 25 de {len(sospechosas)})")
+
+                    if limpias:
+                        with st.expander(f"Ver los {len(limpias)} sin alarmas"):
+                            st.dataframe(
+                                [{"Código A": x["cod_a"], "Marca A": x["marca_a"],
+                                   "Código B": x["cod_b"], "Marca B": x["marca_b"]} for x in limpias[:200]],
+                                use_container_width=True, hide_index=True
+                            )
+
+                    st.markdown("---")
+                    bl1, bl2 = st.columns(2)
+                    pares_limpios = []
+                    for x in limpias:
+                        pares_limpios.extend([(x["a"], x["b"]), (x["b"], x["a"])])
+                    bl1.button(f"✅ Aprobar los {len(limpias)} sin alarmas",
+                                key=f"apr_limpias_{lote_info['lote']}", type="primary",
+                                disabled=not limpias,
+                                on_click=aprobar_pendientes, args=(lote_info["lote"], pares_limpios))
+                    bl2.button("🚫 Descartar toda esta lista",
+                                key=f"rec_lote_{lote_info['lote']}",
+                                on_click=rechazar_pendientes, args=(lote_info["lote"], None),
+                                help="Los productos y precios quedan; solo se descartan los vínculos")
+            st.markdown("---")
+
+        st.markdown("**🛒 Equivalencias que aparecieron solas en el mostrador**")
         st.caption(
             "Cuando un cliente pide un código y termina llevándose otro, eso es una equivalencia "
             "que pasó de verdad. **Nada se carga solo, nunca**: acá se juntan las sugerencias con "
@@ -5797,7 +6212,8 @@ if pagina == PAGINAS[6]:
             "confundir letras o números parecidos."
         )
         foto_cedula = st.file_uploader("Foto de la cédula/título:", type=["png", "jpg", "jpeg"], key="foto_cedula")
-        if foto_cedula and st.button("🔍 Leer datos"):
+        cedula_ok = archivo_listo(foto_cedula, "foto de la cédula")
+        if st.button("🔍 Leer datos", disabled=not cedula_ok):
             with st.spinner("Leyendo..."):
                 datos_cedula, error_cedula = extraer_datos_cedula(foto_cedula.getvalue())
             if error_cedula:
