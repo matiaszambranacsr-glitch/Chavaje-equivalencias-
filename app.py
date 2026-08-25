@@ -1604,11 +1604,12 @@ def eliminar_equivalencia(par_a, par_b, recordar_rechazo=True):
         marcar_revision([(par_a, par_b)], "rechazada")
 
 
-def auditar_equivalencias_existentes(limite=8000):
-    """Pasa las mismas alarmas por las equivalencias que YA están cargadas — las que entraron
-    de listas viejas, antes de que existiera la revisión previa. Se hace con una sola consulta
-    y el análisis en memoria: con miles de vínculos, ir preguntando de a uno sería eterno.
-    Lo que ya se revisó y quedó marcado como correcto no vuelve a aparecer."""
+def auditar_equivalencias_existentes(limite=20000):
+    """Pasa las alarmas por las equivalencias YA cargadas y las devuelve AGRUPADAS por el
+    conflicto, no de a pares sueltos. La diferencia importa: si una importación mal mapeada
+    creó un producto basura (código '1', por ejemplo) vinculado a cientos de códigos de
+    fábrica, verlo de a pares es imposible de resolver — agrupado se ve de una y se corta.
+    Lo ya revisado como correcto no vuelve a aparecer."""
     campos_medida = ["diametro_interno", "diametro_externo", "diametro_interno_cara_b",
                       "diametro_externo_cara_b", "diametro_rosca_homocinetica", "diametro_copa", "ancho"]
     etiquetas = {"diametro_interno": "diám. interno", "diametro_externo": "diám. externo",
@@ -1620,8 +1621,8 @@ def auditar_equivalencias_existentes(limite=8000):
     sel_b = ", ".join(f"pb.{campo} AS b_{campo}" for campo in campos_medida)
 
     c.execute(f"""SELECT e.producto_a_id AS a, e.producto_b_id AS b,
-                         pa.codigo_raw AS cod_a, ma.nombre AS marca_a, ma.tipo AS tipo_a,
-                         pb.codigo_raw AS cod_b, mb.nombre AS marca_b, mb.tipo AS tipo_b,
+                         pa.codigo_raw AS cod_a, pa.descripcion AS desc_a, ma.nombre AS marca_a, ma.tipo AS tipo_a,
+                         pb.codigo_raw AS cod_b, pb.descripcion AS desc_b, mb.nombre AS marca_b, mb.tipo AS tipo_b,
                          pa.paso_rosca AS a_paso, pb.paso_rosca AS b_paso,
                          pa.cantidad_estrias AS a_estrias, pb.cantidad_estrias AS b_estrias,
                          {sel_a}, {sel_b}
@@ -1635,67 +1636,127 @@ def auditar_equivalencias_existentes(limite=8000):
     filas = [dict(r) for r in c.fetchall()]
 
     c.execute("SELECT producto_a_id, producto_b_id FROM equivalencias_revisadas WHERE decision = 'ok'")
-    ya_revisadas = {(r["producto_a_id"], r["producto_b_id"]) for r in c.fetchall()}
+    ya_ok = {(r["producto_a_id"], r["producto_b_id"]) for r in c.fetchall()}
 
-    # Un mismo código de fábrica no debería apuntar a dos productos distintos del mismo proveedor
-    apuntados = {}
+    # Cuántos vínculos tiene cada producto: sirve para detectar productos basura, que
+    # terminan colgados de decenas o cientos de códigos de fábrica.
+    vinculos_por_producto = {}
     for f in filas:
-        if f["tipo_a"] == "OEM":
-            oem, otro, marca_otro = f["cod_a"], f["b"], f["marca_b"]
-        elif f["tipo_b"] == "OEM":
-            oem, otro, marca_otro = f["cod_b"], f["a"], f["marca_a"]
+        for lado in ("a", "b"):
+            pid = f[lado]
+            info = vinculos_por_producto.setdefault(pid, {
+                "id": pid, "codigo": f[f"cod_{lado}"], "descripcion": f[f"desc_{lado}"],
+                "marca": f[f"marca_{lado}"], "tipo": f[f"tipo_{lado}"], "cantidad": 0
+            })
+            info["cantidad"] += 1
+
+    # Conflicto: un código de fábrica que apunta a varios productos del MISMO proveedor
+    grupos = {}
+    for f in filas:
+        if f["tipo_a"] == "OEM" and f["tipo_b"] != "OEM":
+            oem_cod, oem_desc, otro_lado = f["cod_a"], f["desc_a"], "b"
+        elif f["tipo_b"] == "OEM" and f["tipo_a"] != "OEM":
+            oem_cod, oem_desc, otro_lado = f["cod_b"], f["desc_b"], "a"
         else:
             continue
-        apuntados.setdefault((sanitizar(oem), marca_otro), set()).add(otro)
-    ambiguos = {k for k, v in apuntados.items() if len(v) > 1}
+        clave = (sanitizar(oem_cod), f[f"marca_{otro_lado}"])
+        grupo = grupos.setdefault(clave, {
+            "codigo_oem": oem_cod, "descripcion_oem": oem_desc or "",
+            "marca_proveedor": f[f"marca_{otro_lado}"], "productos": {}
+        })
+        pid = f[otro_lado]
+        grupo["productos"][pid] = {
+            "id": pid, "codigo": f[f"cod_{otro_lado}"], "descripcion": f[f"desc_{otro_lado}"] or "",
+            "par": (f["a"], f["b"]),
+            "revisado_ok": (f["a"], f["b"]) in ya_ok,
+            "vinculos_totales": vinculos_por_producto.get(pid, {}).get("cantidad", 0),
+        }
 
-    problematicas = 0
-    revisadas_sin_alarma = 0
-    sospechosas = []
+    conflictos = []
+    for clave, g in grupos.items():
+        pendientes = [p for p in g["productos"].values() if not p["revisado_ok"]]
+        if len(g["productos"]) > 1 and pendientes:
+            g["productos"] = sorted(g["productos"].values(), key=lambda p: -p["vinculos_totales"])
+            conflictos.append(g)
+    conflictos.sort(key=lambda g: -len(g["productos"]))
+
+    # Medidas contradictorias (esto sí tiene sentido de a pares)
+    por_medidas = []
     for f in filas:
-        if (f["a"], f["b"]) in ya_revisadas:
-            revisadas_sin_alarma += 1
+        if (f["a"], f["b"]) in ya_ok:
             continue
-        alarmas = []
         diferencias = []
         for campo in campos_medida:
             va, vb = f[f"a_{campo}"], f[f"b_{campo}"]
-            if va is None or vb is None or not va or not vb:
+            if not va or not vb:
                 continue
             if abs(va - vb) / max(va, vb) * 100 > 3:
                 diferencias.append(f"{etiquetas[campo]}: {va} vs {vb}")
-        for clave, etiqueta in (("paso", "paso de rosca"), ("estrias", "estrías")):
-            va, vb = f[f"a_{clave}"], f[f"b_{clave}"]
+        for clave_c, etiqueta in (("paso", "paso de rosca"), ("estrias", "estrías")):
+            va, vb = f[f"a_{clave_c}"], f[f"b_{clave_c}"]
             if va in (None, "") or vb in (None, ""):
                 continue
             if str(va).strip().upper() != str(vb).strip().upper():
                 diferencias.append(f"{etiqueta}: {va} vs {vb}")
         if diferencias:
-            alarmas.append("📐 Las medidas cargadas no coinciden: " + "; ".join(diferencias))
+            por_medidas.append({
+                "a": f["a"], "b": f["b"], "cod_a": f["cod_a"], "desc_a": f["desc_a"] or "",
+                "marca_a": f["marca_a"], "cod_b": f["cod_b"], "desc_b": f["desc_b"] or "",
+                "marca_b": f["marca_b"], "detalle": "; ".join(diferencias),
+            })
 
-        if f["tipo_a"] == "OEM":
-            clave_amb = (sanitizar(f["cod_a"]), f["marca_b"])
-            texto_oem, texto_marca = f["cod_a"], f["marca_b"]
-        elif f["tipo_b"] == "OEM":
-            clave_amb = (sanitizar(f["cod_b"]), f["marca_a"])
-            texto_oem, texto_marca = f["cod_b"], f["marca_a"]
-        else:
-            clave_amb = None
-        if clave_amb and clave_amb in ambiguos:
-            alarmas.append(f"⚠️ El código {texto_oem} apunta a más de un producto de {texto_marca} — "
-                            "alguno de los dos está mal vinculado")
-
-        if alarmas:
-            problematicas += 1
-            sospechosas.append({"a": f["a"], "b": f["b"], "cod_a": f["cod_a"], "marca_a": f["marca_a"],
-                                 "cod_b": f["cod_b"], "marca_b": f["marca_b"], "alarmas": alarmas})
+    # Productos con una cantidad de vínculos fuera de lo normal: candidatos a basura
+    sospechosos = sorted(
+        [v for v in vinculos_por_producto.values() if v["cantidad"] >= 10 and v["tipo"] != "OEM"],
+        key=lambda v: -v["cantidad"]
+    )
 
     return {
         "total_revisados": len(filas),
-        "con_alarma": problematicas,
-        "ya_revisados_ok": revisadas_sin_alarma,
-        "sospechosas": sospechosas,
+        "ya_revisados_ok": len(ya_ok),
+        "conflictos": conflictos,
+        "por_medidas": por_medidas,
+        "productos_sospechosos": sospechosos[:30],
     }
+
+
+def cb_auditoria_eliminar(par_a, par_b):
+    """Borra el vínculo Y vuelve a calcular la auditoría. Sin esto último el panel seguía
+    mostrando el resultado viejo (guardado desde que se tocó 'Auditar'), y parecía que el
+    botón no hacía nada aunque el vínculo sí se hubiera borrado."""
+    eliminar_equivalencia(par_a, par_b)
+    st.session_state["resultado_auditoria"] = auditar_equivalencias_existentes()
+
+
+def cb_auditoria_dejar(pares):
+    marcar_revision(pares, "ok")
+    st.session_state["resultado_auditoria"] = auditar_equivalencias_existentes()
+
+
+def cb_auditoria_cortar_todos(producto_id):
+    cortar_todos_los_vinculos(producto_id)
+    st.session_state["resultado_auditoria"] = auditar_equivalencias_existentes()
+
+
+def contar_vinculos_producto(producto_id):
+    c.execute("SELECT COUNT(*) FROM equivalencias WHERE producto_a_id = ? OR producto_b_id = ?",
+               (producto_id, producto_id))
+    return c.fetchone()[0]
+
+
+def cortar_todos_los_vinculos(producto_id, recordar_rechazo=True):
+    """Corta TODAS las equivalencias de un producto de una sola vez. Para cuando quedó un
+    producto basura de una importación mal mapeada colgado de decenas de códigos."""
+    c.execute("""SELECT producto_a_id, producto_b_id FROM equivalencias
+                 WHERE producto_a_id = ? OR producto_b_id = ?""", (producto_id, producto_id))
+    pares = [(r["producto_a_id"], r["producto_b_id"]) for r in c.fetchall()]
+    with db_lock:
+        c.execute("DELETE FROM equivalencias WHERE producto_a_id = ? OR producto_b_id = ?",
+                   (producto_id, producto_id))
+        conn.commit()
+    if recordar_rechazo and pares:
+        marcar_revision(pares, "rechazada")
+    return len(pares)
 
 
 def guardar_equivalencias_pendientes(pares, origen, lote):
@@ -5870,31 +5931,88 @@ if pagina == PAGINAS[4]:
         if resultado_aud:
             ma1, ma2, ma3 = st.columns(3)
             ma1.metric("Vínculos revisados", resultado_aud["total_revisados"])
-            ma2.metric("Con alarma", resultado_aud["con_alarma"])
-            ma3.metric("Ya aprobados antes", resultado_aud["ya_revisados_ok"])
+            ma2.metric("Conflictos", len(resultado_aud["conflictos"]))
+            ma3.metric("Medidas que no dan", len(resultado_aud["por_medidas"]))
 
-            if not resultado_aud["sospechosas"]:
-                st.success("✅ No se encontró ningún vínculo sospechoso entre los que ya estaban cargados.")
-            else:
-                st.warning(
-                    f"⚠️ {len(resultado_aud['sospechosas'])} vínculo(s) para mirar. "
-                    "Ojo: una alarma no quiere decir que esté mal — puede que falten medidas o que "
-                    "estén cargadas con otro criterio. Vos decidís."
+            # 1) Productos basura: lo primero a resolver, porque un solo producto mal cargado
+            #    puede estar ensuciando cientos de códigos a la vez.
+            if resultado_aud["productos_sospechosos"]:
+                st.markdown("**🚩 Productos con muchísimos vínculos (revisalos primero)**")
+                st.caption(
+                    "Una pieza real rara vez equivale a más de 10 códigos de fábrica. Si un producto "
+                    "tiene decenas, casi siempre es basura de una importación mal mapeada — por "
+                    "ejemplo un código '1' que quedó de una columna equivocada. Cortarle los vínculos "
+                    "de una limpia el problema entero."
                 )
-                for s in resultado_aud["sospechosas"][:40]:
-                    st.markdown(f"**{s['marca_a']} {s['cod_a']} ↔ {s['marca_b']} {s['cod_b']}**")
-                    for alarma in s["alarmas"]:
-                        st.caption(f"   {alarma}")
-                    ab1, ab2 = st.columns(2)
-                    ab1.button("✅ Está bien, dejalo", key=f"aud_ok_{s['a']}_{s['b']}",
-                                on_click=marcar_revision, args=([(s["a"], s["b"])], "ok"),
-                                help="No vuelve a aparecer en la auditoría")
-                    ab2.button("🗑️ Borrar el vínculo", key=f"aud_del_{s['a']}_{s['b']}",
-                                on_click=eliminar_equivalencia, args=(s["a"], s["b"]),
-                                help="Los productos quedan; solo se corta la relación entre ellos")
-                if len(resultado_aud["sospechosas"]) > 40:
-                    st.caption(f"(mostrando 40 de {len(resultado_aud['sospechosas'])} — "
-                                "resolvé estos y volvé a auditar para ver los que siguen)")
+                for p in resultado_aud["productos_sospechosos"]:
+                    desc = p["descripcion"] or "_(sin descripción)_"
+                    with st.expander(f"🚩 {p['marca']} · código «{p['codigo']}» — {p['cantidad']} vínculos"):
+                        st.write(f"**Código:** `{p['codigo']}`")
+                        st.write(f"**Descripción:** {desc}")
+                        st.write(f"**Marca:** {p['marca']}")
+                        st.warning(
+                            f"Está vinculado a {p['cantidad']} códigos distintos. Si el código no "
+                            "parece un código de repuesto real, es basura de importación."
+                        )
+                        pb1, pb2 = st.columns(2)
+                        pb1.button(f"✂️ Cortar sus {p['cantidad']} vínculos",
+                                    key=f"cortar_todo_{p['id']}", type="primary",
+                                    on_click=cb_auditoria_cortar_todos, args=(p["id"],),
+                                    help="El producto queda; solo se cortan todas sus equivalencias")
+                        pb2.button("✅ Está bien así", key=f"ok_prod_{p['id']}",
+                                    help="No hace nada; simplemente ignoralo y seguí")
+                st.markdown("---")
+
+            # 2) Conflictos agrupados: un código de fábrica apuntando a varios productos
+            if resultado_aud["conflictos"]:
+                st.markdown("**⚠️ Un código de fábrica apuntando a varios productos del mismo proveedor**")
+                st.caption(
+                    "Acá se ven juntos todos los productos a los que apunta cada código, para poder "
+                    "comparar y cortar el que sobra. Normalmente uno tiene descripción real y el otro "
+                    "es el que quedó mal."
+                )
+                for g in resultado_aud["conflictos"][:30]:
+                    titulo = f"⚠️ {g['codigo_oem']} → {len(g['productos'])} productos de {g['marca_proveedor']}"
+                    with st.expander(titulo):
+                        if g["descripcion_oem"]:
+                            st.caption(f"Código de fábrica: {g['codigo_oem']} — {g['descripcion_oem']}")
+                        st.write("**Apunta a estos productos — cortá el que no corresponda:**")
+                        for p in g["productos"]:
+                            desc = p["descripcion"] or "⚠️ _(sin descripción — sospechoso)_"
+                            marca_ok = " · ya revisado" if p["revisado_ok"] else ""
+                            cg1, cg2, cg3 = st.columns([3, 1, 1])
+                            cg1.markdown(f"**`{p['codigo']}`** — {desc}  \n"
+                                          f"<small>{p['vinculos_totales']} vínculos en total{marca_ok}</small>",
+                                          unsafe_allow_html=True)
+                            cg2.button("🗑️ Cortar", key=f"cortar_par_{g['codigo_oem']}_{p['id']}",
+                                        on_click=cb_auditoria_eliminar, args=(p["par"][0], p["par"][1]),
+                                        help="Corta solo este vínculo")
+                            cg3.button("✅ Dejar", key=f"dejar_par_{g['codigo_oem']}_{p['id']}",
+                                        on_click=cb_auditoria_dejar, args=([p["par"]],),
+                                        help="Es correcto; no volver a marcarlo")
+                if len(resultado_aud["conflictos"]) > 30:
+                    st.caption(f"(mostrando 30 de {len(resultado_aud['conflictos'])} — "
+                                "resolvé estos y volvé a auditar)")
+                st.markdown("---")
+
+            # 3) Medidas contradictorias
+            if resultado_aud["por_medidas"]:
+                st.markdown("**📐 Vínculos donde las medidas cargadas no coinciden**")
+                for m in resultado_aud["por_medidas"][:30]:
+                    st.markdown(f"**{m['marca_a']} `{m['cod_a']}`** — {m['desc_a'] or '_(sin descripción)_'}  \n"
+                                 f"**{m['marca_b']} `{m['cod_b']}`** — {m['desc_b'] or '_(sin descripción)_'}")
+                    st.caption(f"📐 {m['detalle']}")
+                    mb1, mb2 = st.columns(2)
+                    mb1.button("✅ Está bien, dejalo", key=f"med_ok_{m['a']}_{m['b']}",
+                                on_click=cb_auditoria_dejar, args=([(m["a"], m["b"])],))
+                    mb2.button("🗑️ Borrar el vínculo", key=f"med_del_{m['a']}_{m['b']}",
+                                on_click=cb_auditoria_eliminar, args=(m["a"], m["b"]))
+                if len(resultado_aud["por_medidas"]) > 30:
+                    st.caption(f"(mostrando 30 de {len(resultado_aud['por_medidas'])})")
+
+            if (not resultado_aud["conflictos"] and not resultado_aud["por_medidas"]
+                    and not resultado_aud["productos_sospechosos"]):
+                st.success("✅ No se encontró nada sospechoso entre los vínculos ya cargados.")
 
         st.markdown("---")
 
