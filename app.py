@@ -1080,12 +1080,17 @@ c = conn.cursor()
 # UTILIDADES
 # ============================================================
 def sanitizar(codigo):
-    """Limpia un código dejando solo letras y números en mayúscula."""
+    """Limpia un código dejando solo letras y números en mayúscula.
+    Ojo con el '.0' del final: Excel guarda los códigos numéricos como número, así que
+    '2776400' llega como '2776400.0'. Si no se saca antes de limpiar, queda '27764000'
+    (un cero de más) y ese producto se vuelve imposible de encontrar por su código real."""
     if codigo is None:
         return ""
     codigo = str(codigo).strip()
     if codigo == "" or codigo.lower() == "nan":
         return ""
+    if re.fullmatch(r"\d+\.0+", codigo):
+        codigo = codigo.split(".")[0]
     return re.sub(r'[^A-Z0-9]', '', codigo.upper())
 
 
@@ -2048,6 +2053,71 @@ def _sql_sin_acentos(columna):
     for viejo, nuevo in reemplazos:
         expr = f"REPLACE({expr},'{viejo}','{nuevo}')"
     return expr
+
+
+def contar_codigos_con_decimal():
+    c.execute(r"SELECT COUNT(*) FROM productos WHERE codigo_raw LIKE '%.0' AND codigo_raw GLOB '[0-9]*'")
+    return c.fetchone()[0]
+
+
+def reparar_codigos_con_decimal():
+    """Arregla los códigos que quedaron con '.0' del final por venir de una celda numérica de
+    Excel. Además de verse feo, los volvía imposibles de encontrar: '2776400.0' se limpiaba
+    como '27764000' (con un cero de más) y nunca coincidía con el código real."""
+    c.execute(r"""SELECT id, codigo_raw FROM productos
+                  WHERE codigo_raw LIKE '%.0' AND codigo_raw GLOB '[0-9]*'""")
+    filas = [(r["id"], r["codigo_raw"]) for r in c.fetchall()]
+    arreglados = 0
+    with db_lock:
+        for pid, raw in filas:
+            if not re.fullmatch(r"\d+\.0+", str(raw).strip()):
+                continue
+            nuevo_raw = str(raw).strip().split(".")[0]
+            nuevo_clean = sanitizar(nuevo_raw)
+            try:
+                c.execute("UPDATE productos SET codigo_raw = ?, codigo_clean = ? WHERE id = ?",
+                           (nuevo_raw, nuevo_clean, pid))
+                arreglados += 1
+            except sqlite3.IntegrityError:
+                # Ya existe otro producto con ese código en la misma marca: se deja como está
+                # para no perder datos; se resuelve desde la auditoría de duplicados.
+                continue
+        conn.commit()
+    return arreglados
+
+
+def cb_ver_equivalencias(codigo_raw):
+    """Callback para que cualquier código listado en pantalla sea clickeable: al tocarlo,
+    busca sus equivalencias y las deja mostradas arriba, sin tener que copiar el código a mano
+    y volver a buscarlo."""
+    clean = sanitizar(codigo_raw)
+    res = buscar_por_codigo(clean) if clean else []
+    if res:
+        incrementar_veces_buscado(clean)
+    guardar_busqueda(codigo_raw)
+    st.session_state["ultima_busqueda_codigo"] = [
+        {"codigo_individual": codigo_raw, "clean": clean, "res": res}
+    ]
+    st.session_state["sugerencia_busqueda"] = codigo_raw
+    st.session_state["modo_busqueda"] = "Código"   # por si se tocó desde la búsqueda por texto
+
+
+def mostrar_lista_clickeable(filas, prefijo_key, limite=15, nota=None):
+    """Muestra resultados con el código como botón: al tocarlo se abren sus equivalencias.
+    Antes esto era una tabla y había que ir copiando los códigos de a uno para buscarlos."""
+    if nota:
+        st.caption(nota)
+    for f in filas[:limite]:
+        col_cod, col_desc = st.columns([1.2, 3])
+        col_cod.button(f"🔎 {f['Codigo']}", key=f"{prefijo_key}_{f['ID']}",
+                        on_click=cb_ver_equivalencias, args=(f["Codigo"],),
+                        help="Ver sus equivalencias")
+        descripcion = (f.get("Descripcion") or "")[:90]
+        precio = f"${f['Precio']:,.0f}" if f.get("Precio") else ""
+        stock = f" · stock {f['Stock']}" if f.get("Stock") is not None else ""
+        col_desc.caption(f"**{f.get('Marca', '')}** {descripcion}  \n{precio}{stock}")
+    if len(filas) > limite:
+        st.caption(f"(mostrando {limite} de {len(filas)})")
 
 
 def buscar_codigos_parecidos(clean_code, limite=30):
@@ -4128,7 +4198,7 @@ Casi todo lo que edita o borra algo pide la contraseña de administrador la prim
                         use_container_width=True, hide_index=True
                     )
 
-    modo = st.radio("Buscar por:", ["Código", "Descripción"], horizontal=True)
+    modo = st.radio("Buscar por:", ["Código", "Descripción"], horizontal=True, key="modo_busqueda")
 
     c.execute("SELECT nombre FROM marcas ORDER BY nombre")
     lista_marcas = ["Todas"] + [r["nombre"] for r in c.fetchall()]
@@ -4341,13 +4411,16 @@ Casi todo lo que edita o borra algo pide la contraseña de administrador la prim
                                                       use_container_width=True, hide_index=True)
                                     else:
                                         st.caption("Todavía no tiene equivalencias cargadas.")
+                                    st.button("🔎 Abrir este código como búsqueda",
+                                               key=f"abrir_parecido_{p['ID']}",
+                                               on_click=cb_ver_equivalencias, args=(p["Codigo"],))
                             if len(parecidos) > 12:
                                 st.caption(f"(mostrando 12 de {len(parecidos)})")
                         else:
                             parcial = buscar_por_texto(clean)
                             if parcial:
-                                st.info("¿Quisiste decir alguno de estos?")
-                                st.dataframe(quitar_id(parcial)[:10], use_container_width=True, hide_index=True)
+                                st.info("¿Quisiste decir alguno de estos? Tocá el código para ver sus equivalencias:")
+                                mostrar_lista_clickeable(parcial, f"sug_{clean}", limite=12)
     else:
         with st.expander("🎙️ Buscar por voz"):
             st.caption(
@@ -4399,6 +4472,10 @@ Casi todo lo que edita o borra algo pide la contraseña de administrador la prim
             if res_texto:
                 st.success(f"Se encontraron {len(res_texto)} coincidencia(s):")
                 st.dataframe(quitar_id(res_texto), use_container_width=True, hide_index=True)
+                mostrar_lista_clickeable(
+                    res_texto, "txt_click", limite=15,
+                    nota="👆 Tocá cualquier código para abrirlo con todas sus equivalencias:"
+                )
 
                 # La búsqueda por descripción solo hace coincidir texto: encuentra el producto,
                 # pero no sus equivalentes. Acá se abre la red de equivalencias de cada resultado,
@@ -5613,6 +5690,22 @@ if pagina == PAGINAS[3]:
                         st.rerun()
             else:
                 st.caption("Sin resultados.")
+
+        st.markdown("---")
+        st.markdown("**🔢 Códigos que quedaron con '.0'**")
+        st.caption(
+            "Cuando una lista de Excel trae el código como número, llega con un decimal pegado "
+            "(2776400.0). Además de verse mal, eso los volvía imposibles de encontrar: al buscarlos "
+            "quedaban con un cero de más. Esto los deja como corresponde."
+        )
+        cantidad_decimal = contar_codigos_con_decimal()
+        if cantidad_decimal:
+            st.warning(f"⚠️ Hay {cantidad_decimal} producto(s) con el código terminado en '.0'.")
+            if st.button(f"🔧 Arreglar los {cantidad_decimal} códigos"):
+                arreglados = reparar_codigos_con_decimal()
+                st.success(f"Se arreglaron {arreglados} código(s).")
+        else:
+            st.caption("✅ Ningún código con ese problema.")
 
         st.markdown("---")
         st.markdown("**🔍 Salud de los datos**")
