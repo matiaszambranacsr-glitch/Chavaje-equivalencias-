@@ -1729,6 +1729,23 @@ def auditar_equivalencias_existentes(limite=20000):
     conflictos.sort(key=lambda g: -len(g["productos"]))
 
     # Medidas contradictorias (esto sí tiene sentido de a pares)
+    # Códigos que no parecen códigos: lo que deja una importación mal mapeada
+    codigos_malos = {}
+    for f in filas:
+        if (f["a"], f["b"]) in ya_ok:
+            continue
+        for lado in ("a", "b"):
+            pid = f[lado]
+            if pid in codigos_malos:
+                continue
+            malo, motivo = codigo_sospechoso(f[f"cod_{lado}"])
+            if malo:
+                codigos_malos[pid] = {
+                    "id": pid, "codigo": f[f"cod_{lado}"], "marca": f[f"marca_{lado}"],
+                    "motivo": motivo,
+                    "vinculos": vinculos_por_producto.get(pid, {}).get("cantidad", 0),
+                }
+
     por_medidas = []
     for f in filas:
         if (f["a"], f["b"]) in ya_ok:
@@ -1771,6 +1788,7 @@ def auditar_equivalencias_existentes(limite=20000):
         "ya_revisados_ok": len(ya_ok),
         "conflictos": conflictos,
         "por_medidas": por_medidas,
+        "codigos_malos": sorted(codigos_malos.values(), key=lambda x: -x["vinculos"])[:50],
         "productos_sospechosos": sospechosos[:30],
     }
 
@@ -1864,6 +1882,12 @@ def analizar_lote_pendiente(lote, limite=400):
     limpias, sospechosas = [], []
     for f in filas:
         alarmas = []
+        # ¿Los códigos parecen códigos? Esto caza las importaciones mal mapeadas, donde la
+        # columna que se tomó como código en realidad tenía medidas o descripciones.
+        for lado, etiqueta in (("a", "Código A"), ("b", "Código B")):
+            malo, motivo = codigo_sospechoso(f[f"cod_{lado}"])
+            if malo:
+                alarmas.append(f"🚫 {etiqueta}: {motivo}")
         coinciden, detalle = comparar_medidas_productos(f["a"], f["b"])
         if coinciden is False:
             alarmas.append(f"📐 {detalle}")
@@ -2309,6 +2333,35 @@ def leer_mapeo_columnas(proveedor):
     c.execute("SELECT * FROM mapeo_columnas WHERE proveedor = ?", (proveedor.strip().upper(),))
     fila = c.fetchone()
     return dict(fila) if fila else None
+
+
+def codigo_sospechoso(codigo):
+    """¿Esto parece un código de repuesto de verdad? Devuelve (es_sospechoso, motivo).
+    Sirve para cazar importaciones mal mapeadas: cuando la columna que se tomó como código
+    en realidad tenía medidas, cantidades o pedazos de la descripción, quedan cargados como
+    productos códigos tipo '0', '1200cc' o '20x2.50x180' — que después ensucian todo."""
+    if codigo is None:
+        return True, "está vacío"
+    texto = str(codigo).strip()
+    if not texto:
+        return True, "está vacío"
+
+    limpio = sanitizar(texto)
+    if len(limpio) <= 2:
+        return True, f"«{texto}» es demasiado corto para ser un código"
+    if re.fullmatch(r"\d{1,3}", limpio):
+        return True, f"«{texto}» es solo un número chico, no parece un código"
+    if re.search(r"[Ee][+\-]\d+", texto):
+        return True, f"«{texto}» quedó en notación científica de Excel (el número real se perdió)"
+    if re.search(r"\d\s*[xX]\s*\d+[.,]?\d*\s*[xX]?\s*\d*\s*(MM|mm)?$", texto) and "x" in texto.lower():
+        return True, f"«{texto}» parece una medida, no un código"
+    if re.search(r"\d+\s*(MM|CM|CC|ML|KG|GR|LTS?|V|W)\b", texto, re.I):
+        return True, f"«{texto}» parece una medida o especificación"
+    if "Ø" in texto or '"' in texto or "″" in texto:
+        return True, f"«{texto}» tiene símbolos de medida (Ø o pulgadas)"
+    if re.search(r"\b(DIESEL|NAFTA|SECTOR|CANAL|JUEGO|ARO|CHAPA|TIPO|MEDIDA)\b", texto, re.I):
+        return True, f"«{texto}» parece un pedazo de la descripción"
+    return False, None
 
 
 def cb_ver_equivalencias(codigo_raw):
@@ -3088,6 +3141,40 @@ def generar_qr_bytes(texto):
     salida = io.BytesIO()
     img.save(salida, format="PNG")
     return salida.getvalue()
+
+
+def recordar_archivo(archivo, clave):
+    """Guarda el archivo subido en la sesión y devuelve siempre esa copia.
+
+    Por qué: en el celular, con conexión lenta, la subida a veces se pierde (un refresco de
+    pantalla en el medio, la conexión que se corta) y el widget vuelve a quedar vacío — de ahí
+    lo de 'tengo que subirlo 2 o 3 veces'. Con esto, la PRIMERA subida que llegue bien queda
+    guardada, y aunque el widget se vacíe después, el archivo sigue disponible."""
+    import io as _io
+
+    if archivo is not None:
+        try:
+            datos = archivo.getvalue()
+            if datos:
+                st.session_state[f"_archivo_{clave}"] = {
+                    "nombre": getattr(archivo, "name", "archivo"),
+                    "datos": datos,
+                }
+        except Exception:
+            pass
+
+    guardado = st.session_state.get(f"_archivo_{clave}")
+    if not guardado:
+        return None
+
+    copia = _io.BytesIO(guardado["datos"])
+    copia.name = guardado["nombre"]
+    copia.size = len(guardado["datos"])
+    return copia
+
+
+def olvidar_archivo(clave):
+    st.session_state.pop(f"_archivo_{clave}", None)
 
 
 def archivo_listo(archivo, etiqueta="archivo"):
@@ -4503,11 +4590,14 @@ Casi todo lo que edita o borra algo pide la contraseña de administrador la prim
             st.button("🔄 Procesar fotos pendientes ahora", disabled=not cantidad_pendientes,
                        on_click=migrar_imagenes_pendientes)
 
-            foto_visual = st.file_uploader(
+            foto_visual = recordar_archivo(st.file_uploader(
                 "Foto de la pieza:", type=["png", "jpg", "jpeg"], key="foto_similitud_visual",
                 label_visibility="collapsed"
-            )
+            ), "foto_visual")
             visual_ok = archivo_listo(foto_visual, "foto")
+            if foto_visual and st.button("🗑️ Usar otra foto", key="otra_foto_visual"):
+                olvidar_archivo("foto_visual")
+                st.rerun()
             if st.button("🖼️ Comparar con fotos del catálogo", disabled=not visual_ok):
                 with st.spinner("Comparando..."):
                     res_visual, error_visual = buscar_por_similitud_visual(foto_visual.getvalue())
@@ -4930,11 +5020,14 @@ Casi todo lo que edita o borra algo pide la contraseña de administrador la prim
                 "Sacale una foto a la pieza o subí una que ya tengas. La IA busca un código visible "
                 "y, si lo encuentra, lo busca directo en tu catálogo."
             )
-            foto = st.file_uploader(
+            foto = recordar_archivo(st.file_uploader(
                 "Foto de la pieza:", type=["png", "jpg", "jpeg"], key="foto_identificar_pieza",
                 label_visibility="collapsed"
-            )
+            ), "foto_pieza")
             foto_ok = archivo_listo(foto, "foto")
+            if foto and st.button("🗑️ Usar otra foto", key="otra_foto_pieza"):
+                olvidar_archivo("foto_pieza")
+                st.rerun()
             if st.button("🔍 Identificar", disabled=not foto_ok):
                 with st.spinner("Consultando..."):
                     datos_pieza, error = identificar_pieza_por_foto(foto.getvalue())
@@ -5191,9 +5284,20 @@ if pagina == PAGINAS[2]:
         archivo = None
 
         if metodo == "Subir archivo":
-            archivo = st.file_uploader("Seleccioná el archivo", type=["xlsx", "csv", "pdf"],
-                                        key="archivo_carga_lista")
-            archivo_listo(archivo, "archivo")
+            archivo_subido = st.file_uploader("Seleccioná el archivo", type=["xlsx", "csv", "pdf"],
+                                               key="archivo_carga_lista")
+            # La primera subida que llegue bien queda guardada, así no se pierde si el widget
+            # se vacía por un refresco o un corte de conexión (el clásico "lo subo y no lo toma").
+            archivo = recordar_archivo(archivo_subido, "lista")
+            if archivo:
+                ca1, ca2 = st.columns([3, 1])
+                with ca1:
+                    archivo_listo(archivo, "archivo")
+                if ca2.button("🗑️ Usar otro archivo"):
+                    olvidar_archivo("lista")
+                    st.rerun()
+            else:
+                archivo_listo(None, "archivo")
             if archivo and archivo.name.lower().endswith(".pdf"):
                 st.caption(
                     "📄 PDF: funciona mejor con catálogos que tienen tablas reales (no una imagen escaneada). "
@@ -6586,10 +6690,11 @@ Administrar → Mantenimiento.
 
         resultado_aud = st.session_state.get("resultado_auditoria")
         if resultado_aud:
-            ma1, ma2, ma3 = st.columns(3)
+            ma1, ma2, ma3, ma4 = st.columns(4)
             ma1.metric("Vínculos revisados", resultado_aud["total_revisados"])
-            ma2.metric("Conflictos", len(resultado_aud["conflictos"]))
-            ma3.metric("Medidas que no dan", len(resultado_aud["por_medidas"]))
+            ma2.metric("Códigos raros", len(resultado_aud.get("codigos_malos", [])))
+            ma3.metric("Conflictos", len(resultado_aud["conflictos"]))
+            ma4.metric("Medidas que no dan", len(resultado_aud["por_medidas"]))
 
             if resultado_aud.get("quedo_corta"):
                 st.warning(
@@ -6598,7 +6703,26 @@ Administrar → Mantenimiento.
                     "y volvé a auditar para seguir con el resto — todavía puede haber problemas sin ver."
                 )
 
-            # 1) Productos basura: lo primero a resolver, porque un solo producto mal cargado
+            # 1) Códigos que no parecen códigos: lo que deja una importación mal mapeada.
+            #    Va primero porque un solo producto basura ensucia decenas de vínculos.
+            if resultado_aud.get("codigos_malos"):
+                st.markdown("**🚫 Códigos que no parecen códigos de repuesto**")
+                st.caption(
+                    "Suelen venir de una importación donde la columna del código en realidad tenía "
+                    "medidas, cantidades o pedazos de la descripción. Cortarles los vínculos limpia "
+                    "el problema; el producto queda por si lo querés corregir a mano."
+                )
+                for cm in resultado_aud["codigos_malos"][:25]:
+                    cc1, cc2 = st.columns([3, 1])
+                    cc1.markdown(f"**{cm['marca']}** · `{cm['codigo']}` — {cm['motivo']}  \n"
+                                  f"<small>{cm['vinculos']} vínculo(s)</small>", unsafe_allow_html=True)
+                    cc2.button("✂️ Cortar sus vínculos", key=f"cortar_malo_{cm['id']}",
+                                on_click=cb_auditoria_cortar_todos, args=(cm["id"],))
+                if len(resultado_aud["codigos_malos"]) > 25:
+                    st.caption(f"(mostrando 25 de {len(resultado_aud['codigos_malos'])})")
+                st.markdown("---")
+
+            # 2) Productos basura: lo primero a resolver, porque un solo producto mal cargado
             #    puede estar ensuciando cientos de códigos a la vez.
             if resultado_aud["productos_sospechosos"]:
                 st.markdown("**🚩 Productos con muchísimos vínculos (revisalos primero)**")
@@ -6675,19 +6799,39 @@ Administrar → Mantenimiento.
                     st.caption(f"(mostrando 30 de {len(resultado_aud['por_medidas'])})")
 
             if (not resultado_aud["conflictos"] and not resultado_aud["por_medidas"]
-                    and not resultado_aud["productos_sospechosos"]):
+                    and not resultado_aud["productos_sospechosos"]
+                    and not resultado_aud.get("codigos_malos")):
                 st.success("✅ No se encontró nada sospechoso entre los vínculos ya cargados.")
 
         st.markdown("---")
 
         lotes_pendientes = resumen_lotes_pendientes()
         if lotes_pendientes:
+            total_pendientes = sum(l["cantidad"] for l in lotes_pendientes)
             st.markdown("**📄 Vínculos de listas de proveedor esperando revisión**")
             st.caption(
                 "Estos llegaron al importar una lista y todavía NO están cargados. Se separan solos "
                 "entre los que no tienen nada raro y los que dispararon alguna alarma, para que "
                 "apruebes en bloque los limpios y mires con lupa solo los pocos sospechosos."
             )
+
+            with st.expander(f"🧹 Descartar TODO lo pendiente ({total_pendientes:,} vínculos de "
+                              f"{len(lotes_pendientes)} lista(s))"):
+                st.warning(
+                    "Borra de una todos los vínculos que están esperando revisión, de todas las listas. "
+                    "**Los productos y precios no se tocan** — solo se descartan las equivalencias "
+                    "pendientes. Es lo que conviene cuando una importación quedó mal mapeada: descartás "
+                    "todo y volvés a importar con las columnas correctas."
+                )
+                confirmar_todo = st.checkbox("Confirmo que quiero descartar todo lo pendiente",
+                                              key="confirmar_descartar_todo")
+                if st.button("🧹 Descartar todo", disabled=not confirmar_todo, type="primary"):
+                    borrados = 0
+                    for l in lotes_pendientes:
+                        borrados += rechazar_pendientes(l["lote"], None)
+                    st.success(f"Se descartaron {borrados:,} vínculo(s) pendientes.")
+                    st.rerun()
+
             for lote_info in lotes_pendientes:
                 with st.expander(f"📄 {lote_info['lote']} — {lote_info['cantidad']} vínculo(s)"):
                     limpias, sospechosas = analizar_lote_pendiente(lote_info["lote"])
