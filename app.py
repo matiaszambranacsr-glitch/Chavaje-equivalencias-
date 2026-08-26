@@ -2513,6 +2513,101 @@ MARCAS_VEHICULO = sorted(set([
 ]), key=len, reverse=True)
 
 
+def extraer_anios(descripcion):
+    """Saca el rango de años de una descripción. Las listas los escriben de varias formas:
+    '1969/78' (1969 a 1978), '1998/...' (1998 en adelante), '2005' (solo ese año).
+    Devuelve (desde, hasta) — hasta=None significa 'en adelante'."""
+    if not descripcion:
+        return None, None
+    texto = str(descripcion)
+    # Rango con dos años: 1969/78, 1974/1981, 2005/09
+    m = re.search(r'\b(19\d{2}|20\d{2})\s*/\s*(\d{2}|\d{4})\b', texto)
+    if m:
+        desde = int(m.group(1))
+        fin = m.group(2)
+        hasta = int(fin) if len(fin) == 4 else int(str(desde)[:2] + fin)
+        if hasta < desde:            # 1998/02 significa 1998 a 2002
+            hasta += 100
+        return desde, hasta
+    # Año en adelante: 1998/... o 1998/…
+    m = re.search(r'\b(19\d{2}|20\d{2})\s*/\s*\.{2,}', texto)
+    if m:
+        return int(m.group(1)), None
+    # Un año suelto
+    m = re.search(r'\b(19\d{2}|20\d{2})\b', texto)
+    if m:
+        return int(m.group(1)), int(m.group(1))
+    return None, None
+
+
+def sirve_para_anio(descripcion, anio):
+    """¿Este repuesto aplica a un vehículo de ese año? Si la descripción no dice nada de años,
+    devuelve None: no se puede afirmar ni descartar, y es mejor mostrarlo que ocultarlo."""
+    desde, hasta = extraer_anios(descripcion)
+    if desde is None:
+        return None
+    if hasta is None:
+        return anio >= desde
+    return desde <= anio <= hasta
+
+
+PALABRAS_NO_MODELO = {
+    "JUNTA", "JUNTAS", "JUEGO", "DESPIECE", "TAPA", "CILINDROS", "VALVULAS", "CARTER", "BOMBA",
+    "ACEITE", "AGUA", "COMBUSTIBLE", "NAFTA", "TERMOSTATO", "RETEN", "ARO", "AROS", "PISTON",
+    "CIL", "CILINDRO", "MOTOR", "SERIE", "PICK", "UP", "BUS", "CAMION", "TRACTOR", "DIESEL",
+    "TURBO", "INY", "INYECCION", "CID", "DOHC", "SOHC", "MM", "CC", "STD", "COMPLETO", "SIN",
+    "CON", "PARA", "DE", "DEL", "LA", "EL", "Y", "O", "REPARACION", "ADMISION", "ESCAPE",
+    "CARBURADOR", "DESCARBONIZACION", "LATERAL", "SUPLEMENTO", "CAPERUZA", "BOLILLEROS",
+    "DIRECCION", "MECANICA", "AGRICOLA", "CARGO", "GRAND", "SEMI", "ORING", "ARANDELA",
+    "ALUMINIO", "CLAVITO", "BANCADA", "CAPUCHON", "BUJIA", "BRIDA", "CAÑO", "CALEFACCION",
+    "ARBOL", "LEVAS", "SALIDA", "TAPON", "VALVULA", "MARIPOSA", "BASE", "DISTRIBUIDOR",
+    "CHUPADOR", "INTERMEDIA", "V", "L", "S", "R", "AX", "DD", "F",
+}
+
+
+@st.cache_data(show_spinner=False, max_entries=20)
+def modelos_de_marca(marca_vehiculo, _version, minimo=2):
+    """Arma la lista de modelos de una marca leyendo el catálogo.
+
+    Cómo distingue un modelo de una palabra de repuesto: las palabras de repuesto (JUNTA,
+    BOMBA, ORING) aparecen en MUCHAS marcas distintas, mientras que un modelo aparece casi
+    solo en la suya — un ASTRA es de Chevrolet y de nadie más. Con eso se filtra sin tener
+    que cargar una lista de modelos a mano, y crece solo con cada lista nueva que importás."""
+    c.execute("""SELECT p.descripcion FROM productos p
+                 WHERE p.descripcion IS NOT NULL AND UPPER(p.descripcion) LIKE ?
+                 LIMIT 4000""", (f"%{marca_vehiculo}%",))
+    propias = [r["descripcion"] for r in c.fetchall()]
+
+    from collections import Counter
+    cuenta_propia = Counter()
+    for desc in propias:
+        _, marca_det, resto = separar_por_marca_vehiculo(desc)
+        if marca_det != marca_vehiculo or not resto:
+            continue
+        for token in re.findall(r"[A-ZÁÉÍÓÚÑ][A-ZÁÉÍÓÚÑ0-9\-]{2,}", resto.upper()):
+            if token in PALABRAS_NO_MODELO or token in MARCAS_VEHICULO:
+                continue
+            if re.fullmatch(r"[\d\-]+", token):
+                continue
+            cuenta_propia[token] += 1
+
+    if not cuenta_propia:
+        return []
+
+    # Cuántas veces aparece cada palabra en el catálogo entero (para descartar las genéricas)
+    candidatos = [t for t, n in cuenta_propia.items() if n >= minimo]
+    modelos = []
+    for token in candidatos:
+        c.execute("""SELECT COUNT(*) FROM productos
+                     WHERE descripcion IS NOT NULL AND UPPER(descripcion) LIKE ?""",
+                  (f"%{token}%",))
+        total_catalogo = c.fetchone()[0] or 1
+        # Si la mayoría de las veces que aparece es dentro de esta marca, es un modelo suyo
+        if cuenta_propia[token] / total_catalogo >= 0.6:
+            modelos.append((token, cuenta_propia[token]))
+    return sorted(modelos, key=lambda x: -x[1])
+
+
 def separar_por_marca_vehiculo(descripcion):
     """Parte una descripción en (categoría, marca del vehículo, resto).
     Ejemplo: 'Junta Tapa de Cilindros FORD TAUNUS COUPE'
@@ -4176,23 +4271,48 @@ def decodificar_vin(vin):
     else:
         resultado["fabricante"] = None
 
-    # El código de año se repite cada 30 años: la misma letra sirve para 1987 y 2017. La regla
-    # del 7° carácter que se usaba antes no es confiable fuera de Estados Unidos, y llegaba a
-    # devolver años futuros. Ahora se calculan los dos candidatos, se descartan los imposibles
-    # (más adelante que el año que viene) y, si quedan los dos, se muestran los dos.
+    # --- Año: se puede ser preciso en los VIN de Norteamérica ---
+    # El código de la 10ª posición se repite cada 30 años (la "D" sirve para 1983 y 2013).
+    # Pero en los VIN emitidos para Norteamérica (país 1 a 5) hay una regla que lo desambigua:
+    # si el 7° carácter es LETRA, el vehículo es del ciclo 2010 en adelante; si es NÚMERO, del
+    # ciclo 1980-2009. Fuera de Norteamérica esa regla no se aplica (VW, por ejemplo, usa
+    # 'ZZZ' en esas posiciones), así que ahí se muestran las dos posibilidades.
     letra_anio = vin[9]
     base_anio = ANIOS_VIN.get(letra_anio)
     resultado["anio_estimado"] = None
     resultado["anio_alternativo"] = None
+    resultado["anio_preciso"] = False
     if base_anio:
         tope = datetime.now().year + 1
-        candidatos = sorted({base_anio, base_anio + 30})
-        candidatos = [a for a in candidatos if a <= tope]
-        if candidatos:
-            # Se ofrece primero el más reciente: la enorme mayoría del parque es del ciclo actual
-            resultado["anio_estimado"] = candidatos[-1]
-            if len(candidatos) > 1:
-                resultado["anio_alternativo"] = candidatos[0]
+        es_norteamerica = vin[0] in "12345"
+        if es_norteamerica:
+            anio = base_anio + 30 if vin[6].isalpha() else base_anio
+            if anio <= tope:
+                resultado["anio_estimado"] = anio
+                resultado["anio_preciso"] = True
+        if not resultado["anio_preciso"]:
+            candidatos = [a for a in sorted({base_anio, base_anio + 30}) if a <= tope]
+            if candidatos:
+                resultado["anio_estimado"] = candidatos[-1]
+                if len(candidatos) > 1:
+                    resultado["anio_alternativo"] = candidatos[0]
+
+    # --- Dígito verificador (9ª posición) ---
+    # Obligatorio en Norteamérica: se calcula con el resto del VIN, así que si no coincide es
+    # porque hay un carácter mal tipeado. Sirve para no buscar repuestos de un auto equivocado.
+    resultado["digito_verificador"] = None
+    if vin[0] in "12345":
+        valores = {**{str(d): d for d in range(10)},
+                   "A": 1, "B": 2, "C": 3, "D": 4, "E": 5, "F": 6, "G": 7, "H": 8,
+                   "J": 1, "K": 2, "L": 3, "M": 4, "N": 5, "P": 7, "R": 9,
+                   "S": 2, "T": 3, "U": 4, "V": 5, "W": 6, "X": 7, "Y": 8, "Z": 9}
+        pesos = [8, 7, 6, 5, 4, 3, 2, 10, 0, 9, 8, 7, 6, 5, 4, 3, 2]
+        try:
+            suma = sum(valores[ch] * peso for ch, peso in zip(vin, pesos))
+            esperado = "X" if suma % 11 == 10 else str(suma % 11)
+            resultado["digito_verificador"] = (vin[8] == esperado)
+        except KeyError:
+            resultado["digito_verificador"] = None
 
     return resultado
 
@@ -7594,12 +7714,22 @@ if pagina == PAGINAS[7]:
                 cv1, cv2, cv3 = st.columns(3)
                 cv1.metric("WMI", datos_vin["wmi"])
                 cv2.metric("País", datos_vin["pais"])
-                cv3.metric("Año estimado", datos_vin["anio_estimado"] or "—")
-                if datos_vin.get("anio_alternativo"):
+                etiqueta_anio = "Año" if datos_vin.get("anio_preciso") else "Año estimado"
+                cv3.metric(etiqueta_anio, datos_vin["anio_estimado"] or "—")
+                if datos_vin.get("anio_preciso"):
+                    st.caption("✅ Año exacto: los VIN de Norteamérica traen cómo desambiguarlo.")
+                elif datos_vin.get("anio_alternativo"):
                     st.caption(
-                        f"⚠️ El código de año se repite cada 30 años: puede ser "
-                        f"**{datos_vin['anio_estimado']}** o **{datos_vin['anio_alternativo']}**. "
-                        "Confirmalo con la cédula del vehículo."
+                        f"⚠️ El código de año se repite cada 30 años y este VIN no es de "
+                        f"Norteamérica, así que puede ser **{datos_vin['anio_estimado']}** o "
+                        f"**{datos_vin['anio_alternativo']}**. Confirmalo con la cédula."
+                    )
+                if datos_vin.get("digito_verificador") is True:
+                    st.caption("✅ El dígito verificador da bien: el VIN está bien escrito.")
+                elif datos_vin.get("digito_verificador") is False:
+                    st.error(
+                        "❌ El dígito verificador NO da. Hay algún carácter mal tipeado — "
+                        "revisalo antes de buscar repuestos, o vas a buscar los del auto equivocado."
                     )
                 if datos_vin["fabricante"]:
                     st.success(f"Fabricante cargado para este WMI: **{datos_vin['fabricante']}**")
@@ -7729,39 +7859,15 @@ if pagina == PAGINAS[7]:
     if sub_mec == SUB_MEC[2]:
         st.markdown("**🚙 Repuestos por vehículo**")
         st.caption(
-            "Buscá lo que le entra a un auto entrando por marca y categoría, en vez de por código. "
+            "Buscá lo que le entra a un auto entrando por marca y modelo, en vez de por código. "
             "Sale de las descripciones de tus propias listas — o sea que crece solo cada vez que "
             "importás un proveedor nuevo."
         )
 
         c.execute("SELECT COUNT(*) FROM productos")
         version_catalogo = c.fetchone()[0]   # cambia al cargar listas: refresca el caché
-
-        with st.expander("🔢 Empezar desde un VIN"):
-            st.caption(
-                "El VIN dice fabricante, país y año — pero **no** qué repuestos lleva el auto: "
-                "esa relación es un dato aparte que ningún VIN incluye. Lo que sí hace es "
-                "preseleccionarte la marca acá abajo."
-            )
-            vin_cat = st.text_input("VIN (17 caracteres):", key="vin_para_catalogo").strip().upper()
-            if vin_cat:
-                datos_v = decodificar_vin(vin_cat)
-                if not datos_v["valido"]:
-                    st.error(datos_v["error"])
-                else:
-                    fab = datos_v.get("fabricante") or "(fabricante no cargado)"
-                    anio_txt = datos_v.get("anio_estimado") or "?"
-                    st.success(f"**{fab}** · {datos_v['pais']} · año ~{anio_txt}")
-                    if datos_v.get("anio_alternativo"):
-                        st.caption(f"(el código de año se repite cada 30: puede ser {anio_txt} "
-                                    f"o {datos_v['anio_alternativo']})")
-                    for marca_v in MARCAS_VEHICULO:
-                        if fab and marca_v in fab.upper():
-                            st.session_state["marca_vehiculo_sel"] = marca_v
-                            st.caption(f"👇 Marca preseleccionada abajo: **{marca_v}**")
-                            break
-
         disponibles = marcas_vehiculo_disponibles(version_catalogo)
+
         if not disponibles:
             st.info(
                 "Todavía no se detectó ninguna marca de vehículo en las descripciones del catálogo. "
@@ -7770,51 +7876,171 @@ if pagina == PAGINAS[7]:
         else:
             etiquetas_marcas = [f"{m} ({n} productos)" for m, n in disponibles]
             mapa_marcas = {f"{m} ({n} productos)": m for m, n in disponibles}
-            preseleccion = st.session_state.get("marca_vehiculo_sel")
-            indice = 0
-            if preseleccion:
-                for i, (m, _) in enumerate(disponibles):
-                    if m == preseleccion:
-                        indice = i
-                        break
-            etiqueta_elegida = st.selectbox("Marca del vehículo:", etiquetas_marcas, index=indice,
+
+            with st.expander("🔢 Empezar desde un VIN"):
+                st.caption(
+                    "El VIN dice fabricante, país y año — pero **no** qué repuestos lleva el auto: "
+                    "esa relación es un dato aparte que ningún VIN incluye. Lo que sí hace es "
+                    "elegirte la marca acá abajo."
+                )
+                vin_cat = st.text_input("VIN (17 caracteres):", key="vin_para_catalogo").strip().upper()
+                if vin_cat:
+                    datos_v = decodificar_vin(vin_cat)
+                    if not datos_v["valido"]:
+                        st.error(datos_v["error"])
+                    else:
+                        fab = datos_v.get("fabricante") or "(fabricante no cargado)"
+                        anio_txt = datos_v.get("anio_estimado") or "?"
+                        prefijo_anio = "año" if datos_v.get("anio_preciso") else "año ~"
+                        st.success(f"**{fab}** · {datos_v['pais']} · {prefijo_anio}{anio_txt}")
+                        if datos_v.get("anio_alternativo"):
+                            st.caption(f"(el código de año se repite cada 30: puede ser {anio_txt} "
+                                        f"o {datos_v['anio_alternativo']})")
+                        if datos_v.get("digito_verificador") is False:
+                            st.error("❌ El dígito verificador no da: revisá si hay algún carácter "
+                                      "mal tipeado.")
+                        # Se escribe directo en el estado del selector: si se pasara como
+                        # "índice inicial", Streamlit lo ignora cuando el selector ya tiene
+                        # un valor elegido — por eso antes detectaba FORD y seguía en FIAT.
+                        marca_detectada = next(
+                            (mv for mv in MARCAS_VEHICULO if fab and mv in fab.upper()), None
+                        )
+                        if marca_detectada:
+                            etiqueta_detectada = next(
+                                (e for e in etiquetas_marcas if mapa_marcas[e] == marca_detectada), None
+                            )
+                            if etiqueta_detectada:
+                                if st.session_state.get("sel_marca_vehiculo") != etiqueta_detectada:
+                                    if st.button(f"👉 Usar {marca_detectada} en la búsqueda",
+                                                  key="usar_marca_vin", type="primary"):
+                                        st.session_state["sel_marca_vehiculo"] = etiqueta_detectada
+                                        st.rerun()
+                                else:
+                                    st.caption(f"✅ Ya estás buscando en **{marca_detectada}**.")
+                            else:
+                                st.warning(
+                                    f"Detecté **{marca_detectada}**, pero todavía no hay repuestos "
+                                    "de esa marca en tu catálogo."
+                                )
+
+            etiqueta_elegida = st.selectbox("Marca del vehículo:", etiquetas_marcas,
                                              key="sel_marca_vehiculo")
             marca_elegida = mapa_marcas[etiqueta_elegida]
-
             por_categoria = catalogo_por_vehiculo(marca_elegida, version_catalogo)
+
             if not por_categoria:
                 st.caption("No se pudo separar la categoría de esas descripciones.")
             else:
-                categorias = sorted(por_categoria.keys(), key=lambda k: -len(por_categoria[k]))
-                etiquetas_cat = [f"{cat} ({len(por_categoria[cat])})" for cat in categorias]
-                mapa_cat = {f"{cat} ({len(por_categoria[cat])})": cat for cat in categorias}
-                cat_elegida = mapa_cat[st.selectbox("Categoría:", etiquetas_cat, key="sel_categoria_vehiculo")]
+                # El modelo sale de una lista detectada del propio catálogo, y el año filtra
+                # usando los rangos que traen las descripciones ("1974/81", "1998/...").
+                # Es lo más parecido a un catálogo de aplicaciones que se puede armar sin
+                # comprar una base licenciada: cubre lo que vos vendés, no todo el mercado.
+                modelos_detectados = modelos_de_marca(marca_elegida, version_catalogo)
+                cmv1, cmv2 = cols(2)
+                with cmv1:
+                    if modelos_detectados:
+                        opciones_mod = ["Todos los modelos"] + [f"{m} ({n})" for m, n in modelos_detectados[:120]]
+                        mapa_mod = {f"{m} ({n})": m for m, n in modelos_detectados[:120]}
+                        mod_etiqueta = st.selectbox("Modelo / motor:", opciones_mod, key="sel_modelo_vehiculo")
+                        modelo_elegido = mapa_mod.get(mod_etiqueta)
+                    else:
+                        modelo_elegido = None
+                        st.caption("No se detectaron modelos para esta marca.")
+                with cmv2:
+                    anio_filtro = st.number_input(
+                        "Año del vehículo (0 = cualquiera):", min_value=0, max_value=2030,
+                        value=0, step=1, key="anio_vehiculo_filtro",
+                        help="Usa los rangos que traen las descripciones. Lo que no aclara años "
+                             "se muestra igual, marcado aparte."
+                    )
 
                 filtro_modelo = st.text_input(
-                    "Filtrar por modelo o aplicación (opcional):", key="filtro_modelo_vehiculo",
-                    placeholder="Ej: taunus, cruze, 1.6..."
+                    "Además, filtrar por texto (opcional):",
+                    key="filtro_modelo_vehiculo", placeholder="Ej: 1.6, inyección, turbo..."
                 ).strip().upper()
 
-                items = por_categoria[cat_elegida]
-                if filtro_modelo:
-                    items = [x for x in items
-                             if filtro_modelo in (x["_aplicacion"] or "").upper()
-                             or filtro_modelo in (x["Descripcion"] or "").upper()]
+                categorias = sorted(por_categoria.keys(), key=lambda k: -len(por_categoria[k]))
+                opciones_cat = ["Todas las categorías"] + [f"{c_} ({len(por_categoria[c_])})"
+                                                            for c_ in categorias]
+                mapa_cat = {f"{c_} ({len(por_categoria[c_])})": c_ for c_ in categorias}
+                cat_etiqueta = st.selectbox("Categoría (opcional):", opciones_cat,
+                                             key="sel_categoria_vehiculo")
 
-                st.success(f"{len(items)} repuesto(s) de **{cat_elegida}** para **{marca_elegida}**"
-                            + (f" que coinciden con «{filtro_modelo}»" if filtro_modelo else ""))
+                if cat_etiqueta == "Todas las categorías":
+                    items = [x for lista in por_categoria.values() for x in lista]
+                else:
+                    items = list(por_categoria[mapa_cat[cat_etiqueta]])
+
+                if modelo_elegido:
+                    items = [x for x in items if modelo_elegido in (x["Descripcion"] or "").upper()]
+                if filtro_modelo:
+                    palabras = [p for p in filtro_modelo.split() if p]
+                    items = [x for x in items
+                             if all(p in (x["Descripcion"] or "").upper() for p in palabras)]
+
+                # El año separa en tres grupos: sirve, no sirve, y "la descripción no lo aclara"
+                sin_dato_anio = []
+                if anio_filtro:
+                    coinciden, sin_dato = [], []
+                    for x in items:
+                        r = sirve_para_anio(x["Descripcion"], int(anio_filtro))
+                        if r is True:
+                            coinciden.append(x)
+                        elif r is None:
+                            sin_dato.append(x)
+                    items, sin_dato_anio = coinciden, sin_dato
+
+                hay_filtro = modelo_elegido or filtro_modelo or anio_filtro or \
+                    cat_etiqueta != "Todas las categorías"
+                if not hay_filtro:
+                    st.info(
+                        f"Hay {len(items)} repuesto(s) de **{marca_elegida}**. Elegí el modelo "
+                        "(o escribí el año) para achicar la lista."
+                    )
+                    items = items[:25]
+                else:
+                    resumen_filtro = " · ".join(filter(None, [
+                        marca_elegida, modelo_elegido,
+                        f"año {int(anio_filtro)}" if anio_filtro else None,
+                    ]))
+                    st.success(f"**{len(items)}** repuesto(s) para {resumen_filtro}")
+
                 if items:
                     st.caption("👆 Tocá un código para ver todas sus equivalencias:")
-                    for it in items[:25]:
+                    for it in items[:30]:
                         cvv1, cvv2 = st.columns([1.2, 3])
                         cvv1.button(f"🔎 {it['Codigo']}", key=f"veh_{it['ID']}",
                                      on_click=cb_ver_equivalencias, args=(it["Codigo"],))
                         precio_v = f"${it['Precio']:,.0f}" if it.get("Precio") else "s/precio"
                         stock_v = it.get("Stock")
-                        cvv2.caption(f"**{it['Marca']}** · {it['_aplicacion'] or ''}  \n"
-                                      f"{precio_v} · stock {stock_v if stock_v is not None else 's/d'}")
-                    if len(items) > 25:
-                        st.caption(f"(mostrando 25 de {len(items)} — usá el filtro de modelo)")
+                        detalle = it.get("_aplicacion") or it.get("Descripcion") or ""
+                        desde_a, hasta_a = extraer_anios(it["Descripcion"])
+                        anios_txt = ""
+                        if desde_a:
+                            anios_txt = f" · {desde_a}–{hasta_a if hasta_a else 'en adelante'}"
+                        cvv2.caption(f"**{it['_categoria']}**{anios_txt} · {detalle[:64]}  \n"
+                                      f"{it['Marca']} · {precio_v} · stock "
+                                      f"{stock_v if stock_v is not None else 's/d'}")
+                    if len(items) > 30:
+                        st.caption(f"(mostrando 30 de {len(items)})")
+                elif hay_filtro:
+                    st.warning("Ningún repuesto coincide con esa combinación.")
+
+                if sin_dato_anio:
+                    with st.expander(f"❔ {len(sin_dato_anio)} repuesto(s) que no aclaran el año "
+                                      "(pueden servir igual)"):
+                        st.caption(
+                            "La descripción no dice para qué años es, así que no se puede afirmar "
+                            "ni descartar. Se muestran aparte para que decidas vos."
+                        )
+                        for it in sin_dato_anio[:20]:
+                            csd1, csd2 = st.columns([1.2, 3])
+                            csd1.button(f"🔎 {it['Codigo']}", key=f"vehsd_{it['ID']}",
+                                         on_click=cb_ver_equivalencias, args=(it["Codigo"],))
+                            csd2.caption(f"**{it['_categoria']}** · "
+                                          f"{(it.get('_aplicacion') or '')[:64]}")
+                        if len(sin_dato_anio) > 20:
+                            st.caption(f"(mostrando 20 de {len(sin_dato_anio)})")
 
             esquemas_veh = esquemas_de_vehiculo(marca_elegida)
             if esquemas_veh:
@@ -7823,6 +8049,7 @@ if pagina == PAGINAS[7]:
                 for e in esquemas_veh[:10]:
                     st.caption(f"• {e['titulo']} — {e['modelo_auto'] or ''} {e['sistema'] or ''}")
                 st.caption("Se ven completos, con las piezas marcadas, en la sección Esquemas.")
+
 
     if sub_mec == SUB_MEC[3]:
         st.caption(
