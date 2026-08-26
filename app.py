@@ -525,6 +525,10 @@ def get_connection():
     # mostraba pendientes, se tocaba, no cambiaba nada, y volvía a mostrar lo mismo.
     if "imagen_orb_estado" not in columnas_productos:
         c.execute("ALTER TABLE productos ADD COLUMN imagen_orb_estado TEXT")
+    # Recuerda que a ese código ya se le buscó foto en la ficha del proveedor y no había. Sin
+    # esto, cada tanda volvía a golpear los mismos miles de códigos sin foto y nunca avanzaba.
+    if "foto_busqueda_estado" not in columnas_productos:
+        c.execute("ALTER TABLE productos ADD COLUMN foto_busqueda_estado TEXT")
 
     # Varias fotos por producto: la del catálogo del proveedor, la que sacaste vos, la de otra
     # marca del mismo repuesto. Al buscar se compara contra todas y se queda con la mejor. Es lo
@@ -1691,22 +1695,36 @@ def listar_evidencia(codigo_clean, producto_id):
     return [dict(r) for r in c.fetchall()]
 
 
-def comparar_medidas_productos(id_a, id_b, tolerancia_pct=3):
-    """Compara las medidas mecánicas cargadas de dos productos. Devuelve (coinciden, detalle).
-    Es evidencia física real, no una suposición: si un retén mide distinto, no entra, punto.
-    Si a alguno le faltan medidas cargadas, no dice nada — no es prueba ni a favor ni en contra."""
-    campos = [
-        ("diametro_interno", "diám. interno"), ("diametro_externo", "diám. externo"),
-        ("diametro_interno_cara_b", "diám. interno cara B"),
-        ("diametro_externo_cara_b", "diám. externo cara B"),
-        ("diametro_rosca_homocinetica", "diám. rosca"), ("diametro_copa", "diám. copa"),
-        ("ancho", "ancho"),
-    ]
-    columnas = ", ".join(cn for cn, _ in campos) + ", paso_rosca, cantidad_estrias"
-    c.execute(f"SELECT {columnas} FROM productos WHERE id = ?", (id_a,))
-    a = c.fetchone()
-    c.execute(f"SELECT {columnas} FROM productos WHERE id = ?", (id_b,))
-    b = c.fetchone()
+CAMPOS_MEDIDAS = [
+    ("diametro_interno", "diám. interno"), ("diametro_externo", "diám. externo"),
+    ("diametro_interno_cara_b", "diám. interno cara B"),
+    ("diametro_externo_cara_b", "diám. externo cara B"),
+    ("diametro_rosca_homocinetica", "diám. rosca"), ("diametro_copa", "diám. copa"),
+    ("ancho", "ancho"),
+]
+COLUMNAS_MEDIDAS = ", ".join(cn for cn, _ in CAMPOS_MEDIDAS) + ", paso_rosca, cantidad_estrias"
+
+
+def cargar_medidas_de_varios(ids):
+    """Trae las medidas de muchos productos de una sola consulta.
+
+    Por qué: analizar un lote pendiente hacía DOS consultas por cada par para comparar medidas.
+    Con 400 pares son 800 consultas — por eso el análisis estaba topeado en 400. Precargando
+    todo de una, revisar 5.000 pares cuesta casi lo mismo que revisar 400."""
+    medidas = {}
+    ids = list({int(i) for i in ids})
+    for inicio in range(0, len(ids), 800):   # SQLite tiene tope de parámetros por consulta
+        tanda = ids[inicio:inicio + 800]
+        marcadores = ",".join("?" * len(tanda))
+        c.execute(f"SELECT id, {COLUMNAS_MEDIDAS} FROM productos WHERE id IN ({marcadores})", tanda)
+        for fila in c.fetchall():
+            medidas[fila["id"]] = dict(fila)
+    return medidas
+
+
+def comparar_medidas(a, b, tolerancia_pct=3):
+    """El núcleo de la comparación, sobre dos diccionarios de medidas ya leídos."""
+    campos = CAMPOS_MEDIDAS
     if not a or not b:
         return None, "No se pudo leer alguno de los dos productos."
 
@@ -1735,6 +1753,17 @@ def comparar_medidas_productos(id_a, id_b, tolerancia_pct=3):
     if diferencias:
         return False, "NO coinciden: " + "; ".join(diferencias)
     return True, "Coinciden en " + ", ".join(comparadas)
+
+
+def comparar_medidas_productos(id_a, id_b, tolerancia_pct=3):
+    """Compara las medidas mecánicas cargadas de dos productos. Devuelve (coinciden, detalle).
+    Es evidencia física real, no una suposición: si un retén mide distinto, no entra, punto.
+    Si a alguno le faltan medidas cargadas, no dice nada — no es prueba ni a favor ni en contra."""
+    c.execute(f"SELECT id, {COLUMNAS_MEDIDAS} FROM productos WHERE id = ?", (id_a,))
+    a = c.fetchone()
+    c.execute(f"SELECT id, {COLUMNAS_MEDIDAS} FROM productos WHERE id = ?", (id_b,))
+    b = c.fetchone()
+    return comparar_medidas(dict(a) if a else None, dict(b) if b else None, tolerancia_pct)
 
 
 def verificar_en_catalogo_oficial(codigo_a_buscar, url_ficha, tiempo_maximo=8):
@@ -2012,7 +2041,13 @@ def resumen_lotes_pendientes():
     return [dict(r) for r in c.fetchall()]
 
 
-def analizar_lote_pendiente(lote, limite=400):
+def contar_pendientes_del_lote(lote):
+    c.execute("""SELECT COUNT(*) FROM equivalencias_pendientes
+                 WHERE lote = ? AND producto_a_id < producto_b_id""", (lote,))
+    return c.fetchone()[0]
+
+
+def analizar_lote_pendiente(lote, limite=400, desde=0):
     """Revisa los vínculos de una importación y marca los sospechosos. Dos alarmas:
       - Las medidas mecánicas cargadas se contradicen (prueba física en contra).
       - Un mismo código de fábrica termina apuntando a dos productos distintos del MISMO
@@ -2028,8 +2063,12 @@ def analizar_lote_pendiente(lote, limite=400):
                  JOIN marcas ma ON ma.id = pa.marca_id
                  JOIN marcas mb ON mb.id = pb.marca_id
                  WHERE ep.lote = ? AND ep.producto_a_id < ep.producto_b_id
-                 LIMIT ?""", (lote, limite))
+                 ORDER BY ep.producto_a_id, ep.producto_b_id
+                 LIMIT ? OFFSET ?""", (lote, limite, desde))
     filas = [dict(r) for r in c.fetchall()]
+
+    # Todas las medidas de una sola vez, en vez de dos consultas por par
+    medidas = cargar_medidas_de_varios([f["a"] for f in filas] + [f["b"] for f in filas])
 
     # Detectar códigos de fábrica que apuntan a varios productos del mismo proveedor
     apuntados = {}
@@ -2048,7 +2087,7 @@ def analizar_lote_pendiente(lote, limite=400):
             malo, motivo = codigo_sospechoso(f[f"cod_{lado}"])
             if malo:
                 alarmas.append(f"🚫 {etiqueta}: {motivo}")
-        coinciden, detalle = comparar_medidas_productos(f["a"], f["b"])
+        coinciden, detalle = comparar_medidas(medidas.get(f["a"]), medidas.get(f["b"]))
         if coinciden is False:
             alarmas.append(f"📐 {detalle}")
         oem, marca_otro = ((f["cod_a"], f["marca_b"]) if f["tipo_a"] == "OEM"
@@ -2414,20 +2453,54 @@ def contar_fotos_por_bajar():
     return c.fetchone()[0]
 
 
-def bajar_fotos_pendientes(limite=200, progreso=None):
-    """Baja de una vez las fotos que están como link externo y las guarda en la base, con su
-    miniatura y sus puntos característicos. Evita tener que ir cargándolas de a una."""
+def _bajar_en_paralelo(tareas, funcion, hilos=6, progreso=None, cancelado=None):
+    """Corre las bajadas en varios hilos a la vez y devuelve los resultados en orden de llegada.
+
+    Por qué: cada foto es una espera de red de 1 a 3 segundos, y en fila india eso son 100 fotos
+    en 3-5 minutos. La espera de una no impide empezar la otra, así que de a 6 en paralelo la
+    misma tanda baja en menos de un minuto. Solo la parte de red va en hilos: escribir en la
+    base se hace después, en el hilo principal, para no pelearse por el archivo.
+
+    6 hilos y no 50 a propósito: es el sitio del proveedor el que atiende, y no corresponde
+    martillarlo — además muchos cortan por exceso de pedidos y ahí no baja ninguna."""
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+    resultados = []
+    total = len(tareas)
+    with ThreadPoolExecutor(max_workers=hilos) as pool:
+        futuros = {pool.submit(funcion, t): t for t in tareas}
+        for hechos, futuro in enumerate(as_completed(futuros), 1):
+            tarea = futuros[futuro]
+            try:
+                datos, error = futuro.result()
+            except Exception as e:
+                datos, error = None, type(e).__name__
+            resultados.append((tarea, datos, error))
+            if progreso:
+                progreso(hechos, total)
+            if cancelado and cancelado():
+                for f in futuros:
+                    f.cancel()
+                break
+    return resultados
+
+
+def bajar_fotos_pendientes(limite=200, progreso=None, hilos=6, liviano=True):
+    """Baja las fotos que están como link externo y las guarda, con miniatura y firma visual."""
     c.execute("""SELECT id, imagen_url FROM productos
                  WHERE imagen_url IS NOT NULL AND imagen_url LIKE 'http%' LIMIT ?""", (limite,))
     pendientes = [(r["id"], r["imagen_url"]) for r in c.fetchall()]
+    if not pendientes:
+        return 0, []
+
+    resultados = _bajar_en_paralelo(
+        pendientes, lambda t: descargar_imagen(t[1]), hilos=hilos, progreso=progreso
+    )
+
     bajadas, fallidas = 0, []
-    for i, (pid, url) in enumerate(pendientes):
-        if progreso:
-            progreso(i + 1, len(pendientes))
-        datos, error = descargar_imagen(url)
+    for (pid, url), datos, error in resultados:
         if datos:
             try:
-                actualizar_imagen_producto(pid, datos)
+                actualizar_imagen_producto(pid, datos, origen="link", fuente=url, liviano=liviano)
                 bajadas += 1
             except Exception as e:
                 fallidas.append((url, type(e).__name__))
@@ -2436,33 +2509,97 @@ def bajar_fotos_pendientes(limite=200, progreso=None):
     return bajadas, fallidas
 
 
-def bajar_fotos_desde_catalogo(marca_id, limite=100, progreso=None):
-    """Para los productos de una marca que NO tienen foto: entra a la ficha oficial del
-    proveedor de cada código y trae la foto de ahí."""
+FILTROS_FOTOS = {
+    "todos": ("", "todos los códigos"),
+    "stock": (" AND stock > 0", "solo los que tienen stock"),
+    "precio": (" AND precio IS NOT NULL AND precio > 0", "solo los que tienen precio cargado"),
+}
+
+
+def _condicion_filtro_fotos(filtro):
+    return FILTROS_FOTOS.get(filtro, FILTROS_FOTOS["todos"])[0]
+
+
+def contar_fotos_por_traer_de_catalogo(marca_id, filtro="todos"):
+    """Cuántos códigos de esa marca faltan probar. No cuenta los que ya se probaron y no tenían
+    foto: esos ya no se reintentan, si no la tanda nunca avanzaba."""
+    c.execute(f"""SELECT COUNT(*) FROM productos
+                  WHERE marca_id = ? AND imagen_url IS NULL
+                    AND (foto_busqueda_estado IS NULL OR foto_busqueda_estado = 'error')
+                    {_condicion_filtro_fotos(filtro)}""", (marca_id,))
+    return c.fetchone()[0]
+
+
+def reintentar_codigos_sin_foto(marca_id=None):
+    """Vuelve a habilitar los códigos marcados como 'sin foto en la ficha', por si el proveedor
+    la subió después o se cayó el sitio justo esa vez."""
+    with db_lock:
+        if marca_id:
+            c.execute("UPDATE productos SET foto_busqueda_estado = NULL WHERE marca_id = ?", (marca_id,))
+        else:
+            c.execute("UPDATE productos SET foto_busqueda_estado = NULL")
+        cambiados = c.rowcount
+        conn.commit()
+    return cambiados
+
+
+def bajar_fotos_desde_catalogo(marca_id, limite=100, progreso=None, hilos=6, liviano=True,
+                               cancelado=None, filtro="todos"):
+    """Para los productos de una marca sin foto: entra a la ficha oficial del proveedor de cada
+    código y trae la foto de ahí. Los códigos cuya ficha no tiene foto quedan marcados para no
+    volver a consultarlos en cada tanda."""
     c.execute("SELECT url_ficha_template FROM marcas WHERE id = ?", (marca_id,))
     fila = c.fetchone()
     if not fila or not fila["url_ficha_template"]:
-        return 0, [("", "esa marca no tiene cargada la dirección de su catálogo")]
+        return 0, [("", "esa marca no tiene cargada la dirección de su catálogo")], 0
     plantilla = fila["url_ficha_template"]
 
-    c.execute("""SELECT id, codigo_raw FROM productos
-                 WHERE marca_id = ? AND imagen_url IS NULL LIMIT ?""", (marca_id, limite))
+    c.execute(f"""SELECT id, codigo_raw FROM productos
+                  WHERE marca_id = ? AND imagen_url IS NULL
+                    AND (foto_busqueda_estado IS NULL OR foto_busqueda_estado = 'error')
+                    {_condicion_filtro_fotos(filtro)}
+                  ORDER BY (stock > 0) DESC, id
+                  LIMIT ?""", (marca_id, limite))
     pendientes = [(r["id"], r["codigo_raw"]) for r in c.fetchall()]
-    bajadas, fallidas = 0, []
-    for i, (pid, codigo) in enumerate(pendientes):
-        if progreso:
-            progreso(i + 1, len(pendientes))
+    if not pendientes:
+        return 0, [], 0
+
+    def traer(tarea):
+        _, codigo = tarea
         url_ficha = plantilla.replace("{codigo}", quote(str(codigo), safe=""))
-        datos, error = buscar_imagen_en_ficha(url_ficha)
+        return buscar_imagen_en_ficha(url_ficha)
+
+    resultados = _bajar_en_paralelo(pendientes, traer, hilos=hilos, progreso=progreso,
+                                    cancelado=cancelado)
+
+    bajadas, fallidas, sin_foto = 0, [], 0
+    for (pid, codigo), datos, error in resultados:
+        url_ficha = plantilla.replace("{codigo}", quote(str(codigo), safe=""))
         if datos:
             try:
-                actualizar_imagen_producto(pid, datos)
+                actualizar_imagen_producto(pid, datos, origen="ficha", fuente=url_ficha,
+                                            liviano=liviano)
                 bajadas += 1
+                continue
             except Exception as e:
-                fallidas.append((codigo, type(e).__name__))
-        else:
-            fallidas.append((codigo, error))
-    return bajadas, fallidas
+                error = type(e).__name__
+        fallidas.append((codigo, error))
+        # "no encontré una foto" es definitivo para ese código; un error de red no lo es
+        definitivo = error and "no encontré" in str(error)
+        with db_lock:
+            c.execute("UPDATE productos SET foto_busqueda_estado = ? WHERE id = ?",
+                      ("sin_foto" if definitivo else "error", pid))
+            conn.commit()
+        if definitivo:
+            sin_foto += 1
+    return bajadas, fallidas, sin_foto
+
+
+def peso_estimado_por_foto(liviano=True):
+    """KB aproximados que ocupa cada foto en la base, para poder avisar antes de llenarla.
+    Medido sobre fotos de producto reales: en liviano son la firma visual (~20 KB) más la
+    miniatura (~2 KB); en completo se suma la imagen de 500px, que es la que pesa."""
+    return 22 if liviano else 120
 
 
 def generar_backup_sin_fotos():
@@ -4314,7 +4451,7 @@ def firma_de_consulta(imagen_bytes):
 # ============================================================
 
 def agregar_foto_producto(producto_id, imagen_bytes, origen="subida", fuente=None,
-                          hacer_principal=None):
+                          hacer_principal=None, liviano=False):
     """Suma una foto más al producto. Devuelve (id_foto, estado).
 
     Un producto puede tener varias: la del catálogo del proveedor, la que sacaste vos, la de
@@ -4331,10 +4468,18 @@ def agregar_foto_producto(producto_id, imagen_bytes, origen="subida", fuente=Non
     buffer = io.BytesIO()
     img.save(buffer, format="JPEG", quality=82)
     comprimida = buffer.getvalue()
-    data_uri = "data:image/jpeg;base64," + base64.b64encode(comprimida).decode("ascii")
 
     firma, estado = calcular_firma_visual(comprimida)
     thumb = generar_miniatura(comprimida)
+
+    if liviano and fuente:
+        # Modo liviano: se guarda el LINK, no la imagen. La foto de 500px pesa unos 45 KB dentro
+        # de la base; la miniatura, 4 KB. Con 8.000 productos eso es la diferencia entre una base
+        # de 500 MB (que ya no entra en el backup de GitHub ni sobrevive un reinicio) y una de
+        # 200 MB. La imagen grande la muestra el navegador desde el sitio del proveedor.
+        data_uri = fuente
+    else:
+        data_uri = "data:image/jpeg;base64," + base64.b64encode(comprimida).decode("ascii")
 
     with db_lock:
         c.execute("""INSERT INTO producto_fotos (producto_id, imagen_data, firma_blob, estado, origen, fuente)
@@ -4386,7 +4531,13 @@ def eliminar_foto_producto(id_foto):
 
 
 def generar_miniatura_de_data_uri(data_uri):
+    """Miniatura de una foto guardada. Si lo guardado es un link (modo liviano), el link mismo
+    hace de miniatura: la baja el navegador."""
     import base64
+    if not data_uri:
+        return None
+    if not data_uri.startswith("data:"):
+        return data_uri
     try:
         return generar_miniatura(base64.b64decode(data_uri.split(",", 1)[1]))
     except Exception:
@@ -4510,10 +4661,12 @@ def generar_miniatura(imagen_bytes, lado=110):
         return None
 
 
-def actualizar_imagen_producto(producto_id, imagen_bytes, origen="subida", fuente=None):
+def actualizar_imagen_producto(producto_id, imagen_bytes, origen="subida", fuente=None,
+                                liviano=False):
     """Guarda una foto del producto. Devuelve True si además quedó lista para la búsqueda visual.
     Se conserva el nombre de antes porque lo usan las bajadas en tanda."""
-    _, estado = agregar_foto_producto(producto_id, imagen_bytes, origen=origen, fuente=fuente)
+    _, estado = agregar_foto_producto(producto_id, imagen_bytes, origen=origen, fuente=fuente,
+                                       liviano=liviano)
     return estado == "ok"
 
 
@@ -7223,13 +7376,28 @@ if pagina == PAGINAS[3]:
             "número de parte (la del rubro, TecDoc, es paga), así que las dos fuentes confiables son: "
             "el link que ya venga en tu lista, o la ficha del propio proveedor."
         )
+
+        modo_liviano = st.checkbox(
+            "Modo liviano (recomendado): guardar el link de la foto, no la foto entera",
+            value=True, key="fotos_modo_liviano",
+            help="La foto se sigue viendo y se sigue pudiendo buscar por parecido, porque la firma "
+                 "visual y la miniatura sí se guardan. Lo que no se guarda es la imagen grande: "
+                 "esa la trae el navegador desde el sitio del proveedor."
+        )
+        kb_por_foto = peso_estimado_por_foto(modo_liviano)
+
         pendientes_url = contar_fotos_por_bajar()
         if pendientes_url:
             st.info(f"Hay {pendientes_url} producto(s) con la foto como link externo, sin bajar.")
-            if st.button(f"⬇️ Bajar hasta 200 fotos de esos links"):
+            cuantas_url = st.select_slider(
+                "¿Cuántas bajar?", options=[100, 250, 500, 1000, 2000],
+                value=min(500, max(100, pendientes_url)), key="cuantas_fotos_url"
+            )
+            if st.button(f"⬇️ Bajar {cuantas_url} fotos de esos links"):
                 barra = st.progress(0.0, text="Bajando fotos...")
                 bajadas, fallidas = bajar_fotos_pendientes(
-                    200, progreso=lambda i, t: barra.progress(i / max(t, 1), text=f"Foto {i} de {t}...")
+                    int(cuantas_url), liviano=modo_liviano,
+                    progreso=lambda i, t: barra.progress(i / max(t, 1), text=f"Foto {i} de {t}...")
                 )
                 barra.empty()
                 st.success(f"Se bajaron {bajadas} foto(s).")
@@ -7244,36 +7412,149 @@ if pagina == PAGINAS[3]:
                      FROM marcas m JOIN productos p ON p.marca_id = m.id
                      WHERE m.url_ficha_template IS NOT NULL AND m.url_ficha_template <> ''
                        AND p.imagen_url IS NULL
+                       AND (p.foto_busqueda_estado IS NULL OR p.foto_busqueda_estado = 'error')
                      GROUP BY m.id HAVING sin_foto > 0 ORDER BY sin_foto DESC""")
         marcas_con_catalogo = [dict(r) for r in c.fetchall()]
+
         if marcas_con_catalogo:
             st.markdown("**Traerlas desde la ficha del proveedor**")
-            opciones_mc = {f"{m['nombre']} ({m['sin_foto']} sin foto)": m["id"] for m in marcas_con_catalogo}
+            opciones_mc = {f"{m['nombre']} ({m['sin_foto']} por probar)": m["id"] for m in marcas_con_catalogo}
             elegida_mc = st.selectbox("Marca:", list(opciones_mc.keys()), key="marca_fotos_catalogo")
-            st.caption(
-                "Entra a la ficha de cada código y busca la foto ahí. Va de a 100 y puede tardar "
-                "un rato — se puede repetir las veces que haga falta."
+            id_marca_fotos = opciones_mc[elegida_mc]
+
+            etiquetas_filtro = {
+                "stock": "Solo los que tienen stock",
+                "precio": "Solo los que tienen precio cargado",
+                "todos": "Todos los códigos de la marca",
+            }
+            filtro_fotos = st.radio(
+                "¿Para cuáles traer foto?", list(etiquetas_filtro.keys()),
+                format_func=lambda k: etiquetas_filtro[k], key="filtro_fotos_catalogo",
+                help="Traer foto de TODO un catálogo de miles de códigos llena la base y hace que "
+                     "el backup ya no entre en GitHub. Empezar por los que tienen stock cubre lo "
+                     "que realmente movés."
             )
-            if st.button("🌐 Traer hasta 100 fotos del catálogo"):
-                barra2 = st.progress(0.0, text="Consultando fichas...")
-                bajadas2, fallidas2 = bajar_fotos_desde_catalogo(
-                    opciones_mc[elegida_mc], 100,
-                    progreso=lambda i, t: barra2.progress(i / max(t, 1), text=f"Código {i} de {t}...")
+            faltan_marca = contar_fotos_por_traer_de_catalogo(id_marca_fotos, filtro_fotos)
+            faltan_todos = contar_fotos_por_traer_de_catalogo(id_marca_fotos, "todos")
+            if filtro_fotos != "todos":
+                st.caption(f"Con ese filtro quedan {faltan_marca:,} de {faltan_todos:,} códigos.")
+
+            st.caption(
+                "Entra a la ficha de cada código y busca la foto ahí. Ahora va de a 6 fichas a la "
+                "vez en vez de una por una, así que rinde bastante más. Los códigos cuya ficha no "
+                "tiene foto quedan marcados y no se vuelven a consultar, para que cada tanda "
+                "avance de verdad."
+            )
+
+            cf_a, cf_b = st.columns(2)
+            with cf_a:
+                tanda_fotos = st.select_slider(
+                    "Fotos por tanda:", options=[100, 250, 500, 1000, 2000],
+                    value=500, key="tanda_fotos_catalogo"
+                )
+            with cf_b:
+                hilos_fotos = st.select_slider(
+                    "Fichas a la vez:", options=[3, 6, 10, 15], value=6, key="hilos_fotos",
+                    help="Más rápido, pero es el sitio del proveedor el que atiende: si te pasás "
+                         "puede empezar a rechazar los pedidos y no baja ninguna."
+                )
+
+            mb_estimados = faltan_marca * kb_por_foto / 1024
+            st.caption(
+                f"Cada foto ocupa unos {kb_por_foto} KB en la base "
+                f"({'modo liviano' if modo_liviano else 'guardando la imagen entera'}). "
+                f"Las {faltan_marca:,} de este filtro serían unos {mb_estimados:,.0f} MB."
+            )
+            if mb_estimados > 80:
+                st.warning(
+                    f"⚠️ {mb_estimados:,.0f} MB no entran en el backup de GitHub (tope 100 MB), y "
+                    "como el hosting borra el disco al reiniciar y restaura desde ahí, esas fotos "
+                    "se te van a perder en cada reinicio. "
+                    + ("Probá con «solo los que tienen stock»: es lo que realmente movés."
+                        if filtro_fotos == "todos" else
+                        "Aun con el filtro es mucho: convendría traerlas de a poco, empezando por "
+                        "las marcas que más vendés.")
+                )
+
+            en_curso = st.session_state.get("bajada_fotos_en_curso")
+
+            bc1, bc2 = st.columns(2)
+            if not en_curso:
+                if bc1.button(f"🌐 Traer una tanda de {tanda_fotos}", type="primary"):
+                    st.session_state["bajada_fotos_en_curso"] = {
+                        "marca_id": id_marca_fotos, "restantes": int(tanda_fotos),
+                        "bajadas": 0, "sin_foto": 0, "fallos": 0, "hasta_terminar": False,
+                    }
+                    st.rerun()
+                if bc2.button(f"♾️ Seguir hasta terminar las {faltan_marca:,}",
+                               disabled=not faltan_marca):
+                    st.session_state["bajada_fotos_en_curso"] = {
+                        "marca_id": id_marca_fotos, "restantes": faltan_marca,
+                        "bajadas": 0, "sin_foto": 0, "fallos": 0, "hasta_terminar": True,
+                    }
+                    st.rerun()
+            else:
+                if st.button("⏹️ Detener", type="primary"):
+                    st.session_state.pop("bajada_fotos_en_curso", None)
+                    st.rerun()
+
+            # La bajada se hace en pedazos, y entre pedazo y pedazo la pantalla se refresca. Si se
+            # hiciera todo de un saque, una tanda de 2.000 fotos serían 20 minutos con la pantalla
+            # colgada — y el navegador o el hosting cortan la conexión mucho antes de eso.
+            if en_curso and en_curso["marca_id"] == id_marca_fotos:
+                # Pedazos chicos a propósito: entre pedazo y pedazo es cuando se puede tocar
+                # "Detener", así que con tandas grandes el botón tardaría un minuto en responder.
+                pedazo = min(en_curso["restantes"], 90)
+                barra2 = st.progress(
+                    0.0, text=f"Consultando fichas... (llevamos {en_curso['bajadas']} foto(s))"
+                )
+                bajadas2, fallidas2, sin_foto2 = bajar_fotos_desde_catalogo(
+                    id_marca_fotos, pedazo, liviano=modo_liviano, hilos=int(hilos_fotos),
+                    filtro=filtro_fotos,
+                    progreso=lambda i, t: barra2.progress(min(i / max(t, 1), 1.0),
+                                                          text=f"Ficha {i} de {t}...")
                 )
                 barra2.empty()
-                if bajadas2:
-                    st.success(f"Se trajeron {bajadas2} foto(s).")
+                en_curso["bajadas"] += bajadas2
+                en_curso["sin_foto"] += sin_foto2
+                en_curso["fallos"] += max(len(fallidas2) - sin_foto2, 0)
+                procesadas = bajadas2 + len(fallidas2)
+                en_curso["restantes"] -= max(procesadas, 1)
+
+                if procesadas == 0 or en_curso["restantes"] <= 0:
+                    st.session_state.pop("bajada_fotos_en_curso", None)
+                    st.success(
+                        f"Listo: {en_curso['bajadas']} foto(s) traídas, "
+                        f"{en_curso['sin_foto']} código(s) sin foto en la ficha, "
+                        f"{en_curso['fallos']} con error de red."
+                    )
+                    if fallidas2:
+                        with st.expander(f"Ver los últimos {min(len(fallidas2), 30)} que no salieron"):
+                            for cod_f, motivo in fallidas2[:30]:
+                                st.caption(f"- {cod_f}: {motivo}")
                 else:
-                    st.warning("No se pudo traer ninguna foto de ese catálogo.")
-                if fallidas2:
-                    with st.expander(f"⚠️ {len(fallidas2)} sin foto"):
-                        for cod_f, motivo in fallidas2[:30]:
-                            st.caption(f"- {cod_f}: {motivo}")
+                    st.session_state["bajada_fotos_en_curso"] = en_curso
+                    st.caption(
+                        f"Van {en_curso['bajadas']} foto(s) — quedan unas {en_curso['restantes']:,}. "
+                        "Dejá esta pantalla abierta; sigue sola."
+                    )
+                    st.rerun()
         else:
             st.caption(
                 "Para traer fotos del catálogo hace falta cargar la dirección de la ficha de la marca "
                 "en Administrar → Marcas."
             )
+
+        c.execute("SELECT COUNT(*) FROM productos WHERE foto_busqueda_estado = 'sin_foto'")
+        marcados_sin_foto = c.fetchone()[0]
+        if marcados_sin_foto:
+            st.caption(
+                f"🔕 {marcados_sin_foto:,} código(s) quedaron marcados como «la ficha no tiene foto» "
+                "y ya no se vuelven a consultar."
+            )
+            if st.button("🔄 Volver a probar esos códigos"):
+                st.success(f"Se rehabilitaron {reintentar_codigos_sin_foto()} código(s).")
+                st.rerun()
 
         st.markdown("---")
         st.markdown("**📝 Descripciones con las columnas pegadas**")
@@ -7982,10 +8263,44 @@ Administrar → Mantenimiento.
                                           key="lote_en_revision")
             lote_info = opciones_lotes[etiqueta_lote]
 
-            limpias, sospechosas = analizar_lote_pendiente(lote_info["lote"])
+            total_lote = contar_pendientes_del_lote(lote_info["lote"])
+            ca1, ca2 = st.columns([2, 1])
+            with ca1:
+                cuantos = st.select_slider(
+                    "¿Cuántos analizar por vez?",
+                    options=[400, 1000, 2500, 5000, 10000],
+                    value=st.session_state.get("cuantos_pendientes", 1000),
+                    key="cuantos_pendientes",
+                    help="Analizar más tarda un poco más, pero te evita repetir la vuelta muchas veces."
+                )
+            paginas_lote = max((total_lote - 1) // int(cuantos) + 1, 1)
+            with ca2:
+                tanda_lote = st.number_input(
+                    f"Tanda (de {paginas_lote}):", min_value=1, max_value=paginas_lote,
+                    value=1, step=1, key=f"tanda_lote_{lote_info['lote']}"
+                ) if paginas_lote > 1 else 1
+
+            with st.spinner("Analizando..."):
+                limpias, sospechosas = analizar_lote_pendiente(
+                    lote_info["lote"], limite=int(cuantos), desde=(int(tanda_lote) - 1) * int(cuantos)
+                )
+            analizados = len(limpias) + len(sospechosas)
+            st.caption(f"Analizados {analizados:,} de {total_lote:,} vínculo(s) de esta lista." +
+                       (f" Quedan {total_lote - analizados:,} — cambiá de tanda para verlos."
+                        if total_lote > analizados else ""))
+
             ml1, ml2 = st.columns(2)
             ml1.metric("Sin nada raro", len(limpias))
             ml2.metric("Con alguna alarma", len(sospechosas))
+
+            if analizados and len(sospechosas) / analizados > 0.7:
+                st.error(
+                    "🔴 Más del 70% de esta lista dispara alarmas. Eso no es que tengas mala suerte: "
+                    "casi siempre significa que la importación quedó **mal mapeada** — la columna que "
+                    "se tomó como código en realidad traía cantidades, medidas o pedazos de la "
+                    "descripción. Antes de revisar de a uno, conviene descartar toda la lista y "
+                    "volver a importarla revisando bien el mapeo de columnas."
+                )
 
             bl1, bl2 = st.columns(2)
             pares_limpios = []
@@ -8004,15 +8319,18 @@ Administrar → Mantenimiento.
                 with st.expander(f"Ver los {len(limpias)} sin alarmas"):
                     st.dataframe(
                         [{"Código A": x["cod_a"], "Marca A": x["marca_a"],
-                           "Código B": x["cod_b"], "Marca B": x["marca_b"]} for x in limpias[:200]],
+                           "Código B": x["cod_b"], "Marca B": x["marca_b"]} for x in limpias[:500]],
                         use_container_width=True, hide_index=True
                     )
+                    if len(limpias) > 500:
+                        st.caption(f"Se muestran 500 de {len(limpias)}; el botón de aprobar los toma a todos.")
 
             if sospechosas:
                 st.markdown("---")
                 st.warning(f"⚠️ {len(sospechosas)} vínculo(s) con algo raro — revisalos:")
-                # De a 10 por pantalla: con cientos, la página se vuelve imposible de usar
-                por_pagina = 10
+                # De a tandas por pantalla: con cientos, la página se vuelve imposible de usar
+                por_pagina = st.radio("Mostrar de a:", [10, 25, 50], horizontal=True,
+                                       key="sosp_por_pagina")
                 paginas = (len(sospechosas) - 1) // por_pagina + 1
                 if paginas > 1:
                     pagina_sosp = st.number_input(
