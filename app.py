@@ -413,6 +413,33 @@ def mostrar_login_inicial():
 # ============================================================
 # CONEXIÓN Y ESQUEMA
 # ============================================================
+ARCHIVO_SEMILLA = "datos_iniciales.db"
+
+
+def _restaurar_desde_semilla(conexion):
+    """Streamlit Cloud borra el disco de la app cada vez que se redespliega o se reinicia, así
+    que la base de datos se pierde. Los archivos del REPOSITORIO, en cambio, sí sobreviven
+    (son parte del despliegue). Entonces: si la base está vacía y en el repositorio hay una
+    copia llamada 'datos_iniciales.db', se restaura sola al arrancar.
+    Para actualizar esa copia: bajar el backup desde Estadísticas → Backup y config, y subir
+    ese archivo al repositorio de GitHub con el nombre 'datos_iniciales.db'."""
+    if not os.path.exists(ARCHIVO_SEMILLA):
+        return False
+    try:
+        cur = conexion.cursor()
+        cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='productos'")
+        if cur.fetchone():
+            cur.execute("SELECT COUNT(*) FROM productos")
+            if cur.fetchone()[0] > 0:
+                return False  # ya hay datos cargados: no se toca nada
+        origen = sqlite3.connect(ARCHIVO_SEMILLA)
+        origen.backup(conexion)
+        origen.close()
+        return True
+    except Exception:
+        return False
+
+
 @st.cache_resource
 def get_connection():
     """Conexión única y persistente entre reruns de Streamlit."""
@@ -420,6 +447,9 @@ def get_connection():
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
     conn.execute("PRAGMA journal_mode = WAL")  # mejor concurrencia / menos bloqueos
+    # Si el disco se borró (pasa al redesplegar), recuperar desde la copia del repositorio.
+    # Va antes de crear las tablas: después las migraciones ponen al día el esquema.
+    st.session_state["_restaurado_de_semilla"] = _restaurar_desde_semilla(conn)
     c = conn.cursor()
 
     c.execute("""CREATE TABLE IF NOT EXISTS marcas (
@@ -733,6 +763,19 @@ def get_connection():
     )""")
     c.execute("CREATE INDEX IF NOT EXISTS idx_ventas_fecha ON ventas_registradas(fecha)")
     c.execute("CREATE INDEX IF NOT EXISTS idx_ventas_codigo ON ventas_registradas(codigo_pedido_clean)")
+
+    # Mapeo de columnas recordado por proveedor. Cada vez que se importa una lista hay que
+    # volver a indicar qué columna es el código, cuál el precio, etc. Un error ahí es lo que
+    # mete basura en la base (un producto con código "1" colgado de decenas de equivalencias),
+    # así que conviene que la próxima vez venga preseleccionado como la vez que funcionó.
+    c.execute("""CREATE TABLE IF NOT EXISTS mapeo_columnas (
+        proveedor TEXT PRIMARY KEY,
+        idx_prov INTEGER, idx_oem INTEGER, idx_desc INTEGER,
+        idx_precio INTEGER, idx_stock INTEGER,
+        buscar_oem_en_desc INTEGER DEFAULT 0,
+        prov_es_oem INTEGER DEFAULT 0,
+        fecha TEXT DEFAULT (datetime('now'))
+    )""")
 
     # Decisiones ya tomadas sobre un vínculo puntual. Sirve para dos cosas: que lo revisado no
     # vuelva a aparecer en la auditoría, y que lo rechazado no se vuelva a crear si más adelante
@@ -1716,8 +1759,15 @@ def auditar_equivalencias_existentes(limite=20000):
         key=lambda v: -v["cantidad"]
     )
 
+    # Si se llegó al tope, se revisó solo una parte: hay que decirlo, porque si no queda la
+    # falsa sensación de que está todo limpio cuando ni siquiera se miró la mitad.
+    c.execute("SELECT COUNT(*) FROM equivalencias WHERE producto_a_id < producto_b_id")
+    total_en_base = c.fetchone()[0]
+
     return {
         "total_revisados": len(filas),
+        "total_en_base": total_en_base,
+        "quedo_corta": len(filas) >= limite and total_en_base > len(filas),
         "ya_revisados_ok": len(ya_ok),
         "conflictos": conflictos,
         "por_medidas": por_medidas,
@@ -2192,6 +2242,73 @@ def bajar_fotos_desde_catalogo(marca_id, limite=100, progreso=None):
         else:
             fallidas.append((codigo, error))
     return bajadas, fallidas
+
+
+def generar_backup_sin_fotos():
+    """Copia de la base SIN las fotos. Las fotos son lo que más pesa: con unos 1.000 productos
+    con foto el archivo pasa los 100 MB que acepta GitHub, y ahí se pierde la copia de
+    seguridad del repositorio justo cuando más datos hay para proteger.
+    Todo lo demás va completo — catálogo, precios, equivalencias, vehículos, historial. Las
+    fotos se vuelven a traer con los botones de Mantenimiento."""
+    import tempfile
+    ruta_temporal = os.path.join(tempfile.gettempdir(), "backup_sin_fotos.db")
+    if os.path.exists(ruta_temporal):
+        os.remove(ruta_temporal)
+    destino = sqlite3.connect(ruta_temporal)
+    with db_lock:
+        conn.backup(destino)
+    destino.execute("UPDATE productos SET imagen_url = NULL, imagen_thumb = NULL, imagen_orb_blob = NULL")
+    try:
+        destino.execute("UPDATE esquemas SET imagen_blob = NULL")
+    except sqlite3.OperationalError:
+        pass
+    try:
+        destino.execute("UPDATE alias_transferencia SET qr_real_blob = NULL")
+    except sqlite3.OperationalError:
+        pass
+    destino.commit()
+    destino.execute("VACUUM")   # sin esto el archivo sigue pesando lo mismo
+    destino.commit()
+    destino.close()
+    with open(ruta_temporal, "rb") as f:
+        datos = f.read()
+    os.remove(ruta_temporal)
+    return datos
+
+
+def peso_de_las_fotos():
+    """Cuánto de la base ocupan las fotos, para poder avisar antes de que sea un problema."""
+    c.execute("""SELECT COUNT(*) AS con_foto,
+                        COALESCE(SUM(LENGTH(COALESCE(imagen_url,'')) +
+                                     LENGTH(COALESCE(imagen_thumb,'')) +
+                                     LENGTH(COALESCE(imagen_orb_blob, X''))), 0) AS bytes
+                 FROM productos WHERE imagen_url IS NOT NULL""")
+    fila = c.fetchone()
+    return fila["con_foto"], fila["bytes"] / (1024 * 1024)
+
+
+def guardar_mapeo_columnas(proveedor, idx_prov, idx_oem, idx_desc, idx_precio, idx_stock,
+                            buscar_oem_en_desc, prov_es_oem):
+    """Recuerda cómo se mapearon las columnas de este proveedor, para que la próxima vez venga
+    preseleccionado igual y no haya que acertarle de nuevo."""
+    if not proveedor or not proveedor.strip():
+        return
+    with db_lock:
+        c.execute("""INSERT OR REPLACE INTO mapeo_columnas
+                     (proveedor, idx_prov, idx_oem, idx_desc, idx_precio, idx_stock,
+                      buscar_oem_en_desc, prov_es_oem, fecha)
+                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))""",
+                  (proveedor.strip().upper(), idx_prov, idx_oem, idx_desc, idx_precio, idx_stock,
+                   1 if buscar_oem_en_desc else 0, 1 if prov_es_oem else 0))
+        conn.commit()
+
+
+def leer_mapeo_columnas(proveedor):
+    if not proveedor or not proveedor.strip():
+        return None
+    c.execute("SELECT * FROM mapeo_columnas WHERE proveedor = ?", (proveedor.strip().upper(),))
+    fila = c.fetchone()
+    return dict(fila) if fila else None
 
 
 def cb_ver_equivalencias(codigo_raw):
@@ -4306,6 +4423,24 @@ if "lista_whatsapp" not in st.session_state:
 #  2) st.tabs dibuja TODAS las pestañas en cada refresco, aunque no las estés mirando —
 #     con 8 pestañas haciendo consultas a la base, eso era trabajo al pedo. Ahora solo se
 #     arma la sección que estás viendo, así que la app responde bastante más rápido.
+# Aviso fuerte si la base quedó vacía: Streamlit Cloud borra el disco al redesplegar, y sin
+# este cartel uno se entera recién cuando busca un código y no aparece nada.
+c.execute("SELECT COUNT(*) FROM productos")
+_total_productos = c.fetchone()[0]
+if _total_productos == 0:
+    st.error(
+        "⚠️ **La base está vacía.** Esto pasa porque el servidor borra el disco de la app cuando "
+        "se redespliega o se reinicia. Si tenés un backup (.db) descargado, restauralo desde "
+        "**Estadísticas → 💾 Backup y config**. Para que no vuelva a pasar, mirá ahí abajo la "
+        "sección de copia permanente."
+    )
+elif st.session_state.get("_restaurado_de_semilla"):
+    st.info(
+        f"♻️ La base se restauró sola desde la copia guardada en el repositorio "
+        f"({_total_productos} productos). Lo cargado después de esa copia no está — "
+        "acordate de actualizarla cada tanto."
+    )
+
 PAGINAS = ["🔍 Buscador", "🔗 Vincular manual", "📁 Cargar Excel", "🗂️ Administrar",
            "📊 Estadísticas", "📋 Lista WhatsApp", "🚗 Vehículos", "🛠️ Modo Mecánico"]
 
@@ -5125,6 +5260,22 @@ if pagina == PAGINAS[2]:
                 opciones_cols = [f"Columna {i}: {str(v)[:20] if v else '(sin título)'}"
                                   for i, v in enumerate(encabezado)]
 
+                # Si ya se importó una lista de este proveedor, se arranca con el mismo mapeo
+                # que funcionó la vez anterior en vez de tener que acertarle de nuevo.
+                mapeo_previo = leer_mapeo_columnas(nombre_prov)
+                if mapeo_previo:
+                    st.success(
+                        f"💾 Se recordó cómo mapeaste las columnas la última vez que importaste "
+                        f"una lista de **{nombre_prov.strip().upper()}** ({mapeo_previo['fecha'][:10]}). "
+                        "Ya viene preseleccionado — revisá que coincida con este archivo."
+                    )
+                    def _valido(indice):
+                        return indice if (indice is not None and 0 <= indice < len(opciones_cols)) else None
+                    if _valido(mapeo_previo["idx_prov"]) is not None:
+                        idx_prov_auto = mapeo_previo["idx_prov"]
+                    idx_oem_auto = _valido(mapeo_previo["idx_oem"])
+                    idx_desc_auto = _valido(mapeo_previo["idx_desc"])
+
                 c_p, c_o, c_d = cols(3)
                 with c_p:
                     idx_prov = st.selectbox("Código Proveedor:", range(len(opciones_cols)),
@@ -5148,11 +5299,13 @@ if pagina == PAGINAS[2]:
                 st.markdown("**Cuando la lista no trae el código de fábrica**")
                 buscar_oem_en_desc = st.checkbox(
                     "🔎 Buscar códigos de fábrica dentro de la descripción",
+                    value=bool(mapeo_previo["buscar_oem_en_desc"]) if mapeo_previo else False,
                     help="Muchas listas meten el OEM en el texto ('... ORIG 6Q0407365'). Esto lo saca de ahí. "
                          "Es conservador a propósito: ante la duda no lo toma, para no ensuciar la base."
                 )
                 prov_es_oem = st.checkbox(
                     "🏭 El código del proveedor YA es el código de fábrica",
+                    value=bool(mapeo_previo["prov_es_oem"]) if mapeo_previo else False,
                     help="Para listas donde el proveedor usa directamente el código original. Se carga "
                          "también como OEM y quedan vinculados, así engancha con las listas de otros proveedores."
                 )
@@ -5347,6 +5500,9 @@ if pagina == PAGINAS[2]:
                     progreso.empty()
 
                     st.success(f"Se importaron {cargados} filas con equivalencia.")
+                    # Recordar el mapeo que funcionó, para la próxima lista de este proveedor
+                    guardar_mapeo_columnas(nombre_prov, idx_prov, idx_oem, idx_desc,
+                                            None, None, buscar_oem_en_desc, prov_es_oem)
                     if not cargar_directo and eq_batch:
                         st.info(
                             f"🔒 {len(eq_batch)} vínculo(s) quedaron **esperando tu revisión** — todavía "
@@ -6195,12 +6351,48 @@ if pagina == PAGINAS[4]:
             st.caption("Todavía no se registraron importaciones.")
 
     if sub_stats == SUB_STATS[2]:
-        if st.button("🗄️ Preparar backup de la base de datos"):
-            with open(DB_PATH, "rb") as f:
-                st.session_state["backup_bytes"] = f.read()
-        if "backup_bytes" in st.session_state:
-            st.download_button("⬇️ Descargar backup (.db)", data=st.session_state["backup_bytes"],
-                                file_name=f"equivalencias_backup_{datetime.now():%Y%m%d}.db")
+        cantidad_fotos, mb_fotos = peso_de_las_fotos()
+        c.execute("SELECT COUNT(*) FROM productos")
+        total_prod_backup = c.fetchone()[0]
+
+        st.markdown("**🗄️ Backup de la base**")
+        if mb_fotos > 60:
+            st.warning(
+                f"⚠️ Las fotos ({cantidad_fotos} productos) ocupan unos {mb_fotos:,.0f} MB. "
+                "GitHub no acepta archivos de más de 100 MB, así que para la copia del repositorio "
+                "conviene usar el **backup sin fotos** de acá abajo."
+            )
+        elif cantidad_fotos:
+            st.caption(f"Las fotos de {cantidad_fotos} producto(s) ocupan {mb_fotos:,.1f} MB de la base.")
+
+        cbk1, cbk2 = st.columns(2)
+        with cbk1:
+            st.markdown("*Completo (con fotos)*")
+            if st.button("🗄️ Preparar backup completo"):
+                with open(DB_PATH, "rb") as f:
+                    st.session_state["backup_bytes"] = f.read()
+            if "backup_bytes" in st.session_state:
+                st.download_button(
+                    f"⬇️ Descargar ({len(st.session_state['backup_bytes'])/(1024*1024):,.0f} MB)",
+                    data=st.session_state["backup_bytes"],
+                    file_name=f"equivalencias_backup_{datetime.now():%Y%m%d}.db"
+                )
+        with cbk2:
+            st.markdown("*Liviano (sin fotos) — para el repositorio*")
+            if st.button("🪶 Preparar backup sin fotos"):
+                with st.spinner("Armando..."):
+                    st.session_state["backup_liviano"] = generar_backup_sin_fotos()
+            if "backup_liviano" in st.session_state:
+                st.download_button(
+                    f"⬇️ Descargar ({len(st.session_state['backup_liviano'])/(1024*1024):,.1f} MB)",
+                    data=st.session_state["backup_liviano"],
+                    file_name="datos_iniciales.db",
+                    help="Ya viene con el nombre listo para subir al repositorio"
+                )
+                st.caption(
+                    f"Lleva los {total_prod_backup} productos con precios, equivalencias, vehículos e "
+                    "historial. Las fotos se vuelven a traer desde Mantenimiento."
+                )
 
         st.markdown("---")
         st.markdown("**📦 Exportar configuración (sin el catálogo de productos)**")
@@ -6215,6 +6407,37 @@ if pagina == PAGINAS[4]:
             file_name=f"configuracion_{datetime.now():%Y%m%d}.txt",
             mime="text/plain"
         )
+
+        st.markdown("---")
+        st.markdown("**🛡️ Copia permanente (para que no se borre nunca más)**")
+        st.caption(
+            "El servidor borra el disco de la app cada vez que se redespliega o se reinicia — por eso "
+            "se pierde la base. Pero los archivos que están en el repositorio de GitHub **sí** "
+            "sobreviven, porque forman parte del despliegue. Con esto se aprovecha eso:"
+        )
+        st.markdown("""
+1. Tocá **🪶 Preparar backup sin fotos** acá arriba y descargalo (ya viene con el nombre correcto).
+2. Subilo al repositorio de GitHub, al lado de `app.py`.
+
+Listo: cada vez que el servidor borre el disco, la app se levanta sola con esos datos.
+Repetí los 2 pasos cada tanto (una vez por semana, o después de cargar una lista grande).
+
+**¿Por qué sin fotos?** Porque son lo que más pesa y GitHub rechaza archivos de más de 100 MB.
+Sin ellas el archivo queda chico, y las fotos se vuelven a traer solas desde
+Administrar → Mantenimiento.
+        """)
+        if os.path.exists(ARCHIVO_SEMILLA):
+            try:
+                marca_tiempo = datetime.fromtimestamp(os.path.getmtime(ARCHIVO_SEMILLA))
+                peso = os.path.getsize(ARCHIVO_SEMILLA) / (1024 * 1024)
+                st.success(f"✅ Hay una copia en el repositorio ({peso:,.1f} MB, del {marca_tiempo:%d/%m/%Y}).")
+            except Exception:
+                st.success("✅ Hay una copia en el repositorio.")
+        else:
+            st.warning(
+                "⚠️ Todavía no hay ninguna copia en el repositorio. Mientras no la subas, cada "
+                "redespliegue borra todo lo cargado."
+            )
 
         st.markdown("---")
         st.markdown("**♻️ Restaurar desde un backup**")
@@ -6367,6 +6590,13 @@ if pagina == PAGINAS[4]:
             ma1.metric("Vínculos revisados", resultado_aud["total_revisados"])
             ma2.metric("Conflictos", len(resultado_aud["conflictos"]))
             ma3.metric("Medidas que no dan", len(resultado_aud["por_medidas"]))
+
+            if resultado_aud.get("quedo_corta"):
+                st.warning(
+                    f"⚠️ **La revisión quedó corta.** Se miraron {resultado_aud['total_revisados']:,} "
+                    f"de {resultado_aud['total_en_base']:,} vínculos que hay cargados. Resolvé estos "
+                    "y volvé a auditar para seguir con el resto — todavía puede haber problemas sin ver."
+                )
 
             # 1) Productos basura: lo primero a resolver, porque un solo producto mal cargado
             #    puede estar ensuciando cientos de códigos a la vez.
