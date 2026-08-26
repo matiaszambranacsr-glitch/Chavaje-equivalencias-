@@ -7,6 +7,7 @@ import unicodedata
 import json
 import hashlib
 import os
+import pickle
 from datetime import datetime
 from urllib.parse import quote
 from openpyxl import load_workbook, Workbook
@@ -518,6 +519,28 @@ def get_connection():
         c.execute("ALTER TABLE productos ADD COLUMN imagen_url TEXT")
     if "imagen_orb_blob" not in columnas_productos:
         c.execute("ALTER TABLE productos ADD COLUMN imagen_orb_blob BLOB")
+    # Estado del procesamiento visual de la foto: NULL = sin intentar, 'ok' = tiene descriptores,
+    # 'sin_detalle' = se intentó y la foto no da (pieza lisa, borrosa), 'error' = falló el proceso.
+    # Sin esto, una foto que no sirve quedaba "pendiente" para siempre: el botón de procesar
+    # mostraba pendientes, se tocaba, no cambiaba nada, y volvía a mostrar lo mismo.
+    if "imagen_orb_estado" not in columnas_productos:
+        c.execute("ALTER TABLE productos ADD COLUMN imagen_orb_estado TEXT")
+
+    # Varias fotos por producto: la del catálogo del proveedor, la que sacaste vos, la de otra
+    # marca del mismo repuesto. Al buscar se compara contra todas y se queda con la mejor. Es lo
+    # único que resuelve de verdad el cambio de ángulo: ninguna comparación reconoce una pieza
+    # fotografiada de frente en una foto sacada de costado.
+    c.execute("""CREATE TABLE IF NOT EXISTS producto_fotos (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        producto_id INTEGER NOT NULL REFERENCES productos(id) ON DELETE CASCADE,
+        imagen_data TEXT,
+        firma_blob BLOB,
+        estado TEXT,
+        origen TEXT,
+        fuente TEXT,
+        created_at TEXT DEFAULT (datetime('now'))
+    )""")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_producto_fotos_prod ON producto_fotos(producto_id)")
     # Miniatura chica aparte: la foto normal pesa bastante y la búsqueda la traía entera por
     # cada resultado, aunque en la tabla se vea en chiquito. Acá se guarda una versión liviana
     # solo para esas listas; la grande se sigue usando al ver el producto en Administrar.
@@ -1222,15 +1245,67 @@ def sanitizar(codigo):
     return re.sub(r'[^A-Z0-9]', '', codigo.upper())
 
 
+LARGO_MINIMO_NUMERICO = 3  # un código que es SOLO números tiene que tener al menos esta cantidad
+
+
+def es_codigo_util(texto):
+    """¿Vale la pena cargar esto como código? Descarta lo que es solo 1 o 2 dígitos y nada más
+    ('1', '12', '07', '3.0', '  2  ').
+
+    Por qué: en muchas listas la columna de código trae metida la cantidad, el número de orden
+    o la cantidad por bulto. Cada uno de esos números entraba como si fuera un producto, y como
+    la app vincula todo lo que aparece en la misma fila, el '1' de una fila terminaba siendo
+    "equivalente" al '1' de otra — y con eso, dos repuestos que no tienen nada que ver quedaban
+    linkeados entre sí. Un solo número basura arrastra decenas de equivalencias falsas.
+
+    Un código con al menos una letra se acepta aunque sea corto (A1, B2 existen de verdad)."""
+    limpio = sanitizar(texto)
+    if not limpio:
+        return False
+    if limpio.isdigit() and len(limpio) < LARGO_MINIMO_NUMERICO:
+        return False
+    return True
+
+
+def _partir_por_barra(trozo):
+    """La barra es el caso jodido: a veces separa dos códigos y a veces es PARTE del código.
+    'W712/94' y 'WK842/2' son códigos Mann enteros, un filtro solo — partirlos ahí generaba dos
+    productos falsos ('W712' y '94') y encima los dejaba vinculados entre sí como si fueran
+    equivalentes. Pero '1109AN/1109AB' sí son dos códigos.
+
+    La diferencia práctica: cuando la barra separa de verdad, los dos lados son códigos completos.
+    Cuando es parte del código, del otro lado queda un numerito corto (el sufijo de la variante).
+    Con espacios alrededor ('ABC / DEF') es separador seguro."""
+    if "/" not in trozo:
+        return [trozo]
+    if re.search(r'\s/|/\s', trozo):          # 'ABC / DEF' → separador
+        return [p for p in re.split(r'\s*/\s*', trozo) if p]
+    partes = [p for p in trozo.split("/") if p]
+    for parte in partes:
+        limpio = sanitizar(parte)
+        if limpio.isdigit() and len(limpio) <= 3:   # sufijo de variante: es un solo código
+            return [trozo]
+    return partes
+
+
 def dividir_codigos(celda):
-    """Separa una celda que puede traer varios códigos juntos (', ' '/' ';' salto de línea)."""
+    """Separa una celda que puede traer varios códigos juntos (coma, punto y coma, barra, salto
+    de línea). De paso descarta los pedazos que no son un código (ver es_codigo_util)."""
     if celda is None:
         return []
     texto = str(celda).strip()
     if texto == "" or texto.lower() == "nan":
         return []
-    partes = re.split(r'[,/;\n]+', texto)
-    return [p.strip() for p in partes if p.strip()]
+    salida = []
+    for trozo in re.split(r'[,;\n|]+', texto):
+        trozo = trozo.strip()
+        if not trozo:
+            continue
+        for parte in _partir_por_barra(trozo):
+            parte = parte.strip()
+            if parte and es_codigo_util(parte):
+                salida.append(parte)
+    return salida
 
 
 def extraer_codigos_de_texto(texto, minimo=6):
@@ -2245,6 +2320,43 @@ def reparar_codigos_con_decimal():
     return arreglados
 
 
+def listar_codigos_basura(limite=200):
+    """Productos ya cargados cuyo código es solo 1 o 2 dígitos ('1', '12', '07'). Entraron con
+    las importaciones viejas, antes del filtro, y son los que arrastran equivalencias falsas:
+    todos los '1' de todas las listas terminaron vinculados entre sí."""
+    c.execute("""SELECT p.id AS "ID", p.codigo_raw AS "Codigo", p.descripcion AS "Descripcion",
+                 m.nombre AS "Marca",
+                 (SELECT COUNT(*) FROM equivalencias e WHERE e.producto_a_id = p.id) AS "Vinculos"
+                 FROM productos p JOIN marcas m ON m.id = p.marca_id
+                 WHERE LENGTH(p.codigo_clean) <= 2
+                   AND p.codigo_clean GLOB '[0-9]*'
+                   AND NOT p.codigo_clean GLOB '*[A-Z]*'
+                 ORDER BY "Vinculos" DESC LIMIT ?""", (limite,))
+    return [dict(r) for r in c.fetchall()]
+
+
+def contar_codigos_basura():
+    c.execute("""SELECT COUNT(*) FROM productos
+                 WHERE LENGTH(codigo_clean) <= 2
+                   AND codigo_clean GLOB '[0-9]*'
+                   AND NOT codigo_clean GLOB '*[A-Z]*'""")
+    return c.fetchone()[0]
+
+
+def borrar_codigos_basura():
+    """Borra esos productos. Las equivalencias falsas que colgaban de ellos se van solas por el
+    ON DELETE CASCADE — que es justamente el punto de la limpieza.
+    No van a la papelera a propósito: restaurarlos sería volver a meter la basura, y la lista de
+    lo que se borra se puede bajar en Excel desde la pantalla antes de confirmar."""
+    items = listar_codigos_basura(limite=100000)
+    if not items:
+        return 0
+    with db_lock:
+        c.executemany("DELETE FROM productos WHERE id = ?", [(i["ID"],) for i in items])
+        conn.commit()
+    return len(items)
+
+
 def descargar_imagen(url, tiempo_maximo=12, tamano_maximo_mb=8):
     """Baja una imagen de una dirección web. Devuelve (bytes, error)."""
     import requests
@@ -2366,7 +2478,12 @@ def generar_backup_sin_fotos():
     destino = sqlite3.connect(ruta_temporal)
     with db_lock:
         conn.backup(destino)
-    destino.execute("UPDATE productos SET imagen_url = NULL, imagen_thumb = NULL, imagen_orb_blob = NULL")
+    destino.execute("UPDATE productos SET imagen_url = NULL, imagen_thumb = NULL, imagen_orb_blob = NULL, "
+                     "imagen_orb_estado = NULL")
+    try:
+        destino.execute("DELETE FROM producto_fotos")
+    except sqlite3.OperationalError:
+        pass
     try:
         destino.execute("UPDATE esquemas SET imagen_blob = NULL")
     except sqlite3.OperationalError:
@@ -2389,11 +2506,17 @@ def peso_de_las_fotos():
     """Cuánto de la base ocupan las fotos, para poder avisar antes de que sea un problema."""
     c.execute("""SELECT COUNT(*) AS con_foto,
                         COALESCE(SUM(LENGTH(COALESCE(imagen_url,'')) +
-                                     LENGTH(COALESCE(imagen_thumb,'')) +
-                                     LENGTH(COALESCE(imagen_orb_blob, X''))), 0) AS bytes
+                                     LENGTH(COALESCE(imagen_thumb,''))), 0) AS bytes
                  FROM productos WHERE imagen_url IS NOT NULL""")
     fila = c.fetchone()
-    return fila["con_foto"], fila["bytes"] / (1024 * 1024)
+    total = fila["bytes"]
+    try:
+        c.execute("""SELECT COALESCE(SUM(LENGTH(COALESCE(imagen_data,'')) +
+                                         LENGTH(COALESCE(firma_blob, X''))), 0) FROM producto_fotos""")
+        total += c.fetchone()[0]
+    except sqlite3.OperationalError:
+        pass
+    return fila["con_foto"], total / (1024 * 1024)
 
 
 def guardar_mapeo_columnas(proveedor, idx_prov, idx_oem, idx_desc, idx_precio, idx_stock,
@@ -3413,8 +3536,39 @@ def recordar_archivo(archivo, clave):
     return copia
 
 
+def _clave_widget_archivo(clave):
+    """La 'key' que usa el widget de subida hoy. Le va pegado un número que se incrementa cada
+    vez que se pide vaciarlo: cambiarle la key es la única forma de que Streamlit lo trate como
+    un widget nuevo y arranque en blanco."""
+    return f"_up_{clave}_{st.session_state.get(f'_nonce_{clave}', 0)}"
+
+
 def olvidar_archivo(clave):
+    """Borra la copia guardada Y vacía el widget de subida de verdad.
+
+    Antes solo se borraba la copia de la sesión. El widget seguía teniendo el archivo adentro,
+    así que en el refresco siguiente lo devolvía igual, se volvía a guardar solo, y el botón
+    'Usar otra foto / otro archivo' quedaba sin efecto: no había forma de cambiar el archivo
+    sin recargar la página entera. Ese era el problema de la carga que seguía apareciendo."""
     st.session_state.pop(f"_archivo_{clave}", None)
+    viejo = _clave_widget_archivo(clave)
+    st.session_state.pop(viejo, None)  # soltar los bytes del widget viejo, si no queda ocupando RAM
+    st.session_state[f"_nonce_{clave}"] = st.session_state.get(f"_nonce_{clave}", 0) + 1
+
+
+def subir_archivo(etiqueta, tipos, clave, **kwargs):
+    """Subida de archivo estándar de la app: widget + memoria + reset. Usar SIEMPRE esta en vez
+    de st.file_uploader directo, así todos los puntos de carga se comportan igual."""
+    subido = st.file_uploader(etiqueta, type=tipos, key=_clave_widget_archivo(clave), **kwargs)
+    return recordar_archivo(subido, clave)
+
+
+def boton_otro_archivo(clave, etiqueta="🗑️ Usar otro archivo", key=None):
+    """Botón para descartar lo subido y empezar de nuevo. Devuelve True si se tocó."""
+    if st.button(etiqueta, key=key or f"btn_otro_{clave}"):
+        olvidar_archivo(clave)
+        st.rerun()
+    return False
 
 
 def archivo_listo(archivo, etiqueta="archivo"):
@@ -3897,80 +4051,447 @@ def actualizar_medidas(producto_id, diam_int, diam_ext, ancho, paso_rosca, estri
         conn.commit()
 
 
-def calcular_descriptores_orb(imagen_bytes):
-    """Calcula puntos característicos (ORB) de una imagen para poder compararla contra otras
-    sin depender tanto del ángulo o el fondo exacto. Devuelve bytes serializados para guardar
-    en la base, o None si la imagen no tiene puntos suficientes (muy lisa, borrosa o uniforme)."""
+# ============================================================
+# COMPARACIÓN VISUAL DE PIEZAS
+# ============================================================
+# La idea: que puedas sacarle una foto a la pieza en el mostrador y encontrarla en el catálogo
+# aunque la foto de referencia sea del sitio del proveedor — otro ángulo, otro fondo, y otro
+# color de pieza (la misma pieza de dos marcas viene pintada distinta).
+#
+# Cómo se aguanta cada una de esas diferencias:
+#   fondo   → se recorta la pieza y se tira el resto antes de comparar
+#   color   → se compara en blanco y negro, y también contra el negativo de la foto
+#   luz     → se empareja el contraste por zonas (CLAHE) en las dos fotos
+#   ángulo  → los puntos ORB aguantan giro y escala, y RANSAC verifica que las coincidencias
+#             sean geométricamente coherentes (la misma pieza vista distinto) y no casualidad
+#   piezas lisas → cuando no hay textura para agarrarse, queda la silueta (momentos de Hu)
+#
+# Lo que NO puede: un cambio de punto de vista grande (de frente contra de costado) es otra
+# imagen para cualquier método de estos. Para eso se cargan varias fotos del mismo producto.
+
+FIRMA_VERSION = 3
+MAX_LADO = 640
+ORB_FEATURES_CATALOGO = 500
+ORB_FEATURES_CONSULTA = 800
+
+
+def _cv():
     import cv2
     import numpy as np
-    import pickle
+    return cv2, np
 
+
+def _recortar_objeto(img, cv2, np):
+    """Se queda con la pieza y tira el fondo.
+
+    Por qué importa: la foto del catálogo del proveedor suele estar sobre fondo blanco de
+    estudio, y la que sacás vos en el mostrador tiene el mostrador, la caja, la mano. Si no se
+    recorta, la mitad de los puntos que se comparan son del fondo, que no tienen nada que ver
+    entre una foto y la otra, y el parecido real de la pieza queda tapado.
+
+    Es conservador: si el recorte da un resultado raro (agarra casi toda la foto, o una esquina
+    minúscula), se deja la imagen entera. Recortar mal es peor que no recortar."""
+    alto, ancho = img.shape[:2]
+    area_total = alto * ancho
+
+    suave = cv2.GaussianBlur(img, (5, 5), 0)
+    bordes = cv2.Canny(suave, 30, 110)
+    bordes = cv2.dilate(bordes, np.ones((7, 7), np.uint8), iterations=2)
+
+    contornos, _ = cv2.findContours(bordes, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    if not contornos:
+        return img, None
+
+    mayor = max(contornos, key=cv2.contourArea)
+    area = cv2.contourArea(mayor)
+    if area < area_total * 0.04 or area > area_total * 0.92:
+        return img, mayor  # el recorte no aporta, pero la silueta sí sirve
+
+    x, y, w, h = cv2.boundingRect(mayor)
+    margen_x, margen_y = int(w * 0.08), int(h * 0.08)
+    x0 = max(x - margen_x, 0)
+    y0 = max(y - margen_y, 0)
+    x1 = min(x + w + margen_x, ancho)
+    y1 = min(y + h + margen_y, alto)
+    if (x1 - x0) < 40 or (y1 - y0) < 40:
+        return img, mayor
+    return img[y0:y1, x0:x1], mayor
+
+
+def _firma_de_forma(contorno, cv2, np):
+    """Momentos de Hu de la silueta: describen la FORMA sin importar el tamaño, la rotación ni
+    el color. Es lo único que queda cuando la pieza es lisa y no tiene textura para agarrarse
+    (rótulas, rulemanes, bujes) — ahí los puntos característicos no dan nada."""
+    if contorno is None:
+        return None
+    try:
+        hu = cv2.HuMoments(cv2.moments(contorno)).flatten()
+        # escala logarítmica: los valores crudos van de 1e-1 a 1e-60 y son incomparables
+        return [float(-np.sign(v) * np.log10(abs(v) + 1e-30)) for v in hu]
+    except Exception:
+        return None
+
+
+def _preparar(imagen_bytes):
+    """Deja la imagen lista para comparar: gris, recortada al objeto, a un tamaño común y con
+    el contraste emparejado. Devuelve (imagen, silueta) o (None, None)."""
+    cv2, np = _cv()
     arr = np.frombuffer(imagen_bytes, dtype=np.uint8)
     img = cv2.imdecode(arr, cv2.IMREAD_GRAYSCALE)
     if img is None:
-        return None
-    alto, ancho = img.shape
-    escala = 500 / max(alto, ancho)
+        return None, None
+
+    escala_previa = 900 / max(img.shape[:2])
+    if escala_previa < 1:
+        img = cv2.resize(img, None, fx=escala_previa, fy=escala_previa, interpolation=cv2.INTER_AREA)
+
+    # CLAHE ANTES de buscar el objeto: si la foto tiene poco contraste (pieza clara sobre fondo
+    # claro, foto velada) sin esto no se detecta ningún borde y el recorte no recorta nada.
+    img = cv2.createCLAHE(clipLimit=3.0, tileGridSize=(8, 8)).apply(img)
+
+    recortada, contorno = _recortar_objeto(img, cv2, np)
+    forma = _firma_de_forma(contorno, cv2, np)
+
+    escala = MAX_LADO / max(recortada.shape[:2])
     if escala < 1:
-        img = cv2.resize(img, (int(ancho * escala), int(alto * escala)))
-    orb = cv2.ORB_create(nfeatures=300)
-    _, descriptores = orb.detectAndCompute(img, None)
-    if descriptores is None or len(descriptores) < 5:
+        recortada = cv2.resize(recortada, None, fx=escala, fy=escala, interpolation=cv2.INTER_AREA)
+    elif escala > 2:
+        recortada = cv2.resize(recortada, None, fx=2, fy=2, interpolation=cv2.INTER_CUBIC)
+
+    # Segunda pasada de contraste, ya sobre el recorte: ahora que el fondo no está, el ajuste
+    # se reparte sobre la pieza en vez de gastarse en el mostrador.
+    return cv2.createCLAHE(clipLimit=2.5, tileGridSize=(8, 8)).apply(recortada), forma
+
+
+def calcular_firma_visual(imagen_bytes, es_consulta=False):
+    """Saca la 'huella' visual de una foto. Devuelve (blob, estado).
+
+    Guarda los puntos característicos (ORB) Y la silueta. Para la foto que se está buscando
+    guarda además la versión en negativo: una misma pieza en negro y en aluminio da gradientes
+    invertidos, y ORB compara claro-contra-oscuro, así que sin el negativo no se reconocerían
+    entre sí. Se guarda solo del lado de la consulta para no duplicar el peso del catálogo."""
+    try:
+        cv2, np = _cv()
+    except Exception:
+        return None, "error"
+
+    try:
+        img, forma = _preparar(imagen_bytes)
+        if img is None:
+            return None, "error"
+
+        n = ORB_FEATURES_CONSULTA if es_consulta else ORB_FEATURES_CATALOGO
+        orb = cv2.ORB_create(nfeatures=n, scaleFactor=1.2, nlevels=10,
+                             edgeThreshold=15, fastThreshold=12)
+        kp, desc = orb.detectAndCompute(img, None)
+
+        payload = {
+            "v": FIRMA_VERSION,
+            "forma": forma,
+            "dim": [int(img.shape[1]), int(img.shape[0])],
+            "kp": np.float32([k.pt for k in kp]) if kp else None,
+            "desc": desc,
+        }
+
+        if es_consulta:
+            kp_i, desc_i = orb.detectAndCompute(cv2.bitwise_not(img), None)
+            payload["kp_inv"] = np.float32([k.pt for k in kp_i]) if kp_i else None
+            payload["desc_inv"] = desc_i
+
+        tiene_textura = desc is not None and len(desc) >= 12
+        if not tiene_textura and forma is None:
+            return None, "sin_detalle"
+        estado = "ok" if tiene_textura else "solo_forma"
+        return pickle.dumps(payload, protocol=4), estado
+    except Exception:
+        return None, "error"
+
+
+def _cargar_firma(blob):
+    """Lee una firma guardada. Acepta las viejas (que eran solo los descriptores sueltos) para
+    no tener que rehacer todo el catálogo de golpe."""
+    try:
+        dato = pickle.loads(blob)
+    except Exception:
         return None
-    return pickle.dumps(descriptores)
+    if isinstance(dato, dict) and dato.get("v"):
+        return dato
+    # Formato viejo: un array de descriptores pelado, sin puntos ni silueta
+    return {"v": 1, "desc": dato, "kp": None, "forma": None}
 
 
-def comparar_descriptores_orb(desc_bytes_a, desc_bytes_b):
-    """Cuenta cuántos puntos característicos matchean bien entre dos fotos — cuanto más alto,
-    más parecidas. Es un puntaje relativo para ORDENAR candidatos, no un porcentaje de certeza."""
-    import cv2
-    import pickle
+def _parecido_de_forma(forma_a, forma_b):
+    """0..100 según cuánto se parecen las siluetas."""
+    if not forma_a or not forma_b:
+        return 0.0
+    try:
+        # Solo los 3 primeros momentos, y con peso decreciente. Del cuarto en adelante son ruido
+        # puro en fotos reales (el séptimo hasta cambia de signo si la pieza está espejada), y
+        # metiéndolos la comparación daba cero siempre, incluso entre dos fotos de la misma pieza.
+        pesos = (1.0, 0.7, 0.4)
+        d = sum(w * abs(a - b) for w, a, b in zip(pesos, forma_a[:3], forma_b[:3]))
+        return float(max(0.0, 100.0 * (1.0 - d / 2.5)))
+    except Exception:
+        return 0.0
 
-    desc_a = pickle.loads(desc_bytes_a)
-    desc_b = pickle.loads(desc_bytes_b)
+
+def _puntaje_textura(desc_q, kp_q, desc_c, kp_c, cv2, np):
+    """Cuenta coincidencias reales entre dos fotos y las verifica geométricamente.
+
+    El filtro de Lowe saca las coincidencias ambiguas, y RANSAC exige además que todas caigan
+    en una misma transformación coherente — o sea, que sean la misma pieza vista distinto, y no
+    puntos sueltos que casualmente se parecen. Sin esa verificación, dos piezas metálicas
+    cualesquiera dan decenas de 'coincidencias' y todo parece parecido a todo."""
+    if desc_q is None or desc_c is None or len(desc_q) < 8 or len(desc_c) < 8:
+        return 0.0, 0
     bf = cv2.BFMatcher(cv2.NORM_HAMMING)
-    matches = bf.knnMatch(desc_a, desc_b, k=2)
-    buenos = 0
-    for par in matches:
-        if len(par) == 2:
-            m, n = par
-            if m.distance < 0.75 * n.distance:  # test de razón de Lowe: descarta matches ambiguos
-                buenos += 1
-    return buenos
+    try:
+        matches = bf.knnMatch(desc_q, desc_c, k=2)
+    except Exception:
+        return 0.0, 0
 
+    buenos = [par[0] for par in matches if len(par) == 2 and par[0].distance < 0.78 * par[1].distance]
+    if not buenos:
+        return 0.0, 0
 
-def buscar_por_similitud_visual(imagen_bytes, top_n=8):
-    """Compara una foto contra todas las que ya tenés cargadas en el catálogo, y devuelve las
-    más parecidas ordenadas — son candidatos a revisar a mano, NUNCA una identificación confirmada.
-    Con piezas metálicas lisas y sin textura (muchas rótulas, rulemanes, bulones) va a rendir mal
-    por más buena que sea la foto — no hay suficiente detalle visual distintivo para agarrarse."""
-    descriptores_query = calcular_descriptores_orb(imagen_bytes)
-    if descriptores_query is None:
-        return None, (
-            "La foto no tiene suficientes detalles distintivos para comparar (muy lisa, borrosa, "
-            "poco iluminada, o la pieza es un objeto metálico simple sin textura marcada)."
-        )
-
-    c.execute("""SELECT p.id AS "ID", p.codigo_raw AS "Codigo", p.descripcion AS "Descripcion",
-                 m.nombre AS "Marca", p.precio AS "Precio", p.stock AS "Stock", p.imagen_orb_blob
-                 FROM productos p JOIN marcas m ON m.id = p.marca_id
-                 WHERE p.imagen_orb_blob IS NOT NULL""")
-    candidatos = c.fetchall()
-    if not candidatos:
-        return None, "Todavía no tenés ninguna foto de producto cargada en el catálogo para comparar."
-
-    resultados = []
-    for fila in candidatos:
+    inliers = 0
+    if len(buenos) >= 8 and kp_q is not None and kp_c is not None:
         try:
-            puntaje = comparar_descriptores_orb(descriptores_query, fila["imagen_orb_blob"])
+            src = np.float32([kp_q[m.queryIdx] for m in buenos]).reshape(-1, 1, 2)
+            dst = np.float32([kp_c[m.trainIdx] for m in buenos]).reshape(-1, 1, 2)
+            _, mascara = cv2.findHomography(src, dst, cv2.RANSAC, 6.0, maxIters=2000)
+            inliers = int(mascara.sum()) if mascara is not None else 0
         except Exception:
-            continue
-        resultados.append({
-            "ID": fila["ID"], "Codigo": fila["Codigo"], "Descripcion": fila["Descripcion"],
-            "Marca": fila["Marca"], "Precio": fila["Precio"], "Stock": fila["Stock"], "Puntaje": puntaje
-        })
-    resultados.sort(key=lambda r: -r["Puntaje"])
+            inliers = 0
+
+    # Las verificadas valen; las no verificadas cuentan poco (pueden ser casualidad)
+    efectivas = inliers + len(buenos) * 0.15
+    denominador = max(min(len(desc_q), len(desc_c)), 1)
+    return float(min(100.0, 130.0 * efectivas / denominador)), inliers
+
+
+def comparar_firmas(firma_consulta, blob_catalogo):
+    """Devuelve (parecido 0-100, coincidencias verificadas, parecido de forma 0-100)."""
+    try:
+        cv2, np = _cv()
+    except Exception:
+        return 0.0, 0, 0.0
+
+    fc = _cargar_firma(blob_catalogo)
+    if not fc:
+        return 0.0, 0, 0.0
+
+    mejor_textura, mejor_inliers = 0.0, 0
+    versiones = [(firma_consulta.get("desc"), firma_consulta.get("kp"))]
+    if firma_consulta.get("desc_inv") is not None:
+        versiones.append((firma_consulta.get("desc_inv"), firma_consulta.get("kp_inv")))
+
+    for desc_q, kp_q in versiones:
+        p, inl = _puntaje_textura(desc_q, kp_q, fc.get("desc"), fc.get("kp"), cv2, np)
+        if p > mejor_textura:
+            mejor_textura, mejor_inliers = p, inl
+
+    forma = _parecido_de_forma(firma_consulta.get("forma"), fc.get("forma"))
+
+    if mejor_textura >= 5:
+        # Hay textura para agarrarse: manda eso, la forma solo desempata
+        total = 0.78 * mejor_textura + 0.22 * forma
+    else:
+        # Pieza lisa: solo queda la silueta, y sola vale bastante menos — techo bajo a propósito
+        total = 0.40 * forma
+    return round(min(total, 100.0), 1), mejor_inliers, round(forma, 1)
+
+
+def firma_de_consulta(imagen_bytes):
+    blob, estado = calcular_firma_visual(imagen_bytes, es_consulta=True)
+    if blob is None:
+        return None, estado
+    return pickle.loads(blob), estado
+
+
+# ============================================================
+# GUARDADO DE FOTOS (varias por producto)
+# ============================================================
+
+def agregar_foto_producto(producto_id, imagen_bytes, origen="subida", fuente=None,
+                          hacer_principal=None):
+    """Suma una foto más al producto. Devuelve (id_foto, estado).
+
+    Un producto puede tener varias: la del catálogo del proveedor, la que sacaste vos, la de
+    otra marca del mismo repuesto. Al buscar se compara contra TODAS y se queda con la mejor —
+    que es lo único que realmente resuelve el cambio de ángulo, porque ninguna comparación
+    reconoce una pieza de frente en una foto de costado."""
+    from PIL import Image as PILImage
+    import base64
+    try:
+        img = PILImage.open(io.BytesIO(imagen_bytes)).convert("RGB")
+    except Exception:
+        return None, "error"
+    img.thumbnail((500, 500))
+    buffer = io.BytesIO()
+    img.save(buffer, format="JPEG", quality=82)
+    comprimida = buffer.getvalue()
+    data_uri = "data:image/jpeg;base64," + base64.b64encode(comprimida).decode("ascii")
+
+    firma, estado = calcular_firma_visual(comprimida)
+    thumb = generar_miniatura(comprimida)
+
+    with db_lock:
+        c.execute("""INSERT INTO producto_fotos (producto_id, imagen_data, firma_blob, estado, origen, fuente)
+                     VALUES (?, ?, ?, ?, ?, ?)""",
+                  (producto_id, data_uri, firma, estado, origen, fuente))
+        id_foto = c.lastrowid
+        if hacer_principal is None:
+            c.execute("SELECT imagen_url FROM productos WHERE id = ?", (producto_id,))
+            fila = c.fetchone()
+            hacer_principal = not (fila and fila["imagen_url"])
+        if hacer_principal:
+            c.execute("UPDATE productos SET imagen_url = ?, imagen_thumb = ?, imagen_orb_estado = ? "
+                      "WHERE id = ?", (data_uri, thumb, estado, producto_id))
+        conn.commit()
+    return id_foto, estado
+
+
+def listar_fotos_producto(producto_id):
+    c.execute("""SELECT id, imagen_data, estado, origen, fuente, created_at
+                 FROM producto_fotos WHERE producto_id = ? ORDER BY id""", (producto_id,))
+    return [dict(r) for r in c.fetchall()]
+
+
+def eliminar_foto_producto(id_foto):
+    """Borra una foto. Si era la que se muestra en el buscador, la reemplaza por otra que quede."""
+    c.execute("SELECT producto_id, imagen_data FROM producto_fotos WHERE id = ?", (id_foto,))
+    fila = c.fetchone()
+    if not fila:
+        return False
+    producto_id, data = fila["producto_id"], fila["imagen_data"]
+    with db_lock:
+        c.execute("DELETE FROM producto_fotos WHERE id = ?", (id_foto,))
+        c.execute("SELECT imagen_url FROM productos WHERE id = ?", (producto_id,))
+        actual = c.fetchone()
+        if actual and actual["imagen_url"] == data:
+            c.execute("SELECT imagen_data, estado FROM producto_fotos WHERE producto_id = ? "
+                      "ORDER BY id LIMIT 1", (producto_id,))
+            reemplazo = c.fetchone()
+            if reemplazo:
+                c.execute("UPDATE productos SET imagen_url = ?, imagen_thumb = ?, imagen_orb_estado = ? "
+                          "WHERE id = ?",
+                          (reemplazo["imagen_data"], generar_miniatura_de_data_uri(reemplazo["imagen_data"]),
+                           reemplazo["estado"], producto_id))
+            else:
+                c.execute("UPDATE productos SET imagen_url = NULL, imagen_thumb = NULL, "
+                          "imagen_orb_estado = NULL WHERE id = ?", (producto_id,))
+        conn.commit()
+    return True
+
+
+def generar_miniatura_de_data_uri(data_uri):
+    import base64
+    try:
+        return generar_miniatura(base64.b64decode(data_uri.split(",", 1)[1]))
+    except Exception:
+        return None
+
+
+def contar_fotos_comparables():
+    """(fotos listas, productos con al menos una foto lista, fotos sin procesar, fotos que no sirven)"""
+    c.execute("SELECT COUNT(*), COUNT(DISTINCT producto_id) FROM producto_fotos WHERE firma_blob IS NOT NULL")
+    listas, productos = c.fetchone()
+    c.execute("SELECT COUNT(*) FROM producto_fotos WHERE firma_blob IS NULL AND (estado IS NULL OR estado = 'error')")
+    pendientes = c.fetchone()[0]
+    c.execute("SELECT COUNT(*) FROM producto_fotos WHERE estado = 'sin_detalle'")
+    no_sirven = c.fetchone()[0]
+    return listas, productos, pendientes, no_sirven
+
+
+def buscar_por_similitud_visual(imagen_bytes, top_n=8, minimo=3.0, progreso=None):
+    """Compara una foto contra todas las del catálogo y devuelve las más parecidas ordenadas.
+
+    Son candidatos para revisar a mano, NUNCA una identificación confirmada: hay repuestos que
+    de foto son idénticos y no son intercambiables (cambia el paso de rosca, la altura, el lado).
+    Confirmá siempre por código o comparando la pieza física."""
+    firma_consulta, estado = calcular_firma_visual(imagen_bytes, es_consulta=True)
+    if firma_consulta is None:
+        if estado == "error":
+            return None, ("No se pudo procesar esa imagen. Puede estar dañada, o ser un formato que "
+                          "el servidor no puede abrir.")
+        return None, ("Esa foto no tiene nada de qué agarrarse para comparar: está muy borrosa, muy "
+                      "oscura, o la pieza se confunde con el fondo. Probá de nuevo apoyándola sobre "
+                      "un fondo liso de otro color, con buena luz y sin que salga movida.")
+    import pickle as _pickle
+    firma_consulta = _pickle.loads(firma_consulta)
+
+    c.execute("SELECT COUNT(*) FROM producto_fotos WHERE firma_blob IS NOT NULL")
+    total_fotos = c.fetchone()[0]
+    if not total_fotos:
+        return None, _mensaje_catalogo_visual_vacio()
+
+    mejores = {}
+    procesadas = 0
+    # De a tandas: traer las firmas de todo el catálogo de una sola vez llenaría la memoria del
+    # servidor con catálogos grandes y la app se reiniciaría en el medio de la búsqueda.
+    c.execute("""SELECT f.id, f.producto_id, f.firma_blob, p.codigo_raw, p.descripcion,
+                        p.precio, p.stock, m.nombre AS marca
+                 FROM producto_fotos f
+                 JOIN productos p ON p.id = f.producto_id
+                 JOIN marcas m ON m.id = p.marca_id
+                 WHERE f.firma_blob IS NOT NULL""")
+    while True:
+        tanda = c.fetchmany(200)
+        if not tanda:
+            break
+        for fila in tanda:
+            procesadas += 1
+            if progreso and procesadas % 25 == 0:
+                progreso(procesadas, total_fotos)
+            try:
+                puntaje, verificadas, forma = comparar_firmas(firma_consulta, fila["firma_blob"])
+            except Exception:
+                continue
+            pid = fila["producto_id"]
+            if pid not in mejores or puntaje > mejores[pid]["Parecido"]:
+                mejores[pid] = {
+                    "ID": pid,
+                    "Codigo": fila["codigo_raw"],
+                    "Descripcion": fila["descripcion"],
+                    "Marca": fila["marca"],
+                    "Precio": fila["precio"],
+                    "Stock": fila["stock"],
+                    "Parecido": puntaje,
+                    "Coincidencias": verificadas,
+                    "Forma": forma,
+                }
+
+    resultados = [r for r in mejores.values() if r["Parecido"] >= minimo]
+    resultados.sort(key=lambda r: (-r["Parecido"], -r["Coincidencias"]))
+    if not resultados:
+        return [], ("Ninguna foto del catálogo se parece lo suficiente. Puede ser que el producto no "
+                    "esté cargado con foto, o que la foto de referencia sea de un ángulo demasiado "
+                    "distinto — en ese caso, cargale a ese producto una segunda foto del ángulo que "
+                    "usás vos y la próxima vez la encuentra.")
     return resultados[:top_n], None
+
+
+def _mensaje_catalogo_visual_vacio():
+    c.execute("SELECT COUNT(*) FROM producto_fotos")
+    fotos = c.fetchone()[0]
+    if fotos:
+        return (f"Hay {fotos} foto(s) en el catálogo pero ninguna procesada todavía. Tocá "
+                "«🔄 Procesar fotos pendientes» acá arriba y volvé a intentar.")
+    return ("Todavía no hay ninguna foto en el catálogo para comparar. Se cargan desde "
+            "Administrar → Medidas y fotos (subiendo la foto o pegando la dirección de la ficha "
+            "del proveedor), o en tanda desde Estadísticas → Mantenimiento. "
+            "Ojo: el *backup sin fotos* que se sube al repositorio no las lleva, así que después "
+            "de un reinicio del hosting hay que volver a cargarlas.")
+
+
+def nivel_de_parecido(fila):
+    """Traduce el puntaje a algo que se pueda leer de un vistazo, sin dar falsa seguridad."""
+    if fila["Coincidencias"] >= 25 and fila["Parecido"] >= 30:
+        return "🟢 Fuerte — muchos detalles coinciden"
+    if fila["Coincidencias"] >= 8 or fila["Parecido"] >= 15:
+        return "🟡 Media — mirala bien"
+    return "🔴 Débil — probablemente no sea"
 
 
 def generar_miniatura(imagen_bytes, lado=110):
@@ -3989,74 +4510,154 @@ def generar_miniatura(imagen_bytes, lado=110):
         return None
 
 
-def actualizar_imagen_producto(producto_id, imagen_bytes):
-    """Guarda la foto de un producto directo en la base (como data URI comprimida) para que
-    aparezca en la columna 'Imagen' del buscador, y calcula sus puntos característicos (ORB)
-    para poder compararla contra otras fotos con el buscador por similitud visual."""
-    from PIL import Image as PILImage
-    import base64
-    img = PILImage.open(io.BytesIO(imagen_bytes)).convert("RGB")
-    img.thumbnail((400, 400))
-    buffer = io.BytesIO()
-    img.save(buffer, format="JPEG", quality=80)
-    imagen_comprimida = buffer.getvalue()
-    b64 = base64.b64encode(imagen_comprimida).decode("ascii")
-    data_uri = f"data:image/jpeg;base64,{b64}"
-    descriptores = calcular_descriptores_orb(imagen_comprimida)
-    thumb = generar_miniatura(imagen_comprimida)
-    with db_lock:
-        c.execute("UPDATE productos SET imagen_url = ?, imagen_thumb = ?, imagen_orb_blob = ? WHERE id = ?",
-                   (data_uri, thumb, descriptores, producto_id))
-        conn.commit()
+def actualizar_imagen_producto(producto_id, imagen_bytes, origen="subida", fuente=None):
+    """Guarda una foto del producto. Devuelve True si además quedó lista para la búsqueda visual.
+    Se conserva el nombre de antes porque lo usan las bajadas en tanda."""
+    _, estado = agregar_foto_producto(producto_id, imagen_bytes, origen=origen, fuente=fuente)
+    return estado == "ok"
 
 
 def eliminar_imagen_producto(producto_id):
+    """Saca TODAS las fotos del producto."""
     with db_lock:
-        c.execute("UPDATE productos SET imagen_url = NULL, imagen_thumb = NULL, imagen_orb_blob = NULL "
-                   "WHERE id = ?", (producto_id,))
+        c.execute("DELETE FROM producto_fotos WHERE producto_id = ?", (producto_id,))
+        c.execute("UPDATE productos SET imagen_url = NULL, imagen_thumb = NULL, imagen_orb_blob = NULL, "
+                   "imagen_orb_estado = NULL WHERE id = ?", (producto_id,))
         conn.commit()
 
 
-def migrar_imagenes_pendientes():
-    """Prepara lo que falta de las fotos ya cargadas: los puntos característicos (ORB) para la
-    comparación visual y la miniatura para las listas. Se saltea lo que ya está hecho, así que
-    en cada arranque solo procesa lo pendiente. Las fotos que son un link externo (cargadas
-    desde Excel) se dejan como están: no hay nada local para achicar."""
+def imagenes_de_una_direccion(url, maximo=8):
+    """Trae las fotos que haya en una dirección web. Devuelve (lista de (url, bytes), error).
+
+    Si la dirección apunta directo a una imagen, baja esa. Si es la página de un producto, saca
+    las fotos de adentro: mira la imagen que la página declara como principal (og:image, la que
+    usan WhatsApp y Facebook para la vista previa) y después las <img> normales, salteando
+    logos, íconos y banners."""
+    import requests
+    from urllib.parse import urljoin
+
+    try:
+        cabecera = requests.head(url, timeout=8, allow_redirects=True,
+                                 headers={"User-Agent": "Mozilla/5.0 (compatible; EquivalenciasElChavo/1.0)"})
+        tipo = cabecera.headers.get("Content-Type", "")
+    except Exception:
+        tipo = ""
+
+    if "image" in tipo.lower() or url.lower().split("?")[0].endswith((".jpg", ".jpeg", ".png", ".webp")):
+        datos, error = descargar_imagen(url)
+        return ([(url, datos)], None) if datos else (None, error or "no se pudo bajar esa imagen")
+
+    try:
+        respuesta = requests.get(url, timeout=15,
+                                 headers={"User-Agent": "Mozilla/5.0 (compatible; EquivalenciasElChavo/1.0)"})
+        if respuesta.status_code != 200:
+            return None, f"la página respondió {respuesta.status_code}"
+        html = respuesta.text
+    except Exception as e:
+        return None, f"no se pudo abrir la página ({type(e).__name__})"
+
+    candidatas, vistas = [], set()
+
+    def sumar(src):
+        if not src or src.startswith("data:"):
+            return
+        if any(x in src.lower() for x in ("logo", "icon", "sprite", "banner", "pixel", "avatar",
+                                          "placeholder", "loading", ".svg", ".gif")):
+            return
+        absoluta = urljoin(url, src)
+        if absoluta not in vistas:
+            vistas.add(absoluta)
+            candidatas.append(absoluta)
+
+    for m in re.finditer(r'<meta[^>]+property=["\']og:image["\'][^>]+content=["\']([^"\']+)', html, re.I):
+        sumar(m.group(1))
+    for m in re.finditer(r'<img[^>]+?(?:data-src|data-original|src)=["\']([^"\']+)["\']', html, re.I):
+        sumar(m.group(1))
+
+    encontradas, errores = [], []
+    for url_img in candidatas[:maximo * 3]:
+        if len(encontradas) >= maximo:
+            break
+        datos, error = descargar_imagen(url_img)
+        if datos and len(datos) > 8000:   # los íconos chiquitos no son fotos de producto
+            encontradas.append((url_img, datos))
+        elif error:
+            errores.append(error)
+    if encontradas:
+        return encontradas, None
+    return None, "no encontré ninguna foto de producto en esa página"
+
+
+def migrar_imagenes_pendientes(limite=400):
+    """Pone al día las firmas visuales: pasa las fotos viejas (que estaban sueltas en la ficha del
+    producto) a la tabla de fotos, y calcula la firma de las que todavía no la tienen.
+    Se saltea lo que ya se intentó y no dio, así el contador de pendientes no queda clavado."""
     import base64
-    c.execute("""SELECT id, imagen_url, imagen_thumb, imagen_orb_blob FROM productos
-                 WHERE imagen_url IS NOT NULL
-                   AND (imagen_orb_blob IS NULL OR imagen_thumb IS NULL)""")
-    pendientes = c.fetchall()
-    procesados = 0
-    for fila in pendientes:
+    resumen = {"listas": 0, "sin_detalle": 0, "error": 0, "links": 0, "migradas": 0}
+
+    # 1) Fotos que están en la ficha del producto pero todavía no en la tabla de fotos
+    c.execute("""SELECT p.id, p.imagen_url FROM productos p
+                 WHERE p.imagen_url IS NOT NULL AND p.imagen_url LIKE 'data:%'
+                   AND NOT EXISTS (SELECT 1 FROM producto_fotos f WHERE f.producto_id = p.id)
+                 LIMIT ?""", (limite,))
+    for fila in c.fetchall():
         try:
-            imagen_url = fila["imagen_url"]
-            if not imagen_url.startswith("data:"):
-                # Es un link externo: la miniatura es el mismo link (lo carga el navegador)
-                if fila["imagen_thumb"] is None:
-                    with db_lock:
-                        c.execute("UPDATE productos SET imagen_thumb = ? WHERE id = ?", (imagen_url, fila["id"]))
-                        conn.commit()
-                continue
-            imagen_bytes = base64.b64decode(imagen_url.split(",", 1)[1])
-            nuevos = {}
-            if fila["imagen_orb_blob"] is None:
-                descriptores = calcular_descriptores_orb(imagen_bytes)
-                if descriptores:
-                    nuevos["imagen_orb_blob"] = descriptores
-            if fila["imagen_thumb"] is None:
-                thumb = generar_miniatura(imagen_bytes)
-                if thumb:
-                    nuevos["imagen_thumb"] = thumb
-            if nuevos:
-                sets = ", ".join(f"{k} = ?" for k in nuevos)
+            datos = base64.b64decode(fila["imagen_url"].split(",", 1)[1])
+            firma, estado = calcular_firma_visual(datos)
+            with db_lock:
+                c.execute("""INSERT INTO producto_fotos (producto_id, imagen_data, firma_blob, estado, origen)
+                             VALUES (?, ?, ?, ?, 'migrada')""",
+                          (fila["id"], fila["imagen_url"], firma, estado))
+                c.execute("UPDATE productos SET imagen_orb_estado = ? WHERE id = ?", (estado, fila["id"]))
+                conn.commit()
+            resumen["migradas"] += 1
+            resumen["listas" if estado == "ok" else ("sin_detalle" if estado == "sin_detalle" else "error")] += 1
+        except Exception:
+            resumen["error"] += 1
+
+    # 2) Fotos ya en la tabla pero sin firma calculada
+    c.execute("""SELECT id, producto_id, imagen_data FROM producto_fotos
+                 WHERE firma_blob IS NULL AND (estado IS NULL OR estado = 'error')
+                   AND imagen_data LIKE 'data:%' LIMIT ?""", (limite,))
+    for fila in c.fetchall():
+        try:
+            datos = base64.b64decode(fila["imagen_data"].split(",", 1)[1])
+            firma, estado = calcular_firma_visual(datos)
+            with db_lock:
+                c.execute("UPDATE producto_fotos SET firma_blob = ?, estado = ? WHERE id = ?",
+                          (firma, estado, fila["id"]))
+                conn.commit()
+            resumen["listas" if estado == "ok" else ("sin_detalle" if estado == "sin_detalle" else "error")] += 1
+        except Exception:
+            resumen["error"] += 1
+
+    # 3) Miniaturas faltantes y fotos que son link externo (esas hay que bajarlas desde Mantenimiento)
+    c.execute("""SELECT id, imagen_url FROM productos
+                 WHERE imagen_url IS NOT NULL AND imagen_thumb IS NULL LIMIT ?""", (limite,))
+    for fila in c.fetchall():
+        url = fila["imagen_url"]
+        try:
+            if url.startswith("data:"):
+                thumb = generar_miniatura_de_data_uri(url)
+            else:
+                thumb = url          # link externo: lo carga el navegador
+                resumen["links"] += 1
+            if thumb:
                 with db_lock:
-                    c.execute(f"UPDATE productos SET {sets} WHERE id = ?", list(nuevos.values()) + [fila["id"]])
+                    c.execute("UPDATE productos SET imagen_thumb = ? WHERE id = ?", (thumb, fila["id"]))
                     conn.commit()
-                procesados += 1
         except Exception:
             continue
-    return procesados
+    return resumen
+
+
+def contar_fotos_pendientes_de_firma():
+    c.execute("""SELECT (SELECT COUNT(*) FROM productos p
+                         WHERE p.imagen_url LIKE 'data:%'
+                           AND NOT EXISTS (SELECT 1 FROM producto_fotos f WHERE f.producto_id = p.id))
+                      + (SELECT COUNT(*) FROM producto_fotos
+                         WHERE firma_blob IS NULL AND (estado IS NULL OR estado = 'error'))""")
+    return c.fetchone()[0]
 
 
 @st.cache_resource
@@ -4859,46 +5460,129 @@ Casi todo lo que edita o borra algo pide la contraseña de administrador la prim
         st.session_state["busqueda_input"] = st.session_state.pop("sugerencia_busqueda")
 
     if es_operador_o_admin():
-        with st.expander("🖼️ Buscar por similitud visual (experimental)"):
+        with st.expander("🖼️ Buscar por parecido visual (experimental)"):
             st.caption(
-                "Compará una foto contra las fotos que ya tenés cargadas en el catálogo. Es MUCHO "
-                "menos confiable que un código exacto: con piezas metálicas lisas sin marcas ni "
-                "textura (rótulas, rulemanes, bulones) va a rendir mal aunque la foto sea buena. "
-                "Úsalo solo para acortar candidatos a revisar a mano, nunca como confirmación."
+                "Compará una foto contra las fotos del catálogo. No hace falta que sea la misma foto: "
+                "aguanta otro ángulo, otro fondo y otro color de pieza (se compara en blanco y negro, "
+                "recortando el fondo). Aun así es MUCHO menos confiable que un código exacto — con "
+                "piezas lisas sin marcas ni grabado (rótulas, rulemanes, bulones) rinde mal por más "
+                "buena que sea la foto. Sirve para acortar candidatos, nunca para confirmar una venta."
             )
-            c.execute("SELECT COUNT(*) FROM productos WHERE imagen_orb_blob IS NOT NULL")
-            cantidad_listas = c.fetchone()[0]
-            c.execute("""SELECT COUNT(*) FROM productos WHERE imagen_url IS NOT NULL
-                         AND (imagen_orb_blob IS NULL OR imagen_thumb IS NULL)""")
-            cantidad_pendientes = c.fetchone()[0]
-            st.caption(f"📊 Fotos listas para comparar: {cantidad_listas}" +
-                       (f" — {cantidad_pendientes} pendiente(s) de procesar" if cantidad_pendientes else ""))
-            st.button("🔄 Procesar fotos pendientes ahora", disabled=not cantidad_pendientes,
-                       on_click=migrar_imagenes_pendientes)
 
-            foto_visual = recordar_archivo(st.file_uploader(
-                "Foto de la pieza:", type=["png", "jpg", "jpeg"], key="foto_similitud_visual",
-                label_visibility="collapsed"
-            ), "foto_visual")
-            visual_ok = archivo_listo(foto_visual, "foto")
-            if foto_visual and st.button("🗑️ Usar otra foto", key="otra_foto_visual"):
-                olvidar_archivo("foto_visual")
+            fotos_listas, prod_con_foto, fotos_pendientes, fotos_no_sirven = contar_fotos_comparables()
+            fotos_pendientes = max(fotos_pendientes, contar_fotos_pendientes_de_firma())
+            st.caption(
+                f"📊 {fotos_listas} foto(s) listas para comparar, sobre {prod_con_foto} producto(s)" +
+                (f" — {fotos_pendientes} pendiente(s) de procesar" if fotos_pendientes else "") +
+                (f" — {fotos_no_sirven} sin detalle suficiente" if fotos_no_sirven else "")
+            )
+
+            if fotos_listas == 0 and fotos_pendientes == 0:
+                st.info(_mensaje_catalogo_visual_vacio())
+
+            if fotos_pendientes and st.button("🔄 Procesar fotos pendientes ahora"):
+                with st.spinner("Procesando fotos..."):
+                    r = migrar_imagenes_pendientes()
+                partes = []
+                if r["listas"]:
+                    partes.append(f"{r['listas']} lista(s) para comparar")
+                if r["sin_detalle"]:
+                    partes.append(f"{r['sin_detalle']} sin detalle suficiente")
+                if r["links"]:
+                    partes.append(f"{r['links']} son links externos (bajalas desde Mantenimiento)")
+                if r["error"]:
+                    partes.append(f"{r['error']} con error")
+                st.success("Procesadas: " + (", ".join(partes) if partes else "no había nada pendiente") + ".")
                 st.rerun()
-            if st.button("🖼️ Comparar con fotos del catálogo", disabled=not visual_ok):
-                with st.spinner("Comparando..."):
-                    res_visual, error_visual = buscar_por_similitud_visual(foto_visual.getvalue())
-                if error_visual:
-                    st.info(error_visual)
-                elif res_visual:
-                    st.warning(
-                        f"⚠️ {len(res_visual)} candidato(s) por parecido visual, de más a menos "
-                        "parecido — NINGUNO está confirmado, es una comparación aproximada. "
-                        "Compará físicamente antes de vender cualquiera de estos."
-                    )
-                    st.dataframe(
-                        [{k: v for k, v in r.items() if k != "ID"} for r in res_visual],
-                        use_container_width=True, hide_index=True
-                    )
+
+            origen_visual = st.radio(
+                "¿De dónde sale la foto a buscar?",
+                ["📷 Subir una foto", "🔗 Pegar una dirección web"],
+                horizontal=True, key="origen_foto_visual"
+            )
+
+            bytes_consulta = None
+
+            if origen_visual.startswith("📷"):
+                foto_visual = subir_archivo(
+                    "Foto de la pieza:", ["png", "jpg", "jpeg"], "foto_visual",
+                    label_visibility="collapsed"
+                )
+                if archivo_listo(foto_visual, "foto"):
+                    bytes_consulta = foto_visual.getvalue()
+                if foto_visual:
+                    boton_otro_archivo("foto_visual", "🗑️ Usar otra foto", key="otra_foto_visual")
+            else:
+                st.caption(
+                    "Pegá la dirección de la ficha del producto (la de tu proveedor, la de Mercado "
+                    "Libre, la que sea) o la de la imagen sola. Se bajan las fotos de esa página y "
+                    "elegís cuál usar — no hace falta guardar nada en el teléfono."
+                )
+                url_visual = st.text_input(
+                    "Dirección web:", placeholder="https://...", key="url_foto_visual"
+                ).strip()
+                if st.button("⬇️ Traer fotos de esa dirección", disabled=not url_visual):
+                    with st.spinner("Bajando..."):
+                        encontradas, error_url = imagenes_de_una_direccion(url_visual)
+                    if error_url:
+                        st.error(error_url)
+                        st.session_state.pop("fotos_de_url", None)
+                    else:
+                        st.session_state["fotos_de_url"] = encontradas
+                        st.session_state.pop("foto_url_elegida", None)
+
+                encontradas = st.session_state.get("fotos_de_url")
+                if encontradas:
+                    st.caption(f"Se encontraron {len(encontradas)} foto(s). Elegí la de la pieza:")
+                    filas_img = st.columns(min(len(encontradas), 4))
+                    for idx, (url_img, datos_img) in enumerate(encontradas[:8]):
+                        with filas_img[idx % len(filas_img)]:
+                            st.image(datos_img, use_container_width=True)
+                            if st.button("Usar esta", key=f"usar_img_url_{idx}"):
+                                st.session_state["foto_url_elegida"] = idx
+                                st.rerun()
+                    elegida = st.session_state.get("foto_url_elegida")
+                    if elegida is not None and elegida < len(encontradas):
+                        bytes_consulta = encontradas[elegida][1]
+                        st.success(f"✅ Foto {elegida + 1} elegida.")
+
+            if st.button("🖼️ Comparar con el catálogo", disabled=bytes_consulta is None,
+                         type="primary", key="btn_comparar_visual"):
+                barra_v = st.progress(0.0, text="Comparando...")
+                res_visual, error_visual = buscar_por_similitud_visual(
+                    bytes_consulta,
+                    progreso=lambda i, t: barra_v.progress(min(i / max(t, 1), 1.0),
+                                                           text=f"Comparando {i} de {t} fotos...")
+                )
+                barra_v.empty()
+                st.session_state["resultado_visual"] = (res_visual, error_visual)
+
+            res_visual, error_visual = st.session_state.get("resultado_visual", (None, None))
+            if error_visual:
+                st.info(error_visual)
+            elif res_visual:
+                st.warning(
+                    f"⚠️ {len(res_visual)} candidato(s) ordenados de más a menos parecido. "
+                    "NINGUNO está confirmado: hay repuestos que de foto son idénticos y no son "
+                    "intercambiables (cambia el paso de rosca, la altura, el lado). "
+                    "Verificá por código o comparando la pieza en la mano antes de vender."
+                )
+                filas_visual = []
+                for r in res_visual:
+                    filas_visual.append({
+                        "Código": r["Codigo"], "Descripción": r["Descripcion"], "Marca": r["Marca"],
+                        "Confianza": nivel_de_parecido(r), "Parecido": f"{r['Parecido']:.0f}",
+                        "Detalles que coinciden": r["Coincidencias"],
+                        "Precio": r["Precio"], "Stock": r["Stock"],
+                    })
+                st.dataframe(filas_visual, use_container_width=True, hide_index=True)
+                st.caption(
+                    "«Detalles que coinciden» son los puntos de la pieza que además dieron "
+                    "geométricamente coherentes entre las dos fotos: es el número que más "
+                    "conviene mirar. Muchos detalles y parecido alto = vale la pena revisarla. "
+                    "Si el que buscabas no aparece, cargale a ese producto una segunda foto del "
+                    "ángulo que usás vos y la próxima vez lo encuentra."
+                )
 
     modo = st.radio("Buscar por:", ["Código", "Descripción"], horizontal=True, key="modo_busqueda")
 
@@ -5570,18 +6254,15 @@ if pagina == PAGINAS[2]:
         archivo = None
 
         if metodo == "Subir archivo":
-            archivo_subido = st.file_uploader("Seleccioná el archivo", type=["xlsx", "csv", "pdf"],
-                                               key="archivo_carga_lista")
             # La primera subida que llegue bien queda guardada, así no se pierde si el widget
             # se vacía por un refresco o un corte de conexión (el clásico "lo subo y no lo toma").
-            archivo = recordar_archivo(archivo_subido, "lista")
+            archivo = subir_archivo("Seleccioná el archivo", ["xlsx", "csv", "pdf"], "lista")
             if archivo:
                 ca1, ca2 = st.columns([3, 1])
                 with ca1:
                     archivo_listo(archivo, "archivo")
-                if ca2.button("🗑️ Usar otro archivo"):
-                    olvidar_archivo("lista")
-                    st.rerun()
+                with ca2:
+                    boton_otro_archivo("lista")
             else:
                 archivo_listo(None, "archivo")
             if archivo and archivo.name.lower().endswith(".pdf"):
@@ -5764,6 +6445,7 @@ if pagina == PAGINAS[2]:
                     cargados = 0
                     cargados_sin_equiv = 0
                     omitidos = 0
+                    descartados_cortos = 0
                     filas_omitidas = []
                     eq_batch = set()  # inserción en lote: se acumulan los pares y se insertan todos juntos al final
                     progreso = st.progress(0, text="Procesando filas...")
@@ -5783,8 +6465,21 @@ if pagina == PAGINAS[2]:
                             raw_o_cell = valor_o_vacio(celda(idx_oem)) if idx_oem is not None else ""
                             desc = separar_texto_pegado(valor_o_vacio(celda(idx_desc)))
 
-                            codigos_prov = dividir_codigos(raw_p_cell) or ([raw_p_cell] if raw_p_cell else [])
-                            codigos_oem = dividir_codigos(raw_o_cell) or ([raw_o_cell] if raw_o_cell else [])
+                            # OJO con el fallback: antes, si dividir_codigos no devolvía nada se
+                            # usaba la celda cruda igual — así que un '1' suelto entraba lo mismo.
+                            # Ahora la celda cruda también tiene que pasar el filtro.
+                            codigos_prov = dividir_codigos(raw_p_cell)
+                            if not codigos_prov and raw_p_cell and es_codigo_util(raw_p_cell):
+                                codigos_prov = [raw_p_cell]
+                            codigos_oem = dividir_codigos(raw_o_cell)
+                            if not codigos_oem and raw_o_cell and es_codigo_util(raw_o_cell):
+                                codigos_oem = [raw_o_cell]
+
+                            # Para poder avisar al final cuántos se filtraron por ser números sueltos
+                            if raw_p_cell and not codigos_prov:
+                                descartados_cortos += 1
+                            if raw_o_cell and not codigos_oem:
+                                descartados_cortos += 1
 
                             # Si la lista no trae OEM, se intenta sacarlo de la descripción
                             if not codigos_oem and buscar_oem_en_desc and desc:
@@ -5906,6 +6601,12 @@ if pagina == PAGINAS[2]:
                             "la equivalencia sola cuando el mismo código llegue desde la lista de otro "
                             "proveedor, o podés vincularlos a mano desde 'Vincular manual'."
                         )
+                    if descartados_cortos:
+                        st.caption(
+                            f"🧹 Se ignoraron {descartados_cortos} valor(es) de las columnas de código "
+                            "por ser un número suelto de 1 o 2 dígitos (cantidad, número de orden, "
+                            "bulto). No son códigos y ensuciaban las equivalencias."
+                        )
                     if omitidos:
                         st.warning(f"Se omitieron {omitidos} filas porque no tenían código de proveedor.")
                         st.dataframe(filas_omitidas, use_container_width=True)
@@ -5940,8 +6641,10 @@ if pagina == PAGINAS[2]:
             "Solo actualiza cantidad de los códigos que ya existen en tu catálogo; los que no "
             "coincidan con nada, los tenés que cargar por 'Vincular manual' o con un Excel nuevo."
         )
-        foto_remito = st.file_uploader("Foto del remito:", type=["png", "jpg", "jpeg"], key="foto_remito")
+        foto_remito = subir_archivo("Foto del remito:", ["png", "jpg", "jpeg"], "remito")
         remito_ok = archivo_listo(foto_remito, "foto del remito")
+        if foto_remito:
+            boton_otro_archivo("remito", "🗑️ Usar otra foto", key="otra_foto_remito")
         if st.button("🔍 Leer remito", disabled=not remito_ok):
             with st.spinner("Leyendo remito..."):
                 items_leidos, error_remito = leer_remito_por_foto(foto_remito.getvalue())
@@ -6200,24 +6903,106 @@ if pagina == PAGINAS[3]:
                                         e_diam_int_b, e_diam_ext_b, e_rosca_homo, e_copa)
                     st.success("Guardado.")
 
-                st.markdown("**📷 Foto del producto**")
-                c.execute("SELECT imagen_url FROM productos WHERE id = ?", (id_medidas,))
-                imagen_actual = c.fetchone()["imagen_url"]
-                if imagen_actual:
-                    st.image(imagen_actual, width=150)
-                foto_producto = st.file_uploader(
-                    "Subí una foto (se guarda comprimida, aparece en la columna 'Imagen' del buscador):",
-                    type=["png", "jpg", "jpeg"], key="foto_producto_admin"
+                st.markdown("**📷 Fotos del producto**")
+                st.caption(
+                    "Podés cargar varias del mismo producto. Cuanto más distintas entre sí (de "
+                    "frente, de costado, la de la ficha del proveedor), más chances de que la "
+                    "búsqueda por parecido lo encuentre después: ninguna comparación reconoce una "
+                    "pieza de frente en una foto sacada de costado, así que la única forma de "
+                    "cubrir los dos ángulos es tener los dos."
                 )
-                producto_foto_ok = archivo_listo(foto_producto, "foto")
-                cf1, cf2 = st.columns(2)
-                if cf1.button("💾 Guardar foto", disabled=not producto_foto_ok):
-                    actualizar_imagen_producto(id_medidas, foto_producto.getvalue())
-                    st.success("Foto guardada.")
-                    st.rerun()
-                if imagen_actual and cf2.button("🗑️ Sacar la foto"):
+
+                fotos_actuales = listar_fotos_producto(id_medidas)
+                if fotos_actuales:
+                    etiquetas_estado = {
+                        "ok": "🟢 lista para comparar",
+                        "sin_detalle": "🟡 se ve, pero no sirve para comparar",
+                        "error": "🔴 no se pudo procesar",
+                    }
+                    columnas_fotos = st.columns(min(len(fotos_actuales), 4))
+                    for idx_f, foto in enumerate(fotos_actuales):
+                        with columnas_fotos[idx_f % len(columnas_fotos)]:
+                            st.image(foto["imagen_data"], use_container_width=True)
+                            st.caption(etiquetas_estado.get(foto["estado"], "⚪ sin procesar"))
+                            if st.button("🗑️", key=f"del_foto_{foto['id']}", help="Borrar esta foto"):
+                                eliminar_foto_producto(foto["id"])
+                                st.rerun()
+                else:
+                    st.caption("Todavía sin fotos.")
+
+                origen_foto_nueva = st.radio(
+                    "Agregar una foto:", ["📷 Subir", "🔗 Desde una dirección web"],
+                    horizontal=True, key="origen_foto_producto"
+                )
+
+                if origen_foto_nueva.startswith("📷"):
+                    foto_producto = subir_archivo(
+                        "Foto (se guarda comprimida y aparece en la columna 'Imagen' del buscador):",
+                        ["png", "jpg", "jpeg"], "foto_producto"
+                    )
+                    producto_foto_ok = archivo_listo(foto_producto, "foto")
+                    if foto_producto:
+                        boton_otro_archivo("foto_producto", "🗑️ Usar otra foto", key="otra_foto_producto")
+                    if st.button("💾 Agregar esta foto", disabled=not producto_foto_ok):
+                        _, estado_foto = agregar_foto_producto(id_medidas, foto_producto.getvalue())
+                        if estado_foto == "ok":
+                            st.success("Foto agregada y lista para la búsqueda por parecido.")
+                        elif estado_foto == "sin_detalle":
+                            st.warning(
+                                "Foto agregada — se va a ver en el buscador, pero **no sirve para "
+                                "comparar por parecido**: no tiene detalles distintivos suficientes "
+                                "(pieza lisa, fondo del mismo tono, poca luz o movida). Para que "
+                                "sirva, sacala apoyada sobre un fondo liso de OTRO color, con buena "
+                                "luz, y que se lea el grabado o la marca de la pieza."
+                            )
+                        else:
+                            st.error("No se pudo procesar esa imagen. Probá con otra.")
+                        olvidar_archivo("foto_producto")
+                        st.rerun()
+                else:
+                    st.caption(
+                        "Pegá la dirección de la ficha del proveedor o la de la imagen directa. Se "
+                        "bajan las fotos de esa página y elegís cuáles guardar."
+                    )
+                    url_foto_prod = st.text_input(
+                        "Dirección web:", placeholder="https://...", key="url_foto_producto"
+                    ).strip()
+                    if st.button("⬇️ Traer fotos de esa dirección", disabled=not url_foto_prod,
+                                 key="btn_traer_fotos_prod"):
+                        with st.spinner("Bajando..."):
+                            halladas, error_ph = imagenes_de_una_direccion(url_foto_prod)
+                        if error_ph:
+                            st.error(error_ph)
+                            st.session_state.pop("fotos_url_producto", None)
+                        else:
+                            st.session_state["fotos_url_producto"] = halladas
+                            st.rerun()
+
+                    halladas = st.session_state.get("fotos_url_producto")
+                    if halladas:
+                        st.caption(f"{len(halladas)} foto(s) encontradas — guardá las que sean de la pieza:")
+                        cols_ph = st.columns(min(len(halladas), 4))
+                        for idx_h, (url_h, datos_h) in enumerate(halladas[:8]):
+                            with cols_ph[idx_h % len(cols_ph)]:
+                                st.image(datos_h, use_container_width=True)
+                                if st.button("💾 Guardar", key=f"guardar_foto_url_{idx_h}"):
+                                    _, est_h = agregar_foto_producto(
+                                        id_medidas, datos_h, origen="url", fuente=url_h
+                                    )
+                                    if est_h == "ok":
+                                        st.success("Guardada y lista para comparar.")
+                                    elif est_h == "sin_detalle":
+                                        st.warning("Guardada, pero sin detalle suficiente para comparar.")
+                                    else:
+                                        st.error("No se pudo procesar esa imagen.")
+                                    st.rerun()
+                        if st.button("✖️ Cerrar estas fotos", key="cerrar_fotos_url_prod"):
+                            st.session_state.pop("fotos_url_producto", None)
+                            st.rerun()
+
+                if fotos_actuales and st.button("🗑️ Sacar TODAS las fotos de este producto"):
                     eliminar_imagen_producto(id_medidas)
-                    st.success("Foto eliminada.")
+                    st.success("Fotos eliminadas.")
                     st.rerun()
             else:
                 st.info("Sin resultados.")
@@ -6325,10 +7110,13 @@ if pagina == PAGINAS[3]:
         cbu_in = cae3.text_input("CBU/CVU (opcional)", value=(alias_actual or {}).get("CBU", ""), key="alias_cbu_in")
         titular_in = cae4.text_input("Titular (opcional)", value=(alias_actual or {}).get("Titular", ""), key="alias_titular_in")
 
-        archivo_qr_real = st.file_uploader(
+        archivo_qr_real = subir_archivo(
             "QR real (opcional — el que te dio tu banco/Mercado Pago/MODO):",
-            type=["png", "jpg", "jpeg"], key="alias_qr_real_archivo"
+            ["png", "jpg", "jpeg"], "qr_real"
         )
+        if archivo_qr_real:
+            archivo_listo(archivo_qr_real, "QR")
+            boton_otro_archivo("qr_real", "🗑️ Usar otro QR", key="otro_qr_real")
         if alias_actual and alias_actual["TieneQrReal"]:
             st.caption("✅ Este alias ya tiene un QR real cargado. Subí uno nuevo para reemplazarlo.")
 
@@ -6517,6 +7305,42 @@ if pagina == PAGINAS[3]:
                 st.success(f"Se arreglaron {arreglados} código(s).")
         else:
             st.caption("✅ Ningún código con ese problema.")
+
+        st.markdown("---")
+        st.markdown("**🗑️ Códigos que son solo un número suelto**")
+        st.caption(
+            "Productos cuyo código es un número de 1 o 2 dígitos ('1', '12', '07'). Casi siempre "
+            "es la cantidad o el número de orden que se coló en la columna del código. Son los "
+            "peores para la base: como la app vincula todo lo que aparece en la misma fila, el "
+            "'1' de una lista queda como equivalente del '1' de otra, y por ahí se cuelan "
+            "equivalencias entre repuestos que no tienen nada que ver. "
+            "Las listas nuevas ya los filtran solas; esto limpia lo que quedó de antes."
+        )
+        cantidad_basura = contar_codigos_basura()
+        if cantidad_basura:
+            st.warning(f"⚠️ Hay {cantidad_basura} producto(s) con un código así.")
+            muestra_basura = listar_codigos_basura(limite=200)
+            with st.expander(f"👀 Ver los primeros {len(muestra_basura)} antes de borrar"):
+                st.dataframe(muestra_basura, use_container_width=True, hide_index=True)
+                st.download_button(
+                    "⬇️ Descargar la lista completa",
+                    data=to_excel_bytes(listar_codigos_basura(limite=100000)),
+                    file_name="codigos_basura.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                )
+            st.caption(
+                "Al borrarlos se van también las equivalencias que colgaban de ellos. Esto NO va a "
+                "la papelera: bajate la lista de arriba si querés dejar constancia."
+            )
+            if st.checkbox("Ya revisé la lista y entiendo que se borran definitivamente",
+                            key="confirmar_borrar_basura"):
+                if st.button(f"🗑️ Borrar los {cantidad_basura} códigos y sus equivalencias"):
+                    if pedir_password_admin("borrar códigos basura"):
+                        borrados = borrar_codigos_basura()
+                        st.success(f"Se borraron {borrados} producto(s) con código basura.")
+                        st.rerun()
+        else:
+            st.caption("✅ Ningún código de 1 o 2 dígitos en la base.")
 
         st.markdown("---")
         st.markdown("**🔍 Salud de los datos**")
@@ -6746,6 +7570,29 @@ if pagina == PAGINAS[4]:
         total_prod_backup = c.fetchone()[0]
 
         st.markdown("**🗄️ Backup de la base**")
+
+        if cantidad_fotos:
+            st.error(
+                "🔴 **Importante sobre las fotos.** El hosting borra el disco cada vez que la app se "
+                "reinicia o se redespliega, y al arrancar se restaura sola desde el `datos_iniciales.db` "
+                "del repositorio. Ese archivo lo genera el **backup sin fotos**, que las saca a "
+                "propósito para no pasarse del límite de GitHub. Resultado: **cada reinicio te borra "
+                "todas las fotos**, y por eso la búsqueda por parecido aparece sin nada para comparar."
+            )
+            with st.expander("¿Y entonces qué hago con las fotos?"):
+                st.markdown(
+                    "- **Si son pocas y el archivo entra en GitHub (menos de 100 MB):** usá el "
+                    "**backup completo** de acá abajo y subilo al repositorio renombrado a "
+                    "`datos_iniciales.db`. Ahí sí sobreviven los reinicios.\n"
+                    "- **Si ya no entra:** subí el backup sin fotos (para no perder el catálogo) y "
+                    "recuperá las fotos después desde **Mantenimiento → Traer fotos en tanda**, que "
+                    "las vuelve a bajar de las fichas de los proveedores sin cargarlas a mano.\n"
+                    "- **Lo más prolijo a futuro:** guardar las fotos por dirección web en vez de "
+                    "adentro de la base, y dejar cargada la dirección del catálogo de cada marca en "
+                    "**Administrar → Marcas**. Así el backup queda liviano y las fotos se vuelven a "
+                    "traer solas."
+                )
+
         if mb_fotos > 60:
             st.warning(
                 f"⚠️ Las fotos ({cantidad_fotos} productos) ocupan unos {mb_fotos:,.0f} MB. "
@@ -6781,7 +7628,8 @@ if pagina == PAGINAS[4]:
                 )
                 st.caption(
                     f"Lleva los {total_prod_backup} productos con precios, equivalencias, vehículos e "
-                    "historial. Las fotos se vuelven a traer desde Mantenimiento."
+                    "historial. ⚠️ **No lleva las fotos**: si restaurás desde este archivo hay que "
+                    "volver a traerlas desde Mantenimiento."
                 )
 
         st.markdown("---")
@@ -6835,7 +7683,10 @@ Administrar → Mantenimiento.
             "⚠️ Esto reemplaza TODA la base actual por la del archivo que subas. "
             "Usalo si el hosting se reinició y perdiste datos, o para volver a un backup anterior."
         )
-        archivo_restaurar = st.file_uploader("Subí un archivo .db de backup:", type=["db"], key="restore_upload")
+        archivo_restaurar = subir_archivo("Subí un archivo .db de backup:", ["db"], "restaurar")
+        if archivo_restaurar:
+            archivo_listo(archivo_restaurar, "backup")
+            boton_otro_archivo("restaurar", "🗑️ Usar otro backup", key="otro_backup")
         confirmar_restore = st.checkbox("Entiendo que esto borra los datos actuales y los reemplaza")
         if st.button("♻️ Restaurar backup", disabled=not (archivo_restaurar and confirmar_restore)):
             if pedir_password_admin("restaurar un backup"):
@@ -7444,8 +8295,10 @@ if pagina == PAGINAS[6]:
             "año y motorización — **siempre revisá los datos antes de guardar**, un OCR puede "
             "confundir letras o números parecidos."
         )
-        foto_cedula = st.file_uploader("Foto de la cédula/título:", type=["png", "jpg", "jpeg"], key="foto_cedula")
+        foto_cedula = subir_archivo("Foto de la cédula/título:", ["png", "jpg", "jpeg"], "cedula")
         cedula_ok = archivo_listo(foto_cedula, "foto de la cédula")
+        if foto_cedula:
+            boton_otro_archivo("cedula", "🗑️ Usar otra foto", key="otra_foto_cedula")
         if st.button("🔍 Leer datos", disabled=not cedula_ok):
             with st.spinner("Leyendo..."):
                 datos_cedula, error_cedula = extraer_datos_cedula(foto_cedula.getvalue())
@@ -8153,7 +9006,10 @@ if pagina == PAGINAS[7]:
             archivo_esq = None
             imagen_generada_bytes = None
             if origen_imagen.startswith("📷"):
-                archivo_esq = st.file_uploader("Imagen del esquema", type=["png", "jpg", "jpeg"], key="esq_archivo")
+                archivo_esq = subir_archivo("Imagen del esquema", ["png", "jpg", "jpeg"], "esquema")
+                if archivo_esq:
+                    archivo_listo(archivo_esq, "imagen")
+                    boton_otro_archivo("esquema", "🗑️ Usar otra imagen", key="otra_img_esquema")
             else:
                 st.caption(
                     "Para cuando no tenés el auto físico enfrente (útil en el mostrador de una casa de "
@@ -8196,8 +9052,9 @@ if pagina == PAGINAS[7]:
                     st.success("Esquema guardado.")
                     st.session_state.pop("esq_preview_ia", None)
                     for k in ["esq_titulo", "esq_marca_nueva", "esq_modelo_nuevo", "esq_sistema_nuevo",
-                              "esq_desc", "esq_archivo", "esq_motorizacion_ia"]:
+                              "esq_desc", "esq_motorizacion_ia"]:
                         st.session_state.pop(k, None)
+                    olvidar_archivo("esquema")
                     st.rerun()
 
     # -------- Conversor de unidades --------
