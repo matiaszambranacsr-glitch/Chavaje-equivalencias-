@@ -1083,6 +1083,91 @@ def get_connection():
             seed_dtc
         )
 
+    # Fabricantes por WMI (los 3 primeros caracteres del VIN) precargados, para no tener que
+    # ir cargándolos de a uno. Están los que circulan en Argentina: fabricación nacional,
+    # importados de Brasil (mayoría del parque) y las marcas más comunes de otros orígenes.
+    # Son editables desde la app: si alguno no coincide, se corrige ahí.
+    c.execute("SELECT COUNT(*) FROM fabricantes_vin")
+    if c.fetchone()[0] == 0:
+        seed_wmi = [
+            # --- Fabricación argentina ---
+            ("8AC", "Mercedes-Benz Argentina", "Argentina"),
+            ("8AD", "Peugeot Argentina", "Argentina"),
+            ("8AF", "Ford Argentina", "Argentina"),
+            ("8AG", "General Motors / Chevrolet Argentina", "Argentina"),
+            ("8AJ", "Toyota Argentina", "Argentina"),
+            ("8AP", "Fiat Argentina", "Argentina"),
+            ("8AW", "Volkswagen Argentina", "Argentina"),
+            ("8A1", "Renault Argentina", "Argentina"),
+            # --- Brasil (gran parte del parque importado) ---
+            ("9BW", "Volkswagen do Brasil", "Brasil"),
+            ("9BD", "Fiat Automóveis Brasil", "Brasil"),
+            ("9BF", "Ford Brasil", "Brasil"),
+            ("9BG", "General Motors / Chevrolet Brasil", "Brasil"),
+            ("9BM", "Mercedes-Benz do Brasil", "Brasil"),
+            ("9BR", "Toyota do Brasil", "Brasil"),
+            ("93Y", "Renault do Brasil", "Brasil"),
+            ("936", "Peugeot / Citroën Brasil", "Brasil"),
+            ("93H", "Honda Brasil", "Brasil"),
+            ("94D", "Nissan Brasil", "Brasil"),
+            # --- México ---
+            ("3VW", "Volkswagen México", "México"),
+            ("3N1", "Nissan México", "México"),
+            ("3FA", "Ford México", "México"),
+            ("3GN", "Chevrolet México", "México"),
+            # --- Alemania ---
+            ("WVW", "Volkswagen", "Alemania"),
+            ("WV1", "Volkswagen Comerciales", "Alemania"),
+            ("WV2", "Volkswagen (furgones)", "Alemania"),
+            ("WAU", "Audi", "Alemania"),
+            ("WBA", "BMW", "Alemania"),
+            ("WBS", "BMW M", "Alemania"),
+            ("WDB", "Mercedes-Benz", "Alemania"),
+            ("WDD", "Mercedes-Benz", "Alemania"),
+            ("WP0", "Porsche", "Alemania"),
+            ("WF0", "Ford Alemania", "Alemania"),
+            # --- Francia / España / Italia ---
+            ("VF1", "Renault", "Francia"),
+            ("VF3", "Peugeot", "Francia"),
+            ("VF7", "Citroën", "Francia"),
+            ("VSS", "SEAT", "España"),
+            ("ZFA", "Fiat", "Italia"),
+            ("ZFF", "Ferrari", "Italia"),
+            # --- Japón ---
+            ("JHM", "Honda", "Japón"),
+            ("JTD", "Toyota", "Japón"),
+            ("JTE", "Toyota", "Japón"),
+            ("JTM", "Toyota", "Japón"),
+            ("JN1", "Nissan", "Japón"),
+            ("JN8", "Nissan", "Japón"),
+            ("JMB", "Mitsubishi", "Japón"),
+            ("JF1", "Subaru", "Japón"),
+            ("JM1", "Mazda", "Japón"),
+            ("JS3", "Suzuki", "Japón"),
+            # --- Corea ---
+            ("KMH", "Hyundai", "Corea del Sur"),
+            ("KNA", "Kia", "Corea del Sur"),
+            ("KND", "Kia", "Corea del Sur"),
+            # --- Estados Unidos ---
+            ("1FA", "Ford", "Estados Unidos"),
+            ("1FT", "Ford (camionetas)", "Estados Unidos"),
+            ("1FM", "Ford (SUV)", "Estados Unidos"),
+            ("1G1", "Chevrolet", "Estados Unidos"),
+            ("1GC", "Chevrolet (camionetas)", "Estados Unidos"),
+            ("1HG", "Honda", "Estados Unidos"),
+            ("1N4", "Nissan", "Estados Unidos"),
+            ("2HG", "Honda", "Canadá"),
+            # --- China / India ---
+            ("LSV", "Volkswagen China", "China"),
+            ("LFV", "FAW-Volkswagen", "China"),
+            ("MA1", "Mahindra", "India"),
+            ("MAT", "Tata", "India"),
+        ]
+        c.executemany(
+            "INSERT OR IGNORE INTO fabricantes_vin (wmi, fabricante, pais) VALUES (?, ?, ?)",
+            seed_wmi
+        )
+
     columnas_equiv = [f[1] for f in c.execute("PRAGMA table_info(equivalencias)").fetchall()]
     if "verificada" not in columnas_equiv:
         c.execute("ALTER TABLE equivalencias ADD COLUMN verificada INTEGER DEFAULT 0")
@@ -2426,6 +2511,66 @@ MARCAS_VEHICULO = sorted(set([
     "PAUNY", "FIAT", "FORD", "JEEP", "AUDI", "SEAT", "BMW", "KIA", "MAN", "DAF", "HINO",
     "ISUZU", "CASE", "GM",
 ]), key=len, reverse=True)
+
+
+def separar_por_marca_vehiculo(descripcion):
+    """Parte una descripción en (categoría, marca del vehículo, resto).
+    Ejemplo: 'Junta Tapa de Cilindros FORD TAUNUS COUPE'
+             -> ('Junta Tapa de Cilindros', 'FORD', 'TAUNUS COUPE')
+    Es lo que permite armar el catálogo por vehículo sin cargar nada a mano: la relación
+    pieza-vehículo ya venía en las listas de los proveedores, solo hay que leerla."""
+    if not descripcion:
+        return None, None, None
+    texto = separar_texto_pegado(str(descripcion))
+    for marca in MARCAS_VEHICULO:
+        patron = re.compile(r'(?<![A-Za-zÁÉÍÓÚÑ])' + re.escape(marca) + r'(?![A-Za-zÁÉÍÓÚÑ])')
+        m = patron.search(texto)
+        if m:
+            categoria = texto[:m.start()].strip(" -,/")
+            resto = texto[m.end():].strip(" -,/")
+            return (categoria or None), marca, (resto or None)
+    return texto.strip() or None, None, None
+
+
+@st.cache_data(show_spinner=False, max_entries=30)
+def catalogo_por_vehiculo(marca_vehiculo, _version):
+    """Todos los productos cuya descripción menciona esa marca de vehículo, agrupados por
+    categoría. '_version' solo sirve para que el caché se refresque cuando cambia el catálogo."""
+    c.execute("""SELECT p.id AS "ID", p.codigo_raw AS "Codigo", p.descripcion AS "Descripcion",
+                        m.nombre AS "Marca", p.precio AS "Precio", p.stock AS "Stock"
+                 FROM productos p JOIN marcas m ON m.id = p.marca_id
+                 WHERE p.descripcion IS NOT NULL AND UPPER(p.descripcion) LIKE ?
+                 LIMIT 4000""", (f"%{marca_vehiculo}%",))
+    filas = filas_a_listas(c)
+    por_categoria = {}
+    for f in filas:
+        categoria, marca_detectada, resto = separar_por_marca_vehiculo(f["Descripcion"])
+        if marca_detectada != marca_vehiculo:
+            continue
+        f["_categoria"] = categoria or "Sin categoría"
+        f["_aplicacion"] = resto or ""
+        por_categoria.setdefault(f["_categoria"], []).append(f)
+    return por_categoria
+
+
+@st.cache_data(show_spinner=False, max_entries=5)
+def marcas_vehiculo_disponibles(_version):
+    """Qué marcas de vehículo aparecen realmente en el catálogo cargado."""
+    disponibles = []
+    for marca in MARCAS_VEHICULO:
+        c.execute("""SELECT COUNT(*) FROM productos
+                     WHERE descripcion IS NOT NULL AND UPPER(descripcion) LIKE ?""",
+                  (f"%{marca}%",))
+        cantidad = c.fetchone()[0]
+        if cantidad:
+            disponibles.append((marca, cantidad))
+    return sorted(disponibles, key=lambda x: -x[1])
+
+
+def esquemas_de_vehiculo(marca_vehiculo):
+    c.execute("""SELECT id, titulo, marca_auto, modelo_auto, sistema FROM esquemas
+                 WHERE UPPER(marca_auto) LIKE ? ORDER BY titulo""", (f"%{marca_vehiculo}%",))
+    return [dict(r) for r in c.fetchall()]
 
 
 def separar_texto_pegado(texto):
@@ -3984,6 +4129,20 @@ PAISES_VIN = {
     "S": "Reino Unido", "T": "Suiza", "V": "Francia / España",
     "W": "Alemania", "Y": "Suecia / Finlandia", "Z": "Italia",
 }
+# Con los DOS primeros caracteres se distingue mucho mejor: "8" solo dice Sudamérica, pero
+# "8A" es Argentina y "8B" Chile. Se usa esto primero y, si no está, se cae al de una letra.
+PAISES_VIN_2 = {
+    "8A": "Argentina", "8B": "Chile", "8C": "Chile", "8G": "Ecuador",
+    "8L": "Ecuador", "8X": "Venezuela", "8Y": "Venezuela", "8Z": "Venezuela",
+    "9A": "Brasil", "9B": "Brasil", "9C": "Brasil", "9D": "Brasil", "9E": "Brasil",
+    "93": "Brasil", "94": "Brasil", "95": "Brasil", "96": "Brasil", "97": "Brasil",
+    "98": "Brasil", "99": "Brasil",
+    "9F": "Colombia", "9G": "Colombia",
+    "VF": "Francia", "VS": "España", "VV": "Austria",
+    "TM": "República Checa", "TR": "Hungría", "TS": "Serbia",
+    "ML": "Tailandia", "MA": "India", "MB": "India", "MC": "India", "MH": "Indonesia",
+    "LS": "China", "LF": "China", "LV": "China", "LB": "China",
+}
 # Código de año en la 10ª posición del VIN (estándar, cíclico cada 30 años).
 ANIOS_VIN = {
     "A": 1980, "B": 1981, "C": 1982, "D": 1983, "E": 1984, "F": 1985, "G": 1986, "H": 1987,
@@ -4006,7 +4165,7 @@ def decodificar_vin(vin):
     resultado["valido"] = True
     wmi = vin[:3]
     resultado["wmi"] = wmi
-    resultado["pais"] = PAISES_VIN.get(vin[0], "Desconocido / no cargado")
+    resultado["pais"] = PAISES_VIN_2.get(vin[:2]) or PAISES_VIN.get(vin[0], "Desconocido / no cargado")
 
     c.execute("SELECT fabricante, pais FROM fabricantes_vin WHERE wmi = ?", (wmi,))
     fila = c.fetchone()
@@ -4017,16 +4176,23 @@ def decodificar_vin(vin):
     else:
         resultado["fabricante"] = None
 
+    # El código de año se repite cada 30 años: la misma letra sirve para 1987 y 2017. La regla
+    # del 7° carácter que se usaba antes no es confiable fuera de Estados Unidos, y llegaba a
+    # devolver años futuros. Ahora se calculan los dos candidatos, se descartan los imposibles
+    # (más adelante que el año que viene) y, si quedan los dos, se muestran los dos.
     letra_anio = vin[9]
     base_anio = ANIOS_VIN.get(letra_anio)
+    resultado["anio_estimado"] = None
+    resultado["anio_alternativo"] = None
     if base_anio:
-        # El 7° carácter numérico suele indicar el ciclo 1980-2009; alfabético, el ciclo 2010+.
-        if vin[6].isdigit():
-            resultado["anio_estimado"] = base_anio
-        else:
-            resultado["anio_estimado"] = base_anio + 30
-    else:
-        resultado["anio_estimado"] = None
+        tope = datetime.now().year + 1
+        candidatos = sorted({base_anio, base_anio + 30})
+        candidatos = [a for a in candidatos if a <= tope]
+        if candidatos:
+            # Se ofrece primero el más reciente: la enorme mayoría del parque es del ciclo actual
+            resultado["anio_estimado"] = candidatos[-1]
+            if len(candidatos) > 1:
+                resultado["anio_alternativo"] = candidatos[0]
 
     return resultado
 
@@ -6732,23 +6898,20 @@ Administrar → Mantenimiento.
                     "ejemplo un código '1' que quedó de una columna equivocada. Cortarle los vínculos "
                     "de una limpia el problema entero."
                 )
-                for p in resultado_aud["productos_sospechosos"]:
+                # Sin desplegables: Streamlit los cierra en cada refresco, y como cada botón
+                # provoca uno, se cerraba la ventana justo cuando estabas revisando.
+                for p in resultado_aud["productos_sospechosos"][:15]:
                     desc = p["descripcion"] or "_(sin descripción)_"
-                    with st.expander(f"🚩 {p['marca']} · código «{p['codigo']}» — {p['cantidad']} vínculos"):
-                        st.write(f"**Código:** `{p['codigo']}`")
-                        st.write(f"**Descripción:** {desc}")
-                        st.write(f"**Marca:** {p['marca']}")
-                        st.warning(
-                            f"Está vinculado a {p['cantidad']} códigos distintos. Si el código no "
-                            "parece un código de repuesto real, es basura de importación."
-                        )
-                        pb1, pb2 = st.columns(2)
-                        pb1.button(f"✂️ Cortar sus {p['cantidad']} vínculos",
-                                    key=f"cortar_todo_{p['id']}", type="primary",
-                                    on_click=cb_auditoria_cortar_todos, args=(p["id"],),
-                                    help="El producto queda; solo se cortan todas sus equivalencias")
-                        pb2.button("✅ Está bien así", key=f"ok_prod_{p['id']}",
-                                    help="No hace nada; simplemente ignoralo y seguí")
+                    ps1, ps2 = st.columns([3, 1])
+                    ps1.markdown(f"**{p['marca']}** · `{p['codigo']}` — {desc}  \n"
+                                  f"<small>vinculado a {p['cantidad']} códigos distintos</small>",
+                                  unsafe_allow_html=True)
+                    ps2.button(f"✂️ Cortar {p['cantidad']}",
+                                key=f"cortar_todo_{p['id']}", type="primary",
+                                on_click=cb_auditoria_cortar_todos, args=(p["id"],),
+                                help="El producto queda; solo se cortan todas sus equivalencias")
+                if len(resultado_aud["productos_sospechosos"]) > 15:
+                    st.caption(f"(mostrando 15 de {len(resultado_aud['productos_sospechosos'])})")
                 st.markdown("---")
 
             # 2) Conflictos agrupados: un código de fábrica apuntando a varios productos
@@ -6759,28 +6922,36 @@ Administrar → Mantenimiento.
                     "comparar y cortar el que sobra. Normalmente uno tiene descripción real y el otro "
                     "es el que quedó mal."
                 )
-                for g in resultado_aud["conflictos"][:30]:
-                    titulo = f"⚠️ {g['codigo_oem']} → {len(g['productos'])} productos de {g['marca_proveedor']}"
-                    with st.expander(titulo):
-                        if g["descripcion_oem"]:
-                            st.caption(f"Código de fábrica: {g['codigo_oem']} — {g['descripcion_oem']}")
-                        st.write("**Apunta a estos productos — cortá el que no corresponda:**")
-                        for p in g["productos"]:
-                            desc = p["descripcion"] or "⚠️ _(sin descripción — sospechoso)_"
-                            marca_ok = " · ya revisado" if p["revisado_ok"] else ""
-                            cg1, cg2, cg3 = st.columns([3, 1, 1])
-                            cg1.markdown(f"**`{p['codigo']}`** — {desc}  \n"
-                                          f"<small>{p['vinculos_totales']} vínculos en total{marca_ok}</small>",
-                                          unsafe_allow_html=True)
-                            cg2.button("🗑️ Cortar", key=f"cortar_par_{g['codigo_oem']}_{p['id']}",
-                                        on_click=cb_auditoria_eliminar, args=(p["par"][0], p["par"][1]),
-                                        help="Corta solo este vínculo")
-                            cg3.button("✅ Dejar", key=f"dejar_par_{g['codigo_oem']}_{p['id']}",
-                                        on_click=cb_auditoria_dejar, args=([p["par"]],),
-                                        help="Es correcto; no volver a marcarlo")
-                if len(resultado_aud["conflictos"]) > 30:
-                    st.caption(f"(mostrando 30 de {len(resultado_aud['conflictos'])} — "
-                                "resolvé estos y volvé a auditar)")
+                total_conf = len(resultado_aud["conflictos"])
+                por_pag_conf = 8
+                pags_conf = (total_conf - 1) // por_pag_conf + 1
+                if pags_conf > 1:
+                    pag_conf = st.number_input(
+                        f"Página (de {pags_conf}) — {por_pag_conf} conflictos por página:",
+                        min_value=1, max_value=pags_conf, value=1, step=1, key="pagina_conflictos"
+                    )
+                else:
+                    pag_conf = 1
+                desde_conf = (int(pag_conf) - 1) * por_pag_conf
+                for g in resultado_aud["conflictos"][desde_conf:desde_conf + por_pag_conf]:
+                    st.markdown(f"**⚠️ {g['codigo_oem']} → {len(g['productos'])} productos "
+                                 f"de {g['marca_proveedor']}**")
+                    if g["descripcion_oem"]:
+                        st.caption(g["descripcion_oem"])
+                    for p in g["productos"]:
+                        desc = p["descripcion"] or "⚠️ _(sin descripción — sospechoso)_"
+                        marca_ok = " · ya revisado" if p["revisado_ok"] else ""
+                        cg1, cg2, cg3 = st.columns([3, 1, 1])
+                        cg1.markdown(f"**`{p['codigo']}`** — {desc}  \n"
+                                      f"<small>{p['vinculos_totales']} vínculos en total{marca_ok}</small>",
+                                      unsafe_allow_html=True)
+                        cg2.button("🗑️ Cortar", key=f"cortar_par_{g['codigo_oem']}_{p['id']}",
+                                    on_click=cb_auditoria_eliminar, args=(p["par"][0], p["par"][1]),
+                                    help="Corta solo este vínculo")
+                        cg3.button("✅ Dejar", key=f"dejar_par_{g['codigo_oem']}_{p['id']}",
+                                    on_click=cb_auditoria_dejar, args=([p["par"]],),
+                                    help="Es correcto; no volver a marcarlo")
+                    st.markdown("")
                 st.markdown("---")
 
             # 3) Medidas contradictorias
@@ -6832,50 +7003,66 @@ Administrar → Mantenimiento.
                     st.success(f"Se descartaron {borrados:,} vínculo(s) pendientes.")
                     st.rerun()
 
-            for lote_info in lotes_pendientes:
-                with st.expander(f"📄 {lote_info['lote']} — {lote_info['cantidad']} vínculo(s)"):
-                    limpias, sospechosas = analizar_lote_pendiente(lote_info["lote"])
-                    ml1, ml2 = st.columns(2)
-                    ml1.metric("Sin nada raro", len(limpias))
-                    ml2.metric("Con alguna alarma", len(sospechosas))
+            # Una lista por vez, elegida con un selector. Antes cada lista estaba dentro de un
+            # desplegable, y como Streamlit los cierra al refrescar la pantalla, cada botón que
+            # tocabas te cerraba la ventana entera — imposible revisar 300 vínculos así.
+            opciones_lotes = {f"{l['lote']} — {l['cantidad']} vínculo(s)": l for l in lotes_pendientes}
+            etiqueta_lote = st.selectbox("Lista a revisar:", list(opciones_lotes.keys()),
+                                          key="lote_en_revision")
+            lote_info = opciones_lotes[etiqueta_lote]
 
-                    if sospechosas:
-                        st.warning(f"⚠️ {len(sospechosas)} vínculo(s) con algo raro — revisalos:")
-                        for s in sospechosas[:25]:
-                            st.markdown(f"**{s['marca_a']} {s['cod_a']} ↔ {s['marca_b']} {s['cod_b']}**")
-                            for alarma in s["alarmas"]:
-                                st.caption(f"   {alarma}")
-                            sb1, sb2 = st.columns(2)
-                            sb1.button("✅ Igual es correcto", key=f"apr_sosp_{s['a']}_{s['b']}",
-                                        on_click=aprobar_pendientes,
-                                        args=(lote_info["lote"], [(s["a"], s["b"]), (s["b"], s["a"])]))
-                            sb2.button("🚫 Descartar", key=f"rec_sosp_{s['a']}_{s['b']}",
-                                        on_click=rechazar_pendientes,
-                                        args=(lote_info["lote"], [(s["a"], s["b"]), (s["b"], s["a"])]))
-                        if len(sospechosas) > 25:
-                            st.caption(f"(mostrando 25 de {len(sospechosas)})")
+            limpias, sospechosas = analizar_lote_pendiente(lote_info["lote"])
+            ml1, ml2 = st.columns(2)
+            ml1.metric("Sin nada raro", len(limpias))
+            ml2.metric("Con alguna alarma", len(sospechosas))
 
-                    if limpias:
-                        with st.expander(f"Ver los {len(limpias)} sin alarmas"):
-                            st.dataframe(
-                                [{"Código A": x["cod_a"], "Marca A": x["marca_a"],
-                                   "Código B": x["cod_b"], "Marca B": x["marca_b"]} for x in limpias[:200]],
-                                use_container_width=True, hide_index=True
-                            )
+            bl1, bl2 = st.columns(2)
+            pares_limpios = []
+            for x in limpias:
+                pares_limpios.extend([(x["a"], x["b"]), (x["b"], x["a"])])
+            bl1.button(f"✅ Aprobar los {len(limpias)} sin alarmas",
+                        key=f"apr_limpias_{lote_info['lote']}", type="primary",
+                        disabled=not limpias,
+                        on_click=aprobar_pendientes, args=(lote_info["lote"], pares_limpios))
+            bl2.button("🚫 Descartar toda esta lista",
+                        key=f"rec_lote_{lote_info['lote']}",
+                        on_click=rechazar_pendientes, args=(lote_info["lote"], None),
+                        help="Los productos y precios quedan; solo se descartan los vínculos")
 
-                    st.markdown("---")
-                    bl1, bl2 = st.columns(2)
-                    pares_limpios = []
-                    for x in limpias:
-                        pares_limpios.extend([(x["a"], x["b"]), (x["b"], x["a"])])
-                    bl1.button(f"✅ Aprobar los {len(limpias)} sin alarmas",
-                                key=f"apr_limpias_{lote_info['lote']}", type="primary",
-                                disabled=not limpias,
-                                on_click=aprobar_pendientes, args=(lote_info["lote"], pares_limpios))
-                    bl2.button("🚫 Descartar toda esta lista",
-                                key=f"rec_lote_{lote_info['lote']}",
-                                on_click=rechazar_pendientes, args=(lote_info["lote"], None),
-                                help="Los productos y precios quedan; solo se descartan los vínculos")
+            if limpias:
+                with st.expander(f"Ver los {len(limpias)} sin alarmas"):
+                    st.dataframe(
+                        [{"Código A": x["cod_a"], "Marca A": x["marca_a"],
+                           "Código B": x["cod_b"], "Marca B": x["marca_b"]} for x in limpias[:200]],
+                        use_container_width=True, hide_index=True
+                    )
+
+            if sospechosas:
+                st.markdown("---")
+                st.warning(f"⚠️ {len(sospechosas)} vínculo(s) con algo raro — revisalos:")
+                # De a 10 por pantalla: con cientos, la página se vuelve imposible de usar
+                por_pagina = 10
+                paginas = (len(sospechosas) - 1) // por_pagina + 1
+                if paginas > 1:
+                    pagina_sosp = st.number_input(
+                        f"Página (de {paginas}) — cada una trae {por_pagina}:",
+                        min_value=1, max_value=paginas, value=1, step=1, key="pagina_sospechosas"
+                    )
+                else:
+                    pagina_sosp = 1
+                desde = (int(pagina_sosp) - 1) * por_pagina
+                for s in sospechosas[desde:desde + por_pagina]:
+                    st.markdown(f"**{s['marca_a']} {s['cod_a']} ↔ {s['marca_b']} {s['cod_b']}**")
+                    for alarma in s["alarmas"]:
+                        st.caption(f"   {alarma}")
+                    sb1, sb2 = st.columns(2)
+                    sb1.button("✅ Igual es correcto", key=f"apr_sosp_{s['a']}_{s['b']}",
+                                on_click=aprobar_pendientes,
+                                args=(lote_info["lote"], [(s["a"], s["b"]), (s["b"], s["a"])]))
+                    sb2.button("🚫 Descartar", key=f"rec_sosp_{s['a']}_{s['b']}",
+                                on_click=rechazar_pendientes,
+                                args=(lote_info["lote"], [(s["a"], s["b"]), (s["b"], s["a"])]))
+                    st.markdown("")
             st.markdown("---")
 
         st.markdown("**🛒 Equivalencias que aparecieron solas en el mostrador**")
@@ -7329,7 +7516,8 @@ if pagina == PAGINAS[6]:
 if pagina == PAGINAS[7]:
     st.subheader("🛠️ Modo Mecánico")
 
-    SUB_MEC = ["📖 Códigos DTC", "🔢 Lector de VIN", "🗺️ Esquemas", "🧮 Conversor de unidades"]
+    SUB_MEC = ["📖 Códigos DTC", "🔢 Lector de VIN", "🚙 Repuestos por vehículo",
+               "🗺️ Esquemas", "🧮 Conversor de unidades"]
     if st.session_state.get("sub_mec") not in SUB_MEC:
         st.session_state["sub_mec"] = SUB_MEC[0]
     st.radio("Sub-sección:", SUB_MEC, key="sub_mec", horizontal=True,
@@ -7407,6 +7595,12 @@ if pagina == PAGINAS[7]:
                 cv1.metric("WMI", datos_vin["wmi"])
                 cv2.metric("País", datos_vin["pais"])
                 cv3.metric("Año estimado", datos_vin["anio_estimado"] or "—")
+                if datos_vin.get("anio_alternativo"):
+                    st.caption(
+                        f"⚠️ El código de año se repite cada 30 años: puede ser "
+                        f"**{datos_vin['anio_estimado']}** o **{datos_vin['anio_alternativo']}**. "
+                        "Confirmalo con la cédula del vehículo."
+                    )
                 if datos_vin["fabricante"]:
                     st.success(f"Fabricante cargado para este WMI: **{datos_vin['fabricante']}**")
                 else:
@@ -7533,6 +7727,104 @@ if pagina == PAGINAS[7]:
                         st.rerun()
 
     if sub_mec == SUB_MEC[2]:
+        st.markdown("**🚙 Repuestos por vehículo**")
+        st.caption(
+            "Buscá lo que le entra a un auto entrando por marca y categoría, en vez de por código. "
+            "Sale de las descripciones de tus propias listas — o sea que crece solo cada vez que "
+            "importás un proveedor nuevo."
+        )
+
+        c.execute("SELECT COUNT(*) FROM productos")
+        version_catalogo = c.fetchone()[0]   # cambia al cargar listas: refresca el caché
+
+        with st.expander("🔢 Empezar desde un VIN"):
+            st.caption(
+                "El VIN dice fabricante, país y año — pero **no** qué repuestos lleva el auto: "
+                "esa relación es un dato aparte que ningún VIN incluye. Lo que sí hace es "
+                "preseleccionarte la marca acá abajo."
+            )
+            vin_cat = st.text_input("VIN (17 caracteres):", key="vin_para_catalogo").strip().upper()
+            if vin_cat:
+                datos_v = decodificar_vin(vin_cat)
+                if not datos_v["valido"]:
+                    st.error(datos_v["error"])
+                else:
+                    fab = datos_v.get("fabricante") or "(fabricante no cargado)"
+                    anio_txt = datos_v.get("anio_estimado") or "?"
+                    st.success(f"**{fab}** · {datos_v['pais']} · año ~{anio_txt}")
+                    if datos_v.get("anio_alternativo"):
+                        st.caption(f"(el código de año se repite cada 30: puede ser {anio_txt} "
+                                    f"o {datos_v['anio_alternativo']})")
+                    for marca_v in MARCAS_VEHICULO:
+                        if fab and marca_v in fab.upper():
+                            st.session_state["marca_vehiculo_sel"] = marca_v
+                            st.caption(f"👇 Marca preseleccionada abajo: **{marca_v}**")
+                            break
+
+        disponibles = marcas_vehiculo_disponibles(version_catalogo)
+        if not disponibles:
+            st.info(
+                "Todavía no se detectó ninguna marca de vehículo en las descripciones del catálogo. "
+                "Aparecen solas a medida que vas importando listas de proveedores."
+            )
+        else:
+            etiquetas_marcas = [f"{m} ({n} productos)" for m, n in disponibles]
+            mapa_marcas = {f"{m} ({n} productos)": m for m, n in disponibles}
+            preseleccion = st.session_state.get("marca_vehiculo_sel")
+            indice = 0
+            if preseleccion:
+                for i, (m, _) in enumerate(disponibles):
+                    if m == preseleccion:
+                        indice = i
+                        break
+            etiqueta_elegida = st.selectbox("Marca del vehículo:", etiquetas_marcas, index=indice,
+                                             key="sel_marca_vehiculo")
+            marca_elegida = mapa_marcas[etiqueta_elegida]
+
+            por_categoria = catalogo_por_vehiculo(marca_elegida, version_catalogo)
+            if not por_categoria:
+                st.caption("No se pudo separar la categoría de esas descripciones.")
+            else:
+                categorias = sorted(por_categoria.keys(), key=lambda k: -len(por_categoria[k]))
+                etiquetas_cat = [f"{cat} ({len(por_categoria[cat])})" for cat in categorias]
+                mapa_cat = {f"{cat} ({len(por_categoria[cat])})": cat for cat in categorias}
+                cat_elegida = mapa_cat[st.selectbox("Categoría:", etiquetas_cat, key="sel_categoria_vehiculo")]
+
+                filtro_modelo = st.text_input(
+                    "Filtrar por modelo o aplicación (opcional):", key="filtro_modelo_vehiculo",
+                    placeholder="Ej: taunus, cruze, 1.6..."
+                ).strip().upper()
+
+                items = por_categoria[cat_elegida]
+                if filtro_modelo:
+                    items = [x for x in items
+                             if filtro_modelo in (x["_aplicacion"] or "").upper()
+                             or filtro_modelo in (x["Descripcion"] or "").upper()]
+
+                st.success(f"{len(items)} repuesto(s) de **{cat_elegida}** para **{marca_elegida}**"
+                            + (f" que coinciden con «{filtro_modelo}»" if filtro_modelo else ""))
+                if items:
+                    st.caption("👆 Tocá un código para ver todas sus equivalencias:")
+                    for it in items[:25]:
+                        cvv1, cvv2 = st.columns([1.2, 3])
+                        cvv1.button(f"🔎 {it['Codigo']}", key=f"veh_{it['ID']}",
+                                     on_click=cb_ver_equivalencias, args=(it["Codigo"],))
+                        precio_v = f"${it['Precio']:,.0f}" if it.get("Precio") else "s/precio"
+                        stock_v = it.get("Stock")
+                        cvv2.caption(f"**{it['Marca']}** · {it['_aplicacion'] or ''}  \n"
+                                      f"{precio_v} · stock {stock_v if stock_v is not None else 's/d'}")
+                    if len(items) > 25:
+                        st.caption(f"(mostrando 25 de {len(items)} — usá el filtro de modelo)")
+
+            esquemas_veh = esquemas_de_vehiculo(marca_elegida)
+            if esquemas_veh:
+                st.markdown("---")
+                st.markdown(f"**🗺️ Esquemas cargados de {marca_elegida}**")
+                for e in esquemas_veh[:10]:
+                    st.caption(f"• {e['titulo']} — {e['modelo_auto'] or ''} {e['sistema'] or ''}")
+                st.caption("Se ven completos, con las piezas marcadas, en la sección Esquemas.")
+
+    if sub_mec == SUB_MEC[3]:
         st.caption(
             "Diagramas organizados por Marca › Vehículo › Sistema, donde cada pieza marcada tiene "
             "su código vinculado al catálogo — así se busca directo desde el dibujo, ya sea en el "
@@ -7682,7 +7974,7 @@ if pagina == PAGINAS[7]:
                     st.rerun()
 
     # -------- Conversor de unidades --------
-    if sub_mec == SUB_MEC[3]:
+    if sub_mec == SUB_MEC[4]:
         st.caption("Conversiones rápidas de unidades que se usan seguido en manuales de taller antiguos o importados.")
 
         categoria_conv = st.radio("Categoría:", ["Torque", "Presión", "Longitud"], horizontal=True, key="conv_categoria")
