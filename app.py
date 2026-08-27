@@ -201,6 +201,10 @@ DB_PATH = "equivalencias_app.db"
 # dejen todo trabado.
 db_lock = threading.Lock()
 
+# Subir este número cuando se agreguen WMI nuevos: hace que la lista se vuelva a aplicar una vez
+# sobre las bases que ya existen, sin pisar lo que el usuario haya corregido a mano.
+SEMILLA_WMI_VERSION = "2"
+
 
 def es_admin():
     return st.session_state.get("nivel_usuario") == "admin"
@@ -489,6 +493,13 @@ def get_connection():
         filas_omitidas INTEGER,
         fecha TEXT DEFAULT (datetime('now'))
     )""")
+    # Huella del archivo importado, para reconocer la MISMA planilla aunque le hayan cambiado el
+    # nombre. Reimportar la misma lista sin darse cuenta duplica el trabajo de revisión y puede
+    # revivir precios viejos encima de los actualizados a mano.
+    _cols_imp = [f[1] for f in c.execute("PRAGMA table_info(importaciones)").fetchall()]
+    if "huella" not in _cols_imp:
+        c.execute("ALTER TABLE importaciones ADD COLUMN huella TEXT")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_importaciones_huella ON importaciones(huella)")
 
     c.execute("""CREATE TABLE IF NOT EXISTS catalogos_externos (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -601,6 +612,12 @@ def get_connection():
         c.execute("ALTER TABLE vehiculos ADD COLUMN anio TEXT")
     if "motorizacion" not in columnas_vehiculos_extra:
         c.execute("ALTER TABLE vehiculos ADD COLUMN motorizacion TEXT")
+    # VIN en la ficha: permite entrar por el número de chasis además de por la patente, y hace
+    # que el decodificador pueda devolver datos REALES del auto (no estimados) cuando ya pasó
+    # por el mostrador. De paso, cada ficha con VIN + modelo le enseña el patrón a la app.
+    if "vin" not in columnas_vehiculos_extra:
+        c.execute("ALTER TABLE vehiculos ADD COLUMN vin TEXT")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_vehiculos_vin ON vehiculos(vin)")
 
     # Migración: instalaciones existentes que no tenían km_registro (km de cuando se cargó
     # el vehículo por primera vez, fijo, para poder calcular km recorridos).
@@ -674,6 +691,42 @@ def get_connection():
         fabricante TEXT NOT NULL,
         pais TEXT
     )""")
+
+    # Modelos por patrón VDS (posiciones 4 a 8 del VIN).
+    # A diferencia del WMI, que es un registro internacional y siempre significa lo mismo, las
+    # posiciones 4-8 las define CADA fabricante como quiere: no hay forma de deducir el modelo
+    # de un VIN sin una base licenciada (TecDoc y similares, que son pagas). Lo que sí se puede
+    # es que la app APRENDA: la primera vez lo cargás vos, y de ahí en más todo VIN con el mismo
+    # patrón se autocompleta solo. Con el tiempo cubre los autos que realmente atendés.
+    c.execute("""CREATE TABLE IF NOT EXISTS modelos_vin (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        wmi TEXT NOT NULL,
+        vds TEXT NOT NULL,
+        modelo TEXT NOT NULL,
+        notas TEXT,
+        veces INTEGER DEFAULT 1,
+        UNIQUE (wmi, vds)
+    )""")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_modelos_vin ON modelos_vin(wmi, vds)")
+    _cols_modelos_vin = [f[1] for f in c.execute("PRAGMA table_info(modelos_vin)").fetchall()]
+    if "motor" not in _cols_modelos_vin:
+        c.execute("ALTER TABLE modelos_vin ADD COLUMN motor TEXT")
+
+    # El motor por la 8ª posición del VIN.
+    # En los VIN de Norteamérica esa posición es, POR NORMA, el código de motor. Fuera de
+    # Norteamérica no hay norma, pero casi todos los fabricantes la usan igual para eso.
+    # Se guarda aparte del modelo porque generaliza distinto: un mismo código de motor aparece
+    # en varios modelos de la misma marca, así que aprendido una vez sirve para todos.
+    c.execute("""CREATE TABLE IF NOT EXISTS motores_vin (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        wmi TEXT NOT NULL,
+        codigo TEXT NOT NULL,
+        motor TEXT NOT NULL,
+        notas TEXT,
+        veces INTEGER DEFAULT 1,
+        UNIQUE (wmi, codigo)
+    )""")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_motores_vin ON motores_vin(wmi, codigo)")
 
     c.execute("""CREATE TABLE IF NOT EXISTS esquemas (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1114,86 +1167,384 @@ def get_connection():
     # ir cargándolos de a uno. Están los que circulan en Argentina: fabricación nacional,
     # importados de Brasil (mayoría del parque) y las marcas más comunes de otros orígenes.
     # Son editables desde la app: si alguno no coincide, se corrige ahí.
-    c.execute("SELECT COUNT(*) FROM fabricantes_vin")
-    if c.fetchone()[0] == 0:
+    # Antes esto solo corría con la tabla vacía, así que quien ya tenía la app nunca recibía los
+    # WMI nuevos. Ahora se aplica una vez por versión de lista, con INSERT OR IGNORE: lo que vos
+    # hayas cargado o corregido a mano NO se pisa nunca.
+    c.execute("SELECT valor FROM configuracion WHERE clave = 'semilla_wmi_version'")
+    _fila_sem = c.fetchone()
+    if (_fila_sem["valor"] if _fila_sem else None) != SEMILLA_WMI_VERSION:
         seed_wmi = [
-            # --- Fabricación argentina ---
-            ("8AC", "Mercedes-Benz Argentina", "Argentina"),
-            ("8AD", "Peugeot Argentina", "Argentina"),
-            ("8AF", "Ford Argentina", "Argentina"),
-            ("8AG", "General Motors / Chevrolet Argentina", "Argentina"),
-            ("8AJ", "Toyota Argentina", "Argentina"),
-            ("8AP", "Fiat Argentina", "Argentina"),
-            ("8AW", "Volkswagen Argentina", "Argentina"),
-            ("8A1", "Renault Argentina", "Argentina"),
-            # --- Brasil (gran parte del parque importado) ---
-            ("9BW", "Volkswagen do Brasil", "Brasil"),
-            ("9BD", "Fiat Automóveis Brasil", "Brasil"),
-            ("9BF", "Ford Brasil", "Brasil"),
-            ("9BG", "General Motors / Chevrolet Brasil", "Brasil"),
-            ("9BM", "Mercedes-Benz do Brasil", "Brasil"),
-            ("9BR", "Toyota do Brasil", "Brasil"),
-            ("93Y", "Renault do Brasil", "Brasil"),
-            ("936", "Peugeot / Citroën Brasil", "Brasil"),
-            ("93H", "Honda Brasil", "Brasil"),
-            ("94D", "Nissan Brasil", "Brasil"),
-            # --- México ---
-            ("3VW", "Volkswagen México", "México"),
-            ("3N1", "Nissan México", "México"),
-            ("3FA", "Ford México", "México"),
-            ("3GN", "Chevrolet México", "México"),
-            # --- Alemania ---
-            ("WVW", "Volkswagen", "Alemania"),
-            ("WV1", "Volkswagen Comerciales", "Alemania"),
-            ("WV2", "Volkswagen (furgones)", "Alemania"),
-            ("WAU", "Audi", "Alemania"),
-            ("WBA", "BMW", "Alemania"),
-            ("WBS", "BMW M", "Alemania"),
-            ("WDB", "Mercedes-Benz", "Alemania"),
-            ("WDD", "Mercedes-Benz", "Alemania"),
-            ("WP0", "Porsche", "Alemania"),
-            ("WF0", "Ford Alemania", "Alemania"),
-            # --- Francia / España / Italia ---
-            ("VF1", "Renault", "Francia"),
-            ("VF3", "Peugeot", "Francia"),
-            ("VF7", "Citroën", "Francia"),
-            ("VSS", "SEAT", "España"),
-            ("ZFA", "Fiat", "Italia"),
-            ("ZFF", "Ferrari", "Italia"),
-            # --- Japón ---
-            ("JHM", "Honda", "Japón"),
-            ("JTD", "Toyota", "Japón"),
-            ("JTE", "Toyota", "Japón"),
-            ("JTM", "Toyota", "Japón"),
-            ("JN1", "Nissan", "Japón"),
-            ("JN8", "Nissan", "Japón"),
-            ("JMB", "Mitsubishi", "Japón"),
-            ("JF1", "Subaru", "Japón"),
-            ("JM1", "Mazda", "Japón"),
-            ("JS3", "Suzuki", "Japón"),
-            # --- Corea ---
-            ("KMH", "Hyundai", "Corea del Sur"),
-            ("KNA", "Kia", "Corea del Sur"),
-            ("KND", "Kia", "Corea del Sur"),
-            # --- Estados Unidos ---
-            ("1FA", "Ford", "Estados Unidos"),
-            ("1FT", "Ford (camionetas)", "Estados Unidos"),
-            ("1FM", "Ford (SUV)", "Estados Unidos"),
-            ("1G1", "Chevrolet", "Estados Unidos"),
-            ("1GC", "Chevrolet (camionetas)", "Estados Unidos"),
-            ("1HG", "Honda", "Estados Unidos"),
-            ("1N4", "Nissan", "Estados Unidos"),
-            ("2HG", "Honda", "Canadá"),
-            # --- China / India ---
-            ("LSV", "Volkswagen China", "China"),
-            ("LFV", "FAW-Volkswagen", "China"),
-            ("MA1", "Mahindra", "India"),
-            ("MAT", "Tata", "India"),
+            # Argentina
+            ('8AC', 'Mercedes-Benz Argentina', 'Argentina'),
+            ('8AD', 'Peugeot Argentina', 'Argentina'),
+            ('8AF', 'Ford Argentina', 'Argentina'),
+            ('8AG', 'General Motors / Chevrolet Argentina', 'Argentina'),
+            ('8AJ', 'Toyota Argentina', 'Argentina'),
+            ('8AK', 'Suzuki Argentina', 'Argentina'),
+            ('8AP', 'Fiat Argentina', 'Argentina'),
+            ('8AW', 'Volkswagen Argentina', 'Argentina'),
+            ('8A1', 'Renault Argentina', 'Argentina'),
+            # Brasil
+            ('935', 'Citroën Brasil', 'Brasil'),
+            ('936', 'Peugeot Brasil', 'Brasil'),
+            ('93H', 'Honda Brasil', 'Brasil'),
+            ('93R', 'Toyota Brasil', 'Brasil'),
+            ('93U', 'Audi Brasil', 'Brasil'),
+            ('93V', 'Audi Brasil', 'Brasil'),
+            ('93X', 'Mitsubishi Brasil', 'Brasil'),
+            ('93Y', 'Renault Brasil', 'Brasil'),
+            ('94D', 'Nissan Brasil', 'Brasil'),
+            ('9BD', 'Fiat Brasil', 'Brasil'),
+            ('9BF', 'Ford Brasil', 'Brasil'),
+            ('9BG', 'General Motors / Chevrolet Brasil', 'Brasil'),
+            ('9BM', 'Mercedes-Benz Brasil', 'Brasil'),
+            ('9BR', 'Toyota Brasil', 'Brasil'),
+            ('9BS', 'Scania Brasil', 'Brasil'),
+            ('9BW', 'Volkswagen Brasil', 'Brasil'),
+            # Chile
+            ('8GD', 'Peugeot Chile', 'Chile'),
+            ('8GG', 'Chevrolet Chile', 'Chile'),
+            # Colombia
+            ('9FB', 'Renault Colombia', 'Colombia'),
+            # México
+            ('3C4', 'Chrysler México', 'México'),
+            ('3D3', 'Dodge México', 'México'),
+            ('3FA', 'Ford México', 'México'),
+            ('3FE', 'Ford México', 'México'),
+            ('3G', 'General Motors México', 'México'),
+            ('3H', 'Honda México', 'México'),
+            ('3MZ', 'Mazda México', 'México'),
+            ('3N', 'Nissan México', 'México'),
+            ('3P3', 'Plymouth México', 'México'),
+            ('3VW', 'Volkswagen México', 'México'),
+            # Estados Unidos
+            ('1B3', 'Dodge', 'Estados Unidos'),
+            ('1C3', 'Chrysler', 'Estados Unidos'),
+            ('1C6', 'Chrysler', 'Estados Unidos'),
+            ('1D3', 'Dodge', 'Estados Unidos'),
+            ('1FA', 'Ford', 'Estados Unidos'),
+            ('1FB', 'Ford', 'Estados Unidos'),
+            ('1FC', 'Ford', 'Estados Unidos'),
+            ('1FD', 'Ford', 'Estados Unidos'),
+            ('1FM', 'Ford (SUV)', 'Estados Unidos'),
+            ('1FT', 'Ford (camionetas)', 'Estados Unidos'),
+            ('1FU', 'Freightliner', 'Estados Unidos'),
+            ('1FV', 'Freightliner', 'Estados Unidos'),
+            ('1G', 'General Motors', 'Estados Unidos'),
+            ('1GC', 'Chevrolet (camionetas)', 'Estados Unidos'),
+            ('1GT', 'GMC (camionetas)', 'Estados Unidos'),
+            ('1G1', 'Chevrolet', 'Estados Unidos'),
+            ('1G2', 'Pontiac', 'Estados Unidos'),
+            ('1G3', 'Oldsmobile', 'Estados Unidos'),
+            ('1G4', 'Buick', 'Estados Unidos'),
+            ('1G6', 'Cadillac', 'Estados Unidos'),
+            ('1G8', 'Saturn', 'Estados Unidos'),
+            ('1GM', 'Pontiac', 'Estados Unidos'),
+            ('1GY', 'Cadillac', 'Estados Unidos'),
+            ('1H', 'Honda', 'Estados Unidos'),
+            ('1HD', 'Harley-Davidson (motos)', 'Estados Unidos'),
+            ('1J4', 'Jeep', 'Estados Unidos'),
+            ('1L', 'Lincoln', 'Estados Unidos'),
+            ('1ME', 'Mercury', 'Estados Unidos'),
+            ('1M1', 'Mack (camiones)', 'Estados Unidos'),
+            ('1M2', 'Mack (camiones)', 'Estados Unidos'),
+            ('1M3', 'Mack (camiones)', 'Estados Unidos'),
+            ('1M4', 'Mack (camiones)', 'Estados Unidos'),
+            ('1N', 'Nissan', 'Estados Unidos'),
+            ('1NX', 'NUMMI (Toyota/GM)', 'Estados Unidos'),
+            ('1P3', 'Plymouth', 'Estados Unidos'),
+            ('1VW', 'Volkswagen', 'Estados Unidos'),
+            ('1XK', 'Kenworth (camiones)', 'Estados Unidos'),
+            ('1XP', 'Peterbilt (camiones)', 'Estados Unidos'),
+            ('1YV', 'Mazda (AutoAlliance)', 'Estados Unidos'),
+            ('1ZV', 'Ford (AutoAlliance)', 'Estados Unidos'),
+            ('4F', 'Mazda', 'Estados Unidos'),
+            ('4JG', 'Mercedes-Benz', 'Estados Unidos'),
+            ('4M', 'Mercury', 'Estados Unidos'),
+            ('4S', 'Subaru-Isuzu', 'Estados Unidos'),
+            ('4T', 'Toyota', 'Estados Unidos'),
+            ('4US', 'BMW', 'Estados Unidos'),
+            ('4V1', 'Volvo (camiones)', 'Estados Unidos'),
+            ('4V2', 'Volvo (camiones)', 'Estados Unidos'),
+            ('4V4', 'Volvo (camiones)', 'Estados Unidos'),
+            ('5F', 'Honda (Alabama)', 'Estados Unidos'),
+            ('5L', 'Lincoln', 'Estados Unidos'),
+            ('5N1', 'Nissan', 'Estados Unidos'),
+            ('5NP', 'Hyundai', 'Estados Unidos'),
+            ('5T', 'Toyota (camionetas)', 'Estados Unidos'),
+            ('5YJ', 'Tesla', 'Estados Unidos'),
+            ('538', 'Zero Motorcycles (motos)', 'Estados Unidos'),
+            # Canadá
+            ('2A4', 'Chrysler Canadá', 'Canadá'),
+            ('2B3', 'Dodge Canadá', 'Canadá'),
+            ('2B7', 'Dodge Canadá', 'Canadá'),
+            ('2C3', 'Chrysler Canadá', 'Canadá'),
+            ('2CN', 'CAMI (GM/Suzuki)', 'Canadá'),
+            ('2D3', 'Dodge Canadá', 'Canadá'),
+            ('2FA', 'Ford Canadá', 'Canadá'),
+            ('2FB', 'Ford Canadá', 'Canadá'),
+            ('2FC', 'Ford Canadá', 'Canadá'),
+            ('2FM', 'Ford Canadá', 'Canadá'),
+            ('2FT', 'Ford Canadá (camionetas)', 'Canadá'),
+            ('2G', 'General Motors Canadá', 'Canadá'),
+            ('2G1', 'Chevrolet Canadá', 'Canadá'),
+            ('2G2', 'Pontiac Canadá', 'Canadá'),
+            ('2G3', 'Oldsmobile Canadá', 'Canadá'),
+            ('2G4', 'Buick Canadá', 'Canadá'),
+            ('2HG', 'Honda Canadá', 'Canadá'),
+            ('2HK', 'Honda Canadá', 'Canadá'),
+            ('2HJ', 'Honda Canadá', 'Canadá'),
+            ('2HM', 'Hyundai Canadá', 'Canadá'),
+            ('2M', 'Mercury Canadá', 'Canadá'),
+            ('2T', 'Toyota Canadá', 'Canadá'),
+            ('2V4', 'Volkswagen Canadá', 'Canadá'),
+            ('2V8', 'Volkswagen Canadá', 'Canadá'),
+            # Alemania
+            ('WAG', 'Neoplan (ómnibus)', 'Alemania'),
+            ('WAU', 'Audi', 'Alemania'),
+            ('WA1', 'Audi (SUV)', 'Alemania'),
+            ('WBA', 'BMW', 'Alemania'),
+            ('WBS', 'BMW M', 'Alemania'),
+            ('WDA', 'Daimler', 'Alemania'),
+            ('WDB', 'Mercedes-Benz', 'Alemania'),
+            ('WDC', 'DaimlerChrysler', 'Alemania'),
+            ('WDD', 'Mercedes-Benz', 'Alemania'),
+            ('WDF', 'Mercedes-Benz (comerciales)', 'Alemania'),
+            ('WEB', 'Evobus (ómnibus Mercedes)', 'Alemania'),
+            ('WJM', 'Iveco Magirus', 'Alemania'),
+            ('WF0', 'Ford Alemania', 'Alemania'),
+            ('WMA', 'MAN (camiones)', 'Alemania'),
+            ('WME', 'smart', 'Alemania'),
+            ('WMW', 'MINI', 'Alemania'),
+            ('WMX', 'Mercedes-AMG', 'Alemania'),
+            ('WP0', 'Porsche', 'Alemania'),
+            ('WP1', 'Porsche (SUV)', 'Alemania'),
+            ('W0L', 'Opel', 'Alemania'),
+            ('WUA', 'quattro GmbH (Audi)', 'Alemania'),
+            ('WVG', 'Volkswagen (SUV/monovolumen)', 'Alemania'),
+            ('WVW', 'Volkswagen', 'Alemania'),
+            ('WV1', 'Volkswagen Comerciales', 'Alemania'),
+            ('WV2', 'Volkswagen (furgones)', 'Alemania'),
+            ('WV3', 'Volkswagen (camiones)', 'Alemania'),
+            # Francia
+            ('VF1', 'Renault', 'Francia'),
+            ('VF2', 'Renault', 'Francia'),
+            ('VF3', 'Peugeot', 'Francia'),
+            ('VF4', 'Talbot', 'Francia'),
+            ('VF6', 'Renault (camiones y ómnibus)', 'Francia'),
+            ('VF7', 'Citroën', 'Francia'),
+            ('VF8', 'Matra', 'Francia'),
+            ('VLU', 'Scania Francia', 'Francia'),
+            ('VN1', 'SOVAB (Renault)', 'Francia'),
+            ('VNE', 'Irisbus', 'Francia'),
+            ('VNK', 'Toyota Francia', 'Francia'),
+            ('VNV', 'Renault-Nissan', 'Francia'),
+            # España
+            ('VSA', 'Mercedes-Benz España', 'España'),
+            ('VSE', 'Suzuki España (Santana)', 'España'),
+            ('VSK', 'Nissan España', 'España'),
+            ('VSS', 'SEAT', 'España'),
+            ('VSX', 'Opel España', 'España'),
+            ('VS6', 'Ford España', 'España'),
+            ('VS7', 'Citroën España', 'España'),
+            ('VWA', 'Nissan España', 'España'),
+            ('VWV', 'Volkswagen España', 'España'),
+            # Italia
+            ('ZAM', 'Maserati', 'Italia'),
+            ('ZAP', 'Piaggio / Vespa / Gilera (motos)', 'Italia'),
+            ('ZAR', 'Alfa Romeo', 'Italia'),
+            ('ZCF', 'Iveco', 'Italia'),
+            ('ZCG', 'Cagiva / MV Agusta (motos)', 'Italia'),
+            ('ZDM', 'Ducati (motos)', 'Italia'),
+            ('ZD4', 'Aprilia (motos)', 'Italia'),
+            ('ZFA', 'Fiat', 'Italia'),
+            ('ZFC', 'Fiat Veicoli Industriali', 'Italia'),
+            ('ZFF', 'Ferrari', 'Italia'),
+            ('ZGU', 'Moto Guzzi (motos)', 'Italia'),
+            ('ZHW', 'Lamborghini', 'Italia'),
+            ('ZLA', 'Lancia', 'Italia'),
+            # Reino Unido
+            ('SAL', 'Land Rover', 'Reino Unido'),
+            ('SAJ', 'Jaguar', 'Reino Unido'),
+            ('SAR', 'Rover', 'Reino Unido'),
+            ('SB1', 'Toyota Reino Unido', 'Reino Unido'),
+            ('SBM', 'McLaren', 'Reino Unido'),
+            ('SCA', 'Rolls-Royce', 'Reino Unido'),
+            ('SCB', 'Bentley', 'Reino Unido'),
+            ('SCC', 'Lotus', 'Reino Unido'),
+            ('SCF', 'Aston Martin', 'Reino Unido'),
+            ('SDB', 'Peugeot Reino Unido', 'Reino Unido'),
+            ('SFA', 'Ford Reino Unido', 'Reino Unido'),
+            ('SHH', 'Honda Reino Unido', 'Reino Unido'),
+            ('SHS', 'Honda Reino Unido', 'Reino Unido'),
+            ('SJN', 'Nissan Reino Unido', 'Reino Unido'),
+            ('SKF', 'Vauxhall', 'Reino Unido'),
+            ('SMT', 'Triumph (motos)', 'Reino Unido'),
+            # República Checa
+            ('TMA', 'Hyundai República Checa', 'República Checa'),
+            ('TMB', 'Škoda', 'República Checa'),
+            ('TMT', 'Tatra (camiones)', 'República Checa'),
+            # Hungría
+            ('TRU', 'Audi Hungría', 'Hungría'),
+            ('TSM', 'Suzuki Hungría', 'Hungría'),
+            # Portugal
+            ('TW1', 'Toyota Caetano', 'Portugal'),
+            # Polonia
+            ('SUF', 'Fiat Polonia', 'Polonia'),
+            ('SUP', 'FSO-Daewoo', 'Polonia'),
+            # Rumania
+            ('UU1', 'Renault Dacia', 'Rumania'),
+            # Eslovaquia
+            ('U5Y', 'Kia Eslovaquia', 'Eslovaquia'),
+            ('U6Y', 'Kia Eslovaquia', 'Eslovaquia'),
+            # Austria
+            ('VAG', 'Magna Steyr Puch', 'Austria'),
+            ('VAN', 'MAN Austria', 'Austria'),
+            ('VBK', 'KTM (motos)', 'Austria'),
+            # Países Bajos
+            ('XLB', 'Volvo (NedCar)', 'Países Bajos'),
+            ('XLE', 'Scania Países Bajos', 'Países Bajos'),
+            ('XLR', 'DAF (camiones)', 'Países Bajos'),
+            ('XMC', 'Mitsubishi (NedCar)', 'Países Bajos'),
+            # Bélgica
+            ('YBW', 'Volkswagen Bélgica', 'Bélgica'),
+            ('YCM', 'Mazda Bélgica', 'Bélgica'),
+            # Suecia
+            ('YS2', 'Scania (camiones)', 'Suecia'),
+            ('YS3', 'Saab', 'Suecia'),
+            ('YS4', 'Scania (ómnibus)', 'Suecia'),
+            ('YV1', 'Volvo', 'Suecia'),
+            ('YV4', 'Volvo', 'Suecia'),
+            ('YV2', 'Volvo (camiones)', 'Suecia'),
+            ('YV3', 'Volvo (ómnibus)', 'Suecia'),
+            # Rusia
+            ('XTA', 'Lada / AvtoVAZ', 'Rusia'),
+            ('XTT', 'UAZ', 'Rusia'),
+            ('X7L', 'Renault Rusia', 'Rusia'),
+            # Serbia
+            ('VX1', 'Zastava / Yugo', 'Serbia'),
+            # Turquía
+            ('NM0', 'Ford Turquía', 'Turquía'),
+            ('NM4', 'Tofaş (Fiat Turquía)', 'Turquía'),
+            ('NMT', 'Toyota Turquía', 'Turquía'),
+            ('NLH', 'Hyundai Turquía', 'Turquía'),
+            ('NLE', 'Mercedes-Benz Turquía (camiones)', 'Turquía'),
+            # Japón
+            ('JA', 'Isuzu', 'Japón'),
+            ('JA3', 'Mitsubishi', 'Japón'),
+            ('JA4', 'Mitsubishi', 'Japón'),
+            ('JD', 'Daihatsu', 'Japón'),
+            ('JF', 'Subaru', 'Japón'),
+            ('JH', 'Honda', 'Japón'),
+            ('JK', 'Kawasaki (motos)', 'Japón'),
+            ('JL5', 'Mitsubishi Fuso (camiones)', 'Japón'),
+            ('JMB', 'Mitsubishi', 'Japón'),
+            ('JMY', 'Mitsubishi', 'Japón'),
+            ('JMZ', 'Mazda', 'Japón'),
+            ('JN', 'Nissan', 'Japón'),
+            ('JS', 'Suzuki', 'Japón'),
+            ('JT', 'Toyota', 'Japón'),
+            ('JY', 'Yamaha (motos)', 'Japón'),
+            # Corea del Sur
+            ('KL', 'Daewoo / GM Corea', 'Corea del Sur'),
+            ('KM', 'Hyundai', 'Corea del Sur'),
+            ('KN', 'Kia', 'Corea del Sur'),
+            ('KNM', 'Renault Samsung', 'Corea del Sur'),
+            ('KPA', 'SsangYong', 'Corea del Sur'),
+            ('KPT', 'SsangYong', 'Corea del Sur'),
+            ('KM1', 'Hyosung (motos)', 'Corea del Sur'),
+            ('KMY', 'Daelim (motos)', 'Corea del Sur'),
+            # China
+            ('LBE', 'Beijing Hyundai', 'China'),
+            ('LDC', 'Dongfeng Peugeot Citroën', 'China'),
+            ('LE4', 'Beijing Benz', 'China'),
+            ('LFP', 'FAW', 'China'),
+            ('LFV', 'FAW-Volkswagen', 'China'),
+            ('LGB', 'Dongfeng', 'China'),
+            ('LGX', 'BYD', 'China'),
+            ('LJC', 'JAC', 'China'),
+            ('LJ1', 'JAC', 'China'),
+            ('LSG', 'Shanghai General Motors', 'China'),
+            ('LSJ', 'MG / SAIC', 'China'),
+            ('LSV', 'Shanghai Volkswagen', 'China'),
+            ('LSY', 'Brilliance', 'China'),
+            ('LTV', 'Toyota Tianjin', 'China'),
+            ('LUC', 'GAC Honda', 'China'),
+            ('LVS', 'Ford Chang An', 'China'),
+            ('LVV', 'Chery', 'China'),
+            ('LVZ', 'DFSK (Dongfeng Sokon)', 'China'),
+            ('LZM', 'MAN China', 'China'),
+            ('LZE', 'Isuzu Guangzhou', 'China'),
+            ('LZG', 'Shaanxi (camiones)', 'China'),
+            ('LZY', 'Yutong (ómnibus)', 'China'),
+            ('LBB', 'Zhejiang Qianjiang / Keeway (motos)', 'China'),
+            ('LCE', 'CFMOTO (motos)', 'China'),
+            # India
+            ('MAB', 'Mahindra', 'India'),
+            ('MAC', 'Mahindra', 'India'),
+            ('MA1', 'Mahindra', 'India'),
+            ('MAJ', 'Ford India', 'India'),
+            ('MAK', 'Honda India', 'India'),
+            ('MAL', 'Hyundai India', 'India'),
+            ('MAT', 'Tata', 'India'),
+            ('MA3', 'Suzuki India (Maruti)', 'India'),
+            ('MBH', 'Suzuki India (Maruti)', 'India'),
+            ('MBJ', 'Toyota India', 'India'),
+            ('MBR', 'Mercedes-Benz India', 'India'),
+            ('MB1', 'Ashok Leyland', 'India'),
+            ('MCA', 'Fiat India', 'India'),
+            ('MDH', 'Nissan India', 'India'),
+            ('MD2', 'Bajaj (motos)', 'India'),
+            ('MEE', 'Renault India', 'India'),
+            ('MEX', 'Volkswagen India', 'India'),
+            # Indonesia
+            ('MHF', 'Toyota Indonesia', 'Indonesia'),
+            ('MHR', 'Honda Indonesia', 'Indonesia'),
+            # Tailandia
+            ('MLC', 'Suzuki Tailandia', 'Tailandia'),
+            ('MLH', 'Honda Tailandia', 'Tailandia'),
+            ('MMB', 'Mitsubishi Tailandia', 'Tailandia'),
+            ('MMC', 'Mitsubishi Tailandia', 'Tailandia'),
+            ('MMM', 'Chevrolet Tailandia', 'Tailandia'),
+            ('MMT', 'Mitsubishi Tailandia', 'Tailandia'),
+            ('MM8', 'Mazda Tailandia', 'Tailandia'),
+            ('MNB', 'Ford Tailandia', 'Tailandia'),
+            ('MNT', 'Nissan Tailandia', 'Tailandia'),
+            ('MPA', 'Isuzu Tailandia', 'Tailandia'),
+            ('MP1', 'Isuzu Tailandia', 'Tailandia'),
+            ('MRH', 'Honda Tailandia', 'Tailandia'),
+            ('MR0', 'Toyota Tailandia', 'Tailandia'),
+            # Malasia
+            ('PL1', 'Proton', 'Malasia'),
+            # Filipinas
+            ('PE1', 'Ford Filipinas', 'Filipinas'),
+            ('PE3', 'Mazda Filipinas', 'Filipinas'),
+            # Taiwán
+            ('RFB', 'Kymco (motos)', 'Taiwán'),
+            ('RFG', 'SYM (motos)', 'Taiwán'),
+            # Sudáfrica
+            ('AAV', 'Volkswagen Sudáfrica', 'Sudáfrica'),
+            ('AC5', 'Hyundai Sudáfrica', 'Sudáfrica'),
+            ('ADD', 'Hyundai Sudáfrica', 'Sudáfrica'),
+            ('AFA', 'Ford Sudáfrica', 'Sudáfrica'),
+            ('AHT', 'Toyota Sudáfrica', 'Sudáfrica'),
+            # Australia
+            ('6AB', 'MAN Australia', 'Australia'),
+            ('6F4', 'Nissan Australia', 'Australia'),
+            ('6F5', 'Kenworth Australia', 'Australia'),
+            ('6FP', 'Ford Australia', 'Australia'),
+            ('6G1', 'Holden (GM)', 'Australia'),
+            ('6G2', 'Pontiac Australia', 'Australia'),
+            ('6H8', 'Holden (GM)', 'Australia'),
+            ('6MM', 'Mitsubishi Australia', 'Australia'),
+            ('6T1', 'Toyota Australia', 'Australia'),
         ]
         c.executemany(
             "INSERT OR IGNORE INTO fabricantes_vin (wmi, fabricante, pais) VALUES (?, ?, ?)",
             seed_wmi
         )
+        c.execute("INSERT INTO configuracion (clave, valor) VALUES ('semilla_wmi_version', ?) "
+                  "ON CONFLICT(clave) DO UPDATE SET valor = excluded.valor", (SEMILLA_WMI_VERSION,))
 
     columnas_equiv = [f[1] for f in c.execute("PRAGMA table_info(equivalencias)").fetchall()]
     if "verificada" not in columnas_equiv:
@@ -2204,6 +2555,232 @@ def contar_productos_sin_equivalencias():
     return c.fetchone()[0]
 
 
+# ============================================================
+# COSAS QUE SE RESUELVEN SOLAS AL IMPORTAR
+# ============================================================
+
+# Palabras que suelen titular cada columna en las listas de proveedor. Se buscan en el
+# encabezado para sugerir el mapeo sin que haya que elegirlo a mano cada vez.
+PISTAS_COLUMNAS = {
+    "prov":   ["COD", "ART", "REF", "NRO", "N°", "NUMERO", "PIEZA", "PART"],
+    "oem":    ["OEM", "ORIG", "EQUIV", "CRUCE", "FABRICA", "FÁBRICA", "APLIC"],
+    "desc":   ["DESC", "DETALLE", "PROD", "ARTICULO", "ARTÍCULO", "NOMBRE", "RUBRO"],
+    "precio": ["PRECIO", "P.VENTA", "PVENTA", "P. VENTA", "IMPORTE", "VALOR", "LISTA",
+                "COSTO", "NETO", "UNITARIO", "$"],
+    "stock":  ["STOCK", "EXIST", "CANT", "DISPON", "SALDO", "DEPOSITO", "DEPÓSITO"],
+}
+
+
+def adivinar_columnas(encabezado):
+    """Sugiere qué columna es cada cosa mirando los títulos. Devuelve un dict con los índices.
+
+    Gana la pista MÁS LARGA que coincida, y una columna no puede tener dos roles.
+    Sin eso, un título como «ARTICULO» quedaba como código (por contener «ART») y a la vez como
+    descripción (por «ARTICULO»), y terminaba importando la descripción como si fuera el código.
+    Comparando el largo, «ARTICULO» le gana a «ART» y cada columna cae donde corresponde.
+
+    Para precio y stock gana la PRIMERA columna que coincide: las listas suelen traer varias
+    (costo, lista, con IVA, con descuento) y la primera es casi siempre la que corresponde."""
+    titulos = [str(x).upper().strip() if x else "" for x in encabezado]
+
+    # Para cada columna, su mejor rol: el de la pista más larga que aparezca en el título
+    mejor_rol = {}
+    for i, titulo in enumerate(titulos):
+        if not titulo:
+            continue
+        candidatos = []
+        for clave, pistas in PISTAS_COLUMNAS.items():
+            for pista in pistas:
+                if pista in titulo:
+                    candidatos.append((len(pista), clave))
+        if candidatos:
+            mejor_rol[i] = max(candidatos)[1]
+
+    hallado = {"prov": None, "oem": None, "desc": None, "precio": None, "stock": None}
+    for i, clave in mejor_rol.items():
+        if clave in ("precio", "stock"):
+            if hallado[clave] is None:      # la primera manda
+                hallado[clave] = i
+        else:
+            hallado[clave] = i              # la última manda
+
+    # El código de proveedor siempre tiene que apuntar a algo: si ningún título se reconoció,
+    # la primera columna libre es la apuesta razonable.
+    if hallado["prov"] is None:
+        ocupadas = {v for k, v in hallado.items() if v is not None}
+        hallado["prov"] = next((i for i in range(max(len(titulos), 1)) if i not in ocupadas), 0)
+    if hallado["oem"] == hallado["prov"]:
+        hallado["oem"] = None
+    return hallado
+
+
+def adivinar_proveedor(nombre_archivo, marcas_conocidas=()):
+    """Saca el nombre del proveedor del nombre del archivo.
+
+    Las listas llegan como 'ILLINOIS 17 07 2026.xlsx' o 'Lista_MAHLE_agosto.xlsx': el proveedor
+    está ahí escrito y no hay razón para volver a tipearlo cada vez. Primero se busca alguna de
+    las marcas que ya existen en la base (lo más confiable); si no aparece ninguna, se limpian
+    fechas, números y palabras de relleno y se toma lo que queda."""
+    base = re.sub(r'\.[A-Za-z0-9]{2,5}$', '', str(nombre_archivo or "").strip())
+    if not base:
+        return ""
+    texto = re.sub(r'[_\-]+', ' ', base).upper()
+
+    for marca in sorted(marcas_conocidas, key=len, reverse=True):
+        if marca and len(marca) >= 3 and marca.upper() in texto:
+            return marca.upper()
+
+    relleno = {"LISTA", "LISTAS", "PRECIOS", "PRECIO", "CATALOGO", "CATÁLOGO", "ACTUALIZADA",
+               "ACTUALIZADO", "NUEVA", "NUEVO", "COPIA", "FINAL", "VIGENTE", "DE", "DEL", "LA",
+               "EL", "Y", "CON", "SIN", "VENTA", "MAYORISTA", "XLSX", "XLS", "CSV", "PDF"}
+    meses = {"ENERO", "FEBRERO", "MARZO", "ABRIL", "MAYO", "JUNIO", "JULIO", "AGOSTO",
+             "SEPTIEMBRE", "SETIEMBRE", "OCTUBRE", "NOVIEMBRE", "DICIEMBRE"}
+    palabras = [p for p in re.split(r'[^A-ZÁÉÍÓÚÑ0-9]+', texto) if p]
+    utiles = [p for p in palabras
+              if not p.isdigit() and p not in relleno and p not in meses and len(p) >= 3]
+    return " ".join(utiles[:2]) if utiles else ""
+
+
+def estado_del_backup():
+    """Qué se cargó desde el último backup. Devuelve un dict con lo que haga falta para avisar.
+
+    Esto importa más acá que en un sistema normal: el hosting borra el disco cuando reinicia y
+    la app se restaura desde la última copia del repositorio. Todo lo cargado después de esa
+    copia se pierde, y uno se entera recién cuando busca un código y no aparece."""
+    c.execute("SELECT COUNT(*) FROM productos")
+    total = c.fetchone()[0]
+    marca = obtener_config("ultimo_backup_fecha", "")
+
+    if not marca:
+        return {"hay_backup": False, "productos_nuevos": total, "importaciones": None,
+                "dias": None, "urgente": total > 0}
+
+    desde = int(obtener_config("ultimo_backup_productos", "0") or 0)
+    c.execute("SELECT COUNT(*) FROM importaciones WHERE fecha > ?", (marca,))
+    importaciones = c.fetchone()[0]
+    try:
+        dias = (datetime.now() - datetime.strptime(marca[:19], "%Y-%m-%d %H:%M:%S")).days
+    except Exception:
+        dias = None
+
+    nuevos = max(total - desde, 0)
+    # Se avisa por cualquiera de las tres: productos nuevos, listas importadas, o tiempo.
+    # Una lista importada puede cambiar miles de precios sin sumar un solo producto, así que
+    # contar solo los productos nuevos dejaría pasar justo el caso que más duele perder.
+    urgente = nuevos >= 50 or importaciones >= 1 or (dias is not None and dias >= 14)
+    return {"hay_backup": True, "productos_nuevos": nuevos, "importaciones": importaciones,
+            "dias": dias, "urgente": urgente}
+
+
+def marcar_backup_hecho():
+    """Se llama al descargar un backup: deja la marca para poder avisar cuando se atrase."""
+    c.execute("SELECT COUNT(*) FROM productos")
+    guardar_config("ultimo_backup_productos", str(c.fetchone()[0]))
+    guardar_config("ultimo_backup_fecha", datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+
+
+def huella_de_archivo(datos):
+    """Huella del contenido del archivo. Reconoce la misma planilla aunque le cambien el nombre."""
+    if not datos:
+        return None
+    return hashlib.sha256(datos).hexdigest()[:32]
+
+
+def importacion_previa(huella):
+    """Si esta misma planilla ya se importó, devuelve cuándo y con qué marca."""
+    if not huella:
+        return None
+    c.execute("""SELECT marca, archivo, fecha, filas_cargadas FROM importaciones
+                 WHERE huella = ? ORDER BY fecha DESC LIMIT 1""", (huella,))
+    fila = c.fetchone()
+    return dict(fila) if fila else None
+
+
+def leer_numero(valor):
+    """Lee un número de una celda de Excel, aguantando cómo lo escribe cada proveedor.
+
+    El problema real: en Argentina el punto separa miles y la coma decimales ("1.234,56"), pero
+    muchas listas vienen exportadas al revés ("1,234.56"), y otras traen el símbolo de peso,
+    espacios o texto pegado ("$850.-"). Leerlo mal convierte $1.234,56 en $123.456: cien veces
+    de más.
+
+    Las reglas, en orden:
+      1. Si están los DOS separadores, el que está más a la derecha es el decimal.
+      2. Si hay uno solo y aparece VARIAS veces, es separador de miles ("12.345.678").
+      3. Si hay uno solo y aparece una vez, decide cuántos dígitos lo siguen: tres significa
+         miles ("1.234" son mil doscientos treinta y cuatro, no uno con doscientos treinta y
+         cuatro), cualquier otra cantidad significa decimales ("1.50", "0,5").
+    """
+    if valor is None:
+        return None
+    if isinstance(valor, bool):
+        return None
+    if isinstance(valor, (int, float)):
+        return float(valor)
+
+    texto = str(valor).strip()
+    if not texto:
+        return None
+    negativo = texto.lstrip().startswith("-")
+    texto = re.sub(r'[^\d,.]', '', texto)
+    texto = texto.strip(",.")               # se come el "$850.-" y el "1.234,-"
+    if not texto or not any(ch.isdigit() for ch in texto):
+        return None
+
+    comas, puntos = texto.count(","), texto.count(".")
+
+    if comas and puntos:
+        # Regla 1: manda el de más a la derecha
+        if texto.rfind(",") > texto.rfind("."):
+            texto = texto.replace(".", "").replace(",", ".")
+        else:
+            texto = texto.replace(",", "")
+    elif comas or puntos:
+        sep = "," if comas else "."
+        if (comas + puntos) > 1:
+            texto = texto.replace(sep, "")                    # Regla 2: miles
+        else:
+            decimales = len(texto.split(sep)[1])
+            if decimales == 3:
+                texto = texto.replace(sep, "")                # Regla 3: miles
+            else:
+                texto = texto.replace(sep, ".")               # Regla 3: decimales
+
+    try:
+        numero = float(texto)
+    except ValueError:
+        return None
+    return -numero if negativo else numero
+
+
+def salto_de_precio_sospechoso(precio_viejo, precio_nuevo, tope_pct=200):
+    """¿Este cambio de precio parece un error de la lista y no un aumento? (sospechoso, motivo).
+
+    No mira solo el porcentaje: un salto de exactamente 100 o 1000 veces casi siempre es el
+    separador de decimales mal leído, y conviene decirlo con esas palabras para que se entienda
+    qué revisar."""
+    if not tope_pct or precio_viejo is None or precio_nuevo is None:
+        return False, None
+    if precio_viejo <= 0 or precio_nuevo <= 0:
+        return False, None
+    razon = precio_nuevo / precio_viejo
+    for factor, texto in ((1000, "mil"), (100, "cien"), (10, "diez")):
+        if abs(razon - factor) / factor < 0.02:
+            return True, f"quedó {texto} veces más caro — suele ser el separador de decimales"
+        if abs(razon - 1 / factor) * factor < 0.02:
+            return True, f"quedó {texto} veces más barato — suele ser el separador de decimales"
+    # Se compara la RAZÓN, no el porcentaje, y a propósito.
+    # Un aumento no tiene techo (+500%, +2000%), pero una baja no puede pasar de -100%: con un
+    # límite del 200% en porcentaje, NINGUNA baja se frenaría nunca, ni siquiera un precio que
+    # se divide por veinte. Mirando la razón, multiplicar por 3 y dividir por 3 pesan igual.
+    factor = 1 + tope_pct / 100.0
+    if razon > factor:
+        return True, f"queda {razon:.1f} veces más caro (+{(razon - 1) * 100:.0f}%)"
+    if razon < 1 / factor:
+        return True, f"queda {1 / razon:.1f} veces más barato ({(razon - 1) * 100:.0f}%)"
+    return False, None
+
+
 def get_or_create_producto(raw, clean, desc, marca_id, imagen_url=None):
     c.execute(
         "INSERT OR IGNORE INTO productos (codigo_raw, codigo_clean, descripcion, marca_id) VALUES (?, ?, ?, ?)",
@@ -2762,7 +3339,12 @@ def buscar_codigos_parecidos(clean_code, limite=30):
     return filas_a_listas(c)
 
 
+# Se ordena de más largo a más corto para que gane la coincidencia más específica:
+# "LAND ROVER" tiene que ganarle a "ROVER", y "MERCEDES BENZ" a "MERCEDES".
+# No se agregan marcas de 2 letras (MG, DS) porque en una descripción de repuesto casi siempre
+# son otra cosa (medidas, siglas) y ensuciarían más de lo que aportan.
 MARCAS_VEHICULO = sorted(set([
+    # --- Las que ya estaban ---
     "MERCEDES BENZ", "M.BENZ", "MERCEDES", "VOLKSWAGEN", "CHEVROLET", "MITSUBISHI", "LAND ROVER",
     "MASSEY FERGUSON", "M. FERGUSON", "AGCO SISU POWER", "JOHN DEERE", "NEW HOLLAND", "ALFA ROMEO",
     "CITROEN", "PEUGEOT", "RENAULT", "CHRYSLER", "CUMMINS", "PERKINS", "ILLINOIS", "TOYOTA",
@@ -2770,6 +3352,28 @@ MARCAS_VEHICULO = sorted(set([
     "HONDA", "DODGE", "BURMOR", "M.W.M.", "M.W.M", "MWM", "KNORR", "VARGA", "VALTRA", "ZANELLO",
     "PAUNY", "FIAT", "FORD", "JEEP", "AUDI", "SEAT", "BMW", "KIA", "MAN", "DAF", "HINO",
     "ISUZU", "CASE", "GM",
+    # --- Chinas, que hoy son parte del parque argentino ---
+    "GREAT WALL", "DONGFENG", "SHINERAY", "CHANGAN", "BAIC", "CHERY", "GEELY", "HAVAL",
+    "FOTON", "LIFAN", "JINBEI", "MAXUS", "JETOUR", "SOUEAST", "BYD", "JAC",
+    # --- Coreanas, japonesas y del resto de Asia ---
+    "SSANGYONG", "MAHINDRA", "SUBARU", "DAIHATSU", "LEXUS", "INFINITI", "ACURA", "GENESIS",
+    "MAZDA", "TATA", "PROTON",
+    # --- Europeas que faltaban ---
+    "VAUXHALL", "LAMBORGHINI", "ROLLS ROYCE", "ASTON MARTIN", "MASERATI", "PORSCHE", "FERRARI",
+    "BENTLEY", "SKODA", "LANCIA", "JAGUAR", "DACIA", "OPEL", "SMART", "MINI", "LADA", "ROVER",
+    "ZASTAVA", "YUGO", "TALBOT", "SAAB", "LOTUS", "MCLAREN",
+    # --- Norteamericanas ---
+    "INTERNATIONAL", "FREIGHTLINER", "WESTERN STAR", "OLDSMOBILE", "KENWORTH", "PETERBILT",
+    "PLYMOUTH", "CADILLAC", "PONTIAC", "LINCOLN", "MERCURY", "SATURN", "NAVISTAR", "BUICK",
+    "TESLA", "MACK", "GMC", "RAM",
+    # --- Camiones, ómnibus, agro e industria ---
+    "MERCEDES-BENZ", "LANDINI", "MARCOPOLO", "METALPAR", "RASTROJERO", "CATERPILLAR", "YANMAR",
+    "KUBOTA", "CLAAS", "FENDT", "JCB", "VETRA", "APACHE", "SEVEL", "SIAM", "DI TELLA",
+    # --- Motos ---
+    "ROYAL ENFIELD", "HARLEY DAVIDSON", "MOTO GUZZI", "MV AGUSTA", "KAWASAKI", "HUSQVARNA",
+    "MOTOMEL", "GUERRERO", "ZANELLA", "KYMCO", "APRILIA", "YAMAHA", "DUCATI", "PIAGGIO",
+    "BENELLI", "CORVEN", "KELLER", "GILERA", "MONDIAL", "BAJAJ", "VESPA", "KTM", "SYM",
+    "HERO", "TVS", "BETA",
 ]), key=len, reverse=True)
 
 
@@ -3944,8 +4548,9 @@ def leer_excel(archivo, nrows=None):
 # IDEA 2: FICHA DIGITAL DEL VEHÍCULO (patente + historial de piezas)
 # ============================================================
 def get_or_create_vehiculo(patente, cliente_nombre="", cliente_telefono="", marca_auto="", modelo_auto="",
-                            km_actual=None, anio="", motorizacion=""):
+                            km_actual=None, anio="", motorizacion="", vin=""):
     patente = patente.strip().upper()
+    vin = re.sub(r'\s', '', (vin or "").strip().upper())
     with db_lock:
         c.execute("SELECT id FROM vehiculos WHERE patente = ?", (patente,))
         row = c.fetchone()
@@ -3957,6 +4562,7 @@ def get_or_create_vehiculo(patente, cliente_nombre="", cliente_telefono="", marc
                 "cliente_telefono = COALESCE(NULLIF(?, ''), cliente_telefono), "
                 "marca_auto = COALESCE(NULLIF(?, ''), marca_auto), "
                 "modelo_auto = COALESCE(NULLIF(?, ''), modelo_auto), "
+                "vin = COALESCE(NULLIF(?, ''), vin), "
                 "anio = COALESCE(NULLIF(?, ''), anio), "
                 "motorizacion = COALESCE(NULLIF(?, ''), motorizacion), "
                 "km_actual = COALESCE(?, km_actual), "
@@ -3964,20 +4570,123 @@ def get_or_create_vehiculo(patente, cliente_nombre="", cliente_telefono="", marc
                 "km_actualizado_fecha = CASE WHEN ? IS NOT NULL THEN datetime('now') ELSE km_actualizado_fecha END "
                 "WHERE id = ?",
                 (cliente_nombre.strip(), cliente_telefono.strip(), marca_auto.strip(), modelo_auto.strip(),
-                 anio.strip(), motorizacion.strip(), km_actual, km_actual, km_actual, vid)
+                 vin, anio.strip(), motorizacion.strip(), km_actual, km_actual, km_actual, vid)
             )
         else:
             c.execute(
                 "INSERT INTO vehiculos (patente, cliente_nombre, cliente_telefono, marca_auto, modelo_auto, "
-                "anio, motorizacion, km_registro, km_actual, km_actualizado_fecha) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))",
+                "vin, anio, motorizacion, km_registro, km_actual, km_actualizado_fecha) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))",
                 (patente, cliente_nombre.strip(), cliente_telefono.strip(), marca_auto.strip(),
-                 modelo_auto.strip(), anio.strip(), motorizacion.strip(), km_actual, km_actual)
+                 modelo_auto.strip(), vin, anio.strip(), motorizacion.strip(), km_actual, km_actual)
             )
             c.execute("SELECT id FROM vehiculos WHERE patente = ?", (patente,))
             vid = c.fetchone()["id"]
         conn.commit()
+    # Cada ficha cargada con VIN y modelo enseña el patrón sola. Así el mostrador va llenando
+    # la tabla de modelos sin que nadie tenga que sentarse a cargarla: al décimo Gol que pasa,
+    # el próximo VIN de Gol se autocompleta.
+    if len(vin) == 17 and (modelo_auto.strip() or motorizacion.strip()):
+        try:
+            aprender_modelo_de_vin(vin, modelo_auto, marca_auto, motorizacion)
+        except Exception:
+            pass
     return vid
+
+
+def enseniar_motor_vin(wmi, codigo, motor, notas=None):
+    """Guarda que en esta marca, ese carácter en la 8ª posición del VIN es ese motor."""
+    wmi, codigo = wmi.strip().upper(), (codigo or "").strip().upper()[:1]
+    if not wmi or not codigo or not (motor or "").strip():
+        return False
+    with db_lock:
+        c.execute("""INSERT INTO motores_vin (wmi, codigo, motor, notas) VALUES (?, ?, ?, ?)
+                     ON CONFLICT(wmi, codigo) DO UPDATE SET motor = excluded.motor,
+                        notas = excluded.notas, veces = veces + 1""",
+                  (wmi, codigo, motor.strip(), (notas or "").strip() or None))
+        conn.commit()
+    return True
+
+
+def olvidar_motor_vin(wmi, codigo):
+    with db_lock:
+        c.execute("DELETE FROM motores_vin WHERE wmi = ? AND codigo = ?",
+                  (wmi.strip().upper(), (codigo or "").strip().upper()[:1]))
+        conn.commit()
+    return c.rowcount
+
+
+def listar_motores_vin():
+    c.execute("""SELECT m.wmi AS "WMI", m.codigo AS "8ª posición", m.motor AS "Motor",
+                        COALESCE(f.fabricante, '—') AS "Fabricante", m.veces AS "Visto",
+                        m.notas AS "Notas"
+                 FROM motores_vin m LEFT JOIN fabricantes_vin f ON f.wmi = m.wmi
+                 ORDER BY f.fabricante, m.codigo""")
+    return filas_a_listas(c)
+
+
+def aprender_modelo_de_vin(vin, modelo, marca="", motor=""):
+    """Guarda los patrones VIN → modelo y VIN → motor a partir de un dato real.
+
+    Nunca pisa lo que ya esté cargado: si el patrón existe, se respeta (puede haberlo corregido
+    una persona a mano, y eso vale más que una deducción automática). Devuelve qué aprendió."""
+    vin = re.sub(r'\s', '', (vin or "").strip().upper())
+    modelo = (modelo or "").strip()
+    motor = (motor or "").strip()
+    if len(vin) != 17:
+        return {"modelo": False, "motor": False}
+    wmi, vds = vin[:3], vin[3:8]
+    origen = f"aprendido de una ficha de vehículo{f' ({marca.strip()})' if marca.strip() else ''}"
+    aprendido = {"modelo": False, "motor": False}
+
+    if modelo:
+        c.execute("SELECT 1 FROM modelos_vin WHERE wmi = ? AND vds IN (?, ?, ?)",
+                  (wmi, vds, vds[:4], vds[:3]))
+        if not c.fetchone():
+            with db_lock:
+                c.execute("INSERT OR IGNORE INTO modelos_vin (wmi, vds, modelo, motor, notas) "
+                          "VALUES (?, ?, ?, ?, ?)",
+                          (wmi, vds, modelo, motor or None, origen))
+                conn.commit()
+            aprendido["modelo"] = True
+
+    if motor:
+        codigo = vin[7]
+        c.execute("SELECT 1 FROM motores_vin WHERE wmi = ? AND codigo = ?", (wmi, codigo))
+        if not c.fetchone():
+            with db_lock:
+                c.execute("INSERT OR IGNORE INTO motores_vin (wmi, codigo, motor, notas) "
+                          "VALUES (?, ?, ?, ?)", (wmi, codigo, motor, origen))
+                conn.commit()
+            aprendido["motor"] = True
+    return aprendido
+
+
+def buscar_vehiculo_por_vin(vin):
+    """Busca una ficha por número de chasis. Si el auto ya pasó por el mostrador, esto da los
+    datos REALES (modelo, año, motor, dueño e historial de piezas), no una estimación."""
+    vin = re.sub(r'\s', '', (vin or "").strip().upper())
+    if len(vin) != 17:
+        return None
+    c.execute("SELECT * FROM vehiculos WHERE vin = ?", (vin,))
+    row = c.fetchone()
+    return dict(row) if row else None
+
+
+def aprender_modelos_de_fichas_existentes():
+    """Recorre las fichas que ya tienen VIN y modelo cargados y arma la tabla de patrones de una.
+    Sirve para no perder lo que ya está cargado cuando se estrena esta función."""
+    c.execute("""SELECT vin, modelo_auto, marca_auto, motorizacion FROM vehiculos
+                 WHERE vin IS NOT NULL AND LENGTH(vin) = 17
+                   AND ((modelo_auto IS NOT NULL AND modelo_auto <> '')
+                        OR (motorizacion IS NOT NULL AND motorizacion <> ''))""")
+    modelos = motores = 0
+    for fila in c.fetchall():
+        r = aprender_modelo_de_vin(fila["vin"], fila["modelo_auto"] or "",
+                                    fila["marca_auto"] or "", fila["motorizacion"] or "")
+        modelos += 1 if r["modelo"] else 0
+        motores += 1 if r["motor"] else 0
+    return modelos, motores
 
 
 def actualizar_km_registro(vehiculo_id, km_registro):
@@ -4971,26 +5680,81 @@ def listar_fabricantes_dtc():
 # ============================================================
 # Primer carácter del VIN = región/país de fabricación (estándar ISO 3779, dato genérico).
 PAISES_VIN = {
+    # Primer carácter del VIN = región. Es lo más grueso; abajo se afina con dos caracteres.
     "1": "Estados Unidos", "4": "Estados Unidos", "5": "Estados Unidos",
-    "2": "Canadá", "3": "México", "6": "Australia",
-    "8": "Argentina", "9": "Brasil / Argentina",
-    "J": "Japón", "K": "Corea del Sur", "L": "China",
-    "S": "Reino Unido", "T": "Suiza", "V": "Francia / España",
-    "W": "Alemania", "Y": "Suecia / Finlandia", "Z": "Italia",
+    "2": "Canadá", "3": "México / Centroamérica",
+    "6": "Australia / Oceanía", "7": "Nueva Zelanda / Oceanía",
+    "8": "Sudamérica", "9": "Brasil / Sudamérica", "0": "Sudamérica",
+    "A": "África", "B": "África", "C": "África", "D": "África", "E": "África",
+    "F": "África", "G": "África", "H": "África",
+    "J": "Japón", "K": "Corea del Sur", "L": "China", "M": "India / Asia del Sur",
+    "N": "Turquía / Asia occidental", "P": "Filipinas / Asia", "R": "Taiwán / Asia",
+    "S": "Reino Unido", "T": "Europa central", "U": "Europa del este",
+    "V": "Francia / España", "W": "Alemania", "X": "Rusia / Europa del este",
+    "Y": "Suecia / Finlandia", "Z": "Italia",
 }
 # Con los DOS primeros caracteres se distingue mucho mejor: "8" solo dice Sudamérica, pero
 # "8A" es Argentina y "8B" Chile. Se usa esto primero y, si no está, se cae al de una letra.
 PAISES_VIN_2 = {
-    "8A": "Argentina", "8B": "Chile", "8C": "Chile", "8G": "Ecuador",
-    "8L": "Ecuador", "8X": "Venezuela", "8Y": "Venezuela", "8Z": "Venezuela",
+    # --- Sudamérica ---
+    "8A": "Argentina", "8B": "Argentina", "8C": "Argentina", "8D": "Argentina",
+    "8E": "Argentina",
+    "8F": "Chile", "8G": "Chile", "8H": "Chile", "8J": "Chile",
+    "8K": "Ecuador", "8L": "Ecuador", "8M": "Ecuador",
+    "8S": "Perú", "8T": "Perú",
+    "8X": "Venezuela", "8Y": "Venezuela", "8Z": "Venezuela",
     "9A": "Brasil", "9B": "Brasil", "9C": "Brasil", "9D": "Brasil", "9E": "Brasil",
     "93": "Brasil", "94": "Brasil", "95": "Brasil", "96": "Brasil", "97": "Brasil",
     "98": "Brasil", "99": "Brasil",
-    "9F": "Colombia", "9G": "Colombia",
-    "VF": "Francia", "VS": "España", "VV": "Austria",
-    "TM": "República Checa", "TR": "Hungría", "TS": "Serbia",
-    "ML": "Tailandia", "MA": "India", "MB": "India", "MC": "India", "MH": "Indonesia",
-    "LS": "China", "LF": "China", "LV": "China", "LB": "China",
+    "9F": "Colombia", "9G": "Colombia", "9H": "Colombia",
+    "9L": "Paraguay", "9M": "Paraguay",
+    "9U": "Uruguay", "9V": "Uruguay",
+    "9X": "Venezuela",
+    # --- Norteamérica ---
+    "1G": "Estados Unidos", "1F": "Estados Unidos", "2F": "Canadá", "2G": "Canadá",
+    "3F": "México", "3G": "México", "3N": "México", "3V": "México",
+    # --- Europa ---
+    "SA": "Reino Unido", "SB": "Reino Unido", "SC": "Reino Unido", "SD": "Reino Unido",
+    "SE": "Reino Unido", "SF": "Reino Unido", "SH": "Reino Unido", "SJ": "Reino Unido",
+    "SK": "Reino Unido", "SL": "Reino Unido", "SM": "Reino Unido",
+    "SU": "Polonia", "SN": "Alemania (este)",
+    "TM": "República Checa", "TN": "República Checa", "TR": "Hungría", "TS": "Hungría",
+    "TW": "Portugal", "TY": "Portugal", "TC": "Suiza", "TD": "Suiza",
+    "UU": "Rumania", "U5": "Eslovaquia", "U6": "Eslovaquia",
+    "VA": "Austria", "VN": "Francia", "VF": "Francia", "VG": "Francia", "VL": "Francia",
+    "VS": "España", "VT": "España", "VV": "España", "VW": "España", "VX": "Serbia",
+    "WA": "Alemania", "WB": "Alemania", "WD": "Alemania", "WE": "Alemania",
+    "WF": "Alemania", "WJ": "Alemania", "WM": "Alemania", "WP": "Alemania",
+    "WU": "Alemania", "WV": "Alemania", "W0": "Alemania",
+    "XL": "Países Bajos", "XM": "Países Bajos", "XT": "Rusia", "XU": "Rusia",
+    "XW": "Rusia / Uzbekistán", "X4": "Rusia", "X7": "Rusia",
+    "YB": "Bélgica", "YC": "Bélgica", "YE": "Bélgica",
+    "YK": "Finlandia", "YS": "Suecia", "YT": "Suecia", "YV": "Suecia", "Y6": "Ucrania",
+    "ZA": "Italia", "ZB": "Italia", "ZC": "Italia", "ZD": "Italia", "ZF": "Italia",
+    "ZG": "Italia", "ZH": "Italia", "ZJ": "Italia", "ZK": "Italia", "ZL": "Italia",
+    "ZO": "Italia",
+    # --- Asia ---
+    "JA": "Japón", "JD": "Japón", "JF": "Japón", "JH": "Japón", "JK": "Japón",
+    "JL": "Japón", "JM": "Japón", "JN": "Japón", "JS": "Japón", "JT": "Japón",
+    "JY": "Japón",
+    "KL": "Corea del Sur", "KM": "Corea del Sur", "KN": "Corea del Sur",
+    "KP": "Corea del Sur",
+    "LA": "China", "LB": "China", "LC": "China", "LD": "China", "LE": "China",
+    "LF": "China", "LG": "China", "LH": "China", "LJ": "China", "LK": "China",
+    "LL": "China", "LM": "China", "LP": "China", "LS": "China", "LT": "China",
+    "LU": "China", "LV": "China", "LZ": "China", "L4": "China", "L5": "China",
+    "MA": "India", "MB": "India", "MC": "India", "MD": "India", "ME": "India",
+    "MH": "Indonesia", "MJ": "Indonesia", "ML": "Tailandia", "MM": "Tailandia",
+    "MN": "Tailandia", "MP": "Tailandia", "MR": "Tailandia",
+    "NL": "Turquía", "NM": "Turquía", "NA": "Irán", "NC": "Turquía",
+    "PE": "Filipinas", "PL": "Malasia", "PN": "Malasia", "PP": "Singapur",
+    "RF": "Taiwán", "RA": "Taiwán", "RL": "Taiwán",
+    # --- África y Oceanía ---
+    "AA": "Sudáfrica", "AC": "Sudáfrica", "AD": "Sudáfrica", "AF": "Sudáfrica",
+    "AH": "Sudáfrica",
+    "6A": "Australia", "6F": "Australia", "6G": "Australia", "6H": "Australia",
+    "6M": "Australia", "6T": "Australia", "6U": "Australia",
+    "7A": "Nueva Zelanda",
 }
 # Código de año en la 10ª posición del VIN (estándar, cíclico cada 30 años).
 ANIOS_VIN = {
@@ -5016,14 +5780,62 @@ def decodificar_vin(vin):
     resultado["wmi"] = wmi
     resultado["pais"] = PAISES_VIN_2.get(vin[:2]) or PAISES_VIN.get(vin[0], "Desconocido / no cargado")
 
-    c.execute("SELECT fabricante, pais FROM fabricantes_vin WHERE wmi = ?", (wmi,))
-    fila = c.fetchone()
-    if fila:
-        resultado["fabricante"] = fila["fabricante"]
-        if fila["pais"]:
-            resultado["pais"] = fila["pais"]
-    else:
-        resultado["fabricante"] = None
+    # Primero el WMI exacto de 3; si no está, el prefijo de 2. El orden importa y no es un
+    # detalle: 'JA' es Isuzu pero 'JA3' es Mitsubishi, y '1H' es Honda mientras que '1HD' es
+    # Harley-Davidson. Si se buscara el prefijo primero, esos casos darían la marca equivocada.
+    resultado["fabricante"] = None
+    resultado["fabricante_por_prefijo"] = False
+    for clave, es_prefijo in ((wmi, False), (wmi[:2], True)):
+        c.execute("SELECT fabricante, pais FROM fabricantes_vin WHERE wmi = ?", (clave,))
+        fila = c.fetchone()
+        if fila:
+            resultado["fabricante"] = fila["fabricante"]
+            resultado["fabricante_por_prefijo"] = es_prefijo
+            if fila["pais"]:
+                resultado["pais"] = fila["pais"]
+            break
+
+    # --- Modelo: NO sale del VIN, sale de lo que se haya enseñado ---
+    # Las posiciones 4-8 (VDS) las define cada fabricante a su gusto, no hay norma que diga qué
+    # significan. Así que se busca el patrón exacto y, si no está, uno más corto (4-7 y 4-6):
+    # muchos fabricantes usan los primeros caracteres para la carrocería y los últimos para el
+    # motor o el equipamiento, así que un patrón corto suele acertar la familia del modelo.
+    vds = vin[3:8]
+    resultado["vds"] = vds
+    resultado["modelo"] = None
+    resultado["modelo_exacto"] = False
+    resultado["motor"] = None
+    resultado["motor_origen"] = None
+    for largo in (5, 4, 3):
+        c.execute("SELECT vds, modelo, motor, notas FROM modelos_vin WHERE wmi = ? AND vds = ?",
+                  (wmi, vds[:largo]))
+        m = c.fetchone()
+        if m:
+            resultado["modelo"] = m["modelo"]
+            resultado["modelo_notas"] = m["notas"]
+            resultado["modelo_exacto"] = (largo == 5)
+            if m["motor"]:
+                resultado["motor"] = m["motor"]
+                resultado["motor_origen"] = ("patrón exacto de este modelo" if largo == 5
+                                              else "patrón de la familia del modelo")
+            break
+
+    # --- Motor por la 8ª posición ---
+    # Es la posición que la norma de Norteamérica reserva para el código de motor, y que casi
+    # todos los fabricantes usan para lo mismo aunque afuera no sea obligatorio. Generaliza
+    # mejor que el modelo: el mismo código suele repetirse en toda la gama de la marca.
+    # Solo se usa si el patrón del modelo no trajo ya un motor, que es más específico.
+    codigo_motor = vin[7]
+    resultado["codigo_motor"] = codigo_motor
+    resultado["motor_por_norma"] = vin[0] in "12345"
+    if not resultado["motor"]:
+        c.execute("SELECT motor, notas FROM motores_vin WHERE wmi = ? AND codigo = ?",
+                  (wmi, codigo_motor))
+        mm = c.fetchone()
+        if mm:
+            resultado["motor"] = mm["motor"]
+            resultado["motor_notas"] = mm["notas"]
+            resultado["motor_origen"] = f"código «{codigo_motor}» en la 8ª posición"
 
     # --- Año: se puede ser preciso en los VIN de Norteamérica ---
     # El código de la 10ª posición se repite cada 30 años (la "D" sirve para 1983 y 2013).
@@ -5068,6 +5880,25 @@ def decodificar_vin(vin):
         except KeyError:
             resultado["digito_verificador"] = None
 
+    # --- Lo más confiable de todo: que el auto ya esté en una ficha ---
+    # Si este VIN exacto ya pasó por el mostrador, no hay nada que estimar: el modelo, el año y
+    # el motor son los que cargó una persona mirando el auto. Eso pisa cualquier deducción, y
+    # además trae la patente, el dueño y el historial de piezas.
+    ficha = buscar_vehiculo_por_vin(vin)
+    if ficha:
+        resultado["vehiculo"] = ficha
+        if ficha.get("modelo_auto"):
+            resultado["modelo"] = ficha["modelo_auto"]
+            resultado["modelo_exacto"] = True
+            resultado["modelo_notas"] = f"de la ficha de la patente {ficha.get('patente') or '—'}"
+        if ficha.get("motorizacion"):
+            resultado["motor"] = ficha["motorizacion"]
+            resultado["motor_origen"] = f"ficha de la patente {ficha.get('patente') or '—'}"
+        if ficha.get("anio") and str(ficha["anio"]).strip().isdigit():
+            resultado["anio_estimado"] = int(str(ficha["anio"]).strip())
+            resultado["anio_alternativo"] = None
+            resultado["anio_preciso"] = True
+
     return resultado
 
 
@@ -5080,6 +5911,36 @@ def agregar_fabricante_vin(wmi, fabricante, pais):
             (wmi, fabricante.strip(), pais.strip())
         )
         conn.commit()
+
+
+def enseniar_modelo_vin(wmi, vds, modelo, notas=None):
+    """Guarda que este patrón de VIN corresponde a este modelo. La próxima vez se autocompleta."""
+    wmi, vds = wmi.strip().upper(), vds.strip().upper()
+    if not wmi or not vds or not modelo.strip():
+        return False
+    with db_lock:
+        c.execute("""INSERT INTO modelos_vin (wmi, vds, modelo, notas) VALUES (?, ?, ?, ?)
+                     ON CONFLICT(wmi, vds) DO UPDATE SET modelo = excluded.modelo,
+                        notas = excluded.notas, veces = veces + 1""",
+                  (wmi, vds, modelo.strip(), (notas or "").strip() or None))
+        conn.commit()
+    return True
+
+
+def olvidar_modelo_vin(wmi, vds):
+    with db_lock:
+        c.execute("DELETE FROM modelos_vin WHERE wmi = ? AND vds = ?",
+                  (wmi.strip().upper(), vds.strip().upper()))
+        conn.commit()
+    return c.rowcount
+
+
+def listar_modelos_vin():
+    c.execute("""SELECT m.wmi AS "WMI", m.vds AS "Patrón (VDS)", m.modelo AS "Modelo",
+                        COALESCE(f.fabricante, '—') AS "Fabricante", m.notas AS "Notas"
+                 FROM modelos_vin m LEFT JOIN fabricantes_vin f ON f.wmi = m.wmi
+                 ORDER BY f.fabricante, m.modelo""")
+    return filas_a_listas(c)
 
 
 def listar_fabricantes_vin():
@@ -5568,6 +6429,29 @@ elif st.session_state.get("_restaurado_de_semilla"):
         "acordate de actualizarla cada tanto."
     )
 
+# Aviso de backup atrasado, en cualquier sección. Va acá arriba a propósito: si esperara a que
+# entres a Estadísticas, te enterarías justo después de perder los datos.
+_bk = estado_del_backup()
+if _bk["urgente"]:
+    if not _bk["hay_backup"]:
+        st.warning(
+            f"💾 **Nunca bajaste un backup** y ya tenés {_bk['productos_nuevos']:,} productos "
+            "cargados. Como el servidor borra el disco al reiniciar, hoy podrías perder todo. "
+            "Andá a **Estadísticas → 💾 Backup y config** y bajate uno."
+        )
+    else:
+        motivos = []
+        if _bk["productos_nuevos"]:
+            motivos.append(f"{_bk['productos_nuevos']:,} producto(s) nuevos")
+        if _bk["importaciones"]:
+            motivos.append(f"{_bk['importaciones']} lista(s) importadas")
+        if _bk["dias"]:
+            motivos.append(f"pasaron {_bk['dias']} día(s)")
+        st.warning(
+            "💾 **Backup atrasado** — desde el último hay " + ", ".join(motivos) +
+            ". Si el servidor reinicia ahora, eso se pierde."
+        )
+
 PAGINAS = ["🔍 Buscador", "🔗 Vincular manual", "📁 Cargar Excel", "🗂️ Administrar",
            "📊 Estadísticas", "📋 Lista WhatsApp", "🚗 Vehículos", "🛠️ Modo Mecánico"]
 
@@ -5922,8 +6806,13 @@ Casi todo lo que edita o borra algo pide la contraseña de administrador la prim
 
                         if catalogos:
                             st.caption("Buscar este código también en:")
-                            cols = st.columns(len(catalogos))
-                            for col, cat in zip(cols, catalogos):
+                            # OJO con el nombre: 'cols' es una función de esta app (arma columnas
+                            # que se apilan bien en el celular). Llamar a la variable igual la
+                            # pisaba a nivel global, y a partir de ahí cualquier cols(3) posterior
+                            # reventaba con "'list' object is not callable". Solo saltaba cuando la
+                            # marca tenía catálogo cargado, por eso era intermitente.
+                            columnas_catalogos = st.columns(len(catalogos))
+                            for col, cat in zip(columnas_catalogos, catalogos):
                                 with col:
                                     st.link_button(f"🌐 {cat['nombre']}", cat["url"],
                                                     use_container_width=True, key=f"link_{cat['id']}_{clean}")
@@ -6395,7 +7284,22 @@ if pagina == PAGINAS[2]:
         pass
     else:
         st.subheader("Cargar nueva planilla (.xlsx / .csv / .pdf)")
-        nombre_prov = st.text_input("Nombre de la Marca / Proveedor:", placeholder="Ej: Mahle, Bosch, Mann...")
+
+        # El proveedor casi siempre está en el nombre del archivo ("ILLINOIS 17 07 2026.xlsx").
+        # Se propone solo, pero queda editable: nunca se pisa lo que la persona haya escrito.
+        _archivo_previo = st.session_state.get("_archivo_lista")
+        if _archivo_previo and not st.session_state.get("nombre_prov_carga"):
+            c.execute("SELECT nombre FROM marcas")
+            _marcas_conocidas = [r["nombre"] for r in c.fetchall()]
+            _sugerido_prov = adivinar_proveedor(_archivo_previo["nombre"], _marcas_conocidas)
+            if _sugerido_prov:
+                st.session_state["nombre_prov_carga"] = _sugerido_prov
+
+        nombre_prov = st.text_input(
+            "Nombre de la Marca / Proveedor:", placeholder="Ej: Mahle, Bosch, Mann...",
+            key="nombre_prov_carga",
+            help="Se propone solo a partir del nombre del archivo. Corregilo si no acertó."
+        )
 
         metodo = st.radio(
             "¿Cómo querés indicar el archivo?",
@@ -6416,6 +7320,18 @@ if pagina == PAGINAS[2]:
                     archivo_listo(archivo, "archivo")
                 with ca2:
                     boton_otro_archivo("lista")
+
+                # ¿Esta misma planilla ya se importó? Se compara el CONTENIDO, no el nombre:
+                # el archivo suele llegar renombrado y así se reconoce igual.
+                previa = importacion_previa(huella_de_archivo(archivo.getvalue()))
+                if previa:
+                    st.warning(
+                        f"🔁 Esta misma planilla ya se importó el "
+                        f"**{str(previa['fecha'])[:16]}** como **{previa['marca']}** "
+                        f"({previa['filas_cargadas']} filas). Si la volvés a importar vas a "
+                        "revisar de nuevo los mismos vínculos, y los precios que hayas corregido "
+                        "a mano desde entonces se pisan con los de esta lista."
+                    )
             else:
                 archivo_listo(None, "archivo")
             if archivo and archivo.name.lower().endswith(".pdf"):
@@ -6440,9 +7356,14 @@ if pagina == PAGINAS[2]:
                     archivo = ruta_archivo
 
         # --- Mapeo dinámico de columnas ---
+        # OJO: estos valores por defecto NO son decorativos. Los selectores se crean adentro de
+        # un "else" (solo si el archivo tiene columnas), pero el bloque de importar está afuera:
+        # sin estas líneas, un archivo sin columnas hace que el importador rompa con NameError.
         todas_filas = None
         idx_prov = idx_oem = 0
         idx_desc = None
+        idx_precio = idx_stock = None
+        tope_salto = 200
 
         if archivo:
             try:
@@ -6471,15 +7392,11 @@ if pagina == PAGINAS[2]:
                 st.error("El archivo no tiene ninguna columna con datos.")
             else:
                 st.markdown("**Mapeo de columnas** — revisá que coincida con tu archivo (se sugiere automáticamente):")
-                cols_upper = [str(x).upper() if x else "" for x in encabezado]
-                idx_prov_auto, idx_oem_auto, idx_desc_auto = 0, min(1, len(encabezado) - 1), None
-                for i, col_name in enumerate(cols_upper):
-                    if any(x in col_name for x in ['COD', 'ART', 'REF']):
-                        idx_prov_auto = i
-                    elif any(x in col_name for x in ['OEM', 'ORIG', 'EQUIV']):
-                        idx_oem_auto = i
-                    elif any(x in col_name for x in ['DESC', 'DETALLE', 'PROD']):
-                        idx_desc_auto = i
+                sugerido = adivinar_columnas(encabezado)
+                idx_prov_auto = sugerido["prov"]
+                idx_oem_auto = sugerido["oem"] if sugerido["oem"] is not None else min(1, len(encabezado) - 1)
+                idx_desc_auto = sugerido["desc"]
+                idx_precio_sug, idx_stock_sug = sugerido["precio"], sugerido["stock"]
 
                 opciones_cols = [f"Columna {i}: {str(v)[:20] if v else '(sin título)'}"
                                   for i, v in enumerate(encabezado)]
@@ -6519,6 +7436,45 @@ if pagina == PAGINAS[2]:
                     idx_desc = st.selectbox("Descripción (opcional):", opciones_desc,
                                              format_func=lambda x: "Ninguna" if x is None else opciones_cols[x],
                                              index=idx_default_desc)
+
+                c_pr, c_st = cols(2)
+                opciones_num = [None] + list(range(len(opciones_cols)))
+                # El mapeo que ya funcionó con este proveedor manda; si no hay, lo detectado
+                # por el título de la columna.
+                idx_precio_auto = (_valido(mapeo_previo["idx_precio"]) if mapeo_previo else None)
+                if idx_precio_auto is None:
+                    idx_precio_auto = idx_precio_sug
+                idx_stock_auto = (_valido(mapeo_previo["idx_stock"]) if mapeo_previo else None)
+                if idx_stock_auto is None:
+                    idx_stock_auto = idx_stock_sug
+                with c_pr:
+                    idx_precio = st.selectbox(
+                        "Precio (opcional):", opciones_num,
+                        format_func=lambda x: "Ninguna" if x is None else opciones_cols[x],
+                        index=opciones_num.index(idx_precio_auto) if idx_precio_auto is not None else 0,
+                        help="Si la elegís, la lista actualiza los precios al importar."
+                    )
+                with c_st:
+                    idx_stock = st.selectbox(
+                        "Stock (opcional):", opciones_num,
+                        format_func=lambda x: "Ninguna" if x is None else opciones_cols[x],
+                        index=opciones_num.index(idx_stock_auto) if idx_stock_auto is not None else 0
+                    )
+
+                if idx_precio is not None:
+                    tope_salto = st.select_slider(
+                        "Frenar precios que cambien más de:",
+                        options=[50, 100, 200, 400, 800, 0],
+                        format_func=lambda x: "No frenar ninguno" if x == 0 else f"{x}%",
+                        value=200, key="tope_salto_precio",
+                        help="Un precio que se multiplica o se divide de golpe casi nunca es un "
+                             "aumento: es la columna equivocada, el separador de decimales al "
+                             "revés, o un precio por bulto donde iba el unitario. Los que superen "
+                             "este límite se cargan igual como producto, pero el precio queda "
+                             "frenado para que lo mires vos."
+                    )
+                else:
+                    tope_salto = 200
 
                 st.markdown("**Cuando la lista no trae el código de fábrica**")
                 buscar_oem_en_desc = st.checkbox(
@@ -6599,6 +7555,8 @@ if pagina == PAGINAS[2]:
                     cargados_sin_equiv = 0
                     omitidos = 0
                     descartados_cortos = 0
+                    precios_actualizados = 0
+                    precios_frenados = []
                     filas_omitidas = []
                     eq_batch = set()  # inserción en lote: se acumulan los pares y se insertan todos juntos al final
                     progreso = st.progress(0, text="Procesando filas...")
@@ -6647,11 +7605,48 @@ if pagina == PAGINAS[2]:
                                     progreso.progress(min((n + 1) / total, 1.0))
                                 continue
 
+                            precio_fila = leer_numero(celda(idx_precio)) if idx_precio is not None else None
+                            stock_fila = leer_numero(celda(idx_stock)) if idx_stock is not None else None
+
                             ids_prov = []
                             for raw_p in codigos_prov:
                                 clean_p = sanitizar(raw_p)
                                 if clean_p:
-                                    ids_prov.append(get_or_create_producto(raw_p, clean_p, desc, prov_id))
+                                    pid_nuevo = get_or_create_producto(raw_p, clean_p, desc, prov_id)
+                                    ids_prov.append(pid_nuevo)
+                                    if precio_fila is not None or stock_fila is not None:
+                                        c.execute("SELECT precio FROM productos WHERE id = ?", (pid_nuevo,))
+                                        _f = c.fetchone()
+                                        precio_viejo = _f["precio"] if _f else None
+                                        raro, motivo = salto_de_precio_sospechoso(
+                                            precio_viejo, precio_fila, tope_salto
+                                        )
+                                        if raro:
+                                            # El producto se carga igual; lo único que no se pisa
+                                            # es el precio, para no cotizar con un número roto.
+                                            precios_frenados.append({
+                                                "Código": raw_p, "Descripción": (desc or "")[:60],
+                                                "Precio actual": precio_viejo,
+                                                "Precio de la lista": precio_fila,
+                                                "Motivo": motivo,
+                                                "_id": pid_nuevo,
+                                            })
+                                            if stock_fila is not None:
+                                                c.execute("UPDATE productos SET stock = ? WHERE id = ?",
+                                                          (int(stock_fila), pid_nuevo))
+                                        else:
+                                            if precio_fila is not None and precio_viejo != precio_fila:
+                                                c.execute("INSERT INTO historial_precios (producto_id, precio) "
+                                                          "VALUES (?, ?)", (pid_nuevo, precio_fila))
+                                                precios_actualizados += 1
+                                            c.execute(
+                                                "UPDATE productos SET "
+                                                "precio = COALESCE(?, precio), stock = COALESCE(?, stock) "
+                                                "WHERE id = ?",
+                                                (precio_fila,
+                                                 int(stock_fila) if stock_fila is not None else None,
+                                                 pid_nuevo)
+                                            )
 
                             if not ids_prov:
                                 omitidos += 1
@@ -6729,9 +7724,15 @@ if pagina == PAGINAS[2]:
                                     [(a, b, lote_importacion) for a, b in eq_batch]
                                 )
 
+                        try:
+                            _huella = huella_de_archivo(archivo.getvalue())
+                        except Exception:
+                            _huella = None
                         c.execute(
-                            "INSERT INTO importaciones (marca, archivo, filas_cargadas, filas_omitidas) VALUES (?, ?, ?, ?)",
-                            (nombre_prov.upper(), getattr(archivo, "name", str(archivo)), cargados, omitidos)
+                            "INSERT INTO importaciones (marca, archivo, filas_cargadas, filas_omitidas, huella) "
+                            "VALUES (?, ?, ?, ?, ?)",
+                            (nombre_prov.upper(), getattr(archivo, "name", str(archivo)),
+                             cargados, omitidos, _huella)
                         )
                         conn.commit()
 
@@ -6740,7 +7741,7 @@ if pagina == PAGINAS[2]:
                     st.success(f"Se importaron {cargados} filas con equivalencia.")
                     # Recordar el mapeo que funcionó, para la próxima lista de este proveedor
                     guardar_mapeo_columnas(nombre_prov, idx_prov, idx_oem, idx_desc,
-                                            None, None, buscar_oem_en_desc, prov_es_oem)
+                                            idx_precio, idx_stock, buscar_oem_en_desc, prov_es_oem)
                     if not cargar_directo and eq_batch:
                         st.info(
                             f"🔒 {len(eq_batch)} vínculo(s) quedaron **esperando tu revisión** — todavía "
@@ -6754,6 +7755,41 @@ if pagina == PAGINAS[2]:
                             "la equivalencia sola cuando el mismo código llegue desde la lista de otro "
                             "proveedor, o podés vincularlos a mano desde 'Vincular manual'."
                         )
+                    if precios_actualizados:
+                        st.success(f"💲 Se actualizaron {precios_actualizados} precio(s).")
+
+                    if precios_frenados:
+                        st.warning(
+                            f"🛑 {len(precios_frenados)} precio(s) quedaron **sin actualizar** porque "
+                            "el cambio no parece un aumento sino un error de la lista. El producto se "
+                            "cargó igual; lo único que no se tocó es el precio."
+                        )
+                        st.dataframe(precios_frenados[:100], use_container_width=True, hide_index=True,
+                                      column_config={"_id": None})
+                        st.download_button(
+                            "⬇️ Bajar la lista completa de precios frenados",
+                            data=to_excel_bytes([{k: v for k, v in f.items() if k != "_id"}
+                                                  for f in precios_frenados]),
+                            file_name="precios_frenados.xlsx",
+                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                        )
+                        st.caption(
+                            "Si mirás la lista y los precios están bien (por ejemplo, hubo un "
+                            "aumento fuerte de verdad), volvé a importar subiendo el límite."
+                        )
+                        if st.checkbox("Revisé la lista y los precios de la planilla son correctos",
+                                        key="confirmar_precios_frenados"):
+                            if st.button(f"💲 Aplicar igual esos {len(precios_frenados)} precios"):
+                                with db_lock:
+                                    for f in precios_frenados:
+                                        if f["Precio de la lista"] is not None:
+                                            c.execute("INSERT INTO historial_precios (producto_id, precio) "
+                                                       "VALUES (?, ?)", (f["_id"], f["Precio de la lista"]))
+                                            c.execute("UPDATE productos SET precio = ? WHERE id = ?",
+                                                       (f["Precio de la lista"], f["_id"]))
+                                    conn.commit()
+                                st.success(f"Se aplicaron {len(precios_frenados)} precio(s).")
+
                     if descartados_cortos:
                         st.caption(
                             f"🧹 Se ignoraron {descartados_cortos} valor(es) de las columnas de código "
@@ -7389,10 +8425,13 @@ if pagina == PAGINAS[3]:
         pendientes_url = contar_fotos_por_bajar()
         if pendientes_url:
             st.info(f"Hay {pendientes_url} producto(s) con la foto como link externo, sin bajar.")
-            cuantas_url = st.select_slider(
-                "¿Cuántas bajar?", options=[100, 250, 500, 1000, 2000],
-                value=min(500, max(100, pendientes_url)), key="cuantas_fotos_url"
-            )
+            # OJO: en select_slider el value TIENE que ser uno de los options. Antes acá iba
+            # min(500, pendientes) y con 347 pendientes tiraba excepción y se caía toda la
+            # pestaña de Mantenimiento — de ahí que la carga de fotos apareciera "rota".
+            opciones_url = [100, 250, 500, 1000, 2000]
+            st.session_state.setdefault("cuantas_fotos_url", 500)
+            cuantas_url = st.select_slider("¿Cuántas bajar?", options=opciones_url,
+                                            key="cuantas_fotos_url")
             if st.button(f"⬇️ Bajar {cuantas_url} fotos de esos links"):
                 barra = st.progress(0.0, text="Bajando fotos...")
                 bajadas, fallidas = bajar_fotos_pendientes(
@@ -7448,13 +8487,15 @@ if pagina == PAGINAS[3]:
 
             cf_a, cf_b = st.columns(2)
             with cf_a:
+                st.session_state.setdefault("tanda_fotos_catalogo", 500)
                 tanda_fotos = st.select_slider(
                     "Fotos por tanda:", options=[100, 250, 500, 1000, 2000],
-                    value=500, key="tanda_fotos_catalogo"
+                    key="tanda_fotos_catalogo"
                 )
             with cf_b:
+                st.session_state.setdefault("hilos_fotos", 6)
                 hilos_fotos = st.select_slider(
-                    "Fichas a la vez:", options=[3, 6, 10, 15], value=6, key="hilos_fotos",
+                    "Fichas a la vez:", options=[3, 6, 10, 15], key="hilos_fotos",
                     help="Más rápido, pero es el sitio del proveedor el que atiende: si te pasás "
                          "puede empezar a rechazar los pedidos y no baja ninguna."
                 )
@@ -7497,6 +8538,16 @@ if pagina == PAGINAS[3]:
                 if st.button("⏹️ Detener", type="primary"):
                     st.session_state.pop("bajada_fotos_en_curso", None)
                     st.rerun()
+                if en_curso["marca_id"] != id_marca_fotos:
+                    # Si no se avisa, cambiar de marca en el selector deja la bajada colgada:
+                    # el bloque de abajo no corre, no se refresca sola, y parece que se trabó.
+                    c.execute("SELECT nombre FROM marcas WHERE id = ?", (en_curso["marca_id"],))
+                    otra = c.fetchone()
+                    st.warning(
+                        f"Hay una bajada en curso de **{otra['nombre'] if otra else 'otra marca'}** "
+                        f"({en_curso['bajadas']} foto(s) hasta ahora). Volvé a elegir esa marca para "
+                        "que siga, o tocá Detener."
+                    )
 
             # La bajada se hace en pedazos, y entre pedazo y pedazo la pantalla se refresca. Si se
             # hiciera todo de un saque, una tanda de 2.000 fotos serían 20 minutos con la pantalla
@@ -7893,7 +8944,8 @@ if pagina == PAGINAS[4]:
                 st.download_button(
                     f"⬇️ Descargar ({len(st.session_state['backup_bytes'])/(1024*1024):,.0f} MB)",
                     data=st.session_state["backup_bytes"],
-                    file_name=f"equivalencias_backup_{datetime.now():%Y%m%d}.db"
+                    file_name=f"equivalencias_backup_{datetime.now():%Y%m%d}.db",
+                    on_click=marcar_backup_hecho
                 )
         with cbk2:
             st.markdown("*Liviano (sin fotos) — para el repositorio*")
@@ -7905,7 +8957,8 @@ if pagina == PAGINAS[4]:
                     f"⬇️ Descargar ({len(st.session_state['backup_liviano'])/(1024*1024):,.1f} MB)",
                     data=st.session_state["backup_liviano"],
                     file_name="datos_iniciales.db",
-                    help="Ya viene con el nombre listo para subir al repositorio"
+                    help="Ya viene con el nombre listo para subir al repositorio",
+                    on_click=marcar_backup_hecho
                 )
                 st.caption(
                     f"Lleva los {total_prod_backup} productos con precios, equivalencias, vehículos e "
@@ -8266,10 +9319,10 @@ Administrar → Mantenimiento.
             total_lote = contar_pendientes_del_lote(lote_info["lote"])
             ca1, ca2 = st.columns([2, 1])
             with ca1:
+                st.session_state.setdefault("cuantos_pendientes", 1000)
                 cuantos = st.select_slider(
                     "¿Cuántos analizar por vez?",
                     options=[400, 1000, 2500, 5000, 10000],
-                    value=st.session_state.get("cuantos_pendientes", 1000),
                     key="cuantos_pendientes",
                     help="Analizar más tarda un poco más, pero te evita repetir la vuelta muchas veces."
                 )
@@ -8643,7 +9696,22 @@ if pagina == PAGINAS[6]:
         st.session_state["form_anio_auto"] = str(datos.get("anio") or "")
         st.session_state["form_motorizacion_auto"] = datos.get("motorizacion") or ""
 
-    patente_input = st.text_input("Patente:", placeholder="Ej: AB123CD", key="patente_buscar").strip().upper()
+    patente_input = st.text_input(
+        "Patente o VIN:", placeholder="Ej: AB123CD — o el chasis completo", key="patente_buscar"
+    ).strip().upper()
+
+    # Si lo que pegaron es un VIN de 17, se resuelve a la patente y se sigue como siempre.
+    if len(re.sub(r"\s", "", patente_input)) == 17:
+        ficha_por_vin = buscar_vehiculo_por_vin(patente_input)
+        if ficha_por_vin:
+            st.success(f"🔎 Ese chasis es la patente **{ficha_por_vin['patente']}**.")
+            patente_input = ficha_por_vin["patente"]
+            st.session_state["patente_buscar"] = patente_input
+        else:
+            st.info(
+                "Ese VIN no está en ninguna ficha todavía. Cargá la patente del auto y poné el "
+                "VIN en los datos del vehículo: la próxima vez lo encontrás pegando el chasis."
+            )
 
     if patente_input:
         vehiculo = buscar_vehiculo(patente_input)
@@ -8666,11 +9734,26 @@ if pagina == PAGINAS[6]:
                     "Km actual", min_value=0, step=1000,
                     value=int((vehiculo or {}).get("km_actual") or 0)
                 )
+                vin_auto = st.text_input(
+                    "VIN / número de chasis (opcional)", value=(vehiculo or {}).get("vin") or "",
+                    key="form_vin_auto", max_chars=17,
+                    help="Cargarlo sirve para dos cosas: podés encontrar este auto por el chasis "
+                         "además de por la patente, y la app aprende sola qué modelo corresponde "
+                         "a ese patrón de VIN, así el próximo auto igual se completa solo."
+                ).strip().upper()
                 guardar_vehiculo = st.form_submit_button("💾 Guardar vehículo", type="primary")
             if guardar_vehiculo:
+                vin_limpio = re.sub(r"\s", "", vin_auto)
+                if vin_limpio and len(vin_limpio) != 17:
+                    st.warning("El VIN tiene que tener 17 caracteres — se guardó el resto sin él.")
+                    vin_limpio = ""
                 get_or_create_vehiculo(patente_input, cliente_nombre, cliente_tel, marca_auto, modelo_auto,
-                                        km_actual_input or None, anio_auto, motorizacion_auto)
+                                        km_actual_input or None, anio_auto, motorizacion_auto,
+                                        vin=vin_limpio)
                 st.success(f"Vehículo {patente_input} guardado.")
+                if vin_limpio and modelo_auto.strip():
+                    st.caption(f"📚 De paso quedó aprendido que el patrón {vin_limpio[:3]}-"
+                               f"{vin_limpio[3:8]} es un {modelo_auto.strip()}.")
                 st.rerun()
 
         vehiculo = buscar_vehiculo(patente_input)
@@ -8754,6 +9837,11 @@ if pagina == PAGINAS[6]:
                 "totales desde que se registró el vehículo."
             )
             proyeccion = []
+            # 'atrasadas' también se inicializa acá aunque más abajo siempre se asigne en las dos
+            # ramas del else: si km_recorridos es None, nunca se asignaba, y el único motivo por
+            # el que no explotaba es que "if proyeccion and atrasadas" corta antes de leerla.
+            # Alcanzaba con dar vuelta esa condición para romper la ficha del vehículo.
+            atrasadas = []
             if km_calc["km_recorridos"] is None:
                 st.info(
                     "Para calcular esto hace falta el km de registro y el km actual del vehículo "
@@ -8872,9 +9960,10 @@ if pagina == PAGINAS[7]:
     # -------- Lector de VIN --------
     if sub_mec == SUB_MEC[1]:
         st.caption(
-            "Decodifica el país de fabricación y año a partir del VIN (estándar ISO 3779). "
-            "El fabricante exacto por WMI (los primeros 3 caracteres) lo tenés que cargar vos, "
-            "ya que varía mucho según los modelos que manejes."
+            "Decodifica el país de fabricación y el año a partir del VIN (estándar ISO 3779). "
+            "El fabricante (por los 3 primeros caracteres) y el modelo (por los caracteres 4 a 8) "
+            "los cargás vos una vez, y de ahí en más se completan solos: no existe una tabla "
+            "pública que los traduzca, las que hay son pagas."
         )
         vin_input = st.text_input("VIN (17 caracteres):", placeholder="Ej: 9BWZZZ377VT004251", key="vin_input")
         if vin_input.strip():
@@ -8910,6 +9999,69 @@ if pagina == PAGINAS[7]:
                         "Si lo conocés, agregalo abajo para la próxima vez."
                     )
 
+                if datos_vin.get("modelo"):
+                    st.success(
+                        f"🚗 Modelo: **{datos_vin['modelo']}**" +
+                        ("" if datos_vin.get("modelo_exacto") else " (patrón parcial)") +
+                        (f" · {datos_vin['modelo_notas']}" if datos_vin.get("modelo_notas") else "")
+                    )
+                else:
+                    st.caption(
+                        f"El modelo no sale del VIN: las posiciones 4-8 (`{datos_vin['vds']}`) las "
+                        "define cada fabricante y no hay norma pública que las traduzca. Cargalo "
+                        "una vez acá abajo y todo VIN con ese patrón lo va a mostrar solo."
+                    )
+
+                if datos_vin.get("motor"):
+                    st.success(f"⚙️ Motor: **{datos_vin['motor']}** "
+                                f"({datos_vin.get('motor_origen') or 'aprendido'})")
+                else:
+                    st.caption(
+                        f"El motor tampoco viene decodificado. La 8ª posición de este VIN es "
+                        f"**`{datos_vin['codigo_motor']}`**, que es "
+                        + ("la posición que la norma de Norteamérica reserva para el código de "
+                           "motor." if datos_vin.get("motor_por_norma") else
+                           "la posición que casi todos los fabricantes usan para el motor, aunque "
+                           "fuera de Norteamérica no sea obligatorio.") +
+                        " Deciles qué motor es una vez y todos los VIN de esta marca con esa "
+                        "misma letra lo van a mostrar solo."
+                    )
+
+                with st.form("form_modelo_vin_mec", clear_on_submit=True):
+                    st.markdown(f"**Enseñar modelo y motor** — patrón `{datos_vin['wmi']}`-"
+                                f"`{datos_vin['vds']}`, 8ª posición `{datos_vin['codigo_motor']}`")
+                    cmv_a, cmv_b = st.columns(2)
+                    modelo_mec = cmv_a.text_input("Modelo", value=datos_vin.get("modelo") or "",
+                                                   placeholder="Ej: GOL 1.6")
+                    motor_mec = cmv_b.text_input("Motor", value=datos_vin.get("motor") or "",
+                                                  placeholder="Ej: 1.6 8V nafta / 2.0 TDI")
+                    notas_mec = st.text_input("Nota (opcional)", placeholder="Ej: 3 puertas")
+                    alcance_mec = st.radio(
+                        "El MODELO, ¿para qué VIN vale?",
+                        ["Este patrón exacto (5 caracteres)", "Toda la familia (3 caracteres)"],
+                        horizontal=True,
+                        help="El motor siempre se guarda por la 8ª posición, que vale para toda "
+                             "la marca."
+                    )
+                    if st.form_submit_button("💾 Guardar", type="primary"):
+                        hechos = []
+                        if modelo_mec.strip():
+                            largo = 5 if alcance_mec.startswith("Este") else 3
+                            enseniar_modelo_vin(datos_vin["wmi"], datos_vin["vds"][:largo],
+                                                 modelo_mec, notas_mec)
+                            hechos.append(f"modelo {modelo_mec.strip()} para "
+                                          f"{datos_vin['wmi']}-{datos_vin['vds'][:largo]}")
+                        if motor_mec.strip():
+                            enseniar_motor_vin(datos_vin["wmi"], datos_vin["codigo_motor"],
+                                                motor_mec, notas_mec)
+                            hechos.append(f"motor {motor_mec.strip()} para el código "
+                                          f"{datos_vin['codigo_motor']}")
+                        if hechos:
+                            st.success("Guardado: " + "; ".join(hechos) + ".")
+                            st.rerun()
+                        else:
+                            st.warning("Escribí al menos el modelo o el motor.")
+
         with st.expander("➕ Agregar fabricante por WMI"):
             with st.form("form_vin_fab", clear_on_submit=True):
                 cw1, cw2, cw3 = st.columns(3)
@@ -8929,6 +10081,61 @@ if pagina == PAGINAS[7]:
         if fabricantes_cargados:
             with st.expander(f"📋 Fabricantes cargados ({len(fabricantes_cargados)})"):
                 st.dataframe(fabricantes_cargados, use_container_width=True, hide_index=True)
+
+        c.execute("""SELECT COUNT(*) FROM vehiculos WHERE vin IS NOT NULL AND LENGTH(vin) = 17
+                     AND modelo_auto IS NOT NULL AND modelo_auto <> ''""")
+        fichas_con_vin = c.fetchone()[0]
+        if fichas_con_vin:
+            st.caption(f"Tenés {fichas_con_vin} ficha(s) de vehículo con VIN y modelo cargados.")
+            if st.button("📚 Aprender modelos y motores de esas fichas"):
+                n_mod, n_mot = aprender_modelos_de_fichas_existentes()
+                st.success(f"Se aprendieron {n_mod} modelo(s) y {n_mot} motor(es) de tus fichas.")
+                st.rerun()
+
+        modelos_cargados = listar_modelos_vin()
+        with st.expander(f"🚗 Modelos que la app ya aprendió ({len(modelos_cargados)})"):
+            if modelos_cargados:
+                st.dataframe(modelos_cargados, use_container_width=True, hide_index=True)
+                st.caption(
+                    "Esta tabla es tuya: la fue armando la app con los VIN que fuiste cargando. "
+                    "Un patrón de 3 caracteres cubre toda una familia; uno de 5, una versión puntual."
+                )
+                cbm1, cbm2 = st.columns(2)
+                wmi_borrar = cbm1.text_input("WMI a borrar", max_chars=3, key="wmi_borrar_modelo")
+                vds_borrar = cbm2.text_input("Patrón (VDS) a borrar", max_chars=5, key="vds_borrar_modelo")
+                if st.button("🗑️ Borrar ese patrón", disabled=not (wmi_borrar and vds_borrar)):
+                    if olvidar_modelo_vin(wmi_borrar, vds_borrar):
+                        st.success("Patrón borrado.")
+                    else:
+                        st.warning("No encontré ese patrón.")
+                    st.rerun()
+            else:
+                st.caption(
+                    "Todavía ninguno. Cada vez que cargues un VIN y le digas qué modelo es, "
+                    "queda acá y se autocompleta la próxima vez."
+                )
+
+        motores_cargados = listar_motores_vin()
+        with st.expander(f"⚙️ Motores que la app ya aprendió ({len(motores_cargados)})"):
+            st.caption(
+                "La 8ª posición del VIN es el código de motor: obligatorio en Norteamérica y usado "
+                "igual por casi todos los demás. Es el que mejor rinde de todos los patrones, "
+                "porque el mismo código se repite en toda la gama de la marca: lo enseñás una vez "
+                "con un auto y queda andando para los otros modelos de esa marca."
+            )
+            if motores_cargados:
+                st.dataframe(motores_cargados, use_container_width=True, hide_index=True)
+                cbt1, cbt2 = st.columns(2)
+                wmi_bm = cbt1.text_input("WMI a borrar", max_chars=3, key="wmi_borrar_motor")
+                cod_bm = cbt2.text_input("Código (8ª posición)", max_chars=1, key="cod_borrar_motor")
+                if st.button("🗑️ Borrar ese motor", disabled=not (wmi_bm and cod_bm)):
+                    if olvidar_motor_vin(wmi_bm, cod_bm):
+                        st.success("Borrado.")
+                    else:
+                        st.warning("No encontré ese código.")
+                    st.rerun()
+            else:
+                st.caption("Todavía ninguno.")
 
     # -------- Visor de esquemas --------
     CATEGORIAS_ESQUEMA = [
@@ -9050,9 +10257,11 @@ if pagina == PAGINAS[7]:
 
             with st.expander("🔢 Empezar desde un VIN"):
                 st.caption(
-                    "El VIN dice fabricante, país y año — pero **no** qué repuestos lleva el auto: "
-                    "esa relación es un dato aparte que ningún VIN incluye. Lo que sí hace es "
-                    "elegirte la marca acá abajo."
+                    "Del VIN salen con certeza el **fabricante**, el **país** y el **año** — eso "
+                    "está normalizado. El **modelo NO**: las posiciones 4 a 8 las define cada "
+                    "fabricante como quiere y no hay norma pública que las traduzca (para eso hay "
+                    "que pagar una base tipo TecDoc). Lo que sí puede hacer la app es aprenderlo: "
+                    "la primera vez se lo enseñás vos y de ahí en más lo completa sola."
                 )
                 vin_cat = st.text_input("VIN (17 caracteres):", key="vin_para_catalogo").strip().upper()
                 if vin_cat:
@@ -9061,6 +10270,8 @@ if pagina == PAGINAS[7]:
                         st.error(datos_v["error"])
                     else:
                         fab = datos_v.get("fabricante") or "(fabricante no cargado)"
+                        if datos_v.get("fabricante_por_prefijo"):
+                            fab += " (por familia de WMI)"
                         anio_txt = datos_v.get("anio_estimado") or "?"
                         prefijo_anio = "año" if datos_v.get("anio_preciso") else "año ~"
                         st.success(f"**{fab}** · {datos_v['pais']} · {prefijo_anio}{anio_txt}")
@@ -9070,29 +10281,117 @@ if pagina == PAGINAS[7]:
                         if datos_v.get("digito_verificador") is False:
                             st.error("❌ El dígito verificador no da: revisá si hay algún carácter "
                                       "mal tipeado.")
-                        # Se escribe directo en el estado del selector: si se pasara como
-                        # "índice inicial", Streamlit lo ignora cuando el selector ya tiene
-                        # un valor elegido — por eso antes detectaba FORD y seguía en FIAT.
+
+                        ficha_vin = datos_v.get("vehiculo")
+                        if ficha_vin:
+                            st.success(
+                                f"🎯 Este chasis ya está en tus fichas: patente "
+                                f"**{ficha_vin.get('patente')}**, "
+                                f"{ficha_vin.get('marca_auto') or '—'} "
+                                f"{ficha_vin.get('modelo_auto') or ''} "
+                                f"{ficha_vin.get('anio') or ''} "
+                                f"{ficha_vin.get('motorizacion') or ''}".rstrip()
+                                + (f" — cliente: {ficha_vin['cliente_nombre']}"
+                                   if ficha_vin.get("cliente_nombre") else "")
+                            )
+                            st.caption("Estos datos son los que cargó una persona mirando el auto, "
+                                       "así que valen más que cualquier deducción del VIN.")
+
+                        modelo_vin = datos_v.get("modelo")
+                        motor_vin = datos_v.get("motor")
+                        if modelo_vin:
+                            st.info(
+                                f"🚗 Modelo: **{modelo_vin}**" +
+                                ("" if datos_v.get("modelo_exacto") else
+                                 " (por patrón parcial — puede ser una variante de la misma familia)") +
+                                (f" · {datos_v['modelo_notas']}" if datos_v.get("modelo_notas") else "")
+                            )
+                        if motor_vin:
+                            st.info(f"⚙️ Motor: **{motor_vin}** "
+                                     f"({datos_v.get('motor_origen') or 'aprendido'})")
+
                         marca_detectada = next(
                             (mv for mv in MARCAS_VEHICULO if fab and mv in fab.upper()), None
                         )
+                        etiqueta_detectada = None
                         if marca_detectada:
                             etiqueta_detectada = next(
                                 (e for e in etiquetas_marcas if mapa_marcas[e] == marca_detectada), None
                             )
-                            if etiqueta_detectada:
-                                if st.session_state.get("sel_marca_vehiculo") != etiqueta_detectada:
-                                    if st.button(f"👉 Usar {marca_detectada} en la búsqueda",
-                                                  key="usar_marca_vin", type="primary"):
-                                        st.session_state["sel_marca_vehiculo"] = etiqueta_detectada
-                                        st.rerun()
-                                else:
-                                    st.caption(f"✅ Ya estás buscando en **{marca_detectada}**.")
-                            else:
-                                st.warning(
-                                    f"Detecté **{marca_detectada}**, pero todavía no hay repuestos "
-                                    "de esa marca en tu catálogo."
-                                )
+
+                        # Un solo botón que aplica TODO lo que el VIN sabe. Antes solo tocaba la
+                        # marca y el año quedaba en 0, que es lo que hacía parecer que el VIN no
+                        # servía para nada más.
+                        # El año ambiguo NO se aplica solo. El código de la 10ª posición se repite
+                        # cada 30 años, así que un Gol del 97 da "1997 o 2027". Si se aplicara el
+                        # más nuevo al filtro, el buscador escondería justo los repuestos buenos.
+                        # Con dos candidatos, elige la persona.
+                        anio_a_usar = datos_v.get("anio_estimado")
+                        if datos_v.get("anio_alternativo"):
+                            opciones_anio = sorted({datos_v["anio_estimado"],
+                                                     datos_v["anio_alternativo"]})
+                            anio_a_usar = st.radio(
+                                "El VIN no permite saber cuál de los dos años es — elegí:",
+                                opciones_anio, horizontal=True, key="anio_vin_elegido",
+                                help="Miralo en la cédula. Fuera de Norteamérica el VIN no trae "
+                                     "con qué desambiguarlo."
+                            )
+
+                        aplicables = []
+                        if etiqueta_detectada:
+                            aplicables.append(f"marca {marca_detectada}")
+                        if anio_a_usar:
+                            aplicables.append(f"año {anio_a_usar}")
+                        if modelo_vin:
+                            aplicables.append(f"modelo {modelo_vin}")
+                        if motor_vin:
+                            aplicables.append(f"motor {motor_vin}")
+
+                        if aplicables:
+                            if st.button(f"👉 Usar el VIN en la búsqueda ({', '.join(aplicables)})",
+                                          key="usar_vin_completo", type="primary"):
+                                if etiqueta_detectada:
+                                    st.session_state["sel_marca_vehiculo"] = etiqueta_detectada
+                                if anio_a_usar:
+                                    st.session_state["anio_vehiculo_filtro"] = int(anio_a_usar)
+                                # El modelo se aplica más abajo, recién cuando se sabe qué
+                                # modelos tiene el catálogo de esa marca: si se escribiera acá
+                                # un modelo que no está entre las opciones, el selector rompe.
+                                st.session_state["vin_modelo_pendiente"] = modelo_vin
+                                st.session_state["vin_motor_pendiente"] = motor_vin
+                                st.rerun()
+                        elif marca_detectada:
+                            st.warning(
+                                f"Detecté **{marca_detectada}**, pero todavía no hay repuestos "
+                                "de esa marca en tu catálogo."
+                            )
+
+                        st.markdown("---")
+                        with st.form("enseniar_modelo_vin_form"):
+                            st.markdown(
+                                f"**¿Qué modelo es este auto?** (patrón `{datos_v['wmi']}`-"
+                                f"`{datos_v['vds']}`)"
+                            )
+                            st.caption(
+                                "Cargalo una vez y todo VIN con el mismo patrón lo completa solo. "
+                                "Escribilo como aparece en las descripciones de tu catálogo, así "
+                                "el filtro lo engancha (ej: «FIORINO», «GOL 1.6»)."
+                            )
+                            modelo_nuevo = st.text_input("Modelo:", value=modelo_vin or "")
+                            notas_modelo = st.text_input("Nota (opcional):",
+                                                          placeholder="Ej: motor 1.4 fire, 3 puertas")
+                            fm1, fm2 = st.columns(2)
+                            guardar_exacto = fm1.form_submit_button("💾 Guardar para este patrón exacto")
+                            guardar_familia = fm2.form_submit_button("💾 Guardar para la familia (3 primeros)")
+                            if (guardar_exacto or guardar_familia) and modelo_nuevo.strip():
+                                largo = 5 if guardar_exacto else 3
+                                enseniar_modelo_vin(datos_v["wmi"], datos_v["vds"][:largo],
+                                                     modelo_nuevo, notas_modelo)
+                                st.success(f"Guardado: {datos_v['wmi']}-{datos_v['vds'][:largo]} "
+                                            f"→ {modelo_nuevo.strip()}")
+                                st.rerun()
+                            elif guardar_exacto or guardar_familia:
+                                st.warning("Escribí el modelo antes de guardar.")
 
             etiqueta_elegida = st.selectbox("Marca del vehículo:", etiquetas_marcas,
                                              key="sel_marca_vehiculo")
@@ -9112,10 +10411,44 @@ if pagina == PAGINAS[7]:
                     if modelos_detectados:
                         opciones_mod = ["Todos los modelos"] + [f"{m} ({n})" for m, n in modelos_detectados[:120]]
                         mapa_mod = {f"{m} ({n})": m for m, n in modelos_detectados[:120]}
+
+                        # Recién acá se sabe qué modelos hay en el catálogo de esta marca, así que
+                        # es acá donde se puede aplicar el que trajo el VIN. Se busca la opción que
+                        # lo contenga; si ninguna coincide, en vez de romper el selector se manda
+                        # al filtro de texto, que es más flexible.
+                        pendiente_motor = st.session_state.pop("vin_motor_pendiente", None)
+                        if pendiente_motor:
+                            # La cilindrada es lo que más filtra ("1.6", "2.0"): las listas de
+                            # proveedor la escriben en la descripción, no en un campo aparte.
+                            cilindrada = re.search(r'\d[.,]\d', pendiente_motor)
+                            st.session_state["filtro_modelo_vehiculo"] = (
+                                cilindrada.group(0).replace(",", ".") if cilindrada else pendiente_motor
+                            )
+
+                        pendiente_mod = st.session_state.pop("vin_modelo_pendiente", None)
+                        if pendiente_mod:
+                            buscado = pendiente_mod.strip().upper()
+                            coincidencia = next(
+                                (e for e in opciones_mod[1:] if buscado in mapa_mod[e].upper()), None
+                            ) or next(
+                                (e for e in opciones_mod[1:] if mapa_mod[e].upper() in buscado), None
+                            )
+                            if coincidencia:
+                                st.session_state["sel_modelo_vehiculo"] = coincidencia
+                            elif not pendiente_motor:
+                                st.session_state["filtro_modelo_vehiculo"] = pendiente_mod
+                                st.session_state["aviso_modelo_vin"] = pendiente_mod
+
+                        if st.session_state.get("sel_modelo_vehiculo") not in opciones_mod:
+                            # Cambió la marca y el modelo guardado ya no existe: sin esto el
+                            # selector tira excepción y se cae la pantalla.
+                            st.session_state.pop("sel_modelo_vehiculo", None)
+
                         mod_etiqueta = st.selectbox("Modelo / motor:", opciones_mod, key="sel_modelo_vehiculo")
                         modelo_elegido = mapa_mod.get(mod_etiqueta)
                     else:
                         modelo_elegido = None
+                        st.session_state.pop("vin_modelo_pendiente", None)
                         st.caption("No se detectaron modelos para esta marca.")
                 with cmv2:
                     anio_filtro = st.number_input(
@@ -9123,6 +10456,14 @@ if pagina == PAGINAS[7]:
                         value=0, step=1, key="anio_vehiculo_filtro",
                         help="Usa los rangos que traen las descripciones. Lo que no aclara años "
                              "se muestra igual, marcado aparte."
+                    )
+
+                aviso_mod_vin = st.session_state.pop("aviso_modelo_vin", None)
+                if aviso_mod_vin:
+                    st.caption(
+                        f"ℹ️ El modelo del VIN («{aviso_mod_vin}») no coincide con ningún modelo "
+                        "detectado en el catálogo de esta marca, así que lo puse en el filtro de "
+                        "texto de acá abajo."
                     )
 
                 filtro_modelo = st.text_input(
