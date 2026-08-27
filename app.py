@@ -556,6 +556,12 @@ def get_connection():
         created_at TEXT DEFAULT (datetime('now'))
     )""")
     c.execute("CREATE INDEX IF NOT EXISTS idx_producto_fotos_prod ON producto_fotos(producto_id)")
+    # Con qué versión del comparador se calculó cada firma. Cuando el comparador mejora, las
+    # firmas viejas quedan sin los datos nuevos y la mejora no se aplica al catálogo que ya
+    # tenías cargado — que es justo donde hace falta. Con esto se detectan y se recalculan.
+    _cols_fotos = [f[1] for f in c.execute("PRAGMA table_info(producto_fotos)").fetchall()]
+    if "firma_version" not in _cols_fotos:
+        c.execute("ALTER TABLE producto_fotos ADD COLUMN firma_version INTEGER")
     # Miniatura chica aparte: la foto normal pesa bastante y la búsqueda la traía entera por
     # cada resultado, aunque en la tabla se vea en chiquito. Acá se guarda una versión liviana
     # solo para esas listas; la grande se sigue usando al ver el producto en Administrar.
@@ -573,6 +579,15 @@ def get_connection():
         c.execute("ALTER TABLE productos ADD COLUMN diametro_rosca_homocinetica REAL")
     if "diametro_copa" not in columnas_productos:
         c.execute("ALTER TABLE productos ADD COLUMN diametro_copa REAL")
+    # La copa de una homocinética es cónica: mide distinto en la base que en la boca. Con un
+    # solo diámetro no alcanzaba para distinguir dos copas que arrancan igual y terminan
+    # distinto, y son justo las que no se pueden intercambiar.
+    if "diametro_copa_superior" not in columnas_productos:
+        c.execute("ALTER TABLE productos ADD COLUMN diametro_copa_superior REAL")
+    # El largo total es la medida que primero descarta: dos homocinéticas con las mismas estrías
+    # y la misma copa pero distinto largo no entran en el mismo auto.
+    if "largo_total" not in columnas_productos:
+        c.execute("ALTER TABLE productos ADD COLUMN largo_total REAL")
     if "ancho" not in columnas_productos:
         c.execute("ALTER TABLE productos ADD COLUMN ancho REAL")
     if "paso_rosca" not in columnas_productos:
@@ -2050,7 +2065,8 @@ CAMPOS_MEDIDAS = [
     ("diametro_interno", "diám. interno"), ("diametro_externo", "diám. externo"),
     ("diametro_interno_cara_b", "diám. interno cara B"),
     ("diametro_externo_cara_b", "diám. externo cara B"),
-    ("diametro_rosca_homocinetica", "diám. rosca"), ("diametro_copa", "diám. copa"),
+    ("diametro_rosca_homocinetica", "diám. rosca"), ("diametro_copa", "diám. copa (base)"),
+    ("diametro_copa_superior", "diám. copa (boca)"), ("largo_total", "largo total"),
     ("ancho", "ancho"),
 ]
 COLUMNAS_MEDIDAS = ", ".join(cn for cn, _ in CAMPOS_MEDIDAS) + ", paso_rosca, cantidad_estrias"
@@ -2199,11 +2215,13 @@ def auditar_equivalencias_existentes(limite=20000):
     fábrica, verlo de a pares es imposible de resolver — agrupado se ve de una y se corta.
     Lo ya revisado como correcto no vuelve a aparecer."""
     campos_medida = ["diametro_interno", "diametro_externo", "diametro_interno_cara_b",
-                      "diametro_externo_cara_b", "diametro_rosca_homocinetica", "diametro_copa", "ancho"]
+                      "diametro_externo_cara_b", "diametro_rosca_homocinetica", "diametro_copa",
+                      "diametro_copa_superior", "largo_total", "ancho"]
     etiquetas = {"diametro_interno": "diám. interno", "diametro_externo": "diám. externo",
                   "diametro_interno_cara_b": "diám. interno cara B",
                   "diametro_externo_cara_b": "diám. externo cara B",
-                  "diametro_rosca_homocinetica": "diám. rosca", "diametro_copa": "diám. copa",
+                  "diametro_rosca_homocinetica": "diám. rosca", "diametro_copa": "diám. copa (base)",
+                  "diametro_copa_superior": "diám. copa (boca)", "largo_total": "largo total",
                   "ancho": "ancho"}
     sel_a = ", ".join(f"pa.{campo} AS a_{campo}" for campo in campos_medida)
     sel_b = ", ".join(f"pb.{campo} AS b_{campo}" for campo in campos_medida)
@@ -3526,6 +3544,435 @@ def marcas_vehiculo_disponibles(_version):
     return sorted(disponibles, key=lambda x: -x[1])
 
 
+# Familias de repuestos. Gana la palabra clave MÁS LARGA que aparezca en la descripción, así
+# "BOMBA DE AGUA" (refrigeración) le gana a "BOMBA" y "BOMBA DE ACEITE" no cae en el mismo lado.
+FAMILIAS_REPUESTO = {
+    "Filtros": [
+        "FILTRO DE ACEITE", "FILTRO DE AIRE", "FILTRO DE COMBUSTIBLE", "FILTRO DE NAFTA",
+        "FILTRO DE GASOIL", "FILTRO DE HABITACULO", "FILTRO DE CABINA", "FILTRO SECADOR",
+        "FILTRO", "SEPARADOR DE AGUA",
+    ],
+    "Frenos": [
+        "PASTILLA DE FRENO", "PASTILLAS DE FRENO", "DISCO DE FRENO", "CAMPANA DE FRENO",
+        "CILINDRO DE FRENO", "BOMBA DE FRENO", "ZAPATA DE FRENO", "CABLE DE FRENO",
+        "LATIGUILLO", "SERVOFRENO", "PASTILLA", "PASTILLAS", "ZAPATA", "ZAPATAS", "CALIPER",
+        "MORDAZA", "CAMPANA", "FRENO", "FRENOS", "ABS",
+    ],
+    "Suspensión": [
+        "AMORTIGUADOR", "ESPIRAL", "ELASTICO", "ROTULA", "BIELETA", "BARRA ESTABILIZADORA",
+        "BRAZO SUSPENSION", "PARRILLA", "SOPORTE DE AMORTIGUADOR", "KIT DE SUSPENSION",
+        "BUJE DE PARRILLA", "TREN DELANTERO", "TOPE DE SUSPENSION", "FUELLE DE AMORTIGUADOR",
+        "SUSPENSION", "MUNON",
+    ],
+    "Dirección": [
+        "CREMALLERA", "EXTREMO DE DIRECCION", "AXIAL DE DIRECCION", "BOMBA DE DIRECCION",
+        "BRAZO PITMAN", "BIELETA DE DIRECCION", "COLUMNA DE DIRECCION", "EXTREMO", "AXIAL",
+        "DIRECCION",
+    ],
+    "Palier y transmisión": [
+        "HOMOCINETICA", "PUNTA DE EJE", "SEMIEJE", "PALIER", "CRUCETA", "CARDAN",
+        "FUELLE DE PALIER", "FUELLE DE HOMOCINETICA", "JUNTA HOMOCINETICA", "TRIPOIDE",
+    ],
+    "Embrague": [
+        "DISCO DE EMBRAGUE", "PLATO DE EMBRAGUE", "PLACA DE EMBRAGUE", "KIT DE EMBRAGUE",
+        "COLLARIN", "RULEMAN DE EMPUJE", "CILINDRO DE EMBRAGUE", "BOMBA DE EMBRAGUE",
+        "CABLE DE EMBRAGUE", "EMBRAGUE", "VOLANTE MOTOR",
+    ],
+    "Caja y diferencial": [
+        "CAJA DE VELOCIDAD", "CORONA Y PINON", "SINCRONIZADO", "DIFERENCIAL", "SATELITE",
+        "CAJA DE CAMBIOS", "PALANCA DE CAMBIOS",
+    ],
+    "Distribución": [
+        "CORREA DE DISTRIBUCION", "KIT DE DISTRIBUCION", "CADENA DE DISTRIBUCION",
+        "TENSOR DE DISTRIBUCION", "CORREA POLY V", "CORREA DENTADA", "DISTRIBUCION",
+        "TENSOR", "POLEA", "CORREA",
+    ],
+    "Refrigeración": [
+        "BOMBA DE AGUA", "RADIADOR", "TERMOSTATO", "ELECTROVENTILADOR", "TAPA DE RADIADOR",
+        "MANGUERA DE RADIADOR", "INTERCOOLER", "DEPOSITO DE AGUA", "REFRIGERACION",
+        "VENTILADOR",
+    ],
+    "Lubricación": [
+        "BOMBA DE ACEITE", "CARTER", "ENFRIADOR DE ACEITE", "VARILLA DE ACEITE",
+        "TAPA DE VALVULAS", "MALLA DE ACEITE",
+    ],
+    "Motor - interno": [
+        "PISTON", "PISTONES", "ARO DE PISTON", "AROS", "COJINETE", "BIELA", "CIGUENAL",
+        "ARBOL DE LEVAS", "VALVULA DE ADMISION", "VALVULA DE ESCAPE", "GUIA DE VALVULA",
+        "BUJE DE BIELA", "CAMISA", "CULATA", "TAPA DE CILINDRO", "BANCADA", "PERNO",
+        "VALVULA", "VALVULAS", "RESORTE DE VALVULA",
+    ],
+    "Juntas y retenes": [
+        "JUNTA DE TAPA", "JUNTA TAPA", "JUEGO DE JUNTAS", "JUNTA HOMOCINETICA", "RETEN",
+        "RETENES", "JUNTA", "JUNTAS", "ORING", "O-RING", "EMPAQUETADURA", "SELLO",
+    ],
+    "Combustible": [
+        "BOMBA DE NAFTA", "BOMBA DE COMBUSTIBLE", "INYECTOR", "CARBURADOR", "RIEL DE INYECCION",
+        "REGULADOR DE PRESION", "TANQUE DE COMBUSTIBLE", "AFORADOR", "INYECCION",
+    ],
+    "Escape": [
+        "CANO DE ESCAPE", "SILENCIADOR", "CATALIZADOR", "SONDA LAMBDA", "MULTIPLE DE ESCAPE",
+        "ESCAPE",
+    ],
+    "Eléctrico y encendido": [
+        "CABLE DE BUJIA", "BUJIA", "BUJIAS", "BOBINA DE ENCENDIDO", "ALTERNADOR",
+        "MOTOR DE ARRANQUE", "BURRO DE ARRANQUE", "BATERIA", "REGULADOR DE VOLTAJE",
+        "DISTRIBUIDOR", "PLATINO", "SENSOR", "MODULO", "RELE", "FUSIBLE", "BOBINA",
+        "CAPUCHON DE BUJIA",
+    ],
+    "Rodamientos y mazas": [
+        "RULEMAN DE RUEDA", "MAZA DE RUEDA", "CUBO DE RUEDA", "RODAMIENTO", "RULEMAN",
+        "BOLILLERO",
+    ],
+    "Climatización": [
+        "COMPRESOR DE AIRE", "CONDENSADOR", "EVAPORADOR", "AIRE ACONDICIONADO",
+        "FILTRO DE POLEN", "CALEFACCION",
+    ],
+    "Soportes y bujes": [
+        "SOPORTE DE MOTOR", "SOPORTE DE CAJA", "BUJE", "BUJES", "TACO DE MOTOR", "SOPORTE",
+    ],
+    "Cables y comandos": [
+        "CABLE DE ACELERADOR", "CABLE DE VELOCIMETRO", "CABLE DE CAPOT", "GUAYA", "CABLE",
+    ],
+    "Carrocería y accesorios": [
+        "OPTICA", "FARO", "ESPEJO", "PARAGOLPE", "MANIJA", "CERRADURA", "BURLETE",
+        "ESCOBILLA", "PARABRISAS", "GUARDABARRO", "CAPOT", "PARRILLA DE RADIADOR",
+        "PLUMA", "CRIQUE",
+    ],
+}
+
+
+def _normalizar_desc(texto):
+    """Mayúsculas, sin acentos y con espacios simples, para poder comparar contra las claves."""
+    return " " + " ".join(normalizar_texto(str(texto or "")).replace("-", " ").split()) + " "
+
+
+def clasificar_repuesto(descripcion):
+    """Devuelve a qué familia pertenece un repuesto, mirando su descripción.
+
+    Por qué hace falta: antes la 'categoría' era literalmente el texto que venía antes de la
+    marca del auto en la descripción. Como cada proveedor la escribe distinto ('JUNTA TAPA DE
+    CILINDROS', 'JUNTA DE TAPA CIL.', 'JUEGO JUNTA TAPA'), salían cientos de categorías casi
+    iguales repetidas, y el filtro no servía para encontrar nada.
+
+    Gana la palabra clave que aparece PRIMERO; entre las que empiezan en el mismo lugar, la
+    más larga. Ese orden no es un capricho: en las listas de repuestos el nombre de la pieza va
+    al principio y lo que sigue es dónde va o de qué auto es. Con solo mirar el largo,
+    'RETEN DELANTERO CIGUENAL' caía en Motor por 'CIGUENAL' en vez de en Retenes, que es lo que
+    la pieza realmente es. Y el desempate por largo resuelve el otro caso: 'BOMBA DE AGUA' cae
+    en Refrigeración y no en la misma bolsa que 'BOMBA DE ACEITE' o 'BOMBA DE FRENO'."""
+    texto = _normalizar_desc(descripcion)
+    if not texto.strip():
+        return "Sin clasificar"
+    mejor = None   # (posición, -largo, familia)
+    for familia, claves in FAMILIAS_REPUESTO.items():
+        for clave in claves:
+            pos = texto.find(f" {clave} ")
+            if pos >= 0:
+                candidato = (pos, -len(clave), familia)
+                if mejor is None or candidato[:2] < mejor[:2]:
+                    mejor = candidato
+    return mejor[2] if mejor else "Sin clasificar"
+
+
+def repuestos_de_este_auto(marca_auto, modelo="", anio=None, motor="", vin="", limite=500):
+    """Los códigos que le corresponden a ESTE auto. Es lo que hace falta en el mostrador: el VIN
+    dice qué auto es, pero lo que se vende son códigos.
+
+    IMPORTANTE sobre de dónde sale cada cosa. No existe una tabla pública que diga qué repuesto
+    lleva cada auto — eso es una base de aplicaciones licenciada (TecDoc y similares) y se paga.
+    Lo que sí hay es información propia del negocio, y se usa en este orden de confianza:
+
+      1. Lo que YA se le puso a ESTE auto (por VIN o patente). Certeza total: alguien lo instaló.
+      2. Lo que se le puso a OTROS autos del MISMO modelo. Evidencia real del mostrador.
+      3. Lo que dicen las descripciones del catálogo del proveedor ('... FORD FIESTA 1.6 2010/15').
+         Es lo más amplio y lo menos seguro: depende de cómo escriba cada proveedor.
+
+    Devuelve un dict con las tres listas por separado, a propósito: mezclarlas escondería que
+    una es un hecho y la otra una coincidencia de texto."""
+    marca_auto = (marca_auto or "").strip().upper()
+    modelo = (modelo or "").strip().upper()
+    motor = (motor or "").strip().upper()
+    vin = re.sub(r'\s', '', (vin or "").strip().upper())
+    resultado = {"de_este_auto": [], "de_otros_iguales": [], "del_catalogo": [],
+                 "modelo_usado": modelo, "sin_datos": True}
+
+    # --- 1. Lo que ya se le puso a este auto ---
+    vehiculo_id = None
+    if len(vin) == 17:
+        c.execute("SELECT id FROM vehiculos WHERE vin = ?", (vin,))
+        f = c.fetchone()
+        vehiculo_id = f["id"] if f else None
+    if vehiculo_id:
+        c.execute("""SELECT h.descripcion_pieza AS "Pieza", h.codigo_pieza AS "Código",
+                            h.marca_pieza AS "Marca", h.km_instalacion AS "Km",
+                            substr(h.fecha_instalacion, 1, 10) AS "Fecha", h.producto_id AS "_pid"
+                     FROM historial_piezas h WHERE h.vehiculo_id = ?
+                     ORDER BY h.fecha_instalacion DESC""", (vehiculo_id,))
+        resultado["de_este_auto"] = filas_a_listas(c)
+
+    # --- 2. Lo que se le puso a otros autos del mismo modelo ---
+    if modelo:
+        c.execute("""SELECT h.descripcion_pieza AS "Pieza", h.codigo_pieza AS "Código",
+                            h.marca_pieza AS "Marca", COUNT(*) AS "Veces",
+                            COUNT(DISTINCT v.id) AS "Autos"
+                     FROM historial_piezas h JOIN vehiculos v ON v.id = h.vehiculo_id
+                     WHERE UPPER(COALESCE(v.modelo_auto,'')) LIKE ?
+                       AND (? = '' OR UPPER(COALESCE(v.marca_auto,'')) LIKE ?)
+                       AND (v.id IS NOT ?)
+                       AND h.codigo_pieza IS NOT NULL AND h.codigo_pieza <> ''
+                     GROUP BY UPPER(h.codigo_pieza)
+                     ORDER BY "Autos" DESC, "Veces" DESC LIMIT 100""",
+                  (f"%{modelo}%", marca_auto, f"%{marca_auto}%", vehiculo_id))
+        resultado["de_otros_iguales"] = filas_a_listas(c)
+
+    # --- 3. El catálogo, por lo que dicen las descripciones ---
+    if marca_auto:
+        condiciones = ["p.descripcion IS NOT NULL", "UPPER(p.descripcion) LIKE ?"]
+        params = [f"%{marca_auto}%"]
+        if modelo:
+            condiciones.append("UPPER(p.descripcion) LIKE ?")
+            params.append(f"%{modelo}%")
+        c.execute(f"""SELECT p.id AS "ID", p.codigo_raw AS "Código", p.descripcion AS "Descripcion",
+                             m.nombre AS "Marca", p.precio AS "Precio", p.stock AS "Stock"
+                      FROM productos p JOIN marcas m ON m.id = p.marca_id
+                      WHERE {" AND ".join(condiciones)}
+                      LIMIT 4000""", params)
+        candidatos = filas_a_listas(c)
+
+        # La cilindrada es lo que más afina ("1.6", "2.0"): si el motor la trae, se usa para
+        # filtrar, pero solo descartando lo que declara OTRA cilindrada — lo que no dice nada
+        # se deja pasar, porque la mayoría de las listas no la aclaran.
+        cilindrada = None
+        if motor:
+            m_cil = re.search(r'\d[.,]\d', motor)
+            cilindrada = m_cil.group(0).replace(",", ".") if m_cil else None
+
+        filtrados = []
+        for f in candidatos:
+            desc = (f["Descripcion"] or "").upper()
+            if anio:
+                sirve = sirve_para_anio(f["Descripcion"], int(anio))
+                if sirve is False:
+                    continue
+                f["Año"] = "✅ coincide" if sirve else "— no aclara"
+            if cilindrada:
+                otras = set(re.findall(r'\d[.,]\d', desc))
+                if otras and cilindrada not in {o.replace(",", ".") for o in otras}:
+                    continue
+                f["Motor"] = "✅ coincide" if cilindrada in desc else "— no aclara"
+            f["Categoría"] = clasificar_repuesto(f["Descripcion"])
+            filtrados.append(f)
+
+        filtrados.sort(key=lambda x: (x.get("Año") != "✅ coincide",
+                                       x.get("Motor") != "✅ coincide",
+                                       x["Categoría"]))
+        resultado["del_catalogo"] = filtrados[:limite]
+        resultado["total_catalogo"] = len(filtrados)
+
+    resultado["sin_datos"] = not (resultado["de_este_auto"] or resultado["de_otros_iguales"]
+                                   or resultado["del_catalogo"])
+    return resultado
+
+
+def panel_vin(clave="vin", mostrar_ensenar=True):
+    """La ÚNICA pantalla de VIN de la app. Antes había dos (una en el Buscador y otra en Modo
+    Mecánico) que hacían casi lo mismo y ninguna terminaba en lo que hace falta: los códigos.
+    Esta identifica el auto y va derecho a qué repuestos lleva."""
+    st.caption(
+        "Pegá el número de chasis y te dice qué repuestos lleva ese auto. "
+        "Del VIN salen con certeza el fabricante, el país y el año. El modelo y el motor no están "
+        "normalizados: los aprende la app de tus propias fichas, o se los enseñás una vez."
+    )
+    vin_txt = st.text_input("VIN / número de chasis (17 caracteres):",
+                             placeholder="Ej: 9BWZZZ377VT004251", key=f"{clave}_texto").strip().upper()
+    if not vin_txt:
+        return None
+
+    d = decodificar_vin(vin_txt)
+    if not d["valido"]:
+        st.error(d["error"])
+        return None
+
+    # --- Qué auto es ---
+    fab = d.get("fabricante") or "(fabricante no cargado)"
+    if d.get("fabricante_por_prefijo"):
+        fab += " (por familia de WMI)"
+    linea = f"**{fab}** · {d['pais']}"
+    if d.get("anio_estimado"):
+        linea += f" · año {d['anio_estimado']}" if d.get("anio_preciso") else f" · año ~{d['anio_estimado']}"
+    if d.get("modelo"):
+        linea += f" · **{d['modelo']}**"
+    if d.get("motor"):
+        linea += f" · motor {d['motor']}"
+    st.success(linea)
+
+    if d.get("digito_verificador") is False:
+        st.error("❌ El dígito verificador no da: revisá si hay algún carácter mal tipeado. "
+                  "Buscar repuestos con un VIN mal copiado es buscar los del auto equivocado.")
+
+    ficha = d.get("vehiculo")
+    if ficha:
+        st.info(f"🎯 Este chasis ya está en tus fichas: patente **{ficha.get('patente')}**"
+                 + (f" — cliente {ficha['cliente_nombre']}" if ficha.get("cliente_nombre") else ""))
+
+    anio_usar = d.get("anio_estimado")
+    if d.get("anio_alternativo"):
+        # El código de año se repite cada 30. Elegir mal acá filtra los repuestos correctos.
+        anio_usar = st.radio(
+            "El VIN no permite saber cuál de los dos años es — elegí (miralo en la cédula):",
+            sorted({d["anio_estimado"], d["anio_alternativo"]}), horizontal=True,
+            key=f"{clave}_anio"
+        )
+
+    # --- Lo que importa: los códigos ---
+    marca_para_buscar = None
+    if d.get("fabricante"):
+        marca_para_buscar = next(
+            (mv for mv in MARCAS_VEHICULO if mv in d["fabricante"].upper()), None
+        )
+
+    if not marca_para_buscar:
+        st.warning(
+            "No puedo buscar repuestos porque no sé de qué marca es este WMI. "
+            "Cargalo abajo en «Enseñar» y la próxima vez sale solo."
+        )
+    else:
+        modelo_manual = st.text_input(
+            "Modelo (corregilo si hace falta):", value=d.get("modelo") or "",
+            key=f"{clave}_modelo_manual",
+            help="Escribilo como aparece en las descripciones de tu catálogo. Si lo dejás vacío, "
+                 "busca todos los repuestos de la marca."
+        ).strip()
+
+        r = repuestos_de_este_auto(
+            marca_para_buscar, modelo_manual, anio_usar, d.get("motor") or "", vin_txt
+        )
+        _mostrar_repuestos_del_auto(r, marca_para_buscar, modelo_manual, anio_usar, clave)
+
+    if mostrar_ensenar:
+        with st.expander("✏️ Enseñarle a la app este auto (para que la próxima salga solo)"):
+            _formulario_ensenar_vin(d, clave)
+    return d
+
+
+def _mostrar_repuestos_del_auto(r, marca, modelo, anio, clave):
+    """Muestra los códigos separados por fuente. Van separados a propósito: uno es un hecho
+    (se lo pusiste a este auto) y el otro es una coincidencia de texto en una descripción.
+    Mezclarlos haría parecer que todos valen lo mismo, y no es así."""
+    if r["de_este_auto"]:
+        st.markdown("#### 🎯 Ya se le puso a ESTE auto")
+        st.caption("Certeza total: alguien lo instaló y quedó registrado en la ficha.")
+        st.dataframe([{k: v for k, v in f.items() if not k.startswith("_")}
+                       for f in r["de_este_auto"]], use_container_width=True, hide_index=True)
+
+    if r["de_otros_iguales"]:
+        st.markdown("#### 🔁 Se le puso a otros autos del mismo modelo")
+        st.caption(
+            "Evidencia real de tu mostrador: estos códigos se instalaron en autos iguales. "
+            "«Autos» es en cuántos distintos — mientras más, más confiable."
+        )
+        st.dataframe(r["de_otros_iguales"], use_container_width=True, hide_index=True)
+
+    if r["del_catalogo"]:
+        total = r.get("total_catalogo", len(r["del_catalogo"]))
+        st.markdown(f"#### 📚 Del catálogo, según las descripciones ({total} código(s))")
+        st.caption(
+            "Sale de que la descripción del proveedor menciona esta marca y modelo. Es lo más "
+            "amplio y lo menos seguro: depende de cómo escriba cada proveedor. "
+            + (f"Se filtró por año {anio} descartando lo que declara otro rango. " if anio else "")
+            + "Confirmá por código antes de vender."
+        )
+        # Antes acá el filtro listaba el texto crudo previo a la marca en cada descripción, así
+        # que con varios proveedores salían cientos de opciones casi iguales ("JUNTA TAPA DE
+        # CILINDROS", "JUNTA DE TAPA CIL.", "JUEGO JUNTA TAPA"...) y no servía para encontrar
+        # nada. Ahora son ~20 familias fijas, con la cantidad al lado.
+        conteo = {}
+        for f in r["del_catalogo"]:
+            conteo[f["Categoría"]] = conteo.get(f["Categoría"], 0) + 1
+        orden_familias = sorted(conteo, key=lambda k: (-conteo[k], k))
+        etiquetas = {f"{k} ({conteo[k]})": k for k in orden_familias}
+
+        cf1, cf2 = st.columns([2, 1])
+        with cf1:
+            elegidas_lbl = st.multiselect("Tipo de pieza:", list(etiquetas.keys()),
+                                           key=f"{clave}_cats",
+                                           placeholder="Todas — o elegí una o varias")
+        with cf2:
+            texto_filtro = st.text_input("Buscar en estos resultados:", key=f"{clave}_txt",
+                                          placeholder="Ej: delantero, 1.6, kit").strip()
+
+        elegidas = {etiquetas[e] for e in elegidas_lbl}
+        filas = [f for f in r["del_catalogo"] if not elegidas or f["Categoría"] in elegidas]
+        if texto_filtro:
+            # Todas las palabras tienen que estar, sin importar el orden ni los acentos: así
+            # "kit delantero" encuentra "Kit de rodamiento delantero" igual.
+            palabras = [normalizar_texto(x) for x in texto_filtro.split() if x.strip()]
+            filas = [f for f in filas
+                     if all(pal in normalizar_texto(f"{f['Código']} {f['Descripcion']}")
+                            for pal in palabras)]
+        st.caption(f"Mostrando {len(filas)} de {len(r['del_catalogo'])}.")
+        st.dataframe(quitar_id(filas), use_container_width=True, hide_index=True)
+        st.download_button(
+            "⬇️ Bajar estos códigos en Excel",
+            data=to_excel_bytes(quitar_id(filas)),
+            file_name=f"repuestos_{marca}_{modelo or 'todos'}.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            key=f"{clave}_dl"
+        )
+        if total > len(r["del_catalogo"]):
+            st.caption(f"(mostrando {len(r['del_catalogo'])} de {total} — afiná el modelo para ver menos)")
+
+    if r["sin_datos"]:
+        st.warning(
+            f"No encontré repuestos para **{marca} {modelo}**. Puede ser que en tu catálogo las "
+            "descripciones lo escriban distinto (probá con otra forma del modelo, o dejá el modelo "
+            "vacío para ver todo lo de la marca), o que todavía no tengas cargada esa lista."
+        )
+
+
+def _formulario_ensenar_vin(d, clave):
+    """Cargar el modelo y el motor de este patrón, una sola vez."""
+    st.caption(
+        f"Patrón `{d['wmi']}`-`{d['vds']}` · 8ª posición `{d['codigo_motor']}`. "
+        "El modelo se guarda por el patrón; el motor por la 8ª posición, que vale para toda la marca."
+    )
+    if not d.get("fabricante"):
+        cw1, cw2 = st.columns(2)
+        nuevo_fab = cw1.text_input("Fabricante de este WMI:", key=f"{clave}_fab")
+        nuevo_pais = cw2.text_input("País:", value=d["pais"], key=f"{clave}_pais")
+        if st.button("💾 Guardar fabricante", key=f"{clave}_guardar_fab"):
+            if nuevo_fab.strip():
+                agregar_fabricante_vin(d["wmi"], nuevo_fab, nuevo_pais)
+                st.success(f"WMI {d['wmi']} guardado.")
+                st.rerun()
+            else:
+                st.warning("Escribí el fabricante.")
+
+    with st.form(f"{clave}_form_ensenar", clear_on_submit=True):
+        ce1, ce2 = st.columns(2)
+        mod_in = ce1.text_input("Modelo", value=d.get("modelo") or "", placeholder="Ej: FIESTA")
+        mot_in = ce2.text_input("Motor", value=d.get("motor") or "", placeholder="Ej: 1.6 16V nafta")
+        nota_in = st.text_input("Nota (opcional)", placeholder="Ej: 5 puertas")
+        alcance = st.radio("El MODELO, ¿para qué VIN vale?",
+                           ["Este patrón exacto (5 caracteres)", "Toda la familia (3 caracteres)"],
+                           horizontal=True)
+        if st.form_submit_button("💾 Guardar", type="primary"):
+            hechos = []
+            if mod_in.strip():
+                largo = 5 if alcance.startswith("Este") else 3
+                enseniar_modelo_vin(d["wmi"], d["vds"][:largo], mod_in, nota_in)
+                hechos.append(f"modelo {mod_in.strip()}")
+            if mot_in.strip():
+                enseniar_motor_vin(d["wmi"], d["codigo_motor"], mot_in, nota_in)
+                hechos.append(f"motor {mot_in.strip()}")
+            if hechos:
+                st.success("Guardado: " + " y ".join(hechos) + ".")
+                st.rerun()
+            else:
+                st.warning("Escribí al menos el modelo o el motor.")
+
+
 def esquemas_de_vehiculo(marca_vehiculo):
     c.execute("""SELECT id, titulo, marca_auto, modelo_auto, sistema FROM esquemas
                  WHERE UPPER(marca_auto) LIKE ? ORDER BY titulo""", (f"%{marca_vehiculo}%",))
@@ -4821,7 +5268,8 @@ def calcular_alertas_vehiculo(vehiculo_id, km_actual):
 def buscar_por_medidas(diam_int=None, diam_ext=None, ancho=None, paso_rosca=None, estrias=None, tolerancia_pct=5,
                         estrias_internas=None, estrias_externas=None, posicion_seguro=None, tiene_abs="Cualquiera",
                         diam_int_cara_b=None, diam_ext_cara_b=None,
-                        diam_rosca_homocinetica=None, diam_copa=None):
+                        diam_rosca_homocinetica=None, diam_copa=None,
+                        diam_copa_superior=None, largo_total=None):
     condiciones = []
     params = []
 
@@ -4837,6 +5285,8 @@ def buscar_por_medidas(diam_int=None, diam_ext=None, ancho=None, paso_rosca=None
     rango(diam_ext_cara_b, "diametro_externo_cara_b")
     rango(diam_rosca_homocinetica, "diametro_rosca_homocinetica")
     rango(diam_copa, "diametro_copa")
+    rango(diam_copa_superior, "diametro_copa_superior")
+    rango(largo_total, "largo_total")
     rango(ancho, "ancho")
     if paso_rosca:
         condiciones.append("UPPER(p.paso_rosca) = ?")
@@ -4863,7 +5313,10 @@ def buscar_por_medidas(diam_int=None, diam_ext=None, ancho=None, paso_rosca=None
     query = f"""SELECT p.id AS "ID", p.codigo_raw AS "Codigo", p.descripcion AS "Descripcion", m.nombre AS "Marca",
                 p.diametro_interno AS "Diám. interno (cara A)", p.diametro_interno_cara_b AS "Diám. interno (cara B)",
                 p.diametro_externo AS "Diám. externo (cara A)", p.diametro_externo_cara_b AS "Diám. externo (cara B)",
-                p.diametro_rosca_homocinetica AS "Diám. rosca homocinética", p.diametro_copa AS "Diám. copa",
+                p.diametro_rosca_homocinetica AS "Diám. rosca homocinética",
+                p.diametro_copa AS "Diám. copa (base)",
+                p.diametro_copa_superior AS "Diám. copa (boca)",
+                p.largo_total AS "Largo total",
                 p.ancho AS "Ancho",
                 p.paso_rosca AS "Paso de rosca", p.cantidad_estrias AS "Estrías",
                 p.estrias_internas AS "Estrías internas", p.estrias_externas AS "Estrías externas",
@@ -4879,20 +5332,23 @@ def buscar_por_medidas(diam_int=None, diam_ext=None, ancho=None, paso_rosca=None
 def actualizar_medidas(producto_id, diam_int, diam_ext, ancho, paso_rosca, estrias, ubicacion,
                         estrias_internas=None, estrias_externas=None, posicion_seguro=None, tiene_abs="Cualquiera",
                         diam_int_cara_b=None, diam_ext_cara_b=None,
-                        diam_rosca_homocinetica=None, diam_copa=None):
+                        diam_rosca_homocinetica=None, diam_copa=None,
+                        diam_copa_superior=None, largo_total=None):
     tiene_abs_valor = None if tiene_abs == "Cualquiera" else (1 if tiene_abs == "Sí" else 0)
     with db_lock:
         c.execute(
             "UPDATE productos SET diametro_interno=?, diametro_externo=?, ancho=?, paso_rosca=?, "
             "cantidad_estrias=?, ubicacion=?, estrias_internas=?, estrias_externas=?, posicion_seguro=?, "
             "tiene_abs=?, diametro_interno_cara_b=?, diametro_externo_cara_b=?, "
-            "diametro_rosca_homocinetica=?, diametro_copa=? WHERE id=?",
+            "diametro_rosca_homocinetica=?, diametro_copa=?, diametro_copa_superior=?, "
+            "largo_total=? WHERE id=?",
             (diam_int or None, diam_ext or None, ancho or None, (paso_rosca.strip() or None) if paso_rosca else None,
              estrias or None, (ubicacion.strip() or None) if ubicacion else None,
              estrias_internas or None, estrias_externas or None,
              (posicion_seguro.strip() or None) if posicion_seguro else None, tiene_abs_valor,
              diam_int_cara_b or None, diam_ext_cara_b or None,
-             diam_rosca_homocinetica or None, diam_copa or None, producto_id)
+             diam_rosca_homocinetica or None, diam_copa or None,
+             diam_copa_superior or None, largo_total or None, producto_id)
         )
         conn.commit()
 
@@ -4915,7 +5371,7 @@ def actualizar_medidas(producto_id, diam_int, diam_ext, ancho, paso_rosca, estri
 # Lo que NO puede: un cambio de punto de vista grande (de frente contra de costado) es otra
 # imagen para cualquier método de estos. Para eso se cargan varias fotos del mismo producto.
 
-FIRMA_VERSION = 3
+FIRMA_VERSION = 4   # 4 suma los rasgos gruesos de forma (objetos, aspecto, llenado)
 MAX_LADO = 640
 ORB_FEATURES_CATALOGO = 500
 ORB_FEATURES_CONSULTA = 800
@@ -4964,6 +5420,79 @@ def _recortar_objeto(img, cv2, np):
     return img[y0:y1, x0:x1], mayor
 
 
+def _rasgos_de_forma(img, contorno, cv2, np):
+    """Tres datos gruesos de la foto que sirven para descartar rápido, y que los puntos ORB y
+    los momentos de Hu no miran.
+
+    El caso que motivó esto: buscando una rótula aparecía un juego de descarbonización. Son
+    fotos que no se parecen en nada para una persona — una es UNA pieza compacta y la otra son
+    QUINCE juntas planas desparramadas — pero la comparación no tenía forma de notarlo, porque
+    ORB no encuentra textura en una rótula lisa y los momentos de Hu solo miran el contorno más
+    grande, así que comparaba la rótula contra UNA de las juntas del juego.
+
+      objetos → cuántas piezas separadas hay en la foto. Distingue 'una pieza' de 'un juego'.
+      aspecto → qué tan alargada es (siempre ≥1, sin importar si está parada o acostada).
+      llenado → cuánto de su recuadro ocupa. Una rótula llena casi todo; una junta plana o un
+                soporte fino, mucho menos."""
+    rasgos = {"objetos": 1, "aspecto": 1.0, "llenado": 1.0}
+    alto, ancho = img.shape[:2]
+    area_total = float(alto * ancho)
+
+    try:
+        suave = cv2.GaussianBlur(img, (5, 5), 0)
+        bordes = cv2.dilate(cv2.Canny(suave, 30, 110), np.ones((7, 7), np.uint8), iterations=2)
+        contornos, _ = cv2.findContours(bordes, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        # "Significativo" = al menos el 1% de la foto. Sin ese piso, cada mota de polvo del
+        # mostrador contaría como una pieza más.
+        grandes = [k for k in contornos if cv2.contourArea(k) > area_total * 0.01]
+        rasgos["objetos"] = max(len(grandes), 1)
+    except Exception:
+        pass
+
+    if contorno is not None:
+        try:
+            (_, _), (w, h), _ = cv2.minAreaRect(contorno)
+            if w > 0 and h > 0:
+                rasgos["aspecto"] = float(max(w, h) / min(w, h))
+            x, y, bw, bh = cv2.boundingRect(contorno)
+            if bw > 0 and bh > 0:
+                rasgos["llenado"] = float(min(cv2.contourArea(contorno) / (bw * bh), 1.0))
+        except Exception:
+            pass
+    return rasgos
+
+
+def _penalizacion_por_rasgos(ra, rb):
+    """Cuánto se castiga el parecido por diferencias gruesas de forma. Devuelve un multiplicador
+    entre 0 y 1. Si alguna de las dos firmas es vieja y no tiene rasgos, no penaliza nada."""
+    if not ra or not rb:
+        return 1.0
+    factor = 1.0
+
+    # Una pieza suelta contra un juego de muchas: es el caso rótula vs descarbonización
+    oa, ob = ra.get("objetos", 1), rb.get("objetos", 1)
+    if min(oa, ob) <= 2 and max(oa, ob) >= 6:
+        factor *= 0.12
+    elif abs(oa - ob) >= 4:
+        factor *= 0.5
+
+    # Proporción: algo el doble de alargado que lo otro difícilmente sea la misma pieza
+    aa, ab = ra.get("aspecto", 1.0), rb.get("aspecto", 1.0)
+    razon = max(aa, ab) / max(min(aa, ab), 0.01)
+    if razon > 2.5:
+        factor *= 0.25
+    elif razon > 1.7:
+        factor *= 0.6
+
+    # Cuánto llena su recuadro: separa lo macizo de lo plano o calado
+    dif = abs(ra.get("llenado", 1.0) - rb.get("llenado", 1.0))
+    if dif > 0.35:
+        factor *= 0.4
+    elif dif > 0.2:
+        factor *= 0.75
+    return factor
+
+
 def _firma_de_forma(contorno, cv2, np):
     """Momentos de Hu de la silueta: describen la FORMA sin importar el tamaño, la rotación ni
     el color. Es lo único que queda cuando la pieza es lisa y no tiene textura para agarrarse
@@ -4980,12 +5509,12 @@ def _firma_de_forma(contorno, cv2, np):
 
 def _preparar(imagen_bytes):
     """Deja la imagen lista para comparar: gris, recortada al objeto, a un tamaño común y con
-    el contraste emparejado. Devuelve (imagen, silueta) o (None, None)."""
+    el contraste emparejado. Devuelve (imagen, silueta, rasgos) o (None, None, None)."""
     cv2, np = _cv()
     arr = np.frombuffer(imagen_bytes, dtype=np.uint8)
     img = cv2.imdecode(arr, cv2.IMREAD_GRAYSCALE)
     if img is None:
-        return None, None
+        return None, None, None
 
     escala_previa = 900 / max(img.shape[:2])
     if escala_previa < 1:
@@ -4997,6 +5526,9 @@ def _preparar(imagen_bytes):
 
     recortada, contorno = _recortar_objeto(img, cv2, np)
     forma = _firma_de_forma(contorno, cv2, np)
+    # Los rasgos se miden sobre la foto ENTERA, antes del recorte: el recorte se queda con la
+    # pieza más grande, así que después del recorte un juego de 15 juntas parece una sola.
+    rasgos = _rasgos_de_forma(img, contorno, cv2, np)
 
     escala = MAX_LADO / max(recortada.shape[:2])
     if escala < 1:
@@ -5006,7 +5538,7 @@ def _preparar(imagen_bytes):
 
     # Segunda pasada de contraste, ya sobre el recorte: ahora que el fondo no está, el ajuste
     # se reparte sobre la pieza en vez de gastarse en el mostrador.
-    return cv2.createCLAHE(clipLimit=2.5, tileGridSize=(8, 8)).apply(recortada), forma
+    return cv2.createCLAHE(clipLimit=2.5, tileGridSize=(8, 8)).apply(recortada), forma, rasgos
 
 
 def calcular_firma_visual(imagen_bytes, es_consulta=False):
@@ -5022,7 +5554,7 @@ def calcular_firma_visual(imagen_bytes, es_consulta=False):
         return None, "error"
 
     try:
-        img, forma = _preparar(imagen_bytes)
+        img, forma, rasgos = _preparar(imagen_bytes)
         if img is None:
             return None, "error"
 
@@ -5034,6 +5566,7 @@ def calcular_firma_visual(imagen_bytes, es_consulta=False):
         payload = {
             "v": FIRMA_VERSION,
             "forma": forma,
+            "rasgos": rasgos,
             "dim": [int(img.shape[1]), int(img.shape[0])],
             "kp": np.float32([k.pt for k in kp]) if kp else None,
             "desc": desc,
@@ -5139,13 +5672,20 @@ def comparar_firmas(firma_consulta, blob_catalogo):
 
     forma = _parecido_de_forma(firma_consulta.get("forma"), fc.get("forma"))
 
+    factor = _penalizacion_por_rasgos(firma_consulta.get("rasgos"), fc.get("rasgos"))
+
     if mejor_textura >= 5:
         # Hay textura para agarrarse: manda eso, la forma solo desempata
         total = 0.78 * mejor_textura + 0.22 * forma
     else:
-        # Pieza lisa: solo queda la silueta, y sola vale bastante menos — techo bajo a propósito
-        total = 0.40 * forma
-    return round(min(total, 100.0), 1), mejor_inliers, round(forma, 1)
+        # Pieza lisa (rótulas, rulemanes, bujes): no hay ningún detalle que verificar, solo la
+        # silueta. Sola vale poco, y encima los momentos de Hu comparan un contorno contra otro
+        # sin enterarse de si la otra foto es un juego de quince piezas. Por eso acá los rasgos
+        # gruesos no descuentan: mandan. Si no coinciden, esto no es un candidato.
+        if factor < 0.5:
+            return 0.0, 0, round(forma, 1)
+        total = 0.35 * forma
+    return round(min(total * factor, 100.0), 1), mejor_inliers, round(forma, 1)
 
 
 def firma_de_consulta(imagen_bytes):
@@ -5191,9 +5731,11 @@ def agregar_foto_producto(producto_id, imagen_bytes, origen="subida", fuente=Non
         data_uri = "data:image/jpeg;base64," + base64.b64encode(comprimida).decode("ascii")
 
     with db_lock:
-        c.execute("""INSERT INTO producto_fotos (producto_id, imagen_data, firma_blob, estado, origen, fuente)
-                     VALUES (?, ?, ?, ?, ?, ?)""",
-                  (producto_id, data_uri, firma, estado, origen, fuente))
+        c.execute("""INSERT INTO producto_fotos (producto_id, imagen_data, firma_blob, estado,
+                                                 origen, fuente, firma_version)
+                     VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                  (producto_id, data_uri, firma, estado, origen, fuente,
+                   FIRMA_VERSION if firma else None))
         id_foto = c.lastrowid
         if hacer_principal is None:
             c.execute("SELECT imagen_url FROM productos WHERE id = ?", (producto_id,))
@@ -5264,7 +5806,8 @@ def contar_fotos_comparables():
     return listas, productos, pendientes, no_sirven
 
 
-def buscar_por_similitud_visual(imagen_bytes, top_n=8, minimo=3.0, progreso=None):
+def buscar_por_similitud_visual(imagen_bytes, top_n=8, minimo=8.0, progreso=None,
+                                 familia=None):
     """Compara una foto contra todas las del catálogo y devuelve las más parecidas ordenadas.
 
     Son candidatos para revisar a mano, NUNCA una identificación confirmada: hay repuestos que
@@ -5304,6 +5847,11 @@ def buscar_por_similitud_visual(imagen_bytes, top_n=8, minimo=3.0, progreso=None
             procesadas += 1
             if progreso and procesadas % 25 == 0:
                 progreso(procesadas, total_fotos)
+            # Filtro por tipo de pieza. Es lo que más ayuda y no sale de la foto: vos ya sabés
+            # que estás buscando una rótula, así que no tiene sentido que la app te ofrezca un
+            # juego de juntas. Descarta antes de comparar, así además va más rápido.
+            if familia and clasificar_repuesto(fila["descripcion"]) != familia:
+                continue
             try:
                 puntaje, verificadas, forma = comparar_firmas(firma_consulta, fila["firma_blob"])
             except Exception:
@@ -5326,9 +5874,11 @@ def buscar_por_similitud_visual(imagen_bytes, top_n=8, minimo=3.0, progreso=None
     resultados.sort(key=lambda r: (-r["Parecido"], -r["Coincidencias"]))
     if not resultados:
         return [], ("Ninguna foto del catálogo se parece lo suficiente. Puede ser que el producto no "
-                    "esté cargado con foto, o que la foto de referencia sea de un ángulo demasiado "
-                    "distinto — en ese caso, cargale a ese producto una segunda foto del ángulo que "
-                    "usás vos y la próxima vez la encuentra.")
+                    "esté cargado con foto, que la foto de referencia sea de un ángulo demasiado "
+                    "distinto (cargale a ese producto una segunda foto del ángulo que usás vos), o "
+                    "que la pieza sea lisa y sin marcas: en rótulas, rulemanes y bujes no hay "
+                    "ningún detalle para agarrarse y esta búsqueda casi nunca sirve. Para esos "
+                    "casos anda mucho mejor **📐 Buscar por medidas mecánicas**.")
     return resultados[:top_n], None
 
 
@@ -5346,12 +5896,18 @@ def _mensaje_catalogo_visual_vacio():
 
 
 def nivel_de_parecido(fila):
-    """Traduce el puntaje a algo que se pueda leer de un vistazo, sin dar falsa seguridad."""
+    """Traduce el puntaje a algo que se pueda leer de un vistazo, sin dar falsa seguridad.
+
+    Lo que manda son las coincidencias VERIFICADAS, no el porcentaje. Sin ninguna, el parecido
+    salió solo de la silueta, y una silueta parecida no significa casi nada entre repuestos:
+    antes eso podía llegar a mostrarse como «Media — mirala bien», que era prometer de más."""
     if fila["Coincidencias"] >= 25 and fila["Parecido"] >= 30:
         return "🟢 Fuerte — muchos detalles coinciden"
-    if fila["Coincidencias"] >= 8 or fila["Parecido"] >= 15:
+    if fila["Coincidencias"] >= 8:
         return "🟡 Media — mirala bien"
-    return "🔴 Débil — probablemente no sea"
+    if fila["Coincidencias"] >= 3:
+        return "🟠 Floja — pocos detalles verificados"
+    return "🔴 Solo la silueta — no confíes en esto"
 
 
 def generar_miniatura(imagen_bytes, lado=110):
@@ -5467,9 +6023,11 @@ def migrar_imagenes_pendientes(limite=400):
             datos = base64.b64decode(fila["imagen_url"].split(",", 1)[1])
             firma, estado = calcular_firma_visual(datos)
             with db_lock:
-                c.execute("""INSERT INTO producto_fotos (producto_id, imagen_data, firma_blob, estado, origen)
-                             VALUES (?, ?, ?, ?, 'migrada')""",
-                          (fila["id"], fila["imagen_url"], firma, estado))
+                c.execute("""INSERT INTO producto_fotos (producto_id, imagen_data, firma_blob, estado,
+                                                         origen, firma_version)
+                             VALUES (?, ?, ?, ?, 'migrada', ?)""",
+                          (fila["id"], fila["imagen_url"], firma, estado,
+                           FIRMA_VERSION if firma else None))
                 c.execute("UPDATE productos SET imagen_orb_estado = ? WHERE id = ?", (estado, fila["id"]))
                 conn.commit()
             resumen["migradas"] += 1
@@ -5479,15 +6037,19 @@ def migrar_imagenes_pendientes(limite=400):
 
     # 2) Fotos ya en la tabla pero sin firma calculada
     c.execute("""SELECT id, producto_id, imagen_data FROM producto_fotos
-                 WHERE firma_blob IS NULL AND (estado IS NULL OR estado = 'error')
-                   AND imagen_data LIKE 'data:%' LIMIT ?""", (limite,))
+                 WHERE (
+                        (firma_blob IS NULL AND (estado IS NULL OR estado = 'error'))
+                        OR COALESCE(firma_version, 0) < ?
+                       )
+                   AND imagen_data LIKE 'data:%' LIMIT ?""", (FIRMA_VERSION, limite))
     for fila in c.fetchall():
         try:
             datos = base64.b64decode(fila["imagen_data"].split(",", 1)[1])
             firma, estado = calcular_firma_visual(datos)
             with db_lock:
-                c.execute("UPDATE producto_fotos SET firma_blob = ?, estado = ? WHERE id = ?",
-                          (firma, estado, fila["id"]))
+                c.execute("UPDATE producto_fotos SET firma_blob = ?, estado = ?, firma_version = ? "
+                          "WHERE id = ?",
+                          (firma, estado, FIRMA_VERSION if firma else None, fila["id"]))
                 conn.commit()
             resumen["listas" if estado == "ok" else ("sin_detalle" if estado == "sin_detalle" else "error")] += 1
         except Exception:
@@ -5518,7 +6080,8 @@ def contar_fotos_pendientes_de_firma():
                          WHERE p.imagen_url LIKE 'data:%'
                            AND NOT EXISTS (SELECT 1 FROM producto_fotos f WHERE f.producto_id = p.id))
                       + (SELECT COUNT(*) FROM producto_fotos
-                         WHERE firma_blob IS NULL AND (estado IS NULL OR estado = 'error'))""")
+                         WHERE (firma_blob IS NULL AND (estado IS NULL OR estado = 'error'))
+                            OR COALESCE(firma_version, 0) < ?)""", (FIRMA_VERSION,))
     return c.fetchone()[0]
 
 
@@ -6583,11 +7146,21 @@ Casi todo lo que edita o borra algo pide la contraseña de administrador la prim
                         bytes_consulta = encontradas[elegida][1]
                         st.success(f"✅ Foto {elegida + 1} elegida.")
 
+            familia_elegida = st.selectbox(
+                "¿Qué tipo de pieza es? (recomendado)",
+                ["No sé / buscar en todo"] + sorted(FAMILIAS_REPUESTO.keys()),
+                key="familia_visual",
+                help="Es lo que más mejora el resultado, y no sale de la foto: vos ya sabés qué "
+                     "pieza tenés en la mano. Diciéndolo, la app deja de ofrecerte cosas de otro "
+                     "rubro que apenas se parecen de silueta."
+            )
+            familia_filtro = None if familia_elegida.startswith("No sé") else familia_elegida
+
             if st.button("🖼️ Comparar con el catálogo", disabled=bytes_consulta is None,
                          type="primary", key="btn_comparar_visual"):
                 barra_v = st.progress(0.0, text="Comparando...")
                 res_visual, error_visual = buscar_por_similitud_visual(
-                    bytes_consulta,
+                    bytes_consulta, familia=familia_filtro,
                     progreso=lambda i, t: barra_v.progress(min(i / max(t, 1), 1.0),
                                                            text=f"Comparando {i} de {t} fotos...")
                 )
@@ -7007,7 +7580,15 @@ Casi todo lo que edita o borra algo pide la contraseña de administrador la prim
         m_abs = ch4.selectbox("¿Tiene ABS?", ["Cualquiera", "Sí", "No"], key="med_abs")
         ch5, ch6 = st.columns(2)
         m_rosca_homo = ch5.number_input("Diámetro de rosca (mm)", min_value=0.0, step=0.1, value=0.0, key="med_rosca_homo")
-        m_copa = ch6.number_input("Diámetro de la copa (mm)", min_value=0.0, step=0.1, value=0.0, key="med_copa")
+        m_largo_total = ch6.number_input(
+            "Largo total (mm)", min_value=0.0, step=0.5, value=0.0, key="med_largo_total",
+            help="De punta a punta — es la medida que más rápido descarta."
+        )
+        st.caption("La copa es cónica: cargá los dos diámetros si los tenés (base y boca).")
+        ch7, ch8 = st.columns(2)
+        m_copa = ch7.number_input("Diám. copa — base (mm)", min_value=0.0, step=0.1, value=0.0, key="med_copa")
+        m_copa_sup = ch8.number_input("Diám. copa — boca / superior (mm)", min_value=0.0, step=0.1,
+                                       value=0.0, key="med_copa_sup")
 
         if st.button("📐 Buscar por medidas"):
             res_medidas = buscar_por_medidas(
@@ -7015,7 +7596,8 @@ Casi todo lo que edita o borra algo pide la contraseña de administrador la prim
                 m_paso or None, m_estrias or None, m_tolerancia,
                 m_estrias_int or None, m_estrias_ext or None, m_seguro or None, m_abs,
                 m_diam_int_b or None, m_diam_ext_b or None,
-                m_rosca_homo or None, m_copa or None
+                m_rosca_homo or None, m_copa or None,
+                m_copa_sup or None, m_largo_total or None
             )
             if res_medidas:
                 st.success(f"Se encontraron {len(res_medidas)} pieza(s) con medidas compatibles:")
@@ -8039,7 +8621,7 @@ if pagina == PAGINAS[3]:
                     "SELECT diametro_interno, diametro_externo, ancho, paso_rosca, cantidad_estrias, ubicacion, "
                     "estrias_internas, estrias_externas, posicion_seguro, tiene_abs, "
                     "diametro_interno_cara_b, diametro_externo_cara_b, "
-                    "diametro_rosca_homocinetica, diametro_copa "
+                    "diametro_rosca_homocinetica, diametro_copa, diametro_copa_superior, largo_total "
                     "FROM productos WHERE id = ?", (id_medidas,)
                 )
                 actual = c.fetchone()
@@ -8083,13 +8665,31 @@ if pagina == PAGINAS[3]:
                 eh5, eh6 = st.columns(2)
                 e_rosca_homo = eh5.number_input("Diámetro de rosca (mm)", min_value=0.0, step=0.1,
                                                  value=float(actual["diametro_rosca_homocinetica"] or 0), key="e_rosca_homo")
-                e_copa = eh6.number_input("Diámetro de la copa (mm)", min_value=0.0, step=0.1,
+                e_largo_total = eh6.number_input(
+                    "Largo total (mm)", min_value=0.0, step=0.5,
+                    value=float(actual["largo_total"] or 0), key="e_largo_total",
+                    help="De punta a punta. Es la medida que más rápido descarta: dos homocinéticas "
+                         "con las mismas estrías y la misma copa pero distinto largo no entran en "
+                         "el mismo auto."
+                )
+                st.caption(
+                    "La copa es cónica, así que se cargan sus dos diámetros: el de la **base** "
+                    "(donde se une al eje) y el de la **boca** (el borde abierto). Con uno solo no "
+                    "se distinguen dos copas que arrancan igual y terminan distinto — y son justo "
+                    "esas las que no se pueden intercambiar."
+                )
+                eh7, eh8 = st.columns(2)
+                e_copa = eh7.number_input("Diám. copa — base (mm)", min_value=0.0, step=0.1,
                                            value=float(actual["diametro_copa"] or 0), key="e_copa")
+                e_copa_sup = eh8.number_input("Diám. copa — boca / superior (mm)", min_value=0.0, step=0.1,
+                                               value=float(actual["diametro_copa_superior"] or 0),
+                                               key="e_copa_sup")
 
                 if st.button("💾 Guardar medidas y ubicación"):
                     actualizar_medidas(id_medidas, e_diam_int, e_diam_ext, e_ancho, e_paso, e_estrias, e_ubicacion,
                                         e_estrias_int, e_estrias_ext, e_seguro, e_abs,
-                                        e_diam_int_b, e_diam_ext_b, e_rosca_homo, e_copa)
+                                        e_diam_int_b, e_diam_ext_b, e_rosca_homo, e_copa,
+                                        e_copa_sup, e_largo_total)
                     st.success("Guardado.")
 
                 st.markdown("**📷 Fotos del producto**")
@@ -9895,7 +10495,7 @@ if pagina == PAGINAS[6]:
 if pagina == PAGINAS[7]:
     st.subheader("🛠️ Modo Mecánico")
 
-    SUB_MEC = ["📖 Códigos DTC", "🔢 Lector de VIN", "🚙 Repuestos por vehículo",
+    SUB_MEC = ["📖 Códigos DTC", "🔢 Chasis / VIN", "🚙 Repuestos por vehículo",
                "🗺️ Esquemas", "🧮 Conversor de unidades"]
     if st.session_state.get("sub_mec") not in SUB_MEC:
         st.session_state["sub_mec"] = SUB_MEC[0]
@@ -9957,193 +10557,7 @@ if pagina == PAGINAS[7]:
                 else:
                     st.warning("Pegá al menos un código.")
 
-    # -------- Lector de VIN --------
-    if sub_mec == SUB_MEC[1]:
-        st.caption(
-            "Decodifica el país de fabricación y el año a partir del VIN (estándar ISO 3779). "
-            "El fabricante (por los 3 primeros caracteres) y el modelo (por los caracteres 4 a 8) "
-            "los cargás vos una vez, y de ahí en más se completan solos: no existe una tabla "
-            "pública que los traduzca, las que hay son pagas."
-        )
-        vin_input = st.text_input("VIN (17 caracteres):", placeholder="Ej: 9BWZZZ377VT004251", key="vin_input")
-        if vin_input.strip():
-            datos_vin = decodificar_vin(vin_input)
-            if not datos_vin["valido"]:
-                st.error(datos_vin["error"])
-            else:
-                cv1, cv2, cv3 = st.columns(3)
-                cv1.metric("WMI", datos_vin["wmi"])
-                cv2.metric("País", datos_vin["pais"])
-                etiqueta_anio = "Año" if datos_vin.get("anio_preciso") else "Año estimado"
-                cv3.metric(etiqueta_anio, datos_vin["anio_estimado"] or "—")
-                if datos_vin.get("anio_preciso"):
-                    st.caption("✅ Año exacto: los VIN de Norteamérica traen cómo desambiguarlo.")
-                elif datos_vin.get("anio_alternativo"):
-                    st.caption(
-                        f"⚠️ El código de año se repite cada 30 años y este VIN no es de "
-                        f"Norteamérica, así que puede ser **{datos_vin['anio_estimado']}** o "
-                        f"**{datos_vin['anio_alternativo']}**. Confirmalo con la cédula."
-                    )
-                if datos_vin.get("digito_verificador") is True:
-                    st.caption("✅ El dígito verificador da bien: el VIN está bien escrito.")
-                elif datos_vin.get("digito_verificador") is False:
-                    st.error(
-                        "❌ El dígito verificador NO da. Hay algún carácter mal tipeado — "
-                        "revisalo antes de buscar repuestos, o vas a buscar los del auto equivocado."
-                    )
-                if datos_vin["fabricante"]:
-                    st.success(f"Fabricante cargado para este WMI: **{datos_vin['fabricante']}**")
-                else:
-                    st.info(
-                        "Ese WMI todavía no está cargado en la base de fabricantes. "
-                        "Si lo conocés, agregalo abajo para la próxima vez."
-                    )
-
-                if datos_vin.get("modelo"):
-                    st.success(
-                        f"🚗 Modelo: **{datos_vin['modelo']}**" +
-                        ("" if datos_vin.get("modelo_exacto") else " (patrón parcial)") +
-                        (f" · {datos_vin['modelo_notas']}" if datos_vin.get("modelo_notas") else "")
-                    )
-                else:
-                    st.caption(
-                        f"El modelo no sale del VIN: las posiciones 4-8 (`{datos_vin['vds']}`) las "
-                        "define cada fabricante y no hay norma pública que las traduzca. Cargalo "
-                        "una vez acá abajo y todo VIN con ese patrón lo va a mostrar solo."
-                    )
-
-                if datos_vin.get("motor"):
-                    st.success(f"⚙️ Motor: **{datos_vin['motor']}** "
-                                f"({datos_vin.get('motor_origen') or 'aprendido'})")
-                else:
-                    st.caption(
-                        f"El motor tampoco viene decodificado. La 8ª posición de este VIN es "
-                        f"**`{datos_vin['codigo_motor']}`**, que es "
-                        + ("la posición que la norma de Norteamérica reserva para el código de "
-                           "motor." if datos_vin.get("motor_por_norma") else
-                           "la posición que casi todos los fabricantes usan para el motor, aunque "
-                           "fuera de Norteamérica no sea obligatorio.") +
-                        " Deciles qué motor es una vez y todos los VIN de esta marca con esa "
-                        "misma letra lo van a mostrar solo."
-                    )
-
-                with st.form("form_modelo_vin_mec", clear_on_submit=True):
-                    st.markdown(f"**Enseñar modelo y motor** — patrón `{datos_vin['wmi']}`-"
-                                f"`{datos_vin['vds']}`, 8ª posición `{datos_vin['codigo_motor']}`")
-                    cmv_a, cmv_b = st.columns(2)
-                    modelo_mec = cmv_a.text_input("Modelo", value=datos_vin.get("modelo") or "",
-                                                   placeholder="Ej: GOL 1.6")
-                    motor_mec = cmv_b.text_input("Motor", value=datos_vin.get("motor") or "",
-                                                  placeholder="Ej: 1.6 8V nafta / 2.0 TDI")
-                    notas_mec = st.text_input("Nota (opcional)", placeholder="Ej: 3 puertas")
-                    alcance_mec = st.radio(
-                        "El MODELO, ¿para qué VIN vale?",
-                        ["Este patrón exacto (5 caracteres)", "Toda la familia (3 caracteres)"],
-                        horizontal=True,
-                        help="El motor siempre se guarda por la 8ª posición, que vale para toda "
-                             "la marca."
-                    )
-                    if st.form_submit_button("💾 Guardar", type="primary"):
-                        hechos = []
-                        if modelo_mec.strip():
-                            largo = 5 if alcance_mec.startswith("Este") else 3
-                            enseniar_modelo_vin(datos_vin["wmi"], datos_vin["vds"][:largo],
-                                                 modelo_mec, notas_mec)
-                            hechos.append(f"modelo {modelo_mec.strip()} para "
-                                          f"{datos_vin['wmi']}-{datos_vin['vds'][:largo]}")
-                        if motor_mec.strip():
-                            enseniar_motor_vin(datos_vin["wmi"], datos_vin["codigo_motor"],
-                                                motor_mec, notas_mec)
-                            hechos.append(f"motor {motor_mec.strip()} para el código "
-                                          f"{datos_vin['codigo_motor']}")
-                        if hechos:
-                            st.success("Guardado: " + "; ".join(hechos) + ".")
-                            st.rerun()
-                        else:
-                            st.warning("Escribí al menos el modelo o el motor.")
-
-        with st.expander("➕ Agregar fabricante por WMI"):
-            with st.form("form_vin_fab", clear_on_submit=True):
-                cw1, cw2, cw3 = st.columns(3)
-                nuevo_wmi = cw1.text_input("WMI (3 caracteres)", max_chars=3, placeholder="Ej: 9BW")
-                nuevo_fabricante = cw2.text_input("Fabricante", placeholder="Ej: Volkswagen Argentina")
-                nuevo_pais_vin = cw3.text_input("País (opcional)", placeholder="Ej: Argentina")
-                guardar_vin_btn = st.form_submit_button("💾 Guardar", type="primary")
-            if guardar_vin_btn:
-                if len(nuevo_wmi.strip()) != 3 or not nuevo_fabricante.strip():
-                    st.warning("El WMI debe tener 3 caracteres y el fabricante es obligatorio.")
-                else:
-                    agregar_fabricante_vin(nuevo_wmi, nuevo_fabricante, nuevo_pais_vin)
-                    st.success(f"WMI {nuevo_wmi.upper()} guardado.")
-                    st.rerun()
-
-        fabricantes_cargados = listar_fabricantes_vin()
-        if fabricantes_cargados:
-            with st.expander(f"📋 Fabricantes cargados ({len(fabricantes_cargados)})"):
-                st.dataframe(fabricantes_cargados, use_container_width=True, hide_index=True)
-
-        c.execute("""SELECT COUNT(*) FROM vehiculos WHERE vin IS NOT NULL AND LENGTH(vin) = 17
-                     AND modelo_auto IS NOT NULL AND modelo_auto <> ''""")
-        fichas_con_vin = c.fetchone()[0]
-        if fichas_con_vin:
-            st.caption(f"Tenés {fichas_con_vin} ficha(s) de vehículo con VIN y modelo cargados.")
-            if st.button("📚 Aprender modelos y motores de esas fichas"):
-                n_mod, n_mot = aprender_modelos_de_fichas_existentes()
-                st.success(f"Se aprendieron {n_mod} modelo(s) y {n_mot} motor(es) de tus fichas.")
-                st.rerun()
-
-        modelos_cargados = listar_modelos_vin()
-        with st.expander(f"🚗 Modelos que la app ya aprendió ({len(modelos_cargados)})"):
-            if modelos_cargados:
-                st.dataframe(modelos_cargados, use_container_width=True, hide_index=True)
-                st.caption(
-                    "Esta tabla es tuya: la fue armando la app con los VIN que fuiste cargando. "
-                    "Un patrón de 3 caracteres cubre toda una familia; uno de 5, una versión puntual."
-                )
-                cbm1, cbm2 = st.columns(2)
-                wmi_borrar = cbm1.text_input("WMI a borrar", max_chars=3, key="wmi_borrar_modelo")
-                vds_borrar = cbm2.text_input("Patrón (VDS) a borrar", max_chars=5, key="vds_borrar_modelo")
-                if st.button("🗑️ Borrar ese patrón", disabled=not (wmi_borrar and vds_borrar)):
-                    if olvidar_modelo_vin(wmi_borrar, vds_borrar):
-                        st.success("Patrón borrado.")
-                    else:
-                        st.warning("No encontré ese patrón.")
-                    st.rerun()
-            else:
-                st.caption(
-                    "Todavía ninguno. Cada vez que cargues un VIN y le digas qué modelo es, "
-                    "queda acá y se autocompleta la próxima vez."
-                )
-
-        motores_cargados = listar_motores_vin()
-        with st.expander(f"⚙️ Motores que la app ya aprendió ({len(motores_cargados)})"):
-            st.caption(
-                "La 8ª posición del VIN es el código de motor: obligatorio en Norteamérica y usado "
-                "igual por casi todos los demás. Es el que mejor rinde de todos los patrones, "
-                "porque el mismo código se repite en toda la gama de la marca: lo enseñás una vez "
-                "con un auto y queda andando para los otros modelos de esa marca."
-            )
-            if motores_cargados:
-                st.dataframe(motores_cargados, use_container_width=True, hide_index=True)
-                cbt1, cbt2 = st.columns(2)
-                wmi_bm = cbt1.text_input("WMI a borrar", max_chars=3, key="wmi_borrar_motor")
-                cod_bm = cbt2.text_input("Código (8ª posición)", max_chars=1, key="cod_borrar_motor")
-                if st.button("🗑️ Borrar ese motor", disabled=not (wmi_bm and cod_bm)):
-                    if olvidar_motor_vin(wmi_bm, cod_bm):
-                        st.success("Borrado.")
-                    else:
-                        st.warning("No encontré ese código.")
-                    st.rerun()
-            else:
-                st.caption("Todavía ninguno.")
-
-    # -------- Visor de esquemas --------
-    CATEGORIAS_ESQUEMA = [
-        "Motor", "Refrigeración", "Retenes y juntas", "Frenos", "Suspensión", "Dirección",
-        "Transmisión", "Embrague", "Correas y distribución", "Eléctrico", "Combustible",
-        "Escape", "Aire acondicionado", "Otro"
-    ]
-
+    # Definida acá porque la usan las dos vistas de esquemas de más abajo.
     def mostrar_lista_esquemas(lista_esq):
         if not lista_esq:
             st.caption("No hay esquemas cargados acá todavía.")
@@ -10234,6 +10648,88 @@ if pagina == PAGINAS[7]:
                         eliminar_esquema(esq["id"])
                         st.rerun()
 
+    # -------- Chasis / VIN (pantalla única) --------
+    if sub_mec == SUB_MEC[1]:
+        panel_vin(clave="vin_mec")
+
+        st.markdown("---")
+        st.markdown("**⚙️ Lo que la app fue aprendiendo**")
+        st.caption(
+            "Estas tablas son tuyas: se llenan solas con cada ficha de vehículo que cargues con "
+            "VIN, y con lo que le enseñes arriba. Acá se revisan y se corrigen."
+        )
+
+        c.execute("""SELECT COUNT(*) FROM vehiculos WHERE vin IS NOT NULL AND LENGTH(vin) = 17
+                     AND ((modelo_auto IS NOT NULL AND modelo_auto <> '')
+                          OR (motorizacion IS NOT NULL AND motorizacion <> ''))""")
+        fichas_con_vin = c.fetchone()[0]
+        if fichas_con_vin:
+            st.caption(f"Tenés {fichas_con_vin} ficha(s) de vehículo con VIN cargado.")
+            if st.button("📚 Aprender modelos y motores de esas fichas"):
+                n_mod, n_mot = aprender_modelos_de_fichas_existentes()
+                st.success(f"Se aprendieron {n_mod} modelo(s) y {n_mot} motor(es) de tus fichas.")
+                st.rerun()
+
+        fabricantes_cargados = listar_fabricantes_vin()
+        with st.expander(f"🏭 Fabricantes por WMI ({len(fabricantes_cargados)})"):
+            st.caption(
+                "Los 3 primeros caracteres del VIN. Vienen 328 cargados de la lista pública "
+                "internacional; podés corregir o agregar los que falten."
+            )
+            if fabricantes_cargados:
+                st.dataframe(fabricantes_cargados, use_container_width=True, hide_index=True)
+            with st.form("form_wmi_admin", clear_on_submit=True):
+                cw1, cw2, cw3 = st.columns(3)
+                nuevo_wmi = cw1.text_input("WMI (3 caracteres)", max_chars=3)
+                nuevo_fabricante = cw2.text_input("Fabricante")
+                nuevo_pais_vin = cw3.text_input("País")
+                if st.form_submit_button("💾 Guardar WMI"):
+                    if len(nuevo_wmi.strip()) != 3 or not nuevo_fabricante.strip():
+                        st.warning("El WMI debe tener 3 caracteres y el fabricante es obligatorio.")
+                    else:
+                        agregar_fabricante_vin(nuevo_wmi, nuevo_fabricante, nuevo_pais_vin)
+                        st.success(f"WMI {nuevo_wmi.upper()} guardado.")
+                        st.rerun()
+
+        modelos_cargados = listar_modelos_vin()
+        with st.expander(f"🚗 Modelos aprendidos ({len(modelos_cargados)})"):
+            if modelos_cargados:
+                st.dataframe(modelos_cargados, use_container_width=True, hide_index=True)
+                cbm1, cbm2 = st.columns(2)
+                wmi_borrar = cbm1.text_input("WMI a borrar", max_chars=3, key="wmi_borrar_modelo")
+                vds_borrar = cbm2.text_input("Patrón (VDS) a borrar", max_chars=5, key="vds_borrar_modelo")
+                if st.button("🗑️ Borrar ese patrón", disabled=not (wmi_borrar and vds_borrar)):
+                    if olvidar_modelo_vin(wmi_borrar, vds_borrar):
+                        st.success("Patrón borrado.")
+                    else:
+                        st.warning("No encontré ese patrón.")
+                    st.rerun()
+            else:
+                st.caption(
+                    "Todavía ninguno. Cada ficha de vehículo que cargues con VIN y modelo suma uno."
+                )
+
+        motores_cargados = listar_motores_vin()
+        with st.expander(f"⚙️ Motores aprendidos ({len(motores_cargados)})"):
+            st.caption(
+                "La 8ª posición del VIN es el código de motor. Es el patrón que mejor rinde: el "
+                "mismo código se repite en toda la gama de la marca, así que enseñarlo una vez "
+                "sirve para los otros modelos."
+            )
+            if motores_cargados:
+                st.dataframe(motores_cargados, use_container_width=True, hide_index=True)
+                cbt1, cbt2 = st.columns(2)
+                wmi_bm = cbt1.text_input("WMI a borrar", max_chars=3, key="wmi_borrar_motor")
+                cod_bm = cbt2.text_input("Código (8ª posición)", max_chars=1, key="cod_borrar_motor")
+                if st.button("🗑️ Borrar ese motor", disabled=not (wmi_bm and cod_bm)):
+                    if olvidar_motor_vin(wmi_bm, cod_bm):
+                        st.success("Borrado.")
+                    else:
+                        st.warning("No encontré ese código.")
+                    st.rerun()
+            else:
+                st.caption("Todavía ninguno.")
+
     if sub_mec == SUB_MEC[2]:
         st.markdown("**🚙 Repuestos por vehículo**")
         st.caption(
@@ -10255,143 +10751,11 @@ if pagina == PAGINAS[7]:
             etiquetas_marcas = [f"{m} ({n} productos)" for m, n in disponibles]
             mapa_marcas = {f"{m} ({n} productos)": m for m, n in disponibles}
 
-            with st.expander("🔢 Empezar desde un VIN"):
-                st.caption(
-                    "Del VIN salen con certeza el **fabricante**, el **país** y el **año** — eso "
-                    "está normalizado. El **modelo NO**: las posiciones 4 a 8 las define cada "
-                    "fabricante como quiere y no hay norma pública que las traduzca (para eso hay "
-                    "que pagar una base tipo TecDoc). Lo que sí puede hacer la app es aprenderlo: "
-                    "la primera vez se lo enseñás vos y de ahí en más lo completa sola."
-                )
-                vin_cat = st.text_input("VIN (17 caracteres):", key="vin_para_catalogo").strip().upper()
-                if vin_cat:
-                    datos_v = decodificar_vin(vin_cat)
-                    if not datos_v["valido"]:
-                        st.error(datos_v["error"])
-                    else:
-                        fab = datos_v.get("fabricante") or "(fabricante no cargado)"
-                        if datos_v.get("fabricante_por_prefijo"):
-                            fab += " (por familia de WMI)"
-                        anio_txt = datos_v.get("anio_estimado") or "?"
-                        prefijo_anio = "año" if datos_v.get("anio_preciso") else "año ~"
-                        st.success(f"**{fab}** · {datos_v['pais']} · {prefijo_anio}{anio_txt}")
-                        if datos_v.get("anio_alternativo"):
-                            st.caption(f"(el código de año se repite cada 30: puede ser {anio_txt} "
-                                        f"o {datos_v['anio_alternativo']})")
-                        if datos_v.get("digito_verificador") is False:
-                            st.error("❌ El dígito verificador no da: revisá si hay algún carácter "
-                                      "mal tipeado.")
-
-                        ficha_vin = datos_v.get("vehiculo")
-                        if ficha_vin:
-                            st.success(
-                                f"🎯 Este chasis ya está en tus fichas: patente "
-                                f"**{ficha_vin.get('patente')}**, "
-                                f"{ficha_vin.get('marca_auto') or '—'} "
-                                f"{ficha_vin.get('modelo_auto') or ''} "
-                                f"{ficha_vin.get('anio') or ''} "
-                                f"{ficha_vin.get('motorizacion') or ''}".rstrip()
-                                + (f" — cliente: {ficha_vin['cliente_nombre']}"
-                                   if ficha_vin.get("cliente_nombre") else "")
-                            )
-                            st.caption("Estos datos son los que cargó una persona mirando el auto, "
-                                       "así que valen más que cualquier deducción del VIN.")
-
-                        modelo_vin = datos_v.get("modelo")
-                        motor_vin = datos_v.get("motor")
-                        if modelo_vin:
-                            st.info(
-                                f"🚗 Modelo: **{modelo_vin}**" +
-                                ("" if datos_v.get("modelo_exacto") else
-                                 " (por patrón parcial — puede ser una variante de la misma familia)") +
-                                (f" · {datos_v['modelo_notas']}" if datos_v.get("modelo_notas") else "")
-                            )
-                        if motor_vin:
-                            st.info(f"⚙️ Motor: **{motor_vin}** "
-                                     f"({datos_v.get('motor_origen') or 'aprendido'})")
-
-                        marca_detectada = next(
-                            (mv for mv in MARCAS_VEHICULO if fab and mv in fab.upper()), None
-                        )
-                        etiqueta_detectada = None
-                        if marca_detectada:
-                            etiqueta_detectada = next(
-                                (e for e in etiquetas_marcas if mapa_marcas[e] == marca_detectada), None
-                            )
-
-                        # Un solo botón que aplica TODO lo que el VIN sabe. Antes solo tocaba la
-                        # marca y el año quedaba en 0, que es lo que hacía parecer que el VIN no
-                        # servía para nada más.
-                        # El año ambiguo NO se aplica solo. El código de la 10ª posición se repite
-                        # cada 30 años, así que un Gol del 97 da "1997 o 2027". Si se aplicara el
-                        # más nuevo al filtro, el buscador escondería justo los repuestos buenos.
-                        # Con dos candidatos, elige la persona.
-                        anio_a_usar = datos_v.get("anio_estimado")
-                        if datos_v.get("anio_alternativo"):
-                            opciones_anio = sorted({datos_v["anio_estimado"],
-                                                     datos_v["anio_alternativo"]})
-                            anio_a_usar = st.radio(
-                                "El VIN no permite saber cuál de los dos años es — elegí:",
-                                opciones_anio, horizontal=True, key="anio_vin_elegido",
-                                help="Miralo en la cédula. Fuera de Norteamérica el VIN no trae "
-                                     "con qué desambiguarlo."
-                            )
-
-                        aplicables = []
-                        if etiqueta_detectada:
-                            aplicables.append(f"marca {marca_detectada}")
-                        if anio_a_usar:
-                            aplicables.append(f"año {anio_a_usar}")
-                        if modelo_vin:
-                            aplicables.append(f"modelo {modelo_vin}")
-                        if motor_vin:
-                            aplicables.append(f"motor {motor_vin}")
-
-                        if aplicables:
-                            if st.button(f"👉 Usar el VIN en la búsqueda ({', '.join(aplicables)})",
-                                          key="usar_vin_completo", type="primary"):
-                                if etiqueta_detectada:
-                                    st.session_state["sel_marca_vehiculo"] = etiqueta_detectada
-                                if anio_a_usar:
-                                    st.session_state["anio_vehiculo_filtro"] = int(anio_a_usar)
-                                # El modelo se aplica más abajo, recién cuando se sabe qué
-                                # modelos tiene el catálogo de esa marca: si se escribiera acá
-                                # un modelo que no está entre las opciones, el selector rompe.
-                                st.session_state["vin_modelo_pendiente"] = modelo_vin
-                                st.session_state["vin_motor_pendiente"] = motor_vin
-                                st.rerun()
-                        elif marca_detectada:
-                            st.warning(
-                                f"Detecté **{marca_detectada}**, pero todavía no hay repuestos "
-                                "de esa marca en tu catálogo."
-                            )
-
-                        st.markdown("---")
-                        with st.form("enseniar_modelo_vin_form"):
-                            st.markdown(
-                                f"**¿Qué modelo es este auto?** (patrón `{datos_v['wmi']}`-"
-                                f"`{datos_v['vds']}`)"
-                            )
-                            st.caption(
-                                "Cargalo una vez y todo VIN con el mismo patrón lo completa solo. "
-                                "Escribilo como aparece en las descripciones de tu catálogo, así "
-                                "el filtro lo engancha (ej: «FIORINO», «GOL 1.6»)."
-                            )
-                            modelo_nuevo = st.text_input("Modelo:", value=modelo_vin or "")
-                            notas_modelo = st.text_input("Nota (opcional):",
-                                                          placeholder="Ej: motor 1.4 fire, 3 puertas")
-                            fm1, fm2 = st.columns(2)
-                            guardar_exacto = fm1.form_submit_button("💾 Guardar para este patrón exacto")
-                            guardar_familia = fm2.form_submit_button("💾 Guardar para la familia (3 primeros)")
-                            if (guardar_exacto or guardar_familia) and modelo_nuevo.strip():
-                                largo = 5 if guardar_exacto else 3
-                                enseniar_modelo_vin(datos_v["wmi"], datos_v["vds"][:largo],
-                                                     modelo_nuevo, notas_modelo)
-                                st.success(f"Guardado: {datos_v['wmi']}-{datos_v['vds'][:largo]} "
-                                            f"→ {modelo_nuevo.strip()}")
-                                st.rerun()
-                            elif guardar_exacto or guardar_familia:
-                                st.warning("Escribí el modelo antes de guardar.")
+            st.info(
+                "🔢 ¿Tenés el número de chasis? Andá a **🛠️ Modo Mecánico → 🔢 Chasis / VIN**: "
+                "pegás el VIN y te da directamente los repuestos que lleva ese auto, sin tener "
+                "que elegir marca y modelo acá a mano."
+            )
 
             etiqueta_elegida = st.selectbox("Marca del vehículo:", etiquetas_marcas,
                                              key="sel_marca_vehiculo")
@@ -10412,33 +10776,6 @@ if pagina == PAGINAS[7]:
                         opciones_mod = ["Todos los modelos"] + [f"{m} ({n})" for m, n in modelos_detectados[:120]]
                         mapa_mod = {f"{m} ({n})": m for m, n in modelos_detectados[:120]}
 
-                        # Recién acá se sabe qué modelos hay en el catálogo de esta marca, así que
-                        # es acá donde se puede aplicar el que trajo el VIN. Se busca la opción que
-                        # lo contenga; si ninguna coincide, en vez de romper el selector se manda
-                        # al filtro de texto, que es más flexible.
-                        pendiente_motor = st.session_state.pop("vin_motor_pendiente", None)
-                        if pendiente_motor:
-                            # La cilindrada es lo que más filtra ("1.6", "2.0"): las listas de
-                            # proveedor la escriben en la descripción, no en un campo aparte.
-                            cilindrada = re.search(r'\d[.,]\d', pendiente_motor)
-                            st.session_state["filtro_modelo_vehiculo"] = (
-                                cilindrada.group(0).replace(",", ".") if cilindrada else pendiente_motor
-                            )
-
-                        pendiente_mod = st.session_state.pop("vin_modelo_pendiente", None)
-                        if pendiente_mod:
-                            buscado = pendiente_mod.strip().upper()
-                            coincidencia = next(
-                                (e for e in opciones_mod[1:] if buscado in mapa_mod[e].upper()), None
-                            ) or next(
-                                (e for e in opciones_mod[1:] if mapa_mod[e].upper() in buscado), None
-                            )
-                            if coincidencia:
-                                st.session_state["sel_modelo_vehiculo"] = coincidencia
-                            elif not pendiente_motor:
-                                st.session_state["filtro_modelo_vehiculo"] = pendiente_mod
-                                st.session_state["aviso_modelo_vin"] = pendiente_mod
-
                         if st.session_state.get("sel_modelo_vehiculo") not in opciones_mod:
                             # Cambió la marca y el modelo guardado ya no existe: sin esto el
                             # selector tira excepción y se cae la pantalla.
@@ -10448,7 +10785,6 @@ if pagina == PAGINAS[7]:
                         modelo_elegido = mapa_mod.get(mod_etiqueta)
                     else:
                         modelo_elegido = None
-                        st.session_state.pop("vin_modelo_pendiente", None)
                         st.caption("No se detectaron modelos para esta marca.")
                 with cmv2:
                     anio_filtro = st.number_input(
@@ -10456,14 +10792,6 @@ if pagina == PAGINAS[7]:
                         value=0, step=1, key="anio_vehiculo_filtro",
                         help="Usa los rangos que traen las descripciones. Lo que no aclara años "
                              "se muestra igual, marcado aparte."
-                    )
-
-                aviso_mod_vin = st.session_state.pop("aviso_modelo_vin", None)
-                if aviso_mod_vin:
-                    st.caption(
-                        f"ℹ️ El modelo del VIN («{aviso_mod_vin}») no coincide con ningún modelo "
-                        "detectado en el catálogo de esta marca, así que lo puse en el filtro de "
-                        "texto de acá abajo."
                     )
 
                 filtro_modelo = st.text_input(
