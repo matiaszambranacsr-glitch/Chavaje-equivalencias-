@@ -245,7 +245,9 @@ for n in ast.walk(ARBOL):
 # filtraba: el bug más caro de encontrar, porque no da ningún síntoma.
 VALORES_PAREADOS = {
     "decision": {"ok", "rechazada"},
-    "estado": {"ok", "sin_detalle", "error", "solo_forma", "pendiente", "resuelto"},
+    "estado": {"ok", "sin_detalle", "error", "solo_forma", "pendiente", "resuelto",
+               # de las reservas de stock
+               "activa", "vencida", "vendida", "cancelada"},
     "foto_busqueda_estado": {"sin_foto", "error"},
     "origen": {"lista_proveedor", "manual", "subida", "url", "ficha", "link", "migrada", "deducida"},
 }
@@ -304,6 +306,74 @@ for nodo in literales_en_riesgo:
                      f'"{txt}" se parece a "{bueno}" por una sola letra — '
                      "¿es el valor que espera el resto del código?")
             break
+
+# ============ 8d. Paredes de texto en la interfaz ============
+# En el celular una explicación de 300 caracteres empuja los botones fuera de la pantalla y hay
+# que scrollear para llegar a lo que uno vino a hacer. Para eso está explicar(): resumen corto
+# a la vista y el detalle a un toque. Este chequeo evita que vuelvan a crecer.
+for nodo in ast.walk(ARBOL):
+    # Solo captions e info: son texto explicativo, y ahí la pared molesta todos los días.
+    # Los warning y error avisan de un problema puntual y sí necesitan explicar qué pasó y qué
+    # hacer — marcarlos empujaría a recortar justo el mensaje que hace falta leer entero.
+    if not (isinstance(nodo, ast.Call) and isinstance(nodo.func, ast.Attribute)
+            and nodo.func.attr in ("caption", "info")):
+        continue
+    if not nodo.args:
+        continue
+    try:
+        texto = ast.literal_eval(nodo.args[0])
+    except Exception:
+        continue        # f-strings: llevan datos, no son texto fijo
+    if isinstance(texto, str) and len(texto) > 300:
+        reportar("AVISO", nodo.lineno,
+                 f"st.{nodo.func.attr} con {len(texto)} caracteres fijos — conviene explicar() "
+                 "(resumen corto + detalle desplegable)")
+
+# El resumen de explicar() tiene que entrar en una línea del celular
+for nodo in ast.walk(ARBOL):
+    if isinstance(nodo, ast.Call) and isinstance(nodo.func, ast.Name) and nodo.func.id == "explicar":
+        if len(nodo.args) < 2:
+            reportar("ERROR", nodo.lineno, "explicar() necesita resumen y detalle")
+            continue
+        try:
+            resumen = ast.literal_eval(nodo.args[0])
+        except Exception:
+            continue
+        if isinstance(resumen, str) and len(resumen) > 170:
+            reportar("AVISO", nodo.lineno,
+                     f"el resumen de explicar() tiene {len(resumen)} caracteres; "
+                     "va lo corto arriba y lo largo adentro")
+
+# ============ 8e. Contenedores anidados que Streamlit prohíbe ============
+# st.expander dentro de otro expander tira StreamlitAPIException y CORTA el renderizado ahí:
+# la mitad de abajo de la pantalla no se dibuja. Es un error que no se ve leyendo el código
+# porque los dos expanders pueden estar a 200 líneas de distancia.
+def _es_contenedor(item, nombre):
+    return (isinstance(item.context_expr, ast.Call)
+            and isinstance(item.context_expr.func, ast.Attribute)
+            and item.context_expr.func.attr == nombre)
+
+
+class _BuscaAnidados(ast.NodeVisitor):
+    def __init__(self, nombre):
+        self.nombre = nombre
+        self.pila = []
+
+    def visit_With(self, nodo):
+        hay = any(_es_contenedor(i, self.nombre) for i in nodo.items)
+        if hay and self.pila:
+            reportar("ERROR", nodo.lineno,
+                     f"st.{self.nombre} dentro de otro st.{self.nombre} "
+                     f"(el de afuera está en L{self.pila[-1]}) — Streamlit lo prohíbe y corta "
+                     "el renderizado")
+        if hay:
+            self.pila.append(nodo.lineno)
+        self.generic_visit(nodo)
+        if hay:
+            self.pila.pop()
+
+
+_BuscaAnidados("expander").visit(ARBOL)
 
 # ============ 9. Argumentos por defecto mutables ============
 for n in ast.walk(ARBOL):
