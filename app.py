@@ -917,6 +917,9 @@ def get_connection():
         fecha TEXT DEFAULT (datetime('now'))
     )""")
     c.execute("CREATE INDEX IF NOT EXISTS idx_ventas_fecha ON ventas_registradas(fecha)")
+    # Sin este, "cuándo se vendió por última vez este producto" recorría la tabla de ventas
+    # ENTERA una vez por producto. Con el estante lleno eso es minutos de espera.
+    c.execute("CREATE INDEX IF NOT EXISTS idx_ventas_prod ON ventas_registradas(producto_id)")
     c.execute("CREATE INDEX IF NOT EXISTS idx_ventas_codigo ON ventas_registradas(codigo_pedido_clean)")
 
     # Mapeo de columnas recordado por proveedor. Cada vez que se importa una lista hay que
@@ -1643,6 +1646,21 @@ def get_connection():
     # Códigos con muchos vínculos que YA revisaste y están bien. Hay repuestos que legítimamente
     # equivalen a decenas: un filtro común, una bujía que va en media gama. Sin esta lista, esos
     # códigos aparecían como problema en cada revisión y no había forma de sacarlos del aviso.
+    # Códigos que el fabricante reemplazó por otros. NO es una equivalencia común: tiene
+    # dirección. El viejo se deja de fabricar y el nuevo lo reemplaza, pero no al revés.
+    c.execute("""CREATE TABLE IF NOT EXISTS reemplazos_codigo (
+        codigo_viejo TEXT NOT NULL,
+        codigo_viejo_clean TEXT NOT NULL,
+        codigo_nuevo TEXT NOT NULL,
+        codigo_nuevo_clean TEXT NOT NULL,
+        marca TEXT,
+        nota TEXT,
+        cargado_por TEXT,
+        fecha TEXT DEFAULT (datetime('now')),
+        PRIMARY KEY (codigo_viejo_clean, codigo_nuevo_clean)
+    )""")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_reemp_viejo ON reemplazos_codigo(codigo_viejo_clean)")
+
     c.execute("""CREATE TABLE IF NOT EXISTS puentes_aprobados (
         producto_id INTEGER PRIMARY KEY REFERENCES productos(id) ON DELETE CASCADE,
         aprobado_por TEXT,
@@ -5752,6 +5770,10 @@ FAMILIAS_REPUESTO = {
         "VALVULA", "VALVULAS", "RESORTE DE VALVULA",
     ],
     "Juntas y retenes": [
+        # Abreviaturas que usan los proveedores en sus listas: sin ellas, «Jgo de motor» y
+        # «JTA T.C.» no caían en ninguna familia y se colaban en cualquier búsqueda.
+        "JGO DE MOTOR", "JUEGO DE MOTOR", "JGO MOTOR", "JGO DE JUNTAS", "JGO JUNTAS",
+        "JTA T C", "JTA TC", "JTA DE TAPA", "JTA TAPA", "JTA",
         "JUNTA DE TAPA", "JUNTA TAPA", "JUEGO DE JUNTAS", "JUNTA HOMOCINETICA", "RETEN",
         "RETENES", "JUNTA", "JUNTAS", "ORING", "O-RING", "EMPAQUETADURA", "SELLO",
     ],
@@ -6591,6 +6613,32 @@ def buscar_por_texto(texto):
     with db_lock:
         c.execute(query, params + params + [minimo])
         filas = filas_a_listas(c)
+
+    # Filtro por RUBRO. Contar palabras coincidentes no alcanza: buscando «bujía golf 1.4 tsi»
+    # aparecían juntas de tapa y juegos de motor, porque coinciden en «golf», «1.4» y «tsi» —
+    # o sea, en el AUTO, no en la pieza. Y el auto es lo de menos: nadie que pide una bujía se
+    # lleva una junta porque va al mismo Golf.
+    #
+    # Si en el pedido se reconoce un rubro, se dejan solo los resultados de ESE rubro. Los que
+    # no se pudieron clasificar se conservan: descartar lo que no se entiende es peor que
+    # mostrarlo, porque las descripciones de proveedor son un desastre y muchas piezas legítimas
+    # no caen en ninguna familia.
+    familia_pedida = clasificar_repuesto(texto)
+    if familia_pedida != "Sin clasificar":
+        del_rubro, sin_clasificar, de_otro_rubro = [], [], []
+        for f in filas:
+            fam = clasificar_repuesto(f.get("Descripcion") or "")
+            if fam == familia_pedida:
+                del_rubro.append(f)
+            elif fam == "Sin clasificar":
+                sin_clasificar.append(f)
+            else:
+                de_otro_rubro.append(f)
+        # Solo se descarta lo de otro rubro si quedó algo del rubro pedido; si no, es mejor
+        # mostrar todo que dejar la pantalla vacía.
+        if del_rubro:
+            filas = del_rubro + sin_clasificar
+
     for f in filas:
         f.pop("_coincidencias", None)
     return filas
@@ -7241,6 +7289,118 @@ def productos_probablemente_discontinuados(marca_id=None, listas_seguidas=2, lim
     return salida[:limite], revisados
 
 
+def guardar_reemplazo(codigo_viejo, codigo_nuevo, marca="", nota=""):
+    """Anota que un código fue reemplazado por otro. Devuelve (ok, mensaje)."""
+    v, n = sanitizar(codigo_viejo), sanitizar(codigo_nuevo)
+    if not v or not n:
+        return False, "Faltan los dos códigos."
+    if v == n:
+        return False, "Son el mismo código."
+    # Si el nuevo ya lleva de vuelta al viejo, esto arma un círculo (A→B→A). Buscar no se cuelga
+    # —la cadena corta al repetirse— pero la respuesta pasa a depender de por dónde se entre, que
+    # es peor que no tener el dato: se ve creíble y está mal.
+    if any(paso["clean"] == v for paso in cadena_de_reemplazos(n)):
+        return False, (f"No se puede: {codigo_nuevo} ya lleva de vuelta a {codigo_viejo}. "
+                       "Revisá cuál de los dos es el vigente.")
+    with db_lock:
+        c.execute("""INSERT OR REPLACE INTO reemplazos_codigo
+                     (codigo_viejo, codigo_viejo_clean, codigo_nuevo, codigo_nuevo_clean,
+                      marca, nota, cargado_por)
+                     VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                  (codigo_viejo.strip(), v, codigo_nuevo.strip(), n,
+                   (marca or "").strip().upper() or None, (nota or "").strip() or None,
+                   obtener_usuario_actual()))
+        conn.commit()
+    return True, f"{codigo_viejo} → {codigo_nuevo} anotado."
+
+
+def cadena_de_reemplazos(clean_code, tope=6):
+    """Sigue la cadena de reemplazos hasta el código vigente.
+
+    Los fabricantes discontinúan un código y lo reemplazan por otro, que a su vez puede volver
+    a reemplazarse. Sin esto, alguien busca el código viejo, no aparece, y se rechaza una venta
+    creyendo que la pieza no existe — cuando en realidad existe con otro número.
+
+    Tiene tope de saltos porque un dato mal cargado puede armar un círculo (A→B→A) y dejar la
+    búsqueda dando vueltas para siempre."""
+    if not clean_code:
+        return []
+    cadena, visto, actual = [], {clean_code}, clean_code
+    for _ in range(tope):
+        try:
+            c.execute("""SELECT codigo_nuevo, codigo_nuevo_clean, marca, nota
+                         FROM reemplazos_codigo WHERE codigo_viejo_clean = ? LIMIT 1""", (actual,))
+            fila = c.fetchone()
+        except sqlite3.OperationalError:
+            return []
+        if not fila or fila["codigo_nuevo_clean"] in visto:
+            break
+        cadena.append({"codigo": fila["codigo_nuevo"], "clean": fila["codigo_nuevo_clean"],
+                       "marca": fila["marca"] or "", "nota": fila["nota"] or ""})
+        visto.add(fila["codigo_nuevo_clean"])
+        actual = fila["codigo_nuevo_clean"]
+    return cadena
+
+
+def productos_estancados(dias_sin_vender=180, minimo_stock=1, limite=100):
+    """Lo que tenés en el estante y no se mueve. Es capital dormido.
+
+    Se cruza el stock con la última venta. Lo que nunca se vendió cuenta como estancado solo si
+    hace rato que está cargado: un producto que entró la semana pasada todavía no tuvo chance."""
+    try:
+        # Las fechas se sacan con dos tablas ya resumidas, no con una subconsulta por
+        # producto: así se leen las ventas una sola vez en total y no una vez por artículo.
+        # Tampoco se puede unir directo contra las tablas crudas, porque un producto con 30
+        # ventas y 10 cambios de precio saldría 300 veces antes de agrupar.
+        c.execute("""SELECT p.id AS "_id", p.codigo_raw AS "Código", m.nombre AS "Marca",
+                            p.descripcion AS "Descripción", p.stock AS "Stock",
+                            p.precio AS "Precio",
+                            v.ultima AS "_ultima_venta", h.primera AS "_desde"
+                     FROM productos p
+                     JOIN marcas m ON m.id = p.marca_id
+                     LEFT JOIN (SELECT producto_id, MAX(fecha) AS ultima
+                                  FROM ventas_registradas GROUP BY producto_id) v
+                            ON v.producto_id = p.id
+                     LEFT JOIN (SELECT producto_id, MIN(fecha) AS primera
+                                  FROM historial_precios GROUP BY producto_id) h
+                            ON h.producto_id = p.id
+                     WHERE COALESCE(p.stock, 0) >= ?""", (minimo_stock,))
+        filas = filas_a_listas(c)
+    except sqlite3.OperationalError:
+        return []
+
+    from datetime import datetime as _dt
+    hoy = _dt.now()
+    salida = []
+    for f in filas:
+        ultima = f.pop("_ultima_venta", None)
+        desde = f.pop("_desde", None)
+        if ultima:
+            try:
+                dias = (hoy - _dt.strptime(str(ultima)[:10], "%Y-%m-%d")).days
+            except Exception:
+                continue
+            detalle = f"hace {dias} día(s)"
+        else:
+            # Nunca vendido: solo cuenta si hace rato que está en la base
+            if not desde:
+                continue
+            try:
+                dias = (hoy - _dt.strptime(str(desde)[:10], "%Y-%m-%d")).days
+            except Exception:
+                continue
+            detalle = "nunca se vendió"
+        if dias < dias_sin_vender:
+            continue
+        f["Última venta"] = detalle
+        f["Plata parada"] = (f["Precio"] or 0) * (f["Stock"] or 0)
+        f["_dias"] = dias
+        salida.append(f)
+    # Primero lo que más plata tiene inmovilizada
+    salida.sort(key=lambda x: -(x["Plata parada"] or 0))
+    return salida[:limite]
+
+
 def productos_por_quebrar(dias_aviso=21, minimo_ventas=3, limite=100):
     """Qué se va a acabar antes de que alguien se dé cuenta.
 
@@ -7670,15 +7830,38 @@ def seccion_plegable(titulo, key, abierto=False):
     return st.toggle(titulo, key=key, value=abierto)
 
 
-def explicar(resumen, detalle, abierto=False):
+def explicar(resumen, detalle, abierto=False, en_expander=False):
     """Una línea corta siempre visible, y el porqué largo a un toque de distancia.
 
     Las explicaciones largas sirven la primera vez y estorban las otras cien: en el celular
     empujan los botones fuera de la pantalla y hay que scrollear para llegar a lo que uno vino
     a hacer. Pero borrarlas tampoco sirve — sin ellas nadie entiende para qué es cada cosa.
-    Así queda el resumen a la vista y el detalle disponible para quien lo necesite."""
+    Así queda el resumen a la vista y el detalle disponible para quien lo necesite.
+
+    Ojo con dónde se la llama. Esta función abre un expander, así que llamarla adentro de otro
+    deja un expander dentro de un expander: en el celular quedan dos cajas anidadas y hay que
+    tocar dos veces para leer tres renglones. Las versiones viejas de Streamlit ni siquiera lo
+    permitían —tiraban excepción y cortaban el renderizado ahí, con lo cual la mitad de abajo de
+    la pantalla no se dibujaba—; las nuevas lo dejan pasar pero sigue quedando mal.
+
+    Para eso está en_expander: adentro de un expander el detalle va en un popover, que se abre
+    encima y no agrega otro nivel. Y por las dudas, si algo de eso no está disponible en la
+    versión de Streamlit que haya instalada, el detalle se muestra directamente: peor queda un
+    poco de texto de más que media pantalla sin dibujar."""
     st.caption(resumen)
-    with st.expander("¿Por qué? / ¿Cómo funciona?", expanded=abierto):
+    caja = None
+    if not en_expander:
+        try:
+            caja = st.expander("¿Por qué? / ¿Cómo funciona?", expanded=abierto)
+        except Exception:
+            caja = None
+    if caja is None:
+        try:
+            caja = st.popover("¿Por qué? / ¿Cómo funciona?")
+        except Exception:
+            st.caption(detalle)
+            return
+    with caja:
         st.markdown(detalle)
 
 
@@ -10446,6 +10629,58 @@ Casi todo lo que edita o borra algo pide la contraseña de administrador la prim
     if "sugerencia_busqueda" in st.session_state:
         st.session_state["busqueda_input"] = st.session_state.pop("sugerencia_busqueda")
 
+    # El carrito arriba de todo: si está armándose un presupuesto, tiene que estar a la vista.
+    # Escondido en otra pantalla, la gente se olvida de lo que ya sumó y lo suma dos veces.
+    if st.session_state.get("carrito"):
+        _cart = st.session_state["carrito"]
+        _total = sum((x["precio"] or 0) * x["cantidad"] for x in _cart.values())
+        with st.expander(f"🛒 Presupuesto en armado — {len(_cart)} ítem(s) · ${_total:,.0f}",
+                          expanded=False):
+            for _pid, _item in list(_cart.items()):
+                ci1, ci2, ci3 = st.columns([5, 2, 1])
+                ci1.markdown(f"**{_item['marca']} {_item['codigo']}** — "
+                              f"{(_item['descripcion'] or '')[:40]}")
+                _nueva_cant = ci2.number_input("Cant.", min_value=1, value=_item["cantidad"],
+                                                step=1, key=f"cant_cart_{_pid}",
+                                                label_visibility="collapsed")
+                if _nueva_cant != _item["cantidad"]:
+                    st.session_state["carrito"][_pid]["cantidad"] = int(_nueva_cant)
+                    st.rerun()
+                if ci3.button("🗑️", key=f"quitar_cart_{_pid}"):
+                    st.session_state["carrito"].pop(_pid, None)
+                    # También la cantidad que quedó guardada del widget: sin esto, volver a
+                    # sumar el mismo producto lo traía con la cantidad vieja en vez de 1.
+                    st.session_state.pop(f"cant_cart_{_pid}", None)
+                    st.rerun()
+
+            _lineas = [f"{x['marca']} {x['codigo']} x{x['cantidad']} — "
+                       f"${(x['precio'] or 0) * x['cantidad']:,.0f}" for x in _cart.values()]
+            _texto = "\n".join(_lineas) + f"\n\nTOTAL: ${_total:,.0f}"
+            st.caption("Para copiar y mandar por WhatsApp:")
+            st.code(_texto, language=None)
+            cb1, cb2 = st.columns(2)
+            if cb1.button("🔒 Apartar todo el presupuesto"):
+                _apartados, _fallaron = 0, []
+                for _pid, _item in list(_cart.items()):
+                    _ok, _msg = reservar_stock(_pid, _item["cantidad"], "presupuesto")
+                    if _ok:
+                        _apartados += 1
+                        # Lo apartado sale del carrito. Si se quedara, tocar el botón otra vez
+                        # —porque uno de los ítems falló, por ejemplo— volvía a apartar los que
+                        # ya estaban apartados y el stock libre terminaba en cualquier cosa.
+                        st.session_state["carrito"].pop(_pid, None)
+                        st.session_state.pop(f"cant_cart_{_pid}", None)
+                    else:
+                        _fallaron.append(f"{_item['codigo']}: {_msg}")
+                if _apartados:
+                    avisar("success", f"Se apartaron {_apartados} ítem(s).")
+                for _f in _fallaron:
+                    avisar("warning", _f)
+                st.rerun()
+            if cb2.button("🗑️ Vaciar presupuesto"):
+                st.session_state["carrito"] = {}
+                st.rerun()
+
     # El escáner va PRIMERO, antes que la foto y las medidas. No es una preferencia de orden:
     # el código de barras es exacto, y todo lo demás —comparar siluetas, leer un grabado
     # gastado, medir— es aproximar. Poner primero lo confiable evita que alguien resuelva con
@@ -10456,7 +10691,7 @@ Casi todo lo que edita o borra algo pide la contraseña de administrador la prim
             "El código de la caja es exacto. A diferencia de comparar fotos o leer un grabado, "
             "acá no hay interpretación posible: o lo lee o no lo lee.\n\nSacá la foto de cerca, "
             "con buena luz y el código derecho, ocupando buena parte de la pantalla. Sirve "
-            "también para QR."
+            "también para QR.", en_expander=True
         )
         foto_barras = st.camera_input("Apuntá al código de barras", key="cam_barras")
         if foto_barras is None:
@@ -10506,7 +10741,7 @@ Casi todo lo que edita o borra algo pide la contraseña de administrador la prim
                 "de pieza — se compara en blanco y negro, recortando el fondo.\n\nAun así es "
                 "**mucho** menos confiable que un código exacto. Con piezas lisas sin marcas ni "
                 "grabado (rótulas, rulemanes, bulones) rinde mal por más buena que sea la foto. "
-                "Para esas, **📐 Buscar por medidas mecánicas** anda mucho mejor."
+                "Para esas, **📐 Buscar por medidas mecánicas** anda mucho mejor.", en_expander=True
             )
 
             fotos_listas, prod_con_foto, fotos_pendientes, fotos_no_sirven = contar_fotos_comparables()
@@ -10726,7 +10961,7 @@ Casi todo lo que edita o borra algo pide la contraseña de administrador la prim
                     "coherentes entre las dos fotos:",
                     "es el número que más conviene mirar. Muchos detalles y parecido alto = vale la pena "
                     "revisarla. Si el que buscabas no aparece, cargale a ese producto una segunda foto del "
-                    "ángulo que usás vos y la próxima vez lo encuentra."
+                    "ángulo que usás vos y la próxima vez lo encuentra.", en_expander=True
                 )
 
     modo = st.radio("Buscar por:", ["Código", "Descripción"], horizontal=True, key="modo_busqueda")
@@ -10771,7 +11006,20 @@ Casi todo lo que edita o borra algo pide la contraseña de administrador la prim
         # que se toque después haría que buscar_click vuelva a False y todo el bloque desaparezca
         # antes de que el click en el botón de adentro llegue a registrarse.
         if buscar_click:
-            codigos_buscados = [x.strip() for x in busqueda.split(",") if x.strip()]
+            # Sin sacar los repetidos, pegar "ABC, abc" dibujaba dos veces los mismos widgets
+            # con la misma key —todas se arman con el código limpio— y Streamlit corta la app
+            # entera con "multiple widgets with the same key". Y pegar una lista con un código
+            # duplicado es lo más común del mundo.
+            codigos_buscados, _ya_vistos = [], set()
+            for _crudo in busqueda.split(","):
+                _crudo = _crudo.strip()
+                if not _crudo:
+                    continue
+                _clave_dedup = sanitizar(_crudo) or _crudo.upper()
+                if _clave_dedup in _ya_vistos:
+                    continue
+                _ya_vistos.add(_clave_dedup)
+                codigos_buscados.append(_crudo)
             if not codigos_buscados:
                 st.info("Ingresá al menos un código válido para buscar.")
                 st.session_state.pop("ultima_busqueda_codigo", None)
@@ -10815,6 +11063,27 @@ Casi todo lo que edita o borra algo pide la contraseña de administrador la prim
                     if res:
                         st.success(f"Se encontraron {len(res)} coincidencias:")
 
+
+                        # Filtro de stock: un botón que ahorra scroll en cada consulta. Va
+                        # antes de la tabla porque decide QUÉ se muestra, no cómo.
+                        fs1, fs2 = st.columns([3, 2])
+                        solo_stock = fs1.checkbox(
+                            f"📦 Solo con stock ({sum(1 for f in res if (f.get('Stock') or 0) > 0)}"
+                            f" de {len(res)})", key=f"solo_stock_{clean}")
+                        if solo_stock:
+                            con_stock = [f for f in res if (f.get("Stock") or 0) > 0]
+                            if con_stock:
+                                res = con_stock
+                            else:
+                                # Antes se volvía a la lista completa sin decir nada: se tildaba
+                                # "solo con stock" y aparecían igual los que no tienen, así que
+                                # parecía que el filtro estaba roto.
+                                st.info("Ninguno de estos tiene stock. Se muestran todos.")
+
+                        # Copiar el código para pegarlo en facturación o WhatsApp. st.code trae
+                        # el botón de copiar incorporado, así que no hace falta JavaScript.
+                        if fs2.checkbox("📋 Códigos para copiar", key=f"copiar_{clean}"):
+                            st.code("\n".join(f["Codigo"] for f in res), language=None)
 
                         # Stock libre = lo que hay menos lo apartado en presupuestos. Es el
                         # número que importa al prometerle algo a un cliente; el stock a secas
@@ -11134,6 +11403,29 @@ Casi todo lo que edita o borra algo pide la contraseña de administrador la prim
                     else:
                         st.warning("No hay ningún producto con ese código exacto.")
 
+                        # ¿Este código fue reemplazado por otro? Es la causa más tonta de
+                        # perder una venta: la pieza existe, cambió de número, y se le dice al
+                        # cliente que no se fabrica más.
+                        _cadena_r = cadena_de_reemplazos(clean)
+                        if _cadena_r:
+                            _ultimo = _cadena_r[-1]
+                            # La variable acá se llama codigo_individual: es el código que se
+                            # está resolviendo en esta vuelta del bucle, no el texto del campo.
+                            _ruta = " → ".join([str(codigo_individual).strip()] +
+                                                [x["codigo"] for x in _cadena_r])
+                            st.success(
+                                f"🔄 **Ese código fue reemplazado.** {_ruta}\n\n"
+                                f"El vigente es **{_ultimo['codigo']}**"
+                                + (f" ({_ultimo['marca']})" if _ultimo["marca"] else "")
+                                + (f". {_ultimo['nota']}" if _ultimo["nota"] else ".")
+                            )
+                            _res_nuevo = buscar_por_codigo(_ultimo["clean"])
+                            if _res_nuevo:
+                                st.dataframe(quitar_id(_res_nuevo), use_container_width=True,
+                                              hide_index=True)
+                            else:
+                                st.caption("Tampoco tenés cargado el código nuevo.")
+
                         # Antes de darse por vencido: ¿lo conoce algún catálogo de fabricante?
                         # Ahí figura qué pieza es y a qué autos le va, y con eso se puede
                         # ofrecer un equivalente en vez de perder la venta.
@@ -11299,10 +11591,48 @@ Casi todo lo que edita o borra algo pide la contraseña de administrador la prim
                         else:
                             st.caption("Este producto todavía no tiene equivalencias cargadas.")
 
+                        # Carrito: ir juntando de varias búsquedas y armar el presupuesto al
+                        # final. Sin esto había que anotar los códigos aparte y volver a
+                        # buscarlos uno por uno.
+                        #
+                        # OJO con los nombres: este bloque vive adentro de la búsqueda por
+                        # DESCRIPCIÓN, donde el resultado de esta vuelta es fila_txt y sus
+                        # equivalentes están en 'otros'. Estaba escrito con los nombres de la
+                        # búsqueda por CÓDIGO (res, clean), que acá no existen, así que entrar a
+                        # "Descripción" tiraba NameError y la sección entera quedaba en blanco.
+                        # La clave de los widgets va por ID y no por código limpio: dos filas
+                        # distintas pueden limpiar al mismo texto y ahí Streamlit corta la app
+                        # por claves repetidas.
+                        st.session_state.setdefault("carrito", {})
+                        opciones_carrito = [fila_txt] + otros
+                        cc1, cc2 = st.columns([3, 2])
+                        agregar_cod = cc1.selectbox(
+                            "🛒 Sumar al presupuesto:",
+                            ["(elegir)"] + [f"{f['Marca']} {f['Codigo']}" for f in opciones_carrito],
+                            key=f"al_carrito_{fila_txt['ID']}")
+                        if agregar_cod != "(elegir)" and cc2.button(
+                                "➕ Sumar", key=f"btn_carrito_{fila_txt['ID']}"):
+                            elegido_c = next((f for f in opciones_carrito
+                                               if f"{f['Marca']} {f['Codigo']}" == agregar_cod), None)
+                            if elegido_c:
+                                st.session_state["carrito"][elegido_c["ID"]] = {
+                                    "codigo": elegido_c["Codigo"], "marca": elegido_c["Marca"],
+                                    "descripcion": elegido_c.get("Descripcion") or "",
+                                    "precio": elegido_c.get("Precio") or 0, "cantidad": 1,
+                                }
+                                avisar("success", f"{elegido_c['Codigo']} sumado al presupuesto.")
+                                st.rerun()
+
                         # Apartar mientras el cliente lo piensa. Va acá y no en otra pantalla
                         # porque el momento de reservar es este: con el presupuesto recién hecho.
-                        if seccion_plegable("🔒 Apartar para un presupuesto", key=f"apartar_{clean}"):
-                            con_stock_ap = [f for f in res if (stock_libre(f["ID"]) or 0) > 0]
+                        # OJO con los nombres: acá el código limpio es clean_txt y la lista es
+                        # 'equivalentes'. Usar los de la búsqueda por código ('clean', 'res')
+                        # tira NameError y corta el renderizado de toda la pantalla.
+                        _para_apartar = equivalentes or [fila_txt]
+                        if seccion_plegable("🔒 Apartar para un presupuesto",
+                                             key=f"apartar_txt_{fila_txt['ID']}"):
+                            con_stock_ap = [f for f in _para_apartar
+                                             if (stock_libre(f["ID"]) or 0) > 0]
                             if not con_stock_ap:
                                 st.caption("Ninguno de estos tiene stock libre para apartar.")
                             else:
@@ -11311,15 +11641,15 @@ Casi todo lo que edita o borra algo pide la contraseña de administrador la prim
                                         f["ID"] for f in con_stock_ap
                                 }
                                 elegido_ap = st.selectbox("¿Cuál?", list(etq_ap.keys()),
-                                                           key=f"cual_apartar_{clean}")
+                                                           key=f"cual_apartar_txt_{fila_txt['ID']}")
                                 ap1, ap2 = st.columns([1, 3])
                                 cant_ap = ap1.number_input(
                                     "Cantidad", min_value=1, value=1, step=1,
-                                    key=f"cant_apartar_{clean}")
+                                    key=f"cant_apartar_txt_{fila_txt['ID']}")
                                 cliente_ap = ap2.text_input(
-                                    "¿Para quién?", key=f"cliente_apartar_{clean}",
+                                    "¿Para quién?", key=f"cliente_apartar_txt_{fila_txt['ID']}",
                                     placeholder="Nombre o patente, para saber a quién reclamarle")
-                                if st.button("🔒 Apartar", key=f"btn_apartar_{clean}"):
+                                if st.button("🔒 Apartar", key=f"btn_apartar_txt_{fila_txt['ID']}"):
                                     ok_ap, msg_ap = reservar_stock(
                                         etq_ap[elegido_ap], cant_ap, cliente_ap)
                                     if ok_ap:
@@ -14445,6 +14775,74 @@ Administrar → Mantenimiento.
             st.dataframe(quitar_id(conviene), use_container_width=True, hide_index=True)
 
         st.markdown("---")
+        st.markdown("**🧊 Clavos: lo que no se mueve**")
+        explicar(
+            "Stock que hace meses no se vende. Es plata dormida en el estante.",
+            "Se cruza el stock con la última venta de cada producto. Ordenado por **plata "
+            "parada** —precio por cantidad—, no por cuántos días lleva: 40 unidades de algo "
+            "barato molestan menos que 2 de algo caro.\n\nLo que nunca se vendió cuenta solo "
+            "si hace rato que está cargado: un producto que entró la semana pasada todavía no "
+            "tuvo su chance."
+        )
+        st.session_state.setdefault("dias_clavo", 180)
+        _dias_clavo = st.select_slider("Sin vender desde hace más de:",
+                                        options=[90, 180, 365, 730],
+                                        format_func=lambda x: f"{x} días" if x < 365
+                                                              else f"{x // 365} año(s)",
+                                        key="dias_clavo")
+        try:
+            _clavos = productos_estancados(int(_dias_clavo))
+        except Exception:
+            _clavos = []
+        if not _clavos:
+            st.success("✅ Nada estancado con ese criterio.")
+        else:
+            _plata = sum(x["Plata parada"] or 0 for x in _clavos)
+            st.warning(f"⚠️ {len(_clavos)} producto(s) con **${_plata:,.0f}** inmovilizados.")
+            st.dataframe(quitar_id([{k: v for k, v in x.items() if not k.startswith("_")}
+                                     for x in _clavos]),
+                          use_container_width=True, hide_index=True)
+            st.caption(
+                "Sirve para decidir una liquidación, o para priorizarlos cuando alguien pide "
+                "un equivalente y tenés varios que sirven igual."
+            )
+
+        st.markdown("---")
+        st.markdown("**🔄 Códigos reemplazados por el fabricante**")
+        explicar(
+            "Cuando un código deja de fabricarse y lo reemplaza otro.",
+            "No es una equivalencia común: tiene dirección. El viejo se discontinúa y el nuevo "
+            "lo reemplaza, pero no al revés.\n\nCargarlo evita la forma más tonta de perder "
+            "una venta: alguien busca el código viejo, no aparece, y se le dice al cliente que "
+            "no se fabrica más — cuando en realidad existe con otro número.\n\nSigue la cadena "
+            "completa: si A fue reemplazado por B y B por C, buscando A te lleva hasta C."
+        )
+        cr1, cr2 = cols(2)
+        _viejo = cr1.text_input("Código viejo:", key="reemp_viejo",
+                                 placeholder="El que ya no se fabrica").strip()
+        _nuevo = cr2.text_input("Lo reemplaza:", key="reemp_nuevo",
+                                 placeholder="El código vigente").strip()
+        _nota_r = st.text_input("Nota (opcional):", key="reemp_nota",
+                                 placeholder="Ej: cambia el largo de rosca, revisar antes")
+        if st.button("💾 Guardar el reemplazo", disabled=not (_viejo and _nuevo)):
+            _ok_r, _msg_r = guardar_reemplazo(_viejo, _nuevo, "", _nota_r)
+            if _ok_r:
+                avisar("success", _msg_r)
+                st.rerun()
+            else:
+                st.error(_msg_r)
+        try:
+            c.execute("""SELECT codigo_viejo AS "Ya no se fabrica",
+                                codigo_nuevo AS "Lo reemplaza", nota AS "Nota",
+                                substr(fecha, 1, 10) AS "Cargado"
+                         FROM reemplazos_codigo ORDER BY fecha DESC LIMIT 200""")
+            _lista_r = filas_a_listas(c)
+        except sqlite3.OperationalError:
+            _lista_r = []
+        if _lista_r:
+            st.dataframe(_lista_r, use_container_width=True, hide_index=True)
+
+        st.markdown("---")
         st.markdown("**🚫 Puede que ya no se fabriquen**")
         explicar(
             "Códigos que faltaron en las últimas listas del proveedor.",
@@ -15282,6 +15680,12 @@ if pagina == PAGINAS[6]:
         st.session_state["form_anio_auto"] = str(datos.get("anio") or "")
         st.session_state["form_motorizacion_auto"] = datos.get("motorizacion") or ""
 
+    # El VIN que se resolvió a patente en la vuelta anterior se vuelca ACÁ, antes de dibujar el
+    # campo. Escribirlo después de dibujado —que es lo que se hacía— Streamlit no lo permite:
+    # tira StreamlitAPIException y corta la pantalla. Pasaba con solo pegar un chasis de 17.
+    if "patente_pendiente" in st.session_state:
+        st.session_state["patente_buscar"] = st.session_state.pop("patente_pendiente")
+
     patente_input = st.text_input(
         "Patente o VIN:", placeholder="Ej: AB123CD — o el chasis completo", key="patente_buscar"
     ).strip().upper()
@@ -15290,9 +15694,10 @@ if pagina == PAGINAS[6]:
     if len(re.sub(r"\s", "", patente_input)) == 17:
         ficha_por_vin = buscar_vehiculo_por_vin(patente_input)
         if ficha_por_vin:
-            st.success(f"🔎 Ese chasis es la patente **{ficha_por_vin['patente']}**.")
             patente_input = ficha_por_vin["patente"]
-            st.session_state["patente_buscar"] = patente_input
+            avisar("success", f"🔎 Ese chasis es la patente **{patente_input}**.")
+            st.session_state["patente_pendiente"] = patente_input
+            st.rerun()
         else:
             st.info(
                 "Ese VIN no está en ninguna ficha todavía. Cargá la patente del auto y poné el "
