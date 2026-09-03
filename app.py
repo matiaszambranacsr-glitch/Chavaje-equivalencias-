@@ -9,6 +9,7 @@ import hashlib
 import os
 import pickle
 import time
+import requests          # se usa en varias funciones; importarlo una vez evita repetirlo
 from datetime import datetime
 from urllib.parse import quote
 from openpyxl import load_workbook, Workbook
@@ -917,9 +918,6 @@ def get_connection():
         fecha TEXT DEFAULT (datetime('now'))
     )""")
     c.execute("CREATE INDEX IF NOT EXISTS idx_ventas_fecha ON ventas_registradas(fecha)")
-    # Sin este, "cuándo se vendió por última vez este producto" recorría la tabla de ventas
-    # ENTERA una vez por producto. Con el estante lleno eso es minutos de espera.
-    c.execute("CREATE INDEX IF NOT EXISTS idx_ventas_prod ON ventas_registradas(producto_id)")
     c.execute("CREATE INDEX IF NOT EXISTS idx_ventas_codigo ON ventas_registradas(codigo_pedido_clean)")
 
     # Mapeo de columnas recordado por proveedor. Cada vez que se importa una lista hay que
@@ -1693,46 +1691,7 @@ def get_connection():
 
 
 conn = get_connection()
-
-
-class _CursorPorHilo:
-    """Un cursor propio para cada persona que esté usando la app en ese momento.
-
-    Antes había UNO SOLO compartido por todos. La conexión sí se puede compartir —SQLite la
-    serializa por dentro—, pero el cursor no: es el que guarda el resultado pendiente. Streamlit
-    atiende a cada persona en su propio hilo, así que dos consultas simultáneas se pisaban en el
-    mismo cursor y una podía llevarse las filas de la otra. No es un riesgo teórico: en una
-    prueba con dos hilos haciendo 400 consultas cada uno sobre un cursor compartido, 748 de las
-    800 contestaron mal o directamente reventaron.
-
-    Lo que se ve desde afuera no cambia: se sigue escribiendo c.execute(...), c.fetchall(),
-    c.rowcount. Por eso el arreglo es este envoltorio y no tocar los cientos de lugares que lo
-    usan. Y como cada hilo tiene el suyo, rowcount y lastrowid siguen siendo los de la consulta
-    que uno mismo acaba de hacer, que es justamente lo que antes no estaba garantizado.
-
-    El db_lock sigue haciendo falta igual: es el que evita que dos escrituras se mezclen."""
-
-    def __init__(self, conexion):
-        self._conexion = conexion
-        self._propio = threading.local()
-
-    @property
-    def _cursor(self):
-        cursor = getattr(self._propio, "cursor", None)
-        if cursor is None:
-            cursor = self._propio.cursor = self._conexion.cursor()
-        return cursor
-
-    def __getattr__(self, nombre):
-        # Solo llega acá lo que no es atributo propio: execute, fetchone, fetchall,
-        # executemany, rowcount, lastrowid, fetchmany.
-        return getattr(self._cursor, nombre)
-
-    def __iter__(self):
-        return iter(self._cursor)
-
-
-c = _CursorPorHilo(conn)
+c = conn.cursor()
 
 
 
@@ -2440,29 +2399,6 @@ def stock_libre(producto_id):
     return max((fila["stock"] or 0) - reservado, 0)
 
 
-def stock_libre_de_varios(ids):
-    """Lo mismo que stock_libre() pero para muchos productos, con dos consultas en total.
-
-    De a uno son dos consultas por producto. En una búsqueda que trae 50 equivalencias eso son
-    200 idas a la base en CADA refresco de pantalla —o sea, cada vez que se toca cualquier botón
-    de la sección—. Así son dos, sin importar cuántos resultados haya."""
-    ids = [int(i) for i in ids if i is not None]
-    if not ids:
-        return {}
-    marcas = ",".join("?" * len(ids))
-    c.execute(f"SELECT id, COALESCE(stock, 0) AS stock FROM productos WHERE id IN ({marcas})", ids)
-    total = {f["id"]: f["stock"] for f in c.fetchall()}
-    try:
-        c.execute(f"""SELECT producto_id, COALESCE(SUM(cantidad), 0) AS reservado
-                      FROM reservas_stock
-                      WHERE estado = 'activa' AND producto_id IN ({marcas})
-                      GROUP BY producto_id""", ids)
-        reservado = {f["producto_id"]: f["reservado"] for f in c.fetchall()}
-    except sqlite3.OperationalError:
-        reservado = {}
-    return {i: max(v - reservado.get(i, 0), 0) for i, v in total.items()}
-
-
 def reservas_activas(limite=200):
     """Lo que está apartado ahora mismo."""
     try:
@@ -2512,17 +2448,11 @@ def margen_de(precio_venta, precio_costo):
 
 
 def agregar_margen(filas):
-    """Le suma a cada resultado su margen, si están los dos precios.
-
-    NO borra el costo de la fila, aunque el costo no se muestre. Antes lo borraba, y estas filas
-    son las mismas que quedan guardadas en session_state entre refrescos: al segundo toque de
-    cualquier botón ya no había costo, así que la columna Margen aparecía vacía y el aviso de
-    «mejor margen» desaparecía. Sin error y sin aviso: se veía una vez y no volvía más.
-    De que el costo no llegue a la pantalla se encarga quien la dibuja, sacando las claves que
-    empiezan con guión bajo."""
+    """Le suma a cada resultado su margen, si están los dos precios."""
     for f in filas:
         pct, pesos = margen_de(f.get("Precio"), f.get("_costo"))
         f["Margen"] = f"{pct:.0f}% (${pesos:,.0f})" if pct is not None else ""
+        f.pop("_costo", None)
     return filas
 
 
@@ -2821,7 +2751,7 @@ def descubrir_equivalencias_candidatas(min_veces=2, dias=180, minutos_ventana=20
         guardar_evidencia(codigo_clean, producto_id, "mostrador",
                            f"Se repitió {datos['veces']} vez/veces en el mostrador")
         evidencias = listar_evidencia(codigo_clean, producto_id)
-        etiqueta_confianza, puntaje = nivel_por_evidencias(evidencias)
+        etiqueta_confianza, puntaje = nivel_de_confianza(evidencias)
 
         candidatas.append({
             "codigo_pedido": datos["termino"] or codigo_clean,
@@ -2970,16 +2900,9 @@ def verificar_en_catalogo_oficial(codigo_a_buscar, url_ficha, tiempo_maximo=8):
         return None, f"No se pudo consultar la página ({type(e).__name__})."
 
 
-def nivel_por_evidencias(evidencias):
+def nivel_de_confianza(evidencias):
     """Traduce la evidencia acumulada a algo legible. Nunca da 'confirmada': eso lo decide
-    una persona. Si hay evidencia EN CONTRA (ej: las medidas no coinciden), lo marca.
-
-    Se llamaba nivel_de_confianza, igual que la de más abajo que recibe un PUNTAJE. Dos def con
-    el mismo nombre no son un error de Python: la segunda simplemente pisa a la primera. Así que
-    esta acá nunca llegaba a correr — la llamada de descubrir_equivalencias_candidatas() le
-    pasaba la lista de evidencias a la que espera un número y reventaba con
-    "'>=' not supported between instances of 'list' and 'int'", tirando abajo toda la pantalla
-    de equivalencias sugeridas apenas había una candidata con evidencia."""
+    una persona. Si hay evidencia EN CONTRA (ej: las medidas no coinciden), lo marca."""
     tipos = {e["tipo"] for e in evidencias}
     if "medidas_no_coinciden" in tipos or "catalogo_no_lo_lista" in tipos:
         return "⛔ Con evidencia en contra", 0
@@ -5153,6 +5076,283 @@ def descargar_imagen(url, tiempo_maximo=12, tamano_maximo_mb=8):
         return None, type(e).__name__
 
 
+def config_portal(nombre_marca):
+    """Datos para entrar al portal de un proveedor. Salen de los secretos de Streamlit.
+
+    Va en los secretos y no en la base por una razón concreta: la base se baja como backup y
+    se sube a GitHub. Una contraseña ahí queda publicada. En los secretos no se descarga con
+    el backup ni se ve desde la app.
+
+    Formato en Settings → Secrets:
+
+        [portal_FISPA]
+        url_login   = "https://proveedor.com/login"
+        usuario     = "tu_usuario"
+        clave       = "tu_clave"
+        campo_usuario = "email"       # el name= del input, mirá el formulario
+        campo_clave   = "password"
+        url_ficha   = "https://proveedor.com/producto/{codigo}"
+    """
+    try:
+        secretos = st.secrets if hasattr(st, "secrets") else {}
+        cfg = secretos.get(f"portal_{(nombre_marca or '').strip().upper()}")
+    except Exception:
+        return None
+    if not cfg:
+        return None
+    try:
+        datos = dict(cfg)
+    except Exception:
+        return None
+    if not all(datos.get(k) for k in ("url_login", "usuario", "clave", "url_ficha")):
+        return None
+    # Se revisa la dirección configurada ANTES de usarla: si la url_ficha apunta a algo que
+    # pide mercadería, el portal queda deshabilitado en vez de andar tocándolo.
+    ok_url, palabra = _url_solo_de_consulta(datos["url_ficha"])
+    if not ok_url:
+        datos["_bloqueado"] = (
+            f"La dirección de ficha contiene «{palabra}», que suele significar pedir algo. "
+            "Configurá la URL de consulta del producto, no la de compra."
+        )
+    datos.setdefault("campo_usuario", "usuario")
+    datos.setdefault("campo_clave", "password")
+    return datos
+
+
+_SESIONES_PORTAL = {}
+
+# Direcciones que en cualquier portal significan "hacer algo", no "mirar". La app entra con TU
+# usuario: si por un error de código o una URL mal armada tocara una de estas, estaría pidiendo
+# mercadería a tu nombre sin que nadie lo haya decidido.
+_RUTAS_QUE_PIDEN = (
+    "carrito", "cart", "pedido", "pedidos", "order", "orders", "comprar", "compra",
+    "checkout", "add-to", "addto", "agregar", "añadir", "anadir", "cotiza", "presupuest",
+    "reserva", "solicitar", "solicitud", "encargar", "confirmar", "pagar", "pago",
+    "basket", "wishlist", "favorito", "alta", "crear", "nuevo", "eliminar", "borrar",
+    "delete", "update", "editar", "modificar",
+)
+
+
+def _url_solo_de_consulta(url):
+    """¿Esta dirección solo mira, o puede llegar a pedir algo? (ok, motivo)."""
+    bajo = str(url or "").lower()
+    for palabra in _RUTAS_QUE_PIDEN:
+        if palabra in bajo:
+            return False, palabra
+    return True, ""
+
+
+# Tope duro de consultas por sesión. No es por rendimiento: si algo entra en un bucle por un
+# error, esto lo corta antes de que el proveedor vea miles de pedidos desde tu cuenta.
+TOPE_CONSULTAS_PORTAL = 400
+MINUTOS_VIDA_SESION = 20
+
+
+def _mismo_dominio(url_a, url_b):
+    """¿Las dos direcciones son del mismo sitio? Sirve para no mandar la sesión a otro lado."""
+    from urllib.parse import urlparse
+    try:
+        a, b = urlparse(str(url_a)), urlparse(str(url_b))
+    except Exception:
+        return False
+    da, db = (a.netloc or "").lower(), (b.netloc or "").lower()
+    if not da or not db:
+        return False
+    # Se acepta un subdominio del mismo sitio (catalogo.prov.com desde prov.com)
+    return da == db or da.endswith("." + db) or db.endswith("." + da)
+
+
+class SesionSoloLectura:
+    """Una sesión del portal que FÍSICAMENTE no puede pedir nada.
+
+    No alcanza con "acordarse de no hacer pedidos": alcanza con que alguien —o yo mismo en un
+    cambio futuro— escriba un `.post()` sobre la sesión y ya estaría comprando con tu cuenta.
+    Por eso la sesión queda envuelta acá después del login, y este objeto NO EXPONE post, put,
+    delete ni patch. No es que estén desaconsejados: no existen. Si algún código los llama,
+    revienta en el momento en vez de mandarle un pedido al proveedor.
+
+    Y sobre los GET: aunque leer no debería cambiar nada, muchos portales viejos agregan al
+    carrito con un simple enlace. Por eso también se rechazan las direcciones que dicen
+    carrito, pedido, comprar y similares."""
+
+    def __init__(self, sesion, dominio_permitido=""):
+        self._sesion = sesion
+        self._dominio = dominio_permitido
+        self._consultas = 0
+        self._abierta = time.time()
+        self.visitadas = []          # queda el registro de todo lo que se abrió
+
+    def _revisar(self, url, salto=""):
+        ok, palabra = _url_solo_de_consulta(url)
+        if not ok:
+            raise PermissionError(
+                f"Bloqueado{salto}: la dirección contiene «{palabra}», que en un portal suele "
+                "significar pedir o modificar algo. La app solo puede consultar fichas."
+            )
+        # Que no salga del sitio del proveedor: si un redirect apunta a otro dominio, la
+        # sesión —con tu usuario dentro— se iría a un servidor ajeno.
+        if self._dominio and not _mismo_dominio(url, self._dominio):
+            raise PermissionError(
+                f"Bloqueado{salto}: la dirección apunta a otro sitio y la sesión solo puede "
+                f"hablar con {self._dominio}."
+            )
+
+    def get(self, url, **kw):
+        if time.time() - self._abierta > MINUTOS_VIDA_SESION * 60:
+            raise PermissionError(
+                f"La sesión con el portal se cerró sola a los {MINUTOS_VIDA_SESION} minutos. "
+                "Volvé a entrar si necesitás seguir."
+            )
+        self._consultas += 1
+        if self._consultas > TOPE_CONSULTAS_PORTAL:
+            raise PermissionError(
+                f"Se llegó al tope de {TOPE_CONSULTAS_PORTAL} consultas en esta sesión. "
+                "Es un freno de seguridad: si algo se disparó solo, se corta acá."
+            )
+        self._revisar(url)
+
+        # Las redirecciones se siguen A MANO, revisando cada salto. Dejar que requests las
+        # siga solo es el agujero grande: una ficha puede redirigir a /carrito/agregar, y con
+        # la sesión abierta eso sería un pedido hecho a tu nombre sin que nadie lo pidiera.
+        kw["allow_redirects"] = False
+        actual = url
+        for _ in range(5):
+            self.visitadas.append(actual)
+            r = self._sesion.get(actual, **kw)
+            destino = None
+            if getattr(r, "status_code", 0) in (301, 302, 303, 307, 308):
+                cabeceras = getattr(r, "headers", {}) or {}
+                destino = cabeceras.get("Location") or cabeceras.get("location")
+            if not destino:
+                return r
+            from urllib.parse import urljoin
+            actual = urljoin(actual, destino)
+            self._revisar(actual, " (en una redirección)")
+        raise PermissionError("Demasiadas redirecciones seguidas; se corta por las dudas.")
+
+    @property
+    def headers(self):
+        return self._sesion.headers
+
+    def __getattr__(self, nombre):
+        # Cualquier otro método —post, put, delete, request...— no existe a propósito.
+        raise PermissionError(
+            f"Bloqueado: la app no puede usar «{nombre}» sobre el portal del proveedor. "
+            "La sesión es de solo lectura: solo puede abrir fichas para leer los autos."
+        )
+
+
+def sesion_de_portal(nombre_marca):
+    """Entra al portal del proveedor y devuelve la sesión abierta. (sesion, error).
+
+    La sesión se guarda en memoria: entrar una vez por marca y reusarla. Hacer login en cada
+    producto es maltratar el servidor del proveedor y la forma más rápida de que te bloqueen.
+    """
+    cfg = config_portal(nombre_marca)
+    if not cfg:
+        return None, ("No hay portal configurado para esa marca. Se carga en "
+                      "Settings → Secrets de Streamlit.")
+    if cfg.get("_bloqueado"):
+        return None, cfg["_bloqueado"]
+    if nombre_marca in _SESIONES_PORTAL:
+        return _SESIONES_PORTAL[nombre_marca], None
+
+    sesion = requests.Session()
+    sesion.headers.update({"User-Agent": "Mozilla/5.0 (compatible; EquivalenciasElChavo/1.0)"})
+    try:
+        # Se abre primero la página de login: muchos portales dejan ahí una cookie o un token
+        # sin el cual rechazan el envío del formulario.
+        previa = sesion.get(cfg["url_login"], timeout=20)
+        datos = {cfg["campo_usuario"]: cfg["usuario"], cfg["campo_clave"]: cfg["clave"]}
+        for extra in ("campo_extra_1", "campo_extra_2"):
+            if cfg.get(extra) and cfg.get(extra + "_valor"):
+                datos[cfg[extra]] = cfg[extra + "_valor"]
+        # Token oculto tipo CSRF, si el formulario lo trae
+        m = re.search(r'name=["\'](_token|csrf_token|authenticity_token|__RequestVerificationToken)'
+                      r'["\'][^>]*value=["\']([^"\']+)', previa.text or "", re.I)
+        if m:
+            datos[m.group(1)] = m.group(2)
+
+        r = sesion.post(cfg["url_login"], data=datos, timeout=25, allow_redirects=True)
+        if r.status_code >= 400:
+            return None, f"El portal respondió {r.status_code} al intentar entrar."
+        # Señal de que el login falló: sigue mostrando el formulario
+        texto = (r.text or "").lower()
+        if cfg["campo_clave"].lower() in texto and "logout" not in texto and "salir" not in texto:
+            return None, ("Entré pero parece que no aceptó el usuario o la clave: la respuesta "
+                          "sigue mostrando el formulario de acceso. Revisá los datos y los "
+                          "nombres de los campos.")
+        # A partir de acá la sesión queda de solo lectura. El login fue lo único que necesitó
+        # mandar datos, y ya se hizo.
+        solo_lectura = SesionSoloLectura(sesion, cfg["url_login"])
+        _SESIONES_PORTAL[nombre_marca] = solo_lectura
+        return solo_lectura, None
+    except Exception as e:
+        # Solo el TIPO de error, nunca el detalle: los mensajes de las librerías de red suelen
+        # incluir la URL completa con los datos enviados, y ahí va la clave.
+        return None, (f"No se pudo entrar al portal ({type(e).__name__}). Revisá la dirección "
+                      "de acceso y la conexión.")
+
+
+def autos_desde_ficha_del_portal(nombre_marca, codigo, tiempo_maximo=20):
+    """Trae la ficha del producto en el portal del proveedor y saca a qué autos le va.
+
+    Esto resuelve el problema de raíz: la descripción de la lista se corta y no entran todos
+    los autos, pero la ficha del portal los tiene completos.
+
+    Devuelve (lista de autos, error). No inventa nada: si la ficha no nombra autos conocidos,
+    devuelve vacío."""
+    sesion, error = sesion_de_portal(nombre_marca)
+    if error:
+        return [], error
+    cfg = config_portal(nombre_marca)
+    # El código se limpia ANTES de meterlo en la dirección. quote() escapa los espacios pero
+    # deja pasar «?» y «&»: con un código así, alguien podría convertir una consulta en una
+    # acción («ABC?accion=comprar»). Se dejan solo letras, números y los separadores que usan
+    # los códigos de verdad.
+    codigo_limpio = re.sub(r"[^A-Za-z0-9._/-]", "", str(codigo).strip())[:60]
+    # Y sin «..»: con eso se sube de nivel en la dirección y se llega a otra parte del sitio.
+    # Un código como «../../pedido/nuevo» convertiría una consulta en cualquier otra cosa.
+    if ".." in codigo_limpio or codigo_limpio.startswith("/"):
+        return [], "Ese código no se puede usar en una dirección: tiene barras o puntos dobles."
+    if not codigo_limpio:
+        return [], "El código tiene caracteres que no se pueden usar en una dirección."
+    url = cfg["url_ficha"].replace("{codigo}", quote(codigo_limpio, safe=""))
+    try:
+        r = sesion.get(url, timeout=tiempo_maximo)
+        if r.status_code == 404:
+            return [], "El portal no tiene ficha para ese código."
+        if r.status_code >= 400:
+            return [], f"La ficha respondió {r.status_code}."
+        html = r.text or ""
+    except Exception as e:
+        return [], f"No se pudo leer la ficha: {type(e).__name__}: {e}"
+
+    # Se saca el texto visible y se buscan marcas y modelos conocidos. Se limita a los que la
+    # app ya conoce para no cargar como "auto" cualquier palabra de la página.
+    texto = re.sub(r"<script.*?</script>|<style.*?</style>", " ", html, flags=re.S | re.I)
+    texto = re.sub(r"<[^>]+>", " ", texto)
+    limpio = normalizar_texto(texto)
+
+    encontrados = []
+    for mv in MARCAS_VEHICULO:
+        if f" {mv} " in f" {limpio} ":
+            encontrados.append(mv)
+    for w in set(re.split(r"[^A-Z0-9]+", limpio)):
+        if len(w) >= 3 and w in MODELOS_CONOCIDOS:
+            encontrados.append(w)
+    return sorted(set(encontrados)), None
+
+
+def guardar_autos_de_ficha(codigo, nombre_marca, autos, tipo_pieza=""):
+    """Guarda como aplicaciones los autos que se leyeron de la ficha del portal."""
+    if not autos:
+        return 0
+    filas = [{"marca_auto": a.split()[0], "modelo_auto": a, "motor": "", "combustible": "",
+              "anio_desde": None, "anio_hasta": None, "codigo": codigo} for a in autos]
+    return guardar_aplicaciones(filas, nombre_marca, "ficha del portal", tipo_pieza)
+
+
 def buscar_imagen_en_ficha(url_ficha, tiempo_maximo=12):
     """Busca la foto del producto dentro de la ficha oficial del proveedor. Es la fuente más
     confiable que hay gratis: es la foto de ESE código, puesta por el propio proveedor.
@@ -6141,6 +6341,444 @@ def guardar_aplicaciones(apps, marca_repuesto, origen="", tipo_pieza=""):
                        for a in apps])
         conn.commit()
     return len(apps)
+
+
+# Palabras que aparecen en las descripciones y NO dicen qué pieza es: son del auto, del envase
+# o relleno del proveedor. Si entran en la firma, dos piezas distintas del mismo auto terminan
+# pareciendo la misma.
+_RUIDO_EN_FIRMA = {
+    "DESPIECE", "JUEGO", "JGO", "KIT", "PARA", "CON", "SIN", "DEL", "LOS", "LAS", "POR",
+    "UNIDAD", "UN", "UNA", "IZQ", "DER", "MM", "CM", "ORIGINAL", "ORIG", "ALTERNATIVO",
+    "NACIONAL", "IMPORTADO", "REPUESTO", "PIEZA", "AUTO", "MOTOR", "CAJA", "TIPO",
+}
+
+# Siglas técnicas que definen QUÉ pieza es, no de qué auto. Dos válvulas del mismo auto, una
+# PCV y otra EGR, no son la misma pieza — y «VALVULA» sola no las distingue. Lo mismo con los
+# sensores: MAF, MAP, IAT y TPS son cuatro sensores distintos del mismo rubro.
+_SIGLAS_DE_PIEZA = {
+    "PCV", "EGR", "MAF", "MAP", "IAT", "TPS", "ECT", "CKP", "CMP", "IAC", "ABS", "EGT",
+    "VVT", "ACC", "TDC", "PMS", "GNC", "GLP", "HDI", "TDI", "CRDI", "JTD",
+}
+
+
+_POSICIONES = {
+    "DELANTERO": "DELANTERO", "DELANTERA": "DELANTERO", "DEL.": "DELANTERO",
+    "TRASERO": "TRASERO", "TRASERA": "TRASERO", "TRAS.": "TRASERO",
+    "SUPERIOR": "SUPERIOR", "INFERIOR": "INFERIOR",
+    "IZQUIERDO": "IZQUIERDO", "IZQUIERDA": "IZQUIERDO",
+    "DERECHO": "DERECHO", "DERECHA": "DERECHO",
+    "INTERNO": "INTERNO", "INTERIOR": "INTERNO",
+    "EXTERNO": "EXTERNO", "EXTERIOR": "EXTERNO",
+}
+
+
+# Modelos de auto que aparecen en las descripciones. Se necesita para saber dónde termina el
+# nombre de la pieza y dónde empieza el auto. Sale de MARCAS_VEHICULO y de los modelos que ya
+# vienen en los catálogos de aplicaciones cargados.
+_MODELOS_CACHE = {"lista": None}
+
+
+def _modelos_conocidos():
+    if _MODELOS_CACHE["lista"] is not None:
+        return _MODELOS_CACHE["lista"]
+    modelos = set()
+    for mv in MARCAS_VEHICULO:
+        modelos.update(w for w in mv.split() if len(w) >= 3)
+    try:
+        c.execute("SELECT DISTINCT modelo_auto FROM aplicaciones LIMIT 3000")
+        for fila in c.fetchall():
+            modelos.update(w for w in normalizar_texto(fila["modelo_auto"] or "").split()
+                           if len(w) >= 3)
+    except Exception:
+        pass
+    _MODELOS_CACHE["lista"] = modelos
+    return modelos
+
+
+class _ModelosLazy:
+    """Para poder escribir `w in MODELOS_CONOCIDOS` sin recalcular la lista en cada palabra."""
+    def __contains__(self, palabra):
+        return palabra in _modelos_conocidos()
+
+
+MODELOS_CONOCIDOS = _ModelosLazy()
+
+
+def autos_de_todas_las_fuentes(producto_id, codigo_clean, autos_de_la_descripcion):
+    """Todos los autos a los que le va un producto, juntando lo que sabe la app.
+
+    La descripción del proveedor casi nunca alcanza: entra lo que entra en la celda y el resto
+    se corta. Pero el mismo producto puede tener autos anotados en otros lados:
+
+      1. El catálogo del fabricante, si cargaste el PDF de NGK, Bosch o similar.
+      2. Las fichas de vehículo: si alguien le puso esta pieza a un Gol, le va a un Gol.
+         Ese dato es de tu propio taller y no está en ninguna lista.
+      3. La descripción, que es de donde salíamos hasta ahora.
+
+    Juntar las tres hace que dos productos se puedan cruzar aunque sus descripciones no
+    compartan ni un modelo."""
+    autos = set(autos_de_la_descripcion or ())
+
+    if codigo_clean:
+        try:
+            c.execute("""SELECT DISTINCT marca_auto, modelo_auto FROM aplicaciones
+                         WHERE codigo_clean = ? LIMIT 200""", (codigo_clean,))
+            for fila in c.fetchall():
+                for campo in (fila["marca_auto"], fila["modelo_auto"]):
+                    autos.update(w for w in normalizar_texto(campo or "").split() if len(w) >= 3)
+        except sqlite3.OperationalError:
+            pass
+
+    if producto_id:
+        try:
+            c.execute("""SELECT DISTINCT v.marca, v.modelo FROM historial_piezas hp
+                         JOIN vehiculos v ON v.id = hp.vehiculo_id
+                         WHERE hp.producto_id = ? LIMIT 100""", (producto_id,))
+            for fila in c.fetchall():
+                for campo in (fila["marca"], fila["modelo"]):
+                    autos.update(w for w in normalizar_texto(campo or "").split() if len(w) >= 3)
+        except sqlite3.OperationalError:
+            pass
+
+    return autos
+
+
+def firma_de_producto(descripcion, producto_id=None, codigo_clean=None):
+    """Saca de una descripción qué pieza es y para qué auto, para poder comparar entre marcas.
+
+    Esta es la única forma de vincular dos proveedores que no traen el código de fábrica —que
+    son la mayoría—. Hasta ahora, sin esa columna no se generaba ninguna equivalencia.
+
+    Lo que se extrae:
+      núcleo    → las palabras que dicen QUÉ pieza es, sin el auto ni el relleno
+      modelos   → los modelos de auto nombrados
+      cilindrada, posición → los dos datos que más equivocan una venta
+
+    El núcleo es lo que evita el error grave: «CAPUCHON BUJIA» y «ANILLO BUJIA» son del mismo
+    rubro y del mismo auto, pero no son la misma pieza. Comparar solo por rubro las mezclaría.
+    """
+    if not descripcion or not str(descripcion).strip():
+        return None
+    texto = separar_texto_pegado(str(descripcion))
+    limpio = normalizar_texto(texto)
+    palabras = [w for w in re.split(r"[^A-Z0-9./]+", limpio) if w]
+
+    familia = clasificar_repuesto(texto)
+    marca_auto = next((mv for mv in MARCAS_VEHICULO if f" {mv} " in f" {limpio} "), None)
+
+    posicion = None
+    for w in palabras:
+        if w in _POSICIONES:
+            posicion = _POSICIONES[w]
+            break
+
+    cilindradas = set(re.findall(r'\b(\d[.,]\d)\b', limpio))
+
+    # Los modelos: palabras que quedan después de sacar la marca del auto, el ruido y los
+    # números sueltos. Se buscan contra el catálogo propio para no inventar modelos.
+    nucleo, modelos = [], set()
+    palabras_marca = set((marca_auto or "").split())
+    for w in palabras:
+        if (w in _RUIDO_EN_FIRMA or w in palabras_marca or w in _POSICIONES
+                or len(w) < 3 or re.fullmatch(r'[\d./,]+', w)):
+            continue
+        nucleo.append(w)
+
+    # Los autos nombrados: marcas y modelos. Es el dato que más discrimina, y probado con
+    # listas reales es el único que no falla. Dos proveedores pueden llamar distinto a la misma
+    # pieza («SENSOR DE MASA DE AIRE» y «SENSOR MAF»), pero si uno dice Ford Focus y el otro
+    # Volvo 850, no es la misma pieza por más que el resto coincida.
+    autos = set()
+    for mv in MARCAS_VEHICULO:
+        if f" {mv} " in f" {limpio} ":
+            autos.update(w for w in mv.split() if len(w) >= 3)
+    for w in palabras:
+        if len(w) >= 3 and w in MODELOS_CONOCIDOS:
+            autos.add(w)
+
+    # El sustantivo principal: en estas descripciones la pieza va primero
+    # («CAPUCHON bujía...», «ANILLO bujía...»). Es lo que separa dos piezas del mismo rubro.
+    cabeza = nucleo[0] if nucleo else None
+    siglas = {w for w in palabras if w in _SIGLAS_DE_PIEZA}
+
+    # Se completa con lo que la app sepa de este producto por otras vías
+    if producto_id or codigo_clean:
+        autos = autos_de_todas_las_fuentes(producto_id, codigo_clean, autos)
+
+    return {"familia": familia, "nucleo": nucleo, "cabeza": cabeza, "autos": autos,
+            "siglas": siglas, "marca_auto": marca_auto, "posicion": posicion,
+            "cilindradas": cilindradas, "texto": limpio}
+
+
+def firmas_compatibles(a, b, minimo_nucleo=2):
+    """¿Estas dos descripciones hablan de la misma pieza? Devuelve (sí/no, motivo).
+
+    Se exige coincidencia en lo que define la pieza y NO contradicción en lo que la distingue.
+    Es a propósito conservador: un falso positivo acá es una equivalencia inventada, y ya
+    sabemos lo que eso le hizo a la base."""
+    if not a or not b:
+        return False, ""
+    if a["familia"] == "Sin clasificar" or b["familia"] == "Sin clasificar":
+        return False, "no se pudo clasificar el rubro"
+    if a["familia"] != b["familia"]:
+        return False, "rubros distintos"
+
+    # Posición: si las dos la declaran y no coinciden, son piezas distintas. Un amortiguador
+    # delantero no reemplaza a uno trasero por más que vayan al mismo auto.
+    if a["posicion"] and b["posicion"] and a["posicion"] != b["posicion"]:
+        return False, f"posiciones distintas ({a['posicion']} vs {b['posicion']})"
+
+    # Cilindrada: si las dos la declaran y no comparten ninguna, no es la misma aplicación
+    if a["cilindradas"] and b["cilindradas"] and not (a["cilindradas"] & b["cilindradas"]):
+        return False, "cilindradas distintas"
+
+    # LOS AUTOS. Probado sobre dos listas reales de 5.000 y 26.000 productos, es el control
+    # que evita la avalancha de falsos: sin él, toda «BUJIA NAFTA» se vinculaba con toda otra
+    # «BUJIA NAFTA» porque comparten dos palabras genéricas, aunque una fuera de un Renault y
+    # la otra de un BMW.
+    if a["autos"] and b["autos"]:
+        autos_comunes = a["autos"] & b["autos"]
+        if not autos_comunes:
+            return False, (f"autos distintos: {'/'.join(sorted(a['autos'])[:2])} "
+                           f"vs {'/'.join(sorted(b['autos'])[:2])}")
+    else:
+        autos_comunes = set()
+
+    # Siglas técnicas: si las dos declaran una y no coinciden, son piezas distintas. Probado
+    # con listas reales: sin esto se cruzaba «VALVULA PCV» con «VALVULA EGR» del mismo auto,
+    # porque comparten la palabra VALVULA y el modelo.
+    if a["siglas"] and b["siglas"] and not (a["siglas"] & b["siglas"]):
+        return False, (f"siglas distintas: {'/'.join(sorted(a['siglas']))} "
+                       f"vs {'/'.join(sorted(b['siglas']))}")
+
+    # El sustantivo principal: «CAPUCHON bujía» y «ANILLO bujía» son del mismo rubro, del mismo
+    # auto, y son piezas distintas. Lo único que las separa es la primera palabra.
+    if a["cabeza"] and b["cabeza"] and a["cabeza"] != b["cabeza"]:
+        # Salvo que una sea abreviatura o parte de la otra: SENSOR MAF / SENSOR DE MASA
+        if not (a["cabeza"] in b["cabeza"] or b["cabeza"] in a["cabeza"]):
+            return False, f"piezas distintas: «{a['cabeza']}» y «{b['cabeza']}»"
+
+    comunes = set(a["nucleo"]) & set(b["nucleo"])
+    if len(comunes) < minimo_nucleo:
+        return False, f"solo comparten {len(comunes)} palabra(s)"
+    # Sin autos en común de ninguno de los dos lados, hace falta más coincidencia en la pieza:
+    # dos descripciones genéricas que solo dicen «FILTRO ACEITE» no alcanzan para vincular.
+    if not autos_comunes and len(comunes) < 3:
+        return False, "ninguno declara el auto y la descripción es demasiado genérica"
+
+    detalle = f"coinciden en {', '.join(sorted(comunes)[:4])}"
+    if autos_comunes:
+        detalle += f" · autos: {'/'.join(sorted(autos_comunes)[:3])}"
+    if a["posicion"] or b["posicion"]:
+        detalle += f" · {a['posicion'] or b['posicion']}"
+    if a["cilindradas"] & b["cilindradas"]:
+        detalle += f" · {'/'.join(sorted(a['cilindradas'] & b['cilindradas']))}"
+    return True, detalle
+
+
+def derivar_equivalencias_por_medidas(minimo_medidas=3, limite=400):
+    """Encuentra equivalencias cruzando las MEDIDAS cargadas, entre marcas distintas.
+
+    Las medidas se venían usando solo para verificar un vínculo que ya existía. Pero en varias
+    familias la medida ES la identidad de la pieza: un retén 35x52x7 de un proveedor y uno
+    35x52x7 de otro son el mismo repuesto, y no hace falta que las descripciones se parezcan
+    ni que compartan un código.
+
+    Es la evidencia más fuerte que hay: no es texto ni interpretación, es la pieza física.
+
+    Se piden al menos 3 medidas coincidentes. Con una sola —por ejemplo, solo el diámetro
+    interno— coincidirían piezas completamente distintas que casualmente miden lo mismo."""
+    campos = [cn for cn, _ in CAMPOS_MEDIDAS]
+    seleccion = ", ".join(f"p.{cn}" for cn in campos)
+    c.execute(f"""SELECT p.id, p.codigo_raw, p.descripcion, p.marca_id, m.nombre AS marca,
+                         p.precio, p.stock, {seleccion}, p.paso_rosca, p.cantidad_estrias
+                  FROM productos p JOIN marcas m ON m.id = p.marca_id""")
+    productos = [dict(r) for r in c.fetchall()]
+
+    # Se agrupa por la combinación exacta de medidas. Sin agrupar habría que comparar todos
+    # contra todos; agrupando, los que comparten medidas caen juntos y el resto ni se mira.
+    grupos = {}
+    for f in productos:
+        valores = tuple(round(f[cn], 2) if f[cn] is not None else None for cn in campos)
+        cuantas = sum(1 for v in valores if v is not None)
+        if cuantas < minimo_medidas:
+            continue
+        clave = valores + ((f["paso_rosca"] or "").strip().upper(),
+                           (f["cantidad_estrias"] or "").strip().upper())
+        grupos.setdefault(clave, []).append(f)
+
+    ya = set()
+    c.execute("SELECT producto_a_id, producto_b_id FROM equivalencias")
+    for r in c.fetchall():
+        ya.add((r["producto_a_id"], r["producto_b_id"]))
+    rechazados = pares_rechazados()
+
+    salida = []
+    for clave, miembros in grupos.items():
+        # Solo interesa si hay al menos dos MARCAS distintas: dos códigos de la misma marca
+        # con las mismas medidas suelen ser presentaciones del mismo producto, no equivalentes
+        # que aporten algo.
+        if len({f["marca_id"] for f in miembros}) < 2:
+            continue
+        for i, pa in enumerate(miembros):
+            for pb in miembros[i + 1:]:
+                if pa["marca_id"] == pb["marca_id"]:
+                    continue
+                par = (min(pa["id"], pb["id"]), max(pa["id"], pb["id"]))
+                if par in ya or par in rechazados:
+                    continue
+                # Aun con las medidas iguales, dos rubros distintos no son la misma pieza:
+                # una arandela y un separador pueden medir exactamente lo mismo.
+                # Con las medidas iguales igual hay que mirar la pieza: una arandela y un
+                # retén pueden medir exactamente lo mismo. Y no alcanza con comparar el rubro
+                # —«ARANDELA DE COBRE» queda sin clasificar y se colaba—, así que se compara
+                # también el sustantivo principal de la descripción.
+                fa = firma_de_producto(pa["descripcion"] or "")
+                fb = firma_de_producto(pb["descripcion"] or "")
+                if not fa or not fb:
+                    continue
+                if ("Sin clasificar" not in (fa["familia"], fb["familia"])
+                        and fa["familia"] != fb["familia"]):
+                    continue
+                if fa["cabeza"] and fb["cabeza"] and fa["cabeza"] != fb["cabeza"]:
+                    if not (fa["cabeza"] in fb["cabeza"] or fb["cabeza"] in fa["cabeza"]):
+                        continue
+                detalle = ", ".join(
+                    f"{eti} {clave[j]}" for j, (cn, eti) in enumerate(CAMPOS_MEDIDAS)
+                    if clave[j] is not None
+                )
+                salida.append({
+                    "Código A": pa["codigo_raw"], "Marca A": pa["marca"],
+                    "Descripción A": (pa["descripcion"] or "")[:40],
+                    "Código B": pb["codigo_raw"], "Marca B": pb["marca"],
+                    "Descripción B": (pb["descripcion"] or "")[:40],
+                    "Medidas que coinciden": detalle[:70],
+                    "_a": pa["id"], "_b": pb["id"],
+                })
+                if len(salida) >= limite:
+                    return salida
+    return salida
+
+
+def equivalencias_puenteadas_por_reemplazo(limite=300):
+    """Vincula lo que quedó separado porque el fabricante cambió el número.
+
+    Caso concreto: tenés A vinculado al código de fábrica viejo, y B vinculado al nuevo. Son
+    el mismo repuesto, pero para la app son dos islas sin relación, porque el cambio de número
+    partió la cadena al medio.
+
+    Los reemplazos que cargaste a mano ya sabían que el viejo y el nuevo son lo mismo. Esto
+    usa ese dato para volver a unir lo que el cambio de número separó."""
+    try:
+        c.execute("SELECT codigo_viejo_clean, codigo_nuevo_clean FROM reemplazos_codigo")
+        cadenas = [(r["codigo_viejo_clean"], r["codigo_nuevo_clean"]) for r in c.fetchall()]
+    except sqlite3.OperationalError:
+        return []
+    if not cadenas:
+        return []
+
+    ya = set()
+    c.execute("SELECT producto_a_id, producto_b_id FROM equivalencias")
+    for r in c.fetchall():
+        ya.add((r["producto_a_id"], r["producto_b_id"]))
+    rechazados = pares_rechazados()
+
+    salida = []
+    for viejo, nuevo in cadenas:
+        c.execute("""SELECT p.id, p.codigo_raw, m.nombre AS marca, p.descripcion
+                     FROM productos p JOIN marcas m ON m.id = p.marca_id
+                     WHERE p.codigo_clean = ?""", (viejo,))
+        de_viejo = [dict(r) for r in c.fetchall()]
+        c.execute("""SELECT p.id, p.codigo_raw, m.nombre AS marca, p.descripcion
+                     FROM productos p JOIN marcas m ON m.id = p.marca_id
+                     WHERE p.codigo_clean = ?""", (nuevo,))
+        de_nuevo = [dict(r) for r in c.fetchall()]
+        for pa in de_viejo:
+            for pb in de_nuevo:
+                par = (min(pa["id"], pb["id"]), max(pa["id"], pb["id"]))
+                if pa["id"] == pb["id"] or par in ya or par in rechazados:
+                    continue
+                salida.append({
+                    "Código A": pa["codigo_raw"], "Marca A": pa["marca"],
+                    "Código B": pb["codigo_raw"], "Marca B": pb["marca"],
+                    "Por qué": f"el fabricante reemplazó {pa['codigo_raw']} por {pb['codigo_raw']}",
+                    "_a": pa["id"], "_b": pb["id"],
+                })
+                if len(salida) >= limite:
+                    return salida
+    return salida
+
+
+def derivar_equivalencias_por_descripcion(marca_a_id=None, marca_b_id=None,
+                                          limite=400, tope_productos=4000,
+                                          por_producto=3):
+    """Vincula productos de DOS proveedores distintos comparando lo que dicen sus descripciones.
+
+    Es la respuesta al problema de fondo: la mayoría de las listas no traen el código de
+    fábrica, y sin esa columna la app no generaba ninguna equivalencia. Con esto, dos
+    proveedores que describen la misma pieza para el mismo auto quedan vinculados.
+
+    Se compara solo dentro del mismo rubro. Eso no es una optimización: es lo que evita que
+    esto se convierta en otra fábrica de vínculos falsos, y de paso hace la comparación
+    manejable —sin agrupar, serían millones de pares—."""
+    if not marca_a_id or not marca_b_id or marca_a_id == marca_b_id:
+        return []
+
+    productos = {}
+    for mid in (marca_a_id, marca_b_id):
+        c.execute("""SELECT p.id, p.codigo_raw, p.codigo_clean, p.descripcion, p.precio,
+                            p.stock, m.nombre AS marca
+                     FROM productos p JOIN marcas m ON m.id = p.marca_id
+                     WHERE p.marca_id = ? AND COALESCE(p.descripcion,'') <> ''
+                     LIMIT ?""", (mid, tope_productos))
+        productos[mid] = [dict(r) for r in c.fetchall()]
+
+    # Se agrupa por rubro antes de comparar: solo tiene sentido cruzar filtros con filtros
+    por_rubro = {mid: {} for mid in productos}
+    for mid, filas in productos.items():
+        for f in filas:
+            firma = firma_de_producto(f["descripcion"], f["id"], f.get("codigo_clean"))
+            if not firma or firma["familia"] == "Sin clasificar":
+                continue
+            f["_firma"] = firma
+            por_rubro[mid].setdefault(firma["familia"], []).append(f)
+
+    ya_vinculados = set()
+    c.execute("SELECT producto_a_id, producto_b_id FROM equivalencias")
+    for r in c.fetchall():
+        ya_vinculados.add((r["producto_a_id"], r["producto_b_id"]))
+    rechazados = pares_rechazados()
+
+    salida = []
+    for familia in set(por_rubro[marca_a_id]) & set(por_rubro[marca_b_id]):
+        for pa in por_rubro[marca_a_id][familia]:
+            # Los mejores candidatos de ESTE producto, no todos. Un termostato de Ford puede
+            # coincidir con quince del otro proveedor, y esos quince tapan al resto del
+            # catálogo: se llega al tope mostrando siempre lo mismo. Se guardan los que más
+            # autos comparten, que son los más probables.
+            candidatos = []
+            for pb in por_rubro[marca_b_id][familia]:
+                par = (min(pa["id"], pb["id"]), max(pa["id"], pb["id"]))
+                if par in ya_vinculados or par in rechazados:
+                    continue
+                ok, motivo = firmas_compatibles(pa["_firma"], pb["_firma"])
+                if not ok:
+                    continue
+                en_comun = len(pa["_firma"]["autos"] & pb["_firma"]["autos"])
+                candidatos.append((en_comun, pb, motivo))
+            candidatos.sort(key=lambda x: -x[0])
+            for _n_autos, pb, motivo in candidatos[:por_producto]:
+                salida.append({
+                    "Código A": pa["codigo_raw"], "Marca A": pa["marca"],
+                    "Descripción A": (pa["descripcion"] or "")[:44],
+                    "Código B": pb["codigo_raw"], "Marca B": pb["marca"],
+                    "Descripción B": (pb["descripcion"] or "")[:44],
+                    "Rubro": familia, "Por qué": motivo,
+                    "_a": pa["id"], "_b": pb["id"],
+                })
+                if len(salida) >= limite:
+                    return salida
+    return salida
 
 
 def derivar_equivalencias_de_aplicaciones(limite=500, minimo_autos=2):
@@ -7371,26 +8009,7 @@ def guardar_reemplazo(codigo_viejo, codigo_nuevo, marca="", nota=""):
         return False, "Faltan los dos códigos."
     if v == n:
         return False, "Son el mismo código."
-    # Si el nuevo ya lleva de vuelta al viejo, esto arma un círculo (A→B→A). Buscar no se cuelga
-    # —la cadena corta al repetirse— pero la respuesta pasa a depender de por dónde se entre, que
-    # es peor que no tener el dato: se ve creíble y está mal.
-    if any(paso["clean"] == v for paso in cadena_de_reemplazos(n)):
-        return False, (f"No se puede: {codigo_nuevo} ya lleva de vuelta a {codigo_viejo}. "
-                       "Revisá cuál de los dos es el vigente.")
-    # Un código viejo tiene UN reemplazo vigente, no varios. La clave de la tabla es el par
-    # (viejo, nuevo), así que cargar A→B y después A→C dejaba las dos filas, y la búsqueda seguía
-    # la que SQLite devolviera primero: la misma consulta podía contestar B o C según cómo
-    # estuvieran guardadas las filas. Se reemplaza el anterior y se avisa cuál se pisó.
-    anterior = None
-    try:
-        c.execute("""SELECT codigo_nuevo FROM reemplazos_codigo
-                     WHERE codigo_viejo_clean = ? AND codigo_nuevo_clean != ?""", (v, n))
-        fila_previa = c.fetchone()
-        anterior = fila_previa["codigo_nuevo"] if fila_previa else None
-    except sqlite3.OperationalError:
-        anterior = None
     with db_lock:
-        c.execute("DELETE FROM reemplazos_codigo WHERE codigo_viejo_clean = ?", (v,))
         c.execute("""INSERT OR REPLACE INTO reemplazos_codigo
                      (codigo_viejo, codigo_viejo_clean, codigo_nuevo, codigo_nuevo_clean,
                       marca, nota, cargado_por)
@@ -7399,9 +8018,6 @@ def guardar_reemplazo(codigo_viejo, codigo_nuevo, marca="", nota=""):
                    (marca or "").strip().upper() or None, (nota or "").strip() or None,
                    obtener_usuario_actual()))
         conn.commit()
-    if anterior:
-        return True, (f"{codigo_viejo} → {codigo_nuevo} anotado. "
-                      f"Antes decía que lo reemplazaba {anterior}; quedó este.")
     return True, f"{codigo_viejo} → {codigo_nuevo} anotado."
 
 
@@ -7419,11 +8035,8 @@ def cadena_de_reemplazos(clean_code, tope=6):
     cadena, visto, actual = [], {clean_code}, clean_code
     for _ in range(tope):
         try:
-            # Por si quedaron filas viejas de antes de que se guardara uno solo por código:
-            # gana el más reciente, para que la respuesta no dependa del orden de la tabla.
             c.execute("""SELECT codigo_nuevo, codigo_nuevo_clean, marca, nota
-                         FROM reemplazos_codigo WHERE codigo_viejo_clean = ?
-                         ORDER BY fecha DESC LIMIT 1""", (actual,))
+                         FROM reemplazos_codigo WHERE codigo_viejo_clean = ? LIMIT 1""", (actual,))
             fila = c.fetchone()
         except sqlite3.OperationalError:
             return []
@@ -7440,31 +8053,16 @@ def productos_estancados(dias_sin_vender=180, minimo_stock=1, limite=100):
     """Lo que tenés en el estante y no se mueve. Es capital dormido.
 
     Se cruza el stock con la última venta. Lo que nunca se vendió cuenta como estancado solo si
-    hace rato que está cargado: un producto que entró la semana pasada todavía no tuvo chance.
-
-    Para saber desde cuándo está se usa el primer cambio de precio y, si no tuvo ninguno, la
-    fecha en que se cargó. Antes se miraba SOLO el historial de precios, y ese historial recién
-    se escribe cuando un precio CAMBIA: un producto importado una vez y nunca tocado no tiene
-    ninguna fila ahí. O sea que quedaban afuera justamente los que nunca se movieron —los clavos
-    más clavos, que son los que esta pantalla existe para encontrar."""
+    hace rato que está cargado: un producto que entró la semana pasada todavía no tuvo chance."""
     try:
-        # Las fechas se sacan con dos tablas ya resumidas, no con una subconsulta por
-        # producto: así se leen las ventas una sola vez en total y no una vez por artículo.
-        # Tampoco se puede unir directo contra las tablas crudas, porque un producto con 30
-        # ventas y 10 cambios de precio saldría 300 veces antes de agrupar.
         c.execute("""SELECT p.id AS "_id", p.codigo_raw AS "Código", m.nombre AS "Marca",
                             p.descripcion AS "Descripción", p.stock AS "Stock",
                             p.precio AS "Precio",
-                            v.ultima AS "_ultima_venta",
-                            COALESCE(h.primera, p.created_at) AS "_desde"
-                     FROM productos p
-                     JOIN marcas m ON m.id = p.marca_id
-                     LEFT JOIN (SELECT producto_id, MAX(fecha) AS ultima
-                                  FROM ventas_registradas GROUP BY producto_id) v
-                            ON v.producto_id = p.id
-                     LEFT JOIN (SELECT producto_id, MIN(fecha) AS primera
-                                  FROM historial_precios GROUP BY producto_id) h
-                            ON h.producto_id = p.id
+                            (SELECT MAX(v.fecha) FROM ventas_registradas v
+                              WHERE v.producto_id = p.id) AS "_ultima_venta",
+                            (SELECT MIN(hp.fecha) FROM historial_precios hp
+                              WHERE hp.producto_id = p.id) AS "_desde"
+                     FROM productos p JOIN marcas m ON m.id = p.marca_id
                      WHERE COALESCE(p.stock, 0) >= ?""", (minimo_stock,))
         filas = filas_a_listas(c)
     except sqlite3.OperationalError:
@@ -7931,38 +8529,15 @@ def seccion_plegable(titulo, key, abierto=False):
     return st.toggle(titulo, key=key, value=abierto)
 
 
-def explicar(resumen, detalle, abierto=False, en_expander=False):
+def explicar(resumen, detalle, abierto=False):
     """Una línea corta siempre visible, y el porqué largo a un toque de distancia.
 
     Las explicaciones largas sirven la primera vez y estorban las otras cien: en el celular
     empujan los botones fuera de la pantalla y hay que scrollear para llegar a lo que uno vino
     a hacer. Pero borrarlas tampoco sirve — sin ellas nadie entiende para qué es cada cosa.
-    Así queda el resumen a la vista y el detalle disponible para quien lo necesite.
-
-    Ojo con dónde se la llama. Esta función abre un expander, así que llamarla adentro de otro
-    deja un expander dentro de un expander: en el celular quedan dos cajas anidadas y hay que
-    tocar dos veces para leer tres renglones. Las versiones viejas de Streamlit ni siquiera lo
-    permitían —tiraban excepción y cortaban el renderizado ahí, con lo cual la mitad de abajo de
-    la pantalla no se dibujaba—; las nuevas lo dejan pasar pero sigue quedando mal.
-
-    Para eso está en_expander: adentro de un expander el detalle va en un popover, que se abre
-    encima y no agrega otro nivel. Y por las dudas, si algo de eso no está disponible en la
-    versión de Streamlit que haya instalada, el detalle se muestra directamente: peor queda un
-    poco de texto de más que media pantalla sin dibujar."""
+    Así queda el resumen a la vista y el detalle disponible para quien lo necesite."""
     st.caption(resumen)
-    caja = None
-    if not en_expander:
-        try:
-            caja = st.expander("¿Por qué? / ¿Cómo funciona?", expanded=abierto)
-        except Exception:
-            caja = None
-    if caja is None:
-        try:
-            caja = st.popover("¿Por qué? / ¿Cómo funciona?")
-        except Exception:
-            st.caption(detalle)
-            return
-    with caja:
+    with st.expander("¿Por qué? / ¿Cómo funciona?", expanded=abierto):
         st.markdown(detalle)
 
 
@@ -10749,9 +11324,6 @@ Casi todo lo que edita o borra algo pide la contraseña de administrador la prim
                     st.rerun()
                 if ci3.button("🗑️", key=f"quitar_cart_{_pid}"):
                     st.session_state["carrito"].pop(_pid, None)
-                    # También la cantidad que quedó guardada del widget: sin esto, volver a
-                    # sumar el mismo producto lo traía con la cantidad vieja en vez de 1.
-                    st.session_state.pop(f"cant_cart_{_pid}", None)
                     st.rerun()
 
             _lineas = [f"{x['marca']} {x['codigo']} x{x['cantidad']} — "
@@ -10762,22 +11334,18 @@ Casi todo lo que edita o borra algo pide la contraseña de administrador la prim
             cb1, cb2 = st.columns(2)
             if cb1.button("🔒 Apartar todo el presupuesto"):
                 _apartados, _fallaron = 0, []
-                for _pid, _item in list(_cart.items()):
+                for _pid, _item in _cart.items():
                     _ok, _msg = reservar_stock(_pid, _item["cantidad"], "presupuesto")
                     if _ok:
                         _apartados += 1
-                        # Lo apartado sale del carrito. Si se quedara, tocar el botón otra vez
-                        # —porque uno de los ítems falló, por ejemplo— volvía a apartar los que
-                        # ya estaban apartados y el stock libre terminaba en cualquier cosa.
-                        st.session_state["carrito"].pop(_pid, None)
-                        st.session_state.pop(f"cant_cart_{_pid}", None)
                     else:
                         _fallaron.append(f"{_item['codigo']}: {_msg}")
                 if _apartados:
                     avisar("success", f"Se apartaron {_apartados} ítem(s).")
                 for _f in _fallaron:
-                    avisar("warning", _f)
-                st.rerun()
+                    st.warning(_f)
+                if _apartados and not _fallaron:
+                    st.rerun()
             if cb2.button("🗑️ Vaciar presupuesto"):
                 st.session_state["carrito"] = {}
                 st.rerun()
@@ -10792,7 +11360,7 @@ Casi todo lo que edita o borra algo pide la contraseña de administrador la prim
             "El código de la caja es exacto. A diferencia de comparar fotos o leer un grabado, "
             "acá no hay interpretación posible: o lo lee o no lo lee.\n\nSacá la foto de cerca, "
             "con buena luz y el código derecho, ocupando buena parte de la pantalla. Sirve "
-            "también para QR.", en_expander=True
+            "también para QR."
         )
         foto_barras = st.camera_input("Apuntá al código de barras", key="cam_barras")
         if foto_barras is None:
@@ -10842,7 +11410,7 @@ Casi todo lo que edita o borra algo pide la contraseña de administrador la prim
                 "de pieza — se compara en blanco y negro, recortando el fondo.\n\nAun así es "
                 "**mucho** menos confiable que un código exacto. Con piezas lisas sin marcas ni "
                 "grabado (rótulas, rulemanes, bulones) rinde mal por más buena que sea la foto. "
-                "Para esas, **📐 Buscar por medidas mecánicas** anda mucho mejor.", en_expander=True
+                "Para esas, **📐 Buscar por medidas mecánicas** anda mucho mejor."
             )
 
             fotos_listas, prod_con_foto, fotos_pendientes, fotos_no_sirven = contar_fotos_comparables()
@@ -11062,7 +11630,7 @@ Casi todo lo que edita o borra algo pide la contraseña de administrador la prim
                     "coherentes entre las dos fotos:",
                     "es el número que más conviene mirar. Muchos detalles y parecido alto = vale la pena "
                     "revisarla. Si el que buscabas no aparece, cargale a ese producto una segunda foto del "
-                    "ángulo que usás vos y la próxima vez lo encuentra.", en_expander=True
+                    "ángulo que usás vos y la próxima vez lo encuentra."
                 )
 
     modo = st.radio("Buscar por:", ["Código", "Descripción"], horizontal=True, key="modo_busqueda")
@@ -11107,20 +11675,7 @@ Casi todo lo que edita o borra algo pide la contraseña de administrador la prim
         # que se toque después haría que buscar_click vuelva a False y todo el bloque desaparezca
         # antes de que el click en el botón de adentro llegue a registrarse.
         if buscar_click:
-            # Sin sacar los repetidos, pegar "ABC, abc" dibujaba dos veces los mismos widgets
-            # con la misma key —todas se arman con el código limpio— y Streamlit corta la app
-            # entera con "multiple widgets with the same key". Y pegar una lista con un código
-            # duplicado es lo más común del mundo.
-            codigos_buscados, _ya_vistos = [], set()
-            for _crudo in busqueda.split(","):
-                _crudo = _crudo.strip()
-                if not _crudo:
-                    continue
-                _clave_dedup = sanitizar(_crudo) or _crudo.upper()
-                if _clave_dedup in _ya_vistos:
-                    continue
-                _ya_vistos.add(_clave_dedup)
-                codigos_buscados.append(_crudo)
+            codigos_buscados = [x.strip() for x in busqueda.split(",") if x.strip()]
             if not codigos_buscados:
                 st.info("Ingresá al menos un código válido para buscar.")
                 st.session_state.pop("ultima_busqueda_codigo", None)
@@ -11172,14 +11727,7 @@ Casi todo lo que edita o borra algo pide la contraseña de administrador la prim
                             f"📦 Solo con stock ({sum(1 for f in res if (f.get('Stock') or 0) > 0)}"
                             f" de {len(res)})", key=f"solo_stock_{clean}")
                         if solo_stock:
-                            con_stock = [f for f in res if (f.get("Stock") or 0) > 0]
-                            if con_stock:
-                                res = con_stock
-                            else:
-                                # Antes se volvía a la lista completa sin decir nada: se tildaba
-                                # "solo con stock" y aparecían igual los que no tienen, así que
-                                # parecía que el filtro estaba roto.
-                                st.info("Ninguno de estos tiene stock. Se muestran todos.")
+                            res = [f for f in res if (f.get("Stock") or 0) > 0] or res
 
                         # Copiar el código para pegarlo en facturación o WhatsApp. st.code trae
                         # el botón de copiar incorporado, así que no hace falta JavaScript.
@@ -11189,25 +11737,17 @@ Casi todo lo que edita o borra algo pide la contraseña de administrador la prim
                         # Stock libre = lo que hay menos lo apartado en presupuestos. Es el
                         # número que importa al prometerle algo a un cliente; el stock a secas
                         # puede estar comprometido con otro que ya lo cotizó.
-                        #
-                        # Va en una columna aparte y NUMÉRICA a propósito. Antes se escribía
-                        # "3 (de 4, el resto apartado)" encima de Stock, y estos diccionarios son
-                        # los mismos que quedan guardados en session_state: al refresco siguiente
-                        # Stock ya era un texto, el filtro de arriba hacía texto > 0 y la pantalla
-                        # se cerraba con TypeError. Con una sola reserva activa alcanzaba con
-                        # tocar cualquier botón de la búsqueda, y el texto además se anidaba en
-                        # cada vuelta: "3 (de 3 (de 4, el resto apartado)...".
                         try:
-                            libres = stock_libre_de_varios([f["ID"] for f in res])
+                            hay_reservas = any(stock_libre(f["ID"]) != (f.get("Stock") or 0)
+                                                for f in res)
                         except Exception:
-                            libres = {}
-                        hay_reservas = any(f["ID"] in libres and libres[f["ID"]] != (f.get("Stock") or 0)
-                                            for f in res)
+                            hay_reservas = False
                         if hay_reservas:
                             for f in res:
-                                f["Libre"] = libres.get(f["ID"], f.get("Stock") or 0)
-                            st.caption("**Libre** es lo que queda sin apartar: es el número que "
-                                       "se le puede prometer a un cliente.")
+                                libre_f = stock_libre(f["ID"])
+                                if libre_f is not None and libre_f != (f.get("Stock") or 0):
+                                    f["Stock"] = f"{libre_f} (de {f.get('Stock') or 0}, "
+                                    f["Stock"] += f"el resto apartado)"
 
                         # El margen es información sensible: la ve el dueño y el administrador,
                         # no cualquiera que atienda el mostrador.
@@ -11221,18 +11761,17 @@ Casi todo lo que edita o borra algo pide la contraseña de administrador la prim
                                     f"${mejor_marg['ganancia']:,.0f} "
                                     f"(${mejor_marg['diferencia']:,.0f} más que el peor de la lista)."
                                 )
+                        else:
+                            for _f in res:
+                                _f.pop("_costo", None)
+
                         puentes_res = puentes_en_el_resultado([f["ID"] for f in res])
                         # comparar precios a ojo cuando hay varias marcas equivalentes.
                         candidatos_precio = [f for f in res if f.get("Precio") and (f.get("Stock") or 0) > 0]
                         id_mas_barato = min(candidatos_precio, key=lambda f: f["Precio"])["ID"] if candidatos_precio else None
                         for f in res:
                             f["💰"] = "🏆 Más barato en stock" if f["ID"] == id_mas_barato else ""
-                        # Las claves con guión bajo son internas —el costo entre ellas— y no
-                        # salen a pantalla ni al Excel. Se sacan ACÁ, al dibujar, y no borrándolas
-                        # de la fila: la fila se reusa en el refresco siguiente y borrarle datos
-                        # es lo que hacía desaparecer el margen después del primer toque.
-                        mostrar = quitar_id([{k: v for k, v in f.items() if not k.startswith("_")}
-                                              for f in res])
+                        mostrar = quitar_id(res)
                         st.dataframe(
                             mostrar, use_container_width=True, hide_index=True,
                             column_config={
@@ -11336,12 +11875,6 @@ Casi todo lo que edita o borra algo pide la contraseña de administrador la prim
                                 # Como este bloque YA está dentro de uno, va como subtítulo.
                                 indirectos = [f for f in res if f.get("Cadena", "").startswith(("🟡", "🔴"))]
                                 if id_buscado and indirectos:
-                                    # Las keys llevan el código de ESTA vuelta. Eran fijas, y este
-                                    # bloque está adentro del bucle que recorre los códigos
-                                    # buscados: pidiendo dos a la vez ("P-1, Q-1") y abriendo esta
-                                    # sección en los dos, Streamlit encontraba la misma key dos
-                                    # veces y cerraba la app entera. Y buscar varios códigos
-                                    # separados por coma es justo lo que el campo invita a hacer.
                                     if True:
                                         st.markdown("**🧭 ¿Por qué apareció alguno de estos?**")
                                         etiquetas_por_que = {
@@ -11350,7 +11883,7 @@ Casi todo lo que edita o borra algo pide la contraseña de administrador la prim
                                         }
                                         elegido_pq = st.selectbox("Elegí un resultado:",
                                                                    list(etiquetas_por_que.keys()),
-                                                                   key=f"por_que_resultado_{clean}")
+                                                                   key="por_que_resultado")
                                         camino = camino_entre(id_buscado, etiquetas_por_que[elegido_pq])
                                         if not camino:
                                             st.caption("No pude reconstruir el camino.")
@@ -11373,8 +11906,7 @@ Casi todo lo que edita o borra algo pide la contraseña de administrador la prim
                                                     f"({peor_paso['Confianza']}/100). Cortando ese, este "
                                                     "resultado deja de aparecer."
                                                 )
-                                                if st.button("✂️ Cortar ese vínculo",
-                                                              key=f"cortar_paso_debil_{clean}"):
+                                                if st.button("✂️ Cortar ese vínculo", key="cortar_paso_debil"):
                                                     borrar_equivalencias_dudosas(
                                                         [(peor_paso["_a"], peor_paso["_b"])])
                                                     invalidar_salud()
@@ -11711,25 +12243,15 @@ Casi todo lo que edita o borra algo pide la contraseña de administrador la prim
                         # Carrito: ir juntando de varias búsquedas y armar el presupuesto al
                         # final. Sin esto había que anotar los códigos aparte y volver a
                         # buscarlos uno por uno.
-                        #
-                        # OJO con los nombres: este bloque vive adentro de la búsqueda por
-                        # DESCRIPCIÓN, donde el resultado de esta vuelta es fila_txt y sus
-                        # equivalentes están en 'otros'. Estaba escrito con los nombres de la
-                        # búsqueda por CÓDIGO (res, clean), que acá no existen, así que entrar a
-                        # "Descripción" tiraba NameError y la sección entera quedaba en blanco.
-                        # La clave de los widgets va por ID y no por código limpio: dos filas
-                        # distintas pueden limpiar al mismo texto y ahí Streamlit corta la app
-                        # por claves repetidas.
                         st.session_state.setdefault("carrito", {})
-                        opciones_carrito = [fila_txt] + otros
                         cc1, cc2 = st.columns([3, 2])
                         agregar_cod = cc1.selectbox(
                             "🛒 Sumar al presupuesto:",
-                            ["(elegir)"] + [f"{f['Marca']} {f['Codigo']}" for f in opciones_carrito],
-                            key=f"al_carrito_{fila_txt['ID']}")
-                        if agregar_cod != "(elegir)" and cc2.button(
-                                "➕ Sumar", key=f"btn_carrito_{fila_txt['ID']}"):
-                            elegido_c = next((f for f in opciones_carrito
+                            ["(elegir)"] + [f"{f['Marca']} {f['Codigo']}" for f in res],
+                            key=f"al_carrito_{clean}")
+                        if agregar_cod != "(elegir)" and cc2.button("➕ Sumar",
+                                                                     key=f"btn_carrito_{clean}"):
+                            elegido_c = next((f for f in res
                                                if f"{f['Marca']} {f['Codigo']}" == agregar_cod), None)
                             if elegido_c:
                                 st.session_state["carrito"][elegido_c["ID"]] = {
@@ -11748,16 +12270,13 @@ Casi todo lo que edita o borra algo pide la contraseña de administrador la prim
                         _para_apartar = equivalentes or [fila_txt]
                         if seccion_plegable("🔒 Apartar para un presupuesto",
                                              key=f"apartar_txt_{fila_txt['ID']}"):
-                            # Una sola consulta para todos: preguntarlo de a uno acá eran dos
-                            # por fila para filtrar y dos más por fila para armar la etiqueta.
-                            libres_ap = stock_libre_de_varios([f["ID"] for f in _para_apartar])
                             con_stock_ap = [f for f in _para_apartar
-                                             if (libres_ap.get(f["ID"]) or 0) > 0]
+                                             if (stock_libre(f["ID"]) or 0) > 0]
                             if not con_stock_ap:
                                 st.caption("Ninguno de estos tiene stock libre para apartar.")
                             else:
                                 etq_ap = {
-                                    f"{f['Marca']} {f['Codigo']} — {libres_ap[f['ID']]} libre(s)":
+                                    f"{f['Marca']} {f['Codigo']} — {stock_libre(f['ID'])} libre(s)":
                                         f["ID"] for f in con_stock_ap
                                 }
                                 elegido_ap = st.selectbox("¿Cuál?", list(etq_ap.keys()),
@@ -14022,6 +14541,216 @@ if pagina == PAGINAS[3]:
                 marcas_con_tipo = 0
 
             if marcas_con_tipo >= 2:
+                st.markdown("**📐 Equivalencias por medidas**")
+                explicar(
+                    "La evidencia más fuerte que hay: no es texto, es la pieza física.",
+                    "Las medidas se venían usando solo para verificar un vínculo que ya "
+                    "existía. Pero en retenes, o'rings, rulemanes y bujes la medida **es** la "
+                    "identidad: un 35x52x7 de un proveedor y un 35x52x7 de otro son el mismo "
+                    "repuesto, sin importar cómo se llame el código ni cómo esté escrita la "
+                    "descripción.\n\nSe piden al menos 3 medidas coincidentes: con una sola "
+                    "—el diámetro interno, por ejemplo— coincidirían piezas completamente "
+                    "distintas que casualmente miden lo mismo. Y se compara igual el nombre de "
+                    "la pieza, porque una arandela y un retén pueden medir exactamente igual."
+                )
+                if st.button("📐 Buscar equivalencias por medidas"):
+                    with st.spinner("Comparando medidas..."):
+                        st.session_state["deriv_med"] = derivar_equivalencias_por_medidas()
+                _dm = st.session_state.get("deriv_med")
+                if _dm is not None:
+                    if not _dm:
+                        st.info(
+                            "No salió ninguna. Hacen falta productos con al menos 3 medidas "
+                            "cargadas, de marcas distintas. Se cargan en la ficha de cada "
+                            "producto o al importar, si la lista trae columnas de medidas."
+                        )
+                    else:
+                        st.success(f"{len(_dm)} par(es) con las mismas medidas.")
+                        st.dataframe(quitar_id(_dm), use_container_width=True, hide_index=True)
+                        if st.button(f"📥 Mandar las {len(_dm)} a revisión", key="env_med"):
+                            _n = guardar_equivalencias_derivadas(
+                                [(x["_a"], x["_b"]) for x in _dm],
+                                f"POR MEDIDAS · {datetime.now():%d/%m %H:%M}")
+                            st.session_state.pop("deriv_med", None)
+                            invalidar_salud()
+                            avisar("success", f"{_n} equivalencia(s) para revisar.")
+                            st.rerun()
+                st.markdown("---")
+
+                st.markdown("**🔄 Reunir lo que separó un cambio de número**")
+                explicar(
+                    "Cuando el fabricante cambia el número, la cadena se parte en dos islas.",
+                    "Tenés un producto vinculado al código de fábrica viejo y otro al nuevo. "
+                    "Son el mismo repuesto, pero para la app quedaron sin relación.\n\nLos "
+                    "reemplazos que cargaste ya sabían que el viejo y el nuevo son lo mismo: "
+                    "esto usa ese dato para volver a unirlos."
+                )
+                try:
+                    _pu = equivalencias_puenteadas_por_reemplazo()
+                except Exception:
+                    _pu = []
+                if not _pu:
+                    st.caption(
+                        "Nada para reunir. Aparece cuando cargues reemplazos y tengas productos "
+                        "de los dos códigos."
+                    )
+                else:
+                    st.success(f"{len(_pu)} par(es) que el cambio de número había separado.")
+                    st.dataframe(quitar_id(_pu), use_container_width=True, hide_index=True)
+                    if st.button(f"📥 Mandar los {len(_pu)} a revisión", key="env_puente"):
+                        _n = guardar_equivalencias_derivadas(
+                            [(x["_a"], x["_b"]) for x in _pu],
+                            f"POR REEMPLAZO DE CÓDIGO · {datetime.now():%d/%m %H:%M}")
+                        invalidar_salud()
+                        avisar("success", f"{_n} equivalencia(s) para revisar.")
+                        st.rerun()
+                st.markdown("---")
+
+                st.markdown("**🔐 Traer autos del portal del proveedor**")
+                explicar(
+                    "Para cuando la descripción se corta y no entran todos los autos.",
+                    "La ficha del portal tiene la lista completa; la celda de Excel no. Con "
+                    "esos autos cargados, la app puede vincular productos de dos proveedores "
+                    "aunque sus descripciones no compartan ni un modelo.\n\n**Configuración**, "
+                    "en Settings → Secrets de Streamlit:\n\n```\n[portal_FISPA]\n"
+                    'url_login = "https://proveedor.com/login"\nusuario = "tu_usuario"\n'
+                    'clave = "tu_clave"\ncampo_usuario = "email"\ncampo_clave = "password"\n'
+                    'url_ficha = "https://proveedor.com/producto/{codigo}"\n```\n\n'
+                    "Los nombres de `campo_usuario` y `campo_clave` son los `name=` del "
+                    "formulario de acceso del portal.\n\n**Va en los secretos y no en la base** "
+                    "por una razón concreta: la base se baja como backup y se sube a GitHub. "
+                    "Una clave ahí queda publicada.\n\n**La app no puede pedir nada.** La "
+                    "sesión que se abre es de solo lectura: los métodos para enviar datos "
+                    "(post, put, delete) directamente no existen en ella, así que ni un error "
+                    "de programación podría mandar un pedido. Y las direcciones que dicen "
+                    "carrito, pedido, comprar o checkout se rechazan aunque sean de solo "
+                    "consulta, porque hay portales que agregan al carrito con un simple enlace."
+                )
+                st.info(
+                    "🔒 **La app solo puede leer fichas.** No puede hacer pedidos, ni reservas, "
+                    "ni modificar nada en el portal del proveedor. Está bloqueado por diseño, "
+                    "no por configuración: nadie puede activarlo sin querer."
+                )
+                try:
+                    c.execute("""SELECT m.id, m.nombre, COUNT(p.id) AS n FROM marcas m
+                                 JOIN productos p ON p.marca_id = m.id
+                                 GROUP BY m.id ORDER BY n DESC""")
+                    _marcas_portal = filas_a_listas(c)
+                except sqlite3.OperationalError:
+                    _marcas_portal = []
+                _con_portal = [x for x in _marcas_portal if config_portal(x["nombre"])]
+                if not _con_portal:
+                    st.caption(
+                        "Todavía no hay ningún portal configurado. Mientras tanto, fijate si el "
+                        "proveedor deja **exportar el catálogo a Excel** desde su portal: bajarlo "
+                        "y cargarlo por «Cargar Excel» es más simple y más confiable que esto."
+                    )
+                else:
+                    _et_p = {f"{x['nombre']} ({x['n']:,} productos)": x for x in _con_portal}
+                    _sel_p = st.selectbox("Proveedor:", list(_et_p.keys()), key="portal_marca")
+                    _marca_p = _et_p[_sel_p]
+                    _cuantos = st.select_slider("Traer fichas de:", options=[10, 25, 50, 100],
+                                                 format_func=lambda x: f"{x} productos",
+                                                 key="portal_cuantos")
+                    st.caption(
+                        "Se hace de a tandas chicas y con una pausa entre pedidos. No es "
+                        "lentitud: golpear el servidor del proveedor a máxima velocidad es la "
+                        "forma más rápida de que te bloqueen la cuenta."
+                    )
+                    if st.button("🔐 Entrar y traer las fichas"):
+                        _sesion, _err = sesion_de_portal(_marca_p["nombre"])
+                        if _err:
+                            st.error(_err)
+                        else:
+                            c.execute("""SELECT p.codigo_raw, p.codigo_clean FROM productos p
+                                         WHERE p.marca_id = ?
+                                           AND p.codigo_clean NOT IN
+                                               (SELECT codigo_clean FROM aplicaciones
+                                                 WHERE codigo_clean IS NOT NULL)
+                                         LIMIT ?""", (_marca_p["id"], int(_cuantos)))
+                            _pendientes = [(r["codigo_raw"], r["codigo_clean"])
+                                            for r in c.fetchall()]
+                            if not _pendientes:
+                                st.info("Todos los productos de esa marca ya tienen autos cargados.")
+                            else:
+                                _barra = st.progress(0.0, text="Trayendo fichas...")
+                                _con, _sin = 0, 0
+                                for _i, (_cod, _cl) in enumerate(_pendientes):
+                                    _autos, _e2 = autos_desde_ficha_del_portal(
+                                        _marca_p["nombre"], _cod)
+                                    if _autos:
+                                        guardar_autos_de_ficha(_cod, _marca_p["nombre"], _autos)
+                                        _con += 1
+                                    else:
+                                        _sin += 1
+                                    _barra.progress((_i + 1) / len(_pendientes),
+                                                     text=f"{_i + 1} de {len(_pendientes)}...")
+                                    time.sleep(0.7)   # pausa entre pedidos, a propósito
+                                _barra.empty()
+                                invalidar_salud()
+                                avisar("success",
+                                       f"Se trajeron autos de {_con} ficha(s). "
+                                       f"{_sin} no tenían autos reconocibles.")
+                                st.rerun()
+                st.markdown("---")
+
+                st.markdown("**🔤 Vincular dos proveedores por la descripción**")
+                explicar(
+                    "Para las listas que NO traen el código de fábrica, que son la mayoría.",
+                    "Sin esa columna, la app no puede generar ninguna equivalencia: es la "
+                    "limitación de fondo que arrastramos. Esto la resuelve comparando lo que dicen "
+                    "las descripciones.\n\nSe exige coincidencia en el **nombre de la pieza** —no "
+                    "solo en el auto—, y que no se contradigan la **posición** ni la "
+                    "**cilindrada**. Ese control es el que evita el error grave: «CAPUCHON BUJIA "
+                    "CRUZE» y «ANILLO BUJIA CRUZE» comparten el rubro y el auto, y son piezas "
+                    "distintas.\n\nComo todo lo deducido, va a la cola de revisión: el sistema de "
+                    "confianza las evalúa igual que a cualquier otra."
+                )
+                try:
+                    c.execute("""SELECT m.id, m.nombre, COUNT(p.id) AS n FROM marcas m
+                                 JOIN productos p ON p.marca_id = m.id
+                                 WHERE COALESCE(p.descripcion,'') <> ''
+                                 GROUP BY m.id HAVING n >= 20 ORDER BY n DESC""")
+                    _marcas_desc = filas_a_listas(c)
+                except sqlite3.OperationalError:
+                    _marcas_desc = []
+                if len(_marcas_desc) < 2:
+                    st.caption("Hacen falta al menos dos marcas con descripciones cargadas.")
+                else:
+                    _et = {f"{x['nombre']} ({x['n']:,} productos)": x["id"] for x in _marcas_desc}
+                    cd1, cd2 = cols(2)
+                    _ma = cd1.selectbox("Proveedor A:", list(_et.keys()), key="desc_marca_a")
+                    _mb = cd2.selectbox("Proveedor B:", list(_et.keys()),
+                                         index=min(1, len(_et) - 1), key="desc_marca_b")
+                    if st.button("🔤 Buscar equivalencias por descripción",
+                                  disabled=(_ma == _mb)):
+                        with st.spinner("Comparando descripciones..."):
+                            st.session_state["deriv_desc"] = derivar_equivalencias_por_descripcion(
+                                _et[_ma], _et[_mb])
+                    _dd = st.session_state.get("deriv_desc")
+                    if _dd is not None:
+                        if not _dd:
+                            st.info(
+                                "No salió ninguna. Puede ser que las descripciones de esos dos "
+                                "proveedores sean muy distintas entre sí, o que ya estén vinculados."
+                            )
+                        else:
+                            st.success(f"Se encontraron {len(_dd)} posibles equivalencias.")
+                            st.dataframe(quitar_id(_dd), use_container_width=True, hide_index=True)
+                            st.caption(
+                                "Mirá la columna «Por qué» antes de mandarlas: dice exactamente en "
+                                "qué coinciden. Si ves algo que no cierra, avisame y ajusto el criterio."
+                            )
+                            if st.button(f"📥 Mandar las {len(_dd)} a revisión", type="primary"):
+                                _lote_d = f"POR DESCRIPCIÓN · {_ma[:14]}↔{_mb[:14]} · {datetime.now():%d/%m %H:%M}"
+                                _n = guardar_equivalencias_derivadas(
+                                    [(x["_a"], x["_b"]) for x in _dd], _lote_d)
+                                st.session_state.pop("deriv_desc", None)
+                                invalidar_salud()
+                                avisar("success", f"{_n} equivalencia(s) quedaron para revisar.")
+                                st.rerun()
+                st.markdown("---")
+
                 st.markdown("**🔗 Equivalencias deducidas cruzando catálogos**")
                 explicar(
                     "Si dos fabricantes dicen que sus piezas van al mismo auto, son intercambiables.",
@@ -15800,12 +16529,6 @@ if pagina == PAGINAS[6]:
         st.session_state["form_anio_auto"] = str(datos.get("anio") or "")
         st.session_state["form_motorizacion_auto"] = datos.get("motorizacion") or ""
 
-    # El VIN que se resolvió a patente en la vuelta anterior se vuelca ACÁ, antes de dibujar el
-    # campo. Escribirlo después de dibujado —que es lo que se hacía— Streamlit no lo permite:
-    # tira StreamlitAPIException y corta la pantalla. Pasaba con solo pegar un chasis de 17.
-    if "patente_pendiente" in st.session_state:
-        st.session_state["patente_buscar"] = st.session_state.pop("patente_pendiente")
-
     patente_input = st.text_input(
         "Patente o VIN:", placeholder="Ej: AB123CD — o el chasis completo", key="patente_buscar"
     ).strip().upper()
@@ -15814,10 +16537,9 @@ if pagina == PAGINAS[6]:
     if len(re.sub(r"\s", "", patente_input)) == 17:
         ficha_por_vin = buscar_vehiculo_por_vin(patente_input)
         if ficha_por_vin:
+            st.success(f"🔎 Ese chasis es la patente **{ficha_por_vin['patente']}**.")
             patente_input = ficha_por_vin["patente"]
-            avisar("success", f"🔎 Ese chasis es la patente **{patente_input}**.")
-            st.session_state["patente_pendiente"] = patente_input
-            st.rerun()
+            st.session_state["patente_buscar"] = patente_input
         else:
             st.info(
                 "Ese VIN no está en ninguna ficha todavía. Cargá la patente del auto y poné el "
