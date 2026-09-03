@@ -5,7 +5,8 @@ import re
 import sys
 from collections import defaultdict, Counter
 
-SRC = open("app.py", encoding="utf-8").read()
+ARCHIVO = sys.argv[1] if len(sys.argv) > 1 else "app.py"
+SRC = open(ARCHIVO, encoding="utf-8").read()
 ARBOL = ast.parse(SRC)
 LINEAS = SRC.splitlines()
 problemas = []
@@ -20,6 +21,21 @@ def literal(nodo):
         return ast.literal_eval(nodo)
     except Exception:
         return None
+
+
+_PADRES = {}
+
+
+def _ancestros(nodo):
+    """Los nodos que contienen a este, de adentro hacia afuera."""
+    if not _PADRES:
+        for n in ast.walk(ARBOL):
+            for hijo in ast.iter_child_nodes(n):
+                _PADRES[id(hijo)] = n
+    actual = nodo
+    while id(actual) in _PADRES:
+        actual = _PADRES[id(actual)]
+        yield actual
 
 
 def es_st(nodo, nombres):
@@ -155,6 +171,23 @@ amb = Ambito(); amb.visit(ARBOL)
 # Nombres que se asignan en las DOS ramas de un mismo if/else: siempre quedan definidos, no hay
 # riesgo. Sin esto la auditoría marcaba media docena de if/else perfectamente sanos.
 cubiertos = set()
+# Lo mismo vale para try/except: si el nombre se asigna en el try Y en el except, salga como
+# salga queda definido. Sin esto, el patrón normal de "probar la consulta y si falla dejar el
+# diccionario vacío" quedaba marcado como riesgo, que es justamente lo contrario.
+for n in ast.walk(ARBOL):
+    if isinstance(n, ast.Try) and n.handlers:
+        def _asignados_try(cuerpo):
+            r = set()
+            for h in cuerpo:
+                for x in ast.walk(h):
+                    if isinstance(x, ast.Name) and isinstance(x.ctx, ast.Store):
+                        r.add(x.id)
+            return r
+        en_try = _asignados_try(n.body)
+        for manejador in n.handlers:
+            en_try &= _asignados_try(manejador.body)
+        cubiertos |= en_try
+
 for n in ast.walk(ARBOL):
     if isinstance(n, ast.If) and n.orelse:
         def _asignados(cuerpo):
@@ -200,11 +233,39 @@ class Pisadas(ast.NodeVisitor):
 Pisadas().visit(ARBOL)
 
 # ============ 7. Columnas SQL que no existen ============
+# Un INSERT o un UPDATE contra una columna que no está en el CREATE TABLE no falla al escribir
+# el código ni al abrir la app: revienta con "no such column" recién cuando alguien toca ese
+# botón, que puede ser meses después. Es el mismo tipo de bug que el de los valores de texto:
+# no da síntoma hasta que da el peor síntoma.
+
+
+def _partir_columnas(cuerpo):
+    """Corta la definición de la tabla por las comas de nivel 0.
+
+    No sirve cortar por líneas: hay tablas con varias columnas en el mismo renglón
+    (`idx_prov INTEGER, idx_oem INTEGER`) y así se perdían todas menos la primera, lo que hacía
+    que después el chequeo marcara como inexistentes columnas que existían. Tampoco sirve cortar
+    por cualquier coma: `DEFAULT (datetime('now'))` y `PRIMARY KEY (a, b)` traen las suyas."""
+    piezas, prof, actual = [], 0, []
+    for ch in cuerpo:
+        if ch == "(":
+            prof += 1
+        elif ch == ")":
+            prof -= 1
+        if ch == "," and prof == 0:
+            piezas.append("".join(actual))
+            actual = []
+        else:
+            actual.append(ch)
+    piezas.append("".join(actual))
+    return piezas
+
+
 columnas = defaultdict(set)
-for m in re.finditer(r'CREATE TABLE IF NOT EXISTS (\w+)\s*\((.*?)\n\s*\)"""', SRC, re.S):
-    tabla, cuerpo = m.group(1), m.group(2)
-    for linea in cuerpo.split("\n"):
-        t = linea.strip().strip(",")
+for m in re.finditer(r'CREATE TABLE(?:\s+IF NOT EXISTS)?\s+(\w+)\s*\((.*?)\)\s*"""', SRC, re.S):
+    tabla = m.group(1)
+    for t in _partir_columnas(m.group(2)):
+        t = t.strip()
         if not t or t.upper().startswith(("PRIMARY", "UNIQUE", "FOREIGN", "CHECK", "CONSTRAINT")):
             continue
         col = t.split()[0].strip('"')
@@ -213,10 +274,33 @@ for m in re.finditer(r'CREATE TABLE IF NOT EXISTS (\w+)\s*\((.*?)\n\s*\)"""', SR
 for m in re.finditer(r'ALTER TABLE (\w+) ADD COLUMN (\w+)', SRC):
     columnas[m.group(1)].add(m.group(2))
 
+# El SQL se busca SOLO adentro de literales de texto. Barriendo el archivo entero, el `.*?` del
+# UPDATE ... SET se comía el código Python que venía después del string y se inventaba columnas
+# ("productos.limite", "productos.progreso") que en realidad eran variables locales.
+_SQL = [(n.value, n.lineno) for n in ast.walk(ARBOL)
+        if isinstance(n, ast.Constant) and isinstance(n.value, str) and len(n.value) > 10]
+
+for texto, linea in _SQL:
+    for m in re.finditer(r'INSERT\s+(?:OR\s+\w+\s+)?INTO\s+(\w+)\s*\(([^)]*)\)', texto, re.I | re.S):
+        tabla = m.group(1)
+        if tabla not in columnas:
+            continue
+        for col in m.group(2).split(","):
+            col = col.strip().strip('"')
+            if col and col.isidentifier() and col not in columnas[tabla]:
+                reportar("ERROR", linea, f"INSERT INTO {tabla}: la columna '{col}' no existe")
+    for m in re.finditer(r'UPDATE\s+(\w+)\s+SET\s+(.*?)(?:\bWHERE\b|$)', texto, re.I | re.S):
+        tabla = m.group(1)
+        if tabla not in columnas:
+            continue
+        for asig in re.finditer(r'([A-Za-z_]\w*)\s*=', m.group(2)):
+            if asig.group(1) not in columnas[tabla]:
+                reportar("ERROR", linea,
+                         f"UPDATE {tabla}: la columna '{asig.group(1)}' no existe")
+
 # ============ 8. except silenciosos en funciones que escriben ============
 for n in ast.walk(ARBOL):
     if isinstance(n, ast.ExceptHandler):
-        cuerpo_texto = "".join(LINEAS[n.lineno - 1:(n.end_lineno or n.lineno)])
         if n.type is None:
             reportar("AVISO", n.lineno, "except desnudo (atrapa hasta Ctrl-C)")
 
@@ -344,36 +428,366 @@ for nodo in ast.walk(ARBOL):
                      f"el resumen de explicar() tiene {len(resumen)} caracteres; "
                      "va lo corto arriba y lo largo adentro")
 
-# ============ 8e. Contenedores anidados que Streamlit prohíbe ============
-# st.expander dentro de otro expander tira StreamlitAPIException y CORTA el renderizado ahí:
-# la mitad de abajo de la pantalla no se dibuja. Es un error que no se ve leyendo el código
-# porque los dos expanders pueden estar a 200 líneas de distancia.
+# ============ 8e. Contenedores anidados ============
+# Un expander adentro de otro deja dos cajas anidadas: en el celular hay que tocar dos veces
+# para leer tres renglones. Las versiones viejas de Streamlit directamente lo rechazaban con una
+# excepción que cortaba el renderizado; las de ahora (probado con la 1.63) lo dejan pasar, así
+# que esto va como AVISO y no como ERROR — marcarlo de rojo sería mentir sobre lo que hace.
+# Igual conviene verlo: los dos expanders pueden estar a 200 líneas de distancia y así, leyendo,
+# no hay forma de darse cuenta.
 def _es_contenedor(item, nombre):
     return (isinstance(item.context_expr, ast.Call)
             and isinstance(item.context_expr.func, ast.Attribute)
             and item.context_expr.func.attr == nombre)
 
 
+def _funciones_que_abren(nombre):
+    """Funciones del módulo que abren ese contenedor, contando las que lo abren a través de otra.
+
+    Sin esto el chequeo solo veía los `with st.expander` escritos a la vista, y se le escapaba el
+    caso que más pasa en este archivo: explicar() abre un expander adentro, así que llamarla
+    dentro de otro expander es exactamente el mismo error prohibido — pero leyendo el código no
+    se parece en nada, porque en la línea dice `explicar(...)` y no `st.expander(...)`."""
+    mods = {n.name: n for n in ARBOL.body if isinstance(n, ast.FunctionDef)}
+
+    def _abre_sin_red(fn):
+        """Abrirlo adentro de un try/except no cuenta: esa función ya sabe caerse con gracia.
+
+        Es lo que hace explicar(): intenta el expander y, si no puede porque ya está adentro de
+        otro, baja a un popover. Marcarla igual sería marcar código que anda —y una auditoría
+        que marca lo que anda se deja de mirar."""
+        protegidos = set()
+        for x in ast.walk(fn):
+            if isinstance(x, ast.Try):
+                for h in x.body:
+                    for y in ast.walk(h):
+                        protegidos.add(id(y))
+        return any(es_st(x, {nombre}) and id(x) not in protegidos for x in ast.walk(fn))
+
+    abren = {nom for nom, fn in mods.items() if _abre_sin_red(fn)}
+    # Repetir hasta que no cambie: si A llama a B y B abre el contenedor, A también lo abre.
+    while True:
+        nuevas = {nom for nom, fn in mods.items() if nom not in abren
+                  and any(isinstance(x, ast.Call) and isinstance(x.func, ast.Name)
+                          and x.func.id in abren for x in ast.walk(fn))}
+        if not nuevas:
+            return abren
+        abren |= nuevas
+
+
 class _BuscaAnidados(ast.NodeVisitor):
     def __init__(self, nombre):
         self.nombre = nombre
         self.pila = []
+        self.abren = _funciones_que_abren(nombre)
+
+    def _avisar(self, linea, que):
+        reportar("AVISO", linea,
+                 f"{que} dentro de un st.{self.nombre} (el de afuera está en L{self.pila[-1]}) "
+                 f"— quedan dos cajas anidadas y en el celular molesta")
+
+    def visit_FunctionDef(self, nodo):
+        # El cuerpo de una función arranca sin contexto: que se la llame desde adentro de un
+        # expander se marca en la llamada, no acá. Si no, cualquier función con un expander
+        # propio quedaba marcada por cada lugar del que se la llama.
+        guardado, self.pila = self.pila, []
+        self.generic_visit(nodo)
+        self.pila = guardado
+
+    visit_AsyncFunctionDef = visit_FunctionDef
 
     def visit_With(self, nodo):
         hay = any(_es_contenedor(i, self.nombre) for i in nodo.items)
         if hay and self.pila:
-            reportar("ERROR", nodo.lineno,
-                     f"st.{self.nombre} dentro de otro st.{self.nombre} "
-                     f"(el de afuera está en L{self.pila[-1]}) — Streamlit lo prohíbe y corta "
-                     "el renderizado")
+            self._avisar(nodo.lineno, f"st.{self.nombre}")
         if hay:
             self.pila.append(nodo.lineno)
         self.generic_visit(nodo)
         if hay:
             self.pila.pop()
 
+    def visit_Call(self, nodo):
+        if isinstance(nodo.func, ast.Name) and self.pila:
+            if nodo.func.id in self.abren:
+                self._avisar(nodo.lineno, f"{nodo.func.id}(), que abre un st.{self.nombre},")
+            # explicar() sabe acomodarse —con en_expander=True manda el detalle a un popover, que
+            # se abre encima y no agrega otro nivel— pero hay que avisarle: sola no se entera de
+            # dónde la llamaron.
+            elif (self.nombre == "expander" and nodo.func.id == "explicar"
+                  and not any(k.arg == "en_expander" for k in nodo.keywords)):
+                reportar("AVISO", nodo.lineno,
+                         f"explicar() adentro del st.expander de L{self.pila[-1]}: pasale "
+                         "en_expander=True y el detalle va a un popover en vez de anidar "
+                         "otra caja")
+        self.generic_visit(nodo)
+
 
 _BuscaAnidados("expander").visit(ARBOL)
+
+# ============ 8f. session_state escrito después de dibujar su widget ============
+# Streamlit no deja tocar st.session_state["x"] una vez que ya se dibujó el widget con key="x":
+# tira StreamlitAPIException y se corta la pantalla. En el archivo ya hay dos comentarios
+# avisando de esto —"precargar ANTES de crear el widget"— justamente porque ya pasó. El patrón
+# correcto es guardar el valor en OTRA clave y volcarlo al principio de la vuelta siguiente.
+_keys_widget = {}
+for n in ast.walk(ARBOL):
+    if es_st(n, WIDGETS):
+        for kw in n.keywords:
+            if kw.arg == "key" and isinstance(kw.value, ast.Constant) and isinstance(kw.value.value, str):
+                _keys_widget.setdefault(kw.value.value, n.lineno)
+
+
+def _clave_session_state(nodo):
+    """Devuelve la clave de un st.session_state["algo"] literal, o None."""
+    if (isinstance(nodo, ast.Subscript) and isinstance(nodo.value, ast.Attribute)
+            and nodo.value.attr == "session_state"
+            and isinstance(nodo.slice, ast.Constant) and isinstance(nodo.slice.value, str)):
+        return nodo.slice.value
+    return None
+
+
+# Adentro de un callback (on_click/on_change) la regla no aplica: el callback corre ANTES de que
+# la pantalla se vuelva a dibujar, así que en ese momento el widget todavía no existe. Sin esta
+# salvedad, un callback escrito más abajo que su widget quedaba marcado sin estar mal.
+_callbacks = set()
+for n in ast.walk(ARBOL):
+    if isinstance(n, ast.Call):
+        for kw in n.keywords:
+            if kw.arg in ("on_click", "on_change") and isinstance(kw.value, ast.Name):
+                _callbacks.add(kw.value.id)
+_lineas_callback = set()
+for n in ARBOL.body:
+    if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)) and n.name in _callbacks:
+        for x in ast.walk(n):
+            if hasattr(x, "lineno"):
+                _lineas_callback.add(x.lineno)
+
+for n in ast.walk(ARBOL):
+    if isinstance(n, (ast.Assign, ast.AugAssign)):
+        for t in (n.targets if isinstance(n, ast.Assign) else [n.target]):
+            k = _clave_session_state(t)
+            if k and k in _keys_widget and n.lineno > _keys_widget[k] \
+                    and n.lineno not in _lineas_callback:
+                reportar("ERROR", n.lineno,
+                         f"st.session_state[{k!r}] se escribe después de dibujar su widget "
+                         f"(L{_keys_widget[k]}) — Streamlit lo prohíbe. Guardarlo en otra clave "
+                         "y volcarlo antes del widget, como se hace con 'sugerencia_busqueda'")
+
+# ============ 8f-bis. Claves fijas adentro de un bucle ============
+# Un widget con key literal metido en un for se dibuja con la MISMA clave en cada vuelta. Con una
+# sola vuelta no se nota nunca; con dos, Streamlit corta la app entera. El caso real: el bloque
+# "¿por qué apareció este resultado?" está adentro del bucle que recorre los códigos buscados, y
+# el campo de búsqueda invita explícitamente a pedir varios separados por coma — así que
+# alcanzaba con buscar dos y abrir esa sección en los dos.
+# No hay forma de que esto esté bien: si el bucle da dos vueltas, revienta.
+for n in ast.walk(ARBOL):
+    if not es_st(n, WIDGETS):
+        continue
+    clave = next((k.value for k in n.keywords if k.arg == "key"), None)
+    if not (isinstance(clave, ast.Constant) and isinstance(clave.value, str)):
+        continue
+    bucle = None
+    for padre in _ancestros(n):
+        if isinstance(padre, (ast.For, ast.While)):
+            bucle = padre
+            break
+        if isinstance(padre, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            break
+    if bucle is not None:
+        reportar("ERROR", n.lineno,
+                 f"st.{n.func.attr} con key fija {clave.value!r} adentro del bucle de L"
+                 f"{bucle.lineno}: en la segunda vuelta la clave se repite y Streamlit corta la "
+                 "app. La key tiene que llevar algo que cambie en cada vuelta")
+
+# ============ 8g. avisar() sin refresco que lo muestre ============
+# avisar() GUARDA el mensaje para el refresco siguiente; lo muestra mostrar_avisos_pendientes(),
+# que corre arriba de todo. Si en esa rama no hay st.rerun(), el mensaje no aparece ahora: queda
+# esperando a que la persona toque cualquier otra cosa, y para entonces ya no significa nada.
+# En una rama donde no se va a refrescar, el mensaje va con st.success() directo.
+# Dónde vive cada sentencia: en qué lista está, en qué posición y de quién es esa lista.
+# Hace falta para poder mirar hacia AFUERA: el st.rerun() que salva a un avisar() casi nunca es
+# su hermano directo —el avisar suele estar adentro de un `if hubo_algo:` y el rerun, después
+# del if. Mirando solo la lista propia, esos quedaban marcados sin estar mal.
+_ubicacion = {}
+for n in ast.walk(ARBOL):
+    for campo in ("body", "orelse", "finalbody"):
+        cuerpo = getattr(n, campo, None)
+        if isinstance(cuerpo, list):
+            for i, sent in enumerate(cuerpo):
+                _ubicacion[id(sent)] = (cuerpo, i, n)
+
+
+def _hay_rerun_despues(sent):
+    """True si algún st.rerun() puede correr después de esta sentencia, en su bloque o afuera."""
+    actual = sent
+    while id(actual) in _ubicacion:
+        cuerpo, i, dueño = _ubicacion[id(actual)]
+        if any(es_st(x, {"rerun", "experimental_rerun"})
+               for s in cuerpo[i:] for x in ast.walk(s)):
+            return True
+        if isinstance(dueño, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            return False    # más afuera ya es otra corrida, no esta
+        actual = dueño
+    return False
+
+
+for n in ast.walk(ARBOL):
+    if not (isinstance(n, ast.Expr) and isinstance(n.value, ast.Call)
+            and isinstance(n.value.func, ast.Name) and n.value.func.id == "avisar"):
+        continue
+    if not _hay_rerun_despues(n):
+        reportar("ERROR", n.lineno,
+                 "avisar() sin ningún st.rerun() después: el mensaje queda guardado para el "
+                 "refresco siguiente y no se muestra. Acá va st.success()/st.warning() directo")
+
+# ============ 8h. Bloques copiados a otra rama, con los nombres de la rama vieja ============
+# El caso que motivó esto: el carrito se copió de la búsqueda por código a la búsqueda por
+# descripción y quedó usando 'res' y 'clean', que en esa rama no existen (ahí se llaman
+# res_texto y clean_txt). Compila perfecto, y recién al entrar a "Descripción" tira NameError y
+# la sección entera queda en blanco.
+#
+# El intento anterior de agarrarlo fue un chequeo de ámbitos y daba falsos positivos, porque
+# decidir qué nombre es visible dónde en un archivo con este anidamiento no se puede sin un
+# analizador completo. La vuelta que sí funciona es mucho más chica: no preguntarse si el nombre
+# está definido, sino si TODAS sus asignaciones están en ramas que NUNCA corren junto con el
+# uso. Si el único lugar donde se asigna es la rama 'if' y se lo usa en el 'else', no hay caso
+# posible en que llegue definido — no es una sospecha, es seguro. Sobre este archivo no marca
+# nada de lo que está bien, y sobre la versión con el bug marcaba las dos líneas exactas.
+_rama_nombre = {}
+
+
+def _recorrer_nombres(nodo, camino):
+    """Igual que el recorrido de las claves de widget, pero anotando TODOS los nombres."""
+    if isinstance(nodo, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)):
+        return      # adentro de una función manda su propio ámbito, no este
+    if isinstance(nodo, ast.Name):
+        _rama_nombre[id(nodo)] = camino
+    if isinstance(nodo, ast.If):
+        for hijo in ast.iter_child_nodes(nodo.test):
+            _recorrer_nombres(hijo, camino)
+        for hijo in nodo.body:
+            _recorrer_nombres(hijo, camino + [(id(nodo), "T")])
+        for hijo in nodo.orelse:
+            _recorrer_nombres(hijo, camino + [(id(nodo), "F")])
+        return
+    for hijo in ast.iter_child_nodes(nodo):
+        _recorrer_nombres(hijo, camino)
+
+
+_recorrer_nombres(ARBOL, [])
+_asignados_en, _usados_en = defaultdict(list), defaultdict(list)
+for n in ast.walk(ARBOL):
+    if isinstance(n, ast.Name) and id(n) in _rama_nombre:
+        (_asignados_en if isinstance(n.ctx, ast.Store) else _usados_en)[n.id].append(n)
+
+
+def _ramas_opuestas(a, b):
+    """True si estos dos nodos están en ramas opuestas del mismo if: nunca corren los dos."""
+    da, db = dict(_rama_nombre[id(a)]), dict(_rama_nombre[id(b)])
+    return any(k in db and db[k] != v for k, v in da.items())
+
+
+for nombre, usos in _usados_en.items():
+    asignaciones = _asignados_en.get(nombre)
+    if not asignaciones or nombre in ligados_aparte:
+        continue
+    for uso in usos:
+        if all(_ramas_opuestas(uso, a) for a in asignaciones):
+            reportar("ERROR", uso.lineno,
+                     f"\'{nombre}\' se usa acá, pero todas sus asignaciones están en ramas que "
+                     "nunca corren con esta: NameError al entrar a esta sección. ¿Es un bloque "
+                     "copiado de otra rama, donde la variable se llama distinto?")
+            break
+
+# NOTA sobre lo que esta auditoría todavía NO puede detectar
+# El mismo bloque copiado, pero donde el nombre viejo SÍ existe también en la rama nueva con
+# otro significado: ahí no hay NameError, hay datos de otra búsqueda mostrados como si fueran
+# de esta. No falla, no avisa, y está mal. Eso hay que mirarlo a mano al copiar un bloque.
+
+# ============ 8i. Borrarle datos a las filas que quedan guardadas ============
+# El bug más difícil de ver de todo el archivo fue este. Las listas de resultados se guardan en
+# st.session_state y se REUSAN en cada refresco: son los mismos diccionarios, no una copia.
+# agregar_margen() les borraba "_costo" para que el costo no saliera en la tabla, y funcionaba
+# —la primera vez—. A partir del segundo toque de cualquier botón el costo ya no estaba, así que
+# la columna Margen quedaba vacía y el aviso de «mejor margen» desaparecía. Sin error, sin aviso:
+# se veía una vez y no volvía más.
+# Lo que hay que hacer es sacar lo que no va A LA HORA DE DIBUJAR, sobre una copia.
+#
+# Se mira SOLO el cuerpo de la pantalla. Adentro de una función, las filas son las que acaba de
+# traer la consulta y sacarles una clave interna antes de devolverlas está perfecto: marcarlo
+# llenaba la auditoría de funciones sanas.
+def _borra_una_clave(nodo):
+    """pop('algo') sobre un diccionario. lista.pop(i) saca un elemento de una lista y está bien:
+    sin esta distinción el chequeo marcaba el botón de quitar de la lista de WhatsApp."""
+    return (isinstance(nodo, ast.Call) and isinstance(nodo.func, ast.Attribute)
+            and nodo.func.attr == "pop" and nodo.args
+            and isinstance(nodo.args[0], ast.Constant) and isinstance(nodo.args[0].value, str))
+
+
+def _sin_entrar_a_funciones(raiz):
+    for nodo in ast.iter_child_nodes(raiz):
+        if isinstance(nodo, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda, ast.ClassDef)):
+            continue
+        yield nodo
+        yield from _sin_entrar_a_funciones(nodo)
+
+
+_EN_PANTALLA = list(_sin_entrar_a_funciones(ARBOL))
+
+
+def _menciona_sesion(nodo, conocidos):
+    for x in ast.walk(nodo):
+        if isinstance(x, ast.Attribute) and x.attr == "session_state":
+            return True
+        if isinstance(x, ast.Name) and x.id in conocidos:
+            return True
+    return False
+
+
+# Qué nombres de la pantalla salieron de session_state (incluido el rebote
+# `for item in guardadas:` y después `res = item["res"]`).
+_de_sesion = set()
+for _ in range(3):
+    for nodo in _EN_PANTALLA:
+        if isinstance(nodo, ast.Assign) and len(nodo.targets) == 1 \
+                and isinstance(nodo.targets[0], ast.Name) \
+                and _menciona_sesion(nodo.value, _de_sesion):
+            _de_sesion.add(nodo.targets[0].id)
+        if isinstance(nodo, ast.For) and isinstance(nodo.target, ast.Name) \
+                and _menciona_sesion(nodo.iter, _de_sesion):
+            _de_sesion.add(nodo.target.id)
+
+# Funciones que le borran claves a las filas que reciben
+_vacian_lo_que_reciben = set()
+for _fn in ARBOL.body:
+    if not isinstance(_fn, ast.FunctionDef):
+        continue
+    _params = {a.arg for a in _fn.args.args}
+    _filas = {x.target.id for x in ast.walk(_fn)
+              if isinstance(x, ast.For) and isinstance(x.target, ast.Name)
+              and isinstance(x.iter, ast.Name) and x.iter.id in _params}
+    for x in ast.walk(_fn):
+        if _borra_una_clave(x) and isinstance(x.func.value, ast.Name) and x.func.value.id in _filas:
+            _vacian_lo_que_reciben.add(_fn.name)
+
+for nodo in _EN_PANTALLA:
+    # 1) pop() directo sobre una fila que salió de la sesión
+    if _borra_una_clave(nodo) and isinstance(nodo.func.value, ast.Name) \
+            and nodo.func.value.id in _de_sesion:
+        reportar("ERROR", nodo.lineno,
+                 f"'{nodo.func.value.id}' salió de session_state y se le está borrando una "
+                 "clave: se reusa en cada refresco, así que del segundo en adelante ese dato ya "
+                 "no está y nada lo avisa. Sacala al dibujar, sobre una copia")
+    # 2) una función que vacía las filas que recibe, llamada con datos de la sesión
+    if isinstance(nodo, ast.Call) and isinstance(nodo.func, ast.Name) \
+            and nodo.func.id in _vacian_lo_que_reciben:
+        for arg in nodo.args:
+            if isinstance(arg, ast.Name) and arg.id in _de_sesion:
+                reportar("ERROR", nodo.lineno,
+                         f"{nodo.func.id}() le borra claves a las filas que recibe, y "
+                         f"'{arg.id}' salió de session_state: del segundo refresco en adelante "
+                         "esos datos ya no están. Que las saque quien dibuja, sobre una copia")
+
 
 # ============ 9. Argumentos por defecto mutables ============
 for n in ast.walk(ARBOL):
@@ -403,7 +817,10 @@ for n in ast.walk(ARBOL):
                      f"{n.func.id}() recibe {len(n.args)} posicionales, la firma acepta {len(f.args.args)}")
 
 # ============ 11. Nombres usados y nunca definidos ============
-definidas = {n.name for n in ast.walk(ARBOL) if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))}
+# Las clases también definen un nombre. Faltaban, así que la primera clase que apareciera en el
+# archivo se reportaba como "nombre usado y nunca definido".
+definidas = {n.name for n in ast.walk(ARBOL)
+             if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))}
 conocidas = set(definidas) | set(dir(__builtins__))
 for n in ast.walk(ARBOL):
     if isinstance(n, (ast.Assign, ast.AugAssign, ast.For)):
@@ -417,7 +834,7 @@ for n in ast.walk(ARBOL):
             if isinstance(x, ast.Name): conocidas.add(x.id)
     if isinstance(n, (ast.Import, ast.ImportFrom)):
         for a in n.names: conocidas.add((a.asname or a.name).split(".")[0])
-    if isinstance(n, ast.FunctionDef):
+    if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)):
         for a in n.args.args + n.args.kwonlyargs: conocidas.add(a.arg)
         if n.args.vararg: conocidas.add(n.args.vararg.arg)
         if n.args.kwarg: conocidas.add(n.args.kwarg.arg)
@@ -436,11 +853,32 @@ for nombre in sorted(funcs_modulo - llamados - referidos):
     if not nombre.startswith("_") and nombre in firmas:
         reportar("AVISO", firmas[nombre].lineno, f"función '{nombre}' definida y nunca usada")
 
+# ============ 12b. Dos definiciones con el mismo nombre ============
+# Python no se queja: la segunda def pisa a la primera y listo. Pero la primera queda muerta, y
+# lo que la llamaba termina ejecutando la otra —con otros parámetros y otro significado— y
+# revienta recién cuando alguien entra a esa pantalla.
+# Pasó de verdad acá: había dos nivel_de_confianza(), una que recibía la lista de evidencias y
+# otra que recibía un puntaje. La de evidencias nunca corrió, y la pantalla de equivalencias
+# sugeridas se caía con "'>=' not supported between instances of 'list' and 'int'" apenas
+# aparecía una candidata con evidencia.
+_definiciones = defaultdict(list)
+for n in ARBOL.body:
+    if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+        _definiciones[n.name].append(n.lineno)
+for nombre, lineas in _definiciones.items():
+    if len(lineas) > 1:
+        reportar("ERROR", lineas[0],
+                 f"'{nombre}' está definido {len(lineas)} veces (L"
+                 + ", L".join(str(x) for x in lineas)
+                 + "): la última pisa a las anteriores. Todo lo que llame a las de arriba va a "
+                   "ejecutar la de abajo, con los parámetros de otra cosa")
+
+
 # ============ Resultado ============
 orden = {"ERROR": 0, "REVISAR": 1, "AVISO": 2}
 problemas.sort(key=lambda x: (orden[x[0]], x[1]))
 cuenta = Counter(p[0] for p in problemas)
-print(f"app.py — {len(LINEAS)} líneas")
+print(f"{ARCHIVO} — {len(LINEAS)} líneas")
 print(f"ERROR: {cuenta['ERROR']}   REVISAR: {cuenta['REVISAR']}   AVISO: {cuenta['AVISO']}\n")
 for nivel, linea, texto in problemas:
     ubic = f"L{linea}" if linea else "  "
