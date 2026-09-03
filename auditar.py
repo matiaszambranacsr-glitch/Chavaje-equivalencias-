@@ -156,6 +156,23 @@ amb = Ambito(); amb.visit(ARBOL)
 # Nombres que se asignan en las DOS ramas de un mismo if/else: siempre quedan definidos, no hay
 # riesgo. Sin esto la auditoría marcaba media docena de if/else perfectamente sanos.
 cubiertos = set()
+# Lo mismo vale para try/except: si el nombre se asigna en el try Y en el except, salga como
+# salga queda definido. Sin esto, el patrón normal de "probar la consulta y si falla dejar el
+# diccionario vacío" quedaba marcado como riesgo, que es justamente lo contrario.
+for n in ast.walk(ARBOL):
+    if isinstance(n, ast.Try) and n.handlers:
+        def _asignados_try(cuerpo):
+            r = set()
+            for h in cuerpo:
+                for x in ast.walk(h):
+                    if isinstance(x, ast.Name) and isinstance(x.ctx, ast.Store):
+                        r.add(x.id)
+            return r
+        en_try = _asignados_try(n.body)
+        for manejador in n.handlers:
+            en_try &= _asignados_try(manejador.body)
+        cubiertos |= en_try
+
 for n in ast.walk(ARBOL):
     if isinstance(n, ast.If) and n.orelse:
         def _asignados(cuerpo):

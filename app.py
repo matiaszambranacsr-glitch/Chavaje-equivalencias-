@@ -2401,6 +2401,29 @@ def stock_libre(producto_id):
     return max((fila["stock"] or 0) - reservado, 0)
 
 
+def stock_libre_de_varios(ids):
+    """Lo mismo que stock_libre() pero para muchos productos, con dos consultas en total.
+
+    De a uno son dos consultas por producto. En una búsqueda que trae 50 equivalencias eso son
+    200 idas a la base en CADA refresco de pantalla —o sea, cada vez que se toca cualquier botón
+    de la sección—. Así son dos, sin importar cuántos resultados haya."""
+    ids = [int(i) for i in ids if i is not None]
+    if not ids:
+        return {}
+    marcas = ",".join("?" * len(ids))
+    c.execute(f"SELECT id, COALESCE(stock, 0) AS stock FROM productos WHERE id IN ({marcas})", ids)
+    total = {f["id"]: f["stock"] for f in c.fetchall()}
+    try:
+        c.execute(f"""SELECT producto_id, COALESCE(SUM(cantidad), 0) AS reservado
+                      FROM reservas_stock
+                      WHERE estado = 'activa' AND producto_id IN ({marcas})
+                      GROUP BY producto_id""", ids)
+        reservado = {f["producto_id"]: f["reservado"] for f in c.fetchall()}
+    except sqlite3.OperationalError:
+        reservado = {}
+    return {i: max(v - reservado.get(i, 0), 0) for i, v in total.items()}
+
+
 def reservas_activas(limite=200):
     """Lo que está apartado ahora mismo."""
     try:
@@ -2450,11 +2473,17 @@ def margen_de(precio_venta, precio_costo):
 
 
 def agregar_margen(filas):
-    """Le suma a cada resultado su margen, si están los dos precios."""
+    """Le suma a cada resultado su margen, si están los dos precios.
+
+    NO borra el costo de la fila, aunque el costo no se muestre. Antes lo borraba, y estas filas
+    son las mismas que quedan guardadas en session_state entre refrescos: al segundo toque de
+    cualquier botón ya no había costo, así que la columna Margen aparecía vacía y el aviso de
+    «mejor margen» desaparecía. Sin error y sin aviso: se veía una vez y no volvía más.
+    De que el costo no llegue a la pantalla se encarga quien la dibuja, sacando las claves que
+    empiezan con guión bajo."""
     for f in filas:
         pct, pesos = margen_de(f.get("Precio"), f.get("_costo"))
         f["Margen"] = f"{pct:.0f}% (${pesos:,.0f})" if pct is not None else ""
-        f.pop("_costo", None)
     return filas
 
 
@@ -11088,17 +11117,25 @@ Casi todo lo que edita o borra algo pide la contraseña de administrador la prim
                         # Stock libre = lo que hay menos lo apartado en presupuestos. Es el
                         # número que importa al prometerle algo a un cliente; el stock a secas
                         # puede estar comprometido con otro que ya lo cotizó.
+                        #
+                        # Va en una columna aparte y NUMÉRICA a propósito. Antes se escribía
+                        # "3 (de 4, el resto apartado)" encima de Stock, y estos diccionarios son
+                        # los mismos que quedan guardados en session_state: al refresco siguiente
+                        # Stock ya era un texto, el filtro de arriba hacía texto > 0 y la pantalla
+                        # se cerraba con TypeError. Con una sola reserva activa alcanzaba con
+                        # tocar cualquier botón de la búsqueda, y el texto además se anidaba en
+                        # cada vuelta: "3 (de 3 (de 4, el resto apartado)...".
                         try:
-                            hay_reservas = any(stock_libre(f["ID"]) != (f.get("Stock") or 0)
-                                                for f in res)
+                            libres = stock_libre_de_varios([f["ID"] for f in res])
                         except Exception:
-                            hay_reservas = False
+                            libres = {}
+                        hay_reservas = any(f["ID"] in libres and libres[f["ID"]] != (f.get("Stock") or 0)
+                                            for f in res)
                         if hay_reservas:
                             for f in res:
-                                libre_f = stock_libre(f["ID"])
-                                if libre_f is not None and libre_f != (f.get("Stock") or 0):
-                                    f["Stock"] = f"{libre_f} (de {f.get('Stock') or 0}, "
-                                    f["Stock"] += f"el resto apartado)"
+                                f["Libre"] = libres.get(f["ID"], f.get("Stock") or 0)
+                            st.caption("**Libre** es lo que queda sin apartar: es el número que "
+                                       "se le puede prometer a un cliente.")
 
                         # El margen es información sensible: la ve el dueño y el administrador,
                         # no cualquiera que atienda el mostrador.
@@ -11112,17 +11149,18 @@ Casi todo lo que edita o borra algo pide la contraseña de administrador la prim
                                     f"${mejor_marg['ganancia']:,.0f} "
                                     f"(${mejor_marg['diferencia']:,.0f} más que el peor de la lista)."
                                 )
-                        else:
-                            for _f in res:
-                                _f.pop("_costo", None)
-
                         puentes_res = puentes_en_el_resultado([f["ID"] for f in res])
                         # comparar precios a ojo cuando hay varias marcas equivalentes.
                         candidatos_precio = [f for f in res if f.get("Precio") and (f.get("Stock") or 0) > 0]
                         id_mas_barato = min(candidatos_precio, key=lambda f: f["Precio"])["ID"] if candidatos_precio else None
                         for f in res:
                             f["💰"] = "🏆 Más barato en stock" if f["ID"] == id_mas_barato else ""
-                        mostrar = quitar_id(res)
+                        # Las claves con guión bajo son internas —el costo entre ellas— y no
+                        # salen a pantalla ni al Excel. Se sacan ACÁ, al dibujar, y no borrándolas
+                        # de la fila: la fila se reusa en el refresco siguiente y borrarle datos
+                        # es lo que hacía desaparecer el margen después del primer toque.
+                        mostrar = quitar_id([{k: v for k, v in f.items() if not k.startswith("_")}
+                                              for f in res])
                         st.dataframe(
                             mostrar, use_container_width=True, hide_index=True,
                             column_config={
@@ -11631,13 +11669,16 @@ Casi todo lo que edita o borra algo pide la contraseña de administrador la prim
                         _para_apartar = equivalentes or [fila_txt]
                         if seccion_plegable("🔒 Apartar para un presupuesto",
                                              key=f"apartar_txt_{fila_txt['ID']}"):
+                            # Una sola consulta para todos: preguntarlo de a uno acá eran dos
+                            # por fila para filtrar y dos más por fila para armar la etiqueta.
+                            libres_ap = stock_libre_de_varios([f["ID"] for f in _para_apartar])
                             con_stock_ap = [f for f in _para_apartar
-                                             if (stock_libre(f["ID"]) or 0) > 0]
+                                             if (libres_ap.get(f["ID"]) or 0) > 0]
                             if not con_stock_ap:
                                 st.caption("Ninguno de estos tiene stock libre para apartar.")
                             else:
                                 etq_ap = {
-                                    f"{f['Marca']} {f['Codigo']} — {stock_libre(f['ID'])} libre(s)":
+                                    f"{f['Marca']} {f['Codigo']} — {libres_ap[f['ID']]} libre(s)":
                                         f["ID"] for f in con_stock_ap
                                 }
                                 elegido_ap = st.selectbox("¿Cuál?", list(etq_ap.keys()),
