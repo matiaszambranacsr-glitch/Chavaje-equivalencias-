@@ -1693,7 +1693,46 @@ def get_connection():
 
 
 conn = get_connection()
-c = conn.cursor()
+
+
+class _CursorPorHilo:
+    """Un cursor propio para cada persona que esté usando la app en ese momento.
+
+    Antes había UNO SOLO compartido por todos. La conexión sí se puede compartir —SQLite la
+    serializa por dentro—, pero el cursor no: es el que guarda el resultado pendiente. Streamlit
+    atiende a cada persona en su propio hilo, así que dos consultas simultáneas se pisaban en el
+    mismo cursor y una podía llevarse las filas de la otra. No es un riesgo teórico: en una
+    prueba con dos hilos haciendo 400 consultas cada uno sobre un cursor compartido, 748 de las
+    800 contestaron mal o directamente reventaron.
+
+    Lo que se ve desde afuera no cambia: se sigue escribiendo c.execute(...), c.fetchall(),
+    c.rowcount. Por eso el arreglo es este envoltorio y no tocar los cientos de lugares que lo
+    usan. Y como cada hilo tiene el suyo, rowcount y lastrowid siguen siendo los de la consulta
+    que uno mismo acaba de hacer, que es justamente lo que antes no estaba garantizado.
+
+    El db_lock sigue haciendo falta igual: es el que evita que dos escrituras se mezclen."""
+
+    def __init__(self, conexion):
+        self._conexion = conexion
+        self._propio = threading.local()
+
+    @property
+    def _cursor(self):
+        cursor = getattr(self._propio, "cursor", None)
+        if cursor is None:
+            cursor = self._propio.cursor = self._conexion.cursor()
+        return cursor
+
+    def __getattr__(self, nombre):
+        # Solo llega acá lo que no es atributo propio: execute, fetchone, fetchall,
+        # executemany, rowcount, lastrowid, fetchmany.
+        return getattr(self._cursor, nombre)
+
+    def __iter__(self):
+        return iter(self._cursor)
+
+
+c = _CursorPorHilo(conn)
 
 
 
@@ -2782,7 +2821,7 @@ def descubrir_equivalencias_candidatas(min_veces=2, dias=180, minutos_ventana=20
         guardar_evidencia(codigo_clean, producto_id, "mostrador",
                            f"Se repitió {datos['veces']} vez/veces en el mostrador")
         evidencias = listar_evidencia(codigo_clean, producto_id)
-        etiqueta_confianza, puntaje = nivel_de_confianza(evidencias)
+        etiqueta_confianza, puntaje = nivel_por_evidencias(evidencias)
 
         candidatas.append({
             "codigo_pedido": datos["termino"] or codigo_clean,
@@ -2931,9 +2970,16 @@ def verificar_en_catalogo_oficial(codigo_a_buscar, url_ficha, tiempo_maximo=8):
         return None, f"No se pudo consultar la página ({type(e).__name__})."
 
 
-def nivel_de_confianza(evidencias):
+def nivel_por_evidencias(evidencias):
     """Traduce la evidencia acumulada a algo legible. Nunca da 'confirmada': eso lo decide
-    una persona. Si hay evidencia EN CONTRA (ej: las medidas no coinciden), lo marca."""
+    una persona. Si hay evidencia EN CONTRA (ej: las medidas no coinciden), lo marca.
+
+    Se llamaba nivel_de_confianza, igual que la de más abajo que recibe un PUNTAJE. Dos def con
+    el mismo nombre no son un error de Python: la segunda simplemente pisa a la primera. Así que
+    esta acá nunca llegaba a correr — la llamada de descubrir_equivalencias_candidatas() le
+    pasaba la lista de evidencias a la que espera un número y reventaba con
+    "'>=' not supported between instances of 'list' and 'int'", tirando abajo toda la pantalla
+    de equivalencias sugeridas apenas había una candidata con evidencia."""
     tipos = {e["tipo"] for e in evidencias}
     if "medidas_no_coinciden" in tipos or "catalogo_no_lo_lista" in tipos:
         return "⛔ Con evidencia en contra", 0

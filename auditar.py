@@ -817,7 +817,10 @@ for n in ast.walk(ARBOL):
                      f"{n.func.id}() recibe {len(n.args)} posicionales, la firma acepta {len(f.args.args)}")
 
 # ============ 11. Nombres usados y nunca definidos ============
-definidas = {n.name for n in ast.walk(ARBOL) if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))}
+# Las clases también definen un nombre. Faltaban, así que la primera clase que apareciera en el
+# archivo se reportaba como "nombre usado y nunca definido".
+definidas = {n.name for n in ast.walk(ARBOL)
+             if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))}
 conocidas = set(definidas) | set(dir(__builtins__))
 for n in ast.walk(ARBOL):
     if isinstance(n, (ast.Assign, ast.AugAssign, ast.For)):
@@ -831,7 +834,7 @@ for n in ast.walk(ARBOL):
             if isinstance(x, ast.Name): conocidas.add(x.id)
     if isinstance(n, (ast.Import, ast.ImportFrom)):
         for a in n.names: conocidas.add((a.asname or a.name).split(".")[0])
-    if isinstance(n, ast.FunctionDef):
+    if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)):
         for a in n.args.args + n.args.kwonlyargs: conocidas.add(a.arg)
         if n.args.vararg: conocidas.add(n.args.vararg.arg)
         if n.args.kwarg: conocidas.add(n.args.kwarg.arg)
@@ -849,6 +852,27 @@ referidos = {n.id for n in ast.walk(ARBOL) if isinstance(n, ast.Name) and isinst
 for nombre in sorted(funcs_modulo - llamados - referidos):
     if not nombre.startswith("_") and nombre in firmas:
         reportar("AVISO", firmas[nombre].lineno, f"función '{nombre}' definida y nunca usada")
+
+# ============ 12b. Dos definiciones con el mismo nombre ============
+# Python no se queja: la segunda def pisa a la primera y listo. Pero la primera queda muerta, y
+# lo que la llamaba termina ejecutando la otra —con otros parámetros y otro significado— y
+# revienta recién cuando alguien entra a esa pantalla.
+# Pasó de verdad acá: había dos nivel_de_confianza(), una que recibía la lista de evidencias y
+# otra que recibía un puntaje. La de evidencias nunca corrió, y la pantalla de equivalencias
+# sugeridas se caía con "'>=' not supported between instances of 'list' and 'int'" apenas
+# aparecía una candidata con evidencia.
+_definiciones = defaultdict(list)
+for n in ARBOL.body:
+    if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+        _definiciones[n.name].append(n.lineno)
+for nombre, lineas in _definiciones.items():
+    if len(lineas) > 1:
+        reportar("ERROR", lineas[0],
+                 f"'{nombre}' está definido {len(lineas)} veces (L"
+                 + ", L".join(str(x) for x in lineas)
+                 + "): la última pisa a las anteriores. Todo lo que llame a las de arriba va a "
+                   "ejecutar la de abajo, con los parámetros de otra cosa")
+
 
 # ============ Resultado ============
 orden = {"ERROR": 0, "REVISAR": 1, "AVISO": 2}
