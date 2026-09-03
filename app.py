@@ -7331,7 +7331,20 @@ def guardar_reemplazo(codigo_viejo, codigo_nuevo, marca="", nota=""):
     if any(paso["clean"] == v for paso in cadena_de_reemplazos(n)):
         return False, (f"No se puede: {codigo_nuevo} ya lleva de vuelta a {codigo_viejo}. "
                        "Revisá cuál de los dos es el vigente.")
+    # Un código viejo tiene UN reemplazo vigente, no varios. La clave de la tabla es el par
+    # (viejo, nuevo), así que cargar A→B y después A→C dejaba las dos filas, y la búsqueda seguía
+    # la que SQLite devolviera primero: la misma consulta podía contestar B o C según cómo
+    # estuvieran guardadas las filas. Se reemplaza el anterior y se avisa cuál se pisó.
+    anterior = None
+    try:
+        c.execute("""SELECT codigo_nuevo FROM reemplazos_codigo
+                     WHERE codigo_viejo_clean = ? AND codigo_nuevo_clean != ?""", (v, n))
+        fila_previa = c.fetchone()
+        anterior = fila_previa["codigo_nuevo"] if fila_previa else None
+    except sqlite3.OperationalError:
+        anterior = None
     with db_lock:
+        c.execute("DELETE FROM reemplazos_codigo WHERE codigo_viejo_clean = ?", (v,))
         c.execute("""INSERT OR REPLACE INTO reemplazos_codigo
                      (codigo_viejo, codigo_viejo_clean, codigo_nuevo, codigo_nuevo_clean,
                       marca, nota, cargado_por)
@@ -7340,6 +7353,9 @@ def guardar_reemplazo(codigo_viejo, codigo_nuevo, marca="", nota=""):
                    (marca or "").strip().upper() or None, (nota or "").strip() or None,
                    obtener_usuario_actual()))
         conn.commit()
+    if anterior:
+        return True, (f"{codigo_viejo} → {codigo_nuevo} anotado. "
+                      f"Antes decía que lo reemplazaba {anterior}; quedó este.")
     return True, f"{codigo_viejo} → {codigo_nuevo} anotado."
 
 
@@ -7357,8 +7373,11 @@ def cadena_de_reemplazos(clean_code, tope=6):
     cadena, visto, actual = [], {clean_code}, clean_code
     for _ in range(tope):
         try:
+            # Por si quedaron filas viejas de antes de que se guardara uno solo por código:
+            # gana el más reciente, para que la respuesta no dependa del orden de la tabla.
             c.execute("""SELECT codigo_nuevo, codigo_nuevo_clean, marca, nota
-                         FROM reemplazos_codigo WHERE codigo_viejo_clean = ? LIMIT 1""", (actual,))
+                         FROM reemplazos_codigo WHERE codigo_viejo_clean = ?
+                         ORDER BY fecha DESC LIMIT 1""", (actual,))
             fila = c.fetchone()
         except sqlite3.OperationalError:
             return []
