@@ -704,6 +704,91 @@ for nombre, usos in _usados_en.items():
 # otro significado: ahí no hay NameError, hay datos de otra búsqueda mostrados como si fueran
 # de esta. No falla, no avisa, y está mal. Eso hay que mirarlo a mano al copiar un bloque.
 
+# ============ 8i. Borrarle datos a las filas que quedan guardadas ============
+# El bug más difícil de ver de todo el archivo fue este. Las listas de resultados se guardan en
+# st.session_state y se REUSAN en cada refresco: son los mismos diccionarios, no una copia.
+# agregar_margen() les borraba "_costo" para que el costo no saliera en la tabla, y funcionaba
+# —la primera vez—. A partir del segundo toque de cualquier botón el costo ya no estaba, así que
+# la columna Margen quedaba vacía y el aviso de «mejor margen» desaparecía. Sin error, sin aviso:
+# se veía una vez y no volvía más.
+# Lo que hay que hacer es sacar lo que no va A LA HORA DE DIBUJAR, sobre una copia.
+#
+# Se mira SOLO el cuerpo de la pantalla. Adentro de una función, las filas son las que acaba de
+# traer la consulta y sacarles una clave interna antes de devolverlas está perfecto: marcarlo
+# llenaba la auditoría de funciones sanas.
+def _borra_una_clave(nodo):
+    """pop('algo') sobre un diccionario. lista.pop(i) saca un elemento de una lista y está bien:
+    sin esta distinción el chequeo marcaba el botón de quitar de la lista de WhatsApp."""
+    return (isinstance(nodo, ast.Call) and isinstance(nodo.func, ast.Attribute)
+            and nodo.func.attr == "pop" and nodo.args
+            and isinstance(nodo.args[0], ast.Constant) and isinstance(nodo.args[0].value, str))
+
+
+def _sin_entrar_a_funciones(raiz):
+    for nodo in ast.iter_child_nodes(raiz):
+        if isinstance(nodo, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda, ast.ClassDef)):
+            continue
+        yield nodo
+        yield from _sin_entrar_a_funciones(nodo)
+
+
+_EN_PANTALLA = list(_sin_entrar_a_funciones(ARBOL))
+
+
+def _menciona_sesion(nodo, conocidos):
+    for x in ast.walk(nodo):
+        if isinstance(x, ast.Attribute) and x.attr == "session_state":
+            return True
+        if isinstance(x, ast.Name) and x.id in conocidos:
+            return True
+    return False
+
+
+# Qué nombres de la pantalla salieron de session_state (incluido el rebote
+# `for item in guardadas:` y después `res = item["res"]`).
+_de_sesion = set()
+for _ in range(3):
+    for nodo in _EN_PANTALLA:
+        if isinstance(nodo, ast.Assign) and len(nodo.targets) == 1 \
+                and isinstance(nodo.targets[0], ast.Name) \
+                and _menciona_sesion(nodo.value, _de_sesion):
+            _de_sesion.add(nodo.targets[0].id)
+        if isinstance(nodo, ast.For) and isinstance(nodo.target, ast.Name) \
+                and _menciona_sesion(nodo.iter, _de_sesion):
+            _de_sesion.add(nodo.target.id)
+
+# Funciones que le borran claves a las filas que reciben
+_vacian_lo_que_reciben = set()
+for _fn in ARBOL.body:
+    if not isinstance(_fn, ast.FunctionDef):
+        continue
+    _params = {a.arg for a in _fn.args.args}
+    _filas = {x.target.id for x in ast.walk(_fn)
+              if isinstance(x, ast.For) and isinstance(x.target, ast.Name)
+              and isinstance(x.iter, ast.Name) and x.iter.id in _params}
+    for x in ast.walk(_fn):
+        if _borra_una_clave(x) and isinstance(x.func.value, ast.Name) and x.func.value.id in _filas:
+            _vacian_lo_que_reciben.add(_fn.name)
+
+for nodo in _EN_PANTALLA:
+    # 1) pop() directo sobre una fila que salió de la sesión
+    if _borra_una_clave(nodo) and isinstance(nodo.func.value, ast.Name) \
+            and nodo.func.value.id in _de_sesion:
+        reportar("ERROR", nodo.lineno,
+                 f"'{nodo.func.value.id}' salió de session_state y se le está borrando una "
+                 "clave: se reusa en cada refresco, así que del segundo en adelante ese dato ya "
+                 "no está y nada lo avisa. Sacala al dibujar, sobre una copia")
+    # 2) una función que vacía las filas que recibe, llamada con datos de la sesión
+    if isinstance(nodo, ast.Call) and isinstance(nodo.func, ast.Name) \
+            and nodo.func.id in _vacian_lo_que_reciben:
+        for arg in nodo.args:
+            if isinstance(arg, ast.Name) and arg.id in _de_sesion:
+                reportar("ERROR", nodo.lineno,
+                         f"{nodo.func.id}() le borra claves a las filas que recibe, y "
+                         f"'{arg.id}' salió de session_state: del segundo refresco en adelante "
+                         "esos datos ya no están. Que las saque quien dibuja, sobre una copia")
+
+
 # ============ 9. Argumentos por defecto mutables ============
 for n in ast.walk(ARBOL):
     if isinstance(n, ast.FunctionDef):
