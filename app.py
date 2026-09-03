@@ -3468,6 +3468,27 @@ def analizar_lote_pendiente(lote, limite=400, desde=0):
         # Las alarmas estructurales (el código no parece un código, un OEM que apunta a dos
         # productos) descuentan fuerte: son problemas de carga, no matices.
         puntaje -= 35 * len([a for a in alarmas if a.startswith(("🚫", "⚠️"))])
+
+        # Y el cruce de métodos, que es lo que más precisión da: que dos caminos
+        # independientes lleguen al mismo par es mucho más fuerte que uno solo. Un VETO —las
+        # medidas se contradicen, los rubros no son el mismo— tumba el par sin importar
+        # cuántos digan que sí.
+        try:
+            a_favor, vetos, veredicto = evidencia_cruzada(f["a"], f["b"])
+        except Exception:
+            a_favor, vetos, veredicto = [], [], ""
+        if vetos:
+            puntaje = min(puntaje, 15.0)
+            for v in vetos:
+                if v not in alarmas:
+                    alarmas.append(v)
+        elif len(a_favor) >= 3:
+            puntaje = max(puntaje, 90.0)
+        elif len(a_favor) == 2:
+            puntaje = max(puntaje, 72.0)
+        f["evidencia"] = a_favor
+        f["veredicto"] = veredicto
+
         puntaje = max(0.0, min(100.0, puntaje))
 
         f["alarmas"] = alarmas
@@ -6574,6 +6595,109 @@ def firmas_compatibles(a, b, minimo_nucleo=2):
     if a["cilindradas"] & b["cilindradas"]:
         detalle += f" · {'/'.join(sorted(a['cilindradas'] & b['cilindradas']))}"
     return True, detalle
+
+
+def evidencia_cruzada(id_a, id_b):
+    """Corre TODOS los métodos sobre un mismo par y cuenta cuántos coinciden.
+
+    Es la mejora de precisión más grande que faltaba. Hasta ahora cada método trabajaba solo:
+    el de descripciones proponía sus pares, el de medidas los suyos, el de catálogos los suyos,
+    y todos caían en la misma cola con el mismo peso. Pero no valen lo mismo.
+
+    Que DOS métodos independientes lleguen al mismo par es muchísimo más fuerte que uno solo:
+    que dos descripciones se parezcan puede ser casualidad, que además midan igual y encima
+    el fabricante las dé para el mismo auto, no.
+
+    Y al revés, lo que más precisión gana: los VETOS. Si las medidas se contradicen, no importa
+    cuántos métodos digan que sí — no es la misma pieza. Antes eso era una alarma más entre
+    varias; acá tumba el par.
+
+    Devuelve (a_favor, vetos, veredicto)."""
+    c.execute(f"""SELECT p.id, p.codigo_raw, p.codigo_clean, p.descripcion, p.precio,
+                         p.marca_id, m.nombre AS marca, {COLUMNAS_MEDIDAS}
+                  FROM productos p JOIN marcas m ON m.id = p.marca_id
+                  WHERE p.id IN (?, ?)""", (id_a, id_b))
+    filas = {r["id"]: dict(r) for r in c.fetchall()}
+    if id_a not in filas or id_b not in filas:
+        return [], ["uno de los dos productos ya no existe"], "🔴 no se puede evaluar"
+    pa, pb = filas[id_a], filas[id_b]
+
+    a_favor, vetos = [], []
+
+    # 1. Medidas. Es el único método que puede VETAR: si las medidas se contradicen, no hay
+    # descripción ni catálogo que lo arregle.
+    medidas = cargar_medidas_de_varios([id_a, id_b])
+    coinciden, detalle_med = comparar_medidas(medidas.get(id_a), medidas.get(id_b))
+    if coinciden is True:
+        a_favor.append(f"📐 las medidas coinciden ({detalle_med})")
+    elif coinciden is False:
+        vetos.append(f"📐 {detalle_med}")
+
+    # 2. Descripción
+    fa = firma_de_producto(pa["descripcion"], id_a, pa["codigo_clean"])
+    fb = firma_de_producto(pb["descripcion"], id_b, pb["codigo_clean"])
+    ok_desc, motivo_desc = firmas_compatibles(fa, fb)
+    if ok_desc:
+        a_favor.append(f"🔤 las descripciones concuerdan ({motivo_desc})")
+    elif fa and fb and fa["familia"] != "Sin clasificar" and fb["familia"] != "Sin clasificar":
+        if fa["familia"] != fb["familia"]:
+            vetos.append(f"🧩 rubros distintos: «{fa['familia']}» y «{fb['familia']}»")
+        elif "posiciones distintas" in motivo_desc or "siglas distintas" in motivo_desc:
+            vetos.append(f"🔤 {motivo_desc}")
+
+    # 3. El catálogo del fabricante: ¿los da para el mismo auto?
+    try:
+        c.execute("""SELECT COUNT(*) FROM aplicaciones a JOIN aplicaciones b
+                       ON a.marca_auto = b.marca_auto AND a.modelo_auto = b.modelo_auto
+                     WHERE a.codigo_clean = ? AND b.codigo_clean = ?
+                       AND a.marca_repuesto <> b.marca_repuesto""",
+                  (pa["codigo_clean"], pb["codigo_clean"]))
+        autos_juntos = c.fetchone()[0]
+        if autos_juntos:
+            a_favor.append(f"🏭 dos fabricantes los dan para {autos_juntos} auto(s) en común")
+    except sqlite3.OperationalError:
+        pass
+
+    # 4. El mostrador: ¿ya se vendió uno en lugar del otro?
+    veces = pares_confirmados_por_ventas().get((min(id_a, id_b), max(id_a, id_b)), 0)
+    if veces >= 2:
+        a_favor.append(f"🧾 ya lo vendiste como reemplazo {veces} vez(ces)")
+
+    # 5. Un código de fábrica compartido
+    try:
+        c.execute("""SELECT COUNT(*) FROM equivalencias e
+                     WHERE (e.producto_a_id = ? AND e.producto_b_id = ?)
+                        OR (e.producto_a_id = ? AND e.producto_b_id = ?)""",
+                  (min(id_a, id_b), max(id_a, id_b), max(id_a, id_b), min(id_a, id_b)))
+        if c.fetchone()[0]:
+            a_favor.append("🔗 ya están vinculados en la base")
+    except sqlite3.OperationalError:
+        pass
+
+    # 6. Reemplazo de código declarado
+    for viejo, nuevo in ((pa["codigo_clean"], pb["codigo_clean"]),
+                         (pb["codigo_clean"], pa["codigo_clean"])):
+        if any(x["clean"] == nuevo for x in cadena_de_reemplazos(viejo)):
+            a_favor.append("🔄 el fabricante reemplazó uno por el otro")
+            break
+
+    # 7. Precio: no confirma nada por sí solo, pero una diferencia enorme sí desmiente
+    if pa["precio"] and pb["precio"] and pa["precio"] > 0 and pb["precio"] > 0:
+        razon = max(pa["precio"], pb["precio"]) / min(pa["precio"], pb["precio"])
+        if razon >= 15:
+            vetos.append(f"💲 los precios se diferencian {razon:.0f} veces")
+
+    if vetos:
+        veredicto = "🔴 hay evidencia en contra"
+    elif len(a_favor) >= 3:
+        veredicto = "🟢 confirmada por varios métodos"
+    elif len(a_favor) == 2:
+        veredicto = "🟡 dos métodos coinciden"
+    elif len(a_favor) == 1:
+        veredicto = "🟠 un solo método, conviene mirarla"
+    else:
+        veredicto = "⚪ sin evidencia a favor"
+    return a_favor, vetos, veredicto
 
 
 def derivar_equivalencias_por_medidas(minimo_medidas=3, limite=400):
@@ -14533,224 +14657,276 @@ if pagina == PAGINAS[3]:
                     avisar("success", f"Se guardaron {n:,} aplicaciones de {marca_aplic.upper()}.")
                     st.rerun()
 
+            # Un índice arriba de todo: son seis formas distintas de generar equivalencias y
+            # cada una necesita cosas distintas. Sin este resumen hay que bajar leyendo panel
+            # por panel para saber cuál se puede usar hoy.
+            st.markdown("### 🔗 Generar equivalencias")
+            # Con valor inicial: si la consulta falla, el índice tiene que dibujarse igual en
+            # vez de tumbar la pantalla entera por un contador.
+            marcas_con_tipo = 0
+            _n_desc = _n_med = _n_reemp = 0
             try:
                 c.execute("""SELECT COUNT(DISTINCT marca_repuesto) FROM aplicaciones
                              WHERE COALESCE(tipo_pieza,'') <> ''""")
                 marcas_con_tipo = c.fetchone()[0]
             except sqlite3.OperationalError:
                 marcas_con_tipo = 0
+            try:
+                c.execute("SELECT COUNT(*) FROM productos WHERE COALESCE(descripcion,'') <> ''")
+                _n_desc = c.fetchone()[0]
+                c.execute(f"SELECT COUNT(*) FROM productos WHERE {CAMPOS_MEDIDAS[0][0]} IS NOT NULL")
+                _n_med = c.fetchone()[0]
+                c.execute("SELECT COUNT(*) FROM reemplazos_codigo")
+                _n_reemp = c.fetchone()[0]
+            except sqlite3.OperationalError:
+                pass
+            _n_portales = sum(1 for _m in (filas_a_listas(c.execute(
+                "SELECT nombre FROM marcas")) or []) if config_portal(_m["nombre"]))
 
-            if marcas_con_tipo >= 2:
-                st.markdown("**📐 Equivalencias por medidas**")
-                explicar(
-                    "La evidencia más fuerte que hay: no es texto, es la pieza física.",
-                    "Las medidas se venían usando solo para verificar un vínculo que ya "
-                    "existía. Pero en retenes, o'rings, rulemanes y bujes la medida **es** la "
-                    "identidad: un 35x52x7 de un proveedor y un 35x52x7 de otro son el mismo "
-                    "repuesto, sin importar cómo se llame el código ni cómo esté escrita la "
-                    "descripción.\n\nSe piden al menos 3 medidas coincidentes: con una sola "
-                    "—el diámetro interno, por ejemplo— coincidirían piezas completamente "
-                    "distintas que casualmente miden lo mismo. Y se compara igual el nombre de "
-                    "la pieza, porque una arandela y un retén pueden medir exactamente igual."
-                )
-                if st.button("📐 Buscar equivalencias por medidas"):
-                    with st.spinner("Comparando medidas..."):
-                        st.session_state["deriv_med"] = derivar_equivalencias_por_medidas()
-                _dm = st.session_state.get("deriv_med")
-                if _dm is not None:
-                    if not _dm:
-                        st.info(
-                            "No salió ninguna. Hacen falta productos con al menos 3 medidas "
-                            "cargadas, de marcas distintas. Se cargan en la ficha de cada "
-                            "producto o al importar, si la lista trae columnas de medidas."
-                        )
-                    else:
-                        st.success(f"{len(_dm)} par(es) con las mismas medidas.")
-                        st.dataframe(quitar_id(_dm), use_container_width=True, hide_index=True)
-                        if st.button(f"📥 Mandar las {len(_dm)} a revisión", key="env_med"):
-                            _n = guardar_equivalencias_derivadas(
-                                [(x["_a"], x["_b"]) for x in _dm],
-                                f"POR MEDIDAS · {datetime.now():%d/%m %H:%M}")
-                            st.session_state.pop("deriv_med", None)
-                            invalidar_salud()
-                            avisar("success", f"{_n} equivalencia(s) para revisar.")
-                            st.rerun()
-                st.markdown("---")
+            st.dataframe([
+                {"Método": "🔤 Por descripción",
+                 "Qué necesita": "dos proveedores con descripciones",
+                 "Estado": f"listo — {_n_desc:,} productos con descripción" if _n_desc > 50
+                            else "faltan productos con descripción"},
+                {"Método": "📐 Por medidas",
+                 "Qué necesita": "3 o más medidas cargadas, en marcas distintas",
+                 "Estado": f"listo — {_n_med:,} con medidas" if _n_med > 5
+                            else "todavía no hay medidas cargadas"},
+                {"Método": "🔄 Por cambio de número",
+                 "Qué necesita": "reemplazos cargados a mano",
+                 "Estado": f"listo — {_n_reemp} reemplazo(s)" if _n_reemp
+                            else "cargá reemplazos en «Códigos reemplazados»"},
+                {"Método": "🏭 Cruzando catálogos",
+                 "Qué necesita": "2 catálogos de fabricante del mismo tipo de pieza",
+                 "Estado": f"listo — {marcas_con_tipo} marca(s)" if marcas_con_tipo >= 2
+                            else f"tenés {marcas_con_tipo}, hacen falta 2"},
+                {"Método": "🔐 Autos del portal",
+                 "Qué necesita": "usuario del portal en los secretos",
+                 "Estado": f"listo — {_n_portales} portal(es)" if _n_portales
+                            else "sin configurar"},
+                {"Método": "🧾 Confirmadas por venta",
+                 "Qué necesita": "usar «Se llevó» en el mostrador",
+                 "Estado": "corre solo, una vez por día"},
+            ], use_container_width=True, hide_index=True)
+            st.caption("Cada método está en un panel más abajo. Todos mandan a revisión: "
+                       "ninguno carga equivalencias directo.")
+            st.markdown("---")
 
-                st.markdown("**🔄 Reunir lo que separó un cambio de número**")
-                explicar(
-                    "Cuando el fabricante cambia el número, la cadena se parte en dos islas.",
-                    "Tenés un producto vinculado al código de fábrica viejo y otro al nuevo. "
-                    "Son el mismo repuesto, pero para la app quedaron sin relación.\n\nLos "
-                    "reemplazos que cargaste ya sabían que el viejo y el nuevo son lo mismo: "
-                    "esto usa ese dato para volver a unirlos."
-                )
-                try:
-                    _pu = equivalencias_puenteadas_por_reemplazo()
-                except Exception:
-                    _pu = []
-                if not _pu:
-                    st.caption(
-                        "Nada para reunir. Aparece cuando cargues reemplazos y tengas productos "
-                        "de los dos códigos."
+            # Cada panel con SU condición. Estaban los cinco dentro de «si hay 2 catálogos
+            # de fabricante», y cuatro no los necesitan: medidas, reemplazos, portal y
+            # descripciones andan sin ningún catálogo cargado. Así quedaban invisibles.
+            st.markdown("**📐 Equivalencias por medidas**")
+            explicar(
+                "La evidencia más fuerte que hay: no es texto, es la pieza física.",
+                "Las medidas se venían usando solo para verificar un vínculo que ya "
+                "existía. Pero en retenes, o'rings, rulemanes y bujes la medida **es** la "
+                "identidad: un 35x52x7 de un proveedor y un 35x52x7 de otro son el mismo "
+                "repuesto, sin importar cómo se llame el código ni cómo esté escrita la "
+                "descripción.\n\nSe piden al menos 3 medidas coincidentes: con una sola "
+                "—el diámetro interno, por ejemplo— coincidirían piezas completamente "
+                "distintas que casualmente miden lo mismo. Y se compara igual el nombre de "
+                "la pieza, porque una arandela y un retén pueden medir exactamente igual."
+            )
+            if st.button("📐 Buscar equivalencias por medidas"):
+                with st.spinner("Comparando medidas..."):
+                    st.session_state["deriv_med"] = derivar_equivalencias_por_medidas()
+            _dm = st.session_state.get("deriv_med")
+            if _dm is not None:
+                if not _dm:
+                    st.info(
+                        "No salió ninguna. Hacen falta productos con al menos 3 medidas "
+                        "cargadas, de marcas distintas. Se cargan en la ficha de cada "
+                        "producto o al importar, si la lista trae columnas de medidas."
                     )
                 else:
-                    st.success(f"{len(_pu)} par(es) que el cambio de número había separado.")
-                    st.dataframe(quitar_id(_pu), use_container_width=True, hide_index=True)
-                    if st.button(f"📥 Mandar los {len(_pu)} a revisión", key="env_puente"):
+                    st.success(f"{len(_dm)} par(es) con las mismas medidas.")
+                    st.dataframe(quitar_id(_dm), use_container_width=True, hide_index=True)
+                    if st.button(f"📥 Mandar las {len(_dm)} a revisión", key="env_med"):
                         _n = guardar_equivalencias_derivadas(
-                            [(x["_a"], x["_b"]) for x in _pu],
-                            f"POR REEMPLAZO DE CÓDIGO · {datetime.now():%d/%m %H:%M}")
+                            [(x["_a"], x["_b"]) for x in _dm],
+                            f"POR MEDIDAS · {datetime.now():%d/%m %H:%M}")
+                        st.session_state.pop("deriv_med", None)
                         invalidar_salud()
                         avisar("success", f"{_n} equivalencia(s) para revisar.")
                         st.rerun()
-                st.markdown("---")
+            st.markdown("---")
 
-                st.markdown("**🔐 Traer autos del portal del proveedor**")
-                explicar(
-                    "Para cuando la descripción se corta y no entran todos los autos.",
-                    "La ficha del portal tiene la lista completa; la celda de Excel no. Con "
-                    "esos autos cargados, la app puede vincular productos de dos proveedores "
-                    "aunque sus descripciones no compartan ni un modelo.\n\n**Configuración**, "
-                    "en Settings → Secrets de Streamlit:\n\n```\n[portal_FISPA]\n"
-                    'url_login = "https://proveedor.com/login"\nusuario = "tu_usuario"\n'
-                    'clave = "tu_clave"\ncampo_usuario = "email"\ncampo_clave = "password"\n'
-                    'url_ficha = "https://proveedor.com/producto/{codigo}"\n```\n\n'
-                    "Los nombres de `campo_usuario` y `campo_clave` son los `name=` del "
-                    "formulario de acceso del portal.\n\n**Va en los secretos y no en la base** "
-                    "por una razón concreta: la base se baja como backup y se sube a GitHub. "
-                    "Una clave ahí queda publicada.\n\n**La app no puede pedir nada.** La "
-                    "sesión que se abre es de solo lectura: los métodos para enviar datos "
-                    "(post, put, delete) directamente no existen en ella, así que ni un error "
-                    "de programación podría mandar un pedido. Y las direcciones que dicen "
-                    "carrito, pedido, comprar o checkout se rechazan aunque sean de solo "
-                    "consulta, porque hay portales que agregan al carrito con un simple enlace."
+            st.markdown("**🔄 Reunir lo que separó un cambio de número**")
+            explicar(
+                "Cuando el fabricante cambia el número, la cadena se parte en dos islas.",
+                "Tenés un producto vinculado al código de fábrica viejo y otro al nuevo. "
+                "Son el mismo repuesto, pero para la app quedaron sin relación.\n\nLos "
+                "reemplazos que cargaste ya sabían que el viejo y el nuevo son lo mismo: "
+                "esto usa ese dato para volver a unirlos."
+            )
+            try:
+                _pu = equivalencias_puenteadas_por_reemplazo()
+            except Exception:
+                _pu = []
+            if not _pu:
+                st.caption(
+                    "Nada para reunir. Aparece cuando cargues reemplazos y tengas productos "
+                    "de los dos códigos."
                 )
-                st.info(
-                    "🔒 **La app solo puede leer fichas.** No puede hacer pedidos, ni reservas, "
-                    "ni modificar nada en el portal del proveedor. Está bloqueado por diseño, "
-                    "no por configuración: nadie puede activarlo sin querer."
+            else:
+                st.success(f"{len(_pu)} par(es) que el cambio de número había separado.")
+                st.dataframe(quitar_id(_pu), use_container_width=True, hide_index=True)
+                if st.button(f"📥 Mandar los {len(_pu)} a revisión", key="env_puente"):
+                    _n = guardar_equivalencias_derivadas(
+                        [(x["_a"], x["_b"]) for x in _pu],
+                        f"POR REEMPLAZO DE CÓDIGO · {datetime.now():%d/%m %H:%M}")
+                    invalidar_salud()
+                    avisar("success", f"{_n} equivalencia(s) para revisar.")
+                    st.rerun()
+            st.markdown("---")
+
+            st.markdown("**🔐 Traer autos del portal del proveedor**")
+            explicar(
+                "Para cuando la descripción se corta y no entran todos los autos.",
+                "La ficha del portal tiene la lista completa; la celda de Excel no. Con "
+                "esos autos cargados, la app puede vincular productos de dos proveedores "
+                "aunque sus descripciones no compartan ni un modelo.\n\n**Configuración**, "
+                "en Settings → Secrets de Streamlit:\n\n```\n[portal_FISPA]\n"
+                'url_login = "https://proveedor.com/login"\nusuario = "tu_usuario"\n'
+                'clave = "tu_clave"\ncampo_usuario = "email"\ncampo_clave = "password"\n'
+                'url_ficha = "https://proveedor.com/producto/{codigo}"\n```\n\n'
+                "Los nombres de `campo_usuario` y `campo_clave` son los `name=` del "
+                "formulario de acceso del portal.\n\n**Va en los secretos y no en la base** "
+                "por una razón concreta: la base se baja como backup y se sube a GitHub. "
+                "Una clave ahí queda publicada.\n\n**La app no puede pedir nada.** La "
+                "sesión que se abre es de solo lectura: los métodos para enviar datos "
+                "(post, put, delete) directamente no existen en ella, así que ni un error "
+                "de programación podría mandar un pedido. Y las direcciones que dicen "
+                "carrito, pedido, comprar o checkout se rechazan aunque sean de solo "
+                "consulta, porque hay portales que agregan al carrito con un simple enlace."
+            )
+            st.info(
+                "🔒 **La app solo puede leer fichas.** No puede hacer pedidos, ni reservas, "
+                "ni modificar nada en el portal del proveedor. Está bloqueado por diseño, "
+                "no por configuración: nadie puede activarlo sin querer."
+            )
+            try:
+                c.execute("""SELECT m.id, m.nombre, COUNT(p.id) AS n FROM marcas m
+                             JOIN productos p ON p.marca_id = m.id
+                             GROUP BY m.id ORDER BY n DESC""")
+                _marcas_portal = filas_a_listas(c)
+            except sqlite3.OperationalError:
+                _marcas_portal = []
+            _con_portal = [x for x in _marcas_portal if config_portal(x["nombre"])]
+            if not _con_portal:
+                st.caption(
+                    "Todavía no hay ningún portal configurado. Mientras tanto, fijate si el "
+                    "proveedor deja **exportar el catálogo a Excel** desde su portal: bajarlo "
+                    "y cargarlo por «Cargar Excel» es más simple y más confiable que esto."
                 )
-                try:
-                    c.execute("""SELECT m.id, m.nombre, COUNT(p.id) AS n FROM marcas m
-                                 JOIN productos p ON p.marca_id = m.id
-                                 GROUP BY m.id ORDER BY n DESC""")
-                    _marcas_portal = filas_a_listas(c)
-                except sqlite3.OperationalError:
-                    _marcas_portal = []
-                _con_portal = [x for x in _marcas_portal if config_portal(x["nombre"])]
-                if not _con_portal:
-                    st.caption(
-                        "Todavía no hay ningún portal configurado. Mientras tanto, fijate si el "
-                        "proveedor deja **exportar el catálogo a Excel** desde su portal: bajarlo "
-                        "y cargarlo por «Cargar Excel» es más simple y más confiable que esto."
-                    )
-                else:
-                    _et_p = {f"{x['nombre']} ({x['n']:,} productos)": x for x in _con_portal}
-                    _sel_p = st.selectbox("Proveedor:", list(_et_p.keys()), key="portal_marca")
-                    _marca_p = _et_p[_sel_p]
-                    _cuantos = st.select_slider("Traer fichas de:", options=[10, 25, 50, 100],
-                                                 format_func=lambda x: f"{x} productos",
-                                                 key="portal_cuantos")
-                    st.caption(
-                        "Se hace de a tandas chicas y con una pausa entre pedidos. No es "
-                        "lentitud: golpear el servidor del proveedor a máxima velocidad es la "
-                        "forma más rápida de que te bloqueen la cuenta."
-                    )
-                    if st.button("🔐 Entrar y traer las fichas"):
-                        _sesion, _err = sesion_de_portal(_marca_p["nombre"])
-                        if _err:
-                            st.error(_err)
+            else:
+                _et_p = {f"{x['nombre']} ({x['n']:,} productos)": x for x in _con_portal}
+                _sel_p = st.selectbox("Proveedor:", list(_et_p.keys()), key="portal_marca")
+                _marca_p = _et_p[_sel_p]
+                _cuantos = st.select_slider("Traer fichas de:", options=[10, 25, 50, 100],
+                                             format_func=lambda x: f"{x} productos",
+                                             key="portal_cuantos")
+                st.caption(
+                    "Se hace de a tandas chicas y con una pausa entre pedidos. No es "
+                    "lentitud: golpear el servidor del proveedor a máxima velocidad es la "
+                    "forma más rápida de que te bloqueen la cuenta."
+                )
+                if st.button("🔐 Entrar y traer las fichas"):
+                    _sesion, _err = sesion_de_portal(_marca_p["nombre"])
+                    if _err:
+                        st.error(_err)
+                    else:
+                        c.execute("""SELECT p.codigo_raw, p.codigo_clean FROM productos p
+                                     WHERE p.marca_id = ?
+                                       AND p.codigo_clean NOT IN
+                                           (SELECT codigo_clean FROM aplicaciones
+                                             WHERE codigo_clean IS NOT NULL)
+                                     LIMIT ?""", (_marca_p["id"], int(_cuantos)))
+                        _pendientes = [(r["codigo_raw"], r["codigo_clean"])
+                                        for r in c.fetchall()]
+                        if not _pendientes:
+                            st.info("Todos los productos de esa marca ya tienen autos cargados.")
                         else:
-                            c.execute("""SELECT p.codigo_raw, p.codigo_clean FROM productos p
-                                         WHERE p.marca_id = ?
-                                           AND p.codigo_clean NOT IN
-                                               (SELECT codigo_clean FROM aplicaciones
-                                                 WHERE codigo_clean IS NOT NULL)
-                                         LIMIT ?""", (_marca_p["id"], int(_cuantos)))
-                            _pendientes = [(r["codigo_raw"], r["codigo_clean"])
-                                            for r in c.fetchall()]
-                            if not _pendientes:
-                                st.info("Todos los productos de esa marca ya tienen autos cargados.")
-                            else:
-                                _barra = st.progress(0.0, text="Trayendo fichas...")
-                                _con, _sin = 0, 0
-                                for _i, (_cod, _cl) in enumerate(_pendientes):
-                                    _autos, _e2 = autos_desde_ficha_del_portal(
-                                        _marca_p["nombre"], _cod)
-                                    if _autos:
-                                        guardar_autos_de_ficha(_cod, _marca_p["nombre"], _autos)
-                                        _con += 1
-                                    else:
-                                        _sin += 1
-                                    _barra.progress((_i + 1) / len(_pendientes),
-                                                     text=f"{_i + 1} de {len(_pendientes)}...")
-                                    time.sleep(0.7)   # pausa entre pedidos, a propósito
-                                _barra.empty()
-                                invalidar_salud()
-                                avisar("success",
-                                       f"Se trajeron autos de {_con} ficha(s). "
-                                       f"{_sin} no tenían autos reconocibles.")
-                                st.rerun()
-                st.markdown("---")
+                            _barra = st.progress(0.0, text="Trayendo fichas...")
+                            _con, _sin = 0, 0
+                            for _i, (_cod, _cl) in enumerate(_pendientes):
+                                _autos, _e2 = autos_desde_ficha_del_portal(
+                                    _marca_p["nombre"], _cod)
+                                if _autos:
+                                    guardar_autos_de_ficha(_cod, _marca_p["nombre"], _autos)
+                                    _con += 1
+                                else:
+                                    _sin += 1
+                                _barra.progress((_i + 1) / len(_pendientes),
+                                                 text=f"{_i + 1} de {len(_pendientes)}...")
+                                time.sleep(0.7)   # pausa entre pedidos, a propósito
+                            _barra.empty()
+                            invalidar_salud()
+                            avisar("success",
+                                   f"Se trajeron autos de {_con} ficha(s). "
+                                   f"{_sin} no tenían autos reconocibles.")
+                            st.rerun()
+            st.markdown("---")
 
-                st.markdown("**🔤 Vincular dos proveedores por la descripción**")
-                explicar(
-                    "Para las listas que NO traen el código de fábrica, que son la mayoría.",
-                    "Sin esa columna, la app no puede generar ninguna equivalencia: es la "
-                    "limitación de fondo que arrastramos. Esto la resuelve comparando lo que dicen "
-                    "las descripciones.\n\nSe exige coincidencia en el **nombre de la pieza** —no "
-                    "solo en el auto—, y que no se contradigan la **posición** ni la "
-                    "**cilindrada**. Ese control es el que evita el error grave: «CAPUCHON BUJIA "
-                    "CRUZE» y «ANILLO BUJIA CRUZE» comparten el rubro y el auto, y son piezas "
-                    "distintas.\n\nComo todo lo deducido, va a la cola de revisión: el sistema de "
-                    "confianza las evalúa igual que a cualquier otra."
-                )
-                try:
-                    c.execute("""SELECT m.id, m.nombre, COUNT(p.id) AS n FROM marcas m
-                                 JOIN productos p ON p.marca_id = m.id
-                                 WHERE COALESCE(p.descripcion,'') <> ''
-                                 GROUP BY m.id HAVING n >= 20 ORDER BY n DESC""")
-                    _marcas_desc = filas_a_listas(c)
-                except sqlite3.OperationalError:
-                    _marcas_desc = []
-                if len(_marcas_desc) < 2:
-                    st.caption("Hacen falta al menos dos marcas con descripciones cargadas.")
-                else:
-                    _et = {f"{x['nombre']} ({x['n']:,} productos)": x["id"] for x in _marcas_desc}
-                    cd1, cd2 = cols(2)
-                    _ma = cd1.selectbox("Proveedor A:", list(_et.keys()), key="desc_marca_a")
-                    _mb = cd2.selectbox("Proveedor B:", list(_et.keys()),
-                                         index=min(1, len(_et) - 1), key="desc_marca_b")
-                    if st.button("🔤 Buscar equivalencias por descripción",
-                                  disabled=(_ma == _mb)):
-                        with st.spinner("Comparando descripciones..."):
-                            st.session_state["deriv_desc"] = derivar_equivalencias_por_descripcion(
-                                _et[_ma], _et[_mb])
-                    _dd = st.session_state.get("deriv_desc")
-                    if _dd is not None:
-                        if not _dd:
-                            st.info(
-                                "No salió ninguna. Puede ser que las descripciones de esos dos "
-                                "proveedores sean muy distintas entre sí, o que ya estén vinculados."
-                            )
-                        else:
-                            st.success(f"Se encontraron {len(_dd)} posibles equivalencias.")
-                            st.dataframe(quitar_id(_dd), use_container_width=True, hide_index=True)
-                            st.caption(
-                                "Mirá la columna «Por qué» antes de mandarlas: dice exactamente en "
-                                "qué coinciden. Si ves algo que no cierra, avisame y ajusto el criterio."
-                            )
-                            if st.button(f"📥 Mandar las {len(_dd)} a revisión", type="primary"):
-                                _lote_d = f"POR DESCRIPCIÓN · {_ma[:14]}↔{_mb[:14]} · {datetime.now():%d/%m %H:%M}"
-                                _n = guardar_equivalencias_derivadas(
-                                    [(x["_a"], x["_b"]) for x in _dd], _lote_d)
-                                st.session_state.pop("deriv_desc", None)
-                                invalidar_salud()
-                                avisar("success", f"{_n} equivalencia(s) quedaron para revisar.")
-                                st.rerun()
-                st.markdown("---")
+            st.markdown("**🔤 Vincular dos proveedores por la descripción**")
+            explicar(
+                "Para las listas que NO traen el código de fábrica, que son la mayoría.",
+                "Sin esa columna, la app no puede generar ninguna equivalencia: es la "
+                "limitación de fondo que arrastramos. Esto la resuelve comparando lo que dicen "
+                "las descripciones.\n\nSe exige coincidencia en el **nombre de la pieza** —no "
+                "solo en el auto—, y que no se contradigan la **posición** ni la "
+                "**cilindrada**. Ese control es el que evita el error grave: «CAPUCHON BUJIA "
+                "CRUZE» y «ANILLO BUJIA CRUZE» comparten el rubro y el auto, y son piezas "
+                "distintas.\n\nComo todo lo deducido, va a la cola de revisión: el sistema de "
+                "confianza las evalúa igual que a cualquier otra."
+            )
+            try:
+                c.execute("""SELECT m.id, m.nombre, COUNT(p.id) AS n FROM marcas m
+                             JOIN productos p ON p.marca_id = m.id
+                             WHERE COALESCE(p.descripcion,'') <> ''
+                             GROUP BY m.id HAVING n >= 20 ORDER BY n DESC""")
+                _marcas_desc = filas_a_listas(c)
+            except sqlite3.OperationalError:
+                _marcas_desc = []
+            if len(_marcas_desc) < 2:
+                st.caption("Hacen falta al menos dos marcas con descripciones cargadas.")
+            else:
+                _et = {f"{x['nombre']} ({x['n']:,} productos)": x["id"] for x in _marcas_desc}
+                cd1, cd2 = cols(2)
+                _ma = cd1.selectbox("Proveedor A:", list(_et.keys()), key="desc_marca_a")
+                _mb = cd2.selectbox("Proveedor B:", list(_et.keys()),
+                                     index=min(1, len(_et) - 1), key="desc_marca_b")
+                if st.button("🔤 Buscar equivalencias por descripción",
+                              disabled=(_ma == _mb)):
+                    with st.spinner("Comparando descripciones..."):
+                        st.session_state["deriv_desc"] = derivar_equivalencias_por_descripcion(
+                            _et[_ma], _et[_mb])
+                _dd = st.session_state.get("deriv_desc")
+                if _dd is not None:
+                    if not _dd:
+                        st.info(
+                            "No salió ninguna. Puede ser que las descripciones de esos dos "
+                            "proveedores sean muy distintas entre sí, o que ya estén vinculados."
+                        )
+                    else:
+                        st.success(f"Se encontraron {len(_dd)} posibles equivalencias.")
+                        st.dataframe(quitar_id(_dd), use_container_width=True, hide_index=True)
+                        st.caption(
+                            "Mirá la columna «Por qué» antes de mandarlas: dice exactamente en "
+                            "qué coinciden. Si ves algo que no cierra, avisame y ajusto el criterio."
+                        )
+                        if st.button(f"📥 Mandar las {len(_dd)} a revisión", type="primary"):
+                            _lote_d = f"POR DESCRIPCIÓN · {_ma[:14]}↔{_mb[:14]} · {datetime.now():%d/%m %H:%M}"
+                            _n = guardar_equivalencias_derivadas(
+                                [(x["_a"], x["_b"]) for x in _dd], _lote_d)
+                            st.session_state.pop("deriv_desc", None)
+                            invalidar_salud()
+                            avisar("success", f"{_n} equivalencia(s) quedaron para revisar.")
+                            st.rerun()
+            st.markdown("---")
 
+
+            if marcas_con_tipo >= 2:
                 st.markdown("**🔗 Equivalencias deducidas cruzando catálogos**")
                 explicar(
                     "Si dos fabricantes dicen que sus piezas van al mismo auto, son intercambiables.",
@@ -16095,6 +16271,8 @@ Administrar → Mantenimiento.
                                      f"**{x['cod_b']}** ({x['marca_b']}) — {x['confianza']:.0f}/100")
                         for tipo, texto in x.get("senales", []):
                             st.caption(("❌ " if tipo == "mal" else "✅ ") + texto)
+                        for _ev in x.get("evidencia", []):
+                            st.caption("✅ " + _ev)
 
             ml1, ml2 = st.columns(2)
             ml1.metric("Sin nada raro", len(limpias))
