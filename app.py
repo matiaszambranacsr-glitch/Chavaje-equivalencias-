@@ -7375,7 +7375,13 @@ def productos_estancados(dias_sin_vender=180, minimo_stock=1, limite=100):
     """Lo que tenés en el estante y no se mueve. Es capital dormido.
 
     Se cruza el stock con la última venta. Lo que nunca se vendió cuenta como estancado solo si
-    hace rato que está cargado: un producto que entró la semana pasada todavía no tuvo chance."""
+    hace rato que está cargado: un producto que entró la semana pasada todavía no tuvo chance.
+
+    Para saber desde cuándo está se usa el primer cambio de precio y, si no tuvo ninguno, la
+    fecha en que se cargó. Antes se miraba SOLO el historial de precios, y ese historial recién
+    se escribe cuando un precio CAMBIA: un producto importado una vez y nunca tocado no tiene
+    ninguna fila ahí. O sea que quedaban afuera justamente los que nunca se movieron —los clavos
+    más clavos, que son los que esta pantalla existe para encontrar."""
     try:
         # Las fechas se sacan con dos tablas ya resumidas, no con una subconsulta por
         # producto: así se leen las ventas una sola vez en total y no una vez por artículo.
@@ -7384,7 +7390,8 @@ def productos_estancados(dias_sin_vender=180, minimo_stock=1, limite=100):
         c.execute("""SELECT p.id AS "_id", p.codigo_raw AS "Código", m.nombre AS "Marca",
                             p.descripcion AS "Descripción", p.stock AS "Stock",
                             p.precio AS "Precio",
-                            v.ultima AS "_ultima_venta", h.primera AS "_desde"
+                            v.ultima AS "_ultima_venta",
+                            COALESCE(h.primera, p.created_at) AS "_desde"
                      FROM productos p
                      JOIN marcas m ON m.id = p.marca_id
                      LEFT JOIN (SELECT producto_id, MAX(fecha) AS ultima
@@ -11264,6 +11271,12 @@ Casi todo lo que edita o borra algo pide la contraseña de administrador la prim
                                 # Como este bloque YA está dentro de uno, va como subtítulo.
                                 indirectos = [f for f in res if f.get("Cadena", "").startswith(("🟡", "🔴"))]
                                 if id_buscado and indirectos:
+                                    # Las keys llevan el código de ESTA vuelta. Eran fijas, y este
+                                    # bloque está adentro del bucle que recorre los códigos
+                                    # buscados: pidiendo dos a la vez ("P-1, Q-1") y abriendo esta
+                                    # sección en los dos, Streamlit encontraba la misma key dos
+                                    # veces y cerraba la app entera. Y buscar varios códigos
+                                    # separados por coma es justo lo que el campo invita a hacer.
                                     if True:
                                         st.markdown("**🧭 ¿Por qué apareció alguno de estos?**")
                                         etiquetas_por_que = {
@@ -11272,7 +11285,7 @@ Casi todo lo que edita o borra algo pide la contraseña de administrador la prim
                                         }
                                         elegido_pq = st.selectbox("Elegí un resultado:",
                                                                    list(etiquetas_por_que.keys()),
-                                                                   key="por_que_resultado")
+                                                                   key=f"por_que_resultado_{clean}")
                                         camino = camino_entre(id_buscado, etiquetas_por_que[elegido_pq])
                                         if not camino:
                                             st.caption("No pude reconstruir el camino.")
@@ -11295,7 +11308,8 @@ Casi todo lo que edita o borra algo pide la contraseña de administrador la prim
                                                     f"({peor_paso['Confianza']}/100). Cortando ese, este "
                                                     "resultado deja de aparecer."
                                                 )
-                                                if st.button("✂️ Cortar ese vínculo", key="cortar_paso_debil"):
+                                                if st.button("✂️ Cortar ese vínculo",
+                                                              key=f"cortar_paso_debil_{clean}"):
                                                     borrar_equivalencias_dudosas(
                                                         [(peor_paso["_a"], peor_paso["_b"])])
                                                     invalidar_salud()

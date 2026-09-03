@@ -23,6 +23,21 @@ def literal(nodo):
         return None
 
 
+_PADRES = {}
+
+
+def _ancestros(nodo):
+    """Los nodos que contienen a este, de adentro hacia afuera."""
+    if not _PADRES:
+        for n in ast.walk(ARBOL):
+            for hijo in ast.iter_child_nodes(n):
+                _PADRES[id(hijo)] = n
+    actual = nodo
+    while id(actual) in _PADRES:
+        actual = _PADRES[id(actual)]
+        yield actual
+
+
 def es_st(nodo, nombres):
     return (isinstance(nodo, ast.Call) and isinstance(nodo.func, ast.Attribute)
             and nodo.func.attr in nombres)
@@ -531,15 +546,58 @@ def _clave_session_state(nodo):
     return None
 
 
+# Adentro de un callback (on_click/on_change) la regla no aplica: el callback corre ANTES de que
+# la pantalla se vuelva a dibujar, así que en ese momento el widget todavía no existe. Sin esta
+# salvedad, un callback escrito más abajo que su widget quedaba marcado sin estar mal.
+_callbacks = set()
+for n in ast.walk(ARBOL):
+    if isinstance(n, ast.Call):
+        for kw in n.keywords:
+            if kw.arg in ("on_click", "on_change") and isinstance(kw.value, ast.Name):
+                _callbacks.add(kw.value.id)
+_lineas_callback = set()
+for n in ARBOL.body:
+    if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)) and n.name in _callbacks:
+        for x in ast.walk(n):
+            if hasattr(x, "lineno"):
+                _lineas_callback.add(x.lineno)
+
 for n in ast.walk(ARBOL):
     if isinstance(n, (ast.Assign, ast.AugAssign)):
         for t in (n.targets if isinstance(n, ast.Assign) else [n.target]):
             k = _clave_session_state(t)
-            if k and k in _keys_widget and n.lineno > _keys_widget[k]:
+            if k and k in _keys_widget and n.lineno > _keys_widget[k] \
+                    and n.lineno not in _lineas_callback:
                 reportar("ERROR", n.lineno,
                          f"st.session_state[{k!r}] se escribe después de dibujar su widget "
                          f"(L{_keys_widget[k]}) — Streamlit lo prohíbe. Guardarlo en otra clave "
                          "y volcarlo antes del widget, como se hace con 'sugerencia_busqueda'")
+
+# ============ 8f-bis. Claves fijas adentro de un bucle ============
+# Un widget con key literal metido en un for se dibuja con la MISMA clave en cada vuelta. Con una
+# sola vuelta no se nota nunca; con dos, Streamlit corta la app entera. El caso real: el bloque
+# "¿por qué apareció este resultado?" está adentro del bucle que recorre los códigos buscados, y
+# el campo de búsqueda invita explícitamente a pedir varios separados por coma — así que
+# alcanzaba con buscar dos y abrir esa sección en los dos.
+# No hay forma de que esto esté bien: si el bucle da dos vueltas, revienta.
+for n in ast.walk(ARBOL):
+    if not es_st(n, WIDGETS):
+        continue
+    clave = next((k.value for k in n.keywords if k.arg == "key"), None)
+    if not (isinstance(clave, ast.Constant) and isinstance(clave.value, str)):
+        continue
+    bucle = None
+    for padre in _ancestros(n):
+        if isinstance(padre, (ast.For, ast.While)):
+            bucle = padre
+            break
+        if isinstance(padre, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            break
+    if bucle is not None:
+        reportar("ERROR", n.lineno,
+                 f"st.{n.func.attr} con key fija {clave.value!r} adentro del bucle de L"
+                 f"{bucle.lineno}: en la segunda vuelta la clave se repite y Streamlit corta la "
+                 "app. La key tiene que llevar algo que cambie en cada vuelta")
 
 # ============ 8g. avisar() sin refresco que lo muestre ============
 # avisar() GUARDA el mensaje para el refresco siguiente; lo muestra mostrar_avisos_pendientes(),
