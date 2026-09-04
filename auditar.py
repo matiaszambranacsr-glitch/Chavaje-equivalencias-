@@ -383,6 +383,45 @@ _BuscaAnidados("expander").visit(ARBOL)
 # marca cosas que están bien se deja de mirar, así que prefiero no tenerlo.
 # Al copiar un bloque de una sección a otra, revisar a mano los nombres de las variables.
 
+# ============ 8f. Funciones usadas antes de estar definidas ============
+# El caso real: se agregó anotar_error() y se conectó a 143 lugares, entre ellos dentro de
+# get_connection(), que corre al arrancar. Pero anotar_error quedó definida DESPUÉS de esa
+# llamada. Compila perfecto y revienta con NameError al abrir la app.
+#
+# Solo importa para lo que se ejecuta al nivel del módulo: adentro de una función, el orden
+# no importa porque para cuando se llama ya está todo definido.
+_defs_por_nombre = {}
+for _n in ARBOL.body:
+    if isinstance(_n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+        _defs_por_nombre.setdefault(_n.name, _n.lineno)
+
+_llamadas_al_arrancar = []
+for _n in ARBOL.body:
+    if isinstance(_n, ast.Expr) and isinstance(_n.value, ast.Call):
+        _fn = getattr(_n.value.func, "id", None)
+        if _fn:
+            _llamadas_al_arrancar.append((_fn, _n.lineno))
+    elif isinstance(_n, ast.Assign):
+        for _x in ast.walk(_n):
+            if isinstance(_x, ast.Call) and getattr(_x.func, "id", None):
+                _llamadas_al_arrancar.append((_x.func.id, _n.lineno))
+
+for _fn, _linea in _llamadas_al_arrancar:
+    _cuerpo = next((x for x in ARBOL.body
+                    if isinstance(x, (ast.FunctionDef, ast.AsyncFunctionDef)) and x.name == _fn), None)
+    if _cuerpo is None:
+        continue
+    # Qué otras funciones del archivo usa esa función
+    for _x in ast.walk(_cuerpo):
+        if not (isinstance(_x, ast.Call) and getattr(_x.func, "id", None)):
+            continue
+        _usada = _x.func.id
+        _def_linea = _defs_por_nombre.get(_usada)
+        if _def_linea and _def_linea > _linea:
+            reportar("ERROR", _def_linea,
+                     f"'{_usada}' se define acá pero {_fn}() la usa al arrancar (L{_linea}): "
+                     "NameError al abrir la app")
+
 # ============ 9. Argumentos por defecto mutables ============
 for n in ast.walk(ARBOL):
     if isinstance(n, ast.FunctionDef):

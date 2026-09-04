@@ -14,6 +14,34 @@ from datetime import datetime
 from urllib.parse import quote
 from openpyxl import load_workbook, Workbook
 
+
+# Los últimos errores que la app se tragó. Hay 142 lugares donde algo puede fallar y la app
+# sigue igual: son fallbacks a propósito —una tabla que todavía no existe, una función opcional
+# que no está—, pero si ahí se esconde un bug real, nadie se entera nunca.
+#
+# Con esto quedan anotados. No cambia el comportamiento: el fallback sigue corriendo igual.
+_ULTIMOS_ERRORES = []
+MAXIMO_ERRORES_ANOTADOS = 150
+
+
+def anotar_error(donde, error):
+    """Deja registrado un error que la app decidió ignorar. NUNCA puede fallar.
+
+    Va a memoria y no a la base a propósito: si lo que falló ES la base, escribir ahí sería
+    fallar de nuevo dentro del manejo del primer error."""
+    try:
+        _ULTIMOS_ERRORES.append({
+            "cuando": datetime.now().strftime("%d/%m %H:%M:%S"),
+            "donde": str(donde)[:60],
+            "tipo": type(error).__name__,
+            "detalle": str(error)[:200],
+        })
+        if len(_ULTIMOS_ERRORES) > MAXIMO_ERRORES_ANOTADOS:
+            del _ULTIMOS_ERRORES[:-MAXIMO_ERRORES_ANOTADOS]
+    except Exception as _err:
+        anotar_error("anotar_error", _err)
+        pass      # anotar un error jamás puede romper nada
+
 # ============================================================
 # CONFIGURACIÓN DE PÁGINA
 # ============================================================
@@ -443,7 +471,8 @@ def _restaurar_desde_semilla(conexion):
         origen.backup(conexion)
         origen.close()
         return True
-    except Exception:
+    except Exception as _err:
+        anotar_error("_restaurar_desde_semilla", _err)
         return False
 
 
@@ -515,6 +544,40 @@ def get_connection():
         fecha TEXT DEFAULT (datetime('now'))
     )""")
     c.execute("CREATE INDEX IF NOT EXISTS idx_reservas_prod ON reservas_stock(producto_id, estado)")
+
+    # Lo que preguntó cada cliente. En el mostrador se anota en un papel y se pierde: el
+    # cliente dijo que lo consultaba y volvía, y cuando vuelve nadie se acuerda qué pidió.
+    c.execute("""CREATE TABLE IF NOT EXISTS consultas_cliente (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        cliente TEXT,
+        telefono TEXT,
+        producto_id INTEGER REFERENCES productos(id) ON DELETE SET NULL,
+        codigo_buscado TEXT,
+        descripcion TEXT,
+        cantidad INTEGER DEFAULT 1,
+        precio_dicho REAL,
+        nota TEXT,
+        estado TEXT DEFAULT 'activa',
+        atendio TEXT,
+        fecha TEXT DEFAULT (datetime('now')),
+        fecha_cierre TEXT
+    )""")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_consultas_estado ON consultas_cliente(estado)")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_consultas_tel ON consultas_cliente(telefono)")
+
+    # Índices que faltaban en columnas muy consultadas. Medido con 30.000 pendientes —los que
+    # tenés hoy—: buscar si un par ya está pendiente pasa de 0,75 ms a 0,01 ms. No se nota en
+    # una consulta suelta; sí cuando se recorren miles al analizar la cola.
+    c.execute("""CREATE INDEX IF NOT EXISTS idx_pend_a
+                 ON equivalencias_pendientes(producto_a_id)""")
+    c.execute("""CREATE INDEX IF NOT EXISTS idx_pend_b
+                 ON equivalencias_pendientes(producto_b_id)""")
+    try:
+        c.execute("CREATE INDEX IF NOT EXISTS idx_combos_disp ON combos_sugeridos(disparador)")
+        c.execute("CREATE INDEX IF NOT EXISTS idx_motores_vin_cod ON motores_vin(codigo)")
+        c.execute("CREATE INDEX IF NOT EXISTS idx_esquemas_marca ON esquemas(marca_auto)")
+    except sqlite3.OperationalError as _err:
+        anotar_error("índices opcionales", _err)   # esas tablas pueden no existir todavía
 
     c.execute("""CREATE TABLE IF NOT EXISTS aplicaciones (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -684,6 +747,17 @@ def get_connection():
         created_at TEXT DEFAULT (datetime('now'))
     )""")
     columnas_vehiculos_extra = [f[1] for f in c.execute("PRAGMA table_info(vehiculos)").fetchall()]
+    # El número de motor grabado en el block. No es lo mismo que la motorización: «1.6 16v» es
+    # el tipo de motor, y el número es el de ESE motor en particular.
+    #
+    # Importa cuando el auto tiene el motor cambiado, que en un taller pasa seguido: el VIN
+    # dice una cosa y el motor que tiene puesto es otro. Buscando por el número de motor se
+    # encuentra lo que de verdad lleva.
+    if "numero_motor" not in columnas_vehiculos_extra:
+        c.execute("ALTER TABLE vehiculos ADD COLUMN numero_motor TEXT")
+        columnas_vehiculos_extra.append("numero_motor")
+    c.execute("""CREATE INDEX IF NOT EXISTS idx_vehiculos_motor
+                 ON vehiculos(numero_motor)""")
     if "anio" not in columnas_vehiculos_extra:
         c.execute("ALTER TABLE vehiculos ADD COLUMN anio TEXT")
     if "motorizacion" not in columnas_vehiculos_extra:
@@ -1690,8 +1764,150 @@ def get_connection():
     return conn
 
 
-conn = get_connection()
-c = conn.cursor()
+# Se llama una vez para crear las tablas y correr las migraciones. La conexión que devuelve
+# no se usa después: cada hilo abre la suya con el proxy de abajo.
+get_connection()
+
+
+class _ConexionPorSesion:
+    """Una conexión propia para cada sesión, detrás de los mismos nombres `conn` y `c`.
+
+    La app usaba UNA conexión y UN cursor compartidos por todos. Con un solo empleado no se
+    nota; con dos usando la app a la vez, el proceso se cae con segmentation fault. Está
+    medido: dos hilos consultando en paralelo sobre un cursor compartido revientan.
+
+    Se probaron las dos alternativas con cuatro hilos haciendo 400 consultas cada uno:
+
+        conexión compartida + cursor por hilo  ->  2 resultados cruzados
+        conexión por hilo                      ->  0 fallos
+
+    Por eso va conexión por hilo. Streamlit atiende cada sesión en su propio hilo, así que en
+    la práctica es una conexión por sesión.
+
+    Se arregla acá y no en las 400 consultas que usan `c`: estos objetos se llaman igual y se
+    usan igual. Ningún otro código cambia. Es a propósito — tocar 400 lugares para esto es
+    pedir un error tonto.
+    """
+
+    def __init__(self, ruta, al_crear=None):
+        self._ruta = ruta
+        self._al_crear = al_crear
+        self._local = threading.local()
+
+    @property
+    def _real(self):
+        propia = getattr(self._local, "conn", None)
+        if propia is None:
+            propia = sqlite3.connect(self._ruta, check_same_thread=False,
+                                     isolation_level=None)
+            propia.row_factory = sqlite3.Row
+            # Los mismos PRAGMA en cada conexión: no se heredan, son por conexión.
+            propia.execute("PRAGMA foreign_keys = ON")
+            propia.execute("PRAGMA journal_mode = WAL")
+            propia.execute("PRAGMA busy_timeout = 8000")
+            self._local.conn = propia
+            if self._al_crear:
+                self._al_crear(propia)
+        return propia
+
+    def cursor(self):
+        return self._real.cursor()
+
+    def execute(self, *a, **kw):
+        return self._real.execute(*a, **kw)
+
+    def executemany(self, *a, **kw):
+        return self._real.executemany(*a, **kw)
+
+    def executescript(self, *a, **kw):
+        return self._real.executescript(*a, **kw)
+
+    def commit(self):
+        return self._real.commit()
+
+    def rollback(self):
+        return self._real.rollback()
+
+    def close(self):
+        propia = getattr(self._local, "conn", None)
+        if propia is not None:
+            propia.close()
+            self._local.conn = None
+
+    def backup(self, *a, **kw):
+        return self._real.backup(*a, **kw)
+
+    def iterdump(self):
+        return self._real.iterdump()
+
+    @property
+    def row_factory(self):
+        return self._real.row_factory
+
+    @row_factory.setter
+    def row_factory(self, valor):
+        self._real.row_factory = valor
+
+    @property
+    def total_changes(self):
+        return self._real.total_changes
+
+
+class _CursorPorSesion:
+    """El cursor de la conexión de esta sesión, detrás del nombre `c` de siempre."""
+
+    def __init__(self, conexion):
+        self._conexion = conexion
+        self._local = threading.local()
+
+    @property
+    def _cursor(self):
+        propio = getattr(self._local, "cursor", None)
+        # Si la conexión del hilo se cerró y se rehízo, el cursor viejo ya no sirve
+        if propio is None or getattr(self._local, "conn", None) is not self._conexion._real:
+            propio = self._conexion.cursor()
+            self._local.cursor = propio
+            self._local.conn = self._conexion._real
+        return propio
+
+    def execute(self, *a, **kw):
+        return self._cursor.execute(*a, **kw)
+
+    def executemany(self, *a, **kw):
+        return self._cursor.executemany(*a, **kw)
+
+    def executescript(self, *a, **kw):
+        return self._cursor.executescript(*a, **kw)
+
+    def fetchone(self):
+        return self._cursor.fetchone()
+
+    def fetchall(self):
+        return self._cursor.fetchall()
+
+    def fetchmany(self, *a, **kw):
+        return self._cursor.fetchmany(*a, **kw)
+
+    def __iter__(self):
+        return iter(self._cursor)
+
+    @property
+    def rowcount(self):
+        return self._cursor.rowcount
+
+    @property
+    def lastrowid(self):
+        return self._cursor.lastrowid
+
+    @property
+    def description(self):
+        return self._cursor.description
+
+
+# La conexión que devuelve get_connection() ya creó las tablas y corrió las migraciones. A
+# partir de acá, cada hilo abre la suya contra el mismo archivo.
+conn = _ConexionPorSesion(DB_PATH)
+c = _CursorPorSesion(conn)
 
 
 
@@ -1737,7 +1953,8 @@ def sanitizar(codigo):
             entero = int(float(codigo))
             if abs(float(codigo) - entero) < 1e-6:
                 codigo = str(entero)
-        except (ValueError, OverflowError):
+        except (ValueError, OverflowError) as _err:
+            anotar_error("sanitizar", _err)
             pass
     return re.sub(r'[^A-Z0-9]', '', codigo.upper())
 
@@ -2041,7 +2258,8 @@ def config_github():
         secretos = st.secrets if hasattr(st, "secrets") else {}
         token = secretos.get("github_token")
         repo = secretos.get("github_repo")      # formato: "usuario/repositorio"
-    except Exception:
+    except Exception as _err:
+        anotar_error("config_github", _err)
         return None
     if not token or not repo or "/" not in str(repo):
         return None
@@ -2093,7 +2311,8 @@ def subir_backup_a_github(datos_db, mensaje=""):
         detalle = ""
         try:
             detalle = r.json().get("message", "")
-        except Exception:
+        except Exception as _err:
+            anotar_error("subir_backup_a_github", _err)
             pass
         if r.status_code in (401, 403):
             return False, ("GitHub rechazó el token. Revisá que tenga permiso de escritura "
@@ -2104,6 +2323,7 @@ def subir_backup_a_github(datos_db, mensaje=""):
                            "tener acceso.")
         return False, f"GitHub respondió {r.status_code}. {detalle}"
     except Exception as e:
+        anotar_error("subir_backup_a_github", e)
         return False, f"No se pudo conectar con GitHub: {type(e).__name__}: {e}"
 
 
@@ -2122,7 +2342,8 @@ def cuanto_perderias_si_reinicia():
         ahora_total = c.fetchone()[0]
         c.execute("SELECT COUNT(*) FROM equivalencias")
         eq_total = c.fetchone()[0]
-    except sqlite3.OperationalError:
+    except sqlite3.OperationalError as _err:
+        anotar_error("cuanto_perderias_si_reinicia", _err)
         return None
 
     if not os.path.exists(ARCHIVO_SEMILLA):
@@ -2144,10 +2365,12 @@ def cuanto_perderias_si_reinicia():
         try:
             cur.execute("SELECT COUNT(*) FROM equivalencias")
             eq_semilla = cur.fetchone()[0]
-        except sqlite3.OperationalError:
+        except sqlite3.OperationalError as _err:
+            anotar_error("cuanto_perderias_si_reinicia", _err)
             eq_semilla = 0
         origen.close()
-    except Exception:
+    except Exception as _err:
+        anotar_error("cuanto_perderias_si_reinicia", _err)
         return None
 
     return {
@@ -2193,7 +2416,8 @@ def tareas_automaticas_del_dia(presupuesto_segundos=6):
                 n = recalcular_confianzas(limite=3000)
                 if n:
                     hecho.append(f"{n:,} vínculo(s) puntuados")
-        except Exception:
+        except Exception as _err:
+            anotar_error("tareas_automaticas_del_dia", _err)
             pass
 
     # 2. Procesar fotos pendientes, de a poco
@@ -2202,7 +2426,8 @@ def tareas_automaticas_del_dia(presupuesto_segundos=6):
             r = migrar_imagenes_pendientes(limite=20)
             if r.get("listas"):
                 hecho.append(f"{r['listas']} foto(s) procesadas")
-        except Exception:
+        except Exception as _err:
+            anotar_error("tareas_automaticas_del_dia", _err)
             pass
 
     # 3. Aprender modelos y motores de las fichas de vehículo cargadas
@@ -2211,7 +2436,8 @@ def tareas_automaticas_del_dia(presupuesto_segundos=6):
             n_mod, n_mot = aprender_modelos_de_fichas_existentes()
             if n_mod or n_mot:
                 hecho.append(f"{n_mod} modelo(s) y {n_mot} motor(es) de VIN aprendidos")
-        except Exception:
+        except Exception as _err:
+            anotar_error("tareas_automaticas_del_dia", _err)
             pass
 
     # 4. Las equivalencias que el mostrador ya confirmó: si vendiste el mismo reemplazo varias
@@ -2225,7 +2451,8 @@ def tareas_automaticas_del_dia(presupuesto_segundos=6):
                     f"CONFIRMADAS EN EL MOSTRADOR · {hoy}")
                 if n:
                     hecho.append(f"{n} equivalencia(s) confirmadas por venta, a revisión")
-        except Exception:
+        except Exception as _err:
+            anotar_error("tareas_automaticas_del_dia", _err)
             pass
 
     # 5. Traer fotos de las fichas del proveedor, de a poco. Es la tarea más tediosa que queda
@@ -2247,7 +2474,8 @@ def tareas_automaticas_del_dia(presupuesto_segundos=6):
                     fila["marca_id"], limite=15, filtro="con_stock")
                 if traidas:
                     hecho.append(f"{traidas} foto(s) traídas del proveedor")
-        except Exception:
+        except Exception as _err:
+            anotar_error("tareas_automaticas_del_dia", _err)
             pass
 
     # 6. Subir el backup al repositorio, si está configurado. Es lo único que sobrevive a un
@@ -2266,7 +2494,8 @@ def tareas_automaticas_del_dia(presupuesto_segundos=6):
                     f"Backup automático — {hay:,} productos")
                 if ok:
                     hecho.append("backup subido al repositorio")
-        except Exception:
+        except Exception as _err:
+            anotar_error("tareas_automaticas_del_dia", _err)
             pass
 
     guardar_config("ultimas_tareas_dia", hoy)
@@ -2292,7 +2521,8 @@ def informe_post_importacion(lote, nombre_prov, cargados):
         c.execute("SELECT COUNT(*) FROM equivalencias WHERE lote = ?", (lote,))
         cargadas = c.fetchone()[0]
         informe["vinculos_nuevos"] = pendientes + cargadas
-    except sqlite3.OperationalError:
+    except sqlite3.OperationalError as _err:
+        anotar_error("informe_post_importacion", _err)
         pendientes = cargadas = 0
 
     # Los vínculos que entraron, evaluados con el mismo análisis de siempre
@@ -2308,7 +2538,8 @@ def informe_post_importacion(lote, nombre_prov, cargados):
                     "Se pueden descartar todos juntos, sin mirarlos de a uno.",
                     "Estadísticas → 🔗 Equivalencias sugeridas",
                 ))
-        except Exception:
+        except Exception as _err:
+            anotar_error("informe_post_importacion", _err)
             pass
 
     # Códigos que no parecen códigos y entraron igual
@@ -2323,7 +2554,8 @@ def informe_post_importacion(lote, nombre_prov, cargados):
                 "Suelen ser cantidades o números de orden que se colaron en la columna del código.",
                 "Estadísticas → Mantenimiento → 🧹 Limpiar vínculos",
             ))
-    except sqlite3.OperationalError:
+    except sqlite3.OperationalError as _err:
+        anotar_error("informe_post_importacion", _err)
         pass
 
     # Productos de esta marca que dejaron de venir en las últimas listas
@@ -2340,7 +2572,8 @@ def informe_post_importacion(lote, nombre_prov, cargados):
                     "Si el proveedor dejó de mandarlos, es mercadería que conviene liquidar.",
                     "Estadísticas → Reposición → Puede que ya no se fabriquen",
                 ))
-    except Exception:
+    except Exception as _err:
+        anotar_error("informe_post_importacion", _err)
         pass
 
     return informe
@@ -2359,6 +2592,256 @@ def vencer_reservas_viejas():
         n = c.rowcount
         conn.commit()
     return n
+
+
+def normalizar_numero_motor(texto):
+    """Deja el número de motor comparable: sin espacios, guiones ni minúsculas.
+
+    Los graban distinto según quién los copie: «4G15-AB1234», «4G15 AB 1234», «4g15ab1234».
+    Sin normalizar, el mismo motor no se encuentra a sí mismo."""
+    if not texto:
+        return ""
+    return re.sub(r"[^A-Z0-9]", "", str(texto).upper())
+
+
+# Caracteres que se confunden al leer un número grabado en el block. No es teoría: están
+# estampados en metal, con grasa encima, muchas veces gastados, y se leen agachado con linterna.
+_CONFUSIONES_MOTOR = [("0", "O"), ("0", "D"), ("1", "I"), ("1", "L"), ("5", "S"),
+                      ("8", "B"), ("2", "Z"), ("6", "G"), ("4", "A"), ("7", "T")]
+
+
+def variantes_numero_motor(numero, tope=40):
+    """Las formas en que ese número pudo haberse leído mal. Devuelve una lista.
+
+    Se cambia UN carácter por vez, no varios: con dos cambios simultáneos el número de
+    combinaciones explota y empieza a coincidir con motores que no tienen nada que ver."""
+    base = normalizar_numero_motor(numero)
+    if len(base) < 4:
+        return []
+    salida = []
+    for i, ch in enumerate(base):
+        for a, b in _CONFUSIONES_MOTOR:
+            otro = b if ch == a else (a if ch == b else None)
+            if otro:
+                v = base[:i] + otro + base[i+1:]
+                if v not in salida:
+                    salida.append(v)
+        if len(salida) >= tope:
+            break
+    return salida[:tope]
+
+
+def buscar_por_numero_motor(numero):
+    """Busca vehículos por el número de motor. Devuelve (fichas, parciales).
+
+    Se devuelven aparte las coincidencias PARCIALES porque el número de motor casi nunca se
+    lee entero: está grabado en el block, con grasa encima y en una posición incómoda. Que
+    coincidan los últimos 6 caracteres ya es una pista fuerte, pero no es lo mismo que una
+    coincidencia exacta y no hay que mezclarlas."""
+    limpio = normalizar_numero_motor(numero)
+    if len(limpio) < 4:
+        return [], []
+    try:
+        c.execute("""SELECT v.id AS "_id", v.patente AS "Patente", v.marca_auto AS "Marca",
+                            v.modelo_auto AS "Modelo", v.anio AS "Año",
+                            v.motorizacion AS "Motorización", v.numero_motor AS "N° de motor",
+                            v.cliente_nombre AS "Cliente", v.km_actual AS "Km"
+                     FROM vehiculos v
+                     WHERE REPLACE(REPLACE(REPLACE(UPPER(COALESCE(v.numero_motor,'')),
+                                                    ' ',''), '-',''), '.','') = ?
+                     LIMIT 50""", (limpio,))
+        exactas = filas_a_listas(c)
+
+        c.execute("""SELECT v.id AS "_id", v.patente AS "Patente", v.marca_auto AS "Marca",
+                            v.modelo_auto AS "Modelo", v.anio AS "Año",
+                            v.motorizacion AS "Motorización", v.numero_motor AS "N° de motor",
+                            v.cliente_nombre AS "Cliente"
+                     FROM vehiculos v
+                     WHERE COALESCE(v.numero_motor,'') <> ''
+                       AND REPLACE(REPLACE(REPLACE(UPPER(v.numero_motor),
+                                                    ' ',''), '-',''), '.','') LIKE ?
+                     LIMIT 50""", (f"%{limpio}%",))
+        parciales = [f for f in filas_a_listas(c)
+                     if f["_id"] not in {x["_id"] for x in exactas}]
+
+        # Si no apareció nada, se prueban las lecturas equivocadas más comunes: un 0 que era
+        # una O, un 5 que era una S. Solo cuando no hay ningún resultado, para no ensuciar
+        # una búsqueda que ya encontró lo que buscaba.
+        if not exactas and not parciales:
+            vistos = set()
+            for variante in variantes_numero_motor(limpio):
+                c.execute("""SELECT v.id AS "_id", v.patente AS "Patente",
+                                    v.marca_auto AS "Marca", v.modelo_auto AS "Modelo",
+                                    v.anio AS "Año", v.motorizacion AS "Motorización",
+                                    v.numero_motor AS "N° de motor",
+                                    v.cliente_nombre AS "Cliente"
+                             FROM vehiculos v
+                             WHERE REPLACE(REPLACE(REPLACE(UPPER(COALESCE(v.numero_motor,'')),
+                                                            ' ',''), '-',''), '.','') = ?
+                             LIMIT 5""", (variante,))
+                for f in filas_a_listas(c):
+                    if f["_id"] not in vistos:
+                        vistos.add(f["_id"])
+                        f["Por qué"] = f"leyendo «{variante}» en vez de «{limpio}»"
+                        parciales.append(f)
+        return exactas, parciales
+    except sqlite3.OperationalError as _err:
+        anotar_error("buscar_por_numero_motor", _err)
+        return [], []
+
+
+def autos_con_la_misma_familia_de_motor(numero, largo_prefijo=4):
+    """Otros autos con un motor de la misma familia.
+
+    El número de motor arranca con el código del modelo de motor —«4G15», «EA111»— y sigue con
+    el serial de esa unidad. Los primeros caracteres son el TIPO de motor, y ahí está lo útil:
+    si el motor es el mismo modelo, los repuestos son los mismos aunque sea otra unidad y otro
+    auto."""
+    limpio = normalizar_numero_motor(numero)
+    if len(limpio) < largo_prefijo + 2:
+        return []
+    prefijo = limpio[:largo_prefijo]
+    try:
+        c.execute("""SELECT v.patente AS "Patente", v.marca_auto AS "Marca",
+                            v.modelo_auto AS "Modelo", v.anio AS "Año",
+                            v.motorizacion AS "Motorización", v.numero_motor AS "N° de motor"
+                     FROM vehiculos v
+                     WHERE COALESCE(v.numero_motor,'') <> ''
+                       AND REPLACE(REPLACE(REPLACE(UPPER(v.numero_motor),
+                                                    ' ',''), '-',''), '.','') LIKE ?
+                       AND REPLACE(REPLACE(REPLACE(UPPER(v.numero_motor),
+                                                    ' ',''), '-',''), '.','') <> ?
+                     LIMIT 50""", (f"{prefijo}%", limpio))
+        return filas_a_listas(c)
+    except sqlite3.OperationalError as _err:
+        anotar_error("autos_con_la_misma_familia_de_motor", _err)
+        return []
+
+
+def repuestos_por_numero_motor(numero):
+    """Qué repuestos se le pusieron a los autos que tienen ese motor.
+
+    Es el punto: si el motor está cambiado, el VIN del auto no sirve para elegir repuestos —
+    el motor manda. Buscando por el número se llega a lo que de verdad le entra."""
+    exactas, _ = buscar_por_numero_motor(numero)
+    if not exactas:
+        return []
+    ids = [v["_id"] for v in exactas]
+    marcadores = ",".join("?" for _ in ids)
+    try:
+        c.execute(f"""SELECT DISTINCT p.codigo_raw AS "Código", m.nombre AS "Marca",
+                             p.descripcion AS "Descripción", p.precio AS "Precio",
+                             p.stock AS "Stock", hp.descripcion_pieza AS "Se puso como",
+                             substr(hp.fecha_instalacion, 1, 10) AS "Cuándo"
+                      FROM historial_piezas hp
+                      LEFT JOIN productos p ON p.id = hp.producto_id
+                      LEFT JOIN marcas m ON m.id = p.marca_id
+                      WHERE hp.vehiculo_id IN ({marcadores})
+                      ORDER BY hp.fecha_instalacion DESC LIMIT 100""", ids)
+        return filas_a_listas(c)
+    except sqlite3.OperationalError as _err:
+        anotar_error("repuestos_por_numero_motor", _err)
+        return []
+
+
+DIAS_CONSULTA_VIEJA = 30
+
+
+def anotar_consulta_cliente(cliente, telefono, producto_id=None, codigo="", descripcion="",
+                            cantidad=1, precio=None, nota=""):
+    """Guarda qué pidió un cliente que dijo que lo pensaba. Devuelve (ok, mensaje)."""
+    if not (cliente or "").strip() and not (telefono or "").strip():
+        return False, "Poné al menos el nombre o el teléfono, si no después no sabés de quién era."
+    with db_lock:
+        c.execute("""INSERT INTO consultas_cliente
+                     (cliente, telefono, producto_id, codigo_buscado, descripcion, cantidad,
+                      precio_dicho, nota, atendio)
+                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                  ((cliente or "").strip() or None, (telefono or "").strip() or None,
+                   producto_id, (codigo or "").strip() or None,
+                   (descripcion or "").strip()[:120] or None, int(cantidad or 1),
+                   precio, (nota or "").strip() or None, obtener_usuario_actual()))
+        conn.commit()
+    return True, "Anotado. Aparece en «Consultas de clientes»."
+
+
+def consultas_de_clientes(estado="activa", limite=200):
+    """Lo que pidieron los clientes y todavía no se resolvió."""
+    try:
+        c.execute("""SELECT cc.id AS "_id", cc.cliente AS "Cliente", cc.telefono AS "Teléfono",
+                            cc.codigo_buscado AS "Pidió", cc.descripcion AS "Descripción",
+                            cc.cantidad AS "Cant.", cc.precio_dicho AS "Precio dicho",
+                            cc.nota AS "Nota", cc.atendio AS "Atendió",
+                            substr(cc.fecha, 1, 16) AS "Cuándo",
+                            CAST(julianday('now') - julianday(cc.fecha) AS INTEGER) AS "Días",
+                            p.stock AS "Stock hoy", p.precio AS "Precio hoy"
+                     FROM consultas_cliente cc
+                     LEFT JOIN productos p ON p.id = cc.producto_id
+                     WHERE cc.estado = ?
+                     ORDER BY cc.fecha DESC LIMIT ?""", (estado, limite))
+        return filas_a_listas(c)
+    except sqlite3.OperationalError as _err:
+        anotar_error("consultas_de_clientes", _err)
+        return []
+
+
+def historial_de_un_cliente(texto):
+    """Todo lo que preguntó o compró un cliente, buscando por nombre o teléfono.
+
+    Sirve cuando vuelve: en vez de arrancar de cero, se ve qué le interesaba y a qué precio se
+    lo cotizaron. También cuando llama y dice «soy el del Gol»."""
+    patron = f"%{(texto or '').strip()}%"
+    if len(patron) <= 2:
+        return []
+    try:
+        c.execute("""SELECT cc.cliente AS "Cliente", cc.telefono AS "Teléfono",
+                            cc.codigo_buscado AS "Pidió", cc.descripcion AS "Descripción",
+                            cc.cantidad AS "Cant.", cc.precio_dicho AS "Le dijimos",
+                            cc.estado AS "Qué pasó", substr(cc.fecha, 1, 16) AS "Cuándo",
+                            p.precio AS "Precio hoy", p.stock AS "Stock hoy"
+                     FROM consultas_cliente cc
+                     LEFT JOIN productos p ON p.id = cc.producto_id
+                     WHERE cc.cliente LIKE ? OR cc.telefono LIKE ?
+                     ORDER BY cc.fecha DESC LIMIT 100""", (patron, patron))
+        return filas_a_listas(c)
+    except sqlite3.OperationalError as _err:
+        anotar_error("historial_de_un_cliente", _err)
+        return []
+
+
+def cerrar_consulta(consulta_id, resultado):
+    """El cliente volvió y compró, o no volvió.
+
+    Los estados son los mismos que usan las reservas —'vendida' y 'cancelada'— a propósito:
+    tener 'vendido' acá y 'vendida' allá es la clase de diferencia de una letra que después
+    hace que una consulta no encuentre nada y nadie sepa por qué."""
+    with db_lock:
+        c.execute("""UPDATE consultas_cliente SET estado = ?, fecha_cierre = datetime('now')
+                     WHERE id = ?""", (resultado, consulta_id))
+        conn.commit()
+    return True
+
+
+def consultas_que_ahora_hay_en_stock():
+    """Clientes esperando algo que en su momento no había y ahora sí. Son ventas a un llamado.
+
+    Es el caso que más se pierde en el mostrador: entró la mercadería, nadie se acuerda quién
+    la había pedido, y el cliente ya la compró en otro lado."""
+    try:
+        c.execute("""SELECT cc.id AS "_id", cc.cliente AS "Cliente", cc.telefono AS "Teléfono",
+                            cc.codigo_buscado AS "Pidió", cc.cantidad AS "Quería",
+                            p.stock AS "Hay ahora", p.precio AS "Precio hoy",
+                            cc.precio_dicho AS "Le dijimos",
+                            CAST(julianday('now') - julianday(cc.fecha) AS INTEGER) AS "Días"
+                     FROM consultas_cliente cc
+                     JOIN productos p ON p.id = cc.producto_id
+                     WHERE cc.estado = 'activa'
+                       AND COALESCE(p.stock, 0) >= COALESCE(cc.cantidad, 1)
+                     ORDER BY cc.fecha LIMIT 100""")
+        return filas_a_listas(c)
+    except sqlite3.OperationalError as _err:
+        anotar_error("consultas_que_ahora_hay_en_stock", _err)
+        return []
 
 
 def reservar_stock(producto_id, cantidad, cliente="", nota=""):
@@ -2394,7 +2877,8 @@ def stock_libre(producto_id):
         c.execute("""SELECT COALESCE(SUM(cantidad), 0) FROM reservas_stock
                      WHERE producto_id = ? AND estado = 'activa'""", (producto_id,))
         reservado = c.fetchone()[0]
-    except sqlite3.OperationalError:
+    except sqlite3.OperationalError as _err:
+        anotar_error("stock_libre", _err)
         reservado = 0
     return max((fila["stock"] or 0) - reservado, 0)
 
@@ -2413,7 +2897,8 @@ def reservas_activas(limite=200):
                      WHERE r.estado = 'activa'
                      ORDER BY r.fecha DESC LIMIT ?""", (limite,))
         return filas_a_listas(c)
-    except sqlite3.OperationalError:
+    except sqlite3.OperationalError as _err:
+        anotar_error("reservas_activas", _err)
         return []
 
 
@@ -2559,7 +3044,8 @@ def fusionar_productos(id_perdedor, id_ganador):
         try:
             c.execute(f"DELETE FROM {tabla} WHERE {col_a} = ? OR {col_b} = ?",
                       (id_perdedor, id_perdedor))
-        except sqlite3.OperationalError:
+        except sqlite3.OperationalError as _err:
+            anotar_error("fusionar_productos", _err)
             pass
 
     # Datos que el que queda podría no tener
@@ -2567,7 +3053,8 @@ def fusionar_productos(id_perdedor, id_ganador):
         try:
             c.execute(f"UPDATE {tabla} SET {columna} = ? WHERE {columna} = ?",
                       (id_ganador, id_perdedor))
-        except sqlite3.OperationalError:
+        except sqlite3.OperationalError as _err:
+            anotar_error("fusionar_productos", _err)
             pass
     c.execute("""UPDATE productos SET
                     precio = COALESCE(precio, (SELECT precio FROM productos WHERE id = ?)),
@@ -2897,6 +3384,7 @@ def verificar_en_catalogo_oficial(codigo_a_buscar, url_ficha, tiempo_maximo=8):
         return False, (f"El código {codigo_a_buscar} NO aparece en esa ficha. Puede que el "
                         "proveedor no lo liste, o que la página cargue los datos aparte.")
     except Exception as e:
+        anotar_error("verificar_en_catalogo_oficial", e)
         return None, f"No se pudo consultar la página ({type(e).__name__})."
 
 
@@ -3219,7 +3707,8 @@ def pares_confirmados_por_ventas(minimo_veces=2):
                      GROUP BY p1.id, v.producto_id
                      HAVING COUNT(*) >= ?""", (minimo_veces,))
         return {(min(r["a"], r["b"]), max(r["a"], r["b"])): r["veces"] for r in c.fetchall()}
-    except sqlite3.OperationalError:
+    except sqlite3.OperationalError as _err:
+        anotar_error("pares_confirmados_por_ventas", _err)
         return {}
 
 
@@ -3247,7 +3736,8 @@ def aprender_de_las_decisiones():
                      WHERE r.producto_a_id < r.producto_b_id
                      GROUP BY ma.nombre, mb.nombre, r.decision""")
         crudo = c.fetchall()
-    except sqlite3.OperationalError:
+    except sqlite3.OperationalError as _err:
+        anotar_error("aprender_de_las_decisiones", _err)
         return patrones
 
     acumulado = {}
@@ -3423,7 +3913,8 @@ def analizar_lote_pendiente(lote, limite=400, desde=0):
                           JOIN aplicaciones ap ON ap.codigo_clean = p.codigo_clean
                           WHERE p.id IN ({marcadores})""", ids)
             codigos_con_respaldo = {r["codigo_clean"] for r in c.fetchall()}
-        except sqlite3.OperationalError:
+        except sqlite3.OperationalError as _err:
+            anotar_error("analizar_lote_pendiente", _err)
             codigos_con_respaldo = set()
 
     # Lo que se aprendió de las revisiones anteriores. Se calcula una vez para todo el lote.
@@ -3475,7 +3966,8 @@ def analizar_lote_pendiente(lote, limite=400, desde=0):
         # cuántos digan que sí.
         try:
             a_favor, vetos, veredicto = evidencia_cruzada(f["a"], f["b"])
-        except Exception:
+        except Exception as _err:
+            anotar_error("analizar_lote_pendiente", _err)
             a_favor, vetos, veredicto = [], [], ""
         if vetos:
             puntaje = min(puntaje, 15.0)
@@ -3971,7 +4463,8 @@ def estado_del_backup():
     importaciones = c.fetchone()[0]
     try:
         dias = (datetime.now() - datetime.strptime(marca[:19], "%Y-%m-%d %H:%M:%S")).days
-    except Exception:
+    except Exception as _err:
+        anotar_error("estado_del_backup", _err)
         dias = None
 
     nuevos = max(total - desde, 0)
@@ -4088,7 +4581,8 @@ def leer_numero(valor):
 
     try:
         numero = float(texto)
-    except ValueError:
+    except ValueError as _err:
+        anotar_error("leer_numero", _err)
         return None
     return -numero if negativo else numero
 
@@ -4309,7 +4803,8 @@ def reparar_codigos_con_decimal():
                 c.execute("UPDATE productos SET codigo_raw = ?, codigo_clean = ? WHERE id = ?",
                            (nuevo_raw, nuevo_clean, pid))
                 arreglados += 1
-            except sqlite3.IntegrityError:
+            except sqlite3.IntegrityError as _err:
+                anotar_error("reparar_codigos_con_decimal", _err)
                 # En teoría no debería pasar: '2776400.0' y '2776400' se limpian al mismo
                 # codigo_clean, así que la base nunca deja que existan los dos en la misma
                 # marca. Si igual llegara a ocurrir, se fusionan en vez de dejar el '.0'.
@@ -4579,7 +5074,8 @@ def puentes_aprobados_ids():
     try:
         c.execute("SELECT producto_id FROM puentes_aprobados")
         return {r["producto_id"] for r in c.fetchall()}
-    except sqlite3.OperationalError:
+    except sqlite3.OperationalError as _err:
+        anotar_error("puentes_aprobados_ids", _err)
         return set()
 
 
@@ -4601,7 +5097,8 @@ def invalidar_salud():
     problema durante tres minutos después de haberlo arreglado, y uno no sabría si funcionó."""
     try:
         st.session_state.pop("_salud_cache", None)
-    except Exception:
+    except Exception as _err:
+        anotar_error("invalidar_salud", _err)
         pass
 
 
@@ -4626,7 +5123,8 @@ def diagnostico_de_salud():
                   "Están vinculados a decenas de repuestos y fusionan familias que no tienen "
                   "relación. Es lo que hace que el buscador devuelva cosas que no entran.",
                   "Estadísticas → Mantenimiento → Códigos puente")
-    except Exception:
+    except Exception as _err:
+        anotar_error("diagnostico_de_salud", _err)
         pass
 
     try:
@@ -4636,7 +5134,8 @@ def diagnostico_de_salud():
                   "La misma relación guardada en las dos direcciones. No cambia lo que encuentra "
                   "el buscador, pero duplica todos los conteos.",
                   "Estadísticas → Mantenimiento → Equivalencias anotadas dos veces")
-    except Exception:
+    except Exception as _err:
+        anotar_error("diagnostico_de_salud", _err)
         pass
 
     try:
@@ -4646,7 +5145,8 @@ def diagnostico_de_salud():
                   "Entraron cantidades o números de orden en la columna del código. Cada uno "
                   "vincula entre sí repuestos que no tienen nada que ver.",
                   "Estadísticas → Mantenimiento → Códigos que son solo un número suelto")
-    except Exception:
+    except Exception as _err:
+        anotar_error("diagnostico_de_salud", _err)
         pass
 
     try:
@@ -4656,7 +5156,8 @@ def diagnostico_de_salud():
                   "Excel los guardó como número. Se encuentran igual, pero el código que se "
                   "muestra y se copia en un presupuesto está mal.",
                   "Estadísticas → Mantenimiento → Códigos que quedaron con '.0'")
-    except Exception:
+    except Exception as _err:
+        anotar_error("diagnostico_de_salud", _err)
         pass
 
     try:
@@ -4671,7 +5172,8 @@ def diagnostico_de_salud():
                   "O el precio está mal cargado, o no son la misma pieza. Cualquiera de las dos "
                   "cuesta plata: o cotizás mal, o vendés algo que no entra.",
                   "Estadísticas → Mantenimiento → Precios que no cierran")
-    except Exception:
+    except Exception as _err:
+        anotar_error("diagnostico_de_salud", _err)
         pass
 
     try:
@@ -4681,7 +5183,8 @@ def diagnostico_de_salud():
             sumar("medio", f"{pendientes:,} vínculos esperando revisión",
                   "Mientras no se revisen no están cargados, así que el buscador no los usa.",
                   "Estadísticas → Vínculos de listas esperando revisión")
-    except Exception:
+    except Exception as _err:
+        anotar_error("diagnostico_de_salud", _err)
         pass
 
     try:
@@ -4692,7 +5195,8 @@ def diagnostico_de_salud():
                   "El buscador no puede decirte qué tan sólido es el camino de cada resultado "
                   "hasta que se calculen. Es un solo botón.",
                   "Estadísticas → Mantenimiento → Puntuar los vínculos")
-    except sqlite3.OperationalError:
+    except sqlite3.OperationalError as _err:
+        anotar_error("diagnostico_de_salud", _err)
         pass
 
     try:
@@ -4705,7 +5209,8 @@ def diagnostico_de_salud():
                       "publican gratis (NGK, Bosch, Mann, SKF). Sin ellos, la búsqueda por "
                       "vehículo tiene que adivinar desde las descripciones del proveedor.",
                       "Estadísticas → Mantenimiento → Catálogo de aplicaciones")
-    except sqlite3.OperationalError:
+    except sqlite3.OperationalError as _err:
+        anotar_error("diagnostico_de_salud", _err)
         pass
 
     try:
@@ -4720,7 +5225,8 @@ def diagnostico_de_salud():
             sumar("medio", f"{len(quiebres)} producto(s) se acaban en menos de 2 semanas",
                   "Según el ritmo con que se vienen vendiendo y el stock que queda.",
                   "Estadísticas → Reposición → Lo que se va a acabar")
-    except sqlite3.OperationalError:
+    except sqlite3.OperationalError as _err:
+        anotar_error("diagnostico_de_salud", _err)
         pass
 
     # El número concreto de lo que se perdería. Un aviso genérico se ignora; «perdés 3.412
@@ -4738,7 +5244,8 @@ def diagnostico_de_salud():
                   f"{riesgo['productos_semilla']:,}; hoy tenés {riesgo['productos_ahora']:,}. "
                   "Si el servidor reinicia, la diferencia se pierde.",
                   "Estadísticas → Backup y config")
-    except Exception:
+    except Exception as _err:
+        anotar_error("diagnostico_de_salud", _err)
         pass
 
     bk = estado_del_backup()
@@ -5094,6 +5601,7 @@ def descargar_imagen(url, tiempo_maximo=12, tamano_maximo_mb=8):
                 return None, "la imagen pesa demasiado"
         return datos, None
     except Exception as e:
+        anotar_error("descargar_imagen", e)
         return None, type(e).__name__
 
 
@@ -5117,13 +5625,15 @@ def config_portal(nombre_marca):
     try:
         secretos = st.secrets if hasattr(st, "secrets") else {}
         cfg = secretos.get(f"portal_{(nombre_marca or '').strip().upper()}")
-    except Exception:
+    except Exception as _err:
+        anotar_error("config_portal", _err)
         return None
     if not cfg:
         return None
     try:
         datos = dict(cfg)
-    except Exception:
+    except Exception as _err:
+        anotar_error("config_portal", _err)
         return None
     if not all(datos.get(k) for k in ("url_login", "usuario", "clave", "url_ficha")):
         return None
@@ -5174,7 +5684,8 @@ def _mismo_dominio(url_a, url_b):
     from urllib.parse import urlparse
     try:
         a, b = urlparse(str(url_a)), urlparse(str(url_b))
-    except Exception:
+    except Exception as _err:
+        anotar_error("_mismo_dominio", _err)
         return False
     da, db = (a.netloc or "").lower(), (b.netloc or "").lower()
     if not da or not db:
@@ -5309,6 +5820,7 @@ def sesion_de_portal(nombre_marca):
         _SESIONES_PORTAL[nombre_marca] = solo_lectura
         return solo_lectura, None
     except Exception as e:
+        anotar_error("sesion_de_portal", e)
         # Solo el TIPO de error, nunca el detalle: los mensajes de las librerías de red suelen
         # incluir la URL completa con los datos enviados, y ahí va la clave.
         return None, (f"No se pudo entrar al portal ({type(e).__name__}). Revisá la dirección "
@@ -5347,6 +5859,7 @@ def autos_desde_ficha_del_portal(nombre_marca, codigo, tiempo_maximo=20):
             return [], f"La ficha respondió {r.status_code}."
         html = r.text or ""
     except Exception as e:
+        anotar_error("autos_desde_ficha_del_portal", e)
         return [], f"No se pudo leer la ficha: {type(e).__name__}: {e}"
 
     # Se saca el texto visible y se buscan marcas y modelos conocidos. Se limita a los que la
@@ -5400,6 +5913,7 @@ def buscar_imagen_en_ficha(url_ficha, tiempo_maximo=12):
                 return datos, None
         return None, "no encontré una foto de producto en esa ficha"
     except Exception as e:
+        anotar_error("buscar_imagen_en_ficha", e)
         return None, type(e).__name__
 
 
@@ -5430,6 +5944,7 @@ def _bajar_en_paralelo(tareas, funcion, hilos=6, progreso=None, cancelado=None):
             try:
                 datos, error = futuro.result()
             except Exception as e:
+                anotar_error("_bajar_en_paralelo", e)
                 datos, error = None, type(e).__name__
             resultados.append((tarea, datos, error))
             if progreso:
@@ -5460,6 +5975,7 @@ def bajar_fotos_pendientes(limite=200, progreso=None, hilos=6, liviano=True):
                 actualizar_imagen_producto(pid, datos, origen="link", fuente=url, liviano=liviano)
                 bajadas += 1
             except Exception as e:
+                anotar_error("bajar_fotos_pendientes", e)
                 fallidas.append((url, type(e).__name__))
         else:
             fallidas.append((url, error))
@@ -5539,6 +6055,7 @@ def bajar_fotos_desde_catalogo(marca_id, limite=100, progreso=None, hilos=6, liv
                 bajadas += 1
                 continue
             except Exception as e:
+                anotar_error("bajar_fotos_desde_catalogo", e)
                 error = type(e).__name__
         fallidas.append((codigo, error))
         # "no encontré una foto" es definitivo para ese código; un error de red no lo es
@@ -5576,15 +6093,18 @@ def generar_backup_sin_fotos():
                      "imagen_orb_estado = NULL")
     try:
         destino.execute("DELETE FROM producto_fotos")
-    except sqlite3.OperationalError:
+    except sqlite3.OperationalError as _err:
+        anotar_error("generar_backup_sin_fotos", _err)
         pass
     try:
         destino.execute("UPDATE esquemas SET imagen_blob = NULL")
-    except sqlite3.OperationalError:
+    except sqlite3.OperationalError as _err:
+        anotar_error("generar_backup_sin_fotos", _err)
         pass
     try:
         destino.execute("UPDATE alias_transferencia SET qr_real_blob = NULL")
-    except sqlite3.OperationalError:
+    except sqlite3.OperationalError as _err:
+        anotar_error("generar_backup_sin_fotos", _err)
         pass
     destino.commit()
     destino.execute("VACUUM")   # sin esto el archivo sigue pesando lo mismo
@@ -5608,7 +6128,8 @@ def peso_de_las_fotos():
         c.execute("""SELECT COALESCE(SUM(LENGTH(COALESCE(imagen_data,'')) +
                                          LENGTH(COALESCE(firma_blob, X''))), 0) FROM producto_fotos""")
         total += c.fetchone()[0]
-    except sqlite3.OperationalError:
+    except sqlite3.OperationalError as _err:
+        anotar_error("peso_de_las_fotos", _err)
         pass
     return fila["con_foto"], total / (1024 * 1024)
 
@@ -6220,7 +6741,8 @@ def parece_catalogo_de_aplicaciones(filas, muestra=200):
         try:
             if es_fila_de_marca(fila) and _limpiar(fila[0]).upper() in MARCAS_VEHICULO:
                 marcas_solas += 1
-        except Exception:
+        except Exception as _err:
+            anotar_error("parece_catalogo_de_aplicaciones", _err)
             continue
 
     ancho = max(len(f) for f in datos)
@@ -6410,7 +6932,8 @@ def _modelos_conocidos():
         for fila in c.fetchall():
             modelos.update(w for w in normalizar_texto(fila["modelo_auto"] or "").split()
                            if len(w) >= 3)
-    except Exception:
+    except Exception as _err:
+        anotar_error("_modelos_conocidos", _err)
         pass
     _MODELOS_CACHE["lista"] = modelos
     return modelos
@@ -6447,7 +6970,8 @@ def autos_de_todas_las_fuentes(producto_id, codigo_clean, autos_de_la_descripcio
             for fila in c.fetchall():
                 for campo in (fila["marca_auto"], fila["modelo_auto"]):
                     autos.update(w for w in normalizar_texto(campo or "").split() if len(w) >= 3)
-        except sqlite3.OperationalError:
+        except sqlite3.OperationalError as _err:
+            anotar_error("autos_de_todas_las_fuentes", _err)
             pass
 
     if producto_id:
@@ -6458,7 +6982,8 @@ def autos_de_todas_las_fuentes(producto_id, codigo_clean, autos_de_la_descripcio
             for fila in c.fetchall():
                 for campo in (fila["marca"], fila["modelo"]):
                     autos.update(w for w in normalizar_texto(campo or "").split() if len(w) >= 3)
-        except sqlite3.OperationalError:
+        except sqlite3.OperationalError as _err:
+            anotar_error("autos_de_todas_las_fuentes", _err)
             pass
 
     return autos
@@ -6655,7 +7180,8 @@ def evidencia_cruzada(id_a, id_b):
         autos_juntos = c.fetchone()[0]
         if autos_juntos:
             a_favor.append(f"🏭 dos fabricantes los dan para {autos_juntos} auto(s) en común")
-    except sqlite3.OperationalError:
+    except sqlite3.OperationalError as _err:
+        anotar_error("evidencia_cruzada", _err)
         pass
 
     # 4. El mostrador: ¿ya se vendió uno en lugar del otro?
@@ -6671,7 +7197,8 @@ def evidencia_cruzada(id_a, id_b):
                   (min(id_a, id_b), max(id_a, id_b), max(id_a, id_b), min(id_a, id_b)))
         if c.fetchone()[0]:
             a_favor.append("🔗 ya están vinculados en la base")
-    except sqlite3.OperationalError:
+    except sqlite3.OperationalError as _err:
+        anotar_error("evidencia_cruzada", _err)
         pass
 
     # 6. Reemplazo de código declarado
@@ -6796,7 +7323,8 @@ def equivalencias_puenteadas_por_reemplazo(limite=300):
     try:
         c.execute("SELECT codigo_viejo_clean, codigo_nuevo_clean FROM reemplazos_codigo")
         cadenas = [(r["codigo_viejo_clean"], r["codigo_nuevo_clean"]) for r in c.fetchall()]
-    except sqlite3.OperationalError:
+    except sqlite3.OperationalError as _err:
+        anotar_error("equivalencias_puenteadas_por_reemplazo", _err)
         return []
     if not cadenas:
         return []
@@ -7040,7 +7568,8 @@ def repuestos_de_este_auto(marca_auto, modelo="", anio=None, motor="", vin="", l
     # a qué auto le va su pieza.
     try:
         resultado["del_fabricante"] = buscar_aplicaciones(marca_auto, modelo, anio)
-    except sqlite3.OperationalError:
+    except sqlite3.OperationalError as _err:
+        anotar_error("repuestos_de_este_auto", _err)
         resultado["del_fabricante"] = []
 
     # --- 1. Lo que ya se le puso a este auto ---
@@ -7154,9 +7683,23 @@ def panel_vin(clave="vin", mostrar_ensenar=True):
         linea += f" · motor {d['motor']}"
     st.success(linea)
 
-    if d.get("digito_verificador") is False:
-        st.error("❌ El dígito verificador no da: revisá si hay algún carácter mal tipeado. "
-                  "Buscar repuestos con un VIN mal copiado es buscar los del auto equivocado.")
+    # Este bloque esperaba un booleano que la app nunca seteaba: el mensaje no salía nunca.
+    # Ahora se calcula de verdad, con la cuenta de la norma ISO 3779.
+    if d.get("corregido"):
+        st.warning(
+            "✏️ **Se corrigieron letras que un VIN no puede tener:** "
+            + "; ".join(d["corregido"])
+            + f". Quedó **{d['vin']}**.\n\nLa norma prohíbe la I, la O y la Q justamente "
+              "porque se confunden con 1 y 0, así que la corrección es segura."
+        )
+    _dv = d.get("digito_verificador")
+    if _dv == "mal":
+        st.error("❌ " + d.get("mensaje_digito", "") +
+                  "\n\nBuscar repuestos con un VIN mal copiado es buscar los del auto equivocado.")
+    elif _dv == "ok":
+        st.caption("✅ " + d.get("mensaje_digito", ""))
+    elif _dv == "no_aplica" and d.get("mensaje_digito"):
+        st.caption("ℹ️ " + d["mensaje_digito"])
 
     ficha = d.get("vehiculo")
     if ficha:
@@ -7573,10 +8116,12 @@ def identificar_pieza_por_foto(imagen_bytes):
         datos = json.loads(texto)
         registrar_uso_ia("Identificar pieza por foto", True)
         return datos, None
-    except json.JSONDecodeError:
+    except json.JSONDecodeError as _err:
+        anotar_error("identificar_pieza_por_foto", _err)
         registrar_uso_ia("Identificar pieza por foto", False)
         return None, "No pude interpretar la respuesta — probá con una foto más clara y de más cerca."
     except Exception as e:
+        anotar_error("identificar_pieza_por_foto", e)
         registrar_uso_ia("Identificar pieza por foto", False)
         return None, traducir_error_gemini(e)
 
@@ -7612,10 +8157,12 @@ def extraer_datos_cedula(imagen_bytes):
         datos = json.loads(texto)
         registrar_uso_ia("Leer cédula/título", True)
         return datos, None
-    except json.JSONDecodeError:
+    except json.JSONDecodeError as _err:
+        anotar_error("extraer_datos_cedula", _err)
         registrar_uso_ia("Leer cédula/título", False)
         return None, "No pude interpretar la respuesta como datos del vehículo — probá con una foto más clara."
     except Exception as e:
+        anotar_error("extraer_datos_cedula", e)
         registrar_uso_ia("Leer cédula/título", False)
         return None, traducir_error_gemini(e)
 
@@ -7640,6 +8187,7 @@ def transcribir_audio(audio_bytes, mime_type="audio/wav"):
         registrar_uso_ia("Búsqueda por voz", True)
         return response.text.strip(), None
     except Exception as e:
+        anotar_error("transcribir_audio", e)
         registrar_uso_ia("Búsqueda por voz", False)
         return None, traducir_error_gemini(e)
 
@@ -7679,10 +8227,12 @@ def leer_remito_por_foto(imagen_bytes):
             return None, "Gemini no devolvió una lista de ítems reconocible."
         registrar_uso_ia("Leer remito por foto", True)
         return items, None
-    except json.JSONDecodeError:
+    except json.JSONDecodeError as _err:
+        anotar_error("leer_remito_por_foto", _err)
         registrar_uso_ia("Leer remito por foto", False)
         return None, "No pude interpretar la respuesta como una lista de ítems — probá con una foto más clara."
     except Exception as e:
+        anotar_error("leer_remito_por_foto", e)
         registrar_uso_ia("Leer remito por foto", False)
         return None, traducir_error_gemini(e)
 
@@ -7797,7 +8347,8 @@ def interpretar_pedido_hablado(texto):
                 if c.fetchone()[0] >= 2:
                     modelo_suelto = w
                     break
-            except Exception:
+            except Exception as _err:
+                anotar_error("interpretar_pedido_hablado", _err)
                 break
     cil = re.search(r'\b(\d[.,]\d)\b', limpio)
     anio = re.search(r'\b(19\d{2}|20\d{2})\b', limpio)
@@ -7856,7 +8407,8 @@ def autos_de_un_codigo(clean_code, limite=200):
                      FROM aplicaciones WHERE codigo_clean = ?
                      ORDER BY marca_auto, modelo_auto LIMIT ?""", (clean_code, limite))
         return filas_a_listas(c)
-    except sqlite3.OperationalError:
+    except sqlite3.OperationalError as _err:
+        anotar_error("autos_de_un_codigo", _err)
         return []
 
 
@@ -7924,7 +8476,8 @@ def identificar_codigo_ajeno(clean_code):
                      FROM aplicaciones WHERE codigo_clean = ?
                      GROUP BY codigo, marca_repuesto, tipo_pieza LIMIT 1""", (clean_code,))
         info = c.fetchone()
-    except sqlite3.OperationalError:
+    except sqlite3.OperationalError as _err:
+        anotar_error("identificar_codigo_ajeno", _err)
         return None
     if not info:
         return None
@@ -7966,7 +8519,8 @@ def equivalentes_para_los_mismos_autos(clean_code, limite=30):
                      ORDER BY (p.stock > 0) DESC, "Autos en común" DESC LIMIT ?""",
                   (clean_code, limite))
         return filas_a_listas(c)
-    except sqlite3.OperationalError:
+    except sqlite3.OperationalError as _err:
+        anotar_error("equivalentes_para_los_mismos_autos", _err)
         return []
 
 
@@ -8162,7 +8716,8 @@ def cadena_de_reemplazos(clean_code, tope=6):
             c.execute("""SELECT codigo_nuevo, codigo_nuevo_clean, marca, nota
                          FROM reemplazos_codigo WHERE codigo_viejo_clean = ? LIMIT 1""", (actual,))
             fila = c.fetchone()
-        except sqlite3.OperationalError:
+        except sqlite3.OperationalError as _err:
+            anotar_error("cadena_de_reemplazos", _err)
             return []
         if not fila or fila["codigo_nuevo_clean"] in visto:
             break
@@ -8189,7 +8744,8 @@ def productos_estancados(dias_sin_vender=180, minimo_stock=1, limite=100):
                      FROM productos p JOIN marcas m ON m.id = p.marca_id
                      WHERE COALESCE(p.stock, 0) >= ?""", (minimo_stock,))
         filas = filas_a_listas(c)
-    except sqlite3.OperationalError:
+    except sqlite3.OperationalError as _err:
+        anotar_error("productos_estancados", _err)
         return []
 
     from datetime import datetime as _dt
@@ -8201,7 +8757,8 @@ def productos_estancados(dias_sin_vender=180, minimo_stock=1, limite=100):
         if ultima:
             try:
                 dias = (hoy - _dt.strptime(str(ultima)[:10], "%Y-%m-%d")).days
-            except Exception:
+            except Exception as _err:
+                anotar_error("productos_estancados", _err)
                 continue
             detalle = f"hace {dias} día(s)"
         else:
@@ -8210,7 +8767,8 @@ def productos_estancados(dias_sin_vender=180, minimo_stock=1, limite=100):
                 continue
             try:
                 dias = (hoy - _dt.strptime(str(desde)[:10], "%Y-%m-%d")).days
-            except Exception:
+            except Exception as _err:
+                anotar_error("productos_estancados", _err)
                 continue
             detalle = "nunca se vendió"
         if dias < dias_sin_vender:
@@ -8505,6 +9063,7 @@ def restaurar_de_papelera(item_id):
             conn.commit()
             return True, None
         except Exception as e:
+            anotar_error("restaurar_de_papelera", e)
             conn.rollback()
             return False, f"No se pudo restaurar: {e}"
 
@@ -8698,7 +9257,8 @@ def recordar_archivo(archivo, clave):
                     "nombre": getattr(archivo, "name", "archivo"),
                     "datos": datos,
                 }
-        except Exception:
+        except Exception as _err:
+            anotar_error("recordar_archivo", _err)
             pass
 
     guardado = st.session_state.get(f"_archivo_{clave}")
@@ -8771,7 +9331,8 @@ def pdf_con_cache(nombre, generador, *args):
     listas y diccionarios: acá la clave se calcula de forma explícita y predecible."""
     try:
         firma = json.dumps(args, default=str, sort_keys=True)
-    except Exception:
+    except Exception as _err:
+        anotar_error("pdf_con_cache", _err)
         return generador(*args)  # si algo no se puede resumir, se genera sin cachear
     clave = nombre + ":" + hashlib.md5(firma.encode("utf-8")).hexdigest()
     guardado = st.session_state.get("_cache_pdf")
@@ -9066,7 +9627,8 @@ def hojas_del_excel(archivo):
         hojas = [(ws.title, ws.max_row or 0) for ws in wb.worksheets]
         wb.close()
         return hojas
-    except Exception:
+    except Exception as _err:
+        anotar_error("hojas_del_excel", _err)
         return []
 
 
@@ -9084,7 +9646,8 @@ def _decodificar_texto(crudo):
     for codificacion in ("utf-8-sig", "utf-8", "cp1252", "latin-1"):
         try:
             return crudo.decode(codificacion)
-        except (UnicodeDecodeError, AttributeError):
+        except (UnicodeDecodeError, AttributeError) as _err:
+            anotar_error("_decodificar_texto", _err)
             continue
     return crudo.decode("latin-1", errors="replace")
 
@@ -9122,7 +9685,8 @@ def leer_excel(archivo, nrows=None, hoja=None):
     if not isinstance(archivo, str):
         try:
             archivo.seek(0)
-        except Exception:
+        except Exception as _err:
+            anotar_error("leer_excel", _err)
             pass
 
     if nombre_lower.endswith((".csv", ".txt", ".tsv")):
@@ -9173,7 +9737,8 @@ def leer_excel(archivo, nrows=None, hoja=None):
                     # cambia la columna. Es el mismo criterio que usa el ojo al leerlo.
                     try:
                         palabras = pagina.extract_words() or []
-                    except Exception:
+                    except Exception as _err:
+                        anotar_error("leer_excel", _err)
                         palabras = []
                     renglones = {}
                     for w in palabras:
@@ -9287,7 +9852,8 @@ def get_or_create_vehiculo(patente, cliente_nombre="", cliente_telefono="", marc
     if len(vin) == 17 and (modelo_auto.strip() or motorizacion.strip()):
         try:
             aprender_modelo_de_vin(vin, modelo_auto, marca_auto, motorizacion)
-        except Exception:
+        except Exception as _err:
+            anotar_error("get_or_create_vehiculo", _err)
             pass
     return vid
 
@@ -9420,7 +9986,8 @@ def calcular_km_recorridos(vehiculo):
             dias = max((datetime.now() - fecha_creado).days, 1)
             resultado["dias_transcurridos"] = dias
             resultado["promedio_mensual"] = round(recorridos / dias * 30)
-        except (ValueError, TypeError):
+        except (ValueError, TypeError) as _err:
+            anotar_error("calcular_km_recorridos", _err)
             pass
     return resultado
 
@@ -9697,7 +10264,8 @@ def _rasgos_de_forma(img, contorno, cv2, np):
         # mostrador contaría como una pieza más.
         grandes = [k for k in contornos if cv2.contourArea(k) > area_total * 0.01]
         rasgos["objetos"] = max(len(grandes), 1)
-    except Exception:
+    except Exception as _err:
+        anotar_error("_rasgos_de_forma", _err)
         pass
 
     if contorno is not None:
@@ -9708,7 +10276,8 @@ def _rasgos_de_forma(img, contorno, cv2, np):
             x, y, bw, bh = cv2.boundingRect(contorno)
             if bw > 0 and bh > 0:
                 rasgos["llenado"] = float(min(cv2.contourArea(contorno) / (bw * bh), 1.0))
-        except Exception:
+        except Exception as _err:
+            anotar_error("_rasgos_de_forma", _err)
             pass
     return rasgos
 
@@ -9754,7 +10323,8 @@ def _firma_de_forma(contorno, cv2, np):
         hu = cv2.HuMoments(cv2.moments(contorno)).flatten()
         # escala logarítmica: los valores crudos van de 1e-1 a 1e-60 y son incomparables
         return [float(-np.sign(v) * np.log10(abs(v) + 1e-30)) for v in hu]
-    except Exception:
+    except Exception as _err:
+        anotar_error("_firma_de_forma", _err)
         return None
 
 
@@ -9807,6 +10377,7 @@ def leer_codigo_de_barras(imagen_bytes):
     try:
         cv2, np = _cv()
     except Exception as e:
+        anotar_error("leer_codigo_de_barras", e)
         return [], f"No está disponible el lector de imágenes: {e}"
     try:
         img = cv2.imdecode(np.frombuffer(imagen_bytes, np.uint8), cv2.IMREAD_COLOR)
@@ -9831,7 +10402,8 @@ def leer_codigo_de_barras(imagen_bytes):
                     encontrados += [t for t in textos if t and t.strip()]
                 if encontrados:
                     break
-        except Exception:
+        except Exception as _err:
+            anotar_error("leer_codigo_de_barras", _err)
             pass
 
         if not encontrados:
@@ -9843,7 +10415,8 @@ def leer_codigo_de_barras(imagen_bytes):
                     if texto and texto.strip():
                         encontrados.append(texto.strip())
                         break
-            except Exception:
+            except Exception as _err:
+                anotar_error("leer_codigo_de_barras", _err)
                 pass
 
         if not encontrados:
@@ -9858,6 +10431,7 @@ def leer_codigo_de_barras(imagen_bytes):
                 salida.append(limpio)
         return salida, None
     except Exception as e:
+        anotar_error("leer_codigo_de_barras", e)
         return [], f"No se pudo leer: {type(e).__name__}: {e}"
 
 
@@ -9890,7 +10464,8 @@ def calcular_firma_visual(imagen_bytes, es_consulta=False):
     entre sí. Se guarda solo del lado de la consulta para no duplicar el peso del catálogo."""
     try:
         cv2, np = _cv()
-    except Exception:
+    except Exception as _err:
+        anotar_error("calcular_firma_visual", _err)
         return None, "error"
 
     try:
@@ -9922,7 +10497,8 @@ def calcular_firma_visual(imagen_bytes, es_consulta=False):
             return None, "sin_detalle"
         estado = "ok" if tiene_textura else "solo_forma"
         return pickle.dumps(payload, protocol=4), estado
-    except Exception:
+    except Exception as _err:
+        anotar_error("calcular_firma_visual", _err)
         return None, "error"
 
 
@@ -9931,7 +10507,8 @@ def _cargar_firma(blob):
     no tener que rehacer todo el catálogo de golpe."""
     try:
         dato = pickle.loads(blob)
-    except Exception:
+    except Exception as _err:
+        anotar_error("_cargar_firma", _err)
         return None
     if isinstance(dato, dict) and dato.get("v"):
         return dato
@@ -9950,7 +10527,8 @@ def _parecido_de_forma(forma_a, forma_b):
         pesos = (1.0, 0.7, 0.4)
         d = sum(w * abs(a - b) for w, a, b in zip(pesos, forma_a[:3], forma_b[:3]))
         return float(max(0.0, 100.0 * (1.0 - d / 2.5)))
-    except Exception:
+    except Exception as _err:
+        anotar_error("_parecido_de_forma", _err)
         return 0.0
 
 
@@ -9966,7 +10544,8 @@ def _puntaje_textura(desc_q, kp_q, desc_c, kp_c, cv2, np):
     bf = cv2.BFMatcher(cv2.NORM_HAMMING)
     try:
         matches = bf.knnMatch(desc_q, desc_c, k=2)
-    except Exception:
+    except Exception as _err:
+        anotar_error("_puntaje_textura", _err)
         return 0.0, 0
 
     buenos = [par[0] for par in matches if len(par) == 2 and par[0].distance < 0.78 * par[1].distance]
@@ -9980,7 +10559,8 @@ def _puntaje_textura(desc_q, kp_q, desc_c, kp_c, cv2, np):
             dst = np.float32([kp_c[m.trainIdx] for m in buenos]).reshape(-1, 1, 2)
             _, mascara = cv2.findHomography(src, dst, cv2.RANSAC, 6.0, maxIters=2000)
             inliers = int(mascara.sum()) if mascara is not None else 0
-        except Exception:
+        except Exception as _err:
+            anotar_error("_puntaje_textura", _err)
             inliers = 0
 
     # Las verificadas valen; las no verificadas cuentan poco (pueden ser casualidad)
@@ -9993,7 +10573,8 @@ def comparar_firmas(firma_consulta, blob_catalogo):
     """Devuelve (parecido 0-100, coincidencias verificadas, parecido de forma 0-100)."""
     try:
         cv2, np = _cv()
-    except Exception:
+    except Exception as _err:
+        anotar_error("comparar_firmas", _err)
         return 0.0, 0, 0.0
 
     fc = _cargar_firma(blob_catalogo)
@@ -10051,7 +10632,8 @@ def agregar_foto_producto(producto_id, imagen_bytes, origen="subida", fuente=Non
     import base64
     try:
         img = PILImage.open(io.BytesIO(imagen_bytes)).convert("RGB")
-    except Exception:
+    except Exception as _err:
+        anotar_error("agregar_foto_producto", _err)
         return None, "error"
     img.thumbnail((500, 500))
     buffer = io.BytesIO()
@@ -10131,7 +10713,8 @@ def generar_miniatura_de_data_uri(data_uri):
         return data_uri
     try:
         return generar_miniatura(base64.b64decode(data_uri.split(",", 1)[1]))
-    except Exception:
+    except Exception as _err:
+        anotar_error("generar_miniatura_de_data_uri", _err)
         return None
 
 
@@ -10194,7 +10777,8 @@ def buscar_por_similitud_visual(imagen_bytes, top_n=8, minimo=8.0, progreso=None
                 continue
             try:
                 puntaje, verificadas, forma = comparar_firmas(firma_consulta, fila["firma_blob"])
-            except Exception:
+            except Exception as _err:
+                anotar_error("buscar_por_similitud_visual", _err)
                 continue
             pid = fila["producto_id"]
             if pid not in mejores or puntaje > mejores[pid]["Parecido"]:
@@ -10262,7 +10846,8 @@ def generar_miniatura(imagen_bytes, lado=110):
         buffer = io.BytesIO()
         img.save(buffer, format="JPEG", quality=70)
         return "data:image/jpeg;base64," + base64.b64encode(buffer.getvalue()).decode("ascii")
-    except Exception:
+    except Exception as _err:
+        anotar_error("generar_miniatura", _err)
         return None
 
 
@@ -10298,7 +10883,8 @@ def imagenes_de_una_direccion(url, maximo=8):
         cabecera = requests.head(url, timeout=8, allow_redirects=True,
                                  headers={"User-Agent": "Mozilla/5.0 (compatible; EquivalenciasElChavo/1.0)"})
         tipo = cabecera.headers.get("Content-Type", "")
-    except Exception:
+    except Exception as _err:
+        anotar_error("imagenes_de_una_direccion", _err)
         tipo = ""
 
     if "image" in tipo.lower() or url.lower().split("?")[0].endswith((".jpg", ".jpeg", ".png", ".webp")):
@@ -10312,6 +10898,7 @@ def imagenes_de_una_direccion(url, maximo=8):
             return None, f"la página respondió {respuesta.status_code}"
         html = respuesta.text
     except Exception as e:
+        anotar_error("imagenes_de_una_direccion", e)
         return None, f"no se pudo abrir la página ({type(e).__name__})"
 
     candidatas, vistas = [], set()
@@ -10372,7 +10959,8 @@ def migrar_imagenes_pendientes(limite=400):
                 conn.commit()
             resumen["migradas"] += 1
             resumen["listas" if estado == "ok" else ("sin_detalle" if estado == "sin_detalle" else "error")] += 1
-        except Exception:
+        except Exception as _err:
+            anotar_error("migrar_imagenes_pendientes", _err)
             resumen["error"] += 1
 
     # 2) Fotos ya en la tabla pero sin firma calculada
@@ -10392,7 +10980,8 @@ def migrar_imagenes_pendientes(limite=400):
                           (firma, estado, FIRMA_VERSION if firma else None, fila["id"]))
                 conn.commit()
             resumen["listas" if estado == "ok" else ("sin_detalle" if estado == "sin_detalle" else "error")] += 1
-        except Exception:
+        except Exception as _err:
+            anotar_error("migrar_imagenes_pendientes", _err)
             resumen["error"] += 1
 
     # 3) Miniaturas faltantes y fotos que son link externo (esas hay que bajarlas desde Mantenimiento)
@@ -10410,7 +10999,8 @@ def migrar_imagenes_pendientes(limite=400):
                 with db_lock:
                     c.execute("UPDATE productos SET imagen_thumb = ? WHERE id = ?", (thumb, fila["id"]))
                     conn.commit()
-        except Exception:
+        except Exception as _err:
+            anotar_error("migrar_imagenes_pendientes", _err)
             continue
     return resumen
 
@@ -10668,6 +11258,88 @@ ANIOS_VIN = {
 }
 
 
+# Para el dígito verificador del VIN: cada letra vale un número. No es arbitrario, es la norma
+# ISO 3779 y es igual en todo el mundo.
+_VALOR_LETRA_VIN = {
+    "A": 1, "B": 2, "C": 3, "D": 4, "E": 5, "F": 6, "G": 7, "H": 8,
+    "J": 1, "K": 2, "L": 3, "M": 4, "N": 5, "P": 7, "R": 9,
+    "S": 2, "T": 3, "U": 4, "V": 5, "W": 6, "X": 7, "Y": 8, "Z": 9,
+}
+_PESOS_VIN = (8, 7, 6, 5, 4, 3, 2, 10, 0, 9, 8, 7, 6, 5, 4, 3, 2)
+
+
+def corregir_confusiones_vin(vin):
+    """Arregla las letras que un VIN NO puede tener. Devuelve (corregido, qué se cambió).
+
+    La norma prohíbe I, O y Q justamente porque se confunden con 1 y 0. Así que si alguien
+    escribió una, es seguro que copió mal: no hay ambigüedad posible.
+
+    Antes la app rechazaba el VIN y listo. Pero el VIN se copia a mano de una chapita, y ese
+    es el error más común que existe: rechazarlo obliga a tipear todo de nuevo sin decir dónde
+    estaba el problema."""
+    original = re.sub(r"[\s\-]", "", (vin or "").strip().upper())
+    cambios = []
+    salida = []
+    for i, ch in enumerate(original):
+        if ch == "I":
+            salida.append("1"); cambios.append(f"la I de la posición {i+1} → 1")
+        elif ch == "O":
+            salida.append("0"); cambios.append(f"la O de la posición {i+1} → 0")
+        elif ch == "Q":
+            salida.append("0"); cambios.append(f"la Q de la posición {i+1} → 0")
+        else:
+            salida.append(ch)
+    return "".join(salida), cambios
+
+
+def digito_verificador_vin(vin):
+    """Calcula qué debería tener el VIN en la posición 9.
+
+    Es una cuenta sobre los otros 16 caracteres. Si no coincide, hay un error de copia en
+    alguna parte — y se detecta ANTES de buscar, en vez de dar resultados de otro auto."""
+    if len(vin) != 17:
+        return None
+    total = 0
+    for i, ch in enumerate(vin):
+        if ch.isdigit():
+            valor = int(ch)
+        elif ch in _VALOR_LETRA_VIN:
+            valor = _VALOR_LETRA_VIN[ch]
+        else:
+            return None
+        total += valor * _PESOS_VIN[i]
+    resto = total % 11
+    return "X" if resto == 10 else str(resto)
+
+
+def verificar_vin(vin):
+    """¿El VIN está bien copiado? Devuelve (estado, mensaje).
+
+    estado: 'ok', 'mal', o 'no_aplica'.
+
+    IMPORTANTE y por eso no se rechaza sin más: el dígito verificador es **obligatorio en
+    Estados Unidos y Canadá** (VIN que empieza con 1 a 5), pero en el resto del mundo es
+    opcional y muchísimos fabricantes no lo usan. Un auto brasileño o argentino puede tener un
+    VIN perfectamente válido que no pase esta cuenta.
+
+    Por eso: si empieza con 1-5 y no da, es un error de copia casi seguro. Si empieza con otra
+    cosa, se avisa y nada más."""
+    esperado = digito_verificador_vin(vin)
+    if esperado is None:
+        return "no_aplica", ""
+    real = vin[8]
+    if real == esperado:
+        return "ok", "El dígito verificador da bien: el VIN está bien copiado."
+    norteamericano = vin[0] in "12345"
+    if norteamericano:
+        return "mal", (f"El dígito verificador no da: la posición 9 dice «{real}» y tendría que "
+                       f"decir «{esperado}». En los VIN de Estados Unidos y Canadá este dígito "
+                       "es obligatorio, así que hay un carácter mal copiado.")
+    return "no_aplica", (f"El dígito verificador no da ({real} en vez de {esperado}), pero fuera "
+                         "de Estados Unidos y Canadá muchos fabricantes no lo usan. Puede estar "
+                         "perfecto igual — tomalo como una señal para revisar, no como un error.")
+
+
 def decodificar_vin(vin):
     vin = re.sub(r'\s', '', vin.strip().upper())
     resultado = {"vin": vin, "valido": False}
@@ -10675,10 +11347,16 @@ def decodificar_vin(vin):
         resultado["error"] = "El VIN debe tener 17 caracteres."
         return resultado
     if any(ch in vin for ch in ("I", "O", "Q")):
-        resultado["error"] = "El VIN no puede contener las letras I, O ni Q."
-        return resultado
+        # Se corrige en vez de rechazar: esas letras no existen en un VIN, así que quien las
+        # escribió copió mal un 1 o un 0. Rechazar obliga a tipear los 17 de nuevo.
+        vin, cambios = corregir_confusiones_vin(vin)
+        resultado["vin"] = vin
+        resultado["corregido"] = cambios
 
     resultado["valido"] = True
+    estado_dv, msg_dv = verificar_vin(vin)
+    resultado["digito_verificador"] = estado_dv
+    resultado["mensaje_digito"] = msg_dv
     wmi = vin[:3]
     resultado["wmi"] = wmi
     resultado["pais"] = PAISES_VIN_2.get(vin[:2]) or PAISES_VIN.get(vin[0], "Desconocido / no cargado")
@@ -10780,7 +11458,8 @@ def decodificar_vin(vin):
             suma = sum(valores[ch] * peso for ch, peso in zip(vin, pesos))
             esperado = "X" if suma % 11 == 10 else str(suma % 11)
             resultado["digito_verificador"] = (vin[8] == esperado)
-        except KeyError:
+        except KeyError as _err:
+            anotar_error("decodificar_vin", _err)
             resultado["digito_verificador"] = None
 
     # --- Lo más confiable de todo: que el auto ya esté en una ficha ---
@@ -10938,6 +11617,7 @@ def generar_esquema_orientativo_ia(marca, modelo, motorizacion, sistema):
         registrar_uso_ia("Generar imagen orientativa (paga)", False)
         return None, "Gemini no devolvió ninguna imagen para ese pedido."
     except Exception as e:
+        anotar_error("generar_esquema_orientativo_ia", e)
         registrar_uso_ia("Generar imagen orientativa (paga)", False)
         texto_error = str(e)
         if "RESOURCE_EXHAUSTED" in texto_error or "429" in texto_error or "quota" in texto_error.lower():
@@ -11103,7 +11783,8 @@ def generar_imagen_con_marcadores(imagen_bytes, puntos):
         salida = io.BytesIO()
         img.save(salida, format="JPEG", quality=90)
         return salida.getvalue()
-    except (UnidentifiedImageError, OSError):
+    except (UnidentifiedImageError, OSError) as _err:
+        anotar_error("generar_imagen_con_marcadores", _err)
         return imagen_bytes
 
 
@@ -11348,7 +12029,8 @@ if not st.session_state.get("_tareas_dia_corridas"):
         _hecho_hoy = tareas_automaticas_del_dia()
         if _hecho_hoy:
             st.session_state["_aviso_tareas"] = _hecho_hoy
-    except Exception:
+    except Exception as _err:
+        anotar_error("nivel principal", _err)
         pass
 
 _hecho_hoy = st.session_state.pop("_aviso_tareas", None)
@@ -11360,7 +12042,8 @@ _cache_salud = st.session_state.get("_salud_cache")
 if not _cache_salud or _ahora - _cache_salud["momento"] > 180:
     try:
         _cache_salud = {"momento": _ahora, "problemas": diagnostico_de_salud()}
-    except Exception:
+    except Exception as _err:
+        anotar_error("nivel principal", _err)
         _cache_salud = {"momento": _ahora, "problemas": []}
     st.session_state["_salud_cache"] = _cache_salud
 
@@ -11864,7 +12547,8 @@ Casi todo lo que edita o borra algo pide la contraseña de administrador la prim
                         try:
                             hay_reservas = any(stock_libre(f["ID"]) != (f.get("Stock") or 0)
                                                 for f in res)
-                        except Exception:
+                        except Exception as _err:
+                            anotar_error("nivel principal", _err)
                             hay_reservas = False
                         if hay_reservas:
                             for f in res:
@@ -11967,7 +12651,8 @@ Casi todo lo que edita o borra algo pide la contraseña de administrador la prim
                                 if id_buscado and len(res) >= 8:
                                     try:
                                         uniones = vinculos_que_unen_familias(id_buscado)
-                                    except Exception:
+                                    except Exception as _err:
+                                        anotar_error("nivel principal", _err)
                                         uniones = []
                                     if uniones and uniones[0]["Confianza del vínculo"] < 50:
                                         u = uniones[0]
@@ -12385,6 +13070,39 @@ Casi todo lo que edita o borra algo pide la contraseña de administrador la prim
                                 }
                                 avisar("success", f"{elegido_c['Codigo']} sumado al presupuesto.")
                                 st.rerun()
+
+                        # Anotar al cliente que se lo lleva pensando. Va acá porque el momento
+                        # de anotarlo es este: si hay que ir a otra pantalla, no se hace.
+                        if seccion_plegable("📞 El cliente lo va a pensar",
+                                             key=f"consulta_{clean}"):
+                            st.caption(
+                                "Queda anotado qué pidió y a qué precio se le dijo. Cuando "
+                                "vuelva o llame, lo buscás por nombre o teléfono."
+                            )
+                            etq_cc = {f"{f['Marca']} {f['Codigo']}": f for f in res}
+                            cual_cc = st.selectbox("¿Qué le interesó?", list(etq_cc.keys()),
+                                                    key=f"cual_cc_{clean}")
+                            k1, k2, k3 = st.columns([3, 3, 1])
+                            nom_cc = k1.text_input("Nombre:", key=f"nom_cc_{clean}",
+                                                    placeholder="Cómo se llama")
+                            tel_cc = k2.text_input("Teléfono:", key=f"tel_cc_{clean}",
+                                                    placeholder="Para avisarle")
+                            cant_cc = k3.number_input("Cant.", min_value=1, value=1, step=1,
+                                                       key=f"cant_cc_{clean}")
+                            nota_cc = st.text_input("Nota:", key=f"nota_cc_{clean}",
+                                                     placeholder="Ej: tiene un Gol 2012, "
+                                                                 "consulta con el mecánico")
+                            if st.button("📞 Anotar la consulta", key=f"btn_cc_{clean}"):
+                                _f = etq_cc[cual_cc]
+                                ok_cc, msg_cc = anotar_consulta_cliente(
+                                    nom_cc, tel_cc, _f["ID"], _f["Codigo"],
+                                    _f.get("Descripcion") or "", cant_cc,
+                                    _f.get("Precio"), nota_cc)
+                                if ok_cc:
+                                    avisar("success", msg_cc)
+                                    st.rerun()
+                                else:
+                                    st.error(msg_cc)
 
                         # Apartar mientras el cliente lo piensa. Va acá y no en otra pantalla
                         # porque el momento de reservar es este: con el presupuesto recién hecho.
@@ -12941,6 +13659,7 @@ if pagina == PAGINAS[2]:
                 if isinstance(archivo, object) and not isinstance(archivo, str):
                     archivo.seek(0)
             except Exception as e:
+                anotar_error("nivel principal", e)
                 st.error(f"No se pudo leer el archivo: {e}")
                 todas_filas = None
 
@@ -13441,7 +14160,8 @@ if pagina == PAGINAS[2]:
 
                         try:
                             _huella = huella_de_archivo(archivo.getvalue())
-                        except Exception:
+                        except Exception as _err:
+                            anotar_error("nivel principal", _err)
                             _huella = None
                         c.execute(
                             "INSERT INTO importaciones (marca, archivo, filas_cargadas, filas_omitidas, huella, lote) "
@@ -13461,13 +14181,15 @@ if pagina == PAGINAS[2]:
                     # use. Antes había que acordarse de tocar «Calcular la confianza».
                     try:
                         recalcular_confianzas(limite=4000)
-                    except Exception:
+                    except Exception as _err:
+                        anotar_error("nivel principal", _err)
                         pass
 
                     # Informe de lo que pasó con ESTA lista, mientras se la tiene fresca
                     try:
                         _inf = informe_post_importacion(lote_importacion, nombre_prov, cargados)
-                    except Exception:
+                    except Exception as _err:
+                        anotar_error("nivel principal", _err)
                         _inf = {"puntos": [], "vinculos_nuevos": 0}
                     if _inf["puntos"]:
                         st.markdown("#### 🔎 Qué conviene revisar de esta lista")
@@ -13558,6 +14280,7 @@ if pagina == PAGINAS[2]:
                         )
                         st.dataframe(sospechosos, use_container_width=True, hide_index=True)
                 except Exception as e:
+                    anotar_error("nivel principal", e)
                     st.error(f"Error procesando la lista: {e}")
 
         st.markdown("---")
@@ -14481,7 +15204,8 @@ if pagina == PAGINAS[3]:
                 sin_puntuar = c.fetchone()[0]
                 c.execute("SELECT COUNT(*) FROM equivalencias")
                 total_eq = c.fetchone()[0]
-            except sqlite3.OperationalError:
+            except sqlite3.OperationalError as _err:
+                anotar_error("nivel principal", _err)
                 sin_puntuar = total_eq = 0
             explicar(
                 "Le pone puntaje a cada vínculo y lo guarda.",
@@ -14512,7 +15236,8 @@ if pagina == PAGINAS[3]:
             )
             try:
                 sustituciones = sustituciones_reales()
-            except sqlite3.OperationalError:
+            except sqlite3.OperationalError as _err:
+                anotar_error("nivel principal", _err)
                 sustituciones = []
             if not sustituciones:
                 st.caption(
@@ -14588,7 +15313,8 @@ if pagina == PAGINAS[3]:
                                     COUNT(DISTINCT codigo) AS "Códigos"
                              FROM aplicaciones GROUP BY marca_repuesto ORDER BY 2 DESC""")
                 ya_cargadas = filas_a_listas(c)
-            except sqlite3.OperationalError:
+            except sqlite3.OperationalError as _err:
+                anotar_error("nivel principal", _err)
                 ya_cargadas = []
             if ya_cargadas:
                 st.dataframe(ya_cargadas, use_container_width=True, hide_index=True)
@@ -14625,6 +15351,7 @@ if pagina == PAGINAS[3]:
                                     posiciones["comb"], posiciones["anios"], posiciones["codigo"]
                                 )
                         except Exception as e:
+                            anotar_error("nivel principal", e)
                             apps = []
                             st.error(f"No se pudo leer: {type(e).__name__}: {e}")
                     if apps:
@@ -14669,7 +15396,8 @@ if pagina == PAGINAS[3]:
                 c.execute("""SELECT COUNT(DISTINCT marca_repuesto) FROM aplicaciones
                              WHERE COALESCE(tipo_pieza,'') <> ''""")
                 marcas_con_tipo = c.fetchone()[0]
-            except sqlite3.OperationalError:
+            except sqlite3.OperationalError as _err:
+                anotar_error("nivel principal", _err)
                 marcas_con_tipo = 0
             try:
                 c.execute("SELECT COUNT(*) FROM productos WHERE COALESCE(descripcion,'') <> ''")
@@ -14678,7 +15406,8 @@ if pagina == PAGINAS[3]:
                 _n_med = c.fetchone()[0]
                 c.execute("SELECT COUNT(*) FROM reemplazos_codigo")
                 _n_reemp = c.fetchone()[0]
-            except sqlite3.OperationalError:
+            except sqlite3.OperationalError as _err:
+                anotar_error("nivel principal", _err)
                 pass
             _n_portales = sum(1 for _m in (filas_a_listas(c.execute(
                 "SELECT nombre FROM marcas")) or []) if config_portal(_m["nombre"]))
@@ -14761,7 +15490,8 @@ if pagina == PAGINAS[3]:
             )
             try:
                 _pu = equivalencias_puenteadas_por_reemplazo()
-            except Exception:
+            except Exception as _err:
+                anotar_error("nivel principal", _err)
                 _pu = []
             if not _pu:
                 st.caption(
@@ -14810,7 +15540,8 @@ if pagina == PAGINAS[3]:
                              JOIN productos p ON p.marca_id = m.id
                              GROUP BY m.id ORDER BY n DESC""")
                 _marcas_portal = filas_a_listas(c)
-            except sqlite3.OperationalError:
+            except sqlite3.OperationalError as _err:
+                anotar_error("nivel principal", _err)
                 _marcas_portal = []
             _con_portal = [x for x in _marcas_portal if config_portal(x["nombre"])]
             if not _con_portal:
@@ -14886,7 +15617,8 @@ if pagina == PAGINAS[3]:
                              WHERE COALESCE(p.descripcion,'') <> ''
                              GROUP BY m.id HAVING n >= 20 ORDER BY n DESC""")
                 _marcas_desc = filas_a_listas(c)
-            except sqlite3.OperationalError:
+            except sqlite3.OperationalError as _err:
+                anotar_error("nivel principal", _err)
                 _marcas_desc = []
             if len(_marcas_desc) < 2:
                 st.caption("Hacen falta al menos dos marcas con descripciones cargadas.")
@@ -15319,7 +16051,8 @@ if pagina == PAGINAS[3]:
                             crear_usuario(nombre_nuevo_usuario, password_nuevo_usuario, rol_nuevo_usuario)
                             avisar("success", f"Empleado '{nombre_nuevo_usuario}' creado.")
                             st.rerun()
-                        except sqlite3.IntegrityError:
+                        except sqlite3.IntegrityError as _err:
+                            anotar_error("nivel principal", _err)
                             st.error("Ya existe un empleado con ese nombre.")
 
                 if usuarios_actuales:
@@ -15365,7 +16098,8 @@ if pagina == PAGINAS[3]:
                             crear_mecanico(nombre_nuevo_mecanico, password_nuevo_mecanico)
                             avisar("success", f"Mecánico '{nombre_nuevo_mecanico}' creado.")
                             st.rerun()
-                        except sqlite3.IntegrityError:
+                        except sqlite3.IntegrityError as _err:
+                            anotar_error("nivel principal", _err)
                             st.error("Ya existe un mecánico con ese nombre.")
 
                 if mecanicos_actuales:
@@ -15458,7 +16192,8 @@ if pagina == PAGINAS[4]:
         _riesgo = None
         try:
             _riesgo = cuanto_perderias_si_reinicia()
-        except Exception:
+        except Exception as _err:
+            anotar_error("nivel principal", _err)
             pass
         if _riesgo:
             if not _riesgo["hay_semilla"]:
@@ -15628,7 +16363,8 @@ Administrar → Mantenimiento.
                 marca_tiempo = datetime.fromtimestamp(os.path.getmtime(ARCHIVO_SEMILLA))
                 peso = os.path.getsize(ARCHIVO_SEMILLA) / (1024 * 1024)
                 st.success(f"✅ Hay una copia en el repositorio ({peso:,.1f} MB, del {marca_tiempo:%d/%m/%Y}).")
-            except Exception:
+            except Exception as _err:
+                anotar_error("nivel principal", _err)
                 st.success("✅ Hay una copia en el repositorio.")
         else:
             st.warning(
@@ -15730,7 +16466,8 @@ Administrar → Mantenimiento.
                                         key="min_ventas_quiebre")
         try:
             por_quebrar = productos_por_quebrar(int(dias_aviso), int(min_ventas))
-        except sqlite3.OperationalError:
+        except sqlite3.OperationalError as _err:
+            anotar_error("nivel principal", _err)
             por_quebrar = []
         if not por_quebrar:
             st.success("✅ Nada a punto de quebrarse, según lo que se vendió estos meses.")
@@ -15767,7 +16504,8 @@ Administrar → Mantenimiento.
                                       key="meses_variacion")
         try:
             variacion = variacion_de_precios_por_marca(int(meses_var))
-        except sqlite3.OperationalError:
+        except sqlite3.OperationalError as _err:
+            anotar_error("nivel principal", _err)
             variacion = []
         if not variacion:
             st.caption(
@@ -15789,7 +16527,8 @@ Administrar → Mantenimiento.
         )
         try:
             conviene = quien_conviene_por_rubro()
-        except sqlite3.OperationalError:
+        except sqlite3.OperationalError as _err:
+            anotar_error("nivel principal", _err)
             conviene = []
         if not conviene:
             st.caption(
@@ -15817,7 +16556,8 @@ Administrar → Mantenimiento.
                                         key="dias_clavo")
         try:
             _clavos = productos_estancados(int(_dias_clavo))
-        except Exception:
+        except Exception as _err:
+            anotar_error("nivel principal", _err)
             _clavos = []
         if not _clavos:
             st.success("✅ Nada estancado con ese criterio.")
@@ -15862,7 +16602,8 @@ Administrar → Mantenimiento.
                                 substr(fecha, 1, 10) AS "Cargado"
                          FROM reemplazos_codigo ORDER BY fecha DESC LIMIT 200""")
             _lista_r = filas_a_listas(c)
-        except sqlite3.OperationalError:
+        except sqlite3.OperationalError as _err:
+            anotar_error("nivel principal", _err)
             _lista_r = []
         if _lista_r:
             st.dataframe(_lista_r, use_container_width=True, hide_index=True)
@@ -15890,7 +16631,8 @@ Administrar → Mantenimiento.
         try:
             discont, revisados_disc = productos_probablemente_discontinuados(
                 listas_seguidas=int(listas_disc))
-        except sqlite3.OperationalError:
+        except sqlite3.OperationalError as _err:
+            anotar_error("nivel principal", _err)
             discont, revisados_disc = [], 0
 
         if not revisados_disc:
@@ -15924,6 +16666,74 @@ Administrar → Mantenimiento.
             )
 
         st.markdown("---")
+        if _ULTIMOS_ERRORES and es_admin():
+            st.markdown("**🐞 Errores que la app se tragó**")
+            explicar(
+                f"{len(_ULTIMOS_ERRORES)} cosa(s) fallaron sin que nadie se enterara.",
+                "Hay muchos lugares donde algo puede fallar y la app sigue igual: una tabla "
+                "que todavía no existe, una función opcional que no está. Son a propósito.\n\n"
+                "Pero si ahí se esconde un bug real, sin este registro nadie se entera nunca. "
+                "Acá quedan anotados los últimos, con dónde y qué pasó.\n\nQue aparezcan cosas "
+                "acá no significa que algo esté roto. Lo que importa es si el mismo error se "
+                "repite muchas veces, o si aparece justo cuando algo no funcionó."
+            )
+            from collections import Counter as _Cnt
+            _repetidos = _Cnt((e["donde"], e["tipo"]) for e in _ULTIMOS_ERRORES)
+            st.dataframe(
+                [{"Veces": v, "Dónde": d, "Tipo": t} for (d, t), v in _repetidos.most_common(15)],
+                use_container_width=True, hide_index=True)
+            if seccion_plegable("Ver el detalle de los últimos", key="detalle_errores"):
+                st.dataframe(list(reversed(_ULTIMOS_ERRORES))[:40],
+                              use_container_width=True, hide_index=True)
+            st.markdown("---")
+
+        st.markdown("**📞 Consultas de clientes**")
+        explicar(
+            "Lo que preguntó cada cliente y todavía no se resolvió.",
+            "En el mostrador esto se anota en un papel y se pierde: el cliente dijo que lo "
+            "consultaba y volvía, y cuando vuelve nadie se acuerda qué pidió ni qué precio se "
+            "le dio.\n\nAcá queda con nombre, teléfono, qué pieza y a cuánto se la cotizó. "
+            "Cuando llama y dice «soy el del Gol», lo buscás y tenés todo."
+        )
+        _ahora_hay = consultas_que_ahora_hay_en_stock()
+        if _ahora_hay:
+            st.success(
+                f"📦 **{len(_ahora_hay)} cliente(s) esperando algo que AHORA hay en stock.** "
+                "Es una venta a un llamado de distancia."
+            )
+            st.dataframe(quitar_id(_ahora_hay), use_container_width=True, hide_index=True)
+            st.markdown("")
+
+        _esperando = consultas_de_clientes()
+        if not _esperando:
+            st.caption("No hay consultas pendientes.")
+        else:
+            st.dataframe(quitar_id(_esperando), use_container_width=True, hide_index=True)
+            _etq_cerr = {f"{x['Cliente'] or x['Teléfono'] or 'sin nombre'} — {x['Pidió']} "
+                          f"({x['Días']} día/s)": x["_id"] for x in _esperando}
+            _sel_cerr = st.selectbox("Cerrar una consulta:", list(_etq_cerr.keys()),
+                                      key="cerrar_consulta")
+            cq1, cq2 = cols(2)
+            if cq1.button("✅ Vino y compró"):
+                cerrar_consulta(_etq_cerr[_sel_cerr], "vendida")
+                avisar("success", "Cerrada como vendida.")
+                st.rerun()
+            if cq2.button("🚶 No volvió"):
+                cerrar_consulta(_etq_cerr[_sel_cerr], "cancelada")
+                avisar("success", "Cerrada.")
+                st.rerun()
+
+        _buscar_cli = st.text_input("🔍 Buscar un cliente por nombre o teléfono:",
+                                     key="buscar_cliente",
+                                     placeholder="Llamó y no sabés qué había pedido")
+        if _buscar_cli and len(_buscar_cli.strip()) > 2:
+            _hist = historial_de_un_cliente(_buscar_cli)
+            if _hist:
+                st.dataframe(_hist, use_container_width=True, hide_index=True)
+            else:
+                st.caption("No hay nada anotado de ese cliente.")
+        st.markdown("---")
+
         st.markdown("**🔒 Stock apartado en presupuestos**")
         explicar(
             "Lo que está reservado y todavía no se vendió.",
@@ -16745,6 +17555,14 @@ if pagina == PAGINAS[6]:
                     "Km actual", min_value=0, step=1000,
                     value=int((vehiculo or {}).get("km_actual") or 0)
                 )
+                numero_motor_auto = st.text_input(
+                    "N° de motor (opcional)", value=(vehiculo or {}).get("numero_motor") or "",
+                    key="form_numero_motor",
+                    placeholder="El grabado en el block, como esté",
+                    help="Sirve cuando el auto tiene el motor cambiado: ahí el VIN lleva a los "
+                         "repuestos equivocados y este número a los correctos. Se busca sin "
+                         "importar espacios ni guiones."
+                )
                 vin_auto = st.text_input(
                     "VIN / número de chasis (opcional)", value=(vehiculo or {}).get("vin") or "",
                     key="form_vin_auto", max_chars=17,
@@ -16761,6 +17579,14 @@ if pagina == PAGINAS[6]:
                 get_or_create_vehiculo(patente_input, cliente_nombre, cliente_tel, marca_auto, modelo_auto,
                                         km_actual_input or None, anio_auto, motorizacion_auto,
                                         vin=vin_limpio)
+                # El número de motor se guarda aparte: get_or_create_vehiculo tiene ya ocho
+                # parámetros y sumarle uno más es la forma de romper las diez llamadas que tiene.
+                if (numero_motor_auto or "").strip():
+                    with db_lock:
+                        c.execute("""UPDATE vehiculos SET numero_motor = ?
+                                     WHERE UPPER(patente) = UPPER(?)""",
+                                  (numero_motor_auto.strip(), patente_input.strip()))
+                        conn.commit()
                 st.success(f"Vehículo {patente_input} guardado.")
                 if vin_limpio and modelo_auto.strip():
                     st.caption(f"📚 De paso quedó aprendido que el patrón {vin_limpio[:3]}-"
@@ -16906,7 +17732,7 @@ if pagina == PAGINAS[6]:
 if pagina == PAGINAS[7]:
     st.subheader("🛠️ Modo Mecánico")
 
-    SUB_MEC = ["📖 Códigos DTC", "🔢 Chasis / VIN", "🚙 Repuestos por vehículo",
+    SUB_MEC = ["📖 Códigos DTC", "🔢 Chasis / VIN", "⚙️ Número de motor", "🚙 Repuestos por vehículo",
                "🗺️ Esquemas", "🧮 Conversor de unidades"]
     if st.session_state.get("sub_mec") not in SUB_MEC:
         st.session_state["sub_mec"] = SUB_MEC[0]
@@ -17066,6 +17892,73 @@ if pagina == PAGINAS[7]:
                         eliminar_esquema(esq["id"])
                         st.rerun()
 
+    # -------- Número de motor --------
+    if sub_mec == SUB_MEC[2]:
+        st.subheader("⚙️ Buscar por número de motor")
+        explicar(
+            "Para cuando el auto tiene el motor cambiado y el VIN ya no sirve.",
+            "El número de motor está grabado en el block y es de ESE motor en particular. No "
+            "es lo mismo que la motorización: «1.6 16v» es el tipo, el número es cuál.\n\n"
+            "En un taller el motor cambiado pasa seguido: el chasis dice una cosa y el motor "
+            "puesto es otro. Ahí el VIN te lleva a los repuestos equivocados y el número de "
+            "motor te lleva a los que de verdad le entran.\n\nSe busca sin importar espacios, "
+            "guiones ni mayúsculas: el mismo motor se anota de tres formas distintas según "
+            "quién lo copie."
+        )
+        _nm = st.text_input("Número de motor:", key="buscar_num_motor",
+                            placeholder="Como está grabado, con o sin guiones").strip()
+        if _nm:
+            if len(normalizar_numero_motor(_nm)) < 4:
+                st.warning("Poné al menos 4 caracteres: con menos, coincide con cualquier cosa.")
+            else:
+                _ex, _par = buscar_por_numero_motor(_nm)
+                if _ex:
+                    st.success(f"✅ {len(_ex)} vehículo(s) con ese número de motor exacto:")
+                    st.dataframe(quitar_id(_ex), use_container_width=True, hide_index=True)
+                    _reps = repuestos_por_numero_motor(_nm)
+                    if _reps:
+                        st.markdown("**🔧 Lo que se le puso a ese motor:**")
+                        st.caption(
+                            "Esto es lo más confiable que hay: no es un catálogo diciendo qué "
+                            "debería entrar, es lo que alguien efectivamente le instaló."
+                        )
+                        st.dataframe(_reps, use_container_width=True, hide_index=True)
+                    else:
+                        st.caption("Todavía no hay repuestos cargados en la ficha de ese auto.")
+                if _par:
+                    st.info(
+                        f"🔎 {len(_par)} coincidencia(s) **parcial(es)**. El número de motor casi "
+                        "nunca se lee entero: está grabado en el block, con grasa encima y en "
+                        "una posición incómoda."
+                    )
+                    if any(x.get("Por qué") for x in _par):
+                        st.caption(
+                            "Algunas salieron de probar lecturas equivocadas comunes —un 0 que "
+                            "era una O, un 5 que era una S—. La columna «Por qué» lo aclara."
+                        )
+                    st.dataframe(quitar_id(_par), use_container_width=True, hide_index=True)
+
+                if _ex or _par:
+                    _fam = autos_con_la_misma_familia_de_motor(_nm)
+                    if _fam:
+                        st.markdown("**🔩 Otros autos con un motor de la misma familia:**")
+                        st.caption(
+                            "El número arranca con el modelo de motor y sigue con el serial de "
+                            "esa unidad. Si el modelo es el mismo, los repuestos son los mismos "
+                            "aunque sea otro auto."
+                        )
+                        st.dataframe(_fam, use_container_width=True, hide_index=True)
+                if not _ex and not _par:
+                    st.warning(
+                        "No hay ningún vehículo con ese número de motor. Se carga en la ficha "
+                        "del auto, en **🚙 Repuestos por vehículo**."
+                    )
+                    st.caption(
+                        "Si el auto no está cargado todavía, el número de motor solo no alcanza "
+                        "para saber qué repuestos lleva: no existe una base pública que lo "
+                        "traduzca. Lo que sirve es cargar la ficha una vez."
+                    )
+
     # -------- Chasis / VIN (pantalla única) --------
     if sub_mec == SUB_MEC[1]:
         panel_vin(clave="vin_mec")
@@ -17148,7 +18041,7 @@ if pagina == PAGINAS[7]:
             else:
                 st.caption("Todavía ninguno.")
 
-    if sub_mec == SUB_MEC[2]:
+    if sub_mec == SUB_MEC[3]:
         st.markdown("**🚙 Repuestos por vehículo**")
         st.caption(
             "Buscá lo que le entra a un auto entrando por marca y modelo, en vez de por código. "
@@ -17309,7 +18202,7 @@ if pagina == PAGINAS[7]:
                 st.caption("Se ven completos, con las piezas marcadas, en la sección Esquemas.")
 
 
-    if sub_mec == SUB_MEC[3]:
+    if sub_mec == SUB_MEC[4]:
         st.caption(
             "Diagramas organizados por Marca › Vehículo › Sistema, donde cada pieza marcada tiene "
             "su código vinculado al catálogo — así se busca directo desde el dibujo, ya sea en el "
@@ -17464,7 +18357,7 @@ if pagina == PAGINAS[7]:
                     st.rerun()
 
     # -------- Conversor de unidades --------
-    if sub_mec == SUB_MEC[4]:
+    if sub_mec == SUB_MEC[5]:
         st.caption("Conversiones rápidas de unidades que se usan seguido en manuales de taller antiguos o importados.")
 
         categoria_conv = st.radio("Categoría:", ["Torque", "Presión", "Longitud"], horizontal=True, key="conv_categoria")
