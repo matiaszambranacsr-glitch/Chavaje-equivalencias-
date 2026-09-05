@@ -9,9 +9,38 @@ import hashlib
 import os
 import pickle
 import time
+import requests          # se usa en varias funciones; importarlo una vez evita repetirlo
 from datetime import datetime
 from urllib.parse import quote
 from openpyxl import load_workbook, Workbook
+
+
+# Los últimos errores que la app se tragó. Hay 142 lugares donde algo puede fallar y la app
+# sigue igual: son fallbacks a propósito —una tabla que todavía no existe, una función opcional
+# que no está—, pero si ahí se esconde un bug real, nadie se entera nunca.
+#
+# Con esto quedan anotados. No cambia el comportamiento: el fallback sigue corriendo igual.
+_ULTIMOS_ERRORES = []
+MAXIMO_ERRORES_ANOTADOS = 150
+
+
+def anotar_error(donde, error):
+    """Deja registrado un error que la app decidió ignorar. NUNCA puede fallar.
+
+    Va a memoria y no a la base a propósito: si lo que falló ES la base, escribir ahí sería
+    fallar de nuevo dentro del manejo del primer error."""
+    try:
+        _ULTIMOS_ERRORES.append({
+            "cuando": datetime.now().strftime("%d/%m %H:%M:%S"),
+            "donde": str(donde)[:60],
+            "tipo": type(error).__name__,
+            "detalle": str(error)[:200],
+        })
+        if len(_ULTIMOS_ERRORES) > MAXIMO_ERRORES_ANOTADOS:
+            del _ULTIMOS_ERRORES[:-MAXIMO_ERRORES_ANOTADOS]
+    except Exception as _err:
+        anotar_error("anotar_error", _err)
+        pass      # anotar un error jamás puede romper nada
 
 # ============================================================
 # CONFIGURACIÓN DE PÁGINA
@@ -442,7 +471,8 @@ def _restaurar_desde_semilla(conexion):
         origen.backup(conexion)
         origen.close()
         return True
-    except Exception:
+    except Exception as _err:
+        anotar_error("_restaurar_desde_semilla", _err)
         return False
 
 
@@ -514,6 +544,27 @@ def get_connection():
         fecha TEXT DEFAULT (datetime('now'))
     )""")
     c.execute("CREATE INDEX IF NOT EXISTS idx_reservas_prod ON reservas_stock(producto_id, estado)")
+
+    # Lo que preguntó cada cliente. En el mostrador se anota en un papel y se pierde: el
+    # cliente dijo que lo consultaba y volvía, y cuando vuelve nadie se acuerda qué pidió.
+    c.execute("""CREATE TABLE IF NOT EXISTS consultas_cliente (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        cliente TEXT,
+        telefono TEXT,
+        producto_id INTEGER REFERENCES productos(id) ON DELETE SET NULL,
+        codigo_buscado TEXT,
+        descripcion TEXT,
+        cantidad INTEGER DEFAULT 1,
+        precio_dicho REAL,
+        nota TEXT,
+        estado TEXT DEFAULT 'activa',
+        atendio TEXT,
+        fecha TEXT DEFAULT (datetime('now')),
+        fecha_cierre TEXT
+    )""")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_consultas_estado ON consultas_cliente(estado)")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_consultas_tel ON consultas_cliente(telefono)")
+
 
     c.execute("""CREATE TABLE IF NOT EXISTS aplicaciones (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -683,6 +734,17 @@ def get_connection():
         created_at TEXT DEFAULT (datetime('now'))
     )""")
     columnas_vehiculos_extra = [f[1] for f in c.execute("PRAGMA table_info(vehiculos)").fetchall()]
+    # El número de motor grabado en el block. No es lo mismo que la motorización: «1.6 16v» es
+    # el tipo de motor, y el número es el de ESE motor en particular.
+    #
+    # Importa cuando el auto tiene el motor cambiado, que en un taller pasa seguido: el VIN
+    # dice una cosa y el motor que tiene puesto es otro. Buscando por el número de motor se
+    # encuentra lo que de verdad lleva.
+    if "numero_motor" not in columnas_vehiculos_extra:
+        c.execute("ALTER TABLE vehiculos ADD COLUMN numero_motor TEXT")
+        columnas_vehiculos_extra.append("numero_motor")
+    c.execute("""CREATE INDEX IF NOT EXISTS idx_vehiculos_motor
+                 ON vehiculos(numero_motor)""")
     if "anio" not in columnas_vehiculos_extra:
         c.execute("ALTER TABLE vehiculos ADD COLUMN anio TEXT")
     if "motorizacion" not in columnas_vehiculos_extra:
@@ -802,6 +864,7 @@ def get_connection():
         UNIQUE (wmi, codigo)
     )""")
     c.execute("CREATE INDEX IF NOT EXISTS idx_motores_vin ON motores_vin(wmi, codigo)")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_motores_vin_cod ON motores_vin(codigo)")
 
     c.execute("""CREATE TABLE IF NOT EXISTS esquemas (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -815,6 +878,7 @@ def get_connection():
         generado_ia INTEGER DEFAULT 0,
         created_at TEXT DEFAULT (datetime('now'))
     )""")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_esquemas_marca ON esquemas(marca_auto)")
     columnas_esquemas = [f[1] for f in c.execute("PRAGMA table_info(esquemas)").fetchall()]
     if "generado_ia" not in columnas_esquemas:
         c.execute("ALTER TABLE esquemas ADD COLUMN generado_ia INTEGER DEFAULT 0")
@@ -960,6 +1024,15 @@ def get_connection():
         PRIMARY KEY (producto_a_id, producto_b_id)
     )""")
     c.execute("CREATE INDEX IF NOT EXISTS idx_pendientes_lote ON equivalencias_pendientes(lote)")
+    # Estos dos estaban 450 líneas MÁS ARRIBA, antes de que existiera la tabla. Con una base ya
+    # creada no se notaba —la tabla venía de una versión anterior—, pero en una instalación nueva
+    # la app no abría: "no such table: main.equivalencias_pendientes" apenas arrancaba.
+    # Medido con 30.000 pendientes: buscar si un par ya está pendiente pasa de 0,75 ms a 0,01 ms.
+    # No se nota en una consulta suelta; sí al recorrer miles analizando la cola.
+    c.execute("""CREATE INDEX IF NOT EXISTS idx_pend_a
+                 ON equivalencias_pendientes(producto_a_id)""")
+    c.execute("""CREATE INDEX IF NOT EXISTS idx_pend_b
+                 ON equivalencias_pendientes(producto_b_id)""")
 
     # Evidencia que respalda cada equivalencia sugerida. La idea es NO cargar nada solo:
     # cada sugerencia llega al panel con el detalle de en qué se basa, para poder decidir
@@ -1025,6 +1098,7 @@ def get_connection():
         disparador TEXT NOT NULL,
         item TEXT NOT NULL
     )""")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_combos_disp ON combos_sugeridos(disparador)")
     c.execute("SELECT COUNT(*) FROM combos_sugeridos")
     if c.fetchone()[0] == 0:
         c.executemany(
@@ -1692,47 +1766,150 @@ def get_connection():
     return conn
 
 
-conn = get_connection()
+# Se llama una vez para crear las tablas y correr las migraciones. La conexión que devuelve
+# no se usa después: cada hilo abre la suya con el proxy de abajo.
+get_connection()
 
 
-class _CursorPorHilo:
-    """Un cursor propio para cada persona que esté usando la app en ese momento.
+class _ConexionPorSesion:
+    """Una conexión propia para cada sesión, detrás de los mismos nombres `conn` y `c`.
 
-    Antes había UNO SOLO compartido por todos. La conexión sí se puede compartir —SQLite la
-    serializa por dentro—, pero el cursor no: es el que guarda el resultado pendiente. Streamlit
-    atiende a cada persona en su propio hilo, así que dos consultas simultáneas se pisaban en el
-    mismo cursor y una podía llevarse las filas de la otra. No es un riesgo teórico: en una
-    prueba con dos hilos haciendo 400 consultas cada uno sobre un cursor compartido, 748 de las
-    800 contestaron mal o directamente reventaron.
+    La app usaba UNA conexión y UN cursor compartidos por todos. Con un solo empleado no se
+    nota; con dos usando la app a la vez, el proceso se cae con segmentation fault. Está
+    medido: dos hilos consultando en paralelo sobre un cursor compartido revientan.
 
-    Lo que se ve desde afuera no cambia: se sigue escribiendo c.execute(...), c.fetchall(),
-    c.rowcount. Por eso el arreglo es este envoltorio y no tocar los cientos de lugares que lo
-    usan. Y como cada hilo tiene el suyo, rowcount y lastrowid siguen siendo los de la consulta
-    que uno mismo acaba de hacer, que es justamente lo que antes no estaba garantizado.
+    Se probaron las dos alternativas con cuatro hilos haciendo 400 consultas cada uno:
 
-    El db_lock sigue haciendo falta igual: es el que evita que dos escrituras se mezclen."""
+        conexión compartida + cursor por hilo  ->  2 resultados cruzados
+        conexión por hilo                      ->  0 fallos
+
+    Por eso va conexión por hilo. Streamlit atiende cada sesión en su propio hilo, así que en
+    la práctica es una conexión por sesión.
+
+    Se arregla acá y no en las 400 consultas que usan `c`: estos objetos se llaman igual y se
+    usan igual. Ningún otro código cambia. Es a propósito — tocar 400 lugares para esto es
+    pedir un error tonto.
+    """
+
+    def __init__(self, ruta, al_crear=None):
+        self._ruta = ruta
+        self._al_crear = al_crear
+        self._local = threading.local()
+
+    @property
+    def _real(self):
+        propia = getattr(self._local, "conn", None)
+        if propia is None:
+            propia = sqlite3.connect(self._ruta, check_same_thread=False,
+                                     isolation_level=None)
+            propia.row_factory = sqlite3.Row
+            # Los mismos PRAGMA en cada conexión: no se heredan, son por conexión.
+            propia.execute("PRAGMA foreign_keys = ON")
+            propia.execute("PRAGMA journal_mode = WAL")
+            propia.execute("PRAGMA busy_timeout = 8000")
+            self._local.conn = propia
+            if self._al_crear:
+                self._al_crear(propia)
+        return propia
+
+    def cursor(self):
+        return self._real.cursor()
+
+    def execute(self, *a, **kw):
+        return self._real.execute(*a, **kw)
+
+    def executemany(self, *a, **kw):
+        return self._real.executemany(*a, **kw)
+
+    def executescript(self, *a, **kw):
+        return self._real.executescript(*a, **kw)
+
+    def commit(self):
+        return self._real.commit()
+
+    def rollback(self):
+        return self._real.rollback()
+
+    def close(self):
+        propia = getattr(self._local, "conn", None)
+        if propia is not None:
+            propia.close()
+            self._local.conn = None
+
+    def backup(self, *a, **kw):
+        return self._real.backup(*a, **kw)
+
+    def iterdump(self):
+        return self._real.iterdump()
+
+    @property
+    def row_factory(self):
+        return self._real.row_factory
+
+    @row_factory.setter
+    def row_factory(self, valor):
+        self._real.row_factory = valor
+
+    @property
+    def total_changes(self):
+        return self._real.total_changes
+
+
+class _CursorPorSesion:
+    """El cursor de la conexión de esta sesión, detrás del nombre `c` de siempre."""
 
     def __init__(self, conexion):
         self._conexion = conexion
-        self._propio = threading.local()
+        self._local = threading.local()
 
     @property
     def _cursor(self):
-        cursor = getattr(self._propio, "cursor", None)
-        if cursor is None:
-            cursor = self._propio.cursor = self._conexion.cursor()
-        return cursor
+        propio = getattr(self._local, "cursor", None)
+        # Si la conexión del hilo se cerró y se rehízo, el cursor viejo ya no sirve
+        if propio is None or getattr(self._local, "conn", None) is not self._conexion._real:
+            propio = self._conexion.cursor()
+            self._local.cursor = propio
+            self._local.conn = self._conexion._real
+        return propio
 
-    def __getattr__(self, nombre):
-        # Solo llega acá lo que no es atributo propio: execute, fetchone, fetchall,
-        # executemany, rowcount, lastrowid, fetchmany.
-        return getattr(self._cursor, nombre)
+    def execute(self, *a, **kw):
+        return self._cursor.execute(*a, **kw)
+
+    def executemany(self, *a, **kw):
+        return self._cursor.executemany(*a, **kw)
+
+    def executescript(self, *a, **kw):
+        return self._cursor.executescript(*a, **kw)
+
+    def fetchone(self):
+        return self._cursor.fetchone()
+
+    def fetchall(self):
+        return self._cursor.fetchall()
+
+    def fetchmany(self, *a, **kw):
+        return self._cursor.fetchmany(*a, **kw)
 
     def __iter__(self):
         return iter(self._cursor)
 
+    @property
+    def rowcount(self):
+        return self._cursor.rowcount
 
-c = _CursorPorHilo(conn)
+    @property
+    def lastrowid(self):
+        return self._cursor.lastrowid
+
+    @property
+    def description(self):
+        return self._cursor.description
+
+
+# La conexión que devuelve get_connection() ya creó las tablas y corrió las migraciones. A
+# partir de acá, cada hilo abre la suya contra el mismo archivo.
+conn = _ConexionPorSesion(DB_PATH)
+c = _CursorPorSesion(conn)
 
 
 
@@ -1778,7 +1955,8 @@ def sanitizar(codigo):
             entero = int(float(codigo))
             if abs(float(codigo) - entero) < 1e-6:
                 codigo = str(entero)
-        except (ValueError, OverflowError):
+        except (ValueError, OverflowError) as _err:
+            anotar_error("sanitizar", _err)
             pass
     return re.sub(r'[^A-Z0-9]', '', codigo.upper())
 
@@ -2082,7 +2260,8 @@ def config_github():
         secretos = st.secrets if hasattr(st, "secrets") else {}
         token = secretos.get("github_token")
         repo = secretos.get("github_repo")      # formato: "usuario/repositorio"
-    except Exception:
+    except Exception as _err:
+        anotar_error("config_github", _err)
         return None
     if not token or not repo or "/" not in str(repo):
         return None
@@ -2134,7 +2313,8 @@ def subir_backup_a_github(datos_db, mensaje=""):
         detalle = ""
         try:
             detalle = r.json().get("message", "")
-        except Exception:
+        except Exception as _err:
+            anotar_error("subir_backup_a_github", _err)
             pass
         if r.status_code in (401, 403):
             return False, ("GitHub rechazó el token. Revisá que tenga permiso de escritura "
@@ -2145,6 +2325,7 @@ def subir_backup_a_github(datos_db, mensaje=""):
                            "tener acceso.")
         return False, f"GitHub respondió {r.status_code}. {detalle}"
     except Exception as e:
+        anotar_error("subir_backup_a_github", e)
         return False, f"No se pudo conectar con GitHub: {type(e).__name__}: {e}"
 
 
@@ -2163,7 +2344,8 @@ def cuanto_perderias_si_reinicia():
         ahora_total = c.fetchone()[0]
         c.execute("SELECT COUNT(*) FROM equivalencias")
         eq_total = c.fetchone()[0]
-    except sqlite3.OperationalError:
+    except sqlite3.OperationalError as _err:
+        anotar_error("cuanto_perderias_si_reinicia", _err)
         return None
 
     if not os.path.exists(ARCHIVO_SEMILLA):
@@ -2185,10 +2367,12 @@ def cuanto_perderias_si_reinicia():
         try:
             cur.execute("SELECT COUNT(*) FROM equivalencias")
             eq_semilla = cur.fetchone()[0]
-        except sqlite3.OperationalError:
+        except sqlite3.OperationalError as _err:
+            anotar_error("cuanto_perderias_si_reinicia", _err)
             eq_semilla = 0
         origen.close()
-    except Exception:
+    except Exception as _err:
+        anotar_error("cuanto_perderias_si_reinicia", _err)
         return None
 
     return {
@@ -2234,7 +2418,8 @@ def tareas_automaticas_del_dia(presupuesto_segundos=6):
                 n = recalcular_confianzas(limite=3000)
                 if n:
                     hecho.append(f"{n:,} vínculo(s) puntuados")
-        except Exception:
+        except Exception as _err:
+            anotar_error("tareas_automaticas_del_dia", _err)
             pass
 
     # 2. Procesar fotos pendientes, de a poco
@@ -2243,8 +2428,33 @@ def tareas_automaticas_del_dia(presupuesto_segundos=6):
             r = migrar_imagenes_pendientes(limite=20)
             if r.get("listas"):
                 hecho.append(f"{r['listas']} foto(s) procesadas")
-        except Exception:
+        except Exception as _err:
+            anotar_error("tareas_automaticas_del_dia", _err)
             pass
+
+    # 2b. Liberar las reservas viejas. Antes solo pasaba cuando alguien abría esa pantalla:
+    # un presupuesto de hace un mes podía seguir bloqueando mercadería para siempre.
+    if queda_tiempo():
+        try:
+            n_venc = vencer_reservas_viejas()
+            if n_venc:
+                hecho.append(f"{n_venc} reserva(s) vencida(s) liberadas")
+        except Exception as _err:
+            anotar_error("tareas/reservas_vencidas", _err)
+
+    # 2c. Las equivalencias que salen de los reemplazos de código ya cargados. No hay nada que
+    # investigar: el dato ya está, solo faltaba cruzarlo.
+    if queda_tiempo():
+        try:
+            puenteadas = equivalencias_puenteadas_por_reemplazo(100)
+            if puenteadas:
+                n_p = guardar_equivalencias_derivadas(
+                    [(x["_a"], x["_b"]) for x in puenteadas],
+                    f"POR REEMPLAZO (automático) · {datetime.now():%d/%m}")
+                if n_p:
+                    hecho.append(f"{n_p} equivalencia(s) por cambio de código, a revisión")
+        except Exception as _err:
+            anotar_error("tareas/puenteadas", _err)
 
     # 3. Aprender modelos y motores de las fichas de vehículo cargadas
     if queda_tiempo():
@@ -2252,7 +2462,8 @@ def tareas_automaticas_del_dia(presupuesto_segundos=6):
             n_mod, n_mot = aprender_modelos_de_fichas_existentes()
             if n_mod or n_mot:
                 hecho.append(f"{n_mod} modelo(s) y {n_mot} motor(es) de VIN aprendidos")
-        except Exception:
+        except Exception as _err:
+            anotar_error("tareas_automaticas_del_dia", _err)
             pass
 
     # 4. Las equivalencias que el mostrador ya confirmó: si vendiste el mismo reemplazo varias
@@ -2266,7 +2477,8 @@ def tareas_automaticas_del_dia(presupuesto_segundos=6):
                     f"CONFIRMADAS EN EL MOSTRADOR · {hoy}")
                 if n:
                     hecho.append(f"{n} equivalencia(s) confirmadas por venta, a revisión")
-        except Exception:
+        except Exception as _err:
+            anotar_error("tareas_automaticas_del_dia", _err)
             pass
 
     # 5. Traer fotos de las fichas del proveedor, de a poco. Es la tarea más tediosa que queda
@@ -2288,7 +2500,8 @@ def tareas_automaticas_del_dia(presupuesto_segundos=6):
                     fila["marca_id"], limite=15, filtro="con_stock")
                 if traidas:
                     hecho.append(f"{traidas} foto(s) traídas del proveedor")
-        except Exception:
+        except Exception as _err:
+            anotar_error("tareas_automaticas_del_dia", _err)
             pass
 
     # 6. Subir el backup al repositorio, si está configurado. Es lo único que sobrevive a un
@@ -2307,7 +2520,8 @@ def tareas_automaticas_del_dia(presupuesto_segundos=6):
                     f"Backup automático — {hay:,} productos")
                 if ok:
                     hecho.append("backup subido al repositorio")
-        except Exception:
+        except Exception as _err:
+            anotar_error("tareas_automaticas_del_dia", _err)
             pass
 
     guardar_config("ultimas_tareas_dia", hoy)
@@ -2333,7 +2547,8 @@ def informe_post_importacion(lote, nombre_prov, cargados):
         c.execute("SELECT COUNT(*) FROM equivalencias WHERE lote = ?", (lote,))
         cargadas = c.fetchone()[0]
         informe["vinculos_nuevos"] = pendientes + cargadas
-    except sqlite3.OperationalError:
+    except sqlite3.OperationalError as _err:
+        anotar_error("informe_post_importacion", _err)
         pendientes = cargadas = 0
 
     # Los vínculos que entraron, evaluados con el mismo análisis de siempre
@@ -2349,7 +2564,8 @@ def informe_post_importacion(lote, nombre_prov, cargados):
                     "Se pueden descartar todos juntos, sin mirarlos de a uno.",
                     "Estadísticas → 🔗 Equivalencias sugeridas",
                 ))
-        except Exception:
+        except Exception as _err:
+            anotar_error("informe_post_importacion", _err)
             pass
 
     # Códigos que no parecen códigos y entraron igual
@@ -2364,7 +2580,8 @@ def informe_post_importacion(lote, nombre_prov, cargados):
                 "Suelen ser cantidades o números de orden que se colaron en la columna del código.",
                 "Estadísticas → Mantenimiento → 🧹 Limpiar vínculos",
             ))
-    except sqlite3.OperationalError:
+    except sqlite3.OperationalError as _err:
+        anotar_error("informe_post_importacion", _err)
         pass
 
     # Productos de esta marca que dejaron de venir en las últimas listas
@@ -2381,7 +2598,8 @@ def informe_post_importacion(lote, nombre_prov, cargados):
                     "Si el proveedor dejó de mandarlos, es mercadería que conviene liquidar.",
                     "Estadísticas → Reposición → Puede que ya no se fabriquen",
                 ))
-    except Exception:
+    except Exception as _err:
+        anotar_error("informe_post_importacion", _err)
         pass
 
     return informe
@@ -2400,6 +2618,315 @@ def vencer_reservas_viejas():
         n = c.rowcount
         conn.commit()
     return n
+
+
+def normalizar_numero_motor(texto):
+    """Deja el número de motor comparable: sin espacios, guiones ni minúsculas.
+
+    Los graban distinto según quién los copie: «4G15-AB1234», «4G15 AB 1234», «4g15ab1234».
+    Sin normalizar, el mismo motor no se encuentra a sí mismo."""
+    if not texto:
+        return ""
+    return re.sub(r"[^A-Z0-9]", "", str(texto).upper())
+
+
+# Caracteres que se confunden al leer un número grabado en el block. No es teoría: están
+# estampados en metal, con grasa encima, muchas veces gastados, y se leen agachado con linterna.
+_CONFUSIONES_MOTOR = [("0", "O"), ("0", "D"), ("1", "I"), ("1", "L"), ("5", "S"),
+                      ("8", "B"), ("2", "Z"), ("6", "G"), ("4", "A"), ("7", "T")]
+
+
+def variantes_numero_motor(numero, tope=40):
+    """Las formas en que ese número pudo haberse leído mal. Devuelve una lista.
+
+    Se cambia UN carácter por vez, no varios: con dos cambios simultáneos el número de
+    combinaciones explota y empieza a coincidir con motores que no tienen nada que ver."""
+    base = normalizar_numero_motor(numero)
+    if len(base) < 4:
+        return []
+    salida = []
+    for i, ch in enumerate(base):
+        for a, b in _CONFUSIONES_MOTOR:
+            otro = b if ch == a else (a if ch == b else None)
+            if otro:
+                v = base[:i] + otro + base[i+1:]
+                if v not in salida:
+                    salida.append(v)
+        if len(salida) >= tope:
+            break
+    return salida[:tope]
+
+
+def buscar_por_numero_motor(numero):
+    """Busca vehículos por el número de motor. Devuelve (fichas, parciales).
+
+    Se devuelven aparte las coincidencias PARCIALES porque el número de motor casi nunca se
+    lee entero: está grabado en el block, con grasa encima y en una posición incómoda. Que
+    coincidan los últimos 6 caracteres ya es una pista fuerte, pero no es lo mismo que una
+    coincidencia exacta y no hay que mezclarlas."""
+    limpio = normalizar_numero_motor(numero)
+    if len(limpio) < 4:
+        return [], []
+    try:
+        c.execute("""SELECT v.id AS "_id", v.patente AS "Patente", v.marca_auto AS "Marca",
+                            v.modelo_auto AS "Modelo", v.anio AS "Año",
+                            v.motorizacion AS "Motorización", v.numero_motor AS "N° de motor",
+                            v.cliente_nombre AS "Cliente", v.km_actual AS "Km"
+                     FROM vehiculos v
+                     WHERE REPLACE(REPLACE(REPLACE(UPPER(COALESCE(v.numero_motor,'')),
+                                                    ' ',''), '-',''), '.','') = ?
+                     LIMIT 50""", (limpio,))
+        exactas = filas_a_listas(c)
+
+        c.execute("""SELECT v.id AS "_id", v.patente AS "Patente", v.marca_auto AS "Marca",
+                            v.modelo_auto AS "Modelo", v.anio AS "Año",
+                            v.motorizacion AS "Motorización", v.numero_motor AS "N° de motor",
+                            v.cliente_nombre AS "Cliente"
+                     FROM vehiculos v
+                     WHERE COALESCE(v.numero_motor,'') <> ''
+                       AND REPLACE(REPLACE(REPLACE(UPPER(v.numero_motor),
+                                                    ' ',''), '-',''), '.','') LIKE ?
+                     LIMIT 50""", (f"%{limpio}%",))
+        parciales = [f for f in filas_a_listas(c)
+                     if f["_id"] not in {x["_id"] for x in exactas}]
+
+        # Si no apareció nada, se prueban las lecturas equivocadas más comunes: un 0 que era
+        # una O, un 5 que era una S. Solo cuando no hay ningún resultado, para no ensuciar
+        # una búsqueda que ya encontró lo que buscaba.
+        if not exactas and not parciales:
+            vistos = set()
+            for variante in variantes_numero_motor(limpio):
+                c.execute("""SELECT v.id AS "_id", v.patente AS "Patente",
+                                    v.marca_auto AS "Marca", v.modelo_auto AS "Modelo",
+                                    v.anio AS "Año", v.motorizacion AS "Motorización",
+                                    v.numero_motor AS "N° de motor",
+                                    v.cliente_nombre AS "Cliente"
+                             FROM vehiculos v
+                             WHERE REPLACE(REPLACE(REPLACE(UPPER(COALESCE(v.numero_motor,'')),
+                                                            ' ',''), '-',''), '.','') = ?
+                             LIMIT 5""", (variante,))
+                for f in filas_a_listas(c):
+                    if f["_id"] not in vistos:
+                        vistos.add(f["_id"])
+                        f["Por qué"] = f"leyendo «{variante}» en vez de «{limpio}»"
+                        parciales.append(f)
+        return exactas, parciales
+    except sqlite3.OperationalError as _err:
+        anotar_error("buscar_por_numero_motor", _err)
+        return [], []
+
+
+def autos_con_la_misma_familia_de_motor(numero, largo_prefijo=4):
+    """Otros autos con un motor de la misma familia.
+
+    El número de motor arranca con el código del modelo de motor —«4G15», «EA111»— y sigue con
+    el serial de esa unidad. Los primeros caracteres son el TIPO de motor, y ahí está lo útil:
+    si el motor es el mismo modelo, los repuestos son los mismos aunque sea otra unidad y otro
+    auto."""
+    limpio = normalizar_numero_motor(numero)
+    if len(limpio) < largo_prefijo + 2:
+        return []
+    prefijo = limpio[:largo_prefijo]
+    try:
+        c.execute("""SELECT v.patente AS "Patente", v.marca_auto AS "Marca",
+                            v.modelo_auto AS "Modelo", v.anio AS "Año",
+                            v.motorizacion AS "Motorización", v.numero_motor AS "N° de motor"
+                     FROM vehiculos v
+                     WHERE COALESCE(v.numero_motor,'') <> ''
+                       AND REPLACE(REPLACE(REPLACE(UPPER(v.numero_motor),
+                                                    ' ',''), '-',''), '.','') LIKE ?
+                       AND REPLACE(REPLACE(REPLACE(UPPER(v.numero_motor),
+                                                    ' ',''), '-',''), '.','') <> ?
+                     LIMIT 50""", (f"{prefijo}%", limpio))
+        return filas_a_listas(c)
+    except sqlite3.OperationalError as _err:
+        anotar_error("autos_con_la_misma_familia_de_motor", _err)
+        return []
+
+
+def todo_lo_de_una_patente(patente):
+    """De la patente a los repuestos, en un solo paso. Devuelve un diccionario con todo.
+
+    Las piezas ya existían sueltas —buscar el vehículo, ver su historial, buscar repuestos por
+    marca y modelo— pero había que ir juntándolas a mano en tres pantallas. En el mostrador
+    eso no pasa: el cliente dice la patente y hay que contestarle.
+
+    Importante y por eso el resultado dice de dónde salió cada cosa: si el auto no está en las
+    fichas, la patente sola NO alcanza. En Argentina no hay ninguna base pública gratuita que
+    traduzca patente a vehículo — las que existen cobran por consulta."""
+    pat = (patente or "").strip().upper().replace(" ", "")
+    salida = {"patente": pat, "vehiculo": None, "historial": [], "sugeridos": [],
+              "por_motor": [], "consultas": []}
+    if len(pat) < 6:
+        return salida
+
+    salida["vehiculo"] = buscar_vehiculo(pat)
+    v = salida["vehiculo"]
+    if not v:
+        return salida
+
+    # 1. Lo que YA se le puso a este auto. Es lo más confiable: no es un catálogo diciendo
+    # qué debería entrar, es lo que alguien efectivamente le instaló.
+    try:
+        c.execute("""SELECT hp.descripcion_pieza AS "Pieza", hp.marca_pieza AS "Marca",
+                            hp.codigo_pieza AS "Código", hp.km_instalacion AS "Km",
+                            substr(hp.fecha_instalacion, 1, 10) AS "Cuándo",
+                            p.precio AS "Precio hoy", p.stock AS "Stock"
+                     FROM historial_piezas hp
+                     LEFT JOIN productos p ON p.id = hp.producto_id
+                     WHERE hp.vehiculo_id = ?
+                     ORDER BY hp.fecha_instalacion DESC LIMIT 100""", (v["id"],))
+        salida["historial"] = filas_a_listas(c)
+    except sqlite3.OperationalError as _err:
+        anotar_error("todo_lo_de_una_patente/historial", _err)
+
+    # 2. Lo que le entra según marca, modelo, año y motor
+    try:
+        salida["sugeridos"] = repuestos_de_este_auto(
+            v.get("marca_auto") or "", v.get("modelo_auto") or "", v.get("anio"),
+            v.get("motorizacion") or "", v.get("vin") or "", limite=200)
+    except Exception as _err:
+        anotar_error("todo_lo_de_una_patente/sugeridos", _err)
+
+    # 3. Si tiene número de motor, lo que se le puso a otros autos con ese mismo motor.
+    # Cuando el motor está cambiado, esto vale más que la marca y el modelo del auto.
+    if v.get("numero_motor"):
+        try:
+            salida["por_motor"] = autos_con_la_misma_familia_de_motor(v["numero_motor"])
+        except Exception as _err:
+            anotar_error("todo_lo_de_una_patente/motor", _err)
+
+    # 4. Lo que este cliente preguntó antes
+    if v.get("cliente_telefono") or v.get("cliente_nombre"):
+        salida["consultas"] = historial_de_un_cliente(
+            v.get("cliente_telefono") or v.get("cliente_nombre") or "")
+    return salida
+
+
+def repuestos_por_numero_motor(numero):
+    """Qué repuestos se le pusieron a los autos que tienen ese motor.
+
+    Es el punto: si el motor está cambiado, el VIN del auto no sirve para elegir repuestos —
+    el motor manda. Buscando por el número se llega a lo que de verdad le entra."""
+    exactas, _ = buscar_por_numero_motor(numero)
+    if not exactas:
+        return []
+    ids = [v["_id"] for v in exactas]
+    marcadores = ",".join("?" for _ in ids)
+    try:
+        c.execute(f"""SELECT DISTINCT p.codigo_raw AS "Código", m.nombre AS "Marca",
+                             p.descripcion AS "Descripción", p.precio AS "Precio",
+                             p.stock AS "Stock", hp.descripcion_pieza AS "Se puso como",
+                             substr(hp.fecha_instalacion, 1, 10) AS "Cuándo"
+                      FROM historial_piezas hp
+                      LEFT JOIN productos p ON p.id = hp.producto_id
+                      LEFT JOIN marcas m ON m.id = p.marca_id
+                      WHERE hp.vehiculo_id IN ({marcadores})
+                      ORDER BY hp.fecha_instalacion DESC LIMIT 100""", ids)
+        return filas_a_listas(c)
+    except sqlite3.OperationalError as _err:
+        anotar_error("repuestos_por_numero_motor", _err)
+        return []
+
+
+DIAS_CONSULTA_VIEJA = 30
+
+
+def anotar_consulta_cliente(cliente, telefono, producto_id=None, codigo="", descripcion="",
+                            cantidad=1, precio=None, nota=""):
+    """Guarda qué pidió un cliente que dijo que lo pensaba. Devuelve (ok, mensaje)."""
+    if not (cliente or "").strip() and not (telefono or "").strip():
+        return False, "Poné al menos el nombre o el teléfono, si no después no sabés de quién era."
+    with db_lock:
+        c.execute("""INSERT INTO consultas_cliente
+                     (cliente, telefono, producto_id, codigo_buscado, descripcion, cantidad,
+                      precio_dicho, nota, atendio)
+                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                  ((cliente or "").strip() or None, (telefono or "").strip() or None,
+                   producto_id, (codigo or "").strip() or None,
+                   (descripcion or "").strip()[:120] or None, int(cantidad or 1),
+                   precio, (nota or "").strip() or None, obtener_usuario_actual()))
+        conn.commit()
+    return True, "Anotado. Aparece en «Consultas de clientes»."
+
+
+def consultas_de_clientes(estado="activa", limite=200):
+    """Lo que pidieron los clientes y todavía no se resolvió."""
+    try:
+        c.execute("""SELECT cc.id AS "_id", cc.cliente AS "Cliente", cc.telefono AS "Teléfono",
+                            cc.codigo_buscado AS "Pidió", cc.descripcion AS "Descripción",
+                            cc.cantidad AS "Cant.", cc.precio_dicho AS "Precio dicho",
+                            cc.nota AS "Nota", cc.atendio AS "Atendió",
+                            substr(cc.fecha, 1, 16) AS "Cuándo",
+                            CAST(julianday('now') - julianday(cc.fecha) AS INTEGER) AS "Días",
+                            p.stock AS "Stock hoy", p.precio AS "Precio hoy"
+                     FROM consultas_cliente cc
+                     LEFT JOIN productos p ON p.id = cc.producto_id
+                     WHERE cc.estado = ?
+                     ORDER BY cc.fecha DESC LIMIT ?""", (estado, limite))
+        return filas_a_listas(c)
+    except sqlite3.OperationalError as _err:
+        anotar_error("consultas_de_clientes", _err)
+        return []
+
+
+def historial_de_un_cliente(texto):
+    """Todo lo que preguntó o compró un cliente, buscando por nombre o teléfono.
+
+    Sirve cuando vuelve: en vez de arrancar de cero, se ve qué le interesaba y a qué precio se
+    lo cotizaron. También cuando llama y dice «soy el del Gol»."""
+    patron = f"%{(texto or '').strip()}%"
+    if len(patron) <= 2:
+        return []
+    try:
+        c.execute("""SELECT cc.cliente AS "Cliente", cc.telefono AS "Teléfono",
+                            cc.codigo_buscado AS "Pidió", cc.descripcion AS "Descripción",
+                            cc.cantidad AS "Cant.", cc.precio_dicho AS "Le dijimos",
+                            cc.estado AS "Qué pasó", substr(cc.fecha, 1, 16) AS "Cuándo",
+                            p.precio AS "Precio hoy", p.stock AS "Stock hoy"
+                     FROM consultas_cliente cc
+                     LEFT JOIN productos p ON p.id = cc.producto_id
+                     WHERE cc.cliente LIKE ? OR cc.telefono LIKE ?
+                     ORDER BY cc.fecha DESC LIMIT 100""", (patron, patron))
+        return filas_a_listas(c)
+    except sqlite3.OperationalError as _err:
+        anotar_error("historial_de_un_cliente", _err)
+        return []
+
+
+def cerrar_consulta(consulta_id, resultado):
+    """El cliente volvió y compró, o no volvió.
+
+    Los estados son los mismos que usan las reservas —'vendida' y 'cancelada'— a propósito:
+    tener 'vendido' acá y 'vendida' allá es la clase de diferencia de una letra que después
+    hace que una consulta no encuentre nada y nadie sepa por qué."""
+    with db_lock:
+        c.execute("""UPDATE consultas_cliente SET estado = ?, fecha_cierre = datetime('now')
+                     WHERE id = ?""", (resultado, consulta_id))
+        conn.commit()
+    return True
+
+
+def consultas_que_ahora_hay_en_stock():
+    """Clientes esperando algo que en su momento no había y ahora sí. Son ventas a un llamado.
+
+    Es el caso que más se pierde en el mostrador: entró la mercadería, nadie se acuerda quién
+    la había pedido, y el cliente ya la compró en otro lado."""
+    try:
+        c.execute("""SELECT cc.id AS "_id", cc.cliente AS "Cliente", cc.telefono AS "Teléfono",
+                            cc.codigo_buscado AS "Pidió", cc.cantidad AS "Quería",
+                            p.stock AS "Hay ahora", p.precio AS "Precio hoy",
+                            cc.precio_dicho AS "Le dijimos",
+                            CAST(julianday('now') - julianday(cc.fecha) AS INTEGER) AS "Días"
+                     FROM consultas_cliente cc
+                     JOIN productos p ON p.id = cc.producto_id
+                     WHERE cc.estado = 'activa'
+                       AND COALESCE(p.stock, 0) >= COALESCE(cc.cantidad, 1)
+                     ORDER BY cc.fecha LIMIT 100""")
+        return filas_a_listas(c)
+    except sqlite3.OperationalError as _err:
+        anotar_error("consultas_que_ahora_hay_en_stock", _err)
+        return []
 
 
 def reservar_stock(producto_id, cantidad, cliente="", nota=""):
@@ -2435,32 +2962,44 @@ def stock_libre(producto_id):
         c.execute("""SELECT COALESCE(SUM(cantidad), 0) FROM reservas_stock
                      WHERE producto_id = ? AND estado = 'activa'""", (producto_id,))
         reservado = c.fetchone()[0]
-    except sqlite3.OperationalError:
+    except sqlite3.OperationalError as _err:
+        anotar_error("stock_libre", _err)
         reservado = 0
     return max((fila["stock"] or 0) - reservado, 0)
 
 
 def stock_libre_de_varios(ids):
-    """Lo mismo que stock_libre() pero para muchos productos, con dos consultas en total.
+    """Lo mismo que stock_libre() pero para muchos productos, con dos consultas por tanda.
 
     De a uno son dos consultas por producto. En una búsqueda que trae 50 equivalencias eso son
     200 idas a la base en CADA refresco de pantalla —o sea, cada vez que se toca cualquier botón
-    de la sección—. Así son dos, sin importar cuántos resultados haya."""
+    de la sección—.
+
+    Va de a 500 porque un IN (?, ?, ...) lleva un signo por producto y choca contra el tope de
+    variables de SQLite, que en instalaciones viejas son 999. Sin las tandas, justo la búsqueda
+    más grande —la que más falta hace— era la que fallaba."""
     ids = [int(i) for i in ids if i is not None]
     if not ids:
         return {}
-    marcas = ",".join("?" * len(ids))
-    c.execute(f"SELECT id, COALESCE(stock, 0) AS stock FROM productos WHERE id IN ({marcas})", ids)
-    total = {f["id"]: f["stock"] for f in c.fetchall()}
-    try:
-        c.execute(f"""SELECT producto_id, COALESCE(SUM(cantidad), 0) AS reservado
-                      FROM reservas_stock
-                      WHERE estado = 'activa' AND producto_id IN ({marcas})
-                      GROUP BY producto_id""", ids)
-        reservado = {f["producto_id"]: f["reservado"] for f in c.fetchall()}
-    except sqlite3.OperationalError:
-        reservado = {}
-    return {i: max(v - reservado.get(i, 0), 0) for i, v in total.items()}
+    libres = {}
+    for arranque in range(0, len(ids), 500):
+        tanda = ids[arranque:arranque + 500]
+        marcadores = ",".join("?" * len(tanda))
+        c.execute(f"SELECT id, COALESCE(stock, 0) AS stock FROM productos "
+                  f"WHERE id IN ({marcadores})", tanda)
+        total = {f["id"]: f["stock"] for f in c.fetchall()}
+        try:
+            c.execute(f"""SELECT producto_id, COALESCE(SUM(cantidad), 0) AS reservado
+                          FROM reservas_stock
+                          WHERE estado = 'activa' AND producto_id IN ({marcadores})
+                          GROUP BY producto_id""", tanda)
+            reservado = {f["producto_id"]: f["reservado"] for f in c.fetchall()}
+        except sqlite3.OperationalError as _err:
+            anotar_error("stock_libre_de_varios", _err)
+            reservado = {}
+        for i, v in total.items():
+            libres[i] = max(v - reservado.get(i, 0), 0)
+    return libres
 
 
 def reservas_activas(limite=200):
@@ -2477,7 +3016,8 @@ def reservas_activas(limite=200):
                      WHERE r.estado = 'activa'
                      ORDER BY r.fecha DESC LIMIT ?""", (limite,))
         return filas_a_listas(c)
-    except sqlite3.OperationalError:
+    except sqlite3.OperationalError as _err:
+        anotar_error("reservas_activas", _err)
         return []
 
 
@@ -2514,10 +3054,10 @@ def margen_de(precio_venta, precio_costo):
 def agregar_margen(filas):
     """Le suma a cada resultado su margen, si están los dos precios.
 
-    NO borra el costo de la fila, aunque el costo no se muestre. Antes lo borraba, y estas filas
-    son las mismas que quedan guardadas en session_state entre refrescos: al segundo toque de
-    cualquier botón ya no había costo, así que la columna Margen aparecía vacía y el aviso de
-    «mejor margen» desaparecía. Sin error y sin aviso: se veía una vez y no volvía más.
+    NO borra el costo de la fila, aunque el costo no se muestre. Estas filas son las mismas que
+    quedan guardadas en session_state entre refrescos: al borrarles el costo, al segundo toque de
+    cualquier botón ya no estaba, así que la columna Margen aparecía vacía y el aviso de «mejor
+    margen» desaparecía. Sin error y sin aviso: se veía una vez y no volvía más.
     De que el costo no llegue a la pantalla se encarga quien la dibuja, sacando las claves que
     empiezan con guión bajo."""
     for f in filas:
@@ -2629,7 +3169,8 @@ def fusionar_productos(id_perdedor, id_ganador):
         try:
             c.execute(f"DELETE FROM {tabla} WHERE {col_a} = ? OR {col_b} = ?",
                       (id_perdedor, id_perdedor))
-        except sqlite3.OperationalError:
+        except sqlite3.OperationalError as _err:
+            anotar_error("fusionar_productos", _err)
             pass
 
     # Datos que el que queda podría no tener
@@ -2637,7 +3178,8 @@ def fusionar_productos(id_perdedor, id_ganador):
         try:
             c.execute(f"UPDATE {tabla} SET {columna} = ? WHERE {columna} = ?",
                       (id_ganador, id_perdedor))
-        except sqlite3.OperationalError:
+        except sqlite3.OperationalError as _err:
+            anotar_error("fusionar_productos", _err)
             pass
     c.execute("""UPDATE productos SET
                     precio = COALESCE(precio, (SELECT precio FROM productos WHERE id = ?)),
@@ -2967,6 +3509,7 @@ def verificar_en_catalogo_oficial(codigo_a_buscar, url_ficha, tiempo_maximo=8):
         return False, (f"El código {codigo_a_buscar} NO aparece en esa ficha. Puede que el "
                         "proveedor no lo liste, o que la página cargue los datos aparte.")
     except Exception as e:
+        anotar_error("verificar_en_catalogo_oficial", e)
         return None, f"No se pudo consultar la página ({type(e).__name__})."
 
 
@@ -2976,10 +3519,10 @@ def nivel_por_evidencias(evidencias):
 
     Se llamaba nivel_de_confianza, igual que la de más abajo que recibe un PUNTAJE. Dos def con
     el mismo nombre no son un error de Python: la segunda simplemente pisa a la primera. Así que
-    esta acá nunca llegaba a correr — la llamada de descubrir_equivalencias_candidatas() le
-    pasaba la lista de evidencias a la que espera un número y reventaba con
-    "'>=' not supported between instances of 'list' and 'int'", tirando abajo toda la pantalla
-    de equivalencias sugeridas apenas había una candidata con evidencia."""
+    esta nunca llegaba a correr — descubrir_equivalencias_candidatas() le pasaba la lista de
+    evidencias a la que espera un número y reventaba con "'>=' not supported between instances
+    of 'list' and 'int'", tirando abajo toda la pantalla de equivalencias sugeridas apenas
+    había una candidata con evidencia."""
     tipos = {e["tipo"] for e in evidencias}
     if "medidas_no_coinciden" in tipos or "catalogo_no_lo_lista" in tipos:
         return "⛔ Con evidencia en contra", 0
@@ -3296,7 +3839,8 @@ def pares_confirmados_por_ventas(minimo_veces=2):
                      GROUP BY p1.id, v.producto_id
                      HAVING COUNT(*) >= ?""", (minimo_veces,))
         return {(min(r["a"], r["b"]), max(r["a"], r["b"])): r["veces"] for r in c.fetchall()}
-    except sqlite3.OperationalError:
+    except sqlite3.OperationalError as _err:
+        anotar_error("pares_confirmados_por_ventas", _err)
         return {}
 
 
@@ -3324,7 +3868,8 @@ def aprender_de_las_decisiones():
                      WHERE r.producto_a_id < r.producto_b_id
                      GROUP BY ma.nombre, mb.nombre, r.decision""")
         crudo = c.fetchall()
-    except sqlite3.OperationalError:
+    except sqlite3.OperationalError as _err:
+        anotar_error("aprender_de_las_decisiones", _err)
         return patrones
 
     acumulado = {}
@@ -3500,7 +4045,8 @@ def analizar_lote_pendiente(lote, limite=400, desde=0):
                           JOIN aplicaciones ap ON ap.codigo_clean = p.codigo_clean
                           WHERE p.id IN ({marcadores})""", ids)
             codigos_con_respaldo = {r["codigo_clean"] for r in c.fetchall()}
-        except sqlite3.OperationalError:
+        except sqlite3.OperationalError as _err:
+            anotar_error("analizar_lote_pendiente", _err)
             codigos_con_respaldo = set()
 
     # Lo que se aprendió de las revisiones anteriores. Se calcula una vez para todo el lote.
@@ -3545,6 +4091,28 @@ def analizar_lote_pendiente(lote, limite=400, desde=0):
         # Las alarmas estructurales (el código no parece un código, un OEM que apunta a dos
         # productos) descuentan fuerte: son problemas de carga, no matices.
         puntaje -= 35 * len([a for a in alarmas if a.startswith(("🚫", "⚠️"))])
+
+        # Y el cruce de métodos, que es lo que más precisión da: que dos caminos
+        # independientes lleguen al mismo par es mucho más fuerte que uno solo. Un VETO —las
+        # medidas se contradicen, los rubros no son el mismo— tumba el par sin importar
+        # cuántos digan que sí.
+        try:
+            a_favor, vetos, veredicto = evidencia_cruzada(f["a"], f["b"])
+        except Exception as _err:
+            anotar_error("analizar_lote_pendiente", _err)
+            a_favor, vetos, veredicto = [], [], ""
+        if vetos:
+            puntaje = min(puntaje, 15.0)
+            for v in vetos:
+                if v not in alarmas:
+                    alarmas.append(v)
+        elif len(a_favor) >= 3:
+            puntaje = max(puntaje, 90.0)
+        elif len(a_favor) == 2:
+            puntaje = max(puntaje, 72.0)
+        f["evidencia"] = a_favor
+        f["veredicto"] = veredicto
+
         puntaje = max(0.0, min(100.0, puntaje))
 
         f["alarmas"] = alarmas
@@ -4027,7 +4595,8 @@ def estado_del_backup():
     importaciones = c.fetchone()[0]
     try:
         dias = (datetime.now() - datetime.strptime(marca[:19], "%Y-%m-%d %H:%M:%S")).days
-    except Exception:
+    except Exception as _err:
+        anotar_error("estado_del_backup", _err)
         dias = None
 
     nuevos = max(total - desde, 0)
@@ -4144,7 +4713,8 @@ def leer_numero(valor):
 
     try:
         numero = float(texto)
-    except ValueError:
+    except ValueError as _err:
+        anotar_error("leer_numero", _err)
         return None
     return -numero if negativo else numero
 
@@ -4365,7 +4935,8 @@ def reparar_codigos_con_decimal():
                 c.execute("UPDATE productos SET codigo_raw = ?, codigo_clean = ? WHERE id = ?",
                            (nuevo_raw, nuevo_clean, pid))
                 arreglados += 1
-            except sqlite3.IntegrityError:
+            except sqlite3.IntegrityError as _err:
+                anotar_error("reparar_codigos_con_decimal", _err)
                 # En teoría no debería pasar: '2776400.0' y '2776400' se limpian al mismo
                 # codigo_clean, así que la base nunca deja que existan los dos en la misma
                 # marca. Si igual llegara a ocurrir, se fusionan en vez de dejar el '.0'.
@@ -4635,7 +5206,8 @@ def puentes_aprobados_ids():
     try:
         c.execute("SELECT producto_id FROM puentes_aprobados")
         return {r["producto_id"] for r in c.fetchall()}
-    except sqlite3.OperationalError:
+    except sqlite3.OperationalError as _err:
+        anotar_error("puentes_aprobados_ids", _err)
         return set()
 
 
@@ -4657,7 +5229,8 @@ def invalidar_salud():
     problema durante tres minutos después de haberlo arreglado, y uno no sabría si funcionó."""
     try:
         st.session_state.pop("_salud_cache", None)
-    except Exception:
+    except Exception as _err:
+        anotar_error("invalidar_salud", _err)
         pass
 
 
@@ -4675,6 +5248,40 @@ def diagnostico_de_salud():
     def sumar(nivel, titulo, detalle, donde):
         problemas.append({"nivel": nivel, "titulo": titulo, "detalle": detalle, "donde": donde})
 
+    # Lo primero de todo: clientes esperando algo que ahora hay. Es lo único de esta lista
+    # que es plata a un llamado de distancia, y lo que más rápido se pierde: entra la
+    # mercadería, nadie se acuerda quién la pidió, y el cliente ya la compró en otro lado.
+    try:
+        esperando = consultas_que_ahora_hay_en_stock()
+        if esperando:
+            sumar("alto", f"{len(esperando)} cliente(s) esperando algo que YA hay",
+                  "Preguntaron por algo que en ese momento no tenías y ahora está en stock. "
+                  "Un llamado y es una venta. Es lo que más rápido se enfría.",
+                  "Estadísticas → Reposición → Consultas de clientes")
+    except Exception as _err:
+        anotar_error("diagnostico_de_salud/consultas", _err)
+
+    try:
+        clavos = productos_estancados(365)
+        if len(clavos) >= 10:
+            plata = sum(x["Plata parada"] or 0 for x in clavos)
+            sumar("medio", f"${plata:,.0f} inmovilizados en {len(clavos)} producto(s)",
+                  "Hace más de un año que no se venden y siguen ocupando estante. No es "
+                  "urgente, pero es plata dormida que conviene mirar antes de la próxima compra.",
+                  "Estadísticas → Reposición → Clavos")
+    except Exception as _err:
+        anotar_error("diagnostico_de_salud/clavos", _err)
+
+    try:
+        gratis = equivalencias_puenteadas_por_reemplazo(50)
+        if gratis:
+            sumar("bajo", f"{len(gratis)} equivalencia(s) esperando, sin trabajo",
+                  "Salen de los reemplazos de código que ya cargaste: son productos que el "
+                  "cambio de número dejó separados. No hay que investigar nada, solo aprobarlas.",
+                  "Estadísticas → Mantenimiento → Calidad → Reunir lo que separó un cambio de número")
+    except Exception as _err:
+        anotar_error("diagnostico_de_salud/puenteadas", _err)
+
     try:
         puentes = contar_codigos_puente(30)
         if puentes:
@@ -4682,7 +5289,8 @@ def diagnostico_de_salud():
                   "Están vinculados a decenas de repuestos y fusionan familias que no tienen "
                   "relación. Es lo que hace que el buscador devuelva cosas que no entran.",
                   "Estadísticas → Mantenimiento → Códigos puente")
-    except Exception:
+    except Exception as _err:
+        anotar_error("diagnostico_de_salud", _err)
         pass
 
     try:
@@ -4692,7 +5300,8 @@ def diagnostico_de_salud():
                   "La misma relación guardada en las dos direcciones. No cambia lo que encuentra "
                   "el buscador, pero duplica todos los conteos.",
                   "Estadísticas → Mantenimiento → Equivalencias anotadas dos veces")
-    except Exception:
+    except Exception as _err:
+        anotar_error("diagnostico_de_salud", _err)
         pass
 
     try:
@@ -4702,7 +5311,8 @@ def diagnostico_de_salud():
                   "Entraron cantidades o números de orden en la columna del código. Cada uno "
                   "vincula entre sí repuestos que no tienen nada que ver.",
                   "Estadísticas → Mantenimiento → Códigos que son solo un número suelto")
-    except Exception:
+    except Exception as _err:
+        anotar_error("diagnostico_de_salud", _err)
         pass
 
     try:
@@ -4712,7 +5322,8 @@ def diagnostico_de_salud():
                   "Excel los guardó como número. Se encuentran igual, pero el código que se "
                   "muestra y se copia en un presupuesto está mal.",
                   "Estadísticas → Mantenimiento → Códigos que quedaron con '.0'")
-    except Exception:
+    except Exception as _err:
+        anotar_error("diagnostico_de_salud", _err)
         pass
 
     try:
@@ -4727,7 +5338,8 @@ def diagnostico_de_salud():
                   "O el precio está mal cargado, o no son la misma pieza. Cualquiera de las dos "
                   "cuesta plata: o cotizás mal, o vendés algo que no entra.",
                   "Estadísticas → Mantenimiento → Precios que no cierran")
-    except Exception:
+    except Exception as _err:
+        anotar_error("diagnostico_de_salud", _err)
         pass
 
     try:
@@ -4737,7 +5349,8 @@ def diagnostico_de_salud():
             sumar("medio", f"{pendientes:,} vínculos esperando revisión",
                   "Mientras no se revisen no están cargados, así que el buscador no los usa.",
                   "Estadísticas → Vínculos de listas esperando revisión")
-    except Exception:
+    except Exception as _err:
+        anotar_error("diagnostico_de_salud", _err)
         pass
 
     try:
@@ -4748,7 +5361,8 @@ def diagnostico_de_salud():
                   "El buscador no puede decirte qué tan sólido es el camino de cada resultado "
                   "hasta que se calculen. Es un solo botón.",
                   "Estadísticas → Mantenimiento → Puntuar los vínculos")
-    except sqlite3.OperationalError:
+    except sqlite3.OperationalError as _err:
+        anotar_error("diagnostico_de_salud", _err)
         pass
 
     try:
@@ -4761,7 +5375,8 @@ def diagnostico_de_salud():
                       "publican gratis (NGK, Bosch, Mann, SKF). Sin ellos, la búsqueda por "
                       "vehículo tiene que adivinar desde las descripciones del proveedor.",
                       "Estadísticas → Mantenimiento → Catálogo de aplicaciones")
-    except sqlite3.OperationalError:
+    except sqlite3.OperationalError as _err:
+        anotar_error("diagnostico_de_salud", _err)
         pass
 
     try:
@@ -4776,7 +5391,8 @@ def diagnostico_de_salud():
             sumar("medio", f"{len(quiebres)} producto(s) se acaban en menos de 2 semanas",
                   "Según el ritmo con que se vienen vendiendo y el stock que queda.",
                   "Estadísticas → Reposición → Lo que se va a acabar")
-    except sqlite3.OperationalError:
+    except sqlite3.OperationalError as _err:
+        anotar_error("diagnostico_de_salud", _err)
         pass
 
     # El número concreto de lo que se perdería. Un aviso genérico se ignora; «perdés 3.412
@@ -4794,7 +5410,8 @@ def diagnostico_de_salud():
                   f"{riesgo['productos_semilla']:,}; hoy tenés {riesgo['productos_ahora']:,}. "
                   "Si el servidor reinicia, la diferencia se pierde.",
                   "Estadísticas → Backup y config")
-    except Exception:
+    except Exception as _err:
+        anotar_error("diagnostico_de_salud", _err)
         pass
 
     bk = estado_del_backup()
@@ -5150,7 +5767,290 @@ def descargar_imagen(url, tiempo_maximo=12, tamano_maximo_mb=8):
                 return None, "la imagen pesa demasiado"
         return datos, None
     except Exception as e:
+        anotar_error("descargar_imagen", e)
         return None, type(e).__name__
+
+
+def config_portal(nombre_marca):
+    """Datos para entrar al portal de un proveedor. Salen de los secretos de Streamlit.
+
+    Va en los secretos y no en la base por una razón concreta: la base se baja como backup y
+    se sube a GitHub. Una contraseña ahí queda publicada. En los secretos no se descarga con
+    el backup ni se ve desde la app.
+
+    Formato en Settings → Secrets:
+
+        [portal_FISPA]
+        url_login   = "https://proveedor.com/login"
+        usuario     = "tu_usuario"
+        clave       = "tu_clave"
+        campo_usuario = "email"       # el name= del input, mirá el formulario
+        campo_clave   = "password"
+        url_ficha   = "https://proveedor.com/producto/{codigo}"
+    """
+    try:
+        secretos = st.secrets if hasattr(st, "secrets") else {}
+        cfg = secretos.get(f"portal_{(nombre_marca or '').strip().upper()}")
+    except Exception as _err:
+        anotar_error("config_portal", _err)
+        return None
+    if not cfg:
+        return None
+    try:
+        datos = dict(cfg)
+    except Exception as _err:
+        anotar_error("config_portal", _err)
+        return None
+    if not all(datos.get(k) for k in ("url_login", "usuario", "clave", "url_ficha")):
+        return None
+    # Se revisa la dirección configurada ANTES de usarla: si la url_ficha apunta a algo que
+    # pide mercadería, el portal queda deshabilitado en vez de andar tocándolo.
+    ok_url, palabra = _url_solo_de_consulta(datos["url_ficha"])
+    if not ok_url:
+        datos["_bloqueado"] = (
+            f"La dirección de ficha contiene «{palabra}», que suele significar pedir algo. "
+            "Configurá la URL de consulta del producto, no la de compra."
+        )
+    datos.setdefault("campo_usuario", "usuario")
+    datos.setdefault("campo_clave", "password")
+    return datos
+
+
+_SESIONES_PORTAL = {}
+
+# Direcciones que en cualquier portal significan "hacer algo", no "mirar". La app entra con TU
+# usuario: si por un error de código o una URL mal armada tocara una de estas, estaría pidiendo
+# mercadería a tu nombre sin que nadie lo haya decidido.
+_RUTAS_QUE_PIDEN = (
+    "carrito", "cart", "pedido", "pedidos", "order", "orders", "comprar", "compra",
+    "checkout", "add-to", "addto", "agregar", "añadir", "anadir", "cotiza", "presupuest",
+    "reserva", "solicitar", "solicitud", "encargar", "confirmar", "pagar", "pago",
+    "basket", "wishlist", "favorito", "alta", "crear", "nuevo", "eliminar", "borrar",
+    "delete", "update", "editar", "modificar",
+)
+
+
+def _url_solo_de_consulta(url):
+    """¿Esta dirección solo mira, o puede llegar a pedir algo? (ok, motivo)."""
+    bajo = str(url or "").lower()
+    for palabra in _RUTAS_QUE_PIDEN:
+        if palabra in bajo:
+            return False, palabra
+    return True, ""
+
+
+# Tope duro de consultas por sesión. No es por rendimiento: si algo entra en un bucle por un
+# error, esto lo corta antes de que el proveedor vea miles de pedidos desde tu cuenta.
+TOPE_CONSULTAS_PORTAL = 400
+MINUTOS_VIDA_SESION = 20
+
+
+def _mismo_dominio(url_a, url_b):
+    """¿Las dos direcciones son del mismo sitio? Sirve para no mandar la sesión a otro lado."""
+    from urllib.parse import urlparse
+    try:
+        a, b = urlparse(str(url_a)), urlparse(str(url_b))
+    except Exception as _err:
+        anotar_error("_mismo_dominio", _err)
+        return False
+    da, db = (a.netloc or "").lower(), (b.netloc or "").lower()
+    if not da or not db:
+        return False
+    # Se acepta un subdominio del mismo sitio (catalogo.prov.com desde prov.com)
+    return da == db or da.endswith("." + db) or db.endswith("." + da)
+
+
+class SesionSoloLectura:
+    """Una sesión del portal que FÍSICAMENTE no puede pedir nada.
+
+    No alcanza con "acordarse de no hacer pedidos": alcanza con que alguien —o yo mismo en un
+    cambio futuro— escriba un `.post()` sobre la sesión y ya estaría comprando con tu cuenta.
+    Por eso la sesión queda envuelta acá después del login, y este objeto NO EXPONE post, put,
+    delete ni patch. No es que estén desaconsejados: no existen. Si algún código los llama,
+    revienta en el momento en vez de mandarle un pedido al proveedor.
+
+    Y sobre los GET: aunque leer no debería cambiar nada, muchos portales viejos agregan al
+    carrito con un simple enlace. Por eso también se rechazan las direcciones que dicen
+    carrito, pedido, comprar y similares."""
+
+    def __init__(self, sesion, dominio_permitido=""):
+        self._sesion = sesion
+        self._dominio = dominio_permitido
+        self._consultas = 0
+        self._abierta = time.time()
+        self.visitadas = []          # queda el registro de todo lo que se abrió
+
+    def _revisar(self, url, salto=""):
+        ok, palabra = _url_solo_de_consulta(url)
+        if not ok:
+            raise PermissionError(
+                f"Bloqueado{salto}: la dirección contiene «{palabra}», que en un portal suele "
+                "significar pedir o modificar algo. La app solo puede consultar fichas."
+            )
+        # Que no salga del sitio del proveedor: si un redirect apunta a otro dominio, la
+        # sesión —con tu usuario dentro— se iría a un servidor ajeno.
+        if self._dominio and not _mismo_dominio(url, self._dominio):
+            raise PermissionError(
+                f"Bloqueado{salto}: la dirección apunta a otro sitio y la sesión solo puede "
+                f"hablar con {self._dominio}."
+            )
+
+    def get(self, url, **kw):
+        if time.time() - self._abierta > MINUTOS_VIDA_SESION * 60:
+            raise PermissionError(
+                f"La sesión con el portal se cerró sola a los {MINUTOS_VIDA_SESION} minutos. "
+                "Volvé a entrar si necesitás seguir."
+            )
+        self._consultas += 1
+        if self._consultas > TOPE_CONSULTAS_PORTAL:
+            raise PermissionError(
+                f"Se llegó al tope de {TOPE_CONSULTAS_PORTAL} consultas en esta sesión. "
+                "Es un freno de seguridad: si algo se disparó solo, se corta acá."
+            )
+        self._revisar(url)
+
+        # Las redirecciones se siguen A MANO, revisando cada salto. Dejar que requests las
+        # siga solo es el agujero grande: una ficha puede redirigir a /carrito/agregar, y con
+        # la sesión abierta eso sería un pedido hecho a tu nombre sin que nadie lo pidiera.
+        kw["allow_redirects"] = False
+        actual = url
+        for _ in range(5):
+            self.visitadas.append(actual)
+            r = self._sesion.get(actual, **kw)
+            destino = None
+            if getattr(r, "status_code", 0) in (301, 302, 303, 307, 308):
+                cabeceras = getattr(r, "headers", {}) or {}
+                destino = cabeceras.get("Location") or cabeceras.get("location")
+            if not destino:
+                return r
+            from urllib.parse import urljoin
+            actual = urljoin(actual, destino)
+            self._revisar(actual, " (en una redirección)")
+        raise PermissionError("Demasiadas redirecciones seguidas; se corta por las dudas.")
+
+    @property
+    def headers(self):
+        return self._sesion.headers
+
+    def __getattr__(self, nombre):
+        # Cualquier otro método —post, put, delete, request...— no existe a propósito.
+        raise PermissionError(
+            f"Bloqueado: la app no puede usar «{nombre}» sobre el portal del proveedor. "
+            "La sesión es de solo lectura: solo puede abrir fichas para leer los autos."
+        )
+
+
+def sesion_de_portal(nombre_marca):
+    """Entra al portal del proveedor y devuelve la sesión abierta. (sesion, error).
+
+    La sesión se guarda en memoria: entrar una vez por marca y reusarla. Hacer login en cada
+    producto es maltratar el servidor del proveedor y la forma más rápida de que te bloqueen.
+    """
+    cfg = config_portal(nombre_marca)
+    if not cfg:
+        return None, ("No hay portal configurado para esa marca. Se carga en "
+                      "Settings → Secrets de Streamlit.")
+    if cfg.get("_bloqueado"):
+        return None, cfg["_bloqueado"]
+    if nombre_marca in _SESIONES_PORTAL:
+        return _SESIONES_PORTAL[nombre_marca], None
+
+    sesion = requests.Session()
+    sesion.headers.update({"User-Agent": "Mozilla/5.0 (compatible; EquivalenciasElChavo/1.0)"})
+    try:
+        # Se abre primero la página de login: muchos portales dejan ahí una cookie o un token
+        # sin el cual rechazan el envío del formulario.
+        previa = sesion.get(cfg["url_login"], timeout=20)
+        datos = {cfg["campo_usuario"]: cfg["usuario"], cfg["campo_clave"]: cfg["clave"]}
+        for extra in ("campo_extra_1", "campo_extra_2"):
+            if cfg.get(extra) and cfg.get(extra + "_valor"):
+                datos[cfg[extra]] = cfg[extra + "_valor"]
+        # Token oculto tipo CSRF, si el formulario lo trae
+        m = re.search(r'name=["\'](_token|csrf_token|authenticity_token|__RequestVerificationToken)'
+                      r'["\'][^>]*value=["\']([^"\']+)', previa.text or "", re.I)
+        if m:
+            datos[m.group(1)] = m.group(2)
+
+        r = sesion.post(cfg["url_login"], data=datos, timeout=25, allow_redirects=True)
+        if r.status_code >= 400:
+            return None, f"El portal respondió {r.status_code} al intentar entrar."
+        # Señal de que el login falló: sigue mostrando el formulario
+        texto = (r.text or "").lower()
+        if cfg["campo_clave"].lower() in texto and "logout" not in texto and "salir" not in texto:
+            return None, ("Entré pero parece que no aceptó el usuario o la clave: la respuesta "
+                          "sigue mostrando el formulario de acceso. Revisá los datos y los "
+                          "nombres de los campos.")
+        # A partir de acá la sesión queda de solo lectura. El login fue lo único que necesitó
+        # mandar datos, y ya se hizo.
+        solo_lectura = SesionSoloLectura(sesion, cfg["url_login"])
+        _SESIONES_PORTAL[nombre_marca] = solo_lectura
+        return solo_lectura, None
+    except Exception as e:
+        anotar_error("sesion_de_portal", e)
+        # Solo el TIPO de error, nunca el detalle: los mensajes de las librerías de red suelen
+        # incluir la URL completa con los datos enviados, y ahí va la clave.
+        return None, (f"No se pudo entrar al portal ({type(e).__name__}). Revisá la dirección "
+                      "de acceso y la conexión.")
+
+
+def autos_desde_ficha_del_portal(nombre_marca, codigo, tiempo_maximo=20):
+    """Trae la ficha del producto en el portal del proveedor y saca a qué autos le va.
+
+    Esto resuelve el problema de raíz: la descripción de la lista se corta y no entran todos
+    los autos, pero la ficha del portal los tiene completos.
+
+    Devuelve (lista de autos, error). No inventa nada: si la ficha no nombra autos conocidos,
+    devuelve vacío."""
+    sesion, error = sesion_de_portal(nombre_marca)
+    if error:
+        return [], error
+    cfg = config_portal(nombre_marca)
+    # El código se limpia ANTES de meterlo en la dirección. quote() escapa los espacios pero
+    # deja pasar «?» y «&»: con un código así, alguien podría convertir una consulta en una
+    # acción («ABC?accion=comprar»). Se dejan solo letras, números y los separadores que usan
+    # los códigos de verdad.
+    codigo_limpio = re.sub(r"[^A-Za-z0-9._/-]", "", str(codigo).strip())[:60]
+    # Y sin «..»: con eso se sube de nivel en la dirección y se llega a otra parte del sitio.
+    # Un código como «../../pedido/nuevo» convertiría una consulta en cualquier otra cosa.
+    if ".." in codigo_limpio or codigo_limpio.startswith("/"):
+        return [], "Ese código no se puede usar en una dirección: tiene barras o puntos dobles."
+    if not codigo_limpio:
+        return [], "El código tiene caracteres que no se pueden usar en una dirección."
+    url = cfg["url_ficha"].replace("{codigo}", quote(codigo_limpio, safe=""))
+    try:
+        r = sesion.get(url, timeout=tiempo_maximo)
+        if r.status_code == 404:
+            return [], "El portal no tiene ficha para ese código."
+        if r.status_code >= 400:
+            return [], f"La ficha respondió {r.status_code}."
+        html = r.text or ""
+    except Exception as e:
+        anotar_error("autos_desde_ficha_del_portal", e)
+        return [], f"No se pudo leer la ficha: {type(e).__name__}: {e}"
+
+    # Se saca el texto visible y se buscan marcas y modelos conocidos. Se limita a los que la
+    # app ya conoce para no cargar como "auto" cualquier palabra de la página.
+    texto = re.sub(r"<script.*?</script>|<style.*?</style>", " ", html, flags=re.S | re.I)
+    texto = re.sub(r"<[^>]+>", " ", texto)
+    limpio = normalizar_texto(texto)
+
+    encontrados = []
+    for mv in MARCAS_VEHICULO:
+        if f" {mv} " in f" {limpio} ":
+            encontrados.append(mv)
+    for w in set(re.split(r"[^A-Z0-9]+", limpio)):
+        if len(w) >= 3 and w in MODELOS_CONOCIDOS:
+            encontrados.append(w)
+    return sorted(set(encontrados)), None
+
+
+def guardar_autos_de_ficha(codigo, nombre_marca, autos, tipo_pieza=""):
+    """Guarda como aplicaciones los autos que se leyeron de la ficha del portal."""
+    if not autos:
+        return 0
+    filas = [{"marca_auto": a.split()[0], "modelo_auto": a, "motor": "", "combustible": "",
+              "anio_desde": None, "anio_hasta": None, "codigo": codigo} for a in autos]
+    return guardar_aplicaciones(filas, nombre_marca, "ficha del portal", tipo_pieza)
 
 
 def buscar_imagen_en_ficha(url_ficha, tiempo_maximo=12):
@@ -5179,6 +6079,7 @@ def buscar_imagen_en_ficha(url_ficha, tiempo_maximo=12):
                 return datos, None
         return None, "no encontré una foto de producto en esa ficha"
     except Exception as e:
+        anotar_error("buscar_imagen_en_ficha", e)
         return None, type(e).__name__
 
 
@@ -5209,6 +6110,7 @@ def _bajar_en_paralelo(tareas, funcion, hilos=6, progreso=None, cancelado=None):
             try:
                 datos, error = futuro.result()
             except Exception as e:
+                anotar_error("_bajar_en_paralelo", e)
                 datos, error = None, type(e).__name__
             resultados.append((tarea, datos, error))
             if progreso:
@@ -5239,6 +6141,7 @@ def bajar_fotos_pendientes(limite=200, progreso=None, hilos=6, liviano=True):
                 actualizar_imagen_producto(pid, datos, origen="link", fuente=url, liviano=liviano)
                 bajadas += 1
             except Exception as e:
+                anotar_error("bajar_fotos_pendientes", e)
                 fallidas.append((url, type(e).__name__))
         else:
             fallidas.append((url, error))
@@ -5318,6 +6221,7 @@ def bajar_fotos_desde_catalogo(marca_id, limite=100, progreso=None, hilos=6, liv
                 bajadas += 1
                 continue
             except Exception as e:
+                anotar_error("bajar_fotos_desde_catalogo", e)
                 error = type(e).__name__
         fallidas.append((codigo, error))
         # "no encontré una foto" es definitivo para ese código; un error de red no lo es
@@ -5355,15 +6259,18 @@ def generar_backup_sin_fotos():
                      "imagen_orb_estado = NULL")
     try:
         destino.execute("DELETE FROM producto_fotos")
-    except sqlite3.OperationalError:
+    except sqlite3.OperationalError as _err:
+        anotar_error("generar_backup_sin_fotos", _err)
         pass
     try:
         destino.execute("UPDATE esquemas SET imagen_blob = NULL")
-    except sqlite3.OperationalError:
+    except sqlite3.OperationalError as _err:
+        anotar_error("generar_backup_sin_fotos", _err)
         pass
     try:
         destino.execute("UPDATE alias_transferencia SET qr_real_blob = NULL")
-    except sqlite3.OperationalError:
+    except sqlite3.OperationalError as _err:
+        anotar_error("generar_backup_sin_fotos", _err)
         pass
     destino.commit()
     destino.execute("VACUUM")   # sin esto el archivo sigue pesando lo mismo
@@ -5387,7 +6294,8 @@ def peso_de_las_fotos():
         c.execute("""SELECT COALESCE(SUM(LENGTH(COALESCE(imagen_data,'')) +
                                          LENGTH(COALESCE(firma_blob, X''))), 0) FROM producto_fotos""")
         total += c.fetchone()[0]
-    except sqlite3.OperationalError:
+    except sqlite3.OperationalError as _err:
+        anotar_error("peso_de_las_fotos", _err)
         pass
     return fila["con_foto"], total / (1024 * 1024)
 
@@ -5999,7 +6907,8 @@ def parece_catalogo_de_aplicaciones(filas, muestra=200):
         try:
             if es_fila_de_marca(fila) and _limpiar(fila[0]).upper() in MARCAS_VEHICULO:
                 marcas_solas += 1
-        except Exception:
+        except Exception as _err:
+            anotar_error("parece_catalogo_de_aplicaciones", _err)
             continue
 
     ancho = max(len(f) for f in datos)
@@ -6143,6 +7052,553 @@ def guardar_aplicaciones(apps, marca_repuesto, origen="", tipo_pieza=""):
     return len(apps)
 
 
+# Palabras que aparecen en las descripciones y NO dicen qué pieza es: son del auto, del envase
+# o relleno del proveedor. Si entran en la firma, dos piezas distintas del mismo auto terminan
+# pareciendo la misma.
+_RUIDO_EN_FIRMA = {
+    "DESPIECE", "JUEGO", "JGO", "KIT", "PARA", "CON", "SIN", "DEL", "LOS", "LAS", "POR",
+    "UNIDAD", "UN", "UNA", "IZQ", "DER", "MM", "CM", "ORIGINAL", "ORIG", "ALTERNATIVO",
+    "NACIONAL", "IMPORTADO", "REPUESTO", "PIEZA", "AUTO", "MOTOR", "CAJA", "TIPO",
+}
+
+# Siglas técnicas que definen QUÉ pieza es, no de qué auto. Dos válvulas del mismo auto, una
+# PCV y otra EGR, no son la misma pieza — y «VALVULA» sola no las distingue. Lo mismo con los
+# sensores: MAF, MAP, IAT y TPS son cuatro sensores distintos del mismo rubro.
+_SIGLAS_DE_PIEZA = {
+    "PCV", "EGR", "MAF", "MAP", "IAT", "TPS", "ECT", "CKP", "CMP", "IAC", "ABS", "EGT",
+    "VVT", "ACC", "TDC", "PMS", "GNC", "GLP", "HDI", "TDI", "CRDI", "JTD",
+}
+
+
+_POSICIONES = {
+    "DELANTERO": "DELANTERO", "DELANTERA": "DELANTERO", "DEL.": "DELANTERO",
+    "TRASERO": "TRASERO", "TRASERA": "TRASERO", "TRAS.": "TRASERO",
+    "SUPERIOR": "SUPERIOR", "INFERIOR": "INFERIOR",
+    "IZQUIERDO": "IZQUIERDO", "IZQUIERDA": "IZQUIERDO",
+    "DERECHO": "DERECHO", "DERECHA": "DERECHO",
+    "INTERNO": "INTERNO", "INTERIOR": "INTERNO",
+    "EXTERNO": "EXTERNO", "EXTERIOR": "EXTERNO",
+}
+
+
+# Modelos de auto que aparecen en las descripciones. Se necesita para saber dónde termina el
+# nombre de la pieza y dónde empieza el auto. Sale de MARCAS_VEHICULO y de los modelos que ya
+# vienen en los catálogos de aplicaciones cargados.
+_MODELOS_CACHE = {"lista": None}
+
+
+def _modelos_conocidos():
+    if _MODELOS_CACHE["lista"] is not None:
+        return _MODELOS_CACHE["lista"]
+    modelos = set()
+    for mv in MARCAS_VEHICULO:
+        modelos.update(w for w in mv.split() if len(w) >= 3)
+    try:
+        c.execute("SELECT DISTINCT modelo_auto FROM aplicaciones LIMIT 3000")
+        for fila in c.fetchall():
+            modelos.update(w for w in normalizar_texto(fila["modelo_auto"] or "").split()
+                           if len(w) >= 3)
+    except Exception as _err:
+        anotar_error("_modelos_conocidos", _err)
+        pass
+    _MODELOS_CACHE["lista"] = modelos
+    return modelos
+
+
+class _ModelosLazy:
+    """Para poder escribir `w in MODELOS_CONOCIDOS` sin recalcular la lista en cada palabra."""
+    def __contains__(self, palabra):
+        return palabra in _modelos_conocidos()
+
+
+MODELOS_CONOCIDOS = _ModelosLazy()
+
+
+def autos_de_todas_las_fuentes(producto_id, codigo_clean, autos_de_la_descripcion):
+    """Todos los autos a los que le va un producto, juntando lo que sabe la app.
+
+    La descripción del proveedor casi nunca alcanza: entra lo que entra en la celda y el resto
+    se corta. Pero el mismo producto puede tener autos anotados en otros lados:
+
+      1. El catálogo del fabricante, si cargaste el PDF de NGK, Bosch o similar.
+      2. Las fichas de vehículo: si alguien le puso esta pieza a un Gol, le va a un Gol.
+         Ese dato es de tu propio taller y no está en ninguna lista.
+      3. La descripción, que es de donde salíamos hasta ahora.
+
+    Juntar las tres hace que dos productos se puedan cruzar aunque sus descripciones no
+    compartan ni un modelo."""
+    autos = set(autos_de_la_descripcion or ())
+
+    if codigo_clean:
+        try:
+            c.execute("""SELECT DISTINCT marca_auto, modelo_auto FROM aplicaciones
+                         WHERE codigo_clean = ? LIMIT 200""", (codigo_clean,))
+            for fila in c.fetchall():
+                for campo in (fila["marca_auto"], fila["modelo_auto"]):
+                    autos.update(w for w in normalizar_texto(campo or "").split() if len(w) >= 3)
+        except sqlite3.OperationalError as _err:
+            anotar_error("autos_de_todas_las_fuentes", _err)
+            pass
+
+    if producto_id:
+        try:
+            c.execute("""SELECT DISTINCT v.marca, v.modelo FROM historial_piezas hp
+                         JOIN vehiculos v ON v.id = hp.vehiculo_id
+                         WHERE hp.producto_id = ? LIMIT 100""", (producto_id,))
+            for fila in c.fetchall():
+                for campo in (fila["marca"], fila["modelo"]):
+                    autos.update(w for w in normalizar_texto(campo or "").split() if len(w) >= 3)
+        except sqlite3.OperationalError as _err:
+            anotar_error("autos_de_todas_las_fuentes", _err)
+            pass
+
+    return autos
+
+
+def firma_de_producto(descripcion, producto_id=None, codigo_clean=None):
+    """Saca de una descripción qué pieza es y para qué auto, para poder comparar entre marcas.
+
+    Esta es la única forma de vincular dos proveedores que no traen el código de fábrica —que
+    son la mayoría—. Hasta ahora, sin esa columna no se generaba ninguna equivalencia.
+
+    Lo que se extrae:
+      núcleo    → las palabras que dicen QUÉ pieza es, sin el auto ni el relleno
+      modelos   → los modelos de auto nombrados
+      cilindrada, posición → los dos datos que más equivocan una venta
+
+    El núcleo es lo que evita el error grave: «CAPUCHON BUJIA» y «ANILLO BUJIA» son del mismo
+    rubro y del mismo auto, pero no son la misma pieza. Comparar solo por rubro las mezclaría.
+    """
+    if not descripcion or not str(descripcion).strip():
+        return None
+    texto = separar_texto_pegado(str(descripcion))
+    limpio = normalizar_texto(texto)
+    palabras = [w for w in re.split(r"[^A-Z0-9./]+", limpio) if w]
+
+    familia = clasificar_repuesto(texto)
+    marca_auto = next((mv for mv in MARCAS_VEHICULO if f" {mv} " in f" {limpio} "), None)
+
+    posicion = None
+    for w in palabras:
+        if w in _POSICIONES:
+            posicion = _POSICIONES[w]
+            break
+
+    cilindradas = set(re.findall(r'\b(\d[.,]\d)\b', limpio))
+
+    # Los modelos: palabras que quedan después de sacar la marca del auto, el ruido y los
+    # números sueltos. Se buscan contra el catálogo propio para no inventar modelos.
+    nucleo, modelos = [], set()
+    palabras_marca = set((marca_auto or "").split())
+    for w in palabras:
+        if (w in _RUIDO_EN_FIRMA or w in palabras_marca or w in _POSICIONES
+                or len(w) < 3 or re.fullmatch(r'[\d./,]+', w)):
+            continue
+        nucleo.append(w)
+
+    # Los autos nombrados: marcas y modelos. Es el dato que más discrimina, y probado con
+    # listas reales es el único que no falla. Dos proveedores pueden llamar distinto a la misma
+    # pieza («SENSOR DE MASA DE AIRE» y «SENSOR MAF»), pero si uno dice Ford Focus y el otro
+    # Volvo 850, no es la misma pieza por más que el resto coincida.
+    autos = set()
+    for mv in MARCAS_VEHICULO:
+        if f" {mv} " in f" {limpio} ":
+            autos.update(w for w in mv.split() if len(w) >= 3)
+    for w in palabras:
+        if len(w) >= 3 and w in MODELOS_CONOCIDOS:
+            autos.add(w)
+
+    # El sustantivo principal: en estas descripciones la pieza va primero
+    # («CAPUCHON bujía...», «ANILLO bujía...»). Es lo que separa dos piezas del mismo rubro.
+    cabeza = nucleo[0] if nucleo else None
+    siglas = {w for w in palabras if w in _SIGLAS_DE_PIEZA}
+
+    # Se completa con lo que la app sepa de este producto por otras vías
+    if producto_id or codigo_clean:
+        autos = autos_de_todas_las_fuentes(producto_id, codigo_clean, autos)
+
+    return {"familia": familia, "nucleo": nucleo, "cabeza": cabeza, "autos": autos,
+            "siglas": siglas, "marca_auto": marca_auto, "posicion": posicion,
+            "cilindradas": cilindradas, "texto": limpio}
+
+
+def firmas_compatibles(a, b, minimo_nucleo=2):
+    """¿Estas dos descripciones hablan de la misma pieza? Devuelve (sí/no, motivo).
+
+    Se exige coincidencia en lo que define la pieza y NO contradicción en lo que la distingue.
+    Es a propósito conservador: un falso positivo acá es una equivalencia inventada, y ya
+    sabemos lo que eso le hizo a la base."""
+    if not a or not b:
+        return False, ""
+    if a["familia"] == "Sin clasificar" or b["familia"] == "Sin clasificar":
+        return False, "no se pudo clasificar el rubro"
+    if a["familia"] != b["familia"]:
+        return False, "rubros distintos"
+
+    # Posición: si las dos la declaran y no coinciden, son piezas distintas. Un amortiguador
+    # delantero no reemplaza a uno trasero por más que vayan al mismo auto.
+    if a["posicion"] and b["posicion"] and a["posicion"] != b["posicion"]:
+        return False, f"posiciones distintas ({a['posicion']} vs {b['posicion']})"
+
+    # Cilindrada: si las dos la declaran y no comparten ninguna, no es la misma aplicación
+    if a["cilindradas"] and b["cilindradas"] and not (a["cilindradas"] & b["cilindradas"]):
+        return False, "cilindradas distintas"
+
+    # LOS AUTOS. Probado sobre dos listas reales de 5.000 y 26.000 productos, es el control
+    # que evita la avalancha de falsos: sin él, toda «BUJIA NAFTA» se vinculaba con toda otra
+    # «BUJIA NAFTA» porque comparten dos palabras genéricas, aunque una fuera de un Renault y
+    # la otra de un BMW.
+    if a["autos"] and b["autos"]:
+        autos_comunes = a["autos"] & b["autos"]
+        if not autos_comunes:
+            return False, (f"autos distintos: {'/'.join(sorted(a['autos'])[:2])} "
+                           f"vs {'/'.join(sorted(b['autos'])[:2])}")
+    else:
+        autos_comunes = set()
+
+    # Siglas técnicas: si las dos declaran una y no coinciden, son piezas distintas. Probado
+    # con listas reales: sin esto se cruzaba «VALVULA PCV» con «VALVULA EGR» del mismo auto,
+    # porque comparten la palabra VALVULA y el modelo.
+    if a["siglas"] and b["siglas"] and not (a["siglas"] & b["siglas"]):
+        return False, (f"siglas distintas: {'/'.join(sorted(a['siglas']))} "
+                       f"vs {'/'.join(sorted(b['siglas']))}")
+
+    # El sustantivo principal: «CAPUCHON bujía» y «ANILLO bujía» son del mismo rubro, del mismo
+    # auto, y son piezas distintas. Lo único que las separa es la primera palabra.
+    if a["cabeza"] and b["cabeza"] and a["cabeza"] != b["cabeza"]:
+        # Salvo que una sea abreviatura o parte de la otra: SENSOR MAF / SENSOR DE MASA
+        if not (a["cabeza"] in b["cabeza"] or b["cabeza"] in a["cabeza"]):
+            return False, f"piezas distintas: «{a['cabeza']}» y «{b['cabeza']}»"
+
+    comunes = set(a["nucleo"]) & set(b["nucleo"])
+    if len(comunes) < minimo_nucleo:
+        return False, f"solo comparten {len(comunes)} palabra(s)"
+    # Sin autos en común de ninguno de los dos lados, hace falta más coincidencia en la pieza:
+    # dos descripciones genéricas que solo dicen «FILTRO ACEITE» no alcanzan para vincular.
+    if not autos_comunes and len(comunes) < 3:
+        return False, "ninguno declara el auto y la descripción es demasiado genérica"
+
+    detalle = f"coinciden en {', '.join(sorted(comunes)[:4])}"
+    if autos_comunes:
+        detalle += f" · autos: {'/'.join(sorted(autos_comunes)[:3])}"
+    if a["posicion"] or b["posicion"]:
+        detalle += f" · {a['posicion'] or b['posicion']}"
+    if a["cilindradas"] & b["cilindradas"]:
+        detalle += f" · {'/'.join(sorted(a['cilindradas'] & b['cilindradas']))}"
+    return True, detalle
+
+
+def evidencia_cruzada(id_a, id_b):
+    """Corre TODOS los métodos sobre un mismo par y cuenta cuántos coinciden.
+
+    Es la mejora de precisión más grande que faltaba. Hasta ahora cada método trabajaba solo:
+    el de descripciones proponía sus pares, el de medidas los suyos, el de catálogos los suyos,
+    y todos caían en la misma cola con el mismo peso. Pero no valen lo mismo.
+
+    Que DOS métodos independientes lleguen al mismo par es muchísimo más fuerte que uno solo:
+    que dos descripciones se parezcan puede ser casualidad, que además midan igual y encima
+    el fabricante las dé para el mismo auto, no.
+
+    Y al revés, lo que más precisión gana: los VETOS. Si las medidas se contradicen, no importa
+    cuántos métodos digan que sí — no es la misma pieza. Antes eso era una alarma más entre
+    varias; acá tumba el par.
+
+    Devuelve (a_favor, vetos, veredicto)."""
+    c.execute(f"""SELECT p.id, p.codigo_raw, p.codigo_clean, p.descripcion, p.precio,
+                         p.marca_id, m.nombre AS marca, {COLUMNAS_MEDIDAS}
+                  FROM productos p JOIN marcas m ON m.id = p.marca_id
+                  WHERE p.id IN (?, ?)""", (id_a, id_b))
+    filas = {r["id"]: dict(r) for r in c.fetchall()}
+    if id_a not in filas or id_b not in filas:
+        return [], ["uno de los dos productos ya no existe"], "🔴 no se puede evaluar"
+    pa, pb = filas[id_a], filas[id_b]
+
+    a_favor, vetos = [], []
+
+    # 1. Medidas. Es el único método que puede VETAR: si las medidas se contradicen, no hay
+    # descripción ni catálogo que lo arregle.
+    medidas = cargar_medidas_de_varios([id_a, id_b])
+    coinciden, detalle_med = comparar_medidas(medidas.get(id_a), medidas.get(id_b))
+    if coinciden is True:
+        a_favor.append(f"📐 las medidas coinciden ({detalle_med})")
+    elif coinciden is False:
+        vetos.append(f"📐 {detalle_med}")
+
+    # 2. Descripción
+    fa = firma_de_producto(pa["descripcion"], id_a, pa["codigo_clean"])
+    fb = firma_de_producto(pb["descripcion"], id_b, pb["codigo_clean"])
+    ok_desc, motivo_desc = firmas_compatibles(fa, fb)
+    if ok_desc:
+        a_favor.append(f"🔤 las descripciones concuerdan ({motivo_desc})")
+    elif fa and fb and fa["familia"] != "Sin clasificar" and fb["familia"] != "Sin clasificar":
+        if fa["familia"] != fb["familia"]:
+            vetos.append(f"🧩 rubros distintos: «{fa['familia']}» y «{fb['familia']}»")
+        elif "posiciones distintas" in motivo_desc or "siglas distintas" in motivo_desc:
+            vetos.append(f"🔤 {motivo_desc}")
+
+    # 3. El catálogo del fabricante: ¿los da para el mismo auto?
+    try:
+        c.execute("""SELECT COUNT(*) FROM aplicaciones a JOIN aplicaciones b
+                       ON a.marca_auto = b.marca_auto AND a.modelo_auto = b.modelo_auto
+                     WHERE a.codigo_clean = ? AND b.codigo_clean = ?
+                       AND a.marca_repuesto <> b.marca_repuesto""",
+                  (pa["codigo_clean"], pb["codigo_clean"]))
+        autos_juntos = c.fetchone()[0]
+        if autos_juntos:
+            a_favor.append(f"🏭 dos fabricantes los dan para {autos_juntos} auto(s) en común")
+    except sqlite3.OperationalError as _err:
+        anotar_error("evidencia_cruzada", _err)
+        pass
+
+    # 4. El mostrador: ¿ya se vendió uno en lugar del otro?
+    veces = pares_confirmados_por_ventas().get((min(id_a, id_b), max(id_a, id_b)), 0)
+    if veces >= 2:
+        a_favor.append(f"🧾 ya lo vendiste como reemplazo {veces} vez(ces)")
+
+    # 5. Un código de fábrica compartido
+    try:
+        c.execute("""SELECT COUNT(*) FROM equivalencias e
+                     WHERE (e.producto_a_id = ? AND e.producto_b_id = ?)
+                        OR (e.producto_a_id = ? AND e.producto_b_id = ?)""",
+                  (min(id_a, id_b), max(id_a, id_b), max(id_a, id_b), min(id_a, id_b)))
+        if c.fetchone()[0]:
+            a_favor.append("🔗 ya están vinculados en la base")
+    except sqlite3.OperationalError as _err:
+        anotar_error("evidencia_cruzada", _err)
+        pass
+
+    # 6. Reemplazo de código declarado
+    for viejo, nuevo in ((pa["codigo_clean"], pb["codigo_clean"]),
+                         (pb["codigo_clean"], pa["codigo_clean"])):
+        if any(x["clean"] == nuevo for x in cadena_de_reemplazos(viejo)):
+            a_favor.append("🔄 el fabricante reemplazó uno por el otro")
+            break
+
+    # 7. Precio: no confirma nada por sí solo, pero una diferencia enorme sí desmiente
+    if pa["precio"] and pb["precio"] and pa["precio"] > 0 and pb["precio"] > 0:
+        razon = max(pa["precio"], pb["precio"]) / min(pa["precio"], pb["precio"])
+        if razon >= 15:
+            vetos.append(f"💲 los precios se diferencian {razon:.0f} veces")
+
+    if vetos:
+        veredicto = "🔴 hay evidencia en contra"
+    elif len(a_favor) >= 3:
+        veredicto = "🟢 confirmada por varios métodos"
+    elif len(a_favor) == 2:
+        veredicto = "🟡 dos métodos coinciden"
+    elif len(a_favor) == 1:
+        veredicto = "🟠 un solo método, conviene mirarla"
+    else:
+        veredicto = "⚪ sin evidencia a favor"
+    return a_favor, vetos, veredicto
+
+
+def derivar_equivalencias_por_medidas(minimo_medidas=3, limite=400):
+    """Encuentra equivalencias cruzando las MEDIDAS cargadas, entre marcas distintas.
+
+    Las medidas se venían usando solo para verificar un vínculo que ya existía. Pero en varias
+    familias la medida ES la identidad de la pieza: un retén 35x52x7 de un proveedor y uno
+    35x52x7 de otro son el mismo repuesto, y no hace falta que las descripciones se parezcan
+    ni que compartan un código.
+
+    Es la evidencia más fuerte que hay: no es texto ni interpretación, es la pieza física.
+
+    Se piden al menos 3 medidas coincidentes. Con una sola —por ejemplo, solo el diámetro
+    interno— coincidirían piezas completamente distintas que casualmente miden lo mismo."""
+    campos = [cn for cn, _ in CAMPOS_MEDIDAS]
+    seleccion = ", ".join(f"p.{cn}" for cn in campos)
+    c.execute(f"""SELECT p.id, p.codigo_raw, p.descripcion, p.marca_id, m.nombre AS marca,
+                         p.precio, p.stock, {seleccion}, p.paso_rosca, p.cantidad_estrias
+                  FROM productos p JOIN marcas m ON m.id = p.marca_id""")
+    productos = [dict(r) for r in c.fetchall()]
+
+    # Se agrupa por la combinación exacta de medidas. Sin agrupar habría que comparar todos
+    # contra todos; agrupando, los que comparten medidas caen juntos y el resto ni se mira.
+    grupos = {}
+    for f in productos:
+        valores = tuple(round(f[cn], 2) if f[cn] is not None else None for cn in campos)
+        cuantas = sum(1 for v in valores if v is not None)
+        if cuantas < minimo_medidas:
+            continue
+        clave = valores + ((f["paso_rosca"] or "").strip().upper(),
+                           (f["cantidad_estrias"] or "").strip().upper())
+        grupos.setdefault(clave, []).append(f)
+
+    ya = set()
+    c.execute("SELECT producto_a_id, producto_b_id FROM equivalencias")
+    for r in c.fetchall():
+        ya.add((r["producto_a_id"], r["producto_b_id"]))
+    rechazados = pares_rechazados()
+
+    salida = []
+    for clave, miembros in grupos.items():
+        # Solo interesa si hay al menos dos MARCAS distintas: dos códigos de la misma marca
+        # con las mismas medidas suelen ser presentaciones del mismo producto, no equivalentes
+        # que aporten algo.
+        if len({f["marca_id"] for f in miembros}) < 2:
+            continue
+        for i, pa in enumerate(miembros):
+            for pb in miembros[i + 1:]:
+                if pa["marca_id"] == pb["marca_id"]:
+                    continue
+                par = (min(pa["id"], pb["id"]), max(pa["id"], pb["id"]))
+                if par in ya or par in rechazados:
+                    continue
+                # Aun con las medidas iguales, dos rubros distintos no son la misma pieza:
+                # una arandela y un separador pueden medir exactamente lo mismo.
+                # Con las medidas iguales igual hay que mirar la pieza: una arandela y un
+                # retén pueden medir exactamente lo mismo. Y no alcanza con comparar el rubro
+                # —«ARANDELA DE COBRE» queda sin clasificar y se colaba—, así que se compara
+                # también el sustantivo principal de la descripción.
+                fa = firma_de_producto(pa["descripcion"] or "")
+                fb = firma_de_producto(pb["descripcion"] or "")
+                if not fa or not fb:
+                    continue
+                if ("Sin clasificar" not in (fa["familia"], fb["familia"])
+                        and fa["familia"] != fb["familia"]):
+                    continue
+                if fa["cabeza"] and fb["cabeza"] and fa["cabeza"] != fb["cabeza"]:
+                    if not (fa["cabeza"] in fb["cabeza"] or fb["cabeza"] in fa["cabeza"]):
+                        continue
+                detalle = ", ".join(
+                    f"{eti} {clave[j]}" for j, (cn, eti) in enumerate(CAMPOS_MEDIDAS)
+                    if clave[j] is not None
+                )
+                salida.append({
+                    "Código A": pa["codigo_raw"], "Marca A": pa["marca"],
+                    "Descripción A": (pa["descripcion"] or "")[:40],
+                    "Código B": pb["codigo_raw"], "Marca B": pb["marca"],
+                    "Descripción B": (pb["descripcion"] or "")[:40],
+                    "Medidas que coinciden": detalle[:70],
+                    "_a": pa["id"], "_b": pb["id"],
+                })
+                if len(salida) >= limite:
+                    return salida
+    return salida
+
+
+def equivalencias_puenteadas_por_reemplazo(limite=300):
+    """Vincula lo que quedó separado porque el fabricante cambió el número.
+
+    Caso concreto: tenés A vinculado al código de fábrica viejo, y B vinculado al nuevo. Son
+    el mismo repuesto, pero para la app son dos islas sin relación, porque el cambio de número
+    partió la cadena al medio.
+
+    Los reemplazos que cargaste a mano ya sabían que el viejo y el nuevo son lo mismo. Esto
+    usa ese dato para volver a unir lo que el cambio de número separó."""
+    try:
+        c.execute("SELECT codigo_viejo_clean, codigo_nuevo_clean FROM reemplazos_codigo")
+        cadenas = [(r["codigo_viejo_clean"], r["codigo_nuevo_clean"]) for r in c.fetchall()]
+    except sqlite3.OperationalError as _err:
+        anotar_error("equivalencias_puenteadas_por_reemplazo", _err)
+        return []
+    if not cadenas:
+        return []
+
+    ya = set()
+    c.execute("SELECT producto_a_id, producto_b_id FROM equivalencias")
+    for r in c.fetchall():
+        ya.add((r["producto_a_id"], r["producto_b_id"]))
+    rechazados = pares_rechazados()
+
+    salida = []
+    for viejo, nuevo in cadenas:
+        c.execute("""SELECT p.id, p.codigo_raw, m.nombre AS marca, p.descripcion
+                     FROM productos p JOIN marcas m ON m.id = p.marca_id
+                     WHERE p.codigo_clean = ?""", (viejo,))
+        de_viejo = [dict(r) for r in c.fetchall()]
+        c.execute("""SELECT p.id, p.codigo_raw, m.nombre AS marca, p.descripcion
+                     FROM productos p JOIN marcas m ON m.id = p.marca_id
+                     WHERE p.codigo_clean = ?""", (nuevo,))
+        de_nuevo = [dict(r) for r in c.fetchall()]
+        for pa in de_viejo:
+            for pb in de_nuevo:
+                par = (min(pa["id"], pb["id"]), max(pa["id"], pb["id"]))
+                if pa["id"] == pb["id"] or par in ya or par in rechazados:
+                    continue
+                salida.append({
+                    "Código A": pa["codigo_raw"], "Marca A": pa["marca"],
+                    "Código B": pb["codigo_raw"], "Marca B": pb["marca"],
+                    "Por qué": f"el fabricante reemplazó {pa['codigo_raw']} por {pb['codigo_raw']}",
+                    "_a": pa["id"], "_b": pb["id"],
+                })
+                if len(salida) >= limite:
+                    return salida
+    return salida
+
+
+def derivar_equivalencias_por_descripcion(marca_a_id=None, marca_b_id=None,
+                                          limite=400, tope_productos=4000,
+                                          por_producto=3):
+    """Vincula productos de DOS proveedores distintos comparando lo que dicen sus descripciones.
+
+    Es la respuesta al problema de fondo: la mayoría de las listas no traen el código de
+    fábrica, y sin esa columna la app no generaba ninguna equivalencia. Con esto, dos
+    proveedores que describen la misma pieza para el mismo auto quedan vinculados.
+
+    Se compara solo dentro del mismo rubro. Eso no es una optimización: es lo que evita que
+    esto se convierta en otra fábrica de vínculos falsos, y de paso hace la comparación
+    manejable —sin agrupar, serían millones de pares—."""
+    if not marca_a_id or not marca_b_id or marca_a_id == marca_b_id:
+        return []
+
+    productos = {}
+    for mid in (marca_a_id, marca_b_id):
+        c.execute("""SELECT p.id, p.codigo_raw, p.codigo_clean, p.descripcion, p.precio,
+                            p.stock, m.nombre AS marca
+                     FROM productos p JOIN marcas m ON m.id = p.marca_id
+                     WHERE p.marca_id = ? AND COALESCE(p.descripcion,'') <> ''
+                     LIMIT ?""", (mid, tope_productos))
+        productos[mid] = [dict(r) for r in c.fetchall()]
+
+    # Se agrupa por rubro antes de comparar: solo tiene sentido cruzar filtros con filtros
+    por_rubro = {mid: {} for mid in productos}
+    for mid, filas in productos.items():
+        for f in filas:
+            firma = firma_de_producto(f["descripcion"], f["id"], f.get("codigo_clean"))
+            if not firma or firma["familia"] == "Sin clasificar":
+                continue
+            f["_firma"] = firma
+            por_rubro[mid].setdefault(firma["familia"], []).append(f)
+
+    ya_vinculados = set()
+    c.execute("SELECT producto_a_id, producto_b_id FROM equivalencias")
+    for r in c.fetchall():
+        ya_vinculados.add((r["producto_a_id"], r["producto_b_id"]))
+    rechazados = pares_rechazados()
+
+    salida = []
+    for familia in set(por_rubro[marca_a_id]) & set(por_rubro[marca_b_id]):
+        for pa in por_rubro[marca_a_id][familia]:
+            # Los mejores candidatos de ESTE producto, no todos. Un termostato de Ford puede
+            # coincidir con quince del otro proveedor, y esos quince tapan al resto del
+            # catálogo: se llega al tope mostrando siempre lo mismo. Se guardan los que más
+            # autos comparten, que son los más probables.
+            candidatos = []
+            for pb in por_rubro[marca_b_id][familia]:
+                par = (min(pa["id"], pb["id"]), max(pa["id"], pb["id"]))
+                if par in ya_vinculados or par in rechazados:
+                    continue
+                ok, motivo = firmas_compatibles(pa["_firma"], pb["_firma"])
+                if not ok:
+                    continue
+                en_comun = len(pa["_firma"]["autos"] & pb["_firma"]["autos"])
+                candidatos.append((en_comun, pb, motivo))
+            candidatos.sort(key=lambda x: -x[0])
+            for _n_autos, pb, motivo in candidatos[:por_producto]:
+                salida.append({
+                    "Código A": pa["codigo_raw"], "Marca A": pa["marca"],
+                    "Descripción A": (pa["descripcion"] or "")[:44],
+                    "Código B": pb["codigo_raw"], "Marca B": pb["marca"],
+                    "Descripción B": (pb["descripcion"] or "")[:44],
+                    "Rubro": familia, "Por qué": motivo,
+                    "_a": pa["id"], "_b": pb["id"],
+                })
+                if len(salida) >= limite:
+                    return salida
+    return salida
+
+
 def derivar_equivalencias_de_aplicaciones(limite=500, minimo_autos=2):
     """Deduce equivalencias cruzando los catálogos de aplicaciones de distintos fabricantes.
 
@@ -6278,7 +7734,8 @@ def repuestos_de_este_auto(marca_auto, modelo="", anio=None, motor="", vin="", l
     # a qué auto le va su pieza.
     try:
         resultado["del_fabricante"] = buscar_aplicaciones(marca_auto, modelo, anio)
-    except sqlite3.OperationalError:
+    except sqlite3.OperationalError as _err:
+        anotar_error("repuestos_de_este_auto", _err)
         resultado["del_fabricante"] = []
 
     # --- 1. Lo que ya se le puso a este auto ---
@@ -6392,9 +7849,59 @@ def panel_vin(clave="vin", mostrar_ensenar=True):
         linea += f" · motor {d['motor']}"
     st.success(linea)
 
-    if d.get("digito_verificador") is False:
-        st.error("❌ El dígito verificador no da: revisá si hay algún carácter mal tipeado. "
-                  "Buscar repuestos con un VIN mal copiado es buscar los del auto equivocado.")
+    # Este bloque esperaba un booleano que la app nunca seteaba: el mensaje no salía nunca.
+    # Ahora se calcula de verdad, con la cuenta de la norma ISO 3779.
+    if d.get("corregido"):
+        st.warning(
+            "✏️ **Se corrigieron letras que un VIN no puede tener:** "
+            + "; ".join(d["corregido"])
+            + f". Quedó **{d['vin']}**.\n\nLa norma prohíbe la I, la O y la Q justamente "
+              "porque se confunden con 1 y 0, así que la corrección es segura."
+        )
+    _dv = d.get("digito_verificador")
+    if _dv == "mal":
+        st.error("❌ " + d.get("mensaje_digito", "") +
+                  "\n\nBuscar repuestos con un VIN mal copiado es buscar los del auto equivocado.")
+    elif _dv == "ok":
+        st.caption("✅ " + d.get("mensaje_digito", ""))
+    elif _dv == "no_aplica" and d.get("mensaje_digito"):
+        st.caption("ℹ️ " + d["mensaje_digito"])
+
+    # Si el modelo no lo sabemos, se ofrece preguntarle a la base pública de la NHTSA. Es
+    # gratis y sin clave. No se consulta sola en cada búsqueda: sería pegarle a un servidor
+    # ajeno cada vez que alguien tipea un VIN, y la mayoría ya están resueltos acá.
+    if not d.get("modelo"):
+        st.caption(
+            "El modelo no está en la norma del VIN, así que hay que aprenderlo. Se puede "
+            "preguntar a la base pública de la NHTSA (gratis, del gobierno de EE.UU.)."
+        )
+        if st.button("🌐 Preguntar a la base pública", key=f"nhtsa_{clave}"):
+            with st.spinner("Consultando..."):
+                _dn, _en = consultar_vin_en_nhtsa(d["vin"])
+            st.session_state[f"nhtsa_res_{clave}"] = (_dn, _en)
+        _guardado = st.session_state.get(f"nhtsa_res_{clave}")
+        if _guardado:
+            _dn, _en = _guardado
+            if _en:
+                st.warning(_en)
+            elif _dn:
+                st.success(
+                    f"🌐 **{_dn['marca']} {_dn['modelo']}** {_dn['anio']}"
+                    + (f" · motor {_dn['motor']}" if _dn["motor"] else "")
+                    + (f" · {_dn['carroceria']}" if _dn["carroceria"] else "")
+                    + (f"\n\nFabricado en {_dn['planta']}." if _dn["planta"] else "")
+                )
+                st.caption(
+                    "Esto viene de una base ajena y **no se guardó**. Si es correcto, "
+                    "confirmalo y queda aprendido para todos los VIN de ese patrón."
+                )
+                if st.button("✅ Es correcto, guardarlo", key=f"nhtsa_ok_{clave}"):
+                    _modelo_n = " ".join(x for x in [_dn["marca"], _dn["modelo"]] if x)
+                    aprender_modelo_de_vin(d["vin"], _modelo_n, _dn.get("marca") or "",
+                                            _dn.get("motor") or "")
+                    st.session_state.pop(f"nhtsa_res_{clave}", None)
+                    avisar("success", f"Aprendido: ese patrón es un {_modelo_n}.")
+                    st.rerun()
 
     ficha = d.get("vehiculo")
     if ficha:
@@ -6811,10 +8318,12 @@ def identificar_pieza_por_foto(imagen_bytes):
         datos = json.loads(texto)
         registrar_uso_ia("Identificar pieza por foto", True)
         return datos, None
-    except json.JSONDecodeError:
+    except json.JSONDecodeError as _err:
+        anotar_error("identificar_pieza_por_foto", _err)
         registrar_uso_ia("Identificar pieza por foto", False)
         return None, "No pude interpretar la respuesta — probá con una foto más clara y de más cerca."
     except Exception as e:
+        anotar_error("identificar_pieza_por_foto", e)
         registrar_uso_ia("Identificar pieza por foto", False)
         return None, traducir_error_gemini(e)
 
@@ -6850,10 +8359,12 @@ def extraer_datos_cedula(imagen_bytes):
         datos = json.loads(texto)
         registrar_uso_ia("Leer cédula/título", True)
         return datos, None
-    except json.JSONDecodeError:
+    except json.JSONDecodeError as _err:
+        anotar_error("extraer_datos_cedula", _err)
         registrar_uso_ia("Leer cédula/título", False)
         return None, "No pude interpretar la respuesta como datos del vehículo — probá con una foto más clara."
     except Exception as e:
+        anotar_error("extraer_datos_cedula", e)
         registrar_uso_ia("Leer cédula/título", False)
         return None, traducir_error_gemini(e)
 
@@ -6878,6 +8389,7 @@ def transcribir_audio(audio_bytes, mime_type="audio/wav"):
         registrar_uso_ia("Búsqueda por voz", True)
         return response.text.strip(), None
     except Exception as e:
+        anotar_error("transcribir_audio", e)
         registrar_uso_ia("Búsqueda por voz", False)
         return None, traducir_error_gemini(e)
 
@@ -6917,10 +8429,12 @@ def leer_remito_por_foto(imagen_bytes):
             return None, "Gemini no devolvió una lista de ítems reconocible."
         registrar_uso_ia("Leer remito por foto", True)
         return items, None
-    except json.JSONDecodeError:
+    except json.JSONDecodeError as _err:
+        anotar_error("leer_remito_por_foto", _err)
         registrar_uso_ia("Leer remito por foto", False)
         return None, "No pude interpretar la respuesta como una lista de ítems — probá con una foto más clara."
     except Exception as e:
+        anotar_error("leer_remito_por_foto", e)
         registrar_uso_ia("Leer remito por foto", False)
         return None, traducir_error_gemini(e)
 
@@ -7035,7 +8549,8 @@ def interpretar_pedido_hablado(texto):
                 if c.fetchone()[0] >= 2:
                     modelo_suelto = w
                     break
-            except Exception:
+            except Exception as _err:
+                anotar_error("interpretar_pedido_hablado", _err)
                 break
     cil = re.search(r'\b(\d[.,]\d)\b', limpio)
     anio = re.search(r'\b(19\d{2}|20\d{2})\b', limpio)
@@ -7094,7 +8609,8 @@ def autos_de_un_codigo(clean_code, limite=200):
                      FROM aplicaciones WHERE codigo_clean = ?
                      ORDER BY marca_auto, modelo_auto LIMIT ?""", (clean_code, limite))
         return filas_a_listas(c)
-    except sqlite3.OperationalError:
+    except sqlite3.OperationalError as _err:
+        anotar_error("autos_de_un_codigo", _err)
         return []
 
 
@@ -7162,7 +8678,8 @@ def identificar_codigo_ajeno(clean_code):
                      FROM aplicaciones WHERE codigo_clean = ?
                      GROUP BY codigo, marca_repuesto, tipo_pieza LIMIT 1""", (clean_code,))
         info = c.fetchone()
-    except sqlite3.OperationalError:
+    except sqlite3.OperationalError as _err:
+        anotar_error("identificar_codigo_ajeno", _err)
         return None
     if not info:
         return None
@@ -7204,7 +8721,8 @@ def equivalentes_para_los_mismos_autos(clean_code, limite=30):
                      ORDER BY (p.stock > 0) DESC, "Autos en común" DESC LIMIT ?""",
                   (clean_code, limite))
         return filas_a_listas(c)
-    except sqlite3.OperationalError:
+    except sqlite3.OperationalError as _err:
+        anotar_error("equivalentes_para_los_mismos_autos", _err)
         return []
 
 
@@ -7380,14 +8898,15 @@ def guardar_reemplazo(codigo_viejo, codigo_nuevo, marca="", nota=""):
     # Un código viejo tiene UN reemplazo vigente, no varios. La clave de la tabla es el par
     # (viejo, nuevo), así que cargar A→B y después A→C dejaba las dos filas, y la búsqueda seguía
     # la que SQLite devolviera primero: la misma consulta podía contestar B o C según cómo
-    # estuvieran guardadas las filas. Se reemplaza el anterior y se avisa cuál se pisó.
+    # estuvieran guardadas. Se reemplaza el anterior y se avisa cuál se pisó.
     anterior = None
     try:
         c.execute("""SELECT codigo_nuevo FROM reemplazos_codigo
                      WHERE codigo_viejo_clean = ? AND codigo_nuevo_clean != ?""", (v, n))
         fila_previa = c.fetchone()
         anterior = fila_previa["codigo_nuevo"] if fila_previa else None
-    except sqlite3.OperationalError:
+    except sqlite3.OperationalError as _err:
+        anotar_error("guardar_reemplazo", _err)
         anterior = None
     with db_lock:
         c.execute("DELETE FROM reemplazos_codigo WHERE codigo_viejo_clean = ?", (v,))
@@ -7419,13 +8938,12 @@ def cadena_de_reemplazos(clean_code, tope=6):
     cadena, visto, actual = [], {clean_code}, clean_code
     for _ in range(tope):
         try:
-            # Por si quedaron filas viejas de antes de que se guardara uno solo por código:
-            # gana el más reciente, para que la respuesta no dependa del orden de la tabla.
             c.execute("""SELECT codigo_nuevo, codigo_nuevo_clean, marca, nota
                          FROM reemplazos_codigo WHERE codigo_viejo_clean = ?
                          ORDER BY fecha DESC LIMIT 1""", (actual,))
             fila = c.fetchone()
-        except sqlite3.OperationalError:
+        except sqlite3.OperationalError as _err:
+            anotar_error("cadena_de_reemplazos", _err)
             return []
         if not fila or fila["codigo_nuevo_clean"] in visto:
             break
@@ -7448,10 +8966,10 @@ def productos_estancados(dias_sin_vender=180, minimo_stock=1, limite=100):
     ninguna fila ahí. O sea que quedaban afuera justamente los que nunca se movieron —los clavos
     más clavos, que son los que esta pantalla existe para encontrar."""
     try:
-        # Las fechas se sacan con dos tablas ya resumidas, no con una subconsulta por
-        # producto: así se leen las ventas una sola vez en total y no una vez por artículo.
-        # Tampoco se puede unir directo contra las tablas crudas, porque un producto con 30
-        # ventas y 10 cambios de precio saldría 300 veces antes de agrupar.
+        # Las fechas salen de dos tablas ya resumidas, no de una subconsulta por producto: así
+        # las ventas se leen una sola vez en total y no una vez por artículo. Tampoco se puede
+        # unir directo contra las tablas crudas, porque un producto con 30 ventas y 10 cambios
+        # de precio saldría 300 veces antes de agrupar.
         c.execute("""SELECT p.id AS "_id", p.codigo_raw AS "Código", m.nombre AS "Marca",
                             p.descripcion AS "Descripción", p.stock AS "Stock",
                             p.precio AS "Precio",
@@ -7467,7 +8985,8 @@ def productos_estancados(dias_sin_vender=180, minimo_stock=1, limite=100):
                             ON h.producto_id = p.id
                      WHERE COALESCE(p.stock, 0) >= ?""", (minimo_stock,))
         filas = filas_a_listas(c)
-    except sqlite3.OperationalError:
+    except sqlite3.OperationalError as _err:
+        anotar_error("productos_estancados", _err)
         return []
 
     from datetime import datetime as _dt
@@ -7479,7 +8998,8 @@ def productos_estancados(dias_sin_vender=180, minimo_stock=1, limite=100):
         if ultima:
             try:
                 dias = (hoy - _dt.strptime(str(ultima)[:10], "%Y-%m-%d")).days
-            except Exception:
+            except Exception as _err:
+                anotar_error("productos_estancados", _err)
                 continue
             detalle = f"hace {dias} día(s)"
         else:
@@ -7488,7 +9008,8 @@ def productos_estancados(dias_sin_vender=180, minimo_stock=1, limite=100):
                 continue
             try:
                 dias = (hoy - _dt.strptime(str(desde)[:10], "%Y-%m-%d")).days
-            except Exception:
+            except Exception as _err:
+                anotar_error("productos_estancados", _err)
                 continue
             detalle = "nunca se vendió"
         if dias < dias_sin_vender:
@@ -7783,6 +9304,7 @@ def restaurar_de_papelera(item_id):
             conn.commit()
             return True, None
         except Exception as e:
+            anotar_error("restaurar_de_papelera", e)
             conn.rollback()
             return False, f"No se pudo restaurar: {e}"
 
@@ -7942,13 +9464,12 @@ def explicar(resumen, detalle, abierto=False, en_expander=False):
     Ojo con dónde se la llama. Esta función abre un expander, así que llamarla adentro de otro
     deja un expander dentro de un expander: en el celular quedan dos cajas anidadas y hay que
     tocar dos veces para leer tres renglones. Las versiones viejas de Streamlit ni siquiera lo
-    permitían —tiraban excepción y cortaban el renderizado ahí, con lo cual la mitad de abajo de
-    la pantalla no se dibujaba—; las nuevas lo dejan pasar pero sigue quedando mal.
+    permitían —tiraban excepción y cortaban el renderizado ahí—; las nuevas lo dejan pasar pero
+    sigue quedando mal.
 
     Para eso está en_expander: adentro de un expander el detalle va en un popover, que se abre
-    encima y no agrega otro nivel. Y por las dudas, si algo de eso no está disponible en la
-    versión de Streamlit que haya instalada, el detalle se muestra directamente: peor queda un
-    poco de texto de más que media pantalla sin dibujar."""
+    encima y no agrega otro nivel. Con en_expander=True el parámetro 'abierto' no aplica: un
+    popover no se puede dejar abierto de entrada."""
     st.caption(resumen)
     caja = None
     if not en_expander:
@@ -7999,7 +9520,8 @@ def recordar_archivo(archivo, clave):
                     "nombre": getattr(archivo, "name", "archivo"),
                     "datos": datos,
                 }
-        except Exception:
+        except Exception as _err:
+            anotar_error("recordar_archivo", _err)
             pass
 
     guardado = st.session_state.get(f"_archivo_{clave}")
@@ -8072,7 +9594,8 @@ def pdf_con_cache(nombre, generador, *args):
     listas y diccionarios: acá la clave se calcula de forma explícita y predecible."""
     try:
         firma = json.dumps(args, default=str, sort_keys=True)
-    except Exception:
+    except Exception as _err:
+        anotar_error("pdf_con_cache", _err)
         return generador(*args)  # si algo no se puede resumir, se genera sin cachear
     clave = nombre + ":" + hashlib.md5(firma.encode("utf-8")).hexdigest()
     guardado = st.session_state.get("_cache_pdf")
@@ -8367,7 +9890,8 @@ def hojas_del_excel(archivo):
         hojas = [(ws.title, ws.max_row or 0) for ws in wb.worksheets]
         wb.close()
         return hojas
-    except Exception:
+    except Exception as _err:
+        anotar_error("hojas_del_excel", _err)
         return []
 
 
@@ -8385,7 +9909,8 @@ def _decodificar_texto(crudo):
     for codificacion in ("utf-8-sig", "utf-8", "cp1252", "latin-1"):
         try:
             return crudo.decode(codificacion)
-        except (UnicodeDecodeError, AttributeError):
+        except (UnicodeDecodeError, AttributeError) as _err:
+            anotar_error("_decodificar_texto", _err)
             continue
     return crudo.decode("latin-1", errors="replace")
 
@@ -8423,7 +9948,8 @@ def leer_excel(archivo, nrows=None, hoja=None):
     if not isinstance(archivo, str):
         try:
             archivo.seek(0)
-        except Exception:
+        except Exception as _err:
+            anotar_error("leer_excel", _err)
             pass
 
     if nombre_lower.endswith((".csv", ".txt", ".tsv")):
@@ -8474,7 +10000,8 @@ def leer_excel(archivo, nrows=None, hoja=None):
                     # cambia la columna. Es el mismo criterio que usa el ojo al leerlo.
                     try:
                         palabras = pagina.extract_words() or []
-                    except Exception:
+                    except Exception as _err:
+                        anotar_error("leer_excel", _err)
                         palabras = []
                     renglones = {}
                     for w in palabras:
@@ -8588,7 +10115,8 @@ def get_or_create_vehiculo(patente, cliente_nombre="", cliente_telefono="", marc
     if len(vin) == 17 and (modelo_auto.strip() or motorizacion.strip()):
         try:
             aprender_modelo_de_vin(vin, modelo_auto, marca_auto, motorizacion)
-        except Exception:
+        except Exception as _err:
+            anotar_error("get_or_create_vehiculo", _err)
             pass
     return vid
 
@@ -8721,7 +10249,8 @@ def calcular_km_recorridos(vehiculo):
             dias = max((datetime.now() - fecha_creado).days, 1)
             resultado["dias_transcurridos"] = dias
             resultado["promedio_mensual"] = round(recorridos / dias * 30)
-        except (ValueError, TypeError):
+        except (ValueError, TypeError) as _err:
+            anotar_error("calcular_km_recorridos", _err)
             pass
     return resultado
 
@@ -8998,7 +10527,8 @@ def _rasgos_de_forma(img, contorno, cv2, np):
         # mostrador contaría como una pieza más.
         grandes = [k for k in contornos if cv2.contourArea(k) > area_total * 0.01]
         rasgos["objetos"] = max(len(grandes), 1)
-    except Exception:
+    except Exception as _err:
+        anotar_error("_rasgos_de_forma", _err)
         pass
 
     if contorno is not None:
@@ -9009,7 +10539,8 @@ def _rasgos_de_forma(img, contorno, cv2, np):
             x, y, bw, bh = cv2.boundingRect(contorno)
             if bw > 0 and bh > 0:
                 rasgos["llenado"] = float(min(cv2.contourArea(contorno) / (bw * bh), 1.0))
-        except Exception:
+        except Exception as _err:
+            anotar_error("_rasgos_de_forma", _err)
             pass
     return rasgos
 
@@ -9055,7 +10586,8 @@ def _firma_de_forma(contorno, cv2, np):
         hu = cv2.HuMoments(cv2.moments(contorno)).flatten()
         # escala logarítmica: los valores crudos van de 1e-1 a 1e-60 y son incomparables
         return [float(-np.sign(v) * np.log10(abs(v) + 1e-30)) for v in hu]
-    except Exception:
+    except Exception as _err:
+        anotar_error("_firma_de_forma", _err)
         return None
 
 
@@ -9108,6 +10640,7 @@ def leer_codigo_de_barras(imagen_bytes):
     try:
         cv2, np = _cv()
     except Exception as e:
+        anotar_error("leer_codigo_de_barras", e)
         return [], f"No está disponible el lector de imágenes: {e}"
     try:
         img = cv2.imdecode(np.frombuffer(imagen_bytes, np.uint8), cv2.IMREAD_COLOR)
@@ -9132,7 +10665,8 @@ def leer_codigo_de_barras(imagen_bytes):
                     encontrados += [t for t in textos if t and t.strip()]
                 if encontrados:
                     break
-        except Exception:
+        except Exception as _err:
+            anotar_error("leer_codigo_de_barras", _err)
             pass
 
         if not encontrados:
@@ -9144,7 +10678,8 @@ def leer_codigo_de_barras(imagen_bytes):
                     if texto and texto.strip():
                         encontrados.append(texto.strip())
                         break
-            except Exception:
+            except Exception as _err:
+                anotar_error("leer_codigo_de_barras", _err)
                 pass
 
         if not encontrados:
@@ -9159,6 +10694,7 @@ def leer_codigo_de_barras(imagen_bytes):
                 salida.append(limpio)
         return salida, None
     except Exception as e:
+        anotar_error("leer_codigo_de_barras", e)
         return [], f"No se pudo leer: {type(e).__name__}: {e}"
 
 
@@ -9191,7 +10727,8 @@ def calcular_firma_visual(imagen_bytes, es_consulta=False):
     entre sí. Se guarda solo del lado de la consulta para no duplicar el peso del catálogo."""
     try:
         cv2, np = _cv()
-    except Exception:
+    except Exception as _err:
+        anotar_error("calcular_firma_visual", _err)
         return None, "error"
 
     try:
@@ -9223,7 +10760,8 @@ def calcular_firma_visual(imagen_bytes, es_consulta=False):
             return None, "sin_detalle"
         estado = "ok" if tiene_textura else "solo_forma"
         return pickle.dumps(payload, protocol=4), estado
-    except Exception:
+    except Exception as _err:
+        anotar_error("calcular_firma_visual", _err)
         return None, "error"
 
 
@@ -9232,7 +10770,8 @@ def _cargar_firma(blob):
     no tener que rehacer todo el catálogo de golpe."""
     try:
         dato = pickle.loads(blob)
-    except Exception:
+    except Exception as _err:
+        anotar_error("_cargar_firma", _err)
         return None
     if isinstance(dato, dict) and dato.get("v"):
         return dato
@@ -9251,7 +10790,8 @@ def _parecido_de_forma(forma_a, forma_b):
         pesos = (1.0, 0.7, 0.4)
         d = sum(w * abs(a - b) for w, a, b in zip(pesos, forma_a[:3], forma_b[:3]))
         return float(max(0.0, 100.0 * (1.0 - d / 2.5)))
-    except Exception:
+    except Exception as _err:
+        anotar_error("_parecido_de_forma", _err)
         return 0.0
 
 
@@ -9267,7 +10807,8 @@ def _puntaje_textura(desc_q, kp_q, desc_c, kp_c, cv2, np):
     bf = cv2.BFMatcher(cv2.NORM_HAMMING)
     try:
         matches = bf.knnMatch(desc_q, desc_c, k=2)
-    except Exception:
+    except Exception as _err:
+        anotar_error("_puntaje_textura", _err)
         return 0.0, 0
 
     buenos = [par[0] for par in matches if len(par) == 2 and par[0].distance < 0.78 * par[1].distance]
@@ -9281,7 +10822,8 @@ def _puntaje_textura(desc_q, kp_q, desc_c, kp_c, cv2, np):
             dst = np.float32([kp_c[m.trainIdx] for m in buenos]).reshape(-1, 1, 2)
             _, mascara = cv2.findHomography(src, dst, cv2.RANSAC, 6.0, maxIters=2000)
             inliers = int(mascara.sum()) if mascara is not None else 0
-        except Exception:
+        except Exception as _err:
+            anotar_error("_puntaje_textura", _err)
             inliers = 0
 
     # Las verificadas valen; las no verificadas cuentan poco (pueden ser casualidad)
@@ -9294,7 +10836,8 @@ def comparar_firmas(firma_consulta, blob_catalogo):
     """Devuelve (parecido 0-100, coincidencias verificadas, parecido de forma 0-100)."""
     try:
         cv2, np = _cv()
-    except Exception:
+    except Exception as _err:
+        anotar_error("comparar_firmas", _err)
         return 0.0, 0, 0.0
 
     fc = _cargar_firma(blob_catalogo)
@@ -9352,7 +10895,8 @@ def agregar_foto_producto(producto_id, imagen_bytes, origen="subida", fuente=Non
     import base64
     try:
         img = PILImage.open(io.BytesIO(imagen_bytes)).convert("RGB")
-    except Exception:
+    except Exception as _err:
+        anotar_error("agregar_foto_producto", _err)
         return None, "error"
     img.thumbnail((500, 500))
     buffer = io.BytesIO()
@@ -9432,7 +10976,8 @@ def generar_miniatura_de_data_uri(data_uri):
         return data_uri
     try:
         return generar_miniatura(base64.b64decode(data_uri.split(",", 1)[1]))
-    except Exception:
+    except Exception as _err:
+        anotar_error("generar_miniatura_de_data_uri", _err)
         return None
 
 
@@ -9495,7 +11040,8 @@ def buscar_por_similitud_visual(imagen_bytes, top_n=8, minimo=8.0, progreso=None
                 continue
             try:
                 puntaje, verificadas, forma = comparar_firmas(firma_consulta, fila["firma_blob"])
-            except Exception:
+            except Exception as _err:
+                anotar_error("buscar_por_similitud_visual", _err)
                 continue
             pid = fila["producto_id"]
             if pid not in mejores or puntaje > mejores[pid]["Parecido"]:
@@ -9563,7 +11109,8 @@ def generar_miniatura(imagen_bytes, lado=110):
         buffer = io.BytesIO()
         img.save(buffer, format="JPEG", quality=70)
         return "data:image/jpeg;base64," + base64.b64encode(buffer.getvalue()).decode("ascii")
-    except Exception:
+    except Exception as _err:
+        anotar_error("generar_miniatura", _err)
         return None
 
 
@@ -9599,7 +11146,8 @@ def imagenes_de_una_direccion(url, maximo=8):
         cabecera = requests.head(url, timeout=8, allow_redirects=True,
                                  headers={"User-Agent": "Mozilla/5.0 (compatible; EquivalenciasElChavo/1.0)"})
         tipo = cabecera.headers.get("Content-Type", "")
-    except Exception:
+    except Exception as _err:
+        anotar_error("imagenes_de_una_direccion", _err)
         tipo = ""
 
     if "image" in tipo.lower() or url.lower().split("?")[0].endswith((".jpg", ".jpeg", ".png", ".webp")):
@@ -9613,6 +11161,7 @@ def imagenes_de_una_direccion(url, maximo=8):
             return None, f"la página respondió {respuesta.status_code}"
         html = respuesta.text
     except Exception as e:
+        anotar_error("imagenes_de_una_direccion", e)
         return None, f"no se pudo abrir la página ({type(e).__name__})"
 
     candidatas, vistas = [], set()
@@ -9673,7 +11222,8 @@ def migrar_imagenes_pendientes(limite=400):
                 conn.commit()
             resumen["migradas"] += 1
             resumen["listas" if estado == "ok" else ("sin_detalle" if estado == "sin_detalle" else "error")] += 1
-        except Exception:
+        except Exception as _err:
+            anotar_error("migrar_imagenes_pendientes", _err)
             resumen["error"] += 1
 
     # 2) Fotos ya en la tabla pero sin firma calculada
@@ -9693,7 +11243,8 @@ def migrar_imagenes_pendientes(limite=400):
                           (firma, estado, FIRMA_VERSION if firma else None, fila["id"]))
                 conn.commit()
             resumen["listas" if estado == "ok" else ("sin_detalle" if estado == "sin_detalle" else "error")] += 1
-        except Exception:
+        except Exception as _err:
+            anotar_error("migrar_imagenes_pendientes", _err)
             resumen["error"] += 1
 
     # 3) Miniaturas faltantes y fotos que son link externo (esas hay que bajarlas desde Mantenimiento)
@@ -9711,7 +11262,8 @@ def migrar_imagenes_pendientes(limite=400):
                 with db_lock:
                     c.execute("UPDATE productos SET imagen_thumb = ? WHERE id = ?", (thumb, fila["id"]))
                     conn.commit()
-        except Exception:
+        except Exception as _err:
+            anotar_error("migrar_imagenes_pendientes", _err)
             continue
     return resumen
 
@@ -9969,6 +11521,150 @@ ANIOS_VIN = {
 }
 
 
+# Para el dígito verificador del VIN: cada letra vale un número. No es arbitrario, es la norma
+# ISO 3779 y es igual en todo el mundo.
+_VALOR_LETRA_VIN = {
+    "A": 1, "B": 2, "C": 3, "D": 4, "E": 5, "F": 6, "G": 7, "H": 8,
+    "J": 1, "K": 2, "L": 3, "M": 4, "N": 5, "P": 7, "R": 9,
+    "S": 2, "T": 3, "U": 4, "V": 5, "W": 6, "X": 7, "Y": 8, "Z": 9,
+}
+_PESOS_VIN = (8, 7, 6, 5, 4, 3, 2, 10, 0, 9, 8, 7, 6, 5, 4, 3, 2)
+
+
+def corregir_confusiones_vin(vin):
+    """Arregla las letras que un VIN NO puede tener. Devuelve (corregido, qué se cambió).
+
+    La norma prohíbe I, O y Q justamente porque se confunden con 1 y 0. Así que si alguien
+    escribió una, es seguro que copió mal: no hay ambigüedad posible.
+
+    Antes la app rechazaba el VIN y listo. Pero el VIN se copia a mano de una chapita, y ese
+    es el error más común que existe: rechazarlo obliga a tipear todo de nuevo sin decir dónde
+    estaba el problema."""
+    original = re.sub(r"[\s\-]", "", (vin or "").strip().upper())
+    cambios = []
+    salida = []
+    for i, ch in enumerate(original):
+        if ch == "I":
+            salida.append("1"); cambios.append(f"la I de la posición {i+1} → 1")
+        elif ch == "O":
+            salida.append("0"); cambios.append(f"la O de la posición {i+1} → 0")
+        elif ch == "Q":
+            salida.append("0"); cambios.append(f"la Q de la posición {i+1} → 0")
+        else:
+            salida.append(ch)
+    return "".join(salida), cambios
+
+
+def digito_verificador_vin(vin):
+    """Calcula qué debería tener el VIN en la posición 9.
+
+    Es una cuenta sobre los otros 16 caracteres. Si no coincide, hay un error de copia en
+    alguna parte — y se detecta ANTES de buscar, en vez de dar resultados de otro auto."""
+    if len(vin) != 17:
+        return None
+    total = 0
+    for i, ch in enumerate(vin):
+        if ch.isdigit():
+            valor = int(ch)
+        elif ch in _VALOR_LETRA_VIN:
+            valor = _VALOR_LETRA_VIN[ch]
+        else:
+            return None
+        total += valor * _PESOS_VIN[i]
+    resto = total % 11
+    return "X" if resto == 10 else str(resto)
+
+
+def verificar_vin(vin):
+    """¿El VIN está bien copiado? Devuelve (estado, mensaje).
+
+    estado: 'ok', 'mal', o 'no_aplica'.
+
+    IMPORTANTE y por eso no se rechaza sin más: el dígito verificador es **obligatorio en
+    Estados Unidos y Canadá** (VIN que empieza con 1 a 5), pero en el resto del mundo es
+    opcional y muchísimos fabricantes no lo usan. Un auto brasileño o argentino puede tener un
+    VIN perfectamente válido que no pase esta cuenta.
+
+    Por eso: si empieza con 1-5 y no da, es un error de copia casi seguro. Si empieza con otra
+    cosa, se avisa y nada más."""
+    esperado = digito_verificador_vin(vin)
+    if esperado is None:
+        return "no_aplica", ""
+    real = vin[8]
+    if real == esperado:
+        return "ok", "El dígito verificador da bien: el VIN está bien copiado."
+    norteamericano = vin[0] in "12345"
+    if norteamericano:
+        return "mal", (f"El dígito verificador no da: la posición 9 dice «{real}» y tendría que "
+                       f"decir «{esperado}». En los VIN de Estados Unidos y Canadá este dígito "
+                       "es obligatorio, así que hay un carácter mal copiado.")
+    return "no_aplica", (f"El dígito verificador no da ({real} en vez de {esperado}), pero fuera "
+                         "de Estados Unidos y Canadá muchos fabricantes no lo usan. Puede estar "
+                         "perfecto igual — tomalo como una señal para revisar, no como un error.")
+
+
+URL_VPIC = "https://vpic.nhtsa.dot.gov/api/vehicles/decodevinvalues/{vin}?format=json"
+
+
+def consultar_vin_en_nhtsa(vin, tiempo_maximo=12):
+    """Le pregunta a la base pública de la NHTSA qué auto es ese VIN. (datos, error).
+
+    Es gratis, no pide clave ni registro, y es la base oficial del gobierno de Estados Unidos.
+    Resuelve el hueco que la app tenía: el modelo y el motor no están en la norma del VIN, así
+    que hasta ahora había que enseñárselos uno por uno.
+
+    Lo que hay que saber antes de confiar: la cobertura es excelente para autos vendidos en
+    Estados Unidos y buena para los fabricantes globales, pero **muchos modelos hechos para el
+    mercado argentino o brasileño no están**. Un Gol o un Palio pueden volver vacíos. Por eso
+    lo que devuelve se ofrece para confirmar, nunca se guarda solo."""
+    limpio = re.sub(r"[^A-HJ-NPR-Z0-9]", "", (vin or "").upper())
+    if len(limpio) != 17:
+        return None, "El VIN tiene que tener 17 caracteres."
+    try:
+        r = requests.get(URL_VPIC.format(vin=quote(limpio)), timeout=tiempo_maximo,
+                         headers={"User-Agent": "EquivalenciasElChavo/1.0"})
+        if r.status_code >= 400:
+            return None, f"La base de la NHTSA respondió {r.status_code}."
+        cuerpo = r.json()
+    except Exception as e:
+        anotar_error("consultar_vin_en_nhtsa", e)
+        return None, f"No se pudo consultar ({type(e).__name__}). Puede ser la conexión."
+
+    filas = (cuerpo or {}).get("Results") or []
+    if not filas:
+        return None, "La base no devolvió nada para ese VIN."
+    d = filas[0]
+
+    def limpiar(clave):
+        v = (d.get(clave) or "").strip()
+        # La API devuelve textos como "Not Applicable" cuando no sabe: no son datos
+        if v.lower() in ("", "not applicable", "0", "null", "none"):
+            return ""
+        return v
+
+    motor = " ".join(x for x in [
+        limpiar("DisplacementL") and f"{limpiar('DisplacementL')}L",
+        limpiar("EngineCylinders") and f"{limpiar('EngineCylinders')}cil",
+        limpiar("FuelTypePrimary"),
+    ] if x)
+
+    datos = {
+        "marca": limpiar("Make"),
+        "modelo": limpiar("Model"),
+        "anio": limpiar("ModelYear"),
+        "motor": motor,
+        "carroceria": limpiar("BodyClass"),
+        "planta": " ".join(x for x in [limpiar("PlantCity"), limpiar("PlantCountry")] if x),
+        "fabricante": limpiar("Manufacturer"),
+        "aviso": limpiar("ErrorText"),
+    }
+    if not datos["marca"] and not datos["modelo"]:
+        return None, ("La base no conoce ese VIN. Es normal en modelos hechos para "
+                      "Sudamérica: la cobertura fuerte es de autos del mercado de "
+                      "Estados Unidos.")
+    return datos, None
+
+
 def decodificar_vin(vin):
     vin = re.sub(r'\s', '', vin.strip().upper())
     resultado = {"vin": vin, "valido": False}
@@ -9976,10 +11672,16 @@ def decodificar_vin(vin):
         resultado["error"] = "El VIN debe tener 17 caracteres."
         return resultado
     if any(ch in vin for ch in ("I", "O", "Q")):
-        resultado["error"] = "El VIN no puede contener las letras I, O ni Q."
-        return resultado
+        # Se corrige en vez de rechazar: esas letras no existen en un VIN, así que quien las
+        # escribió copió mal un 1 o un 0. Rechazar obliga a tipear los 17 de nuevo.
+        vin, cambios = corregir_confusiones_vin(vin)
+        resultado["vin"] = vin
+        resultado["corregido"] = cambios
 
     resultado["valido"] = True
+    estado_dv, msg_dv = verificar_vin(vin)
+    resultado["digito_verificador"] = estado_dv
+    resultado["mensaje_digito"] = msg_dv
     wmi = vin[:3]
     resultado["wmi"] = wmi
     resultado["pais"] = PAISES_VIN_2.get(vin[:2]) or PAISES_VIN.get(vin[0], "Desconocido / no cargado")
@@ -10081,7 +11783,8 @@ def decodificar_vin(vin):
             suma = sum(valores[ch] * peso for ch, peso in zip(vin, pesos))
             esperado = "X" if suma % 11 == 10 else str(suma % 11)
             resultado["digito_verificador"] = (vin[8] == esperado)
-        except KeyError:
+        except KeyError as _err:
+            anotar_error("decodificar_vin", _err)
             resultado["digito_verificador"] = None
 
     # --- Lo más confiable de todo: que el auto ya esté en una ficha ---
@@ -10239,6 +11942,7 @@ def generar_esquema_orientativo_ia(marca, modelo, motorizacion, sistema):
         registrar_uso_ia("Generar imagen orientativa (paga)", False)
         return None, "Gemini no devolvió ninguna imagen para ese pedido."
     except Exception as e:
+        anotar_error("generar_esquema_orientativo_ia", e)
         registrar_uso_ia("Generar imagen orientativa (paga)", False)
         texto_error = str(e)
         if "RESOURCE_EXHAUSTED" in texto_error or "429" in texto_error or "quota" in texto_error.lower():
@@ -10404,7 +12108,8 @@ def generar_imagen_con_marcadores(imagen_bytes, puntos):
         salida = io.BytesIO()
         img.save(salida, format="JPEG", quality=90)
         return salida.getvalue()
-    except (UnidentifiedImageError, OSError):
+    except (UnidentifiedImageError, OSError) as _err:
+        anotar_error("generar_imagen_con_marcadores", _err)
         return imagen_bytes
 
 
@@ -10649,7 +12354,8 @@ if not st.session_state.get("_tareas_dia_corridas"):
         _hecho_hoy = tareas_automaticas_del_dia()
         if _hecho_hoy:
             st.session_state["_aviso_tareas"] = _hecho_hoy
-    except Exception:
+    except Exception as _err:
+        anotar_error("nivel principal", _err)
         pass
 
 _hecho_hoy = st.session_state.pop("_aviso_tareas", None)
@@ -10661,29 +12367,61 @@ _cache_salud = st.session_state.get("_salud_cache")
 if not _cache_salud or _ahora - _cache_salud["momento"] > 180:
     try:
         _cache_salud = {"momento": _ahora, "problemas": diagnostico_de_salud()}
-    except Exception:
+    except Exception as _err:
+        anotar_error("nivel principal", _err)
         _cache_salud = {"momento": _ahora, "problemas": []}
     st.session_state["_salud_cache"] = _cache_salud
 
 _problemas = _cache_salud["problemas"]
 if _problemas:
+    # Se separa por urgencia en vez de mostrar una lista pareja. Antes todo se veía igual y
+    # «hay clientes esperando algo que ya tenés» quedaba mezclado con «hay descripciones
+    # pegadas». Lo que da plata va arriba y sin plegar; el resto, plegado.
     _graves = [p for p in _problemas if p["nivel"] == "alto"]
-    _titulo = (f"⚠️ {len(_problemas)} cosa(s) para revisar"
-               + (f" — {len(_graves)} importante(s)" if _graves else ""))
-    with st.expander(_titulo, expanded=False):
-        for _p in _problemas:
-            _icono = "🔴" if _p["nivel"] == "alto" else "🟡"
-            st.markdown(f"{_icono} **{_p['titulo']}**")
-            st.caption(f"{_p['detalle']}  \n📍 {_p['donde']}")
-        if st.button("🔄 Volver a revisar", key="refrescar_salud"):
-            st.session_state.pop("_salud_cache", None)
-            st.rerun()
+    _resto = [p for p in _problemas if p["nivel"] != "alto"]
+
+    if _graves:
+        st.markdown(
+            "<div style='background:rgba(255,75,75,.08);border-left:4px solid #ff4b4b;"
+            "border-radius:6px;padding:.7rem .9rem;margin-bottom:.6rem'>"
+            f"<b>🔴 {len(_graves)} cosa(s) que conviene mirar hoy</b></div>",
+            unsafe_allow_html=True
+        )
+        for _p in _graves:
+            cS1, cS2 = st.columns([5, 2])
+            cS1.markdown(f"**{_p['titulo']}**  \n<span style='opacity:.75;font-size:.87em'>"
+                          f"{_p['detalle']}</span>", unsafe_allow_html=True)
+            cS2.caption(f"📍 {_p['donde']}")
+
+    if _resto:
+        with st.expander(f"🟡 {len(_resto)} cosa(s) más, sin apuro", expanded=False):
+            for _p in _resto:
+                st.markdown(f"**{_p['titulo']}**")
+                st.caption(f"{_p['detalle']}  \n📍 {_p['donde']}")
+
+    if st.button("🔄 Volver a revisar", key="refrescar_salud"):
+        st.session_state.pop("_salud_cache", None)
+        st.rerun()
+    st.markdown("")
 
 GRUPOS_MANTENIMIENTO = ["🧹 Limpiar vínculos", "🧠 Calidad y aprendizaje", "📷 Fotos",
                         "🩺 Estado y papelera"]
 
 PAGINAS = ["🔍 Buscador", "🔗 Vincular manual", "📁 Cargar Excel", "🗂️ Administrar",
            "📊 Estadísticas", "📋 Lista WhatsApp", "🚗 Vehículos", "🛠️ Modo Mecánico"]
+
+# Una línea por pantalla diciendo para qué sirve. Sin esto hay que entrar a cada una para
+# saber qué hace, y el que atiende el mostrador no tiene tiempo de andar explorando.
+PARA_QUE_SIRVE = {
+    "🔍 Buscador": "Buscar un repuesto y ver todas las marcas que sirven en su lugar.",
+    "🔗 Vincular manual": "Decir a mano que dos códigos son equivalentes.",
+    "📁 Cargar Excel": "Subir la lista de precios de un proveedor.",
+    "🗂️ Administrar": "Editar productos, marcas y usuarios.",
+    "📊 Estadísticas": "Qué comprar, qué no se vende, cuánto aumentó cada proveedor.",
+    "📋 Lista WhatsApp": "Pegar un pedido que llegó por mensaje y resolverlo de una.",
+    "🚗 Vehículos": "Fichas de los autos: qué se le puso a cada uno y cuándo.",
+    "🛠️ Modo Mecánico": "Identificar un auto por patente, chasis o número de motor.",
+}
 
 if st.session_state.get("pagina_actual") not in PAGINAS:
     st.session_state["pagina_actual"] = PAGINAS[0]
@@ -10695,6 +12433,16 @@ if st.session_state.get("pagina_actual") not in PAGINAS:
 st.radio("Sección:", PAGINAS, key="pagina_actual", horizontal=True, label_visibility="collapsed")
 
 pagina = st.session_state["pagina_actual"]
+
+# Debajo de las pastillas, una línea que dice para qué sirve la sección elegida. Es lo que
+# convierte una fila de ocho botones en algo que se entiende sin que nadie te lo explique.
+if PARA_QUE_SIRVE.get(pagina):
+    st.markdown(
+        f"<div style='margin:-.4rem 0 .9rem 0;padding:.45rem .8rem;"
+        f"background:rgba(128,128,128,.10);border-radius:6px;font-size:.9em;opacity:.85'>"
+        f"{PARA_QUE_SIRVE[pagina]}</div>",
+        unsafe_allow_html=True
+    )
 
 # Los avisos que quedaron guardados antes del último refresco. Van acá, arriba del contenido
 # de la página, para que se vean sí o sí — sin esto, cada "Guardado" se perdía en el refresco.
@@ -10773,6 +12521,9 @@ Casi todo lo que edita o borra algo pide la contraseña de administrador la prim
                         st.session_state.pop(f"cant_cart_{_pid}", None)
                     else:
                         _fallaron.append(f"{_item['codigo']}: {_msg}")
+                # Siempre se refresca: avisar() guarda el mensaje PARA el refresco. Sin refrescar,
+                # el "Se apartaron N" quedaba guardado y no se mostraba nunca — justo cuando algún
+                # ítem fallaba, que es cuando más importa saber qué sí se apartó.
                 if _apartados:
                     avisar("success", f"Se apartaron {_apartados} ítem(s).")
                 for _f in _fallaron:
@@ -11190,22 +12941,22 @@ Casi todo lo que edita o borra algo pide la contraseña de administrador la prim
                         # número que importa al prometerle algo a un cliente; el stock a secas
                         # puede estar comprometido con otro que ya lo cotizó.
                         #
-                        # Va en una columna aparte y NUMÉRICA a propósito. Antes se escribía
-                        # "3 (de 4, el resto apartado)" encima de Stock, y estos diccionarios son
-                        # los mismos que quedan guardados en session_state: al refresco siguiente
-                        # Stock ya era un texto, el filtro de arriba hacía texto > 0 y la pantalla
-                        # se cerraba con TypeError. Con una sola reserva activa alcanzaba con
-                        # tocar cualquier botón de la búsqueda, y el texto además se anidaba en
-                        # cada vuelta: "3 (de 3 (de 4, el resto apartado)...".
+                        # Va en una columna aparte y NUMÉRICA, y se calcula al dibujar. Antes se
+                        # escribía "3 (de 4, el resto apartado)" encima de Stock, y estos
+                        # diccionarios son los mismos que quedan guardados en session_state: al
+                        # refresco siguiente Stock ya era un texto, el filtro de arriba hacía
+                        # texto > 0 y la pantalla se cerraba con TypeError. Con una sola reserva
+                        # activa alcanzaba con tocar cualquier botón, y el texto además se
+                        # anidaba en cada vuelta: "3 (de 3 (de 4, el resto apartado)...".
                         try:
                             libres = stock_libre_de_varios([f["ID"] for f in res])
-                        except Exception:
+                        except Exception as _err:
+                            anotar_error("stock libre de los resultados", _err)
                             libres = {}
-                        hay_reservas = any(f["ID"] in libres and libres[f["ID"]] != (f.get("Stock") or 0)
+                        hay_reservas = any(f["ID"] in libres
+                                            and libres[f["ID"]] != (f.get("Stock") or 0)
                                             for f in res)
                         if hay_reservas:
-                            for f in res:
-                                f["Libre"] = libres.get(f["ID"], f.get("Stock") or 0)
                             st.caption("**Libre** es lo que queda sin apartar: es el número que "
                                        "se le puede prometer a un cliente.")
 
@@ -11227,12 +12978,23 @@ Casi todo lo que edita o borra algo pide la contraseña de administrador la prim
                         id_mas_barato = min(candidatos_precio, key=lambda f: f["Precio"])["ID"] if candidatos_precio else None
                         for f in res:
                             f["💰"] = "🏆 Más barato en stock" if f["ID"] == id_mas_barato else ""
-                        # Las claves con guión bajo son internas —el costo entre ellas— y no
-                        # salen a pantalla ni al Excel. Se sacan ACÁ, al dibujar, y no borrándolas
-                        # de la fila: la fila se reusa en el refresco siguiente y borrarle datos
-                        # es lo que hacía desaparecer el margen después del primer toque.
-                        mostrar = quitar_id([{k: v for k, v in f.items() if not k.startswith("_")}
-                                              for f in res])
+
+                        # Acá se arma lo que se ve, SIN tocar las filas guardadas. Dos motivos,
+                        # los dos aprendidos a los golpes:
+                        #  · las claves con guión bajo son internas —el costo entre ellas— y no
+                        #    salen ni a pantalla ni al Excel. Antes el costo se borraba de la
+                        #    fila, y como la fila se reusa en el refresco siguiente, el margen
+                        #    del administrador se veía una vez y después quedaba vacío;
+                        #  · "Libre" se recalcula en cada vuelta. Si se escribiera en la fila, al
+                        #    soltar la reserva la columna quedaría pegada con el número viejo
+                        #    para siempre, porque nadie la vuelve a tocar.
+                        mostrar = []
+                        for f in res:
+                            visible = {k: v for k, v in f.items() if not k.startswith("_")}
+                            if hay_reservas:
+                                visible["Libre"] = libres.get(f["ID"], f.get("Stock") or 0)
+                            mostrar.append(visible)
+                        mostrar = quitar_id(mostrar)
                         st.dataframe(
                             mostrar, use_container_width=True, hide_index=True,
                             column_config={
@@ -11304,7 +13066,8 @@ Casi todo lo que edita o borra algo pide la contraseña de administrador la prim
                                 if id_buscado and len(res) >= 8:
                                     try:
                                         uniones = vinculos_que_unen_familias(id_buscado)
-                                    except Exception:
+                                    except Exception as _err:
+                                        anotar_error("nivel principal", _err)
                                         uniones = []
                                     if uniones and uniones[0]["Confianza del vínculo"] < 50:
                                         u = uniones[0]
@@ -11336,18 +13099,18 @@ Casi todo lo que edita o borra algo pide la contraseña de administrador la prim
                                 # Como este bloque YA está dentro de uno, va como subtítulo.
                                 indirectos = [f for f in res if f.get("Cadena", "").startswith(("🟡", "🔴"))]
                                 if id_buscado and indirectos:
-                                    # Las keys llevan el código de ESTA vuelta. Eran fijas, y este
-                                    # bloque está adentro del bucle que recorre los códigos
-                                    # buscados: pidiendo dos a la vez ("P-1, Q-1") y abriendo esta
-                                    # sección en los dos, Streamlit encontraba la misma key dos
-                                    # veces y cerraba la app entera. Y buscar varios códigos
-                                    # separados por coma es justo lo que el campo invita a hacer.
                                     if True:
                                         st.markdown("**🧭 ¿Por qué apareció alguno de estos?**")
                                         etiquetas_por_que = {
                                             f"{f['Codigo']} ({f['Marca']}) — {f['Cadena']}, {f['Confianza']}": f["ID"]
                                             for f in indirectos
                                         }
+                                        # La key lleva el código de ESTA vuelta. Era fija, y el
+                                        # bloque está adentro del bucle que recorre los códigos
+                                        # buscados: pidiendo dos a la vez ("P-1, Q-1") y abriendo
+                                        # esta sección en los dos, Streamlit encontraba la misma
+                                        # key repetida y cerraba la app entera. Y buscar varios
+                                        # separados por coma es lo que el campo invita a hacer.
                                         elegido_pq = st.selectbox("Elegí un resultado:",
                                                                    list(etiquetas_por_que.keys()),
                                                                    key=f"por_que_resultado_{clean}")
@@ -11711,21 +13474,17 @@ Casi todo lo que edita o borra algo pide la contraseña de administrador la prim
                         # Carrito: ir juntando de varias búsquedas y armar el presupuesto al
                         # final. Sin esto había que anotar los códigos aparte y volver a
                         # buscarlos uno por uno.
-                        #
-                        # OJO con los nombres: este bloque vive adentro de la búsqueda por
-                        # DESCRIPCIÓN, donde el resultado de esta vuelta es fila_txt y sus
-                        # equivalentes están en 'otros'. Estaba escrito con los nombres de la
-                        # búsqueda por CÓDIGO (res, clean), que acá no existen, así que entrar a
-                        # "Descripción" tiraba NameError y la sección entera quedaba en blanco.
-                        # La clave de los widgets va por ID y no por código limpio: dos filas
-                        # distintas pueden limpiar al mismo texto y ahí Streamlit corta la app
-                        # por claves repetidas.
+                        # Mismos nombres que el resto de esta rama: acá el resultado de la
+                        # vuelta es fila_txt y sus equivalentes están en 'otros'. Estaba escrito
+                        # con 'res' y 'clean', que son de la búsqueda por CÓDIGO y acá no
+                        # existen: entrar a "Descripción" tiraba NameError.
                         st.session_state.setdefault("carrito", {})
                         opciones_carrito = [fila_txt] + otros
                         cc1, cc2 = st.columns([3, 2])
                         agregar_cod = cc1.selectbox(
                             "🛒 Sumar al presupuesto:",
-                            ["(elegir)"] + [f"{f['Marca']} {f['Codigo']}" for f in opciones_carrito],
+                            ["(elegir)"] + [f"{f['Marca']} {f['Codigo']}"
+                                            for f in opciones_carrito],
                             key=f"al_carrito_{fila_txt['ID']}")
                         if agregar_cod != "(elegir)" and cc2.button(
                                 "➕ Sumar", key=f"btn_carrito_{fila_txt['ID']}"):
@@ -11740,6 +13499,48 @@ Casi todo lo que edita o borra algo pide la contraseña de administrador la prim
                                 avisar("success", f"{elegido_c['Codigo']} sumado al presupuesto.")
                                 st.rerun()
 
+                        # Anotar al cliente que se lo lleva pensando. Va acá porque el momento
+                        # de anotarlo es este: si hay que ir a otra pantalla, no se hace.
+                        # OJO con los nombres, lo mismo que avisa el bloque de abajo: acá
+                        # estamos en la búsqueda por DESCRIPCIÓN, donde la fila de esta vuelta es
+                        # fila_txt y sus equivalentes están en 'otros'. Este bloque estaba escrito
+                        # con los nombres de la búsqueda por CÓDIGO ('res', 'clean'), que acá no
+                        # existen: abrir esta sección tiraba NameError y se cortaba la pantalla.
+                        # Las keys van por ID y no por código limpio, porque dos filas distintas
+                        # pueden limpiar al mismo texto y ahí Streamlit corta por clave repetida.
+                        if seccion_plegable("📞 El cliente lo va a pensar",
+                                             key=f"consulta_{fila_txt['ID']}"):
+                            st.caption(
+                                "Queda anotado qué pidió y a qué precio se le dijo. Cuando "
+                                "vuelva o llame, lo buscás por nombre o teléfono."
+                            )
+                            etq_cc = {f"{f['Marca']} {f['Codigo']}": f
+                                      for f in [fila_txt] + otros}
+                            cual_cc = st.selectbox("¿Qué le interesó?", list(etq_cc.keys()),
+                                                    key=f"cual_cc_{fila_txt['ID']}")
+                            k1, k2, k3 = st.columns([3, 3, 1])
+                            nom_cc = k1.text_input("Nombre:", key=f"nom_cc_{fila_txt['ID']}",
+                                                    placeholder="Cómo se llama")
+                            tel_cc = k2.text_input("Teléfono:", key=f"tel_cc_{fila_txt['ID']}",
+                                                    placeholder="Para avisarle")
+                            cant_cc = k3.number_input("Cant.", min_value=1, value=1, step=1,
+                                                       key=f"cant_cc_{fila_txt['ID']}")
+                            nota_cc = st.text_input("Nota:", key=f"nota_cc_{fila_txt['ID']}",
+                                                     placeholder="Ej: tiene un Gol 2012, "
+                                                                 "consulta con el mecánico")
+                            if st.button("📞 Anotar la consulta",
+                                          key=f"btn_cc_{fila_txt['ID']}"):
+                                _f = etq_cc[cual_cc]
+                                ok_cc, msg_cc = anotar_consulta_cliente(
+                                    nom_cc, tel_cc, _f["ID"], _f["Codigo"],
+                                    _f.get("Descripcion") or "", cant_cc,
+                                    _f.get("Precio"), nota_cc)
+                                if ok_cc:
+                                    avisar("success", msg_cc)
+                                    st.rerun()
+                                else:
+                                    st.error(msg_cc)
+
                         # Apartar mientras el cliente lo piensa. Va acá y no en otra pantalla
                         # porque el momento de reservar es este: con el presupuesto recién hecho.
                         # OJO con los nombres: acá el código limpio es clean_txt y la lista es
@@ -11748,8 +13549,8 @@ Casi todo lo que edita o borra algo pide la contraseña de administrador la prim
                         _para_apartar = equivalentes or [fila_txt]
                         if seccion_plegable("🔒 Apartar para un presupuesto",
                                              key=f"apartar_txt_{fila_txt['ID']}"):
-                            # Una sola consulta para todos: preguntarlo de a uno acá eran dos
-                            # por fila para filtrar y dos más por fila para armar la etiqueta.
+                            # Una sola consulta para todos: preguntarlo de a uno eran dos
+                            # consultas por fila para filtrar y dos más por fila para la etiqueta.
                             libres_ap = stock_libre_de_varios([f["ID"] for f in _para_apartar])
                             con_stock_ap = [f for f in _para_apartar
                                              if (libres_ap.get(f["ID"]) or 0) > 0]
@@ -12298,6 +14099,7 @@ if pagina == PAGINAS[2]:
                 if isinstance(archivo, object) and not isinstance(archivo, str):
                     archivo.seek(0)
             except Exception as e:
+                anotar_error("nivel principal", e)
                 st.error(f"No se pudo leer el archivo: {e}")
                 todas_filas = None
 
@@ -12798,7 +14600,8 @@ if pagina == PAGINAS[2]:
 
                         try:
                             _huella = huella_de_archivo(archivo.getvalue())
-                        except Exception:
+                        except Exception as _err:
+                            anotar_error("nivel principal", _err)
                             _huella = None
                         c.execute(
                             "INSERT INTO importaciones (marca, archivo, filas_cargadas, filas_omitidas, huella, lote) "
@@ -12818,13 +14621,15 @@ if pagina == PAGINAS[2]:
                     # use. Antes había que acordarse de tocar «Calcular la confianza».
                     try:
                         recalcular_confianzas(limite=4000)
-                    except Exception:
+                    except Exception as _err:
+                        anotar_error("nivel principal", _err)
                         pass
 
                     # Informe de lo que pasó con ESTA lista, mientras se la tiene fresca
                     try:
                         _inf = informe_post_importacion(lote_importacion, nombre_prov, cargados)
-                    except Exception:
+                    except Exception as _err:
+                        anotar_error("nivel principal", _err)
                         _inf = {"puntos": [], "vinculos_nuevos": 0}
                     if _inf["puntos"]:
                         st.markdown("#### 🔎 Qué conviene revisar de esta lista")
@@ -12915,6 +14720,7 @@ if pagina == PAGINAS[2]:
                         )
                         st.dataframe(sospechosos, use_container_width=True, hide_index=True)
                 except Exception as e:
+                    anotar_error("nivel principal", e)
                     st.error(f"Error procesando la lista: {e}")
 
         st.markdown("---")
@@ -13838,7 +15644,8 @@ if pagina == PAGINAS[3]:
                 sin_puntuar = c.fetchone()[0]
                 c.execute("SELECT COUNT(*) FROM equivalencias")
                 total_eq = c.fetchone()[0]
-            except sqlite3.OperationalError:
+            except sqlite3.OperationalError as _err:
+                anotar_error("nivel principal", _err)
                 sin_puntuar = total_eq = 0
             explicar(
                 "Le pone puntaje a cada vínculo y lo guarda.",
@@ -13869,7 +15676,8 @@ if pagina == PAGINAS[3]:
             )
             try:
                 sustituciones = sustituciones_reales()
-            except sqlite3.OperationalError:
+            except sqlite3.OperationalError as _err:
+                anotar_error("nivel principal", _err)
                 sustituciones = []
             if not sustituciones:
                 st.caption(
@@ -13945,7 +15753,8 @@ if pagina == PAGINAS[3]:
                                     COUNT(DISTINCT codigo) AS "Códigos"
                              FROM aplicaciones GROUP BY marca_repuesto ORDER BY 2 DESC""")
                 ya_cargadas = filas_a_listas(c)
-            except sqlite3.OperationalError:
+            except sqlite3.OperationalError as _err:
+                anotar_error("nivel principal", _err)
                 ya_cargadas = []
             if ya_cargadas:
                 st.dataframe(ya_cargadas, use_container_width=True, hide_index=True)
@@ -13982,6 +15791,7 @@ if pagina == PAGINAS[3]:
                                     posiciones["comb"], posiciones["anios"], posiciones["codigo"]
                                 )
                         except Exception as e:
+                            anotar_error("nivel principal", e)
                             apps = []
                             st.error(f"No se pudo leer: {type(e).__name__}: {e}")
                     if apps:
@@ -14014,12 +15824,279 @@ if pagina == PAGINAS[3]:
                     avisar("success", f"Se guardaron {n:,} aplicaciones de {marca_aplic.upper()}.")
                     st.rerun()
 
+            # Un índice arriba de todo: son seis formas distintas de generar equivalencias y
+            # cada una necesita cosas distintas. Sin este resumen hay que bajar leyendo panel
+            # por panel para saber cuál se puede usar hoy.
+            st.markdown("### 🔗 Generar equivalencias")
+            # Con valor inicial: si la consulta falla, el índice tiene que dibujarse igual en
+            # vez de tumbar la pantalla entera por un contador.
+            marcas_con_tipo = 0
+            _n_desc = _n_med = _n_reemp = 0
             try:
                 c.execute("""SELECT COUNT(DISTINCT marca_repuesto) FROM aplicaciones
                              WHERE COALESCE(tipo_pieza,'') <> ''""")
                 marcas_con_tipo = c.fetchone()[0]
-            except sqlite3.OperationalError:
+            except sqlite3.OperationalError as _err:
+                anotar_error("nivel principal", _err)
                 marcas_con_tipo = 0
+            try:
+                c.execute("SELECT COUNT(*) FROM productos WHERE COALESCE(descripcion,'') <> ''")
+                _n_desc = c.fetchone()[0]
+                c.execute(f"SELECT COUNT(*) FROM productos WHERE {CAMPOS_MEDIDAS[0][0]} IS NOT NULL")
+                _n_med = c.fetchone()[0]
+                c.execute("SELECT COUNT(*) FROM reemplazos_codigo")
+                _n_reemp = c.fetchone()[0]
+            except sqlite3.OperationalError as _err:
+                anotar_error("nivel principal", _err)
+                pass
+            _n_portales = sum(1 for _m in (filas_a_listas(c.execute(
+                "SELECT nombre FROM marcas")) or []) if config_portal(_m["nombre"]))
+
+            st.dataframe([
+                {"Método": "🔤 Por descripción",
+                 "Qué necesita": "dos proveedores con descripciones",
+                 "Estado": f"listo — {_n_desc:,} productos con descripción" if _n_desc > 50
+                            else "faltan productos con descripción"},
+                {"Método": "📐 Por medidas",
+                 "Qué necesita": "3 o más medidas cargadas, en marcas distintas",
+                 "Estado": f"listo — {_n_med:,} con medidas" if _n_med > 5
+                            else "todavía no hay medidas cargadas"},
+                {"Método": "🔄 Por cambio de número",
+                 "Qué necesita": "reemplazos cargados a mano",
+                 "Estado": f"listo — {_n_reemp} reemplazo(s)" if _n_reemp
+                            else "cargá reemplazos en «Códigos reemplazados»"},
+                {"Método": "🏭 Cruzando catálogos",
+                 "Qué necesita": "2 catálogos de fabricante del mismo tipo de pieza",
+                 "Estado": f"listo — {marcas_con_tipo} marca(s)" if marcas_con_tipo >= 2
+                            else f"tenés {marcas_con_tipo}, hacen falta 2"},
+                {"Método": "🔐 Autos del portal",
+                 "Qué necesita": "usuario del portal en los secretos",
+                 "Estado": f"listo — {_n_portales} portal(es)" if _n_portales
+                            else "sin configurar"},
+                {"Método": "🧾 Confirmadas por venta",
+                 "Qué necesita": "usar «Se llevó» en el mostrador",
+                 "Estado": "corre solo, una vez por día"},
+            ], use_container_width=True, hide_index=True)
+            st.caption("Cada método está en un panel más abajo. Todos mandan a revisión: "
+                       "ninguno carga equivalencias directo.")
+            st.markdown("---")
+
+            # Cada panel con SU condición. Estaban los cinco dentro de «si hay 2 catálogos
+            # de fabricante», y cuatro no los necesitan: medidas, reemplazos, portal y
+            # descripciones andan sin ningún catálogo cargado. Así quedaban invisibles.
+            st.markdown("**📐 Equivalencias por medidas**")
+            explicar(
+                "La evidencia más fuerte que hay: no es texto, es la pieza física.",
+                "Las medidas se venían usando solo para verificar un vínculo que ya "
+                "existía. Pero en retenes, o'rings, rulemanes y bujes la medida **es** la "
+                "identidad: un 35x52x7 de un proveedor y un 35x52x7 de otro son el mismo "
+                "repuesto, sin importar cómo se llame el código ni cómo esté escrita la "
+                "descripción.\n\nSe piden al menos 3 medidas coincidentes: con una sola "
+                "—el diámetro interno, por ejemplo— coincidirían piezas completamente "
+                "distintas que casualmente miden lo mismo. Y se compara igual el nombre de "
+                "la pieza, porque una arandela y un retén pueden medir exactamente igual."
+            )
+            if st.button("📐 Buscar equivalencias por medidas"):
+                with st.spinner("Comparando medidas..."):
+                    st.session_state["deriv_med"] = derivar_equivalencias_por_medidas()
+            _dm = st.session_state.get("deriv_med")
+            if _dm is not None:
+                if not _dm:
+                    st.info(
+                        "No salió ninguna. Hacen falta productos con al menos 3 medidas "
+                        "cargadas, de marcas distintas. Se cargan en la ficha de cada "
+                        "producto o al importar, si la lista trae columnas de medidas."
+                    )
+                else:
+                    st.success(f"{len(_dm)} par(es) con las mismas medidas.")
+                    st.dataframe(quitar_id(_dm), use_container_width=True, hide_index=True)
+                    if st.button(f"📥 Mandar las {len(_dm)} a revisión", key="env_med"):
+                        _n = guardar_equivalencias_derivadas(
+                            [(x["_a"], x["_b"]) for x in _dm],
+                            f"POR MEDIDAS · {datetime.now():%d/%m %H:%M}")
+                        st.session_state.pop("deriv_med", None)
+                        invalidar_salud()
+                        avisar("success", f"{_n} equivalencia(s) para revisar.")
+                        st.rerun()
+            st.markdown("---")
+
+            st.markdown("**🔄 Reunir lo que separó un cambio de número**")
+            explicar(
+                "Cuando el fabricante cambia el número, la cadena se parte en dos islas.",
+                "Tenés un producto vinculado al código de fábrica viejo y otro al nuevo. "
+                "Son el mismo repuesto, pero para la app quedaron sin relación.\n\nLos "
+                "reemplazos que cargaste ya sabían que el viejo y el nuevo son lo mismo: "
+                "esto usa ese dato para volver a unirlos."
+            )
+            try:
+                _pu = equivalencias_puenteadas_por_reemplazo()
+            except Exception as _err:
+                anotar_error("nivel principal", _err)
+                _pu = []
+            if not _pu:
+                st.caption(
+                    "Nada para reunir. Aparece cuando cargues reemplazos y tengas productos "
+                    "de los dos códigos."
+                )
+            else:
+                st.success(f"{len(_pu)} par(es) que el cambio de número había separado.")
+                st.dataframe(quitar_id(_pu), use_container_width=True, hide_index=True)
+                if st.button(f"📥 Mandar los {len(_pu)} a revisión", key="env_puente"):
+                    _n = guardar_equivalencias_derivadas(
+                        [(x["_a"], x["_b"]) for x in _pu],
+                        f"POR REEMPLAZO DE CÓDIGO · {datetime.now():%d/%m %H:%M}")
+                    invalidar_salud()
+                    avisar("success", f"{_n} equivalencia(s) para revisar.")
+                    st.rerun()
+            st.markdown("---")
+
+            st.markdown("**🔐 Traer autos del portal del proveedor**")
+            explicar(
+                "Para cuando la descripción se corta y no entran todos los autos.",
+                "La ficha del portal tiene la lista completa; la celda de Excel no. Con "
+                "esos autos cargados, la app puede vincular productos de dos proveedores "
+                "aunque sus descripciones no compartan ni un modelo.\n\n**Configuración**, "
+                "en Settings → Secrets de Streamlit:\n\n```\n[portal_FISPA]\n"
+                'url_login = "https://proveedor.com/login"\nusuario = "tu_usuario"\n'
+                'clave = "tu_clave"\ncampo_usuario = "email"\ncampo_clave = "password"\n'
+                'url_ficha = "https://proveedor.com/producto/{codigo}"\n```\n\n'
+                "Los nombres de `campo_usuario` y `campo_clave` son los `name=` del "
+                "formulario de acceso del portal.\n\n**Va en los secretos y no en la base** "
+                "por una razón concreta: la base se baja como backup y se sube a GitHub. "
+                "Una clave ahí queda publicada.\n\n**La app no puede pedir nada.** La "
+                "sesión que se abre es de solo lectura: los métodos para enviar datos "
+                "(post, put, delete) directamente no existen en ella, así que ni un error "
+                "de programación podría mandar un pedido. Y las direcciones que dicen "
+                "carrito, pedido, comprar o checkout se rechazan aunque sean de solo "
+                "consulta, porque hay portales que agregan al carrito con un simple enlace."
+            )
+            st.info(
+                "🔒 **La app solo puede leer fichas.** No puede hacer pedidos, ni reservas, "
+                "ni modificar nada en el portal del proveedor. Está bloqueado por diseño, "
+                "no por configuración: nadie puede activarlo sin querer."
+            )
+            try:
+                c.execute("""SELECT m.id, m.nombre, COUNT(p.id) AS n FROM marcas m
+                             JOIN productos p ON p.marca_id = m.id
+                             GROUP BY m.id ORDER BY n DESC""")
+                _marcas_portal = filas_a_listas(c)
+            except sqlite3.OperationalError as _err:
+                anotar_error("nivel principal", _err)
+                _marcas_portal = []
+            _con_portal = [x for x in _marcas_portal if config_portal(x["nombre"])]
+            if not _con_portal:
+                st.caption(
+                    "Todavía no hay ningún portal configurado. Mientras tanto, fijate si el "
+                    "proveedor deja **exportar el catálogo a Excel** desde su portal: bajarlo "
+                    "y cargarlo por «Cargar Excel» es más simple y más confiable que esto."
+                )
+            else:
+                _et_p = {f"{x['nombre']} ({x['n']:,} productos)": x for x in _con_portal}
+                _sel_p = st.selectbox("Proveedor:", list(_et_p.keys()), key="portal_marca")
+                _marca_p = _et_p[_sel_p]
+                _cuantos = st.select_slider("Traer fichas de:", options=[10, 25, 50, 100],
+                                             format_func=lambda x: f"{x} productos",
+                                             key="portal_cuantos")
+                st.caption(
+                    "Se hace de a tandas chicas y con una pausa entre pedidos. No es "
+                    "lentitud: golpear el servidor del proveedor a máxima velocidad es la "
+                    "forma más rápida de que te bloqueen la cuenta."
+                )
+                if st.button("🔐 Entrar y traer las fichas"):
+                    _sesion, _err = sesion_de_portal(_marca_p["nombre"])
+                    if _err:
+                        st.error(_err)
+                    else:
+                        c.execute("""SELECT p.codigo_raw, p.codigo_clean FROM productos p
+                                     WHERE p.marca_id = ?
+                                       AND p.codigo_clean NOT IN
+                                           (SELECT codigo_clean FROM aplicaciones
+                                             WHERE codigo_clean IS NOT NULL)
+                                     LIMIT ?""", (_marca_p["id"], int(_cuantos)))
+                        _pendientes = [(r["codigo_raw"], r["codigo_clean"])
+                                        for r in c.fetchall()]
+                        if not _pendientes:
+                            st.info("Todos los productos de esa marca ya tienen autos cargados.")
+                        else:
+                            _barra = st.progress(0.0, text="Trayendo fichas...")
+                            _con, _sin = 0, 0
+                            for _i, (_cod, _cl) in enumerate(_pendientes):
+                                _autos, _e2 = autos_desde_ficha_del_portal(
+                                    _marca_p["nombre"], _cod)
+                                if _autos:
+                                    guardar_autos_de_ficha(_cod, _marca_p["nombre"], _autos)
+                                    _con += 1
+                                else:
+                                    _sin += 1
+                                _barra.progress((_i + 1) / len(_pendientes),
+                                                 text=f"{_i + 1} de {len(_pendientes)}...")
+                                time.sleep(0.7)   # pausa entre pedidos, a propósito
+                            _barra.empty()
+                            invalidar_salud()
+                            avisar("success",
+                                   f"Se trajeron autos de {_con} ficha(s). "
+                                   f"{_sin} no tenían autos reconocibles.")
+                            st.rerun()
+            st.markdown("---")
+
+            st.markdown("**🔤 Vincular dos proveedores por la descripción**")
+            explicar(
+                "Para las listas que NO traen el código de fábrica, que son la mayoría.",
+                "Sin esa columna, la app no puede generar ninguna equivalencia: es la "
+                "limitación de fondo que arrastramos. Esto la resuelve comparando lo que dicen "
+                "las descripciones.\n\nSe exige coincidencia en el **nombre de la pieza** —no "
+                "solo en el auto—, y que no se contradigan la **posición** ni la "
+                "**cilindrada**. Ese control es el que evita el error grave: «CAPUCHON BUJIA "
+                "CRUZE» y «ANILLO BUJIA CRUZE» comparten el rubro y el auto, y son piezas "
+                "distintas.\n\nComo todo lo deducido, va a la cola de revisión: el sistema de "
+                "confianza las evalúa igual que a cualquier otra."
+            )
+            try:
+                c.execute("""SELECT m.id, m.nombre, COUNT(p.id) AS n FROM marcas m
+                             JOIN productos p ON p.marca_id = m.id
+                             WHERE COALESCE(p.descripcion,'') <> ''
+                             GROUP BY m.id HAVING n >= 20 ORDER BY n DESC""")
+                _marcas_desc = filas_a_listas(c)
+            except sqlite3.OperationalError as _err:
+                anotar_error("nivel principal", _err)
+                _marcas_desc = []
+            if len(_marcas_desc) < 2:
+                st.caption("Hacen falta al menos dos marcas con descripciones cargadas.")
+            else:
+                _et = {f"{x['nombre']} ({x['n']:,} productos)": x["id"] for x in _marcas_desc}
+                cd1, cd2 = cols(2)
+                _ma = cd1.selectbox("Proveedor A:", list(_et.keys()), key="desc_marca_a")
+                _mb = cd2.selectbox("Proveedor B:", list(_et.keys()),
+                                     index=min(1, len(_et) - 1), key="desc_marca_b")
+                if st.button("🔤 Buscar equivalencias por descripción",
+                              disabled=(_ma == _mb)):
+                    with st.spinner("Comparando descripciones..."):
+                        st.session_state["deriv_desc"] = derivar_equivalencias_por_descripcion(
+                            _et[_ma], _et[_mb])
+                _dd = st.session_state.get("deriv_desc")
+                if _dd is not None:
+                    if not _dd:
+                        st.info(
+                            "No salió ninguna. Puede ser que las descripciones de esos dos "
+                            "proveedores sean muy distintas entre sí, o que ya estén vinculados."
+                        )
+                    else:
+                        st.success(f"Se encontraron {len(_dd)} posibles equivalencias.")
+                        st.dataframe(quitar_id(_dd), use_container_width=True, hide_index=True)
+                        st.caption(
+                            "Mirá la columna «Por qué» antes de mandarlas: dice exactamente en "
+                            "qué coinciden. Si ves algo que no cierra, avisame y ajusto el criterio."
+                        )
+                        if st.button(f"📥 Mandar las {len(_dd)} a revisión", type="primary"):
+                            _lote_d = f"POR DESCRIPCIÓN · {_ma[:14]}↔{_mb[:14]} · {datetime.now():%d/%m %H:%M}"
+                            _n = guardar_equivalencias_derivadas(
+                                [(x["_a"], x["_b"]) for x in _dd], _lote_d)
+                            st.session_state.pop("deriv_desc", None)
+                            invalidar_salud()
+                            avisar("success", f"{_n} equivalencia(s) quedaron para revisar.")
+                            st.rerun()
+            st.markdown("---")
+
 
             if marcas_con_tipo >= 2:
                 st.markdown("**🔗 Equivalencias deducidas cruzando catálogos**")
@@ -14414,7 +16491,8 @@ if pagina == PAGINAS[3]:
                             crear_usuario(nombre_nuevo_usuario, password_nuevo_usuario, rol_nuevo_usuario)
                             avisar("success", f"Empleado '{nombre_nuevo_usuario}' creado.")
                             st.rerun()
-                        except sqlite3.IntegrityError:
+                        except sqlite3.IntegrityError as _err:
+                            anotar_error("nivel principal", _err)
                             st.error("Ya existe un empleado con ese nombre.")
 
                 if usuarios_actuales:
@@ -14460,7 +16538,8 @@ if pagina == PAGINAS[3]:
                             crear_mecanico(nombre_nuevo_mecanico, password_nuevo_mecanico)
                             avisar("success", f"Mecánico '{nombre_nuevo_mecanico}' creado.")
                             st.rerun()
-                        except sqlite3.IntegrityError:
+                        except sqlite3.IntegrityError as _err:
+                            anotar_error("nivel principal", _err)
                             st.error("Ya existe un mecánico con ese nombre.")
 
                 if mecanicos_actuales:
@@ -14553,7 +16632,8 @@ if pagina == PAGINAS[4]:
         _riesgo = None
         try:
             _riesgo = cuanto_perderias_si_reinicia()
-        except Exception:
+        except Exception as _err:
+            anotar_error("nivel principal", _err)
             pass
         if _riesgo:
             if not _riesgo["hay_semilla"]:
@@ -14723,7 +16803,8 @@ Administrar → Mantenimiento.
                 marca_tiempo = datetime.fromtimestamp(os.path.getmtime(ARCHIVO_SEMILLA))
                 peso = os.path.getsize(ARCHIVO_SEMILLA) / (1024 * 1024)
                 st.success(f"✅ Hay una copia en el repositorio ({peso:,.1f} MB, del {marca_tiempo:%d/%m/%Y}).")
-            except Exception:
+            except Exception as _err:
+                anotar_error("nivel principal", _err)
                 st.success("✅ Hay una copia en el repositorio.")
         else:
             st.warning(
@@ -14825,7 +16906,8 @@ Administrar → Mantenimiento.
                                         key="min_ventas_quiebre")
         try:
             por_quebrar = productos_por_quebrar(int(dias_aviso), int(min_ventas))
-        except sqlite3.OperationalError:
+        except sqlite3.OperationalError as _err:
+            anotar_error("nivel principal", _err)
             por_quebrar = []
         if not por_quebrar:
             st.success("✅ Nada a punto de quebrarse, según lo que se vendió estos meses.")
@@ -14862,7 +16944,8 @@ Administrar → Mantenimiento.
                                       key="meses_variacion")
         try:
             variacion = variacion_de_precios_por_marca(int(meses_var))
-        except sqlite3.OperationalError:
+        except sqlite3.OperationalError as _err:
+            anotar_error("nivel principal", _err)
             variacion = []
         if not variacion:
             st.caption(
@@ -14884,7 +16967,8 @@ Administrar → Mantenimiento.
         )
         try:
             conviene = quien_conviene_por_rubro()
-        except sqlite3.OperationalError:
+        except sqlite3.OperationalError as _err:
+            anotar_error("nivel principal", _err)
             conviene = []
         if not conviene:
             st.caption(
@@ -14912,7 +16996,8 @@ Administrar → Mantenimiento.
                                         key="dias_clavo")
         try:
             _clavos = productos_estancados(int(_dias_clavo))
-        except Exception:
+        except Exception as _err:
+            anotar_error("nivel principal", _err)
             _clavos = []
         if not _clavos:
             st.success("✅ Nada estancado con ese criterio.")
@@ -14957,7 +17042,8 @@ Administrar → Mantenimiento.
                                 substr(fecha, 1, 10) AS "Cargado"
                          FROM reemplazos_codigo ORDER BY fecha DESC LIMIT 200""")
             _lista_r = filas_a_listas(c)
-        except sqlite3.OperationalError:
+        except sqlite3.OperationalError as _err:
+            anotar_error("nivel principal", _err)
             _lista_r = []
         if _lista_r:
             st.dataframe(_lista_r, use_container_width=True, hide_index=True)
@@ -14985,7 +17071,8 @@ Administrar → Mantenimiento.
         try:
             discont, revisados_disc = productos_probablemente_discontinuados(
                 listas_seguidas=int(listas_disc))
-        except sqlite3.OperationalError:
+        except sqlite3.OperationalError as _err:
+            anotar_error("nivel principal", _err)
             discont, revisados_disc = [], 0
 
         if not revisados_disc:
@@ -15019,6 +17106,74 @@ Administrar → Mantenimiento.
             )
 
         st.markdown("---")
+        if _ULTIMOS_ERRORES and es_admin():
+            st.markdown("**🐞 Errores que la app se tragó**")
+            explicar(
+                f"{len(_ULTIMOS_ERRORES)} cosa(s) fallaron sin que nadie se enterara.",
+                "Hay muchos lugares donde algo puede fallar y la app sigue igual: una tabla "
+                "que todavía no existe, una función opcional que no está. Son a propósito.\n\n"
+                "Pero si ahí se esconde un bug real, sin este registro nadie se entera nunca. "
+                "Acá quedan anotados los últimos, con dónde y qué pasó.\n\nQue aparezcan cosas "
+                "acá no significa que algo esté roto. Lo que importa es si el mismo error se "
+                "repite muchas veces, o si aparece justo cuando algo no funcionó."
+            )
+            from collections import Counter as _Cnt
+            _repetidos = _Cnt((e["donde"], e["tipo"]) for e in _ULTIMOS_ERRORES)
+            st.dataframe(
+                [{"Veces": v, "Dónde": d, "Tipo": t} for (d, t), v in _repetidos.most_common(15)],
+                use_container_width=True, hide_index=True)
+            if seccion_plegable("Ver el detalle de los últimos", key="detalle_errores"):
+                st.dataframe(list(reversed(_ULTIMOS_ERRORES))[:40],
+                              use_container_width=True, hide_index=True)
+            st.markdown("---")
+
+        st.markdown("**📞 Consultas de clientes**")
+        explicar(
+            "Lo que preguntó cada cliente y todavía no se resolvió.",
+            "En el mostrador esto se anota en un papel y se pierde: el cliente dijo que lo "
+            "consultaba y volvía, y cuando vuelve nadie se acuerda qué pidió ni qué precio se "
+            "le dio.\n\nAcá queda con nombre, teléfono, qué pieza y a cuánto se la cotizó. "
+            "Cuando llama y dice «soy el del Gol», lo buscás y tenés todo."
+        )
+        _ahora_hay = consultas_que_ahora_hay_en_stock()
+        if _ahora_hay:
+            st.success(
+                f"📦 **{len(_ahora_hay)} cliente(s) esperando algo que AHORA hay en stock.** "
+                "Es una venta a un llamado de distancia."
+            )
+            st.dataframe(quitar_id(_ahora_hay), use_container_width=True, hide_index=True)
+            st.markdown("")
+
+        _esperando = consultas_de_clientes()
+        if not _esperando:
+            st.caption("No hay consultas pendientes.")
+        else:
+            st.dataframe(quitar_id(_esperando), use_container_width=True, hide_index=True)
+            _etq_cerr = {f"{x['Cliente'] or x['Teléfono'] or 'sin nombre'} — {x['Pidió']} "
+                          f"({x['Días']} día/s)": x["_id"] for x in _esperando}
+            _sel_cerr = st.selectbox("Cerrar una consulta:", list(_etq_cerr.keys()),
+                                      key="cerrar_consulta")
+            cq1, cq2 = cols(2)
+            if cq1.button("✅ Vino y compró"):
+                cerrar_consulta(_etq_cerr[_sel_cerr], "vendida")
+                avisar("success", "Cerrada como vendida.")
+                st.rerun()
+            if cq2.button("🚶 No volvió"):
+                cerrar_consulta(_etq_cerr[_sel_cerr], "cancelada")
+                avisar("success", "Cerrada.")
+                st.rerun()
+
+        _buscar_cli = st.text_input("🔍 Buscar un cliente por nombre o teléfono:",
+                                     key="buscar_cliente",
+                                     placeholder="Llamó y no sabés qué había pedido")
+        if _buscar_cli and len(_buscar_cli.strip()) > 2:
+            _hist = historial_de_un_cliente(_buscar_cli)
+            if _hist:
+                st.dataframe(_hist, use_container_width=True, hide_index=True)
+            else:
+                st.caption("No hay nada anotado de ese cliente.")
+        st.markdown("---")
+
         st.markdown("**🔒 Stock apartado en presupuestos**")
         explicar(
             "Lo que está reservado y todavía no se vendió.",
@@ -15366,6 +17521,8 @@ Administrar → Mantenimiento.
                                      f"**{x['cod_b']}** ({x['marca_b']}) — {x['confianza']:.0f}/100")
                         for tipo, texto in x.get("senales", []):
                             st.caption(("❌ " if tipo == "mal" else "✅ ") + texto)
+                        for _ev in x.get("evidencia", []):
+                            st.caption("✅ " + _ev)
 
             ml1, ml2 = st.columns(2)
             ml1.metric("Sin nada raro", len(limpias))
@@ -15845,6 +18002,14 @@ if pagina == PAGINAS[6]:
                     "Km actual", min_value=0, step=1000,
                     value=int((vehiculo or {}).get("km_actual") or 0)
                 )
+                numero_motor_auto = st.text_input(
+                    "N° de motor (opcional)", value=(vehiculo or {}).get("numero_motor") or "",
+                    key="form_numero_motor",
+                    placeholder="El grabado en el block, como esté",
+                    help="Sirve cuando el auto tiene el motor cambiado: ahí el VIN lleva a los "
+                         "repuestos equivocados y este número a los correctos. Se busca sin "
+                         "importar espacios ni guiones."
+                )
                 vin_auto = st.text_input(
                     "VIN / número de chasis (opcional)", value=(vehiculo or {}).get("vin") or "",
                     key="form_vin_auto", max_chars=17,
@@ -15861,6 +18026,14 @@ if pagina == PAGINAS[6]:
                 get_or_create_vehiculo(patente_input, cliente_nombre, cliente_tel, marca_auto, modelo_auto,
                                         km_actual_input or None, anio_auto, motorizacion_auto,
                                         vin=vin_limpio)
+                # El número de motor se guarda aparte: get_or_create_vehiculo tiene ya ocho
+                # parámetros y sumarle uno más es la forma de romper las diez llamadas que tiene.
+                if (numero_motor_auto or "").strip():
+                    with db_lock:
+                        c.execute("""UPDATE vehiculos SET numero_motor = ?
+                                     WHERE UPPER(patente) = UPPER(?)""",
+                                  (numero_motor_auto.strip(), patente_input.strip()))
+                        conn.commit()
                 st.success(f"Vehículo {patente_input} guardado.")
                 if vin_limpio and modelo_auto.strip():
                     st.caption(f"📚 De paso quedó aprendido que el patrón {vin_limpio[:3]}-"
@@ -16006,7 +18179,9 @@ if pagina == PAGINAS[6]:
 if pagina == PAGINAS[7]:
     st.subheader("🛠️ Modo Mecánico")
 
-    SUB_MEC = ["📖 Códigos DTC", "🔢 Chasis / VIN", "🚙 Repuestos por vehículo",
+    # Ordenadas por cómo se usan: primero identificar el auto (patente, chasis, motor), después
+    # consultarlo. Antes «Códigos DTC» quedaba segundo, entre dos formas de identificar el auto.
+    SUB_MEC = ["🔤 Por patente", "🔢 Chasis / VIN", "⚙️ Número de motor", "🚙 Repuestos por vehículo", "📖 Códigos DTC",
                "🗺️ Esquemas", "🧮 Conversor de unidades"]
     if st.session_state.get("sub_mec") not in SUB_MEC:
         st.session_state["sub_mec"] = SUB_MEC[0]
@@ -16015,7 +18190,7 @@ if pagina == PAGINAS[7]:
     sub_mec = st.session_state["sub_mec"]
 
     # -------- Diccionario de códigos OBD2 / DTC --------
-    if sub_mec == SUB_MEC[0]:
+    if sub_mec == SUB_MEC[4]:
         st.caption(
             f"Diccionario de códigos de falla OBD2/DTC. Arranca con {contar_dtc()} códigos genéricos "
             "estándar (no específicos de marca) — sumá los que te falten con el formulario de abajo. "
@@ -16166,6 +18341,142 @@ if pagina == PAGINAS[7]:
                         eliminar_esquema(esq["id"])
                         st.rerun()
 
+    # -------- Por patente (lo primero, porque es lo que más se usa) --------
+    if sub_mec == SUB_MEC[0]:
+        st.subheader("🔤 Todo lo de un auto, por la patente")
+        explicar(
+            "El cliente dice la patente y sale todo: qué auto es y qué le entra.",
+            "Junta en una pantalla lo que antes había que ir a buscar a tres: la ficha del "
+            "auto, lo que ya se le puso, lo que le entra según marca y modelo, y lo que "
+            "preguntó ese cliente antes.\n\n**Funciona con los autos que están en tus "
+            "fichas.** En Argentina no hay ninguna base pública gratuita que traduzca patente "
+            "a vehículo: las que existen cobran por consulta. Así que la patente sola, de un "
+            "auto que nunca cargaste, no alcanza."
+        )
+        _pat = st.text_input("Patente:", key="buscar_por_patente",
+                             placeholder="AA123BB o ABC123").strip()
+        if _pat:
+            _todo = todo_lo_de_una_patente(_pat)
+            _v = _todo["vehiculo"]
+            if not _v:
+                st.warning(f"No hay ningún auto cargado con la patente **{_todo['patente']}**.")
+                st.caption(
+                    "Se carga una vez en **🚙 Repuestos por vehículo** y queda para siempre: "
+                    "la próxima vez que venga ese cliente, con la patente sale todo."
+                )
+            else:
+                st.success(
+                    f"🚗 **{_v.get('marca_auto') or ''} {_v.get('modelo_auto') or ''}** "
+                    f"{_v.get('anio') or ''}"
+                    + (f" · {_v['motorizacion']}" if _v.get("motorizacion") else "")
+                    + (f" · motor N° {_v['numero_motor']}" if _v.get("numero_motor") else "")
+                    + (f"\n\nCliente: **{_v['cliente_nombre']}**" if _v.get("cliente_nombre") else "")
+                    + (f" · {_v['cliente_telefono']}" if _v.get("cliente_telefono") else "")
+                )
+                if _v.get("km_actual"):
+                    st.caption(f"Último kilometraje registrado: {_v['km_actual']:,} km")
+
+                if _todo["historial"]:
+                    st.markdown("**🔧 Lo que YA se le puso a este auto**")
+                    st.caption(
+                        "Es lo más confiable que hay: no es un catálogo diciendo qué debería "
+                        "entrar, es lo que alguien efectivamente le instaló."
+                    )
+                    st.dataframe(_todo["historial"], use_container_width=True, hide_index=True)
+
+                if _todo["sugeridos"]:
+                    st.markdown("**📋 Lo que le entra según marca, modelo y motor**")
+                    st.caption(
+                        f"{len(_todo['sugeridos'])} repuesto(s). Esto sale de los catálogos y "
+                        "las descripciones: es más amplio y menos seguro que lo de arriba."
+                    )
+                    st.dataframe(_todo["sugeridos"], use_container_width=True, hide_index=True)
+
+                if _todo["por_motor"]:
+                    st.markdown("**⚙️ Otros autos con el mismo modelo de motor**")
+                    st.caption(
+                        "Si este auto tiene el motor cambiado, esto vale más que la marca y el "
+                        "modelo: los repuestos van con el motor, no con la carrocería."
+                    )
+                    st.dataframe(_todo["por_motor"], use_container_width=True, hide_index=True)
+
+                if _todo["consultas"]:
+                    st.markdown("**📞 Lo que este cliente preguntó antes**")
+                    st.dataframe(_todo["consultas"], use_container_width=True, hide_index=True)
+
+                if not _todo["historial"] and not _todo["sugeridos"]:
+                    st.info(
+                        "El auto está cargado pero todavía no tiene repuestos asociados. Se "
+                        "van sumando solos a medida que se le cargan piezas en la ficha."
+                    )
+
+    # -------- Número de motor --------
+    if sub_mec == SUB_MEC[2]:
+        st.subheader("⚙️ Buscar por número de motor")
+        explicar(
+            "Para cuando el auto tiene el motor cambiado y el VIN ya no sirve.",
+            "El número de motor está grabado en el block y es de ESE motor en particular. No "
+            "es lo mismo que la motorización: «1.6 16v» es el tipo, el número es cuál.\n\n"
+            "En un taller el motor cambiado pasa seguido: el chasis dice una cosa y el motor "
+            "puesto es otro. Ahí el VIN te lleva a los repuestos equivocados y el número de "
+            "motor te lleva a los que de verdad le entran.\n\nSe busca sin importar espacios, "
+            "guiones ni mayúsculas: el mismo motor se anota de tres formas distintas según "
+            "quién lo copie."
+        )
+        _nm = st.text_input("Número de motor:", key="buscar_num_motor",
+                            placeholder="Como está grabado, con o sin guiones").strip()
+        if _nm:
+            if len(normalizar_numero_motor(_nm)) < 4:
+                st.warning("Poné al menos 4 caracteres: con menos, coincide con cualquier cosa.")
+            else:
+                _ex, _par = buscar_por_numero_motor(_nm)
+                if _ex:
+                    st.success(f"✅ {len(_ex)} vehículo(s) con ese número de motor exacto:")
+                    st.dataframe(quitar_id(_ex), use_container_width=True, hide_index=True)
+                    _reps = repuestos_por_numero_motor(_nm)
+                    if _reps:
+                        st.markdown("**🔧 Lo que se le puso a ese motor:**")
+                        st.caption(
+                            "Esto es lo más confiable que hay: no es un catálogo diciendo qué "
+                            "debería entrar, es lo que alguien efectivamente le instaló."
+                        )
+                        st.dataframe(_reps, use_container_width=True, hide_index=True)
+                    else:
+                        st.caption("Todavía no hay repuestos cargados en la ficha de ese auto.")
+                if _par:
+                    st.info(
+                        f"🔎 {len(_par)} coincidencia(s) **parcial(es)**. El número de motor casi "
+                        "nunca se lee entero: está grabado en el block, con grasa encima y en "
+                        "una posición incómoda."
+                    )
+                    if any(x.get("Por qué") for x in _par):
+                        st.caption(
+                            "Algunas salieron de probar lecturas equivocadas comunes —un 0 que "
+                            "era una O, un 5 que era una S—. La columna «Por qué» lo aclara."
+                        )
+                    st.dataframe(quitar_id(_par), use_container_width=True, hide_index=True)
+
+                if _ex or _par:
+                    _fam = autos_con_la_misma_familia_de_motor(_nm)
+                    if _fam:
+                        st.markdown("**🔩 Otros autos con un motor de la misma familia:**")
+                        st.caption(
+                            "El número arranca con el modelo de motor y sigue con el serial de "
+                            "esa unidad. Si el modelo es el mismo, los repuestos son los mismos "
+                            "aunque sea otro auto."
+                        )
+                        st.dataframe(_fam, use_container_width=True, hide_index=True)
+                if not _ex and not _par:
+                    st.warning(
+                        "No hay ningún vehículo con ese número de motor. Se carga en la ficha "
+                        "del auto, en **🚙 Repuestos por vehículo**."
+                    )
+                    st.caption(
+                        "Si el auto no está cargado todavía, el número de motor solo no alcanza "
+                        "para saber qué repuestos lleva: no existe una base pública que lo "
+                        "traduzca. Lo que sirve es cargar la ficha una vez."
+                    )
+
     # -------- Chasis / VIN (pantalla única) --------
     if sub_mec == SUB_MEC[1]:
         panel_vin(clave="vin_mec")
@@ -16248,7 +18559,7 @@ if pagina == PAGINAS[7]:
             else:
                 st.caption("Todavía ninguno.")
 
-    if sub_mec == SUB_MEC[2]:
+    if sub_mec == SUB_MEC[3]:
         st.markdown("**🚙 Repuestos por vehículo**")
         st.caption(
             "Buscá lo que le entra a un auto entrando por marca y modelo, en vez de por código. "
@@ -16409,7 +18720,7 @@ if pagina == PAGINAS[7]:
                 st.caption("Se ven completos, con las piezas marcadas, en la sección Esquemas.")
 
 
-    if sub_mec == SUB_MEC[3]:
+    if sub_mec == SUB_MEC[5]:
         st.caption(
             "Diagramas organizados por Marca › Vehículo › Sistema, donde cada pieza marcada tiene "
             "su código vinculado al catálogo — así se busca directo desde el dibujo, ya sea en el "
@@ -16564,7 +18875,7 @@ if pagina == PAGINAS[7]:
                     st.rerun()
 
     # -------- Conversor de unidades --------
-    if sub_mec == SUB_MEC[4]:
+    if sub_mec == SUB_MEC[6]:
         st.caption("Conversiones rápidas de unidades que se usan seguido en manuales de taller antiguos o importados.")
 
         categoria_conv = st.radio("Categoría:", ["Torque", "Presión", "Longitud"], horizontal=True, key="conv_categoria")

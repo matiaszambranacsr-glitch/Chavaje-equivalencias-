@@ -298,6 +298,25 @@ for texto, linea in _SQL:
                 reportar("ERROR", linea,
                          f"UPDATE {tabla}: la columna '{asig.group(1)}' no existe")
 
+# ============ 7b. Índices creados antes que su tabla ============
+# CREATE INDEX ... ON tabla revienta si la tabla todavía no existe. Con una base ya creada no se
+# nota —la tabla viene de una versión anterior—, así que el error aparece SOLO en una instalación
+# nueva: la app no abre y dice "no such table". Es de los peores porque no lo ve nadie que ya
+# tenga la app andando, justamente los que la prueban.
+# Pasó de verdad: idx_pend_a se creaba 450 líneas antes que equivalencias_pendientes.
+_creada_en = {}
+for m in re.finditer(r'CREATE TABLE(?:\s+IF NOT EXISTS)?\s+(\w+)', SRC):
+    _creada_en.setdefault(m.group(1), SRC[:m.start()].count("\n") + 1)
+for m in re.finditer(r'CREATE INDEX(?:\s+IF NOT EXISTS)?\s+(\w+)\s+ON\s+(\w+)', SRC, re.S):
+    _indice, _tabla = m.group(1), m.group(2)
+    _linea = SRC[:m.start()].count("\n") + 1
+    _linea_tabla = _creada_en.get(_tabla)
+    if _linea_tabla and _linea < _linea_tabla:
+        reportar("ERROR", _linea,
+                 f"el índice {_indice} se crea acá, pero la tabla {_tabla} recién se crea en "
+                 f"L{_linea_tabla}: con una base nueva la app no abre («no such table»). "
+                 "El índice va junto a su tabla")
+
 # ============ 8. except silenciosos en funciones que escriben ============
 for n in ast.walk(ARBOL):
     if isinstance(n, ast.ExceptHandler):
@@ -788,6 +807,70 @@ for nodo in _EN_PANTALLA:
                          f"'{arg.id}' salió de session_state: del segundo refresco en adelante "
                          "esos datos ya no están. Que las saque quien dibuja, sobre una copia")
 
+
+# ============ 8j. Funciones usadas antes de estar definidas ============
+# El caso real: se agregó anotar_error() y se conectó a 143 lugares, entre ellos dentro de
+# get_connection(), que corre al arrancar. Pero anotar_error quedó definida DESPUÉS de esa
+# llamada. Compila perfecto y revienta con NameError al abrir la app.
+#
+# Solo importa para lo que se ejecuta al nivel del módulo: adentro de una función, el orden
+# no importa porque para cuando se llama ya está todo definido.
+_defs_por_nombre = {}
+for _n in ARBOL.body:
+    if isinstance(_n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+        _defs_por_nombre.setdefault(_n.name, _n.lineno)
+
+_llamadas_al_arrancar = []
+for _n in ARBOL.body:
+    if isinstance(_n, ast.Expr) and isinstance(_n.value, ast.Call):
+        _fn = getattr(_n.value.func, "id", None)
+        if _fn:
+            _llamadas_al_arrancar.append((_fn, _n.lineno))
+    elif isinstance(_n, ast.Assign):
+        for _x in ast.walk(_n):
+            if isinstance(_x, ast.Call) and getattr(_x.func, "id", None):
+                _llamadas_al_arrancar.append((_x.func.id, _n.lineno))
+
+for _fn, _linea in _llamadas_al_arrancar:
+    _cuerpo = next((x for x in ARBOL.body
+                    if isinstance(x, (ast.FunctionDef, ast.AsyncFunctionDef)) and x.name == _fn), None)
+    if _cuerpo is None:
+        continue
+    # Qué otras funciones del archivo usa esa función
+    for _x in ast.walk(_cuerpo):
+        if not (isinstance(_x, ast.Call) and getattr(_x.func, "id", None)):
+            continue
+        _usada = _x.func.id
+        _def_linea = _defs_por_nombre.get(_usada)
+        if _def_linea and _def_linea > _linea:
+            reportar("ERROR", _def_linea,
+                     f"'{_usada}' se define acá pero {_fn}() la usa al arrancar (L{_linea}): "
+                     "NameError al abrir la app")
+
+# ============ 8k. Índices de menú repetidos o faltantes ============
+# El caso real, y me pasó dos veces: se agrega una pestaña al principio de la lista y todos
+# los índices de abajo quedan corridos. Dos ramas con el mismo índice significa que una
+# pantalla es inalcanzable, y nadie se entera hasta que alguien la busca y no está.
+import collections as _col
+
+for _lista in re.findall(r'^\s*(\w+) = \[([^\]]*?)\]\s*$', SRC, re.M | re.S):
+    _nombre, _cuerpo = _lista
+    if not re.search(rf'{_nombre}\[\d+\]', SRC):
+        continue
+    _cuantos = len([x for x in re.split(r'",\s*"', _cuerpo) if x.strip()])
+    _usados = [int(x) for x in re.findall(rf'== {_nombre}\[(\d+)\]', SRC)]
+    if not _usados:
+        continue
+    _repetidos = [i for i, v in _col.Counter(_usados).items() if v > 1]
+    if _repetidos:
+        reportar("ERROR", 0,
+                 f"{_nombre}: el índice {_repetidos} se usa en más de una rama — "
+                 "hay una pantalla inalcanzable (¿se agregó una opción y se corrieron?)")
+    _faltan = [i for i in range(_cuantos) if i not in _usados]
+    if _faltan and len(_usados) >= 2:
+        reportar("REVISAR", 0,
+                 f"{_nombre}: hay {_cuantos} opciones pero el índice {_faltan} no se usa "
+                 "en ninguna rama")
 
 # ============ 9. Argumentos por defecto mutables ============
 for n in ast.walk(ARBOL):
