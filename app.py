@@ -565,19 +565,6 @@ def get_connection():
     c.execute("CREATE INDEX IF NOT EXISTS idx_consultas_estado ON consultas_cliente(estado)")
     c.execute("CREATE INDEX IF NOT EXISTS idx_consultas_tel ON consultas_cliente(telefono)")
 
-    # Índices que faltaban en columnas muy consultadas. Medido con 30.000 pendientes —los que
-    # tenés hoy—: buscar si un par ya está pendiente pasa de 0,75 ms a 0,01 ms. No se nota en
-    # una consulta suelta; sí cuando se recorren miles al analizar la cola.
-    c.execute("""CREATE INDEX IF NOT EXISTS idx_pend_a
-                 ON equivalencias_pendientes(producto_a_id)""")
-    c.execute("""CREATE INDEX IF NOT EXISTS idx_pend_b
-                 ON equivalencias_pendientes(producto_b_id)""")
-    try:
-        c.execute("CREATE INDEX IF NOT EXISTS idx_combos_disp ON combos_sugeridos(disparador)")
-        c.execute("CREATE INDEX IF NOT EXISTS idx_motores_vin_cod ON motores_vin(codigo)")
-        c.execute("CREATE INDEX IF NOT EXISTS idx_esquemas_marca ON esquemas(marca_auto)")
-    except sqlite3.OperationalError as _err:
-        anotar_error("índices opcionales", _err)   # esas tablas pueden no existir todavía
 
     c.execute("""CREATE TABLE IF NOT EXISTS aplicaciones (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -877,6 +864,7 @@ def get_connection():
         UNIQUE (wmi, codigo)
     )""")
     c.execute("CREATE INDEX IF NOT EXISTS idx_motores_vin ON motores_vin(wmi, codigo)")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_motores_vin_cod ON motores_vin(codigo)")
 
     c.execute("""CREATE TABLE IF NOT EXISTS esquemas (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -890,6 +878,7 @@ def get_connection():
         generado_ia INTEGER DEFAULT 0,
         created_at TEXT DEFAULT (datetime('now'))
     )""")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_esquemas_marca ON esquemas(marca_auto)")
     columnas_esquemas = [f[1] for f in c.execute("PRAGMA table_info(esquemas)").fetchall()]
     if "generado_ia" not in columnas_esquemas:
         c.execute("ALTER TABLE esquemas ADD COLUMN generado_ia INTEGER DEFAULT 0")
@@ -992,6 +981,9 @@ def get_connection():
         fecha TEXT DEFAULT (datetime('now'))
     )""")
     c.execute("CREATE INDEX IF NOT EXISTS idx_ventas_fecha ON ventas_registradas(fecha)")
+    # Sin este, "cuándo se vendió por última vez este producto" recorría la tabla de ventas
+    # ENTERA una vez por producto. Con el estante lleno eso es minutos de espera.
+    c.execute("CREATE INDEX IF NOT EXISTS idx_ventas_prod ON ventas_registradas(producto_id)")
     c.execute("CREATE INDEX IF NOT EXISTS idx_ventas_codigo ON ventas_registradas(codigo_pedido_clean)")
 
     # Mapeo de columnas recordado por proveedor. Cada vez que se importa una lista hay que
@@ -1032,6 +1024,15 @@ def get_connection():
         PRIMARY KEY (producto_a_id, producto_b_id)
     )""")
     c.execute("CREATE INDEX IF NOT EXISTS idx_pendientes_lote ON equivalencias_pendientes(lote)")
+    # Estos dos estaban 450 líneas MÁS ARRIBA, antes de que existiera la tabla. Con una base ya
+    # creada no se notaba —la tabla venía de una versión anterior—, pero en una instalación nueva
+    # la app no abría: "no such table: main.equivalencias_pendientes" apenas arrancaba.
+    # Medido con 30.000 pendientes: buscar si un par ya está pendiente pasa de 0,75 ms a 0,01 ms.
+    # No se nota en una consulta suelta; sí al recorrer miles analizando la cola.
+    c.execute("""CREATE INDEX IF NOT EXISTS idx_pend_a
+                 ON equivalencias_pendientes(producto_a_id)""")
+    c.execute("""CREATE INDEX IF NOT EXISTS idx_pend_b
+                 ON equivalencias_pendientes(producto_b_id)""")
 
     # Evidencia que respalda cada equivalencia sugerida. La idea es NO cargar nada solo:
     # cada sugerencia llega al panel con el detalle de en qué se basa, para poder decidir
@@ -1097,6 +1098,7 @@ def get_connection():
         disparador TEXT NOT NULL,
         item TEXT NOT NULL
     )""")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_combos_disp ON combos_sugeridos(disparador)")
     c.execute("SELECT COUNT(*) FROM combos_sugeridos")
     if c.fetchone()[0] == 0:
         c.executemany(
@@ -2966,6 +2968,40 @@ def stock_libre(producto_id):
     return max((fila["stock"] or 0) - reservado, 0)
 
 
+def stock_libre_de_varios(ids):
+    """Lo mismo que stock_libre() pero para muchos productos, con dos consultas por tanda.
+
+    De a uno son dos consultas por producto. En una búsqueda que trae 50 equivalencias eso son
+    200 idas a la base en CADA refresco de pantalla —o sea, cada vez que se toca cualquier botón
+    de la sección—.
+
+    Va de a 500 porque un IN (?, ?, ...) lleva un signo por producto y choca contra el tope de
+    variables de SQLite, que en instalaciones viejas son 999. Sin las tandas, justo la búsqueda
+    más grande —la que más falta hace— era la que fallaba."""
+    ids = [int(i) for i in ids if i is not None]
+    if not ids:
+        return {}
+    libres = {}
+    for arranque in range(0, len(ids), 500):
+        tanda = ids[arranque:arranque + 500]
+        marcadores = ",".join("?" * len(tanda))
+        c.execute(f"SELECT id, COALESCE(stock, 0) AS stock FROM productos "
+                  f"WHERE id IN ({marcadores})", tanda)
+        total = {f["id"]: f["stock"] for f in c.fetchall()}
+        try:
+            c.execute(f"""SELECT producto_id, COALESCE(SUM(cantidad), 0) AS reservado
+                          FROM reservas_stock
+                          WHERE estado = 'activa' AND producto_id IN ({marcadores})
+                          GROUP BY producto_id""", tanda)
+            reservado = {f["producto_id"]: f["reservado"] for f in c.fetchall()}
+        except sqlite3.OperationalError as _err:
+            anotar_error("stock_libre_de_varios", _err)
+            reservado = {}
+        for i, v in total.items():
+            libres[i] = max(v - reservado.get(i, 0), 0)
+    return libres
+
+
 def reservas_activas(limite=200):
     """Lo que está apartado ahora mismo."""
     try:
@@ -3016,11 +3052,17 @@ def margen_de(precio_venta, precio_costo):
 
 
 def agregar_margen(filas):
-    """Le suma a cada resultado su margen, si están los dos precios."""
+    """Le suma a cada resultado su margen, si están los dos precios.
+
+    NO borra el costo de la fila, aunque el costo no se muestre. Estas filas son las mismas que
+    quedan guardadas en session_state entre refrescos: al borrarles el costo, al segundo toque de
+    cualquier botón ya no estaba, así que la columna Margen aparecía vacía y el aviso de «mejor
+    margen» desaparecía. Sin error y sin aviso: se veía una vez y no volvía más.
+    De que el costo no llegue a la pantalla se encarga quien la dibuja, sacando las claves que
+    empiezan con guión bajo."""
     for f in filas:
         pct, pesos = margen_de(f.get("Precio"), f.get("_costo"))
         f["Margen"] = f"{pct:.0f}% (${pesos:,.0f})" if pct is not None else ""
-        f.pop("_costo", None)
     return filas
 
 
@@ -3321,7 +3363,7 @@ def descubrir_equivalencias_candidatas(min_veces=2, dias=180, minutos_ventana=20
         guardar_evidencia(codigo_clean, producto_id, "mostrador",
                            f"Se repitió {datos['veces']} vez/veces en el mostrador")
         evidencias = listar_evidencia(codigo_clean, producto_id)
-        etiqueta_confianza, puntaje = nivel_de_confianza(evidencias)
+        etiqueta_confianza, puntaje = nivel_por_evidencias(evidencias)
 
         candidatas.append({
             "codigo_pedido": datos["termino"] or codigo_clean,
@@ -3471,9 +3513,16 @@ def verificar_en_catalogo_oficial(codigo_a_buscar, url_ficha, tiempo_maximo=8):
         return None, f"No se pudo consultar la página ({type(e).__name__})."
 
 
-def nivel_de_confianza(evidencias):
+def nivel_por_evidencias(evidencias):
     """Traduce la evidencia acumulada a algo legible. Nunca da 'confirmada': eso lo decide
-    una persona. Si hay evidencia EN CONTRA (ej: las medidas no coinciden), lo marca."""
+    una persona. Si hay evidencia EN CONTRA (ej: las medidas no coinciden), lo marca.
+
+    Se llamaba nivel_de_confianza, igual que la de más abajo que recibe un PUNTAJE. Dos def con
+    el mismo nombre no son un error de Python: la segunda simplemente pisa a la primera. Así que
+    esta nunca llegaba a correr — descubrir_equivalencias_candidatas() le pasaba la lista de
+    evidencias a la que espera un número y reventaba con "'>=' not supported between instances
+    of 'list' and 'int'", tirando abajo toda la pantalla de equivalencias sugeridas apenas
+    había una candidata con evidencia."""
     tipos = {e["tipo"] for e in evidencias}
     if "medidas_no_coinciden" in tipos or "catalogo_no_lo_lista" in tipos:
         return "⛔ Con evidencia en contra", 0
@@ -8840,7 +8889,27 @@ def guardar_reemplazo(codigo_viejo, codigo_nuevo, marca="", nota=""):
         return False, "Faltan los dos códigos."
     if v == n:
         return False, "Son el mismo código."
+    # Si el nuevo ya lleva de vuelta al viejo, esto arma un círculo (A→B→A). Buscar no se cuelga
+    # —la cadena corta al repetirse— pero la respuesta pasa a depender de por dónde se entre, que
+    # es peor que no tener el dato: se ve creíble y está mal.
+    if any(paso["clean"] == v for paso in cadena_de_reemplazos(n)):
+        return False, (f"No se puede: {codigo_nuevo} ya lleva de vuelta a {codigo_viejo}. "
+                       "Revisá cuál de los dos es el vigente.")
+    # Un código viejo tiene UN reemplazo vigente, no varios. La clave de la tabla es el par
+    # (viejo, nuevo), así que cargar A→B y después A→C dejaba las dos filas, y la búsqueda seguía
+    # la que SQLite devolviera primero: la misma consulta podía contestar B o C según cómo
+    # estuvieran guardadas. Se reemplaza el anterior y se avisa cuál se pisó.
+    anterior = None
+    try:
+        c.execute("""SELECT codigo_nuevo FROM reemplazos_codigo
+                     WHERE codigo_viejo_clean = ? AND codigo_nuevo_clean != ?""", (v, n))
+        fila_previa = c.fetchone()
+        anterior = fila_previa["codigo_nuevo"] if fila_previa else None
+    except sqlite3.OperationalError as _err:
+        anotar_error("guardar_reemplazo", _err)
+        anterior = None
     with db_lock:
+        c.execute("DELETE FROM reemplazos_codigo WHERE codigo_viejo_clean = ?", (v,))
         c.execute("""INSERT OR REPLACE INTO reemplazos_codigo
                      (codigo_viejo, codigo_viejo_clean, codigo_nuevo, codigo_nuevo_clean,
                       marca, nota, cargado_por)
@@ -8849,6 +8918,9 @@ def guardar_reemplazo(codigo_viejo, codigo_nuevo, marca="", nota=""):
                    (marca or "").strip().upper() or None, (nota or "").strip() or None,
                    obtener_usuario_actual()))
         conn.commit()
+    if anterior:
+        return True, (f"{codigo_viejo} → {codigo_nuevo} anotado. "
+                      f"Antes decía que lo reemplazaba {anterior}; quedó este.")
     return True, f"{codigo_viejo} → {codigo_nuevo} anotado."
 
 
@@ -8867,7 +8939,8 @@ def cadena_de_reemplazos(clean_code, tope=6):
     for _ in range(tope):
         try:
             c.execute("""SELECT codigo_nuevo, codigo_nuevo_clean, marca, nota
-                         FROM reemplazos_codigo WHERE codigo_viejo_clean = ? LIMIT 1""", (actual,))
+                         FROM reemplazos_codigo WHERE codigo_viejo_clean = ?
+                         ORDER BY fecha DESC LIMIT 1""", (actual,))
             fila = c.fetchone()
         except sqlite3.OperationalError as _err:
             anotar_error("cadena_de_reemplazos", _err)
@@ -8885,16 +8958,31 @@ def productos_estancados(dias_sin_vender=180, minimo_stock=1, limite=100):
     """Lo que tenés en el estante y no se mueve. Es capital dormido.
 
     Se cruza el stock con la última venta. Lo que nunca se vendió cuenta como estancado solo si
-    hace rato que está cargado: un producto que entró la semana pasada todavía no tuvo chance."""
+    hace rato que está cargado: un producto que entró la semana pasada todavía no tuvo chance.
+
+    Para saber desde cuándo está se usa el primer cambio de precio y, si no tuvo ninguno, la
+    fecha en que se cargó. Antes se miraba SOLO el historial de precios, y ese historial recién
+    se escribe cuando un precio CAMBIA: un producto importado una vez y nunca tocado no tiene
+    ninguna fila ahí. O sea que quedaban afuera justamente los que nunca se movieron —los clavos
+    más clavos, que son los que esta pantalla existe para encontrar."""
     try:
+        # Las fechas salen de dos tablas ya resumidas, no de una subconsulta por producto: así
+        # las ventas se leen una sola vez en total y no una vez por artículo. Tampoco se puede
+        # unir directo contra las tablas crudas, porque un producto con 30 ventas y 10 cambios
+        # de precio saldría 300 veces antes de agrupar.
         c.execute("""SELECT p.id AS "_id", p.codigo_raw AS "Código", m.nombre AS "Marca",
                             p.descripcion AS "Descripción", p.stock AS "Stock",
                             p.precio AS "Precio",
-                            (SELECT MAX(v.fecha) FROM ventas_registradas v
-                              WHERE v.producto_id = p.id) AS "_ultima_venta",
-                            (SELECT MIN(hp.fecha) FROM historial_precios hp
-                              WHERE hp.producto_id = p.id) AS "_desde"
-                     FROM productos p JOIN marcas m ON m.id = p.marca_id
+                            v.ultima AS "_ultima_venta",
+                            COALESCE(h.primera, p.created_at) AS "_desde"
+                     FROM productos p
+                     JOIN marcas m ON m.id = p.marca_id
+                     LEFT JOIN (SELECT producto_id, MAX(fecha) AS ultima
+                                  FROM ventas_registradas GROUP BY producto_id) v
+                            ON v.producto_id = p.id
+                     LEFT JOIN (SELECT producto_id, MIN(fecha) AS primera
+                                  FROM historial_precios GROUP BY producto_id) h
+                            ON h.producto_id = p.id
                      WHERE COALESCE(p.stock, 0) >= ?""", (minimo_stock,))
         filas = filas_a_listas(c)
     except sqlite3.OperationalError as _err:
@@ -9365,15 +9453,37 @@ def seccion_plegable(titulo, key, abierto=False):
     return st.toggle(titulo, key=key, value=abierto)
 
 
-def explicar(resumen, detalle, abierto=False):
+def explicar(resumen, detalle, abierto=False, en_expander=False):
     """Una línea corta siempre visible, y el porqué largo a un toque de distancia.
 
     Las explicaciones largas sirven la primera vez y estorban las otras cien: en el celular
     empujan los botones fuera de la pantalla y hay que scrollear para llegar a lo que uno vino
     a hacer. Pero borrarlas tampoco sirve — sin ellas nadie entiende para qué es cada cosa.
-    Así queda el resumen a la vista y el detalle disponible para quien lo necesite."""
+    Así queda el resumen a la vista y el detalle disponible para quien lo necesite.
+
+    Ojo con dónde se la llama. Esta función abre un expander, así que llamarla adentro de otro
+    deja un expander dentro de un expander: en el celular quedan dos cajas anidadas y hay que
+    tocar dos veces para leer tres renglones. Las versiones viejas de Streamlit ni siquiera lo
+    permitían —tiraban excepción y cortaban el renderizado ahí—; las nuevas lo dejan pasar pero
+    sigue quedando mal.
+
+    Para eso está en_expander: adentro de un expander el detalle va en un popover, que se abre
+    encima y no agrega otro nivel. Con en_expander=True el parámetro 'abierto' no aplica: un
+    popover no se puede dejar abierto de entrada."""
     st.caption(resumen)
-    with st.expander("¿Por qué? / ¿Cómo funciona?", expanded=abierto):
+    caja = None
+    if not en_expander:
+        try:
+            caja = st.expander("¿Por qué? / ¿Cómo funciona?", expanded=abierto)
+        except Exception:
+            caja = None
+    if caja is None:
+        try:
+            caja = st.popover("¿Por qué? / ¿Cómo funciona?")
+        except Exception:
+            st.caption(detalle)
+            return
+    with caja:
         st.markdown(detalle)
 
 
@@ -12387,6 +12497,9 @@ Casi todo lo que edita o borra algo pide la contraseña de administrador la prim
                     st.rerun()
                 if ci3.button("🗑️", key=f"quitar_cart_{_pid}"):
                     st.session_state["carrito"].pop(_pid, None)
+                    # También la cantidad que quedó guardada del widget: sin esto, volver a
+                    # sumar el mismo producto lo traía con la cantidad vieja en vez de 1.
+                    st.session_state.pop(f"cant_cart_{_pid}", None)
                     st.rerun()
 
             _lineas = [f"{x['marca']} {x['codigo']} x{x['cantidad']} — "
@@ -12397,18 +12510,25 @@ Casi todo lo que edita o borra algo pide la contraseña de administrador la prim
             cb1, cb2 = st.columns(2)
             if cb1.button("🔒 Apartar todo el presupuesto"):
                 _apartados, _fallaron = 0, []
-                for _pid, _item in _cart.items():
+                for _pid, _item in list(_cart.items()):
                     _ok, _msg = reservar_stock(_pid, _item["cantidad"], "presupuesto")
                     if _ok:
                         _apartados += 1
+                        # Lo apartado sale del carrito. Si se quedara, tocar el botón otra vez
+                        # —porque uno de los ítems falló, por ejemplo— volvía a apartar los que
+                        # ya estaban apartados y el stock libre terminaba en cualquier cosa.
+                        st.session_state["carrito"].pop(_pid, None)
+                        st.session_state.pop(f"cant_cart_{_pid}", None)
                     else:
                         _fallaron.append(f"{_item['codigo']}: {_msg}")
+                # Siempre se refresca: avisar() guarda el mensaje PARA el refresco. Sin refrescar,
+                # el "Se apartaron N" quedaba guardado y no se mostraba nunca — justo cuando algún
+                # ítem fallaba, que es cuando más importa saber qué sí se apartó.
                 if _apartados:
                     avisar("success", f"Se apartaron {_apartados} ítem(s).")
                 for _f in _fallaron:
-                    st.warning(_f)
-                if _apartados and not _fallaron:
-                    st.rerun()
+                    avisar("warning", _f)
+                st.rerun()
             if cb2.button("🗑️ Vaciar presupuesto"):
                 st.session_state["carrito"] = {}
                 st.rerun()
@@ -12423,7 +12543,7 @@ Casi todo lo que edita o borra algo pide la contraseña de administrador la prim
             "El código de la caja es exacto. A diferencia de comparar fotos o leer un grabado, "
             "acá no hay interpretación posible: o lo lee o no lo lee.\n\nSacá la foto de cerca, "
             "con buena luz y el código derecho, ocupando buena parte de la pantalla. Sirve "
-            "también para QR."
+            "también para QR.", en_expander=True
         )
         foto_barras = st.camera_input("Apuntá al código de barras", key="cam_barras")
         if foto_barras is None:
@@ -12473,7 +12593,7 @@ Casi todo lo que edita o borra algo pide la contraseña de administrador la prim
                 "de pieza — se compara en blanco y negro, recortando el fondo.\n\nAun así es "
                 "**mucho** menos confiable que un código exacto. Con piezas lisas sin marcas ni "
                 "grabado (rótulas, rulemanes, bulones) rinde mal por más buena que sea la foto. "
-                "Para esas, **📐 Buscar por medidas mecánicas** anda mucho mejor."
+                "Para esas, **📐 Buscar por medidas mecánicas** anda mucho mejor.", en_expander=True
             )
 
             fotos_listas, prod_con_foto, fotos_pendientes, fotos_no_sirven = contar_fotos_comparables()
@@ -12693,7 +12813,7 @@ Casi todo lo que edita o borra algo pide la contraseña de administrador la prim
                     "coherentes entre las dos fotos:",
                     "es el número que más conviene mirar. Muchos detalles y parecido alto = vale la pena "
                     "revisarla. Si el que buscabas no aparece, cargale a ese producto una segunda foto del "
-                    "ángulo que usás vos y la próxima vez lo encuentra."
+                    "ángulo que usás vos y la próxima vez lo encuentra.", en_expander=True
                 )
 
     modo = st.radio("Buscar por:", ["Código", "Descripción"], horizontal=True, key="modo_busqueda")
@@ -12738,7 +12858,20 @@ Casi todo lo que edita o borra algo pide la contraseña de administrador la prim
         # que se toque después haría que buscar_click vuelva a False y todo el bloque desaparezca
         # antes de que el click en el botón de adentro llegue a registrarse.
         if buscar_click:
-            codigos_buscados = [x.strip() for x in busqueda.split(",") if x.strip()]
+            # Sin sacar los repetidos, pegar "ABC, abc" dibujaba dos veces los mismos widgets
+            # con la misma key —todas se arman con el código limpio— y Streamlit corta la app
+            # entera con "multiple widgets with the same key". Y pegar una lista con un código
+            # duplicado es lo más común del mundo.
+            codigos_buscados, _ya_vistos = [], set()
+            for _crudo in busqueda.split(","):
+                _crudo = _crudo.strip()
+                if not _crudo:
+                    continue
+                _clave_dedup = sanitizar(_crudo) or _crudo.upper()
+                if _clave_dedup in _ya_vistos:
+                    continue
+                _ya_vistos.add(_clave_dedup)
+                codigos_buscados.append(_crudo)
             if not codigos_buscados:
                 st.info("Ingresá al menos un código válido para buscar.")
                 st.session_state.pop("ultima_busqueda_codigo", None)
@@ -12790,7 +12923,14 @@ Casi todo lo que edita o borra algo pide la contraseña de administrador la prim
                             f"📦 Solo con stock ({sum(1 for f in res if (f.get('Stock') or 0) > 0)}"
                             f" de {len(res)})", key=f"solo_stock_{clean}")
                         if solo_stock:
-                            res = [f for f in res if (f.get("Stock") or 0) > 0] or res
+                            con_stock = [f for f in res if (f.get("Stock") or 0) > 0]
+                            if con_stock:
+                                res = con_stock
+                            else:
+                                # Antes se volvía a la lista completa sin decir nada: se tildaba
+                                # "solo con stock" y aparecían igual los que no tienen, así que
+                                # parecía que el filtro estaba roto.
+                                st.info("Ninguno de estos tiene stock. Se muestran todos.")
 
                         # Copiar el código para pegarlo en facturación o WhatsApp. st.code trae
                         # el botón de copiar incorporado, así que no hace falta JavaScript.
@@ -12800,18 +12940,25 @@ Casi todo lo que edita o borra algo pide la contraseña de administrador la prim
                         # Stock libre = lo que hay menos lo apartado en presupuestos. Es el
                         # número que importa al prometerle algo a un cliente; el stock a secas
                         # puede estar comprometido con otro que ya lo cotizó.
+                        #
+                        # Va en una columna aparte y NUMÉRICA, y se calcula al dibujar. Antes se
+                        # escribía "3 (de 4, el resto apartado)" encima de Stock, y estos
+                        # diccionarios son los mismos que quedan guardados en session_state: al
+                        # refresco siguiente Stock ya era un texto, el filtro de arriba hacía
+                        # texto > 0 y la pantalla se cerraba con TypeError. Con una sola reserva
+                        # activa alcanzaba con tocar cualquier botón, y el texto además se
+                        # anidaba en cada vuelta: "3 (de 3 (de 4, el resto apartado)...".
                         try:
-                            hay_reservas = any(stock_libre(f["ID"]) != (f.get("Stock") or 0)
-                                                for f in res)
+                            libres = stock_libre_de_varios([f["ID"] for f in res])
                         except Exception as _err:
-                            anotar_error("nivel principal", _err)
-                            hay_reservas = False
+                            anotar_error("stock libre de los resultados", _err)
+                            libres = {}
+                        hay_reservas = any(f["ID"] in libres
+                                            and libres[f["ID"]] != (f.get("Stock") or 0)
+                                            for f in res)
                         if hay_reservas:
-                            for f in res:
-                                libre_f = stock_libre(f["ID"])
-                                if libre_f is not None and libre_f != (f.get("Stock") or 0):
-                                    f["Stock"] = f"{libre_f} (de {f.get('Stock') or 0}, "
-                                    f["Stock"] += f"el resto apartado)"
+                            st.caption("**Libre** es lo que queda sin apartar: es el número que "
+                                       "se le puede prometer a un cliente.")
 
                         # El margen es información sensible: la ve el dueño y el administrador,
                         # no cualquiera que atienda el mostrador.
@@ -12825,17 +12972,29 @@ Casi todo lo que edita o borra algo pide la contraseña de administrador la prim
                                     f"${mejor_marg['ganancia']:,.0f} "
                                     f"(${mejor_marg['diferencia']:,.0f} más que el peor de la lista)."
                                 )
-                        else:
-                            for _f in res:
-                                _f.pop("_costo", None)
-
                         puentes_res = puentes_en_el_resultado([f["ID"] for f in res])
                         # comparar precios a ojo cuando hay varias marcas equivalentes.
                         candidatos_precio = [f for f in res if f.get("Precio") and (f.get("Stock") or 0) > 0]
                         id_mas_barato = min(candidatos_precio, key=lambda f: f["Precio"])["ID"] if candidatos_precio else None
                         for f in res:
                             f["💰"] = "🏆 Más barato en stock" if f["ID"] == id_mas_barato else ""
-                        mostrar = quitar_id(res)
+
+                        # Acá se arma lo que se ve, SIN tocar las filas guardadas. Dos motivos,
+                        # los dos aprendidos a los golpes:
+                        #  · las claves con guión bajo son internas —el costo entre ellas— y no
+                        #    salen ni a pantalla ni al Excel. Antes el costo se borraba de la
+                        #    fila, y como la fila se reusa en el refresco siguiente, el margen
+                        #    del administrador se veía una vez y después quedaba vacío;
+                        #  · "Libre" se recalcula en cada vuelta. Si se escribiera en la fila, al
+                        #    soltar la reserva la columna quedaría pegada con el número viejo
+                        #    para siempre, porque nadie la vuelve a tocar.
+                        mostrar = []
+                        for f in res:
+                            visible = {k: v for k, v in f.items() if not k.startswith("_")}
+                            if hay_reservas:
+                                visible["Libre"] = libres.get(f["ID"], f.get("Stock") or 0)
+                            mostrar.append(visible)
+                        mostrar = quitar_id(mostrar)
                         st.dataframe(
                             mostrar, use_container_width=True, hide_index=True,
                             column_config={
@@ -12946,9 +13105,15 @@ Casi todo lo que edita o borra algo pide la contraseña de administrador la prim
                                             f"{f['Codigo']} ({f['Marca']}) — {f['Cadena']}, {f['Confianza']}": f["ID"]
                                             for f in indirectos
                                         }
+                                        # La key lleva el código de ESTA vuelta. Era fija, y el
+                                        # bloque está adentro del bucle que recorre los códigos
+                                        # buscados: pidiendo dos a la vez ("P-1, Q-1") y abriendo
+                                        # esta sección en los dos, Streamlit encontraba la misma
+                                        # key repetida y cerraba la app entera. Y buscar varios
+                                        # separados por coma es lo que el campo invita a hacer.
                                         elegido_pq = st.selectbox("Elegí un resultado:",
                                                                    list(etiquetas_por_que.keys()),
-                                                                   key="por_que_resultado")
+                                                                   key=f"por_que_resultado_{clean}")
                                         camino = camino_entre(id_buscado, etiquetas_por_que[elegido_pq])
                                         if not camino:
                                             st.caption("No pude reconstruir el camino.")
@@ -12971,7 +13136,8 @@ Casi todo lo que edita o borra algo pide la contraseña de administrador la prim
                                                     f"({peor_paso['Confianza']}/100). Cortando ese, este "
                                                     "resultado deja de aparecer."
                                                 )
-                                                if st.button("✂️ Cortar ese vínculo", key="cortar_paso_debil"):
+                                                if st.button("✂️ Cortar ese vínculo",
+                                                              key=f"cortar_paso_debil_{clean}"):
                                                     borrar_equivalencias_dudosas(
                                                         [(peor_paso["_a"], peor_paso["_b"])])
                                                     invalidar_salud()
@@ -13308,15 +13474,21 @@ Casi todo lo que edita o borra algo pide la contraseña de administrador la prim
                         # Carrito: ir juntando de varias búsquedas y armar el presupuesto al
                         # final. Sin esto había que anotar los códigos aparte y volver a
                         # buscarlos uno por uno.
+                        # Mismos nombres que el resto de esta rama: acá el resultado de la
+                        # vuelta es fila_txt y sus equivalentes están en 'otros'. Estaba escrito
+                        # con 'res' y 'clean', que son de la búsqueda por CÓDIGO y acá no
+                        # existen: entrar a "Descripción" tiraba NameError.
                         st.session_state.setdefault("carrito", {})
+                        opciones_carrito = [fila_txt] + otros
                         cc1, cc2 = st.columns([3, 2])
                         agregar_cod = cc1.selectbox(
                             "🛒 Sumar al presupuesto:",
-                            ["(elegir)"] + [f"{f['Marca']} {f['Codigo']}" for f in res],
-                            key=f"al_carrito_{clean}")
-                        if agregar_cod != "(elegir)" and cc2.button("➕ Sumar",
-                                                                     key=f"btn_carrito_{clean}"):
-                            elegido_c = next((f for f in res
+                            ["(elegir)"] + [f"{f['Marca']} {f['Codigo']}"
+                                            for f in opciones_carrito],
+                            key=f"al_carrito_{fila_txt['ID']}")
+                        if agregar_cod != "(elegir)" and cc2.button(
+                                "➕ Sumar", key=f"btn_carrito_{fila_txt['ID']}"):
+                            elegido_c = next((f for f in opciones_carrito
                                                if f"{f['Marca']} {f['Codigo']}" == agregar_cod), None)
                             if elegido_c:
                                 st.session_state["carrito"][elegido_c["ID"]] = {
@@ -13329,26 +13501,35 @@ Casi todo lo que edita o borra algo pide la contraseña de administrador la prim
 
                         # Anotar al cliente que se lo lleva pensando. Va acá porque el momento
                         # de anotarlo es este: si hay que ir a otra pantalla, no se hace.
+                        # OJO con los nombres, lo mismo que avisa el bloque de abajo: acá
+                        # estamos en la búsqueda por DESCRIPCIÓN, donde la fila de esta vuelta es
+                        # fila_txt y sus equivalentes están en 'otros'. Este bloque estaba escrito
+                        # con los nombres de la búsqueda por CÓDIGO ('res', 'clean'), que acá no
+                        # existen: abrir esta sección tiraba NameError y se cortaba la pantalla.
+                        # Las keys van por ID y no por código limpio, porque dos filas distintas
+                        # pueden limpiar al mismo texto y ahí Streamlit corta por clave repetida.
                         if seccion_plegable("📞 El cliente lo va a pensar",
-                                             key=f"consulta_{clean}"):
+                                             key=f"consulta_{fila_txt['ID']}"):
                             st.caption(
                                 "Queda anotado qué pidió y a qué precio se le dijo. Cuando "
                                 "vuelva o llame, lo buscás por nombre o teléfono."
                             )
-                            etq_cc = {f"{f['Marca']} {f['Codigo']}": f for f in res}
+                            etq_cc = {f"{f['Marca']} {f['Codigo']}": f
+                                      for f in [fila_txt] + otros}
                             cual_cc = st.selectbox("¿Qué le interesó?", list(etq_cc.keys()),
-                                                    key=f"cual_cc_{clean}")
+                                                    key=f"cual_cc_{fila_txt['ID']}")
                             k1, k2, k3 = st.columns([3, 3, 1])
-                            nom_cc = k1.text_input("Nombre:", key=f"nom_cc_{clean}",
+                            nom_cc = k1.text_input("Nombre:", key=f"nom_cc_{fila_txt['ID']}",
                                                     placeholder="Cómo se llama")
-                            tel_cc = k2.text_input("Teléfono:", key=f"tel_cc_{clean}",
+                            tel_cc = k2.text_input("Teléfono:", key=f"tel_cc_{fila_txt['ID']}",
                                                     placeholder="Para avisarle")
                             cant_cc = k3.number_input("Cant.", min_value=1, value=1, step=1,
-                                                       key=f"cant_cc_{clean}")
-                            nota_cc = st.text_input("Nota:", key=f"nota_cc_{clean}",
+                                                       key=f"cant_cc_{fila_txt['ID']}")
+                            nota_cc = st.text_input("Nota:", key=f"nota_cc_{fila_txt['ID']}",
                                                      placeholder="Ej: tiene un Gol 2012, "
                                                                  "consulta con el mecánico")
-                            if st.button("📞 Anotar la consulta", key=f"btn_cc_{clean}"):
+                            if st.button("📞 Anotar la consulta",
+                                          key=f"btn_cc_{fila_txt['ID']}"):
                                 _f = etq_cc[cual_cc]
                                 ok_cc, msg_cc = anotar_consulta_cliente(
                                     nom_cc, tel_cc, _f["ID"], _f["Codigo"],
@@ -13368,13 +13549,16 @@ Casi todo lo que edita o borra algo pide la contraseña de administrador la prim
                         _para_apartar = equivalentes or [fila_txt]
                         if seccion_plegable("🔒 Apartar para un presupuesto",
                                              key=f"apartar_txt_{fila_txt['ID']}"):
+                            # Una sola consulta para todos: preguntarlo de a uno eran dos
+                            # consultas por fila para filtrar y dos más por fila para la etiqueta.
+                            libres_ap = stock_libre_de_varios([f["ID"] for f in _para_apartar])
                             con_stock_ap = [f for f in _para_apartar
-                                             if (stock_libre(f["ID"]) or 0) > 0]
+                                             if (libres_ap.get(f["ID"]) or 0) > 0]
                             if not con_stock_ap:
                                 st.caption("Ninguno de estos tiene stock libre para apartar.")
                             else:
                                 etq_ap = {
-                                    f"{f['Marca']} {f['Codigo']} — {stock_libre(f['ID'])} libre(s)":
+                                    f"{f['Marca']} {f['Codigo']} — {libres_ap[f['ID']]} libre(s)":
                                         f["ID"] for f in con_stock_ap
                                 }
                                 elegido_ap = st.selectbox("¿Cuál?", list(etq_ap.keys()),
@@ -17773,6 +17957,12 @@ if pagina == PAGINAS[6]:
         st.session_state["form_anio_auto"] = str(datos.get("anio") or "")
         st.session_state["form_motorizacion_auto"] = datos.get("motorizacion") or ""
 
+    # El VIN que se resolvió a patente en la vuelta anterior se vuelca ACÁ, antes de dibujar el
+    # campo. Escribirlo después de dibujado —que es lo que se hacía— Streamlit no lo permite:
+    # tira StreamlitAPIException y corta la pantalla. Pasaba con solo pegar un chasis de 17.
+    if "patente_pendiente" in st.session_state:
+        st.session_state["patente_buscar"] = st.session_state.pop("patente_pendiente")
+
     patente_input = st.text_input(
         "Patente o VIN:", placeholder="Ej: AB123CD — o el chasis completo", key="patente_buscar"
     ).strip().upper()
@@ -17781,9 +17971,10 @@ if pagina == PAGINAS[6]:
     if len(re.sub(r"\s", "", patente_input)) == 17:
         ficha_por_vin = buscar_vehiculo_por_vin(patente_input)
         if ficha_por_vin:
-            st.success(f"🔎 Ese chasis es la patente **{ficha_por_vin['patente']}**.")
             patente_input = ficha_por_vin["patente"]
-            st.session_state["patente_buscar"] = patente_input
+            avisar("success", f"🔎 Ese chasis es la patente **{patente_input}**.")
+            st.session_state["patente_pendiente"] = patente_input
+            st.rerun()
         else:
             st.info(
                 "Ese VIN no está en ninguna ficha todavía. Cargá la patente del auto y poné el "
