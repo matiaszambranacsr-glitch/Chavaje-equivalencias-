@@ -2430,6 +2430,30 @@ def tareas_automaticas_del_dia(presupuesto_segundos=6):
             anotar_error("tareas_automaticas_del_dia", _err)
             pass
 
+    # 2b. Liberar las reservas viejas. Antes solo pasaba cuando alguien abría esa pantalla:
+    # un presupuesto de hace un mes podía seguir bloqueando mercadería para siempre.
+    if queda_tiempo():
+        try:
+            n_venc = vencer_reservas_viejas()
+            if n_venc:
+                hecho.append(f"{n_venc} reserva(s) vencida(s) liberadas")
+        except Exception as _err:
+            anotar_error("tareas/reservas_vencidas", _err)
+
+    # 2c. Las equivalencias que salen de los reemplazos de código ya cargados. No hay nada que
+    # investigar: el dato ya está, solo faltaba cruzarlo.
+    if queda_tiempo():
+        try:
+            puenteadas = equivalencias_puenteadas_por_reemplazo(100)
+            if puenteadas:
+                n_p = guardar_equivalencias_derivadas(
+                    [(x["_a"], x["_b"]) for x in puenteadas],
+                    f"POR REEMPLAZO (automático) · {datetime.now():%d/%m}")
+                if n_p:
+                    hecho.append(f"{n_p} equivalencia(s) por cambio de código, a revisión")
+        except Exception as _err:
+            anotar_error("tareas/puenteadas", _err)
+
     # 3. Aprender modelos y motores de las fichas de vehículo cargadas
     if queda_tiempo():
         try:
@@ -2716,6 +2740,65 @@ def autos_con_la_misma_familia_de_motor(numero, largo_prefijo=4):
     except sqlite3.OperationalError as _err:
         anotar_error("autos_con_la_misma_familia_de_motor", _err)
         return []
+
+
+def todo_lo_de_una_patente(patente):
+    """De la patente a los repuestos, en un solo paso. Devuelve un diccionario con todo.
+
+    Las piezas ya existían sueltas —buscar el vehículo, ver su historial, buscar repuestos por
+    marca y modelo— pero había que ir juntándolas a mano en tres pantallas. En el mostrador
+    eso no pasa: el cliente dice la patente y hay que contestarle.
+
+    Importante y por eso el resultado dice de dónde salió cada cosa: si el auto no está en las
+    fichas, la patente sola NO alcanza. En Argentina no hay ninguna base pública gratuita que
+    traduzca patente a vehículo — las que existen cobran por consulta."""
+    pat = (patente or "").strip().upper().replace(" ", "")
+    salida = {"patente": pat, "vehiculo": None, "historial": [], "sugeridos": [],
+              "por_motor": [], "consultas": []}
+    if len(pat) < 6:
+        return salida
+
+    salida["vehiculo"] = buscar_vehiculo(pat)
+    v = salida["vehiculo"]
+    if not v:
+        return salida
+
+    # 1. Lo que YA se le puso a este auto. Es lo más confiable: no es un catálogo diciendo
+    # qué debería entrar, es lo que alguien efectivamente le instaló.
+    try:
+        c.execute("""SELECT hp.descripcion_pieza AS "Pieza", hp.marca_pieza AS "Marca",
+                            hp.codigo_pieza AS "Código", hp.km_instalacion AS "Km",
+                            substr(hp.fecha_instalacion, 1, 10) AS "Cuándo",
+                            p.precio AS "Precio hoy", p.stock AS "Stock"
+                     FROM historial_piezas hp
+                     LEFT JOIN productos p ON p.id = hp.producto_id
+                     WHERE hp.vehiculo_id = ?
+                     ORDER BY hp.fecha_instalacion DESC LIMIT 100""", (v["id"],))
+        salida["historial"] = filas_a_listas(c)
+    except sqlite3.OperationalError as _err:
+        anotar_error("todo_lo_de_una_patente/historial", _err)
+
+    # 2. Lo que le entra según marca, modelo, año y motor
+    try:
+        salida["sugeridos"] = repuestos_de_este_auto(
+            v.get("marca_auto") or "", v.get("modelo_auto") or "", v.get("anio"),
+            v.get("motorizacion") or "", v.get("vin") or "", limite=200)
+    except Exception as _err:
+        anotar_error("todo_lo_de_una_patente/sugeridos", _err)
+
+    # 3. Si tiene número de motor, lo que se le puso a otros autos con ese mismo motor.
+    # Cuando el motor está cambiado, esto vale más que la marca y el modelo del auto.
+    if v.get("numero_motor"):
+        try:
+            salida["por_motor"] = autos_con_la_misma_familia_de_motor(v["numero_motor"])
+        except Exception as _err:
+            anotar_error("todo_lo_de_una_patente/motor", _err)
+
+    # 4. Lo que este cliente preguntó antes
+    if v.get("cliente_telefono") or v.get("cliente_nombre"):
+        salida["consultas"] = historial_de_un_cliente(
+            v.get("cliente_telefono") or v.get("cliente_nombre") or "")
+    return salida
 
 
 def repuestos_por_numero_motor(numero):
@@ -5115,6 +5198,40 @@ def diagnostico_de_salud():
 
     def sumar(nivel, titulo, detalle, donde):
         problemas.append({"nivel": nivel, "titulo": titulo, "detalle": detalle, "donde": donde})
+
+    # Lo primero de todo: clientes esperando algo que ahora hay. Es lo único de esta lista
+    # que es plata a un llamado de distancia, y lo que más rápido se pierde: entra la
+    # mercadería, nadie se acuerda quién la pidió, y el cliente ya la compró en otro lado.
+    try:
+        esperando = consultas_que_ahora_hay_en_stock()
+        if esperando:
+            sumar("alto", f"{len(esperando)} cliente(s) esperando algo que YA hay",
+                  "Preguntaron por algo que en ese momento no tenías y ahora está en stock. "
+                  "Un llamado y es una venta. Es lo que más rápido se enfría.",
+                  "Estadísticas → Reposición → Consultas de clientes")
+    except Exception as _err:
+        anotar_error("diagnostico_de_salud/consultas", _err)
+
+    try:
+        clavos = productos_estancados(365)
+        if len(clavos) >= 10:
+            plata = sum(x["Plata parada"] or 0 for x in clavos)
+            sumar("medio", f"${plata:,.0f} inmovilizados en {len(clavos)} producto(s)",
+                  "Hace más de un año que no se venden y siguen ocupando estante. No es "
+                  "urgente, pero es plata dormida que conviene mirar antes de la próxima compra.",
+                  "Estadísticas → Reposición → Clavos")
+    except Exception as _err:
+        anotar_error("diagnostico_de_salud/clavos", _err)
+
+    try:
+        gratis = equivalencias_puenteadas_por_reemplazo(50)
+        if gratis:
+            sumar("bajo", f"{len(gratis)} equivalencia(s) esperando, sin trabajo",
+                  "Salen de los reemplazos de código que ya cargaste: son productos que el "
+                  "cambio de número dejó separados. No hay que investigar nada, solo aprobarlas.",
+                  "Estadísticas → Mantenimiento → Calidad → Reunir lo que separó un cambio de número")
+    except Exception as _err:
+        anotar_error("diagnostico_de_salud/puenteadas", _err)
 
     try:
         puentes = contar_codigos_puente(30)
@@ -7700,6 +7817,42 @@ def panel_vin(clave="vin", mostrar_ensenar=True):
         st.caption("✅ " + d.get("mensaje_digito", ""))
     elif _dv == "no_aplica" and d.get("mensaje_digito"):
         st.caption("ℹ️ " + d["mensaje_digito"])
+
+    # Si el modelo no lo sabemos, se ofrece preguntarle a la base pública de la NHTSA. Es
+    # gratis y sin clave. No se consulta sola en cada búsqueda: sería pegarle a un servidor
+    # ajeno cada vez que alguien tipea un VIN, y la mayoría ya están resueltos acá.
+    if not d.get("modelo"):
+        st.caption(
+            "El modelo no está en la norma del VIN, así que hay que aprenderlo. Se puede "
+            "preguntar a la base pública de la NHTSA (gratis, del gobierno de EE.UU.)."
+        )
+        if st.button("🌐 Preguntar a la base pública", key=f"nhtsa_{clave}"):
+            with st.spinner("Consultando..."):
+                _dn, _en = consultar_vin_en_nhtsa(d["vin"])
+            st.session_state[f"nhtsa_res_{clave}"] = (_dn, _en)
+        _guardado = st.session_state.get(f"nhtsa_res_{clave}")
+        if _guardado:
+            _dn, _en = _guardado
+            if _en:
+                st.warning(_en)
+            elif _dn:
+                st.success(
+                    f"🌐 **{_dn['marca']} {_dn['modelo']}** {_dn['anio']}"
+                    + (f" · motor {_dn['motor']}" if _dn["motor"] else "")
+                    + (f" · {_dn['carroceria']}" if _dn["carroceria"] else "")
+                    + (f"\n\nFabricado en {_dn['planta']}." if _dn["planta"] else "")
+                )
+                st.caption(
+                    "Esto viene de una base ajena y **no se guardó**. Si es correcto, "
+                    "confirmalo y queda aprendido para todos los VIN de ese patrón."
+                )
+                if st.button("✅ Es correcto, guardarlo", key=f"nhtsa_ok_{clave}"):
+                    _modelo_n = " ".join(x for x in [_dn["marca"], _dn["modelo"]] if x)
+                    aprender_modelo_de_vin(d["vin"], _modelo_n, _dn.get("marca") or "",
+                                            _dn.get("motor") or "")
+                    st.session_state.pop(f"nhtsa_res_{clave}", None)
+                    avisar("success", f"Aprendido: ese patrón es un {_modelo_n}.")
+                    st.rerun()
 
     ficha = d.get("vehiculo")
     if ficha:
@@ -11340,6 +11493,68 @@ def verificar_vin(vin):
                          "perfecto igual — tomalo como una señal para revisar, no como un error.")
 
 
+URL_VPIC = "https://vpic.nhtsa.dot.gov/api/vehicles/decodevinvalues/{vin}?format=json"
+
+
+def consultar_vin_en_nhtsa(vin, tiempo_maximo=12):
+    """Le pregunta a la base pública de la NHTSA qué auto es ese VIN. (datos, error).
+
+    Es gratis, no pide clave ni registro, y es la base oficial del gobierno de Estados Unidos.
+    Resuelve el hueco que la app tenía: el modelo y el motor no están en la norma del VIN, así
+    que hasta ahora había que enseñárselos uno por uno.
+
+    Lo que hay que saber antes de confiar: la cobertura es excelente para autos vendidos en
+    Estados Unidos y buena para los fabricantes globales, pero **muchos modelos hechos para el
+    mercado argentino o brasileño no están**. Un Gol o un Palio pueden volver vacíos. Por eso
+    lo que devuelve se ofrece para confirmar, nunca se guarda solo."""
+    limpio = re.sub(r"[^A-HJ-NPR-Z0-9]", "", (vin or "").upper())
+    if len(limpio) != 17:
+        return None, "El VIN tiene que tener 17 caracteres."
+    try:
+        r = requests.get(URL_VPIC.format(vin=quote(limpio)), timeout=tiempo_maximo,
+                         headers={"User-Agent": "EquivalenciasElChavo/1.0"})
+        if r.status_code >= 400:
+            return None, f"La base de la NHTSA respondió {r.status_code}."
+        cuerpo = r.json()
+    except Exception as e:
+        anotar_error("consultar_vin_en_nhtsa", e)
+        return None, f"No se pudo consultar ({type(e).__name__}). Puede ser la conexión."
+
+    filas = (cuerpo or {}).get("Results") or []
+    if not filas:
+        return None, "La base no devolvió nada para ese VIN."
+    d = filas[0]
+
+    def limpiar(clave):
+        v = (d.get(clave) or "").strip()
+        # La API devuelve textos como "Not Applicable" cuando no sabe: no son datos
+        if v.lower() in ("", "not applicable", "0", "null", "none"):
+            return ""
+        return v
+
+    motor = " ".join(x for x in [
+        limpiar("DisplacementL") and f"{limpiar('DisplacementL')}L",
+        limpiar("EngineCylinders") and f"{limpiar('EngineCylinders')}cil",
+        limpiar("FuelTypePrimary"),
+    ] if x)
+
+    datos = {
+        "marca": limpiar("Make"),
+        "modelo": limpiar("Model"),
+        "anio": limpiar("ModelYear"),
+        "motor": motor,
+        "carroceria": limpiar("BodyClass"),
+        "planta": " ".join(x for x in [limpiar("PlantCity"), limpiar("PlantCountry")] if x),
+        "fabricante": limpiar("Manufacturer"),
+        "aviso": limpiar("ErrorText"),
+    }
+    if not datos["marca"] and not datos["modelo"]:
+        return None, ("La base no conoce ese VIN. Es normal en modelos hechos para "
+                      "Sudamérica: la cobertura fuerte es de autos del mercado de "
+                      "Estados Unidos.")
+    return datos, None
+
+
 def decodificar_vin(vin):
     vin = re.sub(r'\s', '', vin.strip().upper())
     resultado = {"vin": vin, "valido": False}
@@ -12049,23 +12264,54 @@ if not _cache_salud or _ahora - _cache_salud["momento"] > 180:
 
 _problemas = _cache_salud["problemas"]
 if _problemas:
+    # Se separa por urgencia en vez de mostrar una lista pareja. Antes todo se veía igual y
+    # «hay clientes esperando algo que ya tenés» quedaba mezclado con «hay descripciones
+    # pegadas». Lo que da plata va arriba y sin plegar; el resto, plegado.
     _graves = [p for p in _problemas if p["nivel"] == "alto"]
-    _titulo = (f"⚠️ {len(_problemas)} cosa(s) para revisar"
-               + (f" — {len(_graves)} importante(s)" if _graves else ""))
-    with st.expander(_titulo, expanded=False):
-        for _p in _problemas:
-            _icono = "🔴" if _p["nivel"] == "alto" else "🟡"
-            st.markdown(f"{_icono} **{_p['titulo']}**")
-            st.caption(f"{_p['detalle']}  \n📍 {_p['donde']}")
-        if st.button("🔄 Volver a revisar", key="refrescar_salud"):
-            st.session_state.pop("_salud_cache", None)
-            st.rerun()
+    _resto = [p for p in _problemas if p["nivel"] != "alto"]
+
+    if _graves:
+        st.markdown(
+            "<div style='background:rgba(255,75,75,.08);border-left:4px solid #ff4b4b;"
+            "border-radius:6px;padding:.7rem .9rem;margin-bottom:.6rem'>"
+            f"<b>🔴 {len(_graves)} cosa(s) que conviene mirar hoy</b></div>",
+            unsafe_allow_html=True
+        )
+        for _p in _graves:
+            cS1, cS2 = st.columns([5, 2])
+            cS1.markdown(f"**{_p['titulo']}**  \n<span style='opacity:.75;font-size:.87em'>"
+                          f"{_p['detalle']}</span>", unsafe_allow_html=True)
+            cS2.caption(f"📍 {_p['donde']}")
+
+    if _resto:
+        with st.expander(f"🟡 {len(_resto)} cosa(s) más, sin apuro", expanded=False):
+            for _p in _resto:
+                st.markdown(f"**{_p['titulo']}**")
+                st.caption(f"{_p['detalle']}  \n📍 {_p['donde']}")
+
+    if st.button("🔄 Volver a revisar", key="refrescar_salud"):
+        st.session_state.pop("_salud_cache", None)
+        st.rerun()
+    st.markdown("")
 
 GRUPOS_MANTENIMIENTO = ["🧹 Limpiar vínculos", "🧠 Calidad y aprendizaje", "📷 Fotos",
                         "🩺 Estado y papelera"]
 
 PAGINAS = ["🔍 Buscador", "🔗 Vincular manual", "📁 Cargar Excel", "🗂️ Administrar",
            "📊 Estadísticas", "📋 Lista WhatsApp", "🚗 Vehículos", "🛠️ Modo Mecánico"]
+
+# Una línea por pantalla diciendo para qué sirve. Sin esto hay que entrar a cada una para
+# saber qué hace, y el que atiende el mostrador no tiene tiempo de andar explorando.
+PARA_QUE_SIRVE = {
+    "🔍 Buscador": "Buscar un repuesto y ver todas las marcas que sirven en su lugar.",
+    "🔗 Vincular manual": "Decir a mano que dos códigos son equivalentes.",
+    "📁 Cargar Excel": "Subir la lista de precios de un proveedor.",
+    "🗂️ Administrar": "Editar productos, marcas y usuarios.",
+    "📊 Estadísticas": "Qué comprar, qué no se vende, cuánto aumentó cada proveedor.",
+    "📋 Lista WhatsApp": "Pegar un pedido que llegó por mensaje y resolverlo de una.",
+    "🚗 Vehículos": "Fichas de los autos: qué se le puso a cada uno y cuándo.",
+    "🛠️ Modo Mecánico": "Identificar un auto por patente, chasis o número de motor.",
+}
 
 if st.session_state.get("pagina_actual") not in PAGINAS:
     st.session_state["pagina_actual"] = PAGINAS[0]
@@ -12077,6 +12323,16 @@ if st.session_state.get("pagina_actual") not in PAGINAS:
 st.radio("Sección:", PAGINAS, key="pagina_actual", horizontal=True, label_visibility="collapsed")
 
 pagina = st.session_state["pagina_actual"]
+
+# Debajo de las pastillas, una línea que dice para qué sirve la sección elegida. Es lo que
+# convierte una fila de ocho botones en algo que se entiende sin que nadie te lo explique.
+if PARA_QUE_SIRVE.get(pagina):
+    st.markdown(
+        f"<div style='margin:-.4rem 0 .9rem 0;padding:.45rem .8rem;"
+        f"background:rgba(128,128,128,.10);border-radius:6px;font-size:.9em;opacity:.85'>"
+        f"{PARA_QUE_SIRVE[pagina]}</div>",
+        unsafe_allow_html=True
+    )
 
 # Los avisos que quedaron guardados antes del último refresco. Van acá, arriba del contenido
 # de la página, para que se vean sí o sí — sin esto, cada "Guardado" se perdía en el refresco.
@@ -17732,7 +17988,9 @@ if pagina == PAGINAS[6]:
 if pagina == PAGINAS[7]:
     st.subheader("🛠️ Modo Mecánico")
 
-    SUB_MEC = ["📖 Códigos DTC", "🔢 Chasis / VIN", "⚙️ Número de motor", "🚙 Repuestos por vehículo",
+    # Ordenadas por cómo se usan: primero identificar el auto (patente, chasis, motor), después
+    # consultarlo. Antes «Códigos DTC» quedaba segundo, entre dos formas de identificar el auto.
+    SUB_MEC = ["🔤 Por patente", "🔢 Chasis / VIN", "⚙️ Número de motor", "🚙 Repuestos por vehículo", "📖 Códigos DTC",
                "🗺️ Esquemas", "🧮 Conversor de unidades"]
     if st.session_state.get("sub_mec") not in SUB_MEC:
         st.session_state["sub_mec"] = SUB_MEC[0]
@@ -17741,7 +17999,7 @@ if pagina == PAGINAS[7]:
     sub_mec = st.session_state["sub_mec"]
 
     # -------- Diccionario de códigos OBD2 / DTC --------
-    if sub_mec == SUB_MEC[0]:
+    if sub_mec == SUB_MEC[4]:
         st.caption(
             f"Diccionario de códigos de falla OBD2/DTC. Arranca con {contar_dtc()} códigos genéricos "
             "estándar (no específicos de marca) — sumá los que te falten con el formulario de abajo. "
@@ -17891,6 +18149,75 @@ if pagina == PAGINAS[7]:
                     if st.button("🗑️ Eliminar este esquema", key=f"del_esq_{esq['id']}"):
                         eliminar_esquema(esq["id"])
                         st.rerun()
+
+    # -------- Por patente (lo primero, porque es lo que más se usa) --------
+    if sub_mec == SUB_MEC[0]:
+        st.subheader("🔤 Todo lo de un auto, por la patente")
+        explicar(
+            "El cliente dice la patente y sale todo: qué auto es y qué le entra.",
+            "Junta en una pantalla lo que antes había que ir a buscar a tres: la ficha del "
+            "auto, lo que ya se le puso, lo que le entra según marca y modelo, y lo que "
+            "preguntó ese cliente antes.\n\n**Funciona con los autos que están en tus "
+            "fichas.** En Argentina no hay ninguna base pública gratuita que traduzca patente "
+            "a vehículo: las que existen cobran por consulta. Así que la patente sola, de un "
+            "auto que nunca cargaste, no alcanza."
+        )
+        _pat = st.text_input("Patente:", key="buscar_por_patente",
+                             placeholder="AA123BB o ABC123").strip()
+        if _pat:
+            _todo = todo_lo_de_una_patente(_pat)
+            _v = _todo["vehiculo"]
+            if not _v:
+                st.warning(f"No hay ningún auto cargado con la patente **{_todo['patente']}**.")
+                st.caption(
+                    "Se carga una vez en **🚙 Repuestos por vehículo** y queda para siempre: "
+                    "la próxima vez que venga ese cliente, con la patente sale todo."
+                )
+            else:
+                st.success(
+                    f"🚗 **{_v.get('marca_auto') or ''} {_v.get('modelo_auto') or ''}** "
+                    f"{_v.get('anio') or ''}"
+                    + (f" · {_v['motorizacion']}" if _v.get("motorizacion") else "")
+                    + (f" · motor N° {_v['numero_motor']}" if _v.get("numero_motor") else "")
+                    + (f"\n\nCliente: **{_v['cliente_nombre']}**" if _v.get("cliente_nombre") else "")
+                    + (f" · {_v['cliente_telefono']}" if _v.get("cliente_telefono") else "")
+                )
+                if _v.get("km_actual"):
+                    st.caption(f"Último kilometraje registrado: {_v['km_actual']:,} km")
+
+                if _todo["historial"]:
+                    st.markdown("**🔧 Lo que YA se le puso a este auto**")
+                    st.caption(
+                        "Es lo más confiable que hay: no es un catálogo diciendo qué debería "
+                        "entrar, es lo que alguien efectivamente le instaló."
+                    )
+                    st.dataframe(_todo["historial"], use_container_width=True, hide_index=True)
+
+                if _todo["sugeridos"]:
+                    st.markdown("**📋 Lo que le entra según marca, modelo y motor**")
+                    st.caption(
+                        f"{len(_todo['sugeridos'])} repuesto(s). Esto sale de los catálogos y "
+                        "las descripciones: es más amplio y menos seguro que lo de arriba."
+                    )
+                    st.dataframe(_todo["sugeridos"], use_container_width=True, hide_index=True)
+
+                if _todo["por_motor"]:
+                    st.markdown("**⚙️ Otros autos con el mismo modelo de motor**")
+                    st.caption(
+                        "Si este auto tiene el motor cambiado, esto vale más que la marca y el "
+                        "modelo: los repuestos van con el motor, no con la carrocería."
+                    )
+                    st.dataframe(_todo["por_motor"], use_container_width=True, hide_index=True)
+
+                if _todo["consultas"]:
+                    st.markdown("**📞 Lo que este cliente preguntó antes**")
+                    st.dataframe(_todo["consultas"], use_container_width=True, hide_index=True)
+
+                if not _todo["historial"] and not _todo["sugeridos"]:
+                    st.info(
+                        "El auto está cargado pero todavía no tiene repuestos asociados. Se "
+                        "van sumando solos a medida que se le cargan piezas en la ficha."
+                    )
 
     # -------- Número de motor --------
     if sub_mec == SUB_MEC[2]:
@@ -18202,7 +18529,7 @@ if pagina == PAGINAS[7]:
                 st.caption("Se ven completos, con las piezas marcadas, en la sección Esquemas.")
 
 
-    if sub_mec == SUB_MEC[4]:
+    if sub_mec == SUB_MEC[5]:
         st.caption(
             "Diagramas organizados por Marca › Vehículo › Sistema, donde cada pieza marcada tiene "
             "su código vinculado al catálogo — así se busca directo desde el dibujo, ya sea en el "
@@ -18357,7 +18684,7 @@ if pagina == PAGINAS[7]:
                     st.rerun()
 
     # -------- Conversor de unidades --------
-    if sub_mec == SUB_MEC[5]:
+    if sub_mec == SUB_MEC[6]:
         st.caption("Conversiones rápidas de unidades que se usan seguido en manuales de taller antiguos o importados.")
 
         categoria_conv = st.radio("Categoría:", ["Torque", "Presión", "Longitud"], horizontal=True, key="conv_categoria")

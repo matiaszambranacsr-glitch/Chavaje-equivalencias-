@@ -422,6 +422,31 @@ for _fn, _linea in _llamadas_al_arrancar:
                      f"'{_usada}' se define acá pero {_fn}() la usa al arrancar (L{_linea}): "
                      "NameError al abrir la app")
 
+# ============ 8g. Índices de menú repetidos o faltantes ============
+# El caso real, y me pasó dos veces: se agrega una pestaña al principio de la lista y todos
+# los índices de abajo quedan corridos. Dos ramas con el mismo índice significa que una
+# pantalla es inalcanzable, y nadie se entera hasta que alguien la busca y no está.
+import collections as _col
+
+for _lista in re.findall(r'^\s*(\w+) = \[([^\]]*?)\]\s*$', SRC, re.M | re.S):
+    _nombre, _cuerpo = _lista
+    if not re.search(rf'{_nombre}\[\d+\]', SRC):
+        continue
+    _cuantos = len([x for x in re.split(r'",\s*"', _cuerpo) if x.strip()])
+    _usados = [int(x) for x in re.findall(rf'== {_nombre}\[(\d+)\]', SRC)]
+    if not _usados:
+        continue
+    _repetidos = [i for i, v in _col.Counter(_usados).items() if v > 1]
+    if _repetidos:
+        reportar("ERROR", 0,
+                 f"{_nombre}: el índice {_repetidos} se usa en más de una rama — "
+                 "hay una pantalla inalcanzable (¿se agregó una opción y se corrieron?)")
+    _faltan = [i for i in range(_cuantos) if i not in _usados]
+    if _faltan and len(_usados) >= 2:
+        reportar("REVISAR", 0,
+                 f"{_nombre}: hay {_cuantos} opciones pero el índice {_faltan} no se usa "
+                 "en ninguna rama")
+
 # ============ 9. Argumentos por defecto mutables ============
 for n in ast.walk(ARBOL):
     if isinstance(n, ast.FunctionDef):
