@@ -388,9 +388,17 @@ def _dist(a, b, tope=2):
 # Solo se miran los textos que se PASAN a una función o se comparan, no las claves de un
 # diccionario ni los nombres de columna: ahí "pendientes" o "migradas" son plurales legítimos
 # y marcarlos llenaba la auditoría de ruido.
+# .get("x") / .pop("x") / .setdefault("x") son claves de diccionario, no valores de estado.
+# Formalmente son argumentos de una llamada, así que se colaban igual: informe.get("pendientes")
+# quedaba marcado por parecerse a "pendiente". Ese es el tipo de falso positivo que hace que
+# alguien deje de leer la auditoría.
+_METODOS_DE_CLAVE = {"get", "pop", "setdefault"}
+
 literales_en_riesgo = []
 for nodo in ast.walk(ARBOL):
     if isinstance(nodo, ast.Call):
+        if (isinstance(nodo.func, ast.Attribute) and nodo.func.attr in _METODOS_DE_CLAVE):
+            continue
         for arg in list(nodo.args) + [k.value for k in nodo.keywords]:
             if isinstance(arg, ast.Constant) and isinstance(arg.value, str):
                 literales_en_riesgo.append(arg)

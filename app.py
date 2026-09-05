@@ -2547,6 +2547,10 @@ def informe_post_importacion(lote, nombre_prov, cargados):
         c.execute("SELECT COUNT(*) FROM equivalencias WHERE lote = ?", (lote,))
         cargadas = c.fetchone()[0]
         informe["vinculos_nuevos"] = pendientes + cargadas
+        # Separadas a propósito: no es lo mismo un vínculo cargado que uno esperando aprobación.
+        # Sumarlos y decir "entraron" es mentir justo donde más caro sale creerlo.
+        informe["cargadas"] = cargadas
+        informe["pendientes"] = pendientes
     except sqlite3.OperationalError as _err:
         anotar_error("informe_post_importacion", _err)
         pendientes = cargadas = 0
@@ -3767,6 +3771,20 @@ def resumen_lotes_pendientes():
     c.execute("""SELECT lote, origen, COUNT(*) AS cantidad, MIN(fecha) AS fecha
                  FROM equivalencias_pendientes GROUP BY lote, origen ORDER BY MIN(fecha) DESC""")
     return [dict(r) for r in c.fetchall()]
+
+
+def equivalencias_esperando_revision():
+    """Cuántos vínculos hay cargados pero todavía sin aprobar.
+
+    Se muestra en el buscador porque es ahí donde se sufre: mientras estén esperando, buscar un
+    código NO trae los equivalentes de las otras marcas. Es exactamente el síntoma de «la app no
+    relaciona proveedores», y hasta ahora no había nada que lo dijera fuera de otra pantalla."""
+    try:
+        c.execute("SELECT COUNT(*) FROM equivalencias_pendientes")
+        return c.fetchone()[0]
+    except sqlite3.OperationalError as _err:
+        anotar_error("equivalencias_esperando_revision", _err)
+        return 0
 
 
 def contar_pendientes_del_lote(lote):
@@ -6353,13 +6371,26 @@ def codigo_sospechoso(codigo, descripcion=""):
         return True, f"«{texto}» es demasiado corto para ser un código"
     if re.fullmatch(r"\d{1,3}", limpio):
         return True, f"«{texto}» es solo un número chico, no parece un código"
-    if re.search(r"[Ee][+\-]\d+", texto):
+    # OJO con este: tiene que ser el código ENTERO el que sea un número en notación científica,
+    # que es lo que hace Excel cuando el código es largo y numérico ("1.09E+11"). Antes se
+    # buscaba el patrón en cualquier parte del texto, y así «BE-777» quedaba marcado: la E de
+    # "BE" seguida de "-777" alcanzaba. Se comía todos los códigos tipo BE-, DE-, SE-, RE-, que
+    # son de lo más común, y esos vínculos quedaban en la cola de revisión para siempre — o sea,
+    # los equivalentes de ese proveedor no aparecían nunca en una búsqueda.
+    # Es la misma regla que usa sanitizar() unas líneas más arriba; acá estaba más floja.
+    if re.fullmatch(r"\d+(?:[.,]\d+)?[Ee][+\-]?\d+", texto.strip()):
         return True, f"«{texto}» quedó en notación científica de Excel (el número real se perdió)"
     if not es_por_medida:
         if re.search(r"\d\s*[xX]\s*\d+[.,]?\d*\s*[xX]?\s*\d*\s*(MM|mm)?$", texto) and "x" in texto.lower():
             return True, f"«{texto}» parece una medida, no un código"
-        if re.search(r"\d+\s*(MM|CM|CC|ML|KG|GR|LTS?|V|W)\b", texto, re.I):
+        # Las unidades de varias letras (MM, CC, KG...) van como antes. V y W sueltos, en
+        # cambio, solo cuentan si el código ES el número y nada más ("24V", "1.6W"): una V o una
+        # W al final es de lo más común en códigos de verdad —MD-135V, AB-100V, XW-25W— y
+        # marcarlos mandaba a revisión manual vínculos que estaban perfectos.
+        if re.search(r"\d+\s*(MM|CM|CC|ML|KG|GR|LTS?)\b", texto, re.I):
             return True, f"«{texto}» parece una medida o especificación"
+        if re.fullmatch(r"\d+(?:[.,]\d+)?\s*[VW]", texto.strip(), re.I):
+            return True, f"«{texto}» parece una especificación eléctrica, no un código"
         if "Ø" in texto or '"' in texto or "″" in texto:
             return True, f"«{texto}» tiene símbolos de medida (Ø o pulgadas)"
     if re.search(r"\b(DIESEL|NAFTA|SECTOR|CANAL|JUEGO|ARO|CHAPA|TIPO|MEDIDA)\b", texto, re.I):
@@ -12473,6 +12504,18 @@ if pagina == PAGINAS[0]:
 Casi todo lo que edita o borra algo pide la contraseña de administrador la primera vez que lo usás.
         """)
 
+    # Lo que está esperando aprobación se avisa ACÁ, no solo en Estadísticas. Mientras haya
+    # vínculos sin aprobar, la búsqueda no cruza marcas: se busca un código de un proveedor y no
+    # aparecen los equivalentes de los otros. Visto desde el mostrador eso se parece bastante a
+    # «la app no relaciona proveedores», y no había nada en esta pantalla que lo explicara.
+    _esperando = equivalencias_esperando_revision()
+    if _esperando:
+        st.warning(
+            f"🔒 Hay **{_esperando:,} equivalencia(s) esperando aprobación**. Hasta que las "
+            "apruebes no se usan: buscar un código no va a traer los equivalentes de las otras "
+            "marcas. Se aprueban en bloque desde **Estadísticas → 🔗 Equivalencias sugeridas**."
+        )
+
     # Si se tocó un botón de sugerencia rápida (favorito o búsqueda reciente), precargamos el
     # campo de búsqueda ANTES de crear el widget — si se hace después de creado, Streamlit tira error.
     if "sugerencia_busqueda" in st.session_state:
@@ -14613,7 +14656,19 @@ if pagina == PAGINAS[2]:
 
                     progreso.empty()
 
-                    st.success(f"Se importaron {cargados} filas con equivalencia.")
+                    if cargar_directo:
+                        st.success(f"Se importaron {cargados} filas con equivalencia.")
+                    else:
+                        # En verde y con la palabra "equivalencia" parecía que ya estaban puestas.
+                        # No lo están: van a la cola de revisión, y hasta que se aprueben la
+                        # búsqueda NO cruza marcas. Decirlo mal es lo que hace que alguien importe
+                        # tres listas, busque un código y crea que la app no relaciona proveedores.
+                        st.warning(
+                            f"Se leyeron {cargados} fila(s) y los productos y precios ya están "
+                            "cargados, **pero las equivalencias todavía NO**: quedaron esperando "
+                            "tu aprobación. Hasta que las apruebes, buscar un código no va a "
+                            "traer los equivalentes de otras marcas."
+                        )
                     # Los números del chequeo de salud cambiaron: que se recalculen
                     invalidar_salud()
 
@@ -14636,6 +14691,9 @@ if pagina == PAGINAS[2]:
                         for nivel, titulo, detalle, donde in _inf["puntos"]:
                             (st.error if nivel == "alto" else st.warning)(
                                 f"**{titulo}**\n\n{detalle}\n\n📍 {donde}")
+                    elif _inf.get("pendientes"):
+                        st.info(f"🔎 Se revisaron {_inf['pendientes']} vínculo(s) y ninguno "
+                                 "disparó alarmas. Siguen esperando tu aprobación.")
                     elif _inf["vinculos_nuevos"]:
                         st.info(f"✅ Entraron {_inf['vinculos_nuevos']} vínculo(s) y ninguno "
                                  "disparó alarmas.")
