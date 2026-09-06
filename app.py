@@ -10644,6 +10644,112 @@ def buscar_por_medidas(diam_int=None, diam_ext=None, ancho=None, paso_rosca=None
     return filas_a_listas(c)
 
 
+def medidas_desde_descripcion(descripcion):
+    """Lee las medidas que la descripción ya trae escritas. Devuelve solo lo que es SEGURO.
+
+    En retenes, rulemanes, bujes y o\'rings la medida ES el código: el proveedor escribe
+    «RETEN 35X52X7» y ahí están el diámetro interno, el externo y el ancho. Esos datos ya están
+    cargados en la base, en el campo descripción, y hasta ahora había que volver a tipearlos a
+    mano uno por uno para que sirvieran de algo.
+
+    Sirven para algo importante: comparar_medidas() usa las medidas como prueba física. Si dos
+    piezas miden distinto, el vínculo se veta por más que una lista diga que equivalen. O sea que
+    llenar esto no agrega equivalencias — saca las falsas.
+
+    Es deliberadamente CONSERVADOR. Solo se leen las formas que no tienen otra lectura posible:
+
+      · tres números seguidos (35x52x7) -> interno, externo, ancho. Se exige interno < externo,
+        que es como está construida cualquier pieza de estas; si no se cumple, no se lee nada,
+        porque entonces esos números son otra cosa.
+      · «22 ESTRIAS» -> cantidad de estrías.
+      · «M24 X 1.5» -> diámetro y paso de rosca.
+
+    DOS números sueltos (20x2.5) NO se leen: en un o\'ring eso es diámetro por espesor del cordón,
+    no interno por externo, y cargarlo como interno/externo sería meter un dato falso en el lugar
+    donde el sistema toma decisiones. Mejor no saber que saber mal."""
+    if not descripcion:
+        return {}
+    texto = str(descripcion).upper().replace(",", ".")
+    medidas = {}
+
+    tres = re.search(r"(?<![\d.])(\d{1,3}(?:\.\d+)?)\s*[X×]\s*(\d{1,3}(?:\.\d+)?)"
+                     r"\s*[X×]\s*(\d{1,3}(?:\.\d+)?)(?![\d.])", texto)
+    if tres:
+        interno, externo, ancho = (float(tres.group(i)) for i in (1, 2, 3))
+        # Cordura: una pieza real tiene el interno menor que el externo, y ninguna de estas
+        # medidas pasa de 500 mm. Si no cierra, son números de otra cosa (un año, una potencia).
+        if 0 < interno < externo <= 500 and 0 < ancho <= 500:
+            medidas["diametro_interno"] = interno
+            medidas["diametro_externo"] = externo
+            medidas["ancho"] = ancho
+
+    estrias = re.search(r"(\d{1,3})\s*ESTR[ÍI]AS?", texto)
+    if estrias and 0 < int(estrias.group(1)) <= 60:
+        medidas["cantidad_estrias"] = int(estrias.group(1))
+
+    rosca = re.search(r"\bM\s?(\d{1,3}(?:\.\d+)?)\s*[X×]\s*(\d{1,2}(?:\.\d+)?)\b", texto)
+    if rosca:
+        diametro, paso = float(rosca.group(1)), rosca.group(2)
+        if 0 < diametro <= 100:
+            medidas["diametro_rosca_homocinetica"] = diametro
+            medidas["paso_rosca"] = paso
+
+    return medidas
+
+
+def productos_con_medidas_deducibles(limite=500):
+    """Productos a los que se les puede leer la medida de la descripción y que todavía la tienen
+    vacía. Nunca toca lo cargado a mano: si alguien ya midió la pieza, ese dato manda."""
+    try:
+        c.execute("""SELECT p.id AS "_id", p.codigo_raw AS "Código", m.nombre AS "Marca",
+                            p.descripcion AS "Descripción",
+                            p.diametro_interno, p.diametro_externo, p.ancho,
+                            p.cantidad_estrias, p.diametro_rosca_homocinetica, p.paso_rosca
+                     FROM productos p JOIN marcas m ON m.id = p.marca_id
+                     WHERE p.descripcion IS NOT NULL AND p.descripcion <> ''
+                       AND (p.diametro_interno IS NULL OR p.diametro_externo IS NULL
+                            OR p.ancho IS NULL OR p.cantidad_estrias IS NULL)""")
+        filas = filas_a_listas(c)
+    except sqlite3.OperationalError as _err:
+        anotar_error("productos_con_medidas_deducibles", _err)
+        return []
+
+    salida = []
+    for f in filas:
+        leidas = medidas_desde_descripcion(f["Descripción"])
+        # Solo lo que está VACÍO hoy. Lo cargado a mano no se pisa nunca.
+        nuevas = {k: v for k, v in leidas.items() if f.get(k) in (None, "")}
+        if not nuevas:
+            continue
+        f["Se completaría"] = ", ".join(
+            f"{etq}={nuevas[campo]}" for campo, etq in
+            (("diametro_interno", "int"), ("diametro_externo", "ext"), ("ancho", "ancho"),
+             ("cantidad_estrias", "estrías"), ("diametro_rosca_homocinetica", "rosca"),
+             ("paso_rosca", "paso"))
+            if campo in nuevas)
+        f["_nuevas"] = nuevas
+        salida.append(f)
+        if len(salida) >= limite:
+            break
+    return salida
+
+
+def aplicar_medidas_deducidas(filas):
+    """Escribe las medidas leídas. Devuelve cuántos productos se completaron."""
+    hechos = 0
+    with db_lock:
+        for f in filas:
+            nuevas = f.get("_nuevas") or {}
+            if not nuevas:
+                continue
+            sets = ", ".join(f"{campo} = ?" for campo in nuevas)
+            c.execute(f"UPDATE productos SET {sets} WHERE id = ?",
+                      list(nuevas.values()) + [f["_id"]])
+            hechos += 1
+        conn.commit()
+    return hechos
+
+
 def actualizar_medidas(producto_id, diam_int, diam_ext, ancho, paso_rosca, estrias, ubicacion,
                         estrias_internas=None, estrias_externas=None, posicion_seguro=None, tiene_abs="Cualquiera",
                         diam_int_cara_b=None, diam_ext_cara_b=None,
@@ -15257,6 +15363,45 @@ if pagina == PAGINAS[3]:
                     st.rerun()
 
     if sub_admin == SUB_ADMIN[1]:
+        # Antes del formulario manual: lo que ya se puede leer de las descripciones.
+        # Cargar medidas a mano, una por una, no lo hace nadie con 20.000 productos; y
+        # sin medidas cargadas el veto por medidas —la única prueba física que tiene el
+        # sistema— no se usa nunca.
+        with st.expander("🪄 Leer medidas de las descripciones"):
+            explicar(
+                "En retenes, rulemanes y bujes la medida ya está escrita en la "
+                "descripción. Esto la lee y completa los campos vacíos.",
+                "Solo lee lo que no tiene otra interpretación posible: los tres números "
+                "seguidos (35x52x7 = interno, externo, ancho), las estrías y el paso de "
+                "rosca. Dos números sueltos NO se leen: en un o'ring «20x2.5» es "
+                "diámetro por espesor del cordón, no interno por externo, y cargarlo mal "
+                "sería peor que no cargarlo.\n\n**Nunca pisa lo que cargaste a mano**: "
+                "solo completa campos vacíos.\n\nPara qué sirve: las medidas son la "
+                "única prueba física del sistema. Si dos piezas miden distinto, el "
+                "vínculo se veta por más que una lista diga que equivalen. Esto no suma "
+                "equivalencias — saca las falsas.",
+                en_expander=True
+            )
+            if st.button("🔍 Ver qué se podría completar", key="btn_ver_medidas_desc"):
+                st.session_state["medidas_deducidas"] = productos_con_medidas_deducibles()
+            _deduc = st.session_state.get("medidas_deducidas")
+            if _deduc is not None:
+                if not _deduc:
+                    st.info("No encontré medidas legibles en las descripciones que "
+                            "tengan los campos vacíos.")
+                else:
+                    st.success(f"Se pueden completar **{len(_deduc)} producto(s)**. "
+                               "Revisá la muestra antes de aplicar:")
+                    st.dataframe(
+                        [{k: v for k, v in f.items() if not k.startswith("_")}
+                         for f in _deduc[:50]],
+                        use_container_width=True, hide_index=True)
+                    if st.button("✅ Completar esas medidas", type="primary",
+                                  key="btn_aplicar_medidas_desc"):
+                        _n = aplicar_medidas_deducidas(_deduc)
+                        st.session_state.pop("medidas_deducidas", None)
+                        avisar("success", f"Se completaron las medidas de {_n} producto(s).")
+                        st.rerun()
         st.markdown("**Buscar y editar un producto puntual**")
         texto_prod = st.text_input("Buscar producto por código o descripción", key="admin_buscar")
         if texto_prod.strip():
