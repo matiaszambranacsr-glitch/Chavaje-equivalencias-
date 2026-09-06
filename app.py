@@ -7348,6 +7348,102 @@ class _ModelosLazy:
 MODELOS_CONOCIDOS = _ModelosLazy()
 
 
+def aplicaciones_desde_descripciones(limite=400):
+    """Lee de la descripción a qué auto le va cada producto, para poder buscar por vehículo.
+
+    La relación pieza-vehículo ya viene en las listas de los proveedores: «JUNTA TAPA DE
+    CILINDROS FORD TAUNUS 1969/78» dice marca, modelo y años. Hasta ahora eso solo se guardaba
+    si además cargabas el catálogo de aplicaciones del fabricante, que es un archivo aparte que
+    casi ningún proveedor manda.
+
+    Compone con lo que ya existe: derivar_equivalencias_de_aplicaciones() cruza productos que le
+    sirven a los mismos autos, así que llenar esta tabla genera equivalencias nuevas solas.
+
+    Por eso mismo hay que ser cuidadoso: un modelo mal leído termina en una equivalencia falsa.
+    El modelo NO se adivina — tiene que estar en la lista que modelos_de_marca() ya deduce del
+    propio catálogo, contando en cuántas marcas distintas aparece cada palabra. Un ASTRA aparece
+    casi solo en Chevrolet y es un modelo; un BOMBA aparece en todas y no lo es. Si el modelo no
+    está confirmado así, la fila no se genera: sin modelo no sirve para buscar por vehículo, y
+    con un modelo inventado sirve para equivocarse."""
+    try:
+        c.execute("""SELECT p.id, p.codigo_raw, p.codigo_clean, p.descripcion, m.nombre AS marca
+                     FROM productos p JOIN marcas m ON m.id = p.marca_id
+                     WHERE p.descripcion IS NOT NULL AND p.descripcion <> ''
+                       AND p.codigo_clean NOT IN (SELECT codigo_clean FROM aplicaciones
+                                                   WHERE codigo_clean IS NOT NULL)
+                     ORDER BY p.id""")
+        filas = filas_a_listas(c)
+    except sqlite3.OperationalError as _err:
+        anotar_error("aplicaciones_desde_descripciones", _err)
+        return []
+
+    # El mismo testigo de caché que usa la pantalla de repuestos por vehículo: cambia al cargar
+    # una lista nueva, así los modelos se recalculan cuando el catálogo creció.
+    try:
+        c.execute("SELECT COUNT(*) FROM productos")
+        _version_cat = c.fetchone()[0]
+    except sqlite3.OperationalError as _err:
+        anotar_error("aplicaciones_desde_descripciones", _err)
+        _version_cat = 0
+
+    modelos_por_marca = {}
+    salida = []
+    for f in filas:
+        _, marca_auto, resto = separar_por_marca_vehiculo(f["descripcion"])
+        if not marca_auto or not resto:
+            continue
+        if marca_auto not in modelos_por_marca:
+            try:
+                modelos_por_marca[marca_auto] = {
+                    t for t, _n in modelos_de_marca(marca_auto, _version_cat)}
+            except Exception as _err:
+                anotar_error("aplicaciones_desde_descripciones", _err)
+                modelos_por_marca[marca_auto] = set()
+        conocidos = modelos_por_marca[marca_auto]
+        modelo = next((t for t in re.findall(r"[A-ZÁÉÍÓÚÑ][A-ZÁÉÍÓÚÑ0-9\-]{2,}", resto.upper())
+                       if t in conocidos), None)
+        if not modelo:
+            continue
+        desde, hasta = extraer_anios(f["descripcion"])
+        # El tipo de pieza hace falta de verdad: derivar_equivalencias_de_aplicaciones()
+        # descarta las filas que no lo tienen, y con razón —sin él cruzaría una bujía con un
+        # filtro por ir al mismo auto—. Se saca con el mismo clasificador que ya usa el resto.
+        # Y el motor va vacío, no NULL: esa consulta compara motor = motor, y en SQL dos NULL
+        # nunca son iguales, así que con NULL estas filas no se cruzarían ni entre ellas.
+        salida.append({
+            "_id": f["id"], "Código": f["codigo_raw"], "Marca": f["marca"],
+            "Descripción": f["descripcion"],
+            "Auto": marca_auto, "Modelo": modelo,
+            "Años": ("—" if not desde else f"{desde}"
+                      + (f"–{hasta}" if hasta else " en adelante")),
+            "Pieza": clasificar_repuesto(f["descripcion"]),
+            "_clean": f["codigo_clean"], "_desde": desde, "_hasta": hasta,
+        })
+        if len(salida) >= limite:
+            break
+    return salida
+
+
+def aplicar_aplicaciones_deducidas(filas):
+    """Guarda las aplicaciones leídas de las descripciones. Devuelve cuántas se cargaron.
+
+    Quedan con origen 'deducida' a propósito: así se distinguen de las que vinieron de un
+    catálogo de fabricante, que son palabra del que fabrica la pieza, y se pueden revisar o
+    borrar aparte si alguna salió mal."""
+    if not filas:
+        return 0
+    with db_lock:
+        c.executemany("""INSERT OR IGNORE INTO aplicaciones
+                         (marca_auto, modelo_auto, motor, anio_desde, anio_hasta,
+                          codigo, codigo_clean, marca_repuesto, tipo_pieza, origen)
+                         VALUES (?, ?, '', ?, ?, ?, ?, ?, ?, 'deducida')""",
+                      [(f["Auto"], f["Modelo"], f["_desde"], f["_hasta"],
+                        f["Código"], f["_clean"], f["Marca"],
+                        f.get("Pieza") or "") for f in filas])
+        conn.commit()
+    return len(filas)
+
+
 def autos_de_todas_las_fuentes(producto_id, codigo_clean, autos_de_la_descripcion):
     """Todos los autos a los que le va un producto, juntando lo que sabe la app.
 
@@ -19027,6 +19123,42 @@ if pagina == PAGINAS[7]:
         c.execute("SELECT COUNT(*) FROM productos")
         version_catalogo = c.fetchone()[0]   # cambia al cargar listas: refresca el caché
         disponibles = marcas_vehiculo_disponibles(version_catalogo)
+
+        # Guardar lo que dicen las descripciones, en vez de releerlas cada vez. Además de que
+        # buscar por vehículo pase a andar para esos productos, la app ya cruza los que le
+        # sirven a los mismos autos: llenar esta tabla genera equivalencias nuevas sola.
+        with st.expander("🪄 Leer de las descripciones a qué auto le va cada repuesto"):
+            explicar(
+                "Las listas ya dicen el auto («JUNTA TAPA FORD TAUNUS 1969/78»). Esto lo guarda "
+                "para poder buscar por vehículo.",
+                "El modelo no se adivina: tiene que ser uno que la app ya reconoce como modelo "
+                "de esa marca, mirando en cuántas marcas distintas aparece cada palabra en TU "
+                "catálogo. Un ASTRA aparece casi solo en Chevrolet y es un modelo; un BOMBA "
+                "aparece en todas y no lo es. Si el modelo no está confirmado así, esa fila no "
+                "se genera — con un modelo inventado la app cruzaría piezas que no van "
+                "juntas.\n\nQuedan marcadas como **deducidas**, para distinguirlas de las que "
+                "vinieron del catálogo de un fabricante y poder revisarlas aparte.",
+                en_expander=True
+            )
+            if st.button("🔍 Ver qué se podría cargar", key="btn_ver_aplic_desc"):
+                st.session_state["aplic_deducidas"] = aplicaciones_desde_descripciones()
+            _apl = st.session_state.get("aplic_deducidas")
+            if _apl is not None:
+                if not _apl:
+                    st.info("No encontré descripciones con una marca y un modelo reconocibles "
+                            "que no estén ya cargados.")
+                else:
+                    st.success(f"Se pueden cargar **{len(_apl)} aplicación(es)**. Revisá la "
+                               "muestra antes de aplicar:")
+                    st.dataframe([{k: v for k, v in f.items() if not k.startswith("_")}
+                                  for f in _apl[:50]],
+                                 use_container_width=True, hide_index=True)
+                    if st.button("✅ Cargar esas aplicaciones", type="primary",
+                                  key="btn_aplicar_aplic_desc"):
+                        _n = aplicar_aplicaciones_deducidas(_apl)
+                        st.session_state.pop("aplic_deducidas", None)
+                        avisar("success", f"Se cargaron {_n} aplicación(es) deducidas.")
+                        st.rerun()
 
         if not disponibles:
             st.info(
