@@ -4822,27 +4822,39 @@ def buscar_por_codigo(clean_code, marca_filtro="Todas", max_saltos=None):
     #     productos con ese código, de cualquier marca. Lo que faltaba era seguir haciéndolo al
     #     avanzar por la cadena. Esto no agrega una suposición nueva, empareja el recorrido con
     #     el arranque.
+    #
+    # El salto por código igual NO se aplica a códigos genéricos. Un "1234" de una marca y un
+    # "1234" de otra son casi seguro piezas distintas: los catálogos numeran de corrido y los
+    # números chicos se repiten en todos. Un "036115561G" repetido en dos listas, en cambio, es
+    # el mismo repuesto. El corte va en los puramente numéricos de menos de 6 dígitos y en
+    # cualquier código de menos de 4 caracteres — lo distintivo se mantiene, lo genérico no
+    # cruza. Es lo que evita que este atajo fusione familias que no tienen nada que ver.
     query = '''
-    WITH RECURSIVE Red(id, saltos, peor) AS (
-        SELECT id, 0, 100 FROM productos WHERE codigo_clean = ?
+    WITH RECURSIVE Red(id, saltos, peor, por_codigo) AS (
+        SELECT id, 0, 100, 0 FROM productos WHERE codigo_clean = ?
         UNION
         SELECT CASE WHEN eq.producto_a_id = re.id THEN eq.producto_b_id ELSE eq.producto_a_id END,
                re.saltos + 1,
-               MIN(re.peor, COALESCE(eq.confianza, 50))
+               MIN(re.peor, COALESCE(eq.confianza, 50)),
+               0
         FROM equivalencias eq JOIN Red re ON (eq.producto_a_id = re.id OR eq.producto_b_id = re.id)
         WHERE re.saltos < ?
         UNION
-        SELECT p2.id, re.saltos, re.peor
+        SELECT p2.id, re.saltos, re.peor, 1
         FROM Red re JOIN productos p1 ON p1.id = re.id
                     JOIN productos p2 ON p2.codigo_clean = p1.codigo_clean AND p2.id <> p1.id
         WHERE re.saltos < ?
+          AND LENGTH(p1.codigo_clean) >= 4
+          AND NOT (p1.codigo_clean GLOB '[0-9]*' AND NOT p1.codigo_clean GLOB '*[A-Z]*'
+                   AND LENGTH(p1.codigo_clean) < 6)
     )
     SELECT p.id AS "ID", p.codigo_raw AS "Codigo", p.descripcion AS "Descripcion",
            m.nombre AS "Marca", m.tipo AS "Tipo", p.precio AS "Precio", p.stock AS "Stock",
            p.favorito AS "Favorito", COALESCE(p.imagen_thumb, p.imagen_url) AS "Imagen",
            p.precio_costo AS "_costo",
            m.url_ficha_template AS "_template", MIN(r.saltos) AS "_saltos",
-           MAX(r.peor) AS "_peor"
+           MAX(r.peor) AS "_peor",
+           MIN(r.por_codigo) AS "_por_codigo"
     FROM Red r JOIN productos p ON p.id = r.id JOIN marcas m ON m.id = p.marca_id
     '''
     params = [clean_code, tope, tope]
@@ -4889,7 +4901,13 @@ def buscar_por_codigo(clean_code, marca_filtro="Todas", max_saltos=None):
     for fila in res:
         saltos = fila.pop("_saltos", 0) or 0
         peor = fila.pop("_peor", None)
+        # Se distingue CÓMO se llegó. Un vínculo lo puso alguien (una lista, o a mano) y puede
+        # estar mal; "mismo código" es que el número es idéntico en otra marca. Son dos tipos de
+        # evidencia distintos y mezclarlos en la misma etiqueta escondía cuál es cuál: mostrarlo
+        # deja decidir con el dato a la vista.
+        por_codigo = fila.pop("_por_codigo", 0)
         fila["Cadena"] = ("— el buscado" if saltos == 0 else
+                          "🔵 mismo código, otra marca" if por_codigo else
                           "🟢 directo" if saltos == 1 else
                           f"🟡 {saltos} saltos" if saltos <= 3 else
                           f"🔴 {saltos} saltos")
@@ -13142,6 +13160,19 @@ Casi todo lo que edita o borra algo pide la contraseña de administrador la prim
                 with st.expander(etiqueta_resultado, expanded=(total_codigos_buscados == 1)):
                     if res:
                         st.success(f"Se encontraron {len(res)} coincidencias:")
+
+                        # Llegar al tope de 400 no es solo "hay muchos": según el criterio de la
+                        # propia consulta, una red sana tiene entre 2 y 20 códigos. Cuatrocientos
+                        # significa casi siempre que un código puente fusionó familias que no
+                        # tienen relación. Truncar sin decirlo escondía justo esa señal.
+                        if len(res) >= 400:
+                            st.warning(
+                                "⚠️ La lista se cortó en **400 resultados**. Una red sana tiene "
+                                "entre 2 y 20 códigos: llegar a 400 casi siempre significa que "
+                                "**un vínculo mal cargado unió familias que no tienen que ver**. "
+                                "Conviene revisarlo con «Revisar la calidad de estos resultados» "
+                                "acá abajo, o bajar el límite a «Solo los directos»."
+                            )
 
                         # ¿Quedó algo afuera por el límite de saltos? El corte es sano —cuanto
                         # más larga la cadena, más chance de que un eslabón esté mal— pero cortar
