@@ -2547,6 +2547,10 @@ def informe_post_importacion(lote, nombre_prov, cargados):
         c.execute("SELECT COUNT(*) FROM equivalencias WHERE lote = ?", (lote,))
         cargadas = c.fetchone()[0]
         informe["vinculos_nuevos"] = pendientes + cargadas
+        # Separadas a propósito: no es lo mismo un vínculo cargado que uno esperando aprobación.
+        # Sumarlos y decir "entraron" es mentir justo donde más caro sale creerlo.
+        informe["cargadas"] = cargadas
+        informe["pendientes"] = pendientes
     except sqlite3.OperationalError as _err:
         anotar_error("informe_post_importacion", _err)
         pendientes = cargadas = 0
@@ -3769,6 +3773,20 @@ def resumen_lotes_pendientes():
     return [dict(r) for r in c.fetchall()]
 
 
+def equivalencias_esperando_revision():
+    """Cuántos vínculos hay cargados pero todavía sin aprobar.
+
+    Se muestra en el buscador porque es ahí donde se sufre: mientras estén esperando, buscar un
+    código NO trae los equivalentes de las otras marcas. Es exactamente el síntoma de «la app no
+    relaciona proveedores», y hasta ahora no había nada que lo dijera fuera de otra pantalla."""
+    try:
+        c.execute("SELECT COUNT(*) FROM equivalencias_pendientes")
+        return c.fetchone()[0]
+    except sqlite3.OperationalError as _err:
+        anotar_error("equivalencias_esperando_revision", _err)
+        return 0
+
+
 def contar_pendientes_del_lote(lote):
     c.execute("""SELECT COUNT(*) FROM equivalencias_pendientes
                  WHERE lote = ? AND producto_a_id < producto_b_id""", (lote,))
@@ -4789,25 +4807,57 @@ def buscar_por_codigo(clean_code, marca_filtro="Todas", max_saltos=None):
     # saltos, hace falta saber si esos dos saltos son sólidos. Una cadena vale lo que su eslabón
     # más flojo, así que se va guardando el mínimo. Los vínculos viejos, todavía sin puntuar,
     # cuentan como 50 (ni a favor ni en contra) para no ensuciar el resultado.
+    # Dos formas de llegar de un producto a otro, y hacían falta las dos:
+    #
+    #  1) por un VÍNCULO cargado (la lista del proveedor dijo que equivalen). Cuesta un salto.
+    #
+    #  2) porque son EL MISMO CÓDIGO cargado bajo dos marcas distintas. No cuesta salto: no es
+    #     una suposición, es el mismo número. Esto es lo que faltaba, y es el caso más común
+    #     entre listas de proveedores distintos: el proveedor A pone «036115561G» en su columna
+    #     OEM, y el proveedor B usa ese mismo número COMO SU PROPIO código. Quedaban como dos
+    #     productos separados —la base los separa por marca a propósito— y nada los unía, así
+    #     que buscar el código de A no traía nunca el de B. De ahí lo de «solo relaciona dentro
+    #     del mismo proveedor».
+    #     Ojo que la búsqueda YA hacía esto al arrancar: la primera línea trae TODOS los
+    #     productos con ese código, de cualquier marca. Lo que faltaba era seguir haciéndolo al
+    #     avanzar por la cadena. Esto no agrega una suposición nueva, empareja el recorrido con
+    #     el arranque.
+    #
+    # El salto por código igual NO se aplica a códigos genéricos. Un "1234" de una marca y un
+    # "1234" de otra son casi seguro piezas distintas: los catálogos numeran de corrido y los
+    # números chicos se repiten en todos. Un "036115561G" repetido en dos listas, en cambio, es
+    # el mismo repuesto. El corte va en los puramente numéricos de menos de 6 dígitos y en
+    # cualquier código de menos de 4 caracteres — lo distintivo se mantiene, lo genérico no
+    # cruza. Es lo que evita que este atajo fusione familias que no tienen nada que ver.
     query = '''
-    WITH RECURSIVE Red(id, saltos, peor) AS (
-        SELECT id, 0, 100 FROM productos WHERE codigo_clean = ?
+    WITH RECURSIVE Red(id, saltos, peor, por_codigo) AS (
+        SELECT id, 0, 100, 0 FROM productos WHERE codigo_clean = ?
         UNION
         SELECT CASE WHEN eq.producto_a_id = re.id THEN eq.producto_b_id ELSE eq.producto_a_id END,
                re.saltos + 1,
-               MIN(re.peor, COALESCE(eq.confianza, 50))
+               MIN(re.peor, COALESCE(eq.confianza, 50)),
+               0
         FROM equivalencias eq JOIN Red re ON (eq.producto_a_id = re.id OR eq.producto_b_id = re.id)
         WHERE re.saltos < ?
+        UNION
+        SELECT p2.id, re.saltos, re.peor, 1
+        FROM Red re JOIN productos p1 ON p1.id = re.id
+                    JOIN productos p2 ON p2.codigo_clean = p1.codigo_clean AND p2.id <> p1.id
+        WHERE re.saltos < ?
+          AND LENGTH(p1.codigo_clean) >= 4
+          AND NOT (p1.codigo_clean GLOB '[0-9]*' AND NOT p1.codigo_clean GLOB '*[A-Z]*'
+                   AND LENGTH(p1.codigo_clean) < 6)
     )
     SELECT p.id AS "ID", p.codigo_raw AS "Codigo", p.descripcion AS "Descripcion",
            m.nombre AS "Marca", m.tipo AS "Tipo", p.precio AS "Precio", p.stock AS "Stock",
            p.favorito AS "Favorito", COALESCE(p.imagen_thumb, p.imagen_url) AS "Imagen",
            p.precio_costo AS "_costo",
            m.url_ficha_template AS "_template", MIN(r.saltos) AS "_saltos",
-           MAX(r.peor) AS "_peor"
+           MAX(r.peor) AS "_peor",
+           MIN(r.por_codigo) AS "_por_codigo"
     FROM Red r JOIN productos p ON p.id = r.id JOIN marcas m ON m.id = p.marca_id
     '''
-    params = [clean_code, tope]
+    params = [clean_code, tope, tope]
     if marca_filtro and marca_filtro != "Todas":
         query += " WHERE UPPER(m.nombre) = ?"
         params.append(marca_filtro.upper())
@@ -4851,7 +4901,13 @@ def buscar_por_codigo(clean_code, marca_filtro="Todas", max_saltos=None):
     for fila in res:
         saltos = fila.pop("_saltos", 0) or 0
         peor = fila.pop("_peor", None)
+        # Se distingue CÓMO se llegó. Un vínculo lo puso alguien (una lista, o a mano) y puede
+        # estar mal; "mismo código" es que el número es idéntico en otra marca. Son dos tipos de
+        # evidencia distintos y mezclarlos en la misma etiqueta escondía cuál es cuál: mostrarlo
+        # deja decidir con el dato a la vista.
+        por_codigo = fila.pop("_por_codigo", 0)
         fila["Cadena"] = ("— el buscado" if saltos == 0 else
+                          "🔵 mismo código, otra marca" if por_codigo else
                           "🟢 directo" if saltos == 1 else
                           f"🟡 {saltos} saltos" if saltos <= 3 else
                           f"🔴 {saltos} saltos")
@@ -4871,6 +4927,45 @@ def buscar_por_codigo(clean_code, marca_filtro="Todas", max_saltos=None):
         template = fila.pop("_template", None)
         fila["Ficha"] = template.replace("{codigo}", quote(fila["Codigo"], safe="")) if template else ""
     return res
+
+
+def equivalentes_mas_alla_del_tope(clean_code, max_saltos):
+    """Cuántos equivalentes quedan FUERA del límite de saltos elegido, y de qué marcas.
+
+    El límite existe por una buena razón: cuanto más larga la cadena, más chance de que un
+    eslabón esté mal. Pero cortando en silencio pasa esto: cada lista cita sus propios códigos de
+    fábrica, esos se encadenan entre sí, y con el tope de 3 saltos se ven el proveedor propio y
+    uno más — el resto queda invisible sin que nada lo diga. Visto desde el mostrador es igual a
+    «no me relaciona los otros proveedores».
+
+    Así que no se cambia el límite: se avisa que hay más y se ofrece verlo."""
+    if not clean_code or not max_saltos:
+        return 0, []
+    consulta = """
+    WITH RECURSIVE Red(id, saltos) AS (
+        SELECT id, 0 FROM productos WHERE codigo_clean = ?
+        UNION
+        SELECT CASE WHEN eq.producto_a_id = re.id THEN eq.producto_b_id ELSE eq.producto_a_id END,
+               re.saltos + 1
+        FROM equivalencias eq JOIN Red re ON (eq.producto_a_id = re.id OR eq.producto_b_id = re.id)
+        WHERE re.saltos < 12
+        UNION
+        SELECT p2.id, re.saltos
+        FROM Red re JOIN productos p1 ON p1.id = re.id
+                    JOIN productos p2 ON p2.codigo_clean = p1.codigo_clean AND p2.id <> p1.id
+        WHERE re.saltos < 12
+    )
+    SELECT m.nombre AS marca, MIN(r.saltos) AS saltos
+    FROM Red r JOIN productos p ON p.id = r.id JOIN marcas m ON m.id = p.marca_id
+    GROUP BY p.id HAVING MIN(r.saltos) > ? LIMIT 400"""
+    try:
+        c.execute(consulta, (clean_code, int(max_saltos)))
+        filas = c.fetchall()
+    except sqlite3.OperationalError as _err:
+        anotar_error("equivalentes_mas_alla_del_tope", _err)
+        return 0, []
+    marcas = sorted({f["marca"] for f in filas if f["marca"] != "OEM / FABRICA"})
+    return len(filas), marcas
 
 
 def incrementar_veces_buscado(clean_code):
@@ -5439,6 +5534,120 @@ def diagnostico_de_salud():
     return problemas
 
 
+def diagnostico_par(codigo_a, codigo_b):
+    """Por qué estos dos códigos NO aparecen relacionados. Devuelve una lista de conclusiones.
+
+    Existe porque «no me relaciona los proveedores» puede venir de seis cosas distintas y desde
+    afuera se ven todas iguales: que un código no esté cargado, que el vínculo esté esperando
+    aprobación, que alguien lo haya rechazado antes, que estén conectados pero más lejos que el
+    límite de saltos, o que sencillamente ninguna lista los haya puesto nunca en la misma fila.
+    Adivinar cuál de las seis es, mirando la pantalla, no se puede. Esto lo dice."""
+    limpio_a, limpio_b = sanitizar(codigo_a), sanitizar(codigo_b)
+    pasos = []
+    if not limpio_a or not limpio_b:
+        return [("error", "Escribí los dos códigos.")]
+    if limpio_a == limpio_b:
+        return [("ok", "Son el mismo código: ya se encuentran entre sí.")]
+
+    def donde_esta(limpio, crudo):
+        c.execute("""SELECT p.id, p.codigo_raw, m.nombre AS marca FROM productos p
+                     JOIN marcas m ON m.id = p.marca_id WHERE p.codigo_clean = ?""", (limpio,))
+        return [dict(r) for r in c.fetchall()]
+
+    filas_a, filas_b = donde_esta(limpio_a, codigo_a), donde_esta(limpio_b, codigo_b)
+    for crudo, filas in ((codigo_a, filas_a), (codigo_b, filas_b)):
+        if not filas:
+            # ¿Está cargado con otra puntuación? Se busca por parecido del código limpio.
+            c.execute("""SELECT p.codigo_raw, m.nombre AS marca FROM productos p
+                         JOIN marcas m ON m.id = p.marca_id
+                         WHERE p.codigo_clean LIKE ? LIMIT 5""",
+                      (f"%{sanitizar(crudo)[:6]}%",))
+            parecidos = [f"{r['codigo_raw']} ({r['marca']})" for r in c.fetchall()]
+            pasos.append(("error",
+                          f"**{crudo}** no está cargado en la base."
+                          + (f" Parecidos que sí están: {', '.join(parecidos)}."
+                             if parecidos else
+                             " No hay ninguno parecido: esa lista no se importó, o el código "
+                             "viene escrito distinto en el Excel.")))
+    if not filas_a or not filas_b:
+        return pasos
+
+    pasos.append(("info", f"**{codigo_a}** está en: " +
+                  ", ".join(sorted({f["marca"] for f in filas_a})) +
+                  f". **{codigo_b}** está en: " +
+                  ", ".join(sorted({f["marca"] for f in filas_b})) + "."))
+
+    ids_a = {f["id"] for f in filas_a}
+    ids_b = {f["id"] for f in filas_b}
+
+    # ¿A qué distancia están, sin ningún límite?
+    marcadores_a = ",".join("?" * len(ids_a))
+    consulta = f"""
+    WITH RECURSIVE Red(id, saltos) AS (
+        SELECT id, 0 FROM productos WHERE id IN ({marcadores_a})
+        UNION
+        SELECT CASE WHEN eq.producto_a_id = re.id THEN eq.producto_b_id ELSE eq.producto_a_id END,
+               re.saltos + 1
+        FROM equivalencias eq JOIN Red re ON (eq.producto_a_id = re.id OR eq.producto_b_id = re.id)
+        WHERE re.saltos < 12
+        UNION
+        SELECT p2.id, re.saltos
+        FROM Red re JOIN productos p1 ON p1.id = re.id
+                    JOIN productos p2 ON p2.codigo_clean = p1.codigo_clean AND p2.id <> p1.id
+        WHERE re.saltos < 12
+    )
+    SELECT MIN(saltos) AS saltos FROM Red WHERE id IN ({",".join("?" * len(ids_b))})"""
+    try:
+        c.execute(consulta, list(ids_a) + list(ids_b))
+        fila = c.fetchone()
+        distancia = fila["saltos"] if fila else None
+    except sqlite3.OperationalError as _err:
+        anotar_error("diagnostico_par", _err)
+        distancia = None
+
+    if distancia is not None:
+        pasos.append(("ok", f"**Sí están relacionados**, a {distancia} salto(s) de distancia."))
+        if distancia > 3:
+            pasos.append(("aviso",
+                          f"Pero el buscador viene con el límite en **3 saltos**, y estos están "
+                          f"a {distancia}. Por eso no aparecen: hay que poner **Toda la cadena** "
+                          "en «Qué tan lejos buscar»."))
+        return pasos
+
+    # No están relacionados. ¿Por qué?
+    try:
+        c.execute("""SELECT COUNT(*) AS n FROM equivalencias_pendientes
+                     WHERE (producto_a_id IN ({}) AND producto_b_id IN ({}))
+                        OR (producto_b_id IN ({}) AND producto_a_id IN ({}))""".format(
+                  marcadores_a, ",".join("?" * len(ids_b)),
+                  marcadores_a, ",".join("?" * len(ids_b))),
+                  list(ids_a) + list(ids_b) + list(ids_a) + list(ids_b))
+        esperando = c.fetchone()["n"]
+    except sqlite3.OperationalError as _err:
+        anotar_error("diagnostico_par", _err)
+        esperando = 0
+    if esperando:
+        pasos.append(("aviso",
+                      "El vínculo **existe pero está esperando aprobación**. Andá a "
+                      "Estadísticas → 🔗 Equivalencias sugeridas y aprobalo."))
+        return pasos
+
+    rechazados = pares_rechazados()
+    if any((a, b) in rechazados or (b, a) in rechazados for a in ids_a for b in ids_b):
+        pasos.append(("aviso",
+                      "Este par fue **rechazado** en una revisión anterior, así que la app no lo "
+                      "vuelve a proponer. Si en realidad sí equivalen, vinculalos a mano acá "
+                      "abajo."))
+        return pasos
+
+    pasos.append(("error",
+                  "**Ninguna lista los puso nunca en la misma fila**, y no comparten ningún "
+                  "código de fábrica. La app no tiene de dónde deducir que son lo mismo: sin un "
+                  "dato en común, no hay nada que relacionar. Si vos sabés que equivalen, "
+                  "vinculalos a mano acá abajo y la cadena hace el resto."))
+    return pasos
+
+
 def camino_entre(origen_id, destino_id, tope_nodos=3000):
     """Por qué cadena de vínculos este resultado llegó hasta acá. Devuelve la lista de pasos.
 
@@ -5715,9 +5924,19 @@ def cortar_vinculos_de(producto_id):
 
 
 def listar_codigos_basura(limite=200):
-    """Productos ya cargados cuyo código es solo 1 o 2 dígitos ('1', '12', '07'). Entraron con
-    las importaciones viejas, antes del filtro, y son los que arrastran equivalencias falsas:
-    todos los '1' de todas las listas terminaron vinculados entre sí."""
+    """Productos ya cargados cuyo código no es un código.
+
+    Dos casos, los dos de importaciones viejas:
+
+    · Códigos de 1 o 2 caracteres ('1', '12', '07', '1S'). Arrastran equivalencias falsas: todos
+      los '1' de todas las listas terminaron vinculados entre sí.
+
+    · Productos cuyo código ES su propia descripción ("FILTRO ACEITE VW"). Salían de que el
+      importador, cuando no encontraba una columna de OEM, asumía la columna 1 —que en una lista
+      sin OEM suele ser la descripción— y cargaba el texto como si fuera un código de fábrica.
+      No coinciden con nada, y encima ocupan el lugar del código OEM real, que es el único puente
+      entre las listas de dos proveedores distintos. El importador ya no lo hace; esto es para
+      encontrar los que quedaron de antes."""
     # Se incluyen TODOS los de 1 o 2 caracteres, tengan letra o no. Antes solo se limpiaban los
     # puramente numéricos, así que un "1S" quedaba en la base generando cientos de pendientes.
     c.execute("""SELECT p.id AS "ID", p.codigo_raw AS "Codigo", p.descripcion AS "Descripcion",
@@ -5726,6 +5945,8 @@ def listar_codigos_basura(limite=200):
                    WHERE e.producto_a_id = p.id OR e.producto_b_id = p.id) AS "Vinculos"
                  FROM productos p JOIN marcas m ON m.id = p.marca_id
                  WHERE LENGTH(p.codigo_clean) <= 2
+                    OR (p.descripcion IS NOT NULL AND p.descripcion <> ''
+                        AND p.codigo_raw = p.descripcion AND LENGTH(p.codigo_clean) > 8)
                  ORDER BY "Vinculos" DESC LIMIT ?""", (limite,))
     return [dict(r) for r in c.fetchall()]
 
@@ -6353,13 +6574,26 @@ def codigo_sospechoso(codigo, descripcion=""):
         return True, f"«{texto}» es demasiado corto para ser un código"
     if re.fullmatch(r"\d{1,3}", limpio):
         return True, f"«{texto}» es solo un número chico, no parece un código"
-    if re.search(r"[Ee][+\-]\d+", texto):
+    # OJO con este: tiene que ser el código ENTERO el que sea un número en notación científica,
+    # que es lo que hace Excel cuando el código es largo y numérico ("1.09E+11"). Antes se
+    # buscaba el patrón en cualquier parte del texto, y así «BE-777» quedaba marcado: la E de
+    # "BE" seguida de "-777" alcanzaba. Se comía todos los códigos tipo BE-, DE-, SE-, RE-, que
+    # son de lo más común, y esos vínculos quedaban en la cola de revisión para siempre — o sea,
+    # los equivalentes de ese proveedor no aparecían nunca en una búsqueda.
+    # Es la misma regla que usa sanitizar() unas líneas más arriba; acá estaba más floja.
+    if re.fullmatch(r"\d+(?:[.,]\d+)?[Ee][+\-]?\d+", texto.strip()):
         return True, f"«{texto}» quedó en notación científica de Excel (el número real se perdió)"
     if not es_por_medida:
         if re.search(r"\d\s*[xX]\s*\d+[.,]?\d*\s*[xX]?\s*\d*\s*(MM|mm)?$", texto) and "x" in texto.lower():
             return True, f"«{texto}» parece una medida, no un código"
-        if re.search(r"\d+\s*(MM|CM|CC|ML|KG|GR|LTS?|V|W)\b", texto, re.I):
+        # Las unidades de varias letras (MM, CC, KG...) van como antes. V y W sueltos, en
+        # cambio, solo cuentan si el código ES el número y nada más ("24V", "1.6W"): una V o una
+        # W al final es de lo más común en códigos de verdad —MD-135V, AB-100V, XW-25W— y
+        # marcarlos mandaba a revisión manual vínculos que estaban perfectos.
+        if re.search(r"\d+\s*(MM|CM|CC|ML|KG|GR|LTS?)\b", texto, re.I):
             return True, f"«{texto}» parece una medida o especificación"
+        if re.fullmatch(r"\d+(?:[.,]\d+)?\s*[VW]", texto.strip(), re.I):
+            return True, f"«{texto}» parece una especificación eléctrica, no un código"
         if "Ø" in texto or '"' in texto or "″" in texto:
             return True, f"«{texto}» tiene símbolos de medida (Ø o pulgadas)"
     if re.search(r"\b(DIESEL|NAFTA|SECTOR|CANAL|JUEGO|ARO|CHAPA|TIPO|MEDIDA)\b", texto, re.I):
@@ -12473,6 +12707,18 @@ if pagina == PAGINAS[0]:
 Casi todo lo que edita o borra algo pide la contraseña de administrador la primera vez que lo usás.
         """)
 
+    # Lo que está esperando aprobación se avisa ACÁ, no solo en Estadísticas. Mientras haya
+    # vínculos sin aprobar, la búsqueda no cruza marcas: se busca un código de un proveedor y no
+    # aparecen los equivalentes de los otros. Visto desde el mostrador eso se parece bastante a
+    # «la app no relaciona proveedores», y no había nada en esta pantalla que lo explicara.
+    _esperando = equivalencias_esperando_revision()
+    if _esperando:
+        st.warning(
+            f"🔒 Hay **{_esperando:,} equivalencia(s) esperando aprobación**. Hasta que las "
+            "apruebes no se usan: buscar un código no va a traer los equivalentes de las otras "
+            "marcas. Se aprueban en bloque desde **Estadísticas → 🔗 Equivalencias sugeridas**."
+        )
+
     # Si se tocó un botón de sugerencia rápida (favorito o búsqueda reciente), precargamos el
     # campo de búsqueda ANTES de crear el widget — si se hace después de creado, Streamlit tira error.
     if "sugerencia_busqueda" in st.session_state:
@@ -12915,6 +13161,36 @@ Casi todo lo que edita o borra algo pide la contraseña de administrador la prim
                     if res:
                         st.success(f"Se encontraron {len(res)} coincidencias:")
 
+                        # Llegar al tope de 400 no es solo "hay muchos": según el criterio de la
+                        # propia consulta, una red sana tiene entre 2 y 20 códigos. Cuatrocientos
+                        # significa casi siempre que un código puente fusionó familias que no
+                        # tienen relación. Truncar sin decirlo escondía justo esa señal.
+                        if len(res) >= 400:
+                            st.warning(
+                                "⚠️ La lista se cortó en **400 resultados**. Una red sana tiene "
+                                "entre 2 y 20 códigos: llegar a 400 casi siempre significa que "
+                                "**un vínculo mal cargado unió familias que no tienen que ver**. "
+                                "Conviene revisarlo con «Revisar la calidad de estos resultados» "
+                                "acá abajo, o bajar el límite a «Solo los directos»."
+                            )
+
+                        # ¿Quedó algo afuera por el límite de saltos? El corte es sano —cuanto
+                        # más larga la cadena, más chance de que un eslabón esté mal— pero cortar
+                        # EN SILENCIO es lo que hace pensar que la app no relaciona proveedores:
+                        # cada lista cita sus propios códigos de fábrica, esos se encadenan, y con
+                        # 3 saltos se ve el proveedor propio y uno más. El resto existe y no se
+                        # muestra. Así que se avisa y se ofrece verlo.
+                        _mas, _marcas_mas = equivalentes_mas_alla_del_tope(clean, max_saltos)
+                        if _mas:
+                            _de_quien = (" de " + ", ".join(_marcas_mas[:4])
+                                          + (" y otras" if len(_marcas_mas) > 4 else "")
+                                          ) if _marcas_mas else ""
+                            st.info(
+                                f"🔗 Hay **{_mas} equivalencia(s) más**{_de_quien}, un poco más "
+                                "lejos en la cadena. No se muestran por el límite de arriba "
+                                "(**Qué tan lejos buscar**): poniendo **Toda la cadena** "
+                                "aparecen."
+                            )
 
                         # Filtro de stock: un botón que ahorra scroll en cada consulta. Va
                         # antes de la tabla porque decide QUÉ se muestra, no cómo.
@@ -13886,6 +14162,20 @@ def vincular_grupo_equivalencias(productos_info, nivel, nota, verificar):
 
 if pagina == PAGINAS[1]:
     st.subheader("Vincular varios códigos como equivalentes")
+
+    # Antes de vincular a mano conviene saber POR QUÉ no están relacionados: puede que ya lo
+    # estén y no se vean por el límite de saltos, que el vínculo esté esperando aprobación, o
+    # que alguien lo haya rechazado. Vincular a mano sin mirar eso tapa el problema de fondo.
+    with st.expander("🔎 ¿Por qué estos dos códigos no se relacionan?"):
+        st.caption("Poné un código de cada proveedor y te digo qué está pasando con ese par.")
+        dg1, dg2 = cols(2)
+        _diag_a = dg1.text_input("Un código:", key="diag_a", placeholder="El de un proveedor")
+        _diag_b = dg2.text_input("El otro:", key="diag_b", placeholder="El del otro proveedor")
+        if st.button("Revisar el par", disabled=not (_diag_a.strip() and _diag_b.strip())):
+            for _nivel, _texto in diagnostico_par(_diag_a, _diag_b):
+                {"ok": st.success, "aviso": st.warning,
+                 "error": st.error}.get(_nivel, st.info)(_texto)
+
     explicar(
         "Armá un grupo de códigos — de la marca/proveedor que sea, se pueden mezclar — y "
         "vinculalos todos entre sí de una sola vez.",
@@ -14143,7 +14433,14 @@ if pagina == PAGINAS[2]:
                             "una mirando los datos. **Revisá la tabla de más abajo** antes de importar."
                         )
                 idx_prov_auto = sugerido["prov"]
-                idx_oem_auto = sugerido["oem"] if sugerido["oem"] is not None else min(1, len(encabezado) - 1)
+                # Si ninguna columna parece de OEM, se deja en "Ninguna" y decide la persona.
+                # Antes se asumía la columna 1 —la segunda, fuera lo que fuera—: en una lista sin
+                # OEM esa es la DESCRIPCIÓN, así que se cargaban productos con códigos como
+                # "FILTROACEITEVW" bajo la marca OEM y se les colgaban equivalencias. Además de
+                # ensuciar la base, tapaba justo lo que hace falta para cruzar proveedores: en
+                # vez de un código de fábrica real —el único puente entre dos listas— quedaba un
+                # texto que no coincide con nada.
+                idx_oem_auto = sugerido["oem"]
                 idx_desc_auto = sugerido["desc"]
                 idx_precio_sug, idx_stock_sug = sugerido["precio"], sugerido["stock"]
 
@@ -14613,7 +14910,19 @@ if pagina == PAGINAS[2]:
 
                     progreso.empty()
 
-                    st.success(f"Se importaron {cargados} filas con equivalencia.")
+                    if cargar_directo:
+                        st.success(f"Se importaron {cargados} filas con equivalencia.")
+                    else:
+                        # En verde y con la palabra "equivalencia" parecía que ya estaban puestas.
+                        # No lo están: van a la cola de revisión, y hasta que se aprueben la
+                        # búsqueda NO cruza marcas. Decirlo mal es lo que hace que alguien importe
+                        # tres listas, busque un código y crea que la app no relaciona proveedores.
+                        st.warning(
+                            f"Se leyeron {cargados} fila(s) y los productos y precios ya están "
+                            "cargados, **pero las equivalencias todavía NO**: quedaron esperando "
+                            "tu aprobación. Hasta que las apruebes, buscar un código no va a "
+                            "traer los equivalentes de otras marcas."
+                        )
                     # Los números del chequeo de salud cambiaron: que se recalculen
                     invalidar_salud()
 
@@ -14636,6 +14945,9 @@ if pagina == PAGINAS[2]:
                         for nivel, titulo, detalle, donde in _inf["puntos"]:
                             (st.error if nivel == "alto" else st.warning)(
                                 f"**{titulo}**\n\n{detalle}\n\n📍 {donde}")
+                    elif _inf.get("pendientes"):
+                        st.info(f"🔎 Se revisaron {_inf['pendientes']} vínculo(s) y ninguno "
+                                 "disparó alarmas. Siguen esperando tu aprobación.")
                     elif _inf["vinculos_nuevos"]:
                         st.info(f"✅ Entraron {_inf['vinculos_nuevos']} vínculo(s) y ninguno "
                                  "disparó alarmas.")
