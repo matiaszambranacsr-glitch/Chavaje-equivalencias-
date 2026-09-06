@@ -4807,6 +4807,21 @@ def buscar_por_codigo(clean_code, marca_filtro="Todas", max_saltos=None):
     # saltos, hace falta saber si esos dos saltos son sólidos. Una cadena vale lo que su eslabón
     # más flojo, así que se va guardando el mínimo. Los vínculos viejos, todavía sin puntuar,
     # cuentan como 50 (ni a favor ni en contra) para no ensuciar el resultado.
+    # Dos formas de llegar de un producto a otro, y hacían falta las dos:
+    #
+    #  1) por un VÍNCULO cargado (la lista del proveedor dijo que equivalen). Cuesta un salto.
+    #
+    #  2) porque son EL MISMO CÓDIGO cargado bajo dos marcas distintas. No cuesta salto: no es
+    #     una suposición, es el mismo número. Esto es lo que faltaba, y es el caso más común
+    #     entre listas de proveedores distintos: el proveedor A pone «036115561G» en su columna
+    #     OEM, y el proveedor B usa ese mismo número COMO SU PROPIO código. Quedaban como dos
+    #     productos separados —la base los separa por marca a propósito— y nada los unía, así
+    #     que buscar el código de A no traía nunca el de B. De ahí lo de «solo relaciona dentro
+    #     del mismo proveedor».
+    #     Ojo que la búsqueda YA hacía esto al arrancar: la primera línea trae TODOS los
+    #     productos con ese código, de cualquier marca. Lo que faltaba era seguir haciéndolo al
+    #     avanzar por la cadena. Esto no agrega una suposición nueva, empareja el recorrido con
+    #     el arranque.
     query = '''
     WITH RECURSIVE Red(id, saltos, peor) AS (
         SELECT id, 0, 100 FROM productos WHERE codigo_clean = ?
@@ -4815,6 +4830,11 @@ def buscar_por_codigo(clean_code, marca_filtro="Todas", max_saltos=None):
                re.saltos + 1,
                MIN(re.peor, COALESCE(eq.confianza, 50))
         FROM equivalencias eq JOIN Red re ON (eq.producto_a_id = re.id OR eq.producto_b_id = re.id)
+        WHERE re.saltos < ?
+        UNION
+        SELECT p2.id, re.saltos, re.peor
+        FROM Red re JOIN productos p1 ON p1.id = re.id
+                    JOIN productos p2 ON p2.codigo_clean = p1.codigo_clean AND p2.id <> p1.id
         WHERE re.saltos < ?
     )
     SELECT p.id AS "ID", p.codigo_raw AS "Codigo", p.descripcion AS "Descripcion",
@@ -4825,7 +4845,7 @@ def buscar_por_codigo(clean_code, marca_filtro="Todas", max_saltos=None):
            MAX(r.peor) AS "_peor"
     FROM Red r JOIN productos p ON p.id = r.id JOIN marcas m ON m.id = p.marca_id
     '''
-    params = [clean_code, tope]
+    params = [clean_code, tope, tope]
     if marca_filtro and marca_filtro != "Todas":
         query += " WHERE UPPER(m.nombre) = ?"
         params.append(marca_filtro.upper())
@@ -5733,9 +5753,19 @@ def cortar_vinculos_de(producto_id):
 
 
 def listar_codigos_basura(limite=200):
-    """Productos ya cargados cuyo código es solo 1 o 2 dígitos ('1', '12', '07'). Entraron con
-    las importaciones viejas, antes del filtro, y son los que arrastran equivalencias falsas:
-    todos los '1' de todas las listas terminaron vinculados entre sí."""
+    """Productos ya cargados cuyo código no es un código.
+
+    Dos casos, los dos de importaciones viejas:
+
+    · Códigos de 1 o 2 caracteres ('1', '12', '07', '1S'). Arrastran equivalencias falsas: todos
+      los '1' de todas las listas terminaron vinculados entre sí.
+
+    · Productos cuyo código ES su propia descripción ("FILTRO ACEITE VW"). Salían de que el
+      importador, cuando no encontraba una columna de OEM, asumía la columna 1 —que en una lista
+      sin OEM suele ser la descripción— y cargaba el texto como si fuera un código de fábrica.
+      No coinciden con nada, y encima ocupan el lugar del código OEM real, que es el único puente
+      entre las listas de dos proveedores distintos. El importador ya no lo hace; esto es para
+      encontrar los que quedaron de antes."""
     # Se incluyen TODOS los de 1 o 2 caracteres, tengan letra o no. Antes solo se limpiaban los
     # puramente numéricos, así que un "1S" quedaba en la base generando cientos de pendientes.
     c.execute("""SELECT p.id AS "ID", p.codigo_raw AS "Codigo", p.descripcion AS "Descripcion",
@@ -5744,6 +5774,8 @@ def listar_codigos_basura(limite=200):
                    WHERE e.producto_a_id = p.id OR e.producto_b_id = p.id) AS "Vinculos"
                  FROM productos p JOIN marcas m ON m.id = p.marca_id
                  WHERE LENGTH(p.codigo_clean) <= 2
+                    OR (p.descripcion IS NOT NULL AND p.descripcion <> ''
+                        AND p.codigo_raw = p.descripcion AND LENGTH(p.codigo_clean) > 8)
                  ORDER BY "Vinculos" DESC LIMIT ?""", (limite,))
     return [dict(r) for r in c.fetchall()]
 
@@ -14186,7 +14218,14 @@ if pagina == PAGINAS[2]:
                             "una mirando los datos. **Revisá la tabla de más abajo** antes de importar."
                         )
                 idx_prov_auto = sugerido["prov"]
-                idx_oem_auto = sugerido["oem"] if sugerido["oem"] is not None else min(1, len(encabezado) - 1)
+                # Si ninguna columna parece de OEM, se deja en "Ninguna" y decide la persona.
+                # Antes se asumía la columna 1 —la segunda, fuera lo que fuera—: en una lista sin
+                # OEM esa es la DESCRIPCIÓN, así que se cargaban productos con códigos como
+                # "FILTROACEITEVW" bajo la marca OEM y se les colgaban equivalencias. Además de
+                # ensuciar la base, tapaba justo lo que hace falta para cruzar proveedores: en
+                # vez de un código de fábrica real —el único puente entre dos listas— quedaba un
+                # texto que no coincide con nada.
+                idx_oem_auto = sugerido["oem"]
                 idx_desc_auto = sugerido["desc"]
                 idx_precio_sug, idx_stock_sug = sugerido["precio"], sugerido["stock"]
 
