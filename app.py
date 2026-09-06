@@ -6456,6 +6456,128 @@ def bajar_fotos_desde_catalogo(marca_id, limite=100, progreso=None, hilos=6, liv
     return bajadas, fallidas, sin_foto
 
 
+def codigos_en_una_ficha(url_ficha, codigo_propio, tiempo_maximo=12):
+    """Abre la ficha de un producto en el catálogo del proveedor y saca los OTROS códigos que
+    aparecen ahí. Devuelve (lista de códigos, error).
+
+    Las fichas de catálogo suelen listar las referencias cruzadas —«equivale a», «OEM», «cross
+    reference»— que es justo la información que uno cargaría a mano código por código. Es la
+    misma fuente que ya se usa para las fotos y para los autos; lo que faltaba era leer los
+    números.
+
+    No inventa: usa el mismo extractor conservador de siempre (extraer_codigos_de_texto), que
+    descarta palabras sin números, años, cilindradas y códigos de motor. Y descarta el propio
+    código, que obviamente está escrito en su ficha."""
+    import requests
+    try:
+        respuesta = requests.get(
+            url_ficha, timeout=tiempo_maximo,
+            headers={"User-Agent": "Mozilla/5.0 (compatible; EquivalenciasElChavo/1.0)"})
+        if respuesta.status_code != 200:
+            return [], f"la ficha respondió {respuesta.status_code}"
+    except Exception as e:
+        anotar_error("codigos_en_una_ficha", e)
+        return [], type(e).__name__
+
+    # Se sacan los scripts y estilos antes de mirar el texto: adentro hay identificadores y
+    # números de versión que parecen códigos y no lo son.
+    html = re.sub(r"(?is)<(script|style)[^>]*>.*?</\1>", " ", respuesta.text)
+    texto = re.sub(r"<[^>]+>", " ", html)
+    texto = re.sub(r"\s+", " ", texto)
+
+    propio = sanitizar(codigo_propio)
+    encontrados, vistos = [], {propio}
+    for candidato in extraer_codigos_de_texto(texto):
+        limpio = sanitizar(candidato)
+        if not limpio or limpio in vistos:
+            continue
+        malo, _motivo = codigo_sospechoso(candidato)
+        if malo:
+            continue
+        vistos.add(limpio)
+        encontrados.append(candidato)
+    if not encontrados:
+        return [], "no encontré códigos en la ficha"
+    return encontrados, None
+
+
+def equivalencias_desde_catalogo(marca_id, limite=50, progreso=None, cancelado=None, hilos=4):
+    """Recorre las fichas del catálogo digital de una marca y propone las equivalencias que
+    encuentra escritas ahí. Devuelve (propuestas, fallidas, consultados).
+
+    Las propuestas NO se cargan solas: van a la misma cola de revisión que todo lo demás. Una
+    ficha puede listar accesorios, repuestos relacionados o el código de un kit, y eso no es una
+    equivalencia — la diferencia la tiene que poner una persona mirando.
+
+    Solo se proponen códigos que YA existan en tu catálogo. Proponer una equivalencia contra un
+    código que no tenés cargado no le sirve a nadie: no lo podrías vender ni buscar."""
+    c.execute("SELECT nombre, url_ficha_template FROM marcas WHERE id = ?", (marca_id,))
+    fila = c.fetchone()
+    if not fila or not fila["url_ficha_template"]:
+        return [], [("", "esa marca no tiene cargada la dirección de su catálogo")], 0
+    plantilla, nombre_marca = fila["url_ficha_template"], fila["nombre"]
+
+    # Primero los que tienen stock: si algo va a salir del mostrador hoy, que sea eso lo que
+    # tenga las equivalencias completas.
+    c.execute("""SELECT id, codigo_raw, codigo_clean FROM productos
+                 WHERE marca_id = ? ORDER BY (COALESCE(stock, 0) > 0) DESC, id LIMIT ?""",
+              (marca_id, limite))
+    pendientes = [(r["id"], r["codigo_raw"], r["codigo_clean"]) for r in c.fetchall()]
+    if not pendientes:
+        return [], [], 0
+
+    def traer(tarea):
+        _pid, codigo, _limpio = tarea
+        # El código se limpia antes de meterlo en la dirección, igual que en el resto: sin esto
+        # un código con «?» o «..» convertiría una consulta en otra cosa.
+        seguro = re.sub(r"[^A-Za-z0-9._/-]", "", str(codigo).strip())[:60]
+        if not seguro or ".." in seguro or seguro.startswith("/"):
+            return None, "ese código no se puede usar en una dirección"
+        return codigos_en_una_ficha(plantilla.replace("{codigo}", quote(seguro, safe="")), codigo)
+
+    resultados = _bajar_en_paralelo(pendientes, traer, hilos=hilos, progreso=progreso,
+                                    cancelado=cancelado)
+
+    propuestas, fallidas = [], []
+    for (pid, codigo, limpio), codigos, error in resultados:
+        if error or not codigos:
+            fallidas.append((codigo, error or "sin códigos"))
+            continue
+        for otro in codigos:
+            otro_limpio = sanitizar(otro)
+            c.execute("""SELECT p.id, p.codigo_raw, m.nombre AS marca FROM productos p
+                         JOIN marcas m ON m.id = p.marca_id
+                         WHERE p.codigo_clean = ? AND p.id <> ? LIMIT 1""", (otro_limpio, pid))
+            destino = c.fetchone()
+            if not destino:
+                continue        # ese código no está en tu catálogo: no sirve proponerlo
+            propuestas.append({
+                "Código": codigo, "Marca": nombre_marca,
+                "Equivale a": destino["codigo_raw"], "Marca del otro": destino["marca"],
+                "_a": min(pid, destino["id"]), "_b": max(pid, destino["id"]),
+            })
+    return propuestas, fallidas, len(pendientes)
+
+
+def guardar_equivalencias_de_catalogo(propuestas, marca):
+    """Manda a revisión lo que se leyó de las fichas. Devuelve cuántas quedaron pendientes."""
+    if not propuestas:
+        return 0
+    lote = f"CATÁLOGO {marca} · {datetime.now():%d/%m %H:%M}"
+    rechazados = pares_rechazados()
+    nuevas = [(p["_a"], p["_b"]) for p in propuestas
+              if (p["_a"], p["_b"]) not in rechazados]
+    if not nuevas:
+        return 0
+    with db_lock:
+        c.executemany("""INSERT OR IGNORE INTO equivalencias_pendientes
+                         (producto_a_id, producto_b_id, origen, lote)
+                         VALUES (?, ?, 'ficha', ?)""",
+                      [(a, b, lote) for a, b in nuevas])
+        conn.commit()
+    return len(nuevas)
+
+
 def peso_estimado_por_foto(liviano=True):
     """KB aproximados que ocupa cada foto en la base, para poder avisar antes de llenarla.
     Medido sobre fotos de producto reales: en liviano son la firma visual (~20 KB) más la
@@ -16687,6 +16809,91 @@ if pagina == PAGINAS[3]:
                             avisar("success", f"{n} equivalencia(s) quedaron para revisar.")
                             st.rerun()
                 st.markdown("---")
+
+            # Leer las equivalencias que el propio proveedor publica en su catálogo web. Es la
+            # misma fuente que ya se usa para las fotos y para los autos de cada ficha; lo que
+            # faltaba era leer los números cruzados que la ficha lista.
+            c.execute("""SELECT m.id, m.nombre, COUNT(p.id) AS productos
+                         FROM marcas m JOIN productos p ON p.marca_id = m.id
+                         WHERE m.url_ficha_template IS NOT NULL AND m.url_ficha_template <> ''
+                         GROUP BY m.id ORDER BY productos DESC""")
+            marcas_con_ficha = [dict(r) for r in c.fetchall()]
+
+            st.markdown("**🌐 Leer equivalencias del catálogo digital del proveedor**")
+            explicar(
+                "Entra a la ficha de cada código en la web del proveedor y trae los códigos "
+                "cruzados que estén publicados ahí.",
+                "Muchas fichas listan las referencias cruzadas —«equivale a», «OEM», «cross "
+                "reference»—, que es justo lo que uno cargaría a mano código por código.\n\n"
+                "Hace falta que la marca tenga cargada la **dirección de su catálogo** en "
+                "Administrar → Marcas, con `{codigo}` donde va el número.\n\n"
+                "Dos límites que conviene saber de entrada: si la ficha arma su contenido con "
+                "JavaScript, lo que llega es la página vacía y no se lee nada — no todos los "
+                "catálogos se dejan; y solo se proponen códigos que YA tengas cargados, porque "
+                "una equivalencia contra algo que no tenés no se puede ni vender ni buscar.\n\n"
+                "Nada se carga solo: todo va a la misma cola de revisión. Una ficha también "
+                "lista accesorios y kits, y eso no es una equivalencia."
+            )
+            if not marcas_con_ficha:
+                st.info(
+                    "Ninguna marca tiene cargada la dirección de su catálogo. Se carga en "
+                    "Administrar → 🏷️ Marcas, en «patrón de link»."
+                )
+            else:
+                opciones_mf = {f"{m['nombre']} ({m['productos']} códigos)": m["id"]
+                               for m in marcas_con_ficha}
+                elegida_mf = st.selectbox("Marca:", list(opciones_mf.keys()),
+                                           key="marca_equiv_catalogo")
+                # El valor por defecto va por session_state y no por value=: con key= puesto,
+                # Streamlit ignora value= a partir del segundo dibujo y el slider parece que
+                # "no obedece". Es la misma forma que usa el resto de la app.
+                st.session_state.setdefault("tanda_equiv_catalogo", 25)
+                cuantos_mf = st.select_slider(
+                    "Cuántas fichas consultar en esta tanda:", options=[10, 25, 50, 100, 200],
+                    key="tanda_equiv_catalogo",
+                    help="Cada ficha es una consulta al sitio del proveedor. De a poco primero, "
+                         "para ver si ese catálogo se deja leer antes de pedirle 200 páginas.")
+                if st.button("🌐 Leer las fichas y proponer equivalencias"):
+                    barra_mf = st.progress(0.0)
+                    with st.spinner("Consultando el catálogo del proveedor..."):
+                        _props, _falla, _consult = equivalencias_desde_catalogo(
+                            opciones_mf[elegida_mf], limite=int(cuantos_mf),
+                            progreso=lambda hechos, total: barra_mf.progress(
+                                min(hechos / max(total, 1), 1.0)))
+                    barra_mf.empty()
+                    st.session_state["equiv_catalogo"] = {
+                        "propuestas": _props, "fallidas": _falla,
+                        "consultados": _consult, "marca": elegida_mf.split(" (")[0]}
+                _ec = st.session_state.get("equiv_catalogo")
+                if _ec is not None:
+                    st.caption(f"Se consultaron {_ec['consultados']} ficha(s); "
+                               f"{len(_ec['fallidas'])} no se pudieron leer.")
+                    if not _ec["propuestas"]:
+                        st.info(
+                            "No salió ninguna equivalencia. O ese catálogo no publica las "
+                            "referencias cruzadas, o arma la página con JavaScript y llega "
+                            "vacía, o los códigos que lista todavía no están en tus listas."
+                        )
+                        if _ec["fallidas"]:
+                            st.dataframe(
+                                [{"Código": cod, "Qué pasó": err}
+                                 for cod, err in _ec["fallidas"][:30]],
+                                use_container_width=True, hide_index=True)
+                    else:
+                        st.success(f"Se encontraron **{len(_ec['propuestas'])} equivalencia(s)** "
+                                   "publicadas en las fichas.")
+                        st.dataframe(
+                            [{k: v for k, v in x.items() if not k.startswith("_")}
+                             for x in _ec["propuestas"][:100]],
+                            use_container_width=True, hide_index=True)
+                        if st.button(f"📥 Mandar las {len(_ec['propuestas'])} a revisión",
+                                      type="primary", key="btn_equiv_catalogo_guardar"):
+                            _n = guardar_equivalencias_de_catalogo(_ec["propuestas"], _ec["marca"])
+                            st.session_state.pop("equiv_catalogo", None)
+                            invalidar_salud()
+                            avisar("success", f"{_n} equivalencia(s) quedaron para revisar.")
+                            st.rerun()
+            st.markdown("---")
 
             st.markdown("**↩️ Deshacer una importación**")
             explicar(
