@@ -7119,8 +7119,13 @@ def extraer_anios(descripcion):
     if not descripcion:
         return None, None
     texto = str(descripcion)
-    # Rango con dos años: 1969/78, 1974/1981, 2005/09
-    m = re.search(r'\b(19\d{2}|20\d{2})\s*/\s*(\d{2}|\d{4})\b', texto)
+    # Rango con dos años: 1969/78, 1974/1981, 2005/09, y también 1998-2006 y 1998 al 2006.
+    # El guion faltaba y es la forma más usada en algunas listas: sobre los archivos reales son
+    # 1.116 filas (331 en una, 778 en otra). Sin él, «GOL 1998-2006» se leía como el año 1998
+    # solo, así que filtrar por 2003 ESCONDÍA un repuesto que sirve. Un filtro que oculta lo que
+    # corresponde es peor que no tener filtro: el de adelante no se entera de que hay stock.
+    m = re.search(r'\b(19\d{2}|20\d{2})\s*(?:[/\-–—]|\s+AL?\s+)\s*(\d{2}|\d{4})\b',
+                  texto, re.IGNORECASE)
     if m:
         desde = int(m.group(1))
         fin = m.group(2)
