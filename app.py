@@ -5329,6 +5329,63 @@ def invalidar_salud():
         pass
 
 
+def salud_de_los_cruces():
+    """Cuánto cruza de verdad tu catálogo entre proveedores, marca por marca.
+
+    Existe porque «no me relaciona los proveedores» es un síntoma, no un diagnóstico, y desde la
+    pantalla no se distingue de qué viene. Esto lo pone en números: para cada marca, cuántos de
+    sus productos tienen algún vínculo y cuántos llegan a OTRA marca. Una lista con 3.000
+    productos y CERO que crucen es una lista que se importó sin la columna de código de fábrica
+    — y eso no se ve mirando resultados de a uno, se ve mirando la tabla entera.
+
+    Se miran los vínculos DIRECTOS, no la cadena completa: es lo que se puede calcular de una
+    sola pasada sobre todo el catálogo, y para saber si una lista quedó aislada alcanza."""
+    try:
+        c.execute("""
+            WITH vecinos AS (
+                SELECT eq.producto_a_id AS pid, p2.marca_id AS marca_vecina
+                  FROM equivalencias eq JOIN productos p2 ON p2.id = eq.producto_b_id
+                UNION ALL
+                SELECT eq.producto_b_id AS pid, p1.marca_id AS marca_vecina
+                  FROM equivalencias eq JOIN productos p1 ON p1.id = eq.producto_a_id
+            )
+            SELECT m.nombre AS "Marca", m.tipo AS "_tipo",
+                   COUNT(DISTINCT p.id) AS "Productos",
+                   COUNT(DISTINCT CASE WHEN v.pid IS NOT NULL THEN p.id END) AS "Con vínculo",
+                   COUNT(DISTINCT CASE WHEN v.marca_vecina IS NOT NULL
+                                        AND v.marca_vecina <> p.marca_id THEN p.id END)
+                       AS "Cruzan a otra marca"
+            FROM productos p
+            JOIN marcas m ON m.id = p.marca_id
+            LEFT JOIN vecinos v ON v.pid = p.id
+            GROUP BY m.id ORDER BY COUNT(DISTINCT p.id) DESC""")
+        filas = filas_a_listas(c)
+    except sqlite3.OperationalError as _err:
+        anotar_error("salud_de_los_cruces", _err)
+        return [], {}
+
+    resumen = {"productos": 0, "cruzan": 0, "listas_aisladas": []}
+    for f in filas:
+        f["% que cruza"] = (f"{f['Cruzan a otra marca'] * 100 // f['Productos']}%"
+                             if f["Productos"] else "—")
+        # El diagnóstico en palabras: es lo que convierte la tabla en algo accionable.
+        if f["_tipo"] == "OEM":
+            f["Qué pasa"] = "Códigos de fábrica: son el puente, no hace falta que crucen."
+        elif not f["Cruzan a otra marca"]:
+            f["Qué pasa"] = ("⚠️ NINGUNO cruza. Esa lista se importó sin la columna de código "
+                              "de fábrica, o esa columna quedó mal mapeada.")
+            resumen["listas_aisladas"].append(f["Marca"])
+        elif f["Cruzan a otra marca"] * 2 < f["Productos"]:
+            f["Qué pasa"] = ("Cruza menos de la mitad: la lista trae el código de fábrica solo "
+                              "en algunas filas.")
+        else:
+            f["Qué pasa"] = "Bien."
+        if f["_tipo"] != "OEM":
+            resumen["productos"] += f["Productos"]
+            resumen["cruzan"] += f["Cruzan a otra marca"]
+    return filas, resumen
+
+
 def diagnostico_de_salud():
     """Corre todos los controles de mantenimiento de una y devuelve solo lo que necesita atención.
 
@@ -5384,6 +5441,26 @@ def diagnostico_de_salud():
                   "Están vinculados a decenas de repuestos y fusionan familias que no tienen "
                   "relación. Es lo que hace que el buscador devuelva cosas que no entran.",
                   "Estadísticas → Mantenimiento → Códigos puente")
+    except Exception as _err:
+        anotar_error("diagnostico_de_salud", _err)
+        pass
+
+    # Listas que quedaron aisladas: es la causa más común de «la app no relaciona los
+    # proveedores», y hasta ahora no avisaba nada. Una lista entera sin un solo producto que
+    # cruce no es mala suerte, es una importación sin la columna de código de fábrica.
+    try:
+        _filas_cr, _res_cr = salud_de_los_cruces()
+        if _res_cr.get("listas_aisladas"):
+            _cuales = ", ".join(_res_cr["listas_aisladas"][:6])
+            if len(_res_cr["listas_aisladas"]) > 6:
+                _cuales += f" y {len(_res_cr['listas_aisladas']) - 6} más"
+            sumar("alto",
+                  f"{len(_res_cr['listas_aisladas'])} lista(s) no cruzan con ninguna otra marca",
+                  f"Ninguno de los productos de {_cuales} está vinculado a otra marca. Buscando "
+                  "un código de esas listas no van a aparecer los equivalentes de los demás "
+                  "proveedores. Casi siempre es que se importaron sin indicar la columna de "
+                  "código de fábrica (OEM), que es la única que las une con el resto.",
+                  "Administrar → Mantenimiento → ¿Cuánto cruza tu catálogo?")
     except Exception as _err:
         anotar_error("diagnostico_de_salud", _err)
         pass
@@ -16818,6 +16895,46 @@ if pagina == PAGINAS[3]:
                          WHERE m.url_ficha_template IS NOT NULL AND m.url_ficha_template <> ''
                          GROUP BY m.id ORDER BY productos DESC""")
             marcas_con_ficha = [dict(r) for r in c.fetchall()]
+
+            st.markdown("**🔀 ¿Cuánto cruza tu catálogo entre proveedores?**")
+            explicar(
+                "Marca por marca: cuántos productos tienen vínculo y cuántos llegan a otra "
+                "marca. Una lista con cero que crucen quedó aislada.",
+                "«No me relaciona los proveedores» puede venir de varias cosas y desde la "
+                "pantalla se ven todas iguales. Esto lo pone en números.\n\nUna lista con miles "
+                "de productos y CERO que crucen es una lista que se importó sin la columna de "
+                "código de fábrica, o con esa columna mal mapeada. Eso no se ve mirando "
+                "resultados de a uno; se ve mirando la tabla entera.\n\nSe cuentan los vínculos "
+                "directos, que es lo que se puede calcular de una pasada sobre todo el catálogo. "
+                "Para saber si una lista quedó aislada, alcanza."
+            )
+            if st.button("🔀 Medir los cruces"):
+                with st.spinner("Contando..."):
+                    st.session_state["salud_cruces"] = salud_de_los_cruces()
+            _sc = st.session_state.get("salud_cruces")
+            if _sc is not None:
+                _filas_sc, _res_sc = _sc
+                if not _filas_sc:
+                    st.info("Todavía no hay productos cargados.")
+                else:
+                    _tot = _res_sc["productos"] or 1
+                    _pct = _res_sc["cruzan"] * 100 // _tot
+                    (st.error if _pct < 25 else st.warning if _pct < 60 else st.success)(
+                        f"**{_pct}% de tus productos de proveedor cruzan a otra marca** "
+                        f"({_res_sc['cruzan']:,} de {_res_sc['productos']:,})."
+                    )
+                    if _res_sc["listas_aisladas"]:
+                        st.error(
+                            "**Estas listas están aisladas** — ninguno de sus productos cruza a "
+                            "otra marca: " + ", ".join(_res_sc["listas_aisladas"][:12])
+                            + (" y otras." if len(_res_sc["listas_aisladas"]) > 12 else ".")
+                            + " Volvé a importarlas indicando bien la columna de código de "
+                              "fábrica (OEM), que es la única que las une con el resto."
+                        )
+                    st.dataframe([{k: v for k, v in f.items() if not k.startswith("_")}
+                                  for f in _filas_sc],
+                                 use_container_width=True, hide_index=True)
+            st.markdown("---")
 
             st.markdown("**🌐 Leer equivalencias del catálogo digital del proveedor**")
             explicar(
