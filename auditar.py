@@ -965,6 +965,30 @@ for nombre, lineas in _definiciones.items():
                    "ejecutar la de abajo, con los parámetros de otra cosa")
 
 
+# ============ 12c. Un except que se llama a sí mismo ============
+# Una función que en su propio manejador de errores se vuelve a llamar a sí misma con los
+# mismos datos entra en recursión infinita: si el cuerpo falló una vez, va a fallar igual la
+# segunda, y la tercera. Y el RecursionError que sale de ahí no lo agarra nadie, porque los
+# que llaman esperan ValueError, sqlite3.Error o lo que sea que la función maneja — así que
+# tumba la pantalla entera.
+# Pasó de verdad acá: anotar_error(), la función que registra los errores que la app decide
+# ignorar y cuyo docstring dice "NUNCA puede fallar", tenía en su except un
+# anotar_error("anotar_error", _err). Era la única función capaz de voltear la app, y lo hacía
+# justo cuando algo ya había salido mal.
+for _f in ast.walk(ARBOL):
+    if not isinstance(_f, (ast.FunctionDef, ast.AsyncFunctionDef)):
+        continue
+    for _h in ast.walk(_f):
+        if not isinstance(_h, ast.ExceptHandler):
+            continue
+        for _c in ast.walk(_h):
+            if isinstance(_c, ast.Call) and isinstance(_c.func, ast.Name) and _c.func.id == _f.name:
+                reportar("ERROR", _c.lineno,
+                         f"'{_f.name}' se llama a sí misma dentro de su propio except: si el "
+                         "cuerpo falla, el reintento falla igual y se repite para siempre. El "
+                         "RecursionError no lo agarra el que llamó y se cae la pantalla")
+
+
 # ============ Resultado ============
 orden = {"ERROR": 0, "REVISAR": 1, "AVISO": 2}
 problemas.sort(key=lambda x: (orden[x[0]], x[1]))

@@ -38,8 +38,15 @@ def anotar_error(donde, error):
         })
         if len(_ULTIMOS_ERRORES) > MAXIMO_ERRORES_ANOTADOS:
             del _ULTIMOS_ERRORES[:-MAXIMO_ERRORES_ANOTADOS]
-    except Exception as _err:
-        anotar_error("anotar_error", _err)
+    except Exception:
+        # Acá NO se puede llamar a anotar_error: era lo que hacía antes y, como el except
+        # existe justamente para cuando el cuerpo de arriba falla, el segundo intento fallaba
+        # igual que el primero y se llamaba a sí mismo para siempre. El RecursionError que
+        # salía de ahí no lo agarraba nadie (los llamadores esperan ValueError, sqlite3.Error,
+        # etc.) y tumbaba la pantalla entera. Es decir: la única función de la app que promete
+        # no fallar nunca era la que rompía más fuerte, y encima justo cuando se la necesitaba.
+        # Un error que no se pudo anotar se pierde, y está bien: perderlo es infinitamente
+        # mejor que voltear la pantalla del usuario por no poder escribirlo en una lista.
         pass      # anotar un error jamás puede romper nada
 
 # ============================================================
@@ -1961,6 +1968,41 @@ def sanitizar(codigo):
     return re.sub(r'[^A-Z0-9]', '', codigo.upper())
 
 
+
+# Cuántas filas de la MISMA lista puede aparecer un código sacado de la descripción antes de
+# que se lo considere texto y no código. Medido sobre dos listas reales (5.063 y 25.875 filas):
+# los códigos de fábrica verdaderos (0221504036, 03C906433A, IWP065, 46474600, 90919-C2003)
+# aparecen 1 o 2 veces cada uno — como mucho el mismo repuesto en dos presentaciones. Lo que
+# se repite más es siempre texto: motorizaciones (TU5JP4, DW10BTED4), modelos (CLA200, SLK230),
+# o muletillas del proveedor (16VREF aparecía 130 veces). Con el tope en 4 se conservan los 9
+# códigos reales que había y se van los 12 que más daño hacían.
+TOPE_REPETICIONES_EN_DESCRIPCION = 4
+
+
+def codigos_confiables_de_descripciones(descripciones, tope=TOPE_REPETICIONES_EN_DESCRIPCION):
+    """De todos los códigos que se pueden sacar de las descripciones de una lista, devuelve
+    solo los que NO se repiten demasiado.
+
+    Por qué hace falta mirar la lista entera y no fila por fila: 'CLA200' e 'IWP065' tienen
+    exactamente la misma forma —tres letras y tres números— y no hay expresión regular que
+    distinga el modelo de Mercedes del inyector de Magneti Marelli. Lo que sí los distingue es
+    cuántas veces aparecen: el inyector está en 2 filas, el modelo en 15.
+
+    Y el repetido es justo el que hace daño, porque el daño crece al cuadrado: un código que
+    aparece 1 vez en cada lista genera 1 equivalencia falsa, pero uno que aparece 130 veces
+    genera cientos, y cada una vincula dos repuestos que no tienen nada que ver. Sacar los
+    repetidos no es prolijidad: es lo único que evita que activar esta opción ensucie la base
+    más de lo que la llena."""
+    from collections import Counter
+    conteo = Counter()
+    for texto in descripciones:
+        # set() por fila: si la misma descripción nombra dos veces el mismo código, cuenta una.
+        # Lo que se está midiendo es en cuántos PRODUCTOS distintos aparece, no cuántas veces.
+        for cod in set(sanitizar(c) for c in extraer_codigos_de_texto(texto)):
+            if cod:
+                conteo[cod] += 1
+    return {cod for cod, veces in conteo.items() if veces <= tope}, conteo
+
 LARGO_MINIMO_NUMERICO = 3  # un código que es SOLO números tiene que tener al menos esta cantidad
 
 
@@ -2063,7 +2105,53 @@ def extraer_codigos_de_texto(texto, minimo=6):
         # Cilindradas y potencias sueltas: 1.6, 2.0TDI, 110CV
         re.compile(r'^\d[.,]\d[A-Z]*$'),
         re.compile(r'^\d+(CV|HP|KW|CC)$'),
+        # RANGOS DE AÑOS: 1998-2006, 2012/2015, 1995-96. Es el peor de todos los falsos códigos
+        # y el más común, porque casi toda descripción de repuesto dice para qué años sirve.
+        # Se midió sobre dos listas reales (5.063 y 25.875 filas): de los 224 "códigos" que las
+        # dos tenían en común, 163 eran rangos de años. Y no es que no sirvieran: activamente
+        # rompían. "2003-2008" aparecía en 12 filas de una lista y 6 de la otra, o sea que solo
+        # ese texto declaraba 72 equivalencias falsas entre repuestos que no tienen nada que
+        # ver — un filtro de aceite "equivalente" a un sensor porque los dos van en autos de
+        # esos años. Un código así no aporta un vínculo malo: aporta cientos.
+        re.compile(r'^(19|20)\d{2}[-/](19|20)?\d{2}$'),
+        # LISTAS DE MODELOS con números cortos: 205-206-306, 106-206-306, 206-306-307. Son las
+        # familias de Peugeot/Citroën enumeradas en la descripción. Un código de fábrica con
+        # guiones tiene partes largas (1234-5678); estas son todas de 3 dígitos o menos.
+        re.compile(r'^\d{1,3}([-/]\d{1,3})+$'),
+        # NOMBRES DE MODELO con guion: 4-RUNNER, 9-RENAULT, 10-BLAZER, BLAZER-S10, 206-PARTNER.
+        # La marca de que es texto y no código: uno de los lados es una palabra entera de 4
+        # letras o más, sin un solo número. Los códigos reales con guion llevan prefijos cortos
+        # (MD-12345, A-4567), nunca una palabra.
+        re.compile(r'^([A-Z0-9]+[-])*[A-Z]{4,}([-][A-Z0-9]+)*$'),
+        # MOTORES japoneses, que empiezan con número: 2AZ-FE, 2GD-FTV, 1KD-FTV, 4G63.
+        # El de arriba no los agarra porque arrancan con dígito. Se vio que juntaban una
+        # válvula VVT con una sonda lambda, y una bujía con un kit de embrague: lo único que
+        # comparten es que van en el mismo motor.
+        re.compile(r'^\d[A-Z]{2}[-]?[A-Z]{2,3}$'),
+        # MODELOS de BMW/Mercedes enumerados: 320I-323I, 320D-330D. Unían un MAF de Kia con
+        # una tapa de BMW.
+        re.compile(r'^\d{3}[A-Z][-]?\d{3}[A-Z]$'),
+        # MEDIDAS DE CORREA: 6PK1555, 4PK850, 10X1075. Es la medida de la correa, no el código
+        # del repuesto — y aparece adentro de la descripción de cualquier kit que la incluya,
+        # así que juntaba una bomba de agua con una correa suelta.
+        re.compile(r'^\d{1,2}PK\d{3,4}$'),
+        re.compile(r'^\d{1,2}X\d{3,4}$'),
+        # MOTORES de PSA (Peugeot/Citroën), que son los que más aparecen en las listas de acá:
+        # TU5JP4, XU7JP4, EW10J4, DW10BTED4, XUD9. La forma es dos letras, número, letras,
+        # número — nunca la de un código de repuesto, que no alterna así.
+        # Juntaban un termostato con un sensor de RPM, y un sensor de rotación con un bidón
+        # recuperador: comparten el motor y nada más.
+        # Ojo que esto NO puede tocar los códigos reales de tres letras + números (IWP044,
+        # H3T021, MAF069): por eso pide exactamente dos letras al principio y letras DESPUÉS
+        # del primer número, cosa que un código de repuesto no tiene.
+        re.compile(r'^[A-Z]{2}\d{1,2}[A-Z]{1,4}\d{0,2}$'),
+        # LISTAS DE MODELOS pegadas: A3A4A6, 206306307. Salen de "AUDI A3-A4-A6" y son el
+        # equivalente de los rangos de años, con el mismo daño.
+        re.compile(r'^([A-Z]\d[-]?){3,}$'),
     )
+    # Palabras de la descripción que quedan pegadas al año y disfrazan el rango:
+    # 'DESDE1993', 'HASTA2005', 'MODELO2010'.
+    arranques_de_texto = ("DESDE", "HASTA", "PARA", "MODELO", "MEDIDA", "ORIGEN", "SERIE")
     encontrados = []
     for token in re.split(r'[\s,;/|()\[\]]+', str(texto)):
         limpio = token.strip().strip(".-_")
@@ -2072,6 +2160,8 @@ def extraer_codigos_de_texto(texto, minimo=6):
         if limpio.upper() in ruido:
             continue
         if any(p.match(limpio.upper()) for p in formas_prohibidas):
+            continue
+        if limpio.upper().startswith(arranques_de_texto):
             continue
         if not any(ch.isdigit() for ch in limpio):
             continue
@@ -15112,6 +15202,17 @@ if pagina == PAGINAS[2]:
                     todas_filas_completas = leer_excel(archivo, hoja=hoja_elegida)
                     filas_datos = todas_filas_completas[header_row + 1:]
 
+                    # Antes de cargar nada: si se van a buscar códigos en la descripción, hay
+                    # que contarlos sobre la lista ENTERA primero. Fila por fila es imposible
+                    # saber si 'CLA200' es un código o el modelo del auto; recién mirando las
+                    # 25.000 filas juntas se ve que aparece 15 veces y el código de verdad 2.
+                    oem_desc_confiables, oem_desc_conteo = set(), {}
+                    oem_desc_descartados = 0
+                    if buscar_oem_en_desc and idx_desc is not None:
+                        oem_desc_confiables, oem_desc_conteo = codigos_confiables_de_descripciones(
+                            [valor_o_vacio(f[idx_desc]) if idx_desc < len(f) else ""
+                             for f in filas_datos])
+
                     cargados = 0
                     cargados_sin_equiv = 0
                     omitidos = 0
@@ -15153,9 +15254,14 @@ if pagina == PAGINAS[2]:
                             if raw_o_cell and not codigos_oem:
                                 descartados_cortos += 1
 
-                            # Si la lista no trae OEM, se intenta sacarlo de la descripción
+                            # Si la lista no trae OEM, se intenta sacarlo de la descripción.
+                            # Solo se aceptan los que no se repiten por toda la lista: ver
+                            # codigos_confiables_de_descripciones() y el conteo de más arriba.
                             if not codigos_oem and buscar_oem_en_desc and desc:
-                                codigos_oem = extraer_codigos_de_texto(desc)
+                                codigos_oem = [c for c in extraer_codigos_de_texto(desc)
+                                               if sanitizar(c) in oem_desc_confiables]
+                                if not codigos_oem and extraer_codigos_de_texto(desc):
+                                    oem_desc_descartados += 1
 
                             # Sin código de proveedor no hay nada que cargar: esa fila sí se omite
                             if not codigos_prov:
@@ -15408,6 +15514,17 @@ if pagina == PAGINAS[2]:
                             f"🧹 Se ignoraron {descartados_cortos} valor(es) de las columnas de código "
                             "por ser un número suelto de 1 o 2 dígitos (cantidad, número de orden, "
                             "bulto). No son códigos y ensuciaban las equivalencias."
+                        )
+                    if oem_desc_descartados:
+                        _repes = sorted(((v, k) for k, v in oem_desc_conteo.items()
+                                         if v > TOPE_REPETICIONES_EN_DESCRIPCION), reverse=True)[:6]
+                        st.caption(
+                            f"🧹 En {oem_desc_descartados} fila(s) encontré algo parecido a un código "
+                            "dentro de la descripción pero no lo cargué, porque el mismo texto se "
+                            f"repite en más de {TOPE_REPETICIONES_EN_DESCRIPCION} productos de esta "
+                            "lista: es la motorización, el modelo o una muletilla, no un código."
+                            + (" Los más repetidos: "
+                               + ", ".join(f"{c} ({v} veces)" for v, c in _repes) if _repes else "")
                         )
                     if omitidos:
                         st.warning(f"Se omitieron {omitidos} filas porque no tenían código de proveedor.")
