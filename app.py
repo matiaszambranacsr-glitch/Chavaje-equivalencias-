@@ -1983,6 +1983,9 @@ def codigos_confiables_de_descripciones(descripciones, tope=TOPE_REPETICIONES_EN
     """De todos los códigos que se pueden sacar de las descripciones de una lista, devuelve
     solo los que NO se repiten demasiado.
 
+    'descripciones' son pares (texto, código de esa misma fila): el código propio hace falta
+    para descartar el caso de la palabra pegada, ver extraer_codigos_de_texto().
+
     Por qué hace falta mirar la lista entera y no fila por fila: 'CLA200' e 'IWP065' tienen
     exactamente la misma forma —tres letras y tres números— y no hay expresión regular que
     distinga el modelo de Mercedes del inyector de Magneti Marelli. Lo que sí los distingue es
@@ -1995,10 +1998,10 @@ def codigos_confiables_de_descripciones(descripciones, tope=TOPE_REPETICIONES_EN
     más de lo que la llena."""
     from collections import Counter
     conteo = Counter()
-    for texto in descripciones:
+    for texto, codigo_propio in descripciones:
         # set() por fila: si la misma descripción nombra dos veces el mismo código, cuenta una.
         # Lo que se está midiendo es en cuántos PRODUCTOS distintos aparece, no cuántas veces.
-        for cod in set(sanitizar(c) for c in extraer_codigos_de_texto(texto)):
+        for cod in set(sanitizar(c) for c in extraer_codigos_de_texto(texto, codigo_propio=codigo_propio)):
             if cod:
                 conteo[cod] += 1
     return {cod for cod, veces in conteo.items() if veces <= tope}, conteo
@@ -2073,7 +2076,20 @@ def dividir_codigos(celda):
     return salida
 
 
-def extraer_codigos_de_texto(texto, minimo=6):
+def _es_el_codigo_propio_con_texto(candidato, propio):
+    """¿'candidato' es 'propio' con una palabra pegada atrás? Ver extraer_codigos_de_texto()."""
+    iguales = 0
+    for a, b in zip(candidato, propio):
+        if a != b:
+            break
+        iguales += 1
+    if iguales < 3:
+        return False
+    resto = candidato[iguales:]
+    return bool(resto) and resto.isalpha()
+
+
+def extraer_codigos_de_texto(texto, minimo=6, codigo_propio=None):
     """Busca códigos de fábrica escondidos dentro de una descripción.
     Muchas listas de proveedor no traen una columna de OEM aparte, pero lo meten en el texto
     ('ROTULA VW GOL - ORIG 6Q0407365'). Esto lo saca de ahí.
@@ -2085,6 +2101,7 @@ def extraer_codigos_de_texto(texto, minimo=6):
     """
     if not texto:
         return []
+    propio = sanitizar(codigo_propio) if codigo_propio else ""
     ruido = {"16V", "8V", "12V", "24V", "4X4", "4X2", "2WD", "4WD", "TDI", "TSI", "CRDI",
              "16valv", "MM", "CM", "KG"}
 
@@ -2152,8 +2169,18 @@ def extraer_codigos_de_texto(texto, minimo=6):
     # Palabras de la descripción que quedan pegadas al año y disfrazan el rango:
     # 'DESDE1993', 'HASTA2005', 'MODELO2010'.
     arranques_de_texto = ("DESDE", "HASTA", "PARA", "MODELO", "MEDIDA", "ORIGEN", "SERIE")
+    # Algunas listas traen la descripción con HTML adentro ('LRSC108197<b>DAEWOO</b>' o
+    # '0001115005<br>BOSCH'). Sin sacarlo, la etiqueta queda pegada al número y el código sale
+    # deformado: '0001115005BRBOSCH' en vez de '0001115005'.
+    texto = re.sub(r'<[^>]{1,30}>', ' ', str(texto))
+    # Muletillas que el proveedor pega al código cuando la exportación se come el espacio:
+    # 'REF ORIGINALES 0360601402' llega como 'ORIGINALES0360601402'. Se despega la palabra en
+    # vez de descartar el token, porque lo que viene atrás es el código de fábrica de verdad.
+    texto = re.sub(r'(ORIGINALES|ORIGINAL|ORIG|REF|CODIGO|COD|EQUIV)(?=\d{5,})', r'\1 ',
+                   texto, flags=re.IGNORECASE)
+
     encontrados = []
-    for token in re.split(r'[\s,;/|()\[\]]+', str(texto)):
+    for token in re.split(r'[\s,;/|()\[\]<>]+', str(texto)):
         limpio = token.strip().strip(".-_")
         if len(limpio) < minimo:
             continue
@@ -2162,6 +2189,10 @@ def extraer_codigos_de_texto(texto, minimo=6):
         if any(p.match(limpio.upper()) for p in formas_prohibidas):
             continue
         if limpio.upper().startswith(arranques_de_texto):
+            continue
+        # Un '?' adentro del token es texto que se rompió al exportar (acentos, comillas o
+        # símbolos que se perdieron): '118?CREF' salía de '1.18 °C REF'. No es un código.
+        if "?" in limpio or "\ufffd" in limpio:
             continue
         if not any(ch.isdigit() for ch in limpio):
             continue
@@ -2173,8 +2204,21 @@ def extraer_codigos_de_texto(texto, minimo=6):
         # Descartar cosas tipo "1.6" o "2.0TDI" que empiezan con cilindrada
         if re.match(r'^\d\.\d', limpio):
             continue
-        if sanitizar(limpio):
-            encontrados.append(limpio)
+        if not sanitizar(limpio):
+            continue
+        # El código de la propia fila con una palabra pegada atrás NO es un código de fábrica.
+        # Pasa cuando el proveedor exporta y se le come el espacio: la fila 52031FISPA tiene de
+        # descripción "FICHA DE INYECCION 52031Ficha para Bomba de Nafta BOSCH", y de ahí salía
+        # "52031Ficha" como si fuera un OEM. Sobre la lista real eran 4.443 de 5.063 filas:
+        # 4.443 productos fantasma bajo la marca OEM, uno por fila, que no cruzaban con nada
+        # (son únicos) pero aparecían en cada búsqueda y hacían que la importación informara
+        # miles de "equivalencias" que no existían.
+        # Se pide que lo que sobra sean SOLO letras: así se saca la palabra pegada
+        # (52031+Ficha, 24075+VW) y no se tocan las variantes reales de un mismo código, que se
+        # diferencian por números o por letra y número (FLO35121 / FLO35122 / FLO35122A).
+        if propio and _es_el_codigo_propio_con_texto(sanitizar(limpio), propio):
+            continue
+        encontrados.append(limpio)
     # sin repetidos, conservando el orden
     vistos, salida = set(), []
     for cod in encontrados:
@@ -15086,22 +15130,46 @@ if pagina == PAGINAS[2]:
                             "búsqueda por vehículo sepa qué repuesto le va a cada auto."
                         )
 
-                    # Aviso clave: una lista sin columna de código de fábrica no puede generar
-                    # equivalencias reales. Si igual se activa "buscarlas en la descripción",
-                    # lo que sale son modelos de auto, medidas y cilindradas tomados por códigos,
-                    # y cada uno de esos vincula entre sí todas las filas donde aparece.
+                    # Una lista sin columna de código de fábrica no puede cruzar con otras por
+                    # sí sola. Pero muchas listas de acá SÍ traen el código de fábrica, metido
+                    # adentro del texto de la descripción — es la única forma de vincularlas.
+                    # Este aviso antes decía que no convenía ni intentarlo. Estaba escrito
+                    # cuando el extractor tomaba rangos de años y motorizaciones, y desalentaba
+                    # justo lo único que funciona en estas listas. Ahora, en vez de advertir en
+                    # abstracto, se mide sobre ESTE archivo y se dice qué va a pasar: es un dato
+                    # que la persona puede verificar mirando la muestra, no una opinión.
                     if idx_oem is None:
-                        st.warning(
-                            "🔗 **Esta lista no trae columna de código de fábrica**, así que no "
-                            "puede generar equivalencias: cada fila es un producto suelto con su "
-                            "precio. Eso está perfecto para **cargar y actualizar precios**.\n\n"
-                            "Lo que NO conviene es activar «buscar el código de fábrica dentro de "
-                            "la descripción» en una lista así. En descripciones como "
-                            "«...CRUZE AVEO ASTRA - 1.4/1.8 - F14D4 Z18XER» lo que se extrae son "
-                            "modelos de motor, medidas y cilindradas, no códigos — y cada valor "
-                            "repetido vincula entre sí todas las filas donde aparece. **Es la "
-                            "forma más rápida de llenar la base de equivalencias falsas.**"
-                        )
+                        _muestra = todas_filas[header_row + 1:header_row + 400]
+                        _con_codigo, _ejemplos = 0, []
+                        if idx_desc is not None:
+                            _pares = [(valor_o_vacio(f[idx_desc]) if idx_desc < len(f) else "",
+                                       valor_o_vacio(f[idx_prov]) if idx_prov < len(f) else "")
+                                      for f in _muestra]
+                            _confiables, _ = codigos_confiables_de_descripciones(_pares)
+                            for _txt, _cod in _pares:
+                                _hall = [c for c in extraer_codigos_de_texto(_txt, codigo_propio=_cod)
+                                         if sanitizar(c) in _confiables]
+                                if _hall:
+                                    _con_codigo += 1
+                                    if len(_ejemplos) < 4:
+                                        _ejemplos.append(f"«{_txt[:44]}» → **{', '.join(_hall[:2])}**")
+                        if _con_codigo:
+                            st.info(
+                                "🔗 **Esta lista no trae columna de código de fábrica**, pero en "
+                                f"**{_con_codigo} de las primeras {len(_muestra)} filas** el código "
+                                "aparece adentro de la descripción. Activá abajo «buscar el código "
+                                "de fábrica dentro de la descripción» y con eso puede cruzar con "
+                                "las listas de otros proveedores.\n\n"
+                                + "\n\n".join(_ejemplos)
+                            )
+                        else:
+                            st.warning(
+                                "🔗 **Esta lista no trae columna de código de fábrica** y tampoco "
+                                "encontré códigos dentro de las descripciones, así que no puede "
+                                "generar equivalencias: cada fila es un producto suelto con su "
+                                "precio. Eso está perfecto para **cargar y actualizar precios**, "
+                                "y para que aparezca en la búsqueda por código y por descripción."
+                            )
 
                     if diag["fechas"]:
                         st.error(
@@ -15145,7 +15213,9 @@ if pagina == PAGINAS[2]:
                     muestras = []
                     for fila_prev in todas_filas[header_row + 1:header_row + 60]:
                         texto_desc = valor_o_vacio(fila_prev[idx_desc]) if idx_desc < len(fila_prev) else ""
-                        hallados = extraer_codigos_de_texto(texto_desc)
+                        cod_fila = (valor_o_vacio(fila_prev[idx_prov])
+                                    if idx_prov is not None and idx_prov < len(fila_prev) else "")
+                        hallados = extraer_codigos_de_texto(texto_desc, codigo_propio=cod_fila)
                         if hallados:
                             muestras.append({"Descripción": texto_desc[:60], "Detecta": ", ".join(hallados)})
                         if len(muestras) >= 8:
@@ -15210,7 +15280,8 @@ if pagina == PAGINAS[2]:
                     oem_desc_descartados = 0
                     if buscar_oem_en_desc and idx_desc is not None:
                         oem_desc_confiables, oem_desc_conteo = codigos_confiables_de_descripciones(
-                            [valor_o_vacio(f[idx_desc]) if idx_desc < len(f) else ""
+                            [(valor_o_vacio(f[idx_desc]) if idx_desc < len(f) else "",
+                              valor_o_vacio(f[idx_prov]) if idx_prov is not None and idx_prov < len(f) else "")
                              for f in filas_datos])
 
                     cargados = 0
@@ -15258,9 +15329,10 @@ if pagina == PAGINAS[2]:
                             # Solo se aceptan los que no se repiten por toda la lista: ver
                             # codigos_confiables_de_descripciones() y el conteo de más arriba.
                             if not codigos_oem and buscar_oem_en_desc and desc:
-                                codigos_oem = [c for c in extraer_codigos_de_texto(desc)
+                                _cands = extraer_codigos_de_texto(desc, codigo_propio=raw_p_cell)
+                                codigos_oem = [c for c in _cands
                                                if sanitizar(c) in oem_desc_confiables]
-                                if not codigos_oem and extraer_codigos_de_texto(desc):
+                                if not codigos_oem and _cands:
                                     oem_desc_descartados += 1
 
                             # Sin código de proveedor no hay nada que cargar: esa fila sí se omite
