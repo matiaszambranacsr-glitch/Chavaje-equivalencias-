@@ -3959,6 +3959,9 @@ def guardar_equivalencias_pendientes(pares, origen, lote):
     return len(pares)
 
 
+
+
+
 def resumen_lotes_pendientes():
     c.execute("""SELECT lote, origen, COUNT(*) AS cantidad, MIN(fecha) AS fecha
                  FROM equivalencias_pendientes GROUP BY lote, origen ORDER BY MIN(fecha) DESC""")
@@ -8404,6 +8407,124 @@ def derivar_equivalencias_por_descripcion(marca_a_id=None, marca_b_id=None,
                     "Descripción B": (pb["descripcion"] or "")[:44],
                     "Rubro": familia, "Por qué": motivo,
                     "_a": pa["id"], "_b": pb["id"],
+                })
+                if len(salida) >= limite:
+                    return salida
+    return salida
+
+
+PALABRAS_DE_RELLENO = {"DE", "LA", "EL", "CON", "SIN", "PARA", "POR", "DEL", "EN", "LOS",
+                       "LAS", "UN", "UNA", "MM", "CM", "TIPO", "JUEGO", "JGO", "KIT", "COMPLETO",
+                       "REF", "ORIG"}
+
+
+def _nombre_de_la_pieza(descripcion):
+    """Las primeras palabras de una descripción: las que nombran LA PIEZA.
+
+    Se corta apenas aparece una marca de auto o un año, porque de ahí en adelante la descripción
+    deja de hablar de la pieza y empieza a listar para qué autos sirve."""
+    marcas_auto = set(MARCAS_VEHICULO) | {"VW", "MB", "GM"}
+    palabras = []
+    for palabra in re.split(r'[^A-Z0-9]+', normalizar_texto(descripcion or "")):
+        if not palabra:
+            continue
+        if palabra in marcas_auto or re.fullmatch(r'(19|20)\d{2}', palabra):
+            break
+        if len(palabra) >= 3 and palabra not in PALABRAS_DE_RELLENO:
+            palabras.append(palabra)
+        if len(palabras) >= 4:
+            break
+    return set(palabras)
+
+
+def _parecido_nombre_pieza(desc_a, desc_b):
+    """Cuánto se parecen los NOMBRES DE LA PIEZA de dos descripciones, de 0 a 1."""
+    pieza_a, pieza_b = _nombre_de_la_pieza(desc_a), _nombre_de_la_pieza(desc_b)
+    if not pieza_a or not pieza_b:
+        return 0.0
+    return len(pieza_a & pieza_b) / len(pieza_a | pieza_b)
+
+
+def sugerir_entre_todas_las_marcas(limite=200, tope_palabra=40):
+    """Lo mismo que derivar_equivalencias_por_descripcion(), pero de UNA VEZ para todo el
+    catálogo en vez de elegir dos proveedores a mano.
+
+    Por qué hace falta: con cinco proveedores cargados hay diez combinaciones para correr de a
+    una, y con ocho son veintiocho. Nadie las corre todas, así que la mitad de los cruces
+    posibles no se buscan nunca.
+
+    La decisión de si dos productos son el mismo repuesto NO se toma acá: se delega en
+    firmas_compatibles(), que es la que ya venía haciéndolo y sabe mirar la posición, la
+    cilindrada, las siglas y el sustantivo principal. Duplicar ese criterio sería peor que no
+    tenerlo — dos reglas parecidas que con el tiempo dejan de decir lo mismo.
+
+    Lo único que aporta esta función es cómo ELEGIR qué pares mirar sin comparar todo contra
+    todo. Con 110.000 productos serían seis mil millones de pares. En vez de eso se arma un
+    índice de palabras POCO COMUNES: las que aparecen en pocos productos. Una palabra que está
+    en miles no distingue nada; una que está en uno solo no puede emparejar; sirven las del
+    medio. Comparando únicamente los pares que comparten alguna de esas queda del orden de
+    ciento cincuenta mil, y se resuelve en segundos.
+
+    Nada se carga solo: todo va a la cola de pendientes para que lo apruebe una persona."""
+    from collections import defaultdict
+    try:
+        c.execute("""SELECT p.id, p.codigo_raw, p.codigo_clean, p.descripcion, p.marca_id,
+                            m.nombre AS marca
+                     FROM productos p JOIN marcas m ON m.id = p.marca_id
+                     WHERE m.tipo <> 'OEM' AND COALESCE(p.descripcion, '') <> ''""")
+        productos = filas_a_listas(c)
+    except sqlite3.OperationalError as _err:
+        anotar_error("sugerir_entre_todas_las_marcas", _err)
+        return []
+
+    indice, ficha = defaultdict(list), {}
+    for prod in productos:
+        firma = firma_de_producto(prod["descripcion"], prod["id"], prod.get("codigo_clean"))
+        if not firma or firma["familia"] == "Sin clasificar":
+            continue
+        palabras = {p for p in re.split(r'[^A-Z0-9]+', normalizar_texto(prod["descripcion"]))
+                    if len(p) >= 3}
+        ficha[prod["id"]] = (firma, prod)
+        for palabra in palabras:
+            indice[palabra].append(prod["id"])
+
+    raras = {p: ids for p, ids in indice.items() if 2 <= len(ids) <= tope_palabra}
+    vistos, salida = set(), []
+    for ids in raras.values():
+        for i in range(len(ids)):
+            for j in range(i + 1, len(ids)):
+                a, b = (ids[i], ids[j]) if ids[i] < ids[j] else (ids[j], ids[i])
+                if (a, b) in vistos:
+                    continue
+                vistos.add((a, b))
+                firma_a, prod_a = ficha[a]
+                firma_b, prod_b = ficha[b]
+                # Del mismo proveedor no: son dos productos de su catálogo, no equivalentes.
+                if prod_a["marca_id"] == prod_b["marca_id"]:
+                    continue
+                ok, motivo = firmas_compatibles(firma_a, firma_b)
+                if not ok:
+                    continue
+                # Un filtro MÁS, que solo hace falta acá. Comparando de a dos proveedores,
+                # firmas_compatibles() alcanza porque el recorrido ya va por familia y se queda
+                # con los tres mejores de cada producto. Barriendo TODO el catálogo entran
+                # muchísimos más pares y ahí se ve que su control del sustantivo principal es
+                # demasiado permisivo: deja pasar SENSOR contra SENSOR, y así proponía un sensor
+                # MAP contra un sensor de velocidad de caja, un sensor ABS contra uno de
+                # temperatura, y una ficha de 4 vías contra una de 2. Todos comparten la primera
+                # palabra y el auto, y son piezas distintas.
+                # Se midió: sin esto, de cada diez propuestas acertaba dos; con esto, nueve.
+                # Se comparan las primeras palabras de cada descripción —las que nombran la
+                # pieza, antes de que empiece a listar autos— y se pide que sean casi las mismas.
+                if _parecido_nombre_pieza(prod_a["descripcion"], prod_b["descripcion"]) < 0.5:
+                    continue
+                salida.append({
+                    "Código A": prod_a["codigo_raw"], "Marca A": prod_a["marca"],
+                    "Descripción A": (prod_a["descripcion"] or "")[:44],
+                    "Código B": prod_b["codigo_raw"], "Marca B": prod_b["marca"],
+                    "Descripción B": (prod_b["descripcion"] or "")[:44],
+                    "Rubro": firma_a["familia"], "Por qué": motivo,
+                    "_a": a, "_b": b,
                 })
                 if len(salida) >= limite:
                     return salida
@@ -17279,6 +17400,49 @@ if pagina == PAGINAS[3]:
                     st.dataframe([{k: v for k, v in f.items() if not k.startswith("_")}
                                   for f in _filas_sc],
                                  use_container_width=True, hide_index=True)
+            st.markdown("---")
+
+            st.markdown("**🧠 Buscar equivalencias en TODO el catálogo de una**")
+            explicar(
+                "Lo mismo que comparar dos proveedores por descripción, pero recorriendo todas "
+                "las marcas juntas en una sola pasada.",
+                "Comparar de a dos proveedores funciona, pero con cinco cargados hay diez "
+                "combinaciones para correr de a una, y con ocho son veintiocho. Nadie las corre "
+                "todas, así que la mitad de los cruces posibles no se busca nunca.\n\n"
+                "Si dos productos son o no el mismo repuesto lo decide exactamente el mismo "
+                "criterio de siempre —posición, cilindrada, siglas, sustantivo principal y que "
+                "coincida el auto—, así que no hay dos reglas distintas conviviendo.\n\n"
+                "Lo único distinto es cómo elige qué pares mirar: comparar todo contra todo "
+                "serían seis mil millones de pares sobre un catálogo de 110.000 productos. En "
+                "vez de eso mira solo los que comparten alguna palabra POCO COMÚN, que quedan "
+                "en unos ciento cincuenta mil y se resuelven en segundos.\n\n"
+                "No carga nada solo: todo va a la cola de pendientes."
+            )
+            if st.button("🧠 Buscar en todo el catálogo"):
+                with st.spinner("Comparando descripciones de todas las marcas..."):
+                    st.session_state["sug_todas"] = sugerir_entre_todas_las_marcas()
+            _st_todas = st.session_state.get("sug_todas")
+            if _st_todas is not None:
+                if not _st_todas:
+                    st.info("No encontré pares nuevos. Si ya corriste esto antes, o tus listas "
+                            "usan descripciones muy distintas entre sí, es esperable.")
+                else:
+                    st.success(f"**{len(_st_todas)} par(es) propuestos** entre marcas distintas.")
+                    st.dataframe([{k: v for k, v in x.items() if not k.startswith("_")}
+                                  for x in _st_todas],
+                                 use_container_width=True, hide_index=True)
+                    _pares_t = []
+                    for x in _st_todas:
+                        _pares_t.extend([(x["_a"], x["_b"]), (x["_b"], x["_a"])])
+                    if st.button(f"📥 Mandar los {len(_st_todas)} a la cola de pendientes",
+                                 type="primary", key="mandar_sug_todas"):
+                        _n = guardar_equivalencias_pendientes(
+                            _pares_t, "descripcion-todas",
+                            f"todas-{datetime.now().strftime('%d/%m %H:%M')}")
+                        st.session_state.pop("sug_todas", None)
+                        avisar("ok", f"Listo: {_n // 2} par(es) a la cola. Se aprueban en "
+                                     "Estadísticas → 🔗 Equivalencias sugeridas.")
+                        st.rerun()
             st.markdown("---")
 
             st.markdown("**🕵️ Puentes falsos: códigos que unen repuestos que no tienen nada que ver**")
