@@ -458,6 +458,17 @@ def mostrar_login_inicial():
 ARCHIVO_SEMILLA = "datos_iniciales.db"
 
 
+def _sql_sin_acentos(columna):
+    """Arma una expresión SQL que le saca los acentos a una columna (funciona con mayúscula
+    y minúscula, porque SQLite no toca letras acentuadas al hacer UPPER())."""
+    reemplazos = [("á", "A"), ("Á", "A"), ("é", "E"), ("É", "E"), ("í", "I"), ("Í", "I"),
+                  ("ó", "O"), ("Ó", "O"), ("ú", "U"), ("Ú", "U"), ("ñ", "N"), ("Ñ", "N")]
+    expr = f"UPPER({columna})"
+    for viejo, nuevo in reemplazos:
+        expr = f"REPLACE({expr},'{viejo}','{nuevo}')"
+    return expr
+
+
 def _restaurar_desde_semilla(conexion):
     """Streamlit Cloud borra el disco de la app cada vez que se redespliega o se reinicia, así
     que la base de datos se pierde. Los archivos del REPOSITORIO, en cambio, sí sobreviven
@@ -652,6 +663,39 @@ def get_connection():
     # esto, cada tanda volvía a golpear los mismos miles de códigos sin foto y nunca avanzaba.
     if "foto_busqueda_estado" not in columnas_productos:
         c.execute("ALTER TABLE productos ADD COLUMN foto_busqueda_estado TEXT")
+
+    # Descripción y código ya pasados a mayúscula y sin acentos, guardados. Es solo velocidad,
+    # pero de la que se nota: la búsqueda por texto le sacaba los acentos a cada fila EN EL
+    # MOMENTO, con doce REPLACE() anidados por columna y por palabra. Sobre 44.000 productos
+    # eso daba 1 segundo por búsqueda, y sobre 110.000 pasa de tres. Con la columna ya
+    # calculada la misma búsqueda tarda 40 ms: veinticuatro veces menos.
+    # Se mantiene con TRIGGERS y no desde el código a propósito. Hay más de veinte lugares que
+    # insertan o cambian productos —importación, alta a mano, restaurar backup, despegar
+    # descripciones, fusionar marcas— y alcanza con que uno se olvide para que esos productos
+    # dejen de aparecer en las búsquedas por descripción, sin ningún error a la vista. El
+    # trigger no se lo puede olvidar nadie.
+    if "busqueda" not in columnas_productos:
+        c.execute("ALTER TABLE productos ADD COLUMN busqueda TEXT")
+    _expr_busqueda = (_sql_sin_acentos("COALESCE(descripcion,'') || ' ' || COALESCE(codigo_raw,'')")
+                      .replace("descripcion", "NEW.descripcion").replace("codigo_raw", "NEW.codigo_raw"))
+    c.execute("""CREATE TRIGGER IF NOT EXISTS productos_busqueda_alta
+                 AFTER INSERT ON productos BEGIN
+                   UPDATE productos SET busqueda = """ + _expr_busqueda + """ WHERE id = NEW.id;
+                 END""")
+    # El "OF descripcion, codigo_raw" no es solo eficiencia: sin él, el UPDATE que hace el
+    # propio trigger volvería a dispararlo. Al nombrar las columnas, escribir 'busqueda' no
+    # cuenta como cambio y el trigger no se llama a sí mismo.
+    c.execute("""CREATE TRIGGER IF NOT EXISTS productos_busqueda_cambio
+                 AFTER UPDATE OF descripcion, codigo_raw ON productos BEGIN
+                   UPDATE productos SET busqueda = """ + _expr_busqueda + """ WHERE id = NEW.id;
+                 END""")
+    # Los productos que ya estaban cargados antes de esta columna. Se hace de una sola vez y
+    # queda: son 400 ms cada 44.000 productos, una vez en la vida de la base.
+    c.execute("SELECT COUNT(*) FROM productos WHERE busqueda IS NULL")
+    if c.fetchone()[0]:
+        c.execute("UPDATE productos SET busqueda = "
+                  + _sql_sin_acentos("COALESCE(descripcion,'') || ' ' || COALESCE(codigo_raw,'')")
+                  + " WHERE busqueda IS NULL")
 
     # Varias fotos por producto: la del catálogo del proveedor, la que sacaste vos, la de otra
     # marca del mismo repuesto. Al buscar se compara contra todas y se queda con la mejor. Es lo
@@ -5144,16 +5188,6 @@ def armar_lista_picking(codigos_texto):
     return resultado
 
 
-def _sql_sin_acentos(columna):
-    """Arma una expresión SQL que le saca los acentos a una columna (funciona con mayúscula
-    y minúscula, porque SQLite no toca letras acentuadas al hacer UPPER())."""
-    reemplazos = [("á", "A"), ("Á", "A"), ("é", "E"), ("É", "E"), ("í", "I"), ("Í", "I"),
-                  ("ó", "O"), ("Ó", "O"), ("ú", "U"), ("Ú", "U"), ("ñ", "N"), ("Ñ", "N")]
-    expr = f"UPPER({columna})"
-    for viejo, nuevo in reemplazos:
-        expr = f"REPLACE({expr},'{viejo}','{nuevo}')"
-    return expr
-
 
 def contar_codigos_con_decimal():
     c.execute(r"SELECT COUNT(*) FROM productos WHERE codigo_raw LIKE '%.0' AND codigo_raw GLOB '[0-9]*'")
@@ -8938,10 +8972,11 @@ def buscar_por_texto(texto):
     palabras = [normalizar_texto(p.strip()) for p in texto.upper().split() if p.strip()]
     if not palabras:
         return []
-    # Compara contra la descripción/código sin tildes de ningún lado, para que no importe si
-    # la búsqueda o el dato cargado tienen o no acentos.
-    desc_sin_acentos = _sql_sin_acentos("p.descripcion")
-    codigo_sin_acentos = _sql_sin_acentos("p.codigo_raw")
+    # Compara contra la columna 'busqueda', que ya tiene la descripción y el código en
+    # mayúscula y sin acentos (la mantienen dos triggers, ver init_db). Antes se le sacaban los
+    # acentos a cada fila acá mismo, con doce REPLACE() anidados por columna y por palabra:
+    # 981 ms por búsqueda sobre 44.000 productos, y más de tres segundos sobre 110.000. Con la
+    # columna guardada la misma búsqueda tarda 40 ms.
     # En vez de exigir que estén TODAS las palabras, se cuenta cuántas coinciden y se ordena
     # por eso. Así "junta tapa cilindro ford taunus" igual encuentra la que dice
     # "Junta Tapa de Cilindros FORD TAUNUS COUPE" aunque no diga exactamente lo mismo, y las
@@ -8951,10 +8986,9 @@ def buscar_por_texto(texto):
     for palabra in palabras:
         # También se compara contra el código sin guiones ni espacios: si alguien escribe
         # "TC421" o "tc-421", tiene que encontrar igual el producto cargado como "TC-421-15".
-        puntajes.append(f"(CASE WHEN {desc_sin_acentos} LIKE ? OR {codigo_sin_acentos} LIKE ? "
-                         f"OR p.codigo_clean LIKE ? THEN 1 ELSE 0 END)")
-        like = f"%{palabra}%"
-        params.extend([like, like, f"%{sanitizar(palabra)}%"])
+        puntajes.append("(CASE WHEN p.busqueda LIKE ? OR p.codigo_clean LIKE ? "
+                         "THEN 1 ELSE 0 END)")
+        params.extend([f"%{palabra}%", f"%{sanitizar(palabra)}%"])
     suma = " + ".join(puntajes)
 
     # Con una o dos palabras se piden todas (si no, aparece cualquier cosa). Con tres o más
@@ -8972,6 +9006,14 @@ def buscar_por_texto(texto):
     with db_lock:
         c.execute(query, params + params + [minimo])
         filas = filas_a_listas(c)
+        # Si pidiendo TODAS las palabras no aparece nada, se afloja y se pide una menos.
+        # Con dos palabras se exigían las dos, y «rótula suspensión» devolvía CERO resultados
+        # sobre un catálogo lleno de rótulas: ninguna descripción dice las dos cosas juntas.
+        # Cero resultados es la peor respuesta posible —el de adelante concluye que no hay, y
+        # hay— así que es mejor mostrar lo que coincide en parte y que decida la persona.
+        if not filas and len(palabras) >= 2:
+            c.execute(query, params + params + [minimo - 1])
+            filas = filas_a_listas(c)
 
     # Filtro por RUBRO. Contar palabras coincidentes no alcanza: buscando «bujía golf 1.4 tsi»
     # aparecían juntas de tapa y juegos de motor, porque coinciden en «golf», «1.4» y «tsi» —
