@@ -309,7 +309,21 @@ def extraer_codigos_de_texto(texto, minimo=6, codigo_propio=None):
         # Ojo que esto NO puede tocar los códigos reales de tres letras + números (IWP044,
         # H3T021, MAF069): por eso pide exactamente dos letras al principio y letras DESPUÉS
         # del primer número, cosa que un código de repuesto no tiene.
-        re.compile(r'^[A-Z]{2}\d{1,2}[A-Z]{1,4}\d{0,2}$'),
+        # La letra final de más cubre XU10J4R, DJ5T12V, TU3F2K y EP6CDTMD, que son la misma
+        # familia. XU10J4R llegó a colgar 6 productos de tres proveedores distintos: una junta
+        # de tapa de Peugeot 405, un juego de reparación y una tapa de cilindros — todo lo que
+        # menciona ese motor, "equivalente" entre sí.
+        re.compile(r'^[A-Z]{2}\d{1,2}[A-Z]{1,4}\d{0,2}[A-Z]?$'),
+        # NÚMERO CON UNA PALABRA PEGADA: 24Amperes, 1990BOSCH, 16VREF, 7LDIESEL, 4RUNNER,
+        # 1600CCAPTO. Sale de la descripción cuando la exportación se come el espacio, y de acá
+        # salían los peores puentes de todos: '16VREF' aparecía en 130 filas de una sola lista,
+        # y '4RUNNER' terminó uniendo una bobina de ignición, un sensor de masa de aire de Mazda
+        # y un sensor de temperatura de Corolla — tres repuestos que no tienen nada que ver,
+        # hermanados porque el texto nombra la misma camioneta.
+        # Medido sobre las cinco listas reales: saca 639 códigos falsos y no rompe ninguno de
+        # los verdaderos. Un código de fábrica no termina en una palabra entera; termina en una
+        # letra o dos (03C906433A, 55575988CA), y eso queda a salvo porque acá se piden cuatro.
+        re.compile(r'^\d+[A-Z]{4,}$'),
         # LISTAS DE MODELOS pegadas: A3A4A6, 206306307. Salen de "AUDI A3-A4-A6" y son el
         # equivalente de los rangos de años, con el mismo daño.
         re.compile(r'^([A-Z]\d[-]?){3,}$'),

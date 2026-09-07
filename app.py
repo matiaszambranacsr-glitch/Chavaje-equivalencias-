@@ -2161,7 +2161,21 @@ def extraer_codigos_de_texto(texto, minimo=6, codigo_propio=None):
         # Ojo que esto NO puede tocar los códigos reales de tres letras + números (IWP044,
         # H3T021, MAF069): por eso pide exactamente dos letras al principio y letras DESPUÉS
         # del primer número, cosa que un código de repuesto no tiene.
-        re.compile(r'^[A-Z]{2}\d{1,2}[A-Z]{1,4}\d{0,2}$'),
+        # La letra final de más cubre XU10J4R, DJ5T12V, TU3F2K y EP6CDTMD, que son la misma
+        # familia. XU10J4R llegó a colgar 6 productos de tres proveedores distintos: una junta
+        # de tapa de Peugeot 405, un juego de reparación y una tapa de cilindros — todo lo que
+        # menciona ese motor, "equivalente" entre sí.
+        re.compile(r'^[A-Z]{2}\d{1,2}[A-Z]{1,4}\d{0,2}[A-Z]?$'),
+        # NÚMERO CON UNA PALABRA PEGADA: 24Amperes, 1990BOSCH, 16VREF, 7LDIESEL, 4RUNNER,
+        # 1600CCAPTO. Sale de la descripción cuando la exportación se come el espacio, y de acá
+        # salían los peores puentes de todos: '16VREF' aparecía en 130 filas de una sola lista,
+        # y '4RUNNER' terminó uniendo una bobina de ignición, un sensor de masa de aire de Mazda
+        # y un sensor de temperatura de Corolla — tres repuestos que no tienen nada que ver,
+        # hermanados porque el texto nombra la misma camioneta.
+        # Medido sobre las cinco listas reales: saca 639 códigos falsos y no rompe ninguno de
+        # los verdaderos. Un código de fábrica no termina en una palabra entera; termina en una
+        # letra o dos (03C906433A, 55575988CA), y eso queda a salvo porque acá se piden cuatro.
+        re.compile(r'^\d+[A-Z]{4,}$'),
         # LISTAS DE MODELOS pegadas: A3A4A6, 206306307. Salen de "AUDI A3-A4-A6" y son el
         # equivalente de los rangos de años, con el mismo daño.
         re.compile(r'^([A-Z]\d[-]?){3,}$'),
@@ -5518,6 +5532,101 @@ def salud_de_los_cruces():
             resumen["productos"] += f["Productos"]
             resumen["cruzan"] += f["Cruzan a otra marca"]
     return filas, resumen
+
+
+TOPE_PRODUCTOS_POR_PUENTE = 5   # ver puentes_sospechosos()
+
+
+def puentes_sospechosos(tope=TOPE_PRODUCTOS_POR_PUENTE, limite=60):
+    """Códigos de fábrica que están uniendo repuestos que no tienen nada que ver.
+
+    Son el peor daño posible en esta base, y el más difícil de ver: un solo código malo no
+    devuelve un resultado de más, fusiona DOS FAMILIAS ENTERAS. Buscando una bobina de ignición
+    aparecía un sensor de masa de aire de Mazda y un sensor de temperatura de Corolla, porque
+    las tres descripciones nombraban la 4Runner y de ahí salió «4RUNNER» como si fuera un código.
+
+    Fila por fila esto no se ve: cada vínculo suelto parece razonable. Se ve mirando el catálogo
+    entero, que es lo que hace esta función.
+
+    Se cruzan dos señales, porque ninguna sola alcanza —se midió sobre cinco listas reales:
+
+      - CUÁNTOS productos cuelga. El 99,9% de los códigos de fábrica verdaderos unen 4 productos
+        o menos: es el mismo repuesto en unos pocos proveedores. Los que unen 6 o más resultaron
+        ser todos texto (F14000 el camión, AP2000 el motor, 1500-1800 la cilindrada).
+      - DE QUÉ FAMILIA es lo que une. Un código real une repuestos de la misma familia; si une
+        un filtro con un cilindro maestro, no es un código, es una palabra que las dos
+        descripciones mencionan. Esta señal es la que no se degrada cuando el catálogo crece:
+        un código de fábrica muy popular puede colgar veinte productos legítimamente, pero van
+        a ser todos de la misma familia.
+
+    Por eso NO se borra nada solo: se listan para que decida quien conoce los repuestos. Un
+    corte automático se llevaría por delante los códigos populares de verdad, que son
+    justamente los más valiosos."""
+    try:
+        c.execute("""
+            SELECT p.id AS pid, p.codigo_raw AS "Código", COUNT(*) AS "Productos que une"
+              FROM equivalencias eq
+              JOIN productos p ON p.id IN (eq.producto_a_id, eq.producto_b_id)
+              JOIN marcas m ON m.id = p.marca_id
+             WHERE m.tipo = 'OEM'
+             GROUP BY p.id HAVING COUNT(*) >= ?
+             ORDER BY COUNT(*) DESC LIMIT ?""", (max(2, tope - 1), limite * 4))
+        candidatos = filas_a_listas(c)
+    except sqlite3.OperationalError as _err:
+        anotar_error("puentes_sospechosos", _err)
+        return []
+
+    salida = []
+    for cand in candidatos:
+        try:
+            c.execute("""
+                SELECT p2.descripcion AS d, m2.nombre AS marca FROM equivalencias eq
+                  JOIN productos p2 ON p2.id = CASE WHEN eq.producto_a_id = ?
+                                                    THEN eq.producto_b_id ELSE eq.producto_a_id END
+                  JOIN marcas m2 ON m2.id = p2.marca_id
+                 WHERE ? IN (eq.producto_a_id, eq.producto_b_id)""", (cand["pid"], cand["pid"]))
+            colgados = filas_a_listas(c)
+        except sqlite3.OperationalError as _err:
+            anotar_error("puentes_sospechosos", _err)
+            continue
+        # "Sin clasificar" no cuenta como familia: es no saber, no es una familia distinta.
+        # Sin esta salvedad, 2H0919050B —un código de VW de verdad— daba tres familias solo
+        # porque una de las descripciones no se pudo clasificar, y quedaba marcado como falso.
+        familias = {clasificar_repuesto(x["d"] or "") for x in colgados}
+        familias = {f for f in familias if f and f != "Sin clasificar"}
+        motivos = []
+        if cand["Productos que une"] > tope:
+            motivos.append(f"une {cand['Productos que une']} productos "
+                           f"(un código real casi nunca pasa de {tope})")
+        if len(familias) >= 3:
+            motivos.append("mezcla " + ", ".join(sorted(familias)))
+        if not motivos:
+            continue
+        cand["Por qué sospecha"] = "; ".join(motivos)
+        cand["Familias"] = ", ".join(sorted(familias)) or "—"
+        cand["Ejemplos"] = " | ".join(f"{x['marca']}: {(x['d'] or '')[:44]}" for x in colgados[:3])
+        salida.append(cand)
+        if len(salida) >= limite:
+            break
+    return salida
+
+
+def borrar_puente(producto_oem_id):
+    """Borra un código de fábrica falso y TODOS los vínculos que colgaban de él.
+
+    Se borra el producto OEM entero y no vínculo por vínculo: el código no existe, así que
+    dejarlo suelto sin vínculos solo ensucia la búsqueda por código. Los productos de los
+    proveedores no se tocan — lo único que se pierde es la relación falsa entre ellos."""
+    try:
+        c.execute("DELETE FROM equivalencias WHERE producto_a_id = ? OR producto_b_id = ?",
+                  (producto_oem_id, producto_oem_id))
+        borrados = c.rowcount
+        c.execute("DELETE FROM productos WHERE id = ? AND marca_id IN "
+                  "(SELECT id FROM marcas WHERE tipo = 'OEM')", (producto_oem_id,))
+        return borrados
+    except sqlite3.OperationalError as _err:
+        anotar_error("borrar_puente", _err)
+        return 0
 
 
 def diagnostico_de_salud():
@@ -17128,6 +17237,54 @@ if pagina == PAGINAS[3]:
                     st.dataframe([{k: v for k, v in f.items() if not k.startswith("_")}
                                   for f in _filas_sc],
                                  use_container_width=True, hide_index=True)
+            st.markdown("---")
+
+            st.markdown("**🕵️ Puentes falsos: códigos que unen repuestos que no tienen nada que ver**")
+            explicar(
+                "Busca códigos de fábrica que estén fusionando familias enteras de repuestos, "
+                "y te deja borrarlos de a uno.",
+                "Es el peor daño que puede tener esta base y el más difícil de ver. Un solo "
+                "código malo no agrega un resultado de más: fusiona DOS FAMILIAS ENTERAS. Pasó "
+                "de verdad acá — buscando una bobina de ignición aparecían un sensor de masa de "
+                "aire de Mazda y un sensor de temperatura de Corolla, porque las tres "
+                "descripciones nombraban la 4Runner y de ahí salió «4RUNNER» como si fuera un "
+                "código de fábrica.\n\nMirando los resultados de a uno no se nota: cada vínculo "
+                "suelto parece razonable. Se nota mirando el catálogo entero.\n\nSe cruzan dos "
+                "señales, porque ninguna sola alcanza:\n\n"
+                "- **cuántos productos cuelga**: el 99,9% de los códigos de fábrica verdaderos "
+                "unen 4 o menos, porque son el mismo repuesto en unos pocos proveedores;\n"
+                "- **de qué familia es lo que une**: un código real une repuestos de la misma "
+                "familia. Si une un filtro con un cilindro maestro, no es un código, es una "
+                "palabra que las dos descripciones mencionan.\n\n"
+                "No borra nada solo, a propósito: un corte automático se llevaría por delante "
+                "los códigos populares de verdad, que son los más valiosos. Decidís vos."
+            )
+            if st.button("🕵️ Buscar puentes falsos"):
+                with st.spinner("Revisando todo el catálogo..."):
+                    st.session_state["puentes_falsos"] = puentes_sospechosos()
+            _pf = st.session_state.get("puentes_falsos")
+            if _pf is not None:
+                if not _pf:
+                    st.success("No encontré ningún código de fábrica uniendo cosas que no van "
+                               "juntas. La base está limpia de puentes falsos.")
+                else:
+                    st.warning(f"**{len(_pf)} código(s) sospechoso(s).** Mirá los ejemplos de "
+                               "cada uno: si lo que une no tiene nada que ver entre sí, borralo.")
+                    for _p in _pf:
+                        with st.expander(f"🔗 {_p['Código']} — {_p['Por qué sospecha']}"):
+                            st.caption(f"Familias que toca: {_p['Familias']}")
+                            st.write(_p["Ejemplos"])
+                            if st.button("🗑️ Borrar este puente y sus vínculos",
+                                         key=f"borrar_puente_{_p['pid']}"):
+                                _n = borrar_puente(_p["pid"])
+                                # La lista guardada queda vieja apenas se borra uno: si no se
+                                # saca de ahí, el botón sigue apareciendo y al tocarlo de nuevo
+                                # no borra nada, que es la peor forma de no funcionar.
+                                st.session_state["puentes_falsos"] = [
+                                    x for x in _pf if x["pid"] != _p["pid"]]
+                                avisar("ok", f"Listo: se borró «{_p['Código']}» y los {_n} "
+                                             "vínculos falsos que colgaban de él.")
+                                st.rerun()
             st.markdown("---")
 
             st.markdown("**🌐 Leer equivalencias del catálogo digital del proveedor**")
