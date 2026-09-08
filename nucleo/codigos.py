@@ -265,8 +265,8 @@ def extraer_codigos_de_texto(texto, minimo=6, codigo_propio=None):
         # códigos de motor. El 1% de pérdida vale, porque cada uno de esos generaba decenas de
         # equivalencias falsas.
         re.compile(r'^[A-Z]{1,3}\d{1,5}[A-Z]{1,4}$'),
-        # Medidas: 14X20X1, 7,5X12X5
-        re.compile(r'^\d+([.,]\d+)?X\d+([.,]\d+)?(X\d+([.,]\d+)?)?$'),
+        # Medidas: 14X20X1, 7,5X12X5, y con la unidad pegada: 32X18X105MM
+        re.compile(r'^\d+([.,]\d+)?X\d+([.,]\d+)?(X\d+([.,]\d+)?)?(MM|CM|M)?$'),
         # Cilindradas y potencias sueltas: 1.6, 2.0TDI, 110CV
         re.compile(r'^\d[.,]\d[A-Z]*$'),
         re.compile(r'^\d+(CV|HP|KW|CC)$'),
@@ -366,7 +366,16 @@ def extraer_codigos_de_texto(texto, minimo=6, codigo_propio=None):
         # Descartar cosas tipo "1.6" o "2.0TDI" que empiezan con cilindrada
         if re.match(r'^\d\.\d', limpio):
             continue
-        if not sanitizar(limpio):
+        # El largo mínimo va sobre el código LIMPIO, no sobre el token con su puntuación.
+        # 'TDI-A6' son seis caracteres y pasaba, pero el código que quedaba era 'TDIA6', que
+        # son cinco: demasiado corto para ser un código de fábrica y suficiente para chocar con
+        # cualquier cosa. De ahí salían puentes como 'Aveo5:', '16V-KA' y '1000-F', que en la
+        # base real estaban uniendo una dirección con una refrigeración y una distribución con
+        # un encendido — familias enteras hermanadas por un pedazo de texto.
+        # Los códigos reales de seis caracteres (IWP044, H3T021, TPRT04) no se pierden: seis
+        # limpios siguen siendo seis.
+        codigo_limpio = sanitizar(limpio)
+        if len(codigo_limpio) < minimo:
             continue
         # El código de la propia fila con una palabra pegada atrás NO es un código de fábrica.
         # Pasa cuando el proveedor exporta y se le come el espacio: la fila 52031FISPA tiene de

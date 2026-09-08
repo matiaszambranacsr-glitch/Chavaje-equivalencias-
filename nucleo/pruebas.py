@@ -56,6 +56,10 @@ def probar_extractor():
         ("MOTOR ARRANQUE <b>DAEWOO</b> 0001115005<br>BOSCH", "0001115005"),
         # muletilla pegada al código porque la exportación se comió el espacio
         ("BOMBA DE AGUA REF ORIGINALES0360601402", "0360601402"),
+        # Códigos reales de exactamente seis caracteres limpios: el largo mínimo se mide sobre
+        # el código sin puntuación, y estos tienen que sobrevivir a esa medición.
+        ("SENSOR MAP VW GOL 1.0 MPI T-PRT04/B", "T-PRT04"),
+        ("BOBINA Toyota COROLLA (90919-C2003)", "90919-C2003"),
     ]
     for texto, esperado in debe:
         got = codigos.extraer_codigos_de_texto(texto)
@@ -77,6 +81,14 @@ def probar_extractor():
         "BOMBA DESDE1993 HASTA2005",              # año con la palabra pegada
         "AMORTIGUADOR 1995/96",
         "BULBO 1 8 118?CREF",                     # texto roto al exportar
+        # Pedazos de texto que parecían códigos por tener seis caracteres CON la puntuación,
+        # pero cuyo código limpio tiene cinco. En la base real estaban uniendo una dirección
+        # con una refrigeración y una distribución con un encendido.
+        "MOTOR Chevrolet Aveo5: 1.6",
+        "TURBO VW TDI-A6 quattro",
+        "TAPA FORD 16V-KA 1.0",
+        "CANO Ford F 100-F 1000-F 4000 3.9",
+        "RETEN 32x18x105mm",                      # medida con la unidad pegada
     ]
     for texto in no_debe:
         got = codigos.extraer_codigos_de_texto(texto)

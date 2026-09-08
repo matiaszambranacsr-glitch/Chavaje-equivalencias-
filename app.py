@@ -2161,8 +2161,8 @@ def extraer_codigos_de_texto(texto, minimo=6, codigo_propio=None):
         # códigos de motor. El 1% de pérdida vale, porque cada uno de esos generaba decenas de
         # equivalencias falsas.
         re.compile(r'^[A-Z]{1,3}\d{1,5}[A-Z]{1,4}$'),
-        # Medidas: 14X20X1, 7,5X12X5
-        re.compile(r'^\d+([.,]\d+)?X\d+([.,]\d+)?(X\d+([.,]\d+)?)?$'),
+        # Medidas: 14X20X1, 7,5X12X5, y con la unidad pegada: 32X18X105MM
+        re.compile(r'^\d+([.,]\d+)?X\d+([.,]\d+)?(X\d+([.,]\d+)?)?(MM|CM|M)?$'),
         # Cilindradas y potencias sueltas: 1.6, 2.0TDI, 110CV
         re.compile(r'^\d[.,]\d[A-Z]*$'),
         re.compile(r'^\d+(CV|HP|KW|CC)$'),
@@ -2262,7 +2262,16 @@ def extraer_codigos_de_texto(texto, minimo=6, codigo_propio=None):
         # Descartar cosas tipo "1.6" o "2.0TDI" que empiezan con cilindrada
         if re.match(r'^\d\.\d', limpio):
             continue
-        if not sanitizar(limpio):
+        # El largo mínimo va sobre el código LIMPIO, no sobre el token con su puntuación.
+        # 'TDI-A6' son seis caracteres y pasaba, pero el código que quedaba era 'TDIA6', que
+        # son cinco: demasiado corto para ser un código de fábrica y suficiente para chocar con
+        # cualquier cosa. De ahí salían puentes como 'Aveo5:', '16V-KA' y '1000-F', que en la
+        # base real estaban uniendo una dirección con una refrigeración y una distribución con
+        # un encendido — familias enteras hermanadas por un pedazo de texto.
+        # Los códigos reales de seis caracteres (IWP044, H3T021, TPRT04) no se pierden: seis
+        # limpios siguen siendo seis.
+        codigo_limpio = sanitizar(limpio)
+        if len(codigo_limpio) < minimo:
             continue
         # El código de la propia fila con una palabra pegada atrás NO es un código de fábrica.
         # Pasa cuando el proveedor exporta y se le come el espacio: la fila 52031FISPA tiene de
@@ -5354,17 +5363,23 @@ def auditar_equivalencias_cargadas(limite=300, tope_confianza=35, revisar=8000):
     importaciones viejas que nadie revisó. Sin esto, la única forma de encontrarlos era
     tropezarse con uno buscando un código.
 
-    Devuelve los peores primero, con el motivo escrito."""
+    Devuelve los peores primero, con el motivo escrito.
+
+    El ORDER BY por confianza guardada no es cosmético. Antes se tomaban las primeras 8.000
+    filas tal como venían, sin orden: sobre una base real de 24.774 vínculos eso deja dos
+    tercios que NUNCA se revisan, y encima los que se revisan son los más viejos, no los peores.
+    Ahora el tope elige los 8.000 más sospechosos, que es para lo que existe la función."""
     c.execute("""SELECT e.producto_a_id AS a, e.producto_b_id AS b, e.lote,
                         pa.codigo_raw AS cod_a, pa.descripcion AS desc_a, pa.precio AS precio_a,
                         ma.nombre AS marca_a,
                         pb.codigo_raw AS cod_b, pb.descripcion AS desc_b, pb.precio AS precio_b,
-                        mb.nombre AS marca_b
+                        mb.nombre AS marca_b, ma.tipo AS tipo_a, mb.tipo AS tipo_b
                  FROM equivalencias e
                  JOIN productos pa ON pa.id = e.producto_a_id
                  JOIN productos pb ON pb.id = e.producto_b_id
                  JOIN marcas ma ON ma.id = pa.marca_id
                  JOIN marcas mb ON mb.id = pb.marca_id
+                 ORDER BY COALESCE(e.confianza, 50) ASC
                  LIMIT ?""", (revisar,))
     filas = [dict(r) for r in c.fetchall()]
     if not filas:
@@ -5375,17 +5390,36 @@ def auditar_equivalencias_cargadas(limite=300, tope_confianza=35, revisar=8000):
     patrones = aprender_de_las_decisiones()
     ventas_confirman = pares_confirmados_por_ventas()
 
+    # Lo mismo que en recalcular_confianzas(): a cuántos productos se cuelga cada código de
+    # fábrica, contado de una sola vez para todo el lote.
+    grados = {}
+    try:
+        c.execute("""SELECT p.id AS pid, COUNT(*) AS n FROM equivalencias eq
+                     JOIN productos p ON p.id IN (eq.producto_a_id, eq.producto_b_id)
+                     JOIN marcas m ON m.id = p.marca_id
+                     WHERE m.tipo = 'OEM' GROUP BY p.id""")
+        grados = {r["pid"]: r["n"] for r in c.fetchall()}
+    except sqlite3.OperationalError as _err:
+        anotar_error("auditar_equivalencias_cargadas", _err)
+
     dudosas = []
     for f in filas:
         # Un vínculo de un código puente ya aprobado a mano no se vuelve a cuestionar
         if f["a"] in aprobados or f["b"] in aprobados:
             continue
+        if f["tipo_a"] == "OEM":
+            puente, id_puente = f["cod_a"], f["a"]
+        elif f["tipo_b"] == "OEM":
+            puente, id_puente = f["cod_b"], f["b"]
+        else:
+            puente, id_puente = None, None
         puntaje, senales = evaluar_equivalencia(
             f["desc_a"], f["desc_b"], medidas.get(f["a"]), medidas.get(f["b"]),
             f["precio_a"], f["precio_b"],
             marca_a=f["marca_a"], marca_b=f["marca_b"], patrones=patrones,
             vendido_como_reemplazo=ventas_confirman.get((min(f["a"], f["b"]),
-                                                          max(f["a"], f["b"])), 0)
+                                                          max(f["a"], f["b"])), 0),
+            codigo_puente=puente, productos_del_puente=grados.get(id_puente, 0)
         )
         for lado in ("a", "b"):
             malo, _ = codigo_sospechoso(f[f"cod_{lado}"], f.get(f"desc_{lado}") or "")
