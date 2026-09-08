@@ -4122,7 +4122,8 @@ def senal_aprendida(marca_a, marca_b, patrones):
 def evaluar_equivalencia(desc_a, desc_b, medidas_a=None, medidas_b=None,
                          precio_a=None, precio_b=None, veces_confirmada=1,
                          respaldo_fabricante=False, marca_a="", marca_b="", patrones=None,
-                         vendido_como_reemplazo=0):
+                         vendido_como_reemplazo=0, codigo_puente=None,
+                         productos_del_puente=0):
     """Pesa toda la evidencia disponible sobre un vínculo. Devuelve (puntaje 0-100, señales).
 
     La diferencia con lo que había antes: las alarmas eran una lista plana, así que 397 vínculos
@@ -4139,6 +4140,44 @@ def evaluar_equivalencia(desc_a, desc_b, medidas_a=None, medidas_b=None,
     """
     puntaje = 50.0
     senales = []
+
+    # EL CÓDIGO DE FÁBRICA QUE HACE DE PUENTE. Sin esto, casi ningún vínculo se movía del 50.
+    # Motivo: la abrumadora mayoría de los vínculos de esta base no son proveedor↔proveedor,
+    # son proveedor↔código de fábrica, y el nodo del código no tiene descripción, ni rubro, ni
+    # precio, ni medidas. O sea que TODAS las señales de más abajo quedaban inertes justo en el
+    # caso más común. Medido sobre la base real: 24.774 vínculos, el 98% caía en la misma banda
+    # y el máximo de todos era 75. Una columna de confianza donde todo dice lo mismo no informa
+    # nada, y encima da la falsa impresión de que se está midiendo algo.
+    #
+    # Para ese caso hay dos señales que sí existen, y las dos se midieron sobre listas reales:
+    if codigo_puente:
+        limpio_puente = sanitizar(codigo_puente)
+        largo = len(limpio_puente)
+        solo_numeros = limpio_puente.isdigit()
+        # 1. QUÉ TAN DISTINTIVO es el código. '0221604014' es un código de fábrica; '1234' lo
+        #    tiene medio catálogo del rubro porque numeran de corrido.
+        if largo >= 8 or (largo >= 6 and not solo_numeros):
+            puntaje += 20
+            senales.append(("bien", f"🔑 El código que los une ({codigo_puente}) es largo y "
+                                     "distintivo: difícil que coincida por casualidad"))
+        elif largo < 4 or (solo_numeros and largo < 6):
+            puntaje -= 25
+            senales.append(("mal", f"🔑 El código que los une ({codigo_puente}) es corto y "
+                                    "genérico: puede coincidir con cualquier cosa"))
+        # 2. A CUÁNTOS PRODUCTOS se cuelga ese mismo código. Se midió sobre cinco listas reales:
+        #    el 99,9% de los códigos de fábrica verdaderos unen 4 productos o menos, y los que
+        #    unían 6 o más resultaron todos texto (F14000 el camión, AP-2000 el motor). Un
+        #    código que une dos productos es el caso típico y sano: el mismo repuesto en dos
+        #    proveedores.
+        if productos_del_puente >= 6:
+            puntaje -= 30
+            senales.append(("mal", f"🕸️ Ese mismo código cuelga {productos_del_puente} productos. "
+                                    "Los códigos de fábrica reales casi nunca pasan de 4: "
+                                    "revisalo en Mantenimiento → Puentes falsos"))
+        elif 0 < productos_del_puente <= 2:
+            puntaje += 10
+            senales.append(("bien", "🕸️ Ese código une solo estos dos: es el mismo repuesto en "
+                                     "dos proveedores"))
 
     if medidas_a and medidas_b:
         coinciden, detalle = comparar_medidas(medidas_a, medidas_b)
@@ -5367,38 +5406,83 @@ def auditar_equivalencias_cargadas(limite=300, tope_confianza=35, revisar=8000):
     return dudosas[:limite], len(filas)
 
 
-def recalcular_confianzas(limite=20000, progreso=None):
+def faltan_por_puntuar():
+    """Cuántos vínculos todavía no tienen confianza calculada."""
+    try:
+        c.execute("SELECT COUNT(*) FROM equivalencias WHERE confianza IS NULL")
+        return c.fetchone()[0]
+    except sqlite3.OperationalError as _err:
+        anotar_error("faltan_por_puntuar", _err)
+        return 0
+
+
+def recalcular_confianzas(limite=20000, progreso=None, solo_faltantes=True):
     """Calcula y guarda la confianza de cada vínculo cargado.
 
     Se guarda en vez de calcularse al vuelo porque el buscador la necesita en CADA búsqueda:
-    hacer el análisis completo ahí lo volvería lento. Así se hace una vez y queda."""
-    c.execute("""SELECT e.producto_a_id AS a, e.producto_b_id AS b,
+    hacer el análisis completo ahí lo volvería lento. Así se hace una vez y queda.
+
+    El 'solo_faltantes' es el arreglo de un bug que dejaba inútil todo este mecanismo: la
+    consulta tomaba LIMIT filas de TODOS los vínculos, sin filtro y sin orden, así que siempre
+    agarraba las mismas primeras. Correrla de nuevo repuntuaba esas y no avanzaba nunca sobre
+    el resto. Medido sobre la base real: 24.774 vínculos, tres corridas de 2.000 cada una, y
+    los sin puntuar quedaban clavados en 20.767 — el 84% del catálogo sin puntaje para siempre,
+    por más veces que se tocara el botón.
+    Y eso no era un detalle de una pantalla de mantenimiento: la confianza es lo que el buscador
+    muestra en CADA resultado para decir cuánto confiar en el camino. Con el 84% de los vínculos
+    contando como neutros, «una cadena vale lo que su eslabón más flojo» no medía nada.
+
+    Con solo_faltantes se puntúa lo que falta y cada corrida avanza. En False vuelve a puntuar
+    todo, que es lo que hace falta cuando cambió la evidencia (ventas nuevas, decisiones nuevas)
+    y los puntajes viejos quedaron desactualizados."""
+    filtro = "WHERE e.confianza IS NULL" if solo_faltantes else ""
+    c.execute(f"""SELECT e.producto_a_id AS a, e.producto_b_id AS b,
                         pa.codigo_raw AS cod_a, pa.descripcion AS desc_a, pa.precio AS precio_a,
                         ma.nombre AS marca_a,
                         pb.codigo_raw AS cod_b, pb.descripcion AS desc_b, pb.precio AS precio_b,
-                        mb.nombre AS marca_b
+                        mb.nombre AS marca_b, ma.tipo AS tipo_a, mb.tipo AS tipo_b
                  FROM equivalencias e
                  JOIN productos pa ON pa.id = e.producto_a_id
                  JOIN productos pb ON pb.id = e.producto_b_id
                  JOIN marcas ma ON ma.id = pa.marca_id
                  JOIN marcas mb ON mb.id = pb.marca_id
+                 {filtro}
                  LIMIT ?""", (limite,))
     filas = [dict(r) for r in c.fetchall()]
     if not filas:
         return 0
     medidas = cargar_medidas_de_varios([f["a"] for f in filas] + [f["b"] for f in filas])
     patrones = aprender_de_las_decisiones()
+    # A cuántos productos se cuelga cada código de fábrica. Se cuenta de una sola vez para todo
+    # el lote: preguntarlo vínculo por vínculo serían miles de consultas para el mismo dato.
+    grados = {}
+    try:
+        c.execute("""SELECT p.id AS pid, COUNT(*) AS n FROM equivalencias eq
+                     JOIN productos p ON p.id IN (eq.producto_a_id, eq.producto_b_id)
+                     JOIN marcas m ON m.id = p.marca_id
+                     WHERE m.tipo = 'OEM' GROUP BY p.id""")
+        grados = {r["pid"]: r["n"] for r in c.fetchall()}
+    except sqlite3.OperationalError as _err:
+        anotar_error("recalcular_confianzas", _err)
     aprobados = puentes_aprobados_ids()
     ventas_confirman = pares_confirmados_por_ventas()
 
     valores = []
     for i, f in enumerate(filas):
+        # Cuál de los dos lados es el código de fábrica que hace de puente (si alguno lo es).
+        if f["tipo_a"] == "OEM":
+            puente, id_puente = f["cod_a"], f["a"]
+        elif f["tipo_b"] == "OEM":
+            puente, id_puente = f["cod_b"], f["b"]
+        else:
+            puente, id_puente = None, None
         puntaje, _ = evaluar_equivalencia(
             f["desc_a"], f["desc_b"], medidas.get(f["a"]), medidas.get(f["b"]),
             f["precio_a"], f["precio_b"],
             marca_a=f["marca_a"], marca_b=f["marca_b"], patrones=patrones,
             vendido_como_reemplazo=ventas_confirman.get((min(f["a"], f["b"]),
-                                                          max(f["a"], f["b"])), 0)
+                                                          max(f["a"], f["b"])), 0),
+            codigo_puente=puente, productos_del_puente=grados.get(id_puente, 0)
         )
         if f["a"] not in aprobados and f["b"] not in aprobados:
             for lado in ("a", "b"):
@@ -16874,15 +16958,39 @@ if pagina == PAGINAS[3]:
             if sin_puntuar:
                 st.info(f"Hay {sin_puntuar:,} vínculo(s) sin puntuar de {total_eq:,}. "
                          "Mientras tanto cuentan como neutros.")
-            if total_eq and st.button("🎯 Calcular la confianza de todos los vínculos"):
+            if total_eq and st.button("🎯 Calcular la confianza de los vínculos que faltan"):
                 barra_conf = st.progress(0.0, text="Puntuando...")
-                n = recalcular_confianzas(
-                    progreso=lambda i, t: barra_conf.progress(min(i / max(t, 1), 1.0),
-                                                              text=f"Puntuando {i:,} de {t:,}...")
-                )
+                # Va por tandas hasta terminar, no una sola de tamaño fijo. Antes se hacía una
+                # tanda y listo, y con más vínculos que el tope quedaban miles sin puntuar por
+                # más veces que se tocara el botón: el botón decía "todos" y no era cierto.
+                pendientes = sin_puntuar
+                hechos = 0
+                while True:
+                    n = recalcular_confianzas(limite=2000, solo_faltantes=True)
+                    if not n:
+                        break
+                    hechos += n
+                    barra_conf.progress(min(hechos / max(pendientes, 1), 1.0),
+                                        text=f"Puntuando {hechos:,} de {pendientes:,}...")
+                    if hechos >= pendientes:
+                        break
                 barra_conf.empty()
                 invalidar_salud()
-                avisar("success", f"Se puntuaron {n:,} vínculo(s). El buscador ya lo está usando.")
+                avisar("success", f"Se puntuaron {hechos:,} vínculo(s). El buscador ya lo está "
+                                  "usando.")
+                st.rerun()
+            if total_eq and st.button("♻️ Volver a puntuar TODO",
+                                       help="Los puntajes cambian cuando aparece evidencia nueva "
+                                            "—ventas que confirman un reemplazo, decisiones que "
+                                            "tomaste al revisar—. Esto los recalcula de cero."):
+                barra_re = st.progress(0.0, text="Recalculando...")
+                n = recalcular_confianzas(
+                    limite=max(total_eq, 1), solo_faltantes=False,
+                    progreso=lambda i, t: barra_re.progress(min(i / max(t, 1), 1.0),
+                                                            text=f"Recalculando {i:,} de {t:,}..."))
+                barra_re.empty()
+                invalidar_salud()
+                avisar("success", f"Se recalcularon {n:,} vínculo(s).")
                 st.rerun()
             st.markdown("**🧾 Equivalencias que confirmó el mostrador**")
             explicar(
