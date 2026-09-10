@@ -996,6 +996,10 @@ def get_connection():
         eliminado_por TEXT,
         eliminado_en TEXT DEFAULT (datetime('now'))
     )""")
+    # Una línea que describe lo borrado, para poder listar la papelera sin abrir el JSON
+    # entero — que en una marca grande son 10,6 MB por fila. Ver mover_a_papelera().
+    if "resumen" not in [f[1] for f in c.execute("PRAGMA table_info(papelera)").fetchall()]:
+        c.execute("ALTER TABLE papelera ADD COLUMN resumen TEXT")
 
     # Cuando un empleado busca algo y no hay stock (o le falta), lo marca acá para que el dueño
     # lo revise después y decida qué pedirle a cada proveedor. Un mismo producto pedido varias
@@ -10517,10 +10521,34 @@ def resumen_uso_ia(dias=30):
               "Con error": r["total"] - r["exitosos"]} for r in c.fetchall()]
 
 
+def _resumen_de_papelera(tipo, datos):
+    """Una línea que describe lo borrado, para poder listar la papelera sin abrir el JSON."""
+    try:
+        if tipo == "marca":
+            return f"{datos['marca']['nombre']} ({len(datos['productos'])} producto(s))"
+        if tipo == "producto":
+            return datos.get("codigo_raw", "")
+        if tipo == "combo":
+            return datos.get("disparador", "")
+        if tipo == "alias":
+            return datos.get("nombre", "")
+    except (KeyError, TypeError) as _err:
+        anotar_error("_resumen_de_papelera", _err)
+    return ""
+
+
 def mover_a_papelera(tipo, datos_dict):
+    """Guarda lo borrado entero, más un resumen corto aparte.
+
+    El resumen no es un lujo: el snapshot de una marca grande son 10,6 MB de JSON en una sola
+    fila, y la pantalla de papelera lo abría ENTERO —de las cien filas— solo para leer el
+    nombre de la marca y contar los productos. Con dos o tres marcas borradas eso es parsear
+    decenas de megas cada vez que se abre la pantalla."""
     with db_lock:
-        c.execute("INSERT INTO papelera (tipo, datos_json, eliminado_por) VALUES (?, ?, ?)",
-                   (tipo, json.dumps(datos_dict, ensure_ascii=False), obtener_usuario_actual()))
+        c.execute("INSERT INTO papelera (tipo, datos_json, eliminado_por, resumen) "
+                  "VALUES (?, ?, ?, ?)",
+                  (tipo, json.dumps(datos_dict, ensure_ascii=False), obtener_usuario_actual(),
+                   _resumen_de_papelera(tipo, datos_dict)))
         conn.commit()
 
 
@@ -10538,12 +10566,16 @@ def eliminar_marca_con_papelera(nombre_marca):
     producto_ids = [p["id"] for p in productos_rows]
     equivalencias_rows = []
     if producto_ids:
-        placeholders = ",".join("?" * len(producto_ids))
-        c.execute(
-            f"SELECT * FROM equivalencias WHERE producto_a_id IN ({placeholders}) "
-            f"OR producto_b_id IN ({placeholders})",
-            producto_ids + producto_ids
-        )
+        # Se pregunta por la MARCA, no por la lista de ids. Antes se armaba un IN con todos
+        # los productos —dos veces, uno por cada lado del vínculo—: borrar un proveedor de
+        # 43.303 productos generaba una consulta con 86.176 variables. El límite habitual de
+        # SQLite es 32.766, así que en un servidor con la compilación estándar la operación
+        # falla con «too many SQL variables» y no se puede borrar justamente a los proveedores
+        # más grandes, que son los que uno quiere borrar cuando la importación salió mal.
+        # Con el JOIN va un solo parámetro y no depende del tamaño de la marca.
+        c.execute("""SELECT DISTINCT e.* FROM equivalencias e
+                     JOIN productos p ON p.id IN (e.producto_a_id, e.producto_b_id)
+                     WHERE p.marca_id = ?""", (marca_id,))
         equivalencias_rows = [dict(r) for r in c.fetchall()]
 
     snapshot = {"marca": dict(marca_row), "productos": productos_rows, "equivalencias": equivalencias_rows}
@@ -10556,23 +10588,22 @@ def eliminar_marca_con_papelera(nombre_marca):
 
 
 def listar_papelera():
-    c.execute("""SELECT id AS "ID", tipo AS "Tipo", datos_json, eliminado_por AS "Eliminado por",
+    # NO se trae datos_json: son 10,6 MB por marca borrada y acá solo hace falta el resumen.
+    # Las filas viejas, de antes de que existiera la columna, se resuelven abriendo el JSON de
+    # a una y solo esas.
+    c.execute("""SELECT id AS "ID", tipo AS "Tipo", resumen, eliminado_por AS "Eliminado por",
                  eliminado_en AS "Fecha" FROM papelera ORDER BY id DESC LIMIT 100""")
     filas = []
     for row in c.fetchall():
-        detalle = ""
-        if row["Tipo"] == "marca":
-            datos = json.loads(row["datos_json"])
-            detalle = f"{datos['marca']['nombre']} ({len(datos['productos'])} producto(s))"
-        elif row["Tipo"] == "producto":
-            datos = json.loads(row["datos_json"])
-            detalle = datos.get("codigo_raw", "")
-        elif row["Tipo"] == "combo":
-            datos = json.loads(row["datos_json"])
-            detalle = datos.get("disparador", "")
-        elif row["Tipo"] == "alias":
-            datos = json.loads(row["datos_json"])
-            detalle = datos.get("nombre", "")
+        detalle = row["resumen"] or ""
+        if not detalle:
+            c.execute("SELECT datos_json FROM papelera WHERE id = ?", (row["ID"],))
+            _vieja = c.fetchone()
+            if _vieja:
+                try:
+                    detalle = _resumen_de_papelera(row["Tipo"], json.loads(_vieja["datos_json"]))
+                except (ValueError, TypeError) as _err:
+                    anotar_error("listar_papelera", _err)
         filas.append({"ID": row["ID"], "Tipo": row["Tipo"], "Detalle": detalle,
                        "Eliminado por": row["Eliminado por"], "Fecha": row["Fecha"]})
     return filas
