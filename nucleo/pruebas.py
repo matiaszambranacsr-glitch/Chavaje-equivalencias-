@@ -53,6 +53,27 @@ def probar_codigo_util():
         cierto(codigos.es_codigo_util(bueno), f"'{bueno}' SÍ debería ser un código útil")
 
 
+def probar_codigo_sospechoso():
+    """Una medida o una palabra PEGADA a un código no hacen que el código deje de existir.
+
+    Marcar de más no es inocuo: cada código marcado manda un vínculo bueno a la cola de
+    revisión, o sea que los equivalentes de ese proveedor no aparecen en una búsqueda. Sobre
+    cinco listas reales esto marcaba 2.406 códigos y unos 2.170 eran válidos."""
+    # Códigos de proveedor REALES que llevan la medida o una aclaración adentro
+    for bueno in ('H21A1/2"RF1,5',        # IMPERIAL, abrazadera de 1/2 pulgada
+                  "F000 TE1 3X9",          # Bosch
+                  "RAPI-335024X45",        # IMPERIAL
+                  "278.897 c/CHAPA",       # JL: el código es 278.897, "c/CHAPA" aclara
+                  "12345 TIPO"):
+        malo, motivo = codigos.codigo_sospechoso(bueno, "")
+        cierto(not malo, f"«{bueno}» es un código de verdad y quedó marcado: {motivo}")
+    # Y lo que SÍ es una medida o la descripción metida en la columna del código
+    for malo_de_verdad in ("20x2.50x180", "35x52x7", '1/2"', "ARO",
+                           "JUEGO DE AROS DIESEL", "SECTOR CANAL"):
+        malo, _ = codigos.codigo_sospechoso(malo_de_verdad, "")
+        cierto(malo, f"«{malo_de_verdad}» NO es un código y no se marcó")
+
+
 def probar_extractor():
     # Lo que SÍ tiene que sacar: son cruces reales, verificados contra las dos listas.
     debe = [
@@ -236,7 +257,8 @@ def probar_codigo_generico_no_cruza():
 
 
 def main():
-    for prueba in (probar_sanitizar, probar_codigo_util, probar_extractor,
+    for prueba in (probar_sanitizar, probar_codigo_util, probar_codigo_sospechoso,
+                   probar_extractor,
                    probar_filtro_por_repeticion, probar_dividir, probar_vehiculos,
                    probar_mapeo_columnas, probar_busqueda_entre_proveedores,
                    probar_codigo_generico_no_cruza):

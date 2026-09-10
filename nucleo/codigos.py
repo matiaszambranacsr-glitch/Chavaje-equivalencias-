@@ -183,8 +183,33 @@ def codigo_sospechoso(codigo, descripcion=""):
     # cola de revisión para siempre.
     if re.fullmatch(r"\d+(?:[.,]\d+)?[Ee][+\-]\d+", texto.strip()):
         return True, f"«{texto}» quedó en notación científica de Excel (el número real se perdió)"
+    # Una medida solo es sospechosa si ES el código, no si es una PARTE del código. Es la misma
+    # idea que ya usaba es_por_medida unas líneas más arriba, aplicada a la forma del código.
+    # Medido sobre las cinco listas reales: de los 2.406 códigos marcados sospechosos, unos
+    # 1.456 eran códigos de proveedor perfectamente válidos que llevan la medida adentro —
+    # 'H21A1/2"RF1,5' es el código de IMPERIAL para esa abrazadera, y 'F000 TE1 3X9' es un Bosch.
+    # Cada uno de esos mandaba un vínculo bueno a la cola de revisión para siempre, o sea que los
+    # equivalentes de ese proveedor no aparecían nunca en una búsqueda.
+    # El corte: si sacándole la parte que parece medida todavía quedan 4 o más caracteres de
+    # código, es un código con una medida adentro y se respeta. Si no queda casi nada
+    # ('20x2.50x180', '1/2"'), es una medida disfrazada de código y sigue marcándose.
+    def _queda_codigo_sin(patron):
+        """¿Sacándole eso, todavía queda algo con forma de código?
+
+        Dos condiciones: que quede material —cuatro caracteres o más— y que ese resto tenga
+        algún NÚMERO. Lo segundo es lo que separa «278.897 c/CHAPA», que es un código con una
+        aclaración al lado, de «JUEGO DE AROS DIESEL», que es la descripción entera metida en
+        la columna del código. Sin pedir el número, las dos pasaban igual."""
+        resto = re.sub(patron, "", texto, flags=re.IGNORECASE)
+        solo_alfanum = re.sub(r"[^A-Za-z0-9]", "", resto)
+        return len(solo_alfanum) >= 4 and any(ch.isdigit() for ch in solo_alfanum)
+
+    _queda_codigo_sin_la_medida = _queda_codigo_sin
+
     if not es_por_medida:
-        if re.search(r"\d\s*[xX]\s*\d+[.,]?\d*\s*[xX]?\s*\d*\s*(MM|mm)?$", texto) and "x" in texto.lower():
+        _medida_x = r"\d\s*[xX]\s*\d+[.,]?\d*\s*[xX]?\s*\d*\s*(MM|mm)?$"
+        if (re.search(_medida_x, texto) and "x" in texto.lower()
+                and not _queda_codigo_sin_la_medida(_medida_x)):
             return True, f"«{texto}» parece una medida, no un código"
         # Las unidades de varias letras (MM, CC, KG...) van como antes. V y W sueltos, en
         # cambio, solo cuentan si el código ES el número y nada más ("24V", "1.6W"): una V o una
@@ -194,9 +219,18 @@ def codigo_sospechoso(codigo, descripcion=""):
             return True, f"«{texto}» parece una medida o especificación"
         if re.fullmatch(r"\d+(?:[.,]\d+)?\s*[VW]", texto.strip(), re.I):
             return True, f"«{texto}» parece una especificación eléctrica, no un código"
-        if "Ø" in texto or '"' in texto or "″" in texto:
+        if ("Ø" in texto or '"' in texto or "″" in texto) and not _queda_codigo_sin_la_medida(
+                r"[Ø\"″]|\d+\s*/\s*\d+|\d+[.,]\d+"):
             return True, f"«{texto}» tiene símbolos de medida (Ø o pulgadas)"
-    if re.search(r"\b(DIESEL|NAFTA|SECTOR|CANAL|JUEGO|ARO|CHAPA|TIPO|MEDIDA)\b", texto, re.I):
+    # Misma idea que con las medidas: una palabra de la descripción pegada al código no hace
+    # que el código deje de existir. JL escribe sus códigos como «278.897 c/CHAPA» —el código es
+    # 278.897 y "c/CHAPA" aclara que viene con chapa—, y eran 739 productos marcados como si la
+    # columna estuviera mal mapeada. Cada uno mandaba un vínculo bueno a la cola de revisión.
+    # Si sacándole la palabra todavía quedan 4 caracteres o más, es un código con una aclaración
+    # al lado. Si no queda nada («JUEGO DE AROS DIESEL»), sí es un pedazo de la descripción, que
+    # es el caso para el que existe esta regla.
+    _palabras_de_desc = r"\b(DIESEL|NAFTA|SECTOR|CANAL|JUEGO|ARO|CHAPA|TIPO|MEDIDA)\b"
+    if re.search(_palabras_de_desc, texto, re.I) and not _queda_codigo_sin(_palabras_de_desc):
         return True, f"«{texto}» parece un pedazo de la descripción"
     return False, None
 
