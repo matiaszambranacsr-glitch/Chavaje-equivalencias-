@@ -1863,6 +1863,15 @@ class _ConexionPorSesion:
                 self._al_crear(propia)
         return propia
 
+    def conexion_real(self):
+        """La sqlite3.Connection de esta sesión, para las pocas APIs que no aceptan el proxy.
+
+        backup() es una de ellas: pide una sqlite3.Connection de verdad como destino y con el
+        proxy tira «TypeError: backup() argument 'target' must be sqlite3.Connection». Existe
+        este método —y no se accede a _real desde afuera— para que quede escrito dónde y por
+        qué se sale del proxy."""
+        return self._real
+
     def cursor(self):
         return self._real.cursor()
 
@@ -2510,16 +2519,46 @@ def listar_productos_sin_equivalencias(marca_filtro="Todas", limite=500):
 
 
 def restaurar_backup(archivo_subido):
-    """Reemplaza la base de datos actual por un archivo .db subido, de forma segura."""
-    with db_lock:
-        conn.commit()
-        contenido = archivo_subido.read()
-        conn.close()
-        with open(DB_PATH, "wb") as f:
-            f.write(contenido)
-        # Muy importante: la conexión estaba cacheada por Streamlit. Si no limpiamos el
-        # caché, la próxima vez que se pida se devolvería esta misma conexión ya cerrada.
-        get_connection.clear()
+    """Reemplaza la base de datos actual por un archivo .db subido.
+
+    Se restaura con la API backup() de SQLite y NO sobrescribiendo el archivo a mano, que es
+    como estaba antes. La diferencia importa y se comprobó:
+
+    La base anda en modo WAL, así que los cambios recientes viven en un archivo aparte
+    (.db-wal) hasta que se consolidan. Cerrar la propia conexión solo borra ese archivo si es
+    la ÚLTIMA conexión abierta — y esta app abre una por sesión justamente para que puedan
+    usarla dos personas a la vez. Con alguien más adentro, el .db-wal sobrevive, y al pisar el
+    .db con los bytes del backup ese WAL viejo se aplica encima de la base nueva: quedan
+    mezcladas dos bases distintas. Probado con una segunda sesión que había escrito 500 filas:
+    la restauración terminaba "bien" y el PRAGMA integrity_check devolvía
+    «NUMERIC value in productos.ubicacion». Corrupción silenciosa, y del archivo entero.
+    Borrar el .db-wal a mano tampoco sirve: la otra sesión lo tiene abierto y se cae con
+    «disk I/O error».
+
+    backup() escribe A TRAVÉS de SQLite, así que el WAL queda coherente, la otra sesión sigue
+    funcionando y la base reabre sana. Es el mismo mecanismo que ya usaba
+    _restaurar_desde_semilla(); acá faltaba."""
+    contenido = archivo_subido.read()
+    temporal = DB_PATH + ".subido"
+    with open(temporal, "wb") as f:
+        f.write(contenido)
+    try:
+        origen = sqlite3.connect(temporal)
+        # Si lo que subieron no es una base de SQLite, esto falla ACÁ, antes de tocar nada.
+        origen.execute("PRAGMA schema_version")
+        with db_lock:
+            conn.commit()
+            # conexion_real() y no conn: backup() no acepta el proxy por sesión.
+            origen.backup(conn.conexion_real())
+            conn.commit()
+        origen.close()
+    finally:
+        try:
+            os.remove(temporal)
+        except OSError as _err:
+            anotar_error("restaurar_backup", _err)
+    # El caché de Streamlit puede tener guardados conteos y consultas de la base anterior.
+    st.cache_data.clear()
 
 
 def listar_marcas_con_conteo():
