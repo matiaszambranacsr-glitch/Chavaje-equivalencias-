@@ -49,11 +49,22 @@ def sanitizar(codigo):
         return ""
     if re.fullmatch(r"\d+\.0+", codigo):
         codigo = codigo.split(".")[0]
-    # Notación científica: se pasa al número entero que representa
-    if re.fullmatch(r"\d+(\.\d+)?[Ee][+-]?\d+", codigo):
+    # Notación científica: se pasa al número entero que representa.
+    # El signo del exponente es OBLIGATORIO, y ahí está toda la diferencia. Excel siempre
+    # escribe '1.09E+11' o '2.7E-05' —nunca sin el + o el −—, mientras que los códigos de
+    # fábrica que TIENEN una E en el medio no lo llevan: '233900E010' es el filtro de
+    # combustible Toyota 23390-0E010, y sin exigir el signo se convertía en el número
+    # 2339000000000000. Ese producto quedaba imposible de encontrar por su código real, y sus
+    # equivalencias apuntaban a un código que no existe.
+    # Se cuentan 283 apariciones de esa forma dentro de las descripciones de cinco listas
+    # reales, y CERO notaciones científicas de Excel de verdad: exigir el signo no cuesta nada
+    # y salva las 283.
+    # La coma también entra como separador decimal: '2,7E-05' es lo que sale de un Excel en
+    # español, y sin contemplarla caía en la limpieza a lo bruto y quedaba '27E05'.
+    if re.fullmatch(r"\d+([.,]\d+)?[Ee][+-]\d+", codigo):
         try:
-            entero = int(float(codigo))
-            if abs(float(codigo) - entero) < 1e-6:
+            entero = int(float(codigo.replace(",", ".")))
+            if abs(float(codigo.replace(",", ".")) - entero) < 1e-6:
                 codigo = str(entero)
         except (ValueError, OverflowError) as _err:
             anotar_error("sanitizar", _err)
@@ -167,7 +178,10 @@ def codigo_sospechoso(codigo, descripcion=""):
     # son de lo más común, y esos vínculos quedaban en la cola de revisión para siempre — o sea,
     # los equivalentes de ese proveedor no aparecían nunca en una búsqueda.
     # Es la misma regla que usa sanitizar() unas líneas más arriba; acá estaba más floja.
-    if re.fullmatch(r"\d+(?:[.,]\d+)?[Ee][+\-]?\d+", texto.strip()):
+    # El signo del exponente es obligatorio, igual que en sanitizar(): sin eso, '233900E010'
+    # —un código Toyota de verdad— quedaba marcado como número roto y su vínculo se iba a la
+    # cola de revisión para siempre.
+    if re.fullmatch(r"\d+(?:[.,]\d+)?[Ee][+\-]\d+", texto.strip()):
         return True, f"«{texto}» quedó en notación científica de Excel (el número real se perdió)"
     if not es_por_medida:
         if re.search(r"\d\s*[xX]\s*\d+[.,]?\d*\s*[xX]?\s*\d*\s*(MM|mm)?$", texto) and "x" in texto.lower():

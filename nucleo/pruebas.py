@@ -35,6 +35,15 @@ def probar_sanitizar():
     igual(codigos.sanitizar("1.09E+11"), "109000000000", "notación científica")
     # ...pero 'BE-777' NO es notación científica, y se rompía justo así.
     igual(codigos.sanitizar("BE-777"), "BE777", "BE-777 no es notación científica")
+    # Ni tampoco un código de fábrica que casualmente tiene una E en el medio. El signo del
+    # exponente es lo que los separa: Excel siempre escribe E+11 o E-05, y estos no llevan
+    # signo. Sin esa distinción, el filtro de combustible Toyota 23390-0E010 se guardaba como
+    # el número 2339000000000000 y el producto quedaba imposible de encontrar. Son 114 códigos
+    # distintos, 230 apariciones, en cinco listas reales.
+    for real in ("233900E010", "2263051E00", "2263051E10", "1E0318760", "5960E6", "123456E7"):
+        igual(codigos.sanitizar(real), real, f"«{real}» es un código, no notación científica")
+        cierto(not codigos.codigo_sospechoso(real, "")[0],
+               f"«{real}» no se puede marcar como número roto")
 
 
 def probar_codigo_util():

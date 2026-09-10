@@ -64,7 +64,7 @@ def filas_a_listas(cursor):
     return [dict(row) for row in cursor.fetchall()]
 
 
-def buscar_por_codigo(cur, clean_code, marca_filtro="Todas", max_saltos=None):
+def buscar_por_codigo(cur, clean_code, marca_filtro="Todas", max_saltos=None, confianza_minima=None):
     """Busca un código y todo lo que esté encadenado con él.
 
     La búsqueda es TRANSITIVA: si la lista A dice que el 1 equivale al 2, y la lista B dice que
@@ -74,7 +74,11 @@ def buscar_por_codigo(cur, clean_code, marca_filtro="Todas", max_saltos=None):
 
     Por eso ahora se cuenta a cuántos SALTOS está cada resultado del código buscado. Un salto es
     un vínculo directo: alguien lo puso en la misma fila. Cinco saltos es una cadena larga donde
-    cualquier eslabón puede estar mal. Con max_saltos se corta la cadena."""
+    cualquier eslabón puede estar mal. Con max_saltos se corta la cadena.
+
+    Y con confianza_minima se corta por otra cosa: cuánto vale el camino, no cuán largo es. Un
+    resultado a dos saltos por vínculos sólidos es más confiable que uno directo colgado de un
+    vínculo malo, así que limitar los saltos no alcanza para sacarse de encima lo dudoso."""
     tope = int(max_saltos) if max_saltos else 99
     # La consulta arrastra, además de los saltos, la confianza del ESLABÓN MÁS DÉBIL del camino.
     # Es lo que faltaba para poder confiar en un resultado: no alcanza con saber que está a dos
@@ -140,7 +144,17 @@ def buscar_por_codigo(cur, clean_code, marca_filtro="Todas", max_saltos=None):
     # Tope de resultados. Una red sana tiene entre 2 y 20 códigos; si devuelve cientos, es que
     # un código puente fusionó familias que no tienen relación, y mostrar 1.800 filas no ayuda
     # a nadie — solo tarda y tapa lo bueno. Se ordena por saltos, así lo primero es lo cercano.
-    query += ' GROUP BY p.id ORDER BY MIN(r.saltos), m.tipo, m.nombre LIMIT 400;'
+    query += ' GROUP BY p.id'
+    # Filtro por lo que vale el camino, no por su largo. Son dos cosas distintas y hasta ahora
+    # solo se podía controlar la segunda: un resultado a dos saltos por vínculos sólidos es más
+    # confiable que uno directo colgado de un vínculo malo, y el control de saltos no distingue
+    # eso. Va en HAVING y no en WHERE porque el valor sale del MAX() del grupo: es el peor
+    # eslabón del camino más corto hasta ese producto.
+    # El buscado (saltos = 0) nunca se filtra: es el código que se escribió, no un resultado.
+    if confianza_minima:
+        query += ' HAVING MIN(r.saltos) = 0 OR MAX(r.peor) >= ?'
+        params.append(int(confianza_minima))
+    query += ' ORDER BY MIN(r.saltos), m.tipo, m.nombre LIMIT 400;'
 
     cur.execute(query, params)
     res = filas_a_listas(cur)

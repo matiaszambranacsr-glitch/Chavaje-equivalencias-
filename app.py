@@ -2000,11 +2000,22 @@ def sanitizar(codigo):
         return ""
     if re.fullmatch(r"\d+\.0+", codigo):
         codigo = codigo.split(".")[0]
-    # Notación científica: se pasa al número entero que representa
-    if re.fullmatch(r"\d+(\.\d+)?[Ee][+-]?\d+", codigo):
+    # Notación científica: se pasa al número entero que representa.
+    # El signo del exponente es OBLIGATORIO, y ahí está toda la diferencia. Excel siempre
+    # escribe '1.09E+11' o '2.7E-05' —nunca sin el + o el −—, mientras que los códigos de
+    # fábrica que TIENEN una E en el medio no lo llevan: '233900E010' es el filtro de
+    # combustible Toyota 23390-0E010, y sin exigir el signo se convertía en el número
+    # 2339000000000000. Ese producto quedaba imposible de encontrar por su código real, y sus
+    # equivalencias apuntaban a un código que no existe.
+    # Se cuentan 283 apariciones de esa forma dentro de las descripciones de cinco listas
+    # reales, y CERO notaciones científicas de Excel de verdad: exigir el signo no cuesta nada
+    # y salva las 283.
+    # La coma también entra como separador decimal: '2,7E-05' es lo que sale de un Excel en
+    # español, y sin contemplarla caía en la limpieza a lo bruto y quedaba '27E05'.
+    if re.fullmatch(r"\d+([.,]\d+)?[Ee][+-]\d+", codigo):
         try:
-            entero = int(float(codigo))
-            if abs(float(codigo) - entero) < 1e-6:
+            entero = int(float(codigo.replace(",", ".")))
+            if abs(float(codigo.replace(",", ".")) - entero) < 1e-6:
                 codigo = str(entero)
         except (ValueError, OverflowError) as _err:
             anotar_error("sanitizar", _err)
@@ -5033,7 +5044,7 @@ def filas_a_listas(cursor):
     return [dict(row) for row in cursor.fetchall()]
 
 
-def buscar_por_codigo(clean_code, marca_filtro="Todas", max_saltos=None):
+def buscar_por_codigo(clean_code, marca_filtro="Todas", max_saltos=None, confianza_minima=None):
     """Busca un código y todo lo que esté encadenado con él.
 
     La búsqueda es TRANSITIVA: si la lista A dice que el 1 equivale al 2, y la lista B dice que
@@ -5043,7 +5054,11 @@ def buscar_por_codigo(clean_code, marca_filtro="Todas", max_saltos=None):
 
     Por eso ahora se cuenta a cuántos SALTOS está cada resultado del código buscado. Un salto es
     un vínculo directo: alguien lo puso en la misma fila. Cinco saltos es una cadena larga donde
-    cualquier eslabón puede estar mal. Con max_saltos se corta la cadena."""
+    cualquier eslabón puede estar mal. Con max_saltos se corta la cadena.
+
+    Y con confianza_minima se corta por otra cosa: cuánto vale el camino, no cuán largo es. Un
+    resultado a dos saltos por vínculos sólidos es más confiable que uno directo colgado de un
+    vínculo malo, así que limitar los saltos no alcanza para sacarse de encima lo dudoso."""
     tope = int(max_saltos) if max_saltos else 99
     # La consulta arrastra, además de los saltos, la confianza del ESLABÓN MÁS DÉBIL del camino.
     # Es lo que faltaba para poder confiar en un resultado: no alcanza con saber que está a dos
@@ -5109,7 +5124,17 @@ def buscar_por_codigo(clean_code, marca_filtro="Todas", max_saltos=None):
     # Tope de resultados. Una red sana tiene entre 2 y 20 códigos; si devuelve cientos, es que
     # un código puente fusionó familias que no tienen relación, y mostrar 1.800 filas no ayuda
     # a nadie — solo tarda y tapa lo bueno. Se ordena por saltos, así lo primero es lo cercano.
-    query += ' GROUP BY p.id ORDER BY MIN(r.saltos), m.tipo, m.nombre LIMIT 400;'
+    query += ' GROUP BY p.id'
+    # Filtro por lo que vale el camino, no por su largo. Son dos cosas distintas y hasta ahora
+    # solo se podía controlar la segunda: un resultado a dos saltos por vínculos sólidos es más
+    # confiable que uno directo colgado de un vínculo malo, y el control de saltos no distingue
+    # eso. Va en HAVING y no en WHERE porque el valor sale del MAX() del grupo: es el peor
+    # eslabón del camino más corto hasta ese producto.
+    # El buscado (saltos = 0) nunca se filtra: es el código que se escribió, no un resultado.
+    if confianza_minima:
+        query += ' HAVING MIN(r.saltos) = 0 OR MAX(r.peor) >= ?'
+        params.append(int(confianza_minima))
+    query += ' ORDER BY MIN(r.saltos), m.tipo, m.nombre LIMIT 400;'
 
     with db_lock:
         c.execute(query, params)
@@ -7178,7 +7203,10 @@ def codigo_sospechoso(codigo, descripcion=""):
     # son de lo más común, y esos vínculos quedaban en la cola de revisión para siempre — o sea,
     # los equivalentes de ese proveedor no aparecían nunca en una búsqueda.
     # Es la misma regla que usa sanitizar() unas líneas más arriba; acá estaba más floja.
-    if re.fullmatch(r"\d+(?:[.,]\d+)?[Ee][+\-]?\d+", texto.strip()):
+    # El signo del exponente es obligatorio, igual que en sanitizar(): sin eso, '233900E010'
+    # —un código Toyota de verdad— quedaba marcado como número roto y su vínculo se iba a la
+    # cola de revisión para siempre.
+    if re.fullmatch(r"\d+(?:[.,]\d+)?[Ee][+\-]\d+", texto.strip()):
         return True, f"«{texto}» quedó en notación científica de Excel (el número real se perdió)"
     if not es_por_medida:
         if re.search(r"\d\s*[xX]\s*\d+[.,]?\d*\s*[xX]?\s*\d*\s*(MM|mm)?$", texto) and "x" in texto.lower():
@@ -14058,6 +14086,17 @@ Casi todo lo que edita o borra algo pide la contraseña de administrador la prim
                      "que cuelga de ahí también."
             )
             max_saltos = opciones_saltos[etiqueta_saltos]
+            # Cortar por saltos y cortar por confianza son dos cosas distintas: la primera mira
+            # cuán largo es el camino, la segunda cuánto vale. Un resultado a dos saltos por
+            # vínculos sólidos es mejor que uno directo colgado de un vínculo malo, y con el
+            # control de saltos solo no había forma de sacarse de encima lo segundo.
+            solo_confiables = st.checkbox(
+                "Esconder los que llegan por vínculos flojos", key="solo_confiables",
+                help="Deja fuera los resultados cuyo camino pasa por algún vínculo que el "
+                     "análisis puntuó por debajo de 50 — códigos puente cortos o genéricos, y "
+                     "los que cuelgan de un mismo código a media docena de productos. El "
+                     "código que buscaste siempre se muestra."
+            )
             buscar_click = st.form_submit_button("🔍 Buscar Equivalencias", type="primary")
 
         # La búsqueda en sí (con sus efectos de una sola vez: guardar historial, contar
@@ -14095,7 +14134,8 @@ Casi todo lo que edita o borra algo pide la contraseña de administrador la prim
                             {"codigo_individual": codigo_individual, "clean": None, "res": None}
                         )
                         continue
-                    res = buscar_por_codigo(clean, marca_filtro, max_saltos)
+                    res = buscar_por_codigo(clean, marca_filtro, max_saltos,
+                                             confianza_minima=50 if solo_confiables else None)
                     if res:
                         incrementar_veces_buscado(clean)
                     else:
