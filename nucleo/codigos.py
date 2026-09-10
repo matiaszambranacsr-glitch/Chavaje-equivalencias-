@@ -300,6 +300,12 @@ def codigos_confiables_de_descripciones(descripciones, tope=TOPE_REPETICIONES_EN
     return {cod for cod, veces in conteo.items() if veces <= tope}, conteo
 
 
+# Cuando el proveedor ESCRIBE que lo que sigue es el código de fábrica. Ahí ya no estamos
+# adivinando: nos lo están diciendo, y las reglas que existen para adivinar tienen que aflojarse.
+_MARCADORES_DE_OEM = {"//", "ORIG", "ORIG.", "ORIGINAL", "ORIGINALES", "OEM", "EQUIV",
+                      "EQUIVALE", "REEMPLAZA", "CROSS", "N°ORIG", "NºORIG", "REF.ORIG"}
+
+
 def _es_el_codigo_propio_con_texto(candidato, propio):
     """¿'candidato' es 'propio' con una palabra pegada atrás? Ver extraer_codigos_de_texto()."""
     iguales = 0
@@ -333,7 +339,10 @@ def extraer_codigos_de_texto(texto, minimo=6, codigo_propio=None):
     # Se aplican SOLO acá, cuando el código se está adivinando de un texto. Si el proveedor lo
     # puso en la columna del código, es un código y se respeta: la exigencia va donde estamos
     # suponiendo, no donde nos lo dijeron.
-    formas_prohibidas = (
+    # AMBIGUAS: aciertan casi siempre, pero la misma forma la tienen códigos de repuesto de
+    # verdad —ERR4685B es un número de Land Rover, no un motor—, así que dejan de aplicarse
+    # cuando el proveedor DECLARÓ que lo que sigue es el código de fábrica.
+    formas_ambiguas = (
         # Códigos de MOTOR: letras, números y letras al final. MR20DE, B4204S, Z18XER, X20XEV,
         # DV6DTED, MT560B. Describen la motorización del auto, no la pieza — y como se repiten
         # en decenas de filas, cada uno vincula entre sí todo lo que lo menciona.
@@ -341,6 +350,15 @@ def extraer_codigos_de_texto(texto, minimo=6, codigo_propio=None):
         # códigos de motor. El 1% de pérdida vale, porque cada uno de esos generaba decenas de
         # equivalencias falsas.
         re.compile(r'^[A-Z]{1,3}\d{1,5}[A-Z]{1,4}$'),
+        # MOTORES de PSA con letra final: XU10J4R, DJ5T12V, TU3F2K, EP6CDTMD. XU10J4R llegó a
+        # colgar 6 productos de tres proveedores: una junta de tapa de Peugeot 405, un juego de
+        # reparación y una tapa de cilindros — todo lo que menciona ese motor. Va acá porque
+        # comparte el problema de arriba: la misma forma la tiene un código real.
+        re.compile(r'^[A-Z]{2}\d{1,2}[A-Z]{1,4}\d{0,2}[A-Z]?$'),
+    )
+    # Y estas son texto sin discusión: un rango de años o una medida no dejan de serlo porque
+    # el proveedor los haya escrito después de un «ORIG».
+    formas_solo_texto = (
         # Medidas: 14X20X1, 7,5X12X5, y con la unidad pegada: 32X18X105MM
         re.compile(r'^\d+([.,]\d+)?X\d+([.,]\d+)?(X\d+([.,]\d+)?)?(MM|CM|M)?$'),
         # Cilindradas y potencias sueltas: 1.6, 2.0TDI, 110CV
@@ -385,11 +403,6 @@ def extraer_codigos_de_texto(texto, minimo=6, codigo_propio=None):
         # Ojo que esto NO puede tocar los códigos reales de tres letras + números (IWP044,
         # H3T021, MAF069): por eso pide exactamente dos letras al principio y letras DESPUÉS
         # del primer número, cosa que un código de repuesto no tiene.
-        # La letra final de más cubre XU10J4R, DJ5T12V, TU3F2K y EP6CDTMD, que son la misma
-        # familia. XU10J4R llegó a colgar 6 productos de tres proveedores distintos: una junta
-        # de tapa de Peugeot 405, un juego de reparación y una tapa de cilindros — todo lo que
-        # menciona ese motor, "equivalente" entre sí.
-        re.compile(r'^[A-Z]{2}\d{1,2}[A-Z]{1,4}\d{0,2}[A-Z]?$'),
         # NÚMERO CON UNA PALABRA PEGADA: 24Amperes, 1990BOSCH, 16VREF, 7LDIESEL, 4RUNNER,
         # 1600CCAPTO. Sale de la descripción cuando la exportación se come el espacio, y de acá
         # salían los peores puentes de todos: '16VREF' aparecía en 130 filas de una sola lista,
@@ -404,6 +417,7 @@ def extraer_codigos_de_texto(texto, minimo=6, codigo_propio=None):
         # equivalente de los rangos de años, con el mismo daño.
         re.compile(r'^([A-Z]\d[-]?){3,}$'),
     )
+    formas_prohibidas = formas_ambiguas + formas_solo_texto
     # Palabras de la descripción que quedan pegadas al año y disfrazan el rango:
     # 'DESDE1993', 'HASTA2005', 'MODELO2010'.
     arranques_de_texto = ("DESDE", "HASTA", "PARA", "MODELO", "MEDIDA", "ORIGEN", "SERIE")
@@ -417,14 +431,33 @@ def extraer_codigos_de_texto(texto, minimo=6, codigo_propio=None):
     texto = re.sub(r'(ORIGINALES|ORIGINAL|ORIG|REF|CODIGO|COD|EQUIV)(?=\d{5,})', r'\1 ',
                    texto, flags=re.IGNORECASE)
 
+    # Dónde el proveedor DECLARÓ que lo que sigue es el código de fábrica. Sin esto se perdía
+    # justo el mejor dato que trae la lista: «JTA SCANIA 113 Nº ORIG 287559» no daba nada,
+    # porque un número de seis dígitos se descarta por si es un año o una medida — y con un
+    # «Nº ORIG» adelante ya no hay duda de qué es. Lo mismo con «// 134048», «// 900432» y
+    # «// ERR4685B», que además se caía por parecerse a un código de motor.
+    posiciones_declaradas = set()
+    piezas = re.split(r'[\s,;/|()\[\]<>]+', str(texto))
+    for i, pieza in enumerate(piezas):
+        if pieza.strip().upper().strip(".:") in _MARCADORES_DE_OEM:
+            # las dos siguientes: cubre «Nº ORIG 287559» y «REF ORIG: 0360601402»
+            posiciones_declaradas.update((i + 1, i + 2))
+    # La barra doble desaparece al partir por '/', así que se marca aparte: en esas listas
+    # «//» es la convención para «de acá en adelante va el código de fábrica».
+    if "//" in str(texto):
+        antes = len(re.split(r'[\s,;/|()\[\]<>]+', str(texto).split("//", 1)[0]))
+        posiciones_declaradas.update(range(antes - 1, antes + 3))
+
     encontrados = []
-    for token in re.split(r'[\s,;/|()\[\]<>]+', str(texto)):
+    for indice, token in enumerate(piezas):
         limpio = token.strip().strip(".-_")
         if len(limpio) < minimo:
             continue
         if limpio.upper() in ruido:
             continue
-        if any(p.match(limpio.upper()) for p in formas_prohibidas):
+        declarado = indice in posiciones_declaradas
+        formas = formas_solo_texto if declarado else formas_prohibidas
+        if any(p.match(limpio.upper()) for p in formas):
             continue
         if limpio.upper().startswith(arranques_de_texto):
             continue
@@ -437,7 +470,9 @@ def extraer_codigos_de_texto(texto, minimo=6, codigo_propio=None):
         tiene_letra = any(ch.isalpha() for ch in limpio)
         # Números sueltos: solo se aceptan si son largos (un código de barras o de fábrica),
         # así no se cuelan años ni medidas
-        if not tiene_letra and len(re.sub(r'\D', '', limpio)) < 7:
+        # Si el proveedor lo declaró como código de fábrica alcanza con seis dígitos: los años
+        # tienen cuatro, así que seis los sigue dejando afuera.
+        if not tiene_letra and len(re.sub(r'\D', '', limpio)) < (6 if declarado else 7):
             continue
         # Descartar cosas tipo "1.6" o "2.0TDI" que empiezan con cilindrada
         if re.match(r'^\d\.\d', limpio):

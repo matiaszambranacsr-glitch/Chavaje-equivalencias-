@@ -95,6 +95,29 @@ def probar_extractor():
         got = codigos.extraer_codigos_de_texto(texto)
         cierto(esperado in got, f"debía sacar {esperado} de «{texto[:44]}» y sacó {got}")
 
+    # Cuando el proveedor DECLARA que lo que sigue es el código de fábrica —«// », «Nº ORIG»,
+    # «REF ORIG»—, las reglas que existen para adivinar tienen que aflojarse: si no, se
+    # descarta justo el mejor dato que trae la lista. Son 172 códigos reales en cinco listas.
+    declarados = [
+        ("JTA SCANIA 113 Nº ORIG 287559", "287559"),      # seis dígitos: el mínimo es siete
+        ("TERMOSTATO 505 // 134048", "134048"),
+        ("APRIETE VALVULAS // 006073", "006073"),
+        ("O-RING TRANSIT // ERR4685B", "ERR4685B"),        # Land Rover, no un código de motor
+        ("BOMBA REF ORIG 0360601402", "0360601402"),
+    ]
+    for texto, esperado in declarados:
+        got = codigos.extraer_codigos_de_texto(texto)
+        cierto(esperado in got, f"el proveedor declaró {esperado} en «{texto[:40]}» y no se tomó: {got}")
+    # ...pero un rango de años o una medida no dejan de serlo porque los declaren
+    for texto in ("FILTRO ORIGINAL 1998-2006", "JUNTA // 14X20X1", "TAPA // 2003-2008",
+                  "SENSOR // A3-A4-A6", "BOBINA ORIG 16VREF"):
+        cierto(not codigos.extraer_codigos_de_texto(texto),
+               f"«{texto}» es texto aunque esté declarado")
+    # ...y sin marcador, las formas ambiguas se siguen rechazando
+    for texto in ("TERMOSTATO Motor XU7JP4", "SENSOR MR20DE", "BUJIA ERR4685B"):
+        cierto(not codigos.extraer_codigos_de_texto(texto),
+               f"«{texto}» no está declarado: la forma ambigua manda")
+
     # Lo que NO tiene que sacar. Cada uno de estos vincula entre sí TODAS las filas donde
     # aparece, así que uno solo arrastra decenas de equivalencias falsas.
     no_debe = [

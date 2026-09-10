@@ -78,7 +78,7 @@ from .errores import anotar_error
 ''', ["es_fecha_disfrazada", "sanitizar", "LARGO_MINIMO_NUMERICO", "es_codigo_util",
       "_partir_por_barra", "dividir_codigos", "codigo_sospechoso",
       "TOPE_REPETICIONES_EN_DESCRIPCION", "codigos_confiables_de_descripciones",
-      "_es_el_codigo_propio_con_texto", "extraer_codigos_de_texto",
+      "_MARCADORES_DE_OEM", "_es_el_codigo_propio_con_texto", "extraer_codigos_de_texto",
       "normalizar_texto", "valor_o_vacio", "valor_codigo"])
 
 # ---------------------------------------------------------------- vehiculos
