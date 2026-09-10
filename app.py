@@ -4167,11 +4167,44 @@ def senal_aprendida(marca_a, marca_b, patrones):
     return 0, None
 
 
+@st.cache_data(ttl=300, show_spinner=False)
+def escalas_de_precio():
+    """El precio típico (la mediana) de cada marca, para poder comparar entre listas.
+
+    Va con caché porque evidencia_cruzada() la consulta UNA VEZ POR PAR, y sin caché eso es
+    recorrer los 40.000 precios del catálogo por cada uno de los cientos de pares que se están
+    revisando. Los cinco minutos de vida alcanzan de sobra: la escala de una lista solo cambia
+    cuando se importa una lista nueva.
+
+    Hace falta porque dos listas pueden estar en escalas completamente distintas: una
+    desactualizada, otra sin IVA, otra en otra unidad. Sobre las listas reales de acá el precio
+    mediano de un proveedor es $1.350 y el de otro $37.610. Sin corregir por eso, cualquier
+    comparación de precios entre esas dos listas dice siempre lo mismo y no informa nada.
+
+    Se usa la MEDIANA y no el promedio a propósito: un solo motor de $3.000.000 en una lista de
+    tornillos corre el promedio y deja la escala mal."""
+    try:
+        c.execute("""SELECT m.nombre AS marca, p.precio AS precio
+                     FROM productos p JOIN marcas m ON m.id = p.marca_id
+                     WHERE p.precio IS NOT NULL AND p.precio > 0
+                     ORDER BY m.nombre, p.precio""")
+        from collections import defaultdict
+        por_marca = defaultdict(list)
+        for fila in c.fetchall():
+            por_marca[fila["marca"]].append(fila["precio"])
+    except sqlite3.OperationalError as _err:
+        anotar_error("escalas_de_precio", _err)
+        return {}
+    # Menos de 20 precios no alcanza para hablar de la escala de una lista.
+    return {marca: precios[len(precios) // 2]
+            for marca, precios in por_marca.items() if len(precios) >= 20}
+
+
 def evaluar_equivalencia(desc_a, desc_b, medidas_a=None, medidas_b=None,
                          precio_a=None, precio_b=None, veces_confirmada=1,
                          respaldo_fabricante=False, marca_a="", marca_b="", patrones=None,
                          vendido_como_reemplazo=0, codigo_puente=None,
-                         productos_del_puente=0):
+                         productos_del_puente=0, escalas=None):
     """Pesa toda la evidencia disponible sobre un vínculo. Devuelve (puntaje 0-100, señales).
 
     La diferencia con lo que había antes: las alarmas eran una lista plana, así que 397 vínculos
@@ -4271,12 +4304,35 @@ def evaluar_equivalencia(desc_a, desc_b, medidas_a=None, medidas_b=None,
 
     if precio_a and precio_b and precio_a > 0 and precio_b > 0:
         razon = max(precio_a, precio_b) / min(precio_a, precio_b)
-        if razon >= 8:
+        # La diferencia se mide contra lo TÍPICO entre esos dos proveedores, no en absoluto.
+        # Dos listas pueden estar en escalas completamente distintas —una desactualizada, otra
+        # sin IVA, otra en otra unidad— y entonces TODAS las parejas entre ellas se diferencian
+        # por el mismo factor. Medido sobre las listas reales: el precio mediano de un proveedor
+        # es $1.350 y el de otro $37.610, o sea 28 veces. Con el umbral fijo en 8, cada pareja
+        # entre esos dos disparaba la alarma aunque fuera la misma bobina — 191 de 260
+        # sugerencias marcadas "con algo raro", y la alarma era siempre esta.
+        # Una alarma que salta siempre no informa: enseña a ignorarla, y con ella se ignoran
+        # las que sí importan.
+        # Corrigiendo por la escala, lo que queda es la diferencia REAL de esa pareja: si dos
+        # listas van 28 veces en general y esta pareja va 13, no hay nada raro; si va 300, sí.
+        esperada = 1.0
+        if escalas:
+            ea, eb = escalas.get(marca_a) or 0, escalas.get(marca_b) or 0
+            if ea > 0 and eb > 0:
+                esperada = max(ea, eb) / min(ea, eb)
+        razon_real = razon / esperada if esperada > 1 else razon
+        if razon_real < 1:
+            razon_real = 1 / razon_real
+        if razon_real >= 8:
             puntaje -= 25
-            senales.append(("mal", f"💲 Los precios se diferencian {razon:.0f} veces"))
-        elif razon <= 2:
+            senales.append(("mal", f"💲 Los precios se diferencian {razon:.0f} veces"
+                                   + (f", y entre estos dos proveedores lo normal es "
+                                      f"{esperada:.0f}" if esperada > 2 else "")))
+        elif razon_real <= 2:
             puntaje += 10
-            senales.append(("bien", "💲 Los precios son parecidos"))
+            senales.append(("bien", "💲 Los precios son parecidos"
+                                    + (" para lo que suele haber entre estas dos listas"
+                                       if esperada > 2 else "")))
 
     return max(0.0, min(100.0, puntaje)), senales
 
@@ -4351,6 +4407,7 @@ def analizar_lote_pendiente(lote, limite=400, desde=0):
 
     # Lo que se aprendió de las revisiones anteriores. Se calcula una vez para todo el lote.
     patrones_aprendidos = aprender_de_las_decisiones()
+    escalas_precio = escalas_de_precio()
     ventas_confirman = pares_confirmados_por_ventas()
 
     limpias, sospechosas = [], []
@@ -4365,11 +4422,22 @@ def analizar_lote_pendiente(lote, limite=400, desde=0):
         coinciden, detalle = comparar_medidas(medidas.get(f["a"]), medidas.get(f["b"]))
         if coinciden is False:
             alarmas.append(f"📐 {detalle}")
-        oem, marca_otro = ((f["cod_a"], f["marca_b"]) if f["tipo_a"] == "OEM"
-                            else (f["cod_b"], f["marca_a"]))
-        if (sanitizar(oem), marca_otro) in ambiguos:
-            alarmas.append(f"⚠️ El código {oem} apunta a más de un producto de {marca_otro} — "
-                            "alguno de los dos está mal cargado")
+        # Este control vale SOLO cuando uno de los dos lados es un código de FÁBRICA. Ahí sí,
+        # que el mismo código de fábrica apunte a dos productos del mismo proveedor significa
+        # que alguno está mal cargado: el fabricante tiene una pieza por número.
+        # Entre DOS PROVEEDORES no significa nada, y era lo que estaba pasando: una bobina de
+        # un proveedor cubre tres códigos del otro porque el otro la numera por aplicación
+        # (una para el Audi A3, otra para el A4, otra para el A6). Eso es normal en el rubro,
+        # no un error de carga. Sin esta condición el par se llevaba -35 y terminaba en
+        # revisión manual: 125 de 179 sugerencias marcadas, y la alarma era casi siempre esta.
+        # El error estaba en el else: cuando ninguno de los dos era OEM, igual tomaba el código
+        # B y lo trataba como si lo fuera.
+        if "OEM" in (f["tipo_a"], f["tipo_b"]):
+            oem, marca_otro = ((f["cod_a"], f["marca_b"]) if f["tipo_a"] == "OEM"
+                                else (f["cod_b"], f["marca_a"]))
+            if (sanitizar(oem), marca_otro) in ambiguos:
+                alarmas.append(f"⚠️ El código {oem} apunta a más de un producto de "
+                                f"{marca_otro} — alguno de los dos está mal cargado")
         # Puntaje de confianza: junta toda la evidencia en un número, para poder ordenar por
         # lo peor primero en vez de mirar cientos de alarmas planas.
         puntaje, senales = evaluar_equivalencia(
@@ -4383,6 +4451,7 @@ def analizar_lote_pendiente(lote, limite=400, desde=0):
             patrones=patrones_aprendidos,
             vendido_como_reemplazo=ventas_confirman.get((min(f["a"], f["b"]),
                                                           max(f["a"], f["b"])), 0),
+            escalas=escalas_precio,
         )
         for tipo, texto in senales:
             if tipo == "mal" and texto not in alarmas:
@@ -5443,6 +5512,7 @@ def auditar_equivalencias_cargadas(limite=300, tope_confianza=35, revisar=8000):
     patrones = aprender_de_las_decisiones()
     ventas_confirman = pares_confirmados_por_ventas()
 
+    escalas = escalas_de_precio()
     # Lo mismo que en recalcular_confianzas(): a cuántos productos se cuelga cada código de
     # fábrica, contado de una sola vez para todo el lote.
     grados = {}
@@ -5472,7 +5542,8 @@ def auditar_equivalencias_cargadas(limite=300, tope_confianza=35, revisar=8000):
             marca_a=f["marca_a"], marca_b=f["marca_b"], patrones=patrones,
             vendido_como_reemplazo=ventas_confirman.get((min(f["a"], f["b"]),
                                                           max(f["a"], f["b"])), 0),
-            codigo_puente=puente, productos_del_puente=grados.get(id_puente, 0)
+            codigo_puente=puente, productos_del_puente=grados.get(id_puente, 0),
+            escalas=escalas
         )
         for lado in ("a", "b"):
             malo, _ = codigo_sospechoso(f[f"cod_{lado}"], f.get(f"desc_{lado}") or "")
@@ -5540,6 +5611,7 @@ def recalcular_confianzas(limite=20000, progreso=None, solo_faltantes=True):
         return 0
     medidas = cargar_medidas_de_varios([f["a"] for f in filas] + [f["b"] for f in filas])
     patrones = aprender_de_las_decisiones()
+    escalas = escalas_de_precio()
     # A cuántos productos se cuelga cada código de fábrica. Se cuenta de una sola vez para todo
     # el lote: preguntarlo vínculo por vínculo serían miles de consultas para el mismo dato.
     grados = {}
@@ -5569,7 +5641,8 @@ def recalcular_confianzas(limite=20000, progreso=None, solo_faltantes=True):
             marca_a=f["marca_a"], marca_b=f["marca_b"], patrones=patrones,
             vendido_como_reemplazo=ventas_confirman.get((min(f["a"], f["b"]),
                                                           max(f["a"], f["b"])), 0),
-            codigo_puente=puente, productos_del_puente=grados.get(id_puente, 0)
+            codigo_puente=puente, productos_del_puente=grados.get(id_puente, 0),
+            escalas=escalas
         )
         if f["a"] not in aprobados and f["b"] not in aprobados:
             for lado in ("a", "b"):
@@ -8413,11 +8486,27 @@ def evidencia_cruzada(id_a, id_b):
             a_favor.append("🔄 el fabricante reemplazó uno por el otro")
             break
 
-    # 7. Precio: no confirma nada por sí solo, pero una diferencia enorme sí desmiente
+    # 7. Precio: no confirma nada por sí solo, pero una diferencia enorme sí desmiente.
+    # Igual que en evaluar_equivalencia(), la diferencia se mide contra lo TÍPICO entre esos
+    # dos proveedores. Dos listas pueden estar en escalas completamente distintas —una
+    # desactualizada, otra sin IVA— y entonces TODAS las parejas entre ellas se diferencian por
+    # el mismo factor. Sobre las listas reales el precio mediano de un proveedor es $1.350 y el
+    # de otro $37.610: 28 veces. Con el umbral fijo en 15, este veto tumbaba a 15 puntos casi
+    # todas las parejas entre esos dos, y un veto no admite discusión — el par se iba a revisión
+    # manual aunque fuera la misma bobina con el mismo texto.
+    # Acá pesa más que en evaluar_equivalencia() justamente porque VETA en vez de descontar.
     if pa["precio"] and pb["precio"] and pa["precio"] > 0 and pb["precio"] > 0:
         razon = max(pa["precio"], pb["precio"]) / min(pa["precio"], pb["precio"])
-        if razon >= 15:
-            vetos.append(f"💲 los precios se diferencian {razon:.0f} veces")
+        escalas = escalas_de_precio()
+        ea, eb = escalas.get(pa["marca"]) or 0, escalas.get(pb["marca"]) or 0
+        esperada = max(ea, eb) / min(ea, eb) if ea > 0 and eb > 0 else 1.0
+        razon_real = razon / esperada if esperada > 1 else razon
+        if razon_real < 1:
+            razon_real = 1 / razon_real
+        if razon_real >= 15:
+            vetos.append(f"💲 los precios se diferencian {razon:.0f} veces"
+                         + (f" (entre estas dos listas lo normal es {esperada:.0f})"
+                            if esperada > 2 else ""))
 
     if vetos:
         veredicto = "🔴 hay evidencia en contra"
