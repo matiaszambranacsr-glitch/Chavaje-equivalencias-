@@ -1,3 +1,85 @@
+"""Chavaje — buscador de equivalencias de repuestos.
+
+CÓMO ESTÁ ORGANIZADO ESTE ARCHIVO
+
+Es uno solo a propósito: así se despliega tal cual, sin paquete ni rutas que configurar.
+Para no perderse, está dividido en secciones con un encabezado de tres líneas como este:
+
+    # ====================================================
+    # NOMBRE DE LA SECCIÓN
+    # ====================================================
+
+Buscando «# ===» se salta de una a la otra. El orden va de lo más básico a lo más
+específico, y las pantallas quedan todas al final:
+
+    · CONFIGURACIÓN DE PÁGINA
+    · MODO DE VISTA (celular / computadora)
+    · CONEXIÓN Y ESQUEMA
+    · CÓDIGOS: limpiar, reconocer, partir y sacarlos de una descripción
+    · MARCAS Y CATÁLOGOS EXTERNOS DE PROVEEDOR
+    · INTEGRIDAD DE LA BASE, BACKUP Y RESTAURACIÓN
+    · MANTENIMIENTO QUE CORRE SOLO AL ABRIR
+    · BÚSQUEDA POR NÚMERO DE MOTOR Y POR PATENTE
+    · CONSULTAS DE CLIENTES (lo que pidieron y no había)
+    · STOCK Y RESERVAS
+    · PRECIOS Y MÁRGENES
+    · FUSIONAR MARCAS Y PRODUCTOS DUPLICADOS
+    · EQUIVALENCIAS DESCUBIERTAS DESDE LAS VENTAS
+    · IMPORTAR UNA LISTA: leer el archivo y adivinar qué es cada columna
+    · AVISOS DE BACKUP Y HUELLA DEL ARCHIVO IMPORTADO
+    · BÚSQUEDA DE EQUIVALENCIAS (el corazón de la app)
+    · DESHACER UNA IMPORTACIÓN
+    · CONFIANZA DE CADA VÍNCULO
+    · CÓDIGOS PUENTE: aprobar los buenos, encontrar los falsos
+    · DIAGNÓSTICO DE SALUD DEL CATÁLOGO
+    · POR QUÉ DOS CÓDIGOS NO SE RELACIONAN
+    · CATÁLOGO WEB DEL PROVEEDOR (fotos y equivalencias)
+    · PESO DE LAS FOTOS Y BACKUP LIVIANO
+    · MAPEO DE COLUMNAS RECORDADO POR PROVEEDOR
+    · CONTROLES DE CALIDAD DE UN CÓDIGO
+    · BÚSQUEDA POR PARECIDO Y ERRORES DE TIPEO
+    · AÑOS, MODELOS Y FAMILIAS DE REPUESTO
+    · CATÁLOGOS DE APLICACIONES (qué repuesto le va a cada auto)
+    · COMBOS DE REPUESTOS RELACIONADOS (ej: correa de distribución -> kit + tensor + bomba de agua)
+    · INTELIGENCIA ARTIFICIAL: fotos, audio y remitos
+    · BUSCAR POR PIEZA Y AUTO
+    · DISCONTINUADOS Y REEMPLAZOS DE FÁBRICA
+    · REPOSICIÓN Y FAVORITOS
+    · CONFIGURACIÓN, USUARIO Y USO DE IA
+    · PAPELERA (borrar con red)
+    · HISTORIAL, DUPLICADOS Y EXPORTAR A EXCEL
+    · COBROS: alias de transferencia y QR
+    · PIEZAS DE INTERFAZ QUE SE REPITEN
+    · PDF: cotización y ficha del vehículo
+    · LEER EL ARCHIVO: encabezado, hojas y codificación
+    · FICHA DIGITAL DEL VEHÍCULO (patente + historial de piezas)
+    · SUSTITUCIÓN POR MEDIDAS MECÁNICAS (retenes, o'rings, bujes)
+    · COMPARACIÓN VISUAL DE PIEZAS
+    · GUARDADO DE FOTOS (varias por producto)
+    · AUDITORÍA DIARIA DE STOCK POR MUESTREO
+    · UBICACIÓN EN DEPÓSITO (matriz ABC)
+    · MODO MECÁNICO — DICCIONARIO DE CÓDIGOS OBD2 / DTC
+    · MODO MECÁNICO — LECTOR DE VIN
+    · MODO MECÁNICO — VISOR DE ESQUEMAS
+    · ENCABEZADO
+    · NAVEGACIÓN PRINCIPAL
+    · BUSCADOR
+    · VINCULAR MANUAL
+    · CARGAR EXCEL
+    · ADMINISTRAR
+    · ESTADÍSTICAS
+    · LISTA PARA WHATSAPP
+    · VEHÍCULOS (ficha digital / historial de piezas)
+    · MODO MECÁNICO
+
+La lógica que no depende de Streamlit está ADEMÁS en el paquete nucleo/, que se puede usar
+desde otro sistema. Se genera desde este archivo con `python3 nucleo/generar.py`, así que si
+tocás algo de códigos, planillas o equivalencias, conviene regenerarlo y correr
+`python3 -m nucleo.pruebas`.
+
+Antes de subir un cambio: `python3 auditar.py app.py` tiene que dar ERROR 0.
+"""
+
 import streamlit as st
 import sqlite3
 import re
@@ -587,32 +669,11 @@ def _restaurar_desde_semilla(conexion):
         return False
 
 
-@st.cache_resource
-def get_connection():
-    """Conexión única y persistente entre reruns de Streamlit."""
-    # isolation_level=None => autocommit: cada sentencia se confirma sola.
-    #
-    # Es importante y no es un detalle técnico. La conexión es UNA SOLA compartida por todos los
-    # que usan la app al mismo tiempo (así la deja @st.cache_resource). Con el modo por defecto,
-    # Python abre una transacción implícita y la deja abierta hasta el commit, así que las
-    # operaciones de dos personas se mezclan en la MISMA transacción:
-    #   · si uno confirma, confirma también la importación a medio hacer del otro;
-    #   · y peor: si uno cancela, se pierde el trabajo que el otro ya había guardado.
-    # Con autocommit eso no puede pasar. Donde hace falta que varias sentencias sean una sola
-    # cosa, se usa el bloque transaccion() de abajo.
-    conn = sqlite3.connect(DB_PATH, check_same_thread=False, isolation_level=None)
-    conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA foreign_keys = ON")
-    conn.execute("PRAGMA journal_mode = WAL")  # mejor concurrencia / menos bloqueos
-    conn.execute("PRAGMA busy_timeout = 8000")  # esperar en vez de fallar si otro está escribiendo
-    # No hace falta agrupar las importaciones en una transacción explícita para compensar: se
-    # midió la importación real de 10.000 filas en los dos modos y tarda lo mismo (0,33 s contra
-    # 0,36 s), porque en modo WAL confirmar es barato.
-    # Si el disco se borró (pasa al redesplegar), recuperar desde la copia del repositorio.
-    # Va antes de crear las tablas: después las migraciones ponen al día el esquema.
-    st.session_state["_restaurado_de_semilla"] = _restaurar_desde_semilla(conn)
-    c = conn.cursor()
+def _esquema_catalogo(c):
+    """El corazón: marcas, productos, los vínculos entre ellos y el stock apartado.
 
+    Se llama desde crear_esquema(), en orden: cada parte da por hecho que las anteriores ya
+    corrieron."""
     c.execute("""CREATE TABLE IF NOT EXISTS marcas (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         nombre TEXT UNIQUE NOT NULL,
@@ -656,8 +717,13 @@ def get_connection():
     )""")
     c.execute("CREATE INDEX IF NOT EXISTS idx_reservas_prod ON reservas_stock(producto_id, estado)")
 
-    # Lo que preguntó cada cliente. En el mostrador se anota en un papel y se pierde: el
-    # cliente dijo que lo consultaba y volvía, y cuando vuelve nadie se acuerda qué pidió.
+
+def _esquema_mostrador(c):
+    """Lo que pasa en el mostrador: consultas de clientes, aplicaciones por vehículo,
+    importaciones, catálogos de proveedor y el historial de búsquedas.
+
+    Se llama desde crear_esquema(), en orden: cada parte da por hecho que las anteriores ya
+    corrieron."""
     c.execute("""CREATE TABLE IF NOT EXISTS consultas_cliente (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         cliente TEXT,
@@ -790,10 +856,15 @@ def get_connection():
                   + _sql_sin_acentos("COALESCE(descripcion,'') || ' ' || COALESCE(codigo_raw,'')")
                   + " WHERE busqueda IS NULL")
 
-    # Varias fotos por producto: la del catálogo del proveedor, la que sacaste vos, la de otra
-    # marca del mismo repuesto. Al buscar se compara contra todas y se queda con la mejor. Es lo
-    # único que resuelve de verdad el cambio de ángulo: ninguna comparación reconoce una pieza
-    # fotografiada de frente en una foto sacada de costado.
+
+def _esquema_fotos(c):
+    """Las fotos de cada producto y los datos para compararlas visualmente.
+
+    Se llama desde crear_esquema(), en orden: cada parte da por hecho que las anteriores ya
+    corrieron."""
+    # Se relee acá en vez de recibirla: cada parte del esquema tiene que poder mirarse sola,
+    # y una lista de columnas es una consulta de microsegundos.
+    columnas_productos = [f[1] for f in c.execute("PRAGMA table_info(productos)").fetchall()]
     c.execute("""CREATE TABLE IF NOT EXISTS producto_fotos (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         producto_id INTEGER NOT NULL REFERENCES productos(id) ON DELETE CASCADE,
@@ -862,7 +933,13 @@ def get_connection():
     if "veces_buscado" not in columnas_productos:
         c.execute("ALTER TABLE productos ADD COLUMN veces_buscado INTEGER DEFAULT 0")
 
-    # Vehículos y ficha digital ("mellizo digital") para historial de piezas por patente
+
+def _esquema_vehiculos_y_mecanico(c):
+    """La ficha del vehículo y todo el modo mecánico: patentes, historial de piezas,
+    códigos de falla OBD-II, decodificación de VIN y los esquemas de despiece.
+
+    Se llama desde crear_esquema(), en orden: cada parte da por hecho que las anteriores ya
+    corrieron."""
     c.execute("""CREATE TABLE IF NOT EXISTS vehiculos (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         patente TEXT UNIQUE NOT NULL,
@@ -1050,8 +1127,13 @@ def get_connection():
         orden INTEGER DEFAULT 0
     )""")
 
-    # Alias/CBU para el QR de transferencia en las cotizaciones. Se pueden cargar varios
-    # (Mercado Pago, distintos bancos, etc.) y elegir cuál usar en cada cotización puntual.
+
+def _esquema_gestion(c):
+    """Administración del negocio: usuarios, papelera, configuración, precios, ventas,
+    presupuestos, y las tablas de revisión de equivalencias.
+
+    Se llama desde crear_esquema(), en orden: cada parte da por hecho que las anteriores ya
+    corrieron."""
     c.execute("""CREATE TABLE IF NOT EXISTS alias_transferencia (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         nombre TEXT NOT NULL,
@@ -1239,8 +1321,15 @@ def get_connection():
         creado_en TEXT DEFAULT (datetime('now'))
     )""")
 
-    # Combos de repuestos que suelen cambiarse juntos (ej: correa de distribución -> kit + tensor + bomba de agua).
-    # "disparador" es la palabra/frase que se busca dentro de la descripción del producto encontrado.
+
+def _datos_precargados_y_migraciones(c):
+    """Semillas que vienen con la app (códigos de falla, fabricantes por VIN) y las
+    migraciones que ponen al día una base creada por una versión anterior.
+
+    Está al final a propósito: todo esto necesita que las tablas ya existan.
+
+    Se llama desde crear_esquema(), en orden: cada parte da por hecho que las anteriores ya
+    corrieron."""
     c.execute("""CREATE TABLE IF NOT EXISTS combos_sugeridos (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         disparador TEXT NOT NULL,
@@ -1910,6 +1999,45 @@ def get_connection():
     c.execute("CREATE INDEX IF NOT EXISTS idx_pedidos_repo_estado ON pedidos_reposicion(estado)")
     c.execute("CREATE INDEX IF NOT EXISTS idx_uso_ia_fecha ON uso_ia(fecha)")
     c.execute("CREATE INDEX IF NOT EXISTS idx_presup_mecanico ON presupuestos_mecanico(mecanico_id)")
+
+
+def crear_esquema(c):
+    _esquema_catalogo(c)
+    _esquema_mostrador(c)
+    _esquema_fotos(c)
+    _esquema_vehiculos_y_mecanico(c)
+    _esquema_gestion(c)
+    _datos_precargados_y_migraciones(c)
+
+
+
+
+@st.cache_resource
+def get_connection():
+    """Conexión única y persistente entre reruns de Streamlit."""
+    # isolation_level=None => autocommit: cada sentencia se confirma sola.
+    #
+    # Es importante y no es un detalle técnico. La conexión es UNA SOLA compartida por todos los
+    # que usan la app al mismo tiempo (así la deja @st.cache_resource). Con el modo por defecto,
+    # Python abre una transacción implícita y la deja abierta hasta el commit, así que las
+    # operaciones de dos personas se mezclan en la MISMA transacción:
+    #   · si uno confirma, confirma también la importación a medio hacer del otro;
+    #   · y peor: si uno cancela, se pierde el trabajo que el otro ya había guardado.
+    # Con autocommit eso no puede pasar. Donde hace falta que varias sentencias sean una sola
+    # cosa, se usa el bloque transaccion() de abajo.
+    conn = sqlite3.connect(DB_PATH, check_same_thread=False, isolation_level=None)
+    conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA foreign_keys = ON")
+    conn.execute("PRAGMA journal_mode = WAL")  # mejor concurrencia / menos bloqueos
+    conn.execute("PRAGMA busy_timeout = 8000")  # esperar en vez de fallar si otro está escribiendo
+    # No hace falta agrupar las importaciones en una transacción explícita para compensar: se
+    # midió la importación real de 10.000 filas en los dos modos y tarda lo mismo (0,33 s contra
+    # 0,36 s), porque en modo WAL confirmar es barato.
+    # Si el disco se borró (pasa al redesplegar), recuperar desde la copia del repositorio.
+    # Va antes de crear las tablas: después las migraciones ponen al día el esquema.
+    st.session_state["_restaurado_de_semilla"] = _restaurar_desde_semilla(conn)
+    c = conn.cursor()
+    crear_esquema(c)
     conn.commit()
     return conn
 
@@ -2072,7 +2200,7 @@ c = _CursorPorSesion(conn)
 
 
 # ============================================================
-# UTILIDADES
+# CÓDIGOS: limpiar, reconocer, partir y sacarlos de una descripción
 # ============================================================
 def es_fecha_disfrazada(valor):
     """¿Esta celda es una fecha que en realidad era un código?
@@ -2506,6 +2634,9 @@ def valor_codigo(valor):
     return valor_o_vacio(valor)
 
 
+# ============================================================================================
+# MARCAS Y CATÁLOGOS EXTERNOS DE PROVEEDOR
+# ============================================================================================
 def get_or_create_marca(nombre, tipo="PROVEEDOR"):
     nombre = nombre.strip().upper()
     c.execute("INSERT OR IGNORE INTO marcas (nombre, tipo) VALUES (?, ?)", (nombre, tipo))
@@ -2534,6 +2665,9 @@ def eliminar_catalogo_externo(catalogo_id):
         conn.commit()
 
 
+# ============================================================================================
+# INTEGRIDAD DE LA BASE, BACKUP Y RESTAURACIÓN
+# ============================================================================================
 def depurar_huerfanos():
     """Borra productos que no tienen ninguna equivalencia vinculada (quedaron sueltos)."""
     with db_lock:
@@ -2790,6 +2924,9 @@ def cuanto_perderias_si_reinicia():
     }
 
 
+# ============================================================================================
+# MANTENIMIENTO QUE CORRE SOLO AL ABRIR
+# ============================================================================================
 def tareas_automaticas_del_dia(presupuesto_segundos=6):
     """El mantenimiento que nadie tiene por qué acordarse de hacer.
 
@@ -3029,6 +3166,9 @@ def vencer_reservas_viejas():
     return n
 
 
+# ============================================================================================
+# BÚSQUEDA POR NÚMERO DE MOTOR Y POR PATENTE
+# ============================================================================================
 def normalizar_numero_motor(texto):
     """Deja el número de motor comparable: sin espacios, guiones ni minúsculas.
 
@@ -3238,6 +3378,9 @@ def repuestos_por_numero_motor(numero):
         return []
 
 
+# ============================================================================================
+# CONSULTAS DE CLIENTES (lo que pidieron y no había)
+# ============================================================================================
 def anotar_consulta_cliente(cliente, telefono, producto_id=None, codigo="", descripcion="",
                             cantidad=1, precio=None, nota=""):
     """Guarda qué pidió un cliente que dijo que lo pensaba. Devuelve (ok, mensaje)."""
@@ -3335,6 +3478,9 @@ def consultas_que_ahora_hay_en_stock():
         return []
 
 
+# ============================================================================================
+# STOCK Y RESERVAS
+# ============================================================================================
 def reservar_stock(producto_id, cantidad, cliente="", nota=""):
     """Aparta unidades para un presupuesto. Devuelve (ok, mensaje).
 
@@ -3443,6 +3589,9 @@ def cerrar_reserva(reserva_id, vendida):
     return True
 
 
+# ============================================================================================
+# PRECIOS Y MÁRGENES
+# ============================================================================================
 def margen_de(precio_venta, precio_costo):
     """Cuánto queda de margen. Devuelve (porcentaje, pesos) o (None, None) si falta un dato.
 
@@ -3490,6 +3639,9 @@ def mejor_margen_entre_equivalentes(res):
             "ganancia": ganancia(mejor), "diferencia": ganancia(mejor) - ganancia(peor)}
 
 
+# ============================================================================================
+# FUSIONAR MARCAS Y PRODUCTOS DUPLICADOS
+# ============================================================================================
 def marcas_probablemente_duplicadas(limite=40):
     """Marcas que son la misma cargada dos veces. Devuelve pares para revisar.
 
@@ -4816,7 +4968,7 @@ def contar_productos_sin_equivalencias():
 
 
 # ============================================================
-# COSAS QUE SE RESUELVEN SOLAS AL IMPORTAR
+# IMPORTAR UNA LISTA: leer el archivo y adivinar qué es cada columna
 # ============================================================
 
 # Palabras que suelen titular cada columna en las listas de proveedor. Se buscan en el
@@ -5098,6 +5250,9 @@ def adivinar_proveedor(nombre_archivo, marcas_conocidas=()):
     return " ".join(utiles[:2]) if utiles else ""
 
 
+# ============================================================================================
+# AVISOS DE BACKUP Y HUELLA DEL ARCHIVO IMPORTADO
+# ============================================================================================
 def estado_del_backup():
     """Qué se cargó desde el último backup. Devuelve un dict con lo que haga falta para avisar.
 
@@ -5289,6 +5444,9 @@ def get_or_create_producto(raw, clean, desc, marca_id, imagen_url=None):
     return c.fetchone()[0]
 
 
+# ============================================================================================
+# BÚSQUEDA DE EQUIVALENCIAS (el corazón de la app)
+# ============================================================================================
 def filas_a_listas(cursor):
     """Convierte el resultado de un cursor (sqlite3.Row) en una lista de diccionarios."""
     return [dict(row) for row in cursor.fetchall()]
@@ -5556,6 +5714,9 @@ def reparar_codigos_con_decimal():
     return arreglados
 
 
+# ============================================================================================
+# DESHACER UNA IMPORTACIÓN
+# ============================================================================================
 def listar_importaciones_deshacibles(limite=40):
     """Importaciones que dejaron vínculos rastreables, con cuántos quedan vivos."""
     c.execute("""SELECT i.id AS "_id", i.marca AS "Marca", i.archivo AS "Archivo",
@@ -5633,6 +5794,9 @@ def origenes_de_los_vinculos_directos(producto_id, ids_resultado):
     return salida
 
 
+# ============================================================================================
+# CONFIANZA DE CADA VÍNCULO
+# ============================================================================================
 def auditar_equivalencias_cargadas(limite=300, tope_confianza=35, revisar=8000):
     """Pasa el mismo análisis de confianza por las equivalencias YA cargadas.
 
@@ -5863,6 +6027,9 @@ def unificar_equivalencias_espejadas():
     return borradas, dadas_vuelta
 
 
+# ============================================================================================
+# CÓDIGOS PUENTE: aprobar los buenos, encontrar los falsos
+# ============================================================================================
 def aprobar_puente(producto_id, nota=""):
     """Marca un código con muchos vínculos como revisado y correcto."""
     with db_lock:
@@ -6066,6 +6233,9 @@ def borrar_puente(producto_oem_id):
         return 0
 
 
+# ============================================================================================
+# DIAGNÓSTICO DE SALUD DEL CATÁLOGO
+# ============================================================================================
 def diagnostico_de_salud():
     """Corre todos los controles de mantenimiento de una y devuelve solo lo que necesita atención.
 
@@ -6291,6 +6461,9 @@ def diagnostico_de_salud():
     return problemas
 
 
+# ============================================================================================
+# POR QUÉ DOS CÓDIGOS NO SE RELACIONAN
+# ============================================================================================
 def diagnostico_par(codigo_a, codigo_b):
     """Por qué estos dos códigos NO aparecen relacionados. Devuelve una lista de conclusiones.
 
@@ -6730,6 +6903,9 @@ def borrar_codigos_basura():
     return len(items)
 
 
+# ============================================================================================
+# CATÁLOGO WEB DEL PROVEEDOR (fotos y equivalencias)
+# ============================================================================================
 def descargar_imagen(url, tiempo_maximo=12, tamano_maximo_mb=8):
     """Baja una imagen de una dirección web. Devuelve (bytes, error)."""
     import requests
@@ -7338,6 +7514,9 @@ def guardar_equivalencias_de_catalogo(propuestas, marca):
     return len(nuevas)
 
 
+# ============================================================================================
+# PESO DE LAS FOTOS Y BACKUP LIVIANO
+# ============================================================================================
 def peso_estimado_por_foto(liviano=True):
     """KB aproximados que ocupa cada foto en la base, para poder avisar antes de llenarla.
     Medido sobre fotos de producto reales: en liviano son la firma visual (~20 KB) más la
@@ -7403,6 +7582,9 @@ def peso_de_las_fotos():
     return fila["con_foto"], total / (1024 * 1024)
 
 
+# ============================================================================================
+# MAPEO DE COLUMNAS RECORDADO POR PROVEEDOR
+# ============================================================================================
 def guardar_mapeo_columnas(proveedor, idx_prov, idx_oem, idx_desc, idx_precio, idx_stock,
                             buscar_oem_en_desc, prov_es_oem):
     """Recuerda cómo se mapearon las columnas de este proveedor, para que la próxima vez venga
@@ -7434,6 +7616,9 @@ _RE_PIEZA_POR_MEDIDA = re.compile(
     r'RULEMAN|RODAMIENTO|ARANDELA|ESPACIADOR|SEPARADOR)\b', re.I)
 
 
+# ============================================================================================
+# CONTROLES DE CALIDAD DE UN CÓDIGO
+# ============================================================================================
 def codigo_sospechoso(codigo, descripcion=""):
     """¿Esto parece un código de repuesto de verdad? Devuelve (es_sospechoso, motivo).
     Sirve para cazar importaciones mal mapeadas: cuando la columna que se tomó como código
@@ -7554,6 +7739,9 @@ def mostrar_lista_clickeable(filas, prefijo_key, limite=15, nota=None):
         st.caption(f"(mostrando {limite} de {len(filas)})")
 
 
+# ============================================================================================
+# BÚSQUEDA POR PARECIDO Y ERRORES DE TIPEO
+# ============================================================================================
 def buscar_codigos_parecidos(clean_code, limite=30):
     """Cuando el código exacto no aparece, busca códigos que EMPIECEN igual o que lo contengan.
     Es el caso típico de las familias: pedís 'TC-421' y en la base están 'TC-421-15' y
@@ -7698,6 +7886,9 @@ MARCAS_VEHICULO = sorted(set([
 ]), key=len, reverse=True)
 
 
+# ============================================================================================
+# AÑOS, MODELOS Y FAMILIAS DE REPUESTO
+# ============================================================================================
 def extraer_anios(descripcion):
     """Saca el rango de años de una descripción. Las listas los escriben de varias formas:
     '1969/78' (1969 a 1978), '1998/...' (1998 en adelante), '2005' (solo ese año).
@@ -9712,6 +9903,9 @@ def eliminar_combo(disparador):
         conn.commit()
 
 
+# ============================================================================================
+# INTELIGENCIA ARTIFICIAL: fotos, audio y remitos
+# ============================================================================================
 def identificar_pieza_por_foto(imagen_bytes):
     """Le manda una foto a Gemini y le pide que identifique la pieza, extrayendo el código
     de forma estructurada (no solo texto libre) para poder buscarlo directo en el catálogo."""
@@ -10003,6 +10197,9 @@ def interpretar_pedido_hablado(texto):
             "anio": int(anio.group(1)) if anio else None}
 
 
+# ============================================================================================
+# BUSCAR POR PIEZA Y AUTO
+# ============================================================================================
 def buscar_por_pieza_y_auto(familia=None, marca_auto=None, modelo=None,
                             cilindrada=None, limite=60):
     """Lo que tenés de ese rubro para ese auto, aunque no coincida ni una palabra del pedido."""
@@ -10256,6 +10453,9 @@ def variacion_de_precios_por_marca(meses=6, minimo_productos=10):
     return salida
 
 
+# ============================================================================================
+# DISCONTINUADOS Y REEMPLAZOS DE FÁBRICA
+# ============================================================================================
 def productos_probablemente_discontinuados(marca_id=None, listas_seguidas=2, limite=300):
     """Productos que el proveedor dejó de mandar en sus últimas listas.
 
@@ -10387,6 +10587,9 @@ def cadena_de_reemplazos(clean_code, tope=6):
     return cadena
 
 
+# ============================================================================================
+# REPOSICIÓN Y FAVORITOS
+# ============================================================================================
 def productos_estancados(dias_sin_vender=180, minimo_stock=1, limite=100):
     """Lo que tenés en el estante y no se mueve. Es capital dormido.
 
@@ -10554,6 +10757,9 @@ def listar_favoritos():
     return filas_a_listas(c)
 
 
+# ============================================================================================
+# CONFIGURACIÓN, USUARIO Y USO DE IA
+# ============================================================================================
 def obtener_config(clave, default=""):
     c.execute("SELECT valor FROM configuracion WHERE clave = ?", (clave,))
     fila = c.fetchone()
@@ -10605,6 +10811,9 @@ def resumen_uso_ia(dias=30):
               "Con error": r["total"] - r["exitosos"]} for r in c.fetchall()]
 
 
+# ============================================================================================
+# PAPELERA (borrar con red)
+# ============================================================================================
 def _resumen_de_papelera(tipo, datos):
     """Una línea que describe lo borrado, para poder listar la papelera sin abrir el JSON."""
     try:
@@ -10769,6 +10978,9 @@ def restaurar_de_papelera(item_id):
             return False, f"No se pudo restaurar: {e}"
 
 
+# ============================================================================================
+# HISTORIAL, DUPLICADOS Y EXPORTAR A EXCEL
+# ============================================================================================
 def guardar_busqueda(termino):
     with db_lock:
         c.execute("INSERT INTO historial_busquedas (termino, usuario) VALUES (?, ?)",
@@ -10834,6 +11046,9 @@ def to_excel_bytes(filas, columnas=None):
     return buf.getvalue()
 
 
+# ============================================================================================
+# COBROS: alias de transferencia y QR
+# ============================================================================================
 def listar_alias_transferencia():
     c.execute("""SELECT id AS "ID", nombre AS "Nombre", alias AS "Alias",
                  cbu AS "CBU", titular AS "Titular",
@@ -10902,6 +11117,9 @@ def generar_qr_bytes(texto):
     return salida.getvalue()
 
 
+# ============================================================================================
+# PIEZAS DE INTERFAZ QUE SE REPITEN
+# ============================================================================================
 def seccion_plegable(titulo, key, abierto=False):
     """Una sección que se abre y se cierra, PERO que se puede usar adentro de un expander.
 
@@ -11046,6 +11264,9 @@ def archivo_listo(archivo, etiqueta="archivo"):
     return True
 
 
+# ============================================================================================
+# PDF: cotización y ficha del vehículo
+# ============================================================================================
 def pdf_con_cache(nombre, generador, *args):
     """El botón de descarga de Streamlit necesita el archivo listo de antemano, así que el PDF
     se arma en CADA refresco de pantalla aunque nadie lo descargue. Esto guarda el último
@@ -11193,6 +11414,9 @@ def generar_pdf_ficha_vehiculo(vehiculo, km_calc, alertas, proyeccion, historial
     return bytes(pdf.output())
 
 
+# ============================================================================================
+# LEER EL ARCHIVO: encabezado, hojas y codificación
+# ============================================================================================
 def _puntaje_como_encabezado(fila, siguientes):
     """Qué tan probable es que ESTA fila sea la de títulos de columna.
 
@@ -11531,7 +11755,7 @@ def leer_excel(archivo, nrows=None, hoja=None):
 
 
 # ============================================================
-# IDEA 2: FICHA DIGITAL DEL VEHÍCULO (patente + historial de piezas)
+# FICHA DIGITAL DEL VEHÍCULO (patente + historial de piezas)
 # ============================================================
 def get_or_create_vehiculo(patente, cliente_nombre="", cliente_telefono="", marca_auto="", modelo_auto="",
                             km_actual=None, anio="", motorizacion="", vin=""):
@@ -11804,7 +12028,7 @@ def calcular_alertas_vehiculo(vehiculo_id, km_actual):
 
 
 # ============================================================
-# IDEA 3: SUSTITUCIÓN INTELIGENTE POR MEDIDAS MECÁNICAS
+# SUSTITUCIÓN POR MEDIDAS MECÁNICAS (retenes, o'rings, bujes)
 # ============================================================
 def buscar_por_medidas(diam_int=None, diam_ext=None, ancho=None, paso_rosca=None, estrias=None, tolerancia_pct=5,
                         estrias_internas=None, estrias_externas=None, posicion_seguro=None, tiene_abs="Cualquiera",
@@ -12849,7 +13073,7 @@ _ejecutar_migracion_orb_una_vez()
 
 
 # ============================================================
-# IDEA 5: AUDITORÍA PREVENTIVA POR MUESTREO ALEATORIO
+# AUDITORÍA DIARIA DE STOCK POR MUESTREO
 # ============================================================
 def generar_auditoria_hoy(cantidad=8):
     """Genera (si no existe todavía) la muestra aleatoria de hoy, priorizando favoritos y productos con precio cargado."""
@@ -12895,7 +13119,7 @@ def registrar_conteo_auditoria(auditoria_id, stock_contado):
 
 
 # ============================================================
-# IDEA 6: UBICACIÓN INTELIGENTE EN DEPÓSITO (matriz ABC)
+# UBICACIÓN EN DEPÓSITO (matriz ABC)
 # ============================================================
 def calcular_matriz_abc(limite=300):
     """Clasifica productos en A/B/C usando la frecuencia de búsqueda como indicador de rotación

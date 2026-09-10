@@ -1034,6 +1034,32 @@ for _f in ast.walk(ARBOL):
                  "queda afuera del tope es siempre lo mismo y no se procesa nunca")
 
 
+# ============ 13. El mapa del principio contra las secciones de verdad ============
+# app.py arranca con un índice de sus secciones. Un índice a mano se desactualiza en el primer
+# cambio y entonces es peor que no tenerlo: manda a buscar cosas donde ya no están. Esto lo
+# compara con los encabezados reales y avisa si se separaron.
+_encabezados = []
+for _i, _l in enumerate(LINEAS):
+    if (re.match(r'^# ={10,}$', _l.rstrip()) and _i + 2 < len(LINEAS)
+            and re.match(r'^# [A-ZÁÉÍÓÚÑ]', LINEAS[_i + 1])
+            and re.match(r'^# ={10,}$', LINEAS[_i + 2].rstrip())):
+        _encabezados.append(LINEAS[_i + 1][2:].strip())
+_doc = ast.get_docstring(ARBOL) or ""
+if _encabezados and "CÓMO ESTÁ ORGANIZADO" in _doc:
+    _listadas = [l.strip()[2:].strip() for l in _doc.splitlines() if l.strip().startswith("·")]
+    _faltan = [x for x in _encabezados if x not in _listadas]
+    _sobran = [x for x in _listadas if x not in _encabezados]
+    if _faltan:
+        reportar("AVISO", 1, "el mapa del principio no nombra estas secciones: "
+                             + "; ".join(_faltan[:4]) + (" …" if len(_faltan) > 4 else ""))
+    if _sobran:
+        reportar("AVISO", 1, "el mapa del principio nombra secciones que ya no existen: "
+                             + "; ".join(_sobran[:4]) + (" …" if len(_sobran) > 4 else ""))
+    if _listadas and not _faltan and not _sobran and _listadas != _encabezados:
+        reportar("AVISO", 1, "el mapa del principio tiene las secciones en otro orden que el "
+                             "archivo")
+
+
 # ============ Resultado ============
 orden = {"ERROR": 0, "REVISAR": 1, "AVISO": 2}
 problemas.sort(key=lambda x: (orden[x[0]], x[1]))

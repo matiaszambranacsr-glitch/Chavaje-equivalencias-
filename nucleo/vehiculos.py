@@ -253,6 +253,9 @@ def clasificar_repuesto(descripcion):
     return mejor[2] if mejor else "Sin clasificar"
 
 
+# ============================================================================================
+# AÑOS, MODELOS Y FAMILIAS DE REPUESTO
+# ============================================================================================
 def extraer_anios(descripcion):
     """Saca el rango de años de una descripción. Las listas los escriben de varias formas:
     '1969/78' (1969 a 1978), '1998/...' (1998 en adelante), '2005' (solo ese año).
