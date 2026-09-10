@@ -2101,12 +2101,30 @@ def _partir_por_barra(trozo):
     Con espacios alrededor ('ABC / DEF') es separador seguro."""
     if "/" not in trozo:
         return [trozo]
+    # 'c/', 's/', 'p/' son abreviaturas de "con", "sin" y "para", no separadores. JL escribe
+    # «208.856 C/PVC» y «23 8130R c/soporte»: el código es 208.856 y lo de atrás aclara con qué
+    # viene. Partiéndolo se cargaban DOS productos, uno con el código mutilado y otro llamado
+    # «PVC» o «soporte» — y ese segundo es lo peor, porque un código así se cuelga después de
+    # todo lo que mencione PVC y fusiona familias que no tienen nada que ver.
+    if re.search(r'(?i)(?:^|[\s\-])[cspx]/\S', trozo):
+        return [trozo]
     if re.search(r'\s/|/\s', trozo):          # 'ABC / DEF' → separador
         return [p for p in re.split(r'\s*/\s*', trozo) if p]
+    # Una barra con un número pegado de los DOS lados es una fracción, o sea una medida metida
+    # adentro del código: 1/2", 3/8, 7/16. IMPERIAL vende ferretería y los usa por todos lados
+    # —«H21A1/2"RF1,5» es una abrazadera de media pulgada— y se partía en 'H21A1' y '2"RF1':
+    # dos códigos que no existen, y el producto real desaparecía.
+    if re.search(r'\d/\d', trozo):
+        return [trozo]
     partes = [p for p in trozo.split("/") if p]
     for parte in partes:
         limpio = sanitizar(parte)
-        if limpio.isdigit() and len(limpio) <= 3:   # sufijo de variante: es un solo código
+        # Un pedazo corto es un SUFIJO DE VARIANTE, no un código aparte. Antes solo se
+        # contemplaba el sufijo numérico ('W712/94'), pero los de letras son igual de comunes:
+        # 'SABO-02233/BRG', 'RODGE-MINI/10F'. Cuando la barra separa dos códigos de verdad
+        # —'1109AN/1109AB'— los dos lados son completos, así que exigir largo de los dos es lo
+        # que distingue un caso del otro.
+        if len(limpio) <= 4:
             return [trozo]
     return partes
 
@@ -2120,7 +2138,17 @@ def dividir_codigos(celda):
     if texto == "" or texto.lower() == "nan":
         return []
     salida = []
+    # La coma entre dos dígitos es el separador DECIMAL, no una lista. Es la coma argentina:
+    # «RHEIN-CCSP-20,5» es un código, no los códigos «RHEIN-CCSP-20» y «5». Cortando ahí pasaban
+    # dos cosas, y la segunda es la grave: el código quedaba mutilado, y como el sufijo era lo
+    # único que los distinguía, «RHEIN-CCSP-20,5» y «RHEIN-CCSP-20,0» terminaban siendo el mismo
+    # código y uno pisaba al otro — un producto entero desaparecía del catálogo sin aviso.
+    # Sobre una lista real son 3.811 códigos.
+    # Se protege reemplazando la coma decimal por un marcador antes de cortar, y devolviéndola
+    # después: así el resto de la función sigue partiendo por comas de verdad.
+    texto = re.sub(r'(?<=\d),(?=\d)', "\x00", texto)
     for trozo in re.split(r'[,;\n|]+', texto):
+        trozo = trozo.replace("\x00", ",")
         trozo = trozo.strip()
         if not trozo:
             continue

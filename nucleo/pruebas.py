@@ -150,6 +150,34 @@ def probar_filtro_por_repeticion():
 def probar_dividir():
     igual(codigos.dividir_codigos("036115561G / 03C115561H"), ["036115561G", "03C115561H"],
           "una celda con dos códigos")
+    igual(codigos.dividir_codigos("1109AN/1109AB"), ["1109AN", "1109AB"],
+          "dos códigos completos pegados por la barra")
+
+    # Lo de arriba es lo fácil. Lo difícil es cuándo la barra y la coma NO separan, que es la
+    # mayoría de las veces en estas listas. Cada uno de estos casos rompía un código real y,
+    # peor, cargaba el pedazo suelto como si fuera un producto: un código llamado «PVC» se
+    # cuelga después de todo lo que mencione PVC y fusiona familias enteras.
+    # Sobre cinco listas reales: 4.017 códigos fantasma que se dejan de crear en una sola.
+    for entero in ("208.856 C/PVC",        # c/ = "con", no separador
+                   "23 8130R c/soporte",
+                   "BOT622-S/MED",
+                   'H21A1/2"RF1,5',        # 1/2 es una fracción: media pulgada
+                   "RHEIN-SCV3/8a1",
+                   "SABO-02233/BRG",       # sufijo de variante, no un código aparte
+                   "RODGE-MINI/10F",
+                   "W712/94",              # filtro Mann: un solo código
+                   "WK842/2"):
+        igual(codigos.dividir_codigos(entero), [entero], f"«{entero}» es UN código")
+
+    # La coma argentina. Sin esto «RHEIN-CCSP-20,5» quedaba «RHEIN-CCSP-20», y como el decimal
+    # era lo único que lo distinguía, terminaba siendo el mismo código que «RHEIN-CCSP-20,0»:
+    # un producto entero desaparecía del catálogo, pisado por el otro, sin ningún aviso.
+    # Son 3.811 códigos en una sola lista real.
+    igual(codigos.dividir_codigos("RHEIN-CCSP-20,5"), ["RHEIN-CCSP-20,5"], "la coma decimal")
+    cierto(codigos.sanitizar("RHEIN-CCSP-20,5") != codigos.sanitizar("RHEIN-CCSP-20,0"),
+           "dos medidas distintas no pueden terminar siendo el mismo código")
+    # ...pero la coma que sí separa una lista tiene que seguir separando
+    igual(codigos.dividir_codigos("ABC123,DEF456"), ["ABC123", "DEF456"], "la coma que sí separa")
 
 
 # ------------------------------------------------------------------ vehículos
