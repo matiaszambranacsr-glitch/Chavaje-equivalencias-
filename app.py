@@ -5,6 +5,7 @@ import io
 import threading
 import unicodedata
 import json
+import hmac
 import hashlib
 import os
 import pickle
@@ -254,14 +255,66 @@ def es_operador_o_admin():
     return st.session_state.get("nivel_usuario") in ("admin", "operador")
 
 
-def hash_password(password, salt=None):
+# Cuántas vueltas se le da a la contraseña antes de guardarla. Cuantas más, más caro es
+# probarlas una por una — y también más tarda el ingreso.
+# El número sale de medir, y hay que tener en cuenta algo: para entrar no se pide el nombre de
+# usuario, así que se prueba contra TODOS los usuarios activos hasta encontrar el que coincide.
+# O sea que el costo se multiplica por la cantidad de gente que trabaja en el negocio:
+#     100.000 vueltas ->  61 ms por usuario -> 0,6 s de ingreso con diez personas
+#     200.000 vueltas -> 121 ms por usuario -> 1,2 s de ingreso con diez personas
+# Se eligen 100.000: el ingreso queda por debajo del segundo y romper un diccionario de cien
+# mil claves pasa de dos centésimas de segundo a más de hora y media.
+VUELTAS_CLAVE = 100_000
+
+
+def hash_password(password, salt=None, formato=None):
     """Nunca guardamos la contraseña en texto plano — se guarda un hash junto con una sal
     aleatoria distinta por usuario, para que ni siquiera dos personas con la misma clave
-    tengan el mismo hash guardado."""
+    tengan el mismo hash guardado.
+
+    Antes eso era UN solo SHA-256, y ahí estaba el problema: SHA-256 está hecho para ser
+    rápido. Una placa de video prueba miles de millones por segundo, así que con el hash a la
+    vista una clave de mostrador («chavaje», «1234», el nombre del negocio) cae en segundos.
+    Y el hash está a la vista más de lo que parece: el backup de la base incluye la tabla de
+    usuarios, y este mismo backup se sube al repositorio de GitHub para que sobreviva a los
+    reinicios del hosting. Si ese repositorio es público, las claves de todos están publicadas.
+
+    Ahora se usa PBKDF2, que es el mismo SHA-256 repetido 200.000 veces: entrar sigue tardando
+    lo mismo para una persona (60 ms) y cuesta 200.000 veces más para quien prueba a lo bruto.
+    No hace falta instalar nada, viene con Python.
+
+    El formato guardado dice cómo se generó ('pbkdf2$200000$...'), así que las claves viejas
+    se siguen pudiendo verificar y se pasan al formato nuevo solas la próxima vez que la
+    persona entra. Nadie tiene que cambiar su clave."""
     if salt is None:
         salt = os.urandom(16).hex()
-    h = hashlib.sha256((salt + password).encode("utf-8")).hexdigest()
-    return h, salt
+    if formato == "sha256":          # el de antes, solo para poder verificar lo ya guardado
+        return hashlib.sha256((salt + password).encode("utf-8")).hexdigest(), salt
+    crudo = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"),
+                                salt.encode("utf-8"), VUELTAS_CLAVE)
+    return f"pbkdf2${VUELTAS_CLAVE}${crudo.hex()}", salt
+
+
+def verificar_password(password, guardado, salt):
+    """¿Esta contraseña corresponde al hash guardado? Entiende el formato viejo y el nuevo.
+
+    Devuelve (coincide, hay_que_actualizar). Lo segundo es para pasar al formato nuevo los
+    hashes viejos sin molestar a nadie."""
+    if not guardado:
+        return False, False
+    if str(guardado).startswith("pbkdf2$"):
+        try:
+            _, vueltas, esperado = str(guardado).split("$", 2)
+            crudo = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"),
+                                        salt.encode("utf-8"), int(vueltas))
+        except (ValueError, TypeError) as _err:
+            anotar_error("verificar_password", _err)
+            return False, False
+        # compare_digest y no ==: comparar de a byte tarda distinto según cuántos coincidan,
+        # y con muchos intentos eso deja adivinar el hash carácter por carácter.
+        return hmac.compare_digest(crudo.hex(), esperado), int(vueltas) != VUELTAS_CLAVE
+    viejo, _ = hash_password(password, salt, formato="sha256")
+    return hmac.compare_digest(viejo, str(guardado)), True
 
 
 def crear_usuario(nombre, password, rol="operador"):
@@ -280,10 +333,21 @@ def listar_usuarios():
 
 
 def validar_password_usuario(password):
-    c.execute("SELECT nombre, password_hash, salt, rol FROM usuarios WHERE activo = 1")
+    c.execute("SELECT id, nombre, password_hash, salt, rol FROM usuarios WHERE activo = 1")
     for fila in c.fetchall():
-        h, _ = hash_password(password, fila["salt"])
-        if h == fila["password_hash"]:
+        coincide, hay_que_actualizar = verificar_password(password, fila["password_hash"],
+                                                           fila["salt"])
+        if coincide:
+            if hay_que_actualizar:
+                # Se pasa al formato nuevo en silencio, la primera vez que entra.
+                try:
+                    nuevo, sal_nueva = hash_password(password)
+                    with db_lock:
+                        c.execute("UPDATE usuarios SET password_hash=?, salt=? WHERE id=?",
+                                  (nuevo, sal_nueva, fila["id"]))
+                        conn.commit()
+                except sqlite3.Error as _err:
+                    anotar_error("validar_password_usuario", _err)
             return fila["nombre"], fila["rol"]
     return None, None
 
@@ -456,6 +520,35 @@ def mostrar_login_inicial():
 # CONEXIÓN Y ESQUEMA
 # ============================================================
 ARCHIVO_SEMILLA = "datos_iniciales.db"
+
+
+# SQLite tiene un tope de variables por consulta: las compilaciones modernas aceptan 32.766,
+# pero las viejas —y las que trae más de un hosting— cortan en 999. Se usa el número chico
+# porque el costo de equivocarse es que la consulta falle entera en el servidor y no acá.
+TOPE_VARIABLES_POR_CONSULTA = 900
+
+
+def en_tandas(valores, usos_por_consulta=1, tope=TOPE_VARIABLES_POR_CONSULTA):
+    """Parte una lista en pedazos que entren en UNA consulta, y devuelve (tanda, marcadores).
+
+    Está en un solo lugar porque el mismo cálculo estaba escrito a mano en varias funciones,
+    con tamaños distintos —una iba de a 500, otra de a 800— y eso es justo lo que se
+    desincroniza con el tiempo.
+
+    'usos_por_consulta' es cuántas VECES aparece la lista en la consulta, y es el detalle que
+    a mano se olvida: si el mismo IN va dos veces —«... IN (…) OR … IN (…)»— cada valor gasta
+    dos variables, así que en una tanda entran la mitad. Con 400 resultados y la lista repetida
+    eran 803 variables contra un tope de 999: andaba, pero sin margen, y subir el tope de
+    resultados de la búsqueda lo habría roto sin que nadie viera la relación.
+
+        for tanda, marcadores in en_tandas(ids, usos_por_consulta=2):
+            c.execute(f"... WHERE a IN ({marcadores}) OR b IN ({marcadores})", tanda + tanda)
+    """
+    valores = list(valores)
+    por_tanda = max(1, tope // max(1, int(usos_por_consulta)))
+    for inicio in range(0, len(valores), por_tanda):
+        tanda = valores[inicio:inicio + por_tanda]
+        yield tanda, ",".join("?" * len(tanda))
 
 
 def _sql_sin_acentos(columna):
@@ -2565,12 +2658,6 @@ def restaurar_backup(archivo_subido):
     st.cache_data.clear()
 
 
-def listar_marcas_con_conteo():
-    c.execute("""SELECT m.id, m.nombre, m.tipo, COUNT(p.id) AS productos
-                 FROM marcas m LEFT JOIN productos p ON p.marca_id = m.id
-                 GROUP BY m.id ORDER BY m.nombre""")
-    return c.fetchall()
-
 
 def config_github():
     """Los datos para subir el backup solo. Devuelve None si no están configurados."""
@@ -3151,9 +3238,6 @@ def repuestos_por_numero_motor(numero):
         return []
 
 
-DIAS_CONSULTA_VIEJA = 30
-
-
 def anotar_consulta_cliente(cliente, telefono, producto_id=None, codigo="", descripcion="",
                             cantidad=1, precio=None, nota=""):
     """Guarda qué pidió un cliente que dijo que lo pensaba. Devuelve (ok, mensaje)."""
@@ -3304,9 +3388,7 @@ def stock_libre_de_varios(ids):
     if not ids:
         return {}
     libres = {}
-    for arranque in range(0, len(ids), 500):
-        tanda = ids[arranque:arranque + 500]
-        marcadores = ",".join("?" * len(tanda))
+    for tanda, marcadores in en_tandas(ids):
         c.execute(f"SELECT id, COALESCE(stock, 0) AS stock FROM productos "
                   f"WHERE id IN ({marcadores})", tanda)
         total = {f["id"]: f["stock"] for f in c.fetchall()}
@@ -3753,9 +3835,7 @@ def cargar_medidas_de_varios(ids):
     todo de una, revisar 5.000 pares cuesta casi lo mismo que revisar 400."""
     medidas = {}
     ids = list({int(i) for i in ids})
-    for inicio in range(0, len(ids), 800):   # SQLite tiene tope de parámetros por consulta
-        tanda = ids[inicio:inicio + 800]
-        marcadores = ",".join("?" * len(tanda))
+    for tanda, marcadores in en_tandas(ids):
         c.execute(f"SELECT id, {COLUMNAS_MEDIDAS} FROM productos WHERE id IN ({marcadores})", tanda)
         for fila in c.fetchall():
             medidas[fila["id"]] = dict(fila)
@@ -4049,11 +4129,6 @@ def cb_auditoria_cortar_todos(producto_id):
     cortar_todos_los_vinculos(producto_id)
     st.session_state["resultado_auditoria"] = auditar_equivalencias_existentes()
 
-
-def contar_vinculos_producto(producto_id):
-    c.execute("SELECT COUNT(*) FROM equivalencias WHERE producto_a_id = ? OR producto_b_id = ?",
-               (producto_id, producto_id))
-    return c.fetchone()[0]
 
 
 def cortar_todos_los_vinculos(producto_id, recordar_rechazo=True):
@@ -5544,15 +5619,18 @@ def origenes_de_los_vinculos_directos(producto_id, ids_resultado):
     deshace de una desde Mantenimiento en vez de ir corrigiendo de a un vínculo."""
     if not ids_resultado:
         return {}
-    marcadores = ",".join("?" * len(ids_resultado))
-    c.execute(f"""SELECT CASE WHEN producto_a_id = ? THEN producto_b_id ELSE producto_a_id END AS otro,
-                         lote
-                  FROM equivalencias
-                  WHERE (producto_a_id = ? OR producto_b_id = ?)
-                    AND lote IS NOT NULL
-                    AND (producto_a_id IN ({marcadores}) OR producto_b_id IN ({marcadores}))""",
-              [producto_id, producto_id, producto_id] + list(ids_resultado) * 2)
-    return {r["otro"]: r["lote"] for r in c.fetchall()}
+    salida = {}
+    # usos_por_consulta=2 porque la lista aparece en los dos IN.
+    for tanda, marcadores in en_tandas(ids_resultado, usos_por_consulta=2):
+        c.execute(f"""SELECT CASE WHEN producto_a_id = ? THEN producto_b_id ELSE producto_a_id END AS otro,
+                             lote
+                      FROM equivalencias
+                      WHERE (producto_a_id = ? OR producto_b_id = ?)
+                        AND lote IS NOT NULL
+                        AND (producto_a_id IN ({marcadores}) OR producto_b_id IN ({marcadores}))""",
+                  [producto_id, producto_id, producto_id] + tanda + tanda)
+        salida.update({r["otro"]: r["lote"] for r in c.fetchall()})
+    return salida
 
 
 def auditar_equivalencias_cargadas(limite=300, tope_confianza=35, revisar=8000):
@@ -6566,16 +6644,19 @@ def puentes_en_el_resultado(ids_resultado, umbral=15):
     cadenas largas, pero contra un puente no alcanza — hay que verlo y cortarlo."""
     if not ids_resultado:
         return []
-    marcadores = ",".join("?" * len(ids_resultado))
-    c.execute(f"""SELECT p.id AS "ID", p.codigo_raw AS "Código", p.descripcion AS "Descripción",
-                         (SELECT COUNT(*) FROM equivalencias e
-                           WHERE e.producto_a_id = p.id OR e.producto_b_id = p.id) AS "Vínculos"
-                  FROM productos p WHERE p.id IN ({marcadores})
-                    AND "Vínculos" >= ?
-                    AND p.id NOT IN (SELECT producto_id FROM puentes_aprobados)
-                  ORDER BY "Vínculos" DESC""",
-              list(ids_resultado) + [umbral])
-    return filas_a_listas(c)
+    salida = []
+    for tanda, marcadores in en_tandas(ids_resultado):
+        c.execute(f"""SELECT p.id AS "ID", p.codigo_raw AS "Código", p.descripcion AS "Descripción",
+                             (SELECT COUNT(*) FROM equivalencias e
+                               WHERE e.producto_a_id = p.id OR e.producto_b_id = p.id) AS "Vínculos"
+                      FROM productos p WHERE p.id IN ({marcadores})
+                        AND "Vínculos" >= ?
+                        AND p.id NOT IN (SELECT producto_id FROM puentes_aprobados)
+                      ORDER BY "Vínculos" DESC""",
+                  tanda + [umbral])
+        salida.extend(filas_a_listas(c))
+    salida.sort(key=lambda x: -x["Vínculos"])
+    return salida
 
 
 def tamano_de_la_red(producto_id, tope=500):
@@ -8809,9 +8890,12 @@ def derivar_equivalencias_por_descripcion(marca_a_id=None, marca_b_id=None,
     return salida
 
 
-PALABRAS_DE_RELLENO = {"DE", "LA", "EL", "CON", "SIN", "PARA", "POR", "DEL", "EN", "LOS",
+RELLENO_EN_NOMBRE_DE_PIEZA = {"DE", "LA", "EL", "CON", "SIN", "PARA", "POR", "DEL", "EN", "LOS",
                        "LAS", "UN", "UNA", "MM", "CM", "TIPO", "JUEGO", "JGO", "KIT", "COMPLETO",
                        "REF", "ORIG"}
+# El nombre es específico a propósito: más abajo hay un _PALABRAS_DE_RELLENO que es OTRA cosa
+# —las muletillas de un pedido hablado, «necesito», «dame»— y dos constantes casi homónimas a
+# mil líneas de distancia son una edición equivocada esperando pasar.
 
 
 def _nombre_de_la_pieza(descripcion):
@@ -8826,7 +8910,7 @@ def _nombre_de_la_pieza(descripcion):
             continue
         if palabra in marcas_auto or re.fullmatch(r'(19|20)\d{2}', palabra):
             break
-        if len(palabra) >= 3 and palabra not in PALABRAS_DE_RELLENO:
+        if len(palabra) >= 3 and palabra not in RELLENO_EN_NOMBRE_DE_PIEZA:
             palabras.append(palabra)
         if len(palabras) >= 4:
             break
@@ -12353,12 +12437,6 @@ def comparar_firmas(firma_consulta, blob_catalogo):
         total = 0.35 * forma
     return round(min(total * factor, 100.0), 1), mejor_inliers, round(forma, 1)
 
-
-def firma_de_consulta(imagen_bytes):
-    blob, estado = calcular_firma_visual(imagen_bytes, es_consulta=True)
-    if blob is None:
-        return None, estado
-    return pickle.loads(blob), estado
 
 
 # ============================================================
@@ -17306,8 +17384,7 @@ if pagina == PAGINAS[3]:
         with _tabs_mant[1]:
             st.markdown("**🎯 Puntuar los vínculos para el buscador**")
             try:
-                c.execute("SELECT COUNT(*) FROM equivalencias WHERE confianza IS NULL")
-                sin_puntuar = c.fetchone()[0]
+                sin_puntuar = faltan_por_puntuar()
                 c.execute("SELECT COUNT(*) FROM equivalencias")
                 total_eq = c.fetchone()[0]
             except sqlite3.OperationalError as _err:
