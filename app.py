@@ -8087,6 +8087,10 @@ def autos_de_todas_las_fuentes(producto_id, codigo_clean, autos_de_la_descripcio
     return autos
 
 
+_RE_CANTIDAD_VIAS = re.compile(
+    r'\b(\d{1,2})\s*(?:VIAS?|V[IÍ]AS?|PIN|PINES|BOCAS?|POLOS?|CONTACTOS?)\b', re.IGNORECASE)
+
+
 def firma_de_producto(descripcion, producto_id=None, codigo_clean=None):
     """Saca de una descripción qué pieza es y para qué auto, para poder comparar entre marcas.
 
@@ -8149,9 +8153,16 @@ def firma_de_producto(descripcion, producto_id=None, codigo_clean=None):
     if producto_id or codigo_clean:
         autos = autos_de_todas_las_fuentes(producto_id, codigo_clean, autos)
 
+    # Cantidad de vías / pines / bocas. En fichas, conectores y carburadores ese número no es
+    # un detalle: ES la pieza. Una ficha de 2 vías no entra donde va una de 3, por más que las
+    # dos digan "FICHA DE INYECCION" y vayan al mismo auto. Se cuentan 723 descripciones que lo
+    # declaran en un catálogo real, así que no es un caso raro.
+    m_vias = _RE_CANTIDAD_VIAS.search(descripcion or "")
+    vias = int(m_vias.group(1)) if m_vias else None
+
     return {"familia": familia, "nucleo": nucleo, "cabeza": cabeza, "autos": autos,
             "siglas": siglas, "marca_auto": marca_auto, "posicion": posicion,
-            "cilindradas": cilindradas, "texto": limpio}
+            "cilindradas": cilindradas, "vias": vias, "texto": limpio}
 
 
 def firmas_compatibles(a, b, minimo_nucleo=2):
@@ -8187,6 +8198,12 @@ def firmas_compatibles(a, b, minimo_nucleo=2):
                            f"vs {'/'.join(sorted(b['autos'])[:2])}")
     else:
         autos_comunes = set()
+
+    # Cantidad de vías / pines: si las dos la declaran y no es la misma, son piezas distintas.
+    # Sin esto se proponía una «FICHA 3 Vias Macho» contra una «FICHA 2 vias macho»: mismo
+    # rubro, misma primera palabra, mismo tipo de conector, y no entra una donde va la otra.
+    if a.get("vias") and b.get("vias") and a["vias"] != b["vias"]:
+        return False, f"distinta cantidad de vías ({a['vias']} vs {b['vias']})"
 
     # Siglas técnicas: si las dos declaran una y no coinciden, son piezas distintas. Probado
     # con listas reales: sin esto se cruzaba «VALVULA PCV» con «VALVULA EGR» del mismo auto,
@@ -8563,7 +8580,7 @@ def _parecido_nombre_pieza(desc_a, desc_b):
     return len(pieza_a & pieza_b) / len(pieza_a | pieza_b)
 
 
-def sugerir_entre_todas_las_marcas(limite=200, tope_palabra=40):
+def sugerir_entre_todas_las_marcas(limite=600, tope_palabra=40):
     """Lo mismo que derivar_equivalencias_por_descripcion(), pero de UNA VEZ para todo el
     catálogo en vez de elegir dos proveedores a mano.
 
@@ -8583,7 +8600,10 @@ def sugerir_entre_todas_las_marcas(limite=200, tope_palabra=40):
     medio. Comparando únicamente los pares que comparten alguna de esas queda del orden de
     ciento cincuenta mil, y se resuelve en segundos.
 
-    Nada se carga solo: todo va a la cola de pendientes para que lo apruebe una persona."""
+    Nada se carga solo: todo va a la cola de pendientes para que lo apruebe una persona.
+
+    El tope está en 600 y no en 200 porque 200 cortaba de verdad: sobre las cinco listas reales
+    salen 284 pares, y con el tope viejo 84 no se veían nunca sin que nada lo avisara."""
     from collections import defaultdict
     try:
         c.execute("""SELECT p.id, p.codigo_raw, p.codigo_clean, p.descripcion, p.marca_id,
@@ -8635,6 +8655,16 @@ def sugerir_entre_todas_las_marcas(limite=200, tope_palabra=40):
                 # Se comparan las primeras palabras de cada descripción —las que nombran la
                 # pieza, antes de que empiece a listar autos— y se pide que sean casi las mismas.
                 if _parecido_nombre_pieza(prod_a["descripcion"], prod_b["descripcion"]) < 0.5:
+                    continue
+                # Acá el AUTO no puede faltar, y esto también es propio de este recorrido.
+                # firmas_compatibles() exige que coincidan solo cuando las DOS descripciones
+                # nombran alguno: si una no nombra ninguno, deja pasar, porque no se puede
+                # descartar por falta de dato. Comparando de a dos proveedores eso está bien.
+                # Acá no: el 36% de los productos no nombra ninguna marca de auto, así que esa
+                # excepción se aplicaba a un tercio del catálogo y emparejaba por el nombre de
+                # la pieza sola. De ahí salía un «SENSOR ABS» de VW Golf contra uno de BMW X5.
+                # Con tantos pares candidatos, "no hay dato" tiene que ser un no.
+                if not (firma_a["autos"] and firma_b["autos"] and (firma_a["autos"] & firma_b["autos"])):
                     continue
                 salida.append({
                     "Código A": prod_a["codigo_raw"], "Marca A": prod_a["marca"],
