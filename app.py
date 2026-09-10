@@ -8476,8 +8476,12 @@ def equivalencias_puenteadas_por_reemplazo(limite=300):
     return salida
 
 
+TOPE_PRODUCTOS_POR_COMPARACION = 4000  # ver derivar_equivalencias_por_descripcion()
+
+
 def derivar_equivalencias_por_descripcion(marca_a_id=None, marca_b_id=None,
-                                          limite=400, tope_productos=4000,
+                                          limite=400,
+                                          tope_productos=TOPE_PRODUCTOS_POR_COMPARACION,
                                           por_producto=3):
     """Vincula productos de DOS proveedores distintos comparando lo que dicen sus descripciones.
 
@@ -17458,6 +17462,24 @@ if pagina == PAGINAS[3]:
                 _ma = cd1.selectbox("Proveedor A:", list(_et.keys()), key="desc_marca_a")
                 _mb = cd2.selectbox("Proveedor B:", list(_et.keys()),
                                      index=min(1, len(_et) - 1), key="desc_marca_b")
+                # El tope no es solo lentitud: es que las filas que quedan afuera son SIEMPRE
+                # las mismas —las últimas de cada lista— y no se comparan nunca. Callarlo hace
+                # creer que se revisó todo. Sobre una lista real de 25.875 productos son casi
+                # 22.000 que no entran, o sea el 85% del proveedor.
+                _cuenta = {x["id"]: x["n"] for x in _marcas_desc}
+                _grandes = [(nombre, _cuenta.get(mid, 0)) for nombre, mid in
+                            ((_ma, _et[_ma]), (_mb, _et[_mb]))
+                            if _cuenta.get(mid, 0) > TOPE_PRODUCTOS_POR_COMPARACION]
+                if _grandes:
+                    st.warning(
+                        "⚠️ " + " y ".join(f"**{n.split(' (')[0]}** tiene {c:,} productos"
+                                            for n, c in _grandes)
+                        + f", y esta comparación mira las primeras "
+                          f"{TOPE_PRODUCTOS_POR_COMPARACION:,} de cada una. El resto no se "
+                          "compara nunca, porque son siempre las mismas filas las que quedan "
+                          "afuera.\n\nPara recorrer el catálogo entero sin tope, usá "
+                          "**🧠 Buscar equivalencias en TODO el catálogo de una**, más abajo."
+                    )
                 if st.button("🔤 Buscar equivalencias por descripción",
                               disabled=(_ma == _mb)):
                     with st.spinner("Comparando descripciones..."):

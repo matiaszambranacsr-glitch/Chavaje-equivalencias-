@@ -989,6 +989,51 @@ for _f in ast.walk(ARBOL):
                          "RecursionError no lo agarra el que llamó y se cae la pantalla")
 
 
+# ============ 12d. Tope de trabajo que siempre agarra lo mismo ============
+# Un LIMIT sin ORDER BY devuelve "las que la base tenga a mano", que en SQLite es el orden de
+# inserción. Para una vista previa está bien. El problema es cuando el LIMIT es un TOPE DE
+# TRABAJO —la función lee un lote, lo procesa y lo GUARDA—: ahí lo que queda afuera no es "el
+# resto", es siempre EL MISMO resto, y no se procesa nunca por más veces que se corra.
+# Pasó de verdad acá dos veces:
+#   · recalcular_confianzas() tomaba LIMIT filas de todos los vínculos: correrla de nuevo
+#     repuntuaba las mismas y el 84% del catálogo quedaba sin puntaje para siempre;
+#   · auditar_equivalencias_cargadas() revisaba las primeras 8.000 de 24.774, o sea las más
+#     viejas en vez de las más sospechosas.
+# Para no marcar lo que anda, se pide que se cumpla TODO:
+#   · la consulta tiene LIMIT y no tiene ORDER BY;
+#   · la función además ESCRIBE (UPDATE/INSERT/DELETE): si solo lee, el tope es de pantalla;
+#   · y la consulta no excluye lo ya hecho (IS NULL, NOT EXISTS, NOT IN), que es justamente
+#     como se escribe un lote que sí avanza.
+def _escribe_en_la_base(nodo):
+    for x in ast.walk(nodo):
+        if isinstance(x, ast.Constant) and isinstance(x.value, str):
+            t = x.value.upper().lstrip()
+            if t.startswith(("UPDATE ", "INSERT ", "DELETE ")):
+                return True
+    return False
+
+
+for _f in ast.walk(ARBOL):
+    if not isinstance(_f, (ast.FunctionDef, ast.AsyncFunctionDef)):
+        continue
+    if not _escribe_en_la_base(_f):
+        continue
+    for _n in ast.walk(_f):
+        if not isinstance(_n, ast.Constant) or not isinstance(_n.value, str):
+            continue
+        _sql = _n.value.upper()
+        if "SELECT" not in _sql or "LIMIT" not in _sql:
+            continue
+        if any(x in _sql for x in ("ORDER BY", "IS NULL", "NOT EXISTS", "NOT IN", "GROUP BY")):
+            continue
+        # LIMIT 1 es buscar UN registro, no un lote: cualquiera de los que coinciden sirve.
+        if re.search(r'LIMIT\s+1\s*$', _sql.strip()) or "LIMIT 1 " in _sql:
+            continue
+        reportar("REVISAR", _n.lineno,
+                 f"'{_f.name}' lee un lote con LIMIT y sin ORDER BY, y después escribe: lo que "
+                 "queda afuera del tope es siempre lo mismo y no se procesa nunca")
+
+
 # ============ Resultado ============
 orden = {"ERROR": 0, "REVISAR": 1, "AVISO": 2}
 problemas.sort(key=lambda x: (orden[x[0]], x[1]))
