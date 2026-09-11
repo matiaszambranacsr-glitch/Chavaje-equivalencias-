@@ -59,11 +59,16 @@ dicen «NO debía sacar nada» están escritos con descripciones reales de esas 
 ## Base de datos
 
 SQLite en modo WAL, con **una conexión por sesión** para que puedan usar la app dos personas a
-la vez. Dos consecuencias que ya causaron problemas y conviene tener presentes:
+la vez. Tres consecuencias que ya causaron problemas y conviene tener presentes:
 
 - **No se puede reemplazar el archivo `.db` a mano.** Si hay otra sesión abierta, su `-wal`
   sobrevive y se aplica encima de la base nueva: quedan mezcladas dos bases. Para restaurar se
   usa la API `backup()` de SQLite, que escribe a través de la base (ver `restaurar_backup()`).
+- **Está en autocommit: cada sentencia se confirma sola.** Sirve para que la importación de
+  una persona no se mezcle con la de otra, pero significa que una operación de varios pasos
+  cortada a la mitad deja la base a medias. Cuando varias sentencias tienen que valer todas o
+  ninguna va `with transaccion():` (ver la sección *TODO O NADA* de `app.py`). El auditor marca
+  las funciones que escriben en dos tablas y no lo usan.
 - **Cuidado con los `IN (?, ?, …)` largos.** SQLite tiene un tope de variables por consulta que
   en muchas instalaciones es 999. Para listas que crecen con el catálogo hay que usar
   `en_tandas()`, que además tiene en cuenta si la lista aparece más de una vez en la consulta.

@@ -214,6 +214,42 @@ def probar_vehiculos():
     igual(vehiculos.extraer_anios("GOL 1998-2006"), (1998, 2006), "años de la descripción")
 
 
+def probar_familias_de_pieza():
+    """La familia de la pieza es lo que usa el detector de puentes falsos para darse cuenta de
+    que un código está uniendo repuestos que no tienen nada que ver, y también vale −40 en la
+    confianza de un vínculo. Cuando una descripción cae en «Sin clasificar», esas dos cosas se
+    quedan sin evidencia — por eso estos casos están clavados acá.
+
+    Los de abajo salieron de las listas reales: son las formas que más aparecían entre las
+    25.112 descripciones que antes no se clasificaban."""
+    casos = [
+        # El punto pegado de las abreviaturas de proveedor (1.332 productos decían esto)
+        ("JTA.TAPA CIL. FORD FALCON", "Juntas y retenes"),
+        ("Jgo.Jtas.P/Motor c/Retenes MAZDA B-2900", "Juntas y retenes"),
+        ("Cpo.Acel. M.BENZ CLS350", "Combustible"),
+        # Familias que faltaban enteras
+        ("BULBO DE TEMPERATURA PEUGEOT 505", "Eléctrico y encendido"),
+        ("INTERRUPTOR STOP M.BENZ 1214", "Eléctrico y encendido"),
+        ("LLAVE TECLA Fiat UNO FARO", "Eléctrico y encendido"),
+        ("MOTOR PASO/PASO FIAT PALIO", "Eléctrico y encendido"),
+        ("CUERPO MARIPOSA Chevrolet CORSA", "Combustible"),
+        ("SURTIDOR WEBER 30 DIC", "Combustible"),
+        ("BOMBA ELECTRICA 64044 Nissan D21", "Combustible"),
+        ("CANO Fiat DUNA salida filtro de aire", "Caños y mangueras"),
+        ("COOLER DE ACEITE VW AMAROK", "Refrigeración"),
+        ("ACTUADOR HIDRAULICO EMBRAGUE RENAULT", "Embrague"),
+        # Y que las claves nuevas no le ganen a las que ya estaban (gana la más larga)
+        ("TUBO DE ESCAPE VW GOL", "Escape"),
+        ("MANGUERA DE RADIADOR PALIO", "Refrigeración"),
+        ("TUBO CALEFACTOR PEUGEOT 307", "Climatización"),
+        ("CANO DE ESCAPE FIAT UNO", "Escape"),
+        ("PASTILLAS DE FRENO CORSA", "Frenos"),
+        ("FILTRO DE AIRE 4RUNNER", "Filtros"),
+    ]
+    for texto, esperada in casos:
+        igual(vehiculos.clasificar_repuesto(texto), esperada, f"familia de «{texto[:40]}»")
+
+
 # ------------------------------------------------------------------ planillas
 def probar_mapeo_columnas():
     # Con encabezado de verdad: el EAN NUNCA puede quedar como código principal, porque en el
@@ -311,6 +347,7 @@ def main():
     for prueba in (probar_sanitizar, probar_codigo_util, probar_codigo_sospechoso,
                    probar_extractor,
                    probar_filtro_por_repeticion, probar_dividir, probar_vehiculos,
+                   probar_familias_de_pieza,
                    probar_mapeo_columnas, probar_busqueda_entre_proveedores,
                    probar_codigo_generico_no_cruza):
         antes = len(fallos)

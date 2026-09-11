@@ -1060,6 +1060,149 @@ if _encabezados and "CÓMO ESTÁ ORGANIZADO" in _doc:
                              "archivo")
 
 
+
+# ============ 14. El mismo bloque escrito dos veces seguidas ============
+# Copiar y pegar un bloque, editar la copia y olvidarse de borrar el original no da error: el
+# segundo pasa igual y no se nota. Pasó acá: descartar_candidata() hacía dos veces exactamente
+# el mismo INSERT OR REPLACE, uno abajo del otro. Como era OR REPLACE el resultado era el
+# mismo, así que nunca se iba a ver; pero si la sentencia repetida hubiera sido un INSERT
+# común, o un UPDATE que suma, el efecto se aplicaba dos veces.
+# Se pide que sean sentencias SEGUIDAS y de más de una línea, para no marcar repeticiones
+# legítimas (dos `st.write("")` para separar, dos veces el mismo `continue`).
+_bloques = []
+for _x in ast.walk(ARBOL):
+    for _campo, _val in ast.iter_fields(_x):
+        if isinstance(_val, list) and _val and isinstance(_val[0], ast.stmt):
+            _bloques.append(_val)
+for _cuerpo in _bloques:
+    for _a, _b in zip(_cuerpo, _cuerpo[1:]):
+        if _a.end_lineno - _a.lineno < 1:
+            continue              # una sola línea: repetirla casi siempre es a propósito
+        _ta = "\n".join(l.strip() for l in LINEAS[_a.lineno - 1:_a.end_lineno])
+        _tb = "\n".join(l.strip() for l in LINEAS[_b.lineno - 1:_b.end_lineno])
+        if _ta and _ta == _tb:
+            reportar("ERROR", _b.lineno,
+                     f"este bloque es idéntico al de la línea {_a.lineno}, justo arriba: "
+                     "quedó una copia sin borrar")
+
+
+# ============ 15. Operación de varios pasos sin transaccion() ============
+# La conexión está en autocommit: cada sentencia se confirma sola. Una función que escribe en
+# VARIAS tablas y se corta en el medio deja la base a mitad de camino, y eso se vio de verdad:
+#   · cerrar_reserva() descontaba el stock y después marcaba la reserva; cortada en el medio,
+#     el empleado la cerraba otra vez y una reserva de 3 unidades descontaba 6;
+#   · fusionar_productos() borraba los vínculos del duplicado y después el duplicado; cortada
+#     en el medio, el producto seguía ahí y sus equivalencias no.
+# Para eso está el bloque transaccion(). Esto marca a las que escriben en dos tablas distintas
+# y no lo usan. Se dejan afuera:
+#   · las que arman el esquema o corren migraciones (van una vez, al arrancar, y sin usuarios);
+#   · las que escriben en OTRA base (generar_backup_sin_fotos abre su propio archivo).
+_TABLAS_SQL = re.compile(
+    r'\b(?:insert\s+(?:or\s+\w+\s+)?into|update|delete\s+from|replace\s+into)\s+'
+    r'([a-z_][a-z_0-9]*)', re.I)
+_SIN_TRANSACCION_OK = ("_esquema_", "_datos_precargados", "crear_esquema", "_migracion",
+                       "generar_backup", "restaurar_")
+
+def _tablas_que_escribe(nodo):
+    tablas = {}
+    for x in ast.walk(nodo):
+        if not (isinstance(x, ast.Call) and isinstance(x.func, ast.Attribute)
+                and x.func.attr in ("execute", "executemany") and x.args):
+            continue
+        a = x.args[0]
+        if isinstance(a, ast.Constant) and isinstance(a.value, str):
+            texto = a.value
+        elif isinstance(a, ast.JoinedStr):
+            texto = " ".join(p.value for p in a.values if isinstance(p, ast.Constant))
+        else:
+            continue
+        for m in _TABLAS_SQL.finditer(" ".join(texto.split())):
+            # «ON CONFLICT ... DO UPDATE SET» hace que el patrón lea «set» como si fuera una
+            # tabla. No es la única palabra reservada que puede caer ahí.
+            nombre = m.group(1).lower()
+            if nombre not in ("set", "or", "into", "from", "table", "index", "trigger", "view"):
+                tablas.setdefault(nombre, x.lineno)
+    return tablas
+
+def _usa_transaccion(nodo):
+    for x in ast.walk(nodo):
+        if isinstance(x, ast.Call) and isinstance(x.func, ast.Name) and x.func.id == "transaccion":
+            return True
+    return False
+
+for _f in ast.walk(ARBOL):
+    if not isinstance(_f, (ast.FunctionDef, ast.AsyncFunctionDef)):
+        continue
+    if _f.name.startswith(_SIN_TRANSACCION_OK) or _usa_transaccion(_f):
+        continue
+    _tablas = _tablas_que_escribe(_f)
+    if len(_tablas) >= 2:
+        reportar("REVISAR", _f.lineno,
+                 f"'{_f.name}' escribe en {len(_tablas)} tablas ({', '.join(sorted(_tablas))}) "
+                 "y no usa transaccion(): si se corta en el medio, la base queda a medias")
+
+
+
+# ============ 16. Caché de una consulta sin forma de saber que la base cambió ============
+# @st.cache_data guarda el resultado según los ARGUMENTOS. Si la función lee la base y no
+# recibe ningún argumento que cambie cuando cambia la base, el resultado se congela hasta que
+# se reinicia la app.
+# El testigo hay que elegirlo con cuidado, y eso esto NO lo puede revisar: el catálogo por
+# vehículo tenía uno —COUNT(*) de productos— pero no alcanzaba, porque «reparar descripciones
+# pegadas» reescribe miles de descripciones sin mover el contador ni un número, y la pantalla
+# seguía mostrando los modelos viejos (ahora usa version_del_catalogo(), que además suma el
+# largo de las descripciones). Lo que sí se puede revisar es el caso grueso: que no haya
+# ningún testigo. Se acepta un ttl, o un parámetro cuyo nombre hable de versión o testigo.
+_TESTIGO = re.compile(r'version|versión|testigo|firma|hash|sello', re.I)
+for _f in ast.walk(ARBOL):
+    if not isinstance(_f, (ast.FunctionDef, ast.AsyncFunctionDef)):
+        continue
+    _cacheada = False
+    _tiene_ttl = False
+    for _d in _f.decorator_list:
+        _call = _d if isinstance(_d, ast.Call) else None
+        _attr = (_call.func if _call else _d)
+        if isinstance(_attr, ast.Attribute) and _attr.attr == "cache_data":
+            _cacheada = True
+            if _call and any(k.arg == "ttl" for k in _call.keywords):
+                _tiene_ttl = True
+    if not _cacheada or _tiene_ttl:
+        continue
+    _lee_la_base = any(isinstance(x, ast.Call) and isinstance(x.func, ast.Attribute)
+                       and x.func.attr in ("execute", "executemany")
+                       for x in ast.walk(_f))
+    if not _lee_la_base:
+        continue
+    _args = [a.arg for a in _f.args.args + _f.args.kwonlyargs]
+    if not any(_TESTIGO.search(a) for a in _args):
+        reportar("REVISAR", _f.lineno,
+                 f"'{_f.name}' está cacheada y lee la base, pero no recibe ningún testigo de "
+                 "versión ni tiene ttl: el resultado queda congelado hasta reiniciar la app")
+
+
+
+# ============ 17. st.rerun() o st.stop() adentro de una transacción ============
+# Las dos cortan el script lanzando una excepción que NO hereda de Exception (RerunException y
+# StopException heredan de BaseException). transaccion() las atrapa —a propósito, para no
+# dejar la transacción abierta— y deshace todo. O sea: refrescar la pantalla en el medio de un
+# `with transaccion():` tira abajo, en silencio, lo que se acababa de guardar. Hay que cerrar
+# el bloque primero y recién después refrescar.
+for _w in ast.walk(ARBOL):
+    if not isinstance(_w, ast.With):
+        continue
+    if not any(isinstance(_i.context_expr, ast.Call)
+               and isinstance(_i.context_expr.func, ast.Name)
+               and _i.context_expr.func.id == "transaccion" for _i in _w.items):
+        continue
+    for _x in ast.walk(_w):
+        if (isinstance(_x, ast.Call) and isinstance(_x.func, ast.Attribute)
+                and _x.func.attr in ("rerun", "stop")
+                and isinstance(_x.func.value, ast.Name) and _x.func.value.id == "st"):
+            reportar("ERROR", _x.lineno,
+                     f"st.{_x.func.attr}() adentro del transaccion() que abre la línea "
+                     f"{_w.lineno}: deshace lo que se guardó, y sin avisar")
+
+
 # ============ Resultado ============
 orden = {"ERROR": 0, "REVISAR": 1, "AVISO": 2}
 problemas.sort(key=lambda x: (orden[x[0]], x[1]))

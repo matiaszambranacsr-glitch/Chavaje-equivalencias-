@@ -15,6 +15,7 @@ específico, y las pantallas quedan todas al final:
     · CONFIGURACIÓN DE PÁGINA
     · MODO DE VISTA (celular / computadora)
     · CONEXIÓN Y ESQUEMA
+    · TODO O NADA: operaciones que son de varias sentencias
     · CÓDIGOS: limpiar, reconocer, partir y sacarlos de una descripción
     · MARCAS Y CATÁLOGOS EXTERNOS DE PROVEEDOR
     · INTEGRIDAD DE LA BASE, BACKUP Y RESTAURACIÓN
@@ -91,6 +92,7 @@ import hmac
 import hashlib
 import os
 import pickle
+import contextlib
 import time
 import requests          # se usa en varias funciones; importarlo una vez evita repetirlo
 from datetime import datetime
@@ -570,8 +572,8 @@ def mostrar_login_inicial():
         )
         clave = st.text_input("Contraseña (opcional):", type="password", key="login_inicial_clave")
         col_a, col_b = st.columns(2)
-        entrar = col_a.form_submit_button("🔓 Ingresar con contraseña", type="primary", use_container_width=True)
-        seguir = col_b.form_submit_button("➡️ Continuar", use_container_width=True)
+        entrar = col_a.form_submit_button("🔓 Ingresar con contraseña", type="primary", width="stretch")
+        seguir = col_b.form_submit_button("➡️ Continuar", width="stretch")
 
     if entrar:
         nombre, nivel, error = validar_password(clave)
@@ -2197,6 +2199,63 @@ conn = _ConexionPorSesion(DB_PATH)
 c = _CursorPorSesion(conn)
 
 
+# ============================================================
+# TODO O NADA: operaciones que son de varias sentencias
+# ============================================================
+@contextlib.contextmanager
+def transaccion():
+    """Varias sentencias que tienen que valer TODAS o NINGUNA.
+
+    La conexión está en autocommit (ver get_connection): cada sentencia se confirma sola. Eso
+    está bien para el 95% de la app —una consulta, un alta suelta— pero es un problema serio
+    cuando una operación necesita varios pasos, porque si se corta en el medio los pasos que
+    ya pasaron quedan guardados igual.
+
+    No es teoría. Está medido cortando la operación a propósito en una base de prueba:
+
+      · cerrar_reserva() descuenta el stock y DESPUÉS marca la reserva como vendida. Si se
+        corta en el medio, el stock bajó pero la reserva sigue «activa»: el empleado la ve
+        ahí, vuelve a cerrarla, y una reserva de 3 unidades descuenta 6. Stock inventado,
+        en silencio, y encima al revés de como conviene (dice que hay menos de lo que hay).
+      · fusionar_productos() pasa los vínculos al que queda, borra los del que se va y recién
+        entonces borra el producto. Cortado antes del último paso, el producto duplicado
+        sigue existiendo pero ya sin ninguna equivalencia: se perdieron y nadie avisó.
+
+    Con este bloque, SQLite deshace sola la parte hecha y la base queda como estaba.
+
+    Detalles de por qué está escrito así:
+
+      · BEGIN IMMEDIATE y no BEGIN a secas: pide el candado de escritura desde el principio.
+        Con BEGIN normal, SQLite lo pide recién en la primera escritura, y si en ese momento
+        está ocupado la operación se cae a mitad de camino. Pidiéndolo antes, el busy_timeout
+        de 8 segundos hace lo que uno espera: esperar el turno.
+      · si ya hay una transacción abierta, este bloque no abre otra (SQLite no las anida) y
+        deja que decida el de afuera. Así una función que la usa puede llamar a otra que
+        también la usa sin romperse.
+      · el COMMIT del final está condicionado a que la transacción siga abierta, porque algún
+        conn.commit() suelto adentro del bloque la cierra antes; sin el condicional saltaría
+        «cannot commit - no transaction is active».
+      · NO toma db_lock a propósito: varias funciones ya hacen `with db_lock:` por fuera, y
+        db_lock no es reentrante — tomarlo acá las colgaría.
+      · atrapa BaseException y no Exception: un st.rerun() adentro del bloque es una excepción
+        que no hereda de Exception, y sin esto se iría con la transacción abierta.
+    """
+    conexion = conn.conexion_real()
+    if conexion.in_transaction:
+        yield            # ya estamos adentro de otra: manda la de afuera
+        return
+    conexion.execute("BEGIN IMMEDIATE")
+    try:
+        yield
+    except BaseException:
+        if conexion.in_transaction:
+            try:
+                conexion.execute("ROLLBACK")
+            except sqlite3.Error:
+                pass   # el error de arriba es el que hay que ver, no el de deshacer
+        raise
+    if conexion.in_transaction:
+        conexion.execute("COMMIT")
 
 
 # ============================================================
@@ -3573,19 +3632,20 @@ def reservas_activas(limite=200):
 
 def cerrar_reserva(reserva_id, vendida):
     """Se concretó la venta (descuenta del stock) o se cayó (solo libera)."""
-    with db_lock:
+    # Todo o nada: el descuento de stock y el cierre de la reserva son el mismo acto. Cortado
+    # en el medio, el stock bajaba y la reserva quedaba «activa», así que el empleado la
+    # cerraba otra vez y descontaba de nuevo. Probado: una reserva de 3 llegó a descontar 6.
+    with db_lock, transaccion():
         c.execute("SELECT producto_id, cantidad FROM reservas_stock WHERE id = ? AND estado='activa'",
                   (reserva_id,))
         fila = c.fetchone()
         if not fila:
-            conn.commit()
             return False
         if vendida:
             c.execute("UPDATE productos SET stock = MAX(COALESCE(stock,0) - ?, 0) WHERE id = ?",
                       (fila["cantidad"], fila["producto_id"]))
         c.execute("UPDATE reservas_stock SET estado = ? WHERE id = ?",
                   ("vendida" if vendida else "cancelada", reserva_id))
-        conn.commit()
     return True
 
 
@@ -3707,42 +3767,46 @@ def fusionar_productos(id_perdedor, id_ganador):
     tuviera el que se va y le falte al que queda. Se descarta el registro duplicado, no los datos."""
     if id_perdedor == id_ganador:
         return False
-    # Las equivalencias del que se va pasan al que queda, sin duplicar ni auto-vincular
-    c.execute("""SELECT CASE WHEN producto_a_id = ? THEN producto_b_id ELSE producto_a_id END AS otro,
-                        lote
-                 FROM equivalencias WHERE producto_a_id = ? OR producto_b_id = ?""",
-              (id_perdedor, id_perdedor, id_perdedor))
-    for fila in c.fetchall():
-        otro = fila["otro"]
-        if otro == id_ganador:
-            continue
-        c.execute("INSERT OR IGNORE INTO equivalencias (producto_a_id, producto_b_id, lote) "
-                  "VALUES (?, ?, ?)", (min(otro, id_ganador), max(otro, id_ganador), fila["lote"]))
-    c.execute("DELETE FROM equivalencias WHERE producto_a_id = ? OR producto_b_id = ?",
-              (id_perdedor, id_perdedor))
+    # Todo o nada: son varios pasos sobre varias tablas y el estado intermedio es basura.
+    # Probado cortando el borrado final a propósito: el producto duplicado seguía existiendo
+    # pero ya se le habían borrado TODAS las equivalencias. Se perdieron sin aviso.
+    with transaccion():
+        # Las equivalencias del que se va pasan al que queda, sin duplicar ni auto-vincular
+        c.execute("""SELECT CASE WHEN producto_a_id = ? THEN producto_b_id ELSE producto_a_id END AS otro,
+                            lote
+                     FROM equivalencias WHERE producto_a_id = ? OR producto_b_id = ?""",
+                  (id_perdedor, id_perdedor, id_perdedor))
+        for fila in c.fetchall():
+            otro = fila["otro"]
+            if otro == id_ganador:
+                continue
+            c.execute("INSERT OR IGNORE INTO equivalencias (producto_a_id, producto_b_id, lote) "
+                      "VALUES (?, ?, ?)", (min(otro, id_ganador), max(otro, id_ganador), fila["lote"]))
+        c.execute("DELETE FROM equivalencias WHERE producto_a_id = ? OR producto_b_id = ?",
+                  (id_perdedor, id_perdedor))
 
-    for tabla, col_a, col_b in (("equivalencias_pendientes", "producto_a_id", "producto_b_id"),):
-        try:
-            c.execute(f"DELETE FROM {tabla} WHERE {col_a} = ? OR {col_b} = ?",
-                      (id_perdedor, id_perdedor))
-        except sqlite3.OperationalError as _err:
-            anotar_error("fusionar_productos", _err)
-            pass
+        for tabla, col_a, col_b in (("equivalencias_pendientes", "producto_a_id", "producto_b_id"),):
+            try:
+                c.execute(f"DELETE FROM {tabla} WHERE {col_a} = ? OR {col_b} = ?",
+                          (id_perdedor, id_perdedor))
+            except sqlite3.OperationalError as _err:
+                anotar_error("fusionar_productos", _err)
+                pass
 
-    # Datos que el que queda podría no tener
-    for tabla, columna in (("producto_fotos", "producto_id"), ("historial_precios", "producto_id")):
-        try:
-            c.execute(f"UPDATE {tabla} SET {columna} = ? WHERE {columna} = ?",
-                      (id_ganador, id_perdedor))
-        except sqlite3.OperationalError as _err:
-            anotar_error("fusionar_productos", _err)
-            pass
-    c.execute("""UPDATE productos SET
-                    precio = COALESCE(precio, (SELECT precio FROM productos WHERE id = ?)),
-                    stock = COALESCE(stock, (SELECT stock FROM productos WHERE id = ?)),
-                    descripcion = COALESCE(descripcion, (SELECT descripcion FROM productos WHERE id = ?))
-                 WHERE id = ?""", (id_perdedor, id_perdedor, id_perdedor, id_ganador))
-    c.execute("DELETE FROM productos WHERE id = ?", (id_perdedor,))
+        # Datos que el que queda podría no tener
+        for tabla, columna in (("producto_fotos", "producto_id"), ("historial_precios", "producto_id")):
+            try:
+                c.execute(f"UPDATE {tabla} SET {columna} = ? WHERE {columna} = ?",
+                          (id_ganador, id_perdedor))
+            except sqlite3.OperationalError as _err:
+                anotar_error("fusionar_productos", _err)
+                pass
+        c.execute("""UPDATE productos SET
+                        precio = COALESCE(precio, (SELECT precio FROM productos WHERE id = ?)),
+                        stock = COALESCE(stock, (SELECT stock FROM productos WHERE id = ?)),
+                        descripcion = COALESCE(descripcion, (SELECT descripcion FROM productos WHERE id = ?))
+                     WHERE id = ?""", (id_perdedor, id_perdedor, id_perdedor, id_ganador))
+        c.execute("DELETE FROM productos WHERE id = ?", (id_perdedor,))
     return True
 
 
@@ -3754,7 +3818,9 @@ def fusionar_marcas(marca_origen_id, marca_destino_id):
     fusionan con el que ya estaba, conservando sus equivalencias. Antes esto no se contemplaba
     y la operación entera fallaba con IntegrityError, sin mover nada."""
     movidos = fusionados = 0
-    with db_lock:
+    # Todo o nada: mover miles de productos y borrar la marca vieja es UNA operación. Cortada
+    # en el medio quedaban productos repartidos entre las dos marcas y la vieja todavía viva.
+    with db_lock, transaccion():
         c.execute("SELECT id, codigo_clean FROM productos WHERE marca_id = ?", (marca_origen_id,))
         productos_origen = [(r["id"], r["codigo_clean"]) for r in c.fetchall()]
         for pid, clean in productos_origen:
@@ -3768,7 +3834,6 @@ def fusionar_marcas(marca_origen_id, marca_destino_id):
                 c.execute("UPDATE productos SET marca_id = ? WHERE id = ?", (marca_destino_id, pid))
                 movidos += 1
         c.execute("DELETE FROM marcas WHERE id = ?", (marca_origen_id,))
-        conn.commit()
     return movidos, fusionados
 
 
@@ -4861,7 +4926,9 @@ def rechazar_pendientes_de_producto(producto_id, lote=None):
 
 def aprobar_pendientes(lote, solo_estos_pares=None):
     """Pasa los vínculos pendientes a equivalencias reales."""
-    with db_lock:
+    # Todo o nada: se crean las equivalencias y se borran los pendientes. Cortado en el medio,
+    # o quedan los dos (el pendiente vuelve a aparecer ya aprobado) o ninguno (se perdieron).
+    with db_lock, transaccion():
         if solo_estos_pares is None:
             c.execute("SELECT producto_a_id, producto_b_id FROM equivalencias_pendientes WHERE lote = ?", (lote,))
             pares = [(r["producto_a_id"], r["producto_b_id"]) for r in c.fetchall()]
@@ -4878,7 +4945,6 @@ def aprobar_pendientes(lote, solo_estos_pares=None):
             [(min(a, b), max(a, b), lote) for a, b in pares if a != b]
         )
         c.executemany("DELETE FROM equivalencias_pendientes WHERE producto_a_id = ? AND producto_b_id = ?", pares)
-        conn.commit()
     # Queda registrado que ya se revisó, así la auditoría de lo existente no lo vuelve a marcar
     marcar_revision(pares, "ok")
     return len(pares)
@@ -4911,18 +4977,13 @@ def descartar_candidata(codigo_clean, producto_id):
         conn.commit()
 
 
-    with db_lock:
-        c.execute("INSERT OR REPLACE INTO equivalencias_descartadas "
-                   "(codigo_clean, producto_id, descartado_por) VALUES (?, ?, ?)",
-                   (codigo_clean, producto_id, obtener_usuario_actual()))
-        conn.commit()
-
-
 def confirmar_candidata(codigo_clean, producto_id, codigo_original, marca_para_nuevo=None):
     """Convierte una sugerencia en una equivalencia real. Si el código que pedía el cliente
     todavía no existe como producto (caso típico: un código de fábrica que no tenés cargado),
     lo crea con la marca elegida y recién ahí los vincula."""
-    with db_lock:
+    # Todo o nada: puede crear un producto nuevo, vincularlo y sacar el descarte. Cortado en el
+    # medio deja un producto inventado sin ningún vínculo, que después aparece en las búsquedas.
+    with db_lock, transaccion():
         c.execute("SELECT id FROM productos WHERE codigo_clean = ? LIMIT 1", (codigo_clean,))
         fila = c.fetchone()
         if fila:
@@ -4947,7 +5008,6 @@ def confirmar_candidata(codigo_clean, producto_id, codigo_original, marca_para_n
             )
         c.execute("DELETE FROM equivalencias_descartadas WHERE codigo_clean = ? AND producto_id = ?",
                    (codigo_clean, producto_id))
-        conn.commit()
     return True, None
 
 
@@ -5662,12 +5722,18 @@ def armar_lista_picking(codigos_texto):
     codigos = [x for x in codigos if x]
     if not codigos:
         return []
-    placeholders = ",".join("?" * len(codigos))
-    c.execute(f'''SELECT p.codigo_raw AS "Codigo", p.descripcion AS "Descripcion", m.nombre AS "Marca",
-                  p.ubicacion AS "Ubicación", p.stock AS "Stock"
-                  FROM productos p JOIN marcas m ON m.id = p.marca_id
-                  WHERE p.codigo_clean IN ({placeholders})''', codigos)
-    resultado = filas_a_listas(c)
+    # Por tandas y no todos de una: el pedido lo pega la persona, así que la cantidad de
+    # códigos no tiene tope. Con una lista de 5.000 renglones (un pedido mensual exportado
+    # del sistema del cliente) la consulta pedía 5.000 variables y en un SQLite compilado con
+    # el tope habitual de 999 se cae con «too many SQL variables», justo en la pantalla que
+    # se usa con el pedido ya armado. Probado: falla a los 999 y anda por tandas.
+    resultado = []
+    for tanda, marcadores in en_tandas(codigos):
+        c.execute(f'''SELECT p.codigo_raw AS "Codigo", p.descripcion AS "Descripcion", m.nombre AS "Marca",
+                      p.ubicacion AS "Ubicación", p.stock AS "Stock"
+                      FROM productos p JOIN marcas m ON m.id = p.marca_id
+                      WHERE p.codigo_clean IN ({marcadores})''', tanda)
+        resultado.extend(filas_a_listas(c))
     resultado.sort(key=lambda r: (not r["Ubicación"], r["Ubicación"] or ""))
     return resultado
 
@@ -5753,7 +5819,9 @@ def deshacer_importacion(lote, borrar_pendientes=True):
     es la parte peligrosa —los vínculos falsos— y eso es reversible sin perder trabajo."""
     if not lote:
         return 0, 0
-    with db_lock:
+    # Todo o nada: los vínculos y los pendientes de la misma lista se van juntos. Si se borran
+    # los vínculos y quedan los pendientes, la lista deshecha vuelve a aparecer para aprobar.
+    with db_lock, transaccion():
         c.execute("SELECT producto_a_id, producto_b_id FROM equivalencias WHERE lote = ?", (lote,))
         pares = [(r["producto_a_id"], r["producto_b_id"]) for r in c.fetchall()]
         c.execute("DELETE FROM equivalencias WHERE lote = ?", (lote,))
@@ -5762,7 +5830,6 @@ def deshacer_importacion(lote, borrar_pendientes=True):
         if borrar_pendientes:
             c.execute("DELETE FROM equivalencias_pendientes WHERE lote = ?", (lote,))
             pend = c.rowcount
-        conn.commit()
     # Queda registrado el rechazo para que una reimportación de la misma lista no los reviva.
     # OJO con el valor: tiene que ser exactamente "rechazada" — es el que busca pares_rechazados().
     # Escrito de cualquier otra forma se guarda igual y no filtra nada, y encima en silencio.
@@ -6222,11 +6289,14 @@ def borrar_puente(producto_oem_id):
     dejarlo suelto sin vínculos solo ensucia la búsqueda por código. Los productos de los
     proveedores no se tocan — lo único que se pierde es la relación falsa entre ellos."""
     try:
-        c.execute("DELETE FROM equivalencias WHERE producto_a_id = ? OR producto_b_id = ?",
-                  (producto_oem_id, producto_oem_id))
-        borrados = c.rowcount
-        c.execute("DELETE FROM productos WHERE id = ? AND marca_id IN "
-                  "(SELECT id FROM marcas WHERE tipo = 'OEM')", (producto_oem_id,))
+        # Todo o nada: si se borran los vínculos pero no el producto OEM, queda un código de
+        # fábrica falso suelto en el catálogo, que es exactamente lo que se quería sacar.
+        with transaccion():
+            c.execute("DELETE FROM equivalencias WHERE producto_a_id = ? OR producto_b_id = ?",
+                      (producto_oem_id, producto_oem_id))
+            borrados = c.rowcount
+            c.execute("DELETE FROM productos WHERE id = ? AND marca_id IN "
+                      "(SELECT id FROM marcas WHERE tipo = 'OEM')", (producto_oem_id,))
         return borrados
     except sqlite3.OperationalError as _err:
         anotar_error("borrar_puente", _err)
@@ -7946,6 +8016,28 @@ PALABRAS_NO_MODELO = {
 }
 
 
+def version_del_catalogo():
+    """Testigo de caché del catálogo de vehículos. Cambia cuando cambia lo que se lee de él.
+
+    El catálogo por vehículo se deduce de las DESCRIPCIONES, así que tiene que recalcularse
+    cuando una descripción cambia, no solo cuando aparecen productos nuevos. Antes el testigo
+    era COUNT(*) a secas y eso dejaba afuera el caso más común: correr «reparar descripciones
+    pegadas» reescribe miles de descripciones sin mover el contador ni un número, así que la
+    pantalla seguía mostrando los modelos viejos hasta reiniciar la app. Lo mismo al borrar
+    una lista e importar otra del mismo tamaño.
+
+    SUM(LENGTH(...)) recorre la tabla entera: 11 ms con 61.574 productos, unos 20 ms con
+    108.000. Es una vez por dibujado de UNA pantalla, contra un caché que evita releer todas
+    las descripciones palabra por palabra."""
+    try:
+        c.execute("SELECT COUNT(*), COALESCE(SUM(LENGTH(COALESCE(descripcion, ''))), 0) FROM productos")
+        fila = c.fetchone()
+        return (fila[0], fila[1])
+    except sqlite3.OperationalError as _err:
+        anotar_error("version_del_catalogo", _err)
+        return (0, 0)
+
+
 @st.cache_data(show_spinner=False, max_entries=20)
 def modelos_de_marca(marca_vehiculo, _version, minimo=2):
     """Arma la lista de modelos de una marca leyendo el catálogo.
@@ -8045,6 +8137,13 @@ def marcas_vehiculo_disponibles(_version):
 
 # Familias de repuestos. Gana la palabra clave MÁS LARGA que aparezca en la descripción, así
 # "BOMBA DE AGUA" (refrigeración) le gana a "BOMBA" y "BOMBA DE ACEITE" no cae en el mismo lado.
+# Medido sobre las 61.574 descripciones reales de las listas: con esta tabla como estaba, el
+# 40% del catálogo (25.112 productos) quedaba en «Sin clasificar». Importa más de lo que
+# parece: puentes_sospechosos() —el que detecta un código falso que fusionó dos familias de
+# repuestos— descarta a propósito los «Sin clasificar», así que estaba decidiendo con menos de
+# dos tercios de la evidencia. Con las claves de abajo y el arreglo del punto en
+# _normalizar_desc(), el sin clasificar baja al 17% (10.502): 14.610 productos rescatados y
+# ninguno perdido.
 FAMILIAS_REPUESTO = {
     "Filtros": [
         "FILTRO DE ACEITE", "FILTRO DE AIRE", "FILTRO DE COMBUSTIBLE", "FILTRO DE NAFTA",
@@ -8055,7 +8154,7 @@ FAMILIAS_REPUESTO = {
         "PASTILLA DE FRENO", "PASTILLAS DE FRENO", "DISCO DE FRENO", "CAMPANA DE FRENO",
         "CILINDRO DE FRENO", "BOMBA DE FRENO", "ZAPATA DE FRENO", "CABLE DE FRENO",
         "LATIGUILLO", "SERVOFRENO", "PASTILLA", "PASTILLAS", "ZAPATA", "ZAPATAS", "CALIPER",
-        "MORDAZA", "CAMPANA", "FRENO", "FRENOS", "ABS",
+        "MORDAZA", "CAMPANA", "TUBO DE FRENO", "MANGUERA DE FRENO", "FRENO", "FRENOS", "ABS",
     ],
     "Suspensión": [
         "AMORTIGUADOR", "ESPIRAL", "ELASTICO", "ROTULA", "BIELETA", "BARRA ESTABILIZADORA",
@@ -8075,7 +8174,7 @@ FAMILIAS_REPUESTO = {
     "Embrague": [
         "DISCO DE EMBRAGUE", "PLATO DE EMBRAGUE", "PLACA DE EMBRAGUE", "KIT DE EMBRAGUE",
         "COLLARIN", "RULEMAN DE EMPUJE", "CILINDRO DE EMBRAGUE", "BOMBA DE EMBRAGUE",
-        "CABLE DE EMBRAGUE", "EMBRAGUE", "VOLANTE MOTOR",
+        "CABLE DE EMBRAGUE", "EMBRAGUE", "VOLANTE MOTOR", "ACTUADOR HIDRAULICO",
     ],
     "Caja y diferencial": [
         "CAJA DE VELOCIDAD", "CORONA Y PINON", "SINCRONIZADO", "DIFERENCIAL", "SATELITE",
@@ -8089,11 +8188,17 @@ FAMILIAS_REPUESTO = {
     "Refrigeración": [
         "BOMBA DE AGUA", "RADIADOR", "TERMOSTATO", "ELECTROVENTILADOR", "TAPA DE RADIADOR",
         "MANGUERA DE RADIADOR", "INTERCOOLER", "DEPOSITO DE AGUA", "REFRIGERACION",
-        "VENTILADOR",
+        "VENTILADOR", "COOLER", "BIDON",
+    ],
+    # «Caño» no es un accesorio ni parte del radiador: es una familia entera de este catálogo
+    # (1.340 productos, casi todos de Cauplas) y va de agua a gasoil a gases de escape. Antes
+    # caían todos en «Sin clasificar», que es lo que ciega al detector de puentes falsos.
+    "Caños y mangueras": [
+        "CANO", "TUBO", "MANGUERA",
     ],
     "Lubricación": [
         "BOMBA DE ACEITE", "CARTER", "ENFRIADOR DE ACEITE", "VARILLA DE ACEITE",
-        "TAPA DE VALVULAS", "MALLA DE ACEITE",
+        "TAPA DE VALVULAS", "MALLA DE ACEITE", "TAPA ACEITE", "TAPA DE ACEITE",
     ],
     "Motor - interno": [
         "PISTON", "PISTONES", "ARO DE PISTON", "AROS", "COJINETE", "BIELA", "CIGUENAL",
@@ -8106,22 +8211,29 @@ FAMILIAS_REPUESTO = {
         # «JTA T.C.» no caían en ninguna familia y se colaban en cualquier búsqueda.
         "JGO DE MOTOR", "JUEGO DE MOTOR", "JGO MOTOR", "JGO DE JUNTAS", "JGO JUNTAS",
         "JTA T C", "JTA TC", "JTA DE TAPA", "JTA TAPA", "JTA",
+        "JGO JTAS", "JGO JUNTAS", "JGO CAJA", "JTAS",
         "JUNTA DE TAPA", "JUNTA TAPA", "JUEGO DE JUNTAS", "JUNTA HOMOCINETICA", "RETEN",
         "RETENES", "JUNTA", "JUNTAS", "ORING", "O-RING", "EMPAQUETADURA", "SELLO",
     ],
     "Combustible": [
         "BOMBA DE NAFTA", "BOMBA DE COMBUSTIBLE", "INYECTOR", "CARBURADOR", "RIEL DE INYECCION",
         "REGULADOR DE PRESION", "TANQUE DE COMBUSTIBLE", "AFORADOR", "INYECCION",
+        "CUERPO MARIPOSA", "CUERPO DE ACELERACION", "CPO ACEL", "MARIPOSA", "SURTIDOR",
+        "BOMBA DE ALTA", "BOMBA ALTA", "BOMBA ELECTRICA", "REGULADOR PRES",
     ],
     "Escape": [
-        "CANO DE ESCAPE", "SILENCIADOR", "CATALIZADOR", "SONDA LAMBDA", "MULTIPLE DE ESCAPE",
-        "ESCAPE",
+        # «TUBO DE ESCAPE» está por el cliente, no por el catálogo: en el mostrador lo piden
+        # así, y sin la clave larga ganaba «TUBO» y el pedido caía en Caños y mangueras.
+        "CANO DE ESCAPE", "TUBO DE ESCAPE", "TUBO ESCAPE", "SILENCIADOR", "CATALIZADOR",
+        "SONDA LAMBDA", "MULTIPLE DE ESCAPE", "ESCAPE",
     ],
     "Eléctrico y encendido": [
         "CABLE DE BUJIA", "BUJIA", "BUJIAS", "BOBINA DE ENCENDIDO", "ALTERNADOR",
         "MOTOR DE ARRANQUE", "BURRO DE ARRANQUE", "BATERIA", "REGULADOR DE VOLTAJE",
         "DISTRIBUIDOR", "PLATINO", "SENSOR", "MODULO", "RELE", "FUSIBLE", "BOBINA",
-        "CAPUCHON DE BUJIA",
+        "CAPUCHON DE BUJIA", "BULBO", "INTERRUPTOR", "INTERRUP", "LLAVE TECLA",
+        "LLAVE CONMUTAD", "CONMUTADOR", "MOTOR PASO", "MOTORES DE ARRANQUE", "CAPTOR",
+        "SOLENOIDE", "PORTAFUSIBLE", "BALIZA",
     ],
     "Rodamientos y mazas": [
         "RULEMAN DE RUEDA", "MAZA DE RUEDA", "CUBO DE RUEDA", "RODAMIENTO", "RULEMAN",
@@ -8129,7 +8241,7 @@ FAMILIAS_REPUESTO = {
     ],
     "Climatización": [
         "COMPRESOR DE AIRE", "CONDENSADOR", "EVAPORADOR", "AIRE ACONDICIONADO",
-        "FILTRO DE POLEN", "CALEFACCION",
+        "FILTRO DE POLEN", "CALEFACCION", "TUBO CALEFACTOR", "TUBO CALEFAC", "CALEFACTOR",
     ],
     "Soportes y bujes": [
         "SOPORTE DE MOTOR", "SOPORTE DE CAJA", "BUJE", "BUJES", "TACO DE MOTOR", "SOPORTE",
@@ -8146,8 +8258,15 @@ FAMILIAS_REPUESTO = {
 
 
 def _normalizar_desc(texto):
-    """Mayúsculas, sin acentos y con espacios simples, para poder comparar contra las claves."""
-    return " " + " ".join(normalizar_texto(str(texto or "")).replace("-", " ").split()) + " "
+    """Mayúsculas, sin acentos y con espacios simples, para poder comparar contra las claves.
+
+    Los separadores se cambian por espacio, no solo el guión. Faltaba el PUNTO y era caro:
+    los proveedores abrevian pegado —«JTA.TAPA CIL.», «Jgo.Jtas.P/Motor», «Cpo.Acel.»— así que
+    la clave «JTA TAPA», que alguien había agregado justamente para esto, no coincidía nunca.
+    Medido sobre las 61.574 descripciones reales: 1.332 productos decían «JTA.TAPA CIL.» y
+    ninguno caía en Juntas y retenes."""
+    limpio = re.sub(r"[-./,;:()]", " ", normalizar_texto(str(texto or "")))
+    return " " + " ".join(limpio.split()) + " "
 
 
 def clasificar_repuesto(descripcion):
@@ -8494,12 +8613,7 @@ def aplicaciones_desde_descripciones(limite=400):
 
     # El mismo testigo de caché que usa la pantalla de repuestos por vehículo: cambia al cargar
     # una lista nueva, así los modelos se recalculan cuando el catálogo creció.
-    try:
-        c.execute("SELECT COUNT(*) FROM productos")
-        _version_cat = c.fetchone()[0]
-    except sqlite3.OperationalError as _err:
-        anotar_error("aplicaciones_desde_descripciones", _err)
-        _version_cat = 0
+    _version_cat = version_del_catalogo()
 
     modelos_por_marca = {}
     salida = []
@@ -9587,7 +9701,7 @@ def _mostrar_repuestos_del_auto(r, marca, modelo, anio, clave):
         st.markdown("#### 🎯 Ya se le puso a ESTE auto")
         st.caption("Certeza total: alguien lo instaló y quedó registrado en la ficha.")
         st.dataframe([{k: v for k, v in f.items() if not k.startswith("_")}
-                       for f in r["de_este_auto"]], use_container_width=True, hide_index=True)
+                       for f in r["de_este_auto"]], width="stretch", hide_index=True)
 
     if r["de_otros_iguales"]:
         st.markdown("#### 🔁 Se le puso a otros autos del mismo modelo")
@@ -9595,7 +9709,7 @@ def _mostrar_repuestos_del_auto(r, marca, modelo, anio, clave):
             "Evidencia real de tu mostrador: estos códigos se instalaron en autos iguales. "
             "«Autos» es en cuántos distintos — mientras más, más confiable."
         )
-        st.dataframe(r["de_otros_iguales"], use_container_width=True, hide_index=True)
+        st.dataframe(r["de_otros_iguales"], width="stretch", hide_index=True)
 
     if r.get("del_fabricante"):
         st.markdown(f"#### 🏭 Según el catálogo del fabricante ({len(r['del_fabricante'])})")
@@ -9605,7 +9719,7 @@ def _mostrar_repuestos_del_auto(r, marca, modelo, anio, clave):
             "Es lo más confiable después de lo que ya le pusiste vos. La columna «En tu catálogo» "
             "dice si ese código está cargado en tus listas."
         )
-        st.dataframe(r["del_fabricante"], use_container_width=True, hide_index=True)
+        st.dataframe(r["del_fabricante"], width="stretch", hide_index=True)
 
     if r["del_catalogo"]:
         total = r.get("total_catalogo", len(r["del_catalogo"]))
@@ -9645,7 +9759,7 @@ def _mostrar_repuestos_del_auto(r, marca, modelo, anio, clave):
                      if all(pal in normalizar_texto(f"{f['Código']} {f['Descripcion']}")
                             for pal in palabras)]
         st.caption(f"Mostrando {len(filas)} de {len(r['del_catalogo'])}.")
-        st.dataframe(quitar_id(filas), use_container_width=True, hide_index=True)
+        st.dataframe(quitar_id(filas), width="stretch", hide_index=True)
         st.download_button(
             "⬇️ Bajar estos códigos en Excel",
             data=to_excel_bytes(quitar_id(filas)),
@@ -10109,7 +10223,9 @@ def actualizar_precio_stock(producto_id, precio, stock, costo=None):
 
     El costo va como parámetro opcional para que las llamadas viejas sigan funcionando: hay
     varias en la app y cambiarlas todas de golpe es pedir un error tonto."""
-    with db_lock:
+    # Todo o nada: el precio nuevo y su renglón en el historial van juntos. Si se guarda uno
+    # sin el otro, el historial deja de servir justo para lo que está: saber cuándo subió.
+    with db_lock, transaccion():
         c.execute("SELECT precio FROM productos WHERE id = ?", (producto_id,))
         fila = c.fetchone()
         precio_anterior = fila["precio"] if fila else None
@@ -10121,7 +10237,6 @@ def actualizar_precio_stock(producto_id, precio, stock, costo=None):
         # (evita ensuciar el historial cada vez que se toca el stock sin tocar el precio).
         if precio_anterior != precio:
             c.execute("INSERT INTO historial_precios (producto_id, precio) VALUES (?, ?)", (producto_id, precio))
-        conn.commit()
 
 
 def historial_precio_producto(producto_id, limite=50):
@@ -10872,11 +10987,13 @@ def eliminar_marca_con_papelera(nombre_marca):
         equivalencias_rows = [dict(r) for r in c.fetchall()]
 
     snapshot = {"marca": dict(marca_row), "productos": productos_rows, "equivalencias": equivalencias_rows}
-    mover_a_papelera("marca", snapshot)
-
-    with db_lock:
-        c.execute("DELETE FROM marcas WHERE id = ?", (marca_id,))
-        conn.commit()
+    # Todo o nada: la copia en la papelera y el borrado de la marca. Si se guarda la copia y
+    # el borrado falla, la marca aparece duplicada al restaurarla; si se borra sin copia, no
+    # hay vuelta atrás de la operación más destructiva de la app.
+    with transaccion():
+        mover_a_papelera("marca", snapshot)
+        with db_lock:
+            c.execute("DELETE FROM marcas WHERE id = ?", (marca_id,))
     return True
 
 
@@ -10938,43 +11055,47 @@ def restaurar_de_papelera(item_id):
     tipo, datos = row["tipo"], json.loads(row["datos_json"])
     with db_lock:
         try:
-            if tipo == "combo":
-                for item in datos["items"]:
-                    c.execute("INSERT INTO combos_sugeridos (disparador, item) VALUES (?, ?)",
-                              (datos["disparador"], item))
-            elif tipo == "alias":
-                c.execute(
-                    "INSERT INTO alias_transferencia (nombre, alias, cbu, titular) VALUES (?, ?, ?, ?)",
-                    (datos["nombre"], datos["alias"], datos["cbu"], datos["titular"])
-                )
-            elif tipo == "producto":
-                columnas = ", ".join(datos.keys())
-                placeholders = ", ".join("?" * len(datos))
-                c.execute(f"INSERT INTO productos ({columnas}) VALUES ({placeholders})", list(datos.values()))
-            elif tipo == "marca":
-                marca = datos["marca"]
-                columnas_marca = ", ".join(marca.keys())
-                placeholders_marca = ", ".join("?" * len(marca))
-                c.execute(f"INSERT INTO marcas ({columnas_marca}) VALUES ({placeholders_marca})",
-                          list(marca.values()))
-                for producto in datos["productos"]:
-                    columnas_p = ", ".join(producto.keys())
-                    placeholders_p = ", ".join("?" * len(producto))
-                    c.execute(f"INSERT INTO productos ({columnas_p}) VALUES ({placeholders_p})",
-                              list(producto.values()))
-                for equiv in datos["equivalencias"]:
-                    columnas_e = ", ".join(equiv.keys())
-                    placeholders_e = ", ".join("?" * len(equiv))
-                    c.execute(f"INSERT INTO equivalencias ({columnas_e}) VALUES ({placeholders_e})",
-                              list(equiv.values()))
-            else:
-                return False, f"No sé cómo restaurar el tipo '{tipo}'."
-            c.execute("DELETE FROM papelera WHERE id = ?", (item_id,))
-            conn.commit()
+            # Todo o nada. Restaurar una marca son tres altas encadenadas —la marca, sus miles
+            # de productos y sus equivalencias— más el borrado del renglón de la papelera.
+            # Cortado en el medio quedaba media marca restaurada y la papelera todavía llena,
+            # así que el segundo intento chocaba contra lo que ya estaba. El except de abajo
+            # llamaba a conn.rollback() creyendo que deshacía: en autocommit no deshace nada.
+            with transaccion():
+                if tipo == "combo":
+                    for item in datos["items"]:
+                        c.execute("INSERT INTO combos_sugeridos (disparador, item) VALUES (?, ?)",
+                                  (datos["disparador"], item))
+                elif tipo == "alias":
+                    c.execute(
+                        "INSERT INTO alias_transferencia (nombre, alias, cbu, titular) VALUES (?, ?, ?, ?)",
+                        (datos["nombre"], datos["alias"], datos["cbu"], datos["titular"])
+                    )
+                elif tipo == "producto":
+                    columnas = ", ".join(datos.keys())
+                    placeholders = ", ".join("?" * len(datos))
+                    c.execute(f"INSERT INTO productos ({columnas}) VALUES ({placeholders})", list(datos.values()))
+                elif tipo == "marca":
+                    marca = datos["marca"]
+                    columnas_marca = ", ".join(marca.keys())
+                    placeholders_marca = ", ".join("?" * len(marca))
+                    c.execute(f"INSERT INTO marcas ({columnas_marca}) VALUES ({placeholders_marca})",
+                              list(marca.values()))
+                    for producto in datos["productos"]:
+                        columnas_p = ", ".join(producto.keys())
+                        placeholders_p = ", ".join("?" * len(producto))
+                        c.execute(f"INSERT INTO productos ({columnas_p}) VALUES ({placeholders_p})",
+                                  list(producto.values()))
+                    for equiv in datos["equivalencias"]:
+                        columnas_e = ", ".join(equiv.keys())
+                        placeholders_e = ", ".join("?" * len(equiv))
+                        c.execute(f"INSERT INTO equivalencias ({columnas_e}) VALUES ({placeholders_e})",
+                                  list(equiv.values()))
+                else:
+                    return False, f"No sé cómo restaurar el tipo '{tipo}'."
+                c.execute("DELETE FROM papelera WHERE id = ?", (item_id,))
             return True, None
         except Exception as e:
             anotar_error("restaurar_de_papelera", e)
-            conn.rollback()
             return False, f"No se pudo restaurar: {e}"
 
 
@@ -11850,26 +11971,28 @@ def aprender_modelo_de_vin(vin, modelo, marca="", motor=""):
     origen = f"aprendido de una ficha de vehículo{f' ({marca.strip()})' if marca.strip() else ''}"
     aprendido = {"modelo": False, "motor": False}
 
-    if modelo:
-        c.execute("SELECT 1 FROM modelos_vin WHERE wmi = ? AND vds IN (?, ?, ?)",
-                  (wmi, vds, vds[:4], vds[:3]))
-        if not c.fetchone():
-            with db_lock:
-                c.execute("INSERT OR IGNORE INTO modelos_vin (wmi, vds, modelo, motor, notas) "
-                          "VALUES (?, ?, ?, ?, ?)",
-                          (wmi, vds, modelo, motor or None, origen))
-                conn.commit()
-            aprendido["modelo"] = True
+    # Todo o nada: lo que se aprende de UNA ficha entra junto. Si entra el modelo y no el motor,
+    # la próxima vez que aparezca ese VIN ya no se pregunta —el patrón de modelo existe— y el
+    # motor no se aprende nunca más.
+    with transaccion():
+        if modelo:
+            c.execute("SELECT 1 FROM modelos_vin WHERE wmi = ? AND vds IN (?, ?, ?)",
+                      (wmi, vds, vds[:4], vds[:3]))
+            if not c.fetchone():
+                with db_lock:
+                    c.execute("INSERT OR IGNORE INTO modelos_vin (wmi, vds, modelo, motor, notas) "
+                              "VALUES (?, ?, ?, ?, ?)",
+                              (wmi, vds, modelo, motor or None, origen))
+                aprendido["modelo"] = True
 
-    if motor:
-        codigo = vin[7]
-        c.execute("SELECT 1 FROM motores_vin WHERE wmi = ? AND codigo = ?", (wmi, codigo))
-        if not c.fetchone():
-            with db_lock:
-                c.execute("INSERT OR IGNORE INTO motores_vin (wmi, codigo, motor, notas) "
-                          "VALUES (?, ?, ?, ?)", (wmi, codigo, motor, origen))
-                conn.commit()
-            aprendido["motor"] = True
+        if motor:
+            codigo = vin[7]
+            c.execute("SELECT 1 FROM motores_vin WHERE wmi = ? AND codigo = ?", (wmi, codigo))
+            if not c.fetchone():
+                with db_lock:
+                    c.execute("INSERT OR IGNORE INTO motores_vin (wmi, codigo, motor, notas) "
+                              "VALUES (?, ?, ?, ?)", (wmi, codigo, motor, origen))
+                aprendido["motor"] = True
     return aprendido
 
 
@@ -12699,7 +12822,8 @@ def agregar_foto_producto(producto_id, imagen_bytes, origen="subida", fuente=Non
     else:
         data_uri = "data:image/jpeg;base64," + base64.b64encode(comprimida).decode("ascii")
 
-    with db_lock:
+    # Todo o nada: se guarda la foto y, si es la primera, pasa a ser la de la ficha.
+    with db_lock, transaccion():
         c.execute("""INSERT INTO producto_fotos (producto_id, imagen_data, firma_blob, estado,
                                                  origen, fuente, firma_version)
                      VALUES (?, ?, ?, ?, ?, ?, ?)""",
@@ -12713,7 +12837,6 @@ def agregar_foto_producto(producto_id, imagen_bytes, origen="subida", fuente=Non
         if hacer_principal:
             c.execute("UPDATE productos SET imagen_url = ?, imagen_thumb = ?, imagen_orb_estado = ? "
                       "WHERE id = ?", (data_uri, thumb, estado, producto_id))
-        conn.commit()
     return id_foto, estado
 
 
@@ -12730,7 +12853,8 @@ def eliminar_foto_producto(id_foto):
     if not fila:
         return False
     producto_id, data = fila["producto_id"], fila["imagen_data"]
-    with db_lock:
+    # Todo o nada: borrar la foto y elegir con cuál se reemplaza en la ficha es lo mismo.
+    with db_lock, transaccion():
         c.execute("DELETE FROM producto_fotos WHERE id = ?", (id_foto,))
         c.execute("SELECT imagen_url FROM productos WHERE id = ?", (producto_id,))
         actual = c.fetchone()
@@ -12746,7 +12870,6 @@ def eliminar_foto_producto(id_foto):
             else:
                 c.execute("UPDATE productos SET imagen_url = NULL, imagen_thumb = NULL, "
                           "imagen_orb_estado = NULL WHERE id = ?", (producto_id,))
-        conn.commit()
     return True
 
 
@@ -12909,11 +13032,12 @@ def actualizar_imagen_producto(producto_id, imagen_bytes, origen="subida", fuent
 
 def eliminar_imagen_producto(producto_id):
     """Saca TODAS las fotos del producto."""
-    with db_lock:
+    # Todo o nada: si se borran las fotos y la ficha queda apuntando a una que ya no está,
+    # el buscador muestra el hueco de una imagen rota.
+    with db_lock, transaccion():
         c.execute("DELETE FROM producto_fotos WHERE producto_id = ?", (producto_id,))
         c.execute("UPDATE productos SET imagen_url = NULL, imagen_thumb = NULL, imagen_orb_blob = NULL, "
                    "imagen_orb_estado = NULL WHERE id = ?", (producto_id,))
-        conn.commit()
 
 
 def imagenes_de_una_direccion(url, maximo=8):
@@ -12996,14 +13120,16 @@ def migrar_imagenes_pendientes(limite=400):
         try:
             datos = base64.b64decode(fila["imagen_url"].split(",", 1)[1])
             firma, estado = calcular_firma_visual(datos)
-            with db_lock:
+            # Todo o nada: pasar la foto a la tabla y marcarle el estado al producto. El paso 1
+            # se saltea lo que ya está en producto_fotos, así que una foto migrada a medias no
+            # vuelve a pasar por acá nunca más.
+            with db_lock, transaccion():
                 c.execute("""INSERT INTO producto_fotos (producto_id, imagen_data, firma_blob, estado,
                                                          origen, firma_version)
                              VALUES (?, ?, ?, ?, 'migrada', ?)""",
                           (fila["id"], fila["imagen_url"], firma, estado,
                            FIRMA_VERSION if firma else None))
                 c.execute("UPDATE productos SET imagen_orb_estado = ? WHERE id = ?", (estado, fila["id"]))
-                conn.commit()
             resumen["migradas"] += 1
             resumen["listas" if estado == "ok" else ("sin_detalle" if estado == "sin_detalle" else "error")] += 1
         except Exception as _err:
@@ -14360,7 +14486,7 @@ Casi todo lo que edita o borra algo pide la contraseña de administrador la prim
                     if res_barra:
                         st.success(f"✅ {len(res_barra)} coincidencia(s) — es una coincidencia "
                                     "exacta de código, no un parecido:")
-                        st.dataframe(quitar_id(res_barra), use_container_width=True,
+                        st.dataframe(quitar_id(res_barra), width="stretch",
                                       hide_index=True)
                     else:
                         st.warning(
@@ -14373,7 +14499,7 @@ Casi todo lo que edita o borra algo pide la contraseña de administrador la prim
                                 [{"Código": x["Codigo"], "Marca": x["Marca"],
                                   "Descripción": x["Descripcion"], "Stock": x["Stock"]}
                                  for x in parecidos_barra],
-                                use_container_width=True, hide_index=True)
+                                width="stretch", hide_index=True)
                         ajeno_barra = identificar_codigo_ajeno(sanitizar(cod_barra))
                         if ajeno_barra:
                             st.info(f"🏭 Según el catálogo de {ajeno_barra['marca']}, es "
@@ -14489,7 +14615,7 @@ Casi todo lo que edita o borra algo pide la contraseña de administrador la prim
                     filas_img = st.columns(min(len(encontradas), 4))
                     for idx, (url_img, datos_img) in enumerate(encontradas[:8]):
                         with filas_img[idx % len(filas_img)]:
-                            st.image(datos_img, use_container_width=True)
+                            st.image(datos_img, width="stretch")
                             if st.button("Usar esta", key=f"usar_img_url_{idx}"):
                                 st.session_state["foto_url_elegida"] = idx
                                 st.rerun()
@@ -14551,7 +14677,7 @@ Casi todo lo que edita o borra algo pide la contraseña de administrador la prim
                         res_ocr = buscar_por_codigo(sanitizar(cod_leido))
                         if res_ocr:
                             st.success(f"✅ Está en tu catálogo — {len(res_ocr)} coincidencia(s):")
-                            st.dataframe(quitar_id(res_ocr), use_container_width=True, hide_index=True)
+                            st.dataframe(quitar_id(res_ocr), width="stretch", hide_index=True)
                             st.caption("Esto es una coincidencia exacta de código, no un parecido.")
                         else:
                             # El OCR se come una letra seguido: es exactamente el caso que
@@ -14567,7 +14693,7 @@ Casi todo lo que edita o borra algo pide la contraseña de administrador la prim
                                     [{"Código": x["Codigo"], "Marca": x["Marca"],
                                       "Descripción": x["Descripcion"], "Precio": x["Precio"],
                                       "Stock": x["Stock"]} for x in parecidos_ocr],
-                                    use_container_width=True, hide_index=True
+                                    width="stretch", hide_index=True
                                 )
                             else:
                                 st.info(f"«{cod_leido}» no figura en tu catálogo ni se parece a nada "
@@ -14603,7 +14729,7 @@ Casi todo lo que edita o borra algo pide la contraseña de administrador la prim
                         "Detalles que coinciden": r["Coincidencias"],
                         "Precio": r["Precio"], "Stock": r["Stock"],
                     })
-                st.dataframe(filas_visual, use_container_width=True, hide_index=True)
+                st.dataframe(filas_visual, width="stretch", hide_index=True)
                 explicar(
                     "«Detalles que coinciden» son los puntos de la pieza que además dieron geométricamente "
                     "coherentes entre las dos fotos:",
@@ -14834,7 +14960,7 @@ Casi todo lo que edita o borra algo pide la contraseña de administrador la prim
                             mostrar.append(visible)
                         mostrar = quitar_id(mostrar)
                         st.dataframe(
-                            mostrar, use_container_width=True, hide_index=True,
+                            mostrar, width="stretch", hide_index=True,
                             column_config={
                                 "Imagen": st.column_config.ImageColumn("Imagen", width="small"),
                                 "Ficha": st.column_config.LinkColumn("Ficha", display_text="Ver en proveedor ↗")
@@ -14869,7 +14995,7 @@ Casi todo lo que edita o borra algo pide la contraseña de administrador la prim
                                     else:
                                         st.info(motivo)
                                 st.caption("Todos los autos para los que el fabricante da este código:")
-                                st.dataframe(autos_cod, use_container_width=True, hide_index=True)
+                                st.dataframe(autos_cod, width="stretch", hide_index=True)
 
                         # Los avisos de calidad van DESPUÉS de la tabla, y agrupados en un solo
                         # desplegable. Antes iban arriba: dos alertas rojas y el explorador de
@@ -15014,7 +15140,7 @@ Casi todo lo que edita o borra algo pide la contraseña de administrador la prim
                                             con_stock = any((r.get("Stock") or 0) > 0 for r in res_item)
                                             if not con_stock:
                                                 st.error(f"⚠️ Tenés '{item}' cargado pero SIN STOCK en ningún proveedor.")
-                                            st.dataframe(quitar_id(res_item), use_container_width=True, hide_index=True)
+                                            st.dataframe(quitar_id(res_item), width="stretch", hide_index=True)
                                         else:
                                             st.error(f"⚠️ No tenés '{item}' cargado en la base — vas a necesitar pedirlo.")
 
@@ -15102,7 +15228,7 @@ Casi todo lo que edita o borra algo pide la contraseña de administrador la prim
                                 if st.session_state.get(f"mostrar_hist_{fila['ID']}"):
                                     historial_p = historial_precio_producto(fila["ID"])
                                     if historial_p:
-                                        st.dataframe(historial_p, use_container_width=True, hide_index=True)
+                                        st.dataframe(historial_p, width="stretch", hide_index=True)
                                     else:
                                         st.caption("Todavía no hay cambios de precio registrados para este producto.")
 
@@ -15117,7 +15243,7 @@ Casi todo lo que edita o borra algo pide la contraseña de administrador la prim
                             for col, cat in zip(columnas_catalogos, catalogos):
                                 with col:
                                     st.link_button(f"🌐 {cat['nombre']}", cat["url"],
-                                                    use_container_width=True, key=f"link_{cat['id']}_{clean}")
+                                                    width="stretch", key=f"link_{cat['id']}_{clean}")
                     else:
                         st.warning("No hay ningún producto con ese código exacto.")
 
@@ -15139,7 +15265,7 @@ Casi todo lo que edita o borra algo pide la contraseña de administrador la prim
                             )
                             _res_nuevo = buscar_por_codigo(_ultimo["clean"])
                             if _res_nuevo:
-                                st.dataframe(quitar_id(_res_nuevo), use_container_width=True,
+                                st.dataframe(quitar_id(_res_nuevo), width="stretch",
                                               hide_index=True)
                             else:
                                 st.caption("Tampoco tenés cargado el código nuevo.")
@@ -15165,7 +15291,7 @@ Casi todo lo que edita o borra algo pide la contraseña de administrador la prim
                                           "Motor": a["motor"],
                                           "Años": f"{a['anio_desde'] or ''}-{a['anio_hasta'] or ''}"}
                                          for a in ajeno["autos"]],
-                                        use_container_width=True, hide_index=True
+                                        width="stretch", hide_index=True
                                     )
                             reemplazos = equivalentes_para_los_mismos_autos(clean)
                             if reemplazos:
@@ -15173,7 +15299,7 @@ Casi todo lo que edita o borra algo pide la contraseña de administrador la prim
                                     f"✅ **Tenés {len(reemplazos)} repuesto(s) que sirven para los "
                                     "mismos autos**, según el catálogo de sus propios fabricantes:"
                                 )
-                                st.dataframe(reemplazos, use_container_width=True, hide_index=True)
+                                st.dataframe(reemplazos, width="stretch", hide_index=True)
                                 st.caption(
                                     "Los que tienen stock van primero. Confirmá con el cliente "
                                     "el modelo y el año antes de cerrar: el catálogo dice a qué "
@@ -15194,7 +15320,7 @@ Casi todo lo que edita o borra algo pide la contraseña de administrador la prim
                                   "Stock": t["Stock"],
                                   "Diferencia": "1 carácter" if t["_dist"] == 1 else "2 caracteres"}
                                  for t in tipeos],
-                                use_container_width=True, hide_index=True
+                                width="stretch", hide_index=True
                             )
 
                         # Familias de códigos: pedís "TC-421" y en la base están "TC-421-15",
@@ -15216,7 +15342,7 @@ Casi todo lo que edita o borra algo pide la contraseña de administrador la prim
                                         st.caption(p["Descripcion"])
                                     if equivalentes_p:
                                         st.dataframe(quitar_id(equivalentes_p),
-                                                      use_container_width=True, hide_index=True)
+                                                      width="stretch", hide_index=True)
                                     else:
                                         st.caption("Todavía no tiene equivalencias cargadas.")
                                     st.button("🔎 Abrir este código como búsqueda",
@@ -15279,7 +15405,7 @@ Casi todo lo que edita o borra algo pide la contraseña de administrador la prim
             texto_pedido = busqueda_texto_guardada["texto"]
             if res_texto:
                 st.success(f"Se encontraron {len(res_texto)} coincidencia(s):")
-                st.dataframe(quitar_id(res_texto), use_container_width=True, hide_index=True)
+                st.dataframe(quitar_id(res_texto), width="stretch", hide_index=True)
                 mostrar_lista_clickeable(
                     res_texto, "txt_click", limite=15,
                     nota="👆 Tocá cualquier código para abrirlo con todas sus equivalencias:"
@@ -15305,7 +15431,7 @@ Casi todo lo que edita o borra algo pide la contraseña de administrador la prim
                                           if candidatos_precio else None)
                             for f in equivalentes:
                                 f["💰"] = "🏆 Más barato en stock" if f["ID"] == id_barato else ""
-                            st.dataframe(quitar_id(equivalentes), use_container_width=True, hide_index=True)
+                            st.dataframe(quitar_id(equivalentes), width="stretch", hide_index=True)
                         else:
                             st.caption("Este producto todavía no tiene equivalencias cargadas.")
 
@@ -15457,7 +15583,7 @@ Casi todo lo que edita o borra algo pide la contraseña de administrador la prim
                         pedido["cilindrada"])
                     if alternativas:
                         st.success(f"Esto es lo que tenés que puede servir ({len(alternativas)}):")
-                        st.dataframe(quitar_id(alternativas), use_container_width=True,
+                        st.dataframe(quitar_id(alternativas), width="stretch",
                                       hide_index=True)
                         st.caption("Con stock primero. Confirmá el modelo y el año antes de cerrar.")
                     elif pedido["marca_auto"]:
@@ -15470,7 +15596,7 @@ Casi todo lo que edita o borra algo pide la contraseña de administrador la prim
                                 f"sí {len(sin_familia)} repuesto(s) de otros rubros:"
                             )
                             st.dataframe(quitar_id(sin_familia[:20]),
-                                          use_container_width=True, hide_index=True)
+                                          width="stretch", hide_index=True)
 
     with st.expander("📦 Armar pedido (ordenado por ubicación en depósito)"):
         st.caption(
@@ -15489,7 +15615,7 @@ Casi todo lo que edita o borra algo pide la contraseña de administrador la prim
                 if res_picking:
                     sin_ubicacion = [r for r in res_picking if not r["Ubicación"]]
                     st.success(f"Se encontraron {len(res_picking)} de los códigos pedidos:")
-                    st.dataframe(res_picking, use_container_width=True, hide_index=True)
+                    st.dataframe(res_picking, width="stretch", hide_index=True)
                     if sin_ubicacion:
                         st.caption(
                             f"⚠️ {len(sin_ubicacion)} producto(s) todavía no tienen ubicación cargada "
@@ -15553,7 +15679,7 @@ Casi todo lo que edita o borra algo pide la contraseña de administrador la prim
             )
             if res_medidas:
                 st.success(f"Se encontraron {len(res_medidas)} pieza(s) con medidas compatibles:")
-                st.dataframe(quitar_id(res_medidas), use_container_width=True, hide_index=True)
+                st.dataframe(quitar_id(res_medidas), width="stretch", hide_index=True)
             else:
                 st.warning(
                     "Sin resultados. Puede ser que no haya piezas con esas medidas cargadas todavía — "
@@ -15612,7 +15738,7 @@ Casi todo lo que edita o borra algo pide la contraseña de administrador la prim
                             "Esto es un match exacto por código, con las equivalencias que ya tenés "
                             "cargadas — no es una suposición de la IA."
                         )
-                        st.dataframe(quitar_id(res_foto), use_container_width=True, hide_index=True)
+                        st.dataframe(quitar_id(res_foto), width="stretch", hide_index=True)
                     else:
                         st.info(
                             f"El código `{codigo_detectado}` no coincide con nada cargado — puede que la "
@@ -15662,7 +15788,7 @@ Casi todo lo que edita o borra algo pide la contraseña de administrador la prim
                                     "Encontré 1 coincidencia por palabras clave — tampoco está confirmada, "
                                     "revisala antes de vender."
                                 )
-                            st.dataframe(quitar_id(res_tipo)[:15], use_container_width=True, hide_index=True)
+                            st.dataframe(quitar_id(res_tipo)[:15], width="stretch", hide_index=True)
                             if len(res_tipo) > 15:
                                 st.caption(f"Mostrando las primeras 15 de {len(res_tipo)} coincidencias.")
                         else:
@@ -15673,7 +15799,7 @@ Casi todo lo que edita o borra algo pide la contraseña de administrador la prim
         st.caption("🕘 Búsquedas recientes:")
         cols_hist = st.columns(min(len(historial), 5))
         for i, termino in enumerate(historial[:5]):
-            if cols_hist[i % 5].button(termino, key=f"sugerencia_hist_{i}_{termino}", use_container_width=True):
+            if cols_hist[i % 5].button(termino, key=f"sugerencia_hist_{i}_{termino}", width="stretch"):
                 st.session_state["sugerencia_busqueda"] = termino
                 st.rerun()
 
@@ -15686,7 +15812,7 @@ Casi todo lo que edita o borra algo pide la contraseña de administrador la prim
                 if colf2.button("🔍", key=f"sugerencia_fav_{fila_fav['ID']}"):
                     st.session_state["sugerencia_busqueda"] = fila_fav.get("Codigo") or ""
                     st.rerun()
-            st.dataframe(quitar_id(favoritos), use_container_width=True, hide_index=True)
+            st.dataframe(quitar_id(favoritos), width="stretch", hide_index=True)
 
 # ============================================================
 # VINCULAR MANUAL
@@ -15972,7 +16098,7 @@ if pagina == PAGINAS[2]:
             preview_filas = todas_filas[header_row:header_row + 6]
 
             st.write("Vista previa (primeras filas detectadas):")
-            st.dataframe(preview_filas, use_container_width=True)
+            st.dataframe(preview_filas, width="stretch")
 
             if len(encabezado) < 1:
                 st.error("El archivo no tiene ninguna columna con datos.")
@@ -16117,7 +16243,7 @@ if pagina == PAGINAS[2]:
                             "Diagnóstico": estado + (f" — {motivo}" if motivo else ""),
                             "Ejemplos del archivo": " · ".join(diag[clave][:3]) or "(vacío)",
                         })
-                    st.dataframe(resumen, use_container_width=True, hide_index=True)
+                    st.dataframe(resumen, width="stretch", hide_index=True)
 
                     d1, d2, d3 = cols(3)
                     d1.metric("Filas que entran", diag["ok"])
@@ -16249,7 +16375,7 @@ if pagina == PAGINAS[2]:
                             break
                     if muestras:
                         st.caption("Así quedaría (muestra de las primeras filas) — revisá antes de importar:")
-                        st.dataframe(muestras, use_container_width=True, hide_index=True)
+                        st.dataframe(muestras, width="stretch", hide_index=True)
                     else:
                         st.caption("En las primeras filas no encontré códigos dentro de la descripción.")
                 elif buscar_oem_en_desc and idx_desc is None:
@@ -16582,7 +16708,7 @@ if pagina == PAGINAS[2]:
                             "el cambio no parece un aumento sino un error de la lista. El producto se "
                             "cargó igual; lo único que no se tocó es el precio."
                         )
-                        st.dataframe(precios_frenados[:100], use_container_width=True, hide_index=True,
+                        st.dataframe(precios_frenados[:100], width="stretch", hide_index=True,
                                       column_config={"_id": None})
                         st.download_button(
                             "⬇️ Bajar la lista completa de precios frenados",
@@ -16627,7 +16753,7 @@ if pagina == PAGINAS[2]:
                         )
                     if omitidos:
                         st.warning(f"Se omitieron {omitidos} filas porque no tenían código de proveedor.")
-                        st.dataframe(filas_omitidas, use_container_width=True)
+                        st.dataframe(filas_omitidas, width="stretch")
                         st.download_button(
                             "⬇️ Descargar filas omitidas",
                             data=to_excel_bytes(filas_omitidas),
@@ -16647,7 +16773,7 @@ if pagina == PAGINAS[2]:
                             f"⚠️ Encontré {len(sospechosos)} par(es) de códigos muy parecidos dentro de "
                             f"'{nombre_prov}' — podrían ser errores de tipeo. Revisalos:"
                         )
-                        st.dataframe(sospechosos, use_container_width=True, hide_index=True)
+                        st.dataframe(sospechosos, width="stretch", hide_index=True)
                 except Exception as e:
                     anotar_error("nivel principal", e)
                     st.error(f"Error procesando la lista: {e}")
@@ -16682,7 +16808,7 @@ if pagina == PAGINAS[2]:
             st.success(f"Se leyeron {len(items_actuales)} ítem(s) — {len(coinciden)} coinciden con tu catálogo.")
             st.dataframe(
                 [{k: v for k, v in i.items() if not k.startswith("_")} for i in items_actuales],
-                use_container_width=True, hide_index=True
+                width="stretch", hide_index=True
             )
             if no_coinciden:
                 st.caption(
@@ -16749,7 +16875,7 @@ if pagina == PAGINAS[3]:
         else:
             tabla_marcas = [{"Marca": m["nombre"], "Tipo": m["tipo"], "Productos cargados": m["productos"]}
                              for m in marcas_info]
-            st.dataframe(tabla_marcas, use_container_width=True, hide_index=True)
+            st.dataframe(tabla_marcas, width="stretch", hide_index=True)
 
             st.markdown("---")
             st.markdown("**🔗 Link a la ficha del proveedor (en vez de guardar la foto)**")
@@ -16793,7 +16919,7 @@ if pagina == PAGINAS[3]:
                     "mismos códigos son el mismo proveedor, aunque se llamen distinto. Ese caso "
                     "no lo agarra ningún chequeo por nombre."
                 )
-                st.dataframe(quitar_id(duplicadas), use_container_width=True, hide_index=True)
+                st.dataframe(quitar_id(duplicadas), width="stretch", hide_index=True)
                 st.caption(
                     "Fusionalas abajo, poniendo como origen la que quieras eliminar. Los "
                     "productos que existan en las dos se juntan conservando precio, stock y "
@@ -16906,7 +17032,7 @@ if pagina == PAGINAS[3]:
                     st.dataframe(
                         [{k: v for k, v in f.items() if not k.startswith("_")}
                          for f in _deduc[:50]],
-                        use_container_width=True, hide_index=True)
+                        width="stretch", hide_index=True)
                     if st.button("✅ Completar esas medidas", type="primary",
                                   key="btn_aplicar_medidas_desc"):
                         _n = aplicar_medidas_deducidas(_deduc)
@@ -16922,7 +17048,7 @@ if pagina == PAGINAS[3]:
                 if clean_admin:
                     res_admin = buscar_por_codigo(clean_admin)
             if res_admin:
-                st.dataframe(res_admin, use_container_width=True, hide_index=True)
+                st.dataframe(res_admin, width="stretch", hide_index=True)
                 st.caption(
                     "¿Necesitás borrar un producto? Está en '🧹 Mantenimiento' → separado a propósito "
                     "de la edición, para que un descuido acá no borre nada."
@@ -17025,7 +17151,7 @@ if pagina == PAGINAS[3]:
                     columnas_fotos = st.columns(min(len(fotos_actuales), 4))
                     for idx_f, foto in enumerate(fotos_actuales):
                         with columnas_fotos[idx_f % len(columnas_fotos)]:
-                            st.image(foto["imagen_data"], use_container_width=True)
+                            st.image(foto["imagen_data"], width="stretch")
                             st.caption(etiquetas_estado.get(foto["estado"], "⚪ sin procesar"))
                             if st.button("🗑️", key=f"del_foto_{foto['id']}", help="Borrar esta foto"):
                                 eliminar_foto_producto(foto["id"])
@@ -17087,7 +17213,7 @@ if pagina == PAGINAS[3]:
                         cols_ph = st.columns(min(len(halladas), 4))
                         for idx_h, (url_h, datos_h) in enumerate(halladas[:8]):
                             with cols_ph[idx_h % len(cols_ph)]:
-                                st.image(datos_h, use_container_width=True)
+                                st.image(datos_h, width="stretch")
                                 if st.button("💾 Guardar", key=f"guardar_foto_url_{idx_h}"):
                                     _, est_h = agregar_foto_producto(
                                         id_medidas, datos_h, origen="url", fuente=url_h
@@ -17196,7 +17322,7 @@ if pagina == PAGINAS[3]:
             st.dataframe(
                 [{k: v for k, v in a.items() if k not in ("ID", "TieneQrReal")} | {"QR real": "✅" if a["TieneQrReal"] else "—"}
                  for a in alias_cargados],
-                use_container_width=True, hide_index=True
+                width="stretch", hide_index=True
             )
 
         opciones_alias_edit = ["➕ Nuevo alias..."] + [f"{a['Nombre']} (editar)" for a in alias_cargados]
@@ -17256,7 +17382,7 @@ if pagina == PAGINAS[3]:
         if combos_actuales:
             st.dataframe(
                 [{"Disparador": c_["disparador"], "Ítems sugeridos": ", ".join(c_["items"])} for c_ in combos_actuales],
-                use_container_width=True, hide_index=True
+                width="stretch", hide_index=True
             )
         disparador_edit = st.text_input(
             "Disparador (palabra/frase que aparece en la descripción del producto):",
@@ -17348,7 +17474,7 @@ if pagina == PAGINAS[3]:
                     "Mirá la columna «Marcas distintas»: un repuesto real se vincula con unas pocas "
                     "marcas. Uno que toca 20 marcas distintas casi nunca es legítimo."
                 )
-                st.dataframe(puentes, use_container_width=True, hide_index=True)
+                st.dataframe(puentes, width="stretch", hide_index=True)
                 st.caption(
                     "Si alguno de estos está bien —hay repuestos que legítimamente equivalen a "
                     "decenas—, aprobalo y deja de aparecer acá y en el aviso del buscador."
@@ -17380,7 +17506,7 @@ if pagina == PAGINAS[3]:
                                   ORDER BY pa.fecha DESC""")
                     lista_ap = filas_a_listas(c)
                     with st.expander(f"✅ Códigos puente aprobados ({len(lista_ap)})"):
-                        st.dataframe(quitar_id(lista_ap), use_container_width=True, hide_index=True)
+                        st.dataframe(quitar_id(lista_ap), width="stretch", hide_index=True)
                         quitar_ap = st.text_input("Código a desaprobar (volver a vigilarlo):",
                                                    key="cod_desaprobar").strip()
                         if quitar_ap and st.button("↩️ Volver a vigilarlo"):
@@ -17443,7 +17569,7 @@ if pagina == PAGINAS[3]:
                     else:
                         st.warning(f"⚠️ {len(uniones)} vínculo(s) sostienen la unión de dos grupos. "
                                     "Los más equilibrados y de menor confianza van primero.")
-                        st.dataframe(quitar_id(uniones), use_container_width=True, hide_index=True)
+                        st.dataframe(quitar_id(uniones), width="stretch", hide_index=True)
                         etiquetas_u = {
                             f"{u['Código A']} ↔ {u['Código B']} (separa {u['Separa']}, "
                             f"confianza {u['Confianza del vínculo']})": (u["_a"], u["_b"])
@@ -17478,7 +17604,7 @@ if pagina == PAGINAS[3]:
                         f"⚠️ De {revisadas:,} vínculos revisados, **{len(dudosas)} tienen evidencia en "
                         "contra**. Están ordenados de peor a mejor, con el motivo al lado."
                     )
-                    st.dataframe(quitar_id(dudosas), use_container_width=True, hide_index=True)
+                    st.dataframe(quitar_id(dudosas), width="stretch", hide_index=True)
                     st.download_button(
                         "⬇️ Bajarlos en Excel antes de decidir",
                         data=to_excel_bytes(quitar_id(dudosas)),
@@ -17526,7 +17652,7 @@ if pagina == PAGINAS[3]:
             incoherentes = precios_incoherentes_entre_equivalentes(int(factor_precio))
             if incoherentes:
                 st.warning(f"⚠️ {len(incoherentes)} par(es) de equivalentes con precios muy distintos.")
-                st.dataframe(quitar_id(incoherentes), use_container_width=True, hide_index=True)
+                st.dataframe(quitar_id(incoherentes), width="stretch", hide_index=True)
                 st.download_button(
                     "⬇️ Bajar la lista en Excel",
                     data=to_excel_bytes(quitar_id(incoherentes)),
@@ -17552,7 +17678,7 @@ if pagina == PAGINAS[3]:
                 st.warning(f"⚠️ Hay {cantidad_basura} producto(s) con un código así.")
                 muestra_basura = listar_codigos_basura(limite=200)
                 with st.expander(f"👀 Ver los primeros {len(muestra_basura)} antes de borrar"):
-                    st.dataframe(muestra_basura, use_container_width=True, hide_index=True)
+                    st.dataframe(muestra_basura, width="stretch", hide_index=True)
                     st.download_button(
                         "⬇️ Descargar la lista completa",
                         data=to_excel_bytes(listar_codigos_basura(limite=100000)),
@@ -17678,7 +17804,7 @@ if pagina == PAGINAS[3]:
                 )
             else:
                 sin_vincular = [x for x in sustituciones if not x["_ya"]]
-                st.dataframe(quitar_id(sustituciones), use_container_width=True, hide_index=True)
+                st.dataframe(quitar_id(sustituciones), width="stretch", hide_index=True)
                 if sin_vincular:
                     st.warning(
                         f"⚠️ {len(sin_vincular)} de estas sustituciones **todavía no están cargadas "
@@ -17724,7 +17850,7 @@ if pagina == PAGINAS[3]:
                         "Aprobaste": f"{d['tasa_ok']*100:.0f}%",
                         "Efecto en los vínculos nuevos": efecto,
                     })
-                st.dataframe(filas_patron, use_container_width=True, hide_index=True)
+                st.dataframe(filas_patron, width="stretch", hide_index=True)
                 st.caption(
                     "Si algún patrón no te cierra, corregilo revisando algunos vínculos de esa "
                     "combinación al revés: la app se reajusta sola con las decisiones nuevas."
@@ -17748,7 +17874,7 @@ if pagina == PAGINAS[3]:
                 anotar_error("nivel principal", _err)
                 ya_cargadas = []
             if ya_cargadas:
-                st.dataframe(ya_cargadas, use_container_width=True, hide_index=True)
+                st.dataframe(ya_cargadas, width="stretch", hide_index=True)
 
             arch_aplic = subir_archivo("Catálogo de aplicaciones (.pdf o .xlsx):",
                                         ["pdf", "xlsx", "csv"], "aplicaciones")
@@ -17797,7 +17923,7 @@ if pagina == PAGINAS[3]:
                         st.success(f"Se reconocieron {len(apps):,} aplicaciones de "
                                    f"{len(marcas_detectadas)} marca(s) de auto.")
                         st.caption("Revisá esta muestra antes de guardar:")
-                        st.dataframe(apps[:40], use_container_width=True, hide_index=True)
+                        st.dataframe(apps[:40], width="stretch", hide_index=True)
                     elif arch_aplic:
                         st.warning(
                             "No reconocí aplicaciones en ese archivo. Esta lectura espera la forma "
@@ -17867,7 +17993,7 @@ if pagina == PAGINAS[3]:
                 {"Método": "🧾 Confirmadas por venta",
                  "Qué necesita": "usar «Se llevó» en el mostrador",
                  "Estado": "corre solo, una vez por día"},
-            ], use_container_width=True, hide_index=True)
+            ], width="stretch", hide_index=True)
             st.caption("Cada método está en un panel más abajo. Todos mandan a revisión: "
                        "ninguno carga equivalencias directo.")
             st.markdown("---")
@@ -17900,7 +18026,7 @@ if pagina == PAGINAS[3]:
                     )
                 else:
                     st.success(f"{len(_dm)} par(es) con las mismas medidas.")
-                    st.dataframe(quitar_id(_dm), use_container_width=True, hide_index=True)
+                    st.dataframe(quitar_id(_dm), width="stretch", hide_index=True)
                     if st.button(f"📥 Mandar las {len(_dm)} a revisión", key="env_med"):
                         _n = guardar_equivalencias_derivadas(
                             [(x["_a"], x["_b"]) for x in _dm],
@@ -17931,7 +18057,7 @@ if pagina == PAGINAS[3]:
                 )
             else:
                 st.success(f"{len(_pu)} par(es) que el cambio de número había separado.")
-                st.dataframe(quitar_id(_pu), use_container_width=True, hide_index=True)
+                st.dataframe(quitar_id(_pu), width="stretch", hide_index=True)
                 if st.button(f"📥 Mandar los {len(_pu)} a revisión", key="env_puente"):
                     _n = guardar_equivalencias_derivadas(
                         [(x["_a"], x["_b"]) for x in _pu],
@@ -18091,7 +18217,7 @@ if pagina == PAGINAS[3]:
                         )
                     else:
                         st.success(f"Se encontraron {len(_dd)} posibles equivalencias.")
-                        st.dataframe(quitar_id(_dd), use_container_width=True, hide_index=True)
+                        st.dataframe(quitar_id(_dd), width="stretch", hide_index=True)
                         st.caption(
                             "Mirá la columna «Por qué» antes de mandarlas: dice exactamente en "
                             "qué coinciden. Si ves algo que no cierra, avisame y ajusto el criterio."
@@ -18128,7 +18254,7 @@ if pagina == PAGINAS[3]:
                         )
                     else:
                         st.success(f"Se dedujeron {len(derivadas)} equivalencia(s) posibles.")
-                        st.dataframe(quitar_id(derivadas), use_container_width=True, hide_index=True)
+                        st.dataframe(quitar_id(derivadas), width="stretch", hide_index=True)
                         st.caption(
                             "No se cargan directo: van a la cola de revisión, donde el análisis de "
                             "confianza las evalúa como a cualquier otra. Por buena que sea la "
@@ -18190,7 +18316,7 @@ if pagina == PAGINAS[3]:
                         )
                     st.dataframe([{k: v for k, v in f.items() if not k.startswith("_")}
                                   for f in _filas_sc],
-                                 use_container_width=True, hide_index=True)
+                                 width="stretch", hide_index=True)
             st.markdown("---")
 
             st.markdown("**🧠 Buscar equivalencias en TODO el catálogo de una**")
@@ -18221,7 +18347,7 @@ if pagina == PAGINAS[3]:
                     st.success(f"**{len(_st_todas)} par(es) propuestos** entre marcas distintas.")
                     st.dataframe([{k: v for k, v in x.items() if not k.startswith("_")}
                                   for x in _st_todas],
-                                 use_container_width=True, hide_index=True)
+                                 width="stretch", hide_index=True)
                     _pares_t = []
                     for x in _st_todas:
                         _pares_t.extend([(x["_a"], x["_b"]), (x["_b"], x["_a"])])
@@ -18343,14 +18469,14 @@ if pagina == PAGINAS[3]:
                             st.dataframe(
                                 [{"Código": cod, "Qué pasó": err}
                                  for cod, err in _ec["fallidas"][:30]],
-                                use_container_width=True, hide_index=True)
+                                width="stretch", hide_index=True)
                     else:
                         st.success(f"Se encontraron **{len(_ec['propuestas'])} equivalencia(s)** "
                                    "publicadas en las fichas.")
                         st.dataframe(
                             [{k: v for k, v in x.items() if not k.startswith("_")}
                              for x in _ec["propuestas"][:100]],
-                            use_container_width=True, hide_index=True)
+                            width="stretch", hide_index=True)
                         if st.button(f"📥 Mandar las {len(_ec['propuestas'])} a revisión",
                                       type="primary", key="btn_equiv_catalogo_guardar"):
                             _n = guardar_equivalencias_de_catalogo(_ec["propuestas"], _ec["marca"])
@@ -18370,7 +18496,7 @@ if pagina == PAGINAS[3]:
             )
             importaciones = listar_importaciones_deshacibles()
             if importaciones:
-                st.dataframe(quitar_id(importaciones), use_container_width=True, hide_index=True)
+                st.dataframe(quitar_id(importaciones), width="stretch", hide_index=True)
                 etiquetas_imp = {
                     f"{i['Marca']} · {i['Archivo']} · {i['Fecha']} "
                     f"({i['Vínculos vivos']} vivos, {i['Sin revisar']} sin revisar)": i["_lote"]
@@ -18640,7 +18766,7 @@ if pagina == PAGINAS[3]:
                     st.warning(f"⚠️ Se encontraron {total_problemas} problema(s) en total.")
                 st.dataframe(
                     [r for r in reporte_salud],
-                    use_container_width=True, hide_index=True,
+                    width="stretch", hide_index=True,
                     column_config={"Problemas": st.column_config.NumberColumn(
                         "Problemas", help="0 está bien; más de 0 conviene revisarlo"
                     )}
@@ -18702,7 +18828,7 @@ if pagina == PAGINAS[3]:
                 )
                 usuarios_actuales = listar_usuarios()
                 if usuarios_actuales:
-                    st.dataframe(usuarios_actuales, use_container_width=True, hide_index=True)
+                    st.dataframe(usuarios_actuales, width="stretch", hide_index=True)
 
                 cu1, cu2 = st.columns(2)
                 nombre_nuevo_usuario = cu1.text_input("Nombre:", key="nuevo_usuario_nombre")
@@ -18750,7 +18876,7 @@ if pagina == PAGINAS[3]:
                 )
                 mecanicos_actuales = listar_mecanicos()
                 if mecanicos_actuales:
-                    st.dataframe(mecanicos_actuales, use_container_width=True, hide_index=True)
+                    st.dataframe(mecanicos_actuales, width="stretch", hide_index=True)
 
                 cm1, cm2 = st.columns(2)
                 nombre_nuevo_mecanico = cm1.text_input("Nombre:", key="nuevo_mecanico_nombre")
@@ -18830,7 +18956,7 @@ if pagina == PAGINAS[4]:
         )
         uso_ia_actual = resumen_uso_ia()
         if uso_ia_actual:
-            st.dataframe(uso_ia_actual, use_container_width=True, hide_index=True)
+            st.dataframe(uso_ia_actual, width="stretch", hide_index=True)
         else:
             st.caption("Todavía no se usó ninguna función de IA.")
 
@@ -18841,7 +18967,7 @@ if pagina == PAGINAS[4]:
                      ORDER BY fecha DESC LIMIT 20""")
         imports = filas_a_listas(c)
         if imports:
-            st.dataframe(imports, use_container_width=True, hide_index=True)
+            st.dataframe(imports, width="stretch", hide_index=True)
         else:
             st.caption("Todavía no se registraron importaciones.")
 
@@ -19094,7 +19220,7 @@ Administrar → Mantenimiento.
         )
         matriz = calcular_matriz_abc()
         if matriz:
-            st.dataframe(quitar_id(matriz), use_container_width=True, hide_index=True)
+            st.dataframe(quitar_id(matriz), width="stretch", hide_index=True)
             st.caption("Para cargar o corregir la ubicación de un producto, andá a la pestaña 'Administrar'.")
         else:
             st.caption("Todavía no hay suficientes búsquedas registradas para armar la matriz.")
@@ -19104,7 +19230,7 @@ Administrar → Mantenimiento.
         st.caption("Qué te están pidiendo los clientes que todavía no tenés cargado.")
         fallidas = listar_busquedas_sin_resultado()
         if fallidas:
-            st.dataframe(fallidas, use_container_width=True, hide_index=True)
+            st.dataframe(fallidas, width="stretch", hide_index=True)
         else:
             st.caption("Sin registros todavía.")
 
@@ -19140,7 +19266,7 @@ Administrar → Mantenimiento.
             sin_stock = [x for x in por_quebrar if x["Stock"] <= 0]
             if sin_stock:
                 st.error(f"🔴 {len(sin_stock)} producto(s) que se venden seguido están **en cero**.")
-            st.dataframe(quitar_id(por_quebrar), use_container_width=True, hide_index=True)
+            st.dataframe(quitar_id(por_quebrar), width="stretch", hide_index=True)
             etiquetas_q = {f"{x['Código']} ({x['Marca']}) — {x['Se acaba en']}": x["_id"]
                            for x in por_quebrar}
             elegidos_q = st.multiselect("Marcar para pedir:", list(etiquetas_q.keys()),
@@ -19178,7 +19304,7 @@ Administrar → Mantenimiento.
                 "distintos para poder comparar. Aparece solo a medida que vas cargando listas."
             )
         else:
-            st.dataframe(quitar_id(variacion), use_container_width=True, hide_index=True)
+            st.dataframe(quitar_id(variacion), width="stretch", hide_index=True)
             st.caption("Ordenado de mayor a menor aumento.")
 
         st.markdown("---")
@@ -19201,7 +19327,7 @@ Administrar → Mantenimiento.
                 "y con precio cargado en los dos."
             )
         else:
-            st.dataframe(quitar_id(conviene), use_container_width=True, hide_index=True)
+            st.dataframe(quitar_id(conviene), width="stretch", hide_index=True)
 
         st.markdown("---")
         st.markdown("**🧊 Clavos: lo que no se mueve**")
@@ -19231,7 +19357,7 @@ Administrar → Mantenimiento.
             st.warning(f"⚠️ {len(_clavos)} producto(s) con **${_plata:,.0f}** inmovilizados.")
             st.dataframe(quitar_id([{k: v for k, v in x.items() if not k.startswith("_")}
                                      for x in _clavos]),
-                          use_container_width=True, hide_index=True)
+                          width="stretch", hide_index=True)
             st.caption(
                 "Sirve para decidir una liquidación, o para priorizarlos cuando alguien pide "
                 "un equivalente y tenés varios que sirven igual."
@@ -19271,7 +19397,7 @@ Administrar → Mantenimiento.
             anotar_error("nivel principal", _err)
             _lista_r = []
         if _lista_r:
-            st.dataframe(_lista_r, use_container_width=True, hide_index=True)
+            st.dataframe(_lista_r, width="stretch", hide_index=True)
 
         st.markdown("---")
         st.markdown("**🚫 Puede que ya no se fabriquen**")
@@ -19317,7 +19443,7 @@ Administrar → Mantenimiento.
                 )
             st.dataframe(quitar_id([{k: v for k, v in x.items() if not k.startswith("_")}
                                      for x in discont]),
-                          use_container_width=True, hide_index=True)
+                          width="stretch", hide_index=True)
             st.download_button(
                 "⬇️ Bajar la lista en Excel",
                 data=to_excel_bytes([{k: v for k, v in x.items() if not k.startswith("_")}
@@ -19346,10 +19472,10 @@ Administrar → Mantenimiento.
             _repetidos = _Cnt((e["donde"], e["tipo"]) for e in _ULTIMOS_ERRORES)
             st.dataframe(
                 [{"Veces": v, "Dónde": d, "Tipo": t} for (d, t), v in _repetidos.most_common(15)],
-                use_container_width=True, hide_index=True)
+                width="stretch", hide_index=True)
             if seccion_plegable("Ver el detalle de los últimos", key="detalle_errores"):
                 st.dataframe(list(reversed(_ULTIMOS_ERRORES))[:40],
-                              use_container_width=True, hide_index=True)
+                              width="stretch", hide_index=True)
             st.markdown("---")
 
         st.markdown("**📞 Consultas de clientes**")
@@ -19366,14 +19492,14 @@ Administrar → Mantenimiento.
                 f"📦 **{len(_ahora_hay)} cliente(s) esperando algo que AHORA hay en stock.** "
                 "Es una venta a un llamado de distancia."
             )
-            st.dataframe(quitar_id(_ahora_hay), use_container_width=True, hide_index=True)
+            st.dataframe(quitar_id(_ahora_hay), width="stretch", hide_index=True)
             st.markdown("")
 
         _esperando = consultas_de_clientes()
         if not _esperando:
             st.caption("No hay consultas pendientes.")
         else:
-            st.dataframe(quitar_id(_esperando), use_container_width=True, hide_index=True)
+            st.dataframe(quitar_id(_esperando), width="stretch", hide_index=True)
             _etq_cerr = {f"{x['Cliente'] or x['Teléfono'] or 'sin nombre'} — {x['Pidió']} "
                           f"({x['Días']} día/s)": x["_id"] for x in _esperando}
             _sel_cerr = st.selectbox("Cerrar una consulta:", list(_etq_cerr.keys()),
@@ -19394,7 +19520,7 @@ Administrar → Mantenimiento.
         if _buscar_cli and len(_buscar_cli.strip()) > 2:
             _hist = historial_de_un_cliente(_buscar_cli)
             if _hist:
-                st.dataframe(_hist, use_container_width=True, hide_index=True)
+                st.dataframe(_hist, width="stretch", hide_index=True)
             else:
                 st.caption("No hay nada anotado de ese cliente.")
         st.markdown("---")
@@ -19417,7 +19543,7 @@ Administrar → Mantenimiento.
         if not _reservas:
             st.caption("No hay nada apartado ahora mismo.")
         else:
-            st.dataframe(quitar_id(_reservas), use_container_width=True, hide_index=True)
+            st.dataframe(quitar_id(_reservas), width="stretch", hide_index=True)
             _etq = {f"{r['Código']} ({r['Marca']}) — {r['Apartadas']} u. "
                     f"para {r['Cliente'] or 'sin nombre'}": r["_id"] for r in _reservas}
             _elegida = st.selectbox("Cerrar una reserva:", list(_etq.keys()), key="reserva_cerrar")
@@ -19717,7 +19843,7 @@ Administrar → Mantenimiento.
                     f"🎯 **{len(culpables)} producto(s) con código dudoso generan {total_culpa} "
                     "de estos pendientes.** Resolvelos de una en vez de vínculo por vínculo."
                 )
-                st.dataframe(quitar_id(culpables), use_container_width=True, hide_index=True)
+                st.dataframe(quitar_id(culpables), width="stretch", hide_index=True)
                 etiquetas_culpa = {
                     f"{x['Código']} ({x['Marca']}) — {x['Pendientes que genera']} pendientes": x["_id"]
                     for x in culpables
@@ -19825,7 +19951,7 @@ Administrar → Mantenimiento.
                     st.dataframe(
                         [{"Código A": x["cod_a"], "Marca A": x["marca_a"],
                            "Código B": x["cod_b"], "Marca B": x["marca_b"]} for x in limpias[:500]],
-                        use_container_width=True, hide_index=True
+                        width="stretch", hide_index=True
                     )
                     if len(limpias) > 500:
                         st.caption(f"Se muestran 500 de {len(limpias)}; el botón de aprobar los toma a todos.")
@@ -20024,7 +20150,7 @@ Administrar → Mantenimiento.
                      ORDER BY v.id DESC LIMIT 25""")
         ultimas_ventas = filas_a_listas(c)
         if ultimas_ventas:
-            st.dataframe(ultimas_ventas, use_container_width=True, hide_index=True)
+            st.dataframe(ultimas_ventas, width="stretch", hide_index=True)
         else:
             st.caption("Todavía no se marcó ninguna venta.")
 
@@ -20101,13 +20227,13 @@ if pagina == PAGINAS[5]:
         import urllib.parse
         url_whatsapp = "https://wa.me/?text=" + urllib.parse.quote(mensaje)
         col_wa, col_pdf = st.columns(2)
-        col_wa.link_button("📲 Abrir en WhatsApp", url_whatsapp, type="primary", use_container_width=True)
+        col_wa.link_button("📲 Abrir en WhatsApp", url_whatsapp, type="primary", width="stretch")
         pdf_bytes = pdf_con_cache("cotizacion", generar_pdf_cotizacion, lista, incluir_precio,
                                    incluir_stock, alias_elegido, qr_real_para_pdf)
         col_pdf.download_button(
             "📄 Descargar cotización (PDF)", data=pdf_bytes,
             file_name=f"cotizacion_{datetime.now():%Y%m%d_%H%M}.pdf",
-            mime="application/pdf", use_container_width=True
+            mime="application/pdf", width="stretch"
         )
 
         if st.button("🗑️ Vaciar toda la lista"):
@@ -20304,7 +20430,7 @@ if pagina == PAGINAS[6]:
                 alertas = calcular_alertas_vehiculo(vehiculo["id"], km_actual)
                 if alertas:
                     st.warning(f"⚠️ {len(alertas)} pieza(s) cerca de cumplir su vida útil estimada:")
-                    st.dataframe(alertas, use_container_width=True, hide_index=True)
+                    st.dataframe(alertas, width="stretch", hide_index=True)
                 else:
                     st.info("Sin alertas de mantenimiento por ahora.")
 
@@ -20334,7 +20460,7 @@ if pagina == PAGINAS[6]:
             st.markdown("**📋 Historial completo**")
             historial_vehiculo = listar_historial_vehiculo(vehiculo["id"])
             if historial_vehiculo:
-                st.dataframe(quitar_id(historial_vehiculo), use_container_width=True, hide_index=True)
+                st.dataframe(quitar_id(historial_vehiculo), width="stretch", hide_index=True)
             else:
                 st.caption("Todavía no hay piezas registradas para este vehículo.")
 
@@ -20362,7 +20488,7 @@ if pagina == PAGINAS[6]:
                     atrasadas = [p for p in proyeccion if p["Atraso estimado"] > 0]
                     if atrasadas:
                         st.warning(f"⚠️ {len(atrasadas)} pieza(s) con cambios atrasados según el kilometraje:")
-                    st.dataframe(proyeccion, use_container_width=True, hide_index=True)
+                    st.dataframe(proyeccion, width="stretch", hide_index=True)
                 else:
                     st.caption("Todavía no hay piezas con vida útil cargada para proyectar.")
                     atrasadas = []
@@ -20377,7 +20503,7 @@ if pagina == PAGINAS[6]:
                                         vehiculo, km_calc, alertas, proyeccion, historial_vehiculo),
                     file_name=f"ficha_{vehiculo['patente']}.pdf",
                     mime="application/pdf",
-                    use_container_width=True
+                    width="stretch"
                 )
             with col_wa:
                 if proyeccion and atrasadas:
@@ -20394,7 +20520,7 @@ if pagina == PAGINAS[6]:
                         f"https://wa.me/{tel_limpio}" if tel_limpio else "https://wa.me/"
                     ) + "?text=" + quote(mensaje_wa)
                     st.link_button("📲 Avisar atraso por WhatsApp", url_wa_vehiculo,
-                                    type="primary", use_container_width=True)
+                                    type="primary", width="stretch")
                 else:
                     st.caption("Sin atrasos detectados todavía para avisar por WhatsApp.")
 
@@ -20429,7 +20555,7 @@ if pagina == PAGINAS[7]:
         if codigo_buscar.strip():
             res_dtc = buscar_dtc(codigo_buscar, filtro_fab_dtc)
             if res_dtc:
-                st.dataframe(res_dtc, use_container_width=True, hide_index=True)
+                st.dataframe(res_dtc, width="stretch", hide_index=True)
             else:
                 st.warning("No tengo ese código cargado todavía (con ese filtro de fabricante). Podés agregarlo abajo.")
 
@@ -20495,7 +20621,7 @@ if pagina == PAGINAS[7]:
                     imagen_a_mostrar = imagen_esquema_lista_para_mostrar(
                         img_bytes, firma_de_puntos(puntos), puntos
                     )
-                    st.image(imagen_a_mostrar, use_container_width=True)
+                    st.image(imagen_a_mostrar, width="stretch")
                     if any(p.get("pos_x") is not None for p in puntos):
                         st.caption("Los números marcados en la foto corresponden a la lista de piezas de abajo.")
 
@@ -20513,7 +20639,7 @@ if pagina == PAGINAS[7]:
                                 if not res_punto:
                                     res_punto = buscar_por_texto(punto["nombre_pieza"])
                                 if res_punto:
-                                    st.dataframe(quitar_id(res_punto), use_container_width=True, hide_index=True)
+                                    st.dataframe(quitar_id(res_punto), width="stretch", hide_index=True)
                                 else:
                                     st.error(f"No encontré '{punto['codigo']}' ni '{punto['nombre_pieza']}' en la base.")
                         if es_admin():
@@ -20545,7 +20671,7 @@ if pagina == PAGINAS[7]:
                                 img_bytes,
                                 puntos + [{"numero": num_punto or "?", "pos_x": pos_x_punto, "pos_y": pos_y_punto}]
                             )
-                            st.image(vista_previa, use_container_width=True, caption="Vista previa de dónde quedaría el marcador")
+                            st.image(vista_previa, width="stretch", caption="Vista previa de dónde quedaría el marcador")
                         if st.button("💾 Agregar pieza", key=f"agregar_punto_{esq['id']}"):
                             if not nombre_punto.strip():
                                 st.warning("Completá el nombre de la pieza.")
@@ -20607,7 +20733,7 @@ if pagina == PAGINAS[7]:
                         "Es lo más confiable que hay: no es un catálogo diciendo qué debería "
                         "entrar, es lo que alguien efectivamente le instaló."
                     )
-                    st.dataframe(_todo["historial"], use_container_width=True, hide_index=True)
+                    st.dataframe(_todo["historial"], width="stretch", hide_index=True)
 
                 if _todo["sugeridos"]:
                     st.markdown("**📋 Lo que le entra según marca, modelo y motor**")
@@ -20615,7 +20741,7 @@ if pagina == PAGINAS[7]:
                         f"{len(_todo['sugeridos'])} repuesto(s). Esto sale de los catálogos y "
                         "las descripciones: es más amplio y menos seguro que lo de arriba."
                     )
-                    st.dataframe(_todo["sugeridos"], use_container_width=True, hide_index=True)
+                    st.dataframe(_todo["sugeridos"], width="stretch", hide_index=True)
 
                 if _todo["por_motor"]:
                     st.markdown("**⚙️ Otros autos con el mismo modelo de motor**")
@@ -20623,11 +20749,11 @@ if pagina == PAGINAS[7]:
                         "Si este auto tiene el motor cambiado, esto vale más que la marca y el "
                         "modelo: los repuestos van con el motor, no con la carrocería."
                     )
-                    st.dataframe(_todo["por_motor"], use_container_width=True, hide_index=True)
+                    st.dataframe(_todo["por_motor"], width="stretch", hide_index=True)
 
                 if _todo["consultas"]:
                     st.markdown("**📞 Lo que este cliente preguntó antes**")
-                    st.dataframe(_todo["consultas"], use_container_width=True, hide_index=True)
+                    st.dataframe(_todo["consultas"], width="stretch", hide_index=True)
 
                 if not _todo["historial"] and not _todo["sugeridos"]:
                     st.info(
@@ -20657,7 +20783,7 @@ if pagina == PAGINAS[7]:
                 _ex, _par = buscar_por_numero_motor(_nm)
                 if _ex:
                     st.success(f"✅ {len(_ex)} vehículo(s) con ese número de motor exacto:")
-                    st.dataframe(quitar_id(_ex), use_container_width=True, hide_index=True)
+                    st.dataframe(quitar_id(_ex), width="stretch", hide_index=True)
                     _reps = repuestos_por_numero_motor(_nm)
                     if _reps:
                         st.markdown("**🔧 Lo que se le puso a ese motor:**")
@@ -20665,7 +20791,7 @@ if pagina == PAGINAS[7]:
                             "Esto es lo más confiable que hay: no es un catálogo diciendo qué "
                             "debería entrar, es lo que alguien efectivamente le instaló."
                         )
-                        st.dataframe(_reps, use_container_width=True, hide_index=True)
+                        st.dataframe(_reps, width="stretch", hide_index=True)
                     else:
                         st.caption("Todavía no hay repuestos cargados en la ficha de ese auto.")
                 if _par:
@@ -20679,7 +20805,7 @@ if pagina == PAGINAS[7]:
                             "Algunas salieron de probar lecturas equivocadas comunes —un 0 que "
                             "era una O, un 5 que era una S—. La columna «Por qué» lo aclara."
                         )
-                    st.dataframe(quitar_id(_par), use_container_width=True, hide_index=True)
+                    st.dataframe(quitar_id(_par), width="stretch", hide_index=True)
 
                 if _ex or _par:
                     _fam = autos_con_la_misma_familia_de_motor(_nm)
@@ -20690,7 +20816,7 @@ if pagina == PAGINAS[7]:
                             "esa unidad. Si el modelo es el mismo, los repuestos son los mismos "
                             "aunque sea otro auto."
                         )
-                        st.dataframe(_fam, use_container_width=True, hide_index=True)
+                        st.dataframe(_fam, width="stretch", hide_index=True)
                 if not _ex and not _par:
                     st.warning(
                         "No hay ningún vehículo con ese número de motor. Se carga en la ficha "
@@ -20731,7 +20857,7 @@ if pagina == PAGINAS[7]:
                 "internacional; podés corregir o agregar los que falten."
             )
             if fabricantes_cargados:
-                st.dataframe(fabricantes_cargados, use_container_width=True, hide_index=True)
+                st.dataframe(fabricantes_cargados, width="stretch", hide_index=True)
             with st.form("form_wmi_admin", clear_on_submit=True):
                 cw1, cw2, cw3 = st.columns(3)
                 nuevo_wmi = cw1.text_input("WMI (3 caracteres)", max_chars=3)
@@ -20748,7 +20874,7 @@ if pagina == PAGINAS[7]:
         modelos_cargados = listar_modelos_vin()
         with st.expander(f"🚗 Modelos aprendidos ({len(modelos_cargados)})"):
             if modelos_cargados:
-                st.dataframe(modelos_cargados, use_container_width=True, hide_index=True)
+                st.dataframe(modelos_cargados, width="stretch", hide_index=True)
                 cbm1, cbm2 = st.columns(2)
                 wmi_borrar = cbm1.text_input("WMI a borrar", max_chars=3, key="wmi_borrar_modelo")
                 vds_borrar = cbm2.text_input("Patrón (VDS) a borrar", max_chars=5, key="vds_borrar_modelo")
@@ -20771,7 +20897,7 @@ if pagina == PAGINAS[7]:
                 "sirve para los otros modelos."
             )
             if motores_cargados:
-                st.dataframe(motores_cargados, use_container_width=True, hide_index=True)
+                st.dataframe(motores_cargados, width="stretch", hide_index=True)
                 cbt1, cbt2 = st.columns(2)
                 wmi_bm = cbt1.text_input("WMI a borrar", max_chars=3, key="wmi_borrar_motor")
                 cod_bm = cbt2.text_input("Código (8ª posición)", max_chars=1, key="cod_borrar_motor")
@@ -20792,8 +20918,7 @@ if pagina == PAGINAS[7]:
             "importás un proveedor nuevo."
         )
 
-        c.execute("SELECT COUNT(*) FROM productos")
-        version_catalogo = c.fetchone()[0]   # cambia al cargar listas: refresca el caché
+        version_catalogo = version_del_catalogo()
         disponibles = marcas_vehiculo_disponibles(version_catalogo)
 
         # Guardar lo que dicen las descripciones, en vez de releerlas cada vez. Además de que
@@ -20824,7 +20949,7 @@ if pagina == PAGINAS[7]:
                                "muestra antes de aplicar:")
                     st.dataframe([{k: v for k, v in f.items() if not k.startswith("_")}
                                   for f in _apl[:50]],
-                                 use_container_width=True, hide_index=True)
+                                 width="stretch", hide_index=True)
                     if st.button("✅ Cargar esas aplicaciones", type="primary",
                                   key="btn_aplicar_aplic_desc"):
                         _n = aplicar_aplicaciones_deducidas(_apl)
@@ -21112,7 +21237,7 @@ if pagina == PAGINAS[7]:
                             st.session_state["esq_preview_ia"] = img_ia
                             st.rerun()
                 if st.session_state.get("esq_preview_ia"):
-                    st.image(st.session_state["esq_preview_ia"], use_container_width=True,
+                    st.image(st.session_state["esq_preview_ia"], width="stretch",
                               caption="Vista previa — orientativo, no es una foto real")
                     imagen_generada_bytes = st.session_state["esq_preview_ia"]
 

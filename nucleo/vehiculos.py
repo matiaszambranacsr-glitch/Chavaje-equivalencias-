@@ -120,6 +120,13 @@ def separar_por_marca_vehiculo(descripcion):
 
 # Familias de repuestos. Gana la palabra clave MÁS LARGA que aparezca en la descripción, así
 # "BOMBA DE AGUA" (refrigeración) le gana a "BOMBA" y "BOMBA DE ACEITE" no cae en el mismo lado.
+# Medido sobre las 61.574 descripciones reales de las listas: con esta tabla como estaba, el
+# 40% del catálogo (25.112 productos) quedaba en «Sin clasificar». Importa más de lo que
+# parece: puentes_sospechosos() —el que detecta un código falso que fusionó dos familias de
+# repuestos— descarta a propósito los «Sin clasificar», así que estaba decidiendo con menos de
+# dos tercios de la evidencia. Con las claves de abajo y el arreglo del punto en
+# _normalizar_desc(), el sin clasificar baja al 17% (10.502): 14.610 productos rescatados y
+# ninguno perdido.
 FAMILIAS_REPUESTO = {
     "Filtros": [
         "FILTRO DE ACEITE", "FILTRO DE AIRE", "FILTRO DE COMBUSTIBLE", "FILTRO DE NAFTA",
@@ -130,7 +137,7 @@ FAMILIAS_REPUESTO = {
         "PASTILLA DE FRENO", "PASTILLAS DE FRENO", "DISCO DE FRENO", "CAMPANA DE FRENO",
         "CILINDRO DE FRENO", "BOMBA DE FRENO", "ZAPATA DE FRENO", "CABLE DE FRENO",
         "LATIGUILLO", "SERVOFRENO", "PASTILLA", "PASTILLAS", "ZAPATA", "ZAPATAS", "CALIPER",
-        "MORDAZA", "CAMPANA", "FRENO", "FRENOS", "ABS",
+        "MORDAZA", "CAMPANA", "TUBO DE FRENO", "MANGUERA DE FRENO", "FRENO", "FRENOS", "ABS",
     ],
     "Suspensión": [
         "AMORTIGUADOR", "ESPIRAL", "ELASTICO", "ROTULA", "BIELETA", "BARRA ESTABILIZADORA",
@@ -150,7 +157,7 @@ FAMILIAS_REPUESTO = {
     "Embrague": [
         "DISCO DE EMBRAGUE", "PLATO DE EMBRAGUE", "PLACA DE EMBRAGUE", "KIT DE EMBRAGUE",
         "COLLARIN", "RULEMAN DE EMPUJE", "CILINDRO DE EMBRAGUE", "BOMBA DE EMBRAGUE",
-        "CABLE DE EMBRAGUE", "EMBRAGUE", "VOLANTE MOTOR",
+        "CABLE DE EMBRAGUE", "EMBRAGUE", "VOLANTE MOTOR", "ACTUADOR HIDRAULICO",
     ],
     "Caja y diferencial": [
         "CAJA DE VELOCIDAD", "CORONA Y PINON", "SINCRONIZADO", "DIFERENCIAL", "SATELITE",
@@ -164,11 +171,17 @@ FAMILIAS_REPUESTO = {
     "Refrigeración": [
         "BOMBA DE AGUA", "RADIADOR", "TERMOSTATO", "ELECTROVENTILADOR", "TAPA DE RADIADOR",
         "MANGUERA DE RADIADOR", "INTERCOOLER", "DEPOSITO DE AGUA", "REFRIGERACION",
-        "VENTILADOR",
+        "VENTILADOR", "COOLER", "BIDON",
+    ],
+    # «Caño» no es un accesorio ni parte del radiador: es una familia entera de este catálogo
+    # (1.340 productos, casi todos de Cauplas) y va de agua a gasoil a gases de escape. Antes
+    # caían todos en «Sin clasificar», que es lo que ciega al detector de puentes falsos.
+    "Caños y mangueras": [
+        "CANO", "TUBO", "MANGUERA",
     ],
     "Lubricación": [
         "BOMBA DE ACEITE", "CARTER", "ENFRIADOR DE ACEITE", "VARILLA DE ACEITE",
-        "TAPA DE VALVULAS", "MALLA DE ACEITE",
+        "TAPA DE VALVULAS", "MALLA DE ACEITE", "TAPA ACEITE", "TAPA DE ACEITE",
     ],
     "Motor - interno": [
         "PISTON", "PISTONES", "ARO DE PISTON", "AROS", "COJINETE", "BIELA", "CIGUENAL",
@@ -181,22 +194,29 @@ FAMILIAS_REPUESTO = {
         # «JTA T.C.» no caían en ninguna familia y se colaban en cualquier búsqueda.
         "JGO DE MOTOR", "JUEGO DE MOTOR", "JGO MOTOR", "JGO DE JUNTAS", "JGO JUNTAS",
         "JTA T C", "JTA TC", "JTA DE TAPA", "JTA TAPA", "JTA",
+        "JGO JTAS", "JGO JUNTAS", "JGO CAJA", "JTAS",
         "JUNTA DE TAPA", "JUNTA TAPA", "JUEGO DE JUNTAS", "JUNTA HOMOCINETICA", "RETEN",
         "RETENES", "JUNTA", "JUNTAS", "ORING", "O-RING", "EMPAQUETADURA", "SELLO",
     ],
     "Combustible": [
         "BOMBA DE NAFTA", "BOMBA DE COMBUSTIBLE", "INYECTOR", "CARBURADOR", "RIEL DE INYECCION",
         "REGULADOR DE PRESION", "TANQUE DE COMBUSTIBLE", "AFORADOR", "INYECCION",
+        "CUERPO MARIPOSA", "CUERPO DE ACELERACION", "CPO ACEL", "MARIPOSA", "SURTIDOR",
+        "BOMBA DE ALTA", "BOMBA ALTA", "BOMBA ELECTRICA", "REGULADOR PRES",
     ],
     "Escape": [
-        "CANO DE ESCAPE", "SILENCIADOR", "CATALIZADOR", "SONDA LAMBDA", "MULTIPLE DE ESCAPE",
-        "ESCAPE",
+        # «TUBO DE ESCAPE» está por el cliente, no por el catálogo: en el mostrador lo piden
+        # así, y sin la clave larga ganaba «TUBO» y el pedido caía en Caños y mangueras.
+        "CANO DE ESCAPE", "TUBO DE ESCAPE", "TUBO ESCAPE", "SILENCIADOR", "CATALIZADOR",
+        "SONDA LAMBDA", "MULTIPLE DE ESCAPE", "ESCAPE",
     ],
     "Eléctrico y encendido": [
         "CABLE DE BUJIA", "BUJIA", "BUJIAS", "BOBINA DE ENCENDIDO", "ALTERNADOR",
         "MOTOR DE ARRANQUE", "BURRO DE ARRANQUE", "BATERIA", "REGULADOR DE VOLTAJE",
         "DISTRIBUIDOR", "PLATINO", "SENSOR", "MODULO", "RELE", "FUSIBLE", "BOBINA",
-        "CAPUCHON DE BUJIA",
+        "CAPUCHON DE BUJIA", "BULBO", "INTERRUPTOR", "INTERRUP", "LLAVE TECLA",
+        "LLAVE CONMUTAD", "CONMUTADOR", "MOTOR PASO", "MOTORES DE ARRANQUE", "CAPTOR",
+        "SOLENOIDE", "PORTAFUSIBLE", "BALIZA",
     ],
     "Rodamientos y mazas": [
         "RULEMAN DE RUEDA", "MAZA DE RUEDA", "CUBO DE RUEDA", "RODAMIENTO", "RULEMAN",
@@ -204,7 +224,7 @@ FAMILIAS_REPUESTO = {
     ],
     "Climatización": [
         "COMPRESOR DE AIRE", "CONDENSADOR", "EVAPORADOR", "AIRE ACONDICIONADO",
-        "FILTRO DE POLEN", "CALEFACCION",
+        "FILTRO DE POLEN", "CALEFACCION", "TUBO CALEFACTOR", "TUBO CALEFAC", "CALEFACTOR",
     ],
     "Soportes y bujes": [
         "SOPORTE DE MOTOR", "SOPORTE DE CAJA", "BUJE", "BUJES", "TACO DE MOTOR", "SOPORTE",
@@ -221,8 +241,15 @@ FAMILIAS_REPUESTO = {
 
 
 def _normalizar_desc(texto):
-    """Mayúsculas, sin acentos y con espacios simples, para poder comparar contra las claves."""
-    return " " + " ".join(normalizar_texto(str(texto or "")).replace("-", " ").split()) + " "
+    """Mayúsculas, sin acentos y con espacios simples, para poder comparar contra las claves.
+
+    Los separadores se cambian por espacio, no solo el guión. Faltaba el PUNTO y era caro:
+    los proveedores abrevian pegado —«JTA.TAPA CIL.», «Jgo.Jtas.P/Motor», «Cpo.Acel.»— así que
+    la clave «JTA TAPA», que alguien había agregado justamente para esto, no coincidía nunca.
+    Medido sobre las 61.574 descripciones reales: 1.332 productos decían «JTA.TAPA CIL.» y
+    ninguno caía en Juntas y retenes."""
+    limpio = re.sub(r"[-./,;:()]", " ", normalizar_texto(str(texto or "")))
+    return " " + " ".join(limpio.split()) + " "
 
 
 def clasificar_repuesto(descripcion):
