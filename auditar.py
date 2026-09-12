@@ -1273,12 +1273,13 @@ for _f in ast.walk(ARBOL):
 # que no tengan un pedir_password_admin() o un es_admin() arriba.
 _DESTRUCTIVAS = re.compile(r'^(eliminar_|borrar_|vaciar_|fusionar_|deshacer_|reparar_|'
                            r'aumentar_precios|crear_usuario|cambiar_password|importar_dtc_masivo|'
-                           r'restaurar_backup|restaurar_de_papelera)')
-# Quedan afuera a propósito:
-#   · recalcular_confianzas(): reescribe una columna DERIVADA, que se puede volver a calcular.
-#   · actualizar_precio_stock(): es el trabajo de todos los días en el mostrador; ponerle
-#     contraseña rompe el uso normal. Que un invitado pueda tocar precios es una decisión del
-#     dueño, no un descuido, así que no se marca.
+                           r'restaurar_backup|restaurar_de_papelera|recalcular_confianzas|'
+                           r'actualizar_precio_stock)')
+# Vale cualquiera de los dos candados, y no es lo mismo:
+#   · pedir_password_admin() para lo que borra o configura;
+#   · pedir_password_operador_o_admin() para el precio y el stock, que es trabajo de todos los
+#     días. Pedir la contraseña de administrador ahí rompería el mostrador; no pedir nada
+#     dejaba los precios abiertos a cualquiera que entrara con «Continuar».
 _padres = {}
 for _n in ast.walk(ARBOL):
     for _h in ast.iter_child_nodes(_n):
@@ -1295,6 +1296,7 @@ def _tiene_candado(nodo):
         if isinstance(x, ast.If):
             prueba = ast.dump(x.test)
             if any(k in prueba for k in ("pedir_password_admin", "es_admin",
+                                         "pedir_password_operador_o_admin",
                                          "es_operador_o_admin")):
                 return True
     return False
@@ -1304,8 +1306,9 @@ for _n in ast.walk(ARBOL):
     if (isinstance(_n, ast.Call) and isinstance(_n.func, ast.Name)
             and _DESTRUCTIVAS.match(_n.func.id) and not _tiene_candado(_n)):
         reportar("ERROR", _n.lineno,
-                 f"{_n.func.id}() se dispara desde la pantalla sin pedir_password_admin(): "
-                 "cualquiera que entre sin contraseña puede hacerlo")
+                 f"{_n.func.id}() se dispara desde la pantalla sin candado: cualquiera que "
+                 "entre con «Continuar» puede hacerlo. Falta pedir_password_admin() o, si es "
+                 "trabajo de mostrador, pedir_password_operador_o_admin()")
 
 
 # ============ Resultado ============

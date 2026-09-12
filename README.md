@@ -68,10 +68,12 @@ Eso se olvida fácil, y se olvidó: el candado estaba en «eliminar una marca» 
 como ERROR cualquier función destructiva llamada desde una pantalla sin ese candado. Si
 agregás un botón que borra algo, ponele el candado o el auditor no te deja subir.
 
-Dos cosas quedan a propósito sin contraseña, y son una decisión, no un olvido:
-`actualizar_precio_stock()` (cambiar precio y stock desde el buscador es el trabajo de todos
-los días) y `recalcular_confianzas()` (reescribe una columna derivada, que se puede volver a
-calcular). Si querés que el precio también pida contraseña, es una línea.
+Hay dos candados, y no son lo mismo:
+
+- `pedir_password_admin("para qué")` — para lo que borra o configura.
+- `pedir_password_operador_o_admin("para qué")` — para el trabajo de mostrador: hoy, tocar el
+  precio y el stock. Alcanza con la contraseña de operador, y como el nivel queda en la
+  sesión se pide una vez por turno, no en cada producto.
 
 ## La pantalla de vehículos
 
@@ -94,6 +96,10 @@ propias listas. Tres cosas que conviene saber antes de tocarla:
 SQLite en modo WAL, con **una conexión por sesión** para que puedan usar la app dos personas a
 la vez. Tres consecuencias que ya causaron problemas y conviene tener presentes:
 
+- **Restaurar un backup trae el esquema del día que se hizo.** Por eso `restaurar_backup()`
+  vuelve a correr `crear_esquema()` después de copiar: sin eso, un backup anterior a una
+  columna nueva la hace desaparecer, y no vuelve hasta que alguien reinicie la app. Está
+  probado: con un backup previo a la columna `resumen`, la papelera se caía al abrirla.
 - **No se puede reemplazar el archivo `.db` a mano.** Si hay otra sesión abierta, su `-wal`
   sobrevive y se aplica encima de la base nueva: quedan mezcladas dos bases. Para restaurar se
   usa la API `backup()` de SQLite, que escribe a través de la base (ver `restaurar_backup()`).

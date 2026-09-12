@@ -527,6 +527,37 @@ def validar_password(clave):
     return None, None, None
 
 
+def pedir_password_operador_o_admin(motivo=""):
+    """Candado de EMPLEADO: alcanza con la contraseña de operador, o la de administrador.
+
+    Distinto de pedir_password_admin(), que es para borrar y configurar. Este es para lo que
+    hace un empleado de confianza todos los días y que igual no puede hacer cualquiera que
+    entró con «Continuar»: tocar el precio y el stock. Pedir la de administrador para eso
+    sería romper el mostrador; no pedir nada era dejar los precios abiertos a quien pase.
+
+    Como el nivel queda guardado en la sesión, la contraseña se pide UNA vez por turno, no en
+    cada producto."""
+    if es_operador_o_admin():
+        return True
+
+    st.warning(f"🔒 Para esto hace falta entrar como empleado{(' — ' + motivo) if motivo else ''}.")
+    with st.form(f"login_empleado_{motivo}"):
+        clave = st.text_input("Contraseña (de operador o de administrador):", type="password")
+        entrar = st.form_submit_button("Ingresar")
+
+    if entrar:
+        nombre, nivel, error = validar_password(clave)
+        if error:
+            st.error(error)
+        elif nivel in ("admin", "operador"):
+            st.session_state.nivel_usuario = nivel
+            st.session_state.admin_nombre = nombre
+            st.rerun()
+        else:
+            st.error("Contraseña incorrecta.")
+    return False
+
+
 def pedir_password_admin(motivo=""):
     """Muestra un formulario de contraseña de ADMINISTRADOR COMPLETO. Devuelve True si ya está
     autenticado como admin — para borrados y configuración sensible, un 'operador' no alcanza."""
@@ -2850,6 +2881,16 @@ def restaurar_backup(archivo_subido):
             conn.commit()
             # conexion_real() y no conn: backup() no acepta el proxy por sesión.
             origen.backup(conn.conexion_real())
+            conn.commit()
+            # Y las migraciones OTRA VEZ. El backup trae su propio esquema, que es el que tenía
+            # la app el día que se hizo: si desde entonces se agregó una columna, al restaurar
+            # desaparece y no vuelve hasta que alguien reinicie la app. Está probado: con un
+            # backup anterior a la columna «resumen», la papelera se cae con «no such column:
+            # resumen» apenas se abre. Y no es solo la papelera — «productos.busqueda» es la
+            # columna en la que se apoya el buscador por texto.
+            # crear_esquema() se puede correr las veces que haga falta: es CREATE TABLE IF NOT
+            # EXISTS y ALTERs condicionados a que la columna no esté.
+            crear_esquema(conn.cursor())
             conn.commit()
         origen.close()
     finally:
@@ -15384,10 +15425,14 @@ Casi todo lo que edita o borra algo pide la contraseña de administrador la prim
                                     label_visibility="collapsed"
                                 )
                                 if colG.button("💾", key=f"save_{fila['ID']}_{clean}"):
-                                    actualizar_precio_stock(
-                                        fila["ID"], nuevo_precio, nuevo_stock,
-                                        st.session_state.get(f"costo_{fila['ID']}_{clean}"))
-                                    st.success("Guardado.")
+                                    # Nivel empleado, no administrador: tocar precios es
+                                    # trabajo de todos los días, pero no de cualquiera que
+                                    # haya entrado con «Continuar».
+                                    if pedir_password_operador_o_admin("tocar precios y stock"):
+                                        actualizar_precio_stock(
+                                            fila["ID"], nuevo_precio, nuevo_stock,
+                                            st.session_state.get(f"costo_{fila['ID']}_{clean}"))
+                                        st.success("Guardado.")
                                 if es_admin():
                                     c.execute("SELECT precio_costo FROM productos WHERE id = ?",
                                               (fila["ID"],))
@@ -17943,7 +17988,8 @@ if pagina == PAGINAS[3]:
             if sin_puntuar:
                 st.info(f"Hay {sin_puntuar:,} vínculo(s) sin puntuar de {total_eq:,}. "
                          "Mientras tanto cuentan como neutros.")
-            if total_eq and st.button("🎯 Calcular la confianza de los vínculos que faltan"):
+            if (total_eq and st.button("🎯 Calcular la confianza de los vínculos que faltan")
+                    and pedir_password_admin("puntuar los vínculos")):
                 barra_conf = st.progress(0.0, text="Puntuando...")
                 # Va por tandas hasta terminar, no una sola de tamaño fijo. Antes se hacía una
                 # tanda y listo, y con más vínculos que el tope quedaban miles sin puntuar por
@@ -17964,10 +18010,11 @@ if pagina == PAGINAS[3]:
                 avisar("success", f"Se puntuaron {hechos:,} vínculo(s). El buscador ya lo está "
                                   "usando.")
                 st.rerun()
-            if total_eq and st.button("♻️ Volver a puntuar TODO",
-                                       help="Los puntajes cambian cuando aparece evidencia nueva "
-                                            "—ventas que confirman un reemplazo, decisiones que "
-                                            "tomaste al revisar—. Esto los recalcula de cero."):
+            if (total_eq and st.button("♻️ Volver a puntuar TODO",
+                                        help="Los puntajes cambian cuando aparece evidencia nueva "
+                                             "—ventas que confirman un reemplazo, decisiones que "
+                                             "tomaste al revisar—. Esto los recalcula de cero.")
+                    and pedir_password_admin("volver a puntuar todos los vínculos")):
                 barra_re = st.progress(0.0, text="Recalculando...")
                 n = recalcular_confianzas(
                     limite=max(total_eq, 1), solo_faltantes=False,
