@@ -15286,11 +15286,12 @@ Casi todo lo que edita o borra algo pide la contraseña de administrador la prim
                                                 )
                                                 if st.button("✂️ Cortar ese vínculo",
                                                               key=f"cortar_paso_debil_{clean}"):
-                                                    borrar_equivalencias_dudosas(
-                                                        [(peor_paso["_a"], peor_paso["_b"])])
-                                                    invalidar_salud()
-                                                    avisar("success", "Vínculo cortado.")
-                                                    st.rerun()
+                                                    if pedir_password_admin("cortar vínculos"):
+                                                        borrar_equivalencias_dudosas(
+                                                            [(peor_paso["_a"], peor_paso["_b"])])
+                                                        invalidar_salud()
+                                                        avisar("success", "Vínculo cortado.")
+                                                        st.rerun()
 
                                 # Marca la opción más barata ENTRE LAS QUE TIENEN STOCK, para no tener que
 
@@ -17165,8 +17166,9 @@ if pagina == PAGINAS[3]:
                 colA.write(cat["nombre"])
                 colB.write(cat["url"])
                 if colC.button("🗑️", key=f"del_cat_{cat['id']}"):
-                    eliminar_catalogo_externo(cat["id"])
-                    st.rerun()
+                    if pedir_password_admin("borrar un catálogo externo"):
+                        eliminar_catalogo_externo(cat["id"])
+                        st.rerun()
         else:
             st.caption("Todavía no agregaste ningún catálogo externo.")
 
@@ -17486,10 +17488,11 @@ if pagina == PAGINAS[3]:
         nuevo_pie = st.text_area("Pie del mensaje (opcional):", value=pie_actual, key="wa_pie_in",
                                   placeholder="Ej: 📍 Av. Siempreviva 742 - Horario: L a V 9 a 18hs")
         if st.button("💾 Guardar textos del mensaje"):
-            guardar_config("whatsapp_encabezado", nuevo_encabezado.strip() or "🔧 *Equivalencias El Chavo*")
-            guardar_config("whatsapp_pie", nuevo_pie.strip())
-            avisar("success", "Guardado.")
-            st.rerun()
+            if pedir_password_admin("cambiar los textos que salen en los mensajes"):
+                guardar_config("whatsapp_encabezado", nuevo_encabezado.strip() or "🔧 *Equivalencias El Chavo*")
+                guardar_config("whatsapp_pie", nuevo_pie.strip())
+                avisar("success", "Guardado.")
+                st.rerun()
 
         st.markdown("---")
         st.markdown("**💳 Alias para QR de transferencia**")
@@ -17547,13 +17550,15 @@ if pagina == PAGINAS[3]:
                 avisar("success", "Alias guardado.")
                 st.rerun()
         if alias_actual and alias_actual["TieneQrReal"] and cbtn2.button("🗑️ Sacar el QR real"):
-            eliminar_qr_real(alias_actual["ID"])
-            avisar("success", "QR real eliminado — vuelve a usar el de texto plano.")
-            st.rerun()
+            if pedir_password_admin("sacar el QR de cobro"):
+                eliminar_qr_real(alias_actual["ID"])
+                avisar("success", "QR real eliminado — vuelve a usar el de texto plano.")
+                st.rerun()
         if alias_actual and cbtn3.button("🗑️ Eliminar este alias"):
-            eliminar_alias_transferencia(alias_actual["ID"])
-            avisar("success", "Alias eliminado.")
-            st.rerun()
+            if pedir_password_admin("eliminar los datos de cobro"):
+                eliminar_alias_transferencia(alias_actual["ID"])
+                avisar("success", "Alias eliminado.")
+                st.rerun()
 
     if sub_admin == SUB_ADMIN[3]:
         st.markdown("**🧩 Combos de repuestos relacionados**")
@@ -17586,7 +17591,7 @@ if pagina == PAGINAS[3]:
                 avisar("success", f"Combo para '{disparador_edit.strip()}' guardado.")
                 st.rerun()
         if cc2.button("🗑️ Eliminar combo (según el disparador de arriba)"):
-            if disparador_edit.strip():
+            if disparador_edit.strip() and pedir_password_admin("eliminar un combo"):
                 eliminar_combo(disparador_edit)
                 avisar("success", f"Combo para '{disparador_edit.strip()}' eliminado.")
                 st.rerun()
@@ -17762,10 +17767,11 @@ if pagina == PAGINAS[3]:
                         elegido_u = st.selectbox("¿Cuál cortar?", list(etiquetas_u.keys()),
                                                   key="union_a_cortar")
                         if st.button("✂️ Cortar ese vínculo"):
-                            n = borrar_equivalencias_dudosas([etiquetas_u[elegido_u]])
-                            invalidar_salud()
-                            avisar("success", f"Se cortó el vínculo. Las dos familias quedaron separadas.")
-                            st.rerun()
+                            if pedir_password_admin("cortar vínculos"):
+                                n = borrar_equivalencias_dudosas([etiquetas_u[elegido_u]])
+                                invalidar_salud()
+                                avisar("success", "Se cortó el vínculo. Las dos familias quedaron separadas.")
+                                st.rerun()
             st.markdown("**🔍 Revisar los vínculos que YA están cargados**")
             explicar(
                 "El análisis de confianza mira los vínculos pendientes de revisión, pero el problema "
@@ -17814,12 +17820,13 @@ if pagina == PAGINAS[3]:
                     )
                     if st.checkbox("Miré la lista y entiendo qué se corta", key="confirmar_dudosas"):
                         if st.button(f"✂️ Cortar los {cuantos_cortar} peores", type="primary"):
-                            pares = [(x["_a"], x["_b"]) for x in dudosas[:int(cuantos_cortar)]]
-                            n = borrar_equivalencias_dudosas(pares)
-                            st.session_state.pop("dudosas_cargadas", None)
-                            invalidar_salud()
-                            avisar("success", f"Se cortaron {n} vínculo(s). Los productos quedaron intactos.")
-                            st.rerun()
+                            if pedir_password_admin("cortar vínculos"):
+                                pares = [(x["_a"], x["_b"]) for x in dudosas[:int(cuantos_cortar)]]
+                                n = borrar_equivalencias_dudosas(pares)
+                                st.session_state.pop("dudosas_cargadas", None)
+                                invalidar_salud()
+                                avisar("success", f"Se cortaron {n} vínculo(s). Los productos quedaron intactos.")
+                                st.rerun()
             st.markdown("**💲 Precios que no cierran entre equivalentes**")
             explicar(
                 "Dos repuestos que hacen lo mismo pueden costar distinto según la marca, pero no ocho "
@@ -17893,12 +17900,14 @@ if pagina == PAGINAS[3]:
             if cantidad_decimal:
                 st.warning(f"⚠️ Hay {cantidad_decimal} producto(s) con el código terminado en '.0'.")
                 if st.button(f"🔧 Arreglar los {cantidad_decimal} códigos"):
-                    arreglados = reparar_codigos_con_decimal()
-                    # Sin el refresco, el cartel de arriba seguía mostrando el número viejo y
-                    # parecía que el botón no hacía nada. El aviso se guarda para que sobreviva.
-                    avisar("success", f"Se arreglaron {arreglados} código(s) terminados en '.0'.")
-                    invalidar_salud()
-                    st.rerun()
+                    if pedir_password_admin("reescribir códigos de todo el catálogo"):
+                        arreglados = reparar_codigos_con_decimal()
+                        # Sin el refresco, el cartel de arriba seguía mostrando el número viejo
+                        # y parecía que el botón no hacía nada. El aviso se guarda para que
+                        # sobreviva al refresco.
+                        avisar("success", f"Se arreglaron {arreglados} código(s) terminados en '.0'.")
+                        invalidar_salud()
+                        st.rerun()
             else:
                 st.caption("✅ Ningún código con ese problema.")
             st.markdown("**📝 Descripciones con las columnas pegadas**")
@@ -17910,8 +17919,9 @@ if pagina == PAGINAS[3]:
             if pegadas:
                 st.warning(f"⚠️ Hay al menos {pegadas} descripción(es) con ese problema.")
                 if st.button("🔧 Separar las descripciones pegadas"):
-                    arregladas = reparar_descripciones_pegadas()
-                    st.success(f"Se separaron {arregladas} descripción(es).")
+                    if pedir_password_admin("reescribir las descripciones de todo el catálogo"):
+                        arregladas = reparar_descripciones_pegadas()
+                        st.success(f"Se separaron {arregladas} descripción(es).")
             else:
                 st.caption("✅ Ninguna descripción con ese problema.")
 
@@ -18582,7 +18592,8 @@ if pagina == PAGINAS[3]:
                             st.caption(f"Familias que toca: {_p['Familias']}")
                             st.write(_p["Ejemplos"])
                             if st.button("🗑️ Borrar este puente y sus vínculos",
-                                         key=f"borrar_puente_{_p['pid']}"):
+                                         key=f"borrar_puente_{_p['pid']}") and pedir_password_admin(
+                                             "borrar un código de fábrica falso"):
                                 _n = borrar_puente(_p["pid"])
                                 # La lista guardada queda vieja apenas se borra uno: si no se
                                 # saca de ahí, el botón sigue apareciendo y al tocarlo de nuevo
@@ -20771,7 +20782,7 @@ if pagina == PAGINAS[7]:
                                       placeholder="P0455;Fuga grande en sistema EVAP;Emisiones;Tapa de nafta, manguera\n"
                                                    "P1105;Solenoide de presión de combustible;Motor;;Chrysler")
             if st.button("📥 Importar códigos"):
-                if texto_dtc.strip():
+                if texto_dtc.strip() and pedir_password_admin("importar códigos de falla"):
                     cargados_dtc = importar_dtc_masivo(texto_dtc)
                     avisar("success", f"Se cargaron/actualizaron {cargados_dtc} código(s).")
                     st.rerun()

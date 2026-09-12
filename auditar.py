@@ -1261,6 +1261,53 @@ for _f in ast.walk(ARBOL):
                  "sobre el prefiltro, así que lo que sirve puede quedar afuera del corte")
 
 
+
+# ============ 19. Acción destructiva sin candado ============
+# La app deja entrar sin contraseña a propósito: el mostrador la usa así. Por eso lo que borra
+# o reescribe se protege de a una, con pedir_password_admin(). Y por eso mismo se olvida: el
+# candado estaba puesto en «eliminar una marca», «eliminar un producto» y «deshacer una
+# importación», y faltaba en «separar las descripciones pegadas», que reescribe el catálogo
+# entero. Probado con la app de verdad: alguien que entró con «Continuar», sin contraseña,
+# apretó una vez y reescribió 9.147 descripciones.
+# Esto marca las llamadas destructivas hechas desde la pantalla (fuera de cualquier función)
+# que no tengan un pedir_password_admin() o un es_admin() arriba.
+_DESTRUCTIVAS = re.compile(r'^(eliminar_|borrar_|vaciar_|fusionar_|deshacer_|reparar_|'
+                           r'aumentar_precios|crear_usuario|cambiar_password|importar_dtc_masivo|'
+                           r'restaurar_backup|restaurar_de_papelera)')
+# Quedan afuera a propósito:
+#   · recalcular_confianzas(): reescribe una columna DERIVADA, que se puede volver a calcular.
+#   · actualizar_precio_stock(): es el trabajo de todos los días en el mostrador; ponerle
+#     contraseña rompe el uso normal. Que un invitado pueda tocar precios es una decisión del
+#     dueño, no un descuido, así que no se marca.
+_padres = {}
+for _n in ast.walk(ARBOL):
+    for _h in ast.iter_child_nodes(_n):
+        _padres[_h] = _n
+
+
+def _tiene_candado(nodo):
+    """¿Hay un if con pedir_password_admin()/es_admin() por encima, sin salir de la pantalla?"""
+    x = nodo
+    while x in _padres:
+        x = _padres[x]
+        if isinstance(x, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            return True       # adentro de una función: no es un botón de pantalla
+        if isinstance(x, ast.If):
+            prueba = ast.dump(x.test)
+            if any(k in prueba for k in ("pedir_password_admin", "es_admin",
+                                         "es_operador_o_admin")):
+                return True
+    return False
+
+
+for _n in ast.walk(ARBOL):
+    if (isinstance(_n, ast.Call) and isinstance(_n.func, ast.Name)
+            and _DESTRUCTIVAS.match(_n.func.id) and not _tiene_candado(_n)):
+        reportar("ERROR", _n.lineno,
+                 f"{_n.func.id}() se dispara desde la pantalla sin pedir_password_admin(): "
+                 "cualquiera que entre sin contraseña puede hacerlo")
+
+
 # ============ Resultado ============
 orden = {"ERROR": 0, "REVISAR": 1, "AVISO": 2}
 problemas.sort(key=lambda x: (orden[x[0]], x[1]))

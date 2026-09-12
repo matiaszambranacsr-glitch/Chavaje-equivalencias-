@@ -56,6 +56,23 @@ veces en una lista; lo que se repite más es texto.
 Antes de aflojar cualquiera de esos filtros, corré `python3 -m nucleo.pruebas`: los casos que
 dicen «NO debía sacar nada» están escritos con descripciones reales de esas listas.
 
+## Quién puede hacer qué
+
+La app **deja entrar sin contraseña a propósito**: el botón «Continuar» del login te mete
+igual, porque en el mostrador se usa así. La consecuencia es que la protección no está en la
+puerta sino en cada acción: lo que borra o reescribe va adentro de un
+`if pedir_password_admin("para qué"):`.
+
+Eso se olvida fácil, y se olvidó: el candado estaba en «eliminar una marca» y faltaba en
+«separar las descripciones pegadas», que reescribe el catálogo entero. El auditor ahora marca
+como ERROR cualquier función destructiva llamada desde una pantalla sin ese candado. Si
+agregás un botón que borra algo, ponele el candado o el auditor no te deja subir.
+
+Dos cosas quedan a propósito sin contraseña, y son una decisión, no un olvido:
+`actualizar_precio_stock()` (cambiar precio y stock desde el buscador es el trabajo de todos
+los días) y `recalcular_confianzas()` (reescribe una columna derivada, que se puede volver a
+calcular). Si querés que el precio también pida contraseña, es una línea.
+
 ## La pantalla de vehículos
 
 «Buscar por auto» no sale de un catálogo comprado: sale de leer las descripciones de tus
