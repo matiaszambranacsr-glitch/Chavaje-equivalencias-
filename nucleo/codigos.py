@@ -367,6 +367,10 @@ def extraer_codigos_de_texto(texto, minimo=6, codigo_propio=None):
         # Cilindradas y potencias sueltas: 1.6, 2.0TDI, 110CV
         re.compile(r'^\d[.,]\d[A-Z]*$'),
         re.compile(r'^\d+(CV|HP|KW|CC)$'),
+        # MEDIDAS SUELTAS con la unidad pegada: 1060MM, 1425MM, L=1010MM (que se limpia como
+        # L1010MM). Salen de descripciones de cables y mangueras, donde el largo es el dato
+        # que las distingue. Con el patrón de arriba no alcanzaba: ese pide la forma AxB.
+        re.compile(r'^L?\d+(MM|CM|MTS|MT)$'),
         # RANGOS DE AÑOS: 1998-2006, 2012/2015, 1995-96. Es el peor de todos los falsos códigos
         # y el más común, porque casi toda descripción de repuesto dice para qué años sirve.
         # Se midió sobre dos listas reales (5.063 y 25.875 filas): de los 224 "códigos" que las
@@ -490,6 +494,12 @@ def extraer_codigos_de_texto(texto, minimo=6, codigo_propio=None):
         # limpios siguen siendo seis.
         codigo_limpio = sanitizar(limpio)
         if len(codigo_limpio) < minimo:
+            continue
+        # Las formas prohibidas se vuelven a probar sobre el código LIMPIO, por el mismo motivo
+        # que el largo mínimo: la puntuación las disfraza. «L=1010MM» —el largo de un cable de
+        # ABS— no coincidía con el patrón de medidas por el signo igual, pero limpio es
+        # «L1010MM» y sí. Eran catorce medidas entrando como códigos de fábrica.
+        if any(p.match(codigo_limpio.upper()) for p in formas):
             continue
         # El código de la propia fila con una palabra pegada atrás NO es un código de fábrica.
         # Pasa cuando el proveedor exporta y se le come el espacio: la fila 52031FISPA tiene de

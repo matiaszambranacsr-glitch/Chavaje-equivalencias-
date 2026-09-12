@@ -56,6 +56,22 @@ veces en una lista; lo que se repite más es texto.
 Antes de aflojar cualquiera de esos filtros, corré `python3 -m nucleo.pruebas`: los casos que
 dicen «NO debía sacar nada» están escritos con descripciones reales de esas listas.
 
+## La pantalla de vehículos
+
+«Buscar por auto» no sale de un catálogo comprado: sale de leer las descripciones de tus
+propias listas. Tres cosas que conviene saber antes de tocarla:
+
+- **Una descripción nombra varios autos** («BUJIA Ford Escort - VW Gol - Kombi»): son el 19%
+  de las descripciones reales. Por eso existe `marcas_vehiculo_en()`, que devuelve todas, y el
+  producto aparece en el catálogo de cada una. `separar_por_marca_vehiculo()` devuelve solo la
+  primera y se usa donde hace falta una sola.
+- **Las listas abrevian** («VW», «CHEV», «PEU») y **escriben en minúsculas**. Las abreviaturas
+  están en `MARCAS_VEHICULO` y se unifican con `ALIAS_MARCA_VEHICULO`; el reconocimiento va en
+  IGNORECASE. Si agregás una abreviatura, contá antes cuántas descripciones reales la usan
+  como palabra suelta: una de dos o tres letras se mete adentro de cualquier cosa.
+- **El número que muestra el desplegable tiene que ser el que devuelve la pantalla.** Eran dos
+  cálculos distintos y no coincidían: MAN ofrecía 749 productos y daba 3.
+
 ## Base de datos
 
 SQLite en modo WAL, con **una conexión por sesión** para que puedan usar la app dos personas a

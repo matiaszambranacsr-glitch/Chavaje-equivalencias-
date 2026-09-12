@@ -214,6 +214,63 @@ def probar_vehiculos():
     igual(vehiculos.extraer_anios("GOL 1998-2006"), (1998, 2006), "años de la descripción")
 
 
+def probar_marcas_de_vehiculo():
+    """Una descripción de proveedor nombra varios autos, y las listas abrevian.
+
+    Los dos casos que arreglaron la pantalla de vehículos: «VW» no estaba en la lista de
+    marcas —5.530 descripciones lo escriben así y ninguna dice VOLKSWAGEN— y de una
+    descripción con varias marcas se tomaba una sola, elegida por el largo del nombre."""
+    igual([m for m, _c, _r in vehiculos.marcas_vehiculo_en(
+               "BUJIA NAFTA Ford Escort - VW Gol - Kombi")],
+          ["FORD", "VOLKSWAGEN"], "las dos marcas, y VW es VOLKSWAGEN")
+    igual([m for m, _c, _r in vehiculos.marcas_vehiculo_en(
+               "BULBO TEMPERATURA PEUGEOT 405 - CITROEN ZX")],
+          ["PEUGEOT", "CITROEN"], "el orden es el del texto, no el del largo del nombre")
+    # el tramo de cada marca llega hasta la siguiente
+    igual(dict((m, r) for m, _c, r in vehiculos.marcas_vehiculo_en(
+               "BUJIA Ford Escort - VW Gol")).get("VOLKSWAGEN"), "Gol",
+          "a cada marca le toca su propio modelo")
+    igual(vehiculos.marcas_vehiculo_en("MANGUERA DE RADIADOR 1 6")[:1], [],
+          "MANGUERA no es la marca MAN")
+    igual(vehiculos.marcas_vehiculo_en("RAMPA DE INYECCION 1 6")[:1], [],
+          "RAMPA no es la marca RAM")
+    # alias: una sola marca aunque se escriba de varias formas
+    igual([m for m, _c, _r in vehiculos.marcas_vehiculo_en("TAPA M.BENZ SPRINTER")],
+          ["MERCEDES BENZ"], "M.BENZ es MERCEDES BENZ")
+    cierto(not vehiculos.es_nombre_de_modelo("A0091547202"), "un número de parte no es modelo")
+    cierto(not vehiculos.es_nombre_de_modelo("EA011610461"), "otro número de parte tampoco")
+    cierto(vehiculos.es_nombre_de_modelo("F-250"), "F-250 sí es un modelo")
+    cierto(vehiculos.es_nombre_de_modelo("COROLLA"), "COROLLA sí es un modelo")
+    cierto(vehiculos.es_nombre_de_modelo("C20NE"), "un código de motor corto se conserva")
+
+
+def probar_ref_pegado():
+    """«REF ORIG» pegado a la palabra anterior. Aparece 9.038 veces en las listas reales.
+
+    Importa por dos motivos: tapa el marcador que dice explícitamente cuál es el código de
+    fábrica, y de paso genera códigos fantasma («10001REF», «L=515MMREF»). Despegarlo sacó
+    461 códigos inventados de las descripciones reales, y ninguno de los 461 era de verdad."""
+    igual(vehiculos.separar_texto_pegado("Passat 1 8 98REF ORIG 030121121B"),
+          "Passat 1 8 98 REF ORIG 030121121B", "despegar REF del token anterior")
+    igual(vehiculos.separar_texto_pegado("SENSOR 16VREF ORIG 0280155868"),
+          "SENSOR 16V REF ORIG 0280155868", "16VREF es 16V + REF")
+    # sin ORIG detrás no se toca: podría ser un código que termina en REF
+    igual(vehiculos.separar_texto_pegado("CODIGO ABC123REF de catalogo"),
+          "CODIGO ABC123REF de catalogo", "sin ORIG detrás, REF no se despega")
+    # y el resultado: el código de fábrica sale y la basura no
+    cierto("030121121B" in codigos.extraer_codigos_de_texto(
+               vehiculos.separar_texto_pegado(
+                   "CARCASA TERMOSTATO Volkswagen Passat 1 8 98REF ORIG 030121121B")),
+           "el código declarado detrás de REF ORIG se reconoce")
+    for basura in ("SENSOR ABS CITROEN BERLINGO TRASERO L=1010MMREF ORIG 4545E8",
+                   "CABLE BUJIA 1060MM JUEGO",
+                   "JUNTA MOTOR 1600-1800-2000cc"):
+        for cod in codigos.extraer_codigos_de_texto(vehiculos.separar_texto_pegado(basura)):
+            cierto(not cod.upper().endswith("REF") and "MM" not in cod.upper()
+                   and not cod.lower().endswith("cc"),
+                   f"«{cod}» no debería salir de «{basura[:34]}»")
+
+
 def probar_familias_de_pieza():
     """La familia de la pieza es lo que usa el detector de puentes falsos para darse cuenta de
     que un código está uniendo repuestos que no tienen nada que ver, y también vale −40 en la
@@ -347,7 +404,7 @@ def main():
     for prueba in (probar_sanitizar, probar_codigo_util, probar_codigo_sospechoso,
                    probar_extractor,
                    probar_filtro_por_repeticion, probar_dividir, probar_vehiculos,
-                   probar_familias_de_pieza,
+                   probar_familias_de_pieza, probar_marcas_de_vehiculo, probar_ref_pegado,
                    probar_mapeo_columnas, probar_busqueda_entre_proveedores,
                    probar_codigo_generico_no_cruza):
         antes = len(fallos)

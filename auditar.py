@@ -1203,6 +1203,64 @@ for _w in ast.walk(ARBOL):
                      f"{_w.lineno}: deshace lo que se guardó, y sin avisar")
 
 
+
+# ============ 18. LIMIT sobre el PREFILTRO y no sobre el resultado ============
+# Traer «las primeras N filas» y recién después decidir cuáles sirven no devuelve las primeras
+# N buenas: devuelve las buenas que haya entre las primeras N cualesquiera. Y no avisa.
+# Pasó acá: catalogo_por_vehiculo() traía LIMIT 4000 filas cuya descripción contuviera el
+# nombre de la marca, y después confirmaba una por una. Para MAN, que por texto engancha con
+# MANGUERA, MANIJA y ALEMANIA, el tope se llenaba de mangueras y los productos de MAN de
+# verdad quedaban afuera: la pantalla salía vacía con el dato cargado.
+# Marca las consultas con LIMIT, sin ORDER BY, cuyas filas se filtran después en Python.
+for _f in ast.walk(ARBOL):
+    if not isinstance(_f, (ast.FunctionDef, ast.AsyncFunctionDef)):
+        continue
+    _con_limit = []
+    for _n in ast.walk(_f):
+        # También las f-string: la consulta con el WHERE armado aparte es justamente la forma
+        # en que estaba escrita la que tenía el error.
+        if isinstance(_n, ast.Constant) and isinstance(_n.value, str):
+            _texto = _n.value
+        elif isinstance(_n, ast.JoinedStr):
+            _texto = " ".join(_p.value for _p in _n.values
+                              if isinstance(_p, ast.Constant) and isinstance(_p.value, str))
+        else:
+            continue
+        _sql = " ".join(_texto.split()).upper()
+        if "SELECT" not in _sql or not re.search(r'\bLIMIT\b', _sql) or "ORDER BY" in _sql:
+            continue
+        # Igual que en el control 12: si la consulta ya excluye lo hecho (IS NULL, NOT EXISTS,
+        # NOT IN), el LIMIT es una tanda de trabajo que avanza, no un prefiltro que recorta.
+        if any(x in _sql for x in ("IS NULL", "NOT EXISTS", "NOT IN")):
+            continue
+        # LIMIT 1 es traer UN registro por clave, no una tanda.
+        if re.search(r'\bLIMIT\s+1\b', _sql):
+            continue
+        # Y se pide un LIKE: la firma del error es un filtro APROXIMADO en SQL, un tope, y la
+        # comprobación exacta después en Python. Cuando el WHERE ya es exacto (marca_id = ?),
+        # el tope es un presupuesto de trabajo a propósito, no un recorte accidental.
+        if "LIKE" not in _sql:
+            continue
+        _con_limit.append(_n.lineno)
+    if not _con_limit:
+        continue
+    # ¿se descartan filas después, en un for sobre el resultado?
+    # Un `continue` adentro de un except es saltear un error, no filtrar el resultado.
+    _en_except = {id(_x) for _h in ast.walk(_f) if isinstance(_h, ast.ExceptHandler)
+                  for _x in ast.walk(_h)}
+    _descarta = False
+    for _n in ast.walk(_f):
+        if not isinstance(_n, ast.For):
+            continue
+        for _x in ast.walk(_n):
+            if isinstance(_x, ast.Continue) and id(_x) not in _en_except:
+                _descarta = True
+    if _descarta:
+        reportar("REVISAR", _con_limit[0],
+                 f"'{_f.name}' corta con LIMIT y después descarta filas en Python: el tope cae "
+                 "sobre el prefiltro, así que lo que sirve puede quedar afuera del corte")
+
+
 # ============ Resultado ============
 orden = {"ERROR": 0, "REVISAR": 1, "AVISO": 2}
 problemas.sort(key=lambda x: (orden[x[0]], x[1]))

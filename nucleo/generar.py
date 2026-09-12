@@ -95,10 +95,13 @@ import unicodedata
 
 from .errores import anotar_error
 from .codigos import normalizar_texto, sanitizar
-''', ["MARCAS_VEHICULO", "_MARCAS_RIESGOSAS", "MARCAS_PARA_DESPEGAR", "_RE_PEGADO_MAYUS",
+''', ["MARCAS_VEHICULO", "ALIAS_MARCA_VEHICULO", "_escrituras_por_marca",
+      "ESCRITURAS_DE_MARCA", "_RE_MARCAS_VEHICULO", "marcas_vehiculo_en",
+      "_MARCAS_RIESGOSAS", "MARCAS_PARA_DESPEGAR", "_RE_PEGADO_MAYUS", "_RE_REF_PEGADO",
       "_RE_MARCAS_PEGADAS", "_RE_ESPACIOS", "separar_texto_pegado", "separar_por_marca_vehiculo",
       "FAMILIAS_REPUESTO", "_normalizar_desc", "clasificar_repuesto", "extraer_anios",
-      "PALABRAS_NO_MODELO", "_RE_PIEZA_POR_MEDIDA", "medidas_desde_descripcion"])
+      "PALABRAS_NO_MODELO", "es_nombre_de_modelo",
+      "_RE_PIEZA_POR_MEDIDA", "medidas_desde_descripcion"])
 
 # ---------------------------------------------------------------- planillas
 escribir("planillas.py", '''"""Leer una lista de proveedor y entender qué es cada columna.

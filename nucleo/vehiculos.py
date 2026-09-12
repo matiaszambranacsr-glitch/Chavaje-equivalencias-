@@ -48,7 +48,85 @@ MARCAS_VEHICULO = sorted(set([
     "MOTOMEL", "GUERRERO", "ZANELLA", "KYMCO", "APRILIA", "YAMAHA", "DUCATI", "PIAGGIO",
     "BENELLI", "CORVEN", "KELLER", "GILERA", "MONDIAL", "BAJAJ", "VESPA", "KTM", "SYM",
     "HERO", "TVS", "BETA",
+    # --- Abreviaturas que las listas escriben todo el tiempo ---
+    # Sin «VW» la app no tenía Volkswagen: 5.530 descripciones lo escriben así y ninguna dice
+    # VOLKSWAGEN, o sea que 6.348 productos —Gol, Polo, Amarok, Suran— no aparecían en la
+    # pantalla de vehículos ni existían para la detección de modelos. Las otras salieron de
+    # contar cuántas descripciones reales las usan como palabra suelta.
+    "VW", "CHEV", "PEUG", "PEU", "REN", "TOY", "CITR", "HYUN",
 ]), key=len, reverse=True)
+
+
+# La misma marca escrita de varias formas es UNA marca. Sin esto el desplegable mostraba
+# «MERCEDES BENZ», «M.BENZ», «MERCEDES» y «MERCEDES-BENZ» como si fueran cuatro autos
+# distintos, cada uno con una parte del catálogo.
+ALIAS_MARCA_VEHICULO = {
+    "VW": "VOLKSWAGEN", "CHEV": "CHEVROLET", "PEUG": "PEUGEOT", "PEU": "PEUGEOT",
+    "REN": "RENAULT", "TOY": "TOYOTA", "CITR": "CITROEN", "HYUN": "HYUNDAI",
+    "M.BENZ": "MERCEDES BENZ", "MERCEDES": "MERCEDES BENZ", "MERCEDES-BENZ": "MERCEDES BENZ",
+    "M. FERGUSON": "MASSEY FERGUSON", "M.W.M.": "MWM", "M.W.M": "MWM",
+}
+
+
+# Todas las formas de escribir cada marca, para poder prefiltrar en SQL: buscar «VOLKSWAGEN»
+# en la base se perdería los 5.530 productos que dicen «VW».
+def _escrituras_por_marca():
+    salida = {}
+    for marca in MARCAS_VEHICULO:
+        salida.setdefault(ALIAS_MARCA_VEHICULO.get(marca, marca), []).append(marca)
+    return salida
+
+
+ESCRITURAS_DE_MARCA = _escrituras_por_marca()
+
+
+# UN solo regex con todas las marcas en vez de uno por marca. Medido sobre las 61.574
+# descripciones reales: 15,2 s recorriendo marca por marca contra 2,1 s así, siete veces más
+# rápido, y es la función que corre una vez por producto en toda la pantalla de vehículos.
+# Las marcas van de más larga a más corta (así lo deja MARCAS_VEHICULO), que es lo que hace
+# que en la misma posición gane «MERCEDES BENZ» antes que «MERCEDES».
+# El borde excluye letras Y dígitos: sin los dígitos, «MAN» aparecía adentro de un número de
+# parte. Con letras solas ya no entraba en MANGUERA, pero sí en cosas como GM1234.
+# Y va en IGNORECASE. Antes se comparaba con la marca tal cual, en mayúsculas, contra el texto
+# tal cual venía: «BUJIA NAFTA Ford Escort - VW Gol» encontraba VW pero no Ford, porque el
+# proveedor lo escribió con minúsculas. Media lista de FISPA está escrita así.
+_RE_MARCAS_VEHICULO = re.compile(
+    r'(?<![A-Za-zÁÉÍÓÚÑ0-9])(' + "|".join(re.escape(_m) for _m in MARCAS_VEHICULO)
+    + r')(?![A-Za-zÁÉÍÓÚÑ0-9])', re.IGNORECASE)
+
+
+def marcas_vehiculo_en(descripcion):
+    """TODOS los autos que nombra una descripción: [(marca, categoría, resto), ...].
+
+    Una descripción de proveedor rara vez habla de un solo auto: «BUJIA NAFTA Ford Escort -
+    VW Gol - Kombi - Parati». Son 11.874 de las 61.574 descripciones reales (el 19%) las que
+    nombran dos marcas o más. Antes la app se quedaba con UNA —la que primero apareciera en
+    la lista de marcas, que está ordenada por largo, o sea prácticamente al azar— y el
+    producto desaparecía del catálogo de las otras. Se medía feo: CITROEN mostraba 1.831 de
+    los 5.106 productos que lo nombran, OPEL 156 de 2.679, PEUGEOT 1.433 de 5.139.
+
+    El «resto» de cada marca va hasta la marca siguiente, así que es lo que le corresponde a
+    ESE auto: en el ejemplo, «Escort» para Ford y «Gol - Kombi - Parati» para Volkswagen.
+    La «categoría» —el nombre de la pieza— es la misma para todas: es lo que va antes de la
+    primera marca."""
+    if not descripcion:
+        return []
+    texto = separar_texto_pegado(str(descripcion))
+    encontradas = list(_RE_MARCAS_VEHICULO.finditer(texto))
+    if not encontradas:
+        return []
+    categoria = texto[:encontradas[0].start()].strip(" -,/") or None
+    salida = []
+    vistas = set()
+    for i, m in enumerate(encontradas):
+        escrita = m.group(1).upper()
+        canonica = ALIAS_MARCA_VEHICULO.get(escrita, escrita)
+        if canonica in vistas:
+            continue          # «Ford ... Ford» es un solo Ford
+        vistas.add(canonica)
+        hasta = encontradas[i + 1].start() if i + 1 < len(encontradas) else len(texto)
+        salida.append((canonica, categoria, texto[m.end():hasta].strip(" -,/") or None))
+    return salida
 
 
 # Marcas que se usan para despegar descripciones. Se dejan solo las de 5 letras o más y se
@@ -66,6 +144,20 @@ MARCAS_PARA_DESPEGAR = [m for m in MARCAS_VEHICULO
 # fila: 332 µs por descripción, o sea 3,3 s en una lista de 10.000 filas — diez veces más que
 # toda la importación junta.
 _RE_PEGADO_MAYUS = re.compile(r'(?<=[a-záéíóúñ])(?=[A-ZÁÉÍÓÚÑ])')
+
+
+# «REF» de «REF. ORIG.» pegado a lo que viene antes. Es la forma de escribir de una de las
+# listas y aparece 9.038 veces: «Passat 1 8 98REF ORIG 030121121B», «16VREF ORIG 0280155868».
+# Hace daño dos veces:
+#   · «98REF», «16VREF», «HDIREF», «PARTNERREF» se cuentan como si fueran modelos de auto y
+#     ensucian el desplegable de la pantalla de vehículos;
+#   · y sobre todo tapa el marcador: «REF ORIG» es el proveedor diciendo EXPLÍCITAMENTE cuál
+#     es el código de fábrica, que es la mejor información que puede llegar. Pegado, el
+#     marcador no se reconoce y el código que le sigue queda como una adivinanza más.
+# Se pide que después venga ORIG/ORG/ORI/OEM para no partir un código que termine en REF por
+# casualidad. Medido sobre las descripciones reales: de 9.038 casos, los 9.038 siguen esa
+# forma, así que la condición no deja nada afuera y sí evita el accidente.
+_RE_REF_PEGADO = re.compile(r'([A-Za-z0-9])REF(?=\s*\.?\s*(?:ORIG|ORG|ORI|OEM)\b)', re.I)
 
 
 # Se rodea la marca de espacios y después se colapsan los sobrantes. Es más simple y más
@@ -89,10 +181,14 @@ def separar_texto_pegado(texto):
 
     El punto 2 antes solo funcionaba si la descripción tenía minúsculas: pedía que el carácter
     anterior a la marca NO fuera mayúscula, así que en una lista escrita toda en mayúsculas
-    —que son la mayoría— no separaba nada."""
+    —que son la mayoría— no separaba nada.
+
+    Y un punto 3: «REF» pegado al final de la palabra anterior, cuando después viene ORIG.
+    Ver _RE_REF_PEGADO."""
     if not texto:
         return texto
     t = str(texto).strip()
+    t = _RE_REF_PEGADO.sub(r'\1 REF ', t)
     t = _RE_PEGADO_MAYUS.sub(' ', t)
     if _RE_MARCAS_PEGADAS is not None:
         t = _RE_MARCAS_PEGADAS.sub(r' \1 ', t)
@@ -100,22 +196,23 @@ def separar_texto_pegado(texto):
 
 
 def separar_por_marca_vehiculo(descripcion):
-    """Parte una descripción en (categoría, marca del vehículo, resto).
+    """Parte una descripción en (categoría, marca del vehículo, resto), con la PRIMERA marca.
     Ejemplo: 'Junta Tapa de Cilindros FORD TAUNUS COUPE'
              -> ('Junta Tapa de Cilindros', 'FORD', 'TAUNUS COUPE')
     Es lo que permite armar el catálogo por vehículo sin cargar nada a mano: la relación
-    pieza-vehículo ya venía en las listas de los proveedores, solo hay que leerla."""
-    if not descripcion:
-        return None, None, None
-    texto = separar_texto_pegado(str(descripcion))
-    for marca in MARCAS_VEHICULO:
-        patron = re.compile(r'(?<![A-Za-zÁÉÍÓÚÑ])' + re.escape(marca) + r'(?![A-Za-zÁÉÍÓÚÑ])')
-        m = patron.search(texto)
-        if m:
-            categoria = texto[:m.start()].strip(" -,/")
-            resto = texto[m.end():].strip(" -,/")
-            return (categoria or None), marca, (resto or None)
-    return texto.strip() or None, None, None
+    pieza-vehículo ya venía en las listas de los proveedores, solo hay que leerla.
+
+    «La primera» es la que aparece antes en el texto, que es la aplicación principal. Antes era
+    la primera de la LISTA de marcas, que está ordenada por largo: en «BULBO ... PEUGEOT 405 -
+    CITROEN ZX» ganaba cualquiera de las dos según cómo hubiera quedado el orden del set, y eso
+    no es una decisión, es azar. Cuando la descripción nombra varios autos —el 19% de los
+    casos— lo correcto no es elegir uno: para eso está marcas_vehiculo_en()."""
+    tramos = marcas_vehiculo_en(descripcion)
+    if not tramos:
+        texto = separar_texto_pegado(str(descripcion)) if descripcion else ""
+        return (texto.strip() or None), None, None
+    marca, categoria, resto = tramos[0]
+    return categoria, marca, resto
 
 
 # Familias de repuestos. Gana la palabra clave MÁS LARGA que aparezca en la descripción, así
@@ -326,7 +423,32 @@ PALABRAS_NO_MODELO = {
     "ALUMINIO", "CLAVITO", "BANCADA", "CAPUCHON", "BUJIA", "BRIDA", "CAÑO", "CALEFACCION",
     "ARBOL", "LEVAS", "SALIDA", "TAPON", "VALVULA", "MARIPOSA", "BASE", "DISTRIBUIDOR",
     "CHUPADOR", "INTERMEDIA", "V", "L", "S", "R", "AX", "DD", "F",
+    # Marcas de REPUESTO, que no son modelos de auto. Estaban saliendo primeras en el
+    # desplegable «Modelo / motor»: DELCO encabezaba la lista de Ford con 951 apariciones y
+    # NIPPONDENSO la de Toyota con 476, antes que COROLLA. El filtro de «aparece sobre todo
+    # en esta marca» no las agarra porque un proveedor sí las nombra casi siempre junto al
+    # mismo auto.
+    "BOSCH", "VALEO", "DELCO", "DENSO", "NIPPONDENSO", "MAGNETI", "MAGNETTI", "MARELLI",
+    "HITACHI", "LUCAS", "SIEMENS", "DELPHI", "JAEGER", "MASSER", "CAUPLAS", "WEBER", "SOLEX",
+    "SKF", "NGK", "MANN", "VITRON", "TAILLOT", "PAIA", "WAHLER", "GATES", "SACHS", "MONROE",
+    "FRAM", "BERU", "FACET", "PIERBURG", "MAHLE", "ELRING", "REINZ", "AJUSA", "CORTECO",
+    "PAYEN", "TRW", "FERODO", "BREMBO", "NAKATA", "ILUMA", "DPB", "FISPA", "CBOSCH",
 }
+
+
+def es_nombre_de_modelo(token):
+    """¿Esta palabra puede ser el nombre de un modelo, o es un número de parte?
+
+    La diferencia que sí se puede medir es cuántos dígitos tiene. Un modelo lleva pocos —
+    F-250, S-10, 4RUNNER, C20NE, XU7JP4— y un número de parte lleva muchos: A0091547202,
+    M009T61671, EA011610461, SR0465N. Se revisaron a mano los 2.655 tokens del catálogo real
+    que tienen cuatro dígitos o más, ordenados por cuánto aparecen, y no hay un solo modelo
+    de verdad entre ellos; son todos números de Bosch, Valeo, Mitsubishi y Cummins.
+
+    El precio de la regla: se pierden nombres de camión tipo «VW 11.000» cuando la lista los
+    escribe pegados («VW11000EB»). Vale la pena: esto arma un desplegable para elegir, no una
+    coincidencia de códigos, y de 5.670 «modelos» detectados 2.655 eran basura."""
+    return sum(ch.isdigit() for ch in token) <= 3
 
 
 
