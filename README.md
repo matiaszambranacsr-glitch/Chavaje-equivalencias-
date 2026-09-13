@@ -75,6 +75,13 @@ Hay dos candados, y no son lo mismo:
   precio y el stock. Alcanza con la contraseña de operador, y como el nivel queda en la
   sesión se pide una vez por turno, no en cada producto.
 
+## Secrets de Streamlit
+
+Se leen con `secretos_app()`, nunca con `st.secrets` directo. El atributo existe siempre pero
+LEERLO revienta si el servidor no tiene un `secrets.toml`, así que el `if hasattr(st, "secrets")`
+que había no protegía nada: en una instalación nueva, apretar «Ingresar con contraseña» tiraba
+la excepción en pantalla. El auditor marca cualquier vuelta a esa forma.
+
 ## La pantalla de vehículos
 
 «Buscar por auto» no sale de un catálogo comprado: sale de leer las descripciones de tus

@@ -328,6 +328,29 @@ db_lock = threading.Lock()
 SEMILLA_WMI_VERSION = "2"
 
 
+def secretos_app():
+    """Los Secrets de Streamlit, o {} si en este servidor no hay ninguno configurado.
+
+    Preguntar si el atributo existe NO alcanza, y era lo que se hacía en los ocho lugares que
+    leen secrets. El atributo existe siempre; lo que falla es LEERLO: sin un secrets.toml, el
+    primer acceso tira StreamlitSecretNotFoundError. O sea que el guardián nunca se activaba y
+    la excepción salía igual.
+
+    No es un detalle de una función de IA: lo mismo pasaba en validar_password(). En un
+    servidor sin secrets.toml —una instalación nueva, una copia local para probar— apretar
+    «🔓 Ingresar con contraseña» tiraba la excepción en pantalla en vez de decir «contraseña
+    incorrecta», y con ella se caía también cualquier candado de administrador, porque todos
+    terminan llamando a validar_password().
+
+    Probado: leer una clave cualquiera levanta StreamlitSecretNotFoundError cuando no hay
+    archivo de secrets."""
+    try:
+        st.secrets.get("_sonda_de_existencia")
+        return st.secrets
+    except Exception:
+        return {}
+
+
 def es_admin():
     return st.session_state.get("nivel_usuario") == "admin"
 
@@ -496,7 +519,7 @@ def validar_password(clave):
     desde la propia app (tabla usuarios). Devuelve (nombre, nivel, error) — nivel es 'admin',
     'operador', o None si no matcheó ninguna. Los mecánicos externos se validan aparte, con
     validar_password_mecanico(), porque tienen su propio portal separado."""
-    secretos = st.secrets if hasattr(st, "secrets") else {}
+    secretos = secretos_app()
     # [admin_passwords] / [operador_passwords] en Streamlit Secrets, cada una con nombre:clave.
     # También soporta la forma anterior de una sola clave (admin_password) por compatibilidad.
     admin_passwords = dict(secretos.get("admin_passwords", {}))
@@ -2768,8 +2791,25 @@ def eliminar_catalogo_externo(catalogo_id):
 # ============================================================================================
 # INTEGRIDAD DE LA BASE, BACKUP Y RESTAURACIÓN
 # ============================================================================================
+def contar_huerfanos():
+    """Cuántos productos no tienen ninguna equivalencia. Es lo que borraría depurar_huerfanos().
+
+    Existe para poder decir el número ANTES de borrar. Medido sobre el catálogo real: 25.143 de
+    61.574, el 41%. Ver depurar_huerfanos() para por qué eso no es basura."""
+    c.execute("""SELECT COUNT(*) FROM productos
+                 WHERE id NOT IN (SELECT producto_a_id FROM equivalencias)
+                   AND id NOT IN (SELECT producto_b_id FROM equivalencias)""")
+    return c.fetchone()[0]
+
+
 def depurar_huerfanos():
-    """Borra productos que no tienen ninguna equivalencia vinculada (quedaron sueltos)."""
+    """Borra productos que no tienen ninguna equivalencia vinculada (quedaron sueltos).
+
+    OJO con lo que esto significa de verdad. «Sin equivalencia» NO quiere decir «cargado por
+    error»: quiere decir que todavía nadie lo cruzó con nada. En el catálogo real son 25.143
+    productos de 61.574 —el 41%—, casi todos perfectamente vendibles, con su precio y su stock.
+    Borrarlos es tirar cuatro de cada diez repuestos del mostrador.
+    Por eso la pantalla muestra el número antes de preguntar, en vez de ofrecer «limpiar»."""
     with db_lock:
         c.execute("""
             DELETE FROM productos
@@ -2906,7 +2946,7 @@ def restaurar_backup(archivo_subido):
 def config_github():
     """Los datos para subir el backup solo. Devuelve None si no están configurados."""
     try:
-        secretos = st.secrets if hasattr(st, "secrets") else {}
+        secretos = secretos_app()
         token = secretos.get("github_token")
         repo = secretos.get("github_repo")      # formato: "usuario/repositorio"
     except Exception as _err:
@@ -7067,7 +7107,7 @@ def config_portal(nombre_marca):
         url_ficha   = "https://proveedor.com/producto/{codigo}"
     """
     try:
-        secretos = st.secrets if hasattr(st, "secrets") else {}
+        secretos = secretos_app()
         cfg = secretos.get(f"portal_{(nombre_marca or '').strip().upper()}")
     except Exception as _err:
         anotar_error("config_portal", _err)
@@ -10251,7 +10291,7 @@ def identificar_pieza_por_foto(imagen_bytes):
     from google import genai
     from google.genai import types
 
-    api_key = st.secrets.get("gemini_api_key") if hasattr(st, "secrets") else None
+    api_key = secretos_app().get("gemini_api_key")
     if not api_key:
         return None, "No configuraste 'gemini_api_key' en Streamlit Cloud (Settings → Secrets)."
 
@@ -10302,7 +10342,7 @@ def extraer_datos_cedula(imagen_bytes):
     from google.genai import types
     import json
 
-    api_key = st.secrets.get("gemini_api_key") if hasattr(st, "secrets") else None
+    api_key = secretos_app().get("gemini_api_key")
     if not api_key:
         return None, "No configuraste 'gemini_api_key' en Streamlit Cloud (Settings → Secrets)."
 
@@ -10341,7 +10381,7 @@ def transcribir_audio(audio_bytes, mime_type="audio/wav"):
     from google import genai
     from google.genai import types
 
-    api_key = st.secrets.get("gemini_api_key") if hasattr(st, "secrets") else None
+    api_key = secretos_app().get("gemini_api_key")
     if not api_key:
         return None, "No configuraste 'gemini_api_key' en Streamlit Cloud (Settings → Secrets)."
 
@@ -10368,7 +10408,7 @@ def leer_remito_por_foto(imagen_bytes):
     from google.genai import types
     import json
 
-    api_key = st.secrets.get("gemini_api_key") if hasattr(st, "secrets") else None
+    api_key = secretos_app().get("gemini_api_key")
     if not api_key:
         return None, "No configuraste 'gemini_api_key' en Streamlit Cloud (Settings → Secrets)."
 
@@ -14043,7 +14083,7 @@ def generar_esquema_orientativo_ia(marca, modelo, motorizacion, sistema):
     from google import genai
     from PIL import Image as PILImage
 
-    api_key = st.secrets.get("gemini_api_key_imagenes") if hasattr(st, "secrets") else None
+    api_key = secretos_app().get("gemini_api_key_imagenes")
     if not api_key:
         return None, (
             "No configuraste 'gemini_api_key_imagenes' en Streamlit Cloud (Settings → Secrets). "
@@ -19014,17 +19054,30 @@ if pagina == PAGINAS[3]:
                     )}
                 )
             st.markdown("**Limpieza de la base**")
+            # El número va ANTES del botón, y a propósito. El texto de antes decía «códigos
+            # cargados por error» y ofrecía borrarlos sin decir cuántos eran: sobre el catálogo
+            # real son 25.143 de 61.574, el 41%, casi todos repuestos vendibles que
+            # simplemente todavía no cruzó nadie. Ese botón no limpiaba, vaciaba el negocio.
+            _sueltos = contar_huerfanos()
+            c.execute("SELECT COUNT(*) FROM productos")
+            _todos = c.fetchone()[0] or 1
+            _porcentaje = _sueltos * 100 // _todos
             st.caption(
-                "Con el tiempo pueden quedar códigos cargados por error que no están vinculados a "
-                "ninguna equivalencia. Este botón los borra."
+                "Un producto «sin equivalencia» es uno que todavía NO cruzaste con ningún otro "
+                "código. No quiere decir que esté mal cargado: puede tener precio, stock y "
+                "venderse igual. Borralos solo si sabés que entraron por una importación fallida."
             )
-            if st.button("🧹 Borrar productos sin ninguna equivalencia"):
-                if pedir_password_admin("borrar productos sin equivalencias"):
-                    borrados = depurar_huerfanos()
-                    if borrados:
-                        st.success(f"Se borraron {borrados} producto(s) sin equivalencias.")
-                    else:
-                        st.info("No había productos sueltos para borrar.")
+            if not _sueltos:
+                st.caption("✅ No hay productos sin equivalencias.")
+            else:
+                (st.warning if _porcentaje >= 20 else st.info)(
+                    f"Hay **{_sueltos:,}** producto(s) sin ninguna equivalencia, de {_todos:,} "
+                    f"— el {_porcentaje}% del catálogo."
+                )
+                if st.button(f"🧹 Borrar esos {_sueltos:,} productos"):
+                    if pedir_password_admin("borrar productos sin equivalencias"):
+                        borrados = depurar_huerfanos()
+                        st.success(f"Se borraron {borrados:,} producto(s) sin equivalencias.")
             st.markdown("**🗑️ Papelera**")
             explicar(
                 "Cuando borrás una marca entera, un combo, un alias de transferencia o un producto "

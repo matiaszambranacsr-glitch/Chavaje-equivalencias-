@@ -1271,7 +1271,10 @@ for _f in ast.walk(ARBOL):
 # apretó una vez y reescribió 9.147 descripciones.
 # Esto marca las llamadas destructivas hechas desde la pantalla (fuera de cualquier función)
 # que no tengan un pedir_password_admin() o un es_admin() arriba.
-_DESTRUCTIVAS = re.compile(r'^(eliminar_|borrar_|vaciar_|fusionar_|deshacer_|reparar_|'
+# «depurar_» está en la lista por un motivo concreto: depurar_huerfanos() borra los productos
+# que no tienen ninguna equivalencia, que en el catálogo real son 25.143 de 61.574 — el 41%.
+# El nombre no suena destructivo y por eso casi se pasa por alto.
+_DESTRUCTIVAS = re.compile(r'^(eliminar_|borrar_|vaciar_|fusionar_|deshacer_|reparar_|depurar_|'
                            r'aumentar_precios|crear_usuario|cambiar_password|importar_dtc_masivo|'
                            r'restaurar_backup|restaurar_de_papelera|recalcular_confianzas|'
                            r'actualizar_precio_stock)')
@@ -1309,6 +1312,26 @@ for _n in ast.walk(ARBOL):
                  f"{_n.func.id}() se dispara desde la pantalla sin candado: cualquiera que "
                  "entre con «Continuar» puede hacerlo. Falta pedir_password_admin() o, si es "
                  "trabajo de mostrador, pedir_password_operador_o_admin()")
+
+
+
+# ============ 20. Guardián que no guarda: hasattr(st, "secrets") ============
+# El atributo `secrets` de Streamlit existe SIEMPRE; lo que falla es leerlo. Sin un
+# secrets.toml en el servidor, el primer acceso levanta StreamlitSecretNotFoundError, así que
+# `st.secrets.get("x") if hasattr(st, "secrets") else None` no protege nada: entra por la rama
+# de la izquierda y explota igual.
+# Estaba escrito así en los ocho lugares que leen secrets, y uno de ellos era validar_password():
+# en un servidor sin secrets.toml, apretar «Ingresar con contraseña» tiraba la excepción en
+# pantalla en vez de decir «contraseña incorrecta», y con ella caía cualquier candado de
+# administrador. Lo que sí funciona es intentar leer y atrapar, que es lo que hace
+# secretos_app().
+for _n in ast.walk(ARBOL):
+    if (isinstance(_n, ast.Call) and isinstance(_n.func, ast.Name) and _n.func.id == "hasattr"
+            and len(_n.args) == 2 and isinstance(_n.args[1], ast.Constant)
+            and _n.args[1].value == "secrets"):
+        reportar("ERROR", _n.lineno,
+                 'hasattr(st, "secrets") no protege nada: el atributo existe siempre y lo que '
+                 "falla es leerlo. Usar secretos_app()")
 
 
 # ============ Resultado ============
