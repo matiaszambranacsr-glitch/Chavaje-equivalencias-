@@ -40,10 +40,23 @@ def probar_sanitizar():
     # signo. Sin esa distinción, el filtro de combustible Toyota 23390-0E010 se guardaba como
     # el número 2339000000000000 y el producto quedaba imposible de encontrar. Son 114 códigos
     # distintos, 230 apariciones, en cinco listas reales.
-    for real in ("233900E010", "2263051E00", "2263051E10", "1E0318760", "5960E6", "123456E7"):
+    # «140E24» y «1984E0» se agregaron después, y no salieron de pensar casos: se buscó un
+    # código del catálogo tal cual estaba cargado y el buscador dijo que no existía. Estaba
+    # guardado con codigo_clean = '139999999999999999798673408'.
+    for real in ("233900E010", "2263051E00", "2263051E10", "1E0318760", "5960E6", "123456E7",
+                 "140E24", "1984E0", "1267E3", "3322085E00"):
         igual(codigos.sanitizar(real), real, f"«{real}» es un código, no notación científica")
         cierto(not codigos.codigo_sospechoso(real, "")[0],
                f"«{real}» no se puede marcar como número roto")
+
+    # Limpiar lo ya limpio no puede cambiar nada. De esto depende la pantalla que encuentra los
+    # productos con el código de búsqueda viejo: compara lo guardado contra sanitizar(crudo), y
+    # si la función no fuera estable marcaría filas sanas para siempre. Comprobado además
+    # contra los 61.574 códigos del catálogo real: cero diferencias.
+    for x in ("233900E010", "0221504036", "W712/94", "2776400.0", "FLO35122A", "26001FISPA",
+              "TH9207.80J", "BI1043MMR", "140E24", "0001218760"):
+        una = codigos.sanitizar(x)
+        igual(codigos.sanitizar(una), una, f"sanitizar() es estable sobre «{x}»")
 
 
 def probar_codigo_util():

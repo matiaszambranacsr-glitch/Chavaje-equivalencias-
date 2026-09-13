@@ -5603,6 +5603,35 @@ def filas_a_listas(cursor):
     return [dict(row) for row in cursor.fetchall()]
 
 
+def buscar_con_variantes_del_cero(clean_code, marca_filtro="Todas", max_saltos=None,
+                                  confianza_minima=None):
+    """Busca el código y, SOLO si no encuentra nada, reintenta con y sin el cero de adelante.
+
+    Devuelve (resultados, aviso). El aviso es para poder decirle a la persona que lo que está
+    viendo no es exactamente lo que escribió.
+
+    Por qué hace falta: los códigos de Bosch, Siemens y varios más arrancan con cero, y en el
+    mostrador ese cero se pierde — al dictarlo por teléfono, al leerlo de una caja gastada, al
+    copiarlo de un Excel que lo comió. En el catálogo real son 4.086 códigos que empiezan con
+    cero, y 4.026 de ellos HOY no aparecen si se escribe sin él.
+
+    Por qué el reintento es seguro: corre únicamente cuando la búsqueda exacta no devolvió
+    nada. Hay 60 códigos del catálogo que, sin el cero, coinciden con otro código distinto —y
+    la mitad son de otra familia de repuestos—, pero en esos casos la búsqueda exacta SÍ
+    encuentra algo, así que el reintento no llega a correr nunca."""
+    res = buscar_por_codigo(clean_code, marca_filtro, max_saltos, confianza_minima)
+    if res or not clean_code:
+        return res, None
+    for variante in (clean_code.lstrip("0"), "0" + clean_code):
+        if variante and variante != clean_code:
+            res = buscar_por_codigo(variante, marca_filtro, max_saltos, confianza_minima)
+            if res:
+                return res, (f"No hay nada cargado como «{clean_code}», pero sí como "
+                             f"«{variante}» — los códigos que empiezan con cero se escriben "
+                             "de las dos formas. Confirmá que sea el mismo repuesto.")
+    return [], None
+
+
 def buscar_por_codigo(clean_code, marca_filtro="Todas", max_saltos=None, confianza_minima=None):
     """Busca un código y todo lo que esté encadenado con él.
 
@@ -5833,6 +5862,59 @@ def armar_lista_picking(codigos_texto):
 def contar_codigos_con_decimal():
     c.execute(r"SELECT COUNT(*) FROM productos WHERE codigo_raw LIKE '%.0' AND codigo_raw GLOB '[0-9]*'")
     return c.fetchone()[0]
+
+
+def codigos_limpios_desfasados(limite=None):
+    """Productos cuyo codigo_clean guardado ya no es el que daría sanitizar() hoy.
+
+    Cada vez que se arregla algo en sanitizar(), las filas que YA estaban importadas se quedan
+    con el valor viejo. Y el valor viejo no es un detalle cosmético: codigo_clean es por donde
+    busca la app, así que un producto con el limpio equivocado no aparece nunca, ni tipeando el
+    código exacto que dice la caja.
+
+    Pasó de verdad y así se encontró: se buscó «140E24», que está cargado, y no salió nada. El
+    producto tenía guardado codigo_clean = '139999999999999999798673408', o sea 1,4 por diez a
+    la 26 — la lectura como notación científica que se corrigió después. Sobre el catálogo real
+    son 66 productos: 51 de notación científica (1984E0 guardado como «1984», 233900E010 como
+    «2339000000000000») y 15 de otras causas. Los primeros son peores de lo que parece: además
+    de no encontrarse, «1984E0» guardado como «1984» puede cruzarse con cualquier otra cosa que
+    limpie a «1984»."""
+    c.execute("SELECT id, marca_id, codigo_raw, codigo_clean FROM productos WHERE codigo_raw IS NOT NULL")
+    salida = []
+    for fila in c.fetchall():
+        correcto = sanitizar(fila["codigo_raw"])
+        if correcto and correcto != fila["codigo_clean"]:
+            salida.append({"id": fila["id"], "marca_id": fila["marca_id"],
+                           "raw": fila["codigo_raw"], "guardado": fila["codigo_clean"],
+                           "correcto": correcto})
+            if limite and len(salida) >= limite:
+                break
+    return salida
+
+
+def reparar_codigos_limpios():
+    """Recalcula el codigo_clean de los que quedaron desfasados. Devuelve cuántos se arreglaron.
+
+    Si al corregirlo choca con otro producto de la misma marca —que es el mismo repuesto
+    cargado dos veces— se fusionan, igual que en reparar_codigos_con_decimal(). En el catálogo
+    real no choca ninguno, pero la base tiene UNIQUE(codigo_clean, marca_id) y sin esto la
+    reparación se cortaría a la mitad con un IntegrityError."""
+    pendientes = codigos_limpios_desfasados()
+    arreglados = 0
+    with db_lock, transaccion():
+        for item in pendientes:
+            try:
+                c.execute("UPDATE productos SET codigo_clean = ? WHERE id = ?",
+                          (item["correcto"], item["id"]))
+                arreglados += 1
+            except sqlite3.IntegrityError as _err:
+                anotar_error("reparar_codigos_limpios", _err)
+                c.execute("SELECT id FROM productos WHERE marca_id = ? AND codigo_clean = ? AND id <> ?",
+                          (item["marca_id"], item["correcto"], item["id"]))
+                bueno = c.fetchone()
+                if bueno and fusionar_productos(item["id"], bueno["id"]):
+                    arreglados += 1
+    return arreglados
 
 
 def reparar_codigos_con_decimal():
@@ -15083,14 +15165,16 @@ Casi todo lo que edita o borra algo pide la contraseña de administrador la prim
                             {"codigo_individual": codigo_individual, "clean": None, "res": None}
                         )
                         continue
-                    res = buscar_por_codigo(clean, marca_filtro, max_saltos,
-                                             confianza_minima=50 if solo_confiables else None)
+                    res, aviso_cero = buscar_con_variantes_del_cero(
+                        clean, marca_filtro, max_saltos,
+                        confianza_minima=50 if solo_confiables else None)
                     if res:
                         incrementar_veces_buscado(clean)
                     else:
                         registrar_busqueda_sin_resultado(codigo_individual)
                     resultados_guardados.append(
-                        {"codigo_individual": codigo_individual, "clean": clean, "res": res}
+                        {"codigo_individual": codigo_individual, "clean": clean, "res": res,
+                         "aviso": aviso_cero}
                     )
                 st.session_state["ultima_busqueda_codigo"] = resultados_guardados
 
@@ -15111,6 +15195,8 @@ Casi todo lo que edita o borra algo pide la contraseña de administrador la prim
                     etiqueta_resultado = f"🔎 {codigo_individual} — sin resultados"
 
                 with st.expander(etiqueta_resultado, expanded=(total_codigos_buscados == 1)):
+                    if item.get("aviso"):
+                        st.warning(item["aviso"])
                     if res:
                         st.success(f"Se encontraron {len(res)} coincidencias:")
 
@@ -17982,6 +18068,33 @@ if pagina == PAGINAS[3]:
                 "quedaban con un cero de más. Esto los deja como corresponde."
             )
             cantidad_decimal = contar_codigos_con_decimal()
+            # Códigos que no se encuentran ni tipeándolos exactos, porque el codigo_clean
+            # guardado quedó viejo. Va antes que el del '.0' porque es el que más duele: el
+            # producto está cargado, con precio y stock, y el buscador jura que no existe.
+            _desfasados = codigos_limpios_desfasados()
+            st.markdown("**🔎 Códigos que el buscador no encuentra**")
+            if not _desfasados:
+                st.caption("✅ Todos los códigos se buscan por donde corresponde.")
+            else:
+                st.warning(
+                    f"⚠️ Hay **{len(_desfasados)}** producto(s) cargados que NO aparecen al "
+                    "buscarlos, ni escribiendo el código exacto: quedaron guardados con una "
+                    "versión vieja del código de búsqueda."
+                )
+                st.dataframe(
+                    [{"Código": x["raw"], "Se busca como": x["guardado"],
+                      "Debería buscarse como": x["correcto"]} for x in _desfasados[:25]],
+                    width="stretch", hide_index=True)
+                if len(_desfasados) > 25:
+                    st.caption(f"…y {len(_desfasados) - 25} más.")
+                if st.button(f"🔧 Arreglar esos {len(_desfasados)} códigos"):
+                    if pedir_password_admin("recalcular códigos de búsqueda"):
+                        _n = reparar_codigos_limpios()
+                        avisar("success", f"Se arreglaron {_n} código(s). Ya se pueden buscar.")
+                        invalidar_salud()
+                        st.rerun()
+
+            st.markdown("**🔢 Códigos con el '.0' de Excel**")
             if cantidad_decimal:
                 st.warning(f"⚠️ Hay {cantidad_decimal} producto(s) con el código terminado en '.0'.")
                 if st.button(f"🔧 Arreglar los {cantidad_decimal} códigos"):

@@ -75,6 +75,17 @@ Hay dos candados, y no son lo mismo:
   precio y el stock. Alcanza con la contraseña de operador, y como el nivel queda en la
   sesión se pide una vez por turno, no en cada producto.
 
+## Cuando mejorás `sanitizar()`
+
+`codigo_clean` es por donde busca la app, y se calcula UNA vez, al importar. Así que cada
+arreglo en `sanitizar()` deja atrás a las filas que ya estaban: siguen buscándose por el valor
+viejo y no aparecen ni escribiendo el código exacto de la caja.
+
+Por eso existe Mantenimiento → **«🔎 Códigos que el buscador no encuentra»**, que compara lo
+guardado contra `sanitizar(codigo_raw)` y los recalcula. Después de tocar `sanitizar()`, mirá
+ahí. Y no rompas la propiedad de la que depende: limpiar lo ya limpio tiene que dar lo mismo
+(hay una prueba en `nucleo/pruebas.py`).
+
 ## Secrets de Streamlit
 
 Se leen con `secretos_app()`, nunca con `st.secrets` directo. El atributo existe siempre pero
