@@ -167,6 +167,24 @@ propias listas. Tres cosas que conviene saber antes de tocarla:
 - **El número que muestra el desplegable tiene que ser el que devuelve la pantalla.** Eran dos
   cálculos distintos y no coincidían: MAN ofrecía 749 productos y daba 3.
 
+## Antes de desplegar: la copia de arranque
+
+**Streamlit Cloud borra el disco en cada redespliegue.** Lo único que sobrevive son los
+archivos del repositorio, así que si no hay un `datos_iniciales.db` subido, la app arranca
+VACÍA y hay que volver a importar todas las listas.
+
+El paso, cada vez que se va a desplegar algo importante:
+
+1. En la app: **📊 Estadísticas → 💾 Backup y config → descargar el backup**.
+2. Subir ese archivo al repositorio con el nombre exacto `datos_iniciales.db`.
+3. Recién ahí, mergear.
+
+`_restaurar_desde_semilla()` lo usa solo si la base está vacía, así que no pisa nada.
+
+Ojo con una trampa que ya estaba: el `.gitignore` tenía `*.db`, que ignoraba también a
+`datos_iniciales.db`. Se hacía `git add`, git no se quejaba, el archivo no subía, y el
+problema aparecía recién al redesplegar. Ahora hay una excepción explícita.
+
 ## Base de datos
 
 SQLite en modo WAL, con **una conexión por sesión** para que puedan usar la app dos personas a

@@ -1,5 +1,12 @@
 __pycache__/
 *.pyc
+# La base de trabajo no va al repositorio: cambia todo el tiempo y pesa.
 *.db
+# PERO la copia de arranque SÍ tiene que ir. Streamlit Cloud borra el disco en cada
+# redespliegue, y «datos_iniciales.db» es lo único que sobrevive, porque es un archivo del
+# repositorio. Sin esta excepción, el *.db de arriba la ignoraba en silencio: se hacía
+# «git add datos_iniciales.db», git no decía nada, no se subía, y al redesplegar la app
+# arrancaba vacía. Ver _restaurar_desde_semilla() en app.py.
+!datos_iniciales.db
 *.db-wal
 *.db-shm
