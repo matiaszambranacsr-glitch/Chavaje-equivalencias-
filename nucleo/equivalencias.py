@@ -33,10 +33,15 @@ CREATE TABLE IF NOT EXISTS productos (
     marca_id INTEGER NOT NULL REFERENCES marcas(id) ON DELETE CASCADE,
     precio REAL, precio_costo REAL, stock INTEGER DEFAULT 0,
     favorito INTEGER DEFAULT 0, imagen_url TEXT, imagen_thumb TEXT,
+    -- el código de barras del proveedor. Va acá y NO como un código de fábrica: es de ese
+    -- proveedor y de nadie más, así que no puede cruzar dos listas. La búsqueda lo mira igual,
+    -- para que escanear la caja encuentre el repuesto.
+    codigo_barras TEXT,
     -- el mismo código puede existir en varias marcas: son productos distintos a propósito
     UNIQUE(codigo_clean, marca_id)
 );
 CREATE INDEX IF NOT EXISTS idx_productos_clean ON productos(codigo_clean);
+CREATE INDEX IF NOT EXISTS idx_codigo_barras ON productos(codigo_barras);
 
 CREATE TABLE IF NOT EXISTS equivalencias (
     producto_a_id INTEGER NOT NULL REFERENCES productos(id) ON DELETE CASCADE,
@@ -133,9 +138,14 @@ def buscar_por_codigo(cur, clean_code, marca_filtro="Todas", max_saltos=None, co
     # el mismo repuesto. El corte va en los puramente numéricos de menos de 6 dígitos y en
     # cualquier código de menos de 4 caracteres — lo distintivo se mantiene, lo genérico no
     # cruza. Es lo que evita que este atajo fusione familias que no tienen nada que ver.
+    # El arranque mira las dos columnas: el código y el código de barras. Escanear la caja
+    # tiene que traer el repuesto y toda su red de equivalencias, igual que si se hubiera
+    # tecleado el número de parte. Antes eso funcionaba porque el EAN se cargaba como si fuera
+    # un código de fábrica —con la equivalencia falsa que eso implicaba—; ahora vive en su
+    # propia columna y la búsqueda la lee de ahí.
     query = '''
     WITH RECURSIVE Red(id, saltos, peor, por_codigo) AS (
-        SELECT id, 0, 100, 0 FROM productos WHERE codigo_clean = ?
+        SELECT id, 0, 100, 0 FROM productos WHERE codigo_clean = ? OR codigo_barras = ?
         UNION
         SELECT CASE WHEN eq.producto_a_id = re.id THEN eq.producto_b_id ELSE eq.producto_a_id END,
                re.saltos + 1,
@@ -161,7 +171,7 @@ def buscar_por_codigo(cur, clean_code, marca_filtro="Todas", max_saltos=None, co
            MIN(r.por_codigo) AS "_por_codigo"
     FROM Red r JOIN productos p ON p.id = r.id JOIN marcas m ON m.id = p.marca_id
     '''
-    params = [clean_code, tope, tope]
+    params = [clean_code, clean_code, tope, tope]
     if marca_filtro and marca_filtro != "Todas":
         query += " WHERE UPPER(m.nombre) = ?"
         params.append(marca_filtro.upper())
@@ -189,7 +199,11 @@ def buscar_por_codigo(cur, clean_code, marca_filtro="Todas", max_saltos=None, co
 
     # Marca qué filas están verificadas con un link directo hacia el producto buscado,
     # y trae el nivel/nota de esa relación. Una sola consulta para todo el lote.
-    cur.execute("SELECT id FROM productos WHERE codigo_clean = ?", (clean_code,))
+    # Los mismos orígenes que el arranque de la consulta de arriba, código de barras
+    # incluido: si acá se buscara solo por codigo_clean, escanear una caja marcaría la
+    # fila escaneada como un resultado más en vez de como «el buscado».
+    cur.execute("SELECT id FROM productos WHERE codigo_clean = ? OR codigo_barras = ?",
+              (clean_code, clean_code))
     origenes = [r["id"] for r in cur.fetchall()]
     verificados_set = set()
     info_relacion = {}  # producto_id -> {"nivel": ..., "nota": ...}
@@ -294,7 +308,7 @@ def equivalentes_mas_alla_del_tope(cur, clean_code, max_saltos):
         return 0, []
     consulta = """
     WITH RECURSIVE Red(id, saltos) AS (
-        SELECT id, 0 FROM productos WHERE codigo_clean = ?
+        SELECT id, 0 FROM productos WHERE codigo_clean = ? OR codigo_barras = ?
         UNION
         SELECT CASE WHEN eq.producto_a_id = re.id THEN eq.producto_b_id ELSE eq.producto_a_id END,
                re.saltos + 1
@@ -310,7 +324,7 @@ def equivalentes_mas_alla_del_tope(cur, clean_code, max_saltos):
     FROM Red r JOIN productos p ON p.id = r.id JOIN marcas m ON m.id = p.marca_id
     GROUP BY p.id HAVING MIN(r.saltos) > ? LIMIT 400"""
     try:
-        cur.execute(consulta, (clean_code, int(max_saltos)))
+        cur.execute(consulta, (clean_code, clean_code, int(max_saltos)))
         filas = cur.fetchall()
     except sqlite3.OperationalError as _err:
         anotar_error("equivalentes_mas_alla_del_tope", _err)

@@ -307,14 +307,18 @@ def adivinar_columnas(encabezado):
         else:
             hallado[clave] = i              # la última manda
 
-    # El código de barras se carga como un código MÁS del producto, no como el principal. Así
-    # escanear la caja encuentra el repuesto, y el número de parte sigue siendo el que se busca
-    # y se muestra.
-    if hallado["ean"] is not None:
-        if hallado["prov"] == hallado["ean"]:
-            hallado["prov"] = None
-        if hallado["oem"] is None:
-            hallado["oem"] = hallado["ean"]
+    # El código de barras no puede ocupar el lugar del código principal: en el mostrador se
+    # pide el número de parte («150000-R»), no el EAN.
+    # Y TAMPOCO el lugar del código de fábrica, que es lo que hacía antes cuando la lista no
+    # traía OEM. La intención era buena —que escanear la caja encuentre el repuesto— pero el
+    # lugar estaba mal: la columna de OEM es por donde se cruzan los proveedores, y el EAN es
+    # de este proveedor y de nadie más. Cada fila quedaba con una equivalencia que no lleva a
+    # ningún lado. Medido en la base real: 8.076 códigos de barras haciendo de código de
+    # fábrica, 8.652 productos con esa equivalencia falsa, y CERO cruces de esa lista con
+    # cualquier otra. Ahora el EAN va a su propia columna (productos.codigo_barras), que la
+    # búsqueda también mira.
+    if hallado["ean"] is not None and hallado["prov"] == hallado["ean"]:
+        hallado["prov"] = None
 
     # El código de proveedor siempre tiene que apuntar a algo: si ningún título se reconoció,
     # la primera columna libre es la apuesta razonable.

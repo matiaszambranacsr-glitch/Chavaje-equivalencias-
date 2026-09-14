@@ -445,6 +445,8 @@ def base_de_prueba():
     p_junta = producto(taranto, "321607", "Jta.Tapa Cilind.Ford Focus / Fiesta")
     p_barras = producto(oem, "7793960016251", "Jta.Tapa Cilind.Ford Focus / Fiesta")
     vincular(p_junta, p_barras)
+    # Y el mismo repuesto con el código de barras donde va: en su propia columna.
+    cur.execute("UPDATE productos SET codigo_barras = ? WHERE id = ?", ("7791234567890", p_jl))
     con.commit()
     return con, cur
 
@@ -575,6 +577,26 @@ def probar_abreviaturas_de_las_listas_reales():
            f"dieron {sorted(taranto)} y {sorted(illinois)}")
 
 
+def probar_busqueda_por_codigo_de_barras():
+    """Escanear la caja tiene que traer el repuesto Y sus equivalencias.
+
+    Es la mitad que no se puede perder al sacar el EAN de la red de equivalencias: antes el
+    código de barras se cargaba como un código de fábrica, y eso lo hacía buscable al precio de
+    inventar un vínculo por producto. Ahora vive en productos.codigo_barras y la búsqueda
+    arranca mirando esa columna también."""
+    con, cur = base_de_prueba()
+    res = equivalencias.buscar_por_codigo(cur, "7791234567890")
+    cierto(res, "escanear el código de barras tiene que encontrar algo")
+    propio = [f for f in res if f["Cadena"] == "— el buscado"]
+    igual(len(propio), 1, "el producto escaneado es «el buscado», no un resultado más")
+    igual(propio[0]["Codigo"], "WS3171", "y es el repuesto, no un producto fantasma")
+    # Y trae la red entera: el de JL está vinculado al OEM 25186240, y por ahí al de FISPA.
+    marcas = {f["Marca"] for f in res}
+    cierto("FISPA" in marcas,
+           f"escanear tiene que traer también los equivalentes; trajo {sorted(marcas)}")
+    con.close()
+
+
 def main():
     for prueba in (probar_sanitizar, probar_codigo_util, probar_codigo_sospechoso,
                    probar_extractor,
@@ -587,7 +609,8 @@ def main():
                    probar_columna_de_codigo_de_barras,
                    probar_codigo_conocido_gana_a_la_forma,
                    probar_vocabulario_de_pieza,
-                   probar_abreviaturas_de_las_listas_reales):
+                   probar_abreviaturas_de_las_listas_reales,
+                   probar_busqueda_por_codigo_de_barras):
         antes = len(fallos)
         prueba()
         print(f"  {'FALLA' if len(fallos) > antes else 'ok   '}  {prueba.__name__}")

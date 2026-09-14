@@ -192,10 +192,15 @@ CREATE TABLE IF NOT EXISTS productos (
     marca_id INTEGER NOT NULL REFERENCES marcas(id) ON DELETE CASCADE,
     precio REAL, precio_costo REAL, stock INTEGER DEFAULT 0,
     favorito INTEGER DEFAULT 0, imagen_url TEXT, imagen_thumb TEXT,
+    -- el código de barras del proveedor. Va acá y NO como un código de fábrica: es de ese
+    -- proveedor y de nadie más, así que no puede cruzar dos listas. La búsqueda lo mira igual,
+    -- para que escanear la caja encuentre el repuesto.
+    codigo_barras TEXT,
     -- el mismo código puede existir en varias marcas: son productos distintos a propósito
     UNIQUE(codigo_clean, marca_id)
 );
 CREATE INDEX IF NOT EXISTS idx_productos_clean ON productos(codigo_clean);
+CREATE INDEX IF NOT EXISTS idx_codigo_barras ON productos(codigo_barras);
 
 CREATE TABLE IF NOT EXISTS equivalencias (
     producto_a_id INTEGER NOT NULL REFERENCES productos(id) ON DELETE CASCADE,

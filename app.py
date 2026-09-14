@@ -923,19 +923,38 @@ def _esquema_mostrador(c):
     # descripciones, fusionar marcas— y alcanza con que uno se olvide para que esos productos
     # dejen de aparecer en las búsquedas por descripción, sin ningún error a la vista. El
     # trigger no se lo puede olvidar nadie.
+    # EL CÓDIGO DE BARRAS, en su propia columna y no como si fuera un código de fábrica.
+    # Antes no tenía dónde ir, así que la lista que lo traía lo cargaba en la columna de OEM.
+    # Eso lo hacía buscable —que era la idea— pero al precio de inventar una equivalencia por
+    # cada producto: el EAN es de ese proveedor y de nadie más, así que el vínculo no lleva a
+    # ningún lado. En la base real son 8.076 códigos de barras haciendo de código de fábrica y
+    # 8.652 productos con una equivalencia que no sirve para nada.
+    # Con columna propia se consiguen las dos cosas: escanear la caja encuentra el repuesto, y
+    # la red de equivalencias queda solo con códigos que de verdad comparten dos proveedores.
+    if "codigo_barras" not in columnas_productos:
+        c.execute("ALTER TABLE productos ADD COLUMN codigo_barras TEXT")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_codigo_barras ON productos(codigo_barras)")
+
     if "busqueda" not in columnas_productos:
         c.execute("ALTER TABLE productos ADD COLUMN busqueda TEXT")
-    _expr_busqueda = (_sql_sin_acentos("COALESCE(descripcion,'') || ' ' || COALESCE(codigo_raw,'')")
-                      .replace("descripcion", "NEW.descripcion").replace("codigo_raw", "NEW.codigo_raw"))
-    c.execute("""CREATE TRIGGER IF NOT EXISTS productos_busqueda_alta
+    _expr_busqueda = (_sql_sin_acentos("COALESCE(descripcion,'') || ' ' || COALESCE(codigo_raw,'')"
+                                        " || ' ' || COALESCE(codigo_barras,'')")
+                      .replace("descripcion", "NEW.descripcion").replace("codigo_raw", "NEW.codigo_raw")
+                      .replace("codigo_barras", "NEW.codigo_barras"))
+    # Se borran y se vuelven a crear en vez de usar solo IF NOT EXISTS: la expresión cambió al
+    # sumarle el código de barras, y con IF NOT EXISTS una base ya creada se quedaba para
+    # siempre con la versión vieja del trigger, sin ningún error a la vista.
+    c.execute("DROP TRIGGER IF EXISTS productos_busqueda_alta")
+    c.execute("DROP TRIGGER IF EXISTS productos_busqueda_cambio")
+    c.execute("""CREATE TRIGGER productos_busqueda_alta
                  AFTER INSERT ON productos BEGIN
                    UPDATE productos SET busqueda = """ + _expr_busqueda + """ WHERE id = NEW.id;
                  END""")
     # El "OF descripcion, codigo_raw" no es solo eficiencia: sin él, el UPDATE que hace el
     # propio trigger volvería a dispararlo. Al nombrar las columnas, escribir 'busqueda' no
     # cuenta como cambio y el trigger no se llama a sí mismo.
-    c.execute("""CREATE TRIGGER IF NOT EXISTS productos_busqueda_cambio
-                 AFTER UPDATE OF descripcion, codigo_raw ON productos BEGIN
+    c.execute("""CREATE TRIGGER productos_busqueda_cambio
+                 AFTER UPDATE OF descripcion, codigo_raw, codigo_barras ON productos BEGIN
                    UPDATE productos SET busqueda = """ + _expr_busqueda + """ WHERE id = NEW.id;
                  END""")
     # Los productos que ya estaban cargados antes de esta columna. Se hace de una sola vez y
@@ -943,7 +962,8 @@ def _esquema_mostrador(c):
     c.execute("SELECT COUNT(*) FROM productos WHERE busqueda IS NULL")
     if c.fetchone()[0]:
         c.execute("UPDATE productos SET busqueda = "
-                  + _sql_sin_acentos("COALESCE(descripcion,'') || ' ' || COALESCE(codigo_raw,'')")
+                  + _sql_sin_acentos("COALESCE(descripcion,'') || ' ' || COALESCE(codigo_raw,'')"
+                                      " || ' ' || COALESCE(codigo_barras,'')")
                   + " WHERE busqueda IS NULL")
 
 
@@ -1318,6 +1338,9 @@ def _esquema_gestion(c):
         prov_es_oem INTEGER DEFAULT 0,
         fecha TEXT DEFAULT (datetime('now'))
     )""")
+    _cols_mapeo = [f[1] for f in c.execute("PRAGMA table_info(mapeo_columnas)").fetchall()]
+    if "idx_ean" not in _cols_mapeo:
+        c.execute("ALTER TABLE mapeo_columnas ADD COLUMN idx_ean INTEGER")
 
     # Decisiones ya tomadas sobre un vínculo puntual. Sirve para dos cosas: que lo revisado no
     # vuelva a aparecer en la auditoría, y que lo rechazado no se vuelva a crear si más adelante
@@ -2915,6 +2938,89 @@ def eliminar_catalogo_externo(catalogo_id):
 # ============================================================================================
 # INTEGRIDAD DE LA BASE, BACKUP Y RESTAURACIÓN
 # ============================================================================================
+def codigos_de_barras_mal_cargados():
+    """Las listas cuyos «códigos de fábrica» son en realidad códigos de barras, y cuántos son.
+
+    Es la parte curable del problema que reporta listas_que_no_cruzan(). Antes de que el EAN
+    tuviera columna propia, la única forma de dejarlo buscable era cargarlo como código de
+    fábrica, y eso deja una equivalencia por producto que no lleva a ningún lado.
+
+    No alcanza con mirar un código suelto: un número de 13 dígitos puede ser un código de
+    fábrica de verdad que todavía no tiene nadie más. Lo que lo delata es el conjunto — todos
+    los de esa lista con el mismo prefijo de empresa—, así que la decisión se toma por LISTA y
+    no por código, con el mismo criterio que usa la vista previa de la importación."""
+    c.execute("""SELECT m.id AS marca_id, m.nombre AS marca FROM marcas m
+                 WHERE m.tipo <> 'OEM' AND EXISTS (SELECT 1 FROM productos p WHERE p.marca_id = m.id)""")
+    salida = []
+    for prov in filas_a_listas(c):
+        c.execute("""SELECT DISTINCT po.codigo_clean AS codigo
+                     FROM productos p JOIN equivalencias e
+                       ON e.producto_a_id = p.id OR e.producto_b_id = p.id
+                     JOIN productos po ON po.id = CASE WHEN e.producto_a_id = p.id
+                                                       THEN e.producto_b_id ELSE e.producto_a_id END
+                     JOIN marcas mo ON mo.id = po.marca_id
+                     WHERE p.marca_id = ? AND mo.tipo = 'OEM' LIMIT 3000""", (prov["marca_id"],))
+        es_barras, prefijo, _ = columna_es_codigo_de_barras([r["codigo"] for r in c.fetchall()])
+        if not es_barras:
+            continue
+        c.execute(_CONSULTA_BARRAS_MAL_CARGADOS.format(que="COUNT(*) AS cuantos"),
+                  (prov["marca_id"],))
+        fila = c.fetchone()
+        cuantos = (fila["cuantos"] if fila else 0) or 0
+        if cuantos:
+            salida.append({"marca_id": prov["marca_id"], "Lista": prov["marca"],
+                           "Códigos de barras cargados como código de fábrica": cuantos,
+                           "Empiezan con": prefijo + "…"})
+    return salida
+
+
+# El SQL va aparte porque lo usan las dos: la que cuenta y la que arregla. Si cada una tuviera
+# el suyo, contarían una cosa y arreglarían otra en cuanto alguien tocara uno de los dos.
+# Las tres condiciones: que sea un número largo (12 a 14 dígitos, la forma de un EAN o un UPC),
+# que esté cargado bajo la marca OEM, y que cuelgue UN SOLO producto — o sea que no está
+# sirviendo de puente entre dos proveedores. Si colgara dos, algo une y no se toca.
+_CONSULTA_BARRAS_MAL_CARGADOS = """
+    SELECT {que}
+    FROM productos p
+    JOIN equivalencias e ON e.producto_a_id = p.id OR e.producto_b_id = p.id
+    JOIN productos po ON po.id = CASE WHEN e.producto_a_id = p.id
+                                      THEN e.producto_b_id ELSE e.producto_a_id END
+    JOIN marcas mo ON mo.id = po.marca_id
+    WHERE p.marca_id = ?
+      AND mo.tipo = 'OEM'
+      AND LENGTH(po.codigo_clean) BETWEEN 12 AND 14
+      AND po.codigo_clean NOT GLOB '*[^0-9]*'
+      AND (SELECT COUNT(*) FROM equivalencias e2
+            WHERE e2.producto_a_id = po.id OR e2.producto_b_id = po.id) = 1"""
+
+
+def mover_codigos_de_barras_a_su_columna(marca_id):
+    """Pasa los códigos de barras de esa lista a productos.codigo_barras y saca el vínculo falso.
+
+    No se pierde nada: el número queda guardado en el producto —se puede escanear y la búsqueda
+    lo encuentra— y lo que desaparece es el producto fantasma que lo representaba bajo la marca
+    «OEM / FABRICA» junto con la equivalencia que salía de él, que es la que hacía creer que el
+    repuesto tenía un equivalente.
+
+    Devuelve (cuántos se movieron, cuántos ya tenían código de barras cargado)."""
+    movidos = ya_tenian = 0
+    with db_lock, transaccion():
+        c.execute(_CONSULTA_BARRAS_MAL_CARGADOS.format(
+            que="p.id AS prov_id, po.id AS oem_id, po.codigo_raw AS barras, p.codigo_barras AS tenia"),
+            (marca_id,))
+        for fila in filas_a_listas(c):
+            if fila["tenia"]:
+                ya_tenian += 1
+            else:
+                c.execute("UPDATE productos SET codigo_barras = ? WHERE id = ?",
+                          (sanitizar(fila["barras"]), fila["prov_id"]))
+            c.execute("DELETE FROM equivalencias WHERE producto_a_id = ? OR producto_b_id = ?",
+                      (fila["oem_id"], fila["oem_id"]))
+            c.execute("DELETE FROM productos WHERE id = ?", (fila["oem_id"],))
+            movidos += 1
+    return movidos, ya_tenian
+
+
 def listas_que_no_cruzan():
     """Por cada proveedor: con cuántos otros proveedores cruza de verdad, y si no cruza, por qué.
 
@@ -5392,14 +5498,18 @@ def adivinar_columnas(encabezado):
         else:
             hallado[clave] = i              # la última manda
 
-    # El código de barras se carga como un código MÁS del producto, no como el principal. Así
-    # escanear la caja encuentra el repuesto, y el número de parte sigue siendo el que se busca
-    # y se muestra.
-    if hallado["ean"] is not None:
-        if hallado["prov"] == hallado["ean"]:
-            hallado["prov"] = None
-        if hallado["oem"] is None:
-            hallado["oem"] = hallado["ean"]
+    # El código de barras no puede ocupar el lugar del código principal: en el mostrador se
+    # pide el número de parte («150000-R»), no el EAN.
+    # Y TAMPOCO el lugar del código de fábrica, que es lo que hacía antes cuando la lista no
+    # traía OEM. La intención era buena —que escanear la caja encuentre el repuesto— pero el
+    # lugar estaba mal: la columna de OEM es por donde se cruzan los proveedores, y el EAN es
+    # de este proveedor y de nadie más. Cada fila quedaba con una equivalencia que no lleva a
+    # ningún lado. Medido en la base real: 8.076 códigos de barras haciendo de código de
+    # fábrica, 8.652 productos con esa equivalencia falsa, y CERO cruces de esa lista con
+    # cualquier otra. Ahora el EAN va a su propia columna (productos.codigo_barras), que la
+    # búsqueda también mira.
+    if hallado["ean"] is not None and hallado["prov"] == hallado["ean"]:
+        hallado["prov"] = None
 
     # El código de proveedor siempre tiene que apuntar a algo: si ningún título se reconoció,
     # la primera columna libre es la apuesta razonable.
@@ -5889,9 +5999,14 @@ def buscar_por_codigo(clean_code, marca_filtro="Todas", max_saltos=None, confian
     # el mismo repuesto. El corte va en los puramente numéricos de menos de 6 dígitos y en
     # cualquier código de menos de 4 caracteres — lo distintivo se mantiene, lo genérico no
     # cruza. Es lo que evita que este atajo fusione familias que no tienen nada que ver.
+    # El arranque mira las dos columnas: el código y el código de barras. Escanear la caja
+    # tiene que traer el repuesto y toda su red de equivalencias, igual que si se hubiera
+    # tecleado el número de parte. Antes eso funcionaba porque el EAN se cargaba como si fuera
+    # un código de fábrica —con la equivalencia falsa que eso implicaba—; ahora vive en su
+    # propia columna y la búsqueda la lee de ahí.
     query = '''
     WITH RECURSIVE Red(id, saltos, peor, por_codigo) AS (
-        SELECT id, 0, 100, 0 FROM productos WHERE codigo_clean = ?
+        SELECT id, 0, 100, 0 FROM productos WHERE codigo_clean = ? OR codigo_barras = ?
         UNION
         SELECT CASE WHEN eq.producto_a_id = re.id THEN eq.producto_b_id ELSE eq.producto_a_id END,
                re.saltos + 1,
@@ -5917,7 +6032,7 @@ def buscar_por_codigo(clean_code, marca_filtro="Todas", max_saltos=None, confian
            MIN(r.por_codigo) AS "_por_codigo"
     FROM Red r JOIN productos p ON p.id = r.id JOIN marcas m ON m.id = p.marca_id
     '''
-    params = [clean_code, tope, tope]
+    params = [clean_code, clean_code, tope, tope]
     if marca_filtro and marca_filtro != "Todas":
         query += " WHERE UPPER(m.nombre) = ?"
         params.append(marca_filtro.upper())
@@ -5946,7 +6061,11 @@ def buscar_por_codigo(clean_code, marca_filtro="Todas", max_saltos=None, confian
 
         # Marca qué filas están verificadas con un link directo hacia el producto buscado,
         # y trae el nivel/nota de esa relación. Una sola consulta para todo el lote.
-        c.execute("SELECT id FROM productos WHERE codigo_clean = ?", (clean_code,))
+        # Los mismos orígenes que el arranque de la consulta de arriba, código de barras
+        # incluido: si acá se buscara solo por codigo_clean, escanear una caja marcaría la
+        # fila escaneada como un resultado más en vez de como «el buscado».
+        c.execute("SELECT id FROM productos WHERE codigo_clean = ? OR codigo_barras = ?",
+                  (clean_code, clean_code))
         origenes = [r["id"] for r in c.fetchall()]
         verificados_set = set()
         info_relacion = {}  # producto_id -> {"nivel": ..., "nota": ...}
@@ -6051,7 +6170,7 @@ def equivalentes_mas_alla_del_tope(clean_code, max_saltos):
         return 0, []
     consulta = """
     WITH RECURSIVE Red(id, saltos) AS (
-        SELECT id, 0 FROM productos WHERE codigo_clean = ?
+        SELECT id, 0 FROM productos WHERE codigo_clean = ? OR codigo_barras = ?
         UNION
         SELECT CASE WHEN eq.producto_a_id = re.id THEN eq.producto_b_id ELSE eq.producto_a_id END,
                re.saltos + 1
@@ -6067,7 +6186,7 @@ def equivalentes_mas_alla_del_tope(clean_code, max_saltos):
     FROM Red r JOIN productos p ON p.id = r.id JOIN marcas m ON m.id = p.marca_id
     GROUP BY p.id HAVING MIN(r.saltos) > ? LIMIT 400"""
     try:
-        c.execute(consulta, (clean_code, int(max_saltos)))
+        c.execute(consulta, (clean_code, clean_code, int(max_saltos)))
         filas = c.fetchall()
     except sqlite3.OperationalError as _err:
         anotar_error("equivalentes_mas_alla_del_tope", _err)
@@ -8083,7 +8202,7 @@ def peso_de_las_fotos():
 # MAPEO DE COLUMNAS RECORDADO POR PROVEEDOR
 # ============================================================================================
 def guardar_mapeo_columnas(proveedor, idx_prov, idx_oem, idx_desc, idx_precio, idx_stock,
-                            buscar_oem_en_desc, prov_es_oem):
+                            buscar_oem_en_desc, prov_es_oem, idx_ean=None):
     """Recuerda cómo se mapearon las columnas de este proveedor, para que la próxima vez venga
     preseleccionado igual y no haya que acertarle de nuevo."""
     if not proveedor or not proveedor.strip():
@@ -8091,10 +8210,10 @@ def guardar_mapeo_columnas(proveedor, idx_prov, idx_oem, idx_desc, idx_precio, i
     with db_lock:
         c.execute("""INSERT OR REPLACE INTO mapeo_columnas
                      (proveedor, idx_prov, idx_oem, idx_desc, idx_precio, idx_stock,
-                      buscar_oem_en_desc, prov_es_oem, fecha)
-                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))""",
+                      buscar_oem_en_desc, prov_es_oem, idx_ean, fecha)
+                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))""",
                   (proveedor.strip().upper(), idx_prov, idx_oem, idx_desc, idx_precio, idx_stock,
-                   1 if buscar_oem_en_desc else 0, 1 if prov_es_oem else 0))
+                   1 if buscar_oem_en_desc else 0, 1 if prov_es_oem else 0, idx_ean))
         conn.commit()
 
 
@@ -13648,8 +13767,10 @@ def leer_codigo_de_barras(imagen_bytes):
 def buscar_por_codigo_de_barras(codigo_leido):
     """Busca el código escaneado, probando también como código de producto.
 
-    El EAN se carga como un código más del producto (así entró el `CODIGO_EAN` de tu lista de
-    juntas), así que buscarlo normalmente ya lo encuentra y trae todas sus equivalencias."""
+    El EAN vive en productos.codigo_barras y buscar_por_codigo() arranca mirando esa columna
+    además del código, así que escanear la caja trae el repuesto y toda su red de
+    equivalencias. Antes el EAN se cargaba como si fuera un código de fábrica: andaba, pero
+    dejaba una equivalencia falsa por producto."""
     clean = sanitizar(codigo_leido)
     if not clean:
         return [], None
@@ -17229,6 +17350,7 @@ if pagina == PAGINAS[2]:
                 # texto que no coincide con nada.
                 idx_oem_auto = sugerido["oem"]
                 idx_desc_auto = sugerido["desc"]
+                idx_ean_auto = sugerido.get("ean")
                 idx_precio_sug, idx_stock_sug = sugerido["precio"], sugerido["stock"]
 
                 opciones_cols = [f"Columna {i}: {str(v)[:20] if v else '(sin título)'}"
@@ -17249,6 +17371,8 @@ if pagina == PAGINAS[2]:
                         idx_prov_auto = mapeo_previo["idx_prov"]
                     idx_oem_auto = _valido(mapeo_previo["idx_oem"])
                     idx_desc_auto = _valido(mapeo_previo["idx_desc"])
+                    if mapeo_previo.get("idx_ean") is not None:
+                        idx_ean_auto = _valido(mapeo_previo["idx_ean"])
 
                 c_p, c_o, c_d = cols(3)
                 with c_p:
@@ -17293,6 +17417,19 @@ if pagina == PAGINAS[2]:
                         format_func=lambda x: "Ninguna" if x is None else opciones_cols[x],
                         index=opciones_num.index(idx_stock_auto) if idx_stock_auto is not None else 0
                     )
+
+                # El código de barras tiene su propio lugar. Antes no lo tenía y terminaba en la
+                # columna de OEM, que es por donde se cruzan los proveedores: ahí adentro no
+                # cruza con nadie —es de este proveedor y de nadie más— y deja una equivalencia
+                # falsa por cada fila. Guardado acá se puede escanear la caja y encontrar el
+                # repuesto, sin ensuciar la red de equivalencias.
+                idx_ean = st.selectbox(
+                    "Código de barras / EAN (opcional):", opciones_num,
+                    format_func=lambda x: "Ninguna" if x is None else opciones_cols[x],
+                    index=opciones_num.index(idx_ean_auto) if idx_ean_auto is not None else 0,
+                    help="Se guarda pegado al producto para poder escanearlo. NO genera "
+                         "equivalencias: el código de barras es de este proveedor solamente."
+                )
 
                 if idx_precio is not None:
                     st.session_state.setdefault("tope_salto_precio", 200)
@@ -17642,12 +17779,20 @@ if pagina == PAGINAS[2]:
                             precio_fila = leer_numero(celda(idx_precio)) if idx_precio is not None else None
                             stock_fila = leer_numero(celda(idx_stock)) if idx_stock is not None else None
 
+                            # El código de barras de esta fila, si la lista lo trae. Va pegado
+                            # al producto y no genera ninguna equivalencia: ver el selector de
+                            # arriba y adivinar_columnas().
+                            barras_fila = sanitizar(valor_codigo(celda(idx_ean))) if idx_ean is not None else ""
+
                             ids_prov = []
                             for raw_p in codigos_prov:
                                 clean_p = sanitizar(raw_p)
                                 if clean_p:
                                     pid_nuevo = get_or_create_producto(raw_p, clean_p, desc, prov_id)
                                     ids_prov.append(pid_nuevo)
+                                    if barras_fila:
+                                        c.execute("UPDATE productos SET codigo_barras = ? "
+                                                  "WHERE id = ?", (barras_fila, pid_nuevo))
                                     if precio_fila is not None or stock_fila is not None:
                                         c.execute("SELECT precio FROM productos WHERE id = ?", (pid_nuevo,))
                                         _f = c.fetchone()
@@ -17827,7 +17972,8 @@ if pagina == PAGINAS[2]:
                                  "disparó alarmas.")
                     # Recordar el mapeo que funcionó, para la próxima lista de este proveedor
                     guardar_mapeo_columnas(nombre_prov, idx_prov, idx_oem, idx_desc,
-                                            idx_precio, idx_stock, buscar_oem_en_desc, prov_es_oem)
+                                            idx_precio, idx_stock, buscar_oem_en_desc, prov_es_oem,
+                                            idx_ean=idx_ean)
                     if not cargar_directo and eq_batch:
                         st.info(
                             f"🔒 {len(eq_batch)} vínculo(s) quedaron **esperando tu revisión** — todavía "
@@ -19921,6 +20067,35 @@ if pagina == PAGINAS[3]:
                     st.rerun()
 
         if _grupo_mant == GRUPOS_MANTENIMIENTO[3]:
+            # LA PARTE QUE SE ARREGLA SOLA. Si el problema es que entró la columna del
+            # código de barras, no hace falta reimportar nada: el número ya está cargado,
+            # solo está en el lugar equivocado. Se mueve a la columna que le corresponde y
+            # se saca el vínculo falso que arrastraba.
+            _barras_mal = codigos_de_barras_mal_cargados()
+            if _barras_mal:
+                st.markdown("**🏷️ Códigos de barras cargados como código de fábrica**")
+                st.dataframe(
+                    [{k: v for k, v in f.items() if k != "marca_id"} for f in _barras_mal],
+                    width="stretch", hide_index=True)
+                st.caption(
+                    "Se pueden pasar a su lugar sin reimportar: el número queda guardado en "
+                    "el producto —se sigue pudiendo escanear y buscar— y lo que desaparece "
+                    "es la equivalencia que no llevaba a ningún lado."
+                )
+                for _lista in _barras_mal:
+                    _n = _lista["Códigos de barras cargados como código de fábrica"]
+                    if candado(f"mover los códigos de barras de {_lista['Lista']}",
+                                st.button(f"🏷️ Arreglar los {_n:,} de {_lista['Lista']}",
+                                           key=f"barras_{_lista['marca_id']}"),
+                                f"barras_{_lista['marca_id']}"):
+                        _mov, _ya = mover_codigos_de_barras_a_su_columna(_lista["marca_id"])
+                        avisar("success",
+                                f"Se movieron {_mov:,} código(s) de barras a su columna y se "
+                                f"sacaron {_mov:,} vínculo(s) que no llevaban a ningún lado."
+                                + (f" {_ya:,} producto(s) ya tenían uno cargado y se respetó."
+                                   if _ya else ""))
+                        st.rerun()
+
             st.markdown("**🔗 Listas que no cruzan con ninguna otra**")
             explicar(
                 "Por qué una lista no genera equivalencias con las demás, con el motivo escrito.",

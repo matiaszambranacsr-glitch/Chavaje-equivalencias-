@@ -56,6 +56,37 @@ veces en una lista; lo que se repite más es texto.
 Antes de aflojar cualquiera de esos filtros, corré `python3 -m nucleo.pruebas`: los casos que
 dicen «NO debía sacar nada» están escritos con descripciones reales de esas listas.
 
+## El código de barras tiene su propia columna
+
+`productos.codigo_barras`. Parece un detalle de esquema y es el origen del problema de abajo.
+
+Antes no existía, y la única forma de dejar el EAN buscable era cargarlo como código de
+fábrica — `adivinar_columnas()` lo hacía solo cuando la lista no traía OEM. La intención era
+buena (escanear la caja y encontrar el repuesto) pero el lugar estaba mal: **la columna de OEM
+es por donde se cruzan los proveedores**, y el código de barras es de un proveedor y de nadie
+más. Cada fila quedaba con una equivalencia que no lleva a ningún lado.
+
+Con columna propia se consiguen las dos cosas:
+
+- `buscar_por_codigo()` arranca con `WHERE codigo_clean = ? OR codigo_barras = ?`, así que
+  escanear trae el repuesto y toda su red. Los orígenes (`origenes`) se buscan con el mismo
+  criterio: si no, la fila escaneada saldría como un resultado más y no como «el buscado».
+- El trigger de `busqueda` incluye `codigo_barras`, así que la búsqueda por texto también lo
+  encuentra. Ese trigger se **borra y se vuelve a crear** en cada arranque, no con
+  `IF NOT EXISTS`: la expresión cambió, y con `IF NOT EXISTS` una base ya creada se quedaba
+  con la versión vieja sin ningún error a la vista.
+
+Para lo que ya estaba cargado, **Mantenimiento → 🩺 Estado** tiene el arreglo:
+`codigos_de_barras_mal_cargados()` + `mover_codigos_de_barras_a_su_columna()`. La decisión se
+toma **por lista y no por código**, porque un número de 13 dígitos suelto puede ser un código
+de fábrica de verdad que todavía no tiene nadie más; lo que delata al EAN es el conjunto —
+todos con el mismo prefijo de empresa. Y solo toca los que cuelgan un solo producto: si
+colgara dos, algo une y no se toca.
+
+Sobre la base real: mueve 8.319 códigos de barras a su columna, borra 8.319 productos fantasma
+de «OEM / FABRICA» y 8.319 vínculos falsos. El catálogo pasa de 61.574 a 53.255 productos sin
+perder un solo dato — el número sigue estando, en el lugar que le corresponde.
+
 ## Una equivalencia que no lleva a ningún lado no es una equivalencia
 
 El error más caro de todo esto no rompe nada: la importación sale bien, se cargan miles de
