@@ -369,12 +369,121 @@ def clasificar_repuesto(descripcion):
     mejor = None   # (posición, -largo, familia)
     for familia, claves in FAMILIAS_REPUESTO.items():
         for clave in claves:
-            pos = texto.find(f" {clave} ")
-            if pos >= 0:
-                candidato = (pos, -len(clave), familia)
-                if mejor is None or candidato[:2] < mejor[:2]:
-                    mejor = candidato
+            # También el plural. Las claves están en singular y las listas escriben las dos
+            # formas: «FILTROS PARA COMBUSTIBLE» no caía en Filtros porque la clave es
+            # «FILTRO». Medido sobre las 61.574 descripciones reales: 405 rescatadas del «Sin
+            # clasificar», ninguna perdida, y 72 que cambiaron de familia — todas las revisadas
+            # para mejor («Filtros inyector» dejó de ser Combustible, «Juego sellos de cierre
+            # de tapa de válvulas» pasó de Lubricación a Juntas y retenes).
+            for forma in (clave, clave + "S"):
+                pos = texto.find(f" {forma} ")
+                if pos >= 0:
+                    candidato = (pos, -len(forma), familia)
+                    if mejor is None or candidato[:2] < mejor[:2]:
+                        mejor = candidato
     return mejor[2] if mejor else "Sin clasificar"
+
+
+_RE_ES_KIT = re.compile(r'\b(KIT|KITS|JUEGO|JUEGOS|JGO|JGOS|COMBO|SET)\b')
+
+
+def familia_para_comparar(descripcion):
+    """La familia de la pieza, pero «Sin clasificar» cuando la descripción es un KIT de varias.
+
+    La regla de «si son de rubros distintos, el vínculo está mal» da por sentado que cada lado
+    es UNA pieza. Un kit no lo es: «KIT CAB Y BUJ» trae cables Y bujías, así que elegirle una
+    sola familia es arbitrario —gana la palabra que aparezca antes— y después ese sorteo se usa
+    para castigar un vínculo que está bien.
+
+    No es una sospecha: al mejorar la clasificación, los pares marcados como «rubro distinto»
+    pasaron de 127 a 208, y 81 de esos 84 nuevos tenían un kit de un lado. Los otros 3 eran
+    vínculos realmente malos (un filtro de combustible atado a un sensor MAP), que es lo que se
+    quiere ver.
+
+    Se pide que el kit nombre piezas de DOS familias o más: «KIT DE EMBRAGUE» es una sola cosa
+    y ahí la comparación por rubro sigue sirviendo."""
+    texto = _normalizar_desc(descripcion)
+    if not _RE_ES_KIT.search(texto):
+        return clasificar_repuesto(descripcion)
+    familias = set()
+    for familia, claves in FAMILIAS_REPUESTO.items():
+        for clave in claves:
+            if any(texto.find(f" {forma} ") >= 0 for forma in (clave, clave + "S")):
+                familias.add(familia)
+                break
+    if len(familias) >= 2:
+        return "Sin clasificar"
+    return clasificar_repuesto(descripcion)
+
+
+# Cómo abrevian los proveedores el nombre de la pieza. No están inventadas: salieron de contar
+# las palabras que entran al nombre en las 61.574 descripciones reales — «JTA» aparece 4.836
+# veces, «JTAS» 2.456, «CIL» 2.115. Sin esto, «CABLE BUJIA» y «KIT CAB Y BUJ» son dos cosas
+# distintas para la app, y el vínculo correcto entre ellas queda marcado como sospechoso.
+ABREVIATURAS_DE_PIEZA = {
+    "JTA": "JUNTA", "JTAS": "JUNTA", "JUNTAS": "JUNTA", "JGO": "JUEGO", "JGOS": "JUEGO",
+    "CIL": "CILINDRO", "CILS": "CILINDRO", "CILINDROS": "CILINDRO",
+    "CAB": "CABLE", "CABLES": "CABLE", "BUJ": "BUJIA", "BUJIAS": "BUJIA",
+    "CPO": "CUERPO", "INY": "INYECCION", "INYEC": "INYECCION",
+    "BBA": "BOMBA", "BOMBAS": "BOMBA", "TEMP": "TEMPERATURA", "MULT": "MULTIPLE",
+    "ELECTROV": "ELECTROVENTILADOR", "ELECTROVENT": "ELECTROVENTILADOR",
+    "ACEL": "ACELERADOR", "DISTRIB": "DISTRIBUCION", "REFRIG": "REFRIGERACION",
+    "ALTERN": "ALTERNADOR", "ARRANQ": "ARRANQUE", "SENS": "SENSOR", "SENSORES": "SENSOR",
+    "VALV": "VALVULA", "VALVULAS": "VALVULA", "TAPAS": "TAPA", "CANOS": "CANO",
+    "RET": "RETEN", "RETENES": "RETEN", "TERM": "TERMOSTATO", "AMORT": "AMORTIGUADOR",
+    "PAST": "PASTILLA", "PASTILLAS": "PASTILLA", "FILT": "FILTRO", "FILTROS": "FILTRO",
+    "INTERRUP": "INTERRUPTOR", "REGUL": "REGULADOR", "PRES": "PRESION",
+    "COMB": "COMBUSTIBLE", "IGNIC": "IGNICION", "ROTAC": "ROTACION", "DETONAC": "DETONACION",
+}
+
+
+RELLENO_EN_NOMBRE_DE_PIEZA = {"DE", "LA", "EL", "CON", "SIN", "PARA", "POR", "DEL", "EN", "LOS",
+                       "LAS", "UN", "UNA", "MM", "CM", "TIPO", "JUEGO", "JGO", "KIT", "COMPLETO",
+                       "REF", "ORIG"}
+
+
+def _nombre_de_la_pieza(descripcion, aceptar_codigos=False):
+    """Las palabras que nombran LA PIEZA, sin los códigos y con las abreviaturas expandidas.
+
+    Se corta apenas aparece una marca de auto o un año, porque de ahí en adelante la descripción
+    deja de hablar de la pieza y empieza a listar para qué autos sirve.
+
+    Los tokens con dígitos se descartan: son el número de parte o una medida, no el nombre. Eran
+    el 73% de las palabras distintas que entraban acá (LEIHTT09SCFIAT, 64033, LSPKR6E), y como
+    nunca coinciden entre dos proveedores solo servían para bajar el parecido de vínculos que
+    estaban bien. Si al sacarlos no queda nada, se vuelve a armar con ellos: un nombre flojo es
+    mejor que ninguno, porque sin nombre el parecido da 0 y eso también marca de más.
+
+    Medido sobre los 24.774 vínculos reales: los marcados como «nombre de pieza muy distinto»
+    bajan de 963 a 608, y los pocos que dejan de marcarse —revisados uno por uno— eran todos
+    vínculos correctos («CABLE DE BUJIA» contra «KIT CAB Y BUJ»)."""
+    # «VW» y «GM» ya están en MARCAS_VEHICULO; queda «MB», que no vale la pena agregar allá
+    # porque como palabra suelta aparece adentro de descripciones que no hablan de Mercedes.
+    marcas_auto = set(MARCAS_VEHICULO) | {"MB"}
+    palabras = []
+    for palabra in re.split(r'[^A-Z0-9]+', normalizar_texto(descripcion or "")):
+        if not palabra:
+            continue
+        if palabra in marcas_auto or re.fullmatch(r'(19|20)\d{2}', palabra):
+            break
+        if any(ch.isdigit() for ch in palabra) and not aceptar_codigos:
+            continue
+        palabra = ABREVIATURAS_DE_PIEZA.get(palabra, palabra)
+        if len(palabra) >= 3 and palabra not in RELLENO_EN_NOMBRE_DE_PIEZA:
+            palabras.append(palabra)
+        if len(palabras) >= 4:
+            break
+    if not palabras and not aceptar_codigos:
+        return _nombre_de_la_pieza(descripcion, aceptar_codigos=True)
+    return set(palabras)
+
+
+def _parecido_nombre_pieza(desc_a, desc_b):
+    """Cuánto se parecen los NOMBRES DE LA PIEZA de dos descripciones, de 0 a 1."""
+    pieza_a, pieza_b = _nombre_de_la_pieza(desc_a), _nombre_de_la_pieza(desc_b)
+    if not pieza_a or not pieza_b:
+        return 0.0
+    return len(pieza_a & pieza_b) / len(pieza_a | pieza_b)
 
 
 # ============================================================================================

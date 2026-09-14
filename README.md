@@ -75,6 +75,22 @@ Hay dos candados, y no son lo mismo:
   precio y el stock. Alcanza con la contraseña de operador, y como el nivel queda en la
   sesión se pide una vez por turno, no en cada producto.
 
+## Decidir si dos repuestos son la misma clase de pieza
+
+Tres funciones, y conviene no confundirlas:
+
+- `clasificar_repuesto()` — la familia para MOSTRAR (el filtro de categoría de la pantalla).
+  Siempre devuelve una. Acepta el plural de cada clave.
+- `familia_para_comparar()` — la familia para DECIDIR. Devuelve «Sin clasificar» cuando la
+  descripción es un kit de varias piezas, porque «KIT CAB Y BUJ» trae cables y bujías y
+  elegirle una sola familia es un sorteo que después castiga vínculos correctos.
+- `_nombre_de_la_pieza()` — las palabras del nombre, sin los números de parte (eran el 73% de
+  las palabras que entraban) y con las abreviaturas del proveedor expandidas: CAB=CABLE,
+  BUJ=BUJIA, JTA=JUNTA.
+
+Si tocás alguna, medí contra los vínculos reales antes y después. La referencia de hoy, sobre
+24.774: «nombre muy distinto» 608, «rubro distinto» 116.
+
 ## Cuando mejorás `sanitizar()`
 
 `codigo_clean` es por donde busca la app, y se calcula UNA vez, al importar. Así que cada

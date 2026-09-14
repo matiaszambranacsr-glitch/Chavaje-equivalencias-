@@ -227,6 +227,45 @@ def probar_vehiculos():
     igual(vehiculos.extraer_anios("GOL 1998-2006"), (1998, 2006), "años de la descripción")
 
 
+def probar_precision_del_rubro():
+    """Las tres cosas que decidían mal si dos repuestos son de la misma clase.
+
+    Se midieron sobre los 24.774 vínculos reales del catálogo: los marcados como «nombre de
+    pieza muy distinto» bajaron de 963 a 608 y los de «rubro distinto» de 127 a 116, y en el
+    camino aparecieron 7 vínculos realmente malos que estaban tapados."""
+    # 1) El plural. «FILTROS PARA COMBUSTIBLE» caía afuera porque la clave dice «FILTRO».
+    igual(vehiculos.clasificar_repuesto("FILTROS PARA COMBUSTIBLE 14002 FIAT PALIO"), "Filtros",
+          "el plural de la clave también cuenta")
+    igual(vehiculos.clasificar_repuesto("Filtros inyector - 10 Juegos MPI BOSCH"), "Filtros",
+          "«Filtros inyector» es un filtro, no combustible")
+
+    # 2) El nombre de la pieza: sin códigos y con las abreviaturas del proveedor.
+    igual(vehiculos._nombre_de_la_pieza("CABLE DE BUJIA LEIHTV28ST"),
+          vehiculos._nombre_de_la_pieza("KIT CAB Y BUJ (LEIHTV28ST)") - {"KIT"},
+          "«CAB BUJ» es «CABLE BUJIA»")
+    cierto(not any(any(ch.isdigit() for ch in x)
+                   for x in vehiculos._nombre_de_la_pieza("BOMBA ELECTRICA 64033 FIAT")),
+           "el número de parte no es parte del nombre de la pieza")
+    cierto(vehiculos._parecido_nombre_pieza(
+               "BUJIA NAFTA LSPFR6F11 HONDA CIVIC",
+               "KIT CAB Y BUJ (LEIHTT66SC/LSPFR6F11) FIAT PALIO") >= 0.3,
+           "dos formas de escribir lo mismo se tienen que parecer")
+    # y lo que de verdad es distinto tiene que seguir dando bajo
+    cierto(vehiculos._parecido_nombre_pieza(
+               "FILTRO PARA COMBUSTIBLE 14101 RENAULT SCENIC",
+               "SENSOR MAP 40024 VW GOL") < 0.3,
+           "un filtro y un sensor no se pueden parecer")
+
+    # 3) Un kit trae varias piezas: pedirle UNA familia y castigar por eso es inventar.
+    igual(vehiculos.familia_para_comparar("KIT CAB Y BUJ (LEIHTT06SC/LSPKR6E) FIAT PALIO"),
+          "Sin clasificar", "un kit de cables y bujías no tiene una sola familia")
+    cierto(vehiculos.familia_para_comparar("KIT DE EMBRAGUE VALEO FIAT PALIO") != "Sin clasificar",
+           "un kit de una sola familia sí se puede comparar")
+    igual(vehiculos.familia_para_comparar("SENSOR MAP 40024 VW GOL"),
+          vehiculos.clasificar_repuesto("SENSOR MAP 40024 VW GOL"),
+          "lo que no es kit se clasifica igual que siempre")
+
+
 def probar_marcas_de_vehiculo():
     """Una descripción de proveedor nombra varios autos, y las listas abrevian.
 
@@ -417,7 +456,8 @@ def main():
     for prueba in (probar_sanitizar, probar_codigo_util, probar_codigo_sospechoso,
                    probar_extractor,
                    probar_filtro_por_repeticion, probar_dividir, probar_vehiculos,
-                   probar_familias_de_pieza, probar_marcas_de_vehiculo, probar_ref_pegado,
+                   probar_familias_de_pieza, probar_precision_del_rubro,
+                   probar_marcas_de_vehiculo, probar_ref_pegado,
                    probar_mapeo_columnas, probar_busqueda_entre_proveedores,
                    probar_codigo_generico_no_cruza):
         antes = len(fallos)

@@ -99,7 +99,10 @@ from .codigos import normalizar_texto, sanitizar
       "ESCRITURAS_DE_MARCA", "_RE_MARCAS_VEHICULO", "marcas_vehiculo_en",
       "_MARCAS_RIESGOSAS", "MARCAS_PARA_DESPEGAR", "_RE_PEGADO_MAYUS", "_RE_REF_PEGADO",
       "_RE_MARCAS_PEGADAS", "_RE_ESPACIOS", "separar_texto_pegado", "separar_por_marca_vehiculo",
-      "FAMILIAS_REPUESTO", "_normalizar_desc", "clasificar_repuesto", "extraer_anios",
+      "FAMILIAS_REPUESTO", "_normalizar_desc", "clasificar_repuesto",
+      "_RE_ES_KIT", "familia_para_comparar",
+      "ABREVIATURAS_DE_PIEZA", "RELLENO_EN_NOMBRE_DE_PIEZA", "_nombre_de_la_pieza",
+      "_parecido_nombre_pieza", "extraer_anios",
       "PALABRAS_NO_MODELO", "es_nombre_de_modelo",
       "_RE_PIEZA_POR_MEDIDA", "medidas_desde_descripcion"])
 
