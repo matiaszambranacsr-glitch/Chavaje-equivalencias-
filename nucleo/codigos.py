@@ -295,7 +295,8 @@ def codigo_sospechoso(codigo, descripcion=""):
 TOPE_REPETICIONES_EN_DESCRIPCION = 4
 
 
-def codigos_confiables_de_descripciones(descripciones, tope=TOPE_REPETICIONES_EN_DESCRIPCION):
+def codigos_confiables_de_descripciones(descripciones, tope=TOPE_REPETICIONES_EN_DESCRIPCION,
+                                        codigos_conocidos=None):
     """De todos los códigos que se pueden sacar de las descripciones de una lista, devuelve
     solo los que NO se repiten demasiado.
 
@@ -316,7 +317,12 @@ def codigos_confiables_de_descripciones(descripciones, tope=TOPE_REPETICIONES_EN
     for texto, codigo_propio in descripciones:
         # set() por fila: si la misma descripción nombra dos veces el mismo código, cuenta una.
         # Lo que se está midiendo es en cuántos PRODUCTOS distintos aparece, no cuántas veces.
-        for cod in set(sanitizar(c) for c in extraer_codigos_de_texto(texto, codigo_propio=codigo_propio)):
+        # El mismo juego de códigos conocidos que va a usar la importación. Si acá se contara
+        # con otro criterio, el recuento y la extracción real no hablarían del mismo conjunto:
+        # un código rescatado al importar no estaría en la lista de confiables y se tiraría
+        # igual, que es peor que no rescatarlo — parecería que el arreglo no hizo nada.
+        for cod in set(sanitizar(c) for c in extraer_codigos_de_texto(
+                texto, codigo_propio=codigo_propio, codigos_conocidos=codigos_conocidos)):
             if cod:
                 conteo[cod] += 1
     return {cod for cod, veces in conteo.items() if veces <= tope}, conteo
@@ -341,7 +347,7 @@ def _es_el_codigo_propio_con_texto(candidato, propio):
     return bool(resto) and resto.isalpha()
 
 
-def extraer_codigos_de_texto(texto, minimo=6, codigo_propio=None):
+def extraer_codigos_de_texto(texto, minimo=6, codigo_propio=None, codigos_conocidos=None):
     """Busca códigos de fábrica escondidos dentro de una descripción.
     Muchas listas de proveedor no traen una columna de OEM aparte, pero lo meten en el texto
     ('ROTULA VW GOL - ORIG 6Q0407365'). Esto lo saca de ahí.
@@ -354,6 +360,19 @@ def extraer_codigos_de_texto(texto, minimo=6, codigo_propio=None):
     if not texto:
         return []
     propio = sanitizar(codigo_propio) if codigo_propio else ""
+    # Los códigos que YA están en el catálogo. Es el desempate para las formas ambiguas de más
+    # abajo: esos patrones existen para tirar designaciones de motor (MR20DE, Z18XER), y una
+    # designación de motor no es algo que alguien venda. Si el token coincide exactamente con
+    # el código de un producto cargado, entonces es un código de repuesto, se llame como se
+    # llame.
+    # Hacía falta: medido contra los 39.746 códigos reales del catálogo, el patrón de
+    # "código de motor" (^[A-Z]{1,3}\d{1,5}[A-Z]{1,4}$) le pega a 672 de ellos —bujías CT5FMR,
+    # capuchones RB9009B— y el de motores PSA a otros 52. Todos esos se perdían cuando
+    # aparecían nombrados adentro de la descripción de otro proveedor, que es justo el momento
+    # en que servían para cruzar las dos listas.
+    # Y no reabre la puerta a lo que se cerró: de 30 designaciones de motor conocidas
+    # (Z18XER, XU10J4R, MR20DE, 4G63, K9K, OM646...), ninguna existe como código de producto.
+    conocidos = codigos_conocidos or ()
     ruido = {"16V", "8V", "12V", "24V", "4X4", "4X2", "2WD", "4WD", "TDI", "TSI", "CRDI",
              "16valv", "MM", "CM", "KG"}
 
@@ -482,7 +501,18 @@ def extraer_codigos_de_texto(texto, minimo=6, codigo_propio=None):
         if limpio.upper() in ruido:
             continue
         declarado = indice in posiciones_declaradas
-        formas = formas_solo_texto if declarado else formas_prohibidas
+        # Estar en el catálogo desarma las formas AMBIGUAS —las de código de motor— y nada
+        # más. Es el desempate que esos patrones no tienen: la duda era si 'TC936MG' es una
+        # motorización o un repuesto, y que alguien lo venda la despeja.
+        # Lo que NO desarma es el largo mínimo de los códigos puramente numéricos, y la
+        # diferencia es cara: la descripción de FISPA «CONECTOR PARA MANGUERA 260035 16 X 5
+        # 16» trae '260035', que es la medida 5/16 pegada al código 26003 — y da la
+        # casualidad de que '260035' existe en el catálogo como una junta de colector de
+        # MOTORARG. Aflojando también el largo, esa medida rota quedaba uniendo un conector
+        # de manguera con una junta de admisión. Los códigos cortos de solo números son
+        # justamente los que chocan entre catálogos; los que tienen letras, no.
+        en_catalogo = sanitizar(limpio) in conocidos
+        formas = formas_solo_texto if (declarado or en_catalogo) else formas_prohibidas
         if any(p.match(limpio.upper()) for p in formas):
             continue
         if limpio.upper().startswith(arranques_de_texto):
@@ -541,6 +571,47 @@ def extraer_codigos_de_texto(texto, minimo=6, codigo_propio=None):
             vistos.add(clave)
             salida.append(cod)
     return salida
+
+
+def columna_es_codigo_de_barras(valores):
+    """¿La columna que se eligió como «código de fábrica» trae en realidad códigos de barras?
+
+    Es la diferencia entre que la lista sirva para cruzar con otros proveedores y que no sirva
+    para nada. El código de fábrica lo pone la terminal (036115561G, 7700274177) y lo repiten
+    todos los que fabrican esa pieza: por ahí es por donde se encadenan las listas. El código
+    de barras lo saca el proveedor para SU producto, es único de él y no lo va a tener nadie
+    más nunca.
+
+    Pasó de verdad y es caro: en la base real la lista de MOTORARG entró con la columna de
+    código de barras mapeada como código de fábrica. Resultado: 8.076 "códigos de fábrica" que
+    empiezan todos con 7793960 —el prefijo de GS1 de esa empresa—, ninguno compartido con nadie,
+    y 8.652 productos que en la búsqueda muestran una equivalencia que no lleva a ningún lado.
+    Desde el mostrador se ve como «no me hace las equivalencias con las otras marcas».
+
+    Cómo se reconoce, sin inventar nada: un código de barras es TODO números, de 12 a 14
+    dígitos, y —esto es lo que lo delata— los primeros dígitos son el prefijo de empresa, así
+    que en una lista de un solo proveedor son casi siempre los mismos. Un código de fábrica de
+    verdad no tiene esa forma: o trae letras, o es más corto, o los de una misma lista arrancan
+    distinto porque salen de terminales distintas.
+
+    Devuelve (es_codigo_de_barras, prefijo_comun, cuantos_del_total)."""
+    limpios = [re.sub(r'\D', '', str(v or "")) for v in valores if str(v or "").strip()]
+    limpios = [v for v in limpios if v]
+    if len(limpios) < 20:          # con menos filas cualquier coincidencia es casualidad
+        return False, "", (0, 0)
+    largos = [v for v in limpios if 12 <= len(v) <= 14]
+    if len(largos) < len(limpios) * 0.7:
+        return False, "", (len(largos), len(limpios))
+    # El prefijo de empresa de GS1 tiene entre 6 y 9 dígitos contando el país. Se busca el
+    # más largo que comparta la mayoría: cuanto más largo, más seguro que es una sola empresa.
+    for largo_prefijo in (9, 8, 7, 6):
+        conteo = {}
+        for v in largos:
+            conteo[v[:largo_prefijo]] = conteo.get(v[:largo_prefijo], 0) + 1
+        prefijo, cuantos = max(conteo.items(), key=lambda kv: kv[1])
+        if cuantos >= len(largos) * 0.7:
+            return True, prefijo, (cuantos, len(limpios))
+    return False, "", (len(largos), len(limpios))
 
 
 # ============================================================

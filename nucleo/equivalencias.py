@@ -64,6 +64,32 @@ def filas_a_listas(cursor):
     return [dict(row) for row in cursor.fetchall()]
 
 
+TOPE_VARIABLES_POR_CONSULTA = 900
+
+
+def en_tandas(valores, usos_por_consulta=1, tope=TOPE_VARIABLES_POR_CONSULTA):
+    """Parte una lista en pedazos que entren en UNA consulta, y devuelve (tanda, marcadores).
+
+    Está en un solo lugar porque el mismo cálculo estaba escrito a mano en varias funciones,
+    con tamaños distintos —una iba de a 500, otra de a 800— y eso es justo lo que se
+    desincroniza con el tiempo.
+
+    'usos_por_consulta' es cuántas VECES aparece la lista en la consulta, y es el detalle que
+    a mano se olvida: si el mismo IN va dos veces —«... IN (…) OR … IN (…)»— cada valor gasta
+    dos variables, así que en una tanda entran la mitad. Con 400 resultados y la lista repetida
+    eran 803 variables contra un tope de 999: andaba, pero sin margen, y subir el tope de
+    resultados de la búsqueda lo habría roto sin que nadie viera la relación.
+
+        for tanda, marcadores in en_tandas(ids, usos_por_consulta=2):
+            c.execute(f"... WHERE a IN ({marcadores}) OR b IN ({marcadores})", tanda + tanda)
+    """
+    valores = list(valores)
+    por_tanda = max(1, tope // max(1, int(usos_por_consulta)))
+    for inicio in range(0, len(valores), por_tanda):
+        tanda = valores[inicio:inicio + por_tanda]
+        yield tanda, ",".join("?" * len(tanda))
+
+
 def buscar_por_codigo(cur, clean_code, marca_filtro="Todas", max_saltos=None, confianza_minima=None):
     """Busca un código y todo lo que esté encadenado con él.
 
@@ -185,6 +211,31 @@ def buscar_por_codigo(cur, clean_code, marca_filtro="Todas", max_saltos=None, co
             if nivel or nota:
                 info_relacion[otro_id] = {"nivel": nivel, "nota": nota}
 
+    # A CUÁNTOS PRODUCTOS SE CUELGA CADA CÓDIGO DE FÁBRICA.
+    # Un código de fábrica que cuelga UN SOLO producto no es una equivalencia: es el mismo
+    # repuesto escrito de otra manera. Y la búsqueda lo mostraba como fila aparte, con
+    # «🟢 directo», «🟢 sólida» y nivel «Exacta» — o sea, contándolo como si hubiera
+    # encontrado el repuesto en otra marca.
+    # No es un detalle de presentación. Medido sobre la base real (61.574 productos):
+    # 12.060 productos —el 20% del catálogo— muestran hoy una equivalencia que no lleva a
+    # ningún lado (8.652 de MOTORARG, 2.524 de FISPA, 884 de JL). En el caso de MOTORARG es
+    # peor todavía: 8.076 de esos "códigos de fábrica" son el código de barras del propio
+    # proveedor (todos empiezan con 7793960, que es su prefijo de GS1), así que no van a
+    # coincidir nunca con la lista de nadie. De los 21.828 códigos de fábrica cargados,
+    # solo 2.483 unen dos productos o más: esos son los que hacen el trabajo.
+    # Desde el mostrador esto se ve exactamente como «no me hace las equivalencias»: se
+    # busca un código, la app dice que encontró una coincidencia, y la coincidencia es el
+    # mismo repuesto otra vez.
+    ids_oem = [f["ID"] for f in res if f.get("Tipo") == "OEM"]
+    grado_oem = {}
+    for tanda, marcadores in en_tandas(ids_oem):
+        cur.execute(
+            f"""SELECT p.id AS id,
+                       (SELECT COUNT(*) FROM equivalencias e
+                         WHERE e.producto_a_id = p.id OR e.producto_b_id = p.id) AS grado
+                FROM productos p WHERE p.id IN ({marcadores})""", tanda)
+        grado_oem.update({r["id"]: r["grado"] for r in cur.fetchall()})
+
     for fila in res:
         saltos = fila.pop("_saltos", 0) or 0
         peor = fila.pop("_peor", None)
@@ -193,24 +244,37 @@ def buscar_por_codigo(cur, clean_code, marca_filtro="Todas", max_saltos=None, co
         # evidencia distintos y mezclarlos en la misma etiqueta escondía cuál es cuál: mostrarlo
         # deja decidir con el dato a la vista.
         por_codigo = fila.pop("_por_codigo", 0)
+        # El código de fábrica que no lo tiene nadie más. Ver el conteo de grado_oem arriba:
+        # cuelga un solo producto, así que no lleva a ninguna otra marca. Se muestra igual
+        # —sirve para pedirlo, y el día que otro proveedor cargue ese mismo número se va a
+        # encadenar solo— pero deja de presentarse como una equivalencia encontrada.
+        sin_salida = fila.get("Tipo") == "OEM" and grado_oem.get(fila["ID"], 0) <= 1
+        fila["_sin_salida"] = sin_salida
         fila["Cadena"] = ("— el buscado" if saltos == 0 else
+                          "⚪ código de fábrica, nadie más lo tiene" if sin_salida else
                           "🔵 mismo código, otra marca" if por_codigo else
                           "🟢 directo" if saltos == 1 else
                           f"🟡 {saltos} saltos" if saltos <= 3 else
                           f"🔴 {saltos} saltos")
         # Lo que vale el camino entero: su eslabón más flojo. Un resultado a dos saltos por
         # vínculos sólidos es más confiable que uno directo colgado de un vínculo malo.
-        if saltos and peor is not None:
+        # Al que no lleva a ningún lado no se le pone confianza: no hay nada que confiar.
+        if saltos and peor is not None and not sin_salida:
             fila["Confianza"] = ("🟢 sólida" if peor >= 70 else
                                  "🟡 razonable" if peor >= 50 else
                                  "🟠 floja" if peor >= 30 else
                                  "🔴 muy débil")
         else:
             fila["Confianza"] = ""
-        fila["Verificada"] = "✅" if fila["ID"] in verificados_set else ""
+        # Al que no lleva a ningún lado tampoco se le pone tilde ni nivel. El vínculo con su
+        # propio código de fábrica está guardado como "Exacta" y es cierto, pero puesto al
+        # lado del resultado se lee como «encontré el equivalente exacto», que es justo lo
+        # contrario de lo que pasó.
+        fila["Verificada"] = "✅" if fila["ID"] in verificados_set and not sin_salida else ""
         rel = info_relacion.get(fila["ID"], {})
-        fila["Nivel"] = rel.get("nivel") or ("Exacta" if fila["ID"] in verificados_set else "")
-        fila["Nota"] = rel.get("nota") or ""
+        fila["Nivel"] = "" if sin_salida else (
+            rel.get("nivel") or ("Exacta" if fila["ID"] in verificados_set else ""))
+        fila["Nota"] = "" if sin_salida else (rel.get("nota") or "")
         template = fila.pop("_template", None)
         fila["Ficha"] = template.replace("{codigo}", quote(fila["Codigo"], safe="")) if template else ""
     return res

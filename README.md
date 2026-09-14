@@ -56,6 +56,62 @@ veces en una lista; lo que se repite más es texto.
 Antes de aflojar cualquiera de esos filtros, corré `python3 -m nucleo.pruebas`: los casos que
 dicen «NO debía sacar nada» están escritos con descripciones reales de esas listas.
 
+## Una equivalencia que no lleva a ningún lado no es una equivalencia
+
+El error más caro de todo esto no rompe nada: la importación sale bien, se cargan miles de
+vínculos, y ninguno sirve.
+
+Pasa cuando la columna que se mapeó como «código de fábrica» **no es el código de fábrica**.
+El caso real: la lista de MOTORARG entró con la columna del **código de barras**. Son 8.076
+números que empiezan todos con `7793960` —el prefijo de GS1 de esa empresa— y que ningún otro
+proveedor va a traer nunca. Quedaron 8.652 productos con una equivalencia cargada que cuelga
+un solo producto: el mismo.
+
+Medido sobre la base real (61.574 productos, 24.774 vínculos): de los 21.828 códigos de
+fábrica cargados, **solo 2.483 unen dos productos o más**. Los otros 19.251 son callejones
+sin salida, y arrastran a 12.060 productos —el 20% del catálogo— que en la búsqueda mostraban
+«🟢 directo / 🟢 sólida / Exacta» apuntando a sí mismos.
+
+Tres cosas lo cubren ahora, y conviene no aflojar ninguna:
+
+- `buscar_por_codigo()` cuenta a cuántos productos se cuelga cada código de fábrica del
+  resultado. Los de grado 1 se marcan `_sin_salida`, la columna **Cadena** lo dice con todas
+  las letras, y no llevan confianza ni nivel. El Buscador cuenta las equivalencias **de
+  verdad** aparte del total de filas.
+- `columna_es_codigo_de_barras()` lo detecta **antes de importar**: 12 a 14 dígitos, todo
+  números, y el mismo prefijo en el 70% de la muestra. Avisa en rojo en la vista previa.
+- `listas_que_no_cruzan()` (Mantenimiento → 🩺 Estado) lo contesta para lo que ya está
+  cargado, con el motivo escrito. La columna que importa es **«Cruzan con otra marca»**: si
+  dice 0, esa lista no sirve para responder «¿qué otra marca me sirve?».
+
+La cuenta que vale no es cuántas equivalencias tiene una lista, es **a cuántos productos de
+otro proveedor llega**.
+
+## Cuando alguien vende el código, es un código
+
+`extraer_codigos_de_texto()` descarta por forma las motorizaciones (`MR20DE`, `Z18XER`,
+`XU10J4R`), y esa regla se llevaba puestos códigos de repuesto reales que tienen la misma
+forma: sobre los 39.746 códigos del catálogo, 724 —bujías `CT5FMR`, capuchones `RB9009B`,
+juntas `TC-936-MG`—.
+
+El desempate es el catálogo: si el token coincide con el código de un producto de una lista
+de **PROVEEDOR**, es un código, porque una motorización no la vende nadie. Se pasa con
+`codigos_conocidos=codigos_del_catalogo(version_del_catalogo())`.
+
+Dos límites que están puestos a propósito y no hay que sacar:
+
+- **Solo códigos de marcas PROVEEDOR**, nunca los de «OEM / FABRICA». Muchos de esos los creó
+  una importación anterior leyendo una descripción: si contaran, la basura de ayer se
+  legitimaría sola. En la base real hay `DS3-BMW`, `i30-KIA` y `gol1.0-golf` cargados como
+  códigos de fábrica.
+- **No afloja el largo mínimo de los códigos de solo números.** La descripción
+  `CONECTOR PARA MANGUERA 260035 16 X 5 16` trae la medida 5/16 pegada al código 26003, y
+  `260035` existe en otra lista como una junta de colector. Aflojando el largo, esa medida
+  rota unía un conector de manguera con una junta de admisión.
+
+Medido: rescata 15 códigos (todos bujías NGK/Bosch, que es justo lo que cruza una bujía de un
+proveedor con la de otro), pierde 0, y las 30 motorizaciones conocidas siguen afuera.
+
 ## Quién puede hacer qué
 
 La app **deja entrar sin contraseña a propósito**: el botón «Continuar» del login te mete

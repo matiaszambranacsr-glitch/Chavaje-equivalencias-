@@ -2434,7 +2434,49 @@ def sanitizar(codigo):
 TOPE_REPETICIONES_EN_DESCRIPCION = 4
 
 
-def codigos_confiables_de_descripciones(descripciones, tope=TOPE_REPETICIONES_EN_DESCRIPCION):
+def columna_es_codigo_de_barras(valores):
+    """¿La columna que se eligió como «código de fábrica» trae en realidad códigos de barras?
+
+    Es la diferencia entre que la lista sirva para cruzar con otros proveedores y que no sirva
+    para nada. El código de fábrica lo pone la terminal (036115561G, 7700274177) y lo repiten
+    todos los que fabrican esa pieza: por ahí es por donde se encadenan las listas. El código
+    de barras lo saca el proveedor para SU producto, es único de él y no lo va a tener nadie
+    más nunca.
+
+    Pasó de verdad y es caro: en la base real la lista de MOTORARG entró con la columna de
+    código de barras mapeada como código de fábrica. Resultado: 8.076 "códigos de fábrica" que
+    empiezan todos con 7793960 —el prefijo de GS1 de esa empresa—, ninguno compartido con nadie,
+    y 8.652 productos que en la búsqueda muestran una equivalencia que no lleva a ningún lado.
+    Desde el mostrador se ve como «no me hace las equivalencias con las otras marcas».
+
+    Cómo se reconoce, sin inventar nada: un código de barras es TODO números, de 12 a 14
+    dígitos, y —esto es lo que lo delata— los primeros dígitos son el prefijo de empresa, así
+    que en una lista de un solo proveedor son casi siempre los mismos. Un código de fábrica de
+    verdad no tiene esa forma: o trae letras, o es más corto, o los de una misma lista arrancan
+    distinto porque salen de terminales distintas.
+
+    Devuelve (es_codigo_de_barras, prefijo_comun, cuantos_del_total)."""
+    limpios = [re.sub(r'\D', '', str(v or "")) for v in valores if str(v or "").strip()]
+    limpios = [v for v in limpios if v]
+    if len(limpios) < 20:          # con menos filas cualquier coincidencia es casualidad
+        return False, "", (0, 0)
+    largos = [v for v in limpios if 12 <= len(v) <= 14]
+    if len(largos) < len(limpios) * 0.7:
+        return False, "", (len(largos), len(limpios))
+    # El prefijo de empresa de GS1 tiene entre 6 y 9 dígitos contando el país. Se busca el
+    # más largo que comparta la mayoría: cuanto más largo, más seguro que es una sola empresa.
+    for largo_prefijo in (9, 8, 7, 6):
+        conteo = {}
+        for v in largos:
+            conteo[v[:largo_prefijo]] = conteo.get(v[:largo_prefijo], 0) + 1
+        prefijo, cuantos = max(conteo.items(), key=lambda kv: kv[1])
+        if cuantos >= len(largos) * 0.7:
+            return True, prefijo, (cuantos, len(limpios))
+    return False, "", (len(largos), len(limpios))
+
+
+def codigos_confiables_de_descripciones(descripciones, tope=TOPE_REPETICIONES_EN_DESCRIPCION,
+                                        codigos_conocidos=None):
     """De todos los códigos que se pueden sacar de las descripciones de una lista, devuelve
     solo los que NO se repiten demasiado.
 
@@ -2456,7 +2498,12 @@ def codigos_confiables_de_descripciones(descripciones, tope=TOPE_REPETICIONES_EN
     for texto, codigo_propio in descripciones:
         # set() por fila: si la misma descripción nombra dos veces el mismo código, cuenta una.
         # Lo que se está midiendo es en cuántos PRODUCTOS distintos aparece, no cuántas veces.
-        for cod in set(sanitizar(c) for c in extraer_codigos_de_texto(texto, codigo_propio=codigo_propio)):
+        # El mismo juego de códigos conocidos que va a usar la importación. Si acá se contara
+        # con otro criterio, el recuento y la extracción real no hablarían del mismo conjunto:
+        # un código rescatado al importar no estaría en la lista de confiables y se tiraría
+        # igual, que es peor que no rescatarlo — parecería que el arreglo no hizo nada.
+        for cod in set(sanitizar(c) for c in extraer_codigos_de_texto(
+                texto, codigo_propio=codigo_propio, codigos_conocidos=codigos_conocidos)):
             if cod:
                 conteo[cod] += 1
     return {cod for cod, veces in conteo.items() if veces <= tope}, conteo
@@ -2578,7 +2625,7 @@ def _es_el_codigo_propio_con_texto(candidato, propio):
     return bool(resto) and resto.isalpha()
 
 
-def extraer_codigos_de_texto(texto, minimo=6, codigo_propio=None):
+def extraer_codigos_de_texto(texto, minimo=6, codigo_propio=None, codigos_conocidos=None):
     """Busca códigos de fábrica escondidos dentro de una descripción.
     Muchas listas de proveedor no traen una columna de OEM aparte, pero lo meten en el texto
     ('ROTULA VW GOL - ORIG 6Q0407365'). Esto lo saca de ahí.
@@ -2591,6 +2638,19 @@ def extraer_codigos_de_texto(texto, minimo=6, codigo_propio=None):
     if not texto:
         return []
     propio = sanitizar(codigo_propio) if codigo_propio else ""
+    # Los códigos que YA están en el catálogo. Es el desempate para las formas ambiguas de más
+    # abajo: esos patrones existen para tirar designaciones de motor (MR20DE, Z18XER), y una
+    # designación de motor no es algo que alguien venda. Si el token coincide exactamente con
+    # el código de un producto cargado, entonces es un código de repuesto, se llame como se
+    # llame.
+    # Hacía falta: medido contra los 39.746 códigos reales del catálogo, el patrón de
+    # "código de motor" (^[A-Z]{1,3}\d{1,5}[A-Z]{1,4}$) le pega a 672 de ellos —bujías CT5FMR,
+    # capuchones RB9009B— y el de motores PSA a otros 52. Todos esos se perdían cuando
+    # aparecían nombrados adentro de la descripción de otro proveedor, que es justo el momento
+    # en que servían para cruzar las dos listas.
+    # Y no reabre la puerta a lo que se cerró: de 30 designaciones de motor conocidas
+    # (Z18XER, XU10J4R, MR20DE, 4G63, K9K, OM646...), ninguna existe como código de producto.
+    conocidos = codigos_conocidos or ()
     ruido = {"16V", "8V", "12V", "24V", "4X4", "4X2", "2WD", "4WD", "TDI", "TSI", "CRDI",
              "16valv", "MM", "CM", "KG"}
 
@@ -2719,7 +2779,18 @@ def extraer_codigos_de_texto(texto, minimo=6, codigo_propio=None):
         if limpio.upper() in ruido:
             continue
         declarado = indice in posiciones_declaradas
-        formas = formas_solo_texto if declarado else formas_prohibidas
+        # Estar en el catálogo desarma las formas AMBIGUAS —las de código de motor— y nada
+        # más. Es el desempate que esos patrones no tienen: la duda era si 'TC936MG' es una
+        # motorización o un repuesto, y que alguien lo venda la despeja.
+        # Lo que NO desarma es el largo mínimo de los códigos puramente numéricos, y la
+        # diferencia es cara: la descripción de FISPA «CONECTOR PARA MANGUERA 260035 16 X 5
+        # 16» trae '260035', que es la medida 5/16 pegada al código 26003 — y da la
+        # casualidad de que '260035' existe en el catálogo como una junta de colector de
+        # MOTORARG. Aflojando también el largo, esa medida rota quedaba uniendo un conector
+        # de manguera con una junta de admisión. Los códigos cortos de solo números son
+        # justamente los que chocan entre catálogos; los que tienen letras, no.
+        en_catalogo = sanitizar(limpio) in conocidos
+        formas = formas_solo_texto if (declarado or en_catalogo) else formas_prohibidas
         if any(p.match(limpio.upper()) for p in formas):
             continue
         if limpio.upper().startswith(arranques_de_texto):
@@ -2844,6 +2915,96 @@ def eliminar_catalogo_externo(catalogo_id):
 # ============================================================================================
 # INTEGRIDAD DE LA BASE, BACKUP Y RESTAURACIÓN
 # ============================================================================================
+def listas_que_no_cruzan():
+    """Por cada proveedor: con cuántos otros proveedores cruza de verdad, y si no cruza, por qué.
+
+    Es la respuesta a la pregunta que más se hace desde el mostrador: «¿por qué no me hace las
+    equivalencias?». Hasta ahora había que adivinarlo. La búsqueda mostraba filas, la pantalla
+    decía «2 coincidencias», y nadie veía que la segunda coincidencia era el mismo repuesto.
+
+    La cuenta que importa no es cuántas equivalencias tiene una lista, es a cuántos productos de
+    OTRO proveedor llega. Una lista puede tener 8.652 equivalencias cargadas y llegar a cero
+    productos de otra marca: pasa cuando todos sus códigos de fábrica son suyos y de nadie más
+    —el caso típico es que se haya mapeado la columna del código de barras— y es exactamente lo
+    que se ve como «no relaciona nada».
+
+    Devuelve una fila por proveedor, de peor a mejor."""
+    c.execute("""
+        SELECT m.id AS marca_id, m.nombre AS marca, COUNT(p.id) AS productos
+        FROM marcas m JOIN productos p ON p.marca_id = m.id
+        WHERE m.tipo <> 'OEM'
+        GROUP BY m.id ORDER BY COUNT(p.id) DESC""")
+    proveedores = filas_a_listas(c)
+
+    filas = []
+    for prov in proveedores:
+        # Productos de esta lista que llegan a un producto de OTRO proveedor, sea directo o
+        # pasando por un código de fábrica. Dos saltos alcanzan: proveedor -> código de
+        # fábrica -> otro proveedor es el camino normal, y más lejos que eso ya no es evidencia.
+        c.execute("""
+            WITH mios AS (SELECT id FROM productos WHERE marca_id = ?),
+                 vecinos AS (
+                    SELECT mi.id AS mio,
+                           CASE WHEN e.producto_a_id = mi.id THEN e.producto_b_id
+                                ELSE e.producto_a_id END AS otro
+                    FROM mios mi JOIN equivalencias e
+                      ON e.producto_a_id = mi.id OR e.producto_b_id = mi.id),
+                 segundos AS (
+                    SELECT v.mio,
+                           CASE WHEN e.producto_a_id = v.otro THEN e.producto_b_id
+                                ELSE e.producto_a_id END AS otro
+                    FROM vecinos v JOIN equivalencias e
+                      ON e.producto_a_id = v.otro OR e.producto_b_id = v.otro)
+            SELECT COUNT(DISTINCT t.mio) AS cruzan
+            FROM (SELECT mio, otro FROM vecinos UNION SELECT mio, otro FROM segundos) t
+            JOIN productos po ON po.id = t.otro
+            JOIN marcas mo ON mo.id = po.marca_id
+            WHERE mo.tipo <> 'OEM' AND mo.id <> ?""", (prov["marca_id"], prov["marca_id"]))
+        cruzan = (c.fetchone() or {"cruzan": 0})["cruzan"] or 0
+
+        # Los códigos de fábrica que esta lista aportó. Si son todos de la misma familia de
+        # números largos, es la columna del código de barras.
+        # El total va en su propia consulta y la muestra aparte: con LIMIT alcanzaba para
+        # decidir si son códigos de barras, pero el número que se muestra en pantalla tiene
+        # que ser el de verdad, no el del tope.
+        consulta_oem = """
+            SELECT {que}
+            FROM productos p JOIN equivalencias e
+              ON e.producto_a_id = p.id OR e.producto_b_id = p.id
+            JOIN productos po ON po.id = CASE WHEN e.producto_a_id = p.id
+                                              THEN e.producto_b_id ELSE e.producto_a_id END
+            JOIN marcas mo ON mo.id = po.marca_id
+            WHERE p.marca_id = ? AND mo.tipo = 'OEM'"""
+        c.execute(consulta_oem.format(que="COUNT(DISTINCT po.codigo_clean) AS cuantos"),
+                  (prov["marca_id"],))
+        total_oem = (c.fetchone() or {"cuantos": 0})["cuantos"] or 0
+        c.execute(consulta_oem.format(que="DISTINCT po.codigo_clean AS codigo")
+                  + " LIMIT 3000", (prov["marca_id"],))
+        codigos_oem = [r["codigo"] for r in c.fetchall()]
+        es_barras, prefijo, _ = columna_es_codigo_de_barras(codigos_oem)
+
+        if cruzan:
+            motivo = ""
+        elif es_barras:
+            motivo = (f"los códigos de fábrica de esta lista son códigos de barras "
+                      f"(empiezan todos con {prefijo}…): no los tiene ningún otro proveedor")
+        elif total_oem:
+            motivo = ("los códigos de fábrica de esta lista no coinciden con los de ninguna "
+                      "otra: puede ser que cada proveedor cite terminales distintas")
+        else:
+            motivo = "esta lista se cargó sin código de fábrica, así que no tiene con qué cruzar"
+
+        filas.append({
+            "Lista": prov["marca"],
+            "Productos": prov["productos"],
+            "Cruzan con otra marca": cruzan,
+            "Códigos de fábrica que aportó": total_oem,
+            "Por qué no cruza": motivo,
+            "_sin_cruce": not cruzan,
+        })
+    return sorted(filas, key=lambda f: (f["Cruzan con otra marca"], -f["Productos"]))
+
+
 def contar_huerfanos():
     """Cuántos productos no tienen ninguna equivalencia. Es lo que borraría depurar_huerfanos().
 
@@ -5807,6 +5968,31 @@ def buscar_por_codigo(clean_code, marca_filtro="Todas", max_saltos=None, confian
                 if nivel or nota:
                     info_relacion[otro_id] = {"nivel": nivel, "nota": nota}
 
+        # A CUÁNTOS PRODUCTOS SE CUELGA CADA CÓDIGO DE FÁBRICA.
+        # Un código de fábrica que cuelga UN SOLO producto no es una equivalencia: es el mismo
+        # repuesto escrito de otra manera. Y la búsqueda lo mostraba como fila aparte, con
+        # «🟢 directo», «🟢 sólida» y nivel «Exacta» — o sea, contándolo como si hubiera
+        # encontrado el repuesto en otra marca.
+        # No es un detalle de presentación. Medido sobre la base real (61.574 productos):
+        # 12.060 productos —el 20% del catálogo— muestran hoy una equivalencia que no lleva a
+        # ningún lado (8.652 de MOTORARG, 2.524 de FISPA, 884 de JL). En el caso de MOTORARG es
+        # peor todavía: 8.076 de esos "códigos de fábrica" son el código de barras del propio
+        # proveedor (todos empiezan con 7793960, que es su prefijo de GS1), así que no van a
+        # coincidir nunca con la lista de nadie. De los 21.828 códigos de fábrica cargados,
+        # solo 2.483 unen dos productos o más: esos son los que hacen el trabajo.
+        # Desde el mostrador esto se ve exactamente como «no me hace las equivalencias»: se
+        # busca un código, la app dice que encontró una coincidencia, y la coincidencia es el
+        # mismo repuesto otra vez.
+        ids_oem = [f["ID"] for f in res if f.get("Tipo") == "OEM"]
+        grado_oem = {}
+        for tanda, marcadores in en_tandas(ids_oem):
+            c.execute(
+                f"""SELECT p.id AS id,
+                           (SELECT COUNT(*) FROM equivalencias e
+                             WHERE e.producto_a_id = p.id OR e.producto_b_id = p.id) AS grado
+                    FROM productos p WHERE p.id IN ({marcadores})""", tanda)
+            grado_oem.update({r["id"]: r["grado"] for r in c.fetchall()})
+
     for fila in res:
         saltos = fila.pop("_saltos", 0) or 0
         peor = fila.pop("_peor", None)
@@ -5815,24 +6001,37 @@ def buscar_por_codigo(clean_code, marca_filtro="Todas", max_saltos=None, confian
         # evidencia distintos y mezclarlos en la misma etiqueta escondía cuál es cuál: mostrarlo
         # deja decidir con el dato a la vista.
         por_codigo = fila.pop("_por_codigo", 0)
+        # El código de fábrica que no lo tiene nadie más. Ver el conteo de grado_oem arriba:
+        # cuelga un solo producto, así que no lleva a ninguna otra marca. Se muestra igual
+        # —sirve para pedirlo, y el día que otro proveedor cargue ese mismo número se va a
+        # encadenar solo— pero deja de presentarse como una equivalencia encontrada.
+        sin_salida = fila.get("Tipo") == "OEM" and grado_oem.get(fila["ID"], 0) <= 1
+        fila["_sin_salida"] = sin_salida
         fila["Cadena"] = ("— el buscado" if saltos == 0 else
+                          "⚪ código de fábrica, nadie más lo tiene" if sin_salida else
                           "🔵 mismo código, otra marca" if por_codigo else
                           "🟢 directo" if saltos == 1 else
                           f"🟡 {saltos} saltos" if saltos <= 3 else
                           f"🔴 {saltos} saltos")
         # Lo que vale el camino entero: su eslabón más flojo. Un resultado a dos saltos por
         # vínculos sólidos es más confiable que uno directo colgado de un vínculo malo.
-        if saltos and peor is not None:
+        # Al que no lleva a ningún lado no se le pone confianza: no hay nada que confiar.
+        if saltos and peor is not None and not sin_salida:
             fila["Confianza"] = ("🟢 sólida" if peor >= 70 else
                                  "🟡 razonable" if peor >= 50 else
                                  "🟠 floja" if peor >= 30 else
                                  "🔴 muy débil")
         else:
             fila["Confianza"] = ""
-        fila["Verificada"] = "✅" if fila["ID"] in verificados_set else ""
+        # Al que no lleva a ningún lado tampoco se le pone tilde ni nivel. El vínculo con su
+        # propio código de fábrica está guardado como "Exacta" y es cierto, pero puesto al
+        # lado del resultado se lee como «encontré el equivalente exacto», que es justo lo
+        # contrario de lo que pasó.
+        fila["Verificada"] = "✅" if fila["ID"] in verificados_set and not sin_salida else ""
         rel = info_relacion.get(fila["ID"], {})
-        fila["Nivel"] = rel.get("nivel") or ("Exacta" if fila["ID"] in verificados_set else "")
-        fila["Nota"] = rel.get("nota") or ""
+        fila["Nivel"] = "" if sin_salida else (
+            rel.get("nivel") or ("Exacta" if fila["ID"] in verificados_set else ""))
+        fila["Nota"] = "" if sin_salida else (rel.get("nota") or "")
         template = fila.pop("_template", None)
         fila["Ficha"] = template.replace("{codigo}", quote(fila["Codigo"], safe="")) if template else ""
     return res
@@ -8395,6 +8594,26 @@ def descripciones_por_palabra(_version):
                                       (fila["descripcion"] or "").upper())):
             cuenta[palabra] += 1
     return cuenta
+
+
+@st.cache_data(show_spinner=False, max_entries=3)
+def codigos_del_catalogo(_version):
+    """Todos los códigos que ya están cargados, limpios. Se usa como desempate al leer
+    códigos de fábrica metidos adentro de una descripción: ver extraer_codigos_de_texto().
+
+    Solo los códigos de las listas de PROVEEDOR, a propósito. Los de «OEM / FABRICA» no
+    valen para esto porque muchos los creó esta misma función en una importación anterior,
+    leyéndolos de una descripción: si contaran, la basura de ayer se legitimaría sola.
+    Se ve enseguida en la base real — entre los códigos «de fábrica» hay 'DS3-BMW', 'i30-KIA',
+    'S10-PEU' y 'gol1.0-golf', que son modelos de auto que entraron mal. Con esos adentro, el
+    texto «CITROEN C3/C4/DS3-PEU 206» volvía a producir un código; con solo los de proveedor,
+    no.
+
+    Va cacheado porque al importar una lista se consulta una vez por fila y son decenas de
+    miles. Son 39.746 códigos de proveedor en la base real: se arma en 0,03 s."""
+    c.execute("""SELECT DISTINCT p.codigo_clean FROM productos p JOIN marcas m ON m.id = p.marca_id
+                 WHERE p.codigo_clean IS NOT NULL AND m.tipo <> 'OEM'""")
+    return {fila[0] for fila in c.fetchall() if fila[0]}
 
 
 @st.cache_data(show_spinner=False, max_entries=20)
@@ -15499,16 +15718,47 @@ Casi todo lo que edita o borra algo pide la contraseña de administrador la prim
                     st.warning(f"🔎 {codigo_individual} — código no válido, se omitió.")
                     continue
 
-                if res:
-                    etiqueta_resultado = f"🔎 {codigo_individual} — {len(res)} coincidencia" + ("s" if len(res) != 1 else "")
-                else:
+                # CUÁNTAS DE LAS COINCIDENCIAS SON DE VERDAD OTRO REPUESTO.
+                # No es lo mismo "2 coincidencias" que "el que buscaste y su propio código de
+                # fábrica". Antes se contaba todo junto y el cartel verde decía que había
+                # encontrado algo cuando no había encontrado nada: en la base real le pasa a
+                # 12.060 productos (el 20% del catálogo). Eso es lo que desde el mostrador se
+                # ve como «no me hace las equivalencias».
+                # Cuenta como alternativa de verdad lo que se puede vender en lugar del
+                # buscado: otro producto, de otro proveedor. Los códigos de fábrica que no
+                # cuelgan nada más (_sin_salida) no cuentan, y el buscado tampoco.
+                alternativas = [f for f in res
+                                if f.get("Cadena") != "— el buscado" and not f.get("_sin_salida")]
+                if not res:
                     etiqueta_resultado = f"🔎 {codigo_individual} — sin resultados"
+                elif alternativas:
+                    etiqueta_resultado = (f"🔎 {codigo_individual} — {len(alternativas)} "
+                                          f"equivalencia" + ("s" if len(alternativas) != 1 else ""))
+                else:
+                    etiqueta_resultado = f"🔎 {codigo_individual} — sin equivalencias todavía"
 
                 with st.expander(etiqueta_resultado, expanded=(total_codigos_buscados == 1)):
                     if item.get("aviso"):
                         st.warning(item["aviso"])
                     if res:
-                        st.success(f"Se encontraron {len(res)} coincidencias:")
+                        if alternativas:
+                            st.success(f"Se encontraron {len(alternativas)} equivalencia(s), "
+                                       f"sobre {len(res)} fila(s) en total:")
+                        else:
+                            # Decirlo con todas las letras, y decir además qué hacer. Sin esto
+                            # la pantalla mostraba dos filas y un tilde verde, y había que
+                            # mirar la columna «Cadena» para darse cuenta de que la segunda
+                            # fila era el mismo repuesto.
+                            _fabrica = [f for f in res if f.get("_sin_salida")]
+                            st.warning(
+                                "🔗 **Este código todavía no tiene equivalencias con otra "
+                                "marca.**"
+                                + (f" Lo único que aparece es su código de fábrica "
+                                   f"(**{_fabrica[0]['Codigo']}**), que por ahora no está en "
+                                   "la lista de ningún otro proveedor." if _fabrica else "")
+                                + "\n\nSe puede cargar a mano desde **🔗 Vincular manual**, y "
+                                "queda para siempre."
+                            )
 
                         # Llegar al tope de 400 no es solo "hay muchos": según el criterio de la
                         # propia consulta, una red sana tiene entre 2 y 20 códigos. Cuatrocientos
@@ -16989,9 +17239,12 @@ if pagina == PAGINAS[2]:
                             _pares = [(valor_o_vacio(f[idx_desc]) if idx_desc < len(f) else "",
                                        valor_o_vacio(f[idx_prov]) if idx_prov < len(f) else "")
                                       for f in _muestra]
-                            _confiables, _ = codigos_confiables_de_descripciones(_pares)
+                            _conocidos = codigos_del_catalogo(version_del_catalogo())
+                            _confiables, _ = codigos_confiables_de_descripciones(
+                                _pares, codigos_conocidos=_conocidos)
                             for _txt, _cod in _pares:
-                                _hall = [c for c in extraer_codigos_de_texto(_txt, codigo_propio=_cod)
+                                _hall = [c for c in extraer_codigos_de_texto(
+                                            _txt, codigo_propio=_cod, codigos_conocidos=_conocidos)
                                          if sanitizar(c) in _confiables]
                                 if _hall:
                                     _con_codigo += 1
@@ -17013,6 +17266,35 @@ if pagina == PAGINAS[2]:
                                 "generar equivalencias: cada fila es un producto suelto con su "
                                 "precio. Eso está perfecto para **cargar y actualizar precios**, "
                                 "y para que aparezca en la búsqueda por código y por descripción."
+                            )
+                    else:
+                        # LA COLUMNA ESTÁ, PERO ¿ES LA QUE PARECE?
+                        # Elegir la columna equivocada como código de fábrica no da error: la
+                        # importación sale bien, carga miles de equivalencias, y ninguna sirve.
+                        # Es peor que no tener la columna, porque la app queda diciendo que
+                        # encontró equivalentes. Con la lista de MOTORARG pasó exactamente eso:
+                        # entró la columna de código de barras y quedaron 8.652 productos con
+                        # una equivalencia que no lleva a ningún lado. Se avisa ACÁ, antes de
+                        # importar, que es el único momento en que se arregla barato.
+                        _muestra_oem = [f[idx_oem] for f in todas_filas[header_row + 1:header_row + 400]
+                                        if idx_oem < len(f)]
+                        _es_barras, _prefijo, (_cuantos, _total_oem) = columna_es_codigo_de_barras(_muestra_oem)
+                        if _es_barras:
+                            st.error(
+                                f"🏷️ **La columna «{opciones_cols[idx_oem]}» parece el código de "
+                                f"barras, no el código de fábrica.** "
+                                f"{_cuantos} de {_total_oem} valores de la muestra son números "
+                                f"de 12 a 14 dígitos que empiezan todos igual (**{_prefijo}…**), "
+                                "que es el prefijo de empresa del código de barras.\n\n"
+                                "**Por qué importa:** el código de barras es de este proveedor "
+                                "solo. Ninguna otra lista lo va a traer, así que **no va a "
+                                "cruzar con nadie**: se van a cargar miles de equivalencias que "
+                                "en la búsqueda no llevan a ningún lado.\n\n"
+                                "**Qué hacer:** fijate si la lista trae otra columna con el "
+                                "código original / OEM / de la terminal (los de fábrica suelen "
+                                "tener letras, o son más cortos, y no arrancan todos igual) y "
+                                "elegí esa. Si no la trae, dejá la columna en «— ninguna —» y "
+                                "activá «buscar el código de fábrica dentro de la descripción»."
                             )
 
                     if diag["fechas"]:
@@ -17059,7 +17341,12 @@ if pagina == PAGINAS[2]:
                         texto_desc = valor_o_vacio(fila_prev[idx_desc]) if idx_desc < len(fila_prev) else ""
                         cod_fila = (valor_o_vacio(fila_prev[idx_prov])
                                     if idx_prov is not None and idx_prov < len(fila_prev) else "")
-                        hallados = extraer_codigos_de_texto(texto_desc, codigo_propio=cod_fila)
+                        # Con el mismo criterio que la importación real: si esta muestra
+                        # detectara con otras reglas, mostraría algo distinto de lo que va a
+                        # pasar, que es exactamente lo que la muestra existe para evitar.
+                        hallados = extraer_codigos_de_texto(
+                            texto_desc, codigo_propio=cod_fila,
+                            codigos_conocidos=codigos_del_catalogo(version_del_catalogo()))
                         if hallados:
                             muestras.append({"Descripción": texto_desc[:60], "Detecta": ", ".join(hallados)})
                         if len(muestras) >= 8:
@@ -17122,11 +17409,15 @@ if pagina == PAGINAS[2]:
                     # 25.000 filas juntas se ve que aparece 15 veces y el código de verdad 2.
                     oem_desc_confiables, oem_desc_conteo = set(), {}
                     oem_desc_descartados = 0
+                    # Los códigos que ya están cargados. Se leen UNA vez, antes del candado y
+                    # antes del bucle: adentro se consultan por cada token de cada fila.
+                    codigos_ya_cargados = codigos_del_catalogo(version_del_catalogo())
                     if buscar_oem_en_desc and idx_desc is not None:
                         oem_desc_confiables, oem_desc_conteo = codigos_confiables_de_descripciones(
                             [(valor_o_vacio(f[idx_desc]) if idx_desc < len(f) else "",
                               valor_o_vacio(f[idx_prov]) if idx_prov is not None and idx_prov < len(f) else "")
-                             for f in filas_datos])
+                             for f in filas_datos],
+                            codigos_conocidos=codigos_ya_cargados)
 
                     cargados = 0
                     cargados_sin_equiv = 0
@@ -17173,7 +17464,9 @@ if pagina == PAGINAS[2]:
                             # Solo se aceptan los que no se repiten por toda la lista: ver
                             # codigos_confiables_de_descripciones() y el conteo de más arriba.
                             if not codigos_oem and buscar_oem_en_desc and desc:
-                                _cands = extraer_codigos_de_texto(desc, codigo_propio=raw_p_cell)
+                                _cands = extraer_codigos_de_texto(
+                                    desc, codigo_propio=raw_p_cell,
+                                    codigos_conocidos=codigos_ya_cargados)
                                 codigos_oem = [c for c in _cands
                                                if sanitizar(c) in oem_desc_confiables]
                                 if not codigos_oem and _cands:
@@ -19470,6 +19763,49 @@ if pagina == PAGINAS[3]:
                     st.rerun()
 
         if _grupo_mant == GRUPOS_MANTENIMIENTO[3]:
+            st.markdown("**🔗 Listas que no cruzan con ninguna otra**")
+            explicar(
+                "Por qué una lista no genera equivalencias con las demás, con el motivo escrito.",
+                "La búsqueda cruza dos listas cuando las dos citan el **mismo código de "
+                "fábrica**. Si una lista no lo trae, o trae otra cosa en esa columna, se carga "
+                "perfecto —precios, stock, búsqueda por descripción— pero no se junta con "
+                "nadie.\n\n"
+                "Lo difícil era darse cuenta: la lista puede tener miles de equivalencias "
+                "cargadas y que **ninguna** llegue a otro proveedor, porque van todas a su "
+                "propio código y ahí se terminan. En la búsqueda eso se ve como un resultado "
+                "de más, no como un problema.\n\n"
+                "**La columna que importa es «Cruzan con otra marca».** Si dice 0, esa lista "
+                "hoy no sirve para responder «¿qué otra marca me sirve?»."
+            )
+            if st.button("🔗 Ver por qué no cruzan"):
+                _cruces = listas_que_no_cruzan()
+                _mudas = [f for f in _cruces if f["_sin_cruce"]]
+                if not _mudas:
+                    st.success("✅ Todas las listas cruzan con alguna otra.")
+                else:
+                    st.warning(
+                        f"⚠️ {len(_mudas)} lista(s) no llegan a ningún producto de otro "
+                        f"proveedor: {', '.join(f['Lista'] for f in _mudas)}."
+                    )
+                st.dataframe(
+                    [{k: v for k, v in f.items() if not k.startswith("_")} for f in _cruces],
+                    width="stretch", hide_index=True,
+                    column_config={"Cruzan con otra marca": st.column_config.NumberColumn(
+                        "Cruzan con otra marca",
+                        help="Productos de esa lista que llegan a un producto de OTRO proveedor. "
+                             "Es la cuenta que dice si la lista sirve para buscar equivalencias."
+                    )}
+                )
+                explicar(
+                    "Se arregla volviendo a importar la lista con la columna correcta.",
+                    "En **📁 Cargar Excel**, al volver a subir la misma lista, elegí en «Código "
+                    "OEM / Equivalente» la columna del código original de la terminal. Si la "
+                    "lista no la trae, dejala en «Ninguna» y activá «buscar el código de "
+                    "fábrica dentro de la descripción».\n\n"
+                    "**Reimportar no duplica nada**: los productos se reconocen por su código y "
+                    "se actualizan, no se cargan de nuevo."
+                )
+
             st.markdown("**🔍 Salud de los datos**")
             st.caption(
                 "Revisa la base en busca de cosas rotas o inconsistentes — útil para detectar corrupción "

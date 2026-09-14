@@ -79,6 +79,7 @@ from .errores import anotar_error
       "_partir_por_barra", "dividir_codigos", "codigo_sospechoso",
       "TOPE_REPETICIONES_EN_DESCRIPCION", "codigos_confiables_de_descripciones",
       "_MARCADORES_DE_OEM", "_es_el_codigo_propio_con_texto", "extraer_codigos_de_texto",
+      "columna_es_codigo_de_barras",
       "normalizar_texto", "valor_o_vacio", "valor_codigo"])
 
 # ---------------------------------------------------------------- vehiculos
@@ -219,6 +220,10 @@ def preparar(conexion):
 
 cuerpo = "\n\n\n".join([
     BLOQUES["filas_a_listas"],
+    # buscar_por_codigo consulta el grado de los códigos de fábrica del resultado, y para eso
+    # parte la lista de ids en tandas que entren en una consulta de SQLite.
+    BLOQUES["TOPE_VARIABLES_POR_CONSULTA"],
+    BLOQUES["en_tandas"],
     (comentario_previo("buscar_por_codigo") + "\n" if comentario_previo("buscar_por_codigo") else "")
     + adaptar_a_cursor(BLOQUES["buscar_por_codigo"], "buscar_por_codigo"),
     adaptar_a_cursor(BLOQUES["equivalentes_mas_alla_del_tope"], "equivalentes_mas_alla_del_tope"),

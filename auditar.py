@@ -925,8 +925,12 @@ for n in ast.walk(ARBOL):
             if isinstance(x, ast.Name): conocidas.add(x.id)
     if isinstance(n, (ast.Import, ast.ImportFrom)):
         for a in n.names: conocidas.add((a.asname or a.name).split(".")[0])
-    if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)):
-        for a in n.args.args + n.args.kwonlyargs: conocidas.add(a.arg)
+    # La lambda va en la misma bolsa que el def: sus parámetros son nombres definidos.
+    # Sin esto, cualquier lambda con un parámetro de nombre nuevo se reportaba como ERROR
+    # ("nombre usado y nunca definido: 'kv'"). Venía andando de casualidad: las lambdas que ya
+    # había usaban x, f, i, t — nombres que además existen sueltos en otro lado del archivo.
+    if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)):
+        for a in n.args.args + n.args.kwonlyargs + n.args.posonlyargs: conocidas.add(a.arg)
         if n.args.vararg: conocidas.add(n.args.vararg.arg)
         if n.args.kwarg: conocidas.add(n.args.kwarg.arg)
     if isinstance(n, ast.ExceptHandler) and n.name: conocidas.add(n.name)

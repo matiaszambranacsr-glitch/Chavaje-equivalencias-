@@ -438,6 +438,13 @@ def base_de_prueba():
     p_tuerca = producto(otra, "TUERCA-M8", "TUERCA")
     vincular(p_bujia, p_g1)
     vincular(p_g2, p_tuerca)
+    # El caso que se veía en el mostrador como «no hace las equivalencias»: un producto cuyo
+    # único código de fábrica es el código de barras del propio proveedor. La equivalencia
+    # está cargada, pero no cuelga nada más, así que no lleva a ninguna otra marca.
+    taranto = marca("MOTORARG")
+    p_junta = producto(taranto, "321607", "Jta.Tapa Cilind.Ford Focus / Fiesta")
+    p_barras = producto(oem, "7793960016251", "Jta.Tapa Cilind.Ford Focus / Fiesta")
+    vincular(p_junta, p_barras)
     con.commit()
     return con, cur
 
@@ -471,6 +478,62 @@ def probar_codigo_generico_no_cruza():
     con.close()
 
 
+def probar_codigo_de_barras_no_es_equivalencia():
+    """Un código de fábrica que no cuelga nada más no puede presentarse como equivalencia."""
+    con, cur = base_de_prueba()
+    res = equivalencias.buscar_por_codigo(cur, codigos.sanitizar("321607"))
+    igual(len(res), 2, "aparece el buscado y su código de barras")
+    barras = [f for f in res if f["Codigo"] == "7793960016251"][0]
+    cierto(barras["_sin_salida"], "el código de barras queda marcado como sin salida")
+    cierto("nadie más lo tiene" in barras["Cadena"],
+           f"la columna Cadena tiene que decirlo; dice {barras['Cadena']!r}")
+    igual(barras["Confianza"], "", "sin salida no lleva confianza")
+    igual(barras["Nivel"], "", "sin salida no lleva nivel")
+    # Y el que SÍ cruza tiene que seguir mostrándose como antes.
+    res2 = equivalencias.buscar_por_codigo(cur, codigos.sanitizar("624FISPA"))
+    jl = [f for f in res2 if f["Marca"] == "JL"][0]
+    cierto(not jl["_sin_salida"], "un equivalente de verdad no se marca como sin salida")
+    igual(jl["Confianza"], "🟢 sólida", "el equivalente de verdad conserva su confianza")
+    con.close()
+
+
+def probar_columna_de_codigo_de_barras():
+    """Reconocer la columna de código de barras ANTES de importarla como código de fábrica."""
+    barras = [f"779396{n:07d}" for n in range(1, 61)]
+    es, prefijo, _ = codigos.columna_es_codigo_de_barras(barras)
+    cierto(es, "60 números de 13 dígitos con el mismo prefijo son códigos de barras")
+    cierto(prefijo.startswith("779396"), f"tiene que decir el prefijo; dijo {prefijo!r}")
+    # Códigos de fábrica de verdad: tienen letras, largos distintos, y no arrancan todos igual.
+    reales = ["036115561G", "7700274177", "1109AH", "0451103316", "03C906433A", "55575988CA",
+              "6Q0407365", "2H0919050B", "8200768913", "04E115561H", "1109CL", "LR004459",
+              "MD972015", "55557300", "93745292", "96476884", "7701478031", "1651076J00",
+              "0K2A114302", "281132E000", "77362191", "9091901210", "1338143", "0280142300"]
+    es2, _, _ = codigos.columna_es_codigo_de_barras(reales)
+    cierto(not es2, "una columna de códigos de fábrica de verdad no se confunde")
+    es3, _, _ = codigos.columna_es_codigo_de_barras(["7793960016251", "7793960024980"])
+    cierto(not es3, "con dos valores no alcanza para afirmarlo")
+
+
+def probar_codigo_conocido_gana_a_la_forma():
+    """Si alguien lo vende, es un código — aunque tenga forma de motorización."""
+    desc = "JTA TAPA CILINDROS FORD FOCUS FIESTA TC-936-MG"
+    igual(codigos.extraer_codigos_de_texto(desc), [],
+          "sin catálogo, TC-936-MG se descarta por tener forma de código de motor")
+    igual(codigos.extraer_codigos_de_texto(desc, codigos_conocidos={"TC936MG"}), ["TC-936-MG"],
+          "si está cargado como producto, se toma")
+    # Lo que el desempate NO tiene que reabrir: una motorización no la vende nadie, así que
+    # nunca va a estar en el catálogo y sigue afuera.
+    igual(codigos.extraer_codigos_de_texto("TERMOSTATO PEUGEOT 307 XU10J4R 2.0",
+                                           codigos_conocidos={"TC936MG"}), [],
+          "una motorización sigue descartada")
+    # Y tampoco afloja el largo mínimo de los códigos de solo números: '260035' es la medida
+    # 5/16 pegada al código, y da la casualidad de que existe como código de otra lista.
+    igual(codigos.extraer_codigos_de_texto("CONECTOR PARA MANGUERA 260035 16 X 5 16 Liso",
+                                           codigo_propio="26003FISPA",
+                                           codigos_conocidos={"260035"}), [],
+          "estar en el catálogo no vuelve código a un número corto pegado a una medida")
+
+
 def main():
     for prueba in (probar_sanitizar, probar_codigo_util, probar_codigo_sospechoso,
                    probar_extractor,
@@ -478,7 +541,10 @@ def main():
                    probar_familias_de_pieza, probar_precision_del_rubro, probar_comodines_y_kits,
                    probar_marcas_de_vehiculo, probar_ref_pegado,
                    probar_mapeo_columnas, probar_busqueda_entre_proveedores,
-                   probar_codigo_generico_no_cruza):
+                   probar_codigo_generico_no_cruza,
+                   probar_codigo_de_barras_no_es_equivalencia,
+                   probar_columna_de_codigo_de_barras,
+                   probar_codigo_conocido_gana_a_la_forma):
         antes = len(fallos)
         prueba()
         print(f"  {'FALLA' if len(fallos) > antes else 'ok   '}  {prueba.__name__}")
