@@ -14,9 +14,6 @@ from collections import Counter
 from .errores import anotar_error
 
 
-# ============================================================
-# CÓDIGOS: limpiar, reconocer, partir y sacarlos de una descripción
-# ============================================================
 def es_fecha_disfrazada(valor):
     """¿Esta celda es una fecha que en realidad era un código?
 
@@ -26,6 +23,28 @@ def es_fecha_disfrazada(valor):
     y que no va a coincidir con nada, sin que nadie se entere de por qué."""
     import datetime as _dt
     return isinstance(valor, (_dt.datetime, _dt.date))
+
+
+# ============================================================
+# CÓDIGOS: limpiar, reconocer, partir y sacarlos de una descripción
+# ============================================================
+def como_texto_en_like(texto):
+    """Prepara un texto para meterlo adentro de un LIKE, sin que se lo coman los comodines.
+
+    En SQL, «%» significa «cualquier cosa» y «_» significa «un carácter cualquiera». Si eso
+    llega desde el buscador, la consulta deja de buscar lo que se escribió:
+
+        buscar «100%»    -> 200 resultados cualesquiera (el tope), ninguno tiene que ver
+        buscar «f_ltro»  -> lo mismo
+        buscar «%»       -> devuelve el catálogo entero
+
+    Y no son textos raros: «aceite 100% sintético» es lo que dice la caja. Medido sobre el
+    catálogo real: los tres casos de arriba devolvían las 200 filas del tope.
+
+    Se escapa también la barra invertida, porque es el carácter de escape que se usa después
+    en la cláusula ESCAPE. Quien use esto tiene que agregar ESCAPE '\\' a su LIKE."""
+    return (str(texto or "").replace("\\", "\\\\")
+            .replace("%", "\\%").replace("_", "\\_"))
 
 
 def sanitizar(codigo):

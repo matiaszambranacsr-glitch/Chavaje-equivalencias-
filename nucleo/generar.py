@@ -75,7 +75,7 @@ import re
 from collections import Counter
 
 from .errores import anotar_error
-''', ["es_fecha_disfrazada", "sanitizar", "LARGO_MINIMO_NUMERICO", "es_codigo_util",
+''', ["es_fecha_disfrazada", "como_texto_en_like", "sanitizar", "LARGO_MINIMO_NUMERICO", "es_codigo_util",
       "_partir_por_barra", "dividir_codigos", "codigo_sospechoso",
       "TOPE_REPETICIONES_EN_DESCRIPCION", "codigos_confiables_de_descripciones",
       "_MARCADORES_DE_OEM", "_es_el_codigo_propio_con_texto", "extraer_codigos_de_texto",
@@ -100,7 +100,7 @@ from .codigos import normalizar_texto, sanitizar
       "_MARCAS_RIESGOSAS", "MARCAS_PARA_DESPEGAR", "_RE_PEGADO_MAYUS", "_RE_REF_PEGADO",
       "_RE_MARCAS_PEGADAS", "_RE_ESPACIOS", "separar_texto_pegado", "separar_por_marca_vehiculo",
       "FAMILIAS_REPUESTO", "_normalizar_desc", "clasificar_repuesto",
-      "_RE_ES_KIT", "familia_para_comparar",
+      "_RE_ES_KIT", "familia_para_comparar", "es_un_kit",
       "ABREVIATURAS_DE_PIEZA", "RELLENO_EN_NOMBRE_DE_PIEZA", "_nombre_de_la_pieza",
       "_parecido_nombre_pieza", "extraer_anios",
       "PALABRAS_NO_MODELO", "es_nombre_de_modelo",

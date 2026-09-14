@@ -266,6 +266,25 @@ def probar_precision_del_rubro():
           "lo que no es kit se clasifica igual que siempre")
 
 
+def probar_comodines_y_kits():
+    """Dos cosas que se rompen en silencio: los comodines del SQL y qué es un kit."""
+    # En SQL, % y _ son comodines. Si llegan desde el buscador, la consulta deja de buscar lo
+    # que se escribió: sobre el catálogo real, «100%» y «f_ltro» devolvían las 200 filas del
+    # tope, ninguna relacionada. Y «aceite 100% sintético» es lo que dice la caja.
+    igual(codigos.como_texto_en_like("100%"), "100\\%", "el % se escapa")
+    igual(codigos.como_texto_en_like("f_ltro"), "f\\_ltro", "el _ se escapa")
+    igual(codigos.como_texto_en_like("a\\b"), "a\\\\b", "la barra invertida también")
+    igual(codigos.como_texto_en_like(None), "", "None no rompe")
+
+    # Qué cuenta como kit, que es lo que decide si se ofrece «también viene en kit».
+    for kit in ("KIT CAB Y BUJ (LEIHTT06SC/LSPKR6E) FIAT PALIO",
+                "JUEGO DE JUNTAS MOTOR FIAT", "Jgo.Jtas.P/Motor NISSAN", "COMBO 3 FILTROS"):
+        cierto(vehiculos.es_un_kit(kit), f"«{kit[:28]}» es un kit")
+    for suelto in ("CABLE DE BUJIA LEIHTT06SC Fiat Palio", "BULBO DE TEMPERATURA PEUGEOT 505",
+                   "SENSOR MAP 40024 VW GOL"):
+        cierto(not vehiculos.es_un_kit(suelto), f"«{suelto[:28]}» no es un kit")
+
+
 def probar_marcas_de_vehiculo():
     """Una descripción de proveedor nombra varios autos, y las listas abrevian.
 
@@ -456,7 +475,7 @@ def main():
     for prueba in (probar_sanitizar, probar_codigo_util, probar_codigo_sospechoso,
                    probar_extractor,
                    probar_filtro_por_repeticion, probar_dividir, probar_vehiculos,
-                   probar_familias_de_pieza, probar_precision_del_rubro,
+                   probar_familias_de_pieza, probar_precision_del_rubro, probar_comodines_y_kits,
                    probar_marcas_de_vehiculo, probar_ref_pegado,
                    probar_mapeo_columnas, probar_busqueda_entre_proveedores,
                    probar_codigo_generico_no_cruza):

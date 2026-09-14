@@ -2315,6 +2315,25 @@ def transaccion():
 # ============================================================
 # CÓDIGOS: limpiar, reconocer, partir y sacarlos de una descripción
 # ============================================================
+def como_texto_en_like(texto):
+    """Prepara un texto para meterlo adentro de un LIKE, sin que se lo coman los comodines.
+
+    En SQL, «%» significa «cualquier cosa» y «_» significa «un carácter cualquiera». Si eso
+    llega desde el buscador, la consulta deja de buscar lo que se escribió:
+
+        buscar «100%»    -> 200 resultados cualesquiera (el tope), ninguno tiene que ver
+        buscar «f_ltro»  -> lo mismo
+        buscar «%»       -> devuelve el catálogo entero
+
+    Y no son textos raros: «aceite 100% sintético» es lo que dice la caja. Medido sobre el
+    catálogo real: los tres casos de arriba devolvían las 200 filas del tope.
+
+    Se escapa también la barra invertida, porque es el carácter de escape que se usa después
+    en la cláusula ESCAPE. Quien use esto tiene que agregar ESCAPE '\\' a su LIKE."""
+    return (str(texto or "").replace("\\", "\\\\")
+            .replace("%", "\\%").replace("_", "\\_"))
+
+
 def es_fecha_disfrazada(valor):
     """¿Esta celda es una fecha que en realidad era un código?
 
@@ -8635,6 +8654,109 @@ def clasificar_repuesto(descripcion):
 
 _RE_ES_KIT = re.compile(r'\b(KIT|KITS|JUEGO|JUEGOS|JGO|JGOS|COMBO|SET)\b')
 
+# Un código más corto que esto adentro de un texto engancha con cualquier cosa por casualidad.
+LARGO_MINIMO_CODIGO_EN_KIT = 6
+
+# Para prefiltrar en SQL. Es a propósito más flojo que _RE_ES_KIT —acá «KIT» engancha también
+# dentro de «KITS»— porque después se confirma con es_un_kit(), que sí mira la palabra entera.
+PALABRAS_DE_KIT = ("KIT", "JUEGO", "JGO", "COMBO", "SET")
+
+
+def es_un_kit(descripcion):
+    """¿La descripción dice que esto es un kit, un juego o un combo?"""
+    return bool(_RE_ES_KIT.search(_normalizar_desc(descripcion)))
+
+
+def kits_que_lo_traen(producto_id, limite=8):
+    """Los kits del catálogo que traen ESTE repuesto adentro. Devuelve filas listas para mostrar.
+
+    Sale de las propias listas, sin cargar nada a mano: cuando un proveedor arma un kit, en la
+    descripción escribe los códigos de lo que trae —«KIT CAB Y BUJ (LEIHTT06SC/LSPKR6E)»—, así
+    que un producto está adentro de un kit si el kit lo nombra por su código.
+
+    Sirve en el mostrador para lo que el cliente pregunta de verdad: pide el cable de bujía y
+    uno puede decirle «también lo tengo en el kit con las bujías incluidas», que suele ser la
+    venta más grande y el cliente lo agradece.
+
+    Dos filtros para no inventar:
+      · el kit tiene que tener OTRA descripción que el producto. Varias filas del catálogo son
+        el mismo kit cargado con distintos códigos —el del cable, el de la bujía, el del kit—
+        y las tres comparten descripción: eso no es «estar adentro», es la misma fila;
+      · el código tiene que tener al menos seis caracteres, porque uno más corto aparece dentro
+        de cualquier texto por casualidad."""
+    c.execute("SELECT codigo_raw, descripcion FROM productos WHERE id = ?", (producto_id,))
+    fila = c.fetchone()
+    if not fila or not fila["codigo_raw"]:
+        return []
+    codigo = str(fila["codigo_raw"]).strip()
+    mia = (fila["descripcion"] or "").strip()
+    if len(re.sub(r'[^A-Za-z0-9]', '', codigo)) < LARGO_MINIMO_CODIGO_EN_KIT:
+        return []
+    # La condición de «es un kit» va en el SQL y no solo en Python, y sin LIMIT: con el tope
+    # puesto sobre el LIKE del código, un código que aparece en muchas descripciones llenaba el
+    # corte de filas que no eran kits y los kits de verdad quedaban afuera. Después se vuelve a
+    # confirmar con es_un_kit(), que mira la palabra entera y no la subcadena.
+    _o_kit = " OR ".join(["p.busqueda LIKE ?"] * len(PALABRAS_DE_KIT))
+    # El código puede traer un «_» —hay dos en el catálogo real— y ahí el LIKE engancharía
+    # cualquier carácter en esa posición, inventando kits que no lo traen.
+    c.execute(f"""SELECT p.id AS "ID", p.codigo_raw AS "Codigo", p.descripcion AS "Descripcion",
+                         m.nombre AS "Marca", p.precio AS "Precio", p.stock AS "Stock"
+                  FROM productos p JOIN marcas m ON m.id = p.marca_id
+                  WHERE p.id <> ? AND p.busqueda LIKE ? ESCAPE '\\' AND ({_o_kit})""",
+              [producto_id, f"%{como_texto_en_like(normalizar_texto(codigo))}%"]
+              + [f"%{k}%" for k in PALABRAS_DE_KIT])
+    # Un mismo kit está cargado varias veces con códigos distintos —el del proveedor, el de
+    # fábrica, el del cable— y las filas comparten descripción. En el mostrador eso es UN kit:
+    # se muestra una sola vez, y se elige la fila que sirve para vender, o sea la que tiene
+    # precio y stock. Sin esto, el mismo kit salía tres veces y dos sin precio.
+    por_descripcion = {}
+    for f in filas_a_listas(c):
+        desc = (f["Descripcion"] or "").strip()
+        if not es_un_kit(desc) or desc == mia:
+            continue
+        vale = (f.get("Precio") is not None, (f.get("Stock") or 0) > 0)
+        previo = por_descripcion.get(desc)
+        if previo is None or vale > (previo.get("Precio") is not None, (previo.get("Stock") or 0) > 0):
+            por_descripcion[desc] = f
+    return list(por_descripcion.values())[:limite]
+
+
+def que_trae_este_kit(producto_id, limite=12):
+    """Lo que trae adentro un kit: los productos del catálogo que su descripción nombra.
+
+    Es el camino inverso de kits_que_lo_traen(), y sirve para lo mismo del otro lado: el
+    cliente pregunta por el kit y uno puede decirle qué lleva, o venderle solo la pieza que
+    necesita si no quiere el kit entero."""
+    c.execute("SELECT codigo_raw, descripcion FROM productos WHERE id = ?", (producto_id,))
+    fila = c.fetchone()
+    if not fila or not es_un_kit(fila["descripcion"]):
+        return []
+    mia = (fila["descripcion"] or "").strip()
+    codigos = extraer_codigos_de_texto(separar_texto_pegado(fila["descripcion"]),
+                                       codigo_propio=sanitizar(fila["codigo_raw"]))
+    limpios = [sanitizar(x) for x in codigos]
+    limpios = [x for x in limpios if len(x) >= LARGO_MINIMO_CODIGO_EN_KIT]
+    if not limpios:
+        return []
+    salida, vistos, por_descripcion = [], set(), {}
+    for tanda, marcadores in en_tandas(limpios):
+        c.execute(f"""SELECT p.id AS "ID", p.codigo_raw AS "Codigo", p.descripcion AS "Descripcion",
+                             m.nombre AS "Marca", p.precio AS "Precio", p.stock AS "Stock"
+                      FROM productos p JOIN marcas m ON m.id = p.marca_id
+                      WHERE p.codigo_clean IN ({marcadores}) AND p.id <> ?""", tanda + [producto_id])
+        for f in filas_a_listas(c):
+            desc = (f["Descripcion"] or "").strip()
+            if desc == mia or f["ID"] in vistos:
+                continue      # misma fila del kit cargada con otro código, no es el contenido
+            vistos.add(f["ID"])
+            # Igual que arriba: una pieza por descripción, y la que se puede vender.
+            vale = (f.get("Precio") is not None, (f.get("Stock") or 0) > 0)
+            previo = por_descripcion.get(desc)
+            if previo is None or vale > (previo.get("Precio") is not None, (previo.get("Stock") or 0) > 0):
+                por_descripcion[desc] = f
+    return list(por_descripcion.values())[:limite]
+
+
 
 def familia_para_comparar(descripcion):
     """La familia de la pieza, pero «Sin clasificar» cuando la descripción es un KIT de varias.
@@ -10329,14 +10451,29 @@ def buscar_por_texto(texto):
     for palabra in palabras:
         # También se compara contra el código sin guiones ni espacios: si alguien escribe
         # "TC421" o "tc-421", tiene que encontrar igual el producto cargado como "TC-421-15".
-        puntajes.append("(CASE WHEN p.busqueda LIKE ? OR p.codigo_clean LIKE ? "
-                         "THEN 1 ELSE 0 END)")
-        params.extend([f"%{palabra}%", f"%{sanitizar(palabra)}%"])
+        # ESCAPE: sin esto, escribir «100%» o «f_ltro» devolvía 200 filas cualesquiera,
+        # porque SQLite tomaba el % y el _ como comodines. Ver como_texto_en_like().
+        ramas, suyos = [], []
+        limpia = sanitizar(palabra)
+        for columna, valor in (("p.busqueda", palabra), ("p.codigo_clean", limpia)):
+            # Un LIKE '%%' coincide con TODO. Pasaba al buscar «%» o «_»: sanitizar() los deja
+            # en nada, el patrón quedaba vacío y la búsqueda devolvía el catálogo entero.
+            if not valor:
+                continue
+            ramas.append(f"{columna} LIKE ? ESCAPE '\\'")
+            suyos.append(f"%{como_texto_en_like(valor)}%")
+        if not ramas:
+            continue        # la palabra era solo símbolos: no aporta nada para buscar
+        puntajes.append("(CASE WHEN " + " OR ".join(ramas) + " THEN 1 ELSE 0 END)")
+        params.extend(suyos)
+    if not puntajes:
+        return []
     suma = " + ".join(puntajes)
 
     # Con una o dos palabras se piden todas (si no, aparece cualquier cosa). Con tres o más
     # alcanza con que coincida la mayoría: es lo que permite "interpretar" y no fallar por una.
-    minimo = len(palabras) if len(palabras) <= 2 else max(2, (len(palabras) * 2) // 3)
+    utiles = len(puntajes)
+    minimo = utiles if utiles <= 2 else max(2, (utiles * 2) // 3)
 
     query = f'''
     SELECT p.id AS "ID", p.codigo_raw AS "Codigo", p.descripcion AS "Descripcion",
@@ -15589,6 +15726,37 @@ Casi todo lo que edita o borra algo pide la contraseña de administrador la prim
                                     "resultados": res
                                 })
                                 st.success("Agregado a la lista. Andá a la pestaña 'Lista WhatsApp' para armarla.")
+
+                        # Kits: la pregunta del mostrador es «¿y el kit con las bujías?».
+                        # Sale de las descripciones de las propias listas — cuando el proveedor
+                        # arma un kit escribe adentro los códigos de lo que trae — así que no
+                        # hay nada que cargar a mano. Va antes de «se lo llevó» porque es una
+                        # decisión de venta, no de registro.
+                        _kits, _contenido = [], []
+                        for _f in res[:12]:
+                            for _k in kits_que_lo_traen(_f["ID"]):
+                                if _k["ID"] not in {x["ID"] for x in _kits}:
+                                    _kits.append(_k)
+                            for _d in que_trae_este_kit(_f["ID"]):
+                                if _d["ID"] not in {x["ID"] for x in _contenido}:
+                                    _contenido.append(_d)
+                        if _kits:
+                            st.markdown("**📦 También viene en kit**")
+                            st.caption(
+                                "Estos kits del catálogo traen adentro alguno de los códigos de "
+                                "arriba. Suele ser la venta más grande y le ahorra al cliente "
+                                "volver por la otra pieza."
+                            )
+                            st.dataframe([{k: v for k, v in f.items() if not k.startswith("_")}
+                                          for f in _kits], width="stretch", hide_index=True)
+                        if _contenido:
+                            st.markdown("**🧩 Lo que trae el kit por separado**")
+                            st.caption(
+                                "Si el cliente no quiere el kit entero, estas son las piezas "
+                                "sueltas que nombra la descripción."
+                            )
+                            st.dataframe([{k: v for k, v in f.items() if not k.startswith("_")}
+                                          for f in _contenido], width="stretch", hide_index=True)
 
                         st.markdown("**🛒 ¿Se lo llevó? / 📌 ¿Falta stock?**")
                         st.caption(

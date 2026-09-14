@@ -416,6 +416,11 @@ def familia_para_comparar(descripcion):
     return clasificar_repuesto(descripcion)
 
 
+def es_un_kit(descripcion):
+    """¿La descripción dice que esto es un kit, un juego o un combo?"""
+    return bool(_RE_ES_KIT.search(_normalizar_desc(descripcion)))
+
+
 # Cómo abrevian los proveedores el nombre de la pieza. No están inventadas: salieron de contar
 # las palabras que entran al nombre en las 61.574 descripciones reales — «JTA» aparece 4.836
 # veces, «JTAS» 2.456, «CIL» 2.115. Sin esto, «CABLE BUJIA» y «KIT CAB Y BUJ» son dos cosas

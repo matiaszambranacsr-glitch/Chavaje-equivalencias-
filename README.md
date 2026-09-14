@@ -75,6 +75,25 @@ Hay dos candados, y no son lo mismo:
   precio y el stock. Alcanza con la contraseña de operador, y como el nivel queda en la
   sesión se pide una vez por turno, no en cada producto.
 
+## Kits
+
+El mostrador pregunta «¿y el kit con las bujías?», así que el buscador lo ofrece solo:
+`kits_que_lo_traen()` y `que_trae_este_kit()`. No hay nada cargado a mano — cuando el proveedor
+arma un kit escribe adentro de la descripción los códigos de lo que trae
+(`KIT CAB Y BUJ (LEIHTT06SC/LSPKR6E)`), y eso alcanza.
+
+Dos filtros para no inventar: el kit tiene que tener OTRA descripción que el producto (varias
+filas del catálogo son el mismo kit cargado con distintos códigos) y el código tiene que tener
+al menos seis caracteres. Y se muestra una fila por kit, la que se puede vender: con precio y
+con stock.
+
+## Comodines del SQL
+
+Todo `LIKE` que reciba texto de una persona o un código va con `como_texto_en_like()` y
+`ESCAPE '\'`. En SQL `%` es «cualquier cosa» y `_` es «un carácter cualquiera»: sin escaparlos,
+buscar «100%» devolvía 200 filas al azar. Y ojo con el patrón vacío — `LIKE '%%'` coincide con
+todo, que es lo que pasaba al buscar un solo símbolo.
+
 ## Decidir si dos repuestos son la misma clase de pieza
 
 Tres funciones, y conviene no confundirlas:
