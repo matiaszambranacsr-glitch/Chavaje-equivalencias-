@@ -439,6 +439,13 @@ ABREVIATURAS_DE_PIEZA = {
     "PAST": "PASTILLA", "PASTILLAS": "PASTILLA", "FILT": "FILTRO", "FILTROS": "FILTRO",
     "INTERRUP": "INTERRUPTOR", "REGUL": "REGULADOR", "PRES": "PRESION",
     "COMB": "COMBUSTIBLE", "IGNIC": "IGNICION", "ROTAC": "ROTACION", "DETONAC": "DETONACION",
+    # Salidas de comparar las dos listas de juntas, que abrevian distinto la misma pieza:
+    # Taranto escribe «Jta.Tapa Cilind.Ford» e Illinois «Junta Tapa de Cilindros FORD».
+    "CILIND": "CILINDRO", "CILINDRICO": "CILINDRO", "CILIN": "CILINDRO", "JTO": "JUEGO",
+    "JUEGOS": "JUEGO", "VAL": "VALVULA", "VALV": "VALVULA", "VALVS": "VALVULA",
+    "ADMIS": "ADMISION", "ESCAP": "ESCAPE", "TRANSM": "TRANSMISION", "DELANT": "DELANTERO",
+    "TRAS": "TRASERO", "SUPL": "SUPLEMENTO", "SUPLEM": "SUPLEMENTO", "REPAR": "REPARACION",
+    "COLEC": "COLECTOR", "COLECT": "COLECTOR", "ASPIR": "ASPIRACION", "COMPRES": "COMPRESOR",
 }
 
 
@@ -526,6 +533,40 @@ def extraer_anios(descripcion):
     return None, None
 
 
+# Marcas de REPUESTO. No son modelos de auto, y tampoco dicen qué pieza es: dos proveedores
+# distintos venden repuestos Bosch de cosas completamente distintas.
+# Estaban saliendo primeras en el desplegable «Modelo / motor»: DELCO encabezaba la lista de
+# Ford con 951 apariciones y NIPPONDENSO la de Toyota con 476, antes que COROLLA. El filtro de
+# «aparece sobre todo en esta marca» no las agarra porque un proveedor sí las nombra casi
+# siempre junto al mismo auto.
+# Va en su propio conjunto porque firma_de_producto() necesita sacar ESTAS de lo que dice qué
+# pieza es, y NO las de abajo — ver el comentario del núcleo.
+MARCAS_DE_REPUESTO = {
+    "BOSCH", "VALEO", "DELCO", "DENSO", "NIPPONDENSO", "MAGNETI", "MAGNETTI", "MARELLI",
+    "HITACHI", "LUCAS", "SIEMENS", "DELPHI", "JAEGER", "MASSER", "CAUPLAS", "WEBER", "SOLEX",
+    "SKF", "NGK", "MANN", "VITRON", "TAILLOT", "PAIA", "WAHLER", "GATES", "SACHS", "MONROE",
+    "FRAM", "BERU", "FACET", "PIERBURG", "MAHLE", "ELRING", "REINZ", "AJUSA", "CORTECO",
+    "PAYEN", "TRW", "FERODO", "BREMBO", "NAKATA", "ILUMA", "DPB", "FISPA", "CBOSCH",
+}
+
+
+# De PALABRAS_NO_MODELO, las que no nombran una PIEZA sino el CONTEXTO: qué tipo de vehículo
+# es, con qué anda, cómo viene el motor. Sirven igual para el desplegable de modelos —no son
+# modelos—, pero del lado de la firma van con la aplicación y no con la pieza.
+# Salió de mirar lo que proponía sobre las dos listas de juntas: «Juego de juntas para Caja de
+# Velocidad FORD CARGO» salía equivalente a «Jta.Tapa Cil. FORD CARGO TURBO» porque las dos
+# compartían JUNTA y CARGO, y CARGO contaba como si dijera qué pieza es. Lo mismo con PICK,
+# UP, BUS, CAMION y TRACTOR.
+PALABRAS_DE_CONTEXTO = {
+    "PICK", "UP", "BUS", "CAMION", "TRACTOR", "AGRICOLA", "CARGO", "GRAND", "SERIE",
+    "DIESEL", "TURBO", "CID", "DOHC", "SOHC", "STD", "COMPLETO", "SEMI", "MECANICA",
+    "MM", "CC", "V", "L", "S", "R", "AX", "DD", "F",
+}
+
+
+# Palabras que NO son modelos de auto, para el desplegable «Modelo / motor». Son sobre todo
+# nombres de PIEZA: por eso este conjunto sirve para descartar modelos y NO sirve para
+# descartar palabras del núcleo de la firma, que es justo lo contrario.
 PALABRAS_NO_MODELO = {
     "JUNTA", "JUNTAS", "JUEGO", "DESPIECE", "TAPA", "CILINDROS", "VALVULAS", "CARTER", "BOMBA",
     "ACEITE", "AGUA", "COMBUSTIBLE", "NAFTA", "TERMOSTATO", "RETEN", "ARO", "AROS", "PISTON",
@@ -537,17 +578,7 @@ PALABRAS_NO_MODELO = {
     "ALUMINIO", "CLAVITO", "BANCADA", "CAPUCHON", "BUJIA", "BRIDA", "CAÑO", "CALEFACCION",
     "ARBOL", "LEVAS", "SALIDA", "TAPON", "VALVULA", "MARIPOSA", "BASE", "DISTRIBUIDOR",
     "CHUPADOR", "INTERMEDIA", "V", "L", "S", "R", "AX", "DD", "F",
-    # Marcas de REPUESTO, que no son modelos de auto. Estaban saliendo primeras en el
-    # desplegable «Modelo / motor»: DELCO encabezaba la lista de Ford con 951 apariciones y
-    # NIPPONDENSO la de Toyota con 476, antes que COROLLA. El filtro de «aparece sobre todo
-    # en esta marca» no las agarra porque un proveedor sí las nombra casi siempre junto al
-    # mismo auto.
-    "BOSCH", "VALEO", "DELCO", "DENSO", "NIPPONDENSO", "MAGNETI", "MAGNETTI", "MARELLI",
-    "HITACHI", "LUCAS", "SIEMENS", "DELPHI", "JAEGER", "MASSER", "CAUPLAS", "WEBER", "SOLEX",
-    "SKF", "NGK", "MANN", "VITRON", "TAILLOT", "PAIA", "WAHLER", "GATES", "SACHS", "MONROE",
-    "FRAM", "BERU", "FACET", "PIERBURG", "MAHLE", "ELRING", "REINZ", "AJUSA", "CORTECO",
-    "PAYEN", "TRW", "FERODO", "BREMBO", "NAKATA", "ILUMA", "DPB", "FISPA", "CBOSCH",
-}
+} | MARCAS_DE_REPUESTO
 
 
 def es_nombre_de_modelo(token):

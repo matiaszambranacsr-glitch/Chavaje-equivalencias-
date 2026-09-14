@@ -8512,6 +8512,38 @@ def sirve_para_anio(descripcion, anio):
     return desde <= anio <= hasta
 
 
+# Marcas de REPUESTO. No son modelos de auto, y tampoco dicen qué pieza es: dos proveedores
+# distintos venden repuestos Bosch de cosas completamente distintas.
+# Estaban saliendo primeras en el desplegable «Modelo / motor»: DELCO encabezaba la lista de
+# Ford con 951 apariciones y NIPPONDENSO la de Toyota con 476, antes que COROLLA. El filtro de
+# «aparece sobre todo en esta marca» no las agarra porque un proveedor sí las nombra casi
+# siempre junto al mismo auto.
+# Va en su propio conjunto porque firma_de_producto() necesita sacar ESTAS de lo que dice qué
+# pieza es, y NO las de abajo — ver el comentario del núcleo.
+MARCAS_DE_REPUESTO = {
+    "BOSCH", "VALEO", "DELCO", "DENSO", "NIPPONDENSO", "MAGNETI", "MAGNETTI", "MARELLI",
+    "HITACHI", "LUCAS", "SIEMENS", "DELPHI", "JAEGER", "MASSER", "CAUPLAS", "WEBER", "SOLEX",
+    "SKF", "NGK", "MANN", "VITRON", "TAILLOT", "PAIA", "WAHLER", "GATES", "SACHS", "MONROE",
+    "FRAM", "BERU", "FACET", "PIERBURG", "MAHLE", "ELRING", "REINZ", "AJUSA", "CORTECO",
+    "PAYEN", "TRW", "FERODO", "BREMBO", "NAKATA", "ILUMA", "DPB", "FISPA", "CBOSCH",
+}
+
+# De PALABRAS_NO_MODELO, las que no nombran una PIEZA sino el CONTEXTO: qué tipo de vehículo
+# es, con qué anda, cómo viene el motor. Sirven igual para el desplegable de modelos —no son
+# modelos—, pero del lado de la firma van con la aplicación y no con la pieza.
+# Salió de mirar lo que proponía sobre las dos listas de juntas: «Juego de juntas para Caja de
+# Velocidad FORD CARGO» salía equivalente a «Jta.Tapa Cil. FORD CARGO TURBO» porque las dos
+# compartían JUNTA y CARGO, y CARGO contaba como si dijera qué pieza es. Lo mismo con PICK,
+# UP, BUS, CAMION y TRACTOR.
+PALABRAS_DE_CONTEXTO = {
+    "PICK", "UP", "BUS", "CAMION", "TRACTOR", "AGRICOLA", "CARGO", "GRAND", "SERIE",
+    "DIESEL", "TURBO", "CID", "DOHC", "SOHC", "STD", "COMPLETO", "SEMI", "MECANICA",
+    "MM", "CC", "V", "L", "S", "R", "AX", "DD", "F",
+}
+
+# Palabras que NO son modelos de auto, para el desplegable «Modelo / motor». Son sobre todo
+# nombres de PIEZA: por eso este conjunto sirve para descartar modelos y NO sirve para
+# descartar palabras del núcleo de la firma, que es justo lo contrario.
 PALABRAS_NO_MODELO = {
     "JUNTA", "JUNTAS", "JUEGO", "DESPIECE", "TAPA", "CILINDROS", "VALVULAS", "CARTER", "BOMBA",
     "ACEITE", "AGUA", "COMBUSTIBLE", "NAFTA", "TERMOSTATO", "RETEN", "ARO", "AROS", "PISTON",
@@ -8523,17 +8555,7 @@ PALABRAS_NO_MODELO = {
     "ALUMINIO", "CLAVITO", "BANCADA", "CAPUCHON", "BUJIA", "BRIDA", "CAÑO", "CALEFACCION",
     "ARBOL", "LEVAS", "SALIDA", "TAPON", "VALVULA", "MARIPOSA", "BASE", "DISTRIBUIDOR",
     "CHUPADOR", "INTERMEDIA", "V", "L", "S", "R", "AX", "DD", "F",
-    # Marcas de REPUESTO, que no son modelos de auto. Estaban saliendo primeras en el
-    # desplegable «Modelo / motor»: DELCO encabezaba la lista de Ford con 951 apariciones y
-    # NIPPONDENSO la de Toyota con 476, antes que COROLLA. El filtro de «aparece sobre todo
-    # en esta marca» no las agarra porque un proveedor sí las nombra casi siempre junto al
-    # mismo auto.
-    "BOSCH", "VALEO", "DELCO", "DENSO", "NIPPONDENSO", "MAGNETI", "MAGNETTI", "MARELLI",
-    "HITACHI", "LUCAS", "SIEMENS", "DELPHI", "JAEGER", "MASSER", "CAUPLAS", "WEBER", "SOLEX",
-    "SKF", "NGK", "MANN", "VITRON", "TAILLOT", "PAIA", "WAHLER", "GATES", "SACHS", "MONROE",
-    "FRAM", "BERU", "FACET", "PIERBURG", "MAHLE", "ELRING", "REINZ", "AJUSA", "CORTECO",
-    "PAYEN", "TRW", "FERODO", "BREMBO", "NAKATA", "ILUMA", "DPB", "FISPA", "CBOSCH",
-}
+} | MARCAS_DE_REPUESTO
 
 
 def version_del_catalogo():
@@ -9266,6 +9288,11 @@ def guardar_aplicaciones(apps, marca_repuesto, origen="", tipo_pieza=""):
 # Palabras que aparecen en las descripciones y NO dicen qué pieza es: son del auto, del envase
 # o relleno del proveedor. Si entran en la firma, dos piezas distintas del mismo auto terminan
 # pareciendo la misma.
+# Un punto entre dos letras es una abreviatura pegada a la palabra que sigue («Jta.Tapa»),
+# no parte de un código. Entre números sí es parte del dato, y por eso el patrón pide letras
+# de los dos lados.
+_RE_PUNTO_ENTRE_LETRAS = re.compile(r'([A-ZÁÉÍÓÚÑ])\.([A-ZÁÉÍÓÚÑ])')
+
 _RUIDO_EN_FIRMA = {
     "DESPIECE", "JUEGO", "JGO", "KIT", "PARA", "CON", "SIN", "DEL", "LOS", "LAS", "POR",
     "UNIDAD", "UN", "UNA", "IZQ", "DER", "MM", "CM", "ORIGINAL", "ORIG", "ALTERNATIVO",
@@ -9479,6 +9506,15 @@ def firma_de_producto(descripcion, producto_id=None, codigo_clean=None):
         return None
     texto = separar_texto_pegado(str(descripcion))
     limpio = normalizar_texto(texto)
+    # EL PUNTO QUE PEGA DOS PALABRAS. Taranto abrevia sin dejar espacio:
+    # «Jta.Tapa Cilind.Ford Focus / Fiesta». Como el punto se conserva adentro del token —hace
+    # falta para 1.6, 278.897 y T-PRT04/B—, eso daba las palabras JTA.TAPA y CILIND.FORD.
+    # Las consecuencias eran las dos peores posibles: la marca del auto quedaba escondida
+    # adentro de una palabra, así que la firma de ese producto salía SIN NINGÚN AUTO, y la
+    # cabeza era «JTA.TAPA», que no coincide con nada.
+    # Se separa solo cuando el punto está entre dos LETRAS. Entre números no se toca, que es
+    # donde importa: 1.6 sigue siendo la cilindrada y 278.897 sigue siendo un código.
+    limpio = _RE_PUNTO_ENTRE_LETRAS.sub(r"\1 \2", limpio)
     palabras = [w for w in re.split(r"[^A-Z0-9./]+", limpio) if w]
 
     familia = clasificar_repuesto(texto)
@@ -9490,7 +9526,10 @@ def firma_de_producto(descripcion, producto_id=None, codigo_clean=None):
             posicion = _POSICIONES[w]
             break
 
-    cilindradas = set(re.findall(r'\b(\d[.,]\d)\b', limpio))
+    # La cilindrada con la unidad pegada. Taranto escribe «SIGMA 1.6CC 16V» y el \b del final
+    # no engancha, porque entre el 6 y la C no hay borde de palabra: ese producto quedaba sin
+    # cilindrada y no se podía contrastar contra el «- 1.6 -» de la otra lista.
+    cilindradas = set(re.findall(r'\b(\d[.,]\d)(?!\d)', limpio))
 
     # Los modelos: palabras que quedan después de sacar la marca del auto, el ruido y los
     # números sueltos. Se buscan contra el catálogo propio para no inventar modelos.
@@ -9506,15 +9545,39 @@ def firma_de_producto(descripcion, producto_id=None, codigo_clean=None):
     for mv in MARCAS_VEHICULO:
         if f" {mv} " in f" {limpio} ":
             palabras_marca.update(mv.split())
-    for w in palabras:
-        # PALABRAS_NO_MODELO trae las marcas de REPUESTO (BOSCH, VALEO, NGK...). Tampoco dicen
-        # qué pieza es: «coinciden en BOSCH» salía en 24 sugerencias y no significa nada, dos
-        # proveedores distintos venden repuestos Bosch de cosas completamente distintas.
+    for indice, w in enumerate(palabras):
+        # «4 y 6 CIL» es la CANTIDAD de cilindros del motor, no la pieza. Sin esto, «Juego de
+        # juntas para Caja de Velocidad PEUGEOT 504 INDENOR DIESEL 4 y 6 CIL» entraba al
+        # núcleo con la palabra CILINDRO y salía equivalente a una junta de tapa de cilindros.
+        # Se reconoce por lo que tiene adelante: un número suelto.
+        if (w in ("CIL", "CILS", "CILINDROS", "CILINDRO") and indice
+                and re.fullmatch(r'\d{1,2}', palabras[indice - 1])):
+            continue
+        # Se sacan las marcas de REPUESTO: «coinciden en BOSCH» salía en 24 sugerencias y no
+        # significa nada, dos proveedores distintos venden repuestos Bosch de cosas
+        # completamente distintas.
+        # Acá decía PALABRAS_NO_MODELO, que es un conjunto MUCHO más grande y para otra cosa:
+        # son los nombres de pieza que no hay que confundir con modelos de auto en el
+        # desplegable de vehículos — JUNTA, TAPA, CILINDROS, BOMBA, VALVULA, ARO...
+        # O sea que el núcleo, que existe para guardar QUÉ PIEZA ES, tiraba exactamente las
+        # palabras que dicen qué pieza es y se quedaba con los MODELOS DE AUTO. En
+        # «Junta Tapa de Cilindros FORD FOCUS FIESTA FUSION CMAX» el núcleo quedaba
+        # ['FOCUS','FIESTA','FUSION','CMAX'] y la cabeza —el sustantivo principal, lo que
+        # separa un CAPUCHON de un ANILLO— era 'FOCUS'.
+        # Las dos caras del mismo error: comparaba una junta contra otra junta del mismo auto
+        # y decía «piezas distintas: FOCUS y JTA.TAPA», y al revés daba por parecidas dos
+        # piezas sin relación con solo compartir dos modelos de auto.
         if (w in _RUIDO_EN_FIRMA or w in palabras_marca or w in _POSICIONES
-                or w in PALABRAS_NO_MODELO
+                or w in MARCAS_DE_REPUESTO
                 or len(w) < 3 or re.fullmatch(r'[\d./,]+', w)):
             continue
-        nucleo.append(w)
+        # La misma pieza abreviada distinta por cada proveedor. Taranto pone «Jta.Tapa
+        # Cilind.» e Illinois «Junta Tapa de Cilindros»: sin expandir, la cabeza de una es
+        # JTA y la de la otra JUNTA, y la comparación cortaba con «piezas distintas» entre
+        # dos juntas de tapa de cilindros del mismo motor.
+        # La tabla ya existía y la usaba _nombre_de_la_pieza(); acá no se estaba usando.
+        # El punto final se saca antes de buscar: «CIL.» tiene que encontrar a «CIL».
+        nucleo.append(ABREVIATURAS_DE_PIEZA.get(w.rstrip("."), w.rstrip(".")) or w)
 
     # Los autos nombrados: marcas y modelos. Es el dato que más discrimina, y probado con
     # listas reales es el único que no falla. Dos proveedores pueden llamar distinto a la misma
@@ -9533,6 +9596,19 @@ def firma_de_producto(descripcion, producto_id=None, codigo_clean=None):
     cabeza = nucleo[0] if nucleo else None
     siglas = {w for w in palabras if w in _SIGLAS_DE_PIEZA}
 
+    # EL NÚCLEO SE PARTE EN DOS, porque son dos preguntas distintas y hay que contestar las
+    # dos: QUÉ PIEZA ES y PARA QUÉ AUTO ES. Mezcladas en una sola bolsa de palabras, «comparten
+    # dos palabras» se cumple igual con dos modelos de auto (y entonces una junta de escape
+    # sale «equivalente» a una de tapa de válvulas porque las dos dicen R11 y R19) que con dos
+    # nombres de pieza (y entonces cualquier junta de tapa de cilindros sale equivalente a
+    # cualquier otra, de cualquier motor).
+    # PALABRAS_NO_MODELO es justamente el vocabulario de PIEZA: está curada a mano para el
+    # desplegable de vehículos, donde hace falta saber qué palabra NO es un modelo.
+    # PALABRAS_DE_CONTEXTO se sacan de la pieza y se dejan del lado de la aplicación: CARGO,
+    # PICK UP, TRACTOR o DIESEL dicen qué vehículo es, no qué pieza es.
+    pieza = {w for w in nucleo if w in PALABRAS_NO_MODELO and w not in PALABRAS_DE_CONTEXTO}
+    aplicacion = [w for w in nucleo if w not in pieza]
+
     # Se completa con lo que la app sepa de este producto por otras vías
     if producto_id or codigo_clean:
         autos = autos_de_todas_las_fuentes(producto_id, codigo_clean, autos)
@@ -9545,6 +9621,7 @@ def firma_de_producto(descripcion, producto_id=None, codigo_clean=None):
     vias = int(m_vias.group(1)) if m_vias else None
 
     return {"familia": familia, "nucleo": nucleo, "cabeza": cabeza, "autos": autos,
+            "pieza": pieza, "aplicacion": set(aplicacion),
             "siglas": siglas, "marca_auto": marca_auto, "posicion": posicion,
             "cilindradas": cilindradas, "vias": vias, "texto": limpio}
 
@@ -9569,7 +9646,19 @@ def cuantas_veces_aparece_cada_palabra():
     cuenta = descripciones_por_palabra(version)
     c.execute("SELECT COUNT(*) FROM productos WHERE descripcion IS NOT NULL")
     fila = c.fetchone()
-    return cuenta, ((fila[0] if fila else 0) or 0)
+    # El conteo se hace sobre las palabras CRUDAS y la firma compara palabras EXPANDIDAS: si
+    # no se suman las formas, la palabra expandida parece rarísima y pasa por «específica».
+    # Es exactamente lo que pasaba con CILINDRO: el catálogo dice CILINDROS 2.596 veces, CIL
+    # otras tantas y CILINDRO apenas 476, así que la forma expandida daba 0,66% —debajo del
+    # 1%— y «coinciden en CILINDRO» contaba como una coincidencia que distingue, cuando
+    # CILINDRO está en el 4,3% de las descripciones. Sumadas las formas, vuelve a ser lo que
+    # es: una palabra genérica.
+    total = ((fila[0] if fila else 0) or 0)
+    completo = dict(cuenta)
+    for abreviatura, expandida in ABREVIATURAS_DE_PIEZA.items():
+        if cuenta.get(abreviatura):
+            completo[expandida] = completo.get(expandida, 0) + cuenta[abreviatura]
+    return completo, total
 
 
 def palabras_que_dicen_algo(comunes, cuenta_palabras, total_descripciones):
@@ -9637,15 +9726,51 @@ def firmas_compatibles(a, b, minimo_nucleo=2, cuenta_palabras=None, total_descri
     comunes = set(a["nucleo"]) & set(b["nucleo"])
     if len(comunes) < minimo_nucleo:
         return False, f"solo comparten {len(comunes)} palabra(s)"
-    # Sin autos en común de ninguno de los dos lados, hace falta más coincidencia en la pieza:
-    # dos descripciones genéricas que solo dicen «FILTRO ACEITE» no alcanzan para vincular.
-    if not autos_comunes and len(comunes) < 3:
-        return False, "ninguno declara el auto y la descripción es demasiado genérica"
-    # Y que al menos UNA de las palabras compartidas diga algo. Coincidir en «AGUA, ORING,
-    # TUBO» o en «ACEITE, BBA, JTA» son tres palabras que están en miles de repuestos: eso no
-    # es parecerse, es hablar el mismo idioma.
+
+    # LAS DOS PREGUNTAS, POR SEPARADO. Antes era una sola bolsa de palabras y «comparten dos»
+    # alcanzaba, sin mirar CUÁLES. Las dos formas de equivocarse salían de ahí, y las dos se
+    # veían en la base real:
+    #   · dos modelos de auto compartidos daban por equivalentes piezas distintas
+    #     («Junta Salida de Escape R9 R11 R19» con «Junta Tapa de Válvulas R9 R11 R19»)
+    #   · dos nombres de pieza compartidos daban por equivalentes aplicaciones distintas
+    #     (cualquier junta de tapa de cilindros con cualquier otra, de cualquier motor)
+    # Ahora tienen que coincidir las dos cosas: qué pieza es Y para qué auto es.
+    pieza_a, pieza_b = a.get("pieza") or set(), b.get("pieza") or set()
+    piezas_comunes = pieza_a & pieza_b
+    if pieza_a and pieza_b:
+        # Dos condiciones, y las dos salieron de mirar lo que proponía sobre las listas reales:
+        #
+        # 1) Al menos DOS palabras de pieza. Con una sola alcanzaba «JUNTA», que está en el
+        #    7,5% del catálogo, y de ahí salía «Juego de juntas para Caja de Velocidad FORD
+        #    F100» contra «Jta.Tapa Valvulas FORD F100»: comparten la palabra JUNTA y la
+        #    camioneta, y son dos piezas que no tienen nada que ver.
+        #
+        # 2) La descripción más pobre tiene que estar ENTERA adentro de la otra. Es lo que
+        #    separa «Junta Tapa de VÁLVULAS» de «Junta Tapa de CILINDROS»: las dos comparten
+        #    JUNTA y TAPA, las dos van al mismo auto, y la palabra en la que se diferencian
+        #    es justamente la que dice cuál de las dos es. Es el mismo criterio que ya se usa
+        #    con las siglas y con la posición: si las dos lo declaran y no coinciden, son
+        #    piezas distintas.
+        chica = pieza_a if len(pieza_a) <= len(pieza_b) else pieza_b
+        if len(piezas_comunes) < 2 or piezas_comunes < chica:
+            return False, (f"no coinciden en qué pieza es: «{'/'.join(sorted(pieza_a)[:3])}» "
+                           f"y «{'/'.join(sorted(pieza_b)[:3])}»")
+
+    # Y para qué auto. Vale la marca (FORD) o el modelo/motor nombrado (FOCUS, SIGMA, F4L).
+    apl_comunes = (a.get("aplicacion") or set()) & (b.get("aplicacion") or set())
+    if not autos_comunes and not apl_comunes:
+        return False, "no coinciden en para qué auto es"
+
+    # Que al menos UNA de las palabras compartidas diga algo. Coincidir en «AGUA, ORING, TUBO»
+    # o en «ACEITE, BBA, JTA» son palabras que están en miles de repuestos: eso no es
+    # parecerse, es hablar el mismo idioma.
+    # Se perdona cuando las dos preguntas se contestaron bien igual —misma pieza Y mismo
+    # auto—, porque ahí la evidencia está en la coincidencia completa y no en una palabra
+    # rara. «JUNTA TAPA CILINDRO» + «FORD FOCUS FIESTA» no tiene una sola palabra rara y sin
+    # embargo es exactamente el mismo repuesto.
     utiles = palabras_que_dicen_algo(comunes, cuenta_palabras, total_descripciones)
-    if cuenta_palabras and not utiles:
+    respaldo_completo = len(piezas_comunes) >= 2 and (autos_comunes and apl_comunes)
+    if cuenta_palabras and not utiles and not respaldo_completo:
         return False, ("solo comparten palabras genéricas ("
                        + ", ".join(sorted(comunes)[:3]) + ")")
 
@@ -9659,6 +9784,30 @@ def firmas_compatibles(a, b, minimo_nucleo=2, cuenta_palabras=None, total_descri
     if a["cilindradas"] & b["cilindradas"]:
         detalle += f" · {'/'.join(sorted(a['cilindradas'] & b['cilindradas']))}"
     return True, detalle
+
+
+def fuerza_de_la_coincidencia(a, b):
+    """Cuánto se parecen dos firmas, para poder ordenar los candidatos de mejor a peor.
+
+    Hace falta porque de cada producto se guardan solo los mejores candidatos, y hasta ahora
+    «mejor» era cuántas MARCAS de auto compartían. Casi todos los productos de una lista
+    comparten la misma marca, así que el orden quedaba empatado en 1 y lo desempataba el orden
+    del catálogo, o sea el azar.
+
+    Se vio con la junta de tapa de cilindros de la Illinois TC-936-MG: entre los candidatos
+    estaba la 321607 de Taranto —misma pieza, mismo motor Ford 1.6 Sigma, cuatro palabras
+    compartidas— y no entraba en los cinco que se guardaban, porque empataba en «comparte
+    FORD» con cualquier otra junta de cualquier Ford.
+
+    Lo que más discrimina va primero: el MODELO o el motor nombrado (FOCUS, SIGMA, F4L) es
+    mucho más específico que la marca, y la cilindrada confirma la aplicación."""
+    if not a or not b:
+        return (0, 0, 0, 0)
+    apl = len((a.get("aplicacion") or set()) & (b.get("aplicacion") or set()))
+    pieza = len((a.get("pieza") or set()) & (b.get("pieza") or set()))
+    cil = len((a.get("cilindradas") or set()) & (b.get("cilindradas") or set()))
+    autos = len((a.get("autos") or set()) & (b.get("autos") or set()))
+    return (apl, cil, pieza, autos)
 
 
 def evidencia_cruzada(id_a, id_b):
@@ -9980,10 +10129,12 @@ def derivar_equivalencias_por_descripcion(marca_a_id=None, marca_b_id=None,
                                                 total_descripciones=_total_desc)
                 if not ok:
                     continue
-                en_comun = len(pa["_firma"]["autos"] & pb["_firma"]["autos"])
-                candidatos.append((en_comun, pb, motivo))
-            candidatos.sort(key=lambda x: -x[0])
-            for _n_autos, pb, motivo in candidatos[:por_producto]:
+                fuerza = fuerza_de_la_coincidencia(pa["_firma"], pb["_firma"])
+                candidatos.append((fuerza, pb, motivo))
+            # De mayor a menor fuerza. Antes ordenaba solo por marcas de auto compartidas y
+            # empataba casi todo en 1: ver fuerza_de_la_coincidencia().
+            candidatos.sort(key=lambda x: x[0], reverse=True)
+            for _fuerza, pb, motivo in candidatos[:por_producto]:
                 salida.append({
                     "Código A": pa["codigo_raw"], "Marca A": pa["marca"],
                     "Descripción A": (pa["descripcion"] or "")[:44],
@@ -10023,6 +10174,13 @@ ABREVIATURAS_DE_PIEZA = {
     "PAST": "PASTILLA", "PASTILLAS": "PASTILLA", "FILT": "FILTRO", "FILTROS": "FILTRO",
     "INTERRUP": "INTERRUPTOR", "REGUL": "REGULADOR", "PRES": "PRESION",
     "COMB": "COMBUSTIBLE", "IGNIC": "IGNICION", "ROTAC": "ROTACION", "DETONAC": "DETONACION",
+    # Salidas de comparar las dos listas de juntas, que abrevian distinto la misma pieza:
+    # Taranto escribe «Jta.Tapa Cilind.Ford» e Illinois «Junta Tapa de Cilindros FORD».
+    "CILIND": "CILINDRO", "CILINDRICO": "CILINDRO", "CILIN": "CILINDRO", "JTO": "JUEGO",
+    "JUEGOS": "JUEGO", "VAL": "VALVULA", "VALV": "VALVULA", "VALVS": "VALVULA",
+    "ADMIS": "ADMISION", "ESCAP": "ESCAPE", "TRANSM": "TRANSMISION", "DELANT": "DELANTERO",
+    "TRAS": "TRASERO", "SUPL": "SUPLEMENTO", "SUPLEM": "SUPLEMENTO", "REPAR": "REPARACION",
+    "COLEC": "COLECTOR", "COLECT": "COLECTOR", "ASPIR": "ASPIRACION", "COMPRES": "COMPRESOR",
 }
 
 

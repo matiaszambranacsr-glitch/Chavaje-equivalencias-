@@ -104,7 +104,8 @@ from .codigos import normalizar_texto, sanitizar
       "_RE_ES_KIT", "familia_para_comparar", "es_un_kit",
       "ABREVIATURAS_DE_PIEZA", "RELLENO_EN_NOMBRE_DE_PIEZA", "_nombre_de_la_pieza",
       "_parecido_nombre_pieza", "extraer_anios",
-      "PALABRAS_NO_MODELO", "es_nombre_de_modelo",
+      "MARCAS_DE_REPUESTO", "PALABRAS_DE_CONTEXTO", "PALABRAS_NO_MODELO",
+      "es_nombre_de_modelo",
       "_RE_PIEZA_POR_MEDIDA", "medidas_desde_descripcion"])
 
 # ---------------------------------------------------------------- planillas

@@ -87,6 +87,58 @@ Tres cosas lo cubren ahora, y conviene no aflojar ninguna:
 La cuenta que vale no es cuántas equivalencias tiene una lista, es **a cuántos productos de
 otro proveedor llega**.
 
+## Las sugerencias por descripción: dos preguntas, no una
+
+Cuando ninguna de las dos listas trae el código de fábrica —el caso de Taranto, que no lo
+trae en ninguna columna— lo único que queda es comparar las descripciones. Eso lo hace
+`firma_de_producto()` + `firmas_compatibles()`, y tiene que contestar **dos** preguntas:
+
+    pieza       QUÉ PIEZA ES         JUNTA, TAPA, CILINDRO
+    aplicacion  PARA QUÉ AUTO ES     FOCUS, FIESTA, SIGMA, 16V
+    autos       la marca del auto    FORD
+
+Estaban en una sola bolsa (`nucleo`) y la regla era «que compartan dos palabras», sin mirar
+cuáles. Las dos formas de equivocarse salían de ahí:
+
+- dos **modelos** compartidos daban por equivalentes piezas distintas: «Junta Salida de
+  Escape R9 R11 R19» con «Junta Tapa de Válvulas R9 R11 R19»;
+- dos **nombres de pieza** compartidos daban por equivalentes aplicaciones distintas:
+  cualquier junta de tapa de cilindros con cualquier otra, de cualquier motor.
+
+Ahora tienen que coincidir las dos cosas, y del lado de la pieza con dos condiciones:
+**al menos dos palabras** (con una sola alcanzaba «JUNTA», que está en el 7,5% del catálogo)
+y **la descripción más pobre entera adentro de la otra** — que es lo único que separa «Tapa
+de VÁLVULAS» de «Tapa de CILINDROS», porque la palabra en la que se diferencian es
+justamente la que dice cuál de las dos es.
+
+Tres listas de palabras sostienen esto y no hay que mezclarlas:
+
+    MARCAS_DE_REPUESTO    BOSCH, NGK, VALEO       no dicen ni la pieza ni el auto
+    PALABRAS_DE_CONTEXTO  PICK, UP, CAMION, CARGO qué vehículo es → van con la aplicación
+    PALABRAS_NO_MODELO    todo lo anterior + JUNTA, TAPA, CILINDROS, BOMBA...
+
+`PALABRAS_NO_MODELO` menos las dos primeras **es** el vocabulario de pieza. El bug más caro
+que tuvo esto fue usar `PALABRAS_NO_MODELO` entera para filtrar el núcleo: el núcleo, que
+existe para guardar qué pieza es, tiraba exactamente las palabras que lo dicen y se quedaba
+con los modelos de auto.
+
+Otras tres cosas que parecen detalles y no lo son:
+
+- **El punto que pega dos palabras.** «Jta.Tapa Cilind.Ford Focus» daba las palabras
+  `JTA.TAPA` y `CILIND.FORD`, así que ese producto quedaba sin ninguna marca de auto. Se
+  separa solo entre dos letras: entre números el punto es parte del dato (1.6, 278.897).
+- **Las abreviaturas.** `ABREVIATURAS_DE_PIEZA` ya existía y la firma no la usaba: JTA/JUNTA,
+  CILIND/CIL/CILINDROS, VAL/VALV. Al expandir hay que sumar las formas en el conteo de
+  palabras genéricas, si no la forma expandida parece rarísima y pasa por «específica».
+- **El orden de los candidatos.** De cada producto se guardan solo los mejores, y «mejor» era
+  cuántas MARCAS de auto compartían — casi siempre 1, así que desempataba el azar. Ahora
+  `fuerza_de_la_coincidencia()` pone primero el modelo y la cilindrada, que es lo que
+  discrimina.
+
+Medido sobre las listas reales de Illinois (6.900) y Taranto (8.708), las dos de juntas:
+las sugerencias pasan de 59 a 1.411, y el error sistemático de proponer una junta de tapa de
+válvulas contra una de tapa de cilindros queda en 13 de 1.411 (0,9%).
+
 ## Cuando alguien vende el código, es un código
 
 `extraer_codigos_de_texto()` descarta por forma las motorizaciones (`MR20DE`, `Z18XER`,

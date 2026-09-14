@@ -534,6 +534,47 @@ def probar_codigo_conocido_gana_a_la_forma():
           "estar en el catálogo no vuelve código a un número corto pegado a una medida")
 
 
+def probar_vocabulario_de_pieza():
+    """Las tres listas de palabras tienen que decir cada una lo suyo.
+
+    firma_de_producto() parte el núcleo en QUÉ PIEZA ES y PARA QUÉ AUTO ES usando estos
+    conjuntos, así que si se mezclan vuelve el error que tenían las sugerencias por
+    descripción: comparar dos repuestos por los modelos de auto que nombran."""
+    # Las marcas de repuesto no dicen qué pieza es
+    for marca in ("BOSCH", "NGK", "VALEO", "MAGNETI"):
+        cierto(marca in vehiculos.MARCAS_DE_REPUESTO, f"{marca} es marca de repuesto")
+        cierto(marca in vehiculos.PALABRAS_NO_MODELO, f"{marca} tampoco es un modelo de auto")
+    # El contexto (qué vehículo es) no dice qué pieza es
+    for ctx in ("PICK", "UP", "CAMION", "TRACTOR", "CARGO", "DIESEL"):
+        cierto(ctx in vehiculos.PALABRAS_DE_CONTEXTO, f"{ctx} es contexto, no pieza")
+        cierto(ctx in vehiculos.PALABRAS_NO_MODELO, f"{ctx} tampoco es un modelo de auto")
+    # Y los nombres de pieza no pueden estar en ninguno de los dos
+    for pieza in ("JUNTA", "TAPA", "CILINDROS", "VALVULAS", "CARTER", "BOMBA", "CARBURADOR"):
+        cierto(pieza in vehiculos.PALABRAS_NO_MODELO, f"{pieza} no es un modelo de auto")
+        cierto(pieza not in vehiculos.MARCAS_DE_REPUESTO
+               and pieza not in vehiculos.PALABRAS_DE_CONTEXTO,
+               f"{pieza} SÍ dice qué pieza es: no puede estar en las otras dos listas")
+
+
+def probar_abreviaturas_de_las_listas_reales():
+    """Cada proveedor abrevia distinto la misma pieza y hay que poder compararlas.
+
+    Los casos salen de las dos listas de juntas: Taranto escribe «Jta.Tapa Cilind.Ford» e
+    Illinois «Junta Tapa de Cilindros FORD». Sin expandir, una pieza es JTA y la otra JUNTA."""
+    for abreviado, entero in (("JTA", "JUNTA"), ("CILIND", "CILINDRO"), ("CILIN", "CILINDRO"),
+                              ("CIL", "CILINDRO"), ("VAL", "VALVULA"), ("VALV", "VALVULA"),
+                              ("JGO", "JUEGO"), ("BBA", "BOMBA")):
+        igual(vehiculos.ABREVIATURAS_DE_PIEZA.get(abreviado), entero,
+              f"«{abreviado}» tiene que expandirse a «{entero}»")
+    # Y que sirva de punta a punta: las dos formas de nombrar la misma junta tienen que dar
+    # el mismo nombre de pieza.
+    taranto = vehiculos._nombre_de_la_pieza("Jta.Tapa Cilind.Ford Focus / Fiesta")
+    illinois = vehiculos._nombre_de_la_pieza("Junta Tapa de Cilindros FORD FOCUS FIESTA")
+    cierto(len(taranto & illinois) >= 2,
+           f"las dos formas de escribir «junta tapa de cilindros» tienen que coincidir; "
+           f"dieron {sorted(taranto)} y {sorted(illinois)}")
+
+
 def main():
     for prueba in (probar_sanitizar, probar_codigo_util, probar_codigo_sospechoso,
                    probar_extractor,
@@ -544,7 +585,9 @@ def main():
                    probar_codigo_generico_no_cruza,
                    probar_codigo_de_barras_no_es_equivalencia,
                    probar_columna_de_codigo_de_barras,
-                   probar_codigo_conocido_gana_a_la_forma):
+                   probar_codigo_conocido_gana_a_la_forma,
+                   probar_vocabulario_de_pieza,
+                   probar_abreviaturas_de_las_listas_reales):
         antes = len(fallos)
         prueba()
         print(f"  {'FALLA' if len(fallos) > antes else 'ok   '}  {prueba.__name__}")
