@@ -1298,7 +1298,9 @@ def _tiene_candado(nodo):
             return True       # adentro de una función: no es un botón de pantalla
         if isinstance(x, ast.If):
             prueba = ast.dump(x.test)
-            if any(k in prueba for k in ("pedir_password_admin", "es_admin",
+            # candado() es el envoltorio que además RECUERDA el clic entre corridas; ver
+            # por qué hace falta en su docstring.
+            if any(k in prueba for k in ("candado", "pedir_password_admin", "es_admin",
                                          "pedir_password_operador_o_admin",
                                          "es_operador_o_admin")):
                 return True
@@ -1332,6 +1334,54 @@ for _n in ast.walk(ARBOL):
         reportar("ERROR", _n.lineno,
                  'hasattr(st, "secrets") no protege nada: el atributo existe siempre y lo que '
                  "falla es leerlo. Usar secretos_app()")
+
+
+
+# ============ 21. fetch() en la misma expresión que otra llamada ============
+# El cursor es UNO SOLO y compartido. Si en la misma expresión hay un c.fetchone() y además
+# una llamada a otra función de la app, el orden de evaluación decide quién usa el cursor
+# primero — y Python evalúa de izquierda a derecha, así que esto:
+#
+#     return descripciones_por_palabra(version), c.fetchone()[0]
+#
+# ejecuta la función ANTES del fetch, la función hace sus propias consultas sobre el mismo
+# cursor, y para cuando llega el fetchone() ya está leyendo otro resultado. Devuelve None y
+# el error aparece lejos, en quien usaba el valor. Pasó exactamente así y dejó sin funcionar
+# todas las sugerencias por descripción.
+# La forma segura es siempre la misma: fetch primero, a una variable, y después llamar.
+# Solo importan las funciones que USAN el cursor: si no lo tocan, el orden da igual.
+_FUNCIONES_DEL_ARCHIVO = set()
+for _f in ast.walk(ARBOL):
+    if not isinstance(_f, (ast.FunctionDef, ast.AsyncFunctionDef)):
+        continue
+    if any(isinstance(x, ast.Call) and isinstance(x.func, ast.Attribute)
+           and x.func.attr in ("execute", "executemany", "fetchone", "fetchall")
+           for x in ast.walk(_f)):
+        _FUNCIONES_DEL_ARCHIVO.add(_f.name)
+for _n in ast.walk(ARBOL):
+    if not isinstance(_n, (ast.Return, ast.Assign)):
+        continue
+    _valor = _n.value
+    if _valor is None:
+        continue
+    # En una comprensión, el iterable se evalúa PRIMERO, así que `for r in c.fetchall()`
+    # está a salvo aunque el cuerpo llame a otra cosa.
+    _iterables = {id(g.iter) for x in ast.walk(_valor)
+                  if isinstance(x, (ast.ListComp, ast.SetComp, ast.DictComp, ast.GeneratorExp))
+                  for g in x.generators}
+    _hay_fetch = any(isinstance(x, ast.Call) and isinstance(x.func, ast.Attribute)
+                     and x.func.attr.startswith("fetch") and id(x) not in _iterables
+                     for x in ast.walk(_valor))
+    if not _hay_fetch:
+        continue
+    _otras = [x.func.id for x in ast.walk(_valor)
+              if isinstance(x, ast.Call) and isinstance(x.func, ast.Name)
+              and x.func.id in _FUNCIONES_DEL_ARCHIVO]
+    if _otras:
+        reportar("ERROR", _n.lineno,
+                 f"c.fetch...() en la misma expresión que {_otras[0]}(): el cursor es "
+                 "compartido y la función corre primero, así que el fetch lee otro resultado. "
+                 "Guardar el fetch en una variable antes")
 
 
 # ============ Resultado ============

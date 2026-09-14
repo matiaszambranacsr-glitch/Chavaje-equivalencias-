@@ -75,6 +75,29 @@ Hay dos candados, y no son lo mismo:
   precio y el stock. Alcanza con la contraseña de operador, y como el nivel queda en la
   sesión se pide una vez por turno, no en cada producto.
 
+## Botones que piden contraseña
+
+Van con `candado(motivo, st.button(...), "clave")`, NUNCA con
+`if st.button(...): if pedir_password_admin(...):`. La forma vieja no funciona y es difícil de
+ver: Streamlit vuelve a correr la página entera en cada interacción, `st.button()` devuelve
+True solo en la corrida del clic, y cuando llega la contraseña ya devuelve False — el `if` de
+afuera no entra y la acción nunca corre. `candado()` anota el pedido en la sesión para que
+sobreviva a esa segunda corrida. El auditor acepta las dos formas, así que esto hay que
+respetarlo a mano.
+
+## Pantallas con secciones
+
+Nada de `st.tabs` en pantallas con botones: no recuerda qué pestaña estabas mirando y cada
+clic te devuelve a la primera. Va un `st.radio` con `key` en session_state, como la navegación
+principal y como Mantenimiento.
+
+## El cursor es uno solo
+
+`c` es un cursor compartido. Nunca poner un `c.fetchone()` en la misma expresión que una
+llamada a otra función de la app: Python evalúa de izquierda a derecha, la función hace sus
+consultas sobre el mismo cursor y el fetch termina leyendo otro resultado. Fetch primero, a
+una variable, y después llamar. El auditor lo marca.
+
 ## Kits
 
 El mostrador pregunta «¿y el kit con las bujías?», así que el buscador lo ofrece solo:

@@ -550,6 +550,40 @@ def validar_password(clave):
     return None, None, None
 
 
+def candado(motivo, disparador, clave, nivel="admin"):
+    """Un botón protegido por contraseña, que NO se olvida de que lo apretaste.
+
+    Lo que había antes no funcionaba, y esto no es teoría — está probado con la app corriendo:
+
+        if st.button("Arreglar los 36 códigos"):
+            if pedir_password_admin("..."):
+                arreglar()
+
+    Apretás el botón, aparece el pedido de contraseña, la ponés… y no pasa nada. El motivo es
+    cómo funciona Streamlit: cada interacción vuelve a correr la página entera, y st.button()
+    devuelve True SOLO en la corrida del clic. Cuando mandás la contraseña eso es otra corrida,
+    el botón ya devuelve False, el `if` de afuera no entra y la acción nunca se ejecuta. La
+    pantalla queda igual y parece que el botón está roto.
+
+    Acá el pedido se ANOTA en la sesión: sobrevive a las corridas siguientes, así que cuando
+    llega la contraseña la acción sí corre. Se borra apenas se autoriza, para que no vuelva a
+    dispararse sola en el próximo refresco.
+
+    `disparador` es el resultado del st.button(...), y `clave` lo distingue de los otros
+    botones con candado de la misma pantalla."""
+    pendiente = f"_candado_{clave}"
+    if disparador:
+        st.session_state[pendiente] = True
+    if not st.session_state.get(pendiente):
+        return False
+    autorizado = (pedir_password_operador_o_admin(motivo) if nivel == "empleado"
+                  else pedir_password_admin(motivo))
+    if autorizado:
+        st.session_state.pop(pendiente, None)
+        return True
+    return False
+
+
 def pedir_password_operador_o_admin(motivo=""):
     """Candado de EMPLEADO: alcanza con la contraseña de operador, o la de administrador.
 
@@ -9242,9 +9276,23 @@ def firma_de_producto(descripcion, producto_id=None, codigo_clean=None):
     # Los modelos: palabras que quedan después de sacar la marca del auto, el ruido y los
     # números sueltos. Se buscan contra el catálogo propio para no inventar modelos.
     nucleo, modelos = [], set()
-    palabras_marca = set((marca_auto or "").split())
+    # TODAS las marcas de auto que nombre, no solo la primera. Antes se sacaba únicamente la
+    # de marca_auto, y en «JTA TAPA CIL M.BENZ ... BENZ» el «BENZ» suelto quedaba adentro del
+    # núcleo: la app contaba la marca del auto como si fuera una palabra de la PIEZA y
+    # proponía equivalencias «porque coinciden en BENZ». Medido sobre las sugerencias reales,
+    # FIAT aparecía en 46 y FORD en 36 de ellas como motivo de la coincidencia.
+    palabras_marca = set()
+    for mv_encontrada, _cat, _resto in marcas_vehiculo_en(texto):
+        palabras_marca.update(mv_encontrada.split())
+    for mv in MARCAS_VEHICULO:
+        if f" {mv} " in f" {limpio} ":
+            palabras_marca.update(mv.split())
     for w in palabras:
+        # PALABRAS_NO_MODELO trae las marcas de REPUESTO (BOSCH, VALEO, NGK...). Tampoco dicen
+        # qué pieza es: «coinciden en BOSCH» salía en 24 sugerencias y no significa nada, dos
+        # proveedores distintos venden repuestos Bosch de cosas completamente distintas.
         if (w in _RUIDO_EN_FIRMA or w in palabras_marca or w in _POSICIONES
+                or w in PALABRAS_NO_MODELO
                 or len(w) < 3 or re.fullmatch(r'[\d./,]+', w)):
             continue
         nucleo.append(w)
@@ -9282,7 +9330,38 @@ def firma_de_producto(descripcion, producto_id=None, codigo_clean=None):
             "cilindradas": cilindradas, "vias": vias, "texto": limpio}
 
 
-def firmas_compatibles(a, b, minimo_nucleo=2):
+# Una palabra que aparece en más de este porcentaje del catálogo no distingue nada: está en
+# miles de repuestos que no tienen relación. Medido sobre las 61.574 descripciones reales:
+# SENSOR está en el 13,8%, BOMBA en el 5,8%, JUNTA en el 3,5%, BUJIA en el 2,1%. Con el 1% de
+# corte, para vincular hace falta compartir además algo específico — un modelo, una medida,
+# una sigla— y no solo «los dos dicen BOMBA».
+PORCENTAJE_PALABRA_GENERICA = 1.0
+
+
+def cuantas_veces_aparece_cada_palabra():
+    """(conteo por palabra, total de descripciones). Lo que necesita firmas_compatibles() para
+    saber qué palabra distingue y cuál está en todos lados. Va cacheado por versión."""
+    version = version_del_catalogo()
+    # Cada cosa por separado y en este orden, a propósito. Escrito como
+    # `return descripciones_por_palabra(version), c.fetchone()[0]` no anda: Python evalúa
+    # primero la función, que hace sus propias consultas sobre el MISMO cursor, y para cuando
+    # llega el fetchone() ya está leyendo otro resultado. Devolvía None y rompía todas las
+    # sugerencias por descripción.
+    cuenta = descripciones_por_palabra(version)
+    c.execute("SELECT COUNT(*) FROM productos WHERE descripcion IS NOT NULL")
+    fila = c.fetchone()
+    return cuenta, ((fila[0] if fila else 0) or 0)
+
+
+def palabras_que_dicen_algo(comunes, cuenta_palabras, total_descripciones):
+    """De las palabras compartidas, las que de verdad distinguen a esta pieza de las demás."""
+    if not cuenta_palabras or not total_descripciones:
+        return set(comunes)
+    tope = max(1, int(total_descripciones * PORCENTAJE_PALABRA_GENERICA / 100))
+    return {w for w in comunes if cuenta_palabras.get(w, 0) <= tope}
+
+
+def firmas_compatibles(a, b, minimo_nucleo=2, cuenta_palabras=None, total_descripciones=0):
     """¿Estas dos descripciones hablan de la misma pieza? Devuelve (sí/no, motivo).
 
     Se exige coincidencia en lo que define la pieza y NO contradicción en lo que la distingue.
@@ -9343,8 +9422,17 @@ def firmas_compatibles(a, b, minimo_nucleo=2):
     # dos descripciones genéricas que solo dicen «FILTRO ACEITE» no alcanzan para vincular.
     if not autos_comunes and len(comunes) < 3:
         return False, "ninguno declara el auto y la descripción es demasiado genérica"
+    # Y que al menos UNA de las palabras compartidas diga algo. Coincidir en «AGUA, ORING,
+    # TUBO» o en «ACEITE, BBA, JTA» son tres palabras que están en miles de repuestos: eso no
+    # es parecerse, es hablar el mismo idioma.
+    utiles = palabras_que_dicen_algo(comunes, cuenta_palabras, total_descripciones)
+    if cuenta_palabras and not utiles:
+        return False, ("solo comparten palabras genéricas ("
+                       + ", ".join(sorted(comunes)[:3]) + ")")
 
-    detalle = f"coinciden en {', '.join(sorted(comunes)[:4])}"
+    # Se muestran primero las que distinguen: es lo que hay que mirar para decidir.
+    orden = sorted(comunes, key=lambda w: (w not in utiles, w))
+    detalle = f"coinciden en {', '.join(orden[:4])}"
     if autos_comunes:
         detalle += f" · autos: {'/'.join(sorted(autos_comunes)[:3])}"
     if a["posicion"] or b["posicion"]:
@@ -9393,7 +9481,9 @@ def evidencia_cruzada(id_a, id_b):
     # 2. Descripción
     fa = firma_de_producto(pa["descripcion"], id_a, pa["codigo_clean"])
     fb = firma_de_producto(pb["descripcion"], id_b, pb["codigo_clean"])
-    ok_desc, motivo_desc = firmas_compatibles(fa, fb)
+    _cuenta, _total = cuantas_veces_aparece_cada_palabra()
+    ok_desc, motivo_desc = firmas_compatibles(fa, fb, cuenta_palabras=_cuenta,
+                                              total_descripciones=_total)
     if ok_desc:
         a_favor.append(f"🔤 las descripciones concuerdan ({motivo_desc})")
     elif fa and fb and fa["familia"] != "Sin clasificar" and fb["familia"] != "Sin clasificar":
@@ -9647,6 +9737,7 @@ def derivar_equivalencias_por_descripcion(marca_a_id=None, marca_b_id=None,
             f["_firma"] = firma
             por_rubro[mid].setdefault(firma["familia"], []).append(f)
 
+    _cuenta_pal, _total_desc = cuantas_veces_aparece_cada_palabra()
     ya_vinculados = set()
     c.execute("SELECT producto_a_id, producto_b_id FROM equivalencias")
     for r in c.fetchall():
@@ -9665,7 +9756,9 @@ def derivar_equivalencias_por_descripcion(marca_a_id=None, marca_b_id=None,
                 par = (min(pa["id"], pb["id"]), max(pa["id"], pb["id"]))
                 if par in ya_vinculados or par in rechazados:
                     continue
-                ok, motivo = firmas_compatibles(pa["_firma"], pb["_firma"])
+                ok, motivo = firmas_compatibles(pa["_firma"], pb["_firma"],
+                                                cuenta_palabras=_cuenta_pal,
+                                                total_descripciones=_total_desc)
                 if not ok:
                     continue
                 en_comun = len(pa["_firma"]["autos"] & pb["_firma"]["autos"])
@@ -9804,6 +9897,7 @@ def sugerir_entre_todas_las_marcas(limite=600, tope_palabra=40):
         for palabra in palabras:
             indice[palabra].append(prod["id"])
 
+    _cuenta_pal, _total_desc = cuantas_veces_aparece_cada_palabra()
     raras = {p: ids for p, ids in indice.items() if 2 <= len(ids) <= tope_palabra}
     vistos, salida = set(), []
     for ids in raras.values():
@@ -9818,7 +9912,9 @@ def sugerir_entre_todas_las_marcas(limite=600, tope_palabra=40):
                 # Del mismo proveedor no: son dos productos de su catálogo, no equivalentes.
                 if prod_a["marca_id"] == prod_b["marca_id"]:
                     continue
-                ok, motivo = firmas_compatibles(firma_a, firma_b)
+                ok, motivo = firmas_compatibles(firma_a, firma_b,
+                                                cuenta_palabras=_cuenta_pal,
+                                                total_descripciones=_total_desc)
                 if not ok:
                     continue
                 # Un filtro MÁS, que solo hace falta acá. Comparando de a dos proveedores,
@@ -15665,14 +15761,12 @@ Casi todo lo que edita o borra algo pide la contraseña de administrador la prim
                                                     f"({peor_paso['Confianza']}/100). Cortando ese, este "
                                                     "resultado deja de aparecer."
                                                 )
-                                                if st.button("✂️ Cortar ese vínculo",
-                                                              key=f"cortar_paso_debil_{clean}"):
-                                                    if pedir_password_admin("cortar vínculos"):
-                                                        borrar_equivalencias_dudosas(
-                                                            [(peor_paso["_a"], peor_paso["_b"])])
-                                                        invalidar_salud()
-                                                        avisar("success", "Vínculo cortado.")
-                                                        st.rerun()
+                                                if candado('cortar vínculos', st.button("✂️ Cortar ese vínculo", key=f"cortar_paso_debil_{clean}"), 'cortar_v_nculos_4'):
+                                                    borrar_equivalencias_dudosas(
+                                                        [(peor_paso["_a"], peor_paso["_b"])])
+                                                    invalidar_salud()
+                                                    avisar("success", "Vínculo cortado.")
+                                                    st.rerun()
 
                                 # Marca la opción más barata ENTRE LAS QUE TIENEN STOCK, para no tener que
 
@@ -15795,15 +15889,11 @@ Casi todo lo que edita o borra algo pide la contraseña de administrador la prim
                                     key=f"stock_{fila['ID']}_{clean}", min_value=0, step=1,
                                     label_visibility="collapsed"
                                 )
-                                if colG.button("💾", key=f"save_{fila['ID']}_{clean}"):
-                                    # Nivel empleado, no administrador: tocar precios es
-                                    # trabajo de todos los días, pero no de cualquiera que
-                                    # haya entrado con «Continuar».
-                                    if pedir_password_operador_o_admin("tocar precios y stock"):
-                                        actualizar_precio_stock(
-                                            fila["ID"], nuevo_precio, nuevo_stock,
-                                            st.session_state.get(f"costo_{fila['ID']}_{clean}"))
-                                        st.success("Guardado.")
+                                if candado('tocar precios y stock', colG.button("💾", key=f"save_{fila['ID']}_{clean}"), 'tocar_precios_y_stock', nivel="empleado"):
+                                    actualizar_precio_stock(
+                                        fila["ID"], nuevo_precio, nuevo_stock,
+                                        st.session_state.get(f"costo_{fila['ID']}_{clean}"))
+                                    st.success("Guardado.")
                                 if es_admin():
                                     c.execute("SELECT precio_costo FROM productos WHERE id = ?",
                                               (fila["ID"],))
@@ -17537,40 +17627,37 @@ if pagina == PAGINAS[3]:
             colOrig, colDest = st.columns(2)
             marca_origen = colOrig.selectbox("Marca a eliminar (origen):", nombres_para_fusion, key="fusion_origen")
             marca_destino = colDest.selectbox("Marca a conservar (destino):", nombres_para_fusion, key="fusion_destino")
-            if st.button("🔀 Fusionar", disabled=(marca_origen == marca_destino)):
-                if pedir_password_admin("fusionar marcas"):
-                    id_origen = next(m["id"] for m in marcas_info if m["nombre"] == marca_origen)
-                    id_destino = next(m["id"] for m in marcas_info if m["nombre"] == marca_destino)
-                    movidos, fusionados = fusionar_marcas(id_origen, id_destino)
-                    detalle = f"{movidos} producto(s) movidos"
-                    if fusionados:
-                        detalle += (f" y {fusionados} fusionados con los que ya existían "
-                                     "en la marca destino con el mismo código")
-                    avisar("success", f"'{marca_origen}' se fusionó dentro de '{marca_destino}': "
-                                       f"{detalle}.")
-                    invalidar_salud()
-                    st.rerun()
+            if candado('fusionar marcas', st.button("🔀 Fusionar", disabled=(marca_origen == marca_destino)), 'fusionar_marcas'):
+                id_origen = next(m["id"] for m in marcas_info if m["nombre"] == marca_origen)
+                id_destino = next(m["id"] for m in marcas_info if m["nombre"] == marca_destino)
+                movidos, fusionados = fusionar_marcas(id_origen, id_destino)
+                detalle = f"{movidos} producto(s) movidos"
+                if fusionados:
+                    detalle += (f" y {fusionados} fusionados con los que ya existían "
+                                 "en la marca destino con el mismo código")
+                avisar("success", f"'{marca_origen}' se fusionó dentro de '{marca_destino}': "
+                                   f"{detalle}.")
+                invalidar_salud()
+                st.rerun()
 
             st.markdown("---")
             st.markdown("**💲 Aumentar/bajar precios por porcentaje**")
             st.caption("Aplica el ajuste a todos los productos con precio cargado de la marca elegida.")
             marca_precio = st.selectbox("Marca:", nombres_para_fusion, key="marca_ajuste_precio")
             porcentaje = st.number_input("Porcentaje (usá negativo para bajar, ej: -5):", value=0.0, step=1.0)
-            if st.button("💲 Aplicar ajuste de precios", disabled=(porcentaje == 0)):
-                if pedir_password_admin("ajustar precios masivamente"):
-                    id_marca_precio = next(m["id"] for m in marcas_info if m["nombre"] == marca_precio)
-                    afectados = aumentar_precios_por_marca(id_marca_precio, porcentaje)
-                    st.success(f"Se ajustaron {afectados} precio(s) de '{marca_precio}' en {porcentaje:+.1f}%.")
+            if candado('ajustar precios masivamente', st.button("💲 Aplicar ajuste de precios", disabled=(porcentaje == 0)), 'ajustar_precios_masivamente'):
+                id_marca_precio = next(m["id"] for m in marcas_info if m["nombre"] == marca_precio)
+                afectados = aumentar_precios_por_marca(id_marca_precio, porcentaje)
+                st.success(f"Se ajustaron {afectados} precio(s) de '{marca_precio}' en {porcentaje:+.1f}%.")
 
             st.markdown("---")
             st.markdown("**Eliminar una marca** (borra también sus productos y equivalencias asociadas)")
             marca_a_borrar = st.selectbox("Elegí una marca", [m["nombre"] for m in marcas_info])
             confirmar = st.checkbox(f"Confirmo que quiero borrar '{marca_a_borrar}' y todo lo asociado")
-            if st.button("🗑️ Eliminar marca", disabled=not confirmar):
-                if pedir_password_admin("eliminar una marca"):
-                    eliminar_marca_con_papelera(marca_a_borrar)
-                    avisar("success", f"Marca '{marca_a_borrar}' eliminada (podés restaurarla desde la papelera).")
-                    st.rerun()
+            if candado('eliminar una marca', st.button("🗑️ Eliminar marca", disabled=not confirmar), 'eliminar_una_marca'):
+                eliminar_marca_con_papelera(marca_a_borrar)
+                avisar("success", f"Marca '{marca_a_borrar}' eliminada (podés restaurarla desde la papelera).")
+                st.rerun()
 
         st.markdown("**Catálogos externos**")
         st.caption("Agregá los sitios de proveedores que querés que aparezcan como botones al buscar un código.")
@@ -17581,10 +17668,9 @@ if pagina == PAGINAS[3]:
                 colA, colB, colC = st.columns([2, 5, 1])
                 colA.write(cat["nombre"])
                 colB.write(cat["url"])
-                if colC.button("🗑️", key=f"del_cat_{cat['id']}"):
-                    if pedir_password_admin("borrar un catálogo externo"):
-                        eliminar_catalogo_externo(cat["id"])
-                        st.rerun()
+                if candado('borrar un catálogo externo', colC.button("🗑️", key=f"del_cat_{cat['id']}"), 'borrar_un_cat_logo_externo'):
+                    eliminar_catalogo_externo(cat["id"])
+                    st.rerun()
         else:
             st.caption("Todavía no agregaste ningún catálogo externo.")
 
@@ -17903,12 +17989,11 @@ if pagina == PAGINAS[3]:
         nuevo_encabezado = st.text_input("Encabezado del mensaje:", value=encabezado_actual, key="wa_encabezado_in")
         nuevo_pie = st.text_area("Pie del mensaje (opcional):", value=pie_actual, key="wa_pie_in",
                                   placeholder="Ej: 📍 Av. Siempreviva 742 - Horario: L a V 9 a 18hs")
-        if st.button("💾 Guardar textos del mensaje"):
-            if pedir_password_admin("cambiar los textos que salen en los mensajes"):
-                guardar_config("whatsapp_encabezado", nuevo_encabezado.strip() or "🔧 *Equivalencias El Chavo*")
-                guardar_config("whatsapp_pie", nuevo_pie.strip())
-                avisar("success", "Guardado.")
-                st.rerun()
+        if candado('cambiar los textos que salen en los mensajes', st.button("💾 Guardar textos del mensaje"), 'cambiar_los_textos_que_salen_en_lo'):
+            guardar_config("whatsapp_encabezado", nuevo_encabezado.strip() or "🔧 *Equivalencias El Chavo*")
+            guardar_config("whatsapp_pie", nuevo_pie.strip())
+            avisar("success", "Guardado.")
+            st.rerun()
 
         st.markdown("---")
         st.markdown("**💳 Alias para QR de transferencia**")
@@ -17965,16 +18050,14 @@ if pagina == PAGINAS[3]:
                 )
                 avisar("success", "Alias guardado.")
                 st.rerun()
-        if alias_actual and alias_actual["TieneQrReal"] and cbtn2.button("🗑️ Sacar el QR real"):
-            if pedir_password_admin("sacar el QR de cobro"):
-                eliminar_qr_real(alias_actual["ID"])
-                avisar("success", "QR real eliminado — vuelve a usar el de texto plano.")
-                st.rerun()
-        if alias_actual and cbtn3.button("🗑️ Eliminar este alias"):
-            if pedir_password_admin("eliminar los datos de cobro"):
-                eliminar_alias_transferencia(alias_actual["ID"])
-                avisar("success", "Alias eliminado.")
-                st.rerun()
+        if candado('sacar el QR de cobro', alias_actual and alias_actual["TieneQrReal"] and cbtn2.button("🗑️ Sacar el QR real"), 'sacar_el_qr_de_cobro'):
+            eliminar_qr_real(alias_actual["ID"])
+            avisar("success", "QR real eliminado — vuelve a usar el de texto plano.")
+            st.rerun()
+        if candado('eliminar los datos de cobro', alias_actual and cbtn3.button("🗑️ Eliminar este alias"), 'eliminar_los_datos_de_cobro'):
+            eliminar_alias_transferencia(alias_actual["ID"])
+            avisar("success", "Alias eliminado.")
+            st.rerun()
 
     if sub_admin == SUB_ADMIN[3]:
         st.markdown("**🧩 Combos de repuestos relacionados**")
@@ -18006,11 +18089,10 @@ if pagina == PAGINAS[3]:
                 guardar_combo(disparador_edit, items_edit.strip().splitlines())
                 avisar("success", f"Combo para '{disparador_edit.strip()}' guardado.")
                 st.rerun()
-        if cc2.button("🗑️ Eliminar combo (según el disparador de arriba)"):
-            if disparador_edit.strip() and pedir_password_admin("eliminar un combo"):
-                eliminar_combo(disparador_edit)
-                avisar("success", f"Combo para '{disparador_edit.strip()}' eliminado.")
-                st.rerun()
+        if candado('eliminar un combo', cc2.button("🗑️ Eliminar combo (según el disparador de arriba)"), 'eliminar_un_combo'):
+            eliminar_combo(disparador_edit)
+            avisar("success", f"Combo para '{disparador_edit.strip()}' eliminado.")
+            st.rerun()
 
     if sub_admin == SUB_ADMIN[4]:
         st.markdown("**🗑️ Eliminar un producto puntual**")
@@ -18037,17 +18119,16 @@ if pagina == PAGINAS[3]:
                 )
                 confirmar_borrado = st.checkbox(f"Confirmo que quiero borrar '{elegido_borrar_label}'",
                                                  key="mant_confirmar_borrar")
-                if st.button("🗑️ Eliminar producto", disabled=not confirmar_borrado):
-                    if pedir_password_admin("eliminar un producto"):
-                        c.execute("SELECT * FROM productos WHERE id = ?", (id_a_borrar,))
-                        fila_producto = c.fetchone()
-                        if fila_producto:
-                            mover_a_papelera("producto", dict(fila_producto))
-                        with db_lock:
-                            c.execute("DELETE FROM productos WHERE id = ?", (id_a_borrar,))
-                            conn.commit()
-                        avisar("success", "Producto eliminado (podés restaurarlo desde la papelera, más abajo).")
-                        st.rerun()
+                if candado('eliminar un producto', st.button("🗑️ Eliminar producto", disabled=not confirmar_borrado), 'eliminar_un_producto'):
+                    c.execute("SELECT * FROM productos WHERE id = ?", (id_a_borrar,))
+                    fila_producto = c.fetchone()
+                    if fila_producto:
+                        mover_a_papelera("producto", dict(fila_producto))
+                    with db_lock:
+                        c.execute("DELETE FROM productos WHERE id = ?", (id_a_borrar,))
+                        conn.commit()
+                    avisar("success", "Producto eliminado (podés restaurarlo desde la papelera, más abajo).")
+                    st.rerun()
             else:
                 st.caption("Sin resultados.")
 
@@ -18055,9 +18136,21 @@ if pagina == PAGINAS[3]:
         # Mantenimiento quedó con 15 herramientas apiladas en un solo scroll interminable.
         # Se agrupan por lo que uno viene a hacer, no por el orden en que se fueron sumando:
         # así se entra directo a lo que se necesita en vez de bajar buscándolo.
-        _tabs_mant = st.tabs([g[0] for g in GRUPOS_MANTENIMIENTO])
+        # Un selector guardado en la sesión, NO st.tabs. Dos motivos, los dos se veían:
+        #   · st.tabs no recuerda en qué pestaña estabas: cada vez que apretás un botón la
+        #     página se vuelve a dibujar y volvés a la primera. Con las pantallas de
+        #     mantenimiento, donde uno aprieta un botón tras otro, eso es insoportable —
+        #     «cada vez que aprieto una opción me manda para atrás».
+        #   · el título de cada pestaña era g[0], o sea el PRIMER CARÁCTER del nombre: se
+        #     veían cuatro emojis sueltos («🧹 🧠 📷 🩺») en vez de los nombres.
+        # Es el mismo cambio que ya se había hecho en la navegación principal, por lo mismo.
+        if st.session_state.get("sub_mantenimiento") not in GRUPOS_MANTENIMIENTO:
+            st.session_state["sub_mantenimiento"] = GRUPOS_MANTENIMIENTO[0]
+        st.radio("Grupo:", GRUPOS_MANTENIMIENTO, key="sub_mantenimiento", horizontal=True,
+                 label_visibility="collapsed")
+        _grupo_mant = st.session_state["sub_mantenimiento"]
 
-        with _tabs_mant[0]:
+        if _grupo_mant == GRUPOS_MANTENIMIENTO[0]:
             st.markdown("**🌉 Códigos puente — los que rompen la búsqueda**")
             explicar(
                 "Códigos vinculados a demasiadas cosas. Cortar uno limpia miles de resultados falsos.",
@@ -18141,12 +18234,11 @@ if pagina == PAGINAS[3]:
                         red = tamano_de_la_red(objetivo["id"])
                         st.info(f"**{objetivo['codigo_raw']}** — {objetivo['descripcion'] or 'sin descripción'}. "
                                  f"Hoy está encadenado con {red}{'+' if red >= 500 else ''} producto(s).")
-                        if st.button(f"✂️ Cortar todos los vínculos de {objetivo['codigo_raw']}"):
-                            if pedir_password_admin("cortar vínculos"):
-                                n = cortar_vinculos_de(objetivo["id"])
-                                invalidar_salud()
-                                avisar("success", f"Se cortaron {n} vínculo(s). El producto quedó en la base.")
-                                st.rerun()
+                        if candado('cortar vínculos', st.button(f"✂️ Cortar todos los vínculos de {objetivo['codigo_raw']}"), 'cortar_v_nculos_3'):
+                            n = cortar_vinculos_de(objetivo["id"])
+                            invalidar_salud()
+                            avisar("success", f"Se cortaron {n} vínculo(s). El producto quedó en la base.")
+                            st.rerun()
             else:
                 st.caption(f"✅ Ningún código con más de {minimo_puente} vínculos.")
             st.markdown("**🔗 Vínculos que unen dos familias de repuestos**")
@@ -18182,12 +18274,11 @@ if pagina == PAGINAS[3]:
                         }
                         elegido_u = st.selectbox("¿Cuál cortar?", list(etiquetas_u.keys()),
                                                   key="union_a_cortar")
-                        if st.button("✂️ Cortar ese vínculo"):
-                            if pedir_password_admin("cortar vínculos"):
-                                n = borrar_equivalencias_dudosas([etiquetas_u[elegido_u]])
-                                invalidar_salud()
-                                avisar("success", "Se cortó el vínculo. Las dos familias quedaron separadas.")
-                                st.rerun()
+                        if candado('cortar vínculos', st.button("✂️ Cortar ese vínculo"), 'cortar_v_nculos_2'):
+                            n = borrar_equivalencias_dudosas([etiquetas_u[elegido_u]])
+                            invalidar_salud()
+                            avisar("success", "Se cortó el vínculo. Las dos familias quedaron separadas.")
+                            st.rerun()
             st.markdown("**🔍 Revisar los vínculos que YA están cargados**")
             explicar(
                 "El análisis de confianza mira los vínculos pendientes de revisión, pero el problema "
@@ -18235,14 +18326,13 @@ if pagina == PAGINAS[3]:
                         "la misma lista no los vuelve a crear."
                     )
                     if st.checkbox("Miré la lista y entiendo qué se corta", key="confirmar_dudosas"):
-                        if st.button(f"✂️ Cortar los {cuantos_cortar} peores", type="primary"):
-                            if pedir_password_admin("cortar vínculos"):
-                                pares = [(x["_a"], x["_b"]) for x in dudosas[:int(cuantos_cortar)]]
-                                n = borrar_equivalencias_dudosas(pares)
-                                st.session_state.pop("dudosas_cargadas", None)
-                                invalidar_salud()
-                                avisar("success", f"Se cortaron {n} vínculo(s). Los productos quedaron intactos.")
-                                st.rerun()
+                        if candado('cortar vínculos', st.button(f"✂️ Cortar los {cuantos_cortar} peores", type="primary"), 'cortar_v_nculos'):
+                            pares = [(x["_a"], x["_b"]) for x in dudosas[:int(cuantos_cortar)]]
+                            n = borrar_equivalencias_dudosas(pares)
+                            st.session_state.pop("dudosas_cargadas", None)
+                            invalidar_salud()
+                            avisar("success", f"Se cortaron {n} vínculo(s). Los productos quedaron intactos.")
+                            st.rerun()
             st.markdown("**💲 Precios que no cierran entre equivalentes**")
             explicar(
                 "Dos repuestos que hacen lo mismo pueden costar distinto según la marca, pero no ocho "
@@ -18298,12 +18388,11 @@ if pagina == PAGINAS[3]:
                 )
                 if st.checkbox("Ya revisé la lista y entiendo que se borran definitivamente",
                                 key="confirmar_borrar_basura"):
-                    if st.button(f"🗑️ Borrar los {cantidad_basura} códigos y sus equivalencias"):
-                        if pedir_password_admin("borrar códigos basura"):
-                            borrados = borrar_codigos_basura()
-                            invalidar_salud()
-                            avisar("success", f"Se borraron {borrados} producto(s) con código basura.")
-                            st.rerun()
+                    if candado('borrar códigos basura', st.button(f"🗑️ Borrar los {cantidad_basura} códigos y sus equivalencias"), 'borrar_c_digos_basura'):
+                        borrados = borrar_codigos_basura()
+                        invalidar_salud()
+                        avisar("success", f"Se borraron {borrados} producto(s) con código basura.")
+                        st.rerun()
             else:
                 st.caption("✅ Ningún código de 1 o 2 dígitos en la base.")
             st.markdown("**🔢 Códigos que quedaron con '.0'**")
@@ -18332,25 +18421,23 @@ if pagina == PAGINAS[3]:
                     width="stretch", hide_index=True)
                 if len(_desfasados) > 25:
                     st.caption(f"…y {len(_desfasados) - 25} más.")
-                if st.button(f"🔧 Arreglar esos {len(_desfasados)} códigos"):
-                    if pedir_password_admin("recalcular códigos de búsqueda"):
-                        _n = reparar_codigos_limpios()
-                        avisar("success", f"Se arreglaron {_n} código(s). Ya se pueden buscar.")
-                        invalidar_salud()
-                        st.rerun()
+                if candado('recalcular códigos de búsqueda', st.button(f"🔧 Arreglar esos {len(_desfasados)} códigos"), 'recalcular_c_digos_de_b_squeda'):
+                    _n = reparar_codigos_limpios()
+                    avisar("success", f"Se arreglaron {_n} código(s). Ya se pueden buscar.")
+                    invalidar_salud()
+                    st.rerun()
 
             st.markdown("**🔢 Códigos con el '.0' de Excel**")
             if cantidad_decimal:
                 st.warning(f"⚠️ Hay {cantidad_decimal} producto(s) con el código terminado en '.0'.")
-                if st.button(f"🔧 Arreglar los {cantidad_decimal} códigos"):
-                    if pedir_password_admin("reescribir códigos de todo el catálogo"):
-                        arreglados = reparar_codigos_con_decimal()
-                        # Sin el refresco, el cartel de arriba seguía mostrando el número viejo
-                        # y parecía que el botón no hacía nada. El aviso se guarda para que
-                        # sobreviva al refresco.
-                        avisar("success", f"Se arreglaron {arreglados} código(s) terminados en '.0'.")
-                        invalidar_salud()
-                        st.rerun()
+                if candado('reescribir códigos de todo el catálogo', st.button(f"🔧 Arreglar los {cantidad_decimal} códigos"), 'reescribir_c_digos_de_todo_el_cat_'):
+                    arreglados = reparar_codigos_con_decimal()
+                    # Sin el refresco, el cartel de arriba seguía mostrando el número viejo
+                    # y parecía que el botón no hacía nada. El aviso se guarda para que
+                    # sobreviva al refresco.
+                    avisar("success", f"Se arreglaron {arreglados} código(s) terminados en '.0'.")
+                    invalidar_salud()
+                    st.rerun()
             else:
                 st.caption("✅ Ningún código con ese problema.")
             st.markdown("**📝 Descripciones con las columnas pegadas**")
@@ -18361,14 +18448,13 @@ if pagina == PAGINAS[3]:
             pegadas = contar_descripciones_pegadas()
             if pegadas:
                 st.warning(f"⚠️ Hay al menos {pegadas} descripción(es) con ese problema.")
-                if st.button("🔧 Separar las descripciones pegadas"):
-                    if pedir_password_admin("reescribir las descripciones de todo el catálogo"):
-                        arregladas = reparar_descripciones_pegadas()
-                        st.success(f"Se separaron {arregladas} descripción(es).")
+                if candado('reescribir las descripciones de todo el catálogo', st.button("🔧 Separar las descripciones pegadas"), 'reescribir_las_descripciones_de_to'):
+                    arregladas = reparar_descripciones_pegadas()
+                    st.success(f"Se separaron {arregladas} descripción(es).")
             else:
                 st.caption("✅ Ninguna descripción con ese problema.")
 
-        with _tabs_mant[1]:
+        if _grupo_mant == GRUPOS_MANTENIMIENTO[1]:
             st.markdown("**🎯 Puntuar los vínculos para el buscador**")
             try:
                 sin_puntuar = faltan_por_puntuar()
@@ -18386,8 +18472,7 @@ if pagina == PAGINAS[3]:
             if sin_puntuar:
                 st.info(f"Hay {sin_puntuar:,} vínculo(s) sin puntuar de {total_eq:,}. "
                          "Mientras tanto cuentan como neutros.")
-            if (total_eq and st.button("🎯 Calcular la confianza de los vínculos que faltan")
-                    and pedir_password_admin("puntuar los vínculos")):
+            if candado('puntuar los vínculos', total_eq and st.button("🎯 Calcular la confianza de los vínculos que faltan"), 'puntuar_los_v_nculos'):
                 barra_conf = st.progress(0.0, text="Puntuando...")
                 # Va por tandas hasta terminar, no una sola de tamaño fijo. Antes se hacía una
                 # tanda y listo, y con más vínculos que el tope quedaban miles sin puntuar por
@@ -18408,11 +18493,7 @@ if pagina == PAGINAS[3]:
                 avisar("success", f"Se puntuaron {hechos:,} vínculo(s). El buscador ya lo está "
                                   "usando.")
                 st.rerun()
-            if (total_eq and st.button("♻️ Volver a puntuar TODO",
-                                        help="Los puntajes cambian cuando aparece evidencia nueva "
-                                             "—ventas que confirman un reemplazo, decisiones que "
-                                             "tomaste al revisar—. Esto los recalcula de cero.")
-                    and pedir_password_admin("volver a puntuar todos los vínculos")):
+            if candado('volver a puntuar todos los vínculos', total_eq and st.button("♻️ Volver a puntuar TODO", help="Los puntajes cambian cuando aparece evidencia nueva " "—ventas que confirman un reemplazo, decisiones que " "tomaste al revisar—. Esto los recalcula de cero."), 'volver_a_puntuar_todos_los_v_nculo'):
                 barra_re = st.progress(0.0, text="Recalculando...")
                 n = recalcular_confianzas(
                     limite=max(total_eq, 1), solo_faltantes=False,
@@ -19036,9 +19117,7 @@ if pagina == PAGINAS[3]:
                         with st.expander(f"🔗 {_p['Código']} — {_p['Por qué sospecha']}"):
                             st.caption(f"Familias que toca: {_p['Familias']}")
                             st.write(_p["Ejemplos"])
-                            if st.button("🗑️ Borrar este puente y sus vínculos",
-                                         key=f"borrar_puente_{_p['pid']}") and pedir_password_admin(
-                                             "borrar un código de fábrica falso"):
+                            if candado('borrar un código de fábrica falso', st.button("🗑️ Borrar este puente y sus vínculos", key=f"borrar_puente_{_p['pid']}"), 'borrar_un_c_digo_de_f_brica_falso'):
                                 _n = borrar_puente(_p["pid"])
                                 # La lista guardada queda vieja apenas se borra uno: si no se
                                 # saca de ahí, el botón sigue apareciendo y al tocarlo de nuevo
@@ -19153,12 +19232,11 @@ if pagina == PAGINAS[3]:
                         "así que si volvés a importar la misma lista no se vuelven a crear solos."
                     )
                     if st.checkbox("Entiendo que esto borra esos vínculos", key="confirmar_deshacer_imp"):
-                        if st.button("↩️ Deshacer esta importación", type="primary"):
-                            if pedir_password_admin("deshacer una importación"):
-                                nv, npd = deshacer_importacion(lote_elegido)
-                                invalidar_salud()
-                                avisar("success", f"Se deshicieron {nv} vínculo(s) cargados y {npd} pendientes.")
-                                st.rerun()
+                        if candado('deshacer una importación', st.button("↩️ Deshacer esta importación", type="primary"), 'deshacer_una_importaci_n'):
+                            nv, npd = deshacer_importacion(lote_elegido)
+                            invalidar_salud()
+                            avisar("success", f"Se deshicieron {nv} vínculo(s) cargados y {npd} pendientes.")
+                            st.rerun()
             else:
                 st.caption(
                     "Todavía no hay importaciones con origen registrado. Las listas que importes de "
@@ -19189,7 +19267,7 @@ if pagina == PAGINAS[3]:
                                        f"y se ordenaron {vueltas:,}.")
                     st.rerun()
 
-        with _tabs_mant[2]:
+        if _grupo_mant == GRUPOS_MANTENIMIENTO[2]:
             st.markdown("**📷 Traer fotos de productos en tanda**")
             st.caption(
                 "En vez de cargarlas de a una. No existe ninguna base pública y gratuita de fotos por "
@@ -19391,7 +19469,7 @@ if pagina == PAGINAS[3]:
                     avisar("success", f"Se rehabilitaron {reintentar_codigos_sin_foto()} código(s).")
                     st.rerun()
 
-        with _tabs_mant[3]:
+        if _grupo_mant == GRUPOS_MANTENIMIENTO[3]:
             st.markdown("**🔍 Salud de los datos**")
             st.caption(
                 "Revisa la base en busca de cosas rotas o inconsistentes — útil para detectar corrupción "
@@ -19432,10 +19510,9 @@ if pagina == PAGINAS[3]:
                     f"Hay **{_sueltos:,}** producto(s) sin ninguna equivalencia, de {_todos:,} "
                     f"— el {_porcentaje}% del catálogo."
                 )
-                if st.button(f"🧹 Borrar esos {_sueltos:,} productos"):
-                    if pedir_password_admin("borrar productos sin equivalencias"):
-                        borrados = depurar_huerfanos()
-                        st.success(f"Se borraron {borrados:,} producto(s) sin equivalencias.")
+                if candado('borrar productos sin equivalencias', st.button(f"🧹 Borrar esos {_sueltos:,} productos"), 'borrar_productos_sin_equivalencias'):
+                    borrados = depurar_huerfanos()
+                    st.success(f"Se borraron {borrados:,} producto(s) sin equivalencias.")
             st.markdown("**🗑️ Papelera**")
             explicar(
                 "Cuando borrás una marca entera, un combo, un alias de transferencia o un producto "
@@ -19827,11 +19904,10 @@ Administrar → Mantenimiento.
             archivo_listo(archivo_restaurar, "backup")
             boton_otro_archivo("restaurar", "🗑️ Usar otro backup", key="otro_backup")
         confirmar_restore = st.checkbox("Entiendo que esto borra los datos actuales y los reemplaza")
-        if st.button("♻️ Restaurar backup", disabled=not (archivo_restaurar and confirmar_restore)):
-            if pedir_password_admin("restaurar un backup"):
-                restaurar_backup(archivo_restaurar)
-                avisar("success", "Backup restaurado. Recargando...")
-                st.rerun()
+        if candado('restaurar un backup', st.button("♻️ Restaurar backup", disabled=not (archivo_restaurar and confirmar_restore)), 'restaurar_un_backup'):
+            restaurar_backup(archivo_restaurar)
+            avisar("success", "Backup restaurado. Recargando...")
+            st.rerun()
 
     if sub_stats == SUB_STATS[3]:
         st.markdown("**🧮 Auditoría diaria de stock (muestreo aleatorio)**")
@@ -21239,13 +21315,10 @@ if pagina == PAGINAS[7]:
             texto_dtc = st.text_area("Pegá los códigos acá:", height=150, key="dtc_masivo",
                                       placeholder="P0455;Fuga grande en sistema EVAP;Emisiones;Tapa de nafta, manguera\n"
                                                    "P1105;Solenoide de presión de combustible;Motor;;Chrysler")
-            if st.button("📥 Importar códigos"):
-                if texto_dtc.strip() and pedir_password_admin("importar códigos de falla"):
-                    cargados_dtc = importar_dtc_masivo(texto_dtc)
-                    avisar("success", f"Se cargaron/actualizaron {cargados_dtc} código(s).")
-                    st.rerun()
-                else:
-                    st.warning("Pegá al menos un código.")
+            if candado('importar códigos de falla', st.button("📥 Importar códigos"), 'importar_c_digos_de_falla'):
+                cargados_dtc = importar_dtc_masivo(texto_dtc)
+                avisar("success", f"Se cargaron/actualizaron {cargados_dtc} código(s).")
+                st.rerun()
 
     # Definidas acá porque las usan las dos vistas de esquemas de más abajo.
     CATEGORIAS_ESQUEMA = [
