@@ -373,9 +373,11 @@ la excepción en pantalla. El auditor marca cualquier vuelta a esa forma.
 propias listas. Tres cosas que conviene saber antes de tocarla:
 
 - **Una descripción nombra varios autos** («BUJIA Ford Escort - VW Gol - Kombi»): son el 19%
-  de las descripciones reales. Por eso existe `marcas_vehiculo_en()`, que devuelve todas, y el
-  producto aparece en el catálogo de cada una. `separar_por_marca_vehiculo()` devuelve solo la
-  primera y se usa donde hace falta una sola.
+  de las descripciones reales. Por eso `marcas_vehiculo_en()` devuelve **todas**, cada una con
+  su pedazo de texto (hasta la marca siguiente), y el producto aparece en el catálogo de cada
+  una. Hubo una función que devolvía solo la primera y ya no está: cada vez que se usaba, el
+  repuesto desaparecía del catálogo de los otros autos y el modelo se leía del pedazo
+  equivocado.
 - **Las listas abrevian** («VW», «CHEV», «PEU») y **escriben en minúsculas**. Las abreviaturas
   están en `MARCAS_VEHICULO` y se unifican con `ALIAS_MARCA_VEHICULO`; el reconocimiento va en
   IGNORECASE. Si agregás una abreviatura, contá antes cuántas descripciones reales la usan

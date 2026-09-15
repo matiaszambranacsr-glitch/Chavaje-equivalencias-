@@ -536,6 +536,44 @@ def probar_codigo_conocido_gana_a_la_forma():
           "estar en el catálogo no vuelve código a un número corto pegado a una medida")
 
 
+def probar_todos_los_autos_de_una_descripcion():
+    """Una descripción que nombra cuatro autos tiene que dar los cuatro, cada uno con SU texto.
+
+    Es el caso que rompía las aplicaciones deducidas. Sobre esta descripción real:
+      «BULBO DE PRESION DE ACEITE 304VW Passat - Santana - Gol - ALFA ROMEO 155 T Spark -
+       FORD Galaxy - Escort - SEAT Toledo»
+    se guardaba UN solo auto, así que el repuesto desaparecía del catálogo de los otros tres."""
+    desc = ("BULBO DE PRESION DE ACEITE 304VW Passat 1 6 tdi - Santana 1 8 - Gol - Saveiro "
+            "ALFA ROMEO 155 T Spark 8V - FORD Galaxy - Escort - SEAT Toledo 1 6")
+    marcas = [m for m, _c, _r in vehiculos.marcas_vehiculo_en(desc)]
+    for esperada in ("VOLKSWAGEN", "ALFA ROMEO", "FORD", "SEAT"):
+        cierto(esperada in marcas, f"{esperada} tiene que estar; salieron {marcas}")
+    # Y a cada una le toca su propio pedazo, no el de la de al lado.
+    tramos = {m: (r or "") for m, _c, r in vehiculos.marcas_vehiculo_en(desc)}
+    cierto("Galaxy" in tramos.get("FORD", ""), f"a FORD le toca Galaxy; le tocó {tramos.get('FORD')!r}")
+    cierto("Toledo" in tramos.get("SEAT", ""), f"a SEAT le toca Toledo; le tocó {tramos.get('SEAT')!r}")
+
+
+def probar_marca_corta_pegada_a_un_numero():
+    """«FI-IWP041VW Gol» — la marca pegada al código sin espacio.
+
+    Las marcas de dos y tres letras no se despegan en general, a propósito: un «VW» suelto se
+    mete adentro de cualquier palabra. Pero con un dígito justo antes no hay ambigüedad, y son
+    1.150 descripciones reales. No es cosmético: de ahí sale el código de fábrica, y sin
+    separar el código que se leía era IWP041VW en vez de IWP041."""
+    igual(vehiculos.separar_texto_pegado("INYECTOR FI-IWP041VW Gol 1.0 16V"),
+          "INYECTOR FI-IWP041 VW Gol 1.0 16V", "el VW pegado al código se despega")
+    igual(codigos.extraer_codigos_de_texto(
+              vehiculos.separar_texto_pegado("INYECTOR FI-IWP041VW Gol 1.0 16V")),
+          ["FI-IWP041"], "y entonces el código que se lee es el bueno")
+    igual(vehiculos.separar_texto_pegado("SONDA LAMBDA 80034GM ASTRA 1 8"),
+          "SONDA LAMBDA 80034 GM ASTRA 1 8", "lo mismo con GM")
+    # Lo que no se toca: un error de tipeo del proveedor no se parte en dos.
+    igual(vehiculos.separar_texto_pegado("KIT DE DISTRIBUCION LKTCN1007TOYOYA AVENSIS"),
+          "KIT DE DISTRIBUCION LKTCN1007TOYOYA AVENSIS",
+          "«TOYOYA» es un error de tipeo, no la marca TOY pegada")
+
+
 def probar_vocabulario_de_pieza():
     """Las tres listas de palabras tienen que decir cada una lo suyo.
 
@@ -691,6 +729,8 @@ def main():
                    probar_codigo_de_barras_no_es_equivalencia,
                    probar_columna_de_codigo_de_barras,
                    probar_codigo_conocido_gana_a_la_forma,
+                   probar_todos_los_autos_de_una_descripcion,
+                   probar_marca_corta_pegada_a_un_numero,
                    probar_vocabulario_de_pieza,
                    probar_abreviaturas_de_las_listas_reales,
                    probar_busqueda_por_codigo_de_barras,

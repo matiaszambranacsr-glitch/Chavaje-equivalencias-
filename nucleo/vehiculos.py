@@ -172,6 +172,26 @@ _RE_MARCAS_PEGADAS = re.compile(
 _RE_ESPACIOS = re.compile(r'\s{2,}')
 
 
+# LA MARCA CORTA PEGADA A UN NÚMERO: «19505VW PASSAT», «314GM Astra», «10127BMW», «FI-IWP041VW».
+# MARCAS_PARA_DESPEGAR deja afuera las marcas de menos de cuatro letras a propósito: un «VW» o
+# un «GM» sueltos se meten adentro de cualquier palabra y harían un desastre. Pero con un
+# DÍGITO justo antes no hay ambigüedad: ninguna palabra del castellano tiene un número pegado
+# adelante. Son 1.150 descripciones reales, casi todas de VW (680), GM (193) y BMW (186).
+# Y no es solo cosmético: la descripción es de donde sale el código de fábrica, así que
+# «FI-IWP041VW Gol» daba el código IWP041VW en vez de IWP041. Hay 5 así cargados en la base.
+# Se pide que después de la marca venga algo que NO sea una letra, o una palabra en Mayúscula
+# minúscula. Sin esa condición se rompen los errores de tipeo del proveedor —«109103PEUGOET»
+# quedaba «109103 PEU GOET» y «LKTCN1007TOYOYA» quedaba «LKTCN1007 TOY OYA»—, que son 32.
+_MARCAS_CORTAS_PEGADAS = sorted(
+    [m for m in MARCAS_VEHICULO if 2 <= len(m) <= 3 and " " not in m], key=len, reverse=True)
+
+
+_RE_MARCA_CORTA_TRAS_NUMERO = re.compile(
+    r'(?<=\d)(' + "|".join(re.escape(m) for m in _MARCAS_CORTAS_PEGADAS)
+    + r')(?=[^A-Za-zÁÉÍÓÚÑ]|[A-ZÁÉÍÓÚÑ][a-záéíóúñ])'
+) if _MARCAS_CORTAS_PEGADAS else None
+
+
 # EL MODELO CON LA CILINDRADA PEGADA: «CORSA1.4», «AMAROK2.0», «HILLUX2.4», «Siena1.0».
 # Sale de la exportación del proveedor, que se come el espacio, y hace daño de dos maneras: el
 # modelo deja de ser reconocible como modelo, y —peor— «CORSA1.4» tiene forma de código, así
@@ -207,27 +227,9 @@ def separar_texto_pegado(texto):
     t = _RE_MODELO_CON_CILINDRADA.sub(' ', t)
     if _RE_MARCAS_PEGADAS is not None:
         t = _RE_MARCAS_PEGADAS.sub(r' \1 ', t)
+    if _RE_MARCA_CORTA_TRAS_NUMERO is not None:
+        t = _RE_MARCA_CORTA_TRAS_NUMERO.sub(r' \1 ', t)
     return _RE_ESPACIOS.sub(' ', t).strip()
-
-
-def separar_por_marca_vehiculo(descripcion):
-    """Parte una descripción en (categoría, marca del vehículo, resto), con la PRIMERA marca.
-    Ejemplo: 'Junta Tapa de Cilindros FORD TAUNUS COUPE'
-             -> ('Junta Tapa de Cilindros', 'FORD', 'TAUNUS COUPE')
-    Es lo que permite armar el catálogo por vehículo sin cargar nada a mano: la relación
-    pieza-vehículo ya venía en las listas de los proveedores, solo hay que leerla.
-
-    «La primera» es la que aparece antes en el texto, que es la aplicación principal. Antes era
-    la primera de la LISTA de marcas, que está ordenada por largo: en «BULBO ... PEUGEOT 405 -
-    CITROEN ZX» ganaba cualquiera de las dos según cómo hubiera quedado el orden del set, y eso
-    no es una decisión, es azar. Cuando la descripción nombra varios autos —el 19% de los
-    casos— lo correcto no es elegir uno: para eso está marcas_vehiculo_en()."""
-    tramos = marcas_vehiculo_en(descripcion)
-    if not tramos:
-        texto = separar_texto_pegado(str(descripcion)) if descripcion else ""
-        return (texto.strip() or None), None, None
-    marca, categoria, resto = tramos[0]
-    return categoria, marca, resto
 
 
 # Familias de repuestos. Gana la palabra clave MÁS LARGA que aparezca en la descripción, así
@@ -607,7 +609,14 @@ def es_nombre_de_modelo(token):
 
     El precio de la regla: se pierden nombres de camión tipo «VW 11.000» cuando la lista los
     escribe pegados («VW11000EB»). Vale la pena: esto arma un desplegable para elegir, no una
-    coincidencia de códigos, y de 5.670 «modelos» detectados 2.655 eran basura."""
+    coincidencia de códigos, y de 5.670 «modelos» detectados 2.655 eran basura.
+
+    Se probó además exigir que alterne poco entre letras y números —la idea era sacar
+    'P5TG01', que es un número de parte y quedaba cargado como si fuera un modelo de Honda—.
+    Se descartó con el dato a la vista: esa regla se lleva puestas las motorizaciones, y las
+    motorizaciones SON el dato más preciso que trae una descripción. En el catálogo real
+    'K9K' está en 109 descripciones, 'C20NE' en 70 y 'DV6CTD' en 10, y saber que una pieza va
+    a un K9K vale más que saber que va a un Clio. Costaba 573 modelos para ganar uno."""
     return sum(ch.isdigit() for ch in token) <= 3
 
 
