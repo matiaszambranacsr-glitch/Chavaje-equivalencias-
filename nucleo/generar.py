@@ -98,15 +98,16 @@ from .errores import anotar_error
 from .codigos import normalizar_texto, sanitizar
 ''', ["MARCAS_VEHICULO", "ALIAS_MARCA_VEHICULO", "_escrituras_por_marca",
       "ESCRITURAS_DE_MARCA", "_RE_MARCAS_VEHICULO", "marcas_vehiculo_en",
-      "_MARCAS_RIESGOSAS", "MARCAS_PARA_DESPEGAR", "_RE_PEGADO_MAYUS", "_RE_REF_PEGADO",
+      "MARCAS_DE_REPUESTO", "_MARCAS_RIESGOSAS", "_SIGLAS_PEGAJOSAS", "MARCAS_PARA_DESPEGAR",
+      "_RE_PEGADO_MAYUS", "_RE_REF_PEGADO",
       "_RE_MARCAS_PEGADAS", "_RE_ESPACIOS", "_MARCAS_CORTAS_PEGADAS",
       "_RE_MARCA_CORTA_TRAS_NUMERO", "_RE_MODELO_CON_CILINDRADA",
       "separar_texto_pegado",
       "FAMILIAS_REPUESTO", "_normalizar_desc", "clasificar_repuesto",
-      "_RE_ES_KIT", "familia_para_comparar", "es_un_kit",
+      "_RE_ES_KIT", "_RE_KIT_POR_SUMA", "familia_para_comparar", "es_un_kit",
       "ABREVIATURAS_DE_PIEZA", "RELLENO_EN_NOMBRE_DE_PIEZA", "_nombre_de_la_pieza",
       "_parecido_nombre_pieza", "extraer_anios",
-      "MARCAS_DE_REPUESTO", "PALABRAS_DE_CONTEXTO", "PALABRAS_NO_MODELO",
+      "PALABRAS_DE_CONTEXTO", "PALABRAS_NO_MODELO",
       "es_nombre_de_modelo",
       "_RE_PIEZA_POR_MEDIDA", "medidas_desde_descripcion"])
 

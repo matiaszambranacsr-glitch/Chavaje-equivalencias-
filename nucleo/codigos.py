@@ -461,6 +461,21 @@ def extraer_codigos_de_texto(texto, minimo=6, codigo_propio=None, codigos_conoci
         # LISTAS DE MODELOS pegadas: A3A4A6, 206306307. Salen de "AUDI A3-A4-A6" y son el
         # equivalente de los rangos de años, con el mismo daño.
         re.compile(r'^([A-Z]\d[-]?){3,}$'),
+        # MOTORIZACIONES CUMMINS y parientes: 4BTA3.9, 6BTA5.9, 6CTA8.3, 4BT3.9. Es
+        # «cantidad de cilindros + familia + litros», o sea el motor, y aparece en cualquier
+        # descripción que lo nombre. Le pega a 0 de los 46.644 códigos de proveedor del
+        # catálogo, así que no se pierde nada.
+        re.compile(r'^\d[A-Z]{2,4}\d[.,]?\d?$'),
+        # CAMIONES FORD: F14000, F4000, F12000, F1000, F16000. No es un código, es el modelo
+        # del camión, y hace el daño de siempre: el F14000 estaba cargado como código de
+        # fábrica uniendo un FILTRO DE COMBUSTIBLE con un CILINDRO MAESTRO, y el F4000 un
+        # filtro con un sensor de nivel. Aparecen en 148 y 123 descripciones.
+        # Se probó antes la regla general —descartar lo que aparece en muchas descripciones—
+        # y no sirve: los mejores puentes que tiene la base son las tablas de equivalencias de
+        # Bosch, donde un mismo número de arranque está en 84 descripciones. La forma sí los
+        # separa: «F» y de tres a cinco dígitos le pega a 0 códigos de proveedor y a los 8
+        # camiones que están cargados.
+        re.compile(r'^F\d{3,5}$'),
         # EL MODELO CON LA CILINDRADA PEGADA: CORSA1.4, AMAROK2.0, TRAFIC-1.6, PALIO1.4.
         # separar_texto_pegado() ya los despega, pero esto es el cinturón de seguridad: la
         # descripción puede llegar acá sin pasar por ahí, y un código de fábrica NUNCA tiene

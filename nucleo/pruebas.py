@@ -574,6 +574,62 @@ def probar_marca_corta_pegada_a_un_numero():
           "«TOYOYA» es un error de tipeo, no la marca TOY pegada")
 
 
+def probar_marcas_de_repuesto_pegadas_al_codigo():
+    """«BOSCHF1003», «MPFIMARELLIF1011»: la marca del repuesto pegada al código.
+
+    Sale de las listas y se lleva puesto el código: esos dos están cargados en la base como si
+    fueran códigos de fábrica de Bosch y de Marelli. Se despegan igual que las marcas de auto.
+    Medido sobre las 46.644 descripciones de proveedor: saca 35 códigos inventados y RECUPERA
+    6 que estaban enterrados adentro del nombre de la marca."""
+    for pegado, esperado in (
+            ("MULTIPUNTO BOSCHF1003", "MULTIPUNTO BOSCH F1003"),
+            ("MULTIPUNTO - MPFIMARELLIF1011", "MULTIPUNTO - MPFI MARELLI F1011"),
+            ("MAGNETI MARELLIFORDF1101", "MAGNETI MARELLI FORD F1101")):
+        igual(vehiculos.separar_texto_pegado(pegado), esperado, f"«{pegado}» se despega")
+    # Y entonces deja de entrar como código de fábrica.
+    for texto in ("KIT FILTROS Y O RINGS 11044PUNTAS INFERIORES MULTIPUNTO BOSCHF1003",
+                  "KIT FILTROS 11030PUNTA INFERIORMULTIPUNTO - MPFIMARELLIF1011"):
+        igual(codigos.extraer_codigos_de_texto(vehiculos.separar_texto_pegado(texto)), [],
+              f"«{texto[:40]}» no tiene ningún código de fábrica adentro")
+
+
+def probar_camiones_y_motorizaciones_no_son_codigos():
+    """«F14000» es el camión y «6CTA8.3» el motor Cummins, no códigos de fábrica.
+
+    El F14000 estaba cargado como código de fábrica uniendo un FILTRO DE COMBUSTIBLE con un
+    CILINDRO MAESTRO, y el F4000 un filtro con un sensor de nivel. Aparecen en 148 y 123
+    descripciones del catálogo real."""
+    for texto in ("Despiece AGRALE O RING VIBRATORIO CHF AUTOELEVADOR F11000 F14000",
+                  "Despiece CUMMINS BUS CAMION AGRICOLA C F14000 6CTA8.3",
+                  "FILTRO COMB M.BENZ - FORD F100/F14000/F4000-CASE"):
+        igual(codigos.extraer_codigos_de_texto(texto), [],
+              f"«{texto[:44]}» son camiones y motores, no códigos")
+    # Y los códigos de verdad que están al lado tienen que seguir saliendo.
+    for texto, esperado in (
+            ("Despiece FORD BOMBA ACEITE SERIE B F100 3931350 5264569 4BTA3.9", "3931350"),
+            ("Despiece CHEVROLET VECTRA ZAFIRA ASTRA F14000 3910824", "3910824"),
+            ("Despiece CUMMINS 3914388 TUBO DRENAJE ACEITE SERIE B F100", "3914388")):
+        cierto(esperado in codigos.extraer_codigos_de_texto(texto),
+               f"«{esperado}» sí es un código y tiene que salir de «{texto[:40]}»")
+
+
+def probar_kit_que_trae_la_pieza():
+    """Uno viene adentro del otro: eso NO es una equivalencia, y hay que saber decirlo.
+
+    La bujía está adentro del «KIT CAB Y BUJ», la bomba de agua adentro de «DISTRIBUCION
+    C/BOMBA». Los rubros no coinciden —una bujía no es un juego de cables— y aun así «rubros
+    distintos» no describe lo que pasa: la relación es de verdad, solo que no es de
+    intercambio. Sobre los 208 vínculos cargados con rubros distintos, 126 son de esta clase."""
+    # Un kit que no dice la palabra «kit»: nombra los dos códigos que trae, sumados.
+    cierto(vehiculos.es_un_kit("DISTRIBUCION C/BOMBA (LKTBN336 + LWPN007 )Citroen Berlingo"),
+           "«(COD1 + COD2)» es un kit aunque no diga la palabra")
+    # Lo que NO puede confundirse: así lista Illinois los códigos de fábrica de UNA pieza.
+    cierto(not vehiculos.es_un_kit("Junta Tapa de Cilindros CUMMINS NT310 (3036100/3411461)"),
+           "«(COD1/COD2)» son dos códigos de fábrica de la misma pieza, no un kit")
+    cierto(vehiculos.es_un_kit("KIT CAB Y BUJ (LEIHTT66SC/LSPFR6F11) FIAT PALIO"),
+           "y el que sí dice KIT sigue siendo kit")
+
+
 def probar_vocabulario_de_pieza():
     """Las tres listas de palabras tienen que decir cada una lo suyo.
 
@@ -731,6 +787,9 @@ def main():
                    probar_codigo_conocido_gana_a_la_forma,
                    probar_todos_los_autos_de_una_descripcion,
                    probar_marca_corta_pegada_a_un_numero,
+                   probar_marcas_de_repuesto_pegadas_al_codigo,
+                   probar_camiones_y_motorizaciones_no_son_codigos,
+                   probar_kit_que_trae_la_pieza,
                    probar_vocabulario_de_pieza,
                    probar_abreviaturas_de_las_listas_reales,
                    probar_busqueda_por_codigo_de_barras,

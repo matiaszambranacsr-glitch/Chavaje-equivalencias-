@@ -129,6 +129,23 @@ def marcas_vehiculo_en(descripcion):
     return salida
 
 
+# Marcas de REPUESTO. No son modelos de auto, y tampoco dicen qué pieza es: dos proveedores
+# distintos venden repuestos Bosch de cosas completamente distintas.
+# Estaban saliendo primeras en el desplegable «Modelo / motor»: DELCO encabezaba la lista de
+# Ford con 951 apariciones y NIPPONDENSO la de Toyota con 476, antes que COROLLA. El filtro de
+# «aparece sobre todo en esta marca» no las agarra porque un proveedor sí las nombra casi
+# siempre junto al mismo auto.
+# Va en su propio conjunto porque firma_de_producto() necesita sacar ESTAS de lo que dice qué
+# pieza es, y NO las de abajo — ver el comentario del núcleo.
+MARCAS_DE_REPUESTO = {
+    "BOSCH", "VALEO", "DELCO", "DENSO", "NIPPONDENSO", "MAGNETI", "MAGNETTI", "MARELLI",
+    "HITACHI", "LUCAS", "SIEMENS", "DELPHI", "JAEGER", "MASSER", "CAUPLAS", "WEBER", "SOLEX",
+    "SKF", "NGK", "MANN", "VITRON", "TAILLOT", "PAIA", "WAHLER", "GATES", "SACHS", "MONROE",
+    "FRAM", "BERU", "FACET", "PIERBURG", "MAHLE", "ELRING", "REINZ", "AJUSA", "CORTECO",
+    "PAYEN", "TRW", "FERODO", "BREMBO", "NAKATA", "ILUMA", "DPB", "FISPA", "CBOSCH",
+}
+
+
 # Marcas que se usan para despegar descripciones. Se dejan solo las de 5 letras o más y se
 # excluyen las que además son palabras comunes del rubro: separar por "MAN" partiría MANGUERA
 # en "MAN GUERA", y por "RAM" partiría RAMAL. Con las largas el riesgo desaparece y son
@@ -136,7 +153,16 @@ def marcas_vehiculo_en(descripcion):
 _MARCAS_RIESGOSAS = {"BETA", "CASE", "HINO", "SEAT", "LADA", "TATA", "MINI", "HERO", "TVS"}
 
 
-MARCAS_PARA_DESPEGAR = [m for m in MARCAS_VEHICULO
+# Las marcas de REPUESTO se despegan igual que las de auto. Las listas las pegan al código y
+# eso se lleva puesto el código: «...MULTIPUNTO BOSCHF1003» daba el código de fábrica
+# 'BOSCHF1003', y «MPFIMARELLIF1011» daba 'MPFIMARELLIF1011'. Los dos están cargados en la
+# base como si fueran códigos de Bosch y de Marelli.
+# MPFI, MPI y TBI no son marcas sino el tipo de inyección, pero se pegan igual y hacen el
+# mismo daño, así que van en la misma bolsa.
+_SIGLAS_PEGAJOSAS = {"MPFI", "TBI", "SPI", "GDI", "CRDI"}
+
+
+MARCAS_PARA_DESPEGAR = [m for m in (set(MARCAS_VEHICULO) | MARCAS_DE_REPUESTO | _SIGLAS_PEGAJOSAS)
                         if len(m) >= 4 and m not in _MARCAS_RIESGOSAS and " " not in m]
 
 
@@ -404,6 +430,20 @@ def clasificar_repuesto(descripcion):
 _RE_ES_KIT = re.compile(r'\b(KIT|KITS|JUEGO|JUEGOS|JGO|JGOS|COMBO|SET)\b')
 
 
+# Un kit que no dice «kit»: nombra entre paréntesis los DOS códigos que trae, sumados.
+# «DISTRIBUCION C/BOMBA (LKTBN336 + LWPN007)» es el kit de distribución con la bomba de agua
+# adentro, y sin esto quedaba como un producto suelto — con la consecuencia de que el vínculo
+# entre la bomba y el kit aparecía en la cola como una equivalencia mal hecha («rubros
+# distintos: Distribución y Refrigeración»), cuando de equivalencia no tiene nada: uno viene
+# adentro del otro.
+# Se pide el PARÉNTESIS y el MÁS, las dos cosas. Con la barra en lugar del más se rompe: así
+# es como Illinois lista los códigos de fábrica de UNA sola pieza —«Junta Tapa de Cilindros
+# CUMMINS NT310 (3036100/3411461)»— y serían 747 productos marcados como kit sin serlo.
+# Medido: con el paréntesis y el más son 12 descripciones y las 12 son kits de verdad.
+_RE_KIT_POR_SUMA = re.compile(
+    r'\(\s*[A-Z0-9][A-Z0-9.\-]{4,}\s*\+\s*[A-Z0-9][A-Z0-9.\-]{4,}\s*\)', re.IGNORECASE)
+
+
 def familia_para_comparar(descripcion):
     """La familia de la pieza, pero «Sin clasificar» cuando la descripción es un KIT de varias.
 
@@ -434,8 +474,14 @@ def familia_para_comparar(descripcion):
 
 
 def es_un_kit(descripcion):
-    """¿La descripción dice que esto es un kit, un juego o un combo?"""
-    return bool(_RE_ES_KIT.search(_normalizar_desc(descripcion)))
+    """¿La descripción dice que esto es un kit, un juego o un combo?
+
+    Por la palabra —KIT, JUEGO, JGO, COMBO, SET— o porque nombra entre paréntesis los dos
+    códigos que trae sumados, que es como escribe los suyos uno de los proveedores. Ver
+    _RE_KIT_POR_SUMA."""
+    if _RE_ES_KIT.search(_normalizar_desc(descripcion)):
+        return True
+    return bool(descripcion and _RE_KIT_POR_SUMA.search(str(descripcion)))
 
 
 # Cómo abrevian los proveedores el nombre de la pieza. No están inventadas: salieron de contar
@@ -548,23 +594,6 @@ def extraer_anios(descripcion):
     if m:
         return int(m.group(1)), int(m.group(1))
     return None, None
-
-
-# Marcas de REPUESTO. No son modelos de auto, y tampoco dicen qué pieza es: dos proveedores
-# distintos venden repuestos Bosch de cosas completamente distintas.
-# Estaban saliendo primeras en el desplegable «Modelo / motor»: DELCO encabezaba la lista de
-# Ford con 951 apariciones y NIPPONDENSO la de Toyota con 476, antes que COROLLA. El filtro de
-# «aparece sobre todo en esta marca» no las agarra porque un proveedor sí las nombra casi
-# siempre junto al mismo auto.
-# Va en su propio conjunto porque firma_de_producto() necesita sacar ESTAS de lo que dice qué
-# pieza es, y NO las de abajo — ver el comentario del núcleo.
-MARCAS_DE_REPUESTO = {
-    "BOSCH", "VALEO", "DELCO", "DENSO", "NIPPONDENSO", "MAGNETI", "MAGNETTI", "MARELLI",
-    "HITACHI", "LUCAS", "SIEMENS", "DELPHI", "JAEGER", "MASSER", "CAUPLAS", "WEBER", "SOLEX",
-    "SKF", "NGK", "MANN", "VITRON", "TAILLOT", "PAIA", "WAHLER", "GATES", "SACHS", "MONROE",
-    "FRAM", "BERU", "FACET", "PIERBURG", "MAHLE", "ELRING", "REINZ", "AJUSA", "CORTECO",
-    "PAYEN", "TRW", "FERODO", "BREMBO", "NAKATA", "ILUMA", "DPB", "FISPA", "CBOSCH",
-}
 
 
 # De PALABRAS_NO_MODELO, las que no nombran una PIEZA sino el CONTEXTO: qué tipo de vehículo

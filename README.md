@@ -254,6 +254,50 @@ Medido sobre las listas reales de Illinois (6.900) y Taranto (8.708), las dos de
 las sugerencias pasan de 59 a 1.411, y el error sistemático de proponer una junta de tapa de
 válvulas contra una de tapa de cilindros queda en 13 de 1.411 (0,9%).
 
+## Lo que se pega al código, y lo que no es un código
+
+Tres cosas distintas que terminaban todas en la columna de códigos de fábrica:
+
+- **La marca pegada al número.** `BOSCHF1003`, `MPFIMARELLIF1011`, `MAGNETI MARELLIFORDF1101`.
+  `MARCAS_PARA_DESPEGAR` ya despegaba las marcas de AUTO; ahora también las de **repuesto**
+  (`MARCAS_DE_REPUESTO`) y las siglas de inyección que se pegan igual (`MPFI`, `TBI`, `SPI`).
+- **El camión.** `F14000`, `F4000`, `F12000`. El F14000 estaba uniendo un **filtro de
+  combustible** con un **cilindro maestro**, y el F4000 un filtro con un sensor de nivel.
+- **La motorización.** `4BTA3.9`, `6BTA5.9`, `6CTA8.3` — cilindros + familia + litros.
+
+Para los dos últimos se probó primero la regla general —descartar lo que aparece en muchas
+descripciones— y **no sirve**: los mejores puentes que tiene la base son las tablas de Bosch,
+donde un mismo número de arranque está en 84 descripciones. La forma sí los separa: `^F\d{3,5}$`
+y `^\d[A-Z]{2,4}\d[.,]?\d?$` le pegan a **0** de los 46.644 códigos de proveedor.
+
+Medido sobre las 46.644 descripciones: saca **35** códigos inventados y **recupera 6** que
+estaban enterrados adentro del nombre de la marca (`0250202025`, `K20178X30XSA`, `4679625`).
+
+## Uno adentro del otro no es una equivalencia
+
+La bujía está adentro del «KIT CAB Y BUJ», la bomba de agua adentro de «DISTRIBUCION C/BOMBA»,
+el filtro de la bomba de nafta cita el mismo número de Bosch que la bomba. Los rubros no
+coinciden y el vínculo terminaba en la pila roja como si fuera un error.
+
+No lo es: la relación es **de verdad**, solo que no es de intercambio — no se puede vender una
+en lugar de la otra. Sobre los 208 vínculos cargados con rubros distintos, **126 son de esta
+clase**. `_uno_trae_al_otro()` lo dice con todas las letras, y el buscador ofrece el kit igual.
+
+Tres detalles que costaron:
+
+- **El código con la marca pegada atrás.** El proveedor se llama `LSPFR6F11LUCAS` a sí mismo y
+  en el kit escribe `LSPFR6F11`. Buscando el código completo el kit no aparecía **nunca** —son
+  2.245 códigos así—. Buscando las dos formas, las relaciones kit→pieza pasan de **59 a 234**.
+- **Un kit que no dice «kit».** `DISTRIBUCION C/BOMBA (LKTBN336 + LWPN007)`. Se pide el
+  paréntesis **y** el más: con la barra en lugar del más se rompe, porque así lista Illinois
+  los códigos de fábrica de UNA pieza (`(3036100/3411461)`) y serían 747 falsos kits.
+- **Sin tocar la base.** Preguntarlo con `kits_que_lo_traen()` cuesta un LIKE sobre 70.888
+  descripciones por par: revisar una tanda pasaba de 1,4 a **15,9 s**. Con los dos textos y
+  nada más: 2,7 s.
+
+Y hay una consecuencia que no se ve: 79 de esos pares estaban cayendo en «sin alarmas», o sea
+que el botón de aprobar en bloque los cargaba como equivalencias.
+
 ## Un número de catálogo no es un código de fábrica
 
 La búsqueda salta de una marca a otra cuando dos productos tienen **el mismo número**. Es el

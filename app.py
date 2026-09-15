@@ -2762,6 +2762,21 @@ def extraer_codigos_de_texto(texto, minimo=6, codigo_propio=None, codigos_conoci
         # LISTAS DE MODELOS pegadas: A3A4A6, 206306307. Salen de "AUDI A3-A4-A6" y son el
         # equivalente de los rangos de años, con el mismo daño.
         re.compile(r'^([A-Z]\d[-]?){3,}$'),
+        # MOTORIZACIONES CUMMINS y parientes: 4BTA3.9, 6BTA5.9, 6CTA8.3, 4BT3.9. Es
+        # «cantidad de cilindros + familia + litros», o sea el motor, y aparece en cualquier
+        # descripción que lo nombre. Le pega a 0 de los 46.644 códigos de proveedor del
+        # catálogo, así que no se pierde nada.
+        re.compile(r'^\d[A-Z]{2,4}\d[.,]?\d?$'),
+        # CAMIONES FORD: F14000, F4000, F12000, F1000, F16000. No es un código, es el modelo
+        # del camión, y hace el daño de siempre: el F14000 estaba cargado como código de
+        # fábrica uniendo un FILTRO DE COMBUSTIBLE con un CILINDRO MAESTRO, y el F4000 un
+        # filtro con un sensor de nivel. Aparecen en 148 y 123 descripciones.
+        # Se probó antes la regla general —descartar lo que aparece en muchas descripciones—
+        # y no sirve: los mejores puentes que tiene la base son las tablas de equivalencias de
+        # Bosch, donde un mismo número de arranque está en 84 descripciones. La forma sí los
+        # separa: «F» y de tres a cinco dígitos le pega a 0 códigos de proveedor y a los 8
+        # camiones que están cargados.
+        re.compile(r'^F\d{3,5}$'),
         # EL MODELO CON LA CILINDRADA PEGADA: CORSA1.4, AMAROK2.0, TRAFIC-1.6, PALIO1.4.
         # separar_texto_pegado() ya los despega, pero esto es el cinturón de seguridad: la
         # descripción puede llegar acá sin pasar por ahí, y un código de fábrica NUNCA tiene
@@ -5030,7 +5045,7 @@ def evaluar_equivalencia(desc_a, desc_b, medidas_a=None, medidas_b=None,
                          precio_a=None, precio_b=None, veces_confirmada=1,
                          respaldo_fabricante=False, marca_a="", marca_b="", patrones=None,
                          vendido_como_reemplazo=0, codigo_puente=None,
-                         productos_del_puente=0, escalas=None):
+                         productos_del_puente=0, escalas=None, trae_al_otro=""):
     """Pesa toda la evidencia disponible sobre un vínculo. Devuelve (puntaje 0-100, señales).
 
     La diferencia con lo que había antes: las alarmas eran una lista plana, así que 397 vínculos
@@ -5095,12 +5110,28 @@ def evaluar_equivalencia(desc_a, desc_b, medidas_a=None, medidas_b=None,
             puntaje += 30
             senales.append(("bien", f"📐 {detalle}"))
 
+    # UNO VIENE ADENTRO DEL OTRO ('trae_al_otro' lo calcula quien llama, que es el que tiene
+    # los códigos a mano). Va antes que el rubro, porque explica la mitad de los casos en
+    # que los rubros no coinciden y NO es un error: la bujía está adentro del «KIT CAB Y BUJ»,
+    # la bomba de agua adentro de «DISTRIBUCION C/BOMBA», el filtro de la bomba de nafta cita
+    # el mismo número de Bosch que la bomba. Los rubros son distintos porque las piezas son
+    # distintas — y aun así la relación es de verdad, solo que no es una equivalencia: no se
+    # puede vender una en lugar de la otra.
+    # Sobre los 208 vínculos cargados con rubros distintos, 126 son de esta clase.
+    # Decirlo cambia qué hace el que revisa: en vez de mirar uno por uno buscando el error,
+    # descarta el grupo entero sabiendo que el buscador igual se los muestra como kit.
+    kit_de = trae_al_otro
+    if kit_de:
+        puntaje -= 40
+        senales.append(("mal", f"📦 No son equivalentes: {kit_de}. El buscador te lo ofrece "
+                                "igual, como kit, cuando buscás la pieza suelta"))
+
     # Rubro: es la señal más barata y una de las que más basura caza. Si las descripciones
     # hablan de piezas de familias distintas, el vínculo no puede ser correcto.
     fam_a = familia_para_comparar(desc_a) if desc_a else "Sin clasificar"
     fam_b = familia_para_comparar(desc_b) if desc_b else "Sin clasificar"
     if fam_a != "Sin clasificar" and fam_b != "Sin clasificar":
-        if fam_a != fam_b:
+        if fam_a != fam_b and not kit_de:
             puntaje -= 40
             senales.append(("mal", f"🧩 Son de rubros distintos: «{fam_a}» y «{fam_b}»"))
         else:
@@ -5281,6 +5312,11 @@ def analizar_lote_pendiente(lote, limite=400, desde=0):
             vendido_como_reemplazo=ventas_confirman.get((min(f["a"], f["b"]),
                                                           max(f["a"], f["b"])), 0),
             escalas=escalas_precio,
+            # Solo se consulta cuando uno de los dos DICE que es un kit, que es una prueba de
+            # texto y cuesta nada. Sin esa guarda serían 1.000 LIKE sobre las 70.888
+            # descripciones por cada tanda que se revisa.
+            trae_al_otro=_uno_trae_al_otro(f.get("desc_a"), f.get("cod_a"),
+                                            f.get("desc_b"), f.get("cod_b")),
         )
         for tipo, texto in senales:
             if tipo == "mal" and texto not in alarmas:
@@ -9118,8 +9154,27 @@ def clasificar_repuesto(descripcion):
 
 _RE_ES_KIT = re.compile(r'\b(KIT|KITS|JUEGO|JUEGOS|JGO|JGOS|COMBO|SET)\b')
 
+# Un kit que no dice «kit»: nombra entre paréntesis los DOS códigos que trae, sumados.
+# «DISTRIBUCION C/BOMBA (LKTBN336 + LWPN007)» es el kit de distribución con la bomba de agua
+# adentro, y sin esto quedaba como un producto suelto — con la consecuencia de que el vínculo
+# entre la bomba y el kit aparecía en la cola como una equivalencia mal hecha («rubros
+# distintos: Distribución y Refrigeración»), cuando de equivalencia no tiene nada: uno viene
+# adentro del otro.
+# Se pide el PARÉNTESIS y el MÁS, las dos cosas. Con la barra en lugar del más se rompe: así
+# es como Illinois lista los códigos de fábrica de UNA sola pieza —«Junta Tapa de Cilindros
+# CUMMINS NT310 (3036100/3411461)»— y serían 747 productos marcados como kit sin serlo.
+# Medido: con el paréntesis y el más son 12 descripciones y las 12 son kits de verdad.
+_RE_KIT_POR_SUMA = re.compile(
+    r'\(\s*[A-Z0-9][A-Z0-9.\-]{4,}\s*\+\s*[A-Z0-9][A-Z0-9.\-]{4,}\s*\)', re.IGNORECASE)
+
 # Un código más corto que esto adentro de un texto engancha con cualquier cosa por casualidad.
 LARGO_MINIMO_CODIGO_EN_KIT = 6
+
+# Marcas que los proveedores pegan atrás de su propio número: «LSPFR6F11LUCAS», «26001FISPA».
+# Se calculan una vez y no se leen de la base: son el nombre de la marca del producto, y la
+# consulta que las necesita corre una vez por búsqueda.
+_MARCAS_QUE_SE_PEGAN_AL_CODIGO = ("LUCAS", "FISPA", "BOSCH", "MARELLI", "MAGNETI", "VALEO",
+                                  "DELPHI", "NGK", "GATES", "SKF", "BERU", "FACET")
 
 # Para prefiltrar en SQL. Es a propósito más flojo que _RE_ES_KIT —acá «KIT» engancha también
 # dentro de «KITS»— porque después se confirma con es_un_kit(), que sí mira la palabra entera.
@@ -9127,8 +9182,14 @@ PALABRAS_DE_KIT = ("KIT", "JUEGO", "JGO", "COMBO", "SET")
 
 
 def es_un_kit(descripcion):
-    """¿La descripción dice que esto es un kit, un juego o un combo?"""
-    return bool(_RE_ES_KIT.search(_normalizar_desc(descripcion)))
+    """¿La descripción dice que esto es un kit, un juego o un combo?
+
+    Por la palabra —KIT, JUEGO, JGO, COMBO, SET— o porque nombra entre paréntesis los dos
+    códigos que trae sumados, que es como escribe los suyos uno de los proveedores. Ver
+    _RE_KIT_POR_SUMA."""
+    if _RE_ES_KIT.search(_normalizar_desc(descripcion)):
+        return True
+    return bool(descripcion and _RE_KIT_POR_SUMA.search(str(descripcion)))
 
 
 def kits_que_lo_traen(producto_id, limite=8):
@@ -9156,6 +9217,19 @@ def kits_que_lo_traen(producto_id, limite=8):
     mia = (fila["descripcion"] or "").strip()
     if len(re.sub(r'[^A-Za-z0-9]', '', codigo)) < LARGO_MINIMO_CODIGO_EN_KIT:
         return []
+    # EL CÓDIGO CON LA MARCA PEGADA ATRÁS. Varios proveedores le agregan su marca al número:
+    # «LSPFR6F11LUCAS», «26001FISPA». Pero cuando arman el kit escriben el número PELADO:
+    # «KIT CAB Y BUJ (LEIHTT66SC/LSPFR6F11)». Buscando el código completo el kit no aparecía
+    # nunca, que es justo el caso más común — son 2.245 códigos así en el catálogo (1.366 con
+    # LUCAS y 879 con FISPA).
+    # Se buscan las dos formas. El pedazo que queda tiene que seguir siendo un código: al menos
+    # los mismos seis caracteres que se le piden a cualquiera.
+    formas = [normalizar_texto(codigo)]
+    _limpio = re.sub(r'[^A-Za-z0-9]', '', codigo).upper()
+    for _marca in _MARCAS_QUE_SE_PEGAN_AL_CODIGO:
+        if _limpio.endswith(_marca) and len(_limpio) - len(_marca) >= LARGO_MINIMO_CODIGO_EN_KIT:
+            formas.append(_limpio[:-len(_marca)])
+            break
     # La condición de «es un kit» va en el SQL y no solo en Python, y sin LIMIT: con el tope
     # puesto sobre el LIKE del código, un código que aparece en muchas descripciones llenaba el
     # corte de filas que no eran kits y los kits de verdad quedaban afuera. Después se vuelve a
@@ -9163,11 +9237,12 @@ def kits_que_lo_traen(producto_id, limite=8):
     _o_kit = " OR ".join(["p.busqueda LIKE ?"] * len(PALABRAS_DE_KIT))
     # El código puede traer un «_» —hay dos en el catálogo real— y ahí el LIKE engancharía
     # cualquier carácter en esa posición, inventando kits que no lo traen.
+    _o_codigo = " OR ".join(["p.busqueda LIKE ? ESCAPE '\\'"] * len(formas))
     c.execute(f"""SELECT p.id AS "ID", p.codigo_raw AS "Codigo", p.descripcion AS "Descripcion",
                          m.nombre AS "Marca", p.precio AS "Precio", p.stock AS "Stock"
                   FROM productos p JOIN marcas m ON m.id = p.marca_id
-                  WHERE p.id <> ? AND p.busqueda LIKE ? ESCAPE '\\' AND ({_o_kit})""",
-              [producto_id, f"%{como_texto_en_like(normalizar_texto(codigo))}%"]
+                  WHERE p.id <> ? AND ({_o_codigo}) AND ({_o_kit})""",
+              [producto_id] + [f"%{como_texto_en_like(f)}%" for f in formas]
               + [f"%{k}%" for k in PALABRAS_DE_KIT])
     # Un mismo kit está cargado varias veces con códigos distintos —el del proveedor, el de
     # fábrica, el del cable— y las filas comparten descripción. En el mostrador eso es UN kit:
@@ -10009,6 +10084,38 @@ def fuerza_de_la_coincidencia(a, b):
     return (apl, cil, pieza, autos)
 
 
+def _uno_trae_al_otro(desc_a, cod_a, desc_b, cod_b):
+    """¿Uno de los dos es un kit que nombra al otro adentro? Devuelve el texto de la relación.
+
+    Es la misma pregunta que contesta kits_que_lo_traen() para el mostrador, pero acá hace
+    falta para lo contrario: para NO tratar la relación como una equivalencia. Que la bujía
+    esté adentro del «KIT CAB Y BUJ» es cierto y útil, y al mismo tiempo quiere decir que no
+    son intercambiables: no se puede vender una en lugar de la otra.
+
+    Se contesta con los dos textos y nada más — sin tocar la base. Hacerlo con
+    kits_que_lo_traen(), que es lo natural, cuesta un LIKE sobre las 70.888 descripciones por
+    cada par: la revisión de una tanda de 1.000 vínculos pasaba de 1,4 a 15,9 segundos.
+
+    El código se busca también SIN la marca pegada atrás, por lo mismo que en
+    kits_que_lo_traen(): el proveedor se llama «LSPFR6F11LUCAS» a sí mismo y en el kit escribe
+    «LSPFR6F11»."""
+    for kit_desc, pieza_cod in ((desc_a, cod_b), (desc_b, cod_a)):
+        if not kit_desc or not pieza_cod or not es_un_kit(kit_desc):
+            continue
+        texto = normalizar_texto(kit_desc)
+        limpio = sanitizar(pieza_cod)
+        if len(limpio) < LARGO_MINIMO_CODIGO_EN_KIT:
+            continue
+        formas = [limpio]
+        for marca in _MARCAS_QUE_SE_PEGAN_AL_CODIGO:
+            if limpio.endswith(marca) and len(limpio) - len(marca) >= LARGO_MINIMO_CODIGO_EN_KIT:
+                formas.append(limpio[:-len(marca)])
+                break
+        if any(f in texto for f in formas):
+            return f"«{str(kit_desc)[:40]}» lo trae adentro"
+    return ""
+
+
 def evidencia_cruzada(id_a, id_b, cuenta_palabras=None, total_descripciones=None):
     """Corre TODOS los métodos sobre un mismo par y cuenta cuántos coinciden.
 
@@ -10058,8 +10165,17 @@ def evidencia_cruzada(id_a, id_b, cuenta_palabras=None, total_descripciones=None
     _cuenta, _total = cuenta_palabras, total_descripciones
     ok_desc, motivo_desc = firmas_compatibles(fa, fb, cuenta_palabras=_cuenta,
                                               total_descripciones=_total)
+    # Antes del rubro: ¿uno viene adentro del otro? Es cierto que los rubros no coinciden —una
+    # bujía no es un juego de cables— y aun así «rubros distintos» no describe lo que pasa. Ver
+    # _uno_trae_al_otro(): sobre los 208 vínculos con rubros distintos que hay cargados, 126
+    # son de esta clase.
+    _kit_de = _uno_trae_al_otro(pa.get("descripcion"), pa.get("codigo_raw"),
+                                 pb.get("descripcion"), pb.get("codigo_raw"))
     if ok_desc:
         a_favor.append(f"🔤 las descripciones concuerdan ({motivo_desc})")
+    elif _kit_de:
+        vetos.append(f"📦 no son equivalentes: {_kit_de}. El buscador te lo ofrece igual, "
+                      "como kit, cuando buscás la pieza suelta")
     elif fa and fb and fa["familia"] != "Sin clasificar" and fb["familia"] != "Sin clasificar":
         if fa["familia"] != fb["familia"]:
             vetos.append(f"🧩 rubros distintos: «{fa['familia']}» y «{fb['familia']}»")
@@ -11045,7 +11161,14 @@ def esquemas_de_vehiculo(marca_vehiculo):
 # en "MAN GUERA", y por "RAM" partiría RAMAL. Con las largas el riesgo desaparece y son
 # justamente las que aparecen pegadas en las listas (VOLKSWAGEN, CHEVROLET, MITSUBISHI...).
 _MARCAS_RIESGOSAS = {"BETA", "CASE", "HINO", "SEAT", "LADA", "TATA", "MINI", "HERO", "TVS"}
-MARCAS_PARA_DESPEGAR = [m for m in MARCAS_VEHICULO
+# Las marcas de REPUESTO se despegan igual que las de auto. Las listas las pegan al código y
+# eso se lleva puesto el código: «...MULTIPUNTO BOSCHF1003» daba el código de fábrica
+# 'BOSCHF1003', y «MPFIMARELLIF1011» daba 'MPFIMARELLIF1011'. Los dos están cargados en la
+# base como si fueran códigos de Bosch y de Marelli.
+# MPFI, MPI y TBI no son marcas sino el tipo de inyección, pero se pegan igual y hacen el
+# mismo daño, así que van en la misma bolsa.
+_SIGLAS_PEGAJOSAS = {"MPFI", "TBI", "SPI", "GDI", "CRDI"}
+MARCAS_PARA_DESPEGAR = [m for m in (set(MARCAS_VEHICULO) | MARCAS_DE_REPUESTO | _SIGLAS_PEGAJOSAS)
                         if len(m) >= 4 and m not in _MARCAS_RIESGOSAS and " " not in m]
 
 # Las expresiones se arman UNA vez, al arrancar. Antes se compilaban las 164 de nuevo en cada
