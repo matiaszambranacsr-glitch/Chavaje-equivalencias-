@@ -118,6 +118,23 @@ Tres cosas lo cubren ahora, y conviene no aflojar ninguna:
 La cuenta que vale no es cuántas equivalencias tiene una lista, es **a cuántos productos de
 otro proveedor llega**.
 
+## El modelo con la cilindrada pegada
+
+`CORSA1.4`, `AMAROK2.0`, `HILLUX2.4`, `Siena1.0`. Sale de la exportación del proveedor, que se
+come el espacio, y hace daño dos veces: el modelo deja de ser reconocible como modelo, y
+—peor— eso tiene forma de código, así que entraba como código de fábrica. En la base real el
+`CORSA1.4` llegó a colgar un tubo, una correa multicanal y un sensor MAP: tres repuestos que no
+tienen nada que ver, hermanados porque las tres descripciones nombran el mismo auto.
+
+Se arregla en los dos lados: `separar_texto_pegado()` los despega, y
+`extraer_codigos_de_texto()` los rechaza aunque lleguen pegados (va en `formas_solo_texto`, o
+sea que ni un «REF ORIG» adelante los rescata).
+
+**Se piden cuatro letras antes del número, y ahí está todo el cuidado.** Con menos se rompen
+las designaciones de zócalo y las medidas, que tienen la misma forma con una o dos letras:
+`W2x4.6d`, `BX8.2d`, `SV8,5-8`, `M14X1.5X42`, `6mmx8mm x7,89mm`. Medido sobre las 53.255
+descripciones reales: separa 158 y no toca ninguna de esas.
+
 ## Las sugerencias por descripción: dos preguntas, no una
 
 Cuando ninguna de las dos listas trae el código de fábrica —el caso de Taranto, que no lo
@@ -169,6 +186,33 @@ Otras tres cosas que parecen detalles y no lo son:
 Medido sobre las listas reales de Illinois (6.900) y Taranto (8.708), las dos de juntas:
 las sugerencias pasan de 59 a 1.411, y el error sistemático de proponer una junta de tapa de
 válvulas contra una de tapa de cilindros queda en 13 de 1.411 (0,9%).
+
+## Un número de catálogo no es un código de fábrica
+
+La búsqueda salta de una marca a otra cuando dos productos tienen **el mismo número**. Es el
+atajo más productivo que tiene —el proveedor A pone `036115561G` en su columna OEM y el
+proveedor B lo usa como su propio código— y también el más fácil de arruinar.
+
+El corte está en la forma del código, y el dato lo decide. En la base real hay 542 códigos que
+aparecen en dos marcas o más, y son dos poblaciones que no se mezclan:
+
+    288 numéricos de 10 dígitos  ┐
+     36 numéricos de 8           ├─ códigos de fábrica: es el mismo repuesto
+     10 numéricos de 12          │
+    185 con letras               ┘
+     19 numéricos de 6 y 7       ─── casualidad: los 19, revisados uno por uno
+
+Los 19 son siempre el mismo choque: JL numera sus filtros de corrido y Taranto sus juntas
+también. El `310007` de JL es un prefiltro de Focus; el de Taranto, una junta de tapa de
+cilindros de un Ford MAX. Por eso el salto pide **8 dígitos** cuando el código es solo números
+(antes pedía 6), y sigue pidiendo 4 caracteres para cualquier código.
+
+Las dos filas con ese número **se siguen mostrando** —es el número que se escribió— pero
+`el_mismo_numero_en_dos_piezas()` avisa que no son la misma pieza. Ese aviso también se decide
+por la forma del código, no por la descripción: la primera versión comparaba los nombres de las
+piezas y marcaba 143 de los 542, porque el mismo repuesto se describe distinto en cada lista
+(`0280130039` es «BULBO DE TEMPERATURA DE AGUA» para uno y «SENSOR INYEC» para el otro). Con la
+forma del código marca 19 de 19, sin un solo falso.
 
 ## Cuando alguien vende el código, es un código
 

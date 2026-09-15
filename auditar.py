@@ -1388,6 +1388,44 @@ for _n in ast.walk(ARBOL):
                  "Guardar el fetch en una variable antes")
 
 
+# ============ 22. Una cuenta que en realidad es una muestra ============
+# Una función que se llama contar_algo() devuelve un número que la pantalla muestra como si
+# fuera EL número. Si adentro hay un LIMIT, no lo es: es lo que encontró en las primeras filas.
+# Pasó con contar_descripciones_pegadas(), que miraba 3.000 de 53.255 y decía «al menos 1.682»
+# cuando eran 9.324 — y si en esas 3.000 no había ninguna, la pantalla afirmaba «Ninguna
+# descripción con ese problema» con cincuenta mil filas sin mirar. Una cuenta parcial que se
+# presenta como total es peor que no tener la cuenta: hace tomar la decisión equivocada.
+for _n in ast.walk(ARBOL):
+    if not isinstance(_n, ast.FunctionDef):
+        continue
+    if not re.match(r'^_?(contar|cuantos|cuantas|faltan|total)_', _n.name):
+        continue
+    _cuerpo = "\n".join(LINEAS[_n.lineno - 1:_n.end_lineno])
+    if re.search(r'\bLIMIT\s+[?\d]', _cuerpo, re.I):
+        reportar("REVISAR", _n.lineno,
+                 f"'{_n.name}' devuelve una cuenta pero la consulta tiene LIMIT: lo que sale es "
+                 "una muestra, y la pantalla la va a mostrar como si fuera el total")
+
+
+# ============ 23. CREATE TRIGGER IF NOT EXISTS con el cuerpo armado en el código ============
+# El IF NOT EXISTS mira solo el NOMBRE. Si el cuerpo del trigger cambia, la base que ya lo tiene
+# se queda con la versión vieja para siempre y sin ningún error a la vista: los datos nuevos se
+# calculan con la fórmula de antes. Pasó al sumarle el código de barras a 'busqueda'.
+# La forma segura es DROP TRIGGER IF EXISTS + CREATE TRIGGER, que cuesta nada y siempre deja la
+# versión de este código.
+for _i, _linea in enumerate(LINEAS, 1):
+    if not re.search(r'CREATE\s+TRIGGER\s+IF\s+NOT\s+EXISTS', _linea, re.I):
+        continue
+    _nombre = re.search(r'CREATE\s+TRIGGER\s+IF\s+NOT\s+EXISTS\s+(\w+)', _linea, re.I)
+    _nombre = _nombre.group(1) if _nombre else "?"
+    _hay_drop = any(re.search(r'DROP\s+TRIGGER\s+IF\s+EXISTS\s+' + re.escape(_nombre), l, re.I)
+                    for l in LINEAS[max(0, _i - 12):_i])
+    if not _hay_drop:
+        reportar("REVISAR", _i,
+                 f"CREATE TRIGGER IF NOT EXISTS '{_nombre}' sin DROP antes: si alguna vez cambia "
+                 "el cuerpo, las bases que ya existen se quedan con la versión vieja en silencio")
+
+
 # ============ Resultado ============
 orden = {"ERROR": 0, "REVISAR": 1, "AVISO": 2}
 problemas.sort(key=lambda x: (orden[x[0]], x[1]))

@@ -597,6 +597,89 @@ def probar_busqueda_por_codigo_de_barras():
     con.close()
 
 
+def probar_modelo_con_cilindrada_pegada():
+    """«CORSA1.4» es el modelo con la cilindrada pegada, no un código.
+
+    Sale de la exportación del proveedor, que se come el espacio, y hacía el daño de siempre:
+    tiene forma de código, así que entraba como código de fábrica. En la base real el CORSA1.4
+    llegó a colgar un tubo, una correa multicanal y un sensor MAP — tres repuestos que no
+    tienen nada que ver, hermanados porque las tres descripciones nombran el mismo auto."""
+    for pegado, separado in (("TUBO CHEV CORSA1.4/1.6 8v", "TUBO CHEV CORSA 1.4/1.6 8v"),
+                             ("FILTRO VW AMAROK2.0 TD", "FILTRO VW AMAROK 2.0 TD"),
+                             ("BOMBA CHEVROLET AVEO1.6 16v", "BOMBA CHEVROLET AVEO 1.6 16v")):
+        igual(vehiculos.separar_texto_pegado(pegado), separado,
+              f"«{pegado}» tiene que quedar separado")
+    # Y aunque llegue sin separar, no puede entrar como código de fábrica.
+    for texto in ("TUBO CHEV CORSA1.4/1.6/1.8 8v", "FILTRO de ACEITE VW AMAROK2.0 TD",
+                  "BOBINA R 19/TWINGO/TRAFIC-1.6 1995/"):
+        igual(codigos.extraer_codigos_de_texto(texto), [],
+              f"«{texto}» no tiene ningún código de fábrica adentro")
+
+    # Lo que NO se puede tocar: con una o dos letras adelante no es un modelo, es la
+    # designación de un zócalo o una medida. Se piden cuatro letras justamente por esto.
+    for medida in ("LAMPARA W2x4.6d 24v", "LAMPARA W2.1x9.5d 12v", "LAMPARA SV8,5-8 24v",
+                   "LAMPARA BX8.2d 12v", "Tornillo M14X1.5X42_R", "TUBO 6mmx8mm x7,89mm"):
+        igual(vehiculos.separar_texto_pegado(medida), medida,
+              f"«{medida}» es una medida o un zócalo: no se toca")
+
+
+def probar_numero_de_catalogo_no_es_puente():
+    """Dos proveedores que numeran de corrido terminan chocando, y eso no es una equivalencia.
+
+    JL numera sus filtros de corrido y Taranto sus juntas también: en la base real hay 19
+    códigos numéricos de 6 y 7 dígitos que las dos listas usan, y los 19 son casualidad. El
+    310007 de JL es un prefiltro de Focus y el de Taranto una junta de tapa de cilindros de un
+    Ford MAX. Los de 8 dígitos o más, en cambio, son códigos de fábrica de verdad — hay 338 en
+    la base real, y esos sí son el mismo repuesto.
+
+    Se prueba el SALTO, que es lo peligroso: buscando un código se llega a otro producto por un
+    vínculo, y desde ahí se salta a todo lo que tenga ESE mismo número. Un salto malo no suma
+    un resultado, suma la red entera del otro."""
+    con = equivalencias.preparar(sqlite3.connect(":memory:"))
+    cur = con.cursor()
+
+    def marca(nombre):
+        cur.execute("INSERT INTO marcas (nombre, tipo) VALUES (?, ?)",
+                    (nombre, "OEM" if nombre == "OEM / FABRICA" else "PROVEEDOR"))
+        return cur.lastrowid
+
+    def producto(marca_id, code, desc):
+        cur.execute("INSERT INTO productos (codigo_raw, codigo_clean, descripcion, marca_id)"
+                    " VALUES (?, ?, ?, ?)", (code, codigos.sanitizar(code), desc, marca_id))
+        return cur.lastrowid
+
+    def vincular(a, b):
+        cur.execute("INSERT INTO equivalencias (producto_a_id, producto_b_id, confianza)"
+                    " VALUES (?, ?, 80)", (min(a, b), max(a, b)))
+
+    jl, taranto, oem = marca("JL"), marca("MOTORARG"), marca("OEM / FABRICA")
+
+    # CHOQUE DE CATÁLOGO: se busca el prefiltro de JL, que cita el 310007 como código de
+    # fábrica. Taranto tiene una junta con ESE mismo número. No pueden encadenarse.
+    filtro = producto(jl, "FILT-1", "PRE-FILTRO FORD FOCUS")
+    vincular(filtro, producto(oem, "310007", "PRE-FILTRO FORD FOCUS"))
+    producto(taranto, "310007", "Jta.Tapa Cil. FORD MAX")
+
+    # CÓDIGO DE FÁBRICA DE VERDAD: ocho dígitos. Acá el salto es lo que hace el trabajo.
+    sensor = producto(jl, "SENS-1", "SENSOR GM")
+    vincular(sensor, producto(oem, "93745292", "SENSOR GM"))
+    producto(taranto, "93745292", "Sensor GM equivalente")
+    con.commit()
+
+    res = equivalencias.buscar_por_codigo(cur, codigos.sanitizar("FILT-1"))
+    cierto("Jta.Tapa Cil. FORD MAX" not in {f["Descripcion"] for f in res},
+           f"un número de catálogo de 6 dígitos no puede saltar de una marca a otra; "
+           f"trajo {[f['Codigo'] for f in res]}")
+
+    res2 = equivalencias.buscar_por_codigo(cur, codigos.sanitizar("SENS-1"))
+    cierto("Sensor GM equivalente" in {f["Descripcion"] for f in res2},
+           f"un código de fábrica de 8 dígitos sí tiene que cruzar; trajo "
+           f"{[f['Codigo'] for f in res2]}")
+    cierto(any(f["Cadena"].startswith("🔵") for f in res2),
+           "y tiene que decir que llegó por «mismo código, otra marca»")
+    con.close()
+
+
 def main():
     for prueba in (probar_sanitizar, probar_codigo_util, probar_codigo_sospechoso,
                    probar_extractor,
@@ -610,7 +693,9 @@ def main():
                    probar_codigo_conocido_gana_a_la_forma,
                    probar_vocabulario_de_pieza,
                    probar_abreviaturas_de_las_listas_reales,
-                   probar_busqueda_por_codigo_de_barras):
+                   probar_busqueda_por_codigo_de_barras,
+                   probar_modelo_con_cilindrada_pegada,
+                   probar_numero_de_catalogo_no_es_puente):
         antes = len(fallos)
         prueba()
         print(f"  {'FALLA' if len(fallos) > antes else 'ok   '}  {prueba.__name__}")

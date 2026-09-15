@@ -135,9 +135,20 @@ def buscar_por_codigo(cur, clean_code, marca_filtro="Todas", max_saltos=None, co
     # El salto por código igual NO se aplica a códigos genéricos. Un "1234" de una marca y un
     # "1234" de otra son casi seguro piezas distintas: los catálogos numeran de corrido y los
     # números chicos se repiten en todos. Un "036115561G" repetido en dos listas, en cambio, es
-    # el mismo repuesto. El corte va en los puramente numéricos de menos de 6 dígitos y en
+    # el mismo repuesto. El corte va en los puramente numéricos de menos de 8 dígitos y en
     # cualquier código de menos de 4 caracteres — lo distintivo se mantiene, lo genérico no
     # cruza. Es lo que evita que este atajo fusione familias que no tienen nada que ver.
+    #
+    # El corte estaba en 6 y se subió a 8 mirando el dato. En la base real hay 542 códigos que
+    # aparecen en dos marcas o más, y separados por forma se ven dos poblaciones distintas:
+    #   288 numéricos de 10 dígitos, 36 de 8, 10 de 12 y 185 con letras -> códigos de fábrica
+    #       de verdad (Renault 7700274177, GM 93745292): es el mismo repuesto
+    #    19 numéricos de 6 y 7 dígitos -> revisados uno por uno, los 19 son casualidad
+    # Los 19 son el mismo choque: JL numera sus filtros de corrido y Taranto sus juntas
+    # también, así que tarde o temprano coinciden. El 310007 de JL es un prefiltro de Focus y
+    # el 310007 de Taranto una junta de tapa de cilindros de un Ford MAX. Buscando uno aparecía
+    # el otro, y peor: se encadenaba toda la red del otro.
+    # Seis dígitos es el largo de un número de catálogo; ocho ya es el de un código de fábrica.
     # El arranque mira las dos columnas: el código y el código de barras. Escanear la caja
     # tiene que traer el repuesto y toda su red de equivalencias, igual que si se hubiera
     # tecleado el número de parte. Antes eso funcionaba porque el EAN se cargaba como si fuera
@@ -160,7 +171,7 @@ def buscar_por_codigo(cur, clean_code, marca_filtro="Todas", max_saltos=None, co
         WHERE re.saltos < ?
           AND LENGTH(p1.codigo_clean) >= 4
           AND NOT (p1.codigo_clean GLOB '[0-9]*' AND NOT p1.codigo_clean GLOB '*[A-Z]*'
-                   AND LENGTH(p1.codigo_clean) < 6)
+                   AND LENGTH(p1.codigo_clean) < 8)
     )
     SELECT p.id AS "ID", p.codigo_raw AS "Codigo", p.descripcion AS "Descripcion",
            m.nombre AS "Marca", m.tipo AS "Tipo", p.precio AS "Precio", p.stock AS "Stock",

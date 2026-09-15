@@ -2762,6 +2762,15 @@ def extraer_codigos_de_texto(texto, minimo=6, codigo_propio=None, codigos_conoci
         # LISTAS DE MODELOS pegadas: A3A4A6, 206306307. Salen de "AUDI A3-A4-A6" y son el
         # equivalente de los rangos de años, con el mismo daño.
         re.compile(r'^([A-Z]\d[-]?){3,}$'),
+        # EL MODELO CON LA CILINDRADA PEGADA: CORSA1.4, AMAROK2.0, TRAFIC-1.6, PALIO1.4.
+        # separar_texto_pegado() ya los despega, pero esto es el cinturón de seguridad: la
+        # descripción puede llegar acá sin pasar por ahí, y un código de fábrica NUNCA tiene
+        # esta forma —una palabra entera seguida de un número con coma—. Va entre las formas
+        # que son texto SIN DISCUSIÓN, o sea que ni un «REF ORIG» adelante las rescata.
+        # En la base real había cinco de estos cargados como código de fábrica, y el peor
+        # —CORSA1.4— colgaba un tubo, una correa multicanal y un sensor MAP. Le pega a 0 de
+        # los 39.746 códigos reales del catálogo.
+        re.compile(r'^[A-Z]{4,}-?\d[.,]\d[A-Z]*$'),
     )
     formas_prohibidas = formas_ambiguas + formas_solo_texto
     # Palabras de la descripción que quedan pegadas al año y disfrazan el rango:
@@ -5996,9 +6005,20 @@ def buscar_por_codigo(clean_code, marca_filtro="Todas", max_saltos=None, confian
     # El salto por código igual NO se aplica a códigos genéricos. Un "1234" de una marca y un
     # "1234" de otra son casi seguro piezas distintas: los catálogos numeran de corrido y los
     # números chicos se repiten en todos. Un "036115561G" repetido en dos listas, en cambio, es
-    # el mismo repuesto. El corte va en los puramente numéricos de menos de 6 dígitos y en
+    # el mismo repuesto. El corte va en los puramente numéricos de menos de 8 dígitos y en
     # cualquier código de menos de 4 caracteres — lo distintivo se mantiene, lo genérico no
     # cruza. Es lo que evita que este atajo fusione familias que no tienen nada que ver.
+    #
+    # El corte estaba en 6 y se subió a 8 mirando el dato. En la base real hay 542 códigos que
+    # aparecen en dos marcas o más, y separados por forma se ven dos poblaciones distintas:
+    #   288 numéricos de 10 dígitos, 36 de 8, 10 de 12 y 185 con letras -> códigos de fábrica
+    #       de verdad (Renault 7700274177, GM 93745292): es el mismo repuesto
+    #    19 numéricos de 6 y 7 dígitos -> revisados uno por uno, los 19 son casualidad
+    # Los 19 son el mismo choque: JL numera sus filtros de corrido y Taranto sus juntas
+    # también, así que tarde o temprano coinciden. El 310007 de JL es un prefiltro de Focus y
+    # el 310007 de Taranto una junta de tapa de cilindros de un Ford MAX. Buscando uno aparecía
+    # el otro, y peor: se encadenaba toda la red del otro.
+    # Seis dígitos es el largo de un número de catálogo; ocho ya es el de un código de fábrica.
     # El arranque mira las dos columnas: el código y el código de barras. Escanear la caja
     # tiene que traer el repuesto y toda su red de equivalencias, igual que si se hubiera
     # tecleado el número de parte. Antes eso funcionaba porque el EAN se cargaba como si fuera
@@ -6021,7 +6041,7 @@ def buscar_por_codigo(clean_code, marca_filtro="Todas", max_saltos=None, confian
         WHERE re.saltos < ?
           AND LENGTH(p1.codigo_clean) >= 4
           AND NOT (p1.codigo_clean GLOB '[0-9]*' AND NOT p1.codigo_clean GLOB '*[A-Z]*'
-                   AND LENGTH(p1.codigo_clean) < 6)
+                   AND LENGTH(p1.codigo_clean) < 8)
     )
     SELECT p.id AS "ID", p.codigo_raw AS "Codigo", p.descripcion AS "Descripcion",
            m.nombre AS "Marca", m.tipo AS "Tipo", p.precio AS "Precio", p.stock AS "Stock",
@@ -6154,6 +6174,38 @@ def buscar_por_codigo(clean_code, marca_filtro="Todas", max_saltos=None, confian
         template = fila.pop("_template", None)
         fila["Ficha"] = template.replace("{codigo}", quote(fila["Codigo"], safe="")) if template else ""
     return res
+
+
+def el_mismo_numero_en_dos_piezas(res):
+    """De los resultados, ¿el código buscado existe en dos marcas y son piezas DISTINTAS?
+
+    Dos proveedores que numeran de corrido terminan chocando. En la base real hay 19 códigos
+    numéricos de seis y siete dígitos que dos listas usan, y los 19 son casualidad: el 310007
+    de JL es un prefiltro de Focus y el 310007 de Taranto una junta de tapa de cilindros de un
+    Ford MAX.
+
+    La búsqueda los muestra a los dos —y está bien, el número que se escribió es ese— pero los
+    muestra iguales, los dos como «el buscado», con sus equivalentes mezclados en la misma
+    lista. Sin decirlo, parece que son alternativas uno del otro.
+
+    Devuelve la lista de esos resultados cuando son piezas distintas, y [] cuando no hay nada
+    que aclarar (un solo producto, o dos que son la misma pieza en dos marcas)."""
+    buscados = [f for f in res if f.get("Cadena") == "— el buscado"]
+    if len(buscados) < 2 or len({f.get("Marca") for f in buscados}) < 2:
+        return []
+    # QUÉ FORMA TIENE UN CHOQUE DE CATÁLOGO, y por qué no se decide mirando la descripción.
+    # Lo primero que probé fue comparar los nombres de las piezas, y marcaba 143 códigos de los
+    # 542 compartidos cuando los choques de verdad son 19. Los otros 124 eran el mismo repuesto
+    # descrito distinto: el 0280130039 de Bosch es «BULBO DE TEMPERATURA DE AGUA» para un
+    # proveedor y «SENSOR INYEC» para el otro, y son la misma pieza.
+    # Lo que sí separa las dos poblaciones es la FORMA DEL CÓDIGO, que es el mismo criterio con
+    # el que la búsqueda decide si puede saltar de una marca a otra: los compartidos con letras
+    # o con ocho dígitos o más son códigos de fábrica —el mismo repuesto—, y los numéricos
+    # cortos son números de catálogo que chocaron. Medido: marca los 19 y ninguno más.
+    clean = sanitizar(buscados[0].get("Codigo") or "")
+    if not clean.isdigit() or len(clean) >= 8:
+        return []
+    return buscados
 
 
 def equivalentes_mas_alla_del_tope(clean_code, max_saltos):
@@ -10967,6 +11019,18 @@ _RE_MARCAS_PEGADAS = re.compile(
 ) if MARCAS_PARA_DESPEGAR else None
 _RE_ESPACIOS = re.compile(r'\s{2,}')
 
+# EL MODELO CON LA CILINDRADA PEGADA: «CORSA1.4», «AMAROK2.0», «HILLUX2.4», «Siena1.0».
+# Sale de la exportación del proveedor, que se come el espacio, y hace daño de dos maneras: el
+# modelo deja de ser reconocible como modelo, y —peor— «CORSA1.4» tiene forma de código, así
+# que se cargaba como código de fábrica. En la base real ese código llegó a colgar un tubo, una
+# correa multicanal y un sensor MAP: tres repuestos que no tienen nada que ver, hermanados
+# porque las tres descripciones nombran el mismo auto.
+# Se piden CUATRO letras antes del número, y ahí está todo el cuidado: con menos se rompían las
+# designaciones de zócalo y las medidas, que son iguales pero con una o dos letras —«W2x4.6d»,
+# «BX8.2d», «SV8,5-8», «M14X1.5X42», «6mmx8mm x7,89mm»—. Medido sobre las 53.255 descripciones
+# reales: separa 158 y no toca ninguna de esas.
+_RE_MODELO_CON_CILINDRADA = re.compile(r'(?<=[A-Za-zÁÉÍÓÚÑáéíóúñ]{4})(?=\d[.,]\d)')
+
 
 # «REF» de «REF. ORIG.» pegado a lo que viene antes. Es la forma de escribir de una de las
 # listas y aparece 9.038 veces: «Passat 1 8 98REF ORIG 030121121B», «16VREF ORIG 0280155868».
@@ -10993,28 +11057,49 @@ def separar_texto_pegado(texto):
     anterior a la marca NO fuera mayúscula, así que en una lista escrita toda en mayúsculas
     —que son la mayoría— no separaba nada.
 
-    Y un punto 3: «REF» pegado al final de la palabra anterior, cuando después viene ORIG.
-    Ver _RE_REF_PEGADO."""
+    Y dos puntos más: «REF» pegado al final de la palabra anterior cuando después viene ORIG
+    (ver _RE_REF_PEGADO), y el modelo con la cilindrada pegada, «CORSA1.4»
+    (ver _RE_MODELO_CON_CILINDRADA)."""
     if not texto:
         return texto
     t = str(texto).strip()
     t = _RE_REF_PEGADO.sub(r'\1 REF ', t)
     t = _RE_PEGADO_MAYUS.sub(' ', t)
+    t = _RE_MODELO_CON_CILINDRADA.sub(' ', t)
     if _RE_MARCAS_PEGADAS is not None:
         t = _RE_MARCAS_PEGADAS.sub(r' \1 ', t)
     return _RE_ESPACIOS.sub(' ', t).strip()
 
 
-def contar_descripciones_pegadas(limite_muestra=3000):
-    c.execute("SELECT id, descripcion FROM productos WHERE descripcion IS NOT NULL LIMIT ?",
-               (limite_muestra,))
-    return sum(1 for r in c.fetchall() if separar_texto_pegado(r["descripcion"]) != r["descripcion"])
+@st.cache_data(show_spinner=False, max_entries=3)
+def _contar_descripciones_pegadas(_version):
+    c.execute("SELECT descripcion FROM productos WHERE descripcion IS NOT NULL")
+    return sum(1 for r in c.fetchall()
+               if separar_texto_pegado(r["descripcion"]) != r["descripcion"])
+
+
+def contar_descripciones_pegadas():
+    """Cuántas descripciones del catálogo están pegadas. TODAS, no una muestra.
+
+    Antes miraba las primeras 3.000 filas y mostraba ese número. Sobre el catálogo real eso
+    decía «al menos 1.682» cuando son 9.324 — y, peor, si en esas 3.000 no había ninguna la
+    pantalla afirmaba «✅ Ninguna descripción con ese problema» con 50.000 filas sin mirar.
+    Recorrer las 53.255 tarda 1,4 s y queda cacheado hasta que cambia el catálogo: el número
+    exacto vale mucho más que el segundo que cuesta, porque de él depende que alguien decida
+    correr el arreglo o no."""
+    return _contar_descripciones_pegadas(version_del_catalogo())
 
 
 def reparar_descripciones_pegadas():
     c.execute("SELECT id, descripcion FROM productos WHERE descripcion IS NOT NULL")
-    cambios = [(separar_texto_pegado(r["descripcion"]), r["id"]) for r in c.fetchall()
-               if separar_texto_pegado(r["descripcion"]) != r["descripcion"]]
+    # Se separa UNA vez por fila y se compara con el resultado guardado. Antes se llamaba dos
+    # veces —una en la condición y otra en el valor— y son 53.255 filas: la mitad del trabajo
+    # era tirarlo a la basura.
+    cambios = []
+    for fila in c.fetchall():
+        nueva = separar_texto_pegado(fila["descripcion"])
+        if nueva != fila["descripcion"]:
+            cambios.append((nueva, fila["id"]))
     with db_lock:
         c.executemany("UPDATE productos SET descripcion = ? WHERE id = ?", cambios)
         conn.commit()
@@ -16019,6 +16104,17 @@ Casi todo lo que edita o borra algo pide la contraseña de administrador la prim
                 with st.expander(etiqueta_resultado, expanded=(total_codigos_buscados == 1)):
                     if item.get("aviso"):
                         st.warning(item["aviso"])
+                    # El mismo número en dos piezas distintas. Ver el_mismo_numero_en_dos_piezas().
+                    _choque = el_mismo_numero_en_dos_piezas(res)
+                    if _choque:
+                        st.warning(
+                            f"⚠️ **Hay {len(_choque)} productos con el código "
+                            f"{codigo_individual}, y no son la misma pieza.** Es casualidad: "
+                            "cada proveedor numera su catálogo de corrido y tarde o temprano "
+                            "coinciden. Mirá la marca de cada fila.\n\n"
+                            + "\n\n".join(f"· **{f['Marca']}** — {(f.get('Descripcion') or '')[:70]}"
+                                            for f in _choque[:4])
+                        )
                     if res:
                         if alternativas:
                             st.success(f"Se encontraron {len(alternativas)} equivalencia(s), "
@@ -19044,7 +19140,7 @@ if pagina == PAGINAS[3]:
             )
             pegadas = contar_descripciones_pegadas()
             if pegadas:
-                st.warning(f"⚠️ Hay al menos {pegadas} descripción(es) con ese problema.")
+                st.warning(f"⚠️ Hay {pegadas:,} descripción(es) con ese problema.")
                 if candado('reescribir las descripciones de todo el catálogo', st.button("🔧 Separar las descripciones pegadas"), 'reescribir_las_descripciones_de_to'):
                     arregladas = reparar_descripciones_pegadas()
                     st.success(f"Se separaron {arregladas} descripción(es).")

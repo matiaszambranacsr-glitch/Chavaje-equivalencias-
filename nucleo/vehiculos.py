@@ -172,6 +172,19 @@ _RE_MARCAS_PEGADAS = re.compile(
 _RE_ESPACIOS = re.compile(r'\s{2,}')
 
 
+# EL MODELO CON LA CILINDRADA PEGADA: «CORSA1.4», «AMAROK2.0», «HILLUX2.4», «Siena1.0».
+# Sale de la exportación del proveedor, que se come el espacio, y hace daño de dos maneras: el
+# modelo deja de ser reconocible como modelo, y —peor— «CORSA1.4» tiene forma de código, así
+# que se cargaba como código de fábrica. En la base real ese código llegó a colgar un tubo, una
+# correa multicanal y un sensor MAP: tres repuestos que no tienen nada que ver, hermanados
+# porque las tres descripciones nombran el mismo auto.
+# Se piden CUATRO letras antes del número, y ahí está todo el cuidado: con menos se rompían las
+# designaciones de zócalo y las medidas, que son iguales pero con una o dos letras —«W2x4.6d»,
+# «BX8.2d», «SV8,5-8», «M14X1.5X42», «6mmx8mm x7,89mm»—. Medido sobre las 53.255 descripciones
+# reales: separa 158 y no toca ninguna de esas.
+_RE_MODELO_CON_CILINDRADA = re.compile(r'(?<=[A-Za-zÁÉÍÓÚÑáéíóúñ]{4})(?=\d[.,]\d)')
+
+
 def separar_texto_pegado(texto):
     """Algunas listas de proveedor exportan varias columnas pegadas sin espacio en el medio:
     'Junta Tapa de CilindrosFORDTAUNUS COUPE' o 'PASTILLAS FRENOVOLKSWAGENGOL'.
@@ -183,13 +196,15 @@ def separar_texto_pegado(texto):
     anterior a la marca NO fuera mayúscula, así que en una lista escrita toda en mayúsculas
     —que son la mayoría— no separaba nada.
 
-    Y un punto 3: «REF» pegado al final de la palabra anterior, cuando después viene ORIG.
-    Ver _RE_REF_PEGADO."""
+    Y dos puntos más: «REF» pegado al final de la palabra anterior cuando después viene ORIG
+    (ver _RE_REF_PEGADO), y el modelo con la cilindrada pegada, «CORSA1.4»
+    (ver _RE_MODELO_CON_CILINDRADA)."""
     if not texto:
         return texto
     t = str(texto).strip()
     t = _RE_REF_PEGADO.sub(r'\1 REF ', t)
     t = _RE_PEGADO_MAYUS.sub(' ', t)
+    t = _RE_MODELO_CON_CILINDRADA.sub(' ', t)
     if _RE_MARCAS_PEGADAS is not None:
         t = _RE_MARCAS_PEGADAS.sub(r' \1 ', t)
     return _RE_ESPACIOS.sub(' ', t).strip()

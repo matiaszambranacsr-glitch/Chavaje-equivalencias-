@@ -461,6 +461,15 @@ def extraer_codigos_de_texto(texto, minimo=6, codigo_propio=None, codigos_conoci
         # LISTAS DE MODELOS pegadas: A3A4A6, 206306307. Salen de "AUDI A3-A4-A6" y son el
         # equivalente de los rangos de años, con el mismo daño.
         re.compile(r'^([A-Z]\d[-]?){3,}$'),
+        # EL MODELO CON LA CILINDRADA PEGADA: CORSA1.4, AMAROK2.0, TRAFIC-1.6, PALIO1.4.
+        # separar_texto_pegado() ya los despega, pero esto es el cinturón de seguridad: la
+        # descripción puede llegar acá sin pasar por ahí, y un código de fábrica NUNCA tiene
+        # esta forma —una palabra entera seguida de un número con coma—. Va entre las formas
+        # que son texto SIN DISCUSIÓN, o sea que ni un «REF ORIG» adelante las rescata.
+        # En la base real había cinco de estos cargados como código de fábrica, y el peor
+        # —CORSA1.4— colgaba un tubo, una correa multicanal y un sensor MAP. Le pega a 0 de
+        # los 39.746 códigos reales del catálogo.
+        re.compile(r'^[A-Z]{4,}-?\d[.,]\d[A-Z]*$'),
     )
     formas_prohibidas = formas_ambiguas + formas_solo_texto
     # Palabras de la descripción que quedan pegadas al año y disfrazan el rango:
