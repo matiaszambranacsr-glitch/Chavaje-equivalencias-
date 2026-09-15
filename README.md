@@ -56,6 +56,24 @@ veces en una lista; lo que se repite más es texto.
 Antes de aflojar cualquiera de esos filtros, corré `python3 -m nucleo.pruebas`: los casos que
 dicen «NO debía sacar nada» están escritos con descripciones reales de esas listas.
 
+## Dos pantallas no pueden contar distinto el mismo producto
+
+El buscador dice «este código todavía no tiene equivalencias con otra marca» cuando lo único
+que aparece es su código de fábrica. Administrar, en cambio, lo daba por resuelto, porque en
+la tabla de equivalencias **sí** tiene una fila. Mismo producto, dos respuestas.
+
+`contar_con_equivalencia_muerta()` cierra ese hueco: son **12.060** productos además de los
+31.947 que no tienen ninguna. La diferencia entre «el 48% del catálogo no cruza con nadie» y
+el 68% real.
+
+Un vecino cuenta como útil si es el producto de **otro proveedor** —ahí la equivalencia ya
+está hecha, aunque ese vecino no tenga ningún otro vínculo— o si es un código de fábrica que
+cuelga algo más que a mí. Esa primera mitad es fácil de olvidar y da 201 de diferencia.
+
+**Y no se suman a lo que borra `depurar_huerfanos()`, a propósito.** No son filas de más:
+tienen su código de fábrica cargado y se encadenan solos el día que otro proveedor traiga ese
+mismo número. Lo que hace falta con ellos es otra lista, no borrarlos — y la pantalla lo dice.
+
 ## Un tope que no ahorra nada solo esconde resultados
 
 `sugerir_entre_todas_las_marcas()` recorre el catálogo entero y propone pares. Tenía un tope de

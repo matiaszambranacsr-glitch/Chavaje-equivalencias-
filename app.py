@@ -3131,6 +3131,42 @@ def contar_huerfanos():
     return c.fetchone()[0]
 
 
+def contar_con_equivalencia_muerta():
+    """Productos de proveedor cuyos vínculos van TODOS a un código que no cuelga nada más.
+
+    Es el agujero entre dos pantallas que decían cosas distintas del mismo producto. El
+    buscador ya avisa «este código todavía no tiene equivalencias con otra marca» cuando lo
+    único que aparece es su código de fábrica; contar_huerfanos(), en cambio, los daba por
+    resueltos porque en la tabla de equivalencias SÍ tienen una fila.
+    En el catálogo real son 12.060 productos además de los 31.947 que no tienen ninguna: la
+    diferencia entre «el 68% del catálogo no cruza con nadie» y «el 48%».
+
+    No se suman a lo que borra depurar_huerfanos(), a propósito: estos NO son filas de más.
+    Tienen su código de fábrica cargado y el día que otro proveedor traiga ese mismo número se
+    encadenan solos. Lo que hace falta con ellos es otra lista, no borrarlos."""
+    c.execute("""
+        SELECT COUNT(*) FROM productos p
+        JOIN marcas m ON m.id = p.marca_id
+        WHERE m.tipo <> 'OEM'
+          AND EXISTS (SELECT 1 FROM equivalencias e
+                       WHERE e.producto_a_id = p.id OR e.producto_b_id = p.id)
+          AND NOT EXISTS (
+                SELECT 1 FROM equivalencias e
+                JOIN productos po ON po.id = CASE WHEN e.producto_a_id = p.id
+                                                  THEN e.producto_b_id ELSE e.producto_a_id END
+                JOIN marcas mo ON mo.id = po.marca_id
+                WHERE (e.producto_a_id = p.id OR e.producto_b_id = p.id)
+                  -- un vecino sirve si es el producto de OTRO PROVEEDOR —ahí la equivalencia
+                  -- ya está hecha, aunque ese vecino no tenga ningún otro vínculo— o si es un
+                  -- código de fábrica que cuelga algo más que a mí.
+                  AND (mo.tipo <> 'OEM'
+                       OR (SELECT COUNT(*) FROM equivalencias e2
+                            WHERE e2.producto_a_id = po.id OR e2.producto_b_id = po.id) > 1))
+    """)
+    fila = c.fetchone()
+    return (fila[0] if fila else 0) or 0
+
+
 def depurar_huerfanos():
     """Borra productos que no tienen ninguna equivalencia vinculada (quedaron sueltos).
 
@@ -5440,15 +5476,6 @@ def listar_busquedas_sin_resultado(limite=50):
                  FROM historial_busquedas WHERE sin_resultado = 1
                  GROUP BY termino ORDER BY COUNT(*) DESC, MAX(fecha) DESC LIMIT ?""", (limite,))
     return filas_a_listas(c)
-
-
-def contar_productos_sin_equivalencias():
-    c.execute("""
-        SELECT COUNT(*) FROM productos
-        WHERE id NOT IN (SELECT DISTINCT producto_a_id FROM equivalencias)
-          AND id NOT IN (SELECT DISTINCT producto_b_id FROM equivalencias)
-    """)
-    return c.fetchone()[0]
 
 
 # ============================================================
@@ -18686,7 +18713,7 @@ if pagina == PAGINAS[3]:
             st.rerun()
 
         if st.session_state.mostrar_huerfanos:
-            total_sin_eq = contar_productos_sin_equivalencias()
+            total_sin_eq = contar_huerfanos()
             st.write(f"Total: **{total_sin_eq}** producto(s) sin ninguna equivalencia.")
 
             if total_sin_eq == 0:
@@ -20336,6 +20363,21 @@ if pagina == PAGINAS[3]:
                     f"Hay **{_sueltos:,}** producto(s) sin ninguna equivalencia, de {_todos:,} "
                     f"— el {_porcentaje}% del catálogo."
                 )
+                # Y los que tienen una equivalencia que no lleva a ningún lado. El buscador ya
+                # se los marca así; sin decirlo acá también, las dos pantallas contaban
+                # distinto el mismo producto.
+                _muertos = contar_con_equivalencia_muerta()
+                if _muertos:
+                    st.info(
+                        f"➕ Otros **{_muertos:,}** tienen una equivalencia cargada que **no "
+                        "lleva a ningún lado**: el único código vinculado es su propio código "
+                        "de fábrica, que todavía no tiene nadie más. El buscador ya se los "
+                        "marca así.\n\n"
+                        "**A esos no los borres.** Se resuelven solos cuando entre otra lista "
+                        "que traiga el mismo código de fábrica, o con **🧠 Buscar equivalencias "
+                        "en todo el catálogo** (Mantenimiento → Calidad), que los cruza por "
+                        "descripción."
+                    )
                 if candado('borrar productos sin equivalencias', st.button(f"🧹 Borrar esos {_sueltos:,} productos"), 'borrar_productos_sin_equivalencias'):
                     borrados = depurar_huerfanos()
                     st.success(f"Se borraron {borrados:,} producto(s) sin equivalencias.")

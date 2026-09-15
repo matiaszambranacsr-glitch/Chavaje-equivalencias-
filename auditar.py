@@ -1,6 +1,7 @@
 """Auditoría estática de app.py. Busca los errores que Streamlit y SQLite solo muestran
 en ejecución, cuando ya es tarde."""
 import ast
+import copy
 import re
 import sys
 from collections import defaultdict, Counter
@@ -1464,6 +1465,40 @@ for _n in ast.walk(ARBOL):
                          "vuelta: aunque esté cacheada, cada llamada recalcula el testigo del "
                          "caché —una recorrida entera de la tabla— y deserializa el resultado. "
                          "Calcularla una vez antes del bucle")
+
+
+# ============ 25. Dos funciones que hacen exactamente lo mismo ============
+# Pasó con contar_huerfanos() y contar_productos_sin_equivalencias(): la misma consulta, dos
+# nombres, dos pantallas. No es solo código de más — el día que una se corrige y la otra no,
+# dos pantallas muestran números distintos del mismo dato y no hay forma de saber cuál creer.
+# Las dos consultas no eran idénticas carácter por carácter —una tenía DISTINCT y otro
+# sangrado—, así que comparar el texto tal cual no las encontraba. Se comparan normalizando lo
+# que no cambia el significado: espacios de más adentro de los strings, mayúsculas, y el
+# DISTINCT de un SELECT que ya no puede repetir filas.
+class _NormalizarTextos(ast.NodeTransformer):
+    def visit_Constant(self, nodo):
+        if isinstance(nodo.value, str):
+            v = re.sub(r'\s+', ' ', nodo.value).strip().upper()
+            v = re.sub(r'\s+', ' ', re.sub(r'\bDISTINCT\b', '', v)).strip()
+            return ast.copy_location(ast.Constant(value=v), nodo)
+        return nodo
+
+
+_CUERPOS = {}
+for _n in ast.walk(ARBOL):
+    if not isinstance(_n, ast.FunctionDef) or len(_n.body) < 2:
+        continue
+    _cuerpo = _n.body[1:] if isinstance(_n.body[0], ast.Expr) and isinstance(
+        getattr(_n.body[0], "value", None), ast.Constant) else _n.body
+    if len(_cuerpo) < 2:
+        continue
+    _huella = "\n".join(ast.dump(_NormalizarTextos().visit(copy.deepcopy(_x))) for _x in _cuerpo)
+    if _huella in _CUERPOS:
+        reportar("REVISAR", _n.lineno,
+                 f"'{_n.name}' tiene el mismo cuerpo que '{_CUERPOS[_huella]}': dos nombres "
+                 "para lo mismo terminan diciendo números distintos cuando se corrige una sola")
+    else:
+        _CUERPOS[_huella] = _n.name
 
 
 # ============ Resultado ============
