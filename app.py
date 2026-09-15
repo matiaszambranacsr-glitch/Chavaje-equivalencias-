@@ -21567,7 +21567,24 @@ Administrar → Mantenimiento.
 
             if sospechosas:
                 st.markdown("---")
-                st.warning(f"⚠️ {len(sospechosas)} vínculo(s) con algo raro — revisalos:")
+                # «Con algo raro» no es cierto para todos: el corte lo decide el PUNTAJE, y un
+                # vínculo puede quedar abajo de 55 sin ninguna alarma, solo porque no encontró
+                # evidencia a favor. Sobre la lista de Illinois son 285 de 595. Llamarlos a
+                # todos «raros» manda a buscar un problema que en la mitad no existe: lo que
+                # les falta es respaldo, que es otra cosa y se revisa distinto.
+                _con_alarma = [x for x in sospechosas if x.get("alarmas")]
+                _sin_respaldo = len(sospechosas) - len(_con_alarma)
+                st.warning(
+                    f"⚠️ **{len(sospechosas)} vínculo(s) para revisar.** "
+                    + (f"{len(_con_alarma)} tienen alguna alarma concreta"
+                       + (f" y {_sin_respaldo} no tienen ninguna: simplemente no se encontró "
+                          "evidencia a favor (ni medidas, ni catálogo, ni parecido de "
+                          "descripción), así que quedaron con poco puntaje."
+                          if _sin_respaldo else ".")
+                       if _con_alarma else
+                       "Ninguno tiene una alarma concreta: lo que les falta es evidencia a "
+                       "favor, así que quedaron con poco puntaje.")
+                )
                 # De a tandas por pantalla: con cientos, la página se vuelve imposible de usar
                 por_pagina = st.radio("Mostrar de a:", [10, 25, 50], horizontal=True,
                                        key="sosp_por_pagina")

@@ -56,6 +56,22 @@ veces en una lista; lo que se repite más es texto.
 Antes de aflojar cualquiera de esos filtros, corré `python3 -m nucleo.pruebas`: los casos que
 dicen «NO debía sacar nada» están escritos con descripciones reales de esas listas.
 
+## Las capas de `nucleo/` van en un solo sentido
+
+    errores.py  ←  codigos.py  ←  vehiculos.py  ←  planillas.py
+                                  equivalencias.py
+
+`codigos.py` **no puede** depender de `vehiculos.py`. Vale la pena escribirlo porque es fácil
+tropezar: al revisar los códigos de fábrica cargados aparecieron cuatro que son en realidad la
+marca del auto con un número pegado (`Peugeot106`, `Renault11-R`, `Cummins-6.4`), y el arreglo
+natural —rechazarlos en `extraer_codigos_de_texto()` usando `MARCAS_PARA_DESPEGAR`— crea un
+import circular.
+
+Las dos salidas son peores que el problema: duplicar la lista de marcas en `codigos.py` (dos
+listas que se separan con el tiempo, que es justo lo que este README pide no hacer) o mover
+`extraer_codigos_de_texto()` a `vehiculos.py` (donde no pertenece). Con cuatro códigos de
+46.644 no vale: quedan, y la pantalla de puentes falsos los muestra.
+
 ## Dos pantallas no pueden contar distinto el mismo producto
 
 El buscador dice «este código todavía no tiene equivalencias con otra marca» cuando lo único
