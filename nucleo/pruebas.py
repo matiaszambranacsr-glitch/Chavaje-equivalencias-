@@ -691,6 +691,47 @@ def probar_busqueda_por_codigo_de_barras():
     con.close()
 
 
+def probar_la_coma_decimal_es_el_mismo_motor():
+    """«1,6» y «1.6» son la misma cilindrada, y hasta ahora no lo eran.
+
+    Illinois escribe la coma —3.105 descripciones de esa lista— y todos los demás el punto.
+    Comparadas tal cual, las dos cilindradas nunca se cruzaban y la comparación cortaba con
+    «cilindradas distintas»: la lista más nueva quedaba rechazada contra el resto del catálogo
+    por cómo escribe un número. Sobre 1.500 x 1.500 productos reales eran 796 pares.
+
+    Y la coma no era un caracter de palabra, así que «1,9TDI» se partía en «1» y «9TDI». Ese
+    «9TDI» suelto aparece 129 veces y hacía de modelo compartido entre un 1,9 y un 2,9."""
+    igual(vehiculos._RE_COMA_DECIMAL.sub(".", "JUNTA FORD FOCUS 1,6 16V"),
+          "JUNTA FORD FOCUS 1.6 16V", "la coma entre números es un punto")
+    igual(vehiculos._RE_COMA_DECIMAL.sub(".", "BOBINA VW GOL 1,9TDI"),
+          "BOBINA VW GOL 1.9TDI", "1,9TDI no se parte")
+    # La coma que NO está entre números se queda: separa una lista de autos.
+    igual(vehiculos._RE_COMA_DECIMAL.sub(".", "JUNTA FIAT PALIO, SIENA, UNO"),
+          "JUNTA FIAT PALIO, SIENA, UNO", "la coma que separa autos no se toca")
+
+
+def probar_las_valvulas_no_dicen_para_que_auto_es():
+    """«16V» no es un auto: es cómo es el motor. Compartirlo no es compartir el vehículo.
+
+    Era la última evidencia que quedaba cuando una de las dos descripciones no nombra ninguna
+    marca conocida, y así salían 43 pares de motores distintos de la misma marca: la junta de
+    la Hilux D-4D contra la del Corolla 1ZZ-FE, la del Peugeot 306 XU7 contra la del 206 TU5,
+    la del Fiat Freemont 2.4 contra la del Punto 1248cc. Todas «coinciden en 16V».
+
+    Lo que NO tiene que agarrar son los modelos que se escriben número y letra: 320I, 318I,
+    525D, 310D y 412D son BMW y Mercedes de verdad, y son de los datos más específicos que
+    traen estas listas. Y la cilindrada exacta en centímetros cúbicos tampoco: «843CC» es lo
+    único que une la junta del ASIA/KIA TOWNER con la del DAIHATSU HI-JET, que son el mismo
+    motor con dos nombres."""
+    for w in ("16V", "12V", "24V", "1.8I", "2.0L", "1.4I/1.6I", "1.8T"):
+        cierto(bool(vehiculos._RE_SOLO_MOTORIZACION.match(w)),
+               f"«{w}» dice cómo es el motor, no para qué auto es")
+    for w in ("320I", "318I", "525D", "310D", "412D", "843CC", "1587CC", "K9K", "XU7JP4",
+              "FOCUS", "S10"):
+        cierto(not vehiculos._RE_SOLO_MOTORIZACION.match(w),
+               f"«{w}» sí dice para qué auto es")
+
+
 def probar_modelo_con_cilindrada_pegada():
     """«CORSA1.4» es el modelo con la cilindrada pegada, no un código.
 
@@ -793,6 +834,8 @@ def main():
                    probar_vocabulario_de_pieza,
                    probar_abreviaturas_de_las_listas_reales,
                    probar_busqueda_por_codigo_de_barras,
+                   probar_la_coma_decimal_es_el_mismo_motor,
+                   probar_las_valvulas_no_dicen_para_que_auto_es,
                    probar_modelo_con_cilindrada_pegada,
                    probar_numero_de_catalogo_no_es_puente):
         antes = len(fallos)

@@ -231,6 +231,35 @@ _RE_MARCA_CORTA_TRAS_NUMERO = re.compile(
 _RE_MODELO_CON_CILINDRADA = re.compile(r'(?<=[A-Za-zÁÉÍÓÚÑáéíóúñ]{4})(?=\d[.,]\d)')
 
 
+# La coma decimal. Illinois escribe «1,6» y todos los demás «1.6»: son 3.105 descripciones de
+# esa lista contra 23.244 con punto. Comparadas tal cual, las cilindradas de las dos nunca se
+# cruzan y firmas_compatibles() cortaba con «cilindradas distintas» — o sea que la lista más
+# nueva quedaba rechazada de entrada contra el resto del catálogo por cómo escribe un número.
+# La pantalla de vehículos ya lo pasaba a punto antes de comparar; acá faltaba.
+# De paso arregla otra cosa: la coma no estaba entre los caracteres que forman una palabra, así
+# que «1,9TDI» se partía en «1» y «9TDI», y ese «9TDI» suelto —129 veces en el catálogo— hacía
+# de modelo compartido entre un 1,9TDI y un 2,9TDI.
+_RE_COMA_DECIMAL = re.compile(r'(?<=\d),(?=\d)')
+
+
+# Una cilindrada o una cantidad de válvulas NO dicen para qué auto es. «16V» está en 3.513
+# descripciones, «2.0I» en 142: compartir eso es compartir el idioma, no el vehículo.
+# Sin esto, «BOBINA ESCORT/ORION 1.8i 16V ZETEC» salía equivalente a una bobina de
+# «PEUGEOT 406 1.8i, 16V, 306 1.8 16V» — un Ford contra un Peugeot, unidos por «1.8I, 16V».
+# El número solo («1.6», «2.0») ya quedaba afuera porque el núcleo descarta lo que es puro
+# número: que «1.6I» contara y «1.6» no fue siempre un accidente del patrón, nunca una decisión.
+# El patrón pide la coma decimal o la V de las válvulas, y por eso no se lleva puestos los
+# modelos que son número y letra: 320I, 318I, 525D, 310D y 412D son BMW y Mercedes de verdad,
+# y son de los datos más específicos que hay en estas listas.
+# La cilindrada exacta en centímetros cúbicos SÍ queda: «843CC» no es una forma de hablar, es
+# un motor. Es lo único que une la «Junta Tapa Cil. ASIA/KIA TOWNER 843CC» con la
+# «Jta.Tapa Cil. DAIHATSU HI-JET 843CC» —el Towner es un Hijet con otro nombre— y sacándola
+# ese par, que está bien, se perdía.
+_RE_SOLO_MOTORIZACION = re.compile(
+    r'^(?:\d{1,2}[.,]\d[A-Z]{0,3}|\d{1,2}V)'
+    r'(?:/(?:\d{1,2}[.,]\d[A-Z]{0,3}|\d{1,2}V))*/?$')
+
+
 def separar_texto_pegado(texto):
     """Algunas listas de proveedor exportan varias columnas pegadas sin espacio en el medio:
     'Junta Tapa de CilindrosFORDTAUNUS COUPE' o 'PASTILLAS FRENOVOLKSWAGENGOL'.

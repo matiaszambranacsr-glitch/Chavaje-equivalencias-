@@ -102,6 +102,7 @@ from .codigos import normalizar_texto, sanitizar
       "_RE_PEGADO_MAYUS", "_RE_REF_PEGADO",
       "_RE_MARCAS_PEGADAS", "_RE_ESPACIOS", "_MARCAS_CORTAS_PEGADAS",
       "_RE_MARCA_CORTA_TRAS_NUMERO", "_RE_MODELO_CON_CILINDRADA",
+      "_RE_COMA_DECIMAL", "_RE_SOLO_MOTORIZACION",
       "separar_texto_pegado",
       "FAMILIAS_REPUESTO", "_normalizar_desc", "clasificar_repuesto",
       "_RE_ES_KIT", "_RE_KIT_POR_SUMA", "familia_para_comparar", "es_un_kit",

@@ -9590,6 +9590,33 @@ def guardar_aplicaciones(apps, marca_repuesto, origen="", tipo_pieza=""):
 # de los dos lados.
 _RE_PUNTO_ENTRE_LETRAS = re.compile(r'([A-ZÁÉÍÓÚÑ])\.([A-ZÁÉÍÓÚÑ])')
 
+# La coma decimal. Illinois escribe «1,6» y todos los demás «1.6»: son 3.105 descripciones de
+# esa lista contra 23.244 con punto. Comparadas tal cual, las cilindradas de las dos nunca se
+# cruzan y firmas_compatibles() cortaba con «cilindradas distintas» — o sea que la lista más
+# nueva quedaba rechazada de entrada contra el resto del catálogo por cómo escribe un número.
+# La pantalla de vehículos ya lo pasaba a punto antes de comparar; acá faltaba.
+# De paso arregla otra cosa: la coma no estaba entre los caracteres que forman una palabra, así
+# que «1,9TDI» se partía en «1» y «9TDI», y ese «9TDI» suelto —129 veces en el catálogo— hacía
+# de modelo compartido entre un 1,9TDI y un 2,9TDI.
+_RE_COMA_DECIMAL = re.compile(r'(?<=\d),(?=\d)')
+
+# Una cilindrada o una cantidad de válvulas NO dicen para qué auto es. «16V» está en 3.513
+# descripciones, «2.0I» en 142: compartir eso es compartir el idioma, no el vehículo.
+# Sin esto, «BOBINA ESCORT/ORION 1.8i 16V ZETEC» salía equivalente a una bobina de
+# «PEUGEOT 406 1.8i, 16V, 306 1.8 16V» — un Ford contra un Peugeot, unidos por «1.8I, 16V».
+# El número solo («1.6», «2.0») ya quedaba afuera porque el núcleo descarta lo que es puro
+# número: que «1.6I» contara y «1.6» no fue siempre un accidente del patrón, nunca una decisión.
+# El patrón pide la coma decimal o la V de las válvulas, y por eso no se lleva puestos los
+# modelos que son número y letra: 320I, 318I, 525D, 310D y 412D son BMW y Mercedes de verdad,
+# y son de los datos más específicos que hay en estas listas.
+# La cilindrada exacta en centímetros cúbicos SÍ queda: «843CC» no es una forma de hablar, es
+# un motor. Es lo único que une la «Junta Tapa Cil. ASIA/KIA TOWNER 843CC» con la
+# «Jta.Tapa Cil. DAIHATSU HI-JET 843CC» —el Towner es un Hijet con otro nombre— y sacándola
+# ese par, que está bien, se perdía.
+_RE_SOLO_MOTORIZACION = re.compile(
+    r'^(?:\d{1,2}[.,]\d[A-Z]{0,3}|\d{1,2}V)'
+    r'(?:/(?:\d{1,2}[.,]\d[A-Z]{0,3}|\d{1,2}V))*/?$')
+
 _RUIDO_EN_FIRMA = {
     "DESPIECE", "JUEGO", "JGO", "KIT", "PARA", "CON", "SIN", "DEL", "LOS", "LAS", "POR",
     "UNIDAD", "UN", "UNA", "IZQ", "DER", "MM", "CM", "ORIGINAL", "ORIG", "ALTERNATIVO",
@@ -9822,6 +9849,7 @@ def firma_de_producto(descripcion, producto_id=None, codigo_clean=None):
     # Se separa solo cuando el punto está entre dos LETRAS. Entre números no se toca, que es
     # donde importa: 1.6 sigue siendo la cilindrada y 278.897 sigue siendo un código.
     limpio = _RE_PUNTO_ENTRE_LETRAS.sub(r"\1 \2", limpio)
+    limpio = _RE_COMA_DECIMAL.sub(".", limpio)   # ver _RE_COMA_DECIMAL
     palabras = [w for w in re.split(r"[^A-Z0-9./]+", limpio) if w]
 
     familia = clasificar_repuesto(texto)
@@ -10064,7 +10092,17 @@ def firmas_compatibles(a, b, minimo_nucleo=2, cuenta_palabras=None, total_descri
                            f"y «{'/'.join(sorted(pieza_b)[:3])}»")
 
     # Y para qué auto. Vale la marca (FORD) o el modelo/motor nombrado (FOCUS, SIGMA, F4L).
-    apl_comunes = (a.get("aplicacion") or set()) & (b.get("aplicacion") or set())
+    # La cilindrada y las válvulas NO valen: dicen cómo es el motor, no cuál es el auto, y
+    # cuando una de las dos descripciones no nombra ninguna marca de vehículo conocida son lo
+    # único que queda para contestar esta pregunta. Así salía «BOBINA ESCORT/ORION 1.8i 16V
+    # ZETEC» contra una bobina de «PEUGEOT 406 1.8i, 16V, 306 1.8 16V»: un Ford y un Peugeot
+    # unidos por «1.8I, 16V». Ver _RE_SOLO_MOTORIZACION.
+    # Se descuentan acá y no en la firma a propósito: para ORDENAR candidatos la cilindrada sí
+    # sirve —confirma la aplicación— y sacarlas de fuerza_de_la_coincidencia() cambiaba el
+    # orden de los tres que se guardan por producto, y con eso se perdían pares buenos
+    # («Jta.Tapa Cil. RENAULT CLIO II», «JUNTA TAPA CILINDROS FORD M. ZETEC») a cambio de otros.
+    apl_comunes = {w for w in (a.get("aplicacion") or set()) & (b.get("aplicacion") or set())
+                   if not _RE_SOLO_MOTORIZACION.match(w)}
     if not autos_comunes and not apl_comunes:
         return False, "no coinciden en para qué auto es"
 

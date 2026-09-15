@@ -350,6 +350,56 @@ Dos límites que están puestos a propósito y no hay que sacar:
 Medido: rescata 15 códigos (todos bujías NGK/Bosch, que es justo lo que cruza una bujía de un
 proveedor con la de otro), pierde 0, y las 30 motorizaciones conocidas siguen afuera.
 
+## «1,6» y «1.6» no eran la misma cilindrada
+
+Illinois escribe la coma —3.105 descripciones de esa lista— y todos los demás el punto: son
+23.244 con punto contra 4.534 con coma, y las dos poblaciones casi no se mezclan porque cada
+proveedor escribe siempre igual.
+
+Comparadas tal cual, las cilindradas de las dos listas **nunca se cruzan**, y la comparación
+corta con «cilindradas distintas» antes de mirar nada más. Sobre 1.500 × 1.500 productos
+reales eran **796 pares rechazados por cómo se escribe un número**. La pantalla de vehículos
+ya pasaba la coma a punto antes de comparar; en la firma faltaba.
+
+De paso arregla otra cosa que no se veía: la coma no era un caracter de palabra, así que
+`1,9TDI` se partía en `1` y `9TDI`. Ese `9TDI` suelto —129 veces en el catálogo— quedaba en la
+firma como si fuera un modelo, y hermanaba un 1,9 TDI con un 2,9 TDI.
+
+Lo que aparece cuando se arregla son pares como este, que estaban a la vista:
+
+    Junta Salida de Escape FORD SIERRA 1984/... - 1,6 - OHC   ↔   Jta.Salida Escape FORD SIERRA 1.6
+    Juego de juntas Carburador FIAT DUNA UNO - 1,4/1,5/1,6    ↔   Jgo.Jtas.Carburador FIAT DUNA 1.6
+    Junta para Cárter FIAT IVECO DUCATO - 2,4/2,5/2,8         ↔   Junta carter Fiat Ducato 2.8L Goma
+
+## «16V» no es un auto
+
+Para aceptar una sugerencia hay que contestar dos preguntas: qué pieza es y **para qué auto
+es**. La segunda se contestaba con cualquier palabra que no fuera el nombre de la pieza, y ahí
+entraban la cilindrada y la cantidad de válvulas. `16V` está en 3.513 descripciones.
+
+Cuando una de las dos descripciones no nombra ninguna marca de vehículo conocida —pasa
+seguido, la marca va pegada o abreviada— eso era **lo único** que quedaba. Los 43 pares que
+salieron al sacarlo son todos el mismo error, motores distintos de la misma marca:
+
+    Junta Tapa Cil. HILUX D-4D 2KD-FTV      ↔  Jta.Tapa Cil. TOYOTA 1ZZ-FE (el Corolla)
+    Junta Tapa Cil. PEUGEOT 306 406 XU7JP4  ↔  Junta tapa cil. Peugeot 206-307 TU5JP4
+    Junta Tapa Cil. FIAT FREEMONT 2.4       ↔  Jta.Tapa Cil. Fiat Punto 1248CC
+    Junta Tapa Cil. HYUNDAI ATOS 999CC      ↔  Jgo.Jta.Tapa Cil. HYUNDAI SONATA 2972CC V6
+
+y los 17 que entraron en su lugar comparten el modelo, no el motor genérico.
+
+Dos cosas que costaron medirlas:
+
+- **Se descuenta al aceptar, no en la firma.** Sacar la cilindrada de la firma cambia también
+  el ORDEN de los candidatos —de cada producto se guardan los tres mejores— y con eso se
+  perdían pares buenos («Jta.Tapa Cil. RENAULT CLIO II», «JUNTA TAPA CILINDROS FORD M. ZETEC»)
+  a cambio de otros. Para ordenar, la cilindrada sí sirve: confirma la aplicación.
+- **La cilindrada exacta en centímetros cúbicos se queda.** `843CC` no es una forma de hablar,
+  es un motor: es lo único que une la junta del ASIA/KIA TOWNER con la del DAIHATSU HI-JET, que
+  son el mismo auto con dos nombres. Y el patrón pide la coma decimal o la V de las válvulas
+  justamente para no llevarse puestos los modelos que son número y letra: 320I, 318I, 525D,
+  310D y 412D son BMW y Mercedes de verdad.
+
 ## Un código que apunta a ocho piezas
 
 Cuando una lista nueva deja cientos de pendientes, casi nunca son cientos de problemas: son
