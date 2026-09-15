@@ -56,6 +56,21 @@ veces en una lista; lo que se repite más es texto.
 Antes de aflojar cualquiera de esos filtros, corré `python3 -m nucleo.pruebas`: los casos que
 dicen «NO debía sacar nada» están escritos con descripciones reales de esas listas.
 
+## Un tope que no ahorra nada solo esconde resultados
+
+`sugerir_entre_todas_las_marcas()` recorre el catálogo entero y propone pares. Tenía un tope de
+600 y cortaba de verdad: con Illinois cargada salen **787** y se veían 600, sin que nada lo
+dijera. Y el tope no ahorraba tiempo — el recorrido cuesta 19 s con tope o sin él, porque lo
+caro es armar el índice y comparar, no guardar el resultado.
+
+Antes ya había pasado lo mismo con el tope en 200: de 284 pares reales se veían 84. Es el
+mismo error dos veces, así que ahora el tope es una constante (`TOPE_SUGERENCIAS_TODAS`) y
+**la pantalla avisa cuando se llega**.
+
+La misma idea vale para las otras cotas de la app: el LIMIT 400 de la búsqueda avisa, el tope
+de 4.000 productos por comparación avisa, y el de saltos avisa. Una cota que corta en silencio
+es indistinguible de «no hay más».
+
 ## `st.cache_data` no quiere decir gratis
 
 Una función cacheada tiene que decidir si el caché sigue vigente, y acá el testigo es

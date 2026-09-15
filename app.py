@@ -10410,7 +10410,10 @@ def _parecido_nombre_pieza(desc_a, desc_b):
     return len(pieza_a & pieza_b) / len(pieza_a | pieza_b)
 
 
-def sugerir_entre_todas_las_marcas(limite=600, tope_palabra=40):
+TOPE_SUGERENCIAS_TODAS = 2000  # ver sugerir_entre_todas_las_marcas()
+
+
+def sugerir_entre_todas_las_marcas(limite=TOPE_SUGERENCIAS_TODAS, tope_palabra=40):
     """Lo mismo que derivar_equivalencias_por_descripcion(), pero de UNA VEZ para todo el
     catálogo en vez de elegir dos proveedores a mano.
 
@@ -10432,8 +10435,12 @@ def sugerir_entre_todas_las_marcas(limite=600, tope_palabra=40):
 
     Nada se carga solo: todo va a la cola de pendientes para que lo apruebe una persona.
 
-    El tope está en 600 y no en 200 porque 200 cortaba de verdad: sobre las cinco listas reales
-    salen 284 pares, y con el tope viejo 84 no se veían nunca sin que nada lo avisara."""
+    El tope no ahorra tiempo: el recorrido cuesta lo mismo con tope o sin él (19 s sobre 70.888
+    productos), porque lo caro es armar el índice y comparar, no guardar el resultado. Lo único
+    que hace el tope es esconder pares. Estuvo en 200 y cortaba de verdad —de 284 pares reales
+    se veían 84—, se subió a 600 y volvió a cortar en cuanto entró una lista más: con Illinois
+    cargada salen 787 y se veían 600. Ahora está en 2.000, y si alguna vez se llega, la
+    pantalla lo dice en vez de callárselo."""
     from collections import defaultdict
     try:
         c.execute("""SELECT p.id, p.codigo_raw, p.codigo_clean, p.descripcion, p.marca_id,
@@ -19787,6 +19794,15 @@ if pagina == PAGINAS[3]:
                             "usan descripciones muy distintas entre sí, es esperable.")
                 else:
                     st.success(f"**{len(_st_todas)} par(es) propuestos** entre marcas distintas.")
+                    # Llegar al tope significa que hay más y no se están mostrando. Callarlo es
+                    # lo que hacía creer que eso era todo lo que había: con el tope en 600 y la
+                    # lista de Illinois cargada salían 787 pares y se veían 600.
+                    if len(_st_todas) >= TOPE_SUGERENCIAS_TODAS:
+                        st.warning(
+                            f"⚠️ Se cortó en **{TOPE_SUGERENCIAS_TODAS:,} pares**, así que hay "
+                            "más. Mandá estos a la cola, aprobalos o descartalos, y volvé a "
+                            "correrlo: los que ya resolviste no vuelven a salir."
+                        )
                     st.dataframe([{k: v for k, v in x.items() if not k.startswith("_")}
                                   for x in _st_todas],
                                  width="stretch", hide_index=True)
