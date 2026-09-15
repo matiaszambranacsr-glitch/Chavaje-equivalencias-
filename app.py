@@ -5383,13 +5383,46 @@ def productos_que_mas_ensucian(lote, limite=15):
     filas = filas_a_listas(c)
     # Solo interesan los que además tienen un código dudoso: un producto legítimo con muchas
     # equivalencias no es un problema, es un repuesto que sirve para muchos autos.
-    salida = []
+    salida, ya = [], set()
     for f in filas:
         malo, motivo = codigo_sospechoso(f["Código"], f.get("Descripción") or "")
         if malo:
             f["Problema"] = motivo
             salida.append(f)
-    return salida
+            ya.add(f["_id"])
+
+    # EL OTRO CULPABLE, y el que aparece de verdad: un código de FÁBRICA que apunta a varios
+    # productos DEL MISMO PROVEEDOR. Un código de fábrica identifica una pieza; si señala a
+    # ocho del mismo catálogo, o no es un código o la lista lo cita en piezas que no lo llevan.
+    # codigo_sospechoso() no los agarra porque tienen forma perfecta de código: en la lista de
+    # Illinois los peores son 'MAXIONS4' (el motor Maxion S4), 'MB616.912' (el OM 616 de
+    # Mercedes), 'OHL355' y 'BENZ813913' — todos nombres de motor o de camión.
+    # Con la lista de Illinois son 20 códigos que generan 87 pendientes: resolverlos de a uno
+    # es mirar 87 veces lo mismo. Antes esta pantalla no aparecía nunca porque la única
+    # condición era codigo_sospechoso(), que sobre esa lista da cero.
+    c.execute("""SELECT po.id AS "_id", po.codigo_raw AS "Código", mo.nombre AS "Marca",
+                        po.descripcion AS "Descripción",
+                        COUNT(DISTINCT p.id) AS "Pendientes que genera",
+                        mp.nombre AS "_prov"
+                 FROM equivalencias_pendientes ep
+                 JOIN productos po ON po.id IN (ep.producto_a_id, ep.producto_b_id)
+                 JOIN marcas mo ON mo.id = po.marca_id
+                 JOIN productos p ON p.id IN (ep.producto_a_id, ep.producto_b_id) AND p.id <> po.id
+                 JOIN marcas mp ON mp.id = p.marca_id
+                 WHERE ep.lote = ? AND mo.tipo = 'OEM' AND mp.tipo <> 'OEM'
+                 GROUP BY po.id, mp.id
+                 HAVING COUNT(DISTINCT p.id) >= 3
+                 ORDER BY COUNT(DISTINCT p.id) DESC LIMIT ?""", (lote, limite))
+    for f in filas_a_listas(c):
+        if f["_id"] in ya:
+            continue
+        prov = f.pop("_prov", "")
+        f["Problema"] = (f"apunta a {f['Pendientes que genera']} productos de {prov} — "
+                         "un código de fábrica identifica UNA pieza")
+        salida.append(f)
+        ya.add(f["_id"])
+    salida.sort(key=lambda x: -x["Pendientes que genera"])
+    return salida[:limite]
 
 
 def rechazar_pendientes_de_producto(producto_id, lote=None):

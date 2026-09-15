@@ -350,6 +350,31 @@ Dos límites que están puestos a propósito y no hay que sacar:
 Medido: rescata 15 códigos (todos bujías NGK/Bosch, que es justo lo que cruza una bujía de un
 proveedor con la de otro), pierde 0, y las 30 motorizaciones conocidas siguen afuera.
 
+## Un código que apunta a ocho piezas
+
+Cuando una lista nueva deja cientos de pendientes, casi nunca son cientos de problemas: son
+unos pocos códigos malos repetidos. Para eso está el aviso «N producto(s) con código dudoso
+generan X de estos pendientes», que los resuelve de una en vez de vínculo por vínculo.
+
+Con la lista de Illinois **ese aviso no aparecía nunca**. La única condición era
+`codigo_sospechoso()` —forma rara, letra suelta, número corto— y sobre esa lista da **cero**,
+porque los culpables tienen forma perfecta de código de fábrica:
+
+    MAXIONS4     8 pendientes   el motor Maxion S4
+    7679315      7              un número de camión
+    MB616.912    4              el OM 616 de Mercedes-Benz
+    OHL355       4              el OH L-355
+    BENZ813913   4              el 813 y el 913
+
+`productos_que_mas_ensucian()` los busca ahora por lo que hacen, no por cómo se escriben: un
+código de **FÁBRICA** que apunta a 3 o más productos **del mismo proveedor**. Un código de
+fábrica identifica UNA pieza; si señala a ocho del mismo catálogo, o no es un código o la lista
+lo cita en piezas que no lo llevan. Son 15 culpables y 67 pendientes, en 0,0 s.
+
+El corte es por proveedor (`GROUP BY po.id, mp.id`) y no por total: un código de fábrica
+legítimo aparece en varias listas a la vez —es justo para eso que sirve— y contando todo junto
+ese sería el primero de la lista.
+
 ## Quién puede hacer qué
 
 La app **deja entrar sin contraseña a propósito**: el botón «Continuar» del login te mete
