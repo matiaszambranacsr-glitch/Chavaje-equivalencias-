@@ -5196,6 +5196,9 @@ def analizar_lote_pendiente(lote, limite=400, desde=0):
             codigos_con_respaldo = set()
 
     # Lo que se aprendió de las revisiones anteriores. Se calcula una vez para todo el lote.
+    # Y el conteo de palabras del catálogo, por lo mismo: adentro del bucle son 400 recorridas
+    # completas de la tabla de productos.
+    _cuenta_pal, _total_desc = cuantas_veces_aparece_cada_palabra()
     patrones_aprendidos = aprender_de_las_decisiones()
     escalas_precio = escalas_de_precio()
     ventas_confirman = pares_confirmados_por_ventas()
@@ -5256,7 +5259,8 @@ def analizar_lote_pendiente(lote, limite=400, desde=0):
         # medidas se contradicen, los rubros no son el mismo— tumba el par sin importar
         # cuántos digan que sí.
         try:
-            a_favor, vetos, veredicto = evidencia_cruzada(f["a"], f["b"])
+            a_favor, vetos, veredicto = evidencia_cruzada(
+                f["a"], f["b"], cuenta_palabras=_cuenta_pal, total_descripciones=_total_desc)
         except Exception as _err:
             anotar_error("analizar_lote_pendiente", _err)
             a_favor, vetos, veredicto = [], [], ""
@@ -9981,7 +9985,7 @@ def fuerza_de_la_coincidencia(a, b):
     return (apl, cil, pieza, autos)
 
 
-def evidencia_cruzada(id_a, id_b):
+def evidencia_cruzada(id_a, id_b, cuenta_palabras=None, total_descripciones=None):
     """Corre TODOS los métodos sobre un mismo par y cuenta cuántos coinciden.
 
     Es la mejora de precisión más grande que faltaba. Hasta ahora cada método trabajaba solo:
@@ -10020,7 +10024,14 @@ def evidencia_cruzada(id_a, id_b):
     # 2. Descripción
     fa = firma_de_producto(pa["descripcion"], id_a, pa["codigo_clean"])
     fb = firma_de_producto(pb["descripcion"], id_b, pb["codigo_clean"])
-    _cuenta, _total = cuantas_veces_aparece_cada_palabra()
+    # El conteo de palabras del catálogo entero se puede pasar hecho, y hay que pasarlo cuando
+    # se llama a esto en un bucle. Cada llamada cuesta un COUNT + SUM(LENGTH(...)) sobre toda
+    # la tabla para saber si el caché sigue vigente, más deserializar el diccionario de 100.000
+    # palabras. Son 34 ms; parece nada hasta que se revisan 400 vínculos de una importación:
+    # la pantalla de «Equivalencias sugeridas» tardaba 37 segundos y 13 eran esto.
+    if cuenta_palabras is None or total_descripciones is None:
+        cuenta_palabras, total_descripciones = cuantas_veces_aparece_cada_palabra()
+    _cuenta, _total = cuenta_palabras, total_descripciones
     ok_desc, motivo_desc = firmas_compatibles(fa, fb, cuenta_palabras=_cuenta,
                                               total_descripciones=_total)
     if ok_desc:
@@ -17728,6 +17739,10 @@ if pagina == PAGINAS[2]:
 
                 if buscar_oem_en_desc and idx_desc is not None:
                     muestras = []
+                    # Los códigos ya cargados, UNA vez. Adentro del bucle eran hasta 60
+                    # recorridas completas de la tabla de productos solo para saber si el caché
+                    # seguía vigente.
+                    _conocidos_muestra = codigos_del_catalogo(version_del_catalogo())
                     for fila_prev in todas_filas[header_row + 1:header_row + 60]:
                         texto_desc = valor_o_vacio(fila_prev[idx_desc]) if idx_desc < len(fila_prev) else ""
                         cod_fila = (valor_o_vacio(fila_prev[idx_prov])
@@ -17737,7 +17752,7 @@ if pagina == PAGINAS[2]:
                         # pasar, que es exactamente lo que la muestra existe para evitar.
                         hallados = extraer_codigos_de_texto(
                             texto_desc, codigo_propio=cod_fila,
-                            codigos_conocidos=codigos_del_catalogo(version_del_catalogo()))
+                            codigos_conocidos=_conocidos_muestra)
                         if hallados:
                             muestras.append({"Descripción": texto_desc[:60], "Detecta": ", ".join(hallados)})
                         if len(muestras) >= 8:
@@ -18025,18 +18040,32 @@ if pagina == PAGINAS[2]:
 
                     progreso.empty()
 
+                    # CADA NÚMERO CON SU NOMBRE. 'cargados' NO es «filas leídas»: es la
+                    # cantidad de filas que además generaron una equivalencia. Importando la
+                    # lista de Illinois —6.900 filas— el cartel decía «Se leyeron 2391 fila(s)»,
+                    # que es un tercio de la verdad, y encima en la misma frase que decía que los
+                    # productos ya estaban cargados. El que importa se queda pensando que perdió
+                    # 4.500 filas.
+                    _total_filas = len(filas_datos)
+                    _con_equiv = cargados
+                    _productos = cargados + cargados_sin_equiv
+                    _resumen = (f"Se leyeron **{_total_filas:,} fila(s)** y quedaron cargados "
+                                f"**{_productos:,} producto(s)**"
+                                + (f", {omitidos:,} fila(s) se saltearon" if omitidos else "")
+                                + ".")
                     if cargar_directo:
-                        st.success(f"Se importaron {cargados} filas con equivalencia.")
+                        st.success(_resumen + f" {_con_equiv:,} de esas filas traían además un "
+                                              "código de fábrica y ya generaron equivalencias.")
                     else:
                         # En verde y con la palabra "equivalencia" parecía que ya estaban puestas.
                         # No lo están: van a la cola de revisión, y hasta que se aprueben la
                         # búsqueda NO cruza marcas. Decirlo mal es lo que hace que alguien importe
                         # tres listas, busque un código y crea que la app no relaciona proveedores.
                         st.warning(
-                            f"Se leyeron {cargados} fila(s) y los productos y precios ya están "
-                            "cargados, **pero las equivalencias todavía NO**: quedaron esperando "
-                            "tu aprobación. Hasta que las apruebes, buscar un código no va a "
-                            "traer los equivalentes de otras marcas."
+                            _resumen + f" Los precios ya están, **pero las equivalencias todavía "
+                            f"NO**: las {_con_equiv:,} fila(s) que traían código de fábrica "
+                            "quedaron esperando tu aprobación. Hasta que las apruebes, buscar un "
+                            "código no va a traer los equivalentes de otras marcas."
                         )
                     # Los números del chequeo de salud cambiaron: que se recalculen
                     invalidar_salud()

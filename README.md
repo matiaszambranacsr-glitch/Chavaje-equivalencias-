@@ -56,6 +56,24 @@ veces en una lista; lo que se repite más es texto.
 Antes de aflojar cualquiera de esos filtros, corré `python3 -m nucleo.pruebas`: los casos que
 dicen «NO debía sacar nada» están escritos con descripciones reales de esas listas.
 
+## `st.cache_data` no quiere decir gratis
+
+Una función cacheada tiene que decidir si el caché sigue vigente, y acá el testigo es
+`version_del_catalogo()`: un `COUNT(*) + SUM(LENGTH(descripcion))` sobre la tabla entera.
+Después hay que deserializar lo guardado. Son 34 ms — nada, hasta que la llamada queda adentro
+de un bucle.
+
+La pantalla de **Equivalencias sugeridas** tardaba **37 segundos** después de importar Illinois.
+De esos, 13 eran `cuantas_veces_aparece_cada_palabra()` llamada una vez por vínculo desde
+`evidencia_cruzada()`: 400 recorridas completas de `productos` para volver a leer el mismo
+diccionario de 100.000 palabras. Se calcula una vez en `analizar_lote_pendiente()` y se pasa
+hecha. **37 s → 4,1 s**, y la función sola de 14 s a 1,4 s.
+
+El control 24 del auditor lo busca solo: una función cacheada llamada adentro de un bucle **sin
+recibir nada que dependa de la vuelta**. Esa última condición es la que lo hace usable —
+`modelos_de_marca(marca, _version_cat)` adentro de un bucle está bien, porque el testigo ya se
+calculó afuera y la marca cambia en cada vuelta.
+
 ## El código de barras tiene su propia columna
 
 `productos.codigo_barras`. Parece un detalle de esquema y es el origen del problema de abajo.

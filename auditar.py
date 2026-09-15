@@ -1426,6 +1426,46 @@ for _i, _linea in enumerate(LINEAS, 1):
                  "el cuerpo, las bases que ya existen se quedan con la versión vieja en silencio")
 
 
+# ============ 24. Una función cara adentro de un bucle ============
+# st.cache_data esconde el costo. Una función cacheada NO es gratis: para saber si el caché
+# sigue vigente hay que calcular el testigo —acá es version_del_catalogo(), que hace un
+# COUNT + SUM(LENGTH(...)) sobre la tabla entera— y después deserializar lo guardado.
+# Son 34 ms. Parece nada hasta que la llamada está adentro de un bucle: la pantalla de
+# «Equivalencias sugeridas» revisa 400 vínculos y tardaba 37 segundos, de los cuales 13 eran
+# 400 recorridas completas de productos para volver a leer el mismo diccionario.
+# La solución siempre es la misma: calcularlo UNA vez antes del bucle y pasarlo.
+_CARAS = {"version_del_catalogo", "cuantas_veces_aparece_cada_palabra"}
+for _f in ast.walk(ARBOL):
+    if isinstance(_f, ast.FunctionDef):
+        for _d in _f.decorator_list:
+            _txt = ast.dump(_d)
+            if "cache_data" in _txt or "cache_resource" in _txt:
+                _CARAS.add(_f.name)
+# Solo molesta cuando NO se le pasa nada de la vuelta actual del bucle: ahí la llamada
+# devuelve siempre lo mismo y está de más. Si recibe una variable —modelos_de_marca(marca,
+# _version_cat), imagen_esquema_lista_para_mostrar(img_bytes, ...)— está bien donde está:
+# depende de la iteración, o el testigo ya se calculó una sola vez afuera.
+def _no_depende_del_bucle(llamada):
+    for _a in list(llamada.args) + [k.value for k in llamada.keywords]:
+        if not isinstance(_a, ast.Call):
+            return False
+    return True
+
+
+for _n in ast.walk(ARBOL):
+    if not isinstance(_n, (ast.For, ast.While)):
+        continue
+    for _cuerpo in _n.body:
+        for _x in ast.walk(_cuerpo):
+            if (isinstance(_x, ast.Call) and isinstance(_x.func, ast.Name)
+                    and _x.func.id in _CARAS and _no_depende_del_bucle(_x)):
+                reportar("REVISAR", _x.lineno,
+                         f"{_x.func.id}() adentro de un bucle y sin nada que dependa de la "
+                         "vuelta: aunque esté cacheada, cada llamada recalcula el testigo del "
+                         "caché —una recorrida entera de la tabla— y deserializa el resultado. "
+                         "Calcularla una vez antes del bucle")
+
+
 # ============ Resultado ============
 orden = {"ERROR": 0, "REVISAR": 1, "AVISO": 2}
 problemas.sort(key=lambda x: (orden[x[0]], x[1]))
