@@ -20378,9 +20378,21 @@ if pagina == PAGINAS[3]:
                         "en todo el catálogo** (Mantenimiento → Calidad), que los cruza por "
                         "descripción."
                     )
-                if candado('borrar productos sin equivalencias', st.button(f"🧹 Borrar esos {_sueltos:,} productos"), 'borrar_productos_sin_equivalencias'):
+                # Una casilla además de la contraseña, como en «Eliminar marca» y «Eliminar
+                # producto». Acá hace más falta que en ninguna: son 34.457 productos —el 48%
+                # del catálogo, casi todos vendibles y con precio— detrás de un solo botón, y
+                # no hay papelera para esto. La contraseña sola protege de que lo toque quien
+                # no debe; la casilla protege del dedo equivocado del que sí puede.
+                _confirmar_sueltos = st.checkbox(
+                    f"Confirmo que quiero borrar {_sueltos:,} productos y que esto NO se puede "
+                    "deshacer", key="confirmar_borrar_sueltos")
+                if candado('borrar productos sin equivalencias',
+                            st.button(f"🧹 Borrar esos {_sueltos:,} productos",
+                                       disabled=not _confirmar_sueltos),
+                            'borrar_productos_sin_equivalencias'):
                     borrados = depurar_huerfanos()
-                    st.success(f"Se borraron {borrados:,} producto(s) sin equivalencias.")
+                    avisar("success", f"Se borraron {borrados:,} producto(s) sin equivalencias.")
+                    st.rerun()
             st.markdown("**🗑️ Papelera**")
             explicar(
                 "Cuando borrás una marca entera, un combo, un alias de transferencia o un producto "
