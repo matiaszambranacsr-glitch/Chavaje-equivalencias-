@@ -16480,6 +16480,34 @@ Casi todo lo que edita o borra algo pide la contraseña de administrador la prim
                     st.warning(f"🔎 {codigo_individual} — código no válido, se omitió.")
                     continue
 
+                # EL KIT QUE APARECE ENTRE LOS RESULTADOS. Que esté en la tabla está
+                # bien —el que atiende quiere verlo, es la venta más grande— pero la
+                # tabla es la de equivalencias, o sea «esto lo podés vender en lugar de
+                # lo que pediste», y un kit NO se puede vender en lugar de la pieza
+                # suelta: trae otras cosas y cuesta otra plata. Al revés tampoco.
+                # Así que se muestran, y se dice en la misma fila qué son. Se contesta
+                # con los dos textos y nada más (ver _uno_trae_al_otro), sin una sola
+                # consulta de más.
+                _fila_buscada = next((f for f in res if f.get("Cadena") == "— el buscado"),
+                                      None)
+                if _fila_buscada:
+                    for f in res:
+                        if f is _fila_buscada:
+                            continue
+                        _rel = _uno_trae_al_otro(
+                            _fila_buscada.get("Descripcion"), _fila_buscada.get("Codigo"),
+                            f.get("Descripcion"), f.get("Codigo"),
+                            _fila_buscada.get("Tipo"), f.get("Tipo"))
+                        if not _rel:
+                            continue
+                        f["_complementario"] = True
+                        f["Cadena"] = ("📦 kit que la trae adentro — NO es lo mismo"
+                                       if es_un_kit(f.get("Descripcion") or "")
+                                       else "🧩 va adentro del kit — NO es lo mismo")
+                        # Sin confianza: no hay nada que confiar, la pregunta «¿es la
+                        # misma pieza?» ya está contestada y es que no.
+                        f["Confianza"] = ""
+
                 # CUÁNTAS DE LAS COINCIDENCIAS SON DE VERDAD OTRO REPUESTO.
                 # No es lo mismo "2 coincidencias" que "el que buscaste y su propio código de
                 # fábrica". Antes se contaba todo junto y el cartel verde decía que había
@@ -16490,7 +16518,8 @@ Casi todo lo que edita o borra algo pide la contraseña de administrador la prim
                 # buscado: otro producto, de otro proveedor. Los códigos de fábrica que no
                 # cuelgan nada más (_sin_salida) no cuentan, y el buscado tampoco.
                 alternativas = [f for f in res
-                                if f.get("Cadena") != "— el buscado" and not f.get("_sin_salida")]
+                                if f.get("Cadena") != "— el buscado" and not f.get("_sin_salida")
+                                and not f.get("_complementario")]
                 if not res:
                     etiqueta_resultado = f"🔎 {codigo_individual} — sin resultados"
                 elif alternativas:
@@ -16611,7 +16640,10 @@ Casi todo lo que edita o borra algo pide la contraseña de administrador la prim
                         # El margen es información sensible: la ve el dueño y el administrador,
                         # no cualquiera que atienda el mostrador.
                         if es_admin():
-                            mejor_marg = mejor_margen_entre_equivalentes(res)
+                            # Sin los kits: comparar el margen de un kit contra el de la
+                            # pieza suelta es comparar dos ventas distintas.
+                            mejor_marg = mejor_margen_entre_equivalentes(
+                                [f for f in res if not f.get("_complementario")])
                             agregar_margen(res)
                             if mejor_marg:
                                 st.info(
@@ -16621,8 +16653,14 @@ Casi todo lo que edita o borra algo pide la contraseña de administrador la prim
                                     f"(${mejor_marg['diferencia']:,.0f} más que el peor de la lista)."
                                 )
                         puentes_res = puentes_en_el_resultado([f["ID"] for f in res])
+
                         # comparar precios a ojo cuando hay varias marcas equivalentes.
-                        candidatos_precio = [f for f in res if f.get("Precio") and (f.get("Stock") or 0) > 0]
+                        # El kit queda afuera de la comparación: casi siempre sale más caro que
+                        # la pieza suelta, y coronarlo «el más barato» sería comparar dos cosas
+                        # distintas. Al revés, la pieza suelta adentro de un kit tampoco.
+                        candidatos_precio = [f for f in res
+                                             if f.get("Precio") and (f.get("Stock") or 0) > 0
+                                             and not f.get("_complementario")]
                         id_mas_barato = min(candidatos_precio, key=lambda f: f["Precio"])["ID"] if candidatos_precio else None
                         for f in res:
                             f["💰"] = "🏆 Más barato en stock" if f["ID"] == id_mas_barato else ""
@@ -16858,19 +16896,22 @@ Casi todo lo que edita o borra algo pide la contraseña de administrador la prim
                                 if _d["ID"] not in {x["ID"] for x in _contenido}:
                                     _contenido.append(_d)
                         if _kits:
-                            st.markdown("**📦 También viene en kit**")
+                            st.markdown("**📦 También viene en kit — no es lo mismo, es además**")
                             st.caption(
                                 "Estos kits del catálogo traen adentro alguno de los códigos de "
-                                "arriba. Suele ser la venta más grande y le ahorra al cliente "
-                                "volver por la otra pieza."
+                                "arriba. **No son equivalentes**: no se puede mandar el kit en "
+                                "lugar de la pieza suelta ni al revés —trae otras cosas y cuesta "
+                                "otra plata—. Se muestran porque suele ser la venta más grande y "
+                                "le ahorra al cliente volver por la otra pieza."
                             )
                             st.dataframe([{k: v for k, v in f.items() if not k.startswith("_")}
                                           for f in _kits], width="stretch", hide_index=True)
                         if _contenido:
-                            st.markdown("**🧩 Lo que trae el kit por separado**")
+                            st.markdown("**🧩 Lo que trae el kit por separado — tampoco es lo mismo**")
                             st.caption(
                                 "Si el cliente no quiere el kit entero, estas son las piezas "
-                                "sueltas que nombra la descripción."
+                                "sueltas que nombra la descripción. Cada una es **una parte** "
+                                "del kit, no un reemplazo del kit."
                             )
                             st.dataframe([{k: v for k, v in f.items() if not k.startswith("_")}
                                           for f in _contenido], width="stretch", hide_index=True)

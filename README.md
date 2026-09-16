@@ -350,6 +350,36 @@ Dos límites que están puestos a propósito y no hay que sacar:
 Medido: rescata 15 códigos (todos bujías NGK/Bosch, que es justo lo que cruza una bujía de un
 proveedor con la de otro), pierde 0, y las 30 motorizaciones conocidas siguen afuera.
 
+## El kit se muestra, pero no como un reemplazo
+
+Buscando la bujía `LSPFR6F11LUCAS` el kit `L206LUCAS` («KIT CAB Y BUJ (LEIHTT66SC/LSPFR6F11)»)
+aparecía en la tabla de resultados como una fila más, con su confianza 🟢 y todo. La tabla de
+resultados quiere decir una cosa sola: **esto se lo podés vender en lugar de lo que te pidió**.
+Y un kit no: trae otras cosas y cuesta otra plata. Al revés tampoco — la bujía suelta no
+reemplaza al kit.
+
+Sacarlo de la tabla sería peor, porque es la venta más grande del mostrador. Así que se queda,
+y la fila dice qué es:
+
+    LSPFR6F11LUCAS   FISPA       — el buscado
+    LSPFR6F11        OEM         🟢 directo                                🟢 sólida
+    ZFR6F-11         MOTORARG    🟢 directo                                🟢 sólida
+    L206LUCAS        FISPA       📦 kit que la trae adentro — NO es lo mismo
+    LEIHTT66SC       OEM         ⚪ código de fábrica, nadie más lo tiene
+
+Y al revés, buscando el kit, las piezas salen marcadas «🧩 va adentro del kit — NO es lo
+mismo». Además:
+
+- **No cuentan como equivalencia** en el cartel de arriba («8 equivalencias» y no 9).
+- **No compiten por «el más barato en stock»** ni entran en la comparación de margen: el kit
+  casi siempre sale más caro, y coronarlo sería comparar dos ventas distintas.
+- **No llevan confianza**: la pregunta «¿es la misma pieza?» ya está contestada, y es que no.
+
+La relación se calcula con los dos textos y nada más —la misma `_uno_trae_al_otro()` que usa la
+cola de revisión— así que no cuesta una sola consulta de más. Y las dos secciones de abajo
+siguen estando, que son las que encuentran el kit **aunque no haya ningún vínculo cargado**:
+salen de que el proveedor escribe adentro de la descripción del kit los códigos de lo que trae.
+
 ## Tres formas de inventar un código de fábrica
 
 Sobre las descripciones reales, adivinando códigos salían 17.499 distintos. **307 no eran
