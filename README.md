@@ -165,9 +165,9 @@ miles de equivalencias muertas.
 La segunda señal es la cuenta de GS1: los dígitos alternando peso 1 y 3, y el verificador es lo
 que falta para llegar a la decena. Medido sobre la base real, separa perfectamente:
 
-    MOTORARG   códigos largos que son EAN            99,7% cierran
-    FISPA      códigos de fábrica largos y numéricos   11% cierran  (lo que da el azar)
-    JL         idem                                     0% cierran
+    MOTORARG   8.319 códigos largos que son EAN      8.319 cierran  (100%)
+    FISPA      117 códigos de fábrica largos             16 cierran  (13%, lo que da el azar)
+    JL         3 idem                                     0 cierran
 
 Con eso alcanza para detectar la lista de prefijos mezclados sin marcar de más — probado: FISPA
 y JL siguen dando «no es una columna de códigos de barras».
@@ -178,6 +178,14 @@ El mismo dígito sirve en otros dos lugares:
   de que alguien salga a buscar un código que no existe.
 - **Buscando**: si lo que se escaneó son los 12 dígitos sin el verificador, el que está cargado
   es el de 13. Ese dígito no hay que adivinarlo, se calcula.
+
+**La trampa del DUN-14.** El código de la caja tiene 14 dígitos, y la primera versión de esto lo
+trataba como «un EAN-13 con un dígito de agrupación adelante»: sacarle el primero y hacer la
+cuenta de trece. Da otro número. Sobre la lista real, 21 códigos de caja de MOTORARG aparecían
+como mal copiados **estando perfectos** — y como la pantalla que los muestra dice «el escáner no
+los va a encontrar», habría mandado a alguien a revisar 21 cajas que están bien. Lo que dice la
+norma es completar con ceros a la izquierda hasta trece dígitos y hacer **una sola cuenta** para
+los cuatro largos (EAN-8, UPC-A, EAN-13 y DUN-14). Hay prueba de los cuatro.
 
 Un detalle que parece menor y no lo es: `codigo_de_barras_cierra()` devuelve **`None`** —no
 `False`— cuando el largo no es de código de barras. «Este código está mal copiado» y «esto no

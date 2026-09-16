@@ -699,14 +699,24 @@ def probar_el_digito_verificador_del_codigo_de_barras():
     la detección por prefijo la deja pasar entera y se cargan miles de equivalencias muertas.
     La cuenta de GS1 la agarra igual.
 
-    Está medido sobre la base real: de los códigos largos de MOTORARG —que son códigos de
-    barras— cierra el 99,7%; de los de FISPA —códigos de fábrica de verdad, largos y
-    numéricos— cierra el 11%, que es lo que da el azar."""
-    igual(codigos.digito_verificador_ean("779396002694"), "6",
+    Está medido sobre la base real: de los 8.319 códigos largos de MOTORARG —que son códigos de
+    barras— cierran los 8.319; de los de FISPA —códigos de fábrica de verdad, largos y
+    numéricos— cierra el 13%, que es lo que da el azar.
+
+    Y hay una trampa que ya se pisó: el DUN-14, que es el código de la CAJA. Tratarlo como «un
+    EAN-13 con un dígito de agrupación adelante» —sacarle el primero y hacer la cuenta de
+    trece— da otro número, y esos 21 códigos de caja de MOTORARG aparecían como mal copiados
+    estando perfectos. La norma dice completar con ceros a la izquierda hasta trece y hacer UNA
+    sola cuenta para los cuatro largos."""
+    igual(codigos.digito_verificador_gtin("779396002694"), "6",
           "la cuenta de GS1 da el dígito que falta")
-    igual(codigos.digito_verificador_ean("77939600269"), "",
-          "con once dígitos no hay cuenta que hacer")
+    igual(codigos.digito_verificador_gtin(""), "", "sin dígitos no hay cuenta que hacer")
     cierto(codigos.codigo_de_barras_cierra("7793960026946"), "un EAN bien copiado cierra")
+    cierto(codigos.codigo_de_barras_cierra("96385074"), "un EAN-8 cierra con la misma cuenta")
+    cierto(codigos.codigo_de_barras_cierra("045496730086"),
+           "y un UPC-A de 12 dígitos también")
+    cierto(codigos.codigo_de_barras_cierra("27793960977877"),
+           "el DUN-14 de la caja cierra: no es un EAN-13 con un dígito adelante")
     cierto(codigos.codigo_de_barras_cierra("7793960026945") is False,
            "cambiando un dígito deja de cerrar: es lo que detecta un código mal tipeado")
     cierto(codigos.codigo_de_barras_cierra("036115561G") is None,

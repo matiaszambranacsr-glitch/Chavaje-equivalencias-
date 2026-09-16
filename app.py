@@ -2714,17 +2714,26 @@ def sanitizar(codigo):
 TOPE_REPETICIONES_EN_DESCRIPCION = 4
 
 
-def digito_verificador_ean(doce_digitos):
+def digito_verificador_gtin(cuerpo):
     """El dígito que le corresponde a un código de barras, calculado. '' si no se puede.
 
-    Es aritmética de la norma GS1, no hay nada que consultar: se suman los dígitos alternando
-    peso 1 y 3, y el verificador es lo que falta para llegar a la decena. Un EAN-13 mal copiado
-    o mal leído por la cámara casi nunca cierra, así que este número solo separa un código de
-    barras de verdad de un número cualquiera de trece dígitos."""
-    n = re.sub(r'\D', '', str(doce_digitos or ""))
-    if len(n) != 12:
+    Es aritmética de la norma GS1, no hay nada que consultar. Y es UNA sola cuenta para los
+    cuatro largos —EAN-8, UPC-A de 12, EAN-13 y DUN-14 (la caja)—: se completa con ceros a la
+    izquierda hasta trece dígitos, se suman con pesos 3 y 1 alternados **empezando por 3 a la
+    izquierda**, y el verificador es lo que falta para llegar a la decena.
+
+    Lo de completar con ceros no es un atajo: es exactamente lo que dice la norma, y es la
+    diferencia entre leer bien y mal un DUN-14. Tratarlo como «un EAN-13 con un dígito de
+    agrupación adelante» —sacarle el primero y hacer la cuenta de trece— da otro número: sobre
+    la lista real de MOTORARG, esos 21 códigos de caja aparecían como mal copiados cuando están
+    perfectos.
+
+    `cuerpo` es el código SIN su dígito verificador."""
+    n = re.sub(r'\D', '', str(cuerpo or ""))
+    if not n or len(n) > 13:
         return ""
-    suma = sum(int(d) * (3 if i % 2 else 1) for i, d in enumerate(n))
+    n = n.rjust(13, "0")
+    suma = sum(int(d) * (3 if i % 2 == 0 else 1) for i, d in enumerate(n))
     return str((10 - suma % 10) % 10)
 
 
@@ -2735,14 +2744,10 @@ def codigo_de_barras_cierra(codigo):
     mal copiado» que «esto no es un código de barras», y confundirlos haría que la app acuse de
     error a un código de fábrica que nunca pretendió ser un EAN."""
     n = re.sub(r'\D', '', str(codigo or ""))
-    if len(n) == 14:               # DUN-14: el dígito de agrupación va adelante
-        n = n[1:]
-    if len(n) == 12:               # UPC-A: es un EAN-13 con un cero adelante
-        n = "0" + n
-    if len(n) != 13:
+    if len(n) not in (8, 12, 13, 14):
         return None
-    esperado = digito_verificador_ean(n[:12])
-    return bool(esperado) and esperado == n[12]
+    esperado = digito_verificador_gtin(n[:-1])
+    return bool(esperado) and esperado == n[-1]
 
 
 def columna_es_codigo_de_barras(valores):
@@ -2786,8 +2791,8 @@ def columna_es_codigo_de_barras(valores):
     # Segunda señal, para las listas que el prefijo no agarra: un revendedor que trae productos
     # de veinte fábricas tiene veinte prefijos distintos y ninguno llega al 70%. Ahí lo que los
     # delata es el DÍGITO VERIFICADOR. Está medido contra la base real: de los códigos largos de
-    # MOTORARG —que son códigos de barras— cierra el 99,7%, y de los de FISPA —que son códigos
-    # de fábrica de verdad, largos y numéricos— cierra el 11%, que es lo que da el azar. No se
+    # MOTORARG —que son códigos de barras— cierran los 8.319, y de los de FISPA —que son códigos
+    # de fábrica de verdad, largos y numéricos— cierra el 13%, que es lo que da el azar. No se
     # puede confundir una cosa con la otra.
     cierran = [v for v in largos if codigo_de_barras_cierra(v)]
     if len(cierran) >= len(largos) * 0.7:
@@ -3397,6 +3402,35 @@ def mover_codigos_de_barras_a_su_columna(marca_id):
             c.execute("DELETE FROM productos WHERE id = ?", (fila["oem_id"],))
             movidos += 1
     return movidos, ya_tenian
+
+
+def codigos_de_barras_que_no_cierran(limite=200):
+    """Los códigos de barras cargados que no pasan su propio dígito verificador.
+
+    Son productos que NO se van a poder escanear nunca: la cámara lee el número de la caja, no
+    coincide con el que está cargado, y el repuesto no aparece. Desde el mostrador se ve como
+    «el escáner no anda», y es un dígito cambiado en la planilla del proveedor.
+
+    No se corrigen solos a propósito: cambiar un dígito para que la cuenta cierre da OTRO código
+    de barras, que puede ser el de un producto distinto. Lo que hay que hacer es mirar la caja.
+
+    Sobre la base real hoy no hay ninguno: los 8.319 códigos de MOTORARG cierran los 8.319. Eso
+    no la hace inútil —es el control que avisa el día que una lista entre con un dígito
+    cambiado— pero sí quiere decir que si alguna vez muestra algo, hay que mirarlo en serio."""
+    try:
+        c.execute("""SELECT p.id, p.codigo_raw AS "Código", m.nombre AS "Lista",
+                            p.codigo_barras AS "Código de barras", p.descripcion AS "Descripción"
+                     FROM productos p JOIN marcas m ON m.id = p.marca_id
+                     WHERE p.codigo_barras IS NOT NULL AND TRIM(p.codigo_barras) <> ''
+                     ORDER BY m.nombre, p.codigo_raw""")
+        filas = filas_a_listas(c)
+    except sqlite3.OperationalError as _err:
+        anotar_error("codigos_de_barras_que_no_cierran", _err)
+        return []
+    # El filtro va en Python y no en SQL porque la cuenta de GS1 no se escribe en SQLite sin
+    # una tabla de pesos; igual son los que tienen código de barras cargado, no el catálogo.
+    malos = [f for f in filas if codigo_de_barras_cierra(f["Código de barras"]) is False]
+    return malos[:limite]
 
 
 def listas_que_no_cruzan():
@@ -15339,7 +15373,8 @@ def buscar_por_codigo_de_barras(codigo_leido):
     # Los EAN-13 a veces se cargan sin el dígito verificador, o con un 0 adelante. Y al revés:
     # si lo que se escaneó son los 12 dígitos sin el verificador, el que está cargado es el de
     # 13 — ese dígito no hay que adivinarlo, se calcula.
-    _completo = clean + digito_verificador_ean(clean) if digito_verificador_ean(clean) else ""
+    _completo = (clean + digito_verificador_gtin(clean)
+                 if len(clean) == 12 and clean.isdigit() else "")
     for variante in (clean[:-1], clean.lstrip("0"), "0" + clean, _completo):
         if variante and variante != clean:
             res = buscar_por_codigo(variante)
@@ -22044,6 +22079,24 @@ if pagina == PAGINAS[3]:
                                 + (f" {_ya:,} producto(s) ya tenían uno cargado y se respetó."
                                    if _ya else ""))
                         st.rerun()
+
+            # Los que ya están en su columna pero con un dígito cambiado: el escáner no los
+            # va a encontrar nunca, y desde el mostrador se ve como «el escáner no anda».
+            _barras_rotos = codigos_de_barras_que_no_cierran()
+            if _barras_rotos:
+                st.markdown("**🔢 Códigos de barras que no cierran con su dígito verificador**")
+                explicar(
+                    "Están cargados, pero con un dígito cambiado: escanear la caja no los va a "
+                    "encontrar.",
+                    "El último dígito de un código de barras es una cuenta sobre los otros doce. "
+                    "Si no da, el número está mal copiado en la lista del proveedor.\n\n"
+                    "**No se corrigen solos a propósito**: cambiar un dígito para que la cuenta "
+                    "cierre da OTRO código de barras, que puede ser el de un producto distinto. "
+                    "Hay que mirar la caja y corregirlo a mano en la ficha del producto."
+                )
+                st.dataframe(quitar_id(_barras_rotos), width="stretch", hide_index=True)
+                st.caption(f"{len(_barras_rotos)} producto(s). Son los que el escáner no "
+                            "encuentra aunque el repuesto esté cargado.")
 
             st.markdown("**🔗 Listas que no cruzan con ninguna otra**")
             explicar(
