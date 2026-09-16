@@ -9955,7 +9955,7 @@ def firma_de_producto(descripcion, producto_id=None, codigo_clean=None):
 
     # Los modelos: palabras que quedan después de sacar la marca del auto, el ruido y los
     # números sueltos. Se buscan contra el catálogo propio para no inventar modelos.
-    nucleo, modelos = [], set()
+    nucleo, modelos, modelos_numericos = [], set(), set()
     # TODAS las marcas de auto que nombre, no solo la primera. Antes se sacaba únicamente la
     # de marca_auto, y en «JTA TAPA CIL M.BENZ ... BENZ» el «BENZ» suelto quedaba adentro del
     # núcleo: la app contaba la marca del auto como si fuera una palabra de la PIEZA y
@@ -9989,10 +9989,25 @@ def firma_de_producto(descripcion, producto_id=None, codigo_clean=None):
         # Las dos caras del mismo error: comparaba una junta contra otra junta del mismo auto
         # y decía «piezas distintas: FOCUS y JTA.TAPA», y al revés daba por parecidas dos
         # piezas sin relación con solo compartir dos modelos de auto.
+        # EL MODELO QUE ES UN NÚMERO. En los autos viejos y en los camiones el modelo ES un
+        # número —FIAT 128, FIAT 600, PEUGEOT 404, VOLKSWAGEN 1300, MERCEDES 1620— y el núcleo
+        # los tiraba a todos junto con los años y las medidas, por ser puro número. La
+        # consecuencia se veía en las sugerencias: «Jgo.Jtas.Carburador FIAT 125» salía
+        # emparejado con «Juego de juntas para Carburador FIAT 1600», porque lo único que
+        # quedaba de las dos descripciones era la palabra FIAT.
+        # Se pide que venga JUSTO DESPUÉS de la marca del auto, que es como se escriben, y que
+        # no sea un año. Los de FISPA, que escriben la cilindrada separada («FIAT PALIO 1 3»),
+        # no entran: son de un dígito y acá se piden dos.
+        es_modelo_numerico = (re.fullmatch(r'\d{2,4}', w) and indice
+                              and palabras[indice - 1] in palabras_marca
+                              and not re.fullmatch(r'(19|20)\d{2}', w))
         if (w in _RUIDO_EN_FIRMA or w in palabras_marca or w in _POSICIONES
                 or w in MARCAS_DE_REPUESTO
-                or len(w) < 3 or re.fullmatch(r'[\d./,]+', w)):
+                or (not es_modelo_numerico
+                    and (len(w) < 3 or re.fullmatch(r'[\d./,]+', w)))):
             continue
+        if es_modelo_numerico:
+            modelos_numericos.add(w)
         # La misma pieza abreviada distinta por cada proveedor. Taranto pone «Jta.Tapa
         # Cilind.» e Illinois «Junta Tapa de Cilindros»: sin expandir, la cabeza de una es
         # JTA y la de la otra JUNTA, y la comparación cortaba con «piezas distintas» entre
@@ -10044,6 +10059,7 @@ def firma_de_producto(descripcion, producto_id=None, codigo_clean=None):
 
     return {"familia": familia, "nucleo": nucleo, "cabeza": cabeza, "autos": autos,
             "pieza": pieza, "aplicacion": set(aplicacion),
+            "modelos_numericos": modelos_numericos,
             "siglas": siglas, "marca_auto": marca_auto, "posicion": posicion,
             "cilindradas": cilindradas, "vias": vias, "texto": limpio}
 
@@ -10112,6 +10128,25 @@ def firmas_compatibles(a, b, minimo_nucleo=2, cuenta_palabras=None, total_descri
     # Cilindrada: si las dos la declaran y no comparten ninguna, no es la misma aplicación
     if a["cilindradas"] and b["cilindradas"] and not (a["cilindradas"] & b["cilindradas"]):
         return False, "cilindradas distintas"
+
+    # El modelo que es un número, con el mismo criterio que la cilindrada y las siglas: si las
+    # dos descripciones lo declaran y no comparten ninguno, son de autos distintos. Hasta que
+    # esos números entraron a la firma, de «Jgo.Jtas.Carburador FIAT 125» contra «Juego de
+    # juntas para Carburador FIAT 1600 128» lo único que quedaba era la palabra FIAT, y el par
+    # pasaba. Ver es_modelo_numerico en firma_de_producto().
+    # Con una salvedad que hace falta: el número se reconoce solo cuando viene JUSTO detrás de
+    # la marca, y las listas encadenan modelos («FIAT 128 EUROPA 147 DUNA»), así que del segundo
+    # en adelante no quedan anotados. Antes de cortar se mira si el número del otro aparece en
+    # algún lado de la descripción: sin eso, «FIAT 147 DUNA» contra «FIAT 128 EUROPA 147 DUNA»
+    # —que son la misma junta— salía como «modelos distintos: 147 vs 128».
+    _num_a, _num_b = a.get("modelos_numericos") or set(), b.get("modelos_numericos") or set()
+    if _num_a and _num_b and not (_num_a & _num_b):
+        _texto_a, _texto_b = a.get("texto") or "", b.get("texto") or ""
+        _lo_nombra = (any(re.search(rf'\b{n}\b', _texto_b) for n in _num_a)
+                      or any(re.search(rf'\b{n}\b', _texto_a) for n in _num_b))
+        if not _lo_nombra:
+            return False, (f"modelos distintos: {'/'.join(sorted(_num_a)[:2])} "
+                           f"vs {'/'.join(sorted(_num_b)[:2])}")
 
     # LOS AUTOS. Probado sobre dos listas reales de 5.000 y 26.000 productos, es el control
     # que evita la avalancha de falsos: sin él, toda «BUJIA NAFTA» se vinculaba con toda otra

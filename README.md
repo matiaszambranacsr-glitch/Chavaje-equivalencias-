@@ -350,6 +350,39 @@ Dos límites que están puestos a propósito y no hay que sacar:
 Medido: rescata 15 códigos (todos bujías NGK/Bosch, que es justo lo que cruza una bujía de un
 proveedor con la de otro), pierde 0, y las 30 motorizaciones conocidas siguen afuera.
 
+## Cuando el modelo del auto es un número
+
+Un Fiat 128, un Fiat 600, un Peugeot 404, un VW 1300, un Mercedes 1620: en los autos viejos y
+en los camiones **el modelo ES un número**, y la firma los tiraba a todos junto con los años y
+las medidas, por la regla de «lo que es puro número no dice qué pieza es».
+
+Se veía en las sugerencias. De estas dos descripciones,
+
+    Jgo.Jtas.Carburador FIAT 125
+    Juego de juntas para Carburador FIAT 1600 128 …
+
+lo único que quedaba era la palabra FIAT, y con eso el par pasaba. Y al revés, dos juntas del
+MISMO 128 no tenían nada específico en común que las hiciera subir en la lista.
+
+Ahora un número de 2 a 4 dígitos que viene **justo detrás de la marca del auto** cuenta como
+modelo. Se pide esa posición porque es como se escriben, y deja afuera lo que no lo es: los
+años (se descartan aparte), los códigos internos del proveedor —los de FISPA son de 5 dígitos,
+«SENSOR DE DETONACION 12006»— y la cilindrada de las listas que la escriben separada («FIAT
+PALIO 1 3»), que es de un dígito.
+
+Con eso el modelo numérico entra además al mismo criterio que la cilindrada, las siglas y la
+posición: **si las dos descripciones lo declaran y no comparten ninguno, son de autos
+distintos**. Medido sobre el barrido del catálogo real: 146 pares nuevos que antes no se
+encontraban (FIAT 128 ↔ FIAT 128 EUROPA, FIAT 600 ↔ FIAT 600 D/E/R, DEUTZ 913 ↔ DEUTZ 913) y
+118 cortados que estaban mal (Citroën C3/C4 Picasso contra Peugeot 405/505, Alfa 166 contra
+Fiat 500, BMW serie 7 contra BMW 135).
+
+Hizo falta una salvedad para no cortar de más: como el número se reconoce solo detrás de la
+marca y las listas encadenan modelos («FIAT 128 EUROPA 147 DUNA»), del segundo en adelante no
+quedan anotados. Antes de cortar se mira si el número del otro aparece en algún lado de la
+descripción; sin eso, «FIAT 147 DUNA» contra «FIAT 128 EUROPA 147 DUNA» —que son la misma
+junta— salía como «modelos distintos».
+
 ## Un caché que no se refrescaba nunca
 
 Streamlit **no hashea los parámetros que empiezan con guion bajo** — es su forma de decir «esto
