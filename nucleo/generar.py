@@ -95,6 +95,7 @@ Se usa para dos cosas distintas y conviene no confundirlas:
     conservadora a propósito: ante la duda no devuelve nada."""
 import re
 import unicodedata
+from datetime import datetime
 
 from .errores import anotar_error
 from .codigos import _RE_REF_PEGADO, normalizar_texto, sanitizar
@@ -112,7 +113,12 @@ from .codigos import _RE_REF_PEGADO, normalizar_texto, sanitizar
       "_parecido_nombre_pieza", "extraer_anios",
       "PALABRAS_DE_CONTEXTO", "PALABRAS_NO_MODELO",
       "es_nombre_de_modelo",
-      "_RE_PIEZA_POR_MEDIDA", "medidas_desde_descripcion"])
+      "_RE_PIEZA_POR_MEDIDA", "medidas_desde_descripcion",
+      # La patente argentina: qué se lee de ella sin consultar ninguna base
+      "PROVINCIAS_PATENTE", "ANCLAS_PATENTE_VIEJA", "ANCLAS_PATENTE_MERCOSUR",
+      "_RE_PATENTE_VIEJA", "_RE_PATENTE_MERCOSUR", "_RE_PATENTE_MOTO_MERCOSUR",
+      "_RE_PATENTE_MOTO_VIEJA", "_RE_PATENTE_PROVINCIAL",
+      "_orden_de_letras", "_anio_por_anclas", "leer_patente"])
 
 # ---------------------------------------------------------------- planillas
 escribir("planillas.py", '''"""Leer una lista de proveedor y entender qué es cada columna.

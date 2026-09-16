@@ -691,6 +691,42 @@ def probar_busqueda_por_codigo_de_barras():
     con.close()
 
 
+def probar_la_patente_argentina():
+    """Qué se puede leer de una patente sin consultar ninguna base.
+
+    No existe una base pública y gratuita que traduzca patente a vehículo, así que de la
+    patente sola nunca va a salir «Gol 1.6». Pero el formato y la serie sí se leen: si es
+    Mercosur o vieja, si es auto o moto, de qué provincia salió —las provinciales— y sobre
+    todo entre qué años se patentó, que es lo que en el mostrador se pregunta siempre después
+    del modelo.
+
+    El año es APROXIMADO y por eso va como rango: lo único seguro es el orden en que se
+    entregan las series. La app lo afina después con las fichas del propio taller."""
+    igual(vehiculos.leer_patente("AB 123 CD")["formato"], "mercosur", "AB123CD es Mercosur")
+    igual(vehiculos.leer_patente("ABC 123")["formato"], "vieja", "ABC123 es la vieja")
+    igual(vehiculos.leer_patente("B 123 456")["formato"], "provincial", "B123456 es provincial")
+    igual(vehiculos.leer_patente("B123456")["provincia"], "Buenos Aires", "la B es Buenos Aires")
+    igual(vehiculos.leer_patente("X123456")["provincia"], "Córdoba", "la X es Córdoba")
+    igual(vehiculos.leer_patente("A123BCD")["vehiculo"], "moto", "una letra y tres es moto")
+    igual(vehiculos.leer_patente("cualquiera")["formato"], None, "lo que no es patente no lo es")
+
+    # El rango de años no se puede salir del período en que existió cada formato.
+    vieja = vehiculos.leer_patente("AAA111")
+    cierto(vieja["anio_desde"] >= 1995, "la serie vieja no arranca antes de 1995")
+    ultima = vehiculos.leer_patente("PZZ999")
+    cierto(ultima["anio_hasta"] <= 2016, "y no llega más allá de marzo de 2016")
+    nueva = vehiculos.leer_patente("AA123AA")
+    cierto(nueva["anio_desde"] >= 2015, "la Mercosur no existe antes de 2016")
+
+    # Y el orden se respeta: una serie posterior no puede dar un año anterior.
+    anteriores = None
+    for serie in ("AAA111", "DVX123", "IZT456", "MHG789", "OQP321"):
+        actual = vehiculos.leer_patente(serie)["anio_desde"]
+        if anteriores is not None:
+            cierto(actual >= anteriores, f"{serie} no puede ser más viejo que el anterior")
+        anteriores = actual
+
+
 def probar_bed_ford_no_es_ford():
     """«BED FORD» es el camión Bedford, no un Ford.
 
@@ -911,6 +947,7 @@ def main():
                    probar_vocabulario_de_pieza,
                    probar_abreviaturas_de_las_listas_reales,
                    probar_busqueda_por_codigo_de_barras,
+                   probar_la_patente_argentina,
                    probar_bed_ford_no_es_ford,
                    probar_la_marca_abreviada_es_la_misma_marca,
                    probar_ref_orig_pegado_no_es_codigo,

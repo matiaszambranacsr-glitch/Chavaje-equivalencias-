@@ -350,6 +350,50 @@ Dos límites que están puestos a propósito y no hay que sacar:
 Medido: rescata 15 códigos (todos bujías NGK/Bosch, que es justo lo que cruza una bujía de un
 proveedor con la de otro), pierde 0, y las 30 motorizaciones conocidas siguen afuera.
 
+## Lo que la patente dice sola
+
+No existe una base pública y gratuita que traduzca patente a vehículo —las que hay cobran por
+consulta— así que de la patente sola nunca va a salir «Gol 1.6 2012». Pero no es cierto que no
+diga nada, y lo que dice es justo lo que el mostrador pregunta después del modelo: **de qué año
+es**.
+
+`leer_patente()` reconoce los cuatro formatos argentinos sin consultar nada:
+
+    AB 123 CD   Mercosur, auto        desde abril de 2016
+    A 123 BCD   Mercosur, moto        desde abril de 2016
+    ABC 123     vieja, auto           1995 a marzo de 2016
+    123 ABC     vieja, moto
+    B 123 456   provincial, hasta 1994 — y la letra dice la provincia (B = Buenos Aires,
+                X = Córdoba, S = Santa Fe, M = Mendoza…)
+
+Y estima el año por la serie. Eso es lo delicado: **no hay una tabla oficial publicada** de qué
+serie salió en qué mes. Lo único seguro es el ORDEN —las series se entregan alfabéticamente— así
+que con unas pocas anclas conocidas se interpola el resto, el resultado va siempre como RANGO y
+la pantalla dice que es aproximado. El rango además se recorta a los años en que ese formato
+existió: una `AAA 111` no puede ser de 1993 ni una `PZZ 999` de 2018.
+
+Lo que hace que esto sea de verdad útil es la segunda parte: **el taller corrige la tabla sin
+darse cuenta**. Cada ficha cargada con patente Y año es un dato exacto de esta zona y de este
+parque, así que `anio_probable_de_patente()` busca las fichas propias más cercanas por arriba y
+por abajo de esa serie e interpola entre esas dos. Con dos fichas ya no usa la tabla general, y
+lo dice: «estimado con las 14 fichas que tenés cargadas con patente y año».
+
+    sin fichas    DVX 123  →  2000-2004   estimado por la serie (aproximado)
+    con 4 fichas  DZZ 999  →  2001-2003   estimado con tus fichas
+
+## Veinte WMI más
+
+El lector de VIN trae precargados los fabricantes por WMI —los tres primeros caracteres— y
+estaban los 328 que cubren el parque argentino. Faltaban los que las marcas estrenaron en los
+últimos años y algunos que acá se ven seguido: Mercedes `W1K`/`W1N`/`W1V`, BMW i `WBY`, BMW
+Motorrad `WB1`, las nuevas de PSA `VR1`/`VR3`/`VR7`, Mazda `JM1`, Great Wall `LGW`, Tesla
+`7SA`/`LRW`, Volvo China `LYV`, Honda y Acura de Estados Unidos `19U`/`19X`/`5FN`/`5J6`, Kia
+`5XY`, Ford Tailandia `MNA`, SAIC-GM-Wuling `LZW`. Son 348.
+
+Van solo los que se pueden dar por seguros: un WMI equivocado hace que la app afirme una marca
+que no es, y eso es peor que no saberla. La lista sigue siendo editable desde la app y lo que
+esté cargado a mano no se pisa nunca.
+
 ## «PVC» era un código, y unía 76 cables
 
 En la base real hay **196 vínculos entre dos productos de la misma lista**, todos de JL. No son

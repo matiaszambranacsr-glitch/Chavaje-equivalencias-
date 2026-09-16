@@ -8,6 +8,7 @@ Se usa para dos cosas distintas y conviene no confundirlas:
     conservadora a propósito: ante la duda no devuelve nada."""
 import re
 import unicodedata
+from datetime import datetime
 
 from .errores import anotar_error
 from .codigos import _RE_REF_PEGADO, normalizar_texto, sanitizar
@@ -740,3 +741,124 @@ def medidas_desde_descripcion(descripcion):
             medidas["paso_rosca"] = paso
 
     return medidas
+
+
+# La letra de las patentes provinciales (las de antes de 1995: una letra y seis números).
+# Es la misma codificación de provincias que usan los registros del automotor.
+PROVINCIAS_PATENTE = {
+    "A": "Salta", "B": "Buenos Aires", "C": "Capital Federal", "D": "San Luis",
+    "E": "Entre Ríos", "F": "La Rioja", "G": "Santiago del Estero", "H": "Chaco",
+    "J": "San Juan", "K": "Catamarca", "L": "La Pampa", "M": "Mendoza", "N": "Misiones",
+    "P": "Formosa", "Q": "Neuquén", "R": "Río Negro", "S": "Santa Fe", "T": "Tucumán",
+    "U": "Chubut", "V": "Tierra del Fuego", "W": "Corrientes", "X": "Córdoba",
+    "Y": "Jujuy", "Z": "Santa Cruz",
+}
+
+
+# Anclas de la serie vieja (tres letras y tres números, 1995–2016) y de la Mercosur
+# (dos letras, tres números, dos letras, desde abril de 2016).
+# SON APROXIMADAS y la app lo dice cada vez que las usa. No hay una tabla oficial publicada de
+# «qué serie salió qué mes»; lo que sí es seguro es el orden —las series se entregan en orden
+# alfabético— así que con unos pocos puntos conocidos se interpola el resto.
+# Y lo más importante: estas anclas son el punto de partida. anio_probable_de_patente() usa
+# ADEMÁS las fichas del propio taller, donde cada auto cargado con patente y año es un dato
+# exacto de esta zona y de este parque. Con treinta fichas cargadas, la estimación deja de
+# depender de esta tabla.
+ANCLAS_PATENTE_VIEJA = [("AAA", 1995), ("CAA", 1999), ("DZZ", 2002), ("FAA", 2006),
+                        ("IAA", 2010), ("KAA", 2012), ("MAA", 2013), ("OAA", 2015),
+                        ("PZZ", 2016)]
+
+
+ANCLAS_PATENTE_MERCOSUR = [("AA", 2016), ("AC", 2018), ("AE", 2020), ("AF", 2021),
+                           ("AG", 2022), ("AH", 2023), ("AJ", 2024), ("AK", 2025)]
+
+
+_RE_PATENTE_VIEJA = re.compile(r'^([A-Z]{3})(\d{3})$')
+
+
+_RE_PATENTE_MERCOSUR = re.compile(r'^([A-Z]{2})(\d{3})([A-Z]{2})$')
+
+
+_RE_PATENTE_MOTO_MERCOSUR = re.compile(r'^([A-Z])(\d{3})([A-Z]{3})$')
+
+
+_RE_PATENTE_MOTO_VIEJA = re.compile(r'^(\d{3})([A-Z]{3})$')
+
+
+_RE_PATENTE_PROVINCIAL = re.compile(r'^([A-Z])(\d{6})$')
+
+
+def _orden_de_letras(letras):
+    """El número de orden de una serie de letras: AAA es 0, AAB es 1, ABA es 26…"""
+    n = 0
+    for ch in letras:
+        n = n * 26 + (ord(ch) - 65)
+    return n
+
+
+def _anio_por_anclas(letras, anclas):
+    """Interpola el año entre las anclas conocidas. Devuelve (año, es_extrapolado)."""
+    x = _orden_de_letras(letras)
+    puntos = sorted((_orden_de_letras(s), a) for s, a in anclas)
+    if x <= puntos[0][0]:
+        return puntos[0][1], x < puntos[0][0]
+    if x >= puntos[-1][0]:
+        return puntos[-1][1], x > puntos[-1][0]
+    for (x0, a0), (x1, a1) in zip(puntos, puntos[1:]):
+        if x0 <= x <= x1:
+            if x1 == x0:
+                return a0, False
+            return int(round(a0 + (a1 - a0) * (x - x0) / (x1 - x0))), False
+    return puntos[-1][1], True
+
+
+def leer_patente(texto):
+    """Qué se puede saber de una patente argentina sin consultar ninguna base.
+
+    Devuelve siempre un diccionario; 'formato' es None cuando no se reconoce. El año va como
+    RANGO y con el aviso de que es aproximado: sirve para filtrar el catálogo, no para
+    afirmar de qué año es el auto."""
+    pat = re.sub(r'[^A-Z0-9]', '', (texto or "").upper())
+    salida = {"patente": pat, "formato": None, "provincia": None, "vehiculo": None,
+              "anio_desde": None, "anio_hasta": None, "detalle": ""}
+    if not pat:
+        return salida
+
+    m = _RE_PATENTE_MERCOSUR.match(pat)
+    if m:
+        anio, fuera = _anio_por_anclas(m.group(1), ANCLAS_PATENTE_MERCOSUR)
+        salida.update(formato="mercosur", vehiculo="auto", anio_desde=anio - 1,
+                      anio_hasta=anio + 1,
+                      detalle="patente Mercosur (se entregan desde abril de 2016)")
+        return salida
+
+    m = _RE_PATENTE_MOTO_MERCOSUR.match(pat)
+    if m:
+        salida.update(formato="mercosur", vehiculo="moto", anio_desde=2016,
+                      anio_hasta=datetime.now().year,
+                      detalle="patente Mercosur de moto (desde abril de 2016)")
+        return salida
+
+    m = _RE_PATENTE_VIEJA.match(pat)
+    if m:
+        anio, _fuera = _anio_por_anclas(m.group(1), ANCLAS_PATENTE_VIEJA)
+        # El rango se recorta a los años en que existió este formato: la primera serie salió
+        # en 1995 y la última en marzo de 2016, así que no tiene sentido ofrecer 1993 ni 2018.
+        salida.update(formato="vieja", vehiculo="auto", anio_desde=max(anio - 2, 1995),
+                      anio_hasta=min(anio + 2, 2016),
+                      detalle="patente vieja de tres letras (1995 a marzo de 2016)")
+        return salida
+
+    m = _RE_PATENTE_MOTO_VIEJA.match(pat)
+    if m:
+        salida.update(formato="vieja", vehiculo="moto", anio_desde=1995, anio_hasta=2016,
+                      detalle="patente vieja de moto (números y letras)")
+        return salida
+
+    m = _RE_PATENTE_PROVINCIAL.match(pat)
+    if m:
+        salida.update(formato="provincial", vehiculo="auto", anio_hasta=1994,
+                      provincia=PROVINCIAS_PATENTE.get(m.group(1)),
+                      detalle="patente provincial: se entregaron hasta 1994")
+        return salida
+    return salida

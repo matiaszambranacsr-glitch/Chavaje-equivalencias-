@@ -54,6 +54,7 @@ específico, y las pantallas quedan todas al final:
     · PDF: cotización y ficha del vehículo
     · LEER EL ARCHIVO: encabezado, hojas y codificación
     · FICHA DIGITAL DEL VEHÍCULO (patente + historial de piezas)
+    · LA PATENTE ARGENTINA: QUÉ SE PUEDE LEER DE ELLA SIN CONSULTAR NADA
     · SUSTITUCIÓN POR MEDIDAS MECÁNICAS (retenes, o'rings, bujes)
     · COMPARACIÓN VISUAL DE PIEZAS
     · GUARDADO DE FOTOS (varias por producto)
@@ -325,7 +326,7 @@ db_lock = threading.Lock()
 
 # Subir este número cuando se agreguen WMI nuevos: hace que la lista se vuelva a aplicar una vez
 # sobre las bases que ya existen, sin pisar lo que el usuario haya corregido a mano.
-SEMILLA_WMI_VERSION = "2"
+SEMILLA_WMI_VERSION = "3"
 
 
 def secretos_app():
@@ -2040,6 +2041,31 @@ def _datos_precargados_y_migraciones(c):
             ('6H8', 'Holden (GM)', 'Australia'),
             ('6MM', 'Mitsubishi Australia', 'Australia'),
             ('6T1', 'Toyota Australia', 'Australia'),
+            # --- Agregados en la versión 3 de la semilla ---
+            # Los que faltaban de marcas que sí circulan acá, y los WMI nuevos que las marcas
+            # estrenaron en los últimos años (Mercedes W1K/W1N/W1V, BMW i, PSA VR3/VR7).
+            # Solo van los que se pueden dar por seguros: un WMI equivocado hace que la app
+            # afirme una marca que no es, y eso es peor que no saberla.
+            ('19U', 'Acura', 'Estados Unidos'),
+            ('19X', 'Honda', 'Estados Unidos'),
+            ('5FN', 'Honda (SUV/monovolumen)', 'Estados Unidos'),
+            ('5J6', 'Honda (SUV)', 'Estados Unidos'),
+            ('5XY', 'Kia (SUV)', 'Estados Unidos'),
+            ('7SA', 'Tesla', 'Estados Unidos'),
+            ('JM1', 'Mazda', 'Japón'),
+            ('LGW', 'Great Wall / Haval', 'China'),
+            ('LRW', 'Tesla China', 'China'),
+            ('LYV', 'Volvo China', 'China'),
+            ('LZW', 'SAIC-GM-Wuling', 'China'),
+            ('MNA', 'Ford Tailandia', 'Tailandia'),
+            ('VR1', 'DS Automobiles', 'Francia'),
+            ('VR3', 'Peugeot', 'Francia'),
+            ('VR7', 'Citroën', 'Francia'),
+            ('W1K', 'Mercedes-Benz', 'Alemania'),
+            ('W1N', 'Mercedes-Benz (SUV)', 'Alemania'),
+            ('W1V', 'Mercedes-Benz (utilitarios)', 'Alemania'),
+            ('WB1', 'BMW Motorrad', 'Alemania'),
+            ('WBY', 'BMW i', 'Alemania'),
         ]
         c.executemany(
             "INSERT OR IGNORE INTO fabricantes_vin (wmi, fabricante, pais) VALUES (?, ?, ?)",
@@ -13945,6 +13971,184 @@ def actualizar_km_registro(vehiculo_id, km_registro):
         conn.commit()
 
 
+# ============================================================================================
+# LA PATENTE ARGENTINA: QUÉ SE PUEDE LEER DE ELLA SIN CONSULTAR NADA
+# ============================================================================================
+# No existe una base pública y gratuita que traduzca patente a vehículo —las que hay cobran por
+# consulta— así que de la patente sola nunca va a salir «Gol 1.6 2012». Pero no es cierto que
+# no diga nada: la letra de las patentes viejas dice la PROVINCIA, y la serie dice
+# aproximadamente CUÁNDO se patentó, que es justo el dato que el mostrador necesita para filtrar
+# un repuesto («¿me das la junta del Corsa? — ¿de qué año?»).
+
+# La letra de las patentes provinciales (las de antes de 1995: una letra y seis números).
+# Es la misma codificación de provincias que usan los registros del automotor.
+PROVINCIAS_PATENTE = {
+    "A": "Salta", "B": "Buenos Aires", "C": "Capital Federal", "D": "San Luis",
+    "E": "Entre Ríos", "F": "La Rioja", "G": "Santiago del Estero", "H": "Chaco",
+    "J": "San Juan", "K": "Catamarca", "L": "La Pampa", "M": "Mendoza", "N": "Misiones",
+    "P": "Formosa", "Q": "Neuquén", "R": "Río Negro", "S": "Santa Fe", "T": "Tucumán",
+    "U": "Chubut", "V": "Tierra del Fuego", "W": "Corrientes", "X": "Córdoba",
+    "Y": "Jujuy", "Z": "Santa Cruz",
+}
+
+# Anclas de la serie vieja (tres letras y tres números, 1995–2016) y de la Mercosur
+# (dos letras, tres números, dos letras, desde abril de 2016).
+# SON APROXIMADAS y la app lo dice cada vez que las usa. No hay una tabla oficial publicada de
+# «qué serie salió qué mes»; lo que sí es seguro es el orden —las series se entregan en orden
+# alfabético— así que con unos pocos puntos conocidos se interpola el resto.
+# Y lo más importante: estas anclas son el punto de partida. anio_probable_de_patente() usa
+# ADEMÁS las fichas del propio taller, donde cada auto cargado con patente y año es un dato
+# exacto de esta zona y de este parque. Con treinta fichas cargadas, la estimación deja de
+# depender de esta tabla.
+ANCLAS_PATENTE_VIEJA = [("AAA", 1995), ("CAA", 1999), ("DZZ", 2002), ("FAA", 2006),
+                        ("IAA", 2010), ("KAA", 2012), ("MAA", 2013), ("OAA", 2015),
+                        ("PZZ", 2016)]
+ANCLAS_PATENTE_MERCOSUR = [("AA", 2016), ("AC", 2018), ("AE", 2020), ("AF", 2021),
+                           ("AG", 2022), ("AH", 2023), ("AJ", 2024), ("AK", 2025)]
+
+_RE_PATENTE_VIEJA = re.compile(r'^([A-Z]{3})(\d{3})$')
+_RE_PATENTE_MERCOSUR = re.compile(r'^([A-Z]{2})(\d{3})([A-Z]{2})$')
+_RE_PATENTE_MOTO_MERCOSUR = re.compile(r'^([A-Z])(\d{3})([A-Z]{3})$')
+_RE_PATENTE_MOTO_VIEJA = re.compile(r'^(\d{3})([A-Z]{3})$')
+_RE_PATENTE_PROVINCIAL = re.compile(r'^([A-Z])(\d{6})$')
+
+
+def _orden_de_letras(letras):
+    """El número de orden de una serie de letras: AAA es 0, AAB es 1, ABA es 26…"""
+    n = 0
+    for ch in letras:
+        n = n * 26 + (ord(ch) - 65)
+    return n
+
+
+def _anio_por_anclas(letras, anclas):
+    """Interpola el año entre las anclas conocidas. Devuelve (año, es_extrapolado)."""
+    x = _orden_de_letras(letras)
+    puntos = sorted((_orden_de_letras(s), a) for s, a in anclas)
+    if x <= puntos[0][0]:
+        return puntos[0][1], x < puntos[0][0]
+    if x >= puntos[-1][0]:
+        return puntos[-1][1], x > puntos[-1][0]
+    for (x0, a0), (x1, a1) in zip(puntos, puntos[1:]):
+        if x0 <= x <= x1:
+            if x1 == x0:
+                return a0, False
+            return int(round(a0 + (a1 - a0) * (x - x0) / (x1 - x0))), False
+    return puntos[-1][1], True
+
+
+def leer_patente(texto):
+    """Qué se puede saber de una patente argentina sin consultar ninguna base.
+
+    Devuelve siempre un diccionario; 'formato' es None cuando no se reconoce. El año va como
+    RANGO y con el aviso de que es aproximado: sirve para filtrar el catálogo, no para
+    afirmar de qué año es el auto."""
+    pat = re.sub(r'[^A-Z0-9]', '', (texto or "").upper())
+    salida = {"patente": pat, "formato": None, "provincia": None, "vehiculo": None,
+              "anio_desde": None, "anio_hasta": None, "detalle": ""}
+    if not pat:
+        return salida
+
+    m = _RE_PATENTE_MERCOSUR.match(pat)
+    if m:
+        anio, fuera = _anio_por_anclas(m.group(1), ANCLAS_PATENTE_MERCOSUR)
+        salida.update(formato="mercosur", vehiculo="auto", anio_desde=anio - 1,
+                      anio_hasta=anio + 1,
+                      detalle="patente Mercosur (se entregan desde abril de 2016)")
+        return salida
+
+    m = _RE_PATENTE_MOTO_MERCOSUR.match(pat)
+    if m:
+        salida.update(formato="mercosur", vehiculo="moto", anio_desde=2016,
+                      anio_hasta=datetime.now().year,
+                      detalle="patente Mercosur de moto (desde abril de 2016)")
+        return salida
+
+    m = _RE_PATENTE_VIEJA.match(pat)
+    if m:
+        anio, _fuera = _anio_por_anclas(m.group(1), ANCLAS_PATENTE_VIEJA)
+        # El rango se recorta a los años en que existió este formato: la primera serie salió
+        # en 1995 y la última en marzo de 2016, así que no tiene sentido ofrecer 1993 ni 2018.
+        salida.update(formato="vieja", vehiculo="auto", anio_desde=max(anio - 2, 1995),
+                      anio_hasta=min(anio + 2, 2016),
+                      detalle="patente vieja de tres letras (1995 a marzo de 2016)")
+        return salida
+
+    m = _RE_PATENTE_MOTO_VIEJA.match(pat)
+    if m:
+        salida.update(formato="vieja", vehiculo="moto", anio_desde=1995, anio_hasta=2016,
+                      detalle="patente vieja de moto (números y letras)")
+        return salida
+
+    m = _RE_PATENTE_PROVINCIAL.match(pat)
+    if m:
+        salida.update(formato="provincial", vehiculo="auto", anio_hasta=1994,
+                      provincia=PROVINCIAS_PATENTE.get(m.group(1)),
+                      detalle="patente provincial: se entregaron hasta 1994")
+        return salida
+    return salida
+
+
+def anio_probable_de_patente(patente):
+    """El año estimado de una patente, corregido con las fichas del propio taller.
+
+    Las anclas de arriba son de todo el país y aproximadas. Las fichas cargadas acá no: cada
+    auto con patente Y año es un punto exacto. Se buscan el más cercano por debajo y el más
+    cercano por arriba EN LA MISMA FAMILIA de patente y se interpola entre esos dos, que es
+    mucho mejor que la tabla general — y mejora sola a medida que se cargan fichas.
+
+    Devuelve (desde, hasta, de_dónde_salió) o (None, None, '') si no se reconoce la patente."""
+    lectura = leer_patente(patente)
+    if not lectura["formato"] or lectura["formato"] == "provincial":
+        return lectura["anio_desde"], lectura["anio_hasta"], lectura["detalle"]
+
+    pat = lectura["patente"]
+    letras = (_RE_PATENTE_MERCOSUR.match(pat) or _RE_PATENTE_VIEJA.match(pat))
+    if not letras:
+        return lectura["anio_desde"], lectura["anio_hasta"], lectura["detalle"]
+    letras = letras.group(1)
+    largo = len(letras)
+
+    try:
+        c.execute("""SELECT patente, anio FROM vehiculos
+                     WHERE anio IS NOT NULL AND TRIM(anio) <> '' AND LENGTH(patente) >= 6""")
+        fichas = c.fetchall()
+    except sqlite3.OperationalError as _err:
+        anotar_error("anio_probable_de_patente", _err)
+        fichas = []
+
+    propios = []
+    for f in fichas:
+        otra = re.sub(r'[^A-Z0-9]', '', (f["patente"] or "").upper())
+        if leer_patente(otra)["formato"] != lectura["formato"]:
+            continue
+        m2 = (_RE_PATENTE_MERCOSUR.match(otra) or _RE_PATENTE_VIEJA.match(otra))
+        if not m2 or len(m2.group(1)) != largo:
+            continue
+        try:
+            anio_ficha = int(str(f["anio"])[:4])
+        except (TypeError, ValueError):
+            continue
+        if 1960 <= anio_ficha <= datetime.now().year + 1:
+            propios.append((m2.group(1), anio_ficha))
+
+    if len(propios) >= 2:
+        anio, _fuera = _anio_por_anclas(letras, propios)
+        piso, techo = ((2016, datetime.now().year) if lectura["formato"] == "mercosur"
+                       else (1995, 2016))
+        return (max(anio - 1, piso), min(anio + 1, techo),
+                f"estimado con las {len(propios)} fichas que tenés cargadas con patente y año")
+
+    anclas = (ANCLAS_PATENTE_MERCOSUR if lectura["formato"] == "mercosur"
+              else ANCLAS_PATENTE_VIEJA)
+    anio, _fuera = _anio_por_anclas(letras, anclas)
+    margen = 1 if lectura["formato"] == "mercosur" else 2
+    piso, techo = ((2016, datetime.now().year) if lectura["formato"] == "mercosur"
+                   else (1995, 2016))
+    return (max(anio - margen, piso), min(anio + margen, techo),
+            "estimado por la serie de la patente (aproximado: las series se entregan en orden)")
+
+
 def buscar_vehiculo(patente):
     c.execute("SELECT * FROM vehiculos WHERE patente = ?", (patente.strip().upper(),))
     row = c.fetchone()
@@ -22697,6 +22901,34 @@ if pagina == PAGINAS[6]:
     if patente_input:
         vehiculo = buscar_vehiculo(patente_input)
 
+        # LO QUE LA PATENTE DICE POR SÍ SOLA. No hay base pública que traduzca patente a
+        # vehículo, pero el formato y la serie sí se leen sin consultar nada: si es Mercosur o
+        # vieja, si es auto o moto, de qué provincia salió (las provinciales) y sobre todo en
+        # qué años se patentó, que es lo que el mostrador pregunta siempre después del modelo.
+        _lectura_pat = leer_patente(patente_input)
+        if _lectura_pat["formato"]:
+            _desde_pat, _hasta_pat, _de_donde = anio_probable_de_patente(patente_input)
+            _partes_pat = [f"🪪 **{_lectura_pat['detalle']}**"]
+            if _lectura_pat["provincia"]:
+                _partes_pat.append(f"Salió de **{_lectura_pat['provincia']}**.")
+            if _desde_pat and _hasta_pat and _desde_pat != _hasta_pat:
+                _partes_pat.append(f"Patentado entre **{_desde_pat} y {_hasta_pat}** "
+                                    f"— {_de_donde}.")
+            elif _hasta_pat:
+                _partes_pat.append(f"Patentado **hasta {_hasta_pat}** — {_de_donde}.")
+            if not (vehiculo or {}).get("anio"):
+                _partes_pat.append("Es una estimación: si sabés el año exacto, cargalo abajo y "
+                                   "de paso la app afina la estimación para las próximas.")
+            st.info(" ".join(_partes_pat))
+            _anio_sugerido = (str(_desde_pat + (_hasta_pat - _desde_pat) // 2)
+                              if _desde_pat and _hasta_pat else "")
+        else:
+            _anio_sugerido = ""
+            if len(re.sub(r"[^A-Z0-9]", "", patente_input)) >= 6:
+                st.caption("No reconozco el formato de esa patente. Las argentinas son "
+                           "**AB 123 CD** (Mercosur), **ABC 123** (vieja) o **B 123 456** "
+                           "(provincial, hasta 1994).")
+
         with st.expander("✏️ Datos del cliente / vehículo", expanded=(vehiculo is None)):
             with st.form("form_vehiculo"):
                 cv1, cv2 = st.columns(2)
@@ -22708,7 +22940,12 @@ if pagina == PAGINAS[6]:
                 modelo_auto = cv4.text_input("Modelo", value=(vehiculo or {}).get("modelo_auto") or "",
                                               key="form_modelo_auto")
                 cv5, cv6, cv7 = cols(3)
-                anio_auto = cv5.text_input("Año", value=(vehiculo or {}).get("anio") or "", key="form_anio_auto")
+                # El año que sugiere la patente va de placeholder, no de valor: es una
+                # estimación y el que carga la ficha tiene que decidir si la toma.
+                anio_auto = cv5.text_input("Año", value=(vehiculo or {}).get("anio") or "",
+                                            key="form_anio_auto",
+                                            placeholder=(f"≈ {_anio_sugerido}" if _anio_sugerido
+                                                          else "Ej: 2012"))
                 motorizacion_auto = cv6.text_input("Motorización", value=(vehiculo or {}).get("motorizacion") or "",
                                                     key="form_motorizacion_auto")
                 km_actual_input = cv7.number_input(
@@ -23068,6 +23305,22 @@ if pagina == PAGINAS[7]:
         if _pat:
             _todo = todo_lo_de_una_patente(_pat)
             _v = _todo["vehiculo"]
+            # Lo que la patente dice SOLA, esté o no cargado el auto. No hay base pública que
+            # traduzca patente a vehículo, pero el formato y la serie se leen sin consultar
+            # nada: de qué provincia salió y entre qué años se patentó. Con el auto cargado es
+            # un dato de más; sin el auto cargado es lo único que hay, y no es poco — en el
+            # mostrador la pregunta que sigue al modelo es siempre «¿de qué año?».
+            _lec = leer_patente(_pat)
+            if _lec["formato"]:
+                _d_pat, _h_pat, _origen_pat = anio_probable_de_patente(_pat)
+                _txt = [f"🪪 {_lec['detalle']}"]
+                if _lec["provincia"]:
+                    _txt.append(f"Salió de **{_lec['provincia']}**.")
+                if _d_pat and _h_pat:
+                    _txt.append(f"Patentado entre **{_d_pat} y {_h_pat}** — {_origen_pat}.")
+                elif _h_pat:
+                    _txt.append(f"Patentado **hasta {_h_pat}** — {_origen_pat}.")
+                st.info(" ".join(_txt))
             if not _v:
                 st.warning(f"No hay ningún auto cargado con la patente **{_todo['patente']}**.")
                 st.caption(
