@@ -350,6 +350,86 @@ Dos límites que están puestos a propósito y no hay que sacar:
 Medido: rescata 15 códigos (todos bujías NGK/Bosch, que es justo lo que cruza una bujía de un
 proveedor con la de otro), pierde 0, y las 30 motorizaciones conocidas siguen afuera.
 
+## Los topes que escondían trabajo
+
+«Se revisaron 8.000 vínculos y ninguno quedó por debajo del umbral» se lee como «está todo
+bien». En la base real hay **24.774**: faltaba el 68%. Revisarlos todos cuesta 10,5 s contra
+3,9 s, o sea que el tope ahorraba seis segundos y escondía 16.774 vínculos.
+
+No era el único. Los que cortaban de verdad sobre el catálogo real:
+
+| Dónde | Antes | Ahora | Lo que costaba |
+|---|---|---|---|
+| Revisar los vínculos ya cargados | 8.000 de 24.774 | todos | 3,9 s → 10,5 s |
+| Contar los rojos de una importación | primeros 600 | todos | 1,4 s → 6,6 s |
+| Analizar los pendientes de una lista | arrancaba en 1.000 | arranca cubriendo la lista entera | 3.185 en 6,6 s |
+| Comparar dos proveedores por descripción | 4.000 de cada lista | 50.000 | 4,4 s → 16,5 s |
+| «Descargar lista completa» de huérfanos | 2.000 de 34.457 | todos | 0,1 s |
+| Leer aplicaciones de las descripciones | 400 de 52.534 | todas | 12,2 s → 30,6 s |
+
+Dos de esos no eran lentitud, eran un número equivocado a la vista: el informe de importación
+decía «N de los 3.185 vínculos nuevos están casi seguro mal» contando N sobre 600, y el botón
+que dice «descargar lista **completa**» bajaba 2.000 de 34.457.
+
+Y el de 4.000 era el peor de todos porque no es aleatorio: las filas que quedaban afuera eran
+**siempre las mismas** —las últimas de cada lista— corrieras la comparación las veces que la
+corrieras. Sobre JL, que tiene 25.975 productos, era el 85% del proveedor que no se comparaba
+nunca. Sacándolo, JL × MOTORARG pasa de **11 sugerencias a 776**.
+
+## El kit que se citaba a sí mismo
+
+Un juego de juntas de Illinois se llama «Juego de juntas para Carburador PEUGEOT 405 GL SR
+SOLEX **1433630**», y de esa misma descripción sale el código de fábrica 1433630, que queda
+cargado como producto OEM con la descripción idéntica.
+
+Cuando después se comparaban esos dos, la app encontraba el número del OEM adentro del texto
+del kit y concluía lo peor posible: **«no son equivalentes, el kit lo trae adentro»**, −40 de
+confianza. Es justo al revés: ese par es el puente entre el proveedor y el código original, el
+vínculo que más sirve de toda la base.
+
+Los números de la base real, con `_uno_trae_al_otro()` sin arreglar:
+
+    786 de los 3.185 pendientes      marcados «no son equivalentes» — 598 con las dos
+                                      descripciones IDÉNTICAS
+  1.054 de los 24.774 ya cargados    lo mismo
+    100% de los dos grupos           eran OEM contra PROVEEDOR
+
+Un kit y su pieza suelta son dos productos que un proveedor vende por separado. Un código de
+fábrica no es ni un kit ni una pieza suelta: es el número con el que la fábrica llama a una de
+las dos, y del otro lado siempre está el producto del que salió ese número. Con que uno de los
+dos lados sea OEM, no hay nada que mirar.
+
+Los «🔴 casi seguro mal» de la lista de Illinois pasan de **938 a 379**.
+
+## Un kit y su pieza no se preguntan
+
+Cuando la relación es de verdad —dos productos de proveedores distintos, uno es el kit y el
+otro la pieza que viene adentro— tampoco hay nada que decidir: no son intercambiables, así que
+no van a la cola de revisión. `pares_de_kit_y_pieza()` los saca antes de guardarlos, y los que
+ya estaban se muestran en una línea con un botón para descartarlos juntos, en vez de aparecer
+mezclados con los que sí hay que mirar.
+
+El buscador los sigue ofreciendo como kit cuando alguien busca la pieza suelta: eso lo resuelve
+`kits_que_lo_traen()` leyendo las descripciones en el momento, sin necesidad de que el vínculo
+esté cargado.
+
+## «Ya cargué el catálogo de esa marca y no figura»
+
+Dos cosas distintas se llamaban igual: la **lista de productos** de un proveedor y la
+**dirección web** de su catálogo, que es la que hace falta para ir a leer las referencias
+cruzadas de cada ficha. La pantalla decía «ninguna marca tiene cargada la dirección de su
+catálogo» sin nombrar ninguna marca, y eso se lee como «no ve mi lista».
+
+Ahora el aviso nombra los proveedores que sí están cargados y aclara que lo que falta es el
+link, y la tabla de Administrar → Marcas tiene una columna **Catálogo web** que dice cuál lo
+tiene y cuál no.
+
+Y había un error que hacía parecer cargado lo que no lo estaba: el campo del patrón usaba una
+sola clave para todas las marcas. Streamlit, con la clave puesta, se queda con lo último
+tipeado e ignora el valor que le pasás, así que al cambiar de marca el campo seguía mostrando
+la dirección de la anterior —y si apretabas Guardar, se la copiabas a esta—. La clave ahora
+lleva el id de la marca.
+
 ## «1,6» y «1.6» no eran la misma cilindrada
 
 Illinois escribe la coma —3.105 descripciones de esa lista— y todos los demás el punto: son

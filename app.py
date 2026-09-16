@@ -3250,7 +3250,7 @@ def chequear_integridad_bd():
     return resultados
 
 
-def listar_productos_sin_equivalencias(marca_filtro="Todas", limite=500):
+def listar_productos_sin_equivalencias(marca_filtro="Todas", limite=None):
     """Devuelve productos que no tienen ninguna equivalencia vinculada, sin borrarlos."""
     query = """
         SELECT p.id AS "ID", p.codigo_raw AS "Codigo", p.descripcion AS "Descripcion",
@@ -3264,7 +3264,7 @@ def listar_productos_sin_equivalencias(marca_filtro="Todas", limite=500):
         query += " AND UPPER(m.nombre) = ?"
         params.append(marca_filtro.upper())
     query += " ORDER BY m.nombre, p.codigo_raw LIMIT ?"
-    params.append(limite)
+    params.append(limite if limite else -1)
     c.execute(query, params)
     return filas_a_listas(c)
 
@@ -3630,7 +3630,10 @@ def informe_post_importacion(lote, nombre_prov, cargados):
     # Los vínculos que entraron, evaluados con el mismo análisis de siempre
     if pendientes:
         try:
-            limpias, sospechosas = analizar_lote_pendiente(lote, limite=600)
+            # Todos, no los primeros 600: el número sale a pantalla como «N de los 3.185
+            # vínculos nuevos están casi seguro mal», y contarlo sobre una parte es dar un
+            # número que no es. Los 3.185 de la lista de Illinois tardan 6,6 s.
+            limpias, sospechosas, _relacionadas = analizar_lote_pendiente(lote, limite=None)
             rojos = [x for x in (limpias + sospechosas) if x.get("confianza", 50) < 30]
             informe["rojos"] = len(rojos)
             if rojos:
@@ -4838,6 +4841,12 @@ def guardar_equivalencias_pendientes(pares, origen, lote):
     """Guarda vínculos para revisar en vez de cargarlos directo."""
     if not pares:
         return 0
+    # Lo mismo que en guardar_equivalencias_derivadas(): el kit y su pieza no son una
+    # equivalencia, así que no se pregunta. Ver pares_de_kit_y_pieza().
+    _kits = pares_de_kit_y_pieza([(a, b) for a, b in pares])
+    pares = [(a, b) for a, b in pares if (a, b) not in _kits]
+    if not pares:
+        return 0
     with db_lock:
         c.executemany(
             "INSERT OR IGNORE INTO equivalencias_pendientes "
@@ -5205,7 +5214,7 @@ def nivel_de_confianza(puntaje):
     return "🔴 Casi seguro mal", "descartala salvo que sepas que está bien"
 
 
-def analizar_lote_pendiente(lote, limite=400, desde=0):
+def analizar_lote_pendiente(lote, limite=None, desde=0):
     """Revisa los vínculos de una importación y marca los sospechosos. Dos alarmas:
       - Las medidas mecánicas cargadas se contradicen (prueba física en contra).
       - Un mismo código de fábrica termina apuntando a dos productos distintos del MISMO
@@ -5226,7 +5235,7 @@ def analizar_lote_pendiente(lote, limite=400, desde=0):
                  JOIN marcas mb ON mb.id = pb.marca_id
                  WHERE ep.lote = ? AND ep.producto_a_id < ep.producto_b_id
                  ORDER BY ep.producto_a_id, ep.producto_b_id
-                 LIMIT ? OFFSET ?""", (lote, limite, desde))
+                 LIMIT ? OFFSET ?""", (lote, limite if limite else -1, desde))
     filas = [dict(r) for r in c.fetchall()]
 
     # Todas las medidas de una sola vez, en vez de dos consultas por par
@@ -5270,7 +5279,7 @@ def analizar_lote_pendiente(lote, limite=400, desde=0):
     escalas_precio = escalas_de_precio()
     ventas_confirman = pares_confirmados_por_ventas()
 
-    limpias, sospechosas = [], []
+    limpias, sospechosas, relacionadas = [], [], []
     for f in filas:
         alarmas = []
         # ¿Los códigos parecen códigos? Esto caza las importaciones mal mapeadas, donde la
@@ -5298,6 +5307,17 @@ def analizar_lote_pendiente(lote, limite=400, desde=0):
             if (sanitizar(oem), marca_otro) in ambiguos:
                 alarmas.append(f"⚠️ El código {oem} apunta a más de un producto de "
                                 f"{marca_otro} — alguno de los dos está mal cargado")
+        # ¿Es un kit y la pieza que trae adentro? Entonces no se pregunta: no es una
+        # equivalencia y ya lo sabemos. Se aparta y la pantalla lo dice en una línea, en vez de
+        # mezclarlo con los que sí hay que decidir. Los nuevos ya no entran a la cola
+        # (ver pares_de_kit_y_pieza), esto es para los que están de antes.
+        _kit_de = _uno_trae_al_otro(f.get("desc_a"), f.get("cod_a"),
+                                     f.get("desc_b"), f.get("cod_b"),
+                                     f.get("tipo_a"), f.get("tipo_b"))
+        if _kit_de:
+            f["relacion"] = _kit_de
+            relacionadas.append(f)
+            continue
         # Puntaje de confianza: junta toda la evidencia en un número, para poder ordenar por
         # lo peor primero en vez de mirar cientos de alarmas planas.
         puntaje, senales = evaluar_equivalencia(
@@ -5315,8 +5335,7 @@ def analizar_lote_pendiente(lote, limite=400, desde=0):
             # Solo se consulta cuando uno de los dos DICE que es un kit, que es una prueba de
             # texto y cuesta nada. Sin esa guarda serían 1.000 LIKE sobre las 70.888
             # descripciones por cada tanda que se revisa.
-            trae_al_otro=_uno_trae_al_otro(f.get("desc_a"), f.get("cod_a"),
-                                            f.get("desc_b"), f.get("cod_b")),
+            trae_al_otro="",   # ya se apartó arriba
         )
         for tipo, texto in senales:
             if tipo == "mal" and texto not in alarmas:
@@ -5361,7 +5380,7 @@ def analizar_lote_pendiente(lote, limite=400, desde=0):
     # Lo más dudoso primero: si hay que revisar 400, que los peores estén arriba
     sospechosas.sort(key=lambda x: x["confianza"])
     limpias.sort(key=lambda x: -x["confianza"])
-    return limpias, sospechosas
+    return limpias, sospechosas, relacionadas
 
 
 def productos_que_mas_ensucian(lote, limite=15):
@@ -6560,7 +6579,7 @@ def origenes_de_los_vinculos_directos(producto_id, ids_resultado):
 # ============================================================================================
 # CONFIANZA DE CADA VÍNCULO
 # ============================================================================================
-def auditar_equivalencias_cargadas(limite=300, tope_confianza=35, revisar=8000):
+def auditar_equivalencias_cargadas(limite=300, tope_confianza=35, revisar=None):
     """Pasa el mismo análisis de confianza por las equivalencias YA cargadas.
 
     Es la herramienta que faltaba. El análisis de confianza solo miraba los vínculos pendientes
@@ -6570,10 +6589,15 @@ def auditar_equivalencias_cargadas(limite=300, tope_confianza=35, revisar=8000):
 
     Devuelve los peores primero, con el motivo escrito.
 
-    El ORDER BY por confianza guardada no es cosmético. Antes se tomaban las primeras 8.000
-    filas tal como venían, sin orden: sobre una base real de 24.774 vínculos eso deja dos
-    tercios que NUNCA se revisan, y encima los que se revisan son los más viejos, no los peores.
-    Ahora el tope elige los 8.000 más sospechosos, que es para lo que existe la función."""
+    El ORDER BY por confianza guardada no es cosmético: hace que, si alguna vez hay que
+    cortar, se corte por los mejores y no por los más viejos.
+
+    Pero ya no se corta. El tope estaba en 8.000 sobre una base de 24.774 vínculos —dos tercios
+    que no se revisaban nunca— y la pantalla decía «se revisaron 8.000 vínculos y ninguno quedó
+    por debajo del umbral», que suena a «está todo bien» cuando faltaba el 68%. Revisarlos
+    todos cuesta 10,5 s contra 3,9 s: el tope ahorraba seis segundos y escondía 16.774
+    vínculos. `revisar=None` es todos; el parámetro queda por si alguna vez hace falta cortar
+    a propósito."""
     c.execute("""SELECT e.producto_a_id AS a, e.producto_b_id AS b, e.lote,
                         pa.codigo_raw AS cod_a, pa.descripcion AS desc_a, pa.precio AS precio_a,
                         ma.nombre AS marca_a,
@@ -6585,7 +6609,7 @@ def auditar_equivalencias_cargadas(limite=300, tope_confianza=35, revisar=8000):
                  JOIN marcas ma ON ma.id = pa.marca_id
                  JOIN marcas mb ON mb.id = pb.marca_id
                  ORDER BY COALESCE(e.confianza, 50) ASC
-                 LIMIT ?""", (revisar,))
+                 LIMIT ?""", (revisar if revisar else -1,))
     filas = [dict(r) for r in c.fetchall()]
     if not filas:
         return [], 0
@@ -9676,7 +9700,7 @@ class _ModelosLazy:
 MODELOS_CONOCIDOS = _ModelosLazy()
 
 
-def aplicaciones_desde_descripciones(limite=400):
+def aplicaciones_desde_descripciones(limite=None):
     """Lee de la descripción a qué auto le va cada producto, para poder buscar por vehículo.
 
     La relación pieza-vehículo ya viene en las listas de los proveedores: «JUNTA TAPA DE
@@ -9752,7 +9776,11 @@ def aplicaciones_desde_descripciones(limite=400):
                 "Pieza": clasificar_repuesto(f["descripcion"]),
                 "_clean": f["codigo_clean"], "_desde": desde, "_hasta": hasta,
             })
-        if len(salida) >= limite:
+        # Sin tope. Estaba en 400 y el catálogo real da 52.534 aplicaciones: se cargaba el 0,8%
+        # de lo que las descripciones ya dicen, y esta tabla es la que hace andar la búsqueda
+        # por vehículo y la que cruza productos que le sirven al mismo auto. Leerlas todas
+        # tarda 30,6 s contra 12,2 s, una vez, apretando un botón.
+        if limite and len(salida) >= limite:
             break
     return salida
 
@@ -10155,7 +10183,7 @@ def fuerza_de_la_coincidencia(a, b):
     return (apl, cil, pieza, autos)
 
 
-def _uno_trae_al_otro(desc_a, cod_a, desc_b, cod_b):
+def _uno_trae_al_otro(desc_a, cod_a, desc_b, cod_b, tipo_a="", tipo_b=""):
     """¿Uno de los dos es un kit que nombra al otro adentro? Devuelve el texto de la relación.
 
     Es la misma pregunta que contesta kits_que_lo_traen() para el mostrador, pero acá hace
@@ -10169,7 +10197,24 @@ def _uno_trae_al_otro(desc_a, cod_a, desc_b, cod_b):
 
     El código se busca también SIN la marca pegada atrás, por lo mismo que en
     kits_que_lo_traen(): el proveedor se llama «LSPFR6F11LUCAS» a sí mismo y en el kit escribe
-    «LSPFR6F11»."""
+    «LSPFR6F11».
+
+    LA PIEZA NO PUEDE SER UN CÓDIGO DE FÁBRICA, y sin esa condición esto se equivocaba en
+    grande: la descripción de un juego de juntas TERMINA con su propio número original
+    —«Juego de juntas para Carburador PEUGEOT 405 SOLEX 1433630»— y de ahí sale el producto OEM
+    1433630, con la MISMA descripción. Encontrar ese número adentro del texto del kit no quiere
+    decir que el kit traiga otra pieza: es el kit citándose a sí mismo. Sobre la base real eran
+    786 de los 3.185 pendientes y 1.054 de los 24.774 vínculos cargados marcados como «no son
+    equivalentes» cuando son justo el puente que hay que tener —598 de esos 786 con las dos
+    descripciones IDÉNTICAS—.
+
+    Un kit y su pieza suelta son dos productos que un PROVEEDOR vende por separado; un código
+    de fábrica no es ni un kit ni una pieza suelta, es el número con el que la fábrica llama a
+    una de las dos. Por eso alcanza con que UNO de los dos lados sea OEM para que no haya nada
+    que mirar: del otro lado siempre está el producto del que salió ese número, con su misma
+    descripción."""
+    if "OEM" in {(tipo_a or "").upper(), (tipo_b or "").upper()}:
+        return ""
     for kit_desc, pieza_cod in ((desc_a, cod_b), (desc_b, cod_a)):
         if not kit_desc or not pieza_cod or not es_un_kit(kit_desc):
             continue
@@ -10185,6 +10230,41 @@ def _uno_trae_al_otro(desc_a, cod_a, desc_b, cod_b):
         if any(f in texto for f in formas):
             return f"«{str(kit_desc)[:40]}» lo trae adentro"
     return ""
+
+
+def pares_de_kit_y_pieza(pares):
+    """De una lista de pares (a, b), cuáles son «un kit y la pieza que trae adentro».
+
+    Existe para NO mandarlos a la cola de revisión. La relación es cierta y sirve —el buscador
+    ofrece el kit cuando buscás la pieza suelta, y eso lo resuelve kits_que_lo_traen() leyendo
+    las descripciones en el momento— pero no es una equivalencia: no se puede vender una en
+    lugar de la otra. Preguntarle a alguien «¿son equivalentes?» cuando ya sabemos que no, es
+    hacerle perder el tiempo y además tentarlo a decir que sí.
+
+    Una sola consulta por tanda para todos los productos involucrados: lo caro sería preguntar
+    por par."""
+    pares = [(a, b) for a, b in pares]
+    ids = sorted({i for par in pares for i in par})
+    if not ids:
+        return set()
+    datos = {}
+    try:
+        for tanda, marcadores in en_tandas(ids):
+            c.execute(f"""SELECT p.id, p.codigo_raw, p.descripcion, m.tipo
+                          FROM productos p JOIN marcas m ON m.id = p.marca_id
+                          WHERE p.id IN ({marcadores})""", tanda)
+            for r in c.fetchall():
+                datos[r["id"]] = (r["descripcion"], r["codigo_raw"], r["tipo"])
+    except sqlite3.OperationalError as _err:
+        anotar_error("pares_de_kit_y_pieza", _err)
+        return set()
+    salida = set()
+    for a, b in pares:
+        da, ca, ta = datos.get(a, ("", "", ""))
+        db, cb, tb = datos.get(b, ("", "", ""))
+        if _uno_trae_al_otro(da, ca, db, cb, ta, tb):
+            salida.add((a, b))
+    return salida
 
 
 def evidencia_cruzada(id_a, id_b, cuenta_palabras=None, total_descripciones=None):
@@ -10204,7 +10284,7 @@ def evidencia_cruzada(id_a, id_b, cuenta_palabras=None, total_descripciones=None
 
     Devuelve (a_favor, vetos, veredicto)."""
     c.execute(f"""SELECT p.id, p.codigo_raw, p.codigo_clean, p.descripcion, p.precio,
-                         p.marca_id, m.nombre AS marca, {COLUMNAS_MEDIDAS}
+                         p.marca_id, m.nombre AS marca, m.tipo AS tipo, {COLUMNAS_MEDIDAS}
                   FROM productos p JOIN marcas m ON m.id = p.marca_id
                   WHERE p.id IN (?, ?)""", (id_a, id_b))
     filas = {r["id"]: dict(r) for r in c.fetchall()}
@@ -10241,7 +10321,8 @@ def evidencia_cruzada(id_a, id_b, cuenta_palabras=None, total_descripciones=None
     # _uno_trae_al_otro(): sobre los 208 vínculos con rubros distintos que hay cargados, 126
     # son de esta clase.
     _kit_de = _uno_trae_al_otro(pa.get("descripcion"), pa.get("codigo_raw"),
-                                 pb.get("descripcion"), pb.get("codigo_raw"))
+                                 pb.get("descripcion"), pb.get("codigo_raw"),
+                                 pa.get("tipo"), pb.get("tipo"))
     if ok_desc:
         a_favor.append(f"🔤 las descripciones concuerdan ({motivo_desc})")
     elif _kit_de:
@@ -10460,11 +10541,16 @@ def equivalencias_puenteadas_por_reemplazo(limite=300):
     return salida
 
 
-TOPE_PRODUCTOS_POR_COMPARACION = 4000  # ver derivar_equivalencias_por_descripcion()
+# Antes 4.000, que sobre la lista de JL —25.975 productos— dejaba afuera el 85%, y siempre
+# las mismas filas: las últimas de cada lista no se comparaban NUNCA, corrieras la comparación
+# las veces que la corrieras. Medido con las listas reales, sin tope el peor cruce (JL de
+# 25.975 contra Illinois de 6.898) tarda 16,5 s contra 4,4 s, y JL x MOTORARG pasa de 11
+# sugerencias a 400. Queda un número igual, pero uno que ninguna lista de proveedor alcanza.
+TOPE_PRODUCTOS_POR_COMPARACION = 50000  # ver derivar_equivalencias_por_descripcion()
 
 
 def derivar_equivalencias_por_descripcion(marca_a_id=None, marca_b_id=None,
-                                          limite=400,
+                                          limite=2000,
                                           tope_productos=TOPE_PRODUCTOS_POR_COMPARACION,
                                           por_producto=3):
     """Vincula productos de DOS proveedores distintos comparando lo que dicen sus descripciones.
@@ -10799,6 +10885,10 @@ def guardar_equivalencias_derivadas(pares, lote):
     rechazados = pares_rechazados()
     nuevos = [(min(a, b), max(a, b)) for a, b in pares
               if (min(a, b), max(a, b)) not in rechazados]
+    # Un kit y la pieza que trae adentro no van a la cola: no son equivalentes y preguntarlo
+    # solo gasta revisiones. Ver pares_de_kit_y_pieza().
+    _kits = pares_de_kit_y_pieza(nuevos)
+    nuevos = [par for par in nuevos if par not in _kits]
     if not nuevos:
         return 0
     with db_lock:
@@ -18521,7 +18611,8 @@ if pagina == PAGINAS[3]:
              label_visibility="collapsed")
     sub_admin = st.session_state["sub_admin"]
 
-    c.execute("""SELECT m.id, m.nombre, m.tipo, COUNT(p.id) AS productos
+    c.execute("""SELECT m.id, m.nombre, m.tipo, COUNT(p.id) AS productos,
+                        COALESCE(m.url_ficha_template, '') AS plantilla
                  FROM marcas m LEFT JOIN productos p ON p.marca_id = m.id
                  GROUP BY m.id ORDER BY m.nombre""")
     marcas_info = c.fetchall()
@@ -18530,7 +18621,13 @@ if pagina == PAGINAS[3]:
         if not marcas_info:
             st.info("Todavía no hay marcas cargadas.")
         else:
-            tabla_marcas = [{"Marca": m["nombre"], "Tipo": m["tipo"], "Productos cargados": m["productos"]}
+            # La dirección del catálogo web va en la tabla y no escondida en el selector de
+            # abajo: «ya cargué el catálogo de tal marca y no figura» se contesta mirando acá,
+            # sin tener que elegir marca por marca en el desplegable para ver cuál la tiene.
+            tabla_marcas = [{"Marca": m["nombre"], "Tipo": m["tipo"],
+                             "Productos cargados": m["productos"],
+                             "Catálogo web": (m["plantilla"][:48] + "…") if len(m["plantilla"]) > 48
+                                             else (m["plantilla"] or "—")}
                              for m in marcas_info]
             st.dataframe(tabla_marcas, width="stretch", hide_index=True)
 
@@ -18546,11 +18643,16 @@ if pagina == PAGINAS[3]:
             nombres_para_link = [m["nombre"] for m in marcas_info]
             marca_link = st.selectbox("Marca:", nombres_para_link, key="marca_link_ficha")
             id_marca_link = next(m["id"] for m in marcas_info if m["nombre"] == marca_link)
-            c.execute("SELECT url_ficha_template FROM marcas WHERE id = ?", (id_marca_link,))
-            template_actual = c.fetchone()["url_ficha_template"] or ""
+            template_actual = next((m["plantilla"] for m in marcas_info
+                                    if m["id"] == id_marca_link), "")
+            # La clave lleva el id de la marca. Con una sola clave para todas, Streamlit se
+            # queda con lo último tipeado y el `value` no se vuelve a mirar: cambiabas de marca
+            # y el campo seguía mostrando el patrón de la anterior —parecía cargado cuando no lo
+            # estaba— y si apretabas Guardar le copiabas a esta marca la dirección de la otra.
             nuevo_template = st.text_input(
                 "Patrón de URL (usá {codigo} donde va el código):", value=template_actual,
-                placeholder="https://www.taranto.com.ar/busqueda?q={codigo}", key="input_template_link"
+                placeholder="https://www.taranto.com.ar/busqueda?q={codigo}",
+                key=f"input_template_link_{id_marca_link}"
             )
             if st.button("💾 Guardar patrón de link"):
                 if nuevo_template.strip() and "{codigo}" not in nuevo_template:
@@ -18919,7 +19021,10 @@ if pagina == PAGINAS[3]:
                 cantidad_mostrar = st.selectbox("Mostrar en pantalla:", [25, 50, 100], index=0,
                                                  help="La descarga en Excel siempre incluye todo, esto es solo lo que se dibuja en pantalla.")
 
-                pendientes_completo = listar_productos_sin_equivalencias(marca_filtro_huerfanos, limite=2000)
+                # Sin tope: el botón de al lado dice «Descargar lista completa» y con 2.000
+                # sobre 34.457 huérfanos esa lista no era completa. Traerlos todos: 0,1 s.
+                pendientes_completo = listar_productos_sin_equivalencias(
+                    marca_filtro_huerfanos, limite=None)
                 if pendientes_completo:
                     st.download_button(
                         "⬇️ Descargar lista completa (Excel)",
@@ -20120,9 +20225,26 @@ if pagina == PAGINAS[3]:
                 "lista accesorios y kits, y eso no es una equivalencia."
             )
             if not marcas_con_ficha:
+                # Se nombran las marcas que SÍ tenés cargadas. «Ninguna marca tiene cargada la
+                # dirección» se lee como «la app no ve mi lista» cuando en realidad la ve: lo
+                # que falta es la dirección web, que es otra cosa que la lista de productos.
+                try:
+                    c.execute("""SELECT m.nombre, COUNT(p.id) AS n
+                                 FROM marcas m JOIN productos p ON p.marca_id = m.id
+                                 WHERE m.tipo <> 'OEM'
+                                 GROUP BY m.id ORDER BY n DESC LIMIT 8""")
+                    _sin_dir = [f"{r['nombre']} ({r['n']:,} productos)" for r in c.fetchall()]
+                except sqlite3.OperationalError as _err:
+                    anotar_error("catálogo digital", _err)
+                    _sin_dir = []
                 st.info(
-                    "Ninguna marca tiene cargada la dirección de su catálogo. Se carga en "
-                    "Administrar → 🏷️ Marcas, en «patrón de link»."
+                    "Ninguna marca tiene cargada la **dirección web** de su catálogo. Es otra "
+                    "cosa que la lista de productos: la lista ya está cargada, lo que falta es "
+                    "el link a la ficha de cada código.\n\n"
+                    + ("Tus proveedores cargados: " + ", ".join(_sin_dir) + ".\n\n"
+                       if _sin_dir else "")
+                    + "Se carga en Administrar → 🏷️ Marcas, en «patrón de link»: ahí la tabla "
+                      "tiene una columna **Catálogo web** que dice cuáles ya lo tienen."
                 )
             else:
                 opciones_mf = {f"{m['nombre']} ({m['productos']} códigos)": m["id"]
@@ -21598,10 +21720,16 @@ Administrar → Mantenimiento.
             total_lote = contar_pendientes_del_lote(lote_info["lote"])
             ca1, ca2 = st.columns([2, 1])
             with ca1:
-                st.session_state.setdefault("cuantos_pendientes", 1000)
+                # Arranca en la opción que cubre la lista ENTERA. Estaba fijo en 1.000, y
+                # con 3.185 pendientes eso son tres vueltas para ver una lista que se analiza
+                # entera en 6,6 s — y dos tercios que, si nadie cambia de tanda, no se miran.
+                _opciones_tanda = [400, 1000, 2500, 5000, 10000, 25000, 100000]
+                st.session_state.setdefault(
+                    "cuantos_pendientes",
+                    next((o for o in _opciones_tanda if o >= total_lote), _opciones_tanda[-1]))
                 cuantos = st.select_slider(
                     "¿Cuántos analizar por vez?",
-                    options=[400, 1000, 2500, 5000, 10000],
+                    options=_opciones_tanda,
                     key="cuantos_pendientes",
                     help="Analizar más tarda un poco más, pero te evita repetir la vuelta muchas veces."
                 )
@@ -21613,13 +21741,37 @@ Administrar → Mantenimiento.
                 ) if paginas_lote > 1 else 1
 
             with st.spinner("Analizando..."):
-                limpias, sospechosas = analizar_lote_pendiente(
+                limpias, sospechosas, relacionadas = analizar_lote_pendiente(
                     lote_info["lote"], limite=int(cuantos), desde=(int(tanda_lote) - 1) * int(cuantos)
                 )
-            analizados = len(limpias) + len(sospechosas)
+            analizados = len(limpias) + len(sospechosas) + len(relacionadas)
             st.caption(f"Analizados {analizados:,} de {total_lote:,} vínculo(s) de esta lista." +
                        (f" Quedan {total_lote - analizados:,} — cambiá de tanda para verlos."
                         if total_lote > analizados else ""))
+
+            # El kit y la pieza que trae adentro no son una equivalencia, así que no se
+            # preguntan de a uno: van en una línea y se descartan juntos. El buscador igual
+            # ofrece el kit cuando alguien busca la pieza suelta.
+            if relacionadas:
+                st.info(
+                    f"📦 **{len(relacionadas)} par(es) son un kit y una pieza que viene "
+                    "adentro.** No son equivalentes —no se puede vender una en lugar de la "
+                    "otra— así que no te los pongo a decidir de a uno. El buscador te ofrece "
+                    "el kit igual cuando buscás la pieza suelta."
+                )
+                with st.expander(f"Ver los {len(relacionadas)}"):
+                    st.dataframe(
+                        [{"Código A": x.get("cod_a"), "Marca A": x.get("marca_a"),
+                          "Código B": x.get("cod_b"), "Marca B": x.get("marca_b"),
+                          "Relación": x.get("relacion", "")} for x in relacionadas[:200]],
+                        width="stretch", hide_index=True)
+                if st.button(f"🚫 Descartar esos {len(relacionadas)}",
+                              key=f"desc_rel_{lote_info['lote']}"):
+                    _pares_rel = [(x["a"], x["b"]) for x in relacionadas]
+                    _n = rechazar_pendientes(lote_info["lote"], _pares_rel)
+                    invalidar_salud()
+                    avisar("success", f"Se descartaron {_n} par(es) de kit y pieza.")
+                    st.rerun()
 
             # Se agrupa por confianza, no por "tiene alarma / no tiene". Con 397 alarmas planas
             # había que mirarlas de a una; así se ve de una que la mayoría es descartable y solo
