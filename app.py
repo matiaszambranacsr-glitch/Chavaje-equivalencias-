@@ -11286,7 +11286,8 @@ def buscar_aplicaciones(marca_auto, modelo="", anio=None, limite=200):
     return filas_a_listas(c)
 
 
-def repuestos_de_este_auto(marca_auto, modelo="", anio=None, motor="", vin="", limite=500):
+def repuestos_de_este_auto(marca_auto, modelo="", anio=None, motor="", vin="", limite=500,
+                            pieza=""):
     """Los códigos que le corresponden a ESTE auto. Es lo que hace falta en el mostrador: el VIN
     dice qué auto es, pero lo que se vende son códigos.
 
@@ -11353,6 +11354,17 @@ def repuestos_de_este_auto(marca_auto, modelo="", anio=None, motor="", vin="", l
         if modelo:
             condiciones.append("UPPER(p.descripcion) LIKE ?")
             params.append(f"%{modelo}%")
+        # QUÉ PIEZA, y va en la CONSULTA y no después. Un auto con 1.855 repuestos en el
+        # catálogo se lista cortado en los primeros 200, así que filtrar el resultado por
+        # «junta de tapa» buscaba adentro de 200 que casi nunca son juntas. Filtrando en la
+        # consulta, los 200 que quedan son los de esa pieza.
+        for _palabra_pieza in re.split(r'\s+', (pieza or "").strip()):
+            # Sin acentos de los dos lados: las listas escriben «INYECCION» y el que pregunta
+            # escribe «inyección». normalizar_texto() hace lo mismo que el SQL de al lado.
+            _limpia_pieza = normalizar_texto(_palabra_pieza)
+            if len(_limpia_pieza) >= 3:
+                condiciones.append(f"{_sql_sin_acentos('p.descripcion')} LIKE ?")
+                params.append(f"%{_limpia_pieza}%")
         c.execute(f"""SELECT p.id AS "ID", p.codigo_raw AS "Código", p.descripcion AS "Descripcion",
                              m.nombre AS "Marca", p.precio AS "Precio", p.stock AS "Stock"
                       FROM productos p JOIN marcas m ON m.id = p.marca_id
@@ -12118,6 +12130,77 @@ def leer_remito_por_foto(imagen_bytes):
     except Exception as e:
         anotar_error("leer_remito_por_foto", e)
         registrar_uso_ia("Leer remito por foto", False)
+        return None, traducir_error_gemini(e)
+
+
+def leer_cedula_por_foto(imagen_bytes):
+    """Lee una cédula verde/azul o un título del automotor y devuelve los datos del vehículo.
+
+    ES LA RESPUESTA A «DE LA PATENTE NO SALE NADA». No existe una base pública y gratuita que
+    traduzca dominio a vehículo, pero el dato completo está impreso en el papel que el cliente
+    lleva en la guantera: dominio, marca, modelo, año, motor y chasis. Una foto, una vez, y de
+    ahí en más la patente sola alcanza para todo — que es lo que se pedía.
+
+    Y lo que sale de acá es MEJOR que cualquier consulta: el número de motor y el de chasis no
+    están en ninguna consulta gratuita, y son los que después dejan buscar por VIN.
+
+    Devuelve (datos, error). Nada se guarda solo: los datos van a un formulario para revisar."""
+    from google import genai
+    from google.genai import types
+    import json
+
+    api_key = secretos_app().get("gemini_api_key")
+    if not api_key:
+        return None, "No configuraste 'gemini_api_key' en Streamlit Cloud (Settings → Secrets)."
+
+    try:
+        client = genai.Client(api_key=api_key)
+        prompt = (
+            "Esta es una foto de una cédula de identificación del automotor argentina (cédula "
+            "verde o azul) o de un título del automotor. Extraé los datos del vehículo y devolvé "
+            "ÚNICAMENTE un JSON válido (sin texto extra, sin markdown), con esta forma exacta: "
+            '{"dominio": "...", "marca": "...", "modelo": "...", "anio": "...", '
+            '"motor": "...", "chasis": "...", "titular": "..."}. '
+            "El DOMINIO es la patente (AB123CD o ABC123). El AÑO es el año modelo, cuatro "
+            "dígitos. MOTOR es el número de motor y CHASIS el número de chasis o VIN, que suelen "
+            "ser largos y mezclar letras y números: copialos carácter por carácter, sin espacios. "
+            "Si algún campo no se lee con claridad, dejalo como null: no completes ni adivines "
+            "nada, un número de chasis inventado hace que después se busquen repuestos de otro "
+            "auto."
+        )
+        response = client.models.generate_content(
+            model="gemini-flash-latest",
+            contents=[prompt, types.Part.from_bytes(data=imagen_bytes, mime_type="image/jpeg")],
+        )
+        texto = response.text.strip()
+        if texto.startswith("```"):
+            texto = texto.split("```")[1]
+            texto = texto[4:] if texto.lower().startswith("json") else texto
+        datos = json.loads(texto)
+        if not isinstance(datos, dict):
+            registrar_uso_ia("Leer cédula por foto", False)
+            return None, "Gemini no devolvió los datos en la forma esperada."
+        # Se normaliza acá y no en la pantalla: el dominio se guarda sin espacios ni guiones
+        # porque así se busca, y el chasis en mayúsculas porque así se compara con el VIN.
+        limpio = {}
+        for clave in ("dominio", "marca", "modelo", "anio", "motor", "chasis", "titular"):
+            valor = datos.get(clave)
+            limpio[clave] = "" if valor is None else str(valor).strip()
+        limpio["dominio"] = re.sub(r'[^A-Z0-9]', '', limpio["dominio"].upper())
+        limpio["chasis"] = re.sub(r'[^A-Z0-9]', '', limpio["chasis"].upper())
+        limpio["motor"] = re.sub(r'\s+', '', limpio["motor"].upper())
+        limpio["anio"] = (re.findall(r'(19|20)\d{2}', limpio["anio"]) and
+                          re.search(r'((?:19|20)\d{2})', limpio["anio"]).group(1)) or ""
+        registrar_uso_ia("Leer cédula por foto", True)
+        return limpio, None
+    except json.JSONDecodeError as _err:
+        anotar_error("leer_cedula_por_foto", _err)
+        registrar_uso_ia("Leer cédula por foto", False)
+        return None, ("No pude interpretar la respuesta — probá con una foto más derecha y con "
+                      "buena luz, que se lean los números.")
+    except Exception as e:
+        anotar_error("leer_cedula_por_foto", e)
+        registrar_uso_ia("Leer cédula por foto", False)
         return None, traducir_error_gemini(e)
 
 
@@ -17014,6 +17097,22 @@ Casi todo lo que edita o borra algo pide la contraseña de administrador la prim
                 with st.expander(etiqueta_resultado, expanded=(total_codigos_buscados == 1)):
                     if item.get("aviso"):
                         st.warning(item["aviso"])
+                    # Una patente escrita en el buscador. Pasa: el cliente la dice y el que
+                    # atiende la escribe donde está el cursor. En vez de «sin resultados», que
+                    # es cierto pero no ayuda, se dice qué es y dónde se usa.
+                    _pat_en_buscador = leer_patente(codigo_individual)
+                    if not res and _pat_en_buscador["formato"]:
+                        _d_b, _h_b, _ = anio_probable_de_patente(codigo_individual)
+                        st.info(
+                            f"🪪 Eso es una **patente argentina** ({_pat_en_buscador['detalle']})"
+                            + (f", de **{_pat_en_buscador['provincia']}**"
+                               if _pat_en_buscador["provincia"] else "")
+                            + (f", patentada entre **{_d_b} y {_h_b}**." if _d_b and _h_b
+                               else ".")
+                            + "\n\nLas patentes se buscan en **🛠️ Modo Mecánico → 🔤 Por "
+                              "patente**: si el auto está cargado, de ahí salen los repuestos "
+                              "que le entran. Y si no está, se carga con una foto de la cédula."
+                        )
                     # El mismo número en dos piezas distintas. Ver el_mismo_numero_en_dos_piezas().
                     _choque = el_mismo_numero_en_dos_piezas(res)
                     if _choque:
@@ -23324,9 +23423,62 @@ if pagina == PAGINAS[7]:
             if not _v:
                 st.warning(f"No hay ningún auto cargado con la patente **{_todo['patente']}**.")
                 st.caption(
-                    "Se carga una vez en **🚙 Repuestos por vehículo** y queda para siempre: "
-                    "la próxima vez que venga ese cliente, con la patente sale todo."
+                    "Se carga una vez y queda para siempre: la próxima vez que venga ese "
+                    "cliente, con la patente sale todo."
                 )
+                # LA FORMA GRATIS DE QUE LA PATENTE SIRVA. No hay ninguna base pública que
+                # traduzca dominio a vehículo —las que hay cobran por consulta— pero el dato
+                # completo está impreso en el papel que el cliente lleva en la guantera. Una
+                # foto, una vez, y la ficha queda cargada con marca, modelo, año, motor y
+                # chasis: de ahí en más la patente sola alcanza.
+                st.markdown("**📷 Cargalo con una foto de la cédula**")
+                explicar(
+                    "Sacale una foto a la cédula verde (o al título) y la app carga la ficha.",
+                    "Es lo que reemplaza a la consulta de dominio, que no existe gratis. Y de "
+                    "paso trae dos datos que ninguna consulta te da: el número de motor y el "
+                    "de chasis, que son los que después dejan buscar por VIN cuando el auto "
+                    "tiene el motor cambiado.\n\nNada se guarda solo: los datos salen a un "
+                    "formulario para que los revises antes de aceptar."
+                )
+                _foto_ced = subir_archivo("Foto de la cédula:", ["png", "jpg", "jpeg"],
+                                           f"cedula_{_todo['patente']}")
+                if st.button("🔎 Leer la cédula", disabled=not archivo_listo(_foto_ced, "foto")):
+                    with st.spinner("Leyendo la cédula..."):
+                        _datos_ced, _err_ced = leer_cedula_por_foto(_foto_ced.getvalue())
+                    if _err_ced:
+                        st.error(_err_ced)
+                    else:
+                        st.session_state["cedula_leida"] = _datos_ced
+                _ced = st.session_state.get("cedula_leida")
+                if _ced:
+                    st.success("Esto leí. Corregí lo que haga falta y guardalo:")
+                    with st.form("form_cedula"):
+                        _cc1, _cc2, _cc3 = cols(3)
+                        _f_dom = _cc1.text_input("Patente", value=_ced.get("dominio") or _pat)
+                        _f_mar = _cc2.text_input("Marca", value=_ced.get("marca") or "")
+                        _f_mod = _cc3.text_input("Modelo", value=_ced.get("modelo") or "")
+                        _cc4, _cc5, _cc6 = cols(3)
+                        _f_anio = _cc4.text_input("Año", value=_ced.get("anio") or "")
+                        _f_mot = _cc5.text_input("N° de motor", value=_ced.get("motor") or "")
+                        _f_vin = _cc6.text_input("N° de chasis (VIN)",
+                                                  value=_ced.get("chasis") or "")
+                        _f_cli = st.text_input("Titular / cliente", value=_ced.get("titular") or "")
+                        if st.form_submit_button("💾 Guardar la ficha", type="primary"):
+                            get_or_create_vehiculo(
+                                _f_dom, cliente_nombre=_f_cli, marca_auto=_f_mar,
+                                modelo_auto=_f_mod, anio=_f_anio, vin=_f_vin)
+                            # El número de motor va aparte, igual que en la ficha de arriba:
+                            # get_or_create_vehiculo() ya tiene ocho parámetros.
+                            if _f_mot.strip():
+                                with db_lock:
+                                    c.execute("""UPDATE vehiculos SET numero_motor = ?
+                                                 WHERE UPPER(patente) = UPPER(?)""",
+                                              (_f_mot.strip(), _f_dom.strip()))
+                                    conn.commit()
+                            st.session_state.pop("cedula_leida", None)
+                            avisar("success", f"Ficha de **{_f_dom}** guardada. Ahora la patente "
+                                              "sola te trae todo.")
+                            st.rerun()
             else:
                 st.success(
                     f"🚗 **{_v.get('marca_auto') or ''} {_v.get('modelo_auto') or ''}** "
@@ -23347,13 +23499,81 @@ if pagina == PAGINAS[7]:
                     )
                     st.dataframe(_todo["historial"], width="stretch", hide_index=True)
 
-                if _todo["sugeridos"]:
-                    st.markdown("**📋 Lo que le entra según marca, modelo y motor**")
-                    st.caption(
-                        f"{len(_todo['sugeridos'])} repuesto(s). Esto sale de los catálogos y "
-                        "las descripciones: es más amplio y menos seguro que lo de arriba."
-                    )
-                    st.dataframe(_todo["sugeridos"], width="stretch", hide_index=True)
+                # LO QUE LE ENTRA, y de dónde salió cada cosa. repuestos_de_este_auto()
+                # devuelve las cuatro fuentes SEPARADAS a propósito —una es un hecho y otra una
+                # coincidencia de texto— y acá se estaba dibujando el diccionario entero de una:
+                # la pantalla decía «7 repuesto(s)» (las 7 claves del diccionario) y la tabla
+                # mostraba los nombres de las listas en vez de los repuestos. Los 200 productos
+                # que le entran a un Palio 2001 estaban ahí y no se veían.
+                _sug = _todo["sugeridos"] if isinstance(_todo["sugeridos"], dict) else {}
+                _fuentes = [
+                    ("de_este_auto", "🔧 Ya se le puso a ESTE auto",
+                     "Certeza total: alguien se lo instaló."),
+                    ("de_otros_iguales", "🚗 Se le puso a otro auto del mismo modelo",
+                     "Evidencia del mostrador, no de un catálogo."),
+                    ("del_fabricante", "🏭 El fabricante del repuesto lo da para este auto",
+                     "Sale del catálogo de aplicaciones, no de una coincidencia de texto."),
+                    ("del_catalogo", "📋 Lo dice la descripción del catálogo",
+                     "Es lo más amplio y lo menos seguro: depende de cómo escriba cada "
+                     "proveedor."),
+                ]
+                if any(_sug.get(k) for k, _t, _a in _fuentes):
+                    # LA PREGUNTA DEL MOSTRADOR. El cliente no pide «todo lo que le entra al
+                    # auto», pide una pieza. Filtra por palabras sobre todas las columnas, así
+                    # sirve tanto «junta tapa» como un pedazo del código.
+                    _que_pieza = st.text_input(
+                        "¿Qué pieza necesita?", key=f"pieza_de_{_todo['patente']}",
+                        placeholder="junta de tapa, bujía, amortiguador delantero…"
+                    ).strip().upper()
+                    _palabras_pieza = [w for w in re.split(r'\s+', _que_pieza) if w]
+                    # Con la pieza escrita se vuelve a preguntar, porque el filtro tiene que
+                    # entrar en la CONSULTA: el catálogo de este auto viene cortado en los
+                    # primeros 200 y filtrar esos 200 por «junta de tapa» no encuentra nada
+                    # aunque el catálogo tenga 1.855 para este auto. Ver repuestos_de_este_auto.
+                    if _palabras_pieza:
+                        try:
+                            _sug = repuestos_de_este_auto(
+                                _v.get("marca_auto") or "", _v.get("modelo_auto") or "",
+                                _v.get("anio"), _v.get("motorizacion") or "",
+                                _v.get("vin") or "", limite=200, pieza=_que_pieza)
+                        except Exception as _err:
+                            anotar_error("repuestos por pieza", _err)
+
+                    def _filtrar_por_pieza(filas):
+                        if not _palabras_pieza:
+                            return filas
+                        salida_f = []
+                        for fila_r in filas:
+                            texto_fila = " ".join(str(x) for x in fila_r.values()).upper()
+                            if all(w in texto_fila for w in _palabras_pieza):
+                                salida_f.append(fila_r)
+                        return salida_f
+
+                    for _clave, _titulo, _ayuda in _fuentes:
+                        _filas_fuente = _filtrar_por_pieza(_sug.get(_clave) or [])
+                        if not _filas_fuente:
+                            continue
+                        st.markdown(f"**{_titulo}**")
+                        _cuantos = len(_sug.get(_clave) or [])
+                        st.caption(_ayuda + (
+                            f" Mostrando {len(_filas_fuente)} de {_cuantos}."
+                            if _palabras_pieza else f" {_cuantos} repuesto(s)."))
+                        st.dataframe(quitar_id(_filas_fuente[:200]), width="stretch",
+                                     hide_index=True)
+                    if _palabras_pieza and not any(
+                            _filtrar_por_pieza(_sug.get(k) or []) for k, _t, _a in _fuentes):
+                        st.warning(
+                            f"Ninguno de los repuestos que le entran a este auto dice "
+                            f"«{_que_pieza}». Probá con una palabra sola, o buscalo por código "
+                            "en el 🔍 Buscador."
+                        )
+                    if _sug.get("total_catalogo", 0) > len(_sug.get("del_catalogo") or []):
+                        st.caption(
+                            f"El catálogo tiene {_sug['total_catalogo']:,} repuestos para este "
+                            f"auto y acá se listan los primeros "
+                            f"{len(_sug.get('del_catalogo') or []):,}: escribí qué pieza "
+                            "necesitás para achicar la lista."
+                        )
 
                 if _todo["por_motor"]:
                     st.markdown("**⚙️ Otros autos con el mismo modelo de motor**")

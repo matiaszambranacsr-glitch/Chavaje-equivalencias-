@@ -350,6 +350,49 @@ Dos límites que están puestos a propósito y no hay que sacar:
 Medido: rescata 15 códigos (todos bujías NGK/Bosch, que es justo lo que cruza una bujía de un
 proveedor con la de otro), pierde 0, y las 30 motorizaciones conocidas siguen afuera.
 
+## De la patente al repuesto, sin pagar una consulta
+
+Lo gratis que existe y lo que no, para que quede escrito:
+
+| Lo que se busca | Gratis |
+|---|---|
+| Patente → marca, modelo, año | **No.** El informe de dominio del registro automotor se paga por consulta, y las páginas que lo ofrecen «gratis» devuelven el dato de un scraping que se cae solo |
+| Patente → si está denunciado | Sí, la consulta pública de automotores sustraídos — pero eso no dice qué auto es |
+| **Foto de la cédula → todo el vehículo** | **Sí**, y es mejor que cualquier consulta |
+| VIN → país, fabricante, año | Sí, es la norma ISO, y ya estaba en la app |
+
+Así que el camino es el de la cédula. `leer_cedula_por_foto()` lee una cédula verde, una azul o
+un título y saca dominio, marca, modelo, año, **número de motor** y **número de chasis**. Los
+dos últimos no los da ninguna consulta gratuita, y son justo los que después sirven cuando el
+auto tiene el motor cambiado y el VIN ya no representa lo que hay abajo del capot.
+
+Una foto, una vez, y de ahí en más la patente sola alcanza. Nada se guarda solo: lo leído sale
+a un formulario para corregir antes de aceptar, y el prompt le pide explícitamente que deje en
+blanco lo que no se lea bien —un número de chasis inventado hace que después se busquen
+repuestos de otro auto.
+
+## Y la pieza que hace falta
+
+Con el auto identificado, la pantalla de patente mostraba «7 repuesto(s)» y una tabla con los
+nombres de las listas adentro. El error era de una línea: `repuestos_de_este_auto()` devuelve
+las cuatro fuentes SEPARADAS a propósito —lo que ya se le puso a este auto, lo que se le puso a
+otro igual, lo que dice el fabricante y lo que dice el catálogo— y la pantalla dibujaba el
+diccionario entero. Los 200 productos que le entran a un Palio 2001 estaban ahí y no se veían.
+
+Ahora se ven las cuatro fuentes, cada una con su cartel de cuánto vale, y arriba está la
+pregunta del mostrador: **¿qué pieza necesita?**
+
+    DVX 123  →  Fiat Palio 2001  →  1.855 repuestos en el catálogo para ese auto
+    «junta tapa»  →  70
+
+Ese filtro va en la CONSULTA y no sobre el resultado, que es donde estaba la trampa: la lista
+viene cortada en los primeros 200, así que filtrar esos 200 por «junta de tapa» no encontraba
+nada aunque el catálogo tuviera setenta.
+
+Y si alguien escribe una patente en el buscador de códigos —pasa, el cliente la dice y uno la
+escribe donde está el cursor— en vez de «sin resultados» ahora dice qué es, de qué años y dónde
+se usa.
+
 ## Lo que la patente dice sola
 
 No existe una base pública y gratuita que traduzca patente a vehículo —las que hay cobran por
