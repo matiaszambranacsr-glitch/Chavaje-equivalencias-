@@ -701,6 +701,115 @@ def columna_es_codigo_de_barras(valores):
     return False, "", (len(largos), len(limpios))
 
 
+# El prefijo de un código de barras dice EN QUÉ PAÍS se registró la empresa que lo emitió.
+# Es público, es fijo y no hace falta consultar nada: lo asigna GS1 y está en la norma.
+# Sirve para dos cosas en el mostrador: saber si algo es nacional o importado sin mirar la caja,
+# y darse cuenta de que una lista entera cargó códigos de barras como si fueran códigos de
+# fábrica —todos con el mismo prefijo de empresa— que es el error que más vínculos muertos deja.
+# OJO con lo que NO es un país: 020-029 y 200-299 son de uso interno del comercio (los que
+# imprime la balanza del supermercado), y 977-979 son revistas y libros.
+PREFIJOS_GS1 = [
+    ((0, 19), "Estados Unidos y Canadá"), ((20, 29), "uso interno del comercio"),
+    ((30, 39), "Estados Unidos"), ((40, 49), "uso interno del comercio"),
+    ((50, 59), "cupón"), ((60, 139), "Estados Unidos y Canadá"),
+    ((200, 299), "uso interno del comercio"),
+    ((300, 379), "Francia"), ((380, 380), "Bulgaria"), ((383, 383), "Eslovenia"),
+    ((385, 385), "Croacia"), ((387, 387), "Bosnia y Herzegovina"), ((389, 389), "Montenegro"),
+    ((400, 440), "Alemania"), ((450, 459), "Japón"), ((460, 469), "Rusia"),
+    ((470, 470), "Kirguistán"), ((471, 471), "Taiwán"), ((474, 474), "Estonia"),
+    ((475, 475), "Letonia"), ((476, 476), "Azerbaiyán"), ((477, 477), "Lituania"),
+    ((478, 478), "Uzbekistán"), ((479, 479), "Sri Lanka"), ((480, 480), "Filipinas"),
+    ((481, 481), "Bielorrusia"), ((482, 482), "Ucrania"), ((484, 484), "Moldavia"),
+    ((485, 485), "Armenia"), ((486, 486), "Georgia"), ((487, 487), "Kazajistán"),
+    ((489, 489), "Hong Kong"), ((490, 499), "Japón"), ((500, 509), "Reino Unido"),
+    ((520, 521), "Grecia"), ((528, 528), "Líbano"), ((529, 529), "Chipre"),
+    ((530, 530), "Albania"), ((531, 531), "Macedonia del Norte"), ((535, 535), "Malta"),
+    ((539, 539), "Irlanda"), ((540, 549), "Bélgica y Luxemburgo"), ((560, 560), "Portugal"),
+    ((569, 569), "Islandia"), ((570, 579), "Dinamarca"), ((590, 590), "Polonia"),
+    ((594, 594), "Rumania"), ((599, 599), "Hungría"), ((600, 601), "Sudáfrica"),
+    ((603, 603), "Ghana"), ((608, 608), "Baréin"), ((609, 609), "Mauricio"),
+    ((611, 611), "Marruecos"), ((613, 613), "Argelia"), ((616, 616), "Kenia"),
+    ((618, 618), "Costa de Marfil"), ((619, 619), "Túnez"), ((621, 621), "Siria"),
+    ((622, 622), "Egipto"), ((624, 624), "Libia"), ((625, 625), "Jordania"),
+    ((626, 626), "Irán"), ((627, 627), "Kuwait"), ((628, 628), "Arabia Saudita"),
+    ((629, 629), "Emiratos Árabes Unidos"), ((640, 649), "Finlandia"), ((690, 695), "China"),
+    ((700, 709), "Noruega"), ((729, 729), "Israel"), ((730, 739), "Suecia"),
+    ((740, 740), "Guatemala"), ((741, 741), "El Salvador"), ((742, 742), "Honduras"),
+    ((743, 743), "Nicaragua"), ((744, 744), "Costa Rica"), ((745, 745), "Panamá"),
+    ((746, 746), "República Dominicana"), ((750, 750), "México"), ((754, 755), "Canadá"),
+    ((759, 759), "Venezuela"), ((760, 769), "Suiza"), ((770, 771), "Colombia"),
+    ((773, 773), "Uruguay"), ((775, 775), "Perú"), ((777, 777), "Bolivia"),
+    ((778, 779), "Argentina"), ((780, 780), "Chile"), ((784, 784), "Paraguay"),
+    ((786, 786), "Ecuador"), ((789, 790), "Brasil"), ((800, 839), "Italia"),
+    ((840, 849), "España"), ((850, 850), "Cuba"), ((858, 858), "Eslovaquia"),
+    ((859, 859), "Chequia"), ((860, 860), "Serbia"), ((865, 865), "Mongolia"),
+    ((867, 867), "Corea del Norte"), ((868, 869), "Turquía"), ((870, 879), "Países Bajos"),
+    ((880, 880), "Corea del Sur"), ((884, 884), "Camboya"), ((885, 885), "Tailandia"),
+    ((888, 888), "Singapur"), ((890, 890), "India"), ((893, 893), "Vietnam"),
+    ((896, 896), "Pakistán"), ((899, 899), "Indonesia"), ((900, 919), "Austria"),
+    ((930, 939), "Australia"), ((940, 949), "Nueva Zelanda"), ((955, 955), "Malasia"),
+    ((958, 958), "Macao"), ((977, 977), "revista o publicación periódica"),
+    ((978, 979), "libro (ISBN)"), ((980, 980), "comprobante de devolución"),
+    ((981, 984), "cupón"), ((990, 999), "cupón"),
+]
+
+
+def pais_del_codigo_de_barras(codigo):
+    """De qué país es el código de barras, por su prefijo GS1. '' si no se puede decir.
+
+    El país es el de la empresa que REGISTRÓ el código, no el de la fábrica: un repuesto con
+    779 lo vende una empresa argentina, aunque la pieza venga de China. Eso igual sirve — lo
+    que se quiere saber en el mostrador es si lo consigue un proveedor local."""
+    limpio = re.sub(r'\D', '', str(codigo or ""))
+    if len(limpio) not in (8, 12, 13, 14):
+        return ""
+    if len(limpio) == 12:          # UPC-A: es EAN-13 con un cero adelante
+        limpio = "0" + limpio
+    if len(limpio) == 14:          # DUN-14 (la caja): el dígito de agrupación va adelante
+        limpio = limpio[1:]
+    try:
+        prefijo = int(limpio[:3])
+    except ValueError:
+        return ""
+    for (desde, hasta), pais in PREFIJOS_GS1:
+        if desde <= prefijo <= hasta:
+            return pais
+    return ""
+
+
+def pais_de_estos_codigos(valores):
+    """El país que comparten estos códigos de barras, o '' si no hay uno solo claro.
+
+    Se usa cuando se descubrió que una lista entera cargó códigos de barras como si fueran
+    códigos de fábrica: poder decir «son de una empresa de Argentina» hace reconocible un
+    número que si no es una tira de dígitos.
+
+    Mira los códigos ENTEROS y no el prefijo común que devuelve columna_es_codigo_de_barras(),
+    que sería lo cómodo, por una razón concreta: ese prefijo se corta de la cadena tal como
+    está guardada, y un UPC-A de 12 dígitos es un EAN-13 con un cero adelante que ahí no está.
+    Sobre el código entero eso ya lo resuelve pais_del_codigo_de_barras(); sobre el prefijo
+    suelto, «045496» daría «uso interno del comercio» cuando en realidad es 004, Estados
+    Unidos."""
+    conteo = {}
+    for v in valores:
+        pais = pais_del_codigo_de_barras(v)
+        if pais:
+            conteo[pais] = conteo.get(pais, 0) + 1
+    if not conteo:
+        return ""
+    pais, cuantos = max(conteo.items(), key=lambda kv: kv[1])
+    # Si la lista mezcla países no se afirma ninguno: sería peor que no decir nada.
+    return pais if cuantos >= sum(conteo.values()) * 0.7 else ""
+
+
+# No todo prefijo es un país: estos cinco valores son usos especiales de la norma. Importan
+# porque si un escaneo cae en uno de ellos, el número NO identifica un repuesto — es la
+# etiqueta que imprimió una balanza, un cupón, o el ISBN del manual que estaba al lado. Sin
+# esto, el mostrador lee «no está cargado» y se pone a buscar un producto que no existe.
+GS1_NO_ES_UN_PAIS = {"uso interno del comercio", "cupón", "revista o publicación periódica",
+                     "libro (ISBN)", "comprobante de devolución"}
+
+
 # ============================================================
 # COMBOS DE REPUESTOS RELACIONADOS (ej: correa de distribución -> kit + tensor + bomba de agua)
 # ============================================================

@@ -330,7 +330,7 @@ SEMILLA_WMI_VERSION = "3"
 # Lo mismo para el diccionario de códigos de falla: subir este número hace que la lista se
 # vuelva a aplicar una vez, con INSERT OR IGNORE, así quien ya tiene la app recibe los códigos
 # nuevos sin perder los que cargó o corrigió a mano.
-SEMILLA_DTC_VERSION = "2"
+SEMILLA_DTC_VERSION = "3"
 
 
 def secretos_app():
@@ -1158,6 +1158,15 @@ def _esquema_vehiculos_y_mecanico(c):
                      SELECT codigo, '', descripcion, sistema, causas_posibles FROM codigos_dtc_old""")
         c.execute("DROP TABLE codigos_dtc_old")
 
+    # Marca de «esto lo escribió alguien acá». Sin ella, la semilla del diccionario era de una
+    # sola vez para siempre: entraba con INSERT OR IGNORE, así que corregir la descripción de un
+    # código ya cargado no llegaba nunca a una base que ya existía. Un P0380 que decía
+    # «bujía/circuito calefactor» —y por eso ofrecía bujías de nafta para un diesel— iba a
+    # seguir diciendo eso en la base del negocio aunque acá se arreglara. Ahora la semilla
+    # corrige los códigos que vinieron con la app, y NO toca los que cargó o editó el usuario.
+    if "editado" not in columnas_dtc:
+        c.execute("ALTER TABLE codigos_dtc ADD COLUMN editado INTEGER NOT NULL DEFAULT 0")
+
     c.execute("""CREATE TABLE IF NOT EXISTS fabricantes_vin (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         wmi TEXT UNIQUE NOT NULL,
@@ -1513,6 +1522,130 @@ def _dtc_sistematicos():
                    "Red / Comunicación", "Corto en la red CAN, módulo que la tiene tomada"))
     salida.append(("U0401", "Datos inválidos recibidos del módulo de motor (ECM/PCM)",
                    "Red / Comunicación", "Módulo con falla interna, programación incorrecta"))
+    # Correlación cigüeñal / árbol de levas: P0016 a P0019.
+    # Es el código que más plata mueve del mostrador y no estaba: significa que la distribución
+    # se corrió. El que atiende lee «correlación» y no sabe qué es; lo que hay que venderle es
+    # el kit de distribución, que es exactamente lo que el catálogo tiene cargado.
+    for codigo, donde in (("P0016", "banco 1, sensor de admisión"),
+                          ("P0017", "banco 1, sensor de escape"),
+                          ("P0018", "banco 2, sensor de admisión"),
+                          ("P0019", "banco 2, sensor de escape")):
+        salida.append((codigo,
+                       f"La distribución se corrió: el cigüeñal y el árbol de levas no están "
+                       f"en fase ({donde})",
+                       "Motor - Distribución",
+                       "Correa o cadena de distribución salteada o estirada, tensor flojo o "
+                       "gastado, kit de distribución mal calzado, sensor de fase o de rotación "
+                       "flojo, engranaje del variador (VVT) sucio"))
+    # Bujías de precalentamiento por cilindro: P0671 a P0678. Es el código del diesel que no
+    # arranca en frío. P0380 (el circuito en general) ya estaba; faltaba saber CUÁL.
+    for cil in range(1, 9):
+        salida.append((f"P0{670 + cil:03d}",
+                       f"Circuito de la bujía incandescente (de precalentamiento) — cilindro {cil}",
+                       "Motor - Arranque en frío (diesel)",
+                       "Bujía incandescente quemada o con resistencia alta, relé o temporizador "
+                       "de precalentamiento, cableado cortado"))
+    # Presión del riel (common rail). El diesel moderno arranca y anda por esto.
+    for codigo, texto, causa in (
+            ("P0087", "Presión del riel o del sistema de combustible demasiado baja",
+             "Filtro de combustible tapado, bomba de combustible gastada, regulador de presión, "
+             "inyector con retorno excesivo, aire en el circuito"),
+            ("P0088", "Presión del riel o del sistema de combustible demasiado alta",
+             "Regulador de presión trabado, sensor de presión del riel desviado, retorno tapado"),
+            ("P0089", "Regulador de presión de combustible fuera de rango",
+             "Regulador de presión gastado o trabado, bomba de combustible que no da caudal"),
+            ("P0093", "Fuga grande detectada en el sistema de combustible",
+             "Cañería o retorno del inyector perdiendo, inyector con el asiento gastado"),
+            ("P0094", "Fuga chica detectada en el sistema de combustible",
+             "Cañería o retorno perdiendo de a poco, unión floja"),
+            ("P0191", "Circuito del sensor de presión del riel fuera de rango",
+             "Sensor de presión del riel desviado, conector sucio, cableado"),
+            ("P0192", "Sensor de presión del riel con señal baja",
+             "Sensor de presión del riel dañado, cable en corto a masa"),
+            ("P0193", "Sensor de presión del riel con señal alta",
+             "Sensor de presión del riel dañado, cable cortado o en corto a positivo")):
+        salida.append((codigo, texto, "Motor - Combustible", causa))
+    # Turbo. P0234 (sobrepresión) ya estaba suelto; faltaba la falta de presión, que es lo que
+    # el cliente describe como «le falta fuerza».
+    for codigo, texto, causa in (
+            ("P0045", "Circuito de control de la geometría variable del turbo",
+             "Actuador de la geometría variable trabado por carbón, válvula solenoide de vacío, "
+             "cañería de vacío partida, cableado"),
+            ("P0046", "Actuador de la geometría del turbo fuera de rango",
+             "Geometría variable trabada, actuador gastado, vacío insuficiente"),
+            ("P0299", "El turbo no da la presión esperada (subalimentación)",
+             "Manguera de aire del intercooler suelta o partida, geometría variable trabada, "
+             "filtro de aire tapado, turbo gastado, válvula de alivio perdiendo")):
+        salida.append((codigo, texto, "Motor - Admisión / Turbo", causa))
+    # Pedal del acelerador y mariposa electrónica (P2101 en adelante). En todo auto con
+    # acelerador por cable eléctrico —o sea casi todo desde 2005— es de lo que más sale.
+    for codigo, texto, causa in (
+            ("P2101", "El cuerpo de mariposa no llega a la posición ordenada",
+             "Cuerpo de mariposa sucio o con el motor quemado, conector flojo"),
+            ("P2102", "Motor del cuerpo de mariposa — señal baja", causa_electrica),
+            ("P2103", "Motor del cuerpo de mariposa — señal alta", causa_electrica),
+            ("P2111", "El cuerpo de mariposa quedó trabado abierto",
+             "Cuerpo de mariposa sucio o trabado por carbón, resorte de retorno vencido"),
+            ("P2112", "El cuerpo de mariposa quedó trabado cerrado",
+             "Cuerpo de mariposa sucio o trabado por carbón, motor del cuerpo quemado"),
+            ("P2122", "Sensor del pedal del acelerador D — señal baja", causa_electrica),
+            ("P2123", "Sensor del pedal del acelerador D — señal alta", causa_electrica),
+            ("P2127", "Sensor del pedal del acelerador E — señal baja", causa_electrica),
+            ("P2128", "Sensor del pedal del acelerador E — señal alta", causa_electrica),
+            ("P2135", "Los dos sensores del cuerpo de mariposa no coinciden entre sí",
+             "Cuerpo de mariposa con la pista gastada, conector con un pin flojo, masa común"),
+            ("P2138", "Los dos sensores del pedal del acelerador no coinciden entre sí",
+             "Pedal del acelerador con la pista gastada, conector flojo, masa común")):
+        salida.append((codigo, texto, "Motor - Sensores/Admisión", causa))
+    # Electroventilador y sus relés. El código que llega junto con «se calienta parado».
+    for codigo, texto, causa in (
+            ("P0691", "Relé del electroventilador 1 — señal baja",
+             "Relé del electroventilador pegado o quemado, cable en corto a masa"),
+            ("P0692", "Relé del electroventilador 1 — señal alta",
+             "Relé del electroventilador quemado, cable cortado"),
+            ("P0645", "Circuito del relé del embrague del compresor del aire acondicionado",
+             "Relé del compresor quemado, bobina del embrague del compresor abierta, cableado")):
+        salida.append((codigo, texto, "Refrigeración / Confort", causa))
+    # Carga y bomba de combustible: dos que dejan el auto en la calle.
+    for codigo, texto, causa in (
+            ("P0622", "Circuito de control del campo del alternador",
+             "Alternador con el regulador quemado, correa floja, cableado del alternador"),
+            ("P0625", "Campo del alternador — señal baja", "Alternador o su regulador, cableado"),
+            ("P0626", "Campo del alternador — señal alta", "Alternador o su regulador, cableado"),
+            ("P0627", "Circuito de control de la bomba de combustible",
+             "Bomba de combustible gastada, relé de bomba, cableado del tanque"),
+            ("P0628", "Bomba de combustible — señal baja", "Relé de bomba, cable en corto a masa"),
+            ("P0629", "Bomba de combustible — señal alta", "Relé de bomba, cable cortado")):
+        salida.append((codigo, texto, "Eléctrico - Carga y combustible", causa))
+    # Sonda lambda pegada. P0130 y familia dicen «circuito»; estos dicen que la sonda dejó de
+    # moverse, que es el diagnóstico que termina en una sonda nueva.
+    for codigo, texto in (("P2195", "Sonda de oxígeno pegada en pobre, banco 1 sensor 1"),
+                          ("P2196", "Sonda de oxígeno pegada en rica, banco 1 sensor 1"),
+                          ("P2197", "Sonda de oxígeno pegada en pobre, banco 2 sensor 1"),
+                          ("P2198", "Sonda de oxígeno pegada en rica, banco 2 sensor 1")):
+        salida.append((codigo, texto, "Emisiones",
+                       "Sonda lambda contaminada o al final de su vida, fuga de escape antes de "
+                       "la sonda, inyector con pérdida"))
+    # Fallos de encendido que no son por cilindro.
+    salida.append(("P0313", "Fallo de encendido con el nivel de combustible bajo",
+                   "Motor - Encendido", "Poco combustible en el tanque, bomba de combustible que "
+                   "pierde presión cuando queda poco"))
+    salida.append(("P0316", "Fallo de encendido apenas arranca el motor", "Motor - Encendido",
+                   "Bujías gastadas, bobina con fuga en frío, compresión baja, inyector sucio"))
+    # Fuga de admisión: el código que explica media docena de síntomas sueltos.
+    salida.append(("P2279", "Fuga de aire en el sistema de admisión", "Motor - Sensores/Admisión",
+                   "Manguera de admisión partida, junta del múltiple soplada, cuerpo de mariposa "
+                   "flojo, cañería de vacío suelta"))
+    # Filtro de partículas (diesel moderno). Todavía no se vende acá, pero el código llega igual
+    # y conviene que la app diga qué significa en vez de no encontrarlo.
+    salida.append(("P2002", "Rendimiento del filtro de partículas por debajo del límite, banco 1",
+                   "Emisiones (diesel)",
+                   "Filtro de partículas saturado por no completar regeneraciones, sensor de "
+                   "presión diferencial o sus cañerías tapadas, inyector con pérdida"))
+    salida.append(("P2463", "Filtro de partículas — acumulación excesiva de hollín",
+                   "Emisiones (diesel)",
+                   "Muchos viajes cortos sin llegar a regenerar, sensor de presión diferencial, "
+                   "válvula EGR pegada abierta"))
     # Sensores de velocidad de rueda (C0xxx), que es el código típico del ABS.
     for codigo, rueda in (("C0035", "delantera izquierda"), ("C0040", "delantera derecha"),
                           ("C0045", "trasera izquierda"), ("C0050", "trasera derecha")):
@@ -1711,7 +1844,7 @@ def _datos_precargados_y_migraciones(c):
             ("P0353","Falla en la bobina de encendido C","Motor - Encendido/Combustión","Bobina, cableado"),
             ("P0354","Falla en la bobina de encendido D","Motor - Encendido/Combustión","Bobina, cableado"),
             ("P0370","Falla en la señal de referencia de sincronización de alta resolución A","Motor - Encendido/Combustión","Sensor, cableado, rueda fónica"),
-            ("P0380","Falla en la bujía/circuito calefactor (motores diésel)","Motor - Encendido/Combustión","Bujía de precalentamiento, relé, cableado"),
+            ("P0380","Circuito de la bujía incandescente (de precalentamiento) — motores diésel","Motor - Arranque en frío (diesel)","Bujía incandescente quemada o con resistencia alta, relé o temporizador de precalentamiento, cableado"),
             ("P0410","Falla en el sistema de inyección de aire secundario","Emisiones","Bomba de aire secundario, válvulas, mangueras"),
             ("P0411","Caudal incorrecto en la inyección de aire secundario","Emisiones","Bomba de aire secundario, fugas"),
             ("P0480","Falla eléctrica en el circuito de control del ventilador de enfriamiento 1","Motor - Sensores/Admisión","Relé, motor del ventilador, cableado"),
@@ -1754,8 +1887,11 @@ def _datos_precargados_y_migraciones(c):
         # en vez de copiarse. Ver _dtc_sistematicos().
         seed_dtc = seed_dtc + _dtc_sistematicos()
         c.executemany(
-            "INSERT OR IGNORE INTO codigos_dtc (codigo, fabricante, descripcion, sistema, causas_posibles) "
-            "VALUES (?, '', ?, ?, ?)",
+            "INSERT INTO codigos_dtc (codigo, fabricante, descripcion, sistema, causas_posibles) "
+            "VALUES (?, '', ?, ?, ?) "
+            "ON CONFLICT(codigo, fabricante) DO UPDATE SET descripcion = excluded.descripcion, "
+            "sistema = excluded.sistema, causas_posibles = excluded.causas_posibles "
+            "WHERE codigos_dtc.editado = 0",
             seed_dtc
         )
         c.execute("INSERT INTO configuracion (clave, valor) VALUES ('semilla_dtc_version', ?) "
@@ -3158,7 +3294,8 @@ def codigos_de_barras_mal_cargados():
                                                        THEN e.producto_b_id ELSE e.producto_a_id END
                      JOIN marcas mo ON mo.id = po.marca_id
                      WHERE p.marca_id = ? AND mo.tipo = 'OEM' LIMIT 3000""", (prov["marca_id"],))
-        es_barras, prefijo, _ = columna_es_codigo_de_barras([r["codigo"] for r in c.fetchall()])
+        _codigos_oem = [r["codigo"] for r in c.fetchall()]
+        es_barras, prefijo, _ = columna_es_codigo_de_barras(_codigos_oem)
         if not es_barras:
             continue
         c.execute(_CONSULTA_BARRAS_MAL_CARGADOS.format(que="COUNT(*) AS cuantos"),
@@ -3168,7 +3305,8 @@ def codigos_de_barras_mal_cargados():
         if cuantos:
             salida.append({"marca_id": prov["marca_id"], "Lista": prov["marca"],
                            "Códigos de barras cargados como código de fábrica": cuantos,
-                           "Empiezan con": prefijo + "…"})
+                           "Empiezan con": prefijo + "…",
+                           "Registrado en": pais_de_estos_codigos(_codigos_oem) or "—"})
     return salida
 
 
@@ -3290,8 +3428,11 @@ def listas_que_no_cruzan():
         if cruzan:
             motivo = ""
         elif es_barras:
+            _pais_pref = pais_de_estos_codigos(codigos_oem)
             motivo = (f"los códigos de fábrica de esta lista son códigos de barras "
-                      f"(empiezan todos con {prefijo}…): no los tiene ningún otro proveedor")
+                      f"(empiezan todos con {prefijo}…"
+                      + (f", el prefijo de una empresa de {_pais_pref}" if _pais_pref else "")
+                      + "): no los tiene ningún otro proveedor")
         elif total_oem:
             motivo = ("los códigos de fábrica de esta lista no coinciden con los de ninguna "
                       "otra: puede ser que cada proveedor cite terminales distintas")
@@ -7219,6 +7360,104 @@ def borrar_puente(producto_oem_id):
 # ============================================================================================
 # DIAGNÓSTICO DE SALUD DEL CATÁLOGO
 # ============================================================================================
+def envejecimiento_de_precios():
+    """Cuánto atrasada está la lista de cada proveedor, medido con TU propio historial.
+
+    En Argentina una lista de precios de hace dos meses no es una lista de precios: es un dato
+    viejo con el que se vende perdiendo. Pero «hace dos meses» no dice cuánto perdés — depende
+    de cuánto aumentó ESE proveedor.
+
+    No hace falta ningún índice ni ninguna consulta: la app ya guarda cada cambio de precio en
+    historial_precios. Con eso se mide a qué ritmo aumenta cada lista, se lo compara con los
+    días que pasaron desde la última importación, y sale un número que sirve: «la lista de
+    MOTORARG tiene 45 días y viene subiendo 9% por mes, así que estos precios están 13% abajo».
+
+    El ritmo sale de la MEDIANA y no del promedio, a propósito: en cada importación hay siempre
+    un puñado de productos que pasan de 100 a 100.000 porque cambió la unidad o se corrigió un
+    error de carga, y con el promedio esos pocos deciden el número de toda la lista.
+
+    Devuelve una lista por proveedor, ordenada por lo que más atrasado está."""
+    try:
+        c.execute("""
+            WITH cambios AS (
+                SELECT hp.producto_id, p.marca_id, hp.precio, hp.fecha,
+                       LAG(hp.precio) OVER (PARTITION BY hp.producto_id ORDER BY hp.fecha) AS antes,
+                       LAG(hp.fecha)  OVER (PARTITION BY hp.producto_id ORDER BY hp.fecha) AS fecha_antes
+                FROM historial_precios hp
+                JOIN productos p ON p.id = hp.producto_id
+            )
+            SELECT marca_id,
+                   precio, antes,
+                   julianday(fecha) - julianday(fecha_antes) AS dias
+            FROM cambios
+            WHERE antes IS NOT NULL AND antes > 0 AND precio > 0
+              AND julianday(fecha) - julianday(fecha_antes) >= 1""")
+        cambios = filas_a_listas(c)
+    except sqlite3.OperationalError as _err:
+        anotar_error("envejecimiento_de_precios", _err)
+        cambios = []
+
+    ritmo_por_marca = {}
+    por_marca = {}
+    for x in cambios:
+        por_marca.setdefault(x["marca_id"], []).append(x)
+    for marca_id, filas in por_marca.items():
+        mensuales = []
+        for x in filas:
+            try:
+                razon = x["precio"] / x["antes"]
+                # A ritmo mensual: un 4% en 15 días no es lo mismo que un 4% en 90.
+                mensuales.append(razon ** (30.0 / max(x["dias"], 1.0)) - 1)
+            except (ZeroDivisionError, OverflowError, ValueError):
+                continue
+        if len(mensuales) >= 20:
+            mensuales.sort()
+            ritmo_por_marca[marca_id] = mensuales[len(mensuales) // 2]
+
+    try:
+        # COUNT(DISTINCT ...) y no COUNT: el LEFT JOIN con el historial multiplica la fila del
+        # producto por cada cambio de precio que tenga, así que contando a secas un proveedor
+        # con dos importaciones aparece con el doble de productos.
+        c.execute("""SELECT m.id, m.nombre, COUNT(DISTINCT p.id) AS productos,
+                            MAX(hp.fecha) AS ultima,
+                            COUNT(DISTINCT CASE WHEN p.precio IS NOT NULL THEN p.id END) AS con_precio
+                     FROM marcas m
+                     JOIN productos p ON p.marca_id = m.id
+                     LEFT JOIN historial_precios hp ON hp.producto_id = p.id
+                     WHERE m.tipo <> 'OEM'
+                     GROUP BY m.id""")
+        marcas = filas_a_listas(c)
+    except sqlite3.OperationalError as _err:
+        anotar_error("envejecimiento_de_precios", _err)
+        return []
+
+    hoy = datetime.now()
+    salida = []
+    for m in marcas:
+        if not m["con_precio"]:
+            continue
+        dias = None
+        if m["ultima"]:
+            try:
+                # Nunca negativo: una fecha adelantada —el reloj de la máquina, o una lista
+                # cargada con fecha futura— no significa que los precios sean del futuro.
+                dias = max((hoy - datetime.strptime(str(m["ultima"])[:19],
+                                                     "%Y-%m-%d %H:%M:%S")).days, 0)
+            except ValueError:
+                dias = None
+        ritmo = ritmo_por_marca.get(m["id"])
+        atraso = (((1 + ritmo) ** (dias / 30.0) - 1) if (ritmo is not None and dias) else None)
+        salida.append({
+            "Lista": m["nombre"], "Productos con precio": m["con_precio"],
+            "Días desde la última carga": dias,
+            "Sube por mes": (f"{ritmo * 100:.1f}%" if ritmo is not None else "—"),
+            "Estarían atrasados": (f"{atraso * 100:.0f}%" if atraso else "—"),
+            "_atraso": atraso or 0, "_dias": dias or 0, "_ritmo": ritmo,
+        })
+    salida.sort(key=lambda x: (-x["_atraso"], -x["_dias"]))
+    return salida
+
+
 def diagnostico_de_salud():
     """Corre todos los controles de mantenimiento de una y devuelve solo lo que necesita atención.
 
@@ -7245,6 +7484,30 @@ def diagnostico_de_salud():
                   "Estadísticas → Reposición → Consultas de clientes")
     except Exception as _err:
         anotar_error("diagnostico_de_salud/consultas", _err)
+
+    # Los precios viejos. Es el único punto de esta lista que cuesta plata en CADA venta, no
+    # cuando algo sale mal: vender con una lista de hace dos meses es vender perdiendo la
+    # diferencia, y nadie se entera hasta que repone.
+    try:
+        for _vieja in envejecimiento_de_precios():
+            if _vieja["_ritmo"] is not None and _vieja["_atraso"] >= 0.05:
+                sumar("alto",
+                      f"Los precios de {_vieja['Lista']} estarían "
+                      f"{_vieja['Estarían atrasados']} abajo",
+                      f"Esa lista se cargó hace {_vieja['_dias']} días y viene subiendo "
+                      f"{_vieja['Sube por mes']} por mes — medido con tus propias "
+                      f"importaciones, no con ningún índice. Pedile la lista nueva al "
+                      f"proveedor.",
+                      "Estadísticas → Importaciones")
+            elif _vieja["_ritmo"] is None and _vieja["_dias"] >= 60:
+                sumar("medio",
+                      f"La lista de {_vieja['Lista']} tiene {_vieja['_dias']} días",
+                      "Todavía no la importaste dos veces, así que no puedo medir cuánto "
+                      "sube: con la próxima importación la app va a saber a qué ritmo "
+                      "aumenta y te va a avisar sola.",
+                      "Estadísticas → Importaciones")
+    except Exception as _err:
+        anotar_error("diagnostico_de_salud/precios viejos", _err)
 
     try:
         clavos = productos_estancados(365)
@@ -14908,6 +15171,115 @@ def leer_codigo_de_barras(imagen_bytes):
         return [], f"No se pudo leer: {type(e).__name__}: {e}"
 
 
+# El prefijo de un código de barras dice EN QUÉ PAÍS se registró la empresa que lo emitió.
+# Es público, es fijo y no hace falta consultar nada: lo asigna GS1 y está en la norma.
+# Sirve para dos cosas en el mostrador: saber si algo es nacional o importado sin mirar la caja,
+# y darse cuenta de que una lista entera cargó códigos de barras como si fueran códigos de
+# fábrica —todos con el mismo prefijo de empresa— que es el error que más vínculos muertos deja.
+# OJO con lo que NO es un país: 020-029 y 200-299 son de uso interno del comercio (los que
+# imprime la balanza del supermercado), y 977-979 son revistas y libros.
+PREFIJOS_GS1 = [
+    ((0, 19), "Estados Unidos y Canadá"), ((20, 29), "uso interno del comercio"),
+    ((30, 39), "Estados Unidos"), ((40, 49), "uso interno del comercio"),
+    ((50, 59), "cupón"), ((60, 139), "Estados Unidos y Canadá"),
+    ((200, 299), "uso interno del comercio"),
+    ((300, 379), "Francia"), ((380, 380), "Bulgaria"), ((383, 383), "Eslovenia"),
+    ((385, 385), "Croacia"), ((387, 387), "Bosnia y Herzegovina"), ((389, 389), "Montenegro"),
+    ((400, 440), "Alemania"), ((450, 459), "Japón"), ((460, 469), "Rusia"),
+    ((470, 470), "Kirguistán"), ((471, 471), "Taiwán"), ((474, 474), "Estonia"),
+    ((475, 475), "Letonia"), ((476, 476), "Azerbaiyán"), ((477, 477), "Lituania"),
+    ((478, 478), "Uzbekistán"), ((479, 479), "Sri Lanka"), ((480, 480), "Filipinas"),
+    ((481, 481), "Bielorrusia"), ((482, 482), "Ucrania"), ((484, 484), "Moldavia"),
+    ((485, 485), "Armenia"), ((486, 486), "Georgia"), ((487, 487), "Kazajistán"),
+    ((489, 489), "Hong Kong"), ((490, 499), "Japón"), ((500, 509), "Reino Unido"),
+    ((520, 521), "Grecia"), ((528, 528), "Líbano"), ((529, 529), "Chipre"),
+    ((530, 530), "Albania"), ((531, 531), "Macedonia del Norte"), ((535, 535), "Malta"),
+    ((539, 539), "Irlanda"), ((540, 549), "Bélgica y Luxemburgo"), ((560, 560), "Portugal"),
+    ((569, 569), "Islandia"), ((570, 579), "Dinamarca"), ((590, 590), "Polonia"),
+    ((594, 594), "Rumania"), ((599, 599), "Hungría"), ((600, 601), "Sudáfrica"),
+    ((603, 603), "Ghana"), ((608, 608), "Baréin"), ((609, 609), "Mauricio"),
+    ((611, 611), "Marruecos"), ((613, 613), "Argelia"), ((616, 616), "Kenia"),
+    ((618, 618), "Costa de Marfil"), ((619, 619), "Túnez"), ((621, 621), "Siria"),
+    ((622, 622), "Egipto"), ((624, 624), "Libia"), ((625, 625), "Jordania"),
+    ((626, 626), "Irán"), ((627, 627), "Kuwait"), ((628, 628), "Arabia Saudita"),
+    ((629, 629), "Emiratos Árabes Unidos"), ((640, 649), "Finlandia"), ((690, 695), "China"),
+    ((700, 709), "Noruega"), ((729, 729), "Israel"), ((730, 739), "Suecia"),
+    ((740, 740), "Guatemala"), ((741, 741), "El Salvador"), ((742, 742), "Honduras"),
+    ((743, 743), "Nicaragua"), ((744, 744), "Costa Rica"), ((745, 745), "Panamá"),
+    ((746, 746), "República Dominicana"), ((750, 750), "México"), ((754, 755), "Canadá"),
+    ((759, 759), "Venezuela"), ((760, 769), "Suiza"), ((770, 771), "Colombia"),
+    ((773, 773), "Uruguay"), ((775, 775), "Perú"), ((777, 777), "Bolivia"),
+    ((778, 779), "Argentina"), ((780, 780), "Chile"), ((784, 784), "Paraguay"),
+    ((786, 786), "Ecuador"), ((789, 790), "Brasil"), ((800, 839), "Italia"),
+    ((840, 849), "España"), ((850, 850), "Cuba"), ((858, 858), "Eslovaquia"),
+    ((859, 859), "Chequia"), ((860, 860), "Serbia"), ((865, 865), "Mongolia"),
+    ((867, 867), "Corea del Norte"), ((868, 869), "Turquía"), ((870, 879), "Países Bajos"),
+    ((880, 880), "Corea del Sur"), ((884, 884), "Camboya"), ((885, 885), "Tailandia"),
+    ((888, 888), "Singapur"), ((890, 890), "India"), ((893, 893), "Vietnam"),
+    ((896, 896), "Pakistán"), ((899, 899), "Indonesia"), ((900, 919), "Austria"),
+    ((930, 939), "Australia"), ((940, 949), "Nueva Zelanda"), ((955, 955), "Malasia"),
+    ((958, 958), "Macao"), ((977, 977), "revista o publicación periódica"),
+    ((978, 979), "libro (ISBN)"), ((980, 980), "comprobante de devolución"),
+    ((981, 984), "cupón"), ((990, 999), "cupón"),
+]
+
+
+def pais_del_codigo_de_barras(codigo):
+    """De qué país es el código de barras, por su prefijo GS1. '' si no se puede decir.
+
+    El país es el de la empresa que REGISTRÓ el código, no el de la fábrica: un repuesto con
+    779 lo vende una empresa argentina, aunque la pieza venga de China. Eso igual sirve — lo
+    que se quiere saber en el mostrador es si lo consigue un proveedor local."""
+    limpio = re.sub(r'\D', '', str(codigo or ""))
+    if len(limpio) not in (8, 12, 13, 14):
+        return ""
+    if len(limpio) == 12:          # UPC-A: es EAN-13 con un cero adelante
+        limpio = "0" + limpio
+    if len(limpio) == 14:          # DUN-14 (la caja): el dígito de agrupación va adelante
+        limpio = limpio[1:]
+    try:
+        prefijo = int(limpio[:3])
+    except ValueError:
+        return ""
+    for (desde, hasta), pais in PREFIJOS_GS1:
+        if desde <= prefijo <= hasta:
+            return pais
+    return ""
+
+
+def pais_de_estos_codigos(valores):
+    """El país que comparten estos códigos de barras, o '' si no hay uno solo claro.
+
+    Se usa cuando se descubrió que una lista entera cargó códigos de barras como si fueran
+    códigos de fábrica: poder decir «son de una empresa de Argentina» hace reconocible un
+    número que si no es una tira de dígitos.
+
+    Mira los códigos ENTEROS y no el prefijo común que devuelve columna_es_codigo_de_barras(),
+    que sería lo cómodo, por una razón concreta: ese prefijo se corta de la cadena tal como
+    está guardada, y un UPC-A de 12 dígitos es un EAN-13 con un cero adelante que ahí no está.
+    Sobre el código entero eso ya lo resuelve pais_del_codigo_de_barras(); sobre el prefijo
+    suelto, «045496» daría «uso interno del comercio» cuando en realidad es 004, Estados
+    Unidos."""
+    conteo = {}
+    for v in valores:
+        pais = pais_del_codigo_de_barras(v)
+        if pais:
+            conteo[pais] = conteo.get(pais, 0) + 1
+    if not conteo:
+        return ""
+    pais, cuantos = max(conteo.items(), key=lambda kv: kv[1])
+    # Si la lista mezcla países no se afirma ninguno: sería peor que no decir nada.
+    return pais if cuantos >= sum(conteo.values()) * 0.7 else ""
+
+
+# No todo prefijo es un país: estos cinco valores son usos especiales de la norma. Importan
+# porque si un escaneo cae en uno de ellos, el número NO identifica un repuesto — es la
+# etiqueta que imprimió una balanza, un cupón, o el ISBN del manual que estaba al lado. Sin
+# esto, el mostrador lee «no está cargado» y se pone a buscar un producto que no existe.
+GS1_NO_ES_UN_PAIS = {"uso interno del comercio", "cupón", "revista o publicación periódica",
+                     "libro (ISBN)", "comprobante de devolución"}
+
+
 def buscar_por_codigo_de_barras(codigo_leido):
     """Busca el código escaneado, probando también como código de producto.
 
@@ -15595,7 +15967,10 @@ def buscar_dtc(codigo, fabricante_filtro="Todos"):
 # descripciones de los productos.
 PIEZAS_QUE_NOMBRA_UN_DTC = {
     "BUJIA": ("BUJIA", "BUJIAS"),
-    "CABLE DE BUJIA": ("CABLE",),
+    # «CABLE» solo no sirve: «cableado cortado o en corto» es la causa de CASI TODOS los
+    # códigos eléctricos del diccionario, así que cualquier falla del ventilador o del pedal
+    # terminaba ofreciendo cables de bujía. El cable de bujía se nombra con las dos palabras.
+    "CABLE DE BUJIA": ("CABLE DE BUJIA", "CABLES DE BUJIA", "CABLE DE ENCENDIDO"),
     "BOBINA": ("BOBINA",),
     "INYECTOR": ("INYECTOR",),
     "SONDA LAMBDA": ("SONDA", "LAMBDA", "OXIGENO"),
@@ -15617,7 +15992,43 @@ PIEZAS_QUE_NOMBRA_UN_DTC = {
     "SENSOR DE PRESION DE ACEITE": ("PRESION DE ACEITE",),
     "MOTOR PASO A PASO": ("PASO A PASO", "RALENTI"),
     "SOLENOIDE DE CAJA": ("SOLENOIDE",),
+    # Las que entraron con los códigos nuevos. Cada palabra está elegida contra el catálogo
+    # real, no por lo que suena bien: «TURBO» y «COMPRESOR» se probaron y quedaron afuera
+    # porque traían 965 y 324 productos que no son la pieza (las aplicaciones dicen «2.0 TD» y
+    # hay caños «al turbocompresor»). «DISTRIBUCION» en cambio trae los 603 kits y nada más.
+    "KIT DE DISTRIBUCION": ("DISTRIBUCION",),
+    "BUJIA INCANDESCENTE": {"dtc": ("BUJIA INCANDESCENTE", "INCANDESCENTE"),
+                            "catalogo": ("INCANDESCENTE",)},
+    "ELECTROVENTILADOR": ("ELECTROVENTILADOR",),
+    "ALTERNADOR": ("ALTERNADOR",),
+    "BOMBA DE AGUA": ("BOMBA DE AGUA",),
+    "FILTRO DE AIRE": ("FILTRO DE AIRE",),
+    # Acá el código y el catálogo no se llaman igual: la norma dice «ventilador del radiador»
+    # (P0480) y el mostrador lo pide como «electroventilador». Cuando pasa eso, van separadas
+    # las palabras que hay que leer EN EL CÓDIGO y las que hay que buscar EN EL CATÁLOGO —
+    # «VENTILADOR» a secas trae 253 productos que no son eso.
+    "ELECTROVENTILADOR": {"dtc": ("ELECTROVENTILADOR", "VENTILADOR DEL RADIADOR",
+                                  "VENTILADOR DE ENFRIAMIENTO"),
+                          "catalogo": ("ELECTROVENTILADOR",)},
 }
+
+
+# Con qué arranca la descripción de un ACCESORIO de la pieza, que no es la pieza. La junta de
+# la tapa de distribución nombra la distribución, pero al que le saltó un P0016 hay que
+# venderle el kit. Antes salían primero las juntas porque la regla era «la palabra aparece en
+# los primeros 12 caracteres», y «JUNTA DISTRIBUCION» la cumple igual que «KIT DE DISTRIBUCION».
+# No se esconden —a veces la junta es justo lo que falta— pero van después.
+_ACCESORIO_DE_LA_PIEZA = ("JUNTA", "JUNTAS", "JTA", "JTAS", "EMPAQUETADURA", "ARANDELA",
+                          "ARANDELAS", "ARAND", "TORNILLO", "BULON", "TUERCA", "CANO",
+                          "MANGUERA", "FICHA", "RETEN", "RTEN", "RESORTE", "CHAVETA", "SOPORTE",
+                          "ACCESORIO", "PRECINTO", "ABRAZADERA", "GRAMPA", "TAPA", "CAPUCHON",
+                          "PERNO", "SEPARADOR", "BUJE", "DESPIECE", "KIT DE JUNTAS",
+                          "GUARNICION", "O'RING", "ORING", "JGO", "JUEGO DE JUNTAS", "TAPON",
+                          "VALVULA DE PURGA DE JUNTA")
+# Se mira el ARRANQUE de la descripción y no la primera palabra cortada por espacios, porque
+# muchas listas escriben «Jta.Distribucion» y «ARAND. ASIENTO INYECTOR» todo pegado.
+_RE_ACCESORIO = re.compile(r'(' + "|".join(sorted(_ACCESORIO_DE_LA_PIEZA, key=len, reverse=True))
+                           + r')(?![A-Z])')
 
 
 def repuestos_para_el_dtc(codigo, marca_auto="", modelo="", limite=8):
@@ -15639,12 +16050,16 @@ def repuestos_para_el_dtc(codigo, marca_auto="", modelo="", limite=8):
         f"{f.get('Descripción') or ''} {f.get('Causas posibles') or ''}" for f in filas))
 
     salida = []
-    for nombre_pieza, palabras in PIEZAS_QUE_NOMBRA_UN_DTC.items():
+    for nombre_pieza, _config in PIEZAS_QUE_NOMBRA_UN_DTC.items():
+        # Casi siempre el código y el catálogo usan las mismas palabras y alcanza con una lista.
+        palabras_dtc = _config["dtc"] if isinstance(_config, dict) else _config
+        palabras = _config["catalogo"] if isinstance(_config, dict) else _config
         # Como PALABRA y no como subcadena: «CABLE» está adentro de «CABLEADO», que es la causa
         # de casi todos los códigos eléctricos, así que buscando la subcadena todos los códigos
         # del diccionario ofrecían cables de bujía.
-        if not any(re.search(rf'(?<![A-ZÁÉÍÓÚÑ]){re.escape(p)}(?![A-ZÁÉÍÓÚÑ])', texto)
-                   for p in palabras):
+        if not any(re.search(rf'(?<![A-ZÁÉÍÓÚÑ]){re.escape(normalizar_texto(p))}'
+                             rf'(?![A-ZÁÉÍÓÚÑ])', texto)
+                   for p in palabras_dtc):
             continue
         condiciones = ["p.descripcion IS NOT NULL", "m.tipo <> 'OEM'"]
         params = []
@@ -15666,7 +16081,7 @@ def repuestos_para_el_dtc(codigo, marca_auto="", modelo="", limite=8):
                           FROM productos p JOIN marcas m ON m.id = p.marca_id
                           WHERE {" AND ".join(condiciones)}
                           ORDER BY (p.stock IS NULL OR p.stock <= 0), p.precio
-                          LIMIT ?""", params + [limite])
+                          LIMIT ?""", params + [limite * 12])
             productos = filas_a_listas(c)
         except sqlite3.OperationalError as _err:
             anotar_error("repuestos_para_el_dtc", _err)
@@ -15681,12 +16096,42 @@ def repuestos_para_el_dtc(codigo, marca_auto="", modelo="", limite=8):
             _desc_norm = normalizar_texto(prod.get("Descripción") or "")
             _m = next((pat.search(_desc_norm) for pat in _patrones if pat.search(_desc_norm)), None)
             if _m:
-                prod["_al_principio"] = _m.start() <= 12
+                # Tres escalones y no dos: la palabra al principio de todo («BOMBA DE
+                # COMBUSTIBLE …») antes que la palabra adentro de otro nombre («FILTRO BOMBA DE
+                # COMBUSTIBLE»), y esa antes que la que aparece al final, en las aplicaciones
+                # («TERMOSTATO ASTRA … catalizador», que no es un catalizador).
+                prod["_al_principio"] = 0 if _m.start() == 0 else (1 if _m.start() <= 12 else 2)
+                prod["_accesorio"] = bool(_RE_ACCESORIO.match(_desc_norm))
                 _filtrados.append(prod)
-        _filtrados.sort(key=lambda x: (not x.pop("_al_principio"),
+        # Se piden doce veces más filas de las que se van a mostrar y se corta DESPUÉS de
+        # ordenar. Es la diferencia entre mostrar la pieza y mostrar su junta: el SQL ordena por
+        # precio, la junta siempre sale más barata que la pieza, y con el LIMIT puesto en la
+        # consulta las ocho filas que llegaban eran ocho juntas — la pieza de verdad no entraba
+        # nunca. Un P0016 ofrecía un o-ring de la tapa en vez del kit de distribución.
+        _filtrados.sort(key=lambda x: (x.pop("_al_principio"),
+                                        bool(x.pop("_accesorio")),
                                         (x.get("Stock") or 0) <= 0))
+        _filtrados = _filtrados[:limite]
         if _filtrados:
-            salida.append({"pieza": nombre_pieza, "productos": _filtrados})
+            # Dónde nombra el código a esta pieza. El texto arranca con la descripción de la
+            # falla y sigue con las causas escritas de la más probable a la menos; ordenar por
+            # esa posición pone arriba lo que hay que cambiar primero. Antes el orden era el
+            # del diccionario, que no quiere decir nada: un P0016 mostraba dos sensores antes
+            # que el kit de distribución.
+            _hallados = [(m.start(), m.end() - m.start()) for m in
+                         (re.search(rf'(?<![A-ZÁÉÍÓÚÑ]){re.escape(normalizar_texto(w))}'
+                                    rf'(?![A-ZÁÉÍÓÚÑ])', texto) for w in palabras_dtc) if m]
+            _donde = min((h[0] for h in _hallados), default=10 ** 6)
+            # Cuál es el nombre más largo que enganchó, para desempatar. «Bujía incandescente»
+            # y «bujía» arrancan en el mismo lugar del texto, y a un código de precalentamiento
+            # hay que ofrecerle la incandescente primero, no las bujías de nafta.
+            _largo = max((h[1] for h in _hallados if h[0] == _donde), default=0)
+            salida.append({"pieza": nombre_pieza, "productos": _filtrados,
+                            "_donde": _donde, "_largo": _largo})
+    salida.sort(key=lambda x: (x["_donde"], -x["_largo"]))
+    for _g in salida:
+        _g.pop("_donde", None)
+        _g.pop("_largo", None)
     return salida
 
 
@@ -15694,11 +16139,12 @@ def agregar_dtc(codigo, descripcion, sistema, causas, fabricante=""):
     codigo = codigo.strip().upper()
     fabricante = fabricante.strip()
     with db_lock:
+        # editado = 1: lo que se carga o corrige desde la app queda protegido de la semilla.
         c.execute(
-            "INSERT INTO codigos_dtc (codigo, fabricante, descripcion, sistema, causas_posibles) "
-            "VALUES (?, ?, ?, ?, ?) "
+            "INSERT INTO codigos_dtc (codigo, fabricante, descripcion, sistema, causas_posibles, "
+            "editado) VALUES (?, ?, ?, ?, ?, 1) "
             "ON CONFLICT(codigo, fabricante) DO UPDATE SET descripcion=excluded.descripcion, "
-            "sistema=excluded.sistema, causas_posibles=excluded.causas_posibles",
+            "sistema=excluded.sistema, causas_posibles=excluded.causas_posibles, editado=1",
             (codigo, fabricante, descripcion.strip(), sistema.strip(), causas.strip())
         )
         conn.commit()
@@ -15719,10 +16165,10 @@ def importar_dtc_masivo(texto):
             causas = partes[3] if len(partes) > 3 else ""
             fabricante = partes[4] if len(partes) > 4 else ""
             c.execute(
-                "INSERT INTO codigos_dtc (codigo, fabricante, descripcion, sistema, causas_posibles) "
-                "VALUES (?, ?, ?, ?, ?) "
+                "INSERT INTO codigos_dtc (codigo, fabricante, descripcion, sistema, "
+                "causas_posibles, editado) VALUES (?, ?, ?, ?, ?, 1) "
                 "ON CONFLICT(codigo, fabricante) DO UPDATE SET descripcion=excluded.descripcion, "
-                "sistema=excluded.sistema, causas_posibles=excluded.causas_posibles",
+                "sistema=excluded.sistema, causas_posibles=excluded.causas_posibles, editado=1",
                 (codigo, fabricante, descripcion, sistema, causas)
             )
             cargados += 1
@@ -16879,6 +17325,13 @@ Casi todo lo que edita o borra algo pide la contraseña de administrador la prim
             else:
                 for cod_barra in codigos_leidos:
                     st.success(f"📷 Código leído: **`{cod_barra}`**")
+                    # De dónde es se sabe sin consultar nada: lo dice el prefijo. Sirve para
+                    # decidir si el repuesto lo consigue un proveedor local o hay que traerlo.
+                    _pais_barra = pais_del_codigo_de_barras(cod_barra)
+                    if _pais_barra and _pais_barra not in GS1_NO_ES_UN_PAIS:
+                        st.caption(f"🌍 El código lo registró una empresa de **{_pais_barra}** "
+                                    "(el país de quien lo emitió, no necesariamente el de la "
+                                    "fábrica).")
                     res_barra, nota_barra = buscar_por_codigo_de_barras(cod_barra)
                     if nota_barra:
                         st.caption(nota_barra)
@@ -16887,6 +17340,15 @@ Casi todo lo que edita o borra algo pide la contraseña de administrador la prim
                                     "exacta de código, no un parecido:")
                         st.dataframe(quitar_id(res_barra), width="stretch",
                                       hide_index=True)
+                    elif _pais_barra in GS1_NO_ES_UN_PAIS:
+                        # Acá no hay nada que buscar: el número no identifica un repuesto.
+                        st.warning(
+                            f"El código `{cod_barra}` no es el de un producto: es "
+                            f"**{_pais_barra}**. Si es de uso interno lo imprimió el comercio "
+                            "para sí mismo y no vale afuera; si es un libro o una revista, "
+                            "escaneaste otra cosa. Buscá el código de barras del repuesto, que "
+                            "suele estar en otra cara de la caja."
+                        )
                     else:
                         st.warning(
                             f"El código `{cod_barra}` no está cargado en tu catálogo."
@@ -18892,7 +19354,9 @@ if pagina == PAGINAS[2]:
                                 f"barras, no el código de fábrica.** "
                                 f"{_cuantos} de {_total_oem} valores de la muestra son números "
                                 f"de 12 a 14 dígitos que empiezan todos igual (**{_prefijo}…**), "
-                                "que es el prefijo de empresa del código de barras.\n\n"
+                                "que es el prefijo de empresa del código de barras"
+                                + (f", registrado en {pais_de_estos_codigos(_muestra_oem)}"
+                                   if pais_de_estos_codigos(_muestra_oem) else "") + ".\n\n"
                                 "**Por qué importa:** el código de barras es de este proveedor "
                                 "solo. Ninguna otra lista lo va a traer, así que **no va a "
                                 "cruzar con nadie**: se van a cargar miles de equivalencias que "
@@ -21188,6 +21652,39 @@ if pagina == PAGINAS[3]:
                             invalidar_salud()
                             avisar("success", f"{_n} equivalencia(s) quedaron para revisar.")
                             st.rerun()
+            st.markdown("---")
+
+            # CUÁNTO ATRASADOS ESTÁN LOS PRECIOS. Va acá, al lado de las importaciones, porque
+            # lo que se hace con este número es pedir la lista nueva.
+            st.markdown("**⏳ Qué tan atrasada está cada lista**")
+            explicar(
+                "Los días que pasaron desde la última carga y, si la importaste más de una vez, "
+                "a qué ritmo viene aumentando.",
+                "No usa ningún índice ni ninguna consulta: sale de tu propio historial de "
+                "precios. La app ya guarda cada cambio, así que puede medir cuánto aumentó ESE "
+                "proveedor entre tus importaciones y cruzarlo con los días que pasaron.\n\n"
+                "El ritmo sale de la MEDIANA y no del promedio a propósito: en cada lista hay "
+                "siempre un puñado de productos que pasan de 100 a 100.000 porque cambió la "
+                "unidad, y con el promedio esos pocos deciden el número de toda la lista.\n\n"
+                "Hace falta haber importado la misma lista al menos dos veces. Con una sola, la "
+                "app te dice los días y nada más — y aprende sola en la próxima."
+            )
+            _envejecidas = envejecimiento_de_precios()
+            if _envejecidas:
+                st.dataframe(quitar_id(_envejecidas), width="stretch", hide_index=True)
+                _peor = _envejecidas[0]
+                if _peor["_ritmo"] is not None and _peor["_atraso"] >= 0.05:
+                    st.warning(
+                        f"⏳ **Los precios de {_peor['Lista']} estarían "
+                        f"{_peor['Estarían atrasados']} abajo.** La lista tiene "
+                        f"{_peor['_dias']} días y viene subiendo {_peor['Sube por mes']} por "
+                        "mes. Cada venta de esa lista se hace con esa diferencia en contra."
+                    )
+                elif all(x["_ritmo"] is None for x in _envejecidas):
+                    st.caption(
+                        "Todavía no puedo medir el ritmo de ninguna lista: hace falta haber "
+                        "importado la misma al menos dos veces. Los días sí valen."
+                    )
             st.markdown("---")
 
             st.markdown("**↩️ Deshacer una importación**")

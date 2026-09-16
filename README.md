@@ -154,6 +154,30 @@ Sobre la base real: mueve 8.319 códigos de barras a su columna, borra 8.319 pro
 de «OEM / FABRICA» y 8.319 vínculos falsos. El catálogo pasa de 61.574 a 53.255 productos sin
 perder un solo dato — el número sigue estando, en el lugar que le corresponde.
 
+## El prefijo del código de barras dice el país, gratis
+
+Los tres primeros dígitos de un EAN los asigna GS1 y son públicos: no hay que consultar nada ni
+pagarle a nadie. `pais_del_codigo_de_barras()` los traduce. Sirve en dos lugares distintos:
+
+- **Escaneando en el mostrador**: «el código lo registró una empresa de Argentina» contesta sola
+  la pregunta de si el repuesto lo consigue un proveedor local o hay que traerlo. Ojo con lo que
+  dice de verdad: es el país de **quien registró el código**, no el de la fábrica.
+- **Mirando una lista entera**: la tabla de códigos de barras mal cargados mostraba «Empiezan
+  con: 7793960…», que es una tira de dígitos. Ahora dice además **Argentina**, y el aviso de la
+  vista previa de la importación —el único momento en que el error se arregla barato— también.
+
+Y hay prefijos que **no son un país**: 020-029 y 200-299 son de uso interno del comercio (los
+que imprime una balanza), 977-979 son revistas y libros, 05x y 98x-99x son cupones. Si un
+escaneo cae ahí, ese número no identifica ningún repuesto y la app lo dice en vez de contestar
+«no está cargado», que manda a buscar algo que no existe.
+
+Una trampa que ya está probada y conviene no volver a pisar: **el país se lee del código
+entero, no del prefijo común de la lista**. Un UPC-A de 12 dígitos es un EAN-13 con un cero
+adelante que no está escrito, así que cortando el arranque tal como viene, «045496…» cae en
+040-049 —uso interno— cuando en realidad es 004, Estados Unidos. Por eso
+`pais_de_estos_codigos()` recibe los códigos completos y no el prefijo que devuelve
+`columna_es_codigo_de_barras()`.
+
 ## Una equivalencia que no lleva a ningún lado no es una equivalencia
 
 El error más caro de todo esto no rompe nada: la importación sale bien, se cargan miles de
@@ -350,6 +374,34 @@ Dos límites que están puestos a propósito y no hay que sacar:
 Medido: rescata 15 códigos (todos bujías NGK/Bosch, que es justo lo que cruza una bujía de un
 proveedor con la de otro), pierde 0, y las 30 motorizaciones conocidas siguen afuera.
 
+## Cuánto atrasada está una lista, medido con tu propio historial
+
+En Argentina una lista de precios de hace dos meses no es una lista de precios. Pero «hace dos
+meses» no dice cuánto estás perdiendo: depende de cuánto aumentó **ese** proveedor.
+
+No hace falta ningún índice ni ninguna consulta paga. La app ya guarda cada cambio de precio en
+`historial_precios`, y con eso alcanza: `envejecimiento_de_precios()` mide a qué ritmo aumenta
+cada lista, lo compara con los días desde la última importación y devuelve un número accionable
+— *«MOTORARG tiene 45 días y viene subiendo 9% por mes: estos precios están 13% abajo»*.
+Aparece en 📥 Importaciones y, cuando pasa del 5%, también en el diagnóstico de salud, que es
+el único punto de esa lista que cuesta plata en **cada venta** y no cuando algo sale mal.
+
+Tres decisiones que no son obvias y que ya se probaron contra la base real:
+
+- **La mediana, no el promedio.** En cada importación hay un puñado de productos que pasan de
+  100 a 100.000 porque cambió la unidad o se corrigió un error de carga. Con el promedio, esos
+  pocos deciden el número de toda la lista.
+- **A ritmo mensual, no «cuánto subió».** Un 4% en 15 días no es un 4% en 90:
+  `razon ** (30 / dias) - 1`. Y se piden al menos 20 muestras antes de afirmar un ritmo.
+- **`COUNT(DISTINCT p.id)`.** El `LEFT JOIN` con el historial multiplica la fila del producto
+  por cada cambio de precio que tenga: contando a secas, un proveedor con dos importaciones
+  aparecía con el doble de productos. Y los días nunca son negativos — una fecha adelantada (el
+  reloj de la máquina, una lista cargada con fecha futura) no significa que los precios sean del
+  futuro.
+
+Cuando todavía no hay dos importaciones de una lista no se inventa un ritmo: si además pasaron
+más de 60 días, avisa igual, pero diciendo que no sabe cuánto.
+
 ## Los códigos de falla que se arman solos
 
 El diccionario de códigos OBD2 traía 191 códigos copiados a mano, y ahí se veía dónde se había
@@ -395,6 +447,65 @@ Dos cuidados que costaron una vuelta:
 - **Primero lo que EMPIEZA con esa palabra.** En una descripción el nombre de la pieza va
   adelante, así que «BUJIA NGK FIAT PALIO» es una bujía y «ARANDELA CAPUCHON BUJIAS» es otra
   cosa que la nombra.
+
+## La junta tapaba a la pieza
+
+El 59% de lo que ofrecía «del código de falla al repuesto» empezaba con JUNTA, ARANDELA, JTA,
+O'RING o CANO. No estaba mal buscado: **estaba mal ordenado**. Un P0016 ofrecía un o-ring de la
+tapa de distribución en vez del kit; un P0335 ofrecía la junta de la tapa anterior del cigüeñal
+en vez del sensor de rotación; un P0420, la junta del catalizador.
+
+Tres cosas se juntaban para producir eso:
+
+- **El `LIMIT` estaba en el SQL, y el orden en Python.** La consulta pedía 8 filas ordenadas por
+  precio; la junta siempre sale más barata que la pieza, así que las 8 filas que llegaban eran 8
+  juntas y la pieza de verdad no entraba nunca — ordenarlas después no la podía traer de vuelta.
+  Ahora se piden doce veces más y se corta **después** de ordenar.
+- **«La palabra en los primeros 12 caracteres» no distingue nada.** «JUNTA DISTRIBUCION» cumple
+  esa regla igual que «KIT DE DISTRIBUCION». Ahora hay una lista de con qué arranca el nombre de
+  un **accesorio** de la pieza (`_ACCESORIO_DE_LA_PIEZA`) y esos van al final del grupo — no se
+  esconden, porque a veces la junta es justo lo que falta.
+- **Los grupos salían en el orden del diccionario**, que no quiere decir nada. Ahora salen en el
+  orden en que **el propio código** los nombra: el texto arranca con la descripción de la falla y
+  sigue con las causas escritas de la más probable a la menos.
+
+Y dos detalles que costaron una vuelta cada uno:
+
+- «CABLE» a secas no sirve como nombre de pieza: *«cableado cortado o en corto»* es la causa de
+  casi todos los códigos eléctricos del diccionario, así que una falla del electroventilador
+  terminaba ofreciendo cables de bujía. El cable de bujía se nombra con las dos palabras.
+- «TURBO» y «COMPRESOR» se probaron como piezas nuevas y **quedaron afuera**: traen 965 y 324
+  productos que no son eso (las aplicaciones dicen «2.0 TD» y hay caños «al turbocompresor»).
+  «DISTRIBUCION» en cambio trae los 603 kits y nada más. La palabra se elige contra el catálogo
+  real, no por lo que suena bien.
+
+Sobre los 316 códigos del diccionario: **299 grupos ofrecidos, 3 encabezados por un accesorio**
+(antes eran 231 grupos y 136 accesorios). El tiempo por código no cambió: 0,34 s.
+
+## Cincuenta y dos códigos de falla más, y los que ya estaban no se podían corregir
+
+Entraron las familias que faltaban y que terminan en una venta:
+
+    P0016 a P0019    la distribución se corrió (cigüeñal y levas fuera de fase) → el kit
+    P0671 a P0678    bujía incandescente por cilindro → el diesel que no arranca en frío
+    P0087…P0193      presión del riel, regulador, fuga → common rail
+    P0045/46, P0299  geometría variable y falta de presión del turbo
+    P2101 a P2138    cuerpo de mariposa y pedal del acelerador (P2135 es de los que más salen)
+    P2195 a P2198    la sonda quedó pegada en pobre o en rica
+    P0691/92, P0645  relés del electroventilador y del compresor del aire
+    P0622 a P0629    campo del alternador y bomba de combustible
+    P2002, P2463     filtro de partículas
+
+De 264 a 316 códigos, y de 189 a 236 los que ofrecen un repuesto del catálogo.
+
+Pero apareció algo peor que la falta de códigos: **la semilla no podía corregir lo que ya había
+cargado**. Entraba con `INSERT OR IGNORE`, así que arreglar el texto de un código existente no
+llegaba nunca a una base que ya existía. `P0380` decía «falla en la bujía/circuito calefactor» y
+por eso ofrecía **bujías de nafta para un motor diesel**; corregirlo acá no cambiaba nada en la
+base del negocio. Ahora hay una columna `editado`: la semilla corrige los códigos que vinieron
+con la app, y **no toca** los que cargó o corrigió el usuario (`agregar_dtc()` y la importación
+masiva los marcan con 1). Está probado con los dos casos: `P0380` se corrigió solo, y un `P0301`
+editado a mano sobrevivió intacto.
 
 ## De la patente al repuesto, sin pagar una consulta
 

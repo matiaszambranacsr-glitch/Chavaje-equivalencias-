@@ -691,6 +691,34 @@ def probar_busqueda_por_codigo_de_barras():
     con.close()
 
 
+def probar_el_pais_del_codigo_de_barras():
+    """El prefijo del código de barras dice el país, y hay que leerlo del código ENTERO.
+
+    Lo caro es el UPC-A: son 12 dígitos y equivalen a un EAN-13 con un cero adelante que no está
+    escrito. Si se mira el arranque tal cual viene, «045496…» cae en 040-049, que la norma
+    reserva para uso interno del comercio, y la app diría que un producto de Estados Unidos es
+    una etiqueta que imprimió una balanza. Mirando el código completo, 004 = Estados Unidos.
+
+    También importa lo que NO es un país: si un escaneo da 200-299, ese número no identifica
+    ningún repuesto y no tiene sentido salir a buscarlo."""
+    igual(codigos.pais_del_codigo_de_barras("7793960026946"), "Argentina",
+          "779 es el prefijo argentino")
+    igual(codigos.pais_del_codigo_de_barras("7897707516933"), "Brasil", "789 es Brasil")
+    igual(codigos.pais_del_codigo_de_barras("045496730086"), "Estados Unidos y Canadá",
+          "un UPC-A de 12 dígitos se lee con el cero adelante, no como 045")
+    igual(codigos.pais_del_codigo_de_barras("2001234567890"), "uso interno del comercio",
+          "200-299 no es un país: es la etiqueta que imprime el comercio")
+    cierto(codigos.pais_del_codigo_de_barras("2001234567890") in codigos.GS1_NO_ES_UN_PAIS,
+           "y la app tiene que poder distinguir eso de un país de verdad")
+    igual(codigos.pais_del_codigo_de_barras("123"), "",
+          "con tres dígitos no se puede decir nada")
+    # Y por lista: es como se detecta que una lista entera cargó códigos de barras.
+    igual(codigos.pais_de_estos_codigos(["7793960026946", "7793960026947", "7793960026948"]),
+          "Argentina", "una lista con todos los códigos del mismo prefijo tiene un país")
+    igual(codigos.pais_de_estos_codigos(["ABC123", "XYZ"]), "",
+          "si no son códigos de barras no se inventa un país")
+
+
 def probar_la_patente_argentina():
     """Qué se puede leer de una patente sin consultar ninguna base.
 
@@ -948,6 +976,7 @@ def main():
                    probar_abreviaturas_de_las_listas_reales,
                    probar_busqueda_por_codigo_de_barras,
                    probar_la_patente_argentina,
+                   probar_el_pais_del_codigo_de_barras,
                    probar_bed_ford_no_es_ford,
                    probar_la_marca_abreviada_es_la_misma_marca,
                    probar_ref_orig_pegado_no_es_codigo,
