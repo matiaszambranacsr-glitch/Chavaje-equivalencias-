@@ -350,6 +350,37 @@ Dos límites que están puestos a propósito y no hay que sacar:
 Medido: rescata 15 códigos (todos bujías NGK/Bosch, que es justo lo que cruza una bujía de un
 proveedor con la de otro), pierde 0, y las 30 motorizaciones conocidas siguen afuera.
 
+## «PVC» era un código, y unía 76 cables
+
+En la base real hay **196 vínculos entre dos productos de la misma lista**, todos de JL. No son
+equivalencias: salen de una celda de código que traía dos cosas y una no era un código.
+
+    208.856 C  ↔  PVC        Cable VW GACEL 1.6/GOL/SENDA
+    23 8130R   ↔  SOPORTE    RELAY UNIVERS Tipo A Simple 30A c/soporte
+    BF 3       ↔  SPR        BOBINA 1000 ST aceite / SPR aceite
+    274.899 c  ↔  CHAPA      Cable VW CARAT
+
+Los códigos de una misma celda **sí** se vinculan entre sí a propósito —son dos números del
+mismo producto— y ahí está el agujero: cuando el pedazo que sobra es una palabra suelta, esa
+palabra queda como un producto que se repite en decenas de filas y termina uniéndolas a todas.
+El «CHAPA» de la lista de JL colgaba **76 cables distintos**, y era el código puente número uno
+de toda la base.
+
+Se reconocen por no tener **ningún dígito**. En las 70.888 filas del catálogo real hay 14
+códigos así, y los pocos que son de verdad son herramientas sueltas —HGONIOMETRO, APLIGAL,
+HCRV— que no necesitan equivalencia con nada. Así que un código sin números deja de vincularse
+con sus compañeros de celda.
+
+Para los que ya están cargados hay dos avisos nuevos, uno en cada pantalla que revisa vínculos:
+
+- «los dos son de JL y **«PVC» no tiene ningún número**: es un pedazo de la descripción que
+  quedó como código»
+- «los dos son de JL y **dicen exactamente lo mismo**: es una fila de la lista leída dos veces»
+
+Con eso, «Revisar los vínculos que YA están cargados» pasa de encontrar 127 dudosos a 270 sobre
+los mismos 24.774. Y de paso ese listado dejó de cortarse en 300: como ordena por confianza, el
+tope escondía justo lo que hay que ver.
+
 ## Pedir el 206 y que no venga el 9662063280
 
 El filtro por modelo de la pantalla de vehículos buscaba el modelo **adentro** del texto de la

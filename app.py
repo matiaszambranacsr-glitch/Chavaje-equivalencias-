@@ -6632,7 +6632,7 @@ def origenes_de_los_vinculos_directos(producto_id, ids_resultado):
 # ============================================================================================
 # CONFIANZA DE CADA VÍNCULO
 # ============================================================================================
-def auditar_equivalencias_cargadas(limite=300, tope_confianza=35, revisar=None):
+def auditar_equivalencias_cargadas(limite=2000, tope_confianza=35, revisar=None):
     """Pasa el mismo análisis de confianza por las equivalencias YA cargadas.
 
     Es la herramienta que faltaba. El análisis de confianza solo miraba los vínculos pendientes
@@ -6709,6 +6709,23 @@ def auditar_equivalencias_cargadas(limite=300, tope_confianza=35, revisar=None):
             malo, _ = codigo_sospechoso(f[f"cod_{lado}"], f.get(f"desc_{lado}") or "")
             if malo:
                 puntaje -= 35
+        # Dos productos del MISMO proveedor. Es el mismo control que hace evidencia_cruzada(),
+        # repetido acá porque esta función no la llama —serían 24.774 llamadas— y se puede
+        # contestar con lo que el lote ya trae. Son 196 vínculos en la base real y ninguno es
+        # una equivalencia: salen de una celda de código que traía dos cosas y una era un
+        # pedazo de la descripción.
+        if f["marca_a"] == f["marca_b"]:
+            _sin_digitos = [f[f"cod_{lado}"] for lado in ("a", "b")
+                            if not any(ch.isdigit() for ch in sanitizar(f[f"cod_{lado}"]))]
+            _misma_desc = (f["desc_a"] or "").strip() == (f["desc_b"] or "").strip()
+            if _sin_digitos or _misma_desc:
+                puntaje = min(puntaje, 10.0)
+                senales.append((
+                    "mal",
+                    f"🏷️ los dos son de {f['marca_a']} y "
+                    + (f"«{_sin_digitos[0]}» no tiene ningún número: es un pedazo de la "
+                       "descripción que quedó como código" if _sin_digitos else
+                       "dicen exactamente lo mismo: es una fila leída dos veces")))
         puntaje = max(0.0, puntaje)
         if puntaje <= tope_confianza:
             dudosas.append({
@@ -10496,6 +10513,21 @@ def evidencia_cruzada(id_a, id_b, cuenta_palabras=None, total_descripciones=None
     pa, pb = filas[id_a], filas[id_b]
 
     a_favor, vetos = [], []
+
+    # 0. DOS PRODUCTOS DEL MISMO PROVEEDOR. Un catálogo no lista dos veces la misma pieza
+    # para que elijas: si aparecen vinculados y además dicen exactamente lo mismo, es una fila
+    # leída dos veces —la celda del código traía dos cosas y una no era un código—. Son 196
+    # vínculos en la base real, todos de la misma lista, y salen de pedazos de la descripción
+    # que quedaron como código: «PVC», «SPR», «SOPORTE», «CHAPA».
+    if pa["marca_id"] == pb["marca_id"]:
+        _sin_digitos = [x["codigo_raw"] for x in (pa, pb)
+                        if not any(ch.isdigit() for ch in (x["codigo_clean"] or ""))]
+        if _sin_digitos:
+            vetos.append(f"🏷️ los dos son de {pa['marca']} y «{_sin_digitos[0]}» no tiene ningún "
+                          "número: es un pedazo de la descripción que quedó como código")
+        elif (pa["descripcion"] or "").strip() == (pb["descripcion"] or "").strip():
+            vetos.append(f"🏷️ los dos son de {pa['marca']} y tienen la misma descripción: es "
+                          "una fila de la lista leída dos veces, no dos repuestos equivalentes")
 
     # 1. Medidas. Es el único método que puede VETAR: si las medidas se contradicen, no hay
     # descripción ni catálogo que lo arregle.
@@ -18570,12 +18602,27 @@ if pagina == PAGINAS[2]:
                             # arriba y adivinar_columnas().
                             barras_fila = sanitizar(valor_codigo(celda(idx_ean))) if idx_ean is not None else ""
 
+                            # Los códigos de una misma celda se vinculan entre sí más abajo
+                            # —son dos números del mismo producto— y ahí está el agujero por el
+                            # que entró la peor basura de la base: cuando la celda se parte y
+                            # uno de los pedazos no es un código sino una palabra suelta
+                            # («PVC», «SPR», «SOPORTE», «CHAPA», «GOMA»), esa palabra queda
+                            # como un producto que se repite en decenas de filas y termina
+                            # uniéndolas a todas. El «CHAPA» de una lista real colgaba 76
+                            # cables distintos.
+                            # Se reconocen por no tener NINGÚN dígito. En las 70.888 filas del
+                            # catálogo real hay 14 códigos así, y los que son de verdad son
+                            # herramientas sueltas (HGONIOMETRO, APLIGAL) que no necesitan
+                            # equivalencias con nada.
                             ids_prov = []
+                            ids_prov_sin_digitos = set()
                             for raw_p in codigos_prov:
                                 clean_p = sanitizar(raw_p)
                                 if clean_p:
                                     pid_nuevo = get_or_create_producto(raw_p, clean_p, desc, prov_id)
                                     ids_prov.append(pid_nuevo)
+                                    if not any(ch.isdigit() for ch in clean_p):
+                                        ids_prov_sin_digitos.add(pid_nuevo)
                                     if barras_fila:
                                         c.execute("UPDATE productos SET codigo_barras = ? "
                                                   "WHERE id = ?", (barras_fila, pid_nuevo))
@@ -18644,7 +18691,8 @@ if pagina == PAGINAS[2]:
                                 # aunque no haya OEM, los códigos de la misma celda se vinculan entre sí
                                 for pid in ids_prov:
                                     for pid2 in ids_prov:
-                                        if pid2 != pid:
+                                        if (pid2 != pid and pid not in ids_prov_sin_digitos
+                                                and pid2 not in ids_prov_sin_digitos):
                                             eq_batch.add((min(pid, pid2), max(pid, pid2)))
                                 if total and n % 25 == 0:
                                     progreso.progress(min((n + 1) / total, 1.0))
@@ -18662,7 +18710,8 @@ if pagina == PAGINAS[2]:
                                     if pid != oid:
                                         eq_batch.add((min(pid, oid), max(pid, oid)))
                                 for pid2 in ids_prov:
-                                    if pid2 != pid:
+                                    if (pid2 != pid and pid not in ids_prov_sin_digitos
+                                            and pid2 not in ids_prov_sin_digitos):
                                         eq_batch.add((min(pid, pid2), max(pid, pid2)))
 
                             cargados += 1
