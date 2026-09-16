@@ -327,6 +327,10 @@ db_lock = threading.Lock()
 # Subir este número cuando se agreguen WMI nuevos: hace que la lista se vuelva a aplicar una vez
 # sobre las bases que ya existen, sin pisar lo que el usuario haya corregido a mano.
 SEMILLA_WMI_VERSION = "3"
+# Lo mismo para el diccionario de códigos de falla: subir este número hace que la lista se
+# vuelva a aplicar una vez, con INSERT OR IGNORE, así quien ya tiene la app recibe los códigos
+# nuevos sin perder los que cargó o corrigió a mano.
+SEMILLA_DTC_VERSION = "2"
 
 
 def secretos_app():
@@ -1436,6 +1440,89 @@ def _esquema_gestion(c):
     )""")
 
 
+# Los códigos DTC que se pueden ARMAR en vez de copiar. Buena parte del estándar genérico es
+# sistemática: el mismo texto con el número de cilindro, el banco o el sensor cambiado. Copiarlos
+# a mano de a uno es donde se cuelan los errores —y donde se cansa uno y corta en el cilindro 4,
+# que es lo que había pasado: el diccionario llegaba hasta P0304 y un motor de 6 tira P0305 y
+# P0306—. Generados, salen los doce cilindros y los dos bancos completos, siempre con el mismo
+# texto.
+def _dtc_sistematicos():
+    """Las familias del estándar genérico que son una serie. Devuelve la lista de tuplas."""
+    salida = []
+    causa_electrica = "Cableado cortado o en corto, conector sucio/flojo, sensor o actuador dañado"
+
+    # Fallo de encendido por cilindro: P0301 a P0312.
+    for cil in range(1, 13):
+        salida.append((f"P{300 + cil:04d}", f"Fallo de encendido detectado en el cilindro {cil}",
+                       "Motor - Encendido",
+                       "Bujía o cable de ese cilindro, bobina, inyector sucio, compresión baja"))
+    # Circuito del inyector por cilindro: P0201 a P0212.
+    for cil in range(1, 13):
+        salida.append((f"P{200 + cil:04d}", f"Circuito del inyector — cilindro {cil}",
+                       "Motor - Combustible", causa_electrica))
+    # Bajo, alto y contribución de cada cilindro: desde P0261, de a tres por cilindro.
+    # LA NUMERACIÓN VA EN DECIMAL, no en hexadecimal: después de P0269 viene P0270. Escribirla
+    # con aritmética hexadecimal —que es la trampa natural, porque los códigos «parecen» hex—
+    # da P026A, que no existe, y deja al cilindro 4 en adelante con códigos inventados.
+    for cil in range(1, 9):
+        base = 261 + (cil - 1) * 3
+        salida.append((f"P0{base:03d}", f"Circuito del inyector del cilindro {cil} — señal baja",
+                       "Motor - Combustible", causa_electrica))
+        salida.append((f"P0{base + 1:03d}", f"Circuito del inyector del cilindro {cil} — señal alta",
+                       "Motor - Combustible", causa_electrica))
+        salida.append((f"P0{base + 2:03d}",
+                       f"Contribución o balance del cilindro {cil} fuera de rango",
+                       "Motor - Combustible",
+                       "Inyector sucio o gastado, compresión despareja, fuga de admisión"))
+    # Sonda lambda por banco y sensor: bloques de seis desde P0130.
+    for banco in (1, 2):
+        for sensor in (1, 2, 3):
+            base = 130 + (banco - 1) * 20 + (sensor - 1) * 6
+            donde = f"banco {banco} sensor {sensor}"
+            salida.append((f"P0{base:03d}", f"Circuito del sensor de oxígeno, {donde}", "Emisiones",
+                           causa_electrica))
+            salida.append((f"P0{base + 1:03d}", f"Sensor de oxígeno con señal baja, {donde}",
+                           "Emisiones", "Sonda gastada, mezcla pobre, fuga de escape antes de la sonda"))
+            salida.append((f"P0{base + 2:03d}", f"Sensor de oxígeno con señal alta, {donde}",
+                           "Emisiones", "Sonda gastada, mezcla rica, inyector con pérdida"))
+            salida.append((f"P0{base + 3:03d}", f"Sensor de oxígeno con respuesta lenta, {donde}",
+                           "Emisiones", "Sonda al final de su vida, contaminada por aceite o silicona"))
+            salida.append((f"P0{base + 4:03d}",
+                           f"Circuito del calefactor del sensor de oxígeno, {donde}", "Emisiones",
+                           causa_electrica))
+            salida.append((f"P0{base + 5:03d}",
+                           f"Circuito del calefactor del sensor de oxígeno con señal baja, {donde}",
+                           "Emisiones", causa_electrica))
+    # Pérdida de comunicación entre módulos (U0xxx). En un auto moderno es de lo que más
+    # aparece y el diccionario no tenía ninguno.
+    for codigo, modulo in (("U0100", "el módulo de motor (ECM/PCM)"),
+                           ("U0101", "el módulo de la caja (TCM)"),
+                           ("U0121", "el módulo de frenos (ABS)"),
+                           ("U0140", "el módulo de carrocería (BCM)"),
+                           ("U0151", "el módulo del airbag"),
+                           ("U0155", "el tablero de instrumentos"),
+                           ("U0164", "el módulo de climatización"),
+                           ("U0184", "el equipo de audio"),
+                           ("U0199", "el módulo de puertas")):
+        salida.append((codigo, f"Se perdió la comunicación con {modulo}", "Red / Comunicación",
+                       "Red CAN cortada o en corto, módulo sin alimentación o sin masa, "
+                       "batería baja, módulo dañado"))
+    salida.append(("U0001", "Bus CAN de alta velocidad", "Red / Comunicación",
+                   "Red CAN cortada o en corto, resistencias de terminación, módulo dañado"))
+    salida.append(("U0073", "Bus de comunicación del módulo de control apagado",
+                   "Red / Comunicación", "Corto en la red CAN, módulo que la tiene tomada"))
+    salida.append(("U0401", "Datos inválidos recibidos del módulo de motor (ECM/PCM)",
+                   "Red / Comunicación", "Módulo con falla interna, programación incorrecta"))
+    # Sensores de velocidad de rueda (C0xxx), que es el código típico del ABS.
+    for codigo, rueda in (("C0035", "delantera izquierda"), ("C0040", "delantera derecha"),
+                          ("C0045", "trasera izquierda"), ("C0050", "trasera derecha")):
+        salida.append((codigo, f"Circuito del sensor de velocidad de la rueda {rueda}",
+                       "Frenos / ABS",
+                       "Sensor sucio o dañado, corona dentada rota, cableado cortado por el "
+                       "movimiento de la suspensión"))
+    return salida
+
+
 def _datos_precargados_y_migraciones(c):
     """Semillas que vienen con la app (códigos de falla, fabricantes por VIN) y las
     migraciones que ponen al día una base creada por una versión anterior.
@@ -1465,8 +1552,11 @@ def _datos_precargados_y_migraciones(c):
     # marca), verificados contra fuentes de referencia. Es un punto de partida — sumá o corregí
     # los que necesites desde la app. Los códigos P1xxx específicos de fabricante se cargan
     # aparte indicando la marca (ver Modo Mecánico → Códigos DTC).
-    c.execute("SELECT COUNT(*) FROM codigos_dtc")
-    if c.fetchone()[0] == 0:
+    # Antes esto corría solo con la tabla vacía, así que quien ya tenía la app nunca recibía
+    # los códigos nuevos — y el diccionario llegaba hasta el cilindro 4. Ahora va por versión.
+    c.execute("SELECT valor FROM configuracion WHERE clave = 'semilla_dtc_version'")
+    _fila_dtc = c.fetchone()
+    if (_fila_dtc["valor"] if _fila_dtc else None) != SEMILLA_DTC_VERSION:
         seed_dtc = [
             ("P0010","Falla eléctrica en el actuador de posición A del árbol de levas, banco 1","Motor - Sensores/Admisión","Cableado cortado o en corto, conector sucio/flojo, sensor o actuador dañado"),
             ("P0011","Avance excesivo o mal desempeño en la posición A del árbol de levas, banco 1","Motor - Sensores/Admisión","Sensor descalibrado, obstrucción física, fuga, componente mecánico desgastado"),
@@ -1660,11 +1750,16 @@ def _datos_precargados_y_migraciones(c):
             ("P0770","Falla en el solenoide de cambios E","Transmisión","Solenoide, cableado"),
             ("P0850","Falla en el interruptor de posición de estacionamiento/neutro","Transmisión","Interruptor, cableado"),
         ]
+        # Y las familias que son una serie —cilindro por cilindro, banco por banco— se arman
+        # en vez de copiarse. Ver _dtc_sistematicos().
+        seed_dtc = seed_dtc + _dtc_sistematicos()
         c.executemany(
             "INSERT OR IGNORE INTO codigos_dtc (codigo, fabricante, descripcion, sistema, causas_posibles) "
             "VALUES (?, '', ?, ?, ?)",
             seed_dtc
         )
+        c.execute("INSERT INTO configuracion (clave, valor) VALUES ('semilla_dtc_version', ?) "
+                  "ON CONFLICT(clave) DO UPDATE SET valor = excluded.valor", (SEMILLA_DTC_VERSION,))
 
     # Fabricantes por WMI (los 3 primeros caracteres del VIN) precargados, para no tener que
     # ir cargándolos de a uno. Están los que circulan en Argentina: fabricación nacional,
@@ -15495,6 +15590,106 @@ def buscar_dtc(codigo, fabricante_filtro="Todos"):
     return filas_a_listas(c)
 
 
+# Las piezas que nombra un código de falla. Es el vocabulario del catálogo, no una lista nueva:
+# se buscan estas palabras en el texto del código y de sus causas, y con eso se busca en las
+# descripciones de los productos.
+PIEZAS_QUE_NOMBRA_UN_DTC = {
+    "BUJIA": ("BUJIA", "BUJIAS"),
+    "CABLE DE BUJIA": ("CABLE",),
+    "BOBINA": ("BOBINA",),
+    "INYECTOR": ("INYECTOR",),
+    "SONDA LAMBDA": ("SONDA", "LAMBDA", "OXIGENO"),
+    "SENSOR DE DETONACION": ("DETONACION",),
+    "SENSOR DE ROTACION / CIGÜEÑAL": ("ROTACION", "CIGUENAL"),
+    "SENSOR DE ARBOL DE LEVAS": ("LEVAS", "FASE"),
+    "SENSOR MAP": ("MAP",),
+    "SENSOR DE MASA DE AIRE": ("MASA DE AIRE", "MAF", "CAUDALIMETRO"),
+    "SENSOR DE TEMPERATURA": ("TEMPERATURA",),
+    "CUERPO DE MARIPOSA": ("MARIPOSA",),
+    "VALVULA EGR": ("EGR",),
+    "VALVULA CANISTER / EVAP": ("CANISTER", "EVAP", "PURGA"),
+    "TERMOSTATO": ("TERMOSTATO",),
+    "BOMBA DE COMBUSTIBLE": ("BOMBA DE COMBUSTIBLE", "BOMBA DE NAFTA"),
+    "FILTRO DE COMBUSTIBLE": ("FILTRO DE COMBUSTIBLE", "FILTRO DE NAFTA"),
+    "CATALIZADOR": ("CATALIZADOR",),
+    # «VELOCIDAD» sola trae las cajas de velocidad, así que va la frase entera.
+    "SENSOR DE VELOCIDAD / ABS": ("ABS", "SENSOR DE VELOCIDAD"),
+    "SENSOR DE PRESION DE ACEITE": ("PRESION DE ACEITE",),
+    "MOTOR PASO A PASO": ("PASO A PASO", "RALENTI"),
+    "SOLENOIDE DE CAJA": ("SOLENOIDE",),
+}
+
+
+def repuestos_para_el_dtc(codigo, marca_auto="", modelo="", limite=8):
+    """Qué de lo que TENÉS puede arreglar ese código de falla.
+
+    El diccionario de códigos decía qué significa la falla y ahí terminaba: el que atiende leía
+    «fallo de encendido en el cilindro 6 — bujía, bobina, inyector» y tenía que ir a buscar cada
+    una de esas piezas al buscador, a mano, una por una.
+
+    Esto lo hace solo. No es una base nueva ni una consulta paga: son las palabras del propio
+    código cruzadas con las descripciones del catálogo que ya está cargado. Si además se sabe
+    el auto, se filtra por eso.
+
+    Devuelve [{pieza, productos:[...]}] ordenado por lo que más probablemente sea."""
+    filas = buscar_dtc(codigo)
+    if not filas:
+        return []
+    texto = normalizar_texto(" ".join(
+        f"{f.get('Descripción') or ''} {f.get('Causas posibles') or ''}" for f in filas))
+
+    salida = []
+    for nombre_pieza, palabras in PIEZAS_QUE_NOMBRA_UN_DTC.items():
+        # Como PALABRA y no como subcadena: «CABLE» está adentro de «CABLEADO», que es la causa
+        # de casi todos los códigos eléctricos, así que buscando la subcadena todos los códigos
+        # del diccionario ofrecían cables de bujía.
+        if not any(re.search(rf'(?<![A-ZÁÉÍÓÚÑ]){re.escape(p)}(?![A-ZÁÉÍÓÚÑ])', texto)
+                   for p in palabras):
+            continue
+        condiciones = ["p.descripcion IS NOT NULL", "m.tipo <> 'OEM'"]
+        params = []
+        # Cualquiera de las formas de nombrar esa pieza: una lista dice SONDA LAMBDA y otra
+        # SENSOR DE OXIGENO.
+        condiciones.append("(" + " OR ".join(
+            f"{_sql_sin_acentos('p.descripcion')} LIKE ?" for _ in palabras) + ")")
+        params.extend(f"%{normalizar_texto(p)}%" for p in palabras)
+        if marca_auto:
+            condiciones.append(f"{_sql_sin_acentos('p.descripcion')} LIKE ?")
+            params.append(f"%{normalizar_texto(marca_auto)}%")
+        if modelo:
+            condiciones.append(f"{_sql_sin_acentos('p.descripcion')} LIKE ?")
+            params.append(f"%{normalizar_texto(modelo)}%")
+        try:
+            c.execute(f"""SELECT p.codigo_raw AS "Código", m.nombre AS "Marca",
+                                 p.descripcion AS "Descripción", p.precio AS "Precio",
+                                 p.stock AS "Stock"
+                          FROM productos p JOIN marcas m ON m.id = p.marca_id
+                          WHERE {" AND ".join(condiciones)}
+                          ORDER BY (p.stock IS NULL OR p.stock <= 0), p.precio
+                          LIMIT ?""", params + [limite])
+            productos = filas_a_listas(c)
+        except sqlite3.OperationalError as _err:
+            anotar_error("repuestos_para_el_dtc", _err)
+            continue
+        # Lo mismo del lado del catálogo, y además primero lo que EMPIEZA con esa palabra: en
+        # una descripción el nombre de la pieza va adelante, así que «BUJIA NGK FIAT PALIO» es
+        # una bujía y «ARANDELA CAPUCHON BUJIAS» es otra cosa que la nombra.
+        _patrones = [re.compile(rf'(?<![A-ZÁÉÍÓÚÑ]){re.escape(normalizar_texto(p))}'
+                                rf'(?![A-ZÁÉÍÓÚÑ])') for p in palabras]
+        _filtrados = []
+        for prod in productos:
+            _desc_norm = normalizar_texto(prod.get("Descripción") or "")
+            _m = next((pat.search(_desc_norm) for pat in _patrones if pat.search(_desc_norm)), None)
+            if _m:
+                prod["_al_principio"] = _m.start() <= 12
+                _filtrados.append(prod)
+        _filtrados.sort(key=lambda x: (not x.pop("_al_principio"),
+                                        (x.get("Stock") or 0) <= 0))
+        if _filtrados:
+            salida.append({"pieza": nombre_pieza, "productos": _filtrados})
+    return salida
+
+
 def agregar_dtc(codigo, descripcion, sistema, causas, fabricante=""):
     codigo = codigo.strip().upper()
     fabricante = fabricante.strip()
@@ -23254,6 +23449,30 @@ if pagina == PAGINAS[7]:
             res_dtc = buscar_dtc(codigo_buscar, filtro_fab_dtc)
             if res_dtc:
                 st.dataframe(res_dtc, width="stretch", hide_index=True)
+                # DEL CÓDIGO AL REPUESTO. El diccionario decía qué significa la falla y ahí
+                # terminaba: el que atiende leía «bujía, bobina, inyector» y salía a buscar
+                # cada una a mano. Esto cruza las palabras del propio código con las
+                # descripciones del catálogo que ya está cargado — sin ninguna base nueva.
+                cdt1, cdt2 = cols(2)
+                _auto_dtc = cdt1.text_input("¿De qué auto? (opcional)", key="dtc_marca_auto",
+                                             placeholder="Ej: FIAT").strip()
+                _modelo_dtc = cdt2.text_input("Modelo (opcional)", key="dtc_modelo_auto",
+                                               placeholder="Ej: PALIO").strip()
+                _reps_dtc = repuestos_para_el_dtc(codigo_buscar, _auto_dtc, _modelo_dtc)
+                if _reps_dtc:
+                    st.markdown("**🔧 Lo que tenés para arreglar eso**")
+                    st.caption(
+                        "Sale de cruzar las piezas que nombra el código con las descripciones "
+                        "de tu catálogo. Es una ayuda para no ir a buscar cada una a mano, no "
+                        "un diagnóstico: el código dice por dónde empezar, no qué cambiar."
+                    )
+                    for _grupo in _reps_dtc:
+                        with st.expander(f"{_grupo['pieza']} — {len(_grupo['productos'])} "
+                                          f"en tu catálogo"):
+                            st.dataframe(_grupo["productos"], width="stretch", hide_index=True)
+                elif _auto_dtc or _modelo_dtc:
+                    st.caption("No encontré en tu catálogo ninguna de las piezas que nombra "
+                               "ese código para ese auto. Probá sin el modelo.")
             else:
                 st.warning("No tengo ese código cargado todavía (con ese filtro de fabricante). Podés agregarlo abajo.")
 

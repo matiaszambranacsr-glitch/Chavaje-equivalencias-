@@ -350,6 +350,52 @@ Dos límites que están puestos a propósito y no hay que sacar:
 Medido: rescata 15 códigos (todos bujías NGK/Bosch, que es justo lo que cruza una bujía de un
 proveedor con la de otro), pierde 0, y las 30 motorizaciones conocidas siguen afuera.
 
+## Los códigos de falla que se arman solos
+
+El diccionario de códigos OBD2 traía 191 códigos copiados a mano, y ahí se veía dónde se había
+cansado quien los copió: los fallos de encendido llegaban hasta **P0304**. Un motor de seis
+cilindros tira P0305 y P0306, y la app no sabía qué eran.
+
+Buena parte del estándar genérico es una serie: el mismo texto con el número de cilindro, el
+banco o el sensor cambiado. Eso no se copia, se arma:
+
+    P0301 a P0312    fallo de encendido, cilindro 1 a 12
+    P0201 a P0212    circuito del inyector, cilindro 1 a 12
+    P0261 a P0284    bajo / alto / contribución de cada cilindro
+    P0130 a P0167    sonda lambda y su calefactor, por banco y por sensor
+    U0100, U0101…    se perdió la comunicación con el módulo de motor, de la caja, del ABS…
+    C0035 a C0050    sensores de velocidad de rueda
+
+Son 264 códigos ahora. Y hay una trampa que vale anotar: **la numeración va en decimal, no en
+hexadecimal**. Los códigos parecen hexadecimales y no lo son — después de P0269 viene P0270, no
+P026A. Armando la serie con aritmética hexadecimal, que es lo que sale natural, del cilindro 4
+en adelante salen códigos que no existen.
+
+La semilla ahora va por versión, como la de los WMI: quien ya tenía la app recibe los códigos
+nuevos sin perder los que cargó o corrigió a mano.
+
+## Del código de falla al repuesto
+
+El diccionario decía qué significa la falla y ahí terminaba. El que atiende leía «fallo de
+encendido en el cilindro 6 — bujía, bobina, inyector» y salía a buscar cada una de esas piezas
+al buscador, a mano, una por una.
+
+Ahora las busca la app. No es una base nueva ni una consulta paga: son las palabras del propio
+código cruzadas con las descripciones del catálogo que ya está cargado.
+
+    P0306            →  BUJIA (8)  ·  CABLE DE BUJIA (7)  ·  BOBINA (8)  ·  INYECTOR (2)
+    P0306 + FIAT     →  BUJIA (8)  ·  CABLE DE BUJIA (3)  ·  BOBINA (8)  ·  INYECTOR (1)
+    P0135            →  SONDA LAMBDA → «SENSOR DE OXIGENO NGK JAPON»
+
+Dos cuidados que costaron una vuelta:
+
+- **La palabra entera, no la subcadena.** «CABLE» está adentro de «CABLEADO», que es la causa
+  de casi todos los códigos eléctricos: buscando la subcadena, todos los códigos del
+  diccionario ofrecían cables de bujía.
+- **Primero lo que EMPIEZA con esa palabra.** En una descripción el nombre de la pieza va
+  adelante, así que «BUJIA NGK FIAT PALIO» es una bujía y «ARANDELA CAPUCHON BUJIAS» es otra
+  cosa que la nombra.
+
 ## De la patente al repuesto, sin pagar una consulta
 
 Lo gratis que existe y lo que no, para que quede escrito:
