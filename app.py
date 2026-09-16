@@ -9023,6 +9023,24 @@ def codigos_del_catalogo(version):   # ver descripciones_por_palabra(): sin guio
     return {fila[0] for fila in c.fetchall() if fila[0]}
 
 
+# Ni la inyección ni la carrocería son un modelo de auto. Salieron de mirar lo que la app
+# ofrecía en el desplegable de vehículos: el primer «modelo» de Audi era TDI y el primero de
+# Peugeot, HDI. Después venían QUATTRO, TFSI, FSI, AVANT, SPORTBACK — o sea que quien busca por
+# auto elegía entre versiones y motores en vez de entre autos. Aparecen arriba de todo porque
+# la lista va por frecuencia y estas palabras están en miles de descripciones.
+# Los CÓDIGOS de motor (DW8, TU5JP4, EW10J4) se dejan: esos sí identifican una aplicación, y de
+# hecho son el dato más preciso que trae una descripción.
+MOTORIZACIONES_QUE_NO_SON_MODELO = {
+    "TDI", "TDCI", "TFSI", "FSI", "HDI", "DCI", "JTD", "JTDM", "CDI", "CRDI", "TSI", "MPI",
+    "SPI", "GDI", "VTI", "THP", "VVT", "MULTIJET", "MULTIAIR", "DUALOGIC", "ETORQ", "E-TORQ",
+    "FIRE", "ZETEC", "ROCAM", "DURATEC", "ENDURA", "POWERSHIFT", "TIPTRONIC", "MULTIPOINT",
+    "MONOPUNTO", "NAFTA", "DIESEL", "TURBO", "BITURBO",
+    "QUATTRO", "AVANT", "SPORTBACK", "ALLROAD", "CABRIOLET", "COUPE", "BREAK", "WEEKEND",
+    "SEDAN", "FURGON", "PICKUP", "RURAL",
+}
+
+
+
 @st.cache_data(show_spinner=False, max_entries=20)
 def modelos_de_marca(marca_vehiculo, version, minimo=2):   # ver descripciones_por_palabra()
     """Arma la lista de modelos de una marca leyendo el catálogo.
@@ -9050,13 +9068,30 @@ def modelos_de_marca(marca_vehiculo, version, minimo=2):   # ver descripciones_p
         resto = next((r for m, _cat, r in marcas_vehiculo_en(desc) if m == marca_vehiculo), None)
         if not resto:
             continue
-        for token in re.findall(r"[A-ZÁÉÍÓÚÑ][A-ZÁÉÍÓÚÑ0-9\-]{2,}", resto.upper()):
-            if token in PALABRAS_NO_MODELO or token in MARCAS_VEHICULO:
+        # Dos formas de escribir un modelo que este patrón dejaba afuera, y por eso el
+        # desplegable de Peugeot no tenía ni el 206 ni el 307, y el de Audi no tenía el A3:
+        #   · el modelo que es un NÚMERO —Peugeot 206, Fiat 600, Mercedes 1620—, que se
+        #     descartaba por ser puro número;
+        #   · el de dos caracteres —A3, A4, Q7, X5—, que no llegaba al mínimo de tres.
+        # Los dos siguen pasando por el mismo filtro que todo lo demás: solo quedan si
+        # aparecen casi siempre dentro de esta marca, así que un número que además es una
+        # medida o un año se cae ahí.
+        for token in re.findall(r"[A-ZÁÉÍÓÚÑ0-9][A-ZÁÉÍÓÚÑ0-9\-]{1,}", resto.upper()):
+            if (token in PALABRAS_NO_MODELO or token in MARCAS_VEHICULO
+                    or token in MOTORIZACIONES_QUE_NO_SON_MODELO):
                 continue
-            if re.fullmatch(r"[\d\-]+", token):
-                continue
-            if not es_nombre_de_modelo(token):
-                continue
+            _puro_numero = re.fullmatch(r"\d{2,4}", token)
+            if _puro_numero and re.fullmatch(r"(19|20)\d{2}", token):
+                continue      # un año no es un modelo
+            if not _puro_numero:
+                if re.fullmatch(r"[\d\-]+", token) or len(token) < 2:
+                    continue
+                if not token[0].isalpha():
+                    continue
+                if len(token) == 2 and not (token[0].isalpha() and token[1].isdigit()):
+                    continue   # «A3» sí, «DE» no
+                if not es_nombre_de_modelo(token):
+                    continue
             cuenta_propia[token] += 1
 
     if not cuenta_propia:
@@ -9849,25 +9884,37 @@ def aplicaciones_desde_descripciones(limite=None):
                     anotar_error("aplicaciones_desde_descripciones", _err)
                     modelos_por_marca[marca_auto] = set()
             conocidos = modelos_por_marca[marca_auto]
-            modelo = next((t for t in re.findall(r"[A-ZÁÉÍÓÚÑ][A-ZÁÉÍÓÚÑ0-9\-]{2,}", resto.upper())
-                           if t in conocidos), None)
-            if not modelo:
+            # TODOS los modelos que nombra ese pedazo, no el primero. Las listas escriben
+            # «FIAT PALIO/SIENA/UNO 1.3» y «RENAULT CLIO MEGANE KANGOO», y guardando uno solo
+            # el repuesto desaparecía del catálogo de los otros: de 41.857 productos, 35.061
+            # quedaban con UNA sola aplicación. Cada modelo se valida igual contra los que la
+            # app ya reconoce para esa marca, así que no se inventa ninguno.
+            vistos_modelo = set()
+            modelos_hallados = []
+            for _t in re.findall(r"[A-ZÁÉÍÓÚÑ][A-ZÁÉÍÓÚÑ0-9\-]{2,}", resto.upper()):
+                if _t in conocidos and _t not in vistos_modelo:
+                    vistos_modelo.add(_t)
+                    modelos_hallados.append(_t)
+            if not modelos_hallados:
                 continue
             desde, hasta = extraer_anios(f["descripcion"])
-        # El tipo de pieza hace falta de verdad: derivar_equivalencias_de_aplicaciones()
-        # descarta las filas que no lo tienen, y con razón —sin él cruzaría una bujía con un
-        # filtro por ir al mismo auto—. Se saca con el mismo clasificador que ya usa el resto.
-        # Y el motor va vacío, no NULL: esa consulta compara motor = motor, y en SQL dos NULL
-        # nunca son iguales, así que con NULL estas filas no se cruzarían ni entre ellas.
-            salida.append({
-                "_id": f["id"], "Código": f["codigo_raw"], "Marca": f["marca"],
-                "Descripción": f["descripcion"],
-                "Auto": marca_auto, "Modelo": modelo,
-                "Años": ("—" if not desde else f"{desde}"
-                          + (f"–{hasta}" if hasta else " en adelante")),
-                "Pieza": clasificar_repuesto(f["descripcion"]),
-                "_clean": f["codigo_clean"], "_desde": desde, "_hasta": hasta,
-            })
+            _pieza_de_esta = clasificar_repuesto(f["descripcion"])
+            # El tipo de pieza hace falta de verdad: derivar_equivalencias_de_aplicaciones()
+            # descarta las filas que no lo tienen, y con razón —sin él cruzaría una bujía con
+            # un filtro por ir al mismo auto—. Se saca con el mismo clasificador que ya usa el
+            # resto. Y el motor va vacío, no NULL: esa consulta compara motor = motor, y en SQL
+            # dos NULL nunca son iguales, así que con NULL estas filas no se cruzarían ni entre
+            # ellas.
+            for modelo in modelos_hallados:
+                salida.append({
+                    "_id": f["id"], "Código": f["codigo_raw"], "Marca": f["marca"],
+                    "Descripción": f["descripcion"],
+                    "Auto": marca_auto, "Modelo": modelo,
+                    "Años": ("—" if not desde else f"{desde}"
+                              + (f"–{hasta}" if hasta else " en adelante")),
+                    "Pieza": _pieza_de_esta,
+                    "_clean": f["codigo_clean"], "_desde": desde, "_hasta": hasta,
+                })
         # Sin tope. Estaba en 400 y el catálogo real da 52.534 aplicaciones: se cargaba el 0,8%
         # de lo que las descripciones ya dicen, y esta tabla es la que hace andar la búsqueda
         # por vehículo y la que cruza productos que le sirven al mismo auto. Leerlas todas

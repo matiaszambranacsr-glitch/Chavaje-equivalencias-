@@ -350,6 +350,50 @@ Dos límites que están puestos a propósito y no hay que sacar:
 Medido: rescata 15 códigos (todos bujías NGK/Bosch, que es justo lo que cruza una bujía de un
 proveedor con la de otro), pierde 0, y las 30 motorizaciones conocidas siguen afuera.
 
+## El desplegable de autos no tenía ni el 206 ni el A3
+
+Eligiendo Peugeot, la app ofrecía como «modelos»: HDI, PARTNER, BOXER, EXPERT, THP, DW8, XD2…
+Eligiendo Audi: TDI, QUATTRO, TFSI, FSI, AVANT, SPORTBACK. O sea versiones, inyecciones y
+códigos de motor — y **ningún 206, ningún 307, ningún A3**.
+
+Dos causas, las dos en el patrón que junta los candidatos:
+
+- **El modelo que es un número se descartaba por ser número.** Peugeot 206, Fiat 600, Mercedes
+  1620: son modelos, y la regla los tiraba junto con los años y las medidas.
+- **El de dos caracteres no llegaba al mínimo de tres.** A3, A4, Q7, X5.
+
+Y las palabras que sí entraban estaban arriba de todo porque la lista va por frecuencia: TDI
+está en miles de descripciones. Ni la inyección ni la carrocería son un modelo, así que ahora
+se descartan por nombre (TDI, HDI, TDCI, JTD, FIRE, ZETEC, QUATTRO, AVANT, BREAK…). Los
+CÓDIGOS de motor se quedan —DW8, TU5JP4, EW10J4 identifican una aplicación de verdad— pero
+dejan de tapar a los modelos.
+
+    antes  PEUGEOT → HDI, PARTNER, BOXER, EXPERT, THP, DW8, XD2, CIT, XD3, TU5JP4…
+    ahora  PEUGEOT → 306, 206, PARTNER, 307, 405, 406, 207, 106, 205, 505, BOXER, 504…
+
+    antes  AUDI → TDI, QUATTRO, TFSI, FSI, AVANT, CABRIOLET, SPORTBACK, FAHR…
+    ahora  AUDI → A3, A4, A6, A5, Q5, A1, Q7, Q3, A2, A8, S3, A7…
+
+Cada candidato sigue pasando por el mismo filtro de siempre —solo queda si aparece casi
+siempre dentro de esa marca— así que un número que además es una medida se cae ahí.
+
+## «PALIO/SIENA/UNO» eran tres autos y se guardaba uno
+
+Al leer de las descripciones a qué auto le va cada repuesto, de cada marca nombrada se tomaba
+**el primer modelo y nada más**. Las listas escriben «FIAT PALIO/SIENA/UNO 1.3» y «RENAULT
+CLIO MEGANE KANGOO», así que el repuesto desaparecía del catálogo de los otros: de 41.857
+productos, 35.061 quedaban con UNA sola aplicación.
+
+Tomando todos los modelos de cada tramo —cada uno validado igual contra los que la app
+reconoce para esa marca— las aplicaciones pasan de **52.534 a 120.691**, y los productos con
+una sola bajan de 35.061 a 15.602.
+
+Eso mueve dos cosas más: el barrido por descripción encuentra 8.661 pares en vez de 8.122
+(cada producto sabe a qué autos va aunque su descripción no los nombre), y el cruce por
+aplicación pasa de 146 a 3.300 pares —todos con las dos condiciones nuevas puestas, así que
+son pares como «SENSOR ABS JEEP COMPASS/PATRIOT» contra «SENSOR ABS JEEP COMPASS/PATRIOT 2.4»
+y no cinco sondas distintas colgadas del mismo código.
+
 ## Cruzar por auto: 32.768 sugerencias de las que servían 146
 
 Si dos fabricantes dicen que su pieza va exactamente a los mismos autos, las dos hacen el mismo
