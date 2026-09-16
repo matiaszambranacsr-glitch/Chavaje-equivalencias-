@@ -54,6 +54,11 @@ MARCAS_VEHICULO = sorted(set([
     # pantalla de vehículos ni existían para la detección de modelos. Las otras salieron de
     # contar cuántas descripciones reales las usan como palabra suelta.
     "VW", "CHEV", "PEUG", "PEU", "REN", "TOY", "CITR", "HYUN",
+    # El camión Bedford, que las listas escriben partido: «BED FORD». Son 147 descripciones y
+    # no estaba, así que de todas ellas la app leía FORD — o sea que una junta de diferencial
+    # de un camión Bedford quedaba emparejada con repuestos de un Fiesta por «coinciden en
+    # FORD». Va antes que FORD porque la lista se ordena de la marca más larga a la más corta.
+    "BED FORD", "BEDFORD",
 ]), key=len, reverse=True)
 
 
@@ -63,6 +68,7 @@ MARCAS_VEHICULO = sorted(set([
 ALIAS_MARCA_VEHICULO = {
     "VW": "VOLKSWAGEN", "CHEV": "CHEVROLET", "PEUG": "PEUGEOT", "PEU": "PEUGEOT",
     "REN": "RENAULT", "TOY": "TOYOTA", "CITR": "CITROEN", "HYUN": "HYUNDAI",
+    "BED FORD": "BEDFORD",
     "M.BENZ": "MERCEDES BENZ", "MERCEDES": "MERCEDES BENZ", "MERCEDES-BENZ": "MERCEDES BENZ",
     "M. FERGUSON": "MASSEY FERGUSON", "M.W.M.": "MWM", "M.W.M": "MWM",
 }
@@ -143,6 +149,11 @@ MARCAS_DE_REPUESTO = {
     "SKF", "NGK", "MANN", "VITRON", "TAILLOT", "PAIA", "WAHLER", "GATES", "SACHS", "MONROE",
     "FRAM", "BERU", "FACET", "PIERBURG", "MAHLE", "ELRING", "REINZ", "AJUSA", "CORTECO",
     "PAYEN", "TRW", "FERODO", "BREMBO", "NAKATA", "ILUMA", "DPB", "FISPA", "CBOSCH",
+    # Salidas de contar qué palabras entraban en la APLICACIÓN de las firmas del catálogo real:
+    # estas cinco están entre las más frecuentes y no son autos, son quién hizo el repuesto.
+    # LESTER no es un fabricante sino la numeración con la que se piden alternadores, pero para
+    # esto da igual: tampoco dice para qué auto es.
+    "INA", "HELLA", "PRESTOLITE", "UNIPOINT", "LESTER", "THOMSON", "INDUMAG",
 }
 
 
@@ -639,6 +650,19 @@ PALABRAS_NO_MODELO = {
     "ALUMINIO", "CLAVITO", "BANCADA", "CAPUCHON", "BUJIA", "BRIDA", "CAÑO", "CALEFACCION",
     "ARBOL", "LEVAS", "SALIDA", "TAPON", "VALVULA", "MARIPOSA", "BASE", "DISTRIBUIDOR",
     "CHUPADOR", "INTERMEDIA", "V", "L", "S", "R", "AX", "DD", "F",
+    # EL VOCABULARIO DE PIEZA QUE FALTABA, y que la firma estaba contando como si dijera para
+    # qué auto es. Salió de contar las palabras que entraban en la aplicación de las 30.000
+    # descripciones reales y quedarse con las que no son ningún auto: nombres de pieza
+    # (SENSOR está 3.988 veces, CANO 2.188, BULBO 1.298), atributos (DIAMETRO, VOLTS, VIAS,
+    # DIENTES) y relleno del proveedor (REF 11.421 veces, TODOS, DESDE, LIVIANA, PESADA).
+    # Con esas del lado de la aplicación, dos sensores de detonación de autos distintos
+    # «coincidían en para qué auto es» porque los dos decían SENSOR y DETONACION.
+    "SENSOR", "SENSORES", "BULBO", "BOBINA", "IGNICION", "INYECTOR", "POLEA", "FILTRO",
+    "FICHA", "CONECTOR", "SONDA", "LAMBDA", "INTERRUPTOR", "RESISTOR", "RELAY", "REGULADOR",
+    "ALTERNADOR", "ALTERNADORES", "ARRANQUE", "ROTACION", "DETONACION", "TEMPERATURA",
+    "PRESION", "RADIADOR", "CALEFACTOR", "ELECTROVENTILADOR", "EGR", "MAP", "ABS", "MASA",
+    "AIRE", "CANO", "CANOS", "TUBO", "CORREA", "DISTRIBUCION", "DIST", "SURTIDOR", "AFORADOR",
+    "CUERPO", "VASO", "EXPANSION", "NIVEL", "STOP",
 } | MARCAS_DE_REPUESTO
 
 

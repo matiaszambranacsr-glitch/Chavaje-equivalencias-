@@ -8734,6 +8734,11 @@ MARCAS_VEHICULO = sorted(set([
     # pantalla de vehículos ni existían para la detección de modelos. Las otras salieron de
     # contar cuántas descripciones reales las usan como palabra suelta.
     "VW", "CHEV", "PEUG", "PEU", "REN", "TOY", "CITR", "HYUN",
+    # El camión Bedford, que las listas escriben partido: «BED FORD». Son 147 descripciones y
+    # no estaba, así que de todas ellas la app leía FORD — o sea que una junta de diferencial
+    # de un camión Bedford quedaba emparejada con repuestos de un Fiesta por «coinciden en
+    # FORD». Va antes que FORD porque la lista se ordena de la marca más larga a la más corta.
+    "BED FORD", "BEDFORD",
 ]), key=len, reverse=True)
 
 
@@ -8743,6 +8748,7 @@ MARCAS_VEHICULO = sorted(set([
 ALIAS_MARCA_VEHICULO = {
     "VW": "VOLKSWAGEN", "CHEV": "CHEVROLET", "PEUG": "PEUGEOT", "PEU": "PEUGEOT",
     "REN": "RENAULT", "TOY": "TOYOTA", "CITR": "CITROEN", "HYUN": "HYUNDAI",
+    "BED FORD": "BEDFORD",
     "M.BENZ": "MERCEDES BENZ", "MERCEDES": "MERCEDES BENZ", "MERCEDES-BENZ": "MERCEDES BENZ",
     "M. FERGUSON": "MASSEY FERGUSON", "M.W.M.": "MWM", "M.W.M": "MWM",
 }
@@ -8874,6 +8880,11 @@ MARCAS_DE_REPUESTO = {
     "SKF", "NGK", "MANN", "VITRON", "TAILLOT", "PAIA", "WAHLER", "GATES", "SACHS", "MONROE",
     "FRAM", "BERU", "FACET", "PIERBURG", "MAHLE", "ELRING", "REINZ", "AJUSA", "CORTECO",
     "PAYEN", "TRW", "FERODO", "BREMBO", "NAKATA", "ILUMA", "DPB", "FISPA", "CBOSCH",
+    # Salidas de contar qué palabras entraban en la APLICACIÓN de las firmas del catálogo real:
+    # estas cinco están entre las más frecuentes y no son autos, son quién hizo el repuesto.
+    # LESTER no es un fabricante sino la numeración con la que se piden alternadores, pero para
+    # esto da igual: tampoco dice para qué auto es.
+    "INA", "HELLA", "PRESTOLITE", "UNIPOINT", "LESTER", "THOMSON", "INDUMAG",
 }
 
 # De PALABRAS_NO_MODELO, las que no nombran una PIEZA sino el CONTEXTO: qué tipo de vehículo
@@ -8903,6 +8914,19 @@ PALABRAS_NO_MODELO = {
     "ALUMINIO", "CLAVITO", "BANCADA", "CAPUCHON", "BUJIA", "BRIDA", "CAÑO", "CALEFACCION",
     "ARBOL", "LEVAS", "SALIDA", "TAPON", "VALVULA", "MARIPOSA", "BASE", "DISTRIBUIDOR",
     "CHUPADOR", "INTERMEDIA", "V", "L", "S", "R", "AX", "DD", "F",
+    # EL VOCABULARIO DE PIEZA QUE FALTABA, y que la firma estaba contando como si dijera para
+    # qué auto es. Salió de contar las palabras que entraban en la aplicación de las 30.000
+    # descripciones reales y quedarse con las que no son ningún auto: nombres de pieza
+    # (SENSOR está 3.988 veces, CANO 2.188, BULBO 1.298), atributos (DIAMETRO, VOLTS, VIAS,
+    # DIENTES) y relleno del proveedor (REF 11.421 veces, TODOS, DESDE, LIVIANA, PESADA).
+    # Con esas del lado de la aplicación, dos sensores de detonación de autos distintos
+    # «coincidían en para qué auto es» porque los dos decían SENSOR y DETONACION.
+    "SENSOR", "SENSORES", "BULBO", "BOBINA", "IGNICION", "INYECTOR", "POLEA", "FILTRO",
+    "FICHA", "CONECTOR", "SONDA", "LAMBDA", "INTERRUPTOR", "RESISTOR", "RELAY", "REGULADOR",
+    "ALTERNADOR", "ALTERNADORES", "ARRANQUE", "ROTACION", "DETONACION", "TEMPERATURA",
+    "PRESION", "RADIADOR", "CALEFACTOR", "ELECTROVENTILADOR", "EGR", "MAP", "ABS", "MASA",
+    "AIRE", "CANO", "CANOS", "TUBO", "CORREA", "DISTRIBUCION", "DIST", "SURTIDOR", "AFORADOR",
+    "CUERPO", "VASO", "EXPANSION", "NIVEL", "STOP",
 } | MARCAS_DE_REPUESTO
 
 
@@ -9704,6 +9728,15 @@ _RUIDO_EN_FIRMA = {
     "DESPIECE", "JUEGO", "JGO", "KIT", "PARA", "CON", "SIN", "DEL", "LOS", "LAS", "POR",
     "UNIDAD", "UN", "UNA", "IZQ", "DER", "MM", "CM", "ORIGINAL", "ORIG", "ALTERNATIVO",
     "NACIONAL", "IMPORTADO", "REPUESTO", "PIEZA", "AUTO", "MOTOR", "CAJA", "TIPO",
+    # El relleno de las listas, contado sobre las descripciones reales: «REF» aparece 11.421
+    # veces —es el «REF ORIG» de una de ellas—, «TODOS» 1.251, «DESDE» 552. No dicen qué pieza
+    # es ni para qué auto, y tienen que salir del núcleo ENTERO y no pasar del lado de la
+    # pieza: si cuentan como nombre de la pieza, «BOBINA DE IGNICION ... REF ORIG» deja de
+    # parecerse a «BOBINA ... desde 2012» y se pierden vínculos que están bien.
+    "REF", "OEM", "TODOS", "DESDE", "HASTA", "ENTRE", "ALTA", "FAMILIA", "CANTIDAD",
+    "HORARIO", "SENTIDO", "LINEA", "LIVIANA", "LIVIANOS", "PESADA", "MOTORES", "CANALES",
+    "POTENCIA", "VOLTS", "ANCHO", "DIAMETRO", "AGUJEROS", "DIENTES", "PINES", "VIAS", "BAR",
+    "MODULO",
 }
 
 # Siglas técnicas que definen QUÉ pieza es, no de qué auto. Dos válvulas del mismo auto, una
@@ -10020,10 +10053,17 @@ def firma_de_producto(descripcion, producto_id=None, codigo_clean=None):
     # listas reales es el único que no falla. Dos proveedores pueden llamar distinto a la misma
     # pieza («SENSOR DE MASA DE AIRE» y «SENSOR MAF»), pero si uno dice Ford Focus y el otro
     # Volvo 850, no es la misma pieza por más que el resto coincida.
+    # La marca en su FORMA CANÓNICA, que es lo que hace marcas_vehiculo_en(): resuelve los
+    # alias y gana siempre la marca más larga. Antes se buscaba cada marca como subcadena y eso
+    # dejaba dos agujeros, los dos caros:
+    #   · CHEV y CHEVROLET quedaban como dos marcas distintas —igual PEUG/PEUGEOT, CITR/CITROEN,
+    #     VW/VOLKSWAGEN, MERCEDES-BENZ/MERCEDES— así que dos proveedores que abrevian distinto
+    #     salían «autos distintos» y el par se rechazaba de entrada. Son 3.705 descripciones;
+    #   · y el camión BED FORD se leía como FORD, con lo cual una junta de diferencial de un
+    #     Bedford podía emparejarse con cualquier repuesto de un Fiesta.
     autos = set()
-    for mv in MARCAS_VEHICULO:
-        if f" {mv} " in f" {limpio} ":
-            autos.update(w for w in mv.split() if len(w) >= 3)
+    for _mv_hallada, _cat_mv, _resto_mv in marcas_vehiculo_en(texto):
+        autos.update(w for w in _mv_hallada.split() if len(w) >= 3)
     for w in palabras:
         if len(w) >= 3 and w in MODELOS_CONOCIDOS:
             autos.add(w)
@@ -10184,6 +10224,12 @@ def firmas_compatibles(a, b, minimo_nucleo=2, cuenta_palabras=None, total_descri
     if len(comunes) < minimo_nucleo:
         return False, f"solo comparten {len(comunes)} palabra(s)"
 
+    # Lo que comparten del lado del AUTO, sin la cilindrada ni las válvulas: ver más abajo, en
+    # el control de «para qué auto es». Se calcula acá porque el control de la pieza lo
+    # necesita para el caso de una sola palabra.
+    apl_comunes = {w for w in (a.get("aplicacion") or set()) & (b.get("aplicacion") or set())
+                   if not _RE_SOLO_MOTORIZACION.match(w)}
+
     # LAS DOS PREGUNTAS, POR SEPARADO. Antes era una sola bolsa de palabras y «comparten dos»
     # alcanzaba, sin mirar CUÁLES. Las dos formas de equivocarse salían de ahí, y las dos se
     # veían en la base real:
@@ -10209,7 +10255,20 @@ def firmas_compatibles(a, b, minimo_nucleo=2, cuenta_palabras=None, total_descri
         #    con las siglas y con la posición: si las dos lo declaran y no coinciden, son
         #    piezas distintas.
         chica = pieza_a if len(pieza_a) <= len(pieza_b) else pieza_b
-        if len(piezas_comunes) < 2 or piezas_comunes < chica:
+        # Las DOS palabras se piden cuando hay dos para pedir. Si el que menos dice nombra la
+        # pieza con UNA sola palabra —«BOBINA» contra «BOBINA DE IGNICION», «SENSOR» contra
+        # «SENSOR MAP»— alcanza con que esa esté del otro lado: pedirle dos es pedirle algo que
+        # no escribió. El caso que la regla de dos cuida es otro, y sigue cuidado: «Juego de
+        # juntas para Caja de Velocidad FORD F100» contra «Jta.Tapa Valvulas FORD F100»
+        # comparten JUNTA y nada más, pero el que menos dice nombra tres palabras, así que la
+        # contención falla igual.
+        # Y con una sola palabra hay que pedir algo más del otro lado: que compartan el
+        # MODELO y no solo la marca. Si no, «Jgo.Jtas.P/Motor BED FORD 3800» y «Juntas para
+        # diferencial BED FORD EATON» pasan compartiendo nada más que la palabra JUNTA y la
+        # marca del camión, que son dos piezas que no tienen nada que ver.
+        if (piezas_comunes < chica
+                or (len(chica) >= 2 and len(piezas_comunes) < 2)
+                or (len(chica) == 1 and not apl_comunes)):
             return False, (f"no coinciden en qué pieza es: «{'/'.join(sorted(pieza_a)[:3])}» "
                            f"y «{'/'.join(sorted(pieza_b)[:3])}»")
 
@@ -10223,8 +10282,6 @@ def firmas_compatibles(a, b, minimo_nucleo=2, cuenta_palabras=None, total_descri
     # sirve —confirma la aplicación— y sacarlas de fuerza_de_la_coincidencia() cambiaba el
     # orden de los tres que se guardan por producto, y con eso se perdían pares buenos
     # («Jta.Tapa Cil. RENAULT CLIO II», «JUNTA TAPA CILINDROS FORD M. ZETEC») a cambio de otros.
-    apl_comunes = {w for w in (a.get("aplicacion") or set()) & (b.get("aplicacion") or set())
-                   if not _RE_SOLO_MOTORIZACION.match(w)}
     if not autos_comunes and not apl_comunes:
         return False, "no coinciden en para qué auto es"
 
@@ -10852,9 +10909,11 @@ def firmas_de_todo_el_catalogo(version):
     return dict(indice), ficha
 
 
-# Con el corte de palabra poco común en 250 salen 5.597 sobre el catálogo real, así que 2.000
-# volvía a cortar justo como cortaba 600 antes. Ver sugerir_entre_todas_las_marcas().
-TOPE_SUGERENCIAS_TODAS = 8000  # ver sugerir_entre_todas_las_marcas()
+# Sobre el catálogo real salen 8.122, así que 8.000 volvía a cortar justo como cortaba 600
+# antes y 2.000 después. Traerlos todos no cuesta nada —lo caro es compararlos, y eso ya está
+# hecho— y ahora además se ordenan antes de cortar, así que si alguna vez se llega al tope lo
+# que queda afuera son los peores. Ver sugerir_entre_todas_las_marcas().
+TOPE_SUGERENCIAS_TODAS = 20000  # ver sugerir_entre_todas_las_marcas()
 
 
 def sugerir_entre_todas_las_marcas(limite=TOPE_SUGERENCIAS_TODAS, tope_palabra=250):
@@ -10960,9 +11019,9 @@ def sugerir_entre_todas_las_marcas(limite=TOPE_SUGERENCIAS_TODAS, tope_palabra=2
                     # firmas ya están a mano: pedirlas de vuelta al final costaría el doble.
                     "_fuerza": fuerza_de_la_coincidencia(firma_a, firma_b),
                 })
-                if len(salida) >= limite:
-                    return _mejores_primero(salida)
-    return _mejores_primero(salida)
+    # Se ordena ANTES de cortar. Cortando al llegar al tope, lo que quedaba afuera no eran los
+    # peores: eran los que el recorrido del índice tocaba último, o sea cualquiera.
+    return _mejores_primero(salida)[:limite]
 
 
 def derivar_equivalencias_de_aplicaciones(limite=500, minimo_autos=2):

@@ -350,6 +350,59 @@ Dos límites que están puestos a propósito y no hay que sacar:
 Medido: rescata 15 códigos (todos bujías NGK/Bosch, que es justo lo que cruza una bujía de un
 proveedor con la de otro), pierde 0, y las 30 motorizaciones conocidas siguen afuera.
 
+## Las palabras que decían para qué auto es, sin ser un auto
+
+Para aceptar una sugerencia hay que contestar dos preguntas: **qué pieza es** y **para qué auto
+es**. La segunda se contestaba con cualquier palabra que no estuviera en la lista de nombres de
+pieza — y esa lista estaba armada para otra cosa (el desplegable de vehículos), así que le
+faltaba medio vocabulario del rubro eléctrico.
+
+Contando qué palabras entraban del lado del AUTO en las descripciones reales:
+
+    REF 11.421   SENSOR 3.988   CANO 2.188   ARRANQUE 2.074   ROTACION 1.743
+    BULBO 1.298  TODOS 1.251    PRESION 1.057  BOBINA 1.012   INYECTOR 968 …
+
+Ninguna es un auto. Con eso adentro, dos sensores de detonación de autos distintos «coincidían
+en para qué auto es» porque los dos decían SENSOR y DETONACION.
+
+Se partió en dos, y la diferencia importa:
+
+- **Nombres de pieza** (SENSOR, BULBO, BOBINA, IGNICION, SONDA, LAMBDA, INTERRUPTOR, CANO,
+  RADIADOR, MAP, ABS…) → pasan al lado de la PIEZA, donde sirven para distinguir un «SENSOR DE
+  ROTACION» de un «SENSOR MAP».
+- **Relleno** (REF, OEM, TODOS, DESDE, HASTA, LIVIANA, PESADA, VOLTS, DIAMETRO, VIAS…) → salen
+  del núcleo entero. Ponerlos del lado de la pieza fue el primer intento y se llevó puestos
+  1.308 pares buenos: «BOBINA DE IGNICION … REF ORIG» dejaba de parecerse a «BOBINA … desde
+  2012» porque REF y DESDE contaban como parte del nombre de la pieza.
+
+Y una vez que el vocabulario quedó limpio hubo que aflojar una regla: se pedían DOS palabras de
+pieza en común, y cuando el que menos dice nombra la pieza con UNA sola —«BOBINA» contra
+«BOBINA DE IGNICION»— pedirle dos es pedirle algo que no escribió. Ahora con una alcanza, si
+esa está del otro lado **y** además comparten el modelo del auto y no solo la marca. El caso
+que la regla de dos cuidaba sigue cuidado: «Juego de juntas para Caja de Velocidad FORD F100»
+contra «Jta.Tapa Valvulas FORD F100» comparten JUNTA y nada más, pero el que menos dice nombra
+tres palabras, así que la contención falla igual.
+
+## CHEV y CHEVROLET eran dos marcas distintas
+
+La firma buscaba cada marca de vehículo como subcadena, sin resolver los alias. Consecuencia:
+un proveedor que escribe «Chev Corsa» y otro que escribe «CHEVROLET CORSA» daban **«autos
+distintos»**, que es un rechazo tajante, antes de mirar nada más. Lo mismo con PEUG/PEUGEOT,
+CITR/CITROEN, VW/VOLKSWAGEN y MERCEDES-BENZ/MERCEDES: **3.705 descripciones** del catálogo
+real.
+
+Y al revés, de yapa: el camión **BED FORD** —147 descripciones, escrito partido— no estaba en
+la lista de marcas, así que la app leía FORD y una junta de diferencial de un Bedford podía
+emparejarse con cualquier repuesto de un Fiesta.
+
+Las dos cosas se arreglan usando `marcas_vehiculo_en()`, que ya resolvía los alias y elige
+siempre la marca más larga, en vez de buscar subcadenas a mano.
+
+Todo junto, sobre el barrido del catálogo real: **5.597 → 8.122 sugerencias**, con la confianza
+media un poco mejor (56,8 → 59,2) y el mismo 3% naciendo en rojo. Y el tope pasó a 20.000
+porque 8.000 volvía a cortar justo, ahora ordenando antes de cortar: si alguna vez se llega,
+lo que queda afuera son los peores y no los que el recorrido tocó último.
+
 ## Cuando el modelo del auto es un número
 
 Un Fiat 128, un Fiat 600, un Peugeot 404, un VW 1300, un Mercedes 1620: en los autos viejos y

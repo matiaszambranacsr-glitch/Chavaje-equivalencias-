@@ -691,6 +691,33 @@ def probar_busqueda_por_codigo_de_barras():
     con.close()
 
 
+def probar_bed_ford_no_es_ford():
+    """«BED FORD» es el camión Bedford, no un Ford.
+
+    Son 147 descripciones que lo escriben partido, y la marca no estaba en la lista: de todas
+    ellas la app leía FORD, así que una junta de diferencial de un camión Bedford quedaba
+    emparejada con repuestos de un Fiesta «porque coinciden en FORD». Gana la marca más larga
+    porque la lista se ordena por largo."""
+    hallado = vehiculos.marcas_vehiculo_en("Juntas para diferencial BED FORD EATON 162 GRANDE")
+    igual([m for m, _c, _r in hallado], ["BEDFORD"], "BED FORD es Bedford, no Ford")
+    hallado = vehiculos.marcas_vehiculo_en("JUNTA TAPA CILINDROS FORD FIESTA")
+    igual([m for m, _c, _r in hallado], ["FORD"], "y un Ford sigue siendo un Ford")
+
+
+def probar_la_marca_abreviada_es_la_misma_marca():
+    """CHEV y CHEVROLET son la misma marca, y hasta ahora no lo eran para la firma.
+
+    La firma buscaba cada marca como subcadena, sin resolver los alias, así que dos proveedores
+    que abrevian distinto —«Chev Corsa» contra «CHEVROLET CORSA»— daban «autos distintos» y el
+    par se rechazaba antes de mirar nada más. Son 3.705 descripciones del catálogo real."""
+    for escrito, canonica in (("Ficha para sensor Chev Corsa", "CHEVROLET"),
+                              ("RESISTOR PEUG 206 1 6", "PEUGEOT"),
+                              ("RESISTOR CITR C3 AIRCROSS", "CITROEN"),
+                              ("BUJIA VW Gol refrigerado", "VOLKSWAGEN")):
+        igual([m for m, _c, _r in vehiculos.marcas_vehiculo_en(escrito)], [canonica],
+              f"«{escrito.split()[-2]}» es {canonica}")
+
+
 def probar_ref_orig_pegado_no_es_codigo():
     """«505REF» no es un código: es el modelo 505 con el «REF» de «REF ORIG» pegado atrás.
 
@@ -884,6 +911,8 @@ def main():
                    probar_vocabulario_de_pieza,
                    probar_abreviaturas_de_las_listas_reales,
                    probar_busqueda_por_codigo_de_barras,
+                   probar_bed_ford_no_es_ford,
+                   probar_la_marca_abreviada_es_la_misma_marca,
                    probar_ref_orig_pegado_no_es_codigo,
                    probar_marca_pegada_atras_del_numero,
                    probar_lista_de_modelos_no_es_codigo,
