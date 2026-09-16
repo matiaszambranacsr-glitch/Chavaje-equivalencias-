@@ -11040,6 +11040,21 @@ def derivar_equivalencias_de_aplicaciones(limite=500, minimo_autos=2):
       · Coincidir en varios autos, no en uno. Una coincidencia suelta puede ser casualidad;
         que dos códigos vayan juntos en varios modelos ya es un patrón.
 
+    Y DOS MÁS QUE HACEN FALTA DESDE QUE LAS APLICACIONES SE DEDUCEN DE LAS DESCRIPCIONES.
+    Antes esta tabla se llenaba solo con el catálogo que mandaba un fabricante —unos cientos de
+    filas— y ahora se llena leyendo las 70.888 descripciones, o sea 52.534 aplicaciones. Con
+    eso, «mismo tipo de pieza y mismo auto» deja de alcanzar:
+      · el «fabricante» no puede ser OEM / FABRICA. Esa marca no es el catálogo de nadie: son
+        los códigos de fábrica que la app dedujo, y cruzarlos por aplicación propone el mismo
+        vínculo que ya hace el puente por código, pero sin la certeza del número.
+      · el tipo de pieza que se guarda es la FAMILIA (21 en total), así que «misma familia y
+        mismo auto» mete en la misma bolsa todas las sondas lambda de ese auto — que se
+        diferencian en los cables, el largo y la ficha. Se le pide además que las dos
+        descripciones se parezcan, con el mismo criterio de siempre.
+    Medido sobre el catálogo real: 32.768 candidatos, 1.987 al sacar los de OEM / FABRICA y
+    146 al pedirles además que las descripciones coincidan. Lo que se va es justo eso: cinco
+    sondas lambda distintas colgadas del mismo código de Bosch por ir a los mismos 13 autos.
+
     No las carga: las deja como pendientes para que pasen por la misma revisión que el resto."""
     c.execute("""SELECT a.codigo_clean AS cod_a, a.marca_repuesto AS marca_a,
                         b.codigo_clean AS cod_b, b.marca_repuesto AS marca_b,
@@ -11053,6 +11068,8 @@ def derivar_equivalencias_de_aplicaciones(limite=500, minimo_autos=2):
                   AND a.marca_repuesto <> b.marca_repuesto
                   AND a.codigo_clean < b.codigo_clean
                  WHERE COALESCE(a.tipo_pieza,'') <> ''
+                   AND a.marca_repuesto <> 'OEM / FABRICA'
+                   AND b.marca_repuesto <> 'OEM / FABRICA'
                  GROUP BY a.codigo_clean, b.codigo_clean
                  HAVING autos >= ?
                  ORDER BY autos DESC LIMIT ?""", (minimo_autos, limite))
@@ -11060,17 +11077,40 @@ def derivar_equivalencias_de_aplicaciones(limite=500, minimo_autos=2):
 
     # Solo sirven los que además existen en el catálogo propio: proponer una equivalencia entre
     # dos códigos que no tenés cargados no le sirve a nadie.
+    # Los productos se buscan de a tandas y no de a uno: eran dos consultas por candidato, o
+    # sea 65.536 consultas sobre los 32.768 candidatos del catálogo real.
+    codigos = sorted({x["cod_a"] for x in candidatos} | {x["cod_b"] for x in candidatos})
+    productos = {}
+    for tanda, marcadores in en_tandas(codigos):
+        c.execute(f"""SELECT p.id, p.codigo_raw, p.codigo_clean, p.descripcion,
+                             m.nombre AS marca, m.tipo
+                      FROM productos p JOIN marcas m ON m.id = p.marca_id
+                      WHERE p.codigo_clean IN ({marcadores})""", tanda)
+        for fila in c.fetchall():
+            productos.setdefault(fila["codigo_clean"], dict(fila))
+
+    _cuenta_pal, _total_desc = cuantas_veces_aparece_cada_palabra()
+    firmas = {}
+
+    def _firma(prod):
+        if prod["id"] not in firmas:
+            firmas[prod["id"]] = firma_de_producto(prod["descripcion"], prod["id"],
+                                                    prod["codigo_clean"])
+        return firmas[prod["id"]]
+
     salida = []
     for x in candidatos:
-        c.execute("""SELECT p.id, p.codigo_raw, m.nombre AS marca FROM productos p
-                     JOIN marcas m ON m.id = p.marca_id WHERE p.codigo_clean = ? LIMIT 1""",
-                  (x["cod_a"],))
-        pa = c.fetchone()
-        c.execute("""SELECT p.id, p.codigo_raw, m.nombre AS marca FROM productos p
-                     JOIN marcas m ON m.id = p.marca_id WHERE p.codigo_clean = ? LIMIT 1""",
-                  (x["cod_b"],))
-        pb = c.fetchone()
+        pa, pb = productos.get(x["cod_a"]), productos.get(x["cod_b"])
         if not pa or not pb or pa["id"] == pb["id"]:
+            continue
+        if "OEM" in (pa["tipo"], pb["tipo"]):
+            continue
+        # Que además las descripciones digan que es la misma pieza. Ver el docstring: la
+        # familia sola mete en la misma bolsa cinco sondas distintas del mismo auto.
+        ok, _motivo = firmas_compatibles(_firma(pa), _firma(pb),
+                                         cuenta_palabras=_cuenta_pal,
+                                         total_descripciones=_total_desc)
+        if not ok:
             continue
         salida.append({
             "Código A": pa["codigo_raw"], "Marca A": pa["marca"],

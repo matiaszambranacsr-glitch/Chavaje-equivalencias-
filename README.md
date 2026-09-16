@@ -350,6 +350,42 @@ Dos límites que están puestos a propósito y no hay que sacar:
 Medido: rescata 15 códigos (todos bujías NGK/Bosch, que es justo lo que cruza una bujía de un
 proveedor con la de otro), pierde 0, y las 30 motorizaciones conocidas siguen afuera.
 
+## Cruzar por auto: 32.768 sugerencias de las que servían 146
+
+Si dos fabricantes dicen que su pieza va exactamente a los mismos autos, las dos hacen el mismo
+trabajo. Eso es lo que cruza `derivar_equivalencias_de_aplicaciones()`, y funcionaba bien
+mientras la tabla de aplicaciones se llenaba solo con el catálogo que manda un fabricante: unos
+cientos de filas.
+
+Desde que se leen de las descripciones son **52.534**, y ahí «mismo tipo de pieza y mismo auto»
+deja de alcanzar. Lo que proponía:
+
+    0258001027 (OEM)  ↔  80034FISPA      13 autos
+    0258001027 (OEM)  ↔  80039FISPA      13 autos
+    0258001027 (OEM)  ↔  80041FISPA      13 autos
+    0258001027 (OEM)  ↔  LECS012LUCAS    13 autos
+    0258001027 (OEM)  ↔  LECS025LUCAS    13 autos
+
+Cinco sondas lambda **distintas** —se diferencian en los cables, el largo y la ficha— colgadas
+del mismo código de Bosch por ir a los mismos trece autos. Así salían **32.768 pares**.
+
+Dos condiciones nuevas, y las dos son la misma idea: lo que la tabla guarda es más grueso que
+antes, así que hay que pedir más.
+
+- **El «fabricante» no puede ser OEM / FABRICA.** Esa marca no es el catálogo de nadie: son los
+  códigos de fábrica que la propia app dedujo. Cruzarlos por aplicación propone el mismo
+  vínculo que ya hace el puente por código, pero sin la certeza del número. Quedan 1.987.
+- **Las descripciones tienen que coincidir**, con el mismo criterio de siempre. El tipo de
+  pieza que se guarda es la FAMILIA —21 en total— y eso mete todas las sondas del auto en la
+  misma bolsa. Quedan **146**.
+
+De paso, los productos se buscan de a tandas: eran dos consultas por candidato, o sea 65.536
+consultas para los 32.768 candidatos. Ahora tarda 7,3 s en vez de 12,6.
+
+Y hay un efecto de arrastre que vale la pena anotar: con las 52.534 aplicaciones cargadas, el
+barrido por descripción encuentra **8.885** pares en vez de 8.122, porque cada producto sabe a
+qué autos va aunque su descripción no los nombre.
+
 ## Las palabras que decían para qué auto es, sin ser un auto
 
 Para aceptar una sugerencia hay que contestar dos preguntas: **qué pieza es** y **para qué auto
