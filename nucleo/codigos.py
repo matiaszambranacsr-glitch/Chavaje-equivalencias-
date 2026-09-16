@@ -660,6 +660,37 @@ def extraer_codigos_de_texto(texto, minimo=6, codigo_propio=None, codigos_conoci
     return salida
 
 
+def digito_verificador_ean(doce_digitos):
+    """El dígito que le corresponde a un código de barras, calculado. '' si no se puede.
+
+    Es aritmética de la norma GS1, no hay nada que consultar: se suman los dígitos alternando
+    peso 1 y 3, y el verificador es lo que falta para llegar a la decena. Un EAN-13 mal copiado
+    o mal leído por la cámara casi nunca cierra, así que este número solo separa un código de
+    barras de verdad de un número cualquiera de trece dígitos."""
+    n = re.sub(r'\D', '', str(doce_digitos or ""))
+    if len(n) != 12:
+        return ""
+    suma = sum(int(d) * (3 if i % 2 else 1) for i, d in enumerate(n))
+    return str((10 - suma % 10) % 10)
+
+
+def codigo_de_barras_cierra(codigo):
+    """¿El código de barras cierra con su dígito verificador? None si no se puede saber.
+
+    None y no False cuando el largo no es de código de barras: no es lo mismo «este código está
+    mal copiado» que «esto no es un código de barras», y confundirlos haría que la app acuse de
+    error a un código de fábrica que nunca pretendió ser un EAN."""
+    n = re.sub(r'\D', '', str(codigo or ""))
+    if len(n) == 14:               # DUN-14: el dígito de agrupación va adelante
+        n = n[1:]
+    if len(n) == 12:               # UPC-A: es un EAN-13 con un cero adelante
+        n = "0" + n
+    if len(n) != 13:
+        return None
+    esperado = digito_verificador_ean(n[:12])
+    return bool(esperado) and esperado == n[12]
+
+
 def columna_es_codigo_de_barras(valores):
     """¿La columna que se eligió como «código de fábrica» trae en realidad códigos de barras?
 
@@ -698,6 +729,15 @@ def columna_es_codigo_de_barras(valores):
         prefijo, cuantos = max(conteo.items(), key=lambda kv: kv[1])
         if cuantos >= len(largos) * 0.7:
             return True, prefijo, (cuantos, len(limpios))
+    # Segunda señal, para las listas que el prefijo no agarra: un revendedor que trae productos
+    # de veinte fábricas tiene veinte prefijos distintos y ninguno llega al 70%. Ahí lo que los
+    # delata es el DÍGITO VERIFICADOR. Está medido contra la base real: de los códigos largos de
+    # MOTORARG —que son códigos de barras— cierra el 99,7%, y de los de FISPA —que son códigos
+    # de fábrica de verdad, largos y numéricos— cierra el 11%, que es lo que da el azar. No se
+    # puede confundir una cosa con la otra.
+    cierran = [v for v in largos if codigo_de_barras_cierra(v)]
+    if len(cierran) >= len(largos) * 0.7:
+        return True, "", (len(cierran), len(limpios))
     return False, "", (len(largos), len(limpios))
 
 

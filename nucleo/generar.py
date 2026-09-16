@@ -81,7 +81,7 @@ from .errores import anotar_error
       "_MARCADORES_DE_OEM", "_es_el_codigo_propio_con_texto", "_RE_REF_PEGADO",
       "_MARCAS_QUE_SE_PEGAN_AL_CODIGO", "_es_lista_de_modelos",
       "extraer_codigos_de_texto",
-      "columna_es_codigo_de_barras",
+      "digito_verificador_ean", "codigo_de_barras_cierra", "columna_es_codigo_de_barras",
       "PREFIJOS_GS1", "pais_del_codigo_de_barras", "pais_de_estos_codigos", "GS1_NO_ES_UN_PAIS",
       "normalizar_texto", "_RE_ESCAPE_DE_EXCEL", "valor_o_vacio", "valor_codigo"])
 

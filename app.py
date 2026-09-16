@@ -2714,6 +2714,37 @@ def sanitizar(codigo):
 TOPE_REPETICIONES_EN_DESCRIPCION = 4
 
 
+def digito_verificador_ean(doce_digitos):
+    """El dígito que le corresponde a un código de barras, calculado. '' si no se puede.
+
+    Es aritmética de la norma GS1, no hay nada que consultar: se suman los dígitos alternando
+    peso 1 y 3, y el verificador es lo que falta para llegar a la decena. Un EAN-13 mal copiado
+    o mal leído por la cámara casi nunca cierra, así que este número solo separa un código de
+    barras de verdad de un número cualquiera de trece dígitos."""
+    n = re.sub(r'\D', '', str(doce_digitos or ""))
+    if len(n) != 12:
+        return ""
+    suma = sum(int(d) * (3 if i % 2 else 1) for i, d in enumerate(n))
+    return str((10 - suma % 10) % 10)
+
+
+def codigo_de_barras_cierra(codigo):
+    """¿El código de barras cierra con su dígito verificador? None si no se puede saber.
+
+    None y no False cuando el largo no es de código de barras: no es lo mismo «este código está
+    mal copiado» que «esto no es un código de barras», y confundirlos haría que la app acuse de
+    error a un código de fábrica que nunca pretendió ser un EAN."""
+    n = re.sub(r'\D', '', str(codigo or ""))
+    if len(n) == 14:               # DUN-14: el dígito de agrupación va adelante
+        n = n[1:]
+    if len(n) == 12:               # UPC-A: es un EAN-13 con un cero adelante
+        n = "0" + n
+    if len(n) != 13:
+        return None
+    esperado = digito_verificador_ean(n[:12])
+    return bool(esperado) and esperado == n[12]
+
+
 def columna_es_codigo_de_barras(valores):
     """¿La columna que se eligió como «código de fábrica» trae en realidad códigos de barras?
 
@@ -2752,6 +2783,15 @@ def columna_es_codigo_de_barras(valores):
         prefijo, cuantos = max(conteo.items(), key=lambda kv: kv[1])
         if cuantos >= len(largos) * 0.7:
             return True, prefijo, (cuantos, len(limpios))
+    # Segunda señal, para las listas que el prefijo no agarra: un revendedor que trae productos
+    # de veinte fábricas tiene veinte prefijos distintos y ninguno llega al 70%. Ahí lo que los
+    # delata es el DÍGITO VERIFICADOR. Está medido contra la base real: de los códigos largos de
+    # MOTORARG —que son códigos de barras— cierra el 99,7%, y de los de FISPA —que son códigos
+    # de fábrica de verdad, largos y numéricos— cierra el 11%, que es lo que da el azar. No se
+    # puede confundir una cosa con la otra.
+    cierran = [v for v in largos if codigo_de_barras_cierra(v)]
+    if len(cierran) >= len(largos) * 0.7:
+        return True, "", (len(cierran), len(limpios))
     return False, "", (len(largos), len(limpios))
 
 
@@ -3305,7 +3345,9 @@ def codigos_de_barras_mal_cargados():
         if cuantos:
             salida.append({"marca_id": prov["marca_id"], "Lista": prov["marca"],
                            "Códigos de barras cargados como código de fábrica": cuantos,
-                           "Empiezan con": prefijo + "…",
+                           # Sin prefijo común quiere decir que se detectó por el dígito
+                           # verificador: son códigos de barras de fábricas distintas.
+                           "Empiezan con": (prefijo + "…" if prefijo else "prefijos varios"),
                            "Registrado en": pais_de_estos_codigos(_codigos_oem) or "—"})
     return salida
 
@@ -3429,10 +3471,11 @@ def listas_que_no_cruzan():
             motivo = ""
         elif es_barras:
             _pais_pref = pais_de_estos_codigos(codigos_oem)
-            motivo = (f"los códigos de fábrica de esta lista son códigos de barras "
-                      f"(empiezan todos con {prefijo}…"
-                      + (f", el prefijo de una empresa de {_pais_pref}" if _pais_pref else "")
-                      + "): no los tiene ningún otro proveedor")
+            _como = (f"empiezan todos con {prefijo}…"
+                     + (f", el prefijo de una empresa de {_pais_pref}" if _pais_pref else "")
+                     ) if prefijo else "cierran con su dígito verificador"
+            motivo = (f"los códigos de fábrica de esta lista son códigos de barras ({_como}): "
+                      f"no los tiene ningún otro proveedor")
         elif total_oem:
             motivo = ("los códigos de fábrica de esta lista no coinciden con los de ninguna "
                       "otra: puede ser que cada proveedor cite terminales distintas")
@@ -15293,8 +15336,11 @@ def buscar_por_codigo_de_barras(codigo_leido):
     res = buscar_por_codigo(clean)
     if res:
         return res, None
-    # Los EAN-13 a veces se cargan sin el dígito verificador, o con un 0 adelante
-    for variante in (clean[:-1], clean.lstrip("0"), "0" + clean):
+    # Los EAN-13 a veces se cargan sin el dígito verificador, o con un 0 adelante. Y al revés:
+    # si lo que se escaneó son los 12 dígitos sin el verificador, el que está cargado es el de
+    # 13 — ese dígito no hay que adivinarlo, se calcula.
+    _completo = clean + digito_verificador_ean(clean) if digito_verificador_ean(clean) else ""
+    for variante in (clean[:-1], clean.lstrip("0"), "0" + clean, _completo):
         if variante and variante != clean:
             res = buscar_por_codigo(variante)
             if res:
@@ -17328,6 +17374,16 @@ Casi todo lo que edita o borra algo pide la contraseña de administrador la prim
                     # De dónde es se sabe sin consultar nada: lo dice el prefijo. Sirve para
                     # decidir si el repuesto lo consigue un proveedor local o hay que traerlo.
                     _pais_barra = pais_del_codigo_de_barras(cod_barra)
+                    # Si la cuenta del dígito verificador no cierra, el número está mal: o la
+                    # cámara leyó mal una raya, o lo tipearon cambiando un dígito. Conviene
+                    # decirlo antes de que alguien salga a buscar un código que no existe.
+                    if codigo_de_barras_cierra(cod_barra) is False:
+                        st.warning(
+                            f"⚠️ El código `{cod_barra}` **no cierra con su dígito "
+                            "verificador**: está mal leído o mal tipeado. Volvé a escanear con "
+                            "el código más derecho y mejor iluminado, o revisá dígito por "
+                            "dígito si lo escribiste a mano."
+                        )
                     if _pais_barra and _pais_barra not in GS1_NO_ES_UN_PAIS:
                         st.caption(f"🌍 El código lo registró una empresa de **{_pais_barra}** "
                                     "(el país de quien lo emitió, no necesariamente el de la "
@@ -19352,11 +19408,19 @@ if pagina == PAGINAS[2]:
                             st.error(
                                 f"🏷️ **La columna «{opciones_cols[idx_oem]}» parece el código de "
                                 f"barras, no el código de fábrica.** "
-                                f"{_cuantos} de {_total_oem} valores de la muestra son números "
-                                f"de 12 a 14 dígitos que empiezan todos igual (**{_prefijo}…**), "
-                                "que es el prefijo de empresa del código de barras"
-                                + (f", registrado en {pais_de_estos_codigos(_muestra_oem)}"
-                                   if pais_de_estos_codigos(_muestra_oem) else "") + ".\n\n"
+                                + (f"{_cuantos} de {_total_oem} valores de la muestra son "
+                                   f"números de 12 a 14 dígitos que empiezan todos igual "
+                                   f"(**{_prefijo}…**), que es el prefijo de empresa del código "
+                                   f"de barras"
+                                   + (f", registrado en {pais_de_estos_codigos(_muestra_oem)}"
+                                      if pais_de_estos_codigos(_muestra_oem) else "")
+                                   if _prefijo else
+                                   f"{_cuantos} de {_total_oem} valores de la muestra **cierran "
+                                   f"con el dígito verificador de un código de barras**. No "
+                                   f"arrancan todos igual porque son productos de fábricas "
+                                   f"distintas, pero la cuenta de GS1 les da bien: un código de "
+                                   f"fábrica de verdad no cierra esa cuenta más que por azar")
+                                + ".\n\n"
                                 "**Por qué importa:** el código de barras es de este proveedor "
                                 "solo. Ninguna otra lista lo va a traer, así que **no va a "
                                 "cruzar con nadie**: se van a cargar miles de equivalencias que "

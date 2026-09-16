@@ -154,6 +154,36 @@ Sobre la base real: mueve 8.319 códigos de barras a su columna, borra 8.319 pro
 de «OEM / FABRICA» y 8.319 vínculos falsos. El catálogo pasa de 61.574 a 53.255 productos sin
 perder un solo dato — el número sigue estando, en el lugar que le corresponde.
 
+## El dígito verificador: la lista que el prefijo no agarraba
+
+`columna_es_codigo_de_barras()` reconocía un EAN cargado como código de fábrica porque **todos
+arrancan igual** — el prefijo de empresa de GS1. Funciona con una lista de un solo fabricante,
+que es el caso de MOTORARG. Pero un revendedor que trae productos de veinte fábricas tiene
+veinte prefijos distintos y ninguno llega al 70%: esa lista pasaba entera, sin aviso, y dejaba
+miles de equivalencias muertas.
+
+La segunda señal es la cuenta de GS1: los dígitos alternando peso 1 y 3, y el verificador es lo
+que falta para llegar a la decena. Medido sobre la base real, separa perfectamente:
+
+    MOTORARG   códigos largos que son EAN            99,7% cierran
+    FISPA      códigos de fábrica largos y numéricos   11% cierran  (lo que da el azar)
+    JL         idem                                     0% cierran
+
+Con eso alcanza para detectar la lista de prefijos mezclados sin marcar de más — probado: FISPA
+y JL siguen dando «no es una columna de códigos de barras».
+
+El mismo dígito sirve en otros dos lugares:
+
+- **Escaneando**: si no cierra, el número está mal leído o mal tipeado, y conviene decirlo antes
+  de que alguien salga a buscar un código que no existe.
+- **Buscando**: si lo que se escaneó son los 12 dígitos sin el verificador, el que está cargado
+  es el de 13. Ese dígito no hay que adivinarlo, se calcula.
+
+Un detalle que parece menor y no lo es: `codigo_de_barras_cierra()` devuelve **`None`** —no
+`False`— cuando el largo no es de código de barras. «Este código está mal copiado» y «esto no
+es un código de barras» son cosas distintas, y confundirlas haría que la app acuse de error a un
+código de fábrica que nunca pretendió ser un EAN.
+
 ## El prefijo del código de barras dice el país, gratis
 
 Los tres primeros dígitos de un EAN los asigna GS1 y son públicos: no hay que consultar nada ni

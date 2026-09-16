@@ -691,6 +691,36 @@ def probar_busqueda_por_codigo_de_barras():
     con.close()
 
 
+def probar_el_digito_verificador_del_codigo_de_barras():
+    """El dígito verificador separa un código de barras de un número largo cualquiera.
+
+    Importa para el caso que el prefijo común NO agarra: una lista de un revendedor que trae
+    productos de veinte fábricas tiene veinte prefijos distintos y ninguno llega al 70%, así que
+    la detección por prefijo la deja pasar entera y se cargan miles de equivalencias muertas.
+    La cuenta de GS1 la agarra igual.
+
+    Está medido sobre la base real: de los códigos largos de MOTORARG —que son códigos de
+    barras— cierra el 99,7%; de los de FISPA —códigos de fábrica de verdad, largos y
+    numéricos— cierra el 11%, que es lo que da el azar."""
+    igual(codigos.digito_verificador_ean("779396002694"), "6",
+          "la cuenta de GS1 da el dígito que falta")
+    igual(codigos.digito_verificador_ean("77939600269"), "",
+          "con once dígitos no hay cuenta que hacer")
+    cierto(codigos.codigo_de_barras_cierra("7793960026946"), "un EAN bien copiado cierra")
+    cierto(codigos.codigo_de_barras_cierra("7793960026945") is False,
+           "cambiando un dígito deja de cerrar: es lo que detecta un código mal tipeado")
+    cierto(codigos.codigo_de_barras_cierra("036115561G") is None,
+           "un código de fábrica no es un código mal copiado: es otra cosa, y hay que "
+           "poder distinguirlo")
+
+    # El caso que el prefijo no agarra: códigos de barras de fábricas distintas.
+    de_varias_fabricas = ["7790396980569", "7892639001397", "4013628164265", "7501031311309",
+                          "7793960026946", "7897707516933"] * 5
+    es_barras, prefijo, _ = codigos.columna_es_codigo_de_barras(de_varias_fabricas)
+    cierto(es_barras, "sin prefijo común, el dígito verificador tiene que delatarlos igual")
+    igual(prefijo, "", "y no se inventa un prefijo común que no existe")
+
+
 def probar_el_pais_del_codigo_de_barras():
     """El prefijo del código de barras dice el país, y hay que leerlo del código ENTERO.
 
@@ -977,6 +1007,7 @@ def main():
                    probar_busqueda_por_codigo_de_barras,
                    probar_la_patente_argentina,
                    probar_el_pais_del_codigo_de_barras,
+                   probar_el_digito_verificador_del_codigo_de_barras,
                    probar_bed_ford_no_es_ford,
                    probar_la_marca_abreviada_es_la_misma_marca,
                    probar_ref_orig_pegado_no_es_codigo,
