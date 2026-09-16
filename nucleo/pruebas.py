@@ -691,6 +691,56 @@ def probar_busqueda_por_codigo_de_barras():
     con.close()
 
 
+def probar_ref_orig_pegado_no_es_codigo():
+    """«505REF» no es un código: es el modelo 505 con el «REF» de «REF ORIG» pegado atrás.
+
+    Una de las listas escribe así 9.038 veces. La regla que lo despega ya existía para la
+    pantalla de vehículos, pero no se aplicaba al adivinar códigos adentro de una descripción,
+    y por eso entraron 212 códigos de fábrica terminados en REF: «505REF», «70010REF»,
+    «1995REF», «2003-2012REF». Ninguno existe; son el modelo del auto, el año, o el número
+    interno del proveedor.
+
+    Y tapaba el mejor dato de la lista: «REF ORIG» es el proveedor diciendo cuál es el código
+    de fábrica. Pegado, ese marcador no se reconocía y el número que venía después quedaba como
+    una adivinanza más."""
+    salida = codigos.extraer_codigos_de_texto(
+        "BULBO DE TEMPERATURA DE ELECTROVENTILADOR 761 PEUGEOT 404 - 504 - 505REF ORIG "
+        "024210 024212 204404 313320172 CA95260000 MLH TS6993")
+    cierto("505REF" not in salida, "«505REF» no es un código")
+    cierto("024210" in salida, "el código que viene después de REF ORIG sí")
+
+
+def probar_marca_pegada_atras_del_numero():
+    """«4EC1TBOSCH=0250202087» son tres cosas: un motor, una marca y un código.
+
+    Así escribe una de las listas la equivalencia de Bosch. Sin partir por el igual entraba
+    todo junto, y un código con la marca adelante no cruza con nadie porque nadie más lo
+    escribe así. Despegada la marca, lo que queda —«4EC1T»— lo descartan las reglas de motor
+    de siempre, que con la marca pegada no lo reconocían."""
+    salida = codigos.extraer_codigos_de_texto(
+        "BUJIA LEIGG008 CHEVROLET GM OPEL Astra 1 7 TD X17DT mot 4EC1TBOSCH=0250202087 "
+        "GM94481972 HESCHER=HC173")
+    igual(sorted(salida), ["0250202087", "GM94481972", "LEIGG008"],
+          "el código de Bosch sí, el motor y la marca no")
+
+
+def probar_lista_de_modelos_no_es_codigo():
+    """«106-206-306-406-607» es la lista de autos a los que le va la pieza, no un código.
+
+    Es de los peores códigos inventados que hay: cada uno cuelga de sí mismo todo lo que nombre
+    esos autos. Lo que no puede pasar es llevarse puestos los códigos de fábrica con guiones,
+    que son muchos y muy usados."""
+    for lista in ("106-206-306-406-607", "307-308-408-208-3008-C4",
+                  "316-318-320-325-330-520-530-540-X3-X5-Z3-Z4"):
+        cierto(codigos._es_lista_de_modelos(lista), f"«{lista}» es una lista de modelos")
+    for codigo in ("06K-905-601-B", "8-01115-315-0", "7700747549-7700850589", "6PU009161-021"):
+        cierto(not codigos._es_lista_de_modelos(codigo), f"«{codigo}» es un código de verdad")
+    igual(codigos.extraer_codigos_de_texto(
+              "SENSOR DE VELOCIDAD 90023 PEUGEOT 106-206-306-406-607REF ORIG HELLA "
+              "6PU009161-021"),
+          ["6PU009161-021"], "de esa descripción sale un solo código")
+
+
 def probar_la_coma_decimal_es_el_mismo_motor():
     """«1,6» y «1.6» son la misma cilindrada, y hasta ahora no lo eran.
 
@@ -834,6 +884,9 @@ def main():
                    probar_vocabulario_de_pieza,
                    probar_abreviaturas_de_las_listas_reales,
                    probar_busqueda_por_codigo_de_barras,
+                   probar_ref_orig_pegado_no_es_codigo,
+                   probar_marca_pegada_atras_del_numero,
+                   probar_lista_de_modelos_no_es_codigo,
                    probar_la_coma_decimal_es_el_mismo_motor,
                    probar_las_valvulas_no_dicen_para_que_auto_es,
                    probar_modelo_con_cilindrada_pegada,

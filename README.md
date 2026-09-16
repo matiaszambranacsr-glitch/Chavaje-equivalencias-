@@ -350,6 +350,46 @@ Dos límites que están puestos a propósito y no hay que sacar:
 Medido: rescata 15 códigos (todos bujías NGK/Bosch, que es justo lo que cruza una bujía de un
 proveedor con la de otro), pierde 0, y las 30 motorizaciones conocidas siguen afuera.
 
+## Tres formas de inventar un código de fábrica
+
+Sobre las descripciones reales, adivinando códigos salían 17.499 distintos. **307 no eran
+códigos**, y los tres motivos se pueden nombrar:
+
+**El «REF» de «REF ORIG» pegado atrás.** Una de las listas escribe
+`PEUGEOT 404 - 504 - 505REF ORIG 024210`, y de ahí salían 212 códigos terminados en REF:
+`505REF` (el modelo), `1995REF` y `2003-2012REF` (los años), `70010REF` (el número interno del
+proveedor). La regla que despega ese REF ya existía —se usa para que el desplegable de
+vehículos no muestre «16VREF» como si fuera un modelo— pero no se aplicaba acá. Y mientras
+estaba pegado tapaba el mejor dato que trae la lista: **«REF ORIG» es el proveedor diciendo
+cuál es el código de fábrica**, y sin reconocer el marcador el número que sigue queda como una
+adivinanza más.
+
+**La marca pegada al número.** `4EC1TBOSCH=0250202087` son tres cosas: el motor 4EC1T, la marca
+y el código. El igual no separaba nada, así que entraba todo junto — y un código con la marca
+adelante no cruza con nadie, porque nadie más lo escribe así. Separado por el igual y
+despegada la marca de atrás (`26001FISPA`, `2015NGK`, `tu5pjp4NGK`), lo que queda cuando
+adelante había una motorización lo descartan las reglas de siempre, que con la marca pegada no
+la reconocían.
+
+**La lista de modelos.** `106-206-306-406-607`, `307-308-408-208-3008-C4`,
+`316-318-320-325-330-520-530-540-X3-X5-Z3-Z4`. Son los peores códigos inventados que hay,
+porque cada uno cuelga de sí mismo todo lo que nombre esos autos. Se piden tres segmentos de
+TRES dígitos y ninguno de más de cuatro caracteres, y ahí está todo el cuidado: los códigos de
+fábrica con guiones o tienen un segmento largo (`8-01115-315-0` de Isuzu, `7700747549-7700850589`
+de Renault) o no llegan a tres segmentos de tres (`06K-905-601-B` de VW). Medido contra los
+70.888 códigos del catálogo: marca 25, y los 25 son listas de modelos.
+
+En total salen 307 y entran 10, y entre los que entran están los códigos que estaban tapados:
+`0250202087` de Bosch, `7700105290` de Renault, `93183739` de GM, `TG15C020`.
+
+## El caracter de control que Excel escribe con letras
+
+`INYECTOR FI-0280155888_x001f_Ford Ka 1.0 8V` — ese `_x001f_` es cómo Excel escribe un caracter
+de control que quedó adentro de la celda, y llega tal cual, como siete caracteres de texto.
+Pega dos palabras y arruina las dos: de ahí salió un producto con el código
+`FI-0280155888_x001f_Fo`. Se cambia por el espacio que había cuando se lee la celda, así que no
+depende de qué columna sea.
+
 ## Los topes que escondían trabajo
 
 «Se revisaron 8.000 vínculos y ninguno quedó por debajo del umbral» se lee como «está todo

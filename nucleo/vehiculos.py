@@ -10,7 +10,7 @@ import re
 import unicodedata
 
 from .errores import anotar_error
-from .codigos import normalizar_texto, sanitizar
+from .codigos import _RE_REF_PEGADO, normalizar_texto, sanitizar
 
 
 # Se ordena de más largo a más corto para que gane la coincidencia más específica:
@@ -170,20 +170,6 @@ MARCAS_PARA_DESPEGAR = [m for m in (set(MARCAS_VEHICULO) | MARCAS_DE_REPUESTO | 
 # fila: 332 µs por descripción, o sea 3,3 s en una lista de 10.000 filas — diez veces más que
 # toda la importación junta.
 _RE_PEGADO_MAYUS = re.compile(r'(?<=[a-záéíóúñ])(?=[A-ZÁÉÍÓÚÑ])')
-
-
-# «REF» de «REF. ORIG.» pegado a lo que viene antes. Es la forma de escribir de una de las
-# listas y aparece 9.038 veces: «Passat 1 8 98REF ORIG 030121121B», «16VREF ORIG 0280155868».
-# Hace daño dos veces:
-#   · «98REF», «16VREF», «HDIREF», «PARTNERREF» se cuentan como si fueran modelos de auto y
-#     ensucian el desplegable de la pantalla de vehículos;
-#   · y sobre todo tapa el marcador: «REF ORIG» es el proveedor diciendo EXPLÍCITAMENTE cuál
-#     es el código de fábrica, que es la mejor información que puede llegar. Pegado, el
-#     marcador no se reconoce y el código que le sigue queda como una adivinanza más.
-# Se pide que después venga ORIG/ORG/ORI/OEM para no partir un código que termine en REF por
-# casualidad. Medido sobre las descripciones reales: de 9.038 casos, los 9.038 siguen esa
-# forma, así que la condición no deja nada afuera y sí evita el accidente.
-_RE_REF_PEGADO = re.compile(r'([A-Za-z0-9])REF(?=\s*\.?\s*(?:ORIG|ORG|ORI|OEM)\b)', re.I)
 
 
 # Se rodea la marca de espacios y después se colapsan los sobrantes. Es más simple y más

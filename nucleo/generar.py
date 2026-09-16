@@ -78,9 +78,11 @@ from .errores import anotar_error
 ''', ["es_fecha_disfrazada", "como_texto_en_like", "sanitizar", "LARGO_MINIMO_NUMERICO", "es_codigo_util",
       "_partir_por_barra", "dividir_codigos", "codigo_sospechoso",
       "TOPE_REPETICIONES_EN_DESCRIPCION", "codigos_confiables_de_descripciones",
-      "_MARCADORES_DE_OEM", "_es_el_codigo_propio_con_texto", "extraer_codigos_de_texto",
+      "_MARCADORES_DE_OEM", "_es_el_codigo_propio_con_texto", "_RE_REF_PEGADO",
+      "_MARCAS_QUE_SE_PEGAN_AL_CODIGO", "_es_lista_de_modelos",
+      "extraer_codigos_de_texto",
       "columna_es_codigo_de_barras",
-      "normalizar_texto", "valor_o_vacio", "valor_codigo"])
+      "normalizar_texto", "_RE_ESCAPE_DE_EXCEL", "valor_o_vacio", "valor_codigo"])
 
 # ---------------------------------------------------------------- vehiculos
 escribir("vehiculos.py", '''"""Lo que sabe de AUTOS y de tipos de repuesto: marcas de vehículo, familias de pieza, y cómo
@@ -95,11 +97,11 @@ import re
 import unicodedata
 
 from .errores import anotar_error
-from .codigos import normalizar_texto, sanitizar
+from .codigos import _RE_REF_PEGADO, normalizar_texto, sanitizar
 ''', ["MARCAS_VEHICULO", "ALIAS_MARCA_VEHICULO", "_escrituras_por_marca",
       "ESCRITURAS_DE_MARCA", "_RE_MARCAS_VEHICULO", "marcas_vehiculo_en",
       "MARCAS_DE_REPUESTO", "_MARCAS_RIESGOSAS", "_SIGLAS_PEGAJOSAS", "MARCAS_PARA_DESPEGAR",
-      "_RE_PEGADO_MAYUS", "_RE_REF_PEGADO",
+      "_RE_PEGADO_MAYUS",
       "_RE_MARCAS_PEGADAS", "_RE_ESPACIOS", "_MARCAS_CORTAS_PEGADAS",
       "_RE_MARCA_CORTA_TRAS_NUMERO", "_RE_MODELO_CON_CILINDRADA",
       "_RE_COMA_DECIMAL", "_RE_SOLO_MOTORIZACION",

@@ -347,6 +347,45 @@ def _es_el_codigo_propio_con_texto(candidato, propio):
     return bool(resto) and resto.isalpha()
 
 
+# «REF» de «REF. ORIG.» pegado a lo que viene antes. Es la forma de escribir de una de las
+# listas y aparece 9.038 veces: «Passat 1 8 98REF ORIG 030121121B», «16VREF ORIG 0280155868».
+# Hace daño dos veces:
+#   · «98REF», «16VREF», «HDIREF», «PARTNERREF» se cuentan como si fueran modelos de auto y
+#     ensucian el desplegable de la pantalla de vehículos;
+#   · y sobre todo tapa el marcador: «REF ORIG» es el proveedor diciendo EXPLÍCITAMENTE cuál
+#     es el código de fábrica, que es la mejor información que puede llegar. Pegado, el
+#     marcador no se reconoce y el código que le sigue queda como una adivinanza más.
+# Se pide que después venga ORIG/ORG/ORI/OEM para no partir un código que termine en REF por
+# casualidad. Medido sobre las descripciones reales: de 9.038 casos, los 9.038 siguen esa
+# forma, así que la condición no deja nada afuera y sí evita el accidente.
+_RE_REF_PEGADO = re.compile(r'([A-Za-z0-9])REF(?=\s*\.?\s*(?:ORIG|ORG|ORI|OEM)\b)', re.I)
+
+
+# Marcas que los proveedores pegan atrás de su propio número: «LSPFR6F11LUCAS», «26001FISPA».
+# Se calculan una vez y no se leen de la base: son el nombre de la marca del producto, y la
+# consulta que las necesita corre una vez por búsqueda.
+_MARCAS_QUE_SE_PEGAN_AL_CODIGO = ("LUCAS", "FISPA", "BOSCH", "MARELLI", "MAGNETI", "VALEO",
+                                  "DELPHI", "NGK", "GATES", "SKF", "BERU", "FACET")
+
+
+def _es_lista_de_modelos(token):
+    """«106-206-306-406-607» no es un código: es la lista de modelos a los que le va la pieza.
+
+    Las listas las escriben así y son de los peores códigos inventados que hay, porque cada uno
+    cuelga de sí mismo todo lo que nombre esos autos. Se piden tres segmentos de TRES dígitos
+    —que es como se numeran los Peugeot, los BMW y los Mercedes— y ninguno de más de cuatro
+    caracteres, y ahí está el cuidado: los códigos de fábrica con guiones tienen algún segmento
+    largo («8-01115-315-0» de Isuzu, «7700747549-7700850589» de Renault) o no llegan a tres
+    segmentos de tres dígitos («06K-905-601-B» de VW).
+
+    Medido contra los 70.888 códigos del catálogo real: marca 25 y los 25 son listas de modelos
+    («316-318-320-325-330-520-530-540-X3-X5-Z3-Z4», «1214-1215-1315-1615-1620-608-912-913»)."""
+    partes = (token or "").split("-")
+    if len(partes) < 3 or any(not p or len(p) > 4 for p in partes):
+        return False
+    return sum(1 for p in partes if p.isdigit() and len(p) == 3) >= 3
+
+
 def extraer_codigos_de_texto(texto, minimo=6, codigo_propio=None, codigos_conocidos=None):
     """Busca códigos de fábrica escondidos dentro de una descripción.
     Muchas listas de proveedor no traen una columna de OEM aparte, pero lo meten en el texto
@@ -499,6 +538,13 @@ def extraer_codigos_de_texto(texto, minimo=6, codigo_propio=None, codigos_conoci
     # vez de descartar el token, porque lo que viene atrás es el código de fábrica de verdad.
     texto = re.sub(r'(ORIGINALES|ORIGINAL|ORIG|REF|CODIGO|COD|EQUIV)(?=\d{5,})', r'\1 ',
                    texto, flags=re.IGNORECASE)
+    # Y al revés: el REF pegado a lo que viene ANTES, «PEUGEOT 404 - 504 - 505REF ORIG 024210».
+    # Esa regla ya existía para la pantalla de vehículos y acá faltaba, así que entraban 212
+    # códigos de fábrica terminados en REF —«505REF», «70010REF», «156REF»— que no son códigos:
+    # son el modelo del auto, o el número interno del proveedor, con el «REF» de «REF ORIG»
+    # pegado atrás. Y de paso tapaban el marcador: «REF ORIG» es el proveedor diciendo cuál es
+    # el código de fábrica, que es el mejor dato que trae la lista.
+    texto = _RE_REF_PEGADO.sub(r'\1 REF ', texto)
 
     # Dónde el proveedor DECLARÓ que lo que sigue es el código de fábrica. Sin esto se perdía
     # justo el mejor dato que trae la lista: «JTA SCANIA 113 Nº ORIG 287559» no daba nada,
@@ -506,7 +552,11 @@ def extraer_codigos_de_texto(texto, minimo=6, codigo_propio=None, codigos_conoci
     # «Nº ORIG» adelante ya no hay duda de qué es. Lo mismo con «// 134048», «// 900432» y
     # «// ERR4685B», que además se caía por parecerse a un código de motor.
     posiciones_declaradas = set()
-    piezas = re.split(r'[\s,;/|()\[\]<>]+', str(texto))
+    # El '=' separa: una de las listas escribe la equivalencia como «BOSCH=0250202087» y
+    # «HESCHER=HC173», o sea marca y número pegados por el igual. Sin partir por ahí entraban
+    # como un código solo, y encima uno que no se cruza con nadie porque nadie más lo escribe
+    # con la marca adelante.
+    piezas = re.split(r'[\s,;/|()\[\]<>=]+', str(texto))
     for i, pieza in enumerate(piezas):
         if pieza.strip().upper().strip(".:") in _MARCADORES_DE_OEM:
             # las dos siguientes: cubre «Nº ORIG 287559» y «REF ORIG: 0360601402»
@@ -514,12 +564,22 @@ def extraer_codigos_de_texto(texto, minimo=6, codigo_propio=None, codigos_conoci
     # La barra doble desaparece al partir por '/', así que se marca aparte: en esas listas
     # «//» es la convención para «de acá en adelante va el código de fábrica».
     if "//" in str(texto):
-        antes = len(re.split(r'[\s,;/|()\[\]<>]+', str(texto).split("//", 1)[0]))
+        antes = len(re.split(r'[\s,;/|()\[\]<>=]+', str(texto).split("//", 1)[0]))
         posiciones_declaradas.update(range(antes - 1, antes + 3))
 
     encontrados = []
     for indice, token in enumerate(piezas):
         limpio = token.strip().strip(".-_")
+        # La marca pegada atrás del número, que es como escriben varias listas: «26001FISPA»,
+        # «2015NGK», «4EC1TBOSCH», «tu5pjp4NGK». Se despega en vez de descartar el token,
+        # porque adelante puede haber un código de verdad — y cuando adelante hay una
+        # motorización («4EC1T», «DW10ATED») lo que queda lo descartan las reglas de siempre,
+        # que con la marca pegada no lo reconocían.
+        for _marca_pegada in _MARCAS_QUE_SE_PEGAN_AL_CODIGO:
+            if (limpio.upper().endswith(_marca_pegada)
+                    and len(limpio) - len(_marca_pegada) >= 4):
+                limpio = limpio[:-len(_marca_pegada)]
+                break
         if len(limpio) < minimo:
             continue
         if limpio.upper() in ruido:
@@ -540,6 +600,9 @@ def extraer_codigos_de_texto(texto, minimo=6, codigo_propio=None, codigos_conoci
         if any(p.match(limpio.upper()) for p in formas):
             continue
         if limpio.upper().startswith(arranques_de_texto):
+            continue
+        # Una lista de modelos no es un código, lo haya declarado el proveedor o no.
+        if _es_lista_de_modelos(limpio.upper()):
             continue
         # Un '?' adentro del token es texto que se rompió al exportar (acentos, comillas o
         # símbolos que se perdieron): '118?CREF' salía de '1.18 °C REF'. No es un código.
@@ -648,6 +711,11 @@ def normalizar_texto(texto):
     return texto.upper().strip()
 
 
+# Excel escribe los caracteres de control que quedaron en una celda como «_x001F_», y el
+# lector los entrega así, como texto. Ver valor_o_vacio().
+_RE_ESCAPE_DE_EXCEL = re.compile(r'_x[0-9A-Fa-f]{4}_')
+
+
 def valor_o_vacio(valor):
     """Devuelve el valor de una celda como texto, o '' si está vacía.
 
@@ -663,6 +731,12 @@ def valor_o_vacio(valor):
     texto = str(valor).strip()
     if re.fullmatch(r"\d+\.0+", texto):
         return texto.split(".")[0]
+    # «_x001f_» y compañía: así escribe Excel un caracter de control que quedó adentro de la
+    # celda, y llega tal cual, como siete caracteres de texto. Pega dos palabras y arruina las
+    # dos: de «INYECTOR FI-0280155888_x001f_Ford Ka» salió un producto con el código
+    # «FI-0280155888_x001f_Fo». Se cambia por un espacio, que es lo que había.
+    if "_x" in texto:
+        texto = _RE_ESCAPE_DE_EXCEL.sub(" ", texto).strip()
     return texto
 
 
