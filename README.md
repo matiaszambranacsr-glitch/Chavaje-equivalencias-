@@ -350,6 +350,58 @@ Dos límites que están puestos a propósito y no hay que sacar:
 Medido: rescata 15 códigos (todos bujías NGK/Bosch, que es justo lo que cruza una bujía de un
 proveedor con la de otro), pierde 0, y las 30 motorizaciones conocidas siguen afuera.
 
+## Un caché que no se refrescaba nunca
+
+Streamlit **no hashea los parámetros que empiezan con guion bajo** — es su forma de decir «esto
+no entra en la clave del caché». Cinco funciones de la app recibían el testigo del catálogo
+como `_version`:
+
+    descripciones_por_palabra(_version)     el conteo de palabras de todo el catálogo
+    codigos_del_catalogo(_version)          los códigos que el extractor usa de desempate
+    modelos_de_marca(marca, _version)       los modelos del desplegable de vehículos
+    catalogo_por_vehiculo(marca, _version)  lo que se ofrece para cada auto
+    marcas_vehiculo_disponibles(_version)   qué marcas aparecen en las descripciones
+
+O sea que se calculaban **una vez por arranque de la app** y después devolvían siempre lo
+mismo. Justo lo contrario de para lo que existe el testigo: importabas una lista nueva y la
+pantalla de vehículos seguía mostrando los modelos viejos, y el extractor seguía sin conocer
+los códigos recién cargados, hasta reiniciar.
+
+Es un error que no se ve leyendo la función: se ve en el nombre del parámetro. Por eso va
+además como chequeo del auditor (el 26), que lo marca en rojo si vuelve.
+
+## El barrido: siete veces más relaciones por tres segundos
+
+El barrido de todo el catálogo no compara todo contra todo —serían seis mil millones de
+pares— sino los que comparten alguna palabra **poco común**. Dónde cortar ese «poco común» es
+la decisión más cara de ahí, y estaba en 40 sin haberla medido nunca. Corriendo sobre el
+catálogo real y cambiando solo ese número:
+
+| corte | sugerencias | tiempo | confianza media | nacen en rojo |
+|---|---|---|---|---|
+| 40 | 807 | 15,9 s | 51,5 | 1% |
+| 100 | 2.280 | 16,2 s | 52,4 | 2% |
+| **250** | **5.597** | **18,8 s** | **61,4** | **1%** |
+| 500 | 11.899 | 26,4 s | 45,4 | 41% ← se rompe |
+
+Con 40 se perdían **siete de cada ocho** relaciones buenas para ahorrar tres segundos. Y el
+límite de verdad está entre 250 y 500: pasando de ahí entran los pares que solo comparten la
+marca del auto y dos palabras genéricas —un «INTERRUPTOR STOP FORD» contra otro «INTERRUPTOR
+STOP FORD» de otro modelo— y cuatro de cada diez nacen ya en rojo.
+
+El tiempo casi no se mueve entre 40 y 250 porque **lo caro no es comparar**: de los 18,8 s,
+15,2 son leer las 46.644 descripciones y sacarles la firma. Eso ahora va cacheado por versión
+del catálogo (17 MB, 0,4 s en volver a leerlo), así que:
+
+    barrido, primera vez     19,6 s
+    barrido, otra vez         4,0 s
+    comparar dos proveedores 14,5 s → 5,4 s   (usa las mismas firmas)
+
+Y las sugerencias salen **ordenadas de mejor a peor** — primero el modelo compartido, después
+la cilindrada, el nombre de la pieza y la marca. Con 807 daba igual el orden; con 5.597 no:
+nadie revisa 5.597 de una sentada, y el que revisa las primeras cincuenta tiene que estar
+viendo las cincuenta mejores.
+
 ## El kit se muestra, pero no como un reemplazo
 
 Buscando la bujía `LSPFR6F11LUCAS` el kit `L206LUCAS` («KIT CAB Y BUJ (LEIHTT66SC/LSPFR6F11)»)

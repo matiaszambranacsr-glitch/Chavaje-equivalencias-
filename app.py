@@ -8950,8 +8950,14 @@ def es_nombre_de_modelo(token):
     return sum(ch.isdigit() for ch in token) <= 3
 
 
+# EL PARÁMETRO NO PUEDE EMPEZAR CON GUION BAJO. Streamlit NO hashea los parámetros que
+# arrancan con «_» —es su forma de decir «esto no entra en la clave del caché»— así que
+# `f(_version)` se calcula UNA vez y después devuelve siempre lo mismo, pase lo que pase con el
+# catálogo. Era exactamente lo contrario de lo que este testigo existe para hacer: se importaba
+# una lista nueva y la pantalla de vehículos seguía mostrando los modelos viejos hasta reiniciar
+# la app, y el extractor de códigos seguía sin conocer los códigos recién cargados.
 @st.cache_data(show_spinner=False, max_entries=3)
-def descripciones_por_palabra(_version):
+def descripciones_por_palabra(version):
     """{palabra: en cuántas descripciones del catálogo aparece}. Una sola pasada.
 
     Existe por velocidad. modelos_de_marca() necesita, para cada palabra candidata, saber en
@@ -8974,7 +8980,7 @@ def descripciones_por_palabra(_version):
 
 
 @st.cache_data(show_spinner=False, max_entries=3)
-def codigos_del_catalogo(_version):
+def codigos_del_catalogo(version):   # ver descripciones_por_palabra(): sin guion bajo
     """Todos los códigos que ya están cargados, limpios. Se usa como desempate al leer
     códigos de fábrica metidos adentro de una descripción: ver extraer_codigos_de_texto().
 
@@ -8994,7 +9000,7 @@ def codigos_del_catalogo(_version):
 
 
 @st.cache_data(show_spinner=False, max_entries=20)
-def modelos_de_marca(marca_vehiculo, _version, minimo=2):
+def modelos_de_marca(marca_vehiculo, version, minimo=2):   # ver descripciones_por_palabra()
     """Arma la lista de modelos de una marca leyendo el catálogo.
 
     Cómo distingue un modelo de una palabra de repuesto: las palabras de repuesto (JUNTA,
@@ -9034,7 +9040,7 @@ def modelos_de_marca(marca_vehiculo, _version, minimo=2):
 
     # Cuántas veces aparece cada palabra en el catálogo entero (para descartar las genéricas)
     candidatos = [t for t, n in cuenta_propia.items() if n >= minimo]
-    en_todo_el_catalogo = descripciones_por_palabra(_version)
+    en_todo_el_catalogo = descripciones_por_palabra(version)
     modelos = []
     for token in candidatos:
         total_catalogo = en_todo_el_catalogo.get(token, 0) or 1
@@ -9045,9 +9051,9 @@ def modelos_de_marca(marca_vehiculo, _version, minimo=2):
 
 
 @st.cache_data(show_spinner=False, max_entries=30)
-def catalogo_por_vehiculo(marca_vehiculo, _version):
+def catalogo_por_vehiculo(marca_vehiculo, version):   # ver descripciones_por_palabra()
     """Todos los productos cuya descripción menciona esa marca de vehículo, agrupados por
-    categoría. '_version' solo sirve para que el caché se refresque cuando cambia el catálogo."""
+    categoría. 'version' solo sirve para que el caché se refresque cuando cambia el catálogo."""
     # Sin LIMIT. El tope de 4.000 se aplicaba al prefiltro suelto, no al resultado: para una
     # marca como MAN, que engancha por LIKE con MANGUERA y MANIJA, el tope se llenaba de
     # basura y los productos de MAN de verdad quedaban afuera del corte, así que la pantalla
@@ -9074,7 +9080,7 @@ def catalogo_por_vehiculo(marca_vehiculo, _version):
 
 
 @st.cache_data(show_spinner=False, max_entries=5)
-def marcas_vehiculo_disponibles(_version):
+def marcas_vehiculo_disponibles(version):   # ver descripciones_por_palabra()
     """Qué marcas de vehículo aparecen realmente en el catálogo, y cuántos productos tiene cada una.
 
     El número que va acá es EL MISMO que después va a devolver la pantalla. Antes era un LIKE
@@ -10627,11 +10633,18 @@ def derivar_equivalencias_por_descripcion(marca_a_id=None, marca_b_id=None,
                      LIMIT ?""", (mid, tope_productos))
         productos[mid] = [dict(r) for r in c.fetchall()]
 
+    # Las firmas ya calculadas, si el barrido de todo el catálogo las dejó en el caché: son
+    # los mismos productos y la misma cuenta, y sacarlas de vuelta cuesta 15 s. Lo que no esté
+    # —un catálogo de fábrica, que el barrido no mira— se calcula acá.
+    _fichas = firmas_de_todo_el_catalogo(version_del_catalogo())[1]
+
     # Se agrupa por rubro antes de comparar: solo tiene sentido cruzar filtros con filtros
     por_rubro = {mid: {} for mid in productos}
     for mid, filas in productos.items():
         for f in filas:
-            firma = firma_de_producto(f["descripcion"], f["id"], f.get("codigo_clean"))
+            _guardada = _fichas.get(f["id"])
+            firma = (_guardada[0] if _guardada else
+                     firma_de_producto(f["descripcion"], f["id"], f.get("codigo_clean")))
             if not firma or firma["familia"] == "Sin clasificar":
                 continue
             f["_firma"] = firma
@@ -10760,10 +10773,56 @@ def _parecido_nombre_pieza(desc_a, desc_b):
     return len(pieza_a & pieza_b) / len(pieza_a | pieza_b)
 
 
-TOPE_SUGERENCIAS_TODAS = 2000  # ver sugerir_entre_todas_las_marcas()
+def _mejores_primero(pares):
+    """Ordena las sugerencias por cuánto se parecen, de mejor a peor.
+
+    Sin esto salían en el orden en que se recorre el índice de palabras, o sea al azar. Daba lo
+    mismo cuando eran 807; con 5.597 no da lo mismo: nadie revisa 5.597 de una sentada, y el que
+    revisa las primeras cincuenta tiene que estar viendo las cincuenta mejores, no cincuenta
+    cualesquiera. Ordena por el modelo compartido primero, después la cilindrada, el nombre de
+    la pieza y la marca del auto — ver fuerza_de_la_coincidencia()."""
+    return sorted(pares, key=lambda x: x.get("_fuerza") or (0, 0, 0, 0), reverse=True)
 
 
-def sugerir_entre_todas_las_marcas(limite=TOPE_SUGERENCIAS_TODAS, tope_palabra=40):
+@st.cache_data(show_spinner=False, max_entries=1)
+def firmas_de_todo_el_catalogo(version):
+    """(índice de palabras, fichas) de todos los productos de proveedor. Cacheado por catálogo.
+
+    Es lo caro del barrido y lo único que no cambia entre una corrida y la siguiente: leer las
+    46.644 descripciones y sacarles la firma tarda 15,2 s, contra 3 s que cuesta comparar. Sin
+    caché, apretar el botón dos veces cuesta dos veces lo mismo aunque no se haya tocado nada.
+    Guardado ocupa 17 MB y volver a leerlo 0,4 s, así que la segunda corrida pasa de 19 a 4 s.
+
+    El testigo va SIN guion bajo a propósito: ver descripciones_por_palabra()."""
+    from collections import defaultdict
+    try:
+        c.execute("""SELECT p.id, p.codigo_raw, p.codigo_clean, p.descripcion, p.marca_id,
+                            m.nombre AS marca
+                     FROM productos p JOIN marcas m ON m.id = p.marca_id
+                     WHERE m.tipo <> 'OEM' AND COALESCE(p.descripcion, '') <> ''""")
+        productos = filas_a_listas(c)
+    except sqlite3.OperationalError as _err:
+        anotar_error("firmas_de_todo_el_catalogo", _err)
+        return {}, {}
+    indice, ficha = defaultdict(list), {}
+    for prod in productos:
+        firma = firma_de_producto(prod["descripcion"], prod["id"], prod.get("codigo_clean"))
+        if not firma or firma["familia"] == "Sin clasificar":
+            continue
+        palabras = {p for p in re.split(r'[^A-Z0-9]+', normalizar_texto(prod["descripcion"]))
+                    if len(p) >= 3}
+        ficha[prod["id"]] = (firma, prod)
+        for palabra in palabras:
+            indice[palabra].append(prod["id"])
+    return dict(indice), ficha
+
+
+# Con el corte de palabra poco común en 250 salen 5.597 sobre el catálogo real, así que 2.000
+# volvía a cortar justo como cortaba 600 antes. Ver sugerir_entre_todas_las_marcas().
+TOPE_SUGERENCIAS_TODAS = 8000  # ver sugerir_entre_todas_las_marcas()
+
+
+def sugerir_entre_todas_las_marcas(limite=TOPE_SUGERENCIAS_TODAS, tope_palabra=250):
     """Lo mismo que derivar_equivalencias_por_descripcion(), pero de UNA VEZ para todo el
     catálogo en vez de elegir dos proveedores a mano.
 
@@ -10783,6 +10842,23 @@ def sugerir_entre_todas_las_marcas(limite=TOPE_SUGERENCIAS_TODAS, tope_palabra=4
     medio. Comparando únicamente los pares que comparten alguna de esas queda del orden de
     ciento cincuenta mil, y se resuelve en segundos.
 
+    DÓNDE CORTAR ESE «POCO COMÚN» ES LA DECISIÓN MÁS CARA DE ACÁ, y estaba en 40 sin haberla
+    medido. Corrido sobre el catálogo real, cambiando solo ese número:
+
+        40   →    807 sugerencias   15,9 s   confianza media 51,5   1% por debajo de 40
+        100  →  2.280               16,2 s   confianza media 52,4   2%
+        250  →  5.597               18,8 s   confianza media 61,4   1%
+        500  → 11.899               26,4 s   confianza media 45,4   41%  ← se rompe
+
+    O sea que con 40 se estaban perdiendo siete de cada ocho relaciones buenas por tres
+    segundos, y que el límite de verdad está entre 250 y 500: pasando de ahí entran los pares
+    que solo comparten la marca del auto y dos palabras genéricas («INTERRUPTOR STOP FORD»
+    contra otro «INTERRUPTOR STOP FORD» de otro modelo), y 4 de cada 10 nacen ya en rojo.
+
+    El tiempo casi no se mueve entre 40 y 250 porque lo caro no es comparar: es leer las 46.644
+    descripciones y sacarles la firma (15,2 s de los 18,8). Eso ahora va cacheado por versión
+    del catálogo —ver firmas_de_todo_el_catalogo()—, así que la segunda corrida tarda 4 s.
+
     Nada se carga solo: todo va a la cola de pendientes para que lo apruebe una persona.
 
     El tope no ahorra tiempo: el recorrido cuesta lo mismo con tope o sin él (19 s sobre 70.888
@@ -10791,27 +10867,9 @@ def sugerir_entre_todas_las_marcas(limite=TOPE_SUGERENCIAS_TODAS, tope_palabra=4
     se veían 84—, se subió a 600 y volvió a cortar en cuanto entró una lista más: con Illinois
     cargada salen 787 y se veían 600. Ahora está en 2.000, y si alguna vez se llega, la
     pantalla lo dice en vez de callárselo."""
-    from collections import defaultdict
-    try:
-        c.execute("""SELECT p.id, p.codigo_raw, p.codigo_clean, p.descripcion, p.marca_id,
-                            m.nombre AS marca
-                     FROM productos p JOIN marcas m ON m.id = p.marca_id
-                     WHERE m.tipo <> 'OEM' AND COALESCE(p.descripcion, '') <> ''""")
-        productos = filas_a_listas(c)
-    except sqlite3.OperationalError as _err:
-        anotar_error("sugerir_entre_todas_las_marcas", _err)
+    indice, ficha = firmas_de_todo_el_catalogo(version_del_catalogo())
+    if not ficha:
         return []
-
-    indice, ficha = defaultdict(list), {}
-    for prod in productos:
-        firma = firma_de_producto(prod["descripcion"], prod["id"], prod.get("codigo_clean"))
-        if not firma or firma["familia"] == "Sin clasificar":
-            continue
-        palabras = {p for p in re.split(r'[^A-Z0-9]+', normalizar_texto(prod["descripcion"]))
-                    if len(p) >= 3}
-        ficha[prod["id"]] = (firma, prod)
-        for palabra in palabras:
-            indice[palabra].append(prod["id"])
 
     _cuenta_pal, _total_desc = cuantas_veces_aparece_cada_palabra()
     raras = {p: ids for p, ids in indice.items() if 2 <= len(ids) <= tope_palabra}
@@ -10863,10 +10921,13 @@ def sugerir_entre_todas_las_marcas(limite=TOPE_SUGERENCIAS_TODAS, tope_palabra=4
                     "Descripción B": (prod_b["descripcion"] or "")[:44],
                     "Rubro": firma_a["familia"], "Por qué": motivo,
                     "_a": a, "_b": b,
+                    # Para poder mostrar primero lo mejor. Se calcula acá, que es donde las dos
+                    # firmas ya están a mano: pedirlas de vuelta al final costaría el doble.
+                    "_fuerza": fuerza_de_la_coincidencia(firma_a, firma_b),
                 })
                 if len(salida) >= limite:
-                    return salida
-    return salida
+                    return _mejores_primero(salida)
+    return _mejores_primero(salida)
 
 
 def derivar_equivalencias_de_aplicaciones(limite=500, minimo_autos=2):
@@ -11470,7 +11531,7 @@ def separar_texto_pegado(texto):
 
 
 @st.cache_data(show_spinner=False, max_entries=3)
-def _contar_descripciones_pegadas(_version):
+def _contar_descripciones_pegadas(version):   # ver descripciones_por_palabra()
     c.execute("SELECT descripcion FROM productos WHERE descripcion IS NOT NULL")
     return sum(1 for r in c.fetchall()
                if separar_texto_pegado(r["descripcion"]) != r["descripcion"])

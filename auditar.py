@@ -1501,6 +1501,37 @@ for _n in ast.walk(ARBOL):
         _CUERPOS[_huella] = _n.name
 
 
+# ============ 26. Un caché que nunca se refresca ============
+# Streamlit NO hashea los parámetros que empiezan con guion bajo: es su forma de decir «esto no
+# entra en la clave del caché». Así que una función cacheada que recibe el testigo del catálogo
+# como '_version' se calcula UNA sola vez y después devuelve siempre lo mismo, pase lo que pase
+# con la base. Estaba pasando en cinco funciones a la vez: se importaba una lista nueva y la
+# pantalla de vehículos seguía mostrando los modelos viejos, y el extractor seguía sin conocer
+# los códigos recién cargados, hasta reiniciar la app.
+# Es un error que no se ve nunca leyendo la función: se ve en el nombre del parámetro.
+# Un '_' sí está bien cuando el argumento no se puede hashear y al lado va su huella —una lista
+# de puntos con su firma—, así que se pide que el nombre no suene a testigo.
+_TESTIGOS = ("version", "testigo", "catalogo", "cuenta", "total", "fecha", "lote")
+for _n in ast.walk(ARBOL):
+    if not isinstance(_n, ast.FunctionDef):
+        continue
+    _cacheada = any(
+        (isinstance(_d, ast.Call) and isinstance(_d.func, ast.Attribute)
+         and _d.func.attr in ("cache_data", "cache_resource"))
+        or (isinstance(_d, ast.Attribute) and _d.attr in ("cache_data", "cache_resource"))
+        for _d in _n.decorator_list)
+    if not _cacheada:
+        continue
+    for _arg in _n.args.args:
+        if not _arg.arg.startswith("_"):
+            continue
+        if any(_t in _arg.arg.lower() for _t in _TESTIGOS):
+            reportar("ERROR", _n.lineno,
+                     f"'{_n.name}' está cacheada y su parámetro '{_arg.arg}' empieza con guion "
+                     "bajo: Streamlit no lo hashea, así que ese caché no se refresca NUNCA. "
+                     "Sacale el guion bajo")
+
+
 # ============ Resultado ============
 orden = {"ERROR": 0, "REVISAR": 1, "AVISO": 2}
 problemas.sort(key=lambda x: (orden[x[0]], x[1]))
