@@ -9134,6 +9134,11 @@ def catalogo_por_vehiculo(marca_vehiculo, version):   # ver descripciones_por_pa
         _marca, categoria, resto = tramo
         f["_categoria"] = categoria or "Sin categoría"
         f["_aplicacion"] = resto or ""
+        # El texto ya despegado, para poder filtrar por modelo sin que «206» enganche adentro
+        # de un número de parte. Se hace acá porque esta función va cacheada por versión del
+        # catálogo: separar las 6.991 descripciones de PEUGEOT cuesta 0,35 s y así se paga una
+        # vez, no en cada vuelta de la pantalla.
+        f["_texto"] = separar_texto_pegado(f["Descripcion"] or "").upper()
         por_categoria.setdefault(f["_categoria"], []).append(f)
     return por_categoria
 
@@ -23332,7 +23337,16 @@ if pagina == PAGINAS[7]:
                     items = list(por_categoria[mapa_cat[cat_etiqueta]])
 
                 if modelo_elegido:
-                    items = [x for x in items if modelo_elegido in (x["Descripcion"] or "").upper()]
+                    # Como PALABRA y no como subcadena. Desde que el desplegable ofrece los
+                    # modelos que son números —206, 307, 405— buscarlos adentro del texto
+                    # engancha cualquier número de parte que los contenga: pedir el 206 traía
+                    # 1.554 productos y 100 eran filas de Citroën con el código 9662063280.
+                    # Sobre el texto despegado, para no perder el «307REF ORIG» de una de las
+                    # listas, que como palabra suelta tampoco daría.
+                    _re_modelo = re.compile(rf'(?<![A-Z0-9]){re.escape(modelo_elegido)}(?![A-Z0-9])')
+                    items = [x for x in items
+                             if _re_modelo.search(x.get("_texto")
+                                                   or (x["Descripcion"] or "").upper())]
                 if filtro_modelo:
                     palabras = [p for p in filtro_modelo.split() if p]
                     items = [x for x in items

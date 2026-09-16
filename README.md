@@ -350,6 +350,27 @@ Dos límites que están puestos a propósito y no hay que sacar:
 Medido: rescata 15 códigos (todos bujías NGK/Bosch, que es justo lo que cruza una bujía de un
 proveedor con la de otro), pierde 0, y las 30 motorizaciones conocidas siguen afuera.
 
+## Pedir el 206 y que no venga el 9662063280
+
+El filtro por modelo de la pantalla de vehículos buscaba el modelo **adentro** del texto de la
+descripción. Con los modelos de siempre eso andaba —PARTNER solo aparece cuando dice PARTNER—
+pero desde que el desplegable ofrece los que son números, buscar «206» engancha cualquier
+número de parte que lo contenga: pedir el 206 traía 1.554 productos y 100 eran filas de
+Citroën con el código `9662063280`.
+
+Ahora se busca como PALABRA, sobre el texto ya despegado. Lo segundo hace falta para no perder
+los que una de las listas escribe pegados: «Peugeot 206 - 307REF ORIG» — como palabra suelta,
+ese 307 tampoco daría.
+
+    206      1.554 → 1.462
+    307      1.169 → 1.132
+    405      1.025 →   916
+    PARTNER  1.275 → 1.272
+
+El texto despegado se guarda al armar el catálogo de la marca, que ya va cacheado por versión
+del catálogo: separar las 6.991 descripciones de Peugeot cuesta 0,35 s y así se paga una vez y
+no en cada vuelta de la pantalla.
+
 ## El desplegable de autos no tenía ni el 206 ni el A3
 
 Eligiendo Peugeot, la app ofrecía como «modelos»: HDI, PARTNER, BOXER, EXPERT, THP, DW8, XD2…
