@@ -1642,6 +1642,137 @@ El corte es por proveedor (`GROUP BY po.id, mp.id`) y no por total: un código d
 legítimo aparece en varias listas a la vez —es justo para eso que sirve— y contando todo junto
 ese sería el primero de la lista.
 
+## «Esta lista se cargó sin código de fábrica» — y no era cierto
+
+Salió de correr el diagnóstico de salud sobre la base del negocio. Decía, en rojo:
+
+> **1 lista no cruza con ninguna otra marca.** Ninguno de los productos de ILLINOIS está
+> vinculado a otra marca… Casi siempre es que se importaron sin indicar la columna de código de
+> fábrica (OEM).
+
+Y la pantalla de «¿Cuánto cruza tu catálogo?» remataba: *«esta lista se cargó sin código de
+fábrica, así que no tiene con qué cruzar»*, con un cartel rojo que decía **volvé a importarla**.
+
+Los números reales de ILLINOIS son otros:
+
+| | |
+|---|---|
+| Vínculos cargados | **0** ← por esto saltaba la alarma |
+| Productos con vínculos **esperando revisión** | **2.367** |
+| Códigos de fábrica que esa lista aportó | **2.397** |
+
+No le faltaba la columna. Estaba todo encontrado y esperando que alguien entrara a aprobarlo.
+El consejo de la app era reimportar una lista que estaba perfecta: una tarde de trabajo para
+llegar exactamente al mismo lugar.
+
+**Por qué mentía:** las dos funciones que dan ese diagnóstico miraban solo la tabla de
+equivalencias CARGADAS. Cero cargadas y cero conclusiones posibles, así que caían en el último
+motivo de la lista, que es el de la lista sin OEM. Ahora las dos consultan también la cola de
+pendientes, y ese caso tiene su propio mensaje, su propio cartel y su propio destino
+(**Estadísticas → 🔗 Equivalencias sugeridas**, no la pantalla de importar). El conteo de
+«códigos de fábrica que aportó» también suma los pendientes: que nadie los haya aprobado todavía
+no cambia lo que la lista trajo.
+
+Ahora dice:
+
+> **ILLINOIS: las equivalencias están encontradas y sin aprobar.** 2.367 producto(s) de esa
+> lista ya tienen equivalencias esperando revisión… la lista está bien importada, lo que falta
+> es revisarlas.
+
+## El número interno de un proveedor no es el código de otro
+
+La importación guarda el código con la marca pegada para que dos proveedores no se pisen
+—`MAF126FISPA`, `LECS032LUCAS`, `FI-0280155786FISPA`— pero adentro de la descripción el
+proveedor escribe el número pelado: «SENSOR DE MASA DE AIRE **MAF126** RENAULT MASTER 2 5».
+
+Ese `MAF126` es su propio código, y volvía a entrar como si fuera una referencia cruzada. La
+regla que descarta el código propio existía, pero solo en un sentido: sabía que `52031Ficha` es
+`52031` con una palabra pegada, y no sabía que `MAF126` es `MAF126FISPA` sin la marca.
+
+El daño es fino y por eso no se veía: **el número interno de un proveedor choca con el de otro**.
+
+| lo que la app iba a proponer | lo que son en realidad |
+|---|---|
+| FISPA `MAF126` = Masser `MAF 126` | Renault Master ≠ Mercedes C280 |
+| FISPA `MAF085` = Masser `MAF 085` | Mercedes ≠ VW Vento / Audi |
+| FISPA `MAF054` = Masser `MAF 054` | Toyota Corolla ≠ Citroën C3 |
+
+En la base real son **88 pares**, y mirados uno por uno los 88 están mal. Después del arreglo:
+88 menos, **0 pares nuevos** (o sea que no se rompió nada de lo que sí encontraba).
+
+El cuidado está en qué se considera «la marca pegada»: se exige que lo que sobra sea el nombre
+de uno de los doce proveedores que se pegan al código, y no «cualquier letra». Si fuera
+cualquier letra se perdería la diferencia entre `06A906265` y `06A906265E`, que son dos piezas
+distintas de VW.
+
+## Los dos puentes falsos que quedaban eran modelos de Mercedes
+
+`puentes_sospechosos()` sobre la base del negocio devolvía exactamente dos, y los dos eran lo
+mismo:
+
+- **`CLS350`** unía una tapa de aceite, un sensor de fase y un cuerpo de aceleración.
+- **`CLA250`** unía una sonda lambda, una brida de refrigeración y un sensor de ABS.
+
+No son códigos: son modelos de Mercedes. Aparecen en cualquier descripción que nombre ese auto
+—«TAPA ACEITE M.BENZ B200/C200/**CLS350**/E320/GL500/ML350»— y todo lo que el texto nombre junto
+a ellos queda hermanado.
+
+**Por qué no estaban cubiertos:** `CLS350` es tres letras y tres números, y esa forma la tienen
+**2.558 códigos REALES** del catálogo — `IWP210`, `GWP065`, `ZSE161`. Un patrón general se los
+llevaría puestos a todos. Así que las clases van listadas una por una, igual que los sufijos de
+motorización (`308HDI`, `213CDI`): `CLS CLA CLK GLK GLC GLE GLA GLS SLK SLC SLS CL ML SL GL`,
+con **tres dígitos exactos**. Medido: le pega a **14 códigos de los 70.888** del catálogo, y los
+14 son modelos.
+
+Los 14 ya estaban cargados, así que la regla sola no los borra — pero ahora la pantalla
+**🧹 Limpiar vínculos → puentes que hoy no se generarían** los muestra (10 de los 14, los que
+tienen dos o más productos colgando) y se borran de a uno.
+
+Y una consecuencia que vale anotar: esto dejó desactualizado el ejemplo que usaba el filtro por
+repetición, que decía «`CLA200` e `IWP065` tienen la misma forma y no hay expresión regular que
+los distinga». Sigue siendo cierto en general —cambié el ejemplo a `CLC250`, que es otra clase
+de Mercedes y **no** está en la lista—, y por eso ese filtro sigue siendo el que hace el trabajo
+de fondo: una lista escrita a mano nunca va a estar completa.
+
+**Sumando los dos arreglos del extractor de esta tanda:** 110 pares equivocados que dejan de
+proponerse, y **0 pares que se pierdan** de los que sí encontraba.
+
+## El código que el proveedor ya había escrito, y nadie volvía a leer
+
+Buscar el código de fábrica adentro de la descripción ya existía, pero **solo en el momento de
+importar**, detrás de una casilla que viene apagada. Si no se tildó —y no se tildó— ese dato no
+se vuelve a mirar nunca: la descripción queda guardada con el número adentro y ahí muere.
+
+Y aunque se tilde, igual hace falta correrlo después, por una razón de fondo: **el cruce solo
+existe cuando están las dos listas**. Una descripción de FISPA que cita «REF ORIG 0258006980» no
+vale nada hasta que se importa la lista que vende ese Bosch — y para entonces la importación de
+FISPA pasó hace meses.
+
+`equivalencias_escritas_en_las_descripciones()` recorre las 70.888 descripciones en **4
+segundos** y propone **884 pares nuevos**. Corre sola después de cada importación (primera de
+los cuatro pasos del descubrimiento, por ser la más barata y la más limpia) y tiene su botón en
+Administrar → Mantenimiento.
+
+**La decisión cara: solo toma los códigos DECLARADOS**, los que van después de `REF ORIG`, `//`,
+`OEM` o `EQUIVALE`. Medido sobre la base real:
+
+| | pares nuevos | entre familias distintas |
+|---|---|---|
+| Códigos **declarados** | 884 | **1,1 %** |
+| Códigos adivinados | 2.154 | **8,7 %** |
+| *(referencia)* los 24.774 vínculos que ya aprobaste a mano | — | **0,8 %** |
+
+O sea que lo declarado nace casi tan limpio como lo que aprobó una persona, y lo adivinado nace
+ocho veces más sucio. El motivo se ve mirando una descripción: en «SONDA LAMBDA **80045** AUDI
+A3» el 80045 es el número interno de ESE proveedor —el mismo problema de la sección de arriba,
+en su forma general—. Cuando el proveedor escribe «REF ORIG» ya no estamos adivinando: nos lo
+están diciendo.
+
+Una cosa chica que se arregló de paso: el par «un kit y la pieza que trae adentro» se descarta
+ahora al BUSCAR y no solo al guardar. Sin eso la pantalla decía «8 pares nuevos», uno los
+mandaba a la cola, no entraba ninguno, y a la corrida siguiente volvían a salir los mismos 8
+para siempre. Se vio corriendo el barrido dos veces seguidas: ahora la segunda corrida da 0.
+
 ## El «<» de «Master 98<» se comía la mitad de la descripción
 
 Salió de la segunda tanda de la revisión externa, que lo marcaba como un agujero de seguridad.

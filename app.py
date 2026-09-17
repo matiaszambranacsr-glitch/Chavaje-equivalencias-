@@ -3007,10 +3007,14 @@ def codigos_confiables_de_descripciones(descripciones, tope=TOPE_REPETICIONES_EN
     'descripciones' son pares (texto, código de esa misma fila): el código propio hace falta
     para descartar el caso de la palabra pegada, ver extraer_codigos_de_texto().
 
-    Por qué hace falta mirar la lista entera y no fila por fila: 'CLA200' e 'IWP065' tienen
+    Por qué hace falta mirar la lista entera y no fila por fila: 'CLC250' e 'IWP065' tienen
     exactamente la misma forma —tres letras y tres números— y no hay expresión regular que
     distinga el modelo de Mercedes del inyector de Magneti Marelli. Lo que sí los distingue es
     cuántas veces aparecen: el inyector está en 2 filas, el modelo en 15.
+    (Las clases de Mercedes que estaban haciendo daño de verdad en esta base —CLS350, CLA250 y
+    doce más— sí se descartan ahora por la forma, pero listadas una por una, no por el patrón
+    general: ver extraer_codigos_de_texto(). Esa lista nunca va a estar completa —CLC250 mismo
+    no está— y por eso este filtro sigue siendo el que hace el trabajo de fondo.)
 
     Y el repetido es justo el que hace daño, porque el daño crece al cuadrado: un código que
     aparece 1 vez en cada lista genera 1 equivalencia falsa, pero uno que aparece 130 veces
@@ -3149,6 +3153,31 @@ def _es_el_codigo_propio_con_texto(candidato, propio):
     return bool(resto) and resto.isalpha()
 
 
+def _es_el_codigo_propio_sin_la_marca(candidato, propio):
+    """¿'propio' es 'candidato' con el nombre de un proveedor pegado atrás?
+
+    Es el espejo de la función de arriba, y faltaba. La importación guarda el código con la
+    marca pegada para que dos proveedores no se pisen —«MAF126FISPA», «LECS032LUCAS»,
+    «FI-0280155786FISPA»— pero adentro de la descripción el proveedor escribe el número pelado:
+    «SENSOR DE MASA DE AIRE MAF126 RENAULT MASTER 2 5». Ese «MAF126» es su propio código, no una
+    referencia cruzada, y así entraba.
+
+    El daño es fino y por eso no se veía: el número interno de un proveedor CHOCA con el de
+    otro. La base real tiene 88 pares así, y mirados uno por uno los 88 están mal — el MAF126 de
+    FISPA es de un Renault Master y el MAF 126 de Masser es de un Mercedes C280; el MAF085 de
+    FISPA es de un Mercedes y el de Masser de un VW Vento. Misma numeración interna, piezas
+    distintas.
+
+    Se exige que lo que sobra sea el nombre de una de las marcas que se pegan al código, y no
+    «cualquier letra», justamente para no tocar las variantes reales de un código de fábrica:
+    06A906265 y 06A906265E son dos piezas distintas de VW, y esa E tiene que seguir contando."""
+    if not candidato or not propio or len(propio) <= len(candidato):
+        return False
+    if not propio.upper().startswith(candidato.upper()):
+        return False
+    return propio[len(candidato):].upper() in _MARCAS_QUE_SE_PEGAN_AL_CODIGO
+
+
 def _es_lista_de_modelos(token):
     """«106-206-306-406-607» no es un código: es la lista de modelos a los que le va la pieza.
 
@@ -3167,7 +3196,8 @@ def _es_lista_de_modelos(token):
     return sum(1 for p in partes if p.isdigit() and len(p) == 3) >= 3
 
 
-def extraer_codigos_de_texto(texto, minimo=6, codigo_propio=None, codigos_conocidos=None):
+def extraer_codigos_de_texto(texto, minimo=6, codigo_propio=None, codigos_conocidos=None,
+                              solo_declarados=False):
     """Busca códigos de fábrica escondidos dentro de una descripción.
     Muchas listas de proveedor no traen una columna de OEM aparte, pero lo meten en el texto
     ('ROTULA VW GOL - ORIG 6Q0407365'). Esto lo saca de ahí.
@@ -3176,6 +3206,16 @@ def extraer_codigos_de_texto(texto, minimo=6, codigo_propio=None, codigos_conoci
       - descarta palabras sin números (ROTULA, DERECHA, DELANTERO)
       - descarta números solos cortos: años, medidas, cilindradas (2005, 1.6, 16V)
       - pide un largo mínimo, porque los códigos de fábrica son largos
+
+    Con solo_declarados se devuelven ÚNICAMENTE los que el proveedor marcó como código de
+    fábrica —los que van después de «REF ORIG», «//», «OEM», «EQUIVALE»—. Es muchísimo más
+    estricto y se midió por qué vale la pena: barriendo las 70.888 descripciones de la base
+    real, los códigos declarados proponen 884 pares nuevos con 1,1% de pares entre familias
+    distintas, y los NO declarados 2.154 pares con 8,7%. Como referencia, los 24.774 vínculos
+    que ya están cargados —aprobados a mano, uno por uno— tienen 0,8%. O sea que lo declarado
+    nace casi tan limpio como lo aprobado por una persona, y lo adivinado nace ocho veces más
+    sucio. La diferencia no es el extractor: es que en «SONDA LAMBDA 80045 AUDI A3» el 80045 es
+    el número interno del proveedor, y el número interno de un proveedor choca con el de otro.
     """
     if not texto:
         return []
@@ -3341,6 +3381,16 @@ def extraer_codigos_de_texto(texto, minimo=6, codigo_propio=None, codigos_conoci
         # estos no. Los dos patrones le pegan a 0 códigos del catálogo real: no rompen nada.
         re.compile(r'^\d[A-Z]{2,3}-\d{3,4}$'),
         re.compile(r'^\d[A-Z]\d{2,4}-\d{1,2}$'),
+        # CLASES DE MERCEDES: CLS350, CLA250, GLK280, SLK230, GLE400, ML350, GL500. Es el
+        # modelo, no un código, y son los dos únicos puentes falsos que le quedaban a la base:
+        # CLS350 unía una tapa de aceite, un sensor de fase y un cuerpo de aceleración; CLA250
+        # una sonda lambda, una brida de refrigeración y un sensor de ABS. Todo lo que el texto
+        # nombre junto a ese modelo termina hermanado.
+        # Las clases se listan una por una y se piden TRES dígitos exactos, igual que con los
+        # sufijos de motorización, porque la forma general —tres letras y tres números— le pega
+        # a 2.558 códigos REALES del catálogo (IWP210, GWP065, ZSE161). Así listado le pega a 14
+        # y los 14 son modelos de Mercedes cargados como código de fábrica.
+        re.compile(r'^(CLS|CLA|CLK|GLK|GLC|GLE|GLA|GLS|SLK|SLC|SLS|CL|ML|SL|GL)\d{3}$'),
         # UNA PALABRA CON UN NÚMERO ATRÁS: SUPER5, SCENIC2, MEGANE2, LAGUNA2, XANTIA3,
         # PICASSO1, TIGGO3. Es el modelo con su generación, la forma en que las listas
         # distinguen un Megane 2 de un Megane 3.
@@ -3409,6 +3459,8 @@ def extraer_codigos_de_texto(texto, minimo=6, codigo_propio=None, codigos_conoci
         if limpio.upper() in ruido:
             continue
         declarado = indice in posiciones_declaradas
+        if solo_declarados and not declarado:
+            continue
         # Estar en el catálogo desarma las formas AMBIGUAS —las de código de motor— y nada
         # más. Es el desempate que esos patrones no tienen: la duda era si 'TC936MG' es una
         # motorización o un repuesto, y que alguien lo venda la despeja.
@@ -3472,6 +3524,10 @@ def extraer_codigos_de_texto(texto, minimo=6, codigo_propio=None, codigos_conoci
         # (52031+Ficha, 24075+VW) y no se tocan las variantes reales de un mismo código, que se
         # diferencian por números o por letra y número (FLO35121 / FLO35122 / FLO35122A).
         if propio and _es_el_codigo_propio_con_texto(sanitizar(limpio), propio):
+            continue
+        # Y el mismo caso al revés: el código de la fila es este mismo con la marca pegada
+        # atrás. Ver _es_el_codigo_propio_sin_la_marca().
+        if propio and _es_el_codigo_propio_sin_la_marca(sanitizar(limpio), propio):
             continue
         encontrados.append(limpio)
     # sin repetidos, conservando el orden
@@ -3943,6 +3999,8 @@ def listas_que_no_cruzan():
         GROUP BY m.id ORDER BY COUNT(p.id) DESC""")
     proveedores = filas_a_listas(c)
 
+    esperando = productos_con_vinculos_esperando()
+
     filas = []
     for prov in proveedores:
         # Productos de esta lista que llegan a un producto de OTRO proveedor, sea directo o
@@ -3974,9 +4032,15 @@ def listas_que_no_cruzan():
         # El total va en su propia consulta y la muestra aparte: con LIMIT alcanzaba para
         # decidir si son códigos de barras, pero el número que se muestra en pantalla tiene
         # que ser el de verdad, no el del tope.
+        # Los vínculos pendientes cuentan igual para esta pregunta: «qué códigos de fábrica
+        # aportó esta lista» no depende de que alguien los haya aprobado todavía. Sin el UNION
+        # la respuesta para una lista recién importada era 0, y de ahí salía el «se cargó sin
+        # código de fábrica» que no era cierto.
         consulta_oem = """
             SELECT {que}
-            FROM productos p JOIN equivalencias e
+            FROM productos p JOIN (SELECT producto_a_id, producto_b_id FROM equivalencias
+                                   UNION SELECT producto_a_id, producto_b_id
+                                     FROM equivalencias_pendientes) e
               ON e.producto_a_id = p.id OR e.producto_b_id = p.id
             JOIN productos po ON po.id = CASE WHEN e.producto_a_id = p.id
                                               THEN e.producto_b_id ELSE e.producto_a_id END
@@ -3990,8 +4054,17 @@ def listas_que_no_cruzan():
         codigos_oem = [r["codigo"] for r in c.fetchall()]
         es_barras, prefijo, _ = columna_es_codigo_de_barras(codigos_oem)
 
+        # Los que ya tienen equivalencia encontrada y sin aprobar. Va primero de todo: el
+        # síntoma es el mismo que el de una lista sin código de fábrica —cero cruces— y lo que
+        # hay que hacer es lo contrario. Ver productos_con_vinculos_esperando().
+        esperan = esperando.get(prov["marca_id"], 0)
+
         if cruzan:
             motivo = ""
+        elif esperan:
+            motivo = (f"{esperan:,} de sus productos YA tienen equivalencias encontradas, "
+                      "esperando que las apruebes en Estadísticas → 🔗 Equivalencias "
+                      "sugeridas. Mientras no se aprueben, la búsqueda no las usa")
         elif es_barras:
             _pais_pref = pais_de_estos_codigos(codigos_oem)
             _como = (f"empiezan todos con {prefijo}…"
@@ -4009,11 +4082,108 @@ def listas_que_no_cruzan():
             "Lista": prov["marca"],
             "Productos": prov["productos"],
             "Cruzan con otra marca": cruzan,
+            "Esperando revisión": esperan,
             "Códigos de fábrica que aportó": total_oem,
             "Por qué no cruza": motivo,
             "_sin_cruce": not cruzan,
+            "_solo_falta_revisar": bool(not cruzan and esperan),
         })
     return sorted(filas, key=lambda f: (f["Cruzan con otra marca"], -f["Productos"]))
+
+
+TOPE_CODIGOS_ESCRITOS = 4000   # ver equivalencias_escritas_en_las_descripciones()
+
+
+def equivalencias_escritas_en_las_descripciones(limite=TOPE_CODIGOS_ESCRITOS, progreso=None):
+    """Los códigos de fábrica que el proveedor YA escribió en la descripción, cruzados contra el
+    catálogo. Devuelve la lista de pares (id_a, id_b) que todavía no están ni cargados ni en la
+    cola de revisión.
+
+    Es el agujero que quedaba en el circuito de descubrimiento. Buscar el código de fábrica
+    adentro del texto existía, pero SOLO en el momento de importar, detrás de una casilla que
+    viene apagada («🔎 Buscar códigos de fábrica dentro de la descripción»). Si esa casilla no
+    se tildó —y no se tildó— ese dato no se vuelve a mirar NUNCA: la descripción queda guardada
+    con el número adentro y nadie lo lee otra vez.
+    Y hay una razón de fondo para que tenga que ser retroactivo: el cruce solo existe cuando
+    están las DOS listas. Una descripción de FISPA que cita «REF ORIG 0258006980» no vale nada
+    hasta que se importa la lista de JL que vende ese Bosch — y para entonces la importación de
+    FISPA ya pasó hace meses.
+
+    SOLO se miran los códigos DECLARADOS por el proveedor: los que van después de «REF ORIG»,
+    «//», «OEM», «EQUIVALE». Esa restricción es la decisión cara de esta función y está medida
+    sobre las 70.888 descripciones reales:
+
+        declarados     884 pares nuevos    1,1% entre familias distintas
+        adivinados   2.154 pares nuevos    8,7% entre familias distintas
+        (referencia: los 24.774 vínculos ya aprobados a mano dan 0,8%)
+
+    O sea que lo declarado nace casi tan limpio como lo que aprobó una persona, y lo adivinado
+    nace ocho veces más sucio. El motivo se ve mirando las descripciones: en «SONDA LAMBDA
+    80045 AUDI A3» el 80045 es el número interno de ESE proveedor, y los números internos de
+    dos proveedores chocan entre sí sin tener nada que ver — el MAF 126 de uno es de un Renault
+    y el del otro de un Mercedes. Cuando el proveedor escribe «REF ORIG» no estamos adivinando:
+    nos lo están diciendo.
+
+    Nada se carga: todo va a la cola de revisión, igual que el resto del descubrimiento."""
+    c.execute("SELECT codigo_clean, id, marca_id FROM productos WHERE codigo_clean IS NOT NULL "
+              "AND codigo_clean <> ''")
+    por_codigo = {}
+    for fila in c.fetchall():
+        por_codigo.setdefault(fila["codigo_clean"], []).append((fila["id"], fila["marca_id"]))
+
+    # Los pares que ya están resueltos o ya esperando. Sin esto se vuelve a proponer todas las
+    # veces lo mismo, que es lo que hacía que la cola pareciera crecer sin que nadie cargara nada.
+    ya = set()
+    for _tabla in ("equivalencias", "equivalencias_pendientes"):
+        try:
+            c.execute(f"SELECT producto_a_id, producto_b_id FROM {_tabla}")
+            for _a, _b in c.fetchall():
+                ya.add((min(_a, _b), max(_a, _b)))
+        except sqlite3.OperationalError as _err:
+            anotar_error("equivalencias_escritas_en_las_descripciones", _err)
+
+    conocidos = set(por_codigo)
+    c.execute("SELECT id, codigo_raw, descripcion, marca_id FROM productos "
+              "WHERE descripcion IS NOT NULL AND descripcion <> ''")
+    filas = c.fetchall()
+    pares, vistos, mirados = [], set(), 0
+    for fila in filas:
+        mirados += 1
+        if progreso and mirados % 5000 == 0:
+            progreso(mirados, len(filas))
+        for candidato in extraer_codigos_de_texto(fila["descripcion"],
+                                                  codigo_propio=fila["codigo_raw"],
+                                                  codigos_conocidos=conocidos,
+                                                  solo_declarados=True):
+            for otro_id, otra_marca in por_codigo.get(sanitizar(candidato), ()):
+                # Del mismo proveedor no: son dos productos de su propio catálogo.
+                if otro_id == fila["id"] or otra_marca == fila["marca_id"]:
+                    continue
+                par = (min(fila["id"], otro_id), max(fila["id"], otro_id))
+                if par in ya or par in vistos:
+                    continue
+                vistos.add(par)
+                pares.append(par)
+                if len(pares) >= limite:
+                    return _sin_los_kits(pares)
+    return _sin_los_kits(pares)
+
+
+def _sin_los_kits(pares):
+    """Saca los pares que son «un kit y la pieza que trae adentro».
+
+    guardar_equivalencias_pendientes() ya los descarta al guardar, pero si no se sacan ACÁ la
+    pantalla queda mintiendo: dice «8 pares nuevos», uno los manda a la cola, no entra ninguno,
+    y a la corrida siguiente vuelven a salir los mismos 8 para siempre. Se vio probando el
+    barrido dos veces seguidas."""
+    if not pares:
+        return pares
+    try:
+        _kits = pares_de_kit_y_pieza(pares)
+    except Exception as _err:
+        anotar_error("_sin_los_kits", _err)
+        return pares
+    return [p for p in pares if p not in _kits]
 
 
 def contar_huerfanos():
@@ -4570,12 +4740,15 @@ def descubrimiento_post_importacion(presupuesto_segundos=PRESUPUESTO_DESCUBRIMIE
     hay algo nuevo que encontrar, y es el único momento en que la persona ya está esperando.
 
     El orden no es casual, va de lo que enriquece a lo que consume:
-      1. Las aplicaciones que salen de las descripciones. Es dato nuevo sobre cada producto.
-      2. El cruce por auto, que USA esas aplicaciones: si va antes, cruza con menos.
-      3. El barrido de todo el catálogo, que es el más caro y el que más produce.
+      1. Los códigos de fábrica que el proveedor ESCRIBIÓ en la descripción. Va primero por ser
+         el más barato y el más limpio: si se acaba el presupuesto, que no sea este el que se
+         pierda.
+      2. Las aplicaciones que salen de las descripciones. Es dato nuevo sobre cada producto.
+      3. El cruce por auto, que USA esas aplicaciones: si va antes, cruza con menos.
+      4. El barrido de todo el catálogo, que es el más caro y el que más produce.
 
-    Medido sobre la base real (70.888 productos, cinco listas): 32 s + 17 s las aplicaciones,
-    22 s el cruce por auto, 23 s el barrido. Total 95 s.
+    Medido sobre la base real (70.888 productos, cinco listas): 4 s los códigos escritos,
+    32 s + 17 s las aplicaciones, 22 s el cruce por auto, 23 s el barrido. Total 98 s.
 
     Nada se carga como equivalencia: todo va a la cola de pendientes, igual que cuando se
     apretaba el botón a mano. Lo único que cambia es que ahora se busca.
@@ -4589,6 +4762,24 @@ def descubrimiento_post_importacion(presupuesto_segundos=PRESUPUESTO_DESCUBRIMIE
 
     def queda_tiempo():
         return time.time() - arranque < presupuesto_segundos
+
+    if queda_tiempo():
+        try:
+            _escritos = equivalencias_escritas_en_las_descripciones()
+            if _escritos:
+                _pares_e = []
+                for _a, _b in _escritos:
+                    _pares_e.extend([(_a, _b), (_b, _a)])
+                _n = guardar_equivalencias_pendientes(
+                    _pares_e, "descripcion-declarada",
+                    f"CÓDIGO ESCRITO EN LA DESCRIPCIÓN (automático) · {datetime.now():%d/%m %H:%M}")
+                if _n:
+                    hecho.append(f"{_n // 2} par(es) de códigos que el proveedor escribió "
+                                 "en la descripción, a revisión")
+        except Exception as _err:
+            anotar_error("descubrimiento_post_importacion/codigos_escritos", _err)
+    else:
+        quedo.append("los códigos de fábrica escritos en las descripciones")
 
     if queda_tiempo():
         try:
@@ -7874,6 +8065,30 @@ def invalidar_salud():
         pass
 
 
+def productos_con_vinculos_esperando():
+    """Por marca: cuántos de sus productos YA tienen equivalencias encontradas, esperando que
+    alguien las apruebe. Devuelve {marca_id: cuántos}.
+
+    Hace falta para no dar un diagnóstico falso. Las dos pantallas que explican «por qué esta
+    lista no cruza con ninguna otra» miraban solo la tabla de equivalencias CARGADAS, y de ahí
+    concluían «esta lista se importó sin la columna de código de fábrica». Sobre la base real
+    eso era mentira y mandaba a reimportar una lista que estaba perfecta: ILLINOIS tiene 0
+    vínculos cargados —por eso saltaba la alarma— y 2.367 productos con vínculos esperando
+    revisión, más 632 códigos de fábrica que esa misma lista aportó. No le faltaba la columna:
+    le faltaba que alguien entrara a aprobar lo que ya se había encontrado."""
+    try:
+        c.execute("""
+            SELECT p.marca_id AS marca_id, COUNT(DISTINCT p.id) AS cuantos
+            FROM productos p
+            WHERE p.id IN (SELECT producto_a_id FROM equivalencias_pendientes
+                           UNION SELECT producto_b_id FROM equivalencias_pendientes)
+            GROUP BY p.marca_id""")
+        return {f["marca_id"]: f["cuantos"] for f in c.fetchall()}
+    except sqlite3.OperationalError as _err:
+        anotar_error("productos_con_vinculos_esperando", _err)
+        return {}
+
+
 def salud_de_los_cruces():
     """Cuánto cruza de verdad tu catálogo entre proveedores, marca por marca.
 
@@ -7894,7 +8109,7 @@ def salud_de_los_cruces():
                 SELECT eq.producto_b_id AS pid, p1.marca_id AS marca_vecina
                   FROM equivalencias eq JOIN productos p1 ON p1.id = eq.producto_a_id
             )
-            SELECT m.nombre AS "Marca", m.tipo AS "_tipo",
+            SELECT m.nombre AS "Marca", m.tipo AS "_tipo", m.id AS "_marca_id",
                    COUNT(DISTINCT p.id) AS "Productos",
                    COUNT(DISTINCT CASE WHEN v.pid IS NOT NULL THEN p.id END) AS "Con vínculo",
                    COUNT(DISTINCT CASE WHEN v.marca_vecina IS NOT NULL
@@ -7909,13 +8124,24 @@ def salud_de_los_cruces():
         anotar_error("salud_de_los_cruces", _err)
         return [], {}
 
-    resumen = {"productos": 0, "cruzan": 0, "listas_aisladas": []}
+    # Los vínculos que esa lista YA tiene encontrados y sin aprobar. Sin esto el diagnóstico
+    # de abajo era falso: ver productos_con_vinculos_esperando().
+    esperando = productos_con_vinculos_esperando()
+    resumen = {"productos": 0, "cruzan": 0, "listas_aisladas": [], "listas_esperando": []}
     for f in filas:
         f["% que cruza"] = (f"{f['Cruzan a otra marca'] * 100 // f['Productos']}%"
                              if f["Productos"] else "—")
+        f["Esperando revisión"] = esperando.get(f["_marca_id"], 0)
         # El diagnóstico en palabras: es lo que convierte la tabla en algo accionable.
         if f["_tipo"] == "OEM":
             f["Qué pasa"] = "Códigos de fábrica: son el puente, no hace falta que crucen."
+        elif not f["Cruzan a otra marca"] and f["Esperando revisión"]:
+            # Este caso va ANTES que el de la lista aislada y no se cuenta como aislada: el
+            # síntoma es el mismo —cero cruces— pero lo que hay que hacer es lo contrario.
+            f["Qué pasa"] = (f"⏳ Todavía ninguno cruza, pero {f['Esperando revisión']:,} "
+                              "producto(s) ya tienen equivalencias encontradas esperando que "
+                              "las apruebes. No falta la columna: falta revisarlas.")
+            resumen["listas_esperando"].append(f["Marca"])
         elif not f["Cruzan a otra marca"]:
             f["Qué pasa"] = ("⚠️ NINGUNO cruza. Esa lista se importó sin la columna de código "
                               "de fábrica, o esa columna quedó mal mapeada.")
@@ -8411,6 +8637,22 @@ def diagnostico_de_salud():
                   "proveedores. Casi siempre es que se importaron sin indicar la columna de "
                   "código de fábrica (OEM), que es la única que las une con el resto.",
                   "Administrar → Mantenimiento → ¿Cuánto cruza tu catálogo?")
+        # El mismo síntoma con la causa opuesta, y va aparte porque lo que hay que hacer es
+        # otra cosa: acá las equivalencias ya están encontradas y lo que falta es aprobarlas.
+        # Mandar a reimportar una lista que está bien es hacer perder una tarde.
+        if _res_cr.get("listas_esperando"):
+            _cuales_e = ", ".join(_res_cr["listas_esperando"][:6])
+            if len(_res_cr["listas_esperando"]) > 6:
+                _cuales_e += f" y {len(_res_cr['listas_esperando']) - 6} más"
+            _cuantos_e = sum(f["Esperando revisión"] for f in _filas_cr
+                             if f["Marca"] in _res_cr["listas_esperando"])
+            sumar("alto",
+                  f"{_cuales_e}: las equivalencias están encontradas y sin aprobar",
+                  f"{_cuantos_e:,} producto(s) de esa(s) lista(s) ya tienen equivalencias "
+                  "esperando revisión. Hasta que no se aprueben, buscar uno de sus códigos no "
+                  "muestra los equivalentes de los otros proveedores — la lista está bien "
+                  "importada, lo que falta es revisarlas.",
+                  "Estadísticas → 🔗 Equivalencias sugeridas")
     except Exception as _err:
         anotar_error("diagnostico_de_salud", _err)
         pass
@@ -22980,6 +23222,21 @@ if pagina == PAGINAS[3]:
                         f"**{_pct}% de tus productos de proveedor cruzan a otra marca** "
                         f"({_res_sc['cruzan']:,} de {_res_sc['productos']:,})."
                     )
+                    # Antes que el cartel de «reimportá»: una lista que ya tiene todo
+                    # encontrado y sin aprobar da el mismo cero, y mandarla a reimportar es
+                    # hacer perder una tarde por nada. Ver productos_con_vinculos_esperando().
+                    if _res_sc.get("listas_esperando"):
+                        _esp_n = sum(f["Esperando revisión"] for f in _filas_sc
+                                     if f["Marca"] in _res_sc["listas_esperando"])
+                        st.warning(
+                            "**No hace falta reimportar nada: "
+                            + ", ".join(_res_sc["listas_esperando"][:12])
+                            + (" y otras" if len(_res_sc["listas_esperando"]) > 12 else "")
+                            + f" ya tienen las equivalencias encontradas.** Son {_esp_n:,} "
+                              "producto(s) esperando que alguien las apruebe en Estadísticas → "
+                              "🔗 Equivalencias sugeridas. Hasta que no se aprueben, la búsqueda "
+                              "no las usa y la columna de arriba sigue en cero."
+                        )
                     if _res_sc["listas_aisladas"]:
                         st.error(
                             "**Estas listas están aisladas** — ninguno de sus productos cruza a "
@@ -22991,6 +23248,74 @@ if pagina == PAGINAS[3]:
                     st.dataframe([{k: v for k, v in f.items() if not k.startswith("_")}
                                   for f in _filas_sc],
                                  width="stretch", hide_index=True)
+            st.markdown("---")
+
+            st.markdown("**📝 Códigos de fábrica que el proveedor escribió en la descripción**")
+            explicar(
+                "Recorre las descripciones ya cargadas y busca los códigos que el proveedor "
+                "marcó con «REF ORIG», «//» u «OEM», y que además tenés en el catálogo.",
+                "Buscar el código de fábrica adentro del texto ya existía, pero **solo en el "
+                "momento de importar**, detrás de una casilla que viene apagada. Si esa casilla "
+                "no se tildó, ese dato no se vuelve a mirar nunca más: la descripción queda "
+                "guardada con el número adentro y nadie lo lee otra vez.\n\n"
+                "Y aunque se tilde, igual hace falta correrlo después: el cruce solo existe "
+                "cuando están las DOS listas. Una descripción que cita «REF ORIG 0258006980» no "
+                "sirve de nada hasta que se importe la lista que vende ese Bosch — y para "
+                "entonces la importación de la primera ya pasó hace meses.\n\n"
+                "**Solo toma los códigos DECLARADOS**, no los que se podrían adivinar. La "
+                "diferencia está medida sobre tu base: los declarados dan 1,1% de pares entre "
+                "familias distintas y los adivinados 8,7% (los vínculos que vos ya aprobaste a "
+                "mano dan 0,8%). El motivo es simple: en «SONDA LAMBDA 80045 AUDI A3» el 80045 "
+                "es el número interno de ESE proveedor, y choca con el número interno de otro "
+                "sin tener nada que ver.\n\n"
+                "No carga nada solo: todo va a la cola de pendientes."
+            )
+            if st.button("📝 Buscar los códigos escritos"):
+                with st.spinner("Leyendo las descripciones del catálogo..."):
+                    st.session_state["sug_escritos"] = equivalencias_escritas_en_las_descripciones()
+            _st_escritos = st.session_state.get("sug_escritos")
+            if _st_escritos is not None:
+                if not _st_escritos:
+                    st.info("No encontré pares nuevos. Si ya corriste esto antes, o tus listas "
+                            "no escriben el código de fábrica en la descripción, es esperable.")
+                else:
+                    st.success(f"**{len(_st_escritos)} par(es) nuevos** que el proveedor dejó "
+                                "escritos en la descripción.")
+                    if len(_st_escritos) >= TOPE_CODIGOS_ESCRITOS:
+                        st.warning(
+                            f"⚠️ Se cortó en **{TOPE_CODIGOS_ESCRITOS:,} pares**, así que hay "
+                            "más. Mandá estos a la cola, resolvelos, y volvé a correrlo."
+                        )
+                    _muestra_esc = []
+                    for _a, _b in _st_escritos[:60]:
+                        c.execute("""SELECT p.codigo_raw AS cod, p.descripcion AS des,
+                                            m.nombre AS marca
+                                     FROM productos p JOIN marcas m ON m.id = p.marca_id
+                                     WHERE p.id IN (?, ?)""", (_a, _b))
+                        _dos = filas_a_listas(c)
+                        if len(_dos) == 2:
+                            _muestra_esc.append({
+                                "Marca": _dos[0]["marca"], "Código": _dos[0]["cod"],
+                                "Descripción": (_dos[0]["des"] or "")[:60],
+                                "Marca equivalente": _dos[1]["marca"],
+                                "Código equivalente": _dos[1]["cod"],
+                                "Su descripción": (_dos[1]["des"] or "")[:60],
+                            })
+                    if _muestra_esc:
+                        st.caption(f"Muestra de {len(_muestra_esc)} de los {len(_st_escritos)}:")
+                        st.dataframe(_muestra_esc, width="stretch", hide_index=True)
+                    if st.button(f"📥 Mandar los {len(_st_escritos)} a la cola de pendientes",
+                                 type="primary", key="mandar_sug_escritos"):
+                        _pares_esc = []
+                        for _a, _b in _st_escritos:
+                            _pares_esc.extend([(_a, _b), (_b, _a)])
+                        _n = guardar_equivalencias_pendientes(
+                            _pares_esc, "descripcion-declarada",
+                            f"escritos-{datetime.now().strftime('%d/%m %H:%M')}")
+                        st.session_state.pop("sug_escritos", None)
+                        avisar("ok", f"Listo: {_n // 2} par(es) a la cola. Se aprueban en "
+                                     "Estadísticas → 🔗 Equivalencias sugeridas.")
+                        st.rerun()
             st.markdown("---")
 
             st.markdown("**🧠 Buscar equivalencias en TODO el catálogo de una**")
@@ -23796,10 +24121,21 @@ if pagina == PAGINAS[3]:
             )
             if st.button("🔗 Ver por qué no cruzan"):
                 _cruces = listas_que_no_cruzan()
-                _mudas = [f for f in _cruces if f["_sin_cruce"]]
-                if not _mudas:
+                # Las que solo esperan revisión van aparte de las que están de verdad
+                # aisladas: el síntoma es el mismo y lo que hay que hacer es lo contrario.
+                _esperan = [f for f in _cruces if f["_solo_falta_revisar"]]
+                _mudas = [f for f in _cruces if f["_sin_cruce"] and not f["_solo_falta_revisar"]]
+                if not _mudas and not _esperan:
                     st.success("✅ Todas las listas cruzan con alguna otra.")
-                else:
+                if _esperan:
+                    st.warning(
+                        "⏳ **No hace falta reimportar "
+                        + ", ".join(f["Lista"] for f in _esperan)
+                        + f"**: {sum(f['Esperando revisión'] for f in _esperan):,} "
+                          "producto(s) ya tienen las equivalencias encontradas y esperan que "
+                          "alguien las apruebe en Estadísticas → 🔗 Equivalencias sugeridas."
+                    )
+                if _mudas:
                     st.warning(
                         f"⚠️ {len(_mudas)} lista(s) no llegan a ningún producto de otro "
                         f"proveedor: {', '.join(f['Lista'] for f in _mudas)}."
@@ -23813,15 +24149,16 @@ if pagina == PAGINAS[3]:
                              "Es la cuenta que dice si la lista sirve para buscar equivalencias."
                     )}
                 )
-                explicar(
-                    "Se arregla volviendo a importar la lista con la columna correcta.",
-                    "En **📁 Cargar Excel**, al volver a subir la misma lista, elegí en «Código "
-                    "OEM / Equivalente» la columna del código original de la terminal. Si la "
-                    "lista no la trae, dejala en «Ninguna» y activá «buscar el código de "
-                    "fábrica dentro de la descripción».\n\n"
-                    "**Reimportar no duplica nada**: los productos se reconocen por su código y "
-                    "se actualizan, no se cargan de nuevo."
-                )
+                if _mudas:
+                    explicar(
+                        "Se arregla volviendo a importar la lista con la columna correcta.",
+                        "En **📁 Cargar Excel**, al volver a subir la misma lista, elegí en "
+                        "«Código OEM / Equivalente» la columna del código original de la "
+                        "terminal. Si la lista no la trae, dejala en «Ninguna» y activá "
+                        "«buscar el código de fábrica dentro de la descripción».\n\n"
+                        "**Reimportar no duplica nada**: los productos se reconocen por su "
+                        "código y se actualizan, no se cargan de nuevo."
+                    )
 
             st.markdown("**🔍 Salud de los datos**")
             st.caption(

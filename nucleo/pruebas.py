@@ -171,16 +171,19 @@ def probar_extractor():
 
 
 def probar_filtro_por_repeticion():
-    # 'CLA200' (modelo Mercedes) e 'IWP065' (inyector Marelli) tienen la MISMA forma: tres
+    # 'CLC250' (modelo Mercedes) e 'IWP065' (inyector Marelli) tienen la MISMA forma: tres
     # letras y tres números. No hay expresión regular que los distinga. Lo que los distingue es
     # en cuántas filas de la lista aparece cada uno.
-    pares = [(f"TAPA ACEITE M.BENZ A200/CLA200 var {i}", f"MTA{4000 + i}") for i in range(12)]
+    # El ejemplo era CLA200 hasta que esa clase entró en la lista de formas descartadas, y el
+    # cambio lo dice todo: esa lista se escribe a mano, nunca va a estar completa —CLC250 no
+    # está— y por eso este filtro es el que hace el trabajo de fondo.
+    pares = [(f"TAPA ACEITE M.BENZ A200/CLC250 var {i}", f"MTA{4000 + i}") for i in range(12)]
     pares += [("INYECTOR MPI BOSCH PALIO 1.3 8v reemplazo IWP065", "0280157512"),
               ("INYECTOR PALIO 1.3 reemplazo IWP065", "0280157513")]
     buenos, conteo = codigos.codigos_confiables_de_descripciones(pares)
     cierto("IWP065" in buenos, "el inyector aparece 2 veces y tiene que quedar")
-    cierto("CLA200" not in buenos, "el modelo aparece 12 veces y tiene que irse")
-    cierto(conteo.get("CLA200", 0) > conteo.get("IWP065", 0), "el conteo tiene que reflejarlo")
+    cierto("CLC250" not in buenos, "el modelo aparece 12 veces y tiene que irse")
+    cierto(conteo.get("CLC250", 0) > conteo.get("IWP065", 0), "el conteo tiene que reflejarlo")
 
 
 def probar_dividir():
@@ -921,6 +924,74 @@ def probar_ref_orig_pegado_no_es_codigo():
     cierto("024210" in salida, "el código que viene después de REF ORIG sí")
 
 
+def probar_la_clase_de_mercedes_no_es_un_codigo():
+    """«CLS350» y «CLA250» son modelos de Mercedes, no códigos de fábrica.
+
+    Eran los dos únicos puentes falsos que le quedaban a la base: CLS350 unía una tapa de
+    aceite, un sensor de fase y un cuerpo de aceleración; CLA250 una sonda lambda, una brida de
+    refrigeración y un sensor de ABS. Todo lo que el texto nombre junto al modelo queda
+    hermanado.
+
+    Las clases van listadas una por una y se piden TRES dígitos exactos: la forma general —tres
+    letras y tres números— le pega a 2.558 códigos REALES del catálogo. Así listado le pega a
+    14, y los 14 son modelos."""
+    salida = codigos.extraer_codigos_de_texto(
+        "TAPA ACEITE M.BENZ B200 C200 CLS350 E320 GL500 ML350 SLK230 GLC300 Masser")
+    for modelo in ("CLS350", "GL500", "ML350", "SLK230", "GLC300"):
+        cierto(modelo not in salida, f"«{modelo}» es un modelo de Mercedes, no un código")
+    # Y los códigos reales de tres letras y tres números siguen entrando.
+    for real in ("IWP210", "GWP065", "ZSE161"):
+        cierto(real in codigos.extraer_codigos_de_texto(f"INYECTOR REF ORIG {real} PARA FIAT"),
+               f"«{real}» es un código de verdad del catálogo y tiene que entrar")
+
+
+def probar_el_numero_interno_del_proveedor_no_es_referencia_cruzada():
+    """«MAF126» adentro de la descripción de «MAF126FISPA» es su propio código, no un OEM.
+
+    La importación guarda el código con la marca pegada para que dos proveedores no se pisen, y
+    adentro del texto el proveedor escribe el número pelado. Ese número volvía a entrar como si
+    fuera una referencia cruzada, y el daño es fino: el número interno de un proveedor CHOCA con
+    el de otro. En la base real eran 88 pares y los 88 estaban mal — el MAF126 de FISPA es de un
+    Renault Master y el MAF 126 de Masser es de un Mercedes C280.
+
+    La regla mira que lo que sobra sea el nombre de un proveedor, no «cualquier letra»: 06A906265
+    y 06A906265E son dos piezas distintas de VW y esa E tiene que seguir contando."""
+    salida = codigos.extraer_codigos_de_texto(
+        "SENSOR DE MASA DE AIRE MAF126 RENAULT MASTER 2 5 REF ORIG 8200914647",
+        codigo_propio="MAF126FISPA")
+    cierto("MAF126" not in [codigos.sanitizar(x) for x in salida],
+           "«MAF126» es el código propio con FISPA pegado atrás, no un OEM")
+    cierto("8200914647" in salida, "el que sí viene declarado con REF ORIG entra igual")
+
+    # Y al revés: la variante real de un código de fábrica no se pierde.
+    salida2 = codigos.extraer_codigos_de_texto(
+        "SONDA LAMBDA REF ORIG 06A906265 PARA AUDI A3", codigo_propio="06A906265E")
+    cierto("06A906265" in salida2,
+           "una variante real (la E final de VW) no es «el código propio sin la marca»")
+
+
+def probar_solo_los_codigos_que_el_proveedor_declaro():
+    """Con solo_declarados, «80045» no entra y el que va después de REF ORIG sí.
+
+    Es la diferencia entre adivinar y que te lo digan, y está medida sobre las 70.888
+    descripciones reales: los códigos declarados proponen 884 pares nuevos con 1,1% entre
+    familias distintas, los adivinados 2.154 con 8,7%. Los 24.774 vínculos ya aprobados a mano
+    dan 0,8%.
+
+    El caso es de la base: «MAF049» es el número de catálogo de un proveedor y entra como
+    código porque tiene letras y seis caracteres. Del otro lado hay un «MAF 049» de OTRO
+    proveedor que es un sensor de otro auto, y ahí nace el par equivocado. El «1054419» que
+    viene después del REF ORIG es el que sirve."""
+    texto = "SENSOR DE MASA DE AIRE MAF049 FORD FOCUS 1 8 16V REF ORIG 1054419"
+    todos = codigos.extraer_codigos_de_texto(texto)
+    solo = codigos.extraer_codigos_de_texto(texto, solo_declarados=True)
+    cierto("1054419" in todos and "1054419" in solo,
+           "el código declarado entra en los dos modos")
+    cierto("MAF049" in todos, "sin la restricción, el número de catálogo también entra")
+    cierto("MAF049" not in solo,
+           "con solo_declarados el número de catálogo del proveedor queda afuera")
+
+
 def probar_marca_pegada_atras_del_numero():
     """«4EC1TBOSCH=0250202087» son tres cosas: un motor, una marca y un código.
 
@@ -1103,6 +1174,9 @@ def main():
                    probar_bed_ford_no_es_ford,
                    probar_la_marca_abreviada_es_la_misma_marca,
                    probar_ref_orig_pegado_no_es_codigo,
+                   probar_la_clase_de_mercedes_no_es_un_codigo,
+                   probar_el_numero_interno_del_proveedor_no_es_referencia_cruzada,
+                   probar_solo_los_codigos_que_el_proveedor_declaro,
                    probar_marca_pegada_atras_del_numero,
                    probar_lista_de_modelos_no_es_codigo,
                    probar_la_coma_decimal_es_el_mismo_motor,

@@ -343,10 +343,14 @@ def codigos_confiables_de_descripciones(descripciones, tope=TOPE_REPETICIONES_EN
     'descripciones' son pares (texto, código de esa misma fila): el código propio hace falta
     para descartar el caso de la palabra pegada, ver extraer_codigos_de_texto().
 
-    Por qué hace falta mirar la lista entera y no fila por fila: 'CLA200' e 'IWP065' tienen
+    Por qué hace falta mirar la lista entera y no fila por fila: 'CLC250' e 'IWP065' tienen
     exactamente la misma forma —tres letras y tres números— y no hay expresión regular que
     distinga el modelo de Mercedes del inyector de Magneti Marelli. Lo que sí los distingue es
     cuántas veces aparecen: el inyector está en 2 filas, el modelo en 15.
+    (Las clases de Mercedes que estaban haciendo daño de verdad en esta base —CLS350, CLA250 y
+    doce más— sí se descartan ahora por la forma, pero listadas una por una, no por el patrón
+    general: ver extraer_codigos_de_texto(). Esa lista nunca va a estar completa —CLC250 mismo
+    no está— y por eso este filtro sigue siendo el que hace el trabajo de fondo.)
 
     Y el repetido es justo el que hace daño, porque el daño crece al cuadrado: un código que
     aparece 1 vez en cada lista genera 1 equivalencia falsa, pero uno que aparece 130 veces
@@ -408,6 +412,31 @@ _MARCAS_QUE_SE_PEGAN_AL_CODIGO = ("LUCAS", "FISPA", "BOSCH", "MARELLI", "MAGNETI
                                   "DELPHI", "NGK", "GATES", "SKF", "BERU", "FACET")
 
 
+def _es_el_codigo_propio_sin_la_marca(candidato, propio):
+    """¿'propio' es 'candidato' con el nombre de un proveedor pegado atrás?
+
+    Es el espejo de la función de arriba, y faltaba. La importación guarda el código con la
+    marca pegada para que dos proveedores no se pisen —«MAF126FISPA», «LECS032LUCAS»,
+    «FI-0280155786FISPA»— pero adentro de la descripción el proveedor escribe el número pelado:
+    «SENSOR DE MASA DE AIRE MAF126 RENAULT MASTER 2 5». Ese «MAF126» es su propio código, no una
+    referencia cruzada, y así entraba.
+
+    El daño es fino y por eso no se veía: el número interno de un proveedor CHOCA con el de
+    otro. La base real tiene 88 pares así, y mirados uno por uno los 88 están mal — el MAF126 de
+    FISPA es de un Renault Master y el MAF 126 de Masser es de un Mercedes C280; el MAF085 de
+    FISPA es de un Mercedes y el de Masser de un VW Vento. Misma numeración interna, piezas
+    distintas.
+
+    Se exige que lo que sobra sea el nombre de una de las marcas que se pegan al código, y no
+    «cualquier letra», justamente para no tocar las variantes reales de un código de fábrica:
+    06A906265 y 06A906265E son dos piezas distintas de VW, y esa E tiene que seguir contando."""
+    if not candidato or not propio or len(propio) <= len(candidato):
+        return False
+    if not propio.upper().startswith(candidato.upper()):
+        return False
+    return propio[len(candidato):].upper() in _MARCAS_QUE_SE_PEGAN_AL_CODIGO
+
+
 def _es_lista_de_modelos(token):
     """«106-206-306-406-607» no es un código: es la lista de modelos a los que le va la pieza.
 
@@ -426,7 +455,8 @@ def _es_lista_de_modelos(token):
     return sum(1 for p in partes if p.isdigit() and len(p) == 3) >= 3
 
 
-def extraer_codigos_de_texto(texto, minimo=6, codigo_propio=None, codigos_conocidos=None):
+def extraer_codigos_de_texto(texto, minimo=6, codigo_propio=None, codigos_conocidos=None,
+                              solo_declarados=False):
     """Busca códigos de fábrica escondidos dentro de una descripción.
     Muchas listas de proveedor no traen una columna de OEM aparte, pero lo meten en el texto
     ('ROTULA VW GOL - ORIG 6Q0407365'). Esto lo saca de ahí.
@@ -435,6 +465,16 @@ def extraer_codigos_de_texto(texto, minimo=6, codigo_propio=None, codigos_conoci
       - descarta palabras sin números (ROTULA, DERECHA, DELANTERO)
       - descarta números solos cortos: años, medidas, cilindradas (2005, 1.6, 16V)
       - pide un largo mínimo, porque los códigos de fábrica son largos
+
+    Con solo_declarados se devuelven ÚNICAMENTE los que el proveedor marcó como código de
+    fábrica —los que van después de «REF ORIG», «//», «OEM», «EQUIVALE»—. Es muchísimo más
+    estricto y se midió por qué vale la pena: barriendo las 70.888 descripciones de la base
+    real, los códigos declarados proponen 884 pares nuevos con 1,1% de pares entre familias
+    distintas, y los NO declarados 2.154 pares con 8,7%. Como referencia, los 24.774 vínculos
+    que ya están cargados —aprobados a mano, uno por uno— tienen 0,8%. O sea que lo declarado
+    nace casi tan limpio como lo aprobado por una persona, y lo adivinado nace ocho veces más
+    sucio. La diferencia no es el extractor: es que en «SONDA LAMBDA 80045 AUDI A3» el 80045 es
+    el número interno del proveedor, y el número interno de un proveedor choca con el de otro.
     """
     if not texto:
         return []
@@ -600,6 +640,16 @@ def extraer_codigos_de_texto(texto, minimo=6, codigo_propio=None, codigos_conoci
         # estos no. Los dos patrones le pegan a 0 códigos del catálogo real: no rompen nada.
         re.compile(r'^\d[A-Z]{2,3}-\d{3,4}$'),
         re.compile(r'^\d[A-Z]\d{2,4}-\d{1,2}$'),
+        # CLASES DE MERCEDES: CLS350, CLA250, GLK280, SLK230, GLE400, ML350, GL500. Es el
+        # modelo, no un código, y son los dos únicos puentes falsos que le quedaban a la base:
+        # CLS350 unía una tapa de aceite, un sensor de fase y un cuerpo de aceleración; CLA250
+        # una sonda lambda, una brida de refrigeración y un sensor de ABS. Todo lo que el texto
+        # nombre junto a ese modelo termina hermanado.
+        # Las clases se listan una por una y se piden TRES dígitos exactos, igual que con los
+        # sufijos de motorización, porque la forma general —tres letras y tres números— le pega
+        # a 2.558 códigos REALES del catálogo (IWP210, GWP065, ZSE161). Así listado le pega a 14
+        # y los 14 son modelos de Mercedes cargados como código de fábrica.
+        re.compile(r'^(CLS|CLA|CLK|GLK|GLC|GLE|GLA|GLS|SLK|SLC|SLS|CL|ML|SL|GL)\d{3}$'),
         # UNA PALABRA CON UN NÚMERO ATRÁS: SUPER5, SCENIC2, MEGANE2, LAGUNA2, XANTIA3,
         # PICASSO1, TIGGO3. Es el modelo con su generación, la forma en que las listas
         # distinguen un Megane 2 de un Megane 3.
@@ -668,6 +718,8 @@ def extraer_codigos_de_texto(texto, minimo=6, codigo_propio=None, codigos_conoci
         if limpio.upper() in ruido:
             continue
         declarado = indice in posiciones_declaradas
+        if solo_declarados and not declarado:
+            continue
         # Estar en el catálogo desarma las formas AMBIGUAS —las de código de motor— y nada
         # más. Es el desempate que esos patrones no tienen: la duda era si 'TC936MG' es una
         # motorización o un repuesto, y que alguien lo venda la despeja.
@@ -731,6 +783,10 @@ def extraer_codigos_de_texto(texto, minimo=6, codigo_propio=None, codigos_conoci
         # (52031+Ficha, 24075+VW) y no se tocan las variantes reales de un mismo código, que se
         # diferencian por números o por letra y número (FLO35121 / FLO35122 / FLO35122A).
         if propio and _es_el_codigo_propio_con_texto(sanitizar(limpio), propio):
+            continue
+        # Y el mismo caso al revés: el código de la fila es este mismo con la marca pegada
+        # atrás. Ver _es_el_codigo_propio_sin_la_marca().
+        if propio and _es_el_codigo_propio_sin_la_marca(sanitizar(limpio), propio):
             continue
         encontrados.append(limpio)
     # sin repetidos, conservando el orden
