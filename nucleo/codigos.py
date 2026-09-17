@@ -120,6 +120,46 @@ def es_codigo_util(texto):
     return True
 
 
+def excel_le_comio_digitos(valor):
+    """¿Excel rompió este número al guardarlo, y ya no hay forma de recuperarlo?
+
+    Es el error más caro que puede entrar por un archivo, porque NO se ve. Excel muestra los
+    números de más de once dígitos en notación científica, y cuando guarda un CSV escribe lo
+    que muestra: un código de barras 7793960026946 sale del archivo como «7.79396E+12». Los
+    últimos siete dígitos ya no están en ninguna parte.
+
+    Y lo peor no es perderlos: es que reconstruir el número da 7793960000000, que tiene trece
+    dígitos, arranca con el prefijo correcto y parece un código de barras perfecto. Se carga sin
+    una sola queja, y desde el mostrador se ve como «el escáner no encuentra nada», sin ninguna
+    pista de por qué.
+
+    Se reconoce contando: «7.79396E+12» trae seis dígitos escritos y el número reconstruido
+    tiene trece. Los otros siete los inventó la cuenta, no estaban en el archivo.
+
+    Devuelve True solo cuando se inventaron dígitos. «2.5E+3» son exactamente 2500 y no se
+    inventó nada que importe; el caso que hay que frenar es el del código largo truncado.
+
+    No se arregla solo a propósito. El número correcto no está: adivinarlo sería inventar un
+    código de barras, que es justo lo que se quiere evitar. Lo que hay que hacer es exportar de
+    nuevo con esa columna como TEXTO."""
+    texto = str(valor or "").strip()
+    # El signo del exponente es OBLIGATORIO, igual que en sanitizar() y por la misma razón:
+    # «233900E010» es el filtro de combustible Toyota 23390-0E010, no una notación científica.
+    # Sin exigir el signo, este control marcaría como rotos los 283 códigos de esa forma que
+    # hay en las listas reales.
+    m = re.fullmatch(r"(\d+)(?:[.,](\d+))?[Ee][+-](\d+)", texto)
+    if not m:
+        return False
+    escritos = len(m.group(1)) + len(m.group(2) or "")
+    try:
+        entero = int(float(texto.replace(",", ".")))
+    except (ValueError, OverflowError):
+        return False
+    # Un número corto no se rompe por esto aunque tenga ceros de más: el daño empieza cuando
+    # el resultado es largo y los dígitos que faltan son los que identifican el producto.
+    return len(str(abs(entero))) > escritos and len(str(abs(entero))) >= 8
+
+
 def _partir_por_barra(trozo):
     """La barra es el caso jodido: a veces separa dos códigos y a veces es PARTE del código.
     'W712/94' y 'WK842/2' son códigos Mann enteros, un filtro solo — partirlos ahí generaba dos

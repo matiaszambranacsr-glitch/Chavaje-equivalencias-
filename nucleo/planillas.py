@@ -404,7 +404,8 @@ def adivinar_columnas_por_datos(filas_datos, ancho):
     return hallado
 
 
-def diagnosticar_lista(filas, header_row, idx_prov, idx_oem, idx_desc, muestra=300):
+def diagnosticar_lista(filas, header_row, idx_prov, idx_oem, idx_desc, muestra=300,
+                       idx_ean=None):
     """Simula la importación sobre las primeras filas y cuenta qué va a pasar con cada una.
 
     Es la respuesta a «se carga mal y no sé por qué». Antes uno mapeaba las columnas, importaba,
@@ -417,7 +418,7 @@ def diagnosticar_lista(filas, header_row, idx_prov, idx_oem, idx_desc, muestra=3
         "total": total, "vacias": 0, "sin_codigo": 0, "codigo_basura": 0,
         "ok": 0, "con_oem": 0, "sospechosas": [], "fechas": 0, "ejemplos_fechas": [],
         "ejemplos_prov": [], "ejemplos_oem": [], "ejemplos_desc": [],
-        "columnas_desiguales": 0,
+        "columnas_desiguales": 0, "cientificos": 0, "ejemplos_cientificos": [],
     }
     if not total:
         return r
@@ -445,6 +446,16 @@ def diagnosticar_lista(filas, header_row, idx_prov, idx_oem, idx_desc, muestra=3
                 r["fechas"] += 1
                 if len(r["ejemplos_fechas"]) < 5:
                     r["ejemplos_fechas"].append(str(fila[i])[:10])
+
+        # Y el hermano silencioso de la fecha: el número largo que Excel escribió en notación
+        # científica. La fecha se nota porque no parece un código; esto parece un código
+        # perfecto. Se mira también la columna del código de barras, que es la que más sufre:
+        # trece dígitos siempre pasan el largo a partir del cual Excel cambia de formato.
+        for i in (idx_prov, idx_oem, idx_ean):
+            if i is not None and i < len(fila) and excel_le_comio_digitos(fila[i]):
+                r["cientificos"] += 1
+                if len(r["ejemplos_cientificos"]) < 5:
+                    r["ejemplos_cientificos"].append(str(fila[i])[:20])
 
         crudo_prov = celda(idx_prov, es_codigo=True)
         crudo_oem = celda(idx_oem, es_codigo=True)

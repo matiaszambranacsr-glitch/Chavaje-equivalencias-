@@ -486,6 +486,34 @@ tres veces. El interruptor está al lado del de las fotos, apagado por defecto p
 internet, y arriba dice cuántas fichas faltan y cuántos días son a ese ritmo: sin ese número,
 «automático» no dice si termina en una semana o en dos años.
 
+## Lo que Excel le come a un código largo, y por qué es peor que una fecha
+
+Ya estaba resuelto el caso de la fecha: Excel toma «12-15» por una fecha, el código se pierde, y
+la app lo detecta y frena la fila. Eso se nota porque una fecha no parece un código.
+
+Este es el mismo problema pero invisible. Excel muestra los números de más de once dígitos en
+notación científica y, al guardar un CSV, **escribe lo que muestra**: el código de barras
+`7793960026946` sale del archivo como `7.79396E+12`. Los últimos siete dígitos ya no están.
+
+Y `sanitizar()` lo reconstruía: `7793960000000`. Trece dígitos, prefijo argentino correcto,
+forma de código de barras perfecta. Se cargaba **sin una sola queja**, y desde el mostrador se
+veía como «el escáner no encuentra nada», sin ninguna pista de por qué.
+
+`excel_le_comio_digitos()` lo reconoce contando: `7.79396E+12` trae seis dígitos escritos y el
+número reconstruido tiene trece. Los otros siete los inventó la cuenta, no estaban en el
+archivo. No se arregla solo a propósito — adivinar el número sería inventar un código de barras,
+que es justo lo que se quiere evitar.
+
+La contracara importa igual o más: **`233900E010` es el filtro de combustible Toyota
+23390-0E010** y no es notación científica. Hay 283 códigos de esa forma en las listas reales.
+Lo que los separa es el signo del exponente, que Excel siempre escribe y un código de fábrica
+nunca — la misma regla que ya usaba `sanitizar()`, ahora compartida.
+
+Avisa en los dos lugares por donde entra un archivo: la vista previa de la importación (mirando
+también la columna del EAN, que es la que más sufre porque trece dígitos siempre pasan el largo
+donde Excel cambia de formato) y la carga masiva de códigos de barras. En los dos casos esas
+filas **no se cargan**, y el mensaje dice cómo exportar de nuevo.
+
 ## Cargar los códigos de barras que ya están pegados en las cajas
 
 Un negocio que ya etiquetó su mercadería tiene los números y las etiquetas puestas; lo que falta
@@ -503,8 +531,11 @@ Tres cosas que decide y conviene saber por qué:
 - **Conviene elegir la lista.** El mismo código de fábrica lo usan varios proveedores; sin
   elegir, la misma etiqueta se le pegaría a los productos de todos. Sin lista elegida, los
   códigos que aparecen en más de una se saltean y se informan.
-- **Avisa los códigos de barras repetidos en el archivo** antes de escribir nada. Es un error
-  que no se ve: escanear esa etiqueta trae dos repuestos y nadie sabe cuál es.
+- **Los códigos de barras repetidos en el archivo no se cargan.** Es un error que no se ve:
+  escanear esa etiqueta trae dos repuestos y nadie sabe cuál es. La primera versión los avisaba
+  *después* de haberlos escrito, que es dejar el problema hecho y contarlo. Y se comparan ya
+  limpios: «779-396-0026946» y «7793960026946» son el mismo número, y comparando el texto crudo
+  pasaban como dos distintos.
 - **Se puede correr dos veces sin miedo.** Probado sobre el catálogo real: la segunda pasada
   pone 0 y marca 3.002 como «ya estaban igual».
 

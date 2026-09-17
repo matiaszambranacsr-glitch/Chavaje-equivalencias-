@@ -76,6 +76,7 @@ from collections import Counter
 
 from .errores import anotar_error
 ''', ["es_fecha_disfrazada", "como_texto_en_like", "sanitizar", "LARGO_MINIMO_NUMERICO", "es_codigo_util",
+      "excel_le_comio_digitos",
       "_partir_por_barra", "dividir_codigos", "codigo_sospechoso",
       "TOPE_REPETICIONES_EN_DESCRIPCION", "codigos_confiables_de_descripciones",
       "_MARCADORES_DE_OEM", "_es_el_codigo_propio_con_texto", "_RE_REF_PEGADO",

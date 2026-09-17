@@ -2781,6 +2781,45 @@ def sanitizar(codigo):
     return re.sub(r'[^A-Z0-9]', '', codigo.upper())
 
 
+def excel_le_comio_digitos(valor):
+    """¿Excel rompió este número al guardarlo, y ya no hay forma de recuperarlo?
+
+    Es el error más caro que puede entrar por un archivo, porque NO se ve. Excel muestra los
+    números de más de once dígitos en notación científica, y cuando guarda un CSV escribe lo
+    que muestra: un código de barras 7793960026946 sale del archivo como «7.79396E+12». Los
+    últimos siete dígitos ya no están en ninguna parte.
+
+    Y lo peor no es perderlos: es que reconstruir el número da 7793960000000, que tiene trece
+    dígitos, arranca con el prefijo correcto y parece un código de barras perfecto. Se carga sin
+    una sola queja, y desde el mostrador se ve como «el escáner no encuentra nada», sin ninguna
+    pista de por qué.
+
+    Se reconoce contando: «7.79396E+12» trae seis dígitos escritos y el número reconstruido
+    tiene trece. Los otros siete los inventó la cuenta, no estaban en el archivo.
+
+    Devuelve True solo cuando se inventaron dígitos. «2.5E+3» son exactamente 2500 y no se
+    inventó nada que importe; el caso que hay que frenar es el del código largo truncado.
+
+    No se arregla solo a propósito. El número correcto no está: adivinarlo sería inventar un
+    código de barras, que es justo lo que se quiere evitar. Lo que hay que hacer es exportar de
+    nuevo con esa columna como TEXTO."""
+    texto = str(valor or "").strip()
+    # El signo del exponente es OBLIGATORIO, igual que en sanitizar() y por la misma razón:
+    # «233900E010» es el filtro de combustible Toyota 23390-0E010, no una notación científica.
+    # Sin exigir el signo, este control marcaría como rotos los 283 códigos de esa forma que
+    # hay en las listas reales.
+    m = re.fullmatch(r"(\d+)(?:[.,](\d+))?[Ee][+-](\d+)", texto)
+    if not m:
+        return False
+    escritos = len(m.group(1)) + len(m.group(2) or "")
+    try:
+        entero = int(float(texto.replace(",", ".")))
+    except (ValueError, OverflowError):
+        return False
+    # Un número corto no se rompe por esto aunque tenga ceros de más: el daño empieza cuando
+    # el resultado es largo y los dígitos que faltan son los que identifican el producto.
+    return len(str(abs(entero))) > escritos and len(str(abs(entero))) >= 8
+
 
 # Cuántas filas de la MISMA lista puede aparecer un código sacado de la descripción antes de
 # que se lo considere texto y no código. Medido sobre dos listas reales (5.063 y 25.875 filas):
@@ -3582,17 +3621,32 @@ def cargar_codigos_de_barras_masivo(pares, marca_id=None, pisar=True):
     Devuelve un resumen con lo que pasó con cada fila, que es lo que hay que poder mirar antes
     de darlo por bueno."""
     resumen = {"puestos": 0, "sin_producto": [], "ya_tenian": [], "repetidos": [],
-               "sin_cambio": 0, "ambiguos": []}
+               "sin_cambio": 0, "ambiguos": [], "rotos_por_excel": []}
     if not pares:
         return resumen
 
+    # PRIMERO lo que Excel rompió. Si el archivo trae la columna en notación científica, los
+    # dígitos ya no están y reconstruirlos da un código plausible y equivocado. Frenar es lo
+    # único correcto: ver excel_le_comio_digitos().
+    rotos = {codigo for codigo, barras in pares if excel_le_comio_digitos(barras)}
+    resumen["rotos_por_excel"] = [{"Código": codigo, "Vino como": barras}
+                                  for codigo, barras in pares
+                                  if excel_le_comio_digitos(barras)][:200]
+
     # Un mismo código de barras para dos productos distintos es un error de la planilla, y es
     # de los que no se ven: escanear esa etiqueta va a traer dos repuestos y nadie va a saber
-    # cuál es. Se avisa antes de escribir nada.
+    # cuál es. No se escriben: avisar después de haberlos puesto sería dejar el problema hecho.
+    # Se comparan YA LIMPIOS: «779-396-0026946» y «7793960026946» son el mismo número, y
+    # comparando el texto crudo pasarían como dos distintos.
+    # Los que rompió Excel quedan afuera de esta cuenta: todos se reconstruyen al mismo número
+    # y saldrían listados también como repetidos, que es dar dos diagnósticos del mismo
+    # problema. El repetido de verdad es el que hay que poder ver.
     vistos = {}
     for codigo, barras in pares:
-        if barras:
-            vistos.setdefault(barras, []).append(codigo)
+        limpio_b = sanitizar(barras)
+        if limpio_b and codigo not in rotos:
+            vistos.setdefault(limpio_b, []).append(codigo)
+    duplicados = {b for b, cs in vistos.items() if len(cs) > 1}
     resumen["repetidos"] = [{"Código de barras": b, "Se lo pusiste a": ", ".join(cs[:6])}
                             for b, cs in vistos.items() if len(cs) > 1]
 
@@ -3601,6 +3655,8 @@ def cargar_codigos_de_barras_masivo(pares, marca_id=None, pisar=True):
             limpio = sanitizar(codigo)
             barras_limpio = sanitizar(barras)
             if not limpio or not barras_limpio:
+                continue
+            if codigo in rotos or barras_limpio in duplicados:
                 continue
             if marca_id:
                 c.execute("SELECT id, codigo_barras FROM productos "
@@ -6337,7 +6393,8 @@ def adivinar_columnas(encabezado):
     return hallado
 
 
-def diagnosticar_lista(filas, header_row, idx_prov, idx_oem, idx_desc, muestra=300):
+def diagnosticar_lista(filas, header_row, idx_prov, idx_oem, idx_desc, muestra=300,
+                       idx_ean=None):
     """Simula la importación sobre las primeras filas y cuenta qué va a pasar con cada una.
 
     Es la respuesta a «se carga mal y no sé por qué». Antes uno mapeaba las columnas, importaba,
@@ -6350,7 +6407,7 @@ def diagnosticar_lista(filas, header_row, idx_prov, idx_oem, idx_desc, muestra=3
         "total": total, "vacias": 0, "sin_codigo": 0, "codigo_basura": 0,
         "ok": 0, "con_oem": 0, "sospechosas": [], "fechas": 0, "ejemplos_fechas": [],
         "ejemplos_prov": [], "ejemplos_oem": [], "ejemplos_desc": [],
-        "columnas_desiguales": 0,
+        "columnas_desiguales": 0, "cientificos": 0, "ejemplos_cientificos": [],
     }
     if not total:
         return r
@@ -6378,6 +6435,16 @@ def diagnosticar_lista(filas, header_row, idx_prov, idx_oem, idx_desc, muestra=3
                 r["fechas"] += 1
                 if len(r["ejemplos_fechas"]) < 5:
                     r["ejemplos_fechas"].append(str(fila[i])[:10])
+
+        # Y el hermano silencioso de la fecha: el número largo que Excel escribió en notación
+        # científica. La fecha se nota porque no parece un código; esto parece un código
+        # perfecto. Se mira también la columna del código de barras, que es la que más sufre:
+        # trece dígitos siempre pasan el largo a partir del cual Excel cambia de formato.
+        for i in (idx_prov, idx_oem, idx_ean):
+            if i is not None and i < len(fila) and excel_le_comio_digitos(fila[i]):
+                r["cientificos"] += 1
+                if len(r["ejemplos_cientificos"]) < 5:
+                    r["ejemplos_cientificos"].append(str(fila[i])[:20])
 
         crudo_prov = celda(idx_prov, es_codigo=True)
         crudo_oem = celda(idx_oem, es_codigo=True)
@@ -20246,7 +20313,8 @@ if pagina == PAGINAS[2]:
                 # de cada columna con valores reales del archivo, y cuántas filas se van a
                 # perder y por qué motivo. Todo esto antes se descubría después de importar.
                 st.markdown("**🔎 Qué está entendiendo la app de tu lista**")
-                diag = diagnosticar_lista(todas_filas, header_row, idx_prov, idx_oem, idx_desc)
+                diag = diagnosticar_lista(todas_filas, header_row, idx_prov, idx_oem, idx_desc,
+                                           idx_ean=idx_ean)
 
                 if diag["total"] == 0:
                     st.error(
@@ -20395,6 +20463,24 @@ if pagina == PAGINAS[2]:
                                 "elegí esa. Si no la trae, dejá la columna en «— ninguna —» y "
                                 "activá «buscar el código de fábrica dentro de la descripción»."
                             )
+
+                    if diag["cientificos"]:
+                        st.error(
+                            f"🛑 **{diag['cientificos']} código(s) llegaron con los dígitos "
+                            f"comidos** (por ejemplo: "
+                            f"{', '.join(diag['ejemplos_cientificos'][:3])}). Excel muestra los "
+                            "números de más de once dígitos en notación científica y, al "
+                            "guardar, escribe lo que muestra: de `7793960026946` queda "
+                            "`7.79396E+12` y los últimos siete dígitos ya no están en el "
+                            "archivo.\n\n"
+                            "**Es peor que una fecha mal leída**, porque no se nota: "
+                            "reconstruirlo da `7793960000000`, que tiene trece dígitos y parece "
+                            "un código de barras perfecto. Se cargaría sin una queja y después "
+                            "el escáner no encontraría nada, sin ninguna pista de por qué.\n\n"
+                            "**Cómo arreglarlo:** volvé a exportar con esa columna en formato "
+                            "**Texto**, o pedí el archivo en .csv y **no lo abras con Excel** "
+                            "antes de subirlo — abrirlo y guardarlo es lo que los rompe."
+                        )
 
                     if diag["fechas"]:
                         st.error(
@@ -23215,7 +23301,24 @@ if pagina == PAGINAS[3]:
                             _c2 = valor_codigo(_f[_i_bar])
                             if _c1 and _c2:
                                 _pares_b.append((_c1, _c2))
-                    st.caption(f"{len(_pares_b):,} fila(s) con los dos datos.")
+                    _rotos_prev = [(a, b) for a, b in _pares_b if excel_le_comio_digitos(b)]
+                    if _rotos_prev:
+                        st.error(
+                            f"🛑 **Excel se comió los dígitos de {len(_rotos_prev):,} código(s) "
+                            f"de barras.** Vienen escritos como `{_rotos_prev[0][1]}` y el "
+                            "número entero ya no está en el archivo: no hay forma de "
+                            "recuperarlo desde acá, y reconstruirlo daría un código que parece "
+                            "válido y está mal.\n\n"
+                            "**Cómo se arregla:** volvé a exportar el archivo con esa columna "
+                            "como **texto**. En Excel: seleccionás la columna → clic derecho → "
+                            "Formato de celdas → Texto, y recién ahí guardás. Si el archivo "
+                            "salió de otro sistema, bajalo como CSV y **no lo abras con Excel** "
+                            "antes de subirlo — abrirlo y guardarlo es lo que los rompe.\n\n"
+                            "Esas filas no se van a cargar. El resto sí."
+                        )
+                    st.caption(f"{len(_pares_b):,} fila(s) con los dos datos"
+                                + (f", {len(_pares_b) - len(_rotos_prev):,} cargables."
+                                   if _rotos_prev else "."))
                     if _pares_b:
                         st.dataframe([{"Código": a, "Código de barras": b,
                                         "¿Cierra la cuenta?":
@@ -23238,13 +23341,21 @@ if pagina == PAGINAS[3]:
                             st.rerun()
             _res_b = st.session_state.get("bm_resultado")
             if _res_b:
+                if _res_b.get("rotos_por_excel"):
+                    st.error(
+                        f"🛑 {len(_res_b['rotos_por_excel'])} código(s) NO se cargaron porque "
+                        "Excel se comió sus dígitos al guardar el archivo. Volvé a exportar esa "
+                        "columna como texto.")
+                    st.dataframe(_res_b["rotos_por_excel"][:50], width="stretch",
+                                  hide_index=True)
                 # Lo que NO entró es lo que hay que mirar, así que va desplegado y con el
                 # archivo para bajar: son las etiquetas que quedaron sin producto.
                 if _res_b["repetidos"]:
                     st.error(
                         f"⚠️ **{len(_res_b['repetidos'])} código(s) de barras repetidos** en el "
                         "archivo: el mismo número en más de un producto. Escanear esa etiqueta "
-                        "va a traer varios repuestos y no hay forma de saber cuál es.")
+                        "va a traer varios repuestos y no hay forma de saber cuál es. **No se "
+                        "cargaron**: corregilos en el archivo y volvé a subirlo.")
                     st.dataframe(_res_b["repetidos"][:50], width="stretch", hide_index=True)
                 if _res_b["ambiguos"]:
                     st.warning(

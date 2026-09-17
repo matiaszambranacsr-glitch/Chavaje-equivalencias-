@@ -691,6 +691,44 @@ def probar_busqueda_por_codigo_de_barras():
     con.close()
 
 
+def probar_lo_que_excel_le_come_a_un_codigo_largo():
+    """Excel rompe los números largos al guardar, y el resultado parece correcto.
+
+    Es el error más caro que puede entrar por un archivo porque no se ve. Excel muestra los
+    números de más de once dígitos en notación científica y, al guardar un CSV, escribe lo que
+    muestra: el código de barras 7793960026946 sale del archivo como «7.79396E+12». Los últimos
+    siete dígitos ya no están.
+
+    Y reconstruirlo da 7793960000000 — trece dígitos, el prefijo argentino correcto, forma de
+    código de barras perfecta. Se cargaba sin una queja y desde el mostrador se veía como «el
+    escáner no encuentra nada», sin ninguna pista de por qué.
+
+    La contracara importa igual o más: «233900E010» es el filtro de combustible Toyota
+    23390-0E010 y NO es notación científica. Hay 283 códigos de esa forma en las listas reales,
+    y marcarlos como rotos sería romper lo que hoy anda. Lo que los separa es el signo del
+    exponente, que Excel siempre escribe y un código de fábrica nunca."""
+    cierto(codigos.excel_le_comio_digitos("7.79396E+12"),
+           "un código de barras truncado por Excel tiene que detectarse")
+    cierto(codigos.excel_le_comio_digitos("7,79396E+12"),
+           "y también con la coma decimal que usa el Excel en español")
+    cierto(codigos.excel_le_comio_digitos("1.09E+11"), "lo mismo con un código de fábrica largo")
+
+    cierto(not codigos.excel_le_comio_digitos("233900E010"),
+           "«233900E010» es el Toyota 23390-0E010, no una notación científica: sin signo en el "
+           "exponente no hay nada roto")
+    cierto(not codigos.excel_le_comio_digitos("7793960026946"),
+           "un código de barras entero no está roto")
+    cierto(not codigos.excel_le_comio_digitos("2.5E+3"),
+           "2.5E+3 son exactamente 2500: no se inventó ningún dígito que importe")
+    cierto(not codigos.excel_le_comio_digitos("IWP065"), "un código común no es notación científica")
+    cierto(not codigos.excel_le_comio_digitos(""), "y con la celda vacía no hay nada que decidir")
+
+    # Y esto es lo que hace el daño: el número roto se limpia a algo que PARECE perfecto.
+    igual(codigos.sanitizar("7.79396E+12"), "7793960000000",
+          "reconstruido da trece dígitos con el prefijo correcto — por eso hay que frenarlo "
+          "antes, no después")
+
+
 def probar_el_digito_verificador_del_codigo_de_barras():
     """El dígito verificador separa un código de barras de un número largo cualquiera.
 
@@ -1018,6 +1056,7 @@ def main():
                    probar_la_patente_argentina,
                    probar_el_pais_del_codigo_de_barras,
                    probar_el_digito_verificador_del_codigo_de_barras,
+                   probar_lo_que_excel_le_come_a_un_codigo_largo,
                    probar_bed_ford_no_es_ford,
                    probar_la_marca_abreviada_es_la_misma_marca,
                    probar_ref_orig_pegado_no_es_codigo,
