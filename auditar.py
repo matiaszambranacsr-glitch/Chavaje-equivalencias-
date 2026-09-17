@@ -1563,6 +1563,67 @@ for _n in ast.walk(ARBOL):
                  "TODA la búsqueda por texto en tiempo de ejecución")
 
 
+# ============ 28) pickle.loads suelto es ejecución de código, no lectura de datos ============
+# pickle no es un formato de datos: es una receta de construcción. Al leerlo puede fabricar
+# cualquier objeto de cualquier módulo instalado, os.system incluido. Está comprobado en esta
+# misma base: un blob armado a mano ejecuta lo que quiera apenas alguien lo lee.
+# En esta app los únicos pickles son las firmas visuales, y viven adentro de la base — que se
+# reemplaza entera desde Estadísticas → Restaurar backup con un .db que sube una persona. O
+# sea que el contenido puede venir de afuera. Se leen con leer_firma_visual(), que solo sabe
+# armar arrays de numpy. Si alguien vuelve a poner un pickle.loads pelado, vuelve el agujero.
+for _n in ast.walk(ARBOL):
+    if not (isinstance(_n, ast.Call) and isinstance(_n.func, ast.Attribute)
+            and _n.func.attr in ("loads", "load")):
+        continue
+    _duenio = _n.func.value
+    if not (isinstance(_duenio, ast.Name) and "pickle" in _duenio.id.lower()):
+        continue
+    reportar("ERROR", _n.lineno,
+             f"pickle.{_n.func.attr}() suelto. pickle no lee datos: construye objetos, y con un "
+             "blob preparado a mano eso es ejecutar código en el servidor. Las firmas visuales "
+             "salen de la base, y la base se reemplaza con un archivo que sube el usuario. "
+             "Usá leer_firma_visual(), que solo acepta arrays de numpy")
+
+
+# ============ 29) El texto de la base no entra crudo en un markdown con HTML prendido ============
+# Los proveedores usan «<» para decir «hasta tal año» («Master 98<»), y cuando lo que sigue es
+# una letra —«1997<REF ORIG VW...»— el navegador lee el principio de una etiqueta y se traga
+# todo hasta el próximo «>». Medido en la base real: 1.435 productos y 265.805 caracteres que
+# desaparecían de la pantalla, justo la parte que dice a qué autos entra la pieza.
+# Los campos de acá abajo son texto que vino de un Excel ajeno. Entre acentos graves no hace
+# falta (markdown los escribe literales); en negrita o sueltos, sí.
+_CAMPOS_DE_LA_BASE = ("descripcion", "marca", "motivo", "titulo_producto", "observaciones")
+for _n in ast.walk(ARBOL):
+    if not isinstance(_n, ast.Call):
+        continue
+    if not any(isinstance(k, ast.keyword) and k.arg == "unsafe_allow_html"
+               and isinstance(k.value, ast.Constant) and k.value.value is True
+               for k in _n.keywords):
+        continue
+    for _j in ast.walk(_n):
+        if not isinstance(_j, ast.JoinedStr):
+            continue
+        _trozos = [LINEAS[_v.lineno - 1] for _v in _j.values
+                   if isinstance(_v, ast.FormattedValue) and _v.lineno <= len(LINEAS)]
+        for _v in _j.values:
+            if not isinstance(_v, ast.FormattedValue):
+                continue
+            _txt = ast.unparse(_v.value)
+            if "texto_para_html" in _txt:
+                continue
+            if not any(f"'{cmp}'" in _txt or f'"{cmp}"' in _txt for cmp in _CAMPOS_DE_LA_BASE):
+                continue
+            # Entre acentos graves markdown ya lo escribe literal.
+            _linea = LINEAS[_v.lineno - 1] if _v.lineno <= len(LINEAS) else ""
+            _pos = _linea.find("{" + _txt)
+            if _pos > 0 and _linea[_pos - 1] == "`":
+                continue
+            reportar("ERROR", _v.lineno,
+                     f"'{_txt}' es texto de la base y entra crudo en un markdown con HTML "
+                     "prendido. Un «<» seguido de letra —«1997<REF ORIG VW...»— se come el "
+                     "resto de la descripción en pantalla. Envolvelo en texto_para_html()")
+
+
 # ============ Resultado ============
 orden = {"ERROR": 0, "REVISAR": 1, "AVISO": 2}
 problemas.sort(key=lambda x: (orden[x[0]], x[1]))

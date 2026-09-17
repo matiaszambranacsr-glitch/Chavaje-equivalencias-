@@ -87,6 +87,7 @@ import streamlit as st
 import sqlite3
 import re
 import io
+import html          # para escapar el texto de la base antes de meterlo en HTML
 import threading
 import unicodedata
 import json
@@ -14900,6 +14901,27 @@ def seccion_plegable(titulo, key, abierto=False):
     return st.toggle(titulo, key=key, value=abierto)
 
 
+def texto_para_html(valor):
+    """Deja un texto de la base listo para meter adentro de un st.markdown con HTML prendido.
+
+    Hace falta de verdad, no es precaución teórica. Los proveedores usan el signo «<» para
+    decir «hasta tal año»: «Master 98<», «Clio 2 2000<». Y cuando lo que sigue al «<» es una
+    letra —«...Dakota 2 5 8v 3 9 1997<REF ORIG VW 377919058D»— el navegador no lee «menor
+    que»: lee el principio de una etiqueta HTML, y se traga todo hasta encontrar un «>». Como
+    no hay ninguno, se come el resto de la descripción. En la base de hoy son 1.435 productos
+    y 265.805 caracteres que desaparecían de la pantalla de auditoría: justamente la parte que
+    dice a qué autos entra la pieza, que es para lo que uno la mira.
+
+    Y de paso cierra la otra puerta: una descripción importada de un Excel ajeno que traiga
+    «<script>» se dibujaba como código de verdad, porque estas pantallas necesitan
+    unsafe_allow_html para las etiquetas <small> del renglón.
+
+    No va en los códigos: esos se muestran entre acentos graves, y adentro de un bloque de
+    código markdown ya los escribe literales. Escapándolos se vería «Tow&amp;Country-300M» en
+    vez de «Tow&Country-300M», que es un código real de la base."""
+    return html.escape(str(valor if valor is not None else ""))
+
+
 def explicar(resumen, detalle, abierto=False, en_expander=False):
     """Una línea corta siempre visible, y el porqué largo a un toque de distancia.
 
@@ -16619,11 +16641,49 @@ def calcular_firma_visual(imagen_bytes, es_consulta=False):
         return None, "error"
 
 
+# Lo único que puede aparecer adentro de una firma visual: números de numpy y nada más.
+# Importa que sea una lista cerrada. pickle no es un formato de datos: es una receta de
+# construcción, y al leerlo puede fabricar CUALQUIER objeto de CUALQUIER módulo instalado,
+# incluido os.system. Las firmas viven en la base, y la base entera se reemplaza desde
+# Estadísticas → Restaurar backup con un archivo .db que sube una persona. O sea que el
+# contenido de firma_blob no siempre lo escribió esta app: puede venir de un archivo de
+# afuera. Con pickle.loads pelado, un .db preparado a mano ejecuta lo que quiera en el
+# servidor apenas alguien entra a buscar por foto. Con esta lista, un blob así no llega a
+# construirse: se corta en find_class y la foto queda marcada como ilegible, que es
+# exactamente lo que ya pasaba con una firma corrupta.
+FIRMAS_CLASES_PERMITIDAS = {
+    ("numpy", "ndarray"),
+    ("numpy", "dtype"),
+    ("numpy", "float32"), ("numpy", "float64"),
+    ("numpy", "uint8"), ("numpy", "int32"), ("numpy", "int64"),
+    # numpy 2 renombró el módulo interno de "numpy.core" a "numpy._core". Van los dos porque
+    # las firmas guardadas con la versión vieja se siguen leyendo con la nueva.
+    ("numpy.core.multiarray", "_reconstruct"), ("numpy.core.multiarray", "scalar"),
+    ("numpy._core.multiarray", "_reconstruct"), ("numpy._core.multiarray", "scalar"),
+}
+
+
+class _LectorDeFirmas(pickle.Unpickler):
+    """Un lector de pickle que solo sabe armar arrays de numpy."""
+
+    def find_class(self, modulo, nombre):
+        if (modulo, nombre) in FIRMAS_CLASES_PERMITIDAS:
+            return super().find_class(modulo, nombre)
+        raise pickle.UnpicklingError(
+            f"Una firma visual no puede contener {modulo}.{nombre}"
+        )
+
+
+def leer_firma_visual(blob):
+    """pickle.loads, pero solo para lo que una firma visual puede tener adentro."""
+    return _LectorDeFirmas(io.BytesIO(blob)).load()
+
+
 def _cargar_firma(blob):
     """Lee una firma guardada. Acepta las viejas (que eran solo los descriptores sueltos) para
     no tener que rehacer todo el catálogo de golpe."""
     try:
-        dato = pickle.loads(blob)
+        dato = leer_firma_visual(blob)
     except Exception as _err:
         anotar_error("_cargar_firma", _err)
         return None
@@ -16855,8 +16915,7 @@ def buscar_por_similitud_visual(imagen_bytes, top_n=8, minimo=8.0, progreso=None
         return None, ("Esa foto no tiene nada de qué agarrarse para comparar: está muy borrosa, muy "
                       "oscura, o la pieza se confunde con el fondo. Probá de nuevo apoyándola sobre "
                       "un fondo liso de otro color, con buena luz y sin que salga movida.")
-    import pickle as _pickle
-    firma_consulta = _pickle.loads(firma_consulta)
+    firma_consulta = leer_firma_visual(firma_consulta)
 
     c.execute("SELECT COUNT(*) FROM producto_fotos WHERE firma_blob IS NOT NULL")
     total_fotos = c.fetchone()[0]
@@ -24711,7 +24770,8 @@ Administrar → Mantenimiento.
                 )
                 for cm in resultado_aud["codigos_malos"][:25]:
                     cc1, cc2 = st.columns([3, 1])
-                    cc1.markdown(f"**{cm['marca']}** · `{cm['codigo']}` — {cm['motivo']}  \n"
+                    cc1.markdown(f"**{texto_para_html(cm['marca'])}** · `{cm['codigo']}` "
+                                  f"— {texto_para_html(cm['motivo'])}  \n"
                                   f"<small>{cm['vinculos']} vínculo(s)</small>", unsafe_allow_html=True)
                     cc2.button("✂️ Cortar sus vínculos", key=f"cortar_malo_{cm['id']}",
                                 on_click=cb_auditoria_cortar_todos, args=(cm["id"],))
@@ -24732,9 +24792,9 @@ Administrar → Mantenimiento.
                 # Sin desplegables: Streamlit los cierra en cada refresco, y como cada botón
                 # provoca uno, se cerraba la ventana justo cuando estabas revisando.
                 for p in resultado_aud["productos_sospechosos"][:15]:
-                    desc = p["descripcion"] or "_(sin descripción)_"
+                    desc = texto_para_html(p["descripcion"]) or "_(sin descripción)_"
                     ps1, ps2 = st.columns([3, 1])
-                    ps1.markdown(f"**{p['marca']}** · `{p['codigo']}` — {desc}  \n"
+                    ps1.markdown(f"**{texto_para_html(p['marca'])}** · `{p['codigo']}` — {desc}  \n"
                                   f"<small>vinculado a {p['cantidad']} códigos distintos</small>",
                                   unsafe_allow_html=True)
                     ps2.button(f"✂️ Cortar {p['cantidad']}",
@@ -24770,7 +24830,7 @@ Administrar → Mantenimiento.
                     if g["descripcion_oem"]:
                         st.caption(g["descripcion_oem"])
                     for p in g["productos"]:
-                        desc = p["descripcion"] or "⚠️ _(sin descripción — sospechoso)_"
+                        desc = texto_para_html(p["descripcion"]) or "⚠️ _(sin descripción — sospechoso)_"
                         marca_ok = " · ya revisado" if p["revisado_ok"] else ""
                         cg1, cg2, cg3 = st.columns([3, 1, 1])
                         cg1.markdown(f"**`{p['codigo']}`** — {desc}  \n"

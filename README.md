@@ -1642,6 +1642,84 @@ El corte es por proveedor (`GROUP BY po.id, mp.id`) y no por total: un código d
 legítimo aparece en varias listas a la vez —es justo para eso que sirve— y contando todo junto
 ese sería el primero de la lista.
 
+## El «<» de «Master 98<» se comía la mitad de la descripción
+
+Salió de la segunda tanda de la revisión externa, que lo marcaba como un agujero de seguridad.
+Lo es, pero lo que se encontró midiendo contra la base del negocio es peor y más cotidiano: un
+bug de pantalla que estaba pasando **hoy, en 1.435 productos**.
+
+Los proveedores usan el signo `<` para decir «hasta tal año». Así vienen las descripciones de
+FISPA:
+
+    INTERRUPTOR DE STOP 31028 MITSUBISHI Colt III RENAULT Clio 2 - Kangoo -
+    Laguna 01< - Master 98< - Megane 00-03 - Todos Cuadripolar RENAULT
+    Trafic 00< - Twingo 96<REF ORIG RENAULT - 93852863 - NISSAN 4404452 ...
+
+Mirá el final: `96<REF`. Cuando lo que sigue al `<` es una letra, el navegador no lee «menor
+que»: lee el principio de una etiqueta HTML y se traga todo hasta encontrar un `>`. Como no hay
+ninguno, **se come el resto del renglón**. En la pantalla de auditoría —donde uno mira
+justamente para decidir si una equivalencia está bien— la descripción terminaba en «Twingo 96»
+y desaparecían los códigos originales de Renault, Nissan y Mitsubishi.
+
+Medido sobre los 70.888 productos: **1.435 descripciones afectadas, 265.805 caracteres que no
+llegaban a la pantalla**. Después del arreglo, cero.
+
+Pasaba solo en las tres listas que usan `unsafe_allow_html=True`, que lo necesitan para el
+`<small>` del segundo renglón. Ahora el texto que sale de la base pasa por `texto_para_html()`
+antes de entrar ahí. De paso cierra la puerta que marcaba la revisión: una descripción importada
+de un Excel ajeno que traiga `<script>` se dibujaba como código de verdad.
+
+**Los códigos no se escapan** y es a propósito: van entre acentos graves, y adentro de un bloque
+de código markdown ya se escriben literales. Escapándolos se vería `Tow&amp;Country-300M` en vez
+de `Tow&Country-300M`, que es un código real de la base.
+
+## Una firma de foto podía ser un programa
+
+Las firmas visuales de las fotos se guardan con `pickle`, y `pickle` **no es un formato de
+datos: es una receta de construcción**. Al leerlo puede fabricar cualquier objeto de cualquier
+módulo instalado, `os.system` incluido.
+
+Por sí solo eso no sería un problema —las escribe la propia app— salvo por una puerta que
+existe y se usa: **📊 Estadísticas → ♻️ Restaurar backup reemplaza la base entera con un `.db`
+que sube una persona**. O sea que el contenido de `firma_blob` no siempre lo escribió esta app.
+Con un archivo preparado a mano, el código de adentro corre en el servidor apenas alguien entra
+a buscar por foto.
+
+Está comprobado, no deducido: con `pickle.loads` pelado el «exploit» de prueba creó su archivo;
+con el lector nuevo no se creó nada y saltó `UnpicklingError: Una firma visual no puede contener
+posix.system`.
+
+`leer_firma_visual()` solo sabe armar arrays de numpy (la lista está en
+`FIRMAS_CLASES_PERMITIDAS`, con los dos nombres del módulo interno porque numpy 2 lo renombró de
+`numpy.core` a `numpy._core` y las firmas viejas se siguen leyendo). Un blob raro ya no llega a
+construirse: se corta y la foto queda marcada como ilegible, que es lo mismo que ya pasaba con
+una firma corrupta. Probado con el formato nuevo, con el viejo (el array de descriptores pelado)
+y con el payload malicioso.
+
+El auditor tiene ahora dos chequeos más —el 28 y el 29— para que ninguno de los dos arreglos se
+pueda deshacer sin que salte. Los dos se verificaron rompiendo el código a propósito.
+
+### Lo que esa revisión marcaba y acá no aplica
+
+Otra vez, para no volver a discutirlo — cada uno se fue a mirar contra el código y contra la
+base real:
+
+- **`VACUUM` después de borrar.** `PRAGMA freelist_count` sobre la base del negocio da **0**:
+  9.159 páginas ocupadas, ninguna desperdiciada. No hay nada que compactar. El único `VACUUM`
+  que hace falta ya está, en `generar_backup_sin_fotos()`, para que el archivo pese menos.
+- **Path traversal con el nombre del archivo subido.** El nombre de un archivo subido se guarda
+  como texto en la base y nunca se usa para armar una ruta. El único `os.path.join` con variable
+  de toda la app arma `backup_sin_fotos.db` en el directorio temporal.
+- **Inyección SQL.** Hay 43 consultas armadas con f-string. Ninguna mete texto del usuario: son
+  marcadores `?` repetidos (`en_tandas()`), listas de columnas fijas, o nombres de tabla que
+  vienen de tuplas escritas en el código. Los nombres de columna de `restaurar_papelera()` salen
+  del JSON que escribió la propia app con `dict(row)` de una tabla real.
+- **`st.exception` mostrando el rastro del error al usuario.** No se usa en ninguna parte.
+- **`maxUploadSize`.** No hay `.streamlit/config.toml`, así que rige el límite por defecto de
+  Streamlit: 200 MB. La base entera con fotos pesa hoy 37,5 MB, y el backup que se sube al
+  repositorio va sin fotos justamente para que entre en GitHub. Queda anotado por si algún día
+  la base pasa los 200 MB; hoy no hay nada que arreglar.
+
 ## Quién puede hacer qué
 
 La app **deja entrar sin contraseña a propósito**: el botón «Continuar» del login te mete
