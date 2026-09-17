@@ -332,6 +332,11 @@ SEMILLA_WMI_VERSION = "3"
 # vuelva a aplicar una vez, con INSERT OR IGNORE, así quien ya tiene la app recibe los códigos
 # nuevos sin perder los que cargó o corrigió a mano.
 SEMILLA_DTC_VERSION = "3"
+# Y lo mismo para la columna `busqueda`: subir este número hace que se vuelva a calcular una vez
+# sobre todos los productos ya cargados. Hace falta cada vez que cambie _sql_sin_acentos(), si
+# no las filas viejas se quedan con la normalización anterior y dejan de encontrarse por lo
+# nuevo, sin ningún error a la vista.
+VERSION_NORMALIZACION = "2"
 
 
 def secretos_app():
@@ -729,15 +734,65 @@ def en_tandas(valores, usos_por_consulta=1, tope=TOPE_VARIABLES_POR_CONSULTA):
         yield tanda, ",".join("?" * len(tanda))
 
 
+# CUIDADO AL AGREGAR LETRAS ACÁ: hay un techo y es duro. Cada par es un REPLACE() anidado
+# adentro del anterior, y SQLite tiene un límite de anidamiento — medido en 3.45: **rompe a los
+# 31** con «parser stack overflow». Y no son 31 libres: la consulta que envuelve la expresión
+# gasta del mismo presupuesto, así que una expresión que anda suelta puede reventar adentro de
+# un SELECT más grande. Está probado: con 28 pares anda sola y falla dentro de un COUNT().
+# Por eso el tope propio es 20, con diez de margen, y auditar.py lo controla: pasarse rompe la
+# búsqueda entera de la app en tiempo de ejecución, que es la peor forma de enterarse.
+MAXIMO_REEMPLAZOS_SIN_ACENTOS = 20
+
+# Las letras van elegidas por lo que aparece DE VERDAD en las listas cargadas, no por
+# completitud: sobre el catálogo real había 80 productos con una letra que el SQL no
+# normalizaba y Python sí —«SENSOR RPM cigüeñal», «CITROËN», «Conexão», «PÒINTER»—, y esos 80
+# no se encontraban buscando CIGUENAL o CITROEN. Con estas cuatro se cubren 73.
+_REEMPLAZOS_SIN_ACENTOS = [
+    ("á", "A"), ("Á", "A"), ("é", "E"), ("É", "E"), ("í", "I"), ("Í", "I"),
+    ("ó", "O"), ("Ó", "O"), ("ú", "U"), ("Ú", "U"), ("ñ", "N"), ("Ñ", "N"),
+    ("ü", "U"), ("Ü", "U"),        # cigüeñal, el más caro de los que faltaban
+    ("ê", "E"), ("Ê", "E"),        # listas brasileñas
+    ("ë", "E"), ("Ë", "E"),        # CITROËN
+    ("â", "A"), ("Â", "A"),        # Ângulo, en las listas brasileñas
+]
+
+
 def _sql_sin_acentos(columna):
     """Arma una expresión SQL que le saca los acentos a una columna (funciona con mayúscula
-    y minúscula, porque SQLite no toca letras acentuadas al hacer UPPER())."""
-    reemplazos = [("á", "A"), ("Á", "A"), ("é", "E"), ("É", "E"), ("í", "I"), ("Í", "I"),
-                  ("ó", "O"), ("Ó", "O"), ("ú", "U"), ("Ú", "U"), ("ñ", "N"), ("Ñ", "N")]
+    y minúscula, porque SQLite no toca letras acentuadas al hacer UPPER()).
+
+    Tiene que decir lo mismo que normalizar_texto() del lado de Python. Cuando no coinciden, el
+    que busca escribe una cosa, la columna guardó otra, y el producto no aparece."""
     expr = f"UPPER({columna})"
-    for viejo, nuevo in reemplazos:
+    for viejo, nuevo in _REEMPLAZOS_SIN_ACENTOS:
         expr = f"REPLACE({expr},'{viejo}','{nuevo}')"
     return expr
+
+
+def like_en_descripcion(patron, alias="p"):
+    """Buscar un texto DENTRO de la descripción, rápido. Devuelve (condición, parámetros).
+
+    Sacarle los acentos a la descripción en la consulta cuesta doce REPLACE() anidados POR
+    FILA. Sobre el catálogo real son 170 ms cada vez, y hay pantallas que lo hacen cuatro o
+    cinco veces seguidas: de ahí salían los 215 ms que tardaba en contestar un código de falla.
+
+    La columna `productos.busqueda` ya tiene el texto normalizado y la mantienen los triggers,
+    pero NO sirve sola: además de la descripción trae el código y el código de barras, así que
+    buscar «FIAT» ahí también engancha un código que lo tenga adentro. Usarla de reemplazo
+    cambiaría lo que la consulta significa.
+
+    Por eso va de PREFILTRO y la condición exacta queda como confirmación: la columna barata
+    descarta el 99% de las filas y los REPLACE corren solo sobre las pocas que pasaron. Medido
+    sobre las 70.888 del catálogo real, con siete búsquedas distintas: 1.184 ms → 150 ms, y
+    devuelve exactamente las mismas filas (se comparó fila por fila, no solo el total).
+
+    El `IS NULL` del prefiltro no debería hacer falta —hay un relleno de una sola vez en
+    crear_esquema() y triggers que la mantienen— pero sin él, una fila con la columna vacía
+    desaparecería de los resultados sin ningún error a la vista, que es la peor forma de
+    equivocarse."""
+    condicion = (f"({alias}.busqueda IS NULL OR {alias}.busqueda LIKE ?) "
+                 f"AND {_sql_sin_acentos(alias + '.descripcion')} LIKE ?")
+    return condicion, [patron, patron]
 
 
 def _restaurar_desde_semilla(conexion):
@@ -970,14 +1025,14 @@ def _esquema_mostrador(c):
                  AFTER UPDATE OF descripcion, codigo_raw, codigo_barras ON productos BEGIN
                    UPDATE productos SET busqueda = """ + _expr_busqueda + """ WHERE id = NEW.id;
                  END""")
-    # Los productos que ya estaban cargados antes de esta columna. Se hace de una sola vez y
-    # queda: son 400 ms cada 44.000 productos, una vez en la vida de la base.
+    # Los productos que ya estaban cargados antes de que existiera esta columna.
+    # OJO: acá va SOLO el caso «nunca se calculó». Volver a calcularla porque cambió la
+    # normalización se hace en _datos_precargados_y_migraciones(), que corre al final: esto
+    # pasa antes de que exista la tabla de configuración, y sin ella no hay dónde anotar que
+    # ya se hizo, así que se repetiría en cada arranque.
     c.execute("SELECT COUNT(*) FROM productos WHERE busqueda IS NULL")
     if c.fetchone()[0]:
-        c.execute("UPDATE productos SET busqueda = "
-                  + _sql_sin_acentos("COALESCE(descripcion,'') || ' ' || COALESCE(codigo_raw,'')"
-                                      " || ' ' || COALESCE(codigo_barras,'')")
-                  + " WHERE busqueda IS NULL")
+        c.execute("UPDATE productos SET busqueda = " + _expr_busqueda + " WHERE busqueda IS NULL")
 
 
 def _esquema_fotos(c):
@@ -1904,6 +1959,21 @@ def _datos_precargados_y_migraciones(c):
         )
         c.execute("INSERT INTO configuracion (clave, valor) VALUES ('semilla_dtc_version', ?) "
                   "ON CONFLICT(clave) DO UPDATE SET valor = excluded.valor", (SEMILLA_DTC_VERSION,))
+
+    # Volver a normalizar la columna `busqueda` cuando cambió _sql_sin_acentos().
+    # Los triggers arreglan lo que se toca de ahí en adelante, pero las filas ya cargadas se
+    # quedan con la normalización vieja y dejan de encontrarse por lo nuevo, sin ningún error a
+    # la vista: sobre el catálogo real eran 73 productos —«SENSOR RPM cigüeñal», «CITROËN»,
+    # «Conexão»— que no aparecían buscando CIGUENAL ni CITROEN.
+    c.execute("SELECT valor FROM configuracion WHERE clave = 'version_normalizacion'")
+    _fila_norm = c.fetchone()
+    if (_fila_norm["valor"] if _fila_norm else None) != VERSION_NORMALIZACION:
+        c.execute("UPDATE productos SET busqueda = "
+                  + _sql_sin_acentos("COALESCE(descripcion,'') || ' ' || COALESCE(codigo_raw,'')"
+                                      " || ' ' || COALESCE(codigo_barras,'')"))
+        c.execute("INSERT INTO configuracion (clave, valor) VALUES ('version_normalizacion', ?) "
+                  "ON CONFLICT(clave) DO UPDATE SET valor = excluded.valor",
+                  (VERSION_NORMALIZACION,))
 
     # Fabricantes por WMI (los 3 primeros caracteres del VIN) precargados, para no tener que
     # ir cargándolos de a uno. Están los que circulan en Argentina: fabricación nacional,
@@ -9350,6 +9420,23 @@ def _trabajo_de_fondo():
     except ValueError:
         objetivo_fotos = objetivo_equiv = 0
 
+    # Lo primero de todo: el descubrimiento que dejó pendiente una importación. Va acá y no
+    # adentro de la pantalla de importar porque tarda 110 segundos, y hacer esperar dos minutos
+    # a alguien que subió una planilla desde el celular —con la pantalla que se apaga sola y el
+    # navegador que puede cortar la conexión— es peor que avisarle que está corriendo.
+    if obtener_config("descubrimiento_pendiente", "") == "1":
+        try:
+            guardar_config("descubrimiento_pendiente", "0")
+            hecho, quedo = descubrimiento_post_importacion()
+            guardar_config("descubrimiento_ultimo",
+                           " · ".join(hecho) if hecho else "nada nuevo para buscar")
+            guardar_config("descubrimiento_fecha", datetime.now().strftime("%Y-%m-%d %H:%M"))
+            if quedo:
+                # Si no le alcanzó el tiempo, queda pedido de nuevo para la próxima vuelta.
+                guardar_config("descubrimiento_pendiente", "1")
+        except Exception as _err:
+            anotar_error("_trabajo_de_fondo/descubrimiento", _err)
+
     while time.time() - arranque < MINUTOS_MAXIMO_DE_TANDA * 60:
         hizo_algo = False
 
@@ -9361,12 +9448,21 @@ def _trabajo_de_fondo():
                                   _cupo_de_hoy("tanda_fondo_fotos", objetivo_fotos))
                     traidas, _fall, _sin = bajar_fotos_desde_catalogo(
                         marca["mid"], limite=cuantas)
-                    # Se suma lo CONSULTADO y no lo traído: el cupo es cuánto se le pide al
-                    # servidor del proveedor, y una ficha sin foto se le pidió igual.
-                    _sumar_al_cupo("tanda_fondo_fotos", cuantas)
+                    # Del cupo se descuenta lo que se CONSULTÓ de verdad, no lo que se pidió.
+                    # No es lo mismo: si quedaban tres fichas y la subtanda es de cincuenta,
+                    # cobrarle cincuenta al cupo del día tira a la basura cuarenta y siete
+                    # consultas que nunca se hicieron. Una ficha sin foto sí cuenta —se le
+                    # pidió igual al servidor del proveedor—, por eso van las fallidas adentro.
+                    consultadas = traidas + len(_fall)
+                    _sumar_al_cupo("tanda_fondo_fotos", consultadas)
                     if traidas:
                         _sumar_al_cupo("tanda_fondo_fotos_ok", traidas)
-                    hizo_algo = True
+                    # Y el bucle sigue solo si esto AVANZÓ. Darlo por hecho porque había una
+                    # marca pendiente deja girar el bucle diez minutos contra la base cuando la
+                    # consulta que elige la marca y la que trae las fichas no miran exactamente
+                    # lo mismo — hoy miran igual, pero con dos consultas separadas eso se
+                    # desincroniza el día que alguien toque una sola de las dos.
+                    hizo_algo = hizo_algo or consultadas > 0
                 except Exception as _err:
                     anotar_error("_trabajo_de_fondo/fotos", _err)
 
@@ -9378,12 +9474,12 @@ def _trabajo_de_fondo():
                                   _cupo_de_hoy("tanda_fondo_equiv", objetivo_equiv))
                     props, _fall, consultados = equivalencias_desde_catalogo(
                         marca["mid"], limite=cuantas, solo_no_leidos=True)
-                    _sumar_al_cupo("tanda_fondo_equiv", consultados or cuantas)
+                    _sumar_al_cupo("tanda_fondo_equiv", consultados)
                     if props:
                         guardadas = guardar_equivalencias_de_catalogo(props, marca["nombre"])
                         if guardadas:
                             _sumar_al_cupo("tanda_fondo_equiv_ok", guardadas)
-                    hizo_algo = True
+                    hizo_algo = hizo_algo or consultados > 0
                 except Exception as _err:
                     anotar_error("_trabajo_de_fondo/equiv", _err)
 
@@ -9398,7 +9494,8 @@ def arrancar_tanda_de_fondo():
     Se llama en cada dibujo de pantalla y casi siempre no hace nada: si ya hay una corriendo,
     si están las dos apagadas o si el cupo del día está gastado, vuelve enseguida."""
     if (obtener_config("fotos_automaticas", "0") != "1"
-            and obtener_config("equiv_ficha_automaticas", "0") != "1"):
+            and obtener_config("equiv_ficha_automaticas", "0") != "1"
+            and obtener_config("descubrimiento_pendiente", "") != "1"):
         return False
 
     # El candado se toma ACÁ y no adentro del hilo. Mirar si está tomado y después crear el
@@ -12469,8 +12566,9 @@ def repuestos_de_este_auto(marca_auto, modelo="", anio=None, motor="", vin="", l
             # escribe «inyección». normalizar_texto() hace lo mismo que el SQL de al lado.
             _limpia_pieza = normalizar_texto(_palabra_pieza)
             if len(_limpia_pieza) >= 3:
-                condiciones.append(f"{_sql_sin_acentos('p.descripcion')} LIKE ?")
-                params.append(f"%{_limpia_pieza}%")
+                _cond, _par = like_en_descripcion(f"%{_limpia_pieza}%")
+                condiciones.append(_cond)
+                params.extend(_par)
         c.execute(f"""SELECT p.id AS "ID", p.codigo_raw AS "Código", p.descripcion AS "Descripcion",
                              m.nombre AS "Marca", p.precio AS "Precio", p.stock AS "Stock"
                       FROM productos p JOIN marcas m ON m.id = p.marca_id
@@ -13416,8 +13514,8 @@ def interpretar_pedido_hablado(texto):
                            and not w.replace(".", "").replace(",", "").isdigit()]
         for w in palabras_utiles:
             try:
-                c.execute(f"""SELECT COUNT(*) FROM productos p
-                              WHERE {_sql_sin_acentos('p.descripcion')} LIKE ?""", (f"% {w} %",))
+                _cond, _par = like_en_descripcion(f"% {w} %")
+                c.execute(f"SELECT COUNT(*) FROM productos p WHERE {_cond}", _par)
                 if c.fetchone()[0] >= 2:
                     modelo_suelto = w
                     break
@@ -13449,12 +13547,11 @@ def buscar_por_pieza_y_auto(familia=None, marca_auto=None, modelo=None,
                             cilindrada=None, limite=60):
     """Lo que tenés de ese rubro para ese auto, aunque no coincida ni una palabra del pedido."""
     condiciones, params = [], []
-    if marca_auto:
-        condiciones.append(f"{_sql_sin_acentos('p.descripcion')} LIKE ?")
-        params.append(f"%{normalizar_texto(marca_auto)}%")
-    if modelo:
-        condiciones.append(f"{_sql_sin_acentos('p.descripcion')} LIKE ?")
-        params.append(f"%{normalizar_texto(modelo)}%")
+    for _texto in (marca_auto, modelo):
+        if _texto:
+            _cond, _par = like_en_descripcion(f"%{normalizar_texto(_texto)}%")
+            condiciones.append(_cond)
+            params.extend(_par)
     if cilindrada:
         condiciones.append("p.descripcion LIKE ?")
         params.append(f"%{cilindrada}%")
@@ -16817,15 +16914,18 @@ def repuestos_para_el_dtc(codigo, marca_auto="", modelo="", limite=8):
         params = []
         # Cualquiera de las formas de nombrar esa pieza: una lista dice SONDA LAMBDA y otra
         # SENSOR DE OXIGENO.
-        condiciones.append("(" + " OR ".join(
-            f"{_sql_sin_acentos('p.descripcion')} LIKE ?" for _ in palabras) + ")")
-        params.extend(f"%{normalizar_texto(p)}%" for p in palabras)
-        if marca_auto:
-            condiciones.append(f"{_sql_sin_acentos('p.descripcion')} LIKE ?")
-            params.append(f"%{normalizar_texto(marca_auto)}%")
-        if modelo:
-            condiciones.append(f"{_sql_sin_acentos('p.descripcion')} LIKE ?")
-            params.append(f"%{normalizar_texto(modelo)}%")
+        _trozos, _pars = [], []
+        for _pal in palabras:
+            _cond, _par = like_en_descripcion(f"%{normalizar_texto(_pal)}%")
+            _trozos.append(f"({_cond})")
+            _pars.extend(_par)
+        condiciones.append("(" + " OR ".join(_trozos) + ")")
+        params.extend(_pars)
+        for _texto in (marca_auto, modelo):
+            if _texto:
+                _cond, _par = like_en_descripcion(f"%{normalizar_texto(_texto)}%")
+                condiciones.append(_cond)
+                params.extend(_par)
         try:
             c.execute(f"""SELECT p.codigo_raw AS "Código", m.nombre AS "Marca",
                                  p.descripcion AS "Descripción", p.precio AS "Precio",
@@ -17877,6 +17977,19 @@ except Exception as _err:
 _hecho_hoy = st.session_state.pop("_aviso_tareas", None)
 if _hecho_hoy:
     st.caption("🔧 Mantenimiento automático de hoy: " + " · ".join(_hecho_hoy))
+
+# El resultado del descubrimiento que corrió por atrás. Se muestra una sola vez por resultado:
+# sin eso, el mismo cartel quedaría en todas las pantallas hasta la próxima importación.
+try:
+    _desc_txt = obtener_config("descubrimiento_ultimo", "")
+    _desc_fec = obtener_config("descubrimiento_fecha", "")
+    if _desc_txt and st.session_state.get("_desc_visto") != _desc_fec:
+        st.session_state["_desc_visto"] = _desc_fec
+        st.caption(f"🧠 Búsqueda automática de relaciones ({_desc_fec}): {_desc_txt}")
+    elif obtener_config("descubrimiento_pendiente", "") == "1":
+        st.caption("🧠 Buscando relaciones nuevas en todo el catálogo, por atrás…")
+except Exception as _err:
+    anotar_error("nivel principal", _err)
 
 _ahora = time.time()
 _cache_salud = st.session_state.get("_salud_cache")
@@ -20566,31 +20679,27 @@ if pagina == PAGINAS[2]:
                     # relaciones que esta lista hace posibles. Va acá y no en las tareas del día
                     # porque es el único momento en que hay algo nuevo que encontrar, y el único
                     # en que la persona ya está esperando. Ver descubrimiento_post_importacion().
+                    # Se PIDE el descubrimiento, no se espera. Tarda 110 segundos sobre el
+                    # catálogo real, y hacer esperar dos minutos a alguien que acaba de subir
+                    # una planilla desde el celular —con la pantalla que se apaga sola y el
+                    # navegador que puede cortar— era la peor parte de haberlo automatizado.
+                    # Lo levanta el hilo de fondo, que ya existe. Ver _trabajo_de_fondo().
                     try:
-                        with st.spinner("Buscando relaciones nuevas en todo el catálogo… "
-                                         "tarda uno o dos minutos y se hace una sola vez por "
-                                         "lista. Podés dejarlo y volver."):
-                            _desc_hecho, _desc_quedo = descubrimiento_post_importacion()
+                        guardar_config("descubrimiento_pendiente", "1")
+                        arrancar_tanda_de_fondo()
+                        st.info("🧠 **Se están buscando solas las relaciones nuevas de esta "
+                                 "lista.** Corre por atrás: podés seguir usando la app.")
+                        explicar(
+                            "Tarda un par de minutos y no hay que esperarlo.",
+                            "Se corren tres cosas sobre TODO el catálogo, no solo sobre esta "
+                            "lista: el barrido de descripciones entre todas las marcas, las "
+                            "aplicaciones que se deducen de las descripciones, y el cruce por "
+                            "auto.\n\nCuando termine, lo nuevo aparece en Estadísticas → "
+                            "🔗 Equivalencias sugeridas. Nada se carga solo: hasta que lo "
+                            "apruebes, buscar un código no trae esos equivalentes."
+                        )
                     except Exception as _err:
                         anotar_error("nivel principal", _err)
-                        _desc_hecho, _desc_quedo = [], []
-                    if _desc_hecho:
-                        _en_cola = equivalencias_esperando_revision()
-                        st.success(
-                            "🧠 **Se buscaron solas las relaciones nuevas:** "
-                            + "; ".join(_desc_hecho) + ".\n\nLo que va «a revisión» todavía "
-                            "**no** está cargado: hasta que lo apruebes, buscar un código no "
-                            "trae esos equivalentes. Quedan "
-                            f"**{_en_cola:,} esperando** en Estadísticas → 🔗 Equivalencias "
-                            "sugeridas — se aprueban o se descartan en bloque, por lote, y el "
-                            "análisis de confianza ya marca ahí los que están casi seguro mal."
-                        )
-                    if _desc_quedo:
-                        st.info(
-                            "⏳ No alcanzó el tiempo para " + " ni ".join(_desc_quedo) + ". Se "
-                            "hace en la próxima importación, o a mano ahora mismo desde "
-                            "Estadísticas → Mantenimiento."
-                        )
 
                     # Recordar el mapeo que funcionó, para la próxima lista de este proveedor
                     guardar_mapeo_columnas(nombre_prov, idx_prov, idx_oem, idx_desc,

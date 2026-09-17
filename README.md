@@ -486,6 +486,100 @@ tres veces. El interruptor está al lado del de las fotos, apagado por defecto p
 internet, y arriba dice cuántas fichas faltan y cuántos días son a ese ritmo: sin ese número,
 «automático» no dice si termina en una semana o en dos años.
 
+## El 87% del catálogo tenía el índice de búsqueda viejo
+
+`productos.busqueda` es la columna con el texto ya normalizado que usa la búsqueda por
+descripción. La mantienen dos triggers, y los triggers **se borran y se vuelven a crear en cada
+arranque** justamente porque la fórmula cambió alguna vez y con `IF NOT EXISTS` una base ya
+creada se quedaba con la versión vieja. Eso arregla el trigger. **No arregla los valores ya
+guardados.**
+
+El relleno existía, pero con `WHERE busqueda IS NULL`: cubre «nunca se calculó» y no cubre «se
+calculó con otra fórmula». Cuando `codigo_barras` se sumó a la expresión, las filas que ya
+estaban cargadas se quedaron con el valor anterior para siempre, porque el trigger solo toca lo
+que se inserta o se modifica de ahí en adelante.
+
+Sobre la base real: **61.574 de 70.888 productos (87%)**. Se los reconoce porque su valor
+guardado no termina en el espacio que deja el `codigo_barras` vacío.
+
+Qué significa en el mostrador, probado de punta a punta: un producto con código de barras
+cargado y el índice viejo **no aparece tipeando su código de barras**, ni reiniciando la app.
+
+    ANTES, buscando el código de barras por texto          0 resultados
+    ANTES, después de reiniciar la app                     0 resultados
+    AHORA, después de arrancar con el relleno por versión  1 resultado
+
+Ahora el relleno va por versión (`VERSION_NORMALIZACION`), igual que las semillas de WMI y de
+códigos de falla: cambiar la fórmula obliga a recalcular una vez sobre todo lo cargado. Cuesta
+0,6 s la primera vez y 0,0 s después. Y va en `_datos_precargados_y_migraciones()`, que corre
+al final, no en `_esquema_catalogo()`: ahí todavía no existe la tabla de configuración y no
+habría dónde anotar que ya se hizo, así que se repetiría en cada arranque.
+
+## El SQL no sacaba los mismos acentos que Python, y no se le pueden agregar muchos más
+
+`normalizar_texto()` usa NFKD y manda a ASCII todo lo que se pueda. `_sql_sin_acentos()` hacía
+doce REPLACE. No es lo mismo: sobre el catálogo real había **80 productos** con una letra que
+Python normaliza y el SQL no —«SENSOR RPM cigüeñal», «CITROËN», «Conexão», «PÒINTER»— y esos
+80 no se encontraban buscando CIGUENAL ni CITROEN.
+
+Lo interesante es por qué no se arregla agregando todas las letras: **cada par es un `REPLACE()`
+anidado adentro del anterior, y SQLite tiene un techo de anidamiento**. Medido en 3.45: revienta
+a los 31 con `parser stack overflow`. Y no son 31 libres — la consulta que envuelve la expresión
+gasta del mismo presupuesto, así que con 28 pares la expresión anda suelta y falla adentro de un
+`COUNT()`. Un intento de agregar el juego completo de acentos latinos (50 pares) no compila.
+
+Así que van cuatro letras elegidas por lo que aparece de verdad en las listas cargadas —ü, ê, ë,
+â, que cubren 73 de los 80— y el tope queda en 20 pares, con diez de margen. **`auditar.py` lo
+controla** (chequeo 27): pasarse no da un error al escribir el código, rompe la búsqueda entera
+de la app en tiempo de ejecución, que es exactamente la forma en que nadie se entera hasta que
+hay un cliente esperando. Probado contra una copia con 28 pares: el auditor la rechaza.
+
+Medido después del cambio: `CIGUENAL` pasa de 261 a 268 productos y `CITROEN` de 3.564 a 3.567.
+
+## Buscar adentro de la descripción costaba doce REPLACE por fila
+
+Sacarle los acentos a la descripción **en la consulta** son doce `REPLACE()` anidados por fila.
+Sobre 70.888 productos son 170 ms por búsqueda, y hay pantallas que la hacen cuatro o cinco
+veces seguidas: de ahí salían los 215 ms que tardaba en contestar un código de falla.
+
+La columna `busqueda` ya tiene el texto normalizado, pero **no sirve de reemplazo**: además de
+la descripción trae el código y el código de barras, así que buscar «FIAT» ahí también engancha
+un código que lo tenga adentro. Usarla directo cambiaría lo que la consulta significa.
+
+Por eso `like_en_descripcion()` la usa de **prefiltro** y deja la condición exacta como
+confirmación: la columna barata descarta casi todo y los `REPLACE` corren solo sobre lo que
+pasó. Es una sustitución sin pérdida — cualquier texto que esté en la descripción normalizada
+está también en la columna, que la contiene entera.
+
+    repuestos_para_el_dtc, los 191 códigos del diccionario
+      antes    49,9 s   (mediana 184 ms por código)
+      después   4,3 s   (mediana  23 ms)            0 respuestas distintas
+
+Las 191 respuestas se compararon **grupo por grupo y producto por producto**, no por el total.
+El `IS NULL` del prefiltro no debería hacer falta —hay relleno y triggers— pero sin él una fila
+con la columna vacía desaparecería de los resultados sin ningún error a la vista.
+
+## El descubrimiento ya no te hace esperar dos minutos
+
+`descubrimiento_post_importacion()` tarda 110 s sobre el catálogo real, y los hacía esperar
+adentro de la pantalla de importar. En un celular —con la pantalla que se apaga sola y el
+navegador que puede cortar— eso era la peor parte de haberlo automatizado.
+
+Ahora la importación solo **pide** el descubrimiento y el hilo de fondo lo levanta. Probado:
+corre completo desde el hilo en 109 s, con el mismo resultado (120.691 aplicaciones, 8.649 pares
+del barrido, 270 vínculos dudosos medidos) y sin un solo error — incluidas las funciones
+cacheadas de Streamlit, que era lo que había que verificar antes de sacarlas del hilo principal.
+Si no le alcanza el tiempo, queda pedido para la vuelta siguiente.
+
+Y dos cosas que aparecieron revisando el hilo de fondo con la lupa:
+
+- **Del cupo diario se descontaba lo que se pedía, no lo que se consultaba.** Si quedaban tres
+  fichas y la subtanda es de cincuenta, se le cobraban cincuenta al cupo: cuarenta y siete
+  consultas tiradas a la basura.
+- **El bucle se daba por productivo porque había una marca pendiente**, no porque hubiera
+  avanzado. La consulta que elige la marca y la que trae las fichas son dos, y el día que
+  alguien toque una sola de las dos, el bucle gira diez minutos contra la base sin hacer nada.
+
 ## Catálogos que piden usuario y contraseña
 
 Muchos proveedores tienen la ficha detrás de un login. Sin manejarlo, la app pide la página, el

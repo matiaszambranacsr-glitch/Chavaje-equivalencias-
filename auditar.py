@@ -1532,6 +1532,37 @@ for _n in ast.walk(ARBOL):
                      "Sacale el guion bajo")
 
 
+# ============ 27) La cadena de REPLACE() de _sql_sin_acentos tiene un techo duro ============
+# Cada par de _REEMPLAZOS_SIN_ACENTOS es un REPLACE() anidado adentro del anterior, y SQLite
+# tiene un límite de anidamiento: medido en 3.45, revienta a los 31 con «parser stack overflow».
+# Y no son 31 libres — la consulta que envuelve la expresión gasta del mismo presupuesto, así
+# que con 28 pares la expresión anda suelta y falla adentro de un COUNT(). Pasarse no da un
+# error al escribir el código: rompe la búsqueda entera de la app en tiempo de ejecución, que
+# es exactamente la forma en que nadie se entera hasta que un cliente está esperando.
+# Por eso el tope propio es 20, con diez de margen sobre el límite real.
+for _n in ast.walk(ARBOL):
+    if not (isinstance(_n, ast.Assign)
+            and any(isinstance(t, ast.Name) and t.id == "_REEMPLAZOS_SIN_ACENTOS"
+                    for t in _n.targets)):
+        continue
+    if not isinstance(_n.value, ast.List):
+        continue
+    _cuantos = len(_n.value.elts)
+    _tope = 20
+    for _m in ast.walk(ARBOL):
+        if (isinstance(_m, ast.Assign)
+                and any(isinstance(t, ast.Name) and t.id == "MAXIMO_REEMPLAZOS_SIN_ACENTOS"
+                        for t in _m.targets)
+                and isinstance(_m.value, ast.Constant)):
+            _tope = _m.value.value
+    if _cuantos > _tope:
+        reportar("ERROR", _n.lineno,
+                 f"_REEMPLAZOS_SIN_ACENTOS tiene {_cuantos} pares y el tope es {_tope}. Cada uno "
+                 "es un REPLACE() anidado y SQLite revienta a los 31 con «parser stack "
+                 "overflow» — antes si la expresión va adentro de otra consulta. Pasarse rompe "
+                 "TODA la búsqueda por texto en tiempo de ejecución")
+
+
 # ============ Resultado ============
 orden = {"ERROR": 0, "REVISAR": 1, "AVISO": 2}
 problemas.sort(key=lambda x: (orden[x[0]], x[1]))
