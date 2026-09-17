@@ -13890,6 +13890,213 @@ def identificar_pieza_por_foto(imagen_bytes):
         return None, traducir_error_gemini(e)
 
 
+def _json_de_una_respuesta(texto):
+    """Saca el JSON de una respuesta que puede venir con texto alrededor.
+
+    Hace falta acá y no en las otras funciones de IA porque cuando se activa la búsqueda en
+    Google el modelo NO acepta que se le exija responder solo JSON: contesta el JSON envuelto en
+    una explicación, o adentro de un bloque markdown, o las dos cosas. Se busca la primera llave
+    y la última, que es lo único que sobrevive a las tres formas."""
+    t = (texto or "").strip()
+    if "```" in t:
+        partes = t.split("```")
+        for p in partes:
+            p = p[4:] if p.lower().startswith("json") else p
+            if p.strip().startswith("{"):
+                t = p
+                break
+    ini, fin = t.find("{"), t.rfind("}")
+    if ini < 0 or fin <= ini:
+        raise json.JSONDecodeError("no hay ningún objeto JSON en la respuesta", t or "", 0)
+    return json.loads(t[ini:fin + 1])
+
+
+def _lista_de_texto(valor, tope=20):
+    """Una lista de strings, venga como venga.
+
+    El modelo devuelve a veces un texto donde se le pidió una lista, y eso no se puede recorrer
+    con un for: son las letras sueltas. Se vio probándolo — «0280155786, 0280150830» entraba
+    como los códigos «0», «2», «8», «1», «5», «7»."""
+    if isinstance(valor, str):
+        valor = [x for x in re.split(r"[,;\n]", valor)]
+    elif not isinstance(valor, list):
+        valor = []
+    return [str(x).strip() for x in valor if str(x).strip()][:tope]
+
+
+def identificar_pieza_por_internet(imagen_bytes, pista=""):
+    """Busca la pieza EN INTERNET a partir de la foto: qué es, para qué autos, y con qué
+    números se vende. Devuelve (datos, error).
+
+    Es el paso que faltaba para el caso más común de todos: la pieza no tiene el código
+    legible —está gastado, tapado de grasa, o la etiqueta se cayó— y en el catálogo no hay
+    ninguna foto contra la cual compararla. Ahí, hasta ahora, la app no tenía nada que decir.
+    Y no es un caso raro: la comparación visual necesita que ALGUIEN haya cargado antes la foto
+    de esa misma pieza, y una base recién armada tiene cero.
+
+    A diferencia de identificar_pieza_por_foto(), que solo lee lo que está escrito en la pieza,
+    esta sale a buscar afuera: se le activa la búsqueda de Google al modelo, así que puede
+    mirar catálogos, foros y tiendas y volver con los números con que esa pieza se vende. Por
+    eso también devuelve las páginas que usó — una identificación sin fuente no se puede
+    verificar, y esto NO es una respuesta confirmada.
+
+    LA REGLA QUE HACE QUE ESTO SEA USABLE está en la función de al lado, no acá: de todo lo que
+    conteste, a la pantalla solo llegan como respuesta los códigos que EXISTEN EN TU CATÁLOGO.
+    Un modelo de lenguaje inventa números de pieza con total seguridad, y no hay forma de
+    distinguir por el texto uno inventado de uno real. Pero sí hay forma de distinguirlo por los
+    datos: si el número está en tu base, alguien lo vende; si no, es una pista para chequear a
+    mano y se muestra aparte, nunca mezclado con lo que tenés.
+
+    'pista' es lo que sepa la persona —«es de un Gol 1.6», «va en el motor»— y cambia mucho el
+    resultado: sin ella el modelo tiene que adivinar también el auto."""
+    from google import genai
+    from google.genai import types
+
+    api_key = secretos_app().get("gemini_api_key")
+    if not api_key:
+        return None, "No configuraste 'gemini_api_key' en Streamlit Cloud (Settings → Secrets)."
+
+    try:
+        client = genai.Client(api_key=api_key)
+        prompt = (
+            "Sos un vendedor de repuestos de auto con muchos años de mostrador, en Argentina. "
+            "En la foto hay un repuesto que un cliente trajo en la mano. NO tiene el código "
+            "legible: por eso hay que identificarlo por lo que se ve.\n\n"
+            + (f"Lo que sabe el cliente: {pista}\n\n" if pista.strip() else "")
+            + "Buscá en internet para identificarla. Fijate en todo lo que sirva: la forma, el "
+            "material, el tipo y la cantidad de conexiones (vías de la ficha, bocas, agujeros, "
+            "dientes, roscas), la cantidad de caños o terminales, los logos o letras parciales "
+            "que se lleguen a ver, y el color. Buscá esa combinación en catálogos de repuestos "
+            "y en tiendas.\n\n"
+            "Devolvé un JSON con esta forma exacta:\n"
+            '{"tipo_pieza": "el nombre con que se pide en el mostrador, ej: SENSOR DE ROTACION", '
+            '"descripcion": "una línea describiendo la pieza y sus rasgos distintivos", '
+            '"autos": ["los autos en los que se usa, lo más concreto posible"], '
+            '"codigos": ["los números con que se vende: OEM y de fabricantes de reposición"], '
+            '"marca_visible": "la marca que se llegue a leer en la pieza, o null", '
+            '"confianza": "alta/media/baja", '
+            '"por_que": "en una línea, qué rasgo de la foto te hizo decidir"}\n\n'
+            "Reglas que importan más que la respuesta:\n"
+            "- Si no estás seguro, poné confianza baja y MENOS códigos. Un número inventado le "
+            "hace perder una venta y la confianza del cliente.\n"
+            "- «codigos» van tal como se escriben en los catálogos, uno por elemento, sin "
+            "agregarles texto.\n"
+            "- Si de la foto no se puede saber ni qué tipo de pieza es, poné confianza baja y "
+            "«codigos» vacío. Decir «no sé» es una respuesta válida y útil."
+        )
+        respuesta = client.models.generate_content(
+            model="gemini-flash-latest",
+            contents=[prompt, types.Part.from_bytes(data=imagen_bytes, mime_type="image/jpeg")],
+            config=types.GenerateContentConfig(
+                tools=[types.Tool(google_search=types.GoogleSearch())],
+                # Cero temperatura: acá no se quiere creatividad, se quiere que repita lo que
+                # encontró. Con el valor por omisión inventaba más números.
+                temperature=0.0,
+            ),
+        )
+        datos = _json_de_una_respuesta(respuesta.text)
+
+        # Las páginas que consultó. Sin esto la respuesta no se puede verificar, y una
+        # identificación de repuesto que no se puede verificar no sirve para vender.
+        datos["fuentes"] = []
+        datos["consultas"] = []
+        try:
+            meta = respuesta.candidates[0].grounding_metadata
+            for trozo in (getattr(meta, "grounding_chunks", None) or []):
+                web = getattr(trozo, "web", None)
+                if web and getattr(web, "uri", None):
+                    datos["fuentes"].append({
+                        "titulo": getattr(web, "title", None) or getattr(web, "domain", "") or web.uri,
+                        "url": web.uri,
+                    })
+            datos["consultas"] = list(getattr(meta, "web_search_queries", None) or [])
+        except Exception as _err:
+            anotar_error("identificar_pieza_por_internet/fuentes", _err)
+
+        # Se normaliza acá y no en la pantalla. Ver _lista_de_texto().
+        for campo in ("codigos", "autos"):
+            datos[campo] = _lista_de_texto(datos.get(campo))
+
+        registrar_uso_ia("Identificar pieza por internet", True)
+        return datos, None
+    except json.JSONDecodeError as _err:
+        anotar_error("identificar_pieza_por_internet", _err)
+        registrar_uso_ia("Identificar pieza por internet", False)
+        return None, ("No pude interpretar la respuesta. Probá de nuevo, o con una foto donde la "
+                      "pieza se vea entera y sobre un fondo liso.")
+    except Exception as e:
+        anotar_error("identificar_pieza_por_internet", e)
+        registrar_uso_ia("Identificar pieza por internet", False)
+        return None, traducir_error_gemini(e)
+
+
+def cruzar_con_el_catalogo_lo_de_internet(datos, familia=None, limite_texto=25):
+    """Lo que dijo internet, pasado por tu catálogo. Devuelve un dict con cuatro listas.
+
+    Esta es la función que convierte una respuesta de IA en algo que se puede usar para
+    vender, y lo hace con una sola idea: NO se le cree al modelo, se le cree a tu base.
+
+      - «exactos»:   códigos que dijo y que están cargados. Son los que valen.
+      - «por_tipeo»: códigos que no están pero se escriben casi igual que uno que sí. Un
+                     catálogo escribe «0 280 155 786» y otro «0280155786»; también es el
+                     caso de un dígito leído mal.
+      - «por_texto»: si ningún código pegó, se busca por la descripción que dio, con el mismo
+                     buscador de siempre. Es más flojo, y por eso va último y se muestra como
+                     lo que es.
+      - «no_los_tenes»: los códigos que no están ni se parecen a nada. Se muestran aparte, con
+                     su fuente, como pista para pedirle al proveedor — NUNCA mezclados con lo
+                     que sí tenés, que es lo que haría creer que son parte de la respuesta.
+
+    Un código inventado por el modelo cae solo en la última lista: para colarse en las otras
+    tres tendría que coincidir con algo que alguien ya cargó."""
+    salida = {"exactos": [], "por_tipeo": [], "por_texto": [], "no_los_tenes": []}
+    if not datos:
+        return salida
+
+    # _lista_de_texto() otra vez acá, aunque identificar_pieza_por_internet() ya normaliza:
+    # esta función es la que decide qué se muestra, y si alguna vez la llama otro camino con un
+    # dict armado a mano, un texto suelto se recorrería letra por letra.
+    vistos = set()
+    for bruto in _lista_de_texto(datos.get("codigos")):
+        # dividir_codigos() porque los catálogos escriben «0280155786 / F 000 TE1 124» en una
+        # sola línea, y así se aprovechan los dos.
+        for candidato in (dividir_codigos(bruto) or [bruto]):
+            limpio = sanitizar(candidato)
+            if not limpio or limpio in vistos:
+                continue
+            vistos.add(limpio)
+            filas = buscar_por_codigo(limpio)
+            if filas:
+                for f in filas:
+                    f["_pedido"] = candidato
+                salida["exactos"].extend(filas)
+                continue
+            parecidos = codigos_por_tipeo(limpio)
+            if parecidos:
+                for f in parecidos:
+                    f["_pedido"] = candidato
+                salida["por_tipeo"].extend(parecidos)
+            else:
+                salida["no_los_tenes"].append(candidato)
+
+    if not salida["exactos"] and not salida["por_tipeo"]:
+        # El texto que se busca junta la pieza con el auto, que es como se pide en el mostrador.
+        # Solo el tipo de pieza devuelve el rubro entero; solo el auto devuelve cualquier cosa.
+        texto = " ".join(filter(None, [str(datos.get("tipo_pieza") or "")]
+                                + _lista_de_texto(datos.get("autos"))[:2]))
+        if texto.strip():
+            try:
+                filas = buscar_por_texto(texto)
+            except Exception as _err:
+                anotar_error("cruzar_con_el_catalogo_lo_de_internet", _err)
+                filas = []
+            if familia:
+                filas = [f for f in filas
+                         if clasificar_repuesto(f.get("Descripcion")) == familia]
+            salida["por_texto"] = filas[:limite_texto]
+    return salida
+
+
 def extraer_datos_cedula(imagen_bytes):
     """Lee una foto de cédula verde/azul o título del auto y extrae patente, marca, modelo, año
     y motorización con Gemini. SIEMPRE hay que revisar antes de guardar — el OCR puede confundir
@@ -17224,9 +17431,12 @@ def _mensaje_catalogo_visual_vacio():
     if fotos:
         return (f"Hay {fotos} foto(s) en el catálogo pero ninguna procesada todavía. Tocá "
                 "«🔄 Procesar fotos pendientes» acá arriba y volvé a intentar.")
-    return ("Todavía no hay ninguna foto en el catálogo para comparar. Se cargan desde "
-            "Administrar → Medidas y fotos (subiendo la foto o pegando la dirección de la ficha "
-            "del proveedor), o en tanda desde Estadísticas → Mantenimiento. "
+    return ("Todavía no hay ninguna foto en el catálogo para comparar, así que el **paso 2 no "
+            "puede encontrar nada**: compara tu foto contra las que estén cargadas, y no hay "
+            "ninguna. Usá el **paso 3, buscar en internet**, que no necesita nada cargado.\n\n"
+            "Las fotos se cargan desde Administrar → Medidas y fotos (subiendo la foto o pegando "
+            "la dirección de la ficha del proveedor), o en tanda desde Estadísticas → "
+            "Mantenimiento. "
             "Ojo: el *backup sin fotos* que se sube al repositorio no las lleva, así que después "
             "de un reinicio del hosting hay que volver a cargarlas.")
 
@@ -19180,7 +19390,16 @@ Casi todo lo que edita o borra algo pide la contraseña de administrador la prim
                             else:
                                 st.info(f"«{cod_leido}» no figura en tu catálogo ni se parece a nada "
                                          "cargado. Podés probar la comparación por parecido.")
+                _fotos_hay = contar_fotos_comparables()[0]
                 st.markdown("**Paso 2 — comparar por parecido** (si no se pudo leer el código)")
+                if not _fotos_hay:
+                    # Decirlo ACÁ y no después de apretar el botón. El paso 2 compara contra las
+                    # fotos del catálogo: con cero cargadas no puede dar nada, nunca, y dejar el
+                    # botón como si fuera a servir hace perder el tiempo dos veces — una
+                    # apretándolo y otra entendiendo por qué no salió nada.
+                    st.caption("⚠️ No hay ninguna foto cargada en el catálogo, así que este paso "
+                                "no va a encontrar nada. Saltá al **paso 3**, que no necesita "
+                                "fotos cargadas.")
 
             if st.button("🖼️ Comparar con el catálogo", disabled=bytes_consulta is None,
                          type="primary", key="btn_comparar_visual"):
@@ -19219,6 +19438,113 @@ Casi todo lo que edita o borra algo pide la contraseña de administrador la prim
                     "revisarla. Si el que buscabas no aparece, cargale a ese producto una segunda foto del "
                     "ángulo que usás vos y la próxima vez lo encuentra.", en_expander=True
                 )
+
+            # ---- Paso 3: preguntarle a internet ----
+            # Va último a propósito, y es el que más falta hacía. Los dos pasos de arriba
+            # dependen de algo que puede no estar: el código tiene que llegar a leerse, y la
+            # comparación necesita que ALGUIEN haya cargado antes una foto de esa misma pieza.
+            # Con el catálogo sin fotos, el paso 2 no puede encontrar nada nunca — y así está
+            # una base recién armada.
+            if bytes_consulta is not None:
+                st.markdown("---")
+                st.markdown("**Paso 3 — preguntarle a internet** (si no se pudo leer el código "
+                            "ni hay foto para comparar)")
+                explicar(
+                    "Busca la pieza en internet a partir de la foto y después cruza lo que "
+                    "encuentra contra TU catálogo.",
+                    "Sale a buscar afuera —catálogos, tiendas, foros— por la forma, el material, "
+                    "la cantidad de vías de la ficha, los caños, los dientes, los logos "
+                    "parciales. Vuelve con qué pieza es, para qué autos, y con qué números se "
+                    "vende, y te muestra las páginas que usó para que puedas chequearlo.\n\n"
+                    "**Lo importante es qué se hace con esa respuesta.** Una IA inventa números "
+                    "de pieza con total seguridad, y por el texto no hay forma de distinguir uno "
+                    "inventado de uno real. Por los datos sí: como respuesta solo se muestran "
+                    "los códigos que **están en tu catálogo** — si está cargado, alguien lo "
+                    "vende. Los que no están van aparte, marcados como pista para chequear, "
+                    "nunca mezclados con lo que tenés.\n\n"
+                    "Sigue sin ser una confirmación. Es el punto de partida para buscar, no el "
+                    "número para facturar.", en_expander=True
+                )
+                _pista = st.text_input(
+                    "¿Sabés algo de la pieza? (opcional, pero ayuda mucho)",
+                    placeholder="Ej: es de un Gol 1.6 nafta, va arriba del motor",
+                    key="pista_internet",
+                    help="Sin esto la IA tiene que adivinar también de qué auto es, que es la "
+                         "mitad del problema."
+                )
+                if st.button("🌐 Buscar esta pieza en internet", key="btn_internet"):
+                    with st.spinner("Buscando en internet..."):
+                        _d_net, _e_net = identificar_pieza_por_internet(bytes_consulta, _pista)
+                    st.session_state["net_visual"] = (_d_net, _e_net)
+
+                _d_net, _e_net = st.session_state.get("net_visual", (None, None))
+                if _e_net:
+                    st.info(_e_net)
+                elif _d_net:
+                    _conf = str(_d_net.get("confianza") or "s/d").lower()
+                    _icono = {"alta": "🟢", "media": "🟡", "baja": "🟠"}.get(_conf, "⚪")
+                    st.markdown(f"**{_icono} La IA dice que es: "
+                                f"{_d_net.get('tipo_pieza') or 'no lo pudo determinar'}** "
+                                f"(confianza {_conf})")
+                    if _d_net.get("descripcion"):
+                        st.caption(_d_net["descripcion"])
+                    if _d_net.get("por_que"):
+                        st.caption(f"Por qué: {_d_net['por_que']}")
+                    if _d_net.get("autos"):
+                        st.caption("Autos: " + ", ".join(str(a) for a in _d_net["autos"][:8]))
+
+                    _cruce = cruzar_con_el_catalogo_lo_de_internet(_d_net, familia=familia_filtro)
+
+                    if _cruce["exactos"]:
+                        st.success(
+                            f"✅ **{len(_cruce['exactos'])} de esos números están en tu "
+                            "catálogo.** Son códigos cargados, no una suposición de la IA — "
+                            "pero que el número exista no prueba que sea ESTA pieza: "
+                            "comparala en la mano antes de vender."
+                        )
+                        st.dataframe(quitar_id(_cruce["exactos"]), width="stretch", hide_index=True)
+                    if _cruce["por_tipeo"]:
+                        st.warning(
+                            "🟡 Estos no están escritos igual, pero tenés códigos casi idénticos. "
+                            "Suele ser el mismo número con los espacios puestos distinto "
+                            "(«0 280 155 786» y «0280155786») o un dígito de diferencia:"
+                        )
+                        st.dataframe(
+                            [{"Lo que dijo internet": x.get("_pedido", ""), "Código que tenés": x["Codigo"],
+                              "Marca": x["Marca"], "Descripción": x["Descripcion"],
+                              "Precio": x["Precio"], "Stock": x["Stock"]}
+                             for x in _cruce["por_tipeo"]],
+                            width="stretch", hide_index=True
+                        )
+                    if _cruce["por_texto"]:
+                        st.info(
+                            "Ningún código pegó, así que busqué en tu catálogo por la "
+                            "descripción. Esto es lo más flojo de la pantalla — coincide el tipo "
+                            "de pieza y el auto, nada más:"
+                        )
+                        st.dataframe(quitar_id(_cruce["por_texto"]), width="stretch", hide_index=True)
+                    if not any((_cruce["exactos"], _cruce["por_tipeo"], _cruce["por_texto"])):
+                        st.warning(
+                            "No encontré nada tuyo que se corresponda. Si la identificación de "
+                            "arriba te cierra, es una pieza que no tenés cargada."
+                        )
+                    if _cruce["no_los_tenes"]:
+                        st.caption(
+                            "**No los tenés cargados** (pista para pedirle al proveedor, sin "
+                            "verificar): " + ", ".join(f"`{x}`" for x in _cruce["no_los_tenes"][:15])
+                        )
+                    if _d_net.get("fuentes"):
+                        # seccion_plegable y no st.expander: todo esto ya vive adentro de uno,
+                        # y Streamlit corta el renderizado si se anidan. Ver seccion_plegable().
+                        if seccion_plegable(f"🔗 Las {len(_d_net['fuentes'])} página(s) que consultó",
+                                            key="fuentes_internet"):
+                            if _d_net.get("consultas"):
+                                st.caption("Buscó: " + " · ".join(_d_net["consultas"][:6]))
+                            for _f in _d_net["fuentes"][:12]:
+                                st.markdown(f"- [{_f['titulo']}]({_f['url']})")
+                    else:
+                        st.caption("⚠️ No devolvió ninguna página de respaldo, así que esta "
+                                    "identificación no se puede verificar. Tomala con pinzas.")
 
     modo = st.radio("Buscar por:", ["Código", "Descripción"], horizontal=True, key="modo_busqueda")
 

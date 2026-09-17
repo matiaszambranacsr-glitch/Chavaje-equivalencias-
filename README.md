@@ -1642,6 +1642,61 @@ El corte es por proveedor (`GROUP BY po.id, mp.id`) y no por total: un código d
 legítimo aparece en varias listas a la vez —es justo para eso que sirve— y contando todo junto
 ese sería el primero de la lista.
 
+## Cuando no hay foto para comparar: preguntarle a internet
+
+La comparación visual tenía un agujero que no es un caso raro, es **el caso normal**: compara tu
+foto contra las fotos que estén cargadas en el catálogo, y hoy en esta base hay **cero**. O sea
+que el paso 2 no fallaba a veces — no podía encontrar nada, nunca. Y el paso 1 (leer el código
+grabado) falla justo cuando más se lo necesita: la pieza gastada, tapada de grasa, o con la
+etiqueta arrancada.
+
+Ahora hay un **paso 3**. Le manda la foto a Gemini **con la búsqueda de Google activada**, así
+que sale a mirar catálogos, tiendas y foros por la forma, el material, la cantidad de vías de la
+ficha, los caños, los dientes y los logos parciales. Vuelve con qué pieza es, para qué autos, con
+qué números se vende, y **las páginas que consultó** — sin fuente, una identificación de repuesto
+no se puede verificar.
+
+### La regla que hace que esto se pueda usar
+
+Una IA inventa números de pieza con total seguridad, y por el texto no hay forma de distinguir
+uno inventado de uno real. Por los datos sí. Entonces, de todo lo que conteste, a la pantalla
+llega separado en cuatro:
+
+| | qué es |
+|---|---|
+| ✅ **Exactos** | el número está en tu catálogo. Si está cargado, alguien lo vende |
+| 🟡 **Por tipeo** | no está así escrito, pero tenés uno casi idéntico (`0 280 155 786` vs `0280155786`, o un dígito de diferencia) |
+| ℹ️ **Por descripción** | ningún código pegó, así que busca por el tipo de pieza + el auto. Lo más flojo, y se muestra como tal |
+| ⚠️ **No los tenés** | aparte, marcado como pista para pedirle al proveedor. **Nunca mezclado con lo de arriba** |
+
+**Un código inventado cae solo en la última fila**: para colarse en las otras tres tendría que
+coincidir con algo que alguien ya cargó. Probado con la base real — de `["0280155786",
+"0 280 155 78", "IWP-NOEXISTE-999"]` salieron 10 exactos con precio y stock, 10 candidatos por
+tipeo (el correcto entre ellos), y el inventado solo, abajo, sin mezclarse.
+
+Lo demás que se midió, con un cliente de Gemini falso porque la clave es del negocio: se activa
+la herramienta de búsqueda, `temperature` en 0 (con el valor por omisión inventaba más números),
+la pista que escribe la persona viaja en el pedido, y las cuatro formas de fallar —sin clave,
+respuesta sin JSON, cuota agotada, metadata con otra forma— devuelven un mensaje y no una
+pantalla rota.
+
+Dos detalles que salieron de probarlo:
+
+- **El JSON viene envuelto en prosa.** Con la búsqueda activada el modelo ya no acepta que se le
+  exija responder solo JSON: contesta el objeto adentro de una explicación, o de un bloque
+  markdown, o las dos cosas. `_json_de_una_respuesta()` busca la primera llave y la última, que
+  es lo único que sobrevive a las tres formas.
+- **A veces devuelve un texto donde se pidió una lista.** Y un texto recorrido con `for` son sus
+  letras sueltas: `"0280155786, 0280150830"` entraba como los códigos `0`, `2`, `8`, `1`, `5`,
+  `7`. Se vio probándolo, y por eso `_lista_de_texto()` se aplica en los dos lados.
+
+Y el paso 2 ahora avisa antes, no después: si el catálogo no tiene ni una foto, lo dice arriba
+del botón en vez de dejar que alguien lo apriete y espere.
+
+**Lo que esto NO es:** una confirmación. Es el punto de partida para buscar, no el número para
+facturar. Que un código exista en tu catálogo no prueba que sea ESA pieza — hay repuestos que de
+foto son idénticos y no son intercambiables.
+
 ## «Esta lista se cargó sin código de fábrica» — y no era cierto
 
 Salió de correr el diagnóstico de salud sobre la base del negocio. Decía, en rojo:
