@@ -412,6 +412,42 @@ Dos límites que están puestos a propósito y no hay que sacar:
 Medido: rescata 15 códigos (todos bujías NGK/Bosch, que es justo lo que cruza una bujía de un
 proveedor con la de otro), pierde 0, y las 30 motorizaciones conocidas siguen afuera.
 
+## Lo que encontraba relaciones solo corría si alguien apretaba un botón
+
+Era el agujero más grande que quedaba, y no se veía porque nada fallaba. El barrido de todo el
+catálogo, las aplicaciones deducidas de las descripciones y el cruce por auto **existían y
+andaban** — pero solo corrían si alguien entraba a Estadísticas → Mantenimiento y apretaba el
+botón. Desde el mostrador nadie entra ahí. Así que en la práctica se importaba una lista, la app
+decía «entraron 6.900 filas», y las 8.649 relaciones que esas filas hacían posibles se quedaban
+sin buscar para siempre.
+
+`descubrimiento_post_importacion()` corre eso solo, **después de importar** y no una vez por
+día: es el único momento en que hay algo nuevo que encontrar, y el único en que la persona ya
+está esperando. El orden va de lo que enriquece a lo que consume:
+
+    1. aplicaciones_desde_descripciones()       32 s + 17 s   dato nuevo sobre cada producto
+    2. derivar_equivalencias_de_aplicaciones()  22 s          USA esas aplicaciones
+    3. sugerir_entre_todas_las_marcas()         23 s          lo más caro y lo que más produce
+
+Medido sobre la base real (70.888 productos, cinco listas): **98 s**, y deja 120.691
+aplicaciones y 17.308 pares nuevos en la cola de revisión — la cola pasa de 3.185 a 20.493.
+Nada se carga como equivalencia: va todo a pendientes, igual que cuando se apretaba el botón.
+Lo único que cambia es que ahora **se busca**.
+
+Tiene presupuesto de tiempo como las tareas del día, pero mucho más grande (120 s contra 6 s), y
+por una razón concreta: las tareas del día caen sobre alguien que abrió la app a buscar un
+repuesto y no pidió nada; esto cae sobre alguien que acaba de subir una planilla de 26.000 filas
+y está mirando una barra de progreso. Si igual se acaba, los pasos son independientes: se dice
+qué quedó y se hace en la próxima importación.
+
+**Y un número que mentía.** `guardar_equivalencias_pendientes()` devolvía `len(pares)` —lo que
+se INTENTÓ guardar— y no lo que entró. Con `INSERT OR IGNORE`, lo que ya estaba en la cola no
+entra. Apretando el botón a mano casi no se notaba; corriendo solo después de cada importación
+se notaba siempre, porque el barrido propone los mismos 8.649 pares cada vez y la app iba a
+anunciar «8.649 nuevos» en cada importación para siempre. Ahora devuelve `rowcount`, que con
+`INSERT OR IGNORE` cuenta solo lo que realmente entró: la segunda corrida seguida no dice nada,
+que es la verdad.
+
 ## Cuánto atrasada está una lista, medido con tu propio historial
 
 En Argentina una lista de precios de hace dos meses no es una lista de precios. Pero «hace dos

@@ -4076,6 +4076,95 @@ def informe_post_importacion(lote, nombre_prov, cargados):
     return informe
 
 
+# Cuánto se le deja gastar al descubrimiento que corre solo después de importar. Es mucho más
+# que el presupuesto de las tareas del día (6 s) a propósito: las tareas del día caen sobre
+# alguien que abrió la app a buscar un repuesto y no pidió nada, y esto cae sobre alguien que
+# acaba de subir una planilla de 26.000 filas y está mirando una barra de progreso.
+PRESUPUESTO_DESCUBRIMIENTO = 120
+
+
+def descubrimiento_post_importacion(presupuesto_segundos=PRESUPUESTO_DESCUBRIMIENTO):
+    """Busca sola las relaciones nuevas que hasta ahora había que ir a pedir a mano.
+
+    Este es el agujero más grande que quedaba: el trabajo que ENCUENTRA equivalencias
+    —el barrido de todo el catálogo, las aplicaciones deducidas de las descripciones, el cruce
+    por auto— existía y andaba, pero solo corría si alguien entraba a Estadísticas →
+    Mantenimiento y apretaba el botón. Desde el mostrador nadie entra ahí. Así que en la
+    práctica se importaba una lista, la app decía «entraron 6.900 filas», y las 8.661 relaciones
+    que esas filas hacían posibles se quedaban sin buscar para siempre.
+
+    Corre DESPUÉS de importar y no una vez por día por dos razones: es el único momento en que
+    hay algo nuevo que encontrar, y es el único momento en que la persona ya está esperando.
+
+    El orden no es casual, va de lo que enriquece a lo que consume:
+      1. Las aplicaciones que salen de las descripciones. Es dato nuevo sobre cada producto.
+      2. El cruce por auto, que USA esas aplicaciones: si va antes, cruza con menos.
+      3. El barrido de todo el catálogo, que es el más caro y el que más produce.
+
+    Medido sobre la base real (70.888 productos, cinco listas): 32 s + 17 s las aplicaciones,
+    22 s el cruce por auto, 23 s el barrido. Total 95 s.
+
+    Nada se carga como equivalencia: todo va a la cola de pendientes, igual que cuando se
+    apretaba el botón a mano. Lo único que cambia es que ahora se busca.
+
+    Si se acaba el presupuesto, lo que quedó se dice y se hace en la próxima importación — los
+    pasos son independientes y ninguno pierde trabajo por cortarse antes de empezar.
+
+    Devuelve (frases_de_lo_que_hizo, lo_que_quedó_sin_hacer)."""
+    arranque = time.time()
+    hecho, quedo = [], []
+
+    def queda_tiempo():
+        return time.time() - arranque < presupuesto_segundos
+
+    if queda_tiempo():
+        try:
+            _apl = aplicaciones_desde_descripciones()
+            if _apl:
+                _n = aplicar_aplicaciones_deducidas(_apl)
+                if _n:
+                    hecho.append(f"{_n:,} aplicación(es) deducidas de las descripciones")
+        except Exception as _err:
+            anotar_error("descubrimiento_post_importacion/aplicaciones", _err)
+    else:
+        quedo.append("las aplicaciones deducidas de las descripciones")
+
+    if queda_tiempo():
+        try:
+            _der = derivar_equivalencias_de_aplicaciones()
+            if _der:
+                _n = guardar_equivalencias_derivadas(
+                    [(x["_a"], x["_b"]) for x in _der],
+                    f"CRUCE POR AUTO (automático) · {datetime.now():%d/%m %H:%M}")
+                if _n:
+                    hecho.append(f"{_n} equivalencia(s) por auto, a revisión")
+        except Exception as _err:
+            anotar_error("descubrimiento_post_importacion/por_auto", _err)
+    else:
+        quedo.append("el cruce por auto")
+
+    if queda_tiempo():
+        try:
+            _todas = sugerir_entre_todas_las_marcas()
+            if _todas:
+                _pares = []
+                for x in _todas:
+                    _pares.extend([(x["_a"], x["_b"]), (x["_b"], x["_a"])])
+                _n = guardar_equivalencias_pendientes(
+                    _pares, "descripcion-todas",
+                    f"BARRIDO (automático) · {datetime.now():%d/%m %H:%M}")
+                if _n:
+                    hecho.append(f"{_n // 2} par(es) del barrido de todo el catálogo, a revisión")
+        except Exception as _err:
+            anotar_error("descubrimiento_post_importacion/barrido", _err)
+    else:
+        quedo.append("el barrido de todo el catálogo")
+
+    if hecho:
+        invalidar_salud()
+    return hecho, quedo
+
+
 DIAS_VENCIMIENTO_RESERVA = 7
 
 
@@ -5245,8 +5334,13 @@ def guardar_equivalencias_pendientes(pares, origen, lote):
             "(producto_a_id, producto_b_id, origen, lote) VALUES (?, ?, ?, ?)",
             [(a, b, origen, lote) for a, b in pares]
         )
+        # rowcount y no len(pares): con INSERT OR IGNORE, los que ya estaban en la cola no
+        # entran, y devolver cuántos se INTENTARON es decir un número que no pasó. Se nota
+        # ahora que esto corre solo después de cada importación: el barrido propone los mismos
+        # 8.654 pares cada vez, y sin esto la app iba a anunciar 8.654 nuevos todas las veces.
+        entraron = c.rowcount
         conn.commit()
-    return len(pares)
+    return max(entraron, 0)
 
 
 
@@ -11689,8 +11783,10 @@ def guardar_equivalencias_derivadas(pares, lote):
                          (producto_a_id, producto_b_id, origen, lote)
                          VALUES (?, ?, 'catalogos_fabricante', ?)""",
                       [(a, b, lote) for a, b in nuevos])
+        # Lo que entró de verdad, no lo que se intentó. Ver guardar_equivalencias_pendientes().
+        entraron = c.rowcount
         conn.commit()
-    return len(nuevos)
+    return max(entraron, 0)
 
 
 def buscar_aplicaciones(marca_auto, modelo="", anio=None, limite=200):
@@ -19880,6 +19976,36 @@ if pagina == PAGINAS[2]:
                     elif _inf["vinculos_nuevos"]:
                         st.info(f"✅ Entraron {_inf['vinculos_nuevos']} vínculo(s) y ninguno "
                                  "disparó alarmas.")
+                    # Y ahora la parte que antes había que ir a pedir a mano: buscar las
+                    # relaciones que esta lista hace posibles. Va acá y no en las tareas del día
+                    # porque es el único momento en que hay algo nuevo que encontrar, y el único
+                    # en que la persona ya está esperando. Ver descubrimiento_post_importacion().
+                    try:
+                        with st.spinner("Buscando relaciones nuevas en todo el catálogo… "
+                                         "tarda uno o dos minutos y se hace una sola vez por "
+                                         "lista. Podés dejarlo y volver."):
+                            _desc_hecho, _desc_quedo = descubrimiento_post_importacion()
+                    except Exception as _err:
+                        anotar_error("nivel principal", _err)
+                        _desc_hecho, _desc_quedo = [], []
+                    if _desc_hecho:
+                        _en_cola = equivalencias_esperando_revision()
+                        st.success(
+                            "🧠 **Se buscaron solas las relaciones nuevas:** "
+                            + "; ".join(_desc_hecho) + ".\n\nLo que va «a revisión» todavía "
+                            "**no** está cargado: hasta que lo apruebes, buscar un código no "
+                            "trae esos equivalentes. Quedan "
+                            f"**{_en_cola:,} esperando** en Estadísticas → 🔗 Equivalencias "
+                            "sugeridas — se aprueban o se descartan en bloque, por lote, y el "
+                            "análisis de confianza ya marca ahí los que están casi seguro mal."
+                        )
+                    if _desc_quedo:
+                        st.info(
+                            "⏳ No alcanzó el tiempo para " + " ni ".join(_desc_quedo) + ". Se "
+                            "hace en la próxima importación, o a mano ahora mismo desde "
+                            "Estadísticas → Mantenimiento."
+                        )
+
                     # Recordar el mapeo que funcionó, para la próxima lista de este proveedor
                     guardar_mapeo_columnas(nombre_prov, idx_prov, idx_oem, idx_desc,
                                             idx_precio, idx_stock, buscar_oem_en_desc, prov_es_oem,
