@@ -870,16 +870,19 @@ for _lista in re.findall(r'^\s*(\w+) = \[([^\]]*?)\]\s*$', SRC, re.M | re.S):
     _usados = [int(x) for x in re.findall(rf'== {_nombre}\[(\d+)\]', SRC)]
     if not _usados:
         continue
-    _repetidos = [i for i, v in _col.Counter(_usados).items() if v > 1]
-    if _repetidos:
-        reportar("ERROR", 0,
-                 f"{_nombre}: el índice {_repetidos} se usa en más de una rama — "
-                 "hay una pantalla inalcanzable (¿se agregó una opción y se corrieron?)")
+    # Lo que hay que detectar es el índice que NO SE USA, no el repetido. Un índice repetido
+    # es legítimo: mantenimiento reparte sus 36 herramientas en seis grupos SIN mover el
+    # código de lugar, o sea con varios `if grupo == GRUPOS[n]:` salteados a lo largo de la
+    # pantalla. Mover mil líneas para agrupar distinto es mucho más peligroso que repetir una
+    # guarda, y el barrido de pantallas no distingue una cosa de la otra.
+    # El corrimiento de índices —que es el error real— igual se ve: si se agrega una opción al
+    # principio, el último índice deja de usarse, y eso es lo que se reporta.
     _faltan = [i for i in range(_cuantos) if i not in _usados]
     if _faltan and len(_usados) >= 2:
-        reportar("REVISAR", 0,
+        reportar("ERROR", 0,
                  f"{_nombre}: hay {_cuantos} opciones pero el índice {_faltan} no se usa "
-                 "en ninguna rama")
+                 "en ninguna rama — esa pantalla no se puede abrir (¿se agregó una opción "
+                 "y se corrieron los índices?)")
 
 # ============ 9. Argumentos por defecto mutables ============
 for n in ast.walk(ARBOL):
@@ -1622,6 +1625,56 @@ for _n in ast.walk(ARBOL):
                      f"'{_txt}' es texto de la base y entra crudo en un markdown con HTML "
                      "prendido. Un «<» seguido de letra —«1997<REF ORIG VW...»— se come el "
                      "resto de la descripción en pantalla. Envolvelo en texto_para_html()")
+
+
+# ============ 30) El índice de mantenimiento no puede mentir ============
+# Arriba de cada grupo de mantenimiento se lista lo que hay adentro, y el buscador de
+# herramientas busca sobre esa misma lista. Los dos salen de HERRAMIENTAS_MANTENIMIENTO, que
+# es una tabla escrita a mano: si alguien agrega una herramienta a la pantalla y no la anota,
+# queda invisible para el buscador —peor que antes, porque ahora el índice dice cuántas hay—;
+# y si cambia un título y no lo cambia en la tabla, el índice nombra algo que no existe.
+_reg = None
+for _n in ast.walk(ARBOL):
+    if (isinstance(_n, ast.Assign)
+            and any(getattr(_t, "id", None) == "HERRAMIENTAS_MANTENIMIENTO" for _t in _n.targets)):
+        try:
+            _reg = ast.literal_eval(_n.value)
+        except Exception:
+            _reg = None
+if _reg is not None:
+    _en_tabla = {_h[0]: _h[1] for _h in _reg}
+    # Los títulos que la pantalla dibuja de verdad, con el grupo en el que caen.
+    _ini = _fin = None
+    for _i, _l in enumerate(LINEAS):
+        if _l.startswith("    if sub_admin == SUB_ADMIN[4]:"):
+            _ini = _i
+        elif _ini is not None and _l.startswith("        if sub_admin == SUB_ADMIN[5]:"):
+            _fin = _i
+            break
+    if _ini is not None and _fin is not None:
+        _g, _en_pantalla = None, {}
+        for _i in range(_ini, _fin):
+            _m = re.match(r'\s*if _grupo_mant == GRUPOS_MANTENIMIENTO\[(\d+)\]', LINEAS[_i])
+            if _m:
+                _g = int(_m.group(1))
+            _m2 = re.match(r'\s*st\.markdown\("\*\*(.+?)\*\*"\)', LINEAS[_i])
+            if _m2 and _g is not None:
+                _en_pantalla[_m2.group(1)] = (_g, _i + 1)
+        for _t, (_g, _ln) in _en_pantalla.items():
+            if _t not in _en_tabla:
+                reportar("ERROR", _ln,
+                         f"la herramienta «{_t}» está en la pantalla y no en "
+                         "HERRAMIENTAS_MANTENIMIENTO: no la va a encontrar el buscador ni la "
+                         "va a listar el índice del grupo")
+            elif _en_tabla[_t] != _g:
+                reportar("ERROR", _ln,
+                         f"«{_t}» se dibuja en el grupo {_g} y la tabla dice {_en_tabla[_t]}: "
+                         "el índice la va a listar en un grupo y no va a estar ahí")
+        for _t, _g in _en_tabla.items():
+            if _t not in _en_pantalla:
+                reportar("ERROR", 0,
+                         f"HERRAMIENTAS_MANTENIMIENTO nombra «{_t}» y esa herramienta no se "
+                         "dibuja en ningún lado: el índice promete algo que no está")
 
 
 # ============ Resultado ============

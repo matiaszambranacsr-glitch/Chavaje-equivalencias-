@@ -15350,6 +15350,98 @@ def seccion_plegable(titulo, key, abierto=False):
     return st.toggle(titulo, key=key, value=abierto)
 
 
+def herramientas_del_grupo(indice_grupo):
+    """Las herramientas de un grupo de mantenimiento, en el orden en que se dibujan."""
+    return [h for h in HERRAMIENTAS_MANTENIMIENTO if h[1] == indice_grupo]
+
+
+def herramientas_que_coinciden(texto):
+    """Las herramientas de mantenimiento que matchean lo que se escribió.
+
+    Busca en el título, en la descripción y en las palabras clave, sin acentos y sin importar
+    el orden: «codigos barras», «barras codigo» y «códigos de barras» dan lo mismo.
+
+    Cuenta cuántas palabras coinciden en vez de exigirlas todas, que es la misma regla que ya
+    usa buscar_por_texto() para los productos y por el mismo motivo: nadie escribe la palabra
+    exacta. Con una o dos palabras se piden las dos —si no aparece cualquier cosa—, con tres o
+    más alcanza con dos tercios, y si aun así no sale nada se afloja una más antes de devolver
+    la lista vacía. Cero resultados es la peor respuesta posible: el que busca concluye que la
+    herramienta no existe, y existe."""
+    palabras = [normalizar_texto(p) for p in (texto or "").split() if p.strip()]
+    palabras = [p for p in palabras if p]
+    if not palabras:
+        return []
+    puntuadas = []
+    for titulo, grupo, que_hace, claves in HERRAMIENTAS_MANTENIMIENTO:
+        bolsa = normalizar_texto(f"{titulo} {que_hace} {claves}")
+        # Al PRINCIPIO de una palabra, no en cualquier lado. Buscando «no me aparece un
+        # codigo», el «no» de adentro de «vinculados» y el «un» de adentro de «una» le daban
+        # puntos a media pantalla, y la herramienta que servía quedaba cuarta. Prefijo y no
+        # palabra entera para que «codigo» encuentre «códigos» y «foto» encuentre «fotos».
+        puntaje = sum(1 for p in palabras if re.search(r"\b" + re.escape(p), bolsa))
+        if puntaje:
+            puntuadas.append((puntaje, titulo, grupo, que_hace, claves))
+    if not puntuadas:
+        return []
+    cuantas = len(palabras)
+    minimo = cuantas if cuantas <= 2 else max(2, (cuantas * 2) // 3)
+    salida = [x for x in puntuadas if x[0] >= minimo]
+    while not salida and minimo > 1:
+        minimo -= 1
+        salida = [x for x in puntuadas if x[0] >= minimo]
+    salida.sort(key=lambda x: (-x[0], HERRAMIENTAS_MANTENIMIENTO.index(
+        (x[1], x[2], x[3], x[4]))))
+    return [(t, g, q, c) for _p, t, g, q, c in salida]
+
+
+def _ir_al_grupo_de_mantenimiento(nombre_grupo):
+    """Cambia de grupo desde un botón, y de paso entra a Mantenimiento si no estabas ahí.
+
+    Va como callback y no como código suelto a propósito: Streamlit no deja tocar la clave de
+    un widget que ya se dibujó en esta pasada («cannot be modified after the widget is
+    instantiated»). Adentro de un on_click corre ANTES de que se vuelva a dibujar, y ahí sí.
+
+    Mueve las DOS solapas porque el buscador también está arriba de Administrar, donde todavía
+    no elegiste Mantenimiento: si moviera solo el grupo, apretar «Ir» no haría nada visible."""
+    st.session_state["sub_admin"] = "🧹 Mantenimiento"
+    st.session_state["sub_mantenimiento"] = nombre_grupo
+
+
+def buscador_de_herramientas(clave, titulo="¿Qué querés hacer?"):
+    """El buscador de las 36 herramientas de mantenimiento. Devuelve True si mostró algo.
+
+    Está en dos lugares y es a propósito: arriba de Administrar, para el que no sabe todavía
+    que existe una pantalla llamada «Mantenimiento», y arriba de Mantenimiento, para el que ya
+    está adentro y no se acuerda en qué grupo estaba. El caso que resuelve es el mismo, y es el
+    que ningún menú resuelve: sabés qué querés hacer, no dónde está."""
+    texto = st.text_input(
+        titulo, key=clave,
+        placeholder="Escribí lo que buscás: barras, fotos, papelera, puentes, precios...",
+        help=f"Busca en las {len(HERRAMIENTAS_MANTENIMIENTO)} herramientas de mantenimiento, "
+             "estén en el grupo que estén."
+    )
+    if not texto.strip():
+        return False
+    encontradas = herramientas_que_coinciden(texto)
+    if not encontradas:
+        st.caption("No encontré ninguna herramienta con esas palabras. Probá con una sola "
+                    "palabra, o mirá los grupos.")
+        return True
+    st.caption(f"{len(encontradas)} herramienta(s):")
+    for titulo_h, grupo_h, que_hace, _claves in encontradas[:8]:
+        col_txt, col_btn = st.columns([4, 1])
+        col_txt.markdown(
+            f"**{texto_para_html(titulo_h)}**  \n<span style='opacity:.75;font-size:.87em'>"
+            f"{texto_para_html(que_hace)} · <i>{texto_para_html(GRUPOS_MANTENIMIENTO[grupo_h])}"
+            f"</i></span>", unsafe_allow_html=True)
+        col_btn.button("Ir 👉", key=f"ir_{clave}_{abs(hash(titulo_h))}",
+                        on_click=_ir_al_grupo_de_mantenimiento,
+                        args=(GRUPOS_MANTENIMIENTO[grupo_h],),
+                        help=f"Está en {GRUPOS_MANTENIMIENTO[grupo_h]}")
+    st.markdown("---")
+    return True
+
+
 def texto_para_html(valor):
     """Deja un texto de la base listo para meter adentro de un st.markdown con HTML prendido.
 
@@ -18965,8 +19057,138 @@ if _problemas:
         st.rerun()
     st.markdown("")
 
-GRUPOS_MANTENIMIENTO = ["🧹 Limpiar vínculos", "🧠 Calidad y aprendizaje", "📷 Fotos",
+# Mantenimiento tiene 36 herramientas. Cuatro grupos no alcanzaban: «Calidad y aprendizaje»
+# se había quedado con 17 de las 36 —1.060 líneas de una sola tirada— y era donde la pregunta
+# «¿dónde estaba eso?» terminaba en bajar y bajar. Ahora se agrupan por LO QUE UNO VIENE A
+# HACER, que es lo que una persona sabe antes de entrar: busco vínculos nuevos, limpio los que
+# están mal, miro cómo está la base.
+GRUPOS_MANTENIMIENTO = ["🔎 Encontrar equivalencias", "🧹 Limpiar y corregir",
+                        "🧠 Calidad y aprendizaje", "🏷️ Códigos de barras", "📷 Fotos",
                         "🩺 Estado y papelera"]
+
+# Cada herramienta con su grupo, una línea de qué hace, y las palabras con las que alguien la
+# buscaría. No es decorado: es lo que hace que la pantalla se explique sola.
+#   · El índice de arriba de cada grupo dice QUÉ HAY antes de bajar a buscarlo.
+#   · El buscador encuentra una herramienta aunque esté en otro grupo, que es el caso que
+#     duele: sabés qué querés hacer y no te acordás dónde estaba.
+# El título tiene que ser EXACTAMENTE el que se dibuja abajo, si no el índice miente. El
+# auditor lo controla.
+HERRAMIENTAS_MANTENIMIENTO = [
+    # (título, grupo, qué hace en una línea, palabras con que se busca)
+    ("🏭 Catálogo de aplicaciones (qué repuesto le va a cada auto)", 0,
+     "Subís el catálogo de NGK, Bosch o Mann y la app sabe qué pieza entra en qué auto.",
+     "aplicaciones catalogo ngk bosch mann skf auto modelo"),
+    ("📐 Equivalencias por medidas", 0,
+     "Propone equivalentes de dos marcas que tienen las mismas medidas cargadas.",
+     "medidas milimetros diametro largo rosca mecanicas"),
+    ("🔄 Reunir lo que separó un cambio de número", 0,
+     "Junta lo que quedó partido cuando el proveedor le cambió el código a una pieza.",
+     "cambio numero renumero sucesor reemplazo separado"),
+    ("🔐 Traer autos del portal del proveedor", 0,
+     "Entra al catálogo web del proveedor y trae a qué autos va cada código.",
+     "portal proveedor web autos aplicaciones clave contraseña"),
+    ("🔤 Vincular dos proveedores por la descripción", 0,
+     "Compara dos listas por el texto y propone los que son la misma pieza.",
+     "descripcion texto dos proveedores comparar"),
+    ("🔗 Equivalencias deducidas cruzando catálogos", 0,
+     "Si A equivale a B y B a C, propone A con C.",
+     "deducidas cruzar cadena transitiva"),
+    ("📝 Códigos de fábrica que el proveedor escribió en la descripción", 0,
+     "Lee los «REF ORIG» que ya están escritos en las descripciones cargadas.",
+     "ref orig oem descripcion escrito declarado"),
+    ("🧠 Buscar equivalencias en TODO el catálogo de una", 0,
+     "Compara todas las marcas entre sí en una sola pasada, en vez de de a dos.",
+     "todo catalogo barrido todas las marcas"),
+    ("🌐 Leer equivalencias del catálogo digital del proveedor", 0,
+     "Abre la ficha web de cada código y trae los códigos cruzados que lista.",
+     "catalogo digital web ficha equivalencias proveedor"),
+
+    ("🌉 Códigos puente — los que rompen la búsqueda", 1,
+     "Códigos vinculados a demasiadas cosas: cortar uno limpia miles de resultados falsos.",
+     "puente puentes fusiona familias muchos vinculos resultados falsos basura mezclado"),
+    ("🧯 Puentes que hoy ya no se generarían", 1,
+     "Puentes falsos que quedaron cargados antes de que las reglas mejoraran.",
+     "puentes viejos falsos limpiar reglas nuevas"),
+    ("🔗 Vínculos que unen dos familias de repuestos", 1,
+     "Pares donde un lado es un filtro y el otro un sensor: alguno está mal.",
+     "familias rubro distinto mal vinculado"),
+    ("🔍 Revisar los vínculos que YA están cargados", 1,
+     "Audita lo que la búsqueda está devolviendo hoy, no lo que falta entrar.",
+     "auditar revisar cargados confianza"),
+    ("💲 Precios que no cierran entre equivalentes", 1,
+     "Dos piezas «iguales» con precios muy distintos: casi siempre una está mal.",
+     "precio precios distinto diferencia equivalentes caro barato raro"),
+    ("🗑️ Códigos que son solo un número suelto", 1,
+     "Códigos que en realidad eran una cantidad o una medida.",
+     "numero suelto basura medida cantidad"),
+    ("🔎 Códigos que el buscador no encuentra", 1,
+     "Productos cargados que no aparecen al escribir su código.",
+     "no aparece no encuentra no figura no sale buscador indice invisible"),
+    ("🔢 Códigos que quedaron con '.0'", 1,
+     "El listado de los que Excel guardó como número, con el «.0» pegado atrás.",
+     "excel punto cero decimal numero"),
+    ("🔢 Códigos con el '.0' de Excel", 1,
+     "El botón que se los saca a todos de una.",
+     "excel punto cero decimal numero arreglar"),
+    ("📝 Descripciones con las columnas pegadas", 1,
+     "Filas donde la exportación pegó dos columnas en una.",
+     "descripcion pegada columnas separar"),
+    ("🕵️ Puentes falsos: códigos que unen repuestos que no tienen nada que ver", 1,
+     "Busca los códigos que fusionan familias enteras y te deja borrarlos de a uno.",
+     "puentes falsos fusionan familias borrar"),
+    ("🔁 Equivalencias anotadas dos veces", 1,
+     "La misma relación guardada de ida y de vuelta.",
+     "duplicadas espejadas dos veces repetidas"),
+
+    ("🎯 Puntuar los vínculos para el buscador", 2,
+     "Le pone nota a cada vínculo para que el buscador muestre primero los buenos.",
+     "puntuar confianza nota ordenar"),
+    ("🧾 Equivalencias que confirmó el mostrador", 2,
+     "Las que se usaron de verdad en una venta: la mejor evidencia que hay.",
+     "confirmadas mostrador venta usadas"),
+    ("📚 Lo que la app aprendió de tus decisiones", 2,
+     "Los patrones que salieron de lo que fuiste aprobando y rechazando.",
+     "aprendio patrones decisiones aprendizaje"),
+
+    ("🏷️ Códigos de barras cargados como código de fábrica", 3,
+     "El código de barras entró en la columna del OEM: se mueve solo al lugar que va.",
+     "barras ean gtin columna equivocada oem"),
+    ("🏷️ Cargar códigos de barras en masa", 3,
+     "Subís una planilla de códigos de barras y se cargan de una.",
+     "barras masa planilla escaner cargar"),
+    ("🔢 Códigos de barras que no cierran con su dígito verificador", 3,
+     "Los que el escáner no va a encontrar porque están mal copiados.",
+     "barras digito verificador escaner mal copiado"),
+
+    ("📷 Traer fotos de productos en tanda", 4,
+     "Baja las fotos del catálogo del proveedor de a muchas.",
+     "fotos tanda bajar imagenes masivo foto imagen"),
+    ("Traerlas desde la ficha del proveedor", 4,
+     "La dirección web de cada marca, que es de donde salen las fotos.",
+     "ficha url direccion web proveedor plantilla"),
+
+    ("⏳ Qué tan atrasada está cada lista", 5,
+     "Cuántos días tiene cada lista de precios y cuánto viene subiendo.",
+     "precios atrasados dias lista aumento inflacion"),
+    ("↩️ Deshacer una importación", 5,
+     "Vuelve atrás una carga de Excel entera.",
+     "deshacer importacion revertir excel lista cargue mal me equivoque"),
+    ("🔀 ¿Cuánto cruza tu catálogo entre proveedores?", 5,
+     "Marca por marca: cuántos productos llegan a otra marca, y por qué no.",
+     "cruza cruces proveedores aislada"),
+    ("🔗 Listas que no cruzan con ninguna otra", 5,
+     "El motivo escrito de por qué una lista no genera equivalencias.",
+     "no cruza aislada motivo lista sola"),
+    ("🔍 Salud de los datos", 5,
+     "Revisa la base buscando cosas rotas o incoherentes.",
+     "salud integridad roto corrupto chequeo"),
+    ("Limpieza de la base", 5,
+     "Borrar huérfanos, vínculos muertos y productos de prueba.",
+     "limpieza huerfanos muertos borrar depurar"),
+    ("🗑️ Papelera", 5,
+     "Lo que borraste, para restaurarlo.",
+     "papelera borrado restaurar recuperar deshacer borre borro elimine sin querer equivoque error"),
+]
 
 PAGINAS = ["🔍 Buscador", "🔗 Vincular manual", "📁 Cargar Excel", "🗂️ Administrar",
            "📊 Estadísticas", "📋 Lista WhatsApp", "🚗 Vehículos", "🛠️ Modo Mecánico"]
@@ -21959,6 +22181,12 @@ if pagina == PAGINAS[3]:
     SUB_ADMIN = ["🏷️ Marcas", "📦 Productos", "💬 Mensajería y cobros", "🧩 Combos", "🧹 Mantenimiento", "👥 Usuarios"]
     if st.session_state.get("sub_admin") not in SUB_ADMIN:
         st.session_state["sub_admin"] = SUB_ADMIN[0]
+    # El mismo buscador que adentro de Mantenimiento, pero acá arriba: el que entra por primera
+    # vez no tiene por qué saber que las 36 herramientas viven detrás de una solapa que se
+    # llama «Mantenimiento». Escribiendo «papelera» o «fotos» llega igual.
+    buscador_de_herramientas("buscar_herramienta_admin",
+                              "¿Qué querés hacer? (buscá entre las herramientas)")
+
     st.radio("Sub-sección:", SUB_ADMIN, key="sub_admin", horizontal=True,
              label_visibility="collapsed")
     sub_admin = st.session_state["sub_admin"]
@@ -22569,11 +22797,29 @@ if pagina == PAGINAS[3]:
         # Es el mismo cambio que ya se había hecho en la navegación principal, por lo mismo.
         if st.session_state.get("sub_mantenimiento") not in GRUPOS_MANTENIMIENTO:
             st.session_state["sub_mantenimiento"] = GRUPOS_MANTENIMIENTO[0]
+        # Va antes del selector de grupo porque resuelve lo que ningún grupo resuelve: sabés
+        # qué querés hacer y no te acordás en cuál estaba.
+        buscador_de_herramientas("buscar_herramienta")
+
         st.radio("Grupo:", GRUPOS_MANTENIMIENTO, key="sub_mantenimiento", horizontal=True,
                  label_visibility="collapsed")
         _grupo_mant = st.session_state["sub_mantenimiento"]
 
-        if _grupo_mant == GRUPOS_MANTENIMIENTO[0]:
+        # EL ÍNDICE DEL GRUPO. Dice QUÉ HAY antes de bajar a buscarlo, que es lo que convierte
+        # un scroll largo en una lista que se lee de un vistazo. Y la línea de al lado de cada
+        # nombre es lo que hace que la pantalla se explique sola: sin eso, «🧯 Puentes que hoy
+        # ya no se generarían» solo lo entiende el que lo programó.
+        _del_grupo = herramientas_del_grupo(GRUPOS_MANTENIMIENTO.index(_grupo_mant))
+        if _del_grupo:
+            st.caption(f"{len(_del_grupo)} herramienta(s) en este grupo:")
+            _cols_ind = st.columns(2)
+            for _i, (_t, _g, _q, _) in enumerate(_del_grupo):
+                _cols_ind[_i % 2].markdown(
+                    f"**{_t}**  \n<span style='opacity:.7;font-size:.85em'>"
+                    f"{texto_para_html(_q)}</span>", unsafe_allow_html=True)
+            st.markdown("---")
+
+        if _grupo_mant == GRUPOS_MANTENIMIENTO[1]:
             st.markdown("**🌉 Códigos puente — los que rompen la búsqueda**")
             explicar(
                 "Códigos vinculados a demasiadas cosas. Cortar uno limpia miles de resultados falsos.",
@@ -22976,7 +23222,7 @@ if pagina == PAGINAS[3]:
             else:
                 st.caption("✅ Ninguna descripción con ese problema.")
 
-        if _grupo_mant == GRUPOS_MANTENIMIENTO[1]:
+        if _grupo_mant == GRUPOS_MANTENIMIENTO[2]:
             st.markdown("**🎯 Puntuar los vínculos para el buscador**")
             try:
                 sin_puntuar = faltan_por_puntuar()
@@ -23097,6 +23343,7 @@ if pagina == PAGINAS[3]:
                     "Si algún patrón no te cierra, corregilo revisando algunos vínculos de esa "
                     "combinación al revés: la app se reajusta sola con las decisiones nuevas."
                 )
+        if _grupo_mant == GRUPOS_MANTENIMIENTO[0]:
             st.markdown("**🏭 Catálogo de aplicaciones (qué repuesto le va a cada auto)**")
             explicar(
                 "El catálogo que dice a qué auto le va cada repuesto. NGK, Bosch, Mann y SKF "
@@ -23512,15 +23759,7 @@ if pagina == PAGINAS[3]:
                             st.rerun()
                 st.markdown("---")
 
-            # Leer las equivalencias que el propio proveedor publica en su catálogo web. Es la
-            # misma fuente que ya se usa para las fotos y para los autos de cada ficha; lo que
-            # faltaba era leer los números cruzados que la ficha lista.
-            c.execute("""SELECT m.id, m.nombre, COUNT(p.id) AS productos
-                         FROM marcas m JOIN productos p ON p.marca_id = m.id
-                         WHERE m.url_ficha_template IS NOT NULL AND m.url_ficha_template <> ''
-                         GROUP BY m.id ORDER BY productos DESC""")
-            marcas_con_ficha = [dict(r) for r in c.fetchall()]
-
+        if _grupo_mant == GRUPOS_MANTENIMIENTO[5]:
             st.markdown("**🔀 ¿Cuánto cruza tu catálogo entre proveedores?**")
             explicar(
                 "Marca por marca: cuántos productos tienen vínculo y cuántos llegan a otra "
@@ -23576,6 +23815,7 @@ if pagina == PAGINAS[3]:
                                  width="stretch", hide_index=True)
             st.markdown("---")
 
+        if _grupo_mant == GRUPOS_MANTENIMIENTO[0]:
             st.markdown("**📝 Códigos de fábrica que el proveedor escribió en la descripción**")
             explicar(
                 "Recorre las descripciones ya cargadas y busca los códigos que el proveedor "
@@ -23696,6 +23936,7 @@ if pagina == PAGINAS[3]:
                         st.rerun()
             st.markdown("---")
 
+        if _grupo_mant == GRUPOS_MANTENIMIENTO[1]:
             st.markdown("**🕵️ Puentes falsos: códigos que unen repuestos que no tienen nada que ver**")
             explicar(
                 "Busca códigos de fábrica que estén fusionando familias enteras de repuestos, "
@@ -23742,6 +23983,16 @@ if pagina == PAGINAS[3]:
                                              "vínculos falsos que colgaban de él.")
                                 st.rerun()
             st.markdown("---")
+
+        if _grupo_mant == GRUPOS_MANTENIMIENTO[0]:
+            # Leer las equivalencias que el propio proveedor publica en su catálogo web. Es la
+            # misma fuente que ya se usa para las fotos y para los autos de cada ficha; lo que
+            # faltaba era leer los números cruzados que la ficha lista.
+            c.execute("""SELECT m.id, m.nombre, COUNT(p.id) AS productos
+                         FROM marcas m JOIN productos p ON p.marca_id = m.id
+                         WHERE m.url_ficha_template IS NOT NULL AND m.url_ficha_template <> ''
+                         GROUP BY m.id ORDER BY productos DESC""")
+            marcas_con_ficha = [dict(r) for r in c.fetchall()]
 
             st.markdown("**🌐 Leer equivalencias del catálogo digital del proveedor**")
             explicar(
@@ -23900,6 +24151,7 @@ if pagina == PAGINAS[3]:
                             st.rerun()
             st.markdown("---")
 
+        if _grupo_mant == GRUPOS_MANTENIMIENTO[5]:
             # CUÁNTO ATRASADOS ESTÁN LOS PRECIOS. Va acá, al lado de las importaciones, porque
             # lo que se hace con este número es pedir la lista nueva.
             st.markdown("**⏳ Qué tan atrasada está cada lista**")
@@ -24013,6 +24265,7 @@ if pagina == PAGINAS[3]:
                     "venía cada vínculo."
                 )
 
+        if _grupo_mant == GRUPOS_MANTENIMIENTO[1]:
             espejadas = contar_equivalencias_espejadas()
             if espejadas:
                 st.markdown("---")
@@ -24036,7 +24289,7 @@ if pagina == PAGINAS[3]:
                                        f"y se ordenaron {vueltas:,}.")
                     st.rerun()
 
-        if _grupo_mant == GRUPOS_MANTENIMIENTO[2]:
+        if _grupo_mant == GRUPOS_MANTENIMIENTO[4]:
             st.markdown("**📷 Traer fotos de productos en tanda**")
             st.caption(
                 "En vez de cargarlas de a una. No existe ninguna base pública y gratuita de fotos por "
@@ -24431,6 +24684,7 @@ if pagina == PAGINAS[3]:
                 st.caption(f"{len(_barras_rotos)} producto(s). Son los que el escáner no "
                             "encuentra aunque el repuesto esté cargado.")
 
+        if _grupo_mant == GRUPOS_MANTENIMIENTO[5]:
             st.markdown("**🔗 Listas que no cruzan con ninguna otra**")
             explicar(
                 "Por qué una lista no genera equivalencias con las demás, con el motivo escrito.",

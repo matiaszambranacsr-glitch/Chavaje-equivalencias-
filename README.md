@@ -1642,6 +1642,86 @@ El corte es por proveedor (`GROUP BY po.id, mp.id`) y no por total: un código d
 legítimo aparece en varias listas a la vez —es justo para eso que sirve— y contando todo junto
 ese sería el primero de la lista.
 
+## Mantenimiento tenía 36 herramientas y una sola forma de encontrarlas: bajar
+
+El reclamo fue «tenés que ir una banda para abajo si querés encontrar algo», y medido es
+exactamente eso. Mantenimiento son **2.072 líneas y 36 herramientas**, repartidas en cuatro
+grupos muy desparejos:
+
+| grupo | herramientas | líneas de scroll |
+|---|---|---|
+| 🧹 Limpiar vínculos | 10 | 403 |
+| 🧠 Calidad y aprendizaje | **17** | **1.060** |
+| 📷 Fotos | 2 | 202 |
+| 🩺 Estado y papelera | 7 | 351 |
+
+«Calidad y aprendizaje» se había quedado con casi la mitad de todo, y adentro tenía cosas que
+no se parecen en nada: buscar equivalencias nuevas, deshacer una importación, y limpiar puentes
+falsos, todo en la misma tirada de mil líneas.
+
+### 1. Seis grupos, por lo que uno viene a hacer
+
+No por el orden en que se fueron sumando, que es como habían quedado:
+
+| grupo | herramientas | líneas |
+|---|---|---|
+| 🔎 Encontrar equivalencias | 9 | 704 |
+| 🧹 Limpiar y corregir | 12 | 475 |
+| 🧠 Calidad y aprendizaje | 3 | 121 |
+| 🏷️ Códigos de barras | 3 | 193 |
+| 📷 Fotos | 2 | 202 |
+| 🩺 Estado y papelera | 7 | 329 |
+
+El grupo más largo pasó de 1.060 líneas a 704, y el que más herramientas tiene (12) es de 475.
+
+**Nada de código se movió de lugar.** Un grupo puede aparecer en varios `if grupo ==
+GRUPOS[n]:` salteados a lo largo de la pantalla, y el orden de adentro lo da el archivo. Mover
+mil líneas para agrupar distinto es mucho más peligroso que repetir una guarda, y el barrido de
+pantallas no distingue una cosa de la otra: vería las dos verdes. Lo único que se movió fueron
+cinco líneas de una consulta que estaba separada del bloque que la usa.
+
+### 2. Un índice arriba de cada grupo
+
+Antes de bajar, la lista de lo que hay, en dos columnas, **con una línea de qué hace cada una**.
+Eso es lo que hace que la pantalla se explique sola: sin esa línea, «🧯 Puentes que hoy ya no se
+generarían» solo lo entiende el que lo programó. Ahora dice al lado: *«Puentes falsos que
+quedaron cargados antes de que las reglas mejoraran.»*
+
+### 3. Un buscador de herramientas, en dos lugares
+
+Es lo que ningún menú resuelve: **sabés qué querés hacer y no te acordás dónde estaba**. Se
+escribe lo que se busca y salen las herramientas con su grupo y un botón «Ir 👉».
+
+Está arriba de **Mantenimiento** para el que ya está adentro, y arriba de **Administrar** para
+el que todavía no sabe que existe una solapa llamada «Mantenimiento». Desde ahí el botón mueve
+las dos solapas: probado desde 🏷️ Marcas, escribir «papelera» y apretar Ir deja la pantalla en
+Mantenimiento → 🩺 Estado y papelera.
+
+Busca con la misma regla que ya usa el buscador de productos —cuenta cuántas palabras coinciden
+en vez de exigirlas todas, y afloja antes de devolver nada—, porque nadie escribe la palabra
+exacta. Dos detalles que salieron de probarlo:
+
+- **Al principio de una palabra, no en cualquier lado.** Buscando «no me aparece un codigo», el
+  «no» de adentro de *vi**no**s* y el «un» de adentro de *una* le daban puntos a media pantalla
+  y la herramienta que servía quedaba cuarta.
+- **Las palabras del mostrador, no las del programador.** «borre algo sin querer» tiene que
+  encontrar la papelera, y «me equivoque al cargar una lista» tiene que encontrar *Deshacer una
+  importación*. Están las dos cosas en las palabras clave.
+
+### El índice no puede mentir
+
+Todo esto sale de una tabla escrita a mano (`HERRAMIENTAS_MANTENIMIENTO`), y una tabla a mano se
+desactualiza: alguien agrega una herramienta y no la anota, o le cambia el título y no lo cambia
+en la tabla. Ahí el índice pasa a prometer algo que no está, que es peor que no tener índice.
+
+El **chequeo 30 del auditor** compara la tabla contra lo que la pantalla dibuja de verdad y falla
+si sobra, falta o está en otro grupo. Verificado rompiéndolo a propósito en los tres casos.
+
+De paso se corrigió el **chequeo 8k**: marcaba como error un índice de menú repetido, y ahora el
+repetido es legítimo. Lo que hay que detectar es el índice que NO se usa —esa sí es una pantalla
+inalcanzable— y ese caso ahora es ERROR en vez de REVISAR. Probado agregando un grupo al
+principio de la lista: lo agarra.
+
 ## Cuando no hay foto para comparar: preguntarle a internet
 
 La comparación visual tenía un agujero que no es un caso raro, es **el caso normal**: compara tu
