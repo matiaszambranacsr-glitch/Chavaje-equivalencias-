@@ -486,6 +486,49 @@ tres veces. El interruptor está al lado del de las fotos, apagado por defecto p
 internet, y arriba dice cuántas fichas faltan y cuántos días son a ese ritmo: sin ese número,
 «automático» no dice si termina en una semana o en dos años.
 
+## Nadie frenaba los intentos de contraseña
+
+Salió de una revisión externa del código. La app vive en una dirección pública y el ingreso es
+**un solo campo de contraseña, sin nombre de usuario**: cualquiera puede probar claves todo el
+día. PBKDF2 protege el hash si alguien se baja la base —y la base se sube sola al repositorio,
+así que eso importa— pero no protege nada contra probar «chavaje», «1234» o el nombre del
+negocio contra la pantalla de ingreso, que es como se entra de verdad a un sistema de mostrador.
+
+Ahora la espera se duplica con cada fallo desde el tercero, y se corta en un minuto:
+
+    fallos    3    4    5    6    7    8    9+
+    espera   1s   2s   4s   8s  16s  32s  60s
+
+Dos decisiones que importan más que la fórmula:
+
+- **El intento rechazado también cuenta.** La primera versión no lo contaba y la espera se
+  quedaba clavada en un segundo para siempre: el que insiste vuelve a probar cada segundo y en
+  un día prueba ochenta mil claves. Se vio probándolo, contando intento por intento.
+- **El contador va en la base, no en `session_state`.** Un freno guardado en session_state se
+  saltea apretando F5.
+
+Y el precio, dicho de frente: desde Streamlit no hay forma de saber la IP, así que el freno es
+para todos. Alguien que insista puede dejar al dueño esperando hasta un minuto. Por eso el tope
+es un minuto y **no se bloquea ninguna cuenta**: la espera pasa sola. Un minuto de espera es
+molesto; probar claves sin límite contra la caja es otra cosa.
+
+De paso, las claves de los secrets se comparaban con `==`. `verificar_password()` ya tenía
+escrito por qué eso está mal —comparar de a byte tarda distinto según cuántos caracteres
+coincidan— pero ese cuidado no valía para las claves de administrador. Ahora las dos van por
+`hmac.compare_digest`.
+
+### Lo que esa misma revisión marcaba y ya estaba hecho
+
+Vale anotarlo para no volver a discutirlo: **WAL** ya está activo, la **conexión es por hilo**
+(`_ConexionPorSesion`, con el segmentation fault que lo motivó documentado ahí mismo),
+`st.cache_data` se usa en toda la app, el **backup** por `conn.backup()` existe y se sube solo
+al repositorio, y hay **39 índices** creados, incluidos los tres que la revisión sugería.
+
+Y una que **no hay que hacer**: mover las fotos de la base a una carpeta en disco. En Streamlit
+Cloud el disco se borra en cada redespliegue — los BLOBs están adentro de la base justamente
+porque la base es lo único que sobrevive, y por eso existe `generar_backup_sin_fotos()`. Sacarlas
+a disco perdería todas las fotos en el primer reinicio.
+
 ## El modelo de la máquina y el número del motor, cargados como código de fábrica
 
 Salió de mirar la pantalla de puentes falsos sobre la base del negocio. Una lista de juntas de

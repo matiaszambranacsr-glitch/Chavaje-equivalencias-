@@ -525,6 +525,58 @@ def eliminar_mecanico(mecanico_id):
         conn.commit()
 
 
+# Cuántos intentos fallidos se dejan pasar sin freno, y hasta cuánto llega la espera.
+# Esta app vive en una dirección pública y el ingreso es UN campo de contraseña, sin nombre de
+# usuario: cualquiera puede probar claves todo el día. PBKDF2 protege el hash si alguien se
+# baja la base; no protege nada contra probar «chavaje», «1234» o el nombre del negocio contra
+# la pantalla de ingreso, que es como se entra de verdad a un sistema de mostrador.
+#
+# La espera crece al doble con cada fallo y se corta a un minuto. Lo que eso hace es cambiar
+# el orden de magnitud del problema: sin freno se prueban miles de claves por minuto; con esto,
+# después del quinto intento se prueba una por minuto y adivinar deja de ser viable.
+#
+# EL PRECIO, dicho de frente: no hay forma de saber la IP desde Streamlit, así que el freno es
+# para todos. Alguien que insista puede dejar al dueño esperando hasta un minuto. Se eligió ese
+# tope justamente por eso — un minuto de espera es molesto, probar claves sin límite es perder
+# el negocio— y por eso NO se bloquea la cuenta: la espera pasa sola.
+INTENTOS_ANTES_DE_FRENAR = 3
+ESPERA_MAXIMA_POR_INTENTOS = 60
+
+
+def _segundos_de_espera_por_intentos():
+    """Cuántos segundos faltan antes de aceptar otro intento de contraseña. 0 si se puede ya.
+
+    El contador va en la base y no en session_state a propósito: session_state se borra
+    recargando la página, así que un freno guardado ahí se saltea apretando F5."""
+    try:
+        fallidos = int(obtener_config("login_fallidos", "0") or 0)
+        if fallidos < INTENTOS_ANTES_DE_FRENAR:
+            return 0
+        ultimo = obtener_config("login_ultimo_fallo", "")
+        if not ultimo:
+            return 0
+        cuando = datetime.strptime(ultimo[:19], "%Y-%m-%d %H:%M:%S")
+        espera = min(2 ** (fallidos - INTENTOS_ANTES_DE_FRENAR), ESPERA_MAXIMA_POR_INTENTOS)
+        faltan = espera - (datetime.now() - cuando).total_seconds()
+        return int(faltan) + 1 if faltan > 0 else 0
+    except (ValueError, TypeError) as _err:
+        anotar_error("_segundos_de_espera_por_intentos", _err)
+        return 0
+
+
+def _anotar_intento(acerto):
+    """Lleva la cuenta de los intentos fallidos seguidos. Acertar la reinicia."""
+    try:
+        if acerto:
+            guardar_config("login_fallidos", "0")
+            return
+        fallidos = int(obtener_config("login_fallidos", "0") or 0) + 1
+        guardar_config("login_fallidos", str(fallidos))
+        guardar_config("login_ultimo_fallo", datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+    except (ValueError, TypeError) as _err:
+        anotar_error("_anotar_intento", _err)
+
+
 def validar_password(clave):
     """Chequea la contraseña contra los secrets de admin/operador Y contra las cuentas creadas
     desde la propia app (tabla usuarios). Devuelve (nombre, nivel, error) — nivel es 'admin',
@@ -539,25 +591,54 @@ def validar_password(clave):
         admin_passwords.setdefault("admin", clave_unica)
     operador_passwords = dict(secretos.get("operador_passwords", {}))
 
-    nombre_admin = next((n for n, p in admin_passwords.items() if p == clave), None)
+    # El freno va ANTES de comparar nada, y también antes de validar_password_usuario(), que
+    # calcula un PBKDF2 por cada empleado activo: sin el freno, cada intento fallido le cuesta
+    # al servidor 25 ms por empleado y eso lo paga la app entera, que es un solo proceso.
+    _faltan = _segundos_de_espera_por_intentos()
+    if _faltan:
+        # El intento rechazado TAMBIÉN cuenta, y eso es lo que hace que el freno sirva de algo.
+        # Sin contarlo, la espera se quedaba clavada en un segundo para siempre: el que insiste
+        # vuelve a probar cada segundo y en un día prueba ochenta mil claves. Contándolo, la
+        # espera se duplica con cada insistencia hasta el minuto, y la cuenta deja de cerrarle.
+        # Para el dueño que se apuró es un segundo más; para el que está probando, el final.
+        _anotar_intento(False)
+        return None, None, (
+            f"Demasiados intentos fallidos seguidos. Esperá {_faltan} segundo(s) y probá una "
+            "sola vez: cada intento durante la espera la alarga. No hay ninguna cuenta "
+            "bloqueada, la espera pasa sola."
+        )
+
+    # compare_digest y no ==, por el mismo motivo que está escrito en verificar_password():
+    # comparar de a byte tarda distinto según cuántos caracteres coincidan, y con muchos
+    # intentos eso deja adivinar la clave de a un carácter. Acá estaba con == a secas, así que
+    # el cuidado que se había tomado con las claves de la base no valía para las de los secrets.
+    nombre_admin = next((n for n, p in admin_passwords.items()
+                         if hmac.compare_digest(str(p), str(clave))), None)
     if nombre_admin:
+        _anotar_intento(True)
         return nombre_admin, "admin", None
-    nombre_operador = next((n for n, p in operador_passwords.items() if p == clave), None)
+    nombre_operador = next((n for n, p in operador_passwords.items()
+                            if hmac.compare_digest(str(p), str(clave))), None)
     if nombre_operador:
+        _anotar_intento(True)
         return nombre_operador, "operador", None
 
     # Cuentas creadas desde la propia app (además de las de Secrets)
     nombre_db, rol_db = validar_password_usuario(clave)
     if nombre_db:
+        _anotar_intento(True)
         return nombre_db, rol_db, None
 
     if not admin_passwords and not operador_passwords:
         c.execute("SELECT COUNT(*) FROM usuarios")
         if c.fetchone()[0] == 0:
+            # No es un intento fallido: no hay contra qué acertar. Contarlo acá dejaría a una
+            # instalación recién hecha frenándose sola antes de poder configurar la primera clave.
             return None, None, (
                 "No configuraste todavía ninguna contraseña en Streamlit Cloud (Settings → Secrets) "
                 "ni creaste ningún usuario desde la app. Sin eso, nadie puede entrar a las secciones protegidas."
             )
+    _anotar_intento(False)
     return None, None, None
 
 
