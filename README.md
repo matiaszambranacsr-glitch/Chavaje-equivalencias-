@@ -486,6 +486,63 @@ tres veces. El interruptor está al lado del de las fotos, apagado por defecto p
 internet, y arriba dice cuántas fichas faltan y cuántos días son a ese ritmo: sin ese número,
 «automático» no dice si termina en una semana o en dos años.
 
+## El modelo de la máquina y el número del motor, cargados como código de fábrica
+
+Salió de mirar la pantalla de puentes falsos sobre la base del negocio. Una lista de juntas de
+motor metía en la columna de OEM cosas como estas:
+
+    6PF-305        el motor Perkins            4D105-3     el motor Komatsu
+    SUPER5         el Renault 5                308HDI      el Peugeot con su motorización
+    L75-L76        dos modelos de Scania       C1J-C1L     dos motores Renault
+    182.A8000      el número de motor Fiat     Cil.Esp.1   la descripción abreviada
+    3350-3550-650-6600-7500                    cinco modelos de John Deere encadenados
+
+Cada uno cuelga de sí mismo todo lo que lo nombre. Solo `6PF-305` aparece en **42 descripciones**
+del catálogo real: 861 pares de productos hermanados por compartir el motor y nada más.
+
+Entraron ocho reglas nuevas. **Lo que las hace difíciles no es reconocer el modelo, es no
+romper los códigos que se le parecen** — y hay dos que se parecen mucho:
+
+- **`55PP27-01` es un sensor de presión Bosch de verdad**, y tiene casi la forma de `6PF-305`.
+  Los separa que el código de Bosch lleva dígitos entre las letras y el guion.
+- **`1201-K1` es una bomba de agua Citroën y `1336-Y80` un termostato Peugeot.** Tienen
+  exactamente la misma forma que `3420-J1`, que es un modelo de John Deere. Por eso `3420-J1`
+  **quedó sin resolver**: por la forma no se puede distinguir, y romper los Citroën para
+  atrapar un John Deere es un mal negocio. Lo mismo con `128-1500` (hay nueve códigos reales
+  con forma `123-4567`) y con `AP2000` (`^[A-Z]{2}\d{4}$` le pega a 196 códigos reales:
+  `IS0957`, `SW1311`, `TH7111`, todos bulbos y sensores).
+- **`SUPER5` contra `TPRT05`.** Los dos son letras con un número atrás; el primero es un
+  Renault y el segundo un sensor Thomson. Lo que los separa es que un modelo de auto **se
+  pronuncia**: se piden dos vocales. Sin eso la regla se lleva puestos `TPRT05`, `TMAP14` y
+  `CVMMF35`.
+
+Todo se midió contra los **21.734 códigos OEM que hoy tienen vínculos**, separando los que
+citan DOS proveedores distintos — esos son puentes reales y no se pueden tocar. Las ocho reglas
+juntas sacan 65 códigos y **ninguno es de dos proveedores**. Pasando el catálogo entero por el
+extractor viejo y el nuevo:
+
+    códigos distintos extraídos     18.171 → 18.059
+    dejan de salir                  112        empiezan a salir: 0
+    pares de productos que unían    3.644
+    equivalencias falsas evitadas   1.192      (las que cruzaban marcas distintas)
+
+## Los puentes falsos que quedaron de antes
+
+Arreglar el extractor evita los que vienen. Los que ya están cargados siguen ensuciando la
+búsqueda, y son los que se ven desde el mostrador. Cada vez que se le enseña a la app a
+reconocer un modelo o un motor queda atrás una camada generada con las reglas viejas que nadie
+vuelve a revisar.
+
+`puentes_que_hoy_no_se_generarian()` los encuentra **sin inventar ningún criterio**: le da la
+vuelta a cada código cargado, lo pone adentro de un texto y lo pasa por el mismo extractor que
+se usa al importar. Si hoy no lo sacaría de una descripción, tampoco debería estar como código
+de fábrica. Solo mira los que unen productos de **dos listas distintas**, que son los que
+fabrican la equivalencia falsa.
+
+Probado inyectando los seis casos de la pantalla real junto a tres códigos verdaderos: detecta
+los 6, respeta los 3, y al borrarlos desaparecen solo los códigos de fábrica falsos y sus
+vínculos — los productos quedan intactos.
+
 ## Lo que Excel le come a un código largo, y por qué es peor que una fecha
 
 Ya estaba resuelto el caso de la fecha: Excel toma «12-15» por una fecha, el código se pierde, y

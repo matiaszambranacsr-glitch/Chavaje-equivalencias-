@@ -564,6 +564,49 @@ def extraer_codigos_de_texto(texto, minimo=6, codigo_propio=None, codigos_conoci
         # —CORSA1.4— colgaba un tubo, una correa multicanal y un sensor MAP. Le pega a 0 de
         # los 39.746 códigos reales del catálogo.
         re.compile(r'^[A-Z]{4,}-?\d[.,]\d[A-Z]*$'),
+        # --- Las que siguen salieron de mirar la pantalla de puentes falsos sobre la base del
+        # negocio: una lista de juntas de motor metía en la columna de OEM el modelo de la
+        # máquina o la designación del motor, y cada uno colgaba de sí mismo todo lo que lo
+        # nombrara. Todas se midieron contra los 21.734 códigos OEM que HOY tienen vínculos,
+        # separando los que citan DOS proveedores distintos —esos son puentes reales, los que
+        # no se pueden romper—. Entre las ocho sacan 65 códigos y NINGUNO es de dos proveedores.
+        #
+        # EL MISMO PREFIJO DE LOS DOS LADOS DEL GUION: L75-L76, C1J-C1L, R9-R11, F100-F150,
+        # B16F-B18K, S500-S600, T4B-T5B. Es la forma de enumerar dos modelos o dos motores de
+        # la misma familia, y por eso el prefijo se repite — un código de fábrica con guion no
+        # tiene por qué repetirlo. La marcha atrás va en la referencia \1: sin ella el patrón
+        # se comería códigos con guion legítimos.
+        re.compile(r'^([A-Z]{1,2})\d{1,3}[A-Z]?-\1\d{1,3}[A-Z]?$'),
+        # CUATRO O MÁS NÚMEROS ENCADENADOS: 3350-3550-650-6600-7500, 2017-2018-2019-2020,
+        # 1214-1215-1315-1615-1620-608-912-913. El patrón que ya estaba pide segmentos de tres
+        # dígitos o menos y se le escapaban los de cuatro; pidiendo CUATRO segmentos en vez de
+        # limitar el largo se agarran igual sin tocar un código de dos partes. Le pega a 6 y
+        # los 6 son listas de modelos o de años.
+        re.compile(r'^\d{2,4}([-/]\d{2,4}){3,}$'),
+        # MODELO CON LA MOTORIZACIÓN PEGADA: 308HDI, 208CDI, 311CDI, 213CDI. Es el Sprinter o
+        # el 308, no un código. Se listan los sufijos uno por uno a propósito: con «tres o
+        # cuatro letras» cualquiera se llevaría puestos códigos reales de esa forma.
+        re.compile(r'^\d{2,4}(HDI|TDI|JTD|CRDI|MPI|TSI|TDCI|DCI|CDI|TD|GTI|GTD)$'),
+        # MOTORES FIAT escritos con punto: 182.A8000, 128.A000. Es el número de motor que Fiat
+        # imprime en el block, y aparece en cualquier junta que lo mencione.
+        re.compile(r'^\d{3}\.[A-Z]\d{3,4}$'),
+        # ABREVIATURAS CON PUNTOS: Cil.Esp.1, Tap.Val.2. No es un código, es la descripción
+        # abreviada («Cilindro Especial 1») que quedó suelta como si fuera un número.
+        re.compile(r'^[A-Z]{2,4}\.[A-Z]{2,4}\.\d{1,2}$'),
+        # MOTORES DE MAQUINARIA: 6PF-305 (Perkins), 4D105-3 (Komatsu). Los dos patrones van
+        # separados y ajustados, porque acá está el límite de lo que se puede distinguir por la
+        # forma: «55PP27-01» es un sensor de presión Bosch REAL y tiene una forma parecida. Lo
+        # que los separa es que el código de Bosch lleva dígitos entre las letras y el guion, y
+        # estos no. Los dos patrones le pegan a 0 códigos del catálogo real: no rompen nada.
+        re.compile(r'^\d[A-Z]{2,3}-\d{3,4}$'),
+        re.compile(r'^\d[A-Z]\d{2,4}-\d{1,2}$'),
+        # UNA PALABRA CON UN NÚMERO ATRÁS: SUPER5, SCENIC2, MEGANE2, LAGUNA2, XANTIA3,
+        # PICASSO1, TIGGO3. Es el modelo con su generación, la forma en que las listas
+        # distinguen un Megane 2 de un Megane 3.
+        # El cuidado está en el paréntesis de adelante, que pide DOS VOCALES: sin eso el patrón
+        # se lleva TPRT05, TMAP14 y CVMMF35, que son códigos de fábrica de verdad. Un modelo de
+        # auto se pronuncia y un código no — es la diferencia entre SCENIC y CVMMF.
+        re.compile(r'^(?=[A-Z]*[AEIOU][A-Z]*[AEIOU])[A-Z]{5,}\d{1,2}$'),
     )
     formas_prohibidas = formas_ambiguas + formas_solo_texto
     # Palabras de la descripción que quedan pegadas al año y disfrazan el rango:

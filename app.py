@@ -3223,6 +3223,49 @@ def extraer_codigos_de_texto(texto, minimo=6, codigo_propio=None, codigos_conoci
         # —CORSA1.4— colgaba un tubo, una correa multicanal y un sensor MAP. Le pega a 0 de
         # los 39.746 códigos reales del catálogo.
         re.compile(r'^[A-Z]{4,}-?\d[.,]\d[A-Z]*$'),
+        # --- Las que siguen salieron de mirar la pantalla de puentes falsos sobre la base del
+        # negocio: una lista de juntas de motor metía en la columna de OEM el modelo de la
+        # máquina o la designación del motor, y cada uno colgaba de sí mismo todo lo que lo
+        # nombrara. Todas se midieron contra los 21.734 códigos OEM que HOY tienen vínculos,
+        # separando los que citan DOS proveedores distintos —esos son puentes reales, los que
+        # no se pueden romper—. Entre las ocho sacan 65 códigos y NINGUNO es de dos proveedores.
+        #
+        # EL MISMO PREFIJO DE LOS DOS LADOS DEL GUION: L75-L76, C1J-C1L, R9-R11, F100-F150,
+        # B16F-B18K, S500-S600, T4B-T5B. Es la forma de enumerar dos modelos o dos motores de
+        # la misma familia, y por eso el prefijo se repite — un código de fábrica con guion no
+        # tiene por qué repetirlo. La marcha atrás va en la referencia \1: sin ella el patrón
+        # se comería códigos con guion legítimos.
+        re.compile(r'^([A-Z]{1,2})\d{1,3}[A-Z]?-\1\d{1,3}[A-Z]?$'),
+        # CUATRO O MÁS NÚMEROS ENCADENADOS: 3350-3550-650-6600-7500, 2017-2018-2019-2020,
+        # 1214-1215-1315-1615-1620-608-912-913. El patrón que ya estaba pide segmentos de tres
+        # dígitos o menos y se le escapaban los de cuatro; pidiendo CUATRO segmentos en vez de
+        # limitar el largo se agarran igual sin tocar un código de dos partes. Le pega a 6 y
+        # los 6 son listas de modelos o de años.
+        re.compile(r'^\d{2,4}([-/]\d{2,4}){3,}$'),
+        # MODELO CON LA MOTORIZACIÓN PEGADA: 308HDI, 208CDI, 311CDI, 213CDI. Es el Sprinter o
+        # el 308, no un código. Se listan los sufijos uno por uno a propósito: con «tres o
+        # cuatro letras» cualquiera se llevaría puestos códigos reales de esa forma.
+        re.compile(r'^\d{2,4}(HDI|TDI|JTD|CRDI|MPI|TSI|TDCI|DCI|CDI|TD|GTI|GTD)$'),
+        # MOTORES FIAT escritos con punto: 182.A8000, 128.A000. Es el número de motor que Fiat
+        # imprime en el block, y aparece en cualquier junta que lo mencione.
+        re.compile(r'^\d{3}\.[A-Z]\d{3,4}$'),
+        # ABREVIATURAS CON PUNTOS: Cil.Esp.1, Tap.Val.2. No es un código, es la descripción
+        # abreviada («Cilindro Especial 1») que quedó suelta como si fuera un número.
+        re.compile(r'^[A-Z]{2,4}\.[A-Z]{2,4}\.\d{1,2}$'),
+        # MOTORES DE MAQUINARIA: 6PF-305 (Perkins), 4D105-3 (Komatsu). Los dos patrones van
+        # separados y ajustados, porque acá está el límite de lo que se puede distinguir por la
+        # forma: «55PP27-01» es un sensor de presión Bosch REAL y tiene una forma parecida. Lo
+        # que los separa es que el código de Bosch lleva dígitos entre las letras y el guion, y
+        # estos no. Los dos patrones le pegan a 0 códigos del catálogo real: no rompen nada.
+        re.compile(r'^\d[A-Z]{2,3}-\d{3,4}$'),
+        re.compile(r'^\d[A-Z]\d{2,4}-\d{1,2}$'),
+        # UNA PALABRA CON UN NÚMERO ATRÁS: SUPER5, SCENIC2, MEGANE2, LAGUNA2, XANTIA3,
+        # PICASSO1, TIGGO3. Es el modelo con su generación, la forma en que las listas
+        # distinguen un Megane 2 de un Megane 3.
+        # El cuidado está en el paréntesis de adelante, que pide DOS VOCALES: sin eso el patrón
+        # se lleva TPRT05, TMAP14 y CVMMF35, que son códigos de fábrica de verdad. Un modelo de
+        # auto se pronuncia y un código no — es la diferencia entre SCENIC y CVMMF.
+        re.compile(r'^(?=[A-Z]*[AEIOU][A-Z]*[AEIOU])[A-Z]{5,}\d{1,2}$'),
     )
     formas_prohibidas = formas_ambiguas + formas_solo_texto
     # Palabras de la descripción que quedan pegadas al año y disfrazan el rango:
@@ -3686,6 +3729,68 @@ def cargar_codigos_de_barras_masivo(pares, marca_id=None, pisar=True):
                           (barras_limpio, fila["id"]))
                 resumen["puestos"] += 1
     return resumen
+
+
+def puentes_que_hoy_no_se_generarian(limite=400):
+    """Códigos de fábrica cargados que el extractor de HOY ya no sacaría de una descripción.
+
+    Arreglar el extractor evita los puentes falsos que vienen. No arregla los que ya están
+    cargados, y esos son los que están ensuciando la búsqueda ahora mismo: cada vez que se le
+    enseña a la app a reconocer un modelo o un motor, queda atrás una camada de códigos que se
+    generaron con las reglas viejas y nadie vuelve a revisar.
+
+    Esto los encuentra sin inventar ningún criterio nuevo: le pasa cada código cargado por el
+    mismo extractor, escrito como si viniera adentro de una descripción, y se queda con los que
+    hoy NO saldrían. Si la regla nueva dice que «SUPER5» es el modelo de un Renault, entonces
+    el «SUPER5» que está cargado como código de fábrica tampoco lo es.
+
+    Solo mira los que unen productos de DOS listas distintas: esos son los que fabrican la
+    equivalencia falsa. Un código malo que cuelga un solo producto no está haciendo daño.
+
+    No borra nada: devuelve la lista para que decida una persona, igual que puentes_sospechosos().
+    """
+    try:
+        c.execute("""SELECT po.id AS pid, po.codigo_raw AS "Código",
+                            COUNT(DISTINCT p.id) AS "Productos que une",
+                            COUNT(DISTINCT p.marca_id) AS "Listas",
+                            GROUP_CONCAT(DISTINCT m.nombre) AS "Marcas"
+                     FROM productos po
+                     JOIN marcas mo ON mo.id = po.marca_id
+                     JOIN equivalencias e ON e.producto_a_id = po.id OR e.producto_b_id = po.id
+                     JOIN productos p ON p.id = CASE WHEN e.producto_a_id = po.id
+                                                     THEN e.producto_b_id ELSE e.producto_a_id END
+                     JOIN marcas m ON m.id = p.marca_id
+                     WHERE mo.tipo = 'OEM'
+                     GROUP BY po.id
+                     HAVING COUNT(DISTINCT p.marca_id) >= 2
+                     ORDER BY COUNT(DISTINCT p.id) DESC""")
+        candidatos = filas_a_listas(c)
+    except sqlite3.OperationalError as _err:
+        anotar_error("puentes_que_hoy_no_se_generarian", _err)
+        return []
+
+    salida = []
+    for fila in candidatos:
+        codigo = fila["Código"]
+        # Se le da la vuelta al extractor: si puesto adentro de una descripción no lo
+        # reconocería, entonces como código de fábrica tampoco debería estar. El texto de
+        # alrededor es el mínimo para que la función tenga algo que partir.
+        if extraer_codigos_de_texto(f"PIEZA {codigo} ORIG", minimo=1):
+            continue
+        # Un ejemplo de lo que está uniendo, que es lo que permite decidir sin salir a buscarlo.
+        c.execute("""SELECT p.descripcion AS d, m.nombre AS marca FROM equivalencias e
+                     JOIN productos p ON p.id = CASE WHEN e.producto_a_id = ?
+                                                     THEN e.producto_b_id ELSE e.producto_a_id END
+                     JOIN marcas m ON m.id = p.marca_id
+                     WHERE e.producto_a_id = ? OR e.producto_b_id = ? LIMIT 2""",
+                  (fila["pid"], fila["pid"], fila["pid"]))
+        ejemplos = filas_a_listas(c)
+        fila["Une por ejemplo"] = " ↔ ".join(f"{x['marca']}: {(x['d'] or '')[:34]}"
+                                              for x in ejemplos)
+        salida.append(fila)
+        if len(salida) >= limite:
+            break
+    return salida
 
 
 def listas_que_no_cruzan():
@@ -22713,6 +22818,68 @@ if pagina == PAGINAS[3]:
                                 avisar("ok", f"Listo: se borró «{_p['Código']}» y los {_n} "
                                              "vínculos falsos que colgaban de él.")
                                 st.rerun()
+            st.markdown("---")
+
+            # LOS QUE QUEDARON DE ANTES. Cada vez que se le enseña a la app a reconocer un
+            # modelo o un motor, queda atrás una camada de códigos generados con las reglas
+            # viejas que nadie vuelve a revisar. Arreglar el extractor evita los que vienen;
+            # esto encuentra los que ya están, sin inventar ningún criterio: les da la vuelta y
+            # los pasa por el mismo extractor de hoy.
+            st.markdown("**🧯 Puentes que hoy ya no se generarían**")
+            explicar(
+                "Códigos de fábrica cargados que la app de hoy ya no sacaría de una "
+                "descripción, porque aprendió que son modelos o motores.",
+                "Es la lista de lo que quedó de antes. La app fue aprendiendo a reconocer "
+                "modelos de auto («SUPER5», «308HDI»), designaciones de motor («6PF-305», "
+                "«C1J-C1L») y listas de modelos, pero lo que ya estaba cargado se quedó "
+                "adentro.\n\n"
+                "No hay criterio nuevo acá: a cada código cargado se le da la vuelta y se lo "
+                "pasa por el **mismo** extractor que se usa al importar. Si hoy no lo sacaría "
+                "de un texto, tampoco debería estar como código de fábrica.\n\n"
+                "Solo aparecen los que unen productos de **dos listas distintas**, que son los "
+                "que fabrican equivalencias falsas. Uno que cuelga un solo producto no hace daño."
+            )
+            if st.button("🧯 Buscar los que quedaron de antes", key="btn_puentes_viejos"):
+                with st.spinner("Pasando cada código por el extractor de hoy..."):
+                    st.session_state["puentes_viejos"] = puentes_que_hoy_no_se_generarian()
+            _pv = st.session_state.get("puentes_viejos")
+            if _pv is not None:
+                if not _pv:
+                    st.success("No quedó ninguno: todos los códigos de fábrica cargados que "
+                               "unen dos listas los reconocería el extractor de hoy.")
+                else:
+                    st.warning(
+                        f"**{len(_pv)} código(s) cargados que hoy no se generarían.** Están "
+                        "uniendo productos de listas distintas, o sea que cada uno está "
+                        "fabricando equivalencias falsas ahora mismo."
+                    )
+                    st.dataframe([{k: v for k, v in x.items() if k != "pid"} for x in _pv],
+                                  width="stretch", hide_index=True)
+                    st.download_button(
+                        "⬇️ Bajarlos en Excel antes de decidir",
+                        data=to_excel_bytes([{k: v for k, v in x.items() if k != "pid"}
+                                              for x in _pv]),
+                        file_name="puentes_viejos.xlsx",
+                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+                    st.caption(
+                        "Se borra el código de fábrica y los vínculos que colgaban de él. **Los "
+                        "productos no se tocan**: precios, stock e historial quedan igual, y lo "
+                        "que desaparece es la equivalencia que no tenía por qué existir."
+                    )
+                    if st.checkbox("Miré la lista y entiendo qué se borra", key="conf_p_viejos"):
+                        if candado("borrar los puentes viejos",
+                                    st.button(f"🗑️ Borrar los {len(_pv)}", type="primary",
+                                               key="btn_borrar_p_viejos"),
+                                    "borrar_los_puentes_viejos"):
+                            _tot = 0
+                            for _x in _pv:
+                                _tot += borrar_puente(_x["pid"])
+                            st.session_state.pop("puentes_viejos", None)
+                            invalidar_salud()
+                            avisar("ok", f"Se borraron {len(_pv)} código(s) de fábrica falsos y "
+                                          f"{_tot} vínculo(s) que colgaban de ellos. Los "
+                                          "productos quedaron intactos.")
+                            st.rerun()
             st.markdown("---")
 
             st.markdown("**🌐 Leer equivalencias del catálogo digital del proveedor**")

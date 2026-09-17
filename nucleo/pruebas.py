@@ -691,6 +691,48 @@ def probar_busqueda_por_codigo_de_barras():
     con.close()
 
 
+def probar_modelos_y_motores_no_son_codigos_de_fabrica():
+    """Una lista de juntas metía en la columna de OEM el modelo de la máquina o el motor.
+
+    Salió de mirar la pantalla de puentes falsos sobre la base del negocio: «6PF-305» (un motor
+    Perkins), «SUPER5» (un Renault), «308HDI» (un Peugeot), «L75-L76» (un Scania), «C1J-C1L»
+    (motores Renault), «182.A8000» (un motor Fiat). Cada uno colgaba de sí mismo todo lo que lo
+    nombrara: solo «6PF-305» aparece en 42 descripciones del catálogo real, o sea 861 pares de
+    productos hermanados por compartir el motor y nada más.
+
+    Lo que hay que cuidar es el otro lado, y por eso está acá: dos de las formas parecidas SON
+    códigos de verdad. «55PP27-01» es un sensor de presión Bosch y «1201-K1» una bomba de agua
+    Citroën. Cualquier regla que los toque hace más daño del que arregla — se midió contra los
+    21.734 códigos OEM con vínculos del catálogo real y ninguna de las reglas nuevas le pega a
+    uno que citen dos proveedores distintos."""
+    def saca(texto):
+        return codigos.extraer_codigos_de_texto(texto)
+
+    igual(saca("Jgo.Jtas.Carter PERKINS 6PF-305"), [], "un motor Perkins no es un código")
+    igual(saca("Jta.Tapa Cil. RENAULT R5 SUPER5"), [], "«SUPER5» es el modelo del Renault")
+    igual(saca("JTC PEUGEOT 308HDI/308 2.0HDI"), [], "«308HDI» es el modelo con la motorización")
+    igual(saca("Jta.Carter SCANIA L75-L76"), [], "dos modelos del mismo prefijo, no un código")
+    igual(saca("Jgo.Jtas.Motor RENAULT C1J-C1L"), [], "dos motores del mismo prefijo")
+    igual(saca("Jta.Tapa Valvulas FIAT 182.A8000"), [], "el número de motor que Fiat pone en el block")
+    igual(saca("Jgo de motor KOMATSU 4D105-3"), [], "un motor Komatsu")
+    igual(saca("Jgo juntas motor John Deere 3350-3550-650-6600-7500"), [],
+          "cinco modelos encadenados no son un código")
+    igual(saca("Jta.Tapa Cil.Esp.1,50 RODILLO"), [], "«Cil.Esp.1» es la descripción abreviada")
+
+    # Y LO QUE NO SE PUEDE ROMPER. Si alguna de estas falla, la regla nueva está de más:
+    # cada uno de estos códigos es un puente real entre dos listas de proveedor.
+    igual(saca("SENSOR PRESION COMBUSTIBLE REF ORIG 55PP27-01"), ["55PP27-01"],
+          "«55PP27-01» es un sensor de presión Bosch, no un motor")
+    igual(saca("BOMBA DE AGUA CITROEN C4 REF ORIG 1201-K1"), ["1201-K1"],
+          "«1201-K1» es una bomba de agua Citroën")
+    igual(saca("TERMOSTATO PEUGEOT 206 REF ORIG 1336-Y80"), ["1336-Y80"],
+          "«1336-Y80» es un termostato Peugeot")
+    igual(saca("SENSOR MAP PALIO Fiorino TPRT05 THOMSON"), ["TPRT05"],
+          "«TPRT05» es un sensor Thomson: se parece a un modelo pero no tiene vocales, y por "
+          "ahí se lo distingue de SCENIC2 o MEGANE2")
+    igual(saca("ROTULA VW GOL ORIG 6Q0407365"), ["6Q0407365"], "un código VW de toda la vida")
+
+
 def probar_lo_que_excel_le_come_a_un_codigo_largo():
     """Excel rompe los números largos al guardar, y el resultado parece correcto.
 
@@ -1057,6 +1099,7 @@ def main():
                    probar_el_pais_del_codigo_de_barras,
                    probar_el_digito_verificador_del_codigo_de_barras,
                    probar_lo_que_excel_le_come_a_un_codigo_largo,
+                   probar_modelos_y_motores_no_son_codigos_de_fabrica,
                    probar_bed_ford_no_es_ford,
                    probar_la_marca_abreviada_es_la_misma_marca,
                    probar_ref_orig_pegado_no_es_codigo,
