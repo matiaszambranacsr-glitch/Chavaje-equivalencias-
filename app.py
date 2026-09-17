@@ -3732,38 +3732,55 @@ def cargar_codigos_de_barras_masivo(pares, marca_id=None, pisar=True):
 
 
 def puentes_que_hoy_no_se_generarian(limite=400):
-    """Códigos de fábrica cargados que el extractor de HOY ya no sacaría de una descripción.
+    """Códigos de fábrica que el extractor de HOY ya no sacaría de una descripción.
 
-    Arreglar el extractor evita los puentes falsos que vienen. No arregla los que ya están
-    cargados, y esos son los que están ensuciando la búsqueda ahora mismo: cada vez que se le
-    enseña a la app a reconocer un modelo o un motor, queda atrás una camada de códigos que se
-    generaron con las reglas viejas y nadie vuelve a revisar.
+    Arreglar el extractor evita los puentes falsos que vienen. No arregla los que ya están, y
+    esos son los que ensucian la búsqueda ahora mismo: cada vez que se le enseña a la app a
+    reconocer un modelo o un motor, queda atrás una camada generada con las reglas viejas que
+    nadie vuelve a revisar.
 
-    Esto los encuentra sin inventar ningún criterio nuevo: le pasa cada código cargado por el
-    mismo extractor, escrito como si viniera adentro de una descripción, y se queda con los que
-    hoy NO saldrían. Si la regla nueva dice que «SUPER5» es el modelo de un Renault, entonces
-    el «SUPER5» que está cargado como código de fábrica tampoco lo es.
+    Los encuentra sin inventar ningún criterio: le da la vuelta a cada código cargado, lo pone
+    adentro de un texto y lo pasa por el MISMO extractor que se usa al importar. Si hoy no lo
+    sacaría de una descripción, tampoco debería estar como código de fábrica.
 
-    Solo mira los que unen productos de DOS listas distintas: esos son los que fabrican la
-    equivalencia falsa. Un código malo que cuelga un solo producto no está haciendo daño.
+    MIRA LAS DOS TABLAS, y esto es lo que fallaba en la primera versión: solo miraba
+    `equivalencias` —los vínculos ya aprobados— y los códigos que generan el problema estaban
+    casi todos en `equivalencias_pendientes`, esperando revisión. El usuario corría la limpieza,
+    no encontraba nada, y los puentes falsos seguían ahí, en la cola. Un código que ensucia
+    cuatro pendientes ensucia igual: son cuatro decisiones que hay que tomar por algo que no es
+    un código.
 
-    No borra nada: devuelve la lista para que decida una persona, igual que puentes_sospechosos().
+    Un código malo que cuelga un solo producto no hace daño, así que se piden dos productos —y
+    si son de dos listas distintas, peor, porque esa es la equivalencia falsa entre proveedores.
     """
     try:
-        c.execute("""SELECT po.id AS pid, po.codigo_raw AS "Código",
-                            COUNT(DISTINCT p.id) AS "Productos que une",
-                            COUNT(DISTINCT p.marca_id) AS "Listas",
-                            GROUP_CONCAT(DISTINCT m.nombre) AS "Marcas"
-                     FROM productos po
-                     JOIN marcas mo ON mo.id = po.marca_id
-                     JOIN equivalencias e ON e.producto_a_id = po.id OR e.producto_b_id = po.id
-                     JOIN productos p ON p.id = CASE WHEN e.producto_a_id = po.id
-                                                     THEN e.producto_b_id ELSE e.producto_a_id END
-                     JOIN marcas m ON m.id = p.marca_id
-                     WHERE mo.tipo = 'OEM'
-                     GROUP BY po.id
-                     HAVING COUNT(DISTINCT p.marca_id) >= 2
-                     ORDER BY COUNT(DISTINCT p.id) DESC""")
+        # Los vecinos de cada código, de las DOS tablas y en los dos sentidos. Va como CTE y no
+        # repetido en la consulta para que las dos preguntas —cuántos une y qué une— salgan de
+        # la misma definición: si se escriben dos veces, se despegan.
+        c.execute("""
+            WITH vecinos AS (
+                SELECT producto_a_id AS ancla, producto_b_id AS otro, 1 AS cargada
+                  FROM equivalencias
+                UNION ALL
+                SELECT producto_b_id, producto_a_id, 1 FROM equivalencias
+                UNION ALL
+                SELECT producto_a_id, producto_b_id, 0 FROM equivalencias_pendientes
+                UNION ALL
+                SELECT producto_b_id, producto_a_id, 0 FROM equivalencias_pendientes
+            )
+            SELECT po.id AS pid, po.codigo_raw AS "Código",
+                   COUNT(DISTINCT v.otro) AS "Productos que une",
+                   COUNT(DISTINCT p.marca_id) AS "Listas",
+                   SUM(v.cargada) AS "Cargados",
+                   SUM(1 - v.cargada) AS "Esperando revisión"
+            FROM productos po
+            JOIN marcas mo ON mo.id = po.marca_id
+            JOIN vecinos v ON v.ancla = po.id
+            JOIN productos p ON p.id = v.otro
+            WHERE mo.tipo = 'OEM'
+            GROUP BY po.id
+            HAVING COUNT(DISTINCT v.otro) >= 2
+            ORDER BY COUNT(DISTINCT v.otro) DESC""")
         candidatos = filas_a_listas(c)
     except sqlite3.OperationalError as _err:
         anotar_error("puentes_que_hoy_no_se_generarian", _err)
@@ -3772,18 +3789,34 @@ def puentes_que_hoy_no_se_generarian(limite=400):
     salida = []
     for fila in candidatos:
         codigo = fila["Código"]
-        # Se le da la vuelta al extractor: si puesto adentro de una descripción no lo
-        # reconocería, entonces como código de fábrica tampoco debería estar. El texto de
-        # alrededor es el mínimo para que la función tenga algo que partir.
-        if extraer_codigos_de_texto(f"PIEZA {codigo} ORIG", minimo=1):
+        # LA PREGUNTA EXACTA IMPORTA, y la primera versión hacía la equivocada.
+        #
+        # El extractor tiene dos juegos de reglas. Unas son AMBIGUAS: aciertan casi siempre,
+        # pero la misma forma la tiene algún código de repuesto de verdad, así que dejan de
+        # aplicarse en cuanto hay alguna señal de que eso ES un código. Las otras son texto sin
+        # discusión: un modelo de auto no deja de serlo por nada.
+        #
+        # Preguntándole a secas, se aplican las ambiguas también, y el control marcaba como
+        # falso a «AT-05103R» —un código real, que une dos motores paso a paso de la misma
+        # aplicación Fiat/Renault— y a «BX8.4d», que es un zócalo de lámpara. Borrarlos habría
+        # sacado vínculos buenos, que es exactamente lo que este control existe para no hacer.
+        #
+        # La pregunta correcta es más dura: «suponiendo que este código YA estuviera cargado en
+        # la lista de un proveedor, ¿el extractor lo seguiría rechazando?». Así solo quedan las
+        # formas que son texto sin discusión. Probado sobre 22 casos de la base real: respeta
+        # los 8 códigos verdaderos y marca las 14 basuras, la familia «505REF» incluida.
+        if extraer_codigos_de_texto(f"PIEZA {codigo} ORIG", minimo=1,
+                                    codigos_conocidos={sanitizar(codigo)}):
             continue
         # Un ejemplo de lo que está uniendo, que es lo que permite decidir sin salir a buscarlo.
-        c.execute("""SELECT p.descripcion AS d, m.nombre AS marca FROM equivalencias e
-                     JOIN productos p ON p.id = CASE WHEN e.producto_a_id = ?
-                                                     THEN e.producto_b_id ELSE e.producto_a_id END
-                     JOIN marcas m ON m.id = p.marca_id
-                     WHERE e.producto_a_id = ? OR e.producto_b_id = ? LIMIT 2""",
-                  (fila["pid"], fila["pid"], fila["pid"]))
+        c.execute("""SELECT p.descripcion AS d, m.nombre AS marca FROM (
+                         SELECT producto_a_id AS a, producto_b_id AS b FROM equivalencias
+                         UNION ALL SELECT producto_b_id, producto_a_id FROM equivalencias
+                         UNION ALL SELECT producto_a_id, producto_b_id FROM equivalencias_pendientes
+                         UNION ALL SELECT producto_b_id, producto_a_id FROM equivalencias_pendientes
+                     ) v JOIN productos p ON p.id = v.b
+                       JOIN marcas m ON m.id = p.marca_id
+                     WHERE v.a = ? LIMIT 2""", (fila["pid"],))
         ejemplos = filas_a_listas(c)
         fila["Une por ejemplo"] = " ↔ ".join(f"{x['marca']}: {(x['d'] or '')[:34]}"
                                               for x in ejemplos)
@@ -3791,6 +3824,20 @@ def puentes_que_hoy_no_se_generarian(limite=400):
         if len(salida) >= limite:
             break
     return salida
+
+
+def borrar_puente_y_sus_pendientes(producto_oem_id):
+    """Saca un código de fábrica falso de las dos tablas. Devuelve (cargados, pendientes).
+
+    borrar_puente() borra el producto OEM y sus vínculos aprobados, pero los pendientes que
+    colgaban de él quedaban en la cola — y al aprobarlos volvían a crear exactamente el vínculo
+    falso que se acababa de borrar."""
+    pendientes = 0
+    try:
+        pendientes = rechazar_pendientes_de_producto(producto_oem_id)
+    except Exception as _err:
+        anotar_error("borrar_puente_y_sus_pendientes", _err)
+    return borrar_puente(producto_oem_id), pendientes
 
 
 def listas_que_no_cruzan():
@@ -21909,6 +21956,75 @@ if pagina == PAGINAS[3]:
                             st.rerun()
             else:
                 st.caption(f"✅ Ningún código con más de {minimo_puente} vínculos.")
+            # LOS QUE QUEDARON DE ANTES. Cada vez que se le enseña a la app a reconocer un
+            # modelo o un motor, queda atrás una camada de códigos generados con las reglas
+            # viejas que nadie vuelve a revisar. Arreglar el extractor evita los que vienen;
+            # esto encuentra los que ya están, sin inventar ningún criterio: les da la vuelta y
+            # los pasa por el mismo extractor de hoy.
+            st.markdown("**🧯 Puentes que hoy ya no se generarían**")
+            explicar(
+                "Códigos de fábrica cargados que la app de hoy ya no sacaría de una "
+                "descripción, porque aprendió que son modelos o motores.",
+                "Es la lista de lo que quedó de antes. La app fue aprendiendo a reconocer "
+                "modelos de auto («SUPER5», «308HDI»), designaciones de motor («6PF-305», "
+                "«C1J-C1L») y listas de modelos, pero lo que ya estaba cargado se quedó "
+                "adentro.\n\n"
+                "No hay criterio nuevo acá: a cada código cargado se le da la vuelta y se lo "
+                "pasa por el **mismo** extractor que se usa al importar. Si hoy no lo sacaría "
+                "de un texto, tampoco debería estar como código de fábrica.\n\n"
+                "Mira **las dos colas**: los vínculos ya aprobados y los que están esperando "
+                "revisión. La primera versión de esto solo miraba los aprobados, y los códigos "
+                "que hacen el daño estaban casi todos en la cola de pendientes — se corría la "
+                "limpieza, no aparecía nada, y los puentes falsos seguían ahí.\n\n"
+                "Uno que cuelga un solo producto no hace daño, así que se piden dos."
+            )
+            if st.button("🧯 Buscar los que quedaron de antes", key="btn_puentes_viejos"):
+                with st.spinner("Pasando cada código por el extractor de hoy..."):
+                    st.session_state["puentes_viejos"] = puentes_que_hoy_no_se_generarian()
+            _pv = st.session_state.get("puentes_viejos")
+            if _pv is not None:
+                if not _pv:
+                    st.success("No quedó ninguno: todos los códigos de fábrica cargados que "
+                               "unen dos listas los reconocería el extractor de hoy.")
+                else:
+                    _carg = sum(x.get("Cargados") or 0 for x in _pv)
+                    _pend = sum(x.get("Esperando revisión") or 0 for x in _pv)
+                    st.warning(
+                        f"**{len(_pv)} código(s) que hoy no se generarían**, uniendo "
+                        f"{_carg} vínculo(s) ya cargados y {_pend} esperando revisión."
+                    )
+                    st.dataframe([{k: v for k, v in x.items() if k != "pid"} for x in _pv],
+                                  width="stretch", hide_index=True)
+                    st.download_button(
+                        "⬇️ Bajarlos en Excel antes de decidir",
+                        data=to_excel_bytes([{k: v for k, v in x.items() if k != "pid"}
+                                              for x in _pv]),
+                        file_name="puentes_viejos.xlsx",
+                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+                    st.caption(
+                        "Se borra el código de fábrica, los vínculos que colgaban de él **y los "
+                        "pendientes que generaba** — si no, al aprobar la cola se vuelve a crear "
+                        "exactamente el vínculo que se acaba de borrar. **Los productos no se "
+                        "tocan**: precios, stock e historial quedan igual."
+                    )
+                    if st.checkbox("Miré la lista y entiendo qué se borra", key="conf_p_viejos"):
+                        if candado("borrar los puentes viejos",
+                                    st.button(f"🗑️ Borrar los {len(_pv)}", type="primary",
+                                               key="btn_borrar_p_viejos"),
+                                    "borrar_los_puentes_viejos"):
+                            _tot = _tot_p = 0
+                            for _x in _pv:
+                                _a, _b = borrar_puente_y_sus_pendientes(_x["pid"])
+                                _tot += _a
+                                _tot_p += _b
+                            st.session_state.pop("puentes_viejos", None)
+                            invalidar_salud()
+                            avisar("ok", f"Se borraron {len(_pv)} código(s) de fábrica falsos, "
+                                          f"{_tot} vínculo(s) cargados y {_tot_p} pendiente(s). "
+                                          "Los productos quedaron intactos.")
+                            st.rerun()
+            st.markdown("---")
+
             st.markdown("**🔗 Vínculos que unen dos familias de repuestos**")
             explicar(
                 "Dos grupos sanos pegados por un solo vínculo malo. Cortándolo se separan.",
@@ -21976,8 +22092,24 @@ if pagina == PAGINAS[3]:
             if st.session_state.get("dudosas_cargadas"):
                 dudosas, revisadas = st.session_state["dudosas_cargadas"]
                 if not dudosas:
+                    # No decir «está todo bien»: este control mira la CONFIANZA de cada vínculo
+                    # y no si el código que los une es un código. Un modelo de auto cargado como
+                    # código de fábrica une repuestos que comparten auto, y por eso saca buena
+                    # confianza — pasa este control con el mejor puntaje y sigue estando mal.
+                    # Decirlo importa: alguien vio este cartel en verde, entendió «no hay nada
+                    # que limpiar», y los puentes falsos seguían ahí arriba en la misma pantalla.
                     st.success(f"✅ Se revisaron {revisadas:,} vínculos y ninguno quedó por debajo del "
                                 "umbral de confianza.")
+                    st.caption("Ojo: esto mide la **confianza** de cada vínculo, no si el "
+                                "código que los unió es un código de verdad.")
+                    explicar(
+                        "Un puente falso puede pasar este control con el mejor puntaje.",
+                        "Un modelo de auto o un número de motor cargado como código de fábrica "
+                        "une repuestos que comparten el mismo auto — y compartir auto es "
+                        "justamente lo que sube la confianza. Así que sale en verde acá y sigue "
+                        "estando mal.\n\nPara eso están **🌉 Códigos puente** y **🧯 Puentes "
+                        "que hoy ya no se generarían**, más arriba en esta misma pantalla."
+                    )
                 else:
                     st.warning(
                         f"⚠️ De {revisadas:,} vínculos revisados, **{len(dudosas)} tienen evidencia en "
@@ -22818,68 +22950,6 @@ if pagina == PAGINAS[3]:
                                 avisar("ok", f"Listo: se borró «{_p['Código']}» y los {_n} "
                                              "vínculos falsos que colgaban de él.")
                                 st.rerun()
-            st.markdown("---")
-
-            # LOS QUE QUEDARON DE ANTES. Cada vez que se le enseña a la app a reconocer un
-            # modelo o un motor, queda atrás una camada de códigos generados con las reglas
-            # viejas que nadie vuelve a revisar. Arreglar el extractor evita los que vienen;
-            # esto encuentra los que ya están, sin inventar ningún criterio: les da la vuelta y
-            # los pasa por el mismo extractor de hoy.
-            st.markdown("**🧯 Puentes que hoy ya no se generarían**")
-            explicar(
-                "Códigos de fábrica cargados que la app de hoy ya no sacaría de una "
-                "descripción, porque aprendió que son modelos o motores.",
-                "Es la lista de lo que quedó de antes. La app fue aprendiendo a reconocer "
-                "modelos de auto («SUPER5», «308HDI»), designaciones de motor («6PF-305», "
-                "«C1J-C1L») y listas de modelos, pero lo que ya estaba cargado se quedó "
-                "adentro.\n\n"
-                "No hay criterio nuevo acá: a cada código cargado se le da la vuelta y se lo "
-                "pasa por el **mismo** extractor que se usa al importar. Si hoy no lo sacaría "
-                "de un texto, tampoco debería estar como código de fábrica.\n\n"
-                "Solo aparecen los que unen productos de **dos listas distintas**, que son los "
-                "que fabrican equivalencias falsas. Uno que cuelga un solo producto no hace daño."
-            )
-            if st.button("🧯 Buscar los que quedaron de antes", key="btn_puentes_viejos"):
-                with st.spinner("Pasando cada código por el extractor de hoy..."):
-                    st.session_state["puentes_viejos"] = puentes_que_hoy_no_se_generarian()
-            _pv = st.session_state.get("puentes_viejos")
-            if _pv is not None:
-                if not _pv:
-                    st.success("No quedó ninguno: todos los códigos de fábrica cargados que "
-                               "unen dos listas los reconocería el extractor de hoy.")
-                else:
-                    st.warning(
-                        f"**{len(_pv)} código(s) cargados que hoy no se generarían.** Están "
-                        "uniendo productos de listas distintas, o sea que cada uno está "
-                        "fabricando equivalencias falsas ahora mismo."
-                    )
-                    st.dataframe([{k: v for k, v in x.items() if k != "pid"} for x in _pv],
-                                  width="stretch", hide_index=True)
-                    st.download_button(
-                        "⬇️ Bajarlos en Excel antes de decidir",
-                        data=to_excel_bytes([{k: v for k, v in x.items() if k != "pid"}
-                                              for x in _pv]),
-                        file_name="puentes_viejos.xlsx",
-                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
-                    st.caption(
-                        "Se borra el código de fábrica y los vínculos que colgaban de él. **Los "
-                        "productos no se tocan**: precios, stock e historial quedan igual, y lo "
-                        "que desaparece es la equivalencia que no tenía por qué existir."
-                    )
-                    if st.checkbox("Miré la lista y entiendo qué se borra", key="conf_p_viejos"):
-                        if candado("borrar los puentes viejos",
-                                    st.button(f"🗑️ Borrar los {len(_pv)}", type="primary",
-                                               key="btn_borrar_p_viejos"),
-                                    "borrar_los_puentes_viejos"):
-                            _tot = 0
-                            for _x in _pv:
-                                _tot += borrar_puente(_x["pid"])
-                            st.session_state.pop("puentes_viejos", None)
-                            invalidar_salud()
-                            avisar("ok", f"Se borraron {len(_pv)} código(s) de fábrica falsos y "
-                                          f"{_tot} vínculo(s) que colgaban de ellos. Los "
-                                          "productos quedaron intactos.")
-                            st.rerun()
             st.markdown("---")
 
             st.markdown("**🌐 Leer equivalencias del catálogo digital del proveedor**")

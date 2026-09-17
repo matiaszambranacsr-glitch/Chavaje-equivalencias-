@@ -528,6 +528,9 @@ extractor viejo y el nuevo:
 
 ## Los puentes falsos que quedaron de antes
 
+*(Reescrito: la primera versión no encontraba nada y el usuario lo reportó. Los tres errores
+están abajo.)*
+
 Arreglar el extractor evita los que vienen. Los que ya están cargados siguen ensuciando la
 búsqueda, y son los que se ven desde el mostrador. Cada vez que se le enseña a la app a
 reconocer un modelo o un motor queda atrás una camada generada con las reglas viejas que nadie
@@ -542,6 +545,48 @@ fabrican la equivalencia falsa.
 Probado inyectando los seis casos de la pantalla real junto a tres códigos verdaderos: detecta
 los 6, respeta los 3, y al borrarlos desaparecen solo los códigos de fábrica falsos y sus
 vínculos — los productos quedan intactos.
+
+### Los tres errores de la primera versión
+
+**1. Miraba la tabla equivocada.** Solo revisaba `equivalencias` —los vínculos ya aprobados— y
+los códigos que hacen el daño estaban casi todos en `equivalencias_pendientes`, esperando
+revisión. Se corría la limpieza, no aparecía nada, y los puentes falsos seguían ahí. Un código
+que ensucia cuatro pendientes ensucia igual: son cuatro decisiones que hay que tomar por algo
+que no es un código. Ahora mira las dos colas, y el borrado se lleva los pendientes también —
+si no, al aprobar la cola se vuelve a crear exactamente el vínculo que se acababa de borrar.
+
+**2. Estaba en la pantalla equivocada.** Quedó en 🧠 Calidad y aprendizaje, decimosegundo de la
+lista, cuando el que tiene el problema entra a 🧹 Limpiar vínculos. Ahora va segundo ahí, al
+lado de «Códigos puente».
+
+**3. Le hacía al extractor la pregunta equivocada, y esa es la interesante.** El extractor tiene
+dos juegos de reglas: unas AMBIGUAS —aciertan casi siempre, pero la misma forma la tiene algún
+código de verdad, así que dejan de aplicarse en cuanto hay señal de que eso ES un código— y
+otras que son texto sin discusión. Preguntándole a secas se aplican las ambiguas también, y el
+control marcaba como falsos a `AT-05103R` (un código real, que une dos motores paso a paso de
+la misma aplicación Fiat/Renault) y a `BX8.4d` (un zócalo de lámpara). **Borrarlos habría sacado
+vínculos buenos, que es justo lo que este control existe para no hacer.**
+
+La pregunta correcta es más dura: *«suponiendo que este código YA estuviera cargado en la lista
+de un proveedor, ¿el extractor lo seguiría rechazando?»*. Así solo sobreviven las formas que son
+texto sin discusión. Probado sobre 22 casos de la base real: respeta los 8 códigos verdaderos y
+marca las 14 basuras, la familia `505REF` incluida.
+
+Sobre el catálogo real, con la pregunta bien hecha: **81 códigos falsos, 185 vínculos cargados y
+15 pendientes**, y ninguno de los 7 códigos reales de control.
+
+## El cartel verde que decía «está todo bien» sobre algo que no controla
+
+El usuario corrió «🔍 Revisar los vínculos que YA están cargados», le dijo *«se revisaron 26.685
+vínculos y ninguno quedó por debajo del umbral de confianza»*, y entendió lo razonable: que no
+había nada que limpiar. Los puentes falsos estaban ahí arriba, en la misma pantalla.
+
+Ese control mide la **confianza** de cada vínculo, no si el código que los unió es un código. Y
+un modelo de auto cargado como código de fábrica une repuestos que comparten el mismo auto —
+compartir auto es justamente lo que *sube* la confianza. Sale en verde y sigue estando mal.
+
+El cartel ahora dice qué no mira y adónde ir. Un control que contesta una pregunta distinta de
+la que le hacen es peor que no tenerlo: manda a la gente a otro lado convencida.
 
 ## Lo que Excel le come a un código largo, y por qué es peor que una fecha
 
