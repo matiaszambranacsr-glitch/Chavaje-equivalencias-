@@ -8818,16 +8818,14 @@ def guardar_autos_de_ficha(codigo, nombre_marca, autos, tipo_pieza=""):
     return guardar_aplicaciones(filas, nombre_marca, "ficha del portal", tipo_pieza)
 
 
-def buscar_imagen_en_ficha(url_ficha, tiempo_maximo=12):
+def buscar_imagen_en_ficha(url_ficha, tiempo_maximo=12, sesion=None):
     """Busca la foto del producto dentro de la ficha oficial del proveedor. Es la fuente más
     confiable que hay gratis: es la foto de ESE código, puesta por el propio proveedor.
     No existe ninguna base pública y gratuita de fotos por número de parte — la del rubro
     (TecDoc) es un servicio pago con licencia."""
-    import requests
     from urllib.parse import urljoin
     try:
-        respuesta = requests.get(url_ficha, timeout=tiempo_maximo,
-                                  headers={"User-Agent": "Mozilla/5.0 (compatible; EquivalenciasElChavo/1.0)"})
+        respuesta = _traer_pagina(url_ficha, tiempo_maximo=tiempo_maximo, sesion=sesion)
         if respuesta.status_code != 200:
             return None, f"la ficha respondió {respuesta.status_code}"
         html = respuesta.text
@@ -8952,11 +8950,13 @@ def bajar_fotos_desde_catalogo(marca_id, limite=100, progreso=None, hilos=6, liv
     """Para los productos de una marca sin foto: entra a la ficha oficial del proveedor de cada
     código y trae la foto de ahí. Los códigos cuya ficha no tiene foto quedan marcados para no
     volver a consultarlos en cada tanda."""
-    c.execute("SELECT url_ficha_template FROM marcas WHERE id = ?", (marca_id,))
+    c.execute("SELECT nombre, url_ficha_template FROM marcas WHERE id = ?", (marca_id,))
     fila = c.fetchone()
     if not fila or not fila["url_ficha_template"]:
         return 0, [("", "esa marca no tiene cargada la dirección de su catálogo")], 0
     plantilla = fila["url_ficha_template"]
+    # Si ese catálogo pide usuario y contraseña, se entra UNA vez y se reusa para toda la tanda.
+    sesion = sesion_para_el_catalogo(fila["nombre"])
 
     c.execute(f"""SELECT id, codigo_raw FROM productos
                   WHERE marca_id = ? AND imagen_url IS NULL
@@ -8971,7 +8971,7 @@ def bajar_fotos_desde_catalogo(marca_id, limite=100, progreso=None, hilos=6, liv
     def traer(tarea):
         _, codigo = tarea
         url_ficha = plantilla.replace("{codigo}", quote(str(codigo), safe=""))
-        return buscar_imagen_en_ficha(url_ficha)
+        return buscar_imagen_en_ficha(url_ficha, sesion=sesion)
 
     resultados = _bajar_en_paralelo(pendientes, traer, hilos=hilos, progreso=progreso,
                                     cancelado=cancelado)
@@ -8997,10 +8997,136 @@ def bajar_fotos_desde_catalogo(marca_id, limite=100, progreso=None, hilos=6, liv
             conn.commit()
         if definitivo:
             sin_foto += 1
+    _si_falla_casi_todo_la_sesion_venció(fila["nombre"], sesion, len(fallidas), len(pendientes))
     return bajadas, fallidas, sin_foto
 
 
-def codigos_en_una_ficha(url_ficha, codigo_propio, tiempo_maximo=12):
+# --------------------------------------------------------------------------------------------
+# CATÁLOGOS QUE PIDEN USUARIO Y CONTRASEÑA
+# --------------------------------------------------------------------------------------------
+# Muchos proveedores tienen la ficha detrás de un login. Sin esto, la app pide la página, el
+# sitio le devuelve el formulario de ingreso, y de ahí no sale ni foto ni equivalencia: el
+# catálogo entero queda afuera.
+#
+# LAS CREDENCIALES VAN EN LOS SECRETOS DE STREAMLIT Y NO EN LA BASE, y no es una preferencia:
+# todo lo que se guarda en la tabla de configuración sale de la app por dos puertas —el backup
+# que se sube solo al repositorio de GitHub, y el botón de bajar la base completa—. Una
+# contraseña guardada ahí termina copiada en el repositorio. En los secretos no toca la base,
+# así que no viaja en ninguna de las dos.
+#
+# En secrets.toml (panel de Streamlit Cloud → Settings → Secrets), una sección por marca, con
+# el nombre de la marca tal como está cargada en la app:
+#
+#     [catalogo.MOTORARG]
+#     url_login = "https://ejemplo.com/ingresar"
+#     usuario = "micuenta@ejemplo.com"
+#     clave = "loquesea"
+#     campo_usuario = "email"        # cómo se llama el campo en el formulario (opcional)
+#     campo_clave = "password"       # idem (opcional)
+#     campos_extra = { recordar = "1" }   # cualquier otro campo que pida el formulario
+#
+# Los nombres de los campos se sacan mirando el formulario del proveedor: cada sitio los llama
+# distinto y no hay forma de adivinarlos.
+_SESIONES_DE_CATALOGO = {}
+_CANDADO_SESIONES = threading.Lock()
+
+
+def credenciales_de_catalogo(nombre_marca):
+    """Lo que hay en los secretos para esa marca, o {}. Nunca falla.
+
+    Leer st.secrets sin un secrets.toml levanta excepción —ver secretos_app()—, así que se pasa
+    siempre por ahí y no por st.secrets directo."""
+    try:
+        todo = secretos_app().get("catalogo") or {}
+        datos = todo.get(str(nombre_marca).strip().upper()) or {}
+        if datos.get("usuario") and datos.get("clave") and datos.get("url_login"):
+            return dict(datos)
+    except Exception as _err:
+        anotar_error("credenciales_de_catalogo", _err)
+    return {}
+
+
+def sesion_para_el_catalogo(nombre_marca, tiempo_maximo=12):
+    """Una sesión de requests ya logueada para esa marca, o None si no hay credenciales.
+
+    Se guarda y se reutiliza: una tanda son cientos de fichas, y loguearse en cada una sería
+    cientos de ingresos contra el sitio del proveedor — que es justo la forma más rápida de que
+    te bloqueen la cuenta.
+
+    Si el login falla no se rompe nada: se devuelve None y la consulta sigue como antes, sin
+    sesión. Lo más probable entonces es que la ficha conteste el formulario de ingreso y esa
+    ficha quede como «no se pudo leer», que es exactamente lo que pasaba hasta ahora."""
+    datos = credenciales_de_catalogo(nombre_marca)
+    if not datos:
+        return None
+    clave_cache = str(nombre_marca).strip().upper()
+    with _CANDADO_SESIONES:
+        sesion = _SESIONES_DE_CATALOGO.get(clave_cache)
+        if sesion is not None:
+            return sesion
+        try:
+            sesion = requests.Session()
+            sesion.headers.update(
+                {"User-Agent": "Mozilla/5.0 (compatible; EquivalenciasElChavo/1.0)"})
+            cuerpo = {datos.get("campo_usuario") or "usuario": datos["usuario"],
+                      datos.get("campo_clave") or "password": datos["clave"]}
+            cuerpo.update(dict(datos.get("campos_extra") or {}))
+            r = sesion.post(datos["url_login"], data=cuerpo, timeout=tiempo_maximo,
+                            allow_redirects=True)
+            # 200 con el formulario devuelto también es un login fallido, pero eso no se puede
+            # distinguir sin saber cómo es el sitio. Se guarda igual: si no entró, las fichas
+            # van a fallar y se va a ver en «no se pudieron leer», que es información honesta.
+            if r.status_code >= 400:
+                anotar_error("sesion_para_el_catalogo",
+                             Exception(f"{nombre_marca}: el ingreso respondió {r.status_code}"))
+                return None
+            _SESIONES_DE_CATALOGO[clave_cache] = sesion
+            return sesion
+        except Exception as _err:
+            anotar_error("sesion_para_el_catalogo", _err)
+            return None
+
+
+def olvidar_sesion_de_catalogo(nombre_marca=None):
+    """Tira la sesión guardada para que el próximo pedido vuelva a loguearse.
+
+    Hace falta porque las sesiones vencen: el sitio corta a las pocas horas y desde ese momento
+    todas las fichas contestan el formulario de ingreso. Sin esto, la sesión muerta quedaría
+    guardada hasta que alguien reiniciara el servidor."""
+    with _CANDADO_SESIONES:
+        if nombre_marca is None:
+            _SESIONES_DE_CATALOGO.clear()
+        else:
+            _SESIONES_DE_CATALOGO.pop(str(nombre_marca).strip().upper(), None)
+
+
+def _si_falla_casi_todo_la_sesion_venció(nombre_marca, sesion, fallidas, total):
+    """Tira la sesión guardada cuando la tanda falló casi entera.
+
+    Las sesiones vencen: el sitio corta a las pocas horas y desde ese momento TODAS las fichas
+    contestan el formulario de ingreso. Sin esto, la sesión muerta se seguiría usando hasta que
+    alguien reiniciara el servidor, y con las tandas corriendo solas en segundo plano eso son
+    miles de fichas marcadas como leídas sin haber leído nada.
+
+    Se pide que haya fallado más del 80% y no simplemente «alguna»: en un catálogo normal
+    siempre hay fichas que no existen o que no tienen foto, y tirar la sesión por eso
+    significaría volver a loguearse en cada tanda."""
+    if sesion is not None and total and fallidas > total * 0.8:
+        olvidar_sesion_de_catalogo(nombre_marca)
+
+
+def _traer_pagina(url, tiempo_maximo=12, sesion=None, **extra):
+    """Pide una página con la sesión del proveedor si la hay, o suelta si no.
+
+    Existe para que las dos funciones que leen fichas —la de fotos y la de equivalencias— usen
+    exactamente el mismo camino. Eran dos requests.get() casi iguales, y agregarle el login a
+    una sola habría dejado la otra afuera sin que se notara."""
+    pedir = (sesion or requests).get
+    cabeceras = {"User-Agent": "Mozilla/5.0 (compatible; EquivalenciasElChavo/1.0)"}
+    return pedir(url, timeout=tiempo_maximo, headers=cabeceras, **extra)
+
+
+def codigos_en_una_ficha(url_ficha, codigo_propio, tiempo_maximo=12, sesion=None):
     """Abre la ficha de un producto en el catálogo del proveedor y saca los OTROS códigos que
     aparecen ahí. Devuelve (lista de códigos, error).
 
@@ -9012,11 +9138,8 @@ def codigos_en_una_ficha(url_ficha, codigo_propio, tiempo_maximo=12):
     No inventa: usa el mismo extractor conservador de siempre (extraer_codigos_de_texto), que
     descarta palabras sin números, años, cilindradas y códigos de motor. Y descarta el propio
     código, que obviamente está escrito en su ficha."""
-    import requests
     try:
-        respuesta = requests.get(
-            url_ficha, timeout=tiempo_maximo,
-            headers={"User-Agent": "Mozilla/5.0 (compatible; EquivalenciasElChavo/1.0)"})
+        respuesta = _traer_pagina(url_ficha, tiempo_maximo=tiempo_maximo, sesion=sesion)
         if respuesta.status_code != 200:
             return [], f"la ficha respondió {respuesta.status_code}"
     except Exception as e:
@@ -9061,6 +9184,7 @@ def equivalencias_desde_catalogo(marca_id, limite=50, progreso=None, cancelado=N
     if not fila or not fila["url_ficha_template"]:
         return [], [("", "esa marca no tiene cargada la dirección de su catálogo")], 0
     plantilla, nombre_marca = fila["url_ficha_template"], fila["nombre"]
+    sesion = sesion_para_el_catalogo(nombre_marca)
 
     # Primero los que tienen stock: si algo va a salir del mostrador hoy, que sea eso lo que
     # tenga las equivalencias completas.
@@ -9082,7 +9206,8 @@ def equivalencias_desde_catalogo(marca_id, limite=50, progreso=None, cancelado=N
         seguro = re.sub(r"[^A-Za-z0-9._/-]", "", str(codigo).strip())[:60]
         if not seguro or ".." in seguro or seguro.startswith("/"):
             return None, "ese código no se puede usar en una dirección"
-        return codigos_en_una_ficha(plantilla.replace("{codigo}", quote(seguro, safe="")), codigo)
+        return codigos_en_una_ficha(plantilla.replace("{codigo}", quote(seguro, safe="")),
+                                    codigo, sesion=sesion)
 
     resultados = _bajar_en_paralelo(pendientes, traer, hilos=hilos, progreso=progreso,
                                     cancelado=cancelado)
@@ -9119,6 +9244,7 @@ def equivalencias_desde_catalogo(marca_id, limite=50, progreso=None, cancelado=N
     except sqlite3.OperationalError as _err:
         anotar_error("equivalencias_desde_catalogo/marcar", _err)
 
+    _si_falla_casi_todo_la_sesion_venció(nombre_marca, sesion, len(fallidas), len(pendientes))
     return propuestas, fallidas, len(pendientes)
 
 
@@ -22298,6 +22424,51 @@ if pagina == PAGINAS[3]:
                       "tiene una columna **Catálogo web** que dice cuáles ya lo tienen."
                 )
             else:
+                # Qué catálogos tienen usuario y contraseña cargados. Sin esto, configurarlos es
+                # invisible: se carga el secreto en el panel de Streamlit y no hay forma de
+                # saber desde la app si quedó bien escrito el nombre de la marca —que tiene que
+                # coincidir exactamente— hasta que una tanda entera falla.
+                _con_clave = [m["nombre"] for m in marcas_con_ficha
+                              if credenciales_de_catalogo(m["nombre"])]
+                _sin_clave = [m["nombre"] for m in marcas_con_ficha
+                              if not credenciales_de_catalogo(m["nombre"])]
+                if _con_clave:
+                    st.caption("🔐 Entran con usuario y contraseña: "
+                               + ", ".join(f"**{x}**" for x in _con_clave)
+                               + (f" · sin contraseña: {', '.join(_sin_clave)}"
+                                  if _sin_clave else ""))
+                    if st.button("🔄 Volver a entrar al catálogo", key="relogin_catalogo",
+                                  help="Si las fichas empezaron a fallar todas juntas, lo más "
+                                       "probable es que haya vencido la sesión. Esto la tira y "
+                                       "la próxima consulta vuelve a ingresar."):
+                        olvidar_sesion_de_catalogo()
+                        avisar("ok", "Listo: la próxima consulta vuelve a ingresar al catálogo.")
+                with st.expander("🔐 ¿El catálogo pide usuario y contraseña?"):
+                    st.markdown(
+                        "Se puede, y **la contraseña no se guarda en la app**: va en los "
+                        "secretos de Streamlit. Es a propósito — todo lo que se guarda en la "
+                        "app sale en el backup automático al repositorio y en el botón de bajar "
+                        "la base, así que una contraseña guardada ahí terminaría copiada en el "
+                        "repositorio.\n\n"
+                        "En el panel de Streamlit Cloud → **Settings → Secrets**, una sección "
+                        "por marca, con el nombre **igual** a como está cargada acá:\n\n"
+                        "```toml\n"
+                        "[catalogo.MOTORARG]\n"
+                        'url_login = "https://ejemplo.com/ingresar"\n'
+                        'usuario = "micuenta@ejemplo.com"\n'
+                        'clave = "loquesea"\n'
+                        'campo_usuario = "email"     # cómo llama el sitio al campo\n'
+                        'campo_clave = "password"\n'
+                        "```\n\n"
+                        "Los dos nombres de campo salen de mirar el formulario de ingreso del "
+                        "proveedor: cada sitio los llama distinto y no se pueden adivinar.\n\n"
+                        "**Avisale al proveedor.** Sos cliente y tenés acceso, pero muchos "
+                        "catálogos prohíben en sus condiciones consultarlos de forma "
+                        "automatizada, y cientos de consultas seguidas pueden hacer que te "
+                        "corten el usuario. Pedir permiso —o directamente el archivo— suele ser "
+                        "más rápido que todo esto."
+                    )
+
                 # Lo mismo que con las fotos: son miles de fichas y sentarse a esperar no es
                 # opción, así que puede avanzar solo de a 15 por día. Sale a internet, por eso
                 # se elige a mano. Al lado va cuánto falta, que es lo que dice si sirve

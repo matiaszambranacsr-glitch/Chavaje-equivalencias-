@@ -486,6 +486,53 @@ tres veces. El interruptor está al lado del de las fotos, apagado por defecto p
 internet, y arriba dice cuántas fichas faltan y cuántos días son a ese ritmo: sin ese número,
 «automático» no dice si termina en una semana o en dos años.
 
+## Catálogos que piden usuario y contraseña
+
+Muchos proveedores tienen la ficha detrás de un login. Sin manejarlo, la app pide la página, el
+sitio le devuelve el formulario de ingreso, y de ahí no sale ni foto ni equivalencia: el catálogo
+entero queda afuera sin que nada falle a la vista.
+
+**Las credenciales van en los secretos de Streamlit, no en la base.** No es una preferencia: todo
+lo que se guarda en la tabla `configuracion` sale de la app por dos puertas —el backup que se
+sube solo al repositorio de GitHub, y el botón de bajar la base completa—, así que una contraseña
+guardada ahí termina copiada en el repositorio. En los secretos no toca la base.
+
+    [catalogo.MOTORARG]
+    url_login     = "https://ejemplo.com/ingresar"
+    usuario       = "micuenta@ejemplo.com"
+    clave         = "loquesea"
+    campo_usuario = "email"        # cómo llama el sitio a ese campo
+    campo_clave   = "password"
+
+Los nombres de campo salen de mirar el formulario del proveedor: cada sitio los llama distinto y
+no se pueden adivinar. Se lee siempre por `secretos_app()` y nunca por `st.secrets` directo —
+leer `st.secrets` sin un `secrets.toml` levanta excepción, que es el bug que ya está documentado
+más abajo.
+
+Tres decisiones:
+
+- **Una sesión por marca, guardada y reusada.** Una tanda son cientos de fichas; loguearse en
+  cada una serían cientos de ingresos contra el proveedor, que es la forma más rápida de que te
+  bloqueen la cuenta.
+- **Las sesiones vencen.** El sitio corta a las pocas horas y desde ahí *todas* las fichas
+  contestan el formulario. Si una tanda falla en más del 80%, se tira la sesión guardada y la
+  siguiente vuelve a entrar. El 80% y no «alguna»: en cualquier catálogo hay fichas que no
+  existen, y tirar la sesión por eso sería loguearse de nuevo en cada tanda.
+- **Si el login falla, no se rompe nada**: se sigue sin sesión, exactamente como antes.
+
+Probado contra un servidor HTTP de verdad levantado para la prueba, con cookie de sesión:
+
+    sin credenciales      6 fichas → 0 propuestas, el sitio devolvió el formulario 6 veces
+    con credenciales      1 login  → 6 fichas leídas, 6 propuestas
+    segunda tanda         sigue en 1 login (reusa la sesión)
+    sesión vencida        falla todo, tira la sesión, y la tanda siguiente vuelve a entrar sola
+    clave equivocada      None, y la tanda sigue sin sesión
+    sin secrets.toml      None, sin excepción
+
+Y una advertencia que la pantalla también da: **avisale al proveedor**. Sos cliente y tenés
+acceso, pero muchos catálogos prohíben en sus condiciones consultarlos de forma automatizada, y
+cientos de consultas seguidas pueden hacer que te corten el usuario.
+
 ## Quince por día son trece años
 
 Las dos tandas que bajan cosas del catálogo del proveedor —fotos y equivalencias— iban de a 15
