@@ -448,6 +448,75 @@ anunciar «8.649 nuevos» en cada importación para siempre. Ahora devuelve `row
 `INSERT OR IGNORE` cuenta solo lo que realmente entró: la segunda corrida seguida no dice nada,
 que es la verdad.
 
+## Los vínculos malos que YA está devolviendo la búsqueda
+
+De todos los controles, `auditar_equivalencias_cargadas()` es el único que mira lo que la
+búsqueda está devolviendo **ahora**: los demás miran lo que todavía no entró. Y era el único que
+seguía dependiendo de que alguien apretara un botón. Sobre la base real encuentra **270 vínculos
+con evidencia en contra** entre los 24.774 cargados — 270 resultados equivocados que alguien
+puede estar leyendo en el mostrador hoy.
+
+Ahora se mide solo, como cuarto paso de `descubrimiento_post_importacion()` (11 s más, total
+110 s), y el número queda guardado en la configuración. El chequeo de salud —que corre en
+**todas** las pantallas, no en una de mantenimiento— lo lee de ahí y lo muestra arriba de todo.
+
+La división es a propósito: **medir es automático, cortar no**. Cortar un vínculo es
+destructivo, así que la app avisa y la decisión sigue siendo de una persona, con la lista
+ordenada de peor a mejor y el motivo al lado. El chequeo lee el número guardado en vez de
+recalcularlo porque medirlo cuesta 11 s y esa pantalla se dibuja todo el tiempo.
+
+## Las equivalencias que publica la ficha del proveedor, de a quince por día
+
+Es la única fuente de equivalencias que no es una deducción: lo dice el fabricante en su propio
+catálogo web. Ya se podía leer, pero de a tandas a mano, y son miles de fichas.
+
+Para que avance solo faltaba una cosa: **saber por dónde iba**. La consulta ordena por stock y
+corta con `LIMIT`, así que cada tanda volvía a leer las mismas primeras fichas y no llegaba
+nunca al resto del catálogo. La columna `productos.ficha_equiv_leida` guarda la fecha en que se
+consultó cada código — la fecha y no un sí/no, para poder volver a pasar en unos meses, porque
+una ficha puede publicar equivalencias nuevas.
+
+Se anota **haya dado equivalencias o no**. El "no" también es información: sin anotarlo, la
+próxima tanda vuelve a golpear las mismas fichas vacías. Es exactamente el problema que ya se
+había arreglado para las fotos con `foto_busqueda_estado`.
+
+Probado sin salir a internet, simulando el servidor del proveedor: tres tandas seguidas de 5
+consultan 5 códigos distintos cada una (5 → 10 → 15 marcados). Antes habrían sido los mismos 5
+tres veces. El interruptor está al lado del de las fotos, apagado por defecto porque sale a
+internet, y arriba dice cuántas fichas faltan y cuántos días son a ese ritmo: sin ese número,
+«automático» no dice si termina en una semana o en dos años.
+
+## El dólar y la inflación: lo único que la app va a buscar afuera
+
+`contexto_de_precios()` trae el dólar oficial del BCRA (api.argentinadatos.com) y el IPC del
+INDEC (apis.datos.gob.ar). Las dos son públicas, sin clave y sin costo.
+
+No decide nada: el ritmo con el que se decide sigue siendo el de **tus** importaciones. Contesta
+las dos cosas que el historial propio no puede — cuánto se movió el dólar, que es lo que manda
+en lo importado, y **qué proveedor viene subiendo por debajo de la inflación**, o sea cuál está
+quedando barato y conviene comprarle ahora.
+
+Cuatro decisiones que salieron de probarlo, no de escribirlo:
+
+- **No usa `st.cache_data`.** Streamlit cachea también el FALLO: si justo cuando se pide no hay
+  internet, el `{}` vacío queda seis horas guardado y la pantalla no dice nada aunque la conexión
+  haya vuelto a los dos minutos. Y ese caché se pierde al reiniciar el servidor, que en Streamlit
+  Cloud pasa seguido. Guardado en la tabla de configuración, lo último que se supo sobrevive.
+- **Penitencia después de un fallo.** Sin eso, con internet caído se reintentaba en cada dibujo
+  de pantalla: cuatro segundos por vez. Ahora espera media hora.
+- **Si hoy no se puede, muestra lo último que supo**, marcado como viejo. Es más útil que no
+  decir nada, y marcarlo evita hacerlo pasar por el dato de hoy.
+- **Las claves de `variacion` son texto, no números.** Pasa por JSON para guardarse, y JSON no
+  tiene claves numéricas: al volver, el `30` es `"30"`. Buscándolo como número no se encontraba
+  nunca y la línea simplemente no aparecía, sin ningún error.
+
+Probado contra nueve respuestas rotas distintas (`None`, lista vacía, `{"data": None}`, texto
+suelto, cotización en cero, una sola fila de IPC): ninguna levanta excepción. **Lo que no pude
+probar es la llamada real** — este entorno bloquea los dos dominios por política de red —, así
+que el parseo está probado con respuestas simuladas con la forma que devuelven esas APIs, y todo
+el camino de fallo está probado de verdad. Si la forma cambió, la pantalla no muestra la línea;
+no rompe nada.
+
 ## Cuánto atrasada está una lista, medido con tu propio historial
 
 En Argentina una lista de precios de hace dos meses no es una lista de precios. Pero «hace dos

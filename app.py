@@ -96,7 +96,7 @@ import pickle
 import contextlib
 import time
 import requests          # se usa en varias funciones; importarlo una vez evita repetirlo
-from datetime import datetime
+from datetime import datetime, timedelta
 from urllib.parse import quote
 from openpyxl import load_workbook, Workbook
 
@@ -917,6 +917,13 @@ def _esquema_mostrador(c):
     # esto, cada tanda volvía a golpear los mismos miles de códigos sin foto y nunca avanzaba.
     if "foto_busqueda_estado" not in columnas_productos:
         c.execute("ALTER TABLE productos ADD COLUMN foto_busqueda_estado TEXT")
+    # Lo mismo pero para las EQUIVALENCIAS que publica la ficha del proveedor. Es la marca que
+    # hace posible avanzar de a tandas: sin ella, cada tanda vuelve a leer las mismas primeras
+    # fichas —la consulta ordena por stock y corta— y no llega nunca al resto del catálogo.
+    # Guarda la fecha en que se consultó, no un sí/no, para poder volver a pasar dentro de unos
+    # meses: una ficha puede publicar equivalencias nuevas.
+    if "ficha_equiv_leida" not in columnas_productos:
+        c.execute("ALTER TABLE productos ADD COLUMN ficha_equiv_leida TEXT")
 
     # Descripción y código ya pasados a mayúscula y sin acentos, guardados. Es solo velocidad,
     # pero de la que se nota: la búsqueda por texto le sacaba los acentos a cada fila EN EL
@@ -3968,6 +3975,34 @@ def tareas_automaticas_del_dia(presupuesto_segundos=6):
             anotar_error("tareas_automaticas_del_dia", _err)
             pass
 
+    # 5b. Las equivalencias que la propia ficha del proveedor publica. Es la misma fuente que
+    # las fotos —el catálogo web de la marca— pero leyendo los números cruzados en vez de la
+    # imagen, y es la única fuente de equivalencias que no es una deducción: lo dice el
+    # fabricante. Va de a tandas chicas porque son miles de fichas y cada una es una consulta a
+    # un servidor ajeno; ficha_equiv_leida hace que cada tanda avance sobre códigos nuevos en
+    # vez de volver a golpear los mismos.
+    if queda_tiempo() and obtener_config("equiv_ficha_automaticas", "0") == "1":
+        try:
+            c.execute("""SELECT p.marca_id, COUNT(*) AS faltan FROM productos p
+                         JOIN marcas m ON m.id = p.marca_id
+                         WHERE p.ficha_equiv_leida IS NULL
+                           AND m.url_ficha_template IS NOT NULL AND m.url_ficha_template <> ''
+                         GROUP BY p.marca_id ORDER BY faltan DESC LIMIT 1""")
+            fila = c.fetchone()
+            if fila:
+                c.execute("SELECT nombre FROM marcas WHERE id = ?", (fila["marca_id"],))
+                _nom = (c.fetchone() or {"nombre": ""})["nombre"]
+                _props, _fall, _consultados = equivalencias_desde_catalogo(
+                    fila["marca_id"], limite=15, solo_no_leidos=True)
+                if _props:
+                    _n = guardar_equivalencias_de_catalogo(_props, _nom)
+                    if _n:
+                        hecho.append(f"{_n} equivalencia(s) leídas de las fichas de {_nom}, "
+                                     f"a revisión")
+        except Exception as _err:
+            anotar_error("tareas_automaticas_del_dia/equiv_ficha", _err)
+            pass
+
     # 6. Subir el backup al repositorio, si está configurado. Es lo único que sobrevive a un
     # reinicio del servidor, y depender de que alguien se acuerde de hacerlo a mano es
     # exactamente cómo se pierden las bases de datos.
@@ -4159,6 +4194,25 @@ def descubrimiento_post_importacion(presupuesto_segundos=PRESUPUESTO_DESCUBRIMIE
             anotar_error("descubrimiento_post_importacion/barrido", _err)
     else:
         quedo.append("el barrido de todo el catálogo")
+
+    # 4. Revisar los vínculos que YA están cargados. Es el único control que mira lo que la
+    # búsqueda está devolviendo AHORA: los demás miran lo que todavía no entró. Acá se mide
+    # nada más —cortar un vínculo es destructivo y lo decide una persona—, pero medirlo solo
+    # es lo que hacía falta: hasta ahora había que apretar un botón para enterarse de que la
+    # búsqueda venía devolviendo un resultado equivocado.
+    if queda_tiempo():
+        try:
+            _dudosas, _revisadas = auditar_equivalencias_cargadas()
+            guardar_config("dudosos_cargados", str(len(_dudosas)))
+            guardar_config("dudosos_revisados", str(_revisadas))
+            guardar_config("dudosos_fecha", datetime.now().strftime("%Y-%m-%d %H:%M"))
+            if _dudosas:
+                hecho.append(f"{len(_dudosas)} vínculo(s) ya cargados quedaron marcados como "
+                             f"dudosos")
+        except Exception as _err:
+            anotar_error("descubrimiento_post_importacion/dudosos", _err)
+    else:
+        quedo.append("la revisión de los vínculos ya cargados")
 
     if hecho:
         invalidar_salud()
@@ -7629,6 +7683,168 @@ def envejecimiento_de_precios():
     return salida
 
 
+# La única fuente de afuera de toda la app que no es el catálogo de un proveedor. Son dos APIs
+# públicas, sin clave y sin costo: argentinadatos publica el dólar oficial del BCRA día por día,
+# y datos.gob.ar publica el IPC del INDEC. Se usan para una sola cosa —poner en contexto cuánto
+# atrasada está una lista de precios— y la app funciona igual sin ellas.
+URL_DOLAR_OFICIAL = "https://api.argentinadatos.com/v1/cotizaciones/dolares/oficial"
+URL_IPC_INDEC = ("https://apis.datos.gob.ar/series/api/series"
+                 "?ids=145.3_INGNACUAL_DICI_M_38&limit=5&sort=desc&format=json")
+
+
+def _pedir_json(url, tiempo_maximo=4):
+    """Trae un JSON de afuera, o None. Nunca levanta excepción ni tarda más de unos segundos.
+
+    El tope de tiempo es lo importante: esto se llama desde una pantalla, y una API que no
+    contesta no puede dejar colgada la app de alguien que entró a buscar un repuesto."""
+    try:
+        r = requests.get(url, timeout=tiempo_maximo,
+                         headers={"User-Agent": "EquivalenciasElChavo/1.0"})
+        if r.status_code != 200:
+            return None
+        return r.json()
+    except Exception as _err:      # de red, de JSON, de lo que sea: acá nada puede romper
+        anotar_error("_pedir_json", _err)
+        return None
+
+
+# Cada cuánto se vuelve a preguntar, y cuánto se espera después de un fallo. El segundo número
+# es el que importa: sin él, con internet caído la app reintentaba en cada dibujo de pantalla y
+# se comía cuatro segundos por vez.
+HORAS_CONTEXTO_FRESCO = 6
+MINUTOS_ANTES_DE_REINTENTAR = 30
+
+
+def _dolar_oficial():
+    """El dólar oficial de hoy y cuánto subió en 30, 60 y 90 días. {} si no se pudo."""
+    datos = _pedir_json(URL_DOLAR_OFICIAL)
+    if not isinstance(datos, list):
+        return {}
+    # Vienen como [{"fecha": "2026-09-16", "compra": .., "venta": ..}, ...].
+    serie = []
+    for x in datos:
+        try:
+            serie.append((str(x["fecha"])[:10], float(x["venta"])))
+        except (KeyError, TypeError, ValueError):
+            continue
+    if not serie:
+        return {}
+    serie.sort()
+    hoy_f, hoy_v = serie[-1]
+    if hoy_v <= 0:
+        return {}
+    salida = {"fecha": hoy_f, "venta": hoy_v, "variacion": {}}
+    for dias in (30, 60, 90):
+        objetivo = (datetime.now() - timedelta(days=dias)).strftime("%Y-%m-%d")
+        # El último día con cotización ANTERIOR o igual al objetivo: los fines de semana y
+        # feriados no cotizan, y buscar la fecha exacta no devolvería nada uno de cada tres días.
+        previos = [v for f, v in serie if f <= objetivo and v > 0]
+        if previos:
+            salida["variacion"][str(dias)] = hoy_v / previos[-1] - 1
+    return salida
+
+
+def _inflacion_mensual_indec():
+    """La última variación mensual del IPC del INDEC, como fracción. {} si no se pudo.
+
+    OJO con el desfasaje: el INDEC publica el dato de un mes a mediados del siguiente, así que
+    esto siempre va una o dos semanas atrás. Por eso el ritmo con el que se decide algo sigue
+    siendo el de historial_precios —tus propias importaciones—, y esto es solo el contexto."""
+    datos = _pedir_json(URL_IPC_INDEC)
+    filas = datos.get("data") if isinstance(datos, dict) else None
+    if not isinstance(filas, list):
+        return {}
+    valores = []
+    for fila in filas:
+        try:
+            if fila[1] is not None:
+                valores.append((str(fila[0])[:10], float(fila[1])))
+        except (IndexError, TypeError, ValueError):
+            continue
+    if len(valores) < 2:
+        return {}
+    valores.sort()
+    v_ant, (f_ult, v_ult) = valores[-2][1], valores[-1]
+    if not v_ant:
+        return {}
+    return {"mes": f_ult, "variacion": v_ult / v_ant - 1}
+
+
+def contexto_de_precios():
+    """El dólar oficial y la inflación, juntos y sin poder fallar. {} si no hay nada que decir.
+
+    Es lo único que esta app va a buscar afuera además de los catálogos de los proveedores, y
+    no decide nada: lo que dice a qué ritmo aumenta un proveedor sigue siendo TU historial de
+    importaciones. Esto contesta las dos cosas que el historial propio no puede — si el
+    proveedor viene subiendo por debajo de la inflación (está quedando barato) y cuánto se movió
+    el dólar, que es lo que manda en lo importado.
+
+    El guardado va en la tabla de configuración y NO en st.cache_data, por dos razones que se
+    probaron:
+
+      · st.cache_data también cachea el FALLO. Si justo cuando se pide no hay internet, el {}
+        vacío queda seis horas guardado y la pantalla no dice nada aunque la conexión haya
+        vuelto a los dos minutos.
+      · El caché de Streamlit se pierde cuando se reinicia el servidor, que en Streamlit Cloud
+        pasa seguido. Guardado en la base, lo último que se supo sobrevive.
+
+    Y si hoy no se puede, se muestra lo último que se supo con la fecha de cuándo fue, que es
+    más útil que no decir nada. Se marca como viejo para no hacerlo pasar por de hoy."""
+    ahora = datetime.now()
+    salida = {}
+    _guardados = {}
+    for clave, config in (("dolar", "ultimo_dolar"), ("ipc", "ultimo_ipc")):
+        try:
+            crudo = obtener_config(config, "")
+            _guardados[clave] = json.loads(crudo) if crudo else None
+        except (ValueError, TypeError):
+            _guardados[clave] = None
+
+    def esta_fresco(guardado):
+        if not guardado or not guardado.get("_traido"):
+            return False
+        try:
+            visto = datetime.strptime(guardado["_traido"][:19], "%Y-%m-%d %H:%M:%S")
+        except ValueError:
+            return False
+        return (ahora - visto).total_seconds() < HORAS_CONTEXTO_FRESCO * 3600
+
+    # Si todo lo guardado está fresco no se sale a internet, y si hace poco falló tampoco:
+    # reintentar en cada dibujo de pantalla cuesta cuatro segundos por vez.
+    frescos = all(esta_fresco(_guardados[k]) for k in ("dolar", "ipc"))
+    espera = obtener_config("contexto_reintentar_despues", "")
+    en_penitencia = bool(espera) and espera > ahora.strftime("%Y-%m-%d %H:%M:%S")
+
+    if not frescos and not en_penitencia:
+        fallo = False
+        for clave, config, traer in (("dolar", "ultimo_dolar", _dolar_oficial),
+                                     ("ipc", "ultimo_ipc", _inflacion_mensual_indec)):
+            if esta_fresco(_guardados[clave]):
+                continue
+            try:
+                nuevo = traer()
+            except Exception as _err:          # nada de acá puede romper una pantalla
+                anotar_error("contexto_de_precios", _err)
+                nuevo = {}
+            if nuevo:
+                nuevo["_traido"] = ahora.strftime("%Y-%m-%d %H:%M:%S")
+                _guardados[clave] = nuevo
+                guardar_config(config, json.dumps(nuevo))
+            else:
+                fallo = True
+        if fallo:
+            guardar_config("contexto_reintentar_despues",
+                           (ahora + timedelta(minutes=MINUTOS_ANTES_DE_REINTENTAR)
+                            ).strftime("%Y-%m-%d %H:%M:%S"))
+
+    for clave in ("dolar", "ipc"):
+        if _guardados[clave]:
+            salida[clave] = _guardados[clave]
+            if not esta_fresco(_guardados[clave]):
+                salida.setdefault("viejos", []).append(clave)
+    return salida
+
+
 def diagnostico_de_salud():
     """Corre todos los controles de mantenimiento de una y devuelve solo lo que necesita atención.
 
@@ -7655,6 +7871,24 @@ def diagnostico_de_salud():
                   "Estadísticas → Reposición → Consultas de clientes")
     except Exception as _err:
         anotar_error("diagnostico_de_salud/consultas", _err)
+
+    # Los vínculos ya cargados con evidencia en contra. Va arriba porque es el único punto de
+    # esta lista que describe algo que la búsqueda está devolviendo MAL ahora mismo: no es
+    # trabajo pendiente, es un resultado equivocado que alguien ya puede estar leyendo. El
+    # número lo deja medido descubrimiento_post_importacion() después de cada importación; acá
+    # solo se lee, porque medirlo cuesta 11 s y esto corre en todas las pantallas.
+    try:
+        _dud = int(obtener_config("dudosos_cargados", "0") or 0)
+        if _dud:
+            _rev = int(obtener_config("dudosos_revisados", "0") or 0)
+            sumar("alto", f"{_dud} vínculo(s) YA cargados tienen evidencia en contra",
+                  f"De {_rev:,} vínculos revisados después de la última importación "
+                  f"({obtener_config('dudosos_fecha', 'sin fecha')}). No son sugerencias "
+                  "esperando: están activos, y la búsqueda los está devolviendo. Se ven de peor "
+                  "a mejor, con el motivo al lado, y se cortan los peores de una.",
+                  "Estadísticas → Mantenimiento → 🧹 Limpiar vínculos")
+    except (TypeError, ValueError) as _err:
+        anotar_error("diagnostico_de_salud/dudosos", _err)
 
     # Los precios viejos. Es el único punto de esta lista que cuesta plata en CADA venta, no
     # cuando algo sale mal: vender con una lista de hace dos meses es vender perdiendo la
@@ -8854,7 +9088,8 @@ def codigos_en_una_ficha(url_ficha, codigo_propio, tiempo_maximo=12):
     return encontrados, None
 
 
-def equivalencias_desde_catalogo(marca_id, limite=50, progreso=None, cancelado=None, hilos=4):
+def equivalencias_desde_catalogo(marca_id, limite=50, progreso=None, cancelado=None, hilos=4,
+                                  solo_no_leidos=False):
     """Recorre las fichas del catálogo digital de una marca y propone las equivalencias que
     encuentra escritas ahí. Devuelve (propuestas, fallidas, consultados).
 
@@ -8872,8 +9107,12 @@ def equivalencias_desde_catalogo(marca_id, limite=50, progreso=None, cancelado=N
 
     # Primero los que tienen stock: si algo va a salir del mostrador hoy, que sea eso lo que
     # tenga las equivalencias completas.
-    c.execute("""SELECT id, codigo_raw, codigo_clean FROM productos
-                 WHERE marca_id = ? ORDER BY (COALESCE(stock, 0) > 0) DESC, id LIMIT ?""",
+    # solo_no_leidos es lo que permite avanzar de a tandas sin repetir: lo usa la tarea del día.
+    # A mano se deja en False porque ahí la intención suele ser volver a mirar lo importante.
+    _filtro = " AND ficha_equiv_leida IS NULL" if solo_no_leidos else ""
+    c.execute(f"""SELECT id, codigo_raw, codigo_clean FROM productos
+                  WHERE marca_id = ?{_filtro}
+                  ORDER BY (COALESCE(stock, 0) > 0) DESC, id LIMIT ?""",
               (marca_id, limite))
     pendientes = [(r["id"], r["codigo_raw"], r["codigo_clean"]) for r in c.fetchall()]
     if not pendientes:
@@ -8909,6 +9148,20 @@ def equivalencias_desde_catalogo(marca_id, limite=50, progreso=None, cancelado=N
                 "Equivale a": destino["codigo_raw"], "Marca del otro": destino["marca"],
                 "_a": min(pid, destino["id"]), "_b": max(pid, destino["id"]),
             })
+
+    # Queda anotado que a estos códigos ya se les leyó la ficha, hayan dado equivalencias o no.
+    # El "no" también es información: sin anotarlo, la próxima tanda vuelve a golpear las mismas
+    # fichas vacías y el recorrido no avanza nunca. Es el mismo problema que ya se arregló con
+    # foto_busqueda_estado para las fotos.
+    try:
+        _ahora_txt = datetime.now().strftime("%Y-%m-%d")
+        with db_lock:
+            c.executemany("UPDATE productos SET ficha_equiv_leida = ? WHERE id = ?",
+                          [(_ahora_txt, pid) for (pid, _c, _l), _x, _e in resultados])
+            conn.commit()
+    except sqlite3.OperationalError as _err:
+        anotar_error("equivalencias_desde_catalogo/marcar", _err)
+
     return propuestas, fallidas, len(pendientes)
 
 
@@ -20935,6 +21188,20 @@ if pagina == PAGINAS[3]:
                 "análisis y te muestra los peores. Hasta ahora la única forma de encontrarlos era "
                 "tropezarse con uno buscando un código."
             )
+            # Lo que ya se midió solo después de la última importación. Sin esto, el número
+            # existía pero no lo veía nadie hasta apretar un botón que tarda 11 s.
+            _dud_prev = obtener_config("dudosos_cargados", "")
+            if _dud_prev:
+                _rev_prev = obtener_config("dudosos_revisados", "0")
+                _fec_prev = obtener_config("dudosos_fecha", "")
+                if _dud_prev == "0":
+                    st.success(f"✅ En la última importación se revisaron {int(_rev_prev):,} "
+                                f"vínculos y ninguno quedó por debajo del umbral ({_fec_prev}).")
+                else:
+                    st.warning(f"⚠️ En la última importación ({_fec_prev}) quedaron "
+                                f"**{int(_dud_prev)} vínculo(s) con evidencia en contra** de "
+                                f"{int(_rev_prev):,} revisados. Analizalos acá para verlos y "
+                                "decidir cuáles cortar.")
             if st.button("🔎 Analizar los vínculos cargados"):
                 with st.spinner("Analizando..."):
                     st.session_state["dudosas_cargadas"] = auditar_equivalencias_cargadas()
@@ -21824,6 +22091,43 @@ if pagina == PAGINAS[3]:
                       "tiene una columna **Catálogo web** que dice cuáles ya lo tienen."
                 )
             else:
+                # Lo mismo que con las fotos: son miles de fichas y sentarse a esperar no es
+                # opción, así que puede avanzar solo de a 15 por día. Sale a internet, por eso
+                # se elige a mano. Al lado va cuánto falta, que es lo que dice si sirve
+                # prenderlo: sin el número, «automático» no se sabe si termina en una semana o
+                # en dos años.
+                st.checkbox(
+                    "🤖 Leer 15 fichas por día automáticamente",
+                    value=obtener_config("equiv_ficha_automaticas", "0") == "1",
+                    key="equiv_ficha_auto_check",
+                    on_change=lambda: guardar_config(
+                        "equiv_ficha_automaticas",
+                        "1" if st.session_state["equiv_ficha_auto_check"] else "0"),
+                    help="Cuando alguien abre la app, lee 15 fichas del catálogo del proveedor "
+                         "y manda a revisión las equivalencias que encuentre escritas ahí. "
+                         "Avanza siempre sobre códigos nuevos, nunca repite los mismos."
+                )
+                try:
+                    c.execute("""SELECT COUNT(*) AS faltan FROM productos p
+                                 JOIN marcas m ON m.id = p.marca_id
+                                 WHERE p.ficha_equiv_leida IS NULL
+                                   AND m.url_ficha_template IS NOT NULL
+                                   AND m.url_ficha_template <> ''""")
+                    _faltan_fichas = (c.fetchone() or {"faltan": 0})["faltan"] or 0
+                    c.execute("""SELECT COUNT(*) AS leidas FROM productos
+                                 WHERE ficha_equiv_leida IS NOT NULL""")
+                    _leidas_fichas = (c.fetchone() or {"leidas": 0})["leidas"] or 0
+                except sqlite3.OperationalError as _err:
+                    anotar_error("catálogo digital", _err)
+                    _faltan_fichas = _leidas_fichas = 0
+                if _faltan_fichas or _leidas_fichas:
+                    st.caption(
+                        f"Leídas {_leidas_fichas:,} · faltan {_faltan_fichas:,}"
+                        + (f" — a 15 por día son {(_faltan_fichas + 14) // 15:,} día(s); "
+                           "con una tanda grande de las de abajo se acorta mucho."
+                           if _faltan_fichas else " — está todo leído.")
+                    )
+
                 opciones_mf = {f"{m['nombre']} ({m['productos']} códigos)": m["id"]
                                for m in marcas_con_ficha}
                 elegida_mf = st.selectbox("Marca:", list(opciones_mf.keys()),
@@ -21910,6 +22214,47 @@ if pagina == PAGINAS[3]:
                         "Todavía no puedo medir el ritmo de ninguna lista: hace falta haber "
                         "importado la misma al menos dos veces. Los días sí valen."
                     )
+
+                # El contexto de afuera, que es lo único que esta app va a buscar a internet
+                # además de los catálogos de los proveedores. No decide nada: el ritmo con el
+                # que se decide sigue siendo el de TUS importaciones. Sirve para dos cosas que
+                # el historial propio no puede contestar: si el proveedor viene subiendo por
+                # debajo de la inflación —o sea que está quedando barato y conviene comprarle
+                # ahora— y cuánto se movió el dólar, que es lo que manda en lo importado.
+                _ctx = contexto_de_precios()
+                if _ctx:
+                    _lineas = []
+                    _d = _ctx.get("dolar") or {}
+                    # Las claves son TEXTO y no números: esto pasa por json para guardarse en
+                    # la base, y JSON no tiene claves numéricas — al volver, el 30 es "30".
+                    # Buscándolo como número no se encuentra nunca y la línea no aparecía.
+                    _var = _d.get("variacion") or {}
+                    if _var.get("30") is not None:
+                        _lineas.append(
+                            f"El **dólar oficial** subió "
+                            f"{_var['30'] * 100:.1f}% en los últimos 30 días"
+                            + (f" y {_var['90'] * 100:.1f}% en 90"
+                               if _var.get("90") is not None else "")
+                            + f" (al {_d.get('fecha', 'sin fecha')}).")
+                    _i = _ctx.get("ipc") or {}
+                    if _i.get("variacion") is not None:
+                        _lineas.append(
+                            f"La **inflación** del último mes publicado por el INDEC "
+                            f"({_i.get('mes', '')[:7]}) fue {_i['variacion'] * 100:.1f}%.")
+                        # La comparación que sirve: quién sube menos que la inflación.
+                        _baratas = [x["Lista"] for x in _envejecidas
+                                    if x["_ritmo"] is not None
+                                    and x["_ritmo"] < _i["variacion"] - 0.01]
+                        if _baratas:
+                            _lineas.append(
+                                "Vienen subiendo **por debajo** de eso: "
+                                + ", ".join(f"**{x}**" for x in _baratas)
+                                + " — ese proveedor está quedando barato.")
+                    if _lineas:
+                        st.info("🌎 " + "  \n".join(_lineas)
+                                + ("\n\n⚠️ Son los últimos datos que pude traer, no los de hoy: "
+                                   "ahora mismo no llego a internet."
+                                   if _ctx.get("viejos") else ""))
             st.markdown("---")
 
             st.markdown("**↩️ Deshacer una importación**")
