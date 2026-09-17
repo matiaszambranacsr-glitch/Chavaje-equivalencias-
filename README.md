@@ -486,6 +486,45 @@ tres veces. El interruptor está al lado del de las fotos, apagado por defecto p
 internet, y arriba dice cuántas fichas faltan y cuántos días son a ese ritmo: sin ese número,
 «automático» no dice si termina en una semana o en dos años.
 
+## Quince por día son trece años
+
+Las dos tandas que bajan cosas del catálogo del proveedor —fotos y equivalencias— iban de a 15
+por día, enganchadas a las tareas del día. Con 500 productos eso alcanza. Con los 70.888 de la
+base real son **trece años**, y con medio millón no termina nunca.
+
+El límite no era el proveedor: era **dónde corría la tanda**. Estaba adentro del dibujo de la
+pantalla, con el presupuesto de 6 segundos de las tareas del día, así que agrandarla significaba
+hacer esperar a alguien que entró a buscar un repuesto.
+
+La tanda se fue a un hilo aparte. Nadie espera, así que ahora puede ser tan grande como se
+quiera, y lo único que la limita es lo único que corresponde que la limite: el servidor del
+proveedor. Se elige a mano, de 15 a 10.000 por día, con los días que faltan escritos al lado —
+sin ese número, «automático» no dice si termina en una semana o en trece años.
+
+Tres cosas la hacen segura:
+
+- **Una sola a la vez en todo el proceso.** Con cinco pestañas abiertas serían cinco tandas
+  pidiéndole lo mismo al proveedor al mismo tiempo. Y el candado se toma **antes** de crear el
+  hilo, no adentro: mirar si está libre y después crear el hilo deja una rendija entre las dos
+  cosas por la que entran dos. El de adentro no alcanzaba a hacer trabajo de más, pero la
+  función contestaba «la largué» sin haber largado nada, y probándola se veía.
+- **Subtandas de 50 que van guardando.** Streamlit Cloud apaga el servidor por inactividad; si
+  pasa, se pierde la subtanda en curso y nada más.
+- **Nunca toca `st`.** Un hilo de fondo no tiene pantalla donde dibujar. Todo lo que tiene para
+  contar lo deja en la configuración, y la pantalla lo lee de ahí.
+
+Alterna fotos y equivalencias en vez de terminar una y después la otra: si no, prender las dos
+significaría que la segunda no arranca hasta dentro de un mes.
+
+Probado contra la base real con un servidor de proveedor simulado (acá no hay internet): con
+cupos de 200 fotos y 300 fichas, pide exactamente 200 y 300, **sin repetir un solo código**, los
+pendientes bajan de 5.063 a 4.763, y con el cupo del día gastado no pide nada más.
+
+**Y el techo que no se arregla agrandando la tanda.** Leer ficha por ficha son tantas consultas
+como productos: medio millón de consultas al servidor del proveedor, que te va a cortar mucho
+antes. Cuando faltan más de 60 días al ritmo elegido, la pantalla lo dice y propone lo que de
+verdad sirve a esa escala — pedirle al proveedor el archivo y cargarlo por 📁 Cargar Excel.
+
 ## El dólar y la inflación: lo único que la app va a buscar afuera
 
 `contexto_de_precios()` trae el dólar oficial del BCRA (api.argentinadatos.com) y el IPC del

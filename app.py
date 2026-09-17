@@ -35,6 +35,7 @@ específico, y las pantallas quedan todas al final:
     · DIAGNÓSTICO DE SALUD DEL CATÁLOGO
     · POR QUÉ DOS CÓDIGOS NO SE RELACIONAN
     · CATÁLOGO WEB DEL PROVEEDOR (fotos y equivalencias)
+    · LAS TANDAS QUE CORREN SOLAS, EN SEGUNDO PLANO
     · PESO DE LAS FOTOS Y BACKUP LIVIANO
     · MAPEO DE COLUMNAS RECORDADO POR PROVEEDOR
     · CONTROLES DE CALIDAD DE UN CÓDIGO
@@ -3952,56 +3953,12 @@ def tareas_automaticas_del_dia(presupuesto_segundos=6):
             anotar_error("tareas_automaticas_del_dia", _err)
             pass
 
-    # 5. Traer fotos de las fichas del proveedor, de a poco. Es la tarea más tediosa que queda
-    # —son miles de productos— y la que mejor se presta a avanzar sola: una tanda chica por día
-    # va completando el catálogo sin que nadie se siente a esperar. Se hace solo si está
-    # activado, porque sale a internet y consume tiempo del proveedor.
-    if queda_tiempo() and obtener_config("fotos_automaticas", "0") == "1":
-        try:
-            c.execute("""SELECT p.marca_id, COUNT(*) AS faltan FROM productos p
-                         WHERE (p.imagen_url IS NULL OR p.imagen_url = '')
-                           AND COALESCE(p.foto_busqueda_estado, '') = ''
-                           AND COALESCE(p.stock, 0) > 0
-                         GROUP BY p.marca_id ORDER BY faltan DESC LIMIT 1""")
-            fila = c.fetchone()
-            if fila:
-                # OJO: devuelve una TUPLA (bajadas, fallidas, sin_foto), no un diccionario.
-                # Tratarla como dict daba siempre cero y la tarea parecía no hacer nada.
-                traidas, _fallidas, _sin_foto = bajar_fotos_desde_catalogo(
-                    fila["marca_id"], limite=15, filtro="con_stock")
-                if traidas:
-                    hecho.append(f"{traidas} foto(s) traídas del proveedor")
-        except Exception as _err:
-            anotar_error("tareas_automaticas_del_dia", _err)
-            pass
-
-    # 5b. Las equivalencias que la propia ficha del proveedor publica. Es la misma fuente que
-    # las fotos —el catálogo web de la marca— pero leyendo los números cruzados en vez de la
-    # imagen, y es la única fuente de equivalencias que no es una deducción: lo dice el
-    # fabricante. Va de a tandas chicas porque son miles de fichas y cada una es una consulta a
-    # un servidor ajeno; ficha_equiv_leida hace que cada tanda avance sobre códigos nuevos en
-    # vez de volver a golpear los mismos.
-    if queda_tiempo() and obtener_config("equiv_ficha_automaticas", "0") == "1":
-        try:
-            c.execute("""SELECT p.marca_id, COUNT(*) AS faltan FROM productos p
-                         JOIN marcas m ON m.id = p.marca_id
-                         WHERE p.ficha_equiv_leida IS NULL
-                           AND m.url_ficha_template IS NOT NULL AND m.url_ficha_template <> ''
-                         GROUP BY p.marca_id ORDER BY faltan DESC LIMIT 1""")
-            fila = c.fetchone()
-            if fila:
-                c.execute("SELECT nombre FROM marcas WHERE id = ?", (fila["marca_id"],))
-                _nom = (c.fetchone() or {"nombre": ""})["nombre"]
-                _props, _fall, _consultados = equivalencias_desde_catalogo(
-                    fila["marca_id"], limite=15, solo_no_leidos=True)
-                if _props:
-                    _n = guardar_equivalencias_de_catalogo(_props, _nom)
-                    if _n:
-                        hecho.append(f"{_n} equivalencia(s) leídas de las fichas de {_nom}, "
-                                     f"a revisión")
-        except Exception as _err:
-            anotar_error("tareas_automaticas_del_dia/equiv_ficha", _err)
-            pass
+    # 5. Las fotos y las equivalencias de las fichas del proveedor YA NO VAN ACÁ.
+    # Estaban como dos tandas de 15 por día, y 15 por día es trece años para 70.888 productos.
+    # No se podían agrandar porque esto corre DENTRO del dibujo de la pantalla, con 6 segundos
+    # de presupuesto: agrandar la tanda era hacer esperar a alguien que entró a buscar un
+    # repuesto. Ahora van en un hilo aparte, donde nadie espera y el tamaño lo elige el usuario.
+    # Ver arrancar_tanda_de_fondo().
 
     # 6. Subir el backup al repositorio, si está configurado. Es lo único que sobrevive a un
     # reinicio del servidor, y depender de que alguien se acuerde de hacerlo a mano es
@@ -9182,6 +9139,245 @@ def guardar_equivalencias_de_catalogo(propuestas, marca):
                       [(a, b, lote) for a, b in nuevas])
         conn.commit()
     return len(nuevas)
+
+
+# ============================================================================================
+# LAS TANDAS QUE CORREN SOLAS, EN SEGUNDO PLANO
+# ============================================================================================
+# Traer fotos y equivalencias de las fichas del proveedor iba de a 15 por día, enganchado a las
+# tareas del día. Con 500 productos eso alcanza; con 70.888 son trece años, y con medio millón
+# no termina nunca. El límite no era el proveedor: era que la tanda corría DENTRO del dibujo de
+# la pantalla, con el presupuesto de 6 segundos de las tareas del día, así que agrandarla
+# significaba hacer esperar a alguien que entró a buscar un repuesto.
+#
+# Acá se corta ese nudo: la tanda se va a un hilo aparte. Nadie espera, así que puede ser tan
+# grande como se quiera. Lo que la limita ahora es lo único que corresponde que la limite —el
+# servidor del proveedor— y eso se elige a mano.
+#
+# Tres cosas la hacen segura:
+#   · UNA sola a la vez en todo el proceso (_CANDADO_FONDO). Sin eso, cinco pestañas abiertas
+#     son cinco tandas pidiéndole lo mismo al proveedor al mismo tiempo.
+#   · Va de a subtandas chicas que van guardando. Si Streamlit Cloud apaga el servidor por
+#     inactividad —pasa seguido— se pierde la subtanda en curso y nada más.
+#   · Nunca toca `st`. Un hilo de fondo no tiene pantalla donde dibujar; llamar a st.* desde
+#     ahí no muestra nada y ensucia el registro. Todo lo que tiene para contar lo deja anotado
+#     en la configuración, y la pantalla lo lee de ahí.
+TANDAS_DISPONIBLES = [15, 100, 500, 2000, 10000]
+PRODUCTOS_POR_SUBTANDA = 50
+MINUTOS_MAXIMO_DE_TANDA = 10
+
+_CANDADO_FONDO = threading.Lock()
+
+
+def _cupo_de_hoy(clave, objetivo):
+    """Cuánto queda del cupo diario de esa tarea. El contador se reinicia con el día."""
+    hoy = datetime.now().strftime("%Y-%m-%d")
+    if obtener_config("tanda_fondo_fecha", "") != hoy:
+        guardar_config("tanda_fondo_fecha", hoy)
+        guardar_config("tanda_fondo_fotos", "0")
+        guardar_config("tanda_fondo_equiv", "0")
+    try:
+        return max(objetivo - int(obtener_config(clave, "0") or 0), 0)
+    except ValueError:
+        return objetivo
+
+
+def _sumar_al_cupo(clave, cuantos):
+    try:
+        guardar_config(clave, str(int(obtener_config(clave, "0") or 0) + cuantos))
+    except ValueError:
+        guardar_config(clave, str(cuantos))
+
+
+def _marca_con_mas_fichas_pendientes(que):
+    """La marca a la que le falta más trabajo del tipo pedido, o None.
+
+    Se elige la de más pendientes y no la primera: así el catálogo más grande —que es el que
+    tarda años— avanza primero, en vez de repartir el esfuerzo entre listas chicas."""
+    condicion = ("p.imagen_url IS NULL "
+                 "AND (p.foto_busqueda_estado IS NULL OR p.foto_busqueda_estado = 'error')"
+                 if que == "fotos" else "p.ficha_equiv_leida IS NULL")
+    try:
+        c.execute(f"""SELECT p.marca_id AS mid, m.nombre AS nombre, COUNT(*) AS faltan
+                      FROM productos p JOIN marcas m ON m.id = p.marca_id
+                      WHERE {condicion}
+                        AND m.url_ficha_template IS NOT NULL AND m.url_ficha_template <> ''
+                      GROUP BY p.marca_id ORDER BY faltan DESC LIMIT 1""")
+        fila = c.fetchone()
+    except sqlite3.OperationalError as _err:
+        anotar_error("_marca_con_mas_fichas_pendientes", _err)
+        return None
+    return dict(fila) if fila else None
+
+
+def _trabajo_de_fondo():
+    """El cuerpo del hilo. Va alternando fotos y equivalencias hasta gastar el cupo o el reloj.
+
+    Alterna en vez de terminar una y después la otra para que prender las dos no signifique que
+    la segunda no arranca hasta dentro de un mes."""
+    arranque = time.time()
+    try:
+        objetivo_fotos = (int(obtener_config("tanda_fotos_diaria", "500") or 500)
+                          if obtener_config("fotos_automaticas", "0") == "1" else 0)
+        objetivo_equiv = (int(obtener_config("tanda_equiv_diaria", "500") or 500)
+                          if obtener_config("equiv_ficha_automaticas", "0") == "1" else 0)
+    except ValueError:
+        objetivo_fotos = objetivo_equiv = 0
+
+    while time.time() - arranque < MINUTOS_MAXIMO_DE_TANDA * 60:
+        hizo_algo = False
+
+        if _cupo_de_hoy("tanda_fondo_fotos", objetivo_fotos) > 0:
+            marca = _marca_con_mas_fichas_pendientes("fotos")
+            if marca:
+                try:
+                    cuantas = min(PRODUCTOS_POR_SUBTANDA,
+                                  _cupo_de_hoy("tanda_fondo_fotos", objetivo_fotos))
+                    traidas, _fall, _sin = bajar_fotos_desde_catalogo(
+                        marca["mid"], limite=cuantas)
+                    # Se suma lo CONSULTADO y no lo traído: el cupo es cuánto se le pide al
+                    # servidor del proveedor, y una ficha sin foto se le pidió igual.
+                    _sumar_al_cupo("tanda_fondo_fotos", cuantas)
+                    if traidas:
+                        _sumar_al_cupo("tanda_fondo_fotos_ok", traidas)
+                    hizo_algo = True
+                except Exception as _err:
+                    anotar_error("_trabajo_de_fondo/fotos", _err)
+
+        if _cupo_de_hoy("tanda_fondo_equiv", objetivo_equiv) > 0:
+            marca = _marca_con_mas_fichas_pendientes("equiv")
+            if marca:
+                try:
+                    cuantas = min(PRODUCTOS_POR_SUBTANDA,
+                                  _cupo_de_hoy("tanda_fondo_equiv", objetivo_equiv))
+                    props, _fall, consultados = equivalencias_desde_catalogo(
+                        marca["mid"], limite=cuantas, solo_no_leidos=True)
+                    _sumar_al_cupo("tanda_fondo_equiv", consultados or cuantas)
+                    if props:
+                        guardadas = guardar_equivalencias_de_catalogo(props, marca["nombre"])
+                        if guardadas:
+                            _sumar_al_cupo("tanda_fondo_equiv_ok", guardadas)
+                    hizo_algo = True
+                except Exception as _err:
+                    anotar_error("_trabajo_de_fondo/equiv", _err)
+
+        if not hizo_algo:
+            break       # no queda cupo, o no queda nada pendiente: no tiene sentido girar
+    guardar_config("tanda_fondo_ultima", datetime.now().strftime("%Y-%m-%d %H:%M"))
+
+
+def arrancar_tanda_de_fondo():
+    """Larga la tanda en un hilo aparte si corresponde. Devuelve si la largó.
+
+    Se llama en cada dibujo de pantalla y casi siempre no hace nada: si ya hay una corriendo,
+    si están las dos apagadas o si el cupo del día está gastado, vuelve enseguida."""
+    if (obtener_config("fotos_automaticas", "0") != "1"
+            and obtener_config("equiv_ficha_automaticas", "0") != "1"):
+        return False
+
+    # El candado se toma ACÁ y no adentro del hilo. Mirar si está tomado y después crear el
+    # hilo deja una rendija entre las dos cosas: con dos pestañas abiertas al mismo tiempo,
+    # las dos ven el candado libre y las dos crean un hilo. El de adentro no llegaba a hacer
+    # trabajo de más —el segundo se iba enseguida— pero esta función devolvía «sí, la largué»
+    # cuando no había largado nada, y probándola se veía. Tomándolo antes, la respuesta es la
+    # verdad y no hay rendija.
+    if not _CANDADO_FONDO.acquire(blocking=False):
+        return False
+
+    def correr():
+        try:
+            _trabajo_de_fondo()
+        except Exception as _err:
+            anotar_error("arrancar_tanda_de_fondo", _err)
+        finally:
+            _CANDADO_FONDO.release()
+
+    try:
+        threading.Thread(target=correr, daemon=True, name="tanda_de_fondo").start()
+        return True
+    except RuntimeError as _err:      # el proceso no deja crear más hilos
+        # Si el hilo no arrancó hay que soltarlo a mano: nadie más lo va a hacer, y un candado
+        # trabado para siempre deja la app sin bajar nada hasta que alguien reinicie el servidor.
+        _CANDADO_FONDO.release()
+        anotar_error("arrancar_tanda_de_fondo", _err)
+        return False
+
+
+def como_va_la_tanda_de_fondo():
+    """Para la pantalla: cuánto falta de cada cosa y a qué ritmo va. Nunca falla."""
+    resumen = {"corriendo": _CANDADO_FONDO.locked(),
+               "ultima": obtener_config("tanda_fondo_ultima", "")}
+    for clave, que in (("fotos", "fotos"), ("equiv", "equiv")):
+        condicion = ("p.imagen_url IS NULL "
+                     "AND (p.foto_busqueda_estado IS NULL OR p.foto_busqueda_estado = 'error')"
+                     if que == "fotos" else "p.ficha_equiv_leida IS NULL")
+        try:
+            c.execute(f"""SELECT COUNT(*) AS faltan FROM productos p
+                          JOIN marcas m ON m.id = p.marca_id
+                          WHERE {condicion}
+                            AND m.url_ficha_template IS NOT NULL
+                            AND m.url_ficha_template <> ''""")
+            resumen[f"faltan_{clave}"] = (c.fetchone() or {"faltan": 0})["faltan"] or 0
+        except sqlite3.OperationalError as _err:
+            anotar_error("como_va_la_tanda_de_fondo", _err)
+            resumen[f"faltan_{clave}"] = 0
+        try:
+            resumen[f"hoy_{clave}"] = int(obtener_config(f"tanda_fondo_{clave}", "0") or 0)
+            resumen[f"objetivo_{clave}"] = int(
+                obtener_config(f"tanda_{'fotos' if clave == 'fotos' else 'equiv'}_diaria",
+                               "500") or 500)
+        except ValueError:
+            resumen[f"hoy_{clave}"] = 0
+            resumen[f"objetivo_{clave}"] = 500
+    return resumen
+
+
+def mostrar_avance_de_tanda(que, clave_config, unidad):
+    """El selector de cuánto pedir por día y en qué anda, para las dos tandas de fondo.
+
+    El número de días que falta es lo que hace que el selector signifique algo. «Automático»
+    sin eso no dice si termina en una semana o en trece años — y con 70.888 productos a 15 por
+    día eran trece años de verdad."""
+    resumen = como_va_la_tanda_de_fondo()
+    faltan = resumen.get(f"faltan_{que}", 0)
+    hoy = resumen.get(f"hoy_{que}", 0)
+
+    clave_widget = f"sel_{clave_config}"
+    st.session_state.setdefault(clave_widget,
+                                resumen.get(f"objetivo_{que}", 500))
+    if st.session_state[clave_widget] not in TANDAS_DISPONIBLES:
+        st.session_state[clave_widget] = 500
+    st.select_slider(
+        f"Cuántas {unidad} por día como máximo:", options=TANDAS_DISPONIBLES,
+        key=clave_widget,
+        on_change=lambda: guardar_config(clave_config,
+                                          str(st.session_state[clave_widget])),
+        help="Cada una es una consulta al sitio del proveedor. Subilo hasta donde ese sitio "
+             "aguante sin cortarte: si empieza a fallar mucho, bajalo."
+    )
+    objetivo = int(st.session_state[clave_widget]) or 1
+
+    if not faltan:
+        st.caption("✅ No queda nada pendiente de las marcas con catálogo web cargado.")
+        return
+    dias = (faltan + objetivo - 1) // objetivo
+    st.caption(
+        f"Faltan **{faltan:,}** · hoy van {hoy:,} de {objetivo:,} · "
+        + (f"a este ritmo, **{dias:,} día(s)**" if dias > 1 else "**termina hoy**")
+        + (" · 🟢 corriendo ahora" if resumen.get("corriendo") else "")
+        + (f" · última vez: {resumen['ultima']}" if resumen.get("ultima") else "")
+    )
+    # El aviso que hay que dar y no esconder: por ficha, un catálogo enorme no termina nunca,
+    # y no es un problema del tamaño de la tanda sino de la cantidad de consultas.
+    if dias > 60:
+        st.warning(
+            f"⚠️ A {objetivo:,} por día son **{dias:,} días**. Leer ficha por ficha tiene un "
+            "techo que no lo arregla agrandar la tanda: son "
+            f"{faltan:,} consultas al servidor del proveedor, y ese servidor te va a cortar "
+            "mucho antes. Para un catálogo de este tamaño, lo que sirve es **pedirle al "
+            "proveedor el archivo** (un Excel o un CSV con código, foto y equivalencias) y "
+            "cargarlo por 📁 Cargar Excel: son cinco minutos en vez de meses."
+        )
 
 
 # ============================================================================================
@@ -17543,6 +17739,15 @@ if not st.session_state.get("_tareas_dia_corridas"):
         anotar_error("nivel principal", _err)
         pass
 
+# Las bajadas del catálogo del proveedor, en un hilo aparte. Va afuera del «una vez por día»:
+# mientras la app esté abierta puede seguir avanzando, que es lo único que hace que un catálogo
+# grande termine alguna vez. Casi siempre esta llamada no hace nada —ya hay una corriendo, o
+# está apagado, o se gastó el cupo del día— y vuelve enseguida.
+try:
+    arrancar_tanda_de_fondo()
+except Exception as _err:
+    anotar_error("nivel principal", _err)
+
 _hecho_hoy = st.session_state.pop("_aviso_tareas", None)
 if _hecho_hoy:
     st.caption("🔧 Mantenimiento automático de hoy: " + " · ".join(_hecho_hoy))
@@ -17844,15 +18049,17 @@ Casi todo lo que edita o borra algo pide la contraseña de administrador la prim
                 fotos_pendientes = max(fotos_pendientes, contar_fotos_pendientes_de_firma())
 
             st.checkbox(
-                "🤖 Traer fotos automáticamente, una tanda por día",
+                "🤖 Traer fotos solas, en segundo plano",
                 value=obtener_config("fotos_automaticas", "0") == "1",
                 key="fotos_auto_check",
                 on_change=lambda: guardar_config(
                     "fotos_automaticas", "1" if st.session_state["fotos_auto_check"] else "0"),
-                help="Cuando alguien abre la app, trae 15 fotos de las fichas del proveedor. "
-                     "Con miles de productos, sentarse a esperar no es opción; así avanza solo. "
-                     "Sale a internet, por eso lo elegís vos."
+                help="Mientras la app esté abierta, va trayendo fotos de las fichas del "
+                     "proveedor en un hilo aparte: nadie espera. Sale a internet, por eso lo "
+                     "elegís vos."
             )
+            if obtener_config("fotos_automaticas", "0") == "1":
+                mostrar_avance_de_tanda("fotos", "tanda_fotos_diaria", "foto(s)")
 
             if fotos_pendientes and st.button(
                     f"🔄 Procesar las {fotos_pendientes} que faltan ahora"):
@@ -22097,36 +22304,18 @@ if pagina == PAGINAS[3]:
                 # prenderlo: sin el número, «automático» no se sabe si termina en una semana o
                 # en dos años.
                 st.checkbox(
-                    "🤖 Leer 15 fichas por día automáticamente",
+                    "🤖 Leer las fichas solas, en segundo plano",
                     value=obtener_config("equiv_ficha_automaticas", "0") == "1",
                     key="equiv_ficha_auto_check",
                     on_change=lambda: guardar_config(
                         "equiv_ficha_automaticas",
                         "1" if st.session_state["equiv_ficha_auto_check"] else "0"),
-                    help="Cuando alguien abre la app, lee 15 fichas del catálogo del proveedor "
-                         "y manda a revisión las equivalencias que encuentre escritas ahí. "
-                         "Avanza siempre sobre códigos nuevos, nunca repite los mismos."
+                    help="Mientras la app esté abierta, va leyendo fichas del catálogo del "
+                         "proveedor en un hilo aparte y manda a revisión las equivalencias que "
+                         "encuentre escritas ahí. Avanza siempre sobre códigos nuevos."
                 )
-                try:
-                    c.execute("""SELECT COUNT(*) AS faltan FROM productos p
-                                 JOIN marcas m ON m.id = p.marca_id
-                                 WHERE p.ficha_equiv_leida IS NULL
-                                   AND m.url_ficha_template IS NOT NULL
-                                   AND m.url_ficha_template <> ''""")
-                    _faltan_fichas = (c.fetchone() or {"faltan": 0})["faltan"] or 0
-                    c.execute("""SELECT COUNT(*) AS leidas FROM productos
-                                 WHERE ficha_equiv_leida IS NOT NULL""")
-                    _leidas_fichas = (c.fetchone() or {"leidas": 0})["leidas"] or 0
-                except sqlite3.OperationalError as _err:
-                    anotar_error("catálogo digital", _err)
-                    _faltan_fichas = _leidas_fichas = 0
-                if _faltan_fichas or _leidas_fichas:
-                    st.caption(
-                        f"Leídas {_leidas_fichas:,} · faltan {_faltan_fichas:,}"
-                        + (f" — a 15 por día son {(_faltan_fichas + 14) // 15:,} día(s); "
-                           "con una tanda grande de las de abajo se acorta mucho."
-                           if _faltan_fichas else " — está todo leído.")
-                    )
+                if obtener_config("equiv_ficha_automaticas", "0") == "1":
+                    mostrar_avance_de_tanda("equiv", "tanda_equiv_diaria", "ficha(s)")
 
                 opciones_mf = {f"{m['nombre']} ({m['productos']} códigos)": m["id"]
                                for m in marcas_con_ficha}
