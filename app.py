@@ -3482,19 +3482,30 @@ def mover_codigos_de_barras_a_su_columna(marca_id):
     return movidos, ya_tenian
 
 
+# A partir de acá se decide por LISTA y no por código suelto. El número sale de la misma idea
+# que columna_es_codigo_de_barras(): un código roto es una excepción, y si la excepción es la
+# mayoría entonces no es una excepción — es otro sistema de numeración.
+PROPORCION_PARA_DECIR_QUE_ES_ETIQUETA_PROPIA = 0.5
+
+
 def codigos_de_barras_que_no_cierran(limite=200):
-    """Los códigos de barras cargados que no pasan su propio dígito verificador.
+    """Los códigos de barras cargados que parecen mal copiados. Devuelve (filas, listas_propias).
 
-    Son productos que NO se van a poder escanear nunca: la cámara lee el número de la caja, no
-    coincide con el que está cargado, y el repuesto no aparece. Desde el mostrador se ve como
-    «el escáner no anda», y es un dígito cambiado en la planilla del proveedor.
+    Un dígito cambiado en la planilla del proveedor deja un producto que no se va a poder
+    escanear: la cámara lee el número de la caja, no coincide con el cargado, y el repuesto no
+    aparece. Desde el mostrador se ve como «el escáner no anda».
 
-    No se corrigen solos a propósito: cambiar un dígito para que la cuenta cierre da OTRO código
-    de barras, que puede ser el de un producto distinto. Lo que hay que hacer es mirar la caja.
+    PERO ESO SOLO VALE SI LA ETIQUETA LA IMPRIMIÓ EL FABRICANTE. Un negocio que etiqueta su
+    propia mercadería genera los números él mismo, y no tienen por qué cumplir la cuenta de
+    GS1 — son códigos internos, y el escáner los encuentra perfecto porque la etiqueta se
+    imprimió DESDE ese número: coinciden letra por letra, cierre la cuenta o no.
 
-    Sobre la base real hoy no hay ninguno: los 8.319 códigos de MOTORARG cierran los 8.319. Eso
-    no la hace inútil —es el control que avisa el día que una lista entre con un dígito
-    cambiado— pero sí quiere decir que si alguna vez muestra algo, hay que mirarlo en serio."""
+    Así que la decisión se toma por lista y no por código: si en una lista falla la mitad o más,
+    eso no son errores de tipeo, es una numeración propia, y esa lista sale del control entera.
+    Avisar ahí sería mandar a alguien a revisar miles de cajas que están bien.
+
+    La segunda parte devuelta son justamente esas listas, para poder decirlo en pantalla en vez
+    de callarse: que un control decida no mirar algo también hay que contarlo."""
     try:
         c.execute("""SELECT p.id, p.codigo_raw AS "Código", m.nombre AS "Lista",
                             p.codigo_barras AS "Código de barras", p.descripcion AS "Descripción"
@@ -3504,11 +3515,121 @@ def codigos_de_barras_que_no_cierran(limite=200):
         filas = filas_a_listas(c)
     except sqlite3.OperationalError as _err:
         anotar_error("codigos_de_barras_que_no_cierran", _err)
-        return []
+        return [], []
+
     # El filtro va en Python y no en SQL porque la cuenta de GS1 no se escribe en SQLite sin
     # una tabla de pesos; igual son los que tienen código de barras cargado, no el catálogo.
-    malos = [f for f in filas if codigo_de_barras_cierra(f["Código de barras"]) is False]
-    return malos[:limite]
+    por_lista = {}
+    for f in filas:
+        cierra = codigo_de_barras_cierra(f["Código de barras"])
+        if cierra is None:
+            continue            # no tiene forma de código de barras: no es asunto de esta cuenta
+        estado = por_lista.setdefault(f["Lista"], {"malos": [], "total": 0})
+        estado["total"] += 1
+        if cierra is False:
+            estado["malos"].append(f)
+
+    malos, propias = [], []
+    for lista, estado in sorted(por_lista.items()):
+        if not estado["malos"]:
+            continue
+        if (len(estado["malos"])
+                >= estado["total"] * PROPORCION_PARA_DECIR_QUE_ES_ETIQUETA_PROPIA):
+            propias.append({"Lista": lista, "Códigos": estado["total"]})
+            continue
+        malos.extend(estado["malos"])
+    return malos[:limite], propias
+
+
+def el_negocio_etiqueta_con_codigos_propios():
+    """¿Este negocio imprime sus propias etiquetas? Se deduce de lo que ya está cargado.
+
+    Cambia lo que hay que decirle a alguien que escanea algo que no aparece. Si el negocio
+    usa etiquetas del fabricante, un código que arranca en 200-299 es de uso interno de OTRO
+    comercio y no identifica ningún repuesto: escaneaste la etiqueta equivocada. Si el negocio
+    imprime las suyas, ese mismo número es probablemente una etiqueta propia que todavía no se
+    cargó, que es un consejo completamente distinto."""
+    try:
+        c.execute("""SELECT codigo_barras FROM productos
+                     WHERE codigo_barras IS NOT NULL AND TRIM(codigo_barras) <> '' LIMIT 3000""")
+        for fila in c.fetchall():
+            if pais_del_codigo_de_barras(fila["codigo_barras"]) in GS1_NO_ES_UN_PAIS:
+                return True
+    except sqlite3.OperationalError as _err:
+        anotar_error("el_negocio_etiqueta_con_codigos_propios", _err)
+    return False
+
+
+def cargar_codigos_de_barras_masivo(pares, marca_id=None, pisar=True):
+    """Pega códigos de barras a productos que YA existen. No crea ni borra nada.
+
+    Es la forma de traer una etiquetación que ya está hecha. Hasta ahora la única manera de
+    cargar códigos de barras era reimportar la lista entera del proveedor con la columna
+    mapeada, y eso toca todo lo demás: pisa precios, pisa stock, genera equivalencias nuevas y
+    deja un lote de importación para revisar. Para pegarle un número a cada producto eso es una
+    operación enorme al lado de lo que hace falta.
+
+    Esto hace SOLO eso: busca el producto por su código de fábrica y le pone el código de
+    barras. Si el código no está cargado, no lo inventa — lo informa. Un producto que no existe
+    con un código de barras pegado no sirve para nada, y crear productos desde acá sería la
+    forma más fácil de llenar el catálogo de fantasmas.
+
+    `pares` es [(codigo_del_producto, codigo_de_barras), ...].
+    `marca_id` acota a una lista: el mismo código de fábrica lo tienen varios proveedores, y sin
+    acotar se le pegaría la misma etiqueta a los productos de todos.
+    `pisar=False` respeta los que ya tienen uno cargado, para poder completar sin arriesgar.
+
+    Devuelve un resumen con lo que pasó con cada fila, que es lo que hay que poder mirar antes
+    de darlo por bueno."""
+    resumen = {"puestos": 0, "sin_producto": [], "ya_tenian": [], "repetidos": [],
+               "sin_cambio": 0, "ambiguos": []}
+    if not pares:
+        return resumen
+
+    # Un mismo código de barras para dos productos distintos es un error de la planilla, y es
+    # de los que no se ven: escanear esa etiqueta va a traer dos repuestos y nadie va a saber
+    # cuál es. Se avisa antes de escribir nada.
+    vistos = {}
+    for codigo, barras in pares:
+        if barras:
+            vistos.setdefault(barras, []).append(codigo)
+    resumen["repetidos"] = [{"Código de barras": b, "Se lo pusiste a": ", ".join(cs[:6])}
+                            for b, cs in vistos.items() if len(cs) > 1]
+
+    with db_lock, transaccion():
+        for codigo, barras in pares:
+            limpio = sanitizar(codigo)
+            barras_limpio = sanitizar(barras)
+            if not limpio or not barras_limpio:
+                continue
+            if marca_id:
+                c.execute("SELECT id, codigo_barras FROM productos "
+                          "WHERE codigo_clean = ? AND marca_id = ?", (limpio, marca_id))
+            else:
+                c.execute("SELECT id, codigo_barras FROM productos p "
+                          "JOIN marcas m ON m.id = p.marca_id "
+                          "WHERE p.codigo_clean = ? AND m.tipo <> 'OEM'", (limpio,))
+            filas = filas_a_listas(c)
+            if not filas:
+                resumen["sin_producto"].append({"Código": codigo, "Código de barras": barras})
+                continue
+            if len(filas) > 1 and not marca_id:
+                # Sin elegir la lista, el mismo código de fábrica aparece en varios proveedores.
+                resumen["ambiguos"].append({"Código": codigo, "Productos": len(filas)})
+                continue
+            for fila in filas:
+                if fila["codigo_barras"] and not pisar:
+                    resumen["ya_tenian"].append({"Código": codigo,
+                                                  "Ya tenía": fila["codigo_barras"],
+                                                  "Traía": barras})
+                    continue
+                if (fila["codigo_barras"] or "") == barras_limpio:
+                    resumen["sin_cambio"] += 1
+                    continue
+                c.execute("UPDATE productos SET codigo_barras = ? WHERE id = ?",
+                          (barras_limpio, fila["id"]))
+                resumen["puestos"] += 1
+    return resumen
 
 
 def listas_que_no_cruzan():
@@ -18202,16 +18323,6 @@ Casi todo lo que edita o borra algo pide la contraseña de administrador la prim
                     # De dónde es se sabe sin consultar nada: lo dice el prefijo. Sirve para
                     # decidir si el repuesto lo consigue un proveedor local o hay que traerlo.
                     _pais_barra = pais_del_codigo_de_barras(cod_barra)
-                    # Si la cuenta del dígito verificador no cierra, el número está mal: o la
-                    # cámara leyó mal una raya, o lo tipearon cambiando un dígito. Conviene
-                    # decirlo antes de que alguien salga a buscar un código que no existe.
-                    if codigo_de_barras_cierra(cod_barra) is False:
-                        st.warning(
-                            f"⚠️ El código `{cod_barra}` **no cierra con su dígito "
-                            "verificador**: está mal leído o mal tipeado. Volvé a escanear con "
-                            "el código más derecho y mejor iluminado, o revisá dígito por "
-                            "dígito si lo escribiste a mano."
-                        )
                     if _pais_barra and _pais_barra not in GS1_NO_ES_UN_PAIS:
                         st.caption(f"🌍 El código lo registró una empresa de **{_pais_barra}** "
                                     "(el país de quien lo emitió, no necesariamente el de la "
@@ -18225,18 +18336,41 @@ Casi todo lo que edita o borra algo pide la contraseña de administrador la prim
                         st.dataframe(quitar_id(res_barra), width="stretch",
                                       hide_index=True)
                     elif _pais_barra in GS1_NO_ES_UN_PAIS:
-                        # Acá no hay nada que buscar: el número no identifica un repuesto.
-                        st.warning(
-                            f"El código `{cod_barra}` no es el de un producto: es "
-                            f"**{_pais_barra}**. Si es de uso interno lo imprimió el comercio "
-                            "para sí mismo y no vale afuera; si es un libro o una revista, "
-                            "escaneaste otra cosa. Buscá el código de barras del repuesto, que "
-                            "suele estar en otra cara de la caja."
-                        )
+                        # Qué decir acá depende de quién imprime las etiquetas, y es lo
+                        # contrario en cada caso. Ver el_negocio_etiqueta_con_codigos_propios().
+                        if el_negocio_etiqueta_con_codigos_propios():
+                            st.warning(
+                                f"El código `{cod_barra}` **no está cargado**. Es un código de "
+                                "uso interno, del rango que usás para tus propias etiquetas, "
+                                "así que lo más probable es que sea una etiqueta tuya que "
+                                "todavía no le pegaste a ningún producto. Se cargan de a "
+                                "muchos en Mantenimiento → 🩺 Estado."
+                            )
+                        else:
+                            st.warning(
+                                f"El código `{cod_barra}` no es el de un producto: es "
+                                f"**{_pais_barra}**. Si es de uso interno lo imprimió un "
+                                "comercio para sí mismo y no vale afuera; si es un libro o una "
+                                "revista, escaneaste otra cosa. Buscá el código de barras del "
+                                "repuesto, que suele estar en otra cara de la caja."
+                            )
                     else:
                         st.warning(
                             f"El código `{cod_barra}` no está cargado en tu catálogo."
                         )
+                        # El dígito verificador SOLO se menciona acá: cuando no se encontró.
+                        # Si el repuesto apareció, el número está bien por definición —coincide
+                        # con el cargado— cierre la cuenta o no, y avisar ahí sería decirle
+                        # «está mal tipeado» a alguien que acaba de escanear su propia etiqueta
+                        # y encontró lo que buscaba. Con un negocio que etiqueta su mercadería,
+                        # eso sería un cartel de error en CADA escaneo.
+                        if codigo_de_barras_cierra(cod_barra) is False:
+                            st.caption(
+                                "🔢 Además, ese número **no cierra con su dígito verificador**. "
+                                "Si la etiqueta es del fabricante, está mal leída o mal "
+                                "tipeada: probá de nuevo más cerca y con mejor luz. Si es una "
+                                "etiqueta tuya, es normal que no cierre y no significa nada."
+                            )
                         parecidos_barra = codigos_por_tipeo(sanitizar(cod_barra))
                         if parecidos_barra:
                             st.caption("Códigos parecidos que sí tenés:")
@@ -23020,9 +23154,129 @@ if pagina == PAGINAS[3]:
                                    if _ya else ""))
                         st.rerun()
 
+            # PEGARLE LOS CÓDIGOS DE BARRAS A LO QUE YA ESTÁ CARGADO.
+            # El caso es el del negocio que ya etiquetó toda su mercadería: los números existen
+            # y están pegados en las cajas, lo que falta es que la app los sepa. Antes la única
+            # forma era reimportar la lista entera del proveedor con la columna mapeada, que
+            # pisa precios, pisa stock y genera un lote de equivalencias para revisar.
+            st.markdown("**🏷️ Cargar códigos de barras en masa**")
+            explicar(
+                "Subís dos columnas —código del producto y código de barras— y se pegan. No "
+                "toca nada más.",
+                "Es para cuando ya tenés la mercadería etiquetada y lo que falta es que la app "
+                "lo sepa. **No se tocan precios, ni stock, ni equivalencias, ni se crea ningún "
+                "producto**: solo se le pega el número al que ya está cargado.\n\n"
+                "El archivo puede ser Excel o CSV, con encabezado o sin él. Si un código no "
+                "está en el catálogo se informa y no se inventa nada: un producto fantasma con "
+                "una etiqueta pegada no le sirve a nadie.\n\n"
+                "**Conviene elegir la lista.** El mismo código de fábrica lo usan varios "
+                "proveedores, y sin elegir no hay forma de saber a cuál de todos va esa "
+                "etiqueta."
+            )
+            _arch_barras = subir_archivo("Archivo con código y código de barras:",
+                                          ["xlsx", "xls", "csv", "txt"], "arch_barras_masivo")
+            if _arch_barras is not None:
+                try:
+                    _filas_b = leer_excel(_arch_barras, nrows=100000)
+                except Exception as _err:
+                    anotar_error("carga masiva de barras", _err)
+                    _filas_b = []
+                if not _filas_b:
+                    st.error("No pude leer ese archivo.")
+                else:
+                    _anchos = max(len(f) for f in _filas_b[:50])
+                    _cols = [f"Columna {i + 1}" + (f" — «{_filas_b[0][i]}»"
+                                                    if i < len(_filas_b[0]) and _filas_b[0][i]
+                                                    else "")
+                             for i in range(_anchos)]
+                    cB1, cB2 = st.columns(2)
+                    _i_cod = cB1.selectbox("Columna del código del producto:", range(_anchos),
+                                            format_func=lambda i: _cols[i], key="bm_cod")
+                    _i_bar = cB2.selectbox("Columna del código de barras:", range(_anchos),
+                                            format_func=lambda i: _cols[i],
+                                            index=min(1, _anchos - 1), key="bm_bar")
+                    _saltar = st.checkbox("La primera fila es el encabezado", value=True,
+                                           key="bm_encabezado")
+                    c.execute("""SELECT m.id, m.nombre, COUNT(p.id) AS n FROM marcas m
+                                 JOIN productos p ON p.marca_id = m.id
+                                 WHERE m.tipo <> 'OEM' GROUP BY m.id ORDER BY n DESC""")
+                    _marcas_b = filas_a_listas(c)
+                    _opc_b = {"— todas las listas (más riesgoso) —": None}
+                    _opc_b.update({f"{m['nombre']} ({m['n']:,})": m["id"] for m in _marcas_b})
+                    _marca_b = _opc_b[st.selectbox("¿De qué lista son estos códigos?",
+                                                    list(_opc_b.keys()), key="bm_marca")]
+                    _pisar = st.checkbox("Pisar los que ya tengan un código de barras cargado",
+                                          value=True, key="bm_pisar")
+
+                    _pares_b = []
+                    for _f in (_filas_b[1:] if _saltar else _filas_b):
+                        if _i_cod < len(_f) and _i_bar < len(_f):
+                            _c1 = valor_codigo(_f[_i_cod])
+                            _c2 = valor_codigo(_f[_i_bar])
+                            if _c1 and _c2:
+                                _pares_b.append((_c1, _c2))
+                    st.caption(f"{len(_pares_b):,} fila(s) con los dos datos.")
+                    if _pares_b:
+                        st.dataframe([{"Código": a, "Código de barras": b,
+                                        "¿Cierra la cuenta?":
+                                            {True: "sí", False: "no", None: "no es un EAN"}[
+                                                codigo_de_barras_cierra(b)]}
+                                       for a, b in _pares_b[:8]],
+                                      width="stretch", hide_index=True)
+                        if candado("cargar códigos de barras en masa",
+                                    st.button(f"🏷️ Pegar los {len(_pares_b):,} códigos de barras",
+                                               type="primary", key="bm_aplicar"),
+                                    "bm_aplicar_candado"):
+                            _res = cargar_codigos_de_barras_masivo(_pares_b, _marca_b, _pisar)
+                            _partes = [f"{_res['puestos']:,} código(s) de barras cargados"]
+                            if _res["sin_cambio"]:
+                                _partes.append(f"{_res['sin_cambio']:,} ya estaban igual")
+                            if _res["ya_tenian"]:
+                                _partes.append(f"{len(_res['ya_tenian']):,} se respetaron")
+                            avisar("success", " · ".join(_partes) + ".")
+                            st.session_state["bm_resultado"] = _res
+                            st.rerun()
+            _res_b = st.session_state.get("bm_resultado")
+            if _res_b:
+                # Lo que NO entró es lo que hay que mirar, así que va desplegado y con el
+                # archivo para bajar: son las etiquetas que quedaron sin producto.
+                if _res_b["repetidos"]:
+                    st.error(
+                        f"⚠️ **{len(_res_b['repetidos'])} código(s) de barras repetidos** en el "
+                        "archivo: el mismo número en más de un producto. Escanear esa etiqueta "
+                        "va a traer varios repuestos y no hay forma de saber cuál es.")
+                    st.dataframe(_res_b["repetidos"][:50], width="stretch", hide_index=True)
+                if _res_b["ambiguos"]:
+                    st.warning(
+                        f"{len(_res_b['ambiguos'])} código(s) existen en más de una lista y se "
+                        "saltearon. Volvé a subir el archivo eligiendo la lista.")
+                if _res_b["sin_producto"]:
+                    st.warning(f"{len(_res_b['sin_producto'])} código(s) del archivo no están "
+                                "en el catálogo. No se creó ninguno.")
+                    st.dataframe(_res_b["sin_producto"][:50], width="stretch", hide_index=True)
+                    st.download_button(
+                        "⬇️ Bajar los que no encontró",
+                        data=to_excel_bytes(_res_b["sin_producto"]),
+                        file_name="codigos_sin_producto.xlsx",
+                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+                if st.button("Listo", key="bm_cerrar"):
+                    st.session_state.pop("bm_resultado", None)
+                    st.rerun()
+            st.markdown("---")
+
             # Los que ya están en su columna pero con un dígito cambiado: el escáner no los
             # va a encontrar nunca, y desde el mostrador se ve como «el escáner no anda».
-            _barras_rotos = codigos_de_barras_que_no_cierran()
+            _barras_rotos, _barras_propias = codigos_de_barras_que_no_cierran()
+            if _barras_propias:
+                # Decirlo, no callarlo: que un control decida NO mirar una lista es información.
+                st.caption(
+                    "🏷️ No se controla el dígito verificador de "
+                    + ", ".join(f"**{x['Lista']}** ({x['Códigos']:,})" for x in _barras_propias)
+                    + ": ahí la mayoría de los códigos no cumple la cuenta de GS1, así que son "
+                      "etiquetas propias del negocio y no del fabricante. Esas se escanean "
+                      "perfecto igual —la etiqueta se imprimió desde ese número— y revisarlas "
+                      "sería mandar a mirar cajas que están bien."
+                )
             if _barras_rotos:
                 st.markdown("**🔢 Códigos de barras que no cierran con su dígito verificador**")
                 explicar(

@@ -486,6 +486,60 @@ tres veces. El interruptor está al lado del de las fotos, apagado por defecto p
 internet, y arriba dice cuántas fichas faltan y cuántos días son a ese ritmo: sin ese número,
 «automático» no dice si termina en una semana o en dos años.
 
+## Cargar los códigos de barras que ya están pegados en las cajas
+
+Un negocio que ya etiquetó su mercadería tiene los números y las etiquetas puestas; lo que falta
+es que la app los sepa. Hasta ahora la única forma era **reimportar la lista entera** del
+proveedor con la columna del EAN mapeada, y eso toca todo lo demás: pisa precios, pisa stock,
+genera equivalencias nuevas y deja un lote para revisar. Para pegarle un número a cada producto,
+es una operación enorme al lado de lo que hace falta.
+
+`cargar_codigos_de_barras_masivo()` hace solo eso: dos columnas —código del producto y código de
+barras— y se pegan. **No crea productos**: un fantasma con una etiqueta pegada no le sirve a
+nadie, así que lo que no está cargado se informa y se puede bajar en Excel.
+
+Tres cosas que decide y conviene saber por qué:
+
+- **Conviene elegir la lista.** El mismo código de fábrica lo usan varios proveedores; sin
+  elegir, la misma etiqueta se le pegaría a los productos de todos. Sin lista elegida, los
+  códigos que aparecen en más de una se saltean y se informan.
+- **Avisa los códigos de barras repetidos en el archivo** antes de escribir nada. Es un error
+  que no se ve: escanear esa etiqueta trae dos repuestos y nadie sabe cuál es.
+- **Se puede correr dos veces sin miedo.** Probado sobre el catálogo real: la segunda pasada
+  pone 0 y marca 3.002 como «ya estaban igual».
+
+Medido sobre la base real con 3.002 etiquetas: entran las 3.002, los 2 códigos inexistentes se
+informan sin crear nada, el repetido se detecta, y **los productos siguen siendo 70.888 y las
+equivalencias 24.774** — no tocó nada más.
+
+## Un control que avisaba de un problema que no existe
+
+El dígito verificador distingue un EAN bien copiado de uno mal tipeado. Pero **eso solo vale si
+la etiqueta la imprimió el fabricante.** Un negocio que etiqueta su propia mercadería genera los
+números él mismo y no tienen por qué cumplir la cuenta de GS1 — y el escáner los encuentra
+igual, porque la etiqueta se imprimió DESDE ese número: coinciden dígito por dígito, cierre la
+cuenta o no.
+
+Sin esto, el negocio que ya tiene todo etiquetado se encontraba con dos carteles falsos:
+
+- La pantalla de Estado listando miles de códigos «que el escáner no va a encontrar» — y
+  mandando a revisar cajas que están bien.
+- **Un cartel de «está mal leído o mal tipeado» en CADA escaneo**, incluso cuando el repuesto
+  aparecía perfecto.
+
+Las dos se arreglan con el mismo criterio que ya usa `columna_es_codigo_de_barras()`: decidir
+por el conjunto y no por el código suelto. Si en una lista falla la mitad o más, eso no son
+errores de tipeo, es una numeración propia, y la lista sale del control entera — diciéndolo en
+pantalla, porque que un control decida no mirar algo también hay que contarlo.
+
+Y en el escáner, el dígito verificador **solo se menciona cuando no se encontró nada**. Si el
+repuesto apareció, el número está bien por definición: coincide con el cargado.
+
+De paso, el consejo para un código de uso interno (200-299) es el contrario según quién imprime
+las etiquetas: «escaneaste la etiqueta equivocada» si son del fabricante, «es una etiqueta tuya
+que todavía no cargaste» si el negocio imprime las suyas. `el_negocio_etiqueta_con_codigos_
+propios()` lo deduce de lo que ya está cargado, en vez de preguntarlo.
+
 ## El 87% del catálogo tenía el índice de búsqueda viejo
 
 `productos.busqueda` es la columna con el texto ya normalizado que usa la búsqueda por
