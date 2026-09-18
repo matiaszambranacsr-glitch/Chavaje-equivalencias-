@@ -349,7 +349,15 @@ VERSION_NORMALIZACION = "2"
 # reglas de hoy están mal. Sin esta marca, eso no se entera nadie hasta tropezárselo.
 # Subir el número cuando cambien las reglas de evaluar_equivalencia(). El recálculo NO corre al
 # abrir la app —son 12,8 s— sino en la tarea de fondo, igual que el descubrimiento.
-VERSION_CONFIANZA = "2"
+VERSION_CONFIANZA = "3"
+
+# La versión del LECTOR DE MEDIDAS. Mismo mecanismo: las medidas se deducen de la descripción
+# una vez y quedan guardadas, así que cuando el lector aprende a leer algo nuevo —el espesor de
+# la junta, las vías de la ficha— lo que ya está cargado no se entera.
+# Sobre la base real eran 1.402 productos con la medida escrita en el texto y 0 cargadas,
+# porque llenarlas era un botón de Mantenimiento que había que saber apretar.
+# Subir el número al agregar una medida nueva a medidas_desde_descripcion().
+VERSION_MEDIDAS = "2"
 
 
 def secretos_app():
@@ -1192,6 +1200,14 @@ def _esquema_fotos(c):
         c.execute("ALTER TABLE productos ADD COLUMN paso_rosca TEXT")
     if "cantidad_estrias" not in columnas_productos:
         c.execute("ALTER TABLE productos ADD COLUMN cantidad_estrias INTEGER")
+    # El ESPESOR de una junta y la CANTIDAD DE VÍAS de una ficha. Los dos estaban escritos en
+    # la descripción de miles de productos y no los leía nadie, y los dos son de los que hacen
+    # que dos piezas NO sean intercambiables aunque todo lo demás coincida.
+    # Ver medidas_desde_descripcion() para los números.
+    if "espesor" not in columnas_productos:
+        c.execute("ALTER TABLE productos ADD COLUMN espesor REAL")
+    if "cantidad_vias" not in columnas_productos:
+        c.execute("ALTER TABLE productos ADD COLUMN cantidad_vias INTEGER")
     if "estrias_internas" not in columnas_productos:
         c.execute("ALTER TABLE productos ADD COLUMN estrias_internas INTEGER")
     if "estrias_externas" not in columnas_productos:
@@ -2068,6 +2084,17 @@ def _datos_precargados_y_migraciones(c):
         c.execute("INSERT INTO configuracion (clave, valor) VALUES ('version_normalizacion', ?) "
                   "ON CONFLICT(clave) DO UPDATE SET valor = excluded.valor",
                   (VERSION_NORMALIZACION,))
+
+    # El lector de medidas aprendió algo nuevo: hay que releer las descripciones. Igual que
+    # abajo, acá solo se deja pedido. Ver VERSION_MEDIDAS.
+    c.execute("SELECT valor FROM configuracion WHERE clave = 'version_medidas'")
+    _fila_med = c.fetchone()
+    if (_fila_med["valor"] if _fila_med else None) != VERSION_MEDIDAS:
+        c.execute("INSERT INTO configuracion (clave, valor) VALUES ('medidas_pendientes', '1') "
+                  "ON CONFLICT(clave) DO UPDATE SET valor = excluded.valor")
+        c.execute("INSERT INTO configuracion (clave, valor) VALUES ('version_medidas', ?) "
+                  "ON CONFLICT(clave) DO UPDATE SET valor = excluded.valor",
+                  (VERSION_MEDIDAS,))
 
     # Las reglas de confianza cambiaron: lo guardado quedó viejo. Acá solo se DEJA PEDIDO —los
     # 24.774 vínculos tardan 12,8 s y esto corre al abrir la app—; lo hace la tarea de fondo.
@@ -4807,15 +4834,18 @@ def descubrimiento_post_importacion(presupuesto_segundos=PRESUPUESTO_DESCUBRIMIE
     hay algo nuevo que encontrar, y es el único momento en que la persona ya está esperando.
 
     El orden no es casual, va de lo que enriquece a lo que consume:
-      1. Los códigos de fábrica que el proveedor ESCRIBIÓ en la descripción. Va primero por ser
-         el más barato y el más limpio: si se acaba el presupuesto, que no sea este el que se
-         pierda.
-      2. Las aplicaciones que salen de las descripciones. Es dato nuevo sobre cada producto.
-      3. El cruce por auto, que USA esas aplicaciones: si va antes, cruza con menos.
-      4. El barrido de todo el catálogo, que es el más caro y el que más produce.
+      1. Las medidas escritas en la descripción. Primero porque es lo más barato y porque SACA
+         vínculos falsos: con la medida cargada, todo lo que viene después tiene la prueba
+         física para vetar.
+      2. Los códigos de fábrica que el proveedor ESCRIBIÓ en la descripción. Barato y limpio:
+         si se acaba el presupuesto, que no sea este el que se pierda.
+      3. Las aplicaciones que salen de las descripciones. Es dato nuevo sobre cada producto.
+      4. El cruce por auto, que USA esas aplicaciones: si va antes, cruza con menos.
+      5. El barrido de todo el catálogo, que es el más caro y el que más produce.
 
-    Medido sobre la base real (70.888 productos, cinco listas): 4 s los códigos escritos,
-    32 s + 17 s las aplicaciones, 22 s el cruce por auto, 23 s el barrido. Total 98 s.
+    Medido sobre la base real (70.888 productos, cinco listas): 3 s las medidas, 4 s los
+    códigos escritos, 32 s + 17 s las aplicaciones, 22 s el cruce por auto, 23 s el barrido.
+    Total 101 s.
 
     Nada se carga como equivalencia: todo va a la cola de pendientes, igual que cuando se
     apretaba el botón a mano. Lo único que cambia es que ahora se busca.
@@ -4829,6 +4859,27 @@ def descubrimiento_post_importacion(presupuesto_segundos=PRESUPUESTO_DESCUBRIMIE
 
     def queda_tiempo():
         return time.time() - arranque < presupuesto_segundos
+
+    # Las medidas que ya están escritas en la descripción. Va primero de todo porque es lo más
+    # barato (2,7 s sobre 70.888 productos) y porque SACA vínculos falsos en vez de agregar:
+    # con las medidas cargadas, los pasos siguientes ya cuentan con la prueba física.
+    # Antes esto era un botón en Mantenimiento que había que saber apretar, y el resultado es
+    # que sobre la base real había 0 medidas cargadas y 1.402 productos que las tenían escritas.
+    if queda_tiempo():
+        try:
+            _completados = 0
+            while queda_tiempo():
+                _pend_med = productos_con_medidas_deducibles(limite=2000)
+                if not _pend_med:
+                    break
+                _completados += aplicar_medidas_deducidas(_pend_med)
+            if _completados:
+                hecho.append(f"{_completados:,} producto(s) con las medidas leídas de su "
+                             "descripción")
+        except Exception as _err:
+            anotar_error("descubrimiento_post_importacion/medidas", _err)
+    else:
+        quedo.append("las medidas escritas en las descripciones")
 
     if queda_tiempo():
         try:
@@ -5745,8 +5796,12 @@ CAMPOS_MEDIDAS = [
     ("diametro_rosca_homocinetica", "diám. rosca"), ("diametro_copa", "diám. copa (base)"),
     ("diametro_copa_superior", "diám. copa (boca)"), ("largo_total", "largo total"),
     ("ancho", "ancho"),
+    # El espesor va con los numéricos porque se compara con tolerancia igual que un diámetro:
+    # una junta de 1,45 y otra de 1,50 son piezas distintas, y el 3% las separa.
+    ("espesor", "espesor"),
 ]
-COLUMNAS_MEDIDAS = ", ".join(cn for cn, _ in CAMPOS_MEDIDAS) + ", paso_rosca, cantidad_estrias"
+COLUMNAS_MEDIDAS = (", ".join(cn for cn, _ in CAMPOS_MEDIDAS)
+                    + ", paso_rosca, cantidad_estrias, cantidad_vias")
 
 
 def cargar_medidas_de_varios(ids):
@@ -5757,11 +5812,28 @@ def cargar_medidas_de_varios(ids):
     todo de una, revisar 5.000 pares cuesta casi lo mismo que revisar 400."""
     medidas = {}
     ids = list({int(i) for i in ids})
+    columnas = _columnas_de_medidas_que_existen()
     for tanda, marcadores in en_tandas(ids):
-        c.execute(f"SELECT id, {COLUMNAS_MEDIDAS} FROM productos WHERE id IN ({marcadores})", tanda)
+        c.execute(f"SELECT id, {columnas} FROM productos WHERE id IN ({marcadores})", tanda)
         for fila in c.fetchall():
             medidas[fila["id"]] = dict(fila)
     return medidas
+
+
+def _columnas_de_medidas_que_existen():
+    """COLUMNAS_MEDIDAS, pero recortada a las columnas que la tabla tiene de verdad.
+
+    Es un cinturón de seguridad y salió de verlo fallar. Al agregar el espesor y las vías, la
+    pantalla de equivalencias sugeridas se cayó con «no such column: espesor» contra una base
+    que todavía no tenía la columna: la conexión está cacheada por Streamlit y el archivo se
+    había reemplazado por debajo, así que la migración de esta versión no había corrido sobre
+    esa conexión. Pasa igual al restaurar un backup viejo con otra sesión abierta.
+    Una columna nueva no puede tumbar una pantalla entera: lo que falte se compara como
+    «todavía no medido», que es exactamente lo que es."""
+    existen = {f["name"] if isinstance(f, sqlite3.Row) else f[1]
+               for f in c.execute("PRAGMA table_info(productos)").fetchall()}
+    pedidas = [x.strip() for x in COLUMNAS_MEDIDAS.split(",")]
+    return ", ".join(x for x in pedidas if x in existen) or "id"
 
 
 def comparar_medidas(a, b, tolerancia_pct=3):
@@ -5772,7 +5844,10 @@ def comparar_medidas(a, b, tolerancia_pct=3):
 
     comparadas, diferencias = [], []
     for campo, etiqueta in campos:
-        va, vb = a[campo], b[campo]
+        # .get() y no [ ]: si la base todavía no tiene una medida nueva, el campo no viene en
+        # el diccionario y la comparación tiene que seguir con las que sí están.
+        # Ver _columnas_de_medidas_que_existen().
+        va, vb = a.get(campo), b.get(campo)
         if va is None or vb is None:
             continue
         comparadas.append(etiqueta)
@@ -5782,8 +5857,11 @@ def comparar_medidas(a, b, tolerancia_pct=3):
         if diferencia > tolerancia_pct:
             diferencias.append(f"{etiqueta}: {va} vs {vb}")
 
-    for campo, etiqueta in (("paso_rosca", "paso de rosca"), ("cantidad_estrias", "estrías")):
-        va, vb = a[campo], b[campo]
+    # Las vías van por igualdad exacta y no por tolerancia: una ficha de 2 vías y una de 3 no
+    # se parecen «un 33%», son dos piezas que no entran una en lugar de la otra.
+    for campo, etiqueta in (("paso_rosca", "paso de rosca"), ("cantidad_estrias", "estrías"),
+                            ("cantidad_vias", "vías de la ficha")):
+        va, vb = a.get(campo), b.get(campo)
         if va in (None, "") or vb in (None, ""):
             continue
         comparadas.append(etiqueta)
@@ -6356,7 +6434,15 @@ def evaluar_equivalencia(desc_a, desc_b, medidas_a=None, medidas_b=None,
     if medidas_a and medidas_b:
         coinciden, detalle = comparar_medidas(medidas_a, medidas_b)
         if coinciden is False:
-            puntaje -= 45
+            # TOPE, no resta. Esta función dice arriba que las medidas que se contradicen son
+            # «prueba física en contra, no hay vuelta», y restando no era así: un sensor de
+            # rotación de 3 polos vinculado a uno de 2 —misma marca, mismo auto, misma
+            # resistencia— se iba a 20 por la medida y volvía a 50 porque el código de fábrica
+            # que los une es largo y cuelga pocos productos. Quedaba arriba del umbral y la
+            # auditoría no lo mostraba nunca; el buscador lo tenía con 95 de confianza.
+            # Que el código «parezca un código» no puede ganarle a que las dos piezas midan
+            # distinto: lo primero es una pista sobre el número, lo segundo es la pieza.
+            puntaje = min(puntaje - 45, 15.0)
             senales.append(("mal", f"📐 {detalle}"))
         elif coinciden is True:
             puntaje += 30
@@ -10260,9 +10346,29 @@ def _trabajo_de_fondo():
     # adentro de la pantalla de importar porque tarda 110 segundos, y hacer esperar dos minutos
     # a alguien que subió una planilla desde el celular —con la pantalla que se apaga sola y el
     # navegador que puede cortar la conexión— es peor que avisarle que está corriendo.
-    # Antes que nada, el repuntaje: es lo más barato de todo (12,8 s sobre 24.774 vínculos) y
-    # lo que más se nota, porque el puntaje viejo lo está mostrando el buscador en cada
-    # búsqueda. Ver VERSION_CONFIANZA.
+    # Las medidas van ANTES que el repuntaje, y el orden no es casual: el puntaje usa las
+    # medidas como prueba física, así que repuntuar primero sería repuntuar sin ellas y habría
+    # que hacerlo dos veces. Ver VERSION_MEDIDAS.
+    if obtener_config("medidas_pendientes", "") == "1":
+        try:
+            guardar_config("medidas_pendientes", "0")
+            _n_med = 0
+            while True:
+                _tanda_med = productos_con_medidas_deducibles(limite=2000)
+                if not _tanda_med:
+                    break
+                _n_med += aplicar_medidas_deducidas(_tanda_med)
+            guardar_config("medidas_completadas", str(_n_med))
+            guardar_config("medidas_fecha", datetime.now().strftime("%Y-%m-%d %H:%M"))
+            # Las medidas nuevas cambian el puntaje, así que se pide el repuntaje detrás.
+            guardar_config("confianza_pendiente", "1")
+        except Exception as _err:
+            anotar_error("_trabajo_de_fondo/medidas", _err)
+            guardar_config("medidas_pendientes", "1")
+
+    # Después el repuntaje: es barato (12,8 s sobre 24.774 vínculos) y lo que más se nota,
+    # porque el puntaje viejo lo está mostrando el buscador en cada búsqueda.
+    # Ver VERSION_CONFIANZA.
     if obtener_config("confianza_pendiente", "") == "1":
         try:
             guardar_config("confianza_pendiente", "0")
@@ -10349,7 +10455,8 @@ def arrancar_tanda_de_fondo():
             # después de cambiar las reglas de confianza el puntaje viejo se quedaría para
             # siempre en la base de quien no tiene prendida ninguna tanda automática — que es
             # justo el caso normal. Ver VERSION_CONFIANZA.
-            and obtener_config("confianza_pendiente", "") != "1"):
+            and obtener_config("confianza_pendiente", "") != "1"
+            and obtener_config("medidas_pendientes", "") != "1"):
         return False
 
     # El candado se toma ACÁ y no adentro del hilo. Mirar si está tomado y después crear el
@@ -16846,6 +16953,36 @@ def medidas_desde_descripcion(descripcion):
             medidas["diametro_rosca_homocinetica"] = diametro
             medidas["paso_rosca"] = paso
 
+    # EL ESPESOR DE LA JUNTA. Es de los datos más caros de errar que hay en el mostrador y
+    # estaba escrito en la descripción sin que lo leyera nadie. Una junta de tapa de cilindros
+    # de 1,50 mm y una de 1,70 son piezas distintas —cambian la relación de compresión— y para
+    # todas las reglas de texto de la app son casi la misma fila:
+    #     Junta Tapa de Cilindros ISUZU (ESP 1.50MM) TROOPER ...
+    #     Junta Tapa de Cilindros ISUZU (ESP 1.60MM) TROOPER ...
+    #     Junta Tapa de Cilindros ISUZU (ESP 1.70MM) TROOPER ...
+    # Medido sobre la base real: 630 productos lo traen escrito, y hay 32 vínculos esperando
+    # revisión que unen juntas de espesor distinto — uno de ellos propone el mismo código de
+    # fábrica para 0,2 / 0,3 / 0,5 y 0,8 mm a la vez.
+    # Se pide la palabra ESP y la unidad MM pegadas al número: así no se confunde con la
+    # abreviatura «Esp.» de «especial», que aparece suelta y sin número.
+    espesor = re.search(r"\bESP\.?\s*:?\s*(\d{1,2}(?:\.\d{1,2})?)\s*MM\b", texto)
+    if espesor:
+        valor = float(espesor.group(1))
+        # Los 630 de la base van de 0,2 a 3 mm. El tope deja lugar de sobra sin dejar entrar
+        # un número que sea otra cosa.
+        if 0.05 <= valor <= 20:
+            medidas["espesor"] = valor
+
+    # LAS VÍAS DE LA FICHA. Mismo caso: un sensor de 2 polos y uno de 3 no son intercambiables,
+    # y la descripción lo dice. En la base hay 483 productos que lo escriben y dos vínculos YA
+    # CARGADOS que unen un sensor de rotación de 3 polos con uno de 2 —misma marca, mismo auto,
+    # misma resistencia— que hoy el buscador ofrece como equivalentes.
+    vias = re.search(r"\b(\d{1,2})\s*(?:VIAS|VÍAS|POLOS|PINES)\b", texto)
+    if vias:
+        cuantas = int(vias.group(1))
+        if 1 <= cuantas <= 40:
+            medidas["cantidad_vias"] = cuantas
+
     return medidas
 
 
@@ -16856,11 +16993,13 @@ def productos_con_medidas_deducibles(limite=500):
         c.execute("""SELECT p.id AS "_id", p.codigo_raw AS "Código", m.nombre AS "Marca",
                             p.descripcion AS "Descripción",
                             p.diametro_interno, p.diametro_externo, p.ancho,
-                            p.cantidad_estrias, p.diametro_rosca_homocinetica, p.paso_rosca
+                            p.cantidad_estrias, p.diametro_rosca_homocinetica, p.paso_rosca,
+                            p.espesor, p.cantidad_vias
                      FROM productos p JOIN marcas m ON m.id = p.marca_id
                      WHERE p.descripcion IS NOT NULL AND p.descripcion <> ''
                        AND (p.diametro_interno IS NULL OR p.diametro_externo IS NULL
-                            OR p.ancho IS NULL OR p.cantidad_estrias IS NULL)""")
+                            OR p.ancho IS NULL OR p.cantidad_estrias IS NULL
+                            OR p.espesor IS NULL OR p.cantidad_vias IS NULL)""")
         filas = filas_a_listas(c)
     except sqlite3.OperationalError as _err:
         anotar_error("productos_con_medidas_deducibles", _err)
@@ -16877,7 +17016,7 @@ def productos_con_medidas_deducibles(limite=500):
             f"{etq}={nuevas[campo]}" for campo, etq in
             (("diametro_interno", "int"), ("diametro_externo", "ext"), ("ancho", "ancho"),
              ("cantidad_estrias", "estrías"), ("diametro_rosca_homocinetica", "rosca"),
-             ("paso_rosca", "paso"))
+             ("paso_rosca", "paso"), ("espesor", "espesor"), ("cantidad_vias", "vías"))
             if campo in nuevas)
         f["_nuevas"] = nuevas
         salida.append(f)

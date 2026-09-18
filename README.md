@@ -1642,6 +1642,97 @@ El corte es por proveedor (`GROUP BY po.id, mp.id`) y no por total: un código d
 legítimo aparece en varias listas a la vez —es justo para eso que sirve— y contando todo junto
 ese sería el primero de la lista.
 
+## Los datos ya estaban escritos en la descripción: el espesor y las vías
+
+La pregunta fue qué más datos automáticos se pueden poner. Lo primero fue medir qué hay cargado
+hoy, columna por columna, sobre los 70.888 productos:
+
+| dato | cargado |
+|---|---|
+| precio | 46.644 (65,8 %) |
+| stock | **0** |
+| fotos | **0** |
+| aplicaciones (qué auto lleva cada pieza) | **0** |
+| todas las medidas juntas | **0** |
+
+Y las descripciones están llenas de datos que nadie lee. Dos de ellos son exactamente los que
+hacen que dos piezas **no** sean intercambiables aunque todo lo demás coincida:
+
+### El espesor de la junta
+
+    Junta Tapa de Cilindros ISUZU (ESP 1.50MM) TROOPER ...
+    Junta Tapa de Cilindros ISUZU (ESP 1.60MM) TROOPER ...
+    Junta Tapa de Cilindros ISUZU (ESP 1.70MM) TROOPER ...
+
+Tres piezas distintas —el espesor cambia la relación de compresión— y para todas las reglas de
+texto de la app son casi la misma fila. **630 productos lo traen escrito y había 0 cargados.**
+
+Consecuencia medida: **32 vínculos esperando revisión unen juntas de espesor distinto**. El peor
+propone el mismo código de fábrica para 0,2 / 0,3 / 0,5 y 0,8 mm a la vez.
+
+### Las vías de la ficha
+
+Un sensor de 2 polos y uno de 3 no son intercambiables, y la descripción lo dice. **483 productos
+lo traen escrito, 0 cargados.** Y hay dos vínculos **ya cargados** que unen un sensor de rotación
+de 3 polos con uno de 2 —misma marca, mismo auto, misma resistencia— que el buscador venía
+mostrando con **95 de confianza**.
+
+### El tope que faltaba: la medida le ganaba al código
+
+Cargar las medidas no alcanzaba, y esto solo se vio probándolo. `evaluar_equivalencia()` dice
+arriba de todo que las medidas que se contradicen son «prueba física en contra, no hay vuelta»,
+pero **restaba 45 en vez de topear**. Ese sensor de 3 polos contra el de 2 bajaba a 20 por la
+medida y volvía a 50 porque el código de fábrica que los une es largo y cuelga pocos productos.
+Quedaba arriba del umbral, la auditoría no lo mostraba nunca, y el buscador lo daba por bueno.
+
+Que el código «parezca un código» no puede ganarle a que las dos piezas midan distinto: lo
+primero es una pista sobre el número, lo segundo es la pieza. Ahora topea.
+
+Resultado sobre la base real:
+
+| | antes | después |
+|---|---|---|
+| Pares de juntas con espesor distinto en la cola | 4 🔴 / 28 🟠 | **32 🔴**, con «📐 NO coinciden: espesor: 0.2 vs 0.3» |
+| Vínculos cargados marcados por medidas | 0 | **3** (2 de vías, 1 de paso de rosca) |
+| Confianza guardada de los dos sensores | **95** | **30** |
+
+El tercero apareció solo: `7700785258 ↔ BS4508`, paso de rosca 1 contra 1,5. No es que se
+parezcan poco — es que no enrosca.
+
+### Y que pase solo
+
+Llenar las medidas era un botón en Mantenimiento que había que saber apretar, y el resultado se
+ve en la tabla de arriba: 0 cargadas con 1.402 productos que las tenían escritas. Ahora corre en
+dos momentos, sin que nadie lo pida:
+
+- **Después de cada importación**, como primer paso del descubrimiento. Va primero porque es lo
+  más barato (3 s sobre 70.888 productos) y porque SACA vínculos falsos: con la medida cargada,
+  los cuatro pasos siguientes ya cuentan con la prueba física.
+- **Cuando el lector aprende a leer algo nuevo**, por `VERSION_MEDIDAS`, igual que la versión del
+  índice de búsqueda y la de confianza. Al abrir la app se deja pedido y lo hace la tarea de
+  fondo, que arranca también por esto aunque estén apagadas las tandas automáticas.
+
+El orden entre las dos tareas de fondo importa y está escrito: **las medidas van antes que el
+repuntaje**, porque el puntaje las usa como prueba física y repuntuar primero sería repuntuar sin
+ellas.
+
+Probado de punta a punta sobre una copia de la base: abrir la app deja los dos pedidos, la tarea
+de fondo completa 1.402 productos y repuntúa los 24.774 vínculos en 16,7 s con todo lo demás
+apagado, los dos sensores caen de 95 a 30, y correrla de nuevo no repite nada.
+
+### Y una columna nueva no puede tumbar una pantalla
+
+El barrido lo agarró: la pantalla de equivalencias sugeridas se cayó con «no such column:
+espesor». La causa era del banco de pruebas —la conexión queda cacheada por Streamlit y el
+archivo se reemplaza por debajo, así que la migración de esta versión no había corrido sobre esa
+conexión— pero el agujero es real y pasa igual **al restaurar un backup viejo con otra sesión
+abierta**, que es algo que la app hace.
+
+`cargar_medidas_de_varios()` armaba el SELECT con una lista de columnas fija. Ahora recorta la
+lista a las que la tabla tiene de verdad, y `comparar_medidas()` lee con `.get()`: lo que falte
+se compara como «todavía no medido», que es exactamente lo que es. Una medida nueva agrega un
+dato, no puede sacar una pantalla.
+
 ## Los vínculos viejos se juzgaban con reglas viejas
 
 La pregunta fue: si cambiamos tanto la confianza, ¿el botón de revisión también vuelve a mirar

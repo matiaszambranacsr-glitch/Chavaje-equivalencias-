@@ -924,6 +924,39 @@ def probar_ref_orig_pegado_no_es_codigo():
     cierto("024210" in salida, "el código que viene después de REF ORIG sí")
 
 
+def probar_el_espesor_y_las_vias_que_estaban_escritos():
+    """El espesor de la junta y las vías de la ficha ya estaban en la descripción.
+
+    Son los dos datos que hacen que dos piezas NO sean intercambiables aunque todo lo demás
+    coincida, y para todas las reglas de texto de la app eran casi la misma fila:
+
+        Junta Tapa de Cilindros ISUZU (ESP 1.50MM) TROOPER ...
+        Junta Tapa de Cilindros ISUZU (ESP 1.70MM) TROOPER ...
+
+    En la base real: 630 productos con el espesor escrito, 483 con la cantidad de polos o vías,
+    y 0 cargados. Había 32 vínculos esperando revisión que unían juntas de espesor distinto
+    —uno proponía el mismo código de fábrica para 0,2 / 0,3 / 0,5 y 0,8 mm a la vez— y dos YA
+    CARGADOS, con 95 de confianza, que unían un sensor de 3 polos con uno de 2."""
+    igual(vehiculos.medidas_desde_descripcion(
+        "Junta Tapa de Cilindros ISUZU (ESP 1.50MM) TROOPER"), {"espesor": 1.5},
+        "el espesor entre paréntesis")
+    igual(vehiculos.medidas_desde_descripcion("Jta.Tapa Cil. FIAT DAILY ESP 1.6MM"),
+          {"espesor": 1.6}, "el espesor suelto")
+    igual(vehiculos.medidas_desde_descripcion(
+        "SENSOR DE ROTACION RENAULT 19 CLIO 1 6 SPI 3 POLOS RESISTENCIA 235"),
+        {"cantidad_vias": 3}, "los polos del sensor")
+    igual(vehiculos.medidas_desde_descripcion("FICHA 4 vias BULBO ELECTROVENTILADOR"),
+          {"cantidad_vias": 4}, "las vías de la ficha")
+
+    # «Esp.» de «especial» aparece suelta y sin unidad: no es un espesor y no se lee.
+    igual(vehiculos.medidas_desde_descripcion("JUEGO Cil.Esp.1 SIN NUMERO"), {},
+          "«Esp.» de especial no es un espesor")
+    # Y lo que ya se leía sigue igual.
+    igual(vehiculos.medidas_desde_descripcion("RETEN 35X52X7 SKF"),
+          {"diametro_interno": 35.0, "diametro_externo": 52.0, "ancho": 7.0},
+          "los tres números de un retén")
+
+
 def probar_el_codigo_que_hoy_ya_no_se_tomaria():
     """La pregunta que decide si un código viejo hay que borrarlo, y si un pendiente vale.
 
@@ -1219,6 +1252,7 @@ def main():
                    probar_la_clase_de_mercedes_no_es_un_codigo,
                    probar_el_camion_no_es_un_codigo,
                    probar_el_codigo_que_hoy_ya_no_se_tomaria,
+                   probar_el_espesor_y_las_vias_que_estaban_escritos,
                    probar_el_numero_interno_del_proveedor_no_es_referencia_cruzada,
                    probar_solo_los_codigos_que_el_proveedor_declaro,
                    probar_marca_pegada_atras_del_numero,

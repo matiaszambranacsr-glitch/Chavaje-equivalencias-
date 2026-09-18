@@ -740,6 +740,36 @@ def medidas_desde_descripcion(descripcion):
             medidas["diametro_rosca_homocinetica"] = diametro
             medidas["paso_rosca"] = paso
 
+    # EL ESPESOR DE LA JUNTA. Es de los datos más caros de errar que hay en el mostrador y
+    # estaba escrito en la descripción sin que lo leyera nadie. Una junta de tapa de cilindros
+    # de 1,50 mm y una de 1,70 son piezas distintas —cambian la relación de compresión— y para
+    # todas las reglas de texto de la app son casi la misma fila:
+    #     Junta Tapa de Cilindros ISUZU (ESP 1.50MM) TROOPER ...
+    #     Junta Tapa de Cilindros ISUZU (ESP 1.60MM) TROOPER ...
+    #     Junta Tapa de Cilindros ISUZU (ESP 1.70MM) TROOPER ...
+    # Medido sobre la base real: 630 productos lo traen escrito, y hay 32 vínculos esperando
+    # revisión que unen juntas de espesor distinto — uno de ellos propone el mismo código de
+    # fábrica para 0,2 / 0,3 / 0,5 y 0,8 mm a la vez.
+    # Se pide la palabra ESP y la unidad MM pegadas al número: así no se confunde con la
+    # abreviatura «Esp.» de «especial», que aparece suelta y sin número.
+    espesor = re.search(r"\bESP\.?\s*:?\s*(\d{1,2}(?:\.\d{1,2})?)\s*MM\b", texto)
+    if espesor:
+        valor = float(espesor.group(1))
+        # Los 630 de la base van de 0,2 a 3 mm. El tope deja lugar de sobra sin dejar entrar
+        # un número que sea otra cosa.
+        if 0.05 <= valor <= 20:
+            medidas["espesor"] = valor
+
+    # LAS VÍAS DE LA FICHA. Mismo caso: un sensor de 2 polos y uno de 3 no son intercambiables,
+    # y la descripción lo dice. En la base hay 483 productos que lo escriben y dos vínculos YA
+    # CARGADOS que unen un sensor de rotación de 3 polos con uno de 2 —misma marca, mismo auto,
+    # misma resistencia— que hoy el buscador ofrece como equivalentes.
+    vias = re.search(r"\b(\d{1,2})\s*(?:VIAS|VÍAS|POLOS|PINES)\b", texto)
+    if vias:
+        cuantas = int(vias.group(1))
+        if 1 <= cuantas <= 40:
+            medidas["cantidad_vias"] = cuantas
+
     return medidas
 
 
