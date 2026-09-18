@@ -359,6 +359,14 @@ VERSION_CONFIANZA = "3"
 # Subir el número al agregar una medida nueva a medidas_desde_descripcion().
 VERSION_MEDIDAS = "2"
 
+# La versión del LECTOR DE APLICACIONES: a qué auto le va cada pieza, deducido de la
+# descripción. Es el dato gratis más grande que tiene esta base —114.673 filas que salen de
+# texto ya cargado, contra 0 que había— y el que hace andar la búsqueda por vehículo.
+# Como las otras dos, corría solo después de importar una lista, así que en una base donde no
+# se importó nada desde que la función existe nunca corrió.
+# Subir el número al cambiar cómo se leen los modelos.
+VERSION_APLICACIONES = "2"
+
 
 def secretos_app():
     """Los Secrets de Streamlit, o {} si en este servidor no hay ninguno configurado.
@@ -2085,6 +2093,17 @@ def _datos_precargados_y_migraciones(c):
                   "ON CONFLICT(clave) DO UPDATE SET valor = excluded.valor",
                   (VERSION_NORMALIZACION,))
 
+    # Lo mismo para las aplicaciones. Ver VERSION_APLICACIONES.
+    c.execute("SELECT valor FROM configuracion WHERE clave = 'version_aplicaciones'")
+    _fila_apl = c.fetchone()
+    if (_fila_apl["valor"] if _fila_apl else None) != VERSION_APLICACIONES:
+        c.execute("INSERT INTO configuracion (clave, valor) VALUES "
+                  "('aplicaciones_pendientes', '1') "
+                  "ON CONFLICT(clave) DO UPDATE SET valor = excluded.valor")
+        c.execute("INSERT INTO configuracion (clave, valor) VALUES ('version_aplicaciones', ?) "
+                  "ON CONFLICT(clave) DO UPDATE SET valor = excluded.valor",
+                  (VERSION_APLICACIONES,))
+
     # El lector de medidas aprendió algo nuevo: hay que releer las descripciones. Igual que
     # abajo, acá solo se deja pedido. Ver VERSION_MEDIDAS.
     c.execute("SELECT valor FROM configuracion WHERE clave = 'version_medidas'")
@@ -3252,6 +3271,50 @@ _RE_MARCA_DE_AUTO_PEGADA = re.compile(
 _RE_MODELO_IVECO = re.compile(r'^\d{2,3}E\d{2}[A-Z]?$')
 
 
+# LAS DOS FORMAS DE UNA DESIGNACIÓN DE MOTOR. Están a nivel de módulo y no adentro del
+# extractor porque las usan dos cosas distintas —adivinar códigos en un texto y decidir si una
+# palabra es el MODELO de un auto— y tener dos copias es tener dos reglas que con el tiempo
+# dejan de decir lo mismo. Ver parece_designacion_de_motor().
+FORMAS_DE_DESIGNACION_DE_MOTOR = (
+    # Códigos de MOTOR: letras, números y letras al final. MR20DE, B4204S, Z18XER, X20XEV,
+    # DV6DTED, MT560B. Describen la motorización del auto, no la pieza — y como se repiten
+    # en decenas de filas, cada uno vincula entre sí todo lo que lo menciona.
+    # Se midió sobre 4.340 códigos extraídos de una lista real: descarta 36, y los 36 son
+    # códigos de motor. El 1% de pérdida vale, porque cada uno de esos generaba decenas de
+    # equivalencias falsas.
+    re.compile(r'^[A-Z]{1,3}\d{1,5}[A-Z]{1,4}$'),
+    # MOTORES de PSA con letra final: XU10J4R, DJ5T12V, TU3F2K, EP6CDTMD. XU10J4R llegó a
+    # colgar 6 productos de tres proveedores: una junta de tapa de Peugeot 405, un juego de
+    # reparación y una tapa de cilindros — todo lo que menciona ese motor. Va acá porque
+    # comparte el problema de arriba: la misma forma la tiene un código real.
+    re.compile(r'^[A-Z]{2}\d{1,2}[A-Z]{1,4}\d{0,2}[A-Z]?$'),
+)
+
+
+def parece_designacion_de_motor(palabra):
+    """¿Esa palabra es un motor —K4M, TU5JP4, Z18XER— y no el modelo de un auto?
+
+    Para el extractor de códigos esta forma es AMBIGUA: un código de repuesto real puede
+    tenerla, y ahí lo desempata que el código esté en el catálogo. Para el lector de
+    aplicaciones no hay ambigüedad: un motor NO es un modelo. «RENAULT K4M» no es un auto que
+    alguien vaya a buscar, y como aparece en decenas de descripciones, cada motor junta entre
+    sí todo lo que lo nombre.
+
+    Medido sobre las 120.691 aplicaciones que las descripciones de la base dan: saca 566
+    combinaciones auto+modelo y 6.048 filas (el 5%), y entre las 566 no hay un solo modelo de
+    verdad. Las de arriba por volumen son K4M, F8Q, K7M, F4R, K9K, TU5JP4, C20NE, Z18XER: los
+    motores de Renault, de PSA y de Opel.
+
+    El primer intento fue preguntarle al extractor de códigos directamente, y estuvo mal por un
+    motivo que se ve enseguida midiendo: el extractor exige que haya un dígito, así que tiraba
+    GOLF, CLIO, FIESTA y PALIO — el 88% de las aplicaciones. La pregunta no es «¿esto sería un
+    código?», es «¿esto tiene la forma de un motor?»."""
+    t = (palabra or "").strip().upper()
+    if not t:
+        return False
+    return any(p.match(t) for p in FORMAS_DE_DESIGNACION_DE_MOTOR)
+
+
 def _es_lista_de_modelos(token):
     """«106-206-306-406-607» no es un código: es la lista de modelos a los que le va la pieza.
 
@@ -3317,20 +3380,7 @@ def extraer_codigos_de_texto(texto, minimo=6, codigo_propio=None, codigos_conoci
     # AMBIGUAS: aciertan casi siempre, pero la misma forma la tienen códigos de repuesto de
     # verdad —ERR4685B es un número de Land Rover, no un motor—, así que dejan de aplicarse
     # cuando el proveedor DECLARÓ que lo que sigue es el código de fábrica.
-    formas_ambiguas = (
-        # Códigos de MOTOR: letras, números y letras al final. MR20DE, B4204S, Z18XER, X20XEV,
-        # DV6DTED, MT560B. Describen la motorización del auto, no la pieza — y como se repiten
-        # en decenas de filas, cada uno vincula entre sí todo lo que lo menciona.
-        # Se midió sobre 4.340 códigos extraídos de una lista real: descarta 36, y los 36 son
-        # códigos de motor. El 1% de pérdida vale, porque cada uno de esos generaba decenas de
-        # equivalencias falsas.
-        re.compile(r'^[A-Z]{1,3}\d{1,5}[A-Z]{1,4}$'),
-        # MOTORES de PSA con letra final: XU10J4R, DJ5T12V, TU3F2K, EP6CDTMD. XU10J4R llegó a
-        # colgar 6 productos de tres proveedores: una junta de tapa de Peugeot 405, un juego de
-        # reparación y una tapa de cilindros — todo lo que menciona ese motor. Va acá porque
-        # comparte el problema de arriba: la misma forma la tiene un código real.
-        re.compile(r'^[A-Z]{2}\d{1,2}[A-Z]{1,4}\d{0,2}[A-Z]?$'),
-    )
+    formas_ambiguas = FORMAS_DE_DESIGNACION_DE_MOTOR
     # Y estas son texto sin discusión: un rango de años o una medida no dejan de serlo porque
     # el proveedor los haya escrito después de un «ORIG».
     formas_solo_texto = (
@@ -6614,9 +6664,17 @@ def analizar_lote_pendiente(lote, limite=None, desde=0):
         for r in c.fetchall():
             confirmaciones[(r["producto_a_id"], r["producto_b_id"])] = r["n"]
         try:
+            # origen <> 'deducida' y esto importa: la señal que alimenta vale +25 y se llama
+            # «el catálogo del fabricante respalda este vínculo». Una aplicación DEDUCIDA no
+            # sale de ningún catálogo — sale de leerle el auto a la misma descripción que el
+            # resto de las señales ya está comparando. Contarla sería contar dos veces la
+            # misma evidencia, y encima diciéndole al usuario algo que no es cierto.
+            # Sobre la base real son 114.673 aplicaciones deducidas: sin este filtro, cargarlas
+            # le sumaba 25 a casi todos los vínculos sin que apareciera un dato nuevo.
             c.execute(f"""SELECT DISTINCT p.codigo_clean FROM productos p
                           JOIN aplicaciones ap ON ap.codigo_clean = p.codigo_clean
-                          WHERE p.id IN ({marcadores})""", ids)
+                          WHERE p.id IN ({marcadores})
+                            AND COALESCE(ap.origen, '') <> 'deducida'""", ids)
             codigos_con_respaldo = {r["codigo_clean"] for r in c.fetchall()}
         except sqlite3.OperationalError as _err:
             anotar_error("analizar_lote_pendiente", _err)
@@ -10366,6 +10424,39 @@ def _trabajo_de_fondo():
             anotar_error("_trabajo_de_fondo/medidas", _err)
             guardar_config("medidas_pendientes", "1")
 
+    # Las aplicaciones: a qué auto le va cada pieza. Es lo más caro de las tres (55 s sobre
+    # 70.888 descripciones: 32 s leerlas y 23 s escribirlas) y va después de las medidas porque
+    # no se necesitan entre sí. Ver VERSION_APLICACIONES.
+    if obtener_config("aplicaciones_pendientes", "") == "1":
+        try:
+            guardar_config("aplicaciones_pendientes", "0")
+            _apl_ded = aplicaciones_desde_descripciones()
+            _n_apl = aplicar_aplicaciones_deducidas(_apl_ded) if _apl_ded else 0
+            guardar_config("aplicaciones_deducidas", str(_n_apl))
+            guardar_config("aplicaciones_fecha", datetime.now().strftime("%Y-%m-%d %H:%M"))
+            if _n_apl:
+                # Con las aplicaciones cargadas, el cruce por auto tiene con qué cruzar, así
+                # que se corre ESE paso y nada más. La primera versión pedía el descubrimiento
+                # completo y probándolo se vio el problema: eso larga también el barrido de
+                # todo el catálogo, que no necesita las aplicaciones para nada, y la cola de
+                # revisión pasaba de 3.185 a 22.235 de una vez. Que crezca así está bien
+                # después de importar una lista —hay algo nuevo que mirar— pero no cuando lo
+                # único que pasó es que la app se actualizó: nadie pidió 9.000 pares nuevos, y
+                # abrir la app y encontrarlos parece que algo se rompió.
+                # El barrido sigue corriendo después de cada importación, como siempre.
+                try:
+                    _por_auto = derivar_equivalencias_de_aplicaciones()
+                    if _por_auto:
+                        _n_auto = guardar_equivalencias_derivadas(
+                            [(x["_a"], x["_b"]) for x in _por_auto],
+                            f"CRUCE POR AUTO (automático) · {datetime.now():%d/%m %H:%M}")
+                        guardar_config("aplicaciones_cruces", str(_n_auto))
+                except Exception as _err:
+                    anotar_error("_trabajo_de_fondo/cruce_por_auto", _err)
+        except Exception as _err:
+            anotar_error("_trabajo_de_fondo/aplicaciones", _err)
+            guardar_config("aplicaciones_pendientes", "1")
+
     # Después el repuntaje: es barato (12,8 s sobre 24.774 vínculos) y lo que más se nota,
     # porque el puntaje viejo lo está mostrando el buscador en cada búsqueda.
     # Ver VERSION_CONFIANZA.
@@ -10456,7 +10547,8 @@ def arrancar_tanda_de_fondo():
             # siempre en la base de quien no tiene prendida ninguna tanda automática — que es
             # justo el caso normal. Ver VERSION_CONFIANZA.
             and obtener_config("confianza_pendiente", "") != "1"
-            and obtener_config("medidas_pendientes", "") != "1"):
+            and obtener_config("medidas_pendientes", "") != "1"
+            and obtener_config("aplicaciones_pendientes", "") != "1"):
         return False
 
     # El candado se toma ACÁ y no adentro del hilo. Mirar si está tomado y después crear el
@@ -12103,6 +12195,15 @@ def aplicaciones_desde_descripciones(limite=None):
             modelos_hallados = []
             for _t in re.findall(r"[A-ZÁÉÍÓÚÑ][A-ZÁÉÍÓÚÑ0-9\-]{2,}", resto.upper()):
                 if _t in conocidos and _t not in vistos_modelo:
+                    # Un MOTOR no es un modelo. modelos_de_marca() lo confirma igual —«K4M»
+                    # aparece muchas veces y casi solo en Renault, que es justo su regla— y de
+                    # ahí salían 6.048 filas donde el «auto» era una motorización. Nadie busca
+                    # repuestos «para un K4M», y como el motor aparece en decenas de
+                    # descripciones, junta entre sí todo lo que lo nombre.
+                    # Ver parece_designacion_de_motor() para los números y para el intento
+                    # equivocado que vino antes.
+                    if parece_designacion_de_motor(_t):
+                        continue
                     vistos_modelo.add(_t)
                     modelos_hallados.append(_t)
             if not modelos_hallados:
@@ -12759,10 +12860,16 @@ def evidencia_cruzada(id_a, id_b, cuenta_palabras=None, total_descripciones=None
 
     # 3. El catálogo del fabricante: ¿los da para el mismo auto?
     try:
+        # Las deducidas quedan afuera por lo mismo que en analizar_lote_pendiente(): esta vía
+        # cuenta como UNA de las tres evidencias que fuerzan el puntaje a 90, y una aplicación
+        # deducida de la descripción no es un tercer camino independiente — es el mismo texto
+        # que ya miran las señales de descripción, con el cartel de «lo dice el fabricante».
         c.execute("""SELECT COUNT(*) FROM aplicaciones a JOIN aplicaciones b
                        ON a.marca_auto = b.marca_auto AND a.modelo_auto = b.modelo_auto
                      WHERE a.codigo_clean = ? AND b.codigo_clean = ?
-                       AND a.marca_repuesto <> b.marca_repuesto""",
+                       AND a.marca_repuesto <> b.marca_repuesto
+                       AND COALESCE(a.origen, '') <> 'deducida'
+                       AND COALESCE(b.origen, '') <> 'deducida'""",
                   (pa["codigo_clean"], pb["codigo_clean"]))
         autos_juntos = c.fetchone()[0]
         if autos_juntos:

@@ -1642,6 +1642,68 @@ El corte es por proveedor (`GROUP BY po.id, mp.id`) y no por total: un código d
 legítimo aparece en varias listas a la vez —es justo para eso que sirve— y contando todo junto
 ese sería el primero de la lista.
 
+## A qué auto le va cada pieza: 114.673 filas que ya estaban en el texto
+
+La tabla de aplicaciones —lo que hace andar la búsqueda por vehículo— tenía **0 filas**, y las
+descripciones de los proveedores dan **114.673**. La función que las lee existía y andaba, pero
+corría solo después de importar una lista; en una base donde no se importó nada desde que existe
+esa función, nunca corrió.
+
+Ahora corre sola, por `VERSION_APLICACIONES`, igual que las medidas y el repuntaje: al abrir la
+app se deja pedido y lo hace la tarea de fondo. Resultado sobre la base real: **87 marcas de
+auto, 4.229 combinaciones marca+modelo**, VW con 432 modelos y 17.990 piezas.
+
+### Pero antes de prenderla, dos cosas que aparecieron midiendo
+
+**1. Los motores entraban como si fueran modelos.** «RENAULT K4M», «PEUGEOT TU5JP4»,
+«CHEVROLET Z18XER» — el K4M solo movía 184 filas. `modelos_de_marca()` los confirma como
+modelos legítimamente: su regla es «esta palabra aparece muchas veces y casi solo en esta
+marca», y un motor de Renault cumple las dos. Pero nadie busca repuestos «para un K4M», y como
+el motor aparece en decenas de descripciones, junta entre sí todo lo que lo nombre.
+
+`parece_designacion_de_motor()` saca **566 combinaciones y 6.048 filas (5%)**, y entre las 566 no
+hay un solo modelo de verdad: son los motores de Renault, de PSA y de Opel.
+
+El primer intento estuvo mal y vale contarlo, porque se vio enseguida midiendo: preguntarle al
+extractor de códigos «¿esto sería un código?» tiraba **GOLF, CLIO, FIESTA y PALIO — el 88% de
+las aplicaciones**, porque el extractor exige que haya un dígito. La pregunta no era «¿esto
+sería un código?», era «¿esto tiene la forma de un motor?». Las dos expresiones de motor ahora
+están a nivel de módulo, compartidas con el extractor, para no tener dos copias de la misma
+regla.
+
+**2. Cargarlas le sumaba 25 de confianza a casi todo sin aportar nada nuevo.** El puntaje tiene
+una señal que vale +25 y se llama «🏭 el catálogo del fabricante respalda este vínculo», y se
+alimenta de la tabla de aplicaciones. Una aplicación **deducida** no sale de ningún catálogo:
+sale de leerle el auto a la misma descripción que el resto de las señales ya está comparando.
+Contarla es contar dos veces la misma evidencia, y encima decirle al usuario algo que no es
+cierto. Lo mismo en `evidencia_cruzada()`, donde cuenta como uno de los tres caminos
+independientes que fuerzan el puntaje a 90.
+
+Las dos consultas ahora piden `origen <> 'deducida'`. Las aplicaciones deducidas sirven para
+buscar por vehículo y para el cruce por auto; no para decir que lo dice el fabricante.
+
+### Y una decisión de alcance que también salió de probarlo
+
+La primera versión, después de cargar las aplicaciones, pedía el descubrimiento **completo**. Eso
+larga también el barrido de todo el catálogo —que no necesita las aplicaciones para nada— y la
+cola de revisión pasaba de **3.185 a 22.235** de una sola vez.
+
+Que crezca así está bien después de importar una lista: hay algo nuevo que mirar. No está bien
+cuando lo único que pasó es que la app se actualizó — nadie pidió 9.000 pares nuevos, y abrir la
+app y encontrarlos parece que algo se rompió. Ahora se corre solo **el cruce por auto**, que es
+el paso que usa las aplicaciones. El barrido sigue corriendo después de cada importación, como
+siempre.
+
+Probado de punta a punta sobre una copia de la base, con todas las tandas automáticas apagadas:
+la tarea de fondo tarda **96 s**, completa 1.402 productos con medidas, carga 114.673
+aplicaciones con **0 motores adentro**, repuntúa los 24.774 vínculos, agrega **10** pares del
+cruce por auto (cola: 3.185 → 3.195) y la segunda corrida no repite nada.
+
+Lo que queda sucio y no se filtró: la cola de modelos raros —«AUDI ACLARACION», «AUDI SAME»,
+«BMW BOSCH-HALL»— que salen de palabras sueltas de la descripción. Aparecen una o dos veces cada
+una, así que mueven ~2% de las filas, y filtrarlas por forma sería adivinar. La defensa que ya
+hay es la de `modelos_de_marca()`: si una palabra aparece en varias marcas, no es un modelo.
+
 ## Los datos ya estaban escritos en la descripción: el espesor y las vías
 
 La pregunta fue qué más datos automáticos se pueden poner. Lo primero fue medir qué hay cargado

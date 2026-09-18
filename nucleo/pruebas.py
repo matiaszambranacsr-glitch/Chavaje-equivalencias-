@@ -924,6 +924,31 @@ def probar_ref_orig_pegado_no_es_codigo():
     cierto("024210" in salida, "el código que viene después de REF ORIG sí")
 
 
+def probar_el_motor_no_es_el_modelo_del_auto():
+    """«K4M» es un motor de Renault, no un auto que alguien vaya a buscar.
+
+    modelos_de_marca() los confirma como modelos legítimamente —su regla es «esta palabra
+    aparece muchas veces y casi solo en esta marca», y un motor de Renault cumple las dos— y de
+    ahí salían 6.048 filas de aplicación donde el «auto» era una motorización. Nadie pide
+    repuestos «para un K4M», y como el motor aparece en decenas de descripciones, junta entre sí
+    todo lo que lo nombre.
+
+    Sobre las 120.691 aplicaciones que dan las descripciones de la base real, saca 566
+    combinaciones marca+modelo y entre las 566 no hay un solo modelo de verdad.
+
+    Y los modelos de verdad tienen que quedar: el primer intento preguntaba al extractor de
+    códigos «¿esto sería un código?», y como el extractor exige un dígito, tiraba GOLF, CLIO,
+    FIESTA y PALIO — el 88% de las aplicaciones."""
+    for motor in ("K4M", "F8Q", "TU5JP4", "Z18XER", "C20NE", "D4F", "EW10J4", "MR20DE"):
+        cierto(codigos.parece_designacion_de_motor(motor),
+               f"«{motor}» es un motor, no un modelo de auto")
+    for modelo in ("GOLF", "CLIO", "FIESTA", "PALIO", "KANGOO", "ECOSPORT", "AMAROK",
+                   "206", "A3", "X5", "HILUX", "RANGER"):
+        cierto(not codigos.parece_designacion_de_motor(modelo),
+               f"«{modelo}» es un modelo de auto y tiene que quedar")
+    cierto(not codigos.parece_designacion_de_motor(""), "el vacío no es un motor")
+
+
 def probar_el_espesor_y_las_vias_que_estaban_escritos():
     """El espesor de la junta y las vías de la ficha ya estaban en la descripción.
 
@@ -1252,6 +1277,7 @@ def main():
                    probar_la_clase_de_mercedes_no_es_un_codigo,
                    probar_el_camion_no_es_un_codigo,
                    probar_el_codigo_que_hoy_ya_no_se_tomaria,
+                   probar_el_motor_no_es_el_modelo_del_auto,
                    probar_el_espesor_y_las_vias_que_estaban_escritos,
                    probar_el_numero_interno_del_proveedor_no_es_referencia_cruzada,
                    probar_solo_los_codigos_que_el_proveedor_declaro,

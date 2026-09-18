@@ -463,6 +463,50 @@ _RE_MARCA_DE_AUTO_PEGADA = re.compile(
 _RE_MODELO_IVECO = re.compile(r'^\d{2,3}E\d{2}[A-Z]?$')
 
 
+# LAS DOS FORMAS DE UNA DESIGNACIÓN DE MOTOR. Están a nivel de módulo y no adentro del
+# extractor porque las usan dos cosas distintas —adivinar códigos en un texto y decidir si una
+# palabra es el MODELO de un auto— y tener dos copias es tener dos reglas que con el tiempo
+# dejan de decir lo mismo. Ver parece_designacion_de_motor().
+FORMAS_DE_DESIGNACION_DE_MOTOR = (
+    # Códigos de MOTOR: letras, números y letras al final. MR20DE, B4204S, Z18XER, X20XEV,
+    # DV6DTED, MT560B. Describen la motorización del auto, no la pieza — y como se repiten
+    # en decenas de filas, cada uno vincula entre sí todo lo que lo menciona.
+    # Se midió sobre 4.340 códigos extraídos de una lista real: descarta 36, y los 36 son
+    # códigos de motor. El 1% de pérdida vale, porque cada uno de esos generaba decenas de
+    # equivalencias falsas.
+    re.compile(r'^[A-Z]{1,3}\d{1,5}[A-Z]{1,4}$'),
+    # MOTORES de PSA con letra final: XU10J4R, DJ5T12V, TU3F2K, EP6CDTMD. XU10J4R llegó a
+    # colgar 6 productos de tres proveedores: una junta de tapa de Peugeot 405, un juego de
+    # reparación y una tapa de cilindros — todo lo que menciona ese motor. Va acá porque
+    # comparte el problema de arriba: la misma forma la tiene un código real.
+    re.compile(r'^[A-Z]{2}\d{1,2}[A-Z]{1,4}\d{0,2}[A-Z]?$'),
+)
+
+
+def parece_designacion_de_motor(palabra):
+    """¿Esa palabra es un motor —K4M, TU5JP4, Z18XER— y no el modelo de un auto?
+
+    Para el extractor de códigos esta forma es AMBIGUA: un código de repuesto real puede
+    tenerla, y ahí lo desempata que el código esté en el catálogo. Para el lector de
+    aplicaciones no hay ambigüedad: un motor NO es un modelo. «RENAULT K4M» no es un auto que
+    alguien vaya a buscar, y como aparece en decenas de descripciones, cada motor junta entre
+    sí todo lo que lo nombre.
+
+    Medido sobre las 120.691 aplicaciones que las descripciones de la base dan: saca 566
+    combinaciones auto+modelo y 6.048 filas (el 5%), y entre las 566 no hay un solo modelo de
+    verdad. Las de arriba por volumen son K4M, F8Q, K7M, F4R, K9K, TU5JP4, C20NE, Z18XER: los
+    motores de Renault, de PSA y de Opel.
+
+    El primer intento fue preguntarle al extractor de códigos directamente, y estuvo mal por un
+    motivo que se ve enseguida midiendo: el extractor exige que haya un dígito, así que tiraba
+    GOLF, CLIO, FIESTA y PALIO — el 88% de las aplicaciones. La pregunta no es «¿esto sería un
+    código?», es «¿esto tiene la forma de un motor?»."""
+    t = (palabra or "").strip().upper()
+    if not t:
+        return False
+    return any(p.match(t) for p in FORMAS_DE_DESIGNACION_DE_MOTOR)
+
+
 def _es_lista_de_modelos(token):
     """«106-206-306-406-607» no es un código: es la lista de modelos a los que le va la pieza.
 
@@ -528,20 +572,7 @@ def extraer_codigos_de_texto(texto, minimo=6, codigo_propio=None, codigos_conoci
     # AMBIGUAS: aciertan casi siempre, pero la misma forma la tienen códigos de repuesto de
     # verdad —ERR4685B es un número de Land Rover, no un motor—, así que dejan de aplicarse
     # cuando el proveedor DECLARÓ que lo que sigue es el código de fábrica.
-    formas_ambiguas = (
-        # Códigos de MOTOR: letras, números y letras al final. MR20DE, B4204S, Z18XER, X20XEV,
-        # DV6DTED, MT560B. Describen la motorización del auto, no la pieza — y como se repiten
-        # en decenas de filas, cada uno vincula entre sí todo lo que lo menciona.
-        # Se midió sobre 4.340 códigos extraídos de una lista real: descarta 36, y los 36 son
-        # códigos de motor. El 1% de pérdida vale, porque cada uno de esos generaba decenas de
-        # equivalencias falsas.
-        re.compile(r'^[A-Z]{1,3}\d{1,5}[A-Z]{1,4}$'),
-        # MOTORES de PSA con letra final: XU10J4R, DJ5T12V, TU3F2K, EP6CDTMD. XU10J4R llegó a
-        # colgar 6 productos de tres proveedores: una junta de tapa de Peugeot 405, un juego de
-        # reparación y una tapa de cilindros — todo lo que menciona ese motor. Va acá porque
-        # comparte el problema de arriba: la misma forma la tiene un código real.
-        re.compile(r'^[A-Z]{2}\d{1,2}[A-Z]{1,4}\d{0,2}[A-Z]?$'),
-    )
+    formas_ambiguas = FORMAS_DE_DESIGNACION_DE_MOTOR
     # Y estas son texto sin discusión: un rango de años o una medida no dejan de serlo porque
     # el proveedor los haya escrito después de un «ORIG».
     formas_solo_texto = (

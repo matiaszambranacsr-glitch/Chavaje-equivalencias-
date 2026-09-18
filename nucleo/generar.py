@@ -82,6 +82,7 @@ from .errores import anotar_error
       "_MARCADORES_DE_OEM", "_es_el_codigo_propio_con_texto", "_RE_REF_PEGADO",
       "_MARCAS_QUE_SE_PEGAN_AL_CODIGO", "_es_el_codigo_propio_sin_la_marca",
       "_MARCAS_DE_AUTO_QUE_SE_PEGAN", "_RE_MARCA_DE_AUTO_PEGADA", "_RE_MODELO_IVECO",
+      "FORMAS_DE_DESIGNACION_DE_MOTOR", "parece_designacion_de_motor",
       "_es_lista_de_modelos",
       "extraer_codigos_de_texto", "codigo_que_hoy_no_se_tomaria",
       "digito_verificador_gtin", "codigo_de_barras_cierra", "columna_es_codigo_de_barras",
