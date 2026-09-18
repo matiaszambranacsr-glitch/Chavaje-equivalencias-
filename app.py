@@ -3178,6 +3178,29 @@ def _es_el_codigo_propio_sin_la_marca(candidato, propio):
     return propio[len(candidato):].upper() in _MARCAS_QUE_SE_PEGAN_AL_CODIGO
 
 
+# EL NOMBRE DE LA MARCA DEL AUTO PEGADO AL MODELO. Las listas escriben «M. BENZ 1618» y la
+# exportación se come el espacio: queda «BENZ1618», que es el camión 1618 de Mercedes y no el
+# código de ninguna pieza. Igual con «Peugeot106», «Renault11-R», «MINI116I», «Cummins-6.4».
+# La lista va acá y no se saca de MARCAS_VEHICULO a propósito: el extractor de códigos no
+# puede depender de lo que sabe de autos (ver nucleo/generar.py, la capa de códigos va antes
+# que la de vehículos). Son las que aparecen de verdad pegadas a un número en estas listas.
+# Medido sobre los 70.888 códigos del catálogo real: le pega a 22, y los 22 son modelos de
+# vehículo. Ninguno tiene un vínculo cargado que se pierda; sí tienen 31 esperando revisión,
+# o sea 31 códigos basura a punto de entrar.
+_MARCAS_DE_AUTO_QUE_SE_PEGAN = ("MERCEDESBENZ", "MERCEDES", "BENZ", "RENAULT", "PEUGEOT",
+                                "CITROEN", "FORD", "CHEVROLET", "VOLKSWAGEN", "TOYOTA",
+                                "IVECO", "SCANIA", "CUMMINS", "NISSAN", "HYUNDAI", "MINI",
+                                "AGRALE", "DEUTZ")
+_RE_MARCA_DE_AUTO_PEGADA = re.compile(
+    r'^(?:' + "|".join(sorted(_MARCAS_DE_AUTO_QUE_SE_PEGAN, key=len, reverse=True))
+    + r')\d[\dA-Z.\-]{0,6}$')
+
+# MODELOS DE CAMIÓN IVECO: 180E42, 240E42, 440E39, 720E31, 120E20C, 450-E37-M. Es
+# «toneladas + E + caballos», o sea el camión, y aparece en cualquier descripción que lo
+# nombre. Le pega a 7 de los 70.888 códigos del catálogo y los 7 son camiones.
+_RE_MODELO_IVECO = re.compile(r'^\d{2,3}E\d{2}[A-Z]?$')
+
+
 def _es_lista_de_modelos(token):
     """«106-206-306-406-607» no es un código: es la lista de modelos a los que le va la pieza.
 
@@ -3398,6 +3421,10 @@ def extraer_codigos_de_texto(texto, minimo=6, codigo_propio=None, codigos_conoci
         # se lleva TPRT05, TMAP14 y CVMMF35, que son códigos de fábrica de verdad. Un modelo de
         # auto se pronuncia y un código no — es la diferencia entre SCENIC y CVMMF.
         re.compile(r'^(?=[A-Z]*[AEIOU][A-Z]*[AEIOU])[A-Z]{5,}\d{1,2}$'),
+        # La marca del auto pegada al modelo, y los camiones Iveco. Ver los dos comentarios
+        # largos de arriba de _RE_MARCA_DE_AUTO_PEGADA y _RE_MODELO_IVECO.
+        _RE_MARCA_DE_AUTO_PEGADA,
+        _RE_MODELO_IVECO,
     )
     formas_prohibidas = formas_ambiguas + formas_solo_texto
     # Palabras de la descripción que quedan pegadas al año y disfrazan el rango:
@@ -3869,6 +3896,23 @@ def cargar_codigos_de_barras_masivo(pares, marca_id=None, pisar=True):
     return resumen
 
 
+def codigo_que_hoy_no_se_tomaria(codigo):
+    """¿Es un código que las reglas de hoy ya NO aceptarían como código de fábrica?
+
+    Es la pregunta que hace el control de puentes viejos, sacada a una función porque también
+    hace falta al puntuar la cola de revisión. Y la forma de la pregunta importa: se le pasa el
+    propio código como «conocido» para que NO se apliquen las formas ambiguas —esas existen
+    para tirar designaciones de motor y se llevaban puestos códigos reales como «AT-05103R»—.
+    Así solo quedan las formas que son texto sin discusión: un modelo de auto, un rango de
+    años, una medida. Esas no dejan de serlo porque el proveedor las haya puesto en la columna
+    del código."""
+    limpio = sanitizar(codigo)
+    if not limpio:
+        return True
+    return not extraer_codigos_de_texto(f"PIEZA {codigo} ORIG", minimo=1,
+                                        codigos_conocidos={limpio})
+
+
 def puentes_que_hoy_no_se_generarian(limite=400):
     """Códigos de fábrica que el extractor de HOY ya no sacaría de una descripción.
 
@@ -3943,8 +3987,7 @@ def puentes_que_hoy_no_se_generarian(limite=400):
         # la lista de un proveedor, ¿el extractor lo seguiría rechazando?». Así solo quedan las
         # formas que son texto sin discusión. Probado sobre 22 casos de la base real: respeta
         # los 8 códigos verdaderos y marca las 14 basuras, la familia «505REF» incluida.
-        if extraer_codigos_de_texto(f"PIEZA {codigo} ORIG", minimo=1,
-                                    codigos_conocidos={sanitizar(codigo)}):
+        if not codigo_que_hoy_no_se_tomaria(codigo):
             continue
         # Un ejemplo de lo que está uniendo, que es lo que permite decidir sin salir a buscarlo.
         c.execute("""SELECT p.descripcion AS d, m.nombre AS marca FROM (
@@ -6219,6 +6262,13 @@ def escalas_de_precio():
             for marca, precios in por_marca.items() if len(precios) >= 20}
 
 
+# Una descripción tiene que tener algo adentro para que «son iguales» signifique algo. Con
+# «JUNTA» o «FILTRO» sueltos coinciden piezas que no tienen nada que ver. Medido sobre las
+# 70.888 descripciones reales: la mediana son 59 caracteres y solo 1.264 de 70.888 tienen 20 o
+# menos, así que el piso deja afuera las de una palabra suelta y nada más.
+LARGO_DESCRIPCION_QUE_CONVENCE = 20
+
+
 def evaluar_equivalencia(desc_a, desc_b, medidas_a=None, medidas_b=None,
                          precio_a=None, precio_b=None, veces_confirmada=1,
                          respaldo_fabricante=False, marca_a="", marca_b="", patrones=None,
@@ -6303,6 +6353,28 @@ def evaluar_equivalencia(desc_a, desc_b, medidas_a=None, medidas_b=None,
         puntaje -= 40
         senales.append(("mal", f"📦 No son equivalentes: {kit_de}. El buscador te lo ofrece "
                                 "igual, como kit, cuando buscás la pieza suelta"))
+
+    # LA MISMA DESCRIPCIÓN DE LOS DOS LADOS. Faltaba, y es la señal que decidía la mayoría de
+    # la cola sin que nadie la mirara: sobre los 3.185 pendientes reales había 2.495 pares con
+    # la descripción palabra por palabra igual, y el puntaje los repartía entre 🟡 (1.330),
+    # 🟠 (1.048) y hasta 🔴 (117). NINGUNO llegaba a 🟢 — el máximo de toda la cola era 65 —
+    # así que había que mirar 3.185 vínculos de a uno para aprobar una lista que estaba bien.
+    #
+    # Qué prueba de verdad, dicho sin exagerar: que el vínculo salió de UNA MISMA FILA de la
+    # lista del proveedor —el importador copia la descripción de la fila al crear el producto
+    # OEM— o que dos proveedores copiaron la misma fuente. O sea, que lo declaró el proveedor.
+    # Es la misma clase de evidencia que un «REF ORIG», y no es una certeza: si la columna de
+    # OEM de esa lista está mal mapeada, van a estar todas mal Y con la descripción igual. Por
+    # eso suma fuerte pero no blinda — el rubro distinto, las medidas que se contradicen y el
+    # puente que cuelga de veinte productos siguen restando abajo y tumban el par igual.
+    #
+    # Se pide una descripción larga: «JUNTA» igual de los dos lados no dice nada, y las
+    # descripciones vacías coincidirían entre sí.
+    _da, _db = normalizar_texto(desc_a or ""), normalizar_texto(desc_b or "")
+    if _da and _da == _db and len(_da) >= LARGO_DESCRIPCION_QUE_CONVENCE:
+        puntaje += 35
+        senales.append(("bien", "📄 Los dos tienen EXACTAMENTE la misma descripción: salieron "
+                                 "de la misma fila de la lista del proveedor"))
 
     # Rubro: es la señal más barata y una de las que más basura caza. Si las descripciones
     # hablan de piezas de familias distintas, el vínculo no puede ser correcto.
@@ -6446,6 +6518,7 @@ def analizar_lote_pendiente(lote, limite=None, desde=0):
     _cuenta_pal, _total_desc = cuantas_veces_aparece_cada_palabra()
     patrones_aprendidos = aprender_de_las_decisiones()
     escalas_precio = escalas_de_precio()
+    _ya_juzgados = {}   # código -> ¿las reglas de hoy ya no lo tomarían? (ver más abajo)
     ventas_confirman = pares_confirmados_por_ventas()
 
     limpias, sospechosas, relacionadas = [], [], []
@@ -6489,6 +6562,8 @@ def analizar_lote_pendiente(lote, limite=None, desde=0):
             continue
         # Puntaje de confianza: junta toda la evidencia en un número, para poder ordenar por
         # lo peor primero en vez de mirar cientos de alarmas planas.
+        # (_ya_juzgados cachea la respuesta por código: en una tanda de 3.185 pares los mismos
+        # códigos se repiten, y preguntar dos veces lo mismo es tiempo tirado.)
         puntaje, senales = evaluar_equivalencia(
             f.get("desc_a", ""), f.get("desc_b", ""),
             medidas.get(f["a"]), medidas.get(f["b"]),
@@ -6513,6 +6588,27 @@ def analizar_lote_pendiente(lote, limite=None, desde=0):
         # Las alarmas estructurales (el código no parece un código, un OEM que apunta a dos
         # productos) descuentan fuerte: son problemas de carga, no matices.
         puntaje -= 35 * len([a for a in alarmas if a.startswith(("🚫", "⚠️"))])
+
+        # EL CÓDIGO QUE LAS REGLAS DE HOY YA NO TOMARÍAN. Esto tapa un agujero que abrió la
+        # señal de «misma descripción»: el producto OEM se crea copiando la descripción de la
+        # fila, así que un modelo de camión metido en la columna de OEM da descripción idéntica
+        # y llegaba a 100 de confianza. Medido sobre la cola real: 15 pares con «BENZ1722»,
+        # «240E42», «BENZ332-6» y compañía entraban en el botón de aprobar en bloque.
+        # No alcanza con que la descripción coincida: si el código no es un código, el vínculo
+        # no sirve para nada aunque las dos filas digan lo mismo. Va al fondo para que se
+        # resuelva donde corresponde, que es borrando ese código en Limpiar → puentes viejos.
+        for _lado in ("cod_a", "cod_b"):
+            _cod = f.get(_lado) or ""
+            if _cod and _cod not in _ya_juzgados:
+                _ya_juzgados[_cod] = codigo_que_hoy_no_se_tomaria(_cod)
+            if _cod and _ya_juzgados.get(_cod):
+                puntaje = min(puntaje, 15.0)
+                _aviso = (f"🧯 «{_cod}» no es un código de pieza: es un modelo, una medida o un "
+                          "año. Las reglas de hoy ya no lo tomarían. Borralo en Mantenimiento → "
+                          "🧹 Limpiar y corregir → «Puentes que hoy ya no se generarían»")
+                if _aviso not in alarmas:
+                    alarmas.append(_aviso)
+                break
 
         # Y el cruce de métodos, que es lo que más precisión da: que dos caminos
         # independientes lleguen al mismo par es mucho más fuerte que uno solo. Un VETO —las

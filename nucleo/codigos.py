@@ -437,6 +437,32 @@ def _es_el_codigo_propio_sin_la_marca(candidato, propio):
     return propio[len(candidato):].upper() in _MARCAS_QUE_SE_PEGAN_AL_CODIGO
 
 
+# EL NOMBRE DE LA MARCA DEL AUTO PEGADO AL MODELO. Las listas escriben «M. BENZ 1618» y la
+# exportación se come el espacio: queda «BENZ1618», que es el camión 1618 de Mercedes y no el
+# código de ninguna pieza. Igual con «Peugeot106», «Renault11-R», «MINI116I», «Cummins-6.4».
+# La lista va acá y no se saca de MARCAS_VEHICULO a propósito: el extractor de códigos no
+# puede depender de lo que sabe de autos (ver nucleo/generar.py, la capa de códigos va antes
+# que la de vehículos). Son las que aparecen de verdad pegadas a un número en estas listas.
+# Medido sobre los 70.888 códigos del catálogo real: le pega a 22, y los 22 son modelos de
+# vehículo. Ninguno tiene un vínculo cargado que se pierda; sí tienen 31 esperando revisión,
+# o sea 31 códigos basura a punto de entrar.
+_MARCAS_DE_AUTO_QUE_SE_PEGAN = ("MERCEDESBENZ", "MERCEDES", "BENZ", "RENAULT", "PEUGEOT",
+                                "CITROEN", "FORD", "CHEVROLET", "VOLKSWAGEN", "TOYOTA",
+                                "IVECO", "SCANIA", "CUMMINS", "NISSAN", "HYUNDAI", "MINI",
+                                "AGRALE", "DEUTZ")
+
+
+_RE_MARCA_DE_AUTO_PEGADA = re.compile(
+    r'^(?:' + "|".join(sorted(_MARCAS_DE_AUTO_QUE_SE_PEGAN, key=len, reverse=True))
+    + r')\d[\dA-Z.\-]{0,6}$')
+
+
+# MODELOS DE CAMIÓN IVECO: 180E42, 240E42, 440E39, 720E31, 120E20C, 450-E37-M. Es
+# «toneladas + E + caballos», o sea el camión, y aparece en cualquier descripción que lo
+# nombre. Le pega a 7 de los 70.888 códigos del catálogo y los 7 son camiones.
+_RE_MODELO_IVECO = re.compile(r'^\d{2,3}E\d{2}[A-Z]?$')
+
+
 def _es_lista_de_modelos(token):
     """«106-206-306-406-607» no es un código: es la lista de modelos a los que le va la pieza.
 
@@ -657,6 +683,10 @@ def extraer_codigos_de_texto(texto, minimo=6, codigo_propio=None, codigos_conoci
         # se lleva TPRT05, TMAP14 y CVMMF35, que son códigos de fábrica de verdad. Un modelo de
         # auto se pronuncia y un código no — es la diferencia entre SCENIC y CVMMF.
         re.compile(r'^(?=[A-Z]*[AEIOU][A-Z]*[AEIOU])[A-Z]{5,}\d{1,2}$'),
+        # La marca del auto pegada al modelo, y los camiones Iveco. Ver los dos comentarios
+        # largos de arriba de _RE_MARCA_DE_AUTO_PEGADA y _RE_MODELO_IVECO.
+        _RE_MARCA_DE_AUTO_PEGADA,
+        _RE_MODELO_IVECO,
     )
     formas_prohibidas = formas_ambiguas + formas_solo_texto
     # Palabras de la descripción que quedan pegadas al año y disfrazan el rango:
@@ -797,6 +827,23 @@ def extraer_codigos_de_texto(texto, minimo=6, codigo_propio=None, codigos_conoci
             vistos.add(clave)
             salida.append(cod)
     return salida
+
+
+def codigo_que_hoy_no_se_tomaria(codigo):
+    """¿Es un código que las reglas de hoy ya NO aceptarían como código de fábrica?
+
+    Es la pregunta que hace el control de puentes viejos, sacada a una función porque también
+    hace falta al puntuar la cola de revisión. Y la forma de la pregunta importa: se le pasa el
+    propio código como «conocido» para que NO se apliquen las formas ambiguas —esas existen
+    para tirar designaciones de motor y se llevaban puestos códigos reales como «AT-05103R»—.
+    Así solo quedan las formas que son texto sin discusión: un modelo de auto, un rango de
+    años, una medida. Esas no dejan de serlo porque el proveedor las haya puesto en la columna
+    del código."""
+    limpio = sanitizar(codigo)
+    if not limpio:
+        return True
+    return not extraer_codigos_de_texto(f"PIEZA {codigo} ORIG", minimo=1,
+                                        codigos_conocidos={limpio})
 
 
 def digito_verificador_gtin(cuerpo):

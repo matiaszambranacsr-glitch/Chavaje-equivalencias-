@@ -1642,6 +1642,90 @@ El corte es por proveedor (`GROUP BY po.id, mp.id`) y no por total: un código d
 legítimo aparece en varias listas a la vez —es justo para eso que sirve— y contando todo junto
 ese sería el primero de la lista.
 
+## La cola de revisión tenía 3.185 vínculos y ni uno solo en verde
+
+Salió de mirar qué le queda por hacer a la app sobre la base del negocio. El aviso decía
+«3.185 vínculos esperando revisión», y revisarlos de a uno es el cuello de botella: a cinco
+segundos cada uno son más de cuatro horas.
+
+Corriendo el analizador sobre esa cola, el resultado era este:
+
+| | antes |
+|---|---|
+| 🟢 Muy probables | **0** |
+| 🟡 Probables | 1.333 |
+| 🟠 Dudosas | 1.473 |
+| 🔴 Casi seguro mal | 379 |
+
+**Cero en verde, y el puntaje más alto de los 3.185 era 65.** O sea que el botón de «aprobar
+en bloque los muy probables» —que existe— no servía para nada, y había que mirar 3.185 de a uno
+para aprobar una lista que estaba bien.
+
+### Lo que el puntaje no miraba
+
+De esos 3.185 pares, **2.495 tienen la descripción palabra por palabra igual de los dos lados**.
+Y el puntaje los repartía entre 🟡 (1.330), 🟠 (1.048) y hasta 🔴 (117), porque miraba el rubro,
+las medidas, el precio, las ventas y el catálogo del fabricante — pero nunca si las dos
+descripciones eran **el mismo texto**.
+
+Qué prueba eso, dicho sin exagerar: que el vínculo salió de **una misma fila** de la lista del
+proveedor. El importador copia la descripción de la fila al crear el producto OEM, así que
+descripción idéntica significa «esto lo declaró el proveedor en su lista», la misma clase de
+evidencia que un «REF ORIG». No es una certeza —si la columna de OEM de esa lista está mal
+mapeada, van a estar todas mal y todas con la descripción igual— y por eso suma fuerte pero no
+blinda: el rubro distinto, las medidas que se contradicen y el puente que cuelga de veinte
+productos siguen restando y tumban el par igual.
+
+### El agujero que abrió esa señal, y cómo se tapó
+
+Medí el resultado antes de cantar victoria, y apareció el problema: **15 pares llegaban a 100 de
+confianza con un modelo de camión como código**.
+
+    conf 100   JC-375-34  ↔  240E42
+      A: Junta para Cárter FIAT IVECO CAMIÓN EURO TRAKKER STAR TECH 180E42...
+      B: Junta para Cárter FIAT IVECO CAMIÓN EURO TRAKKER STAR TECH 180E42...
+
+`240E42` es un camión Iveco y `BENZ1722` es un Mercedes 1722. Las descripciones son idénticas
+—claro, el producto OEM se creó copiando esa fila— así que la señal nueva los empujaba justo
+al botón de aprobar en bloque.
+
+El arreglo es la pregunta que ya hacía el control de puentes viejos, ahora compartida en
+`codigo_que_hoy_no_se_tomaria()`: *suponiendo que este código ya estuviera cargado, ¿las reglas
+de hoy lo seguirían rechazando?* Si la respuesta es sí, el par se va al fondo con un cartel que
+dice dónde borrar ese código. **No alcanza con que la descripción coincida: si el código no es
+un código, el vínculo no sirve aunque las dos filas digan lo mismo.**
+
+| | antes | después |
+|---|---|---|
+| 🟢 Muy probables | 0 | **1.784** |
+| … con un modelo de vehículo adentro | — | **0** (eran 15) |
+| … con rubros distintos | — | **0** |
+| Pares con un código que hoy no se tomaría | repartidos | **85, todos en 🔴** |
+
+De 3.185 revisiones a mano, 1.784 pasan a ser un botón, y los 85 realmente rotos quedan arriba
+de todo con el cartel de qué hacer.
+
+## El nombre del camión pegado al número
+
+Buscando de dónde salían esos códigos apareció la familia entera. Las listas escriben
+«M. BENZ 1618 1620» y la exportación se come el espacio: queda **`BENZ1618`**, que es el camión
+1618 de Mercedes. Lo mismo con `Peugeot106`, `Renault11-R`, `MINI116I`, `Cummins-6.4`.
+
+Y los Iveco, que se numeran «toneladas + E + caballos»: `240E42`, `260E37`, `440E39`, `720E31`,
+`120E20C`.
+
+Medido sobre los 70.888 códigos del catálogo: **29 códigos, y los 29 son modelos de vehículo**.
+No tienen vínculos cargados que se pierdan, pero sí **31 esperando revisión** — 31 códigos
+basura a punto de entrar, cada uno listo para colgar de sí mismo todo lo que nombre ese camión.
+
+La lista de marcas va escrita en la capa de códigos y no sale de `MARCAS_VEHICULO` a propósito:
+el extractor no puede depender de lo que la app sabe de autos, porque la capa de códigos va
+antes que la de vehículos (ver `nucleo/generar.py`). Son las que aparecen de verdad pegadas a un
+número en estas listas.
+
+Los 7 que ya cuelgan dos productos o más aparecen ahora en **🧹 Limpiar y corregir → «Puentes
+que hoy ya no se generarían»**, con el botón para borrarlos.
+
 ## Mantenimiento tenía 36 herramientas y una sola forma de encontrarlas: bajar
 
 El reclamo fue «tenés que ir una banda para abajo si querés encontrar algo», y medido es

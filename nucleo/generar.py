@@ -81,8 +81,9 @@ from .errores import anotar_error
       "TOPE_REPETICIONES_EN_DESCRIPCION", "codigos_confiables_de_descripciones",
       "_MARCADORES_DE_OEM", "_es_el_codigo_propio_con_texto", "_RE_REF_PEGADO",
       "_MARCAS_QUE_SE_PEGAN_AL_CODIGO", "_es_el_codigo_propio_sin_la_marca",
+      "_MARCAS_DE_AUTO_QUE_SE_PEGAN", "_RE_MARCA_DE_AUTO_PEGADA", "_RE_MODELO_IVECO",
       "_es_lista_de_modelos",
-      "extraer_codigos_de_texto",
+      "extraer_codigos_de_texto", "codigo_que_hoy_no_se_tomaria",
       "digito_verificador_gtin", "codigo_de_barras_cierra", "columna_es_codigo_de_barras",
       "PREFIJOS_GS1", "pais_del_codigo_de_barras", "pais_de_estos_codigos", "GS1_NO_ES_UN_PAIS",
       "normalizar_texto", "_RE_ESCAPE_DE_EXCEL", "valor_o_vacio", "valor_codigo"])

@@ -924,6 +924,48 @@ def probar_ref_orig_pegado_no_es_codigo():
     cierto("024210" in salida, "el código que viene después de REF ORIG sí")
 
 
+def probar_el_codigo_que_hoy_ya_no_se_tomaria():
+    """La pregunta que decide si un código viejo hay que borrarlo, y si un pendiente vale.
+
+    Se le pasa el propio código como «conocido» para que NO se apliquen las formas ambiguas:
+    esas existen para tirar designaciones de motor y se llevaban puestos códigos reales como
+    «AT-05103R». Quedan solo las formas que son texto sin discusión.
+
+    Importa que sea la misma función en los dos lugares que la usan —el control de puentes
+    viejos y el puntaje de la cola de revisión—: si un código no es un código, el vínculo no
+    sirve ni aunque las dos filas tengan la descripción idéntica."""
+    for basura in ("BENZ1618", "240E42", "CLS350", "2003-2008", "14X20X1", "F14000"):
+        cierto(codigos.codigo_que_hoy_no_se_tomaria(basura),
+               f"«{basura}» no es un código de pieza")
+    for real in ("0280155786", "AT-05103R", "IWP210", "W712/94", "06A906265E", "F000TE1124"):
+        cierto(not codigos.codigo_que_hoy_no_se_tomaria(real),
+               f"«{real}» es un código de verdad y no hay que borrarlo")
+    cierto(codigos.codigo_que_hoy_no_se_tomaria(""), "un código vacío no es un código")
+
+
+def probar_el_camion_no_es_un_codigo():
+    """«BENZ1618» es el camión 1618 de Mercedes y «240E42» un Iveco, no códigos de pieza.
+
+    Las listas escriben «M. BENZ 1618 1620» y la exportación se come el espacio. En la base real
+    hay 29 códigos así —18 Mercedes, 7 Iveco, más un Peugeot 106, un Renault 11 y un MINI 116i—
+    y ninguno es una pieza. No tienen vínculos cargados que se pierdan, pero sí 31 esperando
+    revisión: 31 códigos basura a punto de entrar."""
+    salida = codigos.extraer_codigos_de_texto(
+        "Junta Salida de Escape M. BENZ1618 1620 - 6,0 - OM 366 REF ORIG 3660160221")
+    cierto("BENZ1618" not in salida, "«BENZ1618» es el camión, no un código")
+    cierto("3660160221" in salida, "el código de fábrica declarado sí entra")
+
+    salida2 = codigos.extraer_codigos_de_texto(
+        "Junta para Carter FIAT IVECO CAMION EURO TRAKKER 240E42 260E37 720E31")
+    for camion in ("240E42", "260E37", "720E31"):
+        cierto(camion not in salida2, f"«{camion}» es un modelo de camión Iveco")
+
+    # Y los códigos reales de forma parecida siguen entrando.
+    for real in ("0280155786", "IWP210", "F000TE1124"):
+        cierto(real in codigos.extraer_codigos_de_texto(f"PIEZA REF ORIG {real} PARA FIAT"),
+               f"«{real}» es un código de verdad y tiene que entrar")
+
+
 def probar_la_clase_de_mercedes_no_es_un_codigo():
     """«CLS350» y «CLA250» son modelos de Mercedes, no códigos de fábrica.
 
@@ -1175,6 +1217,8 @@ def main():
                    probar_la_marca_abreviada_es_la_misma_marca,
                    probar_ref_orig_pegado_no_es_codigo,
                    probar_la_clase_de_mercedes_no_es_un_codigo,
+                   probar_el_camion_no_es_un_codigo,
+                   probar_el_codigo_que_hoy_ya_no_se_tomaria,
                    probar_el_numero_interno_del_proveedor_no_es_referencia_cruzada,
                    probar_solo_los_codigos_que_el_proveedor_declaro,
                    probar_marca_pegada_atras_del_numero,
