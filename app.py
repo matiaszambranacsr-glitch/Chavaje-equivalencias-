@@ -339,6 +339,18 @@ SEMILLA_DTC_VERSION = "3"
 # nuevo, sin ningún error a la vista.
 VERSION_NORMALIZACION = "2"
 
+# La versión de las REGLAS DE CONFIANZA. Sirve para lo mismo que la de arriba: el puntaje de
+# cada vínculo se guarda en la base porque el buscador lo necesita en cada búsqueda, así que
+# cuando las reglas cambian, lo guardado queda contando una película vieja.
+# No es teórico. Al agregar la señal de «misma descripción» y el veto del código que hoy no se
+# tomaría, se recalcularon los 24.774 vínculos cargados y cambió el puntaje de 22.257 — el 90%.
+# La mayoría se movió adentro de su misma banda, pero 145 BAJARON, y de esos 31 se cayeron de
+# «55-74» a «0-34»: vínculos que el buscador venía mostrando como confiables y que con las
+# reglas de hoy están mal. Sin esta marca, eso no se entera nadie hasta tropezárselo.
+# Subir el número cuando cambien las reglas de evaluar_equivalencia(). El recálculo NO corre al
+# abrir la app —son 12,8 s— sino en la tarea de fondo, igual que el descubrimiento.
+VERSION_CONFIANZA = "2"
+
 
 def secretos_app():
     """Los Secrets de Streamlit, o {} si en este servidor no hay ninguno configurado.
@@ -2056,6 +2068,18 @@ def _datos_precargados_y_migraciones(c):
         c.execute("INSERT INTO configuracion (clave, valor) VALUES ('version_normalizacion', ?) "
                   "ON CONFLICT(clave) DO UPDATE SET valor = excluded.valor",
                   (VERSION_NORMALIZACION,))
+
+    # Las reglas de confianza cambiaron: lo guardado quedó viejo. Acá solo se DEJA PEDIDO —los
+    # 24.774 vínculos tardan 12,8 s y esto corre al abrir la app—; lo hace la tarea de fondo.
+    # Ver VERSION_CONFIANZA.
+    c.execute("SELECT valor FROM configuracion WHERE clave = 'version_confianza'")
+    _fila_conf = c.fetchone()
+    if (_fila_conf["valor"] if _fila_conf else None) != VERSION_CONFIANZA:
+        c.execute("INSERT INTO configuracion (clave, valor) VALUES ('confianza_pendiente', '1') "
+                  "ON CONFLICT(clave) DO UPDATE SET valor = excluded.valor")
+        c.execute("INSERT INTO configuracion (clave, valor) VALUES ('version_confianza', ?) "
+                  "ON CONFLICT(clave) DO UPDATE SET valor = excluded.valor",
+                  (VERSION_CONFIANZA,))
 
     # Fabricantes por WMI (los 3 primeros caracteres del VIN) precargados, para no tener que
     # ir cargándolos de a uno. Están los que circulan en Argentina: fabricación nacional,
@@ -6589,23 +6613,34 @@ def analizar_lote_pendiente(lote, limite=None, desde=0):
         # productos) descuentan fuerte: son problemas de carga, no matices.
         puntaje -= 35 * len([a for a in alarmas if a.startswith(("🚫", "⚠️"))])
 
-        # EL CÓDIGO QUE LAS REGLAS DE HOY YA NO TOMARÍAN. Esto tapa un agujero que abrió la
-        # señal de «misma descripción»: el producto OEM se crea copiando la descripción de la
-        # fila, así que un modelo de camión metido en la columna de OEM da descripción idéntica
-        # y llegaba a 100 de confianza. Medido sobre la cola real: 15 pares con «BENZ1722»,
-        # «240E42», «BENZ332-6» y compañía entraban en el botón de aprobar en bloque.
-        # No alcanza con que la descripción coincida: si el código no es un código, el vínculo
-        # no sirve para nada aunque las dos filas digan lo mismo. Va al fondo para que se
-        # resuelva donde corresponde, que es borrando ese código en Limpiar → puentes viejos.
-        for _lado in ("cod_a", "cod_b"):
+        # EL CÓDIGO DE FÁBRICA QUE LAS REGLAS DE HOY YA NO TOMARÍAN. Esto tapa un agujero que
+        # abrió la señal de «misma descripción»: el producto OEM se crea copiando la descripción
+        # de la fila, así que un modelo de camión metido en la columna de OEM da descripción
+        # idéntica y llegaba a 100 de confianza. Medido sobre la cola real: 15 pares con
+        # «BENZ1722», «240E42», «BENZ332-6» y compañía entraban en el botón de aprobar en bloque.
+        # No alcanza con que la descripción coincida: si el código no es un código, el vínculo no
+        # sirve para nada aunque las dos filas digan lo mismo.
+        #
+        # SOLO EL LADO DEL CÓDIGO DE FÁBRICA, y esto es lo que importa: la pregunta que hace
+        # codigo_que_hoy_no_se_tomaria() es «¿el extractor sacaría esto de un texto?», y eso
+        # vale para un OEM —que se adivinó de una descripción— pero NO para el código propio de
+        # un proveedor, que vino de su columna. La primera versión preguntaba por los dos lados
+        # y el resultado se ve de una: sobre los 24.774 vínculos cargados vetaba 12.508 contra
+        # los 681 correctos. Los 11.827 de más eran pares perfectos —«10082FISPA» con
+        # «8200488774A», misma descripción y todo— que quedaban marcados como basura porque
+        # «10082FISPA» sin la marca es «10082», y un número de cinco cifras suelto no se
+        # adivinaría de un texto. Nunca se adivinó: estaba en la columna del código.
+        for _lado, _tipo in (("cod_a", "tipo_a"), ("cod_b", "tipo_b")):
+            if f.get(_tipo) != "OEM":
+                continue
             _cod = f.get(_lado) or ""
             if _cod and _cod not in _ya_juzgados:
                 _ya_juzgados[_cod] = codigo_que_hoy_no_se_tomaria(_cod)
             if _cod and _ya_juzgados.get(_cod):
                 puntaje = min(puntaje, 15.0)
-                _aviso = (f"🧯 «{_cod}» no es un código de pieza: es un modelo, una medida o un "
-                          "año. Las reglas de hoy ya no lo tomarían. Borralo en Mantenimiento → "
-                          "🧹 Limpiar y corregir → «Puentes que hoy ya no se generarían»")
+                _aviso = (f"🧯 «{_cod}» no es un código de fábrica: es un modelo, una medida o "
+                          "un año. Las reglas de hoy ya no lo tomarían. Borralo en Mantenimiento "
+                          "→ 🧹 Limpiar y corregir → «Puentes que hoy ya no se generarían»")
                 if _aviso not in alarmas:
                     alarmas.append(_aviso)
                 break
@@ -7896,6 +7931,8 @@ def auditar_equivalencias_cargadas(limite=2000, tope_confianza=35, revisar=None)
     ventas_confirman = pares_confirmados_por_ventas()
 
     escalas = escalas_de_precio()
+    _ya_juzgados = {}   # código -> ¿las reglas de hoy ya no lo tomarían? Cacheado: los 24.774
+                        # vínculos se apoyan en muchos menos códigos distintos.
     # Lo mismo que en recalcular_confianzas(): a cuántos productos se cuelga cada código de
     # fábrica, contado de una sola vez para todo el lote.
     grados = {}
@@ -7932,6 +7969,28 @@ def auditar_equivalencias_cargadas(limite=2000, tope_confianza=35, revisar=None)
             malo, _ = codigo_sospechoso(f[f"cod_{lado}"], f.get(f"desc_{lado}") or "")
             if malo:
                 puntaje -= 35
+        # EL CÓDIGO DE FÁBRICA QUE LAS REGLAS DE HOY YA NO TOMARÍAN. Es el mismo control que
+        # hace el análisis de la cola de pendientes, y acá hace más falta todavía: estos
+        # vínculos YA están cargados y el buscador los está usando hoy. Se cargaron con las
+        # reglas de su momento, y las reglas cambiaron —los modelos de Mercedes, los camiones
+        # Iveco, el «505REF», el «1995REF»—. Sin esto había que esperar a tropezarse con uno.
+        # Medido sobre los 24.774 cargados: 681 cuelgan de un código que hoy no se tomaría, y
+        # la auditoría marcaba 203. Los códigos son «CLA250», «CLS350», «505REF», «2002REF»,
+        # «SCENIC2», «307REF»: modelos y años, no piezas.
+        # Solo el lado del código de fábrica, por lo mismo que explica analizar_lote_pendiente():
+        # preguntarle esto al código propio de un proveedor vetaba 12.508 de 24.774.
+        for lado in ("a", "b"):
+            if f.get(f"tipo_{lado}") != "OEM":
+                continue
+            _cod_oem = f[f"cod_{lado}"] or ""
+            if _cod_oem and _cod_oem not in _ya_juzgados:
+                _ya_juzgados[_cod_oem] = codigo_que_hoy_no_se_tomaria(_cod_oem)
+            if _cod_oem and _ya_juzgados.get(_cod_oem):
+                puntaje = min(puntaje, 15.0)
+                senales.append(("mal", f"🧯 «{_cod_oem}» no es un código de fábrica: es un "
+                                        "modelo, una medida o un año. Las reglas de hoy ya no "
+                                        "lo tomarían"))
+                break
         # Dos productos del MISMO proveedor. Es el mismo control que hace evidencia_cruzada(),
         # repetido acá porque esta función no la llama —serían 24.774 llamadas— y se puede
         # contestar con lo que el lote ya trae. Son 196 vínculos en la base real y ninguno es
@@ -8025,6 +8084,7 @@ def recalcular_confianzas(limite=20000, progreso=None, solo_faltantes=True):
         anotar_error("recalcular_confianzas", _err)
     aprobados = puentes_aprobados_ids()
     ventas_confirman = pares_confirmados_por_ventas()
+    _ya_juzgados = {}   # código -> ¿las reglas de hoy ya no lo tomarían? (cacheado)
 
     valores = []
     for i, f in enumerate(filas):
@@ -8049,6 +8109,22 @@ def recalcular_confianzas(limite=20000, progreso=None, solo_faltantes=True):
                 malo, _ = codigo_sospechoso(f[f"cod_{lado}"], f.get(f"desc_{lado}") or "")
                 if malo:
                     puntaje -= 35
+            # El mismo control que hacen el análisis de la cola y la auditoría de los
+            # cargados, y acá cierra el círculo: este puntaje es el GUARDADO, o sea el que el
+            # buscador muestra en cada búsqueda. Si las tres partes no usan la misma regla,
+            # la pantalla de auditoría dice que un vínculo está mal y el buscador lo sigue
+            # mostrando como confiable. Solo el lado del código de fábrica: ver
+            # analizar_lote_pendiente() para por qué preguntárselo al código propio de un
+            # proveedor vetaba 12.508 de 24.774.
+            for lado in ("a", "b"):
+                if f.get(f"tipo_{lado}") != "OEM":
+                    continue
+                _cod_oem = f[f"cod_{lado}"] or ""
+                if _cod_oem and _cod_oem not in _ya_juzgados:
+                    _ya_juzgados[_cod_oem] = codigo_que_hoy_no_se_tomaria(_cod_oem)
+                if _cod_oem and _ya_juzgados.get(_cod_oem):
+                    puntaje = min(puntaje, 15.0)
+                    break
         valores.append((max(0, min(100, round(puntaje))), f["a"], f["b"]))
         if progreso and i % 500 == 0:
             progreso(i, len(filas))
@@ -10184,6 +10260,19 @@ def _trabajo_de_fondo():
     # adentro de la pantalla de importar porque tarda 110 segundos, y hacer esperar dos minutos
     # a alguien que subió una planilla desde el celular —con la pantalla que se apaga sola y el
     # navegador que puede cortar la conexión— es peor que avisarle que está corriendo.
+    # Antes que nada, el repuntaje: es lo más barato de todo (12,8 s sobre 24.774 vínculos) y
+    # lo que más se nota, porque el puntaje viejo lo está mostrando el buscador en cada
+    # búsqueda. Ver VERSION_CONFIANZA.
+    if obtener_config("confianza_pendiente", "") == "1":
+        try:
+            guardar_config("confianza_pendiente", "0")
+            _n_conf = recalcular_confianzas(limite=100000, solo_faltantes=False)
+            guardar_config("confianza_repuntuada", str(_n_conf))
+            guardar_config("confianza_fecha", datetime.now().strftime("%Y-%m-%d %H:%M"))
+        except Exception as _err:
+            anotar_error("_trabajo_de_fondo/confianza", _err)
+            guardar_config("confianza_pendiente", "1")
+
     if obtener_config("descubrimiento_pendiente", "") == "1":
         try:
             guardar_config("descubrimiento_pendiente", "0")
@@ -10255,7 +10344,12 @@ def arrancar_tanda_de_fondo():
     si están las dos apagadas o si el cupo del día está gastado, vuelve enseguida."""
     if (obtener_config("fotos_automaticas", "0") != "1"
             and obtener_config("equiv_ficha_automaticas", "0") != "1"
-            and obtener_config("descubrimiento_pendiente", "") != "1"):
+            and obtener_config("descubrimiento_pendiente", "") != "1"
+            # El repuntaje pendiente también la larga, aunque esté todo lo demás apagado: si no,
+            # después de cambiar las reglas de confianza el puntaje viejo se quedaría para
+            # siempre en la base de quien no tiene prendida ninguna tanda automática — que es
+            # justo el caso normal. Ver VERSION_CONFIANZA.
+            and obtener_config("confianza_pendiente", "") != "1"):
         return False
 
     # El candado se toma ACÁ y no adentro del hilo. Mirar si está tomado y después crear el
@@ -23119,8 +23213,27 @@ if pagina == PAGINAS[3]:
                 "grande está en los que ya entraron:",
                 "los que cargaron importaciones viejas que nadie revisó. Esto les pasa el mismo "
                 "análisis y te muestra los peores. Hasta ahora la única forma de encontrarlos era "
-                "tropezarse con uno buscando un código."
+                "tropezarse con uno buscando un código.\n\n"
+                "**Vuelve a mirar TODO cada vez que lo corrés, con las reglas de hoy.** No queda "
+                "nada marcado como «ya revisado»: los vínculos se cargaron con las reglas de su "
+                "momento y las reglas fueron cambiando, así que uno que pasaba limpio hace un mes "
+                "puede no pasar hoy. En la base actual son 24.774 vínculos y tarda 12 segundos."
             )
+            # Lo mismo de arriba pero del lado del puntaje GUARDADO, que es el que ve el
+            # buscador en cada búsqueda: cuando cambian las reglas queda viejo, y el repuntaje
+            # lo hace la tarea de fondo. Ver VERSION_CONFIANZA.
+            if obtener_config("confianza_pendiente", "") == "1":
+                st.info(
+                    "⏳ Las reglas de confianza cambiaron y los puntajes guardados todavía son "
+                    "los viejos. Se están recalculando solos en segundo plano — el análisis de "
+                    "acá abajo ya usa las reglas nuevas igual, porque recalcula al vuelo."
+                )
+            elif obtener_config("confianza_fecha", ""):
+                st.caption(
+                    f"Puntajes guardados al día: se repuntuaron "
+                    f"{int(obtener_config('confianza_repuntuada', '0') or 0):,} vínculo(s) el "
+                    f"{obtener_config('confianza_fecha', '')}."
+                )
             # Lo que ya se midió solo después de la última importación. Sin esto, el número
             # existía pero no lo veía nadie hasta apretar un botón que tarda 11 s.
             _dud_prev = obtener_config("dudosos_cargados", "")

@@ -1642,6 +1642,81 @@ El corte es por proveedor (`GROUP BY po.id, mp.id`) y no por total: un código d
 legítimo aparece en varias listas a la vez —es justo para eso que sirve— y contando todo junto
 ese sería el primero de la lista.
 
+## Los vínculos viejos se juzgaban con reglas viejas
+
+La pregunta fue: si cambiamos tanto la confianza, ¿el botón de revisión también vuelve a mirar
+los que ya están cargados? Buscando la respuesta aparecieron tres cosas, una de ellas un error
+mío del día anterior.
+
+### El error mío: el veto le preguntaba lo que no correspondía
+
+`codigo_que_hoy_no_se_tomaria()` pregunta **«¿el extractor sacaría esto de un texto?»**. Eso vale
+para un código de fábrica —que se adivinó de una descripción— pero **no** para el código propio
+de un proveedor, que vino de su columna. El día anterior lo había aplicado a los dos lados del
+vínculo. Medido sobre los 24.774 cargados:
+
+| | vínculos vetados |
+|---|---|
+| Preguntando por los dos lados | **12.508** |
+| Preguntando solo por el lado del código de fábrica | **681** |
+
+Los 11.827 de más eran pares perfectos: `10082FISPA` con `8200488774A`, misma descripción,
+obviamente el mismo repuesto. Quedaban marcados como basura porque `10082FISPA` sin la marca es
+`10082`, y un número de cinco cifras suelto no se adivinaría de un texto. **Nunca se adivinó:
+estaba en la columna del código.** Es el principio que ya estaba escrito en el extractor —«si el
+proveedor lo puso en la columna del código, es un código y se respeta»— y lo había pasado por
+alto.
+
+No llegó a hacer daño porque la cola de hoy es ILLINOIS↔OEM y esos códigos sobreviven. En la
+próxima importación de FISPA habría mandado miles de vínculos buenos al fondo.
+
+### Lo que faltaba: la misma regla en las tres partes
+
+Hay tres lugares que puntúan un vínculo, y usaban reglas distintas:
+
+| | qué puntúa | tenía la regla nueva |
+|---|---|---|
+| `analizar_lote_pendiente()` | la cola de revisión | sí |
+| `auditar_equivalencias_cargadas()` | el botón «revisar los que ya están» | **no** |
+| `recalcular_confianzas()` | el puntaje **guardado**, el que el buscador muestra en cada búsqueda | **no** |
+
+Que las tres no coincidan tiene una consecuencia concreta: la pantalla de auditoría te dice que
+un vínculo está mal y el buscador te lo sigue mostrando como confiable. Ahora las tres hacen el
+mismo control.
+
+Sobre la base real:
+
+- La auditoría de cargados pasó de marcar **265** a **922** (657 nuevos, 0 perdidos). Los nuevos
+  cuelgan de `ORION1` (el Ford Orion), `V8-628-635-730-735-740-840-850-M3-M5-Z3` (una lista de
+  BMW), `1994REF`, `295REF`, `1998-2002REF`, `10x18mm`, `180E25`. Modelos, años y medidas.
+- El puntaje guardado: **671 vínculos pasaron de «confiable» a «casi seguro mal»**. El buscador
+  los venía mostrando con 80-95% de confianza colgados de `5008REF`, `150E20`, `CLA250`,
+  `2007-2009REF`, `146REF`.
+
+### Y el puntaje guardado quedaba viejo sin que nadie se enterara
+
+La confianza se guarda en la base porque el buscador la necesita en cada búsqueda. Cuando las
+reglas cambian, lo guardado queda contando una película vieja — y recalcularlo era un botón que
+había que saber apretar.
+
+`VERSION_CONFIANZA` funciona igual que la versión del índice de búsqueda que ya existía: al
+abrir la app, si la versión guardada no es la de hoy, se deja **pedido** el repuntaje (no se
+hace ahí: son 13 segundos) y lo corre la tarea de fondo. Esa tarea ahora arranca también por
+esto, aunque estén apagadas las tandas automáticas de fotos y equivalencias — que es el caso
+normal, y si no, el puntaje viejo se quedaría para siempre.
+
+Probado de punta a punta sobre una copia de la base: abrir la app deja el pedido, la tarea de
+fondo repuntúa los 24.774 en 13,8 s con todo lo demás apagado, cambian 22.257 puntajes, y
+correrla de nuevo no repite nada.
+
+La pantalla lo dice mientras pasa («se están recalculando solos en segundo plano — el análisis
+de acá abajo ya usa las reglas nuevas igual, porque recalcula al vuelo») y después muestra
+cuántos y cuándo.
+
+Y se agregó la aclaración que faltaba arriba del botón: **vuelve a mirar todo cada vez que lo
+corrés, con las reglas de hoy.** No queda nada marcado como «ya revisado», justamente porque las
+reglas cambian y uno que pasaba limpio hace un mes puede no pasar hoy.
+
 ## La cola de revisión tenía 3.185 vínculos y ni uno solo en verde
 
 Salió de mirar qué le queda por hacer a la app sobre la base del negocio. El aviso decía
