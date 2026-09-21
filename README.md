@@ -1738,6 +1738,19 @@ guardada —una columna que no existe, un valor que vuelve NULL—, la consulta 
 filas para siempre y el hilo queda girando sin que nadie lo vea. Ahora tiene tope de vueltas y
 corta con un error anotado si una tanda no completa nada.
 
+### Dos cosas que se comprobaron y estaban bien
+
+**La tanda de fondo no se siente.** Ahora hace 96 s de trabajo la primera vez que se abre la app
+—medidas, aplicaciones, repuntaje— y la duda razonable era si eso traba la pantalla, porque
+escribe 114.673 filas tomando el candado de la base. Medido con los tres pedidos forzados y 30
+refrescos seguidos del buscador **mientras el hilo trabajaba**: peor 1,51 s, mediana 1,43 s —
+los mismos números que con todo quieto.
+
+**La base vacía arranca.** Es el caso de un usuario nuevo y el de después de que el hosting
+borra el disco, y lo tocan las tres marcas de versión nuevas. Arranca en 1,7 s, las ocho
+pantallas dibujan sin una sola excepción, la tarea de fondo no hace nada (no hay qué procesar) y
+no se traga ningún error.
+
 ## A qué auto le va cada pieza: 114.673 filas que ya estaban en el texto
 
 La tabla de aplicaciones —lo que hace andar la búsqueda por vehículo— tenía **0 filas**, y las
