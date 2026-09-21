@@ -3,6 +3,7 @@ en ejecución, cuando ya es tarde."""
 import ast
 import copy
 import re
+import sqlite3
 import sys
 from collections import defaultdict, Counter
 
@@ -1843,6 +1844,53 @@ if _GEN34:
                      "generador lleva bloques por nombre y se va a llevar medio renglón. "
                      "Guardar el resultado en UN solo nombre y desarmarlo adentro de quien "
                      f"lo usa ({', '.join(_nombres)})")
+
+
+# ============ 35) Preparar de verdad cada consulta contra el esquema del propio archivo =====
+# El chequeo 30a compara `alias.columna` contra el mapa de columnas, y es útil, pero solo ve lo
+# que está calificado. Lo que se le escapa es la columna SIN alias en una consulta con JOIN:
+#     SELECT id, codigo_barras FROM productos p JOIN marcas m ON m.id = p.marca_id
+# `id` está en las dos tablas, así que SQLite corta con «ambiguous column name: id». Esa
+# consulta es la rama que corre cuando no se elige una lista al pegar códigos de barras en
+# masa, y «— todas las listas —» es la PRIMERA opción del selector: el camino por defecto de
+# esa herramienta nunca funcionó, y ni siquiera quedaba anotado, porque la excepción no la
+# atrapa nadie.
+#
+# Así que en vez de razonar sobre el texto, se arma el esquema ejecutando los CREATE TABLE y
+# ALTER TABLE que están en el propio archivo, y se PREPARA cada consulta literal con EXPLAIN.
+# Lo que SQLite acepta, pasa; lo que no, es un error de verdad. No hace falta la base real.
+#
+# Los pedazos de SQL que se concatenan o se formatean en tiempo de ejecución no se pueden
+# preparar y se saltean: dan «incomplete input» o «unrecognized token {». Medido sobre app.py:
+# de 541 consultas literales, 51 son pedazos —los 51 se saltean— y el resto prepara limpio.
+# Sobre el archivo con el bug adentro, este control devolvía exactamente 1 hallazgo, el bueno.
+_ES_SQL = re.compile(r"^\s*(SELECT|INSERT|UPDATE|DELETE|WITH|CREATE|ALTER)\b", re.I)
+_NO_SE_PUEDE_PREPARAR = ("incomplete input", "unrecognized token", "near \"{\"")
+_LITERALES_SQL = [(n.lineno, n.value) for n in ast.walk(ARBOL)
+                  if isinstance(n, ast.Constant) and isinstance(n.value, str)
+                  and _ES_SQL.match(n.value)]
+_MEM = sqlite3.connect(":memory:")
+for _ln, _sql in _LITERALES_SQL:
+    if _sql.strip().upper().startswith(("CREATE", "ALTER")):
+        try:
+            _MEM.execute(_sql)
+        except sqlite3.Error:
+            pass     # migraciones condicionadas, tablas temporales de un rename: no son del esquema
+for _ln, _sql in _LITERALES_SQL:
+    if _sql.strip().upper().startswith(("CREATE", "ALTER", "PRAGMA")):
+        continue
+    try:
+        _MEM.execute("EXPLAIN " + _sql)
+    except sqlite3.OperationalError as _err:
+        _texto = str(_err)
+        if any(x in _texto for x in _NO_SE_PUEDE_PREPARAR):
+            continue     # es un pedazo que se completa en tiempo de ejecución
+        reportar("ERROR", _ln,
+                 f"SQLite no acepta esta consulta contra el esquema del propio archivo: "
+                 f"«{_texto}». Una columna que está en dos tablas del JOIN hay que calificarla "
+                 "con el alias, y una que no existe hay que arreglarla")
+    except sqlite3.Error:
+        pass
 
 
 # ============ Resultado ============

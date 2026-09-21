@@ -3972,7 +3972,18 @@ def cargar_codigos_de_barras_masivo(pares, marca_id=None, pisar=True):
                 c.execute("SELECT id, codigo_barras FROM productos "
                           "WHERE codigo_clean = ? AND marca_id = ?", (limpio, marca_id))
             else:
-                c.execute("SELECT id, codigo_barras FROM productos p "
+                # p.id y p.codigo_barras CALIFICADOS, y no es cosmética: `id` existe en
+                # productos y en marcas, así que sin el alias SQLite corta con «ambiguous
+                # column name: id». Esta rama es la que corre cuando no se elige una lista —y
+                # «— todas las listas —» es la PRIMERA opción del selector, o sea la que viene
+                # puesta—, así que el camino por defecto de pegar códigos de barras en masa
+                # nunca funcionó: se subía la planilla, se tildaba el candado, se apretaba el
+                # botón y se caía la pantalla con un error crudo. Ni siquiera quedaba anotado,
+                # porque la excepción no la atrapa nadie.
+                # Los `AS` van a propósito: abajo se lee fila["id"] y fila["codigo_barras"].
+                # Tranquiliza una cosa: reventaba en el primer SELECT, antes de cualquier
+                # UPDATE, así que era «no anda», no «deja la base a medias».
+                c.execute("SELECT p.id AS id, p.codigo_barras AS codigo_barras FROM productos p "
                           "JOIN marcas m ON m.id = p.marca_id "
                           "WHERE p.codigo_clean = ? AND m.tipo <> 'OEM'", (limpio,))
             filas = filas_a_listas(c)

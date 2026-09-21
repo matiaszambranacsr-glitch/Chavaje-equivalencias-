@@ -1645,6 +1645,49 @@ El corte es por proveedor (`GROUP BY po.id, mp.id`) y no por total: un código d
 legítimo aparece en varias listas a la vez —es justo para eso que sirve— y contando todo junto
 ese sería el primero de la lista.
 
+## Pegar códigos de barras en masa nunca funcionó por la opción que viene puesta
+
+```sql
+SELECT id, codigo_barras FROM productos p
+JOIN marcas m ON m.id = p.marca_id
+WHERE p.codigo_clean = ? AND m.tipo <> 'OEM'
+```
+
+`id` está en `productos` **y** en `marcas`. Sin calificar, SQLite corta con
+`ambiguous column name: id`.
+
+Lo que lo vuelve grave es cuál es esa rama. Corre cuando no se elige una lista en el
+desplegable, y esa es la **primera opción**, o sea la que viene puesta:
+
+```python
+_opc_b = {"— todas las listas (más riesgoso) —": None}
+```
+
+El recorrido completo: subir la planilla, mapear las columnas, ver el preview, tildar el
+candado, apretar «🏷️ Pegar los N códigos de barras» — y la pantalla se cae con un error crudo.
+Cero códigos cargados, y **ni siquiera queda anotado**, porque la excepción no la atrapa nadie.
+La única manera de que la herramienta anduviera era acordarse de elegir una lista concreta.
+
+Una cosa tranquiliza: reventaba en el primer `SELECT`, antes de cualquier `UPDATE`. Era «no
+anda», no «deja la base a medias».
+
+### El chequeo 35: preparar cada consulta de verdad
+
+El chequeo 30a compara `alias.columna` contra el mapa de columnas y es útil, pero solo ve lo
+que está calificado. La columna **sin** alias en un JOIN se le escapa entera.
+
+Así que en vez de razonar sobre el texto, el chequeo 35 arma el esquema ejecutando los
+`CREATE TABLE` y `ALTER TABLE` que están en el propio `app.py` —39 tablas, 47 alters, 34
+índices— y después **prepara** cada consulta literal con `EXPLAIN`. Lo que SQLite acepta, pasa.
+No hace falta la base real.
+
+Los pedazos de SQL que se concatenan o se formatean en tiempo de ejecución no se pueden
+preparar y se saltean: dan `incomplete input` o `unrecognized token "{"`. Medido sobre `app.py`:
+de **541 consultas literales, 51 son pedazos** y el resto prepara limpio.
+
+La comprobación que importa: sobre el archivo con el bug adentro el chequeo devuelve
+**exactamente 1 hallazgo, el bueno**; sobre el arreglado, 0.
+
 ## Las 114.673 aplicaciones nunca se cargaron, y la app decía que sí
 
 La tabla `aplicaciones` —la que dice qué repuesto le va a cada auto— tiene **0 filas**. Y la
