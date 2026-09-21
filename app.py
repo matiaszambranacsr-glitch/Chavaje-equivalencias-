@@ -3998,6 +3998,58 @@ def cargar_codigos_de_barras_masivo(pares, marca_id=None, pisar=True):
     return resumen
 
 
+def codigo_base_sin_variante(codigo):
+    """De «TC-687-20 2M» devuelve «TC-687-20»; de «JVL-168-28», «JVL-168». None si no queda nada.
+
+    Casi todos los proveedores numeran las variantes de una misma pieza agregándole un sufijo
+    corto al código: la junta de tapa de cilindros TC-687-20 viene en 1,50 / 1,60 / 1,70 mm y se
+    llaman «TC-687-20 1M», «... 2M», «... 3M». Son la misma pieza en otra medida, no piezas
+    distintas.
+
+    Nunca baja de DOS tramos, y eso es lo que evita que se pase de rosca: «JCA-123» se
+    recortaría a «JCA», que es solo la sigla de la línea («Juego de juntas para Compresor de
+    Aire») y la comparten kits de compresores distintos, que sí son piezas distintas. Con el
+    piso en dos tramos, «JCA-123» y «JCA-121-15» quedan en bases distintas, que es lo correcto,
+    y «JI-276» con «JI-276-R» —el mismo juego, con retenes— quedan en la misma."""
+    u = re.sub(r"[\s\.]+", "-", (codigo or "").upper().strip())
+    partes = [x for x in u.split("-") if x]
+    while len(partes) > 2 and len(partes[-1]) <= 4:
+        partes = partes[:-1]
+    base = "-".join(partes)
+    return base if any(ch.isdigit() for ch in base) else None
+
+
+def son_variantes_de_la_misma_pieza(codigos):
+    """¿Estos códigos de un mismo proveedor son la misma pieza en distintas medidas?
+
+    Es la respuesta a una alarma que gritaba de más. «El código de fábrica X apunta a más de un
+    producto del proveedor Y» resta 35 puntos, y la idea es buena: el fabricante tiene UNA pieza
+    por número, así que dos productos del mismo proveedor colgando del mismo número quieren
+    decir que alguno se cargó mal.
+
+    Pero sobre la cola real la alarma saltaba en 557 grupos, y mirándolos: el número de FIAT
+    7785351 cuelga «TC-615-MG 0M», «TC-615-MG 4M» y «TC-615-20 0M» —la misma junta de tapa de
+    cilindros en 1,65 y 2,40 mm, en dos materiales—, y las tres entran en el mismo motor. No hay
+    nada mal cargado; ILLINOIS vende la junta en varios espesores y las tres corresponden a ese
+    número de fábrica.
+
+    Con esta regla, de los 557 grupos se sueltan 350 y quedan marcados 207. Los que siguen
+    marcados son los de verdad: el 7703061078 cuelga «2712800» (guarnición de bomba depresora)
+    y «2627400» (arandela de fibra de tapa de válvula), que son dos piezas distintas y una de
+    las dos está mal; y el 4JH1TC cuelga la junta de tapa de cilindros sola y el juego completo
+    de reparación, que tampoco son equivalentes.
+
+    Efecto en la cola de revisión, medido sobre los 3.185 pendientes reales:
+        🟢 1.785 → 2.266     🟡 695 → 502     🔴 705 → 417
+    y ninguno de los 2.266 verdes tiene una sola señal en contra ni una sola alarma.
+
+    A propósito NO alcanza con que las descripciones arranquen igual: el compresor OHL355 cuelga
+    JCA-120, JCA-121, JCA-122 y JCA-123, los cuatro descriptos «Juego de juntas para Compresor de
+    Aire KNORR», y son cuatro kits distintos. Lo que distingue a una variante es el código."""
+    bases = {codigo_base_sin_variante(x) for x in codigos}
+    return len(bases) == 1 and None not in bases
+
+
 def codigo_que_hoy_no_se_tomaria(codigo):
     """¿Es un código que las reglas de hoy ya NO aceptarían como código de fábrica?
 
@@ -6646,13 +6698,23 @@ def analizar_lote_pendiente(lote, limite=None, desde=0):
     # Todas las medidas de una sola vez, en vez de dos consultas por par
     medidas = cargar_medidas_de_varios([f["a"] for f in filas] + [f["b"] for f in filas])
 
-    # Detectar códigos de fábrica que apuntan a varios productos del mismo proveedor
+    # Detectar códigos de fábrica que apuntan a varios productos del mismo proveedor.
+    # Solo se miran las filas donde uno de los dos lados ES de fábrica: entre dos proveedores
+    # que un código se repita no significa nada, y la rama else tomaba igual el código B como
+    # si fuera de fábrica. El uso de más abajo ya estaba protegido, pero armar el grupo con
+    # códigos que no son de fábrica solo puede meter ruido.
+    # Se guarda el CÓDIGO del proveedor y no solo su id, porque hace falta para distinguir las
+    # variantes de una misma pieza (ver son_variantes_de_la_misma_pieza).
     apuntados = {}
     for f in filas:
-        oem, otro, marca_otro = ((f["cod_a"], f["b"], f["marca_b"]) if f["tipo_a"] == "OEM"
-                                  else (f["cod_b"], f["a"], f["marca_a"]))
-        apuntados.setdefault((sanitizar(oem), marca_otro), set()).add(otro)
-    ambiguos = {k for k, v in apuntados.items() if len(v) > 1}
+        if "OEM" not in (f["tipo_a"], f["tipo_b"]):
+            continue
+        oem, otro, marca_otro, cod_otro = (
+            (f["cod_a"], f["b"], f["marca_b"], f["cod_b"]) if f["tipo_a"] == "OEM"
+            else (f["cod_b"], f["a"], f["marca_a"], f["cod_a"]))
+        apuntados.setdefault((sanitizar(oem), marca_otro), {})[otro] = cod_otro
+    ambiguos = {k for k, v in apuntados.items()
+                if len(v) > 1 and not son_variantes_de_la_misma_pieza(v.values())}
 
     # ¿Este par aparece en más de una lista? Que dos proveedores independientes digan lo mismo
     # es la mejor confirmación que se puede tener sin mirar la pieza.
@@ -8362,13 +8424,39 @@ def puentes_aprobados_ids():
         return set()
 
 
-def contar_codigos_puente(minimo=30):
+MARCAS_PARA_SER_UN_PUENTE = 2   # ver contar_codigos_puente()
+
+
+def contar_codigos_puente(minimo=30, marcas_minimas=MARCAS_PARA_SER_UN_PUENTE):
     """Solo el conteo, sin traer los datos. Es lo que usa el chequeo de salud, que corre seguido:
-    la consulta completa arma dos subconsultas por producto y no hace falta para un número."""
+    la consulta completa arma dos subconsultas por producto y no hace falta para un número.
+
+    CUENTA LOS QUE TOCAN VARIAS MARCAS, no los que tienen muchos vínculos, y esa es toda la
+    diferencia. Un puente es, por definición, un código que FUSIONA familias de proveedores
+    distintos; si todos sus vínculos se quedan adentro de una sola marca, no está puenteando
+    nada. Y hay un caso perfectamente sano que tiene decenas de vínculos en una sola marca: la
+    tabla de referencias cruzadas que el propio proveedor publica. Un motor de arranque de FISPA
+    lista 45 códigos de fábrica de Bosch, Delco, Valeo y Magneti Marelli en su descripción, y
+    los 45 son ciertos.
+
+    Sobre la base real, contando solo los vínculos, el aviso decía «31 códigos puente» en rojo,
+    todos los días. Mirando la columna que importa: **30 de esos 31 tocan UNA sola marca** y son
+    tablas de referencias cruzadas de motores de arranque y alternadores. El único de verdad es
+    «CHAPA» —la palabra, cargada como código— con 76 vínculos y 2 marcas.
+    Un aviso en rojo que grita 31 cuando hay 1 no es un aviso: es ruido que enseña a ignorar
+    los avisos, incluso los que importan.
+    La pantalla sigue mostrando todos, con la columna «Marcas distintas» al lado, porque
+    mirarlos no hace daño; lo que cambia es de qué avisa la app sola."""
     c.execute("""SELECT COUNT(*) FROM productos p
                  WHERE (SELECT COUNT(*) FROM equivalencias e
                         WHERE e.producto_a_id = p.id OR e.producto_b_id = p.id) >= ?
-                   AND p.id NOT IN (SELECT producto_id FROM puentes_aprobados)""", (minimo,))
+                   AND (SELECT COUNT(DISTINCT m2.nombre) FROM equivalencias e
+                          JOIN productos p2 ON p2.id = CASE WHEN e.producto_a_id = p.id
+                                                            THEN e.producto_b_id ELSE e.producto_a_id END
+                          JOIN marcas m2 ON m2.id = p2.marca_id
+                        WHERE e.producto_a_id = p.id OR e.producto_b_id = p.id) >= ?
+                   AND p.id NOT IN (SELECT producto_id FROM puentes_aprobados)""",
+              (minimo, marcas_minimas))
     return c.fetchone()[0]
 
 
@@ -8934,9 +9022,12 @@ def diagnostico_de_salud():
         puentes = contar_codigos_puente(30)
         if puentes:
             sumar("alto", f"{puentes} código(s) puente",
-                  "Están vinculados a decenas de repuestos y fusionan familias que no tienen "
-                  "relación. Es lo que hace que el buscador devuelva cosas que no entran.",
-                  "Estadísticas → Mantenimiento → Códigos puente")
+                  "Están vinculados a decenas de repuestos DE VARIAS MARCAS y fusionan familias "
+                  "que no tienen relación. Es lo que hace que el buscador devuelva cosas que no "
+                  "entran. (Un código con muchos vínculos pero todos de una sola marca no entra "
+                  "acá: esa es la tabla de referencias cruzadas del propio proveedor, y está "
+                  "bien.)",
+                  "Administrar → Mantenimiento → 🧹 Limpiar y corregir → Códigos puente")
     except Exception as _err:
         anotar_error("diagnostico_de_salud", _err)
         pass
@@ -9453,7 +9544,17 @@ def codigos_puente(minimo=15, limite=100):
     todas las familias que toca. Un filtro de aceite legítimo puede tener 10 o 15 equivalencias
     entre marcas; si aparece con 200, casi seguro es un código que se cargó mal (una cantidad,
     un número de orden, o una columna corrida) y quedó de puente entre repuestos que no tienen
-    nada que ver. Cortar UNO de estos limpia miles de resultados falsos de una."""
+    nada que ver. Cortar UNO de estos limpia miles de resultados falsos de una.
+
+    Se ordena por MARCAS DISTINTAS y recién después por cantidad de vínculos, por el mismo
+    motivo que explica contar_codigos_puente(): un código con 60 vínculos que se quedan todos
+    adentro de una marca es, casi siempre, la tabla de referencias cruzadas que el propio
+    proveedor publica, y no puentea nada.
+    Honestidad sobre la medición: HOY este orden no cambia nada. Sobre la base real el único
+    puente de verdad («CHAPA», 2 marcas) también es el que más vínculos tiene —76—, así que
+    encabezaba la lista igual. El orden está por el día que aparezca un puente con 20 vínculos
+    repartidos en 5 marcas: ese hace mucho más daño que 60 vínculos adentro de una sola, y
+    ordenado por vínculos quedaría abajo de treinta motores de arranque inofensivos."""
     c.execute("""SELECT p.id AS "ID", p.codigo_raw AS "Código", p.descripcion AS "Descripción",
                         m.nombre AS "Marca",
                         (SELECT COUNT(*) FROM equivalencias e
@@ -9466,7 +9567,7 @@ def codigos_puente(minimo=15, limite=100):
                  FROM productos p JOIN marcas m ON m.id = p.marca_id
                  WHERE "Vínculos" >= ?
                    AND p.id NOT IN (SELECT producto_id FROM puentes_aprobados)
-                 ORDER BY "Vínculos" DESC LIMIT ?""", (minimo, limite))
+                 ORDER BY "Marcas distintas" DESC, "Vínculos" DESC LIMIT ?""", (minimo, limite))
     return filas_a_listas(c)
 
 
@@ -10680,6 +10781,46 @@ def peso_estimado_por_foto(liviano=True):
     Medido sobre fotos de producto reales: en liviano son la firma visual (~20 KB) más la
     miniatura (~2 KB); en completo se suma la imagen de 500px, que es la que pesa."""
     return 22 if liviano else 120
+
+
+def generar_backup_completo():
+    """El backup entero, fotos incluidas, bajado con la API backup() de SQLite y NO leyendo el
+    archivo .db a mano, que es como estaba antes.
+
+    Es exactamente el mismo error que ya se había arreglado del otro lado, en
+    restaurar_backup(), y de este lado había quedado. La base anda en modo WAL: todo lo que se
+    escribió desde el último «checkpoint» vive en equivalencias_app.db-wal, no adentro del
+    .db. Leer el .db crudo devuelve la base como estaba hace rato — y ni siquiera de forma
+    pareja, porque el checkpoint corre cuando SQLite quiere.
+
+    Está medido, y es peor de lo que suena. Base nueva en WAL, 5.000 filas insertadas y
+    COMMITEADAS:
+        archivo .db crudo ..... 4.096 bytes — al abrirlo: «no such table: productos»
+        conn.backup() ......... 94.208 bytes — 5.000 filas, todas
+    O sea que el botón «backup completo» podía entregar un archivo que no tenía NI LA TABLA.
+    Y este es el archivo con el que se restaura todo cuando Streamlit borra el disco: no hay
+    otra copia atrás. Un backup que miente es peor que no tener backup, porque uno deja de
+    revisar.
+
+    El backup liviano de acá abajo ya usaba backup() desde el principio; por eso el problema
+    no se veía: el que se sube al repositorio todos los días salía bien."""
+    import tempfile
+    ruta_temporal = os.path.join(tempfile.gettempdir(), "backup_completo.db")
+    if os.path.exists(ruta_temporal):
+        os.remove(ruta_temporal)
+    destino = sqlite3.connect(ruta_temporal)
+    with db_lock:
+        # conexion_real() y no conn: backup() no acepta el proxy por sesión.
+        conn.conexion_real().backup(destino)
+    destino.close()
+    try:
+        with open(ruta_temporal, "rb") as f:
+            return f.read()
+    finally:
+        try:
+            os.remove(ruta_temporal)
+        except OSError as _err:
+            anotar_error("generar_backup_completo", _err)
 
 
 def generar_backup_sin_fotos():
@@ -25638,8 +25779,8 @@ if pagina == PAGINAS[4]:
         with cbk1:
             st.markdown("*Completo (con fotos)*")
             if st.button("🗄️ Preparar backup completo"):
-                with open(DB_PATH, "rb") as f:
-                    st.session_state["backup_bytes"] = f.read()
+                with st.spinner("Armando..."):
+                    st.session_state["backup_bytes"] = generar_backup_completo()
             if "backup_bytes" in st.session_state:
                 st.download_button(
                     f"⬇️ Descargar ({len(st.session_state['backup_bytes'])/(1024*1024):,.0f} MB)",

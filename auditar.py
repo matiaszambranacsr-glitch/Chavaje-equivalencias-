@@ -1786,6 +1786,23 @@ if _CON_LRU:
                 break
 
 
+# ============ 32) Leer el archivo .db a mano estando en modo WAL ============
+# La base anda en WAL: lo que se escribió desde el último checkpoint vive en el .db-wal, no
+# adentro del .db. Copiar o leer el archivo crudo entrega una base vieja, y puede entregar una
+# base que ni siquiera tiene las tablas — medido: 5.000 filas commiteadas, el .db crudo pesaba
+# 4.096 bytes y al abrirlo daba «no such table: productos».
+# Pasó en los dos sentidos: primero al restaurar (se arregló con backup()) y después se
+# descubrió que el botón de bajar el backup completo seguía haciendo open(DB_PATH,"rb").
+# Cualquier copia de la base se hace con la API backup() de SQLite.
+for _i, _l in enumerate(LINEAS, 1):
+    _limpia = _l.split("#")[0]
+    if "DB_PATH" in _limpia and re.search(r"open\s*\(\s*DB_PATH", _limpia):
+        reportar("ERROR", _i,
+                 "lee el archivo de la base directamente estando en modo WAL: lo escrito "
+                 "desde el último checkpoint está en el .db-wal y no entra en esa copia. "
+                 "Usar conn.conexion_real().backup(destino), como generar_backup_completo()")
+
+
 # ============ Resultado ============
 orden = {"ERROR": 0, "REVISAR": 1, "AVISO": 2}
 problemas.sort(key=lambda x: (orden[x[0]], x[1]))

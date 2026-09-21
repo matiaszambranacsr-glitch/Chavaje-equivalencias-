@@ -1642,6 +1642,128 @@ El corte es por proveedor (`GROUP BY po.id, mp.id`) y no por total: un código d
 legítimo aparece en varias listas a la vez —es justo para eso que sirve— y contando todo junto
 ese sería el primero de la lista.
 
+## La misma junta en otro espesor no es un error de carga
+
+La cola de revisión tenía 3.185 vínculos: 🟢 1.785, 🟡 695, 🔴 705. Mirando los 695 amarillos
+apareció algo raro: **los 695 tenían cero señales en contra**. Ninguno. Estaban ahí por una sola
+cosa, la misma para todos:
+
+> ⚠️ El código 7785351 apunta a más de un producto de ILLINOIS — alguno de los dos está mal cargado
+
+Esa alarma resta 35 puntos y la idea es correcta: el fabricante tiene UNA pieza por número, así
+que dos productos del mismo proveedor colgando del mismo número quieren decir que alguno se
+cargó mal. Pero mirando qué cuelga del 7785351:
+
+```
+TC-615-MG 0M   Junta Tapa de Cilindros FIAT (ESP 1.65MM) FIORINO UNO TIPO PALIO ...
+TC-615-MG 4M   Junta Tapa de Cilindros FIAT (ESP 2.40MM) FIORINO UNO TIPO PALIO ...
+TC-615-20 0M   Junta Tapa de Cilindros FIAT (ESP 1.65MM) FIORINO UNO TIPO PALIO ...
+```
+
+Es **la misma junta** en dos espesores y dos materiales. Las tres entran en ese motor y las tres
+corresponden a ese número de fábrica. No hay nada mal cargado: ILLINOIS vende la junta en varias
+medidas, como todo el rubro de juntas.
+
+Lo que distingue a una variante es el **código**, no la descripción. El proveedor numera las
+variantes agregando un sufijo corto: `TC-615-…`, `JVL-168-24 / -28 / -34`, `JI-276` y `JI-276-R`
+(el mismo juego, con retenes). `codigo_base_sin_variante()` recorta esos sufijos y nunca baja de
+dos tramos, que es lo que evita pasarse: el compresor `OHL355` cuelga `JCA-120`, `JCA-121`,
+`JCA-122` y `JCA-123` —cuatro kits **distintos**— y recortando de más quedarían todos en «JCA».
+
+Y a propósito **no** alcanza con que las descripciones coincidan, que era el atajo tentador: esos
+cuatro kits de compresor están descriptos los cuatro «Juego de juntas para Compresor de Aire
+KNORR».
+
+| | grupos | |
+|---|---|---|
+| disparaban la alarma | 557 | |
+| son variantes de una misma pieza | **350** | se sueltan |
+| son piezas distintas de verdad | **207** | siguen marcados |
+
+Los 207 que quedan son los que la alarma vino a cazar: el `7703061078` cuelga `2712800`
+(guarnición de bomba depresora) y `2627400` (arandela de fibra de tapa de válvula); el `4JH1TC`
+cuelga la junta de tapa de cilindros sola y el juego completo de reparación.
+
+Efecto en la cola, sobre los 3.185 pendientes reales:
+
+| | antes | después |
+|---|---|---|
+| 🟢 se puede aprobar sin mirar | 1.785 | **2.266** |
+| 🟡 conviene una mirada | 695 | 502 |
+| 🔴 casi seguro mal | 705 | 417 |
+
+Y el control que importa: de los 2.266 verdes, **ninguno** tiene una sola señal en contra ni una
+sola alarma — ni rubros distintos, ni medidas que se contradigan. Se revisaron a mano 22 grupos
+sueltos al azar y los 22 son variantes de espesor o de material.
+
+De paso, un error que estaba al lado: el grupo de «qué cuelga de este código de fábrica» se
+armaba con TODAS las filas, y cuando ninguno de los dos lados era de fábrica igual tomaba el
+código B como si lo fuera. El uso ya estaba protegido —se arregló cuando se vio que entre dos
+proveedores un código repetido no significa nada— pero armar el grupo con códigos que no son de
+fábrica solo puede meter ruido. Ahora se arma solo con las filas que tienen un lado de fábrica.
+
+## El backup completo podía bajarse sin la mitad de la base
+
+El botón **Backup y config → Preparar backup completo** hacía `open(DB_PATH, "rb").read()`:
+leía el archivo `.db` a mano. La base anda en **modo WAL**, o sea que todo lo escrito desde el
+último *checkpoint* vive en `equivalencias_app.db-wal`, no adentro del `.db`. Leer el archivo
+crudo entrega la base como estaba hace un rato — y ni siquiera de forma pareja, porque el
+checkpoint corre cuando SQLite quiere.
+
+Medido con una base nueva en WAL, 5.000 filas insertadas y **commiteadas**:
+
+| | tamaño | al abrirlo |
+|---|---|---|
+| el `.db` crudo, como lo bajaba el botón | 4.096 bytes | `no such table: productos` |
+| `conn.backup()` | 94.208 bytes | las 5.000 filas |
+
+O sea que el backup completo podía entregar un archivo **que no tenía ni la tabla**. Y ese es
+el archivo con el que se restaura todo cuando el hosting borra el disco: no hay otra copia
+atrás. Un backup que miente es peor que no tener backup, porque uno deja de revisar.
+
+Lo más incómodo es que era el **mismo error, del otro lado**. Hace unos días se arregló
+`restaurar_backup()` por exactamente esto y el comentario de esa función explica el WAL en
+detalle; el camino de salida quedó sin tocar. El backup liviano —el que se sube al
+repositorio— ya usaba `backup()` desde el principio, y por eso el problema no se veía: el que
+se genera todos los días salía bien.
+
+Ahora hay `generar_backup_completo()`, que copia con la API `backup()` de SQLite. Sobre la base
+real: 38,0 MB en 0,1 s, 70.888 productos, 24.774 equivalencias, `PRAGMA integrity_check` = ok.
+Y el **chequeo 32** del auditor marca cualquier `open(DB_PATH, ...)` que vuelva a aparecer,
+verificado reproduciendo la línea vieja.
+
+## El aviso rojo gritaba 31 códigos puente y el verdadero era uno
+
+`contar_codigos_puente()` contaba los códigos con más de 30 vínculos. Sobre la base real daban
+31, el aviso salía en **rojo todos los días**, y mirando la columna que importa:
+
+| vínculos | códigos | de ellos, con 1 sola marca |
+|---|---|---|
+| más de 15 | 76 | 75 |
+| más de 30 | 31 | 30 |
+| más de 50 | 8 | 7 |
+
+Un puente es, por definición, un código que **fusiona familias de proveedores distintos**. Si
+todos sus vínculos se quedan adentro de una marca, no está puenteando nada. Y hay un caso
+perfectamente sano que tiene decenas de vínculos en una sola marca: la tabla de referencias
+cruzadas que el propio proveedor publica. `LRAC03043LUCAS` tiene 65 vínculos y una sola marca
+porque su descripción lista 45 códigos de fábrica de Bosch, Delco, Valeo y Magneti Marelli, y
+los 45 son ciertos.
+
+El único puente de verdad es **`CHAPA`** —la palabra, cargada como código— con 76 vínculos y 2
+marcas.
+
+Ahora el aviso cuenta los que tocan **2 marcas o más**: de 31 pasa a **1**, y tarda lo mismo
+(46 ms → 44 ms). La pantalla sigue mostrando los 76 con la columna «Marcas distintas» al lado,
+porque mirarlos no hace daño; lo que cambia es de qué avisa la app sola. Un aviso en rojo que
+grita 31 cuando hay 1 enseña a ignorar los avisos, incluso los que importan.
+
+Honestidad sobre una parte: la lista de la pantalla ahora se ordena por marcas distintas antes
+que por vínculos, y **hoy eso no cambia nada** — `CHAPA` también es el que más vínculos tiene,
+así que ya encabezaba. El orden está por el día que aparezca un puente con 20 vínculos
+repartidos en 5 marcas: ese hace mucho más daño que 60 vínculos adentro de una sola, y
+ordenado por vínculos quedaría abajo de treinta motores de arranque inofensivos.
+
 ## 254 errores que la app se tragaba en silencio, todos el mismo
 
 Se me ocurrió contar los errores que la app decide ignorar —`anotar_error()` los guarda y

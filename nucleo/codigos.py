@@ -860,6 +860,58 @@ def extraer_codigos_de_texto(texto, minimo=6, codigo_propio=None, codigos_conoci
     return salida
 
 
+def codigo_base_sin_variante(codigo):
+    """De «TC-687-20 2M» devuelve «TC-687-20»; de «JVL-168-28», «JVL-168». None si no queda nada.
+
+    Casi todos los proveedores numeran las variantes de una misma pieza agregándole un sufijo
+    corto al código: la junta de tapa de cilindros TC-687-20 viene en 1,50 / 1,60 / 1,70 mm y se
+    llaman «TC-687-20 1M», «... 2M», «... 3M». Son la misma pieza en otra medida, no piezas
+    distintas.
+
+    Nunca baja de DOS tramos, y eso es lo que evita que se pase de rosca: «JCA-123» se
+    recortaría a «JCA», que es solo la sigla de la línea («Juego de juntas para Compresor de
+    Aire») y la comparten kits de compresores distintos, que sí son piezas distintas. Con el
+    piso en dos tramos, «JCA-123» y «JCA-121-15» quedan en bases distintas, que es lo correcto,
+    y «JI-276» con «JI-276-R» —el mismo juego, con retenes— quedan en la misma."""
+    u = re.sub(r"[\s\.]+", "-", (codigo or "").upper().strip())
+    partes = [x for x in u.split("-") if x]
+    while len(partes) > 2 and len(partes[-1]) <= 4:
+        partes = partes[:-1]
+    base = "-".join(partes)
+    return base if any(ch.isdigit() for ch in base) else None
+
+
+def son_variantes_de_la_misma_pieza(codigos):
+    """¿Estos códigos de un mismo proveedor son la misma pieza en distintas medidas?
+
+    Es la respuesta a una alarma que gritaba de más. «El código de fábrica X apunta a más de un
+    producto del proveedor Y» resta 35 puntos, y la idea es buena: el fabricante tiene UNA pieza
+    por número, así que dos productos del mismo proveedor colgando del mismo número quieren
+    decir que alguno se cargó mal.
+
+    Pero sobre la cola real la alarma saltaba en 557 grupos, y mirándolos: el número de FIAT
+    7785351 cuelga «TC-615-MG 0M», «TC-615-MG 4M» y «TC-615-20 0M» —la misma junta de tapa de
+    cilindros en 1,65 y 2,40 mm, en dos materiales—, y las tres entran en el mismo motor. No hay
+    nada mal cargado; ILLINOIS vende la junta en varios espesores y las tres corresponden a ese
+    número de fábrica.
+
+    Con esta regla, de los 557 grupos se sueltan 350 y quedan marcados 207. Los que siguen
+    marcados son los de verdad: el 7703061078 cuelga «2712800» (guarnición de bomba depresora)
+    y «2627400» (arandela de fibra de tapa de válvula), que son dos piezas distintas y una de
+    las dos está mal; y el 4JH1TC cuelga la junta de tapa de cilindros sola y el juego completo
+    de reparación, que tampoco son equivalentes.
+
+    Efecto en la cola de revisión, medido sobre los 3.185 pendientes reales:
+        🟢 1.785 → 2.266     🟡 695 → 502     🔴 705 → 417
+    y ninguno de los 2.266 verdes tiene una sola señal en contra ni una sola alarma.
+
+    A propósito NO alcanza con que las descripciones arranquen igual: el compresor OHL355 cuelga
+    JCA-120, JCA-121, JCA-122 y JCA-123, los cuatro descriptos «Juego de juntas para Compresor de
+    Aire KNORR», y son cuatro kits distintos. Lo que distingue a una variante es el código."""
+    bases = {codigo_base_sin_variante(x) for x in codigos}
+    return len(bases) == 1 and None not in bases
+
+
 def codigo_que_hoy_no_se_tomaria(codigo):
     """¿Es un código que las reglas de hoy ya NO aceptarían como código de fábrica?
 

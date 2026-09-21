@@ -982,6 +982,33 @@ def probar_el_espesor_y_las_vias_que_estaban_escritos():
           "los tres números de un retén")
 
 
+def probar_la_misma_junta_en_otro_espesor_no_es_un_error_de_carga():
+    """El proveedor numera las variantes agregando un sufijo corto, y eso no es un error.
+
+    La alarma «el código de fábrica apunta a más de un producto del proveedor» resta 35 puntos
+    y sobre la cola real saltaba en 557 grupos, de los cuales 350 eran esto: la misma junta de
+    tapa de cilindros en 1,65 y 2,40 mm, o en dos materiales. La regla mira el CÓDIGO, no la
+    descripción: cuatro kits distintos de compresor se describen todos igual («Juego de juntas
+    para Compresor de Aire KNORR») y ésos sí hay que seguir marcándolos."""
+    variantes = [
+        ("TC-615-MG 0M", "TC-615-MG 4M", "TC-615-20 0M"),   # misma junta, 1,65 y 2,40 mm
+        ("JVL-168-24", "JVL-168-28", "JVL-168-34"),
+        ("TC-696-MG 2M", "TC-696-11 2M"),                    # mismo espesor, otro material
+        ("JI-276", "JI-276-R"),                              # el mismo juego, con retenes
+    ]
+    for grupo in variantes:
+        cierto(codigos.son_variantes_de_la_misma_pieza(grupo),
+               f"{grupo} es la misma pieza en otra medida")
+    distintos = [
+        ("JCA-121-15", "JCA-120-15", "JCA-123"),   # tres kits de compresor distintos
+        ("2712800", "2627400"),                     # guarnición de bomba y arandela de fibra
+        ("TC-963-17", "JR-602-17R"),                # la junta sola y el juego completo
+    ]
+    for grupo in distintos:
+        cierto(not codigos.son_variantes_de_la_misma_pieza(grupo),
+               f"{grupo} son piezas distintas y la alarma tiene que seguir")
+
+
 def probar_el_codigo_que_hoy_ya_no_se_tomaria():
     """La pregunta que decide si un código viejo hay que borrarlo, y si un pendiente vale.
 

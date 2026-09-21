@@ -84,7 +84,8 @@ from .errores import anotar_error
       "_MARCAS_DE_AUTO_QUE_SE_PEGAN", "_RE_MARCA_DE_AUTO_PEGADA", "_RE_MODELO_IVECO",
       "FORMAS_DE_DESIGNACION_DE_MOTOR", "parece_designacion_de_motor",
       "_es_lista_de_modelos",
-      "extraer_codigos_de_texto", "codigo_que_hoy_no_se_tomaria",
+      "extraer_codigos_de_texto", "codigo_base_sin_variante",
+      "son_variantes_de_la_misma_pieza", "codigo_que_hoy_no_se_tomaria",
       "digito_verificador_gtin", "codigo_de_barras_cierra", "columna_es_codigo_de_barras",
       "PREFIJOS_GS1", "pais_del_codigo_de_barras", "pais_de_estos_codigos", "GS1_NO_ES_UN_PAIS",
       "normalizar_texto", "_RE_ESCAPE_DE_EXCEL", "valor_o_vacio", "valor_codigo"])
