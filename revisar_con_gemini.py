@@ -111,9 +111,15 @@ def el_cambio(args):
         fuente = open(args.archivo, encoding="utf-8").read()
         for nodo in ast.walk(ast.parse(fuente)):
             if isinstance(nodo, ast.FunctionDef) and nodo.name == args.funcion:
-                lineas = fuente.splitlines()[nodo.lineno - 1:nodo.end_lineno]
+                # DESDE EL DECORADOR, no desde el `def`. El .lineno de un FunctionDef apunta al
+                # `def` y deja los decoradores afuera, y eso ya causó un hallazgo falso: se le
+                # mandó transaccion() sin su @contextlib.contextmanager y Gemini avisó, con toda
+                # razón sobre lo que estaba viendo, que «con with esto explota porque es un
+                # generador pelado». El decorador es parte de la función.
+                arranque = min([d.lineno for d in nodo.decorator_list] + [nodo.lineno])
+                lineas = fuente.splitlines()[arranque - 1:nodo.end_lineno]
                 cuerpo = "\n".join(lineas)
-                return (f"# {args.archivo}, desde la línea {nodo.lineno}\n\n{cuerpo}",
+                return (f"# {args.archivo}, desde la línea {arranque}\n\n{cuerpo}",
                         f"la función {args.funcion}()")
         sys.exit(f"No hay ninguna función que se llame {args.funcion} en {args.archivo}.")
 
@@ -138,8 +144,22 @@ def revisar_que_no_se_escape_nada(texto):
                      "así que no sale de acá. Sacalo del diff y volvé a correrlo.")
 
 
+# Los modelos gratis devuelven 503 «high demand» bastante seguido: en la primera tanda de
+# revisiones, 3 de 6 llamadas se cayeron así y la revisión quedaba sin hacer. No es un error
+# del pedido, es la cola del otro lado, y con esperar un poco sale.
+REINTENTOS = 4
+ESPERA_INICIAL = 5   # segundos, se duplica en cada intento: 5, 10, 20, 40
+
+
+def _vale_la_pena_reintentar(err):
+    """Solo lo que se arregla esperando. Una clave inválida o un modelo que no existe no."""
+    crudo = str(err)
+    return any(x in crudo for x in ("503", "UNAVAILABLE", "500", "INTERNAL", "504", "DEADLINE"))
+
+
 def preguntarle_a_gemini(texto, modelo, clave):
     import logging
+    import time
     from google import genai
     from google.genai import types
 
@@ -149,16 +169,27 @@ def preguntarle_a_gemini(texto, modelo, clave):
     logging.getLogger("google_genai.models").setLevel(logging.ERROR)
 
     cliente = genai.Client(api_key=clave)
-    respuesta = cliente.models.generate_content(
-        model=modelo,
-        contents=f"{CONTEXTO}\n\nEl cambio a revisar:\n\n```diff\n{texto}\n```",
-        config=types.GenerateContentConfig(
-            # 0.0 igual que en la app: queremos la misma respuesta para el mismo diff, para
-            # poder volver a correrlo y comparar en vez de recibir una opinión distinta cada vez.
-            temperature=0.0,
-        ),
-    )
-    return (respuesta.text or "").strip()
+    espera = ESPERA_INICIAL
+    for intento in range(1, REINTENTOS + 1):
+        try:
+            respuesta = cliente.models.generate_content(
+                model=modelo,
+                contents=f"{CONTEXTO}\n\nEl cambio a revisar:\n\n```diff\n{texto}\n```",
+                config=types.GenerateContentConfig(
+                    # 0.0 igual que en la app: queremos la misma respuesta para el mismo diff,
+                    # para poder volver a correrlo y comparar en vez de recibir una opinión
+                    # distinta cada vez.
+                    temperature=0.0,
+                ),
+            )
+            return (respuesta.text or "").strip()
+        except Exception as err:
+            if intento == REINTENTOS or not _vale_la_pena_reintentar(err):
+                raise
+            print(f"  (el modelo está ocupado; reintento {intento} de {REINTENTOS - 1} "
+                  f"en {espera} s)")
+            time.sleep(espera)
+            espera *= 2
 
 
 def explicar_la_falla(err):

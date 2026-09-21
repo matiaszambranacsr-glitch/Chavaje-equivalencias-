@@ -1645,6 +1645,52 @@ El corte es por proveedor (`GROUP BY po.id, mp.id`) y no por total: un código d
 legítimo aparece en varias listas a la vez —es justo para eso que sirve— y contando todo junto
 ese sería el primero de la lista.
 
+## Se podían reservar 7 unidades de un stock de 5
+
+`reservar_stock()` preguntaba cuánto hay libre **afuera** del candado y metía la reserva
+adentro. Entre la pregunta y la respuesta se cuela la otra sesión.
+
+Y es exactamente el caso que la tabla de reservas existe para evitar. Está escrito en el
+comentario de su propia tabla: *«Con varios atendiendo a la vez, vender dos veces la misma
+pieza es cuestión de tiempo: uno cotiza 4 pastillas, el otro ve stock 4 y las vende.»* El
+agujero estaba en la función que lo tenía que tapar.
+
+Reproducido sobre una copia de la base real — stock 5, dos sesiones a la vez:
+
+```
+pidió 4 -> (True, 'Se apartaron 4 unidad(es).')
+pidió 3 -> (True, 'Se apartaron 3 unidad(es).')
+RESERVADO EN TOTAL: 7 sobre un stock de 5
+```
+
+Ahora la lectura va adentro de `db_lock` y de `transaccion()`. `BEGIN IMMEDIATE` además pide el
+candado de escritura de SQLite desde el arranque, así que tampoco se cuela otro proceso, no
+solo otro hilo. Verificado en cuatro escenarios: 4+3, 3+3, 5+5 y 1+1 sobre stock 5. En los tres
+primeros entra una sola y la otra recibe el «solo quedan N»; en el último —que es legítimo—
+entran las dos. Nunca se pasa de 5.
+
+## Un costo de $0 se guardaba como «sin costo»
+
+`actualizar_precio_stock()` hacía `costo or None`, y en Python el cero es falso. Pedir que el
+costo quede en 0 —mercadería bonificada, una muestra— guardaba NULL.
+
+```
+se pidió guardar costo=5000.0 -> quedó 5000.0
+se pidió guardar costo=0.0    -> quedó None
+```
+
+Que el cero es un valor que esta app usa de verdad se ve en la misma base: hay **21 productos
+con precio 0**. Quién decide si el costo se toca es `costo is not None`, que es la pregunta
+correcta; el `or` de adentro solo pisaba un valor legítimo.
+
+En la misma función había un segundo problema: si el producto **ya no existe** —lo borró la
+otra sesión mientras la pantalla estaba abierta— los dos UPDATE no encontraban fila y se iban
+en silencio, pero el INSERT del historial sí se intentaba, porque `precio_anterior` quedaba en
+None y None siempre es distinto del precio nuevo. Con las claves foráneas prendidas, que lo
+están, eso revienta con `IntegrityError` adentro de la transacción y la pantalla se cae con un
+error crudo. Ahora la función devuelve `False` y la pantalla dice qué pasó, en vez de mentir un
+«Guardado».
+
 ## Una segunda opinión, de otro modelo
 
 Las tres compuertas de arriba cazan lo que ya nos rompió la app alguna vez: cada control del

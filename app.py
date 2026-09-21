@@ -5414,22 +5414,34 @@ def reservar_stock(producto_id, cantidad, cliente="", nota=""):
     """Aparta unidades para un presupuesto. Devuelve (ok, mensaje).
 
     No deja reservar más de lo que hay libre: eso convertiría la reserva en otra forma de
-    prometer lo que no tenés, que es justo lo que se quiere evitar."""
+    prometer lo que no tenés, que es justo lo que se quiere evitar.
+
+    EL CONTROL Y LA RESERVA VAN JUNTOS, y ese es todo el punto. Antes se preguntaba cuánto hay
+    libre AFUERA del candado y solo el INSERT iba adentro, así que entre la pregunta y la
+    respuesta se podía colar la otra sesión. Es exactamente el caso que la tabla de reservas
+    existe para evitar —el de su propio comentario: «uno cotiza 4 pastillas, el otro ve stock 4
+    y las vende»— y estaba abierto en la función que lo tenía que cerrar.
+
+    Reproducido sobre una copia de la base real: stock 5, dos sesiones a la vez pidiendo 4 y 3.
+    Las dos contestaban «se apartaron», y quedaban 7 unidades reservadas sobre 5.
+
+    Con la lectura adentro de `db_lock` y de `transaccion()`, la segunda espera a la primera y
+    recibe el «solo quedan N». BEGIN IMMEDIATE además pide el candado de escritura de SQLite
+    desde el arranque, así que tampoco se cuela otro proceso, no solo otro hilo."""
     cantidad = int(cantidad or 0)
     if cantidad <= 0:
         return False, "La cantidad tiene que ser mayor que cero."
-    libre = stock_libre(producto_id)
-    if libre is None:
-        return False, "No encontré ese producto."
-    if cantidad > libre:
-        return False, (f"Solo quedan {libre} sin reservar. Si igual querés apartarlas, "
-                       "primero liberá alguna reserva.")
-    with db_lock:
+    with db_lock, transaccion():
+        libre = stock_libre(producto_id)
+        if libre is None:
+            return False, "No encontré ese producto."
+        if cantidad > libre:
+            return False, (f"Solo quedan {libre} sin reservar. Si igual querés apartarlas, "
+                           "primero liberá alguna reserva.")
         c.execute("""INSERT INTO reservas_stock (producto_id, cantidad, cliente, nota, reservado_por)
                      VALUES (?, ?, ?, ?, ?)""",
                   (producto_id, cantidad, (cliente or "").strip() or None,
                    (nota or "").strip() or None, obtener_usuario_actual()))
-        conn.commit()
     return True, f"Se apartaron {cantidad} unidad(es)."
 
 
@@ -14949,24 +14961,45 @@ def aplicar_carga_remito(items_cotejados):
 
 
 def actualizar_precio_stock(producto_id, precio, stock, costo=None):
-    """Guarda precio, stock y —si se pasa— el precio de costo.
+    """Guarda precio, stock y —si se pasa— el precio de costo. Devuelve False si el producto ya no está.
 
     El costo va como parámetro opcional para que las llamadas viejas sigan funcionando: hay
-    varias en la app y cambiarlas todas de golpe es pedir un error tonto."""
+    varias en la app y cambiarlas todas de golpe es pedir un error tonto.
+
+    Dos cosas que parecen detalles y no lo son:
+
+    COSTO CERO ES UN COSTO. Antes decía `costo or None`, y en Python el cero es falso: pedir
+    que el costo quede en 0 —mercadería bonificada, una muestra, un costo que se quiere poner
+    en cero a propósito— guardaba NULL. Comprobado sobre una copia de la base real: pidiendo
+    guardar 5000 queda 5000, pidiendo guardar 0 quedaba None. Y que el cero es un valor que
+    esta app usa de verdad se ve en la misma base: hay 21 productos con precio 0. Quién decide
+    si el costo se toca es `costo is not None`, que es la pregunta correcta; el `or` de adentro
+    solo pisaba un valor legítimo.
+
+    SI EL PRODUCTO NO ESTÁ, NO SE ESCRIBE NADA. Los dos UPDATE no encuentran fila y se van en
+    silencio, pero el INSERT del historial sí se intentaba, porque `precio_anterior` quedaba en
+    None y None siempre es distinto del precio nuevo. Con las claves foráneas prendidas —que lo
+    están— eso revienta con IntegrityError adentro de la transacción y la pantalla se cae con
+    un error crudo. Pasa si alguien borra el producto desde la otra sesión entre que se dibujó
+    la pantalla y se apretó Guardar, que es exactamente para lo que la app tiene una conexión
+    por sesión. Reproducido con un id inexistente."""
     # Todo o nada: el precio nuevo y su renglón en el historial van juntos. Si se guarda uno
     # sin el otro, el historial deja de servir justo para lo que está: saber cuándo subió.
     with db_lock, transaccion():
         c.execute("SELECT precio FROM productos WHERE id = ?", (producto_id,))
         fila = c.fetchone()
-        precio_anterior = fila["precio"] if fila else None
+        if not fila:
+            return False
+        precio_anterior = fila["precio"]
         if costo is not None:
             c.execute("UPDATE productos SET precio_costo = ? WHERE id = ?",
-                      (costo or None, producto_id))
+                      (costo, producto_id))
         c.execute("UPDATE productos SET precio = ?, stock = ? WHERE id = ?", (precio, stock, producto_id))
         # Solo se guarda un registro nuevo en el historial si el precio realmente cambió
         # (evita ensuciar el historial cada vez que se toca el stock sin tocar el precio).
         if precio_anterior != precio:
             c.execute("INSERT INTO historial_precios (producto_id, precio) VALUES (?, ?)", (producto_id, precio))
+    return True
 
 
 def historial_precio_producto(producto_id, limite=50):
@@ -21025,10 +21058,17 @@ Casi todo lo que edita o borra algo pide la contraseña de administrador la prim
                                     label_visibility="collapsed"
                                 )
                                 if candado('tocar precios y stock', colG.button("💾", key=f"save_{fila['ID']}_{clean}"), 'tocar_precios_y_stock', nivel="empleado"):
-                                    actualizar_precio_stock(
-                                        fila["ID"], nuevo_precio, nuevo_stock,
-                                        st.session_state.get(f"costo_{fila['ID']}_{clean}"))
-                                    st.success("Guardado.")
+                                    if actualizar_precio_stock(
+                                            fila["ID"], nuevo_precio, nuevo_stock,
+                                            st.session_state.get(f"costo_{fila['ID']}_{clean}")):
+                                        st.success("Guardado.")
+                                    else:
+                                        # Decirlo y no mentir un «Guardado»: el producto lo
+                                        # borró la otra sesión mientras esta pantalla estaba
+                                        # abierta.
+                                        st.error("Ese producto ya no está en el catálogo: "
+                                                 "alguien lo borró mientras tenías esta "
+                                                 "pantalla abierta. Refrescá y fijate.")
                                 if es_admin():
                                     c.execute("SELECT precio_costo FROM productos WHERE id = ?",
                                               (fila["ID"],))
