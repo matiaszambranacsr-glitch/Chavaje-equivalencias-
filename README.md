@@ -19,10 +19,13 @@ qué proveedores, son el mismo repuesto. Corre con Streamlit sobre una base SQLi
 python3 auditar.py app.py        # tiene que dar ERROR 0
 python3 nucleo/generar.py        # regenerar el paquete desde app.py
 python3 -m nucleo.pruebas        # tiene que decir "todo en verde"
+python3 revisar_con_gemini.py    # opcional: una segunda opinión sobre el diff
 ```
 
 El auditor no es un linter genérico: cada control salió de un error que rompió la app de
 verdad, y el mensaje cuenta cuál fue. Si marca algo, conviene leerlo antes de descartarlo.
+
+El último es de otra clase y no bloquea nada: ver *Una segunda opinión, de otro modelo*.
 
 ## Cómo encontrar las cosas en `app.py`
 
@@ -1641,6 +1644,54 @@ lo cita en piezas que no lo llevan. Son 15 culpables y 67 pendientes, en 0,0 s.
 El corte es por proveedor (`GROUP BY po.id, mp.id`) y no por total: un código de fábrica
 legítimo aparece en varias listas a la vez —es justo para eso que sirve— y contando todo junto
 ese sería el primero de la lista.
+
+## Una segunda opinión, de otro modelo
+
+Las tres compuertas de arriba cazan lo que ya nos rompió la app alguna vez: cada control del
+auditor y cada prueba salió de un error real. Lo que por definición no pueden cazar es lo que
+todavía no se nos ocurrió mirar.
+
+Ahí gana un modelo distinto, y no porque sea mejor: porque **se equivoca en otros lugares**. En
+este repositorio está probado. Dos de los peores agujeros los encontró Gemini leyendo el
+código, no las compuertas:
+
+- el `pickle.loads()` de las firmas visuales, que dejaba ejecutar código cualquiera con un blob
+  armado a mano;
+- el `<` de las descripciones, que se comía medio renglón en 1.435 productos porque el
+  navegador lo tomaba como una etiqueta HTML abierta.
+
+Hasta ahora ese circuito era a mano: copiar el código, pegarlo en Gemini, leer las capturas.
+`revisar_con_gemini.py` lo hace solo sobre el diff.
+
+```bash
+export GEMINI_API_KEY="..."                              # nunca en el repositorio
+python3 revisar_con_gemini.py                            # lo que no commiteaste todavía
+python3 revisar_con_gemini.py --desde main               # todo lo que la rama le agrega a main
+python3 revisar_con_gemini.py --funcion evaluar_equivalencia
+```
+
+Tres decisiones que vale la pena explicar:
+
+**Le pasa el contexto del proyecto.** Sin eso marca como problemas cosas que son decisiones
+tomadas y medidas —el autocommit, los comentarios largos, el paquete `nucleo/` generado— y la
+revisión se vuelve ruido que se aprende a ignorar. También le dice qué controla ya el auditor,
+para que no lo repita.
+
+**Nunca devuelve error.** No es una compuerta que bloquea. Cada hallazgo hay que comprobarlo
+contra la base real antes de tocar código, igual que con las capturas; un modelo que marca de
+más no puede frenar un push. Y «sin hallazgos» no quiere decir que esté bien: quiere decir que
+ese modelo, leyendo ese diff, no vio nada.
+
+**Corta antes de mandar si en el diff hay algo con forma de clave o de token.** Esto sale a un
+servicio externo. Está probado con una clave falsa en el diff: corta y no envía.
+
+### Lo que esto NO resuelve
+
+El cuello de botella de este proyecto no es pensar, es **medir**. Lo de las variantes de junta
+—350 grupos de 557— fueron cinco minutos de idea y cuarenta de comprobarlo contra los 70.888
+productos y revisar 22 grupos a mano. Dos modelos tirando el doble de ideas **duplican el
+trabajo de verificación, no lo dividen**. Por eso la segunda opinión sirve como revisor
+independiente y no como segundo obrero.
 
 ## La misma junta en otro espesor no es un error de carga
 
