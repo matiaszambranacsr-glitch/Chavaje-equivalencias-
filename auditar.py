@@ -1677,6 +1677,62 @@ if _reg is not None:
                          "dibuja en ningún lado: el índice promete algo que no está")
 
 
+# ============ 30b) Un decorador que nombra algo definido más abajo ============
+# El decorador se EVALÚA al importar el archivo, de arriba hacia abajo. Si nombra una constante
+# que está definida cien líneas después, la app no arranca: NameError apenas se abre, con la
+# pantalla en blanco. Pasó de verdad con @functools.lru_cache(maxsize=MAXIMO_...) puesto arriba
+# de una función que estaba antes que la constante, y el auditor no lo veía: el chequeo que
+# controla el orden mira las LLAMADAS al arrancar, no los decoradores.
+_DEF_EN_LINEA = {}
+for _n in ARBOL.body:
+    if isinstance(_n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+        _DEF_EN_LINEA.setdefault(_n.name, _n.lineno)
+    elif isinstance(_n, ast.Assign):
+        for _t in _n.targets:
+            if isinstance(_t, ast.Name):
+                _DEF_EN_LINEA.setdefault(_t.id, _n.lineno)
+for _n in ARBOL.body:
+    if not isinstance(_n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+        continue
+    for _d in _n.decorator_list:
+        for _x in ast.walk(_d):
+            if not isinstance(_x, ast.Name):
+                continue
+            _donde = _DEF_EN_LINEA.get(_x.id)
+            if _donde and _donde > _d.lineno:
+                reportar("ERROR", _d.lineno,
+                         f"el decorador de '{_n.name}' nombra '{_x.id}', que se define recién "
+                         f"en la línea {_donde}. Los decoradores se evalúan al importar: la app "
+                         "no arranca, NameError con la pantalla en blanco")
+
+
+# ============ 31) Los decoradores que el paquete nucleo se come ============
+# nucleo/generar.py copia el CUERPO de cada función a los módulos del paquete, y el decorador
+# queda afuera. Con @st.cache_data da igual —el paquete corre sin Streamlit— pero con
+# @functools.lru_cache no: la función queda sin cachear en nucleo y hace el doble de trabajo
+# que en app.py, sin que nadie se entere. Pasó con separar_texto_pegado().
+# El generador tiene un ajuste que se lo devuelve; esto controla que ese ajuste siga estando.
+_CON_LRU = [n.name for n in ast.walk(ARBOL)
+            if isinstance(n, ast.FunctionDef)
+            and any("lru_cache" in ast.unparse(d) for d in n.decorator_list)]
+if _CON_LRU:
+    try:
+        _GEN = open("nucleo/generar.py", encoding="utf-8").read()
+    except OSError:
+        _GEN = ""
+    if _GEN:
+        for _fn in _CON_LRU:
+            # ¿el generador lo lleva al paquete?
+            if f'"{_fn}"' not in _GEN:
+                continue
+            if "lru_cache" not in _GEN:
+                reportar("ERROR", 0,
+                         f"'{_fn}' usa @functools.lru_cache y nucleo/generar.py lo copia al "
+                         "paquete sin el decorador: en nucleo va a quedar sin caché y "
+                         "haciendo el doble de trabajo que en app.py")
+                break
+
+
 # ============ Resultado ============
 orden = {"ERROR": 0, "REVISAR": 1, "AVISO": 2}
 problemas.sort(key=lambda x: (orden[x[0]], x[1]))

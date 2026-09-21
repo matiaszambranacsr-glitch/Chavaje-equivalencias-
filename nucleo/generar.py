@@ -105,13 +105,19 @@ from datetime import datetime
 from .errores import anotar_error
 from .codigos import _RE_REF_PEGADO, normalizar_texto, sanitizar
 ''', ["MARCAS_VEHICULO", "ALIAS_MARCA_VEHICULO", "_escrituras_por_marca",
-      "ESCRITURAS_DE_MARCA", "_RE_MARCAS_VEHICULO", "marcas_vehiculo_en",
+      "ESCRITURAS_DE_MARCA", "_RE_MARCAS_VEHICULO",
+      # El tope del caché va PRIMERO: los dos decoradores que el ajuste de más abajo
+      # vuelve a poner lo nombran, y en el paquete el orden del archivo es el orden de
+      # esta lista. Si queda después, el módulo no importa: NameError al arrancar.
+      "MAXIMO_DESCRIPCIONES_RECORDADAS",
+      "_marcas_vehiculo_en_cacheado", "marcas_vehiculo_en", "_marcas_vehiculo_en",
       "MARCAS_DE_REPUESTO", "_MARCAS_RIESGOSAS", "_SIGLAS_PEGAJOSAS", "MARCAS_PARA_DESPEGAR",
       "_RE_PEGADO_MAYUS",
       "_RE_MARCAS_PEGADAS", "_RE_ESPACIOS", "_MARCAS_CORTAS_PEGADAS",
       "_RE_MARCA_CORTA_TRAS_NUMERO", "_RE_MODELO_CON_CILINDRADA",
       "_RE_COMA_DECIMAL", "_RE_SOLO_MOTORIZACION",
-      "separar_texto_pegado",
+      "_separar_texto_pegado_cacheado",
+      "separar_texto_pegado", "_separar_texto_pegado",
       "FAMILIAS_REPUESTO", "_normalizar_desc", "clasificar_repuesto",
       "_RE_ES_KIT", "_RE_KIT_POR_SUMA", "familia_para_comparar", "es_un_kit",
       "ABREVIATURAS_DE_PIEZA", "RELLENO_EN_NOMBRE_DE_PIEZA", "_nombre_de_la_pieza",
@@ -271,6 +277,19 @@ fin = next(i for i, l in enumerate(v) if l.startswith("    r'RULEMAN|RODAMIENTO"
 bloque = "\n".join(v[ini:fin + 1])
 del v[ini:fin + 2]
 open(D + "vehiculos.py", "w", encoding="utf-8").write("\n".join(v))
+
+# El caché de separar_texto_pegado() se pierde al partir el archivo: el generador copia el
+# cuerpo de cada función y el decorador queda afuera, así que en el paquete la función quedaba
+# sin cachear y nadie se enteraba. Acá se le pone el import y el decorador de vuelta, para que
+# nucleo y app.py hagan exactamente lo mismo. El auditor lo controla (chequeo 31).
+v2 = open(D + "vehiculos.py", encoding="utf-8").read()
+v2 = v2.replace("import re\nimport unicodedata\n",
+                "import functools\nimport re\nimport unicodedata\n", 1)
+for _cacheada in ("_separar_texto_pegado_cacheado", "_marcas_vehiculo_en_cacheado"):
+    v2 = v2.replace(f"\ndef {_cacheada}(",
+                    "\n@functools.lru_cache(maxsize=MAXIMO_DESCRIPCIONES_RECORDADAS)\n"
+                    f"def {_cacheada}(", 1)
+open(D + "vehiculos.py", "w", encoding="utf-8").write(v2)
 
 s = open(D + "codigos.py", encoding="utf-8").read()
 s = s.replace("import re\nfrom collections import Counter\n",

@@ -96,6 +96,7 @@ import hashlib
 import os
 import pickle
 import contextlib
+import functools
 import time
 import requests          # se usa en varias funciones; importarlo una vez evita repetirlo
 from datetime import datetime, timedelta
@@ -4922,7 +4923,10 @@ def descubrimiento_post_importacion(presupuesto_segundos=PRESUPUESTO_DESCUBRIMIE
                 _pend_med = productos_con_medidas_deducibles(limite=2000)
                 if not _pend_med:
                     break
-                _completados += aplicar_medidas_deducidas(_pend_med)
+                _aplic = aplicar_medidas_deducidas(_pend_med)
+                _completados += _aplic
+                if not _aplic:
+                    break      # ver el mismo caso en _trabajo_de_fondo()
             if _completados:
                 hecho.append(f"{_completados:,} producto(s) con las medidas leídas de su "
                              "descripción")
@@ -10411,11 +10415,23 @@ def _trabajo_de_fondo():
         try:
             guardar_config("medidas_pendientes", "0")
             _n_med = 0
-            while True:
+            # Con tope de vueltas, no `while True`. Esto corre en un hilo de fondo: si alguna
+            # vez el lector devuelve una medida que la escritura no deja guardada —una columna
+            # que no existe, un valor que vuelve NULL—, la consulta devuelve las MISMAS filas
+            # para siempre y el hilo queda girando sin que nadie lo vea. 2.000 por vuelta y
+            # 100 vueltas son 200.000 productos, casi el triple del catálogo real.
+            for _ in range(100):
                 _tanda_med = productos_con_medidas_deducibles(limite=2000)
                 if not _tanda_med:
                     break
-                _n_med += aplicar_medidas_deducidas(_tanda_med)
+                _aplicadas = aplicar_medidas_deducidas(_tanda_med)
+                _n_med += _aplicadas
+                if not _aplicadas:
+                    # Hay filas para completar y no se completó ninguna: seguir es girar.
+                    anotar_error("_trabajo_de_fondo/medidas",
+                                 RuntimeError(f"{len(_tanda_med)} productos con medidas para "
+                                              "leer y ninguno se pudo guardar"))
+                    break
             guardar_config("medidas_completadas", str(_n_med))
             guardar_config("medidas_fecha", datetime.now().strftime("%Y-%m-%d %H:%M"))
             # Las medidas nuevas cambian el puntaje, así que se pide el repuntaje detrás.
@@ -11076,7 +11092,37 @@ _RE_MARCAS_VEHICULO = re.compile(
     + r')(?![A-Za-zÁÉÍÓÚÑ0-9])', re.IGNORECASE)
 
 
+# El resultado de separar_texto_pegado() se guarda por descripción. No es microoptimización:
+# la función hace SEIS pasadas de expresión regular sobre cada texto, y la llaman ocho lugares
+# —entre ellos marcas_vehiculo_en(), que a su vez la llama una vez por descripción del catálogo
+# entero—. Medido sobre las 70.888 descripciones reales: separar todas cuesta 2,70 s y hay
+# 27.201 repetidas (el 38%), porque el producto OEM se crea copiando la descripción de la fila
+# del proveedor. Esas 27.201 se estaban separando de nuevo cada vez.
+# El tope de 50.000 entradas cubre las 43.687 descripciones distintas de esta base con lugar de
+# sobra, y si alguna vez se pasa, lru_cache tira las más viejas: no crece sin control.
+MAXIMO_DESCRIPCIONES_RECORDADAS = 50000
+
+
+@functools.lru_cache(maxsize=MAXIMO_DESCRIPCIONES_RECORDADAS)
+def _marcas_vehiculo_en_cacheado(descripcion):
+    return tuple(_marcas_vehiculo_en(descripcion))
+
+
 def marcas_vehiculo_en(descripcion):
+    """TODOS los autos que nombra una descripción. Ver _marcas_vehiculo_en().
+
+    Igual que separar_texto_pegado(), se recuerda por descripción: esta función se llama una
+    vez por fila del catálogo desde tres lugares distintos —el contador de marcas, el lector de
+    aplicaciones y el de modelos— y el 38% de las descripciones están repetidas.
+    Se guarda una TUPLA y se devuelve una lista nueva cada vez: si se devolviera la misma
+    lista, dos pantallas tendrían el mismo objeto y la que lo modificara le cambiaría el
+    resultado a la otra. Copiar tres tuplas no cuesta nada al lado de la expresión regular."""
+    if not descripcion or not isinstance(descripcion, str):
+        return _marcas_vehiculo_en(descripcion)
+    return list(_marcas_vehiculo_en_cacheado(descripcion))
+
+
+def _marcas_vehiculo_en(descripcion):
     """TODOS los autos que nombra una descripción: [(marca, categoría, resto), ...].
 
     Una descripción de proveedor rara vez habla de un solo auto: «BUJIA NAFTA Ford Escort -
@@ -14031,7 +14077,24 @@ _RE_MODELO_CON_CILINDRADA = re.compile(r'(?<=[A-Za-zÁÉÍÓÚÑáéíóúñ]{4}
 _RE_REF_PEGADO = re.compile(r'([A-Za-z0-9])REF(?=\s*\.?\s*(?:ORIG|ORG|ORI|OEM)\b)', re.I)
 
 
+@functools.lru_cache(maxsize=MAXIMO_DESCRIPCIONES_RECORDADAS)
+def _separar_texto_pegado_cacheado(texto):
+    return _separar_texto_pegado(texto)
+
+
 def separar_texto_pegado(texto):
+    """Separa las columnas que la exportación pegó. Ver _separar_texto_pegado().
+
+    Esta capa existe solo para el caché: lru_cache necesita un argumento hashable y acá llegan
+    cosas que no lo son —None, y los valores que devuelve openpyxl al leer una celda—."""
+    if not texto:
+        return texto
+    if isinstance(texto, str):
+        return _separar_texto_pegado_cacheado(texto)
+    return _separar_texto_pegado(texto)
+
+
+def _separar_texto_pegado(texto):
     """Algunas listas de proveedor exportan varias columnas pegadas sin espacio en el medio:
     'Junta Tapa de CilindrosFORDTAUNUS COUPE' o 'PASTILLAS FRENOVOLKSWAGENGOL'.
     Esto las vuelve legibles separando en dos puntos:

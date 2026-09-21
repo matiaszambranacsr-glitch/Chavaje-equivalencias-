@@ -6,6 +6,7 @@ Se usa para dos cosas distintas y conviene no confundirlas:
     puede aplicar siempre;
   - DEDUCIR datos (medidas, aplicaciones), que es suponer, y por eso cada función de acá es
     conservadora a propósito: ante la duda no devuelve nada."""
+import functools
 import re
 import unicodedata
 from datetime import datetime
@@ -102,7 +103,37 @@ _RE_MARCAS_VEHICULO = re.compile(
     + r')(?![A-Za-zÁÉÍÓÚÑ0-9])', re.IGNORECASE)
 
 
+# El resultado de separar_texto_pegado() se guarda por descripción. No es microoptimización:
+# la función hace SEIS pasadas de expresión regular sobre cada texto, y la llaman ocho lugares
+# —entre ellos marcas_vehiculo_en(), que a su vez la llama una vez por descripción del catálogo
+# entero—. Medido sobre las 70.888 descripciones reales: separar todas cuesta 2,70 s y hay
+# 27.201 repetidas (el 38%), porque el producto OEM se crea copiando la descripción de la fila
+# del proveedor. Esas 27.201 se estaban separando de nuevo cada vez.
+# El tope de 50.000 entradas cubre las 43.687 descripciones distintas de esta base con lugar de
+# sobra, y si alguna vez se pasa, lru_cache tira las más viejas: no crece sin control.
+MAXIMO_DESCRIPCIONES_RECORDADAS = 50000
+
+
+@functools.lru_cache(maxsize=MAXIMO_DESCRIPCIONES_RECORDADAS)
+def _marcas_vehiculo_en_cacheado(descripcion):
+    return tuple(_marcas_vehiculo_en(descripcion))
+
+
 def marcas_vehiculo_en(descripcion):
+    """TODOS los autos que nombra una descripción. Ver _marcas_vehiculo_en().
+
+    Igual que separar_texto_pegado(), se recuerda por descripción: esta función se llama una
+    vez por fila del catálogo desde tres lugares distintos —el contador de marcas, el lector de
+    aplicaciones y el de modelos— y el 38% de las descripciones están repetidas.
+    Se guarda una TUPLA y se devuelve una lista nueva cada vez: si se devolviera la misma
+    lista, dos pantallas tendrían el mismo objeto y la que lo modificara le cambiaría el
+    resultado a la otra. Copiar tres tuplas no cuesta nada al lado de la expresión regular."""
+    if not descripcion or not isinstance(descripcion, str):
+        return _marcas_vehiculo_en(descripcion)
+    return list(_marcas_vehiculo_en_cacheado(descripcion))
+
+
+def _marcas_vehiculo_en(descripcion):
     """TODOS los autos que nombra una descripción: [(marca, categoría, resto), ...].
 
     Una descripción de proveedor rara vez habla de un solo auto: «BUJIA NAFTA Ford Escort -
@@ -258,7 +289,24 @@ _RE_SOLO_MOTORIZACION = re.compile(
     r'(?:/(?:\d{1,2}[.,]\d[A-Z]{0,3}|\d{1,2}V))*/?$')
 
 
+@functools.lru_cache(maxsize=MAXIMO_DESCRIPCIONES_RECORDADAS)
+def _separar_texto_pegado_cacheado(texto):
+    return _separar_texto_pegado(texto)
+
+
 def separar_texto_pegado(texto):
+    """Separa las columnas que la exportación pegó. Ver _separar_texto_pegado().
+
+    Esta capa existe solo para el caché: lru_cache necesita un argumento hashable y acá llegan
+    cosas que no lo son —None, y los valores que devuelve openpyxl al leer una celda—."""
+    if not texto:
+        return texto
+    if isinstance(texto, str):
+        return _separar_texto_pegado_cacheado(texto)
+    return _separar_texto_pegado(texto)
+
+
+def _separar_texto_pegado(texto):
     """Algunas listas de proveedor exportan varias columnas pegadas sin espacio en el medio:
     'Junta Tapa de CilindrosFORDTAUNUS COUPE' o 'PASTILLAS FRENOVOLKSWAGENGOL'.
     Esto las vuelve legibles separando en dos puntos:

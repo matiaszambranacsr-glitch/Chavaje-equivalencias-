@@ -1642,6 +1642,64 @@ El corte es por proveedor (`GROUP BY po.id, mp.id`) y no por total: un código d
 legítimo aparece en varias listas a la vez —es justo para eso que sirve— y contando todo junto
 ese sería el primero de la lista.
 
+## Lo mismo, dos veces: el texto que se separaba una y otra vez
+
+Salió de cronometrar las ocho pantallas contra la base real. Casi todas responden en 1,3-1,8 s,
+pero dos funciones se llevaban todo:
+
+| | antes |
+|---|---|
+| `marcas_vehiculo_disponibles()` (Modo Mecánico → Repuestos por vehículo) | **6,44 s** |
+| `_contar_descripciones_pegadas()` (Mantenimiento → Limpiar y corregir) | **2,77 s** |
+| `aplicaciones_desde_descripciones()` (la tarea de fondo) | **36,8 s** |
+
+Las tres pasan por el mismo lugar: `separar_texto_pegado()`, que hace **seis pasadas de
+expresión regular** sobre cada descripción, y `marcas_vehiculo_en()`, que la llama y encima
+corre la expresión de las 174 marcas de vehículo.
+
+Y sobre las 70.888 descripciones reales hay **27.201 repetidas (el 38%)**, porque el producto
+OEM se crea copiando la descripción de la fila del proveedor. Esas 27.201 se estaban volviendo
+a separar, y a parsear, cada vez.
+
+Las dos funciones ahora recuerdan su resultado por descripción (`lru_cache`, 50.000 entradas —
+las distintas de esta base son 43.687). Son funciones puras: dependen del texto y de constantes
+que se arman una sola vez al abrir el archivo.
+
+| | antes | después |
+|---|---|---|
+| `marcas_vehiculo_disponibles()` | 6,44 s | **2,97 s** |
+| `_contar_descripciones_pegadas()` | 2,77 s | **1,41 s** |
+| `aplicaciones_desde_descripciones()` | 36,8 s | **19,1 s** |
+
+Comprobado que no cambia nada: sobre las 70.888 descripciones, **0 resultados distintos** en las
+dos funciones, y lo mismo con los tipos raros que llegan de una planilla (`None`, `''`, un
+número, bytes).
+
+Un cuidado que hacía falta: `marcas_vehiculo_en()` devuelve una **lista**, y devolver siempre el
+mismo objeto significa que dos pantallas comparten la lista y la que la modifique le cambia el
+resultado a la otra. Se guarda una tupla y se devuelve una lista nueva cada vez — copiar tres
+tuplas no cuesta nada al lado de la expresión regular.
+
+### Tres errores que aparecieron haciendo esto
+
+**1. La app no arrancaba.** El decorador `@functools.lru_cache(maxsize=MAXIMO_...)` quedó arriba
+de una función que estaba ANTES de donde se define esa constante. Los decoradores se evalúan al
+importar el archivo, de arriba hacia abajo: `NameError` apenas se abre la app, pantalla en
+blanco. Lo agarró el barrido de pantallas, no el auditor — el chequeo que controla el orden
+miraba las *llamadas* al arrancar, no los decoradores. Ahora está el **chequeo 30b**, verificado
+reproduciendo el archivo roto.
+
+**2. El paquete `nucleo` se comía el decorador.** `nucleo/generar.py` copia el CUERPO de cada
+función, así que el `@lru_cache` quedaba afuera y en el paquete la función corría sin caché —
+haciendo el doble de trabajo que en `app.py`, sin que nadie se enterara. El generador ahora se
+lo devuelve, y el **chequeo 31** controla que ese ajuste siga estando.
+
+**3. Un `while True` en un hilo de fondo.** El llenado de medidas giraba hasta que la consulta
+no devolviera filas. Si alguna vez el lector devuelve una medida que la escritura no deja
+guardada —una columna que no existe, un valor que vuelve NULL—, la consulta devuelve las mismas
+filas para siempre y el hilo queda girando sin que nadie lo vea. Ahora tiene tope de vueltas y
+corta con un error anotado si una tanda no completa nada.
+
 ## A qué auto le va cada pieza: 114.673 filas que ya estaban en el texto
 
 La tabla de aplicaciones —lo que hace andar la búsqueda por vehículo— tenía **0 filas**, y las
