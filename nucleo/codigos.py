@@ -868,11 +868,19 @@ def codigo_base_sin_variante(codigo):
     llaman «TC-687-20 1M», «... 2M», «... 3M». Son la misma pieza en otra medida, no piezas
     distintas.
 
-    Nunca baja de DOS tramos, y eso es lo que evita que se pase de rosca: «JCA-123» se
+    Recorta TODOS los tramos cortos del final, no uno solo, mientras queden más de dos. Así
+    «TC-687-20 2M» no queda en «TC-687-20» sino en «TC-687», porque en este catálogo el
+    anteúltimo tramo también es de variante: «-20», «-MG» y «-11» son los materiales de la
+    misma junta. Está medido: de los 350 grupos que se sueltan, 42 dependen del segundo
+    recorte, y los 42 son la misma junta en otro material con el mismo espesor
+    («TC-615-20 0M» con «TC-615-MG 0M», «TC-695-MG 2M» con «TC-695-11 2M»). Con un solo
+    recorte se sueltan 287 en vez de 350.
+
+    Nunca baja de DOS tramos, y ese piso es lo que evita que se pase de rosca: «JCA-123» se
     recortaría a «JCA», que es solo la sigla de la línea («Juego de juntas para Compresor de
     Aire») y la comparten kits de compresores distintos, que sí son piezas distintas. Con el
-    piso en dos tramos, «JCA-123» y «JCA-121-15» quedan en bases distintas, que es lo correcto,
-    y «JI-276» con «JI-276-R» —el mismo juego, con retenes— quedan en la misma."""
+    piso, «JCA-123» y «JCA-121-15» quedan en bases distintas, que es lo correcto, y «JI-276»
+    con «JI-276-R» —el mismo juego, con retenes— quedan en la misma."""
     u = re.sub(r"[\s\.]+", "-", (codigo or "").upper().strip())
     partes = [x for x in u.split("-") if x]
     while len(partes) > 2 and len(partes[-1]) <= 4:

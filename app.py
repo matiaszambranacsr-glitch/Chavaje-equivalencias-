@@ -4006,11 +4006,19 @@ def codigo_base_sin_variante(codigo):
     llaman «TC-687-20 1M», «... 2M», «... 3M». Son la misma pieza en otra medida, no piezas
     distintas.
 
-    Nunca baja de DOS tramos, y eso es lo que evita que se pase de rosca: «JCA-123» se
+    Recorta TODOS los tramos cortos del final, no uno solo, mientras queden más de dos. Así
+    «TC-687-20 2M» no queda en «TC-687-20» sino en «TC-687», porque en este catálogo el
+    anteúltimo tramo también es de variante: «-20», «-MG» y «-11» son los materiales de la
+    misma junta. Está medido: de los 350 grupos que se sueltan, 42 dependen del segundo
+    recorte, y los 42 son la misma junta en otro material con el mismo espesor
+    («TC-615-20 0M» con «TC-615-MG 0M», «TC-695-MG 2M» con «TC-695-11 2M»). Con un solo
+    recorte se sueltan 287 en vez de 350.
+
+    Nunca baja de DOS tramos, y ese piso es lo que evita que se pase de rosca: «JCA-123» se
     recortaría a «JCA», que es solo la sigla de la línea («Juego de juntas para Compresor de
     Aire») y la comparten kits de compresores distintos, que sí son piezas distintas. Con el
-    piso en dos tramos, «JCA-123» y «JCA-121-15» quedan en bases distintas, que es lo correcto,
-    y «JI-276» con «JI-276-R» —el mismo juego, con retenes— quedan en la misma."""
+    piso, «JCA-123» y «JCA-121-15» quedan en bases distintas, que es lo correcto, y «JI-276»
+    con «JI-276-R» —el mismo juego, con retenes— quedan en la misma."""
     u = re.sub(r"[\s\.]+", "-", (codigo or "").upper().strip())
     partes = [x for x in u.split("-") if x]
     while len(partes) > 2 and len(partes[-1]) <= 4:
@@ -10783,6 +10791,18 @@ def peso_estimado_por_foto(liviano=True):
     return 22 if liviano else 120
 
 
+def _ruta_temporal_de_backup(nombre):
+    """Un nombre distinto en cada llamada, y esto no es paranoia: la app está hecha para que la
+    usen dos personas a la vez (por eso hay una conexión por sesión).
+
+    Con un nombre fijo, si los dos tocan «Preparar backup» al mismo tiempo, el segundo le borra
+    el archivo al primero mientras SQLite lo está escribiendo. Lo que se baja en ese caso no da
+    error: da un archivo cortado, que es la peor forma de que falle un backup."""
+    import tempfile
+    import uuid
+    return os.path.join(tempfile.gettempdir(), f"{uuid.uuid4().hex}_{nombre}")
+
+
 def generar_backup_completo():
     """El backup entero, fotos incluidas, bajado con la API backup() de SQLite y NO leyendo el
     archivo .db a mano, que es como estaba antes.
@@ -10804,15 +10824,15 @@ def generar_backup_completo():
 
     El backup liviano de acá abajo ya usaba backup() desde el principio; por eso el problema
     no se veía: el que se sube al repositorio todos los días salía bien."""
-    import tempfile
-    ruta_temporal = os.path.join(tempfile.gettempdir(), "backup_completo.db")
-    if os.path.exists(ruta_temporal):
-        os.remove(ruta_temporal)
+    ruta_temporal = _ruta_temporal_de_backup("backup_completo.db")
     destino = sqlite3.connect(ruta_temporal)
-    with db_lock:
-        # conexion_real() y no conn: backup() no acepta el proxy por sesión.
-        conn.conexion_real().backup(destino)
-    destino.close()
+    try:
+        with db_lock:
+            conn.backup(destino)
+    finally:
+        # Cerrar SIEMPRE, aunque backup() se caiga: si no, la conexión queda abierta contra un
+        # archivo que después se borra, y en Windows el borrado falla y el temporal se acumula.
+        destino.close()
     try:
         with open(ruta_temporal, "rb") as f:
             return f.read()
@@ -10829,38 +10849,36 @@ def generar_backup_sin_fotos():
     seguridad del repositorio justo cuando más datos hay para proteger.
     Todo lo demás va completo — catálogo, precios, equivalencias, vehículos, historial. Las
     fotos se vuelven a traer con los botones de Mantenimiento."""
-    import tempfile
-    ruta_temporal = os.path.join(tempfile.gettempdir(), "backup_sin_fotos.db")
-    if os.path.exists(ruta_temporal):
-        os.remove(ruta_temporal)
+    ruta_temporal = _ruta_temporal_de_backup("backup_sin_fotos.db")
     destino = sqlite3.connect(ruta_temporal)
-    with db_lock:
-        conn.backup(destino)
-    destino.execute("UPDATE productos SET imagen_url = NULL, imagen_thumb = NULL, imagen_orb_blob = NULL, "
-                     "imagen_orb_estado = NULL")
     try:
-        destino.execute("DELETE FROM producto_fotos")
-    except sqlite3.OperationalError as _err:
-        anotar_error("generar_backup_sin_fotos", _err)
-        pass
+        with db_lock:
+            conn.backup(destino)
+        destino.execute("UPDATE productos SET imagen_url = NULL, imagen_thumb = NULL, "
+                        "imagen_orb_blob = NULL, imagen_orb_estado = NULL")
+        for _limpieza in ("DELETE FROM producto_fotos",
+                          "UPDATE esquemas SET imagen_blob = NULL",
+                          "UPDATE alias_transferencia SET qr_real_blob = NULL"):
+            try:
+                destino.execute(_limpieza)
+            except sqlite3.OperationalError as _err:
+                # La tabla puede no existir si el backup sale de una base vieja: se sigue.
+                anotar_error("generar_backup_sin_fotos", _err)
+        destino.commit()
+        destino.execute("VACUUM")   # sin esto el archivo sigue pesando lo mismo
+        destino.commit()
+    finally:
+        # Cerrar SIEMPRE: si algo de arriba se cae, la conexión queda abierta contra el
+        # temporal y el borrado de abajo falla.
+        destino.close()
     try:
-        destino.execute("UPDATE esquemas SET imagen_blob = NULL")
-    except sqlite3.OperationalError as _err:
-        anotar_error("generar_backup_sin_fotos", _err)
-        pass
-    try:
-        destino.execute("UPDATE alias_transferencia SET qr_real_blob = NULL")
-    except sqlite3.OperationalError as _err:
-        anotar_error("generar_backup_sin_fotos", _err)
-        pass
-    destino.commit()
-    destino.execute("VACUUM")   # sin esto el archivo sigue pesando lo mismo
-    destino.commit()
-    destino.close()
-    with open(ruta_temporal, "rb") as f:
-        datos = f.read()
-    os.remove(ruta_temporal)
-    return datos
+        with open(ruta_temporal, "rb") as f:
+            return f.read()
+    finally:
+        try:
+            os.remove(ruta_temporal)
+        except OSError as _err:
+            anotar_error("generar_backup_sin_fotos", _err)
 
 
 def peso_de_las_fotos():

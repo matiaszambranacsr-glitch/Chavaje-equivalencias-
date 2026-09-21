@@ -1685,6 +1685,39 @@ ese modelo, leyendo ese diff, no vio nada.
 **Corta antes de mandar si en el diff hay algo con forma de clave o de token.** Esto sale a un
 servicio externo. Está probado con una clave falsa en el diff: corta y no envía.
 
+### Estreno: lo que encontró en la primera corrida
+
+Se corrió sobre el diff del día (las variantes de junta y el backup por WAL) y devolvió dos
+hallazgos. **Los dos eran ciertos**, y ninguno lo habían agarrado el auditor, las 48 pruebas ni
+el barrido de pantallas.
+
+**1. Un comentario que mentía.** El docstring de `codigo_base_sin_variante()` decía que de
+«TC-687-20 2M» devuelve «TC-687-20». Devuelve «TC-687»: el `while` recorta todos los tramos
+cortos del final, no uno. El código está bien —está medido que de los 350 grupos que se
+sueltan, 42 dependen de ese segundo recorte y los 42 son la misma junta en otro material—, pero
+el comentario decía otra cosa, y en este repositorio un comentario que miente es un error: es
+justamente lo que el prompt le pide buscar, y cayó uno propio en la primera corrida.
+
+**2. El archivo temporal del backup tenía nombre fijo.** `backup_completo.db` en la carpeta de
+temporales, igual para todos. La app está hecha para que la usen dos personas a la vez, así que
+si los dos tocan «Preparar backup», el segundo le borra el archivo al primero mientras SQLite
+lo está escribiendo. Gemini lo puso en «confianza media»; medido, es peor: con el nombre fijo y
+cuatro pedidos simultáneos **fallan los cuatro, todas las veces** — `disk I/O error`,
+`no such table: productos` y `FileNotFoundError`. Con un nombre único por llamada, los cuatro
+devuelven la base entera con `integrity_check` en ok.
+
+El mismo error estaba en `generar_backup_sin_fotos()` desde antes; Gemini no lo vio porque no
+estaba en el diff. Los dos quedaron arreglados, con `destino.close()` en un `finally` —si
+`backup()` se cae, la conexión quedaba abierta contra el temporal y el borrado fallaba— y con
+el **chequeo 33** del auditor, que marca cualquier temporal con nombre fijo que vuelva a
+aparecer.
+
+De paso salió un tercero, mío: el comentario de `generar_backup_completo()` decía que
+«`backup()` no acepta el proxy por sesión». Eso vale cuando el proxy es el DESTINO
+(`restaurar_backup()`), no cuando es el origen — `_ConexionPorSesion` tiene su propio
+`.backup()` y es el que usa el backup liviano desde siempre. Había copiado el motivo del lado
+equivocado.
+
 ### Lo que esto NO resuelve
 
 El cuello de botella de este proyecto no es pensar, es **medir**. Lo de las variantes de junta

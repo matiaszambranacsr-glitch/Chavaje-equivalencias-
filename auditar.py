@@ -1800,7 +1800,23 @@ for _i, _l in enumerate(LINEAS, 1):
         reportar("ERROR", _i,
                  "lee el archivo de la base directamente estando en modo WAL: lo escrito "
                  "desde el último checkpoint está en el .db-wal y no entra en esa copia. "
-                 "Usar conn.conexion_real().backup(destino), como generar_backup_completo()")
+                 "Usar conn.backup(destino) sobre un archivo temporal, como generar_backup_completo()")
+
+
+# ============ 33) Un archivo temporal con nombre fijo ============
+# La app está hecha para que la usen dos personas a la vez (una conexión por sesión). Un
+# temporal con nombre fijo es de una sola persona: si los dos tocan el mismo botón, el segundo
+# le borra el archivo al primero mientras SQLite lo escribe.
+# Medido con el nombre fijo que tenía generar_backup_completo(), cuatro pedidos a la vez:
+# fallaron los cuatro, todas las veces — «disk I/O error», «no such table: productos» y
+# FileNotFoundError. Con un nombre único por llamada, los cuatro devuelven la base entera.
+for _i, _l in enumerate(LINEAS, 1):
+    _limpia = _l.split("#")[0]
+    if "gettempdir()" in _limpia and re.search(r"gettempdir\(\)\s*,\s*[\"']", _limpia):
+        reportar("ERROR", _i,
+                 "arma un archivo temporal con un nombre fijo, y dos sesiones a la vez se lo "
+                 "pisan entre ellas. Usar _ruta_temporal_de_backup(), que le pone un nombre "
+                 "distinto a cada llamada")
 
 
 # ============ Resultado ============
