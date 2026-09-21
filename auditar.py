@@ -1677,6 +1677,59 @@ if _reg is not None:
                          "dibuja en ningún lado: el índice promete algo que no está")
 
 
+# ============ 30a) Una consulta que nombra una columna que no existe ============
+# El error real: «SELECT v.marca, v.modelo FROM historial_piezas hp JOIN vehiculos v ...»
+# cuando las columnas se llaman marca_auto y modelo_auto. La consulta estaba adentro de un
+# try/except OperationalError que la tapaba, así que NUNCA anduvo y nadie se enteró: la fuente
+# de autos «lo que este taller le puso a cada auto» no aportaba nada desde siempre. Se vio
+# contando los errores que la app se traga — 254 en una sola corrida de la tarea de fondo.
+# Se construye el mapa de columnas desde los CREATE TABLE y los ALTER TABLE del propio archivo,
+# y después se miran las referencias «alias.columna» de cada consulta.
+# Es a propósito CONSERVADOR: solo se juzga un alias cuya tabla se conoce entera, y se saltean
+# las consultas con subconsultas o CTE, donde un alias puede ser una tabla armada al vuelo.
+_COLS_DE_TABLA = {}
+for _m in re.finditer(r'CREATE TABLE IF NOT EXISTS (\w+)\s*\((.*?)\n\s*\)"""', SRC, re.S):
+    _tabla, _cuerpo = _m.group(1), _m.group(2)
+    _cols = set()
+    for _linea in _cuerpo.split(","):
+        _linea = _linea.strip()
+        _mm = re.match(r'(\w+)\s+(INTEGER|TEXT|REAL|BLOB|NUMERIC)', _linea, re.I)
+        if _mm:
+            _cols.add(_mm.group(1).lower())
+    if _cols:
+        _COLS_DE_TABLA.setdefault(_tabla.lower(), set()).update(_cols)
+for _m in re.finditer(r'ALTER TABLE (\w+) ADD COLUMN (\w+)', SRC):
+    _COLS_DE_TABLA.setdefault(_m.group(1).lower(), set()).add(_m.group(2).lower())
+
+_SQL_LITERALES = [n.value for n in ast.walk(ARBOL)
+                  if isinstance(n, ast.Constant) and isinstance(n.value, str)
+                  and re.search(r'\bSELECT\b', n.value, re.I)]
+for _sql in _SQL_LITERALES:
+    if re.search(r'\bWITH\b|\(\s*SELECT\b', _sql, re.I):
+        continue          # CTE o subconsulta: el alias puede no ser una tabla
+    _alias = {}
+    for _m in re.finditer(r'\b(?:FROM|JOIN)\s+(\w+)\s+(?:AS\s+)?(\w+)\b', _sql, re.I):
+        _t, _a = _m.group(1).lower(), _m.group(2).lower()
+        if _a in ("on", "where", "group", "order", "limit", "join", "left", "inner", "set",
+                  "using", "and", "or"):
+            continue
+        if _t in _COLS_DE_TABLA:
+            _alias[_a] = _t
+    if not _alias:
+        continue
+    for _m in re.finditer(r'\b(\w+)\.(\w+)\b', _sql):
+        _a, _col = _m.group(1).lower(), _m.group(2).lower()
+        if _a not in _alias:
+            continue
+        if _col in _COLS_DE_TABLA[_alias[_a]] or _col == "rowid":
+            continue
+        reportar("ERROR", 0,
+                 f"una consulta pide «{_m.group(1)}.{_m.group(2)}» y la tabla "
+                 f"«{_alias[_a]}» no tiene esa columna. Si está adentro de un try/except la "
+                 "consulta falla en silencio y esa parte no anda nunca")
+        break
+
+
 # ============ 30b) Un decorador que nombra algo definido más abajo ============
 # El decorador se EVALÚA al importar el archivo, de arriba hacia abajo. Si nombra una constante
 # que está definida cien líneas después, la app no arranca: NameError apenas se abre, con la

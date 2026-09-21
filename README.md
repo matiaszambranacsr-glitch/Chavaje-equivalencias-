@@ -1642,6 +1642,44 @@ El corte es por proveedor (`GROUP BY po.id, mp.id`) y no por total: un código d
 legítimo aparece en varias listas a la vez —es justo para eso que sirve— y contando todo junto
 ese sería el primero de la lista.
 
+## 254 errores que la app se tragaba en silencio, todos el mismo
+
+Se me ocurrió contar los errores que la app decide ignorar —`anotar_error()` los guarda y
+después nadie los mira— durante una corrida completa de la tarea de fondo. Salieron **254, y
+los 254 eran el mismo**:
+
+    autos_de_todas_las_fuentes → OperationalError: no such column: v.marca
+
+`autos_de_todas_las_fuentes()` junta a qué autos le va un producto desde tres lugares, y su
+docstring los enumera: el catálogo del fabricante, **las fichas de vehículo del propio taller**,
+y la descripción. La consulta de la fuente 2 pedía `v.marca` y `v.modelo`, y esas columnas se
+llaman `marca_auto` y `modelo_auto`.
+
+O sea que **esa fuente no anduvo nunca**. Y no se notaba porque la consulta está adentro de un
+`try / except OperationalError` que la tapa: la app seguía andando con dos fuentes de tres, y la
+tercera —la única que sale de tu propio taller, la que sabe que a ese Ranger le pusiste esta
+pieza— devolvía vacío siempre.
+
+Probado antes y después con un auto cargado y una pieza puesta:
+
+| | autos que aporta la ficha del taller |
+|---|---|
+| antes | `[]` — y un error tragado |
+| después | `['FORD', 'RANGER']` — 0 errores |
+
+Durante el ciclo completo de la tarea de fondo: **254 errores → 0**.
+
+### El chequeo que faltaba
+
+Una consulta que nombra una columna inexistente, adentro de un `try/except`, es un error que
+puede vivir para siempre. El **chequeo 30a** del auditor arma el mapa de columnas leyendo los
+`CREATE TABLE` y los `ALTER TABLE ADD COLUMN` del propio archivo, y después controla cada
+referencia `alias.columna` de cada consulta contra la tabla de ese alias.
+
+Es a propósito conservador: solo juzga un alias cuya tabla conoce entera, y saltea las
+consultas con CTE o subconsultas, donde un alias puede ser una tabla armada al vuelo. Verificado
+con dos casos rotos a propósito — el error real de hoy, y una columna inventada en `productos`.
+
 ## Lo mismo, dos veces: el texto que se separaba una y otra vez
 
 Salió de cronometrar las ocho pantallas contra la base real. Casi todas responden en 1,3-1,8 s,

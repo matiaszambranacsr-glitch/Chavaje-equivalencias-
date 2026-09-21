@@ -12329,11 +12329,16 @@ def autos_de_todas_las_fuentes(producto_id, codigo_clean, autos_de_la_descripcio
 
     if producto_id:
         try:
-            c.execute("""SELECT DISTINCT v.marca, v.modelo FROM historial_piezas hp
+            # marca_auto / modelo_auto, que es como se llaman de verdad las columnas. Decía
+            # v.marca y v.modelo, y esa consulta NUNCA anduvo: fallaba con «no such column»,
+            # el except la tapaba y la fuente 2 —lo que este taller le puso a cada auto—
+            # no aportaba nada desde siempre. Se vio contando los errores que la app se
+            # traga: 254 en una sola corrida de la tarea de fondo, todos este.
+            c.execute("""SELECT DISTINCT v.marca_auto, v.modelo_auto FROM historial_piezas hp
                          JOIN vehiculos v ON v.id = hp.vehiculo_id
                          WHERE hp.producto_id = ? LIMIT 100""", (producto_id,))
             for fila in c.fetchall():
-                for campo in (fila["marca"], fila["modelo"]):
+                for campo in (fila["marca_auto"], fila["modelo_auto"]):
                     autos.update(w for w in normalizar_texto(campo or "").split() if len(w) >= 3)
         except sqlite3.OperationalError as _err:
             anotar_error("autos_de_todas_las_fuentes", _err)
