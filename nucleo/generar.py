@@ -119,7 +119,11 @@ from .codigos import _RE_REF_PEGADO, normalizar_texto, sanitizar
       "_RE_COMA_DECIMAL", "_RE_SOLO_MOTORIZACION",
       "_separar_texto_pegado_cacheado",
       "separar_texto_pegado", "_separar_texto_pegado",
-      "FAMILIAS_REPUESTO", "_normalizar_desc", "clasificar_repuesto",
+      "FAMILIAS_REPUESTO", "_normalizar_desc",
+      # El orden importa: _RE_FAMILIAS se arma llamando a la función de arriba y lo usa
+      # clasificar_repuesto, así que los tres van antes que ella. El generador copia cuerpos,
+      # no el archivo: dejar afuera la expresión rompe el paquete con un NameError al importar.
+      "_armar_buscador_de_familias", "_BUSCADOR_DE_FAMILIAS", "clasificar_repuesto",
       "_RE_ES_KIT", "_RE_KIT_POR_SUMA", "familia_para_comparar", "es_un_kit",
       "ABREVIATURAS_DE_PIEZA", "RELLENO_EN_NOMBRE_DE_PIEZA", "_nombre_de_la_pieza",
       "_parecido_nombre_pieza", "extraer_anios",

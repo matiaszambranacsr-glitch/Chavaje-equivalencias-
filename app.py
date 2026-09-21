@@ -366,7 +366,7 @@ VERSION_MEDIDAS = "2"
 # Como las otras dos, corría solo después de importar una lista, así que en una base donde no
 # se importó nada desde que la función existe nunca corrió.
 # Subir el número al cambiar cómo se leen los modelos.
-VERSION_APLICACIONES = "2"
+VERSION_APLICACIONES = "3"
 
 
 def secretos_app():
@@ -9165,11 +9165,19 @@ def diagnostico_de_salud():
         if c.fetchone()[0] == 0:
             c.execute("SELECT COUNT(*) FROM productos")
             if c.fetchone()[0] > 500:
-                sumar("medio", "Sin catálogos de aplicaciones cargados",
-                      "Son los que dicen qué repuesto le va a cada auto. Varios fabricantes los "
-                      "publican gratis (NGK, Bosch, Mann, SKF). Sin ellos, la búsqueda por "
-                      "vehículo tiene que adivinar desde las descripciones del proveedor.",
-                      "Estadísticas → Mantenimiento → Catálogo de aplicaciones")
+                # ALTO y no medio, y el texto cambió: la app puede deducir 114.673
+                # aplicaciones de las descripciones que YA tiene, sin importar nada. Decir
+                # «varios fabricantes los publican gratis» mandaba a buscar planillas afuera
+                # cuando el dato estaba adentro, y con la tabla vacía la búsqueda por vehículo
+                # —una pantalla entera— no tiene con qué trabajar.
+                sumar("alto", "La búsqueda por vehículo no tiene datos",
+                      "La tabla que dice qué repuesto le va a cada auto está VACÍA, así que "
+                      "«🚙 Repuestos por vehículo» y el cruce por auto no tienen con qué "
+                      "trabajar. No hace falta conseguir nada afuera: la app las deduce de las "
+                      "descripciones que ya tenés. Se deja pedido solo al abrir la app y lo "
+                      "hace la tarea de fondo; si sigue en cero, corrélo a mano.",
+                      "Administrar → Mantenimiento → 🔎 Encontrar equivalencias → "
+                      "🏭 Catálogo de aplicaciones (qué repuesto le va a cada auto)")
     except sqlite3.OperationalError as _err:
         anotar_error("diagnostico_de_salud", _err)
         pass
@@ -10532,9 +10540,8 @@ def _trabajo_de_fondo():
     # Las medidas van ANTES que el repuntaje, y el orden no es casual: el puntaje usa las
     # medidas como prueba física, así que repuntuar primero sería repuntuar sin ellas y habría
     # que hacerlo dos veces. Ver VERSION_MEDIDAS.
-    if obtener_config("medidas_pendientes", "") == "1":
+    if _hay_que_hacerlo("medidas_pendientes"):
         try:
-            guardar_config("medidas_pendientes", "0")
             _n_med = 0
             # Con tope de vueltas, no `while True`. Esto corre en un hilo de fondo: si alguna
             # vez el lector devuelve una medida que la escritura no deja guardada —una columna
@@ -10557,16 +10564,17 @@ def _trabajo_de_fondo():
             guardar_config("medidas_fecha", datetime.now().strftime("%Y-%m-%d %H:%M"))
             # Las medidas nuevas cambian el puntaje, así que se pide el repuntaje detrás.
             guardar_config("confianza_pendiente", "1")
+            guardar_config("confianza_pendiente_intentos", "0")
+            _quedo_hecho("medidas_pendientes")
         except Exception as _err:
+            # La bandera sigue prendida: se reintenta en el próximo arranque, hasta el tope.
             anotar_error("_trabajo_de_fondo/medidas", _err)
-            guardar_config("medidas_pendientes", "1")
 
     # Las aplicaciones: a qué auto le va cada pieza. Es lo más caro de las tres (55 s sobre
     # 70.888 descripciones: 32 s leerlas y 23 s escribirlas) y va después de las medidas porque
     # no se necesitan entre sí. Ver VERSION_APLICACIONES.
-    if obtener_config("aplicaciones_pendientes", "") == "1":
+    if _hay_que_hacerlo("aplicaciones_pendientes"):
         try:
-            guardar_config("aplicaciones_pendientes", "0")
             _apl_ded = aplicaciones_desde_descripciones()
             _n_apl = aplicar_aplicaciones_deducidas(_apl_ded) if _apl_ded else 0
             guardar_config("aplicaciones_deducidas", str(_n_apl))
@@ -10590,22 +10598,23 @@ def _trabajo_de_fondo():
                         guardar_config("aplicaciones_cruces", str(_n_auto))
                 except Exception as _err:
                     anotar_error("_trabajo_de_fondo/cruce_por_auto", _err)
+            _quedo_hecho("aplicaciones_pendientes")
         except Exception as _err:
+            # La bandera sigue prendida: se reintenta en el próximo arranque, hasta el tope.
             anotar_error("_trabajo_de_fondo/aplicaciones", _err)
-            guardar_config("aplicaciones_pendientes", "1")
 
     # Después el repuntaje: es barato (12,8 s sobre 24.774 vínculos) y lo que más se nota,
     # porque el puntaje viejo lo está mostrando el buscador en cada búsqueda.
     # Ver VERSION_CONFIANZA.
-    if obtener_config("confianza_pendiente", "") == "1":
+    if _hay_que_hacerlo("confianza_pendiente"):
         try:
-            guardar_config("confianza_pendiente", "0")
             _n_conf = recalcular_confianzas(limite=100000, solo_faltantes=False)
             guardar_config("confianza_repuntuada", str(_n_conf))
             guardar_config("confianza_fecha", datetime.now().strftime("%Y-%m-%d %H:%M"))
+            _quedo_hecho("confianza_pendiente")
         except Exception as _err:
+            # La bandera sigue prendida: se reintenta en el próximo arranque, hasta el tope.
             anotar_error("_trabajo_de_fondo/confianza", _err)
-            guardar_config("confianza_pendiente", "1")
 
     if obtener_config("descubrimiento_pendiente", "") == "1":
         try:
@@ -10669,6 +10678,54 @@ def _trabajo_de_fondo():
         if not hizo_algo:
             break       # no queda cupo, o no queda nada pendiente: no tiene sentido girar
     guardar_config("tanda_fondo_ultima", datetime.now().strftime("%Y-%m-%d %H:%M"))
+
+
+INTENTOS_MAXIMOS_DE_FONDO = 5
+
+
+def _hay_que_hacerlo(clave):
+    """¿Corresponde hacer este trabajo de fondo? Cuenta el intento antes de empezar.
+
+    Reemplaza a un `guardar_config(clave, "0")` puesto ANTES del trabajo, que era un agujero
+    serio y silencioso. Si el proceso se muere en el medio —y en Streamlit Cloud se muere
+    seguido: se redespliega, se reinicia, recicla el contenedor— la bandera ya estaba en «0» y
+    NADIE la volvía a prender. Un proceso que muere no lanza una excepción, así que el `except`
+    que la reponía nunca corría.
+
+    Y no es hipotético, está en la base real: `aplicaciones_pendientes` dice «0» y
+    `version_aplicaciones` dice «2», o sea «este trabajo ya se hizo». La tabla `aplicaciones`
+    tiene 0 filas, y las claves `aplicaciones_deducidas` y `aplicaciones_fecha` —que se
+    escriben recién al terminar— NO EXISTEN. Las 114.673 aplicaciones nunca se cargaron, ni una
+    vez, y la búsqueda por vehículo viene trabajando sobre una tabla vacía sin que nada avise.
+
+    Apagar la bandera antes tampoco protegía de nada: que no corran dos a la vez ya lo asegura
+    `_CANDADO_FONDO`, que se toma en arrancar_tanda_de_fondo().
+
+    El contador de intentos es el otro lado del cambio. Ahora la bandera queda prendida hasta
+    que el trabajo termina bien, así que un trabajo que SIEMPRE falla se reintentaría en cada
+    arranque para siempre, quemando 55 segundos por vez. A los cinco intentos se rinde y anota
+    el error, que es lo que el usuario necesita ver."""
+    if obtener_config(clave, "") != "1":
+        return False
+    try:
+        intentos = int(obtener_config(f"{clave}_intentos", "0") or 0)
+    except ValueError:
+        intentos = 0
+    if intentos >= INTENTOS_MAXIMOS_DE_FONDO:
+        guardar_config(clave, "0")
+        anotar_error(f"_trabajo_de_fondo/{clave}",
+                     RuntimeError(f"se intentó {intentos} veces y nunca terminó; se deja de "
+                                  "reintentar. Se puede volver a pedir a mano desde "
+                                  "Administrar → Mantenimiento"))
+        return False
+    guardar_config(f"{clave}_intentos", str(intentos + 1))
+    return True
+
+
+def _quedo_hecho(clave):
+    """El trabajo terminó bien: recién ACÁ se apaga la bandera y se olvidan los intentos."""
+    guardar_config(clave, "0")
+    guardar_config(f"{clave}_intentos", "0")
 
 
 def arrancar_tanda_de_fondo():
@@ -11811,6 +11868,40 @@ def _normalizar_desc(texto):
     return " " + " ".join(limpio.split()) + " "
 
 
+def _armar_buscador_de_familias():
+    """Una sola expresión regular con todas las claves, en vez de 522 búsquedas por descripción.
+
+    El bucle de antes hacía `texto.find(f" {clave} ")` por cada clave y por cada plural: son
+    261 claves × 2 formas = **522 `str.find` y 522 f-strings por descripción**. Con cProfile
+    sobre el catálogo entero eran 24.348.168 llamadas a `str.find`, el ítem número uno del
+    perfil, y clasificar las 46.644 descripciones tardaba 6,66 s.
+
+    La alternación de Python devuelve el match MÁS A LA IZQUIERDA y, a igual posición, la
+    alternativa listada primero. Ordenando las formas de más larga a más corta, eso es
+    exactamente el criterio de desempate de antes —`(posición, -largo)`— sin escribirlo.
+
+    El empate entre familias se resuelve igual que antes, y hay que resolverlo igual a
+    propósito: si la misma clave está en dos familias, el bucle viejo se quedaba con la
+    primera que encontraba (el `<` es estricto), así que acá la primera tampoco se pisa.
+
+    Medido: 6,66 s → 0,462 s, **14,4×**, y comparando familia por familia sobre las 46.644
+    descripciones reales, 0 diferencias."""
+    de_forma_a_familia = {}
+    for familia, claves in FAMILIAS_REPUESTO.items():
+        for clave in claves:
+            for forma in (clave, clave + "S"):
+                de_forma_a_familia.setdefault(forma, familia)
+    # De más larga a más corta: es lo que le da a la alternación el desempate por largo.
+    formas = sorted(de_forma_a_familia, key=len, reverse=True)
+    patron = re.compile(r"(?<= )(" + "|".join(re.escape(f) for f in formas) + r")(?= )")
+    return patron, de_forma_a_familia
+
+
+# Un solo nombre a propósito: nucleo/generar.py copia bloques POR NOMBRE, así que una
+# tupla desarmada en dos variables deja la segunda línea afuera y el paquete no importa.
+_BUSCADOR_DE_FAMILIAS = _armar_buscador_de_familias()
+
+
 def clasificar_repuesto(descripcion):
     """Devuelve a qué familia pertenece un repuesto, mirando su descripción.
 
@@ -11825,25 +11916,19 @@ def clasificar_repuesto(descripcion):
     'RETEN DELANTERO CIGUENAL' caía en Motor por 'CIGUENAL' en vez de en Retenes, que es lo que
     la pieza realmente es. Y el desempate por largo resuelve el otro caso: 'BOMBA DE AGUA' cae
     en Refrigeración y no en la misma bolsa que 'BOMBA DE ACEITE' o 'BOMBA DE FRENO'."""
+    # También el plural. Las claves están en singular y las listas escriben las dos formas:
+    # «FILTROS PARA COMBUSTIBLE» no caía en Filtros porque la clave es «FILTRO». Medido sobre
+    # las 61.574 descripciones reales: 405 rescatadas del «Sin clasificar», ninguna perdida, y
+    # 72 que cambiaron de familia — todas las revisadas para mejor («Filtros inyector» dejó de
+    # ser Combustible, «Juego sellos de cierre de tapa de válvulas» pasó de Lubricación a
+    # Juntas y retenes). Los plurales están adentro de la expresión, ver
+    # _armar_buscador_de_familias().
     texto = _normalizar_desc(descripcion)
     if not texto.strip():
         return "Sin clasificar"
-    mejor = None   # (posición, -largo, familia)
-    for familia, claves in FAMILIAS_REPUESTO.items():
-        for clave in claves:
-            # También el plural. Las claves están en singular y las listas escriben las dos
-            # formas: «FILTROS PARA COMBUSTIBLE» no caía en Filtros porque la clave es
-            # «FILTRO». Medido sobre las 61.574 descripciones reales: 405 rescatadas del «Sin
-            # clasificar», ninguna perdida, y 72 que cambiaron de familia — todas las revisadas
-            # para mejor («Filtros inyector» dejó de ser Combustible, «Juego sellos de cierre
-            # de tapa de válvulas» pasó de Lubricación a Juntas y retenes).
-            for forma in (clave, clave + "S"):
-                pos = texto.find(f" {forma} ")
-                if pos >= 0:
-                    candidato = (pos, -len(forma), familia)
-                    if mejor is None or candidato[:2] < mejor[:2]:
-                        mejor = candidato
-    return mejor[2] if mejor else "Sin clasificar"
+    patron, familia_de_la_forma = _BUSCADOR_DE_FAMILIAS
+    hallado = patron.search(texto)
+    return familia_de_la_forma[hallado.group(1)] if hallado else "Sin clasificar"
 
 
 _RE_ES_KIT = re.compile(r'\b(KIT|KITS|JUEGO|JUEGOS|JGO|JGOS|COMBO|SET)\b')
@@ -12009,6 +12094,17 @@ def familia_para_comparar(descripcion):
     texto = _normalizar_desc(descripcion)
     if not _RE_ES_KIT.search(texto):
         return clasificar_repuesto(descripcion)
+    # ACÁ NO SIRVE la expresión única de clasificar_repuesto(), y se probó: cambia 60
+    # resultados sobre las 70.888 descripciones reales. El motivo es que las dos preguntas son
+    # distintas. Allá se busca UNA clave, la de más a la izquierda, y la alternación la da
+    # gratis. Acá hay que saber CUÁNTAS familias distintas nombra el texto, y una expresión
+    # regular consume lo que va encontrando: en «JUNTA TAPA DE CILINDROS», si una clave es
+    # «JUNTA TAPA», se la come entera y ya no puede ver también «TAPA» de otra familia.
+    # El bucle prueba cada clave por separado, que es justo lo que hace falta.
+    # («Jgo. Junta tapa de cilindros» pasaba de «Sin clasificar» a «Juntas y retenes» — puede
+    # que sea mejor, pero eso es un cambio de criterio y no entra escondido en un arreglo de
+    # velocidad. Si algún día se quiere cambiar, se mide aparte.)
+    # El costo igual bajó: lo caro era clasificar_repuesto(), que se llama abajo.
     familias = set()
     for familia, claves in FAMILIAS_REPUESTO.items():
         for clave in claves:
@@ -24086,6 +24182,38 @@ if pagina == PAGINAS[3]:
                 ya_cargadas = []
             if ya_cargadas:
                 st.dataframe(ya_cargadas, width="stretch", hide_index=True)
+
+            # LAS QUE SALEN DE TU PROPIO CATÁLOGO, sin subir nada. Va ARRIBA del archivo a
+            # propósito: el que llega acá con la tabla vacía no necesita salir a buscar el PDF
+            # de NGK, necesita apretar un botón. Sobre las descripciones reales salen 114.673
+            # aplicaciones de 87 marcas de auto.
+            #
+            # Y sobre todo: esto es la SALIDA DE EMERGENCIA. La deducción la hace sola la tarea
+            # de fondo, pero hasta ahora no había forma de pedirla a mano, así que si el hilo
+            # se moría a la mitad —que es lo que venía pasando— la tabla quedaba en cero para
+            # siempre y el usuario no tenía ningún botón que apretar.
+            st.caption("O sin subir nada, deduciéndolas de las descripciones que ya tenés:")
+            _cd1, _cd2 = cols([2, 3])
+            if _cd1.button("🧠 Deducir de mis descripciones", key="deducir_aplic_a_mano",
+                            help="Lee las descripciones del catálogo y saca a qué auto le va "
+                                 "cada pieza. Tarda cerca de un minuto."):
+                with st.spinner("Leyendo las descripciones..."):
+                    try:
+                        _ded = aplicaciones_desde_descripciones()
+                        _n_ded = aplicar_aplicaciones_deducidas(_ded) if _ded else 0
+                        guardar_config("aplicaciones_deducidas", str(_n_ded))
+                        guardar_config("aplicaciones_fecha",
+                                       datetime.now().strftime("%Y-%m-%d %H:%M"))
+                        _quedo_hecho("aplicaciones_pendientes")
+                        invalidar_salud()
+                        avisar("success", f"Se dedujeron {_n_ded:,} aplicaciones de tus "
+                                          "descripciones.")
+                    except Exception as _err:
+                        anotar_error("deducir_aplicaciones_a_mano", _err)
+                        st.error(f"No se pudo: {type(_err).__name__}: {_err}")
+                st.rerun()
+            _cd2.caption("Son las que la app puede sacar sola de lo que ya importaste. "
+                         "No reemplazan al catálogo del fabricante: lo complementan.")
 
             arch_aplic = subir_archivo("Catálogo de aplicaciones (.pdf o .xlsx):",
                                         ["pdf", "xlsx", "csv"], "aplicaciones")

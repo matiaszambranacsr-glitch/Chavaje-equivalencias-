@@ -1645,6 +1645,90 @@ El corte es por proveedor (`GROUP BY po.id, mp.id`) y no por total: un código d
 legítimo aparece en varias listas a la vez —es justo para eso que sirve— y contando todo junto
 ese sería el primero de la lista.
 
+## Las 114.673 aplicaciones nunca se cargaron, y la app decía que sí
+
+La tabla `aplicaciones` —la que dice qué repuesto le va a cada auto— tiene **0 filas**. Y la
+configuración dice que el trabajo está hecho: `aplicaciones_pendientes = 0`,
+`version_aplicaciones = 2`.
+
+Las dos cosas no pueden ser ciertas, y la prueba de cuál miente está en la misma tabla: las
+claves `aplicaciones_deducidas` y `aplicaciones_fecha`, que se escriben **recién al terminar**,
+no existen. Tampoco existen `medidas_completadas`, `medidas_fecha`, `confianza_repuntuada` ni
+`confianza_fecha`. Ninguno de los tres trabajos de fondo dejó nunca su marca de terminado.
+
+El porqué está en una sola línea, y es del tipo que no se ve leyendo:
+
+```python
+if obtener_config("aplicaciones_pendientes", "") == "1":
+    try:
+        guardar_config("aplicaciones_pendientes", "0")   # se apaga ANTES de trabajar
+        _apl_ded = aplicaciones_desde_descripciones()    # 48 segundos
+```
+
+Si el proceso se muere en esos 48 segundos, la bandera ya está en «0» y **nadie la vuelve a
+prender**. Un proceso que muere no lanza una excepción, así que el `except` que la reponía no
+llega a correr nunca. Y morirse es lo normal: Streamlit Cloud se redespliega, se reinicia y
+recicla el contenedor. El hilo es `daemon`, o sea que se va con el proceso, a mitad de camino.
+
+Apagarla antes tampoco protegía de nada: que no corran dos a la vez ya lo asegura
+`_CANDADO_FONDO`, que se toma en `arrancar_tanda_de_fondo()`.
+
+Ahora la bandera se apaga en `_quedo_hecho()`, **después** de que el trabajo terminó. Y como
+eso solo haría que un trabajo que siempre falla se reintente para siempre, `_hay_que_hacerlo()`
+cuenta los intentos: a los cinco se rinde y anota el error, que es lo que hay que ver.
+
+Para que las que faltan se carguen en las bases que ya dicen «hecho», `VERSION_APLICACIONES`
+pasa a «3». Comprobado sobre una copia de la base real: la marca de versión vuelve a pedir el
+trabajo (`aplicaciones_pendientes` de «0» a «1»), la deducción carga **114.673 filas de 87
+marcas de auto y 4.229 combinaciones en 48 s**, y el tope de reintentos corta al sexto.
+
+### Y no había ningún botón para correrlo a mano
+
+Esa era la parte peor. La deducción existía solo adentro de la tarea de fondo: si el hilo se
+moría, no había nada que apretar. La herramienta «🏭 Catálogo de aplicaciones» solo sabía subir
+un PDF de NGK o de Bosch.
+
+Ahora arriba del archivo hay un **🧠 Deducir de mis descripciones**, porque el que llega ahí con
+la tabla vacía no necesita salir a buscar el catálogo de un fabricante: el dato está adentro de
+lo que ya importó.
+
+Y el aviso de salud cambió de tono. Decía, en amarillo, «Sin catálogos de aplicaciones
+cargados — varios fabricantes los publican gratis», que manda a buscar afuera algo que está
+adentro. Ahora dice en rojo **«La búsqueda por vehículo no tiene datos»** y señala el botón.
+
+## Una expresión regular en lugar de 522 búsquedas por descripción
+
+`clasificar_repuesto()` hacía `texto.find(f" {clave} ")` por cada clave y por cada plural: 261
+claves × 2 formas = **522 `str.find` y 522 f-strings por descripción**. Con cProfile sobre el
+catálogo entero eran 24.348.168 llamadas a `str.find`, el ítem número uno del perfil.
+
+Ahora es una sola expresión alternada, construida una vez. La alternación de Python devuelve el
+match más a la izquierda y, a igual posición, la alternativa listada primero: ordenando las
+formas de más larga a más corta, eso **es** el criterio de desempate de antes —`(posición,
+-largo)`— sin escribirlo.
+
+| sobre las 70.888 descripciones reales | antes | después | |
+|---|---|---|---|
+| `clasificar_repuesto()` | 10,26 s | **0,70 s** | 14,6× |
+| `familia_para_comparar()` | 13,16 s | **3,36 s** | 3,9× |
+
+**0 diferencias** en las dos, descripción por descripción, más los tipos raros que llegan de una
+planilla (`None`, `''`, un número, bytes).
+
+### Lo que NO se hizo, y por qué
+
+El mismo bucle está en `familia_para_comparar()` y la tentación era cambiarlo igual. Se probó y
+**cambia 60 resultados**: las dos preguntas no son la misma. `clasificar_repuesto()` busca UNA
+clave, la de más a la izquierda, y la alternación la da gratis. La otra necesita saber CUÁNTAS
+familias distintas nombra el texto, y una expresión regular consume lo que va encontrando: en
+«JUNTA TAPA DE CILINDROS», si una clave es «JUNTA TAPA», se la come entera y ya no puede ver
+también «TAPA» de otra familia.
+
+Puede que los 60 nuevos sean mejores —«Jgo. Junta tapa de cilindros» pasaba de «Sin clasificar»
+a «Juntas y retenes»— pero eso es un cambio de criterio, y un cambio de criterio no entra
+escondido adentro de un arreglo de velocidad. El bucle se quedó como estaba, y la función igual
+bajó 3,9× porque lo caro lo tenía abajo.
+
 ## Se podían reservar 7 unidades de un stock de 5
 
 `reservar_stock()` preguntaba cuánto hay libre **afuera** del candado y metía la reserva

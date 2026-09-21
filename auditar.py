@@ -1819,6 +1819,32 @@ for _i, _l in enumerate(LINEAS, 1):
                  "distinto a cada llamada")
 
 
+# ============ 34) Una tupla desarmada que el paquete nucleo no se puede llevar ============
+# nucleo/generar.py copia bloques POR NOMBRE. Una asignación de dos nombres a la vez
+# —`a, b = f()`— solo se puede pedir por uno de los dos, así que la línea entera queda afuera
+# o entra sin que el otro nombre exista, y el paquete revienta con un NameError al importar.
+# Pasó con `_RE_FAMILIAS, _FAMILIA_DE_LA_FORMA = _armar_buscador_de_familias()`.
+# Esto marca las asignaciones múltiples a nivel módulo que el generador sí lleva.
+try:
+    _GEN34 = open("nucleo/generar.py", encoding="utf-8").read()
+except OSError:
+    _GEN34 = ""
+if _GEN34:
+    for _n in ARBOL.body:
+        if not isinstance(_n, ast.Assign):
+            continue
+        _destinos = [d for d in _n.targets if isinstance(d, (ast.Tuple, ast.List))]
+        if not _destinos:
+            continue
+        _nombres = [e.id for d in _destinos for e in d.elts if isinstance(e, ast.Name)]
+        if any(f'"{x}"' in _GEN34 for x in _nombres):
+            reportar("ERROR", _n.lineno,
+                     "asignación de varios nombres a la vez que nucleo/generar.py copia: el "
+                     "generador lleva bloques por nombre y se va a llevar medio renglón. "
+                     "Guardar el resultado en UN solo nombre y desarmarlo adentro de quien "
+                     f"lo usa ({', '.join(_nombres)})")
+
+
 # ============ Resultado ============
 orden = {"ERROR": 0, "REVISAR": 1, "AVISO": 2}
 problemas.sort(key=lambda x: (orden[x[0]], x[1]))

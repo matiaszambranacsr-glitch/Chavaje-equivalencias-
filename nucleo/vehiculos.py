@@ -467,6 +467,40 @@ def _normalizar_desc(texto):
     return " " + " ".join(limpio.split()) + " "
 
 
+def _armar_buscador_de_familias():
+    """Una sola expresión regular con todas las claves, en vez de 522 búsquedas por descripción.
+
+    El bucle de antes hacía `texto.find(f" {clave} ")` por cada clave y por cada plural: son
+    261 claves × 2 formas = **522 `str.find` y 522 f-strings por descripción**. Con cProfile
+    sobre el catálogo entero eran 24.348.168 llamadas a `str.find`, el ítem número uno del
+    perfil, y clasificar las 46.644 descripciones tardaba 6,66 s.
+
+    La alternación de Python devuelve el match MÁS A LA IZQUIERDA y, a igual posición, la
+    alternativa listada primero. Ordenando las formas de más larga a más corta, eso es
+    exactamente el criterio de desempate de antes —`(posición, -largo)`— sin escribirlo.
+
+    El empate entre familias se resuelve igual que antes, y hay que resolverlo igual a
+    propósito: si la misma clave está en dos familias, el bucle viejo se quedaba con la
+    primera que encontraba (el `<` es estricto), así que acá la primera tampoco se pisa.
+
+    Medido: 6,66 s → 0,462 s, **14,4×**, y comparando familia por familia sobre las 46.644
+    descripciones reales, 0 diferencias."""
+    de_forma_a_familia = {}
+    for familia, claves in FAMILIAS_REPUESTO.items():
+        for clave in claves:
+            for forma in (clave, clave + "S"):
+                de_forma_a_familia.setdefault(forma, familia)
+    # De más larga a más corta: es lo que le da a la alternación el desempate por largo.
+    formas = sorted(de_forma_a_familia, key=len, reverse=True)
+    patron = re.compile(r"(?<= )(" + "|".join(re.escape(f) for f in formas) + r")(?= )")
+    return patron, de_forma_a_familia
+
+
+# Un solo nombre a propósito: nucleo/generar.py copia bloques POR NOMBRE, así que una
+# tupla desarmada en dos variables deja la segunda línea afuera y el paquete no importa.
+_BUSCADOR_DE_FAMILIAS = _armar_buscador_de_familias()
+
+
 def clasificar_repuesto(descripcion):
     """Devuelve a qué familia pertenece un repuesto, mirando su descripción.
 
@@ -481,25 +515,19 @@ def clasificar_repuesto(descripcion):
     'RETEN DELANTERO CIGUENAL' caía en Motor por 'CIGUENAL' en vez de en Retenes, que es lo que
     la pieza realmente es. Y el desempate por largo resuelve el otro caso: 'BOMBA DE AGUA' cae
     en Refrigeración y no en la misma bolsa que 'BOMBA DE ACEITE' o 'BOMBA DE FRENO'."""
+    # También el plural. Las claves están en singular y las listas escriben las dos formas:
+    # «FILTROS PARA COMBUSTIBLE» no caía en Filtros porque la clave es «FILTRO». Medido sobre
+    # las 61.574 descripciones reales: 405 rescatadas del «Sin clasificar», ninguna perdida, y
+    # 72 que cambiaron de familia — todas las revisadas para mejor («Filtros inyector» dejó de
+    # ser Combustible, «Juego sellos de cierre de tapa de válvulas» pasó de Lubricación a
+    # Juntas y retenes). Los plurales están adentro de la expresión, ver
+    # _armar_buscador_de_familias().
     texto = _normalizar_desc(descripcion)
     if not texto.strip():
         return "Sin clasificar"
-    mejor = None   # (posición, -largo, familia)
-    for familia, claves in FAMILIAS_REPUESTO.items():
-        for clave in claves:
-            # También el plural. Las claves están en singular y las listas escriben las dos
-            # formas: «FILTROS PARA COMBUSTIBLE» no caía en Filtros porque la clave es
-            # «FILTRO». Medido sobre las 61.574 descripciones reales: 405 rescatadas del «Sin
-            # clasificar», ninguna perdida, y 72 que cambiaron de familia — todas las revisadas
-            # para mejor («Filtros inyector» dejó de ser Combustible, «Juego sellos de cierre
-            # de tapa de válvulas» pasó de Lubricación a Juntas y retenes).
-            for forma in (clave, clave + "S"):
-                pos = texto.find(f" {forma} ")
-                if pos >= 0:
-                    candidato = (pos, -len(forma), familia)
-                    if mejor is None or candidato[:2] < mejor[:2]:
-                        mejor = candidato
-    return mejor[2] if mejor else "Sin clasificar"
+    patron, familia_de_la_forma = _BUSCADOR_DE_FAMILIAS
+    hallado = patron.search(texto)
+    return familia_de_la_forma[hallado.group(1)] if hallado else "Sin clasificar"
 
 
 _RE_ES_KIT = re.compile(r'\b(KIT|KITS|JUEGO|JUEGOS|JGO|JGOS|COMBO|SET)\b')
@@ -537,6 +565,17 @@ def familia_para_comparar(descripcion):
     texto = _normalizar_desc(descripcion)
     if not _RE_ES_KIT.search(texto):
         return clasificar_repuesto(descripcion)
+    # ACÁ NO SIRVE la expresión única de clasificar_repuesto(), y se probó: cambia 60
+    # resultados sobre las 70.888 descripciones reales. El motivo es que las dos preguntas son
+    # distintas. Allá se busca UNA clave, la de más a la izquierda, y la alternación la da
+    # gratis. Acá hay que saber CUÁNTAS familias distintas nombra el texto, y una expresión
+    # regular consume lo que va encontrando: en «JUNTA TAPA DE CILINDROS», si una clave es
+    # «JUNTA TAPA», se la come entera y ya no puede ver también «TAPA» de otra familia.
+    # El bucle prueba cada clave por separado, que es justo lo que hace falta.
+    # («Jgo. Junta tapa de cilindros» pasaba de «Sin clasificar» a «Juntas y retenes» — puede
+    # que sea mejor, pero eso es un cambio de criterio y no entra escondido en un arreglo de
+    # velocidad. Si algún día se quiere cambiar, se mide aparte.)
+    # El costo igual bajó: lo caro era clasificar_repuesto(), que se llama abajo.
     familias = set()
     for familia, claves in FAMILIAS_REPUESTO.items():
         for clave in claves:
