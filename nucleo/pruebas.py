@@ -1009,6 +1009,31 @@ def probar_la_misma_junta_en_otro_espesor_no_es_un_error_de_carga():
                f"{grupo} son piezas distintas y la alarma tiene que seguir")
 
 
+def probar_que_motor_lleva():
+    """El motor solo se lee donde el texto dice dónde está: detrás de MOTOR o de la cilindrada.
+
+    Buscar una palabra con forma de motor suelta en el texto da 2.109 productos y se cuelan
+    cosas como «Y10I», que es el Lancia Y10."""
+    claros = [
+        ("Aro piston RENAULT Megane - Kangoo - Motor K7M - Nafta (1598cc)", "K7M"),
+        ("Junta Tapa de Cilindros CHEVROLET SPIN COBALT - 1.8 - N18XFN", "N18XFN"),
+        ("Juego de Descarbonización RENAULT CLIO II TWINGO - 1,1 - D4F (DOHC)", "D4F"),
+        ("KIT DE DISTRIBUCION Citroen Saxo-Xsara-ZX 1 6 Motor TU5JP", "TU5JP"),
+    ]
+    for desc, esperado in claros:
+        igual(codigos.motor_desde_descripcion(desc), esperado, f"el motor de «{desc[:32]}…»")
+    sin_decidir = [
+        # El motor suelto en el texto, sin nada que diga que es el motor: no se toma.
+        "Despiece FIAT BANCADA CHICA UNO SMART PUNTO SS UNO 45 FIRE PANDA Y10I",
+        "Junta Tapa de Cilindros FIAT FIORINO UNO TIPO PALIO",
+        "",
+    ]
+    for desc in sin_decidir:
+        cierto(codigos.motor_desde_descripcion(desc) is None,
+               f"«{desc[:44]}» no dice qué motor sin dudar")
+    cierto(codigos.motor_desde_descripcion(None) is None, "None no rompe")
+
+
 def probar_el_modelo_que_era_un_codigo():
     """«VOLVO LRA974» no es un modelo de Volvo: es el número del proveedor.
 

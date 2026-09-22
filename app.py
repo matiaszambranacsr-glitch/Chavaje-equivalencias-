@@ -366,7 +366,7 @@ VERSION_MEDIDAS = "4"
 # Como las otras dos, corría solo después de importar una lista, así que en una base donde no
 # se importó nada desde que la función existe nunca corrió.
 # Subir el número al cambiar cómo se leen los modelos.
-VERSION_APLICACIONES = "5"
+VERSION_APLICACIONES = "6"
 
 # Quién FABRICA la pieza, leído del final de la descripción. Ver marca_de_repuesto_en().
 # Subir el número al agregar marcas a MARCAS_QUE_FABRICAN_LA_PIEZA o al cambiar cómo se leen.
@@ -4146,6 +4146,45 @@ _RE_NAFTA = re.compile(r"(?<![A-Z])(" + FORMAS_DE_NAFTA + r")(?![A-Z])", re.IGNO
 # («LRA974», «ALTT150», «STRB014»), o letras y números alternados en dos grupos («D6RA32»).
 _RE_FORMA_DE_CODIGO_DE_PROVEEDOR = re.compile(
     r"^[A-Z]{3,}\d{2,}[A-Z0-9]*$|^[A-Z]{1,3}\d{1,3}[A-Z]{1,3}\d", re.IGNORECASE)
+
+
+# Los dos lugares donde la designación del motor está dicha sin ambigüedad: detrás de la
+# palabra MOTOR, y detrás de la cilindrada entre guiones, que es como escriben estas listas
+# («Junta Tapa de Cilindros CHEVROLET SPIN COBALT - 1.8 - N18XFN»).
+_RE_MOTOR_TRAS_LA_PALABRA = re.compile(r"\bMOTOR(?:ES)?\s+([A-Z0-9][A-Z0-9.\-]{2,})",
+                                       re.IGNORECASE)
+_RE_MOTOR_TRAS_LA_CILINDRADA = re.compile(
+    r"-\s*\d[.,]?\d?(?:/\d[.,]?\d?)*\s*-\s*([A-Z0-9][A-Z0-9.\-]{2,})", re.IGNORECASE)
+
+
+def motor_desde_descripcion(descripcion):
+    """La designación del motor, si la descripción la dice sin ambigüedad. None si no.
+
+    No alcanza con buscar una palabra con forma de motor suelta en el texto, y medirlo lo dejó
+    claro: eso da 2.109 productos y se cuelan cosas como «Y10I» —que es el Lancia Y10— o
+    «JA0REF», que son dos pedazos pegados. Hace falta que el texto diga DÓNDE está el motor.
+
+    Hay dos lugares donde lo dice sin dudar:
+      · detrás de la palabra MOTOR: «Aro piston RENAULT Kangoo - Motor K7M - Nafta»;
+      · detrás de la cilindrada entre guiones, que es la forma fija de estas listas:
+        «Junta Tapa de Cilindros CHEVROLET SPIN COBALT - 1.8 - N18XFN».
+
+    Las dos juntas dan 998 productos y 187 motores distintos, encabezados por F8Q (39), K9K
+    (37), K7M (30) y TU5JP4 (30). En dos muestras de 10 y 14 al azar revisadas a mano, 24/24
+    correctas.
+
+    Si la descripción nombra DOS motores distintos no se devuelve ninguno: son listas que
+    cubren varias motorizaciones y no se puede decir cuál es."""
+    if not descripcion:
+        return None
+    texto = str(descripcion)
+    hallados = set()
+    for expresion in (_RE_MOTOR_TRAS_LA_PALABRA, _RE_MOTOR_TRAS_LA_CILINDRADA):
+        for encontrado in expresion.finditer(texto):
+            candidato = encontrado.group(1).upper()
+            if parece_designacion_de_motor(candidato):
+                hallados.add(candidato)
+    return next(iter(hallados)) if len(hallados) == 1 else None
 
 
 def parece_un_codigo_y_no_un_modelo(palabra, codigos_del_catalogo):
@@ -12963,6 +13002,7 @@ def aplicaciones_desde_descripciones(limite=None):
             desde, hasta = extraer_anios(f["descripcion"])
             _pieza_de_esta = clasificar_repuesto(f["descripcion"])
             _combustible_de_esta = combustible_desde_descripcion(f["descripcion"]) or ""
+            _motor_de_esta = motor_desde_descripcion(f["descripcion"]) or ""
             # El tipo de pieza hace falta de verdad: derivar_equivalencias_de_aplicaciones()
             # descarta las filas que no lo tienen, y con razón —sin él cruzaría una bujía con
             # un filtro por ir al mismo auto—. Se saca con el mismo clasificador que ya usa el
@@ -12978,7 +13018,7 @@ def aplicaciones_desde_descripciones(limite=None):
                               + (f"–{hasta}" if hasta else " en adelante")),
                     "Pieza": _pieza_de_esta,
                     "_clean": f["codigo_clean"], "_desde": desde, "_hasta": hasta,
-                    "_combustible": _combustible_de_esta,
+                    "_combustible": _combustible_de_esta, "_motor": _motor_de_esta,
                 })
         # Sin tope. Estaba en 400 y el catálogo real da 52.534 aplicaciones: se cargaba el 0,8%
         # de lo que las descripciones ya dicen, y esta tabla es la que hace andar la búsqueda
@@ -13003,8 +13043,9 @@ def aplicar_aplicaciones_deducidas(filas):
         c.executemany("""INSERT OR IGNORE INTO aplicaciones
                          (marca_auto, modelo_auto, motor, combustible, anio_desde, anio_hasta,
                           codigo, codigo_clean, marca_repuesto, tipo_pieza, origen)
-                         VALUES (?, ?, '', ?, ?, ?, ?, ?, ?, ?, 'deducida')""",
-                      [(f["Auto"], f["Modelo"], f.get("_combustible") or "",
+                         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'deducida')""",
+                      [(f["Auto"], f["Modelo"], f.get("_motor") or "",
+                        f.get("_combustible") or "",
                         f["_desde"], f["_hasta"],
                         f["Código"], f["_clean"], f["Marca"],
                         f.get("Pieza") or "") for f in filas])
@@ -14204,7 +14245,16 @@ def derivar_equivalencias_de_aplicaciones(limite=500, minimo_autos=2):
                  JOIN aplicaciones b
                    ON a.marca_auto = b.marca_auto
                   AND a.modelo_auto = b.modelo_auto
-                  AND a.motor = b.motor
+                  -- EL MOTOR CONTRADICE SOLO SI LOS DOS LO SABEN, igual que las medidas
+                  -- físicas. Con `a.motor = b.motor` a secas, llenar esta columna EMPEORA las
+                  -- cosas en vez de mejorarlas: el que declara su motor deja de cruzar con el
+                  -- que no lo declara, y son la enorme mayoría. Medido al agregar el lector de
+                  -- motores —4.880 filas de 112.764 quedaron con motor—: con la comparación
+                  -- estricta se pierden 84.862 pares candidatos que antes cruzaban bien, sin
+                  -- ganar nada a cambio. Un dato parcial comparado por igualdad estricta es
+                  -- peor que no tener el dato.
+                  AND (a.motor = b.motor OR COALESCE(a.motor,'') = ''
+                       OR COALESCE(b.motor,'') = '')
                   -- El combustible, por el mismo motivo que el motor: una pieza del 1.6 nafta
                   -- no entra en el 1.9 diesel aunque el auto se llame igual. Con COALESCE
                   -- porque las filas viejas lo tienen en NULL y en SQL dos NULL nunca son

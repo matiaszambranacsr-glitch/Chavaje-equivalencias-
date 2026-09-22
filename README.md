@@ -1645,6 +1645,52 @@ El corte es por proveedor (`GROUP BY po.id, mp.id`) y no por total: un código d
 legítimo aparece en varias listas a la vez —es justo para eso que sirve— y contando todo junto
 ese sería el primero de la lista.
 
+## Qué motor lleva, y por qué un dato parcial puede empeorar las cosas
+
+`aplicaciones.motor` existía y se insertaba **siempre vacía**. Llenarla parecía trivial y
+resultó ser el cambio que más cuidado necesitó de los cuatro.
+
+### Primero, cómo leerlo
+
+Buscar una palabra con forma de motor suelta en el texto da 2.109 productos, y se cuela basura:
+«Y10I» —que es el Lancia Y10— o «JA0REF», que son dos pedazos pegados. Hace falta que el texto
+diga **dónde** está el motor, y hay dos lugares donde lo dice sin dudar:
+
+- detrás de la palabra MOTOR: «Aro piston RENAULT Kangoo - Motor K7M - Nafta»;
+- detrás de la cilindrada entre guiones, que es la forma fija de estas listas:
+  «Junta Tapa de Cilindros CHEVROLET SPIN COBALT - **1.8 - N18XFN**».
+
+Las dos juntas: **998 productos, 187 motores distintos**, encabezados por F8Q (39), K9K (37),
+K7M (30). En dos muestras de 10 y 14 al azar revisadas a mano, 24/24 correctas. Llevado a las
+aplicaciones son **4.880 filas con motor**.
+
+### Y después, lo que casi sale mal
+
+El cruce por auto comparaba `a.motor = b.motor`. Con la columna siempre vacía, eso era «todos
+contra todos»; apenas se llena para algunos, **el que declara su motor deja de cruzar con el
+que no lo declara** — y los que no lo declaran son la enorme mayoría.
+
+Medido:
+
+| comparación | pares candidatos |
+|---|---|
+| `a.motor = b.motor` (la que había) | 1.419.859 |
+| contradice solo si los dos lo saben | **1.504.721** |
+
+O sea que llenar la columna, con la comparación estricta, **habría perdido 84.862 cruces que
+hoy funcionan bien, sin ganar nada a cambio**. Un dato parcial comparado por igualdad estricta
+es peor que no tener el dato.
+
+La regla correcta es la que ya usa `comparar_medidas()`: si a uno de los dos le falta, no se
+concluye nada. Con eso, el veto frena **6.896 pares donde los dos declaran motor y es distinto**
+—un Peugeot Partner para el XU5CP contra uno para el TU3JP, que no se reemplazan— y no toca
+ninguno de los otros.
+
+Las equivalencias derivadas quedan en 156, las mismas que antes: ninguno de esos 6.896
+sobrevivía igual a los demás filtros. O sea que hoy el veto no cambia el resultado, y vale
+decirlo así. Lo que cambia es que el dato está, se ve, y el día que dos piezas de motores
+distintos lleguen juntas al final, ahí las frena.
+
 ## Las medidas escritas con palabras: la pantalla de buscar por medida cubría el 26%
 
 El lector de medidas entendía «35x52x7», «22 ESTRIAS» y «M24 X 1.5». Pero las listas de poleas

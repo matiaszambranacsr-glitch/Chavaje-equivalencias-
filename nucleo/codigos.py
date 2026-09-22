@@ -860,6 +860,47 @@ def extraer_codigos_de_texto(texto, minimo=6, codigo_propio=None, codigos_conoci
     return salida
 
 
+# Los dos lugares donde la designación del motor está dicha sin ambigüedad: detrás de la
+# palabra MOTOR, y detrás de la cilindrada entre guiones, que es como escriben estas listas
+# («Junta Tapa de Cilindros CHEVROLET SPIN COBALT - 1.8 - N18XFN»).
+_RE_MOTOR_TRAS_LA_PALABRA = re.compile(r"\bMOTOR(?:ES)?\s+([A-Z0-9][A-Z0-9.\-]{2,})",
+                                       re.IGNORECASE)
+
+
+_RE_MOTOR_TRAS_LA_CILINDRADA = re.compile(
+    r"-\s*\d[.,]?\d?(?:/\d[.,]?\d?)*\s*-\s*([A-Z0-9][A-Z0-9.\-]{2,})", re.IGNORECASE)
+
+
+def motor_desde_descripcion(descripcion):
+    """La designación del motor, si la descripción la dice sin ambigüedad. None si no.
+
+    No alcanza con buscar una palabra con forma de motor suelta en el texto, y medirlo lo dejó
+    claro: eso da 2.109 productos y se cuelan cosas como «Y10I» —que es el Lancia Y10— o
+    «JA0REF», que son dos pedazos pegados. Hace falta que el texto diga DÓNDE está el motor.
+
+    Hay dos lugares donde lo dice sin dudar:
+      · detrás de la palabra MOTOR: «Aro piston RENAULT Kangoo - Motor K7M - Nafta»;
+      · detrás de la cilindrada entre guiones, que es la forma fija de estas listas:
+        «Junta Tapa de Cilindros CHEVROLET SPIN COBALT - 1.8 - N18XFN».
+
+    Las dos juntas dan 998 productos y 187 motores distintos, encabezados por F8Q (39), K9K
+    (37), K7M (30) y TU5JP4 (30). En dos muestras de 10 y 14 al azar revisadas a mano, 24/24
+    correctas.
+
+    Si la descripción nombra DOS motores distintos no se devuelve ninguno: son listas que
+    cubren varias motorizaciones y no se puede decir cuál es."""
+    if not descripcion:
+        return None
+    texto = str(descripcion)
+    hallados = set()
+    for expresion in (_RE_MOTOR_TRAS_LA_PALABRA, _RE_MOTOR_TRAS_LA_CILINDRADA):
+        for encontrado in expresion.finditer(texto):
+            candidato = encontrado.group(1).upper()
+            if parece_designacion_de_motor(candidato):
+                hallados.add(candidato)
+    return next(iter(hallados)) if len(hallados) == 1 else None
+
+
 # Forma de código de proveedor y no de modelo de auto: tres o más letras seguidas de números
 # («LRA974», «ALTT150», «STRB014»), o letras y números alternados en dos grupos («D6RA32»).
 _RE_FORMA_DE_CODIGO_DE_PROVEEDOR = re.compile(
