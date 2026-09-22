@@ -1009,6 +1009,28 @@ def probar_la_misma_junta_en_otro_espesor_no_es_un_error_de_carga():
                f"{grupo} son piezas distintas y la alarma tiene que seguir")
 
 
+def probar_con_que_anda_el_auto():
+    """Una pieza del 1.6 nafta no entra en el 1.9 diesel aunque el auto se llame igual.
+
+    Las siglas valen tanto como la palabra: nadie escribe «diesel» al lado de «HDI», y «MPI»
+    quiere decir nafta sin decirlo."""
+    for desc in ("SENSOR MAP VW GOLF/POLO Tdi THOMSON",
+                 "SENSOR TEMP KIA SORENTO 2.5 16v CRDi Masser",
+                 "Jgo.Jtas.P/Motor MITSUBISHI S6K-T DIESEL AUTOELEVADOR 6CIL"):
+        igual(codigos.combustible_desde_descripcion(desc), "diesel", f"«{desc[:34]}…»")
+    for desc in ("BOMBA MPI BMW 318-320-323-330 Masser",
+                 "KIT TTC NISSAN 1.0/1.2 LTRS. 4 CIL NAFTA 8V",
+                 "INYECTOR Volkswagen Jetta 2.0 TFSI"):
+        igual(codigos.combustible_desde_descripcion(desc), "nafta", f"«{desc[:34]}…»")
+    # Si dice las dos, no se decide: son listas que cubren las dos versiones del mismo auto.
+    for desc in ("FILTRO PEUGEOT 206 1.4 NAFTA / 1.9 DIESEL",
+                 "Junta Tapa de Cilindros FIAT FIORINO UNO TIPO",
+                 ""):
+        cierto(codigos.combustible_desde_descripcion(desc) is None,
+               f"«{desc[:40]}» no dice con qué anda")
+    cierto(codigos.combustible_desde_descripcion(None) is None, "None no rompe")
+
+
 def probar_donde_va_la_pieza():
     """El caño de arriba del radiador no es el de abajo, y el ABS izquierdo no es el derecho.
 

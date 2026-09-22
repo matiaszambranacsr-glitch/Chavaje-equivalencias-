@@ -366,7 +366,7 @@ VERSION_MEDIDAS = "3"
 # Como las otras dos, corría solo después de importar una lista, así que en una base donde no
 # se importó nada desde que la función existe nunca corrió.
 # Subir el número al cambiar cómo se leen los modelos.
-VERSION_APLICACIONES = "3"
+VERSION_APLICACIONES = "4"
 
 # Quién FABRICA la pieza, leído del final de la descripción. Ver marca_de_repuesto_en().
 # Subir el número al agregar marcas a MARCAS_QUE_FABRICAN_LA_PIEZA o al cambiar cómo se leen.
@@ -4129,6 +4129,34 @@ EJES_DE_POSICION = [("DELANTERA", "TRASERA"), ("IZQUIERDA", "DERECHA"),
                     ("SUPERIOR", "INFERIOR")]
 
 
+# CON QUÉ ANDA EL AUTO. Las siglas valen tanto como la palabra: nadie escribe «diesel» al lado
+# de «HDI», y «MPI» quiere decir nafta sin decirlo.
+FORMAS_DE_DIESEL = (r"DIESEL|D[IÍ]ESEL|TURBODIESEL|TDI|HDI|CRDI|JTD|DCI|TDCI|CDI|MULTIJET|"
+                    r"D4D|CTDI")
+FORMAS_DE_NAFTA = r"NAFTA|NAFTERO|NAFTEROS|GASOLINA|MPFI|MPI|TFSI|TSI|GDI|FLEX"
+_RE_DIESEL = re.compile(r"(?<![A-Z])(" + FORMAS_DE_DIESEL + r")(?![A-Z])", re.IGNORECASE)
+_RE_NAFTA = re.compile(r"(?<![A-Z])(" + FORMAS_DE_NAFTA + r")(?![A-Z])", re.IGNORECASE)
+
+
+def combustible_desde_descripcion(descripcion):
+    """«diesel», «nafta» o None. None también cuando la descripción dice las dos cosas.
+
+    Una pieza del 1.6 nafta no entra en el 1.9 diesel aunque el auto se llame igual, así que
+    esto sirve de las dos maneras: como dato a la vista y para no cruzar por auto dos piezas
+    que no se pueden reemplazar.
+
+    Medido sobre las 46.644 descripciones de proveedor: 4.292 dicen diesel, 2.215 dicen nafta,
+    y 129 dicen las dos —listas que cubren las dos versiones del mismo auto— y quedan sin
+    decidir. En una muestra de 14 al azar revisada a mano, 14 correctas."""
+    if not descripcion:
+        return None
+    texto = str(descripcion)
+    es_diesel, es_nafta = bool(_RE_DIESEL.search(texto)), bool(_RE_NAFTA.search(texto))
+    if es_diesel == es_nafta:
+        return None      # ninguna, o las dos: no se puede decidir
+    return "diesel" if es_diesel else "nafta"
+
+
 def posicion_desde_descripcion(descripcion):
     """Dónde va la pieza, si la descripción lo dice sin ambigüedad. None si no.
 
@@ -6961,6 +6989,7 @@ def analizar_lote_pendiente(lote, limite=None, desde=0):
     # Hace falta para saber quién es «el hermano»: el que cita el mismo número pero llegó
     # segundo, y al que por eso no le tocó la señal de la descripción igual.
     candidatos_a_origen = {}
+    juegos_y_piezas = {}      # clave -> {True si algún miembro es un juego, False si alguno no}
     for f in filas:
         if "OEM" not in (f["tipo_a"], f["tipo_b"]):
             continue
@@ -6970,9 +6999,23 @@ def analizar_lote_pendiente(lote, limite=None, desde=0):
             else (f["cod_b"], f["a"], f["marca_a"], f["cod_a"], f.get("desc_b"), f.get("desc_a")))
         clave = (sanitizar(oem), marca_otro)
         apuntados.setdefault(clave, {})[otro] = cod_otro
+        juegos_y_piezas.setdefault(clave, set()).add(bool(es_un_kit(desc_otro)))
         if normalizar_texto(desc_oem or "") == normalizar_texto(desc_otro or "") and desc_oem:
             candidatos_a_origen.setdefault(clave, set()).add(cod_otro)
     origen_del_codigo = {k: next(iter(v)) for k, v in candidatos_a_origen.items() if len(v) == 1}
+
+    # EL JUEGO Y LA PIEZA QUE TRAE ADENTRO, cuando comparten el número de fábrica.
+    # _uno_trae_al_otro() ya resuelve el caso en que el kit NOMBRA el código de la pieza
+    # —«KIT CAB Y BUJ (LEIHTT06SC/LSPKR6E)»—, pero en esta lista eso no pasa nunca: el juego y
+    # la junta no se citan entre sí, se encuentran porque los dos llevan el MISMO número
+    # original. «Junta Tapa de Cilindros IVECO STRALIS (460S36T)» y «Juego Completo de
+    # Reparación IVECO STRALIS (460S36T)» son la junta y el juego que la trae, y el número es
+    # de la junta.
+    # Cuando en el mismo número conviven un juego y una pieza suelta, el del JUEGO no es una
+    # equivalencia: no se puede vender uno en lugar del otro. Va al balde de «relacionadas»,
+    # que la pantalla muestra en una línea, en vez de hacerlo decidir de a uno.
+    # Medido sobre la cola real: 55 grupos, 79 pares del lado del juego.
+    grupos_con_juego_y_pieza = {k for k, v in juegos_y_piezas.items() if v == {True, False}}
 
     def _variante_del_origen(clave, cod_propio):
         """¿Este producto es la misma pieza que la que originó el número, en otra medida?"""
@@ -7074,6 +7117,15 @@ def analizar_lote_pendiente(lote, limite=None, desde=0):
         _kit_de = _uno_trae_al_otro(f.get("desc_a"), f.get("cod_a"),
                                      f.get("desc_b"), f.get("cod_b"),
                                      f.get("tipo_a"), f.get("tipo_b"))
+        if not _kit_de and "OEM" in (f["tipo_a"], f["tipo_b"]):
+            # El juego que comparte número de fábrica con una pieza suelta del mismo proveedor.
+            _oem_jp, _marca_jp, _desc_jp = (
+                (f["cod_a"], f["marca_b"], f.get("desc_b")) if f["tipo_a"] == "OEM"
+                else (f["cod_b"], f["marca_a"], f.get("desc_a")))
+            if ((sanitizar(_oem_jp), _marca_jp) in grupos_con_juego_y_pieza
+                    and es_un_kit(_desc_jp)):
+                _kit_de = (f"es un juego que trae adentro la pieza con el número {_oem_jp}, "
+                           "no un reemplazo de ella")
         if _kit_de:
             f["relacion"] = _kit_de
             relacionadas.append(f)
@@ -12851,6 +12903,7 @@ def aplicaciones_desde_descripciones(limite=None):
                 continue
             desde, hasta = extraer_anios(f["descripcion"])
             _pieza_de_esta = clasificar_repuesto(f["descripcion"])
+            _combustible_de_esta = combustible_desde_descripcion(f["descripcion"]) or ""
             # El tipo de pieza hace falta de verdad: derivar_equivalencias_de_aplicaciones()
             # descarta las filas que no lo tienen, y con razón —sin él cruzaría una bujía con
             # un filtro por ir al mismo auto—. Se saca con el mismo clasificador que ya usa el
@@ -12866,6 +12919,7 @@ def aplicaciones_desde_descripciones(limite=None):
                               + (f"–{hasta}" if hasta else " en adelante")),
                     "Pieza": _pieza_de_esta,
                     "_clean": f["codigo_clean"], "_desde": desde, "_hasta": hasta,
+                    "_combustible": _combustible_de_esta,
                 })
         # Sin tope. Estaba en 400 y el catálogo real da 52.534 aplicaciones: se cargaba el 0,8%
         # de lo que las descripciones ya dicen, y esta tabla es la que hace andar la búsqueda
@@ -12885,11 +12939,14 @@ def aplicar_aplicaciones_deducidas(filas):
     if not filas:
         return 0
     with db_lock:
+        # El combustible va vacío y no NULL por lo mismo que el motor: la consulta que cruza
+        # por auto compara columna = columna, y en SQL dos NULL nunca son iguales.
         c.executemany("""INSERT OR IGNORE INTO aplicaciones
-                         (marca_auto, modelo_auto, motor, anio_desde, anio_hasta,
+                         (marca_auto, modelo_auto, motor, combustible, anio_desde, anio_hasta,
                           codigo, codigo_clean, marca_repuesto, tipo_pieza, origen)
-                         VALUES (?, ?, '', ?, ?, ?, ?, ?, ?, 'deducida')""",
-                      [(f["Auto"], f["Modelo"], f["_desde"], f["_hasta"],
+                         VALUES (?, ?, '', ?, ?, ?, ?, ?, ?, ?, 'deducida')""",
+                      [(f["Auto"], f["Modelo"], f.get("_combustible") or "",
+                        f["_desde"], f["_hasta"],
                         f["Código"], f["_clean"], f["Marca"],
                         f.get("Pieza") or "") for f in filas])
         conn.commit()
@@ -14089,6 +14146,11 @@ def derivar_equivalencias_de_aplicaciones(limite=500, minimo_autos=2):
                    ON a.marca_auto = b.marca_auto
                   AND a.modelo_auto = b.modelo_auto
                   AND a.motor = b.motor
+                  -- El combustible, por el mismo motivo que el motor: una pieza del 1.6 nafta
+                  -- no entra en el 1.9 diesel aunque el auto se llame igual. Con COALESCE
+                  -- porque las filas viejas lo tienen en NULL y en SQL dos NULL nunca son
+                  -- iguales: sin esto, esas filas dejarían de cruzarse entre ellas.
+                  AND COALESCE(a.combustible,'') = COALESCE(b.combustible,'')
                   AND COALESCE(a.tipo_pieza,'') = COALESCE(b.tipo_pieza,'')
                   AND a.marca_repuesto <> b.marca_repuesto
                   AND a.codigo_clean < b.codigo_clean

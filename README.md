@@ -1645,6 +1645,59 @@ El corte es por proveedor (`GROUP BY po.id, mp.id`) y no por total: un código d
 legítimo aparece en varias listas a la vez —es justo para eso que sirve— y contando todo junto
 ese sería el primero de la lista.
 
+## El juego y la junta que trae adentro no son lo mismo
+
+`_uno_trae_al_otro()` ya resolvía el caso en que el kit **nombra** el código de la pieza —«KIT
+CAB Y BUJ (LEIHTT06SC/LSPKR6E)»—, y por eso daba 0 relacionadas sobre los 3.185 pendientes: en
+esta lista eso no pasa nunca. El juego y la junta no se citan entre sí. Se encuentran porque los
+dos llevan **el mismo número original**, y ese número es de la junta:
+
+```
+OEM 460S36T   pieza  TC-963-17    Junta Tapa de Cilindros IVECO STRALIS I 460S36T…
+              JUEGO  JR-602-17R   Juego Completo de Reparación IVECO STRALIS I 460S36T…
+```
+
+La primera idea fue usar los prefijos de ILLINOIS —`JR-`, `JD-`, `SJ-` son juegos; `TC-`,
+`JC-`, `JVS-` son piezas— pero **no hace falta y habría sido peor**: la descripción ya lo dice
+con todas las letras, «Juego Completo de Reparación» contra «Junta Tapa de Cilindros», y
+`es_un_kit()` ya sabe leer eso. La regla queda general en vez de atada a cómo numera un
+proveedor.
+
+Cuando en un mismo número de fábrica conviven un juego y una pieza suelta, el del **juego** no
+es una equivalencia: no se puede vender uno en lugar del otro. Va al balde de «relacionadas»,
+que la pantalla muestra en una línea. Sobre la cola real: **55 grupos, 79 pares**.
+
+## Con qué anda el auto
+
+Una pieza del 1.6 nafta no entra en el 1.9 diesel aunque el auto se llame igual. Las siglas
+valen tanto como la palabra —nadie escribe «diesel» al lado de «HDI», y «MPI» quiere decir
+nafta sin decirlo—, así que se leen las dos formas.
+
+Sobre las 46.644 descripciones de proveedor: **4.292 dicen diesel, 2.215 dicen nafta**, y 129
+dicen las dos —listas que cubren las dos versiones del mismo auto— y quedan sin decidir. Muestra
+de 14 al azar: 14 correctas.
+
+Llevado a las aplicaciones deducidas son **30.920 filas con combustible** (21.964 diesel, 8.956
+nafta), y de ahí sale el uso que importa: el cruce por auto ya no junta una pieza diesel con una
+nafta del mismo modelo.
+
+| | sin el filtro | con el filtro |
+|---|---|---|
+| pares candidatos del cruce | 2.598.796 | 1.511.755 |
+| equivalencias derivadas | 177 | **156** |
+
+21 equivalencias que se iban a derivar cruzando combustibles distintos ya no se derivan.
+
+### Números de la cola, acumulado
+
+| | al empezar el día | ahora |
+|---|---|---|
+| 🟢 aprobar sin mirar | 2.266 | 2.489 |
+| 🟡 conviene una mirada | 502 | 328 |
+| 🔴 casi seguro mal | 417 | 289 |
+| apartadas como «juego y pieza» | 0 | 79 |
+| **decisiones a mano** | **919** | **617** |
+
 ## Dónde va la pieza: el caño de arriba del radiador no es el de abajo
 
 Tercer dato que estaba escrito en miles de descripciones y no leía nadie, después de las
