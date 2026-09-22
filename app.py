@@ -358,7 +358,7 @@ VERSION_CONFIANZA = "3"
 # Sobre la base real eran 1.402 productos con la medida escrita en el texto y 0 cargadas,
 # porque llenarlas era un botón de Mantenimiento que había que saber apretar.
 # Subir el número al agregar una medida nueva a medidas_desde_descripcion().
-VERSION_MEDIDAS = "3"
+VERSION_MEDIDAS = "4"
 
 # La versión del LECTOR DE APLICACIONES: a qué auto le va cada pieza, deducido de la
 # descripción. Es el dato gratis más grande que tiene esta base —114.673 filas que salen de
@@ -366,7 +366,7 @@ VERSION_MEDIDAS = "3"
 # Como las otras dos, corría solo después de importar una lista, así que en una base donde no
 # se importó nada desde que la función existe nunca corrió.
 # Subir el número al cambiar cómo se leen los modelos.
-VERSION_APLICACIONES = "4"
+VERSION_APLICACIONES = "5"
 
 # Quién FABRICA la pieza, leído del final de la descripción. Ver marca_de_repuesto_en().
 # Subir el número al agregar marcas a MARCAS_QUE_FABRICAN_LA_PIEZA o al cambiar cómo se leen.
@@ -1224,6 +1224,10 @@ def _esquema_fotos(c):
     # sin que lo leyera nadie. Ver posicion_desde_descripcion().
     if "posicion" not in columnas_productos:
         c.execute("ALTER TABLE productos ADD COLUMN posicion TEXT")
+    # La cantidad de canales de una polea. Va con las medidas exactas, no con tolerancia: una
+    # polea de 5 canales y una de 6 no se parecen «un 17%», son dos piezas distintas.
+    if "cantidad_canales" not in columnas_productos:
+        c.execute("ALTER TABLE productos ADD COLUMN cantidad_canales INTEGER")
     if "marca_repuesto" not in columnas_productos:
         c.execute("ALTER TABLE productos ADD COLUMN marca_repuesto TEXT")
         c.execute("CREATE INDEX IF NOT EXISTS idx_marca_repuesto ON productos(marca_repuesto)")
@@ -4138,6 +4142,45 @@ _RE_DIESEL = re.compile(r"(?<![A-Z])(" + FORMAS_DE_DIESEL + r")(?![A-Z])", re.IG
 _RE_NAFTA = re.compile(r"(?<![A-Z])(" + FORMAS_DE_NAFTA + r")(?![A-Z])", re.IGNORECASE)
 
 
+# Forma de código de proveedor y no de modelo de auto: tres o más letras seguidas de números
+# («LRA974», «ALTT150», «STRB014»), o letras y números alternados en dos grupos («D6RA32»).
+_RE_FORMA_DE_CODIGO_DE_PROVEEDOR = re.compile(
+    r"^[A-Z]{3,}\d{2,}[A-Z0-9]*$|^[A-Z]{1,3}\d{1,3}[A-Z]{1,3}\d", re.IGNORECASE)
+
+
+def parece_un_codigo_y_no_un_modelo(palabra, codigos_del_catalogo):
+    """¿Esta «palabra» que parece un modelo de auto es en realidad un código de repuesto?
+
+    Salió de mirar las 4.229 combinaciones marca+modelo que el extractor saca de las
+    descripciones: «VOLVO LRA974», «IVECO ALTT150», «DAF STRB014», «FIAT D6RA32». Nadie busca
+    repuestos «para un LRA974» — es el propio número del proveedor, que quedó adentro de la
+    descripción y el extractor lo tomó por modelo. Y como aparece en decenas de descripciones,
+    junta entre sí todo lo que lo nombre.
+
+    DOS condiciones, y la segunda es la que importa. La primera es que la palabra exista como
+    código en el catálogo. Sola no alcanza, y medirlo lo dejó claro: **«F1000» está cargado
+    como código de un repuesto Y es una Ford F1000 de verdad**, así que con la primera
+    condición a secas se perdía un modelo real. Lo mismo con «S16» (el Peugeot 306 S16) y
+    «NV200» (el Nissan NV200).
+
+    La segunda es la FORMA: tres o más letras seguidas de números, o letras y números alternados
+    en dos grupos. «F1000» tiene una sola letra adelante y queda afuera del filtro, que es lo
+    que se quería.
+
+    Medido sobre la base real: saca 298 combinaciones y 1.909 filas, y en una muestra de 14 al
+    azar revisada a mano no hay un solo modelo de verdad — son códigos de proveedor
+    (KPV149, KTB764, IWP101), designaciones de motor (EW10J4RFN, DOHC16V) y dos modelos pegados
+    entre sí («GOL-R19»), que tampoco son un modelo.
+
+    Es la misma idea que parece_designacion_de_motor(), una vuelta más: preguntarle al catálogo
+    en vez de adivinar."""
+    if not palabra or not codigos_del_catalogo:
+        return False
+    limpio = sanitizar(palabra)
+    return bool(limpio in codigos_del_catalogo
+                and _RE_FORMA_DE_CODIGO_DE_PROVEEDOR.match(limpio))
+
+
 def combustible_desde_descripcion(descripcion):
     """«diesel», «nafta» o None. None también cuando la descripción dice las dos cosas.
 
@@ -6151,7 +6194,7 @@ CAMPOS_MEDIDAS = [
     ("espesor", "espesor"),
 ]
 COLUMNAS_MEDIDAS = (", ".join(cn for cn, _ in CAMPOS_MEDIDAS)
-                    + ", paso_rosca, cantidad_estrias, cantidad_vias, posicion")
+                    + ", paso_rosca, cantidad_estrias, cantidad_vias, cantidad_canales, posicion")
 
 
 def cargar_medidas_de_varios(ids):
@@ -6213,7 +6256,9 @@ def comparar_medidas(a, b, tolerancia_pct=3):
     # y el sensor de ABS trasero izquierdo no es el delantero derecho. No es «parecido en un
     # porcentaje», es otra pieza. Ver posicion_desde_descripcion().
     for campo, etiqueta in (("paso_rosca", "paso de rosca"), ("cantidad_estrias", "estrías"),
-                            ("cantidad_vias", "vías de la ficha"), ("posicion", "posición")):
+                            ("cantidad_vias", "vías de la ficha"),
+                            ("cantidad_canales", "canales de la polea"),
+                            ("posicion", "posición")):
         va, vb = a.get(campo), b.get(campo)
         if va in (None, "") or vb in (None, ""):
             continue
@@ -12855,6 +12900,16 @@ def aplicaciones_desde_descripciones(limite=None):
     # una lista nueva, así los modelos se recalculan cuando el catálogo creció.
     _version_cat = version_del_catalogo()
 
+    # Los códigos del catálogo, una sola vez: hace falta para descartar los «modelos» que en
+    # realidad son el número del proveedor. Preguntarlo por palabra sería una consulta por
+    # token sobre 70.888 productos.
+    try:
+        c.execute("SELECT DISTINCT codigo_clean FROM productos")
+        _codigos_del_catalogo = {r["codigo_clean"] for r in c.fetchall()}
+    except sqlite3.OperationalError as _err:
+        anotar_error("aplicaciones_desde_descripciones/codigos", _err)
+        _codigos_del_catalogo = set()
+
     modelos_por_marca = {}
     salida = []
     for f in filas:
@@ -12896,6 +12951,10 @@ def aplicaciones_desde_descripciones(limite=None):
                     # Ver parece_designacion_de_motor() para los números y para el intento
                     # equivocado que vino antes.
                     if parece_designacion_de_motor(_t):
+                        continue
+                    # Y el que es directamente un código del catálogo con forma de código.
+                    # Ver parece_un_codigo_y_no_un_modelo().
+                    if parece_un_codigo_y_no_un_modelo(_t, _codigos_del_catalogo):
                         continue
                     vistos_modelo.add(_t)
                     modelos_hallados.append(_t)
@@ -17841,6 +17900,35 @@ def medidas_desde_descripcion(descripcion):
         if 1 <= cuantas <= 40:
             medidas["cantidad_vias"] = cuantas
 
+    # LAS MEDIDAS ESCRITAS CON PALABRAS. Las listas de poleas y alternadores no escriben
+    # «35x52x7»: escriben «Diametro interno 17mm - Diametro Externo 54 5mm - Cantidad de
+    # canales 6». El lector de acá arriba solo entiende la forma corta, así que sobre la base
+    # real esos 523 productos tenían las tres columnas vacías teniendo la medida a la vista.
+    #
+    # El «54 5mm» es 54,5: la importación se comió el separador decimal y dejó un espacio. Por
+    # eso el decimal acepta coma, punto o espacio — pegado al «mm», que es lo que lo hace
+    # seguro: sin esa ancla, cualquier «54 5» suelto de la descripción entraría como medida.
+    for _campo, _etiqueta in (("diametro_interno", r"DI[AÁ]METRO\s+INTERNO"),
+                              ("diametro_externo", r"DI[AÁ]METRO\s+EXTERNO"),
+                              ("ancho", r"ANCHO")):
+        if _campo in medidas:
+            continue      # la forma corta manda: es la que trae la pieza medida de verdad
+        _m = re.search(_etiqueta + r"\s+(\d{1,3})(?:[.,\s](\d{1,2}))?\s*MM",
+                       texto, re.IGNORECASE)
+        if _m:
+            _valor = float(_m.group(1) + ("." + _m.group(2) if _m.group(2) else ""))
+            if 0 < _valor < 500:
+                medidas[_campo] = _valor
+
+    # Los canales de una polea. Se pide «CANTIDAD DE CANALES N» con el número DETRÁS: en esta
+    # misma lista hay «Polea de 4 canales 96 >», donde el número que sigue es un año, y tomando
+    # el de atrás quedaba una polea de 96 canales.
+    _canales = re.search(r"CANTIDAD\s+DE\s+CANALES\s+(\d{1,2})", texto, re.IGNORECASE)
+    if _canales:
+        _cuantos = int(_canales.group(1))
+        if 1 <= _cuantos <= 20:
+            medidas["cantidad_canales"] = _cuantos
+
     # Dónde va la pieza. Se lee de la descripción sin tocar, no del texto normalizado, porque
     # las abreviaturas dependen del punto y del guion: «DEL.» y «DEL-IZQ» se distinguen de la
     # preposición «del» justamente por eso.
@@ -17859,13 +17947,13 @@ def productos_con_medidas_deducibles(limite=500):
                             p.descripcion AS "Descripción",
                             p.diametro_interno, p.diametro_externo, p.ancho,
                             p.cantidad_estrias, p.diametro_rosca_homocinetica, p.paso_rosca,
-                            p.espesor, p.cantidad_vias, p.posicion
+                            p.espesor, p.cantidad_vias, p.cantidad_canales, p.posicion
                      FROM productos p JOIN marcas m ON m.id = p.marca_id
                      WHERE p.descripcion IS NOT NULL AND p.descripcion <> ''
                        AND (p.diametro_interno IS NULL OR p.diametro_externo IS NULL
                             OR p.ancho IS NULL OR p.cantidad_estrias IS NULL
                             OR p.espesor IS NULL OR p.cantidad_vias IS NULL
-                            OR p.posicion IS NULL)""")
+                            OR p.cantidad_canales IS NULL OR p.posicion IS NULL)""")
         filas = filas_a_listas(c)
     except sqlite3.OperationalError as _err:
         anotar_error("productos_con_medidas_deducibles", _err)

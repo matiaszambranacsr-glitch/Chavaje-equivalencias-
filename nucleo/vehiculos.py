@@ -857,6 +857,35 @@ def medidas_desde_descripcion(descripcion):
         if 1 <= cuantas <= 40:
             medidas["cantidad_vias"] = cuantas
 
+    # LAS MEDIDAS ESCRITAS CON PALABRAS. Las listas de poleas y alternadores no escriben
+    # «35x52x7»: escriben «Diametro interno 17mm - Diametro Externo 54 5mm - Cantidad de
+    # canales 6». El lector de acá arriba solo entiende la forma corta, así que sobre la base
+    # real esos 523 productos tenían las tres columnas vacías teniendo la medida a la vista.
+    #
+    # El «54 5mm» es 54,5: la importación se comió el separador decimal y dejó un espacio. Por
+    # eso el decimal acepta coma, punto o espacio — pegado al «mm», que es lo que lo hace
+    # seguro: sin esa ancla, cualquier «54 5» suelto de la descripción entraría como medida.
+    for _campo, _etiqueta in (("diametro_interno", r"DI[AÁ]METRO\s+INTERNO"),
+                              ("diametro_externo", r"DI[AÁ]METRO\s+EXTERNO"),
+                              ("ancho", r"ANCHO")):
+        if _campo in medidas:
+            continue      # la forma corta manda: es la que trae la pieza medida de verdad
+        _m = re.search(_etiqueta + r"\s+(\d{1,3})(?:[.,\s](\d{1,2}))?\s*MM",
+                       texto, re.IGNORECASE)
+        if _m:
+            _valor = float(_m.group(1) + ("." + _m.group(2) if _m.group(2) else ""))
+            if 0 < _valor < 500:
+                medidas[_campo] = _valor
+
+    # Los canales de una polea. Se pide «CANTIDAD DE CANALES N» con el número DETRÁS: en esta
+    # misma lista hay «Polea de 4 canales 96 >», donde el número que sigue es un año, y tomando
+    # el de atrás quedaba una polea de 96 canales.
+    _canales = re.search(r"CANTIDAD\s+DE\s+CANALES\s+(\d{1,2})", texto, re.IGNORECASE)
+    if _canales:
+        _cuantos = int(_canales.group(1))
+        if 1 <= _cuantos <= 20:
+            medidas["cantidad_canales"] = _cuantos
+
     # Dónde va la pieza. Se lee de la descripción sin tocar, no del texto normalizado, porque
     # las abreviaturas dependen del punto y del guion: «DEL.» y «DEL-IZQ» se distinguen de la
     # preposición «del» justamente por eso.

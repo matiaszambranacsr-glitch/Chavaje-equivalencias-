@@ -1009,6 +1009,28 @@ def probar_la_misma_junta_en_otro_espesor_no_es_un_error_de_carga():
                f"{grupo} son piezas distintas y la alarma tiene que seguir")
 
 
+def probar_el_modelo_que_era_un_codigo():
+    """«VOLVO LRA974» no es un modelo de Volvo: es el número del proveedor.
+
+    Dos condiciones, y la segunda es la que importa. Que la palabra exista como código no
+    alcanza: «F1000» está cargado como código de un repuesto Y es una Ford F1000 de verdad.
+    Por eso se pide además la FORMA de un código de proveedor —tres o más letras seguidas de
+    números, o dos grupos alternados—, que «F1000», «S16» y «NV200» no tienen."""
+    catalogo = {"LRA974", "ALTT150", "STRB014", "D6RA32", "KTB764", "F1000", "S16", "NV200"}
+    for basura in ("LRA974", "ALTT150", "STRB014", "D6RA32", "KTB764"):
+        cierto(codigos.parece_un_codigo_y_no_un_modelo(basura, catalogo),
+               f"«{basura}» es un código del proveedor, no un modelo")
+    for modelo in ("F1000", "S16", "NV200"):
+        cierto(not codigos.parece_un_codigo_y_no_un_modelo(modelo, catalogo),
+               f"«{modelo}» es un modelo de verdad aunque también sea un código")
+    # Lo que no está en el catálogo no se toca, por más forma de código que tenga.
+    cierto(not codigos.parece_un_codigo_y_no_un_modelo("ABC123", catalogo),
+           "si no está en el catálogo, no se decide nada")
+    cierto(not codigos.parece_un_codigo_y_no_un_modelo("", catalogo), "vacío no rompe")
+    cierto(not codigos.parece_un_codigo_y_no_un_modelo("LRA974", set()),
+           "sin catálogo no se filtra nada")
+
+
 def probar_con_que_anda_el_auto():
     """Una pieza del 1.6 nafta no entra en el 1.9 diesel aunque el auto se llame igual.
 

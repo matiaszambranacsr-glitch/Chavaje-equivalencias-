@@ -860,6 +860,45 @@ def extraer_codigos_de_texto(texto, minimo=6, codigo_propio=None, codigos_conoci
     return salida
 
 
+# Forma de código de proveedor y no de modelo de auto: tres o más letras seguidas de números
+# («LRA974», «ALTT150», «STRB014»), o letras y números alternados en dos grupos («D6RA32»).
+_RE_FORMA_DE_CODIGO_DE_PROVEEDOR = re.compile(
+    r"^[A-Z]{3,}\d{2,}[A-Z0-9]*$|^[A-Z]{1,3}\d{1,3}[A-Z]{1,3}\d", re.IGNORECASE)
+
+
+def parece_un_codigo_y_no_un_modelo(palabra, codigos_del_catalogo):
+    """¿Esta «palabra» que parece un modelo de auto es en realidad un código de repuesto?
+
+    Salió de mirar las 4.229 combinaciones marca+modelo que el extractor saca de las
+    descripciones: «VOLVO LRA974», «IVECO ALTT150», «DAF STRB014», «FIAT D6RA32». Nadie busca
+    repuestos «para un LRA974» — es el propio número del proveedor, que quedó adentro de la
+    descripción y el extractor lo tomó por modelo. Y como aparece en decenas de descripciones,
+    junta entre sí todo lo que lo nombre.
+
+    DOS condiciones, y la segunda es la que importa. La primera es que la palabra exista como
+    código en el catálogo. Sola no alcanza, y medirlo lo dejó claro: **«F1000» está cargado
+    como código de un repuesto Y es una Ford F1000 de verdad**, así que con la primera
+    condición a secas se perdía un modelo real. Lo mismo con «S16» (el Peugeot 306 S16) y
+    «NV200» (el Nissan NV200).
+
+    La segunda es la FORMA: tres o más letras seguidas de números, o letras y números alternados
+    en dos grupos. «F1000» tiene una sola letra adelante y queda afuera del filtro, que es lo
+    que se quería.
+
+    Medido sobre la base real: saca 298 combinaciones y 1.909 filas, y en una muestra de 14 al
+    azar revisada a mano no hay un solo modelo de verdad — son códigos de proveedor
+    (KPV149, KTB764, IWP101), designaciones de motor (EW10J4RFN, DOHC16V) y dos modelos pegados
+    entre sí («GOL-R19»), que tampoco son un modelo.
+
+    Es la misma idea que parece_designacion_de_motor(), una vuelta más: preguntarle al catálogo
+    en vez de adivinar."""
+    if not palabra or not codigos_del_catalogo:
+        return False
+    limpio = sanitizar(palabra)
+    return bool(limpio in codigos_del_catalogo
+                and _RE_FORMA_DE_CODIGO_DE_PROVEEDOR.match(limpio))
+
+
 # CON QUÉ ANDA EL AUTO. Las siglas valen tanto como la palabra: nadie escribe «diesel» al lado
 # de «HDI», y «MPI» quiere decir nafta sin decirlo.
 FORMAS_DE_DIESEL = (r"DIESEL|D[IÍ]ESEL|TURBODIESEL|TDI|HDI|CRDI|JTD|DCI|TDCI|CDI|MULTIJET|"

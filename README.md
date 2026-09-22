@@ -1645,6 +1645,60 @@ El corte es por proveedor (`GROUP BY po.id, mp.id`) y no por total: un código d
 legítimo aparece en varias listas a la vez —es justo para eso que sirve— y contando todo junto
 ese sería el primero de la lista.
 
+## Las medidas escritas con palabras: la pantalla de buscar por medida cubría el 26%
+
+El lector de medidas entendía «35x52x7», «22 ESTRIAS» y «M24 X 1.5». Pero las listas de poleas
+y alternadores no escriben así:
+
+```
+POLEA LRAP016 Citroen C5 … Diametro interno 17mm - Diametro Externo 54 5mm - Cantidad de canales 6
+```
+
+523 productos tenían las tres columnas vacías **teniendo la medida a la vista**.
+
+El «54 5mm» es 54,5: la importación se comió el separador decimal y dejó un espacio. Por eso el
+decimal acepta coma, punto o espacio — **pegado al «mm»**, que es lo que lo hace seguro: sin esa
+ancla, cualquier «54 5» suelto de la descripción entraría como medida.
+
+Y los canales se piden con el número DETRÁS («CANTIDAD DE CANALES 6»), porque en esa misma lista
+hay «Polea de 4 canales 96 >», donde el número que sigue es un año. Tomando el de atrás quedaba
+una polea de 96 canales. Comprobado: esa descripción ahora devuelve vacío.
+
+| | antes | después |
+|---|---|---|
+| productos con diámetro interno/externo | 184 | **707** |
+| productos con ancho | 184 | 310 |
+| productos con canales de polea | — | **523** |
+
+La pantalla **📐 Buscar por medidas** pasa de 184 productos a 707, casi cuatro veces. Y el veto
+físico encuentra **3 equivalencias ya cargadas que se contradicen**: poleas de 5 canales contra
+6, con diámetro externo de 54,0 contra 48,8 y de 61,0 contra 55,0. No son la misma polea.
+
+## «VOLVO LRA974» no es un modelo de Volvo
+
+De las 4.229 combinaciones marca+modelo que el extractor saca de las descripciones, muchas no
+son modelos: «VOLVO LRA974», «IVECO ALTT150», «DAF STRB014», «FIAT D6RA32». Es el propio número
+del proveedor, que quedó adentro de la descripción y el extractor lo tomó por modelo. Nadie
+busca repuestos «para un LRA974», y como aparece en decenas de descripciones junta entre sí todo
+lo que lo nombre.
+
+Es la misma idea que `parece_designacion_de_motor()`, una vuelta más: **preguntarle al catálogo
+en vez de adivinar**. Si la palabra existe como código de un producto, sospechá.
+
+Pero eso solo no alcanza, y medirlo lo dejó clarísimo:
+
+> **«F1000» está cargado como código de un repuesto Y es una Ford F1000 de verdad.**
+
+Lo mismo con «S16» (el Peugeot 306 S16) y «NV200» (el Nissan NV200). Así que se pide además la
+FORMA de un código de proveedor: tres o más letras seguidas de números, o letras y números
+alternados en dos grupos. «F1000» tiene una sola letra adelante y queda afuera del filtro.
+
+Resultado: **298 combinaciones y 1.909 filas menos** (114.673 → 112.764), y en una muestra de 14
+al azar revisada a mano no hay un solo modelo de verdad — son códigos de proveedor (KPV149,
+KTB764, IWP101), designaciones de motor (EW10J4RFN, DOHC16V) y dos modelos pegados entre sí
+(«GOL-R19»), que tampoco son un modelo. Comprobado uno por uno que F100, S16, NV200, GOL e
+HILUX siguen ahí.
+
 ## El juego y la junta que trae adentro no son lo mismo
 
 `_uno_trae_al_otro()` ya resolvía el caso en que el kit **nombra** el código de la pieza —«KIT
