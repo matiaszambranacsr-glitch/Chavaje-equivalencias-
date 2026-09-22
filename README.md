@@ -1645,6 +1645,79 @@ El corte es por proveedor (`GROUP BY po.id, mp.id`) y no por total: un código d
 legítimo aparece en varias listas a la vez —es justo para eso que sirve— y contando todo junto
 ese sería el primero de la lista.
 
+## 8.319 códigos de barras cargados como código de fábrica: la app lo sabía y no lo decía
+
+Una de cada tres equivalencias de la base —**8.319 de 24.774**— sale de un producto fantasma
+cuyo «código de fábrica» es en realidad un código de barras de MOTORARG (prefijo `7793960…`,
+Argentina). Cada uno deja una equivalencia que no lleva a ningún lado: es lo que hace que el
+buscador prometa un equivalente que no existe.
+
+Lo llamativo es que **ya estaba todo hecho menos avisar**. `codigos_de_barras_mal_cargados()`
+los detecta —decide por lista y no por código suelto, con el dígito verificador y el prefijo de
+empresa— y `mover_codigos_de_barras_a_su_columna()` los arregla. Lo que faltaba era que el
+diagnóstico de salud lo dijera: había que entrar a la herramienta a mirar para enterarse.
+
+Probado sobre una copia de la base real:
+
+| | antes | después |
+|---|---|---|
+| productos | 70.888 | 62.569 |
+| equivalencias | 24.774 | 16.455 |
+| con código de barras en su columna | 0 | **8.319** |
+
+Y lo que importa: **MOTORARG cruzaba con 0 proveedores antes y con 0 después**. No se pierde
+nada, porque esas 8.319 equivalencias no unían nada — es literalmente lo que el README ya
+llamaba «una equivalencia que no lleva a ningún lado». Comprobado además que los productos se
+siguen encontrando por su código, por el código de barras y por texto, con `integrity_check` en
+ok y 0 equivalencias huérfanas.
+
+**No se arregla solo, y es a propósito**: el arreglo borra productos, y lo que borra tiene que
+decidirlo una persona. El aviso sale en rojo con el botón al lado.
+
+## Quién fabrica la pieza: 13.705 productos lo dicen y no había dónde guardarlo
+
+Las 5 marcas de la tabla `marcas` son **proveedores** —JL, MOTORARG, ILLINOIS, FISPA y el nodo
+de fábrica—. Quién **fabrica** la pieza no estaba en ninguna columna, y en el mostrador suele ser
+la primera pregunta: «¿lo tenés en Bosch o en Masser?».
+
+Está escrito al final de la descripción. La pregunta era cómo reconocerlo sin inventar.
+
+Primero se midió, sobre las 46.644 descripciones de proveedor, cuántas veces cada palabra
+aparece **al final** contra cuántas aparece en cualquier lado — una marca es una firma, va al
+final:
+
+| | al final | en total | proporción |
+|---|---|---|---|
+| MASSER | 6.258 | 6.261 | 1,00 |
+| CAUPLAS | 3.483 | 3.489 | 1,00 |
+| MLH | 563 | 576 | 0,98 |
+| RETENES | 692 | 1.023 | 0,68 |
+| **BOSCH** | 834 | 2.581 | **0,32** |
+| DIESEL | 339 | 1.260 | 0,27 |
+
+Y ahí se ve que la proporción **no alcanza**: BOSCH da 0,32 porque también aparece en el medio
+como referencia cruzada («REF ORIG BOSCH 0281002764»), y RETENES da 0,68 sin ser marca de nada.
+O sea que sirve para DESCUBRIR candidatos, no para decidir. La decisión es una lista curada de
+41 marcas, como la que ya existe para los vehículos.
+
+La regla pide que esté **al final**, y eso es lo que la hace confiable: en el medio, «BOSCH»
+quiere decir que la pieza *reemplaza* a una Bosch, no que lo sea.
+
+Resultado: **13.705 productos** con fabricante, encabezados por MASSER (6.261), CAUPLAS (3.483),
+BOSCH (833), MLH (563) y MARELLI (555). En una muestra de 14 al azar revisada a mano, 14
+correctas. Se llena sola por `VERSION_MARCAS_REPUESTO` (2,7 s), no pisa lo que alguien corrija a
+mano, y ahora aparece como columna **Fabricante** en la búsqueda por código y por texto:
+
+```
+buscando «SENSOR MAF»
+  12 7162          JL   fab=—        SENSOR MAF THOMSON MAREA 2.0
+  0280 217 512 :   JL   fab=BOSCH    SENSOR MAF VW GOLF 2.8 BOSCH
+  MAF 208          JL   fab=MASSER   SENSOR MAF AUDI A6 3.0 Masser
+```
+
+El primero se queda sin fabricante a propósito: ahí «THOMSON» está en el medio, y la regla no
+adivina.
+
 ## El hermano que llegó segundo arrancaba 35 puntos abajo, y nada más que por eso
 
 La señal más fuerte del puntaje es «📄 los dos tienen exactamente la misma descripción», +35.

@@ -84,7 +84,8 @@ from .errores import anotar_error
       "_MARCAS_DE_AUTO_QUE_SE_PEGAN", "_RE_MARCA_DE_AUTO_PEGADA", "_RE_MODELO_IVECO",
       "FORMAS_DE_DESIGNACION_DE_MOTOR", "parece_designacion_de_motor",
       "_es_lista_de_modelos",
-      "extraer_codigos_de_texto", "codigo_base_sin_variante",
+      "extraer_codigos_de_texto", "MARCAS_DE_REPUESTO", "_RE_MARCA_DE_REPUESTO",
+      "marca_de_repuesto_en", "codigo_base_sin_variante",
       "PUNTAJE_QUE_NO_LLEGA_A_APROBAR_SOLO", "el_codigo_no_figura_entre_las_referencias",
       "son_variantes_de_la_misma_pieza", "codigo_que_hoy_no_se_tomaria",
       "digito_verificador_gtin", "codigo_de_barras_cierra", "columna_es_codigo_de_barras",
@@ -225,6 +226,9 @@ CREATE TABLE IF NOT EXISTS productos (
     -- proveedor y de nadie más, así que no puede cruzar dos listas. La búsqueda lo mira igual,
     -- para que escanear la caja encuentre el repuesto.
     codigo_barras TEXT,
+    -- quién FABRICA la pieza (Bosch, Masser, Cauplas…), que es otra cosa que el proveedor que
+    -- te la vende. Sale del final de la descripción; ver marca_de_repuesto_en().
+    marca_repuesto TEXT,
     -- el mismo código puede existir en varias marcas: son productos distintos a propósito
     UNIQUE(codigo_clean, marca_id)
 );

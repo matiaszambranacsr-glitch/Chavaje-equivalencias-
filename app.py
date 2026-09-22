@@ -368,6 +368,10 @@ VERSION_MEDIDAS = "2"
 # Subir el número al cambiar cómo se leen los modelos.
 VERSION_APLICACIONES = "3"
 
+# Quién FABRICA la pieza, leído del final de la descripción. Ver marca_de_repuesto_en().
+# Subir el número al agregar marcas a MARCAS_DE_REPUESTO o al cambiar cómo se leen.
+VERSION_MARCAS_REPUESTO = "1"
+
 
 def secretos_app():
     """Los Secrets de Streamlit, o {} si en este servidor no hay ninguno configurado.
@@ -1209,6 +1213,14 @@ def _esquema_fotos(c):
         c.execute("ALTER TABLE productos ADD COLUMN paso_rosca TEXT")
     if "cantidad_estrias" not in columnas_productos:
         c.execute("ALTER TABLE productos ADD COLUMN cantidad_estrias INTEGER")
+    # QUIÉN FABRICA LA PIEZA, que es otra cosa que quién te la vende. Las 5 marcas de la tabla
+    # `marcas` son proveedores —JL, MOTORARG, ILLINOIS, FISPA y el nodo de fábrica—, así que
+    # hasta ahora la app no tenía dónde guardar que esa bomba es Bosch y esa otra es Masser. Y
+    # es la primera pregunta del mostrador. Ver marca_de_repuesto_en(): sobre las 46.644
+    # descripciones de proveedor está escrita en 13.705.
+    if "marca_repuesto" not in columnas_productos:
+        c.execute("ALTER TABLE productos ADD COLUMN marca_repuesto TEXT")
+        c.execute("CREATE INDEX IF NOT EXISTS idx_marca_repuesto ON productos(marca_repuesto)")
     # El ESPESOR de una junta y la CANTIDAD DE VÍAS de una ficha. Los dos estaban escritos en
     # la descripción de miles de productos y no los leía nadie, y los dos son de los que hacen
     # que dos piezas NO sean intercambiables aunque todo lo demás coincida.
@@ -2093,6 +2105,18 @@ def _datos_precargados_y_migraciones(c):
         c.execute("INSERT INTO configuracion (clave, valor) VALUES ('version_normalizacion', ?) "
                   "ON CONFLICT(clave) DO UPDATE SET valor = excluded.valor",
                   (VERSION_NORMALIZACION,))
+
+    # Lo mismo para la marca del repuesto. Ver VERSION_MARCAS_REPUESTO.
+    c.execute("SELECT valor FROM configuracion WHERE clave = 'version_marcas_repuesto'")
+    _fila_mr = c.fetchone()
+    if (_fila_mr["valor"] if _fila_mr else None) != VERSION_MARCAS_REPUESTO:
+        c.execute("INSERT INTO configuracion (clave, valor) VALUES "
+                  "('marcas_repuesto_pendientes', '1') "
+                  "ON CONFLICT(clave) DO UPDATE SET valor = excluded.valor")
+        c.execute("INSERT INTO configuracion (clave, valor) VALUES "
+                  "('version_marcas_repuesto', ?) "
+                  "ON CONFLICT(clave) DO UPDATE SET valor = excluded.valor",
+                  (VERSION_MARCAS_REPUESTO,))
 
     # Lo mismo para las aplicaciones. Ver VERSION_APLICACIONES.
     c.execute("SELECT valor FROM configuracion WHERE clave = 'version_aplicaciones'")
@@ -4007,6 +4031,71 @@ def cargar_codigos_de_barras_masivo(pares, marca_id=None, pisar=True):
                           (barras_limpio, fila["id"]))
                 resumen["puestos"] += 1
     return resumen
+
+
+# QUIÉN FABRICA LA PIEZA. No confundir con la marca de la tabla `marcas`, que es quién te la
+# vende: JL, MOTORARG, ILLINOIS, FISPA. En el mostrador la primera pregunta suele ser «¿lo
+# tenés en Bosch o en Masser?», y ese dato no estaba en ninguna columna.
+#
+# La lista es curada y no adivinada, y vale explicar por qué. Se midió, sobre las 46.644
+# descripciones de proveedor, con qué frecuencia cada palabra aparece AL FINAL contra cuántas
+# veces aparece en cualquier lado — una marca es una firma, va al final. Eso separa muy bien a
+# MASSER (1,00), CAUPLAS (1,00), FLORIO (1,00) o MLH (0,98)… pero NO alcanza: BOSCH da 0,32 y
+# MARELLI 0,59, porque también aparecen en el medio como referencia cruzada («REF ORIG BOSCH
+# 0281002764»). Y al revés, RETENES da 0,68 y DIESEL 0,27 sin ser marcas de nada.
+# O sea que la proporción sirve para DESCUBRIR candidatos, no para decidir. La decisión es una
+# lista, como la de las marcas de vehículo.
+MARCAS_DE_REPUESTO = [
+    "MAGNETI MARELLI", "MAGNETI", "MARELLI", "BOSCH", "MASSER", "CAUPLAS", "METALGRAF",
+    "DELPHI", "FLORIO", "WEBER", "SOLEX", "INDUMAG", "ARGELITE", "NGK", "RALUX", "AUTRONIC",
+    "VUARAM", "RO-FIL", "ROFIL", "GALILEO", "THOMSON", "MLH", "MLS", "WAGNER", "VALEO",
+    "SKF", "MANN", "SACHS", "MAHLE", "CORTECO", "VICTOR REINZ", "REINZ", "TARANTO",
+    "LUCAS", "DENSO", "HENGST", "TRW", "FRAM", "WIX", "MONROE", "GABRIEL",
+]
+
+# De más larga a más corta, para que «MAGNETI MARELLI» gane sobre «MARELLI».
+_RE_MARCA_DE_REPUESTO = re.compile(
+    r"(?:^|[\s\-/.,])(" + "|".join(re.escape(m) for m in
+                                   sorted(MARCAS_DE_REPUESTO, key=len, reverse=True)) + r")\s*$",
+    re.IGNORECASE)
+
+
+def marca_de_repuesto_en(descripcion):
+    """Quién fabrica la pieza, si la descripción lo dice al final. None si no.
+
+    Se pide que esté AL FINAL a propósito, y es lo que la hace confiable: ahí es donde el
+    proveedor firma la pieza. En el medio la misma marca aparece como referencia cruzada
+    —«REF ORIG BOSCH 0281002764»— y ahí no quiere decir que la pieza sea Bosch, quiere decir
+    que reemplaza a una que sí lo es.
+
+    Medido sobre las 46.644 descripciones de proveedor: reconoce 13.705, encabezadas por
+    MASSER (6.261), CAUPLAS (3.483), BOSCH (833), MLH (563) y MARELLI (555). En una muestra de
+    14 al azar revisada a mano, 14 correctas."""
+    if not descripcion:
+        return None
+    hallado = _RE_MARCA_DE_REPUESTO.search(str(descripcion).strip())
+    return hallado.group(1).upper() if hallado else None
+
+
+def completar_marcas_de_repuesto():
+    """Llena productos.marca_repuesto leyendo el final de cada descripción. Devuelve cuántos.
+
+    Solo toca los que están vacíos: si alguien la corrigió a mano, no se la pisa."""
+    puestos = 0
+    with db_lock:
+        c.execute("""SELECT p.id, p.descripcion FROM productos p
+                     JOIN marcas m ON m.id = p.marca_id
+                     WHERE m.tipo <> 'OEM'
+                       AND (p.marca_repuesto IS NULL OR p.marca_repuesto = '')
+                       AND p.descripcion IS NOT NULL AND p.descripcion <> ''""")
+        for fila in filas_a_listas(c):
+            marca = marca_de_repuesto_en(fila["descripcion"])
+            if marca:
+                c.execute("UPDATE productos SET marca_repuesto = ? WHERE id = ?",
+                          (marca, fila["id"]))
+                puestos += 1
+        conn.commit()
+    return puestos
 
 
 def codigo_base_sin_variante(codigo):
@@ -7839,7 +7928,12 @@ def buscar_por_codigo(clean_code, marca_filtro="Todas", max_saltos=None, confian
                    AND LENGTH(p1.codigo_clean) < 8)
     )
     SELECT p.id AS "ID", p.codigo_raw AS "Codigo", p.descripcion AS "Descripcion",
-           m.nombre AS "Marca", m.tipo AS "Tipo", p.precio AS "Precio", p.stock AS "Stock",
+           m.nombre AS "Marca", m.tipo AS "Tipo",
+           -- Quién FABRICA la pieza, que es otra cosa que la lista de quién te la vende. En el
+           -- mostrador, entre cinco equivalentes, la pregunta es «¿cuál es el Bosch?».
+           -- Ver marca_de_repuesto_en(): sale del final de la descripción, 13.705 productos.
+           p.marca_repuesto AS "Fabricante",
+           p.precio AS "Precio", p.stock AS "Stock",
            p.favorito AS "Favorito", COALESCE(p.imagen_thumb, p.imagen_url) AS "Imagen",
            p.precio_costo AS "_costo",
            m.url_ficha_template AS "_template", MIN(r.saltos) AS "_saltos",
@@ -9172,6 +9266,32 @@ def diagnostico_de_salud():
                   "Estadísticas → Mantenimiento → Calidad → Reunir lo que separó un cambio de número")
     except Exception as _err:
         anotar_error("diagnostico_de_salud/puenteadas", _err)
+
+    # LOS CÓDIGOS DE BARRAS CARGADOS COMO CÓDIGO DE FÁBRICA. La app sabía detectarlos desde
+    # hace rato —codigos_de_barras_mal_cargados() devuelve la lista y el número— y tenía el
+    # botón que los arregla, pero no avisaba NUNCA: había que entrar a la herramienta a mirar.
+    # Sobre la base real son 8.319 de MOTORARG, y cada uno arrastra una equivalencia que no
+    # lleva a ningún lado: 8.319 de las 24.774 equivalencias cargadas, UNA DE CADA TRES.
+    # Va en alto por eso, y porque no se arregla solo a propósito: el arreglo borra productos,
+    # y lo que borra tiene que decidirlo una persona.
+    try:
+        _mal_barras = codigos_de_barras_mal_cargados()
+        if _mal_barras:
+            _total_b = sum(x["Códigos de barras cargados como código de fábrica"]
+                           for x in _mal_barras)
+            _listas_b = ", ".join(x["Lista"] for x in _mal_barras[:4])
+            sumar("alto",
+                  f"{_total_b:,} código(s) de barras cargados como código de fábrica",
+                  f"En {_listas_b} lo que se importó en la columna del código original son "
+                  "códigos de barras. Cada uno deja una equivalencia que no lleva a ningún "
+                  "lado, y son las que hacen que el buscador prometa un equivalente que no "
+                  "existe. El arreglo es un botón: el número pasa a la columna de código de "
+                  "barras —se sigue escaneando y buscando igual— y desaparece el producto "
+                  "fantasma que lo representaba.",
+                  "Administrar → Mantenimiento → 🏷️ Códigos de barras → "
+                  "🏷️ Códigos de barras cargados como código de fábrica")
+    except Exception as _err:
+        anotar_error("diagnostico_de_salud/barras_mal_cargados", _err)
 
     try:
         puentes = contar_codigos_puente(30)
@@ -10708,6 +10828,18 @@ def _trabajo_de_fondo():
     # Las aplicaciones: a qué auto le va cada pieza. Es lo más caro de las tres (55 s sobre
     # 70.888 descripciones: 32 s leerlas y 23 s escribirlas) y va después de las medidas porque
     # no se necesitan entre sí. Ver VERSION_APLICACIONES.
+    # La marca del repuesto: es la más barata de las cuatro (una expresión regular por
+    # descripción, sin consultas de por medio) así que va primero.
+    if _hay_que_hacerlo("marcas_repuesto_pendientes"):
+        try:
+            _n_mr = completar_marcas_de_repuesto()
+            guardar_config("marcas_repuesto_puestas", str(_n_mr))
+            guardar_config("marcas_repuesto_fecha", datetime.now().strftime("%Y-%m-%d %H:%M"))
+            _quedo_hecho("marcas_repuesto_pendientes")
+        except Exception as _err:
+            # La bandera sigue prendida: se reintenta en el próximo arranque, hasta el tope.
+            anotar_error("_trabajo_de_fondo/marcas_repuesto", _err)
+
     if _hay_que_hacerlo("aplicaciones_pendientes"):
         try:
             _apl_ded = aplicaciones_desde_descripciones()
@@ -10877,7 +11009,8 @@ def arrancar_tanda_de_fondo():
             # justo el caso normal. Ver VERSION_CONFIANZA.
             and obtener_config("confianza_pendiente", "") != "1"
             and obtener_config("medidas_pendientes", "") != "1"
-            and obtener_config("aplicaciones_pendientes", "") != "1"):
+            and obtener_config("aplicaciones_pendientes", "") != "1"
+            and obtener_config("marcas_repuesto_pendientes", "") != "1"):
         return False
 
     # El candado se toma ACÁ y no adentro del hilo. Mirar si está tomado y después crear el
@@ -14611,7 +14744,12 @@ def buscar_por_texto(texto):
 
     query = f'''
     SELECT p.id AS "ID", p.codigo_raw AS "Codigo", p.descripcion AS "Descripcion",
-           m.nombre AS "Marca", m.tipo AS "Tipo", p.precio AS "Precio", p.stock AS "Stock",
+           m.nombre AS "Marca", m.tipo AS "Tipo",
+           -- Quién FABRICA la pieza, que es otra cosa que la lista de quién te la vende. En el
+           -- mostrador, entre cinco equivalentes, la pregunta es «¿cuál es el Bosch?».
+           -- Ver marca_de_repuesto_en(): sale del final de la descripción, 13.705 productos.
+           p.marca_repuesto AS "Fabricante",
+           p.precio AS "Precio", p.stock AS "Stock",
            p.favorito AS "Favorito", ({suma}) AS _coincidencias
     FROM productos p JOIN marcas m ON m.id = p.marca_id
     WHERE ({suma}) >= ?

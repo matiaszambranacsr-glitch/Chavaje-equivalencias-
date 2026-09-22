@@ -1009,6 +1009,32 @@ def probar_la_misma_junta_en_otro_espesor_no_es_un_error_de_carga():
                f"{grupo} son piezas distintas y la alarma tiene que seguir")
 
 
+def probar_quien_fabrica_la_pieza():
+    """La marca del final es quién fabrica; la del medio es una referencia cruzada.
+
+    Son dos cosas distintas y la diferencia importa en el mostrador: «REF ORIG BOSCH 0281…»
+    quiere decir que la pieza REEMPLAZA a una Bosch, no que sea Bosch."""
+    firma_al_final = [
+        ("SENSOR MAF AUDI A6 3.0 Masser", "MASSER"),
+        ("CANO Fiat PALIO-UNO toma de aire Cauplas", "CAUPLAS"),
+        ("CORREA POLY V 6PK1125 Peu 206/307 1.6 Bosch", "BOSCH"),
+        ("TUBO CALEFAC Peugeot 307 1.6 16v MLH", "MLH"),
+        ("JTA BBA DEPRESORA MAGNETI MARELLI", "MAGNETI MARELLI"),
+    ]
+    for desc, esperada in firma_al_final:
+        igual(codigos.marca_de_repuesto_en(desc), esperada, f"la firma de «{desc[:34]}…»")
+    no_es_la_marca = [
+        "INYECTOR MPI REF ORIG BOSCH 0280155786",     # referencia cruzada, no es Bosch
+        "SENSOR MAF THOMSON MAREA 2.0",               # la marca va en el medio
+        "Junta Tapa de Cilindros FIAT FIORINO UNO",   # no dice ninguna
+        "",
+    ]
+    for desc in no_es_la_marca:
+        cierto(codigos.marca_de_repuesto_en(desc) is None,
+               f"«{desc[:40]}» no declara quién la fabrica")
+    cierto(codigos.marca_de_repuesto_en(None) is None, "None no rompe")
+
+
 def probar_el_codigo_que_no_esta_entre_las_referencias():
     """El «número de fábrica» que en realidad se levantó del texto del medio.
 

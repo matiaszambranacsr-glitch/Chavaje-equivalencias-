@@ -37,6 +37,9 @@ CREATE TABLE IF NOT EXISTS productos (
     -- proveedor y de nadie más, así que no puede cruzar dos listas. La búsqueda lo mira igual,
     -- para que escanear la caja encuentre el repuesto.
     codigo_barras TEXT,
+    -- quién FABRICA la pieza (Bosch, Masser, Cauplas…), que es otra cosa que el proveedor que
+    -- te la vende. Sale del final de la descripción; ver marca_de_repuesto_en().
+    marca_repuesto TEXT,
     -- el mismo código puede existir en varias marcas: son productos distintos a propósito
     UNIQUE(codigo_clean, marca_id)
 );
@@ -174,7 +177,12 @@ def buscar_por_codigo(cur, clean_code, marca_filtro="Todas", max_saltos=None, co
                    AND LENGTH(p1.codigo_clean) < 8)
     )
     SELECT p.id AS "ID", p.codigo_raw AS "Codigo", p.descripcion AS "Descripcion",
-           m.nombre AS "Marca", m.tipo AS "Tipo", p.precio AS "Precio", p.stock AS "Stock",
+           m.nombre AS "Marca", m.tipo AS "Tipo",
+           -- Quién FABRICA la pieza, que es otra cosa que la lista de quién te la vende. En el
+           -- mostrador, entre cinco equivalentes, la pregunta es «¿cuál es el Bosch?».
+           -- Ver marca_de_repuesto_en(): sale del final de la descripción, 13.705 productos.
+           p.marca_repuesto AS "Fabricante",
+           p.precio AS "Precio", p.stock AS "Stock",
            p.favorito AS "Favorito", COALESCE(p.imagen_thumb, p.imagen_url) AS "Imagen",
            p.precio_costo AS "_costo",
            m.url_ficha_template AS "_template", MIN(r.saltos) AS "_saltos",

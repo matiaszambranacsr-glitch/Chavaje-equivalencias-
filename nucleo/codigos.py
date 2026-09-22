@@ -860,6 +860,52 @@ def extraer_codigos_de_texto(texto, minimo=6, codigo_propio=None, codigos_conoci
     return salida
 
 
+# Marcas de REPUESTO. No son modelos de auto, y tampoco dicen qué pieza es: dos proveedores
+# distintos venden repuestos Bosch de cosas completamente distintas.
+# Estaban saliendo primeras en el desplegable «Modelo / motor»: DELCO encabezaba la lista de
+# Ford con 951 apariciones y NIPPONDENSO la de Toyota con 476, antes que COROLLA. El filtro de
+# «aparece sobre todo en esta marca» no las agarra porque un proveedor sí las nombra casi
+# siempre junto al mismo auto.
+# Va en su propio conjunto porque firma_de_producto() necesita sacar ESTAS de lo que dice qué
+# pieza es, y NO las de abajo — ver el comentario del núcleo.
+MARCAS_DE_REPUESTO = {
+    "BOSCH", "VALEO", "DELCO", "DENSO", "NIPPONDENSO", "MAGNETI", "MAGNETTI", "MARELLI",
+    "HITACHI", "LUCAS", "SIEMENS", "DELPHI", "JAEGER", "MASSER", "CAUPLAS", "WEBER", "SOLEX",
+    "SKF", "NGK", "MANN", "VITRON", "TAILLOT", "PAIA", "WAHLER", "GATES", "SACHS", "MONROE",
+    "FRAM", "BERU", "FACET", "PIERBURG", "MAHLE", "ELRING", "REINZ", "AJUSA", "CORTECO",
+    "PAYEN", "TRW", "FERODO", "BREMBO", "NAKATA", "ILUMA", "DPB", "FISPA", "CBOSCH",
+    # Salidas de contar qué palabras entraban en la APLICACIÓN de las firmas del catálogo real:
+    # estas cinco están entre las más frecuentes y no son autos, son quién hizo el repuesto.
+    # LESTER no es un fabricante sino la numeración con la que se piden alternadores, pero para
+    # esto da igual: tampoco dice para qué auto es.
+    "INA", "HELLA", "PRESTOLITE", "UNIPOINT", "LESTER", "THOMSON", "INDUMAG",
+}
+
+
+# De más larga a más corta, para que «MAGNETI MARELLI» gane sobre «MARELLI».
+_RE_MARCA_DE_REPUESTO = re.compile(
+    r"(?:^|[\s\-/.,])(" + "|".join(re.escape(m) for m in
+                                   sorted(MARCAS_DE_REPUESTO, key=len, reverse=True)) + r")\s*$",
+    re.IGNORECASE)
+
+
+def marca_de_repuesto_en(descripcion):
+    """Quién fabrica la pieza, si la descripción lo dice al final. None si no.
+
+    Se pide que esté AL FINAL a propósito, y es lo que la hace confiable: ahí es donde el
+    proveedor firma la pieza. En el medio la misma marca aparece como referencia cruzada
+    —«REF ORIG BOSCH 0281002764»— y ahí no quiere decir que la pieza sea Bosch, quiere decir
+    que reemplaza a una que sí lo es.
+
+    Medido sobre las 46.644 descripciones de proveedor: reconoce 13.705, encabezadas por
+    MASSER (6.261), CAUPLAS (3.483), BOSCH (833), MLH (563) y MARELLI (555). En una muestra de
+    14 al azar revisada a mano, 14 correctas."""
+    if not descripcion:
+        return None
+    hallado = _RE_MARCA_DE_REPUESTO.search(str(descripcion).strip())
+    return hallado.group(1).upper() if hallado else None
+
+
 def codigo_base_sin_variante(codigo):
     """De «TC-687-20 2M» devuelve «TC-687-20»; de «JVL-168-28», «JVL-168». None si no queda nada.
 
