@@ -1009,6 +1009,40 @@ def probar_la_misma_junta_en_otro_espesor_no_es_un_error_de_carga():
                f"{grupo} son piezas distintas y la alarma tiene que seguir")
 
 
+def probar_el_codigo_que_no_esta_entre_las_referencias():
+    """El «número de fábrica» que en realidad se levantó del texto del medio.
+
+    ILLINOIS escribe primero qué es la pieza y para qué autos, y al final los números de
+    fábrica de verdad, entre paréntesis o detrás de «//». Lo que quedó cargado como código y
+    no está en esa zona salió del medio, donde van los motores."""
+    sacados_del_medio = [
+        ("K9K16V", "Junta para Carter RENAULT CLIO SCENIC - 1,4/1,5/1,6 - K4M K9K16V (8200120)"),
+        ("DSC12.01", "Junta Tapa de Cilindros SCANIA P124 - 10,6 - DSC12.01 (1732456/1743981)"),
+        ("4-PA.203", "Junta Tapa de Valvulas PERKINS D100 - 3,3 - 4.203/4-PA.203 (36812345)"),
+    ]
+    for codigo, desc in sacados_del_medio:
+        cierto(codigos.el_codigo_no_figura_entre_las_referencias(codigo, desc),
+               f"«{codigo}» no figura entre las referencias del final")
+    esta_donde_va = [
+        ("8200120", "Junta para Carter RENAULT CLIO SCENIC - 1,4/1,5/1,6 - K4M K9K16V (8200120)"),
+        ("1743981", "Junta Tapa de Cilindros SCANIA P124 - 10,6 - DSC12.01 (1732456/1743981)"),
+    ]
+    for codigo, desc in esta_donde_va:
+        cierto(not codigos.el_codigo_no_figura_entre_las_referencias(codigo, desc),
+               f"«{codigo}» sí está en la lista de referencias")
+    # Sin zona de referencias no se puede concluir nada, y una zona con puras medidas tampoco
+    # es una lista de referencias.
+    sin_conclusion = [
+        ("7785351", "Junta Tapa de Cilindros FIAT FIORINO UNO TIPO PALIO TEMPRA DUCATO"),
+        ("7785351", "Junta Tapa de Cilindros FIAT (ESP 1.65MM) FIORINO UNO TIPO PALIO"),
+        ("", "Junta Tapa de Cilindros FIAT (4367123)"),
+        ("7785351", ""),
+    ]
+    for codigo, desc in sin_conclusion:
+        cierto(not codigos.el_codigo_no_figura_entre_las_referencias(codigo, desc),
+               f"sin lista de referencias no se marca nada ({codigo!r})")
+
+
 def probar_el_codigo_que_hoy_ya_no_se_tomaria():
     """La pregunta que decide si un código viejo hay que borrarlo, y si un pendiente vale.
 

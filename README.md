@@ -1645,6 +1645,81 @@ El corte es por proveedor (`GROUP BY po.id, mp.id`) y no por total: un código d
 legítimo aparece en varias listas a la vez —es justo para eso que sirve— y contando todo junto
 ese sería el primero de la lista.
 
+## El hermano que llegó segundo arrancaba 35 puntos abajo, y nada más que por eso
+
+La señal más fuerte del puntaje es «📄 los dos tienen exactamente la misma descripción», +35.
+Pero en esta cola esa señal no prueba lo que parece.
+
+El importador crea el producto de fábrica **copiando la descripción** de la fila que primero
+nombró ese número. O sea que «la descripción coincide» quiere decir, en realidad, «esta fila
+fue la primera». Sobre la cola real: de 2.397 números de fábrica, **2.296 tienen exactamente
+una fila de origen**, y de los 919 vínculos que había que revisar a mano, **643 (el 70 %) son
+hermanos** — filas que citan el mismo número con la misma evidencia y llegaron segundas.
+
+El hermano que es **la misma pieza en otra medida** —`TC-703-MG` contra `TC-703-15`— ahora
+recibe la misma señal, con su propio texto, porque tiene la misma evidencia detrás. Se pide que
+compartan la base del código, que es lo que distingue a una variante.
+
+Lo mismo arregla dos cosas más que venían del mismo malentendido:
+
+- **La alarma de ambigüedad no le corresponde al hermano variante.** Que la junta venga en tres
+  espesores no quiere decir que alguno esté mal cargado.
+- **El veto por medidas tampoco.** El nodo de fábrica no tiene medidas propias: se leyeron de la
+  descripción que copió. Comparar el espesor de `TC-615-MG 4M` (2,40 mm) contra el que el nodo
+  heredó de `TC-615-MG 0M` (1,65 mm) es compararlo contra su propio hermano — la diferencia está
+  garantizada por construcción. Comprobado: de los 3.185 pendientes hay **34 con la medida
+  contradiciéndose y los 34 son exactamente este caso**. Ni uno era una pieza distinta.
+
+## Y lo que se aprobaba sin mirar tenía basura adentro
+
+Eso solo no se podía soltar. Subir 300 hermanos al botón de «aprobar sin mirar» sirve si el
+botón está limpio, y no lo estaba.
+
+`ILLINOIS` escribe la descripción con una forma fija: primero qué es la pieza y para qué autos,
+y al final los números de fábrica de verdad, entre paréntesis o detrás de `//`. Cuando el número
+cargado como código **no está en esa zona** pero la zona existe y tiene otros números, lo que
+pasó es claro: el extractor lo levantó del texto del medio, donde van los motores.
+
+```
+«Junta para Cárter RENAULT CLIO … - 1,4/1,5/1,6 - K4M K4J K9K16V (8200………)»
+   quedó cargado «K9K16V», que es el MOTOR. El número real estaba en el paréntesis.
+«Junta Tapa de Cilindros SCANIA … - 10,6/11,7 - … DSC12.01 (…)»   -> «DSC12.01»
+«Junta Tapa de Válvulas PERKINS … - 3,3 - 4.203/4-PA.203 (…)»     -> «4-PA.203»
+```
+
+Los tres tenían **100 de confianza** y entraban al botón de aprobar en bloque.
+
+**No baja a rojo, baja a amarillo**, y la diferencia es deliberada. El objetivo es sacarlos de
+«aprobar sin mirar», no darlos por perdidos. Revisando 22 a mano: 17 eran designaciones de motor
+o de chasis, y **5 eran números de fábrica reales con la marca pegada adelante** («AGCO SISU
+POWER836122282», «JOHN DEERER43413»). Con el castigo en rojo esas 5 quedaban como basura; en
+amarillo cuestan una mirada, que es lo que cuestan.
+
+### El efecto, medido sobre los 3.185
+
+| | hoy | después |
+|---|---|---|
+| 🟢 se puede aprobar sin mirar | 2.266 | **2.456** |
+| 🟡 conviene una mirada | 502 | 335 |
+| 🔴 casi seguro mal | 417 | 394 |
+| **hay que mirar a mano** | **919** | **729** |
+
+190 decisiones manuales menos, y **104 vínculos con un motor como número de fábrica salieron
+del botón de aprobar en bloque**. Ninguno de los 2.456 verdes tiene una señal en contra ni una
+alarma.
+
+### Lo que no queda perfecto, dicho como es
+
+Revisé 15 de los 324 que subieron a verde por la señal nueva: 14 son números de fábrica reales
+(`7702023675` de Renault, `06A103383AN` de VW, `BB3Q6051C1A` de Ford). **Uno no**: `MF:1075`, que
+es un modelo de tractor Massey Ferguson, y el detector de referencias no lo agarra porque esa
+descripción no tiene zona de referencias.
+
+O sea: el botón de aprobar en bloque queda **más limpio que antes** —salen 104 y entra cerca de
+una veintena— pero no queda limpio. La basura que queda es la misma clase de siempre: un modelo
+de vehículo metido en la columna del código de fábrica, y se sigue atacando por donde ya se
+venía atacando, en «Puentes que hoy ya no se generarían».
+
 ## Pegar códigos de barras en masa nunca funcionó por la opción que viene puesta
 
 ```sql

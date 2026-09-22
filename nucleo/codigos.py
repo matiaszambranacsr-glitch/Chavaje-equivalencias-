@@ -889,6 +889,45 @@ def codigo_base_sin_variante(codigo):
     return base if any(ch.isdigit() for ch in base) else None
 
 
+PUNTAJE_QUE_NO_LLEGA_A_APROBAR_SOLO = 74.0
+
+
+def el_codigo_no_figura_entre_las_referencias(codigo, descripcion):
+    """¿El «número de fábrica» se sacó del texto del vehículo en vez de la lista de referencias?
+
+    ILLINOIS y varios más escriben la descripción con una forma fija: primero qué es la pieza y
+    para qué autos, y al final los números de fábrica de verdad, entre paréntesis o detrás de
+    «//». Cuando el número que quedó cargado como código de fábrica NO está en esa zona pero la
+    zona existe y tiene otros números, lo que pasó es claro: el extractor lo levantó del texto
+    del medio, donde van los motores y las designaciones de chasis.
+
+    Ejemplos reales de la cola, todos hoy con 100 de confianza:
+        «Junta para Cárter RENAULT CLIO … - 1,4/1,5/1,6 - K4M K4J K9K16V (8200………)»
+         -> quedó cargado «K9K16V», que es el MOTOR; el número real está en el paréntesis.
+        «Junta Tapa de Cilindros SCANIA … - 10,6/11,7 - 16… DSC12.01 (…)» -> «DSC12.01».
+        «… PERKINS … 4.203/4-PA.203 …» -> «4-PA.203».
+
+    NO BAJA A ROJO, BAJA A AMARILLO, y la diferencia importa. El objetivo es sacarlos del botón
+    de «aprobar sin mirar», no darlos por perdidos. Revisando una muestra de 22 a mano, 17 eran
+    designaciones de motor o de chasis y **5 eran números de fábrica reales con la marca pegada
+    adelante** («AGCO SISU POWER836122282», «JOHN DEERER43413»). Con el castigo en rojo esas 5
+    quedaban como basura; con el castigo en amarillo cuestan una mirada, que es lo que cuestan.
+
+    Sobre la cola real toca 104 de los 2.560 vínculos que hoy se aprueban en bloque."""
+    if not codigo or not descripcion:
+        return False
+    zona = " ".join([m.group(1) for m in re.finditer(r"\(([^)]*)\)", descripcion)]
+                    + re.findall(r"//(.*)$", descripcion))
+    if not zona:
+        return False
+    # La zona tiene que tener al menos un número con pinta de código; si son puras medidas
+    # («ESP 1.50MM») no es una lista de referencias y no se puede concluir nada.
+    if not any(any(ch.isdigit() for ch in t)
+               for t in re.findall(r"[A-Z0-9][A-Z0-9./-]{4,}", zona.upper())):
+        return False
+    return sanitizar(codigo).upper() not in sanitizar(zona).upper()
+
+
 def son_variantes_de_la_misma_pieza(codigos):
     """¿Estos códigos de un mismo proveedor son la misma pieza en distintas medidas?
 

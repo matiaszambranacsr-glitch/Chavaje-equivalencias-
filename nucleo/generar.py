@@ -85,6 +85,7 @@ from .errores import anotar_error
       "FORMAS_DE_DESIGNACION_DE_MOTOR", "parece_designacion_de_motor",
       "_es_lista_de_modelos",
       "extraer_codigos_de_texto", "codigo_base_sin_variante",
+      "PUNTAJE_QUE_NO_LLEGA_A_APROBAR_SOLO", "el_codigo_no_figura_entre_las_referencias",
       "son_variantes_de_la_misma_pieza", "codigo_que_hoy_no_se_tomaria",
       "digito_verificador_gtin", "codigo_de_barras_cierra", "columna_es_codigo_de_barras",
       "PREFIJOS_GS1", "pais_del_codigo_de_barras", "pais_de_estos_codigos", "GS1_NO_ES_UN_PAIS",

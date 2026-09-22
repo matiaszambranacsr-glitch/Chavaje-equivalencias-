@@ -4069,6 +4069,45 @@ def son_variantes_de_la_misma_pieza(codigos):
     return len(bases) == 1 and None not in bases
 
 
+PUNTAJE_QUE_NO_LLEGA_A_APROBAR_SOLO = 74.0   # el verde arranca en 75
+
+
+def el_codigo_no_figura_entre_las_referencias(codigo, descripcion):
+    """¿El «número de fábrica» se sacó del texto del vehículo en vez de la lista de referencias?
+
+    ILLINOIS y varios más escriben la descripción con una forma fija: primero qué es la pieza y
+    para qué autos, y al final los números de fábrica de verdad, entre paréntesis o detrás de
+    «//». Cuando el número que quedó cargado como código de fábrica NO está en esa zona pero la
+    zona existe y tiene otros números, lo que pasó es claro: el extractor lo levantó del texto
+    del medio, donde van los motores y las designaciones de chasis.
+
+    Ejemplos reales de la cola, todos hoy con 100 de confianza:
+        «Junta para Cárter RENAULT CLIO … - 1,4/1,5/1,6 - K4M K4J K9K16V (8200………)»
+         -> quedó cargado «K9K16V», que es el MOTOR; el número real está en el paréntesis.
+        «Junta Tapa de Cilindros SCANIA … - 10,6/11,7 - 16… DSC12.01 (…)» -> «DSC12.01».
+        «… PERKINS … 4.203/4-PA.203 …» -> «4-PA.203».
+
+    NO BAJA A ROJO, BAJA A AMARILLO, y la diferencia importa. El objetivo es sacarlos del botón
+    de «aprobar sin mirar», no darlos por perdidos. Revisando una muestra de 22 a mano, 17 eran
+    designaciones de motor o de chasis y **5 eran números de fábrica reales con la marca pegada
+    adelante** («AGCO SISU POWER836122282», «JOHN DEERER43413»). Con el castigo en rojo esas 5
+    quedaban como basura; con el castigo en amarillo cuestan una mirada, que es lo que cuestan.
+
+    Sobre la cola real toca 104 de los 2.560 vínculos que hoy se aprueban en bloque."""
+    if not codigo or not descripcion:
+        return False
+    zona = " ".join([m.group(1) for m in re.finditer(r"\(([^)]*)\)", descripcion)]
+                    + re.findall(r"//(.*)$", descripcion))
+    if not zona:
+        return False
+    # La zona tiene que tener al menos un número con pinta de código; si son puras medidas
+    # («ESP 1.50MM») no es una lista de referencias y no se puede concluir nada.
+    if not any(any(ch.isdigit() for ch in t)
+               for t in re.findall(r"[A-Z0-9][A-Z0-9./-]{4,}", zona.upper())):
+        return False
+    return sanitizar(codigo).upper() not in sanitizar(zona).upper()
+
+
 def codigo_que_hoy_no_se_tomaria(codigo):
     """¿Es un código que las reglas de hoy ya NO aceptarían como código de fábrica?
 
@@ -6512,7 +6551,8 @@ def evaluar_equivalencia(desc_a, desc_b, medidas_a=None, medidas_b=None,
                          precio_a=None, precio_b=None, veces_confirmada=1,
                          respaldo_fabricante=False, marca_a="", marca_b="", patrones=None,
                          vendido_como_reemplazo=0, codigo_puente=None,
-                         productos_del_puente=0, escalas=None, trae_al_otro=""):
+                         productos_del_puente=0, escalas=None, trae_al_otro="",
+                         variante_del_origen=""):
     """Pesa toda la evidencia disponible sobre un vínculo. Devuelve (puntaje 0-100, señales).
 
     La diferencia con lo que había antes: las alarmas eran una lista plana, así que 397 vínculos
@@ -6568,7 +6608,16 @@ def evaluar_equivalencia(desc_a, desc_b, medidas_a=None, medidas_b=None,
             senales.append(("bien", "🕸️ Ese código une solo estos dos: es el mismo repuesto en "
                                      "dos proveedores"))
 
-    if medidas_a and medidas_b:
+    # EL NODO DE FÁBRICA NO TIENE MEDIDAS PROPIAS cuando el otro lado es una variante del que
+    # lo creó, así que acá no hay prueba física que valga. El producto OEM se crea copiando la
+    # descripción de la fila que primero nombró ese número, y las medidas se leen de esa copia:
+    # comparar el espesor de «TC-615-MG 4M» (2,40 mm) contra el que el nodo heredó de
+    # «TC-615-MG 0M» (1,65 mm) es compararlo contra su propio hermano. La diferencia está
+    # garantizada por construcción y no dice nada del vínculo.
+    # Medido sobre la cola real: de los 3.185 pendientes hay 34 con la medida contradiciéndose,
+    # y los 34 son exactamente este caso —misma base de código que el origen—. Ni uno solo era
+    # una pieza distinta.
+    if medidas_a and medidas_b and not variante_del_origen:
         coinciden, detalle = comparar_medidas(medidas_a, medidas_b)
         if coinciden is False:
             # TOPE, no resta. Esta función dice arriba que las medidas que se contradicen son
@@ -6622,6 +6671,25 @@ def evaluar_equivalencia(desc_a, desc_b, medidas_a=None, medidas_b=None,
         puntaje += 35
         senales.append(("bien", "📄 Los dos tienen EXACTAMENTE la misma descripción: salieron "
                                  "de la misma fila de la lista del proveedor"))
+    elif variante_del_origen:
+        # LA MISMA EVIDENCIA, POR ORDEN DE LLEGADA. Vale lo mismo que la de arriba y por eso
+        # suma lo mismo, pero hay que decirlo aparte porque la de arriba no la alcanzaba.
+        #
+        # El nodo de fábrica se crea copiando la descripción de la fila que primero nombró ese
+        # número. O sea que «la descripción coincide» quiere decir, en realidad, «esta fila fue
+        # la primera». El hermano que cita EL MISMO número con la misma evidencia arrancaba 35
+        # puntos abajo por el azar del orden de importación, y nada más que por eso.
+        #
+        # Medido sobre la cola real: de 2.397 números de fábrica, 2.296 tienen exactamente una
+        # fila de origen. De los 919 vínculos que hoy hay que revisar a mano, 643 —el 70 %— son
+        # hermanos. En una muestra de 30 revisada a mano, 18 eran vínculos correctos frenados
+        # por esto.
+        #
+        # Se pide que compartan la base del código, que es lo que distingue a una variante:
+        # «TC-703-MG» y «TC-703-15» son la misma junta en otro material. En una muestra de 20
+        # al azar, 20/20 correctos.
+        puntaje += 35
+        senales.append(("bien", f"📄 {variante_del_origen}"))
 
     # Rubro: es la señal más barata y una de las que más basura caza. Si las descripciones
     # hablan de piezas de familias distintas, el vínculo no puede ser correcto.
@@ -6737,13 +6805,43 @@ def analizar_lote_pendiente(lote, limite=None, desde=0):
     # Se guarda el CÓDIGO del proveedor y no solo su id, porque hace falta para distinguir las
     # variantes de una misma pieza (ver son_variantes_de_la_misma_pieza).
     apuntados = {}
+    # LA FILA QUE CREÓ EL NODO DE FÁBRICA. El importador crea el producto OEM copiando la
+    # descripción de la fila del proveedor, así que la fila cuya descripción es idéntica a la
+    # del nodo es la que lo originó. Sobre la cola real, 2.296 de 2.397 nodos tienen
+    # exactamente una; cuando hay cero o varias no se puede decidir y no se usa.
+    # Hace falta para saber quién es «el hermano»: el que cita el mismo número pero llegó
+    # segundo, y al que por eso no le tocó la señal de la descripción igual.
+    candidatos_a_origen = {}
     for f in filas:
         if "OEM" not in (f["tipo_a"], f["tipo_b"]):
             continue
-        oem, otro, marca_otro, cod_otro = (
-            (f["cod_a"], f["b"], f["marca_b"], f["cod_b"]) if f["tipo_a"] == "OEM"
-            else (f["cod_b"], f["a"], f["marca_a"], f["cod_a"]))
-        apuntados.setdefault((sanitizar(oem), marca_otro), {})[otro] = cod_otro
+        oem, otro, marca_otro, cod_otro, desc_oem, desc_otro = (
+            (f["cod_a"], f["b"], f["marca_b"], f["cod_b"], f.get("desc_a"), f.get("desc_b"))
+            if f["tipo_a"] == "OEM"
+            else (f["cod_b"], f["a"], f["marca_a"], f["cod_a"], f.get("desc_b"), f.get("desc_a")))
+        clave = (sanitizar(oem), marca_otro)
+        apuntados.setdefault(clave, {})[otro] = cod_otro
+        if normalizar_texto(desc_oem or "") == normalizar_texto(desc_otro or "") and desc_oem:
+            candidatos_a_origen.setdefault(clave, set()).add(cod_otro)
+    origen_del_codigo = {k: next(iter(v)) for k, v in candidatos_a_origen.items() if len(v) == 1}
+
+    def _variante_del_origen(clave, cod_propio):
+        """¿Este producto es la misma pieza que la que originó el número, en otra medida?"""
+        origen = origen_del_codigo.get(clave)
+        if not origen or sanitizar(origen) == sanitizar(cod_propio):
+            return ""     # no hay origen claro, o ESTE es el origen
+        base_propia = codigo_base_sin_variante(cod_propio)
+        if base_propia and base_propia == codigo_base_sin_variante(origen):
+            return (f"Es la misma pieza que «{origen}» —la fila que trajo este número de "
+                    "fábrica— en otra medida o material, así que la respalda la misma fila "
+                    "de la lista del proveedor")
+        return ""
+
+    # La alarma de ambigüedad no le corresponde al hermano que ES una variante del origen:
+    # que la junta venga en tres espesores no quiere decir que alguno esté mal cargado.
+    # Antes era todo-o-nada sobre el grupo y alcanzaba un miembro raro para marcar a los demás:
+    # en «11044BC20A», TC-384-15 / -MG / -11 son la misma junta en tres materiales y TC-801-11
+    # es otra pieza, y los cuatro se llevaban el castigo.
     ambiguos = {k for k, v in apuntados.items()
                 if len(v) > 1 and not son_variantes_de_la_misma_pieza(v.values())}
 
@@ -6808,10 +6906,16 @@ def analizar_lote_pendiente(lote, limite=None, desde=0):
         # revisión manual: 125 de 179 sugerencias marcadas, y la alarma era casi siempre esta.
         # El error estaba en el else: cuando ninguno de los dos era OEM, igual tomaba el código
         # B y lo trataba como si lo fuera.
+        _variante = ""
         if "OEM" in (f["tipo_a"], f["tipo_b"]):
-            oem, marca_otro = ((f["cod_a"], f["marca_b"]) if f["tipo_a"] == "OEM"
-                                else (f["cod_b"], f["marca_a"]))
-            if (sanitizar(oem), marca_otro) in ambiguos:
+            oem, marca_otro, _cod_propio = (
+                (f["cod_a"], f["marca_b"], f["cod_b"]) if f["tipo_a"] == "OEM"
+                else (f["cod_b"], f["marca_a"], f["cod_a"]))
+            _clave = (sanitizar(oem), marca_otro)
+            _variante = _variante_del_origen(_clave, _cod_propio)
+            # Al hermano que es una variante del origen no le corresponde la alarma: que la
+            # junta venga en tres espesores no quiere decir que alguno esté mal cargado.
+            if _clave in ambiguos and not _variante:
                 alarmas.append(f"⚠️ El código {oem} apunta a más de un producto de "
                                 f"{marca_otro} — alguno de los dos está mal cargado")
         # ¿Es un kit y la pieza que trae adentro? Entonces no se pregunta: no es una
@@ -6841,6 +6945,7 @@ def analizar_lote_pendiente(lote, limite=None, desde=0):
             vendido_como_reemplazo=ventas_confirman.get((min(f["a"], f["b"]),
                                                           max(f["a"], f["b"])), 0),
             escalas=escalas_precio,
+            variante_del_origen=_variante,
             # Solo se consulta cuando uno de los dos DICE que es un kit, que es una prueba de
             # texto y cuesta nada. Sin esa guarda serían 1.000 LIKE sobre las 70.888
             # descripciones por cada tanda que se revisa.
@@ -6884,6 +6989,25 @@ def analizar_lote_pendiente(lote, limite=None, desde=0):
                           "→ 🧹 Limpiar y corregir → «Puentes que hoy ya no se generarían»")
                 if _aviso not in alarmas:
                     alarmas.append(_aviso)
+                break
+
+        # Y el que se levantó del texto del medio en vez de la lista de referencias del final.
+        # Es más blando a propósito: saca el vínculo del botón de aprobar en bloque y lo manda
+        # a «conviene una mirada», sin darlo por perdido. Ver
+        # el_codigo_no_figura_entre_las_referencias().
+        for _lado, _tipo, _otra_desc in (("cod_a", "tipo_a", "desc_b"),
+                                          ("cod_b", "tipo_b", "desc_a")):
+            if f.get(_tipo) != "OEM":
+                continue
+            _cod_ref = f.get(_lado) or ""
+            if _cod_ref and el_codigo_no_figura_entre_las_referencias(_cod_ref,
+                                                                      f.get(_otra_desc) or ""):
+                puntaje = min(puntaje, PUNTAJE_QUE_NO_LLEGA_A_APROBAR_SOLO)
+                _av_ref = (f"🔎 «{_cod_ref}» no aparece entre los números de fábrica que la "
+                           "descripción lista al final: parece sacado del texto del medio, "
+                           "donde van los motores. Miralo antes de aprobarlo")
+                if _av_ref not in alarmas:
+                    alarmas.append(_av_ref)
                 break
 
         # Y el cruce de métodos, que es lo que más precisión da: que dos caminos
