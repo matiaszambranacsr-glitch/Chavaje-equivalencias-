@@ -84,7 +84,8 @@ from .errores import anotar_error
       "_MARCAS_DE_AUTO_QUE_SE_PEGAN", "_RE_MARCA_DE_AUTO_PEGADA", "_RE_MODELO_IVECO",
       "FORMAS_DE_DESIGNACION_DE_MOTOR", "parece_designacion_de_motor",
       "_es_lista_de_modelos",
-      "extraer_codigos_de_texto", "MARCAS_DE_REPUESTO", "_RE_MARCA_DE_REPUESTO",
+      "extraer_codigos_de_texto", "FORMAS_DE_POSICION", "_RE_POSICION", "EJES_DE_POSICION",
+      "posicion_desde_descripcion", "MARCAS_QUE_FABRICAN_LA_PIEZA", "_RE_MARCA_DE_REPUESTO",
       "marca_de_repuesto_en", "codigo_base_sin_variante",
       "PUNTAJE_QUE_NO_LLEGA_A_APROBAR_SOLO", "el_codigo_no_figura_entre_las_referencias",
       "son_variantes_de_la_misma_pieza", "codigo_que_hoy_no_se_tomaria",
@@ -106,7 +107,7 @@ import unicodedata
 from datetime import datetime
 
 from .errores import anotar_error
-from .codigos import _RE_REF_PEGADO, normalizar_texto, sanitizar
+from .codigos import _RE_REF_PEGADO, normalizar_texto, posicion_desde_descripcion, sanitizar
 ''', ["MARCAS_VEHICULO", "ALIAS_MARCA_VEHICULO", "_escrituras_por_marca",
       "ESCRITURAS_DE_MARCA", "_RE_MARCAS_VEHICULO",
       # El tope del caché va PRIMERO: los dos decoradores que el ajuste de más abajo

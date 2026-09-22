@@ -860,32 +860,86 @@ def extraer_codigos_de_texto(texto, minimo=6, codigo_propio=None, codigos_conoci
     return salida
 
 
-# Marcas de REPUESTO. No son modelos de auto, y tampoco dicen qué pieza es: dos proveedores
-# distintos venden repuestos Bosch de cosas completamente distintas.
-# Estaban saliendo primeras en el desplegable «Modelo / motor»: DELCO encabezaba la lista de
-# Ford con 951 apariciones y NIPPONDENSO la de Toyota con 476, antes que COROLLA. El filtro de
-# «aparece sobre todo en esta marca» no las agarra porque un proveedor sí las nombra casi
-# siempre junto al mismo auto.
-# Va en su propio conjunto porque firma_de_producto() necesita sacar ESTAS de lo que dice qué
-# pieza es, y NO las de abajo — ver el comentario del núcleo.
-MARCAS_DE_REPUESTO = {
-    "BOSCH", "VALEO", "DELCO", "DENSO", "NIPPONDENSO", "MAGNETI", "MAGNETTI", "MARELLI",
-    "HITACHI", "LUCAS", "SIEMENS", "DELPHI", "JAEGER", "MASSER", "CAUPLAS", "WEBER", "SOLEX",
-    "SKF", "NGK", "MANN", "VITRON", "TAILLOT", "PAIA", "WAHLER", "GATES", "SACHS", "MONROE",
-    "FRAM", "BERU", "FACET", "PIERBURG", "MAHLE", "ELRING", "REINZ", "AJUSA", "CORTECO",
-    "PAYEN", "TRW", "FERODO", "BREMBO", "NAKATA", "ILUMA", "DPB", "FISPA", "CBOSCH",
-    # Salidas de contar qué palabras entraban en la APLICACIÓN de las firmas del catálogo real:
-    # estas cinco están entre las más frecuentes y no son autos, son quién hizo el repuesto.
-    # LESTER no es un fabricante sino la numeración con la que se piden alternadores, pero para
-    # esto da igual: tampoco dice para qué auto es.
-    "INA", "HELLA", "PRESTOLITE", "UNIPOINT", "LESTER", "THOMSON", "INDUMAG",
+# DÓNDE VA LA PIEZA. Tres ejes, y de cada uno se toma un lado solo.
+# Las abreviaturas van con punto, guion o final de texto a propósito, y esto costó una medición:
+# «DEL» suelto es la preposición más común del español, y con ella «Junta Tapa de Cilindros
+# FORD CORCEL PAMPA DEL REY» —que es el Ford Del Rey— quedaba como pieza DELANTERA. Exigiendo
+# «DEL.» o «DEL-», los falsos positivos desaparecen: de 4.239 productos se baja a 3.528, y en
+# una muestra de 16 al azar revisada a mano, 16 correctas.
+FORMAS_DE_POSICION = {
+    "DELANTERA": r"DELANTER[OA]S?|FRONTAL(?:ES)?|(?<![A-Z])DEL(?=[.\-]|\s*$)",
+    "TRASERA":   r"TRASER[OA]S?|POSTERIOR(?:ES)?|(?<![A-Z])TRAS(?=[.\-]|\s*$)",
+    "IZQUIERDA": r"IZQUIERD[OA]S?|(?<![A-Z])IZQ(?![A-Z])",
+    "DERECHA":   r"DERECH[OA]S?|(?<![A-Z])DER(?![A-Z])",
+    "SUPERIOR":  r"SUPERIOR(?:ES)?|(?<![A-Z])SUP(?=[.\-]|\s*$)",
+    "INFERIOR":  r"INFERIOR(?:ES)?|(?<![A-Z])INF(?=[.\-]|\s*$)",
 }
+
+
+_RE_POSICION = {k: re.compile(v, re.IGNORECASE) for k, v in FORMAS_DE_POSICION.items()}
+
+
+EJES_DE_POSICION = [("DELANTERA", "TRASERA"), ("IZQUIERDA", "DERECHA"),
+                    ("SUPERIOR", "INFERIOR")]
+
+
+def posicion_desde_descripcion(descripcion):
+    """Dónde va la pieza, si la descripción lo dice sin ambigüedad. None si no.
+
+    Si nombra LOS DOS lados de un eje —«delantero y trasero», un kit que trae ambos— devuelve
+    None para ese eje: no se puede decir dónde va, y adivinar sería peor que no saber, porque
+    esto alimenta un veto.
+
+    Sirve para dos cosas. Como filtro y como dato a la vista —«¿el de adelante o el de
+    atrás?» es media conversación del mostrador— y como PRUEBA FÍSICA: el caño superior del
+    radiador no reemplaza al inferior, por más que los dos sean del mismo auto."""
+    if not descripcion:
+        return None
+    texto = str(descripcion)
+    presentes = {k for k, rx in _RE_POSICION.items() if rx.search(texto)}
+    partes = []
+    for uno, otro in EJES_DE_POSICION:
+        tiene_uno, tiene_otro = uno in presentes, otro in presentes
+        if tiene_uno and tiene_otro:
+            return None      # nombra los dos: no se puede decidir
+        if tiene_uno:
+            partes.append(uno)
+        elif tiene_otro:
+            partes.append(otro)
+    return "+".join(partes) or None
+
+
+# QUIÉN FABRICA LA PIEZA. No confundir con la marca de la tabla `marcas`, que es quién te la
+# vende: JL, MOTORARG, ILLINOIS, FISPA. En el mostrador la primera pregunta suele ser «¿lo
+# tenés en Bosch o en Masser?», y ese dato no estaba en ninguna columna.
+#
+# La lista es curada y no adivinada, y vale explicar por qué. Se midió, sobre las 46.644
+# descripciones de proveedor, con qué frecuencia cada palabra aparece AL FINAL contra cuántas
+# veces aparece en cualquier lado — una marca es una firma, va al final. Eso separa muy bien a
+# MASSER (1,00), CAUPLAS (1,00), FLORIO (1,00) o MLH (0,98)… pero NO alcanza: BOSCH da 0,32 y
+# MARELLI 0,59, porque también aparecen en el medio como referencia cruzada («REF ORIG BOSCH
+# 0281002764»). Y al revés, RETENES da 0,68 y DIESEL 0,27 sin ser marcas de nada.
+# O sea que la proporción sirve para DESCUBRIR candidatos, no para decidir. La decisión es una
+# lista, como la de las marcas de vehículo.
+#
+# El nombre NO es MARCAS_DE_REPUESTO aunque sea lo que uno escribiría: ese nombre ya existe más
+# abajo y es otra cosa —el conjunto de marcas que hay que DESPEGAR de un texto pegado—. Las dos
+# definiciones a nivel módulo convivían sin romperse solo porque esta se usa antes de que la
+# otra la pise, que es la clase de cosa que anda hasta el día que deja de andar.
+MARCAS_QUE_FABRICAN_LA_PIEZA = [
+    "MAGNETI MARELLI", "MAGNETI", "MARELLI", "BOSCH", "MASSER", "CAUPLAS", "METALGRAF",
+    "DELPHI", "FLORIO", "WEBER", "SOLEX", "INDUMAG", "ARGELITE", "NGK", "RALUX", "AUTRONIC",
+    "VUARAM", "RO-FIL", "ROFIL", "GALILEO", "THOMSON", "MLH", "MLS", "WAGNER", "VALEO",
+    "SKF", "MANN", "SACHS", "MAHLE", "CORTECO", "VICTOR REINZ", "REINZ", "TARANTO",
+    "LUCAS", "DENSO", "HENGST", "TRW", "FRAM", "WIX", "MONROE", "GABRIEL",
+]
 
 
 # De más larga a más corta, para que «MAGNETI MARELLI» gane sobre «MARELLI».
 _RE_MARCA_DE_REPUESTO = re.compile(
     r"(?:^|[\s\-/.,])(" + "|".join(re.escape(m) for m in
-                                   sorted(MARCAS_DE_REPUESTO, key=len, reverse=True)) + r")\s*$",
+                                   sorted(MARCAS_QUE_FABRICAN_LA_PIEZA, key=len,
+                                          reverse=True)) + r")\s*$",
     re.IGNORECASE)
 
 

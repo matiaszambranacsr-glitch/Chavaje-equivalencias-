@@ -1893,6 +1893,29 @@ for _ln, _sql in _LITERALES_SQL:
         pass
 
 
+# ============ 36) El mismo nombre a nivel módulo, definido dos veces ============
+# Python no se queja: la segunda asignación pisa a la primera, y todo lo que se ejecutó en el
+# medio se quedó con la vieja. Anda perfecto hasta el día que alguien mueve una línea.
+# Pasó de verdad: se agregó MARCAS_DE_REPUESTO (la lista de quién FABRICA la pieza) sin ver que
+# ya existía MARCAS_DE_REPUESTO más abajo (el conjunto de marcas que hay que despegar de un
+# texto). Las dos convivieron sin romperse solo porque la primera se usa antes de que la
+# segunda la pise. Y encima nucleo/generar.py copia bloques POR NOMBRE: con el nombre repetido
+# se lleva cualquiera de los dos.
+_ASIGNADOS = defaultdict(list)
+for _n in ARBOL.body:
+    if isinstance(_n, ast.Assign):
+        for _t in _n.targets:
+            if isinstance(_t, ast.Name):
+                _ASIGNADOS[_t.id].append(_n.lineno)
+for _nombre, _lineas in _ASIGNADOS.items():
+    if len(_lineas) > 1 and _nombre.isupper():
+        reportar("ERROR", _lineas[-1],
+                 f"«{_nombre}» se define dos veces a nivel módulo (líneas "
+                 f"{', '.join(str(x) for x in _lineas)}). La segunda pisa a la primera y "
+                 "nucleo/generar.py, que copia bloques por nombre, se lleva cualquiera de las "
+                 "dos. Renombrar una")
+
+
 # ============ Resultado ============
 orden = {"ERROR": 0, "REVISAR": 1, "AVISO": 2}
 problemas.sort(key=lambda x: (orden[x[0]], x[1]))

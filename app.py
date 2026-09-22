@@ -358,7 +358,7 @@ VERSION_CONFIANZA = "3"
 # Sobre la base real eran 1.402 productos con la medida escrita en el texto y 0 cargadas,
 # porque llenarlas era un botón de Mantenimiento que había que saber apretar.
 # Subir el número al agregar una medida nueva a medidas_desde_descripcion().
-VERSION_MEDIDAS = "2"
+VERSION_MEDIDAS = "3"
 
 # La versión del LECTOR DE APLICACIONES: a qué auto le va cada pieza, deducido de la
 # descripción. Es el dato gratis más grande que tiene esta base —114.673 filas que salen de
@@ -369,7 +369,7 @@ VERSION_MEDIDAS = "2"
 VERSION_APLICACIONES = "3"
 
 # Quién FABRICA la pieza, leído del final de la descripción. Ver marca_de_repuesto_en().
-# Subir el número al agregar marcas a MARCAS_DE_REPUESTO o al cambiar cómo se leen.
+# Subir el número al agregar marcas a MARCAS_QUE_FABRICAN_LA_PIEZA o al cambiar cómo se leen.
 VERSION_MARCAS_REPUESTO = "1"
 
 
@@ -1218,6 +1218,12 @@ def _esquema_fotos(c):
     # hasta ahora la app no tenía dónde guardar que esa bomba es Bosch y esa otra es Masser. Y
     # es la primera pregunta del mostrador. Ver marca_de_repuesto_en(): sobre las 46.644
     # descripciones de proveedor está escrita en 13.705.
+    # DÓNDE VA LA PIEZA: delantera/trasera, izquierda/derecha, superior/inferior. Es de los
+    # datos que hacen que dos piezas NO sean intercambiables aunque todo lo demás coincida —el
+    # caño superior del radiador no es el inferior— y estaba escrito en miles de descripciones
+    # sin que lo leyera nadie. Ver posicion_desde_descripcion().
+    if "posicion" not in columnas_productos:
+        c.execute("ALTER TABLE productos ADD COLUMN posicion TEXT")
     if "marca_repuesto" not in columnas_productos:
         c.execute("ALTER TABLE productos ADD COLUMN marca_repuesto TEXT")
         c.execute("CREATE INDEX IF NOT EXISTS idx_marca_repuesto ON productos(marca_repuesto)")
@@ -4045,7 +4051,12 @@ def cargar_codigos_de_barras_masivo(pares, marca_id=None, pisar=True):
 # 0281002764»). Y al revés, RETENES da 0,68 y DIESEL 0,27 sin ser marcas de nada.
 # O sea que la proporción sirve para DESCUBRIR candidatos, no para decidir. La decisión es una
 # lista, como la de las marcas de vehículo.
-MARCAS_DE_REPUESTO = [
+#
+# El nombre NO es MARCAS_DE_REPUESTO aunque sea lo que uno escribiría: ese nombre ya existe más
+# abajo y es otra cosa —el conjunto de marcas que hay que DESPEGAR de un texto pegado—. Las dos
+# definiciones a nivel módulo convivían sin romperse solo porque esta se usa antes de que la
+# otra la pise, que es la clase de cosa que anda hasta el día que deja de andar.
+MARCAS_QUE_FABRICAN_LA_PIEZA = [
     "MAGNETI MARELLI", "MAGNETI", "MARELLI", "BOSCH", "MASSER", "CAUPLAS", "METALGRAF",
     "DELPHI", "FLORIO", "WEBER", "SOLEX", "INDUMAG", "ARGELITE", "NGK", "RALUX", "AUTRONIC",
     "VUARAM", "RO-FIL", "ROFIL", "GALILEO", "THOMSON", "MLH", "MLS", "WAGNER", "VALEO",
@@ -4056,7 +4067,8 @@ MARCAS_DE_REPUESTO = [
 # De más larga a más corta, para que «MAGNETI MARELLI» gane sobre «MARELLI».
 _RE_MARCA_DE_REPUESTO = re.compile(
     r"(?:^|[\s\-/.,])(" + "|".join(re.escape(m) for m in
-                                   sorted(MARCAS_DE_REPUESTO, key=len, reverse=True)) + r")\s*$",
+                                   sorted(MARCAS_QUE_FABRICAN_LA_PIEZA, key=len,
+                                          reverse=True)) + r")\s*$",
     re.IGNORECASE)
 
 
@@ -4096,6 +4108,51 @@ def completar_marcas_de_repuesto():
                 puestos += 1
         conn.commit()
     return puestos
+
+
+# DÓNDE VA LA PIEZA. Tres ejes, y de cada uno se toma un lado solo.
+# Las abreviaturas van con punto, guion o final de texto a propósito, y esto costó una medición:
+# «DEL» suelto es la preposición más común del español, y con ella «Junta Tapa de Cilindros
+# FORD CORCEL PAMPA DEL REY» —que es el Ford Del Rey— quedaba como pieza DELANTERA. Exigiendo
+# «DEL.» o «DEL-», los falsos positivos desaparecen: de 4.239 productos se baja a 3.528, y en
+# una muestra de 16 al azar revisada a mano, 16 correctas.
+FORMAS_DE_POSICION = {
+    "DELANTERA": r"DELANTER[OA]S?|FRONTAL(?:ES)?|(?<![A-Z])DEL(?=[.\-]|\s*$)",
+    "TRASERA":   r"TRASER[OA]S?|POSTERIOR(?:ES)?|(?<![A-Z])TRAS(?=[.\-]|\s*$)",
+    "IZQUIERDA": r"IZQUIERD[OA]S?|(?<![A-Z])IZQ(?![A-Z])",
+    "DERECHA":   r"DERECH[OA]S?|(?<![A-Z])DER(?![A-Z])",
+    "SUPERIOR":  r"SUPERIOR(?:ES)?|(?<![A-Z])SUP(?=[.\-]|\s*$)",
+    "INFERIOR":  r"INFERIOR(?:ES)?|(?<![A-Z])INF(?=[.\-]|\s*$)",
+}
+_RE_POSICION = {k: re.compile(v, re.IGNORECASE) for k, v in FORMAS_DE_POSICION.items()}
+EJES_DE_POSICION = [("DELANTERA", "TRASERA"), ("IZQUIERDA", "DERECHA"),
+                    ("SUPERIOR", "INFERIOR")]
+
+
+def posicion_desde_descripcion(descripcion):
+    """Dónde va la pieza, si la descripción lo dice sin ambigüedad. None si no.
+
+    Si nombra LOS DOS lados de un eje —«delantero y trasero», un kit que trae ambos— devuelve
+    None para ese eje: no se puede decir dónde va, y adivinar sería peor que no saber, porque
+    esto alimenta un veto.
+
+    Sirve para dos cosas. Como filtro y como dato a la vista —«¿el de adelante o el de
+    atrás?» es media conversación del mostrador— y como PRUEBA FÍSICA: el caño superior del
+    radiador no reemplaza al inferior, por más que los dos sean del mismo auto."""
+    if not descripcion:
+        return None
+    texto = str(descripcion)
+    presentes = {k for k, rx in _RE_POSICION.items() if rx.search(texto)}
+    partes = []
+    for uno, otro in EJES_DE_POSICION:
+        tiene_uno, tiene_otro = uno in presentes, otro in presentes
+        if tiene_uno and tiene_otro:
+            return None      # nombra los dos: no se puede decidir
+        if tiene_uno:
+            partes.append(uno)
+        elif tiene_otro:
+            partes.append(otro)
+    return "+".join(partes) or None
 
 
 def codigo_base_sin_variante(codigo):
@@ -5036,7 +5093,7 @@ def informe_post_importacion(lote, nombre_prov, cargados):
             informe["puntos"].append((
                 "medio", f"{cortos} código(s) de 3 caracteres o menos en {nombre_prov.upper()}",
                 "Suelen ser cantidades o números de orden que se colaron en la columna del código.",
-                "Estadísticas → Mantenimiento → 🧹 Limpiar vínculos",
+                "Administrar → Mantenimiento → 🧹 Limpiar vínculos",
             ))
     except sqlite3.OperationalError as _err:
         anotar_error("informe_post_importacion", _err)
@@ -6066,7 +6123,7 @@ CAMPOS_MEDIDAS = [
     ("espesor", "espesor"),
 ]
 COLUMNAS_MEDIDAS = (", ".join(cn for cn, _ in CAMPOS_MEDIDAS)
-                    + ", paso_rosca, cantidad_estrias, cantidad_vias")
+                    + ", paso_rosca, cantidad_estrias, cantidad_vias, posicion")
 
 
 def cargar_medidas_de_varios(ids):
@@ -6124,8 +6181,11 @@ def comparar_medidas(a, b, tolerancia_pct=3):
 
     # Las vías van por igualdad exacta y no por tolerancia: una ficha de 2 vías y una de 3 no
     # se parecen «un 33%», son dos piezas que no entran una en lugar de la otra.
+    # La posición va acá por el mismo motivo: el caño superior del radiador no es el inferior,
+    # y el sensor de ABS trasero izquierdo no es el delantero derecho. No es «parecido en un
+    # porcentaje», es otra pieza. Ver posicion_desde_descripcion().
     for campo, etiqueta in (("paso_rosca", "paso de rosca"), ("cantidad_estrias", "estrías"),
-                            ("cantidad_vias", "vías de la ficha")):
+                            ("cantidad_vias", "vías de la ficha"), ("posicion", "posición")):
         va, vb = a.get(campo), b.get(campo)
         if va in (None, "") or vb in (None, ""):
             continue
@@ -9218,7 +9278,7 @@ def diagnostico_de_salud():
                   f"({obtener_config('dudosos_fecha', 'sin fecha')}). No son sugerencias "
                   "esperando: están activos, y la búsqueda los está devolviendo. Se ven de peor "
                   "a mejor, con el motivo al lado, y se cortan los peores de una.",
-                  "Estadísticas → Mantenimiento → 🧹 Limpiar vínculos")
+                  "Administrar → Mantenimiento → 🧹 Limpiar vínculos")
     except (TypeError, ValueError) as _err:
         anotar_error("diagnostico_de_salud/dudosos", _err)
 
@@ -9263,7 +9323,7 @@ def diagnostico_de_salud():
             sumar("bajo", f"{len(gratis)} equivalencia(s) esperando, sin trabajo",
                   "Salen de los reemplazos de código que ya cargaste: son productos que el "
                   "cambio de número dejó separados. No hay que investigar nada, solo aprobarlas.",
-                  "Estadísticas → Mantenimiento → Calidad → Reunir lo que separó un cambio de número")
+                  "Administrar → Mantenimiento → Calidad → Reunir lo que separó un cambio de número")
     except Exception as _err:
         anotar_error("diagnostico_de_salud/puenteadas", _err)
 
@@ -9349,7 +9409,7 @@ def diagnostico_de_salud():
             sumar("medio", f"{espejadas:,} equivalencias anotadas dos veces",
                   "La misma relación guardada en las dos direcciones. No cambia lo que encuentra "
                   "el buscador, pero duplica todos los conteos.",
-                  "Estadísticas → Mantenimiento → Equivalencias anotadas dos veces")
+                  "Administrar → Mantenimiento → Equivalencias anotadas dos veces")
     except Exception as _err:
         anotar_error("diagnostico_de_salud", _err)
         pass
@@ -9360,7 +9420,7 @@ def diagnostico_de_salud():
             sumar("alto", f"{basura} código(s) que son un número suelto",
                   "Entraron cantidades o números de orden en la columna del código. Cada uno "
                   "vincula entre sí repuestos que no tienen nada que ver.",
-                  "Estadísticas → Mantenimiento → Códigos que son solo un número suelto")
+                  "Administrar → Mantenimiento → Códigos que son solo un número suelto")
     except Exception as _err:
         anotar_error("diagnostico_de_salud", _err)
         pass
@@ -9371,7 +9431,7 @@ def diagnostico_de_salud():
             sumar("medio", f"{con_punto} código(s) terminados en '.0'",
                   "Excel los guardó como número. Se encuentran igual, pero el código que se "
                   "muestra y se copia en un presupuesto está mal.",
-                  "Estadísticas → Mantenimiento → Códigos que quedaron con '.0'")
+                  "Administrar → Mantenimiento → Códigos que quedaron con '.0'")
     except Exception as _err:
         anotar_error("diagnostico_de_salud", _err)
         pass
@@ -9387,7 +9447,7 @@ def diagnostico_de_salud():
             sumar("alto", f"{precios} par(es) de equivalentes con precios muy distintos",
                   "O el precio está mal cargado, o no son la misma pieza. Cualquiera de las dos "
                   "cuesta plata: o cotizás mal, o vendés algo que no entra.",
-                  "Estadísticas → Mantenimiento → Precios que no cierran")
+                  "Administrar → Mantenimiento → Precios que no cierran")
     except Exception as _err:
         anotar_error("diagnostico_de_salud", _err)
         pass
@@ -9398,7 +9458,7 @@ def diagnostico_de_salud():
         if pendientes > 500:
             sumar("medio", f"{pendientes:,} vínculos esperando revisión",
                   "Mientras no se revisen no están cargados, así que el buscador no los usa.",
-                  "Estadísticas → Vínculos de listas esperando revisión")
+                  "Estadísticas → 🔗 Equivalencias sugeridas")
     except Exception as _err:
         anotar_error("diagnostico_de_salud", _err)
         pass
@@ -9410,7 +9470,7 @@ def diagnostico_de_salud():
             sumar("medio", f"{sin_punt:,} vínculos sin puntuar",
                   "El buscador no puede decirte qué tan sólido es el camino de cada resultado "
                   "hasta que se calculen. Es un solo botón.",
-                  "Estadísticas → Mantenimiento → Puntuar los vínculos")
+                  "Administrar → Mantenimiento → Puntuar los vínculos")
     except sqlite3.OperationalError as _err:
         anotar_error("diagnostico_de_salud", _err)
         pass
@@ -17719,6 +17779,13 @@ def medidas_desde_descripcion(descripcion):
         if 1 <= cuantas <= 40:
             medidas["cantidad_vias"] = cuantas
 
+    # Dónde va la pieza. Se lee de la descripción sin tocar, no del texto normalizado, porque
+    # las abreviaturas dependen del punto y del guion: «DEL.» y «DEL-IZQ» se distinguen de la
+    # preposición «del» justamente por eso.
+    donde = posicion_desde_descripcion(descripcion)
+    if donde:
+        medidas["posicion"] = donde
+
     return medidas
 
 
@@ -17730,12 +17797,13 @@ def productos_con_medidas_deducibles(limite=500):
                             p.descripcion AS "Descripción",
                             p.diametro_interno, p.diametro_externo, p.ancho,
                             p.cantidad_estrias, p.diametro_rosca_homocinetica, p.paso_rosca,
-                            p.espesor, p.cantidad_vias
+                            p.espesor, p.cantidad_vias, p.posicion
                      FROM productos p JOIN marcas m ON m.id = p.marca_id
                      WHERE p.descripcion IS NOT NULL AND p.descripcion <> ''
                        AND (p.diametro_interno IS NULL OR p.diametro_externo IS NULL
                             OR p.ancho IS NULL OR p.cantidad_estrias IS NULL
-                            OR p.espesor IS NULL OR p.cantidad_vias IS NULL)""")
+                            OR p.espesor IS NULL OR p.cantidad_vias IS NULL
+                            OR p.posicion IS NULL)""")
         filas = filas_a_listas(c)
     except sqlite3.OperationalError as _err:
         anotar_error("productos_con_medidas_deducibles", _err)
@@ -20090,6 +20158,51 @@ if not _cache_salud or _ahora - _cache_salud["momento"] > 180:
         _cache_salud = {"momento": _ahora, "problemas": []}
     st.session_state["_salud_cache"] = _cache_salud
 
+def ir_a_donde_dice_el_aviso(donde):
+    """Lleva a la pantalla que el aviso nombra en su «📍». Va como on_click.
+
+    Hasta ahora los avisos terminaban en una miga de pan escrita —«📍 Administrar →
+    Mantenimiento → 🧹 Limpiar y corregir → Códigos puente»— y ahí quedaba: había que
+    acordarse del camino y hacerlo a mano. De los 28 textos de la app que mandan a otra
+    pantalla, UNO SOLO tenía botón.
+
+    Se navega leyendo la miga en vez de escribir un destino por aviso, y eso tiene una ventaja
+    que no es de código: si la miga miente, el botón no llega, y se nota. Ya pasó al escribir
+    esto — había 11 lugares que decían «Estadísticas → Mantenimiento» y Mantenimiento vive en
+    Administrar. Nadie lo había visto porque una miga de pan escrita no se prueba sola.
+
+    Como callback y no suelto, por lo mismo que _ir_al_grupo_de_mantenimiento(): Streamlit no
+    deja tocar la clave de un widget que ya se dibujó en esta pasada."""
+    tramos = [t.strip() for t in str(donde or "").split("→")]
+    if not tramos:
+        return
+
+    # Mantenimiento primero, y sin mirar el primer tramo: vive adentro de Administrar aunque
+    # la miga diga otra cosa.
+    if any("Mantenimiento" in t for t in tramos):
+        st.session_state["pagina_actual"] = "🗂️ Administrar"
+        st.session_state["sub_admin"] = "🧹 Mantenimiento"
+        for tramo in tramos:
+            for grupo in GRUPOS_MANTENIMIENTO:
+                if tramo == grupo:
+                    st.session_state["sub_mantenimiento"] = grupo
+                    return
+        return
+
+    for pantalla in PAGINAS:
+        # Se compara sin el emoji: la miga escribe «Estadísticas», no «📊 Estadísticas».
+        if pantalla.split(" ", 1)[-1].lower() in tramos[0].lower():
+            st.session_state["pagina_actual"] = pantalla
+            break
+    for tramo in tramos[1:]:
+        for solapa in SUB_STATS:
+            # Sin el emoji: varias migas escriben «Backup y config» y la solapa se llama
+            # «💾 Backup y config». Exigir el emoji dejaba el botón a mitad de camino.
+            if tramo == solapa or tramo == solapa.split(" ", 1)[-1]:
+                st.session_state["sub_stats"] = solapa
+                return
+
+
 _problemas = _cache_salud["problemas"]
 if _problemas:
     # Se separa por urgencia en vez de mostrar una lista pareja. Antes todo se veía igual y
@@ -20105,17 +20218,24 @@ if _problemas:
             f"<b>🔴 {len(_graves)} cosa(s) que conviene mirar hoy</b></div>",
             unsafe_allow_html=True
         )
-        for _p in _graves:
+        for _i_p, _p in enumerate(_graves):
             cS1, cS2 = st.columns([5, 2])
             cS1.markdown(f"**{_p['titulo']}**  \n<span style='opacity:.75;font-size:.87em'>"
                           f"{_p['detalle']}</span>", unsafe_allow_html=True)
+            cS2.button("Ir a arreglarlo →", key=f"ir_salud_alto_{_i_p}",
+                        on_click=ir_a_donde_dice_el_aviso, args=(_p["donde"],),
+                        help=_p["donde"])
             cS2.caption(f"📍 {_p['donde']}")
 
     if _resto:
         with st.expander(f"🟡 {len(_resto)} cosa(s) más, sin apuro", expanded=False):
-            for _p in _resto:
+            for _i_p, _p in enumerate(_resto):
                 st.markdown(f"**{_p['titulo']}**")
-                st.caption(f"{_p['detalle']}  \n📍 {_p['donde']}")
+                st.caption(_p["detalle"])
+                st.button(f"Ir a {_p['donde'].split('→')[-1].strip()} →",
+                           key=f"ir_salud_resto_{_i_p}",
+                           on_click=ir_a_donde_dice_el_aviso, args=(_p["donde"],),
+                           help=_p["donde"])
 
     if st.button("🔄 Volver a revisar", key="refrescar_salud"):
         st.session_state.pop("_salud_cache", None)
@@ -20257,6 +20377,11 @@ HERRAMIENTAS_MANTENIMIENTO = [
 
 PAGINAS = ["🔍 Buscador", "🔗 Vincular manual", "📁 Cargar Excel", "🗂️ Administrar",
            "📊 Estadísticas", "📋 Lista WhatsApp", "🚗 Vehículos", "🛠️ Modo Mecánico"]
+
+# Las sub-solapas de Estadísticas viven acá arriba y no adentro de la pantalla porque el
+# botón de los avisos de salud —que se dibuja mucho antes— necesita poder llevar hasta una.
+SUB_STATS = ["📈 Resumen", "📥 Importaciones", "💾 Backup y config", "🧮 Auditoría y depósito",
+             "🔎 Búsquedas sin resultado", "📌 Para pedir", "🔗 Equivalencias sugeridas"]
 
 # Una línea por pantalla diciendo para qué sirve. Sin esto hay que entrar a cada una para
 # saber qué hace, y el que atiende el mostrador no tiene tiempo de andar explorando.
@@ -21236,7 +21361,7 @@ Casi todo lo que edita o borra algo pide la contraseña de administrador la prim
                                             f"({u['Marca B']}) separa {u['Separa']}, y su confianza es "
                                             f"{u['Confianza del vínculo']}/100.\n\n"
                                             "Cortando **ese solo vínculo** se separan las dos familias. "
-                                            "Está en **Estadísticas → Mantenimiento → Vínculos que unen "
+                                            "Está en **Administrar → Mantenimiento → Vínculos que unen "
                                             "familias**."
                                         )
                                 if puentes_res:
@@ -21247,7 +21372,7 @@ Casi todo lo que edita o borra algo pide la contraseña de administrador la prim
                                         "está vinculado a demasiadas cosas, así que arrastra acá repuestos "
                                         "de otros rubros que no tienen nada que ver. Fijate la columna "
                                         "**Cadena**: lo marcado como 🟢 directo es lo confiable. "
-                                        "Para arreglarlo de raíz: **Estadísticas → Mantenimiento → "
+                                        "Para arreglarlo de raíz: **Administrar → Mantenimiento → "
                                         "Códigos puente**."
                                     )
 
@@ -22530,7 +22655,7 @@ if pagina == PAGINAS[2]:
                             "Si lo importás acá, se van a cargar los **modelos de auto como si "
                             "fueran códigos de repuesto** (A4, Q3, Golf...) y los años como "
                             "precios.\n\n"
-                            "Para este archivo andá a **Estadísticas → Mantenimiento → "
+                            "Para este archivo andá a **Administrar → Mantenimiento → "
                             "🏭 Catálogo de aplicaciones**: ahí se lee bien y sirve para que la "
                             "búsqueda por vehículo sepa qué repuesto le va a cada auto."
                         )
@@ -26063,8 +26188,6 @@ if pagina == PAGINAS[3]:
 if pagina == PAGINAS[4]:
     st.subheader("📊 Estadísticas")
 
-    SUB_STATS = ["📈 Resumen", "📥 Importaciones", "💾 Backup y config", "🧮 Auditoría y depósito",
-               "🔎 Búsquedas sin resultado", "📌 Para pedir", "🔗 Equivalencias sugeridas"]
     if st.session_state.get("sub_stats") not in SUB_STATS:
         st.session_state["sub_stats"] = SUB_STATS[0]
     st.radio("Sub-sección:", SUB_STATS, key="sub_stats", horizontal=True,

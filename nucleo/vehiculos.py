@@ -12,7 +12,7 @@ import unicodedata
 from datetime import datetime
 
 from .errores import anotar_error
-from .codigos import _RE_REF_PEGADO, normalizar_texto, sanitizar
+from .codigos import _RE_REF_PEGADO, normalizar_texto, posicion_desde_descripcion, sanitizar
 
 
 # Se ordena de más largo a más corto para que gane la coincidencia más específica:
@@ -856,6 +856,13 @@ def medidas_desde_descripcion(descripcion):
         cuantas = int(vias.group(1))
         if 1 <= cuantas <= 40:
             medidas["cantidad_vias"] = cuantas
+
+    # Dónde va la pieza. Se lee de la descripción sin tocar, no del texto normalizado, porque
+    # las abreviaturas dependen del punto y del guion: «DEL.» y «DEL-IZQ» se distinguen de la
+    # preposición «del» justamente por eso.
+    donde = posicion_desde_descripcion(descripcion)
+    if donde:
+        medidas["posicion"] = donde
 
     return medidas
 

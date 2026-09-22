@@ -1645,6 +1645,64 @@ El corte es por proveedor (`GROUP BY po.id, mp.id`) y no por total: un código d
 legítimo aparece en varias listas a la vez —es justo para eso que sirve— y contando todo junto
 ese sería el primero de la lista.
 
+## Dónde va la pieza: el caño de arriba del radiador no es el de abajo
+
+Tercer dato que estaba escrito en miles de descripciones y no leía nadie, después de las
+medidas y las aplicaciones. Y como esos, no es solo un dato a la vista: es **prueba física**.
+Un sensor de ABS trasero izquierdo no reemplaza al delantero derecho por más que los dos sean
+del mismo auto.
+
+Tres ejes, y de cada uno se toma un lado: delantera/trasera, izquierda/derecha,
+superior/inferior. Si la descripción nombra **los dos** lados de un eje —un kit que trae ambos—
+no se decide nada: adivinar sería peor que no saber, porque esto alimenta un veto.
+
+Lo delicado fueron las abreviaturas, y costó una medición encontrarlo: **«DEL» suelto es la
+preposición más común del español**. Con ella, «Junta Tapa de Cilindros FORD CORCEL BELINA
+PAMPA DEL REY» —que es el Ford Del Rey— quedaba como pieza *delantera*. Exigiendo «DEL.» o
+«DEL-», los falsos positivos desaparecen: de 4.239 productos se baja a 3.528, y en una muestra
+de 16 al azar revisada a mano, 16 correctas.
+
+Sobre la base real: **3.553 productos** con posición, en 9 s. Y el veto encuentra **4
+equivalencias ya cargadas que están mal**:
+
+```
+SENSOR ABS M.BENZ ML270/ML320    DELANTERA+IZQUIERDA  ↔  DELANTERA+DERECHA
+SENSOR ABS AUDI A4-A5-A6…        TRASERA+DERECHA      ↔  TRASERA+IZQUIERDA
+SENSOR ABS KIA SPORTAGE/TUCSON   TRASERA+IZQUIERDA    ↔  TRASERA+DERECHA
+CANO Ford F100-F1000-F4000       radiador SUPERIOR    ↔  radiador INFERIOR
+```
+
+Las cuatro son de las que mandan la pieza equivocada al mostrador.
+
+### El voltaje se midió y se descartó
+
+La idea era la misma —12 V no reemplaza a 24 V, y hay 4 equivalencias cargadas que los
+mezclan— pero **en este catálogo «16V» y «24V» casi siempre son VÁLVULAS, no volts**:
+«CANO Renault LAGUNA 3.0 24V», «KIT TTC NISSAN 2.8 6 CIL DIESEL 12V».
+
+Se probó filtrando por rubro eléctrico y exigiendo que no viniera una cilindrada delante. Eso
+baja de 1.582 a 460 productos, pero en una muestra de 16 seguían colándose dos sensores donde
+el «24V» eran válvulas. Un veto que se equivoca manda a revisar piezas que están bien, así que
+**no entra**. Queda medido acá para no volver a intentarlo sin saberlo.
+
+## Los avisos ahora tienen botón, y eso destapó que once mentían
+
+De los 28 textos de la app que mandan a otra pantalla, **uno solo tenía botón**. Los demás
+terminaban en una miga de pan escrita —«📍 Administrar → Mantenimiento → 🧹 Limpiar y corregir
+→ Códigos puente»— y ahí quedaba: había que acordarse del camino y hacerlo a mano.
+
+En vez de escribir un destino por aviso, el botón **lee la miga**. Eso tiene una ventaja que no
+es de código: si la miga miente, el botón no llega, y se nota. Pasó apenas se escribió:
+
+- **11 lugares decían «Estadísticas → Mantenimiento»** y Mantenimiento vive en Administrar.
+- Uno mandaba a «Estadísticas → Vínculos de listas esperando revisión», una solapa que no
+  existe.
+- Varios escriben la solapa sin su emoji («Backup y config» contra «💾 Backup y config»), y
+  exigir el emoji dejaba el botón a mitad de camino.
+
+Ninguna de las tres se había visto nunca, porque **una miga de pan escrita no se prueba sola**.
+Ahora los 8 avisos de la base real llegan a su pantalla, comprobado uno por uno.
+
 ## 8.319 códigos de barras cargados como código de fábrica: la app lo sabía y no lo decía
 
 Una de cada tres equivalencias de la base —**8.319 de 24.774**— sale de un producto fantasma

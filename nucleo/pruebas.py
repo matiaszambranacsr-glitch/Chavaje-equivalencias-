@@ -1009,6 +1009,35 @@ def probar_la_misma_junta_en_otro_espesor_no_es_un_error_de_carga():
                f"{grupo} son piezas distintas y la alarma tiene que seguir")
 
 
+def probar_donde_va_la_pieza():
+    """El caño de arriba del radiador no es el de abajo, y el ABS izquierdo no es el derecho.
+
+    Lo más delicado son las abreviaturas: «DEL» suelto es la preposición más común del
+    español, y sin exigirle punto o guion, «FORD CORCEL PAMPA DEL REY» —que es el Ford Del
+    Rey— quedaba como pieza delantera."""
+    claras = [
+        ("CANO Ford KA radiador superior Cauplas", "SUPERIOR"),
+        ("CANO Renault KANGOO radiador inferior Cauplas", "INFERIOR"),
+        ("SENSOR ABS KIA SPORTAGE 2.0 CRDi TRAS-IZQ Masser", "TRASERA+IZQUIERDA"),
+        ("JUNTA TAPA DEL. BLOCK M. BENZ", "DELANTERA"),
+        ("Reten Semieje Derecho FIAT UNO/DUNA", "DERECHA"),
+    ]
+    for desc, esperada in claras:
+        igual(codigos.posicion_desde_descripcion(desc), esperada, f"dónde va «{desc[:34]}…»")
+    sin_decidir = [
+        # La preposición, que es el caso que costó una medición encontrar.
+        "Junta Tapa de Cilindros FORD CORCEL BELINA PAMPA DEL REY",
+        # Nombra los dos lados del mismo eje: un kit que trae los dos. No se puede decidir.
+        "JUEGO DE PASTILLAS DELANTERAS Y TRASERAS FIAT UNO",
+        "Junta Tapa de Cilindros FIAT FIORINO UNO TIPO PALIO",
+        "",
+    ]
+    for desc in sin_decidir:
+        cierto(codigos.posicion_desde_descripcion(desc) is None,
+               f"«{desc[:44]}» no dice sin ambigüedad dónde va")
+    cierto(codigos.posicion_desde_descripcion(None) is None, "None no rompe")
+
+
 def probar_quien_fabrica_la_pieza():
     """La marca del final es quién fabrica; la del medio es una referencia cruzada.
 
