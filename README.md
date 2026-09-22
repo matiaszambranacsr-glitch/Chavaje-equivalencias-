@@ -1645,6 +1645,74 @@ El corte es por proveedor (`GROUP BY po.id, mp.id`) y no por total: un código d
 legítimo aparece en varias listas a la vez —es justo para eso que sirve— y contando todo junto
 ese sería el primero de la lista.
 
+## Las bujías del TU5JP4 y las del EW10 son las mismas
+
+Esto lo corrigió el dueño, y corrige algo que se había agregado el día anterior.
+
+El veto por motor dice «si los dos declaran motor y es distinto, no son equivalentes». Suena
+bien y **está mal seguido**: las bujías del TU5JP4 y las del EW10 son las mismas, pero cada
+proveedor escribe en su descripción los motores que se le ocurren. Uno pone TU5JP4, el otro
+pone EW10, y el veto separa dos piezas que se reemplazan.
+
+**La evidencia ya estaba en el catálogo**, y no hace falta ningún dato de afuera: cuando un
+proveedor vende UN producto y en su descripción nombra VARIOS motores, está diciendo que esa
+pieza entra en todos.
+
+Sobre el catálogo real hay **838 descripciones que nombran dos motores o más**, y de ahí salen
+**1.334 pares de motores con su tipo de pieza**. El ejemplo del mostrador está adentro:
+
+```
+TU5JP4 + EW10J4    Combustible
+DV6TD4 + DV6TED4   Juntas y retenes   (17 listas lo dicen)
+EW10D  + EW10J4    Juntas y retenes   (13 listas lo dicen)
+D4D    + D4F       Juntas y retenes   (13 listas lo dicen)
+```
+
+**Se exige el MISMO tipo de pieza**, y no es un detalle: que K4M y K7M compartan una bomba de
+agua no prueba que compartan la junta de tapa de cilindros — son un 16 válvulas y un 8
+válvulas, y la tapa es otra. Pidiendo la misma familia se liberan 3.755 pares y quedan frenados
+16.056; sin pedirla se liberarían 6.408, y varios de esos de más son justamente juntas entre
+motores de distinta tapa.
+
+Tampoco es transitivo a propósito: que A vaya con B y B con C no dice nada de A con C.
+
+Y lo mismo que con el motor: las equivalencias derivadas siguen en 156. Ninguno de esos 3.755
+llegaba al final igual. Lo que cambia es que el veto dejó de estar equivocado.
+
+## Las descripciones que entraron antes de que el separador aprendiera
+
+`separar_texto_pegado()` corre al importar, pero fue aprendiendo después: las descripciones que
+entraron antes quedaron como vinieron. Son **12.255 de 70.888 que todavía cambiarían**, y lo que
+arregla casi siempre es lo mismo — el «REF ORIG» pegado a la palabra anterior, que se come lo
+que venía justo antes:
+
+```
+antes: «…TOYOTA COROLLA 1 6 - 1 8REF ORIG…»
+ahora: «…TOYOTA COROLLA 1 6 - 1 8 REF ORIG…»
+```
+
+Medido qué gana y qué pierde sobre esas 12.255:
+
+| | gana | pierde |
+|---|---|---|
+| combustible | **+377** | −6 |
+| medidas | +68 | 0 |
+| familia | +5 | 0 |
+| fabricante | +1 | 0 |
+| motor | 0 | −3 |
+
+Los 3 «motores perdidos» son en realidad el arreglo: antes se leía «YD25REF» —el motor pegado a
+REF— que no es ningún motor. Lo que se pierde es un dato equivocado.
+
+**Y lo que se esperaba ganar no se ganó**: cero descripciones recuperan un año. El informe que
+originó esto decía 113; sobre esta base son 0. La ganancia está en el combustible, no en los
+años.
+
+Corre antes que todo lo demás en la tarea de fondo, y el orden no es casual: las medidas, el
+combustible, la marca del repuesto y las aplicaciones se leen de la descripción. Hacerlo después
+sería leer el texto viejo y tener que rehacerlo. 12.255 en 4 s, idempotente, y la columna
+`busqueda` se mantiene sola porque hay un trigger `AFTER UPDATE OF descripcion`.
+
 ## Qué motor lleva, y por qué un dato parcial puede empeorar las cosas
 
 `aplicaciones.motor` existía y se insertaba **siempre vacía**. Llenarla parecía trivial y

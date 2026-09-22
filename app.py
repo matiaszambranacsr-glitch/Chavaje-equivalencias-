@@ -366,11 +366,16 @@ VERSION_MEDIDAS = "4"
 # Como las otras dos, corría solo después de importar una lista, así que en una base donde no
 # se importó nada desde que la función existe nunca corrió.
 # Subir el número al cambiar cómo se leen los modelos.
-VERSION_APLICACIONES = "6"
+VERSION_APLICACIONES = "7"
 
 # Quién FABRICA la pieza, leído del final de la descripción. Ver marca_de_repuesto_en().
 # Subir el número al agregar marcas a MARCAS_QUE_FABRICAN_LA_PIEZA o al cambiar cómo se leen.
 VERSION_MARCAS_REPUESTO = "1"
+
+# El separador de texto pegado aprendió cosas después de que se importaran las listas, y las
+# descripciones que ya estaban en la base quedaron como entraron. Ver
+# reseparar_descripciones_viejas(). Subir el número al mejorar separar_texto_pegado().
+VERSION_SEPARACION = "1"
 
 
 def secretos_app():
@@ -1008,6 +1013,20 @@ def _esquema_mostrador(c):
     c.execute("CREATE INDEX IF NOT EXISTS idx_consultas_estado ON consultas_cliente(estado)")
     c.execute("CREATE INDEX IF NOT EXISTS idx_consultas_tel ON consultas_cliente(telefono)")
 
+
+    # QUÉ MOTORES SE LLEVAN ENTRE SÍ, PARA CADA TIPO DE PIEZA. No sale de ningún catálogo
+    # técnico: sale de que un proveedor venda UN producto y en su descripción nombre varios
+    # motores. Eso es el proveedor diciendo «esta pieza entra en los dos». Ver
+    # aprender_motores_que_van_juntos().
+    c.execute("""CREATE TABLE IF NOT EXISTS motores_compatibles (
+        motor_a TEXT NOT NULL,
+        motor_b TEXT NOT NULL,
+        tipo_pieza TEXT NOT NULL DEFAULT '',
+        veces INTEGER DEFAULT 1,
+        PRIMARY KEY (motor_a, motor_b, tipo_pieza)
+    )""")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_motores_compat "
+              "ON motores_compatibles(tipo_pieza, motor_a, motor_b)")
 
     c.execute("""CREATE TABLE IF NOT EXISTS aplicaciones (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -2115,6 +2134,18 @@ def _datos_precargados_y_migraciones(c):
         c.execute("INSERT INTO configuracion (clave, valor) VALUES ('version_normalizacion', ?) "
                   "ON CONFLICT(clave) DO UPDATE SET valor = excluded.valor",
                   (VERSION_NORMALIZACION,))
+
+    # Lo mismo para las descripciones que entraron antes de que el separador aprendiera.
+    # Ver VERSION_SEPARACION.
+    c.execute("SELECT valor FROM configuracion WHERE clave = 'version_separacion'")
+    _fila_sep = c.fetchone()
+    if (_fila_sep["valor"] if _fila_sep else None) != VERSION_SEPARACION:
+        c.execute("INSERT INTO configuracion (clave, valor) VALUES "
+                  "('separacion_pendiente', '1') "
+                  "ON CONFLICT(clave) DO UPDATE SET valor = excluded.valor")
+        c.execute("INSERT INTO configuracion (clave, valor) VALUES ('version_separacion', ?) "
+                  "ON CONFLICT(clave) DO UPDATE SET valor = excluded.valor",
+                  (VERSION_SEPARACION,))
 
     # Lo mismo para la marca del repuesto. Ver VERSION_MARCAS_REPUESTO.
     c.execute("SELECT valor FROM configuracion WHERE clave = 'version_marcas_repuesto'")
@@ -4093,6 +4124,51 @@ def marca_de_repuesto_en(descripcion):
     return hallado.group(1).upper() if hallado else None
 
 
+def reseparar_descripciones_viejas():
+    """Vuelve a pasar el separador de texto pegado por las descripciones ya cargadas.
+
+    separar_texto_pegado() corre al importar, pero fue aprendiendo después: las descripciones
+    que entraron antes quedaron como vinieron. Sobre la base real son **12.255 de 70.888 que
+    todavía cambiarían**, y lo que arregla casi siempre es lo mismo: el «REF ORIG» pegado a la
+    palabra anterior, que se come lo que venía justo antes.
+
+        antes: «…TOYOTA COROLLA 1 6 - 1 8REF ORIG…»
+        ahora: «…TOYOTA COROLLA 1 6 - 1 8 REF ORIG…»
+
+    Medido qué gana y qué pierde, sobre esas 12.255:
+
+        combustible  +377   -6
+        medidas       +68    0
+        familia        +5    0
+        fabricante     +1    0
+        motor           0   -3
+
+    Los 3 «motores perdidos» son en realidad el arreglo: antes se leía «YD25REF» —el motor
+    pegado a REF— que no es ningún motor. Lo que se pierde es un dato equivocado.
+
+    No se reprocesan los años, y vale aclararlo porque era lo que se esperaba ganar: sobre esta
+    base, cero descripciones recuperan un año. La ganancia está en el combustible.
+
+    La columna `busqueda` se mantiene sola: hay un trigger AFTER UPDATE OF descripcion."""
+    cambiadas = 0
+    try:
+        c.execute("""SELECT id, descripcion FROM productos
+                     WHERE descripcion IS NOT NULL AND descripcion <> ''""")
+        filas = filas_a_listas(c)
+    except sqlite3.OperationalError as _err:
+        anotar_error("reseparar_descripciones_viejas", _err)
+        return 0
+    with db_lock:
+        for fila in filas:
+            separada = separar_texto_pegado(fila["descripcion"])
+            if separada and separada != fila["descripcion"]:
+                c.execute("UPDATE productos SET descripcion = ? WHERE id = ?",
+                          (separada, fila["id"]))
+                cambiadas += 1
+        conn.commit()
+    return cambiadas
+
+
 def completar_marcas_de_repuesto():
     """Llena productos.marca_repuesto leyendo el final de cada descripción. Devuelve cuántos.
 
@@ -4155,6 +4231,11 @@ _RE_MOTOR_TRAS_LA_PALABRA = re.compile(r"\bMOTOR(?:ES)?\s+([A-Z0-9][A-Z0-9.\-]{2
                                        re.IGNORECASE)
 _RE_MOTOR_TRAS_LA_CILINDRADA = re.compile(
     r"-\s*\d[.,]?\d?(?:/\d[.,]?\d?)*\s*-\s*([A-Z0-9][A-Z0-9.\-]{2,})", re.IGNORECASE)
+
+
+# Cualquier palabra con pinta de código, para después preguntarle a parece_designacion_de_motor()
+# cuál de ellas es un motor. Se usa para aprender qué motores conviven en una descripción.
+_RE_TOKEN_DE_MOTOR = re.compile(r"[A-Z0-9][A-Z0-9.\-]{2,}", re.IGNORECASE)
 
 
 def motor_desde_descripcion(descripcion):
@@ -11024,6 +11105,25 @@ def _trabajo_de_fondo():
     # Las aplicaciones: a qué auto le va cada pieza. Es lo más caro de las tres (55 s sobre
     # 70.888 descripciones: 32 s leerlas y 23 s escribirlas) y va después de las medidas porque
     # no se necesitan entre sí. Ver VERSION_APLICACIONES.
+    # Reseparar las descripciones va ANTES QUE TODO lo demás, y el orden no es casual: las
+    # medidas, el combustible, la marca del repuesto y las aplicaciones se leen de la
+    # descripción. Hacerlo después sería leer el texto viejo y tener que rehacerlo.
+    if _hay_que_hacerlo("separacion_pendiente"):
+        try:
+            _n_sep = reseparar_descripciones_viejas()
+            guardar_config("descripciones_reseparadas", str(_n_sep))
+            guardar_config("separacion_fecha", datetime.now().strftime("%Y-%m-%d %H:%M"))
+            if _n_sep:
+                # El texto cambió: hay que releerlo todo.
+                for _marca in ("medidas_pendientes", "marcas_repuesto_pendientes",
+                               "aplicaciones_pendientes"):
+                    guardar_config(_marca, "1")
+                    guardar_config(f"{_marca}_intentos", "0")
+            _quedo_hecho("separacion_pendiente")
+        except Exception as _err:
+            # La bandera sigue prendida: se reintenta en el próximo arranque, hasta el tope.
+            anotar_error("_trabajo_de_fondo/separacion", _err)
+
     # La marca del repuesto: es la más barata de las cuatro (una expresión regular por
     # descripción, sin consultas de por medio) así que va primero.
     if _hay_que_hacerlo("marcas_repuesto_pendientes"):
@@ -11038,6 +11138,7 @@ def _trabajo_de_fondo():
 
     if _hay_que_hacerlo("aplicaciones_pendientes"):
         try:
+            aprender_motores_que_van_juntos()
             _apl_ded = aplicaciones_desde_descripciones()
             _n_apl = aplicar_aplicaciones_deducidas(_apl_ded) if _apl_ded else 0
             guardar_config("aplicaciones_deducidas", str(_n_apl))
@@ -11206,7 +11307,8 @@ def arrancar_tanda_de_fondo():
             and obtener_config("confianza_pendiente", "") != "1"
             and obtener_config("medidas_pendientes", "") != "1"
             and obtener_config("aplicaciones_pendientes", "") != "1"
-            and obtener_config("marcas_repuesto_pendientes", "") != "1"):
+            and obtener_config("marcas_repuesto_pendientes", "") != "1"
+            and obtener_config("separacion_pendiente", "") != "1"):
         return False
 
     # El candado se toma ACÁ y no adentro del hilo. Mirar si está tomado y después crear el
@@ -13029,6 +13131,60 @@ def aplicaciones_desde_descripciones(limite=None):
     return salida
 
 
+def aprender_motores_que_van_juntos():
+    """Qué motores se llevan entre sí para cada tipo de pieza. Devuelve cuántos pares aprendió.
+
+    EL PROBLEMA QUE RESUELVE. El veto por motor dice «si los dos declaran motor y es distinto,
+    no son equivalentes». Suena bien y está mal seguido: las bujías del TU5JP4 y las del EW10
+    son las mismas, pero cada proveedor escribe en su descripción los motores que se le ocurren.
+    Uno pone TU5JP4, el otro pone EW10, y el veto separa dos piezas que se reemplazan.
+
+    LA EVIDENCIA YA ESTÁ EN EL CATÁLOGO, y no hace falta ningún dato de afuera: cuando un
+    proveedor vende UN producto y en su descripción nombra VARIOS motores, está diciendo que esa
+    pieza entra en todos. «Juego de Descarbonización PEUGEOT/CITROEN … EW10D EW10J4» es el
+    proveedor declarando que para esa pieza los dos motores son el mismo caso.
+
+    Sobre el catálogo real hay 838 descripciones que nombran dos motores o más, y de ahí salen
+    **1.334 pares de motores con su tipo de pieza**. El ejemplo del mostrador está adentro:
+    TU5JP4 con EW10J4 aparecen juntos en una pieza de combustible.
+
+    SE EXIGE EL MISMO TIPO DE PIEZA, y no es un detalle. Que K4M y K7M compartan una bomba de
+    agua no prueba que compartan la junta de tapa de cilindros —son un 16 válvulas y un 8
+    válvulas, y la tapa es otra—. Pidiendo la misma familia, de los pares que el veto frena se
+    liberan 3.755 y quedan frenados 16.056; sin pedirla se liberarían 6.408, y varios de esos
+    de más son justamente juntas entre motores de distinta tapa.
+
+    No es transitivo a propósito: que A vaya con B y B con C no dice nada de A con C."""
+    try:
+        c.execute("""SELECT p.descripcion FROM productos p JOIN marcas m ON m.id = p.marca_id
+                     WHERE m.tipo <> 'OEM' AND p.descripcion IS NOT NULL AND p.descripcion <> ''""")
+        descripciones = [r["descripcion"] for r in c.fetchall()]
+    except sqlite3.OperationalError as _err:
+        anotar_error("aprender_motores_que_van_juntos", _err)
+        return 0
+
+    juntos = {}
+    for descripcion in descripciones:
+        motores = sorted({t.upper() for t in _RE_TOKEN_DE_MOTOR.findall(descripcion)
+                          if parece_designacion_de_motor(t)})
+        if len(motores) < 2:
+            continue
+        familia = clasificar_repuesto(descripcion)
+        for i, uno in enumerate(motores):
+            for otro in motores[i + 1:]:
+                juntos[(uno, otro, familia)] = juntos.get((uno, otro, familia), 0) + 1
+    if not juntos:
+        return 0
+    with db_lock:
+        c.executemany("""INSERT INTO motores_compatibles (motor_a, motor_b, tipo_pieza, veces)
+                         VALUES (?, ?, ?, ?)
+                         ON CONFLICT(motor_a, motor_b, tipo_pieza)
+                         DO UPDATE SET veces = excluded.veces""",
+                      [(a, b, f, n) for (a, b, f), n in juntos.items()])
+        conn.commit()
+    return len(juntos)
+
+
 def aplicar_aplicaciones_deducidas(filas):
     """Guarda las aplicaciones leídas de las descripciones. Devuelve cuántas se cargaron.
 
@@ -14253,8 +14409,17 @@ def derivar_equivalencias_de_aplicaciones(limite=500, minimo_autos=2):
                   -- estricta se pierden 84.862 pares candidatos que antes cruzaban bien, sin
                   -- ganar nada a cambio. Un dato parcial comparado por igualdad estricta es
                   -- peor que no tener el dato.
+                  -- …y tampoco contradice si alguna lista declara que esos dos motores se
+                  -- llevan para ESTE tipo de pieza. Las bujías del TU5JP4 y las del EW10 son
+                  -- las mismas y cada proveedor escribe los motores que se le ocurren; sin
+                  -- esta excepción el veto separaba piezas que sí se reemplazan.
+                  -- Ver aprender_motores_que_van_juntos().
                   AND (a.motor = b.motor OR COALESCE(a.motor,'') = ''
-                       OR COALESCE(b.motor,'') = '')
+                       OR COALESCE(b.motor,'') = ''
+                       OR EXISTS (SELECT 1 FROM motores_compatibles mc
+                                  WHERE mc.tipo_pieza = COALESCE(a.tipo_pieza,'')
+                                    AND mc.motor_a = MIN(a.motor, b.motor)
+                                    AND mc.motor_b = MAX(a.motor, b.motor)))
                   -- El combustible, por el mismo motivo que el motor: una pieza del 1.6 nafta
                   -- no entra en el 1.9 diesel aunque el auto se llame igual. Con COALESCE
                   -- porque las filas viejas lo tienen en NULL y en SQL dos NULL nunca son
