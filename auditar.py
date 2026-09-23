@@ -1985,6 +1985,39 @@ for _ln, _sql in _textos_sql(ARBOL):
              "el doble. Meter {SIN_CONTAR_EL_ESPEJO} en el WHERE, o decir por qué no hace falta")
 
 
+# ============ 38) Una función que confirma, llamada adentro de transaccion() ============
+# transaccion() promete «todo o nada», pero un conn.commit() adentro del bloque la cierra antes
+# de tiempo, y lo que viene después ya no se deshace si falla. transaccion() lo tolera a
+# propósito —no revienta al final—, así que el error no se ve: se ve la base a medio hacer.
+# Pasó de verdad: eliminar_marca_con_papelera() llamaba a mover_a_papelera(), que hace commit,
+# adentro de su transacción. Probado cortando justo antes del DELETE: la marca seguía en la base
+# Y quedaba una copia en la papelera. Este control, pasado por el archivo de ese momento,
+# devuelve exactamente ese caso y ningún otro.
+# Mira las llamadas DIRECTAS a funciones de módulo que tienen un .commit() adentro.
+_CON_COMMIT = {n.name for n in ARBOL.body
+               if isinstance(n, ast.FunctionDef)
+               and any(isinstance(x, ast.Call) and isinstance(x.func, ast.Attribute)
+                       and x.func.attr == "commit" for x in ast.walk(n))}
+for _n in ast.walk(ARBOL):
+    if not isinstance(_n, ast.With):
+        continue
+    if not any(isinstance(_i.context_expr, ast.Call)
+               and getattr(_i.context_expr.func, "id", "") == "transaccion" for _i in _n.items):
+        continue
+    for _m in ast.walk(_n):
+        if not isinstance(_m, ast.Call):
+            continue
+        if isinstance(_m.func, ast.Name) and _m.func.id in _CON_COMMIT:
+            reportar("ERROR", _m.lineno,
+                     f"«{_m.func.id}()» hace conn.commit() y se llama adentro de "
+                     "transaccion(): el commit cierra la transacción antes de tiempo y lo que "
+                     "sigue ya no es «todo o nada». Usar una variante que no confirme")
+        elif isinstance(_m.func, ast.Attribute) and _m.func.attr == "commit":
+            reportar("ERROR", _m.lineno,
+                     "conn.commit() adentro de transaccion(): cierra la transacción antes de "
+                     "tiempo. El commit lo hace transaccion() al salir del bloque")
+
+
 # ============ Resultado ============
 orden = {"ERROR": 0, "REVISAR": 1, "AVISO": 2}
 problemas.sort(key=lambda x: (orden[x[0]], x[1]))

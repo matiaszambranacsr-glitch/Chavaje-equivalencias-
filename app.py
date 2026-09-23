@@ -381,7 +381,9 @@ VERSION_SEPARACION = "1"
 
 # La cola de pendientes pasó a guardar UNA fila por par y a no recibir lo ya rechazado ni lo ya
 # cargado (ver guardar_equivalencias_pendientes()). Esto limpia lo que quedó de antes.
-VERSION_COLA_PENDIENTES = "1"
+# 2: además se sacan los pendientes de productos que ya no existen. Ver el trigger
+# productos_sin_pendientes_colgando.
+VERSION_COLA_PENDIENTES = "2"
 
 
 def secretos_app():
@@ -1619,6 +1621,19 @@ def _esquema_gestion(c):
                  ON equivalencias_pendientes(producto_a_id)""")
     c.execute("""CREATE INDEX IF NOT EXISTS idx_pend_b
                  ON equivalencias_pendientes(producto_b_id)""")
+    # Un pendiente de un producto que ya no existe no se puede revisar —la pantalla hace JOIN
+    # con productos y no lo ve— pero sí se cuenta: el cartel del buscador, el selector de listas
+    # y «Descartar TODO» hacen COUNT(*). `equivalencias` se limpia sola con ON DELETE CASCADE;
+    # esta tabla no tiene claves foráneas, y de los seis lugares que borran productos solo la
+    # fusión se acordaba de ella. En vez de arreglar cinco, se arregla acá: vale para esos cinco
+    # y para el que se agregue mañana.
+    # DROP y CREATE, no IF NOT EXISTS, por lo mismo que productos_busqueda_alta.
+    c.execute("DROP TRIGGER IF EXISTS productos_sin_pendientes_colgando")
+    c.execute("""CREATE TRIGGER productos_sin_pendientes_colgando
+                 AFTER DELETE ON productos BEGIN
+                   DELETE FROM equivalencias_pendientes
+                    WHERE producto_a_id = OLD.id OR producto_b_id = OLD.id;
+                 END""")
 
     # Evidencia que respalda cada equivalencia sugerida. La idea es NO cargar nada solo:
     # cada sugerencia llega al panel con el detalle de en qué se basa, para poder decidir
@@ -2171,6 +2186,11 @@ def _datos_precargados_y_migraciones(c):
                                           AND e.producto_b_id = equivalencias_pendientes.producto_b_id)
                                       OR (e.producto_a_id = equivalencias_pendientes.producto_b_id
                                           AND e.producto_b_id = equivalencias_pendientes.producto_a_id))""")
+        c.execute("""DELETE FROM equivalencias_pendientes
+                     WHERE NOT EXISTS (SELECT 1 FROM productos p
+                                       WHERE p.id = equivalencias_pendientes.producto_a_id)
+                        OR NOT EXISTS (SELECT 1 FROM productos p
+                                       WHERE p.id = equivalencias_pendientes.producto_b_id)""")
         c.execute("INSERT INTO configuracion (clave, valor) VALUES ('version_cola_pendientes', ?) "
                   "ON CONFLICT(clave) DO UPDATE SET valor = excluded.valor",
                   (VERSION_COLA_PENDIENTES,))
@@ -5294,7 +5314,17 @@ def informe_post_importacion(lote, nombre_prov, cargados):
 
     Esto corre los mismos controles que ya existen, pero acotados a lo que ACABA de entrar, y
     junta el resultado en un solo lugar mientras uno todavía tiene la lista fresca."""
-    informe = {"puntos": [], "vinculos_nuevos": 0, "rojos": 0}
+    informe = {"puntos": [], "vinculos_nuevos": 0, "rojos": 0, "pedidos_que_entraron": []}
+
+    # Lo que te pidieron sin resultado y trajo ESTA lista. Va en el informe porque es el
+    # momento: la persona está mirando qué entró. Después, se entera solo si va a buscarlo.
+    try:
+        c.execute("SELECT id FROM marcas WHERE UPPER(nombre) = UPPER(?)", (nombre_prov,))
+        _fila_m = c.fetchone()
+        if _fila_m:
+            informe["pedidos_que_entraron"] = busquedas_fallidas_que_ahora_estan(_fila_m["id"])
+    except Exception as _err:
+        anotar_error("informe_post_importacion/pedidos", _err)
 
     try:
         c.execute("SELECT COUNT(*) FROM equivalencias_pendientes WHERE lote = ?", (lote,))
@@ -7794,6 +7824,60 @@ def confirmar_candidata(codigo_clean, producto_id, codigo_original, marca_para_n
         c.execute("DELETE FROM equivalencias_descartadas WHERE codigo_clean = ? AND producto_id = ?",
                    (codigo_clean, producto_id))
     return True, None
+
+
+def busquedas_fallidas_que_ahora_estan(marca_id=None):
+    """Lo que se buscó sin resultado y HOY sí está cargado. Devuelve una lista, lo más pedido
+    primero.
+
+    «Códigos buscados sin resultado» era un registro muerto: decía qué te pidieron y no tenías,
+    pero no si ya lo tenés. Y lo normal es que sí —entra con la lista siguiente del proveedor—, y
+    que nadie se entere: el cliente que lo pidió tres veces ya no vuelve a preguntar.
+
+    Se compara con el código LIMPIO contra codigo_clean y contra el código de barras, que es lo
+    mismo que mira la búsqueda al arrancar (ver buscar_por_codigo()), así que «está» quiere
+    decir «buscándolo hoy, aparece». Con `marca_id` se mira solo esa marca: es lo que usa el
+    informe de una importación para decir qué trajo ESA lista.
+
+    En tandas, porque la cantidad de términos distintos no tiene techo."""
+    try:
+        c.execute("""SELECT termino, COUNT(*) AS veces, MAX(fecha) AS ultima
+                     FROM historial_busquedas WHERE sin_resultado = 1 GROUP BY termino""")
+        fallidas = filas_a_listas(c)
+    except sqlite3.OperationalError as _err:
+        anotar_error("busquedas_fallidas_que_ahora_estan", _err)
+        return []
+    # Varias formas de escribir lo mismo («06A 905 115», «06A905115») son UN pedido.
+    por_codigo = {}
+    for f in fallidas:
+        limpio = sanitizar(f["termino"])
+        if not limpio:
+            continue
+        d = por_codigo.setdefault(limpio, {"Buscado": f["termino"], "Veces": 0, "Última vez": ""})
+        d["Veces"] += f["veces"]
+        d["Última vez"] = max(d["Última vez"], f["ultima"] or "")
+    if not por_codigo:
+        return []
+    encontrados = {}
+    filtro_marca = "AND p.marca_id = ?" if marca_id else ""
+    for tanda, marcas in en_tandas(list(por_codigo), usos_por_consulta=2):
+        params = tanda + tanda + ([marca_id] if marca_id else [])
+        c.execute(f"""SELECT p.codigo_clean, p.codigo_barras, p.codigo_raw, m.nombre AS marca
+                      FROM productos p JOIN marcas m ON m.id = p.marca_id
+                      WHERE (p.codigo_clean IN ({marcas}) OR p.codigo_barras IN ({marcas}))
+                      {filtro_marca}""", params)
+        for r in c.fetchall():
+            for clave in (r["codigo_clean"], r["codigo_barras"]):
+                if clave in por_codigo:
+                    encontrados.setdefault(clave, []).append(f"{r['codigo_raw']} ({r['marca']})")
+    salida = []
+    for limpio, dato in por_codigo.items():
+        if limpio in encontrados:
+            salida.append({**dato, "Ahora está como": ", ".join(sorted(set(encontrados[limpio]))[:3])})
+    # Lo más pedido primero y, a igual cantidad, lo más reciente.
+    salida.sort(key=lambda x: x["Última vez"], reverse=True)
+    salida.sort(key=lambda x: -x["Veces"])
+    return salida
 
 
 def listar_busquedas_sin_resultado(limite=50):
@@ -16776,11 +16860,73 @@ def mover_a_papelera(tipo, datos_dict):
     nombre de la marca y contar los productos. Con dos o tres marcas borradas eso es parsear
     decenas de megas cada vez que se abre la pantalla."""
     with db_lock:
-        c.execute("INSERT INTO papelera (tipo, datos_json, eliminado_por, resumen) "
-                  "VALUES (?, ?, ?, ?)",
-                  (tipo, json.dumps(datos_dict, ensure_ascii=False), obtener_usuario_actual(),
-                   _resumen_de_papelera(tipo, datos_dict)))
+        _guardar_en_papelera_sin_candado(tipo, datos_dict)
         conn.commit()
+
+
+def _guardar_en_papelera_sin_candado(tipo, datos_dict):
+    """El INSERT de mover_a_papelera(), para quien ya tiene el candado y una transacción
+    abierta: db_lock no es reentrante, y guardar en la papelera y borrar tienen que pasar
+    juntos o no pasar."""
+    c.execute("INSERT INTO papelera (tipo, datos_json, eliminado_por, resumen) "
+              "VALUES (?, ?, ?, ?)",
+              (tipo, json.dumps(datos_dict, ensure_ascii=False), obtener_usuario_actual(),
+               _resumen_de_papelera(tipo, datos_dict)))
+
+
+def borrar_producto_con_papelera(producto_id):
+    """Borra un producto dejándolo en la papelera CON sus vínculos. Devuelve cuántos guardó.
+
+    Antes se guardaba la fila del producto sola, y la pantalla lo avisaba: «si lo restaurás, el
+    producto vuelve pero SIN esos vínculos — hay que volver a vincularlo manualmente». Medido con
+    un producto real de LUCAS: tenía 61 vínculos y la búsqueda traía 62 resultados; borrado y
+    restaurado, volvía con 0 y la búsqueda traía 1. Una papelera que devuelve el producto sin
+    lo que lo hacía útil es un borrado con otro nombre.
+
+    Se guardan también sus pendientes: el trigger productos_sin_pendientes_colgando los borra
+    con el producto, y restaurar tiene que devolverlos.
+
+    Todo en una transacción: guardarlo en la papelera y borrarlo pasan juntos o no pasan. Antes
+    eran dos pasos sueltos, y cortado en el medio quedaba en la papelera y también en la base."""
+    with db_lock, transaccion():
+        c.execute("SELECT * FROM productos WHERE id = ?", (producto_id,))
+        fila = c.fetchone()
+        if not fila:
+            return None
+        datos = dict(fila)
+        c.execute("""SELECT * FROM equivalencias
+                     WHERE producto_a_id = ? OR producto_b_id = ?""", (producto_id, producto_id))
+        datos["_equivalencias"] = [dict(r) for r in c.fetchall()]
+        c.execute("""SELECT * FROM equivalencias_pendientes
+                     WHERE producto_a_id = ? OR producto_b_id = ?""", (producto_id, producto_id))
+        datos["_pendientes"] = [dict(r) for r in c.fetchall()]
+        _guardar_en_papelera_sin_candado("producto", datos)
+        c.execute("DELETE FROM productos WHERE id = ?", (producto_id,))
+    return len(datos["_equivalencias"])
+
+
+def _reponer_vinculos(tabla, filas, cambiar_id):
+    """Vuelve a meter los vínculos guardados en la papelera. Devuelve (repuestos, perdidos).
+
+    `cambiar_id` es {id viejo: id nuevo}, para cuando el producto ya había vuelto a entrar
+    con una importación y se restauran los vínculos sobre ese. Un vínculo cuyo OTRO producto
+    ya no existe no se puede reponer —las claves foráneas no lo dejan, y no tendría a dónde
+    apuntar—: se cuenta como perdido y se dice."""
+    repuestos = perdidos = 0
+    for vinc in filas:
+        vinc = dict(vinc)
+        vinc["producto_a_id"] = cambiar_id.get(vinc["producto_a_id"], vinc["producto_a_id"])
+        vinc["producto_b_id"] = cambiar_id.get(vinc["producto_b_id"], vinc["producto_b_id"])
+        a, b = vinc["producto_a_id"], vinc["producto_b_id"]
+        c.execute("SELECT COUNT(*) FROM productos WHERE id IN (?, ?)", (a, b))
+        if a == b or c.fetchone()[0] < 2:
+            perdidos += 1
+            continue
+        columnas = ", ".join(vinc.keys())
+        c.execute(f"INSERT OR IGNORE INTO {tabla} ({columnas}) VALUES "
+                  f"({', '.join('?' * len(vinc))})", list(vinc.values()))
+        repuestos += 1
+    return repuestos, perdidos
 
 
 def eliminar_marca_con_papelera(nombre_marca):
@@ -16809,14 +16955,28 @@ def eliminar_marca_con_papelera(nombre_marca):
                      WHERE p.marca_id = ?""", (marca_id,))
         equivalencias_rows = [dict(r) for r in c.fetchall()]
 
-    snapshot = {"marca": dict(marca_row), "productos": productos_rows, "equivalencias": equivalencias_rows}
+    # Los pendientes también: al borrar los productos, el trigger productos_sin_pendientes_colgando
+    # se los lleva, y antes quedaban huérfanos en la cola —invisibles pero contados— hasta que
+    # se restauraba la marca. Ahora viajan con ella.
+    pendientes_rows = []
+    if producto_ids:
+        c.execute("""SELECT DISTINCT ep.* FROM equivalencias_pendientes ep
+                     JOIN productos p ON p.id IN (ep.producto_a_id, ep.producto_b_id)
+                     WHERE p.marca_id = ?""", (marca_id,))
+        pendientes_rows = [dict(r) for r in c.fetchall()]
+
+    snapshot = {"marca": dict(marca_row), "productos": productos_rows,
+                "equivalencias": equivalencias_rows, "pendientes": pendientes_rows}
     # Todo o nada: la copia en la papelera y el borrado de la marca. Si se guarda la copia y
     # el borrado falla, la marca aparece duplicada al restaurarla; si se borra sin copia, no
     # hay vuelta atrás de la operación más destructiva de la app.
-    with transaccion():
-        mover_a_papelera("marca", snapshot)
-        with db_lock:
-            c.execute("DELETE FROM marcas WHERE id = ?", (marca_id,))
+    # Y el candado AFUERA, con la variante que no confirma. Estaba escrito así y no andaba:
+    # mover_a_papelera() hace conn.commit(), y un commit adentro de transaccion() la cierra
+    # antes de tiempo. Probado cortando justo antes del DELETE: la marca seguía en la base Y
+    # quedaba una copia en la papelera, que al restaurarla chocaba con la que nunca se fue.
+    with db_lock, transaccion():
+        _guardar_en_papelera_sin_candado("marca", snapshot)
+        c.execute("DELETE FROM marcas WHERE id = ?", (marca_id,))
     return True
 
 
@@ -16859,8 +17019,8 @@ def borrar_papelera_definitivo(item_id):
 def cb_restaurar_papelera(item_id):
     """Callback para el botón de restaurar. Guarda el resultado en session_state para poder
     mostrarlo después del refresco, ya que un callback corre antes de dibujar la pantalla."""
-    ok, error = restaurar_de_papelera(item_id)
-    st.session_state["resultado_papelera"] = ("ok", "Restaurado.") if ok else ("error", error)
+    ok, texto = restaurar_de_papelera(item_id)
+    st.session_state["resultado_papelera"] = ("ok", texto or "Restaurado.") if ok else ("error", texto)
 
 
 def vaciar_papelera_antigua(dias=30):
@@ -16871,6 +17031,8 @@ def vaciar_papelera_antigua(dias=30):
 
 
 def restaurar_de_papelera(item_id):
+    """Devuelve (ok, texto): el error si no se pudo, o un detalle de lo restaurado si hay."""
+    detalle = None
     c.execute("SELECT tipo, datos_json FROM papelera WHERE id = ?", (item_id,))
     row = c.fetchone()
     if not row:
@@ -16894,9 +17056,34 @@ def restaurar_de_papelera(item_id):
                         (datos["nombre"], datos["alias"], datos["cbu"], datos["titular"])
                     )
                 elif tipo == "producto":
-                    columnas = ", ".join(datos.keys())
-                    placeholders = ", ".join("?" * len(datos))
-                    c.execute(f"INSERT INTO productos ({columnas}) VALUES ({placeholders})", list(datos.values()))
+                    # Los de antes de este cambio no traen vínculos: se restauran igual.
+                    _equivs = datos.pop("_equivalencias", None) or []
+                    _pends = datos.pop("_pendientes", None) or []
+                    # Si mientras estuvo en la papelera volvió a entrar con una importación, ya
+                    # existe otro con el mismo código y la misma marca, y la base no deja dos
+                    # (UNIQUE codigo_clean, marca_id). Antes eso era «No se pudo restaurar:
+                    # UNIQUE constraint failed». Ahora se le devuelven los vínculos a ese.
+                    c.execute("SELECT id FROM productos WHERE codigo_clean = ? AND marca_id = ?",
+                              (datos.get("codigo_clean"), datos.get("marca_id")))
+                    _ya_esta = c.fetchone()
+                    if _ya_esta:
+                        _cambiar = {datos.get("id"): _ya_esta["id"]}
+                    else:
+                        _cambiar = {}
+                        columnas = ", ".join(datos.keys())
+                        placeholders = ", ".join("?" * len(datos))
+                        c.execute(f"INSERT INTO productos ({columnas}) VALUES ({placeholders})",
+                                  list(datos.values()))
+                    _rep, _perd = _reponer_vinculos("equivalencias", _equivs, _cambiar)
+                    _reponer_vinculos("equivalencias_pendientes", _pends, _cambiar)
+                    if _equivs:
+                        detalle = f"Restaurado con {_rep} de sus {len(_equivs)} vínculo(s)."
+                        if _perd:
+                            detalle += (f" {_perd} no se pudieron reponer: el otro producto ya "
+                                        "no existe.")
+                    if _ya_esta:
+                        detalle = ("Ese código ya había vuelto a entrar con una importación: "
+                                   "se le devolvieron los vínculos a ese. " + (detalle or ""))
                 elif tipo == "marca":
                     marca = datos["marca"]
                     columnas_marca = ", ".join(marca.keys())
@@ -16908,15 +17095,22 @@ def restaurar_de_papelera(item_id):
                         placeholders_p = ", ".join("?" * len(producto))
                         c.execute(f"INSERT INTO productos ({columnas_p}) VALUES ({placeholders_p})",
                                   list(producto.values()))
-                    for equiv in datos["equivalencias"]:
-                        columnas_e = ", ".join(equiv.keys())
-                        placeholders_e = ", ".join("?" * len(equiv))
-                        c.execute(f"INSERT INTO equivalencias ({columnas_e}) VALUES ({placeholders_e})",
-                                  list(equiv.values()))
+                    # Con _reponer_vinculos() y no un INSERT por fila: el otro lado de un vínculo
+                    # es casi siempre un código de fábrica de OTRA marca, y si mientras tanto se
+                    # lo borró —depurar huérfanos, cortar un puente, los códigos basura— la clave
+                    # foránea rechazaba el INSERT y con él la restauración ENTERA: «No se pudo
+                    # restaurar: FOREIGN KEY constraint failed», y la marca no volvía nunca.
+                    _rep, _perd = _reponer_vinculos("equivalencias", datos["equivalencias"], {})
+                    _reponer_vinculos("equivalencias_pendientes", datos.get("pendientes") or [], {})
+                    detalle = (f"Restaurada con {len(datos['productos'])} producto(s) y {_rep} "
+                               "vínculo(s).")
+                    if _perd:
+                        detalle += (f" {_perd} vínculo(s) no se pudieron reponer: el otro "
+                                    "producto ya no existe.")
                 else:
                     return False, f"No sé cómo restaurar el tipo '{tipo}'."
                 c.execute("DELETE FROM papelera WHERE id = ?", (item_id,))
-            return True, None
+            return True, detalle
         except Exception as e:
             anotar_error("restaurar_de_papelera", e)
             return False, f"No se pudo restaurar: {e}"
@@ -23853,6 +24047,14 @@ if pagina == PAGINAS[2]:
                     except Exception as _err:
                         anotar_error("nivel principal", _err)
                         _inf = {"puntos": [], "vinculos_nuevos": 0}
+                    if _inf.get("pedidos_que_entraron"):
+                        _ped = _inf["pedidos_que_entraron"]
+                        st.success(
+                            f"📞 **Esta lista trajo {len(_ped)} código(s) que te habían pedido y "
+                            "no tenías.** "
+                            + ", ".join(f"{x['Buscado']} ({x['Veces']} vez/veces)" for x in _ped[:6])
+                            + (" y más" if len(_ped) > 6 else "")
+                            + ". Están en Estadísticas → 🔎 Búsquedas sin resultado.")
                     if _inf["puntos"]:
                         st.markdown("#### 🔎 Qué conviene revisar de esta lista")
                         for nivel, titulo, detalle, donde in _inf["puntos"]:
@@ -24651,21 +24853,15 @@ if pagina == PAGINAS[3]:
                                                      key="mant_sel_borrar")
                 id_a_borrar = opciones_borrar[elegido_borrar_label]
                 st.caption(
-                    "⚠️ Se borran también sus equivalencias con otros productos. Si lo restaurás desde "
-                    "la papelera, el producto vuelve pero **sin** esos vínculos — hay que volver a "
-                    "vincularlo manualmente."
+                    "Se borran también sus equivalencias con otros productos, pero quedan "
+                    "guardadas con él en la papelera: si lo restaurás, vuelve **con** sus vínculos."
                 )
                 confirmar_borrado = st.checkbox(f"Confirmo que quiero borrar '{elegido_borrar_label}'",
                                                  key="mant_confirmar_borrar")
                 if candado('eliminar un producto', st.button("🗑️ Eliminar producto", disabled=not confirmar_borrado), 'eliminar_un_producto'):
-                    c.execute("SELECT * FROM productos WHERE id = ?", (id_a_borrar,))
-                    fila_producto = c.fetchone()
-                    if fila_producto:
-                        mover_a_papelera("producto", dict(fila_producto))
-                    with db_lock:
-                        c.execute("DELETE FROM productos WHERE id = ?", (id_a_borrar,))
-                        conn.commit()
-                    avisar("success", "Producto eliminado (podés restaurarlo desde la papelera, más abajo).")
+                    _n_vinc = borrar_producto_con_papelera(id_a_borrar)
+                    avisar("success", "Producto eliminado. Podés restaurarlo desde la papelera, "
+                                      f"más abajo, con sus {_n_vinc or 0} vínculo(s).")
                     st.rerun()
             else:
                 st.caption("Sin resultados.")
@@ -26751,6 +26947,14 @@ if pagina == PAGINAS[3]:
                 "(Fusionar marcas y restaurar un backup completo siguen siendo irreversibles — esos no "
                 "pasan por acá.)"
             )
+            # El resultado de restaurar va ANTES de mirar si quedó algo. Estaba adentro del
+            # «else» de abajo, y restaurar lo ÚLTIMO que había deja la papelera vacía: el cartel
+            # no salía, quedaba guardado en la sesión, y aparecía la próxima vez que alguien
+            # borrara algo — un «Restaurado con 61 vínculos» que ya no tenía nada que ver.
+            resultado_papelera = st.session_state.pop("resultado_papelera", None)
+            if resultado_papelera:
+                tipo_res, msg_res = resultado_papelera
+                (st.success if tipo_res == "ok" else st.error)(msg_res)
             items_papelera = listar_papelera()
             if not items_papelera:
                 st.caption("La papelera está vacía.")
@@ -26767,11 +26971,6 @@ if pagina == PAGINAS[3]:
                                   on_click=cb_restaurar_papelera, args=(item["ID"],))
                     colp3.button("🗑️", key=f"borrar_papelera_{item['ID']}", help="Borrar en forma permanente, sin restaurar",
                                   on_click=borrar_papelera_definitivo, args=(item["ID"],))
-
-                resultado_papelera = st.session_state.pop("resultado_papelera", None)
-                if resultado_papelera:
-                    tipo_res, msg_res = resultado_papelera
-                    (st.success if tipo_res == "ok" else st.error)(msg_res)
 
                 st.caption("También se limpia sola: lo que lleva más de 30 días acá se borra en forma permanente.")
                 st.button("🧹 Vaciar ahora lo de más de 30 días", on_click=vaciar_papelera_antigua, args=(30,))
@@ -27185,8 +27384,19 @@ Administrar → Mantenimiento.
     if sub_stats == SUB_STATS[4]:
         st.markdown("**🔎 Códigos buscados sin resultado**")
         st.caption("Qué te están pidiendo los clientes que todavía no tenés cargado.")
+        # Lo primero, lo que YA ESTÁ: de todo lo de esta pantalla es lo único que es una venta
+        # a un llamado de distancia. Ver busquedas_fallidas_que_ahora_estan().
+        _ya_estan = busquedas_fallidas_que_ahora_estan()
+        if _ya_estan:
+            st.success(f"✅ **{len(_ya_estan)} de los códigos que te pidieron y no tenías YA "
+                       "ESTÁN cargados.** Entraron con alguna lista después de que los "
+                       "buscaron. Si te acordás quién los pidió, es un llamado.")
+            st.dataframe(_ya_estan, width="stretch", hide_index=True)
         fallidas = listar_busquedas_sin_resultado()
         if fallidas:
+            _ya = {sanitizar(x["Buscado"]) for x in _ya_estan}
+            for f in fallidas:
+                f["¿Hoy?"] = "✅ ya está" if sanitizar(f["Buscado"]) in _ya else "—"
             st.dataframe(fallidas, width="stretch", hide_index=True)
         else:
             st.caption("Sin registros todavía.")

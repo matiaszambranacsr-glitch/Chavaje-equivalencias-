@@ -1649,6 +1649,97 @@ El corte es por proveedor (`GROUP BY po.id, mp.id`) y no por total: un código d
 legítimo aparece en varias listas a la vez —es justo para eso que sirve— y contando todo junto
 ese sería el primero de la lista.
 
+## La papelera devolvía el producto sin lo que lo hacía útil
+
+Borrar un producto lo mandaba a la papelera, pero solo la fila del producto. La pantalla lo
+avisaba: «si lo restaurás, el producto vuelve pero **sin** esos vínculos — hay que volver a
+vincularlo manualmente». Medido con un producto real:
+
+| LRSC030120LUCAS | antes | ahora |
+|---|---|---|
+| vínculos antes de borrarlo | 61 | 61 |
+| vínculos después de restaurarlo | **0** | **61** |
+| lo que trae la búsqueda después de restaurarlo | **1** (él solo) | 62 |
+
+Ahora `borrar_producto_con_papelera()` guarda el producto **con sus vínculos y sus pendientes**,
+en una sola transacción, y restaurarlo los repone. Si mientras estuvo en la papelera el mismo
+código volvió a entrar con una importación, antes fallaba con «UNIQUE constraint failed»; ahora
+se le devuelven los vínculos al que entró.
+
+## Una marca en la papelera que no se podía restaurar nunca
+
+Borrar una marca entera sí guardaba sus vínculos. Pero al restaurarla se los volvía a meter de a
+uno con un `INSERT` a secas, y el otro lado de cada vínculo es casi siempre un código de fábrica
+de OTRA marca. Si mientras tanto se borraba **uno solo** de esos —depurar huérfanos, cortar un
+puente, los códigos basura—, la clave foránea rechazaba ese `INSERT` y con él la restauración
+**entera**:
+
+| restaurar FISPA después de borrar UN código de fábrica | antes | ahora |
+|---|---|---|
+| resultado | «No se pudo restaurar: FOREIGN KEY constraint failed» | restaurada |
+| la marca | **no vuelve nunca** | vuelve con sus 5.068 productos |
+| vínculos | 0 de 14.607 | 14.603, y dice que 4 no se pudieron reponer |
+
+Ahora la marca y el producto pasan por `_reponer_vinculos()`, que repone lo que puede y cuenta
+lo que no.
+
+Probándolo con la app corriendo —apretando «↩️ Restaurar» en la pantalla— apareció otro: el
+cartel con el resultado se dibujaba adentro del «la papelera tiene cosas». Restaurar lo ÚLTIMO
+que había la deja vacía, así que el cartel no salía, quedaba guardado en la sesión y aparecía la
+próxima vez que alguien borrara algo, fuera de lugar. Ahora se muestra antes: «Restaurado con 61
+de sus 61 vínculo(s)».
+
+Y el «todo o nada» de borrar una marca no era todo o nada. `mover_a_papelera()` hace
+`conn.commit()`, y un commit adentro de `transaccion()` la cierra antes de tiempo. Probado
+cortando justo antes del `DELETE`: la marca **seguía en la base y además quedaba una copia en la
+papelera**. Ahora se guarda con `_guardar_en_papelera_sin_candado()`, que no confirma nada, y el
+corte deja 0 copias.
+
+`auditar.py` tiene un control nuevo (38) para esa clase de error: una función que hace
+`conn.commit()` llamada adentro de `transaccion()`, o un `commit()` directo ahí adentro. Pasado
+por el archivo de antes de este arreglo devuelve exactamente ese caso, y ningún otro.
+
+## Pendientes colgando de productos que ya no existen
+
+`equivalencias` se limpia sola al borrar un producto (`ON DELETE CASCADE`). La cola de pendientes
+no tiene claves foráneas, y de los **seis** lugares que borran productos solo la fusión se
+acordaba de ella. El resultado es el mismo agujero de conteo del lote anterior: invisibles en la
+revisión —que hace `JOIN` con productos—, pero contados en el cartel del buscador y en «Descartar
+TODO». Borrar ILLINOIS dejaba **6.001 pendientes huérfanos**.
+
+En vez de arreglar cinco lugares, un trigger (`productos_sin_pendientes_colgando`) los borra con
+el producto, venga de donde venga el borrado —incluido el que se agregue mañana—. Por eso ahora
+la papelera guarda también los pendientes: al restaurar ILLINOIS la cola vuelve a sus 12.747.
+Las bases que ya tienen huérfanos se limpian al abrir (`VERSION_COLA_PENDIENTES = "2"`).
+
+## «Lo que te pidieron y no tenías» ahora dice si ya lo tenés
+
+«🔎 Búsquedas sin resultado» era un registro muerto: qué te pidieron y no estaba cargado. Lo
+normal es que después sí esté —entra con la lista siguiente— y que nadie se entere: el cliente
+que lo pidió tres veces ya no vuelve a preguntar.
+
+`busquedas_fallidas_que_ahora_estan()` vuelve a mirar cada pedido contra el catálogo de hoy, con
+el mismo criterio con que arranca la búsqueda (código limpio o código de barras):
+
+- arriba de la pantalla, en verde, los que **ya están**, con cómo están cargados;
+- en la lista de siempre, una columna «¿Hoy?»;
+- y al terminar de importar una lista, un cartel: «📞 Esta lista trajo N código(s) que te habían
+  pedido y no tenías».
+
+Las formas distintas de escribir lo mismo cuentan como un solo pedido: «271 1500» buscado dos
+veces y «2711500» una vez son 3 pedidos del 2711500. Tarda 1 ms.
+
+## Generar el paquete tardaba siete minutos
+
+`nucleo/generar.py` copia de `app.py` el texto de cada bloque con `ast.get_source_segment()`, y
+esa función vuelve a partir **el archivo entero** en líneas cada vez que se la llama. Una vez por
+bloque, unos 2.000 bloques, 29.700 líneas: cuadrático. Nadie lo cambió; fue creciendo con el
+archivo hasta pasar los **siete minutos**, casi todo adentro de `ast._splitlines_no_ff`.
+
+Ahora las líneas se parten una sola vez y el recorte se hace a mano, en bytes UTF-8 como lo hace
+`ast`. **De más de 7 minutos a 0,87 s**, y el paquete generado es idéntico byte por byte al de la
+versión lenta.
+
 ## Rechazabas un vínculo y volvía con la lista siguiente
 
 El más grave de este lote, y es consecuencia directa de haber hecho automático el

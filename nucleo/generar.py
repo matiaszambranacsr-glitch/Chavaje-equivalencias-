@@ -6,14 +6,35 @@ import ast, os, io
 SRC = open("/home/user/Chavaje-equivalencias-/app.py", encoding="utf-8").read()
 ARBOL = ast.parse(SRC)
 
+# Las líneas se parten UNA vez. ast.get_source_segment() vuelve a partir el archivo entero en
+# cada llamada, y acá se lo llamaba una vez por bloque: cuadrático. Con app.py en 29.700 líneas
+# y unos 2.000 bloques, generar el paquete había pasado a tardar más de SIETE MINUTOS, casi
+# todo adentro de ast._splitlines_no_ff. Nadie lo había cambiado: fue creciendo con el archivo.
+# Mismo recorte que hace get_source_segment —las columnas de ast son bytes UTF-8, no
+# caracteres—, así que el resultado es idéntico; se comprobó comparando el paquete generado de
+# las dos formas, byte por byte.
+_LINEAS = SRC.split("\n")
+
+
+def segmento(nodo):
+    """Lo mismo que ast.get_source_segment(SRC, nodo), sin volver a partir el archivo."""
+    primera, ultima = nodo.lineno - 1, nodo.end_lineno - 1
+    if primera == ultima:
+        return _LINEAS[primera].encode()[nodo.col_offset:nodo.end_col_offset].decode()
+    trozos = ([_LINEAS[primera].encode()[nodo.col_offset:].decode()]
+              + _LINEAS[primera + 1:ultima]
+              + [_LINEAS[ultima].encode()[:nodo.end_col_offset].decode()])
+    return "\n".join(trozos)
+
+
 BLOQUES = {}   # nombre -> texto exacto
 for n in ARBOL.body:
     if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
-        BLOQUES[n.name] = ast.get_source_segment(SRC, n)
+        BLOQUES[n.name] = segmento(n)
     elif isinstance(n, ast.Assign):
         for t in n.targets:
             if isinstance(t, ast.Name):
-                BLOQUES[t.id] = ast.get_source_segment(SRC, n)
+                BLOQUES[t.id] = segmento(n)
 
 def comentario_previo(nombre):
     """Se lleva también el comentario que va JUSTO ARRIBA del bloque. Esos comentarios explican
