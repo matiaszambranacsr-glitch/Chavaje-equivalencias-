@@ -1649,6 +1649,81 @@ El corte es por proveedor (`GROUP BY po.id, mp.id`) y no por total: un código d
 legítimo aparece en varias listas a la vez —es justo para eso que sirve— y contando todo junto
 ese sería el primero de la lista.
 
+## Rechazabas un vínculo y volvía con la lista siguiente
+
+El más grave de este lote, y es consecuencia directa de haber hecho automático el
+descubrimiento.
+
+Revisar la cola sirve si la decisión **queda**. No quedaba. Los dos que más proponen —el
+barrido de todo el catálogo y los códigos escritos en la descripción— no miraban lo que ya se
+había decidido, y `guardar_equivalencias_pendientes()` tampoco. Mientras había que apretar un
+botón para correrlos, eso pasaba de vez en cuando; desde que corren solos después de cada
+importación, pasaba **siempre**.
+
+Medido sobre la base real, con el descubrimiento ya corrido: se decidieron 300 pares a mano,
+como lo hace la pantalla, y se corrió el descubrimiento de la importación siguiente.
+
+| | antes | ahora |
+|---|---|---|
+| rechazados que volvieron a la cola | **300 de 300** | 0 |
+| aprobados que volvieron a la cola como pendientes | **300 de 300** | 0 |
+
+Y la app encima los anunciaba como nuevos: «100 par(es) de códigos que el proveedor escribió…
+200 par(es) del barrido…» — exactamente los 300 que se acababan de decidir.
+
+La importación de una lista ya lo hacía bien (filtra `rechazados_antes`), y
+`guardar_equivalencias_derivadas()` también miraba los rechazos. Ahora las dos pasan por el mismo
+lugar, que además saca lo que ya está cargado. Se hace adentro de
+`guardar_equivalencias_pendientes()` y no en quien llama porque quien llama son cinco lugares
+distintos, y alcanza con que uno se olvide.
+
+## Una fila por par, y los números que decían el doble
+
+De paso, el mismo lugar ahora guarda **una fila por par**, `(menor, mayor)`. Quien llamaba
+mandaba la ida y la vuelta, la cola guardaba las dos, y todo lo que la cuenta con `COUNT(*)`
+decía el doble —mientras la pantalla de revisión, que filtra `a < b`, mostraba la mitad—:
+
+| en la base real, después de un descubrimiento | decía | pares de verdad |
+|---|---|---|
+| cartel del buscador, «esperando aprobación» | 22.309 | 12.747 |
+| selector de listas, el barrido | 17.326 | 8.648 |
+| «Descartar TODO lo pendiente» | 22.309 | 12.747 |
+
+Y un caso peor: cuando el mismo par caía en dos listas, una se quedaba con la ida y la otra con
+la vuelta —la clave primaria no deja repetir la fila exacta, pero la vuelta es otra fila—. La
+vuelta es **invisible** en la revisión, que filtra `a < b`. Eran 30 en el barrido: una lista que
+no se terminaba de vaciar nunca.
+
+Las bases que ya tienen la cola así se arreglan solas al abrir la app (`VERSION_COLA_PENDIENTES`):
+se borra la vuelta de los pares que tienen la ida, se dan vuelta los que quedaron solos al revés,
+y se saca de la cola lo ya rechazado y lo ya cargado. Sobre la cola real: **22.309 filas → 12.747
+pares, en 0,06 s**. En la base de la prueba de arriba saca justo los 300 rechazados que habían
+vuelto.
+
+`aprobar_pendientes()` y `rechazar_pendientes()` borran ahora las dos direcciones, igual que
+`borrar_equivalencias_dudosas()`: el botón «Descartar esos N» de kit y pieza mandaba solo la ida.
+Y `rechazar_pendientes()` devuelve lo que borró, no cuántos pares le pasaron — la pantalla casi
+siempre manda ida y vuelta, así que decía el doble.
+
+## De dónde salían las «equivalencias anotadas dos veces»
+
+Hay una herramienta entera para unificarlas y un aviso de salud que las cuenta. Salían de dos
+lugares que las creaban a propósito:
+
+- **«Vincular manual»** con varios códigos recorría cada par dos veces —i contra j y j contra i—.
+- **La confirmación desde el mostrador** guardaba la ida y la vuelta de cada sustitución.
+
+| | antes | ahora |
+|---|---|---|
+| vincular 3 códigos: la pantalla decía | «6 relaciones creadas» | «3 relaciones» |
+| filas guardadas | 6 (3 espejadas) | 3 |
+| confirmar 1 sustitución en el mostrador | 2 filas | 1 |
+
+Ahora los dos pasan por `_guardar_equivalencia_una_vez()`, que guarda `(menor, mayor)` y, si el
+par ya estaba anotado al revés, se lleva esa fila. El buscador mira las dos columnas, así que con
+una fila alcanza: probado buscando cada uno de los cuatro códigos, los cuatro traen a los otros
+tres.
+
 ## «Se cortaron 2 vínculos» y el vínculo seguía ahí
 
 El peor de este lote. No lo encontró el auditor: el control nuevo marcó la consulta de

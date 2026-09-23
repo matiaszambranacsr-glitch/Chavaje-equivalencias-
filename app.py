@@ -379,6 +379,10 @@ VERSION_MARCAS_REPUESTO = "2"
 # reseparar_descripciones_viejas(). Subir el número al mejorar separar_texto_pegado().
 VERSION_SEPARACION = "1"
 
+# La cola de pendientes pasó a guardar UNA fila por par y a no recibir lo ya rechazado ni lo ya
+# cargado (ver guardar_equivalencias_pendientes()). Esto limpia lo que quedó de antes.
+VERSION_COLA_PENDIENTES = "1"
+
 
 def secretos_app():
     """Los Secrets de Streamlit, o {} si en este servidor no hay ninguno configurado.
@@ -2136,6 +2140,40 @@ def _datos_precargados_y_migraciones(c):
         c.execute("INSERT INTO configuracion (clave, valor) VALUES ('version_normalizacion', ?) "
                   "ON CONFLICT(clave) DO UPDATE SET valor = excluded.valor",
                   (VERSION_NORMALIZACION,))
+
+    # La cola de pendientes, al día con lo que ahora guarda guardar_equivalencias_pendientes().
+    # Va acá y no en la tarea de fondo porque es SQL puro sobre una tabla chica: sobre la cola
+    # real después de un descubrimiento —22.309 filas— tarda milésimas.
+    # El orden importa: primero se borra la vuelta de los pares que tienen la ida, y recién ahí
+    # se dan vuelta los que quedaron solos al revés; al revés chocarían con la clave primaria.
+    # Lo rechazado y lo ya cargado se saca de la cola por lo mismo que ya no entra: preguntar
+    # otra vez por algo que se decidió es hacer que la decisión no sirva.
+    c.execute("SELECT valor FROM configuracion WHERE clave = 'version_cola_pendientes'")
+    _fila_cola = c.fetchone()
+    if (_fila_cola["valor"] if _fila_cola else None) != VERSION_COLA_PENDIENTES:
+        c.execute("""DELETE FROM equivalencias_pendientes
+                     WHERE producto_a_id > producto_b_id
+                       AND EXISTS (SELECT 1 FROM equivalencias_pendientes e2
+                                   WHERE e2.producto_a_id = equivalencias_pendientes.producto_b_id
+                                     AND e2.producto_b_id = equivalencias_pendientes.producto_a_id)""")
+        c.execute("""UPDATE equivalencias_pendientes
+                     SET producto_a_id = producto_b_id, producto_b_id = producto_a_id
+                     WHERE producto_a_id > producto_b_id""")
+        c.execute("DELETE FROM equivalencias_pendientes WHERE producto_a_id = producto_b_id")
+        c.execute("""DELETE FROM equivalencias_pendientes
+                     WHERE EXISTS (SELECT 1 FROM equivalencias_revisadas r
+                                   WHERE r.decision = 'rechazada'
+                                     AND r.producto_a_id = equivalencias_pendientes.producto_a_id
+                                     AND r.producto_b_id = equivalencias_pendientes.producto_b_id)""")
+        c.execute("""DELETE FROM equivalencias_pendientes
+                     WHERE EXISTS (SELECT 1 FROM equivalencias e
+                                   WHERE (e.producto_a_id = equivalencias_pendientes.producto_a_id
+                                          AND e.producto_b_id = equivalencias_pendientes.producto_b_id)
+                                      OR (e.producto_a_id = equivalencias_pendientes.producto_b_id
+                                          AND e.producto_b_id = equivalencias_pendientes.producto_a_id))""")
+        c.execute("INSERT INTO configuracion (clave, valor) VALUES ('version_cola_pendientes', ?) "
+                  "ON CONFLICT(clave) DO UPDATE SET valor = excluded.valor",
+                  (VERSION_COLA_PENDIENTES,))
 
     # Lo mismo para las descripciones que entraron antes de que el separador aprendiera.
     # Ver VERSION_SEPARACION.
@@ -5435,14 +5473,11 @@ def descubrimiento_post_importacion(presupuesto_segundos=PRESUPUESTO_DESCUBRIMIE
         try:
             _escritos = equivalencias_escritas_en_las_descripciones()
             if _escritos:
-                _pares_e = []
-                for _a, _b in _escritos:
-                    _pares_e.extend([(_a, _b), (_b, _a)])
                 _n = guardar_equivalencias_pendientes(
-                    _pares_e, "descripcion-declarada",
+                    list(_escritos), "descripcion-declarada",
                     f"CÓDIGO ESCRITO EN LA DESCRIPCIÓN (automático) · {datetime.now():%d/%m %H:%M}")
                 if _n:
-                    hecho.append(f"{_n // 2} par(es) de códigos que el proveedor escribió "
+                    hecho.append(f"{_n} par(es) de códigos que el proveedor escribió "
                                  "en la descripción, a revisión")
         except Exception as _err:
             anotar_error("descubrimiento_post_importacion/codigos_escritos", _err)
@@ -5498,14 +5533,11 @@ def descubrimiento_post_importacion(presupuesto_segundos=PRESUPUESTO_DESCUBRIMIE
         try:
             _todas = sugerir_entre_todas_las_marcas()
             if _todas:
-                _pares = []
-                for x in _todas:
-                    _pares.extend([(x["_a"], x["_b"]), (x["_b"], x["_a"])])
                 _n = guardar_equivalencias_pendientes(
-                    _pares, "descripcion-todas",
+                    [(x["_a"], x["_b"]) for x in _todas], "descripcion-todas",
                     f"BARRIDO (automático) · {datetime.now():%d/%m %H:%M}")
                 if _n:
-                    hecho.append(f"{_n // 2} par(es) del barrido de todo el catálogo, a revisión")
+                    hecho.append(f"{_n} par(es) del barrido de todo el catálogo, a revisión")
         except Exception as _err:
             anotar_error("descubrimiento_post_importacion/barrido", _err)
     else:
@@ -6776,14 +6808,54 @@ def cortar_todos_los_vinculos(producto_id, recordar_rechazo=True):
     return len(pares)
 
 
+def pares_ya_cargados():
+    """Los pares que ya son equivalencia cargada, como (menor, mayor). Ver
+    guardar_equivalencias_pendientes()."""
+    c.execute("""SELECT MIN(producto_a_id, producto_b_id) AS a,
+                        MAX(producto_a_id, producto_b_id) AS b FROM equivalencias""")
+    return {(r["a"], r["b"]) for r in c.fetchall()}
+
+
 def guardar_equivalencias_pendientes(pares, origen, lote):
-    """Guarda vínculos para revisar en vez de cargarlos directo."""
+    """Guarda vínculos para revisar en vez de cargarlos directo. Devuelve cuántos PARES entraron.
+
+    Tres cosas se hacen acá y no en quien llama, porque quien llama son cinco lugares distintos
+    y basta con que uno se olvide:
+
+    · LO QUE YA RECHAZASTE NO VUELVE. Era el agujero más grande: ninguno de los dos que más
+      proponen —el barrido de todo el catálogo y los códigos escritos en la descripción— miraba
+      las decisiones anteriores, y desde que corren solos después de cada importación eso quería
+      decir que TODO lo rechazado volvía a la cola con la lista siguiente. Medido: se rechazaron
+      300 pares a mano, se corrió el descubrimiento de la importación siguiente, y volvieron los
+      300 —y la app los anunció como nuevos—. Revisar no servía para nada si la revisión no
+      quedaba. La importación de una lista ya lo hacía (ver `rechazados_antes`); esto no.
+    · Lo que ya está cargado tampoco: preguntar si se aprueba algo aprobado es ruido.
+    · Se guarda UNA fila por par, (menor, mayor). Quien llama mandaba las dos direcciones, la
+      cola guardaba las dos, y todo lo que la cuenta con COUNT(*) —el cartel del buscador, el
+      selector de listas, «Descartar TODO lo pendiente», el aviso de salud— decía el doble,
+      mientras la pantalla de revisión, que filtra `a < b`, mostraba la mitad. Después de un
+      descubrimiento sobre la base real: el buscador decía 22.309 esperando y los pares eran
+      12.747; el selector decía 17.326 para el barrido y adentro había 8.648. Y peor: cuando
+      el mismo par caía en dos listas, una se quedaba con la ida y otra con la vuelta, y la
+      vuelta era invisible en la revisión —30 así en el barrido—, así que esa lista no se
+      terminaba de vaciar nunca."""
     if not pares:
         return 0
-    # Lo mismo que en guardar_equivalencias_derivadas(): el kit y su pieza no son una
-    # equivalencia, así que no se pregunta. Ver pares_de_kit_y_pieza().
-    _kits = pares_de_kit_y_pieza([(a, b) for a, b in pares])
-    pares = [(a, b) for a, b in pares if (a, b) not in _kits]
+    rechazados = pares_rechazados()
+    cargados = pares_ya_cargados()
+    vistos, limpios = set(), []
+    for a, b in pares:
+        if a == b:
+            continue
+        par = (min(a, b), max(a, b))
+        if par in vistos or par in rechazados or par in cargados:
+            continue
+        vistos.add(par)
+        limpios.append(par)
+    # El kit y su pieza no son una equivalencia, así que no se pregunta. Ver
+    # pares_de_kit_y_pieza().
+    _kits = pares_de_kit_y_pieza(limpios)
+    pares = [par for par in limpios if par not in _kits]
     if not pares:
         return 0
     with db_lock:
@@ -7615,6 +7687,10 @@ def rechazar_pendientes_de_producto(producto_id, lote=None):
     return borrados
 
 
+_BORRAR_PENDIENTE_EN_LOS_DOS_SENTIDOS = """DELETE FROM equivalencias_pendientes
+    WHERE (producto_a_id = ? AND producto_b_id = ?) OR (producto_a_id = ? AND producto_b_id = ?)"""
+
+
 def aprobar_pendientes(lote, solo_estos_pares=None):
     """Pasa los vínculos pendientes a equivalencias reales."""
     # Todo o nada: se crean las equivalencias y se borran los pendientes. Cortado en el medio,
@@ -7635,7 +7711,10 @@ def aprobar_pendientes(lote, solo_estos_pares=None):
             "VALUES (?, ?, datetime('now'), ?)",
             [(min(a, b), max(a, b), lote) for a, b in pares if a != b]
         )
-        c.executemany("DELETE FROM equivalencias_pendientes WHERE producto_a_id = ? AND producto_b_id = ?", pares)
+        # Las dos direcciones, por lo mismo que en borrar_equivalencias_dudosas(): la cola ya
+        # guarda una sola fila por par, pero una base de antes puede tener la vuelta, y la
+        # pantalla no siempre la manda.
+        c.executemany(_BORRAR_PENDIENTE_EN_LOS_DOS_SENTIDOS, [(a, b, b, a) for a, b in pares])
     # Queda registrado que ya se revisó, así la auditoría de lo existente no lo vuelve a marcar
     marcar_revision(pares, "ok")
     return len(pares)
@@ -7651,8 +7730,11 @@ def rechazar_pendientes(lote, solo_estos_pares=None):
             borrados = c.rowcount
         else:
             pares = list(solo_estos_pares)
-            c.executemany("DELETE FROM equivalencias_pendientes WHERE producto_a_id = ? AND producto_b_id = ?", pares)
-            borrados = len(pares)
+            # Las dos direcciones, y se cuenta lo que se BORRÓ. Antes se devolvía len(pares), y
+            # la pantalla manda casi siempre ida y vuelta: decía el doble. Y el botón de «kit y
+            # pieza» mandaba solo la ida, así que la vuelta se quedaba en la cola.
+            c.executemany(_BORRAR_PENDIENTE_EN_LOS_DOS_SENTIDOS, [(a, b, b, a) for a, b in pares])
+            borrados = max(c.rowcount, 0)
             marcar_para_recordar = pares
         conn.commit()
     # Se recuerda el rechazo para que no vuelva a aparecer si se reimporta la misma lista
@@ -7666,6 +7748,19 @@ def descartar_candidata(codigo_clean, producto_id):
                    "(codigo_clean, producto_id, descartado_por) VALUES (?, ?, ?)",
                    (codigo_clean, producto_id, obtener_usuario_actual()))
         conn.commit()
+
+
+def _guardar_equivalencia_una_vez(a, b, verificada, nivel, nota):
+    """Carga (o actualiza) una equivalencia como UNA fila (menor, mayor).
+
+    Si ya existía anotada al revés, esa fila se va: si no, el par quedaría espejado, que es
+    justo lo que esto viene a evitar. El que llama tiene el candado tomado."""
+    a, b = min(a, b), max(a, b)
+    c.execute("DELETE FROM equivalencias WHERE producto_a_id = ? AND producto_b_id = ?", (b, a))
+    c.execute("INSERT OR REPLACE INTO equivalencias "
+              "(producto_a_id, producto_b_id, created_at, verificada, nivel, nota) "
+              "VALUES (?, ?, datetime('now'), ?, ?, ?)",
+              (a, b, verificada, nivel, nota))
 
 
 def confirmar_candidata(codigo_clean, producto_id, codigo_original, marca_para_nuevo=None):
@@ -7690,13 +7785,12 @@ def confirmar_candidata(codigo_clean, producto_id, codigo_original, marca_para_n
         if id_pedido == producto_id:
             return False, "Los dos códigos son el mismo producto."
 
-        for a, b in ((id_pedido, producto_id), (producto_id, id_pedido)):
-            c.execute(
-                "INSERT OR REPLACE INTO equivalencias "
-                "(producto_a_id, producto_b_id, created_at, verificada, nivel, nota) "
-                "VALUES (?, ?, datetime('now'), 1, ?, ?)",
-                (a, b, "Exacta", "Descubierta desde las ventas del mostrador")
-            )
+        # UNA fila, (menor, mayor). Guardaba las dos direcciones a propósito, y era uno de los
+        # dos lugares de donde salían las «equivalencias anotadas dos veces» que después hay
+        # que unificar con una herramienta aparte. La búsqueda mira las dos columnas: con una
+        # fila alcanza. Ver _guardar_equivalencia_una_vez().
+        _guardar_equivalencia_una_vez(id_pedido, producto_id, 1, "Exacta",
+                                      "Descubierta desde las ventas del mostrador")
         c.execute("DELETE FROM equivalencias_descartadas WHERE codigo_clean = ? AND producto_id = ?",
                    (codigo_clean, producto_id))
     return True, None
@@ -14702,26 +14796,9 @@ def guardar_equivalencias_derivadas(pares, lote):
     A propósito: por más buena que sea la deducción, sigue siendo una deducción. Pasa por la
     misma revisión que todo lo demás, y ahí el sistema de confianza la evalúa como a cualquier
     otra."""
-    if not pares:
-        return 0
-    rechazados = pares_rechazados()
-    nuevos = [(min(a, b), max(a, b)) for a, b in pares
-              if (min(a, b), max(a, b)) not in rechazados]
-    # Un kit y la pieza que trae adentro no van a la cola: no son equivalentes y preguntarlo
-    # solo gasta revisiones. Ver pares_de_kit_y_pieza().
-    _kits = pares_de_kit_y_pieza(nuevos)
-    nuevos = [par for par in nuevos if par not in _kits]
-    if not nuevos:
-        return 0
-    with db_lock:
-        c.executemany("""INSERT OR IGNORE INTO equivalencias_pendientes
-                         (producto_a_id, producto_b_id, origen, lote)
-                         VALUES (?, ?, 'catalogos_fabricante', ?)""",
-                      [(a, b, lote) for a, b in nuevos])
-        # Lo que entró de verdad, no lo que se intentó. Ver guardar_equivalencias_pendientes().
-        entraron = c.rowcount
-        conn.commit()
-    return max(entraron, 0)
+    # Esta era la única de las dos que ya miraba los rechazos y ordenaba el par. Ahora las dos
+    # pasan por el mismo lugar, que además descarta lo que ya está cargado.
+    return guardar_equivalencias_pendientes(pares, "catalogos_fabricante", lote)
 
 
 def buscar_aplicaciones(marca_auto, modelo="", anio=None, limite=200):
@@ -22805,20 +22882,20 @@ def vincular_grupo_equivalencias(productos_info, nivel, nota, verificar):
             )
             ids.append(pid)
         v = 1 if verificar else 0
-        pares = 0
+        # Cada par UNA vez. Recorría i contra j y j contra i, así que tres productos dejaban
+        # seis filas —las dos direcciones de cada par— y la pantalla decía «6 relaciones
+        # creadas» cuando eran tres. Era el otro lugar de donde salían las equivalencias
+        # anotadas dos veces.
+        hechos = set()
         for i in range(len(ids)):
-            for j in range(len(ids)):
-                if i == j or ids[i] == ids[j]:
+            for j in range(i + 1, len(ids)):
+                par = (min(ids[i], ids[j]), max(ids[i], ids[j]))
+                if ids[i] == ids[j] or par in hechos:
                     continue
-                c.execute(
-                    "INSERT OR REPLACE INTO equivalencias "
-                    "(producto_a_id, producto_b_id, created_at, verificada, nivel, nota) "
-                    "VALUES (?, ?, datetime('now'), ?, ?, ?)",
-                    (ids[i], ids[j], v, nivel, nota.strip())
-                )
-                pares += 1
+                _guardar_equivalencia_una_vez(par[0], par[1], v, nivel, nota.strip())
+                hechos.add(par)
         conn.commit()
-    return len(set(ids)), pares
+    return len(set(ids)), len(hechos)
 
 
 if pagina == PAGINAS[1]:
@@ -25733,14 +25810,11 @@ if pagina == PAGINAS[3]:
                         st.dataframe(_muestra_esc, width="stretch", hide_index=True)
                     if st.button(f"📥 Mandar los {len(_st_escritos)} a la cola de pendientes",
                                  type="primary", key="mandar_sug_escritos"):
-                        _pares_esc = []
-                        for _a, _b in _st_escritos:
-                            _pares_esc.extend([(_a, _b), (_b, _a)])
                         _n = guardar_equivalencias_pendientes(
-                            _pares_esc, "descripcion-declarada",
+                            list(_st_escritos), "descripcion-declarada",
                             f"escritos-{datetime.now().strftime('%d/%m %H:%M')}")
                         st.session_state.pop("sug_escritos", None)
-                        avisar("ok", f"Listo: {_n // 2} par(es) a la cola. Se aprueban en "
+                        avisar("ok", f"Listo: {_n} par(es) a la cola. Se aprueban en "
                                      "Estadísticas → 🔗 Equivalencias sugeridas.")
                         st.rerun()
             st.markdown("---")
@@ -25783,16 +25857,14 @@ if pagina == PAGINAS[3]:
                     st.dataframe([{k: v for k, v in x.items() if not k.startswith("_")}
                                   for x in _st_todas],
                                  width="stretch", hide_index=True)
-                    _pares_t = []
-                    for x in _st_todas:
-                        _pares_t.extend([(x["_a"], x["_b"]), (x["_b"], x["_a"])])
+                    _pares_t = [(x["_a"], x["_b"]) for x in _st_todas]
                     if st.button(f"📥 Mandar los {len(_st_todas)} a la cola de pendientes",
                                  type="primary", key="mandar_sug_todas"):
                         _n = guardar_equivalencias_pendientes(
                             _pares_t, "descripcion-todas",
                             f"todas-{datetime.now().strftime('%d/%m %H:%M')}")
                         st.session_state.pop("sug_todas", None)
-                        avisar("ok", f"Listo: {_n // 2} par(es) a la cola. Se aprueban en "
+                        avisar("ok", f"Listo: {_n} par(es) a la cola. Se aprueban en "
                                      "Estadísticas → 🔗 Equivalencias sugeridas.")
                         st.rerun()
             st.markdown("---")
