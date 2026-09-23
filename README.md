@@ -1645,6 +1645,40 @@ El corte es por proveedor (`GROUP BY po.id, mp.id`) y no por total: un código d
 legítimo aparece en varias listas a la vez —es justo para eso que sirve— y contando todo junto
 ese sería el primero de la lista.
 
+## La pantalla de equivalencias sugeridas reanalizaba todo por tocar una casilla
+
+`analizar_lote_pendiente()` tarda 5,2 s sobre los 3.185 pendientes reales, y estaba corriendo
+en **cada dibujado** de la pantalla. Mover el slider de «cuántos analizar», cambiar de tanda o
+tildar un checkbox volvía a analizar de cero: cinco segundos de reloj de arena por tocar una
+casilla.
+
+Medido dibujando la pantalla de verdad contra la base real:
+
+| | |
+|---|---|
+| primera vez | 12,75 s |
+| segunda | **1,35 s** |
+| tercera | **1,26 s** |
+
+**La parte que importa es la invalidación**, no el caché. La clave incluye el total de
+pendientes del lote, así que aprobar o descartar lo rehace justo cuando dejó de valer y no
+antes. Comprobado apretando el botón de verdad: «✅ Aprobar los 2.719 sin alarmas» cambió la
+clave de 3.185 a 466 y el análisis se recalculó solo, sin una excepción.
+
+Lo que se hace en OTRO lote no lo toca, y está bien: el análisis de éste sigue siendo cierto.
+
+### Dos arreglos chicos del mismo informe
+
+**El `PRAGMA` que corría 3.186 veces.** `_columnas_de_medidas_que_existen()` es puro esquema y
+se llamaba una vez por par. Cacheada con `lru_cache(1)`, con el cuidado que hacía falta:
+`restaurar_backup()` la limpia, porque la base que acaba de entrar puede tener otras columnas —
+que es exactamente el caso que esa función existe para cubrir.
+
+**El caché de modelos desalojaba a los 20.** `modelos_de_marca()` tenía `max_entries=20` y hay
+**117 marcas de vehículo con productos** en el catálogo. El que mira más de veinte marcas en una
+sesión empezaba a repagar 0,65 s justo al volver sobre una que ya había abierto. Sube a 130; lo
+que se guarda son listas de palabras, no filas.
+
 ## Una búsqueda tardó 23,78 segundos, y la mediana decía que todo estaba bien
 
 Después de cinco marcas de versión nuevas en un día, la primera vez que se abre la app la tarea

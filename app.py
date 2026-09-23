@@ -4968,6 +4968,10 @@ def restaurar_backup(archivo_subido):
             anotar_error("restaurar_backup", _err)
     # El caché de Streamlit puede tener guardados conteos y consultas de la base anterior.
     st.cache_data.clear()
+    # Y el del esquema: la base que acaba de entrar puede tener otras columnas, que es
+    # exactamente el caso que _columnas_de_medidas_que_existen() existe para cubrir.
+    _columnas_de_medidas_que_existen.cache_clear()
+    st.session_state.pop("_analisis_lote", None)
 
 
 
@@ -6338,8 +6342,15 @@ def cargar_medidas_de_varios(ids):
     return medidas
 
 
+@functools.lru_cache(maxsize=1)
 def _columnas_de_medidas_que_existen():
     """COLUMNAS_MEDIDAS, pero recortada a las columnas que la tabla tiene de verdad.
+
+    Cacheada porque es puro esquema y se llamaba UNA VEZ POR PAR: analizando los 3.185
+    pendientes salían 3.186 `PRAGMA table_info(productos)`, 0,158 s de puro preguntar lo mismo.
+    El esquema no cambia mientras la app corre… salvo en el caso que esta función existe para
+    cubrir, que es justamente restaurar un backup con otro esquema. Por eso restaurar_backup()
+    limpia este caché: si no, quedaría contestando con las columnas de la base anterior.
 
     Es un cinturón de seguridad y salió de verlo fallar. Al agregar el espesor y las vías, la
     pantalla de equivalencias sugeridas se cayó con «no such column: espesor» contra una base
@@ -12201,7 +12212,11 @@ MOTORIZACIONES_QUE_NO_SON_MODELO = {
 
 
 
-@st.cache_data(show_spinner=False, max_entries=20)
+# max_entries=20 no alcanzaba y el número sale del catálogo: hay 117 marcas de vehículo con
+# productos. Con tope 20, el que mira más de veinte marcas en una sesión empieza a desalojar las
+# primeras y a repagarlas —1 segundo cada vez, medido— justo cuando vuelve sobre una que ya
+# había abierto. Lo que se guarda son listas de palabras, no filas del catálogo.
+@st.cache_data(show_spinner=False, max_entries=130)
 def modelos_de_marca(marca_vehiculo, version, minimo=2):   # ver descripciones_por_palabra()
     """Arma la lista de modelos de una marca leyendo el catálogo.
 
@@ -27480,10 +27495,30 @@ Administrar → Mantenimiento.
                     value=1, step=1, key=f"tanda_lote_{lote_info['lote']}"
                 ) if paginas_lote > 1 else 1
 
-            with st.spinner("Analizando..."):
-                limpias, sospechosas, relacionadas = analizar_lote_pendiente(
-                    lote_info["lote"], limite=int(cuantos), desde=(int(tanda_lote) - 1) * int(cuantos)
-                )
+            # EL ANÁLISIS SE GUARDA, y no es un lujo: tarda 5,2 s sobre los 3.185 pendientes
+            # reales y estaba corriendo en CADA dibujado de esta pantalla. Mover el slider de
+            # «cuántos analizar», cambiar de tanda o tildar un checkbox volvía a analizar todo
+            # de cero — 5 segundos de reloj de arena por tocar una casilla.
+            #
+            # La clave incluye el total de pendientes del lote, y eso es lo que lo invalida
+            # solo: aprobar o descartar cambia ese número, así que el análisis se rehace justo
+            # cuando dejó de valer y no antes. Lo que se hace en OTRO lote no lo toca, y está
+            # bien: el análisis de éste sigue siendo cierto.
+            _clave_analisis = (lote_info["lote"], int(cuantos),
+                               (int(tanda_lote) - 1) * int(cuantos), total_lote)
+            _guardado = st.session_state.get("_analisis_lote")
+            if _guardado and _guardado.get("clave") == _clave_analisis:
+                limpias, sospechosas, relacionadas = _guardado["resultado"]
+            else:
+                with st.spinner("Analizando..."):
+                    limpias, sospechosas, relacionadas = analizar_lote_pendiente(
+                        lote_info["lote"], limite=int(cuantos),
+                        desde=(int(tanda_lote) - 1) * int(cuantos)
+                    )
+                st.session_state["_analisis_lote"] = {
+                    "clave": _clave_analisis,
+                    "resultado": (limpias, sospechosas, relacionadas),
+                }
             analizados = len(limpias) + len(sospechosas) + len(relacionadas)
             st.caption(f"Analizados {analizados:,} de {total_lote:,} vínculo(s) de esta lista." +
                        (f" Quedan {total_lote - analizados:,} — cambiá de tanda para verlos."
