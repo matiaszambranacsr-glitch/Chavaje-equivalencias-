@@ -370,7 +370,9 @@ VERSION_APLICACIONES = "7"
 
 # Quién FABRICA la pieza, leído del final de la descripción. Ver marca_de_repuesto_en().
 # Subir el número al agregar marcas a MARCAS_QUE_FABRICAN_LA_PIEZA o al cambiar cómo se leen.
-VERSION_MARCAS_REPUESTO = "1"
+# 2: entraron nueve marcas más (PRESTOLITE, KOBLA, BOUGICORD, HOLLEY, TAILLOT, INDIEL, LOCX,
+# PAIA, GATES), sacadas de contar las últimas palabras del catálogo real.
+VERSION_MARCAS_REPUESTO = "2"
 
 # El separador de texto pegado aprendió cosas después de que se importaran las listas, y las
 # descripciones que ya estaban en la base quedaron como entraron. Ver
@@ -4097,6 +4099,13 @@ MARCAS_QUE_FABRICAN_LA_PIEZA = [
     "VUARAM", "RO-FIL", "ROFIL", "GALILEO", "THOMSON", "MLH", "MLS", "WAGNER", "VALEO",
     "SKF", "MANN", "SACHS", "MAHLE", "CORTECO", "VICTOR REINZ", "REINZ", "TARANTO",
     "LUCAS", "DENSO", "HENGST", "TRW", "FRAM", "WIX", "MONROE", "GABRIEL",
+    # Estas nueve salieron de CONTAR, no de acordarse: se listaron las últimas palabras de las
+    # 70.888 descripciones reales, se sacaron las que son marca de AUTO («FIAT», «RENAULT») y
+    # las que son palabra de repuesto («DIESEL», «CILINDRO»), y quedaron estas, cada una
+    # cerrando la descripción como la cierra un fabricante. Son 422 productos más.
+    # DAYCO aparece 73 veces en el catálogo y NO está acá: ninguna de esas 73 la tiene al
+    # final —siempre está en el medio de un kit— y esta lista solo lee el final.
+    "PRESTOLITE", "KOBLA", "BOUGICORD", "HOLLEY", "TAILLOT", "INDIEL", "LOCX", "PAIA", "GATES",
 ]
 
 # De más larga a más corta, para que «MAGNETI MARELLI» gane sobre «MARELLI».
@@ -5344,15 +5353,23 @@ def descubrimiento_post_importacion(presupuesto_segundos=PRESUPUESTO_DESCUBRIMIE
       1. Las medidas escritas en la descripción. Primero porque es lo más barato y porque SACA
          vínculos falsos: con la medida cargada, todo lo que viene después tiene la prueba
          física para vetar.
-      2. Los códigos de fábrica que el proveedor ESCRIBIÓ en la descripción. Barato y limpio:
+      2. La marca del repuesto —quién fabrica la pieza—, que es el paso más barato de todos.
+      3. Los códigos de fábrica que el proveedor ESCRIBIÓ en la descripción. Barato y limpio:
          si se acaba el presupuesto, que no sea este el que se pierda.
-      3. Las aplicaciones que salen de las descripciones. Es dato nuevo sobre cada producto.
-      4. El cruce por auto, que USA esas aplicaciones: si va antes, cruza con menos.
-      5. El barrido de todo el catálogo, que es el más caro y el que más produce.
+      4. Las aplicaciones que salen de las descripciones. Es dato nuevo sobre cada producto.
+      5. Los motores que van juntos. Tiene que ir ANTES de los dos pasos que puntúan, porque
+         el veto por motor lee esa tabla para decidir.
+      6. El cruce por auto, que USA esas aplicaciones: si va antes, cruza con menos.
+      7. El barrido de todo el catálogo, que es el más caro y el que más produce.
 
-    Medido sobre la base real (70.888 productos, cinco listas): 3 s las medidas, 4 s los
-    códigos escritos, 32 s + 17 s las aplicaciones, 22 s el cruce por auto, 23 s el barrido.
-    Total 101 s.
+    Los pasos 2 y 5 llegaron tarde y por el mismo motivo: los dos vivían solo en el hilo de
+    fondo, atados a una bandera de migración que se apaga una vez. Lo que entraba en la
+    importación siguiente no los veía nunca.
+
+    Medido sobre la base real (70.888 productos, cinco listas): 3 s las medidas, 2,6 s la marca
+    del repuesto, 4 s los códigos escritos, 32 s + 17 s las aplicaciones, 0,6 s los motores,
+    22 s el cruce por auto, 23 s el barrido. La tanda entera, cronometrada de punta a punta,
+    tarda 86 s.
 
     Nada se carga como equivalencia: todo va a la cola de pendientes, igual que cuando se
     apretaba el botón a mano. Lo único que cambia es que ahora se busca.
@@ -5391,6 +5408,29 @@ def descubrimiento_post_importacion(presupuesto_segundos=PRESUPUESTO_DESCUBRIMIE
     else:
         quedo.append("las medidas escritas en las descripciones")
 
+    # QUIÉN FABRICA LA PIEZA, leída del final de la descripción. Es el paso más barato de todos
+    # —una expresión regular por descripción, sin una sola consulta de por medio— y estaba
+    # faltando acá por un motivo que no se ve mirando el código de a un pedazo:
+    # completar_marcas_de_repuesto() solo corría en el hilo de fondo, atado a la bandera que
+    # levanta la migración de VERSION_MARCAS_REPUESTO. Esa bandera se apaga una vez y no se
+    # vuelve a prender. O sea que los productos que entran DESPUÉS —que son justamente los de
+    # cada lista nueva— se quedaban con la columna vacía para siempre, y la columna
+    # «Fabricante» del buscador aparecía en blanco para todo lo recién importado.
+    # Solo toca los que están vacíos, así que correrlo de nuevo no pisa nada corregido a mano.
+    if queda_tiempo():
+        try:
+            _n_mr = completar_marcas_de_repuesto()
+            if _n_mr:
+                guardar_config("marcas_repuesto_puestas", str(_n_mr))
+                guardar_config("marcas_repuesto_fecha",
+                               datetime.now().strftime("%Y-%m-%d %H:%M"))
+                hecho.append(f"{_n_mr:,} producto(s) con la marca del repuesto leída de su "
+                             "descripción")
+        except Exception as _err:
+            anotar_error("descubrimiento_post_importacion/marcas_repuesto", _err)
+    else:
+        quedo.append("la marca del repuesto")
+
     if queda_tiempo():
         try:
             _escritos = equivalencias_escritas_en_las_descripciones()
@@ -5420,6 +5460,25 @@ def descubrimiento_post_importacion(presupuesto_segundos=PRESUPUESTO_DESCUBRIMIE
             anotar_error("descubrimiento_post_importacion/aplicaciones", _err)
     else:
         quedo.append("las aplicaciones deducidas de las descripciones")
+
+    # QUÉ MOTORES SE LLEVAN ENTRE SÍ. Va ACÁ, y el lugar importa: los dos pasos que siguen
+    # —el cruce por auto y el barrido— puntúan con evaluar_equivalencia(), y el veto por motor
+    # lee esta tabla. Aprenderlos después sería vetar pares que la lista recién importada acaba
+    # de demostrar compatibles, y esos pares no vuelven: quedan descartados hasta la próxima
+    # importación.
+    # Mismo agujero que la marca del repuesto —solo se aprendía en el hilo de fondo, colgado de
+    # la bandera de aplicaciones—, así que las descripciones nuevas no enseñaban nada.
+    # Devuelve el TOTAL de pares que sabe, no los que agregó: la tabla se reescribe entera.
+    if queda_tiempo():
+        try:
+            _n_mot = aprender_motores_que_van_juntos()
+            if _n_mot:
+                hecho.append(f"{_n_mot:,} par(es) de motores que el catálogo declara "
+                             "compatibles, al día")
+        except Exception as _err:
+            anotar_error("descubrimiento_post_importacion/motores", _err)
+    else:
+        quedo.append("los motores que van juntos")
 
     if queda_tiempo():
         try:
@@ -8703,7 +8762,11 @@ def auditar_equivalencias_cargadas(limite=2000, tope_confianza=35, revisar=None)
     todos cuesta 10,5 s contra 3,9 s: el tope ahorraba seis segundos y escondía 16.774
     vínculos. `revisar=None` es todos; el parámetro queda por si alguna vez hace falta cortar
     a propósito."""
-    c.execute("""SELECT e.producto_a_id AS a, e.producto_b_id AS b, e.lote,
+    # SIN_CONTAR_EL_ESPEJO: acá se juzga el PAR. Con la relación anotada de ida y de vuelta,
+    # el mismo vínculo se analizaba dos veces —cuesta el doble—, salía dos veces en la lista
+    # de «los peores» y el «se revisaron N vínculos» de la pantalla decía el doble de los que
+    # hay. Cortarlo sigue llevándose las dos filas: ver borrar_equivalencias_dudosas().
+    c.execute(f"""SELECT e.producto_a_id AS a, e.producto_b_id AS b, e.lote,
                         pa.codigo_raw AS cod_a, pa.descripcion AS desc_a, pa.precio AS precio_a,
                         ma.nombre AS marca_a,
                         pb.codigo_raw AS cod_b, pb.descripcion AS desc_b, pb.precio AS precio_b,
@@ -8713,6 +8776,7 @@ def auditar_equivalencias_cargadas(limite=2000, tope_confianza=35, revisar=None)
                  JOIN productos pb ON pb.id = e.producto_b_id
                  JOIN marcas ma ON ma.id = pa.marca_id
                  JOIN marcas mb ON mb.id = pb.marca_id
+                 WHERE {SIN_CONTAR_EL_ESPEJO}
                  ORDER BY COALESCE(e.confianza, 50) ASC
                  LIMIT ?""", (revisar if revisar else -1,))
     filas = [dict(r) for r in c.fetchall()]
@@ -8847,7 +8911,11 @@ def recalcular_confianzas(limite=20000, progreso=None, solo_faltantes=True):
     todo, que es lo que hace falta cuando cambió la evidencia (ventas nuevas, decisiones nuevas)
     y los puntajes viejos quedaron desactualizados."""
     filtro = "WHERE e.confianza IS NULL" if solo_faltantes else ""
-    c.execute(f"""SELECT e.producto_a_id AS a, e.producto_b_id AS b,
+    c.execute(f"""-- FILA Y NO PAR: esta consulta ESCRIBE la confianza de cada fila. Si la
+                  -- relación está anotada de ida y de vuelta hay que puntuar las dos, porque
+                  -- la que quede sin puntuar cuenta como neutra en el buscador. Descartar el
+                  -- espejo acá dejaría la mitad de los vínculos en NULL para siempre.
+                  SELECT e.producto_a_id AS a, e.producto_b_id AS b,
                         pa.codigo_raw AS cod_a, pa.descripcion AS desc_a, pa.precio AS precio_a,
                         ma.nombre AS marca_a,
                         pb.codigo_raw AS cod_b, pb.descripcion AS desc_b, pb.precio AS precio_b,
@@ -8931,16 +8999,44 @@ def recalcular_confianzas(limite=20000, progreso=None, solo_faltantes=True):
 
 
 def borrar_equivalencias_dudosas(pares):
-    """Corta los vínculos elegidos y los deja anotados como rechazados."""
+    """Corta los vínculos elegidos y los deja anotados como rechazados.
+
+    SE BORRAN LAS DOS DIRECCIONES, y ese es el arreglo de un vínculo que no se cortaba.
+    Antes el DELETE normalizaba el par a (menor, mayor) y buscaba esa fila exacta. Un vínculo
+    guardado al revés —id mayor primero, que es justo lo que existe mientras nadie corrió
+    unificar_equivalencias_espejadas()— no coincidía con nada: el DELETE borraba cero filas y
+    la pantalla decía «se cortaron N vínculos» igual, con marcar_revision() anotándolo como
+    rechazado. El vínculo malo seguía ahí y la búsqueda seguía devolviéndolo.
+
+    Reproducido con dos vínculos, uno guardado (5,3) y otro (7,9): el corte se llevaba el
+    segundo y dejaba el primero intacto.
+
+    Y borrar las dos direcciones no es de más: si la relación está espejada hay que llevarse
+    las dos filas, porque la que quede sigue siendo el mismo vínculo para el buscador."""
     if not pares:
         return 0
     with db_lock:
-        c.executemany("DELETE FROM equivalencias WHERE producto_a_id = ? AND producto_b_id = ?",
-                      [(min(a, b), max(a, b)) for a, b in pares])
+        c.executemany("""DELETE FROM equivalencias
+                         WHERE (producto_a_id = ? AND producto_b_id = ?)
+                            OR (producto_a_id = ? AND producto_b_id = ?)""",
+                      [(a, b, b, a) for a, b in pares])
         borrados = c.rowcount
         conn.commit()
     marcar_revision(list(pares), "rechazada")
     return borrados
+
+
+# Un par es un par, se lo mire de A a B o de B a A. La tabla `equivalencias` puede tener las
+# dos filas —pasa seguido, para eso está unificar_equivalencias_espejadas()— y cualquier
+# consulta que cuente pares sin esto cuenta el doble.
+# Se queda con la fila que va del id MENOR al mayor, salvo que la única que exista sea la otra:
+# poner «producto_a_id < producto_b_id» a secas parece lo mismo y no lo es — esconde los pares
+# que solo están anotados al revés, que es justo el caso que la herramienta de unificar todavía
+# no tocó.
+SIN_CONTAR_EL_ESPEJO = """(e.producto_a_id < e.producto_b_id
+                           OR NOT EXISTS (SELECT 1 FROM equivalencias e2
+                                          WHERE e2.producto_a_id = e.producto_b_id
+                                            AND e2.producto_b_id = e.producto_a_id))"""
 
 
 def contar_equivalencias_espejadas():
@@ -9712,10 +9808,17 @@ def diagnostico_de_salud():
         pass
 
     try:
-        c.execute("""SELECT COUNT(*) FROM equivalencias e
+        # El SIN_ESPEJO no es adorno: el aviso dice «par(es)» y contaba FILAS. La misma
+        # relación anotada de ida y de vuelta —que es exactamente lo que cuenta
+        # contar_equivalencias_espejadas(), y para lo que hay una herramienta entera— se
+        # contaba dos veces. Reproducido con dos productos y las dos filas: el aviso decía
+        # «2 par(es)» habiendo uno solo. Ver precios_incoherentes_entre_equivalentes(), que
+        # tenía el mismo agujero y ahí se VEÍA: el par aparecía dos veces en la tabla, con
+        # las columnas dadas vuelta.
+        c.execute(f"""SELECT COUNT(*) FROM equivalencias e
                      JOIN productos pa ON pa.id = e.producto_a_id
                      JOIN productos pb ON pb.id = e.producto_b_id
-                     WHERE pa.precio > 0 AND pb.precio > 0
+                     WHERE {SIN_CONTAR_EL_ESPEJO} AND pa.precio > 0 AND pb.precio > 0
                        AND MAX(pa.precio, pb.precio) / MIN(pa.precio, pb.precio) >= 8""")
         precios = c.fetchone()[0]
         if precios:
@@ -11860,7 +11963,7 @@ def precios_incoherentes_entre_equivalentes(factor=8, limite=200):
       - el precio (se importó una columna equivocada o el separador de decimales al revés), o
       - la equivalencia (los vinculó una lista mal cargada y no son la misma pieza).
     Cualquiera de las dos que sea, es plata: o cotizás mal, o vendés lo que no entra."""
-    c.execute("""SELECT pa.codigo_raw AS "Código A", ma.nombre AS "Marca A", pa.precio AS "Precio A",
+    c.execute(f"""SELECT pa.codigo_raw AS "Código A", ma.nombre AS "Marca A", pa.precio AS "Precio A",
                         pb.codigo_raw AS "Código B", mb.nombre AS "Marca B", pb.precio AS "Precio B",
                         ROUND(MAX(pa.precio, pb.precio) / MIN(pa.precio, pb.precio), 1) AS "Veces",
                         pa.descripcion AS "Descripción",
@@ -11870,7 +11973,7 @@ def precios_incoherentes_entre_equivalentes(factor=8, limite=200):
                  JOIN productos pb ON pb.id = e.producto_b_id
                  JOIN marcas ma ON ma.id = pa.marca_id
                  JOIN marcas mb ON mb.id = pb.marca_id
-                 WHERE pa.precio > 0 AND pb.precio > 0
+                 WHERE {SIN_CONTAR_EL_ESPEJO} AND pa.precio > 0 AND pb.precio > 0
                    AND MAX(pa.precio, pb.precio) / MIN(pa.precio, pb.precio) >= ?
                  ORDER BY "Veces" DESC LIMIT ?""", (factor, limite))
     return filas_a_listas(c)
@@ -16117,14 +16220,17 @@ def quien_conviene_por_rubro(limite=40, minimo_comparaciones=5):
     Solo se comparan productos que son EQUIVALENTES entre sí: comparar el precio promedio de dos
     marcas sin eso no dice nada, porque una puede vender frenos caros y la otra filtros baratos.
     Acá cada comparación es entre dos códigos que hacen el mismo trabajo."""
-    c.execute("""SELECT ma.nombre AS marca_a, mb.nombre AS marca_b,
+    # SIN_CONTAR_EL_ESPEJO porque acá se cuentan COMPARACIONES, y el mínimo para que una marca
+    # entre en el ranking son 5: con el par anotado de ida y de vuelta, dos comparaciones y
+    # media alcanzaban para pasar un filtro pensado para cinco.
+    c.execute(f"""SELECT ma.nombre AS marca_a, mb.nombre AS marca_b,
                         pa.precio AS precio_a, pb.precio AS precio_b
                  FROM equivalencias e
                  JOIN productos pa ON pa.id = e.producto_a_id
                  JOIN productos pb ON pb.id = e.producto_b_id
                  JOIN marcas ma ON ma.id = pa.marca_id
                  JOIN marcas mb ON mb.id = pb.marca_id
-                 WHERE pa.precio > 0 AND pb.precio > 0
+                 WHERE {SIN_CONTAR_EL_ESPEJO} AND pa.precio > 0 AND pb.precio > 0
                    AND ma.nombre <> mb.nombre
                    AND COALESCE(e.confianza, 50) >= 50
                    AND MAX(pa.precio, pb.precio) / MIN(pa.precio, pb.precio) < 8""")
@@ -18267,6 +18373,16 @@ def medidas_desde_descripcion(descripcion):
     return medidas
 
 
+# Cómo se nombra cada medida en la tabla de «qué se podría completar». Lo que no esté acá se
+# muestra con el nombre de la columna. Ver productos_con_medidas_deducibles().
+ETIQUETAS_DE_MEDIDA = {
+    "diametro_interno": "int", "diametro_externo": "ext", "ancho": "ancho",
+    "cantidad_estrias": "estrías", "diametro_rosca_homocinetica": "rosca",
+    "paso_rosca": "paso", "espesor": "espesor", "cantidad_vias": "vías",
+    "cantidad_canales": "canales", "posicion": "posición",
+}
+
+
 def productos_con_medidas_deducibles(limite=500):
     """Productos a los que se les puede leer la medida de la descripción y que todavía la tienen
     vacía. Nunca toca lo cargado a mano: si alguien ya midió la pieza, ese dato manda."""
@@ -18294,12 +18410,17 @@ def productos_con_medidas_deducibles(limite=500):
         nuevas = {k: v for k, v in leidas.items() if f.get(k) in (None, "")}
         if not nuevas:
             continue
+        # Se recorre `nuevas` y no una lista escrita acá adentro, y el cambio salió de un
+        # agujero real: la lista tenía ocho campos y medidas_desde_descripcion() ya devuelve
+        # diez —se le sumaron `cantidad_canales` y `posicion`—, así que un producto al que solo
+        # se le leía la posición aparecía en la tabla con «Se completaría» VACÍO. Y esa tabla es
+        # lo único que la persona mira antes de apretar «Completar esas medidas»: se le estaba
+        # pidiendo que aprobara un cambio que la pantalla no le mostraba.
+        # El nombre de la columna como respaldo es a propósito: si mañana se lee un campo nuevo
+        # y nadie le pone etiqueta, se verá feo, pero se verá.
         f["Se completaría"] = ", ".join(
-            f"{etq}={nuevas[campo]}" for campo, etq in
-            (("diametro_interno", "int"), ("diametro_externo", "ext"), ("ancho", "ancho"),
-             ("cantidad_estrias", "estrías"), ("diametro_rosca_homocinetica", "rosca"),
-             ("paso_rosca", "paso"), ("espesor", "espesor"), ("cantidad_vias", "vías"))
-            if campo in nuevas)
+            f"{ETIQUETAS_DE_MEDIDA.get(campo, campo)}={valor}"
+            for campo, valor in nuevas.items())
         f["_nuevas"] = nuevas
         salida.append(f)
         if len(salida) >= limite:
@@ -20740,8 +20861,9 @@ HERRAMIENTAS_MANTENIMIENTO = [
     # (título, grupo, qué hace en una línea, palabras con que se busca)
     ("🏭 Catálogo de aplicaciones (qué repuesto le va a cada auto)", 0,
      "Subís el catálogo de NGK, Bosch o Mann y la app sabe qué pieza entra en qué auto. "
-     "Adentro está el botón para deducirlas de tus propias descripciones, sin subir nada.",
-     "aplicaciones catalogo ngk bosch mann skf auto modelo deducir descripciones"),
+     "Deducirlas de tus propias descripciones ✅ ya corre solo después de cada importación; "
+     "el botón de adentro es para volver a pasarlo. Subir un catálogo sigue siendo a mano.",
+     "aplicaciones catalogo ngk bosch mann skf auto modelo deducir descripciones automatico solo"),
     ("📐 Equivalencias por medidas", 0,
      "Propone equivalentes de dos marcas que tienen las mismas medidas cargadas.",
      "medidas milimetros diametro largo rosca mecanicas"),
@@ -20784,8 +20906,9 @@ HERRAMIENTAS_MANTENIMIENTO = [
      "Pares donde un lado es un filtro y el otro un sensor: alguno está mal.",
      "familias rubro distinto mal vinculado"),
     ("🔍 Revisar los vínculos que YA están cargados", 1,
-     "Audita lo que la búsqueda está devolviendo hoy, no lo que falta entrar.",
-     "auditar revisar cargados confianza"),
+     "Audita lo que la búsqueda está devolviendo hoy, no lo que falta entrar. "
+     "✅ Ya corre solo después de cada importación: el resultado está escrito en la pantalla.",
+     "auditar revisar cargados confianza automatico solo"),
     ("💲 Precios que no cierran entre equivalentes", 1,
      "Dos piezas «iguales» con precios muy distintos: casi siempre una está mal.",
      "precio precios distinto diferencia equivalentes caro barato raro"),

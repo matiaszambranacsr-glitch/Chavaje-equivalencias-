@@ -1118,6 +1118,17 @@ def probar_quien_fabrica_la_pieza():
         ("CORREA POLY V 6PK1125 Peu 206/307 1.6 Bosch", "BOSCH"),
         ("TUBO CALEFAC Peugeot 307 1.6 16v MLH", "MLH"),
         ("JTA BBA DEPRESORA MAGNETI MARELLI", "MAGNETI MARELLI"),
+        # Las nueve que entraron contando las últimas palabras del catálogo real. Están acá
+        # porque una lista que se amplía a ojo es la que después mete «DIESEL» como fabricante.
+        ("ACOPLE PEUGEOT 404/504 PRESTOLITE", "PRESTOLITE"),
+        ("RETEN BOMBA PEUGEOT-RENAULT-CITROEN KOBLA", "KOBLA"),
+        ("CABLE BUJIA RENAULT LOGAN-SANDERO BOUGICORD", "BOUGICORD"),
+        ("RESORTE CEBADOR TRAFIC HOLLEY", "HOLLEY"),
+        ("CABLE FIAT REGATTA 85-128-147-BRIO-DUNA TAILLOT", "TAILLOT"),
+        ("ROTOR ESCORT 1.6/R 9/ FIAT 1.4/1.6 INDIEL", "INDIEL"),
+        ("LIMPIA INYECTORES DIESEL X 250 ML- LOCX", "LOCX"),
+        ("TORNILLO TAPA PEUGEOT 504 34 PAIA", "PAIA"),
+        ("58337 CORREA MULTIC RENAULT LAGUNA MT6/SPACE 3.0 GATES", "GATES"),
     ]
     for desc, esperada in firma_al_final:
         igual(codigos.marca_de_repuesto_en(desc), esperada, f"la firma de «{desc[:34]}…»")
@@ -1125,6 +1136,9 @@ def probar_quien_fabrica_la_pieza():
         "INYECTOR MPI REF ORIG BOSCH 0280155786",     # referencia cruzada, no es Bosch
         "SENSOR MAF THOMSON MAREA 2.0",               # la marca va en el medio
         "Junta Tapa de Cilindros FIAT FIORINO UNO",   # no dice ninguna
+        # DAYCO no está en la lista a propósito: en el catálogo real aparece 73 veces y
+        # NINGUNA al final. Si algún día se la agrega, esta línea lo avisa.
+        "KIT DE DISTRIBUCION LKTBN135 FIAT DUNA-PALIO 1.4 DAYCO TOTAL",
         "",
     ]
     for desc in no_es_la_marca:

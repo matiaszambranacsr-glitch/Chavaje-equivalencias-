@@ -22,6 +22,10 @@ python3 -m nucleo.pruebas        # tiene que decir "todo en verde"
 python3 revisar_con_gemini.py    # opcional: una segunda opinión sobre el diff
 ```
 
+Uno por uno y mirando la salida de cada uno. Encadenarlos con `&&` y quedarse con lo último
+que imprime la consola ya dejó pasar un paquete `nucleo` roto: el `&&` se enganchó de un `head`
+que terminó bien y el fallo de las pruebas no se vio.
+
 El auditor no es un linter genérico: cada control salió de un error que rompió la app de
 verdad, y el mensaje cuenta cuál fue. Si marca algo, conviene leerlo antes de descartarlo.
 
@@ -1644,6 +1648,170 @@ lo cita en piezas que no lo llevan. Son 15 culpables y 67 pendientes, en 0,0 s.
 El corte es por proveedor (`GROUP BY po.id, mp.id`) y no por total: un código de fábrica
 legítimo aparece en varias listas a la vez —es justo para eso que sirve— y contando todo junto
 ese sería el primero de la lista.
+
+## «Se cortaron 2 vínculos» y el vínculo seguía ahí
+
+El peor de este lote. No lo encontró el auditor: el control nuevo marcó la consulta de
+`auditar_equivalencias_cargadas()` —la de al lado— y esto apareció leyendo qué hacía después
+con lo que esa consulta devuelve.
+
+En Administrar → Limpiar vínculos se analiza lo que la búsqueda está devolviendo hoy, se
+listan los peores y hay un botón «✂️ Cortar los N peores». El corte hacía esto:
+
+```sql
+DELETE FROM equivalencias WHERE producto_a_id = ? AND producto_b_id = ?
+```
+
+con el par normalizado a `(menor, mayor)`. Pero la tabla **no guarda siempre el par en ese
+orden**, y no por accidente: hay tres lugares que meten la fila sin normalizar, y uno de ellos
+mete las dos direcciones a propósito —las sustituciones que confirma el mostrador
+(`app.py:7695`), «Vincular manual» con varios productos a la vez (`app.py:22814`) y la
+importación con carga directa (`app.py:23709`)—.
+
+Contra una fila guardada al revés, ese `DELETE` no coincide con nada. La pantalla decía «se
+cortaron N vínculos» igual, `marcar_revision()` lo anotaba como rechazado, y **el vínculo malo
+seguía cargado y la búsqueda seguía devolviéndolo**.
+
+Medido sobre la base real con un vínculo creado como lo crea la app:
+
+| cómo quedó guardado | antes | ahora |
+|---|---|---|
+| las dos direcciones (mostrador / vincular manual) | dice «se cortaron 1» → **queda 1 fila viva** | dice 2 → **queda 0** |
+| solo al revés `(b, a)` | dice «se cortaron 0» → **queda 1 fila viva** | dice 1 → **queda 0** |
+
+Ahora el `DELETE` se lleva las dos direcciones. Si la relación está espejada hay que llevarse
+las dos filas, porque la que quede sigue siendo el mismo vínculo para el buscador.
+
+Detalle que ayuda a ver de qué tamaño era el descuido: `marcar_revision()`, que corre en la
+línea siguiente, **ya guardaba las dos direcciones** —`(a,b)` y `(b,a)`— desde el principio. El
+anotar estaba bien; el borrar, no.
+
+## Un par contado como dos
+
+El mismo origen. `equivalencias` puede tener la relación anotada de ida y de vuelta —para eso
+existe «🔁 Equivalencias anotadas dos veces» y su aviso de salud—, y varias consultas que
+cuentan **pares** estaban contando **filas**:
+
+- el aviso «N par(es) de equivalentes con precios muy distintos» decía el doble;
+- `precios_incoherentes_entre_equivalentes()` mostraba el mismo par dos veces en la tabla, con
+  las columnas dadas vuelta, y gastaba la mitad del `LIMIT 200` en repetidos;
+- `auditar_equivalencias_cargadas()` analizaba el mismo vínculo dos veces —cuesta el doble—,
+  lo listaba dos veces entre «los peores», y el «se revisaron N vínculos» de la pantalla decía
+  de más. Medido con un par espejado encima de la base real: **24.776 → 24.775**;
+- `quien_conviene_por_rubro()` pide 5 comparaciones mínimas para que una marca entre al
+  ranking, y con el par duplicado alcanzaban dos y media.
+
+La condición quedó en una sola constante, `SIN_CONTAR_EL_ESPEJO`. Y **no es
+`producto_a_id < producto_b_id`**, que es lo primero que uno escribe: eso esconde los pares que
+solo están anotados al revés. Probado con cuatro productos, dos pares —uno espejado y otro
+guardado solo al revés—:
+
+| | pares contados |
+|---|---|
+| como estaba | 3 |
+| con `a_id < b_id` a secas | 1 ← **pierde uno de los dos** |
+| con `SIN_CONTAR_EL_ESPEJO` | **2** |
+
+`recalcular_confianzas()` es la excepción y se quedó como estaba: escribe una confianza **por
+fila**, y la fila que quedara sin puntuar contaría como neutra en el buscador. Lo dice adentro
+del SQL, con la marca `FILA Y NO PAR`, que es lo que el auditor acepta como respuesta.
+
+El `NOT EXISTS` es correlacionado y eso se paga, pero poco: `auditar_equivalencias_cargadas()`
+sobre los 24.774 vínculos reales pasó de **5,0 s a 5,2 s**, con las mismas 922 dudosas.
+
+**Sobre la base real de hoy esto no cambia ningún número**: tiene 0 equivalencias espejadas y 0
+guardadas al revés. Lo que cambia es que ya no depende de que eso siga siendo cierto — y los
+tres lugares que las crean están ahí, andando.
+
+### El control que lo encontró
+
+`auditar.py` tiene un chequeo nuevo (37): **una consulta que sale de `equivalencias` y engancha
+`productos` dos veces está mirando un par, no una fila**. Si no descarta el espejo, se reporta.
+Marcó cinco consultas: las cuatro de arriba y `recalcular_confianzas()`, que es la excepción
+legítima. El `DELETE` que no borraba **no lo marca** —no tiene ningún JOIN—, pero fue lo que
+apareció mirando una de las cinco.
+
+Para escribirlo hubo que enseñarle al auditor a leer **f-strings**: al mover la condición a una
+constante, la consulta pasó a ser un f-string y el nombre dejó de estar en un `ast.Constant`
+—vive en un `FormattedValue`—, así que el control se disparaba sobre la consulta ya arreglada.
+Y a no entrar adentro del f-string, porque sus pedazos, mirados sueltos, son exactamente la
+consulta sin el hueco.
+
+## La tabla te pedía aprobar un cambio que no te mostraba
+
+En Administrar → «🔍 Ver qué se podría completar» sale una tabla con una columna
+`Se completaría`, y abajo el botón «✅ Completar esas medidas». Esa tabla es lo único que la
+persona mira antes de apretar.
+
+La columna se armaba con una lista de ocho campos escrita adentro de la función.
+`medidas_desde_descripcion()` ya devuelve **diez** —se le sumaron `cantidad_canales` y
+`posicion`—, así que un producto al que solo se le leía la posición aparecía con la celda
+**vacía**.
+
+Contado sobre las 70.888 descripciones reales:
+
+| | |
+|---|---|
+| productos con algo para completar | 5.449 |
+| que mostraban la celda **vacía** | **3.524** |
+
+El 65 % de la tabla. Y no eran casos raros: `KIT FILTROS Y O'RINGS 11044 PUNTAS INFERIORES
+MULTIPUNTO` → `posición=INFERIOR`, que ahora se lee.
+
+Ahora la celda se arma recorriendo lo que se va a escribir, no una lista aparte, así que no se
+puede volver a desincronizar. Lo que no tenga etiqueta se muestra con el nombre de la columna:
+feo, pero visible.
+
+## Dos pasos que solo corrían una vez en la vida
+
+`completar_marcas_de_repuesto()` —quién FABRICA la pieza, leído del final de la descripción— y
+`aprender_motores_que_van_juntos()` —la tabla que evita que el veto por motor separe las bujías
+del TU5JP4 de las del EW10— existían, andaban, y **solo corrían en el hilo de fondo, colgados de
+una bandera de migración**. Esa bandera se prende una vez, al actualizar la app, y se apaga.
+
+O sea: todo lo que entra DESPUÉS —que es justamente cada lista nueva que se importa— no los veía
+nunca. La columna «Fabricante» del buscador quedaba en blanco para lo recién importado, para
+siempre.
+
+Probado contra la base real, con las banderas de migración ya consumidas (el estado normal de
+quien viene usando la app) y cinco productos nuevos importados encima:
+
+| | antes | ahora |
+|---|---|---|
+| productos nuevos sin marca del repuesto | **5 de 5** | **1 de 5** |
+| pares de motores compatibles al día | no se tocaban | 1.334 |
+| duración del descubrimiento completo | 98 s | 84 s |
+
+El que sigue sin marca es FERODO, que no está en la lista de fabricantes — y no se agregó a
+propósito: en el catálogo real no aparece ni una sola vez, así que agregarla sería inventar.
+
+El orden importa y por eso `aprender_motores_que_van_juntos()` va **antes** del cruce por auto y
+del barrido: los dos puntúan con `evaluar_equivalencia()`, que lee esa tabla para decidir el
+veto. Aprenderlos después sería vetar pares que la lista recién importada acaba de demostrar
+compatibles, y esos pares no vuelven — quedan descartados hasta la próxima importación.
+
+Cuesta 3,2 s sobre un presupuesto de 120 s (2,6 s las marcas, 0,6 s los motores), y correrlo de
+nuevo no pisa nada: la segunda pasada completa 0 productos en 0,3 s.
+
+## Nueve fabricantes que faltaban, sacados de contar y no de acordarse
+
+`MARCAS_QUE_FABRICAN_LA_PIEZA` tenía 41 marcas puestas a mano. Para ampliarla no se pensó en
+marcas: se listaron **las últimas palabras de las 70.888 descripciones reales**, se sacaron las
+que son marca de AUTO (`FIAT`, `RENAULT`, `PEUGEOT`) y las que son palabra de repuesto
+(`DIESEL`, `CILINDRO`, `JUNTA`), y quedaron nueve que cierran la descripción como la cierra un
+fabricante:
+
+`PRESTOLITE` · `KOBLA` · `BOUGICORD` · `HOLLEY` · `TAILLOT` · `INDIEL` · `LOCX` · `PAIA` · `GATES`
+
+| | |
+|---|---|
+| productos con fabricante, antes | 13.705 |
+| productos con fabricante, ahora | **14.127** |
+| diferencia | +422 |
+
+**DAYCO no entró**, y eso es parte del resultado: aparece 73 veces en el catálogo y **ninguna al
+final** —siempre en el medio de un kit—, y esta lectura solo mira el final. Hay una línea en las
+pruebas que lo deja escrito, para que si algún día se la agrega se note.
 
 ## Una columna nueva tumbaba el buscador entero
 

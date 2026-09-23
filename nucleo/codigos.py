@@ -1046,6 +1046,13 @@ MARCAS_QUE_FABRICAN_LA_PIEZA = [
     "VUARAM", "RO-FIL", "ROFIL", "GALILEO", "THOMSON", "MLH", "MLS", "WAGNER", "VALEO",
     "SKF", "MANN", "SACHS", "MAHLE", "CORTECO", "VICTOR REINZ", "REINZ", "TARANTO",
     "LUCAS", "DENSO", "HENGST", "TRW", "FRAM", "WIX", "MONROE", "GABRIEL",
+    # Estas nueve salieron de CONTAR, no de acordarse: se listaron las últimas palabras de las
+    # 70.888 descripciones reales, se sacaron las que son marca de AUTO («FIAT», «RENAULT») y
+    # las que son palabra de repuesto («DIESEL», «CILINDRO»), y quedaron estas, cada una
+    # cerrando la descripción como la cierra un fabricante. Son 422 productos más.
+    # DAYCO aparece 73 veces en el catálogo y NO está acá: ninguna de esas 73 la tiene al
+    # final —siempre está en el medio de un kit— y esta lista solo lee el final.
+    "PRESTOLITE", "KOBLA", "BOUGICORD", "HOLLEY", "TAILLOT", "INDIEL", "LOCX", "PAIA", "GATES",
 ]
 
 

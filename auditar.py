@@ -1916,6 +1916,75 @@ for _nombre, _lineas in _ASIGNADOS.items():
                  "dos. Renombrar una")
 
 
+# ============ 37) Contar PARES de equivalencias contando filas ============
+# La tabla `equivalencias` puede tener la misma relación anotada en las dos direcciones —pasa
+# seguido, para eso existe unificar_equivalencias_espejadas()—. Una consulta que sale de
+# `equivalencias` y engancha `productos` DOS VECES está mirando el par, no la fila, y si no
+# descarta el espejo cuenta el doble.
+# No es teórico: el aviso de salud de «precios que no cierran» decía «N par(es)» contando filas,
+# y precios_incoherentes_entre_equivalentes() mostraba el mismo par dos veces en la tabla, con
+# las columnas dadas vuelta. Reproducido con dos productos y las dos filas: decía 2, había 1.
+# Se pide SIN_CONTAR_EL_ESPEJO y no «a_id < b_id» porque lo segundo esconde los pares que solo
+# están anotados al revés — se probó, y perdía uno de cada dos.
+_DOS_VECES_PRODUCTOS = re.compile(
+    r"FROM\s+equivalencias\s+e\b(?:.|\n)*?JOIN\s+productos\s+\w+(?:.|\n)*?"
+    r"JOIN\s+productos\s+\w+", re.I)
+
+
+def _texto_de_sql(nodo):
+    """El SQL de un literal o de un f-string, con los huecos como «{NOMBRE}».
+
+    Hace falta el f-string: al meter la condición en una constante, la consulta pasa a ser un
+    f-string con el nombre adentro de las llaves, y ahí el nombre ya NO está en ningún
+    ast.Constant —vive en un FormattedValue—, así que el control se disparaba sobre la consulta
+    ya arreglada."""
+    if isinstance(nodo, ast.Constant) and isinstance(nodo.value, str):
+        return nodo.value
+    if isinstance(nodo, ast.JoinedStr):
+        partes = []
+        for _p in nodo.values:
+            if isinstance(_p, ast.Constant) and isinstance(_p.value, str):
+                partes.append(_p.value)
+            elif isinstance(_p, ast.FormattedValue):
+                partes.append("{" + (_p.value.id if isinstance(_p.value, ast.Name) else "?") + "}")
+        return "".join(partes)
+    return None
+
+
+def _textos_sql(raiz):
+    """Cada cadena del archivo UNA vez. Un f-string se devuelve entero y no se entra adentro:
+    sus pedazos son ast.Constant y, mirados sueltos, les falta justamente el hueco."""
+    pila, salida = [raiz], []
+    while pila:
+        _nodo = pila.pop()
+        if isinstance(_nodo, ast.JoinedStr):
+            salida.append((_nodo.lineno, _texto_de_sql(_nodo)))
+            continue
+        if isinstance(_nodo, ast.Constant) and isinstance(_nodo.value, str):
+            salida.append((_nodo.lineno, _nodo.value))
+            continue
+        pila.extend(ast.iter_child_nodes(_nodo))
+    return salida
+
+
+for _ln, _sql in _textos_sql(ARBOL):
+    if not _sql:
+        continue
+    if not _DOS_VECES_PRODUCTOS.search(_sql):
+        continue
+    if "SIN_CONTAR_EL_ESPEJO" in _sql or "producto_a_id < " in _sql:
+        continue
+    # La salida: una consulta que de verdad mira la FILA y no el par lo dice adentro del SQL.
+    # recalcular_confianzas() es el caso — escribe una confianza por fila, y si la relación
+    # está espejada hay que puntuar las dos.
+    if "FILA Y NO PAR" in _sql:
+        continue
+    reportar("REVISAR", _ln,
+             "esta consulta sale de «equivalencias» y engancha «productos» dos veces: está "
+             "mirando un PAR. Si la tabla tiene la relación anotada de ida y de vuelta, cuenta "
+             "el doble. Meter {SIN_CONTAR_EL_ESPEJO} en el WHERE, o decir por qué no hace falta")
+
+
 # ============ Resultado ============
 orden = {"ERROR": 0, "REVISAR": 1, "AVISO": 2}
 problemas.sort(key=lambda x: (orden[x[0]], x[1]))
