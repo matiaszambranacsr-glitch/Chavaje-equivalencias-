@@ -4158,14 +4158,16 @@ def reseparar_descripciones_viejas():
     except sqlite3.OperationalError as _err:
         anotar_error("reseparar_descripciones_viejas", _err)
         return 0
-    with db_lock:
-        for fila in filas:
-            separada = separar_texto_pegado(fila["descripcion"])
-            if separada and separada != fila["descripcion"]:
-                c.execute("UPDATE productos SET descripcion = ? WHERE id = ?",
-                          (separada, fila["id"]))
-                cambiadas += 1
-        conn.commit()
+    # El candado se suelta cada tanda: ver FILAS_ANTES_DE_SOLTAR_EL_CANDADO.
+    for tanda in en_tandas_para_no_trabar(filas):
+        with db_lock:
+            for fila in tanda:
+                separada = separar_texto_pegado(fila["descripcion"])
+                if separada and separada != fila["descripcion"]:
+                    c.execute("UPDATE productos SET descripcion = ? WHERE id = ?",
+                              (separada, fila["id"]))
+                    cambiadas += 1
+            conn.commit()
     return cambiadas
 
 
@@ -4174,19 +4176,22 @@ def completar_marcas_de_repuesto():
 
     Solo toca los que están vacíos: si alguien la corrigió a mano, no se la pisa."""
     puestos = 0
-    with db_lock:
-        c.execute("""SELECT p.id, p.descripcion FROM productos p
-                     JOIN marcas m ON m.id = p.marca_id
-                     WHERE m.tipo <> 'OEM'
-                       AND (p.marca_repuesto IS NULL OR p.marca_repuesto = '')
-                       AND p.descripcion IS NOT NULL AND p.descripcion <> ''""")
-        for fila in filas_a_listas(c):
-            marca = marca_de_repuesto_en(fila["descripcion"])
-            if marca:
-                c.execute("UPDATE productos SET marca_repuesto = ? WHERE id = ?",
-                          (marca, fila["id"]))
-                puestos += 1
-        conn.commit()
+    c.execute("""SELECT p.id, p.descripcion FROM productos p
+                 JOIN marcas m ON m.id = p.marca_id
+                 WHERE m.tipo <> 'OEM'
+                   AND (p.marca_repuesto IS NULL OR p.marca_repuesto = '')
+                   AND p.descripcion IS NOT NULL AND p.descripcion <> ''""")
+    pendientes = filas_a_listas(c)
+    # El candado se suelta cada tanda: ver FILAS_ANTES_DE_SOLTAR_EL_CANDADO.
+    for tanda in en_tandas_para_no_trabar(pendientes):
+        with db_lock:
+            for fila in tanda:
+                marca = marca_de_repuesto_en(fila["descripcion"])
+                if marca:
+                    c.execute("UPDATE productos SET marca_repuesto = ? WHERE id = ?",
+                              (marca, fila["id"]))
+                    puestos += 1
+            conn.commit()
     return puestos
 
 
@@ -11065,6 +11070,28 @@ def _trabajo_de_fondo():
     except ValueError:
         objetivo_fotos = objetivo_equiv = 0
 
+    # RESEPARAR LAS DESCRIPCIONES VA PRIMERO, y el orden no es casual: las medidas, el
+    # combustible, la marca del repuesto y las aplicaciones se leen de la descripción.
+    # Estaba escrito así y NO era así: el bloque había quedado después del de medidas, y
+    # corriendo la tanda entera se vio —las medidas se leían del texto viejo, y al final
+    # `medidas_pendientes` quedaba otra vez en «1» porque este bloque lo vuelve a pedir.
+    # Funcionaba igual, en dos arranques en vez de uno, pero el comentario mentía.
+    if _hay_que_hacerlo("separacion_pendiente"):
+        try:
+            _n_sep = reseparar_descripciones_viejas()
+            guardar_config("descripciones_reseparadas", str(_n_sep))
+            guardar_config("separacion_fecha", datetime.now().strftime("%Y-%m-%d %H:%M"))
+            if _n_sep:
+                # El texto cambió: hay que releerlo todo.
+                for _marca in ("medidas_pendientes", "marcas_repuesto_pendientes",
+                               "aplicaciones_pendientes"):
+                    guardar_config(_marca, "1")
+                    guardar_config(f"{_marca}_intentos", "0")
+            _quedo_hecho("separacion_pendiente")
+        except Exception as _err:
+            # La bandera sigue prendida: se reintenta en el próximo arranque, hasta el tope.
+            anotar_error("_trabajo_de_fondo/separacion", _err)
+
     # Lo primero de todo: el descubrimiento que dejó pendiente una importación. Va acá y no
     # adentro de la pantalla de importar porque tarda 110 segundos, y hacer esperar dos minutos
     # a alguien que subió una planilla desde el celular —con la pantalla que se apaga sola y el
@@ -11105,25 +11132,6 @@ def _trabajo_de_fondo():
     # Las aplicaciones: a qué auto le va cada pieza. Es lo más caro de las tres (55 s sobre
     # 70.888 descripciones: 32 s leerlas y 23 s escribirlas) y va después de las medidas porque
     # no se necesitan entre sí. Ver VERSION_APLICACIONES.
-    # Reseparar las descripciones va ANTES QUE TODO lo demás, y el orden no es casual: las
-    # medidas, el combustible, la marca del repuesto y las aplicaciones se leen de la
-    # descripción. Hacerlo después sería leer el texto viejo y tener que rehacerlo.
-    if _hay_que_hacerlo("separacion_pendiente"):
-        try:
-            _n_sep = reseparar_descripciones_viejas()
-            guardar_config("descripciones_reseparadas", str(_n_sep))
-            guardar_config("separacion_fecha", datetime.now().strftime("%Y-%m-%d %H:%M"))
-            if _n_sep:
-                # El texto cambió: hay que releerlo todo.
-                for _marca in ("medidas_pendientes", "marcas_repuesto_pendientes",
-                               "aplicaciones_pendientes"):
-                    guardar_config(_marca, "1")
-                    guardar_config(f"{_marca}_intentos", "0")
-            _quedo_hecho("separacion_pendiente")
-        except Exception as _err:
-            # La bandera sigue prendida: se reintenta en el próximo arranque, hasta el tope.
-            anotar_error("_trabajo_de_fondo/separacion", _err)
-
     # La marca del repuesto: es la más barata de las cuatro (una expresión regular por
     # descripción, sin consultas de por medio) así que va primero.
     if _hay_que_hacerlo("marcas_repuesto_pendientes"):
@@ -11245,6 +11253,21 @@ def _trabajo_de_fondo():
 
 
 INTENTOS_MAXIMOS_DE_FONDO = 5
+
+# Cuántas filas se escriben con el candado tomado antes de soltarlo. La tarea de fondo escribe
+# decenas de miles de filas, y tomar db_lock UNA vez para todas deja la pantalla de la otra
+# persona esperando todo lo que dure.
+# No es teoría: midiendo búsquedas desde otro hilo mientras corría la tanda completa, la peor
+# tardó 23,78 SEGUNDOS. La mediana estaba perfecta —0,02 s— y por eso no se veía promediando;
+# lo que hay que mirar es la peor, porque esa es la que tiene a alguien esperando en el
+# mostrador. Soltando y volviendo a tomar cada 500 filas, la otra sesión se cuela en el medio.
+FILAS_ANTES_DE_SOLTAR_EL_CANDADO = 500
+
+
+def en_tandas_para_no_trabar(filas):
+    """Parte una lista larga en pedazos, para escribir cada uno con el candado tomado aparte."""
+    for arranque in range(0, len(filas), FILAS_ANTES_DE_SOLTAR_EL_CANDADO):
+        yield filas[arranque:arranque + FILAS_ANTES_DE_SOLTAR_EL_CANDADO]
 
 
 def _hay_que_hacerlo(clave):
@@ -13193,19 +13216,23 @@ def aplicar_aplicaciones_deducidas(filas):
     borrar aparte si alguna salió mal."""
     if not filas:
         return 0
-    with db_lock:
-        # El combustible va vacío y no NULL por lo mismo que el motor: la consulta que cruza
-        # por auto compara columna = columna, y en SQL dos NULL nunca son iguales.
-        c.executemany("""INSERT OR IGNORE INTO aplicaciones
-                         (marca_auto, modelo_auto, motor, combustible, anio_desde, anio_hasta,
-                          codigo, codigo_clean, marca_repuesto, tipo_pieza, origen)
-                         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'deducida')""",
-                      [(f["Auto"], f["Modelo"], f.get("_motor") or "",
-                        f.get("_combustible") or "",
-                        f["_desde"], f["_hasta"],
-                        f["Código"], f["_clean"], f["Marca"],
-                        f.get("Pieza") or "") for f in filas])
-        conn.commit()
+    # El combustible y el motor van vacíos y no NULL: la consulta que cruza por auto compara
+    # columna = columna, y en SQL dos NULL nunca son iguales.
+    # El candado se suelta cada tanda: son 112.499 filas, y con una sola toma la pantalla de la
+    # otra persona espera todo lo que dure el INSERT. Ver FILAS_ANTES_DE_SOLTAR_EL_CANDADO.
+    for tanda in en_tandas_para_no_trabar(filas):
+        with db_lock:
+            c.executemany("""INSERT OR IGNORE INTO aplicaciones
+                             (marca_auto, modelo_auto, motor, combustible, anio_desde,
+                              anio_hasta, codigo, codigo_clean, marca_repuesto, tipo_pieza,
+                              origen)
+                             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'deducida')""",
+                          [(f["Auto"], f["Modelo"], f.get("_motor") or "",
+                            f.get("_combustible") or "",
+                            f["_desde"], f["_hasta"],
+                            f["Código"], f["_clean"], f["Marca"],
+                            f.get("Pieza") or "") for f in tanda])
+            conn.commit()
     return len(filas)
 
 

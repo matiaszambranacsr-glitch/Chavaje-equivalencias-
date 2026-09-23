@@ -1645,6 +1645,54 @@ El corte es por proveedor (`GROUP BY po.id, mp.id`) y no por total: un código d
 legítimo aparece en varias listas a la vez —es justo para eso que sirve— y contando todo junto
 ese sería el primero de la lista.
 
+## Una búsqueda tardó 23,78 segundos, y la mediana decía que todo estaba bien
+
+Después de cinco marcas de versión nuevas en un día, la primera vez que se abre la app la tarea
+de fondo hace TODO junto: resepara 12.255 descripciones, completa 4.144 medidas, pone 13.706
+marcas de repuesto, deduce 112.499 aplicaciones y repuntúa 24.774 vínculos. Nunca se había
+corrido entera, así que se corrió.
+
+**Dos cosas aparecieron, y ninguna se veía leyendo el código.**
+
+### 1. El bloque que decía ir primero iba tercero
+
+El comentario del bloque que resepara las descripciones decía «va ANTES QUE TODO lo demás, y el
+orden no es casual: las medidas, el combustible y las aplicaciones se leen de la descripción».
+Era falso: había quedado **después** del de medidas.
+
+Se vio porque al terminar la tanda `medidas_pendientes` quedaba otra vez en «1» — este bloque lo
+vuelve a pedir cuando el texto cambió, y el de medidas ya había pasado. Funcionaba igual, en dos
+arranques en vez de uno, y las medidas se leían del texto viejo. Con el bloque donde decía estar:
+las cinco banderas quedan en 0 en una sola pasada y `medidas_completadas` sube de 4.076 a
+**4.144** — los 68 que antes había que esperar a un segundo arranque.
+
+### 2. La peor búsqueda tardaba 24 segundos
+
+Midiendo búsquedas desde otro hilo mientras la tanda corría:
+
+```
+mediana 0,02 s    9 de cada 10 bajo 0,21 s    PEOR: 23,78 s
+```
+
+La mediana estaba perfecta y por eso no se veía promediando. Lo que hay que mirar es **la
+peor**, porque esa es la que tiene a alguien esperando en el mostrador.
+
+La causa: la tarea de fondo escribía decenas de miles de filas tomando `db_lock` **una sola
+vez**. `reseparar_descripciones_viejas()` lo tomaba para las 70.888 filas de una; el INSERT de
+las 112.499 aplicaciones, también.
+
+Ahora el candado se suelta cada 500 filas, así que la otra sesión se cuela en el medio:
+
+| | antes | después |
+|---|---|---|
+| peor búsqueda | **23,78 s** | **2,91 s** |
+| búsquedas de más de 3 s | 2 | **0** |
+| mediana | 0,02 s | 0,02 s |
+| la tanda entera | 85 s | 95 s |
+
+La tanda tarda un 12% más. Es el precio de no dejar a nadie esperando 24 segundos, y está bien
+pagado.
+
 ## Las bujías del TU5JP4 y las del EW10 son las mismas
 
 Esto lo corrigió el dueño, y corrige algo que se había agregado el día anterior.
