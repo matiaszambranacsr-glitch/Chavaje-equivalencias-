@@ -1672,8 +1672,20 @@ Comprobado por los dos lados, 25 búsquedas completas de cada uno:
 | base SIN la columna | 803 | 118 ms |
 | base CON la columna | 803 | 114 ms |
 
-Sin la columna, `Fabricante` llega en `None`; con ella, llega BOSCH y MASSER. Y el caché del
-esquema se limpia al restaurar un backup, junto con el de las medidas.
+Sin la columna, `Fabricante` llega en `None`; con ella, llega BOSCH y MASSER.
+
+El primer intento cacheaba el `PRAGMA table_info` con `lru_cache` y limpiaba el caché al
+restaurar un backup. Se sacó: lo que se está cacheando cuesta **50 µs** y se pide dos veces por
+búsqueda —0,1 ms—, y a cambio obliga a acordarse de limpiarlo cada vez que el esquema puede
+cambiar. Esa clase de olvido es justamente lo que esta función existe para cubrir; no tiene
+sentido que la función traiga adentro el mismo problema que vino a resolver. Barato y sin
+estado le gana a rápido y con una trampa.
+
+Y una segunda: el paquete `nucleo` se lleva el **cuerpo** de `buscar_por_codigo()`, así que en
+cuanto la búsqueda empezó a llamar a un ayudante nuevo, el paquete quedó con un
+`NameError: name 'campo_opcional_de_producto' is not defined`. Ahora `generar.py` copia también
+los dos ayudantes, y como en el paquete el cursor viaja por parámetro, `campo_opcional_de_producto()`
+lo recibe igual que las demás —es la razón por la que no usa el cursor de módulo.
 
 ## Doce barridos del catálogo por cada búsqueda
 

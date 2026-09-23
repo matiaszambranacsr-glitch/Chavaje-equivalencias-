@@ -98,6 +98,43 @@ def en_tandas(valores, usos_por_consulta=1, tope=TOPE_VARIABLES_POR_CONSULTA):
         yield tanda, ",".join("?" * len(tanda))
 
 
+def _columnas_que_tiene_productos(cursor):
+    """Los nombres de columna que la tabla productos tiene AHORA.
+
+    SIN caché a propósito. El PRAGMA cuesta 50 µs y se llama dos veces por búsqueda: 0,1 ms.
+    Cachearlo obligaría a acordarse de limpiarlo cada vez que el esquema puede cambiar —al
+    restaurar un backup, al migrar— y esa es justamente la clase de olvido que esta función
+    existe para cubrir. Barato y sin estado le gana a rápido y con una trampa.
+    Recibe el cursor y no usa el de módulo para que el paquete nucleo pueda llevarse
+    buscar_por_codigo() tal cual.
+
+    Mismo cinturón de seguridad que _columnas_de_medidas_que_existen(), y por la misma razón:
+    una columna agregada en esta versión puede no existir todavía en la base que la sesión
+    tiene abierta —una conexión cacheada, un backup viejo restaurado con otra sesión adentro— y
+    entonces una consulta que la nombra se cae.
+    Lo que la hace importante es DÓNDE se usa: el buscador. Al agregar `marca_repuesto` a la
+    búsqueda por código y por texto, contra una base sin esa columna la pantalla principal de
+    la app moría con «no such column: p.marca_repuesto». Una columna nueva que agrega una
+    comodidad no puede tumbar lo único que la app tiene que hacer siempre."""
+    try:
+        return {f["name"] if isinstance(f, sqlite3.Row) else f[1]
+                for f in cursor.execute("PRAGMA table_info(productos)").fetchall()}
+    except sqlite3.Error as _err:
+        anotar_error("_columnas_que_tiene_productos", _err)
+        return set()
+
+
+def campo_opcional_de_producto(cursor, columna, alias):
+    """`p.columna AS "alias"` si la columna existe, y si no un NULL con el mismo alias.
+
+    Devolver NULL y no omitir la columna es a propósito: quien lee el resultado encuentra la
+    clave igual, con el valor vacío, que es exactamente lo que significa «esta base todavía no
+    tiene ese dato»."""
+    if columna in _columnas_que_tiene_productos(cursor):
+        return f'p.{columna} AS "{alias}"'
+    return f'NULL AS "{alias}"'
+
+
 def buscar_por_codigo(cur, clean_code, marca_filtro="Todas", max_saltos=None, confianza_minima=None):
     """Busca un código y todo lo que esté encadenado con él.
 
@@ -159,7 +196,7 @@ def buscar_por_codigo(cur, clean_code, marca_filtro="Todas", max_saltos=None, co
     # propia columna y la búsqueda la lee de ahí.
     # f-string para poder meter la columna opcional del fabricante. Las llaves que SQLite
     # usa no existen en esta consulta, así que no hay nada que escapar.
-    _fabricante = campo_opcional_de_producto("marca_repuesto", "Fabricante")
+    _fabricante = campo_opcional_de_producto(cur, "marca_repuesto", "Fabricante")
     query = f'''
     WITH RECURSIVE Red(id, saltos, peor, por_codigo) AS (
         SELECT id, 0, 100, 0 FROM productos WHERE codigo_clean = ? OR codigo_barras = ?

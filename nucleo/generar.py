@@ -189,6 +189,8 @@ def adaptar_a_cursor(texto, nombre):
             quitando = None
         salida.append(ln)
     texto = "\n".join(salida)
+    # El cursor que se le pasa a un ayudante, no solo el que ejecuta.
+    texto = _re.sub(r'campo_opcional_de_producto\(c,', 'campo_opcional_de_producto(cur,', texto)
     texto = _re.sub(r'\bc\.execute\(', 'cur.execute(', texto)
     texto = _re.sub(r'\bc\.fetchall\(\)', 'cur.fetchall()', texto)
     texto = _re.sub(r'\bfilas_a_listas\(c\)', 'filas_a_listas(cur)', texto)
@@ -269,6 +271,10 @@ cuerpo = "\n\n\n".join([
     # parte la lista de ids en tandas que entren en una consulta de SQLite.
     BLOQUES["TOPE_VARIABLES_POR_CONSULTA"],
     BLOQUES["en_tandas"],
+    # buscar_por_codigo pide la columna del fabricante solo si existe: contra una base sin ella
+    # nombrarla tumba la búsqueda entera. Ver campo_opcional_de_producto().
+    BLOQUES["_columnas_que_tiene_productos"],
+    BLOQUES["campo_opcional_de_producto"],
     (comentario_previo("buscar_por_codigo") + "\n" if comentario_previo("buscar_por_codigo") else "")
     + adaptar_a_cursor(BLOQUES["buscar_por_codigo"], "buscar_por_codigo"),
     adaptar_a_cursor(BLOQUES["equivalentes_mas_alla_del_tope"], "equivalentes_mas_alla_del_tope"),
