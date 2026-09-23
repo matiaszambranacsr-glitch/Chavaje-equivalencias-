@@ -4971,6 +4971,7 @@ def restaurar_backup(archivo_subido):
     # Y el del esquema: la base que acaba de entrar puede tener otras columnas, que es
     # exactamente el caso que _columnas_de_medidas_que_existen() existe para cubrir.
     _columnas_de_medidas_que_existen.cache_clear()
+    _columnas_que_tiene_productos.cache_clear()
     st.session_state.pop("_analisis_lote", None)
 
 
@@ -6340,6 +6341,37 @@ def cargar_medidas_de_varios(ids):
         for fila in c.fetchall():
             medidas[fila["id"]] = dict(fila)
     return medidas
+
+
+@functools.lru_cache(maxsize=1)
+def _columnas_que_tiene_productos():
+    """Los nombres de columna que la tabla productos tiene AHORA.
+
+    Mismo cinturón de seguridad que _columnas_de_medidas_que_existen(), y por la misma razón:
+    una columna agregada en esta versión puede no existir todavía en la base que la sesión
+    tiene abierta —una conexión cacheada, un backup viejo restaurado con otra sesión adentro— y
+    entonces una consulta que la nombra se cae.
+    Lo que la hace importante es DÓNDE se usa: el buscador. Al agregar `marca_repuesto` a la
+    búsqueda por código y por texto, contra una base sin esa columna la pantalla principal de
+    la app moría con «no such column: p.marca_repuesto». Una columna nueva que agrega una
+    comodidad no puede tumbar lo único que la app tiene que hacer siempre."""
+    try:
+        return {f["name"] if isinstance(f, sqlite3.Row) else f[1]
+                for f in c.execute("PRAGMA table_info(productos)").fetchall()}
+    except sqlite3.Error as _err:
+        anotar_error("_columnas_que_tiene_productos", _err)
+        return set()
+
+
+def campo_opcional_de_producto(columna, alias):
+    """`p.columna AS "alias"` si la columna existe, y si no un NULL con el mismo alias.
+
+    Devolver NULL y no omitir la columna es a propósito: quien lee el resultado encuentra la
+    clave igual, con el valor vacío, que es exactamente lo que significa «esta base todavía no
+    tiene ese dato»."""
+    if columna in _columnas_que_tiene_productos():
+        return f'p.{columna} AS "{alias}"'
+    return f'NULL AS "{alias}"'
 
 
 @functools.lru_cache(maxsize=1)
@@ -8201,7 +8233,10 @@ def buscar_por_codigo(clean_code, marca_filtro="Todas", max_saltos=None, confian
     # tecleado el número de parte. Antes eso funcionaba porque el EAN se cargaba como si fuera
     # un código de fábrica —con la equivalencia falsa que eso implicaba—; ahora vive en su
     # propia columna y la búsqueda la lee de ahí.
-    query = '''
+    # f-string para poder meter la columna opcional del fabricante. Las llaves que SQLite
+    # usa no existen en esta consulta, así que no hay nada que escapar.
+    _fabricante = campo_opcional_de_producto("marca_repuesto", "Fabricante")
+    query = f'''
     WITH RECURSIVE Red(id, saltos, peor, por_codigo) AS (
         SELECT id, 0, 100, 0 FROM productos WHERE codigo_clean = ? OR codigo_barras = ?
         UNION
@@ -8225,7 +8260,9 @@ def buscar_por_codigo(clean_code, marca_filtro="Todas", max_saltos=None, confian
            -- Quién FABRICA la pieza, que es otra cosa que la lista de quién te la vende. En el
            -- mostrador, entre cinco equivalentes, la pregunta es «¿cuál es el Bosch?».
            -- Ver marca_de_repuesto_en(): sale del final de la descripción, 13.705 productos.
-           p.marca_repuesto AS "Fabricante",
+           -- Va por campo_opcional_de_producto() y no directo: contra una base que todavía no
+           -- tiene la columna, nombrarla acá tumba el buscador entero.
+           {_fabricante},
            p.precio AS "Precio", p.stock AS "Stock",
            p.favorito AS "Favorito", COALESCE(p.imagen_thumb, p.imagen_url) AS "Imagen",
            p.precio_costo AS "_costo",
@@ -12575,78 +12612,103 @@ def es_un_kit(descripcion):
     return bool(descripcion and _RE_KIT_POR_SUMA.search(str(descripcion)))
 
 
-def kits_que_lo_traen(producto_id, limite=8):
-    """Los kits del catálogo que traen ESTE repuesto adentro. Devuelve filas listas para mostrar.
+def _formas_del_codigo_para_buscar_en_kits(codigo):
+    """El código como lo escribe el proveedor, y también sin su marca pegada atrás.
 
-    Sale de las propias listas, sin cargar nada a mano: cuando un proveedor arma un kit, en la
-    descripción escribe los códigos de lo que trae —«KIT CAB Y BUJ (LEIHTT06SC/LSPKR6E)»—, así
-    que un producto está adentro de un kit si el kit lo nombra por su código.
-
-    Sirve en el mostrador para lo que el cliente pregunta de verdad: pide el cable de bujía y
-    uno puede decirle «también lo tengo en el kit con las bujías incluidas», que suele ser la
-    venta más grande y el cliente lo agradece.
-
-    Dos filtros para no inventar:
-      · el kit tiene que tener OTRA descripción que el producto. Varias filas del catálogo son
-        el mismo kit cargado con distintos códigos —el del cable, el de la bujía, el del kit—
-        y las tres comparten descripción: eso no es «estar adentro», es la misma fila;
-      · el código tiene que tener al menos seis caracteres, porque uno más corto aparece dentro
-        de cualquier texto por casualidad."""
-    c.execute("SELECT codigo_raw, descripcion FROM productos WHERE id = ?", (producto_id,))
-    fila = c.fetchone()
-    if not fila or not fila["codigo_raw"]:
-        return []
-    codigo = str(fila["codigo_raw"]).strip()
-    mia = (fila["descripcion"] or "").strip()
-    if len(re.sub(r'[^A-Za-z0-9]', '', codigo)) < LARGO_MINIMO_CODIGO_EN_KIT:
-        return []
-    # EL CÓDIGO CON LA MARCA PEGADA ATRÁS. Varios proveedores le agregan su marca al número:
-    # «LSPFR6F11LUCAS», «26001FISPA». Pero cuando arman el kit escriben el número PELADO:
-    # «KIT CAB Y BUJ (LEIHTT66SC/LSPFR6F11)». Buscando el código completo el kit no aparecía
-    # nunca, que es justo el caso más común — son 2.245 códigos así en el catálogo (1.366 con
-    # LUCAS y 879 con FISPA).
-    # Se buscan las dos formas. El pedazo que queda tiene que seguir siendo un código: al menos
-    # los mismos seis caracteres que se le piden a cualquiera.
+    Ver kits_que_traen_a_varios() para el porqué: varios proveedores se agregan la marca al número —«LSPFR6F11LUCAS»,
+    «26001FISPA»— pero cuando arman el kit escriben el número pelado."""
     formas = [normalizar_texto(codigo)]
-    _limpio = re.sub(r'[^A-Za-z0-9]', '', codigo).upper()
-    for _marca in _MARCAS_QUE_SE_PEGAN_AL_CODIGO:
-        if _limpio.endswith(_marca) and len(_limpio) - len(_marca) >= LARGO_MINIMO_CODIGO_EN_KIT:
-            formas.append(_limpio[:-len(_marca)])
+    limpio = re.sub(r'[^A-Za-z0-9]', '', codigo).upper()
+    for marca in _MARCAS_QUE_SE_PEGAN_AL_CODIGO:
+        if limpio.endswith(marca) and len(limpio) - len(marca) >= LARGO_MINIMO_CODIGO_EN_KIT:
+            formas.append(limpio[:-len(marca)])
             break
-    # La condición de «es un kit» va en el SQL y no solo en Python, y sin LIMIT: con el tope
-    # puesto sobre el LIKE del código, un código que aparece en muchas descripciones llenaba el
-    # corte de filas que no eran kits y los kits de verdad quedaban afuera. Después se vuelve a
-    # confirmar con es_un_kit(), que mira la palabra entera y no la subcadena.
-    _o_kit = " OR ".join(["p.busqueda LIKE ?"] * len(PALABRAS_DE_KIT))
-    # El código puede traer un «_» —hay dos en el catálogo real— y ahí el LIKE engancharía
-    # cualquier carácter en esa posición, inventando kits que no lo traen.
-    _o_codigo = " OR ".join(["p.busqueda LIKE ? ESCAPE '\\'"] * len(formas))
-    c.execute(f"""SELECT p.id AS "ID", p.codigo_raw AS "Codigo", p.descripcion AS "Descripcion",
-                         m.nombre AS "Marca", p.precio AS "Precio", p.stock AS "Stock"
-                  FROM productos p JOIN marcas m ON m.id = p.marca_id
-                  WHERE p.id <> ? AND ({_o_codigo}) AND ({_o_kit})""",
-              [producto_id] + [f"%{como_texto_en_like(f)}%" for f in formas]
-              + [f"%{k}%" for k in PALABRAS_DE_KIT])
-    # Un mismo kit está cargado varias veces con códigos distintos —el del proveedor, el de
-    # fábrica, el del cable— y las filas comparten descripción. En el mostrador eso es UN kit:
-    # se muestra una sola vez, y se elige la fila que sirve para vender, o sea la que tiene
-    # precio y stock. Sin esto, el mismo kit salía tres veces y dos sin precio.
+    return formas
+
+
+def _elegir_un_kit_por_descripcion(candidatos, mia, limite):
+    """De las filas candidatas, un kit por descripción y la que sirve para vender.
+
+    Un mismo kit está cargado varias veces con códigos distintos —el del proveedor, el de
+    fábrica, el del cable— y las filas comparten descripción. En el mostrador eso es UN kit."""
     por_descripcion = {}
-    for f in filas_a_listas(c):
+    for f in candidatos:
         desc = (f["Descripcion"] or "").strip()
         if not es_un_kit(desc) or desc == mia:
             continue
         vale = (f.get("Precio") is not None, (f.get("Stock") or 0) > 0)
         previo = por_descripcion.get(desc)
-        if previo is None or vale > (previo.get("Precio") is not None, (previo.get("Stock") or 0) > 0):
+        if previo is None or vale > (previo.get("Precio") is not None,
+                                     (previo.get("Stock") or 0) > 0):
             por_descripcion[desc] = f
     return list(por_descripcion.values())[:limite]
+
+
+def kits_que_traen_a_varios(ids, limite=8):
+    """Los kits del catálogo que traen adentro alguno de ESTOS repuestos, en UNA consulta.
+
+    La pantalla de resultados preguntaba por los doce primeros productos de a uno, y cada
+    pregunta es un `LIKE '%…%'` que ningún índice puede servir: doce barridos de las 70.888
+    descripciones por cada búsqueda. Medido, 0,247 s por página de resultados, en el camino más
+    caliente de la app — el que corre cada vez que alguien busca un repuesto en el mostrador.
+
+    Con una sola consulta es UN barrido en vez de doce, y el reparto se hace en Python: se trae
+    también `busqueda`, que es el mismo texto contra el que el LIKE compara, así que decidir a
+    qué producto corresponde cada kit es mirar si esa forma del código está adentro.
+
+    Los filtros que son POR PRODUCTO —que el kit no sea el producto mismo, y que no compartan
+    descripción— se aplican al repartir y no en el SQL, porque en el SQL serían otra vez doce
+    consultas. Devuelve {id del producto: [kits]}."""
+    ids = [int(x) for x in dict.fromkeys(ids)]
+    if not ids:
+        return {}
+    marcadores = ",".join("?" * len(ids))
+    c.execute(f"SELECT id, codigo_raw, descripcion FROM productos WHERE id IN ({marcadores})",
+              ids)
+    origen = {f["id"]: f for f in filas_a_listas(c)}
+
+    formas_por_id = {}
+    todas_las_formas = []
+    for pid in ids:
+        fila = origen.get(pid)
+        if not fila:
+            continue
+        codigo = str(fila["codigo_raw"] or "").strip()
+        if len(re.sub(r'[^A-Za-z0-9]', '', codigo)) < LARGO_MINIMO_CODIGO_EN_KIT:
+            continue
+        formas = _formas_del_codigo_para_buscar_en_kits(codigo)
+        formas_por_id[pid] = formas
+        todas_las_formas.extend(formas)
+    if not todas_las_formas:
+        return {}
+
+    _o_kit = " OR ".join(["p.busqueda LIKE ?"] * len(PALABRAS_DE_KIT))
+    _o_codigo = " OR ".join(["p.busqueda LIKE ? ESCAPE '\\'"] * len(todas_las_formas))
+    c.execute(f"""SELECT p.id AS "ID", p.codigo_raw AS "Codigo", p.descripcion AS "Descripcion",
+                         m.nombre AS "Marca", p.precio AS "Precio", p.stock AS "Stock",
+                         p.busqueda AS "_busqueda"
+                  FROM productos p JOIN marcas m ON m.id = p.marca_id
+                  WHERE ({_o_codigo}) AND ({_o_kit})""",
+              [f"%{como_texto_en_like(f)}%" for f in todas_las_formas]
+              + [f"%{k}%" for k in PALABRAS_DE_KIT])
+    candidatos = filas_a_listas(c)
+
+    salida = {}
+    for pid, formas in formas_por_id.items():
+        mia = (origen[pid]["descripcion"] or "").strip()
+        mios = [f for f in candidatos
+                if f["ID"] != pid
+                and any(forma in (f["_busqueda"] or "") for forma in formas)]
+        kits = _elegir_un_kit_por_descripcion(mios, mia, limite)
+        if kits:
+            salida[pid] = kits
+    return salida
 
 
 def que_trae_este_kit(producto_id, limite=12):
     """Lo que trae adentro un kit: los productos del catálogo que su descripción nombra.
 
-    Es el camino inverso de kits_que_lo_traen(), y sirve para lo mismo del otro lado: el
+    Es el camino inverso de kits_que_traen_a_varios(), y sirve para lo mismo del otro lado: el
     cliente pregunta por el kit y uno puede decirle qué lleva, o venderle solo la pieza que
     necesita si no quiere el kit entero."""
     c.execute("SELECT codigo_raw, descripcion FROM productos WHERE id = ?", (producto_id,))
@@ -13696,17 +13758,18 @@ def fuerza_de_la_coincidencia(a, b):
 def _uno_trae_al_otro(desc_a, cod_a, desc_b, cod_b, tipo_a="", tipo_b=""):
     """¿Uno de los dos es un kit que nombra al otro adentro? Devuelve el texto de la relación.
 
-    Es la misma pregunta que contesta kits_que_lo_traen() para el mostrador, pero acá hace
+    Es la misma pregunta que contesta kits_que_traen_a_varios() para el mostrador, pero acá hace
     falta para lo contrario: para NO tratar la relación como una equivalencia. Que la bujía
     esté adentro del «KIT CAB Y BUJ» es cierto y útil, y al mismo tiempo quiere decir que no
     son intercambiables: no se puede vender una en lugar de la otra.
 
     Se contesta con los dos textos y nada más — sin tocar la base. Hacerlo con
-    kits_que_lo_traen(), que es lo natural, cuesta un LIKE sobre las 70.888 descripciones por
+    una consulta, que es lo natural, cuesta un LIKE sobre las 70.888 descripciones por
     cada par: la revisión de una tanda de 1.000 vínculos pasaba de 1,4 a 15,9 segundos.
 
     El código se busca también SIN la marca pegada atrás, por lo mismo que en
-    kits_que_lo_traen(): el proveedor se llama «LSPFR6F11LUCAS» a sí mismo y en el kit escribe
+    _formas_del_codigo_para_buscar_en_kits(): el proveedor se llama «LSPFR6F11LUCAS» a sí mismo
+    y en el kit escribe
     «LSPFR6F11».
 
     LA PIEZA NO PUEDE SER UN CÓDIGO DE FÁBRICA, y sin esa condición esto se equivocaba en
@@ -13746,7 +13809,7 @@ def pares_de_kit_y_pieza(pares):
     """De una lista de pares (a, b), cuáles son «un kit y la pieza que trae adentro».
 
     Existe para NO mandarlos a la cola de revisión. La relación es cierta y sirve —el buscador
-    ofrece el kit cuando buscás la pieza suelta, y eso lo resuelve kits_que_lo_traen() leyendo
+    ofrece el kit cuando buscás la pieza suelta, y eso lo resuelve kits_que_traen_a_varios() leyendo
     las descripciones en el momento— pero no es una equivalencia: no se puede vender una en
     lugar de la otra. Preguntarle a alguien «¿son equivalentes?» cuando ya sabemos que no, es
     hacerle perder el tiempo y además tentarlo a decir que sí.
@@ -15180,13 +15243,16 @@ def buscar_por_texto(texto):
     utiles = len(puntajes)
     minimo = utiles if utiles <= 2 else max(2, (utiles * 2) // 3)
 
+    _fabricante = campo_opcional_de_producto("marca_repuesto", "Fabricante")
     query = f'''
     SELECT p.id AS "ID", p.codigo_raw AS "Codigo", p.descripcion AS "Descripcion",
            m.nombre AS "Marca", m.tipo AS "Tipo",
            -- Quién FABRICA la pieza, que es otra cosa que la lista de quién te la vende. En el
            -- mostrador, entre cinco equivalentes, la pregunta es «¿cuál es el Bosch?».
            -- Ver marca_de_repuesto_en(): sale del final de la descripción, 13.705 productos.
-           p.marca_repuesto AS "Fabricante",
+           -- Va por campo_opcional_de_producto() y no directo: contra una base que todavía no
+           -- tiene la columna, nombrarla acá tumba el buscador entero.
+           {_fabricante},
            p.precio AS "Precio", p.stock AS "Stock",
            p.favorito AS "Favorito", ({suma}) AS _coincidencias
     FROM productos p JOIN marcas m ON m.id = p.marca_id
@@ -20668,8 +20734,9 @@ GRUPOS_MANTENIMIENTO = ["🔎 Encontrar equivalencias", "🧹 Limpiar y corregir
 HERRAMIENTAS_MANTENIMIENTO = [
     # (título, grupo, qué hace en una línea, palabras con que se busca)
     ("🏭 Catálogo de aplicaciones (qué repuesto le va a cada auto)", 0,
-     "Subís el catálogo de NGK, Bosch o Mann y la app sabe qué pieza entra en qué auto.",
-     "aplicaciones catalogo ngk bosch mann skf auto modelo"),
+     "Subís el catálogo de NGK, Bosch o Mann y la app sabe qué pieza entra en qué auto. "
+     "Adentro está el botón para deducirlas de tus propias descripciones, sin subir nada.",
+     "aplicaciones catalogo ngk bosch mann skf auto modelo deducir descripciones"),
     ("📐 Equivalencias por medidas", 0,
      "Propone equivalentes de dos marcas que tienen las mismas medidas cargadas.",
      "medidas milimetros diametro largo rosca mecanicas"),
@@ -20685,12 +20752,19 @@ HERRAMIENTAS_MANTENIMIENTO = [
     ("🔗 Equivalencias deducidas cruzando catálogos", 0,
      "Si A equivale a B y B a C, propone A con C.",
      "deducidas cruzar cadena transitiva"),
+    # El «✅ ya corre solo» no es decoración: estas dos las dispara
+    # descubrimiento_post_importacion() después de cada importación, y el índice no lo decía.
+    # Sin eso, el que entra a este grupo ve nueve botones y no tiene forma de saber cuáles ya
+    # se hicieron ni en qué orden conviene apretar los demás — y termina corriendo de nuevo,
+    # a mano y esperando, algo que la app ya hizo sola.
     ("📝 Códigos de fábrica que el proveedor escribió en la descripción", 0,
-     "Lee los «REF ORIG» que ya están escritos en las descripciones cargadas.",
-     "ref orig oem descripcion escrito declarado"),
+     "Lee los «REF ORIG» que ya están escritos en las descripciones cargadas. "
+     "✅ Ya corre solo después de cada importación: esto es para volver a pasarlo.",
+     "ref orig oem descripcion escrito declarado automatico solo"),
     ("🧠 Buscar equivalencias en TODO el catálogo de una", 0,
-     "Compara todas las marcas entre sí en una sola pasada, en vez de de a dos.",
-     "todo catalogo barrido todas las marcas"),
+     "Compara todas las marcas entre sí en una sola pasada, en vez de de a dos. "
+     "✅ Ya corre solo después de cada importación: esto es para volver a pasarlo.",
+     "todo catalogo barrido todas las marcas automatico solo"),
     ("🌐 Leer equivalencias del catálogo digital del proveedor", 0,
      "Abre la ficha web de cada código y trae los códigos cruzados que lista.",
      "catalogo digital web ficha equivalencias proveedor"),
@@ -21892,9 +21966,13 @@ Casi todo lo que edita o borra algo pide la contraseña de administrador la prim
                         # arma un kit escribe adentro los códigos de lo que trae — así que no
                         # hay nada que cargar a mano. Va antes de «se lo llevó» porque es una
                         # decisión de venta, no de registro.
+                        # Los kits de los doce primeros salen de UNA consulta y no de doce:
+                        # cada una es un LIKE que barre las 70.888 descripciones, y esto corre
+                        # en cada búsqueda del mostrador. Ver kits_que_traen_a_varios().
                         _kits, _contenido = [], []
+                        _kits_por_producto = kits_que_traen_a_varios([_f["ID"] for _f in res[:12]])
                         for _f in res[:12]:
-                            for _k in kits_que_lo_traen(_f["ID"]):
+                            for _k in _kits_por_producto.get(_f["ID"], []):
                                 if _k["ID"] not in {x["ID"] for x in _kits}:
                                     _kits.append(_k)
                             for _d in que_trae_este_kit(_f["ID"]):

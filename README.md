@@ -1645,6 +1645,79 @@ El corte es por proveedor (`GROUP BY po.id, mp.id`) y no por total: un código d
 legítimo aparece en varias listas a la vez —es justo para eso que sirve— y contando todo junto
 ese sería el primero de la lista.
 
+## Una columna nueva tumbaba el buscador entero
+
+Salió de una medición que ni siquiera era sobre esto: al cronometrar las búsquedas contra la
+base real —donde todavía no corrió la migración— saltó
+
+```
+sqlite3.OperationalError: no such column: p.marca_repuesto
+```
+
+y lo que se cae ahí no es una comodidad: es **la pantalla principal de la app**. Agregar
+`marca_repuesto` a la búsqueda por código y por texto la dejó atada a que la columna exista.
+
+Es exactamente el caso que `_columnas_de_medidas_que_existen()` ya cubría para las medidas —una
+conexión cacheada, un backup viejo restaurado con otra sesión adentro— y que se había olvidado
+acá. Ahora las dos consultas piden la columna por `campo_opcional_de_producto()`, que devuelve
+`p.marca_repuesto AS "Fabricante"` si existe y `NULL AS "Fabricante"` si no.
+
+Devolver NULL y no omitir la columna es a propósito: quien lee el resultado encuentra la clave
+igual, vacía, que es exactamente lo que significa «esta base todavía no tiene ese dato».
+
+Comprobado por los dos lados, 25 búsquedas completas de cada uno:
+
+| | resultados | por búsqueda |
+|---|---|---|
+| base SIN la columna | 803 | 118 ms |
+| base CON la columna | 803 | 114 ms |
+
+Sin la columna, `Fabricante` llega en `None`; con ella, llega BOSCH y MASSER. Y el caché del
+esquema se limpia al restaurar un backup, junto con el de las medidas.
+
+## Doce barridos del catálogo por cada búsqueda
+
+`kits_que_lo_traen()` contesta la pregunta del mostrador —«¿y el kit con las bujías?»— con un
+`LIKE '%…%'` sobre `busqueda`, que **ningún índice de SQLite puede servir**: es un barrido de
+las 70.888 descripciones. La pantalla de resultados la llamaba una vez por cada uno de los doce
+primeros productos. Doce barridos. En el camino más caliente de la app, el que corre cada vez
+que alguien busca un repuesto.
+
+Ahora es **una sola consulta** con las formas de los doce códigos, y el reparto se hace en
+Python: se trae también `busqueda`, que es el mismo texto contra el que el `LIKE` compara, así
+que decidir a qué producto corresponde cada kit es mirar si esa forma está adentro. Los filtros
+que son POR producto —que el kit no sea el producto mismo, que no compartan descripción— se
+aplican al repartir, porque en el SQL serían otra vez doce consultas.
+
+Medido sobre doce productos que **sí** están adentro de algún kit (la primera medición usó
+productos al azar, ninguno tenía kit, y no probaba nada):
+
+| | |
+|---|---|
+| de a uno, doce consultas | 0,265 s |
+| de una sola vez | **0,124 s** |
+| diferencias en el resultado | **0** |
+
+Y quedó UNA implementación, no dos: `kits_que_lo_traen()` se borró en vez de dejarla como
+envoltorio. El auditor la marcó como «definida y nunca usada» apenas dejó de llamarse, que es
+exactamente para lo que está ese control.
+
+## Cinco botones que ya se habían apretado solos
+
+En «🔎 Encontrar equivalencias» hay nueve herramientas, y `descubrimiento_post_importacion()`
+dispara varias de ellas **sola, después de cada importación**. El índice no lo decía.
+
+El resultado es el peor de los dos mundos: el que entra ve nueve botones sin saber cuáles ya se
+hicieron, y termina corriendo a mano —y esperando— algo que la app ya hizo. Ahora las que
+corren solas lo dicen en su propia línea del índice:
+
+> 📝 Códigos de fábrica que el proveedor escribió en la descripción
+> Lee los «REF ORIG» que ya están escritos en las descripciones cargadas.
+> **✅ Ya corre solo después de cada importación: esto es para volver a pasarlo.**
+
+Y «🏭 Catálogo de aplicaciones» ahora dice que adentro está el botón para deducirlas de las
+propias descripciones sin subir nada, que era el que no encontraba nadie.
+
 ## La pantalla de equivalencias sugeridas reanalizaba todo por tocar una casilla
 
 `analizar_lote_pendiente()` tarda 5,2 s sobre los 3.185 pendientes reales, y estaba corriendo

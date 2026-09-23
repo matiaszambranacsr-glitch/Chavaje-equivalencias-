@@ -157,7 +157,10 @@ def buscar_por_codigo(cur, clean_code, marca_filtro="Todas", max_saltos=None, co
     # tecleado el número de parte. Antes eso funcionaba porque el EAN se cargaba como si fuera
     # un código de fábrica —con la equivalencia falsa que eso implicaba—; ahora vive en su
     # propia columna y la búsqueda la lee de ahí.
-    query = '''
+    # f-string para poder meter la columna opcional del fabricante. Las llaves que SQLite
+    # usa no existen en esta consulta, así que no hay nada que escapar.
+    _fabricante = campo_opcional_de_producto("marca_repuesto", "Fabricante")
+    query = f'''
     WITH RECURSIVE Red(id, saltos, peor, por_codigo) AS (
         SELECT id, 0, 100, 0 FROM productos WHERE codigo_clean = ? OR codigo_barras = ?
         UNION
@@ -181,7 +184,9 @@ def buscar_por_codigo(cur, clean_code, marca_filtro="Todas", max_saltos=None, co
            -- Quién FABRICA la pieza, que es otra cosa que la lista de quién te la vende. En el
            -- mostrador, entre cinco equivalentes, la pregunta es «¿cuál es el Bosch?».
            -- Ver marca_de_repuesto_en(): sale del final de la descripción, 13.705 productos.
-           p.marca_repuesto AS "Fabricante",
+           -- Va por campo_opcional_de_producto() y no directo: contra una base que todavía no
+           -- tiene la columna, nombrarla acá tumba el buscador entero.
+           {_fabricante},
            p.precio AS "Precio", p.stock AS "Stock",
            p.favorito AS "Favorito", COALESCE(p.imagen_thumb, p.imagen_url) AS "Imagen",
            p.precio_costo AS "_costo",
