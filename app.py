@@ -398,7 +398,10 @@ VERSION_SEPARACION = "1"
 # cargado (ver guardar_equivalencias_pendientes()). Esto limpia lo que quedó de antes.
 # 2: además se sacan los pendientes de productos que ya no existen. Ver el trigger
 # productos_sin_pendientes_colgando.
-VERSION_COLA_PENDIENTES = "2"
+# 3: otra vuelta para lo ya cargado: reimportar una lista volvía a poner en la cola todo lo
+# que ya estaba aprobado (13.756 de 13.943 con la de FISPA), y una base que reimportó algo
+# desde la versión 2 lo tiene adentro. La limpieza es la misma y no cambia.
+VERSION_COLA_PENDIENTES = "3"
 
 
 def secretos_app():
@@ -24100,6 +24103,7 @@ if pagina == PAGINAS[2]:
                     precios_frenados = []
                     filas_omitidas = []
                     eq_batch = set()  # inserción en lote: se acumulan los pares y se insertan todos juntos al final
+                    _ids_de_la_lista = set()   # los productos DISTINTOS que tocó: ver el cartel del final
                     progreso = st.progress(0, text="Procesando filas...")
                     total = len(filas_datos)
 
@@ -24246,6 +24250,7 @@ if pagina == PAGINAS[2]:
                             # Ahora el producto queda cargado igual (buscable por código y por
                             # descripción), solo que sin equivalencia hasta que aparezca de otra lista
                             # o se vincule a mano.
+                            _ids_de_la_lista.update(ids_prov)
                             if not ids_oem:
                                 cargados_sin_equiv += len(ids_prov)
                                 # aunque no haya OEM, los códigos de la misma celda se vinculan entre sí
@@ -24287,9 +24292,21 @@ if pagina == PAGINAS[2]:
 
                         # Inserción en lote: mucho más rápido que insertar de a un vínculo por vez
                         if eq_batch:
-                            # No revivir vínculos que ya fueron rechazados en una revisión anterior
+                            # No revivir vínculos que ya fueron rechazados en una revisión
+                            # anterior, NI volver a preguntar por los que ya están cargados.
+                            # Lo segundo faltaba, y es lo que pasa cada vez que un proveedor
+                            # manda su lista nueva de precios: reimportando la de FISPA que ya
+                            # estaba, quedaron 13.943 vínculos «esperando revisión» y 13.756 ya
+                            # eran equivalencias aprobadas. El informe de la importación encima
+                            # decía «539 de los 13.943 vínculos nuevos están casi seguro mal».
+                            # Mismo criterio que guardar_equivalencias_pendientes().
                             rechazados_antes = pares_rechazados()
-                            eq_batch = {p for p in eq_batch if p not in rechazados_antes}
+                            ya_cargados = pares_ya_cargados()
+                            _vinculos_ya_cargados = len(eq_batch & ya_cargados)
+                            eq_batch = {p for p in eq_batch
+                                        if p not in rechazados_antes and p not in ya_cargados}
+                        else:
+                            _vinculos_ya_cargados = 0
                         # El nombre del lote se arma SIEMPRE, vayan los vínculos a revisión o
                         # directo: es la etiqueta que después permite deshacer toda la lista.
                         lote_importacion = (f"{nombre_prov.upper()} · "
@@ -24332,7 +24349,12 @@ if pagina == PAGINAS[2]:
                     # 4.500 filas.
                     _total_filas = len(filas_datos)
                     _con_equiv = cargados
-                    _productos = cargados + cargados_sin_equiv
+                    # Productos DISTINTOS. Era «filas con equivalencia» + «códigos sin
+                    # equivalencia», que mezcla unidades y cuenta dos veces un código que la
+                    # lista repite: importando la de IMPERIAL decía «se leyeron 43.303 filas y
+                    # quedaron cargados 43.347 productos» —más productos que filas— y la marca
+                    # quedó con 43.101.
+                    _productos = len(_ids_de_la_lista)
                     _resumen = (f"Se leyeron **{_total_filas:,} fila(s)** y quedaron cargados "
                                 f"**{_productos:,} producto(s)**"
                                 + (f", {omitidos:,} fila(s) se saltearon" if omitidos else "")
@@ -24345,12 +24367,21 @@ if pagina == PAGINAS[2]:
                         # No lo están: van a la cola de revisión, y hasta que se aprueben la
                         # búsqueda NO cruza marcas. Decirlo mal es lo que hace que alguien importe
                         # tres listas, busque un código y crea que la app no relaciona proveedores.
-                        st.warning(
-                            _resumen + f" Los precios ya están, **pero las equivalencias todavía "
-                            f"NO**: las {_con_equiv:,} fila(s) que traían código de fábrica "
-                            "quedaron esperando tu aprobación. Hasta que las apruebes, buscar un "
-                            "código no va a traer los equivalentes de otras marcas."
-                        )
+                        # Y se cuentan los vínculos NUEVOS, no las filas con código de fábrica:
+                        # reimportando la lista de FISPA, que ya estaba, decía «las 4.446 filas
+                        # quedaron esperando tu aprobación» con casi todo ya aprobado de antes.
+                        _ya_txt = (f" Otros {_vinculos_ya_cargados:,} ya estaban cargados de "
+                                   "antes y siguen funcionando." if _vinculos_ya_cargados else "")
+                        if eq_batch:
+                            st.warning(
+                                _resumen + f" Los precios ya están, **pero {len(eq_batch):,} "
+                                "vínculo(s) nuevos todavía NO**: quedaron esperando tu "
+                                "aprobación, y hasta que los apruebes buscar esos códigos no va "
+                                "a traer los equivalentes de otras marcas." + _ya_txt
+                            )
+                        else:
+                            st.success(_resumen + " Los precios ya están, y esta lista no trajo "
+                                       "vínculos nuevos para revisar." + _ya_txt)
                     # Los números del chequeo de salud cambiaron: que se recalculen
                     invalidar_salud()
 

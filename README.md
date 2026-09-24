@@ -1649,6 +1649,37 @@ El corte es por proveedor (`GROUP BY po.id, mp.id`) y no por total: un código d
 legítimo aparece en varias listas a la vez —es justo para eso que sirve— y contando todo junto
 ese sería el primero de la lista.
 
+## Reimportar una lista volvía a mandar a revisión todo lo ya aprobado
+
+Lo más común en la vida real es que un proveedor mande su lista nueva de precios y se la vuelva
+a importar. Se probó con las listas reales, apretando los botones de «📁 Cargar Excel»:
+reimportando la de FISPA, que ya estaba cargada, la cola pasó de 12.747 a **26.690** pendientes.
+
+**13.756 de esos 13.943 «vínculos nuevos» ya eran equivalencias aprobadas.** La importación no
+revivía lo rechazado (filtraba `rechazados_antes`), pero sí volvía a preguntar por lo aprobado.
+Es el mismo agujero que se cerró en el descubrimiento automático, del lado de la importación.
+
+| reimportando la lista de FISPA | antes | ahora |
+|---|---|---|
+| vínculos «esperando tu revisión» | **13.943** | **187** (los nuevos de verdad) |
+| «casi seguro mal», según el informe | «539 de los 13.943» | «117 de los 187» |
+| la importación tarda | 23,5 s | **9,5 s** |
+
+Tarda menos porque el informe de después analiza 187 vínculos y no 13.943. Una lista que no
+estaba (IMPERIAL, 43.303 filas) deja exactamente la misma base antes y ahora. Las bases que ya
+reimportaron algo tienen los repetidos en la cola: `VERSION_COLA_PENDIENTES = "3"` los saca al
+abrir.
+
+De paso, el cartel del final decía dos cosas que no eran:
+
+- «**Las 4.446 fila(s)** que traían código de fábrica quedaron esperando tu aprobación», con casi
+  todo aprobado de antes. Ahora: «**187 vínculo(s) nuevos** todavía no… Otros 13.756 ya estaban
+  cargados de antes y siguen funcionando». Y si la lista no trae nada nuevo, lo dice en verde.
+- «Se leyeron 43.303 filas y quedaron cargados **43.347 productos**» —más productos que filas— y la
+  marca quedó con 43.101. Sumaba «filas con equivalencia» más «códigos sin equivalencia», que son
+  unidades distintas, y un código repetido en la lista contaba dos veces. Ahora cuenta productos
+  distintos: 43.101.
+
 ## La copia de seguridad en GitHub: nunca se hizo, y no hubiera aguantado
 
 **En ninguna rama del repositorio hay ni hubo nunca un `datos_iniciales.db`.** O sea: la subida
