@@ -2,10 +2,9 @@
 
 Está aparte y sin dependencias porque lo usan todos los demás módulos: si esto importara algo,
 ese algo no podría anotar sus propios errores."""
+import sys
+import types
 from datetime import datetime
-
-
-MAXIMO_ERRORES_ANOTADOS = 150
 
 
 # Los últimos errores que la app se tragó. Hay 142 lugares donde algo puede fallar y la app
@@ -13,7 +12,35 @@ MAXIMO_ERRORES_ANOTADOS = 150
 # que no está—, pero si ahí se esconde un bug real, nadie se entera nunca.
 #
 # Con esto quedan anotados. No cambia el comportamiento: el fallback sigue corriendo igual.
-_ULTIMOS_ERRORES = []
+def del_proceso(nombre, crear):
+    """Un objeto que dura lo que dura el PROCESO del servidor, no una pasada del script.
+
+    Streamlit vuelve a ejecutar app.py entero en cada toque, y cada vez en un módulo nuevo:
+    todo lo que se crea a este nivel con «= threading.Lock()» o «= []» es OTRO objeto en cada
+    pasada. Para una constante da igual; para un candado que tiene que ser uno solo, no. Medido
+    con una base con trabajo de fondo pendiente: cada toque largaba otra tanda de fondo, y
+    después de seis toques había **diez corriendo a la vez**, cuando la regla era una. Cada una
+    puede durar diez minutos contra la base: así es como se cae un servidor chico.
+
+    Esto los guarda en un módulo propio adentro de sys.modules, que Streamlit no toca entre
+    pasadas. Tampoco se borra con el «Clear cache» del menú, ni cuando se sube código nuevo sin
+    reiniciar: la tanda que largó el código viejo sigue teniendo el candado, y el nuevo la
+    respeta. dict.setdefault es atómico, así que dos sesiones que llegan juntas se quedan con
+    el mismo objeto."""
+    registro = sys.modules.setdefault("_equivalencias_el_chavo_del_proceso",
+                                      types.ModuleType("_equivalencias_el_chavo_del_proceso"))
+    guardados = registro.__dict__
+    if nombre not in guardados:
+        guardados.setdefault(nombre, crear())
+    return guardados[nombre]
+
+
+MAXIMO_ERRORES_ANOTADOS = 150
+
+
+# Del proceso y no de la pasada (ver del_proceso): si no, la pantalla que los muestra veía solo
+# los errores de su propia pasada, y los de los hilos de fondo no los veía nunca nadie.
+_ULTIMOS_ERRORES = del_proceso("ultimos_errores", list)
 
 
 def anotar_error(donde, error):

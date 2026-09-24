@@ -74,8 +74,10 @@ escribir("errores.py", '''"""Registro de los errores que la app decide ignorar.
 
 Está aparte y sin dependencias porque lo usan todos los demás módulos: si esto importara algo,
 ese algo no podría anotar sus propios errores."""
+import sys
+import types
 from datetime import datetime
-''', ["MAXIMO_ERRORES_ANOTADOS", "_ULTIMOS_ERRORES", "anotar_error"], '''
+''', ["del_proceso", "MAXIMO_ERRORES_ANOTADOS", "_ULTIMOS_ERRORES", "anotar_error"], '''
 def errores_anotados():
     """Los últimos errores ignorados, del más viejo al más nuevo. Para mostrarlos en una
     pantalla de diagnóstico sin tocar la lista de adentro."""

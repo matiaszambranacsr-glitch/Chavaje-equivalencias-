@@ -14,3 +14,7 @@ __pycache__/
 # descomprime de ella al arrancar ya lo tapa el *.db de arriba; esto es el temporal de ese
 # paso, por si un arranque se corta a la mitad. Ver ruta_de_la_semilla() en app.py.
 datos_iniciales_desde_gz.db.*.tmp
+# La copia que la app baja de la rama copia-de-seguridad al arrancar con el disco vacío, y sus
+# temporales. Ver bajar_la_copia_de_github() en app.py.
+datos_desde_github.db.*.bajando
+datos_desde_github.db.*.tmp

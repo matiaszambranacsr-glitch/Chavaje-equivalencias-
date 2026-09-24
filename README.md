@@ -1649,6 +1649,97 @@ El corte es por proveedor (`GROUP BY po.id, mp.id`) y no por total: un código d
 legítimo aparece en varias listas a la vez —es justo para eso que sirve— y contando todo junto
 ese sería el primero de la lista.
 
+## Que la app no se caiga, y que un reinicio no borre nada
+
+En el Streamlit Cloud gratis la app «se cae» de tres maneras. Las tres se miraron con números.
+
+### 1. Diez tandas de fondo donde tenía que haber una
+
+Streamlit vuelve a ejecutar `app.py` entero en cada toque, **en un módulo nuevo**. Todo lo que
+se crea arriba de todo con `= threading.Lock()` o `= []` es otro objeto en cada pasada. El
+candado de la tanda de fondo (`_CANDADO_FONDO`) estaba así: cada toque traía uno nuevo y
+libre, y la regla de «una sola tanda a la vez» no se cumplía nunca. Probado con una base con
+trabajo de fondo pendiente, contando los hilos por nombre con `py-spy`:
+
+| el mismo recorrido de seis toques | antes | ahora |
+|---|---|---|
+| tandas de fondo corriendo a la vez | **10** | **1** |
+| pico de memoria del servidor | 535 MB | **275 MB** |
+| CPU gastada | 69 s | **14,5 s** |
+
+El trabajo es el mismo (24.774 vínculos puntuados, ninguno sin puntaje): se hacía diez veces.
+Ahora esos objetos viven en `del_proceso()`, que los guarda donde Streamlit no los toca entre
+pasadas. Pasó lo mismo con el registro de errores (`_ULTIMOS_ERRORES`): la pantalla que los
+muestra veía solo los de su propia pasada, y los de los hilos de fondo no los veía nadie.
+
+`db_lock` tiene el mismo problema y **se dejó así a propósito**, con el porqué al lado: las
+escrituras entre sesiones ya las ordena SQLite (WAL y `busy_timeout`), y volverlo del proceso
+abre una traba —uno con el candado esperando la base, otro con la base esperando el
+candado— que hoy no existe.
+
+### 2. La copia en GitHub: casi nunca se subía
+
+Con los secretos configurados, la copia se subía **una vez por día**, como último paso de las
+tareas diarias y dentro de sus seis segundos (si los pasos de antes los gastaban, ese día no
+había copia). Además se subía **solo si había más productos que en la anterior**: aprobar 8.000
+equivalencias, cambiar precios, anotar ventas o cargar fichas de autos no la disparaba. Todo eso
+vivía solo en un disco que se borra al reiniciar.
+
+Ahora:
+
+- **Se sube cuando cambia algo.** Un hilo (`vigilar_la_copia()`) arma la copia cada 15 minutos,
+  le saca una huella (sha256) y la sube solo si cambió. Armarla cuesta 0,7 s. La huella deja
+  afuera la tabla de configuración, porque ahí van marcas que cambian solas; la copia subida
+  sí la lleva. Lo máximo que se pierde en un reinicio son 15 minutos.
+- **Va a una rama propia, `copia-de-seguridad`, con un solo commit** que se reemplaza cada vez.
+  Con un commit nuevo por copia en `main`, a 11 MB cada uno, el repositorio engordaría gigas por
+  año, y cada copia chocaría con los cambios de código. Si en los secretos se pone
+  `github_rama`, se usa esa como antes, con un commit por copia: a `main` no se le puede
+  reemplazar el historial.
+- **Al arrancar con el disco vacío, la app la baja sola** (`bajar_la_copia_de_github()`), con
+  10 segundos de tope para conectar. Si GitHub no contesta, sigue con la del repositorio.
+- **Nunca pisa la copia buena con una mala.** Si GitHub no contestara justo al arrancar, la app
+  arrancaría vacía, o con la copia vieja del repositorio, y a los 15 minutos el vigía la
+  subiría encima de la buena. Por eso: una base vacía no se sube nunca, y una base que no viene
+  de la copia (no tiene su huella) no reemplaza sola una copia que ya existe. Avisa, y deja la
+  decisión al botón de «Subir ahora».
+
+Probado de punta a punta contra un GitHub de mentira que responde como la API de git (la
+variable `EQUIVALENCIAS_API_DE_GITHUB` sirve solo para eso). El servidor de verdad subió la
+copia solo. Después se lo apagó, **se le borró la base**, se lo prendió y arrancó con los 70.893
+productos y las 24.774 equivalencias. En la primera revisión, al minuto de arrancar, no la
+volvió a subir, porque no había cambiado nada. Aparte, en diez casos:
+
+| caso | resultado |
+|---|---|
+| primera copia | crea la rama, 1 commit, la copia y un LEEME |
+| sin cambios | no sube |
+| solo cambió la configuración | no sube |
+| cambió un precio | sube; la rama sigue con 1 commit |
+| base restaurada de la copia | la reconoce y no la vuelve a subir |
+| restaurar sobre una base con datos | no toca nada |
+| base que no viene de la copia | no pisa la de GitHub; avisa |
+| base vacía, aun con el botón | no sube |
+
+Hubo un error en el camino que vale anotar: la huella se sacaba leyendo el archivo con la
+conexión abierta. La copia hereda el modo WAL, lo escrito va primero a un archivo aparte, y la
+misma base daba a veces otra huella. Ahora se lee con la copia cerrada.
+
+### 3. Dormida
+
+Streamlit apaga las apps gratis que pasan 12 horas sin visitas. La primera persona de la mañana
+ve un cartel, toca «Yes, get this app back up!» y espera, y el servidor arranca de cero.
+`.github/workflows/mantener_despierta.yml` abre la app cada 4 horas en un navegador de verdad
+(`.github/despertar_la_app.py`). Si la encuentra dormida la despierta, y si no aparece en 4
+minutos el trabajo falla: **GitHub le manda un mail al dueño del repositorio**, y eso sirve de
+alarma de «la app está caída». Se puede correr a mano desde Actions → «Mantener la app
+despierta» → Run workflow. Probado con la app andando, con una página que imita el cartel de
+dormida (la despierta) y con una que nunca despierta (sale con error).
+
+Lo que no depende de la app: Streamlit puede reiniciar el servidor cuando quiera
+(mantenimiento, actualizaciones). Con lo de arriba, eso cuesta como mucho 15 minutos de datos,
+no todo.
+
 ## Celular o computadora: se elige sola
 
 La vista arrancaba **siempre** en «📱 Celular». El que entraba desde la computadora la tenía que

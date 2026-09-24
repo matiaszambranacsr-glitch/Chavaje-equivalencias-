@@ -1,0 +1,28 @@
+# Visita la app cada cuatro horas para que Streamlit no la ponga a dormir, y la despierta si
+# está dormida. Si no levanta, el trabajo falla y GitHub manda un mail: es la alarma de «la app
+# está caída». Ver .github/despertar_la_app.py.
+# Se puede correr a mano desde la pestaña Actions → «Mantener la app despierta» → Run workflow.
+name: Mantener la app despierta
+
+on:
+  schedule:
+    - cron: "7 */4 * * *"     # cada 4 horas (en hora UTC), a los 7 minutos
+  workflow_dispatch:
+
+jobs:
+  despertar:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: .github
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Instalar el navegador
+        run: |
+          pip install playwright==1.63.0
+          python -m playwright install --with-deps chromium
+      - name: Abrir la app
+        run: python .github/despertar_la_app.py

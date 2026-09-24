@@ -102,6 +102,8 @@ import contextlib
 import functools
 import time
 import requests          # se usa en varias funciones; importarlo una vez evita repetirlo
+import sys
+import types
 from datetime import datetime, timedelta
 from urllib.parse import quote
 from openpyxl import load_workbook, Workbook
@@ -112,7 +114,32 @@ from openpyxl import load_workbook, Workbook
 # que no está—, pero si ahí se esconde un bug real, nadie se entera nunca.
 #
 # Con esto quedan anotados. No cambia el comportamiento: el fallback sigue corriendo igual.
-_ULTIMOS_ERRORES = []
+def del_proceso(nombre, crear):
+    """Un objeto que dura lo que dura el PROCESO del servidor, no una pasada del script.
+
+    Streamlit vuelve a ejecutar app.py entero en cada toque, y cada vez en un módulo nuevo:
+    todo lo que se crea a este nivel con «= threading.Lock()» o «= []» es OTRO objeto en cada
+    pasada. Para una constante da igual; para un candado que tiene que ser uno solo, no. Medido
+    con una base con trabajo de fondo pendiente: cada toque largaba otra tanda de fondo, y
+    después de seis toques había **diez corriendo a la vez**, cuando la regla era una. Cada una
+    puede durar diez minutos contra la base: así es como se cae un servidor chico.
+
+    Esto los guarda en un módulo propio adentro de sys.modules, que Streamlit no toca entre
+    pasadas. Tampoco se borra con el «Clear cache» del menú, ni cuando se sube código nuevo sin
+    reiniciar: la tanda que largó el código viejo sigue teniendo el candado, y el nuevo la
+    respeta. dict.setdefault es atómico, así que dos sesiones que llegan juntas se quedan con
+    el mismo objeto."""
+    registro = sys.modules.setdefault("_equivalencias_el_chavo_del_proceso",
+                                      types.ModuleType("_equivalencias_el_chavo_del_proceso"))
+    guardados = registro.__dict__
+    if nombre not in guardados:
+        guardados.setdefault(nombre, crear())
+    return guardados[nombre]
+
+
+# Del proceso y no de la pasada (ver del_proceso): si no, la pantalla que los muestra veía solo
+# los errores de su propia pasada, y los de los hilos de fondo no los veía nunca nadie.
+_ULTIMOS_ERRORES = del_proceso("ultimos_errores", list)
 MAXIMO_ERRORES_ANOTADOS = 150
 
 
@@ -397,6 +424,12 @@ DB_PATH = "equivalencias_app.db"
 # tiempo (así funciona el hosting gratuito). Este candado evita que dos operaciones
 # (por ejemplo una importación larga y una búsqueda de otra persona) se pisen y
 # dejen todo trabado.
+# OJO: este candado es de cada PASADA del script, no del proceso (ver del_proceso()), así que
+# en los hechos ordena solo lo de una misma pasada: dos personas, o la pantalla y el hilo de
+# fondo, tienen cada una el suyo. Lo que de verdad ordena las escrituras entre ellas es SQLite
+# (modo WAL y busy_timeout, en get_connection()). Se dejó así a propósito: hacerlo del proceso
+# abre una traba que hoy no existe —uno con el candado esperando la base, otro con la base
+# esperando el candado— y eso se probaría recién con dos personas a la vez en el servidor.
 db_lock = threading.Lock()
 
 # Subir este número cuando se agreguen WMI nuevos: hace que la lista se vuelva a aplicar una vez
@@ -1040,6 +1073,92 @@ def like_en_descripcion(patron, alias="p"):
     return condicion, [patron, patron]
 
 
+# LA COPIA AUTOMÁTICA VA A UNA RAMA PROPIA, con un solo commit que se reemplaza cada vez.
+# Antes iba a `main`, un commit nuevo por copia. Con 11 MB comprimidos por copia eso son 4 GB por
+# año en el historial del repositorio si se sube una vez por día —y la idea ahora es subirla
+# cada vez que hay cambios—: GitHub recomienda no pasar de 1 GB, y Streamlit clona el repositorio
+# entero en cada arranque. Además cada copia en `main` es un commit que el que sube código tiene
+# que traerse antes de poder subir el suyo. En su rama, reemplazada, pesa siempre una copia sola,
+# y el código no se entera. Como Streamlit clona solo `main`, al arrancar la app la baja de ahí:
+# ver bajar_la_copia_de_github(). Si en los secretos se pone otra rama (`github_rama`), se sube
+# a esa como antes, con un commit por copia: a `main` no se le puede reemplazar el historial.
+RAMA_DE_LA_COPIA = "copia-de-seguridad"
+# Solo para probar: permite apuntar la app a un GitHub de mentira y ver la copia ir y volver
+# sin tocar el de verdad. En el servidor no se define y es el de siempre.
+API_DE_GITHUB = os.environ.get("EQUIVALENCIAS_API_DE_GITHUB", "https://api.github.com")
+ARCHIVO_COPIA_BAJADA = "datos_desde_github.db"
+
+
+def config_github():
+    """Los datos para subir el backup solo. Devuelve None si no están configurados."""
+    try:
+        secretos = secretos_app()
+        token = secretos.get("github_token")
+        repo = secretos.get("github_repo")      # formato: "usuario/repositorio"
+    except Exception as _err:
+        anotar_error("config_github", _err)
+        return None
+    if not token or not repo or "/" not in str(repo):
+        return None
+    return {"token": str(token), "repo": str(repo),
+            "rama": str(secretos.get("github_rama", RAMA_DE_LA_COPIA)),
+            "archivo": str(secretos.get("github_archivo", ARCHIVO_SEMILLA_COMPRIMIDA))}
+
+
+def bajar_la_copia_de_github():
+    """Baja la última copia de la rama de copias y la deja lista para abrir. Devuelve la ruta,
+    o None si no hay copia, no está configurado o algo falla: en ese caso se sigue con la del
+    repositorio, si hay, como siempre.
+
+    Se valida antes de usarla —que abra y tenga productos—, y se escribe a un temporal que se
+    renombra al final: una bajada cortada no puede quedar con el nombre bueno."""
+    cfg = config_github()
+    if not cfg or cfg["rama"] != RAMA_DE_LA_COPIA:
+        return None
+    url = f"{API_DE_GITHUB}/repos/{cfg['repo']}/contents/{cfg['archivo']}"
+    cabeceras = {"Authorization": f"Bearer {cfg['token']}",
+                 # «raw» trae el archivo tal cual, hasta 100 MB; el de siempre corta en 1 MB
+                 "Accept": "application/vnd.github.raw"}
+    bajado = f"{ARCHIVO_COPIA_BAJADA}.{uuid.uuid4().hex}.bajando"
+    abierto = f"{ARCHIVO_COPIA_BAJADA}.{uuid.uuid4().hex}.tmp"
+    try:
+        # Diez segundos para conectar: esto corre al arrancar, y con GitHub caído la app no
+        # puede quedarse colgada esperándolo. Sin copia bajada sigue con la del repositorio.
+        with requests.get(url, headers=cabeceras, params={"ref": cfg["rama"]},
+                          timeout=(10, 60), stream=True) as r:
+            if r.status_code != 200:
+                if r.status_code != 404:       # 404 = todavía no se subió ninguna
+                    anotar_error("bajar_la_copia_de_github", f"GitHub respondió {r.status_code}")
+                return None
+            with open(bajado, "wb") as salida:
+                for pedazo in r.iter_content(1 << 20):
+                    salida.write(pedazo)
+        if cfg["archivo"].endswith(".gz"):
+            with gzip.open(bajado, "rb") as entrada, open(abierto, "wb") as salida:
+                shutil.copyfileobj(entrada, salida)
+        else:
+            os.replace(bajado, abierto)
+        # immutable: solo mirar, sin los archivos de al lado que SQLite crea para una base en
+        # modo WAL (si no, quedaban sueltos con el nombre del temporal).
+        prueba = sqlite3.connect(f"file:{abierto}?mode=ro&immutable=1", uri=True)
+        try:
+            if not prueba.execute("SELECT COUNT(*) FROM productos").fetchone()[0]:
+                return None
+        finally:
+            prueba.close()
+        os.replace(abierto, ARCHIVO_COPIA_BAJADA)
+        return ARCHIVO_COPIA_BAJADA
+    except Exception as _err:
+        anotar_error("bajar_la_copia_de_github", _err)
+        return None
+    finally:
+        for sobra in (bajado, abierto):
+            try:
+                os.remove(sobra)
+            except OSError:
+                pass
+
+
 def _restaurar_desde_semilla(conexion):
     """Streamlit Cloud borra el disco de la app cada vez que se redespliega o se reinicia, así
     que la base de datos se pierde. Los archivos del REPOSITORIO, en cambio, sí sobreviven
@@ -1047,11 +1166,9 @@ def _restaurar_desde_semilla(conexion):
     copia llamada 'datos_iniciales.db', se restaura sola al arrancar.
     Para actualizar esa copia: bajar el backup desde Estadísticas → Backup y config, y subir
     ese archivo al repositorio de GitHub con el nombre 'datos_iniciales.db'. Si está
-    configurada la subida automática, la app la sube sola y comprimida: ver
-    ARCHIVO_SEMILLA_COMPRIMIDA."""
-    semilla = ruta_de_la_semilla()
-    if not semilla:
-        return False
+    configurada la subida automática, la app la sube sola cada vez que hay cambios a la rama
+    copia-de-seguridad, y la baja de ahí al arrancar: ver vigilar_la_copia() y
+    bajar_la_copia_de_github()."""
     try:
         cur = conexion.cursor()
         cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='productos'")
@@ -1059,6 +1176,12 @@ def _restaurar_desde_semilla(conexion):
             cur.execute("SELECT COUNT(*) FROM productos")
             if cur.fetchone()[0] > 0:
                 return False  # ya hay datos cargados: no se toca nada
+        # La de la rama de copias primero: la sube la app sola cada vez que hay cambios, así
+        # que es la más nueva. Se pregunta recién acá, con la base vacía, para no bajar 11 MB
+        # en cada arranque que no los necesita.
+        semilla = bajar_la_copia_de_github() or ruta_de_la_semilla()
+        if not semilla:
+            return False
         origen = sqlite3.connect(semilla)
         origen.backup(conexion)
         origen.close()
@@ -5171,22 +5294,6 @@ def restaurar_backup(archivo_subido):
 
 
 
-def config_github():
-    """Los datos para subir el backup solo. Devuelve None si no están configurados."""
-    try:
-        secretos = secretos_app()
-        token = secretos.get("github_token")
-        repo = secretos.get("github_repo")      # formato: "usuario/repositorio"
-    except Exception as _err:
-        anotar_error("config_github", _err)
-        return None
-    if not token or not repo or "/" not in str(repo):
-        return None
-    return {"token": str(token), "repo": str(repo),
-            "rama": str(secretos.get("github_rama", "main")),
-            "archivo": str(secretos.get("github_archivo", ARCHIVO_SEMILLA_COMPRIMIDA))}
-
-
 def subir_backup_a_github(datos_db, mensaje=""):
     """Sube la copia de la base al repositorio, que es lo único que sobrevive a un reinicio.
 
@@ -5231,7 +5338,7 @@ def _sha_en_github(cfg, url, cabeceras):
         if r.status_code == 200 and r.json().get("sha"):
             return r.json()["sha"]
         carpeta, _, nombre = cfg["archivo"].rpartition("/")
-        r = requests.get(f"https://api.github.com/repos/{cfg['repo']}/contents/{carpeta}",
+        r = requests.get(f"{API_DE_GITHUB}/repos/{cfg['repo']}/contents/{carpeta}",
                          headers=cabeceras, params={"ref": cfg["rama"]}, timeout=20)
         if r.status_code == 200 and isinstance(r.json(), list):
             for entrada in r.json():
@@ -5242,19 +5349,77 @@ def _sha_en_github(cfg, url, cabeceras):
     return None
 
 
+LEEME_DE_LA_RAMA_DE_COPIAS = """Esta rama la escribe sola la app: guarda la ultima copia de la base de datos.
+
+Cada copia REEMPLAZA a la anterior (un solo commit), para que el repositorio no engorde.
+La app la baja sola cuando arranca con el disco vacio. No hace falta tocar nada aca.
+Para bajarla a mano: el archivo de esta rama, descomprimido con cualquier programa de .gz,
+es una base SQLite que se abre con la app (Backup y config -> Restaurar).
+"""
+
+
+def _subir_a_la_rama_de_copias(cfg, datos, mensaje, cabeceras):
+    """Sube la copia como el ÚNICO commit de la rama de copias, reemplazando al anterior.
+
+    Es la API de datos de git en vez de la de archivos: la de archivos solo sabe agregar
+    commits encima. Acá se arma un commit sin padres con el archivo y un LEEME, y la rama se
+    mueve a ese commit a la fuerza. El commit viejo queda sin nadie que lo apunte y GitHub lo
+    limpia solo. Devuelve (ok, código de respuesta, detalle)."""
+    import base64
+    base = f"{API_DE_GITHUB}/repos/{cfg['repo']}/git"
+    r = requests.post(f"{base}/blobs", headers=cabeceras, timeout=120,
+                      json={"content": base64.b64encode(datos).decode(), "encoding": "base64"})
+    if r.status_code != 201:
+        return False, r.status_code, r.text[:200]
+    r = requests.post(f"{base}/trees", headers=cabeceras, timeout=30, json={"tree": [
+        {"path": cfg["archivo"], "mode": "100644", "type": "blob", "sha": r.json()["sha"]},
+        {"path": "LEEME.txt", "mode": "100644", "type": "blob",
+         "content": LEEME_DE_LA_RAMA_DE_COPIAS},
+    ]})
+    if r.status_code != 201:
+        return False, r.status_code, r.text[:200]
+    r = requests.post(f"{base}/commits", headers=cabeceras, timeout=30,
+                      json={"message": mensaje, "tree": r.json()["sha"], "parents": []})
+    if r.status_code != 201:
+        return False, r.status_code, r.text[:200]
+    commit = r.json()["sha"]
+    r = requests.patch(f"{base}/refs/heads/{cfg['rama']}", headers=cabeceras, timeout=30,
+                       json={"sha": commit, "force": True})
+    if r.status_code == 422:        # la rama todavía no existe: la primera copia la crea
+        r = requests.post(f"{base}/refs", headers=cabeceras, timeout=30,
+                          json={"ref": f"refs/heads/{cfg['rama']}", "sha": commit})
+    return r.status_code in (200, 201), r.status_code, r.text[:200]
+
+
 def _subir_backup_a_github(cfg, datos_db, mensaje):
     import base64
-    url = f"https://api.github.com/repos/{cfg['repo']}/contents/{cfg['archivo']}"
+    url = f"{API_DE_GITHUB}/repos/{cfg['repo']}/contents/{cfg['archivo']}"
     cabeceras = {"Authorization": f"Bearer {cfg['token']}",
                  "Accept": "application/vnd.github+json"}
     try:
-        # GitHub exige el sha del archivo que se reemplaza; si no existe todavía, se crea
-        sha = _sha_en_github(cfg, url, cabeceras)
         # Comprimida si el nombre lo dice. Ver ARCHIVO_SEMILLA_COMPRIMIDA.
         contenido = gzip.compress(datos_db, 6) if cfg["archivo"].endswith(".gz") else datos_db
+        mensaje = mensaje or f"Backup automático {datetime.now():%Y-%m-%d %H:%M}"
+        if cfg["rama"] == RAMA_DE_LA_COPIA:
+            ok, codigo, texto_gh = _subir_a_la_rama_de_copias(cfg, contenido, mensaje, cabeceras)
+            if ok:
+                guardar_config("ultimo_backup_github",
+                               datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+                marcar_backup_hecho()
+                return True, (f"Copia subida a {cfg['repo']}, rama «{cfg['rama']}», "
+                              f"como `{cfg['archivo']}`.")
+            if codigo in (401, 403):
+                return False, ("GitHub rechazó el token. Revisá que tenga permiso de escritura "
+                               f"(Contents: read and write) sobre {cfg['repo']}. ({texto_gh})")
+            if codigo == 404:
+                return False, (f"GitHub no encuentra {cfg['repo']}. Revisá el nombre. Si el "
+                               "repo es privado, el token tiene que tener acceso.")
+            return False, f"GitHub respondió {codigo}. {texto_gh}"
 
+        # GitHub exige el sha del archivo que se reemplaza; si no existe todavía, se crea
+        sha = _sha_en_github(cfg, url, cabeceras)
         cuerpo = {
-            "message": mensaje or f"Backup automático {datetime.now():%Y-%m-%d %H:%M}",
+            "message": mensaje,
             "content": base64.b64encode(contenido).decode(),
             "branch": cfg["rama"],
         }
@@ -5303,6 +5468,21 @@ def cuanto_perderias_si_reinicia():
     except sqlite3.OperationalError as _err:
         anotar_error("cuanto_perderias_si_reinicia", _err)
         return None
+
+    # Con la subida automática a la rama de copias andando, lo que se perdería es lo de los
+    # últimos MINUTOS_ENTRE_COPIAS como mucho: vigilar_la_copia() sube cualquier cambio. La
+    # copia de esa rama no está en el disco —la app la baja al arrancar—, así que mirar solo el
+    # archivo del repositorio diría «no hay copia» teniendo una de hace diez minutos.
+    _cfg_gh = config_github()
+    _ultima_gh = obtener_config("ultimo_backup_github", "") if _cfg_gh else ""
+    if _cfg_gh and _cfg_gh["rama"] == RAMA_DE_LA_COPIA and _ultima_gh:
+        try:
+            _fecha_gh = datetime.strptime(_ultima_gh, "%Y-%m-%d %H:%M:%S").strftime("%d/%m/%Y %H:%M")
+        except ValueError:
+            _fecha_gh = _ultima_gh
+        return {"hay_semilla": True, "en_github": True, "productos_ahora": ahora_total,
+                "productos_semilla": ahora_total, "en_riesgo": 0, "equivalencias_en_riesgo": 0,
+                "fecha_semilla": _fecha_gh}
 
     semilla = ruta_de_la_semilla()
     if not semilla:
@@ -5448,25 +5628,7 @@ def tareas_automaticas_del_dia(presupuesto_segundos=6):
     # repuesto. Ahora van en un hilo aparte, donde nadie espera y el tamaño lo elige el usuario.
     # Ver arrancar_tanda_de_fondo().
 
-    # 6. Subir el backup al repositorio, si está configurado. Es lo único que sobrevive a un
-    # reinicio del servidor, y depender de que alguien se acuerde de hacerlo a mano es
-    # exactamente cómo se pierden las bases de datos.
-    if queda_tiempo() and config_github():
-        try:
-            c.execute("SELECT COUNT(*) FROM productos")
-            hay = c.fetchone()[0]
-            riesgo = cuanto_perderias_si_reinicia()
-            # Solo si hay algo nuevo que proteger: subir por subir gasta tiempo y llena el
-            # historial del repositorio de commits iguales.
-            if hay and riesgo and riesgo.get("en_riesgo", 0) > 0:
-                ok, _ = subir_backup_a_github(
-                    generar_backup_sin_fotos(),
-                    f"Backup automático — {hay:,} productos")
-                if ok:
-                    hecho.append("backup subido al repositorio")
-        except Exception as _err:
-            anotar_error("tareas_automaticas_del_dia", _err)
-            pass
+    # 6. La copia a GitHub ya no va acá: ver vigilar_la_copia().
 
     guardar_config("ultimas_tareas_dia", hoy)
     guardar_config("ultimas_tareas_detalle", " · ".join(hecho) if hecho else "nada pendiente")
@@ -9583,11 +9745,24 @@ def invalidar_salud():
     Se llama después de cada acción que cambia los números: importar, unificar duplicadas,
     cortar vínculos, bajar un backup. Sin esto el aviso de arriba seguiría mostrando el
     problema durante tres minutos después de haberlo arreglado, y uno no sabría si funcionó."""
+    # Desde un hilo de fondo (la copia a GitHub) no hay sesión ni pantalla: no hay nada que
+    # invalidar, y tocar st.session_state ahí solo llenaría el registro de errores.
+    if not _hay_pantalla():
+        return
     try:
         st.session_state.pop("_salud_cache", None)
     except Exception as _err:
         anotar_error("invalidar_salud", _err)
         pass
+
+
+def _hay_pantalla():
+    """Si esto corre dibujando una pantalla (y no en un hilo de fondo)."""
+    try:
+        from streamlit.runtime.scriptrunner import get_script_run_ctx
+        return get_script_run_ctx(suppress_warning=True) is not None
+    except Exception:
+        return True
 
 
 def productos_con_vinculos_esperando():
@@ -11619,7 +11794,9 @@ TANDAS_DISPONIBLES = [15, 100, 500, 2000, 10000]
 PRODUCTOS_POR_SUBTANDA = 50
 MINUTOS_MAXIMO_DE_TANDA = 10
 
-_CANDADO_FONDO = threading.Lock()
+# Del proceso, no de la pasada: ver del_proceso(). Con «= threading.Lock()» acá, cada toque
+# traía un candado nuevo y libre, y la regla de «una sola a la vez» no se cumplía nunca.
+_CANDADO_FONDO = del_proceso("candado_de_la_tanda_de_fondo", threading.Lock)
 
 
 def _cupo_de_hoy(clave, objetivo):
@@ -12143,6 +12320,171 @@ def generar_backup_completo():
             anotar_error("generar_backup_completo", _err)
 
 
+def _sacar_las_fotos(destino):
+    """Le saca las fotos a una copia recién hecha (ver generar_backup_sin_fotos())."""
+    destino.execute("UPDATE productos SET imagen_url = NULL, imagen_thumb = NULL, "
+                    "imagen_orb_blob = NULL, imagen_orb_estado = NULL")
+    for _limpieza in ("DELETE FROM producto_fotos",
+                      "UPDATE esquemas SET imagen_blob = NULL",
+                      "UPDATE alias_transferencia SET qr_real_blob = NULL"):
+        try:
+            destino.execute(_limpieza)
+        except sqlite3.OperationalError as _err:
+            # La tabla puede no existir si el backup sale de una base vieja: se sigue.
+            anotar_error("generar_backup_sin_fotos", _err)
+    destino.commit()
+
+
+def copia_para_github(huella_anterior=""):
+    """La copia sin fotos y su huella. Devuelve (huella, datos), y datos=None si la huella es
+    la misma que la anterior: no cambió nada que valga la pena subir.
+
+    Antes se decidía si subir comparando la CANTIDAD de productos con la de la última copia.
+    Aprobar 8.000 equivalencias, cambiar precios, anotar ventas, cargar fichas de autos: nada
+    de eso cambia la cantidad de productos, y nada de eso se subía. La huella es el sha256 de
+    la copia entera, y cualquier cambio la mueve.
+    Menos la tabla de configuración: ahí van las marcas de avance de las tareas de fondo y la
+    fecha de la última copia misma, que cambian solas, y con ellas adentro la copia no quedaría
+    igual nunca. La que se sube sí la lleva completa; solo la huella no la mira.
+    Probado sobre la base real: dos copias seguidas sin cambios dan la misma huella; armar la
+    copia tarda 0,7 s, y comprimirla 1,4 s."""
+    ruta_temporal = _ruta_temporal_de_backup("copia_para_github.db")
+    destino = sqlite3.connect(ruta_temporal)
+    try:
+        with db_lock:
+            conn.backup(destino)
+        _sacar_las_fotos(destino)
+        configuracion = destino.execute("SELECT clave, valor FROM configuracion").fetchall()
+        destino.execute("DELETE FROM configuracion")
+        destino.commit()
+        destino.execute("VACUUM")
+    finally:
+        # La huella se saca con la copia CERRADA. La copia hereda el modo WAL de la base: lo
+        # escrito va primero a un archivo aparte y el principal se pone al día recién al
+        # cerrar (o cuando SQLite decide). Leyéndolo abierto, la misma base daba a veces otra
+        # huella, y se subía una copia idéntica.
+        destino.close()
+    with open(ruta_temporal, "rb") as f:
+        huella = hashlib.sha256(f.read()).hexdigest()
+    if huella == huella_anterior:
+        try:
+            os.remove(ruta_temporal)
+        except OSError as _err:
+            anotar_error("copia_para_github", _err)
+        return huella, None
+    destino = sqlite3.connect(ruta_temporal)
+    try:
+        destino.executemany("INSERT INTO configuracion (clave, valor) VALUES (?, ?)", configuracion)
+        # La copia ya sabe de qué huella es: restaurada, la primera revisión la reconoce como
+        # igual y no la vuelve a subir.
+        destino.executemany(
+            "INSERT OR REPLACE INTO configuracion (clave, valor) VALUES (?, ?)",
+            [("huella_copia_github", huella),
+             ("ultimo_backup_github", datetime.now().strftime("%Y-%m-%d %H:%M:%S")),
+             ("ultimo_backup_github_error", "")])
+        destino.commit()
+        destino.execute("VACUUM")
+        destino.commit()
+    finally:
+        destino.close()
+    try:
+        with open(ruta_temporal, "rb") as f:
+            return huella, f.read()
+    finally:
+        try:
+            os.remove(ruta_temporal)
+        except OSError as _err:
+            anotar_error("copia_para_github", _err)
+
+
+def _ya_hay_copia_en_github(cfg):
+    """Si la rama de copias ya existe. Si no se puede saber, se contesta que sí: del lado
+    seguro, que es no pisar nada."""
+    try:
+        r = requests.get(f"{API_DE_GITHUB}/repos/{cfg['repo']}/git/ref/heads/{cfg['rama']}",
+                         headers={"Authorization": f"Bearer {cfg['token']}",
+                                  "Accept": "application/vnd.github+json"}, timeout=20)
+        return r.status_code != 404
+    except Exception as _err:
+        anotar_error("_ya_hay_copia_en_github", _err)
+        return True
+
+
+def subir_la_copia_si_cambio(aunque_no_haya_cambios=False):
+    """Arma la copia y la sube a GitHub si cambió algo desde la última. Devuelve (ok, mensaje);
+    ok=None quiere decir que no hacía falta."""
+    cfg = config_github()
+    if not cfg:
+        return None, "La subida automática no está configurada."
+    c.execute("SELECT COUNT(*) FROM productos")
+    productos = c.fetchone()[0]
+    # Las dos trabas de abajo son para el día que GitHub no conteste justo cuando la app
+    # arranca: la base arranca vacía (o con la copia vieja del repositorio), y a los quince
+    # minutos el vigía subiría ESO encima de la copia buena. Se perdería todo, y por hacer
+    # justamente lo que tenía que proteger.
+    if not productos:
+        return None, "La base está vacía: no se sube, para no pisar la copia buena."
+    huella_anterior = obtener_config("huella_copia_github", "")
+    if (not aunque_no_haya_cambios and not huella_anterior
+            and cfg["rama"] == RAMA_DE_LA_COPIA and _ya_hay_copia_en_github(cfg)):
+        # Una base que nunca subió copia —no tiene huella— y en GitHub ya hay una: no viene
+        # de ahí. O la app no la pudo bajar al arrancar, o es otra base. No se decide sola.
+        texto = ("En GitHub hay una copia que esta base no reconoce, y no se la reemplaza sola "
+                 "por si la buena es esa: puede que al arrancar no se haya podido bajar. "
+                 "Reiniciá la app (menú ⋮ → Reboot) para que la baje. Si estás seguro de que "
+                 "lo bueno es lo que hay acá, tocá «Subir el backup al repositorio ahora».")
+        guardar_config("ultimo_backup_github_error", f"{datetime.now():%d/%m %H:%M} — {texto}")
+        return False, texto
+    huella, datos = copia_para_github("" if aunque_no_haya_cambios else huella_anterior)
+    if datos is None:
+        return None, "No cambió nada desde la última copia."
+    ok, texto = subir_backup_a_github(datos, f"Copia automática — {productos:,} productos")
+    if ok:
+        guardar_config("huella_copia_github", huella)
+    return ok, texto
+
+
+# Cada cuánto se mira si hay algo nuevo para subir. Armar la copia y compararla cuesta 0,7 s de
+# un hilo aparte; subirla, solo cuando cambió. Es también lo máximo que se puede perder si el
+# servidor se reinicia: lo hecho en los últimos quince minutos.
+MINUTOS_ENTRE_COPIAS = 15
+
+
+def vigilar_la_copia():
+    """Larga el hilo que sube la copia cuando hay cambios. Uno solo por proceso: se llama en
+    cada pasada y casi siempre vuelve enseguida porque ya está corriendo.
+
+    Antes la subida era un paso de las tareas del día: UNA vez por día, el último, dentro de
+    los seis segundos que tienen esas tareas —si los pasos de antes los gastaban, ese día no
+    había copia— y encima subiendo 11 MB mientras alguien esperaba que se dibujara la pantalla.
+    Lo cargado durante el día vivía solo en un disco que se borra al reiniciar."""
+    if not config_github():
+        return False
+    candado = del_proceso("candado_de_la_copia_a_github", threading.Lock)
+    if not candado.acquire(blocking=False):
+        return False
+
+    def correr():
+        try:
+            time.sleep(60)          # que termine de arrancar la app primero
+            while True:
+                try:
+                    subir_la_copia_si_cambio()
+                except Exception as _err:
+                    anotar_error("vigilar_la_copia", _err)
+                time.sleep(MINUTOS_ENTRE_COPIAS * 60)
+        finally:
+            candado.release()
+
+    try:
+        threading.Thread(target=correr, daemon=True, name="copia_a_github").start()
+        return True
+    except RuntimeError as _err:
+        candado.release()
+        anotar_error("vigilar_la_copia", _err)
+        return False
+
+
 def generar_backup_sin_fotos():
     """Copia de la base SIN las fotos. Las fotos son lo que más pesa: con unos 1.000 productos
     con foto el archivo pasa los 100 MB que acepta GitHub, y ahí se pierde la copia de
@@ -12154,17 +12496,7 @@ def generar_backup_sin_fotos():
     try:
         with db_lock:
             conn.backup(destino)
-        destino.execute("UPDATE productos SET imagen_url = NULL, imagen_thumb = NULL, "
-                        "imagen_orb_blob = NULL, imagen_orb_estado = NULL")
-        for _limpieza in ("DELETE FROM producto_fotos",
-                          "UPDATE esquemas SET imagen_blob = NULL",
-                          "UPDATE alias_transferencia SET qr_real_blob = NULL"):
-            try:
-                destino.execute(_limpieza)
-            except sqlite3.OperationalError as _err:
-                # La tabla puede no existir si el backup sale de una base vieja: se sigue.
-                anotar_error("generar_backup_sin_fotos", _err)
-        destino.commit()
+        _sacar_las_fotos(destino)
         destino.execute("VACUUM")   # sin esto el archivo sigue pesando lo mismo
         destino.commit()
     finally:
@@ -21434,6 +21766,12 @@ try:
 except Exception as _err:
     anotar_error("nivel principal", _err)
 
+# La copia a GitHub cuando hay cambios, en su propio hilo. Ver vigilar_la_copia().
+try:
+    vigilar_la_copia()
+except Exception as _err:
+    anotar_error("nivel principal", _err)
+
 _hecho_hoy = st.session_state.pop("_aviso_tareas", None)
 if _hecho_hoy:
     st.caption("🔧 Mantenimiento automático de hoy: " + " · ".join(_hecho_hoy))
@@ -27703,6 +28041,13 @@ if pagina == PAGINAS[4]:
                     f"{_riesgo['productos_ahora']:,}. Si el servidor reinicia, esa diferencia "
                     "se pierde."
                 )
+            elif _riesgo.get("en_github"):
+                st.success(
+                    f"✅ **La copia en GitHub se actualiza sola.** Cada {MINUTOS_ENTRE_COPIAS} "
+                    "minutos la app mira si cambió algo y, si cambió, la sube. Si el servidor se "
+                    f"reinicia, se pierde como mucho lo de los últimos {MINUTOS_ENTRE_COPIAS} "
+                    f"minutos. Última copia subida: {_riesgo['fecha_semilla']}."
+                )
             else:
                 st.success(
                     f"✅ La copia del repositorio está al día ({_riesgo['productos_semilla']:,} "
@@ -27723,8 +28068,7 @@ if pagina == PAGINAS[4]:
                     st.error(f"⚠️ El último intento de subir la copia falló: {_err_gh}")
                 if st.button("☁️ Subir el backup al repositorio ahora", type="primary"):
                     with st.spinner("Armando la copia y subiéndola..."):
-                        _datos = generar_backup_sin_fotos()
-                        _ok, _msg = subir_backup_a_github(_datos)
+                        _ok, _msg = subir_la_copia_si_cambio(aunque_no_haya_cambios=True)
                     if _ok:
                         invalidar_salud()
                         avisar("success", f"☁️ {_msg}")
@@ -27738,23 +28082,28 @@ if pagina == PAGINAS[4]:
                     "```\ngithub_token = \"ghp_tu_token\"\ngithub_repo = \"usuario/repositorio\"\n"
                     "```\n\nEl token se saca en GitHub → Settings → Developer settings → "
                     "Personal access tokens, con permiso de escritura (`Contents: read and "
-                    "write`) sobre ese repositorio.\n\nCon eso configurado aparece un botón "
-                    "para subir la copia de una, y además se sube sola una vez por día. "
+                    "write`) sobre ese repositorio.\n\nCon eso configurado la copia se sube sola "
+                    f"cada vez que hay cambios (se mira cada {MINUTOS_ENTRE_COPIAS} minutos), "
+                    "a una rama aparte, `copia-de-seguridad`, y si el servidor se reinicia la "
+                    "app la baja sola al arrancar. También aparece un botón para subirla ya. "
                     "Mientras no lo configures, hay que hacerlo a mano como hasta ahora."
                 )
 
-            explicar(
-                "Bajar el backup no alcanza: hay que subirlo al repositorio.",
-                "El servidor borra su disco cada vez que la app se reinicia o se "
-                "redespliega. Lo único que sobrevive son los archivos del **repositorio de "
-                "GitHub**, porque son parte del despliegue.\n\nPor eso el backup se restaura "
-                "solo desde un archivo llamado `datos_iniciales.db` que tiene que estar ahí. "
-                "Bajarlo a tu teléfono te sirve a vos, pero **no protege a la app**: hasta que "
-                "ese archivo no esté en GitHub, un reinicio se lleva todo lo cargado desde la "
-                "última vez.\n\n**Los pasos:** bajá el backup de acá abajo → entrá al "
-                "repositorio en GitHub → subí el archivo con el nombre exacto "
-                "`datos_iniciales.db`, reemplazando el que está."
-            )
+            # Con la subida automática andando, esto ya no corresponde: nadie tiene que subir
+            # nada a mano.
+            if not _cfg_gh:
+                explicar(
+                    "Bajar el backup no alcanza: hay que subirlo al repositorio.",
+                    "El servidor borra su disco cada vez que la app se reinicia o se "
+                    "redespliega. Lo único que sobrevive son los archivos del **repositorio de "
+                    "GitHub**, porque son parte del despliegue.\n\nPor eso el backup se restaura "
+                    "solo desde un archivo llamado `datos_iniciales.db` que tiene que estar ahí. "
+                    "Bajarlo a tu teléfono te sirve a vos, pero **no protege a la app**: hasta que "
+                    "ese archivo no esté en GitHub, un reinicio se lleva todo lo cargado desde la "
+                    "última vez.\n\n**Los pasos:** bajá el backup de acá abajo → entrá al "
+                    "repositorio en GitHub → subí el archivo con el nombre exacto "
+                    "`datos_iniciales.db`, reemplazando el que está."
+                )
             st.markdown("---")
 
         if cantidad_fotos:
