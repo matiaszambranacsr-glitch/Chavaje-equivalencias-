@@ -144,6 +144,18 @@ def anotar_error(donde, error):
 st.set_page_config(page_title="Equivalencias El Chavo", page_icon="🔧", layout="wide")
 
 
+@st.cache_resource
+def _actividad_del_mostrador():
+    """Cuándo empezó y cuándo terminó de dibujarse la última pantalla. Ver ceder_al_mostrador().
+    Va acá arriba porque se usa en la línea de abajo, al arrancar cada dibujo."""
+    return {"empezo": 0.0, "termino": 0.0}
+
+
+# Hay alguien esperando esta pantalla: la tarea de fondo le cede el paso hasta que termine de
+# dibujarse (la marca de «terminó» está en la última línea del archivo). Ver ceder_al_mostrador().
+_actividad_del_mostrador()["empezo"] = time.monotonic()
+
+
 # ============================================================
 # MODO DE VISTA (celular / computadora)
 # ============================================================
@@ -3884,14 +3896,22 @@ def codigos_de_barras_mal_cargados():
                  WHERE m.tipo <> 'OEM' AND EXISTS (SELECT 1 FROM productos p WHERE p.marca_id = m.id)""")
     salida = []
     for prov in filas_a_listas(c):
-        c.execute("""SELECT DISTINCT po.codigo_clean AS codigo
-                     FROM productos p JOIN equivalencias e
-                       ON e.producto_a_id = p.id OR e.producto_b_id = p.id
-                     JOIN productos po ON po.id = CASE WHEN e.producto_a_id = p.id
-                                                       THEN e.producto_b_id ELSE e.producto_a_id END
-                     JOIN marcas mo ON mo.id = po.marca_id
-                     WHERE p.marca_id = ? AND mo.tipo = 'OEM' LIMIT 3000""", (prov["marca_id"],))
-        _codigos_oem = [r["codigo"] for r in c.fetchall()]
+        # En UNA fila (group_concat): son hasta 3.000 por lista y esto corre en el chequeo de
+        # salud, o sea en cualquier pantalla cada tres minutos. Fila por fila, mientras trabaja
+        # la tarea de fondo cada una espera su turno para el intérprete y la pantalla de
+        # códigos de barras tardaba 1-2 s. Ver codigos_limpios_desfasados(). Los códigos
+        # limpios no tienen caracteres de control, así que el 31 separa sin ambigüedad.
+        c.execute("""SELECT group_concat(codigo, char(31)) FROM (
+                         SELECT DISTINCT po.codigo_clean AS codigo
+                         FROM productos p JOIN equivalencias e
+                           ON e.producto_a_id = p.id OR e.producto_b_id = p.id
+                         JOIN productos po ON po.id = CASE WHEN e.producto_a_id = p.id
+                                                           THEN e.producto_b_id ELSE e.producto_a_id END
+                         JOIN marcas mo ON mo.id = po.marca_id
+                         WHERE p.marca_id = ? AND mo.tipo = 'OEM' LIMIT 3000)""",
+                  (prov["marca_id"],))
+        _juntos = c.fetchone()[0]
+        _codigos_oem = _juntos.split("\x1f") if _juntos else []
         es_barras, prefijo, _ = columna_es_codigo_de_barras(_codigos_oem)
         if not es_barras:
             continue
@@ -4242,6 +4262,7 @@ def completar_marcas_de_repuesto():
     """Llena productos.marca_repuesto leyendo el final de cada descripción. Devuelve cuántos.
 
     Solo toca los que están vacíos: si alguien la corrigió a mano, no se la pisa."""
+    ceder_al_mostrador()      # antes de la lectura grande. Ver ceder_al_mostrador().
     puestos = 0
     c.execute("""SELECT p.id, p.descripcion FROM productos p
                  JOIN marcas m ON m.id = p.marca_id
@@ -6453,6 +6474,7 @@ def cargar_medidas_de_varios(ids):
     Por qué: analizar un lote pendiente hacía DOS consultas por cada par para comparar medidas.
     Con 400 pares son 800 consultas — por eso el análisis estaba topeado en 400. Precargando
     todo de una, revisar 5.000 pares cuesta casi lo mismo que revisar 400."""
+    ceder_al_mostrador()      # antes de la lectura grande. Ver ceder_al_mostrador().
     medidas = {}
     ids = list({int(i) for i in ids})
     columnas = _columnas_de_medidas_que_existen()
@@ -8776,17 +8798,53 @@ def codigos_limpios_desfasados(limite=None):
     «2339000000000000») y 15 de otras causas. Los primeros son peores de lo que parece: además
     de no encontrarse, «1984E0» guardado como «1984» puede cruzarse con cualquier otra cosa que
     limpie a «1984»."""
-    c.execute("SELECT id, marca_id, codigo_raw, codigo_clean FROM productos WHERE codigo_raw IS NOT NULL")
+    # Corre en CADA clic de «🧹 Limpiar y corregir», y recorría los 70.888 productos pasando
+    # cada código por sanitizar(): 0,5 s en reposo y 7,4 s mientras trabaja la tarea de fondo
+    # —cada fila que entrega SQLite espera su turno para el intérprete—. Dos cambios:
+    #   · UNA fila con todo pegado (group_concat), que es una espera en vez de 70.888. Los
+    #     separadores son los caracteres de control 30 y 31: se los saca del código crudo antes
+    #     de pegar —sobre la base real no hay ninguno, y sanitizar() los descartaría igual— y el
+    #     limpio no los puede tener.
+    #   · lo que dio sanitizar() para cada código crudo se recuerda entre clics. Es exacto y no
+    #     necesita testigo: si un código cambia, es otro código y se calcula de nuevo. Se
+    #     olvida entero si cambia app.py, porque ahí puede haber cambiado sanitizar().
+    c.execute("""SELECT group_concat(id || char(30) || marca_id || char(30)
+                                     || REPLACE(REPLACE(codigo_raw, char(30), ''), char(31), '')
+                                     || char(30) || COALESCE(codigo_clean, ''), char(31))
+                 FROM productos WHERE codigo_raw IS NOT NULL""")
+    juntos = c.fetchone()[0] or ""
+    memoria = _lo_que_dio_sanitizar()
     salida = []
-    for fila in c.fetchall():
-        correcto = sanitizar(fila["codigo_raw"])
-        if correcto and correcto != fila["codigo_clean"]:
-            salida.append({"id": fila["id"], "marca_id": fila["marca_id"],
-                           "raw": fila["codigo_raw"], "guardado": fila["codigo_clean"],
+    for trozo in juntos.split("\x1f") if juntos else ():
+        pid, marca_id, raw, guardado = trozo.split("\x1e")
+        correcto = memoria.get(raw)
+        if correcto is None:
+            correcto = memoria[raw] = sanitizar(raw)
+        if correcto and correcto != guardado:
+            salida.append({"id": int(pid), "marca_id": int(marca_id),
+                           "raw": raw, "guardado": guardado,
                            "correcto": correcto})
             if limite and len(salida) >= limite:
                 break
     return salida
+
+
+@st.cache_resource
+def _memoria_de_sanitizar():
+    return {"version": None, "valores": {}}
+
+
+def _lo_que_dio_sanitizar():
+    """{código crudo: lo que devuelve sanitizar()}, que sobrevive entre clics. Ver
+    codigos_limpios_desfasados(). Se vacía si app.py cambió desde la última vez."""
+    caja = _memoria_de_sanitizar()
+    try:
+        version = os.path.getmtime(globals().get("__file__") or "")
+    except OSError:
+        version = None
+    if caja["version"] != version:
+        caja["version"], caja["valores"] = version, {}
+    return caja["valores"]
 
 
 def reparar_codigos_limpios():
@@ -8953,6 +9011,7 @@ def auditar_equivalencias_cargadas(limite=2000, tope_confianza=35, revisar=None)
     todos cuesta 10,5 s contra 3,9 s: el tope ahorraba seis segundos y escondía 16.774
     vínculos. `revisar=None` es todos; el parámetro queda por si alguna vez hace falta cortar
     a propósito."""
+    ceder_al_mostrador()      # antes de la lectura grande. Ver ceder_al_mostrador().
     # SIN_CONTAR_EL_ESPEJO: acá se juzga el PAR. Con la relación anotada de ida y de vuelta,
     # el mismo vínculo se analizaba dos veces —cuesta el doble—, salía dos veces en la lista
     # de «los peores» y el «se revisaron N vínculos» de la pantalla decía el doble de los que
@@ -8996,6 +9055,7 @@ def auditar_equivalencias_cargadas(limite=2000, tope_confianza=35, revisar=None)
 
     dudosas = []
     for f in filas:
+        ceder_al_mostrador()
         # Un vínculo de un código puente ya aprobado a mano no se vuelve a cuestionar
         if f["a"] in aprobados or f["b"] in aprobados:
             continue
@@ -9101,6 +9161,7 @@ def recalcular_confianzas(limite=20000, progreso=None, solo_faltantes=True):
     Con solo_faltantes se puntúa lo que falta y cada corrida avanza. En False vuelve a puntuar
     todo, que es lo que hace falta cuando cambió la evidencia (ventas nuevas, decisiones nuevas)
     y los puntajes viejos quedaron desactualizados."""
+    ceder_al_mostrador()      # antes de la lectura grande. Ver ceder_al_mostrador().
     filtro = "WHERE e.confianza IS NULL" if solo_faltantes else ""
     c.execute(f"""-- FILA Y NO PAR: esta consulta ESCRIBE la confianza de cada fila. Si la
                   -- relación está anotada de ida y de vuelta hay que puntuar las dos, porque
@@ -9141,6 +9202,7 @@ def recalcular_confianzas(limite=20000, progreso=None, solo_faltantes=True):
 
     valores = []
     for i, f in enumerate(filas):
+        ceder_al_mostrador()
         # Cuál de los dos lados es el código de fábrica que hace de puente (si alguno lo es).
         if f["tipo_a"] == "OEM":
             puente, id_puente = f["cod_a"], f["a"]
@@ -11403,6 +11465,39 @@ def _marca_con_mas_fichas_pendientes(que):
     return dict(fila) if fila else None
 
 
+# CEDERLE EL PASO AL MOSTRADOR. La tarea de fondo y la pantalla que alguien está mirando se
+# reparten el procesador: un hilo de Python no corre en paralelo con otro, se turnan. Medido:
+# «Equivalencias sugeridas» analiza la lista del barrido en 4 s, y con la tarea de fondo al
+# lado —que es justo después de importar, cuando uno entra a revisar— tardaba 19. La tarea de
+# fondo no apura a nadie; la persona sí está esperando.
+# Mientras hay una pantalla dibujándose, el hilo de fondo duerme un rato cada vez que pasa por
+# ceder_al_mostrador(), que está puesto en sus bucles pesados. Con tope: si una pantalla
+# termina en un st.stop() el «terminó» no se anota, y sin tope la tarea de fondo quedaría
+# frenada para siempre por una marca perdida. Pasados SEGUNDOS_DE_PREFERENCIA vuelve a correr.
+# Es una sola marca para todo el proceso, no una por sesión: con dos personas a la vez, que
+# una termine libera a la tarea aunque la otra siga. Se prefirió simple a exacto.
+SEGUNDOS_DE_PREFERENCIA = 20
+_HILO_DE_FONDO = threading.local()
+
+
+def ceder_al_mostrador():
+    """Si esto corre en la tarea de fondo y alguien está esperando una pantalla, espera a que
+    termine de dibujarse (con el tope de SEGUNDOS_DE_PREFERENCIA). En cualquier otro hilo no
+    hace nada, así que se puede llamar desde funciones que también usa la pantalla.
+
+    ESPERA y no «duerme un poco»: la primera versión dormía 50 ms por vuelta y la pantalla de
+    revisión bajó de 19 s a 12,5, no a los 5 que tarda sola. Muestreando el hilo de fondo se vio
+    por qué: seguía leyendo —las 24.774 filas de recalcular_confianzas(), las medidas de todo
+    el catálogo— y una lectura grande compite fila por fila aunque el bucle de después ceda.
+    Por eso también se llama antes de esas lecturas, no solo adentro de los bucles."""
+    if not getattr(_HILO_DE_FONDO, "corriendo", False):
+        return
+    act = _actividad_del_mostrador()
+    while (act["empezo"] > act["termino"]
+           and time.monotonic() - act["empezo"] < SEGUNDOS_DE_PREFERENCIA):
+        time.sleep(0.05)
+
+
 def _trabajo_de_fondo():
     """El cuerpo del hilo. Va alternando fotos y equivalencias hasta gastar el cupo o el reloj.
 
@@ -11614,6 +11709,7 @@ FILAS_ANTES_DE_SOLTAR_EL_CANDADO = 500
 def en_tandas_para_no_trabar(filas):
     """Parte una lista larga en pedazos, para escribir cada uno con el candado tomado aparte."""
     for arranque in range(0, len(filas), FILAS_ANTES_DE_SOLTAR_EL_CANDADO):
+        ceder_al_mostrador()
         yield filas[arranque:arranque + FILAS_ANTES_DE_SOLTAR_EL_CANDADO]
 
 
@@ -11691,6 +11787,7 @@ def arrancar_tanda_de_fondo():
         return False
 
     def correr():
+        _HILO_DE_FONDO.corriendo = True      # ver ceder_al_mostrador()
         try:
             _trabajo_de_fondo()
         except Exception as _err:
@@ -13454,6 +13551,7 @@ def aplicaciones_desde_descripciones(limite=None):
     casi solo en Chevrolet y es un modelo; un BOMBA aparece en todas y no lo es. Si el modelo no
     está confirmado así, la fila no se genera: sin modelo no sirve para buscar por vehículo, y
     con un modelo inventado sirve para equivocarse."""
+    ceder_al_mostrador()      # antes de la lectura grande. Ver ceder_al_mostrador().
     try:
         c.execute("""SELECT p.id, p.codigo_raw, p.codigo_clean, p.descripcion, m.nombre AS marca
                      FROM productos p JOIN marcas m ON m.id = p.marca_id
@@ -13483,6 +13581,7 @@ def aplicaciones_desde_descripciones(limite=None):
     modelos_por_marca = {}
     salida = []
     for f in filas:
+        ceder_al_mostrador()
         # TODAS las marcas que nombra, cada una con SU pedazo de texto. Antes se usaba
         # separar_por_marca_vehiculo(), que devuelve una sola, y eso rompía de las dos maneras
         # posibles sobre la misma descripción:
@@ -14711,6 +14810,7 @@ def firmas_de_todo_el_catalogo(version):
     Guardado ocupa 17 MB y volver a leerlo 0,4 s, así que la segunda corrida pasa de 19 a 4 s.
 
     El testigo va SIN guion bajo a propósito: ver descripciones_por_palabra()."""
+    ceder_al_mostrador()      # antes de la lectura grande. Ver ceder_al_mostrador().
     from collections import defaultdict
     try:
         c.execute("""SELECT p.id, p.codigo_raw, p.codigo_clean, p.descripcion, p.marca_id,
@@ -14723,6 +14823,7 @@ def firmas_de_todo_el_catalogo(version):
         return {}, {}
     indice, ficha = defaultdict(list), {}
     for prod in productos:
+        ceder_al_mostrador()
         firma = firma_de_producto(prod["descripcion"], prod["id"], prod.get("codigo_clean"))
         if not firma or firma["familia"] == "Sin clasificar":
             continue
@@ -14794,6 +14895,7 @@ def sugerir_entre_todas_las_marcas(limite=TOPE_SUGERENCIAS_TODAS, tope_palabra=2
     raras = {p: ids for p, ids in indice.items() if 2 <= len(ids) <= tope_palabra}
     vistos, salida = set(), []
     for ids in raras.values():
+        ceder_al_mostrador()
         for i in range(len(ids)):
             for j in range(i + 1, len(ids)):
                 a, b = (ids[i], ids[j]) if ids[i] < ids[j] else (ids[j], ids[i])
@@ -18792,6 +18894,7 @@ def productos_con_medidas_deducibles(limite=500):
 
     salida = []
     for f in filas:
+        ceder_al_mostrador()
         leidas = medidas_desde_descripcion(f["Descripción"])
         # Solo lo que está VACÍO hoy. Lo cargado a mano no se pisa nunca.
         nuevas = {k: v for k, v in leidas.items() if f.get(k) in (None, "")}
@@ -29855,3 +29958,7 @@ if pagina == PAGINAS[7]:
             }
             resultado, unidad = factores[direccion]
             st.metric("Resultado", f"{resultado:.3f} {unidad}")
+
+# La pantalla terminó de dibujarse: la tarea de fondo puede volver a correr a toda velocidad.
+# Ver ceder_al_mostrador().
+_actividad_del_mostrador()["termino"] = time.monotonic()

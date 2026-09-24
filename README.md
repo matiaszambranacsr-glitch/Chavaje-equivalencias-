@@ -1649,6 +1649,58 @@ El corte es por proveedor (`GROUP BY po.id, mp.id`) y no por total: un código d
 legítimo aparece en varias listas a la vez —es justo para eso que sirve— y contando todo junto
 ese sería el primero de la lista.
 
+## La tarea de fondo le cede el paso a quien está usando la app
+
+Se midieron **todas** las pantallas con la tarea de fondo corriendo, cada una en un proceso
+aparte. Tres se arrastraban:
+
+| con la tarea de fondo corriendo | antes | ahora |
+|---|---|---|
+| «🧹 Limpiar y corregir», cada clic | 7–10 s | **0,4–0,5 s** |
+| «🏷️ Códigos de barras», cada clic | 1–2 s | **0,4 s** |
+| «🔗 Equivalencias sugeridas», la primera vez | 19 s | **6 s** (sola tarda 5) |
+
+- **Limpiar y corregir** pasaba los 70.888 códigos por `sanitizar()` en cada clic, para ver si
+  alguno quedó con el código limpio viejo. Ahora los trae en una sola fila y **recuerda entre
+  clics** lo que dio `sanitizar()` para cada código crudo. Es exacto sin testigo —un código que
+  cambia es otro código y se calcula de nuevo— y se olvida si cambia `app.py`. Mismo resultado
+  sobre la base real y sobre una con 325 códigos rotos a propósito.
+- **Códigos de barras** traía hasta 3.000 códigos por lista, fila por fila, y eso además corre
+  en el chequeo de salud de cualquier pantalla. Ahora en una sola fila. Mismo resultado.
+- **Equivalencias sugeridas** no tenía una consulta mala: la pantalla y la tarea de fondo se
+  **repartían el procesador**. Un hilo de Python no corre en paralelo con otro, se turnan: el
+  análisis solo tarda 4 s, y con la tarea de fondo al lado —que es justo después de importar,
+  cuando uno entra a revisar— tardaba 19.
+
+  Ahora `ceder_al_mostrador()`: mientras hay una pantalla dibujándose, la tarea de fondo **espera
+  a que termine**. Está en sus bucles pesados y antes de sus lecturas grandes. La primera versión
+  solo dormía 50 ms por vuelta y dejaba la pantalla en 12,5 s; muestreando el hilo de fondo se
+  vio que seguía compitiendo con sus lecturas de 24.774 filas, que no pasan por ningún bucle.
+  Tiene un tope de 20 s —si una pantalla termina en un `st.stop()` la marca de «terminó» no se
+  anota, y sin tope la tarea quedaría frenada para siempre—, y es una sola marca para todo el
+  proceso, no una por persona: simple antes que exacto. La tarea de fondo igual termina: a los
+  25 s en vez de 22.
+
+Se probó también pedir los pares de la lista como un solo JSON, porque medida sola esa consulta
+«tardaba 4,2 s» con la tarea de fondo al lado. No cambió nada y se deshizo: el reloj corría
+mientras el hilo esperaba su turno, y lo que había era la competencia por el procesador.
+
+### Un error que el auditor no veía
+
+Escribiendo esto se puso `_actividad_del_mostrador()` arriba de todo del archivo con la función
+definida 11.000 líneas más abajo: **la app no hubiera arrancado**. Se vio leyendo el diff, no
+por el auditor. El control 8j miraba qué funciones usa por dentro lo que corre al arrancar, pero
+no si lo que corre al arrancar está definido más abajo — y en este archivo todo lo que no está
+adentro de una función corre de arriba hacia abajo en cada dibujo, pantallas incluidas. Ahora lo
+mira: sobre el archivo roto encuentra exactamente ese caso, y sobre el de ahora, ninguno.
+
+## Lo que la app se traga en silencio
+
+Se recorrieron todas las pantallas, subpantallas y grupos de mantenimiento, más cinco búsquedas,
+juntando lo que `anotar_error()` registra sin mostrar. Solo 2, los dos de red —este entorno no
+deja salir a buscar el dólar y la inflación—, y los dos ya tienen su freno de 30 minutos antes de
+reintentar. La app está limpia.
+
 ## La página lenta justo cuando se la usa
 
 Se cronometró cada pantalla sobre la base real. Primero, una trampa de la medición misma: el

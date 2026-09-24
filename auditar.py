@@ -857,6 +857,28 @@ for _fn, _linea in _llamadas_al_arrancar:
                      f"'{_usada}' se define acá pero {_fn}() la usa al arrancar (L{_linea}): "
                      "NameError al abrir la app")
 
+# Y la llamada misma. Lo de arriba mira qué usa por dentro la función que corre al arrancar,
+# pero no si ESA función está definida más abajo, y en este archivo todo lo que no está adentro
+# de una función corre de arriba hacia abajo en cada dibujo —las pantallas incluidas—. Pasó:
+# se agregó `_actividad_del_mostrador()["empezo"] = ...` arriba de todo, con la función
+# definida 11.000 líneas más abajo. NameError al abrir la app, y este control no lo veía.
+def _llamadas_fuera_de_funciones(nodo):
+    for _hijo in ast.iter_child_nodes(nodo):
+        if isinstance(_hijo, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef, ast.Lambda)):
+            continue
+        if isinstance(_hijo, ast.Call) and isinstance(_hijo.func, ast.Name):
+            yield _hijo
+        yield from _llamadas_fuera_de_funciones(_hijo)
+
+
+for _llamada in _llamadas_fuera_de_funciones(ARBOL):
+    _def_linea = _defs_por_nombre.get(_llamada.func.id)
+    if _def_linea and _def_linea > _llamada.lineno:
+        reportar("ERROR", _llamada.lineno,
+                 f"'{_llamada.func.id}()' se llama acá, al nivel del módulo, y se define recién "
+                 f"en la línea {_def_linea}: NameError al abrir la app")
+
+
 # ============ 8k. Índices de menú repetidos o faltantes ============
 # El caso real, y me pasó dos veces: se agrega una pestaña al principio de la lista y todos
 # los índices de abajo quedan corridos. Dos ramas con el mismo índice significa que una
