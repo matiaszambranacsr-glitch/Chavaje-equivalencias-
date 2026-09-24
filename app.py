@@ -88,6 +88,9 @@ import sqlite3
 import re
 import io
 import html          # para escapar el texto de la base antes de meterlo en HTML
+import gzip          # la copia del repositorio va comprimida: ver ARCHIVO_SEMILLA_COMPRIMIDA
+import shutil
+import uuid
 import threading
 import unicodedata
 import json
@@ -843,6 +846,48 @@ def mostrar_login_inicial():
 # CONEXIÓN Y ESQUEMA
 # ============================================================
 ARCHIVO_SEMILLA = "datos_iniciales.db"
+# LA COPIA DEL REPOSITORIO VA COMPRIMIDA. GitHub no acepta archivos de más de 100 MB, y la copia
+# sin fotos de la base real ya pesa 60,6 MB —80,8 MB en el viaje, porque la API la manda en
+# base64—: dos o tres listas más y la copia de seguridad deja de subirse justo cuando más hay
+# para proteger. Comprimida pesa 11,2 MB. Se sigue leyendo la de siempre, sin comprimir, si es
+# la única que hay; si están las dos, manda la comprimida, que es la que sube la app.
+ARCHIVO_SEMILLA_COMPRIMIDA = ARCHIVO_SEMILLA + ".gz"
+_SEMILLA_DESCOMPRIMIDA = "datos_iniciales_desde_gz.db"
+
+
+def semilla_del_repositorio():
+    """El archivo de copia que está en el repositorio (el comprimido si está), o None. Es el
+    que tiene la fecha y el peso que importan; para ABRIRLO, ver ruta_de_la_semilla()."""
+    for ruta in (ARCHIVO_SEMILLA_COMPRIMIDA, ARCHIVO_SEMILLA):
+        if os.path.exists(ruta):
+            return ruta
+    return None
+
+
+def ruta_de_la_semilla():
+    """La copia del repositorio lista para abrir con sqlite, o None.
+
+    Si la del repositorio está comprimida se descomprime al lado —una vez, y de nuevo solo si
+    la comprimida es más nueva— escribiendo a un temporal y renombrando: un arranque que se
+    corta a mitad de camino no puede dejar una base a medio escribir con el nombre bueno."""
+    repo = semilla_del_repositorio()
+    if repo != ARCHIVO_SEMILLA_COMPRIMIDA:
+        return repo
+    temporal = f"{_SEMILLA_DESCOMPRIMIDA}.{uuid.uuid4().hex}.tmp"
+    try:
+        if (not os.path.exists(_SEMILLA_DESCOMPRIMIDA)
+                or os.path.getmtime(_SEMILLA_DESCOMPRIMIDA) < os.path.getmtime(repo)):
+            with gzip.open(repo, "rb") as entrada, open(temporal, "wb") as salida:
+                shutil.copyfileobj(entrada, salida)
+            os.replace(temporal, _SEMILLA_DESCOMPRIMIDA)
+        return _SEMILLA_DESCOMPRIMIDA
+    except (OSError, EOFError, gzip.BadGzipFile) as _err:
+        anotar_error("ruta_de_la_semilla", _err)
+        try:
+            os.remove(temporal)       # el que quedó a medio escribir
+        except OSError:
+            pass
+        return ARCHIVO_SEMILLA if os.path.exists(ARCHIVO_SEMILLA) else None
 
 
 # SQLite tiene un tope de variables por consulta: las compilaciones modernas aceptan 32.766,
@@ -941,8 +986,11 @@ def _restaurar_desde_semilla(conexion):
     (son parte del despliegue). Entonces: si la base está vacía y en el repositorio hay una
     copia llamada 'datos_iniciales.db', se restaura sola al arrancar.
     Para actualizar esa copia: bajar el backup desde Estadísticas → Backup y config, y subir
-    ese archivo al repositorio de GitHub con el nombre 'datos_iniciales.db'."""
-    if not os.path.exists(ARCHIVO_SEMILLA):
+    ese archivo al repositorio de GitHub con el nombre 'datos_iniciales.db'. Si está
+    configurada la subida automática, la app la sube sola y comprimida: ver
+    ARCHIVO_SEMILLA_COMPRIMIDA."""
+    semilla = ruta_de_la_semilla()
+    if not semilla:
         return False
     try:
         cur = conexion.cursor()
@@ -951,7 +999,7 @@ def _restaurar_desde_semilla(conexion):
             cur.execute("SELECT COUNT(*) FROM productos")
             if cur.fetchone()[0] > 0:
                 return False  # ya hay datos cargados: no se toca nada
-        origen = sqlite3.connect(ARCHIVO_SEMILLA)
+        origen = sqlite3.connect(semilla)
         origen.backup(conexion)
         origen.close()
         return True
@@ -5076,7 +5124,7 @@ def config_github():
         return None
     return {"token": str(token), "repo": str(repo),
             "rama": str(secretos.get("github_rama", "main")),
-            "archivo": str(secretos.get("github_archivo", ARCHIVO_SEMILLA))}
+            "archivo": str(secretos.get("github_archivo", ARCHIVO_SEMILLA_COMPRIMIDA))}
 
 
 def subir_backup_a_github(datos_db, mensaje=""):
@@ -5097,18 +5145,57 @@ def subir_backup_a_github(datos_db, mensaje=""):
     if not cfg:
         return False, ("Falta configurar `github_token` y `github_repo` en los secretos de "
                        "Streamlit. Sin eso el backup hay que subirlo a mano.")
+    ok, texto = _subir_backup_a_github(cfg, datos_db, mensaje)
+    # Se anota el resultado, sea cual sea. La subida diaria corre sola en
+    # tareas_automaticas_del_dia(), y ahí un fallo no lo veía nadie: la app seguía como si
+    # la copia estuviera, y el aviso de «no hay copia» quedaba igual que siempre, sin decir
+    # que se estaba intentando y fallando. Ver diagnostico_de_salud().
+    guardar_config("ultimo_backup_github_error",
+                   "" if ok else f"{datetime.now():%d/%m %H:%M} — {texto}")
+    return ok, texto
+
+
+def _sha_en_github(cfg, url, cabeceras):
+    """El sha del archivo que ya está en el repositorio, o None si no existe todavía.
+
+    GitHub lo exige para reemplazar un archivo, y pedirlo como se pedía no alcanza con una
+    base de datos: la API de contenidos, con el tipo de respuesta de siempre, devuelve el
+    archivo entero en base64 y solo hasta 1 MB. La copia pesa decenas. El tipo
+    «application/vnd.github.object» devuelve los datos del archivo sin el contenido, y el sha
+    viene igual. Si aun así no aparece, se lista la carpeta: cada entrada trae su sha."""
+    try:
+        r = requests.get(url, headers={**cabeceras, "Accept": "application/vnd.github.object"},
+                         params={"ref": cfg["rama"]}, timeout=20)
+        if r.status_code == 404:
+            return None
+        if r.status_code == 200 and r.json().get("sha"):
+            return r.json()["sha"]
+        carpeta, _, nombre = cfg["archivo"].rpartition("/")
+        r = requests.get(f"https://api.github.com/repos/{cfg['repo']}/contents/{carpeta}",
+                         headers=cabeceras, params={"ref": cfg["rama"]}, timeout=20)
+        if r.status_code == 200 and isinstance(r.json(), list):
+            for entrada in r.json():
+                if entrada.get("name") == nombre:
+                    return entrada.get("sha")
+    except Exception as _err:
+        anotar_error("_sha_en_github", _err)
+    return None
+
+
+def _subir_backup_a_github(cfg, datos_db, mensaje):
     import base64
     url = f"https://api.github.com/repos/{cfg['repo']}/contents/{cfg['archivo']}"
     cabeceras = {"Authorization": f"Bearer {cfg['token']}",
                  "Accept": "application/vnd.github+json"}
     try:
         # GitHub exige el sha del archivo que se reemplaza; si no existe todavía, se crea
-        actual = requests.get(url, headers=cabeceras, params={"ref": cfg["rama"]}, timeout=20)
-        sha = actual.json().get("sha") if actual.status_code == 200 else None
+        sha = _sha_en_github(cfg, url, cabeceras)
+        # Comprimida si el nombre lo dice. Ver ARCHIVO_SEMILLA_COMPRIMIDA.
+        contenido = gzip.compress(datos_db, 6) if cfg["archivo"].endswith(".gz") else datos_db
 
         cuerpo = {
             "message": mensaje or f"Backup automático {datetime.now():%Y-%m-%d %H:%M}",
-            "content": base64.b64encode(datos_db).decode(),
+            "content": base64.b64encode(contenido).decode(),
             "branch": cfg["rama"],
         }
         if sha:
@@ -5157,7 +5244,8 @@ def cuanto_perderias_si_reinicia():
         anotar_error("cuanto_perderias_si_reinicia", _err)
         return None
 
-    if not os.path.exists(ARCHIVO_SEMILLA):
+    semilla = ruta_de_la_semilla()
+    if not semilla:
         # Sin copia en el repositorio se pierde TODO, no cero. Devolver ceros acá escondía
         # justamente el caso más grave.
         return {"hay_semilla": False, "productos_ahora": ahora_total, "productos_semilla": 0,
@@ -5169,7 +5257,7 @@ def cuanto_perderias_si_reinicia():
         c.execute("SELECT COUNT(*) FROM equivalencias")
         eq_ahora = c.fetchone()[0]
 
-        origen = sqlite3.connect(f"file:{ARCHIVO_SEMILLA}?mode=ro", uri=True)
+        origen = sqlite3.connect(f"file:{semilla}?mode=ro", uri=True)
         cur = origen.cursor()
         cur.execute("SELECT COUNT(*) FROM productos")
         en_semilla = cur.fetchone()[0]
@@ -5190,7 +5278,7 @@ def cuanto_perderias_si_reinicia():
         "en_riesgo": max(ahora - en_semilla, 0),
         "equivalencias_en_riesgo": max(eq_ahora - eq_semilla, 0),
         "fecha_semilla": datetime.fromtimestamp(
-            os.path.getmtime(ARCHIVO_SEMILLA)).strftime("%d/%m/%Y"),
+            os.path.getmtime(semilla_del_repositorio())).strftime("%d/%m/%Y"),
     }
 
 
@@ -10143,6 +10231,20 @@ def diagnostico_de_salud():
     except sqlite3.OperationalError as _err:
         anotar_error("diagnostico_de_salud", _err)
         pass
+
+    # La subida automática configurada y FALLANDO. Va antes que «no hay copia» porque dice
+    # algo que ese aviso no: que se está intentando, por qué no anda, y que no hay que ir a
+    # configurar nada sino arreglar lo que dice GitHub. Antes el fallo de la subida diaria no
+    # lo veía nadie.
+    try:
+        _err_gh = obtener_config("ultimo_backup_github_error", "")
+        if _err_gh and config_github():
+            sumar("alto", "La copia automática a GitHub está fallando",
+                  f"La app intenta subir la copia sola y GitHub la rechaza: {_err_gh}. "
+                  "Mientras tanto la copia del repositorio no se actualiza.",
+                  "Estadísticas → Backup y config")
+    except Exception as _err:
+        anotar_error("diagnostico_de_salud/backup_github", _err)
 
     # El número concreto de lo que se perdería. Un aviso genérico se ignora; «perdés 3.412
     # productos» no.
@@ -27393,6 +27495,9 @@ if pagina == PAGINAS[4]:
                 _ult_gh = obtener_config("ultimo_backup_github", "")
                 if _ult_gh:
                     st.caption(f"Última subida automática: {_ult_gh}")
+                _err_gh = obtener_config("ultimo_backup_github_error", "")
+                if _err_gh:
+                    st.error(f"⚠️ El último intento de subir la copia falló: {_err_gh}")
                 if st.button("☁️ Subir el backup al repositorio ahora", type="primary"):
                     with st.spinner("Armando la copia y subiéndola..."):
                         _datos = generar_backup_sin_fotos()
@@ -27525,10 +27630,11 @@ Repetí los 2 pasos cada tanto (una vez por semana, o después de cargar una lis
 Sin ellas el archivo queda chico, y las fotos se vuelven a traer solas desde
 Administrar → Mantenimiento.
         """)
-        if os.path.exists(ARCHIVO_SEMILLA):
+        _en_repo = semilla_del_repositorio()
+        if _en_repo:
             try:
-                marca_tiempo = datetime.fromtimestamp(os.path.getmtime(ARCHIVO_SEMILLA))
-                peso = os.path.getsize(ARCHIVO_SEMILLA) / (1024 * 1024)
+                marca_tiempo = datetime.fromtimestamp(os.path.getmtime(_en_repo))
+                peso = os.path.getsize(_en_repo) / (1024 * 1024)
                 st.success(f"✅ Hay una copia en el repositorio ({peso:,.1f} MB, del {marca_tiempo:%d/%m/%Y}).")
             except Exception as _err:
                 anotar_error("nivel principal", _err)

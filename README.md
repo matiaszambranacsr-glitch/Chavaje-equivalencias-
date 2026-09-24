@@ -1649,6 +1649,46 @@ El corte es por proveedor (`GROUP BY po.id, mp.id`) y no por total: un código d
 legítimo aparece en varias listas a la vez —es justo para eso que sirve— y contando todo junto
 ese sería el primero de la lista.
 
+## La copia de seguridad en GitHub: nunca se hizo, y no hubiera aguantado
+
+**En ninguna rama del repositorio hay ni hubo nunca un `datos_iniciales.db`.** O sea: la subida
+automática a GitHub no está configurada (o nunca anduvo), y los datos de la app publicada viven
+solo en el disco del servidor, que Streamlit Cloud borra al reiniciar. La app lo avisa en rojo
+—«No hay copia en el repositorio. Hoy un reinicio borra TODO»—, pero es fácil acostumbrarse a un
+cartel. **Esto se arregla configurando dos secretos en Streamlit, no con código:** ver «Backup y
+config» en la app.
+
+Revisando el código de la subida para cuando se configure, aparecieron tres problemas:
+
+**1. La copia no iba a entrar.** GitHub no acepta archivos de más de 100 MB. La copia sin fotos de
+la base real pesa **60,6 MB**, y por la API viaja en base64: **80,8 MB**. Dos o tres listas más y
+deja de subirse justo cuando más hay para proteger. Ahora se sube **comprimida**,
+`datos_iniciales.db.gz`: **11,2 MB** en el repositorio, 15 MB en el viaje. Al arrancar, si la
+copia está comprimida se descomprime al lado —a un temporal y después se renombra, para que un
+arranque cortado no deje una base a medio escribir— y se restaura como siempre. Si hay una
+`datos_iniciales.db` vieja sin comprimir, se sigue leyendo cuando es la única; si están las dos,
+manda la comprimida. Probado: restaura los 70.893 productos, prefiere la comprimida, y si la
+comprimida está rota cae a la otra sin romper nada.
+
+**2. La segunda subida iba a fallar.** Para reemplazar un archivo GitHub exige su `sha`, y la app
+lo pedía con el tipo de respuesta de siempre, que devuelve el archivo entero en base64 **solo
+hasta 1 MB**. Con una base de decenas de MB no venía el `sha`, y el reemplazo fallaba con
+«"sha" wasn't supplied»: la primera copia se subía y ninguna más. Ahora se pide con
+`application/vnd.github.object`, que da los datos sin el contenido, y si aun así no aparece se
+lista la carpeta, que trae el `sha` de cada archivo.
+
+Desde este entorno no se puede hablar con GitHub, así que esto se probó contra un **modelo** de la
+API armado con ese comportamiento: con el código anterior la 2ª subida falla, con el de ahora las
+dos andan, y lo que queda en el repositorio se descomprime y abre con los 70.893 productos. Es un
+modelo; si GitHub se comporta distinto, la vía de listar la carpeta cubre el caso igual.
+
+**3. Si fallaba, no se enteraba nadie.** La subida diaria corre sola en
+`tareas_automaticas_del_dia()`, y un fallo ahí no dejaba rastro: la app seguía mostrando el mismo
+«no hay copia» de siempre, sin decir que se estaba intentando y fallando. Ahora cada intento
+anota su resultado, y si falla aparece arriba de todo, en rojo, «La copia automática a GitHub
+está fallando», con lo que dijo GitHub —«GitHub rechazó el token…»—, y también en la pantalla de
+backup.
+
 ## La tarea de fondo le cede el paso a quien está usando la app
 
 Se midieron **todas** las pantallas con la tarea de fondo corriendo, cada una en un proceso

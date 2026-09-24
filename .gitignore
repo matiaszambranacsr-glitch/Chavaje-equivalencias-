@@ -10,3 +10,7 @@ __pycache__/
 !datos_iniciales.db
 *.db-wal
 *.db-shm
+# La copia comprimida (datos_iniciales.db.gz) SÍ va: es la que sube la app sola. Lo que se
+# descomprime de ella al arrancar ya lo tapa el *.db de arriba; esto es el temporal de ese
+# paso, por si un arranque se corta a la mitad. Ver ruta_de_la_semilla() en app.py.
+datos_iniciales_desde_gz.db.*.tmp
