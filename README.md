@@ -1649,6 +1649,55 @@ El corte es por proveedor (`GROUP BY po.id, mp.id`) y no por total: un código d
 legítimo aparece en varias listas a la vez —es justo para eso que sirve— y contando todo junto
 ese sería el primero de la lista.
 
+## La página lenta justo cuando se la usa
+
+Se cronometró cada pantalla sobre la base real. Primero, una trampa de la medición misma: el
+arnés de pruebas de Streamlit vuelve a compilar `app.py` en cada dibujo —29.700 líneas, ~1 s—, y
+el servidor de verdad lo compila **una vez** y lo guarda (`ScriptCache`). Midiendo con la app
+envuelta para sacar ese segundo, casi todas las pantallas abren en **0,2–0,4 s**. Ese «1,4 s por
+clic» que daban las mediciones anteriores no lo sufre nadie.
+
+Lo que sí se sufre es otra cosa: la **tarea de fondo** —la que corre después de cada importación
+y de cada actualización de la app, que es justo cuando alguien la está usando—. Mientras corre,
+cada fila que SQLite le entrega a Python obliga a soltar el intérprete y volver a pedirlo, y el
+hilo de fondo lo tiene ocupado. Una consulta que trae 70.000 filas para quedarse con diez pasa de
+0,2 s a 9 s. Tres de esas estaban en el camino de todos los días:
+
+| con la tarea de fondo corriendo | antes | ahora |
+|---|---|---|
+| «📌 Para pedir», cada clic | 6–10 s | **0,3–0,7 s** |
+| buscar un código que no existe (W712/94) | 3,8–4,1 s | **0,55 s** |
+| buscar 06A905115 | 1,3 s | 0,5 s |
+
+- `variacion_de_precios_por_marca()` traía una fila por cada uno de los 70.888 productos para
+  descartar casi todas: con un solo precio no hay aumento. Ahora trae solo los que tienen dos o
+  más. Mismo resultado, comprobado con 20.000 cambios de precio sintéticos.
+- `codigos_por_tipeo()` —las sugerencias por error de tipeo— traía hasta 7.444 filas completas,
+  con descripción y precio, para devolver diez. Ahora trae id y código en **una sola fila**
+  (`group_concat`), mide la distancia en Python y pide completas solo las que quedan cerca. Los
+  mismos 27.645 candidatos en 504 búsquedas de prueba. Entre empatados —misma distancia, sin
+  stock— el orden lo decidía el plan de SQLite; ahora es alfabético.
+
+Se probó también partir en tandas la escritura de `recalcular_confianzas()`, sospechando del
+candado. No cambió nada (10 s → 8–14 s) y se deshizo: no era el candado.
+
+## «Equivalencias sugeridas» abre en la mitad
+
+La primera vez que se abre analiza la lista entera. Sobre la lista del barrido —8.648 pares— eran
+**9 s**; ahora **5 s**, con el resultado idéntico al de antes en las cuatro listas.
+
+- Los 8.648 pares salen de solo **4.399 productos**, y cada par preguntaba por los dos: sus autos
+  en los catálogos, en las fichas del taller, sus cambios de código y su firma. Ahora se recuerdan
+  **mientras dura el análisis** y se tiran al terminar —guardarlos más obligaría a acordarse de
+  invalidarlos—: de 95.144 consultas a 56.456, y la firma de 17.296 cálculos a 4.399.
+- La señal «📋 Lo confirman N listas distintas» (+20) **no se disparaba nunca**: se contaba con
+  `COUNT(DISTINCT lote)` por par, y la cola tiene clave primaria por par — un par está en una
+  sola lista. Costaba 2 s por análisis. No se la hizo andar: de ~12.700 pares propuestos, 44 los
+  propone más de una fuente, y 30 de esos ya los cuenta `evidencia_cruzada()` como dos métodos
+  que coinciden. Sumarles +20 sería contar dos veces lo mismo.
+- La consulta de al lado armaba un `IN` con todos los productos de la lista sin tandas. Hoy entra
+  (4.399 contra un tope de 32.766), pero no tiene techo.
+
 ## La papelera devolvía el producto sin lo que lo hacía útil
 
 Borrar un producto lo mandaba a la papelera, pero solo la fila del producto. La pantalla lo

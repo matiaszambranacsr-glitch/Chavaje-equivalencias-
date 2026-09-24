@@ -7327,6 +7327,13 @@ def nivel_de_confianza(puntaje):
 
 
 def analizar_lote_pendiente(lote, limite=None, desde=0):
+    """Ver _analizar_lote_pendiente(). Esto solo abre la memoria del análisis: ver
+    recordando_lo_de_cada_producto()."""
+    with recordando_lo_de_cada_producto():
+        return _analizar_lote_pendiente(lote, limite, desde)
+
+
+def _analizar_lote_pendiente(lote, limite=None, desde=0):
     """Revisa los vínculos de una importación y marca los sospechosos. Dos alarmas:
       - Las medidas mecánicas cargadas se contradicen (prueba física en contra).
       - Un mismo código de fábrica termina apuntando a dos productos distintos del MISMO
@@ -7418,17 +7425,20 @@ def analizar_lote_pendiente(lote, limite=None, desde=0):
 
     # ¿Este par aparece en más de una lista? Que dos proveedores independientes digan lo mismo
     # es la mejor confirmación que se puede tener sin mirar la pieza.
+    #
+    # NO SE CALCULA, y no por olvido. Se contaba con COUNT(DISTINCT lote) agrupando por par, pero
+    # la cola tiene clave primaria (producto_a_id, producto_b_id): un par está en UNA lista y el
+    # número daba 1 siempre. La señal «📋 Lo confirman N listas distintas» (+20) no se disparó
+    # nunca, y la consulta costaba 2 s de cada análisis —un IN con los 4.399 productos del
+    # barrido, dos veces—.
+    # Se midió si valía la pena hacerla andar: sobre la base real, de ~12.700 pares propuestos,
+    # 44 los propone más de una fuente, y 30 de esos son barrido + cruce por auto, que
+    # evidencia_cruzada() ya cuenta como dos métodos que coinciden. Sumarles +20 sería contar dos
+    # veces la misma evidencia. Si algún día entra una SEGUNDA lista de proveedor que se pisa con
+    # otra, ahí sí: habría que guardar las fuentes de cada par en una tabla aparte.
     ids = list({f["a"] for f in filas} | {f["b"] for f in filas})
-    confirmaciones = {}
     codigos_con_respaldo = set()
     if ids:
-        marcadores = ",".join("?" * len(ids))
-        c.execute(f"""SELECT producto_a_id, producto_b_id, COUNT(DISTINCT lote) AS n
-                      FROM equivalencias_pendientes
-                      WHERE producto_a_id IN ({marcadores}) AND producto_b_id IN ({marcadores})
-                      GROUP BY producto_a_id, producto_b_id""", ids * 2)
-        for r in c.fetchall():
-            confirmaciones[(r["producto_a_id"], r["producto_b_id"])] = r["n"]
         try:
             # origen <> 'deducida' y esto importa: la señal que alimenta vale +25 y se llama
             # «el catálogo del fabricante respalda este vínculo». Una aplicación DEDUCIDA no
@@ -7437,11 +7447,15 @@ def analizar_lote_pendiente(lote, limite=None, desde=0):
             # misma evidencia, y encima diciéndole al usuario algo que no es cierto.
             # Sobre la base real son 114.673 aplicaciones deducidas: sin este filtro, cargarlas
             # le sumaba 25 a casi todos los vínculos sin que apareciera un dato nuevo.
-            c.execute(f"""SELECT DISTINCT p.codigo_clean FROM productos p
-                          JOIN aplicaciones ap ON ap.codigo_clean = p.codigo_clean
-                          WHERE p.id IN ({marcadores})
-                            AND COALESCE(ap.origen, '') <> 'deducida'""", ids)
-            codigos_con_respaldo = {r["codigo_clean"] for r in c.fetchall()}
+            # En tandas: un IN con todos los productos de la lista entra hoy —4.399 variables
+            # contra un tope de 32.766— pero no tiene techo, y pasado el tope se cae la
+            # pantalla de revisión entera. Ver en_tandas().
+            for _tanda, _marcas in en_tandas(ids):
+                c.execute(f"""SELECT DISTINCT p.codigo_clean FROM productos p
+                              JOIN aplicaciones ap ON ap.codigo_clean = p.codigo_clean
+                              WHERE p.id IN ({_marcas})
+                                AND COALESCE(ap.origen, '') <> 'deducida'""", _tanda)
+                codigos_con_respaldo.update(r["codigo_clean"] for r in c.fetchall())
         except sqlite3.OperationalError as _err:
             anotar_error("analizar_lote_pendiente", _err)
             codigos_con_respaldo = set()
@@ -7517,7 +7531,6 @@ def analizar_lote_pendiente(lote, limite=None, desde=0):
             f.get("desc_a", ""), f.get("desc_b", ""),
             medidas.get(f["a"]), medidas.get(f["b"]),
             f.get("precio_a"), f.get("precio_b"),
-            veces_confirmada=confirmaciones.get((f["a"], f["b"]), 1),
             respaldo_fabricante=(sanitizar(f["cod_a"]) in codigos_con_respaldo
                                   or sanitizar(f["cod_b"]) in codigos_con_respaldo),
             marca_a=f.get("marca_a", ""), marca_b=f.get("marca_b", ""),
@@ -12114,22 +12127,52 @@ def codigos_por_tipeo(clean_code, limite=10):
 
     condiciones = " OR ".join("p.codigo_clean LIKE ?" for _ in pedazos)
     params = [f"%{p}%" for p in pedazos] + [largo - 2, largo + 2, clean_code]
-    c.execute(f"""SELECT p.id AS "ID", p.codigo_raw AS "Codigo", p.descripcion AS "Descripcion",
-                         m.nombre AS "Marca", m.tipo AS "Tipo", p.precio AS "Precio",
-                         p.stock AS "Stock", p.codigo_clean AS "_clean"
-                  FROM productos p JOIN marcas m ON m.id = p.marca_id
+    # EN DOS PASOS: primero solo el id y el código, que es lo único que hace falta para medir la
+    # distancia, y la fila entera recién para los que quedan cerca. Un pedazo corto —«12» de
+    # W71294, «27» de 2711500— aparece en miles de códigos: eran hasta 7.444 filas COMPLETAS,
+    # con descripción y precio, convertidas en diccionarios para quedarse con diez. Sola no se
+    # notaba; mientras corre la tarea de fondo, cada una de esas filas espera su turno para
+    # agarrar el intérprete y una búsqueda sin resultado pasaba de 0,4 s a 4 s.
+    # Y en UNA fila, con group_concat. Cada fila que entrega SQLite obliga a Python a soltar el
+    # intérprete y volver a pedirlo; con la tarea de fondo ocupándolo, cada vuelta espera, y
+    # 3.950 vueltas eran un segundo entero aunque las filas fueran dos números. Una fila, una
+    # espera. Los separadores son los caracteres de control 30 y 31, que un código limpio no
+    # puede tener (sanitizar() deja letras y números).
+    c.execute(f"""SELECT group_concat(p.id || char(30) || p.codigo_clean, char(31))
+                  FROM productos p
                   WHERE ({condiciones})
                     AND LENGTH(p.codigo_clean) BETWEEN ? AND ?
                     AND p.codigo_clean <> ?""", params)
-
-    candidatos = []
-    for fila in filas_a_listas(c):
-        d = _distancia_edicion(clean_code, fila["_clean"])
+    juntos = c.fetchone()[0] or ""
+    cerca = []
+    for trozo in juntos.split("\x1f") if juntos else ():
+        pid, cod = trozo.split("\x1e", 1)
+        d = _distancia_edicion(clean_code, cod)
         if d <= 2:
-            fila["_dist"] = d
-            candidatos.append(fila)
-    # Primero los de un solo carácter de diferencia, y dentro de esos los que tienen stock
-    candidatos.sort(key=lambda f: (f["_dist"], -(f["Stock"] or 0)))
+            cerca.append((int(pid), d))
+    if not cerca:
+        return []
+    completas = {}
+    for tanda, marcas in en_tandas([pid for pid, _d in cerca]):
+        c.execute(f"""SELECT p.id AS "ID", p.codigo_raw AS "Codigo", p.descripcion AS "Descripcion",
+                             m.nombre AS "Marca", m.tipo AS "Tipo", p.precio AS "Precio",
+                             p.stock AS "Stock", p.codigo_clean AS "_clean"
+                      FROM productos p JOIN marcas m ON m.id = p.marca_id
+                      WHERE p.id IN ({marcas})""", tanda)
+        for fila in filas_a_listas(c):
+            completas[fila["ID"]] = fila
+    # En el orden del primer paso, que es el que tenía antes: el sort de abajo es estable y,
+    # con la misma distancia y el mismo stock, desempata por ese orden.
+    candidatos = []
+    for pid, d in cerca:
+        if pid in completas:
+            completas[pid]["_dist"] = d
+            candidatos.append(completas[pid])
+    # Primero los de un solo carácter de diferencia, y dentro de esos los que tienen stock.
+    # El código al final no es cosmético: sin él, entre empatados —misma distancia, sin stock,
+    # que es lo común— el orden era el que se le ocurría a SQLite al recorrer la tabla, y al
+    # cortar en diez quedaban unos u otros según el plan de la consulta.
+    candidatos.sort(key=lambda f: (f["_dist"], -(f["Stock"] or 0), f["Codigo"] or ""))
     return candidatos[:limite]
 
 
@@ -13599,6 +13642,40 @@ def aplicar_aplicaciones_deducidas(filas):
     return len(filas)
 
 
+# LO QUE SE SABE DE CADA PRODUCTO, recordado mientras dura UN análisis.
+# analizar_lote_pendiente() llama a evidencia_cruzada() una vez por par, y ésta pregunta por
+# cada uno de los dos productos sus autos en los catálogos, sus autos en las fichas del taller y
+# sus cambios de código. Pero los pares se repiten productos: la lista del barrido tiene 8.648
+# pares hechos con 4.399 productos. Se hacían 95.144 consultas, 51.888 de ellas repetidas.
+# Vive solo mientras dura el análisis y se tira al terminar: guardarlo más tiempo obligaría a
+# acordarse de invalidarlo cada vez que cambia una aplicación, una ficha o un reemplazo, que es
+# justo el olvido que no se ve. Una por hilo, porque la tarea de fondo analiza por su cuenta.
+_MEMORIA_DEL_ANALISIS = threading.local()
+
+
+@contextlib.contextmanager
+def recordando_lo_de_cada_producto():
+    """Mientras dura el bloque, lo que se pregunta por producto se pregunta una vez sola."""
+    if getattr(_MEMORIA_DEL_ANALISIS, "datos", None) is not None:
+        yield            # ya hay una abierta más afuera: se usa esa
+        return
+    _MEMORIA_DEL_ANALISIS.datos = {}
+    try:
+        yield
+    finally:
+        _MEMORIA_DEL_ANALISIS.datos = None
+
+
+def _recordado(clave, calcular):
+    """calcular() la primera vez; después, lo mismo. Fuera de un análisis, calcula siempre."""
+    datos = getattr(_MEMORIA_DEL_ANALISIS, "datos", None)
+    if datos is None:
+        return calcular()
+    if clave not in datos:
+        datos[clave] = calcular()
+    return datos[clave]
+
+
 def autos_de_todas_las_fuentes(producto_id, codigo_clean, autos_de_la_descripcion):
     """Todos los autos a los que le va un producto, juntando lo que sabe la app.
 
@@ -13612,7 +13689,15 @@ def autos_de_todas_las_fuentes(producto_id, codigo_clean, autos_de_la_descripcio
 
     Juntar las tres hace que dos productos se puedan cruzar aunque sus descripciones no
     compartan ni un modelo."""
-    autos = set(autos_de_la_descripcion or ())
+    return set(autos_de_la_descripcion or ()) | _recordado(
+        ("autos", producto_id, codigo_clean),
+        lambda: _autos_guardados_en_la_base(producto_id, codigo_clean))
+
+
+def _autos_guardados_en_la_base(producto_id, codigo_clean):
+    """Las fuentes 1 y 2 de autos_de_todas_las_fuentes(): lo que dice la base, sin la
+    descripción. Aparte para poder recordarlo durante un análisis."""
+    autos = set()
 
     if codigo_clean:
         try:
@@ -13642,7 +13727,7 @@ def autos_de_todas_las_fuentes(producto_id, codigo_clean, autos_de_la_descripcio
             anotar_error("autos_de_todas_las_fuentes", _err)
             pass
 
-    return autos
+    return frozenset(autos)
 
 
 _RE_CANTIDAD_VIAS = re.compile(
@@ -13650,6 +13735,17 @@ _RE_CANTIDAD_VIAS = re.compile(
 
 
 def firma_de_producto(descripcion, producto_id=None, codigo_clean=None):
+    """Ver _firma_de_producto(). Durante un análisis se calcula una vez por producto: la lista
+    del barrido son 8.648 pares hechos con 4.399 productos, y se calculaba 17.296 veces —4,5 s
+    de los 7,8 que tardaba el análisis—. Ver recordando_lo_de_cada_producto().
+
+    La MISMA firma se devuelve a todos los que la piden, sin copiar: nadie la modifica después
+    de armada —se revisó cada llamada—. Si alguna vez hace falta cambiarle algo, copiarla antes."""
+    return _recordado(("firma", descripcion, producto_id, codigo_clean),
+                      lambda: _firma_de_producto(descripcion, producto_id, codigo_clean))
+
+
+def _firma_de_producto(descripcion, producto_id=None, codigo_clean=None):
     """Saca de una descripción qué pieza es y para qué auto, para poder comparar entre marcas.
 
     Esta es la única forma de vincular dos proveedores que no traen el código de fábrica —que
@@ -16433,15 +16529,29 @@ def variacion_de_precios_por_marca(meses=6, minimo_productos=10):
 
     Se usa la MEDIANA, no el promedio. Un solo precio mal cargado —de esos que llegan con el
     separador de decimales al revés y quedan cien veces más caros— alcanza para inflar un
-    promedio y hacer parecer que un proveedor aumentó 400%. La mediana lo ignora."""
-    c.execute("""SELECT m.nombre AS marca, p.id AS pid,
+    promedio y hacer parecer que un proveedor aumentó 400%. La mediana lo ignora.
+
+    SOLO LOS QUE TIENEN DOS PRECIOS O MÁS, y es lo que hacía lenta la pantalla «Para pedir».
+    Se traía una fila por cada uno de los 70.888 productos para descartar casi todas en Python:
+    sobre la base real, 46.644 productos tienen historial y casi todos con UN precio solo, que
+    no puede ser un aumento. Sola tardaba 0,18 s y no se notaba. Pero cada fila la arma Python,
+    y mientras corre la tarea de fondo —después de cada importación y de cada actualización,
+    que es cuando alguien está usando la app— cada una de las 70.888 espera su turno para
+    agarrar el intérprete: la pantalla pasaba a tardar 9 s por clic. Con un solo precio, el
+    «antes» y el «ahora» son el mismo y el producto se descartaba igual, así que filtrar acá
+    no cambia el resultado: se comprobó con el mismo historial por los dos caminos."""
+    c.execute("""WITH con_cambios AS (SELECT producto_id FROM historial_precios
+                                      GROUP BY producto_id HAVING COUNT(*) >= 2)
+                 SELECT m.nombre AS marca, p.id AS pid,
                         (SELECT hp.precio FROM historial_precios hp
                           WHERE hp.producto_id = p.id AND hp.fecha >= datetime('now', ?)
                           ORDER BY hp.fecha ASC LIMIT 1) AS antes,
                         (SELECT hp.precio FROM historial_precios hp
                           WHERE hp.producto_id = p.id
                           ORDER BY hp.fecha DESC LIMIT 1) AS ahora
-                 FROM productos p JOIN marcas m ON m.id = p.marca_id""",
+                 FROM con_cambios cc
+                 JOIN productos p ON p.id = cc.producto_id
+                 JOIN marcas m ON m.id = p.marca_id""",
               (f"-{int(meses) * 30} days",))
     por_marca = {}
     for r in c.fetchall():
@@ -16590,6 +16700,12 @@ def cadena_de_reemplazos(clean_code, tope=6):
     búsqueda dando vueltas para siempre."""
     if not clean_code:
         return []
+    # Copia de cada paso: lo recordado no se toca desde afuera. Ver _recordado().
+    return [dict(x) for x in _recordado(("reemplazos", clean_code, tope),
+                                        lambda: _cadena_de_reemplazos(clean_code, tope))]
+
+
+def _cadena_de_reemplazos(clean_code, tope):
     cadena, visto, actual = [], {clean_code}, clean_code
     for _ in range(tope):
         try:
