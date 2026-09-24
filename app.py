@@ -256,11 +256,14 @@ html, body, [class*="css"] { font-family: 'Inter', -apple-system, sans-serif; }
    look de pastillas en vez del radio suelto por defecto, para que se sienta como
    un selector de vista, no como un formulario más. */
 .stRadio [role="radiogroup"] { gap: 6px; flex-wrap: wrap; }
-.stRadio label {
+/* [role="radiogroup"] y no «.stRadio label» a secas: así agarraba también el TÍTULO del grupo
+   —«Buscar por:», «Qué tan lejos buscar:»— y lo dibujaba como una opción más, con su pastilla.
+   Se vio en capturas de la app en un celular. */
+.stRadio [role="radiogroup"] label {
   background: var(--bg-panel); border: 1px solid var(--border); border-radius: 999px;
   padding: 5px 14px 5px 10px !important; transition: all 0.15s ease;
 }
-.stRadio label:has(input:checked) { border-color: var(--accent); background: rgba(232, 163, 61, 0.12); }
+.stRadio [role="radiogroup"] label:has(input:checked) { border-color: var(--accent); background: rgba(232, 163, 61, 0.12); }
 
 /* Inputs */
 .stTextInput input, .stNumberInput input, .stTextArea textarea,
@@ -316,14 +319,17 @@ if es_celular():
     }
     [data-testid="stDataFrame"] { font-size: 0.78rem; }
     .app-header h1 { font-size: 1.45rem !important; }
-    .app-header p { font-size: 0.8rem !important; }
+    /* En el celular el encabezado va con el nombre solo: la línea de arriba y el subtítulo
+       ocupaban lo mismo que el nombre y empujaban la caja de búsqueda hacia abajo. */
+    .app-header { padding: 10px 14px !important; margin-bottom: 6px !important; }
+    .app-header__eyebrow, .app-header p { display: none !important; }
     [data-testid="stExpander"] summary { padding: 0.65rem 0.5rem !important; }
     h3 { font-size: 1.1rem !important; }
     /* Navegación en pastillas: compactas para que las 8 secciones entren en pocas filas
        sin comerse la pantalla, y con buen tamaño para tocar con el dedo. */
     .stRadio [role="radiogroup"] { gap: 4px; }
-    .stRadio label { padding: 4px 10px 4px 6px !important; font-size: 0.82rem; }
-    .stRadio label p { font-size: 0.82rem !important; }
+    .stRadio [role="radiogroup"] label { padding: 4px 10px 4px 6px !important; font-size: 0.82rem; }
+    .stRadio [role="radiogroup"] label p { font-size: 0.82rem !important; }
     </style>
     """, unsafe_allow_html=True)
 else:
@@ -17063,6 +17069,22 @@ def solicitar_reposicion(producto_id):
         conn.commit()
 
 
+def anotar_venta_y_avisar(producto_id, termino_pedido, rotulo):
+    """Lo que corre al tocar «Se llevó». Sin el aviso el botón no mostraba nada: en el
+    celular eso invita a tocar de nuevo, y cada toque es otra venta anotada que después
+    pesa en las equivalencias sugeridas como si el cliente hubiera vuelto. Va con
+    st.toast y no con avisar(): avisar() escribe arriba de todo, y en el celular uno está
+    scrolleado abajo, en el resultado; el toast flota sobre lo que se esté mirando."""
+    registrar_venta(producto_id, termino_pedido)
+    st.toast(f"🛒 Anotado: se llevó {rotulo}")
+
+
+def pedir_reposicion_y_avisar(producto_id, rotulo):
+    """Lo mismo para «Pedir»: cada toque suma uno a «veces pedido»."""
+    solicitar_reposicion(producto_id)
+    st.toast(f"📌 {rotulo} quedó en la lista para pedir")
+
+
 def listar_pedidos_reposicion(estado="pendiente"):
     c.execute("""SELECT pr.id AS "ID", p.id AS "ProductoID", p.codigo_raw AS "Codigo",
                  p.descripcion AS "Descripcion", m.nombre AS "Marca", p.stock AS "Stock actual",
@@ -21406,23 +21428,44 @@ if _problemas:
     _resto = [p for p in _problemas if p["nivel"] != "alto"]
 
     if _graves:
-        st.markdown(
-            "<div style='background:rgba(255,75,75,.08);border-left:4px solid #ff4b4b;"
-            "border-radius:6px;padding:.7rem .9rem;margin-bottom:.6rem'>"
-            f"<b>🔴 {len(_graves)} cosa(s) que conviene mirar hoy</b></div>",
-            unsafe_allow_html=True
-        )
-        for _i_p, _p in enumerate(_graves):
-            cS1, cS2 = st.columns([5, 2])
-            cS1.markdown(f"**{_p['titulo']}**  \n<span style='opacity:.75;font-size:.87em'>"
-                          f"{_p['detalle']}</span>", unsafe_allow_html=True)
-            cS2.button("Ir a arreglarlo →", key=f"ir_salud_alto_{_i_p}",
-                        on_click=ir_a_donde_dice_el_aviso, args=(_p["donde"],),
-                        help=_p["donde"])
-            cS2.caption(f"📍 {_p['donde']}")
+        # EN EL CELULAR, PLEGADO. Abierto, cada aviso trae su texto y su botón, y con los seis
+        # de la base real la caja de búsqueda quedaba TRES pantallas más abajo: se vio sacando
+        # capturas de la app en un celular. Quien atiende el mostrador entra a buscar un
+        # código; el aviso sigue arriba de todo, en rojo, con el número, y se abre con un toque.
+        # En la computadora sobra lugar y queda como estaba.
+        if es_celular():
+            _caja_graves = st.expander(
+                f"🔴 {len(_graves)} cosa(s) que conviene mirar hoy"
+                + (f" · 🟡 {len(_resto)} sin apuro" if _resto else ""), expanded=False)
+        else:
+            st.markdown(
+                "<div style='background:rgba(255,75,75,.08);border-left:4px solid #ff4b4b;"
+                "border-radius:6px;padding:.7rem .9rem;margin-bottom:.6rem'>"
+                f"<b>🔴 {len(_graves)} cosa(s) que conviene mirar hoy</b></div>",
+                unsafe_allow_html=True
+            )
+            _caja_graves = st.container()
+        with _caja_graves:
+            for _i_p, _p in enumerate(_graves):
+                cS1, cS2 = st.columns([5, 2])
+                cS1.markdown(f"**{_p['titulo']}**  \n<span style='opacity:.75;font-size:.87em'>"
+                              f"{_p['detalle']}</span>", unsafe_allow_html=True)
+                cS2.button("Ir a arreglarlo →", key=f"ir_salud_alto_{_i_p}",
+                            on_click=ir_a_donde_dice_el_aviso, args=(_p["donde"],),
+                            help=_p["donde"])
+                cS2.caption(f"📍 {_p['donde']}")
 
     if _resto:
-        with st.expander(f"🟡 {len(_resto)} cosa(s) más, sin apuro", expanded=False):
+        # En el celular, con avisos graves, los «sin apuro» van en el MISMO plegable: dos
+        # renglones plegados uno abajo del otro eran otro renglón entre el encabezado y la caja
+        # de búsqueda. Sin graves, o en la computadora, quedan en el suyo como antes.
+        if _graves and es_celular():
+            with _caja_graves:
+                st.markdown("**🟡 Sin apuro**")
+            _caja_resto = _caja_graves
+        else:
+            _caja_resto = st.expander(f"🟡 {len(_resto)} cosa(s) más, sin apuro", expanded=False)
+        with _caja_resto:
             for _i_p, _p in enumerate(_resto):
                 st.markdown(f"**{_p['titulo']}**")
                 st.caption(_p["detalle"])
@@ -21431,9 +21474,12 @@ if _problemas:
                            on_click=ir_a_donde_dice_el_aviso, args=(_p["donde"],),
                            help=_p["donde"])
 
-    if st.button("🔄 Volver a revisar", key="refrescar_salud"):
-        st.session_state.pop("_salud_cache", None)
-        st.rerun()
+    # En el celular va adentro del aviso plegado: suelto era una fila más entre el encabezado y
+    # la caja de búsqueda. Si no hay avisos graves, queda donde estaba.
+    with (_caja_graves if (_graves and es_celular()) else st.container()):
+        if st.button("🔄 Volver a revisar", key="refrescar_salud"):
+            st.session_state.pop("_salud_cache", None)
+            st.rerun()
     st.markdown("")
 
 # Mantenimiento tiene 36 herramientas. Cuatro grupos no alcanzaban: «Calidad y aprendizaje»
@@ -21613,7 +21659,9 @@ pagina = st.session_state["pagina_actual"]
 
 # Debajo de las pastillas, una línea que dice para qué sirve la sección elegida. Es lo que
 # convierte una fila de ocho botones en algo que se entiende sin que nadie te lo explique.
-if PARA_QUE_SIRVE.get(pagina):
+# En el celular, en el buscador no: es la pantalla que se explica sola, y cada renglón arriba de
+# la caja de búsqueda es un renglón que hay que bajar para llegar a ella.
+if PARA_QUE_SIRVE.get(pagina) and not (es_celular() and pagina == PAGINAS[0]):
     st.markdown(
         f"<div style='margin:-.4rem 0 .9rem 0;padding:.45rem .8rem;"
         f"background:rgba(128,128,128,.10);border-radius:6px;font-size:.9em;opacity:.85'>"
@@ -21629,8 +21677,15 @@ mostrar_avisos_pendientes()
 # BUSCADOR
 # ============================================================
 if pagina == PAGINAS[0]:
-    with st.expander("❓ Guía rápida — cómo usar esta app"):
-        st.markdown("""
+    def _guia_y_lo_que_espera_aprobacion():
+        """La guía rápida y el cartel de lo que espera aprobación. En la computadora van arriba,
+        como siempre; en el celular, AL FINAL de la página del buscador. Mirada en un celular
+        de verdad, la caja de búsqueda quedaba tres pantallas abajo: estos dos, los avisos de
+        salud abiertos y el encabezado completo iban antes. Quien atiende el mostrador entra
+        a buscar un código, y el cartel de lo que espera aprobación explica los resultados:
+        abajo de ellos también se entiende."""
+        with st.expander("❓ Guía rápida — cómo usar esta app"):
+            st.markdown("""
 - **🔍 Buscador** — el corazón de la app. Buscá por código (acepta varios separados por coma) o por
   descripción. Los resultados muestran todas las marcas equivalentes, precio, stock y un link directo
   a la ficha del proveedor si lo cargaste.
@@ -21650,17 +21705,25 @@ if pagina == PAGINAS[0]:
 Casi todo lo que edita o borra algo pide la contraseña de administrador la primera vez que lo usás.
         """)
 
-    # Lo que está esperando aprobación se avisa ACÁ, no solo en Estadísticas. Mientras haya
-    # vínculos sin aprobar, la búsqueda no cruza marcas: se busca un código de un proveedor y no
-    # aparecen los equivalentes de los otros. Visto desde el mostrador eso se parece bastante a
-    # «la app no relaciona proveedores», y no había nada en esta pantalla que lo explicara.
-    _esperando = equivalencias_esperando_revision()
-    if _esperando:
-        st.warning(
-            f"🔒 Hay **{_esperando:,} equivalencia(s) esperando aprobación**. Hasta que las "
-            "apruebes no se usan: buscar un código no va a traer los equivalentes de las otras "
-            "marcas. Se aprueban en bloque desde **Estadísticas → 🔗 Equivalencias sugeridas**."
-        )
+        # Lo que está esperando aprobación se avisa ACÁ, no solo en Estadísticas. Mientras haya
+        # vínculos sin aprobar, la búsqueda no cruza marcas: se busca un código de un proveedor y no
+        # aparecen los equivalentes de los otros. Visto desde el mostrador eso se parece bastante a
+        # «la app no relaciona proveedores», y no había nada en esta pantalla que lo explicara.
+        _esperando = equivalencias_esperando_revision()
+        if _esperando and es_celular():
+            # Lo mismo en una línea: en el celular este cartel ocupaba media pantalla justo arriba
+            # de la caja de búsqueda.
+            st.warning(f"🔒 **{_esperando:,} equivalencia(s) esperando aprobación**: todavía no "
+                       "aparecen al buscar. Se aprueban en Estadísticas → 🔗 Equivalencias sugeridas.")
+        elif _esperando:
+            st.warning(
+                f"🔒 Hay **{_esperando:,} equivalencia(s) esperando aprobación**. Hasta que las "
+                "apruebes no se usan: buscar un código no va a traer los equivalentes de las otras "
+                "marcas. Se aprueban en bloque desde **Estadísticas → 🔗 Equivalencias sugeridas**."
+            )
+
+    if not es_celular():
+        _guia_y_lo_que_espera_aprobacion()
 
     # Si se tocó un botón de sugerencia rápida (favorito o búsqueda reciente), precargamos el
     # campo de búsqueda ANTES de crear el widget — si se hace después de creado, Streamlit tira error.
@@ -22729,14 +22792,41 @@ Casi todo lo que edita o borra algo pide la contraseña de administrador la prim
                             "Estadísticas → Equivalencias sugeridas. Si falta stock, 'Pedir' lo manda "
                             "a la lista de reposición."
                         )
-                        for fila_stock in res:
-                            colr1, colr2, colr3 = st.columns([3, 1, 1])
-                            colr1.write(f"{fila_stock['Marca']} - {fila_stock['Codigo']} (stock actual: {fila_stock.get('Stock') if fila_stock.get('Stock') is not None else 's/d'})")
-                            colr2.button("🛒 Se llevó", key=f"vendido_{fila_stock['ID']}_{clean}",
-                                          on_click=registrar_venta, args=(fila_stock["ID"], codigo_individual),
+                        def _rotulo_stock(f):
+                            _s = f.get("Stock")
+                            return (f"{f['Marca']} - {f['Codigo']} "
+                                    f"(stock: {_s if _s is not None else 's/d'})")
+                        # Hasta cinco, un par de botones por resultado: es un toque. Con más, un
+                        # selector y los dos botones una sola vez. Mirado en un celular de verdad,
+                        # una búsqueda de 62 resultados dejaba 124 botones del ancho de la
+                        # pantalla uno abajo del otro, y la página medía 17 pantallas.
+                        if len(res) <= 5:
+                            for fila_stock in res:
+                                colr1, colr2, colr3 = st.columns([3, 1, 1])
+                                colr1.write(_rotulo_stock(fila_stock))
+                                colr2.button("🛒 Se llevó", key=f"vendido_{fila_stock['ID']}_{clean}",
+                                              on_click=anotar_venta_y_avisar,
+                                              args=(fila_stock["ID"], codigo_individual,
+                                                    f"{fila_stock['Marca']} - {fila_stock['Codigo']}"),
+                                              help="Anota la venta para ir descubriendo equivalencias solas")
+                                colr3.button("📌 Pedir", key=f"pedir_repo_{fila_stock['ID']}_{clean}",
+                                              on_click=pedir_reposicion_y_avisar,
+                                              args=(fila_stock["ID"], f"{fila_stock['Marca']} - {fila_stock['Codigo']}"),
+                                              help="Marcar para reposición")
+                        else:
+                            # Se elige por ID y no por el rótulo: dos productos con la misma
+                            # marca, código y stock darían el mismo texto y uno taparía al otro.
+                            _rotulos = {f["ID"]: _rotulo_stock(f) for f in res}
+                            _elegido = st.selectbox(f"¿Cuál? ({len(res)} resultados)",
+                                                    list(_rotulos), format_func=_rotulos.get,
+                                                    key=f"cual_vendido_{clean}")
+                            colr2, colr3 = st.columns(2)
+                            colr2.button("🛒 Se llevó", key=f"vendido_elegido_{clean}",
+                                          on_click=anotar_venta_y_avisar,
+                                          args=(_elegido, codigo_individual, _rotulos[_elegido]),
                                           help="Anota la venta para ir descubriendo equivalencias solas")
-                            colr3.button("📌 Pedir", key=f"pedir_repo_{fila_stock['ID']}_{clean}",
-                                          on_click=solicitar_reposicion, args=(fila_stock["ID"],),
+                            colr3.button("📌 Pedir", key=f"pedir_elegido_{clean}",
+                                          on_click=pedir_reposicion_y_avisar, args=(_elegido, _rotulos[_elegido]),
                                           help="Marcar para reposición")
 
                         # Marcar favoritos / editar precio y stock
@@ -23122,7 +23212,8 @@ Casi todo lo que edita o borra algo pide la contraseña de administrador la prim
                             cv1.write(f"{f['Marca']} - {f['Codigo']} ({precio_txt}, "
                                        f"stock: {f.get('Stock') if f.get('Stock') is not None else 's/d'})")
                             cv2.button("🛒 Se llevó", key=f"vendido_txt_{fila_txt['ID']}_{f['ID']}",
-                                        on_click=registrar_venta, args=(f["ID"], texto_pedido))
+                                        on_click=anotar_venta_y_avisar,
+                                        args=(f["ID"], texto_pedido, f"{f['Marca']} - {f['Codigo']}"))
                 if len(res_texto) > 15:
                     st.caption(f"(mostrando las primeras 15 de {len(res_texto)} — afiná la búsqueda "
                                 "para ver menos resultados)")
@@ -23381,6 +23472,9 @@ Casi todo lo que edita o borra algo pide la contraseña de administrador la prim
                     st.session_state["sugerencia_busqueda"] = fila_fav.get("Codigo") or ""
                     st.rerun()
             st.dataframe(quitar_id(favoritos), width="stretch", hide_index=True)
+
+    if es_celular():
+        _guia_y_lo_que_espera_aprobacion()      # ver la función: en el celular va al final
 
 # ============================================================
 # VINCULAR MANUAL

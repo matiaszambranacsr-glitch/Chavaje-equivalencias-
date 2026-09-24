@@ -1,0 +1,13 @@
+# El diseño de la app es OSCURO: el CSS de app.py (CSS_CUSTOM) pinta el fondo #14171B y el
+# texto claro sin preguntar. Sin esto, Streamlit elegía su tema según el celular, y con el
+# teléfono en modo claro pintaba SUS etiquetas y botones con los colores del tema claro
+# —texto gris oscuro, botones blancos con letra clara— encima de ese fondo oscuro: «Tu
+# nombre:», «➡️ Continuar» y los «Ir a arreglarlo →» casi no se leían. Se vio sacando
+# capturas de la app en un celular simulado en modo claro y en modo oscuro.
+# Los colores son los mismos de CSS_CUSTOM: si se cambia uno, cambiar el otro.
+[theme]
+base = "dark"
+primaryColor = "#E8A33D"
+backgroundColor = "#14171B"
+secondaryBackgroundColor = "#1D2126"
+textColor = "#ECEEF0"

@@ -1649,6 +1649,56 @@ El corte es por proveedor (`GROUP BY po.id, mp.id`) y no por total: un código d
 legítimo aparece en varias listas a la vez —es justo para eso que sirve— y contando todo junto
 ese sería el primero de la lista.
 
+## La app en el celular, mirada en un celular
+
+La app se usa desde el teléfono, en el mostrador. Se sacaron capturas con un celular simulado
+(390 px de ancho, el de un teléfono común) y se midió dónde queda cada cosa. «Pantalla 4,3»
+quiere decir que hay que bajar el dedo tres pantallas y un tercio para llegar.
+
+| en el celular | antes | ahora |
+|---|---|---|
+| dónde está la caja de búsqueda, al abrir | a 2.787 px: **pantalla 4,3** | a 663 px: **pantalla 1,8** |
+| largo de la página, buscando LRSC030120LUCAS (62 resultados) | **17,2 pantallas** | **3,9 pantallas** |
+| con el teléfono en modo claro | etiquetas y botones casi ilegibles | igual que en modo oscuro |
+
+**Con el teléfono en modo claro no se leía.** El diseño de la app es oscuro y su CSS pinta el
+fondo oscuro sin preguntar, pero Streamlit elegía SU tema según el teléfono: en modo claro ponía
+texto gris oscuro y botones blancos encima de ese fondo. «Tu nombre:», «➡️ Continuar» y los «Ir a
+arreglarlo →» casi no se veían. Lo arregla `.streamlit/config.toml`, que fija el tema oscuro
+con los mismos colores del CSS. Si se cambia un color, hay que cambiarlo en los dos lados.
+
+**La caja de búsqueda estaba abajo de todo.** Antes de ella había, en este orden: el encabezado
+con su subtítulo, las alertas de salud abiertas (seis, cada una con su explicación y su botón), el
+«para qué sirve» de la página, la guía rápida y el cartel de lo que espera aprobación. En el
+celular ahora:
+
+- las alertas van plegadas en una sola línea («🔴 6 cosa(s) que conviene mirar hoy · 🟡 …»), y
+  se abren con un toque;
+- el encabezado queda solo con el nombre;
+- el «para qué sirve» no aparece en el buscador, que se entiende solo;
+- la guía y el cartel de pendientes van **debajo** de la búsqueda, y el cartel en una línea.
+
+En la computadora no cambia nada. La pantalla es ancha y todo eso entra sin tapar la búsqueda.
+
+**124 botones para decir qué se llevó el cliente.** Abajo de los resultados, cada uno tenía su
+par «🛒 Se llevó» / «📌 Pedir». En el celular las columnas se apilan, así que con 62 resultados
+eran 124 botones del ancho de la pantalla, uno abajo del otro: 13 de las 17 pantallas. Hasta 5
+resultados sigue igual, que es un toque. Con más aparece un selector «¿Cuál? (62 resultados)» y
+los dos botones una sola vez. El selector elige por ID y no por el texto, porque dos productos con
+la misma marca, código y stock darían el mismo rótulo y uno taparía al otro.
+
+**Tocar «Se llevó» no mostraba nada.** Tampoco «Pedir». La venta se anotaba, pero la pantalla
+no daba ninguna señal, y en el celular eso invita a tocar de nuevo. Cada toque de más es otra venta, que después pesa en
+«Equivalencias sugeridas» como si el cliente hubiera vuelto, y otro «veces pedido» en
+reposición. Ahora aparece un aviso flotante: «🛒 Anotado: se llevó FISPA - LRSC030120LUCAS». Es
+flotante (`st.toast`) y no el `avisar()` de siempre porque `avisar()` escribe arriba de todo, y en
+el celular uno está abajo, mirando el resultado.
+
+**Un detalle del CSS:** las opciones de los grupos de botones redondos (`st.radio`) se dibujan
+como pastillas. La regla era `.stRadio label`, que agarraba también el **título** del grupo, así
+que «Buscar por:» aparecía como una pastilla más, igual que las opciones. Ahora es
+`.stRadio [role="radiogroup"] label`: solo las opciones.
+
 ## Reimportar una lista volvía a mandar a revisión todo lo ya aprobado
 
 Lo más común en la vida real es que un proveedor mande su lista nueva de precios y se la vuelva
