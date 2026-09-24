@@ -1680,6 +1680,20 @@ De paso, el cartel del final decía dos cosas que no eran:
   unidades distintas, y un código repetido en la lista contaba dos veces. Ahora cuenta productos
   distintos: 43.101.
 
+Reimportando también las otras tres listas reales (JL, ILLINOIS y la de MOTORARG) aparecieron
+dos más del mismo tipo:
+
+- Con la de JL, un cartel decía «se cargaron **25.916** productos que no traían código de
+  fábrica» al lado de otro que decía «quedaron cargados **25.912**». El primero sumaba de a código
+  por fila, con los repetidos. Ahora cuenta productos distintos, y descuenta los que en otra fila
+  de la lista sí trajeron código. (Que JL tenga más productos que filas es correcto: hay celdas
+  con dos códigos, «A/B».)
+- Con la de MOTORARG, la vista previa dejaba un `ArrowTypeError` largo en el registro en cada
+  importación: la columna de códigos mezcla números (`140000`) y textos (`150000-R`) y no se puede
+  convertir a tabla tal cual. Streamlit lo arreglaba solo, pero ensuciaba el registro justo donde
+  uno mira cuando algo falla. La vista previa ahora muestra todo como texto, que es además lo que
+  dice la celda. Barriendo las 31 pantallas no aparece en ninguna otra tabla.
+
 ## La copia de seguridad en GitHub: nunca se hizo, y no hubiera aguantado
 
 **En ninguna rama del repositorio hay ni hubo nunca un `datos_iniciales.db`.** O sea: la subida

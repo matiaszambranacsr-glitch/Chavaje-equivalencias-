@@ -23666,7 +23666,12 @@ if pagina == PAGINAS[2]:
             preview_filas = todas_filas[header_row:header_row + 6]
 
             st.write("Vista previa (primeras filas detectadas):")
-            st.dataframe(preview_filas, width="stretch")
+            # Todo como texto: una columna que mezcla números y textos —la de MOTORARG trae
+            # 140000 y 150000-R en la misma— no se puede convertir a tabla tal cual, y
+            # Streamlit dejaba un error largo en el registro en cada importación antes de
+            # arreglarlo solo. Para mirar alcanza, y así se ve exactamente lo que dice la celda.
+            st.dataframe([["" if v is None else str(v) for v in fila] for fila in preview_filas],
+                         width="stretch")
 
             if len(encabezado) < 1:
                 st.error("El archivo no tiene ninguna columna con datos.")
@@ -24104,6 +24109,7 @@ if pagina == PAGINAS[2]:
                     filas_omitidas = []
                     eq_batch = set()  # inserción en lote: se acumulan los pares y se insertan todos juntos al final
                     _ids_de_la_lista = set()   # los productos DISTINTOS que tocó: ver el cartel del final
+                    _ids_con_codigo_de_fabrica = set()
                     progreso = st.progress(0, text="Procesando filas...")
                     total = len(filas_datos)
 
@@ -24270,6 +24276,7 @@ if pagina == PAGINAS[2]:
                             # cada código (los "códigos puente" mostraban 200 donde había 100) y
                             # hacía que el control de precios listara cada par dos veces.
                             # La búsqueda nunca lo notó porque consulta las dos columnas con OR.
+                            _ids_con_codigo_de_fabrica.update(ids_prov)
                             for pid in ids_prov:
                                 for oid in ids_oem:
                                     if pid != oid:
@@ -24454,9 +24461,13 @@ if pagina == PAGINAS[2]:
                             "no están cargados como equivalencias. Andá a Estadísticas → "
                             "🔗 Equivalencias sugeridas para aprobarlos (podés hacerlo en bloque)."
                         )
-                    if cargados_sin_equiv:
+                    # Productos distintos, y sin los que en OTRA fila de la lista sí trajeron código
+                    # de fábrica. Sumaba de a código por fila: con la de JL decía «25.916 sin
+                    # código de fábrica» al lado de «quedaron cargados 25.912 producto(s)».
+                    _sin_codigo = len(_ids_de_la_lista - _ids_con_codigo_de_fabrica)
+                    if _sin_codigo:
                         st.info(
-                            f"📦 Además se cargaron {cargados_sin_equiv} producto(s) que no traían código "
+                            f"📦 Además se cargaron {_sin_codigo:,} producto(s) que no traían código "
                             "de fábrica. Quedan buscables por código y por descripción; les va a aparecer "
                             "la equivalencia sola cuando el mismo código llegue desde la lista de otro "
                             "proveedor, o podés vincularlos a mano desde 'Vincular manual'."
