@@ -1649,6 +1649,64 @@ El corte es por proveedor (`GROUP BY po.id, mp.id`) y no por total: un código d
 legítimo aparece en varias listas a la vez —es justo para eso que sirve— y contando todo junto
 ese sería el primero de la lista.
 
+## Celular o computadora: se elige sola
+
+La vista arrancaba **siempre** en «📱 Celular». El que entraba desde la computadora la tenía que
+cambiar a mano cada vez, porque el selector no se guarda entre visitas. Ahora se elige según el
+navegador: si dice «Mobi» (así se presentan Chrome y Firefox en Android, Safari en iPhone,
+Samsung Internet) es celular, y si no, computadora. Una tablet Android no dice «Mobi» y un iPad
+se presenta como una Mac, así que las dos quedan en vista de computadora, que es lo que les va
+con esa pantalla. Si no se puede saber, queda en celular, como antes. El selector sigue estando
+para cuando no acierte, y una vez tocado manda lo que se eligió.
+
+Probado con los perfiles de navegador reales de iPhone 13, Pixel 7, Galaxy S9+ (celular), Galaxy
+Tab S4, Chrome y Firefox de escritorio (computadora), y cambiándola a mano en el iPhone: sigue
+en computadora después de moverse por la app.
+
+**Una trampa de Streamlit.** La primera versión guardaba lo detectado en
+`st.session_state["modo_vista"]`, que es la clave del selector. En la pantalla de entrada el
+selector todavía no existe, y cargar su clave antes de que exista deja a Streamlit con el valor
+bueno y a la pantalla mostrando la primera opción. En la computadora se veía el CSS de
+computadora con el selector diciendo «Celular», y al primer toque la pantalla le devolvía su
+valor y la vista se daba vuelta sola. Reproducido en una app de diez renglones. Ahora lo
+detectado entra como opción inicial del selector (`index=`), y la clave la escribe solo el
+selector.
+
+## Los botones del celular no eran anchos, aunque el CSS decía que sí
+
+El CSS del celular pedía botones a lo ancho (`.stButton > button { width: 100% }`), pero en esta
+versión de Streamlit el botón está uno o dos niveles más adentro (más todavía si tiene ayuda) y
+la caja de afuera se achica al texto. La regla no agarraba nada: en el celular, «🔍 Buscar
+Equivalencias» medía 169 px de 336. Ahora todos van a lo ancho, que es más fácil de acertar con el
+pulgar. De paso, las métricas van de a dos por renglón en vez de una. En «Equivalencias
+sugeridas» las seis ocupaban una pantalla entera antes de llegar a lo que hay que revisar.
+
+## Revisar los sospechosos: de 315 decisiones a 45
+
+En «Equivalencias sugeridas», los vínculos para revisar se agrupan por motivo, para decidir el
+grupo de una vez. Pero se agrupaba por el **texto entero** de la alarma, y el texto trae el
+dato de cada par: «se diferencian 25 veces» y «40 veces» eran dos motivos, y lo mismo cada
+código ambiguo o cada «DELANTERA+DERECHA vs TRASERA+IZQUIERDA». Además se agrupaba dentro de
+cada página de 10, así que un grupo nunca pasaba de 10. Con los datos reales:
+
+| para revisar todo, de a 10 por página | antes | ahora |
+|---|---|---|
+| ILLINOIS (381 vínculos) | 315 decisiones | **45** |
+| BARRIDO (461) | 205 | **52** |
+| código escrito en la descripción (241) | 85 | **32** |
+
+`tipo_de_alarma()` saca el dato de cada par («💲 Los precios se diferencian 8 veces o más»,
+«📐 NO coinciden: posición»), y la lista se ordena por motivo **antes** de cortar en páginas: primero
+el motivo con el peor vínculo, como antes iba primero el peor vínculo. El título dice «10
+vínculo(s) (de 286 con este motivo)». El detalle no se pierde, porque la vista de a uno lo
+muestra en cada par. Lo que sí cambia la decisión se deja en el motivo y no se junta: los dos
+rubros de «rubros distintos», las dos siglas de «siglas distintas», qué medida no coincide.
+
+De paso, **150 de los 12.668 vínculos mostraban la misma alarma dos veces**: «💲 Los precios se
+diferencian 19 veces» y abajo «💲 los precios se diferencian 19 veces». El precio y los rubros
+los miran dos partes del análisis, cada una con su redacción, y la que evitaba repetir comparaba
+el texto exacto. Ahora son 0. Los puntajes no cambian: la repetida solo se mostraba.
+
 ## La app en el celular, mirada en un celular
 
 La app se usa desde el teléfono, en el mostrador. Se sacaron capturas con un celular simulado

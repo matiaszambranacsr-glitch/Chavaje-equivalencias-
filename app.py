@@ -166,8 +166,41 @@ _actividad_del_mostrador()["empezo"] = time.monotonic()
 # se cambia algo, y terminarían desincronizándose), es la misma app con dos modos de vista.
 # Cada uno acomoda la pantalla distinto: el celular apila las cosas en vertical y usa un
 # selector compacto; la computadora aprovecha el ancho con columnas y pestañas en fila.
+def _el_navegador_es_de_celular():
+    """True si el navegador dice ser de un celular, False si no, None si no se sabe.
+
+    Se mira «Mobi» en el User-Agent, que es lo que recomiendan los que mantienen los
+    navegadores: lo traen Chrome y Firefox en Android, Safari en iPhone, Samsung Internet. Una
+    tablet Android dice «Android» pero no «Mobi», y un iPad dice ser una Mac: las dos quedan
+    en vista de computadora, que es lo que les va con esa pantalla."""
+    try:
+        agente = st.context.headers.get("User-Agent") or ""
+    except Exception:
+        return None
+    if not agente:
+        return None
+    return "Mobi" in agente
+
+
+VISTAS = ["📱 Celular", "💻 Computadora"]
+
+
+def vista_detectada():
+    """La vista que corresponde según el navegador; si no se sabe, celular, como era antes."""
+    return VISTAS[1] if _el_navegador_es_de_celular() is False else VISTAS[0]
+
+
 def es_celular():
-    return st.session_state.get("modo_vista", "📱 Celular") == "📱 Celular"
+    # Al abrir, la vista se elige sola según el navegador. Antes arrancaba SIEMPRE en celular y
+    # el que entraba desde la computadora tenía que cambiarla a mano, cada vez: el selector no
+    # se guarda entre visitas. Sigue estando, por si la detección no acierta: una vez tocado,
+    # manda lo que se eligió.
+    # La detección NO se escribe en st.session_state["modo_vista"]: esa es la clave del
+    # selector, y cargarla antes de que el selector exista (en la pantalla de entrada todavía
+    # no está) deja a Streamlit con el valor bueno y a la pantalla mostrando la primera opción;
+    # al siguiente toque la pantalla le devuelve la suya y la vista se da vuelta sola. Por eso
+    # la detección le llega al selector como opción inicial (index=).
+    return st.session_state.get("modo_vista", vista_detectada()) == VISTAS[0]
 
 
 def cols(pesos, apilar_en_celular=True):
@@ -314,9 +347,27 @@ if es_celular():
     st.markdown("""
     <style>
     .block-container { padding: 0.8rem 0.7rem 3rem 0.7rem !important; max-width: 100% !important; }
-    .stButton > button, .stDownloadButton > button, .stLinkButton > a, .stFormSubmitButton > button {
-      min-height: 2.7rem; width: 100%;
+    /* Botones a lo ancho: más fáciles de acertar con el pulgar, y todos del mismo largo en vez
+       de uno por renglón cada uno de su tamaño. La regla era «.stButton > button», pero en esta
+       versión de Streamlit el botón está uno o dos niveles más adentro (más todavía si tiene
+       ayuda, que lo envuelve en el globito) y la caja de afuera se achica al texto: medido en el
+       celular, «🔍 Buscar Equivalencias» ocupaba 169 px de 336. Nunca se había aplicado. */
+    [data-testid="stElementContainer"]:has(.stButton, .stDownloadButton, .stFormSubmitButton, .stLinkButton),
+    [data-testid="stElementContainer"]:has(.stButton, .stDownloadButton, .stFormSubmitButton, .stLinkButton) > div,
+    .stButton, .stDownloadButton, .stFormSubmitButton, .stLinkButton,
+    .stButton div, .stDownloadButton div, .stFormSubmitButton div, .stLinkButton div {
+      width: 100% !important;
     }
+    .stButton button, .stDownloadButton button, .stLinkButton a, .stFormSubmitButton button {
+      min-height: 2.7rem; width: 100% !important;
+    }
+    /* Las métricas de a dos por renglón. Streamlit apila las columnas en pantallas angostas y
+       cada número quedaba solo, a lo ancho: en «Equivalencias sugeridas» los seis ocupaban una
+       pantalla entera antes de llegar a lo que hay que revisar. */
+    [data-testid="stColumn"]:has(> [data-testid="stVerticalBlock"] > [data-testid="stElementContainer"] > [data-testid="stMetric"]) {
+      min-width: calc(50% - 0.5rem) !important; flex: 1 1 calc(50% - 0.5rem) !important;
+    }
+    [data-testid="stMetricValue"] { font-size: 1.7rem !important; }
     [data-testid="stDataFrame"] { font-size: 0.78rem; }
     .app-header h1 { font-size: 1.45rem !important; }
     /* En el celular el encabezado va con el nombre solo: la línea de arriba y el subtítulo
@@ -7445,6 +7496,35 @@ def nivel_de_confianza(puntaje):
     return "🔴 Casi seguro mal", "descartala salvo que sepas que está bien"
 
 
+def tipo_de_alarma(alarma):
+    """El MOTIVO de una alarma sin el dato de cada par, para agrupar en la pantalla de revisión.
+
+    Se agrupaba por el texto entero, y el texto trae el detalle: «se diferencian 25 veces» y
+    «se diferencian 40 veces» eran dos motivos, igual que cada código ambiguo de ILLINOIS y cada
+    combinación de «DELANTERA+DERECHA vs TRASERA+IZQUIERDA». Con los datos reales, los 461 de
+    BARRIDO daban 93 motivos (48 de un solo vínculo) y los 381 de ILLINOIS, 251.
+    El detalle no se pierde: la vista de a uno lo muestra en cada par. Lo que SÍ cambia la
+    decisión queda en el motivo y no se junta: los dos rubros de «rubros distintos», las dos
+    siglas de «siglas distintas», qué medida es la que no coincide."""
+    if not alarma:
+        return "Sin alarma puntual"
+    if alarma.startswith("💲 Los precios se diferencian"):
+        return "💲 Los precios se diferencian 8 veces o más"
+    m = re.match(r"📐 NO coinciden: (.*)", alarma)
+    if m:
+        medidas = [p.split(":")[0].strip() for p in m.group(1).split(";")]
+        return "📐 NO coinciden: " + " y ".join(medidas)
+    m = re.match(r"⚠️ El código .+? apunta a más de un producto de (.+?) — ", alarma)
+    if m:
+        return (f"⚠️ Un código que apunta a más de un producto de {m.group(1)} — alguno de los "
+                "dos está mal cargado")
+    if alarma.startswith("🧯 «") and "no es un código de fábrica" in alarma:
+        return "🧯 Lo que se tomó como código de fábrica es un modelo, una medida o un año"
+    if alarma.startswith("🚫 Código ") and " parece una " in alarma:
+        return "🚫 Uno de los dos códigos parece una medida o una especificación"
+    return alarma
+
+
 def analizar_lote_pendiente(lote, limite=None, desde=0):
     """Ver _analizar_lote_pendiente(). Esto solo abre la memoria del análisis: ver
     recordando_lo_de_cada_producto()."""
@@ -7734,8 +7814,15 @@ def _analizar_lote_pendiente(lote, limite=None, desde=0):
             a_favor, vetos, veredicto = [], [], ""
         if vetos:
             puntaje = min(puntaje, 15.0)
+            # El precio y los rubros los miran las dos: las señales de arriba y
+            # evidencia_cruzada(), cada una con su redacción («Los precios se diferencian 19
+            # veces» y «los precios se diferencian 19 veces»). Comparando el texto exacto
+            # pasaban las dos, y 150 de los 12.668 vínculos de la base real mostraban la misma
+            # alarma dos veces seguidas. Esas dos se reconocen por el emoji; las demás no, porque
+            # otro 📐 o otro 🚫 sí puede decir algo distinto.
+            _ya_dichas = {a.split()[0] for a in alarmas if a.startswith(("💲", "🧩"))}
             for v in vetos:
-                if v not in alarmas:
+                if v not in alarmas and v.split()[0] not in _ya_dichas:
                     alarmas.append(v)
         elif len(a_favor) >= 3:
             puntaje = max(puntaje, 90.0)
@@ -21270,9 +21357,9 @@ if es_admin() or es_operador_o_admin() or st.session_state.get("nivel_usuario") 
     etiquetas_nivel = {"admin": "administrador", "operador": "operador", "mecanico": "mecánico"}
     etiqueta_nivel = etiquetas_nivel.get(st.session_state.get("nivel_usuario"), "administrador")
     col_estado.caption(f"🔓 Sesión de {etiqueta_nivel} activa ({nombre_sesion}).")
-    col_modo.selectbox("Vista:", ["📱 Celular", "💻 Computadora"], key="modo_vista",
+    col_modo.selectbox("Vista:", VISTAS, index=VISTAS.index(vista_detectada()), key="modo_vista",
                         label_visibility="collapsed",
-                        help="Acomoda la pantalla según el dispositivo desde el que estés entrando.")
+                        help="Se elige sola según desde dónde entres. Cambiala si no acertó.")
     if col_salir.button("Salir"):
         st.session_state.nivel_usuario = None
         st.session_state.admin_nombre = None
@@ -21281,9 +21368,9 @@ if es_admin() or es_operador_o_admin() or st.session_state.get("nivel_usuario") 
 else:
     col_estado, col_modo = st.columns([3, 1.4])
     col_estado.caption(f"👤 Usando como: {obtener_usuario_actual()}")
-    col_modo.selectbox("Vista:", ["📱 Celular", "💻 Computadora"], key="modo_vista",
+    col_modo.selectbox("Vista:", VISTAS, index=VISTAS.index(vista_detectada()), key="modo_vista",
                         label_visibility="collapsed",
-                        help="Acomoda la pantalla según el dispositivo desde el que estés entrando.")
+                        help="Se elige sola según desde dónde entres. Cambiala si no acertó.")
 
 if st.session_state.get("nivel_usuario") == "mecanico":
     mostrar_portal_mecanico()
@@ -28667,21 +28754,37 @@ Administrar → Mantenimiento.
                 else:
                     pagina_sosp = 1
                 desde = (int(pagina_sosp) - 1) * por_pagina
-                pagina_actual = sospechosas[desde:desde + por_pagina]
 
                 # Agrupados por MOTIVO, no uno debajo del otro. Cuando 40 vínculos fallan por lo
                 # mismo —"«1S» es demasiado corto"— repetir la explicación 40 veces obliga a
                 # scrollear y a decidir 40 veces algo que es una sola decisión. Agrupados, se lee
                 # el motivo una vez y se resuelve el grupo entero.
+                # Y ordenados por motivo ANTES de cortar en páginas: si no, cada página de 10
+                # traía de todo un poco y agrupar dentro de ella no juntaba casi nada. Primero
+                # el motivo con el peor vínculo, como antes iba primero el peor vínculo. Con los
+                # datos reales, de a 10: ILLINOIS pasa de 315 decisiones a 45, BARRIDO de 205
+                # a 52. El tamaño de la página sigue siendo el que eligió el que revisa.
+                def _tipo(x):
+                    return tipo_de_alarma(x["alarmas"][0] if x["alarmas"] else "")
+                _peor_del_tipo, _total_del_tipo = {}, {}
+                for x in sospechosas:
+                    _t = _tipo(x)
+                    _peor_del_tipo[_t] = min(_peor_del_tipo.get(_t, 100), x["confianza"])
+                    _total_del_tipo[_t] = _total_del_tipo.get(_t, 0) + 1
+                _por_tipo = sorted(sospechosas, key=lambda x: (_peor_del_tipo[_tipo(x)], _tipo(x),
+                                                                x["confianza"]))
+                pagina_actual = _por_tipo[desde:desde + por_pagina]
+
                 por_motivo = {}
                 for s in pagina_actual:
-                    clave = s["alarmas"][0] if s["alarmas"] else "Sin alarma puntual"
-                    por_motivo.setdefault(clave, []).append(s)
+                    por_motivo.setdefault(_tipo(s), []).append(s)
 
-                for motivo, items in sorted(por_motivo.items(), key=lambda x: -len(x[1])):
+                for motivo, items in por_motivo.items():
                     peor_grupo = min(x["confianza"] for x in items)
                     icono = "🔴" if peor_grupo < 30 else "🟠" if peor_grupo < 55 else "🟡"
-                    st.markdown(f"{icono} **{motivo}** — {len(items)} vínculo(s)")
+                    _de_cuantos = (f" (de {_total_del_tipo[motivo]} con este motivo)"
+                                   if _total_del_tipo[motivo] > len(items) else "")
+                    st.markdown(f"{icono} **{motivo}** — {len(items)} vínculo(s){_de_cuantos}")
 
                     pares_grupo = []
                     for x in items:
@@ -28701,9 +28804,11 @@ Administrar → Mantenimiento.
                         for s in items:
                             st.markdown(f"**{s['marca_a']} {s['cod_a']} ↔ "
                                          f"{s['marca_b']} {s['cod_b']}** · {s['confianza']:.0f}/100")
-                            # Solo las alarmas ADICIONALES: la del título ya se leyó arriba
-                            for alarma in s["alarmas"][1:]:
-                                st.caption(f"   {alarma}")
+                            # La del título ya se leyó arriba; si el título es el motivo sin
+                            # el detalle («espesor» y no «espesor: 3 vs 5»), el detalle va acá.
+                            for i_al, alarma in enumerate(s["alarmas"]):
+                                if i_al or alarma != motivo:
+                                    st.caption(f"   {alarma}")
                             sb1, sb2 = st.columns(2)
                             sb1.button("✅ Igual es correcto", key=f"apr_sosp_{s['a']}_{s['b']}",
                                         on_click=aprobar_pendientes,
