@@ -56,6 +56,13 @@ def main():
         pagina = navegador.new_page()
         pagina.goto(URL, wait_until="domcontentloaded", timeout=120_000)
         pagina.wait_for_timeout(8_000)
+        if "errors/not_found" in pagina.url:
+            # Streamlit contesta lo mismo para las dos cosas, así que no se puede saber cuál es.
+            print(f"Streamlit dice que no hay acceso a {URL} o que no existe. O la app es "
+                  "privada (en Streamlit: Share → que la pueda ver cualquiera), o la dirección "
+                  "es otra (cambiarla en la variable URL_DE_LA_APP del repositorio).")
+            navegador.close()
+            sys.exit(1)
         # Botón o enlace: el cartel de Streamlit cambió de forma más de una vez.
         boton = pagina.locator("button, a").filter(
             has_text=re.compile(r"get this app back up|wake (it|the app) (back )?up", re.I))
