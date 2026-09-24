@@ -33,13 +33,32 @@ def se_ve_la_app(pagina):
     return False
 
 
+def contar_lo_que_se_ve(pagina):
+    """Cuando falla, qué había en la pantalla: sin esto el error dice «no apareció» y nada
+    más, y no hay forma de saber si era un cartel nuevo, un pedido de login o la app rota.
+    La captura queda en los archivos de la corrida (Actions → la corrida → Artifacts)."""
+    try:
+        print("Título:", pagina.title(), "| dirección:", pagina.url)
+        for marco in pagina.frames:
+            try:
+                texto = marco.locator("body").inner_text(timeout=5_000)
+            except Exception as error:
+                texto = f"(no se pudo leer: {error})"
+            print(f"--- marco {marco.url}\n{texto[:1500]}")
+        pagina.screenshot(path="lo_que_se_vio.png", full_page=True)
+    except Exception as error:
+        print("No se pudo mirar la página:", error)
+
+
 def main():
     with sync_playwright() as p:
         navegador = p.chromium.launch()
         pagina = navegador.new_page()
         pagina.goto(URL, wait_until="domcontentloaded", timeout=120_000)
         pagina.wait_for_timeout(8_000)
-        boton = pagina.get_by_role("button", name=re.compile("get this app back up", re.I))
+        # Botón o enlace: el cartel de Streamlit cambió de forma más de una vez.
+        boton = pagina.locator("button, a").filter(
+            has_text=re.compile(r"get this app back up|wake (it|the app) (back )?up", re.I))
         if boton.count():
             print("La app estaba dormida: despertándola.")
             boton.first.click()
@@ -48,6 +67,7 @@ def main():
             pagina.wait_for_timeout(5_000)
         if not se_ve_la_app(pagina):
             print(f"La app no apareció en {MINUTOS_PARA_ARRANCAR} minutos: {URL}")
+            contar_lo_que_se_ve(pagina)
             navegador.close()
             sys.exit(1)
         # Un rato con la sesión abierta, como una visita de verdad.

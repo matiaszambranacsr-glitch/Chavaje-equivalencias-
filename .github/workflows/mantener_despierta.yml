@@ -14,10 +14,10 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           sparse-checkout: .github
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
       - name: Instalar el navegador
@@ -26,3 +26,10 @@ jobs:
           python -m playwright install --with-deps chromium
       - name: Abrir la app
         run: python .github/despertar_la_app.py
+      - name: Guardar la captura si falló
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: lo-que-se-vio
+          path: lo_que_se_vio.png
+          if-no-files-found: ignore
