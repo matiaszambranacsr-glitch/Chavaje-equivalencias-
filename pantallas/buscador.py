@@ -6,8 +6,8 @@
 # ============================================================
 if pagina == PAGINAS[0]:
     def _guia_y_lo_que_espera_aprobacion():
-        """La guía rápida y el cartel de lo que espera aprobación. En la computadora van arriba,
-        como siempre; en el celular, AL FINAL de la página del buscador. Mirada en un celular
+        """La guía rápida y el cartel de lo que espera aprobación. Para el administrador en la
+        computadora van arriba, como siempre; para los demás, AL FINAL de la página del buscador. Mirada en un celular
         de verdad, la caja de búsqueda quedaba tres pantallas abajo: estos dos, los avisos de
         salud abiertos y el encabezado completo iban antes. Quien atiende el mostrador entra
         a buscar un código, y el cartel de lo que espera aprobación explica los resultados:
@@ -50,7 +50,13 @@ Casi todo lo que edita o borra algo pide la contraseña de administrador la prim
                 "marcas. Se aprueban en bloque desde **Estadísticas → 🔗 Equivalencias sugeridas**."
             )
 
-    if not es_celular():
+    # Arriba de la caja de búsqueda solo para el administrador en la computadora: para quien
+    # atiende el mostrador —en el celular o en la computadora— van al final. Medido en una
+    # computadora de 1366x768: con los avisos de salud abiertos, esto y el encabezado, la caja
+    # quedaba en la tercera pantalla; el cartel de «esperando aprobación» es una tarea que un
+    # empleado no puede hacer.
+    _guia_arriba = not es_celular() and es_admin()
+    if _guia_arriba:
         _guia_y_lo_que_espera_aprobacion()
 
     # Si se tocó un botón de sugerencia rápida (favorito o búsqueda reciente), precargamos el
@@ -1819,5 +1825,5 @@ Casi todo lo que edita o borra algo pide la contraseña de administrador la prim
                     st.rerun()
             st.dataframe(quitar_id(favoritos), width="stretch", hide_index=True)
 
-    if es_celular():
-        _guia_y_lo_que_espera_aprobacion()      # ver la función: en el celular va al final
+    if not _guia_arriba:
+        _guia_y_lo_que_espera_aprobacion()      # ver la función: para el mostrador va al final

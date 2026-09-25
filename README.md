@@ -1655,6 +1655,38 @@ El corte es por proveedor (`GROUP BY po.id, mp.id`) y no por total: un código d
 legítimo aparece en varias listas a la vez —es justo para eso que sirve— y contando todo junto
 ese sería el primero de la lista.
 
+## La computadora del mostrador, y lo que la app se tragaba
+
+**La caja de búsqueda en la computadora.** La mitad del equipo va a usar la app desde una
+computadora, y hasta acá se había acomodado el celular. En una de 1366x768, un empleado veía
+arriba de la caja de búsqueda los 7 avisos de salud abiertos, cada uno con su explicación y su
+botón, y el cartel de «12.747 equivalencias esperando aprobación». Son tareas de
+administración: «Ir a arreglarlo» le pide la clave, y aprobar no puede. Ahora, para quien no es
+administrador, los avisos van plegados en una línea (como en el celular) y la guía y el cartel
+van al final de la página. El administrador en la computadora los sigue viendo abiertos arriba,
+que es quien los arregla.
+
+| computadora 1366x768, empleado | antes | ahora |
+|---|---|---|
+| dónde está la caja de búsqueda | a 1.646 px (tercera pantalla) | **a 663 px (se ve al entrar)** |
+
+**Lo que la app se traga.** La app anota en memoria los errores que decide ignorar (hay 142
+lugares así). Corriendo los dos barridos en un mismo proceso y leyendo ese registro al final
+aparecieron 148 «no such column: espesor» en el análisis de sugeridas. Era de la prueba: el
+barrido cambia el archivo de la base entre sesiones y la lógica, que ahora se carga una vez,
+seguía con las columnas de la base anterior. En la app de verdad la base solo se cambia con
+`restaurar_backup()`, que corre las migraciones y limpia ese caché. Con el barrido arreglado
+(cada base nueva limpia los cachés, como un servidor nuevo) quedan 2 errores, los dos de
+internet: las consultas del dólar y la inflación, bloqueadas desde el entorno de prueba. Esas
+ya tienen 4 s de tope y no reintentan por 30 minutos si fallan.
+
+**Probado y sin cambios:** cada búsqueda cuesta 0,2 s de procesador y tarda 0,5 s. Entrar a la
+app cuesta 0,4 s de procesador (1,4 s al principio de estas rondas). Lo que queda es de
+Streamlit: servirle los archivos de la página a cada navegador nuevo (un celular de verdad los
+guarda de una visita a la otra) y, una vez por arranque, cargar la librería de gráficos. El
+análisis de sugeridas ocupa unos 25 MB por persona que lo abre; como lo abre quien revisa, no
+quien atiende, no hace falta compartirlo.
+
 ## Escribir a la vez: importaciones, stock y confirmaciones
 
 **Importar mientras los demás trabajan.** 8 personas en el celular buscando y tocando «Se

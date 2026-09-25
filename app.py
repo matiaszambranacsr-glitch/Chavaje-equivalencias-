@@ -383,13 +383,17 @@ if _problemas:
     _graves = [p for p in _problemas if p["nivel"] == "alto"]
     _resto = [p for p in _problemas if p["nivel"] != "alto"]
 
+    # PLEGADO en el celular, y en la computadora para quien no es administrador. Abierto, cada
+    # aviso trae su texto y su botón: con los seis de la base real la caja de búsqueda quedaba
+    # TRES pantallas más abajo en el celular, y casi DOS en una computadora de 1366x768 —se vio
+    # sacando capturas de las dos—. Quien atiende el mostrador entra a buscar un código, y estos
+    # avisos son tareas de administración: «Ir a arreglarlo» igual le pide la clave. Siguen
+    # arriba de todo, en rojo, con el número, y se abren con un toque. Abiertos quedan solo para
+    # el administrador en la computadora, que es quien los arregla.
+    _plegar_avisos = es_celular() or not es_admin()
+
     if _graves:
-        # EN EL CELULAR, PLEGADO. Abierto, cada aviso trae su texto y su botón, y con los seis
-        # de la base real la caja de búsqueda quedaba TRES pantallas más abajo: se vio sacando
-        # capturas de la app en un celular. Quien atiende el mostrador entra a buscar un
-        # código; el aviso sigue arriba de todo, en rojo, con el número, y se abre con un toque.
-        # En la computadora sobra lugar y queda como estaba.
-        if es_celular():
+        if _plegar_avisos:
             _caja_graves = st.expander(
                 f"🔴 {len(_graves)} cosa(s) que conviene mirar hoy"
                 + (f" · 🟡 {len(_resto)} sin apuro" if _resto else ""), expanded=False)
@@ -412,10 +416,10 @@ if _problemas:
                 cS2.caption(f"📍 {_p['donde']}")
 
     if _resto:
-        # En el celular, con avisos graves, los «sin apuro» van en el MISMO plegable: dos
-        # renglones plegados uno abajo del otro eran otro renglón entre el encabezado y la caja
-        # de búsqueda. Sin graves, o en la computadora, quedan en el suyo como antes.
-        if _graves and es_celular():
+        # Plegados, con avisos graves, los «sin apuro» van en el MISMO plegable: dos renglones
+        # plegados uno abajo del otro eran otro renglón entre el encabezado y la caja de
+        # búsqueda. Sin graves, o abiertos, quedan en el suyo como antes.
+        if _graves and _plegar_avisos:
             with _caja_graves:
                 st.markdown("**🟡 Sin apuro**")
             _caja_resto = _caja_graves
@@ -432,7 +436,7 @@ if _problemas:
 
     # En el celular va adentro del aviso plegado: suelto era una fila más entre el encabezado y
     # la caja de búsqueda. Si no hay avisos graves, queda donde estaba.
-    with (_caja_graves if (_graves and es_celular()) else st.container()):
+    with (_caja_graves if (_graves and _plegar_avisos) else st.container()):
         if st.button("🔄 Volver a revisar", key="refrescar_salud"):
             invalidar_salud()
             st.rerun()
