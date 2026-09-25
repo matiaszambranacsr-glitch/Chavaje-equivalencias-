@@ -1649,6 +1649,49 @@ El corte es por proveedor (`GROUP BY po.id, mp.id`) y no por total: un código d
 legítimo aparece en varias listas a la vez —es justo para eso que sirve— y contando todo junto
 ese sería el primero de la lista.
 
+## 15 personas a la vez
+
+La app la van a usar 10 a 15 personas a la vez, la mitad desde la computadora y la mitad
+desde el celular. Hasta acá todo se había probado de a una. `carga.py` (en las herramientas de
+prueba) abre N navegadores al mismo tiempo, mitad computadora y mitad iPhone, cada uno entra
+con su nombre, busca 5 códigos reales y cambia de pantalla. El servidor corre en **un solo
+procesador** (`taskset`), como el de Streamlit gratis.
+
+Con una persona: entrar 3,6 s, buscar 0,6 s. Con 15 llegando juntas, antes:
+
+| 15 a la vez, un procesador | antes | ahora |
+|---|---|---|
+| procesador que gasta el servidor | 34,9 s | **21,1 s** |
+| entrar, mediana / peor | 16,0 s / 26,8 s | 12,9 s / 18,9 s |
+| buscar, mediana / peor | 0,7 s / 4,9 s | 0,8 s / 2,3 s |
+| memoria, pico | 365 MB | 365 MB |
+| errores | 0 | 0 |
+
+Lo que se encontró muestreando el servidor con `py-spy` mientras entraban:
+
+- **El chequeo de salud se calculaba una vez por persona.** Estaba en la sesión de cada uno,
+  pero da lo mismo para todos: no mira quién pregunta. Era el 40% del procesador al entrar.
+  Ahora `salud_compartida()` lo calcula la primera persona; las que llegan mientras tanto
+  esperan ese resultado, y las siguientes lo reciben hecho por tres minutos o hasta que alguien
+  cambie algo, como antes.
+- **Streamlit corría el recolector de basura completo después de cada toque de cada persona**
+  (`runner.postScriptGC`). Era la cuarta parte del procesador. Se apagó en
+  `.streamlit/config.toml`. La memoria se midió en tres rondas seguidas de 15 personas, con y
+  sin: 321 y 316 MB en uso al final, casi igual. Python lo corre solo cuando hace falta.
+
+Lo que queda, y por qué no se tocó todavía:
+
+- **22%: el vigilante de archivos de Streamlit.** Después de cada toque recorre todos los
+  módulos cargados. Se puede apagar, pero es lo que usa Streamlit Cloud para tomar el código
+  nuevo cuando se sube un cambio, y eso no se puede probar desde acá.
+- **10%: rearmar las funciones guardadas (`@st.cache_data`) en cada toque.** Streamlit vuelve
+  a ejecutar el archivo entero, y cada vez les calcula la huella leyendo su código. Se va a
+  resolver partiendo la app en módulos que se importan una sola vez.
+
+«Entrar» sigue siendo lo más lento cuando llegan todos juntos: 15 personas en tres segundos es
+una cola sobre un solo procesador. Espaciadas, como se llega a un negocio, cada una tarda lo
+que tardaría sola.
+
 ## Lo que se perdía en cada toque, un control para que no vuelva, y detalles de pantalla
 
 **Las sesiones con los proveedores.** `_SESIONES_DE_CATALOGO` y `_SESIONES_PORTAL` guardaban

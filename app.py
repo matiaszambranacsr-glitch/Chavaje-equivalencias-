@@ -9757,24 +9757,33 @@ def invalidar_salud():
     Se llama después de cada acción que cambia los números: importar, unificar duplicadas,
     cortar vínculos, bajar un backup. Sin esto el aviso de arriba seguiría mostrando el
     problema durante tres minutos después de haberlo arreglado, y uno no sabría si funcionó."""
-    # Desde un hilo de fondo (la copia a GitHub) no hay sesión ni pantalla: no hay nada que
-    # invalidar, y tocar st.session_state ahí solo llenaría el registro de errores.
-    if not _hay_pantalla():
-        return
-    try:
-        st.session_state.pop("_salud_cache", None)
-    except Exception as _err:
-        anotar_error("invalidar_salud", _err)
-        pass
+    # El chequeo es uno solo para todos (ver salud_compartida()): se tira el de todos.
+    del_proceso("salud_compartida", dict).clear()
 
 
-def _hay_pantalla():
-    """Si esto corre dibujando una pantalla (y no en un hilo de fondo)."""
-    try:
-        from streamlit.runtime.scriptrunner import get_script_run_ctx
-        return get_script_run_ctx(suppress_warning=True) is not None
-    except Exception:
-        return True
+def salud_compartida(segundos_de_vida=180):
+    """El chequeo de salud, UNO para todos los que usan la app. Devuelve {momento, problemas}.
+
+    Se guardaba en la sesión de cada uno, así que cada persona que entraba lo calculaba de cero,
+    aunque da lo mismo para todos: no mira quién pregunta. Medido con 15 personas entrando a la
+    vez contra un servidor de un solo procesador, como el de Streamlit gratis: cada entrada
+    costaba 1,4 s de procesador y el 40% era esto. Llegando juntas, la última esperaba 25 s.
+    Ahora lo calcula la primera; las que llegan mientras tanto esperan ESE resultado en vez de
+    calcular el suyo, y las siguientes lo reciben hecho hasta que pasen los tres minutos de
+    siempre o alguien cambie algo (invalidar_salud())."""
+    guardado = del_proceso("salud_compartida", dict)
+    candado = del_proceso("candado_de_la_salud_compartida", threading.Lock)
+    vigente = lambda: guardado.get("momento") and time.time() - guardado["momento"] <= segundos_de_vida
+    if not vigente():
+        with candado:
+            if not vigente():         # otro la calculó mientras se esperaba el candado
+                try:
+                    problemas = diagnostico_de_salud()
+                except Exception as _err:
+                    anotar_error("salud_compartida", _err)
+                    problemas = []
+                guardado.update(momento=time.time(), problemas=problemas)
+    return dict(guardado)
 
 
 def productos_con_vinculos_esperando():
@@ -21813,15 +21822,7 @@ try:
 except Exception as _err:
     anotar_error("nivel principal", _err)
 
-_ahora = time.time()
-_cache_salud = st.session_state.get("_salud_cache")
-if not _cache_salud or _ahora - _cache_salud["momento"] > 180:
-    try:
-        _cache_salud = {"momento": _ahora, "problemas": diagnostico_de_salud()}
-    except Exception as _err:
-        anotar_error("nivel principal", _err)
-        _cache_salud = {"momento": _ahora, "problemas": []}
-    st.session_state["_salud_cache"] = _cache_salud
+_cache_salud = salud_compartida()
 
 def ir_a_donde_dice_el_aviso(donde):
     """Lleva a la pantalla que el aviso nombra en su «📍». Va como on_click.
@@ -21927,7 +21928,7 @@ if _problemas:
     # la caja de búsqueda. Si no hay avisos graves, queda donde estaba.
     with (_caja_graves if (_graves and es_celular()) else st.container()):
         if st.button("🔄 Volver a revisar", key="refrescar_salud"):
-            st.session_state.pop("_salud_cache", None)
+            invalidar_salud()
             st.rerun()
     st.markdown("")
 

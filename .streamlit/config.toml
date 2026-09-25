@@ -11,3 +11,11 @@ primaryColor = "#E8A33D"
 backgroundColor = "#14171B"
 secondaryBackgroundColor = "#1D2126"
 textColor = "#ECEEF0"
+
+# Streamlit corre el recolector de basura de Python COMPLETO después de cada toque de cada
+# persona. Con una app de este tamaño eso es caro: con 15 personas a la vez era la cuarta parte
+# del procesador del servidor (medido con py-spy). Python igual lo corre solo cuando hace falta;
+# lo que se pierde es solo el «por las dudas» de cada toque. Medido con 15 personas en un
+# procesador: ver el README, «15 personas a la vez».
+[runner]
+postScriptGC = false
