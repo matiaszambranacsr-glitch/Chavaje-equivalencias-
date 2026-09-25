@@ -1649,6 +1649,47 @@ El corte es por proveedor (`GROUP BY po.id, mp.id`) y no por total: un código d
 legítimo aparece en varias listas a la vez —es justo para eso que sirve— y contando todo junto
 ese sería el primero de la lista.
 
+## Lo que se perdía en cada toque, un control para que no vuelva, y detalles de pantalla
+
+**Las sesiones con los proveedores.** `_SESIONES_DE_CATALOGO` y `_SESIONES_PORTAL` guardaban
+la sesión ya logueada para no entrar al sitio del proveedor en cada ficha. Pero eran
+diccionarios del archivo, y Streamlit los vacía en cada toque (lo mismo que pasaba con el
+candado de la tanda de fondo). Medido contra un proveedor de mentira que cuenta los ingresos:
+**3 logins en 3 toques** antes; ahora 1. La del catálogo ya sabía descartar una sesión vencida.
+La del portal no, y el vaciado de cada toque la renovaba sin querer: ahora se renueva a
+propósito, a la hora.
+
+**Control 39 en `auditar.py`.** Marca todo candado creado al nivel del archivo, y todo
+diccionario o lista que alguna función modifica, salvo que el comentario de arriba diga que
+es «de cada pasada» a propósito. Pasado por el código de antes de estas dos tandas, encuentra
+exactamente los siete casos: los seis arreglados y `db_lock`, que quedó así con el porqué al
+lado. Sobre el de hoy encontró uno más, `_MODELOS_CACHE`. Se midió y quedó como estaba: armar
+la lista de modelos cuesta 60 ms (la primera medición dio 828 ms, pero contaba la apertura de
+la conexión), y rearmarla en cada toque hace que una lista de aplicaciones recién importada
+entre sin avisarle a nadie.
+
+**Probado y descartado: no rehacer el análisis de sugeridas después de cada decisión.** El
+análisis de BARRIDO tarda 5 a 8 s y se rehace entero después de cada «Los N están bien» o
+«Descartar los N». La idea era sacar del análisis guardado solo los pares decididos. Se probó
+con los datos reales, decidiendo grupos y comparando par por par contra el análisis completo:
+decidir unos cambia el puntaje de otros (en BARRIDO, 51 de los 101 que quedan pasan de 50 a 65 y
+dejan de ser sospechosos; en ILLINOIS aparecen 79 que el atajo no mostraría). Con el atajo se
+vería información vieja, así que se rehace. Tampoco hay un punto caro que atacar: el tiempo está
+repartido en muchas partes chicas del motor que puntúa, y tocarlo por uno o dos segundos no vale
+el riesgo.
+
+**En pantalla:**
+- En «Para pedir», lo que marcaron los empleados con «📌 Pedir» (y los favoritos con poco
+  stock y el mensaje para el proveedor) va arriba, pegado a «lo que se va a acabar». Estaba al
+  final, casi cinco pantallas abajo en el celular.
+- Estando en Mantenimiento se veían dos buscadores de herramientas seguidos, el de Administrar
+  y el de adentro. El de arriba ahora aparece solo en las otras sub-secciones.
+- Textos en inglés: las cajas de subir archivos decían «Upload» y «200MB per file» (en cinco
+  pantallas) y un selector «Choose options». Ahora dicen «Elegir archivo», «Hasta 200 MB por
+  archivo» y «Elegí uno o más». Se encontraron recorriendo las 19 pantallas y juntando lo que se
+  ve en inglés, no lo que dice el código: «Choose an option» aparecía en todas, pero es el texto
+  de fondo de un campo que ya tiene valor y no se ve.
+
 ## Que la app no se caiga, y que un reinicio no borre nada
 
 En el Streamlit Cloud gratis la app «se cae» de tres maneras. Las tres se miraron con números.

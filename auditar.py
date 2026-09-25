@@ -2040,6 +2040,69 @@ for _n in ast.walk(ARBOL):
                      "tiempo. El commit lo hace transaccion() al salir del bloque")
 
 
+# ============ 39) Estado «del proceso» que en realidad es de cada pasada ============
+# Streamlit vuelve a ejecutar app.py entero en cada toque, en un módulo nuevo: lo que se crea al
+# nivel del archivo con «= threading.Lock()», «= {}» o «= []» es OTRO objeto en cada pasada.
+# Si el código lo usa como algo compartido —un candado para «uno solo a la vez», un diccionario
+# donde guardar sesiones, una lista de errores— no comparte nada. Pasó de verdad: el candado de
+# la tanda de fondo dejaba correr diez a la vez; las sesiones con los proveedores se abrían de
+# nuevo en cada toque (un login por toque); el registro de errores veía solo los de su pasada.
+# Lo que tiene que durar va con del_proceso(). Se marca: todo candado creado así, y todo
+# contenedor que alguna función modifica. Se exceptúa con un comentario que diga «de cada
+# PASADA» en las líneas de arriba: es para cuando se decidió dejarlo así a propósito.
+_CREA_CANDADO = {"Lock", "RLock", "Semaphore", "BoundedSemaphore", "Condition", "Event"}
+_CREA_CONTENEDOR = {"dict", "list", "set", "defaultdict", "Counter", "OrderedDict", "deque"}
+_MODIFICA = {"append", "extend", "insert", "pop", "clear", "update", "setdefault", "add",
+             "discard", "remove", "popitem", "appendleft"}
+
+
+def _que_crea(valor):
+    if isinstance(valor, (ast.Dict, ast.List, ast.Set)):
+        return "contenedor"
+    if isinstance(valor, ast.Call):
+        nombre = getattr(valor.func, "attr", None) or getattr(valor.func, "id", None)
+        if nombre in _CREA_CANDADO:
+            return "candado"
+        if nombre in _CREA_CONTENEDOR:
+            return "contenedor"
+    return None
+
+
+def _modificados_en_funciones(arbol):
+    nombres = set()
+    for _f in ast.walk(arbol):
+        if not isinstance(_f, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+        for _x in ast.walk(_f):
+            if (isinstance(_x, ast.Call) and isinstance(_x.func, ast.Attribute)
+                    and _x.func.attr in _MODIFICA and isinstance(_x.func.value, ast.Name)):
+                nombres.add(_x.func.value.id)
+            destinos = (_x.targets if isinstance(_x, (ast.Assign, ast.Delete))
+                        else [_x.target] if isinstance(_x, ast.AugAssign) else [])
+            for _d in destinos:
+                if isinstance(_d, ast.Subscript) and isinstance(_d.value, ast.Name):
+                    nombres.add(_d.value.id)
+    return nombres
+
+
+_MODIFICADOS = _modificados_en_funciones(ARBOL)
+for _n in ARBOL.body:
+    if not (isinstance(_n, ast.Assign) and len(_n.targets) == 1
+            and isinstance(_n.targets[0], ast.Name)):
+        continue
+    _nombre, _tipo = _n.targets[0].id, _que_crea(_n.value)
+    if not _tipo or (_tipo == "contenedor" and _nombre not in _MODIFICADOS):
+        continue
+    if "de cada pasada" in "\n".join(LINEAS[max(0, _n.lineno - 12):_n.lineno - 1]).lower():
+        continue
+    reportar("ERROR", _n.lineno,
+             f"«{_nombre}» es un {_tipo} creado al nivel del archivo"
+             + (" y se lo modifica desde funciones" if _tipo == "contenedor" else "")
+             + ": Streamlit crea otro en cada toque, así que no se comparte entre toques ni con "
+             "los hilos de fondo. Usar del_proceso(), o dejar dicho arriba que es «de cada "
+             "pasada» a propósito")
+
+
 # ============ Resultado ============
 orden = {"ERROR": 0, "REVISAR": 1, "AVISO": 2}
 problemas.sort(key=lambda x: (orden[x[0]], x[1]))

@@ -340,6 +340,18 @@ html, body, [class*="css"] { font-family: 'Inter', -apple-system, sans-serif; }
 [data-testid="stFileUploaderDropzone"] {
   background: var(--bg-panel) !important; border: 1px dashed var(--border) !important; border-radius: 8px !important;
 }
+/* Los textos de la caja de subir archivos vienen en inglés y Streamlit no deja cambiarlos:
+   «Upload» y «200MB per file • PNG, JPG», en cinco pantallas. Se tapan y se escriben en
+   castellano. La lista de tipos no hace falta: el selector del teléfono ya muestra solo los
+   archivos que sirven. */
+[data-testid="stFileUploaderDropzone"] button [data-testid="stMarkdownContainer"] p { font-size: 0 !important; }
+[data-testid="stFileUploaderDropzone"] button [data-testid="stMarkdownContainer"] p::after {
+  content: "Elegir archivo"; font-size: 0.9rem;
+}
+[data-testid="stFileUploaderDropzoneInstructions"] span { font-size: 0 !important; }
+[data-testid="stFileUploaderDropzoneInstructions"] span::after {
+  content: "Hasta 200 MB por archivo"; font-size: 0.8rem;
+}
 
 /* Expanders */
 [data-testid="stExpander"] { border: 1px solid var(--border) !important; border-radius: 8px !important; margin-bottom: 4px; }
@@ -11083,7 +11095,12 @@ def config_portal(nombre_marca):
     return datos
 
 
-_SESIONES_PORTAL = {}
+# Del proceso (ver del_proceso()), por lo mismo que _SESIONES_DE_CATALOGO. Guarda
+# (sesión, cuándo se abrió): a diferencia de aquella, acá nada detecta una sesión vencida, y
+# antes el vaciado de cada pasada la renovaba sin querer. Ahora se renueva a propósito, pasada
+# MINUTOS_DE_SESION_DE_PORTAL. Una hora es un login por hora en vez de uno por toque.
+_SESIONES_PORTAL = del_proceso("sesiones_de_portal", dict)
+MINUTOS_DE_SESION_DE_PORTAL = 60
 
 # Direcciones que en cualquier portal significan "hacer algo", no "mirar". La app entra con TU
 # usuario: si por un error de código o una URL mal armada tocara una de estas, estaría pidiendo
@@ -11219,8 +11236,9 @@ def sesion_de_portal(nombre_marca):
                       "Settings → Secrets de Streamlit.")
     if cfg.get("_bloqueado"):
         return None, cfg["_bloqueado"]
-    if nombre_marca in _SESIONES_PORTAL:
-        return _SESIONES_PORTAL[nombre_marca], None
+    _guardada = _SESIONES_PORTAL.get(nombre_marca)
+    if _guardada and time.time() - _guardada[1] < MINUTOS_DE_SESION_DE_PORTAL * 60:
+        return _guardada[0], None
 
     sesion = requests.Session()
     sesion.headers.update({"User-Agent": "Mozilla/5.0 (compatible; EquivalenciasElChavo/1.0)"})
@@ -11250,7 +11268,7 @@ def sesion_de_portal(nombre_marca):
         # A partir de acá la sesión queda de solo lectura. El login fue lo único que necesitó
         # mandar datos, y ya se hizo.
         solo_lectura = SesionSoloLectura(sesion, cfg["url_login"])
-        _SESIONES_PORTAL[nombre_marca] = solo_lectura
+        _SESIONES_PORTAL[nombre_marca] = (solo_lectura, time.time())
         return solo_lectura, None
     except Exception as e:
         anotar_error("sesion_de_portal", e)
@@ -11529,8 +11547,11 @@ def bajar_fotos_desde_catalogo(marca_id, limite=100, progreso=None, hilos=6, liv
 #
 # Los nombres de los campos se sacan mirando el formulario del proveedor: cada sitio los llama
 # distinto y no hay forma de adivinarlos.
-_SESIONES_DE_CATALOGO = {}
-_CANDADO_SESIONES = threading.Lock()
+# Del proceso, no de cada pasada del script (ver del_proceso()): con «= {}» acá, cada toque
+# empezaba con el diccionario vacío y la sesión «guardada» duraba una pasada. Cada tanda de
+# fondo nueva y cada ficha pedida desde la pantalla era un login más contra el proveedor.
+_SESIONES_DE_CATALOGO = del_proceso("sesiones_de_catalogo", dict)
+_CANDADO_SESIONES = del_proceso("candado_de_sesiones_de_catalogo", threading.Lock)
 
 
 def credenciales_de_catalogo(nombre_marca):
@@ -14034,6 +14055,9 @@ _POSICIONES = {
 # Modelos de auto que aparecen en las descripciones. Se necesita para saber dónde termina el
 # nombre de la pieza y dónde empieza el auto. Sale de MARCAS_VEHICULO y de los modelos que ya
 # vienen en los catálogos de aplicaciones cargados.
+# Es de cada PASADA del script a propósito (ver del_proceso()): armarla cuesta 60 ms medidos
+# sobre las 112.764 aplicaciones reales, y así una lista de aplicaciones recién importada entra
+# en el toque siguiente sin tener que avisarle a nadie.
 _MODELOS_CACHE = {"lista": None}
 
 
@@ -25155,8 +25179,11 @@ if pagina == PAGINAS[3]:
     # El mismo buscador que adentro de Mantenimiento, pero acá arriba: el que entra por primera
     # vez no tiene por qué saber que las 36 herramientas viven detrás de una solapa que se
     # llama «Mantenimiento». Escribiendo «papelera» o «fotos» llega igual.
-    buscador_de_herramientas("buscar_herramienta_admin",
-                              "¿Qué querés hacer? (buscá entre las herramientas)")
+    # Estando YA en Mantenimiento no: ahí está el de adentro, y se veían los dos seguidos en la
+    # misma pantalla —mismo texto de ayuda, dos cajas— sin que se entendiera cuál usar.
+    if st.session_state["sub_admin"] != "🧹 Mantenimiento":
+        buscador_de_herramientas("buscar_herramienta_admin",
+                                  "¿Qué querés hacer? (buscá entre las herramientas)")
 
     st.radio("Sub-sección:", SUB_ADMIN, key="sub_admin", horizontal=True,
              label_visibility="collapsed")
@@ -28334,12 +28361,81 @@ Administrar → Mantenimiento.
             etiquetas_q = {f"{x['Código']} ({x['Marca']}) — {x['Se acaba en']}": x["_id"]
                            for x in por_quebrar}
             elegidos_q = st.multiselect("Marcar para pedir:", list(etiquetas_q.keys()),
-                                         key="quiebre_a_pedir")
+                                         key="quiebre_a_pedir", placeholder="Elegí uno o más")
             if elegidos_q and st.button(f"📌 Marcar {len(elegidos_q)} para reposición"):
                 for e in elegidos_q:
                     solicitar_reposicion(etiquetas_q[e])
                 avisar("success", f"{len(elegidos_q)} producto(s) marcados para pedir.")
                 st.rerun()
+
+        st.markdown("---")
+        # Lo que marcaron para pedir va acá arriba, pegado a «lo que se va a acabar»: es lo
+        # que se viene a buscar a esta pantalla. Estaba al final, después de los aumentos,
+        # los clavos y los códigos reemplazados; en el celular, casi cinco pantallas abajo.
+        st.markdown("**🙋 Pedidos marcados por empleados**")
+        st.caption(
+            "Cuando alguien busca algo y toca '📌 Pedir' en el buscador, aparece acá para que decidas "
+            "qué comprarle a cada proveedor."
+        )
+        pedidos = listar_pedidos_reposicion("pendiente")
+        seleccionados = []
+        if pedidos:
+            for p in pedidos:
+                colp1, colp2, colp3 = st.columns([4, 1, 1])
+                stock_txt = p["Stock actual"] if p["Stock actual"] is not None else "s/d"
+                marcado = colp1.checkbox(
+                    f"{p['Marca']} - {p['Codigo']} — {p['Descripcion'] or ''} "
+                    f"(stock: {stock_txt}, pedido {p['Veces pedido']}x, último: {p['Último en pedirlo']})",
+                    key=f"chk_pedido_{p['ID']}"
+                )
+                if marcado:
+                    seleccionados.append(p)
+                # on_click en vez de "if boton: accion + st.rerun()": el callback corre ANTES de
+                # que Streamlit refresque la página, así la lista ya sale actualizada sin tener que
+                # forzar un st.rerun() — que es lo que hacía perder la pestaña y volver al inicio.
+                colp2.button("✅", key=f"resuelto_{p['ID']}", help="Marcar como resuelto",
+                              on_click=marcar_pedido_resuelto, args=(p["ID"],))
+                colp3.button("🗑️", key=f"descartar_{p['ID']}", help="Descartar (no hace falta pedirlo)",
+                              on_click=descartar_pedido_reposicion, args=(p["ID"],))
+        else:
+            st.caption("Ningún empleado marcó nada para pedir todavía.")
+
+        st.markdown("---")
+        st.markdown("**📦 Favoritos con poco stock**")
+        umbral_stock = st.number_input("Alertar cuando el stock sea menor o igual a:", min_value=0, value=2, step=1,
+                                        key="umbral_para_pedir")
+        stock_bajo = listar_favoritos_stock_bajo(umbral_stock)
+        if stock_bajo:
+            for f in stock_bajo:
+                stock_txt_f = f["Stock"] if f["Stock"] is not None else "s/d"
+                marcado_f = st.checkbox(
+                    f"{f['Marca']} - {f['Codigo']} — {f['Descripcion'] or ''} (stock: {stock_txt_f})",
+                    key=f"chk_stockbajo_{f['ID']}"
+                )
+                if marcado_f:
+                    seleccionados.append(f)
+        else:
+            st.caption("Ningún favorito con stock bajo por ahora.")
+
+        if seleccionados:
+            st.markdown("---")
+            st.markdown(f"**📲 Armar mensaje para el proveedor ({len(seleccionados)} ítem(s) elegidos)**")
+            por_marca = {}
+            for item in seleccionados:
+                por_marca.setdefault(item["Marca"], []).append(item)
+            for marca, items in por_marca.items():
+                lineas_msg = [f"Hola! Necesito reponer estos productos de {marca}:"]
+                for it in items:
+                    stock_it = it.get("Stock actual", it.get("Stock"))
+                    lineas_msg.append(
+                        f"- {it['Codigo']} ({it.get('Descripcion') or ''}) — "
+                        f"quedan {stock_it if stock_it is not None else 's/d'}"
+                    )
+                mensaje_reposicion = "\n".join(lineas_msg)
+                with st.expander(f"📨 {marca} ({len(items)} ítem(s))"):
+                    st.text_area("Mensaje:", value=mensaje_reposicion, height=120, key=f"msg_repo_{marca}")
+                    url_wa_repo = "https://wa.me/?text=" + quote(mensaje_reposicion)
+                    st.link_button(f"📲 Abrir WhatsApp para {marca}", url_wa_repo, key=f"wa_repo_{marca}")
 
         st.markdown("---")
         st.markdown("**📈 Cuánto te aumentó cada proveedor**")
@@ -28620,72 +28716,6 @@ Administrar → Mantenimiento.
                 cerrar_reserva(_etq[_elegida], vendida=False)
                 avisar("success", "Reserva liberada.")
                 st.rerun()
-
-        st.markdown("---")
-        st.markdown("**🙋 Pedidos marcados por empleados**")
-        st.caption(
-            "Cuando alguien busca algo y toca '📌 Pedir' en el buscador, aparece acá para que decidas "
-            "qué comprarle a cada proveedor."
-        )
-        pedidos = listar_pedidos_reposicion("pendiente")
-        seleccionados = []
-        if pedidos:
-            for p in pedidos:
-                colp1, colp2, colp3 = st.columns([4, 1, 1])
-                stock_txt = p["Stock actual"] if p["Stock actual"] is not None else "s/d"
-                marcado = colp1.checkbox(
-                    f"{p['Marca']} - {p['Codigo']} — {p['Descripcion'] or ''} "
-                    f"(stock: {stock_txt}, pedido {p['Veces pedido']}x, último: {p['Último en pedirlo']})",
-                    key=f"chk_pedido_{p['ID']}"
-                )
-                if marcado:
-                    seleccionados.append(p)
-                # on_click en vez de "if boton: accion + st.rerun()": el callback corre ANTES de
-                # que Streamlit refresque la página, así la lista ya sale actualizada sin tener que
-                # forzar un st.rerun() — que es lo que hacía perder la pestaña y volver al inicio.
-                colp2.button("✅", key=f"resuelto_{p['ID']}", help="Marcar como resuelto",
-                              on_click=marcar_pedido_resuelto, args=(p["ID"],))
-                colp3.button("🗑️", key=f"descartar_{p['ID']}", help="Descartar (no hace falta pedirlo)",
-                              on_click=descartar_pedido_reposicion, args=(p["ID"],))
-        else:
-            st.caption("Ningún empleado marcó nada para pedir todavía.")
-
-        st.markdown("---")
-        st.markdown("**📦 Favoritos con poco stock**")
-        umbral_stock = st.number_input("Alertar cuando el stock sea menor o igual a:", min_value=0, value=2, step=1,
-                                        key="umbral_para_pedir")
-        stock_bajo = listar_favoritos_stock_bajo(umbral_stock)
-        if stock_bajo:
-            for f in stock_bajo:
-                stock_txt_f = f["Stock"] if f["Stock"] is not None else "s/d"
-                marcado_f = st.checkbox(
-                    f"{f['Marca']} - {f['Codigo']} — {f['Descripcion'] or ''} (stock: {stock_txt_f})",
-                    key=f"chk_stockbajo_{f['ID']}"
-                )
-                if marcado_f:
-                    seleccionados.append(f)
-        else:
-            st.caption("Ningún favorito con stock bajo por ahora.")
-
-        if seleccionados:
-            st.markdown("---")
-            st.markdown(f"**📲 Armar mensaje para el proveedor ({len(seleccionados)} ítem(s) elegidos)**")
-            por_marca = {}
-            for item in seleccionados:
-                por_marca.setdefault(item["Marca"], []).append(item)
-            for marca, items in por_marca.items():
-                lineas_msg = [f"Hola! Necesito reponer estos productos de {marca}:"]
-                for it in items:
-                    stock_it = it.get("Stock actual", it.get("Stock"))
-                    lineas_msg.append(
-                        f"- {it['Codigo']} ({it.get('Descripcion') or ''}) — "
-                        f"quedan {stock_it if stock_it is not None else 's/d'}"
-                    )
-                mensaje_reposicion = "\n".join(lineas_msg)
-                with st.expander(f"📨 {marca} ({len(items)} ítem(s))"):
-                    st.text_area("Mensaje:", value=mensaje_reposicion, height=120, key=f"msg_repo_{marca}")
-                    url_wa_repo = "https://wa.me/?text=" + quote(mensaje_reposicion)
-                    st.link_button(f"📲 Abrir WhatsApp para {marca}", url_wa_repo, key=f"wa_repo_{marca}")
 
     if sub_stats == SUB_STATS[6]:
         st.markdown("**🔍 Revisar las equivalencias que ya están cargadas**")
