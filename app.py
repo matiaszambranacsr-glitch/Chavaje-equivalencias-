@@ -7670,6 +7670,57 @@ def nivel_de_confianza(puntaje):
     return "🔴 Casi seguro mal", "descartala salvo que sepas que está bien"
 
 
+# Las decisiones sobre los sospechosos se juntan y se aplican de una. Antes cada «Los N están
+# bien» se aplicaba al tocarlo, y cada aplicación rehace el análisis del lote entero: 5 a 8 s
+# sobre los 8.648 de BARRIDO. Revisar todo son unas 50 decisiones: varios minutos de reloj de
+# arena. Ahora cada grupo (o cada par, adentro de «Ver uno por uno») se marca, y un solo botón
+# aplica todo: una espera en vez de cincuenta. Rehacer el análisis después de cada decisión NO
+# se puede evitar —decidir unos pares cambia el puntaje de otros, ver el README—, pero sí
+# hacerlo una vez por tanda en vez de una por grupo.
+# Se guardan por par y no por grupo: el mismo motivo aparece en varias páginas, y cambiar
+# «Mostrar de a» rearma los grupos. Atado al grupo, lo decidido en la página 1 se hubiera
+# aplicado a los de la página 2.
+DECISIONES_DE_REVISION = {"—": None, "✅ Están bien": "bien", "🚫 Descartar": "mal"}
+_ROTULO_DE_LA_DECISION = {v: k for k, v in DECISIONES_DE_REVISION.items()}
+
+
+def decisiones_del_lote(lote):
+    """{(a, b): 'bien'|'mal'} de lo marcado y todavía no aplicado en ese lote, en esta sesión."""
+    return st.session_state.setdefault("_decisiones_por_lote", {}).setdefault(lote, {})
+
+
+def anotar_decision(lote, clave_del_selector, pares):
+    """on_change de los selectores de revisión: anota (o borra) la decisión de esos pares."""
+    decididas = decisiones_del_lote(lote)
+    que = DECISIONES_DE_REVISION.get(st.session_state.get(clave_del_selector))
+    for par in pares:
+        if que:
+            decididas[par] = que
+        else:
+            decididas.pop(par, None)
+
+
+def aplicar_decisiones(lote):
+    """Aplica todo lo marcado en el lote, de una vez. Lo que otro ya resolvió mientras tanto se
+    saltea solo (ver _los_que_siguen_pendientes())."""
+    decididas = decisiones_del_lote(lote)
+    bien = [par for par, que in decididas.items() if que == "bien"]
+    mal = [par for par, que in decididas.items() if que == "mal"]
+    n_bien = aprobar_pendientes(lote, bien) if bien else 0
+    if mal:
+        rechazar_pendientes(lote, mal)
+    decididas.clear()
+    invalidar_salud()
+    ya_resueltos = len(bien) - n_bien
+    # Flotante y no avisar(): el botón de abajo deja la pantalla scrolleada abajo, y avisar()
+    # escribe arriba de todo, donde en el celular no se ve.
+    st.toast(f"✅ Listo: {n_bien} aprobado(s) y {len(mal)} descartado(s), de una sola vez."
+             + (f" {ya_resueltos} ya los había resuelto otra persona." if ya_resueltos > 0 else ""),
+             # Largo: después viene el análisis del lote, que tarda más que los 4 s de siempre,
+             # y el aviso se iba antes de que la pantalla terminara de dibujarse.
+             duration="long")
+
+
 def tipo_de_alarma(alarma):
     """El MOTIVO de una alarma sin el dato de cada par, para agrupar en la pantalla de revisión.
 
@@ -8114,6 +8165,30 @@ _BORRAR_PENDIENTE_EN_LOS_DOS_SENTIDOS = """DELETE FROM equivalencias_pendientes
     WHERE (producto_a_id = ? AND producto_b_id = ?) OR (producto_a_id = ? AND producto_b_id = ?)"""
 
 
+def _los_que_siguen_pendientes(pares):
+    """De esos pares, los que TODAVÍA están en la cola, como (menor, mayor). El que llama tiene
+    el candado tomado.
+
+    Con varias personas revisando a la vez, la pantalla de uno puede tener pares que otro ya
+    resolvió. Aprobar sin mirar volvía a crear una equivalencia que otro acababa de descartar
+    —y descartar anotaba como rechazada una que otro acababa de aprobar, que después la
+    auditoría marcaba como «evidencia en contra»—. Y con las decisiones por tandas es más
+    probable: se juntan durante minutos antes de aplicarse. Se decide solo sobre lo que sigue
+    esperando; lo demás ya lo decidió alguien."""
+    normalizados = sorted({(min(a, b), max(a, b)) for a, b in pares if a != b})
+    siguen = set()
+    # Cuatro variables por par (las dos direcciones): 200 pares son 800, abajo del tope de 900.
+    for i in range(0, len(normalizados), 200):
+        tanda = normalizados[i:i + 200]
+        c.execute(
+            "SELECT producto_a_id, producto_b_id FROM equivalencias_pendientes WHERE "
+            + " OR ".join(["(producto_a_id = ? AND producto_b_id = ?) OR "
+                           "(producto_a_id = ? AND producto_b_id = ?)"] * len(tanda)),
+            [v for a, b in tanda for v in (a, b, b, a)])
+        siguen.update((min(r[0], r[1]), max(r[0], r[1])) for r in c.fetchall())
+    return [par for par in normalizados if par in siguen]
+
+
 def aprobar_pendientes(lote, solo_estos_pares=None):
     """Pasa los vínculos pendientes a equivalencias reales."""
     # Todo o nada: se crean las equivalencias y se borran los pendientes. Cortado en el medio,
@@ -8123,7 +8198,7 @@ def aprobar_pendientes(lote, solo_estos_pares=None):
             c.execute("SELECT producto_a_id, producto_b_id FROM equivalencias_pendientes WHERE lote = ?", (lote,))
             pares = [(r["producto_a_id"], r["producto_b_id"]) for r in c.fetchall()]
         else:
-            pares = list(solo_estos_pares)
+            pares = _los_que_siguen_pendientes(solo_estos_pares)
         if not pares:
             return 0
         # El lote viaja con el vínculo: es lo que después permite deshacer toda una lista.
@@ -8152,7 +8227,7 @@ def rechazar_pendientes(lote, solo_estos_pares=None):
             c.execute("DELETE FROM equivalencias_pendientes WHERE lote = ?", (lote,))
             borrados = c.rowcount
         else:
-            pares = list(solo_estos_pares)
+            pares = _los_que_siguen_pendientes(solo_estos_pares)
             # Las dos direcciones, y se cuenta lo que se BORRÓ. Antes se devolvía len(pares), y
             # la pantalla manda casi siempre ida y vuelta: decía el doble. Y el botón de «kit y
             # pieza» mandaba solo la ida, así que la vuelta se quedaba en la cola.
@@ -29127,6 +29202,9 @@ Administrar → Mantenimiento.
                                        key="sosp_por_pagina")
                 paginas = (len(sospechosas) - 1) // por_pagina + 1
                 if paginas > 1:
+                    if "_ir_a_pagina_sospechosas" in st.session_state:
+                        st.session_state["pagina_sospechosas"] = min(
+                            st.session_state.pop("_ir_a_pagina_sospechosas"), paginas)
                     pagina_sosp = st.number_input(
                         f"Página (de {paginas}) — cada una trae {por_pagina}:",
                         min_value=1, max_value=paginas, value=1, step=1, key="pagina_sospechosas"
@@ -29159,6 +29237,27 @@ Administrar → Mantenimiento.
                 for s in pagina_actual:
                     por_motivo.setdefault(_tipo(s), []).append(s)
 
+                _lote_rev = lote_info["lote"]
+                _decididas = decisiones_del_lote(_lote_rev)
+
+                def _boton_aplicar(donde):
+                    """El botón de aplicar lo marcado. Arriba y abajo de los grupos: en el
+                    celular, después de marcar el último, el de arriba queda pantallas atrás."""
+                    _b = sum(1 for q in _decididas.values() if q == "bien")
+                    _m = len(_decididas) - _b
+                    if not _decididas:
+                        if donde == "arriba":
+                            st.caption("Marcá cada grupo (o cada vínculo) y aplicá todo junto con "
+                                       "un solo botón: una espera en vez de una por grupo.")
+                        return
+                    st.button(f"💾 Aplicar lo marcado: ✅ {_b} bien · 🚫 {_m} a descartar",
+                              type="primary", key=f"aplicar_decisiones_{donde}",
+                              on_click=aplicar_decisiones, args=(_lote_rev,))
+                    if donde == "arriba":
+                        st.caption("Nada se guarda hasta tocar «Aplicar». Lo marcado se mantiene "
+                                   "aunque cambies de página.")
+
+                _boton_aplicar("arriba")
                 for motivo, items in por_motivo.items():
                     peor_grupo = min(x["confianza"] for x in items)
                     icono = "🔴" if peor_grupo < 30 else "🟠" if peor_grupo < 55 else "🟡"
@@ -29166,21 +29265,25 @@ Administrar → Mantenimiento.
                                    if _total_del_tipo[motivo] > len(items) else "")
                     st.markdown(f"{icono} **{motivo}** — {len(items)} vínculo(s){_de_cuantos}")
 
-                    pares_grupo = []
-                    for x in items:
-                        pares_grupo.extend([(x["a"], x["b"]), (x["b"], x["a"])])
-                    if len(items) > 1:
-                        gb1, gb2 = st.columns(2)
-                        gb1.button(f"✅ Los {len(items)} están bien",
-                                    key=f"apr_grupo_{lote_info['lote']}_{abs(hash(motivo))}",
-                                    on_click=aprobar_pendientes,
-                                    args=(lote_info["lote"], pares_grupo))
-                        gb2.button(f"🚫 Descartar los {len(items)}",
-                                    key=f"rec_grupo_{lote_info['lote']}_{abs(hash(motivo))}",
-                                    on_click=rechazar_pendientes,
-                                    args=(lote_info["lote"], pares_grupo))
+                    _pares_grupo = [(x["a"], x["b"]) for x in items]
+                    # El selector del grupo muestra lo que tienen sus pares: si todos tienen lo
+                    # mismo, eso; si no, «—» y abajo cuántos se decidieron de a uno.
+                    _clave_g = f"dec_grupo_{_lote_rev}_{desde}_{por_pagina}_{abs(hash(motivo))}"
+                    _hay = {_decididas.get(par) for par in _pares_grupo}
+                    st.session_state[_clave_g] = (_ROTULO_DE_LA_DECISION[_hay.pop()]
+                                                  if len(_hay) == 1 else "—")
+                    st.radio(f"¿Qué hacés con {'estos ' + str(len(items)) if len(items) > 1 else 'este'}?",
+                             list(DECISIONES_DE_REVISION), key=_clave_g, horizontal=True,
+                             on_change=anotar_decision, args=(_lote_rev, _clave_g, _pares_grupo))
+                    if len(_hay) > 1 or (len(_hay) == 1 and st.session_state[_clave_g] == "—"
+                                         and any(_decididas.get(par) for par in _pares_grupo)):
+                        _b_g = sum(1 for par in _pares_grupo if _decididas.get(par) == "bien")
+                        _m_g = sum(1 for par in _pares_grupo if _decididas.get(par) == "mal")
+                        st.caption(f"Decididos de a uno: ✅ {_b_g} · 🚫 {_m_g} · "
+                                   f"sin decidir {len(items) - _b_g - _m_g}")
 
-                    with st.expander(f"Ver los {len(items)} uno por uno"):
+                    with st.expander(f"Ver los {len(items)} uno por uno" if len(items) > 1
+                                     else "Ver el detalle"):
                         for s in items:
                             st.markdown(f"**{s['marca_a']} {s['cod_a']} ↔ "
                                          f"{s['marca_b']} {s['cod_b']}** · {s['confianza']:.0f}/100")
@@ -29189,15 +29292,26 @@ Administrar → Mantenimiento.
                             for i_al, alarma in enumerate(s["alarmas"]):
                                 if i_al or alarma != motivo:
                                     st.caption(f"   {alarma}")
-                            sb1, sb2 = st.columns(2)
-                            sb1.button("✅ Igual es correcto", key=f"apr_sosp_{s['a']}_{s['b']}",
-                                        on_click=aprobar_pendientes,
-                                        args=(lote_info["lote"], [(s["a"], s["b"]), (s["b"], s["a"])]))
-                            sb2.button("🚫 Descartar", key=f"rec_sosp_{s['a']}_{s['b']}",
-                                        on_click=rechazar_pendientes,
-                                        args=(lote_info["lote"], [(s["a"], s["b"]), (s["b"], s["a"])]))
+                            if len(items) > 1:
+                                _clave_p = f"dec_{_lote_rev}_{s['a']}_{s['b']}"
+                                st.session_state[_clave_p] = _ROTULO_DE_LA_DECISION[
+                                    _decididas.get((s["a"], s["b"]))]
+                                st.radio("Este:", list(DECISIONES_DE_REVISION), key=_clave_p,
+                                         horizontal=True, label_visibility="collapsed",
+                                         on_change=anotar_decision,
+                                         args=(_lote_rev, _clave_p, [(s["a"], s["b"])]))
                             st.markdown("")
                     st.markdown("")
+                _boton_aplicar("abajo")
+                # Marcar y pasar a la página siguiente es el ritmo de la revisión, y en el celular
+                # el «+» del número de página es chico y quedó varias pantallas más arriba.
+                if paginas > 1 and int(pagina_sosp) < paginas:
+                    def _a_la_pagina_siguiente():
+                        # A otra clave: la del número de página ya se dibujó en esta pasada. Se
+                        # vuelca antes de dibujarlo, en la próxima (ver arriba).
+                        st.session_state["_ir_a_pagina_sospechosas"] = int(pagina_sosp) + 1
+                    st.button(f"➡️ Página siguiente ({int(pagina_sosp) + 1} de {paginas})",
+                              key="pagina_sospechosas_siguiente", on_click=_a_la_pagina_siguiente)
             st.markdown("---")
 
         st.markdown("**🛒 Equivalencias que aparecieron solas en el mostrador**")

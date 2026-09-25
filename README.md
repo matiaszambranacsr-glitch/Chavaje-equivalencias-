@@ -1649,6 +1649,38 @@ El corte es por proveedor (`GROUP BY po.id, mp.id`) y no por total: un código d
 legítimo aparece en varias listas a la vez —es justo para eso que sirve— y contando todo junto
 ese sería el primero de la lista.
 
+## Revisar sugeridas por tandas, y dos personas decidiendo el mismo vínculo
+
+**Por tandas.** En «Equivalencias sugeridas», cada «Los N están bien» se aplicaba al tocarlo,
+y cada aplicación rehace el análisis del lote entero: 5 a 8 s en BARRIDO. Revisar todo son unas
+50 decisiones. Rehacer el análisis no se puede evitar (decidir unos pares cambia el puntaje de
+otros, medido más abajo), pero sí hacerlo una vez por tanda. Ahora cada grupo tiene un selector
+«— / ✅ Están bien / 🚫 Descartar», y adentro de «Ver uno por uno», uno por vínculo. Un botón
+«💾 Aplicar lo marcado: ✅ N bien · 🚫 M a descartar», arriba y abajo de los grupos, aplica todo.
+Lo marcado se guarda **por par** y no por grupo: el mismo motivo sigue en la página siguiente, y
+atado al grupo lo decidido en la página 1 se hubiera aplicado a los de la 2. Con «➡️ Página
+siguiente» se pasa de página sin subir hasta el número.
+
+Probado en un iPhone simulado: grupo de la página 1 a descartar, un vínculo de ese grupo
+cambiado a bien, grupo de la página 2 a bien, vuelta a la página 1 (sigue todo marcado). Un
+solo «Aplicar»: 11 aprobados, 9 descartados, 20 pendientes menos, **una espera de 5,6 s** en
+vez de tres.
+
+**Dos personas, el mismo vínculo.** `aprobar_pendientes()` con una lista de pares creaba la
+equivalencia para todos los pares de la lista, sin mirar si seguían en la cola. Con varias
+personas revisando a la vez:
+
+| | antes | ahora |
+|---|---|---|
+| A descarta un vínculo; B, con la pantalla vieja, lo aprueba | **queda cargado** | queda descartado |
+| A aprueba uno; B, tarde, lo descarta | sigue cargado, pero **anotado como rechazado** | sigue cargado, sin anotar nada |
+| aprobar los 8.185 limpios de BARRIDO | 7,1 s | **3,5 s** |
+
+Ahora las dos solo deciden sobre lo que sigue esperando (`_los_que_siguen_pendientes()`), y el
+aviso dice cuántos ya había resuelto otra persona. Aprobar los limpios tarda la mitad porque la
+pantalla manda cada par en las dos direcciones y se procesaban dos veces (y el número que
+devolvía era el doble).
+
 ## 15 personas a la vez
 
 La app la van a usar 10 a 15 personas a la vez, la mitad desde la computadora y la mitad
