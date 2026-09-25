@@ -2,13 +2,26 @@
 en ejecución, cuando ya es tarde."""
 import ast
 import copy
+import os
 import re
 import sqlite3
 import sys
 from collections import defaultdict, Counter
 
+# La app está partida en app.py, logica/ y pantallas/ (ver orden.py). Sin argumentos —o con
+# «app.py», como se corrió siempre— se revisa ENTERA: las tres partes juntas, en el orden en que
+# corren, que es como las ven Python y Streamlit. Los chequeos que miran el orden (una función
+# usada antes de definirla, un widget escrito después de dibujarlo) solo tienen sentido así.
+# Con otro archivo como argumento se revisa ese solo, como antes: sirve para pasarle el control
+# a una versión vieja y ver si hubiera encontrado un error.
 ARCHIVO = sys.argv[1] if len(sys.argv) > 1 else "app.py"
-SRC = open(ARCHIVO, encoding="utf-8").read()
+DE_DONDE = None
+if ARCHIVO == "app.py" and os.path.isdir("logica"):
+    import orden
+    SRC, DE_DONDE = orden.fuente_completa()
+    ARCHIVO = "app.py + logica/ + pantallas/"
+else:
+    SRC = open(ARCHIVO, encoding="utf-8").read()
 ARBOL = ast.parse(SRC)
 LINEAS = SRC.splitlines()
 problemas = []
@@ -2098,9 +2111,66 @@ for _n in ARBOL.body:
     reportar("ERROR", _n.lineno,
              f"«{_nombre}» es un {_tipo} creado al nivel del archivo"
              + (" y se lo modifica desde funciones" if _tipo == "contenedor" else "")
-             + ": Streamlit crea otro en cada toque, así que no se comparte entre toques ni con "
-             "los hilos de fondo. Usar del_proceso(), o dejar dicho arriba que es «de cada "
+             + ": en app.py y en las pantallas Streamlit crea otro en cada toque, y en logica/ "
+             "otro cada vez que se recarga el código, así que no se comparte como se espera "
+             "con los hilos de fondo. Usar del_proceso(), o dejar dicho arriba que es «de cada "
              "pasada» a propósito")
+
+
+# ============ 40) La lógica usando algo que solo existe en una pantalla ============
+# logica/ se carga una vez, en su propio espacio de nombres; app.py y las pantallas corren en
+# otro, el de cada toque, y reciben los nombres de la lógica, pero no al revés. Una función de
+# logica/ que use un nombre definido solo en app.py o en una pantalla anda en la cabeza de quien
+# la escribió —todo era un archivo— y revienta con NameError recién cuando alguien toca el botón
+# que la llama. Al partir la app pasaba con GRUPOS_MANTENIMIENTO y HERRAMIENTAS_MANTENIMIENTO
+# (constantes de la pantalla que usaba el buscador de herramientas); se mudaron a logica/.
+if DE_DONDE:
+    import symtable as _symtable
+
+    def _es_logica(linea):
+        return DE_DONDE[linea - 1][0].startswith("logica/")
+
+    def _asignados_a_nivel_modulo(nodos):
+        out = set()
+        for _n in nodos:
+            _pila = [_n]
+            while _pila:
+                _x = _pila.pop()
+                if isinstance(_x, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                    out.add(_x.name)
+                    continue
+                if isinstance(_x, (ast.Lambda, ast.ListComp, ast.SetComp, ast.DictComp,
+                                   ast.GeneratorExp)):
+                    continue
+                if isinstance(_x, ast.Name) and isinstance(_x.ctx, ast.Store):
+                    out.add(_x.id)
+                if isinstance(_x, (ast.Import, ast.ImportFrom)):
+                    for _a in _x.names:
+                        out.add((_a.asname or _a.name).split(".")[0])
+                _pila.extend(ast.iter_child_nodes(_x))
+        return out
+
+    _de_la_logica = _asignados_a_nivel_modulo([n for n in ARBOL.body if _es_logica(n.lineno)])
+    _solo_de_pantalla = (_asignados_a_nivel_modulo([n for n in ARBOL.body
+                                                    if not _es_logica(n.lineno)])
+                         - _de_la_logica)
+    _vistos = set()
+
+    def _revisar_tabla(tabla):
+        for _hija in tabla.get_children():
+            if _es_logica(_hija.get_lineno()):
+                for _sim in _hija.get_symbols():
+                    if (_sim.is_global() and _sim.is_referenced()
+                            and _sim.get_name() in _solo_de_pantalla
+                            and (_sim.get_name(), _hija.get_lineno()) not in _vistos):
+                        _vistos.add((_sim.get_name(), _hija.get_lineno()))
+                        reportar("ERROR", _hija.get_lineno(),
+                                 f"«{_hija.get_name()}» (en logica/) usa «{_sim.get_name()}», que "
+                                 "solo existe en app.py o en una pantalla: la lógica no ve esos "
+                                 "nombres y va a dar NameError al llamarla. Mudarlo a logica/")
+            _revisar_tabla(_hija)
+
+    _revisar_tabla(_symtable.symtable(SRC, "app", "exec"))
 
 
 # ============ Resultado ============
@@ -2110,7 +2180,11 @@ cuenta = Counter(p[0] for p in problemas)
 print(f"{ARCHIVO} — {len(LINEAS)} líneas")
 print(f"ERROR: {cuenta['ERROR']}   REVISAR: {cuenta['REVISAR']}   AVISO: {cuenta['AVISO']}\n")
 for nivel, linea, texto in problemas:
-    ubic = f"L{linea}" if linea else "  "
+    if linea and DE_DONDE:
+        _archivo, _renglon = DE_DONDE[linea - 1]
+        ubic = f"{_archivo}:{_renglon}"
+    else:
+        ubic = f"L{linea}" if linea else "  "
     print(f"[{nivel:7}] {ubic:>7}  {texto}")
     if linea and nivel == "ERROR":
         print(f"                    {LINEAS[linea - 1].strip()[:95]}")

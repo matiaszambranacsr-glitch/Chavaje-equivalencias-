@@ -7,17 +7,20 @@ qué proveedores, son el mismo repuesto. Corre con Streamlit sobre una base SQLi
 
 | archivo | qué es |
 |---|---|
-| `app.py` | La aplicación. Es un solo archivo a propósito: se despliega tal cual, sin paquete ni rutas que configurar. Arranca con un mapa de sus secciones. |
-| `nucleo/` | La misma lógica pero **sin Streamlit**, para poder usarla desde otro sistema. Se genera desde `app.py`. |
-| `auditar.py` | Revisa `app.py` y busca los errores que ya pasaron alguna vez. Correlo antes de subir un cambio. |
+| `app.py` | Lo que Streamlit corre en cada toque: la configuración de la página, el encabezado, la entrada y la navegación. Arranca con el mapa de todas las secciones de la app. |
+| `logica/` | Todo lo que no es una pantalla: la base, los códigos, las equivalencias, las copias, los proveedores. 17 archivos. Se carga **una vez** por proceso. |
+| `pantallas/` | Una pantalla por archivo (buscador, administrar, estadísticas...). Corren en cada toque, al final de `app.py`. |
+| `orden.py` | En qué orden corren las partes de `logica/` y las pantallas. Lo leen la app y las herramientas. |
+| `nucleo/` | La misma lógica pero **sin Streamlit**, para poder usarla desde otro sistema. Se genera desde `logica/`. |
+| `auditar.py` | Revisa la app entera y busca los errores que ya pasaron alguna vez. Correlo antes de subir un cambio. |
 | `requirements.txt` | Lo que hay que instalar. |
 | `Equivalencias` | El prototipo original, de antes de `app.py`. No lo usa nadie; queda por si querés mirarlo. Se puede borrar. |
 
 ## Antes de subir un cambio
 
 ```bash
-python3 auditar.py app.py        # tiene que dar ERROR 0
-python3 nucleo/generar.py        # regenerar el paquete desde app.py
+python3 auditar.py               # tiene que dar ERROR 0 (revisa la app entera)
+python3 nucleo/generar.py        # regenerar el paquete desde logica/
 python3 -m nucleo.pruebas        # tiene que decir "todo en verde"
 python3 revisar_con_gemini.py    # opcional: una segunda opinión sobre el diff
 ```
@@ -31,9 +34,11 @@ verdad, y el mensaje cuenta cuál fue. Si marca algo, conviene leerlo antes de d
 
 El último es de otra clase y no bloquea nada: ver *Una segunda opinión, de otro modelo*.
 
-## Cómo encontrar las cosas en `app.py`
+## Cómo encontrar las cosas
 
-Son 21.000 líneas, así que está partido en secciones con un encabezado de tres líneas:
+La app son 30.900 líneas repartidas en `app.py`, `logica/` y `pantallas/` (ver *La app
+partida en archivos*). Cada archivo está dividido en secciones con un encabezado de tres
+líneas:
 
 ```
 # ============================================
@@ -41,8 +46,9 @@ Son 21.000 líneas, así que está partido en secciones con un encabezado de tre
 # ============================================
 ```
 
-Buscando `# ===` se salta de una a otra. El índice completo está en el docstring del principio
-del archivo, y el auditor avisa si ese índice y las secciones dejan de coincidir.
+Buscando `# ===` se salta de una a otra. El índice completo, archivo por archivo, está en el
+docstring del principio de `app.py`, y el auditor avisa si ese índice y las secciones dejan de
+coincidir.
 
 El orden va de lo más básico a lo más específico: primero la conexión y el esquema, después el
 manejo de códigos, después las equivalencias, y las pantallas al final.
@@ -1648,6 +1654,63 @@ lo cita en piezas que no lo llevan. Son 15 culpables y 67 pendientes, en 0,0 s.
 El corte es por proveedor (`GROUP BY po.id, mp.id`) y no por total: un código de fábrica
 legítimo aparece en varias listas a la vez —es justo para eso que sirve— y contando todo junto
 ese sería el primero de la lista.
+
+## La app partida en archivos
+
+`app.py` tenía 30.800 líneas. Ahora:
+
+- **`logica/`**: las 55 secciones de funciones y datos, en 17 archivos por tema. Se cargan
+  **una vez por proceso**, todas en un mismo espacio de nombres, en el orden de `orden.py`.
+- **`pantallas/`**: las 8 pantallas, una por archivo. Corren en cada toque, en el mismo lugar
+  del flujo en que estaban, y se compilan una vez por cambio.
+- **`app.py`**: la configuración de la página, el encabezado, la entrada, la navegación y la
+  vuelta que ejecuta las pantallas.
+
+**Por qué un solo espacio de nombres y no módulos que se importan entre sí.** Son 566 funciones
+que se llaman por su nombre, sin prefijo, porque nacieron en un archivo. Como módulos habría
+que escribir cientos de imports cruzados, y con importaciones circulares el orden de carga
+decide qué nombre existe: un error que aparece recién al tocar el botón que usa esa función.
+Así, todo se sigue viendo como antes.
+
+**Cómo se controló que no se rompiera nada:**
+- La partición la hizo un programa, cortando en los encabezados de sección: cada una de las
+  30.806 líneas del original quedó **exactamente en un lugar**, ninguna perdida ni repetida.
+- Antes de cortar se analizó con `symtable` qué usa cada función. Una sola cosa de la lógica
+  dependía de la pantalla (`GRUPOS_MANTENIMIENTO` y `HERRAMIENTAS_MANTENIMIENTO`, que usa el
+  buscador de herramientas): se mudó a `logica/`. Nada de lo que corre al cargar la lógica
+  depende de quién está usando la app. Y nada usaba la «magia» de Streamlit (mostrar una
+  variable suelta), que solo funciona en el archivo principal.
+- `auditar.py` revisa la app entera: arma las tres partes en el orden en que corren y dice
+  `archivo:línea`. Tiene un control nuevo, el 40: una función de `logica/` que use un nombre
+  que solo existe en una pantalla (daría `NameError` al llamarla). Probado metiendo uno a
+  propósito: lo encuentra y dice dónde.
+- `nucleo/generar.py` lee la app partida y genera **exactamente los mismos archivos** que antes.
+- Los dos barridos (31 y 17 combinaciones de pantalla y usuario), las 19 pantallas en un iPhone
+  simulado, la revisión por tandas, las diez pruebas de la copia a GitHub y la de dos personas
+  decidiendo el mismo vínculo dan lo mismo que antes de partir.
+
+**Un cambio de código se toma sin reiniciar.** Las pantallas se recompilan solas si cambió el
+archivo. La lógica no alcanzaba con el vigilante de archivos de Streamlit: se probó cambiando
+un texto con el servidor andando, y la lógica seguía vieja. Cada sesión abierta tiene su propio
+vigilante, y solo las que estaban conectadas en el momento del cambio tiran la versión vieja.
+Una sesión nueva, o cualquiera si al subir un cambio no había nadie adentro, seguía con la
+lógica vieja hasta reiniciar. Ahora `app.py` mira en cada toque las fechas de los archivos de
+la lógica (19 consultas al disco, microsegundos) y, si alguno cambió, la vuelve a cargar.
+Probado: los dos cambios se ven en el toque siguiente. Probándolo apareció otro caso: un
+`app.py` nuevo con una lógica cargada antes de que existiera esa función. También se recarga.
+
+**Con 15 personas a la vez** (misma prueba que *15 personas a la vez*, dos rondas cada una):
+
+| | un archivo | partida |
+|---|---|---|
+| procesador del servidor | 19,4 y 21,4 s | **16,8 y 16,0 s** |
+| memoria, pico | 378 y 331 MB | **285 y 282 MB** |
+| errores | 0 | 0 |
+
+Es lo que se esperaba: antes, en cada toque de cada persona se volvían a definir 566 funciones
+y se rearmaba cada `@st.cache_data`. Ahora eso pasa una vez. Los tiempos de espera no se mueven
+de forma clara: entrar con 15 personas llegando juntas sigue siendo una cola sobre un solo
+procesador.
 
 ## Revisar sugeridas por tandas, y dos personas decidiendo el mismo vínculo
 

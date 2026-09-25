@@ -1,9 +1,15 @@
-"""Arma el paquete nucleo/ sacando el código TEXTUAL de app.py.
+"""Arma el paquete nucleo/ sacando el código TEXTUAL de la app (logica/, ver orden.py).
 No se reescribe nada a mano: se copian los segmentos exactos, así el paquete y la app dicen
 literalmente lo mismo y no hay forma de que se separen por una transcripción."""
 import ast, os, io
 
-SRC = open("/home/user/Chavaje-equivalencias-/app.py", encoding="utf-8").read()
+# La app está partida (ver orden.py): se lee entera, en el orden en que corre, como si fuera el
+# archivo único de antes. Los bloques se buscan por nombre, así que da igual en qué parte estén.
+import sys as _sys
+_sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+import orden
+
+SRC, _ = orden.fuente_completa()
 ARBOL = ast.parse(SRC)
 
 # Las líneas se parten UNA vez. ast.get_source_segment() vuelve a partir el archivo entero en
