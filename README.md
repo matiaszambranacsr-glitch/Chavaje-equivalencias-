@@ -1655,6 +1655,45 @@ El corte es por proveedor (`GROUP BY po.id, mp.id`) y no por total: un código d
 legítimo aparece en varias listas a la vez —es justo para eso que sirve— y contando todo junto
 ese sería el primero de la lista.
 
+## Escribir a la vez: importaciones, stock y confirmaciones
+
+**Importar mientras los demás trabajan.** 8 personas en el celular buscando y tocando «Se
+llevó» y «Pedir» sin parar, y en el medio se importa IMPERIAL (43.303 filas nuevas), contra un
+servidor de un procesador:
+
+| 8 personas escribiendo | sin importar | importando IMPERIAL |
+|---|---|---|
+| escrituras | 128 | 409 |
+| mediana / peor | 0,74 s / 1,9 s | 0,89 s / 4,5 s |
+| errores, «database is locked» | 0 | 0 |
+
+No hubo que tocar nada: la importación confirma fila por fila (autocommit), así que los demás
+entran entre fila y fila, y lo que sí es largo va con `BEGIN IMMEDIATE` y 8 s de espera.
+
+**El stock que se pisaba.** «✏️ Editar precio, costo y stock» escribía siempre el stock que
+mostraba la pantalla al dibujarse, aunque solo se cambiara el precio. Uno abre el editor con
+stock 10, otro cierra una venta de 2 (queda 8), el primero guarda el precio y el stock vuelve a
+10. `actualizar_precio_stock()` recibe ahora lo que la pantalla mostraba: si el stock no se
+cambió, no se escribe; si se cambió pero en la base ya no está lo que se mostraba, tampoco, y
+avisa cuánto hay ahora. Probado con las dos versiones:
+
+| caso | antes | ahora |
+|---|---|---|
+| A cambia solo el precio mientras B vende 2 | stock 10 (se perdió la venta) | **8** |
+| A corrige el stock a 20 mientras B vende 1 | 20 (se pisó la venta) | **7, y avisa** |
+| A corrige el stock sin que nadie más toque | 15 | 15 |
+
+Los demás cambios de stock (cerrar una reserva, cargar un remito) ya suman o restan sobre lo
+que hay, y no tienen este problema.
+
+**Las confirmaciones que no aparecían.** Contando toques contra filas en la base, no se perdió
+ninguna venta ni ningún pedido: 83 «Se llevó», 83 ventas. Pero 1 de cada 4 veces no aparecía el
+aviso. Siguiendo la pantalla cada 50 ms: si el aviso flotante anterior seguía visible (duran
+4 s), el nuevo no aparecía nunca. «Se llevó» y enseguida «Pedir», que es lo normal, mostraba
+solo el primero, y eso invita a tocar «Pedir» de nuevo (cada toque suma a «veces pedido»).
+Ahora la confirmación va **abajo de los botones**, donde se está mirando, y queda hasta el
+próximo toque (`mostrar_lo_anotado()`). Con 8 personas a la vez: 0 de 178 sin confirmación.
+
 ## La app partida en archivos
 
 `app.py` tenía 30.800 líneas. Ahora:

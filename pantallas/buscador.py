@@ -1135,11 +1135,13 @@ Casi todo lo que edita o borra algo pide la contraseña de administrador la prim
                                 colr2.button("🛒 Se llevó", key=f"vendido_{fila_stock['ID']}_{clean}",
                                               on_click=anotar_venta_y_avisar,
                                               args=(fila_stock["ID"], codigo_individual,
-                                                    f"{fila_stock['Marca']} - {fila_stock['Codigo']}"),
+                                                    f"{fila_stock['Marca']} - {fila_stock['Codigo']}",
+                                                    f"stock_{clean}"),
                                               help="Anota la venta para ir descubriendo equivalencias solas")
                                 colr3.button("📌 Pedir", key=f"pedir_repo_{fila_stock['ID']}_{clean}",
                                               on_click=pedir_reposicion_y_avisar,
-                                              args=(fila_stock["ID"], f"{fila_stock['Marca']} - {fila_stock['Codigo']}"),
+                                              args=(fila_stock["ID"], f"{fila_stock['Marca']} - {fila_stock['Codigo']}",
+                                                    f"stock_{clean}"),
                                               help="Marcar para reposición")
                         else:
                             # Se elige por ID y no por el rótulo: dos productos con la misma
@@ -1151,11 +1153,15 @@ Casi todo lo que edita o borra algo pide la contraseña de administrador la prim
                             colr2, colr3 = st.columns(2)
                             colr2.button("🛒 Se llevó", key=f"vendido_elegido_{clean}",
                                           on_click=anotar_venta_y_avisar,
-                                          args=(_elegido, codigo_individual, _rotulos[_elegido]),
+                                          args=(_elegido, codigo_individual, _rotulos[_elegido],
+                                                f"stock_{clean}"),
                                           help="Anota la venta para ir descubriendo equivalencias solas")
                             colr3.button("📌 Pedir", key=f"pedir_elegido_{clean}",
-                                          on_click=pedir_reposicion_y_avisar, args=(_elegido, _rotulos[_elegido]),
+                                          on_click=pedir_reposicion_y_avisar,
+                                          args=(_elegido, _rotulos[_elegido], f"stock_{clean}"),
                                           help="Marcar para reposición")
+
+                        mostrar_lo_anotado(f"stock_{clean}")
 
                         # Marcar favoritos / editar precio y stock
                         if seccion_plegable("✏️ Marcar favorito / editar precio, costo y stock",
@@ -1178,9 +1184,19 @@ Casi todo lo que edita o borra algo pide la contraseña de administrador la prim
                                     label_visibility="collapsed"
                                 )
                                 if candado('tocar precios y stock', colG.button("💾", key=f"save_{fila['ID']}_{clean}"), 'tocar_precios_y_stock', nivel="empleado"):
-                                    if actualizar_precio_stock(
-                                            fila["ID"], nuevo_precio, nuevo_stock,
-                                            st.session_state.get(f"costo_{fila['ID']}_{clean}")):
+                                    _guardado = actualizar_precio_stock(
+                                        fila["ID"], nuevo_precio, nuevo_stock,
+                                        st.session_state.get(f"costo_{fila['ID']}_{clean}"),
+                                        stock_mostrado=int(fila.get("Stock") or 0))
+                                    if _guardado == "stock_cambio":
+                                        c.execute("SELECT stock FROM productos WHERE id = ?",
+                                                  (fila["ID"],))
+                                        _ahora = (c.fetchone() or {"stock": None})["stock"]
+                                        st.warning(
+                                            f"Precio guardado. El stock NO: mientras editabas, "
+                                            f"alguien lo cambió y ahora hay {_ahora}. Si igual "
+                                            "querés corregirlo, buscá de nuevo y ponelo otra vez.")
+                                    elif _guardado:
                                         st.success("Guardado.")
                                     else:
                                         # Decirlo y no mentir un «Guardado»: el producto lo
@@ -1541,7 +1557,9 @@ Casi todo lo que edita o borra algo pide la contraseña de administrador la prim
                                        f"stock: {f.get('Stock') if f.get('Stock') is not None else 's/d'})")
                             cv2.button("🛒 Se llevó", key=f"vendido_txt_{fila_txt['ID']}_{f['ID']}",
                                         on_click=anotar_venta_y_avisar,
-                                        args=(f["ID"], texto_pedido, f"{f['Marca']} - {f['Codigo']}"))
+                                        args=(f["ID"], texto_pedido, f"{f['Marca']} - {f['Codigo']}",
+                                              f"txt_{fila_txt['ID']}"))
+                        mostrar_lo_anotado(f"txt_{fila_txt['ID']}")
                 if len(res_texto) > 15:
                     st.caption(f"(mostrando las primeras 15 de {len(res_texto)} — afiná la búsqueda "
                                 "para ver menos resultados)")

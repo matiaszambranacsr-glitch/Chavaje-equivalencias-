@@ -536,8 +536,17 @@ def aplicar_carga_remito(items_cotejados):
     return actualizados
 
 
-def actualizar_precio_stock(producto_id, precio, stock, costo=None):
-    """Guarda precio, stock y —si se pasa— el precio de costo. Devuelve False si el producto ya no está.
+def actualizar_precio_stock(producto_id, precio, stock, costo=None, stock_mostrado=None):
+    """Guarda precio, stock y —si se pasa— el precio de costo. Devuelve False si el producto ya no
+    está, "stock_cambio" si no se tocó el stock porque otro lo cambió mientras se editaba, y True
+    si se guardó todo.
+
+    EL STOCK NO SE PISA. La pantalla de edición mandaba siempre el stock que mostraba al
+    dibujarse, aunque solo se hubiera cambiado el precio. Con varias personas a la vez: uno abre
+    el editor con stock 10, otro cierra una venta de 2 (queda 8), el primero guarda el precio
+    nuevo y el stock vuelve a 10. Stock inventado y en silencio. Con `stock_mostrado` —lo que la
+    pantalla mostraba—: si no se cambió, el stock no se escribe; si se cambió pero en la base ya
+    no está lo que se mostraba, tampoco, y se avisa. El precio se guarda igual.
 
     El costo va como parámetro opcional para que las llamadas viejas sigan funcionando: hay
     varias en la app y cambiarlas todas de golpe es pedir un error tonto.
@@ -570,12 +579,20 @@ def actualizar_precio_stock(producto_id, precio, stock, costo=None):
         if costo is not None:
             c.execute("UPDATE productos SET precio_costo = ? WHERE id = ?",
                       (costo, producto_id))
-        c.execute("UPDATE productos SET precio = ?, stock = ? WHERE id = ?", (precio, stock, producto_id))
+        c.execute("UPDATE productos SET precio = ? WHERE id = ?", (precio, producto_id))
+        resultado = True
+        if stock_mostrado is None:
+            c.execute("UPDATE productos SET stock = ? WHERE id = ?", (stock, producto_id))
+        elif stock != stock_mostrado:
+            c.execute("UPDATE productos SET stock = ? WHERE id = ? AND COALESCE(stock, 0) = ?",
+                      (stock, producto_id, stock_mostrado))
+            if c.rowcount == 0:
+                resultado = "stock_cambio"
         # Solo se guarda un registro nuevo en el historial si el precio realmente cambió
         # (evita ensuciar el historial cada vez que se toca el stock sin tocar el precio).
         if precio_anterior != precio:
             c.execute("INSERT INTO historial_precios (producto_id, precio) VALUES (?, ?)", (producto_id, precio))
-    return True
+    return resultado
 
 
 def historial_precio_producto(producto_id, limite=50):
@@ -1194,20 +1211,32 @@ def solicitar_reposicion(producto_id):
         conn.commit()
 
 
-def anotar_venta_y_avisar(producto_id, termino_pedido, rotulo):
-    """Lo que corre al tocar «Se llevó». Sin el aviso el botón no mostraba nada: en el
-    celular eso invita a tocar de nuevo, y cada toque es otra venta anotada que después
-    pesa en las equivalencias sugeridas como si el cliente hubiera vuelto. Va con
-    st.toast y no con avisar(): avisar() escribe arriba de todo, y en el celular uno está
-    scrolleado abajo, en el resultado; el toast flota sobre lo que se esté mirando."""
+def anotar_venta_y_avisar(producto_id, termino_pedido, rotulo, donde=""):
+    """Lo que corre al tocar «Se llevó». Sin el aviso el botón no mostraba nada: en el celular
+    eso invita a tocar de nuevo, y cada toque es otra venta anotada que después pesa en las
+    equivalencias sugeridas como si el cliente hubiera vuelto.
+
+    El aviso va ABAJO DE LOS BOTONES, no flotando (ver mostrar_lo_anotado()). Iba con st.toast,
+    y medido en un iPhone simulado: si el aviso anterior seguía en pantalla —duran 4 s— el nuevo
+    no aparecía nunca; quedaba el viejo hasta vencerse. «Se llevó» y enseguida «Pedir», que es
+    lo normal en el mostrador, mostraba solo el primero, y el segundo invitaba a tocar de nuevo.
+    Tampoco con avisar(), que escribe arriba de todo y en el celular no se ve."""
     registrar_venta(producto_id, termino_pedido)
-    st.toast(f"🛒 Anotado: se llevó {rotulo}")
+    st.session_state.setdefault("_lo_anotado", {})[donde] = f"🛒 Anotado: se llevó {rotulo}"
 
 
-def pedir_reposicion_y_avisar(producto_id, rotulo):
+def pedir_reposicion_y_avisar(producto_id, rotulo, donde=""):
     """Lo mismo para «Pedir»: cada toque suma uno a «veces pedido»."""
     solicitar_reposicion(producto_id)
-    st.toast(f"📌 {rotulo} quedó en la lista para pedir")
+    st.session_state.setdefault("_lo_anotado", {})[donde] = f"📌 {rotulo} quedó en la lista para pedir"
+
+
+def mostrar_lo_anotado(donde=""):
+    """Muestra, abajo de los botones de «Se llevó» / «Pedir» de ese lugar, lo que se acaba de
+    anotar ahí. Queda a la vista hasta el próximo toque, justo donde se estaba mirando."""
+    texto = st.session_state.get("_lo_anotado", {}).pop(donde, None)
+    if texto:
+        st.success(texto)
 
 
 def listar_pedidos_reposicion(estado="pendiente"):
