@@ -131,7 +131,8 @@ if pagina == PAGINAS[4]:
             else:
                 explicar(
                     "Se puede automatizar: que la app suba el backup sola al repositorio.",
-                    "En **Settings → Secrets** de Streamlit Cloud, agregá estas dos líneas:\n\n"
+                    "En **Settings → Secrets** de Streamlit Cloud, agregá estas dos líneas "
+                    "ARRIBA DE TODO (antes de cualquier renglón entre corchetes):\n\n"
                     "```\ngithub_token = \"ghp_tu_token\"\ngithub_repo = \"usuario/repositorio\"\n"
                     "```\n\nEl token se saca en GitHub → Settings → Developer settings → "
                     "Personal access tokens, con permiso de escritura (`Contents: read and "

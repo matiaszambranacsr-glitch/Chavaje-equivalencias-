@@ -620,11 +620,16 @@ def validar_password(clave):
     secretos = secretos_app()
     # [admin_passwords] / [operador_passwords] en Streamlit Secrets, cada una con nombre:clave.
     # También soporta la forma anterior de una sola clave (admin_password) por compatibilidad.
-    admin_passwords = dict(secretos.get("admin_passwords", {}))
+    # Sin las claves de la copia a GitHub: pegadas al final de los secretos quedan adentro de
+    # la última sección (ver config_github()), y leídas como usuarios, el nombre del
+    # repositorio —que no es ningún secreto— entraba como contraseña de administrador.
+    admin_passwords = {n: p for n, p in dict(secretos.get("admin_passwords", {})).items()
+                       if not str(n).startswith("github_")}
     clave_unica = secretos.get("admin_password")
     if clave_unica:
         admin_passwords.setdefault("admin", clave_unica)
-    operador_passwords = dict(secretos.get("operador_passwords", {}))
+    operador_passwords = {n: p for n, p in dict(secretos.get("operador_passwords", {})).items()
+                          if not str(n).startswith("github_")}
 
     # El freno va ANTES de comparar nada, y también antes de validar_password_usuario(), que
     # calcula un PBKDF2 por cada empleado activo: sin el freno, cada intento fallido le cuesta

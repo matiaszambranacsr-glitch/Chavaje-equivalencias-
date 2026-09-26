@@ -164,6 +164,17 @@ def config_github():
         secretos = secretos_app()
         token = secretos.get("github_token")
         repo = secretos.get("github_repo")      # formato: "usuario/repositorio"
+        if not token or not repo:
+            # Pegadas al final de los secretos quedan ADENTRO de la última sección: en TOML,
+            # todo lo que viene después de «[operador_passwords]» es de esa sección, y
+            # arriba de todo no aparecen. Es lo primero que pasa al seguir «agregá estas dos
+            # líneas», y la copia no subía sin ningún error a la vista. Se buscan también
+            # adentro de cada sección.
+            for _valor in list(secretos.values()):
+                if hasattr(_valor, "get") and _valor.get("github_token") and _valor.get("github_repo"):
+                    secretos = _valor
+                    token, repo = _valor.get("github_token"), _valor.get("github_repo")
+                    break
     except Exception as _err:
         anotar_error("config_github", _err)
         return None
