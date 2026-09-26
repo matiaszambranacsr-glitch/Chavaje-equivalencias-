@@ -18,7 +18,7 @@ import time
 
 from playwright.sync_api import sync_playwright
 
-URL = os.environ.get("URL_DE_LA_APP", "https://elchavo.streamlit.app/")
+URL = os.environ.get("URL_DE_LA_APP", "https://equivalenciasdelchavo.streamlit.app/")
 MINUTOS_PARA_ARRANCAR = 4     # despertar una app dormida tarda uno o dos minutos
 
 

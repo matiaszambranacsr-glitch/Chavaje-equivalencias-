@@ -1986,11 +1986,10 @@ alarma de «la app está caída». Se puede correr a mano desde Actions → «Ma
 despierta» → Run workflow. Probado con la app andando, con una página que imita el cartel de
 dormida (la despierta) y con una que nunca despierta (sale con error).
 
-**Está en pausa.** La primera corrida en GitHub vio «You do not have access to this app or it
-does not exist» en `https://elchavo.streamlit.app/`: o la app es privada en Streamlit, o la
-dirección es otra. Streamlit contesta lo mismo en los dos casos. Hasta resolverlo, el horario
-está comentado en el workflow, para no mandar un mail de falla cada 4 horas. La dirección se
-cambia sin tocar código, en la variable `URL_DE_LA_APP` del repositorio.
+La dirección es `https://equivalenciasdelchavo.streamlit.app/`. Estuvo en pausa un tiempo
+porque tenía otra (`elchavo.streamlit.app`), y Streamlit contestaba «You do not have access to
+this app or it does not exist» —que es lo mismo que contesta para una app privada—. Si algún
+día cambia, se cambia sin tocar código, en la variable `URL_DE_LA_APP` del repositorio.
 
 Lo que no depende de la app: Streamlit puede reiniciar el servidor cuando quiera
 (mantenimiento, actualizaciones). Con lo de arriba, eso cuesta como mucho 15 minutos de datos,

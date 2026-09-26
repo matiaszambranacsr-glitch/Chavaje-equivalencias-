@@ -5,13 +5,11 @@
 name: Mantener la app despierta
 
 on:
-  # EN PAUSA: la primera prueba en GitHub vio «You do not have access to this app or it does
-  # not exist» en https://elchavo.streamlit.app/. O la app es privada en Streamlit (solo entran
-  # los invitados, y este navegador no tiene sesión) o la dirección es otra. Mientras tanto,
-  # corriéndolo cada 4 horas fallaría siempre y llegarían seis mails por día. Cuando esté
-  # resuelto, sacar el «#» de las dos líneas de abajo.
-  # schedule:
-  #   - cron: "7 */4 * * *"     # cada 4 horas (en hora UTC), a los 7 minutos
+  # Estuvo en pausa porque la dirección que tenía (elchavo.streamlit.app) no era la de la app:
+  # GitHub veía «You do not have access to this app or it does not exist». La de verdad es
+  # equivalenciasdelchavo.streamlit.app.
+  schedule:
+    - cron: "7 */4 * * *"     # cada 4 horas (en hora UTC), a los 7 minutos
   workflow_dispatch:
 
 jobs:
@@ -34,7 +32,7 @@ jobs:
         env:
           # La dirección se cambia sin tocar código: GitHub → Settings → Secrets and variables
           # → Actions → Variables → «URL_DE_LA_APP».
-          URL_DE_LA_APP: ${{ vars.URL_DE_LA_APP || 'https://elchavo.streamlit.app/' }}
+          URL_DE_LA_APP: ${{ vars.URL_DE_LA_APP || 'https://equivalenciasdelchavo.streamlit.app/' }}
       - name: Guardar la captura si falló
         if: failure()
         uses: actions/upload-artifact@v4
