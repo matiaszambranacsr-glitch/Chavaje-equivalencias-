@@ -631,6 +631,7 @@ def auditar_equivalencias_cargadas(limite=2000, tope_confianza=35, revisar=None)
     ventas_confirman = pares_confirmados_por_ventas()
 
     escalas = escalas_de_precio()
+    rubros_oem = rubros_de_los_codigos_de_fabrica()
     _ya_juzgados = {}   # código -> ¿las reglas de hoy ya no lo tomarían? Cacheado: los 24.774
                         # vínculos se apoyan en muchos menos códigos distintos.
     # Lo mismo que en recalcular_confianzas(): a cuántos productos se cuelga cada código de
@@ -664,7 +665,9 @@ def auditar_equivalencias_cargadas(limite=2000, tope_confianza=35, revisar=None)
             vendido_como_reemplazo=ventas_confirman.get((min(f["a"], f["b"]),
                                                           max(f["a"], f["b"])), 0),
             codigo_puente=puente, productos_del_puente=grados.get(id_puente, 0),
-            escalas=escalas
+            escalas=escalas,
+            familia_a=rubro_del_codigo_frente_a(rubros_oem, f["a"], f["desc_a"], f["desc_b"]),
+            familia_b=rubro_del_codigo_frente_a(rubros_oem, f["b"], f["desc_b"], f["desc_a"])
         )
         for lado in ("a", "b"):
             malo, _ = codigo_sospechoso(f[f"cod_{lado}"], f.get(f"desc_{lado}") or "")
@@ -777,6 +780,7 @@ def recalcular_confianzas(limite=20000, progreso=None, solo_faltantes=True):
     medidas = cargar_medidas_de_varios([f["a"] for f in filas] + [f["b"] for f in filas])
     patrones = aprender_de_las_decisiones()
     escalas = escalas_de_precio()
+    rubros_oem = rubros_de_los_codigos_de_fabrica()
     # A cuántos productos se cuelga cada código de fábrica. Se cuenta de una sola vez para todo
     # el lote: preguntarlo vínculo por vínculo serían miles de consultas para el mismo dato.
     grados = {}
@@ -809,7 +813,9 @@ def recalcular_confianzas(limite=20000, progreso=None, solo_faltantes=True):
             vendido_como_reemplazo=ventas_confirman.get((min(f["a"], f["b"]),
                                                           max(f["a"], f["b"])), 0),
             codigo_puente=puente, productos_del_puente=grados.get(id_puente, 0),
-            escalas=escalas
+            escalas=escalas,
+            familia_a=rubro_del_codigo_frente_a(rubros_oem, f["a"], f["desc_a"], f["desc_b"]),
+            familia_b=rubro_del_codigo_frente_a(rubros_oem, f["b"], f["desc_b"], f["desc_a"])
         )
         if f["a"] not in aprobados and f["b"] not in aprobados:
             for lado in ("a", "b"):

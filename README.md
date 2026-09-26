@@ -4308,6 +4308,76 @@ de un Excel ajeno que traiga `<script>` se dibujaba como código de verdad.
 de código markdown ya se escriben literales. Escapándolos se vería `Tow&amp;Country-300M` en vez
 de `Tow&Country-300M`, que es un código real de la base.
 
+## Motores leídos como códigos, juntas de otro auto y rubros heredados
+
+Tres cosas que se vieron en capturas del uso real, las tres en las equivalencias.
+
+### 1. «F6L913», «OHC181» y «STAND.5» no son códigos de fábrica
+
+Al importar la lista de IMPERIAL con «buscar códigos originales en la descripción», la vista
+previa ofrecía como códigos de fábrica cosas como `F6L913` y `BF6L913` (de «DEUTZ
+F6L913/BF6L913»), `OHC181` (de «RENAULT TORNADO 4BANC./OHC181/»), `FA6L714` o `STAND.5` (de
+«LLAVE FIJA T STAND.5 mm»). Son designaciones de motor y medidas: si entran como códigos,
+unen productos que no tienen nada que ver.
+
+En `formas_solo_texto` (logica/codigos.py) entraron las formas de las designaciones de motor
+de Deutz, Perkins, Isuzu, Renault, Iveco, Indenor y Scania, más OHC/OHV, «MOT.», los rangos de
+años («1500-1800»), «16V-307» y «PALABRA.5». Cada una se midió contra los códigos reales de
+proveedor que hay en la base y contra los puentes buenos: **ninguna toca un código real**
+(`04283299`, `T-36042` y `LKS026` se siguen tomando). Con la lista de IMPERIAL, los puentes
+hacia otras listas bajaron de 16 a 5, y los 5 que quedan son números de verdad.
+
+La vista previa, además, ahora aplica el mismo filtro que la importación («el mismo número
+repetido en muchas filas es un motor, no una pieza»), así que muestra lo que de verdad va a
+entrar.
+
+### 2. La misma junta de otro auto
+
+La junta de tapa de cilindros de la S10/Trail Blazer salía con 90 puntos contra la del Corsa, y
+con 100 contra la de un Isuzu. Las dos «coincidían» en todo lo que se miraba: el rubro, la
+palabra CHEVROLET y el espesor. Tres arreglos:
+
+- **La marca sola no alcanza.** Si las dos descripciones nombran modelos y no comparten
+  ninguno —y ninguna nombra al de la otra, ni comparten un código de motor—, son autos
+  distintos. Solo cuando las dos son específicas (tres modelos o menos): una lista larga de un
+  sensor que va en veinte autos no se contradice por anotar otros veinte.
+- **Un modelo compartido tampoco, si las marcas no coinciden.** «S10-TRAIL Blazer» y «Nissan
+  X-TRAIL» compartían TRAIL. Las marcas que comparten motores y plataformas (GM con Chevrolet
+  y Opel, Peugeot con Citroën, Fiat con Chrysler e Iveco, el grupo Volkswagen, Renault con
+  Nissan...) cuentan como la misma, y las que hacen motores para las demás (MWM, Cummins,
+  Perkins...) no contradicen nunca.
+- **El espesor solo no prueba nada.** Separa las tres variantes de una misma junta, pero dos
+  juntas de motores distintos pueden medir 1,10 las dos. Ahora las medidas cuentan como prueba
+  a favor solo si hay alguna que identifique la pieza (un diámetro, un largo). El espesor suma
+  cuando las descripciones ya dijeron que es la misma junta del mismo auto: ahí confirma que es
+  la misma variante.
+
+Lo que el texto **contradice** —autos, marcas o modelos distintos— ahora tumba el par, igual
+que las medidas que no coinciden. Antes solo dejaba de sumar, y con «mismo rubro» y «precio
+parecido» el par llegaba igual a 75 y se aprobaba solo. No aplica cuando el par está unido por
+un número (un código de fábrica, o el código de uno escrito en la descripción del otro): ahí la
+pieza la dice el número, y que cada lista anote autos distintos es lo normal.
+
+Medido sobre la cola real (12.747 vínculos): **356 pasan de «limpios» a «para revisar»**; en
+las muestras revisadas eran juntas de otro motor, sensores de otra marca, la S10 contra la
+X-Trail. La junta que sí es la de la S10 1,30 mm (TC-804-11 3M) sigue aprobada.
+
+### 3. El rubro de un código de fábrica es el de los que lo citan
+
+El producto de un código de fábrica copia la descripción de la **primera** fila que lo nombró.
+El 2H0919050B es la bomba de combustible de la Amarok, pero la primera fila que lo citó fue el
+filtro de esa bomba («FILTRO BOMBA DE COMBUSTIBLE ... REF ORIG 2H0919050B»), así que el código
+quedó como «Filtros» y las dos bombas que lo citan salían con **0/100 y «Son de rubros
+distintos»**.
+
+Ahora el rubro de cada código de fábrica sale de la mayoría de los productos unidos a él (al
+menos dos, y más de la mitad), en los vínculos cargados y en los pendientes. Con eso, las dos
+bombas pasan de 30 a 85. Contra la fila de la que el código sacó su descripción no se aplica:
+ahí los dos lados son el mismo texto. Se usa en la revisión de pendientes, en la auditoría de
+vínculos cargados y en el recálculo de confianzas (por eso `VERSION_CONFIANZA` pasó a «4»: los
+puntajes guardados se recalculan solos). En la cola real, 37 reguladores de presión que
+estaban «para revisar» pasan a limpios, y ninguno limpio cae.
+
 ## Una firma de foto podía ser un programa
 
 Las firmas visuales de las fotos se guardan con `pickle`, y `pickle` **no es un formato de

@@ -758,6 +758,80 @@ def familia_para_comparar(descripcion):
     return clasificar_repuesto(descripcion)
 
 
+def rubros_de_los_codigos_de_fabrica():
+    """{id de un producto OEM: su rubro}, para los códigos de fábrica cuyo rubro no es el de
+    su propia descripción sino el de los productos que lo citan.
+
+    El producto OEM no tiene descripción propia: se crea copiando la de la PRIMERA fila de la
+    lista que nombró ese número. Si esa fila era de otra pieza, el código hereda un rubro que
+    no es el suyo. El caso que lo mostró: el 2H0919050B es la bomba de combustible de la
+    Amarok, y lo citan dos bombas de FISPA (64051 y LEFS045) y también el filtro de esa bomba
+    (24075, «FILTRO BOMBA DE COMBUSTIBLE ... REF ORIG 2H0919050B»). El filtro apareció primero,
+    el código quedó como «Filtros», y las dos bombas salían con 0/100 y «Son de rubros
+    distintos: Filtros y Combustible». Es al revés: el que no es el mismo repuesto es el filtro.
+
+    Se decide por mayoría entre los productos de proveedor que están unidos al código, en los
+    vínculos cargados y en los pendientes: hace falta que al menos dos digan el mismo rubro y
+    que sean más de la mitad. Si no hay mayoría clara, queda el de la descripción.
+    Se devuelven solo los que cambian. Una consulta por tabla, para todos los códigos de una
+    vez: lo llaman el análisis de la cola, la auditoría y el recálculo de confianzas, que
+    recorren miles de vínculos."""
+    from collections import Counter
+    vecinos = {}
+    propias = {}
+    for tabla in ("equivalencias", "equivalencias_pendientes"):
+        for lado, otro in (("producto_a_id", "producto_b_id"), ("producto_b_id", "producto_a_id")):
+            try:
+                c.execute(f"""SELECT o.id AS oem, o.descripcion AS desc_oem,
+                                     x.id AS xid, x.descripcion AS desc_x
+                              FROM {tabla} e
+                              JOIN productos o ON o.id = e.{lado}
+                              JOIN marcas mo ON mo.id = o.marca_id
+                              JOIN productos x ON x.id = e.{otro}
+                              JOIN marcas mx ON mx.id = x.marca_id
+                              WHERE mo.tipo = 'OEM' AND mx.tipo <> 'OEM'""")
+                for r in c.fetchall():
+                    propias[r["oem"]] = r["desc_oem"]
+                    vecinos.setdefault(r["oem"], {})[r["xid"]] = r["desc_x"]
+            except sqlite3.OperationalError as _err:
+                anotar_error("rubros_de_los_codigos_de_fabrica", _err)
+                return {}
+    rubro_de = {}
+
+    def _rubro(desc):
+        if desc not in rubro_de:
+            rubro_de[desc] = familia_para_comparar(desc) if desc else "Sin clasificar"
+        return rubro_de[desc]
+
+    salida = {}
+    for oem, descs in vecinos.items():
+        if len(descs) < 2:
+            continue
+        votos = Counter(f for f in map(_rubro, descs.values()) if f != "Sin clasificar")
+        if not votos:
+            continue
+        rubro, cuantos = votos.most_common(1)[0]
+        if cuantos >= 2 and cuantos * 2 > sum(votos.values()) and rubro != _rubro(propias[oem]):
+            salida[oem] = rubro
+    return salida
+
+
+def rubro_del_codigo_frente_a(rubros_oem, producto_id, su_descripcion, descripcion_del_otro):
+    """El rubro por mayoría de rubros_de_los_codigos_de_fabrica(), o None para usar el de la
+    descripción.
+
+    Contra la fila de la que el código sacó su descripción NO se usa: ahí los dos dicen lo
+    mismo porque son la misma fila, y el rubro tiene que salir igual de los dos lados. Sin
+    esta condición, «Junta Salida de Escape FIAT ... (4309031)» contra su propio 4309031 salía
+    «rubros distintos: Juntas y retenes y Escape», porque los otros productos que citan ese
+    número son juntas de Illinois que el clasificador pone en otro rubro."""
+    if not rubros_oem or producto_id not in rubros_oem:
+        return None
+    if normalizar_texto(su_descripcion or "") == normalizar_texto(descripcion_del_otro or ""):
+        return None
+    return rubros_oem[producto_id]
+
+
 # ============================================================
 # CATÁLOGOS DE APLICACIONES (qué repuesto le va a cada auto)
 # ============================================================
@@ -1015,6 +1089,12 @@ _RE_COMA_DECIMAL = re.compile(r'(?<=\d),(?=\d)')
 _RE_SOLO_MOTORIZACION = re.compile(
     r'^(?:\d{1,2}[.,]\d[A-Z]{0,3}|\d{1,2}V)'
     r'(?:/(?:\d{1,2}[.,]\d[A-Z]{0,3}|\d{1,2}V))*/?$')
+
+# Una medida suelta o la palabra que la anuncia: «ESP», «1.10MM», «1,63MM». En una junta el
+# espesor dice cuál de las variantes es, no para qué auto va: dos juntas de 1,10 mm de dos
+# motores distintos lo comparten igual. Ver «la marca sola no alcanza» en firmas_compatibles().
+# El número entero pelado NO: «128» es un Fiat 128, y ese sí dice para qué auto es.
+_RE_MEDIDA_SUELTA = re.compile(r'^(?:ESP|ESPESOR|\d+[.,]\d+(?:MM|CM|MTS?)?|\d+(?:MM|CM|MTS?))$')
 
 _RUIDO_EN_FIRMA = {
     "DESPIECE", "JUEGO", "JGO", "KIT", "PARA", "CON", "SIN", "DEL", "LOS", "LAS", "POR",
@@ -1516,12 +1596,21 @@ def _firma_de_producto(descripcion, producto_id=None, codigo_clean=None):
     #     salían «autos distintos» y el par se rechazaba de entrada. Son 3.705 descripciones;
     #   · y el camión BED FORD se leía como FORD, con lo cual una junta de diferencial de un
     #     Bedford podía emparejarse con cualquier repuesto de un Fiesta.
-    autos = set()
+    autos, marcas = set(), set()
     for _mv_hallada, _cat_mv, _resto_mv in marcas_vehiculo_en(texto):
         autos.update(w for w in _mv_hallada.split() if len(w) >= 3)
+        marcas.add(_mv_hallada)
+    # Las marcas y los MODELOS se guardan también aparte. Ver «la marca sola no alcanza» en
+    # firmas_compatibles(): compartir CHEVROLET no dice nada si una es de S10 y la otra de
+    # Corsa, y compartir TRAIL tampoco si una es la Trail Blazer de Chevrolet y la otra la
+    # X-Trail de Nissan. La lista de modelos conocidos trae también las marcas y sus
+    # abreviaturas (CHEVROLET, FIAT, CHEV, PEU, REN), y por eso se descuentan.
+    modelos = set()
     for w in palabras:
         if len(w) >= 3 and w in MODELOS_CONOCIDOS:
             autos.add(w)
+            if w not in _PALABRAS_DE_MARCA_DE_VEHICULO:
+                modelos.add(w)
 
     # El sustantivo principal: en estas descripciones la pieza va primero
     # («CAPUCHON bujía...», «ANILLO bujía...»). Es lo que separa dos piezas del mismo rubro.
@@ -1554,7 +1643,7 @@ def _firma_de_producto(descripcion, producto_id=None, codigo_clean=None):
 
     return {"familia": familia, "nucleo": nucleo, "cabeza": cabeza, "autos": autos,
             "pieza": pieza, "aplicacion": set(aplicacion),
-            "modelos_numericos": modelos_numericos,
+            "modelos_numericos": modelos_numericos, "modelos": modelos, "marcas": marcas,
             "siglas": siglas, "marca_auto": marca_auto, "posicion": posicion,
             "cilindradas": cilindradas, "vias": vias, "texto": limpio}
 
@@ -1600,6 +1689,45 @@ def palabras_que_dicen_algo(comunes, cuenta_palabras, total_descripciones):
         return set(comunes)
     tope = max(1, int(total_descripciones * PORCENTAJE_PALABRA_GENERICA / 100))
     return {w for w in comunes if cuenta_palabras.get(w, 0) <= tope}
+
+
+# Cada palabra con que se escribe una marca de vehículo, abreviaturas incluidas. Ninguna es un
+# modelo: «modelos distintos: VECTRA vs CHEV» comparaba un modelo contra la marca abreviada.
+# Van también las de marcas de dos palabras —NEW de NEW HOLLAND—, y está bien que vayan: «NEW
+# Beetle» contra «New Fiesta» no son el mismo modelo por decir los dos NEW.
+_PALABRAS_DE_MARCA_DE_VEHICULO = {p for m in MARCAS_VEHICULO for p in re.split(r'[\s.\-]+', m)
+                                  if len(p) >= 2} | set(ALIAS_MARCA_VEHICULO.values())
+
+# Marcas que comparten motores y plataformas: una pieza de una puede ser la misma de la otra, y
+# que una lista diga GM y la otra CHEVROLET, o una PEUGEOT y la otra CITROEN, no es una
+# contradicción. Son las familias históricas, las que se ven en el parque argentino; no el
+# grupo de hoy (con Stellantis entero, «marcas distintas» no cortaría casi nunca).
+_FAMILIAS_DE_MARCAS = [
+    {"CHEVROLET", "GM", "OPEL", "VAUXHALL", "DAEWOO", "GMC", "BUICK", "PONTIAC", "CADILLAC",
+     "OLDSMOBILE", "SATURN"},
+    {"PEUGEOT", "CITROEN"},
+    {"FIAT", "ALFA ROMEO", "LANCIA", "CHRYSLER", "JEEP", "DODGE", "RAM", "IVECO"},
+    {"VOLKSWAGEN", "AUDI", "SEAT", "SKODA", "PORSCHE"},
+    {"RENAULT", "NISSAN", "DACIA", "INFINITI", "MITSUBISHI"},
+    {"FORD", "MAZDA", "VOLVO", "LINCOLN", "MERCURY"},
+    {"TOYOTA", "LEXUS", "DAIHATSU"},
+    {"HYUNDAI", "KIA", "GENESIS"},
+    {"HONDA", "ACURA"},
+    {"LAND ROVER", "ROVER", "JAGUAR"},
+    {"MERCEDES BENZ", "SMART"},
+    {"BMW", "MINI"},
+]
+# Las que hacen MOTORES para las demás: una junta de MWM va en la S10 y en la Ranger, un sensor
+# Cummins va en un Iveco. Que una descripción nombre al motor y la otra al vehículo no dice que
+# sean autos distintos.
+_MARCAS_DE_MOTORES = {"MWM", "CUMMINS", "PERKINS", "DEUTZ", "CATERPILLAR", "YANMAR", "KUBOTA"}
+
+
+def _marcas_que_se_cruzan(marcas_a, marcas_b):
+    """¿Nombran alguna marca en común, o de la misma familia, o una es de motores?"""
+    if (marcas_a & marcas_b) or (marcas_a | marcas_b) & _MARCAS_DE_MOTORES:
+        return True
+    return any(fam & marcas_a and fam & marcas_b for fam in _FAMILIAS_DE_MARCAS)
 
 
 def firmas_compatibles(a, b, minimo_nucleo=2, cuenta_palabras=None, total_descripciones=0):
@@ -1683,7 +1811,40 @@ def firmas_compatibles(a, b, minimo_nucleo=2, cuenta_palabras=None, total_descri
     # el control de «para qué auto es». Se calcula acá porque el control de la pieza lo
     # necesita para el caso de una sola palabra.
     apl_comunes = {w for w in (a.get("aplicacion") or set()) & (b.get("aplicacion") or set())
-                   if not _RE_SOLO_MOTORIZACION.match(w)}
+                   if not _RE_SOLO_MOTORIZACION.match(w) and not _RE_MEDIDA_SUELTA.match(w)}
+
+    # LA MARCA SOLA NO ALCANZA cuando las dos nombran modelos y no comparten ninguno. Se vio en
+    # las sugerencias: «Jta.Tapa Cil. Chevrolet S10-Trail Blazer ESP 1.10MM» salía con 90
+    # puntos contra «Junta Tapa de Cilindros CHEVROLET (ESP 1.10mm) COMBO CORSA ASTRA TIGRA».
+    # Los autos «coincidían» porque las dos dicen CHEVROLET, y lo demás que compartían era el
+    # espesor y la palabra ESP: la misma junta, de otro motor.
+    # No corta si comparten algo de la aplicación que no sea una medida —un código de motor
+    # como Z13DT o 4FB1 vale: el mismo motor va en autos distintos— ni si el modelo de una
+    # está escrito en cualquier lado de la otra, por lo mismo que con los modelos numéricos:
+    # la lista de modelos conocidos no los tiene a todos, y un CORSA puede no estar anotado.
+    _mod_a, _mod_b = a.get("modelos") or set(), b.get("modelos") or set()
+    # Y al revés: comparten una palabra de modelo pero las marcas no coinciden. «S10-Trail
+    # Blazer» de Chevrolet contra «X-TRAIL» de Nissan compartían TRAIL, y con eso los autos
+    # «coincidían». El modelo compartido no cuenta como respaldo acá, justamente porque es la
+    # palabra que se está poniendo en duda; un código de motor en común sí.
+    _mar_a, _mar_b = a.get("marcas") or set(), b.get("marcas") or set()
+    if (_mar_a and _mar_b and not _marcas_que_se_cruzan(_mar_a, _mar_b)
+            and not (apl_comunes - _mod_a - _mod_b)):
+        return False, (f"marcas distintas: {'/'.join(sorted(_mar_a)[:2])} "
+                       f"vs {'/'.join(sorted(_mar_b)[:2])}")
+    # Solo cuando las dos son ESPECÍFICAS: tres modelos o menos de cada lado. Una lista larga
+    # —«SENSOR DE DETONACION FIAT 500 BRAVO IDEA PUNTO...» contra «Fiat BRAVA DOBLO»— es de
+    # una pieza que va en muchos autos, y cada proveedor anota los que quiere: que no se pisen
+    # no dice que sean piezas distintas. Una junta de tapa de cilindros de S10 y Trail Blazer
+    # contra una de Corsa, Astra y Tigra, sí.
+    if (_mod_a and _mod_b and not (_mod_a & _mod_b) and not apl_comunes
+            and len(_mod_a) <= 3 and len(_mod_b) <= 3):
+        _texto_a, _texto_b = a.get("texto") or "", b.get("texto") or ""
+        _lo_nombra = (any(re.search(rf'\b{re.escape(m)}\b', _texto_b) for m in _mod_a)
+                      or any(re.search(rf'\b{re.escape(m)}\b', _texto_a) for m in _mod_b))
+        if not _lo_nombra:
+            return False, (f"modelos distintos: {'/'.join(sorted(_mod_a)[:2])} "
+                           f"vs {'/'.join(sorted(_mod_b)[:2])}")
 
     # LAS DOS PREGUNTAS, POR SEPARADO. Antes era una sola bolsa de palabras y «comparten dos»
     # alcanzaba, sin mirar CUÁLES. Las dos formas de equivocarse salían de ahí, y las dos se
@@ -1874,7 +2035,44 @@ def pares_de_kit_y_pieza(pares):
     return salida
 
 
-def evidencia_cruzada(id_a, id_b, cuenta_palabras=None, total_descripciones=None):
+# Los motivos de firmas_compatibles() que CONTRADICEN, y no solo dejan de confirmar. «Solo
+# comparten una palabra» quiere decir que el texto no alcanza para opinar; «modelos distintos:
+# S10 vs CORSA» quiere decir que el texto dice que es otro auto. Los primeros no suman; estos
+# tumban el par, igual que las medidas que se contradicen.
+# Antes eran solo la posición y las siglas, y el resto quedaba callado: la junta de la S10 con
+# la de la X-Trail de Nissan no tenía ninguna evidencia a favor, pero con «mismo rubro» y
+# «precio parecido» llegaba a 75 y se aprobaba sola.
+# «Piezas distintas» no está, a propósito: sale de comparar la primera palabra, y BULBO y
+# SENSOR, o CARCASA y BASE de termostato, son la misma pieza dicha de otra forma.
+_MOTIVOS_QUE_CONTRADICEN = ("posiciones distintas", "siglas distintas", "autos distintos",
+                            "marcas distintas", "modelos distintos", "cilindradas distintas",
+                            "distinta cantidad de vías")
+# Los que hablan del AUTO. Esos no cuentan cuando el par está unido por un código: ver
+# _unidos_por_codigo().
+_MOTIVOS_DEL_AUTO = ("autos distintos", "marcas distintas", "modelos distintos",
+                     "cilindradas distintas")
+
+
+def _unidos_por_codigo(pa, pb):
+    """¿El par está unido por un número, y no por el parecido de las descripciones?
+
+    Un lado es un código de fábrica, o el código de uno está escrito en la descripción del
+    otro («... REF ORIG 0281006325» contra el 0281 006 325 de otra lista). Ahí la pieza la dice
+    el número, y que cada lista nombre autos distintos es lo normal: un sensor Bosch va en
+    diez marcas y cada proveedor anota las que le parecen. Medido sobre la cola real: sin esta
+    excepción, 64 pares de «código escrito en la descripción» caían por «autos distintos» o
+    «modelos distintos», y los que se miraron eran el mismo número de Bosch."""
+    if "OEM" in {(pa.get("tipo") or "").upper(), (pb.get("tipo") or "").upper()}:
+        return True
+    for yo, otro in ((pa, pb), (pb, pa)):
+        codigo = sanitizar(yo.get("codigo_raw") or "")
+        if len(codigo) >= 6 and codigo in sanitizar(otro.get("descripcion") or ""):
+            return True
+    return False
+
+
+def evidencia_cruzada(id_a, id_b, cuenta_palabras=None, total_descripciones=None,
+                      rubros_oem=None):
     """Corre TODOS los métodos sobre un mismo par y cuenta cuántos coinciden.
 
     Es la mejora de precisión más grande que faltaba. Hasta ahora cada método trabajaba solo:
@@ -1888,6 +2086,9 @@ def evidencia_cruzada(id_a, id_b, cuenta_palabras=None, total_descripciones=None
     Y al revés, lo que más precisión gana: los VETOS. Si las medidas se contradicen, no importa
     cuántos métodos digan que sí — no es la misma pieza. Antes eso era una alarma más entre
     varias; acá tumba el par.
+
+    rubros_oem es lo de rubros_de_los_codigos_de_fabrica(), para no tomarle al código de
+    fábrica el rubro de la fila que lo nombró primero. Quien llama en un bucle lo pasa hecho.
 
     Devuelve (a_favor, vetos, veredicto)."""
     c.execute(f"""SELECT p.id, p.codigo_raw, p.codigo_clean, p.descripcion, p.precio,
@@ -1928,6 +2129,14 @@ def evidencia_cruzada(id_a, id_b, cuenta_palabras=None, total_descripciones=None
     # 2. Descripción
     fa = firma_de_producto(pa["descripcion"], id_a, pa["codigo_clean"])
     fb = firma_de_producto(pb["descripcion"], id_b, pb["codigo_clean"])
+    # Copia, no se toca la firma: es la misma para todos los que la piden. Ver
+    # firma_de_producto().
+    _rub_a = rubro_del_codigo_frente_a(rubros_oem, id_a, pa["descripcion"], pb["descripcion"])
+    _rub_b = rubro_del_codigo_frente_a(rubros_oem, id_b, pb["descripcion"], pa["descripcion"])
+    if fa and _rub_a:
+        fa = dict(fa, familia=_rub_a)
+    if fb and _rub_b:
+        fb = dict(fb, familia=_rub_b)
     # El conteo de palabras del catálogo entero se puede pasar hecho, y hay que pasarlo cuando
     # se llama a esto en un bucle. Cada llamada cuesta un COUNT + SUM(LENGTH(...)) sobre toda
     # la tabla para saber si el caché sigue vigente, más deserializar el diccionario de 100.000
@@ -1947,13 +2156,22 @@ def evidencia_cruzada(id_a, id_b, cuenta_palabras=None, total_descripciones=None
                                  pa.get("tipo"), pb.get("tipo"))
     if ok_desc:
         a_favor.append(f"🔤 las descripciones concuerdan ({motivo_desc})")
+        # El espesor solo no prueba que sea la misma pieza (ver el final de
+        # comparar_medidas()), pero cuando las descripciones ya dicen que es la misma junta del
+        # mismo auto, que además midan igual confirma que es la MISMA VARIANTE: de las tres
+        # juntas de un motor, la del mismo espesor. «Jta.Tapa Cil. CHEVROLET CORSA ESP 1,00MM»
+        # contra «Junta Tapa de Cilindros CHEVROLET (ESP 1.00MM) CORSA...» es eso.
+        # Solo el espesor: la posición y las vías salen del mismo texto que ya se comparó.
+        if coinciden is None and detalle_med.startswith("Solo coinciden en espesor:"):
+            a_favor.append("📐 el espesor coincide: es la misma variante")
     elif _kit_de:
         vetos.append(f"📦 no son equivalentes: {_kit_de}. El buscador te lo ofrece igual, "
                       "como kit, cuando buscás la pieza suelta")
     elif fa and fb and fa["familia"] != "Sin clasificar" and fb["familia"] != "Sin clasificar":
         if fa["familia"] != fb["familia"]:
             vetos.append(f"🧩 rubros distintos: «{fa['familia']}» y «{fb['familia']}»")
-        elif "posiciones distintas" in motivo_desc or "siglas distintas" in motivo_desc:
+        elif (motivo_desc.startswith(_MOTIVOS_QUE_CONTRADICEN)
+              and not (motivo_desc.startswith(_MOTIVOS_DEL_AUTO) and _unidos_por_codigo(pa, pb))):
             vetos.append(f"🔤 {motivo_desc}")
 
     # 3. El catálogo del fabricante: ¿los da para el mismo auto?

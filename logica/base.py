@@ -335,7 +335,7 @@ VERSION_NORMALIZACION = "2"
 # reglas de hoy están mal. Sin esta marca, eso no se entera nadie hasta tropezárselo.
 # Subir el número cuando cambien las reglas de evaluar_equivalencia(). El recálculo NO corre al
 # abrir la app —son 12,8 s— sino en la tarea de fondo, igual que el descubrimiento.
-VERSION_CONFIANZA = "3"
+VERSION_CONFIANZA = "4"
 
 # La versión del LECTOR DE MEDIDAS. Mismo mecanismo: las medidas se deducen de la descripción
 # una vez y quedan guardadas, así que cuando el lector aprende a leer algo nuevo —el espesor de

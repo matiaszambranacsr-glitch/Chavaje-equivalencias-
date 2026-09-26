@@ -304,7 +304,20 @@ def comparar_medidas(a, b, tolerancia_pct=3):
         return None, "Ninguno de los dos tiene medidas cargadas todavía."
     if diferencias:
         return False, "NO coinciden: " + "; ".join(diferencias)
+    # Que coincidan SOLO en algo que distingue variantes no prueba que sea la misma pieza.
+    # El espesor separa las tres juntas de un mismo motor, pero dos juntas de motores
+    # distintos pueden medir 1,10 las dos: así salía la de una S10 «confirmada» contra la de
+    # un Corsa, con «las medidas coinciden (espesor)» como una de sus dos evidencias. Lo mismo
+    # la posición o la cantidad de vías: si no coinciden, son otra pieza; si coinciden, no
+    # dicen cuál. Hace falta al menos una medida que identifique —un diámetro, un largo—.
+    if all(etiqueta in _MEDIDAS_QUE_SOLO_DISTINGUEN for etiqueta in comparadas):
+        return None, ("Solo coinciden en " + ", ".join(comparadas)
+                      + ": no alcanza para decir que es la misma pieza.")
     return True, "Coinciden en " + ", ".join(comparadas)
+
+
+# Ver el final de comparar_medidas(). Son las etiquetas con que se anotan en «comparadas».
+_MEDIDAS_QUE_SOLO_DISTINGUEN = {"espesor", "posición", "vías de la ficha"}
 
 
 def comparar_medidas_productos(id_a, id_b, tolerancia_pct=3):
@@ -848,7 +861,7 @@ def evaluar_equivalencia(desc_a, desc_b, medidas_a=None, medidas_b=None,
                          respaldo_fabricante=False, marca_a="", marca_b="", patrones=None,
                          vendido_como_reemplazo=0, codigo_puente=None,
                          productos_del_puente=0, escalas=None, trae_al_otro="",
-                         variante_del_origen=""):
+                         variante_del_origen="", familia_a=None, familia_b=None):
     """Pesa toda la evidencia disponible sobre un vínculo. Devuelve (puntaje 0-100, señales).
 
     La diferencia con lo que había antes: las alarmas eran una lista plana, así que 397 vínculos
@@ -989,8 +1002,10 @@ def evaluar_equivalencia(desc_a, desc_b, medidas_a=None, medidas_b=None,
 
     # Rubro: es la señal más barata y una de las que más basura caza. Si las descripciones
     # hablan de piezas de familias distintas, el vínculo no puede ser correcto.
-    fam_a = familia_para_comparar(desc_a) if desc_a else "Sin clasificar"
-    fam_b = familia_para_comparar(desc_b) if desc_b else "Sin clasificar"
+    # familia_a / familia_b las pasa quien llama cuando un lado es un código de fábrica: ver
+    # rubros_de_los_codigos_de_fabrica().
+    fam_a = familia_a or (familia_para_comparar(desc_a) if desc_a else "Sin clasificar")
+    fam_b = familia_b or (familia_para_comparar(desc_b) if desc_b else "Sin clasificar")
     if fam_a != "Sin clasificar" and fam_b != "Sin clasificar":
         if fam_a != fam_b and not kit_de:
             puntaje -= 40
@@ -1284,6 +1299,7 @@ def _analizar_lote_pendiente(lote, limite=None, desde=0):
     # Y el conteo de palabras del catálogo, por lo mismo: adentro del bucle son 400 recorridas
     # completas de la tabla de productos.
     _cuenta_pal, _total_desc = cuantas_veces_aparece_cada_palabra()
+    rubros_oem = rubros_de_los_codigos_de_fabrica()
     patrones_aprendidos = aprender_de_las_decisiones()
     escalas_precio = escalas_de_precio()
     _ya_juzgados = {}   # código -> ¿las reglas de hoy ya no lo tomarían? (ver más abajo)
@@ -1363,6 +1379,10 @@ def _analizar_lote_pendiente(lote, limite=None, desde=0):
             # texto y cuesta nada. Sin esa guarda serían 1.000 LIKE sobre las 70.888
             # descripciones por cada tanda que se revisa.
             trae_al_otro="",   # ya se apartó arriba
+            familia_a=rubro_del_codigo_frente_a(rubros_oem, f["a"], f.get("desc_a"),
+                                                f.get("desc_b")),
+            familia_b=rubro_del_codigo_frente_a(rubros_oem, f["b"], f.get("desc_b"),
+                                                f.get("desc_a")),
         )
         for tipo, texto in senales:
             if tipo == "mal" and texto not in alarmas:
@@ -1429,7 +1449,8 @@ def _analizar_lote_pendiente(lote, limite=None, desde=0):
         # cuántos digan que sí.
         try:
             a_favor, vetos, veredicto = evidencia_cruzada(
-                f["a"], f["b"], cuenta_palabras=_cuenta_pal, total_descripciones=_total_desc)
+                f["a"], f["b"], cuenta_palabras=_cuenta_pal, total_descripciones=_total_desc,
+                rubros_oem=rubros_oem)
         except Exception as _err:
             anotar_error("analizar_lote_pendiente", _err)
             a_favor, vetos, veredicto = [], [], ""

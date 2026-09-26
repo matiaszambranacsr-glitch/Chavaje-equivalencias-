@@ -674,6 +674,42 @@ def extraer_codigos_de_texto(texto, minimo=6, codigo_propio=None, codigos_conoci
         # largos de arriba de _RE_MARCA_DE_AUTO_PEGADA y _RE_MODELO_IVECO.
         _RE_MARCA_DE_AUTO_PEGADA,
         _RE_MODELO_IVECO,
+        # --- MOTORES DE CAMIÓN, TRACTOR Y MAQUINARIA, y cómo los escribe una lista de juntas.
+        # Salieron de importar IMPERIAL (43.303 filas, sin columna de código de fábrica) con
+        # «buscar en la descripción»: de los 16 códigos que terminaban cruzando esa lista con
+        # otra, 12 eran el motor o el camión —la junta de un Perkins 1104C-44 unida a un juego
+        # de Massey Ferguson, un paso a paso de Renault Clio a un kit por decir «K4M-700»—.
+        # Cada forma se midió contra las 70.888 descripciones de la base y las 43.303 de
+        # IMPERIAL, y contra los códigos de verdad: NINGUNA le pega a un código de la columna
+        # de código de un proveedor ni a un código de fábrica que cruce dos proveedores.
+        # Deutz: F6L913, BF6L913, FA6L714, F8L413, BF4M1013 (cilindros, L/M, serie).
+        re.compile(r'^B?F[A-Z]?\d{1,2}[LM]\d{3,4}[A-Z]{0,3}$'),
+        # Perkins: 1104C-44, 1103C-33, 1104D-44TA; y 4-PA.203, 6PF305, 6PF.305.
+        re.compile(r'^\d{4}[A-Z]{1,2}-\d{2}[A-Z]{0,3}$'),
+        re.compile(r'^\d-?P[A-Z]?\.?\d{3}$'),
+        # Isuzu: 4JH1-TC, 4JB1TC, 4JJ1-TC.
+        re.compile(r'^\d[A-Z]{2}\d-?[A-Z]{0,3}$'),
+        # Renault con la variante: K4M-700, F4R730, G9U-720, M4R-700, R9M-450. Van las
+        # familias una por una: la forma general —letra, número, letra, tres números— le pega a
+        # H3T021, que es una bobina Hitachi y un puente bueno entre dos proveedores.
+        re.compile(r'^(C[1-9]|D[4-7]|E[57]|F[3-9]|G[89]|K[4-9]|L7|M[4-9]|R9)[A-Z]-?\d{3}$'),
+        # Iveco/Fiat: F3BE0681, F1AE0481, F4AE0481.
+        re.compile(r'^F\d[A-Z]{2}\d{4}[A-Z]?$'),
+        # Indenor: XD4.88, XDP4.88. Scania: DSC12.01, DC12.17, y los camiones LK140, LKS140,
+        # LBS110. Estos con el 1 adelante a propósito: LKS026 y LKS048 son sensores de
+        # detonación Lucas de verdad.
+        re.compile(r'^XDP?\d[.,]\d{2}$'),
+        re.compile(r'^DS?C?\d{2}([.-]\d{2})?$'),
+        re.compile(r'^L[BKST]{1,2}1\d{2}$'),
+        # «OHC181», «MOT.221»: el tipo de motor o la palabra motor con la cilindrada.
+        re.compile(r'^(OHC|OHV|DOHC|SOHC)\d{2,4}$'),
+        re.compile(r'^MOT\.?\d{2,4}$'),
+        # Rangos de cilindrada: «DODGE 1500-1800», «FIAT 1500-1600».
+        re.compile(r'^(1[0-9]|[5-9])\d{2}-(1[0-9]|[5-9]|2[0-9])\d{2}$'),
+        # «206 16V-307»: las válvulas pegadas al modelo.
+        re.compile(r'^\d{1,2}V-?\d{3}$'),
+        # Una palabra abreviada con un número: STAND.5 (estándar 5 mm), DIAM.86, EXPL.45.
+        re.compile(r'^[A-Z]{4,}\.\d{1,2}$'),
     )
     formas_prohibidas = formas_ambiguas + formas_solo_texto
     # Palabras de la descripción que quedan pegadas al año y disfrazan el rango:

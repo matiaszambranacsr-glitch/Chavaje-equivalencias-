@@ -500,6 +500,15 @@ if pagina == PAGINAS[2]:
                     # recorridas completas de la tabla de productos solo para saber si el caché
                     # seguía vigente.
                     _conocidos_muestra = codigos_del_catalogo(version_del_catalogo())
+                    # El mismo filtro que la importación: tira los códigos que se repiten en
+                    # muchas filas (el modelo del camión, no el repuesto). Sin esto, la muestra
+                    # mostraba códigos que después la importación descartaba: «DEUTZ
+                    # F6L913/BF6L913» decía «detecta F6L913» y pedía que uno lo revisara.
+                    _confiables_muestra, _ = codigos_confiables_de_descripciones(
+                        [(valor_o_vacio(f[idx_desc]) if idx_desc < len(f) else "",
+                          valor_o_vacio(f[idx_prov]) if idx_prov is not None and idx_prov < len(f) else "")
+                         for f in todas_filas[header_row + 1:]],
+                        codigos_conocidos=_conocidos_muestra)
                     for fila_prev in todas_filas[header_row + 1:header_row + 60]:
                         texto_desc = valor_o_vacio(fila_prev[idx_desc]) if idx_desc < len(fila_prev) else ""
                         cod_fila = (valor_o_vacio(fila_prev[idx_prov])
@@ -507,15 +516,18 @@ if pagina == PAGINAS[2]:
                         # Con el mismo criterio que la importación real: si esta muestra
                         # detectara con otras reglas, mostraría algo distinto de lo que va a
                         # pasar, que es exactamente lo que la muestra existe para evitar.
-                        hallados = extraer_codigos_de_texto(
-                            texto_desc, codigo_propio=cod_fila,
-                            codigos_conocidos=_conocidos_muestra)
+                        hallados = [x for x in extraer_codigos_de_texto(
+                                        texto_desc, codigo_propio=cod_fila,
+                                        codigos_conocidos=_conocidos_muestra)
+                                    if sanitizar(x) in _confiables_muestra]
                         if hallados:
                             muestras.append({"Descripción": texto_desc[:60], "Detecta": ", ".join(hallados)})
                         if len(muestras) >= 8:
                             break
                     if muestras:
-                        st.caption("Así quedaría (muestra de las primeras filas) — revisá antes de importar:")
+                        st.caption("Así quedaría (muestra de las primeras filas) — revisá antes de importar. "
+                                   "Al importar se cuentan las repeticiones sobre la lista entera, "
+                                   "así que alguno de estos todavía puede quedar afuera:")
                         st.dataframe(muestras, width="stretch", hide_index=True)
                     else:
                         st.caption("En las primeras filas no encontré códigos dentro de la descripción.")
