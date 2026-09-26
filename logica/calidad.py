@@ -150,6 +150,8 @@ def _ya_hay_copia_en_github(cfg):
         r = requests.get(f"{API_DE_GITHUB}/repos/{cfg['repo']}/git/ref/heads/{cfg['rama']}",
                          headers={"Authorization": f"Bearer {cfg['token']}",
                                   "Accept": "application/vnd.github+json"}, timeout=20)
+        if r.status_code in (401, 403):
+            return "sin_permiso"
         return r.status_code != 404
     except Exception as _err:
         anotar_error("_ya_hay_copia_en_github", _err)
@@ -171,8 +173,16 @@ def subir_la_copia_si_cambio(aunque_no_haya_cambios=False):
     if not productos:
         return None, "La base está vacía: no se sube, para no pisar la copia buena."
     huella_anterior = obtener_config("huella_copia_github", "")
-    if (not aunque_no_haya_cambios and not huella_anterior
-            and cfg["rama"] == RAMA_DE_LA_COPIA and _ya_hay_copia_en_github(cfg)):
+    _hay_copia = (_ya_hay_copia_en_github(cfg) if cfg["rama"] == RAMA_DE_LA_COPIA
+                  and not huella_anterior else False)
+    if _hay_copia == "sin_permiso":
+        # Antes esto contaba como «ya hay una copia» y el aviso hablaba de una copia que no
+        # existe. El problema es la clave, y así lo tiene que decir.
+        texto = ("GitHub no acepta la clave `github_token`: está vencida, mal copiada o le "
+                 "falta el permiso «Contents: Read and write» sobre este repositorio.")
+        guardar_config("ultimo_backup_github_error", f"{datetime.now():%d/%m %H:%M} — {texto}")
+        return False, texto
+    if not aunque_no_haya_cambios and _hay_copia:
         # Una base que nunca subió copia —no tiene huella— y en GitHub ya hay una: no viene
         # de ahí. O la app no la pudo bajar al arrancar, o es otra base. No se decide sola.
         texto = ("En GitHub hay una copia que esta base no reconoce, y no se la reemplaza sola "

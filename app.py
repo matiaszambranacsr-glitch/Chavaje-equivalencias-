@@ -217,6 +217,17 @@ st.markdown(
     unsafe_allow_html=True
 )
 
+# La copia a GitHub cuando hay cambios, en su propio hilo. Ver vigilar_la_copia().
+# Va ANTES del login, a propósito: después de un reinicio de Streamlit, la primera visita
+# suele ser el despertador de GitHub (.github/despertar_la_app.py), que no entra con usuario y
+# se queda en esta pantalla. Con la llamada más abajo, el st.stop() del login la cortaba, y
+# lo que se cargara después no tenía copia hasta que alguien iniciara sesión. Casi siempre
+# vuelve enseguida: el hilo ya está corriendo.
+try:
+    vigilar_la_copia()
+except Exception as _err:
+    anotar_error("nivel principal", _err)
+
 # Pantalla de login apenas se abre la app, con opción de seguir sin loguearse.
 if not es_admin() and not st.session_state.get("saltar_login"):
     mostrar_login_inicial()
@@ -305,11 +316,6 @@ try:
 except Exception as _err:
     anotar_error("nivel principal", _err)
 
-# La copia a GitHub cuando hay cambios, en su propio hilo. Ver vigilar_la_copia().
-try:
-    vigilar_la_copia()
-except Exception as _err:
-    anotar_error("nivel principal", _err)
 
 _hecho_hoy = st.session_state.pop("_aviso_tareas", None)
 if _hecho_hoy:
