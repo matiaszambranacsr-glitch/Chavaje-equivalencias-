@@ -785,9 +785,11 @@ HERRAMIENTAS_MANTENIMIENTO = [
     ("🔄 Reunir lo que separó un cambio de número", 0,
      "Junta lo que quedó partido cuando el proveedor le cambió el código a una pieza.",
      "cambio numero renumero sucesor reemplazo separado"),
-    ("🔐 Traer autos del portal del proveedor", 0,
-     "Entra al catálogo web del proveedor y trae a qué autos va cada código.",
-     "portal proveedor web autos aplicaciones clave contraseña"),
+    ("🔐 Portal del proveedor: autos y productos que muestra juntos", 0,
+     "Entra al portal del proveedor, trae a qué autos va cada código y qué otros productos "
+     "tuyos muestra al lado —el mismo repuesto en otras marcas—, como prueba a favor.",
+     "portal proveedor web autos aplicaciones clave contraseña jl distribuidor varias marcas "
+     "relacionar equivalentes alternativas"),
     ("🔤 Vincular dos proveedores por la descripción", 0,
      "Compara dos listas por el texto y propone los que son la misma pieza.",
      "descripcion texto dos proveedores comparar"),

@@ -946,8 +946,11 @@ Administrar → Mantenimiento.
             # solo: aprobar o descartar cambia ese número, así que el análisis se rehace justo
             # cuando dejó de valer y no antes. Lo que se hace en OTRO lote no lo toca, y está
             # bien: el análisis de éste sigue siendo cierto.
+            # Y los pares vistos juntos en un portal: leer fichas no cambia este lote, pero
+            # le agrega pruebas a favor a pares que ya estaban acá.
             _clave_analisis = (lote_info["lote"], int(cuantos),
-                               (int(tanda_lote) - 1) * int(cuantos), total_lote)
+                               (int(tanda_lote) - 1) * int(cuantos), total_lote,
+                               cuantos_juntos_en_portales())
             _guardado = st.session_state.get("_analisis_lote")
             if _guardado and _guardado.get("clave") == _clave_analisis:
                 limpias, sospechosas, relacionadas = _guardado["resultado"]

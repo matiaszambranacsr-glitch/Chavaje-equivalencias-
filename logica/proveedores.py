@@ -257,47 +257,55 @@ def sesion_de_portal(nombre_marca):
                       "de acceso y la conexión.")
 
 
-def autos_desde_ficha_del_portal(nombre_marca, codigo, tiempo_maximo=20):
-    """Trae la ficha del producto en el portal del proveedor y saca a qué autos le va.
+def _html_de_la_ficha_del_portal(nombre_marca, codigo, tiempo_maximo=20):
+    """La página de la ficha de ese código en el portal del proveedor. (html, error).
 
-    Esto resuelve el problema de raíz: la descripción de la lista se corta y no entran todos
-    los autos, pero la ficha del portal los tiene completos.
-
-    Devuelve (lista de autos, error). No inventa nada: si la ficha no nombra autos conocidos,
-    devuelve vacío."""
+    Una sola visita sirve para todo lo que se lee de la ficha —los autos y los productos que el
+    portal muestra al lado—: pedirla dos veces sería el doble de consultas contra el portal."""
     sesion, error = sesion_de_portal(nombre_marca)
     if error:
-        return [], error
+        return "", error
     cfg = config_portal(nombre_marca)
     # El código se limpia ANTES de meterlo en la dirección. quote() escapa los espacios pero
     # deja pasar «?» y «&»: con un código así, alguien podría convertir una consulta en una
     # acción («ABC?accion=comprar»). Se dejan solo letras, números y los separadores que usan
     # los códigos de verdad.
-    codigo_limpio = re.sub(r"[^A-Za-z0-9._/-]", "", str(codigo).strip())[:60]
+    # Los espacios se dejan —quote() los escribe como %20, que no hace nada—: JL numera
+    # «MBS 018» y «390 718 060», y sin el espacio su portal no encuentra la ficha. Si algún
+    # portal los quiere pegados, se configura `sin_espacios = true`.
+    codigo_limpio = re.sub(r"[^A-Za-z0-9._/ -]", "", str(codigo).strip())[:60]
+    codigo_limpio = re.sub(r"\s+", "" if cfg.get("sin_espacios") else " ", codigo_limpio).strip()
     # Y sin «..»: con eso se sube de nivel en la dirección y se llega a otra parte del sitio.
     # Un código como «../../pedido/nuevo» convertiría una consulta en cualquier otra cosa.
     if ".." in codigo_limpio or codigo_limpio.startswith("/"):
-        return [], "Ese código no se puede usar en una dirección: tiene barras o puntos dobles."
+        return "", "Ese código no se puede usar en una dirección: tiene barras o puntos dobles."
     if not codigo_limpio:
-        return [], "El código tiene caracteres que no se pueden usar en una dirección."
+        return "", "El código tiene caracteres que no se pueden usar en una dirección."
     url = cfg["url_ficha"].replace("{codigo}", quote(codigo_limpio, safe=""))
     try:
         r = sesion.get(url, timeout=tiempo_maximo)
         if r.status_code == 404:
-            return [], "El portal no tiene ficha para ese código."
+            return "", "El portal no tiene ficha para ese código."
         if r.status_code >= 400:
-            return [], f"La ficha respondió {r.status_code}."
-        html = r.text or ""
+            return "", f"La ficha respondió {r.status_code}."
+        return r.text or "", None
     except Exception as e:
-        anotar_error("autos_desde_ficha_del_portal", e)
-        return [], f"No se pudo leer la ficha: {type(e).__name__}: {e}"
+        anotar_error("_html_de_la_ficha_del_portal", e)
+        return "", f"No se pudo leer la ficha: {type(e).__name__}"
 
-    # Se saca el texto visible y se buscan marcas y modelos conocidos. Se limita a los que la
-    # app ya conoce para no cargar como "auto" cualquier palabra de la página.
-    texto = re.sub(r"<script.*?</script>|<style.*?</style>", " ", html, flags=re.S | re.I)
+
+def _texto_visible(html):
+    """El texto que se ve en la página, sin scripts, estilos ni etiquetas."""
+    texto = re.sub(r"(?is)<(script|style)[^>]*>.*?</\1>", " ", html or "")
     texto = re.sub(r"<[^>]+>", " ", texto)
-    limpio = normalizar_texto(texto)
+    return re.sub(r"\s+", " ", texto)
 
+
+def _autos_del_texto(texto):
+    """Las marcas y modelos que la app ya conoce, nombrados en ese texto."""
+    # Se limita a los que la app ya conoce para no cargar como "auto" cualquier palabra de la
+    # página.
+    limpio = normalizar_texto(texto)
     encontrados = []
     for mv in MARCAS_VEHICULO:
         if f" {mv} " in f" {limpio} ":
@@ -305,7 +313,174 @@ def autos_desde_ficha_del_portal(nombre_marca, codigo, tiempo_maximo=20):
     for w in set(re.split(r"[^A-Z0-9]+", limpio)):
         if len(w) >= 3 and w in MODELOS_CONOCIDOS:
             encontrados.append(w)
-    return sorted(set(encontrados)), None
+    return sorted(set(encontrados))
+
+
+# --------------------------------------------------------------------------------------------
+# LO QUE EL PORTAL MUESTRA JUNTO
+# --------------------------------------------------------------------------------------------
+# Un distribuidor como JL vende el mismo repuesto en varias marcas —el caño de Cauplas y el de
+# otra marca, el sensor de Masser y el de Bosch— y en su portal la ficha de uno muestra los
+# otros: «equivalentes», «otras marcas», «alternativas». Es lo que uno relacionaría a mano,
+# escrito por alguien que conoce la pieza.
+#
+# NO DECIDE NADA SOLO, y a propósito: un portal no tiene todas las relaciones, y en la misma
+# página suele haber cosas que no son equivalentes —«productos relacionados», el kit que la
+# trae, lo último que se miró—. Por eso es UNA prueba más entre las de evidencia_cruzada():
+# suma a favor, pero las medidas que no dan, el rubro distinto o el auto distinto la tumban
+# igual que a cualquier otra.
+
+# Más que esto nombrados en una sola ficha ya no es «el mismo repuesto en otras marcas»: es un
+# listado, un menú o un buscador, y juntar todo con todo sería inventar relaciones.
+MAXIMO_PRODUCTOS_POR_FICHA = 10
+
+# Precios con signo o con coma decimal: «$ 10.450» o «10.450,00» no son el código 10450.
+_RE_PRECIO_EN_PAGINA = re.compile(r"\$\s*[\d.,]+|\b\d{1,3}(?:\.\d{3})+(?:,\d+)?\b|\b\d+,\d{2}\b")
+_RE_PEDAZO_DE_CODIGO = re.compile(r"[A-Za-z0-9][A-Za-z0-9./-]*")
+
+
+def _normalizar_codigo_escrito(texto):
+    return re.sub(r"\s+", " ", str(texto or "").strip().upper())
+
+
+def productos_nombrados_en_la_pagina(texto, excluir_codigo_clean=""):
+    """Los productos de TU catálogo cuyo código aparece escrito en ese texto. [(id, código)].
+
+    Se busca al revés que de costumbre: en vez de adivinar qué es un código y después buscarlo,
+    se prueban los pedazos del texto —de a una, dos y tres palabras— contra los códigos que ya
+    están cargados. Así entran los códigos con espacios de JL («390 718 060», «CAU 4660»), que
+    el extractor de siempre no toma como un solo código.
+
+    Dos cuidados para no ver códigos donde hay otra cosa:
+      · los pedazos de varias palabras cuentan solo si están escritos EXACTAMENTE como el código
+        de la lista: «GOL 1.6» no es el código «GOL16» aunque sin espacios se lean igual;
+      · un número suelto de menos de 6 cifras solo cuenta escrito igual que en la lista —si
+        no, cualquier cantidad o año de la página sería un código—, y los precios se sacan
+        antes."""
+    texto = _RE_PRECIO_EN_PAGINA.sub(" ", texto or "")
+    pedazos = _RE_PEDAZO_DE_CODIGO.findall(texto)
+    candidatos = {}   # código limpio -> formas escritas
+    for i in range(len(pedazos)):
+        for n in (1, 2, 3):
+            if i + n > len(pedazos):
+                break
+            escrito = " ".join(pedazos[i:i + n])
+            limpio = sanitizar(escrito)
+            if len(limpio) < 4 or not any(ch.isdigit() for ch in limpio):
+                continue
+            candidatos.setdefault(limpio, set()).add(_normalizar_codigo_escrito(escrito))
+    candidatos.pop(excluir_codigo_clean or "", None)
+    if not candidatos:
+        return []
+    encontrados = {}
+    for _tanda, _marcas in en_tandas(list(candidatos)):
+        c.execute(f"""SELECT id, codigo_raw, codigo_clean FROM productos
+                      WHERE codigo_clean IN ({_marcas})""", _tanda)
+        for r in c.fetchall():
+            formas = candidatos[r["codigo_clean"]]
+            if _normalizar_codigo_escrito(r["codigo_raw"]) not in formas:
+                # Escrito distinto que en la lista: vale solo si en la página es UNA palabra
+                # («03C906433A» o «03C-906-433-A») y no es un número corto.
+                if not any(" " not in x for x in formas):
+                    continue
+                if r["codigo_clean"].isdigit() and len(r["codigo_clean"]) < 6:
+                    continue
+            if codigo_sospechoso(r["codigo_raw"])[0]:
+                continue
+            encontrados[r["id"]] = r["codigo_raw"]
+    return sorted(encontrados.items())
+
+
+def portales_que_los_muestran_juntos(id_a, id_b):
+    """Los portales en los que la ficha de uno mostró al otro. Lista de nombres, o []."""
+    try:
+        c.execute("""SELECT DISTINCT portal FROM productos_juntos_en_portal
+                     WHERE producto_a_id = ? AND producto_b_id = ?""",
+                  (min(id_a, id_b), max(id_a, id_b)))
+        return [r["portal"] for r in c.fetchall()]
+    except sqlite3.OperationalError as _err:
+        anotar_error("portales_que_los_muestran_juntos", _err)
+        return []
+
+
+def cuantos_juntos_en_portales():
+    """Cuántos pares vio juntos algún portal. Sirve para saber si el análisis quedó viejo."""
+    try:
+        return c.execute("SELECT COUNT(*) FROM productos_juntos_en_portal").fetchone()[0]
+    except sqlite3.OperationalError as _err:
+        anotar_error("cuantos_juntos_en_portales", _err)
+        return 0
+
+
+def leer_fichas_del_portal(marca_id, nombre_marca, cuantos=25, progreso=None, pausa=0.7):
+    """Recorre las fichas del portal de esa marca que todavía no se leyeron. De cada ficha saca
+    los autos (como hasta ahora) y los productos de tu catálogo que la ficha muestra al lado.
+
+    Los pares que salen van a la cola de revisión en su propia lista, «PORTAL …», y además
+    quedan anotados: si el mismo par llega por otro camino —el barrido, un código de fábrica—,
+    el análisis lo cuenta como una prueba más a favor (ver evidencia_cruzada()).
+
+    Devuelve un resumen: fichas leídas, con autos, con productos, listados descartados, pares
+    nuevos para revisar, el nombre de la lista y el primer error si no se pudo entrar."""
+    resumen = {"leidas": 0, "con_autos": 0, "con_productos": 0, "listados": 0,
+               "sin_ficha": 0, "pares": 0, "nuevos": 0, "lote": "", "error": ""}
+    _sesion, error = sesion_de_portal(nombre_marca)
+    if error:
+        resumen["error"] = error
+        return resumen
+    # Primero lo que tiene stock: si algo va a salir del mostrador hoy, que sea eso lo que
+    # quede relacionado primero.
+    c.execute("""SELECT p.id, p.codigo_raw, p.codigo_clean, p.descripcion FROM productos p
+                 WHERE p.marca_id = ?
+                   AND p.id NOT IN (SELECT producto_id FROM fichas_de_portal_leidas
+                                     WHERE portal = ?)
+                 ORDER BY (COALESCE(p.stock, 0) > 0) DESC, p.id LIMIT ?""",
+              (marca_id, nombre_marca, int(cuantos)))
+    pendientes = [dict(r) for r in c.fetchall()]
+    pares, leidas = [], []
+    for i, prod in enumerate(pendientes):
+        html, err = _html_de_la_ficha_del_portal(nombre_marca, prod["codigo_raw"])
+        if err and ("tope" in err or "cerró sola" in err or "PermissionError" in err):
+            resumen["error"] = err
+            break
+        if err:
+            resumen["sin_ficha"] += 1
+            leidas.append((nombre_marca, prod["id"], None))
+        else:
+            texto = _texto_visible(html)
+            autos = _autos_del_texto(texto)
+            if autos:
+                guardar_autos_de_ficha(prod["codigo_raw"], nombre_marca, autos)
+                resumen["con_autos"] += 1
+            nombrados = [pid for pid, _cod in productos_nombrados_en_la_pagina(
+                texto, prod["codigo_clean"]) if pid != prod["id"]]
+            if len(nombrados) > MAXIMO_PRODUCTOS_POR_FICHA:
+                resumen["listados"] += 1
+                nombrados = []
+            elif nombrados:
+                resumen["con_productos"] += 1
+            pares.extend((min(prod["id"], o), max(prod["id"], o), prod["id"]) for o in nombrados)
+            leidas.append((nombre_marca, prod["id"], len(nombrados)))
+        resumen["leidas"] += 1
+        if progreso:
+            progreso((i + 1) / len(pendientes), f"{i + 1} de {len(pendientes)}...")
+        if pausa:
+            time.sleep(pausa)   # pausa entre pedidos, a propósito: ver el panel
+    # Juntas: una ficha marcada como leída sin sus pares guardados no se vuelve a leer, y esos
+    # pares se perderían para siempre.
+    with transaccion():
+        c.executemany("""INSERT OR REPLACE INTO fichas_de_portal_leidas
+                         (portal, producto_id, productos_juntos) VALUES (?, ?, ?)""", leidas)
+        c.executemany("""INSERT OR IGNORE INTO productos_juntos_en_portal
+                         (producto_a_id, producto_b_id, portal, producto_origen_id)
+                         VALUES (?, ?, ?, ?)""",
+                      [(a, b, nombre_marca, o) for a, b, o in pares])
+    resumen["pares"] = len({(a, b) for a, b, _o in pares})
+    if pares:
+        resumen["lote"] = f"PORTAL {nombre_marca} · {datetime.now():%d/%m %H:%M}"
+        resumen["nuevos"] = guardar_equivalencias_pendientes(
+            [(a, b) for a, b, _o in pares], "portal", resumen["lote"])
+    return resumen
 
 
 def guardar_autos_de_ficha(codigo, nombre_marca, autos, tipo_pieza=""):

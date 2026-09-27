@@ -1525,18 +1525,31 @@ if pagina == PAGINAS[3]:
                     st.rerun()
             st.markdown("---")
 
-            st.markdown("**🔐 Traer autos del portal del proveedor**")
+            st.markdown("**🔐 Portal del proveedor: autos y productos que muestra juntos**")
             explicar(
-                "Para cuando la descripción se corta y no entran todos los autos.",
-                "La ficha del portal tiene la lista completa; la celda de Excel no. Con "
+                "Para cuando la descripción se corta, y para relacionar lo que el proveedor ya "
+                "relacionó.",
+                "De cada ficha del portal se sacan dos cosas:\n\n"
+                "- **Los autos.** La ficha tiene la lista completa; la celda de Excel no. Con "
                 "esos autos cargados, la app puede vincular productos de dos proveedores "
-                "aunque sus descripciones no compartan ni un modelo.\n\n**Configuración**, "
-                "en Settings → Secrets de Streamlit:\n\n```\n[portal_FISPA]\n"
+                "aunque sus descripciones no compartan ni un modelo.\n"
+                "- **Los productos que muestra al lado.** Un distribuidor como JL vende el "
+                "mismo repuesto en varias marcas, y en la ficha de uno muestra los otros. "
+                "Esos pares van a revisión en su propia lista («PORTAL …») y además cuentan "
+                "como una prueba a favor cuando el mismo par llega por otro camino.\n\n"
+                "**No decide solo.** Un portal no tiene todas las relaciones, y en la misma "
+                "página puede haber «productos relacionados» que no son la misma pieza. Es "
+                "una prueba más: si las medidas, el rubro o el auto dicen otra cosa, el par "
+                "se descarta igual. Una ficha que nombra más de "
+                f"{MAXIMO_PRODUCTOS_POR_FICHA} productos tuyos es un listado y no cuenta.\n\n"
+                "**Configuración**, en Settings → Secrets de Streamlit:\n\n```\n[portal_JL]\n"
                 'url_login = "https://proveedor.com/login"\nusuario = "tu_usuario"\n'
                 'clave = "tu_clave"\ncampo_usuario = "email"\ncampo_clave = "password"\n'
                 'url_ficha = "https://proveedor.com/producto/{codigo}"\n```\n\n'
-                "Los nombres de `campo_usuario` y `campo_clave` son los `name=` del "
-                "formulario de acceso del portal.\n\n**Va en los secretos y no en la base** "
+                "El nombre después de `portal_` es la marca tal como está cargada en la app "
+                "(la de la lista del proveedor). Los nombres de `campo_usuario` y "
+                "`campo_clave` son los `name=` del formulario de acceso del portal.\n\n"
+                "**Va en los secretos y no en la base** "
                 "por una razón concreta: la base se baja como backup y se sube a GitHub. "
                 "Una clave ahí queda publicada.\n\n**La app no puede pedir nada.** La "
                 "sesión que se abre es de solo lectura: los métodos para enviar datos "
@@ -1569,49 +1582,61 @@ if pagina == PAGINAS[3]:
                 _et_p = {f"{x['nombre']} ({x['n']:,} productos)": x for x in _con_portal}
                 _sel_p = st.selectbox("Proveedor:", list(_et_p.keys()), key="portal_marca")
                 _marca_p = _et_p[_sel_p]
-                _cuantos = st.select_slider("Traer fichas de:", options=[10, 25, 50, 100],
+                try:
+                    _leidas_p = c.execute(
+                        """SELECT COUNT(*), SUM(productos_juntos > 0),
+                                  SUM(productos_juntos IS NULL)
+                           FROM fichas_de_portal_leidas WHERE portal = ?""",
+                        (_marca_p["nombre"],)).fetchone()
+                    _pares_p = c.execute(
+                        "SELECT COUNT(*) FROM productos_juntos_en_portal WHERE portal = ?",
+                        (_marca_p["nombre"],)).fetchone()[0]
+                except sqlite3.OperationalError as _err:
+                    anotar_error("portal/avance", _err)
+                    _leidas_p, _pares_p = (0, 0, 0), 0
+                if _leidas_p and _leidas_p[0]:
+                    st.caption(
+                        f"Leídas {_leidas_p[0]:,} de {_marca_p['n']:,} fichas · "
+                        f"{int(_leidas_p[1] or 0):,} mostraban otros productos tuyos · "
+                        f"{_pares_p:,} pares vistos juntos"
+                        + (f" · {int(_leidas_p[2]):,} sin ficha" if _leidas_p[2] else ""))
+                _cuantos = st.select_slider("Leer fichas de:", options=[10, 25, 50, 100, 200],
                                              format_func=lambda x: f"{x} productos",
                                              key="portal_cuantos")
                 st.caption(
                     "Se hace de a tandas chicas y con una pausa entre pedidos. No es "
                     "lentitud: golpear el servidor del proveedor a máxima velocidad es la "
-                    "forma más rápida de que te bloqueen la cuenta."
+                    "forma más rápida de que te bloqueen la cuenta. Cada tanda sigue donde "
+                    "quedó la anterior."
                 )
-                if st.button("🔐 Entrar y traer las fichas"):
-                    _sesion, _err = sesion_de_portal(_marca_p["nombre"])
-                    if _err:
-                        st.error(_err)
+                if st.button("🔐 Entrar y leer las fichas"):
+                    _barra = st.progress(0.0, text="Entrando al portal...")
+                    _res = leer_fichas_del_portal(
+                        _marca_p["id"], _marca_p["nombre"], int(_cuantos),
+                        progreso=lambda f, t: _barra.progress(f, text=t))
+                    _barra.empty()
+                    if _res["error"] and not _res["leidas"]:
+                        st.error(_res["error"])
+                    elif not _res["leidas"]:
+                        st.info("Ya se leyeron todas las fichas de esa marca.")
                     else:
-                        c.execute("""SELECT p.codigo_raw, p.codigo_clean FROM productos p
-                                     WHERE p.marca_id = ?
-                                       AND p.codigo_clean NOT IN
-                                           (SELECT codigo_clean FROM aplicaciones
-                                             WHERE codigo_clean IS NOT NULL)
-                                     LIMIT ?""", (_marca_p["id"], int(_cuantos)))
-                        _pendientes = [(r["codigo_raw"], r["codigo_clean"])
-                                        for r in c.fetchall()]
-                        if not _pendientes:
-                            st.info("Todos los productos de esa marca ya tienen autos cargados.")
-                        else:
-                            _barra = st.progress(0.0, text="Trayendo fichas...")
-                            _con, _sin = 0, 0
-                            for _i, (_cod, _cl) in enumerate(_pendientes):
-                                _autos, _e2 = autos_desde_ficha_del_portal(
-                                    _marca_p["nombre"], _cod)
-                                if _autos:
-                                    guardar_autos_de_ficha(_cod, _marca_p["nombre"], _autos)
-                                    _con += 1
-                                else:
-                                    _sin += 1
-                                _barra.progress((_i + 1) / len(_pendientes),
-                                                 text=f"{_i + 1} de {len(_pendientes)}...")
-                                time.sleep(0.7)   # pausa entre pedidos, a propósito
-                            _barra.empty()
-                            invalidar_salud()
-                            avisar("success",
-                                   f"Se trajeron autos de {_con} ficha(s). "
-                                   f"{_sin} no tenían autos reconocibles.")
-                            st.rerun()
+                        invalidar_salud()
+                        _msj = (f"Se leyeron {_res['leidas']} ficha(s): {_res['con_autos']} con "
+                                f"autos y {_res['con_productos']} que muestran otros productos "
+                                "tuyos.")
+                        if _res["nuevos"]:
+                            _msj += (f" **{_res['nuevos']} par(es) nuevos para revisar** en "
+                                     f"«{_res['lote']}».")
+                        elif _res["pares"]:
+                            _msj += (f" Los {_res['pares']} par(es) ya estaban cargados o para "
+                                     "revisar: ahí cuentan como una prueba más a favor.")
+                        if _res["listados"]:
+                            _msj += (f" {_res['listados']} ficha(s) nombraban demasiados "
+                                     "productos y se tomaron como listados.")
+                        if _res["error"]:
+                            _msj += f" Se cortó antes: {_res['error']}"
+                        avisar("success", _msj)
+                        st.rerun()
             st.markdown("---")
 
             st.markdown("**🔤 Vincular dos proveedores por la descripción**")

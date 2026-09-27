@@ -2534,6 +2534,15 @@ def evidencia_cruzada(id_a, id_b, cuenta_palabras=None, total_descripciones=None
                          + (f" (entre estas dos listas lo normal es {esperada:.0f})"
                             if esperada > 2 else ""))
 
+    # 8. El portal de un proveedor los muestra juntos: en la ficha de uno está el código del
+    # otro. Un distribuidor que vende la misma pieza en varias marcas —JL— lo pone ahí para
+    # que el cliente elija. Cuenta como UNA prueba, igual que las demás: los vetos de arriba la
+    # tumban si las medidas, el rubro o el auto dicen otra cosa, porque en la misma página
+    # también puede haber «productos relacionados» que no son la misma pieza.
+    _portales = portales_que_los_muestran_juntos(id_a, id_b)
+    if _portales:
+        a_favor.append(f"🌐 el portal de {', '.join(_portales)} los muestra juntos")
+
     if vetos:
         veredicto = "🔴 hay evidencia en contra"
     elif len(a_favor) >= 3:

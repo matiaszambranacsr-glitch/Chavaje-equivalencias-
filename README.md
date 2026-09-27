@@ -4633,6 +4633,35 @@ en 2.585 pares, y casi todos eran la misma pieza de las dos marcas que vende FIS
 («40015FISPA» y «LEMSM017LUCAS» citando el mismo número). La ambigüedad ahora se busca dentro de
 cada marca (`_submarca_del_codigo()`), y 1.380 pares vuelven a limpios.
 
+### 🌐 El portal del proveedor como otra forma de relacionar
+
+Un distribuidor como JL vende el mismo repuesto en varias marcas —el caño de Cauplas y el de
+otra, el sensor de Masser y el de Bosch— y en su portal la ficha de uno muestra los otros. Es lo
+que uno relacionaría a mano, escrito por alguien que conoce la pieza.
+
+Ahora, con el portal configurado en los secretos (`[portal_JL]`, lo mismo que ya servía para
+traer autos), **Mantenimiento → 🔎 Encontrar equivalencias → 🔐 Portal del proveedor** lee las
+fichas de a tandas y de cada una saca dos cosas en una sola visita: los autos, como antes, y los
+productos de tu catálogo que la ficha nombra (`leer_fichas_del_portal()`).
+
+- **Los códigos se buscan al revés**: en vez de adivinar qué es un código, se prueban los
+  pedazos del texto contra los códigos ya cargados. Así entran los de JL con espacios («MBS
+  018», «390 718 060»). Un pedazo de varias palabras cuenta solo si está escrito exactamente
+  como en la lista; los precios se sacan antes, y un número corto suelto no cuenta
+  (`productos_nombrados_en_la_pagina()`).
+- **Una ficha que nombra más de 10 productos tuyos es un listado** y no cuenta.
+- **No decide solo.** Los pares van a revisión en su propia lista («PORTAL JL · …») y quedan
+  anotados en `productos_juntos_en_portal`. En el análisis es una prueba más de
+  `evidencia_cruzada()` —«🌐 el portal de JL los muestra juntos»—: con la descripción que
+  concuerda son dos métodos, pero si las medidas, el rubro o el auto dicen otra cosa, el veto
+  gana igual. Un portal no tiene todas las relaciones y en la misma página puede haber
+  «productos relacionados» que no son la misma pieza.
+- **Cada tanda sigue donde quedó** (`fichas_de_portal_leidas`), primero lo que tiene stock.
+
+Probado contra un portal simulado sobre la base real: dos pares del barrido que JL mostraba
+juntos pasaron de «un solo método» a «dos métodos coinciden», y un sensor que la página nombraba
+al lado de una junta siguió vetado por rubros distintos.
+
 ## Una firma de foto podía ser un programa
 
 Las firmas visuales de las fotos se guardan con `pickle`, y `pickle` **no es un formato de

@@ -938,6 +938,28 @@ def _esquema_gestion(c):
         PRIMARY KEY (grupo, producto_a_id, producto_b_id)
     )""")
 
+    # Lo que el portal de un proveedor muestra junto: en la ficha de uno, el código del otro.
+    # Es una prueba a favor para el análisis, no una equivalencia (ver
+    # productos_nombrados_en_la_pagina()). Clave (a, b, portal) y no (portal, a, b): la
+    # pregunta de todos los días es «¿algún portal los mostró juntos?», par por par.
+    c.execute("""CREATE TABLE IF NOT EXISTS productos_juntos_en_portal (
+        producto_a_id INTEGER NOT NULL,
+        producto_b_id INTEGER NOT NULL,
+        portal TEXT NOT NULL,
+        producto_origen_id INTEGER,
+        fecha TEXT DEFAULT (datetime('now')),
+        PRIMARY KEY (producto_a_id, producto_b_id, portal)
+    )""")
+    # Qué fichas del portal ya se leyeron, para avanzar de a tandas sin repetir.
+    # productos_juntos: cuántos productos tuyos mostraba; NULL si la ficha no se pudo leer.
+    c.execute("""CREATE TABLE IF NOT EXISTS fichas_de_portal_leidas (
+        portal TEXT NOT NULL,
+        producto_id INTEGER NOT NULL,
+        productos_juntos INTEGER,
+        fecha TEXT DEFAULT (datetime('now')),
+        PRIMARY KEY (portal, producto_id)
+    )""")
+
     # Vínculos que llegaron de una lista de proveedor y esperan revisión. Una importación puede
     # generar miles de vínculos de una: si se cargaran solos, un error en la columna de código de
     # fábrica te ensucia la base entera sin que nadie se entere.
