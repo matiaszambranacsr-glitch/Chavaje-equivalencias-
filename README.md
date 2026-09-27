@@ -4527,6 +4527,20 @@ de Fiat Marea contra el de Audi A3, sonda de Honda Fit contra la de GM Astra. Lo
 Sobre la cola real, las limpias pasan de 22.484 a 21.045; de las que bajan, casi todas son de
 CRI-FA↔FISPA y de pares sin nada en común más que la marca.
 
+### El motivo también en la revisión de a uno, y las medidas de o'rings y retenes
+
+- **Descartar con motivo en toda la revisión.** En la lista de «para revisar», al marcar un
+  grupo o un par como «🚫 Descartar» aparece «¿Por qué?» (opcional). Al aplicar, el motivo
+  queda guardado y, con el análisis nuevo, la app busca los pares con el mismo problema y los
+  ofrece arriba, igual que en la muestra de control (`parecidos_de_varios()`).
+- **Las medidas de dos números, cuando se sabe qué pieza es.** El lector no tomaba «20x2.5»
+  porque en un o'ring es diámetro por cordón y en un retén interno por externo. Pero la
+  descripción casi siempre lo dice: «O´RING 36,5X3.53MM» se lee como diámetro interno y cordón,
+  «RET DIST FORD 1.4 TDCI 40x55x» y «ARAND 16x22» como interno y externo. Además, «Reten Arbol
+  Secund.30x44x8» no se leía porque el punto de la abreviatura parecía un decimal. En la base
+  real, los productos con diámetro interno leído pasan a unos 600. `VERSION_MEDIDAS` pasó a «5»:
+  la tarea de fondo relee las descripciones sola.
+
 ## Una firma de foto podía ser un programa
 
 Las firmas visuales de las fotos se guardan con `pickle`, y `pickle` **no es un formato de

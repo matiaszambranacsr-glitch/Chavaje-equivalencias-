@@ -343,7 +343,7 @@ VERSION_CONFIANZA = "4"
 # Sobre la base real eran 1.402 productos con la medida escrita en el texto y 0 cargadas,
 # porque llenarlas era un botón de Mantenimiento que había que saber apretar.
 # Subir el número al agregar una medida nueva a medidas_desde_descripcion().
-VERSION_MEDIDAS = "4"
+VERSION_MEDIDAS = "5"
 
 # La versión del LECTOR DE APLICACIONES: a qué auto le va cada pieza, deducido de la
 # descripción. Es el dato gratis más grande que tiene esta base —114.673 filas que salen de

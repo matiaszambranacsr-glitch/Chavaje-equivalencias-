@@ -1208,16 +1208,44 @@ def anotar_decision(lote, clave_del_selector, pares):
             decididas.pop(par, None)
 
 
+def motivos_del_lote(lote):
+    """{(a, b): (motivo, fila)} de los descartes marcados con un motivo en esa tanda."""
+    return st.session_state.setdefault("_motivos_por_lote", {}).setdefault(lote, {})
+
+
+def anotar_motivo(lote, clave_del_selector, filas):
+    """on_change del «¿por qué?» de un descarte: anota (o borra) el motivo de esos pares. Se
+    guarda la fila entera porque, después de aplicar, el par ya no está en el análisis y hace
+    falta su descripción para buscar los parecidos (ver pares_parecidos())."""
+    motivos = motivos_del_lote(lote)
+    elegido = st.session_state.get(clave_del_selector)
+    clave = next((k for k, v in MOTIVOS_DE_RECHAZO.items() if v == elegido), None)
+    for fila in filas:
+        if clave:
+            motivos[(fila["a"], fila["b"])] = (clave, fila)
+        else:
+            motivos.pop((fila["a"], fila["b"]), None)
+
+
 def aplicar_decisiones(lote):
     """Aplica todo lo marcado en el lote, de una vez. Lo que otro ya resolvió mientras tanto se
-    saltea solo (ver _los_que_siguen_pendientes())."""
+    saltea solo (ver _los_que_siguen_pendientes()). Los descartes con motivo se guardan con su
+    motivo, y quedan anotados para que la pantalla busque los parecidos con el análisis nuevo."""
     decididas = decisiones_del_lote(lote)
+    motivos = motivos_del_lote(lote)
     bien = [par for par, que in decididas.items() if que == "bien"]
     mal = [par for par, que in decididas.items() if que == "mal"]
     n_bien = aprobar_pendientes(lote, bien) if bien else 0
-    if mal:
-        rechazar_pendientes(lote, mal)
+    por_motivo = {}
+    for par in mal:
+        por_motivo.setdefault((motivos.get(par) or (None, None))[0], []).append(par)
+    for motivo, pares in por_motivo.items():
+        rechazar_pendientes(lote, pares, motivo=motivo)
+    para_buscar = [motivos[par] for par in mal if par in motivos]
+    if para_buscar:
+        st.session_state.setdefault("_buscar_parecidos", {})[lote] = para_buscar
     decididas.clear()
+    motivos.clear()
     invalidar_salud()
     ya_resueltos = len(bien) - n_bien
     # Flotante y no avisar(): el botón de abajo deja la pantalla scrolleada abajo, y avisar()
@@ -1371,6 +1399,26 @@ def _texto_sin_medidas(texto):
     «Junta Tapa de Cilindros NISSAN (ESP 1.20MM) ...» y «... (ESP 1.30MM) ...» quedan iguales."""
     limpio = _RE_MEDIDA_EN_TEXTO.sub(" ", normalizar_texto(texto or ""))
     return " ".join(re.sub(r"[()\[\],;]", " ", limpio).split())
+
+
+def parecidos_de_varios(rechazados, candidatas, tope=60):
+    """Los parecidos de varios rechazos juntos, agrupados por motivo, para la pantalla:
+    [{"motivo", "clave_motivo", "ejemplo", "filas"}]. Un par se ofrece una sola vez aunque se
+    parezca a varios. 'rechazados' son (motivo, fila). Con tope, porque descartar un grupo de
+    cientos de una vez no necesita cientos de búsquedas para encontrar lo mismo."""
+    ya = {(f["a"], f["b"]) for _, f in rechazados}
+    salida = {}
+    with recordando_lo_de_cada_producto():
+        for motivo, fila in rechazados[:tope]:
+            hallados = [f for f in pares_parecidos(fila, motivo, candidatas)
+                        if (f["a"], f["b"]) not in ya]
+            ya.update((f["a"], f["b"]) for f in hallados)
+            if hallados:
+                grupo = salida.setdefault(motivo, {
+                    "motivo": MOTIVOS_DE_RECHAZO[motivo], "clave_motivo": motivo,
+                    "ejemplo": f"{fila['cod_a']} ↔ {fila['cod_b']}", "filas": []})
+                grupo["filas"].extend(hallados)
+    return list(salida.values())
 
 
 def pares_parecidos(fila_rechazada, motivo, candidatas):

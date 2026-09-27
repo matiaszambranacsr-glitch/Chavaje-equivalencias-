@@ -1066,6 +1066,13 @@ Administrar → Mantenimiento.
             _lote_m = lote_info["lote"]
             _candidatas_m = limpias + sospechosas
             _clave_parecidos = f"_parecidos_{_lote_m}"
+            # Los descartes con motivo de la revisión de a uno (ver aplicar_decisiones()): se
+            # buscan ahora, contra el análisis nuevo, que ya no tiene a los descartados.
+            _por_buscar = st.session_state.get("_buscar_parecidos", {}).pop(_lote_m, None)
+            if _por_buscar:
+                _hallados_rev = parecidos_de_varios(_por_buscar, _candidatas_m)
+                if _hallados_rev:
+                    st.session_state[_clave_parecidos] = _hallados_rev
             if st.session_state.get(_clave_parecidos):
                 _par_info = st.session_state[_clave_parecidos]
                 _filas_par = [f for grupo_p in _par_info for f in grupo_p["filas"]]
@@ -1173,24 +1180,18 @@ Administrar → Mantenimiento.
                         if _bien_ahora:
                             aprobar_pendientes(_lote_m, [p for a, b in _bien_ahora
                                                          for p in ((a, b), (b, a))])
-                        _parecidos_nuevos, _ya_ofrecidos = [], set(_muestra)
+                        _rechazados_m = []
                         for _mot, _pares_mot in _mal_ahora.items():
                             rechazar_pendientes(_lote_m, [p for a, b in _pares_mot
                                                           for p in ((a, b), (b, a))],
                                                 motivo=_mot)
-                            if not _mot:
-                                continue
-                            for _par in _pares_mot:
-                                _hallados = [f for f in pares_parecidos(_por_par_g[_par], _mot,
-                                                                        _candidatas_m)
-                                             if (f["a"], f["b"]) not in _ya_ofrecidos]
-                                _ya_ofrecidos.update((f["a"], f["b"]) for f in _hallados)
-                                if _hallados:
-                                    _f = _por_par_g[_par]
-                                    _parecidos_nuevos.append({
-                                        "motivo": MOTIVOS_DE_RECHAZO[_mot], "clave_motivo": _mot,
-                                        "ejemplo": f"{_f['cod_a']} ↔ {_f['cod_b']}",
-                                        "filas": _hallados})
+                            if _mot:
+                                _rechazados_m.extend((_mot, _por_par_g[_par])
+                                                     for _par in _pares_mot)
+                        _muestra_set = set(_muestra)
+                        _parecidos_nuevos = parecidos_de_varios(
+                            _rechazados_m, [f for f in _candidatas_m
+                                            if (f["a"], f["b"]) not in _muestra_set])
                         if _parecidos_nuevos:
                             st.session_state[_clave_parecidos] = _parecidos_nuevos
                         invalidar_salud()
@@ -1421,6 +1422,17 @@ Administrar → Mantenimiento.
                     st.radio(f"¿Qué hacés con {'estos ' + str(len(items)) if len(items) > 1 else 'este'}?",
                              list(DECISIONES_DE_REVISION), key=_clave_g, horizontal=True,
                              on_change=anotar_decision, args=(_lote_rev, _clave_g, _pares_grupo))
+                    # El «¿por qué?» del descarte: con él, la app busca los parecidos (ver
+                    # aplicar_decisiones()). Opcional: descartar sin decirlo sigue andando.
+                    if st.session_state[_clave_g] == "🚫 Descartar":
+                        _clave_mg = f"mot_{_clave_g}"
+                        _motivos_rev = motivos_del_lote(_lote_rev)
+                        _ya_mot = {(_motivos_rev.get(par) or (None,))[0] for par in _pares_grupo}
+                        st.session_state[_clave_mg] = (MOTIVOS_DE_RECHAZO.get(_ya_mot.pop(), "—")
+                                                       if len(_ya_mot) == 1 else "—")
+                        st.selectbox("¿Por qué? (opcional: sirve para encontrar los parecidos)",
+                                     ["—"] + list(MOTIVOS_DE_RECHAZO.values()), key=_clave_mg,
+                                     on_change=anotar_motivo, args=(_lote_rev, _clave_mg, items))
                     if len(_hay) > 1 or (len(_hay) == 1 and st.session_state[_clave_g] == "—"
                                          and any(_decididas.get(par) for par in _pares_grupo)):
                         _b_g = sum(1 for par in _pares_grupo if _decididas.get(par) == "bien")
@@ -1446,6 +1458,14 @@ Administrar → Mantenimiento.
                                          horizontal=True, label_visibility="collapsed",
                                          on_change=anotar_decision,
                                          args=(_lote_rev, _clave_p, [(s["a"], s["b"])]))
+                                if st.session_state[_clave_p] == "🚫 Descartar":
+                                    _clave_mp = f"mot_{_clave_p}"
+                                    st.session_state[_clave_mp] = MOTIVOS_DE_RECHAZO.get(
+                                        (motivos_del_lote(_lote_rev).get((s["a"], s["b"]))
+                                         or (None,))[0], "—")
+                                    st.selectbox("¿Por qué?", ["—"] + list(MOTIVOS_DE_RECHAZO.values()),
+                                                 key=_clave_mp, on_change=anotar_motivo,
+                                                 args=(_lote_rev, _clave_mp, [s]))
                             st.markdown("")
                     st.markdown("")
                 _boton_aplicar("abajo")

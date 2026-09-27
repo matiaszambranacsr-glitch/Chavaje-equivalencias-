@@ -812,7 +812,9 @@ def medidas_desde_descripcion(descripcion):
     texto = str(descripcion).upper().replace(",", ".")
     medidas = {}
 
-    tres = re.search(r"(?<![\d.])(\d{1,3}(?:\.\d+)?)\s*[X×]\s*(\d{1,3}(?:\.\d+)?)"
+    # Antes del primer número no puede haber otro número ni un decimal (1.30x...), pero sí el
+    # punto de una abreviatura: «Reten Arbol Secund.30x44x8» no se leía.
+    tres = re.search(r"(?<!\d)(?<!\d\.)(\d{1,3}(?:\.\d+)?)\s*[X×]\s*(\d{1,3}(?:\.\d+)?)"
                      r"\s*[X×]\s*(\d{1,3}(?:\.\d+)?)(?![\d.])", texto)
     if tres:
         interno, externo, ancho = (float(tres.group(i)) for i in (1, 2, 3))
@@ -822,6 +824,28 @@ def medidas_desde_descripcion(descripcion):
             medidas["diametro_interno"] = interno
             medidas["diametro_externo"] = externo
             medidas["ancho"] = ancho
+
+    # DOS NÚMEROS, SOLO CUANDO SE SABE QUÉ PIEZA ES. Arriba se explica por qué «20x2.5» no se lee
+    # a ciegas: en un o'ring es diámetro por cordón, en un retén es interno por externo. Pero la
+    # descripción casi siempre dice cuál es, y entonces no hay ambigüedad. Son los que más
+    # hacían falta: ILLINOIS escribe «O´RING 36,5X3.53MM», IMPERIAL «ORING 16x3 DEUTZ 514» y
+    # «RET DIST FORD 1.4 TDCI 40x55x» (el ancho cortado), TARANTO «ARAND.BASE INYECT.16x21x2».
+    # En estas piezas la medida decide todo: un o'ring de 36,5 no entra donde va uno de 37,7.
+    # No se toma lo que viene después de una barra («1/2 x100» es media pulgada por cien).
+    if "diametro_interno" not in medidas:
+        dos = re.search(r"(?<![\d/])(?<!\d\.)(\d{1,3}(?:\.\d+)?)\s*[X×]\s*(\d{1,3}(?:\.\d+)?)"
+                        r"(?![\d.])", texto)
+        if dos:
+            a, b = float(dos.group(1)), float(dos.group(2))
+            if _RE_ES_ORING.search(texto):
+                # Diámetro interno por cordón: el cordón es siempre bastante menor.
+                if 0 < b < a <= 500 and b <= 15:
+                    medidas["diametro_interno"] = a
+                    medidas["espesor"] = b
+            elif _RE_ES_RETEN_O_ARANDELA.search(texto):
+                if 0 < a < b <= 500:
+                    medidas["diametro_interno"] = a
+                    medidas["diametro_externo"] = b
 
     estrias = re.search(r"(\d{1,3})\s*ESTR[ÍI]AS?", texto)
     if estrias and 0 < int(estrias.group(1)) <= 60:
