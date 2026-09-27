@@ -4561,6 +4561,29 @@ FISPA↔JL) salieron cinco errores sistemáticos más, todos corregidos:
 Sobre la cola real, 380 pares más dejan de aprobarse solos; en las muestras, todos mal
 emparejados.
 
+### 🪭 El abanico: un producto con muchos candidatos, elegido a mano
+
+La tercera ronda de muestras mostró el error más grande que quedaba: **un producto emparejado
+con muchos productos distintos de la otra lista**. La sonda 80007 de FISPA nombra tantos autos
+que «concordaba» con 25 sondas distintas de CRI-FA; la junta de ILLINOIS de la Hilux 2,8 estaba
+con 11 juntas de TARANTO de otros motores de la Hilux. Como mucho una de cada abanico es la
+equivalente, y aprobar el grupo las aprobaba todas.
+
+- **En el análisis**: cuando un producto tiene 4 o más candidatos distintos en una misma lista
+  (las variantes de una misma pieza cuentan como uno), se queda el que mejor coincide —más
+  modelos, motor y cilindrada en común— y los demás van a revisión con «🪭». Si empatan más de
+  dos, van todos. Para comparar la cilindrada, «2779cc» ahora es 2.8 y «1587CC» es 1.6.
+- **En la pantalla**: **🪭 Elegí cuál es la equivalente** muestra cada producto con sus
+  candidatos, de a 5 productos por página. Cada opción es una pieza con todas sus variantes
+  (52 candidatos que eran 11 juntas en 2 materiales y 3 espesores quedan en 11 opciones); si el
+  producto dice su espesor, se aprueban solo las de ese espesor. Se marca la que es y, con «Ya
+  lo miré», el resto se descarta. Una decisión resuelve todo el abanico.
+- Los que están en revisión solo por el abanico no se repiten en la lista de «para revisar».
+
+Sobre la cola real: las limpias quedan en 15.489 (11.096 de FISPA y 2.726 de ILLINOIS contra
+códigos de fábrica, que en las muestras salieron bien) y 4.463 pares pasan a resolverse en
+1.078 decisiones de abanico, en vez de aprobarse a ciegas.
+
 ## Una firma de foto podía ser un programa
 
 Las firmas visuales de las fotos se guardan con `pickle`, y `pickle` **no es un formato de

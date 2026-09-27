@@ -1272,6 +1272,10 @@ def aplicar_decisiones(lote):
 
 TAMANO_DE_LA_MUESTRA = 30
 
+# Ver «el abanico» en _analizar_lote_pendiente().
+PRODUCTOS_DISTINTOS_PARA_ABANICO = 4
+MEJORES_EMPATADOS_QUE_SE_ACEPTAN = 2
+
 
 def tamano_de_la_muestra(total):
     """Cuántos mirar según el tamaño del grupo. Con 0 errores en 30 solo se puede prometer
@@ -1399,6 +1403,71 @@ def _texto_sin_medidas(texto):
     «Junta Tapa de Cilindros NISSAN (ESP 1.20MM) ...» y «... (ESP 1.30MM) ...» quedan iguales."""
     limpio = _RE_MEDIDA_EN_TEXTO.sub(" ", normalizar_texto(texto or ""))
     return " ".join(re.sub(r"[()\[\],;]", " ", limpio).split())
+
+
+def es_de_un_abanico(fila):
+    """¿El par está en revisión por el abanico? Ver «el abanico» en _analizar_lote_pendiente()."""
+    return any(a.startswith("🪭") for a in (fila.get("alarmas") or []))
+
+
+def abanicos_para_elegir(limpias, sospechosas):
+    """Los productos que tienen varios candidatos DISTINTOS en otra lista, para elegir a mano.
+
+    Devuelve [{"producto": {...}, "marca_otra": str, "candidatos": [filas]}], de los que
+    más candidatos tienen a los que menos. Se arma alrededor de los pares que el análisis mandó
+    a revisión por el abanico, y cada uno se asigna al lado que más candidatos tiene: una junta
+    de ILLINOIS con 11 de TARANTO se presenta como «esta junta, ¿con cuál de estas 11?», que es
+    una decisión, y no como 11 pares sueltos en la lista de revisión.
+    Los candidatos son TODOS los pares de ese producto con esa lista, también el que el
+    análisis dejó limpio por ser el que mejor coincidía: la persona tiene que verlos juntos."""
+    todas = [f for f in limpias + sospechosas if "OEM" not in (f.get("tipo_a"), f.get("tipo_b"))]
+    por_clave = {}
+    for f in todas:
+        for clave in ((f["a"], f.get("marca_b")), (f["b"], f.get("marca_a"))):
+            por_clave.setdefault(clave, []).append(f)
+    elegidas = {}
+    for f in sospechosas:
+        if not es_de_un_abanico(f):
+            continue
+        claves = [(f["a"], f.get("marca_b")), (f["b"], f.get("marca_a"))]
+        clave = max(claves, key=lambda k: len(por_clave.get(k, ())))
+        elegidas.setdefault(clave, None)
+    salida = []
+    for (pid, marca_otra) in elegidas:
+        candidatos = por_clave.get((pid, marca_otra), [])
+        if len(candidatos) < 2:
+            continue
+        f0 = candidatos[0]
+        lado = "a" if f0["a"] == pid else "b"
+        salida.append({"producto": {"id": pid, "cod": f0[f"cod_{lado}"],
+                                    "marca": f0[f"marca_{lado}"], "desc": f0.get(f"desc_{lado}")},
+                       "marca_otra": marca_otra,
+                       "candidatos": sorted(candidatos, key=lambda f: -f.get("confianza", 0))})
+    salida.sort(key=lambda x: -len(x["candidatos"]))
+    return salida
+
+
+def candidatos_por_pieza(abanico):
+    """Los candidatos de un abanico agrupados por pieza: las variantes de un mismo código
+    (TC-432-20 0M, 1M, 2M, TC-432-MG 0M...) son una sola opción. Con 52 candidatos que en
+    realidad eran 8 juntas en 2 materiales y 3 espesores, elegir de a uno era imposible en el
+    celular.
+
+    Devuelve [(base, [filas])], la base con el mejor puntaje primero. Si el producto dice su
+    espesor, dentro de cada pieza quedan solo las variantes con ese espesor (o sin espesor
+    escrito): las otras no son la misma aunque sean la misma junta."""
+    pid = abanico["producto"]["id"]
+    esp_prod = medidas_desde_descripcion(abanico["producto"].get("desc") or "").get("espesor")
+    grupos = {}
+    for f in abanico["candidatos"]:
+        lado = "b" if f["a"] == pid else "a"
+        if esp_prod is not None:
+            esp_c = medidas_desde_descripcion(f.get(f"desc_{lado}") or "").get("espesor")
+            if esp_c is not None and abs(esp_c - esp_prod) > 0.03:
+                continue
+        base = codigo_base_sin_variante(f[f"cod_{lado}"]) or f[f"cod_{lado}"]
+        grupos.setdefault(base, []).append(f)
+    return sorted(grupos.items(), key=lambda g: -max(f.get("confianza", 0) for f in g[1]))
 
 
 def parecidos_de_varios(rechazados, candidatas, tope=60):
@@ -1702,6 +1771,49 @@ def _analizar_lote_pendiente(lote, limite=None, desde=0):
     _ya_juzgados = {}   # código -> ¿las reglas de hoy ya no lo tomarían? (ver más abajo)
     ventas_confirman = pares_confirmados_por_ventas()
 
+    # EL ABANICO: un producto emparejado con muchos productos DISTINTOS de una misma lista. La
+    # sonda 80007 de FISPA nombra tantos autos que «concordaba» con 25 sondas distintas de
+    # CRI-FA. No pueden estar todas bien: CRI-FA no vende la misma sonda 25 veces, así que como
+    # mucho una es la equivalente. Las variantes de una misma pieza no cuentan (la misma junta
+    # en tres espesores es legítima, ver son_variantes_de_la_misma_pieza()), ni los códigos de
+    # fábrica, que tienen su propio control más arriba.
+    _abanico = {}
+    for f in filas:
+        if "OEM" in (f.get("tipo_a"), f.get("tipo_b")):
+            continue
+        for yo, otro, marca_otro in ((f["a"], f["cod_b"], f.get("marca_b")),
+                                     (f["b"], f["cod_a"], f.get("marca_a"))):
+            _abanico.setdefault((yo, marca_otro), set()).add(
+                codigo_base_sin_variante(otro) or sanitizar(otro or ""))
+    _en_abanico = {clave for clave, bases in _abanico.items()
+                   if len(bases) >= PRODUCTOS_DISTINTOS_PARA_ABANICO}
+    # Dentro del abanico se queda el que MEJOR coincide —más modelos, motor y cilindrada en
+    # común (ver fuerza_de_la_coincidencia())— y los demás van a revisión. La junta de
+    # ILLINOIS para la Hilux 2,8 motor 3L estaba emparejada con 11 de TARANTO de otros motores
+    # de la Hilux: bajarlas todas era bajar también la buena. Si empatan muchos, como las
+    # sondas que nombran veinte autos, no hay a cuál quedarse y van todos.
+    _no_es_el_mejor = set()
+    if _en_abanico:
+        _fuerza_del_par, _pares_del_abanico = {}, {}
+        for f in filas:
+            _claves = [k for k in ((f["a"], f.get("marca_b")), (f["b"], f.get("marca_a")))
+                       if k in _en_abanico]
+            if not _claves:
+                continue
+            _fuerza_del_par[(f["a"], f["b"])] = fuerza_de_la_coincidencia(
+                firma_de_producto(f.get("desc_a")), firma_de_producto(f.get("desc_b")))
+            for k in _claves:
+                _pares_del_abanico.setdefault(k, []).append(f)
+        for k, pares_k in _pares_del_abanico.items():
+            mejor = max(_fuerza_del_par[(f["a"], f["b"])] for f in pares_k)
+            mejores = [f for f in pares_k if _fuerza_del_par[(f["a"], f["b"])] == mejor]
+            _bases_mejores = {codigo_base_sin_variante(f["cod_b"] if f["a"] == k[0] else f["cod_a"])
+                              for f in mejores}
+            for f in pares_k:
+                if (_fuerza_del_par[(f["a"], f["b"])] < mejor
+                        or len(_bases_mejores) > MEJORES_EMPATADOS_QUE_SE_ACEPTAN):
+                    _no_es_el_mejor.add((f["a"], f["b"]))
+
     limpias, sospechosas, relacionadas = [], [], []
     for f in filas:
         alarmas = []
@@ -1878,6 +1990,13 @@ def _analizar_lote_pendiente(lote, limite=None, desde=0):
             if not alarmas:
                 alarmas.append("🤷 Nada dice que sean la misma pieza: no los une ningún código y "
                                "las descripciones no alcanzan para decirlo")
+        if (f["a"], f["b"]) in _no_es_el_mejor:
+            puntaje = min(puntaje, 50.0)
+            _cuantos_ab = max(len(_abanico.get((f["a"], f.get("marca_b")), ())),
+                              len(_abanico.get((f["b"], f.get("marca_a")), ())))
+            alarmas.append(f"🪭 Uno de los dos está emparejado con {_cuantos_ab} productos "
+                           "distintos de la otra lista y este no es el que mejor coincide: "
+                           "como mucho uno es el equivalente")
         f["evidencia"] = a_favor
         f["veredicto"] = veredicto
 

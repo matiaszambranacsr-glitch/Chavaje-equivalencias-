@@ -1253,6 +1253,75 @@ Administrar → Mantenimiento.
                                 st.rerun()
                 st.markdown("---")
 
+            # 🪭 LOS ABANICOS: un producto con varios candidatos distintos en otra lista. Se
+            # eligen a mano, de a un producto: ver abanicos_para_elegir().
+            _abanicos = abanicos_para_elegir(limpias, sospechosas)
+            if _abanicos:
+                st.markdown(f"**🪭 Elegí cuál es la equivalente** — {len(_abanicos)} producto(s)")
+                explicar(
+                    "Productos que coinciden con varios productos distintos de otra lista. "
+                    "Como mucho uno es el mismo: elegilo.",
+                    "Pasa cuando una descripción es vaga —«Jta.Tapa Cil. TOYOTA HILUX», sin "
+                    "motor— o nombra muchos autos, y encaja con varias piezas de la otra lista. "
+                    "Ninguna regla puede elegir entre ellas; una persona sí.\n\n"
+                    "Cada opción es una pieza con todas sus variantes (la misma junta en otro "
+                    "material o espesor); si el producto dice su espesor, se aprueban solo las "
+                    "de ese espesor. Marcá la que es la misma pieza y tildá «Ya lo miré» para "
+                    "descartar las demás. Si no tildás, solo se aprueba la marcada y el resto "
+                    "queda para después."
+                )
+                _por_pag_ab = 5
+                _pags_ab = (len(_abanicos) - 1) // _por_pag_ab + 1
+                _pag_ab = (st.number_input(f"Página (de {_pags_ab}):", min_value=1,
+                                           max_value=_pags_ab, value=1, step=1,
+                                           key=f"pag_abanicos_{_lote_m}")
+                           if _pags_ab > 1 else 1)
+                _estos_ab = _abanicos[(int(_pag_ab) - 1) * _por_pag_ab:int(_pag_ab) * _por_pag_ab]
+                with st.form(key=f"form_abanicos_{_lote_m}_{_pag_ab}"):
+                    for _i_ab, _ab in enumerate(_estos_ab):
+                        _prod = _ab["producto"]
+                        st.markdown(f"**{_prod['marca']} {_prod['cod']}** — "
+                                    f"{len(_ab['candidatos'])} candidatos en {_ab['marca_otra']}")
+                        st.caption((_prod.get("desc") or "")[:160])
+                        _opciones_ab = {}
+                        for _base, _filas_b in candidatos_por_pieza(_ab):
+                            _f = _filas_b[0]
+                            _lado_o = "b" if _f["a"] == _prod["id"] else "a"
+                            _opciones_ab[_base] = (
+                                f"{_f[f'cod_{_lado_o}']}"
+                                + (f" (+{len(_filas_b) - 1} variantes)" if len(_filas_b) > 1 else "")
+                                + f" — {(_f.get(f'desc_{_lado_o}') or '')[:80]}")
+                        st.multiselect("Las que son la misma pieza:", list(_opciones_ab),
+                                       format_func=lambda k, o=_opciones_ab: o[k],
+                                       key=f"ab_sel_{_prod['id']}_{_ab['marca_otra']}")
+                        st.checkbox("Ya lo miré: las que no marqué no son",
+                                    key=f"ab_listo_{_prod['id']}_{_ab['marca_otra']}")
+                        st.markdown("")
+                    _guardar_ab = st.form_submit_button("💾 Guardar estos", type="primary")
+                if _guardar_ab:
+                    _n_ap_ab = _n_rec_ab = 0
+                    for _ab in _estos_ab:
+                        _k = f"{_ab['producto']['id']}_{_ab['marca_otra']}"
+                        _bases_sel = set(st.session_state.get(f"ab_sel_{_k}") or [])
+                        _sel = {(f["a"], f["b"]) for _base, _filas_b in candidatos_por_pieza(_ab)
+                                if _base in _bases_sel for f in _filas_b}
+                        _listo = st.session_state.get(f"ab_listo_{_k}")
+                        if _sel:
+                            _n_ap_ab += aprobar_pendientes(_lote_m, [p for a, b in _sel
+                                                                     for p in ((a, b), (b, a))])
+                        if _listo:
+                            _resto_ab = [(f["a"], f["b"]) for f in _ab["candidatos"]
+                                         if (f["a"], f["b"]) not in _sel]
+                            if _resto_ab:
+                                _n_rec_ab += rechazar_pendientes(
+                                    _lote_m, [p for a, b in _resto_ab for p in ((a, b), (b, a))],
+                                    motivo="otra_pieza")
+                    invalidar_salud()
+                    avisar("success", f"Guardado: ✅ {_n_ap_ab} aprobado(s) · 🚫 {_n_rec_ab} "
+                                      "descartado(s).")
+                    st.rerun()
+                st.markdown("---")
+
             pares_limpios = []
             for x in limpias:
                 pares_limpios.extend([(x["a"], x["b"]), (x["b"], x["a"])])
@@ -1324,6 +1393,11 @@ Administrar → Mantenimiento.
                     if len(limpias) > 500:
                         st.caption(f"Se muestran 500 de {len(limpias)}; el botón de aprobar los toma a todos.")
 
+            # Los que están en revisión SOLO por el abanico se eligen arriba, en «Elegí cuál es
+            # la equivalente»: acá serían cientos de pares sueltos con el mismo motivo.
+            sospechosas = [x for x in sospechosas
+                           if not (x.get("alarmas") and all(a.startswith("🪭")
+                                                            for a in x["alarmas"]))]
             if sospechosas:
                 st.markdown("---")
                 # «Con algo raro» no es cierto para todos: el corte lo decide el PUNTAJE, y un

@@ -620,6 +620,12 @@ _TIPOS_DE_SENSOR = [
     ("LAMBDA", r'LAMBDA|OXIGENO'),
     ("ABS", r'\bABS\b'),
     ("NIVEL", r'\bNIVEL\b'),
+    # Los bulbos: el de retromarcha y el de electroventilador son interruptores, no el de
+    # temperatura del reloj, aunque lo digan en la misma frase («BULBO DE TEMPERATURA DE
+    # ELECTROVENTILADOR»). Ver tipos_de_sensor().
+    ("RETROMARCHA", r'RETROMARCHA|MARCHA ATRAS|REVERSA'),
+    ("ELECTROVENTILADOR", r'ELECTROVENT|ELECTRO VENT'),
+    ("PRESION DE ACEITE", r'PRESION (?:DE )?ACEITE|ACEITE'),
 ]
 _RE_TIPOS_DE_SENSOR = [(t, re.compile(p)) for t, p in _TIPOS_DE_SENSOR]
 
@@ -663,9 +669,14 @@ def tipos_de_sensor(descripcion):
     """Qué mide, si la descripción es de un SENSOR: {'MAP'}, {'ROTACION'}... Vacío si no es un
     sensor o no lo dice. El MAP mide presión, así que PRESION sola no cuenta como tipo."""
     texto = _normalizar_desc(descripcion)
-    if " SENSOR " not in texto and " SONDA " not in texto:
+    if " SENSOR " not in texto and " SONDA " not in texto and " BULBO " not in texto:
         return frozenset()
-    return frozenset(t for t, patron in _RE_TIPOS_DE_SENSOR if patron.search(texto))
+    tipos = {t for t, patron in _RE_TIPOS_DE_SENSOR if patron.search(texto)}
+    # El interruptor del electroventilador se activa por temperatura y lo dice: no por eso es
+    # el sensor de temperatura del reloj. Lo que manda es para qué es.
+    if "ELECTROVENTILADOR" in tipos or "RETROMARCHA" in tipos:
+        tipos.discard("TEMPERATURA")
+    return frozenset(tipos)
 
 
 def tipo_de_juego_de_motor(descripcion):
@@ -1664,6 +1675,12 @@ def _firma_de_producto(descripcion, producto_id=None, codigo_clean=None):
     # no engancha, porque entre el 6 y la C no hay borde de palabra: ese producto quedaba sin
     # cilindrada y no se podía contrastar contra el «- 1.6 -» de la otra lista.
     cilindradas = set(re.findall(r'\b(\d[.,]\d)(?!\d)', limpio))
+    # Y en centímetros cúbicos, que es como escribe TARANTO: «Hilux 2779cc» es el 2.8, «1587CC»
+    # el 1.6. Sin pasarlo a litros, la junta de la Hilux 2,8 no encontraba a su par por la
+    # cilindrada y el abanico elegía otra (ver _analizar_lote_pendiente()).
+    for _cc in re.findall(r'\b(\d{3,4})\s*CC\b', limpio):
+        if 600 <= int(_cc) <= 9999:
+            cilindradas.add(f"{int(_cc) / 1000:.1f}")
 
     # Los modelos: palabras que quedan después de sacar la marca del auto, el ruido y los
     # números sueltos. Se buscan contra el catálogo propio para no inventar modelos.
