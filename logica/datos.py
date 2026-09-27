@@ -2110,6 +2110,18 @@ def get_connection():
 # no se usa después: cada hilo abre la suya con el proxy de abajo.
 get_connection()
 
+# Y el esquema se pone al día de nuevo cada vez que se carga la lógica, aparte de
+# get_connection(). Hace falta: al subir código nuevo, logica/ se vuelve a cargar pero
+# get_connection() NO se vuelve a correr —@st.cache_resource la guarda mientras su propio
+# código no cambie, y lo que cambia es crear_esquema()—. Así, una tabla nueva no se creaba
+# hasta reiniciar la app: «sqlite3.OperationalError» al abrir la muestra de control, porque
+# muestras_de_control no existía. Todo es CREATE ... IF NOT EXISTS: en la base real tarda 15 ms.
+with contextlib.closing(sqlite3.connect(DB_PATH, isolation_level=None)) as _conn_esquema:
+    _conn_esquema.row_factory = sqlite3.Row
+    _conn_esquema.execute("PRAGMA foreign_keys = ON")
+    _conn_esquema.execute("PRAGMA busy_timeout = 8000")
+    crear_esquema(_conn_esquema.cursor())
+
 
 class _ConexionPorSesion:
     """Una conexión propia para cada sesión, detrás de los mismos nombres `conn` y `c`.
