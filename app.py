@@ -37,6 +37,7 @@ específico, y las pantallas quedan todas al final:
         · FUSIONAR MARCAS Y PRODUCTOS DUPLICADOS
     logica/equivalencias_descubiertas.py
         · EQUIVALENCIAS DESCUBIERTAS DESDE LAS VENTAS
+        · APROBAR POR GRUPOS, CON UNA MUESTRA DE CONTROL
     logica/importar.py
         · IMPORTAR UNA LISTA: leer el archivo y adivinar qué es cada columna
         · AVISOS DE BACKUP Y HUELLA DEL ARCHIVO IMPORTADO

@@ -922,6 +922,21 @@ def _esquema_gestion(c):
         PRIMARY KEY (producto_a_id, producto_b_id)
     )""")
     c.execute("CREATE INDEX IF NOT EXISTS idx_revisadas_decision ON equivalencias_revisadas(decision)")
+    # Por qué se rechazó: ver MOTIVOS_DE_RECHAZO. Vacío en lo que se decidió sin decir por qué.
+    if "motivo" not in [f[1] for f in c.execute("PRAGMA table_info(equivalencias_revisadas)")]:
+        c.execute("ALTER TABLE equivalencias_revisadas ADD COLUMN motivo TEXT")
+
+    # Los pares elegidos al azar para controlar un grupo de vínculos antes de aprobarlo entero.
+    # Se guardan para que la muestra sea SIEMPRE la misma: si se volviera a sortear en cada
+    # recarga, cada persona —o la misma, al volver— vería otra, y revisar la muestra hasta que
+    # salga limpia sería trampa sin querer. Ver muestra_de_control().
+    c.execute("""CREATE TABLE IF NOT EXISTS muestras_de_control (
+        grupo TEXT NOT NULL,
+        producto_a_id INTEGER NOT NULL,
+        producto_b_id INTEGER NOT NULL,
+        fecha TEXT DEFAULT (datetime('now')),
+        PRIMARY KEY (grupo, producto_a_id, producto_b_id)
+    )""")
 
     # Vínculos que llegaron de una lista de proveedor y esperan revisión. Una importación puede
     # generar miles de vínculos de una: si se cargaran solos, un error en la columna de código de

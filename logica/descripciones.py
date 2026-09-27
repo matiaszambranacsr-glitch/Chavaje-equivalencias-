@@ -1112,6 +1112,9 @@ _RE_PUNTO_ENTRE_LETRAS = re.compile(r'([A-ZÁÉÍÓÚÑ])\.([A-ZÁÉÍÓÚÑ])')
 # Solo las que se contaron en las descripciones reales, y con lo que viene después cuando la
 # letra sola es ambigua: «M.» también es M.BENZ o M.FIRE, y «T.» es «T.Y CODO».
 _ABREVIATURAS_CON_PUNTO = [
+    # «JTA S.TAPA A.LEVA» es la junta de la sobretapa del árbol de levas, que en los motores con
+    # el árbol arriba es la misma junta que las otras listas llaman «de tapa de válvulas».
+    (re.compile(r'\bS\.\s?TAPA\s+A\.\s?LEVAS?\b'), "TAPA VALVULA "),
     (re.compile(r'\bT\.\s?C\b\.?'), "TAPA CILINDRO "),
     (re.compile(r'\bT\.\s?V\b\.?'), "TAPA VALVULA "),
     (re.compile(r'\bT\.(?=\s?(?:CIL|DIST|VALV|TERM|BOT|TRAS|DEL|INF|SUP|FRONT|LAT|BALANC))'),
@@ -1794,6 +1797,24 @@ _FAMILIAS_DE_MARCAS = [
 _MARCAS_DE_MOTORES = {"MWM", "CUMMINS", "PERKINS", "DEUTZ", "CATERPILLAR", "YANMAR", "KUBOTA"}
 
 
+# Dónde va la pieza, que es lo que separa dos juntas del mismo auto. Ver «piezas de lugares
+# distintos» en firmas_compatibles(). SENSOR, PRESION o VELOCIDAD no están: dicen qué mide, y
+# el mismo sensor MAP se escribe «de presión» en una lista y no en otra.
+_LUGARES_DE_LA_PIEZA = {
+    "CILINDRO", "VALVULA", "CARTER", "ESCAPE", "ADMISION", "MULTIPLE", "SALIDA", "DISTRIBUCION",
+    "LEVAS", "BANCADA", "CARBURADOR", "TERMOSTATO", "DIFERENCIAL", "TURBO", "COLECTOR",
+    "BOMBA", "FILTRO", "INYECCION",
+}
+
+# Ver «la marca sola no alcanza» en firmas_compatibles().
+_TECNOLOGIAS_DE_MOTOR = {
+    "TDI", "TDCI", "HDI", "CRDI", "DCI", "JTD", "JTDM", "MULTIJET", "CDI", "CDTI", "DTI", "TDDI",
+    "TDS", "TSI", "TFSI", "FSI", "GTI", "MPI", "SPI", "MPFI", "VTI", "VTEC", "TURBO", "TD", "D",
+    "DIESEL", "NAFTA", "GNC", "16V", "8V", "12V", "20V", "24V", "32V", "DOHC", "SOHC", "INY",
+    "INYECCION", "CARB", "CARBURADOR", "EFI", "TBI", "ECO", "FLEX", "EVO",
+}
+
+
 def _marcas_que_se_cruzan(marcas_a, marcas_b):
     """¿Nombran alguna marca en común, o de la misma familia, o una es de motores?"""
     if (marcas_a & marcas_b) or (marcas_a | marcas_b) & _MARCAS_DE_MOTORES:
@@ -1900,6 +1921,11 @@ def firmas_compatibles(a, b, minimo_nucleo=2, cuenta_palabras=None, total_descri
     # está escrito en cualquier lado de la otra, por lo mismo que con los modelos numéricos:
     # la lista de modelos conocidos no los tiene a todos, y un CORSA puede no estar anotado.
     _mod_a, _mod_b = a.get("modelos") or set(), b.get("modelos") or set()
+    # Para estas dos reglas, lo compartido que salva tiene que ser un MOTOR, no una tecnología
+    # de motor: «TDCI», «HDI» o «16V» los tienen decenas de motores distintos. Lo mostró la
+    # muestra de control: «Ranger Puma 2168cc» contra «Fiesta Focus Transit 1,8» pasaba porque
+    # las dos dicen TDCI.
+    apl_comunes = {w for w in apl_comunes if w not in _TECNOLOGIAS_DE_MOTOR}
     # Y al revés: comparten una palabra de modelo pero las marcas no coinciden. «S10-Trail
     # Blazer» de Chevrolet contra «X-TRAIL» de Nissan compartían TRAIL, y con eso los autos
     # «coincidían». El modelo compartido no cuenta como respaldo acá, justamente porque es la
@@ -1962,6 +1988,17 @@ def firmas_compatibles(a, b, minimo_nucleo=2, cuenta_palabras=None, total_descri
         if (piezas_comunes < chica
                 or (len(chica) >= 2 and len(piezas_comunes) < 2)
                 or (len(chica) == 1 and not apl_comunes)):
+            # Cuando cada una nombra un LUGAR del motor que la otra no —cárter contra tapa de
+            # válvulas, múltiple contra salida de escape— no es que el texto no alcance: dice
+            # que son dos piezas distintas. Ese motivo tumba el par (ver
+            # _MOTIVOS_QUE_CONTRADICEN); el otro solo deja de sumar. La diferencia la mostró la
+            # muestra de control: «Jta.Tapa Cil. S10» contra «Junta Tapa de Válvulas M.W.M.»
+            # quedaba limpia con 75 por el rubro y el precio.
+            _lugar_a = (pieza_a - pieza_b) & _LUGARES_DE_LA_PIEZA
+            _lugar_b = (pieza_b - pieza_a) & _LUGARES_DE_LA_PIEZA
+            if _lugar_a and _lugar_b:
+                return False, (f"piezas de lugares distintos: {'/'.join(sorted(_lugar_a))} "
+                               f"vs {'/'.join(sorted(_lugar_b))}")
             return False, (f"no coinciden en qué pieza es: «{'/'.join(sorted(pieza_a)[:3])}» "
                            f"y «{'/'.join(sorted(pieza_b)[:3])}»")
 
@@ -2123,7 +2160,8 @@ def pares_de_kit_y_pieza(pares):
 # SENSOR, o CARCASA y BASE de termostato, son la misma pieza dicha de otra forma.
 _MOTIVOS_QUE_CONTRADICEN = ("posiciones distintas", "siglas distintas", "autos distintos",
                             "marcas distintas", "modelos distintos", "cilindradas distintas",
-                            "distinta cantidad de vías", "juegos distintos")
+                            "distinta cantidad de vías", "juegos distintos",
+                            "piezas de lugares distintos")
 # Los que hablan del AUTO. Esos no cuentan cuando el par está unido por un código: ver
 # _unidos_por_codigo().
 _MOTIVOS_DEL_AUTO = ("autos distintos", "marcas distintas", "modelos distintos",

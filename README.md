@@ -4461,6 +4461,48 @@ Dos cosas más que mostró la cola real, las dos en la comparación de descripci
   los juegos que no son de motor: «Juego de juntas para Carburador» contra «JUNTAS FIAT 128
   WEBER» sigue siendo el mismo juego. En la cola real: 250 pares dejan de aprobarse solos.
 
+## Aprobar por grupos con una muestra de control, y rechazos que enseñan
+
+En la base real había 5 equivalencias aprobadas y 23.001 «limpias» esperando. «Limpia» quiere
+decir que el análisis no encontró nada en contra, no que esté bien, y la única salida que tenía
+la pantalla era aprobarlas todas a ciegas. Ahora, en Estadísticas → 🔗 Equivalencias sugeridas:
+
+**🎯 Aprobar las limpias por grupos, con una muestra de control.** Un grupo son las limpias
+entre dos listas (ILLINOIS ↔ TARANTO, CRI-FA ↔ FISPA...), porque los errores se parecen dentro
+de un par de listas y cambian entre uno y otro. De cada grupo la app sortea una muestra —30, 50
+u 80 pares según el tamaño— y la guarda en la base (`muestras_de_control`): es siempre la
+misma, aunque se recargue o la revise otra persona, así que no se puede «revisar hasta que
+salga limpia». Se marcan de a 10 en un formulario, sin recargar la pantalla con cada toque.
+Con la muestra completa, la app dice cuántos errores se pueden esperar en el resto (el límite
+de arriba del intervalo de Wilson al 95%: con 0 errores en 80, menos de 5%) y:
+
+- con 0 errores, ofrece aprobar el resto del grupo de un toque;
+- con 1, lo ofrece igual, o mirar 30 más;
+- con 2 o más, recomienda revisar uno por uno, y si la mitad está mal ofrece descartar el resto.
+
+**🧠 Los rechazos enseñan.** Al marcar un par como malo se dice por qué: otro auto o motor, otra
+medida o variante, juego contra pieza suelta, otra pieza, código mal leído. El motivo se guarda
+(`equivalencias_revisadas.motivo`), y con él la app busca en la lista los pares con el MISMO
+problema y ofrece descartarlos juntos (`pares_parecidos()`). Los criterios son estrechos a
+propósito, porque lo que se ofrece se descarta con un botón: el mismo producto contra una
+variante del otro con la misma descripción salvo el espesor; contra otro que nombra
+exactamente los mismos modelos; contra otro con la misma medida; los mismos dos tipos de juego
+entre las mismas dos listas; todo lo que cuelga del mismo código de fábrica. Con un código de
+fábrica del otro lado no se busca por texto, porque su descripción es una copia.
+
+**Lo que la muestra encontró en la primera pasada**, y que se corrigió en las reglas:
+
+- «Jta.Tapa Cil. S10» contra «Junta Tapa de Válvulas M.W.M.» quedaba limpia con 75 puntos. El
+  texto dice que son dos piezas distintas, y eso solo dejaba de sumar. Ahora, cuando cada
+  descripción nombra un lugar del motor que la otra no —cárter contra tapa de válvulas,
+  múltiple contra salida de escape, carburador contra tapa de cilindros—, el par se tumba.
+  En la cola real: 422 pares.
+- «Ranger Puma 2168cc» contra «Fiesta Focus Transit 1,8» se salvaban de «modelos distintos»
+  porque las dos dicen TDCI. Las tecnologías de motor (TDCI, HDI, 16V, TURBO...) ya no cuentan
+  como motor compartido. En la cola real: 95 pares.
+- «JTA S.TAPA A.LEVA» de IMPERIAL es la junta de tapa de válvulas de los motores con el árbol
+  de levas arriba, y ahora se lee así.
+
 ## Una firma de foto podía ser un programa
 
 Las firmas visuales de las fotos se guardan con `pickle`, y `pickle` **no es un formato de

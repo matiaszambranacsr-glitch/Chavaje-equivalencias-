@@ -381,20 +381,23 @@ def nivel_por_evidencias(evidencias):
     return "🔴 Solo por repetición", puntaje
 
 
-def marcar_revision(pares, decision):
+def marcar_revision(pares, decision, motivo=None):
     """Recuerda la decisión tomada sobre un vínculo, en los dos sentidos. 'ok' = ya lo miré y
     está bien (no volver a marcarlo en la auditoría). 'rechazada' = no es equivalente (además
-    de borrarlo, no se vuelve a crear aunque se reimporte la lista del proveedor)."""
+    de borrarlo, no se vuelve a crear aunque se reimporte la lista del proveedor).
+    'motivo' es una clave de MOTIVOS_DE_RECHAZO, cuando la persona dijo por qué."""
     if not pares:
         return
     filas = []
+    usuario = obtener_usuario_actual()
     for a, b in pares:
-        filas.append((a, b, decision, obtener_usuario_actual()))
-        filas.append((b, a, decision, obtener_usuario_actual()))
+        filas.append((a, b, decision, usuario, motivo))
+        filas.append((b, a, decision, usuario, motivo))
     with db_lock:
         c.executemany(
             "INSERT OR REPLACE INTO equivalencias_revisadas "
-            "(producto_a_id, producto_b_id, decision, revisado_por) VALUES (?, ?, ?, ?)", filas
+            "(producto_a_id, producto_b_id, decision, revisado_por, motivo) VALUES (?, ?, ?, ?, ?)",
+            filas
         )
         conn.commit()
 
@@ -1226,6 +1229,258 @@ def aplicar_decisiones(lote):
              duration="long")
 
 
+# ============================================================
+# APROBAR POR GRUPOS, CON UNA MUESTRA DE CONTROL
+# ============================================================
+# Las «limpias» son las que el análisis no pudo objetar, y eso no es lo mismo que estar bien:
+# nadie sabe cuántas de ellas están mal hasta que alguien las mira. Aprobarlas todas a ciegas
+# era la única salida que tenía la pantalla, y la alternativa —mirar 23.000 de a una— no es
+# una alternativa. Sobre la base real: 5 equivalencias aprobadas y 23.001 limpias esperando.
+#
+# Lo que se hace es lo mismo que en cualquier control de calidad: se mira una muestra al azar
+# de cada grupo, y de lo que sale se decide el grupo entero. Un grupo son las limpias de un
+# mismo PAR DE LISTAS dentro de una tanda, porque los errores se parecen dentro de un par de
+# listas y cambian entre uno y otro (TARANTO↔ILLINOIS falla distinto que FISPA↔JL).
+
+TAMANO_DE_LA_MUESTRA = 30
+
+
+def tamano_de_la_muestra(total):
+    """Cuántos mirar según el tamaño del grupo. Con 0 errores en 30 solo se puede prometer
+    «menos de 11% mal», que en un grupo de 3.600 son hasta 400 vínculos; con 0 en 80 baja a
+    menos de 5%. Mirar 80 para aprobar 3.600 sigue siendo muy buen negocio."""
+    if total > 2000:
+        return 80
+    if total > 500:
+        return 50
+    return TAMANO_DE_LA_MUESTRA
+
+MOTIVOS_DE_RECHAZO = {
+    "otro_auto": "🚗 Es de otro auto o motor",
+    "variante": "📐 Otra medida o variante",
+    "juego": "📦 Juego contra pieza suelta",
+    "otra_pieza": "🔩 Es otra pieza",
+    "codigo": "🔢 El código está mal leído",
+}
+
+
+def clave_de_grupo(lote, marca_a, marca_b):
+    """El nombre con que se guarda la muestra de un grupo: la tanda y el par de listas."""
+    ma, mb = sorted((marca_a or "", marca_b or ""))
+    return f"{lote}|{ma}|{mb}"
+
+
+def grupos_de_limpias(limpias):
+    """[(marca_a, marca_b, filas)], de los grupos más grandes a los más chicos."""
+    grupos = {}
+    for fila in limpias:
+        grupos.setdefault(tuple(sorted((fila.get("marca_a") or "", fila.get("marca_b") or ""))),
+                          []).append(fila)
+    return sorted(((ma, mb, filas) for (ma, mb), filas in grupos.items()),
+                  key=lambda g: -len(g[2]))
+
+
+def muestra_de_control(grupo, pares_del_grupo, ampliar=False):
+    """Los pares de la muestra de ese grupo. La primera vez se sortean y se guardan —cuántos,
+    según tamano_de_la_muestra()—; después se devuelven los mismos. Con ampliar=True se suman
+    TAMANO_DE_LA_MUESTRA más, sorteados entre los que todavía no estaban.
+
+    Un grupo chico se mira entero: sacar 30 de 35 para ahorrar 5 no tiene sentido, y con la
+    muestra entera la estimación deja de ser una estimación."""
+    import random
+    pares_del_grupo = [tuple(p) for p in pares_del_grupo]
+    c.execute("SELECT producto_a_id, producto_b_id FROM muestras_de_control WHERE grupo = ?",
+              (grupo,))
+    ya = [(r[0], r[1]) for r in c.fetchall()]
+    if ya and not ampliar:
+        return ya
+    quedan = sorted(set(pares_del_grupo) - set(ya))
+    if not quedan:
+        return ya
+    cuantos = TAMANO_DE_LA_MUESTRA if ampliar else tamano_de_la_muestra(len(pares_del_grupo))
+    if len(quedan) <= cuantos * 1.3:
+        nuevos = quedan
+    else:
+        # Sorteo con semilla: si dos personas abren el mismo grupo a la vez, las dos sortean lo
+        # mismo y el INSERT OR IGNORE deja una sola muestra.
+        nuevos = random.Random(f"{grupo}|{len(ya)}").sample(quedan, cuantos)
+    with db_lock:
+        c.executemany("INSERT OR IGNORE INTO muestras_de_control (grupo, producto_a_id, "
+                      "producto_b_id) VALUES (?, ?, ?)", [(grupo, a, b) for a, b in nuevos])
+        conn.commit()
+    c.execute("SELECT producto_a_id, producto_b_id FROM muestras_de_control WHERE grupo = ?",
+              (grupo,))
+    return [(r[0], r[1]) for r in c.fetchall()]
+
+
+def estado_de_la_muestra(pares):
+    """{par: 'pendiente' | 'bien' | 'mal'}. Lo decidido se lee de la base, no de la sesión:
+    la muestra la puede ir revisando más de una persona, y lo que marcó otra cuenta."""
+    estado = {}
+    ids = sorted({x for par in pares for x in par})
+    pendientes, decisiones = set(), {}
+    for tanda, marcadores in en_tandas(ids):
+        c.execute(f"""SELECT producto_a_id, producto_b_id FROM equivalencias_pendientes
+                      WHERE producto_a_id IN ({marcadores})""", tanda)
+        pendientes.update((r[0], r[1]) for r in c.fetchall())
+        c.execute(f"""SELECT producto_a_id, producto_b_id, decision FROM equivalencias_revisadas
+                      WHERE producto_a_id IN ({marcadores})""", tanda)
+        decisiones.update({(r[0], r[1]): r[2] for r in c.fetchall()})
+    for a, b in pares:
+        if (a, b) in pendientes or (b, a) in pendientes:
+            estado[(a, b)] = "pendiente"
+        else:
+            d = decisiones.get((a, b)) or decisiones.get((b, a))
+            estado[(a, b)] = {"ok": "bien", "rechazada": "mal"}.get(d, "pendiente")
+    return estado
+
+
+def estimacion_de_errores(errores, revisados, total):
+    """(porcentaje estimado, tope razonable, cuántos del grupo estarían mal según el tope).
+
+    El tope es el límite de arriba del intervalo de Wilson al 95%: con 0 errores en 30 no se
+    puede decir «0% de errores», se puede decir «menos de 11%». Es lo que hay que mirar para
+    decidir, porque aprobar el grupo es apostar a que el error de verdad no es mayor que eso."""
+    import math
+    if not revisados:
+        return 0.0, 1.0, total
+    z = 1.96
+    p = errores / revisados
+    centro = (p + z * z / (2 * revisados)) / (1 + z * z / revisados)
+    margen = (z * math.sqrt(p * (1 - p) / revisados + z * z / (4 * revisados * revisados))
+              / (1 + z * z / revisados))
+    tope = min(1.0, centro + margen)
+    return p, tope, round(tope * total)
+
+
+def _base_de_la_pieza(codigo):
+    """El código sin sus sufijos de variante, hasta que no quede ninguno: de «TC-882-20 1M» y de
+    «TC-882-MG 1M» queda «TC-882». Ver codigo_base_sin_variante()."""
+    base, anterior = codigo or "", None
+    while base and base != anterior:
+        anterior = base
+        base = codigo_base_sin_variante(base) or base
+    return sanitizar(base)
+
+
+_RE_MEDIDA_EN_TEXTO = re.compile(r'\bESP\b\.?\s*:?\s*[\d.,]+\s*(?:MM)?|\b[\d.,]+\s*MM\b')
+
+
+def _texto_sin_medidas(texto):
+    """La descripción sin el espesor ni las medidas en milímetros, para reconocer variantes:
+    «Junta Tapa de Cilindros NISSAN (ESP 1.20MM) ...» y «... (ESP 1.30MM) ...» quedan iguales."""
+    limpio = _RE_MEDIDA_EN_TEXTO.sub(" ", normalizar_texto(texto or ""))
+    return " ".join(re.sub(r"[()\[\],;]", " ", limpio).split())
+
+
+def pares_parecidos(fila_rechazada, motivo, candidatas):
+    """Los pares de 'candidatas' que tienen el MISMO problema que el que se acaba de rechazar.
+
+    Es lo que hace que un rechazo enseñe algo: la persona dice por qué está mal, y con eso la
+    app sabe qué buscar. Los criterios son estrechos a propósito: lo que se ofrece se descarta
+    con un botón, y ofrecer de más es tentar a descartar pares buenos.
+
+      · siempre: el mismo producto contra una VARIANTE del otro (TC-882-20 1M y TC-882-MG 1M son
+        la misma junta en otro material: si una está mal con la S10, la otra también);
+      · otro auto: el mismo producto contra otro que nombra exactamente los mismos modelos;
+      · otra medida: el mismo producto contra otro con la misma medida que el rechazado;
+      · otra pieza: solo las variantes (ver el comentario adentro);
+      · juego contra suelta: las mismas dos listas, y de cada lado el mismo tipo de juego y las
+        mismas palabras de pieza que el rechazado;
+      · código mal leído: todo lo que cuelga del mismo código de fábrica.
+
+    Con un código de fábrica del otro lado, el texto no sirve para buscar: su descripción es una
+    copia de la del proveedor que lo nombró (ver rubros_de_los_codigos_de_fabrica()), así que
+    «nombra los mismos modelos» o «mide lo mismo» se cumpliría con todos los otros números de
+    ese producto, los buenos incluidos. Ahí solo valen las variantes y el mismo código."""
+    a, b = fila_rechazada["a"], fila_rechazada["b"]
+    desc = {a: fila_rechazada.get("desc_a"), b: fila_rechazada.get("desc_b")}
+    cod = {a: fila_rechazada.get("cod_a"), b: fila_rechazada.get("cod_b")}
+    marca = {a: fila_rechazada.get("marca_a"), b: fila_rechazada.get("marca_b")}
+    tipo = {a: fila_rechazada.get("tipo_a"), b: fila_rechazada.get("tipo_b")}
+    es_oem = {p: (tipo.get(p) or "") == "OEM" for p in (a, b)}
+    firmas = {}
+
+    def _firma(texto):
+        if texto not in firmas:
+            firmas[texto] = firma_de_producto(texto) or {}
+        return firmas[texto]
+
+    def _texto(t):
+        return normalizar_texto(t or "")
+
+    medidas = {}
+    if motivo == "variante":
+        ids = {a, b} | {x for f in candidatas for x in (f["a"], f["b"]) if {f["a"], f["b"]} & {a, b}}
+        medidas = cargar_medidas_de_varios(list(ids))
+
+    def _misma_medida(x, y):
+        mx, my = medidas.get(x) or {}, medidas.get(y) or {}
+        campos = [cm for cm, _ in CAMPOS_MEDIDAS if mx.get(cm) is not None]
+        return bool(campos) and all(mx.get(cm) == my.get(cm) for cm in campos)
+
+    # Juego contra suelta: solo si el rechazado de verdad es un juego contra otra cosa.
+    _juego = {p: _firma(desc[p]).get("juego") for p in (a, b)}
+    buscar_juegos = (motivo == "juego" and _juego[a] != _juego[b]
+                     and not any(es_oem.values()) and marca[a] != marca[b])
+
+    salida = []
+    for f in candidatas:
+        x, y = f["a"], f["b"]
+        if {x, y} == {a, b}:
+            continue
+        d2 = {x: f.get("desc_a"), y: f.get("desc_b")}
+        c2 = {x: f.get("cod_a"), y: f.get("cod_b")}
+        m2 = {x: f.get("marca_a"), y: f.get("marca_b")}
+        t2 = {x: f.get("tipo_a"), y: f.get("tipo_b")}
+        comun = {x, y} & {a, b}
+        parecido = False
+        if len(comun) == 1:
+            fijo = comun.pop()
+            otro_rech = b if fijo == a else a
+            otro_cand = y if fijo == x else x
+            if motivo == "codigo":
+                # El código mal leído es el de fábrica: lo que cuelga de él tiene el mismo
+                # problema. Lo demás del producto del proveedor, no: sus otros números pueden
+                # estar perfectos.
+                parecido = es_oem[fijo]
+            elif m2[otro_cand] == marca[otro_rech]:
+                base_r, base_c = _base_de_la_pieza(cod[otro_rech]), _base_de_la_pieza(c2[otro_cand])
+                # La variante NO cuenta cuando el motivo es la medida: si la junta de 1,10 mm
+                # estaba mal por el espesor, la misma junta en otro espesor puede ser la buena.
+                # Y el código solo no alcanza: codigo_base_sin_variante() recorta todos los
+                # tramos cortos, que en ILLINOIS son material y espesor, pero en otras listas es
+                # la pieza misma («14-R7818.40.071» es la sonda del Escort y «.040» la del
+                # Fiesta). Una variante de verdad tiene la MISMA descripción salvo la medida.
+                if (base_r and base_r == base_c and motivo != "variante"
+                        and _texto_sin_medidas(desc[otro_rech]) == _texto_sin_medidas(d2[otro_cand])):
+                    parecido = True
+                elif (not any(es_oem.values()) and (t2[otro_cand] or "") != "OEM"
+                      and _texto(desc[otro_rech]) != _texto(desc[fijo])):
+                    fr, fc = _firma(desc[otro_rech]), _firma(d2[otro_cand])
+                    if motivo == "otro_auto":
+                        parecido = bool(fr.get("modelos")) and fr.get("modelos") == fc.get("modelos")
+                    elif motivo == "variante":
+                        parecido = _misma_medida(otro_rech, otro_cand)
+                    # «Otra pieza» no busca por texto, a propósito: si el texto de los dos dice
+                    # la misma pieza y la persona dice que no lo es, el texto no tiene con qué
+                    # encontrar otras. Probado: buscando por las palabras de pieza, rechazar una
+                    # junta de cárter de Fiat 1100 ofrecía descartar las de Fiat 128 y 147,
+                    # entre las que puede estar la buena. Quedan las variantes, de arriba.
+        elif buscar_juegos and not comun and "OEM" not in {t2[x] or "", t2[y] or ""}:
+            if {m2[x], m2[y]} == {marca[a], marca[b]}:
+                par_c = {m2[x]: x, m2[y]: y}
+                parecido = True
+                for rech in (a, b):
+                    cand = par_c[marca[rech]]
+                    fr, fc = _firma(desc[rech]), _firma(d2[cand])
+                    parecido &= (fr.get("juego") == fc.get("juego")
+                                 and (fr.get("pieza") or set()) == (fc.get("pieza") or set()))
+        if parecido:
+            salida.append(f)
+    return salida
+
+
 def tipo_de_alarma(alarma):
     """El MOTIVO de una alarma sin el dato de cada par, para agrupar en la pantalla de revisión.
 
@@ -1729,7 +1984,7 @@ def aprobar_pendientes(lote, solo_estos_pares=None):
     return len(pares)
 
 
-def rechazar_pendientes(lote, solo_estos_pares=None):
+def rechazar_pendientes(lote, solo_estos_pares=None, motivo=None):
     with db_lock:
         if solo_estos_pares is None:
             # Hay que leer los pares ANTES de borrarlos, si no queda sin registrar el rechazo
@@ -1747,7 +2002,7 @@ def rechazar_pendientes(lote, solo_estos_pares=None):
             marcar_para_recordar = pares
         conn.commit()
     # Se recuerda el rechazo para que no vuelva a aparecer si se reimporta la misma lista
-    marcar_revision(marcar_para_recordar, "rechazada")
+    marcar_revision(marcar_para_recordar, "rechazada", motivo)
     return borrados
 
 
