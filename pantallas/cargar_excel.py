@@ -371,11 +371,14 @@ if pagina == PAGINAS[2]:
                                        valor_o_vacio(f[idx_prov]) if idx_prov < len(f) else "")
                                       for f in _muestra]
                             _conocidos = codigos_del_catalogo(version_del_catalogo())
+                            _estricta = not la_lista_declara_codigos(_pares)
                             _confiables, _ = codigos_confiables_de_descripciones(
-                                _pares, codigos_conocidos=_conocidos)
+                                _pares, codigos_conocidos=_conocidos,
+                                declarados_o_conocidos=_estricta)
                             for _txt, _cod in _pares:
                                 _hall = [c for c in extraer_codigos_de_texto(
-                                            _txt, codigo_propio=_cod, codigos_conocidos=_conocidos)
+                                            _txt, codigo_propio=_cod, codigos_conocidos=_conocidos,
+                                            declarados_o_conocidos=_estricta)
                                          if sanitizar(c) in _confiables]
                                 if _hall:
                                     _con_codigo += 1
@@ -504,11 +507,19 @@ if pagina == PAGINAS[2]:
                     # muchas filas (el modelo del camión, no el repuesto). Sin esto, la muestra
                     # mostraba códigos que después la importación descartaba: «DEUTZ
                     # F6L913/BF6L913» decía «detecta F6L913» y pedía que uno lo revisara.
+                    _pares_muestra = [
+                        (valor_o_vacio(f[idx_desc]) if idx_desc < len(f) else "",
+                         valor_o_vacio(f[idx_prov]) if idx_prov is not None and idx_prov < len(f) else "")
+                        for f in todas_filas[header_row + 1:]]
+                    _estricta_muestra = not la_lista_declara_codigos(_pares_muestra)
                     _confiables_muestra, _ = codigos_confiables_de_descripciones(
-                        [(valor_o_vacio(f[idx_desc]) if idx_desc < len(f) else "",
-                          valor_o_vacio(f[idx_prov]) if idx_prov is not None and idx_prov < len(f) else "")
-                         for f in todas_filas[header_row + 1:]],
-                        codigos_conocidos=_conocidos_muestra)
+                        _pares_muestra, codigos_conocidos=_conocidos_muestra,
+                        declarados_o_conocidos=_estricta_muestra)
+                    if _estricta_muestra:
+                        st.caption("Esta lista casi nunca marca el código de fábrica («REF ORIG», "
+                                   "«Nº», «//»), así que de la descripción se toman solo los "
+                                   "marcados y los que ya son el código de otra lista. Lo demás "
+                                   "que parece un código acá suele ser una medida o un motor.")
                     for fila_prev in todas_filas[header_row + 1:header_row + 60]:
                         texto_desc = valor_o_vacio(fila_prev[idx_desc]) if idx_desc < len(fila_prev) else ""
                         cod_fila = (valor_o_vacio(fila_prev[idx_prov])
@@ -518,7 +529,8 @@ if pagina == PAGINAS[2]:
                         # pasar, que es exactamente lo que la muestra existe para evitar.
                         hallados = [x for x in extraer_codigos_de_texto(
                                         texto_desc, codigo_propio=cod_fila,
-                                        codigos_conocidos=_conocidos_muestra)
+                                        codigos_conocidos=_conocidos_muestra,
+                                        declarados_o_conocidos=_estricta_muestra)
                                     if sanitizar(x) in _confiables_muestra]
                         if hallados:
                             muestras.append({"Descripción": texto_desc[:60], "Detecta": ", ".join(hallados)})
@@ -587,12 +599,16 @@ if pagina == PAGINAS[2]:
                     # Los códigos que ya están cargados. Se leen UNA vez, antes del candado y
                     # antes del bucle: adentro se consultan por cada token de cada fila.
                     codigos_ya_cargados = codigos_del_catalogo(version_del_catalogo())
+                    oem_desc_estricta = False
                     if buscar_oem_en_desc and idx_desc is not None:
+                        _pares_desc = [
+                            (valor_o_vacio(f[idx_desc]) if idx_desc < len(f) else "",
+                             valor_o_vacio(f[idx_prov]) if idx_prov is not None and idx_prov < len(f) else "")
+                            for f in filas_datos]
+                        oem_desc_estricta = not la_lista_declara_codigos(_pares_desc)
                         oem_desc_confiables, oem_desc_conteo = codigos_confiables_de_descripciones(
-                            [(valor_o_vacio(f[idx_desc]) if idx_desc < len(f) else "",
-                              valor_o_vacio(f[idx_prov]) if idx_prov is not None and idx_prov < len(f) else "")
-                             for f in filas_datos],
-                            codigos_conocidos=codigos_ya_cargados)
+                            _pares_desc, codigos_conocidos=codigos_ya_cargados,
+                            declarados_o_conocidos=oem_desc_estricta)
 
                     cargados = 0
                     cargados_sin_equiv = 0
@@ -640,10 +656,16 @@ if pagina == PAGINAS[2]:
                             # Si la lista no trae OEM, se intenta sacarlo de la descripción.
                             # Solo se aceptan los que no se repiten por toda la lista: ver
                             # codigos_confiables_de_descripciones() y el conteo de más arriba.
+                            # Y si la lista casi nunca marca el código de fábrica, solo los
+                            # que marcó («REF ORIG», «Nº», «//») o que ya son el código de otra
+                            # lista: ver la_lista_declara_codigos(). Lo que se deja afuera se
+                            # sigue encontrando, porque el buscador busca también en las
+                            # descripciones (ver buscar_por_texto()).
                             if not codigos_oem and buscar_oem_en_desc and desc:
                                 _cands = extraer_codigos_de_texto(
                                     desc, codigo_propio=raw_p_cell,
-                                    codigos_conocidos=codigos_ya_cargados)
+                                    codigos_conocidos=codigos_ya_cargados,
+                                    declarados_o_conocidos=oem_desc_estricta)
                                 codigos_oem = [c for c in _cands
                                                if sanitizar(c) in oem_desc_confiables]
                                 if not codigos_oem and _cands:

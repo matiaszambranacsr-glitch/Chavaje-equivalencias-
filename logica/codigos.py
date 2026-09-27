@@ -218,7 +218,7 @@ def columna_es_codigo_de_barras(valores):
 
 
 def codigos_confiables_de_descripciones(descripciones, tope=TOPE_REPETICIONES_EN_DESCRIPCION,
-                                        codigos_conocidos=None):
+                                        codigos_conocidos=None, declarados_o_conocidos=False):
     """De todos los códigos que se pueden sacar de las descripciones de una lista, devuelve
     solo los que NO se repiten demasiado.
 
@@ -249,10 +249,44 @@ def codigos_confiables_de_descripciones(descripciones, tope=TOPE_REPETICIONES_EN
         # un código rescatado al importar no estaría en la lista de confiables y se tiraría
         # igual, que es peor que no rescatarlo — parecería que el arreglo no hizo nada.
         for cod in set(sanitizar(c) for c in extraer_codigos_de_texto(
-                texto, codigo_propio=codigo_propio, codigos_conocidos=codigos_conocidos)):
+                texto, codigo_propio=codigo_propio, codigos_conocidos=codigos_conocidos,
+                declarados_o_conocidos=declarados_o_conocidos)):
             if cod:
                 conteo[cod] += 1
     return {cod for cod, veces in conteo.items() if veces <= tope}, conteo
+
+# Ver la_lista_declara_codigos(). Medido sobre las listas reales: FISPA marca el código de
+# fábrica en el 67% de las filas e ILLINOIS en el 9%; IMPERIAL en 2 de 43.101, y TARANTO, JL y
+# CRI-FA en ninguna. El corte está lejos de los dos grupos.
+PORCENTAJE_DE_FILAS_QUE_DECLARAN = 2
+
+
+def la_lista_declara_codigos(descripciones, muestra=3000):
+    """¿Esta lista acostumbra escribir el código de fábrica en la descripción, y marcarlo?
+
+    'descripciones' son pares (texto, código propio), como en
+    codigos_confiables_de_descripciones(). Sí, si al menos PORCENTAJE_DE_FILAS_QUE_DECLARAN de
+    las filas con texto traen un código declarado («REF ORIG», «Nº», «//», «OEM»...).
+
+    Para qué: lo que tiene forma de código en una descripción vale muy distinto según la lista.
+    En FISPA e ILLINOIS, que marcan el número de fábrica, lo no marcado también suele serlo
+    —el tercero de «REF ORIG 6G91-7A095-AD - 0792231 - LR00291», el que ILLINOIS pone entre
+    paréntesis al final—. En una lista que no lo marca nunca, lo que parece un código es una
+    medida, un motor o una herramienta: de los 1.731 que se sacaban de IMPERIAL, «85x105x»,
+    «ESTR.32MM», «220V-50HZ», «RANGER3L», «206-TU5», y ni uno cruzaba con otra lista. Cada uno
+    era un código de fábrica falso y un par más para revisar a mano.
+
+    Se mira una muestra repartida a lo largo de la lista, no el principio: las listas vienen
+    ordenadas por rubro, y las primeras mil filas pueden ser todas de un rubro que no declara."""
+    con_texto = [(t, cod) for t, cod in descripciones if t]
+    if not con_texto:
+        return False
+    paso = max(1, len(con_texto) // muestra)
+    elegidas = con_texto[::paso]
+    declaran = sum(1 for t, cod in elegidas
+                   if extraer_codigos_de_texto(t, codigo_propio=cod, solo_declarados=True))
+    return declaran * 100 >= PORCENTAJE_DE_FILAS_QUE_DECLARAN * len(elegidas)
+
 
 LARGO_MINIMO_NUMERICO = 3  # un código que es SOLO números tiene que tener al menos esta cantidad
 
@@ -482,7 +516,7 @@ def _es_lista_de_modelos(token):
 
 
 def extraer_codigos_de_texto(texto, minimo=6, codigo_propio=None, codigos_conocidos=None,
-                              solo_declarados=False):
+                              solo_declarados=False, declarados_o_conocidos=False):
     """Busca códigos de fábrica escondidos dentro de una descripción.
     Muchas listas de proveedor no traen una columna de OEM aparte, pero lo meten en el texto
     ('ROTULA VW GOL - ORIG 6Q0407365'). Esto lo saca de ahí.
@@ -501,6 +535,10 @@ def extraer_codigos_de_texto(texto, minimo=6, codigo_propio=None, codigos_conoci
     nace casi tan limpio como lo aprobado por una persona, y lo adivinado nace ocho veces más
     sucio. La diferencia no es el extractor: es que en «SONDA LAMBDA 80045 AUDI A3» el 80045 es
     el número interno del proveedor, y el número interno de un proveedor choca con el de otro.
+
+    Con declarados_o_conocidos se devuelven los declarados MÁS los que ya son el código de algún
+    producto cargado (codigos_conocidos). Es lo que usa la importación: ver
+    CODIGOS_DE_LA_DESCRIPCION_AL_IMPORTAR en pantallas/cargar_excel.py y el README.
     """
     if not texto:
         return []
@@ -784,6 +822,8 @@ def extraer_codigos_de_texto(texto, minimo=6, codigo_propio=None, codigos_conoci
         # de manguera con una junta de admisión. Los códigos cortos de solo números son
         # justamente los que chocan entre catálogos; los que tienen letras, no.
         en_catalogo = sanitizar(limpio) in conocidos
+        if declarados_o_conocidos and not (declarado or en_catalogo):
+            continue
         formas = formas_solo_texto if (declarado or en_catalogo) else formas_prohibidas
         if any(p.match(limpio.upper()) for p in formas):
             continue

@@ -2228,13 +2228,8 @@ def evidencia_cruzada(id_a, id_b, cuenta_palabras=None, total_descripciones=None
     # manual aunque fuera la misma bobina con el mismo texto.
     # Acá pesa más que en evaluar_equivalencia() justamente porque VETA en vez de descontar.
     if pa["precio"] and pb["precio"] and pa["precio"] > 0 and pb["precio"] > 0:
-        razon = max(pa["precio"], pb["precio"]) / min(pa["precio"], pb["precio"])
-        escalas = escalas_de_precio()
-        ea, eb = escalas.get(pa["marca"]) or 0, escalas.get(pb["marca"]) or 0
-        esperada = max(ea, eb) / min(ea, eb) if ea > 0 and eb > 0 else 1.0
-        razon_real = razon / esperada if esperada > 1 else razon
-        if razon_real < 1:
-            razon_real = 1 / razon_real
+        razon, esperada, razon_real = comparar_precios(
+            pa["precio"], pa["marca"], pb["precio"], pb["marca"], escalas_de_precio())
         if razon_real >= 15:
             vetos.append(f"💲 los precios se diferencian {razon:.0f} veces"
                          + (f" (entre estas dos listas lo normal es {esperada:.0f})"

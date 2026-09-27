@@ -831,6 +831,72 @@ if pagina == PAGINAS[3]:
                             st.rerun()
             st.markdown("---")
 
+            # La otra mitad de lo de arriba: los que cuelgan de UN solo producto. Ver
+            # codigos_adivinados_que_no_unen_nada().
+            st.markdown("**🧽 Códigos adivinados que no unen nada**")
+            explicar(
+                "Medidas, motores y herramientas que entraron como código de fábrica, leídos de "
+                "la descripción de una lista que nunca marca el código de fábrica.",
+                "Pasa con listas como la de IMPERIAL: en «RET DIST FORD 1.4 TDCI 40x55x» o "
+                "«BOCALLAVE 1/2 ESTR.32MM» la importación leía «40x55x» y «ESTR.32MM» como "
+                "códigos de fábrica. Ahora ya no los toma, pero los que entraron antes siguen "
+                "ahí, y cada uno es un par más en la cola de revisión.\n\n"
+                "Aparece solo el que cumple todo: une productos de una sola lista, esa lista "
+                "casi nunca marca el código de fábrica («REF ORIG», «Nº», «//»), el código "
+                "está escrito sin marcar en la descripción, no es el código de otro "
+                "proveedor, y ninguno de sus vínculos está aprobado.\n\n"
+                "**No se pierde la búsqueda**: si alguien escribe ese número, el buscador lo "
+                "encuentra igual adentro de la descripción."
+            )
+            if st.button("🧽 Buscarlos", key="btn_adivinados"):
+                with st.spinner("Mirando cada código de fábrica y de dónde salió..."):
+                    st.session_state["codigos_adivinados"] = codigos_adivinados_que_no_unen_nada()
+            _adv = st.session_state.get("codigos_adivinados")
+            if _adv is not None:
+                if not _adv:
+                    st.success("No hay ninguno: cada código de fábrica cargado une algo, o lo "
+                               "marcó el proveedor.")
+                else:
+                    _adv_pend = sum(x.get("Esperando revisión") or 0 for x in _adv)
+                    _adv_listas = sorted({x["Lista"] for x in _adv})
+                    st.warning(
+                        f"**{len(_adv):,} código(s) adivinados** de {', '.join(_adv_listas)}, "
+                        f"con {_adv_pend:,} par(es) esperando revisión que se van con ellos."
+                    )
+                    st.dataframe([{k: v for k, v in x.items() if k != "pid"} for x in _adv],
+                                  width="stretch", hide_index=True)
+                    st.download_button(
+                        "⬇️ Bajarlos en Excel antes de decidir",
+                        data=to_excel_bytes([{k: v for k, v in x.items() if k != "pid"}
+                                              for x in _adv]),
+                        file_name="codigos_adivinados.xlsx",
+                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                        key="dl_adivinados")
+                    st.caption("Se borra el código de fábrica y los pendientes que colgaban de "
+                               "él. **Los productos no se tocan**: precios, stock e historial "
+                               "quedan igual.")
+                    if st.checkbox("Miré la lista y entiendo qué se borra", key="conf_adivinados"):
+                        if candado("borrar los códigos adivinados",
+                                    st.button(f"🗑️ Borrar los {len(_adv):,}", type="primary",
+                                               key="btn_borrar_adivinados"),
+                                    "borrar_los_codigos_adivinados"):
+                            _barra_adv = st.progress(0.0, text="Borrando...")
+                            _tot_adv = 0
+                            for _i_adv, _x in enumerate(_adv):
+                                _tot_adv += borrar_puente_y_sus_pendientes(_x["pid"])[1]
+                                if _i_adv % 50 == 0:
+                                    _barra_adv.progress((_i_adv + 1) / len(_adv),
+                                                        text=f"Borrando... {_i_adv + 1:,} de "
+                                                             f"{len(_adv):,}")
+                            _barra_adv.empty()
+                            st.session_state.pop("codigos_adivinados", None)
+                            invalidar_salud()
+                            avisar("ok", f"Se borraron {len(_adv):,} código(s) adivinados y "
+                                          f"{_tot_adv:,} pendiente(s). Los productos quedaron "
+                                          "intactos.")
+                            st.rerun()
+            st.markdown("---")
+
             st.markdown("**🔗 Vínculos que unen dos familias de repuestos**")
             explicar(
                 "Dos grupos sanos pegados por un solo vínculo malo. Cortándolo se separan.",

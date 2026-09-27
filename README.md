@@ -4377,6 +4377,71 @@ vínculos cargados y en el recálculo de confianzas (por eso `VERSION_CONFIANZA`
 puntajes guardados se recalculan solos). En la cola real, 37 reguladores de presión que
 estaban «para revisar» pasan a limpios, y ninguno limpio cae.
 
+## Medido sobre la base de verdad: la cola de 30.234
+
+Con la copia de seguridad en GitHub se pudo, por primera vez, medir sobre la base que se usa
+en el negocio y no sobre una copia vieja: 87.155 productos, **5 equivalencias aprobadas y
+30.234 esperando revisión**. Salieron dos cosas.
+
+### Las listas que nunca marcan el código de fábrica
+
+De los 1.861 pares entre IMPERIAL y un «código de fábrica», el extractor de ese momento
+volvía a sacar 1.727, y casi todos eran medidas, motores o herramientas: `85x105x`,
+`ESTR.32MM`, `220V-50HZ`, `RANGER3L`, `206-TU5`, `HEXAG.17MM`, `Chev.S10`.
+
+No hay regla de forma que los separe de los códigos reales: medido contra los 71.659 códigos
+que los proveedores escriben en su propia columna, los reales también tienen puntos,
+minúsculas o una «x» entre números. Lo que sí los separa es **la lista**:
+
+| Lista | Filas que marcan el código («REF ORIG», «Nº», «//») |
+|---|---|
+| FISPA | 67 % |
+| ILLINOIS | 9 % |
+| IMPERIAL | 2 de 43.101 |
+| TARANTO, JL, CRI-FA | ninguna |
+
+En una lista que marca el código de fábrica, lo que no marcó también suele serlo: el tercer
+número de «REF ORIG 6G91-7A095-AD - 0792231 - LR00291», o el que ILLINOIS pone entre
+paréntesis al final. En una lista que no lo marca nunca, lo que parece un código es otra cosa.
+
+Ahora, al importar con «buscar el código de fábrica en la descripción», si la lista marca el
+código en menos del 2 % de las filas (`la_lista_declara_codigos()`), se toman solo los
+marcados y los que ya son el código de otra lista. Sobre las listas reales: IMPERIAL pasa de
+1.731 códigos a 2 (los dos «Nº ORIG» de verdad), TARANTO de 304 a 1, JL y CRI-FA a 0, y FISPA
+e ILLINOIS no cambian. No se pierde la búsqueda: si nadie tiene ese número, el buscador lo
+encuentra en la descripción.
+
+Para lo que ya estaba cargado, en Mantenimiento → 🧹 Limpiar y corregir está **🧽 Códigos
+adivinados que no unen nada**: los que cuelgan de una sola lista que no marca códigos, están
+escritos sin marcar en la descripción, no son el código de otro proveedor y no tienen nada
+aprobado. En la base real son 1.450 códigos y **1.911 pares menos en la cola**; borrarlos
+tarda 3 segundos y no toca ningún producto.
+
+### «Lo normal entre estas dos listas» estaba mal medido
+
+Para no marcar como raro un precio que es distinto solo porque una lista está en otra escala
+(una desactualizada, otra sin IVA), la app compara contra lo típico entre las dos listas. Eso
+se medía con la mediana de TODOS los precios de cada lista, y eso mezcla cuánto cobra la lista
+con qué vende. Medido con los pares que las unen:
+
+| Listas | La misma pieza, de verdad | Lo que se suponía |
+|---|---|---|
+| FISPA / JL | 1,06 veces | 8,6 |
+| IMPERIAL / JL | 0,71 | 5,3 |
+| ILLINOIS / IMPERIAL | 2,3 | 0,72 |
+
+Así, 262 pares con el mismo precio salían «se diferencian 1 vez, y lo normal es 9» y se iban a
+revisión. Ahora la escala sale de los pares mismos (aprobados, pendientes y los que comparten
+código de fábrica): la mediana de la razón de precios por cada par de listas, y una escala por
+lista que las explica a todas juntas. Además se mira **para qué lado** va la diferencia: si A
+suele ser 10 veces más cara que B y en un par sale 10 veces más barata, ese par se aparta 100
+veces de lo normal, y antes pasaba como normal.
+
+Sobre la cola real, 455 pares pasan a limpios (la misma junta de base de carburador del
+Regatta, la misma tapa de cilindros del Volvo N12, frenadas por un precio que era la escala de
+la lista) y 345 pasan a revisión (juego completo de motor contra una junta de tapa de
+válvulas, tapa de cilindros contra tapa de válvulas: el precio ahora sí lo delata).
+
 ## Una firma de foto podía ser un programa
 
 Las firmas visuales de las fotos se guardan con `pickle`, y `pickle` **no es un formato de

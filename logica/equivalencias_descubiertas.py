@@ -818,35 +818,136 @@ def senal_aprendida(marca_a, marca_b, patrones):
 
 @st.cache_data(ttl=300, show_spinner=False)
 def escalas_de_precio():
-    """El precio típico (la mediana) de cada marca, para poder comparar entre listas.
+    """La escala de precios de cada lista, para poder comparar precios entre listas.
 
-    Va con caché porque evidencia_cruzada() la consulta UNA VEZ POR PAR, y sin caché eso es
-    recorrer los 40.000 precios del catálogo por cada uno de los cientos de pares que se están
-    revisando. Los cinco minutos de vida alcanzan de sobra: la escala de una lista solo cambia
+    Devuelve {marca: escala}, con la forma de siempre: escala_a / escala_b es cuánto más cara
+    suele ser la lista A que la B PARA LA MISMA PIEZA. Va con caché porque evidencia_cruzada()
+    la consulta una vez por par; los cinco minutos alcanzan, la escala de una lista solo cambia
     cuando se importa una lista nueva.
 
     Hace falta porque dos listas pueden estar en escalas completamente distintas: una
-    desactualizada, otra sin IVA, otra en otra unidad. Sobre las listas reales de acá el precio
-    mediano de un proveedor es $1.350 y el de otro $37.610. Sin corregir por eso, cualquier
+    desactualizada, otra sin IVA, otra en otra unidad. Sin corregir por eso, cualquier
     comparación de precios entre esas dos listas dice siempre lo mismo y no informa nada.
 
-    Se usa la MEDIANA y no el promedio a propósito: un solo motor de $3.000.000 en una lista de
-    tornillos corre el promedio y deja la escala mal."""
+    SE MIDE SOBRE LOS PARES, NO SOBRE LA LISTA ENTERA. Antes la escala era la mediana de todos
+    los precios de cada lista, y eso mezcla dos cosas: cuánto cobra la lista y QUÉ vende. Una
+    lista de herramientas y juntas no tiene la misma mediana que una de sensores aunque cobren
+    igual. Medido sobre la base real, con los pares que las unen:
+        FISPA / JL        la misma pieza cuesta 1,06 veces   — las medianas decían 8,6
+        IMPERIAL / JL                               0,71 veces — decían 5,3
+        ILLINOIS / IMPERIAL                         2,3 veces  — decían 0,72
+    O sea que cada par FISPA–JL con el MISMO precio salía «se diferencian 1 vez, y lo normal es
+    9»: 262 pares mandados a revisión por tener el precio parecido.
+
+    Cómo: por cada par de listas con al menos 20 pares vinculados (aprobados o pendientes,
+    directos o a través del mismo código de fábrica) se toma la mediana de la razón de precios;
+    y de todas esas razones se saca UNA escala por lista, la que mejor las explica a todas
+    juntas (mínimos cuadrados sobre el logaritmo, pesado por cantidad de pares). La mediana
+    aguanta los pares malos que haya en la cola. Una lista que no tiene pares suficientes con
+    ninguna otra queda con la escala de antes, la mediana de sus precios, puesta en la misma
+    unidad que las demás."""
+    import math
+    from collections import defaultdict
     try:
         c.execute("""SELECT m.nombre AS marca, p.precio AS precio
                      FROM productos p JOIN marcas m ON m.id = p.marca_id
-                     WHERE p.precio IS NOT NULL AND p.precio > 0
+                     WHERE p.precio IS NOT NULL AND p.precio > 0 AND m.tipo <> 'OEM'
                      ORDER BY m.nombre, p.precio""")
-        from collections import defaultdict
         por_marca = defaultdict(list)
         for fila in c.fetchall():
             por_marca[fila["marca"]].append(fila["precio"])
+        razones = defaultdict(list)       # (marca_a, marca_b) con a < b -> log(precio_a / precio_b)
+
+        def _anotar(ma, pa, mb, pb):
+            if ma == mb or not pa or not pb or pa <= 0 or pb <= 0:
+                return
+            if ma > mb:
+                ma, mb, pa, pb = mb, ma, pb, pa
+            razones[(ma, mb)].append(math.log(pa / pb))
+
+        for tabla in ("equivalencias", "equivalencias_pendientes"):
+            c.execute(f"""SELECT ma.nombre, a.precio, mb.nombre, b.precio FROM {tabla} e
+                          JOIN productos a ON a.id = e.producto_a_id
+                          JOIN marcas ma ON ma.id = a.marca_id AND ma.tipo <> 'OEM'
+                          JOIN productos b ON b.id = e.producto_b_id
+                          JOIN marcas mb ON mb.id = b.marca_id AND mb.tipo <> 'OEM'""")
+            for fila in c.fetchall():
+                _anotar(*fila)
+        # A través del mismo código de fábrica, que es como están casi todos los vínculos
+        # aprobados: proveedor ↔ código ↔ otro proveedor. Con tope, por si un código puente
+        # cuelga cientos de productos y multiplica los pares.
+        c.execute("""WITH v AS (
+                         -- SIN_CONTAR_EL_ESPEJO: el UNION sin ALL ya junta la fila anotada de
+                         -- ida con la de vuelta, así que cada vecino del código cuenta una vez.
+                         SELECT e.producto_a_id AS oem, e.producto_b_id AS otro FROM equivalencias e
+                         UNION SELECT e.producto_b_id, e.producto_a_id FROM equivalencias e)
+                     SELECT ma.nombre, a.precio, mb.nombre, b.precio
+                     FROM v v1 JOIN v v2 ON v2.oem = v1.oem AND v2.otro > v1.otro
+                     JOIN productos o ON o.id = v1.oem
+                     JOIN marcas mo ON mo.id = o.marca_id AND mo.tipo = 'OEM'
+                     JOIN productos a ON a.id = v1.otro
+                     JOIN marcas ma ON ma.id = a.marca_id AND ma.tipo <> 'OEM'
+                     JOIN productos b ON b.id = v2.otro
+                     JOIN marcas mb ON mb.id = b.marca_id AND mb.tipo <> 'OEM'
+                     LIMIT 200000""")
+        for fila in c.fetchall():
+            _anotar(*fila)
     except sqlite3.OperationalError as _err:
         anotar_error("escalas_de_precio", _err)
         return {}
+
     # Menos de 20 precios no alcanza para hablar de la escala de una lista.
-    return {marca: precios[len(precios) // 2]
-            for marca, precios in por_marca.items() if len(precios) >= 20}
+    medianas = {marca: math.log(precios[len(precios) // 2])
+                for marca, precios in por_marca.items() if len(precios) >= 20}
+    aristas = {}
+    for (ma, mb), lista in razones.items():
+        if len(lista) >= 20 and ma in medianas and mb in medianas:
+            lista.sort()
+            aristas[(ma, mb)] = (lista[len(lista) // 2], len(lista))
+    vecinos = defaultdict(list)
+    for (ma, mb), (d, n) in aristas.items():
+        vecinos[ma].append((mb, d, n))       # s_a - s_b = d
+        vecinos[mb].append((ma, -d, n))
+    escala = {}
+    pendientes = set(vecinos)
+    while pendientes:
+        # Cada grupo de listas unidas entre sí se resuelve aparte.
+        grupo, frontera = set(), [next(iter(pendientes))]
+        while frontera:
+            m = frontera.pop()
+            if m in grupo:
+                continue
+            grupo.add(m)
+            frontera.extend(o for o, _, _ in vecinos[m] if o not in grupo)
+        pendientes -= grupo
+        s = {m: medianas[m] for m in grupo}
+        for _ in range(300):
+            for m in grupo:
+                total = sum(n for _, _, n in vecinos[m])
+                s[m] = sum((s[o] + d) * n for o, d, n in vecinos[m]) / total
+        # En la misma unidad que las demás: que en promedio coincida con las medianas.
+        corrimiento = sum(medianas[m] - s[m] for m in grupo) / len(grupo)
+        for m in grupo:
+            escala[m] = s[m] + corrimiento
+    for marca, log_mediana in medianas.items():
+        escala.setdefault(marca, log_mediana)
+    return {marca: math.exp(v) for marca, v in escala.items()}
+
+
+def comparar_precios(precio_a, marca_a, precio_b, marca_b, escalas):
+    """(cuántas veces se diferencian, cuántas veces es lo típico entre esas dos listas,
+    cuánto se aparta ESTE par de lo típico). Las tres son 1 o más.
+
+    La dirección importa, y antes no se miraba: si la lista A suele ser 10 veces más cara que
+    la B y en este par A sale 10 veces MÁS BARATA, el par se aparta 100 veces de lo normal, no
+    cero. Comparando solo «cuántas veces» sin mirar cuál es la cara, pasaba como normal."""
+    razon = max(precio_a, precio_b) / min(precio_a, precio_b)
+    ea, eb = (escalas or {}).get(marca_a) or 0, (escalas or {}).get(marca_b) or 0
+    tipica = ea / eb if ea > 0 and eb > 0 else 1.0
+    desvio = (precio_a / precio_b) / tipica
+    if desvio < 1:
+        desvio = 1 / desvio
+    return razon, max(tipica, 1 / tipica), desvio
 
 
 # Una descripción tiene que tener algo adentro para que «son iguales» signifique algo. Con
@@ -1036,7 +1137,6 @@ def evaluar_equivalencia(desc_a, desc_b, medidas_a=None, medidas_b=None,
         senales.append(senal)
 
     if precio_a and precio_b and precio_a > 0 and precio_b > 0:
-        razon = max(precio_a, precio_b) / min(precio_a, precio_b)
         # La diferencia se mide contra lo TÍPICO entre esos dos proveedores, no en absoluto.
         # Dos listas pueden estar en escalas completamente distintas —una desactualizada, otra
         # sin IVA, otra en otra unidad— y entonces TODAS las parejas entre ellas se diferencian
@@ -1048,14 +1148,8 @@ def evaluar_equivalencia(desc_a, desc_b, medidas_a=None, medidas_b=None,
         # las que sí importan.
         # Corrigiendo por la escala, lo que queda es la diferencia REAL de esa pareja: si dos
         # listas van 28 veces en general y esta pareja va 13, no hay nada raro; si va 300, sí.
-        esperada = 1.0
-        if escalas:
-            ea, eb = escalas.get(marca_a) or 0, escalas.get(marca_b) or 0
-            if ea > 0 and eb > 0:
-                esperada = max(ea, eb) / min(ea, eb)
-        razon_real = razon / esperada if esperada > 1 else razon
-        if razon_real < 1:
-            razon_real = 1 / razon_real
+        razon, esperada, razon_real = comparar_precios(precio_a, marca_a, precio_b, marca_b,
+                                                        escalas)
         if razon_real >= 8:
             puntaje -= 25
             senales.append(("mal", f"💲 Los precios se diferencian {razon:.0f} veces"

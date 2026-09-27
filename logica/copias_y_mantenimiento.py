@@ -775,6 +775,89 @@ def puentes_que_hoy_no_se_generarian(limite=400):
     return salida
 
 
+def codigos_adivinados_que_no_unen_nada():
+    """Códigos de fábrica leídos de la descripción de una lista que NUNCA marca el código de
+    fábrica, y que no unen nada: cuelgan de productos de esa sola lista y nadie los aprobó.
+
+    Es la otra mitad de puentes_que_hoy_no_se_generarian(), que pide dos productos porque
+    «uno que cuelga un solo producto no hace daño». Sí hace: es un par más en la cola de
+    revisión y un código de fábrica falso en la búsqueda. En la base real eran unos 1.300 de la
+    lista de IMPERIAL —«85x105x», «ESTR.32MM», «220V-50HZ», «RANGER3L»—, que entraron antes de
+    que la importación aprendiera a no tomarlos: ver la_lista_declara_codigos().
+
+    Cada uno tiene que cumplir todo esto, y si falta una sola cosa se deja:
+      · todos los productos que une son de UNA misma lista, y esa lista no marca el código de
+        fábrica (la_lista_declara_codigos() dice que no);
+      · el código está escrito en la descripción de cada uno, SIN marcar: no viene de una
+        columna de código de fábrica ni de un «REF ORIG»;
+      · no es el código de ningún producto de proveedor (no es un puente a otra lista);
+      · ninguno de sus vínculos está aprobado: solo pendientes.
+    No se pierde la búsqueda por ese número: el buscador lo sigue encontrando adentro de la
+    descripción (ver buscar_por_texto())."""
+    try:
+        c.execute("""
+            WITH vecinos AS (
+                SELECT producto_a_id AS ancla, producto_b_id AS otro, 1 AS cargada FROM equivalencias
+                UNION ALL SELECT producto_b_id, producto_a_id, 1 FROM equivalencias
+                UNION ALL SELECT producto_a_id, producto_b_id, 0 FROM equivalencias_pendientes
+                UNION ALL SELECT producto_b_id, producto_a_id, 0 FROM equivalencias_pendientes
+            )
+            SELECT po.id AS pid, po.codigo_raw AS codigo, v.cargada AS cargada,
+                   p.marca_id AS marca_id, m.nombre AS marca, p.codigo_raw AS codigo_otro,
+                   p.descripcion AS descripcion
+            FROM productos po
+            JOIN marcas mo ON mo.id = po.marca_id AND mo.tipo = 'OEM'
+            JOIN vecinos v ON v.ancla = po.id
+            JOIN productos p ON p.id = v.otro
+            JOIN marcas m ON m.id = p.marca_id""")
+        filas = c.fetchall()
+    except sqlite3.OperationalError as _err:
+        anotar_error("codigos_adivinados_que_no_unen_nada", _err)
+        return []
+    por_codigo = {}
+    for f in filas:
+        por_codigo.setdefault(f["pid"], []).append(f)
+
+    # Qué listas marcan el código de fábrica: una muestra de cada una, una sola vez.
+    marcas_en_juego = {f["marca_id"] for f in filas}
+    declaran = {}
+    for marca_id in marcas_en_juego:
+        c.execute("SELECT descripcion, codigo_raw FROM productos WHERE marca_id = ?", (marca_id,))
+        declaran[marca_id] = la_lista_declara_codigos(
+            [(r["descripcion"] or "", r["codigo_raw"] or "") for r in c.fetchall()])
+    de_proveedor = codigos_del_catalogo(version_del_catalogo())
+
+    salida = []
+    for pid, vecinos in por_codigo.items():
+        marcas = {v["marca_id"] for v in vecinos}
+        if len(marcas) != 1 or declaran.get(next(iter(marcas)), True):
+            continue
+        if any(v["cargada"] for v in vecinos):
+            continue
+        codigo = vecinos[0]["codigo"] or ""
+        limpio = sanitizar(codigo)
+        if not limpio or limpio in de_proveedor:
+            continue
+        escrito_sin_marcar = True
+        for v in vecinos:
+            texto = separar_texto_pegado(v["descripcion"] or "")
+            hallados = {sanitizar(x) for x in extraer_codigos_de_texto(
+                texto, codigo_propio=v["codigo_otro"])}
+            marcados = {sanitizar(x) for x in extraer_codigos_de_texto(
+                texto, codigo_propio=v["codigo_otro"], solo_declarados=True)}
+            if limpio not in hallados or limpio in marcados:
+                escrito_sin_marcar = False
+                break
+        if not escrito_sin_marcar:
+            continue
+        salida.append({"pid": pid, "Código": codigo, "Lista": vecinos[0]["marca"],
+                       "Productos": len({v["codigo_otro"] for v in vecinos}),
+                       "Esperando revisión": len(vecinos),
+                       "Ejemplo": (vecinos[0]["descripcion"] or "")[:70]})
+    salida.sort(key=lambda x: (x["Lista"], x["Código"]))
+    return salida
+
+
 def borrar_puente_y_sus_pendientes(producto_oem_id):
     """Saca un código de fábrica falso de las dos tablas. Devuelve (cargados, pendientes).
 
