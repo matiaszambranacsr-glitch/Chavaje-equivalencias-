@@ -4617,9 +4617,16 @@ Con todo lo anterior, lo que queda «para revisar» en la base real son unos 8.0
   que apunta a dos productos—: la misma muestra de control que las limpias, con aprobar o
   descartar el resto según lo que salga (`_panel_de_muestra()`, compartido por los dos).
 
-En la lista del barrido, por ejemplo, 4.875 pares quedan en 14 motivos: 13 se descartan de a
-grupo (el más grande, «cilindradas distintas», son 1.066 pares de un toque) y uno, «nada dice»,
-se resuelve con una muestra de 50.
+Las dudas, además, se separan **por par de listas** («nada dice que sean la misma pieza ·
+CRI-FA ↔ FISPA» es un grupo e «IMPERIAL ↔ TARANTO» es otro): una muestra sólo sirve si todo el
+grupo se parece, y dos proveedores que escriben distinto no se parecen.
+
+En la lista del barrido, por ejemplo, 4.875 pares quedan en 11 grupos para descartar (el más
+grande, «cilindradas distintas», son 1.066 pares de un toque) y las dudas se resuelven con una
+muestra por par de listas (631 pares de CRI-FA ↔ FISPA, 477 de IMPERIAL ↔ TARANTO…).
+
+**Agua y aceite** cuentan ahora como lugares de la pieza: «JTA CPO.BBA. ACEITE» y «JTA
+CPO.BBA.AGUA» son dos juntas distintas, aunque todo lo demás coincida.
 
 **Y una falsa alarma menos**: «el código de fábrica apunta a más de un producto de FISPA» salía
 en 2.585 pares, y casi todos eran la misma pieza de las dos marcas que vende FISPA en su lista

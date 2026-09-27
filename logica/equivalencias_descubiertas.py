@@ -1435,9 +1435,11 @@ def motivo_para_agrupar(fila):
     VALVULA» se deciden igual, y separadas eran veinte grupos chicos."""
     alarmas = fila.get("alarmas") or []
     tipo = tipo_de_alarma(alarmas[0] if alarmas else "")
-    if tipo.startswith("🔤 "):
+    if tipo.startswith(("🔤 ", "🤷 ")):
         tipo = re.split(r"\s*[:(]", tipo, maxsplit=1)[0]
-    return tipo
+    # «... — alguno de los dos está mal cargado»: la explicación va en la pantalla, no en el
+    # nombre del grupo, que tiene que entrar en una línea del celular.
+    return tipo.split(" — ")[0]
 
 
 def grupos_por_motivo(sospechosas):
@@ -1445,7 +1447,15 @@ def grupos_por_motivo(sospechosas):
     clase de los más grandes a los más chicos."""
     grupos = {}
     for f in sospechosas:
-        grupos.setdefault(motivo_para_agrupar(f), []).append(f)
+        motivo = motivo_para_agrupar(f)
+        # Las dudas, además, por par de listas: una muestra solo dice algo del grupo si el grupo
+        # es parejo, y «nada dice que sean la misma pieza» entre CRI-FA y FISPA (sensores, casi
+        # todos mal) no se parece al mismo motivo entre IMPERIAL y TARANTO (juntas, mitad y
+        # mitad). Juntos, una muestra de uno escondía al otro.
+        if not motivo.startswith(_MOTIVOS_QUE_SE_DESCARTAN):
+            ma, mb = sorted((f.get("marca_a") or "", f.get("marca_b") or ""))
+            motivo = f"{motivo} · {ma} ↔ {mb}"
+        grupos.setdefault(motivo, []).append(f)
     salida = [(m, "descartar" if m.startswith(_MOTIVOS_QUE_SE_DESCARTAN) else "muestra", filas)
               for m, filas in grupos.items()]
     salida.sort(key=lambda g: (g[1] != "descartar", -len(g[2])))

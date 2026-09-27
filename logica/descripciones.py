@@ -1936,6 +1936,10 @@ _LUGARES_DE_LA_PIEZA = {
     "CILINDRO", "VALVULA", "CARTER", "ESCAPE", "ADMISION", "MULTIPLE", "SALIDA", "DISTRIBUCION",
     "LEVAS", "BANCADA", "CARBURADOR", "TERMOSTATO", "DIFERENCIAL", "TURBO", "COLECTOR",
     "BOMBA", "FILTRO", "INYECCION",
+    # «JTA CPO.BBA. ACEITE» contra «JTA CPO.BBA.AGUA»: la bomba de aceite y la de agua. Solo
+    # cortan cuando cada lado nombra uno que el otro no: «Jta carter aceite» contra «Junta para
+    # Cárter» sigue pasando.
+    "AGUA", "ACEITE",
 }
 
 # Ver «la marca sola no alcanza» en firmas_compatibles().
