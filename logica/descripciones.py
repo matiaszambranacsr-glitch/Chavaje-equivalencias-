@@ -97,6 +97,9 @@ PALABRAS_NO_MODELO = {
     "DIRECCION", "MECANICA", "AGRICOLA", "CARGO", "GRAND", "SEMI", "ORING", "ARANDELA",
     "ALUMINIO", "CLAVITO", "BANCADA", "CAPUCHON", "BUJIA", "BRIDA", "CAÑO", "CALEFACCION",
     "ARBOL", "LEVAS", "SALIDA", "TAPON", "VALVULA", "MARIPOSA", "BASE", "DISTRIBUIDOR",
+    # Las dos que dejan leer «JTA M.ESC.» y «JTA TAPA C.VEL.» de IMPERIAL como piezas: ver
+    # _ABREVIATURAS_CON_PUNTO.
+    "MULTIPLE", "VELOCIDAD",
     "CHUPADOR", "INTERMEDIA", "V", "L", "S", "R", "AX", "DD", "F",
     # EL VOCABULARIO DE PIEZA QUE FALTABA, y que la firma estaba contando como si dijera para
     # qué auto es. Salió de contar las palabras que entraban en la aplicación de las 30.000
@@ -575,6 +578,43 @@ _MARCAS_QUE_SE_PEGAN_AL_CODIGO = ("LUCAS", "FISPA", "BOSCH", "MARELLI", "MAGNETI
 # Para prefiltrar en SQL. Es a propósito más flojo que _RE_ES_KIT —acá «KIT» engancha también
 # dentro de «KITS»— porque después se confirma con es_un_kit(), que sí mira la palabra entera.
 PALABRAS_DE_KIT = ("KIT", "JUEGO", "JGO", "COMBO", "SET")
+
+
+# QUÉ JUEGO DE MOTOR ES. Un «Jgo.Jtas.P/Motor FORD FALCON» es el juego completo de juntas del
+# motor; un «JTA T.C. FORD FALCON» es UNA junta, la de tapa de cilindros, que viene adentro de
+# ese juego. Son del mismo rubro y del mismo auto, y no se vende uno en lugar del otro. Sobre la
+# cola real había 914 pares aprobables con un juego de un lado y no del otro, y los de juego de
+# motor contra junta suelta eran siempre esto.
+# No alcanza con «es un juego»: «Juego de juntas para Carburador» contra «JUNTAS FIAT 128
+# WEBER» es el mismo juego escrito de dos formas. Lo que se compara es QUÉ juego de motor: el
+# completo, el superior (descarbonización) o el inferior. Si uno lo es y el otro no, o son de
+# tipos distintos, son productos distintos.
+_RE_JUEGO_SUPERIOR = re.compile(r'\b(SUPERIOR|DESCARBONIZACION|DESCARB|DESM|DESMONTAJE)\b')
+_RE_JUEGO_INFERIOR = re.compile(r'\bINFERIOR\b')
+# Sobre el texto de _normalizar_desc(), que cambia la barra por un espacio: «P/Motor» llega
+# como «P MOTOR».
+_RE_JUEGO_COMPLETO = re.compile(r'\b(P MOTOR|PARA MOTOR|JTAS MOTOR|JUNTAS MOTOR|JUNTAS DE MOTOR'
+                                r'|COMPLETO)\b')
+# El «Juego Completo de Reparación "sin TC" (Semi-juego)» de ILLINOIS: el completo SIN la junta
+# de tapa de cilindros. Es otro producto que el completo.
+_RE_JUEGO_SIN_TAPA = re.compile(r'\b(SIN TC|SEMI JUEGO|SEMIJUEGO)\b')
+
+
+def tipo_de_juego_de_motor(descripcion):
+    """'completo', 'superior', 'inferior', 'completo sin tapa de cilindros', o None si no es un
+    juego de juntas de motor."""
+    texto = _normalizar_desc(descripcion)
+    if not _RE_ES_KIT.search(texto):
+        return None
+    if _RE_JUEGO_SUPERIOR.search(texto):
+        return "superior"
+    if _RE_JUEGO_INFERIOR.search(texto):
+        return "inferior"
+    if _RE_JUEGO_SIN_TAPA.search(texto):
+        return "completo sin tapa de cilindros"
+    if _RE_JUEGO_COMPLETO.search(texto):
+        return "completo"
+    return None
 
 
 def es_un_kit(descripcion):
@@ -1063,6 +1103,35 @@ def guardar_aplicaciones(apps, marca_repuesto, origen="", tipo_pieza=""):
 # de los dos lados.
 _RE_PUNTO_ENTRE_LETRAS = re.compile(r'([A-ZÁÉÍÓÚÑ])\.([A-ZÁÉÍÓÚÑ])')
 
+# LAS ABREVIATURAS DE UNA LETRA CON PUNTO. IMPERIAL escribe «JTA T.C.» (junta tapa de
+# cilindros, 1.072 veces), «JTA T.V.» (tapa de válvulas, 267), «JTA M.ESC.» / «S.ESC.»
+# (múltiple / salida de escape), «M.ADM.», «A.LEVA», «T.DIST.», «C.VEL.», «R.V.». La letra
+# sola se tiraba por corta, así que «JTA T.V. DODGE 1500» quedaba como «JUNTA» y nada más: sin
+# ninguna palabra que dijera CUÁL junta, se emparejaba con la de tapa de cilindros, la de
+# escape o la de carburador del mismo auto. Se expanden antes de partir en palabras.
+# Solo las que se contaron en las descripciones reales, y con lo que viene después cuando la
+# letra sola es ambigua: «M.» también es M.BENZ o M.FIRE, y «T.» es «T.Y CODO».
+_ABREVIATURAS_CON_PUNTO = [
+    (re.compile(r'\bT\.\s?C\b\.?'), "TAPA CILINDRO "),
+    (re.compile(r'\bT\.\s?V\b\.?'), "TAPA VALVULA "),
+    (re.compile(r'\bT\.(?=\s?(?:CIL|DIST|VALV|TERM|BOT|TRAS|DEL|INF|SUP|FRONT|LAT|BALANC))'),
+     "TAPA "),
+    (re.compile(r'\bM\.(?=\s?(?:ESC|ADM))'), "MULTIPLE "),
+    (re.compile(r'\bS\.(?=\s?ESC)'), "SALIDA "),
+    (re.compile(r'\bA\.\s?LEVAS?\b'), "ARBOL LEVAS "),
+    (re.compile(r'\bC\.\s?VEL\b\.?'), "CAJA VELOCIDAD "),
+    (re.compile(r'\bR\.\s?V\b\.?'), "RETEN VALVULA "),
+]
+
+
+def _expandir_abreviaturas_con_punto(texto):
+    """Ver _ABREVIATURAS_CON_PUNTO. Recibe el texto ya en mayúsculas."""
+    if "." not in texto:
+        return texto
+    for patron, reemplazo in _ABREVIATURAS_CON_PUNTO:
+        texto = patron.sub(reemplazo, texto)
+    return texto
+
 # La coma decimal. Illinois escribe «1,6» y todos los demás «1.6»: son 3.105 descripciones de
 # esa lista contra 23.244 con punto. Comparadas tal cual, las cilindradas de las dos nunca se
 # cruzan y firmas_compatibles() cortaba con «cilindradas distintas» — o sea que la lista más
@@ -1503,6 +1572,7 @@ def _firma_de_producto(descripcion, producto_id=None, codigo_clean=None):
     # cabeza era «JTA.TAPA», que no coincide con nada.
     # Se separa solo cuando el punto está entre dos LETRAS. Entre números no se toca, que es
     # donde importa: 1.6 sigue siendo la cilindrada y 278.897 sigue siendo un código.
+    limpio = _expandir_abreviaturas_con_punto(limpio)
     limpio = _RE_PUNTO_ENTRE_LETRAS.sub(r"\1 \2", limpio)
     limpio = _RE_COMA_DECIMAL.sub(".", limpio)   # ver _RE_COMA_DECIMAL
     palabras = [w for w in re.split(r"[^A-Z0-9./]+", limpio) if w]
@@ -1644,6 +1714,7 @@ def _firma_de_producto(descripcion, producto_id=None, codigo_clean=None):
     return {"familia": familia, "nucleo": nucleo, "cabeza": cabeza, "autos": autos,
             "pieza": pieza, "aplicacion": set(aplicacion),
             "modelos_numericos": modelos_numericos, "modelos": modelos, "marcas": marcas,
+            "juego": tipo_de_juego_de_motor(texto),
             "siglas": siglas, "marca_auto": marca_auto, "posicion": posicion,
             "cilindradas": cilindradas, "vias": vias, "texto": limpio}
 
@@ -1742,6 +1813,12 @@ def firmas_compatibles(a, b, minimo_nucleo=2, cuenta_palabras=None, total_descri
         return False, "no se pudo clasificar el rubro"
     if a["familia"] != b["familia"]:
         return False, "rubros distintos"
+
+    # El juego de juntas del motor contra una junta suelta, o dos juegos distintos (completo
+    # contra superior). Ver tipo_de_juego_de_motor().
+    if (a.get("juego") or b.get("juego")) and a.get("juego") != b.get("juego"):
+        return False, (f"juegos distintos: {a.get('juego') or 'junta suelta'} vs "
+                       f"{b.get('juego') or 'junta suelta'}")
 
     # Posición: si las dos la declaran y no coinciden, son piezas distintas. Un amortiguador
     # delantero no reemplaza a uno trasero por más que vayan al mismo auto.
@@ -2046,7 +2123,7 @@ def pares_de_kit_y_pieza(pares):
 # SENSOR, o CARCASA y BASE de termostato, son la misma pieza dicha de otra forma.
 _MOTIVOS_QUE_CONTRADICEN = ("posiciones distintas", "siglas distintas", "autos distintos",
                             "marcas distintas", "modelos distintos", "cilindradas distintas",
-                            "distinta cantidad de vías")
+                            "distinta cantidad de vías", "juegos distintos")
 # Los que hablan del AUTO. Esos no cuentan cuando el par está unido por un código: ver
 # _unidos_por_codigo().
 _MOTIVOS_DEL_AUTO = ("autos distintos", "marcas distintas", "modelos distintos",
@@ -2505,7 +2582,11 @@ ABREVIATURAS_DE_PIEZA = {
     # Taranto escribe «Jta.Tapa Cilind.Ford» e Illinois «Junta Tapa de Cilindros FORD».
     "CILIND": "CILINDRO", "CILINDRICO": "CILINDRO", "CILIN": "CILINDRO", "JTO": "JUEGO",
     "JUEGOS": "JUEGO", "VAL": "VALVULA", "VALV": "VALVULA", "VALVS": "VALVULA",
-    "ADMIS": "ADMISION", "ESCAP": "ESCAPE", "TRANSM": "TRANSMISION", "DELANT": "DELANTERO",
+    "ADMIS": "ADMISION", "ESCAP": "ESCAPE",
+    # Las de IMPERIAL, contadas en su lista: «M.ESC», «M.ADM», «T.DIST», «SAL.AGUA», «T.VALVUL».
+    "ESC": "ESCAPE", "ADM": "ADMISION", "ADMISI": "ADMISION", "DIST": "DISTRIBUCION",
+    "DISTR": "DISTRIBUCION", "DISTRI": "DISTRIBUCION", "VALVUL": "VALVULA", "SAL": "SALIDA",
+    "VEL": "VELOCIDAD", "BSE": "BASE", "TRANSM": "TRANSMISION", "DELANT": "DELANTERO",
     "TRAS": "TRASERO", "SUPL": "SUPLEMENTO", "SUPLEM": "SUPLEMENTO", "REPAR": "REPARACION",
     "COLEC": "COLECTOR", "COLECT": "COLECTOR", "ASPIR": "ASPIRACION", "COMPRES": "COMPRESOR",
 }

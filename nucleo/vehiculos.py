@@ -620,7 +620,11 @@ ABREVIATURAS_DE_PIEZA = {
     # Taranto escribe «Jta.Tapa Cilind.Ford» e Illinois «Junta Tapa de Cilindros FORD».
     "CILIND": "CILINDRO", "CILINDRICO": "CILINDRO", "CILIN": "CILINDRO", "JTO": "JUEGO",
     "JUEGOS": "JUEGO", "VAL": "VALVULA", "VALV": "VALVULA", "VALVS": "VALVULA",
-    "ADMIS": "ADMISION", "ESCAP": "ESCAPE", "TRANSM": "TRANSMISION", "DELANT": "DELANTERO",
+    "ADMIS": "ADMISION", "ESCAP": "ESCAPE",
+    # Las de IMPERIAL, contadas en su lista: «M.ESC», «M.ADM», «T.DIST», «SAL.AGUA», «T.VALVUL».
+    "ESC": "ESCAPE", "ADM": "ADMISION", "ADMISI": "ADMISION", "DIST": "DISTRIBUCION",
+    "DISTR": "DISTRIBUCION", "DISTRI": "DISTRIBUCION", "VALVUL": "VALVULA", "SAL": "SALIDA",
+    "VEL": "VELOCIDAD", "BSE": "BASE", "TRANSM": "TRANSMISION", "DELANT": "DELANTERO",
     "TRAS": "TRASERO", "SUPL": "SUPLEMENTO", "SUPLEM": "SUPLEMENTO", "REPAR": "REPARACION",
     "COLEC": "COLECTOR", "COLECT": "COLECTOR", "ASPIR": "ASPIRACION", "COMPRES": "COMPRESOR",
 }
@@ -737,6 +741,9 @@ PALABRAS_NO_MODELO = {
     "DIRECCION", "MECANICA", "AGRICOLA", "CARGO", "GRAND", "SEMI", "ORING", "ARANDELA",
     "ALUMINIO", "CLAVITO", "BANCADA", "CAPUCHON", "BUJIA", "BRIDA", "CAÑO", "CALEFACCION",
     "ARBOL", "LEVAS", "SALIDA", "TAPON", "VALVULA", "MARIPOSA", "BASE", "DISTRIBUIDOR",
+    # Las dos que dejan leer «JTA M.ESC.» y «JTA TAPA C.VEL.» de IMPERIAL como piezas: ver
+    # _ABREVIATURAS_CON_PUNTO.
+    "MULTIPLE", "VELOCIDAD",
     "CHUPADOR", "INTERMEDIA", "V", "L", "S", "R", "AX", "DD", "F",
     # EL VOCABULARIO DE PIEZA QUE FALTABA, y que la firma estaba contando como si dijera para
     # qué auto es. Salió de contar las palabras que entraban en la aplicación de las 30.000

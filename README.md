@@ -4442,6 +4442,25 @@ Regatta, la misma tapa de cilindros del Volvo N12, frenadas por un precio que er
 la lista) y 345 pasan a revisión (juego completo de motor contra una junta de tapa de
 válvulas, tapa de cilindros contra tapa de válvulas: el precio ahora sí lo delata).
 
+### Las abreviaturas de IMPERIAL y el juego contra la junta suelta
+
+Dos cosas más que mostró la cola real, las dos en la comparación de descripciones:
+
+- **«JTA T.V.», «JTA T.C.», «M.ESC.», «A.LEVA».** IMPERIAL abrevia con una letra y un punto:
+  «T.C.» (tapa de cilindros) aparece 1.072 veces, «T.V.» (tapa de válvulas) 267. La letra sola
+  se tiraba por corta, así que «JTA T.V. DODGE 1500» quedaba como «JUNTA» a secas y se
+  emparejaba con cualquier junta del mismo auto. Ahora se expanden antes de comparar (ver
+  `_ABREVIATURAS_CON_PUNTO`), con las que se contaron en su lista. En la cola real: 28 pares
+  dejan de aprobarse solos (juntas de admisión de Monza contra Corsa, que pasaban porque «ADM»
+  contaba como una palabra del auto).
+- **El juego de juntas del motor contra una junta suelta.** «Jgo.Jtas.P/Motor FORD FALCON» y
+  «JTA T.C. FORD FALCON» son del mismo rubro y del mismo auto, y no son lo mismo: la junta viene
+  adentro del juego. Ahora se distingue qué juego de motor es —completo, superior
+  (descarbonización), inferior, completo sin tapa de cilindros— y si uno lo es y el otro no, o
+  son de tipos distintos, son productos distintos (ver `tipo_de_juego_de_motor()`). No se cortan
+  los juegos que no son de motor: «Juego de juntas para Carburador» contra «JUNTAS FIAT 128
+  WEBER» sigue siendo el mismo juego. En la cola real: 250 pares dejan de aprobarse solos.
+
 ## Una firma de foto podía ser un programa
 
 Las firmas visuales de las fotos se guardan con `pickle`, y `pickle` **no es un formato de
