@@ -236,9 +236,6 @@ _RE_PIEZA_POR_MEDIDA = re.compile(
     r'RULEMAN|RODAMIENTO|ARANDELA|ESPACIADOR|SEPARADOR)\b', re.I)
 
 
-# ============================================================================================
-# CONTROLES DE CALIDAD DE UN CÓDIGO
-# ============================================================================================
 def codigo_sospechoso(codigo, descripcion=""):
     """¿Esto parece un código de repuesto de verdad? Devuelve (es_sospechoso, motivo).
     Sirve para cazar importaciones mal mapeadas: cuando la columna que se tomó como código

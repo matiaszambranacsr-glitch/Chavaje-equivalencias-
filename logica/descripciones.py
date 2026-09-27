@@ -837,6 +837,7 @@ def que_trae_este_kit(producto_id, limite=12):
 
 
 
+@functools.lru_cache(maxsize=MAXIMO_DESCRIPCIONES_RECORDADAS)   # solo depende del texto
 def familia_para_comparar(descripcion):
     """La familia de la pieza, pero «Sin clasificar» cuando la descripción es un KIT de varias.
 
@@ -1631,7 +1632,41 @@ def firma_de_producto(descripcion, producto_id=None, codigo_clean=None):
                       lambda: _firma_de_producto(descripcion, producto_id, codigo_clean))
 
 
+# Las que se usan palabra por palabra en _firma_armada(), compiladas una vez: escritas en el
+# bucle, cada palabra pasaba por la caché de expresiones de re —3 millones de consultas para
+# analizar la lista de FISPA—.
+_RE_1_O_2_DIGITOS = re.compile(r'\d{1,2}')
+_RE_2_A_4_DIGITOS = re.compile(r'\d{2,4}')
+_RE_UN_ANIO = re.compile(r'(19|20)\d{2}')
+_RE_SOLO_NUMERO = re.compile(r'[\d./,]+')
+
+
 def _firma_de_producto(descripcion, producto_id=None, codigo_clean=None):
+    """La firma del texto (ver _firma_armada()) más los autos que la base sabe de ese producto.
+
+    LO QUE SALE DEL TEXTO SE GUARDA, POR TEXTO. Leer una descripción son 0,7 ms, y analizar la
+    lista de FISPA las leía 16.000 veces: 10,6 de sus 14 segundos. La mitad eran repetidas —el
+    código de fábrica copia la descripción del producto que lo nombró— y además cada decisión
+    en la pantalla de revisión rehace el análisis entero, y volvía a leer todo. Lo que depende
+    del texto no cambia mientras la app corre, así que se lee una vez por proceso. Los autos
+    guardados en la base sí pueden cambiar, y se siguen preguntando cada vez (dentro de un
+    análisis, una vez por producto: ver _recordado()).
+    La firma que se devuelve es compartida: nadie la modifica. Si cambian los autos, se
+    devuelve una copia con los autos nuevos."""
+    base = (_firma_del_texto(descripcion) if isinstance(descripcion, str)
+            else _firma_armada(descripcion))
+    if not base or not (producto_id or codigo_clean):
+        return base
+    autos = autos_de_todas_las_fuentes(producto_id, codigo_clean, base["autos"])
+    return base if autos == base["autos"] else dict(base, autos=autos)
+
+
+@functools.lru_cache(maxsize=20000)
+def _firma_del_texto(descripcion):
+    return _firma_armada(descripcion)
+
+
+def _firma_armada(descripcion, producto_id=None, codigo_clean=None):
     """Saca de una descripción qué pieza es y para qué auto, para poder comparar entre marcas.
 
     Esta es la única forma de vincular dos proveedores que no traen el código de fábrica —que
@@ -1702,7 +1737,7 @@ def _firma_de_producto(descripcion, producto_id=None, codigo_clean=None):
         # núcleo con la palabra CILINDRO y salía equivalente a una junta de tapa de cilindros.
         # Se reconoce por lo que tiene adelante: un número suelto.
         if (w in ("CIL", "CILS", "CILINDROS", "CILINDRO") and indice
-                and re.fullmatch(r'\d{1,2}', palabras[indice - 1])):
+                and _RE_1_O_2_DIGITOS.fullmatch(palabras[indice - 1])):
             continue
         # Se sacan las marcas de REPUESTO: «coinciden en BOSCH» salía en 24 sugerencias y no
         # significa nada, dos proveedores distintos venden repuestos Bosch de cosas
@@ -1727,13 +1762,13 @@ def _firma_de_producto(descripcion, producto_id=None, codigo_clean=None):
         # Se pide que venga JUSTO DESPUÉS de la marca del auto, que es como se escriben, y que
         # no sea un año. Los de FISPA, que escriben la cilindrada separada («FIAT PALIO 1 3»),
         # no entran: son de un dígito y acá se piden dos.
-        es_modelo_numerico = (re.fullmatch(r'\d{2,4}', w) and indice
+        es_modelo_numerico = (_RE_2_A_4_DIGITOS.fullmatch(w) and indice
                               and palabras[indice - 1] in palabras_marca
-                              and not re.fullmatch(r'(19|20)\d{2}', w))
+                              and not _RE_UN_ANIO.fullmatch(w))
         if (w in _RUIDO_EN_FIRMA or w in palabras_marca or w in _POSICIONES
                 or w in MARCAS_DE_REPUESTO
                 or (not es_modelo_numerico
-                    and (len(w) < 3 or re.fullmatch(r'[\d./,]+', w)))):
+                    and (len(w) < 3 or _RE_SOLO_NUMERO.fullmatch(w)))):
             continue
         if es_modelo_numerico:
             modelos_numericos.add(w)

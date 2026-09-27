@@ -324,6 +324,9 @@ _RE_PIEZA_POR_MEDIDA = re.compile(
 # ============================================================================================
 # CONTROLES DE CALIDAD DE UN CÓDIGO
 # ============================================================================================
+# Se recuerda: depende solo del texto, y el análisis de la cola lo pregunta dos veces por par
+# cada vez que se rehace (27.000 llamadas en la lista de FISPA).
+@functools.lru_cache(maxsize=50000)
 def codigo_sospechoso(codigo, descripcion=""):
     """¿Esto parece un código de repuesto de verdad? Devuelve (es_sospechoso, motivo).
     Sirve para cazar importaciones mal mapeadas: cuando la columna que se tomó como código

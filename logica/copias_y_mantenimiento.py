@@ -664,6 +664,7 @@ def el_codigo_no_figura_entre_las_referencias(codigo, descripcion):
     return sanitizar(codigo).upper() not in sanitizar(zona).upper()
 
 
+@functools.lru_cache(maxsize=50000)   # depende solo del código: ver codigo_sospechoso()
 def codigo_que_hoy_no_se_tomaria(codigo):
     """¿Es un código que las reglas de hoy ya NO aceptarían como código de fábrica?
 

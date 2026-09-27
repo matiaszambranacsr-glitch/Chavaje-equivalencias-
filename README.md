@@ -4584,6 +4584,22 @@ Sobre la cola real: las limpias quedan en 15.489 (11.096 de FISPA y 2.726 de ILL
 códigos de fábrica, que en las muestras salieron bien) y 4.463 pares pasan a resolverse en
 1.078 decisiones de abanico, en vez de aprobarse a ciegas.
 
+### La revisión, más rápida
+
+Cada decisión en la pantalla de revisión rehace el análisis de la lista entera, y en la lista de
+FISPA eso eran 14 segundos. 10,6 se iban en leer las mismas descripciones una y otra vez: el
+código de fábrica copia la descripción del producto que lo nombró, y cada vuelta volvía a leer
+todo. Ahora lo que sale del texto se lee una vez por proceso (`_firma_del_texto()`, y también
+`familia_para_comparar()`, `codigo_sospechoso()` y `codigo_que_hoy_no_se_tomaria()`, que
+dependen solo del texto); los autos que la base sabe de cada producto se siguen preguntando cada
+vez. Con los mismos resultados:
+
+| Lista | Antes | Primera vez | Después de cada decisión |
+|---|---|---|---|
+| FISPA (13.941 pares) | 14 s | 9 s | 4,3 s |
+| BARRIDO (10.899) | 6,2 s | 4,1 s | 2,9 s |
+| ILLINOIS (3.172) | 3,1 s | 1,9 s | 1,3 s |
+
 ## Una firma de foto podía ser un programa
 
 Las firmas visuales de las fotos se guardan con `pickle`, y `pickle` **no es un formato de
