@@ -1819,6 +1819,17 @@ def _analizar_lote_pendiente(lote, limite=None, desde=0):
             puntaje = max(puntaje, 90.0)
         elif len(a_favor) == 2:
             puntaje = max(puntaje, 72.0)
+        elif not a_favor and not _unidos_por_codigo(
+                {"tipo": f.get("tipo_a"), "codigo_raw": f.get("cod_a"), "descripcion": f.get("desc_a")},
+                {"tipo": f.get("tipo_b"), "codigo_raw": f.get("cod_b"), "descripcion": f.get("desc_b")}):
+            # SIN NADA A FAVOR Y SIN UN NÚMERO QUE LOS UNA, no se aprueba solo. Un par entre dos
+            # proveedores arranca en 50 y suma 15 por el rubro y 10 por el precio: 75, «limpio»,
+            # sin que nada diga que es la misma pieza. Si no los une un código y las
+            # descripciones no concuerdan, lo único que se sabe es que son del mismo rubro.
+            puntaje = min(puntaje, 50.0)
+            if not alarmas:
+                alarmas.append("🤷 Nada dice que sean la misma pieza: no los une ningún código y "
+                               "las descripciones no alcanzan para decirlo")
         f["evidencia"] = a_favor
         f["veredicto"] = veredicto
 

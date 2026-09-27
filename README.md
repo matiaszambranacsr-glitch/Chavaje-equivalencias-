@@ -4503,6 +4503,30 @@ fábrica del otro lado no se busca por texto, porque su descripción es una copi
 - «JTA S.TAPA A.LEVA» de IMPERIAL es la junta de tapa de válvulas de los motores con el árbol
   de levas arriba, y ahora se lee así.
 
+### Una ronda de muestras de control hecha sobre la base real
+
+Antes de dejar la muestra de control en manos de nadie, se hizo una ronda leyendo pares al azar
+de cada grupo grande. ILLINOIS↔TARANTO y los grupos contra códigos de fábrica salieron bien;
+**CRI-FA↔FISPA salió mal**: sensor de velocidad de Logan contra el de Megane, sensor de rotación
+de Fiat Marea contra el de Audi A3, sonda de Honda Fit contra la de GM Astra. Lo que había detrás:
+
+- **Un par entre dos proveedores se aprobaba sin ninguna evidencia.** Arranca en 50, suma 15 por
+  el rubro y 10 por el precio: 75, limpio. Ahora, si no los une ningún código y las
+  descripciones no concuerdan, queda en 50 con «🤷 Nada dice que sean la misma pieza».
+- **Coincidir en la pieza y en la marca no es concordar.** «Sonda lambda ... Ford» contra
+  «SONDA LAMBDA ... FORD ESCORT MONDEO ...» coincide en eso y nada más, y FISPA nombra veinte
+  autos por producto. Ahora hace falta un modelo o un motor en común.
+- **El mismo motor escrito distinto sí cuenta**: «PERKINS 4.203» y «4-203», «6.354» y «6-354»
+  (se comparan sin el separador); y un modelo que es un número cuenta aunque no venga pegado a
+  la marca («FIAT 1600 125» contra «FIAT 125»).
+- **Los sensores de tipos distintos son piezas distintas**: velocímetro contra mariposa, MAP
+  contra rotación. Se lee qué mide cada sensor, con sus sinónimos (`tipos_de_sensor()`).
+- **Cables, terminales y salidas** se leen como la cantidad de vías: «4 CABLES» contra «3
+  terminales» son sensores distintos.
+
+Sobre la cola real, las limpias pasan de 22.484 a 21.045; de las que bajan, casi todas son de
+CRI-FA↔FISPA y de pares sin nada en común más que la marca.
+
 ## Una firma de foto podía ser un programa
 
 Las firmas visuales de las fotos se guardan con `pickle`, y `pickle` **no es un formato de

@@ -600,6 +600,41 @@ _RE_JUEGO_COMPLETO = re.compile(r'\b(P MOTOR|PARA MOTOR|JTAS MOTOR|JUNTAS MOTOR|
 _RE_JUEGO_SIN_TAPA = re.compile(r'\b(SIN TC|SEMI JUEGO|SEMIJUEGO)\b')
 
 
+# QUÉ MIDE EL SENSOR. «Sensor de velocímetro Fiat Fiorino ... Palio» contra «SENSOR MARIPOSA
+# ... Palio» compartían SENSOR y los autos, y son dos piezas distintas. Se lee el tipo con sus
+# sinónimos y, si los dos dicen uno y no coinciden, son sensores distintos.
+_TIPOS_DE_SENSOR = [
+    ("MAP", r'\bMAP\b|PRESION (?:ABSOLUTA|DE COLECTOR|DEL COLECTOR|DE ADMISION|DEL MULTIPLE)'),
+    ("MAF", r'\bMAF\b|MASA DE AIRE|MASA AIRE|FLUJO DE AIRE|CAUDALIMETRO'),
+    ("MARIPOSA", r'\bTPS\b|MARIPOSA|POSICION (?:DEL |DE )?ACELERADOR|PEDAL'),
+    ("ROTACION", r'ROTACION|CIGUENAL|\bRPM\b|\bPMS\b'),
+    ("FASE", r'\bFASE\b|ARBOL DE LEVAS|\bLEVAS\b'),
+    ("DETONACION", r'DETONACION|PISTONEO'),
+    ("VELOCIDAD", r'VELOCIDAD|VELOCIMETRO|ODOMETRO'),
+    ("TEMPERATURA", r'TEMPERATURA|\bTEMP\b'),
+    ("LAMBDA", r'LAMBDA|OXIGENO'),
+    ("ABS", r'\bABS\b'),
+    ("NIVEL", r'\bNIVEL\b'),
+]
+_RE_TIPOS_DE_SENSOR = [(t, re.compile(p)) for t, p in _TIPOS_DE_SENSOR]
+
+
+# Los motores que son un número con un separador: PERKINS «4.203», «4-203», «6.354»; MWM
+# «4.07». El núcleo los tira por ser puro número (o los parte en dos por el guion), así que
+# «Junta para Cárter PERKINS ... 4.203» y «Jgo.Jtas.Carter PERKINS 4-203» no compartían nada
+# más que la marca. Se guardan aparte, sin el separador.
+_RE_MOTOR_NUMERICO = re.compile(r'(?<![\d.,])(\d{1,2})[.\-](\d{2,3})(?![\d.,])')
+
+
+def tipos_de_sensor(descripcion):
+    """Qué mide, si la descripción es de un SENSOR: {'MAP'}, {'ROTACION'}... Vacío si no es un
+    sensor o no lo dice. El MAP mide presión, así que PRESION sola no cuenta como tipo."""
+    texto = _normalizar_desc(descripcion)
+    if " SENSOR " not in texto and " SONDA " not in texto:
+        return frozenset()
+    return frozenset(t for t, patron in _RE_TIPOS_DE_SENSOR if patron.search(texto))
+
+
 def tipo_de_juego_de_motor(descripcion):
     """'completo', 'superior', 'inferior', 'completo sin tapa de cilindros', o None si no es un
     juego de juntas de motor."""
@@ -1534,8 +1569,11 @@ def _autos_guardados_en_la_base(producto_id, codigo_clean):
     return frozenset(autos)
 
 
+# CABLES, TERMINALES y SALIDAS son lo mismo dicho por otras listas: «SONDA LAMBDA ... 4 CABLES»,
+# «Sensor de rotación ... 3 terminales», «Bulbo electroventilador ... 4 salidas».
 _RE_CANTIDAD_VIAS = re.compile(
-    r'\b(\d{1,2})\s*(?:VIAS?|V[IÍ]AS?|PIN|PINES|BOCAS?|POLOS?|CONTACTOS?)\b', re.IGNORECASE)
+    r'\b(\d{1,2})\s*(?:VIAS?|V[IÍ]AS?|PIN|PINES|BOCAS?|POLOS?|CONTACTOS?|CABLES|TERMINALES'
+    r'|SALIDAS)\b', re.IGNORECASE)
 
 
 def firma_de_producto(descripcion, producto_id=None, codigo_clean=None):
@@ -1717,7 +1755,8 @@ def _firma_de_producto(descripcion, producto_id=None, codigo_clean=None):
     return {"familia": familia, "nucleo": nucleo, "cabeza": cabeza, "autos": autos,
             "pieza": pieza, "aplicacion": set(aplicacion),
             "modelos_numericos": modelos_numericos, "modelos": modelos, "marcas": marcas,
-            "juego": tipo_de_juego_de_motor(texto),
+            "juego": tipo_de_juego_de_motor(texto), "sensor": tipos_de_sensor(texto),
+            "motores_numericos": {a + b for a, b in _RE_MOTOR_NUMERICO.findall(limpio)},
             "siglas": siglas, "marca_auto": marca_auto, "posicion": posicion,
             "cilindradas": cilindradas, "vias": vias, "texto": limpio}
 
@@ -1841,6 +1880,11 @@ def firmas_compatibles(a, b, minimo_nucleo=2, cuenta_palabras=None, total_descri
         return False, (f"juegos distintos: {a.get('juego') or 'junta suelta'} vs "
                        f"{b.get('juego') or 'junta suelta'}")
 
+    _sen_a, _sen_b = a.get("sensor") or frozenset(), b.get("sensor") or frozenset()
+    if _sen_a and _sen_b and not (_sen_a & _sen_b):
+        return False, (f"sensores de tipos distintos: {'/'.join(sorted(_sen_a))} vs "
+                       f"{'/'.join(sorted(_sen_b))}")
+
     # Posición: si las dos la declaran y no coinciden, son piezas distintas. Un amortiguador
     # delantero no reemplaza a uno trasero por más que vayan al mismo auto.
     if a["posicion"] and b["posicion"] and a["posicion"] != b["posicion"]:
@@ -1910,6 +1954,22 @@ def firmas_compatibles(a, b, minimo_nucleo=2, cuenta_palabras=None, total_descri
     # necesita para el caso de una sola palabra.
     apl_comunes = {w for w in (a.get("aplicacion") or set()) & (b.get("aplicacion") or set())
                    if not _RE_SOLO_MOTORIZACION.match(w) and not _RE_MEDIDA_SUELTA.match(w)}
+    # El mismo motor con otro separador: «PERKINS 4.203» y «4-203», «6.354» y «6-354»,
+    # «411-R» y «411R». Se comparan sin puntos, guiones ni barras, y solo los que tienen algún
+    # número: sin eso, dos palabras que se escriben igual sin separadores no dicen nada.
+    def _sin_separadores(w):
+        return re.sub(r"[.\-/]", "", w)
+    _apl_b_normal = {}
+    for w in (b.get("aplicacion") or set()):
+        if any(ch.isdigit() for ch in w) and not _RE_SOLO_MOTORIZACION.match(w) \
+                and not _RE_MEDIDA_SUELTA.match(w):
+            _apl_b_normal.setdefault(_sin_separadores(w), w)
+    for w in (a.get("aplicacion") or set()):
+        _n = _sin_separadores(w)
+        if (w not in apl_comunes and len(_n) >= 3 and _n in _apl_b_normal
+                and any(ch.isdigit() for ch in w)
+                and not _RE_SOLO_MOTORIZACION.match(w) and not _RE_MEDIDA_SUELTA.match(w)):
+            apl_comunes.add(w)
 
     # LA MARCA SOLA NO ALCANZA cuando las dos nombran modelos y no comparten ninguno. Se vio en
     # las sugerencias: «Jta.Tapa Cil. Chevrolet S10-Trail Blazer ESP 1.10MM» salía con 90
@@ -2027,6 +2087,26 @@ def firmas_compatibles(a, b, minimo_nucleo=2, cuenta_palabras=None, total_descri
     if cuenta_palabras and not utiles and not respaldo_completo:
         return False, ("solo comparten palabras genéricas ("
                        + ", ".join(sorted(comunes)[:3]) + ")")
+
+    # SOLO LA MARCA NO ES CONCORDAR. «SONDA LAMBDA ... Ford largo del cable 92 cm» contra «SONDA
+    # LAMBDA 80014 FORD ESCORT MONDEO ...» coinciden en la pieza y en FORD, y nada más: con las
+    # listas de FISPA, que nombran veinte autos, eso lo cumple casi cualquier sonda. No es una
+    # contradicción —puede ser la misma—, pero tampoco es evidencia a favor: hace falta un
+    # modelo o un motor en común.
+    _en_comun = ({w for w in autos_comunes if w not in _PALABRAS_DE_MARCA_DE_VEHICULO}
+                 | set(apl_comunes))
+    # El modelo que es un número cuenta aunque no venga pegado a la marca: «FIAT 1600 125»
+    # contra «FIAT 125». Es el mismo criterio que «modelos distintos», más arriba.
+    if not _en_comun:
+        _txt_a, _txt_b = a.get("texto") or "", b.get("texto") or ""
+        _en_comun = ({n for n in (a.get("modelos_numericos") or set())
+                      if re.search(rf'\b{n}\b', _txt_b)}
+                     | {n for n in (b.get("modelos_numericos") or set())
+                        if re.search(rf'\b{n}\b', _txt_a)})
+    if not _en_comun:
+        _en_comun = (a.get("motores_numericos") or set()) & (b.get("motores_numericos") or set())
+    if not _en_comun:
+        return False, "solo comparten la marca del auto"
 
     # Se muestran primero las que distinguen: es lo que hay que mirar para decidir.
     orden = sorted(comunes, key=lambda w: (w not in utiles, w))
@@ -2161,7 +2241,7 @@ def pares_de_kit_y_pieza(pares):
 _MOTIVOS_QUE_CONTRADICEN = ("posiciones distintas", "siglas distintas", "autos distintos",
                             "marcas distintas", "modelos distintos", "cilindradas distintas",
                             "distinta cantidad de vías", "juegos distintos",
-                            "piezas de lugares distintos")
+                            "piezas de lugares distintos", "sensores de tipos distintos")
 # Los que hablan del AUTO. Esos no cuentan cuando el par está unido por un código: ver
 # _unidos_por_codigo().
 _MOTIVOS_DEL_AUTO = ("autos distintos", "marcas distintas", "modelos distintos",
