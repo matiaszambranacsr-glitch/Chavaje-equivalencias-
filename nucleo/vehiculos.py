@@ -61,6 +61,9 @@ MARCAS_VEHICULO = sorted(set([
     # de un camión Bedford quedaba emparejada con repuestos de un Fiesta por «coinciden en
     # FORD». Va antes que FORD porque la lista se ordena de la marca más larga a la más corta.
     "BED FORD", "BEDFORD",
+    # John Deere como lo escriben IMPERIAL y TARANTO. Sin esto «DEERE» quedaba suelto como si
+    # fuera un modelo, y dos juntas cualesquiera de John Deere «compartían el modelo».
+    "J.DEERE", "J. DEERE", "JHON DEERE",
 ]), key=len, reverse=True)
 
 
@@ -71,6 +74,7 @@ ALIAS_MARCA_VEHICULO = {
     "VW": "VOLKSWAGEN", "CHEV": "CHEVROLET", "PEUG": "PEUGEOT", "PEU": "PEUGEOT",
     "REN": "RENAULT", "TOY": "TOYOTA", "CITR": "CITROEN", "HYUN": "HYUNDAI",
     "BED FORD": "BEDFORD",
+    "J.DEERE": "JOHN DEERE", "J. DEERE": "JOHN DEERE", "JHON DEERE": "JOHN DEERE",
     "M.BENZ": "MERCEDES BENZ", "MERCEDES": "MERCEDES BENZ", "MERCEDES-BENZ": "MERCEDES BENZ",
     "M. FERGUSON": "MASSEY FERGUSON", "M.W.M.": "MWM", "M.W.M": "MWM",
 }
@@ -744,6 +748,11 @@ PALABRAS_NO_MODELO = {
     # Las dos que dejan leer «JTA M.ESC.» y «JTA TAPA C.VEL.» de IMPERIAL como piezas: ver
     # _ABREVIATURAS_CON_PUNTO.
     "MULTIPLE", "VELOCIDAD",
+    # Faltaban, y sin ellas «Juntas para diferencial PEUGEOT 404» quedaba como «JUNTA» a secas.
+    "DIFERENCIAL", "COLECTOR", "FILTRO",
+    # Las marcas de carburador dicen QUÉ junta es: ver _MARCAS_DE_CARBURADOR.
+    "WEBER", "SOLEX", "HOLLEY", "STROMBERG", "ZENITH", "CARESA", "BROSOL", "GALILEO", "IAVA",
+    "EIES", "CARTER", "MOTORCRAFT", "ROCHESTER", "AUTOLITE", "DELLORTO",
     "CHUPADOR", "INTERMEDIA", "V", "L", "S", "R", "AX", "DD", "F",
     # EL VOCABULARIO DE PIEZA QUE FALTABA, y que la firma estaba contando como si dijera para
     # qué auto es. Salió de contar las palabras que entraban en la aplicación de las 30.000

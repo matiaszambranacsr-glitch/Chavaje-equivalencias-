@@ -629,6 +629,9 @@ MARCAS_VEHICULO = sorted(set([
     # de un camión Bedford quedaba emparejada con repuestos de un Fiesta por «coinciden en
     # FORD». Va antes que FORD porque la lista se ordena de la marca más larga a la más corta.
     "BED FORD", "BEDFORD",
+    # John Deere como lo escriben IMPERIAL y TARANTO. Sin esto «DEERE» quedaba suelto como si
+    # fuera un modelo, y dos juntas cualesquiera de John Deere «compartían el modelo».
+    "J.DEERE", "J. DEERE", "JHON DEERE",
 ]), key=len, reverse=True)
 
 
@@ -639,6 +642,7 @@ ALIAS_MARCA_VEHICULO = {
     "VW": "VOLKSWAGEN", "CHEV": "CHEVROLET", "PEUG": "PEUGEOT", "PEU": "PEUGEOT",
     "REN": "RENAULT", "TOY": "TOYOTA", "CITR": "CITROEN", "HYUN": "HYUNDAI",
     "BED FORD": "BEDFORD",
+    "J.DEERE": "JOHN DEERE", "J. DEERE": "JOHN DEERE", "JHON DEERE": "JOHN DEERE",
     "M.BENZ": "MERCEDES BENZ", "MERCEDES": "MERCEDES BENZ", "MERCEDES-BENZ": "MERCEDES BENZ",
     "M. FERGUSON": "MASSEY FERGUSON", "M.W.M.": "MWM", "M.W.M": "MWM",
 }

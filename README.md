@@ -4541,6 +4541,26 @@ CRI-FA↔FISPA y de pares sin nada en común más que la marca.
   real, los productos con diámetro interno leído pasan a unos 600. `VERSION_MEDIDAS` pasó a «5»:
   la tarea de fondo relee las descripciones sola.
 
+### Segunda ronda de muestras: carburadores, cilindros, bujías
+
+Leyendo muestras de los grupos medianos (IMPERIAL↔JL, IMPERIAL↔TARANTO, ILLINOIS↔IMPERIAL,
+FISPA↔JL) salieron cinco errores sistemáticos más, todos corregidos:
+
+- **JL no escribe «carburador»**: «JUNTAS FIAT TEMPRA WEBER», «JUNTAS DODGE 1500 STROMBERG». La
+  marca del carburador (Weber, Solex, Holley, Stromberg, Zenith, Caresa, Brosol...) ahora dice
+  que es un juego de carburador, y dos carburadores distintos no son el mismo juego.
+- **La cantidad de cilindros**: «Junta para Cárter DEUTZ 913 ... 5 CIL.» contra «JTA CARTER
+  DEUTZ 913 3 CIL.» es el mismo motor con otro cárter.
+- **Bujía de encendido contra bujía de precalentamiento**: se llaman igual; las de FISPA
+  «LEIGG...» son de diésel. Se lee cuál es (`tipo_de_bujia()`).
+- **«J.DEERE», «J. DEERE» y «JHON DEERE» son John Deere**: sin eso «DEERE» contaba como un modelo
+  compartido entre cualquier par de juntas de John Deere.
+- **«Diferencial», «colector», «filtro»** ahora son palabras de pieza, y «JGO JTAS SIN T.CIL.»
+  es el juego completo sin la junta de tapa de cilindros.
+
+Sobre la cola real, 380 pares más dejan de aprobarse solos; en las muestras, todos mal
+emparejados.
+
 ## Una firma de foto podía ser un programa
 
 Las firmas visuales de las fotos se guardan con `pickle`, y `pickle` **no es un formato de

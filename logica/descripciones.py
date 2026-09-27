@@ -100,6 +100,11 @@ PALABRAS_NO_MODELO = {
     # Las dos que dejan leer «JTA M.ESC.» y «JTA TAPA C.VEL.» de IMPERIAL como piezas: ver
     # _ABREVIATURAS_CON_PUNTO.
     "MULTIPLE", "VELOCIDAD",
+    # Faltaban, y sin ellas «Juntas para diferencial PEUGEOT 404» quedaba como «JUNTA» a secas.
+    "DIFERENCIAL", "COLECTOR", "FILTRO",
+    # Las marcas de carburador dicen QUÉ junta es: ver _MARCAS_DE_CARBURADOR.
+    "WEBER", "SOLEX", "HOLLEY", "STROMBERG", "ZENITH", "CARESA", "BROSOL", "GALILEO", "IAVA",
+    "EIES", "CARTER", "MOTORCRAFT", "ROCHESTER", "AUTOLITE", "DELLORTO",
     "CHUPADOR", "INTERMEDIA", "V", "L", "S", "R", "AX", "DD", "F",
     # EL VOCABULARIO DE PIEZA QUE FALTABA, y que la firma estaba contando como si dijera para
     # qué auto es. Salió de contar las palabras que entraban en la aplicación de las 30.000
@@ -597,7 +602,7 @@ _RE_JUEGO_COMPLETO = re.compile(r'\b(P MOTOR|PARA MOTOR|JTAS MOTOR|JUNTAS MOTOR|
                                 r'|COMPLETO)\b')
 # El «Juego Completo de Reparación "sin TC" (Semi-juego)» de ILLINOIS: el completo SIN la junta
 # de tapa de cilindros. Es otro producto que el completo.
-_RE_JUEGO_SIN_TAPA = re.compile(r'\b(SIN TC|SEMI JUEGO|SEMIJUEGO)\b')
+_RE_JUEGO_SIN_TAPA = re.compile(r'\b(SIN TC|SIN T C|SIN T CIL|SIN TAPA CIL\w*|SEMI JUEGO|SEMIJUEGO)\b')
 
 
 # QUÉ MIDE EL SENSOR. «Sensor de velocímetro Fiat Fiorino ... Palio» contra «SENSOR MARIPOSA
@@ -624,6 +629,34 @@ _RE_TIPOS_DE_SENSOR = [(t, re.compile(p)) for t, p in _TIPOS_DE_SENSOR]
 # «Junta para Cárter PERKINS ... 4.203» y «Jgo.Jtas.Carter PERKINS 4-203» no compartían nada
 # más que la marca. Se guardan aparte, sin el separador.
 _RE_MOTOR_NUMERICO = re.compile(r'(?<![\d.,])(\d{1,2})[.\-](\d{2,3})(?![\d.,])')
+
+
+# Ver el control de firmas_compatibles(). «Junta para Cárter DEUTZ 913 TRACTOR 5 CIL.» contra
+# «JTA CARTER DEUTZ 913 3 CIL.»: el mismo motor en otra cantidad de cilindros tiene otro cárter.
+_RE_CANTIDAD_DE_CILINDROS = re.compile(r'\b(\d{1,2})\s*CIL(?:INDROS?|IND|S)?\b')
+
+_MARCAS_DE_CARBURADOR = {"WEBER", "SOLEX", "HOLLEY", "STROMBERG", "ZENITH", "CARESA", "BROSOL",
+                         "GALILEO", "IAVA", "EIES", "CARTER", "MOTORCRAFT", "ROCHESTER",
+                         "AUTOLITE", "DELLORTO"}
+
+# BUJÍA DE ENCENDIDO Y BUJÍA DE PRECALENTAMIENTO se llaman igual y no tienen nada que ver: una
+# va en un motor naftero y la otra en un diésel. FISPA vende las de precalentamiento como
+# «BUJIA LEIGG0xx ... 2 5 TD», y se emparejaban con «BUJIA NGK» del mismo auto.
+_RE_BUJIA_PRECALENTAMIENTO = re.compile(r'INCANDES|ENCANDES|PRECALENT|PRE CALENT|CALENTADOR'
+                                        r'|\bGLOW\b|\bLEIGG')
+_RE_BUJIA_ENCENDIDO = re.compile(r'\bNAFTA\b|\bNGK\b|\bENCEND|\bIRIDIUM\b|\bPLATINO\b')
+
+
+def tipo_de_bujia(descripcion):
+    """'precalentamiento', 'encendido', o None si no es una bujía o no lo dice."""
+    texto = _normalizar_desc(descripcion)
+    if " BUJIA" not in texto:
+        return None
+    if _RE_BUJIA_PRECALENTAMIENTO.search(texto):
+        return "precalentamiento"
+    if _RE_BUJIA_ENCENDIDO.search(texto):
+        return "encendido"
+    return None
 
 
 def tipos_de_sensor(descripcion):
@@ -1739,6 +1772,11 @@ def _firma_de_producto(descripcion, producto_id=None, codigo_clean=None):
     # PALABRAS_DE_CONTEXTO se sacan de la pieza y se dejan del lado de la aplicación: CARGO,
     # PICK UP, TRACTOR o DIESEL dicen qué vehículo es, no qué pieza es.
     pieza = {w for w in nucleo if w in PALABRAS_NO_MODELO and w not in PALABRAS_DE_CONTEXTO}
+    # JL escribe «JUNTAS FIAT TEMPRA WEBER» y «JUNTAS DODGE 1500 STROMBERG» sin decir
+    # «carburador»: la marca del carburador lo dice. Sin esto se emparejaban con juntas de tapa
+    # de cilindros del mismo auto. CARTER no cuenta acá: también es la junta de cárter.
+    if pieza & (_MARCAS_DE_CARBURADOR - {"CARTER"}):
+        pieza.add("CARBURADOR")
     aplicacion = [w for w in nucleo if w not in pieza]
 
     # Se completa con lo que la app sepa de este producto por otras vías
@@ -1757,6 +1795,9 @@ def _firma_de_producto(descripcion, producto_id=None, codigo_clean=None):
             "modelos_numericos": modelos_numericos, "modelos": modelos, "marcas": marcas,
             "juego": tipo_de_juego_de_motor(texto), "sensor": tipos_de_sensor(texto),
             "motores_numericos": {a + b for a, b in _RE_MOTOR_NUMERICO.findall(limpio)},
+            "cilindros": {int(n) for n in _RE_CANTIDAD_DE_CILINDROS.findall(limpio)
+                          if 1 <= int(n) <= 16},
+            "bujia": tipo_de_bujia(texto),
             "siglas": siglas, "marca_auto": marca_auto, "posicion": posicion,
             "cilindradas": cilindradas, "vias": vias, "texto": limpio}
 
@@ -1880,6 +1921,12 @@ def firmas_compatibles(a, b, minimo_nucleo=2, cuenta_palabras=None, total_descri
         return False, (f"juegos distintos: {a.get('juego') or 'junta suelta'} vs "
                        f"{b.get('juego') or 'junta suelta'}")
 
+    if a.get("bujia") and b.get("bujia") and a["bujia"] != b["bujia"]:
+        return False, f"bujías de tipos distintos: {a['bujia']} vs {b['bujia']}"
+    _cil_a, _cil_b = a.get("cilindros") or set(), b.get("cilindros") or set()
+    if _cil_a and _cil_b and not (_cil_a & _cil_b):
+        return False, (f"distinta cantidad de cilindros: {'/'.join(map(str, sorted(_cil_a)))} vs "
+                       f"{'/'.join(map(str, sorted(_cil_b)))}")
     _sen_a, _sen_b = a.get("sensor") or frozenset(), b.get("sensor") or frozenset()
     if _sen_a and _sen_b and not (_sen_a & _sen_b):
         return False, (f"sensores de tipos distintos: {'/'.join(sorted(_sen_a))} vs "
@@ -2241,7 +2288,8 @@ def pares_de_kit_y_pieza(pares):
 _MOTIVOS_QUE_CONTRADICEN = ("posiciones distintas", "siglas distintas", "autos distintos",
                             "marcas distintas", "modelos distintos", "cilindradas distintas",
                             "distinta cantidad de vías", "juegos distintos",
-                            "piezas de lugares distintos", "sensores de tipos distintos")
+                            "piezas de lugares distintos", "sensores de tipos distintos",
+                            "bujías de tipos distintos", "distinta cantidad de cilindros")
 # Los que hablan del AUTO. Esos no cuentan cuando el par está unido por un código: ver
 # _unidos_por_codigo().
 _MOTIVOS_DEL_AUTO = ("autos distintos", "marcas distintas", "modelos distintos",
