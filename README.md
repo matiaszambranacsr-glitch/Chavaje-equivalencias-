@@ -4600,6 +4600,32 @@ vez. Con los mismos resultados:
 | BARRIDO (10.899) | 6,2 s | 4,1 s | 2,9 s |
 | ILLINOIS (3.172) | 3,1 s | 1,9 s | 1,3 s |
 
+### 📋 Para revisar, por motivo
+
+Con todo lo anterior, lo que queda «para revisar» en la base real son unos 8.000 pares, y la
+única forma de resolverlos era la lista de a 10 por página. Ahora, arriba de esa lista:
+
+- **Un resumen con todos los motivos** de la lista, cuántos pares tiene cada uno y qué conviene
+  hacer. Los motivos que son contradicciones del texto se agrupan sin el detalle («piezas de
+  lugares distintos: CARTER vs CILINDRO» y «...: CARBURADOR vs VALVULA» son un solo grupo).
+- **🚫 Descartar el grupo**, para los que el texto contradice —otro auto u otro motor, otra
+  cantidad de cilindros, dos piezas de lugares distintos, un juego contra una junta suelta, las
+  medidas que no dan, un código que no es un código—: se muestran 8 ejemplos al azar y se
+  descarta el grupo entero con su motivo guardado. Si se prefiere, se puede mirar una muestra
+  antes.
+- **🎯 Con muestra**, para las dudas —«nada dice que sean la misma pieza», el precio, un código
+  que apunta a dos productos—: la misma muestra de control que las limpias, con aprobar o
+  descartar el resto según lo que salga (`_panel_de_muestra()`, compartido por los dos).
+
+En la lista del barrido, por ejemplo, 4.875 pares quedan en 14 motivos: 13 se descartan de a
+grupo (el más grande, «cilindradas distintas», son 1.066 pares de un toque) y uno, «nada dice»,
+se resuelve con una muestra de 50.
+
+**Y una falsa alarma menos**: «el código de fábrica apunta a más de un producto de FISPA» salía
+en 2.585 pares, y casi todos eran la misma pieza de las dos marcas que vende FISPA en su lista
+(«40015FISPA» y «LEMSM017LUCAS» citando el mismo número). La ambigüedad ahora se busca dentro de
+cada marca (`_submarca_del_codigo()`), y 1.380 pares vuelven a limpios.
+
 ## Una firma de foto podía ser un programa
 
 Las firmas visuales de las fotos se guardan con `pickle`, y `pickle` **no es un formato de

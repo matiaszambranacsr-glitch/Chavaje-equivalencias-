@@ -1103,40 +1103,12 @@ Administrar → Mantenimiento.
                     st.session_state.pop(_clave_parecidos, None)
                     st.rerun()
 
-            _grupos_m = grupos_de_limpias(limpias)
-            if _grupos_m:
-                st.markdown("**🎯 Aprobar las limpias por grupos, con una muestra de control**")
-                explicar(
-                    "Revisás 30 pares al azar de un grupo y, según cuántos estén mal, aprobás "
-                    "el resto de una.",
-                    "«Sin alarmas» no quiere decir «bien»: quiere decir que el análisis no "
-                    "encontró nada en contra. Cuántos están mal de verdad solo se sabe "
-                    "mirando.\n\n"
-                    "Cada grupo son las limpias entre dos listas. La app elige unas cuantas al "
-                    "azar —30, 50 u 80 según el tamaño del grupo; siempre las mismas, aunque "
-                    "recargues o "
-                    "las mire otra persona— y vos marcás cada una. Con lo que salga, la app "
-                    "te dice cuántos errores se pueden esperar en el resto y te deja aprobarlo "
-                    "entero de un toque.\n\n"
-                    "Cuando marcás uno como malo y decís por qué, la app busca en la lista los "
-                    "que tienen el mismo problema y te los ofrece para descartar juntos."
-                )
-                # Se elige por el PAR DE LISTAS y no por el rótulo: el rótulo lleva la cantidad,
-                # y al guardar la muestra la cantidad cambia. Elegido por el rótulo, el
-                # selector dejaba de encontrar lo elegido y saltaba al grupo más grande, con la
-                # persona a mitad de la muestra de otro.
-                _por_grupo = {(ma, mb): filas_g for ma, mb, filas_g in _grupos_m}
-                _clave_sel_g = f"grupo_muestra_{_lote_m}"
-                if st.session_state.get(_clave_sel_g) not in _por_grupo:
-                    st.session_state.pop(_clave_sel_g, None)
-                _elegido_g = st.selectbox(
-                    "Grupo:", list(_por_grupo), key=_clave_sel_g,
-                    format_func=lambda g: f"{g[0]} ↔ {g[1]} — {len(_por_grupo[g]):,} limpias")
-                _ma_g, _mb_g = _elegido_g
-                _filas_g = _por_grupo[_elegido_g]
-                _clave_g = clave_de_grupo(_lote_m, _ma_g, _mb_g)
-                _por_par_g = {(f["a"], f["b"]): f for f in _filas_g}
-                _muestra = muestra_de_control(_clave_g, list(_por_par_g))
+            def _panel_de_muestra(lote, clave_g, filas, candidatas, clave_parecidos, nombre):
+                """La muestra de control de un grupo: el avance, los pares por mirar de a 10, y el veredicto
+                con aprobar o descartar el resto. La usan los grupos por par de listas y los grupos por
+                motivo de la revisión. Ver muestra_de_control()."""
+                _por_par_g = {(f["a"], f["b"]): f for f in filas}
+                _muestra = muestra_de_control(clave_g, list(_por_par_g))
                 _estado_m = estado_de_la_muestra(_muestra)
                 _sin_mirar = [p for p in _muestra if _estado_m[p] == "pendiente"]
                 _bien_m = sum(1 for p in _muestra if _estado_m[p] == "bien")
@@ -1152,7 +1124,7 @@ Administrar → Mantenimiento.
                 if _a_mirar:
                     _opciones_mot = ["—"] + list(MOTIVOS_DE_RECHAZO.values())
                     _clave_de_motivo = {v: k for k, v in MOTIVOS_DE_RECHAZO.items()}
-                    with st.form(key=f"form_muestra_{abs(hash(_clave_g))}"):
+                    with st.form(key=f"form_muestra_{abs(hash(clave_g))}"):
                         st.caption(f"Quedan {len(_sin_mirar)} de la muestra. Marcá estos "
                                    f"{len(_a_mirar)} y guardá.")
                         for _i_m, _par in enumerate(_a_mirar):
@@ -1178,11 +1150,11 @@ Administrar → Mantenimiento.
                                     st.session_state.get(f"m_mot_{_par[0]}_{_par[1]}"))
                                 _mal_ahora.setdefault(_mot, []).append(_par)
                         if _bien_ahora:
-                            aprobar_pendientes(_lote_m, [p for a, b in _bien_ahora
+                            aprobar_pendientes(lote, [p for a, b in _bien_ahora
                                                          for p in ((a, b), (b, a))])
                         _rechazados_m = []
                         for _mot, _pares_mot in _mal_ahora.items():
-                            rechazar_pendientes(_lote_m, [p for a, b in _pares_mot
+                            rechazar_pendientes(lote, [p for a, b in _pares_mot
                                                           for p in ((a, b), (b, a))],
                                                 motivo=_mot)
                             if _mot:
@@ -1190,10 +1162,10 @@ Administrar → Mantenimiento.
                                                      for _par in _pares_mot)
                         _muestra_set = set(_muestra)
                         _parecidos_nuevos = parecidos_de_varios(
-                            _rechazados_m, [f for f in _candidatas_m
+                            _rechazados_m, [f for f in candidatas
                                             if (f["a"], f["b"]) not in _muestra_set])
                         if _parecidos_nuevos:
-                            st.session_state[_clave_parecidos] = _parecidos_nuevos
+                            st.session_state[clave_parecidos] = _parecidos_nuevos
                         invalidar_salud()
                         _n_mal = sum(len(v) for v in _mal_ahora.values())
                         avisar("success", f"Guardado: ✅ {len(_bien_ahora)} bien · 🚫 {_n_mal} mal.")
@@ -1233,24 +1205,58 @@ Administrar → Mantenimiento.
                         if _mal_m <= 1 and _v1.button(
                                 f"✅ Aprobar los {len(_resto):,} que quedan del grupo",
                                 type="primary" if _mal_m == 0 else "secondary",
-                                key=f"apr_resto_{abs(hash(_clave_g))}"):
-                            _n_ap = aprobar_pendientes(_lote_m, _pares_resto)
+                                key=f"apr_resto_{abs(hash(clave_g))}"):
+                            _n_ap = aprobar_pendientes(lote, _pares_resto)
                             invalidar_salud()
                             avisar("success", f"Se aprobaron {_n_ap:,} vínculo(s) del grupo "
-                                              f"{_ma_g} ↔ {_mb_g}.")
+                                              f"{nombre}.")
                             st.rerun()
                         if _v2.button(f"➕ Mirar {TAMANO_DE_LA_MUESTRA} más",
-                                      key=f"ampliar_{abs(hash(_clave_g))}"):
-                            muestra_de_control(_clave_g, list(_por_par_g), ampliar=True)
+                                      key=f"ampliar_{abs(hash(clave_g))}"):
+                            muestra_de_control(clave_g, list(_por_par_g), ampliar=True)
                             st.rerun()
                         if _mal_m >= 2 and _mal_m * 2 >= _revisados_m:
                             if st.button(f"🚫 Descartar los {len(_resto):,} que quedan del grupo",
-                                         key=f"rec_resto_{abs(hash(_clave_g))}"):
-                                rechazar_pendientes(_lote_m, _pares_resto)
+                                         key=f"rec_resto_{abs(hash(clave_g))}"):
+                                rechazar_pendientes(lote, _pares_resto)
                                 invalidar_salud()
-                                avisar("success", f"Se descartó el resto del grupo {_ma_g} ↔ "
-                                                  f"{_mb_g}.")
+                                avisar("success", f"Se descartó el resto del grupo {nombre}.")
                                 st.rerun()
+
+            _grupos_m = grupos_de_limpias(limpias)
+            if _grupos_m:
+                st.markdown("**🎯 Aprobar las limpias por grupos, con una muestra de control**")
+                explicar(
+                    "Revisás 30 pares al azar de un grupo y, según cuántos estén mal, aprobás "
+                    "el resto de una.",
+                    "«Sin alarmas» no quiere decir «bien»: quiere decir que el análisis no "
+                    "encontró nada en contra. Cuántos están mal de verdad solo se sabe "
+                    "mirando.\n\n"
+                    "Cada grupo son las limpias entre dos listas. La app elige unas cuantas al "
+                    "azar —30, 50 u 80 según el tamaño del grupo; siempre las mismas, aunque "
+                    "recargues o "
+                    "las mire otra persona— y vos marcás cada una. Con lo que salga, la app "
+                    "te dice cuántos errores se pueden esperar en el resto y te deja aprobarlo "
+                    "entero de un toque.\n\n"
+                    "Cuando marcás uno como malo y decís por qué, la app busca en la lista los "
+                    "que tienen el mismo problema y te los ofrece para descartar juntos."
+                )
+                # Se elige por el PAR DE LISTAS y no por el rótulo: el rótulo lleva la cantidad,
+                # y al guardar la muestra la cantidad cambia. Elegido por el rótulo, el
+                # selector dejaba de encontrar lo elegido y saltaba al grupo más grande, con la
+                # persona a mitad de la muestra de otro.
+                _por_grupo = {(ma, mb): filas_g for ma, mb, filas_g in _grupos_m}
+                _clave_sel_g = f"grupo_muestra_{_lote_m}"
+                if st.session_state.get(_clave_sel_g) not in _por_grupo:
+                    st.session_state.pop(_clave_sel_g, None)
+                _elegido_g = st.selectbox(
+                    "Grupo:", list(_por_grupo), key=_clave_sel_g,
+                    format_func=lambda g: f"{g[0]} ↔ {g[1]} — {len(_por_grupo[g]):,} limpias")
+                _ma_g, _mb_g = _elegido_g
+                _filas_g = _por_grupo[_elegido_g]
+                _clave_g = clave_de_grupo(_lote_m, _ma_g, _mb_g)
+                _panel_de_muestra(_lote_m, _clave_g, _filas_g, _candidatas_m, _clave_parecidos,
+                                  f"{_ma_g} ↔ {_mb_g}")
                 st.markdown("---")
 
             # 🪭 LOS ABANICOS: un producto con varios candidatos distintos en otra lista. Se
@@ -1398,8 +1404,67 @@ Administrar → Mantenimiento.
             sospechosas = [x for x in sospechosas
                            if not (x.get("alarmas") and all(a.startswith("🪭")
                                                             for a in x["alarmas"]))]
+            # 📋 PARA REVISAR, POR MOTIVO. Ver grupos_por_motivo(). Antes la única forma era la
+            # lista de abajo, de a 10 por página: con 8.000 pares en revisión, eso no se termina.
+            _grupos_mot = grupos_por_motivo(sospechosas)
+            if _grupos_mot:
+                st.markdown("---")
+                st.markdown(f"**📋 Para revisar, por motivo** — {len(sospechosas):,} par(es) "
+                            f"en {len(_grupos_mot)} motivo(s)")
+                explicar(
+                    "Los pares en revisión agrupados por el motivo. Los que el texto contradice "
+                    "se descartan de una; los dudosos, con una muestra.",
+                    "**🚫 Se descartan**: los dos textos dicen que son piezas distintas —otro "
+                    "auto, otro motor, otra cantidad de cilindros, junta de cárter contra junta "
+                    "de tapa—, o las medidas no dan. Mirá los ejemplos y descartá el grupo "
+                    "entero.\n\n"
+                    "**🎯 Con muestra**: la app no pudo decidir —«nada dice que sean la misma "
+                    "pieza», el precio, un código que apunta a dos productos—. Se resuelven igual "
+                    "que las limpias: mirás una muestra y, según lo que salga, aprobás o "
+                    "descartás el resto.\n\n"
+                    "Abajo sigue la lista de a uno, para el que quiera ir par por par."
+                )
+                _etiqueta_rec = {"descartar": "🚫 Descartar el grupo", "muestra": "🎯 Con muestra"}
+                st.dataframe([{"Motivo": m, "Pares": len(fs), "Qué conviene": _etiqueta_rec[r]}
+                              for m, r, fs in _grupos_mot],
+                             width="stretch", hide_index=True)
+                _por_motivo_g = {m: (r, fs) for m, r, fs in _grupos_mot}
+                _clave_sel_mot = f"motivo_elegido_{_lote_m}"
+                if st.session_state.get(_clave_sel_mot) not in _por_motivo_g:
+                    st.session_state.pop(_clave_sel_mot, None)
+                _motivo_g = st.selectbox(
+                    "Motivo:", list(_por_motivo_g), key=_clave_sel_mot,
+                    format_func=lambda m: f"{m} — {len(_por_motivo_g[m][1]):,} "
+                                          f"({_etiqueta_rec[_por_motivo_g[m][0]]})")
+                _rec_g, _filas_mot = _por_motivo_g[_motivo_g]
+                if _rec_g == "descartar":
+                    import random as _random
+                    _ejemplos = _random.Random(_motivo_g).sample(_filas_mot, min(8, len(_filas_mot)))
+                    st.caption("Ejemplos al azar del grupo:")
+                    st.dataframe([{"A": f"{f['marca_a']} {f['cod_a']} — {(f.get('desc_a') or '')[:60]}",
+                                   "B": f"{f['marca_b']} {f['cod_b']} — {(f.get('desc_b') or '')[:60]}",
+                                   "Por qué": (f["alarmas"][0] if f.get("alarmas") else "")[:80]}
+                                  for f in _ejemplos], width="stretch", hide_index=True)
+                    _dm1, _dm2 = st.columns(2)
+                    if _dm1.button(f"🚫 Descartar los {len(_filas_mot):,}", type="primary",
+                                   key=f"desc_motivo_{_lote_m}_{abs(hash(_motivo_g))}"):
+                        _n_dm = rechazar_pendientes(
+                            _lote_m, [p for f in _filas_mot for p in ((f["a"], f["b"]), (f["b"], f["a"]))],
+                            motivo=motivo_de_rechazo_del_grupo(_motivo_g))
+                        invalidar_salud()
+                        avisar("success", f"Se descartaron {_n_dm:,} par(es) de «{_motivo_g}».")
+                        st.rerun()
+                    _mirar_antes = _dm2.checkbox("Prefiero mirar una muestra antes",
+                                                 key=f"muestra_motivo_{_lote_m}_{abs(hash(_motivo_g))}")
+                else:
+                    _mirar_antes = True
+                if _mirar_antes:
+                    _panel_de_muestra(_lote_m, f"{_lote_m}|motivo|{_motivo_g}", _filas_mot,
+                                      _candidatas_m, _clave_parecidos, f"«{_motivo_g}»")
+
             if sospechosas:
                 st.markdown("---")
+                st.markdown("**🔎 De a uno**")
                 # «Con algo raro» no es cierto para todos: el corte lo decide el PUNTAJE, y un
                 # vínculo puede quedar abajo de 55 sin ninguna alarma, solo porque no encontró
                 # evidencia a favor. Sobre la lista de Illinois son 285 de 595. Llamarlos a

@@ -1405,6 +1405,67 @@ def _texto_sin_medidas(texto):
     return " ".join(re.sub(r"[()\[\],;]", " ", limpio).split())
 
 
+# ============================================================
+# PARA REVISAR, POR MOTIVO
+# ============================================================
+# Los motivos que dicen que el par está MAL, no que falta saber: el texto de los dos se
+# contradice (otro auto, otro motor, otra pieza), las medidas no dan, el código no es un
+# código. Un grupo así se descarta entero; mirar unos ejemplos alcanza para confirmarlo.
+# Los demás —«nada dice», el precio, un código que apunta a dos productos— son dudas, y se
+# resuelven como las limpias: con una muestra de control.
+_MOTIVOS_QUE_SE_DESCARTAN = ("🔤 ", "📐 NO coinciden", "🧯", "📦", "🧩")
+
+# Qué motivo de rechazo corresponde a cada grupo, para guardarlo al descartarlo entero.
+_MOTIVO_DE_RECHAZO_DEL_GRUPO = (
+    (("🔤 modelos distintos", "🔤 marcas distintas", "🔤 autos distintos",
+      "🔤 cilindradas distintas", "🔤 distinta cantidad de cilindros"), "otro_auto"),
+    (("📐 NO coinciden", "🔤 distinta cantidad de vías"), "variante"),
+    (("🔤 juegos distintos",), "juego"),
+    (("🔤 piezas de lugares distintos", "🔤 sensores de tipos distintos",
+      "🔤 bujías de tipos distintos", "🔤 posiciones distintas", "🔤 siglas distintas",
+      "🧩"), "otra_pieza"),
+    (("🧯",), "codigo"),
+)
+
+
+def motivo_para_agrupar(fila):
+    """El motivo de un par en revisión, sin el detalle que no cambia la decisión. Parte de
+    tipo_de_alarma(), y a las contradicciones del texto les saca lo que viene después de los
+    dos puntos: «piezas de lugares distintos: CARTER vs CILINDRO» y «...: CARBURADOR vs
+    VALVULA» se deciden igual, y separadas eran veinte grupos chicos."""
+    alarmas = fila.get("alarmas") or []
+    tipo = tipo_de_alarma(alarmas[0] if alarmas else "")
+    if tipo.startswith("🔤 "):
+        tipo = re.split(r"\s*[:(]", tipo, maxsplit=1)[0]
+    return tipo
+
+
+def grupos_por_motivo(sospechosas):
+    """[(motivo, "descartar"|"muestra", filas)]: primero los que se descartan, y dentro de cada
+    clase de los más grandes a los más chicos."""
+    grupos = {}
+    for f in sospechosas:
+        grupos.setdefault(motivo_para_agrupar(f), []).append(f)
+    salida = [(m, "descartar" if m.startswith(_MOTIVOS_QUE_SE_DESCARTAN) else "muestra", filas)
+              for m, filas in grupos.items()]
+    salida.sort(key=lambda g: (g[1] != "descartar", -len(g[2])))
+    return salida
+
+
+def motivo_de_rechazo_del_grupo(motivo):
+    """La clave de MOTIVOS_DE_RECHAZO que corresponde a un grupo, o None."""
+    return next((clave for prefijos, clave in _MOTIVO_DE_RECHAZO_DEL_GRUPO
+                 if motivo.startswith(prefijos)), None)
+
+
+def _submarca_del_codigo(codigo):
+    """La marca pegada al final del código, en las listas que traen varias: «LEMSM017LUCAS» ->
+    LUCAS, «40015FISPA» -> FISPA. Vacío si no tiene. Ver «las listas de distribuidor» en
+    _analizar_lote_pendiente()."""
+    limpio = sanitizar(codigo or "")
+    return next((m for m in _MARCAS_QUE_SE_PEGAN_AL_CODIGO if limpio.endswith(m)), "")
+
+
 def es_de_un_abanico(fila):
     """¿El par está en revisión por el abanico? Ver «el abanico» en _analizar_lote_pendiente()."""
     return any(a.startswith("🪭") for a in (fila.get("alarmas") or []))
@@ -1721,8 +1782,21 @@ def _analizar_lote_pendiente(lote, limite=None, desde=0):
     # Antes era todo-o-nada sobre el grupo y alcanzaba un miembro raro para marcar a los demás:
     # en «11044BC20A», TC-384-15 / -MG / -11 son la misma junta en tres materiales y TC-801-11
     # es otra pieza, y los cuatro se llevaban el castigo.
-    ambiguos = {k for k, v in apuntados.items()
-                if len(v) > 1 and not son_variantes_de_la_misma_pieza(v.values())}
+    # LAS LISTAS DE DISTRIBUIDOR TRAEN VARIAS MARCAS. FISPA vende lo suyo («40015FISPA») y lo de
+    # LUCAS («LEMSM017LUCAS») en la misma lista, y las dos citan el mismo número de fábrica
+    # porque son la misma pieza de dos fabricantes. Que un número apunte a una de cada marca
+    # no es un error de carga: la ambigüedad es tener DOS de la MISMA marca. Sobre la cola real
+    # eran 2.585 pares con 35 puntos menos por esto, y en las muestras todos estaban bien.
+    ambiguos = set()
+    for k, v in apuntados.items():
+        if len(v) < 2:
+            continue
+        por_submarca = {}
+        for cod in v.values():
+            por_submarca.setdefault(_submarca_del_codigo(cod), []).append(cod)
+        if any(len(cods) > 1 and not son_variantes_de_la_misma_pieza(cods)
+               for cods in por_submarca.values()):
+            ambiguos.add(k)
 
     # ¿Este par aparece en más de una lista? Que dos proveedores independientes digan lo mismo
     # es la mejor confirmación que se puede tener sin mirar la pieza.
