@@ -4944,6 +4944,13 @@ palabras— y a las comparaciones de mellizos y variantes limpiando cada palabra
 FISPA: 11,3 → 8,9 s la primera vez, 5,8 → 4,6 las siguientes; el barrido 5,1 → 4,4 y 4,3 → 3,3.
 La clasificación de la cola no cambia en un solo par.
 
+**Y `evidencia_cruzada()` sin ocho consultas por par** (`precargar_para_evidencia()`): los dos
+productos y sus medidas se traen de una vez para toda la lista, y las tablas enteras —ventas,
+vínculos cargados, portales, reemplazos, aplicaciones de fábrica— se leen una sola vez por
+análisis; la cadena de reemplazos y el cruce de aplicaciones solo se consultan para los códigos
+que los tienen. En FISPA eran 128.000 consultas. Ahora: FISPA 7,5 s la primera vez y 3,0 las
+siguientes; el barrido 3,3 y 2,1. Los avisos y las pruebas de cada par son idénticos.
+
 ## Una firma de foto podía ser un programa
 
 Las firmas visuales de las fotos se guardan con `pickle`, y `pickle` **no es un formato de

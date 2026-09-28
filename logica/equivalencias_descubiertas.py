@@ -1976,6 +1976,8 @@ def _analizar_lote_pendiente(lote, limite=None, desde=0):
 
     # Todas las medidas de una sola vez, en vez de dos consultas por par
     medidas = cargar_medidas_de_varios([f["a"] for f in filas] + [f["b"] for f in filas])
+    # Y lo que evidencia_cruzada() pide de a dos productos, también de una vez.
+    precargar_para_evidencia({f["a"] for f in filas} | {f["b"] for f in filas}, medidas)
 
     # Detectar códigos de fábrica que apuntan a varios productos del mismo proveedor.
     # Solo se miran las filas donde uno de los dos lados ES de fábrica: entre dos proveedores

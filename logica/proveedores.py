@@ -493,18 +493,6 @@ def probar_plantilla_de_portal(plantilla, codigos, tiempo_maximo=15):
     return salida
 
 
-def portales_que_los_muestran_juntos(id_a, id_b):
-    """Los portales en los que la ficha de uno mostró al otro. Lista de nombres, o []."""
-    try:
-        c.execute("""SELECT DISTINCT portal FROM productos_juntos_en_portal
-                     WHERE producto_a_id = ? AND producto_b_id = ?""",
-                  (min(id_a, id_b), max(id_a, id_b)))
-        return [r["portal"] for r in c.fetchall()]
-    except sqlite3.OperationalError as _err:
-        anotar_error("portales_que_los_muestran_juntos", _err)
-        return []
-
-
 def cuantos_juntos_en_portales():
     """Cuántos pares vio juntos algún portal. Sirve para saber si el análisis quedó viejo."""
     try:

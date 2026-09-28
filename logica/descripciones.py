@@ -2563,6 +2563,69 @@ def _unidos_por_codigo(pa, pb):
     return False
 
 
+class _NadaQueBuscar(Exception):
+    """Para saltear una consulta que se sabe vacía sin anidar otro nivel de if."""
+
+
+def _codigos_con_aplicaciones_de_fabrica():
+    """Los códigos que tienen alguna aplicación que NO sea deducida. Ver evidencia_cruzada()."""
+    try:
+        return {r[0] for r in c.execute("""SELECT DISTINCT codigo_clean FROM aplicaciones
+                                           WHERE COALESCE(origen, '') <> 'deducida'""")}
+    except sqlite3.OperationalError as _err:
+        anotar_error("_codigos_con_aplicaciones_de_fabrica", _err)
+        return set()
+
+
+def _pares_vinculados():
+    try:
+        return {(min(r[0], r[1]), max(r[0], r[1]))
+                for r in c.execute("SELECT producto_a_id, producto_b_id FROM equivalencias")}
+    except sqlite3.OperationalError as _err:
+        anotar_error("_pares_vinculados", _err)
+        return set()
+
+
+def _codigos_con_reemplazo():
+    try:
+        return {r[0] for r in c.execute("SELECT codigo_viejo_clean FROM reemplazos_codigo")}
+    except sqlite3.OperationalError as _err:
+        anotar_error("_codigos_con_reemplazo", _err)
+        return set()
+
+
+def _pares_de_portales():
+    salida = {}
+    try:
+        for r in c.execute("""SELECT producto_a_id, producto_b_id, portal
+                              FROM productos_juntos_en_portal"""):
+            salida.setdefault((r[0], r[1]), [])
+            if r[2] not in salida[(r[0], r[1])]:
+                salida[(r[0], r[1])].append(r[2])
+    except sqlite3.OperationalError as _err:
+        anotar_error("_pares_de_portales", _err)
+    return salida
+
+
+def precargar_para_evidencia(ids, medidas=None):
+    """Trae de una vez los productos (y sus medidas) que evidencia_cruzada() va a pedir de a
+    dos. Solo sirve dentro de recordando_lo_de_cada_producto(). Sobre la lista de FISPA eran
+    27.000 consultas de a dos productos; ahora son unas pocas de a mil."""
+    memoria = getattr(_MEMORIA_DEL_ANALISIS, "datos", None)
+    if memoria is None or not ids:
+        return
+    for tanda, marcas in en_tandas(list(ids)):
+        c.execute(f"""SELECT p.id, p.codigo_raw, p.codigo_clean, p.descripcion, p.precio,
+                             p.marca_id, m.nombre AS marca, m.tipo AS tipo, {COLUMNAS_MEDIDAS}
+                      FROM productos p JOIN marcas m ON m.id = p.marca_id
+                      WHERE p.id IN ({marcas})""", tanda)
+        for r in c.fetchall():
+            memoria[("producto_ev", r["id"])] = dict(r)
+    if medidas is not None:
+        for i in ids:
+            memoria[("medidas_ev", i)] = medidas.get(i)
+
+
 def evidencia_cruzada(id_a, id_b, cuenta_palabras=None, total_descripciones=None,
                       rubros_oem=None):
     """Corre TODOS los métodos sobre un mismo par y cuenta cuántos coinciden.
@@ -2583,11 +2646,17 @@ def evidencia_cruzada(id_a, id_b, cuenta_palabras=None, total_descripciones=None
     fábrica el rubro de la fila que lo nombró primero. Quien llama en un bucle lo pasa hecho.
 
     Devuelve (a_favor, vetos, veredicto)."""
-    c.execute(f"""SELECT p.id, p.codigo_raw, p.codigo_clean, p.descripcion, p.precio,
-                         p.marca_id, m.nombre AS marca, m.tipo AS tipo, {COLUMNAS_MEDIDAS}
-                  FROM productos p JOIN marcas m ON m.id = p.marca_id
-                  WHERE p.id IN (?, ?)""", (id_a, id_b))
-    filas = {r["id"]: dict(r) for r in c.fetchall()}
+    # Si el análisis los precargó (ver precargar_para_evidencia()), no se consultan de nuevo:
+    # eran dos de las ocho consultas que se hacían por par.
+    _memoria = getattr(_MEMORIA_DEL_ANALISIS, "datos", None) or {}
+    filas = {i: _memoria[("producto_ev", i)] for i in (id_a, id_b)
+             if ("producto_ev", i) in _memoria}
+    if len(filas) < 2:
+        c.execute(f"""SELECT p.id, p.codigo_raw, p.codigo_clean, p.descripcion, p.precio,
+                             p.marca_id, m.nombre AS marca, m.tipo AS tipo, {COLUMNAS_MEDIDAS}
+                      FROM productos p JOIN marcas m ON m.id = p.marca_id
+                      WHERE p.id IN (?, ?)""", (id_a, id_b))
+        filas = {r["id"]: dict(r) for r in c.fetchall()}
     if id_a not in filas or id_b not in filas:
         return [], ["uno de los dos productos ya no existe"], "🔴 no se puede evaluar"
     pa, pb = filas[id_a], filas[id_b]
@@ -2611,7 +2680,10 @@ def evidencia_cruzada(id_a, id_b, cuenta_palabras=None, total_descripciones=None
 
     # 1. Medidas. Es el único método que puede VETAR: si las medidas se contradicen, no hay
     # descripción ni catálogo que lo arregle.
-    medidas = cargar_medidas_de_varios([id_a, id_b])
+    if ("medidas_ev", id_a) in _memoria and ("medidas_ev", id_b) in _memoria:
+        medidas = {id_a: _memoria[("medidas_ev", id_a)], id_b: _memoria[("medidas_ev", id_b)]}
+    else:
+        medidas = cargar_medidas_de_varios([id_a, id_b])
     coinciden, detalle_med = comparar_medidas(medidas.get(id_a), medidas.get(id_b))
     if coinciden is True:
         a_favor.append(f"📐 las medidas coinciden ({detalle_med})")
@@ -2667,7 +2739,11 @@ def evidencia_cruzada(id_a, id_b, cuenta_palabras=None, total_descripciones=None
             vetos.append(f"🔤 {motivo_desc}")
 
     # 3. El catálogo del fabricante: ¿los da para el mismo auto?
+    _con_fabrica = _recordado(("codigos_con_aplicaciones_de_fabrica",),
+                              _codigos_con_aplicaciones_de_fabrica)
     try:
+        if pa["codigo_clean"] not in _con_fabrica or pb["codigo_clean"] not in _con_fabrica:
+            raise _NadaQueBuscar()
         # Las deducidas quedan afuera por lo mismo que en analizar_lote_pendiente(): esta vía
         # cuenta como UNA de las tres evidencias que fuerzan el puntaje a 90, y una aplicación
         # deducida de la descripción no es un tercer camino independiente — es el mismo texto
@@ -2682,30 +2758,29 @@ def evidencia_cruzada(id_a, id_b, cuenta_palabras=None, total_descripciones=None
         autos_juntos = c.fetchone()[0]
         if autos_juntos:
             a_favor.append(f"🏭 dos fabricantes los dan para {autos_juntos} auto(s) en común")
+    except _NadaQueBuscar:
+        pass
     except sqlite3.OperationalError as _err:
         anotar_error("evidencia_cruzada", _err)
         pass
 
     # 4. El mostrador: ¿ya se vendió uno en lugar del otro?
-    veces = pares_confirmados_por_ventas().get((min(id_a, id_b), max(id_a, id_b)), 0)
+    veces = _recordado(("ventas_ev",), pares_confirmados_por_ventas).get(
+        (min(id_a, id_b), max(id_a, id_b)), 0)
     if veces >= 2:
         a_favor.append(f"🧾 ya lo vendiste como reemplazo {veces} vez(ces)")
 
     # 5. Un código de fábrica compartido
-    try:
-        c.execute("""SELECT COUNT(*) FROM equivalencias e
-                     WHERE (e.producto_a_id = ? AND e.producto_b_id = ?)
-                        OR (e.producto_a_id = ? AND e.producto_b_id = ?)""",
-                  (min(id_a, id_b), max(id_a, id_b), max(id_a, id_b), min(id_a, id_b)))
-        if c.fetchone()[0]:
-            a_favor.append("🔗 ya están vinculados en la base")
-    except sqlite3.OperationalError as _err:
-        anotar_error("evidencia_cruzada", _err)
-        pass
+    if (min(id_a, id_b), max(id_a, id_b)) in _recordado(("vinculados_ev",), _pares_vinculados):
+        a_favor.append("🔗 ya están vinculados en la base")
 
-    # 6. Reemplazo de código declarado
+    # 6. Reemplazo de código declarado. Solo se sigue la cadena de los códigos que figuran en
+    # la tabla de reemplazos: era una consulta por par aunque la tabla estuviera vacía.
+    _con_reemplazo = _recordado(("codigos_con_reemplazo",), _codigos_con_reemplazo)
     for viejo, nuevo in ((pa["codigo_clean"], pb["codigo_clean"]),
                          (pb["codigo_clean"], pa["codigo_clean"])):
+        if viejo not in _con_reemplazo:
+            continue
         if any(x["clean"] == nuevo for x in cadena_de_reemplazos(viejo)):
             a_favor.append("🔄 el fabricante reemplazó uno por el otro")
             break
@@ -2730,7 +2805,8 @@ def evidencia_cruzada(id_a, id_b, cuenta_palabras=None, total_descripciones=None
     # que el cliente elija. Cuenta como UNA prueba, igual que las demás: los vetos de arriba la
     # tumban si las medidas, el rubro o el auto dicen otra cosa, porque en la misma página
     # también puede haber «productos relacionados» que no son la misma pieza.
-    _portales = portales_que_los_muestran_juntos(id_a, id_b)
+    _portales = _recordado(("portales_ev",), _pares_de_portales).get(
+        (min(id_a, id_b), max(id_a, id_b)), [])
     if _portales:
         a_favor.append(f"🌐 el portal de {', '.join(_portales)} los muestra juntos")
 
