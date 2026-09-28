@@ -1051,7 +1051,7 @@ Administrar → Mantenimiento.
             # le agrega pruebas a favor a pares que ya estaban acá.
             _clave_analisis = clave_del_analisis_de_lote(
                 lote_info["lote"], cuantos, (int(tanda_lote) - 1) * int(cuantos), total_lote)
-            _guardado = analisis_de_lote_guardado()
+            _guardado = esperar_el_analisis_en_preparacion()
             _clave_vieja = (_guardado or {}).get("clave") or ()
             if _guardado and _clave_vieja == _clave_analisis:
                 limpias, sospechosas, relacionadas = _guardado["resultado"]

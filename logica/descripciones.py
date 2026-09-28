@@ -4109,8 +4109,22 @@ def contar_descripciones_pegadas():
     pantalla afirmaba «✅ Ninguna descripción con ese problema» con 50.000 filas sin mirar.
     Recorrer las 53.255 tarda 1,4 s y queda cacheado hasta que cambia el catálogo: el número
     exacto vale mucho más que el segundo que cuesta, porque de él depende que alguien decida
-    correr el arreglo o no."""
-    return _contar_descripciones_pegadas(version_del_catalogo())
+    correr el arreglo o no.
+
+    Y se guarda en la base con la versión del catálogo con que se contó: el caché de Streamlit
+    se pierde con cada reinicio del servidor —en Streamlit Cloud, seguido— y eran 1,9 s en la
+    primera visita a «Limpiar y corregir» después de cada uno, para volver a contar lo mismo."""
+    # Con la versión del separador: si cambian sus reglas, lo contado ya no vale.
+    version = f"{version_del_catalogo()} · separador {VERSION_SEPARACION}"
+    if obtener_config("pegadas_version", "") == version:
+        try:
+            return int(obtener_config("pegadas_cantidad", ""))
+        except ValueError:
+            pass
+    n = _contar_descripciones_pegadas(version)
+    guardar_config("pegadas_version", version)
+    guardar_config("pegadas_cantidad", str(n))
+    return n
 
 
 def reparar_descripciones_pegadas():

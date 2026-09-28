@@ -2323,9 +2323,29 @@ def preparar_el_analisis_del_primer_lote():
     guardado = analisis_de_lote_guardado()
     if guardado and guardado.get("clave") == clave:
         return False
-    resultado = analizar_lote_pendiente(lote, limite=cuantos, desde=0)
-    guardar_analisis_de_lote({"clave": clave, "resultado": resultado})
+    _ANALISIS_DE_LOTE["_preparando"] = time.time()
+    try:
+        resultado = analizar_lote_pendiente(lote, limite=cuantos, desde=0)
+        guardar_analisis_de_lote({"clave": clave, "resultado": resultado})
+    finally:
+        _ANALISIS_DE_LOTE.pop("_preparando", None)
     return True
+
+
+def esperar_el_analisis_en_preparacion(tope_segundos=30):
+    """Si la tanda de fondo está haciendo el análisis justo ahora, la pantalla lo espera en vez
+    de hacer otro igual al lado: los dos se reparten el procesador y tardan más cada uno (7 s en
+    vez de los 6 de uno solo, medido). Con tope, por si el de fondo se trabara."""
+    empezo = _ANALISIS_DE_LOTE.get("_preparando")
+    if empezo:
+        # Mientras espera, esta pantalla no le pide el paso a la tarea de fondo: el análisis
+        # le cede el procesador a la pantalla que se está dibujando (ver ceder_al_mostrador()),
+        # y con las dos esperándose una a la otra se quedaban quietas hasta el tope de 20 s.
+        _actividad_del_mostrador()["termino"] = time.monotonic()
+    while empezo and time.time() - empezo < tope_segundos:
+        time.sleep(0.1)
+        empezo = _ANALISIS_DE_LOTE.get("_preparando")
+    return analisis_de_lote_guardado()
 
 
 def pares_pendientes_del_lote(lote):

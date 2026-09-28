@@ -5293,9 +5293,22 @@ sobre la cola real (13.941 pares de FISPA). Tres cambios para no esperarlos:
   celular abre una sesión nueva, y antes eso volvía a analizar todo. Ahora queda guardado
   (`analisis_de_lote_guardado()`) mientras no cambie el código, hasta
   `HORAS_QUE_DURA_EL_ANALISIS` (3 h): una sesión nueva abre en **0,7 s**.
+- **Si ya se está preparando, se espera.** Entrar justo mientras la tanda de fondo lo hace
+  arrancaba otro análisis al lado, y los dos se repartían el procesador (7,1 s). Ahora la
+  pantalla espera al de fondo (`esperar_el_analisis_en_preparacion()`, 5,9 s), sin pedirle el
+  paso mientras tanto: si no, se esperarían una a la otra hasta el tope de 20 s.
 - **Se prepara de antemano.** La tanda de fondo deja hecho el análisis de la lista que la
   pantalla muestra primero, al arrancar el servidor y después de cada importación
   (`preparar_el_analisis_del_primer_lote()`). La primera apertura pasó de **6,6 s a 1,0 s**.
+
+## 🧹 Mantenimiento más liviano
+
+- El conteo de descripciones pegadas recorre las 70.000 descripciones (1,6 s). Tenía caché de
+  Streamlit, que se pierde con cada reinicio del servidor; ahora se guarda en la base con la
+  versión del catálogo y la del separador (`pegadas_version`): después de un reinicio cuesta
+  0,017 s.
+- El panel «⚡ Carga automática», que va arriba de Mantenimiento, es una lista y no una tabla:
+  la tabla costaba 0,3 s en cada toque.
 
 ## ✅ Lo que ya se bajó no se vuelve a bajar
 

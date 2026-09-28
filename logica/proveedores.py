@@ -2613,7 +2613,13 @@ def mostrar_panel_de_carga_automatica():
             "Lo que falla por la red (el sitio no contesta) se reintenta **una vez por día, "
             "hasta tres días**; después se deja de intentar y figura en «Dejadas de intentar». "
             "Con **♻️ Reintentar las que fallaron** se vuelven a probar solo esas.")
-        st.dataframe(filas, width="stretch", hide_index=True)
+        # Una lista y no st.dataframe: son seis renglones, se leen mejor en el celular y la
+        # tabla costaba 0,3 s en cada toque de Mantenimiento, donde este panel va arriba de todo.
+        st.markdown("  \n".join(
+            f"{f['Estado']} — **{f['Tarea']}**"
+            + (f" · {f['Dejadas de intentar']:,} dejadas de intentar"
+               if f["Dejadas de intentar"] else "")
+            for f in filas))
         _c1, _c2 = st.columns(2)
         if _c1.button("🔄 Buscar lo nuevo", key="carga_auto_lo_nuevo", width="stretch",
                       help="Reabre las tareas terminadas. Solo busca lo que todavía no se bajó."):
