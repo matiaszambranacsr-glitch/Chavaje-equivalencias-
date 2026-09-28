@@ -937,6 +937,16 @@ def _esquema_gestion(c):
         fecha TEXT DEFAULT (datetime('now')),
         PRIMARY KEY (grupo, producto_a_id, producto_b_id)
     )""")
+    # Qué pares tenía el grupo cuando se sorteó su muestra. La muestra habla de ESOS: un par que
+    # entró al grupo después —porque apareció una prueba nueva, o porque llegó otra tanda— no
+    # estaba en el sorteo, y aprobarlo con esa muestra sería aprobarlo sin control. Ver
+    # clave_vigente_de_la_muestra().
+    c.execute("""CREATE TABLE IF NOT EXISTS pares_al_sortear_la_muestra (
+        grupo TEXT NOT NULL,
+        producto_a_id INTEGER NOT NULL,
+        producto_b_id INTEGER NOT NULL,
+        PRIMARY KEY (grupo, producto_a_id, producto_b_id)
+    )""")
 
     # Lo que el portal de un proveedor muestra junto: en la ficha de uno, el código del otro.
     # Es una prueba a favor para el análisis, no una equivalencia (ver

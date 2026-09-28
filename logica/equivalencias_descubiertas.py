@@ -1149,10 +1149,12 @@ def evaluar_equivalencia(desc_a, desc_b, medidas_a=None, medidas_b=None,
         senales.append(("bien", f"📋 Lo confirman {veces_confirmada} listas distintas"))
 
     # Lo aprendido de tus propias decisiones anteriores
-    ajuste, senal = senal_aprendida(marca_a, marca_b, patrones)
+    ajuste_aprendido, senal = senal_aprendida(marca_a, marca_b, patrones)
     if senal:
-        puntaje += ajuste
+        puntaje += ajuste_aprendido
         senales.append(senal)
+    else:
+        ajuste_aprendido = 0
 
     if precio_a and precio_b and precio_a > 0 and precio_b > 0:
         # La diferencia se mide contra lo TÍPICO entre esos dos proveedores, no en absoluto.
@@ -1177,7 +1179,32 @@ def evaluar_equivalencia(desc_a, desc_b, medidas_a=None, medidas_b=None,
                                     + (" para lo que suele haber entre estas dos listas"
                                        if esperada > 2 else "")))
 
-    return max(0.0, min(100.0, puntaje)), senales
+    return sin_cruzar_la_linea_por_lo_aprendido(puntaje, ajuste_aprendido), senales
+
+
+# Las líneas que deciden qué se aprueba sin mirar: 55 separa las limpias de las que se revisan,
+# y CONFIANZA_ALTA parte los grupos grandes en dos muestras (ver grupos_de_limpias()).
+LINEAS_DE_CONFIANZA = (55, 85)
+
+
+def sin_cruzar_la_linea_por_lo_aprendido(puntaje, ajuste_aprendido):
+    """El puntaje final, entre 0 y 100, sin que lo aprendido de las marcas lo suba de franja.
+
+    LO APRENDIDO SUMA, PERO NO ALCANZA SOLO PARA PASAR UNA LÍNEA. «De 30 ILLINOIS↔TARANTO que
+    revisaste, aprobaste el 100%» sale de los pares que se revisaron, y los que se revisan son
+    sobre todo las limpias —la muestra de control se saca de ellas—: dice que las limpias de
+    esas marcas andan bien, no que ande bien cualquier par de esas marcas. Probado sobre la base
+    real: marcar bien 20 de la muestra de ILLINOIS ↔ TARANTO subió los 919 de 75 a 90 y metió
+    27 sospechosos entre las limpias, que se hubieran aprobado con una muestra que no los
+    incluía. Al revés no hay cuidado: si lo aprendido baja un par, que lo baje."""
+    final = max(0.0, min(100.0, puntaje))
+    if ajuste_aprendido > 0:
+        sin_lo_aprendido = max(0.0, min(100.0, puntaje - ajuste_aprendido))
+        for linea in LINEAS_DE_CONFIANZA:
+            if sin_lo_aprendido < linea <= final:
+                final = float(linea - 1)
+                break
+    return final
 
 
 def nivel_de_confianza(puntaje):
@@ -1320,7 +1347,7 @@ def clave_de_grupo(lote, marca_a, marca_b, franja=""):
 # tiene que tener cada franja para que valga la pena su propia muestra.
 TAMANO_PARA_PARTIR_EL_GRUPO = 500
 MINIMO_POR_FRANJA = 100
-CONFIANZA_ALTA = 85
+CONFIANZA_ALTA = LINEAS_DE_CONFIANZA[1]
 
 
 def grupos_de_limpias(limpias):
@@ -1360,10 +1387,16 @@ def muestra_de_control(grupo, pares_del_grupo, ampliar=False):
     c.execute("SELECT producto_a_id, producto_b_id FROM muestras_de_control WHERE grupo = ?",
               (grupo,))
     ya = [(r[0], r[1]) for r in c.fetchall()]
-    if ya and not ampliar:
-        return ya
-    quedan = sorted(set(pares_del_grupo) - set(ya))
-    if not quedan:
+    al_sortear = pares_al_sortear(grupo)
+    guardar_al_sortear = not al_sortear
+    if guardar_al_sortear:
+        # La primera vez, o una muestra sacada antes de que se guardara esto: lo que hay hoy
+        # es lo más parecido a lo que había.
+        al_sortear = set(pares_del_grupo) | set(ya)
+    # Al ampliar, se sortea entre los que estaban al sortear la primera vez: si no, la muestra
+    # ampliada mezcla dos grupos distintos y la estimación no vale para ninguno.
+    quedan = [] if ya and not ampliar else sorted((set(pares_del_grupo) & al_sortear) - set(ya))
+    if not quedan and not guardar_al_sortear:
         return ya
     cuantos = TAMANO_DE_LA_MUESTRA if ampliar else tamano_de_la_muestra(len(pares_del_grupo))
     if len(quedan) <= cuantos * 1.3:
@@ -1372,13 +1405,40 @@ def muestra_de_control(grupo, pares_del_grupo, ampliar=False):
         # Sorteo con semilla: si dos personas abren el mismo grupo a la vez, las dos sortean lo
         # mismo y el INSERT OR IGNORE deja una sola muestra.
         nuevos = random.Random(f"{grupo}|{len(ya)}").sample(quedan, cuantos)
-    with db_lock:
+    with transaccion():
+        if guardar_al_sortear:
+            c.executemany("INSERT OR IGNORE INTO pares_al_sortear_la_muestra (grupo, "
+                          "producto_a_id, producto_b_id) VALUES (?, ?, ?)",
+                          [(grupo, a, b) for a, b in sorted(al_sortear)])
         c.executemany("INSERT OR IGNORE INTO muestras_de_control (grupo, producto_a_id, "
                       "producto_b_id) VALUES (?, ?, ?)", [(grupo, a, b) for a, b in nuevos])
-        conn.commit()
     c.execute("SELECT producto_a_id, producto_b_id FROM muestras_de_control WHERE grupo = ?",
               (grupo,))
     return [(r[0], r[1]) for r in c.fetchall()]
+
+
+def pares_al_sortear(grupo):
+    """Los pares que tenía el grupo cuando se sorteó su muestra (vacío si no se sorteó)."""
+    c.execute("SELECT producto_a_id, producto_b_id FROM pares_al_sortear_la_muestra "
+              "WHERE grupo = ?", (grupo,))
+    return {(r[0], r[1]) for r in c.fetchall()}
+
+
+def clave_vigente_de_la_muestra(clave, pares_del_grupo):
+    """La clave de la muestra que le toca hoy al grupo.
+
+    Una muestra vale para los pares que había cuando se sorteó (ver pares_al_sortear()). Cuando
+    ya no queda ninguno de esos —se aprobaron o se descartaron— y el grupo sigue teniendo pares,
+    son pares que entraron después: les toca una muestra nueva, «vuelta 2», «vuelta 3»... Si
+    todavía quedan de los de antes, sigue la muestra de antes y los nuevos esperan."""
+    pares = {tuple(p) for p in pares_del_grupo}
+    vuelta, vigente = 1, clave
+    while True:
+        al_sortear = pares_al_sortear(vigente)
+        if not al_sortear or al_sortear & pares:
+            return vigente
+        vuelta += 1
+        vigente = f"{clave}|vuelta {vuelta}"
 
 
 def estado_de_la_muestra(pares):
@@ -1419,6 +1479,22 @@ def estimacion_de_errores(errores, revisados, total):
               / (1 + z * z / revisados))
     tope = min(1.0, centro + margen)
     return p, tope, round(tope * total)
+
+
+# El máximo de error que se acepta para aprobar el resto de un grupo: el tope del intervalo de
+# Wilson al 95% (ver estimacion_de_errores()) tiene que quedar en esto o menos. Con 0 errores en
+# 30 da 11%, así que alcanza; con 1 en 30 da 17% —en un grupo de 1.000, hasta 170 vínculos
+# malos— y hay que mirar 30 más (1 en 60 da 9%). Antes se aprobaba con 0 o 1 error sin importar
+# de cuántos, y 1 en 30 pasaba igual que 1 en 80.
+TOPE_DE_ERROR_PARA_APROBAR = 0.12
+
+
+def se_puede_aprobar_el_resto(errores, revisados):
+    """¿La muestra alcanza para aprobar el resto del grupo sin mirarlo?"""
+    if not revisados:
+        return False
+    _p, tope, _n = estimacion_de_errores(errores, revisados, 0)
+    return tope <= TOPE_DE_ERROR_PARA_APROBAR
 
 
 def _base_de_la_pieza(codigo):

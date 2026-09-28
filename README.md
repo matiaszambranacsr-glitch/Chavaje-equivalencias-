@@ -4999,6 +4999,30 @@ saber de verdad cómo están las dudosas. Los grupos chicos no cambian. Las mues
 partidos se guardan con otro nombre, así que si había una empezada sobre el grupo entero, se
 empieza una nueva por franja (las marcas ya hechas siguen guardadas).
 
+### 🛡️ La muestra de control, más exigente y sin trampas sin querer
+
+Tres agujeros, todos probados sobre la base real con la pantalla de verdad:
+
+- **Aprobar el resto pide que el error posible sea chico, no que haya pocos errores.** Antes se
+  aprobaba con 0 o 1 error sin importar de cuántos: 1 en 30 pasaba igual que 1 en 80. Pero 1 en
+  30 deja un tope de 17% —en un grupo de 1.000, hasta 170 vínculos malos—. Ahora el tope del
+  intervalo de Wilson al 95% tiene que quedar en 12% o menos (`se_puede_aprobar_el_resto()`):
+  0 en 30 alcanza (11%), 1 en 30 no (17%) y pide mirar 30 más; 1 en 60 sí (9%), 2 en 50 no, 2
+  en 80 sí.
+- **Lo aprendido de tus decisiones ya no mueve pares de franja por sí solo.** «De N
+  ILLINOIS↔TARANTO que revisaste, aprobaste el 100%» suma 15, y los que se revisan son sobre todo
+  limpias —la muestra sale de ellas—. Marcar bien 20 de la muestra subía los 919 del grupo de 75
+  a 90, partía el grupo en dos a mitad de la muestra —la muestra empezada quedaba colgada— y
+  metía 27 que eran sospechosos entre las limpias. Ahora lo aprendido suma, pero si sin él el
+  par no llegaba a 55 (limpia) o a 85 (confianza alta), queda justo abajo de la línea
+  (`sin_cruzar_la_linea_por_lo_aprendido()`). Para abajo no hay tope.
+- **La muestra solo aprueba a los que estaban cuando se sorteó.** Se guarda qué pares tenía el
+  grupo en ese momento (`pares_al_sortear_la_muestra`). Si después entran otros —una prueba
+  nueva, otra tanda—, la pantalla los cuenta aparte y no los aprueba con esa muestra; cuando se
+  terminan los de antes, les toca la suya («vuelta 2»: `clave_vigente_de_la_muestra()`). Al
+  ampliar la muestra también se sortea solo entre los de antes, para que la estimación siga
+  hablando de un solo grupo.
+
 ## Una firma de foto podía ser un programa
 
 Las firmas visuales de las fotos se guardan con `pickle`, y `pickle` **no es un formato de

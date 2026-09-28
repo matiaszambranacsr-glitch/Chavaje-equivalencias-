@@ -1122,12 +1122,21 @@ Administrar → Mantenimiento.
                 con aprobar o descartar el resto. La usan los grupos por par de listas y los grupos por
                 motivo de la revisión. Ver muestra_de_control()."""
                 _por_par_g = {(f["a"], f["b"]): f for f in filas}
+                clave_g = clave_vigente_de_la_muestra(clave_g, list(_por_par_g))
+                if "|vuelta " in clave_g:
+                    nombre = f"{nombre} ({clave_g.rsplit('|', 1)[1]})"
                 _muestra = muestra_de_control(clave_g, list(_por_par_g))
                 _estado_m = estado_de_la_muestra(_muestra)
                 _sin_mirar = [p for p in _muestra if _estado_m[p] == "pendiente"]
                 _bien_m = sum(1 for p in _muestra if _estado_m[p] == "bien")
                 _mal_m = sum(1 for p in _muestra if _estado_m[p] == "mal")
-                _resto = [p for p in _por_par_g if p not in set(_muestra)]
+                # Lo que se aprueba o descarta con esta muestra son los que estaban cuando se
+                # sorteó. Los que entraron después esperan su propia muestra: ver
+                # clave_vigente_de_la_muestra().
+                _al_sortear = pares_al_sortear(clave_g)
+                _resto = [p for p in _por_par_g if p not in set(_muestra) and p in _al_sortear]
+                _entraron_despues = [p for p in _por_par_g
+                                     if p not in _al_sortear and p not in set(_muestra)]
                 st.progress((_bien_m + _mal_m) / max(len(_muestra), 1),
                             text=f"Muestra: {_bien_m + _mal_m} de {len(_muestra)} revisados · "
                                  f"✅ {_bien_m} bien · 🚫 {_mal_m} mal")
@@ -1188,6 +1197,13 @@ Administrar → Mantenimiento.
                     st.caption("Los que faltan de la muestra ya no están en esta tanda: los "
                                "resolvió otra persona o cambió el análisis.")
 
+                if _entraron_despues:
+                    st.info(
+                        f"➕ **{len(_entraron_despues):,} par(es) entraron a este grupo después "
+                        "de sortear la muestra** —una prueba nueva los subió, o llegaron con "
+                        "otra tanda—. Esta muestra no habla de ellos, así que no se aprueban con "
+                        "ella: cuando termines con los de esta muestra, van a tener la suya.")
+
                 # EL VEREDICTO, cuando la muestra está completa.
                 _revisados_m = _bien_m + _mal_m
                 if not _a_mirar and _revisados_m:
@@ -1196,17 +1212,19 @@ Administrar → Mantenimiento.
                     _pares_resto = [p for a, b in _resto for p in ((a, b), (b, a))]
                     if not _resto:
                         st.success(f"✅ El grupo entero ya está revisado ({_revisados_m} pares).")
-                    elif _mal_m == 0:
-                        st.success(
-                            f"✅ **Ningún error en {_revisados_m}.** Del resto del grupo se puede "
-                            f"esperar menos de {_tope_m:.0%} mal —como mucho unos {_n_tope_m} de "
-                            f"{len(_resto):,}—.")
-                    elif _mal_m == 1:
+                    elif se_puede_aprobar_el_resto(_mal_m, _revisados_m):
+                        (st.success if _mal_m == 0 else st.warning)(
+                            (f"✅ **Ningún error en {_revisados_m}.** " if _mal_m == 0 else
+                             f"🟡 **{_mal_m} error(es) en {_revisados_m}.** ")
+                            + f"Del resto del grupo se puede esperar como mucho {_tope_m:.0%} "
+                            f"mal —unos {_n_tope_m} de {len(_resto):,}—. Alcanza para aprobarlo.")
+                    elif _mal_m * 2 < _revisados_m and _tope_m <= 0.25:
                         st.warning(
-                            f"🟡 **1 error en {_revisados_m}.** En el resto se pueden esperar "
-                            f"alrededor de {_p_m:.0%} mal, y hasta {_tope_m:.0%} (unos "
-                            f"{_n_tope_m} de {len(_resto):,}). Podés aprobar o mirar 30 más "
-                            "para estar más seguro.")
+                            f"🟡 **{_mal_m} error(es) en {_revisados_m}.** Todavía no alcanza: "
+                            f"en el resto podría haber hasta {_tope_m:.0%} mal (unos "
+                            f"{_n_tope_m} de {len(_resto):,}). Mirá "
+                            f"{TAMANO_DE_LA_MUESTRA} más: si no aparecen errores nuevos, se "
+                            "habilita la aprobación.")
                     else:
                         st.error(
                             f"🔴 **{_mal_m} errores en {_revisados_m}.** Aprobar el resto a "
@@ -1216,7 +1234,7 @@ Administrar → Mantenimiento.
                             "de una.")
                     if _resto:
                         _v1, _v2 = st.columns(2)
-                        if _mal_m <= 1 and _v1.button(
+                        if se_puede_aprobar_el_resto(_mal_m, _revisados_m) and _v1.button(
                                 f"✅ Aprobar los {len(_resto):,} que quedan del grupo",
                                 type="primary" if _mal_m == 0 else "secondary",
                                 key=f"apr_resto_{abs(hash(clave_g))}"):
