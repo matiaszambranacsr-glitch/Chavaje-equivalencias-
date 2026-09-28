@@ -1299,10 +1299,16 @@ def _fallaron_hoy(fuente):
 
 
 def _quedan_para_reintentar(prefijo):
-    """¿Hay algo de esa fuente que falló y todavía se va a reintentar otro día?"""
+    """¿Hay algo de esa fuente que falló HOY y se va a reintentar mañana?
+
+    Solo lo de hoy: lo que falló otro día y sigue pendiente, la tarea ya lo habría vuelto a
+    elegir. Contando cualquier fila, una que quedó huérfana —el producto se borró, o le
+    cargaron la foto a mano— dejaba la tarea «descansando hasta mañana» todos los días, sin
+    terminar nunca."""
     try:
         c.execute("""SELECT 1 FROM descargas_fallidas
-                     WHERE fuente LIKE ? AND intentos < ? LIMIT 1""",
+                     WHERE fuente LIKE ? AND intentos < ?
+                       AND fecha = date('now', 'localtime') LIMIT 1""",
                   (prefijo + "%", INTENTOS_POR_DESCARGA))
         return c.fetchone() is not None
     except sqlite3.OperationalError as _err:
@@ -1469,6 +1475,9 @@ def bajar_fotos_pendientes(limite=200, progreso=None, hilos=6, liviano=True):
                 except Exception as e:
                     anotar_error("bajar_fotos_pendientes", e)
                     fallidas.append((url, type(e).__name__))
+                    # Bajó pero no se pudo guardar (imagen dañada): se marca, para que la
+                    # tanda no la vuelva a elegir en cada vuelta.
+                    rotas.append(pid)
             _olvidar_fallas("foto_link", pids)
         else:
             fallidas.extend((url, error) for _p in pids)
@@ -2403,12 +2412,16 @@ def _trabajo_de_fondo():
                                                              hilos=6)
                 # Sin ninguna bajada —no quedaba nada, o todo lo que quedaba falló— se deja de
                 # intentar: vuelve a prenderse cuando llegue una foto nueva.
-                if not _bajadas:
+                # Se apaga solo cuando no quedó NADA que intentar. Antes bastaba una tanda de 50
+                # links que no bajara ninguno —todos vencidos del mismo proveedor, por ejemplo—
+                # para apagarla con miles pendientes. Cada link que falla queda marcado (roto o
+                # fallado hoy), así que seguir no gira sobre los mismos.
+                if not _bajadas and not _fallidas:
                     guardar_config("fotos_de_internet_pendientes", "0")
                     if _quedan_para_reintentar("foto_link"):
                         guardar_config("fotos_de_internet_pendientes", "1")
                         _dar_por_terminada("fotos_de_internet")     # descansa hasta mañana
-                hizo_algo = hizo_algo or _bajadas > 0
+                hizo_algo = hizo_algo or _bajadas > 0 or bool(_fallidas)
             except Exception as _err:
                 guardar_config("fotos_de_internet_pendientes", "0")
                 anotar_error("_trabajo_de_fondo/fotos_de_internet", _err)

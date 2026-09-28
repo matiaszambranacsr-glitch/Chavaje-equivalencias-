@@ -254,6 +254,11 @@ if st.session_state.get("nivel_usuario") in ("admin", "operador", "mecanico"):
                 "sin usarla. Volvé a poner la contraseña.")
     else:
         st.session_state["_ultimo_toque"] = time.time()
+else:
+    # Sin sesión con contraseña no hay nada que contar, y así el próximo ingreso arranca la
+    # cuenta de cero. Antes el reloj de una sesión anterior («Salir» no lo borraba) cerraba la
+    # nueva apenas entraba, si habían pasado más de cuatro horas desde aquella.
+    st.session_state.pop("_ultimo_toque", None)
 
 # Pantalla de login apenas se abre la app, con opción de seguir sin loguearse.
 if not es_admin() and not st.session_state.get("saltar_login"):

@@ -885,6 +885,9 @@ Administrar → Mantenimiento.
                     and _clave_vieja[:3] == _clave_analisis[:3]
                     and _clave_vieja[4:] == _clave_analisis[4:]
                     and total_lote < _clave_vieja[3]
+                    # Solo si esa tanda cubría la lista entera: si no, al decidir entran pares
+                    # de la tanda siguiente que el recorte no analiza, y quedaban sin verse.
+                    and _clave_vieja[2] == 0 and _clave_vieja[3] <= _clave_vieja[1]
                     and _guardado.get("recortes", 0) < RECORTES_ANTES_DE_REANALIZAR):
                 # SOLO SE SACAN LOS QUE YA SE DECIDIERON. Aprobar o descartar un par bajaba
                 # el total y rehacía el análisis entero: 3,7 s sobre la cola real por cada

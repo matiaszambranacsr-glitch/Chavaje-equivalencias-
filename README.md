@@ -5280,6 +5280,30 @@ Medido con un servidor falso: los 96 códigos SKF citados en la base real se ley
 pasada (antes eran hasta 150 por día); con el sitio caído cortó a los 5 pedidos y se pausó una
 hora.
 
+## 🔎 Revisión cruzada: nueve errores que encontró otra IA
+
+Los cambios del día los revisó un agente independiente (otra instancia de Claude, sin el
+contexto de la conversación). Encontró nueve errores reales; están corregidos y probados:
+
+1. **La sesión se cerraba apenas se volvía a entrar**: el reloj de inactividad de una sesión
+   anterior («Salir» no lo borraba) cerraba la nueva. Ahora sin sesión con contraseña no hay
+   reloj.
+2. **La búsqueda por número de motor mostraba el titular y el km al invitado** (hasta 50 pares
+   patente + cliente con cuatro caracteres). Ahora solo con contraseña, y sin el `_id` interno.
+3. **Una copia cifrada escrita en el repositorio mismo dejaba la app vacía al arrancar**:
+   `ruta_de_la_semilla()` ahora la descifra.
+4. **Restaurar a mano no volvía a pedir las fotos** y dejaba entrar una base dañada. Ahora pasa
+   por `la_base_esta_sana()` y `pedir_de_nuevo_las_fotos()`, igual que al arrancar.
+5. **Una tanda de 50 links vencidos apagaba la bajada de fotos** con miles pendientes. Ahora se
+   apaga solo cuando no queda nada que intentar (cada falla queda marcada, así no gira).
+6. **Tareas que no terminaban nunca**: una falla vieja huérfana las dejaba «descansando hasta
+   mañana» todos los días. Ahora solo cuenta lo que falló hoy.
+7. **`clave_copia` pegada dentro de `[admin_passwords]` funcionaba como contraseña de
+   administrador** (`es_un_usuario_de_los_secretos()`).
+8. **La columna Stock desaparecía cuando nada tenía stock**: el 0 es un dato, no un vacío.
+9. **El recorte del análisis de sugeridas dejaba pares sin ver** cuando la lista no entraba en
+   una tanda. Ahora recorta solo si la tanda cubría la lista entera.
+
 ## 🔗 Revisar sugeridas: primero lo que hay que hacer
 
 Mirado con capturas sobre la base real (15.308 pendientes en 8 listas):

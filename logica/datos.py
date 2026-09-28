@@ -33,17 +33,32 @@ def ruta_de_la_semilla():
     la comprimida es más nueva— escribiendo a un temporal y renombrando: un arranque que se
     corta a mitad de camino no puede dejar una base a medio escribir con el nombre bueno."""
     repo = semilla_del_repositorio()
-    if repo != ARCHIVO_SEMILLA_COMPRIMIDA:
+    if not repo:
+        return None
+    # Cifrada: pasa si la copia automática escribe en el repositorio mismo (github_rama
+    # distinta de la de copias) con clave_copia puesta. Ver cifrar_copia(). Sin descifrarla,
+    # gzip o sqlite la leían como basura y la app arrancaba vacía.
+    with open(repo, "rb") as _f:
+        _cifrada = esta_cifrada(_f.read(len(MARCA_DE_COPIA_CIFRADA)))
+    if repo != ARCHIVO_SEMILLA_COMPRIMIDA and not _cifrada:
         return repo
     temporal = f"{_SEMILLA_DESCOMPRIMIDA}.{uuid.uuid4().hex}.tmp"
     try:
         if (not os.path.exists(_SEMILLA_DESCOMPRIMIDA)
                 or os.path.getmtime(_SEMILLA_DESCOMPRIMIDA) < os.path.getmtime(repo)):
-            with gzip.open(repo, "rb") as entrada, open(temporal, "wb") as salida:
-                shutil.copyfileobj(entrada, salida)
+            if _cifrada:
+                with open(repo, "rb") as _f:
+                    _datos = descifrar_copia(_f.read())
+                if _datos[:2] == b"\x1f\x8b":
+                    _datos = gzip.decompress(_datos)
+                with open(temporal, "wb") as salida:
+                    salida.write(_datos)
+            else:
+                with gzip.open(repo, "rb") as entrada, open(temporal, "wb") as salida:
+                    shutil.copyfileobj(entrada, salida)
             os.replace(temporal, _SEMILLA_DESCOMPRIMIDA)
         return _SEMILLA_DESCOMPRIMIDA
-    except (OSError, EOFError, gzip.BadGzipFile) as _err:
+    except (OSError, EOFError, gzip.BadGzipFile, ValueError) as _err:
         anotar_error("ruta_de_la_semilla", _err)
         try:
             os.remove(temporal)       # el que quedó a medio escribir
@@ -350,6 +365,22 @@ def bajar_la_copia_de_github():
                 pass
 
 
+def pedir_de_nuevo_las_fotos(conexion):
+    """Después de restaurar una copia: la copia no trae las fotos, solo sus links (ver
+    _sacar_las_fotos()), así que se piden de nuevo y se reabren las tareas de fotos y firmas
+    aunque hubieran quedado terminadas. No es repetir por repetir: lo que había se perdió.
+    La usan el arranque (_restaurar_desde_semilla()) y «Restaurar backup» (restaurar_backup())."""
+    try:
+        conexion.executemany(
+            "INSERT OR REPLACE INTO configuracion (clave, valor) VALUES (?, ?)",
+            [("fotos_de_internet_pendientes", "1"), ("descanso_fotos_de_internet", ""),
+             ("terminado_fotos", ""), ("descanso_fotos", ""),
+             ("terminado_firmas", ""), ("descanso_firmas", "")])
+        conexion.commit()
+    except sqlite3.Error as _err:
+        anotar_error("pedir_de_nuevo_las_fotos", _err)
+
+
 def _restaurar_desde_semilla(conexion):
     """Streamlit Cloud borra el disco de la app cada vez que se redespliega o se reinicia, así
     que la base de datos se pierde. Los archivos del REPOSITORIO, en cambio, sí sobreviven
@@ -376,18 +407,7 @@ def _restaurar_desde_semilla(conexion):
         origen = sqlite3.connect(semilla)
         origen.backup(conexion)
         origen.close()
-        # La copia no trae las fotos, solo sus links (ver _sacar_las_fotos()): se piden de
-        # nuevo, y se reabren las tareas de fotos y firmas aunque hubieran quedado terminadas.
-        # No es repetir por repetir: lo que había se perdió con el disco.
-        try:
-            conexion.executemany(
-                "INSERT OR REPLACE INTO configuracion (clave, valor) VALUES (?, ?)",
-                [("fotos_de_internet_pendientes", "1"), ("descanso_fotos_de_internet", ""),
-                 ("terminado_fotos", ""), ("descanso_fotos", ""),
-                 ("terminado_firmas", ""), ("descanso_firmas", "")])
-            conexion.commit()
-        except sqlite3.Error as _err:
-            anotar_error("_restaurar_desde_semilla/fotos", _err)
+        pedir_de_nuevo_las_fotos(conexion)
         return True
     except Exception as _err:
         anotar_error("_restaurar_desde_semilla", _err)

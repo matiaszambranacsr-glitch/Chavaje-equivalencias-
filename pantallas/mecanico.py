@@ -424,6 +424,12 @@ if pagina == PAGINAS[7]:
                 st.warning("Poné al menos 4 caracteres: con menos, coincide con cualquier cosa.")
             else:
                 _ex, _par = buscar_por_numero_motor(_nm)
+                # El titular y el kilometraje, solo con contraseña: la búsqueda parcial con
+                # cuatro caracteres listaba hasta 50 pares patente + cliente a cualquiera. Y
+                # «_id» es interno (quitar_id() saca «ID», no esta).
+                _ocultas = {"_id"} | (set() if es_empleado_o_abierto() else {"Cliente", "Km"})
+                _ex = [{k: v for k, v in f.items() if k not in _ocultas} for f in _ex]
+                _par = [{k: v for k, v in f.items() if k not in _ocultas} for f in _par]
                 if _ex:
                     st.success(f"✅ {len(_ex)} vehículo(s) con ese número de motor exacto:")
                     st.dataframe(quitar_id(_ex), width="stretch", hide_index=True)

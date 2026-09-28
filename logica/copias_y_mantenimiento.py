@@ -1262,6 +1262,10 @@ def restaurar_backup(archivo_subido):
     contenido = descifrar_copia(contenido)
     if contenido[:2] == b"\x1f\x8b":
         contenido = gzip.decompress(contenido)
+    # Una base dañada no entra: pisaría la que anda. Ver la_base_esta_sana().
+    _sana, _detalle = la_base_esta_sana(datos=contenido)
+    if not _sana:
+        raise ValueError(f"el archivo no es una base sana ({_detalle})")
     temporal = DB_PATH + ".subido"
     with open(temporal, "wb") as f:
         f.write(contenido)
@@ -1284,6 +1288,9 @@ def restaurar_backup(archivo_subido):
             # EXISTS y ALTERs condicionados a que la columna no esté.
             crear_esquema(conn.cursor())
             conn.commit()
+            # Una copia sin fotos (la de GitHub, o «backup sin fotos») trae solo los links:
+            # hay que volver a pedirlas, igual que al arrancar. Ver pedir_de_nuevo_las_fotos().
+            pedir_de_nuevo_las_fotos(conn.conexion_real())
         origen.close()
     finally:
         try:

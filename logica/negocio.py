@@ -1835,7 +1835,10 @@ def columnas_que_dicen_algo(filas):
     utiles = []
     for col in todas:
         valores = [f.get(col) for f in filas]
-        llenos = [v for v in valores if v not in (None, "", 0)]
+        # El 0 es un dato («no hay stock»), no un vacío: tratándolo como vacío, una búsqueda
+        # donde nada tenía stock escondía la columna Stock y no se distinguía «no hay» de «no
+        # se carga». Solo Favorito en 0 es ruido, y eso lo cubre el filtro de abajo.
+        llenos = [v for v in valores if v not in (None, "")]
         if not llenos:
             continue
         if col in ("Tipo", "Favorito") and len({str(v) for v in valores}) == 1:

@@ -722,12 +722,12 @@ def validar_password(clave):
     # la última sección (ver config_github()), y leídas como usuarios, el nombre del
     # repositorio —que no es ningún secreto— entraba como contraseña de administrador.
     admin_passwords = {n: p for n, p in dict(secretos.get("admin_passwords", {})).items()
-                       if not str(n).startswith("github_")}
+                       if es_un_usuario_de_los_secretos(n)}
     clave_unica = secretos.get("admin_password")
     if clave_unica:
         admin_passwords.setdefault("admin", clave_unica)
     operador_passwords = {n: p for n, p in dict(secretos.get("operador_passwords", {})).items()
-                          if not str(n).startswith("github_")}
+                          if es_un_usuario_de_los_secretos(n)}
 
     # El freno va ANTES de comparar nada, y también antes de validar_password_usuario(), que
     # calcula un PBKDF2 por cada empleado activo: sin el freno, cada intento fallido le cuesta
@@ -845,12 +845,23 @@ def pedir_password_operador_o_admin(motivo=""):
     return False
 
 
+# Lo que se pega al final de los secretos queda ADENTRO de la última sección (así es TOML), y
+# si esa sección es [admin_passwords] se leía como un usuario más: el nombre del repositorio
+# entraba como contraseña de administrador, y la frase de cifrado de la copia también.
+_NO_SON_USUARIOS = {"clave_copia"}
+
+
+def es_un_usuario_de_los_secretos(nombre):
+    nombre = str(nombre)
+    return not nombre.startswith("github_") and nombre not in _NO_SON_USUARIOS
+
+
 def hay_claves_configuradas():
     """¿Hay al menos una contraseña con la que entrar? (en los secretos o creada en la app)."""
     try:
         secretos = secretos_app()
         for seccion in ("admin_passwords", "operador_passwords"):
-            if any(not str(n).startswith("github_") for n in dict(secretos.get(seccion, {}))):
+            if any(es_un_usuario_de_los_secretos(n) for n in dict(secretos.get(seccion, {}))):
                 return True
         if secretos.get("admin_password"):
             return True
