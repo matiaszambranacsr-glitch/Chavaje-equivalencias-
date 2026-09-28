@@ -1259,18 +1259,28 @@ Administrar → Mantenimiento.
                 # y al guardar la muestra la cantidad cambia. Elegido por el rótulo, el
                 # selector dejaba de encontrar lo elegido y saltaba al grupo más grande, con la
                 # persona a mitad de la muestra de otro.
-                _por_grupo = {(ma, mb): filas_g for ma, mb, filas_g in _grupos_m}
+                _por_grupo = {(ma, mb, fr): filas_g for ma, mb, filas_g, fr in _grupos_m}
                 _clave_sel_g = f"grupo_muestra_{_lote_m}"
                 if st.session_state.get(_clave_sel_g) not in _por_grupo:
                     st.session_state.pop(_clave_sel_g, None)
                 _elegido_g = st.selectbox(
                     "Grupo:", list(_por_grupo), key=_clave_sel_g,
-                    format_func=lambda g: f"{g[0]} ↔ {g[1]} — {len(_por_grupo[g]):,} limpias")
-                _ma_g, _mb_g = _elegido_g
+                    format_func=lambda g: (f"{g[0]} ↔ {g[1]}"
+                                           + {"alta": " · confianza alta",
+                                              "media": " · confianza media"}.get(g[2], "")
+                                           + f" — {len(_por_grupo[g]):,} limpias"))
+                _ma_g, _mb_g, _fr_g = _elegido_g
                 _filas_g = _por_grupo[_elegido_g]
-                _clave_g = clave_de_grupo(_lote_m, _ma_g, _mb_g)
+                _clave_g = clave_de_grupo(_lote_m, _ma_g, _mb_g, _fr_g)
+                if _fr_g:
+                    st.caption(
+                        "Este par de listas es grande y se partió en dos: las de confianza "
+                        f"alta ({CONFIANZA_ALTA} o más) y las de confianza media. Cada una tiene "
+                        "su muestra, así los errores de las de confianza media no se esconden "
+                        "entre miles de las otras.")
                 _panel_de_muestra(_lote_m, _clave_g, _filas_g, _candidatas_m, _clave_parecidos,
-                                  f"{_ma_g} ↔ {_mb_g}")
+                                  f"{_ma_g} ↔ {_mb_g}"
+                                  + (f" (confianza {_fr_g})" if _fr_g else ""))
                 st.markdown("---")
 
             # 🪭 LOS ABANICOS: un producto con varios candidatos distintos en otra lista. Se

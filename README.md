@@ -4985,6 +4985,20 @@ Con las abreviaturas de Imperial («TAPA TRASE.», «TAPA DELAN.», «TAPA DEL.�
 preposición («TAPA DEL CARTER»). La tapa delantera del block es la de la distribución, así que
 «TAPA BLOCK LADO DIST.» coincide con «TAPA DELAN. BLOCK».
 
+### 🎯 Los grupos grandes de limpias, partidos por confianza
+
+Las 12.790 limpias de FISPA contra los números de fábrica eran un solo grupo con una muestra de
+80: 10.222 con confianza 100 —la descripción es la de la fila que trajo el número— y 1.283 entre
+65 y 74, que pasaron con algún aviso. En 80 al azar entraban unas 8 de esas: si estaban todas mal,
+la muestra no lo mostraba.
+
+Ahora un grupo de 500 limpias o más se parte en dos si cada franja tiene al menos 100: confianza
+alta (85 o más) y media, cada una con su muestra (`grupos_de_limpias()`). FISPA queda en 11.501 de
+confianza alta (muestra de 80) y 1.289 de confianza media (muestra de 50): 50 marcas más para
+saber de verdad cómo están las dudosas. Los grupos chicos no cambian. Las muestras de los grupos
+partidos se guardan con otro nombre, así que si había una empezada sobre el grupo entero, se
+empieza una nueva por franja (las marcas ya hechas siguen guardadas).
+
 ## Una firma de foto podía ser un programa
 
 Las firmas visuales de las fotos se guardan con `pickle`, y `pickle` **no es un formato de

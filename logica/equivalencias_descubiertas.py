@@ -1309,20 +1309,43 @@ MOTIVOS_DE_RECHAZO = {
 }
 
 
-def clave_de_grupo(lote, marca_a, marca_b):
-    """El nombre con que se guarda la muestra de un grupo: la tanda y el par de listas."""
+def clave_de_grupo(lote, marca_a, marca_b, franja=""):
+    """El nombre con que se guarda la muestra de un grupo: la tanda, el par de listas y, si el
+    grupo se partió, la franja de confianza (ver grupos_de_limpias())."""
     ma, mb = sorted((marca_a or "", marca_b or ""))
-    return f"{lote}|{ma}|{mb}"
+    return f"{lote}|{ma}|{mb}" + (f"|{franja}" if franja else "")
+
+
+# Desde qué tamaño un grupo de limpias se parte en dos franjas de confianza, y cuántos pares
+# tiene que tener cada franja para que valga la pena su propia muestra.
+TAMANO_PARA_PARTIR_EL_GRUPO = 500
+MINIMO_POR_FRANJA = 100
+CONFIANZA_ALTA = 85
 
 
 def grupos_de_limpias(limpias):
-    """[(marca_a, marca_b, filas)], de los grupos más grandes a los más chicos."""
+    """[(marca_a, marca_b, filas, franja)], de los grupos más grandes a los más chicos.
+
+    LOS GRUPOS GRANDES SE PARTEN POR CONFIANZA. Las 12.790 limpias de FISPA eran un solo grupo
+    con una muestra de 80: 10.222 con 100 —la descripción es la de la fila que trajo el número— y
+    1.283 entre 65 y 74, que pasaron con un aviso. En 80 al azar entraban unas 8 de esas: si
+    estaban todas mal, la muestra no lo mostraba. Partidas, cada franja tiene su muestra, y la
+    de confianza media dice por sí sola cuántas están mal. «franja» es "" si el grupo no se
+    partió, o "alta" / "media"."""
     grupos = {}
     for fila in limpias:
         grupos.setdefault(tuple(sorted((fila.get("marca_a") or "", fila.get("marca_b") or ""))),
                           []).append(fila)
-    return sorted(((ma, mb, filas) for (ma, mb), filas in grupos.items()),
-                  key=lambda g: -len(g[2]))
+    salida = []
+    for (ma, mb), filas in grupos.items():
+        alta = [f for f in filas if f.get("confianza", 0) >= CONFIANZA_ALTA]
+        media = [f for f in filas if f.get("confianza", 0) < CONFIANZA_ALTA]
+        if (len(filas) >= TAMANO_PARA_PARTIR_EL_GRUPO
+                and len(alta) >= MINIMO_POR_FRANJA and len(media) >= MINIMO_POR_FRANJA):
+            salida.extend([(ma, mb, alta, "alta"), (ma, mb, media, "media")])
+        else:
+            salida.append((ma, mb, filas, ""))
+    return sorted(salida, key=lambda g: -len(g[2]))
 
 
 def muestra_de_control(grupo, pares_del_grupo, ampliar=False):
@@ -1741,7 +1764,7 @@ def plan_de_la_lista(limpias, sospechosas, relacionadas):
                       "Dónde": "📋 Para revisar, por motivo"})
     grupos_l = grupos_de_limpias(limpias)
     if grupos_l:
-        marcas = sum(min(len(f), tamano_de_la_muestra(len(f))) for _a, _b, f in grupos_l)
+        marcas = sum(min(len(f), tamano_de_la_muestra(len(f))) for _a, _b, f, _fr in grupos_l)
         pasos.append({"Paso": "🎯 Aprobar las limpias con su muestra",
                       "Pares": len(limpias),
                       "Trabajo": f"{marcas:,} marcas en {len(grupos_l)} muestra(s)",
