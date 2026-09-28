@@ -1540,8 +1540,12 @@ def _dos_que_citan_el_mismo_numero(cod_a, desc_a, cod_b, desc_b):
 
     def _sin_codigos(texto, codigo):
         limpio = sanitizar(codigo or "")
-        return " ".join(w for w in _RE_ES_ORIGINAL.sub(" ", texto).split()
-                        if not (len(sanitizar(w)) >= 3 and sanitizar(w) in limpio))
+        salida = []
+        for w in _RE_ES_ORIGINAL.sub(" ", texto).split():
+            sw = sanitizar(w)
+            if not (len(sw) >= 3 and sw in limpio):
+                salida.append(w)
+        return " ".join(salida)
     if ta and _sin_codigos(ta, cod_a) == _sin_codigos(tb, cod_b):
         return "la misma pieza, común y original"
     cabeza_a, cabeza_b = _cabeza_de(desc_a), _cabeza_de(desc_b)
@@ -1651,6 +1655,22 @@ def _numero_de_un_componente(numero, cod, desc):
     return ""
 
 
+@functools.lru_cache(maxsize=50000)
+def _palabras_sin_el_codigo(desc, cod):
+    """Las palabras de la descripción sin las que son parte del código, sin «ORIGINAL» y sin
+    la S final. Recordada: cada producto se compara contra varios hermanos."""
+    limpio = sanitizar(cod or "")
+    texto = _RE_ES_ORIGINAL.sub(" ", normalizar_texto(desc))
+    salida = set()
+    for w in re.split(r"[^A-Z0-9]+", texto):
+        if len(w) < 2:
+            continue
+        sw = sanitizar(w)
+        if not (len(sw) >= 3 and sw in limpio):
+            salida.add(w.rstrip("S"))
+    return frozenset(salida)
+
+
 def _descripciones_mellizas(desc_a, cod_a, desc_b, cod_b):
     """¿Dos descripciones de la MISMA lista dicen lo mismo salvo el código?
 
@@ -1669,12 +1689,7 @@ def _descripciones_mellizas(desc_a, cod_a, desc_b, cod_b):
     if not sub_a or not sub_b or sub_a == sub_b:
         return False
 
-    def _palabras(desc, cod):
-        limpio = sanitizar(cod or "")
-        texto = _RE_ES_ORIGINAL.sub(" ", normalizar_texto(desc))
-        return {w.rstrip("S") for w in re.split(r"[^A-Z0-9]+", texto)
-                if len(w) >= 2 and not (len(sanitizar(w)) >= 3 and sanitizar(w) in limpio)}
-    pa, pb = _palabras(desc_a, cod_a), _palabras(desc_b, cod_b)
+    pa, pb = _palabras_sin_el_codigo(desc_a, cod_a), _palabras_sin_el_codigo(desc_b, cod_b)
     if len(pa) < 4 or len(pb) < 4:
         return False
     return len(pa & pb) / len(pa | pb) >= 0.75

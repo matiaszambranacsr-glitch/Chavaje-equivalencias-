@@ -104,7 +104,7 @@ import re
 from collections import Counter
 
 from .errores import anotar_error
-''', ["es_fecha_disfrazada", "como_texto_en_like", "sanitizar", "LARGO_MINIMO_NUMERICO", "es_codigo_util",
+''', ["es_fecha_disfrazada", "como_texto_en_like", "sanitizar", "_sanitizar_recordado", "_sanitizar", "LARGO_MINIMO_NUMERICO", "es_codigo_util",
       "excel_le_comio_digitos",
       "_partir_por_barra", "dividir_codigos", "codigo_sospechoso",
       "TOPE_REPETICIONES_EN_DESCRIPCION", "codigos_confiables_de_descripciones",

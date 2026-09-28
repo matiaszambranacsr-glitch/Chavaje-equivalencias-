@@ -48,6 +48,21 @@ def como_texto_en_like(texto):
 
 
 def sanitizar(codigo):
+    """Ver _sanitizar(). Esta capa solo recuerda: el análisis de la lista de FISPA la llamaba
+    793.000 veces —casi siempre con los mismos códigos y las mismas palabras— y eran 5,4 de sus
+    22 segundos de perfil. Lo que no se puede usar de clave (una lista, un tipo raro) pasa
+    directo, sin caché."""
+    try:
+        return _sanitizar_recordado(codigo)
+    except TypeError:
+        return _sanitizar(codigo)
+
+
+def _sanitizar_recordado(codigo):
+    return _sanitizar(codigo)
+
+
+def _sanitizar(codigo):
     """Limpia un código dejando solo letras y números en mayúscula.
 
     Ojo con el '.0' del final: Excel guarda los códigos numéricos como número, así que

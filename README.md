@@ -4928,6 +4928,22 @@ Dos reglas que parecían buenas y la cola real dijo que no:
 Sí quedó «DIFER.» como abreviatura de DIFERENCIAL: la tapa de diferencial tipo 34 de la Transit
 concordaba con la del Dana 46 de la F-100 porque las dos decían «DIFER.».
 
+### ⏱️ Más rápido: `sanitizar()` recordada y los modelos guardados
+
+Con todas las reglas nuevas, analizar la lista de FISPA tardaba 11,3 s la primera vez. El perfil
+mostraba a `sanitizar()` llamada 793.000 veces —casi siempre con los mismos códigos y las mismas
+palabras— y a las comparaciones de mellizos y variantes limpiando cada palabra dos veces.
+
+- `sanitizar()` ahora recuerda (lru_cache de 200.000); lo que no sirve de clave pasa directo.
+- Las palabras de cada descripción sin su código se calculan una vez por producto
+  (`_palabras_sin_el_codigo()`).
+- La limpieza de la lista de modelos (2,6 s recorriendo el catálogo) se guarda en la
+  configuración con una huella del catálogo y se rehace solo cuando el catálogo cambia: el
+  segundo arranque tarda 0,03 s.
+
+FISPA: 11,3 → 8,9 s la primera vez, 5,8 → 4,6 las siguientes; el barrido 5,1 → 4,4 y 4,3 → 3,3.
+La clasificación de la cola no cambia en un solo par.
+
 ## Una firma de foto podía ser un programa
 
 Las firmas visuales de las fotos se guardan con `pickle`, y `pickle` **no es un formato de

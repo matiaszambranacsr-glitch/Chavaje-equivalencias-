@@ -1347,12 +1347,21 @@ def _modelos_que_andan_con_otras_marcas(de_aplicaciones, minimo=20):
     segunda condición cuida a las que casi nunca van con marca, que son de las dos clases:
     TORINO (se escribe sin IKA) y GALILEO (marca de carburador) sirven, MACHO y PRIMARIO no.
     Esas no se distinguen contando y las que no sirven están a mano en
-    _PALABRAS_QUE_NO_SON_MODELOS. Recorrer el catálogo cuesta 2,6 s con 86.000 descripciones,
-    una vez por proceso."""
+    _PALABRAS_QUE_NO_SON_MODELOS.
+
+    Recorrer el catálogo cuesta 2,6 s con 86.000 descripciones, y eso era en cada arranque de
+    la app. Se guarda el resultado en la configuración con una huella del catálogo —cuántos
+    productos, el último id, cuántos modelos— y se rehace solo cuando cambia."""
     try:
+        _huella = "|".join(str(x) for x in c.execute(
+            "SELECT COUNT(*), COALESCE(MAX(id), 0) FROM productos").fetchone()) + \
+            f"|{len(de_aplicaciones)}"
+        _guardado = json.loads(obtener_config("modelos_que_no_son", "") or "{}")
+        if _guardado.get("huella") == _huella:
+            return set(_guardado.get("palabras") or ())
         c.execute("SELECT descripcion FROM productos WHERE descripcion IS NOT NULL")
         descripciones = [r["descripcion"] for r in c.fetchall()]
-    except sqlite3.OperationalError as _err:
+    except (sqlite3.OperationalError, ValueError) as _err:
         anotar_error("_modelos_que_andan_con_otras_marcas", _err)
         return set()
     total, con_la_suya, con_otras = {}, {}, {}
@@ -1367,8 +1376,15 @@ def _modelos_que_andan_con_otras_marcas(de_aplicaciones, minimo=20):
                 con_la_suya[w] = con_la_suya.get(w, 0) + 1
             elif marcas:
                 con_otras[w] = con_otras.get(w, 0) + 1
-    return {w for w, n in total.items()
-            if n >= minimo and con_la_suya.get(w, 0) < 0.3 * n and con_otras.get(w, 0) >= 0.2 * n}
+    palabras = {w for w, n in total.items()
+                if n >= minimo and con_la_suya.get(w, 0) < 0.3 * n
+                and con_otras.get(w, 0) >= 0.2 * n}
+    try:
+        guardar_config("modelos_que_no_son",
+                       json.dumps({"huella": _huella, "palabras": sorted(palabras)}))
+    except sqlite3.OperationalError as _err:
+        anotar_error("_modelos_que_andan_con_otras_marcas", _err)
+    return palabras
 
 
 _PALABRAS_QUE_NO_SON_MODELOS = frozenset({
