@@ -917,11 +917,17 @@ Casi todo lo que edita o borra algo pide la contraseña de administrador la prim
                                 visible["Libre"] = libres.get(f["ID"], f.get("Stock") or 0)
                             mostrar.append(visible)
                         mostrar = para_mostrar(quitar_id(mostrar))
-                        st.dataframe(
-                            mostrar, width="stretch", hide_index=True,
-                            column_order=columnas_que_dicen_algo(mostrar),
-                            column_config=CONFIG_COLUMNAS_RESULTADO,
-                        )
+                        # En el celular, tarjetas; la tabla queda a un toque. Ver
+                        # mostrar_tarjetas_de_resultados().
+                        if es_celular() and not st.toggle("📋 Ver como tabla",
+                                                           key=f"como_tabla_{clean}"):
+                            mostrar_tarjetas_de_resultados(mostrar)
+                        else:
+                            st.dataframe(
+                                mostrar, width="stretch", hide_index=True,
+                                column_order=columnas_que_dicen_algo(mostrar),
+                                column_config=CONFIG_COLUMNAS_RESULTADO,
+                            )
 
                         # La pregunta que sigue siempre a «¿lo tenés?»: ¿le sirve al auto del
                         # cliente? La app tiene el dato en los catálogos de fabricante y no lo

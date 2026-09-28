@@ -1751,6 +1751,10 @@ def _traer_pagina(url, tiempo_maximo=12, sesion=None, **extra):
 # ir por la misma marca).
 PAGINAS_EN_MEMORIA = 400
 MINUTOS_DE_PAGINA_EN_MEMORIA = 180
+# Y un tope de TAMAÑO, no solo de cantidad: 400 páginas de hasta 1,5 MB podían ser 600 MB, y
+# Streamlit Cloud tiene 1 GB para todo el proceso (lo señaló la revisión con Gemini). Con 40 MB
+# entran de sobra las fichas de una tanda, que son las que se vuelven a pedir.
+MB_DE_PAGINAS_EN_MEMORIA = 40
 _PAGINAS_RECIENTES = del_proceso("paginas_recientes", dict)
 _CANDADO_PAGINAS = del_proceso("candado_de_paginas_recientes", threading.Lock)
 
@@ -1781,8 +1785,14 @@ def _guardar_pagina(url, respuesta):
         with _CANDADO_PAGINAS:
             _PAGINAS_RECIENTES[url] = (time.time(), _PaginaGuardada(
                 respuesta.status_code, texto, {"Content-Type": tipo}))
-            while len(_PAGINAS_RECIENTES) > PAGINAS_EN_MEMORIA:
-                _PAGINAS_RECIENTES.pop(next(iter(_PAGINAS_RECIENTES)))
+            # Se sacan las más viejas (el dict guarda el orden de entrada) hasta volver a
+            # entrar en los dos topes.
+            _total = sum(len(p.text) for _t, p in _PAGINAS_RECIENTES.values())
+            while _PAGINAS_RECIENTES and (
+                    len(_PAGINAS_RECIENTES) > PAGINAS_EN_MEMORIA
+                    or _total > MB_DE_PAGINAS_EN_MEMORIA * 1024 * 1024):
+                _t, _vieja = _PAGINAS_RECIENTES.pop(next(iter(_PAGINAS_RECIENTES)))
+                _total -= len(_vieja.text)
     except Exception as _err:
         anotar_error("_guardar_pagina", _err)
 

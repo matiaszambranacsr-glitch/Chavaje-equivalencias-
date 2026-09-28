@@ -1114,8 +1114,10 @@ Administrar → Mantenimiento.
                             # pantallas. La decisión y el motivo van en la misma fila.
                             st.markdown(f"**{_i_m + 1}.** {_f['marca_a']} **{_f['cod_a']}** ↔ "
                                         f"{_f['marca_b']} **{_f['cod_b']}**")
-                            st.caption(f"A: {(_f.get('desc_a') or '')[:120]}  \n"
-                                       f"B: {(_f.get('desc_b') or '')[:120]}")
+                            # En negrita, los datos con números que el otro no dice.
+                            _da, _db = (_f.get('desc_a') or '')[:160], (_f.get('desc_b') or '')[:160]
+                            st.caption(f"A: {resaltar_lo_que_difiere(_da, _db)}  \n"
+                                       f"B: {resaltar_lo_que_difiere(_db, _da)}")
                             _cd, _cm = st.columns([1, 1])
                             _cd.radio("¿Son la misma pieza?", ["—", "✅ Bien", "🚫 Mal"],
                                       key=f"m_dec_{_par[0]}_{_par[1]}", horizontal=True,

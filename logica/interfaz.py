@@ -919,3 +919,78 @@ HERRAMIENTAS_MANTENIMIENTO = [
      "Lo que borraste, para restaurarlo.",
      "papelera borrado restaurar recuperar deshacer borre borro elimine sin querer equivoque error"),
 ]
+
+
+def texto_para_markdown(valor):
+    """Un texto de la base listo para st.markdown SIN HTML: se escapan los signos que markdown
+    lee como formato. Una descripción con «*» o «_» —«JUNTA 1_8 *REF*»— se veía en cursiva o
+    en negrita, o se comía los guiones bajos."""
+    texto = str(valor or "")
+    for signo in "\\`*_[]#|<>":
+        texto = texto.replace(signo, "\\" + signo)
+    return texto
+
+
+def formato_precio(valor):
+    """$ 18.375, con punto de miles como se escribe acá."""
+    try:
+        return "$ " + f"{float(valor):,.0f}".replace(",", ".")
+    except (TypeError, ValueError):
+        return ""
+
+
+def mostrar_tarjetas_de_resultados(filas, tope=40):
+    """Los resultados como tarjetas, para el celular.
+
+    En la tabla, el celular muestra dos o tres columnas y el resto queda a un deslizamiento del
+    dedo. La tarjeta pone lo que contesta el mostrador —marca, código, precio y si hay— arriba,
+    grande, y la descripción abajo. Lo sugirió la revisión de usabilidad con Gemini, mirando
+    capturas del buscador en un iPhone.
+    El stock va con color, porque se mira de reojo mientras se habla con el cliente: 🟢 hay,
+    🔴 no hay, ⚪ no se sabe (la lista no trae stock)."""
+    for f in filas[:tope]:
+        _stock = f.get("Libre", f.get("Stock"))
+        if _stock is None or _stock == "":
+            _semaforo = "⚪ stock s/d"
+        elif _stock > 0:
+            _semaforo = f"🟢 **{_stock:,.0f}** en stock".replace(",", ".")
+        else:
+            _semaforo = "🔴 sin stock"
+        _precio = formato_precio(f.get("Precio")) if f.get("Precio") else "sin precio"
+        _extra = " · ".join(str(x) for x in (f.get("💰"), f.get("Cadena"), f.get("Confianza"))
+                            if x)
+        with st.container(border=True):
+            st.markdown(f"**{texto_para_markdown(f.get('Marca'))}** · `{f.get('Codigo', '')}`  \n"
+                        f"**{_precio}** · {_semaforo}")
+            _desc = texto_para_markdown((f.get("Descripcion") or "")[:140])
+            st.caption(_desc + (f"  \n{texto_para_markdown(_extra)}" if _extra else ""))
+    if len(filas) > tope:
+        st.caption(f"(mostrando {tope} de {len(filas)}: el resto, en «📋 Ver como tabla»)")
+
+
+_RE_DATO_CON_NUMERO = re.compile(r"[0-9A-Za-zÁÉÍÓÚÑáéíóúñ][0-9A-Za-zÁÉÍÓÚÑáéíóúñ.,/-]*")
+
+
+def resaltar_lo_que_difiere(texto, otro):
+    """El texto listo para markdown, con en negrita los datos con números que el otro NO dice
+    («8V» contra «16V», «1.4» contra «1.6», «1968CC»). Es lo que decide si dos juntas son la
+    misma pieza, y leyendo dos descripciones largas se pierde. Solo los que llevan números: las
+    palabras distintas son casi siempre abreviaturas del proveedor («JTA» y «JUNTA»), y
+    resaltarlas sería ruido. Lo sugirió la revisión de usabilidad con Gemini."""
+    def clave(t):
+        # «1.4CC» y «1,4» son el mismo dato: se compara sin la unidad y con punto decimal.
+        k = normalizar_texto(t).strip(".,/-").replace(",", ".").upper()
+        return re.sub(r"(?<=\d)(CC|MM|L)$", "", k)
+    del_otro = {clave(m.group()) for m in _RE_DATO_CON_NUMERO.finditer(str(otro or ""))}
+    salida, desde = [], 0
+    texto = str(texto or "")
+    for m in _RE_DATO_CON_NUMERO.finditer(texto):
+        salida.append(texto_para_markdown(texto[desde:m.start()]))
+        palabra = m.group()
+        if any(ch.isdigit() for ch in palabra) and clave(palabra) not in del_otro:
+            salida.append(f"**{texto_para_markdown(palabra)}**")
+        else:
+            salida.append(texto_para_markdown(palabra))
+        desde = m.end()
+    salida.append(texto_para_markdown(texto[desde:]))
+    return "".join(salida)

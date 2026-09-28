@@ -5318,6 +5318,23 @@ valían:
   no 200.000. La copia lleva la versión en la marca del principio (`CHAVO-COPIA-CIFRADA-2`), así
   que las copias ya subidas con la versión 1 se siguen abriendo.
 
+### Ideas de usabilidad de Gemini, mirando capturas
+
+A Gemini 3 Flash se le mandaron capturas del buscador en un iPhone y de la revisión de
+sugeridas (sin datos de clientes). De sus diez ideas se tomaron las que no estaban ya hechas y
+cambian el trabajo diario:
+
+- **Tarjetas en el celular** (`mostrar_tarjetas_de_resultados()`): marca y código, precio en
+  negrita y el stock con color —🟢 hay, 🔴 no hay, ⚪ sin dato—, porque se mira de reojo
+  mientras se habla con el cliente. La tabla queda a un toque («📋 Ver como tabla»).
+- **En la revisión, en negrita lo que difiere** (`resaltar_lo_que_difiere()`): los datos con
+  números que la otra descripción no dice («1968CC», «16V», «1,55MM»). «1.4CC» y «1,4» cuentan
+  como el mismo dato. Las palabras sin números no se marcan: casi siempre son abreviaturas del
+  proveedor.
+- Y de la revisión de la tarea de fondo: **el caché de fichas tiene tope de tamaño** (40 MB),
+  no solo de cantidad; 400 fichas grandes podían ocupar más de la mitad de la memoria del
+  servidor.
+
 ## 🔗 Revisar sugeridas: primero lo que hay que hacer
 
 Mirado con capturas sobre la base real (15.308 pendientes en 8 listas):
