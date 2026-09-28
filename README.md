@@ -5297,6 +5297,11 @@ Mirado con capturas en un iPhone y en una computadora, con la base real:
 - **El precio con separador de miles** según el idioma del navegador (18.375).
 - **El resumen dice lo que se ve**: «✅ 3 equivalencias en 2 marcas: …». Antes decía «1
   equivalencia, sobre 10 filas en total» y se veían dos (las otras eran códigos de fábrica).
+- **En la búsqueda por descripción se toca la fila** para abrir ese código con todas sus
+  equivalencias (`abrir_la_fila_elegida()`). Antes abajo de la tabla se repetía la lista entera
+  como botones, uno por resultado, y en el celular eran tres pantallas más.
+- **Sin «None» en los textos y el precio sin centavos** en pantalla (`para_mostrar()`); las
+  filas guardadas no se tocan.
 - **«¿Se lo llevó?» en el celular es un selector desde dos resultados**: las columnas se apilan
   y cada fila eran dos botones a lo ancho.
 

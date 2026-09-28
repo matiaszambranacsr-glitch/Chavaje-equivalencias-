@@ -914,7 +914,7 @@ Casi todo lo que edita o borra algo pide la contraseña de administrador la prim
                             if hay_reservas:
                                 visible["Libre"] = libres.get(f["ID"], f.get("Stock") or 0)
                             mostrar.append(visible)
-                        mostrar = quitar_id(mostrar)
+                        mostrar = para_mostrar(quitar_id(mostrar))
                         st.dataframe(
                             mostrar, width="stretch", hide_index=True,
                             column_order=columnas_que_dicen_algo(mostrar),
@@ -1450,14 +1450,18 @@ Casi todo lo que edita o borra algo pide la contraseña de administrador la prim
             res_texto = busqueda_texto_guardada["res"]
             texto_pedido = busqueda_texto_guardada["texto"]
             if res_texto:
-                st.success(f"Se encontraron {len(res_texto)} coincidencia(s):")
-                st.dataframe(quitar_id(res_texto), width="stretch", hide_index=True,
-                         column_order=columnas_que_dicen_algo(quitar_id(res_texto)),
-                         column_config=CONFIG_COLUMNAS_RESULTADO)
-                mostrar_lista_clickeable(
-                    res_texto, "txt_click", limite=15,
-                    nota="👆 Tocá cualquier código para abrirlo con todas sus equivalencias:"
-                )
+                st.success(f"Se encontraron {len(res_texto)} coincidencia(s). 👆 Tocá una fila "
+                           "para abrir ese código con todas sus equivalencias.")
+                # La fila se toca en la misma tabla. Antes abajo se repetía la lista entera como
+                # botones —uno por resultado, con su descripción—, y en el celular la página
+                # medía tres pantallas más para mostrar lo que la tabla ya decía.
+                _tabla_txt = para_mostrar(quitar_id(res_texto))
+                st.dataframe(_tabla_txt, width="stretch", hide_index=True,
+                             column_order=columnas_que_dicen_algo(_tabla_txt),
+                             column_config=CONFIG_COLUMNAS_RESULTADO,
+                             key="tabla_resultados_texto", selection_mode="single-row",
+                             on_select=functools.partial(
+                                 abrir_la_fila_elegida, "tabla_resultados_texto", res_texto))
 
                 # La búsqueda por descripción solo hace coincidir texto: encuentra el producto,
                 # pero no sus equivalentes. Acá se abre la red de equivalencias de cada resultado,
@@ -1482,9 +1486,10 @@ Casi todo lo que edita o borra algo pide la contraseña de administrador la prim
                                           if candidatos_precio else None)
                             for f in equivalentes:
                                 f["💰"] = "🏆 Más barato en stock" if f["ID"] == id_barato else ""
-                            st.dataframe(quitar_id(equivalentes), width="stretch", hide_index=True,
-                         column_order=columnas_que_dicen_algo(quitar_id(equivalentes)),
-                         column_config=CONFIG_COLUMNAS_RESULTADO)
+                            _tabla_eq = para_mostrar(quitar_id(equivalentes))
+                            st.dataframe(_tabla_eq, width="stretch", hide_index=True,
+                                         column_order=columnas_que_dicen_algo(_tabla_eq),
+                                         column_config=CONFIG_COLUMNAS_RESULTADO)
                         else:
                             st.caption("Este producto todavía no tiene equivalencias cargadas.")
 

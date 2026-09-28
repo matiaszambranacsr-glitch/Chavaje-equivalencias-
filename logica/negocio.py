@@ -1856,6 +1856,34 @@ CONFIG_COLUMNAS_RESULTADO = {
 }
 
 
+def para_mostrar(filas):
+    """Una copia de las filas lista para la tabla: los textos vacíos en blanco y no «None», y el
+    precio sin centavos (68.057 y no 68,056.53: en el mostrador nadie cobra centavos, y la
+    columna se leía peor). No toca las filas originales, que siguen en la sesión."""
+    if not filas:
+        return []
+    texto = {k for f in filas for k, v in f.items() if isinstance(v, str)}
+    salida = []
+    for f in filas:
+        g = dict(f)
+        for k in texto:
+            if g.get(k) is None:
+                g[k] = ""
+        if isinstance(g.get("Precio"), float):
+            g["Precio"] = round(g["Precio"])
+        salida.append(g)
+    return salida
+
+
+def abrir_la_fila_elegida(clave_tabla, filas):
+    """Callback de una tabla con selección: la fila tocada se abre como búsqueda por código,
+    con todas sus equivalencias (ver cb_ver_equivalencias())."""
+    elegida = st.session_state.get(clave_tabla)
+    filas_elegidas = getattr(getattr(elegida, "selection", None), "rows", None) or []
+    if filas_elegidas and filas_elegidas[0] < len(filas):
+        cb_ver_equivalencias(filas[filas_elegidas[0]]["Codigo"])
+
+
 def quitar_id(filas):
     """Quita la clave ID de cada diccionario para mostrar en pantalla."""
     return [{k: v for k, v in f.items() if k != "ID"} for f in filas]
