@@ -987,6 +987,18 @@ def _esquema_gestion(c):
         precios INTEGER,
         fecha TEXT DEFAULT (datetime('now'))
     )""")
+    # Lo que no se pudo bajar por la red (el sitio no contestó, cortó, dio 500). Sirve para dos
+    # cosas: no reintentar lo mismo más de una vez por día, y dejarlo de intentar al tercer día
+    # que falla —ahí se marca como hecho en su propia tabla—. «Reintentar las que fallaron»
+    # vuelve a habilitar lo que quedó acá. Ver _anotar_fallas() en proveedores.py.
+    c.execute("""CREATE TABLE IF NOT EXISTS descargas_fallidas (
+        fuente TEXT NOT NULL,
+        clave TEXT NOT NULL,
+        intentos INTEGER NOT NULL DEFAULT 0,
+        error TEXT,
+        fecha TEXT,
+        PRIMARY KEY (fuente, clave)
+    )""")
 
     # Vínculos que llegaron de una lista de proveedor y esperan revisión. Una importación puede
     # generar miles de vínculos de una: si se cargaran solos, un error en la columna de código de

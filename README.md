@@ -5280,6 +5280,39 @@ Medido con un servidor falso: los 96 códigos SKF citados en la base real se ley
 pasada (antes eran hasta 150 por día); con el sitio caído cortó a los 5 pedidos y se pausó una
 hora.
 
+## ✅ Lo que ya se bajó no se vuelve a bajar
+
+**Cuando una tarea automática termina, no se repite.** Si no encuentra nada pendiente queda
+«terminada» (`terminado_<tarea>` en la configuración) y la tanda de fondo ya no la mira: ni cada
+rato, ni al reiniciar el servidor, ni al importar una lista. Se reabre solo si lo pedís:
+
+- **Administrar → Mantenimiento → ⚡ Carga automática → 🔄 Buscar lo nuevo** (o el mismo botón
+  al lado del avance de cada tanda),
+- prendiendo una tarea que estaba apagada,
+- o, si prendés «Al importar una lista, buscar solo lo nuevo de esa lista», al importar
+  (apagado de fábrica).
+
+**Y al reabrirla no baja nada de lo que ya bajó.** Cada fuente anota lo hecho: la foto en el
+producto, `ficha_equiv_leida`, `fichas_de_catalogo_leidas`, `mercado_libre_leidos`. Solo se pide
+lo que falta. Además:
+
+- **La misma ficha no se pide dos veces.** Las fotos y las equivalencias leen la misma página
+  del proveedor; las últimas 400 fichas leídas quedan en memoria (sin scripts ni estilos), y
+  las equivalencias van por la misma marca que acaban de recorrer las fotos. Medido con un
+  servidor falso: 81 productos con las dos tareas prendidas, 81 fichas pedidas, ninguna dos
+  veces.
+- **Una foto compartida se baja una vez.** La foto de un catálogo de fabricante queda
+  propuesta para todos los productos que citan ese código. Antes se bajaba una vez por cada
+  uno; ahora una vez por link (3 productos con el mismo link: 1 pedido).
+- **Lo que falla por la red se reintenta una vez por día, hasta tres días**
+  (tabla `descargas_fallidas`, ver `_anotar_fallas()`). Lo que falló hoy no se vuelve a pedir
+  hoy. Al tercer día se deja de intentar, se marca como hecho y figura en «Dejadas de
+  intentar». Mientras quede algo para reintentar, la tarea descansa hasta mañana en vez de
+  terminar. **♻️ Reintentar las que fallaron** vuelve a probar solo esas: en la prueba, 3
+  pedidos y no los 96 del catálogo.
+- Un «no hay ficha» (404) o «la ficha no tiene foto» es una respuesta, no una falla: queda
+  anotado y no se reintenta.
+
 ## 🎯 Tus propios datos: qué pedir y a quién avisar
 
 - **Qué te conviene cargar o pedir** (Estadísticas → 🔎 Búsquedas sin resultado). La lista de

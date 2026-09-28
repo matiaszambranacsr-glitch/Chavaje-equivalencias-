@@ -249,8 +249,8 @@ Casi todo lo que edita o borra algo pide la contraseña de administrador la prim
                 "🤖 Traer fotos solas, en segundo plano",
                 value=obtener_config("fotos_automaticas", "0") == "1",
                 key="fotos_auto_check",
-                on_change=lambda: guardar_config(
-                    "fotos_automaticas", "1" if st.session_state["fotos_auto_check"] else "0"),
+                on_change=lambda: prender_tarea_de_fondo(
+                    "fotos", "fotos_automaticas", st.session_state["fotos_auto_check"]),
                 help="Mientras la app esté abierta, va trayendo fotos de las fichas del "
                      "proveedor en un hilo aparte: nadie espera. Sale a internet, por eso lo "
                      "elegís vos."

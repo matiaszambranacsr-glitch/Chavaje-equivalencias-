@@ -952,6 +952,9 @@ if pagina == PAGINAS[2]:
                     # Lo levanta el hilo de fondo, que ya existe. Ver _trabajo_de_fondo().
                     try:
                         guardar_config("descubrimiento_pendiente", "1")
+                        # Las fotos y fichas de lo nuevo: solo si lo elegiste (ver
+                        # lo_nuevo_al_importar()). Lo que ya terminó no arranca solo.
+                        lo_nuevo_al_importar()
                         arrancar_tanda_de_fondo()
                         st.info("🧠 **Se están buscando solas las relaciones nuevas de esta "
                                  "lista.** Corre por atrás: podés seguir usando la app.")

@@ -695,6 +695,7 @@ def leer_catalogo_de_fabricante(nombre_catalogo, cuantos=20, pausa=PAUSA_ENTRE_F
     c.execute("SELECT codigo FROM fichas_de_catalogo_leidas WHERE catalogo = ?",
               (nombre_catalogo,))
     ya = {r[0] for r in c.fetchall()}
+    ya |= _fallaron_hoy(f"catalogo:{nombre_catalogo}")      # esas, mañana
     faltan = sorted((cod for cod in citados if cod not in ya),
                     key=lambda cod: (-len(set(citados[cod])), cod))
     resumen["pendientes"] = len(faltan)
@@ -704,7 +705,7 @@ def leer_catalogo_de_fabricante(nombre_catalogo, cuantos=20, pausa=PAUSA_ENTRE_F
         base = requests.Session()
         base.headers.update({"User-Agent": "Mozilla/5.0 (compatible; EquivalenciasElChavo/1.0)"})
         sesion = SesionSoloLectura(base, cat["url"]("X1"))
-    pares, leidas, fallas_seguidas = [], [], 0
+    pares, leidas, fallas_seguidas, fallas_de_red = [], [], 0, []
     tanda = faltan[:int(cuantos)]
     for i, cod in enumerate(tanda):
         url = cat["url"](cod)
@@ -741,6 +742,7 @@ def leer_catalogo_de_fabricante(nombre_catalogo, cuantos=20, pausa=PAUSA_ENTRE_F
             fallas_seguidas += 1
             resumen["sin_ficha"] += 1
             resumen["fallidas"] += 1
+            fallas_de_red.append((cod, err))
             if fallas_seguidas >= 5:
                 resumen["error"] = f"{fallas_seguidas} fichas seguidas sin poder abrirse: {err}"
                 break
@@ -766,6 +768,12 @@ def leer_catalogo_de_fabricante(nombre_catalogo, cuantos=20, pausa=PAUSA_ENTRE_F
             progreso((i + 1) / len(tanda), f"{i + 1} de {len(tanda)}...")
         if pausa and i + 1 < len(tanda):
             time.sleep(pausa)
+    # Lo que falló por la red tres días distintos se da por leído «sin ficha» (ver _anotar_fallas()).
+    # Las que respondieron dejan de contar como fallidas; las rendidas siguen anotadas, que es lo
+    # que usa «Reintentar las que fallaron».
+    _fuente = f"catalogo:{nombre_catalogo}"
+    _olvidar_fallas(_fuente, [cod for _n, cod, _j in leidas])
+    leidas.extend((nombre_catalogo, cod, None) for cod in _anotar_fallas(_fuente, fallas_de_red))
     with transaccion():
         c.executemany("""INSERT OR REPLACE INTO fichas_de_catalogo_leidas
                          (catalogo, codigo, productos_juntos) VALUES (?, ?, ?)""", leidas)
@@ -1028,14 +1036,15 @@ def leer_mercado_libre(cuantos=30, pausa=PAUSA_ENTRE_BUSQUEDAS_DE_MERCADO_LIBRE,
     if error:
         resumen["error"] = error
         return resumen
-    c.execute("""SELECT p.id, p.codigo_raw, p.codigo_clean, m.nombre AS marca, m.tipo AS tipo
+    c.execute(f"""SELECT p.id, p.codigo_raw, p.codigo_clean, m.nombre AS marca, m.tipo AS tipo
                  FROM productos p JOIN marcas m ON m.id = p.marca_id
                  WHERE p.id NOT IN (SELECT producto_id FROM mercado_libre_leidos)
                    AND LENGTH(p.codigo_clean) >= 5
+                   AND {_no_fallo_hoy("mercado_libre", "p.id")}
                  ORDER BY (COALESCE(p.stock, 0) > 0) DESC, (m.tipo = 'OEM'), p.id LIMIT ?""",
               (int(cuantos),))
     pendientes = [dict(r) for r in c.fetchall()]
-    pares, leidos, fallas_seguidas = [], [], 0
+    pares, leidos, fallas_seguidas, fallas_de_red = [], [], 0, []
     for i, prod in enumerate(pendientes):
         es_de_fabrica = prod["tipo"] == "OEM"
         marca = "" if es_de_fabrica else (_submarca_del_codigo(prod["codigo_raw"]) or prod["marca"])
@@ -1043,6 +1052,7 @@ def leer_mercado_libre(cuantos=30, pausa=PAUSA_ENTRE_BUSQUEDAS_DE_MERCADO_LIBRE,
             f"{_codigo_sin_la_marca_pegada(prod['codigo_raw'])} {marca}".strip())
         if err:
             fallas_seguidas += 1
+            fallas_de_red.append((prod["id"], err))
             if fallas_seguidas >= 5:
                 resumen["error"] = err
                 break
@@ -1077,6 +1087,9 @@ def leer_mercado_libre(cuantos=30, pausa=PAUSA_ENTRE_BUSQUEDAS_DE_MERCADO_LIBRE,
             progreso((i + 1) / len(pendientes), f"{i + 1} de {len(pendientes)}...")
         if pausa and i + 1 < len(pendientes):
             time.sleep(pausa)
+    # Lo que falló tres días distintos se da por buscado, sin publicaciones (ver _anotar_fallas()).
+    _olvidar_fallas("mercado_libre", [pid for pid, _p, _m, _n in leidos])
+    leidos.extend((pid, None, None, 0) for pid in _anotar_fallas("mercado_libre", fallas_de_red))
     with transaccion():
         c.executemany("""INSERT OR REPLACE INTO mercado_libre_leidos
                          (producto_id, publicaciones, precio_mediano, precios) VALUES (?, ?, ?, ?)""",
@@ -1170,13 +1183,139 @@ def buscar_imagen_en_ficha(url_ficha, tiempo_maximo=12, sesion=None):
         return None, type(e).__name__
 
 
+# LO QUE FALLÓ POR LA RED: UNA VEZ POR DÍA Y HASTA TRES DÍAS. Un sitio que no contesta no dice
+# nada de la ficha: mañana puede andar. Pero reintentarla en cada vuelta es bajar lo mismo una y
+# otra vez, y con la carga sin tope por día eso es golpear al sitio sin parar. Cada falla suma
+# un intento por día como mucho; al tercer día distinto que falla se deja de intentar y se marca
+# como hecha en su propia tabla, así la tarea puede terminar. «Reintentar las que fallaron»
+# (reintentar_descargas_fallidas()) las vuelve a habilitar.
+INTENTOS_POR_DESCARGA = 3
+
+
+def _anotar_fallas(fuente, fallas):
+    """Anota [(clave, error)] que fallaron por la red. Suma un intento por día como mucho.
+    Devuelve las claves que llegaron a INTENTOS_POR_DESCARGA: esas ya no se reintentan."""
+    if not fallas:
+        return []
+    hoy = datetime.now().strftime("%Y-%m-%d")
+    rendidas = []
+    try:
+        claves = [str(k) for k, _e in fallas]
+        previas = {}
+        for tanda, marcadores in en_tandas(claves, tope=TOPE_VARIABLES_POR_CONSULTA - 1):
+            c.execute(f"""SELECT clave, intentos, fecha FROM descargas_fallidas
+                          WHERE fuente = ? AND clave IN ({marcadores})""", [fuente, *tanda])
+            previas.update({r["clave"]: (r["intentos"], r["fecha"]) for r in c.fetchall()})
+        filas = []
+        for clave, error in fallas:
+            intentos, fecha = previas.get(str(clave), (0, ""))
+            if fecha != hoy:
+                intentos += 1
+            filas.append((fuente, str(clave), intentos, str(error or "")[:200], hoy))
+            if intentos >= INTENTOS_POR_DESCARGA:
+                rendidas.append(clave)
+        with db_lock, transaccion():
+            c.executemany("""INSERT OR REPLACE INTO descargas_fallidas
+                             (fuente, clave, intentos, error, fecha) VALUES (?, ?, ?, ?, ?)""",
+                          filas)
+    except sqlite3.OperationalError as _err:
+        anotar_error("_anotar_fallas", _err)
+    return rendidas
+
+
+def _no_fallo_hoy(fuente, columna="id"):
+    """Condición SQL: el producto no falló hoy por la red en esa fuente. Lo que falló hoy se
+    reintenta mañana, no en la vuelta siguiente: si no, la tanda lo volvería a bajar cada
+    minuto mientras avanza con lo demás."""
+    return (f"{columna} NOT IN (SELECT CAST(clave AS INTEGER) FROM descargas_fallidas "
+            f"WHERE fuente = '{fuente}' AND fecha = date('now', 'localtime'))")
+
+
+def _fallaron_hoy(fuente):
+    """Las claves que fallaron hoy en esa fuente (para las que no son productos)."""
+    try:
+        c.execute("""SELECT clave FROM descargas_fallidas
+                     WHERE fuente = ? AND fecha = date('now', 'localtime')""", (fuente,))
+        return {r[0] for r in c.fetchall()}
+    except sqlite3.OperationalError as _err:
+        anotar_error("_fallaron_hoy", _err)
+        return set()
+
+
+def _quedan_para_reintentar(prefijo):
+    """¿Hay algo de esa fuente que falló y todavía se va a reintentar otro día?"""
+    try:
+        c.execute("""SELECT 1 FROM descargas_fallidas
+                     WHERE fuente LIKE ? AND intentos < ? LIMIT 1""",
+                  (prefijo + "%", INTENTOS_POR_DESCARGA))
+        return c.fetchone() is not None
+    except sqlite3.OperationalError as _err:
+        anotar_error("_quedan_para_reintentar", _err)
+        return False
+
+
+def _olvidar_fallas(fuente, claves):
+    """Lo que bajó bien ya no cuenta como fallado."""
+    if not claves:
+        return
+    try:
+        with db_lock, transaccion():
+            c.executemany("DELETE FROM descargas_fallidas WHERE fuente = ? AND clave = ?",
+                          [(fuente, str(k)) for k in claves])
+    except sqlite3.OperationalError as _err:
+        anotar_error("_olvidar_fallas", _err)
+
+
+def contar_descargas_fallidas():
+    """{fuente: cuántas se dejaron de intentar}. Nunca falla."""
+    try:
+        c.execute("""SELECT fuente, COUNT(*) FROM descargas_fallidas
+                     WHERE intentos >= ? GROUP BY fuente""", (INTENTOS_POR_DESCARGA,))
+        return {r[0]: r[1] for r in c.fetchall()}
+    except sqlite3.OperationalError as _err:
+        anotar_error("contar_descargas_fallidas", _err)
+        return {}
+
+
+def reintentar_descargas_fallidas():
+    """Vuelve a habilitar todo lo que se dejó de intentar por fallas de red, y reabre las tareas.
+    Lo que ya bajó bien NO se toca: eso no se vuelve a bajar nunca. Devuelve cuántas habilitó."""
+    tope = INTENTOS_POR_DESCARGA
+    rendidas = ("SELECT CAST(clave AS INTEGER) FROM descargas_fallidas "
+                "WHERE fuente = ? AND intentos >= ?")
+    try:
+        with db_lock, transaccion():
+            n = c.execute("SELECT COUNT(*) FROM descargas_fallidas WHERE intentos >= ?",
+                          (tope,)).fetchone()[0]
+            c.execute("""UPDATE productos SET foto_busqueda_estado = NULL
+                         WHERE foto_busqueda_estado = 'fallo'""")
+            c.execute(f"""UPDATE productos SET foto_busqueda_estado = NULL
+                          WHERE foto_busqueda_estado = 'link_roto' AND id IN ({rendidas})""",
+                      ("foto_link", tope))
+            c.execute(f"UPDATE productos SET ficha_equiv_leida = NULL WHERE id IN ({rendidas})",
+                      ("equiv_ficha", tope))
+            c.execute(f"DELETE FROM mercado_libre_leidos WHERE producto_id IN ({rendidas})",
+                      ("mercado_libre", tope))
+            c.execute("""DELETE FROM fichas_de_catalogo_leidas
+                         WHERE EXISTS (SELECT 1 FROM descargas_fallidas d
+                                       WHERE d.fuente = 'catalogo:' || catalogo
+                                         AND d.clave = codigo AND d.intentos >= ?)""", (tope,))
+            c.execute("DELETE FROM descargas_fallidas")
+    except sqlite3.OperationalError as _err:
+        anotar_error("reintentar_descargas_fallidas", _err)
+        return 0
+    buscar_lo_nuevo()
+    return n
+
+
 # Las fotos como link que todavía no se bajaron. Que el link esté en la ficha no alcanza para
 # saberlo: en modo liviano la foto bajada se guarda como el MISMO link (ver
 # agregar_foto_producto()), así que se miraba solo eso y cada tanda volvía a bajar las mismas y
 # a sumarlas repetidas. Lo que dice si ya se bajó es que tenga fotos en producto_fotos. Y un link
 # que no bajó queda marcado, para no reintentarlo en cada vuelta.
-_FOTO_POR_BAJAR = """imagen_url IS NOT NULL AND imagen_url LIKE 'http%'
+_FOTO_POR_BAJAR = f"""imagen_url IS NOT NULL AND imagen_url LIKE 'http%'
                      AND COALESCE(foto_busqueda_estado, '') <> 'link_roto'
+                     AND {_no_fallo_hoy("foto_link")}
                      AND NOT EXISTS (SELECT 1 FROM producto_fotos f
                                      WHERE f.producto_id = productos.id)"""
 
@@ -1220,32 +1359,54 @@ def _bajar_en_paralelo(tareas, funcion, hilos=6, progreso=None, cancelado=None):
 
 
 def bajar_fotos_pendientes(limite=200, progreso=None, hilos=6, liviano=True):
-    """Baja las fotos que están como link externo y las guarda, con miniatura y firma visual."""
-    c.execute(f"SELECT id, imagen_url FROM productos WHERE {_FOTO_POR_BAJAR} LIMIT ?", (limite,))
-    pendientes = [(r["id"], r["imagen_url"]) for r in c.fetchall()]
-    if not pendientes:
+    """Baja las fotos que están como link externo y las guarda, con miniatura y firma visual.
+
+    Cada LINK se baja una sola vez aunque lo compartan varios productos: la foto de un catálogo
+    de fabricante queda propuesta para todos los productos tuyos que citan ese código, y antes
+    se bajaba la misma imagen una vez por cada uno."""
+    c.execute(f"""SELECT DISTINCT imagen_url FROM productos WHERE {_FOTO_POR_BAJAR}
+                  LIMIT ?""", (limite,))
+    links = [r[0] for r in c.fetchall()]
+    if not links:
         return 0, []
+    por_link = {}
+    for tanda, marcadores in en_tandas(links):
+        c.execute(f"""SELECT id, imagen_url FROM productos WHERE {_FOTO_POR_BAJAR}
+                        AND imagen_url IN ({marcadores})""", tanda)
+        for r in c.fetchall():
+            por_link.setdefault(r["imagen_url"], []).append(r["id"])
 
     resultados = _bajar_en_paralelo(
-        pendientes, lambda t: descargar_imagen(t[1]), hilos=hilos, progreso=progreso
+        list(por_link.items()), lambda t: descargar_imagen(t[0]), hilos=hilos, progreso=progreso
     )
 
-    bajadas, fallidas = 0, []
-    for (pid, url), datos, error in resultados:
+    bajadas, fallidas, por_la_red, rotas = 0, [], [], []
+    for (url, pids), datos, error in resultados:
         if datos:
-            try:
-                actualizar_imagen_producto(pid, datos, origen="link", fuente=url, liviano=liviano)
-                bajadas += 1
-            except Exception as e:
-                anotar_error("bajar_fotos_pendientes", e)
-                fallidas.append((url, type(e).__name__))
+            for pid in pids:
+                try:
+                    actualizar_imagen_producto(pid, datos, origen="link", fuente=url,
+                                               liviano=liviano)
+                    bajadas += 1
+                except Exception as e:
+                    anotar_error("bajar_fotos_pendientes", e)
+                    fallidas.append((url, type(e).__name__))
+            _olvidar_fallas("foto_link", pids)
         else:
-            fallidas.append((url, error))
-            # Solo lo que es una respuesta —no existe, no es una imagen—, no un corte de red.
+            fallidas.extend((url, error) for _p in pids)
+            # Solo lo que es una respuesta —no existe, no es una imagen— es definitivo. Un corte
+            # de red se reintenta otro día, hasta tres (ver _anotar_fallas()).
             if error and ("respondió 404" in error or "respondió 410" in error
                           or "no devuelve una imagen" in error):
-                c.execute("UPDATE productos SET foto_busqueda_estado = 'link_roto' WHERE id = ?",
-                          (pid,))
+                rotas.extend(pids)
+            else:
+                por_la_red.extend((pid, error) for pid in pids)
+    rotas.extend(_anotar_fallas("foto_link", por_la_red))
+    if rotas:
+        with db_lock:
+            c.executemany("UPDATE productos SET foto_busqueda_estado = 'link_roto' WHERE id = ?",
+                          [(pid,) for pid in rotas])
+            conn.commit()
     return bajadas, fallidas
 
 
@@ -1299,6 +1460,7 @@ def bajar_fotos_desde_catalogo(marca_id, limite=100, progreso=None, hilos=6, liv
     c.execute(f"""SELECT id, codigo_raw FROM productos
                   WHERE marca_id = ? AND imagen_url IS NULL
                     AND (foto_busqueda_estado IS NULL OR foto_busqueda_estado = 'error')
+                    AND {_no_fallo_hoy("foto_ficha")}
                     {_condicion_filtro_fotos(filtro)}
                   ORDER BY (stock > 0) DESC, id
                   LIMIT ?""", (marca_id, limite))
@@ -1316,7 +1478,7 @@ def bajar_fotos_desde_catalogo(marca_id, limite=100, progreso=None, hilos=6, liv
     resultados = _bajar_en_paralelo(pendientes, traer, hilos=hilos, progreso=progreso,
                                     cancelado=cancelado)
 
-    bajadas, fallidas, sin_foto = 0, [], 0
+    bajadas, fallidas, sin_foto, por_la_red, bien = 0, [], 0, [], []
     for (pid, codigo), datos, error in resultados:
         url_ficha = url_de_la_ficha(plantilla, codigo)
         if datos:
@@ -1324,19 +1486,30 @@ def bajar_fotos_desde_catalogo(marca_id, limite=100, progreso=None, hilos=6, liv
                 actualizar_imagen_producto(pid, datos, origen="ficha", fuente=url_ficha,
                                             liviano=liviano)
                 bajadas += 1
+                bien.append(pid)
                 continue
             except Exception as e:
                 anotar_error("bajar_fotos_desde_catalogo", e)
                 error = type(e).__name__
         fallidas.append((codigo, error))
-        # "no encontré una foto" es definitivo para ese código; un error de red no lo es
-        definitivo = error and "no encontré" in str(error)
+        # «no encontré una foto» o «no hay ficha» son definitivos para ese código; un error de
+        # red no lo es: se reintenta otro día, hasta tres (ver _anotar_fallas()).
+        definitivo = not _falla_de_la_red(error)
+        if not definitivo:
+            por_la_red.append((pid, error))
         with db_lock:
             c.execute("UPDATE productos SET foto_busqueda_estado = ? WHERE id = ?",
                       ("sin_foto" if definitivo else "error", pid))
             conn.commit()
         if definitivo:
             sin_foto += 1
+    rendidas = _anotar_fallas("foto_ficha", por_la_red)
+    if rendidas:
+        with db_lock:
+            c.executemany("UPDATE productos SET foto_busqueda_estado = 'fallo' WHERE id = ?",
+                          [(pid,) for pid in rendidas])
+            conn.commit()
+    _olvidar_fallas("foto_ficha", bien)
     _si_falla_casi_todo_la_sesion_venció(fila["nombre"], sesion, len(fallidas), len(pendientes))
     return bajadas, fallidas, sin_foto
 
@@ -1464,9 +1637,59 @@ def _traer_pagina(url, tiempo_maximo=12, sesion=None, **extra):
     Existe para que las dos funciones que leen fichas —la de fotos y la de equivalencias— usen
     exactamente el mismo camino. Eran dos requests.get() casi iguales, y agregarle el login a
     una sola habría dejado la otra afuera sin que se notara."""
+    guardada = _pagina_guardada(url) if not extra else None
+    if guardada is not None:
+        return guardada
     pedir = (sesion or requests).get
     cabeceras = {"User-Agent": "Mozilla/5.0 (compatible; EquivalenciasElChavo/1.0)"}
-    return pedir(url, timeout=tiempo_maximo, headers=cabeceras, **extra)
+    respuesta = pedir(url, timeout=tiempo_maximo, headers=cabeceras, **extra)
+    if not extra:
+        _guardar_pagina(url, respuesta)
+    return respuesta
+
+
+# LA MISMA FICHA NO SE BAJA DOS VECES. Las fotos y las equivalencias leen la MISMA página del
+# proveedor —la ficha de cada código—, y con las dos tareas prendidas cada ficha se pedía dos
+# veces. Se guardan en memoria las últimas fichas leídas (sin scripts ni estilos, que es lo que
+# más pesa y ninguna de las dos usa), un rato y con tope de tamaño: alcanza para que la segunda
+# tarea encuentre la ficha que acaba de leer la primera (ver _trabajo_de_fondo(), que las hace
+# ir por la misma marca).
+PAGINAS_EN_MEMORIA = 400
+MINUTOS_DE_PAGINA_EN_MEMORIA = 180
+_PAGINAS_RECIENTES = del_proceso("paginas_recientes", dict)
+_CANDADO_PAGINAS = del_proceso("candado_de_paginas_recientes", threading.Lock)
+
+
+class _PaginaGuardada:
+    """Lo que usan de la respuesta quienes leen fichas: el código y el texto."""
+    def __init__(self, status_code, text, headers):
+        self.status_code, self.text, self.headers = status_code, text, headers
+        self.content = text.encode("utf-8", "ignore")
+
+
+def _pagina_guardada(url):
+    with _CANDADO_PAGINAS:
+        guardada = _PAGINAS_RECIENTES.get(url)
+    if guardada and time.time() - guardada[0] < MINUTOS_DE_PAGINA_EN_MEMORIA * 60:
+        return guardada[1]
+    return None
+
+
+def _guardar_pagina(url, respuesta):
+    try:
+        tipo = (respuesta.headers.get("Content-Type") or "").lower()
+        if respuesta.status_code not in (200, 404) or "html" not in tipo:
+            return      # solo respuestas que dicen algo de la ficha; un 500 se reintenta
+        texto = re.sub(r"(?is)<(script|style)[^>]*>.*?</\1>", " ", respuesta.text or "")
+        if len(texto) > 1_500_000:
+            return
+        with _CANDADO_PAGINAS:
+            _PAGINAS_RECIENTES[url] = (time.time(), _PaginaGuardada(
+                respuesta.status_code, texto, {"Content-Type": tipo}))
+            while len(_PAGINAS_RECIENTES) > PAGINAS_EN_MEMORIA:
+                _PAGINAS_RECIENTES.pop(next(iter(_PAGINAS_RECIENTES)))
+    except Exception as _err:
+        anotar_error("_guardar_pagina", _err)
 
 
 def codigos_en_una_ficha(url_ficha, codigo_propio, tiempo_maximo=12, sesion=None):
@@ -1533,7 +1756,8 @@ def equivalencias_desde_catalogo(marca_id, limite=50, progreso=None, cancelado=N
     # tenga las equivalencias completas.
     # solo_no_leidos es lo que permite avanzar de a tandas sin repetir: lo usa la tarea del día.
     # A mano se deja en False porque ahí la intención suele ser volver a mirar lo importante.
-    _filtro = " AND ficha_equiv_leida IS NULL" if solo_no_leidos else ""
+    _filtro = (f" AND ficha_equiv_leida IS NULL AND {_no_fallo_hoy('equiv_ficha')}"
+               if solo_no_leidos else "")
     c.execute(f"""SELECT id, codigo_raw, codigo_clean FROM productos
                   WHERE marca_id = ?{_filtro}
                   ORDER BY (COALESCE(stock, 0) > 0) DESC, id LIMIT ?""",
@@ -1577,12 +1801,20 @@ def equivalencias_desde_catalogo(marca_id, limite=50, progreso=None, cancelado=N
     # El "no" también es información: sin anotarlo, la próxima tanda vuelve a golpear las mismas
     # fichas vacías y el recorrido no avanza nunca. Es el mismo problema que ya se arregló con
     # foto_busqueda_estado para las fotos.
+    # La excepción es la falla de red: esa no dice nada de la ficha, así que queda sin leer y se
+    # reintenta otro día, hasta tres (ver _anotar_fallas()).
     try:
         _ahora_txt = datetime.now().strftime("%Y-%m-%d")
+        _red = [(pid, _e) for (pid, _c, _l), _x, _e in resultados if _falla_de_la_red(_e)]
+        _rendidas = set(_anotar_fallas("equiv_ficha", _red))
+        _sin_leer = {pid for pid, _e in _red} - _rendidas
         with db_lock:
             c.executemany("UPDATE productos SET ficha_equiv_leida = ? WHERE id = ?",
-                          [(_ahora_txt, pid) for (pid, _c, _l), _x, _e in resultados])
+                          [(_ahora_txt, pid) for (pid, _c, _l), _x, _e in resultados
+                           if pid not in _sin_leer])
             conn.commit()
+        _olvidar_fallas("equiv_ficha", [pid for (pid, _c, _l), _x, _e in resultados
+                                        if not _falla_de_la_red(_e)])
     except sqlite3.OperationalError as _err:
         anotar_error("equivalencias_desde_catalogo/marcar", _err)
 
@@ -1692,8 +1924,66 @@ def _descansar(que, minutos=MINUTOS_DE_DESCANSO):
                    (datetime.now() + timedelta(minutes=minutos)).strftime("%Y-%m-%d %H:%M:%S"))
 
 
+# UNA VEZ QUE TERMINA, NO SE REPITE. Cuando una tarea no encuentra nada pendiente queda
+# «terminada» y la tanda de fondo ya no la vuelve a mirar: ni cada media hora, ni al importar una
+# lista, ni al reiniciar el servidor. Se reabre solo cuando lo pedís (buscar_lo_nuevo(), el botón
+# «🔄 Buscar lo nuevo»), o al prenderla, o —si lo elegiste— al importar una lista. Y al reabrirla
+# no vuelve a bajar nada de lo que ya bajó: cada fuente anota lo hecho en su tabla (la foto en el
+# producto, ficha_equiv_leida, fichas_de_catalogo_leidas, mercado_libre_leidos) y solo busca lo
+# que falta.
+# Cada tarea, con la fuente con que anota sus fallas de red (ver _anotar_fallas()).
+TAREAS_DE_FONDO = {
+    "fotos": ("📷 Fotos de las fichas del proveedor", "foto_ficha"),
+    "equiv": ("🌐 Equivalencias de las fichas del proveedor", "equiv_ficha"),
+    "catalogos": ("🏭 Catálogos de fabricantes", "catalogo:"),
+    "mercado_libre": ("🛒 Mercado Libre", "mercado_libre"),
+    "fotos_de_internet": ("🖼️ Fotos que dejaron esos sitios", "foto_link"),
+    "firmas": ("🔍 Firmas visuales para la cámara", None),
+}
+
+
+def _terminada(que):
+    return bool(obtener_config(f"terminado_{que}", ""))
+
+
+def _dar_por_terminada(que):
+    """No queda nada pendiente. Si hay algo que falló hoy por la red y se reintenta mañana,
+    descansa hasta mañana en vez de terminar: si no, eso quedaría sin bajar para siempre."""
+    fuente = TAREAS_DE_FONDO.get(que, ("", None))[1]
+    if fuente and _quedan_para_reintentar(fuente):
+        manana = (datetime.now() + timedelta(days=1)).replace(hour=0, minute=5, second=0)
+        _descansar(que, int((manana - datetime.now()).total_seconds() // 60) + 1)
+    else:
+        guardar_config(f"terminado_{que}", datetime.now().strftime("%Y-%m-%d %H:%M"))
+
+
+def buscar_lo_nuevo(tareas=None):
+    """Reabre las tareas terminadas (todas, o las pedidas) y larga la tanda. Solo va a buscar lo
+    que falta: lo ya bajado está anotado y no se vuelve a pedir."""
+    for que in (tareas or TAREAS_DE_FONDO):
+        guardar_config(f"terminado_{que}", "")
+        guardar_config(f"descanso_{que}", "")
+        if que == "fotos_de_internet":
+            guardar_config("fotos_de_internet_pendientes", "1")
+    return arrancar_tanda_de_fondo()
+
+
+def prender_tarea_de_fondo(que, clave_config, prendida):
+    """Para los interruptores: prenderla es pedirla, así que también la reabre."""
+    guardar_config(clave_config, "1" if prendida else "0")
+    if prendida:
+        buscar_lo_nuevo([que])
+
+
+def lo_nuevo_al_importar():
+    """Después de importar una lista, ¿se buscan solas las fotos y fichas de lo nuevo? Apagado
+    de fábrica: lo que ya terminó no arranca hasta que lo pidas."""
+    if obtener_config("buscar_lo_nuevo_al_importar", "0") == "1":
+        buscar_lo_nuevo()
+
+
 def _tarea_prendida(que):
-    """La tarea está prendida por el usuario y no está descansando."""
+    """La tarea está prendida por el usuario, no terminó y no está descansando."""
     if que == "fotos":
         prendida = obtener_config("fotos_automaticas", "0") == "1"
     elif que == "equiv":
@@ -1704,7 +1994,17 @@ def _tarea_prendida(que):
         prendida = mercado_libre_automatico()
     else:
         prendida = True
-    return prendida and not _descansando(que)
+    return prendida and not _terminada(que) and not _descansando(que)
+
+
+def _le_faltan_equivalencias(marca_id):
+    try:
+        c.execute(f"""SELECT 1 FROM productos WHERE marca_id = ? AND ficha_equiv_leida IS NULL
+                        AND {_no_fallo_hoy('equiv_ficha')} LIMIT 1""", (marca_id,))
+        return c.fetchone() is not None
+    except sqlite3.OperationalError as _err:
+        anotar_error("_le_faltan_equivalencias", _err)
+        return False
 
 
 def _marca_con_mas_fichas_pendientes(que):
@@ -1713,8 +2013,10 @@ def _marca_con_mas_fichas_pendientes(que):
     Se elige la de más pendientes y no la primera: así el catálogo más grande —que es el que
     tarda años— avanza primero, en vez de repartir el esfuerzo entre listas chicas."""
     condicion = ("p.imagen_url IS NULL "
-                 "AND (p.foto_busqueda_estado IS NULL OR p.foto_busqueda_estado = 'error')"
-                 if que == "fotos" else "p.ficha_equiv_leida IS NULL")
+                 "AND (p.foto_busqueda_estado IS NULL OR p.foto_busqueda_estado = 'error') "
+                 f"AND {_no_fallo_hoy('foto_ficha', 'p.id')}"
+                 if que == "fotos" else
+                 f"p.ficha_equiv_leida IS NULL AND {_no_fallo_hoy('equiv_ficha', 'p.id')}")
     try:
         c.execute(f"""SELECT p.marca_id AS mid, m.nombre AS nombre, COUNT(*) AS faltan
                       FROM productos p JOIN marcas m ON m.id = p.marca_id
@@ -1910,10 +2212,11 @@ def _trabajo_de_fondo():
             guardar_config("tanda_fondo_ultima", datetime.now().strftime("%Y-%m-%d %H:%M"))
             return True
 
+        _marca_de_las_fotos = None
         if _tarea_prendida("fotos"):
-            marca = _marca_con_mas_fichas_pendientes("fotos")
+            marca = _marca_de_las_fotos = _marca_con_mas_fichas_pendientes("fotos")
             if not marca:
-                _descansar("fotos")
+                _dar_por_terminada("fotos")
             else:
                 try:
                     traidas, _fall, _sin = bajar_fotos_desde_catalogo(
@@ -1945,9 +2248,13 @@ def _trabajo_de_fondo():
                     anotar_error("_trabajo_de_fondo/fotos", _err)
 
         if _tarea_prendida("equiv"):
-            marca = _marca_con_mas_fichas_pendientes("equiv")
+            # Si las fotos acaban de leer fichas de una marca y a esa le faltan equivalencias,
+            # va por la misma: las fichas están en memoria y no se vuelven a pedir.
+            marca = (_marca_de_las_fotos if _marca_de_las_fotos
+                     and _le_faltan_equivalencias(_marca_de_las_fotos["mid"])
+                     else _marca_con_mas_fichas_pendientes("equiv"))
             if not marca:
-                _descansar("equiv")
+                _dar_por_terminada("equiv")
             else:
                 try:
                     props, _fall, consultados = equivalencias_desde_catalogo(
@@ -1979,7 +2286,12 @@ def _trabajo_de_fondo():
                 _sumar_al_cupo("tanda_fondo_catalogos", consultadas)
                 hizo_algo = hizo_algo or consultadas > 0
                 if not consultadas:
-                    _descansar("catalogos")
+                    # Nada resuelto: si algún sitio quedó pausado es que falla, y se reintenta
+                    # en una hora. Si no, no queda nada por leer.
+                    if any(_catalogo_de_fabricante_pausado(n) for n in CATALOGOS_DE_FABRICANTE):
+                        _descansar("catalogos", MINUTOS_DE_DESCANSO_SI_FALLA)
+                    else:
+                        _dar_por_terminada("catalogos")
             except Exception as _err:
                 _descansar("catalogos", MINUTOS_DE_DESCANSO_SI_FALLA)
                 anotar_error("_trabajo_de_fondo/catalogos", _err)
@@ -1987,7 +2299,8 @@ def _trabajo_de_fondo():
         # Las fotos que dejaron los catálogos de fabricante y Mercado Libre (ver proponer_foto()):
         # se bajan y se les calcula la firma visual, que es lo que usa la búsqueda por cámara.
         # En modo liviano: en la base queda el link y la miniatura, no la foto entera.
-        if obtener_config("fotos_de_internet_pendientes", "") == "1":
+        if (obtener_config("fotos_de_internet_pendientes", "") == "1"
+                and not _descansando("fotos_de_internet")):
             try:
                 ceder_al_mostrador()
                 _bajadas, _fallidas = bajar_fotos_pendientes(limite=PRODUCTOS_POR_SUBTANDA,
@@ -1996,6 +2309,9 @@ def _trabajo_de_fondo():
                 # intentar: vuelve a prenderse cuando llegue una foto nueva.
                 if not _bajadas:
                     guardar_config("fotos_de_internet_pendientes", "0")
+                    if _quedan_para_reintentar("foto_link"):
+                        guardar_config("fotos_de_internet_pendientes", "1")
+                        _dar_por_terminada("fotos_de_internet")     # descansa hasta mañana
                 hizo_algo = hizo_algo or _bajadas > 0
             except Exception as _err:
                 guardar_config("fotos_de_internet_pendientes", "0")
@@ -2012,7 +2328,7 @@ def _trabajo_de_fondo():
                 if _res_ml["error"]:
                     _descansar("mercado_libre", MINUTOS_DE_DESCANSO_SI_FALLA)
                 elif not _res_ml["buscados"]:
-                    _descansar("mercado_libre")
+                    _dar_por_terminada("mercado_libre")
             except Exception as _err:
                 _descansar("mercado_libre", MINUTOS_DE_DESCANSO_SI_FALLA)
                 anotar_error("_trabajo_de_fondo/mercado_libre", _err)
@@ -2021,14 +2337,14 @@ def _trabajo_de_fondo():
         # por día, en las tareas del día. Solo cuenta como avance lo que quedó resuelto: las que
         # dan error se vuelven a elegir en la próxima vuelta, y contarlas dejaría girando el
         # bucle para siempre sobre las mismas 50 fotos rotas.
-        if not _descansando("firmas"):
+        if not _descansando("firmas") and not _terminada("firmas"):
             try:
                 ceder_al_mostrador()
                 _r_fir = migrar_imagenes_pendientes(limite=PRODUCTOS_POR_SUBTANDA)
                 _hechas = sum(_r_fir.get(k, 0) for k in ("listas", "sin_detalle"))
                 hizo_algo = hizo_algo or _hechas > 0
                 if not _hechas:
-                    _descansar("firmas")
+                    _dar_por_terminada("firmas")
             except Exception as _err:
                 _descansar("firmas", MINUTOS_DE_DESCANSO_SI_FALLA)
                 anotar_error("_trabajo_de_fondo/firmas", _err)
@@ -2123,8 +2439,9 @@ def arrancar_tanda_de_fondo():
             and obtener_config("separacion_pendiente", "") != "1"
             and not _tarea_prendida("catalogos")
             and not _tarea_prendida("mercado_libre")
-            and obtener_config("fotos_de_internet_pendientes", "") != "1"
-            and _descansando("firmas")):
+            and (obtener_config("fotos_de_internet_pendientes", "") != "1"
+                 or _descansando("fotos_de_internet"))
+            and (_descansando("firmas") or _terminada("firmas"))):
         return False
 
     # El candado se toma ACÁ y no adentro del hilo. Mirar si está tomado y después crear el
@@ -2184,6 +2501,7 @@ def como_va_la_tanda_de_fondo():
             resumen[f"hoy_{clave}"] = 0
         resumen[f"descanso_{clave}"] = (obtener_config(f"descanso_{clave}", "")
                                         if _descansando(clave) else "")
+        resumen[f"terminado_{clave}"] = obtener_config(f"terminado_{clave}", "")
     return resumen
 
 
@@ -2196,17 +2514,104 @@ def mostrar_avance_de_tanda(que, unidad):
     resumen = como_va_la_tanda_de_fondo()
     faltan = resumen.get(f"faltan_{que}", 0)
     hoy = resumen.get(f"hoy_{que}", 0)
-    if not faltan:
-        st.caption("✅ No queda nada pendiente de las marcas con catálogo web cargado.")
+    terminado = resumen.get(f"terminado_{que}", "")
+    if terminado or not faltan:
+        st.caption(f"✅ Terminado{' el ' + _fecha_corta(terminado) if terminado else ''}: no "
+                   "se vuelve a correr hasta que lo pidas, y al pedirlo busca solo lo que falta"
+                   + (f" ({faltan:,} ahora)." if faltan else "."))
+        if terminado and st.button("🔄 Buscar lo nuevo", key=f"lo_nuevo_tanda_{que}"):
+            buscar_lo_nuevo([que])
+            st.rerun()
         return
     descanso = resumen.get(f"descanso_{que}", "")
     st.caption(
         f"Faltan **{faltan:,}** {unidad} · hoy van {hoy:,} · ⚡ sin tope por día"
         + (" · 🟢 corriendo ahora" if resumen.get("corriendo") else "")
-        + (f" · 😴 descansa hasta las {descanso[11:16]}" if descanso else "")
+        + (f" · 😴 retoma {_fecha_corta(descanso)}" if descanso else "")
         + (f" · última vez: {resumen['ultima']}" if resumen.get("ultima") else "")
     )
     if descanso and st.button("▶️ Retomar ahora", key=f"retomar_tanda_{que}"):
         guardar_config(f"descanso_{que}", "")
         arrancar_tanda_de_fondo()
         st.rerun()
+
+
+def _fecha_corta(fecha):
+    """«2026-09-28 14:30…» → «hoy 14:30», «mañana 00:05» o «28/09 14:30»."""
+    fecha = str(fecha or "")
+    if len(fecha) < 16:
+        return fecha
+    hoy = datetime.now()
+    if fecha[:10] == hoy.strftime("%Y-%m-%d"):
+        return f"hoy {fecha[11:16]}"
+    if fecha[:10] == (hoy + timedelta(days=1)).strftime("%Y-%m-%d"):
+        return f"mañana {fecha[11:16]}"
+    return f"{fecha[8:10]}/{fecha[5:7]} {fecha[11:16]}"
+
+
+def estado_de_las_tareas_de_fondo():
+    """Para la pantalla: cada tarea automática, si está prendida, terminada o descansando, y
+    cuántas cosas se dejaron de intentar porque fallaron tres días. [dict]."""
+    rendidas = contar_descargas_fallidas()
+    prendidas = {"fotos": obtener_config("fotos_automaticas", "0") == "1",
+                 "equiv": obtener_config("equiv_ficha_automaticas", "0") == "1",
+                 "catalogos": catalogos_de_fabricante_automaticos(),
+                 "mercado_libre": mercado_libre_automatico()}
+    corriendo = _CANDADO_FONDO.locked()
+    filas = []
+    for que, (nombre, fuente) in TAREAS_DE_FONDO.items():
+        if not prendidas.get(que, True):
+            estado = "⏸️ Apagada"
+        elif _terminada(que):
+            estado = f"✅ Terminada {_fecha_corta(obtener_config(f'terminado_{que}', ''))}"
+        elif _descansando(que):
+            estado = f"😴 Retoma {_fecha_corta(obtener_config(f'descanso_{que}', ''))}"
+        elif que == "fotos_de_internet" and obtener_config("fotos_de_internet_pendientes",
+                                                           "") != "1":
+            estado = "✅ Al día"
+        else:
+            estado = "🟢 Corriendo" if corriendo else "⏳ En cola"
+        fallidas = (sum(n for f, n in rendidas.items() if f.startswith(fuente))
+                    if fuente else 0)
+        filas.append({"Tarea": nombre, "Estado": estado, "Dejadas de intentar": fallidas})
+    return filas
+
+
+def mostrar_panel_de_carga_automatica():
+    """El tablero de todo lo que se baja solo: en qué anda cada cosa, y los dos botones para
+    pedirle que vuelva a buscar."""
+    filas = estado_de_las_tareas_de_fondo()
+    n_term = sum(f["Estado"].startswith("✅") for f in filas)
+    n_corr = sum(f["Estado"].startswith(("🟢", "⏳")) for f in filas)
+    with st.expander(f"⚡ Carga automática — {n_term} terminada(s)"
+                     + (f", {n_corr} en curso" if n_corr else "")):
+        ayuda(
+            "Fotos, fichas, catálogos de fabricantes y Mercado Libre se bajan solos en segundo "
+            "plano, **sin tope por día**, hasta terminar.\n\n"
+            "**Cuando una termina, no se repite**: ni cada rato, ni al reiniciar la app. Se "
+            "vuelve a correr solo si tocás **🔄 Buscar lo nuevo** (o si prendés la opción de "
+            "abajo para cuando importás una lista). Y al volver a correr **no baja nada de lo "
+            "que ya bajó**: cada foto, ficha y búsqueda queda anotada, y solo se pide lo que "
+            "falta —por ejemplo, los productos de una lista nueva—.\n\n"
+            "Lo que falla por la red (el sitio no contesta) se reintenta **una vez por día, "
+            "hasta tres días**; después se deja de intentar y figura en «Dejadas de intentar». "
+            "Con **♻️ Reintentar las que fallaron** se vuelven a probar solo esas.")
+        st.dataframe(filas, width="stretch", hide_index=True)
+        _c1, _c2 = st.columns(2)
+        if _c1.button("🔄 Buscar lo nuevo", key="carga_auto_lo_nuevo", width="stretch",
+                      help="Reabre las tareas terminadas. Solo busca lo que todavía no se bajó."):
+            buscar_lo_nuevo()
+            st.success("Listo: va a buscar solo lo que falta, en segundo plano.")
+        _n_f = sum(f["Dejadas de intentar"] for f in filas)
+        if _n_f and _c2.button(f"♻️ Reintentar las {_n_f:,} que fallaron",
+                               key="carga_auto_reintentar", width="stretch"):
+            reintentar_descargas_fallidas()
+            st.success(f"Se van a volver a probar {_n_f:,}. Lo que ya bajó no se toca.")
+        _al_importar = st.toggle(
+            "Al importar una lista, buscar solo lo nuevo de esa lista",
+            value=obtener_config("buscar_lo_nuevo_al_importar", "0") == "1",
+            key="carga_auto_al_importar",
+            help="Apagado: después de importar no arranca nada hasta que toques «Buscar lo "
+                 "nuevo». Prendido: arranca solo, pero igual baja únicamente lo que falta.")
+        if _al_importar != (obtener_config("buscar_lo_nuevo_al_importar", "0") == "1"):
+            guardar_config("buscar_lo_nuevo_al_importar", "1" if _al_importar else "0")

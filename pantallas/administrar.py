@@ -672,6 +672,9 @@ if pagina == PAGINAS[3]:
         # Va antes del selector de grupo porque resuelve lo que ningún grupo resuelve: sabés
         # qué querés hacer y no te acordás en cuál estaba.
         buscador_de_herramientas("buscar_herramienta")
+        # Arriba de los grupos: es lo que corre solo, y el lugar donde se le pide que vuelva a
+        # buscar. Ver mostrar_panel_de_carga_automatica().
+        mostrar_panel_de_carga_automatica()
 
         st.radio("Grupo:", GRUPOS_MANTENIMIENTO, key="sub_mantenimiento", horizontal=True,
                  label_visibility="collapsed")
@@ -1800,7 +1803,7 @@ if pagina == PAGINAS[3]:
                                   value=catalogos_de_fabricante_automaticos(),
                                   key="catalogos_fabricante_toggle")
             if _auto_cat != catalogos_de_fabricante_automaticos():
-                guardar_config("catalogos_fabricante_automaticos", "1" if _auto_cat else "0")
+                prender_tarea_de_fondo("catalogos", "catalogos_fabricante_automaticos", _auto_cat)
                 st.rerun()
             try:
                 st.dataframe(estado_de_los_catalogos_de_fabricante_guardado(),
@@ -1859,7 +1862,7 @@ if pagina == PAGINAS[3]:
                                      value=obtener_config("mercado_libre_automatico", "1") == "1",
                                      key="mercado_libre_toggle")
                 if _auto_ml != (obtener_config("mercado_libre_automatico", "1") == "1"):
-                    guardar_config("mercado_libre_automatico", "1" if _auto_ml else "0")
+                    prender_tarea_de_fondo("mercado_libre", "mercado_libre_automatico", _auto_ml)
                     st.rerun()
                 try:
                     _ml = c.execute("""SELECT COUNT(*), SUM(publicaciones > 0),
@@ -2336,9 +2339,9 @@ if pagina == PAGINAS[3]:
                     "🤖 Leer las fichas solas, en segundo plano",
                     value=obtener_config("equiv_ficha_automaticas", "0") == "1",
                     key="equiv_ficha_auto_check",
-                    on_change=lambda: guardar_config(
-                        "equiv_ficha_automaticas",
-                        "1" if st.session_state["equiv_ficha_auto_check"] else "0"),
+                    on_change=lambda: prender_tarea_de_fondo(
+                        "equiv", "equiv_ficha_automaticas",
+                        st.session_state["equiv_ficha_auto_check"]),
                     help="Mientras la app esté abierta, va leyendo fichas del catálogo del "
                          "proveedor en un hilo aparte y manda a revisión las equivalencias que "
                          "encuentre escritas ahí. Avanza siempre sobre códigos nuevos."
