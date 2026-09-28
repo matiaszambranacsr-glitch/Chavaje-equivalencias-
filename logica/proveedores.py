@@ -843,7 +843,9 @@ def tanda_de_catalogos_de_fabricante(cupo):
         ceder_al_mostrador()
         res = leer_catalogo_de_fabricante(nombre, cuantos=min(PRODUCTOS_POR_SUBTANDA,
                                                               cupo - consultadas))
-        consultadas += res["leidas"] - res.get("fallidas", 0)
+        # Con max(): la ficha que corta la tanda (la quinta falla seguida) cuenta como fallida
+        # pero no llega a contarse como leída, y la resta daba -1.
+        consultadas += max(res["leidas"] - res.get("fallidas", 0), 0)
         if res["error"] or res.get("fallidas", 0) * 2 > res["leidas"]:
             guardar_config(f"catalogo_pausado_{nombre}",
                            (datetime.now() + timedelta(minutes=MINUTOS_DE_DESCANSO_SI_FALLA)
