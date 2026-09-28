@@ -1814,6 +1814,48 @@ def detectar_posibles_duplicados(marca_id, umbral=0.87, limite_productos=1500):
     return sospechosos
 
 
+# LA TABLA DEL BUSCADOR: primero lo que se mira en el mostrador. En el celular entran dos o
+# tres columnas sin deslizar, y antes eran Código y Descripción: la marca, el precio y el stock
+# —lo que se le contesta al cliente— quedaban afuera de la pantalla. La descripción es la más
+# larga y va después.
+COLUMNAS_PRIMERO = ["Codigo", "Marca", "Precio", "Stock", "Libre", "💰", "Cadena", "Confianza",
+                    "Fabricante", "Descripcion"]
+
+
+def columnas_que_dicen_algo(filas):
+    """El orden de las columnas, sin las que en ESTA búsqueda no dicen nada: todas vacías
+    («None» en cada fila, que es lo que se veía en Fabricante, Stock e Imagen), o todas con el
+    mismo valor (Tipo: PROVEEDOR, Favorito: 0). El buscado y las del mismo tipo no aportan
+    nada que no diga ya la fila."""
+    if not filas:
+        return []
+    todas = list(filas[0].keys())
+    for f in filas[1:]:
+        todas += [k for k in f if k not in todas]
+    utiles = []
+    for col in todas:
+        valores = [f.get(col) for f in filas]
+        llenos = [v for v in valores if v not in (None, "", 0)]
+        if not llenos:
+            continue
+        if col in ("Tipo", "Favorito") and len({str(v) for v in valores}) == 1:
+            continue
+        utiles.append(col)
+    return ([c for c in COLUMNAS_PRIMERO if c in utiles]
+            + [c for c in utiles if c not in COLUMNAS_PRIMERO])
+
+
+# El precio con separador de miles según el idioma del navegador (18.375); la imagen como
+# imagen y la ficha como link.
+CONFIG_COLUMNAS_RESULTADO = {
+    "Precio": st.column_config.NumberColumn("Precio $", format="localized"),
+    "Stock": st.column_config.NumberColumn("Stock", format="%d"),
+    "Imagen": st.column_config.ImageColumn("Imagen", width="small"),
+    "Ficha": st.column_config.LinkColumn("Ficha", display_text="Ver en proveedor ↗"),
+    "Favorito": st.column_config.CheckboxColumn("⭐"),
+}
+
+
 def quitar_id(filas):
     """Quita la clave ID de cada diccionario para mostrar en pantalla."""
     return [{k: v for k, v in f.items() if k != "ID"} for f in filas]

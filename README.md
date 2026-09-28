@@ -5280,6 +5280,26 @@ Medido con un servidor falso: los 96 códigos SKF citados en la base real se ley
 pasada (antes eran hasta 150 por día); con el sitio caído cortó a los 5 pedidos y se pausó una
 hora.
 
+## 📱 El buscador, pensado para el mostrador (y el celular)
+
+Mirado con capturas en un iPhone y en una computadora, con la base real:
+
+- **El formulario ocupaba toda la primera pantalla del celular** (filtro de marca, tres opciones
+  de distancia apiladas y una casilla) y el resultado quedaba abajo. Ahora van la caja del código
+  y **Buscar** a lo ancho, y las opciones en **⚙️ Opciones**, cuyo título dice lo que está
+  puesto («todas las marcas · hasta 3 saltos»), así un filtro elegido nunca queda escondido.
+- **La tabla muestra primero lo que se contesta en el mostrador**: Código, Marca, Precio y
+  Stock (`COLUMNAS_PRIMERO`). En el celular antes se veían Código y Descripción, y lo demás
+  quedaba afuera de la pantalla.
+- **Sin columnas que no dicen nada** (`columnas_que_dicen_algo()`): se esconden las que en esa
+  búsqueda están vacías —se veía «None» en Fabricante, Stock e Imagen— o dicen siempre lo mismo
+  (Tipo: PROVEEDOR, Favorito: 0).
+- **El precio con separador de miles** según el idioma del navegador (18.375).
+- **El resumen dice lo que se ve**: «✅ 3 equivalencias en 2 marcas: …». Antes decía «1
+  equivalencia, sobre 10 filas en total» y se veían dos (las otras eran códigos de fábrica).
+- **«¿Se lo llevó?» en el celular es un selector desde dos resultados**: las columnas se apilan
+  y cada fila eran dos botones a lo ancho.
+
 ## 📷 Las fotos sobreviven a los reinicios
 
 La copia que se sube a GitHub —con la que arranca la app después de cada reinicio de

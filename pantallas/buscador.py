@@ -565,44 +565,57 @@ Casi todo lo que edita o borra algo pide la contraseña de administrador la prim
     lista_marcas = ["Todas"] + [r["nombre"] for r in c.fetchall()]
 
     if modo == "Código":
+        # EL CÓDIGO Y EL BOTÓN ARRIBA, LAS OPCIONES PLEGADAS. En el celular el formulario ocupaba
+        # la pantalla entera —filtro de marca, tres opciones de distancia apiladas y una
+        # casilla— y el resultado quedaba abajo de todo. Las opciones se tocan poco; el título
+        # del desplegable dice cuáles están puestas, así un filtro elegido nunca queda escondido.
+        opciones_saltos = {
+            "Solo los directos (más confiable)": 1,
+            "Hasta 3 saltos (recomendado)": 3,
+            "Toda la cadena": None,
+        }
+        # Una marca que se borró o se fusionó no puede quedar elegida: el selector se rompería.
+        if st.session_state.get("marca_filtro_busqueda") not in (None, *lista_marcas):
+            st.session_state.pop("marca_filtro_busqueda", None)
+        _marca_elegida = st.session_state.get("marca_filtro_busqueda", "Todas")
+        _saltos_elegidos = st.session_state.get("saltos_busqueda", "Hasta 3 saltos (recomendado)")
+        _resumen_opciones = " · ".join(
+            ["todas las marcas" if _marca_elegida in (None, "Todas") else f"solo {_marca_elegida}",
+             {1: "solo directos", 3: "hasta 3 saltos", None: "toda la cadena"}.get(
+                 opciones_saltos.get(_saltos_elegidos, 3), "hasta 3 saltos")]
+            + (["sin vínculos flojos"] if st.session_state.get("solo_confiables") else []))
         with st.form("form_buscar_codigo"):
-            col_busq, col_filt = st.columns([3, 1])
-            with col_busq:
-                busqueda = st.text_input(
-                    "Ingresá uno o varios códigos (separados por coma):",
-                    placeholder="Ej: W712/94, 036115561G...",
-                    key="busqueda_input"
+            busqueda = st.text_input(
+                "Ingresá uno o varios códigos (separados por coma):",
+                placeholder="Ej: W712/94, 036115561G...",
+                key="busqueda_input"
+            )
+            buscar_click = st.form_submit_button("🔍 Buscar Equivalencias", type="primary",
+                                                 width="stretch")
+            with st.expander(f"⚙️ Opciones: {_resumen_opciones}"):
+                marca_filtro = st.selectbox("Filtrar por marca:", lista_marcas,
+                                            key="marca_filtro_busqueda")
+                # La búsqueda encadena: el código buscado trae sus equivalentes, y los
+                # equivalentes de esos, y así. Cuanto más larga la cadena, más chances de que
+                # un eslabón esté mal y aparezcan cosas que no entran. Este control la corta.
+                etiqueta_saltos = st.radio(
+                    "Qué tan lejos buscar:", list(opciones_saltos.keys()),
+                    index=1, horizontal=True, key="saltos_busqueda",
+                    help="«Directo» es lo que alguna lista puso en la misma fila que tu código. "
+                         "Cada salto más se apoya en el vínculo anterior: si uno está mal "
+                         "cargado, todo lo que cuelga de ahí también."
                 )
-            with col_filt:
-                marca_filtro = st.selectbox("Filtrar por marca:", lista_marcas)
-            # La búsqueda encadena: el código buscado trae sus equivalentes, y los equivalentes
-            # de esos, y así. Cuanto más larga la cadena, más chances de que un eslabón esté mal
-            # y aparezcan cosas que no entran. Este control corta esa cadena.
-            opciones_saltos = {
-                "Solo los directos (más confiable)": 1,
-                "Hasta 3 saltos (recomendado)": 3,
-                "Toda la cadena": None,
-            }
-            etiqueta_saltos = st.radio(
-                "Qué tan lejos buscar:", list(opciones_saltos.keys()),
-                index=1, horizontal=True, key="saltos_busqueda",
-                help="«Directo» es lo que alguna lista puso en la misma fila que tu código. Cada "
-                     "salto más se apoya en el vínculo anterior: si uno está mal cargado, todo lo "
-                     "que cuelga de ahí también."
-            )
+                # Cortar por saltos y cortar por confianza son dos cosas distintas: la primera
+                # mira cuán largo es el camino, la segunda cuánto vale. Un resultado a dos saltos
+                # por vínculos sólidos es mejor que uno directo colgado de un vínculo malo.
+                solo_confiables = st.checkbox(
+                    "Esconder los que llegan por vínculos flojos", key="solo_confiables",
+                    help="Deja fuera los resultados cuyo camino pasa por algún vínculo que el "
+                         "análisis puntuó por debajo de 50 — códigos puente cortos o genéricos, "
+                         "y los que cuelgan de un mismo código a media docena de productos. El "
+                         "código que buscaste siempre se muestra."
+                )
             max_saltos = opciones_saltos[etiqueta_saltos]
-            # Cortar por saltos y cortar por confianza son dos cosas distintas: la primera mira
-            # cuán largo es el camino, la segunda cuánto vale. Un resultado a dos saltos por
-            # vínculos sólidos es mejor que uno directo colgado de un vínculo malo, y con el
-            # control de saltos solo no había forma de sacarse de encima lo segundo.
-            solo_confiables = st.checkbox(
-                "Esconder los que llegan por vínculos flojos", key="solo_confiables",
-                help="Deja fuera los resultados cuyo camino pasa por algún vínculo que el "
-                     "análisis puntuó por debajo de 50 — códigos puente cortos o genéricos, y "
-                     "los que cuelgan de un mismo código a media docena de productos. El "
-                     "código que buscaste siempre se muestra."
-            )
-            buscar_click = st.form_submit_button("🔍 Buscar Equivalencias", type="primary")
 
         # La búsqueda en sí (con sus efectos de una sola vez: guardar historial, contar
         # veces_buscado) se hace acá, solo cuando se tocó "Buscar". El resultado se guarda en
@@ -751,8 +764,14 @@ Casi todo lo que edita o borra algo pide la contraseña de administrador la prim
                         )
                     if res:
                         if alternativas:
-                            st.success(f"Se encontraron {len(alternativas)} equivalencia(s), "
-                                       f"sobre {len(res)} fila(s) en total:")
+                            # Antes decía «1 equivalencia, sobre 10 filas en total» y se veían
+                            # dos: las otras ocho eran códigos de fábrica, que no se muestran.
+                            _marcas_alt = sorted({f["Marca"] for f in alternativas})
+                            st.success(
+                                f"✅ **{len(alternativas)} equivalencia(s)**"
+                                + (f" en {len(_marcas_alt)} marca(s): {', '.join(_marcas_alt[:6])}"
+                                   + ("…" if len(_marcas_alt) > 6 else "")
+                                   if _marcas_alt else ""))
                         else:
                             # Decirlo con todas las letras, y decir además qué hacer. Sin esto
                             # la pantalla mostraba dos filas y un tilde verde, y había que
@@ -898,10 +917,8 @@ Casi todo lo que edita o borra algo pide la contraseña de administrador la prim
                         mostrar = quitar_id(mostrar)
                         st.dataframe(
                             mostrar, width="stretch", hide_index=True,
-                            column_config={
-                                "Imagen": st.column_config.ImageColumn("Imagen", width="small"),
-                                "Ficha": st.column_config.LinkColumn("Ficha", display_text="Ver en proveedor ↗")
-                            }
+                            column_order=columnas_que_dicen_algo(mostrar),
+                            column_config=CONFIG_COLUMNAS_RESULTADO,
                         )
 
                         # La pregunta que sigue siempre a «¿lo tenés?»: ¿le sirve al auto del
@@ -1136,7 +1153,7 @@ Casi todo lo que edita o borra algo pide la contraseña de administrador la prim
                                           for f in _contenido], width="stretch", hide_index=True)
 
                         st.markdown("**🛒 ¿Se lo llevó? / 📌 ¿Falta stock?**")
-                        st.caption(
+                        ayuda(
                             "Marcá cuál se llevó el cliente: con eso el sistema va aprendiendo qué "
                             "sirve para qué, y después te propone equivalencias nuevas en "
                             "Estadísticas → Equivalencias sugeridas. Si falta stock, 'Pedir' lo manda "
@@ -1150,7 +1167,9 @@ Casi todo lo que edita o borra algo pide la contraseña de administrador la prim
                         # selector y los dos botones una sola vez. Mirado en un celular de verdad,
                         # una búsqueda de 62 resultados dejaba 124 botones del ancho de la
                         # pantalla uno abajo del otro, y la página medía 17 pantallas.
-                        if len(res) <= 5:
+                        # En el celular las columnas se apilan: cada fila eran dos botones a lo
+                        # ancho, y con cinco resultados, diez botones. Ahí el selector va desde dos.
+                        if len(res) <= (1 if es_celular() else 5):
                             for fila_stock in res:
                                 colr1, colr2, colr3 = st.columns([3, 1, 1])
                                 colr1.write(_rotulo_stock(fila_stock))
@@ -1432,7 +1451,9 @@ Casi todo lo que edita o borra algo pide la contraseña de administrador la prim
             texto_pedido = busqueda_texto_guardada["texto"]
             if res_texto:
                 st.success(f"Se encontraron {len(res_texto)} coincidencia(s):")
-                st.dataframe(quitar_id(res_texto), width="stretch", hide_index=True)
+                st.dataframe(quitar_id(res_texto), width="stretch", hide_index=True,
+                         column_order=columnas_que_dicen_algo(quitar_id(res_texto)),
+                         column_config=CONFIG_COLUMNAS_RESULTADO)
                 mostrar_lista_clickeable(
                     res_texto, "txt_click", limite=15,
                     nota="👆 Tocá cualquier código para abrirlo con todas sus equivalencias:"
@@ -1461,7 +1482,9 @@ Casi todo lo que edita o borra algo pide la contraseña de administrador la prim
                                           if candidatos_precio else None)
                             for f in equivalentes:
                                 f["💰"] = "🏆 Más barato en stock" if f["ID"] == id_barato else ""
-                            st.dataframe(quitar_id(equivalentes), width="stretch", hide_index=True)
+                            st.dataframe(quitar_id(equivalentes), width="stretch", hide_index=True,
+                         column_order=columnas_que_dicen_algo(quitar_id(equivalentes)),
+                         column_config=CONFIG_COLUMNAS_RESULTADO)
                         else:
                             st.caption("Este producto todavía no tiene equivalencias cargadas.")
 
