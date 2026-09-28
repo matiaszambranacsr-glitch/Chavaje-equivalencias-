@@ -1433,14 +1433,21 @@ def contar_fotos_por_traer_de_catalogo(marca_id, filtro="todos"):
 
 def reintentar_codigos_sin_foto(marca_id=None):
     """Vuelve a habilitar los códigos marcados como 'sin foto en la ficha', por si el proveedor
-    la subió después o se cayó el sitio justo esa vez."""
-    with db_lock:
-        if marca_id:
-            c.execute("UPDATE productos SET foto_busqueda_estado = NULL WHERE marca_id = ?", (marca_id,))
-        else:
-            c.execute("UPDATE productos SET foto_busqueda_estado = NULL")
+    la subió después o se cayó el sitio justo esa vez.
+
+    Solo esos: antes limpiaba el estado de TODOS los productos, y con eso también los links de
+    fotos rotas —que la tanda volvía a bajar, cuando ya se sabía que no andaban— y el aviso
+    decía «se rehabilitaron 70.888» cuando eran unos cientos. Reabre la tanda de fotos."""
+    _cond = ("imagen_url IS NULL AND foto_busqueda_estado IN ('sin_foto', 'fallo')"
+             + (" AND marca_id = ?" if marca_id else ""))
+    with db_lock, transaccion():
+        c.execute(f"UPDATE productos SET foto_busqueda_estado = NULL WHERE {_cond}",
+                  (marca_id,) if marca_id else ())
         cambiados = c.rowcount
-        conn.commit()
+        c.execute("DELETE FROM descargas_fallidas WHERE fuente = 'foto_ficha'")
+    if cambiados:
+        guardar_config("terminado_fotos", "")
+        guardar_config("descanso_fotos", "")
     return cambiados
 
 

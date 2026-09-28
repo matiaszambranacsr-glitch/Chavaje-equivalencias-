@@ -5329,6 +5329,11 @@ lo que falta. Además:
   pedidos y no los 96 del catálogo.
 - Un «no hay ficha» (404) o «la ficha no tiene foto» es una respuesta, no una falla: queda
   anotado y no se reintenta.
+- **A mano tampoco se repite.** «🌐 Leer las fichas y proponer equivalencias» sigue donde
+  quedó la tanda anterior; releer las ya leídas es una casilla aparte, para cuando el
+  proveedor actualizó su catálogo. Y «🔄 Volver a probar esos códigos» (fotos) rehabilita solo
+  los marcados «sin foto» o «fallo»: antes limpiaba el estado de todos los productos, incluidos
+  los links rotos, que se volvían a bajar sabiendo que no andaban.
 
 ## 🎯 Tus propios datos: qué pedir y a quién avisar
 

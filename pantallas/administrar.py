@@ -2362,11 +2362,18 @@ if pagina == PAGINAS[3]:
                     key="tanda_equiv_catalogo",
                     help="Cada ficha es una consulta al sitio del proveedor. De a poco primero, "
                          "para ver si ese catálogo se deja leer antes de pedirle 200 páginas.")
+                # Lo ya leído no se vuelve a pedir, salvo que lo pidas: antes a mano se releían
+                # siempre las primeras fichas (las de stock), y cada tanda bajaba lo mismo.
+                _releer_mf = st.checkbox(
+                    "Volver a leer también las fichas ya leídas", key="releer_equiv_catalogo",
+                    help="Solo si el proveedor actualizó su catálogo. Si no, cada tanda sigue "
+                         "donde quedó la anterior.")
                 if st.button("🌐 Leer las fichas y proponer equivalencias"):
                     barra_mf = st.progress(0.0)
                     with st.spinner("Consultando el catálogo del proveedor..."):
                         _props, _falla, _consult = equivalencias_desde_catalogo(
                             opciones_mf[elegida_mf], limite=int(cuantos_mf),
+                            solo_no_leidos=not _releer_mf,
                             progreso=lambda hechos, total: barra_mf.progress(
                                 min(hechos / max(total, 1), 1.0)))
                     barra_mf.empty()
@@ -2374,7 +2381,11 @@ if pagina == PAGINAS[3]:
                         "propuestas": _props, "fallidas": _falla,
                         "consultados": _consult, "marca": elegida_mf.split(" (")[0]}
                 _ec = st.session_state.get("equiv_catalogo")
-                if _ec is not None:
+                if _ec is not None and not _ec["consultados"]:
+                    st.success("✅ Ya se leyeron todas las fichas de esta marca: no hay nada "
+                               "nuevo que pedir. Tildá «Volver a leer» si el proveedor "
+                               "actualizó su catálogo.")
+                elif _ec is not None:
                     st.caption(f"Se consultaron {_ec['consultados']} ficha(s); "
                                f"{len(_ec['fallidas'])} no se pudieron leer.")
                     if not _ec["propuestas"]:
@@ -2733,12 +2744,13 @@ if pagina == PAGINAS[3]:
                     "en Administrar → Marcas."
                 )
 
-            c.execute("SELECT COUNT(*) FROM productos WHERE foto_busqueda_estado = 'sin_foto'")
+            c.execute("""SELECT COUNT(*) FROM productos WHERE imagen_url IS NULL
+                         AND foto_busqueda_estado IN ('sin_foto', 'fallo')""")
             marcados_sin_foto = c.fetchone()[0]
             if marcados_sin_foto:
                 st.caption(
                     f"🔕 {marcados_sin_foto:,} código(s) quedaron marcados como «la ficha no tiene foto» "
-                    "y ya no se vuelven a consultar."
+                    "(o fallaron tres días) y ya no se vuelven a consultar."
                 )
                 if st.button("🔄 Volver a probar esos códigos"):
                     avisar("success", f"Se rehabilitaron {reintentar_codigos_sin_foto()} código(s).")
