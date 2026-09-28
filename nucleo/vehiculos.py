@@ -631,6 +631,9 @@ ABREVIATURAS_DE_PIEZA = {
     "VEL": "VELOCIDAD", "BSE": "BASE", "TRANSM": "TRANSMISION", "DELANT": "DELANTERO",
     "TRAS": "TRASERO", "SUPL": "SUPLEMENTO", "SUPLEM": "SUPLEMENTO", "REPAR": "REPARACION",
     "COLEC": "COLECTOR", "COLECT": "COLECTOR", "ASPIR": "ASPIRACION", "COMPRES": "COMPRESOR",
+    # «Jta.Tapa Difer.tipo 34 FORD TRANSIT» es la tapa del diferencial: sin expandir, era una
+    # «junta tapa» de Transit y concordaba con la de tapa de cilindros.
+    "DIFER": "DIFERENCIAL", "DIFERENC": "DIFERENCIAL",
 }
 
 

@@ -4913,6 +4913,21 @@ número de fábrica»), en vez de caer en «Sin alarma puntual».
   Marelli pega MM al final), «1920LT» y «1525KG» (Peugeot/Citroën) y «19208W» dejaron de
   perder 35 puntos; «1600CC», «24V» y «700MM.X470MM» se siguen marcando.
 
+### 🧪 Lo que se probó y NO se dejó
+
+Dos reglas que parecían buenas y la cola real dijo que no:
+
+- **Las muescas del código como espesor** («TC-355-MG 2M», «232407-2M»): Illinois y Taranto no
+  numeran igual —Illinois usa la marca del fabricante, con 0M; Taranto cuenta 1M, 2M, 3M—. En
+  los pares que declaran espesor, «291307-3M» de 1,3 mm es «TC-130-20 0M» de 1,3 mm, y hay pares
+  con las mismas muescas y espesores distintos. No sirve para comparar entre marcas.
+- **Juego de juntas contra junta suelta** sin tipo de juego: frenaba 158 limpios, y Taranto
+  llama «Jgo.Jta.Tapa Cil.» a la junta de tapa con sus accesorios, o al par de juntas de un
+  motor en V, que puede ser el mismo producto que la «Junta Tapa de Cilindros» de Illinois.
+
+Sí quedó «DIFER.» como abreviatura de DIFERENCIAL: la tapa de diferencial tipo 34 de la Transit
+concordaba con la del Dana 46 de la F-100 porque las dos decían «DIFER.».
+
 ## Una firma de foto podía ser un programa
 
 Las firmas visuales de las fotos se guardan con `pickle`, y `pickle` **no es un formato de
