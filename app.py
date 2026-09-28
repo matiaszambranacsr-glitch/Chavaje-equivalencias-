@@ -235,6 +235,26 @@ try:
 except Exception as _err:
     anotar_error("nivel principal", _err)
 
+# LA SESIÓN CON CONTRASEÑA SE CIERRA SOLA si nadie la usa por un rato. En la computadora del
+# mostrador la pestaña queda abierta días: sin esto, la sesión de administrador que abrió el
+# dueño a la mañana la hereda cualquiera que se siente después, con permiso para borrar y bajar
+# la base entera. Cuenta desde el último toque, así que usándola no se corta nunca.
+HORAS_DE_SESION_SIN_USO = 4
+if st.session_state.get("nivel_usuario") in ("admin", "operador", "mecanico"):
+    _ultimo_toque = st.session_state.get("_ultimo_toque", time.time())
+    if time.time() - _ultimo_toque > HORAS_DE_SESION_SIN_USO * 3600:
+        st.session_state.nivel_usuario = None
+        st.session_state.admin_nombre = None
+        st.session_state.mecanico_id = None
+        st.session_state.saltar_login = False
+        st.session_state.pop("_ultimo_toque", None)
+        # Directo y no con avisar(): lo que sigue es la pantalla de ingreso, que corta antes
+        # de donde se muestran los avisos guardados.
+        st.info(f"🔒 La sesión se cerró sola: pasaron más de {HORAS_DE_SESION_SIN_USO} horas "
+                "sin usarla. Volvé a poner la contraseña.")
+    else:
+        st.session_state["_ultimo_toque"] = time.time()
+
 # Pantalla de login apenas se abre la app, con opción de seguir sin loguearse.
 if not es_admin() and not st.session_state.get("saltar_login"):
     mostrar_login_inicial()

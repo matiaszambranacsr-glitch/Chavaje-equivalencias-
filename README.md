@@ -5299,6 +5299,9 @@ Vehículos y crear vínculos a mano. Solo pedían clave los botones que borran.
   códigos de falla, leer la cédula con IA, guardar la ficha del auto, cargar fabricantes y
   aplicaciones pide contraseña de empleado, y borrar modelos o motores aprendidos, la de
   administrador. La búsqueda por voz del Buscador usa IA paga: también para empleados.
+- **La sesión con contraseña se cierra sola** después de `HORAS_DE_SESION_SIN_USO` (4) horas
+  sin tocar nada: en la computadora del mostrador la pestaña queda abierta días, y la sesión de
+  administrador de la mañana la heredaba el que se sentara después. Usándola no se corta.
 - **La copia a GitHub se sube cifrada** si en los secretos está
   `clave_copia = "una frase larga"` (AES-GCM, clave estirada con PBKDF2; ver
   `cifrar_copia()`). Al arrancar se descifra sola. Sin la frase se sigue subiendo como antes —
