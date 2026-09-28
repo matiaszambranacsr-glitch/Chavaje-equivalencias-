@@ -1781,6 +1781,12 @@ def firma_de_producto(descripcion, producto_id=None, codigo_clean=None):
 # analizar la lista de FISPA—.
 _RE_1_O_2_DIGITOS = re.compile(r'\d{1,2}')
 _RE_2_A_4_DIGITOS = re.compile(r'\d{2,4}')
+# El modelo o el motor que es un número, con la versión pegada: «14000», «1006.6C/T/TW»,
+# «6081H/T». Ver es_modelo_numerico en firma_de_producto().
+_RE_MODELO_NUMERICO = re.compile(r'(\d{2,5}(?:\.\d)?)((?:[A-Z]{1,2})(?:/[A-Z]{1,2})*)?')
+_RE_NUMERO_DE_MODELO = re.compile(r'\d{2,5}(?:\.\d)?')
+_SUFIJOS_QUE_NO_SON_VERSION = {"V", "CC", "L", "LT", "MM", "CM", "KG", "HP", "CV", "KW", "I",
+                               "MI", "M", "GR", "X", "RPM"}
 _RE_UN_ANIO = re.compile(r'(19|20)\d{2}')
 _RE_SOLO_NUMERO = re.compile(r'[\d./,]+')
 
@@ -1943,7 +1949,17 @@ def _firma_armada(descripcion, producto_id=None, codigo_clean=None):
         # Se pide que venga JUSTO DESPUÉS de la marca del auto, que es como se escriben, y que
         # no sea un año. Los de FISPA, que escriben la cilindrada separada («FIAT PALIO 1 3»),
         # no entran: son de un dígito y acá se piden dos.
-        es_modelo_numerico = (_RE_2_A_4_DIGITOS.fullmatch(w) and indice
+        # También los de camión y los motores: «FORD 14000», «PERKINS 1006.6C/T/TW», «J.DEERE
+        # 6081H/T». Del token se toma el número —«1006.6», «6081»—, que es lo que el otro
+        # proveedor escribe; las letras de atrás son la versión. Sin años, y sin lo que es
+        # válvulas, cilindrada o una medida («16V», «1600CC», «120MM»).
+        # Solo cuando hay decimal o barra: «22R» y «6359D» son motores que el otro proveedor
+        # escribe igual, y partidos dejaban de coincidir.
+        _m_num = _RE_MODELO_NUMERICO.fullmatch(w)
+        if (_m_num and _m_num.group(2) and ("." in _m_num.group(1) or "/" in _m_num.group(2))
+                and _m_num.group(2).split("/")[0] not in _SUFIJOS_QUE_NO_SON_VERSION):
+            w = _m_num.group(1)
+        es_modelo_numerico = (_RE_NUMERO_DE_MODELO.fullmatch(w) and indice
                               and _es_de_marca(anterior.get(indice, ""))
                               and not _RE_UN_ANIO.fullmatch(w))
         if (w in _RUIDO_EN_FIRMA or w in palabras_marca or w in _POSICIONES
@@ -2228,8 +2244,8 @@ def firmas_compatibles(a, b, minimo_nucleo=2, cuenta_palabras=None, total_descri
     _num_a, _num_b = a.get("modelos_numericos") or set(), b.get("modelos_numericos") or set()
     if _num_a and _num_b and not (_num_a & _num_b):
         _texto_a, _texto_b = a.get("texto") or "", b.get("texto") or ""
-        _lo_nombra = (any(re.search(rf'\b{n}\b', _texto_b) for n in _num_a)
-                      or any(re.search(rf'\b{n}\b', _texto_a) for n in _num_b))
+        _lo_nombra = (any(re.search(rf'\b{re.escape(n)}\b', _texto_b) for n in _num_a)
+                      or any(re.search(rf'\b{re.escape(n)}\b', _texto_a) for n in _num_b))
         if not _lo_nombra:
             return False, (f"modelos distintos: {'/'.join(sorted(_num_a)[:2])} "
                            f"vs {'/'.join(sorted(_num_b)[:2])}")
@@ -2458,9 +2474,9 @@ def firmas_compatibles(a, b, minimo_nucleo=2, cuenta_palabras=None, total_descri
     if not _en_comun:
         _txt_a, _txt_b = a.get("texto") or "", b.get("texto") or ""
         _en_comun = ({n for n in (a.get("modelos_numericos") or set())
-                      if re.search(rf'\b{n}\b', _txt_b)}
+                      if re.search(rf'\b{re.escape(n)}\b', _txt_b)}
                      | {n for n in (b.get("modelos_numericos") or set())
-                        if re.search(rf'\b{n}\b', _txt_a)})
+                        if re.search(rf'\b{re.escape(n)}\b', _txt_a)})
     if not _en_comun:
         _en_comun = (a.get("motores_numericos") or set()) & (b.get("motores_numericos") or set())
     if not _en_comun:

@@ -5113,6 +5113,16 @@ DOHC16V, K9K16V, 4JH1-TC). 640 vínculos de inyectores, sensores MAP, arranques 
 FISPA pasan de confianza media (74) a alta, donde debían estar: la misma fila trae el número dos
 veces.
 
+### 🚚 Los modelos de camión y de motor que son un número
+
+El número que va pegado a la marca ya contaba como modelo —«FIAT 128», «VW 1300»—, pero solo de
+2 a 4 cifras y sin nada pegado. Quedaban afuera «FORD 14000», «PERKINS 1006.6C/T/TW» y
+«PERKINS 1004.4/T», y esas juntas «solo compartían la marca del auto». Ahora entran los de 5
+cifras y los que tienen decimal, y cuando traen la versión con barra se toma el número («1006.6»
+de «1006.6C/T/TW»). Los que tienen una letra sola pegada quedan enteros: «22R» y «6359D» son
+motores que el otro proveedor escribe igual. 5 juntas de cárter salen de revisión, y la de
+bomba inyectora «Perkins 1004.4T» deja de concordar con la del «PERKINS 1006», que es otro motor.
+
 ## Una firma de foto podía ser un programa
 
 Las firmas visuales de las fotos se guardan con `pickle`, y `pickle` **no es un formato de
