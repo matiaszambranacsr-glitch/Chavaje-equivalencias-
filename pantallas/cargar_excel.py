@@ -5,7 +5,10 @@
 # CARGAR EXCEL
 # ============================================================
 if pagina == PAGINAS[2]:
-    if not pedir_password_admin("cargar listas de proveedores"):
+    # Como las demás secciones (ver seccion_permitida()): con contraseñas, pide la de
+    # administrador; sin ninguna configurada, avisa y deja pasar. Antes pedía una contraseña que
+    # no existía y no había forma de importar hasta configurar los secretos.
+    if not seccion_permitida("admin", "cargar listas de proveedores"):
         pass
     else:
         st.subheader("Cargar nueva planilla (.xlsx / .csv / .pdf)")

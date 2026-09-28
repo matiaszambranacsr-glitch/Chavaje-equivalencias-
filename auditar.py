@@ -1351,9 +1351,10 @@ def _tiene_candado(nodo):
             prueba = ast.dump(x.test)
             # candado() es el envoltorio que además RECUERDA el clic entre corridas; ver
             # por qué hace falta en su docstring.
+            # seccion_permitida() es el candado de una sección entera (ver logica/base.py).
             if any(k in prueba for k in ("candado", "pedir_password_admin", "es_admin",
                                          "pedir_password_operador_o_admin",
-                                         "es_operador_o_admin")):
+                                         "es_operador_o_admin", "seccion_permitida")):
                 return True
     return False
 
