@@ -5203,6 +5203,27 @@ Estadísticas → 📌 Para pedir → «🔄 Códigos reemplazados por el fabric
 En la base real entran 40 reemplazos, y el cruce propone un par a revisión (Taranto 981308 →
 272008).
 
+## 🛒 Mercado Libre: pistas para relacionar y precio de mercado
+
+Con la aplicación de desarrollador cargada en los secretos (`[mercadolibre]` con `client_id` y
+`client_secret`; se crea gratis en developers.mercadolibre.com.ar), `leer_mercado_libre()` busca
+tus códigos —primero lo que tenés en stock— y se queda solo con las publicaciones que son de ese
+producto: el código en el título o como número de pieza, y la marca si no es un código de
+fábrica (`publicaciones_de_tu_producto()`). De ahí:
+
+- **Pistas**: si esas publicaciones nombran el código de otro producto tuyo, el par queda en
+  `productos_juntos_en_portal` como «MERCADO LIBRE» —«🌐 las publicaciones de Mercado Libre los
+  muestran juntos»— y va a revisión. No decide nada solo: el que publica escribe lo que le
+  conviene.
+- **Precio de mercado**: la mediana de lo publicado en pesos, con al menos dos publicaciones, en
+  `mercado_libre_leidos`. Estadísticas → 📌 Para pedir → «💲 Tus precios contra Mercado Libre»
+  lista los que están a más de 1,6 veces (elegible), primero lo que tenés en stock.
+
+Corre solo en la tarea de fondo, hasta 200 búsquedas por día, con el token guardado en memoria
+hasta que vence. Se prueba y se apaga en Administrar → Mantenimiento → «🛒 Mercado Libre». El
+servidor donde se armó esto no llega a la API, así que se probó con un servidor falso que
+responde como ella: token, búsqueda, publicaciones ajenas descartadas, pares y precios.
+
 ## Una firma de foto podía ser un programa
 
 Las firmas visuales de las fotos se guardan con `pickle`, y `pickle` **no es un formato de

@@ -978,6 +978,15 @@ def _esquema_gestion(c):
         fecha TEXT DEFAULT (datetime('now')),
         PRIMARY KEY (catalogo, codigo)
     )""")
+    # Qué productos ya se buscaron en Mercado Libre, cuántas publicaciones eran suyas y el precio
+    # mediano que se publica. Ver leer_mercado_libre().
+    c.execute("""CREATE TABLE IF NOT EXISTS mercado_libre_leidos (
+        producto_id INTEGER PRIMARY KEY,
+        publicaciones INTEGER,
+        precio_mediano REAL,
+        precios INTEGER,
+        fecha TEXT DEFAULT (datetime('now'))
+    )""")
 
     # Vínculos que llegaron de una lista de proveedor y esperan revisión. Una importación puede
     # generar miles de vínculos de una: si se cargaran solos, un error en la columna de código de

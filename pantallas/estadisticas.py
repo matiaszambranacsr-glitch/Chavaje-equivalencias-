@@ -595,6 +595,28 @@ Administrar → Mantenimiento.
             st.dataframe(_lista_r, width="stretch", hide_index=True)
 
         st.markdown("---")
+        st.markdown("**💲 Tus precios contra Mercado Libre**")
+        explicar(
+            "Los productos cuyo precio de lista está lejos de lo que se publica.",
+            "Sale de buscar tus códigos en Mercado Libre (Administrar → Mantenimiento → «🛒 "
+            "Mercado Libre»): de las publicaciones que son de ese producto se toma el precio "
+            "mediano. Un precio de lista muy por debajo suele ser una lista vieja que nadie "
+            "actualizó; uno muy por encima, una pieza que no vas a vender.\n\n"
+            "**Es una referencia, no una verdad**: en Mercado Libre se publica con envío, con "
+            "comisión y a veces con la unidad distinta (un juego contra una pieza)."
+        )
+        st.session_state.setdefault("ml_veces", 1.6)
+        _veces_ml = st.select_slider("A partir de cuántas veces de diferencia:",
+                                     options=[1.3, 1.6, 2.0, 3.0], key="ml_veces")
+        _lejos_ml = precios_lejos_de_mercado_libre(_veces_ml)
+        if _lejos_ml:
+            st.dataframe(_lejos_ml, width="stretch", hide_index=True)
+        else:
+            st.caption("Todavía no hay precios de Mercado Libre para comparar, o ninguno está "
+                       "tan lejos." if config_mercado_libre() else
+                       "Hace falta activar Mercado Libre en Administrar → Mantenimiento.")
+
+        st.markdown("---")
         st.markdown("**🚫 Puede que ya no se fabriquen**")
         explicar(
             "Códigos que faltaron en las últimas listas del proveedor.",

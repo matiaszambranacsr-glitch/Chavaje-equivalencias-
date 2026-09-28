@@ -2922,8 +2922,10 @@ def evidencia_cruzada(id_a, id_b, cuenta_palabras=None, total_descripciones=None
         # Los catálogos de fabricante se guardan como «CATÁLOGO SKF»: ver
         # leer_catalogo_de_fabricante().
         _de = [f"el catálogo de {p.split(' ', 1)[1]}" if p.startswith("CATÁLOGO ")
+               else "las publicaciones de Mercado Libre" if p == "MERCADO LIBRE"
                else f"el portal de {p}" for p in _portales]
-        a_favor.append(f"🌐 {', '.join(_de)} los muestra juntos")
+        _verbo = "muestran" if len(_de) > 1 or _de[0].startswith("las ") else "muestra"
+        a_favor.append(f"🌐 {', '.join(_de)} los {_verbo} juntos")
 
     if vetos:
         veredicto = "🔴 hay evidencia en contra"

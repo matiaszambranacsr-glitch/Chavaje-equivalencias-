@@ -803,6 +803,9 @@ HERRAMIENTAS_MANTENIMIENTO = [
      "SKF, MANN-FILTER y bujías NGK: abre la ficha de cada código que tus listas citan. "
      "✅ Corre solo en segundo plano.",
      "catalogo fabricante skf mann ngk bujias filtros automatico internet equivalencias"),
+    ("🛒 Mercado Libre: pistas y precio de mercado", 0,
+     "Busca tus códigos en Mercado Libre: relaciona productos y trae el precio publicado.",
+     "mercado libre mercadolibre ml publicaciones precio mercado competencia api"),
     ("🔤 Vincular dos proveedores por la descripción", 0,
      "Compara dos listas por el texto y propone los que son la misma pieza.",
      "descripcion texto dos proveedores comparar"),

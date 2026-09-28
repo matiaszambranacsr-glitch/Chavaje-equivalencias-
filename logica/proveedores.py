@@ -832,6 +832,240 @@ def tanda_de_catalogos_de_fabricante(cupo):
     return consultadas
 
 
+# --------------------------------------------------------------------------------------------
+# MERCADO LIBRE
+# --------------------------------------------------------------------------------------------
+# Las publicaciones de autopartes traen el número de pieza, la marca y, en el título, las
+# equivalencias con las que el vendedor quiere que lo encuentren: «Sensor Map Fispa 40011 Bosch
+# 0261230027 Ford Fiesta». De ahí salen dos cosas:
+#   · UNA PISTA MÁS para relacionar productos, igual que el portal del proveedor: si las
+#     publicaciones de tu código nombran el código de otro producto tuyo, cuenta a favor en
+#     evidencia_cruzada() como «MERCADO LIBRE», y el par va a revisión. No decide nada solo: el
+#     que publica escribe lo que le conviene.
+#   · EL PRECIO DE MERCADO: la mediana de lo que se publica con ese código, para ver qué precios
+#     de tus listas quedaron atrasados o pasados.
+#
+# La búsqueda de Mercado Libre pide un token. Se saca con una aplicación de desarrollador
+# (gratis, en developers.mercadolibre.com.ar → «Crear aplicación»), y sus datos van en los
+# secretos de Streamlit, en su propia sección:
+#
+#     [mercadolibre]
+#     client_id     = "1234567890"
+#     client_secret = "abc..."
+#
+# En los secretos y no en la base: la base se sube a GitHub con cada copia.
+ML_API = "https://api.mercadolibre.com"
+ML_SITIO = "MLA"
+BUSQUEDAS_DE_MERCADO_LIBRE_POR_DIA = 200
+PAUSA_ENTRE_BUSQUEDAS_DE_MERCADO_LIBRE = 0.6
+_TOKEN_DE_MERCADO_LIBRE = del_proceso("token_de_mercado_libre", dict)
+
+
+def config_mercado_libre():
+    """{client_id, client_secret} de los secretos, o None si no está cargado."""
+    try:
+        cfg = dict(secretos_app().get("mercadolibre") or {})
+    except Exception as _err:
+        anotar_error("config_mercado_libre", _err)
+        return None
+    return cfg if cfg.get("client_id") and cfg.get("client_secret") else None
+
+
+def token_de_mercado_libre():
+    """(token, error). Se pide con los datos de la aplicación y se guarda en memoria hasta un
+    minuto antes de que venza: pedir uno por búsqueda es maltratar el servicio."""
+    cfg = config_mercado_libre()
+    if not cfg:
+        return None, ("Falta cargar la aplicación de Mercado Libre en los secretos "
+                      "([mercadolibre] con client_id y client_secret).")
+    guardado = _TOKEN_DE_MERCADO_LIBRE.get("token")
+    if guardado and _TOKEN_DE_MERCADO_LIBRE.get("vence", 0) > time.time() + 60:
+        return guardado, None
+    try:
+        r = requests.post(f"{ML_API}/oauth/token", timeout=20,
+                          data={"grant_type": "client_credentials",
+                                "client_id": cfg["client_id"],
+                                "client_secret": cfg["client_secret"]},
+                          headers={"Accept": "application/json"})
+        datos = r.json() if r.content else {}
+    except Exception as e:
+        anotar_error("token_de_mercado_libre", e)
+        return None, f"No se pudo pedir el token ({type(e).__name__})."
+    if r.status_code != 200 or not datos.get("access_token"):
+        # El mensaje de Mercado Libre, sin los datos que se mandaron.
+        return None, (f"Mercado Libre no dio el token ({r.status_code}: "
+                      f"{str(datos.get('message') or datos.get('error') or '')[:120]}). "
+                      "Revisá el client_id y el client_secret.")
+    _TOKEN_DE_MERCADO_LIBRE.update(token=datos["access_token"],
+                                   vence=time.time() + int(datos.get("expires_in") or 3600))
+    return datos["access_token"], None
+
+
+def buscar_en_mercado_libre(texto, limite=20):
+    """([publicaciones], error). Cada publicación: título, precio, moneda, link y atributos."""
+    token, error = token_de_mercado_libre()
+    if error:
+        return [], error
+    try:
+        r = requests.get(f"{ML_API}/sites/{ML_SITIO}/search", timeout=20,
+                         params={"q": str(texto or "")[:80], "limit": int(limite)},
+                         headers={"Authorization": f"Bearer {token}"})
+    except Exception as e:
+        anotar_error("buscar_en_mercado_libre", e)
+        return [], f"No se pudo buscar ({type(e).__name__})."
+    if r.status_code in (401, 403):
+        _TOKEN_DE_MERCADO_LIBRE.clear()
+        return [], f"Mercado Libre rechazó la búsqueda ({r.status_code})."
+    if r.status_code != 200:
+        return [], f"Mercado Libre respondió {r.status_code}."
+    salida = []
+    for it in (r.json() or {}).get("results") or []:
+        atributos = {str(a.get("id") or ""): str(a.get("value_name") or "")
+                     for a in it.get("attributes") or []}
+        salida.append({"titulo": str(it.get("title") or ""), "precio": it.get("price"),
+                       "moneda": it.get("currency_id") or "", "link": it.get("permalink") or "",
+                       "atributos": atributos})
+    return salida, None
+
+
+def _codigo_sin_la_marca_pegada(codigo):
+    """«40011FISPA» -> «40011»: como lo escribe cualquiera que no sea FISPA."""
+    limpio = sanitizar(codigo)
+    sub = _submarca_del_codigo(codigo)
+    return limpio[:-len(sub)] if sub and limpio.endswith(sub) and len(limpio) > len(sub) else limpio
+
+
+def publicaciones_de_tu_producto(publicaciones, codigo, marca):
+    """Las publicaciones que son de ESE producto: el código aparece en el título o como número de
+    pieza, y —si no es un código de fábrica— la marca también. Un código corto o genérico trae de
+    todo, y sin este filtro el precio y las pistas serían de otras piezas."""
+    cod = _codigo_sin_la_marca_pegada(codigo)
+    marcas = {sanitizar(x) for x in (marca, _submarca_del_codigo(codigo)) if x}
+    salida = []
+    for pub in publicaciones:
+        en_texto = sanitizar(pub["titulo"] + " " + " ".join(pub["atributos"].values()))
+        numero = sanitizar(pub["atributos"].get("PART_NUMBER", "") + " "
+                           + pub["atributos"].get("MPN", ""))
+        if cod not in en_texto and cod not in numero:
+            continue
+        if marcas and not any(m and m in en_texto for m in marcas):
+            continue
+        salida.append(pub)
+    return salida
+
+
+def _mediana(valores):
+    v = sorted(valores)
+    if not v:
+        return None
+    return v[len(v) // 2] if len(v) % 2 else (v[len(v) // 2 - 1] + v[len(v) // 2]) / 2
+
+
+def leer_mercado_libre(cuantos=30, pausa=PAUSA_ENTRE_BUSQUEDAS_DE_MERCADO_LIBRE, progreso=None):
+    """Busca en Mercado Libre los productos que todavía no se buscaron —primero los que tenés
+    en stock— y guarda las pistas y el precio de mercado. Devuelve un resumen."""
+    resumen = {"buscados": 0, "con_publicaciones": 0, "con_productos": 0, "pares": 0,
+               "nuevos": 0, "con_precio": 0, "lote": "", "error": ""}
+    _token, error = token_de_mercado_libre()
+    if error:
+        resumen["error"] = error
+        return resumen
+    c.execute("""SELECT p.id, p.codigo_raw, p.codigo_clean, m.nombre AS marca, m.tipo AS tipo
+                 FROM productos p JOIN marcas m ON m.id = p.marca_id
+                 WHERE p.id NOT IN (SELECT producto_id FROM mercado_libre_leidos)
+                   AND LENGTH(p.codigo_clean) >= 5
+                 ORDER BY (COALESCE(p.stock, 0) > 0) DESC, (m.tipo = 'OEM'), p.id LIMIT ?""",
+              (int(cuantos),))
+    pendientes = [dict(r) for r in c.fetchall()]
+    pares, leidos, fallas_seguidas = [], [], 0
+    for i, prod in enumerate(pendientes):
+        es_de_fabrica = prod["tipo"] == "OEM"
+        marca = "" if es_de_fabrica else (_submarca_del_codigo(prod["codigo_raw"]) or prod["marca"])
+        pubs, err = buscar_en_mercado_libre(
+            f"{_codigo_sin_la_marca_pegada(prod['codigo_raw'])} {marca}".strip())
+        if err:
+            fallas_seguidas += 1
+            if fallas_seguidas >= 5:
+                resumen["error"] = err
+                break
+            continue
+        fallas_seguidas = 0
+        suyas = publicaciones_de_tu_producto(pubs, prod["codigo_raw"], marca)
+        mediana, n_precios = None, 0
+        if suyas:
+            resumen["con_publicaciones"] += 1
+            texto = " · ".join(p["titulo"] + " " + " ".join(p["atributos"].values())
+                               for p in suyas)
+            nombrados = [pid for pid, _c in productos_nombrados_en_la_pagina(
+                texto, prod["codigo_clean"]) if pid != prod["id"]]
+            if 0 < len(nombrados) <= MAXIMO_PRODUCTOS_POR_FICHA_DE_FABRICANTE:
+                resumen["con_productos"] += 1
+                pares.extend((min(prod["id"], o), max(prod["id"], o), prod["id"])
+                             for o in nombrados)
+            precios = [float(p["precio"]) for p in suyas
+                       if p["moneda"] == "ARS" and isinstance(p["precio"], (int, float))
+                       and p["precio"] > 0]
+            # El precio sirve para lo que vendés, no para el número de fábrica.
+            if len(precios) >= 2 and not es_de_fabrica:
+                mediana, n_precios = _mediana(precios), len(precios)
+                resumen["con_precio"] += 1
+        leidos.append((prod["id"], len(suyas), mediana, n_precios))
+        resumen["buscados"] += 1
+        if progreso:
+            progreso((i + 1) / len(pendientes), f"{i + 1} de {len(pendientes)}...")
+        if pausa and i + 1 < len(pendientes):
+            time.sleep(pausa)
+    with transaccion():
+        c.executemany("""INSERT OR REPLACE INTO mercado_libre_leidos
+                         (producto_id, publicaciones, precio_mediano, precios) VALUES (?, ?, ?, ?)""",
+                      leidos)
+        c.executemany("""INSERT OR IGNORE INTO productos_juntos_en_portal
+                         (producto_a_id, producto_b_id, portal, producto_origen_id)
+                         VALUES (?, ?, 'MERCADO LIBRE', ?)""", pares)
+    resumen["pares"] = len({(a, b) for a, b, _o in pares})
+    if pares:
+        resumen["lote"] = f"MERCADO LIBRE · {datetime.now():%d/%m %H:%M}"
+        resumen["nuevos"] = guardar_equivalencias_pendientes(
+            [(a, b) for a, b, _o in pares], "mercado_libre", resumen["lote"])
+    return resumen
+
+
+def precios_lejos_de_mercado_libre(veces=1.6, limite=200):
+    """Tus productos cuyo precio de lista está a más de `veces` del que se publica en Mercado
+    Libre, para un lado o para el otro. Primero los que tenés en stock y los más alejados."""
+    try:
+        c.execute("""SELECT p.codigo_raw AS "Código", m.nombre AS "Marca",
+                            p.descripcion AS "Descripción", p.precio AS "Tu precio",
+                            l.precio_mediano AS "Mercado Libre", l.precios AS "Publicaciones",
+                            COALESCE(p.stock, 0) AS "Stock"
+                     FROM mercado_libre_leidos l
+                     JOIN productos p ON p.id = l.producto_id
+                     JOIN marcas m ON m.id = p.marca_id
+                     WHERE l.precio_mediano > 0 AND p.precio > 0""")
+        filas = [dict(r) for r in c.fetchall()]
+    except sqlite3.OperationalError as _err:
+        anotar_error("precios_lejos_de_mercado_libre", _err)
+        return []
+    salida = []
+    for f in filas:
+        razon = f["Tu precio"] / f["Mercado Libre"]
+        if razon >= veces or razon <= 1 / veces:
+            f["Diferencia"] = (f"{razon:.1f} veces más caro" if razon > 1
+                               else f"{1 / razon:.1f} veces más barato")
+            f["_orden"] = max(razon, 1 / razon)
+            salida.append(f)
+    salida.sort(key=lambda f: (-(f["Stock"] > 0), -f["_orden"]))
+    for f in salida:
+        f.pop("_orden", None)
+    return salida[:limite]
+
+
+def mercado_libre_automatico():
+    """¿Se busca solo? Sí, si la aplicación está cargada, salvo que se apague en Administrar."""
+    return (config_mercado_libre() is not None
+            and obtener_config("mercado_libre_automatico", "1") == "1")
+
+
 def guardar_autos_de_ficha(codigo, nombre_marca, autos, tipo_pieza=""):
     """Guarda como aplicaciones los autos que se leyeron de la ficha del portal."""
     if not autos:
@@ -1337,6 +1571,7 @@ def _cupo_de_hoy(clave, objetivo):
         guardar_config("tanda_fondo_fotos", "0")
         guardar_config("tanda_fondo_equiv", "0")
         guardar_config("tanda_fondo_catalogos", "0")
+        guardar_config("tanda_fondo_mercado_libre", "0")
     try:
         return max(objetivo - int(obtener_config(clave, "0") or 0), 0)
     except ValueError:
@@ -1611,6 +1846,23 @@ def _trabajo_de_fondo():
                 _sumar_al_cupo("tanda_fondo_catalogos", FICHAS_DE_CATALOGO_POR_DIA)
                 anotar_error("_trabajo_de_fondo/catalogos", _err)
 
+        # Mercado Libre, si la aplicación está cargada: ver leer_mercado_libre(). Igual que con
+        # los catálogos, si no avanzó —nada pendiente, o no responde— el cupo del día se da por
+        # gastado.
+        if mercado_libre_automatico() and _cupo_de_hoy(
+                "tanda_fondo_mercado_libre", BUSQUEDAS_DE_MERCADO_LIBRE_POR_DIA) > 0:
+            try:
+                ceder_al_mostrador()
+                _res_ml = leer_mercado_libre(cuantos=min(
+                    PRODUCTOS_POR_SUBTANDA,
+                    _cupo_de_hoy("tanda_fondo_mercado_libre", BUSQUEDAS_DE_MERCADO_LIBRE_POR_DIA)))
+                _sumar_al_cupo("tanda_fondo_mercado_libre",
+                               _res_ml["buscados"] or BUSQUEDAS_DE_MERCADO_LIBRE_POR_DIA)
+                hizo_algo = hizo_algo or _res_ml["buscados"] > 0
+            except Exception as _err:
+                _sumar_al_cupo("tanda_fondo_mercado_libre", BUSQUEDAS_DE_MERCADO_LIBRE_POR_DIA)
+                anotar_error("_trabajo_de_fondo/mercado_libre", _err)
+
         if not hizo_algo:
             break       # no queda cupo, o no queda nada pendiente: no tiene sentido girar
     guardar_config("tanda_fondo_ultima", datetime.now().strftime("%Y-%m-%d %H:%M"))
@@ -1698,7 +1950,10 @@ def arrancar_tanda_de_fondo():
             and obtener_config("marcas_repuesto_pendientes", "") != "1"
             and obtener_config("separacion_pendiente", "") != "1"
             and not (catalogos_de_fabricante_automaticos()
-                     and _cupo_de_hoy("tanda_fondo_catalogos", FICHAS_DE_CATALOGO_POR_DIA) > 0)):
+                     and _cupo_de_hoy("tanda_fondo_catalogos", FICHAS_DE_CATALOGO_POR_DIA) > 0)
+            and not (mercado_libre_automatico()
+                     and _cupo_de_hoy("tanda_fondo_mercado_libre",
+                                      BUSQUEDAS_DE_MERCADO_LIBRE_POR_DIA) > 0)):
         return False
 
     # El candado se toma ACÁ y no adentro del hilo. Mirar si está tomado y después crear el

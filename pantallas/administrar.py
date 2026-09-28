@@ -1828,6 +1828,77 @@ if pagina == PAGINAS[3]:
                 st.rerun()
             st.markdown("---")
 
+            st.markdown("**🛒 Mercado Libre: pistas y precio de mercado**")
+            explicar(
+                "Busca tus códigos en Mercado Libre: relaciona productos y trae el precio que "
+                "se publica.",
+                "Las publicaciones de autopartes traen el número de pieza y, en el título, las "
+                "equivalencias con las que el vendedor quiere que lo encuentren. De cada código "
+                "tuyo se miran solo las publicaciones donde el código aparece de verdad (y la "
+                "marca, si no es un código de fábrica), y de ahí salen:\n\n"
+                "- **Pistas para relacionar**: si nombran el código de otro producto tuyo, "
+                "cuenta como una prueba a favor («las publicaciones de Mercado Libre los muestran "
+                "juntos») y el par va a revisión. No decide nada solo.\n"
+                "- **El precio de mercado**: la mediana de lo publicado, para ver en Estadísticas "
+                "→ 📌 Para pedir qué precios de tus listas quedaron atrasados.\n\n"
+                "**Cómo se activa (una sola vez):** entrá a developers.mercadolibre.com.ar con tu "
+                "cuenta, «Crear aplicación» (es gratis), y copiá el *App ID* y la *Secret Key* en "
+                "Settings → Secrets de Streamlit, en su propia sección, al final de todo:\n\n"
+                "```toml\n[mercadolibre]\nclient_id = \"el App ID\"\n"
+                "client_secret = \"la Secret Key\"\n```\n\n"
+                "Van en los secretos y no en la app porque la base se sube a GitHub con cada "
+                f"copia. Después corre solo: hasta {BUSQUEDAS_DE_MERCADO_LIBRE_POR_DIA} búsquedas "
+                "por día, primero lo que tenés en stock."
+            )
+            if not config_mercado_libre():
+                st.info("Todavía no está cargada la aplicación de Mercado Libre: mirá «ℹ️» "
+                        "arriba para activarla.")
+            else:
+                _auto_ml = st.toggle("Buscar solo en segundo plano",
+                                     value=obtener_config("mercado_libre_automatico", "1") == "1",
+                                     key="mercado_libre_toggle")
+                if _auto_ml != (obtener_config("mercado_libre_automatico", "1") == "1"):
+                    guardar_config("mercado_libre_automatico", "1" if _auto_ml else "0")
+                    st.rerun()
+                try:
+                    _ml = c.execute("""SELECT COUNT(*), SUM(publicaciones > 0),
+                                              SUM(precio_mediano IS NOT NULL)
+                                       FROM mercado_libre_leidos""").fetchone()
+                    _ml_pares = c.execute("""SELECT COUNT(*) FROM productos_juntos_en_portal
+                                             WHERE portal = 'MERCADO LIBRE'""").fetchone()[0]
+                    st.caption(f"Buscados: {_ml[0] or 0:,} · con publicaciones suyas: "
+                               f"{_ml[1] or 0:,} · con precio de mercado: {_ml[2] or 0:,} · "
+                               f"pares vistos juntos: {_ml_pares:,}")
+                except sqlite3.OperationalError as _err:
+                    anotar_error("panel de Mercado Libre", _err)
+                _prueba_ml = st.text_input("Probar con un código:", key="ml_prueba",
+                                           placeholder="Ej: 40011 fispa")
+                if _prueba_ml and st.button("🔍 Buscar", key="ml_probar"):
+                    _pubs, _err_ml = buscar_en_mercado_libre(_prueba_ml)
+                    if _err_ml:
+                        st.error(_err_ml)
+                    else:
+                        st.dataframe([{"Título": p["titulo"], "Precio": p["precio"],
+                                       "Nº de pieza": p["atributos"].get("PART_NUMBER", ""),
+                                       "Marca": p["atributos"].get("BRAND", ""),
+                                       "Link": p["link"]} for p in _pubs],
+                                     hide_index=True, width="stretch")
+                if st.button("🛒 Buscar una tanda ahora", key="ml_tanda"):
+                    _barra_ml = st.progress(0.0, text="Buscando en Mercado Libre...")
+                    _res_ml = leer_mercado_libre(
+                        cuantos=30, progreso=lambda f, t: _barra_ml.progress(f, text=t))
+                    _barra_ml.empty()
+                    if _res_ml["error"] and not _res_ml["buscados"]:
+                        st.error(_res_ml["error"])
+                    else:
+                        invalidar_salud()
+                        avisar("success",
+                               f"Se buscaron {_res_ml['buscados']}: {_res_ml['con_publicaciones']} "
+                               f"con publicaciones suyas, {_res_ml['con_precio']} con precio de "
+                               f"mercado, {_res_ml['nuevos']} par(es) nuevos para revisar.")
+                        st.rerun()
+            st.markdown("---")
+
             st.markdown("**🔤 Vincular dos proveedores por la descripción**")
             explicar(
                 "Para las listas que NO traen el código de fábrica, que son la mayoría.",
