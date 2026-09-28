@@ -789,7 +789,7 @@ HERRAMIENTAS_MANTENIMIENTO = [
      "Entra al portal del proveedor, trae a qué autos va cada código y qué otros productos "
      "tuyos muestra al lado —el mismo repuesto en otras marcas—, como prueba a favor.",
      "portal proveedor web autos aplicaciones clave contraseña jl distribuidor varias marcas "
-     "relacionar equivalentes alternativas"),
+     "relacionar equivalentes alternativas cargar link pegar sin contraseña publico wega"),
     ("🔤 Vincular dos proveedores por la descripción", 0,
      "Compara dos listas por el texto y propone los que son la misma pieza.",
      "descripcion texto dos proveedores comparar"),

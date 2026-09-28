@@ -258,7 +258,7 @@ def buscar_por_codigo(clean_code, marca_filtro="Todas", max_saltos=None, confian
             rel.get("nivel") or ("Exacta" if fila["ID"] in verificados_set else ""))
         fila["Nota"] = "" if sin_salida else (rel.get("nota") or "")
         template = fila.pop("_template", None)
-        fila["Ficha"] = template.replace("{codigo}", quote(fila["Codigo"], safe="")) if template else ""
+        fila["Ficha"] = url_de_la_ficha(template, fila["Codigo"]) if template else ""
     return res
 
 

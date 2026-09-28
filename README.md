@@ -4681,6 +4681,34 @@ Sobre la cola real: «🤷 nada dice que sean la misma pieza» baja de 1.510 a 1
 nuevos descartes, los 25 eran de autos distintos. Y el motivo del abanico ya no se parte en un
 grupo por cantidad («emparejado con 4», «con 5»…).
 
+### ➕ Cargar un portal es pegar un link
+
+Antes, un portal se configuraba escribiendo en los secretos de Streamlit la dirección de la ficha
+con `{codigo}` adentro, el login y los nombres de los campos del formulario; y el catálogo
+público de una marca era otra cosa aparte, que servía para fotos y links pero no para leer autos
+ni relacionar productos.
+
+Ahora son lo mismo. En **🔐 Portal del proveedor → ➕ Cargar un portal** se elige el proveedor
+y se pega el link de la ficha de cualquier producto suyo, copiado del navegador:
+
+- **La app encuentra el código en el link** (`plantilla_desde_un_ejemplo()`) y arma la
+  dirección para todos los demás. Acepta que el sitio escriba el código a su manera:
+  `{codigo}` como en la lista, `{codigo_pegado}` sin guiones ni espacios,
+  `{codigo_minusculas}` y `{codigo_pegado_minusculas}`. Todas pasan por
+  `url_de_la_ficha()`, que además limpia el código para que no pueda convertir una consulta en
+  otra cosa. Sin el `https://` (copiado del celular) también sirve.
+- **La prueba antes de guardar** con ese producto y con otro de la lista
+  (`probar_plantilla_de_portal()`): si la ficha se lee, qué autos nombra y cuántos productos
+  tuyos muestra. Si la página abre pero no muestra el código, avisa: el sitio la arma con
+  JavaScript o el link no es el de la ficha.
+- **Un portal sin contraseña, como el de Wega, no necesita nada más.** Los secretos quedan solo
+  para el usuario y la clave de los que piden login; la dirección la tiene la app.
+- Guardado, sirve para todo lo que usa el catálogo: leer autos y productos juntos, las fotos y
+  el link a la ficha en el buscador. En Administrar → Marcas también se puede pegar el link en
+  vez del patrón.
+- Si varias fichas seguidas no abren, la tanda se corta y esas fichas **no** quedan como
+  leídas: un error de red no es una respuesta, y antes se perdían para siempre.
+
 ## Una firma de foto podía ser un programa
 
 Las firmas visuales de las fotos se guardan con `pickle`, y `pickle` **no es un formato de

@@ -51,16 +51,25 @@ def config_portal(nombre_marca):
         cfg = secretos.get(f"portal_{(nombre_marca or '').strip().upper()}")
     except Exception as _err:
         anotar_error("config_portal", _err)
-        return None
-    if not cfg:
-        return None
+        cfg = None
     try:
-        datos = dict(cfg)
+        datos = dict(cfg or {})
     except Exception as _err:
         anotar_error("config_portal", _err)
+        datos = {}
+    # LA DIRECCIÓN DE LA FICHA PUEDE ESTAR EN LA APP. Es la plantilla del catálogo de la marca
+    # (Administrar → Marcas, o «Cargar un portal» con el link de un producto), que no es un
+    # secreto: los secretos quedan solo para el usuario y la clave. Y un catálogo PÚBLICO,
+    # como el de Wega, no necesita nada más que eso: sin usuario ni clave también es un portal.
+    if not datos.get("url_ficha"):
+        _plantilla = _plantilla_del_catalogo(nombre_marca)
+        if _plantilla:
+            datos["url_ficha"] = _plantilla
+    if not datos.get("url_ficha"):
         return None
-    if not all(datos.get(k) for k in ("url_login", "usuario", "clave", "url_ficha")):
-        return None
+    if not all(datos.get(k) for k in ("url_login", "usuario", "clave")):
+        datos = {"url_ficha": datos["url_ficha"], "publico": True,
+                 "sin_espacios": datos.get("sin_espacios")}
     # Se revisa la dirección configurada ANTES de usarla: si la url_ficha apunta a algo que
     # pide mercadería, el portal queda deshabilitado en vez de andar tocándolo.
     ok_url, palabra = _url_solo_de_consulta(datos["url_ficha"])
@@ -72,6 +81,17 @@ def config_portal(nombre_marca):
     datos.setdefault("campo_usuario", "usuario")
     datos.setdefault("campo_clave", "password")
     return datos
+
+
+def _plantilla_del_catalogo(nombre_marca):
+    """La plantilla de la ficha cargada en la app para esa marca, o ""."""
+    try:
+        fila = c.execute("SELECT url_ficha_template FROM marcas WHERE nombre = ?",
+                         (str(nombre_marca or "").strip().upper(),)).fetchone()
+        return (fila["url_ficha_template"] or "").strip() if fila else ""
+    except sqlite3.OperationalError as _err:
+        anotar_error("_plantilla_del_catalogo", _err)
+        return ""
 
 
 # Del proceso (ver del_proceso()), por lo mismo que _SESIONES_DE_CATALOGO. Guarda
@@ -218,6 +238,15 @@ def sesion_de_portal(nombre_marca):
     _guardada = _SESIONES_PORTAL.get(nombre_marca)
     if _guardada and time.time() - _guardada[1] < MINUTOS_DE_SESION_DE_PORTAL * 60:
         return _guardada[0], None
+    if cfg.get("publico"):
+        # Sin usuario ni clave: no hay login que hacer. Si el catálogo tiene su usuario en
+        # [catalogo.MARCA] —lo que ya usan las fotos—, se entra con ese. La sesión queda igual
+        # de solo lectura que la de un portal con clave: los mismos frenos valen para todo.
+        base = sesion_para_el_catalogo(nombre_marca) or requests.Session()
+        base.headers.update({"User-Agent": "Mozilla/5.0 (compatible; EquivalenciasElChavo/1.0)"})
+        solo_lectura = SesionSoloLectura(base, cfg["url_ficha"])
+        _SESIONES_PORTAL[nombre_marca] = (solo_lectura, time.time())
+        return solo_lectura, None
 
     sesion = requests.Session()
     sesion.headers.update({"User-Agent": "Mozilla/5.0 (compatible; EquivalenciasElChavo/1.0)"})
@@ -266,22 +295,14 @@ def _html_de_la_ficha_del_portal(nombre_marca, codigo, tiempo_maximo=20):
     if error:
         return "", error
     cfg = config_portal(nombre_marca)
-    # El código se limpia ANTES de meterlo en la dirección. quote() escapa los espacios pero
-    # deja pasar «?» y «&»: con un código así, alguien podría convertir una consulta en una
-    # acción («ABC?accion=comprar»). Se dejan solo letras, números y los separadores que usan
-    # los códigos de verdad.
-    # Los espacios se dejan —quote() los escribe como %20, que no hace nada—: JL numera
-    # «MBS 018» y «390 718 060», y sin el espacio su portal no encuentra la ficha. Si algún
-    # portal los quiere pegados, se configura `sin_espacios = true`.
-    codigo_limpio = re.sub(r"[^A-Za-z0-9._/ -]", "", str(codigo).strip())[:60]
-    codigo_limpio = re.sub(r"\s+", "" if cfg.get("sin_espacios") else " ", codigo_limpio).strip()
-    # Y sin «..»: con eso se sube de nivel en la dirección y se llega a otra parte del sitio.
-    # Un código como «../../pedido/nuevo» convertiría una consulta en cualquier otra cosa.
-    if ".." in codigo_limpio or codigo_limpio.startswith("/"):
-        return "", "Ese código no se puede usar en una dirección: tiene barras o puntos dobles."
-    if not codigo_limpio:
-        return "", "El código tiene caracteres que no se pueden usar en una dirección."
-    url = cfg["url_ficha"].replace("{codigo}", quote(codigo_limpio, safe=""))
+    # url_de_la_ficha() limpia el código antes de meterlo en la dirección: sin «?», «&» ni
+    # «..», con los que una consulta se podría convertir en otra cosa. Si algún portal quiere
+    # los códigos con espacios pegados, se configura `sin_espacios = true`.
+    if cfg.get("sin_espacios"):
+        codigo = re.sub(r"\s+", "", str(codigo or ""))
+    url = url_de_la_ficha(cfg["url_ficha"], codigo)
+    if not url:
+        return "", "Ese código no se puede usar en una dirección."
     try:
         r = sesion.get(url, timeout=tiempo_maximo)
         if r.status_code == 404:
@@ -391,6 +412,54 @@ def productos_nombrados_en_la_pagina(texto, excluir_codigo_clean=""):
     return sorted(encontrados.items())
 
 
+def probar_plantilla_de_portal(plantilla, codigos, tiempo_maximo=15):
+    """Abre la ficha de esos códigos con la plantilla y cuenta qué se pudo leer. Lista de dicts.
+
+    Es para ver ANTES de guardar si el portal sirve: una dirección bien armada que devuelve la
+    página vacía —el contenido lo arma JavaScript después— o la portada del sitio no le sirve a
+    nadie, y eso no se nota hasta que la primera tanda vuelve sin nada."""
+    ok_url, palabra = _url_solo_de_consulta(plantilla)
+    if not ok_url:
+        return [{"Código": "", "Resultado": f"❌ La dirección contiene «{palabra}», que suele "
+                                            "significar pedir algo. Usá la de la ficha."}]
+    sesion = requests.Session()
+    sesion.headers.update({"User-Agent": "Mozilla/5.0 (compatible; EquivalenciasElChavo/1.0)"})
+    solo_lectura = SesionSoloLectura(sesion, plantilla)
+    salida = []
+    for codigo, codigo_clean in codigos:
+        fila = {"Código": codigo, "Resultado": "", "Autos": "", "Productos tuyos": 0}
+        url = url_de_la_ficha(plantilla, codigo)
+        if not url:
+            fila["Resultado"] = "❌ ese código no se puede usar en una dirección"
+            salida.append(fila)
+            continue
+        try:
+            r = solo_lectura.get(url, timeout=tiempo_maximo)
+        except Exception as e:
+            anotar_error("probar_plantilla_de_portal", e)
+            fila["Resultado"] = f"❌ no se pudo abrir ({type(e).__name__})"
+            salida.append(fila)
+            continue
+        if r.status_code != 200:
+            fila["Resultado"] = f"❌ la página respondió {r.status_code}"
+            salida.append(fila)
+            continue
+        texto = _texto_visible(r.text or "")
+        autos = _autos_del_texto(texto)
+        nombrados = [pid for pid, _cod in productos_nombrados_en_la_pagina(texto, codigo_clean)]
+        fila["Autos"] = ", ".join(autos[:6]) + ("…" if len(autos) > 6 else "")
+        fila["Productos tuyos"] = len(nombrados)
+        if codigo_clean and codigo_clean not in sanitizar(texto):
+            fila["Resultado"] = ("⚠️ la página abre pero no muestra el código: puede que arme "
+                                 "el contenido con JavaScript, o que no sea la ficha")
+        elif len(texto) < 300:
+            fila["Resultado"] = "⚠️ la página casi no tiene texto"
+        else:
+            fila["Resultado"] = "✅ se lee la ficha"
+        salida.append(fila)
+    return salida
+
+
 def portales_que_los_muestran_juntos(id_a, id_b):
     """Los portales en los que la ficha de uno mostró al otro. Lista de nombres, o []."""
     try:
@@ -438,15 +507,28 @@ def leer_fichas_del_portal(marca_id, nombre_marca, cuantos=25, progreso=None, pa
               (marca_id, nombre_marca, int(cuantos)))
     pendientes = [dict(r) for r in c.fetchall()]
     pares, leidas = [], []
+    fallas_seguidas = 0
     for i, prod in enumerate(pendientes):
         html, err = _html_de_la_ficha_del_portal(nombre_marca, prod["codigo_raw"])
         if err and ("tope" in err or "cerró sola" in err or "PermissionError" in err):
             resumen["error"] = err
             break
-        if err:
+        # Solo «no hay ficha para ese código» queda anotado como leído: es una respuesta. Un
+        # error de red o del servidor no lo es, y anotarlo dejaría esas fichas sin leer para
+        # siempre. Si fallan varias seguidas, el portal está caído o la dirección está mal: se
+        # corta en vez de seguir golpeando.
+        if err and "no tiene ficha" not in err:
+            fallas_seguidas += 1
+            resumen["sin_ficha"] += 1
+            if fallas_seguidas >= 5:
+                resumen["error"] = f"{fallas_seguidas} fichas seguidas sin poder abrirse: {err}"
+                break
+        elif err:
+            fallas_seguidas = 0
             resumen["sin_ficha"] += 1
             leidas.append((nombre_marca, prod["id"], None))
         else:
+            fallas_seguidas = 0
             texto = _texto_visible(html)
             autos = _autos_del_texto(texto)
             if autos:
@@ -644,7 +726,9 @@ def bajar_fotos_desde_catalogo(marca_id, limite=100, progreso=None, hilos=6, liv
 
     def traer(tarea):
         _, codigo = tarea
-        url_ficha = plantilla.replace("{codigo}", quote(str(codigo), safe=""))
+        url_ficha = url_de_la_ficha(plantilla, codigo)
+        if not url_ficha:
+            return None, "ese código no se puede usar en una dirección"
         return buscar_imagen_en_ficha(url_ficha, sesion=sesion)
 
     resultados = _bajar_en_paralelo(pendientes, traer, hilos=hilos, progreso=progreso,
@@ -652,7 +736,7 @@ def bajar_fotos_desde_catalogo(marca_id, limite=100, progreso=None, hilos=6, liv
 
     bajadas, fallidas, sin_foto = 0, [], 0
     for (pid, codigo), datos, error in resultados:
-        url_ficha = plantilla.replace("{codigo}", quote(str(codigo), safe=""))
+        url_ficha = url_de_la_ficha(plantilla, codigo)
         if datos:
             try:
                 actualizar_imagen_producto(pid, datos, origen="ficha", fuente=url_ficha,
@@ -878,13 +962,12 @@ def equivalencias_desde_catalogo(marca_id, limite=50, progreso=None, cancelado=N
 
     def traer(tarea):
         _pid, codigo, _limpio = tarea
-        # El código se limpia antes de meterlo en la dirección, igual que en el resto: sin esto
-        # un código con «?» o «..» convertiría una consulta en otra cosa.
-        seguro = re.sub(r"[^A-Za-z0-9._/-]", "", str(codigo).strip())[:60]
-        if not seguro or ".." in seguro or seguro.startswith("/"):
+        # url_de_la_ficha() limpia el código antes de meterlo en la dirección: sin eso un
+        # código con «?» o «..» convertiría una consulta en otra cosa.
+        url_ficha = url_de_la_ficha(plantilla, codigo)
+        if not url_ficha:
             return None, "ese código no se puede usar en una dirección"
-        return codigos_en_una_ficha(plantilla.replace("{codigo}", quote(seguro, safe="")),
-                                    codigo, sesion=sesion)
+        return codigos_en_una_ficha(url_ficha, codigo, sesion=sesion)
 
     resultados = _bajar_en_paralelo(pendientes, traer, hilos=hilos, progreso=progreso,
                                     cancelado=cancelado)

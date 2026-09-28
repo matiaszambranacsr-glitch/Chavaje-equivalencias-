@@ -76,7 +76,11 @@ if pagina == PAGINAS[3]:
                 "código del producto.",
                 "La app arma el link automáticamente para cada resultado de búsqueda, sin copiar "
                 "ninguna imagen — así podés sumar Taranto y cualquier otro proveedor que uses, cada uno "
-                "con su propio patrón. Ejemplo: `https://www.taranto.com.ar/busqueda?q={codigo}`"
+                "con su propio patrón. Ejemplo: `https://www.taranto.com.ar/busqueda?q={codigo}`\n\n"
+                "**Más fácil:** pegá directamente el link de la ficha de un producto de esa marca "
+                "y la app encuentra sola dónde va el código. Si el sitio lo escribe distinto que "
+                "la lista, también sirven `{codigo_pegado}` (sin guiones ni espacios), "
+                "`{codigo_minusculas}` y `{codigo_pegado_minusculas}`."
             )
             nombres_para_link = [m["nombre"] for m in marcas_info]
             marca_link = st.selectbox("Marca:", nombres_para_link, key="marca_link_ficha")
@@ -93,14 +97,30 @@ if pagina == PAGINAS[3]:
                 key=f"input_template_link_{id_marca_link}"
             )
             if st.button("💾 Guardar patrón de link"):
-                if nuevo_template.strip() and "{codigo}" not in nuevo_template:
-                    st.warning("El patrón tiene que incluir '{codigo}' en algún lado, si no todos los links quedan iguales.")
+                _plantilla_ok = nuevo_template.strip()
+                if _plantilla_ok and not any(f in _plantilla_ok
+                                             for f in FORMAS_DEL_CODIGO_EN_LA_URL):
+                    # Pegaron el link de la ficha de un producto en vez del patrón: se busca
+                    # el código de la lista en el link y se arma solo. Ver
+                    # plantilla_desde_un_ejemplo().
+                    _plantilla_ok, _cod_ej, _err_ej = plantilla_desde_un_ejemplo(
+                        _plantilla_ok, [r["codigo_raw"] for r in c.execute(
+                            "SELECT codigo_raw FROM productos WHERE marca_id = ?",
+                            (id_marca_link,)).fetchall()])
+                    if _err_ej:
+                        st.warning("El patrón tiene que incluir '{codigo}' donde va el código, "
+                                   "o ser el link de la ficha de un producto de esta marca. "
+                                   + _err_ej)
+                        _plantilla_ok = None
+                if _plantilla_ok is None:
+                    pass
                 else:
                     with db_lock:
                         c.execute("UPDATE marcas SET url_ficha_template = ? WHERE id = ?",
-                                  (nuevo_template.strip() or None, id_marca_link))
+                                  (_plantilla_ok or None, id_marca_link))
                         conn.commit()
-                    avisar("success", f"Patrón de link guardado para '{marca_link}'.")
+                    avisar("success", f"Patrón de link guardado para '{marca_link}'"
+                                      + (f": `{_plantilla_ok}`" if _plantilla_ok else "") + ".")
                     st.rerun()
 
             st.markdown("---")
@@ -1425,7 +1445,8 @@ if pagina == PAGINAS[3]:
                 anotar_error("nivel principal", _err)
                 pass
             _n_portales = sum(1 for _m in (filas_a_listas(c.execute(
-                "SELECT nombre FROM marcas")) or []) if config_portal(_m["nombre"]))
+                "SELECT nombre FROM marcas WHERE tipo <> 'OEM'")) or [])
+                if config_portal(_m["nombre"]))
 
             st.dataframe([
                 {"Método": "🔤 Por descripción",
@@ -1444,8 +1465,8 @@ if pagina == PAGINAS[3]:
                  "Qué necesita": "2 catálogos de fabricante del mismo tipo de pieza",
                  "Estado": f"listo — {marcas_con_tipo} marca(s)" if marcas_con_tipo >= 2
                             else f"tenés {marcas_con_tipo}, hacen falta 2"},
-                {"Método": "🔐 Autos del portal",
-                 "Qué necesita": "usuario del portal en los secretos",
+                {"Método": "🔐 Portal del proveedor",
+                 "Qué necesita": "el link de la ficha de un producto (y la clave, si pide)",
                  "Estado": f"listo — {_n_portales} portal(es)" if _n_portales
                             else "sin configurar"},
                 {"Método": "🧾 Confirmadas por venta",
@@ -1542,10 +1563,15 @@ if pagina == PAGINAS[3]:
                 "una prueba más: si las medidas, el rubro o el auto dicen otra cosa, el par "
                 "se descarta igual. Una ficha que nombra más de "
                 f"{MAXIMO_PRODUCTOS_POR_FICHA} productos tuyos es un listado y no cuenta.\n\n"
-                "**Configuración**, en Settings → Secrets de Streamlit:\n\n```\n[portal_JL]\n"
+                "**Cargarlo es pegar un link.** Abrí en el navegador la ficha de cualquier "
+                "producto de ese proveedor, copiá la dirección y pegala en «➕ Cargar un "
+                "portal», acá abajo. La app encuentra el código en el link, arma la dirección "
+                "para todos los demás y la prueba antes de guardarla. Si el portal no pide "
+                "contraseña —como el de Wega— no hace falta nada más.\n\n"
+                "**Si pide usuario y clave**, eso va aparte, en Settings → Secrets de "
+                "Streamlit (la dirección de la ficha ya la tiene la app):\n\n```\n[portal_JL]\n"
                 'url_login = "https://proveedor.com/login"\nusuario = "tu_usuario"\n'
-                'clave = "tu_clave"\ncampo_usuario = "email"\ncampo_clave = "password"\n'
-                'url_ficha = "https://proveedor.com/producto/{codigo}"\n```\n\n'
+                'clave = "tu_clave"\ncampo_usuario = "email"\ncampo_clave = "password"\n```\n\n'
                 "El nombre después de `portal_` es la marca tal como está cargada en la app "
                 "(la de la lista del proveedor). Los nombres de `campo_usuario` y "
                 "`campo_clave` son los `name=` del formulario de acceso del portal.\n\n"
@@ -1564,22 +1590,104 @@ if pagina == PAGINAS[3]:
                 "no por configuración: nadie puede activarlo sin querer."
             )
             try:
-                c.execute("""SELECT m.id, m.nombre, COUNT(p.id) AS n FROM marcas m
+                c.execute("""SELECT m.id, m.nombre, COUNT(p.id) AS n,
+                                    COALESCE(m.url_ficha_template, '') AS plantilla
+                             FROM marcas m
                              JOIN productos p ON p.marca_id = m.id
+                             WHERE m.tipo <> 'OEM'
                              GROUP BY m.id ORDER BY n DESC""")
                 _marcas_portal = filas_a_listas(c)
             except sqlite3.OperationalError as _err:
                 anotar_error("nivel principal", _err)
                 _marcas_portal = []
+
+            # ➕ CARGAR UN PORTAL: pegar el link de la ficha de un producto. Ver
+            # plantilla_desde_un_ejemplo() y probar_plantilla_de_portal().
+            with st.expander("➕ Cargar un portal", expanded=not any(
+                    config_portal(x["nombre"]) for x in _marcas_portal)):
+                if not _marcas_portal:
+                    st.caption("Primero cargá la lista de algún proveedor.")
+                else:
+                    _et_nuevo = {f"{x['nombre']} ({x['n']:,} productos)"
+                                 + (" · ya tiene portal" if x["plantilla"] else ""): x
+                                 for x in _marcas_portal}
+                    _marca_n = _et_nuevo[st.selectbox("Proveedor:", list(_et_nuevo),
+                                                      key="portal_nuevo_marca")]
+                    _link_n = st.text_input(
+                        "Link de la ficha de UN producto de ese proveedor:",
+                        placeholder="https://www.proveedor.com.ar/producto/FAP-2033",
+                        key=f"portal_nuevo_link_{_marca_n['id']}",
+                        help="Abrilo en el navegador, en la web del proveedor, y copiá la "
+                             "dirección de arriba. Tiene que ser un producto que esté en tu "
+                             "lista de ese proveedor.")
+                    _cod_n = st.text_input(
+                        "Código de ese producto (solo si la app no lo encuentra sola):",
+                        key=f"portal_nuevo_cod_{_marca_n['id']}")
+                    if st.button("🔎 Probar", key="portal_nuevo_probar", disabled=not _link_n):
+                        if _cod_n.strip():
+                            _codigos_n = [_cod_n.strip()]
+                        else:
+                            _codigos_n = [r["codigo_raw"] for r in c.execute(
+                                "SELECT codigo_raw FROM productos WHERE marca_id = ?",
+                                (_marca_n["id"],)).fetchall()]
+                        _plantilla_n, _cod_hallado, _err_n = plantilla_desde_un_ejemplo(
+                            _link_n, _codigos_n)
+                        if _err_n:
+                            st.session_state.pop("portal_nuevo", None)
+                            st.warning(_err_n)
+                        else:
+                            # Se prueba con el del ejemplo y con otro de la lista, con stock si
+                            # hay: que ande con uno solo puede ser casualidad.
+                            _otro_n = c.execute(
+                                """SELECT codigo_raw, codigo_clean FROM productos
+                                   WHERE marca_id = ? AND codigo_clean <> ?
+                                   ORDER BY (COALESCE(stock, 0) > 0) DESC, RANDOM() LIMIT 1""",
+                                (_marca_n["id"], sanitizar(_cod_hallado))).fetchone()
+                            _a_probar = [(_cod_hallado, sanitizar(_cod_hallado))] + (
+                                [(_otro_n["codigo_raw"], _otro_n["codigo_clean"])]
+                                if _otro_n else [])
+                            with st.spinner("Abriendo las fichas..."):
+                                _prueba_n = probar_plantilla_de_portal(_plantilla_n, _a_probar)
+                            st.session_state["portal_nuevo"] = {
+                                "marca_id": _marca_n["id"], "nombre": _marca_n["nombre"],
+                                "plantilla": _plantilla_n, "prueba": _prueba_n}
+                    _nuevo = st.session_state.get("portal_nuevo")
+                    if _nuevo and _nuevo["marca_id"] == _marca_n["id"]:
+                        st.markdown(f"Dirección para cada producto: `{_nuevo['plantilla']}`")
+                        st.dataframe(_nuevo["prueba"], width="stretch", hide_index=True)
+                        _anda = any(f["Resultado"].startswith("✅") for f in _nuevo["prueba"])
+                        if not _anda:
+                            st.caption(
+                                "Ninguna ficha se pudo leer bien. Probá con el link de otro "
+                                "producto, o con el de la búsqueda del sitio "
+                                "(«…/buscar?q=FAP2033»). Si igual no anda, el sitio arma la "
+                                "página con JavaScript y no se puede leer así.")
+                        if st.button("💾 Guardar el portal", key="portal_nuevo_guardar",
+                                     type="primary" if _anda else "secondary"):
+                            with db_lock:
+                                c.execute("UPDATE marcas SET url_ficha_template = ? WHERE id = ?",
+                                          (_nuevo["plantilla"], _nuevo["marca_id"]))
+                                conn.commit()
+                            olvidar_sesion_de_catalogo(_nuevo["nombre"])
+                            _SESIONES_PORTAL.pop(_nuevo["nombre"], None)
+                            st.session_state.pop("portal_nuevo", None)
+                            avisar("success",
+                                   f"Portal de {_nuevo['nombre']} guardado. Ya se puede leer "
+                                   "abajo, y además sirve para las fotos y para el link a la "
+                                   "ficha en el buscador.")
+                            st.rerun()
             _con_portal = [x for x in _marcas_portal if config_portal(x["nombre"])]
             if not _con_portal:
                 st.caption(
-                    "Todavía no hay ningún portal configurado. Mientras tanto, fijate si el "
-                    "proveedor deja **exportar el catálogo a Excel** desde su portal: bajarlo "
-                    "y cargarlo por «Cargar Excel» es más simple y más confiable que esto."
+                    "Todavía no hay ningún portal cargado: empezá por «➕ Cargar un portal». "
+                    "Y fijate si el proveedor deja **exportar el catálogo a Excel** desde su "
+                    "portal: bajarlo y cargarlo por «Cargar Excel» es todavía más confiable."
                 )
             else:
-                _et_p = {f"{x['nombre']} ({x['n']:,} productos)": x for x in _con_portal}
+                _et_p = {f"{x['nombre']} ({x['n']:,} productos) · "
+                         + ("público" if config_portal(x["nombre"]).get("publico")
+                            else "con usuario y clave"): x
+                         for x in _con_portal}
                 _sel_p = st.selectbox("Proveedor:", list(_et_p.keys()), key="portal_marca")
                 _marca_p = _et_p[_sel_p]
                 try:
@@ -1615,7 +1723,7 @@ if pagina == PAGINAS[3]:
                         _marca_p["id"], _marca_p["nombre"], int(_cuantos),
                         progreso=lambda f, t: _barra.progress(f, text=t))
                     _barra.empty()
-                    if _res["error"] and not _res["leidas"]:
+                    if _res["error"] and not (_res["leidas"] - _res["sin_ficha"]):
                         st.error(_res["error"])
                     elif not _res["leidas"]:
                         st.info("Ya se leyeron todas las fichas de esa marca.")
@@ -1630,6 +1738,8 @@ if pagina == PAGINAS[3]:
                         elif _res["pares"]:
                             _msj += (f" Los {_res['pares']} par(es) ya estaban cargados o para "
                                      "revisar: ahí cuentan como una prueba más a favor.")
+                        if _res["sin_ficha"]:
+                            _msj += f" {_res['sin_ficha']} no se pudieron abrir."
                         if _res["listados"]:
                             _msj += (f" {_res['listados']} ficha(s) nombraban demasiados "
                                      "productos y se tomaron como listados.")

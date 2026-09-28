@@ -1697,9 +1697,8 @@ Administrar → Mantenimiento.
                                         if tiene_catalogo else
                                         f"La marca {cand['marca_vendida']} no tiene cargada la dirección "
                                         "de su catálogo (se carga en Administrar → Marcas)")):
-                        url_ficha = info_ficha["url_ficha_template"].replace(
-                            "{codigo}", quote(info_ficha["codigo_raw"], safe="")
-                        )
+                        url_ficha = url_de_la_ficha(info_ficha["url_ficha_template"],
+                                                    info_ficha["codigo_raw"])
                         with st.spinner("Consultando la ficha del proveedor..."):
                             encontrado, detalle_verif = verificar_en_catalogo_oficial(
                                 cand["codigo_pedido"], url_ficha

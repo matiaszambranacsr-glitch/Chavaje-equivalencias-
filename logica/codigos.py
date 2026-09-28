@@ -936,6 +936,90 @@ def valor_codigo(valor):
 # ============================================================================================
 # MARCAS Y CATÁLOGOS EXTERNOS DE PROVEEDOR
 # ============================================================================================
+# LA DIRECCIÓN DE LA FICHA DE UN CÓDIGO. Cada catálogo escribe el código a su manera en la
+# dirección: como en la lista («/producto/FAP-2033»), pegado («?q=FAP2033») o en minúsculas
+# («/fap-2033»). Por eso la plantilla admite cuatro formas, y todas pasan por acá:
+#     {codigo}                   como en la lista
+#     {codigo_minusculas}        como en la lista, en minúsculas
+#     {codigo_pegado}            solo letras y números, en mayúsculas
+#     {codigo_pegado_minusculas} solo letras y números, en minúsculas
+FORMAS_DEL_CODIGO_EN_LA_URL = ("{codigo_pegado_minusculas}", "{codigo_minusculas}",
+                               "{codigo_pegado}", "{codigo}")
+
+
+def url_de_la_ficha(plantilla, codigo):
+    """La dirección de la ficha de ese código según la plantilla del catálogo, o "".
+
+    El código se limpia ANTES de meterlo en la dirección, igual para todas las formas: quote()
+    escapa los espacios pero deja pasar «?» y «&», y con un código así alguien podría convertir
+    una consulta en una acción («ABC?accion=comprar»). Tampoco se deja «..», con el que se sube
+    de nivel y se llega a otra parte del sitio. Los espacios quedan —quote() los escribe %20—:
+    JL numera «MBS 018» y sin el espacio su portal no encuentra la ficha."""
+    plantilla = str(plantilla or "")
+    if not any(forma in plantilla for forma in FORMAS_DEL_CODIGO_EN_LA_URL):
+        return ""
+    como_en_la_lista = re.sub(r"\s+", " ",
+                              re.sub(r"[^A-Za-z0-9._/ -]", "", str(codigo or "").strip()))[:60]
+    como_en_la_lista = como_en_la_lista.strip()
+    if not como_en_la_lista or ".." in como_en_la_lista or como_en_la_lista.startswith("/"):
+        return ""
+    pegado = sanitizar(codigo)
+    formas = {"{codigo_pegado_minusculas}": pegado.lower(),
+              "{codigo_minusculas}": como_en_la_lista.lower(),
+              "{codigo_pegado}": pegado,
+              "{codigo}": como_en_la_lista}
+    for marcador in FORMAS_DEL_CODIGO_EN_LA_URL:
+        plantilla = plantilla.replace(marcador, quote(formas[marcador], safe=""))
+    return plantilla
+
+
+def plantilla_desde_un_ejemplo(url_ejemplo, codigos):
+    """Arma la plantilla a partir del link de la ficha de UN producto. (plantilla, código, error).
+
+    Es lo que hace fácil cargar un catálogo: en vez de explicarle a alguien qué es «{codigo}»,
+    se le pide que abra la ficha de cualquier producto en la web del proveedor y pegue el link.
+    La app busca en ese link alguno de los códigos de la marca —`codigos` son los de su lista— y
+    lo reemplaza por la forma que corresponde: «…/producto/fap-2033» con el FAP-2033 de la lista
+    queda «…/producto/{codigo_minusculas}»."""
+    from urllib.parse import unquote_plus
+    url = str(url_ejemplo or "").strip()
+    # «wega.com.ar/producto/...», copiado de la barra del celular, que no muestra el https.
+    if url and not re.match(r"[a-z]+://", url, re.I) and re.match(r"[\w-]+(\.[\w-]+)*(:\d+)?/", url):
+        url = "https://" + url
+    if not re.match(r"https?://", url, re.I):
+        return "", "", "El link tiene que empezar con http:// o https://"
+    decodificada = unquote_plus(url)
+    # Los pedazos de la dirección donde puede estar el código: entre barras, después de «=».
+    pedazos = [p for p in re.split(r"[/?&=#]+", decodificada) if p]
+    por_limpio = {}
+    for cod in codigos:
+        limpio = sanitizar(cod)
+        if len(limpio) >= 3 and any(ch.isdigit() for ch in limpio):
+            por_limpio.setdefault(limpio, cod)
+    # El pedazo más largo primero: «FAP-2033-X» antes que un «2033» suelto de otra parte.
+    for pedazo in sorted(pedazos, key=len, reverse=True):
+        limpio = sanitizar(pedazo)
+        # Sin la extensión: «/fap-2033.html».
+        limpio_sin_ext = sanitizar(re.sub(r"\.(html?|php|aspx?)$", "", pedazo, flags=re.I))
+        codigo = por_limpio.get(limpio) or por_limpio.get(limpio_sin_ext)
+        if not codigo:
+            continue
+        como_en_la_lista = re.sub(r"\s+", " ", str(codigo).strip())
+        for marcador, forma in (("{codigo}", como_en_la_lista),
+                                ("{codigo_minusculas}", como_en_la_lista.lower()),
+                                ("{codigo_pegado}", sanitizar(codigo)),
+                                ("{codigo_pegado_minusculas}", sanitizar(codigo).lower())):
+            for escrita in (quote(forma, safe=""), forma.replace(" ", "+"), forma):
+                if escrita and escrita in url:
+                    return url.replace(escrita, marcador, 1), codigo, ""
+        # Está, pero escrito de otra forma (con otros separadores): se usa como en la lista.
+        for escrita in (pedazo, quote(pedazo, safe="")):
+            if escrita in url:
+                return url.replace(escrita, "{codigo}", 1), codigo, ""
+    return "", "", ("No encontré en el link ningún código de esa marca. Fijate que sea el link "
+                    "de la ficha de UN producto que esté en tu lista, o escribí el código.")
+
+
 def get_or_create_marca(nombre, tipo="PROVEEDOR"):
     nombre = nombre.strip().upper()
     c.execute("INSERT OR IGNORE INTO marcas (nombre, tipo) VALUES (?, ?)", (nombre, tipo))
