@@ -1023,10 +1023,8 @@ Administrar → Mantenimiento.
                 # Arranca en la opción que cubre la lista ENTERA. Estaba fijo en 1.000, y
                 # con 3.185 pendientes eso son tres vueltas para ver una lista que se analiza
                 # entera en 6,6 s — y dos tercios que, si nadie cambia de tanda, no se miran.
-                _opciones_tanda = [400, 1000, 2500, 5000, 10000, 25000, 100000]
-                st.session_state.setdefault(
-                    "cuantos_pendientes",
-                    next((o for o in _opciones_tanda if o >= total_lote), _opciones_tanda[-1]))
+                _opciones_tanda = OPCIONES_DE_TANDA_DEL_LOTE
+                st.session_state.setdefault("cuantos_pendientes", tanda_que_cubre(total_lote))
                 cuantos = st.select_slider(
                     "¿Cuántos analizar por vez?",
                     options=_opciones_tanda,
@@ -1051,22 +1049,42 @@ Administrar → Mantenimiento.
             # bien: el análisis de éste sigue siendo cierto.
             # Y los pares vistos juntos en un portal: leer fichas no cambia este lote, pero
             # le agrega pruebas a favor a pares que ya estaban acá.
-            _clave_analisis = (lote_info["lote"], int(cuantos),
-                               (int(tanda_lote) - 1) * int(cuantos), total_lote,
-                               cuantos_juntos_en_portales())
-            _guardado = st.session_state.get("_analisis_lote")
-            if _guardado and _guardado.get("clave") == _clave_analisis:
+            _clave_analisis = clave_del_analisis_de_lote(
+                lote_info["lote"], cuantos, (int(tanda_lote) - 1) * int(cuantos), total_lote)
+            _guardado = analisis_de_lote_guardado()
+            _clave_vieja = (_guardado or {}).get("clave") or ()
+            if _guardado and _clave_vieja == _clave_analisis:
                 limpias, sospechosas, relacionadas = _guardado["resultado"]
+            elif (len(_clave_vieja) == len(_clave_analisis)
+                    and _clave_vieja[:3] == _clave_analisis[:3]
+                    and _clave_vieja[4:] == _clave_analisis[4:]
+                    and total_lote < _clave_vieja[3]
+                    and _guardado.get("recortes", 0) < RECORTES_ANTES_DE_REANALIZAR):
+                # SOLO SE SACAN LOS QUE YA SE DECIDIERON. Aprobar o descartar un par bajaba
+                # el total y rehacía el análisis entero: 3,7 s sobre la cola real por cada
+                # decisión, con el mismo resultado para todos los demás pares. Ahora se sacan
+                # los que ya no están pendientes y el resto queda como estaba (0,8 s). Cada
+                # RECORTES_ANTES_DE_REANALIZAR decisiones se rehace entero, por lo poco que lo
+                # decidido le cambia a lo aprendido de los demás.
+                _siguen = pares_pendientes_del_lote(lote_info["lote"])
+                limpias, sospechosas, relacionadas = (
+                    [x for x in _lista if (x["a"], x["b"]) in _siguen]
+                    for _lista in _guardado["resultado"])
+                guardar_analisis_de_lote({
+                    "clave": _clave_analisis,
+                    "resultado": (limpias, sospechosas, relacionadas),
+                    "recortes": _guardado.get("recortes", 0) + _clave_vieja[3] - total_lote,
+                })
             else:
                 with st.spinner("Analizando..."):
                     limpias, sospechosas, relacionadas = analizar_lote_pendiente(
                         lote_info["lote"], limite=int(cuantos),
                         desde=(int(tanda_lote) - 1) * int(cuantos)
                     )
-                st.session_state["_analisis_lote"] = {
+                guardar_analisis_de_lote({
                     "clave": _clave_analisis,
                     "resultado": (limpias, sospechosas, relacionadas),
-                }
+                })
             analizados = len(limpias) + len(sospechosas) + len(relacionadas)
             st.caption(f"Analizados {analizados:,} de {total_lote:,} vínculo(s) de esta lista." +
                        (f" Quedan {total_lote - analizados:,} — cambiá de tanda para verlos."

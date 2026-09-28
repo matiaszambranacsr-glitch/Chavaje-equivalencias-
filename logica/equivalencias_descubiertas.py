@@ -2246,6 +2246,95 @@ def tipo_de_alarma(alarma):
     return alarma
 
 
+# Ver el análisis guardado en Estadísticas → Equivalencias sugeridas: cuántas decisiones se
+# descuentan del análisis ya hecho antes de rehacerlo entero.
+RECORTES_ANTES_DE_REANALIZAR = 200
+
+
+# EL ANÁLISIS DEL LOTE ES DEL SERVIDOR, NO DE LA SESIÓN. Tarda 6 s sobre la cola real, y
+# guardado en la sesión se perdía al recargar la página o al entrar desde el celular (cada
+# reconexión es una sesión nueva). Queda UNO, el último: la clave con que se guarda dice qué
+# lote, qué tanda y cuántos pendientes había, así que otro lote simplemente no coincide.
+# A propósito NO va en del_proceso(): la lógica se carga una vez por proceso y se vuelve a
+# cargar cuando cambia el código (ver logica/__init__.py), y un análisis hecho con las reglas
+# viejas no tiene que sobrevivir a eso: es de cada carga del código —«de cada pasada» de la
+# lógica—, a propósito.
+_ANALISIS_DE_LOTE = {}
+
+
+# Y dura unas horas: lo que se aprende de lo que vas decidiendo en otras listas, las fichas
+# nuevas y los puntajes que rehace la tarea de fondo le van cambiando algo a cada par.
+HORAS_QUE_DURA_EL_ANALISIS = 3
+
+
+def analisis_de_lote_guardado():
+    guardado = _ANALISIS_DE_LOTE.get("ultimo")
+    if guardado and time.time() - guardado.get("_hecho", 0) > HORAS_QUE_DURA_EL_ANALISIS * 3600:
+        return None
+    return guardado
+
+
+def guardar_analisis_de_lote(analisis):
+    # Un recorte conserva la hora del análisis entero del que salió.
+    anterior = _ANALISIS_DE_LOTE.get("ultimo") or {}
+    analisis["_hecho"] = (anterior.get("_hecho", time.time()) if analisis.get("recortes")
+                          else time.time())
+    _ANALISIS_DE_LOTE["ultimo"] = analisis
+
+
+def olvidar_analisis_de_lote():
+    _ANALISIS_DE_LOTE.pop("ultimo", None)
+
+
+# Las tandas que ofrece la pantalla; arranca en la que cubre la lista entera.
+OPCIONES_DE_TANDA_DEL_LOTE = [400, 1000, 2500, 5000, 10000, 25000, 100000]
+
+
+def tanda_que_cubre(total):
+    return next((o for o in OPCIONES_DE_TANDA_DEL_LOTE if o >= total),
+                OPCIONES_DE_TANDA_DEL_LOTE[-1])
+
+
+def clave_del_analisis_de_lote(lote, cuantos, desde, total):
+    """Lo que tiene que coincidir para que un análisis guardado siga valiendo. El total de
+    pendientes lo invalida al decidir (ver el recorte en la pantalla), y los pares vistos juntos
+    en un portal porque leer fichas le agrega pruebas a pares que ya estaban."""
+    return (lote, int(cuantos), int(desde), int(total), cuantos_juntos_en_portales())
+
+
+def falta_preparar_el_analisis():
+    """¿La tanda de fondo tiene que dejar listo el análisis? Una vez por carga del código."""
+    return not _ANALISIS_DE_LOTE.get("_intentado")
+
+
+def preparar_el_analisis_del_primer_lote():
+    """Deja hecho el análisis de la lista que la pantalla muestra primero, tal como la pantalla
+    lo pediría. Lo corre la tanda de fondo al arrancar y después de cada importación: son 8 s
+    sobre la cola real que antes esperaba el primero que abría «Equivalencias sugeridas».
+    Devuelve si lo hizo (False si ya estaba o no hay nada pendiente)."""
+    _ANALISIS_DE_LOTE["_intentado"] = True
+    lotes = resumen_lotes_pendientes()
+    if not lotes:
+        return False
+    lote = lotes[0]["lote"]
+    total = contar_pendientes_del_lote(lote)
+    cuantos = tanda_que_cubre(total)
+    clave = clave_del_analisis_de_lote(lote, cuantos, 0, total)
+    guardado = analisis_de_lote_guardado()
+    if guardado and guardado.get("clave") == clave:
+        return False
+    resultado = analizar_lote_pendiente(lote, limite=cuantos, desde=0)
+    guardar_analisis_de_lote({"clave": clave, "resultado": resultado})
+    return True
+
+
+def pares_pendientes_del_lote(lote):
+    """{(a, b)} con a < b: los pares de ese lote que siguen esperando revisión."""
+    c.execute("""SELECT MIN(producto_a_id, producto_b_id), MAX(producto_a_id, producto_b_id)
+                 FROM equivalencias_pendientes WHERE lote = ?""", (lote,))
+    return {(r[0], r[1]) for r in c.fetchall()}
+
+
 def analizar_lote_pendiente(lote, limite=None, desde=0):
     """Ver _analizar_lote_pendiente(). Esto solo abre la memoria del análisis: ver
     recordando_lo_de_cada_producto()."""

@@ -5280,6 +5280,23 @@ Medido con un servidor falso: los 96 códigos SKF citados en la base real se ley
 pasada (antes eran hasta 150 por día); con el sitio caído cortó a los 5 pedidos y se pausó una
 hora.
 
+## ⏱️ Revisar sugeridas sin esperar
+
+«Estadísticas → 🔗 Equivalencias sugeridas» analiza la lista entera antes de mostrarla: 6 a 8 s
+sobre la cola real (13.941 pares de FISPA). Tres cambios para no esperarlos:
+
+- **Decidir no rehace el análisis.** Aprobar o descartar bajaba el total de pendientes y eso
+  rehacía todo: 3,7 s por decisión. Ahora se sacan del análisis guardado los pares que ya no
+  están pendientes (`pares_pendientes_del_lote()`) y el resto queda igual: **1,3 s**. Cada
+  `RECORTES_ANTES_DE_REANALIZAR` (200) decisiones se rehace entero.
+- **El análisis es del servidor, no de la sesión.** Recargar la página o entrar desde el
+  celular abre una sesión nueva, y antes eso volvía a analizar todo. Ahora queda guardado
+  (`analisis_de_lote_guardado()`) mientras no cambie el código, hasta
+  `HORAS_QUE_DURA_EL_ANALISIS` (3 h): una sesión nueva abre en **0,7 s**.
+- **Se prepara de antemano.** La tanda de fondo deja hecho el análisis de la lista que la
+  pantalla muestra primero, al arrancar el servidor y después de cada importación
+  (`preparar_el_analisis_del_primer_lote()`). La primera apertura pasó de **6,6 s a 1,0 s**.
+
 ## ✅ Lo que ya se bajó no se vuelve a bajar
 
 **Cuando una tarea automática termina, no se repite.** Si no encuentra nada pendiente queda

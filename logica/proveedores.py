@@ -2201,6 +2201,15 @@ def _trabajo_de_fondo():
         except Exception as _err:
             anotar_error("_trabajo_de_fondo/descubrimiento", _err)
 
+    # El análisis de la lista que «Equivalencias sugeridas» muestra primero, para que al abrirla
+    # ya esté hecho (ver preparar_el_analisis_del_primer_lote()). Va después del descubrimiento
+    # porque ese agrega pares, y antes de las descargas porque es lo que alguien va a mirar.
+    try:
+        ceder_al_mostrador()
+        preparar_el_analisis_del_primer_lote()
+    except Exception as _err:
+        anotar_error("_trabajo_de_fondo/analisis_del_lote", _err)
+
     # SIN CUPO POR DÍA NI TOPE DE TIEMPO: sigue mientras haya algo que hacer. Lo único que la
     # frena es que un sitio falle cinco veces seguidas (ver _descansar()).
     while True:
@@ -2441,7 +2450,8 @@ def arrancar_tanda_de_fondo():
             and not _tarea_prendida("mercado_libre")
             and (obtener_config("fotos_de_internet_pendientes", "") != "1"
                  or _descansando("fotos_de_internet"))
-            and (_descansando("firmas") or _terminada("firmas"))):
+            and (_descansando("firmas") or _terminada("firmas"))
+            and not falta_preparar_el_analisis()):
         return False
 
     # El candado se toma ACÁ y no adentro del hilo. Mirar si está tomado y después crear el

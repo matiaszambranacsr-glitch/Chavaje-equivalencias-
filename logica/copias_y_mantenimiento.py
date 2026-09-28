@@ -1288,7 +1288,7 @@ def restaurar_backup(archivo_subido):
     # Y el del esquema: la base que acaba de entrar puede tener otras columnas, que es
     # exactamente el caso que _columnas_de_medidas_que_existen() existe para cubrir.
     _columnas_de_medidas_que_existen.cache_clear()
-    st.session_state.pop("_analisis_lote", None)
+    olvidar_analisis_de_lote()
 
 
 
