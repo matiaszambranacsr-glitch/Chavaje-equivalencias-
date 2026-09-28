@@ -689,6 +689,14 @@ def extraer_codigos_de_texto(texto, minimo=6, codigo_propio=None, codigos_conoci
         # MOTORES FIAT escritos con punto: 182.A8000, 128.A000. Es el número de motor que Fiat
         # imprime en el block, y aparece en cualquier junta que lo mencione.
         re.compile(r'^\d{3}\.[A-Z]\d{3,4}$'),
+        # Y sin el primer punto: 188A9000, 199A2000, 176B2000, 939A4.000. Estaban cargados como
+        # números de fábrica y unían juntas de tapa de Fiat con las de Chevrolet Combo, que usa
+        # el mismo motor. Le pegan a 0 de los códigos de proveedor del catálogo.
+        re.compile(r'^\d{3}[A-Z]\d\.?\d{3}$'),
+        # MOTOR AP de Volkswagen (AP2000, AP-1600) y los Perkins con punto (1004.4T, 1006.6):
+        # también 0 códigos de proveedor con esta forma.
+        re.compile(r'^AP-?\d{4}$'),
+        re.compile(r'^\d{4}\.\d{1,2}[A-Z]{0,2}$'),
         # ABREVIATURAS CON PUNTOS: Cil.Esp.1, Tap.Val.2. No es un código, es la descripción
         # abreviada («Cilindro Especial 1») que quedó suelta como si fuera un número.
         re.compile(r'^[A-Z]{2,4}\.[A-Z]{2,4}\.\d{1,2}$'),

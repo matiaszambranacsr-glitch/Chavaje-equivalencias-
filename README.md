@@ -4881,6 +4881,20 @@ Y **ningún par en revisión queda sin motivo**: los que solo une el número de 
 descripciones no dicen lo mismo y el número solo no alcanza— dicen eso («🔢 Solo los une el
 número de fábrica»), en vez de caer en «Sin alarma puntual».
 
+### 🔧 Motores Fiat, VW AP y Perkins no son números de fábrica; la pieza dueña del número
+
+- **Códigos de motor que estaban como números de fábrica**: los Fiat sin punto (188A9000,
+  199A2000, 176B2000, 939A4.000), el VW AP (AP2000) y los Perkins con punto (1004.4T). Unían
+  juntas de tapa de Fiat con las de la Chevrolet Combo —mismo motor— y aros de pistón de Ford
+  con los de Volkswagen. Ninguno de los códigos de proveedor del catálogo tiene esas formas.
+  12 vínculos que estaban limpios pasan a 🧯.
+- **La pieza dueña del número**: cuando el número lo cita un kit o un accesorio —el kit de
+  reparación de la bomba de combustible cita el número del aforador— y queda una sola pieza
+  que no es accesorio, el número es de ella y queda respaldada por la fila del kit, igual que
+  la variante por la fila de origen. 49 aforadores pasan a limpios.
+- **El aviso 🔢 solo en los unidos por un número**. Los pares entre dos proveedores que quedan
+  cortos dicen «🤏 Las descripciones se parecen, pero no alcanza».
+
 ## Una firma de foto podía ser un programa
 
 Las firmas visuales de las fotos se guardan con `pickle`, y `pickle` **no es un formato de

@@ -2021,6 +2021,7 @@ def _analizar_lote_pendiente(lote, limite=None, desde=0):
     # 70181)» es el código nuevo y el viejo.
     ambiguos = set()
     accesorios = {}           # (clave, código del accesorio) -> la relación, para apartarlo
+    duenos = {}               # (clave, código de la pieza) -> el accesorio que trajo el número
     for k, v in apuntados.items():
         if len(v) < 2:
             continue
@@ -2049,6 +2050,13 @@ def _analizar_lote_pendiente(lote, limite=None, desde=0):
                                                      for o in cods if o != cod])
                 if relacion:
                     accesorios[(k, cod)] = relacion
+            # Si queda UNA sola pieza que no es accesorio, el número es de ella: el kit de
+            # reparación de la bomba cita el número de la bomba. Esa pieza queda respaldada por
+            # la fila del kit, como la variante por la fila de origen (ver _variante_del_origen).
+            _apartados = [cod for cod in cods if (k, cod) in accesorios]
+            _quedan = [cod for cod in cods if (k, cod) not in accesorios]
+            if _apartados and len(_quedan) == 1:
+                duenos[(k, _quedan[0])] = _apartados[0]
 
     # ¿Este par aparece en más de una lista? Que dos proveedores independientes digan lo mismo
     # es la mejor confirmación que se puede tener sin mirar la pieza.
@@ -2127,6 +2135,9 @@ def _analizar_lote_pendiente(lote, limite=None, desde=0):
                 else (f["cod_b"], f["marca_a"], f["cod_a"]))
             _clave = (sanitizar(oem), marca_otro)
             _variante = _variante_del_origen(_clave, _cod_propio)
+            if not _variante and (_clave, _cod_propio) in duenos:
+                _variante = (f"El número lo cita «{duenos[(_clave, _cod_propio)]}», que es un "
+                             "kit o un accesorio de esta pieza: el número es de esta pieza")
             # Al hermano que es una variante del origen no le corresponde la alarma: que la
             # junta venga en tres espesores no quiere decir que alguno esté mal cargado.
             if (_clave, _cod_propio) in accesorios:
@@ -2291,8 +2302,17 @@ def _analizar_lote_pendiente(lote, limite=None, desde=0):
         # En revisión y sin ningún aviso, la pantalla no tenía cómo decir por qué: quedaba en
         # «Sin alarma puntual». Casi siempre es esto.
         if puntaje < 55 and not alarmas:
-            alarmas.append("🔢 Solo los une el número de fábrica: las descripciones no dicen lo "
-                           "mismo, y el número solo no alcanza para aprobarlo sin mirar")
+            if _unidos_por_codigo(
+                    {"tipo": f.get("tipo_a"), "codigo_raw": f.get("cod_a"),
+                     "descripcion": f.get("desc_a")},
+                    {"tipo": f.get("tipo_b"), "codigo_raw": f.get("cod_b"),
+                     "descripcion": f.get("desc_b")}):
+                alarmas.append("🔢 Solo los une el número de fábrica: las descripciones no "
+                               "dicen lo mismo, y el número solo no alcanza para aprobarlo "
+                               "sin mirar")
+            else:
+                alarmas.append("🤏 Las descripciones se parecen, pero no alcanza: comparten "
+                               "poco más que el nombre de la pieza y el auto")
 
         f["alarmas"] = alarmas
         f["confianza"] = puntaje
