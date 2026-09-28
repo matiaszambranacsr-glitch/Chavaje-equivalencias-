@@ -1789,8 +1789,9 @@ if pagina == PAGINAS[3]:
                 "**No decide nada solo**: suma como una prueba a favor, y los pares que no "
                 "estaban van a revisión en su propia lista («CATÁLOGO …»).\n\n"
                 "No hay que cargar nada: las direcciones son públicas. Corre en segundo plano, "
-                f"hasta {FICHAS_DE_CATALOGO_POR_DIA} fichas por día y con pausas. Si un sitio no "
-                "responde cinco veces seguidas, se pausa un día.\n\n"
+                "**sin tope por día**, hasta leer todo lo pendiente. Si un sitio no responde "
+                "cinco veces seguidas —o falla más de la mitad de una tanda—, se pausa una "
+                "hora y retoma solo.\n\n"
                 "FRAM, MAHLE, BOSCH, TARANTO y CORVEN no están porque sus catálogos buscan con un "
                 "formulario, sin una dirección por código. Si encontrás el link de la ficha de "
                 "alguno, cargalo arriba en «➕ Cargar un portal»."
@@ -1847,8 +1848,8 @@ if pagina == PAGINAS[3]:
                 "```toml\n[mercadolibre]\nclient_id = \"el App ID\"\n"
                 "client_secret = \"la Secret Key\"\n```\n\n"
                 "Van en los secretos y no en la app porque la base se sube a GitHub con cada "
-                f"copia. Después corre solo: hasta {BUSQUEDAS_DE_MERCADO_LIBRE_POR_DIA} búsquedas "
-                "por día, primero lo que tenés en stock."
+                "copia. Después corre solo, **sin tope por día**, hasta buscar todo el catálogo: "
+                "primero lo que tenés en stock. Si Mercado Libre rechaza, descansa una hora."
             )
             if not config_mercado_libre():
                 st.info("Todavía no está cargada la aplicación de Mercado Libre: mirá «ℹ️» "
@@ -2327,7 +2328,7 @@ if pagina == PAGINAS[3]:
                     )
 
                 # Lo mismo que con las fotos: son miles de fichas y sentarse a esperar no es
-                # opción, así que puede avanzar solo de a 15 por día. Sale a internet, por eso
+                # opción, así que avanza solo, sin tope por día. Sale a internet, por eso
                 # se elige a mano. Al lado va cuánto falta, que es lo que dice si sirve
                 # prenderlo: sin el número, «automático» no se sabe si termina en una semana o
                 # en dos años.
@@ -2343,7 +2344,7 @@ if pagina == PAGINAS[3]:
                          "encuentre escritas ahí. Avanza siempre sobre códigos nuevos."
                 )
                 if obtener_config("equiv_ficha_automaticas", "0") == "1":
-                    mostrar_avance_de_tanda("equiv", "tanda_equiv_diaria", "ficha(s)")
+                    mostrar_avance_de_tanda("equiv", "ficha(s)")
 
                 opciones_mf = {f"{m['nombre']} ({m['productos']} códigos)": m["id"]
                                for m in marcas_con_ficha}

@@ -5253,6 +5253,33 @@ De paso, un error de antes: en modo liviano la foto bajada se guarda como el mis
 Ahora solo baja las de productos sin fotos, y un link que no existe queda como `link_roto` para
 no reintentarlo siempre.
 
+## ⚡ Sin topes diarios en la carga automática
+
+La tarea de fondo (`_trabajo_de_fondo()` en `logica/proveedores.py`) ya no tiene cupo por día
+ni corta a los 10 minutos: corre hasta que no queda nada pendiente. Eso vale para las fotos y
+las equivalencias de las fichas del proveedor, los catálogos de fabricante (SKF, MANN-FILTER,
+NGK), Mercado Libre, las fotos que esos sitios dejan propuestas y las firmas visuales de la
+cámara (que antes iban de a 20 por día). Las pausas entre pedido y pedido bajaron (0,3 s en
+los catálogos y 0,15 s en Mercado Libre), y las fotos se bajan de a 6 a la vez.
+
+Lo único que la frena es un **descanso**, que se ve en la pantalla («😴 descansa hasta las …»,
+con un botón para que retome ya):
+
+- **30 minutos** si una tarea no encontró nada para hacer, para no mirar la base en cada toque.
+- **Una hora** si el sitio falla cinco veces seguidas o falla más de la mitad de una tanda. Sin
+  cupo por día este freno es el que importa: las fichas que fallan por la red vuelven a salir
+  en la vuelta siguiente, y sin él la tanda giraría sobre las mismas cincuenta golpeando a un
+  sitio caído. Solo cuenta como avance lo que quedó resuelto.
+
+Si mientras corre llega trabajo de los que van primero (una lista importada, puntajes por
+rehacer), la tanda corta y vuelve a arrancar para hacerlo antes. Las fotos y las equivalencias
+de las fichas siguen siendo interruptores que se prenden a mano, porque salen a internet con
+el nombre de tu catálogo.
+
+Medido con un servidor falso: los 96 códigos SKF citados en la base real se leyeron en una sola
+pasada (antes eran hasta 150 por día); con el sitio caído cortó a los 5 pedidos y se pausó una
+hora.
+
 ## 🎯 Tus propios datos: qué pedir y a quién avisar
 
 - **Qué te conviene cargar o pedir** (Estadísticas → 🔎 Búsquedas sin resultado). La lista de

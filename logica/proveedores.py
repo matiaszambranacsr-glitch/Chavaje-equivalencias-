@@ -648,10 +648,10 @@ CATALOGOS_DE_FABRICANTE = {
     },
 }
 
-# Cuántas fichas de catálogo se leen por día entre todos los fabricantes, y la pausa entre una
-# y otra. Son sitios ajenos: pocas por vez y despacio.
-FICHAS_DE_CATALOGO_POR_DIA = 150
-PAUSA_ENTRE_FICHAS_DE_CATALOGO = 1.5
+# La pausa entre una ficha de catálogo y la siguiente. Sin tope por día (ver
+# MINUTOS_DE_DESCANSO): la pausa corta queda para no pedirle diez fichas por segundo a un sitio
+# ajeno, que es lo que dispara un bloqueo.
+PAUSA_ENTRE_FICHAS_DE_CATALOGO = 0.3
 # Con más de esto nombrados, la ficha es un listado y no la de una pieza: ver
 # MAXIMO_PRODUCTOS_POR_FICHA. Acá es más alto porque la ficha de un fabricante lista a propósito
 # todos los números originales de la pieza.
@@ -690,7 +690,7 @@ def leer_catalogo_de_fabricante(nombre_catalogo, cuantos=20, pausa=PAUSA_ENTRE_F
     cat = CATALOGOS_DE_FABRICANTE[nombre_catalogo]
     portal = f"CATÁLOGO {nombre_catalogo}"
     resumen = {"leidas": 0, "con_productos": 0, "listados": 0, "sin_ficha": 0, "pares": 0,
-               "nuevos": 0, "lote": "", "error": "", "pendientes": 0}
+               "nuevos": 0, "lote": "", "error": "", "pendientes": 0, "fallidas": 0}
     citados = codigos_citados_en_tu_catalogo(nombre_catalogo)
     c.execute("SELECT codigo FROM fichas_de_catalogo_leidas WHERE catalogo = ?",
               (nombre_catalogo,))
@@ -740,6 +740,7 @@ def leer_catalogo_de_fabricante(nombre_catalogo, cuantos=20, pausa=PAUSA_ENTRE_F
             # seguidos quieren decir que el sitio está caído o nos está rechazando.
             fallas_seguidas += 1
             resumen["sin_ficha"] += 1
+            resumen["fallidas"] += 1
             if fallas_seguidas >= 5:
                 resumen["error"] = f"{fallas_seguidas} fichas seguidas sin poder abrirse: {err}"
                 break
@@ -820,8 +821,11 @@ def _catalogo_de_fabricante_pausado(nombre):
 
 def tanda_de_catalogos_de_fabricante(cupo):
     """Una vuelta de la tarea de fondo: lee hasta `cupo` fichas, repartidas entre los
-    fabricantes que no estén pausados. Devuelve cuántas consultó. Si un sitio falla cinco veces
-    seguidas, se pausa un día: seguir golpeándolo no sirve y puede terminar en un bloqueo."""
+    fabricantes que no estén pausados. Devuelve cuántas quedaron RESUELTAS (con ficha o «sin
+    ficha»): las que fallaron por la red no se anotan como leídas y vuelven a salir en la vuelta
+    siguiente, así que contarlas dejaría a la tarea de fondo girando sobre ellas sin avanzar. Si
+    más de la mitad de una tanda falla, ese sitio también se pausa. Si un sitio falla cinco veces
+    seguidas, se pausa una hora: seguir golpeándolo no sirve y puede terminar en un bloqueo."""
     consultadas = 0
     for nombre in CATALOGOS_DE_FABRICANTE:
         if consultadas >= cupo:
@@ -831,10 +835,11 @@ def tanda_de_catalogos_de_fabricante(cupo):
         ceder_al_mostrador()
         res = leer_catalogo_de_fabricante(nombre, cuantos=min(PRODUCTOS_POR_SUBTANDA,
                                                               cupo - consultadas))
-        consultadas += res["leidas"]
-        if res["error"]:
+        consultadas += res["leidas"] - res.get("fallidas", 0)
+        if res["error"] or res.get("fallidas", 0) * 2 > res["leidas"]:
             guardar_config(f"catalogo_pausado_{nombre}",
-                           (datetime.now() + timedelta(days=1)).strftime("%Y-%m-%d %H:%M"))
+                           (datetime.now() + timedelta(minutes=MINUTOS_DE_DESCANSO_SI_FALLA)
+                            ).strftime("%Y-%m-%d %H:%M"))
     return consultadas
 
 
@@ -862,8 +867,7 @@ def tanda_de_catalogos_de_fabricante(cupo):
 # En los secretos y no en la base: la base se sube a GitHub con cada copia.
 ML_API = "https://api.mercadolibre.com"
 ML_SITIO = "MLA"
-BUSQUEDAS_DE_MERCADO_LIBRE_POR_DIA = 200
-PAUSA_ENTRE_BUSQUEDAS_DE_MERCADO_LIBRE = 0.6
+PAUSA_ENTRE_BUSQUEDAS_DE_MERCADO_LIBRE = 0.15
 _TOKEN_DE_MERCADO_LIBRE = del_proceso("token_de_mercado_libre", dict)
 
 
@@ -1615,8 +1619,7 @@ def guardar_equivalencias_de_catalogo(propuestas, marca):
 # significaba hacer esperar a alguien que entró a buscar un repuesto.
 #
 # Acá se corta ese nudo: la tanda se va a un hilo aparte. Nadie espera, así que puede ser tan
-# grande como se quiera. Lo que la limita ahora es lo único que corresponde que la limite —el
-# servidor del proveedor— y eso se elige a mano.
+# grande como se quiera, y no tiene tope por día: corre hasta que no queda nada pendiente.
 #
 # Tres cosas la hacen segura:
 #   · UNA sola a la vez en todo el proceso (_CANDADO_FONDO). Sin eso, cinco pestañas abiertas
@@ -1626,9 +1629,23 @@ def guardar_equivalencias_de_catalogo(propuestas, marca):
 #   · Nunca toca `st`. Un hilo de fondo no tiene pantalla donde dibujar; llamar a st.* desde
 #     ahí no muestra nada y ensucia el registro. Todo lo que tiene para contar lo deja anotado
 #     en la configuración, y la pantalla lo lee de ahí.
-TANDAS_DISPONIBLES = [15, 100, 500, 2000, 10000]
 PRODUCTOS_POR_SUBTANDA = 50
-MINUTOS_MAXIMO_DE_TANDA = 10
+
+# SIN CUPO POR DÍA. Antes cada tarea tenía un tope diario (500 fotos, 150 fichas de catálogo,
+# 200 búsquedas de Mercado Libre) y la tanda cortaba a los 10 minutos: con 70.888 productos eso
+# eran meses. Ahora corre hasta terminar. Lo único que la frena es un descanso:
+#   · MINUTOS_DE_DESCANSO si la tarea no encontró nada que hacer (para no volver a mirar la
+#     base en cada toque de pantalla),
+#   · MINUTOS_DE_DESCANSO_SI_FALLA si el sitio falló o rechazó (para no insistirle a un sitio
+#     caído, que es la forma más rápida de que te bloquee).
+MINUTOS_DE_DESCANSO = 30
+MINUTOS_DE_DESCANSO_SI_FALLA = 60
+
+# Si llega trabajo de estos mientras la tanda baja fotos, se corta y se vuelve a empezar: una
+# lista recién importada no tiene que esperar a que terminen 70.000 fotos.
+_TAREAS_QUE_VAN_PRIMERO = ("separacion_pendiente", "medidas_pendientes",
+                           "marcas_repuesto_pendientes", "aplicaciones_pendientes",
+                           "confianza_pendiente", "descubrimiento_pendiente")
 
 # Del proceso, no de la pasada: ver del_proceso(). Con «= threading.Lock()» acá, cada toque
 # traía un candado nuevo y libre, y la regla de «una sola a la vez» no se cumplía nunca.
@@ -1655,6 +1672,39 @@ def _sumar_al_cupo(clave, cuantos):
         guardar_config(clave, str(int(obtener_config(clave, "0") or 0) + cuantos))
     except ValueError:
         guardar_config(clave, str(cuantos))
+
+
+def _falla_de_la_red(error):
+    """¿El error es del sitio o de la red, y no una respuesta («no hay ficha», «sin códigos»)?"""
+    error = str(error or "")
+    return bool(error) and not any(x in error for x in ("sin códigos", "404", "no encontré",
+                                                        "no se puede usar en una dirección"))
+
+
+def _descansando(que):
+    """¿Esa tarea está en su descanso (ver MINUTOS_DE_DESCANSO)?"""
+    hasta = obtener_config(f"descanso_{que}", "")
+    return bool(hasta) and hasta > datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+
+def _descansar(que, minutos=MINUTOS_DE_DESCANSO):
+    guardar_config(f"descanso_{que}",
+                   (datetime.now() + timedelta(minutes=minutos)).strftime("%Y-%m-%d %H:%M:%S"))
+
+
+def _tarea_prendida(que):
+    """La tarea está prendida por el usuario y no está descansando."""
+    if que == "fotos":
+        prendida = obtener_config("fotos_automaticas", "0") == "1"
+    elif que == "equiv":
+        prendida = obtener_config("equiv_ficha_automaticas", "0") == "1"
+    elif que == "catalogos":
+        prendida = catalogos_de_fabricante_automaticos()
+    elif que == "mercado_libre":
+        prendida = mercado_libre_automatico()
+    else:
+        prendida = True
+    return prendida and not _descansando(que)
 
 
 def _marca_con_mas_fichas_pendientes(que):
@@ -1712,19 +1762,12 @@ def ceder_al_mostrador():
 
 
 def _trabajo_de_fondo():
-    """El cuerpo del hilo. Va alternando fotos y equivalencias hasta gastar el cupo o el reloj.
+    """El cuerpo del hilo. Va alternando fotos, equivalencias, catálogos y Mercado Libre hasta
+    que no queda nada pendiente. Devuelve True si cortó porque llegó trabajo de los que van
+    primero (ver _TAREAS_QUE_VAN_PRIMERO), para que correr() la vuelva a largar.
 
     Alterna en vez de terminar una y después la otra para que prender las dos no signifique que
     la segunda no arranca hasta dentro de un mes."""
-    arranque = time.time()
-    try:
-        objetivo_fotos = (int(obtener_config("tanda_fotos_diaria", "500") or 500)
-                          if obtener_config("fotos_automaticas", "0") == "1" else 0)
-        objetivo_equiv = (int(obtener_config("tanda_equiv_diaria", "500") or 500)
-                          if obtener_config("equiv_ficha_automaticas", "0") == "1" else 0)
-    except ValueError:
-        objetivo_fotos = objetivo_equiv = 0
-
     # RESEPARAR LAS DESCRIPCIONES VA PRIMERO, y el orden no es casual: las medidas, el
     # combustible, la marca del repuesto y las aplicaciones se leen de la descripción.
     # Estaba escrito así y NO era así: el bloque había quedado después del de medidas, y
@@ -1856,17 +1899,25 @@ def _trabajo_de_fondo():
         except Exception as _err:
             anotar_error("_trabajo_de_fondo/descubrimiento", _err)
 
-    while time.time() - arranque < MINUTOS_MAXIMO_DE_TANDA * 60:
+    # SIN CUPO POR DÍA NI TOPE DE TIEMPO: sigue mientras haya algo que hacer. Lo único que la
+    # frena es que un sitio falle cinco veces seguidas (ver _descansar()).
+    while True:
         hizo_algo = False
+        # Si mientras tanto llegó trabajo de los de arriba —una lista importada, puntajes por
+        # rehacer—, se vuelve a empezar para no hacerlo esperar a que termine esto. Ver correr()
+        # en arrancar_tanda_de_fondo().
+        if any(obtener_config(k, "") == "1" for k in _TAREAS_QUE_VAN_PRIMERO):
+            guardar_config("tanda_fondo_ultima", datetime.now().strftime("%Y-%m-%d %H:%M"))
+            return True
 
-        if _cupo_de_hoy("tanda_fondo_fotos", objetivo_fotos) > 0:
+        if _tarea_prendida("fotos"):
             marca = _marca_con_mas_fichas_pendientes("fotos")
-            if marca:
+            if not marca:
+                _descansar("fotos")
+            else:
                 try:
-                    cuantas = min(PRODUCTOS_POR_SUBTANDA,
-                                  _cupo_de_hoy("tanda_fondo_fotos", objetivo_fotos))
                     traidas, _fall, _sin = bajar_fotos_desde_catalogo(
-                        marca["mid"], limite=cuantas)
+                        marca["mid"], limite=PRODUCTOS_POR_SUBTANDA)
                     # Del cupo se descuenta lo que se CONSULTÓ de verdad, no lo que se pidió.
                     # No es lo mismo: si quedaban tres fichas y la subtanda es de cincuenta,
                     # cobrarle cincuenta al cupo del día tira a la basura cuarenta y siete
@@ -1876,46 +1927,61 @@ def _trabajo_de_fondo():
                     _sumar_al_cupo("tanda_fondo_fotos", consultadas)
                     if traidas:
                         _sumar_al_cupo("tanda_fondo_fotos_ok", traidas)
+                    # Las que fallaron por la red quedan en 'error' y se vuelven a elegir: sin
+                    # tope por día, si el sitio anda mal la tanda giraría sobre las mismas
+                    # cincuenta. Si falla más de la mitad, descansa una hora.
+                    if (len(_fall) - _sin) * 2 > consultadas:
+                        _descansar("fotos", MINUTOS_DE_DESCANSO_SI_FALLA)
                     # Y el bucle sigue solo si esto AVANZÓ. Darlo por hecho porque había una
                     # marca pendiente deja girar el bucle diez minutos contra la base cuando la
                     # consulta que elige la marca y la que trae las fichas no miran exactamente
                     # lo mismo — hoy miran igual, pero con dos consultas separadas eso se
                     # desincroniza el día que alguien toque una sola de las dos.
-                    hizo_algo = hizo_algo or consultadas > 0
+                    hizo_algo = hizo_algo or traidas + _sin > 0
+                    if not consultadas:
+                        _descansar("fotos")
                 except Exception as _err:
+                    _descansar("fotos", MINUTOS_DE_DESCANSO_SI_FALLA)
                     anotar_error("_trabajo_de_fondo/fotos", _err)
 
-        if _cupo_de_hoy("tanda_fondo_equiv", objetivo_equiv) > 0:
+        if _tarea_prendida("equiv"):
             marca = _marca_con_mas_fichas_pendientes("equiv")
-            if marca:
+            if not marca:
+                _descansar("equiv")
+            else:
                 try:
-                    cuantas = min(PRODUCTOS_POR_SUBTANDA,
-                                  _cupo_de_hoy("tanda_fondo_equiv", objetivo_equiv))
                     props, _fall, consultados = equivalencias_desde_catalogo(
-                        marca["mid"], limite=cuantas, solo_no_leidos=True)
+                        marca["mid"], limite=PRODUCTOS_POR_SUBTANDA, solo_no_leidos=True)
                     _sumar_al_cupo("tanda_fondo_equiv", consultados)
                     if props:
                         guardadas = guardar_equivalencias_de_catalogo(props, marca["nombre"])
                         if guardadas:
                             _sumar_al_cupo("tanda_fondo_equiv_ok", guardadas)
                     hizo_algo = hizo_algo or consultados > 0
+                    if not consultados:
+                        _descansar("equiv")
+                    elif sum(1 for _c, _e in _fall if _falla_de_la_red(_e)) * 2 > consultados:
+                        # La ficha se anota como leída igual: con el sitio caído, sin este freno
+                        # la tanda recorrería todo el catálogo marcándolo leído sin leer nada.
+                        _descansar("equiv", MINUTOS_DE_DESCANSO_SI_FALLA)
                 except Exception as _err:
+                    _descansar("equiv", MINUTOS_DE_DESCANSO_SI_FALLA)
                     anotar_error("_trabajo_de_fondo/equiv", _err)
 
         # Los catálogos de fabricante (SKF, NGK, MANN-FILTER): ver
         # tanda_de_catalogos_de_fabricante(). Si no queda nada por leer —o están todos
-        # pausados—, se da el cupo del día por gastado: si no, la tarea se volvería a largar en
-        # cada toque de pantalla para no hacer nada.
-        if catalogos_de_fabricante_automaticos() and _cupo_de_hoy(
-                "tanda_fondo_catalogos", FICHAS_DE_CATALOGO_POR_DIA) > 0:
+        # pausados—, descansa: si no, la tarea se volvería a largar en cada toque de pantalla
+        # para no hacer nada.
+        if _tarea_prendida("catalogos"):
             try:
                 consultadas = tanda_de_catalogos_de_fabricante(
-                    _cupo_de_hoy("tanda_fondo_catalogos", FICHAS_DE_CATALOGO_POR_DIA))
-                _sumar_al_cupo("tanda_fondo_catalogos",
-                               consultadas or FICHAS_DE_CATALOGO_POR_DIA)
+                    PRODUCTOS_POR_SUBTANDA * len(CATALOGOS_DE_FABRICANTE))
+                _sumar_al_cupo("tanda_fondo_catalogos", consultadas)
                 hizo_algo = hizo_algo or consultadas > 0
+                if not consultadas:
+                    _descansar("catalogos")
             except Exception as _err:
-                _sumar_al_cupo("tanda_fondo_catalogos", FICHAS_DE_CATALOGO_POR_DIA)
+                _descansar("catalogos", MINUTOS_DE_DESCANSO_SI_FALLA)
                 anotar_error("_trabajo_de_fondo/catalogos", _err)
 
         # Las fotos que dejaron los catálogos de fabricante y Mercado Libre (ver proponer_foto()):
@@ -1925,7 +1991,7 @@ def _trabajo_de_fondo():
             try:
                 ceder_al_mostrador()
                 _bajadas, _fallidas = bajar_fotos_pendientes(limite=PRODUCTOS_POR_SUBTANDA,
-                                                             hilos=3)
+                                                             hilos=6)
                 # Sin ninguna bajada —no quedaba nada, o todo lo que quedaba falló— se deja de
                 # intentar: vuelve a prenderse cuando llegue una foto nueva.
                 if not _bajadas:
@@ -1935,26 +2001,42 @@ def _trabajo_de_fondo():
                 guardar_config("fotos_de_internet_pendientes", "0")
                 anotar_error("_trabajo_de_fondo/fotos_de_internet", _err)
 
-        # Mercado Libre, si la aplicación está cargada: ver leer_mercado_libre(). Igual que con
-        # los catálogos, si no avanzó —nada pendiente, o no responde— el cupo del día se da por
-        # gastado.
-        if mercado_libre_automatico() and _cupo_de_hoy(
-                "tanda_fondo_mercado_libre", BUSQUEDAS_DE_MERCADO_LIBRE_POR_DIA) > 0:
+        # Mercado Libre, si la aplicación está cargada: ver leer_mercado_libre(). Si no avanzó
+        # —nada pendiente— descansa; si Mercado Libre no responde o rechaza, descansa una hora.
+        if _tarea_prendida("mercado_libre"):
             try:
                 ceder_al_mostrador()
-                _res_ml = leer_mercado_libre(cuantos=min(
-                    PRODUCTOS_POR_SUBTANDA,
-                    _cupo_de_hoy("tanda_fondo_mercado_libre", BUSQUEDAS_DE_MERCADO_LIBRE_POR_DIA)))
-                _sumar_al_cupo("tanda_fondo_mercado_libre",
-                               _res_ml["buscados"] or BUSQUEDAS_DE_MERCADO_LIBRE_POR_DIA)
+                _res_ml = leer_mercado_libre(cuantos=PRODUCTOS_POR_SUBTANDA)
+                _sumar_al_cupo("tanda_fondo_mercado_libre", _res_ml["buscados"])
                 hizo_algo = hizo_algo or _res_ml["buscados"] > 0
+                if _res_ml["error"]:
+                    _descansar("mercado_libre", MINUTOS_DE_DESCANSO_SI_FALLA)
+                elif not _res_ml["buscados"]:
+                    _descansar("mercado_libre")
             except Exception as _err:
-                _sumar_al_cupo("tanda_fondo_mercado_libre", BUSQUEDAS_DE_MERCADO_LIBRE_POR_DIA)
+                _descansar("mercado_libre", MINUTOS_DE_DESCANSO_SI_FALLA)
                 anotar_error("_trabajo_de_fondo/mercado_libre", _err)
 
+        # Las fotos viejas sin firma visual (la que usa la cámara): antes se procesaban de a 20
+        # por día, en las tareas del día. Solo cuenta como avance lo que quedó resuelto: las que
+        # dan error se vuelven a elegir en la próxima vuelta, y contarlas dejaría girando el
+        # bucle para siempre sobre las mismas 50 fotos rotas.
+        if not _descansando("firmas"):
+            try:
+                ceder_al_mostrador()
+                _r_fir = migrar_imagenes_pendientes(limite=PRODUCTOS_POR_SUBTANDA)
+                _hechas = sum(_r_fir.get(k, 0) for k in ("listas", "sin_detalle"))
+                hizo_algo = hizo_algo or _hechas > 0
+                if not _hechas:
+                    _descansar("firmas")
+            except Exception as _err:
+                _descansar("firmas", MINUTOS_DE_DESCANSO_SI_FALLA)
+                anotar_error("_trabajo_de_fondo/firmas", _err)
+
         if not hizo_algo:
-            break       # no queda cupo, o no queda nada pendiente: no tiene sentido girar
+            break       # no queda nada pendiente: no tiene sentido girar
     guardar_config("tanda_fondo_ultima", datetime.now().strftime("%Y-%m-%d %H:%M"))
+    return False
 
 
 INTENTOS_MAXIMOS_DE_FONDO = 5
@@ -2025,9 +2107,10 @@ def arrancar_tanda_de_fondo():
     """Larga la tanda en un hilo aparte si corresponde. Devuelve si la largó.
 
     Se llama en cada dibujo de pantalla y casi siempre no hace nada: si ya hay una corriendo,
-    si están las dos apagadas o si el cupo del día está gastado, vuelve enseguida."""
-    if (obtener_config("fotos_automaticas", "0") != "1"
-            and obtener_config("equiv_ficha_automaticas", "0") != "1"
+    si está todo apagado o descansando, vuelve enseguida."""
+    _cupo_de_hoy("tanda_fondo_fotos", 0)     # reinicia los contadores de «hoy van» con el día
+    if (not _tarea_prendida("fotos")
+            and not _tarea_prendida("equiv")
             and obtener_config("descubrimiento_pendiente", "") != "1"
             # El repuntaje pendiente también la larga, aunque esté todo lo demás apagado: si no,
             # después de cambiar las reglas de confianza el puntaje viejo se quedaría para
@@ -2038,12 +2121,10 @@ def arrancar_tanda_de_fondo():
             and obtener_config("aplicaciones_pendientes", "") != "1"
             and obtener_config("marcas_repuesto_pendientes", "") != "1"
             and obtener_config("separacion_pendiente", "") != "1"
-            and not (catalogos_de_fabricante_automaticos()
-                     and _cupo_de_hoy("tanda_fondo_catalogos", FICHAS_DE_CATALOGO_POR_DIA) > 0)
-            and not (mercado_libre_automatico()
-                     and _cupo_de_hoy("tanda_fondo_mercado_libre",
-                                      BUSQUEDAS_DE_MERCADO_LIBRE_POR_DIA) > 0)
-            and obtener_config("fotos_de_internet_pendientes", "") != "1"):
+            and not _tarea_prendida("catalogos")
+            and not _tarea_prendida("mercado_libre")
+            and obtener_config("fotos_de_internet_pendientes", "") != "1"
+            and _descansando("firmas")):
         return False
 
     # El candado se toma ACÁ y no adentro del hilo. Mirar si está tomado y después crear el
@@ -2058,7 +2139,11 @@ def arrancar_tanda_de_fondo():
     def correr():
         _HILO_DE_FONDO.corriendo = True      # ver ceder_al_mostrador()
         try:
-            _trabajo_de_fondo()
+            # Vuelve a arrancar mientras _trabajo_de_fondo() corte porque llegó trabajo nuevo
+            # de los que van primero. Con tope, por si alguna bandera quedara prendida siempre.
+            for _ in range(20):
+                if not _trabajo_de_fondo():
+                    break
         except Exception as _err:
             anotar_error("arrancar_tanda_de_fondo", _err)
         finally:
@@ -2076,7 +2161,7 @@ def arrancar_tanda_de_fondo():
 
 
 def como_va_la_tanda_de_fondo():
-    """Para la pantalla: cuánto falta de cada cosa y a qué ritmo va. Nunca falla."""
+    """Para la pantalla: cuánto falta de cada cosa y cuánto va hoy. Nunca falla."""
     resumen = {"corriendo": _CANDADO_FONDO.locked(),
                "ultima": obtener_config("tanda_fondo_ultima", "")}
     for clave, que in (("fotos", "fotos"), ("equiv", "equiv")):
@@ -2095,58 +2180,33 @@ def como_va_la_tanda_de_fondo():
             resumen[f"faltan_{clave}"] = 0
         try:
             resumen[f"hoy_{clave}"] = int(obtener_config(f"tanda_fondo_{clave}", "0") or 0)
-            resumen[f"objetivo_{clave}"] = int(
-                obtener_config(f"tanda_{'fotos' if clave == 'fotos' else 'equiv'}_diaria",
-                               "500") or 500)
         except ValueError:
             resumen[f"hoy_{clave}"] = 0
-            resumen[f"objetivo_{clave}"] = 500
+        resumen[f"descanso_{clave}"] = (obtener_config(f"descanso_{clave}", "")
+                                        if _descansando(clave) else "")
     return resumen
 
 
-def mostrar_avance_de_tanda(que, clave_config, unidad):
-    """El selector de cuánto pedir por día y en qué anda, para las dos tandas de fondo.
+def mostrar_avance_de_tanda(que, unidad):
+    """En qué anda una de las dos tandas de fondo (fotos o equivalencias de las fichas).
 
-    El número de días que falta es lo que hace que el selector signifique algo. «Automático»
-    sin eso no dice si termina en una semana o en trece años — y con 70.888 productos a 15 por
-    día eran trece años de verdad."""
+    Ya no hay selector de «cuántas por día»: corre sin tope hasta terminar. Lo que se muestra
+    es cuánto falta, cuánto va hoy y, si está descansando, hasta cuándo — con un botón para que
+    retome ya."""
     resumen = como_va_la_tanda_de_fondo()
     faltan = resumen.get(f"faltan_{que}", 0)
     hoy = resumen.get(f"hoy_{que}", 0)
-
-    clave_widget = f"sel_{clave_config}"
-    st.session_state.setdefault(clave_widget,
-                                resumen.get(f"objetivo_{que}", 500))
-    if st.session_state[clave_widget] not in TANDAS_DISPONIBLES:
-        st.session_state[clave_widget] = 500
-    st.select_slider(
-        f"Cuántas {unidad} por día como máximo:", options=TANDAS_DISPONIBLES,
-        key=clave_widget,
-        on_change=lambda: guardar_config(clave_config,
-                                          str(st.session_state[clave_widget])),
-        help="Cada una es una consulta al sitio del proveedor. Subilo hasta donde ese sitio "
-             "aguante sin cortarte: si empieza a fallar mucho, bajalo."
-    )
-    objetivo = int(st.session_state[clave_widget]) or 1
-
     if not faltan:
         st.caption("✅ No queda nada pendiente de las marcas con catálogo web cargado.")
         return
-    dias = (faltan + objetivo - 1) // objetivo
+    descanso = resumen.get(f"descanso_{que}", "")
     st.caption(
-        f"Faltan **{faltan:,}** · hoy van {hoy:,} de {objetivo:,} · "
-        + (f"a este ritmo, **{dias:,} día(s)**" if dias > 1 else "**termina hoy**")
+        f"Faltan **{faltan:,}** {unidad} · hoy van {hoy:,} · ⚡ sin tope por día"
         + (" · 🟢 corriendo ahora" if resumen.get("corriendo") else "")
+        + (f" · 😴 descansa hasta las {descanso[11:16]}" if descanso else "")
         + (f" · última vez: {resumen['ultima']}" if resumen.get("ultima") else "")
     )
-    # El aviso que hay que dar y no esconder: por ficha, un catálogo enorme no termina nunca,
-    # y no es un problema del tamaño de la tanda sino de la cantidad de consultas.
-    if dias > 60:
-        st.warning(
-            f"⚠️ A {objetivo:,} por día son **{dias:,} días**. Leer ficha por ficha tiene un "
-            "techo que no lo arregla agrandar la tanda: son "
-            f"{faltan:,} consultas al servidor del proveedor, y ese servidor te va a cortar "
-            "mucho antes. Para un catálogo de este tamaño, lo que sirve es **pedirle al "
-            "proveedor el archivo** (un Excel o un CSV con código, foto y equivalencias) y "
-            "cargarlo por 📁 Cargar Excel: son cinco minutos en vez de meses."
-        )
+    if descanso and st.button("▶️ Retomar ahora", key=f"retomar_tanda_{que}"):
+        guardar_config(f"descanso_{que}", "")
+        arrancar_tanda_de_fondo()
+        st.rerun()

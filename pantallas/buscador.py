@@ -256,7 +256,7 @@ Casi todo lo que edita o borra algo pide la contraseña de administrador la prim
                      "elegís vos."
             )
             if obtener_config("fotos_automaticas", "0") == "1":
-                mostrar_avance_de_tanda("fotos", "tanda_fotos_diaria", "foto(s)")
+                mostrar_avance_de_tanda("fotos", "foto(s)")
 
             if fotos_pendientes and st.button(
                     f"🔄 Procesar las {fotos_pendientes} que faltan ahora"):
