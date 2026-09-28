@@ -1747,6 +1747,14 @@ _RE_CANTIDAD_VIAS = re.compile(
     r'|SALIDAS)\b', re.IGNORECASE)
 
 
+# «8V», «16V», «16 VALV.»: las válvulas del motor. Ver el control de firmas_compatibles().
+_RE_CANTIDAD_DE_VALVULAS = re.compile(r"(?<![\d.,])(8|12|16|20|24|32)\s?V(?:ALV\w*)?\b")
+
+# Los Ford S-MAX, C-MAX y B-MAX. Partidos por el guion quedaba un MAX suelto, y «Jta.Tapa Cil.
+# FORD MAX ECONO» de Taranto concordaba con la junta de un S-MAX 2.3 Duratec de Illinois.
+_RE_MODELO_CON_LETRA_Y_MAX = re.compile(r"\b([BCS])[\s-]?MAX\b")
+
+
 def firma_de_producto(descripcion, producto_id=None, codigo_clean=None):
     """Ver _firma_de_producto(). Durante un análisis se calcula una vez por producto: la lista
     del barrido son 8.648 pares hechos con 4.399 productos, y se calculaba 17.296 veces —4,5 s
@@ -1825,6 +1833,7 @@ def _firma_armada(descripcion, producto_id=None, codigo_clean=None):
     # «CABLE» hacían concordar a cualquier sonda de CRI-FA con cualquiera de FISPA: una de
     # Honda Fit «coincidía en LAMBDA, LARGO, SONDA, CABLE» con una de Ford Zetec.
     limpio = _RE_LARGO_DE_CABLE.sub(" ", limpio)
+    limpio = _RE_MODELO_CON_LETRA_Y_MAX.sub(r"\1MAX", limpio)
     palabras = [w for w in re.split(r"[^A-Z0-9./]+", limpio) if w]
 
     familia = clasificar_repuesto(texto)
@@ -2029,6 +2038,8 @@ def _firma_armada(descripcion, producto_id=None, codigo_clean=None):
             "juego": tipo_de_juego_de_motor(texto), "sensor": tipos_de_sensor(texto),
             "cable_mm": largo_de_cable_mm(descripcion),
             "temperaturas": temperaturas_declaradas(descripcion),
+            "carburador": (_marcas_carb if "CARBURADOR" in pieza else set()),
+            "valvulas": {int(v) for v in _RE_CANTIDAD_DE_VALVULAS.findall(limpio)},
             "motores_numericos": {a + b for a, b in _RE_MOTOR_NUMERICO.findall(limpio)},
             "cilindros": {int(n) for n in
                           _RE_CANTIDAD_DE_CILINDROS.findall(limpio)
@@ -2234,6 +2245,26 @@ def firmas_compatibles(a, b, minimo_nucleo=2, cuenta_palabras=None, total_descri
     if _tem_a and _tem_b and not (_tem_a & _tem_b):
         return False, (f"temperaturas distintas ({'/'.join(map(str, sorted(_tem_a, reverse=True)))}"
                        f" vs {'/'.join(map(str, sorted(_tem_b, reverse=True)))})")
+
+    # El carburador que las dos nombran. «Juego de juntas para Carburador FIAT 1500 WEBER 28-36»
+    # y «JUNTAS FIAT 128/1500 SOLEX 2 bocas» son del mismo auto y de otro carburador: las juntas
+    # de un Weber no van en un Solex.
+    _carb_a, _carb_b = a.get("carburador") or set(), b.get("carburador") or set()
+    if _carb_a and _carb_b and not (_carb_a & _carb_b):
+        return False, (f"carburadores distintos: {'/'.join(sorted(_carb_a))} "
+                       f"vs {'/'.join(sorted(_carb_b))}")
+
+    # Las válvulas del motor, en las juntas de la tapa de cilindros: la tapa de un Fire 8V no es
+    # la de un Fire 16V, ni la de un Captiva 16V la del V6 de 24. Solo ahí: un sensor o una
+    # sonda nombran varios motores y dicen las válvulas de algunos («GOL III 1 0 Mi 2 0 16v»),
+    # y que no nombre el 8V no quiere decir que no le vaya.
+    _val_a, _val_b = a.get("valvulas") or set(), b.get("valvulas") or set()
+    if (_val_a and _val_b and not (_val_a & _val_b)
+            and {"JUNTA"} <= (a["pieza"] & b["pieza"])
+            and any({"TAPA", "CILINDRO"} <= x["pieza"] for x in (a, b))):
+        return False, (f"motores de distintas válvulas: "
+                       f"{'/'.join(f'{v}V' for v in sorted(_val_a))} "
+                       f"vs {'/'.join(f'{v}V' for v in sorted(_val_b))}")
 
     # Siglas técnicas: si las dos declaran una y no coinciden, son piezas distintas. Probado
     # con listas reales: sin esto se cruzaba «VALVULA PCV» con «VALVULA EGR» del mismo auto,
@@ -2553,12 +2584,13 @@ _MOTIVOS_QUE_CONTRADICEN = ("posiciones distintas", "siglas distintas", "autos d
                             "marcas distintas", "modelos distintos", "cilindradas distintas",
                             "distinta cantidad de vías", "juegos distintos",
                             "largo de cable distinto", "temperaturas distintas",
-                            "piezas de lugares distintos", "sensores de tipos distintos",
-                            "bujías de tipos distintos", "distinta cantidad de cilindros")
+                            "carburadores distintos", "piezas de lugares distintos",
+                            "sensores de tipos distintos", "bujías de tipos distintos",
+                            "distinta cantidad de cilindros", "motores de distintas válvulas")
 # Los que hablan del AUTO. Esos no cuentan cuando el par está unido por un código: ver
 # _unidos_por_codigo().
 _MOTIVOS_DEL_AUTO = ("autos distintos", "marcas distintas", "modelos distintos",
-                     "cilindradas distintas")
+                     "cilindradas distintas", "motores de distintas válvulas")
 
 
 def _unidos_por_codigo(pa, pb):

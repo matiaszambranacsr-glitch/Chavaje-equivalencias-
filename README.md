@@ -5050,6 +5050,39 @@ que no es un código la descripción coincide siempre —el producto de fábrica
 la fila—, así que esa evidencia no dice nada del código. Ahora el tope vale hasta el final: la
 junta TC-687-20 contra «4JB1TC», que es un motor Isuzu, estaba limpia con 72.
 
+### 🎯 Una confianza que distingue mejor
+
+Revisando a mano 45 limpias entre proveedores salieron cuatro clases de error que ahora el
+análisis reconoce, y una clase de acierto que no veía:
+
+- **El carburador.** «Juego de juntas para Carburador FIAT 1500 WEBER» y «JUNTAS FIAT 128/1500
+  SOLEX» son del mismo auto y de otro carburador. La marca del carburador ya decía que era una
+  junta de carburador; ahora, si las dos la dicen y no coincide, es un veto («carburadores
+  distintos»). 15 vínculos de la cola real.
+- **Las válvulas, en la tapa de cilindros.** La junta de un Fire 8V no es la de un Fire 16V, ni
+  la de un Captiva 16V la del V6 de 24. Solo en juntas de tapa de cilindros: un sensor o una
+  sonda nombran varios motores y dicen las válvulas de algunos, y ahí no se puede concluir nada.
+  Y no cuenta si los une un código, como los demás motivos del auto. 10 vínculos.
+- **S-MAX, C-MAX, B-MAX.** Partidos por el guion dejaban un MAX suelto: «Jta.Tapa Cil. FORD MAX
+  ECONO» concordaba con la junta de un S-MAX 2.3 Duratec.
+- **El abanico cuenta piezas, no códigos.** IMPERIAL vende la misma junta en varios materiales,
+  cada uno con su código y la misma descripción (604AC2, 604AD2, 604AD6: «JTA CARTER DEUTZ 913 4
+  CIL.»); contados como piezas distintas, la junta de Illinois de ese cárter tenía un abanico de
+  tres empatados y ninguno quedaba limpio. Ahora dos candidatos son la misma opción si comparten
+  el código base o dicen lo mismo sin el código (`piezas_del_abanico()`), en el análisis y en la
+  pantalla de elegir. Y en las listas con varias marcas —FISPA vende lo suyo y lo de LUCAS— un
+  candidato de cada marca no compite. 668 vínculos salen de revisión: Amarok, Duratorq, K9K,
+  TU5JP4, Honda Fit, Deutz 913… en la muestra, casi todos bien.
+
+**Lo que se probó y NO se dejó:** aplicar el abanico desde 2 candidatos en vez de 4. Bajaba
+718 limpias, pero en la muestra muchas eran las buenas —Honda CRV 2.0 B20B, Fiat Tractor 700E,
+Perkins 4-203, Fiesta HCS—: con dos o tres candidatos parecidos, «el que mejor coincide» por
+palabras en común es casi azar. Tampoco puntuar por cuántas palabras de modelo comparten: los
+pares buenos de motores viejos coinciden solo en un número («PERKINS 4-203», «FIAT 619») y se
+hubieran castigado.
+
+La cola queda en 18.300 limpias, 9.558 para revisar y 465 relacionadas.
+
 ## Una firma de foto podía ser un programa
 
 Las firmas visuales de las fotos se guardan con `pickle`, y `pickle` **no es un formato de
