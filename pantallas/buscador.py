@@ -37,7 +37,9 @@ Casi todo lo que edita o borra algo pide la contraseña de administrador la prim
         # vínculos sin aprobar, la búsqueda no cruza marcas: se busca un código de un proveedor y no
         # aparecen los equivalentes de los otros. Visto desde el mostrador eso se parece bastante a
         # «la app no relaciona proveedores», y no había nada en esta pantalla que lo explicara.
-        _esperando = equivalencias_esperando_revision()
+        # Solo a quien las puede aprobar: el que entró sin contraseña no llega a Estadísticas, y
+        # para él era un cartel más sin nada que hacer. Ver es_empleado_o_abierto().
+        _esperando = equivalencias_esperando_revision() if es_empleado_o_abierto() else 0
         if _esperando and es_celular():
             # Lo mismo en una línea: en el celular este cartel ocupaba media pantalla justo arriba
             # de la caja de búsqueda.

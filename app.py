@@ -260,15 +260,24 @@ if not es_admin() and not st.session_state.get("saltar_login"):
     mostrar_login_inicial()
     st.stop()
 
+def selector_de_vista(donde, **extra):
+    """El selector de vista, en el lugar que toque (arriba en la computadora, al pie en el
+    celular). Uno solo: la clave es una y no puede dibujarse dos veces en la misma pasada."""
+    donde.selectbox("Vista:", VISTAS, index=VISTAS.index(vista_detectada()), key="modo_vista",
+                    help="Se elige sola según desde dónde entres. Cambiala si no acertó.", **extra)
+
+
+# En el celular el selector de vista va al pie de la página: las columnas se apilan y ocupaba
+# un renglón entero arriba de la caja de búsqueda, para algo que se elige solo.
+_VISTA_AL_PIE = es_celular()
 if es_admin() or es_operador_o_admin() or st.session_state.get("nivel_usuario") == "mecanico":
     col_estado, col_modo, col_salir = st.columns([3, 1.4, 1])
     nombre_sesion = st.session_state.get("admin_nombre", "")
     etiquetas_nivel = {"admin": "administrador", "operador": "operador", "mecanico": "mecánico"}
     etiqueta_nivel = etiquetas_nivel.get(st.session_state.get("nivel_usuario"), "administrador")
     col_estado.caption(f"🔓 Sesión de {etiqueta_nivel} activa ({nombre_sesion}).")
-    col_modo.selectbox("Vista:", VISTAS, index=VISTAS.index(vista_detectada()), key="modo_vista",
-                        label_visibility="collapsed",
-                        help="Se elige sola según desde dónde entres. Cambiala si no acertó.")
+    if not _VISTA_AL_PIE:
+        selector_de_vista(col_modo, label_visibility="collapsed")
     if col_salir.button("Salir"):
         st.session_state.nivel_usuario = None
         st.session_state.admin_nombre = None
@@ -277,9 +286,8 @@ if es_admin() or es_operador_o_admin() or st.session_state.get("nivel_usuario") 
 else:
     col_estado, col_modo = st.columns([3, 1.4])
     col_estado.caption(f"👤 Usando como: {obtener_usuario_actual()}")
-    col_modo.selectbox("Vista:", VISTAS, index=VISTAS.index(vista_detectada()), key="modo_vista",
-                        label_visibility="collapsed",
-                        help="Se elige sola según desde dónde entres. Cambiala si no acertó.")
+    if not _VISTA_AL_PIE:
+        selector_de_vista(col_modo, label_visibility="collapsed")
 
 if st.session_state.get("nivel_usuario") == "mecanico":
     mostrar_portal_mecanico()
@@ -344,8 +352,10 @@ except Exception as _err:
     anotar_error("nivel principal", _err)
 
 
+# Los partes del mantenimiento y del descubrimiento son para quien administra, no para el
+# mostrador: en el celular eran dos o tres renglones técnicos arriba de la caja de búsqueda.
 _hecho_hoy = st.session_state.pop("_aviso_tareas", None)
-if _hecho_hoy:
+if _hecho_hoy and es_operador_o_admin():
     st.caption("🔧 Mantenimiento automático de hoy: " + " · ".join(_hecho_hoy))
 
 # El resultado del descubrimiento que corrió por atrás. Se muestra una sola vez por resultado:
@@ -353,7 +363,9 @@ if _hecho_hoy:
 try:
     _desc_txt = obtener_config("descubrimiento_ultimo", "")
     _desc_fec = obtener_config("descubrimiento_fecha", "")
-    if _desc_txt and st.session_state.get("_desc_visto") != _desc_fec:
+    if not es_operador_o_admin():
+        pass
+    elif _desc_txt and st.session_state.get("_desc_visto") != _desc_fec:
         st.session_state["_desc_visto"] = _desc_fec
         st.caption(f"🧠 Búsqueda automática de relaciones ({_desc_fec}): {_desc_txt}")
     elif obtener_config("descubrimiento_pendiente", "") == "1":
@@ -543,6 +555,10 @@ if (NIVEL_DE_CADA_SECCION.get(pagina)
 # «AQUÍ CORREN LAS PANTALLAS»
 for _pantalla in pantallas.PANTALLAS:
     exec(pantallas.codigo_de_la_pantalla(_pantalla), globals())
+
+if _VISTA_AL_PIE:
+    st.markdown("---")
+    selector_de_vista(st)
 
 # La pantalla terminó de dibujarse: la tarea de fondo puede volver a correr a toda velocidad.
 # Ver ceder_al_mostrador().

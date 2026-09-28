@@ -5302,6 +5302,10 @@ Mirado con capturas en un iPhone y en una computadora, con la base real:
   como botones, uno por resultado, y en el celular eran tres pantallas más.
 - **Sin «None» en los textos y el precio sin centavos** en pantalla (`para_mostrar()`); las
   filas guardadas no se tocan.
+- **Arriba de la caja de búsqueda, solo lo del mostrador.** En el celular, el selector de vista
+  (que se elige solo) va al pie de la página; los partes técnicos del mantenimiento y del
+  descubrimiento, y el cartel de «N equivalencias esperando aprobación», se muestran solo a quien
+  entró con contraseña, que es quien puede hacer algo con ellos.
 - **«¿Se lo llevó?» en el celular es un selector desde dos resultados**: las columnas se apilan
   y cada fila eran dos botones a lo ancho.
 
