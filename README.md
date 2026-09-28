@@ -4759,6 +4759,24 @@ cilindros del 128. Ahora la marca de carburador se busca en todo el texto, solo 
 (un «SENSOR TPS WEBER» es de inyección). 45 pares de cárter o tapa de válvulas contra juegos de
 carburador pasan a descartarse, y 6 juegos de carburador que sí coinciden pasan a limpios.
 
+### 🔢 La cilindrada de FISPA, y sus mellizos con LUCAS
+
+**FISPA escribe la cilindrada sin punto**: su lista llega sin ningún signo, así que «FOCUS 2 0
+DURATEC» o «ASTRA 1 8 - CELTA 1 4» son el 2.0, el 1.8 y el 1.4, y no se leían. «Sensor MAP Ford
+Focus 1.8» no se podía separar del sensor del Focus 2.0. Ahora se leen, solo en las
+descripciones que no traen ningún número con punto o coma, y no después de una «X» («M 12 x 1
+5» es una rosca).
+
+**Los mellizos FISPA/LUCAS cuentan como una sola opción del abanico**
+(`pieza_para_el_abanico()`): «SENSOR MAP 40068 FORD FIESTA VI…» y «SENSOR MAP LEMSM057 FORD
+FIESTA VI…» son la misma pieza con dos códigos, y contados como dos, cualquier producto que
+encajara con ese sensor tenía un empate de más.
+
+Sobre la cola real: 149 pares pasan a limpios (el MAP del Aveo 1.4 con el de FISPA para Aveo
+1 4, la bobina del Cruze 1.8 con la de LUCAS) y 50 a descartarse por cilindrada (el inyector del
+Kuga 1.6T contra el de Focus/Kuga 1 5, la bujía de S10 4.3 V6 contra una de S10 2 8 diésel). Los
+pares en revisión solo por el abanico bajan de 4.209 a 3.580.
+
 ## Una firma de foto podía ser un programa
 
 Las firmas visuales de las fotos se guardan con `pickle`, y `pickle` **no es un formato de

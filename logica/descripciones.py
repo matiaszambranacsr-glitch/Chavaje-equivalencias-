@@ -1780,6 +1780,14 @@ def _firma_armada(descripcion, producto_id=None, codigo_clean=None):
     for _cc in re.findall(r'\b(\d{3,4})\s*CC\b', limpio):
         if 600 <= int(_cc) <= 9999:
             cilindradas.add(f"{int(_cc) / 1000:.1f}")
+    # Y sin punto, como escribe FISPA: su lista llega sin ningún signo, y «FOCUS 2 0 DURATEC»
+    # o «ASTRA 1 8 - CELTA 1 4» son el 2.0, el 1.8 y el 1.4. Sin leerlas, «Sensor MAP Ford
+    # Focus 1.8» no se podía separar del sensor del Focus 2.0 y quedaban empatados. Solo en las
+    # descripciones que no traen NINGÚN número con punto o coma —las de esa lista—, y no
+    # después de una «X»: «M 12 x 1 5» es una rosca.
+    if not cilindradas and not re.search(r'\d[.,]\d', limpio):
+        cilindradas.update(f"{a}.{b}" for a, b in
+                           re.findall(r'(?<!X )(?<!X)\b([0-6]) (\d)\b(?! ?(?:MM|X)\b)', limpio))
 
     # Los modelos: palabras que quedan después de sacar la marca del auto, el ruido y los
     # números sueltos. Se buscan contra el catálogo propio para no inventar modelos.

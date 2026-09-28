@@ -1476,6 +1476,23 @@ def _submarca_del_codigo(codigo):
     return next((m for m in _MARCAS_QUE_SE_PEGAN_AL_CODIGO if limpio.endswith(m)), "")
 
 
+def pieza_para_el_abanico(codigo, descripcion):
+    """Qué cuenta como UNA opción del abanico. Las variantes de un código son una sola
+    (codigo_base_sin_variante(): «TC-882-MG 1M» y «TC-882-20» son la misma junta), y también
+    los mellizos de las listas de distribuidor: FISPA vende la misma pieza con su código y con
+    el de LUCAS —«SENSOR MAP 40068 FORD FIESTA VI…» y «SENSOR MAP LEMSM057 FORD FIESTA VI…»—,
+    y contados como dos, cualquier producto que encajara con ese sensor tenía un empate de más
+    y el abanico lo mandaba a revisión. Los mellizos se reconocen por la descripción sin el
+    número del código."""
+    if _submarca_del_codigo(codigo):
+        limpio = sanitizar(codigo)
+        sin_codigo = [w for w in normalizar_texto(descripcion or "").split()
+                      if not (sanitizar(w) and len(sanitizar(w)) >= 3 and sanitizar(w) in limpio)]
+        if sin_codigo:
+            return "MELLIZOS:" + " ".join(sin_codigo)
+    return codigo_base_sin_variante(codigo) or sanitizar(codigo or "")
+
+
 def es_de_un_abanico(fila):
     """¿El par está en revisión por el abanico? Ver «el abanico» en _analizar_lote_pendiente()."""
     return any(a.startswith("🪭") for a in (fila.get("alarmas") or []))
@@ -1539,7 +1556,7 @@ def candidatos_por_pieza(abanico):
             esp_c = medidas_desde_descripcion(f.get(f"desc_{lado}") or "").get("espesor")
             if esp_c is not None and abs(esp_c - esp_prod) > 0.03:
                 continue
-        base = codigo_base_sin_variante(f[f"cod_{lado}"]) or f[f"cod_{lado}"]
+        base = pieza_para_el_abanico(f[f"cod_{lado}"], f.get(f"desc_{lado}"))
         grupos.setdefault(base, []).append(f)
     return sorted(grupos.items(), key=lambda g: -max(f.get("confianza", 0) for f in g[1]))
 
@@ -2065,10 +2082,11 @@ def _analizar_lote_pendiente(lote, limite=None, desde=0):
     for f in evaluadas:
         if "OEM" in (f.get("tipo_a"), f.get("tipo_b")) or f["confianza"] <= 15:
             continue
-        for yo, otro, marca_otro in ((f["a"], f["cod_b"], f.get("marca_b")),
-                                     (f["b"], f["cod_a"], f.get("marca_a"))):
+        for yo, otro, desc_otro, marca_otro in (
+                (f["a"], f["cod_b"], f.get("desc_b"), f.get("marca_b")),
+                (f["b"], f["cod_a"], f.get("desc_a"), f.get("marca_a"))):
             _abanico.setdefault((yo, marca_otro), set()).add(
-                codigo_base_sin_variante(otro) or sanitizar(otro or ""))
+                pieza_para_el_abanico(otro, desc_otro))
     _en_abanico = {clave for clave, bases in _abanico.items()
                    if len(bases) >= PRODUCTOS_DISTINTOS_PARA_ABANICO}
     # Dentro del abanico se queda el que MEJOR coincide —más modelos, motor y cilindrada en
@@ -2093,7 +2111,9 @@ def _analizar_lote_pendiente(lote, limite=None, desde=0):
         for k, pares_k in _pares_del_abanico.items():
             mejor = max(_fuerza_del_par[(f["a"], f["b"])] for f in pares_k)
             mejores = [f for f in pares_k if _fuerza_del_par[(f["a"], f["b"])] == mejor]
-            _bases_mejores = {codigo_base_sin_variante(f["cod_b"] if f["a"] == k[0] else f["cod_a"])
+            _bases_mejores = {pieza_para_el_abanico(*((f["cod_b"], f.get("desc_b"))
+                                                       if f["a"] == k[0]
+                                                       else (f["cod_a"], f.get("desc_a"))))
                               for f in mejores}
             for f in pares_k:
                 if (_fuerza_del_par[(f["a"], f["b"])] < mejor
