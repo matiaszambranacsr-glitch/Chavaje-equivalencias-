@@ -1499,6 +1499,8 @@ def _submarca_del_codigo(codigo):
 
 _RE_MATERIAL_O_ESPESOR = re.compile(
     r"\(?\b(?:SINTETIC[OA]|SILICONA|CORCHO|GOMA|FIBRA|METALIC[OA]|METAL|ACERO|ALUMINIO|MG|"
+    r"VITON|NITRILO|BRONCE|TEFLON|PTFE|MULTICAPA|METALGRAF|AMIANTO|GRAFITAD[OA]|NEOPRENO|"
+    r"COBRE|PAPEL|CARTON|"
     r"GRAFITAD[OA]|MLS|ESP(?:ESOR)?\.?\s*\(?\d+(?:[.,]\d+)?\s*MM\)?|\d+(?:[.,]\d+)?\s*MM)\b\)?")
 _RE_ES_ORIGINAL = re.compile(r"\(?\b(?:PRODUCTO\s+)?ORIGINAL\b\)?")
 
