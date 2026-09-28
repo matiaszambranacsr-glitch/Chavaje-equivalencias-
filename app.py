@@ -153,6 +153,8 @@ globals().update(logica.todo_lo_de_la_logica())
 _actividad_del_mostrador()["empezo"] = time.monotonic()
 
 st.markdown(CSS_CUSTOM, unsafe_allow_html=True)
+# Las ayudas plegadas numeran sus cajas por pasada: ver _clave_de_ayuda().
+st.session_state["_ayudas_de_esta_pasada"] = {}
 
 # Ajustes según el modo de vista elegido. En celular se agranda lo que hay que tocar con el
 # dedo y se achica el texto de las tablas para que entre; en computadora se aprovecha el ancho.
@@ -182,11 +184,12 @@ if es_celular():
     }
     [data-testid="stMetricValue"] { font-size: 1.7rem !important; }
     [data-testid="stDataFrame"] { font-size: 0.78rem; }
-    .app-header h1 { font-size: 1.45rem !important; }
-    /* En el celular el encabezado va con el nombre solo: la línea de arriba y el subtítulo
-       ocupaban lo mismo que el nombre y empujaban la caja de búsqueda hacia abajo. */
-    .app-header { padding: 10px 14px !important; margin-bottom: 6px !important; }
-    .app-header__eyebrow, .app-header p { display: none !important; }
+    /* En el celular el encabezado va con el nombre solo: el subtítulo empujaba la caja de
+       búsqueda hacia abajo. */
+    .app-bar { padding: 8px 10px !important; margin-bottom: 6px !important; gap: 10px !important; }
+    .app-bar__logo { width: 32px !important; height: 32px !important; font-size: 1rem !important; }
+    .app-bar__title { font-size: 1.05rem !important; }
+    .app-bar__sub { display: none !important; }
     [data-testid="stExpander"] summary { padding: 0.65rem 0.5rem !important; }
     h3 { font-size: 1.1rem !important; }
     /* Navegación en pastillas: compactas para que las 8 secciones entren en pocas filas
@@ -199,7 +202,7 @@ if es_celular():
 else:
     st.markdown("""
     <style>
-    .block-container { padding: 1.6rem 3rem 4rem 3rem !important; max-width: 1500px !important; }
+    .block-container { padding: 1rem 3rem 4rem 3rem !important; max-width: 1500px !important; }
     [data-testid="stDataFrame"] { font-size: 0.88rem; }
     </style>
     """, unsafe_allow_html=True)
@@ -210,10 +213,12 @@ else:
 # ============================================================
 st.markdown(
     """
-    <div class="app-header">
-        <p class="app-header__eyebrow">Base de equivalencias de repuestos</p>
-        <h1>🔧 Equivalencias El Chavo</h1>
-        <p>Sistema de búsqueda de repuestos por equivalencia</p>
+    <div class="app-bar">
+        <div class="app-bar__logo">🔧</div>
+        <div>
+            <div class="app-bar__title">Equivalencias El Chavo</div>
+            <div class="app-bar__sub">Búsqueda de repuestos por equivalencia</div>
+        </div>
     </div>
     """,
     unsafe_allow_html=True
@@ -479,7 +484,9 @@ if st.session_state.get("pagina_actual") not in PAGINAS:
 # un campo de texto adentro para filtrar, y en el celular eso abre el teclado cada vez que lo
 # tocás, que es molesto para algo que se usa todo el tiempo. Con radio es un toque y listo.
 # El CSS los muestra como pastillas: en el celular se acomodan solas en varias filas.
-st.radio("Sección:", PAGINAS, key="pagina_actual", horizontal=True, label_visibility="collapsed")
+with st.container(key="nav_principal"):
+    st.radio("Sección:", PAGINAS, key="pagina_actual", horizontal=True,
+             label_visibility="collapsed")
 
 pagina = st.session_state["pagina_actual"]
 
@@ -487,13 +494,9 @@ pagina = st.session_state["pagina_actual"]
 # convierte una fila de ocho botones en algo que se entiende sin que nadie te lo explique.
 # En el celular, en el buscador no: es la pantalla que se explica sola, y cada renglón arriba de
 # la caja de búsqueda es un renglón que hay que bajar para llegar a ella.
+# Plegada, como todas las ayudas: ver ayuda().
 if PARA_QUE_SIRVE.get(pagina) and not (es_celular() and pagina == PAGINAS[0]):
-    st.markdown(
-        f"<div style='margin:-.4rem 0 .9rem 0;padding:.45rem .8rem;"
-        f"background:rgba(128,128,128,.10);border-radius:6px;font-size:.9em;opacity:.85'>"
-        f"{PARA_QUE_SIRVE[pagina]}</div>",
-        unsafe_allow_html=True
-    )
+    ayuda(PARA_QUE_SIRVE[pagina], titulo="ℹ️ ¿Para qué sirve esta sección?")
 
 # Los avisos que quedaron guardados antes del último refresco. Van acá, arriba del contenido
 # de la página, para que se vean sí o sí — sin esto, cada "Guardado" se perdía en el refresco.

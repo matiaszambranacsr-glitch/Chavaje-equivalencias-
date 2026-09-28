@@ -6,7 +6,7 @@
 # ============================================================
 if pagina == PAGINAS[5]:
     st.subheader("Armar lista de productos para enviar por WhatsApp")
-    st.caption(
+    ayuda(
         "Buscá códigos en la pestaña Buscador y tocá '📋 Agregar a lista de WhatsApp'. "
         "Acá se arma un mensaje agrupado por producto, con las equivalencias y precios de cada marca."
     )

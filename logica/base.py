@@ -294,6 +294,104 @@ hr { border-color: var(--border) !important; margin: 1.1rem 0 !important; }
    En celular no hay evento que lo "suelte" al hacer scroll con el dedo, y queda pegado en
    pantalla tapando el contenido de abajo. Se desactiva: el dato ya se ve en las barras. */
 #vg-tooltip-element, .vg-tooltip { display: none !important; }
+
+/* ===== Diseño moderno ===== */
+/* Menos aire arriba: la barra de Streamlit queda vacía (ver toolbarMode en config.toml). */
+[data-testid="stHeader"] { height: 0 !important; min-height: 0 !important; }
+.block-container { padding-top: 1rem !important; }
+
+/* Encabezado compacto: una barra, no una tarjeta que ocupa media pantalla del celular. */
+.app-bar {
+  display: flex; align-items: center; gap: 12px; padding: 10px 14px; margin-bottom: 8px;
+  background: linear-gradient(135deg, var(--bg-panel) 0%, var(--bg-panel-2) 100%);
+  border: 1px solid var(--border); border-radius: 14px;
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.25);
+}
+.app-bar__logo {
+  width: 40px; height: 40px; border-radius: 11px; flex: 0 0 auto;
+  display: flex; align-items: center; justify-content: center; font-size: 1.25rem;
+  background: linear-gradient(135deg, var(--accent) 0%, #C97B1C 100%);
+  box-shadow: 0 2px 10px rgba(232, 163, 61, 0.35);
+}
+.app-bar__title {
+  font-family: 'Space Grotesk', sans-serif; font-weight: 700; font-size: 1.2rem;
+  color: var(--text); line-height: 1.15; letter-spacing: -0.01em;
+}
+.app-bar__sub { font-size: 0.78rem; color: var(--text-muted); line-height: 1.2; }
+
+/* Las opciones de un radio como pastillas, sin el puntito de formulario. */
+[data-testid="stRadioOption"] > div > div > div:not([data-testid="stMarkdownContainer"]) {
+  display: none !important;
+}
+.stRadio [role="radiogroup"] label { padding: 6px 14px !important; border-radius: 10px !important; }
+.stRadio [role="radiogroup"] label:has(input:checked) p { color: var(--accent); font-weight: 600; }
+
+/* La navegación principal: una barra de pestañas en un solo renglón. En el celular se desliza
+   de costado en vez de ocupar tres renglones. */
+/* Todo a lo ancho de la pantalla y no más: sin esto la barra se estiraba al largo de sus
+   ocho botones y la PÁGINA entera se corría de costado en el celular. */
+.st-key-nav_principal, .st-key-nav_principal [data-testid="stElementContainer"],
+.st-key-nav_principal .stRadio, .st-key-nav_principal .stRadio > div {
+  max-width: 100% !important; min-width: 0 !important;
+}
+.st-key-nav_principal [role="radiogroup"] {
+  flex-wrap: nowrap !important; overflow-x: auto; gap: 2px !important;
+  max-width: 100%; box-sizing: border-box;
+  /* Los botones de radio escondidos de cada opción van con position: absolute. Sin esto se
+     ubicaban contra el contenedor principal y lo ensanchaban: la página entera se corría de
+     costado al tocar una sección de la derecha. */
+  position: relative;
+  padding: 4px; background: var(--bg-panel); border: 1px solid var(--border);
+  border-radius: 14px; scrollbar-width: none;
+}
+.st-key-nav_principal [role="radiogroup"]::-webkit-scrollbar { display: none; }
+.st-key-nav_principal [role="radiogroup"] label {
+  flex: 0 0 auto; background: transparent !important; border: 1px solid transparent !important;
+  padding: 7px 13px !important;
+}
+.st-key-nav_principal [role="radiogroup"] label:hover { background: var(--bg-panel-2) !important; }
+.st-key-nav_principal [role="radiogroup"] label:has(input:checked) {
+  background: rgba(232, 163, 61, 0.14) !important; border-color: rgba(232, 163, 61, 0.45) !important;
+}
+.st-key-nav_principal [role="radiogroup"] label p { white-space: nowrap; font-weight: 600; }
+
+/* Las ayudas plegadas (ver ayuda()): un renglón gris, sin caja, que se abre con una línea de
+   color al costado. Se distinguen de los desplegables que son parte de la pantalla. */
+[class*="st-key-ayuda_"] [data-testid="stExpander"],
+[class*="st-key-ayuda_"] [data-testid="stExpander"] details {
+  border: none !important; background: transparent !important; box-shadow: none !important;
+  margin: 0 !important;
+}
+[class*="st-key-ayuda_"] [data-testid="stExpander"] summary {
+  background: transparent !important; padding: 0.1rem 0 !important; min-height: 0 !important;
+  font-weight: 500 !important;
+}
+[class*="st-key-ayuda_"] [data-testid="stExpander"] summary p {
+  font-size: 0.84rem !important; color: var(--text-muted) !important;
+}
+[class*="st-key-ayuda_"] [data-testid="stExpander"] summary:hover p { color: var(--accent) !important; }
+[class*="st-key-ayuda_"] [data-testid="stExpander"] details[open] > summary { border-bottom: none !important; }
+[class*="st-key-ayuda_"] [data-testid="stExpander"] summary [data-testid="stIconMaterial"] {
+  color: var(--text-muted); font-size: 1rem;
+}
+[class*="st-key-ayuda_"] [data-testid="stExpanderDetails"] {
+  border-left: 2px solid var(--accent); margin: 0.2rem 0 0.5rem 0.45rem;
+  padding: 0.1rem 0 0.2rem 0.9rem !important;
+}
+[class*="st-key-ayuda_"] [data-testid="stExpanderDetails"] p,
+[class*="st-key-ayuda_"] [data-testid="stExpanderDetails"] li {
+  font-size: 0.88rem; color: var(--text-muted);
+}
+
+/* Tarjetas, desplegables y botones un poco más redondeados y con algo de profundidad. */
+[data-testid="stVerticalBlockBorderWrapper"] { border-radius: 14px !important; }
+[data-testid="stExpander"] { border-radius: 12px !important; }
+.stButton > button, .stDownloadButton > button, .stFormSubmitButton > button { border-radius: 10px; }
+.stButton > button[kind="primary"], .stFormSubmitButton > button[kind="primary"] {
+  box-shadow: 0 2px 12px rgba(232, 163, 61, 0.25);
+}
+[data-testid="stMetric"] { border-radius: 14px; }
+h1, h2, h3 { font-family: 'Space Grotesk', sans-serif !important; letter-spacing: -0.01em; }
 </style>
 """
 

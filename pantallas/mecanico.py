@@ -45,7 +45,7 @@ if pagina == PAGINAS[7]:
                 _reps_dtc = repuestos_para_el_dtc(codigo_buscar, _auto_dtc, _modelo_dtc)
                 if _reps_dtc:
                     st.markdown("**🔧 Lo que tenés para arreglar eso**")
-                    st.caption(
+                    ayuda(
                         "Sale de cruzar las piezas que nombra el código con las descripciones "
                         "de tu catálogo. Es una ayuda para no ir a buscar cada una a mano, no "
                         "un diagnóstico: el código dice por dónde empezar, no qué cambiar."
@@ -80,7 +80,7 @@ if pagina == PAGINAS[7]:
                     st.rerun()
 
         with st.expander("📋 Carga masiva de códigos (pegar texto)"):
-            st.caption(
+            ayuda(
                 "Un código por línea, formato: `codigo;descripción;sistema;causas;fabricante` "
                 "(sistema, causas y fabricante son opcionales — dejá fabricante vacío para códigos genéricos)."
             )
@@ -446,7 +446,7 @@ if pagina == PAGINAS[7]:
                     _fam = autos_con_la_misma_familia_de_motor(_nm)
                     if _fam:
                         st.markdown("**🔩 Otros autos con un motor de la misma familia:**")
-                        st.caption(
+                        ayuda(
                             "El número arranca con el modelo de motor y sigue con el serial de "
                             "esa unidad. Si el modelo es el mismo, los repuestos son los mismos "
                             "aunque sea otro auto."
@@ -457,7 +457,7 @@ if pagina == PAGINAS[7]:
                         "No hay ningún vehículo con ese número de motor. Se carga en la ficha "
                         "del auto, en **🚙 Repuestos por vehículo**."
                     )
-                    st.caption(
+                    ayuda(
                         "Si el auto no está cargado todavía, el número de motor solo no alcanza "
                         "para saber qué repuestos lleva: no existe una base pública que lo "
                         "traduzca. Lo que sirve es cargar la ficha una vez."
@@ -469,7 +469,7 @@ if pagina == PAGINAS[7]:
 
         st.markdown("---")
         st.markdown("**⚙️ Lo que la app fue aprendiendo**")
-        st.caption(
+        ayuda(
             "Estas tablas son tuyas: se llenan solas con cada ficha de vehículo que cargues con "
             "VIN, y con lo que le enseñes arriba. Acá se revisan y se corrigen."
         )
@@ -526,7 +526,7 @@ if pagina == PAGINAS[7]:
 
         motores_cargados = listar_motores_vin()
         with st.expander(f"⚙️ Motores aprendidos ({len(motores_cargados)})"):
-            st.caption(
+            ayuda(
                 "La 8ª posición del VIN es el código de motor. Es el patrón que mejor rinde: el "
                 "mismo código se repite en toda la gama de la marca, así que enseñarlo una vez "
                 "sirve para los otros modelos."
@@ -547,7 +547,7 @@ if pagina == PAGINAS[7]:
 
     if sub_mec == SUB_MEC[3]:
         st.markdown("**🚙 Repuestos por vehículo**")
-        st.caption(
+        ayuda(
             "Buscá lo que le entra a un auto entrando por marca y modelo, en vez de por código. "
             "Sale de las descripciones de tus propias listas — o sea que crece solo cada vez que "
             "importás un proveedor nuevo."
@@ -751,7 +751,7 @@ if pagina == PAGINAS[7]:
 
 
     if sub_mec == SUB_MEC[5]:
-        st.caption(
+        ayuda(
             "Diagramas organizados por Marca › Vehículo › Sistema, donde cada pieza marcada tiene "
             "su código vinculado al catálogo — así se busca directo desde el dibujo, ya sea en el "
             "taller o en el mostrador de una casa de repuestos. Las imágenes las tenés que subir vos."
@@ -789,7 +789,7 @@ if pagina == PAGINAS[7]:
             marcas_existentes = listar_marcas_esquemas()
 
             st.markdown("**🚗 Precargar marca / vehículo (sin imagen todavía)**")
-            st.caption(
+            ayuda(
                 "Dejá lista la estructura del árbol aunque todavía no tengas ningún esquema para subir — "
                 "va a aparecer en 'Explorar por categoría' apenas la guardes."
             )

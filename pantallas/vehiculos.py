@@ -6,7 +6,7 @@
 # ============================================================
 if pagina == PAGINAS[6]:
     st.subheader("🚗 Ficha digital del vehículo")
-    st.caption(
+    ayuda(
         "Registrá la patente de un cliente frecuente junto con las piezas que le fuiste cambiando. "
         "La app avisa cuándo una pieza ya recorrió casi toda su vida útil estimada."
     )
@@ -34,7 +34,7 @@ if pagina == PAGINAS[6]:
     st.markdown("**Buscar / registrar un vehículo**")
 
     with st.expander("📷 Cargar por foto de cédula/título (con IA)"):
-        st.caption(
+        ayuda(
             "Sacale una foto a la cédula verde/azul o al título. La IA lee patente, marca, modelo, "
             "año y motorización — **siempre revisá los datos antes de guardar**, un OCR puede "
             "confundir letras o números parecidos."
@@ -206,7 +206,7 @@ if pagina == PAGINAS[6]:
                 )
 
             with st.expander("✏️ Corregir km de registro (solo si se cargó mal la primera vez)"):
-                st.caption(
+                ayuda(
                     "El km de registro queda fijo automáticamente la primera vez que cargás el vehículo. "
                     "Usá esto solo para corregir un error de tipeo — cambiarlo afecta los cálculos de abajo."
                 )
@@ -260,7 +260,7 @@ if pagina == PAGINAS[6]:
 
             st.markdown("---")
             st.markdown("**🔧 Proyección de mantenimiento**")
-            st.caption(
+            ayuda(
                 "Compara, para cada tipo de pieza con vida útil cargada, cuántas veces se cambió "
                 "realmente contra cuántas veces debería haberse cambiado según los km recorridos "
                 "totales desde que se registró el vehículo."

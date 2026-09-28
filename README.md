@@ -5123,6 +5123,28 @@ de «1006.6C/T/TW»). Los que tienen una letra sola pegada quedan enteros: «22R
 motores que el otro proveedor escribe igual. 5 juntas de cárter salen de revisión, y la de
 bomba inyectora «Perkins 1004.4T» deja de concordar con la del «PERKINS 1006», que es otro motor.
 
+## 🎨 Diseño más moderno, con las ayudas plegadas
+
+- **Las ayudas se despliegan.** `explicar()` dejaba el resumen siempre a la vista y el detalle en
+  un desplegable aparte: dos renglones por ayuda. Ahora es uno solo, «ℹ️ resumen», con todo
+  adentro. Y 49 textos fijos que explicaban una opción debajo de cada cosa (`st.caption` de más
+  de 140 caracteres) pasaron a `ayuda()`, igual de plegados. Se dejaron a la vista los que no son
+  ayuda: avisos de lo que se borra, estados vacíos, errores y lo que decide una venta («No son
+  equivalentes», «Confirmá con el cliente el modelo»). También la línea «para qué sirve» de cada
+  sección. Las ayudas se dibujan livianas —un renglón gris que al abrirse muestra el texto con
+  una línea de color al costado— para no confundirse con los desplegables que son parte de la
+  pantalla, y por eso pueden ir adentro de otro desplegable sin quedar como cajas anidadas (el
+  control de auditar.py las exceptúa).
+- **Encabezado en una barra** en vez de una tarjeta que ocupaba media pantalla del celular.
+- **La navegación es una barra de pestañas de un renglón.** En el celular se desliza de
+  costado; antes ocupaba tres renglones. Ojo con el detalle que costó encontrar: los botones de
+  radio escondidos de cada opción van con `position: absolute`, y sin `position: relative` en la
+  barra ensanchaban el contenedor principal y la página entera se corría de costado al tocar una
+  sección de la derecha (medido con Playwright en un celular simulado).
+- **Opciones sin el puntito de formulario:** los radios se ven como pastillas y la elegida en
+  color.
+- **Sin el botón «Deploy»** ni el menú de desarrollador (`toolbarMode = "minimal"`).
+
 ## Una firma de foto podía ser un programa
 
 Las firmas visuales de las fotos se guardan con `pickle`, y `pickle` **no es un formato de

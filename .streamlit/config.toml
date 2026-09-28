@@ -17,5 +17,10 @@ textColor = "#ECEEF0"
 # del procesador del servidor (medido con py-spy). Python igual lo corre solo cuando hace falta;
 # lo que se pierde es solo el «por las dudas» de cada toque. Medido con 15 personas en un
 # procesador: ver el README, «15 personas a la vez».
+# Sin el botón «Deploy» ni el menú de desarrollador arriba a la derecha: no son para quien usa
+# la app, y ocupaban un renglón entero en el celular.
+[client]
+toolbarMode = "minimal"
+
 [runner]
 postScriptGC = false

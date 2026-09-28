@@ -75,7 +75,7 @@ if pagina == PAGINAS[2]:
             else:
                 archivo_listo(None, "archivo")
             if archivo and archivo.name.lower().endswith(".pdf"):
-                st.caption(
+                ayuda(
                     "📄 PDF: funciona mejor con catálogos que tienen tablas reales (no una imagen escaneada). "
                     "Revisá bien la vista previa antes de importar, el resultado puede variar según el PDF."
                 )
@@ -516,10 +516,10 @@ if pagina == PAGINAS[2]:
                         _pares_muestra, codigos_conocidos=_conocidos_muestra,
                         declarados_o_conocidos=_estricta_muestra)
                     if _estricta_muestra:
-                        st.caption("Esta lista casi nunca marca el código de fábrica («REF ORIG», "
-                                   "«Nº», «//»), así que de la descripción se toman solo los "
-                                   "marcados y los que ya son el código de otra lista. Lo demás "
-                                   "que parece un código acá suele ser una medida o un motor.")
+                        ayuda("Esta lista casi nunca marca el código de fábrica («REF ORIG», "
+                              "«Nº», «//»), así que de la descripción se toman solo los "
+                              "marcados y los que ya son el código de otra lista. Lo demás "
+                              "que parece un código acá suele ser una medida o un motor.")
                     for fila_prev in todas_filas[header_row + 1:header_row + 60]:
                         texto_desc = valor_o_vacio(fila_prev[idx_desc]) if idx_desc < len(fila_prev) else ""
                         cod_fila = (valor_o_vacio(fila_prev[idx_prov])

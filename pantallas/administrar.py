@@ -137,7 +137,7 @@ if pagina == PAGINAS[3]:
                     "no lo agarra ningún chequeo por nombre."
                 )
                 st.dataframe(quitar_id(duplicadas), width="stretch", hide_index=True)
-                st.caption(
+                ayuda(
                     "Fusionalas abajo, poniendo como origen la que quieras eliminar. Los "
                     "productos que existan en las dos se juntan conservando precio, stock y "
                     "equivalencias."
@@ -145,7 +145,7 @@ if pagina == PAGINAS[3]:
                 st.markdown("---")
 
             st.markdown("**🔀 Fusionar marcas duplicadas**")
-            st.caption(
+            ayuda(
                 "Útil cuando una marca quedó cargada con nombres distintos por error de tipeo "
                 "(ej: 'MANN' y 'MANN FILTER'). Mueve todos los productos de una a la otra."
             )
@@ -295,7 +295,7 @@ if pagina == PAGINAS[3]:
                                               placeholder="Ej: Pasillo 3, estante B", key="e_ubic")
 
                 st.markdown("**↔️ Segunda cara (opcional)**")
-                st.caption(
+                ayuda(
                     "Para piezas con distinta medida de cada lado — retenes con labio interior/exterior "
                     "escalonado, tensores con el interior de un diámetro de un lado y otro del otro, etc."
                 )
@@ -509,7 +509,7 @@ if pagina == PAGINAS[3]:
 
     if sub_admin == SUB_ADMIN[2]:
         st.markdown("**💬 Texto del mensaje de WhatsApp**")
-        st.caption(
+        ayuda(
             "Personalizá el encabezado y el pie del mensaje que se arma en 'Lista WhatsApp' — por "
             "ejemplo para poner el nombre real de tu local, un teléfono de contacto, horarios, etc."
         )
@@ -590,7 +590,7 @@ if pagina == PAGINAS[3]:
 
     if sub_admin == SUB_ADMIN[3]:
         st.markdown("**🧩 Combos de repuestos relacionados**")
-        st.caption(
+        ayuda(
             "Cuando alguien busca un producto cuya descripción contenga el 'disparador', la app va a "
             "sugerir estos ítems relacionados con un botón para buscarlos también. Ej: disparador "
             "'correa de distribucion' → ítems 'Kit de distribución', 'Tensor', 'Bomba de agua'."
@@ -625,7 +625,7 @@ if pagina == PAGINAS[3]:
 
     if sub_admin == SUB_ADMIN[4]:
         st.markdown("**🗑️ Eliminar un producto puntual**")
-        st.caption(
+        ayuda(
             "Separado a propósito de la edición de medidas/fotos, para que buscar y editar un producto "
             "no te deje el botón de borrar a mano por accidente."
         )
@@ -709,12 +709,12 @@ if pagina == PAGINAS[3]:
             puentes = codigos_puente(int(minimo_puente))
             if puentes:
                 st.warning(f"⚠️ {len(puentes)} código(s) con más de {minimo_puente} vínculos.")
-                st.caption(
+                ayuda(
                     "Mirá la columna «Marcas distintas»: un repuesto real se vincula con unas pocas "
                     "marcas. Uno que toca 20 marcas distintas casi nunca es legítimo."
                 )
                 st.dataframe(puentes, width="stretch", hide_index=True)
-                st.caption(
+                ayuda(
                     "Si alguno de estos está bien —hay repuestos que legítimamente equivalen a "
                     "decenas—, aprobalo y deja de aparecer acá y en el aviso del buscador."
                 )
@@ -1081,7 +1081,7 @@ if pagina == PAGINAS[3]:
                     file_name="precios_incoherentes.xlsx",
                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
                 )
-                st.caption(
+                ayuda(
                     "Revisá primero los de arriba. Si el precio está bien, entonces lo que está mal "
                     "es el vínculo: cortalo desde «Vincular manual» o con los códigos puente de acá abajo."
                 )
@@ -1121,7 +1121,7 @@ if pagina == PAGINAS[3]:
             else:
                 st.caption("✅ Ningún código de 1 o 2 dígitos en la base.")
             st.markdown("**🔢 Códigos que quedaron con '.0'**")
-            st.caption(
+            ayuda(
                 "Cuando una lista de Excel trae el código como número, llega con un decimal pegado "
                 "(2776400.0). Además de verse mal, eso los volvía imposibles de encontrar: al buscarlos "
                 "quedaban con un cero de más. Esto los deja como corresponde."
@@ -1296,7 +1296,7 @@ if pagina == PAGINAS[3]:
                         "Efecto en los vínculos nuevos": efecto,
                     })
                 st.dataframe(filas_patron, width="stretch", hide_index=True)
-                st.caption(
+                ayuda(
                     "Si algún patrón no te cierra, corregilo revisando algunos vínculos de esa "
                     "combinación al revés: la app se reajusta sola con las decisiones nuevas."
                 )
@@ -1739,7 +1739,7 @@ if pagina == PAGINAS[3]:
                 _cuantos = st.select_slider("Leer fichas de:", options=[10, 25, 50, 100, 200],
                                              format_func=lambda x: f"{x} productos",
                                              key="portal_cuantos")
-                st.caption(
+                ayuda(
                     "Se hace de a tandas chicas y con una pausa entre pedidos. No es "
                     "lentitud: golpear el servidor del proveedor a máxima velocidad es la "
                     "forma más rápida de que te bloqueen la cuenta. Cada tanda sigue donde "
@@ -1876,7 +1876,7 @@ if pagina == PAGINAS[3]:
                     else:
                         st.success(f"Se dedujeron {len(derivadas)} equivalencia(s) posibles.")
                         st.dataframe(quitar_id(derivadas), width="stretch", hide_index=True)
-                        st.caption(
+                        ayuda(
                             "No se cargan directo: van a la cola de revisión, donde el análisis de "
                             "confianza las evalúa como a cualquier otra. Por buena que sea la "
                             "deducción, sigue siendo una deducción."
@@ -2418,7 +2418,7 @@ if pagina == PAGINAS[3]:
 
         if _grupo_mant == GRUPOS_MANTENIMIENTO[4]:
             st.markdown("**📷 Traer fotos de productos en tanda**")
-            st.caption(
+            ayuda(
                 "En vez de cargarlas de a una. No existe ninguna base pública y gratuita de fotos por "
                 "número de parte (la del rubro, TecDoc, es paga), así que las dos fuentes confiables son: "
                 "el link que ya venga en tu lista, o la ficha del propio proveedor."
@@ -2629,7 +2629,7 @@ if pagina == PAGINAS[3]:
                 st.dataframe(
                     [{k: v for k, v in f.items() if k != "marca_id"} for f in _barras_mal],
                     width="stretch", hide_index=True)
-                st.caption(
+                ayuda(
                     "Se pueden pasar a su lugar sin reimportar: el número queda guardado en "
                     "el producto —se sigue pudiendo escanear y buscar— y lo que desaparece "
                     "es la equivalencia que no llevaba a ningún lado."
@@ -2868,7 +2868,7 @@ if pagina == PAGINAS[3]:
                     )
 
             st.markdown("**🔍 Salud de los datos**")
-            st.caption(
+            ayuda(
                 "Revisa la base en busca de cosas rotas o inconsistentes — útil para detectar corrupción "
                 "de datos antes de encontrártela buscando un producto."
             )
@@ -2895,7 +2895,7 @@ if pagina == PAGINAS[3]:
             c.execute("SELECT COUNT(*) FROM productos")
             _todos = c.fetchone()[0] or 1
             _porcentaje = _sueltos * 100 // _todos
-            st.caption(
+            ayuda(
                 "Un producto «sin equivalencia» es uno que todavía NO cruzaste con ningún otro "
                 "código. No quiere decir que esté mal cargado: puede tener precio, stock y "
                 "venderse igual. Borralos solo si sabés que entraron por una importación fallida."
@@ -3027,7 +3027,7 @@ if pagina == PAGINAS[3]:
 
                 st.markdown("---")
                 st.markdown("**🔧 Mecánicos externos**")
-                st.caption(
+                ayuda(
                     "Cuentas separadas para mecánicos que no son empleados tuyos — solo ven su propio "
                     "portal para armar presupuestos con su mano de obra, nunca las secciones internas."
                 )

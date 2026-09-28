@@ -296,7 +296,7 @@ Casi todo lo que edita o borra algo pide la contraseña de administrador la prim
                         st.session_state.pop("resultado_visual", None)
                         st.rerun()
             else:
-                st.caption(
+                ayuda(
                     "Pegá la dirección de la ficha del producto (la de tu proveedor, la de Mercado "
                     "Libre, la que sea) o la de la imagen sola. Se bajan las fotos de esa página y "
                     "elegís cuál usar — no hace falta guardar nada en el teléfono."
@@ -355,7 +355,7 @@ Casi todo lo que edita o borra algo pide la contraseña de administrador la prim
             # pantallas distintas hacía que se usara la peor sin necesidad.
             if bytes_consulta is not None:
                 st.markdown("**Paso 1 — buscar un código en la foto**")
-                st.caption(
+                ayuda(
                     "Casi todas las piezas traen el código grabado, impreso en una etiqueta o "
                     "moldeado. Si se llega a leer, la respuesta es exacta y no hay nada que adivinar."
                 )
@@ -1111,7 +1111,7 @@ Casi todo lo que edita o borra algo pide la contraseña de administrador la prim
                                           for f in _kits], width="stretch", hide_index=True)
                         if _contenido:
                             st.markdown("**🧩 Lo que trae el kit por separado — tampoco es lo mismo**")
-                            st.caption(
+                            ayuda(
                                 "Si el cliente no quiere el kit entero, estas son las piezas "
                                 "sueltas que nombra la descripción. Cada una es **una parte** "
                                 "del kit, no un reemplazo del kit."
@@ -1365,7 +1365,7 @@ Casi todo lo que edita o borra algo pide la contraseña de administrador la prim
                                 mostrar_lista_clickeable(parcial, f"sug_{clean}", limite=12)
     else:
         with st.expander("🎙️ Buscar por voz"):
-            st.caption(
+            ayuda(
                 "Grabá diciendo lo que buscás — la IA lo transcribe y lo busca con el buscador de "
                 "siempre. No es un asistente que entienda pedidos complejos, es simplemente hablar "
                 "en vez de tipear."
@@ -1610,7 +1610,7 @@ Casi todo lo que edita o borra algo pide la contraseña de administrador la prim
                                           width="stretch", hide_index=True)
 
     with st.expander("📦 Armar pedido (ordenado por ubicación en depósito)"):
-        st.caption(
+        ayuda(
             "Pegá varios códigos separados por coma — te devuelve la lista ordenada por ubicación "
             "en el depósito, para juntar todo en un solo recorrido en vez de ir y volver."
         )
@@ -1637,7 +1637,7 @@ Casi todo lo que edita o borra algo pide la contraseña de administrador la prim
                     st.warning("No encontré ninguno de esos códigos en el catálogo.")
 
     with st.expander("📐 Buscar por medidas mecánicas (cuando no hay código ni equivalencia cargada)"):
-        st.caption(
+        ayuda(
             "Para piezas de autos antiguos, importados o fuera de catálogo: medí la pieza rota con un "
             "calibre y buscá alternativas que compartan esas cotas, aunque no tengan equivalencia registrada."
         )
@@ -1651,7 +1651,7 @@ Casi todo lo que edita o borra algo pide la contraseña de administrador la prim
         m_tolerancia = cm6.slider("Tolerancia (%)", min_value=1, max_value=15, value=5, key="med_tol")
 
         st.markdown("**↔️ Segunda cara (opcional, para piezas con distinta medida de cada lado)**")
-        st.caption(
+        ayuda(
             "Ej: un retén con labio interior de un diámetro de un lado y otro del otro, o un tensor "
             "con el interior escalonado (17mm de una cara, 8mm de la otra)."
         )

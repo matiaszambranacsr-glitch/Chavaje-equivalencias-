@@ -506,10 +506,15 @@ def _funciones_que_abren(nombre):
                         protegidos.add(id(y))
         return any(es_st(x, {nombre}) and id(x) not in protegidos for x in ast.walk(fn))
 
-    abren = {nom for nom, fn in mods.items() if _abre_sin_red(fn)}
+    # ayuda() abre un expander a propósito, pero uno liviano: sin borde ni fondo, un renglón gris
+    # que se despliega (ver el CSS de las cajas «ayuda_»). Adentro de otro desplegable no suma
+    # una segunda caja, así que no es el error que busca este control.
+    _LIVIANAS = {"ayuda", "_clave_de_ayuda"}
+    abren = {nom for nom, fn in mods.items() if nom not in _LIVIANAS and _abre_sin_red(fn)}
     # Repetir hasta que no cambie: si A llama a B y B abre el contenedor, A también lo abre.
     while True:
-        nuevas = {nom for nom, fn in mods.items() if nom not in abren
+        nuevas = {nom for nom, fn in mods.items() if nom not in abren and nom not in _LIVIANAS
+                  and nom != "explicar"
                   and any(isinstance(x, ast.Call) and isinstance(x.func, ast.Name)
                           and x.func.id in abren for x in ast.walk(fn))}
         if not nuevas:

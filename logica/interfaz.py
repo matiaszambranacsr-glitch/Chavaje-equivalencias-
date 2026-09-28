@@ -131,38 +131,47 @@ def texto_para_html(valor):
     return html.escape(str(valor if valor is not None else ""))
 
 
+def _clave_de_ayuda(texto):
+    """Una clave estable para la caja de una ayuda: la misma ayuda en el mismo lugar tiene que
+    conservar la clave de un refresco al otro, o se cerraría sola cada vez que uno toca algo.
+    Sale del texto, más cuántas veces apareció ese mismo texto en esta pasada (el contador se
+    reinicia al principio de cada una, en app.py)."""
+    vistas = st.session_state.setdefault("_ayudas_de_esta_pasada", {})
+    base = f"{abs(hash(texto)) % 10**10}"
+    vistas[base] = vistas.get(base, 0) + 1
+    return f"ayuda_{base}_{vistas[base]}"
+
+
+def ayuda(texto, titulo="ℹ️ Cómo funciona", abierto=False):
+    """Una explicación plegada: se ve solo el título, y el texto a un toque.
+
+    La app tenía decenas de explicaciones fijas —para qué sirve cada opción, qué hace cada
+    botón— escritas debajo de cada cosa. Sirven la primera vez; las otras cien empujan hacia
+    abajo lo que uno vino a hacer. Plegadas, siguen ahí para quien las necesita.
+
+    Va en una caja con clave propia (ver _clave_de_ayuda()) para que el CSS la dibuje liviana
+    —sin borde, en gris, como un «más información»— y se distinga de los desplegables que son
+    parte de la pantalla. Por eso también se puede usar adentro de otro desplegable: no suma
+    una segunda caja pesada, suma un renglón."""
+    with st.container(key=_clave_de_ayuda(texto)):
+        with st.expander(titulo, expanded=abierto):
+            st.markdown(texto)
+
+
 def explicar(resumen, detalle, abierto=False, en_expander=False):
-    """Una línea corta siempre visible, y el porqué largo a un toque de distancia.
+    """El resumen como título de una ayuda plegada, y el porqué largo adentro.
 
     Las explicaciones largas sirven la primera vez y estorban las otras cien: en el celular
     empujan los botones fuera de la pantalla y hay que scrollear para llegar a lo que uno vino
     a hacer. Pero borrarlas tampoco sirve — sin ellas nadie entiende para qué es cada cosa.
-    Así queda el resumen a la vista y el detalle disponible para quien lo necesite.
 
-    Ojo con dónde se la llama. Esta función abre un expander, así que llamarla adentro de otro
-    deja un expander dentro de un expander: en el celular quedan dos cajas anidadas y hay que
-    tocar dos veces para leer tres renglones. Las versiones viejas de Streamlit ni siquiera lo
-    permitían —tiraban excepción y cortaban el renderizado ahí—; las nuevas lo dejan pasar pero
-    sigue quedando mal.
+    Antes el resumen iba siempre a la vista y el detalle en un desplegable aparte («¿Por qué? /
+    ¿Cómo funciona?»): dos renglones por cada ayuda. Ahora es uno solo, con el resumen de
+    título, y todo lo demás adentro. Ver ayuda().
 
-    Para eso está en_expander: adentro de un expander el detalle va en un popover, que se abre
-    encima y no agrega otro nivel. Con en_expander=True el parámetro 'abierto' no aplica: un
-    popover no se puede dejar abierto de entrada."""
-    st.caption(resumen)
-    caja = None
-    if not en_expander:
-        try:
-            caja = st.expander("¿Por qué? / ¿Cómo funciona?", expanded=abierto)
-        except Exception:
-            caja = None
-    if caja is None:
-        try:
-            caja = st.popover("¿Por qué? / ¿Cómo funciona?")
-        except Exception:
-            st.caption(detalle)
-            return
-    with caja:
-        st.markdown(detalle)
+    en_expander queda por compatibilidad: la ayuda ya no es una caja pesada, así que adentro de
+    otro desplegable queda bien igual."""
+    ayuda(detalle, titulo=f"ℹ️ {resumen}", abierto=abierto)
 
 
 def avisar(tipo, texto):

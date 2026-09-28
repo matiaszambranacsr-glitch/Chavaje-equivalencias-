@@ -42,7 +42,7 @@ if pagina == PAGINAS[4]:
 
         st.markdown("---")
         st.markdown("**🤖 Uso de las funciones de IA (últimos 30 días)**")
-        st.caption(
+        ayuda(
             "Las primeras 4 funciones usan una API key; en el peor caso fallan por límite de uso y "
             "hay que reintentar. 'Generar imagen orientativa' usa una key aparte, configurada por separado."
         )
@@ -225,7 +225,7 @@ if pagina == PAGINAS[4]:
 
         st.markdown("---")
         st.markdown("**📦 Exportar configuración (sin el catálogo de productos)**")
-        st.caption(
+        ayuda(
             "Combos de repuestos, códigos DTC y fabricantes por WMI en un solo archivo de texto — útil "
             "como respaldo liviano aparte del backup completo, o para copiarle la configuración a otra "
             "sucursal sin duplicar todo el catálogo de productos."
@@ -289,7 +289,7 @@ Administrar → Mantenimiento.
 
     if sub_stats == SUB_STATS[3]:
         st.markdown("**🧮 Auditoría diaria de stock (muestreo aleatorio)**")
-        st.caption(
+        ayuda(
             "Todas las mañanas se puede generar una lista corta de productos al azar (priorizando favoritos "
             "y los que tienen precio cargado) para contarlos a mano en 5 minutos y detectar descalces antes de que se acumulen."
         )
@@ -321,7 +321,7 @@ Administrar → Mantenimiento.
 
         st.markdown("---")
         st.markdown("**📦 Matriz ABC — ubicación sugerida en depósito**")
-        st.caption(
+        ayuda(
             "Como la app no tiene un módulo de ventas, la rotación se aproxima con la cantidad de veces que "
             "se buscó cada código. Los más buscados (A) conviene tenerlos más a mano."
         )
@@ -486,7 +486,7 @@ Administrar → Mantenimiento.
             anotar_error("nivel principal", _err)
             variacion = []
         if not variacion:
-            st.caption(
+            ayuda(
                 "Hace falta haber importado precios de una misma marca en dos momentos "
                 "distintos para poder comparar. Aparece solo a medida que vas cargando listas."
             )
@@ -775,7 +775,7 @@ Administrar → Mantenimiento.
             #    Va primero porque un solo producto basura ensucia decenas de vínculos.
             if resultado_aud.get("codigos_malos"):
                 st.markdown("**🚫 Códigos que no parecen códigos de repuesto**")
-                st.caption(
+                ayuda(
                     "Suelen venir de una importación donde la columna del código en realidad tenía "
                     "medidas, cantidades o pedazos de la descripción. Cortarles los vínculos limpia "
                     "el problema; el producto queda por si lo querés corregir a mano."
@@ -820,7 +820,7 @@ Administrar → Mantenimiento.
             # 2) Conflictos agrupados: un código de fábrica apuntando a varios productos
             if resultado_aud["conflictos"]:
                 st.markdown("**⚠️ Un código de fábrica apuntando a varios productos del mismo proveedor**")
-                st.caption(
+                ayuda(
                     "Acá se ven juntos todos los productos a los que apunta cada código, para poder "
                     "comparar y cortar el que sobra. Normalmente uno tiene descripción real y el otro "
                     "es el que quedó mal."
@@ -1065,9 +1065,9 @@ Administrar → Mantenimiento.
             if _plan:
                 with st.expander("🧭 Cómo resolver esta lista, paso a paso", expanded=True):
                     st.dataframe(_plan, width="stretch", hide_index=True)
-                    st.caption("De arriba hacia abajo: cada paso achica lo que queda para los "
-                               "siguientes. Los que dicen «1 toque» no necesitan mirar par por "
-                               "par; los de muestra, solo los que la app elige al azar.")
+                    ayuda("De arriba hacia abajo: cada paso achica lo que queda para los "
+                          "siguientes. Los que dicen «1 toque» no necesitan mirar par por "
+                          "par; los de muestra, solo los que la app elige al azar.")
 
             # Cuando el problema es UN producto que aparece en decenas de pendientes, se resuelve
             # de una. Antes había que aprobar o descartar cada vínculo por separado, aunque los
