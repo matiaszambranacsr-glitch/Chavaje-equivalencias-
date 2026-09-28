@@ -1895,7 +1895,12 @@ def _firma_armada(descripcion, producto_id=None, codigo_clean=None):
     # JL escribe «JUNTAS FIAT TEMPRA WEBER» y «JUNTAS DODGE 1500 STROMBERG» sin decir
     # «carburador»: la marca del carburador lo dice. Sin esto se emparejaban con juntas de tapa
     # de cilindros del mismo auto. CARTER no cuenta acá: también es la junta de cárter.
-    if pieza & (_MARCAS_DE_CARBURADOR - {"CARTER"}):
+    # Se mira en TODAS las palabras y no solo en la pieza: WEBER, SOLEX y HOLLEY también son
+    # marcas de repuesto, y esas se sacan antes de armar la pieza. «JUNTAS FIAT 128 1972/ WEBER
+    # 1b» quedaba como «JUNTA 128» a secas y concordaba con la junta de tapa de cilindros del
+    # 128. Solo en las juntas: un «SENSOR TPS WEBER» es de inyección, no del carburador.
+    _marcas_carb = (pieza | set(palabras)) & (_MARCAS_DE_CARBURADOR - {"CARTER"})
+    if _marcas_carb and (pieza & {"JUNTA", "JUNTAS"} or "JUNTA" in (cabeza or "")):
         pieza.add("CARBURADOR")
     aplicacion = [w for w in nucleo if w not in pieza]
 

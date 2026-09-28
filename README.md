@@ -4737,6 +4737,28 @@ están a mano, porque así también son TORINO y GALILEO, que sí sirven. En la 
 pares, los cuatro bien: juntas de escape de Fiesta y Clio que «coincidían» con una de motor MWM
 porque ACOPLE contaba como modelo.
 
+### 🪭 El abanico, sin los candidatos que ya estaban vetados
+
+El abanico —un producto emparejado con cuatro o más productos distintos de otra lista— se armaba
+con TODOS sus pares, también los que el texto ya contradecía. Eso hacía dos daños:
+
+- aparecían como opción en «Elegí cuál es la equivalente»: la junta de tapa de válvulas del
+  Peugeot 404 contra el juego de carburador, la de cárter y la de diferencial;
+- inflaban el abanico: un producto con UN candidato bueno y cuatro vetados era «un abanico», y
+  el bueno tenía que ganarles en fuerza de la coincidencia o se iba a revisión.
+
+Ahora cada par se evalúa primero y el abanico se arma después, solo con los que no quedaron
+vetados. Sobre la cola real: **258 pares vuelven a limpios** (juntas de tapa de MWM Sprint,
+Sprinter, Pathfinder, Cruze 1.4, Fire 1.4…), y «Elegí cuál» baja de 1.078 productos con 10.746
+opciones a 767 con 6.778.
+
+**Y las juntas de carburador de JL.** «JUNTAS FIAT 128 1972/ WEBER 1b» dice que es de carburador
+por la marca del carburador, pero WEBER, SOLEX y HOLLEY también son marcas de repuesto y se
+sacaban antes de mirar: quedaba «JUNTA 128» a secas y concordaba con la junta de tapa de
+cilindros del 128. Ahora la marca de carburador se busca en todo el texto, solo en las juntas
+(un «SENSOR TPS WEBER» es de inyección). 45 pares de cárter o tapa de válvulas contra juegos de
+carburador pasan a descartarse, y 6 juegos de carburador que sí coinciden pasan a limpios.
+
 ## Una firma de foto podía ser un programa
 
 Las firmas visuales de las fotos se guardan con `pickle`, y `pickle` **no es un formato de
