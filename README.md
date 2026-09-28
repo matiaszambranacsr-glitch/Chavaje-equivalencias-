@@ -5189,7 +5189,7 @@ lo dicen: «SENSOR MAP 40011 (reemplaza a 40035)», «… REEMPLAZA AL 10044», 
 cilindros - Reemplazada por 272008».
 
 `cargar_reemplazos_de_las_descripciones()` los lee una vez por día (y con un botón en
-Estadísticas → Backup y config → «🔄 Códigos reemplazados por el fabricante»):
+Estadísticas → 📌 Para pedir → «🔄 Códigos reemplazados por el fabricante»):
 
 - solo de las listas de proveedor: el producto de fábrica copia la descripción de la fila y
   daría el reemplazo con el código equivocado;
