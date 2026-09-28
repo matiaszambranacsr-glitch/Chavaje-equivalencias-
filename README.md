@@ -4951,6 +4951,10 @@ análisis; la cadena de reemplazos y el cruce de aplicaciones solo se consultan 
 que los tienen. En FISPA eran 128.000 consultas. Ahora: FISPA 7,5 s la primera vez y 3,0 las
 siguientes; el barrido 3,3 y 2,1. Los avisos y las pruebas de cada par son idénticos.
 
+Los autos que la base sabe de cada producto (aplicaciones y lo que el taller le puso a cada
+vehículo) también se precargan por tandas con los mismos topes: eran dos consultas por producto.
+FISPA queda en 7,0 s la primera vez y 2,7 las siguientes; el barrido en 2,9 y 2,1.
+
 ## Una firma de foto podía ser un programa
 
 Las firmas visuales de las fotos se guardan con `pickle`, y `pickle` **no es un formato de

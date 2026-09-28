@@ -2625,6 +2625,37 @@ def precargar_para_evidencia(ids, medidas=None):
         for i in ids:
             memoria[("medidas_ev", i)] = medidas.get(i)
 
+    # Los autos que la base sabe de cada producto (ver _autos_guardados_en_la_base()): eran dos
+    # consultas por producto —15.700 llamadas en la lista de FISPA—. Se traen por tandas con los
+    # mismos topes (200 por código, 100 por producto).
+    productos = [memoria[("producto_ev", i)] for i in ids if ("producto_ev", i) in memoria]
+    por_codigo, por_producto = {}, {}
+    codigos = list({p["codigo_clean"] for p in productos if p.get("codigo_clean")})
+    try:
+        for tanda, marcas in en_tandas(codigos):
+            for r in c.execute(f"""SELECT DISTINCT codigo_clean, marca_auto, modelo_auto
+                                   FROM aplicaciones WHERE codigo_clean IN ({marcas})""", tanda):
+                filas = por_codigo.setdefault(r["codigo_clean"], [])
+                if len(filas) < 200:
+                    filas.append((r["marca_auto"], r["modelo_auto"]))
+        for tanda, marcas in en_tandas(list(ids)):
+            for r in c.execute(f"""SELECT DISTINCT hp.producto_id, v.marca_auto, v.modelo_auto
+                                   FROM historial_piezas hp JOIN vehiculos v
+                                     ON v.id = hp.vehiculo_id
+                                   WHERE hp.producto_id IN ({marcas})""", tanda):
+                filas = por_producto.setdefault(r["producto_id"], [])
+                if len(filas) < 100:
+                    filas.append((r["marca_auto"], r["modelo_auto"]))
+    except sqlite3.OperationalError as _err:
+        anotar_error("precargar_para_evidencia", _err)
+        return
+    for p in productos:
+        autos = set()
+        for campos in por_codigo.get(p.get("codigo_clean"), []) + por_producto.get(p["id"], []):
+            for campo in campos:
+                autos.update(w for w in normalizar_texto(campo or "").split() if len(w) >= 3)
+        memoria[("autos", p["id"], p.get("codigo_clean"))] = frozenset(autos)
+
 
 def evidencia_cruzada(id_a, id_b, cuenta_palabras=None, total_descripciones=None,
                       rubros_oem=None):
