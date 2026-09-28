@@ -4970,6 +4970,21 @@ marcas en 10 muestras; 1.551 dudas se resuelven con 385 marcas en 22 muestras; y
 productos para elegir a mano entre varios candidatos (3.109 pares). En la lista de FISPA, 12.790
 limpias se aprueban con una sola muestra de 80.
 
+### ⭐ Elegí cuál: la sugerida viene elegida, y primero los fáciles
+
+En «🪭 Elegí cuál es la equivalente», cuando una sola de las opciones le gana a todas —el análisis
+la dejó limpia y las demás en revisión—, viene ya elegida y marcada con ⭐
+(`pieza_sugerida_del_abanico()`). Nada se aprueba sin mirar: hay que guardar igual, y si no es,
+se saca. Y el orden ahora va de lo fácil a lo difícil: primero los que tienen sugerida y, entre
+esos, los de menos opciones. Antes iban primero los de más candidatos. En el barrido, 149 de los
+698 productos traen sugerida.
+
+De paso, **la tapa trasera y la tapa delantera del motor son lugares de la pieza**: «JTA TAPA
+TRASERA FIAT FIRE 16V» salía limpia —y con ⭐— contra la junta de tapa de válvulas del Fire.
+Con las abreviaturas de Imperial («TAPA TRASE.», «TAPA DELAN.», «TAPA DEL.») y sin confundir la
+preposición («TAPA DEL CARTER»). La tapa delantera del block es la de la distribución, así que
+«TAPA BLOCK LADO DIST.» coincide con «TAPA DELAN. BLOCK».
+
 ## Una firma de foto podía ser un programa
 
 Las firmas visuales de las fotos se guardan con `pickle`, y `pickle` **no es un formato de

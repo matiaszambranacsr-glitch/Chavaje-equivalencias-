@@ -1986,6 +1986,20 @@ def _firma_armada(descripcion, producto_id=None, codigo_clean=None):
     # PALABRAS_DE_CONTEXTO se sacan de la pieza y se dejan del lado de la aplicación: CARGO,
     # PICK UP, TRACTOR o DIESEL dicen qué vehículo es, no qué pieza es.
     pieza = {w for w in nucleo if w in PALABRAS_NO_MODELO and w not in PALABRAS_DE_CONTEXTO}
+    # «TAPA TRASERA» y «TAPA DELANTERA» del motor son lugares, aunque TRASERA y DELANTERA solas
+    # sean una posición (un amortiguador trasero): «JTA TAPA TRASERA FIAT FIRE 16V» no es la
+    # junta de tapa de válvulas del Fire, y salía limpia contra ella.
+    # Con las abreviaturas de IMPERIAL («TAPA TRASE.», «TAPA DELAN.», «TAPA DEL.») y sin
+    # confundir la preposición: «TAPA DEL CARTER» no es la tapa delantera.
+    if re.search(r"\bTAPA\s+(TRAS\w*|POST\w*)", limpio):
+        pieza.add("TAPATRASERA")
+    if re.search(r"\bTAPA\s+(DELANT\w*|DELAN\w*|DEL\.|FRONTAL)", limpio):
+        pieza.add("TAPADELANTERA")
+    # La tapa delantera del block es la de la distribución: «TAPA BLOCK LADO DIST.» de Taranto
+    # es la «TAPA DELAN. BLOCK» de Imperial. Se marcan juntas para que no se lean como dos
+    # lugares distintos.
+    if "TAPA" in pieza and ("TAPADELANTERA" in pieza or "DISTRIBUCION" in pieza):
+        pieza.update(("TAPADELANTERA", "DISTRIBUCION"))
     # JL escribe «JUNTAS FIAT TEMPRA WEBER» y «JUNTAS DODGE 1500 STROMBERG» sin decir
     # «carburador»: la marca del carburador lo dice. Sin esto se emparejaban con juntas de tapa
     # de cilindros del mismo auto. CARTER no cuenta acá: también es la junta de cárter.
@@ -2115,6 +2129,8 @@ _LUGARES_DE_LA_PIEZA = {
     # «JTA LATERAL BOTADORES» y «JTA LATERAL T.V.» son dos tapas distintas del motor. (CAJA no
     # entra: está entre las palabras que no cuentan, por «caja x 10 unidades».)
     "BOTADORES",
+    # Ver «TAPA TRASERA» en _firma_armada().
+    "TAPATRASERA", "TAPADELANTERA",
 }
 
 # Ver «la marca sola no alcanza» en firmas_compatibles().

@@ -1276,6 +1276,11 @@ Administrar → Mantenimiento.
             # 🪭 LOS ABANICOS: un producto con varios candidatos distintos en otra lista. Se
             # eligen a mano, de a un producto: ver abanicos_para_elegir().
             _abanicos = abanicos_para_elegir(limpias, sospechosas)
+            # Primero los fáciles: los que ya tienen una sugerida (ver pieza_sugerida_del_abanico())
+            # y, entre esos, los de menos opciones. Antes iban primero los de más candidatos, que
+            # son justo los más difíciles, y el avance se sentía nulo.
+            _abanicos.sort(key=lambda a: (pieza_sugerida_del_abanico(a) is None,
+                                          len(candidatos_por_pieza(a))))
             if _abanicos:
                 st.markdown(f"**🪭 Elegí cuál es la equivalente** — {len(_abanicos)} producto(s)")
                 explicar(
@@ -1288,7 +1293,9 @@ Administrar → Mantenimiento.
                     "material o espesor); si el producto dice su espesor, se aprueban solo las "
                     "de ese espesor. Marcá la que es la misma pieza y tildá «Ya lo miré» para "
                     "descartar las demás. Si no tildás, solo se aprueba la marcada y el resto "
-                    "queda para después."
+                    "queda para después.\n\n"
+                    "La marcada con ⭐ viene ya elegida: es la que mejor coincide —más modelo, "
+                    "motor y cilindrada en común— y le gana a todas las demás. Si no es, sacala."
                 )
                 _por_pag_ab = 5
                 _pags_ab = (len(_abanicos) - 1) // _por_pag_ab + 1
@@ -1311,7 +1318,12 @@ Administrar → Mantenimiento.
                                 f"{_f[f'cod_{_lado_o}']}"
                                 + (f" (+{len(_filas_b) - 1} variantes)" if len(_filas_b) > 1 else "")
                                 + f" — {(_f.get(f'desc_{_lado_o}') or '')[:80]}")
+                        _sugerida_ab = pieza_sugerida_del_abanico(_ab)
+                        if _sugerida_ab in _opciones_ab:
+                            _opciones_ab[_sugerida_ab] = "⭐ " + _opciones_ab[_sugerida_ab]
                         st.multiselect("Las que son la misma pieza:", list(_opciones_ab),
+                                       default=[_sugerida_ab] if _sugerida_ab in _opciones_ab
+                                       else [],
                                        format_func=lambda k, o=_opciones_ab: o[k],
                                        key=f"ab_sel_{_prod['id']}_{_ab['marca_otra']}")
                         st.checkbox("Ya lo miré: las que no marqué no son",

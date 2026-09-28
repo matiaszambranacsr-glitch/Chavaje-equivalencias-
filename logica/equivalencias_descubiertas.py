@@ -1829,6 +1829,18 @@ def candidatos_por_pieza(abanico):
     return sorted(grupos.items(), key=lambda g: -max(f.get("confianza", 0) for f in g[1]))
 
 
+def pieza_sugerida_del_abanico(abanico):
+    """La opción del abanico que conviene traer ya elegida, o None.
+
+    Solo cuando hay UNA que le gana a todas: la que el análisis dejó limpia (55 o más) y todas
+    las demás en revisión. Es la que mejor coincide en modelo, motor y cilindrada (ver
+    fuerza_de_la_coincidencia()); si empatan dos, no se sugiere ninguna."""
+    grupos = candidatos_por_pieza(abanico)
+    limpias = [base for base, filas in grupos
+               if max(f.get("confianza", 0) for f in filas) >= 55]
+    return limpias[0] if len(limpias) == 1 else None
+
+
 def parecidos_de_varios(rechazados, candidatas, tope=60):
     """Los parecidos de varios rechazos juntos, agrupados por motivo, para la pantalla:
     [{"motivo", "clave_motivo", "ejemplo", "filas"}]. Un par se ofrece una sola vez aunque se
