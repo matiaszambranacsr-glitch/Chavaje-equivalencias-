@@ -4895,6 +4895,24 @@ número de fábrica»), en vez de caer en «Sin alarma puntual».
 - **El aviso 🔢 solo en los unidos por un número**. Los pares entre dos proveedores que quedan
   cortos dicen «🤏 Las descripciones se parecen, pero no alcanza».
 
+### 🚌 Ómnibus y tractores como números de fábrica; variantes de material; medidas de verdad
+
+- **Más modelos que estaban como números de fábrica**: los ómnibus Mercedes (OH1115, OHL1320,
+  OHL355) y los modelos escritos marca+número (DEERE730, DEERE3350, VW1500, MB3500). Con 3 o 4
+  cifras, para no tocar números reales como «BENZ312015220». Ninguno de los códigos de
+  proveedor tiene esas formas. 21 vínculos que estaban limpios pasan a 🧯.
+- **La misma pieza en otro material o espesor no es un código ambiguo**: Illinois lista «MEDIA
+  LUNA TAPA DE VALVULAS (SINTETICO)» y «(SILICONA)», o la junta de bomba de nafta de 0,8 y de
+  1,6 mm, y las dos citan el número de la pieza. Tampoco los juegos del mismo motor de distinto
+  tipo (descarbonización, inferior, «sin TC»): el análisis de cada par ya descarta el tipo que
+  no es.
+- **Un código con forma de medida no se aprueba sin mirar**: «Materiales para junta CORCHO Y
+  GOMA» contra «800MM.X600MM» llegaba a 65. Ahora queda en revisión.
+- **Y la alarma «parece una medida» ya no marca números reales**: el número tiene que estar
+  suelto y tener un tamaño que la unidad admita. «E0NN6051CC» (Ford), «BI0113MM» (Magneti
+  Marelli pega MM al final), «1920LT» y «1525KG» (Peugeot/Citroën) y «19208W» dejaron de
+  perder 35 puntos; «1600CC», «24V» y «700MM.X470MM» se siguen marcando.
+
 ## Una firma de foto podía ser un programa
 
 Las firmas visuales de las fotos se guardan con `pickle`, y `pickle` **no es un formato de

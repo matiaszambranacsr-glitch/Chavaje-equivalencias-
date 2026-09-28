@@ -393,9 +393,17 @@ def codigo_sospechoso(codigo, descripcion=""):
         # cambio, solo cuentan si el código ES el número y nada más ("24V", "1.6W"): una V o una
         # W al final es de lo más común en códigos de verdad —MD-135V, AB-100V, XW-25W— y
         # marcarlos mandaba a revisión manual vínculos que estaban perfectos.
-        if re.search(r"\d+\s*(MM|CM|CC|ML|KG|GR|LTS?)\b", texto, re.I):
-            return True, f"«{texto}» parece una medida o especificación"
-        if re.fullmatch(r"\d+(?:[.,]\d+)?\s*[VW]", texto.strip(), re.I):
+        # El número tiene que estar SUELTO —no pegado a letras— y tener un tamaño que la unidad
+        # admita. Sin eso se marcaban números de fábrica de verdad: «E0NN6051CC» (Ford),
+        # «BI0113MM» (Magneti Marelli pega MM al final), «1920LT» (Peugeot: nadie vende 1920
+        # litros de nada). 1.500 cc o 1.200 mm sí; 1.920 litros no.
+        _m_unidad = re.search(r"(?<![A-Z\d])(\d+)\s*(MM|CM|CC|ML|KG|GR|LTS?)\b", texto, re.I)
+        if _m_unidad:
+            _cifras = len(_m_unidad.group(1).lstrip("0") or "0")
+            _tope = {"LT": 3, "LTS": 3, "KG": 3}.get(_m_unidad.group(2).upper(), 4)
+            if _cifras <= _tope:
+                return True, f"«{texto}» parece una medida o especificación"
+        if re.fullmatch(r"\d{1,4}(?:[.,]\d+)?\s*[VW]", texto.strip(), re.I):
             return True, f"«{texto}» parece una especificación eléctrica, no un código"
         if ("Ø" in texto or '"' in texto or "″" in texto) and not _queda_codigo_sin_la_medida(
                 r"[Ø\"″]|\d+\s*/\s*\d+|\d+[.,]\d+"):

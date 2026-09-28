@@ -302,9 +302,17 @@ def codigo_sospechoso(codigo, descripcion=""):
         # cambio, solo cuentan si el código ES el número y nada más ("24V", "1.6W"): una V o una
         # W al final es de lo más común en códigos de verdad —MD-135V, AB-100V, XW-25W— y
         # marcarlos mandaba a revisión manual vínculos que estaban perfectos.
-        if re.search(r"\d+\s*(MM|CM|CC|ML|KG|GR|LTS?)\b", texto, re.I):
-            return True, f"«{texto}» parece una medida o especificación"
-        if re.fullmatch(r"\d+(?:[.,]\d+)?\s*[VW]", texto.strip(), re.I):
+        # El número tiene que estar SUELTO —no pegado a letras— y tener un tamaño que la unidad
+        # admita. Sin eso se marcaban números de fábrica de verdad: «E0NN6051CC» (Ford),
+        # «BI0113MM» (Magneti Marelli pega MM al final), «1920LT» (Peugeot: nadie vende 1920
+        # litros de nada). 1.500 cc o 1.200 mm sí; 1.920 litros no.
+        _m_unidad = re.search(r"(?<![A-Z\d])(\d+)\s*(MM|CM|CC|ML|KG|GR|LTS?)\b", texto, re.I)
+        if _m_unidad:
+            _cifras = len(_m_unidad.group(1).lstrip("0") or "0")
+            _tope = {"LT": 3, "LTS": 3, "KG": 3}.get(_m_unidad.group(2).upper(), 4)
+            if _cifras <= _tope:
+                return True, f"«{texto}» parece una medida o especificación"
+        if re.fullmatch(r"\d{1,4}(?:[.,]\d+)?\s*[VW]", texto.strip(), re.I):
             return True, f"«{texto}» parece una especificación eléctrica, no un código"
         if ("Ø" in texto or '"' in texto or "″" in texto) and not _queda_codigo_sin_la_medida(
                 r"[Ø\"″]|\d+\s*/\s*\d+|\d+[.,]\d+"):
@@ -696,6 +704,13 @@ def extraer_codigos_de_texto(texto, minimo=6, codigo_propio=None, codigos_conoci
         # MOTOR AP de Volkswagen (AP2000, AP-1600) y los Perkins con punto (1004.4T, 1006.6):
         # también 0 códigos de proveedor con esta forma.
         re.compile(r'^AP-?\d{4}$'),
+        # ÓMNIBUS MERCEDES (OH1115, OHL1320, OHL355) y MODELOS escritos marca+número (DEERE730,
+        # VW1500, MB3500): estaban como números de fábrica uniendo juegos de juntas de
+        # compresor y de caja. Con 3 o 4 cifras: «BENZ312015220» sí es un número de Mercedes.
+        # Ninguno de los códigos de proveedor del catálogo tiene estas formas.
+        re.compile(r'^O[HL]{1,2}\d{3,4}[A-Z]?$'),
+        re.compile(r'^(VW|FIAT|FORD|DODGE|IKA|MB|DEERE|SCANIA|VOLVO|IVECO|DEUTZ|PERKINS'
+                   r'|CUMMINS)-?\d{3,4}$'),
         re.compile(r'^\d{4}\.\d{1,2}[A-Z]{0,2}$'),
         # ABREVIATURAS CON PUNTOS: Cil.Esp.1, Tap.Val.2. No es un código, es la descripción
         # abreviada («Cilindro Especial 1») que quedó suelta como si fuera un número.

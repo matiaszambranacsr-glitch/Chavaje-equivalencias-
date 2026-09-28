@@ -1497,6 +1497,9 @@ def _submarca_del_codigo(codigo):
     return next((m for m in _MARCAS_QUE_SE_PEGAN_AL_CODIGO if limpio.endswith(m)), "")
 
 
+_RE_MATERIAL_O_ESPESOR = re.compile(
+    r"\(?\b(?:SINTETIC[OA]|SILICONA|CORCHO|GOMA|FIBRA|METALIC[OA]|METAL|ACERO|ALUMINIO|MG|"
+    r"GRAFITAD[OA]|MLS|ESP(?:ESOR)?\.?\s*\(?\d+(?:[.,]\d+)?\s*MM\)?|\d+(?:[.,]\d+)?\s*MM)\b\)?")
 _RE_ES_ORIGINAL = re.compile(r"\(?\b(?:PRODUCTO\s+)?ORIGINAL\b\)?")
 
 
@@ -1542,6 +1545,20 @@ def _dos_que_citan_el_mismo_numero(cod_a, desc_a, cod_b, desc_b):
     cabeza_a, cabeza_b = _cabeza_de(desc_a), _cabeza_de(desc_b)
     if cabeza_a and cabeza_b and cabeza_a != cabeza_b:
         return f"piezas distintas: {cabeza_a} y {cabeza_b}"
+    # La misma pieza en otro material o espesor: «MEDIA LUNA TAPA DE VALVULAS (SINTETICO)» y
+    # «(SILICONA)», «BOMBA NAFTA ESPESOR (0,8MM)» y «(1,6MM)». Illinois las lista por separado
+    # y las dos citan el número de la pieza.
+    def _sin_variante(texto, codigo):
+        texto = _RE_MATERIAL_O_ESPESOR.sub(" ", _sin_codigos(texto, codigo))
+        return " ".join(texto.split())
+    if ta and _sin_variante(ta, cod_a) == _sin_variante(tb, cod_b):
+        return "la misma pieza en otro material o espesor"
+    # Juegos del mismo motor de distinto tipo —descarbonización, inferior, completo «sin TC»—:
+    # Illinois les pone a todos la misma lista de números. El par con el tipo que no es lo
+    # descarta el análisis por «juegos distintos»; la ambigüedad no agrega nada.
+    juego_a, juego_b = tipo_de_juego_de_motor(desc_a), tipo_de_juego_de_motor(desc_b)
+    if juego_a and juego_b and juego_a != juego_b:
+        return f"juegos distintos del mismo motor: {juego_a} y {juego_b}"
     return ""
 
 
@@ -2205,6 +2222,20 @@ def _analizar_lote_pendiente(lote, limite=None, desde=0):
         # Las alarmas estructurales (el código no parece un código, un OEM que apunta a dos
         # productos) descuentan fuerte: son problemas de carga, no matices.
         puntaje -= 35 * len([a for a in alarmas if a.startswith(("🚫", "⚠️"))])
+        # Y un código que parece una medida no se aprueba sin mirar, aunque la descripción
+        # coincida entera: «Materiales para junta CORCHO Y GOMA» contra «800MM.X600MM» llegaba
+        # a 65 —100 por la descripción igual, menos 35—. Los retenes y o'rings, donde la medida
+        # ES el código, ya no llevan esta alarma (ver codigo_sospechoso()).
+        # Solo si el código TIENE forma de medida —«700MM.X470MM», «700X470»—: la misma
+        # alarma también la llevan números reales como «1920LT» o «E0NN6051CC» de Peugeot y
+        # Ford, que terminan en letras que parecen unidades, y esos no hay que frenarlos.
+        for _a in alarmas:
+            _m = re.search(r"«([^»]+)»", _a) if _a.startswith("🚫") else None
+            # («BI0113MM» es un Magneti Marelli: esa marca pega MM al final del código.)
+            if _m and re.search(r"\d\s*(MM|CM)\s*[.X]|\d\s*X\s*\d|^\d+\s*(MM|CM)$",
+                                _m.group(1).upper()):
+                puntaje = min(puntaje, 50.0)
+                break
 
         # EL CÓDIGO DE FÁBRICA QUE LAS REGLAS DE HOY YA NO TOMARÍAN. Esto tapa un agujero que
         # abrió la señal de «misma descripción»: el producto OEM se crea copiando la descripción

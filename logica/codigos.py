@@ -688,6 +688,13 @@ def extraer_codigos_de_texto(texto, minimo=6, codigo_propio=None, codigos_conoci
         # MOTOR AP de Volkswagen (AP2000, AP-1600) y los Perkins con punto (1004.4T, 1006.6):
         # también 0 códigos de proveedor con esta forma.
         re.compile(r'^AP-?\d{4}$'),
+        # ÓMNIBUS MERCEDES (OH1115, OHL1320, OHL355) y MODELOS escritos marca+número (DEERE730,
+        # VW1500, MB3500): estaban como números de fábrica uniendo juegos de juntas de
+        # compresor y de caja. Con 3 o 4 cifras: «BENZ312015220» sí es un número de Mercedes.
+        # Ninguno de los códigos de proveedor del catálogo tiene estas formas.
+        re.compile(r'^O[HL]{1,2}\d{3,4}[A-Z]?$'),
+        re.compile(r'^(VW|FIAT|FORD|DODGE|IKA|MB|DEERE|SCANIA|VOLVO|IVECO|DEUTZ|PERKINS'
+                   r'|CUMMINS)-?\d{3,4}$'),
         re.compile(r'^\d{4}\.\d{1,2}[A-Z]{0,2}$'),
         # ABREVIATURAS CON PUNTOS: Cil.Esp.1, Tap.Val.2. No es un código, es la descripción
         # abreviada («Cilindro Especial 1») que quedó suelta como si fuera un número.
