@@ -5083,6 +5083,21 @@ hubieran castigado.
 
 La cola queda en 18.300 limpias, 9.558 para revisar y 465 relacionadas.
 
+### 🔍 Tres lecturas que confundían piezas
+
+De otra muestra de 50 limpias entre proveedores:
+
+- **«NEW», «NUEVO» y «NUEVA» no son modelos.** «Jgo.Jta.Tapa Cil. SUBARU NEW LEONE» y una junta de
+  «VOLKSWAGEN ... NEW BEETLE» tenían un «modelo en común», y eso salteaba el control de autos
+  distintos.
+- **«4 CIL.» no es la tapa de cilindros.** «Junta Tapa de Válvulas M.W.M. CHEV S10 TURBO 4 CIL.»
+  quedaba como junta de tapa de CILINDROS y concordaba con la de la tapa de cilindros del mismo
+  motor. La cantidad de cilindros se sigue leyendo, pero ya no suma palabras a la pieza.
+- **PERKINS y MWM dicen los cilindros en el nombre del motor.** «4.203», «6.354», «4.07T»: el
+  primer número. «Junta Termostato MWM SPRINT 4.07» concordaba con «JTA BASE.TERM. MWM SPRINT 6 C.».
+
+13 vínculos de la cola real pasan a revisión, todos con el error a la vista.
+
 ## Una firma de foto podía ser un programa
 
 Las firmas visuales de las fotos se guardan con `pickle`, y `pickle` **no es un formato de

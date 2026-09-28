@@ -646,6 +646,13 @@ _RE_CANTIDAD_DE_CILINDROS = re.compile(r'\b(\d{1,2})\s*CIL(?:INDROS?|IND|S)?\b')
 # (para 4 y 6 cilindros). Con el punto después de la C, y sin un punto ni un número pegado
 # adelante: «ORING 12x3.5 C.D.ACE» es una medida, no un motor de 5 cilindros.
 _RE_CILINDROS_CON_C = re.compile(r'(?<![\d.,/X])((?:\d/)*\d)\s*C\.(?!\w)')
+# Y los motores que lo dicen en el nombre: en PERKINS y MWM el primer número es la cantidad de
+# cilindros —«4.203», «6.354», «4.07T», «6-305»—. «Junta Termostato MWM SPRINT 4.07» es de
+# cuatro cilindros, y concordaba con «JTA BASE.TERM. MWM SPRINT 6 C.». Solo en esas marcas: en
+# otra, «4.10» puede ser cualquier cosa. Con dos o tres cifras después, que «2.8» es la
+# cilindrada.
+_RE_MOTOR_QUE_DICE_SUS_CILINDROS = re.compile(r'\bPERKINS\b|\bM\W?W\W?M\b')
+_RE_CILINDROS_EN_EL_MOTOR = re.compile(r'(?<![\d.,])([2-8])[.\-]\d{2,3}T?(?![\d.,])')
 
 _MARCAS_DE_CARBURADOR = {"WEBER", "SOLEX", "HOLLEY", "STROMBERG", "ZENITH", "CARESA", "BROSOL",
                          "GALILEO", "IAVA", "EIES", "CARTER", "MOTORCRAFT", "ROCHESTER",
@@ -1396,6 +1403,9 @@ _PALABRAS_QUE_NO_SON_MODELOS = frozenset({
     "FINO", "GRAF", "BCA", "DIAMETRO", "ANCHO",
     # «Blue HDI», «BlueMotion»: tecnología, no un auto.
     "BLUE",
+    # «NEW LEONE», «NEW BEETLE», «UNO NUEVO»: la versión, no el auto. Como «modelo en común»
+    # unía una junta de Subaru con una de Volkswagen y salteaba el control de marcas distintas.
+    "NEW", "NUEVO", "NUEVA",
 })
 
 
@@ -1834,7 +1844,11 @@ def _firma_armada(descripcion, producto_id=None, codigo_clean=None):
     # Honda Fit «coincidía en LAMBDA, LARGO, SONDA, CABLE» con una de Ford Zetec.
     limpio = _RE_LARGO_DE_CABLE.sub(" ", limpio)
     limpio = _RE_MODELO_CON_LETRA_Y_MAX.sub(r"\1MAX", limpio)
-    palabras = [w for w in re.split(r"[^A-Z0-9./]+", limpio) if w]
+    # «4 CIL.» es la cantidad de cilindros (se lee aparte, ver "cilindros"), no la tapa de
+    # cilindros: «Junta Tapa de Válvulas M.W.M. CHEV S10 TURBO 4 CIL.» quedaba como junta de
+    # tapa de CILINDROS y concordaba con la de la tapa de cilindros del mismo motor.
+    palabras = [w for w in re.split(r"[^A-Z0-9./]+", _RE_CANTIDAD_DE_CILINDROS.sub(" ", limpio))
+                if w]
 
     familia = clasificar_repuesto(texto)
     marca_auto = next((mv for mv in MARCAS_VEHICULO if f" {mv} " in f" {limpio} "), None)
@@ -2045,6 +2059,8 @@ def _firma_armada(descripcion, producto_id=None, codigo_clean=None):
                           _RE_CANTIDAD_DE_CILINDROS.findall(limpio)
                           + [x for grupo in _RE_CILINDROS_CON_C.findall(limpio)
                              for x in grupo.split("/")]
+                          + (_RE_CILINDROS_EN_EL_MOTOR.findall(limpio)
+                             if _RE_MOTOR_QUE_DICE_SUS_CILINDROS.search(limpio) else [])
                           if 1 <= int(n) <= 16},
             "bujia": tipo_de_bujia(texto),
             "siglas": siglas, "marca_auto": marca_auto, "posicion": posicion,
