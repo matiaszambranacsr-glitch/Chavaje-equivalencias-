@@ -1632,6 +1632,35 @@ def _numero_de_un_componente(numero, cod, desc):
     return ""
 
 
+def _descripciones_mellizas(desc_a, cod_a, desc_b, cod_b):
+    """¿Dos descripciones de la MISMA lista dicen lo mismo salvo el código?
+
+    FISPA vende lo suyo y lo de LUCAS con la misma descripción, y el número de fábrica lo trae
+    una sola de las dos filas: «REGULADORES DE PRESIo N 16004 FIAT Brava 1 6 16v» y «REGULADOR
+    DE PRESION LEICP003 FIAT Brava 1 6 16v». La del mellizo quedaba en 50 puntos y sin ningún
+    aviso —345 pares de la cola real—, porque la palabra rota y el plural hacían que las
+    descripciones «no concordaran». Se comparan las palabras sin los códigos, sin «ORIGINAL» y
+    sin la S final: 3 de cada 4 en común alcanza."""
+    if not desc_a or not desc_b:
+        return False
+    # De DOS marcas: dos productos de LUCAS con casi la misma descripción no son mellizos, son
+    # dos versiones —dos motores de arranque para los mismos autos— y justamente la duda que
+    # marca «el código apunta a más de un producto».
+    sub_a, sub_b = _submarca_del_codigo(cod_a), _submarca_del_codigo(cod_b)
+    if not sub_a or not sub_b or sub_a == sub_b:
+        return False
+
+    def _palabras(desc, cod):
+        limpio = sanitizar(cod or "")
+        texto = _RE_ES_ORIGINAL.sub(" ", normalizar_texto(desc))
+        return {w.rstrip("S") for w in re.split(r"[^A-Z0-9]+", texto)
+                if len(w) >= 2 and not (len(sanitizar(w)) >= 3 and sanitizar(w) in limpio)}
+    pa, pb = _palabras(desc_a, cod_a), _palabras(desc_b, cod_b)
+    if len(pa) < 4 or len(pb) < 4:
+        return False
+    return len(pa & pb) / len(pa | pb) >= 0.75
+
+
 def pieza_para_el_abanico(codigo, descripcion):
     """Qué cuenta como UNA opción del abanico. Las variantes de un código son una sola
     (codigo_base_sin_variante(): «TC-882-MG 1M» y «TC-882-20» son la misma junta), y también
@@ -1969,6 +1998,11 @@ def _analizar_lote_pendiente(lote, limite=None, desde=0):
             return (f"Es la misma pieza que «{origen}» —la fila que trajo este número de "
                     "fábrica— en otra medida o material, así que la respalda la misma fila "
                     "de la lista del proveedor")
+        if _descripciones_mellizas(descripcion_de.get(origen), origen,
+                                   descripcion_de.get(cod_propio), cod_propio):
+            return (f"Es el mellizo de «{origen}» —la fila que trajo este número de fábrica—: "
+                    "la misma descripción con otro código, como vende FISPA lo suyo y lo de "
+                    "LUCAS")
         return ""
 
     # La alarma de ambigüedad no le corresponde al hermano que ES una variante del origen:
@@ -2254,6 +2288,11 @@ def _analizar_lote_pendiente(lote, limite=None, desde=0):
         f["veredicto"] = veredicto
 
         puntaje = max(0.0, min(100.0, puntaje))
+        # En revisión y sin ningún aviso, la pantalla no tenía cómo decir por qué: quedaba en
+        # «Sin alarma puntual». Casi siempre es esto.
+        if puntaje < 55 and not alarmas:
+            alarmas.append("🔢 Solo los une el número de fábrica: las descripciones no dicen lo "
+                           "mismo, y el número solo no alcanza para aprobarlo sin mirar")
 
         f["alarmas"] = alarmas
         f["confianza"] = puntaje

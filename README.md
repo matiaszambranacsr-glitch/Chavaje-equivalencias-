@@ -4862,6 +4862,25 @@ quedan vetados; 30 que estaban limpios pasan a descartarse, y 19 sondas que el a
 —porque competían con las de otro largo— pasan a limpias (Gol/Fox con Gol Trend/Fox, Honda
 Fit con Honda Fit, Berlingo con Berlingo).
 
+### 🧬 Los mellizos FISPA/LUCAS que no concordaban, y un motivo para los que no tenían
+
+FISPA vende lo suyo y lo de LUCAS con la misma descripción, y el número de fábrica lo trae una
+sola de las dos filas. El mellizo quedaba en 50 puntos y **sin ningún aviso** cuando las
+descripciones no «concordaban» por una palabra rota o un plural: «REGULADORES DE PRESIo N 16004
+FIAT Brava 1 6 16v» contra «REGULADOR DE PRESION LEICP003 FIAT Brava 1 6 16v».
+
+Ahora se reconocen (`_descripciones_mellizas()`): las mismas palabras sin los códigos, sin
+«ORIGINAL» y sin la S final, en 3 de cada 4. Solo entre **dos marcas** —FISPA y LUCAS—: dos
+productos de LUCAS con casi la misma descripción son dos versiones (dos motores de arranque
+para los mismos autos), que es justamente la duda de «el código apunta a más de un producto».
+Cuentan igual que la variante de la fila de origen: +35. Sobre la cola real, 164 pares pasan a
+limpios —reguladores de presión, ralentís, kits de reparación de bomba, sondas, MAF— y en la
+muestra todos eran mellizos de verdad.
+
+Y **ningún par en revisión queda sin motivo**: los que solo une el número de fábrica —las
+descripciones no dicen lo mismo y el número solo no alcanza— dicen eso («🔢 Solo los une el
+número de fábrica»), en vez de caer en «Sin alarma puntual».
+
 ## Una firma de foto podía ser un programa
 
 Las firmas visuales de las fotos se guardan con `pickle`, y `pickle` **no es un formato de

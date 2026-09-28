@@ -649,7 +649,10 @@ _RE_CILINDROS_CON_C = re.compile(r'(?<![\d.,/X])((?:\d/)*\d)\s*C\.(?!\w)')
 
 _MARCAS_DE_CARBURADOR = {"WEBER", "SOLEX", "HOLLEY", "STROMBERG", "ZENITH", "CARESA", "BROSOL",
                          "GALILEO", "IAVA", "EIES", "CARTER", "MOTORCRAFT", "ROCHESTER",
-                         "AUTOLITE", "DELLORTO"}
+                         "AUTOLITE", "DELLORTO",
+                         # DFV es la brasileña: «JUNTAS CHEV ETTE 1400 DFV Brasil» de JL es de
+                         # carburador, no el cárter del Chevette. MIKUNI y KEIHIN, las japonesas.
+                         "DFV", "MIKUNI", "KEIHIN"}
 
 # BUJÍA DE ENCENDIDO Y BUJÍA DE PRECALENTAMIENTO se llaman igual y no tienen nada que ver: una
 # va en un motor naftero y la otra en un diésel. FISPA vende las de precalentamiento como
