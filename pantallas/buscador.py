@@ -571,11 +571,7 @@ Casi todo lo que edita o borra algo pide la contraseña de administrador la prim
         # la pantalla entera —filtro de marca, tres opciones de distancia apiladas y una
         # casilla— y el resultado quedaba abajo de todo. Las opciones se tocan poco; el título
         # del desplegable dice cuáles están puestas, así un filtro elegido nunca queda escondido.
-        opciones_saltos = {
-            "Solo los directos (más confiable)": 1,
-            "Hasta 3 saltos (recomendado)": 3,
-            "Toda la cadena": None,
-        }
+        opciones_saltos = OPCIONES_DE_SALTOS
         # Una marca que se borró o se fusionó no puede quedar elegida: el selector se rompería.
         if st.session_state.get("marca_filtro_busqueda") not in (None, *lista_marcas):
             st.session_state.pop("marca_filtro_busqueda", None)
@@ -657,9 +653,18 @@ Casi todo lo que edita o borra algo pide la contraseña de administrador la prim
                     res, aviso_cero = buscar_con_variantes_del_cero(
                         clean, marca_filtro, max_saltos,
                         confianza_minima=50 if solo_confiables else None)
+                    # Si se llegó por la variante del cero o por el código de barras, lo que
+                    # sigue (autos, «hay más», contador) va con el código que se encontró: con
+                    # el tipeado no encontraban nada.
+                    _buscada = next((f for f in res or []
+                                     if f.get("Cadena") == "— el buscado"), None)
+                    if _buscada and sanitizar(_buscada["Codigo"]):
+                        clean = sanitizar(_buscada["Codigo"])
                     if res:
                         incrementar_veces_buscado(clean)
-                    else:
+                    elif not existe_el_codigo(clean):
+                        # Sin resultado porque el filtro de marca lo dejó afuera no es «no lo
+                        # tenemos»: no va a la lista de lo que conviene pedir.
                         registrar_busqueda_sin_resultado(codigo_individual)
                     resultados_guardados.append(
                         {"codigo_individual": codigo_individual, "clean": clean, "res": res,
@@ -810,7 +815,9 @@ Casi todo lo que edita o borra algo pide la contraseña de administrador la prim
                         # cada lista cita sus propios códigos de fábrica, esos se encadenan, y con
                         # 3 saltos se ve el proveedor propio y uno más. El resto existe y no se
                         # muestra. Así que se avisa y se ofrece verlo.
-                        _mas, _marcas_mas = equivalentes_mas_alla_del_tope(clean, max_saltos)
+                        _mas, _marcas_mas = equivalentes_mas_alla_del_tope(
+                            clean, max_saltos, marca_filtro,
+                            50 if solo_confiables else None)
                         if _mas:
                             _de_quien = (" de " + ", ".join(_marcas_mas[:4])
                                           + (" y otras" if len(_marcas_mas) > 4 else "")

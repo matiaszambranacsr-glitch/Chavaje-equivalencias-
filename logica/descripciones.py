@@ -4219,7 +4219,10 @@ def buscar_por_texto(texto):
         # sobre un catálogo lleno de rótulas: ninguna descripción dice las dos cosas juntas.
         # Cero resultados es la peor respuesta posible —el de adelante concluye que no hay, y
         # hay— así que es mejor mostrar lo que coincide en parte y que decida la persona.
-        if not filas and len(palabras) >= 2:
+        # Con las palabras que CUENTAN, no con todas las escritas: «QQQZZZ °» son dos palabras
+        # pero una sola útil, y aflojar a «0 coincidencias» devolvía 200 productos cualquiera
+        # (lo encontró la revisión independiente del buscador). Nunca se pide menos de una.
+        if not filas and utiles >= 2 and minimo > 1:
             c.execute(query, params + params + [minimo - 1] + _codigos_escritos)
             filas = filas_a_listas(c)
 

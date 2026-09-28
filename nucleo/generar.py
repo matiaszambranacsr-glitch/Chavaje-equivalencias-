@@ -224,6 +224,7 @@ def adaptar_a_cursor(texto, nombre):
     texto = _re.sub(r'\bc\.execute\(', 'cur.execute(', texto)
     texto = _re.sub(r'\bc\.fetchall\(\)', 'cur.fetchall()', texto)
     texto = _re.sub(r'\bfilas_a_listas\(c\)', 'filas_a_listas(cur)', texto)
+    texto = _re.sub(r'(?<!def )\bbuscar_por_codigo\((?!cur)', 'buscar_por_codigo(cur, ', texto)
     return texto
 
 CABECERA_EQ = '''"""La búsqueda de equivalencias: el SQL recursivo que encadena saltos entre proveedores.
@@ -305,6 +306,8 @@ cuerpo = "\n\n\n".join([
     # nombrarla tumba la búsqueda entera. Ver campo_opcional_de_producto().
     BLOQUES["_columnas_que_tiene_productos"],
     BLOQUES["campo_opcional_de_producto"],
+    # El patrón de los códigos de motor que la búsqueda no usa como puente.
+    BLOQUES["GLOB_DE_MOTOR_CON_INDICE"],
     (comentario_previo("buscar_por_codigo") + "\n" if comentario_previo("buscar_por_codigo") else "")
     + adaptar_a_cursor(BLOQUES["buscar_por_codigo"], "buscar_por_codigo"),
     adaptar_a_cursor(BLOQUES["equivalentes_mas_alla_del_tope"], "equivalentes_mas_alla_del_tope"),

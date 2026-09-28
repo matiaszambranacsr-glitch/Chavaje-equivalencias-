@@ -135,6 +135,9 @@ def campo_opcional_de_producto(cursor, columna, alias):
     return f'NULL AS "{alias}"'
 
 
+GLOB_DE_MOTOR_CON_INDICE = "[A-Z][0-9][A-Z][0-9][0-9][0-9]"
+
+
 def buscar_por_codigo(cur, clean_code, marca_filtro="Todas", max_saltos=None, confianza_minima=None):
     """Busca un código y todo lo que esté encadenado con él.
 
@@ -197,6 +200,20 @@ def buscar_por_codigo(cur, clean_code, marca_filtro="Todas", max_saltos=None, co
     # f-string para poder meter la columna opcional del fabricante. Las llaves que SQLite
     # usa no existen en esta consulta, así que no hay nada que escapar.
     _fabricante = campo_opcional_de_producto(cur, "marca_repuesto", "Fabricante")
+    # DOS CORTES MÁS, de la revisión independiente del buscador:
+    #  · la rama por código va con «<=» y no «<»: no suma saltos, así que el gemelo de un
+    #    producto que está justo en el tope también entra. Con «Solo directos», la bujía
+    #    TARANTO BKR6EZ —el mismo número que cita la FISPA LSP6R03LUCAS— no salía, y la pantalla
+    #    decía «ningún otro proveedor lo tiene», que era falso.
+    #  · no se sigue de largo por un código de FÁBRICA con forma de motor + índice (K4M700,
+    #    F4R770, G9U630): lo citan piezas de familias distintas —una bomba de agua y una válvula
+    #    reguladora— y como puente las juntaba. Buscando el motor paso a paso 10012FISPA salía
+    #    una bomba de agua Mitsubishi «a 2 saltos, razonable». Si lo que se busca ES ese código,
+    #    se muestra igual lo que lo cita.
+    _no_es_puente = f"""(re.saltos = 0 OR NOT EXISTS (
+            SELECT 1 FROM productos px JOIN marcas mx ON mx.id = px.marca_id
+            WHERE px.id = re.id AND mx.tipo = 'OEM'
+              AND px.codigo_clean GLOB '{GLOB_DE_MOTOR_CON_INDICE}'))"""
     query = f'''
     WITH RECURSIVE Red(id, saltos, peor, por_codigo) AS (
         SELECT id, 0, 100, 0 FROM productos WHERE codigo_clean = ? OR codigo_barras = ?
@@ -206,16 +223,20 @@ def buscar_por_codigo(cur, clean_code, marca_filtro="Todas", max_saltos=None, co
                MIN(re.peor, COALESCE(eq.confianza, 50)),
                0
         FROM equivalencias eq JOIN Red re ON (eq.producto_a_id = re.id OR eq.producto_b_id = re.id)
-        WHERE re.saltos < ?
+        WHERE re.saltos < ? AND {_no_es_puente}
         UNION
         SELECT p2.id, re.saltos, re.peor, 1
         FROM Red re JOIN productos p1 ON p1.id = re.id
                     JOIN productos p2 ON p2.codigo_clean = p1.codigo_clean AND p2.id <> p1.id
-        WHERE re.saltos < ?
+        WHERE re.saltos <= ? AND {_no_es_puente}
           AND LENGTH(p1.codigo_clean) >= 4
           AND NOT (p1.codigo_clean GLOB '[0-9]*' AND NOT p1.codigo_clean GLOB '*[A-Z]*'
                    AND LENGTH(p1.codigo_clean) < 8)
-    )
+    ),
+    -- El camino que se MUESTRA es el de mejor confianza, y de esos el más corto. Antes la
+    -- confianza salía del mejor camino y la «Cadena» del más corto: un vínculo directo muy
+    -- débil con otro camino sólido de dos saltos se veía «🟢 directo · 🟢 sólida».
+    Mejor(id, pe) AS (SELECT id, MAX(peor) FROM Red GROUP BY id)
     SELECT p.id AS "ID", p.codigo_raw AS "Codigo", p.descripcion AS "Descripcion",
            m.nombre AS "Marca", m.tipo AS "Tipo",
            -- Quién FABRICA la pieza, que es otra cosa que la lista de quién te la vende. En el
@@ -230,7 +251,8 @@ def buscar_por_codigo(cur, clean_code, marca_filtro="Todas", max_saltos=None, co
            m.url_ficha_template AS "_template", MIN(r.saltos) AS "_saltos",
            MAX(r.peor) AS "_peor",
            MIN(r.por_codigo) AS "_por_codigo"
-    FROM Red r JOIN productos p ON p.id = r.id JOIN marcas m ON m.id = p.marca_id
+    FROM Red r JOIN Mejor mj ON mj.id = r.id AND r.peor = mj.pe
+               JOIN productos p ON p.id = r.id JOIN marcas m ON m.id = p.marca_id
     '''
     params = [clean_code, clean_code, tope, tope]
     if marca_filtro and marca_filtro != "Todas":
@@ -251,7 +273,9 @@ def buscar_por_codigo(cur, clean_code, marca_filtro="Todas", max_saltos=None, co
     if confianza_minima:
         query += ' HAVING MIN(r.saltos) = 0 OR MAX(r.peor) >= ?'
         params.append(int(confianza_minima))
-    query += ' ORDER BY MIN(r.saltos), m.tipo, m.nombre LIMIT 400;'
+    # Los códigos de fábrica al final de cada nivel: la pantalla los esconde, y con una red de
+    # más de 400 el tope recortaba proveedores y dejaba códigos de fábrica.
+    query += " ORDER BY MIN(r.saltos), (m.tipo = 'OEM'), m.nombre LIMIT 400;"
 
     cur.execute(query, params)
     res = filas_a_listas(cur)
@@ -307,7 +331,10 @@ def buscar_por_codigo(cur, clean_code, marca_filtro="Todas", max_saltos=None, co
         cur.execute(
             f"""SELECT p.id AS id,
                        (SELECT COUNT(*) FROM equivalencias e
-                         WHERE e.producto_a_id = p.id OR e.producto_b_id = p.id) AS grado
+                         WHERE e.producto_a_id = p.id OR e.producto_b_id = p.id)
+                       -- el mismo número en otra marca también es una salida
+                       + (SELECT COUNT(*) FROM productos p3
+                          WHERE p3.codigo_clean = p.codigo_clean AND p3.id <> p.id) AS grado
                 FROM productos p WHERE p.id IN ({marcadores})""", tanda)
         grado_oem.update({r["id"]: r["grado"] for r in cur.fetchall()})
 
@@ -355,7 +382,8 @@ def buscar_por_codigo(cur, clean_code, marca_filtro="Todas", max_saltos=None, co
     return res
 
 
-def equivalentes_mas_alla_del_tope(cur, clean_code, max_saltos):
+def equivalentes_mas_alla_del_tope(cur, clean_code, max_saltos, marca_filtro="Todas",
+                                   confianza_minima=None):
     """Cuántos equivalentes quedan FUERA del límite de saltos elegido, y de qué marcas.
 
     El límite existe por una buena razón: cuanto más larga la cadena, más chance de que un
@@ -364,31 +392,21 @@ def equivalentes_mas_alla_del_tope(cur, clean_code, max_saltos):
     uno más — el resto queda invisible sin que nada lo diga. Visto desde el mostrador es igual a
     «no me relaciona los otros proveedores».
 
-    Así que no se cambia el límite: se avisa que hay más y se ofrece verlo."""
+    Así que no se cambia el límite: se avisa que hay más y se ofrece verlo.
+
+    Es la DIFERENCIA entre la misma búsqueda sin tope y la que se muestra, con las mismas
+    opciones (marca, confianza) y sin los códigos de fábrica, que la pantalla esconde. Antes era
+    una consulta aparte que no cortaba los códigos genéricos, no miraba la marca ni la confianza
+    y contaba los de fábrica: «hay 64 más» y con «Toda la cadena» no aparecía ninguno (lo
+    encontró la revisión independiente del buscador)."""
     if not clean_code or not max_saltos:
         return 0, []
-    consulta = """
-    WITH RECURSIVE Red(id, saltos) AS (
-        SELECT id, 0 FROM productos WHERE codigo_clean = ? OR codigo_barras = ?
-        UNION
-        SELECT CASE WHEN eq.producto_a_id = re.id THEN eq.producto_b_id ELSE eq.producto_a_id END,
-               re.saltos + 1
-        FROM equivalencias eq JOIN Red re ON (eq.producto_a_id = re.id OR eq.producto_b_id = re.id)
-        WHERE re.saltos < 12
-        UNION
-        SELECT p2.id, re.saltos
-        FROM Red re JOIN productos p1 ON p1.id = re.id
-                    JOIN productos p2 ON p2.codigo_clean = p1.codigo_clean AND p2.id <> p1.id
-        WHERE re.saltos < 12
-    )
-    SELECT m.nombre AS marca, MIN(r.saltos) AS saltos
-    FROM Red r JOIN productos p ON p.id = r.id JOIN marcas m ON m.id = p.marca_id
-    GROUP BY p.id HAVING MIN(r.saltos) > ? LIMIT 400"""
     try:
-        cur.execute(consulta, (clean_code, clean_code, int(max_saltos)))
-        filas = cur.fetchall()
+        con_tope = {f["ID"] for f in buscar_por_codigo(cur, clean_code, marca_filtro, max_saltos,
+                                                        confianza_minima)}
+        todos = buscar_por_codigo(cur, clean_code, marca_filtro, None, confianza_minima)
     except sqlite3.OperationalError as _err:
         anotar_error("equivalentes_mas_alla_del_tope", _err)
         return 0, []
-    marcas = sorted({f["marca"] for f in filas if f["marca"] != "OEM / FABRICA"})
-    return len(filas), marcas
+    fuera = [f for f in todos if f["ID"] not in con_tope and f.get("Tipo") != "OEM"]
+    return len(fuera), sorted({f["Marca"] for f in fuera})

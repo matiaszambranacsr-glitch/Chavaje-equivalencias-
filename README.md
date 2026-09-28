@@ -5346,6 +5346,34 @@ cambian el trabajo diario:
   no solo de cantidad; 400 fichas grandes podían ocupar más de la mitad de la memoria del
   servidor.
 
+### El buscador, revisado por otra IA
+
+Un revisor independiente (Claude, sin el contexto de la conversación) comparó el buscador contra
+un recorrido de referencia sobre 600 códigos al azar —daba lo mismo— y encontró siete errores en
+los bordes, reproducidos sobre la base real. Corregidos:
+
+1. **Con filtro de marca, el reintento del cero traía otra pieza**: «041064» (una lente de CRI-FA)
+   filtrando por IMPERIAL devolvía el 41064 de IMPERIAL, de Toyota. Ahora el cero se prueba solo si
+   el código no existe en ninguna marca, y eso tampoco se anota como «búsqueda sin resultado».
+2. **El mismo código en otra marca se perdía justo en el tope**: con «Solo directos», la bujía
+   TARANTO BKR6EZ no salía y la pantalla decía que nadie más la tenía. La rama «mismo código» no
+   suma saltos, así que va con `<=`.
+3. **«Hay 64 equivalencias más» y no aparecía ninguna**: contaba códigos de fábrica que la pantalla
+   esconde. Ahora es la diferencia entre la búsqueda sin tope y la que se ve, con las mismas opciones.
+4. **Tocar un código desde otra lista buscaba con toda la cadena**, sin mirar las opciones (38
+   filas en vez de 15). Ahora usa las elegidas (`opciones_de_busqueda_actuales()`).
+5. **Los códigos de motor cargados como de fábrica (K4M700, F4R770) hacían de puente**: buscando un
+   motor paso a paso salía una bomba de agua «a 2 saltos». La búsqueda no sigue por ellos
+   (`GLOB_DE_MOTOR_CON_INDICE`), salvo que sea lo que se buscó.
+6. **La búsqueda por descripción con un símbolo suelto** («QQQZZZ °») devolvía 200 productos
+   cualquiera: aflojaba a «cero palabras».
+7. **La confianza y la cadena mostradas salen del mismo camino**: el de mejor confianza y, de esos,
+   el más corto. Antes se podía ver «🟢 directo · 🟢 sólida» sobre un vínculo directo muy débil.
+
+Y dos menores: los códigos de fábrica van al final de cada nivel (el tope de 400 ya no recorta
+proveedores), y si se llegó por la variante del cero o el código de barras, «le sirve a qué
+autos» y «hay más» usan el código encontrado.
+
 ## 🔗 Revisar sugeridas: primero lo que hay que hacer
 
 Mirado con capturas sobre la base real (15.308 pendientes en 8 listas):

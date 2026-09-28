@@ -433,7 +433,10 @@ def cb_ver_equivalencias(codigo_raw):
     busca sus equivalencias y las deja mostradas arriba, sin tener que copiar el código a mano
     y volver a buscarlo."""
     clean = sanitizar(codigo_raw)
-    res = buscar_por_codigo(clean) if clean else []
+    # Con las opciones elegidas en el buscador (qué tan lejos, sin vínculos flojos): antes se
+    # buscaba con toda la cadena. Ver opciones_de_busqueda_actuales().
+    _saltos, _confianza = opciones_de_busqueda_actuales()
+    res = buscar_por_codigo(clean, "Todas", _saltos, _confianza) if clean else []
     if res:
         incrementar_veces_buscado(clean)
     guardar_busqueda(codigo_raw)
