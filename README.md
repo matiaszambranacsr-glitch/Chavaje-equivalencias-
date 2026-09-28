@@ -5280,6 +5280,31 @@ Medido con un servidor falso: los 96 códigos SKF citados en la base real se ley
 pasada (antes eran hasta 150 por día); con el sitio caído cortó a los 5 pedidos y se pausó una
 hora.
 
+## 📷 Las fotos sobreviven a los reinicios
+
+La copia que se sube a GitHub —con la que arranca la app después de cada reinicio de
+Streamlit Cloud— no lleva las fotos, por peso. Pero borraba también sus LINKS
+(`imagen_url = NULL`), y eso tenía un costo que no se veía: las fotos que trajeron los catálogos
+de fabricante y Mercado Libre se perdían en cada reinicio, y nada las volvía a buscar, porque esos
+códigos ya figuraban como leídos y las tareas como terminadas. La búsqueda por cámara quedaba
+vacía.
+
+- **La copia conserva los links** (`_sacar_las_fotos()`): lo que pesa es la foto guardada
+  adentro, las miniaturas y las firmas, no una dirección.
+- **Al restaurar al arrancar se vuelven a bajar** (`_restaurar_desde_semilla()` prende
+  `fotos_de_internet_pendientes` y reabre las tareas de fotos y firmas). No es repetir por
+  repetir: lo que había se perdió con el disco.
+- **Las fotos de la ficha del proveedor guardan el link de la IMAGEN**, no el de la ficha.
+  Con el de la ficha, sin miniatura el buscador mostraba una foto rota, y volver a bajarla daba
+  «no es una imagen».
+- **Si un link resulta ser una página**, se busca la foto adentro y el link pasa a ser el de la
+  imagen. Cubre las fotos de ficha guardadas antes de este cambio y los links de producto
+  pegados en un Excel.
+
+Probado con un servidor falso: 3 fotos de ficha con el link de la imagen, un link-página
+corregido solo, la copia con los 4 links, y después de restaurarla en una base vacía, las 4
+bajadas de nuevo con su firma para la cámara.
+
 ## 🔒 Seguridad: quién entra, adónde va la copia y qué se pide afuera
 
 La app está publicada en internet y «➡️ Continuar» entra sin contraseña. Revisado entrando

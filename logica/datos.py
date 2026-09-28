@@ -376,6 +376,18 @@ def _restaurar_desde_semilla(conexion):
         origen = sqlite3.connect(semilla)
         origen.backup(conexion)
         origen.close()
+        # La copia no trae las fotos, solo sus links (ver _sacar_las_fotos()): se piden de
+        # nuevo, y se reabren las tareas de fotos y firmas aunque hubieran quedado terminadas.
+        # No es repetir por repetir: lo que había se perdió con el disco.
+        try:
+            conexion.executemany(
+                "INSERT OR REPLACE INTO configuracion (clave, valor) VALUES (?, ?)",
+                [("fotos_de_internet_pendientes", "1"), ("descanso_fotos_de_internet", ""),
+                 ("terminado_fotos", ""), ("descanso_fotos", ""),
+                 ("terminado_firmas", ""), ("descanso_firmas", "")])
+            conexion.commit()
+        except sqlite3.Error as _err:
+            anotar_error("_restaurar_desde_semilla/fotos", _err)
         return True
     except Exception as _err:
         anotar_error("_restaurar_desde_semilla", _err)

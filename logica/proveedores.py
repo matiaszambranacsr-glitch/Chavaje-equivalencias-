@@ -1205,11 +1205,17 @@ def guardar_autos_de_ficha(codigo, nombre_marca, autos, tipo_pieza=""):
     return guardar_aplicaciones(filas, nombre_marca, "ficha del portal", tipo_pieza)
 
 
-def buscar_imagen_en_ficha(url_ficha, tiempo_maximo=12, sesion=None):
+def buscar_imagen_en_ficha(url_ficha, tiempo_maximo=12, sesion=None, con_direccion=False):
     """Busca la foto del producto dentro de la ficha oficial del proveedor. Es la fuente más
     confiable que hay gratis: es la foto de ESE código, puesta por el propio proveedor.
     No existe ninguna base pública y gratuita de fotos por número de parte — la del rubro
-    (TecDoc) es un servicio pago con licencia."""
+    (TecDoc) es un servicio pago con licencia.
+
+    Con con_direccion=True devuelve ((bytes, dirección de la imagen), error): en modo liviano lo
+    que se guarda es el LINK, y tiene que ser el de la imagen, no el de la ficha. Con el de la
+    ficha, el buscador mostraba una foto rota cada vez que faltaba la miniatura —después de
+    cada reinicio, porque la copia no lleva miniaturas— y volver a bajarla daba «no es una
+    imagen»."""
     from urllib.parse import urljoin
     try:
         respuesta = _traer_pagina(url_ficha, tiempo_maximo=tiempo_maximo, sesion=sesion)
@@ -1226,7 +1232,7 @@ def buscar_imagen_en_ficha(url_ficha, tiempo_maximo=12, sesion=None):
         for url_img in candidatas[:6]:
             datos, error = descargar_imagen(url_img)
             if datos and len(datos) > 8000:   # descarta íconos chiquitos
-                return datos, None
+                return ((datos, url_img) if con_direccion else datos), None
         return None, "no encontré una foto de producto en esa ficha"
     except Exception as e:
         anotar_error("buscar_imagen_en_ficha", e)
@@ -1426,17 +1432,39 @@ def bajar_fotos_pendientes(limite=200, progreso=None, hilos=6, liviano=True):
         for r in c.fetchall():
             por_link.setdefault(r["imagen_url"], []).append(r["id"])
 
+    def traer(tarea):
+        datos, error = descargar_imagen(tarea[0])
+        # El link es una PÁGINA y no una imagen: pasa con las fotos de ficha guardadas antes de
+        # que se guardara el link de la imagen, y con links de producto pegados en un Excel. Se
+        # busca la foto adentro, como en la ficha del proveedor (ver buscar_imagen_en_ficha()).
+        if not datos and error and "no devuelve una imagen" in error \
+                and not direccion_interna(tarea[0]):
+            encontrada, _err = buscar_imagen_en_ficha(tarea[0], con_direccion=True)
+            if encontrada:
+                return encontrada, None
+        if datos:
+            return (datos, tarea[0]), None
+        return None, error
+
     resultados = _bajar_en_paralelo(
-        list(por_link.items()), lambda t: descargar_imagen(t[0]), hilos=hilos, progreso=progreso
+        list(por_link.items()), traer, hilos=hilos, progreso=progreso
     )
 
     bajadas, fallidas, por_la_red, rotas = 0, [], [], []
     for (url, pids), datos, error in resultados:
         if datos:
+            datos, url_imagen = datos
             for pid in pids:
                 try:
-                    actualizar_imagen_producto(pid, datos, origen="link", fuente=url,
+                    actualizar_imagen_producto(pid, datos, origen="link", fuente=url_imagen,
                                                liviano=liviano)
+                    if url_imagen != url:
+                        # Salió de adentro de una página: el link de la ficha pasa a ser el de
+                        # la imagen, que es lo que el buscador sabe mostrar.
+                        with db_lock:
+                            c.execute("UPDATE productos SET imagen_url = ? "
+                                      "WHERE id = ? AND imagen_url = ?", (url_imagen, pid, url))
+                            conn.commit()
                     bajadas += 1
                 except Exception as e:
                     anotar_error("bajar_fotos_pendientes", e)
@@ -1530,7 +1558,7 @@ def bajar_fotos_desde_catalogo(marca_id, limite=100, progreso=None, hilos=6, liv
         url_ficha = url_de_la_ficha(plantilla, codigo)
         if not url_ficha:
             return None, "ese código no se puede usar en una dirección"
-        return buscar_imagen_en_ficha(url_ficha, sesion=sesion)
+        return buscar_imagen_en_ficha(url_ficha, sesion=sesion, con_direccion=True)
 
     resultados = _bajar_en_paralelo(pendientes, traer, hilos=hilos, progreso=progreso,
                                     cancelado=cancelado)
@@ -1539,8 +1567,9 @@ def bajar_fotos_desde_catalogo(marca_id, limite=100, progreso=None, hilos=6, liv
     for (pid, codigo), datos, error in resultados:
         url_ficha = url_de_la_ficha(plantilla, codigo)
         if datos:
+            datos, url_imagen = datos
             try:
-                actualizar_imagen_producto(pid, datos, origen="ficha", fuente=url_ficha,
+                actualizar_imagen_producto(pid, datos, origen="ficha", fuente=url_imagen,
                                             liviano=liviano)
                 bajadas += 1
                 bien.append(pid)

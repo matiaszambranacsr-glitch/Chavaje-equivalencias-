@@ -67,8 +67,15 @@ def generar_backup_completo():
 
 
 def _sacar_las_fotos(destino):
-    """Le saca las fotos a una copia recién hecha (ver generar_backup_sin_fotos())."""
-    destino.execute("UPDATE productos SET imagen_url = NULL, imagen_thumb = NULL, "
+    """Le saca las fotos a una copia recién hecha (ver generar_backup_sin_fotos()).
+
+    Los LINKS se quedan: lo que pesa es la foto guardada adentro (data:…), las miniaturas y las
+    firmas, no una dirección de cien letras. Antes se borraba todo, y después de cada reinicio
+    —la copia es con lo que arranca la app— se perdían las fotos que habían traído los
+    catálogos y Mercado Libre, sin que nada las volviera a buscar: esos códigos ya figuraban
+    como leídos. Con el link, se vuelven a bajar solas (ver _restaurar_desde_semilla())."""
+    destino.execute("UPDATE productos SET imagen_url = CASE WHEN imagen_url LIKE 'http%' "
+                    "THEN imagen_url END, imagen_thumb = NULL, "
                     "imagen_orb_blob = NULL, imagen_orb_estado = NULL")
     for _limpieza in ("DELETE FROM producto_fotos",
                       "UPDATE esquemas SET imagen_blob = NULL",
