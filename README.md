@@ -5058,7 +5058,7 @@ análisis reconoce, y una clase de acierto que no veía:
 - **El carburador.** «Juego de juntas para Carburador FIAT 1500 WEBER» y «JUNTAS FIAT 128/1500
   SOLEX» son del mismo auto y de otro carburador. La marca del carburador ya decía que era una
   junta de carburador; ahora, si las dos la dicen y no coincide, es un veto («carburadores
-  distintos»). 15 vínculos de la cola real.
+  distintos»). 12 vínculos de la cola real.
 - **Las válvulas, en la tapa de cilindros.** La junta de un Fire 8V no es la de un Fire 16V, ni
   la de un Captiva 16V la del V6 de 24. Solo en juntas de tapa de cilindros: un sensor o una
   sonda nombran varios motores y dicen las válvulas de algunos, y ahí no se puede concluir nada.
