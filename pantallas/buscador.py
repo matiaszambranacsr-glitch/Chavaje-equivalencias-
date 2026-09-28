@@ -1380,22 +1380,25 @@ Casi todo lo que edita o borra algo pide la contraseña de administrador la prim
                                 st.info("¿Quisiste decir alguno de estos? Tocá el código para ver sus equivalencias:")
                                 mostrar_lista_clickeable(parcial, f"sug_{clean}", limite=12)
     else:
-        with st.expander("🎙️ Buscar por voz"):
-            ayuda(
-                "Grabá diciendo lo que buscás — la IA lo transcribe y lo busca con el buscador de "
-                "siempre. No es un asistente que entienda pedidos complejos, es simplemente hablar "
-                "en vez de tipear."
-            )
-            audio_busqueda = st.audio_input("Grabar:", key="audio_busqueda_voz")
-            if audio_busqueda and st.button("🔍 Transcribir y buscar"):
-                with st.spinner("Transcribiendo..."):
-                    mime_audio = audio_busqueda.type or "audio/wav"
-                    texto_voz, error_voz = transcribir_audio(audio_busqueda.getvalue(), mime_audio)
-                if error_voz:
-                    st.error(error_voz)
-                else:
-                    st.session_state["texto_desde_voz"] = texto_voz
-                    st.rerun()
+        # La voz la transcribe la IA, que se paga por uso: para empleados, como el resto de la
+        # IA de la app. Ver es_empleado_o_abierto().
+        if es_empleado_o_abierto():
+            with st.expander("🎙️ Buscar por voz"):
+                ayuda(
+                    "Grabá diciendo lo que buscás — la IA lo transcribe y lo busca con el buscador de "
+                    "siempre. No es un asistente que entienda pedidos complejos, es simplemente hablar "
+                    "en vez de tipear."
+                )
+                audio_busqueda = st.audio_input("Grabar:", key="audio_busqueda_voz")
+                if audio_busqueda and st.button("🔍 Transcribir y buscar"):
+                    with st.spinner("Transcribiendo..."):
+                        mime_audio = audio_busqueda.type or "audio/wav"
+                        texto_voz, error_voz = transcribir_audio(audio_busqueda.getvalue(), mime_audio)
+                    if error_voz:
+                        st.error(error_voz)
+                    else:
+                        st.session_state["texto_desde_voz"] = texto_voz
+                        st.rerun()
 
         # Precargar el texto transcripto ANTES de crear el widget del form — si se hace después
         # de que ya se dibujó en pantalla, Streamlit tira un error.

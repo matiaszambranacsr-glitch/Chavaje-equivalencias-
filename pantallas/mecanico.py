@@ -60,37 +60,38 @@ if pagina == PAGINAS[7]:
             else:
                 st.warning("No tengo ese código cargado todavía (con ese filtro de fabricante). Podés agregarlo abajo.")
 
-        with st.expander("➕ Agregar / corregir un código"):
-            st.caption("Dejá 'Fabricante' vacío si es un código genérico (P0xxx). Completalo si es específico de una marca (ej: Ford, Toyota).")
-            with st.form("form_dtc", clear_on_submit=True):
-                cd1, cd2, cd3 = st.columns(3)
-                nuevo_codigo = cd1.text_input("Código (ej: P0301)")
-                nuevo_fabricante = cd2.text_input("Fabricante (opcional)", placeholder="Ej: Ford")
-                nuevo_sistema = cd3.text_input("Sistema (ej: Motor, Transmisión)")
-                nueva_desc = st.text_input("Descripción")
-                nuevas_causas = st.text_input("Causas posibles (opcional)")
-                guardar_dtc_btn = st.form_submit_button("💾 Guardar código", type="primary")
-            if guardar_dtc_btn:
-                if not nuevo_codigo.strip() or not nueva_desc.strip():
-                    st.warning("Completá al menos el código y la descripción.")
-                else:
-                    agregar_dtc(nuevo_codigo, nueva_desc, nuevo_sistema, nuevas_causas, nuevo_fabricante)
-                    etiqueta_fab = f" ({nuevo_fabricante.strip()})" if nuevo_fabricante.strip() else " (genérico)"
-                    avisar("success", f"Código {nuevo_codigo.upper()}{etiqueta_fab} guardado.")
-                    st.rerun()
+        if es_empleado_o_abierto():
+            with st.expander("➕ Agregar / corregir un código"):
+                st.caption("Dejá 'Fabricante' vacío si es un código genérico (P0xxx). Completalo si es específico de una marca (ej: Ford, Toyota).")
+                with st.form("form_dtc", clear_on_submit=True):
+                    cd1, cd2, cd3 = st.columns(3)
+                    nuevo_codigo = cd1.text_input("Código (ej: P0301)")
+                    nuevo_fabricante = cd2.text_input("Fabricante (opcional)", placeholder="Ej: Ford")
+                    nuevo_sistema = cd3.text_input("Sistema (ej: Motor, Transmisión)")
+                    nueva_desc = st.text_input("Descripción")
+                    nuevas_causas = st.text_input("Causas posibles (opcional)")
+                    guardar_dtc_btn = st.form_submit_button("💾 Guardar código", type="primary")
+                if guardar_dtc_btn:
+                    if not nuevo_codigo.strip() or not nueva_desc.strip():
+                        st.warning("Completá al menos el código y la descripción.")
+                    else:
+                        agregar_dtc(nuevo_codigo, nueva_desc, nuevo_sistema, nuevas_causas, nuevo_fabricante)
+                        etiqueta_fab = f" ({nuevo_fabricante.strip()})" if nuevo_fabricante.strip() else " (genérico)"
+                        avisar("success", f"Código {nuevo_codigo.upper()}{etiqueta_fab} guardado.")
+                        st.rerun()
 
-        with st.expander("📋 Carga masiva de códigos (pegar texto)"):
-            ayuda(
-                "Un código por línea, formato: `codigo;descripción;sistema;causas;fabricante` "
-                "(sistema, causas y fabricante son opcionales — dejá fabricante vacío para códigos genéricos)."
-            )
-            texto_dtc = st.text_area("Pegá los códigos acá:", height=150, key="dtc_masivo",
-                                      placeholder="P0455;Fuga grande en sistema EVAP;Emisiones;Tapa de nafta, manguera\n"
-                                                   "P1105;Solenoide de presión de combustible;Motor;;Chrysler")
-            if candado('importar códigos de falla', st.button("📥 Importar códigos"), 'importar_c_digos_de_falla'):
-                cargados_dtc = importar_dtc_masivo(texto_dtc)
-                avisar("success", f"Se cargaron/actualizaron {cargados_dtc} código(s).")
-                st.rerun()
+            with st.expander("📋 Carga masiva de códigos (pegar texto)"):
+                ayuda(
+                    "Un código por línea, formato: `codigo;descripción;sistema;causas;fabricante` "
+                    "(sistema, causas y fabricante son opcionales — dejá fabricante vacío para códigos genéricos)."
+                )
+                texto_dtc = st.text_area("Pegá los códigos acá:", height=150, key="dtc_masivo",
+                                          placeholder="P0455;Fuga grande en sistema EVAP;Emisiones;Tapa de nafta, manguera\n"
+                                                       "P1105;Solenoide de presión de combustible;Motor;;Chrysler")
+                if candado('importar códigos de falla', st.button("📥 Importar códigos"), 'importar_c_digos_de_falla'):
+                    cargados_dtc = importar_dtc_masivo(texto_dtc)
+                    avisar("success", f"Se cargaron/actualizaron {cargados_dtc} código(s).")
+                    st.rerun()
 
     # Definidas acá porque las usan las dos vistas de esquemas de más abajo.
     CATEGORIAS_ESQUEMA = [
@@ -234,62 +235,69 @@ if pagina == PAGINAS[7]:
                 # completo está impreso en el papel que el cliente lleva en la guantera. Una
                 # foto, una vez, y la ficha queda cargada con marca, modelo, año, motor y
                 # chasis: de ahí en más la patente sola alcanza.
-                st.markdown("**📷 Cargalo con una foto de la cédula**")
-                explicar(
-                    "Sacale una foto a la cédula verde (o al título) y la app carga la ficha.",
-                    "Es lo que reemplaza a la consulta de dominio, que no existe gratis. Y de "
-                    "paso trae dos datos que ninguna consulta te da: el número de motor y el "
-                    "de chasis, que son los que después dejan buscar por VIN cuando el auto "
-                    "tiene el motor cambiado.\n\nNada se guarda solo: los datos salen a un "
-                    "formulario para que los revises antes de aceptar."
-                )
-                _foto_ced = subir_archivo("Foto de la cédula:", ["png", "jpg", "jpeg"],
-                                           f"cedula_{_todo['patente']}")
-                if st.button("🔎 Leer la cédula", disabled=not archivo_listo(_foto_ced, "foto")):
-                    with st.spinner("Leyendo la cédula..."):
-                        _datos_ced, _err_ced = leer_cedula_por_foto(_foto_ced.getvalue())
-                    if _err_ced:
-                        st.error(_err_ced)
-                    else:
-                        st.session_state["cedula_leida"] = _datos_ced
-                _ced = st.session_state.get("cedula_leida")
-                if _ced:
-                    st.success("Esto leí. Corregí lo que haga falta y guardalo:")
-                    with st.form("form_cedula"):
-                        _cc1, _cc2, _cc3 = cols(3)
-                        _f_dom = _cc1.text_input("Patente", value=_ced.get("dominio") or _pat)
-                        _f_mar = _cc2.text_input("Marca", value=_ced.get("marca") or "")
-                        _f_mod = _cc3.text_input("Modelo", value=_ced.get("modelo") or "")
-                        _cc4, _cc5, _cc6 = cols(3)
-                        _f_anio = _cc4.text_input("Año", value=_ced.get("anio") or "")
-                        _f_mot = _cc5.text_input("N° de motor", value=_ced.get("motor") or "")
-                        _f_vin = _cc6.text_input("N° de chasis (VIN)",
-                                                  value=_ced.get("chasis") or "")
-                        _f_cli = st.text_input("Titular / cliente", value=_ced.get("titular") or "")
-                        if st.form_submit_button("💾 Guardar la ficha", type="primary"):
-                            get_or_create_vehiculo(
-                                _f_dom, cliente_nombre=_f_cli, marca_auto=_f_mar,
-                                modelo_auto=_f_mod, anio=_f_anio, vin=_f_vin)
-                            # El número de motor va aparte, igual que en la ficha de arriba:
-                            # get_or_create_vehiculo() ya tiene ocho parámetros.
-                            if _f_mot.strip():
-                                with db_lock:
-                                    c.execute("""UPDATE vehiculos SET numero_motor = ?
-                                                 WHERE UPPER(patente) = UPPER(?)""",
-                                              (_f_mot.strip(), _f_dom.strip()))
-                                    conn.commit()
-                            st.session_state.pop("cedula_leida", None)
-                            avisar("success", f"Ficha de **{_f_dom}** guardada. Ahora la patente "
-                                              "sola te trae todo.")
-                            st.rerun()
+                if es_empleado_o_abierto():
+                    st.markdown("**📷 Cargalo con una foto de la cédula**")
+                    explicar(
+                        "Sacale una foto a la cédula verde (o al título) y la app carga la ficha.",
+                        "Es lo que reemplaza a la consulta de dominio, que no existe gratis. Y de "
+                        "paso trae dos datos que ninguna consulta te da: el número de motor y el "
+                        "de chasis, que son los que después dejan buscar por VIN cuando el auto "
+                        "tiene el motor cambiado.\n\nNada se guarda solo: los datos salen a un "
+                        "formulario para que los revises antes de aceptar."
+                    )
+                    _foto_ced = subir_archivo("Foto de la cédula:", ["png", "jpg", "jpeg"],
+                                               f"cedula_{_todo['patente']}")
+                    if st.button("🔎 Leer la cédula", disabled=not archivo_listo(_foto_ced, "foto")):
+                        with st.spinner("Leyendo la cédula..."):
+                            _datos_ced, _err_ced = leer_cedula_por_foto(_foto_ced.getvalue())
+                        if _err_ced:
+                            st.error(_err_ced)
+                        else:
+                            st.session_state["cedula_leida"] = _datos_ced
+                    _ced = st.session_state.get("cedula_leida")
+                    if _ced:
+                        st.success("Esto leí. Corregí lo que haga falta y guardalo:")
+                        with st.form("form_cedula"):
+                            _cc1, _cc2, _cc3 = cols(3)
+                            _f_dom = _cc1.text_input("Patente", value=_ced.get("dominio") or _pat)
+                            _f_mar = _cc2.text_input("Marca", value=_ced.get("marca") or "")
+                            _f_mod = _cc3.text_input("Modelo", value=_ced.get("modelo") or "")
+                            _cc4, _cc5, _cc6 = cols(3)
+                            _f_anio = _cc4.text_input("Año", value=_ced.get("anio") or "")
+                            _f_mot = _cc5.text_input("N° de motor", value=_ced.get("motor") or "")
+                            _f_vin = _cc6.text_input("N° de chasis (VIN)",
+                                                      value=_ced.get("chasis") or "")
+                            _f_cli = st.text_input("Titular / cliente", value=_ced.get("titular") or "")
+                            if st.form_submit_button("💾 Guardar la ficha", type="primary"):
+                                get_or_create_vehiculo(
+                                    _f_dom, cliente_nombre=_f_cli, marca_auto=_f_mar,
+                                    modelo_auto=_f_mod, anio=_f_anio, vin=_f_vin)
+                                # El número de motor va aparte, igual que en la ficha de arriba:
+                                # get_or_create_vehiculo() ya tiene ocho parámetros.
+                                if _f_mot.strip():
+                                    with db_lock:
+                                        c.execute("""UPDATE vehiculos SET numero_motor = ?
+                                                     WHERE UPPER(patente) = UPPER(?)""",
+                                                  (_f_mot.strip(), _f_dom.strip()))
+                                        conn.commit()
+                                st.session_state.pop("cedula_leida", None)
+                                avisar("success", f"Ficha de **{_f_dom}** guardada. Ahora la patente "
+                                                  "sola te trae todo.")
+                                st.rerun()
+                else:
+                    st.caption('🔒 Para cargar la ficha de un auto hace falta entrar con contraseña de empleado.')
             else:
                 st.success(
                     f"🚗 **{_v.get('marca_auto') or ''} {_v.get('modelo_auto') or ''}** "
                     f"{_v.get('anio') or ''}"
                     + (f" · {_v['motorizacion']}" if _v.get("motorizacion") else "")
                     + (f" · motor N° {_v['numero_motor']}" if _v.get("numero_motor") else "")
-                    + (f"\n\nCliente: **{_v['cliente_nombre']}**" if _v.get("cliente_nombre") else "")
-                    + (f" · {_v['cliente_telefono']}" if _v.get("cliente_telefono") else "")
+                    # El cliente y su teléfono, solo con contraseña: una patente se adivina, y
+                    # esta sección está abierta para el mostrador. Ver es_empleado_o_abierto().
+                    + (f"\n\nCliente: **{_v['cliente_nombre']}**"
+                       if _v.get("cliente_nombre") and es_empleado_o_abierto() else "")
+                    + (f" · {_v['cliente_telefono']}"
+                       if _v.get("cliente_telefono") and es_empleado_o_abierto() else "")
                 )
                 if _v.get("km_actual"):
                     st.caption(f"Último kilometraje registrado: {_v['km_actual']:,} km")
@@ -386,7 +394,7 @@ if pagina == PAGINAS[7]:
                     )
                     st.dataframe(_todo["por_motor"], width="stretch", hide_index=True)
 
-                if _todo["consultas"]:
+                if _todo["consultas"] and es_empleado_o_abierto():
                     st.markdown("**📞 Lo que este cliente preguntó antes**")
                     st.dataframe(_todo["consultas"], width="stretch", hide_index=True)
 
@@ -493,18 +501,21 @@ if pagina == PAGINAS[7]:
             )
             if fabricantes_cargados:
                 st.dataframe(fabricantes_cargados, width="stretch", hide_index=True)
-            with st.form("form_wmi_admin", clear_on_submit=True):
-                cw1, cw2, cw3 = st.columns(3)
-                nuevo_wmi = cw1.text_input("WMI (3 caracteres)", max_chars=3)
-                nuevo_fabricante = cw2.text_input("Fabricante")
-                nuevo_pais_vin = cw3.text_input("País")
-                if st.form_submit_button("💾 Guardar WMI"):
-                    if len(nuevo_wmi.strip()) != 3 or not nuevo_fabricante.strip():
-                        st.warning("El WMI debe tener 3 caracteres y el fabricante es obligatorio.")
-                    else:
-                        agregar_fabricante_vin(nuevo_wmi, nuevo_fabricante, nuevo_pais_vin)
-                        avisar("success", f"WMI {nuevo_wmi.upper()} guardado.")
-                        st.rerun()
+            if es_empleado_o_abierto():
+                with st.form("form_wmi_admin", clear_on_submit=True):
+                    cw1, cw2, cw3 = st.columns(3)
+                    nuevo_wmi = cw1.text_input("WMI (3 caracteres)", max_chars=3)
+                    nuevo_fabricante = cw2.text_input("Fabricante")
+                    nuevo_pais_vin = cw3.text_input("País")
+                    if st.form_submit_button("💾 Guardar WMI"):
+                        if len(nuevo_wmi.strip()) != 3 or not nuevo_fabricante.strip():
+                            st.warning("El WMI debe tener 3 caracteres y el fabricante es obligatorio.")
+                        else:
+                            agregar_fabricante_vin(nuevo_wmi, nuevo_fabricante, nuevo_pais_vin)
+                            avisar("success", f"WMI {nuevo_wmi.upper()} guardado.")
+                            st.rerun()
+            else:
+                st.caption('🔒 Para cargar fabricantes hace falta entrar con contraseña de empleado.')
 
         modelos_cargados = listar_modelos_vin()
         with st.expander(f"🚗 Modelos aprendidos ({len(modelos_cargados)})"):
@@ -513,7 +524,9 @@ if pagina == PAGINAS[7]:
                 cbm1, cbm2 = st.columns(2)
                 wmi_borrar = cbm1.text_input("WMI a borrar", max_chars=3, key="wmi_borrar_modelo")
                 vds_borrar = cbm2.text_input("Patrón (VDS) a borrar", max_chars=5, key="vds_borrar_modelo")
-                if st.button("🗑️ Borrar ese patrón", disabled=not (wmi_borrar and vds_borrar)):
+                if candado("borrar un modelo aprendido",
+                           st.button("🗑️ Borrar ese patrón", disabled=not (wmi_borrar and vds_borrar)),
+                           "borrar_patron_vin"):
                     if olvidar_modelo_vin(wmi_borrar, vds_borrar):
                         st.success("Patrón borrado.")
                     else:
@@ -536,7 +549,9 @@ if pagina == PAGINAS[7]:
                 cbt1, cbt2 = st.columns(2)
                 wmi_bm = cbt1.text_input("WMI a borrar", max_chars=3, key="wmi_borrar_motor")
                 cod_bm = cbt2.text_input("Código (8ª posición)", max_chars=1, key="cod_borrar_motor")
-                if st.button("🗑️ Borrar ese motor", disabled=not (wmi_bm and cod_bm)):
+                if candado("borrar un motor aprendido",
+                           st.button("🗑️ Borrar ese motor", disabled=not (wmi_bm and cod_bm)),
+                           "borrar_motor_vin"):
                     if olvidar_motor_vin(wmi_bm, cod_bm):
                         st.success("Borrado.")
                     else:
@@ -585,8 +600,9 @@ if pagina == PAGINAS[7]:
                     st.dataframe([{k: v for k, v in f.items() if not k.startswith("_")}
                                   for f in _apl[:50]],
                                  width="stretch", hide_index=True)
-                    if st.button("✅ Cargar esas aplicaciones", type="primary",
-                                  key="btn_aplicar_aplic_desc"):
+                    if es_empleado_o_abierto() and st.button(
+                            "✅ Cargar esas aplicaciones", type="primary",
+                            key="btn_aplicar_aplic_desc"):
                         _n = aplicar_aplicaciones_deducidas(_apl)
                         st.session_state.pop("aplic_deducidas", None)
                         avisar("success", f"Se cargaron {_n} aplicación(es) deducidas.")

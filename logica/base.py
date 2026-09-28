@@ -861,6 +861,13 @@ def hay_claves_configuradas():
         return True      # ante la duda, que pida la contraseña
 
 
+def es_empleado_o_abierto():
+    """Para lo que un invitado no tiene por qué ver ni cambiar dentro de una sección abierta
+    (los datos del cliente, cargar o corregir cosas). Sin ninguna contraseña configurada todo
+    queda abierto, igual que en seccion_permitida()."""
+    return es_operador_o_admin() or not hay_claves_configuradas()
+
+
 def seccion_permitida(nivel, motivo=""):
     """El candado de una SECCIÓN entera: 'empleado' (operador o administrador) o 'admin'.
 

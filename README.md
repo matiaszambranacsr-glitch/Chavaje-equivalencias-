@@ -5293,6 +5293,12 @@ Vehículos y crear vínculos a mano. Solo pedían clave los botones que borran.
   administrador), y «💾 Backup y config» la de administrador. Los avisos de salud tampoco se
   le muestran a quien entró sin contraseña. Si todavía no hay ninguna contraseña configurada
   no se cierra nada —dejaría afuera al dueño—: la sección avisa que está abierta.
+- **Adentro de lo que queda abierto**, el invitado consulta pero no carga ni ve datos de
+  clientes (`es_empleado_o_abierto()`). En Modo Mecánico, buscar por patente ya no muestra el
+  nombre y el teléfono del cliente ni lo que consultó antes —una patente se adivina—; cargar
+  códigos de falla, leer la cédula con IA, guardar la ficha del auto, cargar fabricantes y
+  aplicaciones pide contraseña de empleado, y borrar modelos o motores aprendidos, la de
+  administrador. La búsqueda por voz del Buscador usa IA paga: también para empleados.
 - **La copia a GitHub se sube cifrada** si en los secretos está
   `clave_copia = "una frase larga"` (AES-GCM, clave estirada con PBKDF2; ver
   `cifrar_copia()`). Al arrancar se descifra sola. Sin la frase se sigue subiendo como antes —
