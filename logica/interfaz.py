@@ -799,6 +799,10 @@ HERRAMIENTAS_MANTENIMIENTO = [
      "tuyos muestra al lado —el mismo repuesto en otras marcas—, como prueba a favor.",
      "portal proveedor web autos aplicaciones clave contraseña jl distribuidor varias marcas "
      "relacionar equivalentes alternativas cargar link pegar sin contraseña publico wega"),
+    ("🏭 Catálogos de fabricantes: se leen solos", 0,
+     "SKF, MANN-FILTER y bujías NGK: abre la ficha de cada código que tus listas citan. "
+     "✅ Corre solo en segundo plano.",
+     "catalogo fabricante skf mann ngk bujias filtros automatico internet equivalencias"),
     ("🔤 Vincular dos proveedores por la descripción", 0,
      "Compara dos listas por el texto y propone los que son la misma pieza.",
      "descripcion texto dos proveedores comparar"),

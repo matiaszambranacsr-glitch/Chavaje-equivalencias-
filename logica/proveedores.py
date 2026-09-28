@@ -585,6 +585,253 @@ def leer_fichas_del_portal(marca_id, nombre_marca, cuantos=25, progreso=None, pa
     return resumen
 
 
+# --------------------------------------------------------------------------------------------
+# CATÁLOGOS DE FABRICANTE, SOLOS
+# --------------------------------------------------------------------------------------------
+# Tus listas nombran piezas de fabricantes que no son proveedores tuyos: «BOMBA DE AGUA ... SKF
+# VKPC85304», «BUJIA NAFTA ... NGK= BP5HS», «FILTRO ... MANN W 712/95». Esos fabricantes publican
+# una ficha por código con los números originales y las equivalencias de otras marcas. Si en esa
+# ficha aparece el código de OTRO producto tuyo —un número de fábrica, la misma pieza de otra
+# marca—, es una relación escrita por el fabricante de la pieza.
+#
+# Igual que el portal del proveedor, NO DECIDE NADA SOLO: queda anotado en
+# productos_juntos_en_portal como «CATÁLOGO SKF», suma a favor en evidencia_cruzada(), y los
+# pares que no estaban van a la cola de revisión. Los vetos de siempre los tumban.
+#
+# Solo entran los fabricantes con UNA DIRECCIÓN POR CÓDIGO, verificada con fichas reales que
+# publican los buscadores (el servidor donde se armó esto no llega a esos sitios):
+#   · SKF:          automotive.skf.com/eur/es/product-catalogue/VKMA01250
+#   · MANN-FILTER:  mann-filter.com/en/catalog/international/search-results/product.html/
+#                   w712/95_mann-filter.html  (la barra del código es parte de la dirección)
+#   · NGK (bujías): sparkplug-crossreference.com/convert/NGK_PN/BKR6E, una tabla de
+#                   equivalencias de bujías por código NGK. No es de NGK: la ficha oficial lleva
+#                   un número de stock que no sale del código.
+# Quedaron afuera, a propósito, los que buscan con un formulario o muestran listados por rubro:
+# FRAM, MAHLE, BOSCH, TARANTO, CORVEN, FISPA. Y ILLINOIS, que publica un PDF por juego con las
+# piezas que trae adentro: juntaría cada juego con sus juntas, que no son equivalentes.
+
+_RE_CODIGO_PARA_LA_DIRECCION = re.compile(r"[^A-Za-z0-9/-]")
+
+
+def _codigo_para_la_direccion(codigo, conservar_barra=False):
+    """El código listo para ir adentro de una dirección: sin espacios ni nada raro. Sin «..» y
+    sin barras sueltas al principio, por lo mismo que url_de_la_ficha()."""
+    limpio = _RE_CODIGO_PARA_LA_DIRECCION.sub("", str(codigo or ""))
+    if not conservar_barra:
+        limpio = limpio.replace("/", "")
+    limpio = limpio.strip("/-")
+    return "" if (not limpio or ".." in limpio or "//" in limpio) else limpio
+
+
+CATALOGOS_DE_FABRICANTE = {
+    "SKF": {
+        # Sin letra al final: en «SKF VKMA 02410 A INA 530020310» la A es de lo que sigue.
+        "cita": re.compile(r"\bSKF\b[\s:=.-]*(VK[A-Z]{1,4}\s?\d{4,5})\b"),
+        "url": lambda cod: ("https://automotive.skf.com/eur/es/product-catalogue/"
+                            + _codigo_para_la_direccion(cod).upper()),
+        "sitio": "automotive.skf.com",
+    },
+    "MANN-FILTER": {
+        "cita": re.compile(r"\bMANN(?:[\s-]*FILTER)?\b[\s:=.-]*"
+                           r"([A-Z]{1,3}\s?\d{2,4}(?:/\d{1,3})?(?:\s?[A-Z]{1,2})?)\b"),
+        "url": lambda cod: ("https://www.mann-filter.com/en/catalog/international/search-results/"
+                            "product.html/"
+                            + _codigo_para_la_direccion(cod, conservar_barra=True).lower()
+                            + "_mann-filter.html"),
+        "sitio": "mann-filter.com",
+    },
+    "NGK": {
+        "cita": re.compile(r"\bNGK\b[\s:=.-]*([A-Z]{1,6}\d{1,2}[A-Z]{0,5}(?:-\d{1,2})?)\b"),
+        "url": lambda cod: ("https://www.sparkplug-crossreference.com/convert/NGK_PN/"
+                            + _codigo_para_la_direccion(cod).upper()),
+        "sitio": "sparkplug-crossreference.com",
+    },
+}
+
+# Cuántas fichas de catálogo se leen por día entre todos los fabricantes, y la pausa entre una
+# y otra. Son sitios ajenos: pocas por vez y despacio.
+FICHAS_DE_CATALOGO_POR_DIA = 150
+PAUSA_ENTRE_FICHAS_DE_CATALOGO = 1.5
+# Con más de esto nombrados, la ficha es un listado y no la de una pieza: ver
+# MAXIMO_PRODUCTOS_POR_FICHA. Acá es más alto porque la ficha de un fabricante lista a propósito
+# todos los números originales de la pieza.
+MAXIMO_PRODUCTOS_POR_FICHA_DE_FABRICANTE = 25
+# Si un código lo citan muchos productos, no se juntan todos con todo lo de la ficha.
+MAXIMO_QUE_LO_CITAN = 12
+
+
+def _codigo_citado(codigo):
+    """La forma con que se guarda un código citado: mayúsculas y sin espacios, con la barra."""
+    return re.sub(r"\s+", "", str(codigo or "").upper())
+
+
+def codigos_citados_en_tu_catalogo(nombre_catalogo):
+    """{código: [ids de los productos que lo citan]} para ese fabricante, leyendo las
+    descripciones de toda la base."""
+    patron = CATALOGOS_DE_FABRICANTE[nombre_catalogo]["cita"]
+    salida = {}
+    c.execute("SELECT id, descripcion FROM productos WHERE descripcion LIKE ?",
+              (f"%{nombre_catalogo.split('-')[0]}%",))
+    for fila in c.fetchall():
+        for cod in patron.findall(normalizar_texto(fila["descripcion"] or "")):
+            salida.setdefault(_codigo_citado(cod), []).append(fila["id"])
+    return salida
+
+
+def leer_catalogo_de_fabricante(nombre_catalogo, cuantos=20, pausa=PAUSA_ENTRE_FICHAS_DE_CATALOGO,
+                                progreso=None, sesion=None):
+    """Lee las fichas del fabricante para los códigos que tus descripciones citan y todavía no
+    se leyeron, primero los más citados. Devuelve un resumen como leer_fichas_del_portal().
+
+    De cada ficha salen los productos tuyos que nombra. Se juntan con los que citan el código:
+    «la bomba de FISPA que dice SKF VKPC85304» con el número original que la ficha de SKF lista.
+    La ficha tiene que mostrar el código pedido; si no, no es la ficha (el sitio devolvió la
+    portada o un buscador) y se anota como «sin ficha»."""
+    cat = CATALOGOS_DE_FABRICANTE[nombre_catalogo]
+    portal = f"CATÁLOGO {nombre_catalogo}"
+    resumen = {"leidas": 0, "con_productos": 0, "listados": 0, "sin_ficha": 0, "pares": 0,
+               "nuevos": 0, "lote": "", "error": "", "pendientes": 0}
+    citados = codigos_citados_en_tu_catalogo(nombre_catalogo)
+    c.execute("SELECT codigo FROM fichas_de_catalogo_leidas WHERE catalogo = ?",
+              (nombre_catalogo,))
+    ya = {r[0] for r in c.fetchall()}
+    faltan = sorted((cod for cod in citados if cod not in ya),
+                    key=lambda cod: (-len(set(citados[cod])), cod))
+    resumen["pendientes"] = len(faltan)
+    if not faltan:
+        return resumen
+    if sesion is None:
+        base = requests.Session()
+        base.headers.update({"User-Agent": "Mozilla/5.0 (compatible; EquivalenciasElChavo/1.0)"})
+        sesion = SesionSoloLectura(base, cat["url"]("X1"))
+    pares, leidas, fallas_seguidas = [], [], 0
+    tanda = faltan[:int(cuantos)]
+    for i, cod in enumerate(tanda):
+        url = cat["url"](cod)
+        texto, err = "", None
+        try:
+            r = sesion.get(url, timeout=20)
+            if r.status_code == 404:
+                err = "sin ficha"
+            elif r.status_code >= 400:
+                err = f"respondió {r.status_code}"
+            elif "pdf" in (r.headers.get("Content-Type") or "").lower():
+                import io as _io
+                import pdfplumber
+                with pdfplumber.open(_io.BytesIO(r.content)) as _pdf:
+                    texto = " ".join((pg.extract_text() or "") for pg in _pdf.pages[:5])
+            else:
+                texto = _texto_visible(r.text or "")
+        except PermissionError as e:
+            resumen["error"] = str(e)
+            break
+        except Exception as e:
+            anotar_error("leer_catalogo_de_fabricante", e)
+            err = type(e).__name__
+        if not err and sanitizar(cod) not in sanitizar(texto):
+            err = "sin ficha"
+        if err == "sin ficha":
+            fallas_seguidas = 0
+            resumen["sin_ficha"] += 1
+            leidas.append((nombre_catalogo, cod, None))
+        elif err:
+            # Un error de red o del servidor no es una respuesta: no se anota como leído. Varios
+            # seguidos quieren decir que el sitio está caído o nos está rechazando.
+            fallas_seguidas += 1
+            resumen["sin_ficha"] += 1
+            if fallas_seguidas >= 5:
+                resumen["error"] = f"{fallas_seguidas} fichas seguidas sin poder abrirse: {err}"
+                break
+        else:
+            fallas_seguidas = 0
+            los_que_citan = sorted(set(citados[cod]))[:MAXIMO_QUE_LO_CITAN]
+            nombrados = [pid for pid, _c in productos_nombrados_en_la_pagina(texto, sanitizar(cod))
+                         if pid not in los_que_citan]
+            if len(nombrados) > MAXIMO_PRODUCTOS_POR_FICHA_DE_FABRICANTE:
+                resumen["listados"] += 1
+                nombrados = []
+            elif nombrados:
+                resumen["con_productos"] += 1
+            pares.extend((min(a, b), max(a, b), a) for a in los_que_citan for b in nombrados)
+            leidas.append((nombre_catalogo, cod, len(nombrados)))
+        resumen["leidas"] += 1
+        if progreso:
+            progreso((i + 1) / len(tanda), f"{i + 1} de {len(tanda)}...")
+        if pausa and i + 1 < len(tanda):
+            time.sleep(pausa)
+    with transaccion():
+        c.executemany("""INSERT OR REPLACE INTO fichas_de_catalogo_leidas
+                         (catalogo, codigo, productos_juntos) VALUES (?, ?, ?)""", leidas)
+        c.executemany("""INSERT OR IGNORE INTO productos_juntos_en_portal
+                         (producto_a_id, producto_b_id, portal, producto_origen_id)
+                         VALUES (?, ?, ?, ?)""",
+                      [(a, b, portal, o) for a, b, o in pares])
+    resumen["pares"] = len({(a, b) for a, b, _o in pares})
+    if pares:
+        resumen["lote"] = f"{portal} · {datetime.now():%d/%m %H:%M}"
+        resumen["nuevos"] = guardar_equivalencias_pendientes(
+            [(a, b) for a, b, _o in pares], "catalogo_fabricante", resumen["lote"])
+    return resumen
+
+
+def estado_de_los_catalogos_de_fabricante():
+    """Para la pantalla: por fabricante, cuántos códigos citan tus listas, cuántos se leyeron y
+    cuántos pares salieron. [dict]."""
+    salida = []
+    for nombre, cat in CATALOGOS_DE_FABRICANTE.items():
+        citados = codigos_citados_en_tu_catalogo(nombre)
+        fila = c.execute("""SELECT COUNT(*), SUM(productos_juntos > 0)
+                            FROM fichas_de_catalogo_leidas WHERE catalogo = ?""",
+                         (nombre,)).fetchone()
+        pares = c.execute("SELECT COUNT(*) FROM productos_juntos_en_portal WHERE portal = ?",
+                          (f"CATÁLOGO {nombre}",)).fetchone()[0]
+        salida.append({"Fabricante": nombre, "Sitio": cat["sitio"],
+                       "Códigos citados": len(citados),
+                       "Productos que los citan": len({i for v in citados.values() for i in v}),
+                       "Fichas leídas": fila[0] or 0, "Con productos tuyos": fila[1] or 0,
+                       "Pares": pares,
+                       "Pausado hasta": obtener_config(f"catalogo_pausado_{nombre}", "")})
+    return salida
+
+
+@st.cache_data(ttl=300, show_spinner=False)
+def estado_de_los_catalogos_de_fabricante_guardado():
+    """estado_de_los_catalogos_de_fabricante() con caché: lee las descripciones de toda la base
+    tres veces, y el panel se dibuja en cada toque."""
+    return estado_de_los_catalogos_de_fabricante()
+
+
+def catalogos_de_fabricante_automaticos():
+    """¿Se leen solos? Prendido de fábrica: no hace falta cargar nada, las direcciones son
+    públicas y los códigos salen de tus descripciones. Se apaga en Administrar."""
+    return obtener_config("catalogos_fabricante_automaticos", "1") == "1"
+
+
+def _catalogo_de_fabricante_pausado(nombre):
+    hasta = obtener_config(f"catalogo_pausado_{nombre}", "")
+    return bool(hasta) and hasta > datetime.now().strftime("%Y-%m-%d %H:%M")
+
+
+def tanda_de_catalogos_de_fabricante(cupo):
+    """Una vuelta de la tarea de fondo: lee hasta `cupo` fichas, repartidas entre los
+    fabricantes que no estén pausados. Devuelve cuántas consultó. Si un sitio falla cinco veces
+    seguidas, se pausa un día: seguir golpeándolo no sirve y puede terminar en un bloqueo."""
+    consultadas = 0
+    for nombre in CATALOGOS_DE_FABRICANTE:
+        if consultadas >= cupo:
+            break
+        if _catalogo_de_fabricante_pausado(nombre):
+            continue
+        ceder_al_mostrador()
+        res = leer_catalogo_de_fabricante(nombre, cuantos=min(PRODUCTOS_POR_SUBTANDA,
+                                                              cupo - consultadas))
+        consultadas += res["leidas"]
+        if res["error"]:
+            guardar_config(f"catalogo_pausado_{nombre}",
+                           (datetime.now() + timedelta(days=1)).strftime("%Y-%m-%d %H:%M"))
+    return consultadas
+
+
 def guardar_autos_de_ficha(codigo, nombre_marca, autos, tipo_pieza=""):
     """Guarda como aplicaciones los autos que se leyeron de la ficha del portal."""
     if not autos:
@@ -1089,6 +1336,7 @@ def _cupo_de_hoy(clave, objetivo):
         guardar_config("tanda_fondo_fecha", hoy)
         guardar_config("tanda_fondo_fotos", "0")
         guardar_config("tanda_fondo_equiv", "0")
+        guardar_config("tanda_fondo_catalogos", "0")
     try:
         return max(objetivo - int(obtener_config(clave, "0") or 0), 0)
     except ValueError:
@@ -1347,6 +1595,22 @@ def _trabajo_de_fondo():
                 except Exception as _err:
                     anotar_error("_trabajo_de_fondo/equiv", _err)
 
+        # Los catálogos de fabricante (SKF, NGK, MANN-FILTER): ver
+        # tanda_de_catalogos_de_fabricante(). Si no queda nada por leer —o están todos
+        # pausados—, se da el cupo del día por gastado: si no, la tarea se volvería a largar en
+        # cada toque de pantalla para no hacer nada.
+        if catalogos_de_fabricante_automaticos() and _cupo_de_hoy(
+                "tanda_fondo_catalogos", FICHAS_DE_CATALOGO_POR_DIA) > 0:
+            try:
+                consultadas = tanda_de_catalogos_de_fabricante(
+                    _cupo_de_hoy("tanda_fondo_catalogos", FICHAS_DE_CATALOGO_POR_DIA))
+                _sumar_al_cupo("tanda_fondo_catalogos",
+                               consultadas or FICHAS_DE_CATALOGO_POR_DIA)
+                hizo_algo = hizo_algo or consultadas > 0
+            except Exception as _err:
+                _sumar_al_cupo("tanda_fondo_catalogos", FICHAS_DE_CATALOGO_POR_DIA)
+                anotar_error("_trabajo_de_fondo/catalogos", _err)
+
         if not hizo_algo:
             break       # no queda cupo, o no queda nada pendiente: no tiene sentido girar
     guardar_config("tanda_fondo_ultima", datetime.now().strftime("%Y-%m-%d %H:%M"))
@@ -1432,7 +1696,9 @@ def arrancar_tanda_de_fondo():
             and obtener_config("medidas_pendientes", "") != "1"
             and obtener_config("aplicaciones_pendientes", "") != "1"
             and obtener_config("marcas_repuesto_pendientes", "") != "1"
-            and obtener_config("separacion_pendiente", "") != "1"):
+            and obtener_config("separacion_pendiente", "") != "1"
+            and not (catalogos_de_fabricante_automaticos()
+                     and _cupo_de_hoy("tanda_fondo_catalogos", FICHAS_DE_CATALOGO_POR_DIA) > 0)):
         return False
 
     # El candado se toma ACÁ y no adentro del hilo. Mirar si está tomado y después crear el

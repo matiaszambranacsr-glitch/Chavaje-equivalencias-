@@ -1777,6 +1777,57 @@ if pagina == PAGINAS[3]:
                         st.rerun()
             st.markdown("---")
 
+            st.markdown("**🏭 Catálogos de fabricantes: se leen solos**")
+            explicar(
+                "SKF, MANN-FILTER y las bujías NGK, por los códigos que tus listas citan.",
+                "Tus listas nombran piezas de fabricantes que no son proveedores tuyos: «BOMBA "
+                "DE AGUA … SKF VKPC85304», «BUJIA … NGK= BP5HS», «REF ORIG MANN P 716». Esos "
+                "fabricantes publican una ficha por código con los números originales y las "
+                "equivalencias de otras marcas. La app abre la ficha de cada código citado y, si "
+                "ahí aparece el código de otro producto tuyo, los anota como «el catálogo de SKF "
+                "los muestra juntos».\n\n"
+                "**No decide nada solo**: suma como una prueba a favor, y los pares que no "
+                "estaban van a revisión en su propia lista («CATÁLOGO …»).\n\n"
+                "No hay que cargar nada: las direcciones son públicas. Corre en segundo plano, "
+                f"hasta {FICHAS_DE_CATALOGO_POR_DIA} fichas por día y con pausas. Si un sitio no "
+                "responde cinco veces seguidas, se pausa un día.\n\n"
+                "FRAM, MAHLE, BOSCH, TARANTO y CORVEN no están porque sus catálogos buscan con un "
+                "formulario, sin una dirección por código. Si encontrás el link de la ficha de "
+                "alguno, cargalo arriba en «➕ Cargar un portal»."
+            )
+            _auto_cat = st.toggle("Leerlos solos en segundo plano",
+                                  value=catalogos_de_fabricante_automaticos(),
+                                  key="catalogos_fabricante_toggle")
+            if _auto_cat != catalogos_de_fabricante_automaticos():
+                guardar_config("catalogos_fabricante_automaticos", "1" if _auto_cat else "0")
+                st.rerun()
+            try:
+                st.dataframe(estado_de_los_catalogos_de_fabricante_guardado(),
+                             hide_index=True, width="stretch")
+            except Exception as _err:
+                anotar_error("panel de catálogos de fabricante", _err)
+            if st.button("🏭 Leer una tanda ahora", key="leer_catalogos_ahora"):
+                _barra_c = st.progress(0.0, text="Leyendo catálogos...")
+                _res_c = {"leidas": 0, "pares": 0, "nuevos": 0, "errores": []}
+                for _i_c, _nombre_c in enumerate(CATALOGOS_DE_FABRICANTE):
+                    _barra_c.progress(_i_c / len(CATALOGOS_DE_FABRICANTE),
+                                      text=f"{_nombre_c}...")
+                    _r_c = leer_catalogo_de_fabricante(_nombre_c, cuantos=10)
+                    for _k in ("leidas", "pares", "nuevos"):
+                        _res_c[_k] += _r_c[_k]
+                    if _r_c["error"]:
+                        _res_c["errores"].append(f"{_nombre_c}: {_r_c['error']}")
+                _barra_c.empty()
+                estado_de_los_catalogos_de_fabricante_guardado.clear()
+                invalidar_salud()
+                avisar("success" if not _res_c["errores"] else "warning",
+                       f"Se leyeron {_res_c['leidas']} ficha(s); {_res_c['pares']} par(es) "
+                       f"vistos juntos, {_res_c['nuevos']} nuevos para revisar."
+                       + (" No respondieron: " + "; ".join(_res_c["errores"])
+                          if _res_c["errores"] else ""))
+                st.rerun()
+            st.markdown("---")
+
             st.markdown("**🔤 Vincular dos proveedores por la descripción**")
             explicar(
                 "Para las listas que NO traen el código de fábrica, que son la mayoría.",

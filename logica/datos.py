@@ -969,6 +969,15 @@ def _esquema_gestion(c):
         fecha TEXT DEFAULT (datetime('now')),
         PRIMARY KEY (portal, producto_id)
     )""")
+    # Lo mismo para los catálogos de fabricante (SKF, NGK, MANN-FILTER...), que se leen por el
+    # CÓDIGO citado en tus descripciones y no por un producto tuyo: ver leer_catalogo_de_fabricante().
+    c.execute("""CREATE TABLE IF NOT EXISTS fichas_de_catalogo_leidas (
+        catalogo TEXT NOT NULL,
+        codigo TEXT NOT NULL,
+        productos_juntos INTEGER,
+        fecha TEXT DEFAULT (datetime('now')),
+        PRIMARY KEY (catalogo, codigo)
+    )""")
 
     # Vínculos que llegaron de una lista de proveedor y esperan revisión. Una importación puede
     # generar miles de vínculos de una: si se cargaran solos, un error en la columna de código de

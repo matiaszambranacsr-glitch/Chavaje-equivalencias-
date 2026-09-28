@@ -2919,7 +2919,11 @@ def evidencia_cruzada(id_a, id_b, cuenta_palabras=None, total_descripciones=None
     _portales = _recordado(("portales_ev",), _pares_de_portales).get(
         (min(id_a, id_b), max(id_a, id_b)), [])
     if _portales:
-        a_favor.append(f"🌐 el portal de {', '.join(_portales)} los muestra juntos")
+        # Los catálogos de fabricante se guardan como «CATÁLOGO SKF»: ver
+        # leer_catalogo_de_fabricante().
+        _de = [f"el catálogo de {p.split(' ', 1)[1]}" if p.startswith("CATÁLOGO ")
+               else f"el portal de {p}" for p in _portales]
+        a_favor.append(f"🌐 {', '.join(_de)} los muestra juntos")
 
     if vetos:
         veredicto = "🔴 hay evidencia en contra"

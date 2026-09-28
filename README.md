@@ -5145,6 +5145,41 @@ bomba inyectora «Perkins 1004.4T» deja de concordar con la del «PERKINS 1006�
   color.
 - **Sin el botón «Deploy»** ni el menú de desarrollador (`toolbarMode = "minimal"`).
 
+## 🏭 Catálogos de fabricantes, solos
+
+Tus listas nombran piezas de fabricantes que no son proveedores tuyos: «BOMBA DE AGUA … SKF
+VKPC85304», «BUJIA … NGK= BP5HS», «REF ORIG MANN P 716». En la base real: 402 productos citan 96
+códigos SKF, 105 citan 23 bujías NGK y 72 citan 29 filtros MANN. Esos fabricantes publican una
+ficha por código con los números originales y las equivalencias de otras marcas.
+
+`leer_catalogo_de_fabricante()` abre la ficha de cada código citado —primero los más citados—
+y, si ahí aparece el código de otro producto tuyo, anota el par en `productos_juntos_en_portal`
+como «CATÁLOGO SKF». Es una prueba más a favor en `evidencia_cruzada()` («🌐 el catálogo de SKF
+los muestra juntos»), igual que el portal del proveedor: no decide nada sola, y los pares que no
+estaban van a revisión en su propia lista. La ficha tiene que mostrar el código pedido; si no,
+es la portada o un buscador y se anota como «sin ficha». Más de 25 productos tuyos nombrados es
+un listado y no cuenta.
+
+**Corre solo**, en la tarea de fondo: hasta 150 fichas por día con 1,5 s entre una y otra. Si un
+sitio falla cinco veces seguidas se pausa un día (`catalogo_pausado_…`). Se apaga en Administrar
+→ Mantenimiento → «🏭 Catálogos de fabricantes».
+
+Las direcciones salen de fichas reales que publican los buscadores. El servidor donde se armó
+esto no llega a esos sitios, así que se probó con un servidor falso local que imita las
+fichas: códigos leídos, pares anotados, ficha inexistente (404), sitio caído (se reintenta, y
+tras cinco fallas se pausa):
+
+| Fabricante | Ficha por código |
+|---|---|
+| SKF | `automotive.skf.com/eur/es/product-catalogue/VKMA01250` |
+| MANN-FILTER | `mann-filter.com/en/catalog/international/search-results/product.html/w712/95_mann-filter.html` (la barra del código es parte de la dirección) |
+| NGK (bujías) | `sparkplug-crossreference.com/convert/NGK_PN/BKR6E`: una tabla de equivalencias de bujías por código NGK; no es de NGK, la ficha oficial lleva un número de stock que no sale del código |
+
+Quedaron afuera FRAM, MAHLE, BOSCH, TARANTO, CORVEN y FISPA, porque sus catálogos buscan con un
+formulario o listan por rubro: no hay una dirección por código. E ILLINOIS, que publica un PDF
+por juego con las piezas que trae adentro: juntaría cada juego con sus juntas, que no son
+equivalentes.
+
 ## Una firma de foto podía ser un programa
 
 Las firmas visuales de las fotos se guardan con `pickle`, y `pickle` **no es un formato de
