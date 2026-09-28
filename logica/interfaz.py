@@ -994,3 +994,11 @@ def resaltar_lo_que_difiere(texto, otro):
         desde = m.end()
     salida.append(texto_para_markdown(texto[desde:]))
     return "".join(salida)
+
+
+def miles(valor):
+    """Un número con punto de miles, como se escribe acá (85.705 y no 85705). Lo que no es un
+    número entero vuelve tal cual. Para st.metric, que muestra el número crudo."""
+    if isinstance(valor, bool) or not isinstance(valor, int):
+        return valor
+    return f"{valor:,}".replace(",", ".")

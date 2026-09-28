@@ -14,8 +14,10 @@ if pagina == PAGINAS[6]:
     # A QUIÉN AVISAR: la última vez que se cambió cada pieza y el km de hoy estimado con el
     # ritmo de cada auto. Ver a_quien_avisar().
     _avisar = a_quien_avisar(dias_de_aviso=30)
-    with st.expander(f"📞 A quién avisar ({len({x['Patente'] for x in _avisar})} cliente(s))",
-                     expanded=bool(_avisar)):
+    # Plegados: abiertos empujaban la búsqueda por patente —lo que se viene a hacer— abajo de
+    # todo. El título ya dice cuántos hay (lo señaló la revisión de usabilidad con Gemini).
+    _n_avisar = len({x['Patente'] for x in _avisar})
+    with st.expander(f"📞 A quién avisar ({_n_avisar} cliente(s))" + (" 🔴" if _n_avisar else "")):
         ayuda(
             "Se mira la **última vez** que se cambió cada pieza en cada auto y el km de hoy "
             "**estimado** con lo que anda ese auto por día (entre que se cargó la ficha y la última "
@@ -35,7 +37,7 @@ if pagina == PAGINAS[6]:
             _cb.link_button("📲 Avisar", _x["_whatsapp"], width="stretch")
 
     vehiculos_atrasados = listar_vehiculos_atrasados()
-    with st.expander(f"⚠️ Vehículos con mantenimiento atrasado ({len(vehiculos_atrasados)})", expanded=bool(vehiculos_atrasados)):
+    with st.expander(f"⚠️ Vehículos con mantenimiento atrasado ({len(vehiculos_atrasados)})"):
         if not vehiculos_atrasados:
             st.caption(
                 "Ninguno detectado por ahora (o todavía no cargaste km de registro/actual en los vehículos)."
@@ -50,7 +52,9 @@ if pagina == PAGINAS[6]:
                 colv1.write(f"**{v['patente']}** {nombre_auto} — {v.get('cliente_nombre') or 'sin nombre'}")
                 colv1.caption(f"Atrasado: {piezas_txt}")
                 if colv2.button("👁️ Ver", key=f"ver_atrasado_{v['id']}"):
-                    st.session_state["patente_buscar"] = v["patente"]
+                    # Por patente_pendiente, que se vuelca antes de dibujar el campo: escribir
+                    # la clave de un campo ya dibujado corta la pantalla.
+                    st.session_state["patente_pendiente"] = v["patente"]
                     st.rerun()
 
     st.markdown("---")
@@ -219,9 +223,9 @@ if pagina == PAGINAS[6]:
 
             km_calc = calcular_km_recorridos(vehiculo)
             mk1, mk2, mk3 = st.columns(3)
-            mk1.metric("Km de registro", km_registro if km_registro is not None else "—")
-            mk2.metric("Km actual", km_actual if km_actual is not None else "—")
-            mk3.metric("Km recorridos", km_calc["km_recorridos"] if km_calc["km_recorridos"] is not None else "—")
+            mk1.metric("Km de registro", miles(km_registro if km_registro is not None else "—"))
+            mk2.metric("Km actual", miles(km_actual if km_actual is not None else "—"))
+            mk3.metric("Km recorridos", miles(km_calc["km_recorridos"] if km_calc["km_recorridos"] is not None else "—"))
             if km_calc["promedio_mensual"] is not None:
                 st.caption(
                     f"📈 Promedio aproximado: **{km_calc['promedio_mensual']:,} km/mes** "

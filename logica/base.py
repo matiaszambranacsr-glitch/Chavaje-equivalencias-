@@ -903,9 +903,10 @@ def seccion_permitida(nivel, motivo=""):
     Si todavía no hay ninguna contraseña configurada no se cierra nada —dejaría afuera al propio
     dueño—: se avisa, bien visible, que la sección está abierta."""
     if not hay_claves_configuradas():
-        st.warning("🔓 **Cualquiera que tenga el link puede entrar acá.** Todavía no hay ninguna "
-                   "contraseña: cargá una en Streamlit Cloud → Settings → Secrets "
-                   "(`[admin_passwords]`) o creá un usuario en Administrar → 👥 Usuarios.")
+        # En palabras del negocio: «Secrets» y «[admin_passwords]» no le dicen nada al dueño
+        # (lo señaló la revisión con Gemini). El camino técnico queda en Usuarios.
+        st.warning("🔓 **La app todavía no tiene contraseña**: cualquiera con el link entra acá. "
+                   "Creá una en **Administrar → 👥 Usuarios**.")
         return True
     if nivel == "admin":
         return pedir_password_admin(motivo)

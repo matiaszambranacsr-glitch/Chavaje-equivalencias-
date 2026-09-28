@@ -5331,6 +5331,17 @@ cambian el trabajo diario:
   números que la otra descripción no dice («1968CC», «16V», «1,55MM»). «1.4CC» y «1,4» cuentan
   como el mismo dato. Las palabras sin números no se marcan: casi siempre son abreviaturas del
   proveedor.
+- **Filtro por marca en la búsqueda por descripción**: «sensor rotacion ford» son 197 filas de
+  tres listas; el selector dice cuántas hay de cada una («CRI-FA (86)»).
+- De una segunda tanda, mirando Mantenimiento, Estadísticas y Vehículos:
+  - **Números con punto de miles** en todas las métricas (`miles()`): 85.705, no 85705.
+  - **El gráfico de marcas horizontal y ordenado**: parado, los nombres salían girados y cortados.
+  - **«Uso de IA» solo si se usó**; antes era una sección entera para decir «todavía nada».
+  - **El aviso de «sin contraseña» en palabras simples**, sin «Secrets» ni «[admin_passwords]».
+  - **Crear la primera contraseña ya no es un callejón sin salida**: Usuarios pedía una contraseña
+    de administrador que todavía no existía, y el aviso mandaba justo ahí.
+  - **En Vehículos, la patente a la vista**: «A quién avisar» y «Mantenimiento atrasado» van
+    plegados (el título dice cuántos hay) en vez de empujar la búsqueda abajo.
 - Y de la revisión de la tarea de fondo: **el caché de fichas tiene tope de tamaño** (40 MB),
   no solo de cantidad; 400 fichas grandes podían ocupar más de la mitad de la memoria del
   servidor.

@@ -1463,13 +1463,30 @@ Casi todo lo que edita o borra algo pide la contraseña de administrador la prim
                 # La fila se toca en la misma tabla. Antes abajo se repetía la lista entera como
                 # botones —uno por resultado, con su descripción—, y en el celular la página
                 # medía tres pantallas más para mostrar lo que la tabla ya decía.
-                _tabla_txt = para_mostrar(quitar_id(res_texto))
+                # Filtro por marca cuando el resultado mezcla varias: «sensor rotacion ford» son
+                # 197 filas de cinco listas, y lo que se busca suele ser «¿qué tengo de FISPA?».
+                # Lo sugirió la revisión de usabilidad con Gemini.
+                _marcas_txt = {}
+                for _f in res_texto:
+                    _marcas_txt[_f["Marca"]] = _marcas_txt.get(_f["Marca"], 0) + 1
+                _res_vista = res_texto
+                if len(_marcas_txt) > 1:
+                    _opciones_mt = ["Todas"] + sorted(_marcas_txt, key=lambda m: -_marcas_txt[m])
+                    if st.session_state.get("filtro_marca_texto") not in _opciones_mt:
+                        st.session_state.pop("filtro_marca_texto", None)
+                    _marca_txt = st.selectbox(
+                        "Marca:", _opciones_mt, key="filtro_marca_texto",
+                        format_func=lambda m: (f"Todas ({len(res_texto)})" if m == "Todas"
+                                               else f"{m} ({_marcas_txt[m]})"))
+                    if _marca_txt != "Todas":
+                        _res_vista = [f for f in res_texto if f["Marca"] == _marca_txt]
+                _tabla_txt = para_mostrar(quitar_id(_res_vista))
                 st.dataframe(_tabla_txt, width="stretch", hide_index=True,
                              column_order=columnas_que_dicen_algo(_tabla_txt),
                              column_config=CONFIG_COLUMNAS_RESULTADO,
                              key="tabla_resultados_texto", selection_mode="single-row",
                              on_select=functools.partial(
-                                 abrir_la_fila_elegida, "tabla_resultados_texto", res_texto))
+                                 abrir_la_fila_elegida, "tabla_resultados_texto", _res_vista))
 
                 # La búsqueda por descripción solo hace coincidir texto: encuentra el producto,
                 # pero no sus equivalentes. Acá se abre la red de equivalencias de cada resultado,

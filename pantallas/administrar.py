@@ -3112,7 +3112,10 @@ if pagina == PAGINAS[3]:
                 st.button("🧹 Vaciar ahora lo de más de 30 días", on_click=vaciar_papelera_antigua, args=(30,))
 
         if sub_admin == SUB_ADMIN[5]:
-            if not pedir_password_admin("gestionar usuarios"):
+            # seccion_permitida() y no pedir_password_admin(): sin ninguna contraseña todavía,
+            # acá es donde se crea la primera, y pedir una que no existe era un callejón sin
+            # salida (el aviso de «la app no tiene contraseña» manda justo acá).
+            if not seccion_permitida("admin", "gestionar usuarios"):
                 pass
             else:
                 st.markdown("**👤 Empleados (admin / operador)**")

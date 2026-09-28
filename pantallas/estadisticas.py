@@ -24,9 +24,9 @@ if pagina == PAGINAS[4]:
         total_equiv = c.fetchone()[0]
 
         m1, m2, m3 = st.columns(3)
-        m1.metric("Marcas registradas", total_marcas)
-        m2.metric("Códigos cargados", total_productos)
-        m3.metric("Vínculos de equivalencia", total_equiv // 2 if total_equiv else 0)
+        m1.metric("Marcas registradas", miles(total_marcas))
+        m2.metric("Códigos cargados", miles(total_productos))
+        m3.metric("Vínculos de equivalencia", miles(total_equiv // 2 if total_equiv else 0))
 
         st.markdown("---")
         c.execute("""SELECT m.nombre, COUNT(p.id) AS productos
@@ -38,19 +38,22 @@ if pagina == PAGINAS[4]:
             st.markdown("**📊 Top marcas por cantidad de códigos cargados**")
             chart_data = {"Marca": [t["nombre"] for t in top_marcas],
                            "Productos": [t["productos"] for t in top_marcas]}
-            st.bar_chart(chart_data, x="Marca", y="Productos")
+            # Horizontal y de mayor a menor: parado, los nombres salían girados y cortados
+            # («MANNOL LUBRIC…»). Lo señaló la revisión con Gemini.
+            st.bar_chart(chart_data, x="Marca", y="Productos", horizontal=True,
+                         sort="-Productos")
 
-        st.markdown("---")
-        st.markdown("**🤖 Uso de las funciones de IA (últimos 30 días)**")
-        ayuda(
-            "Las primeras 4 funciones usan una API key; en el peor caso fallan por límite de uso y "
-            "hay que reintentar. 'Generar imagen orientativa' usa una key aparte, configurada por separado."
-        )
+        # Solo si se usó: una sección entera para decir «todavía nada» era ruido.
         uso_ia_actual = resumen_uso_ia()
         if uso_ia_actual:
+            st.markdown("---")
+            st.markdown("**🤖 Uso de las funciones de IA (últimos 30 días)**")
+            ayuda(
+                "Las primeras 4 funciones usan una API key; en el peor caso fallan por límite de "
+                "uso y hay que reintentar. 'Generar imagen orientativa' usa una key aparte, "
+                "configurada por separado."
+            )
             st.dataframe(uso_ia_actual, width="stretch", hide_index=True)
-        else:
-            st.caption("Todavía no se usó ninguna función de IA.")
 
     if sub_stats == SUB_STATS[1]:
         st.markdown("**Historial de importaciones**")
@@ -954,10 +957,10 @@ Administrar → Mantenimiento.
                 por_nivel[nivel_de_confianza(x.get("confianza", 50))[0][:1]].append(x)
 
             mn1, mn2, mn3, mn4 = st.columns(4)
-            mn1.metric("🟢 Muy probables", len(por_nivel["🟢"]))
-            mn2.metric("🟡 Probables", len(por_nivel["🟡"]))
-            mn3.metric("🟠 Dudosas", len(por_nivel["🟠"]))
-            mn4.metric("🔴 Casi seguro mal", len(por_nivel["🔴"]))
+            mn1.metric("🟢 Muy probables", miles(len(por_nivel["🟢"])))
+            mn2.metric("🟡 Probables", miles(len(por_nivel["🟡"])))
+            mn3.metric("🟠 Dudosas", miles(len(por_nivel["🟠"])))
+            mn4.metric("🔴 Casi seguro mal", miles(len(por_nivel["🔴"])))
 
             # 🧭 EL PLAN. Ver plan_de_la_lista(): qué conviene hacer primero y cuánto trabajo
             # lleva cada paso, para no tener que descubrirlo recorriendo la pantalla.
@@ -1012,8 +1015,8 @@ Administrar → Mantenimiento.
                             st.caption("✅ " + _ev)
 
             ml1, ml2 = st.columns(2)
-            ml1.metric("Sin nada raro", len(limpias))
-            ml2.metric("Con alguna alarma", len(sospechosas))
+            ml1.metric("Sin nada raro", miles(len(limpias)))
+            ml2.metric("Con alguna alarma", miles(len(sospechosas)))
 
             # Solo en una lista IMPORTADA: ahí sí que casi todo dispare alarmas dice que el mapeo
             # de columnas salió mal. En las automáticas (el barrido de todo el catálogo, el cruce
@@ -1656,10 +1659,10 @@ Administrar → Mantenimiento.
         resultado_aud = st.session_state.get("resultado_auditoria")
         if resultado_aud:
             ma1, ma2, ma3, ma4 = st.columns(4)
-            ma1.metric("Vínculos revisados", resultado_aud["total_revisados"])
-            ma2.metric("Códigos raros", len(resultado_aud.get("codigos_malos", [])))
-            ma3.metric("Conflictos", len(resultado_aud["conflictos"]))
-            ma4.metric("Medidas que no dan", len(resultado_aud["por_medidas"]))
+            ma1.metric("Vínculos revisados", miles(resultado_aud["total_revisados"]))
+            ma2.metric("Códigos raros", miles(len(resultado_aud.get("codigos_malos", []))))
+            ma3.metric("Conflictos", miles(len(resultado_aud["conflictos"])))
+            ma4.metric("Medidas que no dan", miles(len(resultado_aud["por_medidas"])))
 
             if resultado_aud.get("quedo_corta"):
                 st.warning(
