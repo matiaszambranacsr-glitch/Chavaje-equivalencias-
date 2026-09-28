@@ -1605,6 +1605,15 @@ if pagina == PAGINAS[3]:
             # plantilla_desde_un_ejemplo() y probar_plantilla_de_portal().
             with st.expander("➕ Cargar un portal", expanded=not any(
                     config_portal(x["nombre"]) for x in _marcas_portal)):
+                _faltan_conocidos = [m for m in PORTALES_CONOCIDOS
+                                     if not any(portal_conocido(x["nombre"])
+                                                == PORTALES_CONOCIDOS[m]
+                                                for x in _marcas_portal)]
+                if _faltan_conocidos:
+                    st.caption(
+                        f"Portales que ya conozco: {', '.join(_faltan_conocidos)}. Todavía no "
+                        "tenés su lista cargada; cuando la cargues, aparecen acá listos para "
+                        "probar sin pegar nada.")
                 if not _marcas_portal:
                     st.caption("Primero cargá la lista de algún proveedor.")
                 else:
@@ -1623,6 +1632,25 @@ if pagina == PAGINAS[3]:
                     _cod_n = st.text_input(
                         "Código de ese producto (solo si la app no lo encuentra sola):",
                         key=f"portal_nuevo_cod_{_marca_n['id']}")
+                    # Wega y los demás de PORTALES_CONOCIDOS no necesitan el link: la dirección
+                    # ya se sabe. Se prueba igual antes de guardarla.
+                    _conocido_n = portal_conocido(_marca_n["nombre"])
+                    _usar_conocido = False
+                    if _conocido_n and not _link_n:
+                        st.caption(f"Ya conozco el portal de {_marca_n['nombre']}: "
+                                   f"`{_conocido_n}`. No hace falta pegar nada.")
+                        _usar_conocido = st.button(f"🔎 Probar el portal de {_marca_n['nombre']}",
+                                                   key="portal_conocido_probar")
+                    if _usar_conocido:
+                        _a_probar_c = [(r["codigo_raw"], r["codigo_clean"]) for r in c.execute(
+                            """SELECT codigo_raw, codigo_clean FROM productos WHERE marca_id = ?
+                               ORDER BY (COALESCE(stock, 0) > 0) DESC, RANDOM() LIMIT 2""",
+                            (_marca_n["id"],)).fetchall()]
+                        with st.spinner("Abriendo las fichas..."):
+                            _prueba_c = probar_plantilla_de_portal(_conocido_n, _a_probar_c)
+                        st.session_state["portal_nuevo"] = {
+                            "marca_id": _marca_n["id"], "nombre": _marca_n["nombre"],
+                            "plantilla": _conocido_n, "prueba": _prueba_c}
                     if st.button("🔎 Probar", key="portal_nuevo_probar", disabled=not _link_n):
                         if _cod_n.strip():
                             _codigos_n = [_cod_n.strip()]

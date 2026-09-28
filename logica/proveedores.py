@@ -322,19 +322,33 @@ def _texto_visible(html):
     return re.sub(r"\s+", " ", texto)
 
 
+# De lo que sigue a cada marca en la página, cuántas palabras se miran para buscar el modelo.
+# La última marca de la página no tiene otra después que le corte el tramo, y sin tope su
+# «resto» llegaba hasta el pie de la página: menús, medidas, equivalencias.
+PALABRAS_DESPUES_DE_LA_MARCA = 8
+
+
 def _autos_del_texto(texto):
-    """Las marcas y modelos que la app ya conoce, nombrados en ese texto."""
-    # Se limita a los que la app ya conoce para no cargar como "auto" cualquier palabra de la
-    # página.
-    limpio = normalizar_texto(texto)
-    encontrados = []
-    for mv in MARCAS_VEHICULO:
-        if f" {mv} " in f" {limpio} ":
-            encontrados.append(mv)
-    for w in set(re.split(r"[^A-Z0-9]+", limpio)):
-        if len(w) >= 3 and w in MODELOS_CONOCIDOS:
-            encontrados.append(w)
-    return sorted(set(encontrados))
+    """Los autos que nombra una página: [(marca, modelo)], con modelo "" si no dice cuál.
+
+    Cada modelo va con la marca que lo precede —«CITROËN Jumper III · FIAT Ducato · PEUGEOT
+    Boxer»—. Antes se juntaban todas las palabras conocidas sueltas y cada una se guardaba
+    como un auto aparte: «BOXER» quedaba con marca BOXER, y también se guardaban como autos
+    «APLICACIONES» o «DIAMETRO», que son títulos de la página. Esos datos después contaban en el
+    análisis como «el fabricante lo da para el mismo auto», que es una prueba fuerte."""
+    autos = []
+    for marca, _cat, resto in marcas_vehiculo_en(texto or ""):
+        palabras = [w.strip("./") for w in
+                    re.split(r"[^A-Z0-9./]+", normalizar_texto(resto))[:PALABRAS_DESPUES_DE_LA_MARCA]]
+        modelos = [w for w in palabras
+                   if len(w) >= 3 and w in MODELOS_CONOCIDOS
+                   and w not in _PALABRAS_DE_MARCA_DE_VEHICULO]
+        autos.extend((marca, m) for m in modelos) if modelos else autos.append((marca, ""))
+    return sorted(set(autos))
+
+
+def _autos_para_mostrar(autos):
+    return [f"{marca} {modelo}".strip() for marca, modelo in autos]
 
 
 # --------------------------------------------------------------------------------------------
@@ -412,6 +426,24 @@ def productos_nombrados_en_la_pagina(texto, excluir_codigo_clean=""):
     return sorted(encontrados.items())
 
 
+# PORTALES YA CONOCIDOS, públicos y con una ficha por código. Solo entran los que se
+# verificaron: la dirección de Wega es «…/catalogo/filtros/detalle/wo-161», el código en
+# minúsculas y con el guion, y la página se arma en el servidor —las aplicaciones se leen sin
+# JavaScript—. Los de Taranto, Illinois y FISPA no están porque sus catálogos se recorren por
+# rubro o por auto, no tienen una ficha por código.
+# Igual se prueban antes de guardarlos: una dirección conocida puede cambiar.
+PORTALES_CONOCIDOS = {
+    "WEGA": "https://www.wega.com.ar/catalogo/filtros/detalle/{codigo_minusculas}",
+}
+
+
+def portal_conocido(nombre_marca):
+    """La plantilla ya conocida de esa marca, o "". Acepta «WEGA FILTROS» y parecidos."""
+    nombre = str(nombre_marca or "").strip().upper()
+    return next((pl for marca, pl in PORTALES_CONOCIDOS.items()
+                 if nombre == marca or nombre.split()[:1] == [marca]), "")
+
+
 def probar_plantilla_de_portal(plantilla, codigos, tiempo_maximo=15):
     """Abre la ficha de esos códigos con la plantilla y cuenta qué se pudo leer. Lista de dicts.
 
@@ -447,7 +479,8 @@ def probar_plantilla_de_portal(plantilla, codigos, tiempo_maximo=15):
         texto = _texto_visible(r.text or "")
         autos = _autos_del_texto(texto)
         nombrados = [pid for pid, _cod in productos_nombrados_en_la_pagina(texto, codigo_clean)]
-        fila["Autos"] = ", ".join(autos[:6]) + ("…" if len(autos) > 6 else "")
+        _autos_txt = _autos_para_mostrar(autos)
+        fila["Autos"] = ", ".join(_autos_txt[:6]) + ("…" if len(_autos_txt) > 6 else "")
         fila["Productos tuyos"] = len(nombrados)
         if codigo_clean and codigo_clean not in sanitizar(texto):
             fila["Resultado"] = ("⚠️ la página abre pero no muestra el código: puede que arme "
@@ -531,8 +564,7 @@ def leer_fichas_del_portal(marca_id, nombre_marca, cuantos=25, progreso=None, pa
             fallas_seguidas = 0
             texto = _texto_visible(html)
             autos = _autos_del_texto(texto)
-            if autos:
-                guardar_autos_de_ficha(prod["codigo_raw"], nombre_marca, autos)
+            if guardar_autos_de_ficha(prod["codigo_raw"], nombre_marca, autos):
                 resumen["con_autos"] += 1
             nombrados = [pid for pid, _cod in productos_nombrados_en_la_pagina(
                 texto, prod["codigo_clean"]) if pid != prod["id"]]
@@ -569,8 +601,13 @@ def guardar_autos_de_ficha(codigo, nombre_marca, autos, tipo_pieza=""):
     """Guarda como aplicaciones los autos que se leyeron de la ficha del portal."""
     if not autos:
         return 0
-    filas = [{"marca_auto": a.split()[0], "modelo_auto": a, "motor": "", "combustible": "",
-              "anio_desde": None, "anio_hasta": None, "codigo": codigo} for a in autos]
+    # Solo los que dicen el modelo: «le va a un FIAT» no sirve para buscar por vehículo, y como
+    # aplicación de fábrica empataría con cualquier otro repuesto de cualquier Fiat.
+    filas = [{"marca_auto": marca, "modelo_auto": modelo, "motor": "", "combustible": "",
+              "anio_desde": None, "anio_hasta": None, "codigo": codigo}
+             for marca, modelo in autos if modelo]
+    if not filas:
+        return 0
     return guardar_aplicaciones(filas, nombre_marca, "ficha del portal", tipo_pieza)
 
 

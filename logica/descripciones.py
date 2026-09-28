@@ -1298,20 +1298,22 @@ def _modelos_conocidos():
     modelos = set()
     for mv in MARCAS_VEHICULO:
         modelos.update(w for w in mv.split() if len(w) >= 3)
+    # palabra -> marcas con las que figura en la columna de modelo de las aplicaciones
+    de_aplicaciones = {}
     try:
         # SIN TOPE. Había un LIMIT 3000, y la base real tiene 4.042 modelos distintos: el corte
         # caía donde caía y dejaba afuera GOL, GOLF, POLO, MEGANE, LOGAN, KANGOO, HILUX,
         # PASSAT y VENTO, los más vendidos. Sin ellos, «Sonda Lambda VW Gol» contra «SONDA
         # LAMBDA VW PASSAT» no tenía modelo del que hablar y el par quedaba en «nada dice que
-        # sean la misma pieza» en vez de descartarse por modelos distintos. Son unos pocos
-        # miles de palabras: leerlas todas es instantáneo.
-        c.execute("SELECT DISTINCT modelo_auto FROM aplicaciones")
+        # sean la misma pieza» en vez de descartarse por modelos distintos.
+        c.execute("SELECT DISTINCT marca_auto, modelo_auto FROM aplicaciones")
         for fila in c.fetchall():
-            modelos.update(w for w in normalizar_texto(fila["modelo_auto"] or "").split()
-                           if len(w) >= 3)
+            for w in normalizar_texto(fila["modelo_auto"] or "").split():
+                if len(w) >= 3:
+                    de_aplicaciones.setdefault(w, set()).add(fila["marca_auto"])
     except Exception as _err:
         anotar_error("_modelos_conocidos", _err)
-        pass
+    modelos |= set(de_aplicaciones) - _modelos_que_andan_con_otras_marcas(de_aplicaciones)
     # Palabras que aparecen en la columna de modelo de las aplicaciones y no son modelos: «desde
     # 2008», «CLASE C COMPRESOR», «EURO 3», «ASTRA GLS». Con DESDE como modelo, una sonda de
     # Corolla «desde 2008» salía de un auto llamado DESDE.
@@ -1323,9 +1325,52 @@ def _modelos_conocidos():
     return modelos
 
 
+def _modelos_que_andan_con_otras_marcas(de_aplicaciones, minimo=20):
+    """Las palabras de la columna de modelo que en las descripciones NO andan con su marca.
+
+    Las aplicaciones deducidas de las descripciones traen basura en el modelo: «DIAMETRO» como
+    modelo de Fiat, «CAMION», «FAMILIA», «PISTON», «VAN». Un modelo de verdad aparece casi
+    siempre junto a su marca —GOL con Volkswagen en el 85% de las descripciones que lo nombran,
+    MEGANE con Renault en el 95%, COROLLA con Toyota en el 96%— y esas palabras no: DIAMETRO
+    está con Fiat en el 13% y con OTRAS marcas en el 80%.
+
+    Se saca la que anda con su marca menos del 30% de las veces y con otras al menos el 20%. La
+    segunda condición cuida a las que casi nunca van con marca, que son de las dos clases:
+    TORINO (se escribe sin IKA) y GALILEO (marca de carburador) sirven, MACHO y PRIMARIO no.
+    Esas no se distinguen contando y las que no sirven están a mano en
+    _PALABRAS_QUE_NO_SON_MODELOS. Recorrer el catálogo cuesta 2,6 s con 86.000 descripciones,
+    una vez por proceso."""
+    try:
+        c.execute("SELECT descripcion FROM productos WHERE descripcion IS NOT NULL")
+        descripciones = [r["descripcion"] for r in c.fetchall()]
+    except sqlite3.OperationalError as _err:
+        anotar_error("_modelos_que_andan_con_otras_marcas", _err)
+        return set()
+    total, con_la_suya, con_otras = {}, {}, {}
+    for desc in descripciones:
+        palabras = set(re.split(r"[^A-Z0-9]+", normalizar_texto(desc))) & de_aplicaciones.keys()
+        if not palabras:
+            continue
+        marcas = {m for m, _cat, _resto in marcas_vehiculo_en(desc)}
+        for w in palabras:
+            total[w] = total.get(w, 0) + 1
+            if marcas & de_aplicaciones[w]:
+                con_la_suya[w] = con_la_suya.get(w, 0) + 1
+            elif marcas:
+                con_otras[w] = con_otras.get(w, 0) + 1
+    return {w for w, n in total.items()
+            if n >= minimo and con_la_suya.get(w, 0) < 0.3 * n and con_otras.get(w, 0) >= 0.2 * n}
+
+
 _PALABRAS_QUE_NO_SON_MODELOS = frozenset({
     "DESDE", "HASTA", "TODOS", "TODAS", "MODELOS", "MODELO", "VERSION", "VERSIONES", "MOTOR",
-    "COMPRESOR", "EURO", "GLS", "GLX", "CVT", "BSE", "CON", "SIN", "PARA",
+    "COMPRESOR", "EURO", "GLS", "GLX", "CVT", "BSE", "CON", "SIN", "PARA", "APLICACIONES",
+    # Las que casi nunca van con una marca y no son modelos (ver
+    # _modelos_que_andan_con_otras_marcas()): «TERMINAL MACHO», «FILTRO PRIMARIO», «ROSCA UNF».
+    "MACHO", "PRIMARIO", "PLUS", "UNF", "HOJA", "RAPIDO", "FIBRA", "PLANO", "CURVO", "FINA",
+    "FINO", "GRAF", "BCA", "DIAMETRO", "ANCHO",
+    # «Blue HDI», «BlueMotion»: tecnología, no un auto.
+    "BLUE",
 })
 
 

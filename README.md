@@ -4709,6 +4709,34 @@ y se pega el link de la ficha de cualquier producto suyo, copiado del navegador:
 - Si varias fichas seguidas no abren, la tanda se corta y esas fichas **no** quedan como
   leídas: un error de red no es una respuesta, y antes se perdían para siempre.
 
+### 🧾 Wega, y los autos que se leen de una ficha
+
+**Wega ya es un portal conocido** (`PORTALES_CONOCIDOS`): su ficha es
+`www.wega.com.ar/catalogo/filtros/detalle/wo-161` —el código en minúsculas, con el guion— y la
+página se arma en el servidor, así que las aplicaciones se leen sin JavaScript. Cuando la lista
+de Wega esté cargada, «➕ Cargar un portal» la ofrece con un botón, sin pegar ningún link; se
+prueba igual antes de guardarla. Los catálogos de Taranto, Illinois y FISPA no entran porque se
+recorren por rubro o por auto y no tienen una ficha por código.
+
+**Los autos de una ficha se guardaban mal**, y eso metía pruebas falsas en el análisis. Se
+juntaban todas las palabras conocidas de la página y cada una era un auto aparte: «BOXER» con
+marca BOXER, y también «APLICACIONES» o «DIAMETRO», que son títulos de la página. Como
+aplicaciones de fábrica, eso contaba como «dos fabricantes lo dan para el mismo auto». Ahora
+cada modelo va con la marca que lo precede (`_autos_del_texto()`), mirando solo las 8
+palabras que siguen —la última marca de la página no se come el pie—, y sin modelo no se
+guarda nada.
+
+**Y la lista de modelos conocidos se limpia sola.** Las aplicaciones deducidas de las
+descripciones traían basura en la columna de modelo: DIAMETRO como modelo de Fiat, CAMION,
+FAMILIA, PISTON, VAN. Un modelo de verdad aparece casi siempre con su marca —GOL con
+Volkswagen en el 85% de las descripciones que lo nombran, COROLLA con Toyota en el 96%— y esas
+no: DIAMETRO está con Fiat en el 13% y con otras marcas en el 80%. Se saca la que anda con su
+marca menos del 30% de las veces y con otras al menos el 20%
+(`_modelos_que_andan_con_otras_marcas()`); las que casi nunca van con marca (MACHO, PRIMARIO)
+están a mano, porque así también son TORINO y GALILEO, que sí sirven. En la cola real cambian 4
+pares, los cuatro bien: juntas de escape de Fiesta y Clio que «coincidían» con una de motor MWM
+porque ACOPLE contaba como modelo.
+
 ## Una firma de foto podía ser un programa
 
 Las firmas visuales de las fotos se guardan con `pickle`, y `pickle` **no es un formato de
