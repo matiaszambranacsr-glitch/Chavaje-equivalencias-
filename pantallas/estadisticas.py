@@ -63,7 +63,8 @@ if pagina == PAGINAS[4]:
         else:
             st.caption("Todavía no se registraron importaciones.")
 
-    if sub_stats == SUB_STATS[2]:
+    # La copia de la base es TODO: precios, clientes, teléfonos, usuarios. Solo administrador.
+    if sub_stats == SUB_STATS[2] and seccion_permitida("admin", "copias de la base"):
         cantidad_fotos, mb_fotos = peso_de_las_fotos()
         c.execute("SELECT COUNT(*) FROM productos")
         total_prod_backup = c.fetchone()[0]
@@ -220,7 +221,10 @@ if pagina == PAGINAS[4]:
                 st.caption(
                     f"Lleva los {total_prod_backup} productos con precios, equivalencias, vehículos e "
                     "historial. ⚠️ **No lleva las fotos**: si restaurás desde este archivo hay que "
-                    "volver a traerlas desde Mantenimiento."
+                    "volver a traerlas desde Mantenimiento.\n\n"
+                    "🔒 **No lo subas a un repositorio público**: lleva tus precios, clientes y "
+                    "usuarios, y cualquiera lo podría bajar. Para la copia automática usá un "
+                    "repositorio privado y `clave_copia` en los secretos (se sube cifrada)."
                 )
 
         st.markdown("---")

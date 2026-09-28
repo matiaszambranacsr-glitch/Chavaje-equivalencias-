@@ -281,6 +281,27 @@ def diagnostico_de_salud():
     def sumar(nivel, titulo, detalle, donde):
         problemas.append({"nivel": nivel, "titulo": titulo, "detalle": detalle, "donde": donde})
 
+    # LA COPIA EN UN REPOSITORIO PÚBLICO. Es lo más grave que puede decir esta lista: la base
+    # entera —precios, clientes, teléfonos, usuarios— descargable por cualquiera. Lo anota el
+    # hilo que sube la copia (ver _anotar_si_el_repositorio_es_publico()); acá solo se lee.
+    try:
+        if obtener_config("repo_copia_publico", "") == "1":
+            if not clave_de_la_copia():
+                sumar("alto", "🔓 La copia de tu base se sube SIN CIFRAR a un repositorio PÚBLICO",
+                      "Cualquiera puede bajarla de GitHub: precios, clientes, teléfonos, patentes "
+                      "y usuarios. Poné el repositorio en privado (GitHub → Settings → General → "
+                      "Change visibility) y agregá en los secretos una línea "
+                      "clave_copia = \"una frase larga\" para que la copia viaje cifrada.",
+                      "Estadísticas → Backup y config")
+            else:
+                sumar("medio", "El repositorio de la copia es público",
+                      "La copia ya se sube cifrada, pero las anteriores al cifrado siguen en el "
+                      "historial de la rama «copia-de-seguridad». Poné el repositorio en privado "
+                      "(GitHub → Settings → General → Change visibility).",
+                      "Estadísticas → Backup y config")
+    except Exception as _err:
+        anotar_error("diagnostico_de_salud/repo_publico", _err)
+
     # Lo primero de todo: clientes esperando algo que ahora hay. Es lo único de esta lista
     # que es plata a un llamado de distancia, y lo que más rápido se pierde: entra la
     # mercadería, nadie se acuerda quién la pidió, y el cliente ya la compró en otro lado.

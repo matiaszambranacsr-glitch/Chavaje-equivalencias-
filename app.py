@@ -389,7 +389,9 @@ def ir_a_donde_dice_el_aviso(donde):
 
 
 _problemas = _cache_salud["problemas"]
-if _problemas:
+# Los avisos de salud son del negocio (cuántos productos, qué está roto, clientes esperando):
+# no se le muestran a quien entró sin contraseña. Ver seccion_permitida().
+if _problemas and (es_operador_o_admin() or not hay_claves_configuradas()):
     # Se separa por urgencia en vez de mostrar una lista pareja. Antes todo se veía igual y
     # «hay clientes esperando algo que ya tenés» quedaba mezclado con «hay descripciones
     # pegadas». Lo que da plata va arriba y sin plegar; el resto, plegado.
@@ -502,6 +504,17 @@ if PARA_QUE_SIRVE.get(pagina) and not (es_celular() and pagina == PAGINAS[0]):
 # de la página, para que se vean sí o sí — sin esto, cada "Guardado" se perdía en el refresco.
 mostrar_avisos_pendientes()
 
+
+# QUIÉN PUEDE ENTRAR A CADA SECCIÓN. El Buscador, la lista de WhatsApp y el modo mecánico
+# quedan abiertos: son el mostrador. Lo demás muestra o cambia datos del negocio —clientes y
+# teléfonos, precios, vínculos, la base entera para descargar— y pide contraseña de empleado.
+# Ver seccion_permitida(). Adentro, lo que borra o configura sigue pidiendo la de administrador.
+NIVEL_DE_CADA_SECCION = {PAGINAS[1]: "empleado", PAGINAS[3]: "empleado",
+                         PAGINAS[4]: "empleado", PAGINAS[6]: "empleado"}
+if (NIVEL_DE_CADA_SECCION.get(pagina)
+        and not seccion_permitida(NIVEL_DE_CADA_SECCION[pagina], pagina.split(" ", 1)[-1])):
+    _actividad_del_mostrador()["termino"] = time.monotonic()      # ver ceder_al_mostrador()
+    st.stop()
 
 # Las pantallas, en el orden en que estaban escritas acá: cada una empieza con su
 # «if pagina == PAGINAS[n]:», así que correrlas todas en fila es lo mismo que antes. Corren en

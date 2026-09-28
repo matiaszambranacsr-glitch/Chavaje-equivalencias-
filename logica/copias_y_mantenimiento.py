@@ -1320,6 +1320,18 @@ def subir_backup_a_github(datos_db, mensaje=""):
     return ok, texto
 
 
+def _anotar_si_el_repositorio_es_publico(cfg, cabeceras):
+    """Después de subir la copia, se pregunta si el repositorio es público y se deja anotado
+    (repo_copia_publico) para el control de salud. Va acá, en el hilo que sube, y no en la
+    pantalla: son dos segundos de red que nadie tiene por qué esperar."""
+    try:
+        r = requests.get(f"{API_DE_GITHUB}/repos/{cfg['repo']}", headers=cabeceras, timeout=15)
+        if r.status_code == 200 and isinstance(r.json(), dict):
+            guardar_config("repo_copia_publico", "0" if r.json().get("private") else "1")
+    except Exception as _err:
+        anotar_error("_anotar_si_el_repositorio_es_publico", _err)
+
+
 def _sha_en_github(cfg, url, cabeceras):
     """El sha del archivo que ya está en el repositorio, o None si no existe todavía.
 
@@ -1397,12 +1409,15 @@ def _subir_backup_a_github(cfg, datos_db, mensaje):
     try:
         # Comprimida si el nombre lo dice. Ver ARCHIVO_SEMILLA_COMPRIMIDA.
         contenido = gzip.compress(datos_db, 6) if cfg["archivo"].endswith(".gz") else datos_db
+        # Y cifrada, si está la clave en los secretos. Ver cifrar_copia().
+        contenido = cifrar_copia(contenido)
         mensaje = mensaje or f"Backup automático {datetime.now():%Y-%m-%d %H:%M}"
         if cfg["rama"] == RAMA_DE_LA_COPIA:
             ok, codigo, texto_gh = _subir_a_la_rama_de_copias(cfg, contenido, mensaje, cabeceras)
             if ok:
                 guardar_config("ultimo_backup_github",
                                datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+                _anotar_si_el_repositorio_es_publico(cfg, cabeceras)
                 marcar_backup_hecho()
                 return True, (f"Copia subida a {cfg['repo']}, rama «{cfg['rama']}», "
                               f"como `{cfg['archivo']}`.")

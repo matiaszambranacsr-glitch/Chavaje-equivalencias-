@@ -7,12 +7,60 @@ se usan sin importarlos los nombres que definen las partes anteriores."""
 # ============================================================================================
 # CATÁLOGO WEB DEL PROVEEDOR (fotos y equivalencias)
 # ============================================================================================
+def direccion_interna(url):
+    """¿La dirección apunta adentro del servidor o a una red privada? Devuelve el motivo, o "".
+
+    Las fotos se bajan de links que escriben OTROS: el og:image de una ficha, la miniatura de
+    una publicación de Mercado Libre, las <img> de un catálogo. Una página hecha a propósito
+    puede poner ahí http://169.254.169.254/… (los datos internos del servidor en la nube) o
+    http://localhost:… y la app iría a pedirlo. Se revisa adónde resuelve el nombre, no solo
+    cómo está escrito: «algo.com» también puede resolver a 127.0.0.1.
+    Para las pruebas con servidores falsos en la misma máquina existe
+    EQUIVALENCIAS_PERMITIR_RED_LOCAL=1."""
+    import ipaddress
+    import socket
+    from urllib.parse import urlparse
+    if os.environ.get("EQUIVALENCIAS_PERMITIR_RED_LOCAL") == "1":
+        return ""
+    try:
+        partes = urlparse(url)
+        if partes.scheme not in ("http", "https") or not partes.hostname:
+            return "la dirección no es http ni https"
+        for info in socket.getaddrinfo(partes.hostname, partes.port or 443, proto=socket.IPPROTO_TCP):
+            ip = ipaddress.ip_address(info[4][0])
+            if (ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved
+                    or ip.is_multicast or ip.is_unspecified):
+                return f"la dirección apunta a una red interna ({ip})"
+    except ValueError as _err:
+        return f"la dirección no es válida ({type(_err).__name__})"
+    except OSError:
+        # No resuelve acá: o no existe —y el pedido va a fallar solo— o se sale por un proxy,
+        # que es el que resuelve. En los dos casos no hay nada interno que proteger.
+        return ""
+    return ""
+
+
 def descargar_imagen(url, tiempo_maximo=12, tamano_maximo_mb=8):
-    """Baja una imagen de una dirección web. Devuelve (bytes, error)."""
+    """Baja una imagen de una dirección web. Devuelve (bytes, error).
+
+    Las redirecciones se siguen a mano, revisando cada salto con direccion_interna(): si no, un
+    link externo que redirige a una dirección interna pasaba el control igual."""
     import requests
     try:
-        respuesta = requests.get(url, timeout=tiempo_maximo, stream=True,
-                                  headers={"User-Agent": "Mozilla/5.0 (compatible; EquivalenciasElChavo/1.0)"})
+        for _salto in range(6):
+            _motivo = direccion_interna(url)
+            if _motivo:
+                return None, f"bloqueado: {_motivo}"
+            respuesta = requests.get(url, timeout=tiempo_maximo, stream=True, allow_redirects=False,
+                                      headers={"User-Agent": "Mozilla/5.0 (compatible; EquivalenciasElChavo/1.0)"})
+            if respuesta.is_redirect and respuesta.headers.get("Location"):
+                from urllib.parse import urljoin
+                url = urljoin(url, respuesta.headers["Location"])
+                respuesta.close()
+                continue
+            break
+        else:
+            return None, "demasiadas redirecciones"
         if respuesta.status_code != 200:
             return None, f"respondió {respuesta.status_code}"
         tipo = respuesta.headers.get("Content-Type", "")
@@ -1399,7 +1447,7 @@ def bajar_fotos_pendientes(limite=200, progreso=None, hilos=6, liviano=True):
             # Solo lo que es una respuesta —no existe, no es una imagen— es definitivo. Un corte
             # de red se reintenta otro día, hasta tres (ver _anotar_fallas()).
             if error and ("respondió 404" in error or "respondió 410" in error
-                          or "no devuelve una imagen" in error):
+                          or "no devuelve una imagen" in error or "bloqueado" in error):
                 rotas.extend(pids)
             else:
                 por_la_red.extend((pid, error) for pid in pids)
@@ -1919,7 +1967,8 @@ def _falla_de_la_red(error):
     """¿El error es del sitio o de la red, y no una respuesta («no hay ficha», «sin códigos»)?"""
     error = str(error or "")
     return bool(error) and not any(x in error for x in ("sin códigos", "404", "no encontré",
-                                                        "no se puede usar en una dirección"))
+                                                        "no se puede usar en una dirección",
+                                                        "bloqueado"))
 
 
 def _descansando(que):

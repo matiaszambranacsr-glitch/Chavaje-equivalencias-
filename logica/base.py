@@ -845,6 +845,43 @@ def pedir_password_operador_o_admin(motivo=""):
     return False
 
 
+def hay_claves_configuradas():
+    """¿Hay al menos una contraseña con la que entrar? (en los secretos o creada en la app)."""
+    try:
+        secretos = secretos_app()
+        for seccion in ("admin_passwords", "operador_passwords"):
+            if any(not str(n).startswith("github_") for n in dict(secretos.get(seccion, {}))):
+                return True
+        if secretos.get("admin_password"):
+            return True
+        c.execute("SELECT 1 FROM usuarios WHERE activo = 1 LIMIT 1")
+        return c.fetchone() is not None
+    except Exception as _err:
+        anotar_error("hay_claves_configuradas", _err)
+        return True      # ante la duda, que pida la contraseña
+
+
+def seccion_permitida(nivel, motivo=""):
+    """El candado de una SECCIÓN entera: 'empleado' (operador o administrador) o 'admin'.
+
+    La app está publicada en internet y «➡️ Continuar» entra sin contraseña. Hasta acá solo
+    pedían clave los botones que borran; todo lo demás quedaba abierto a cualquiera que tuviera
+    el link. Probado entrando como invitado: se podía armar y DESCARGAR LA BASE ENTERA (61 MB,
+    con precios, clientes, teléfonos y usuarios), aprobar o descartar equivalencias en bloque,
+    ver los clientes de Vehículos y crear vínculos a mano.
+
+    Si todavía no hay ninguna contraseña configurada no se cierra nada —dejaría afuera al propio
+    dueño—: se avisa, bien visible, que la sección está abierta."""
+    if not hay_claves_configuradas():
+        st.warning("🔓 **Cualquiera que tenga el link puede entrar acá.** Todavía no hay ninguna "
+                   "contraseña: cargá una en Streamlit Cloud → Settings → Secrets "
+                   "(`[admin_passwords]`) o creá un usuario en Administrar → 👥 Usuarios.")
+        return True
+    if nivel == "admin":
+        return pedir_password_admin(motivo)
+    return pedir_password_operador_o_admin(motivo)
+
+
 def pedir_password_admin(motivo=""):
     """Muestra un formulario de contraseña de ADMINISTRADOR COMPLETO. Devuelve True si ya está
     autenticado como admin — para borrados y configuración sensible, un 'operador' no alcanza."""

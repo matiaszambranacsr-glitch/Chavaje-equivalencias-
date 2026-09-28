@@ -185,6 +185,74 @@ def config_github():
             "archivo": str(secretos.get("github_archivo", ARCHIVO_SEMILLA_COMPRIMIDA))}
 
 
+# LA COPIA SE SUBE CIFRADA. Va a un repositorio de GitHub, y si ese repositorio es público
+# —el de esta app lo era— cualquiera la baja: precios, clientes, teléfonos, patentes y las
+# contraseñas de los usuarios (con hash, pero con hash también se prueban de a millones).
+# Con una clave en los secretos, la copia se cifra antes de salir (AES-GCM, la clave estirada
+# con PBKDF2) y se descifra al bajarla. Sin la clave se sigue subiendo como antes —perder la
+# copia es peor— y el control de salud lo avisa en rojo. Ver cifrar_copia().
+#
+#     clave_copia = "una frase larga que no uses en otro lado"
+#
+# OJO: sin esa frase, la copia cifrada NO se puede abrir. Guardala también fuera de la app.
+MARCA_DE_COPIA_CIFRADA = b"CHAVO-COPIA-CIFRADA-1\n"
+VUELTAS_CLAVE_COPIA = 200_000
+
+
+def clave_de_la_copia():
+    """La frase para cifrar la copia, o None. Se busca arriba de todo y adentro de cada sección
+    de los secretos, por lo mismo que en config_github()."""
+    try:
+        secretos = secretos_app()
+        clave = secretos.get("clave_copia")
+        if not clave:
+            for _valor in list(secretos.values()):
+                if hasattr(_valor, "get") and _valor.get("clave_copia"):
+                    clave = _valor.get("clave_copia")
+                    break
+        return str(clave) if clave else None
+    except Exception as _err:
+        anotar_error("clave_de_la_copia", _err)
+        return None
+
+
+def _clave_aes(frase, sal):
+    return hashlib.pbkdf2_hmac("sha256", frase.encode("utf-8"), sal, VUELTAS_CLAVE_COPIA, 32)
+
+
+def cifrar_copia(datos, frase=None):
+    """Los bytes cifrados si hay frase; si no, los mismos bytes."""
+    frase = frase or clave_de_la_copia()
+    if not frase:
+        return datos
+    from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+    sal, nonce = os.urandom(16), os.urandom(12)
+    return (MARCA_DE_COPIA_CIFRADA + sal + nonce
+            + AESGCM(_clave_aes(frase, sal)).encrypt(nonce, datos, MARCA_DE_COPIA_CIFRADA))
+
+
+def esta_cifrada(datos):
+    return datos[:len(MARCA_DE_COPIA_CIFRADA)] == MARCA_DE_COPIA_CIFRADA
+
+
+def descifrar_copia(datos, frase=None):
+    """Lo contrario de cifrar_copia(). Una copia sin cifrar (las de antes) vuelve tal cual.
+    Levanta ValueError si está cifrada y no hay frase, o la frase no es la correcta."""
+    if not esta_cifrada(datos):
+        return datos
+    frase = frase or clave_de_la_copia()
+    if not frase:
+        raise ValueError("la copia está cifrada y en los secretos no está «clave_copia»")
+    from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+    from cryptography.exceptions import InvalidTag
+    resto = datos[len(MARCA_DE_COPIA_CIFRADA):]
+    sal, nonce, cifrado = resto[:16], resto[16:28], resto[28:]
+    try:
+        return AESGCM(_clave_aes(frase, sal)).decrypt(nonce, cifrado, MARCA_DE_COPIA_CIFRADA)
+    except InvalidTag:
+        raise ValueError("la frase «clave_copia» no es la que cifró esta copia") from None
+
+
 def bajar_la_copia_de_github():
     """Baja la última copia de la rama de copias y la deja lista para abrir. Devuelve la ruta,
     o None si no hay copia, no está configurado o algo falla: en ese caso se sigue con la del
@@ -213,6 +281,16 @@ def bajar_la_copia_de_github():
             with open(bajado, "wb") as salida:
                 for pedazo in r.iter_content(1 << 20):
                     salida.write(pedazo)
+        # Cifrada: se descifra primero (ver cifrar_copia()). Si no se puede, NO se sigue con
+        # un archivo ilegible: se anota y la app arranca con la copia del repositorio.
+        with open(bajado, "rb") as _f:
+            _cabeza = _f.read(len(MARCA_DE_COPIA_CIFRADA))
+        if esta_cifrada(_cabeza):
+            with open(bajado, "rb") as _f:
+                _claro = descifrar_copia(_f.read())
+            with open(bajado, "wb") as _f:
+                _f.write(_claro)
+            del _claro
         if cfg["archivo"].endswith(".gz"):
             with gzip.open(bajado, "rb") as entrada, open(abierto, "wb") as salida:
                 shutil.copyfileobj(entrada, salida)

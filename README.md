@@ -5280,6 +5280,38 @@ Medido con un servidor falso: los 96 códigos SKF citados en la base real se ley
 pasada (antes eran hasta 150 por día); con el sitio caído cortó a los 5 pedidos y se pausó una
 hora.
 
+## 🔒 Seguridad: quién entra, adónde va la copia y qué se pide afuera
+
+La app está publicada en internet y «➡️ Continuar» entra sin contraseña. Revisado entrando
+como invitado, se podía armar y **descargar la base entera** (61 MB: precios, clientes,
+teléfonos, usuarios), aprobar o descartar equivalencias en bloque, ver los clientes de
+Vehículos y crear vínculos a mano. Solo pedían clave los botones que borran.
+
+- **Candado por sección** (`seccion_permitida()`, `NIVEL_DE_CADA_SECCION` en app.py). Buscador,
+  Lista WhatsApp y Modo Mecánico siguen abiertos: son el mostrador. Vincular manual,
+  Administrar, Estadísticas y Vehículos piden contraseña de empleado (operador o
+  administrador), y «💾 Backup y config» la de administrador. Los avisos de salud tampoco se
+  le muestran a quien entró sin contraseña. Si todavía no hay ninguna contraseña configurada
+  no se cierra nada —dejaría afuera al dueño—: la sección avisa que está abierta.
+- **La copia a GitHub se sube cifrada** si en los secretos está
+  `clave_copia = "una frase larga"` (AES-GCM, clave estirada con PBKDF2; ver
+  `cifrar_copia()`). Al arrancar se descifra sola. Sin la frase se sigue subiendo como antes —
+  perder la copia es peor—. **Guardá la frase también fuera de la app: sin ella la copia
+  cifrada no se puede abrir.** Las copias viejas, sin cifrar, se siguen pudiendo leer.
+- **Aviso si el repositorio es público.** Después de cada subida se pregunta a GitHub
+  (`repo_copia_publico`) y el control de salud lo dice en rojo. El repositorio de esta app
+  ES público, y la rama `copia-de-seguridad` tiene copias sin cifrar en su historial:
+  hay que ponerlo en privado (GitHub → Settings → General → Change visibility).
+- **Las fotos no pueden apuntar adentro del servidor** (`direccion_interna()`). Se bajan de
+  links que escriben otros (og:image, miniaturas de Mercado Libre, <img> de catálogos), y una
+  página hecha a propósito podía hacer que la app pidiera 169.254.169.254 (los datos internos
+  de la nube) o localhost. Se revisa adónde resuelve el nombre y cada redirección. Para las
+  pruebas con servidores falsos locales: `EQUIVALENCIAS_PERMITIR_RED_LOCAL=1`.
+- Lo que ya estaba bien y se revisó: contraseñas con PBKDF2 y sal, comparación en tiempo
+  constante, freno a los intentos repetidos, credenciales de portales solo en los secretos,
+  texto de las listas escapado antes de entrar en HTML (lo controla el auditor), y ninguna
+  clave ni token en el historial del repositorio.
+
 ## ⏱️ Revisar sugeridas sin esperar
 
 «Estadísticas → 🔗 Equivalencias sugeridas» analiza la lista entera antes de mostrarla: 6 a 8 s
