@@ -5307,6 +5307,13 @@ Vehículos y crear vínculos a mano. Solo pedían clave los botones que borran.
   `cifrar_copia()`). Al arrancar se descifra sola. Sin la frase se sigue subiendo como antes —
   perder la copia es peor—. **Guardá la frase también fuera de la app: sin ella la copia
   cifrada no se puede abrir.** Las copias viejas, sin cifrar, se siguen pudiendo leer.
+- **Lo dañado no se sube ni se baja** (`la_base_esta_sana()`, un `PRAGMA quick_check` de
+  0,1 s). Si la base se dañara, la copia automática la subía igual y pisaba la última copia
+  buena —la que se usa para arrancar después de un reinicio—. Ahora no se sube, queda la buena
+  y el control de salud lo avisa en rojo (`base_danada`). Al arrancar, una copia bajada de
+  GitHub que no pasa el control tampoco se usa.
+- **Restaurar acepta la copia de GitHub** tal cual está: `.gz`, cifrada o no. Sin la frase,
+  o con otra, no se toca nada y lo dice.
 - **Aviso si el repositorio es público.** Después de cada subida se pregunta a GitHub
   (`repo_copia_publico`) y el control de salud lo dice en rojo. El repositorio de esta app
   ES público, y la rama `copia-de-seguridad` tiene copias sin cifrar en su historial:

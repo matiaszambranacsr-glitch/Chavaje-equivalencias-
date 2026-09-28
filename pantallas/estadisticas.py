@@ -281,15 +281,21 @@ Administrar → Mantenimiento.
             "⚠️ Esto reemplaza TODA la base actual por la del archivo que subas. "
             "Usalo si el hosting se reinició y perdiste datos, o para volver a un backup anterior."
         )
-        archivo_restaurar = subir_archivo("Subí un archivo .db de backup:", ["db"], "restaurar")
+        archivo_restaurar = subir_archivo(
+            "Subí un archivo .db de backup (o la copia .gz de GitHub, cifrada o no):",
+            ["db", "gz"], "restaurar")
         if archivo_restaurar:
             archivo_listo(archivo_restaurar, "backup")
             boton_otro_archivo("restaurar", "🗑️ Usar otro backup", key="otro_backup")
         confirmar_restore = st.checkbox("Entiendo que esto borra los datos actuales y los reemplaza")
         if candado('restaurar un backup', st.button("♻️ Restaurar backup", disabled=not (archivo_restaurar and confirmar_restore)), 'restaurar_un_backup'):
-            restaurar_backup(archivo_restaurar)
-            avisar("success", "Backup restaurado. Recargando...")
-            st.rerun()
+            try:
+                restaurar_backup(archivo_restaurar)
+            except ValueError as _err_rest:
+                st.error(f"No se restauró nada: {_err_rest}.")
+            else:
+                avisar("success", "Backup restaurado. Recargando...")
+                st.rerun()
 
     if sub_stats == SUB_STATS[3]:
         st.markdown("**🧮 Auditoría diaria de stock (muestreo aleatorio)**")

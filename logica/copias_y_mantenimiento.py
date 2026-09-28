@@ -1255,6 +1255,13 @@ def restaurar_backup(archivo_subido):
     funcionando y la base reabre sana. Es el mismo mecanismo que ya usaba
     _restaurar_desde_semilla(); acá faltaba."""
     contenido = archivo_subido.read()
+    # También la copia tal como está en GitHub: cifrada (ver cifrar_copia()) y comprimida.
+    # Sin esto, el día que hiciera falta restaurarla a mano no había cómo abrirla.
+    # descifrar_copia() levanta ValueError si falta la frase o no es la correcta: la pantalla
+    # lo muestra, y no se toca nada.
+    contenido = descifrar_copia(contenido)
+    if contenido[:2] == b"\x1f\x8b":
+        contenido = gzip.decompress(contenido)
     temporal = DB_PATH + ".subido"
     with open(temporal, "wb") as f:
         f.write(contenido)
@@ -1310,6 +1317,15 @@ def subir_backup_a_github(datos_db, mensaje=""):
     if not cfg:
         return False, ("Falta configurar `github_token` y `github_repo` en los secretos de "
                        "Streamlit. Sin eso el backup hay que subirlo a mano.")
+    # Lo dañado no se sube: pisaría la última copia buena. Ver la_base_esta_sana().
+    _sana, _detalle = la_base_esta_sana(datos=datos_db)
+    guardar_config("base_danada", "" if _sana else
+                   f"{datetime.now():%d/%m %H:%M} — {_detalle}")
+    if not _sana:
+        texto = ("La copia NO se subió: la base tiene daño y habría pisado la última copia "
+                 f"buena de GitHub, que queda como estaba. Detalle: {_detalle}")
+        guardar_config("ultimo_backup_github_error", f"{datetime.now():%d/%m %H:%M} — {texto}")
+        return False, texto
     ok, texto = _subir_backup_a_github(cfg, datos_db, mensaje)
     # Se anota el resultado, sea cual sea. La subida diaria corre sola en
     # tareas_automaticas_del_dia(), y ahí un fallo no lo veía nadie: la app seguía como si

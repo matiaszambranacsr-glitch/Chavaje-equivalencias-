@@ -253,6 +253,35 @@ def descifrar_copia(datos, frase=None):
         raise ValueError("la frase «clave_copia» no es la que cifró esta copia") from None
 
 
+def la_base_esta_sana(datos=None, ruta=None):
+    """PRAGMA quick_check sobre una base (bytes o archivo). Devuelve (sana, detalle).
+
+    Tarda 0,1 s sobre la base real. Existe por la copia a GitHub: si la base se dañara, la copia
+    automática subía la base dañada y pisaba la última buena —que es justo la que se usa para
+    arrancar después de un reinicio—. Así, lo dañado no sale ni entra."""
+    temporal = None
+    try:
+        if datos is not None:
+            temporal = f"{DB_PATH}.{uuid.uuid4().hex}.revisar"
+            with open(temporal, "wb") as f:
+                f.write(datos)
+            ruta = temporal
+        prueba = sqlite3.connect(f"file:{ruta}?mode=ro&immutable=1", uri=True)
+        try:
+            filas = [r[0] for r in prueba.execute("PRAGMA quick_check(5)").fetchall()]
+        finally:
+            prueba.close()
+        return filas == ["ok"], "; ".join(str(f) for f in filas)[:300]
+    except sqlite3.DatabaseError as _err:
+        return False, f"no se puede abrir como base: {_err}"
+    finally:
+        if temporal:
+            try:
+                os.remove(temporal)
+            except OSError:
+                pass
+
+
 def bajar_la_copia_de_github():
     """Baja la última copia de la rama de copias y la deja lista para abrir. Devuelve la ruta,
     o None si no hay copia, no está configurado o algo falla: en ese caso se sigue con la del
@@ -304,6 +333,10 @@ def bajar_la_copia_de_github():
                 return None
         finally:
             prueba.close()
+        _sana, _detalle = la_base_esta_sana(ruta=abierto)
+        if not _sana:
+            anotar_error("bajar_la_copia_de_github", f"la copia está dañada: {_detalle}")
+            return None
         os.replace(abierto, ARCHIVO_COPIA_BAJADA)
         return ARCHIVO_COPIA_BAJADA
     except Exception as _err:

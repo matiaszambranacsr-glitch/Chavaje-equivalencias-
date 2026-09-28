@@ -281,6 +281,19 @@ def diagnostico_de_salud():
     def sumar(nivel, titulo, detalle, donde):
         problemas.append({"nivel": nivel, "titulo": titulo, "detalle": detalle, "donde": donde})
 
+    # LA BASE DAÑADA. Lo anota la subida de la copia (ver la_base_esta_sana()), que en ese caso
+    # no sube nada para no pisar la última copia buena.
+    try:
+        _danada = obtener_config("base_danada", "")
+        if _danada:
+            sumar("alto", "🧯 La base tiene daño y la copia a GitHub quedó frenada",
+                  f"El control de integridad falló ({_danada}). La última copia buena de GitHub "
+                  "está intacta. Bajá un backup ahora y restaurá desde la copia de GitHub o "
+                  "desde un backup anterior.",
+                  "Estadísticas → Backup y config")
+    except Exception as _err:
+        anotar_error("diagnostico_de_salud/base_danada", _err)
+
     # LA COPIA EN UN REPOSITORIO PÚBLICO. Es lo más grave que puede decir esta lista: la base
     # entera —precios, clientes, teléfonos, usuarios— descargable por cualquiera. Lo anota el
     # hilo que sube la copia (ver _anotar_si_el_repositorio_es_publico()); acá solo se lee.
