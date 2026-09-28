@@ -857,16 +857,28 @@ def es_un_usuario_de_los_secretos(nombre):
 
 
 def hay_claves_configuradas():
-    """¿Hay al menos una contraseña con la que entrar? (en los secretos o creada en la app)."""
+    """¿Hay al menos una contraseña con la que entrar? (en los secretos o creada en la app).
+
+    UNA VEZ QUE HUBO, SIEMPRE HAY. Sin contraseñas las secciones quedan abiertas (ver
+    seccion_permitida()), y eso es para una instalación nueva, no para una que ya las tenía:
+    si un día Streamlit no pudiera leer los secretos —se borraron por error, falló la
+    plataforma—, la app creía que nunca se configuraron y abría todo, backups incluidos. Queda
+    anotado la primera vez que se ven, y después no hay vuelta atrás sola: sin los secretos,
+    las secciones piden una contraseña que no se puede poner, y hay que arreglar los secretos.
+    (Lo señaló la revisión con Gemini.)"""
     try:
         secretos = secretos_app()
-        for seccion in ("admin_passwords", "operador_passwords"):
-            if any(es_un_usuario_de_los_secretos(n) for n in dict(secretos.get(seccion, {}))):
-                return True
-        if secretos.get("admin_password"):
+        hay = any(any(es_un_usuario_de_los_secretos(n) for n in dict(secretos.get(s, {})))
+                  for s in ("admin_passwords", "operador_passwords"))
+        hay = hay or bool(secretos.get("admin_password"))
+        if not hay:
+            c.execute("SELECT 1 FROM usuarios WHERE activo = 1 LIMIT 1")
+            hay = c.fetchone() is not None
+        if hay:
+            if obtener_config("hubo_claves", "") != "1":
+                guardar_config("hubo_claves", "1")
             return True
-        c.execute("SELECT 1 FROM usuarios WHERE activo = 1 LIMIT 1")
-        return c.fetchone() is not None
+        return obtener_config("hubo_claves", "") == "1"
     except Exception as _err:
         anotar_error("hay_claves_configuradas", _err)
         return True      # ante la duda, que pida la contraseña

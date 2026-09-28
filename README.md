@@ -5304,6 +5304,20 @@ contexto de la conversación). Encontró nueve errores reales; están corregidos
 9. **El recorte del análisis de sugeridas dejaba pares sin ver** cuando la lista no entraba en
    una tanda. Ahora recorta solo si la tanda cubría la lista entera.
 
+### Y dos más, de la revisión con Gemini
+
+La misma revisión se le pidió a Gemini. Con la clave del plan gratis solo respondió el modelo más
+liviano (Gemini 3.1 Flash Lite; los Pro no están en el plan gratis y los Flash estaban saturados), y
+la mayoría de lo que marcó eran consejos genéricos o cosas que el código ya hace. Dos puntos sí
+valían:
+
+- **Una vez que hubo contraseñas, la app no se abre sola** (`hubo_claves` en
+  `hay_claves_configuradas()`). Si un día Streamlit no pudiera leer los secretos, la app creía
+  que nunca se configuraron y abría todo, backups incluidos.
+- **La frase de la copia se estira con 600.000 vueltas de PBKDF2** (lo que recomienda OWASP),
+  no 200.000. La copia lleva la versión en la marca del principio (`CHAVO-COPIA-CIFRADA-2`), así
+  que las copias ya subidas con la versión 1 se siguen abriendo.
+
 ## 🔗 Revisar sugeridas: primero lo que hay que hacer
 
 Mirado con capturas sobre la base real (15.308 pendientes en 8 listas):

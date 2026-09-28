@@ -210,8 +210,13 @@ def config_github():
 #     clave_copia = "una frase larga que no uses en otro lado"
 #
 # OJO: sin esa frase, la copia cifrada NO se puede abrir. Guardala también fuera de la app.
-MARCA_DE_COPIA_CIFRADA = b"CHAVO-COPIA-CIFRADA-1\n"
-VUELTAS_CLAVE_COPIA = 200_000
+# Dos versiones: la 1 estiraba la frase con 200.000 vueltas de PBKDF2; la 2, con 600.000, que
+# es lo que recomienda hoy OWASP para PBKDF2-SHA256 (lo señaló la revisión con Gemini). Se
+# cifra siempre con la 2 y se leen las dos, así las copias ya subidas se siguen abriendo.
+# Cuesta 0,7 s por copia, en el hilo que la sube y al arrancar: nadie lo espera.
+MARCA_DE_COPIA_CIFRADA_1 = b"CHAVO-COPIA-CIFRADA-1\n"
+MARCA_DE_COPIA_CIFRADA = b"CHAVO-COPIA-CIFRADA-2\n"
+VUELTAS_POR_VERSION = {MARCA_DE_COPIA_CIFRADA_1: 200_000, MARCA_DE_COPIA_CIFRADA: 600_000}
 
 
 def clave_de_la_copia():
@@ -231,8 +236,9 @@ def clave_de_la_copia():
         return None
 
 
-def _clave_aes(frase, sal):
-    return hashlib.pbkdf2_hmac("sha256", frase.encode("utf-8"), sal, VUELTAS_CLAVE_COPIA, 32)
+def _clave_aes(frase, sal, marca=MARCA_DE_COPIA_CIFRADA):
+    return hashlib.pbkdf2_hmac("sha256", frase.encode("utf-8"), sal,
+                               VUELTAS_POR_VERSION[marca], 32)
 
 
 def cifrar_copia(datos, frase=None):
@@ -246,8 +252,13 @@ def cifrar_copia(datos, frase=None):
             + AESGCM(_clave_aes(frase, sal)).encrypt(nonce, datos, MARCA_DE_COPIA_CIFRADA))
 
 
+def _marca_de(datos):
+    """La marca de versión con que empieza una copia cifrada, o None."""
+    return next((m for m in VUELTAS_POR_VERSION if datos[:len(m)] == m), None)
+
+
 def esta_cifrada(datos):
-    return datos[:len(MARCA_DE_COPIA_CIFRADA)] == MARCA_DE_COPIA_CIFRADA
+    return _marca_de(datos) is not None
 
 
 def descifrar_copia(datos, frase=None):
@@ -260,10 +271,11 @@ def descifrar_copia(datos, frase=None):
         raise ValueError("la copia está cifrada y en los secretos no está «clave_copia»")
     from cryptography.hazmat.primitives.ciphers.aead import AESGCM
     from cryptography.exceptions import InvalidTag
-    resto = datos[len(MARCA_DE_COPIA_CIFRADA):]
+    marca = _marca_de(datos)
+    resto = datos[len(marca):]
     sal, nonce, cifrado = resto[:16], resto[16:28], resto[28:]
     try:
-        return AESGCM(_clave_aes(frase, sal)).decrypt(nonce, cifrado, MARCA_DE_COPIA_CIFRADA)
+        return AESGCM(_clave_aes(frase, sal, marca)).decrypt(nonce, cifrado, marca)
     except InvalidTag:
         raise ValueError("la frase «clave_copia» no es la que cifró esta copia") from None
 
