@@ -808,190 +808,6 @@ Administrar → Mantenimiento.
                 st.rerun()
 
     if sub_stats == SUB_STATS[6]:
-        st.markdown("**🔍 Revisar las equivalencias que ya están cargadas**")
-        explicar(
-            "Pasa las mismas alarmas por todo lo que se cargó antes (listas viejas, vínculos hechos "
-            "a mano).",
-            "Lo que marques como correcto no vuelve a aparecer; lo que borres queda descartado para "
-            "siempre, aunque vuelvas a importar la misma lista."
-        )
-        if st.button("🔍 Auditar lo ya cargado"):
-            with st.spinner("Revisando..."):
-                st.session_state["resultado_auditoria"] = auditar_equivalencias_existentes()
-
-        resultado_aud = st.session_state.get("resultado_auditoria")
-        if resultado_aud:
-            ma1, ma2, ma3, ma4 = st.columns(4)
-            ma1.metric("Vínculos revisados", resultado_aud["total_revisados"])
-            ma2.metric("Códigos raros", len(resultado_aud.get("codigos_malos", [])))
-            ma3.metric("Conflictos", len(resultado_aud["conflictos"]))
-            ma4.metric("Medidas que no dan", len(resultado_aud["por_medidas"]))
-
-            if resultado_aud.get("quedo_corta"):
-                st.warning(
-                    f"⚠️ **La revisión quedó corta.** Se miraron {resultado_aud['total_revisados']:,} "
-                    f"de {resultado_aud['total_en_base']:,} vínculos que hay cargados. Resolvé estos "
-                    "y volvé a auditar para seguir con el resto — todavía puede haber problemas sin ver."
-                )
-
-            # 1) Códigos que no parecen códigos: lo que deja una importación mal mapeada.
-            #    Va primero porque un solo producto basura ensucia decenas de vínculos.
-            if resultado_aud.get("codigos_malos"):
-                st.markdown("**🚫 Códigos que no parecen códigos de repuesto**")
-                ayuda(
-                    "Suelen venir de una importación donde la columna del código en realidad tenía "
-                    "medidas, cantidades o pedazos de la descripción. Cortarles los vínculos limpia "
-                    "el problema; el producto queda por si lo querés corregir a mano."
-                )
-                for cm in resultado_aud["codigos_malos"][:25]:
-                    cc1, cc2 = st.columns([3, 1])
-                    cc1.markdown(f"**{texto_para_html(cm['marca'])}** · `{cm['codigo']}` "
-                                  f"— {texto_para_html(cm['motivo'])}  \n"
-                                  f"<small>{cm['vinculos']} vínculo(s)</small>", unsafe_allow_html=True)
-                    cc2.button("✂️ Cortar sus vínculos", key=f"cortar_malo_{cm['id']}",
-                                on_click=cb_auditoria_cortar_todos, args=(cm["id"],))
-                if len(resultado_aud["codigos_malos"]) > 25:
-                    st.caption(f"(mostrando 25 de {len(resultado_aud['codigos_malos'])})")
-                st.markdown("---")
-
-            # 2) Productos basura: lo primero a resolver, porque un solo producto mal cargado
-            #    puede estar ensuciando cientos de códigos a la vez.
-            if resultado_aud["productos_sospechosos"]:
-                st.markdown("**🚩 Productos con muchísimos vínculos (revisalos primero)**")
-                explicar(
-                    "Una pieza real rara vez equivale a más de 10 códigos de fábrica.",
-                    "Si un producto tiene decenas, casi siempre es basura de una importación mal mapeada — "
-                    "por ejemplo un código '1' que quedó de una columna equivocada. Cortarle los vínculos "
-                    "de una limpia el problema entero."
-                )
-                # Sin desplegables: Streamlit los cierra en cada refresco, y como cada botón
-                # provoca uno, se cerraba la ventana justo cuando estabas revisando.
-                for p in resultado_aud["productos_sospechosos"][:15]:
-                    desc = texto_para_html(p["descripcion"]) or "_(sin descripción)_"
-                    ps1, ps2 = st.columns([3, 1])
-                    ps1.markdown(f"**{texto_para_html(p['marca'])}** · `{p['codigo']}` — {desc}  \n"
-                                  f"<small>vinculado a {p['cantidad']} códigos distintos</small>",
-                                  unsafe_allow_html=True)
-                    ps2.button(f"✂️ Cortar {p['cantidad']}",
-                                key=f"cortar_todo_{p['id']}", type="primary",
-                                on_click=cb_auditoria_cortar_todos, args=(p["id"],),
-                                help="El producto queda; solo se cortan todas sus equivalencias")
-                if len(resultado_aud["productos_sospechosos"]) > 15:
-                    st.caption(f"(mostrando 15 de {len(resultado_aud['productos_sospechosos'])})")
-                st.markdown("---")
-
-            # 2) Conflictos agrupados: un código de fábrica apuntando a varios productos
-            if resultado_aud["conflictos"]:
-                st.markdown("**⚠️ Un código de fábrica apuntando a varios productos del mismo proveedor**")
-                ayuda(
-                    "Acá se ven juntos todos los productos a los que apunta cada código, para poder "
-                    "comparar y cortar el que sobra. Normalmente uno tiene descripción real y el otro "
-                    "es el que quedó mal."
-                )
-                total_conf = len(resultado_aud["conflictos"])
-                por_pag_conf = 8
-                pags_conf = (total_conf - 1) // por_pag_conf + 1
-                if pags_conf > 1:
-                    pag_conf = st.number_input(
-                        f"Página (de {pags_conf}) — {por_pag_conf} conflictos por página:",
-                        min_value=1, max_value=pags_conf, value=1, step=1, key="pagina_conflictos"
-                    )
-                else:
-                    pag_conf = 1
-                desde_conf = (int(pag_conf) - 1) * por_pag_conf
-                for g in resultado_aud["conflictos"][desde_conf:desde_conf + por_pag_conf]:
-                    st.markdown(f"**⚠️ {g['codigo_oem']} → {len(g['productos'])} productos "
-                                 f"de {g['marca_proveedor']}**")
-                    if g["descripcion_oem"]:
-                        st.caption(g["descripcion_oem"])
-                    for p in g["productos"]:
-                        desc = texto_para_html(p["descripcion"]) or "⚠️ _(sin descripción — sospechoso)_"
-                        marca_ok = " · ya revisado" if p["revisado_ok"] else ""
-                        cg1, cg2, cg3 = st.columns([3, 1, 1])
-                        cg1.markdown(f"**`{p['codigo']}`** — {desc}  \n"
-                                      f"<small>{p['vinculos_totales']} vínculos en total{marca_ok}</small>",
-                                      unsafe_allow_html=True)
-                        cg2.button("🗑️ Cortar", key=f"cortar_par_{g['codigo_oem']}_{p['id']}",
-                                    on_click=cb_auditoria_eliminar, args=(p["par"][0], p["par"][1]),
-                                    help="Corta solo este vínculo")
-                        cg3.button("✅ Dejar", key=f"dejar_par_{g['codigo_oem']}_{p['id']}",
-                                    on_click=cb_auditoria_dejar, args=([p["par"]],),
-                                    help="Es correcto; no volver a marcarlo")
-                    st.markdown("")
-                st.markdown("---")
-
-            # 3) Medidas contradictorias
-            if resultado_aud["por_medidas"]:
-                st.markdown("**📐 Vínculos donde las medidas cargadas no coinciden**")
-                for m in resultado_aud["por_medidas"][:30]:
-                    st.markdown(f"**{m['marca_a']} `{m['cod_a']}`** — {m['desc_a'] or '_(sin descripción)_'}  \n"
-                                 f"**{m['marca_b']} `{m['cod_b']}`** — {m['desc_b'] or '_(sin descripción)_'}")
-                    st.caption(f"📐 {m['detalle']}")
-                    mb1, mb2 = st.columns(2)
-                    mb1.button("✅ Está bien, dejalo", key=f"med_ok_{m['a']}_{m['b']}",
-                                on_click=cb_auditoria_dejar, args=([(m["a"], m["b"])],))
-                    mb2.button("🗑️ Borrar el vínculo", key=f"med_del_{m['a']}_{m['b']}",
-                                on_click=cb_auditoria_eliminar, args=(m["a"], m["b"]))
-                if len(resultado_aud["por_medidas"]) > 30:
-                    st.caption(f"(mostrando 30 de {len(resultado_aud['por_medidas'])})")
-
-            if (not resultado_aud["conflictos"] and not resultado_aud["por_medidas"]
-                    and not resultado_aud["productos_sospechosos"]
-                    and not resultado_aud.get("codigos_malos")):
-                st.success("✅ No se encontró nada sospechoso entre los vínculos ya cargados.")
-
-        st.markdown("---")
-        st.markdown("**🔁 Revisar lo aprobado con las reglas de hoy**")
-        explicar(
-            "Pasa cada vínculo ya cargado por los mismos vetos que usa hoy la revisión.",
-            "Cada vez que la app aprende a distinguir algo —modelos distintos, largo de cable, "
-            "temperaturas, un código que en realidad es un motor— lo aplica a lo que llega. Lo que "
-            "ya habías aprobado antes quedó como estaba, y la auditoría de arriba no lo vuelve a "
-            "mirar. Esto sí. Lo que confirmes como correcto no vuelve a aparecer; lo que cortes "
-            "queda descartado aunque vuelvas a importar la lista."
-        )
-        if st.button("🔁 Revisar lo aprobado", key="revisar_lo_aprobado"):
-            with st.spinner("Revisando..."):
-                st.session_state["resultado_reglas_de_hoy"] = aprobados_que_hoy_se_vetarian()
-        _rh = st.session_state.get("resultado_reglas_de_hoy")
-        if _rh:
-            _n_vetados = sum(len(filas) for _m, filas in _rh["grupos"])
-            if not _n_vetados:
-                st.success(f"✅ Ninguno de los {_rh['revisados']:,} vínculos cargados choca con "
-                           "las reglas de hoy.")
-            else:
-                st.warning(
-                    f"**{_n_vetados:,} de {_rh['revisados']:,} vínculos cargados hoy se "
-                    "vetarían.** Van agrupados por motivo: mirá los ejemplos de cada grupo y "
-                    "resolvelo de un toque.")
-            if _rh["confirmados"]:
-                st.caption(f"({_rh['confirmados']:,} ya confirmados como correctos no se miran.)")
-            for _motivo_rh, _filas_rh in _rh["grupos"][:30]:
-                with st.container(border=True):
-                    st.markdown(f"**{texto_para_html(_motivo_rh)}** — {len(_filas_rh):,} "
-                                "vínculo(s)")
-                    for _f in _filas_rh[:5]:
-                        st.caption(
-                            f"{_f['marca_a']} **{_f['cod_a']}** — {(_f['desc_a'] or '')[:70]}  ↔  "
-                            f"{_f['marca_b']} **{_f['cod_b']}** — {(_f['desc_b'] or '')[:70]}"
-                            + (f"  \n_{_f['vetos'][0]}_" if _f["vetos"][0] != _motivo_rh else ""))
-                    if len(_filas_rh) > 5:
-                        st.caption(f"… y {len(_filas_rh) - 5:,} más.")
-                    _pares_rh = [(_f["a"], _f["b"]) for _f in _filas_rh]
-                    _k_rh = abs(hash(_motivo_rh))
-                    _c1_rh, _c2_rh = st.columns(2)
-                    _c1_rh.button(f"✂️ Cortar los {len(_filas_rh):,}", key=f"rh_cortar_{_k_rh}",
-                                  on_click=cb_reglas_de_hoy, args=(_pares_rh, "cortar"),
-                                  help="Los productos quedan; solo se corta la relación, y no "
-                                       "vuelve aunque reimportes la lista")
-                    _c2_rh.button("✅ Están bien", key=f"rh_ok_{_k_rh}",
-                                  on_click=cb_reglas_de_hoy, args=(_pares_rh, "ok"),
-                                  help="No vuelven a aparecer acá")
-            if len(_rh["grupos"]) > 30:
-                st.caption(f"(mostrando 30 de {len(_rh['grupos'])} motivos)")
-
-        st.markdown("---")
-
         lotes_pendientes = resumen_lotes_pendientes()
         if lotes_pendientes:
             total_pendientes = sum(l["cantidad"] for l in lotes_pendientes)
@@ -1196,7 +1012,12 @@ Administrar → Mantenimiento.
             ml1.metric("Sin nada raro", len(limpias))
             ml2.metric("Con alguna alarma", len(sospechosas))
 
-            if analizados and len(sospechosas) / analizados > 0.7:
+            # Solo en una lista IMPORTADA: ahí sí que casi todo dispare alarmas dice que el mapeo
+            # de columnas salió mal. En las automáticas (el barrido de todo el catálogo, el cruce
+            # por auto) es lo esperable —se proponen muchos pares para que la revisión filtre— y
+            # el consejo de «descartá toda la lista» hacía tirar las 2.558 limpias con el resto.
+            if (analizados and len(sospechosas) / analizados > 0.7
+                    and lote_info.get("origen") == "lista_proveedor"):
                 st.error(
                     "🔴 Más del 70% de esta lista dispara alarmas. Eso no es que tengas mala suerte: "
                     "casi siempre significa que la importación quedó **mal mapeada** — la columna que "
@@ -1276,21 +1097,30 @@ Administrar → Mantenimiento.
                 # pantalla, y todo se guarda junto con un botón.
                 _a_mirar = [p for p in _sin_mirar if p in _por_par_g][:10]
                 if _a_mirar:
-                    _opciones_mot = ["—"] + list(MOTIVOS_DE_RECHAZO.values())
+                    # La primera opción dice para qué es: el selector va sin rótulo, al lado
+                    # de la decisión, y con «—» solo no se entendía.
+                    _opciones_mot = (["Si está mal: ¿por qué? (opcional)"]
+                                     + list(MOTIVOS_DE_RECHAZO.values()))
                     _clave_de_motivo = {v: k for k, v in MOTIVOS_DE_RECHAZO.items()}
                     with st.form(key=f"form_muestra_{abs(hash(clave_g))}"):
                         st.caption(f"Quedan {len(_sin_mirar)} de la muestra. Marcá estos "
                                    f"{len(_a_mirar)} y guardá.")
                         for _i_m, _par in enumerate(_a_mirar):
                             _f = _por_par_g[_par]
+                            # Compacto: cada par eran cinco renglones y diez pares, dos
+                            # pantallas. La decisión y el motivo van en la misma fila.
                             st.markdown(f"**{_i_m + 1}.** {_f['marca_a']} **{_f['cod_a']}** ↔ "
                                         f"{_f['marca_b']} **{_f['cod_b']}**")
-                            st.caption(f"A: {(_f.get('desc_a') or '')[:120]}")
-                            st.caption(f"B: {(_f.get('desc_b') or '')[:120]}")
-                            st.radio("¿Son la misma pieza?", ["—", "✅ Bien", "🚫 Mal"],
-                                     key=f"m_dec_{_par[0]}_{_par[1]}", horizontal=True)
-                            st.selectbox("Si está mal, ¿por qué?", _opciones_mot,
-                                         key=f"m_mot_{_par[0]}_{_par[1]}")
+                            st.caption(f"A: {(_f.get('desc_a') or '')[:120]}  \n"
+                                       f"B: {(_f.get('desc_b') or '')[:120]}")
+                            _cd, _cm = st.columns([1, 1])
+                            _cd.radio("¿Son la misma pieza?", ["—", "✅ Bien", "🚫 Mal"],
+                                      key=f"m_dec_{_par[0]}_{_par[1]}", horizontal=True,
+                                      label_visibility="collapsed")
+                            _cm.selectbox("Si está mal, ¿por qué?", _opciones_mot,
+                                          key=f"m_mot_{_par[0]}_{_par[1]}",
+                                          label_visibility="collapsed",
+                                          help="Solo si está mal: el motivo enseña a la revisión.")
                         _guardar_m = st.form_submit_button("💾 Guardar lo marcado",
                                                            type="primary")
                     if _guardar_m:
@@ -1803,6 +1633,193 @@ Administrar → Mantenimiento.
                     st.button(f"➡️ Página siguiente ({int(pagina_sosp) + 1} de {paginas})",
                               key="pagina_sospechosas_siguiente", on_click=_a_la_pagina_siguiente)
             st.markdown("---")
+
+        # LOS CONTROLES DE LO YA CARGADO VAN DESPUÉS de la revisión de las listas. Estaban
+        # arriba de todo, y lo que se viene a hacer a esta pantalla —revisar lo que espera
+        # aprobación— quedaba tercero, abajo de dos botones que se usan de vez en cuando.
+        st.markdown("**🔍 Revisar las equivalencias que ya están cargadas**")
+        explicar(
+            "Pasa las mismas alarmas por todo lo que se cargó antes (listas viejas, vínculos hechos "
+            "a mano).",
+            "Lo que marques como correcto no vuelve a aparecer; lo que borres queda descartado para "
+            "siempre, aunque vuelvas a importar la misma lista."
+        )
+        if st.button("🔍 Auditar lo ya cargado"):
+            with st.spinner("Revisando..."):
+                st.session_state["resultado_auditoria"] = auditar_equivalencias_existentes()
+
+        resultado_aud = st.session_state.get("resultado_auditoria")
+        if resultado_aud:
+            ma1, ma2, ma3, ma4 = st.columns(4)
+            ma1.metric("Vínculos revisados", resultado_aud["total_revisados"])
+            ma2.metric("Códigos raros", len(resultado_aud.get("codigos_malos", [])))
+            ma3.metric("Conflictos", len(resultado_aud["conflictos"]))
+            ma4.metric("Medidas que no dan", len(resultado_aud["por_medidas"]))
+
+            if resultado_aud.get("quedo_corta"):
+                st.warning(
+                    f"⚠️ **La revisión quedó corta.** Se miraron {resultado_aud['total_revisados']:,} "
+                    f"de {resultado_aud['total_en_base']:,} vínculos que hay cargados. Resolvé estos "
+                    "y volvé a auditar para seguir con el resto — todavía puede haber problemas sin ver."
+                )
+
+            # 1) Códigos que no parecen códigos: lo que deja una importación mal mapeada.
+            #    Va primero porque un solo producto basura ensucia decenas de vínculos.
+            if resultado_aud.get("codigos_malos"):
+                st.markdown("**🚫 Códigos que no parecen códigos de repuesto**")
+                ayuda(
+                    "Suelen venir de una importación donde la columna del código en realidad tenía "
+                    "medidas, cantidades o pedazos de la descripción. Cortarles los vínculos limpia "
+                    "el problema; el producto queda por si lo querés corregir a mano."
+                )
+                for cm in resultado_aud["codigos_malos"][:25]:
+                    cc1, cc2 = st.columns([3, 1])
+                    cc1.markdown(f"**{texto_para_html(cm['marca'])}** · `{cm['codigo']}` "
+                                  f"— {texto_para_html(cm['motivo'])}  \n"
+                                  f"<small>{cm['vinculos']} vínculo(s)</small>", unsafe_allow_html=True)
+                    cc2.button("✂️ Cortar sus vínculos", key=f"cortar_malo_{cm['id']}",
+                                on_click=cb_auditoria_cortar_todos, args=(cm["id"],))
+                if len(resultado_aud["codigos_malos"]) > 25:
+                    st.caption(f"(mostrando 25 de {len(resultado_aud['codigos_malos'])})")
+                st.markdown("---")
+
+            # 2) Productos basura: lo primero a resolver, porque un solo producto mal cargado
+            #    puede estar ensuciando cientos de códigos a la vez.
+            if resultado_aud["productos_sospechosos"]:
+                st.markdown("**🚩 Productos con muchísimos vínculos (revisalos primero)**")
+                explicar(
+                    "Una pieza real rara vez equivale a más de 10 códigos de fábrica.",
+                    "Si un producto tiene decenas, casi siempre es basura de una importación mal mapeada — "
+                    "por ejemplo un código '1' que quedó de una columna equivocada. Cortarle los vínculos "
+                    "de una limpia el problema entero."
+                )
+                # Sin desplegables: Streamlit los cierra en cada refresco, y como cada botón
+                # provoca uno, se cerraba la ventana justo cuando estabas revisando.
+                for p in resultado_aud["productos_sospechosos"][:15]:
+                    desc = texto_para_html(p["descripcion"]) or "_(sin descripción)_"
+                    ps1, ps2 = st.columns([3, 1])
+                    ps1.markdown(f"**{texto_para_html(p['marca'])}** · `{p['codigo']}` — {desc}  \n"
+                                  f"<small>vinculado a {p['cantidad']} códigos distintos</small>",
+                                  unsafe_allow_html=True)
+                    ps2.button(f"✂️ Cortar {p['cantidad']}",
+                                key=f"cortar_todo_{p['id']}", type="primary",
+                                on_click=cb_auditoria_cortar_todos, args=(p["id"],),
+                                help="El producto queda; solo se cortan todas sus equivalencias")
+                if len(resultado_aud["productos_sospechosos"]) > 15:
+                    st.caption(f"(mostrando 15 de {len(resultado_aud['productos_sospechosos'])})")
+                st.markdown("---")
+
+            # 2) Conflictos agrupados: un código de fábrica apuntando a varios productos
+            if resultado_aud["conflictos"]:
+                st.markdown("**⚠️ Un código de fábrica apuntando a varios productos del mismo proveedor**")
+                ayuda(
+                    "Acá se ven juntos todos los productos a los que apunta cada código, para poder "
+                    "comparar y cortar el que sobra. Normalmente uno tiene descripción real y el otro "
+                    "es el que quedó mal."
+                )
+                total_conf = len(resultado_aud["conflictos"])
+                por_pag_conf = 8
+                pags_conf = (total_conf - 1) // por_pag_conf + 1
+                if pags_conf > 1:
+                    pag_conf = st.number_input(
+                        f"Página (de {pags_conf}) — {por_pag_conf} conflictos por página:",
+                        min_value=1, max_value=pags_conf, value=1, step=1, key="pagina_conflictos"
+                    )
+                else:
+                    pag_conf = 1
+                desde_conf = (int(pag_conf) - 1) * por_pag_conf
+                for g in resultado_aud["conflictos"][desde_conf:desde_conf + por_pag_conf]:
+                    st.markdown(f"**⚠️ {g['codigo_oem']} → {len(g['productos'])} productos "
+                                 f"de {g['marca_proveedor']}**")
+                    if g["descripcion_oem"]:
+                        st.caption(g["descripcion_oem"])
+                    for p in g["productos"]:
+                        desc = texto_para_html(p["descripcion"]) or "⚠️ _(sin descripción — sospechoso)_"
+                        marca_ok = " · ya revisado" if p["revisado_ok"] else ""
+                        cg1, cg2, cg3 = st.columns([3, 1, 1])
+                        cg1.markdown(f"**`{p['codigo']}`** — {desc}  \n"
+                                      f"<small>{p['vinculos_totales']} vínculos en total{marca_ok}</small>",
+                                      unsafe_allow_html=True)
+                        cg2.button("🗑️ Cortar", key=f"cortar_par_{g['codigo_oem']}_{p['id']}",
+                                    on_click=cb_auditoria_eliminar, args=(p["par"][0], p["par"][1]),
+                                    help="Corta solo este vínculo")
+                        cg3.button("✅ Dejar", key=f"dejar_par_{g['codigo_oem']}_{p['id']}",
+                                    on_click=cb_auditoria_dejar, args=([p["par"]],),
+                                    help="Es correcto; no volver a marcarlo")
+                    st.markdown("")
+                st.markdown("---")
+
+            # 3) Medidas contradictorias
+            if resultado_aud["por_medidas"]:
+                st.markdown("**📐 Vínculos donde las medidas cargadas no coinciden**")
+                for m in resultado_aud["por_medidas"][:30]:
+                    st.markdown(f"**{m['marca_a']} `{m['cod_a']}`** — {m['desc_a'] or '_(sin descripción)_'}  \n"
+                                 f"**{m['marca_b']} `{m['cod_b']}`** — {m['desc_b'] or '_(sin descripción)_'}")
+                    st.caption(f"📐 {m['detalle']}")
+                    mb1, mb2 = st.columns(2)
+                    mb1.button("✅ Está bien, dejalo", key=f"med_ok_{m['a']}_{m['b']}",
+                                on_click=cb_auditoria_dejar, args=([(m["a"], m["b"])],))
+                    mb2.button("🗑️ Borrar el vínculo", key=f"med_del_{m['a']}_{m['b']}",
+                                on_click=cb_auditoria_eliminar, args=(m["a"], m["b"]))
+                if len(resultado_aud["por_medidas"]) > 30:
+                    st.caption(f"(mostrando 30 de {len(resultado_aud['por_medidas'])})")
+
+            if (not resultado_aud["conflictos"] and not resultado_aud["por_medidas"]
+                    and not resultado_aud["productos_sospechosos"]
+                    and not resultado_aud.get("codigos_malos")):
+                st.success("✅ No se encontró nada sospechoso entre los vínculos ya cargados.")
+
+        st.markdown("---")
+        st.markdown("**🔁 Revisar lo aprobado con las reglas de hoy**")
+        explicar(
+            "Pasa cada vínculo ya cargado por los mismos vetos que usa hoy la revisión.",
+            "Cada vez que la app aprende a distinguir algo —modelos distintos, largo de cable, "
+            "temperaturas, un código que en realidad es un motor— lo aplica a lo que llega. Lo que "
+            "ya habías aprobado antes quedó como estaba, y la auditoría de arriba no lo vuelve a "
+            "mirar. Esto sí. Lo que confirmes como correcto no vuelve a aparecer; lo que cortes "
+            "queda descartado aunque vuelvas a importar la lista."
+        )
+        if st.button("🔁 Revisar lo aprobado", key="revisar_lo_aprobado"):
+            with st.spinner("Revisando..."):
+                st.session_state["resultado_reglas_de_hoy"] = aprobados_que_hoy_se_vetarian()
+        _rh = st.session_state.get("resultado_reglas_de_hoy")
+        if _rh:
+            _n_vetados = sum(len(filas) for _m, filas in _rh["grupos"])
+            if not _n_vetados:
+                st.success(f"✅ Ninguno de los {_rh['revisados']:,} vínculos cargados choca con "
+                           "las reglas de hoy.")
+            else:
+                st.warning(
+                    f"**{_n_vetados:,} de {_rh['revisados']:,} vínculos cargados hoy se "
+                    "vetarían.** Van agrupados por motivo: mirá los ejemplos de cada grupo y "
+                    "resolvelo de un toque.")
+            if _rh["confirmados"]:
+                st.caption(f"({_rh['confirmados']:,} ya confirmados como correctos no se miran.)")
+            for _motivo_rh, _filas_rh in _rh["grupos"][:30]:
+                with st.container(border=True):
+                    st.markdown(f"**{texto_para_html(_motivo_rh)}** — {len(_filas_rh):,} "
+                                "vínculo(s)")
+                    for _f in _filas_rh[:5]:
+                        st.caption(
+                            f"{_f['marca_a']} **{_f['cod_a']}** — {(_f['desc_a'] or '')[:70]}  ↔  "
+                            f"{_f['marca_b']} **{_f['cod_b']}** — {(_f['desc_b'] or '')[:70]}"
+                            + (f"  \n_{_f['vetos'][0]}_" if _f["vetos"][0] != _motivo_rh else ""))
+                    if len(_filas_rh) > 5:
+                        st.caption(f"… y {len(_filas_rh) - 5:,} más.")
+                    _pares_rh = [(_f["a"], _f["b"]) for _f in _filas_rh]
+                    _k_rh = abs(hash(_motivo_rh))
+                    _c1_rh, _c2_rh = st.columns(2)
+                    _c1_rh.button(f"✂️ Cortar los {len(_filas_rh):,}", key=f"rh_cortar_{_k_rh}",
+                                  on_click=cb_reglas_de_hoy, args=(_pares_rh, "cortar"),
+                                  help="Los productos quedan; solo se corta la relación, y no "
+                                       "vuelve aunque reimportes la lista")
+                    _c2_rh.button("✅ Están bien", key=f"rh_ok_{_k_rh}",
+                                  on_click=cb_reglas_de_hoy, args=(_pares_rh, "ok"),
+                                  help="No vuelven a aparecer acá")
+            if len(_rh["grupos"]) > 30:
+                st.caption(f"(mostrando 30 de {len(_rh['grupos'])} motivos)")
+
+        st.markdown("---")
 
         st.markdown("**🛒 Equivalencias que aparecieron solas en el mostrador**")
         explicar(

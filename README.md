@@ -5280,6 +5280,23 @@ Medido con un servidor falso: los 96 códigos SKF citados en la base real se ley
 pasada (antes eran hasta 150 por día); con el sitio caído cortó a los 5 pedidos y se pausó una
 hora.
 
+## 🔗 Revisar sugeridas: primero lo que hay que hacer
+
+Mirado con capturas sobre la base real (15.308 pendientes en 8 listas):
+
+- **Abre en la lista que importa.** Las listas iban por fecha y la más nueva era siempre la
+  automática del día, de uno o dos pares: la pantalla abría ahí mientras la importación de
+  13.941 esperaba en el selector. Ahora las de menos de `PARES_DE_UNA_LISTA_CHICA` (20) van al
+  final (`resumen_lotes_pendientes()`).
+- **La revisión va primero.** «Revisar lo ya cargado» y «Revisar lo aprobado con las reglas de
+  hoy», que se usan de vez en cuando, pasaron abajo: lo que se viene a hacer a esta pantalla
+  quedaba tercero.
+- **Sin un consejo equivocado.** El aviso «más del 70% dispara alarmas: la importación quedó mal
+  mapeada, descartá toda la lista» salía también en el BARRIDO automático, donde es lo esperable,
+  y hacía tirar las 2.558 limpias con el resto. Ahora sale solo en las listas importadas.
+- **La muestra de control, compacta.** Cada par eran cinco renglones; ahora las dos
+  descripciones van juntas y la decisión al lado del motivo. Diez pares entran en una pantalla.
+
 ## 📱 El buscador, pensado para el mostrador (y el celular)
 
 Mirado con capturas en un iPhone y en una computadora, con la base real:

@@ -757,10 +757,21 @@ def guardar_equivalencias_pendientes(pares, origen, lote):
 
 
 
+# Una lista con menos de esto va al final, aunque sea la más nueva: ver resumen_lotes_pendientes().
+PARES_DE_UNA_LISTA_CHICA = 20
+
+
 def resumen_lotes_pendientes():
+    """Las listas esperando revisión, la primera es la que la pantalla abre.
+
+    La más nueva primero, como antes, PERO las chicas al final. Las tareas automáticas del día
+    arman listas de uno o dos pares («POR REEMPLAZO (automático)»), y como son siempre las más
+    nuevas, la pantalla abría todos los días en una lista de un par mientras la importación de
+    13.941 esperaba abajo en el selector."""
     c.execute("""SELECT lote, origen, COUNT(*) AS cantidad, MIN(fecha) AS fecha
                  FROM equivalencias_pendientes GROUP BY lote, origen ORDER BY MIN(fecha) DESC""")
-    return [dict(r) for r in c.fetchall()]
+    filas = [dict(r) for r in c.fetchall()]
+    return sorted(filas, key=lambda f: f["cantidad"] < PARES_DE_UNA_LISTA_CHICA)
 
 
 def equivalencias_esperando_revision():
