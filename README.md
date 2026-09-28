@@ -4804,7 +4804,7 @@ con «+», o con «/» y además es el código de otro producto de la misma marc
 
 Sobre la cola real: 246 pares pasan a limpios, 225 se apartan como kit o accesorio (118 de ellos
 estaban limpios y eran errores: capuchones contra la bobina, kits contra su componente), y la
-alarma de código ambiguo baja de 1.394 pares a 844.
+alarma de código ambiguo baja de 1.394 pares a 804.
 
 ## Una firma de foto podía ser un programa
 
