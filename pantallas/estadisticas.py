@@ -975,7 +975,8 @@ Administrar → Mantenimiento.
             if relacionadas:
                 st.info(
                     f"📦 **{len(relacionadas)} par(es) son un kit y una pieza que viene "
-                    "adentro.** No son equivalentes —no se puede vender una en lugar de la "
+                    "adentro, o un accesorio y su pieza** (el capuchón y la bobina en la que "
+                    "monta). No son equivalentes —no se puede vender una en lugar de la "
                     "otra— así que no te los pongo a decidir de a uno. El buscador te ofrece "
                     "el kit igual cuando buscás la pieza suelta."
                 )
@@ -990,7 +991,7 @@ Administrar → Mantenimiento.
                     _pares_rel = [(x["a"], x["b"]) for x in relacionadas]
                     _n = rechazar_pendientes(lote_info["lote"], _pares_rel)
                     invalidar_salud()
-                    avisar("success", f"Se descartaron {_n} par(es) de kit y pieza.")
+                    avisar("success", f"Se descartaron {_n} par(es) de kit o accesorio y pieza.")
                     st.rerun()
 
             # Se agrupa por confianza, no por "tiene alarma / no tiene". Con 397 alarmas planas

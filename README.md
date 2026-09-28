@@ -4777,6 +4777,35 @@ Sobre la cola real: 149 pares pasan a limpios (el MAP del Aveo 1.4 con el de FIS
 Kuga 1.6T contra el de Focus/Kuga 1 5, la bujía de S10 4.3 V6 contra una de S10 2 8 diésel). Los
 pares en revisión solo por el abanico bajan de 4.209 a 3.580.
 
+### ⚠️ «El código apunta a dos productos de FISPA»: accesorios, kits y versiones originales
+
+Era la alarma más grande de la lista de FISPA (1.034 pares), y en las muestras había cuatro
+clases de casos que no son errores de carga (`_dos_que_citan_el_mismo_numero()`):
+
+- **uno nombra al otro**: «CAPUCHONES 79012 … MONTA EN BOBINA 70213», «70120 (reemplaza a
+  70181)»;
+- **la misma pieza en versión común y «(ORIGINAL)»**: 84029 y 831259, el mismo sensor de la
+  Amarok;
+- **piezas distintas que van juntas**: el microfiltro y el inyector, el kit de reparación y el
+  aforador.
+
+Esos dejan de ser alarma. Y cuando uno es el **accesorio** o el **kit que trae la pieza**, su
+par con el número no es una equivalencia y se aparta con los kits (`_es_accesorio_del_numero()`):
+lo que «monta en» otra pieza, lo que tiene el número dentro del código del otro («FI-IWP006» es
+el inyector IWP006, no el microfiltro que lo cita), o el kit frente a la pieza suelta. No se
+decide por quién trajo el número primero: el capuchón suele ser esa fila, y la bobina —la dueña
+del número— quedaba como su accesorio. «Reemplaza a» nunca se aparta.
+
+**Y en general, un kit no es sus componentes** (`_numero_de_un_componente()`): «KIT BOB CAB
+(LEIG005/LEIHTG73SC)» es la bobina LEIG005 más los cables, y «DISTRIBUCION C/BOMBA (LKTBN285 +
+LWPN029)» el kit LKTBN285 más la bomba. El importador toma esos códigos como números de fábrica
+del kit, y el vínculo decía que el kit ES la bobina. Cuenta como componente si está en una lista
+con «+», o con «/» y además es el código de otro producto de la misma marca.
+
+Sobre la cola real: 246 pares pasan a limpios, 225 se apartan como kit o accesorio (118 de ellos
+estaban limpios y eran errores: capuchones contra la bobina, kits contra su componente), y la
+alarma de código ambiguo baja de 1.394 pares a 844.
+
 ## Una firma de foto podía ser un programa
 
 Las firmas visuales de las fotos se guardan con `pickle`, y `pickle` **no es un formato de

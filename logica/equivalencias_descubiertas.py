@@ -1476,6 +1476,138 @@ def _submarca_del_codigo(codigo):
     return next((m for m in _MARCAS_QUE_SE_PEGAN_AL_CODIGO if limpio.endswith(m)), "")
 
 
+_RE_ES_ORIGINAL = re.compile(r"\(?\b(?:PRODUCTO\s+)?ORIGINAL\b\)?")
+
+
+def _cabeza_de(descripcion):
+    """El nombre de la pieza —la primera palabra que la nombra—, o ""."""
+    firma = firma_de_producto(descripcion or "")
+    return (firma or {}).get("cabeza") or ""
+
+
+def _numero_sin_marca(codigo):
+    """«70181FISPA» -> 70181, «LEIG030LUCAS» -> LEIG030: el número como lo escribe la lista."""
+    limpio = sanitizar(codigo or "")
+    sub = _submarca_del_codigo(codigo)
+    return limpio[:-len(sub)] if sub and limpio.endswith(sub) else limpio
+
+
+def _dos_que_citan_el_mismo_numero(cod_a, desc_a, cod_b, desc_b):
+    """¿Hay una razón por la que dos productos de la MISMA marca citen el mismo número de
+    fábrica sin que ninguno esté mal cargado? Devuelve la razón, o "".
+
+    Sobre los 1.034 pares de FISPA con «el código apunta a más de un producto», las muestras
+    tenían tres clases que no son errores:
+      · uno NOMBRA al otro: «CAPUCHONES 79012 … MONTA EN BOBINA 70213», «PASO A PASO REGULABLE
+        10609 … Regulable 10014», «70120 (reemplaza a 70181)»;
+      · son la misma pieza en versión común y «(ORIGINAL)»: 84029 y 831259, el mismo sensor de
+        presión de combustible de la Amarok, con la misma descripción;
+      · son piezas distintas que van juntas: el microfiltro y el inyector, la rampa y el
+        inyector. Cada una es la suya; ninguna está «mal cargada».
+    Lo que sigue siendo una duda de verdad —el aforador de nafta y el diésel con el mismo
+    número— no entra en ninguna y conserva la alarma."""
+    ta, tb = normalizar_texto(desc_a or ""), normalizar_texto(desc_b or "")
+    na, nb = _numero_sin_marca(cod_a), _numero_sin_marca(cod_b)
+    if (len(nb) >= 4 and re.search(rf"\b{re.escape(nb)}\b", ta)) or \
+            (len(na) >= 4 and re.search(rf"\b{re.escape(na)}\b", tb)):
+        return "uno nombra al otro"
+
+    def _sin_codigos(texto, codigo):
+        limpio = sanitizar(codigo or "")
+        return " ".join(w for w in _RE_ES_ORIGINAL.sub(" ", texto).split()
+                        if not (len(sanitizar(w)) >= 3 and sanitizar(w) in limpio))
+    if ta and _sin_codigos(ta, cod_a) == _sin_codigos(tb, cod_b):
+        return "la misma pieza, común y original"
+    cabeza_a, cabeza_b = _cabeza_de(desc_a), _cabeza_de(desc_b)
+    if cabeza_a and cabeza_b and cabeza_a != cabeza_b:
+        return f"piezas distintas: {cabeza_a} y {cabeza_b}"
+    return ""
+
+
+_RE_MONTA_EN = re.compile(r"\b(?:MONTA\s+EN|PARA\s+(?:LA\s+|EL\s+)?(?:BOBINA|INYECTOR|BOMBA))\b")
+
+
+def _es_accesorio_del_numero(numero, cod, desc, otros):
+    """Si este producto NO es la pieza de ese número de fábrica sino un accesorio o un kit que
+    la trae, la relación para mostrar; si no, "". `otros` son los demás productos de la misma
+    marca que citan el mismo número, [(código, descripción)].
+
+    No alcanza con saber quién nombró el número primero: el capuchón suele ser la fila que lo
+    trajo, y la bobina —la dueña del número— quedaba como «accesorio del capuchón». Se decide
+    por la descripción:
+      · lo que «monta en» o es «para la bobina» es el accesorio;
+      · el número está en la lista de componentes de un kit —«KIT CAB Y BUJ (LEIHTF23SC/
+        LSPR6F13)»—: es de una pieza que el kit trae adentro;
+      · uno es un kit y el otro no —el kit de reparación y el aforador—: el kit trae la pieza.
+    Lo demás —«reemplaza a», la versión original, dos piezas que no se sabe cuál es la dueña—
+    solo deja de ser una alarma, sin apartar a nadie."""
+    texto = normalizar_texto(desc or "")
+    if re.search(r"\bREEMPLAZA\b", texto):
+        return ""
+    cabeza = _cabeza_de(desc)
+    if _RE_MONTA_EN.search(texto) and any(_cabeza_de(d) != cabeza for _o, d in otros):
+        return f"es un accesorio —«{cabeza}»— de la pieza con el número {numero}, no la pieza"
+    # El número es parte del CÓDIGO del otro: «FI-IWP006FISPA» es el inyector IWP006, y el
+    # microfiltro que lo cita (y a otros treinta) no es ese inyector.
+    limpio_numero = sanitizar(numero)
+    if (len(limpio_numero) >= 5 and limpio_numero not in sanitizar(cod)
+            and any(limpio_numero in sanitizar(o) and _cabeza_de(d) != cabeza
+                    for o, d in otros)):
+        return (f"es otra pieza —«{cabeza}»— que cita el número {numero}, que es el de "
+                f"«{next(o for o, _d in otros if limpio_numero in sanitizar(o))}»")
+    # Trae adentro a otro de la misma marca que cita el número: «DISTRIBUCION C/BOMBA
+    # (LKTBN417 + LWPN006)» es el kit LKTBN417 más la bomba de agua.
+    listas = re.findall(r"\(([^)]*[/+][^)]*)\)", texto)
+    numeros_otros = {_numero_sin_marca(o) for o, _d in otros}
+    for lista in listas:
+        if any(len(sanitizar(x)) >= 4 and sanitizar(x) in numeros_otros
+               for x in re.split(r"[/+]", lista)):
+            return (f"trae adentro a otro producto que tiene el número {numero} "
+                    f"({lista.strip()}); no es un reemplazo de él")
+    if es_un_kit(desc):
+        for lista in listas:
+            if any(sanitizar(x) == limpio_numero for x in re.split(r"[/+]", lista)):
+                return (f"es un kit que trae adentro la pieza con el número {numero}, no un "
+                        "reemplazo de ella")
+        if any(not es_un_kit(d) and _cabeza_de(d) != cabeza for _o, d in otros):
+            return (f"es un kit que trae la pieza con el número {numero}, no un reemplazo "
+                    "de ella")
+    return ""
+
+
+def _numero_de_un_componente(numero, cod, desc):
+    """Si el número de fábrica es el de una pieza que este producto TRAE ADENTRO, la relación
+    para mostrar; si no, "".
+
+    El importador toma como número de fábrica cualquier código de la descripción, y los kits
+    listan sus componentes: «KIT BOB CAB (LEIG005/LEIHTG73SC)» es la bobina LEIG005 más los
+    cables, «DISTRIBUCION C/BOMBA (LKTBN285 + LWPN029)» es el kit LKTBN285 más la bomba de agua.
+    Como vínculo, eso decía que el kit ES la bobina. Sobre la cola real eran 59 pares limpios.
+    Cuenta como componente si está en una lista con «+», o en una lista con «/» y además es el
+    código de OTRO producto de la misma marca (con «LUCAS» pegado, como escribe FISPA): una
+    lista con barras también puede ser la de los números de fábrica del propio kit."""
+    texto = normalizar_texto(desc or "")
+    limpio_numero = sanitizar(numero)
+    if len(limpio_numero) < 4 or "(" not in texto:
+        return ""
+    sub = _submarca_del_codigo(cod)
+    for lista in re.findall(r"\(([^)]*[/+][^)]*)\)", texto):
+        if limpio_numero not in [sanitizar(x) for x in re.split(r"[/+]", lista)]:
+            continue
+        otro = ""
+        if "+" not in lista:
+            if not sub or limpio_numero + sub == sanitizar(cod):
+                continue
+            fila = c.execute("SELECT codigo_raw FROM productos WHERE codigo_clean = ? LIMIT 1",
+                             (limpio_numero + sub,)).fetchone()
+            if not fila:
+                continue
+            otro = f" («{fila['codigo_raw']}»)"
+        return (f"trae adentro la pieza con el número {numero}{otro} —«{lista.strip()}»—; "
+                "no es un reemplazo de ella")
+    return ""
+
+
 def pieza_para_el_abanico(codigo, descripcion):
     """Qué cuenta como UNA opción del abanico. Las variantes de un código son una sola
     (codigo_base_sin_variante(): «TC-882-MG 1M» y «TC-882-20» son la misma junta), y también
@@ -1772,6 +1904,7 @@ def _analizar_lote_pendiente(lote, limite=None, desde=0):
     # Hace falta para saber quién es «el hermano»: el que cita el mismo número pero llegó
     # segundo, y al que por eso no le tocó la señal de la descripción igual.
     candidatos_a_origen = {}
+    descripcion_de = {}       # código del proveedor -> su descripción
     juegos_y_piezas = {}      # clave -> {True si algún miembro es un juego, False si alguno no}
     for f in filas:
         if "OEM" not in (f["tipo_a"], f["tipo_b"]):
@@ -1782,6 +1915,7 @@ def _analizar_lote_pendiente(lote, limite=None, desde=0):
             else (f["cod_b"], f["a"], f["marca_a"], f["cod_a"], f.get("desc_b"), f.get("desc_a")))
         clave = (sanitizar(oem), marca_otro)
         apuntados.setdefault(clave, {})[otro] = cod_otro
+        descripcion_de[cod_otro] = desc_otro or ""
         juegos_y_piezas.setdefault(clave, set()).add(bool(es_un_kit(desc_otro)))
         if normalizar_texto(desc_oem or "") == normalizar_texto(desc_otro or "") and desc_oem:
             candidatos_a_origen.setdefault(clave, set()).add(cod_otro)
@@ -1822,16 +1956,40 @@ def _analizar_lote_pendiente(lote, limite=None, desde=0):
     # porque son la misma pieza de dos fabricantes. Que un número apunte a una de cada marca
     # no es un error de carga: la ambigüedad es tener DOS de la MISMA marca. Sobre la cola real
     # eran 2.585 pares con 35 puntos menos por esto, y en las muestras todos estaban bien.
+    # Y dentro de la misma marca tampoco es un error cuando los dos se explican entre sí (ver
+    # _dos_que_citan_el_mismo_numero()): el capuchón que «monta en bobina 70213» cita el número
+    # de la bobina, FISPA vende el mismo sensor común y «(ORIGINAL)», y «70120 (reemplaza a
+    # 70181)» es el código nuevo y el viejo.
     ambiguos = set()
+    accesorios = {}           # (clave, código del accesorio) -> la relación, para apartarlo
     for k, v in apuntados.items():
         if len(v) < 2:
             continue
         por_submarca = {}
         for cod in v.values():
             por_submarca.setdefault(_submarca_del_codigo(cod), []).append(cod)
-        if any(len(cods) > 1 and not son_variantes_de_la_misma_pieza(cods)
-               for cods in por_submarca.values()):
-            ambiguos.add(k)
+        for cods in por_submarca.values():
+            if len(cods) < 2 or son_variantes_de_la_misma_pieza(cods):
+                continue
+            sin_explicar = False
+            for i in range(len(cods)):
+                for j in range(i + 1, len(cods)):
+                    if not _dos_que_citan_el_mismo_numero(cods[i], descripcion_de.get(cods[i]),
+                                                          cods[j], descripcion_de.get(cods[j])):
+                        sin_explicar = True
+            if sin_explicar:
+                ambiguos.add(k)
+                continue
+            # Explicado. Si alguno es un ACCESORIO o un kit que trae la pieza del número —el
+            # capuchón que «monta en bobina 70213», el kit de reparación del aforador—, su par
+            # con el número no es una equivalencia y se aparta con los kits. Ver
+            # _es_accesorio_del_numero().
+            for cod in cods:
+                relacion = _es_accesorio_del_numero(k[0], cod, descripcion_de.get(cod),
+                                                    [(o, descripcion_de.get(o))
+                                                     for o in cods if o != cod])
+                if relacion:
+                    accesorios[(k, cod)] = relacion
 
     # ¿Este par aparece en más de una lista? Que dos proveedores independientes digan lo mismo
     # es la mejor confirmación que se puede tener sin mirar la pieza.
@@ -1912,6 +2070,16 @@ def _analizar_lote_pendiente(lote, limite=None, desde=0):
             _variante = _variante_del_origen(_clave, _cod_propio)
             # Al hermano que es una variante del origen no le corresponde la alarma: que la
             # junta venga en tres espesores no quiere decir que alguno esté mal cargado.
+            if (_clave, _cod_propio) in accesorios:
+                f["relacion"] = accesorios[(_clave, _cod_propio)]
+                relacionadas.append(f)
+                continue
+            _componente = _numero_de_un_componente(
+                oem, _cod_propio, f.get("desc_b") if f["tipo_a"] == "OEM" else f.get("desc_a"))
+            if _componente:
+                f["relacion"] = _componente
+                relacionadas.append(f)
+                continue
             if _clave in ambiguos and not _variante:
                 alarmas.append(f"⚠️ El código {oem} apunta a más de un producto de "
                                 f"{marca_otro} — alguno de los dos está mal cargado")
