@@ -4839,6 +4839,29 @@ camión:
 - **BOTADORES** como lugar de la pieza: «JTA LATERAL BOTADORES» y «JTA LATERAL T.V.» son dos
   tapas distintas.
 
+### 🌡️ El largo del cable de la sonda y la temperatura del bulbo
+
+Dos datos que las listas escriben y distinguen variantes de la misma pieza para el mismo auto:
+
+- **El largo del cable de la sonda lambda** (`largo_de_cable_mm()`): CRI-FA escribe «Largo
+  cable 28 centimetros» —y lo repite en el código: «14-R8834.40.046» es la de 46 cm— y FISPA
+  «Cable de 48cm» o «LARGO DEL CABLE 530mm». Dos sondas del mismo auto con cables de 46 y 103
+  cm son dos sondas distintas (antes y después del catalizador, u otro motor). Tolerancia: 3 cm
+  o el 10%. Veto «largo de cable distinto», que se descarta de a grupo como variante.
+- **Las temperaturas de un bulbo** (`temperaturas_declaradas()`): «92º/82º», «temp. 102/97»,
+  y FISPA «Temp 86? 76?» con el signo de grado roto. Un bulbo de electroventilador de 92/82 no
+  reemplaza a uno de 102/97. Solo pares de 70 a 125 grados y en descripciones que hablan de
+  bulbo o temperatura.
+
+Y **la frase del largo del cable ya no cuenta como palabras en común**: «LARGO» y «CABLE»
+hacían concordar a cualquier sonda de CRI-FA con cualquiera de FISPA —una de Honda Fit
+«coincidía en LAMBDA, LARGO, SONDA, CABLE» con una de Ford Zetec—.
+
+Sobre la cola real: 254 pares con cables de largo distinto y 17 bulbos con otras temperaturas
+quedan vetados; 30 que estaban limpios pasan a descartarse, y 19 sondas que el abanico frenaba
+—porque competían con las de otro largo— pasan a limpias (Gol/Fox con Gol Trend/Fox, Honda
+Fit con Honda Fit, Berlingo con Berlingo).
+
 ## Una firma de foto podía ser un programa
 
 Las firmas visuales de las fotos se guardan con `pickle`, y `pickle` **no es un formato de

@@ -1686,6 +1686,43 @@ def _autos_guardados_en_la_base(producto_id, codigo_clean):
 
 # CABLES, TERMINALES y SALIDAS son lo mismo dicho por otras listas: «SONDA LAMBDA ... 4 CABLES»,
 # «Sensor de rotación ... 3 terminales», «Bulbo electroventilador ... 4 salidas».
+# EL LARGO DEL CABLE DE UNA SONDA. CRI-FA escribe «Largo cable 28 centimetros», «Largo del cable
+# 63 cm»; FISPA «Cable de 48cm», «LARGO DEL CABLE 530mm». Dos sondas del mismo auto con cables
+# de 28 y 48 cm son dos sondas distintas —antes y después del catalizador, o de otro motor—.
+_RE_LARGO_DE_CABLE = re.compile(
+    r'(?:LARGO\s+(?:DEL\s+)?CABLE|CABLE\s+DE)\s*:?\s*(\d{2,4})\s*(CM|CENTIMETROS?|MM)\b',
+    re.IGNORECASE)
+# LAS TEMPERATURAS DE UN BULBO: «92º/82º», «temp. 102/97», «95º/100º-76º/86º»; FISPA «Temp 86?
+# 76?» (el signo de grado llega roto). Un bulbo de electroventilador de 92/82 no reemplaza a uno
+# de 102/97 aunque vaya en el mismo auto: el ventilador arrancaría a otra temperatura.
+_RE_PAR_DE_TEMPERATURAS = re.compile(
+    r'(?<![\d.,])(\d{2,3})\s*[º°?]?\s*[/\- ]\s*(\d{2,3})\s*[º°?]?(?![\d.,])')
+_RE_HABLA_DE_TEMPERATURA = re.compile(r'\b(BULBO|TERMO|TERMOSTATO|TEMP|ELECTROVENT)', re.I)
+
+
+def largo_de_cable_mm(descripcion):
+    """El largo del cable que declara la descripción, en milímetros, o None."""
+    m = _RE_LARGO_DE_CABLE.search(descripcion or "")
+    if not m:
+        return None
+    valor = int(m.group(1))
+    return valor if m.group(2).upper() == "MM" else valor * 10
+
+
+def temperaturas_declaradas(descripcion):
+    """Las temperaturas de trabajo que declara un bulbo o un termostato, o un conjunto vacío.
+    Solo pares de 70 a 125 grados, y solo si la descripción habla de un bulbo o temperatura:
+    «1 6 16V» o «2 0 - 2 2» no son temperaturas."""
+    texto = descripcion or ""
+    if not _RE_HABLA_DE_TEMPERATURA.search(texto) or not re.search(r"[º°?]|TEMP", texto, re.I):
+        return set()
+    salida = set()
+    for x, y in _RE_PAR_DE_TEMPERATURAS.findall(texto):
+        if 70 <= int(x) <= 125 and 70 <= int(y) <= 125:
+            salida.update((int(x), int(y)))
+    return salida
+
+
 _RE_CANTIDAD_VIAS = re.compile(
     r'\b(\d{1,2})\s*(?:VIAS?|V[IÍ]AS?|PIN|PINES|BOCAS?|POLOS?|CONTACTOS?|CABLES|TERMINALES'
     r'|SALIDAS)\b', re.IGNORECASE)
@@ -1765,6 +1802,10 @@ def _firma_armada(descripcion, producto_id=None, codigo_clean=None):
     limpio = _expandir_abreviaturas_con_punto(limpio)
     limpio = _RE_PUNTO_ENTRE_LETRAS.sub(r"\1 \2", limpio)
     limpio = _RE_COMA_DECIMAL.sub(".", limpio)   # ver _RE_COMA_DECIMAL
+    # El largo del cable ya se lee aparte (ver largo_de_cable_mm()); como palabras, «LARGO» y
+    # «CABLE» hacían concordar a cualquier sonda de CRI-FA con cualquiera de FISPA: una de
+    # Honda Fit «coincidía en LAMBDA, LARGO, SONDA, CABLE» con una de Ford Zetec.
+    limpio = _RE_LARGO_DE_CABLE.sub(" ", limpio)
     palabras = [w for w in re.split(r"[^A-Z0-9./]+", limpio) if w]
 
     familia = clasificar_repuesto(texto)
@@ -1953,6 +1994,8 @@ def _firma_armada(descripcion, producto_id=None, codigo_clean=None):
             "pieza": pieza, "aplicacion": set(aplicacion),
             "modelos_numericos": modelos_numericos, "modelos": modelos, "marcas": marcas,
             "juego": tipo_de_juego_de_motor(texto), "sensor": tipos_de_sensor(texto),
+            "cable_mm": largo_de_cable_mm(descripcion),
+            "temperaturas": temperaturas_declaradas(descripcion),
             "motores_numericos": {a + b for a, b in _RE_MOTOR_NUMERICO.findall(limpio)},
             "cilindros": {int(n) for n in
                           _RE_CANTIDAD_DE_CILINDROS.findall(limpio)
@@ -2146,6 +2189,16 @@ def firmas_compatibles(a, b, minimo_nucleo=2, cuenta_palabras=None, total_descri
     # rubro, misma primera palabra, mismo tipo de conector, y no entra una donde va la otra.
     if a.get("vias") and b.get("vias") and a["vias"] != b["vias"]:
         return False, f"distinta cantidad de vías ({a['vias']} vs {b['vias']})"
+    # Ver _RE_LARGO_DE_CABLE: con una tolerancia de 3 cm o el 10%, lo que sea más, porque
+    # uno redondea y otro no.
+    _cab_a, _cab_b = a.get("cable_mm"), b.get("cable_mm")
+    if _cab_a and _cab_b and abs(_cab_a - _cab_b) > max(30, 0.1 * max(_cab_a, _cab_b)):
+        return False, f"largo de cable distinto ({_cab_a / 10:.0f} vs {_cab_b / 10:.0f} cm)"
+    # Ver _RE_PAR_DE_TEMPERATURAS.
+    _tem_a, _tem_b = a.get("temperaturas") or set(), b.get("temperaturas") or set()
+    if _tem_a and _tem_b and not (_tem_a & _tem_b):
+        return False, (f"temperaturas distintas ({'/'.join(map(str, sorted(_tem_a, reverse=True)))}"
+                       f" vs {'/'.join(map(str, sorted(_tem_b, reverse=True)))})")
 
     # Siglas técnicas: si las dos declaran una y no coinciden, son piezas distintas. Probado
     # con listas reales: sin esto se cruzaba «VALVULA PCV» con «VALVULA EGR» del mismo auto,
@@ -2464,6 +2517,7 @@ def pares_de_kit_y_pieza(pares):
 _MOTIVOS_QUE_CONTRADICEN = ("posiciones distintas", "siglas distintas", "autos distintos",
                             "marcas distintas", "modelos distintos", "cilindradas distintas",
                             "distinta cantidad de vías", "juegos distintos",
+                            "largo de cable distinto", "temperaturas distintas",
                             "piezas de lugares distintos", "sensores de tipos distintos",
                             "bujías de tipos distintos", "distinta cantidad de cilindros")
 # Los que hablan del AUTO. Esos no cuentan cuando el par está unido por un código: ver

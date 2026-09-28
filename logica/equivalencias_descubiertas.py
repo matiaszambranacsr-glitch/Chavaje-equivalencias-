@@ -1432,7 +1432,8 @@ _MOTIVOS_QUE_SE_DESCARTAN = ("🔤 ", "📐 NO coinciden", "🧯", "📦", "🧩
 _MOTIVO_DE_RECHAZO_DEL_GRUPO = (
     (("🔤 modelos distintos", "🔤 marcas distintas", "🔤 autos distintos",
       "🔤 cilindradas distintas", "🔤 distinta cantidad de cilindros"), "otro_auto"),
-    (("📐 NO coinciden", "🔤 distinta cantidad de vías"), "variante"),
+    (("📐 NO coinciden", "🔤 distinta cantidad de vías", "🔤 largo de cable distinto",
+      "🔤 temperaturas distintas"), "variante"),
     (("🔤 juegos distintos",), "juego"),
     (("🔤 piezas de lugares distintos", "🔤 sensores de tipos distintos",
       "🔤 bujías de tipos distintos", "🔤 posiciones distintas", "🔤 siglas distintas",
