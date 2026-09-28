@@ -1299,15 +1299,34 @@ def _modelos_conocidos():
     for mv in MARCAS_VEHICULO:
         modelos.update(w for w in mv.split() if len(w) >= 3)
     try:
-        c.execute("SELECT DISTINCT modelo_auto FROM aplicaciones LIMIT 3000")
+        # SIN TOPE. Había un LIMIT 3000, y la base real tiene 4.042 modelos distintos: el corte
+        # caía donde caía y dejaba afuera GOL, GOLF, POLO, MEGANE, LOGAN, KANGOO, HILUX,
+        # PASSAT y VENTO, los más vendidos. Sin ellos, «Sonda Lambda VW Gol» contra «SONDA
+        # LAMBDA VW PASSAT» no tenía modelo del que hablar y el par quedaba en «nada dice que
+        # sean la misma pieza» en vez de descartarse por modelos distintos. Son unos pocos
+        # miles de palabras: leerlas todas es instantáneo.
+        c.execute("SELECT DISTINCT modelo_auto FROM aplicaciones")
         for fila in c.fetchall():
             modelos.update(w for w in normalizar_texto(fila["modelo_auto"] or "").split()
                            if len(w) >= 3)
     except Exception as _err:
         anotar_error("_modelos_conocidos", _err)
         pass
+    # Palabras que aparecen en la columna de modelo de las aplicaciones y no son modelos: «desde
+    # 2008», «CLASE C COMPRESOR», «EURO 3», «ASTRA GLS». Con DESDE como modelo, una sonda de
+    # Corolla «desde 2008» salía de un auto llamado DESDE.
+    # Solo estas, a mano: sacar todo el vocabulario de pieza se llevaba también GALILEO y
+    # ZENITH, que son marcas de carburador y son justo lo que empareja «JUNTAS CHEV Y GALILEO»
+    # con el juego de juntas del carburador del Chevy.
+    modelos -= _PALABRAS_QUE_NO_SON_MODELOS
     _MODELOS_CACHE["lista"] = modelos
     return modelos
+
+
+_PALABRAS_QUE_NO_SON_MODELOS = frozenset({
+    "DESDE", "HASTA", "TODOS", "TODAS", "MODELOS", "MODELO", "VERSION", "VERSIONES", "MOTOR",
+    "COMPRESOR", "EURO", "GLS", "GLX", "CVT", "BSE", "CON", "SIN", "PARA",
+})
 
 
 class _ModelosLazy:
@@ -1803,6 +1822,10 @@ def _firma_armada(descripcion, producto_id=None, codigo_clean=None):
     # abreviaturas (CHEVROLET, FIAT, CHEV, PEU, REN), y por eso se descuentan.
     modelos = set()
     for w in palabras:
+        # Sin el punto final: CRI-FA escribe «Sonda lambda Toyota Corolla. 1.8-16 valvulas.», y
+        # «COROLLA.» no es COROLLA para la lista. Esa sonda quedaba sin modelo, y el único que
+        # le quedaba era «DESDE», de «Desde 2008».
+        w = w.strip("./")
         if len(w) >= 3 and w in MODELOS_CONOCIDOS:
             autos.add(w)
             if w not in _PALABRAS_DE_MARCA_DE_VEHICULO:
@@ -2103,8 +2126,15 @@ def firmas_compatibles(a, b, minimo_nucleo=2, cuenta_palabras=None, total_descri
     # una pieza que va en muchos autos, y cada proveedor anota los que quiere: que no se pisen
     # no dice que sean piezas distintas. Una junta de tapa de cilindros de S10 y Trail Blazer
     # contra una de Corsa, Astra y Tigra, sí.
-    if (_mod_a and _mod_b and not (_mod_a & _mod_b) and not apl_comunes
-            and len(_mod_a) <= 3 and len(_mod_b) <= 3):
+    # Y cuando UNA es específica —uno o dos modelos— alcanza con esa, aunque la otra sea una
+    # lista larga: «Sensor MAP Chevrolet Onix Prisma» contra «SENSOR MAP CHEVROLET CAPTIVA -
+    # LACETTI - NUBIRA...». Si la lista larga nombra veinte autos y ni uno es el de la corta, es
+    # el sensor de otros autos. Sobre la cola real eran 284 pares en «nada dice que sean la misma
+    # pieza», y en la muestra los 25 eran de autos distintos. Lo que las salva sigue igual: que
+    # el modelo de una esté escrito en cualquier lado de la otra, o un motor en común.
+    _especificas = ((len(_mod_a) <= 3 and len(_mod_b) <= 3)
+                    or min(len(_mod_a), len(_mod_b)) <= 2)
+    if (_mod_a and _mod_b and not (_mod_a & _mod_b) and not apl_comunes and _especificas):
         _texto_a, _texto_b = a.get("texto") or "", b.get("texto") or ""
         _lo_nombra = (any(re.search(rf'\b{re.escape(m)}\b', _texto_b) for m in _mod_a)
                       or any(re.search(rf'\b{re.escape(m)}\b', _texto_a) for m in _mod_b))

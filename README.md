@@ -4662,6 +4662,25 @@ Probado contra un portal simulado sobre la base real: dos pares del barrido que 
 juntos pasaron de «un solo método» a «dos métodos coinciden», y un sensor que la página nombraba
 al lado de una junta siguió vetado por rubros distintos.
 
+### 🚗 Los modelos más vendidos no se reconocían
+
+La lista de modelos conocidos salía de la columna de modelo de las aplicaciones **con un tope de
+3.000**, y la base real tiene 4.042: el corte caía donde caía y dejaba afuera GOL, GOLF, POLO,
+MEGANE, LOGAN, KANGOO, HILUX, PASSAT y VENTO. Además «Toyota Corolla.» —con el punto, como
+escribe CRI-FA— no se leía como COROLLA, y en cambio «DESDE» (de «desde 2008») sí contaba como
+modelo. Arreglado las tres cosas (`_modelos_conocidos()`, `_PALABRAS_QUE_NO_SON_MODELOS`).
+
+Con los modelos bien leídos, **«modelos distintos» alcanza con que UNA descripción sea
+específica** (uno o dos modelos), aunque la otra sea la lista larga de FISPA: «Sensor MAP
+Chevrolet Onix Prisma» contra «SENSOR MAP CHEVROLET CAPTIVA - LACETTI - NUBIRA...» es el sensor
+de otros autos. Lo que lo salva sigue igual: el modelo escrito en cualquier lado de la otra, o
+un motor en común.
+
+Sobre la cola real: «🤷 nada dice que sean la misma pieza» baja de 1.510 a 1.173 pares, y
+«modelos distintos» —que se descarta de un toque— sube de 259 a 593. En una muestra de 25 de los
+nuevos descartes, los 25 eran de autos distintos. Y el motivo del abanico ya no se parte en un
+grupo por cantidad («emparejado con 4», «con 5»…).
+
 ## Una firma de foto podía ser un programa
 
 Las firmas visuales de las fotos se guardan con `pickle`, y `pickle` **no es un formato de

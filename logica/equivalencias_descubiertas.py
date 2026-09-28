@@ -1691,6 +1691,11 @@ def tipo_de_alarma(alarma):
     if m:
         return (f"⚠️ Un código que apunta a más de un producto de {m.group(1)} — alguno de los "
                 "dos está mal cargado")
+    if alarma.startswith("🪭 "):
+        # «emparejado con 4 productos», «con 5», «con 6»...: cada cantidad era un grupo aparte, y
+        # en el barrido real eran 30 grupos de la misma cosa.
+        return ("🪭 Uno de los dos está emparejado con varios productos distintos de la otra "
+                "lista y este no es el que mejor coincide")
     if alarma.startswith("🧯 «") and "no es un código de fábrica" in alarma:
         return "🧯 Lo que se tomó como código de fábrica es un modelo, una medida o un año"
     if alarma.startswith("🚫 Código ") and " parece una " in alarma:
