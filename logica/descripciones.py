@@ -88,6 +88,8 @@ PALABRAS_DE_CONTEXTO = {
 # nombres de PIEZA: por eso este conjunto sirve para descartar modelos y NO sirve para
 # descartar palabras del núcleo de la firma, que es justo lo contrario.
 PALABRAS_NO_MODELO = {
+    # Lugar de la pieza que no estaba: ver _LUGARES_DE_LA_PIEZA.
+    "BOTADORES", "BOTADOR",
     "JUNTA", "JUNTAS", "JUEGO", "DESPIECE", "TAPA", "CILINDROS", "VALVULAS", "CARTER", "BOMBA",
     "ACEITE", "AGUA", "COMBUSTIBLE", "NAFTA", "TERMOSTATO", "RETEN", "ARO", "AROS", "PISTON",
     "CIL", "CILINDRO", "MOTOR", "SERIE", "PICK", "UP", "BUS", "CAMION", "TRACTOR", "DIESEL",
@@ -640,6 +642,10 @@ _RE_MOTOR_NUMERICO = re.compile(r'(?<![\d.,])(\d{1,2})[.\-](\d{2,3})(?![\d.,])')
 # Ver el control de firmas_compatibles(). «Junta para Cárter DEUTZ 913 TRACTOR 5 CIL.» contra
 # «JTA CARTER DEUTZ 913 3 CIL.»: el mismo motor en otra cantidad de cilindros tiene otro cárter.
 _RE_CANTIDAD_DE_CILINDROS = re.compile(r'\b(\d{1,2})\s*CIL(?:INDROS?|IND|S)?\b')
+# Y como escribe IMPERIAL: «JTA CARTER FIAT 400/500 - 3 C.», «JTA TERMOSTATO MWM X-10 4/6 C.»
+# (para 4 y 6 cilindros). Con el punto después de la C, y sin un punto ni un número pegado
+# adelante: «ORING 12x3.5 C.D.ACE» es una medida, no un motor de 5 cilindros.
+_RE_CILINDROS_CON_C = re.compile(r'(?<![\d.,/X])((?:\d/)*\d)\s*C\.(?!\w)')
 
 _MARCAS_DE_CARBURADOR = {"WEBER", "SOLEX", "HOLLEY", "STROMBERG", "ZENITH", "CARESA", "BROSOL",
                          "GALILEO", "IAVA", "EIES", "CARTER", "MOTORCRAFT", "ROCHESTER",
@@ -1803,6 +1809,26 @@ def _firma_armada(descripcion, producto_id=None, codigo_clean=None):
     for mv in MARCAS_VEHICULO:
         if f" {mv} " in f" {limpio} ":
             palabras_marca.update(mv.split())
+    # LOS MODELOS CON NÚMERO ESCRITOS CON BARRA: «J.DEERE 2420/2730», «FORD 350/351», «FIAT
+    # 1500/1600». La barra dejaba todo como una sola palabra y no era ni un número ni un modelo,
+    # así que «Jgo.Jtas.Caja JHON DEERE 4220-2530» contra «JTA T.C. J.DEERE 2420/2730» no tenía
+    # modelos que comparar. Cada número de la barra cuenta como si viniera después de la marca.
+    # Y la marca con punto —«J.DEERE», «M.BENZ»— cuenta como la marca.
+    def _es_de_marca(tok):
+        return tok in palabras_marca or any(len(p) >= 3 and p in palabras_marca
+                                            for p in tok.split("."))
+    anterior = {}
+    _con_barra = []
+    for _i, _w in enumerate(palabras):
+        _partes = _w.split("/")
+        if len(_partes) > 1 and all(_RE_2_A_4_DIGITOS.fullmatch(x) for x in _partes):
+            for _x in _partes:
+                anterior[len(_con_barra)] = palabras[_i - 1] if _i else ""
+                _con_barra.append(_x)
+        else:
+            anterior[len(_con_barra)] = palabras[_i - 1] if _i else ""
+            _con_barra.append(_w)
+    palabras = _con_barra
     for indice, w in enumerate(palabras):
         # «4 y 6 CIL» es la CANTIDAD de cilindros del motor, no la pieza. Sin esto, «Juego de
         # juntas para Caja de Velocidad PEUGEOT 504 INDENOR DIESEL 4 y 6 CIL» entraba al
@@ -1835,7 +1861,7 @@ def _firma_armada(descripcion, producto_id=None, codigo_clean=None):
         # no sea un año. Los de FISPA, que escriben la cilindrada separada («FIAT PALIO 1 3»),
         # no entran: son de un dígito y acá se piden dos.
         es_modelo_numerico = (_RE_2_A_4_DIGITOS.fullmatch(w) and indice
-                              and palabras[indice - 1] in palabras_marca
+                              and _es_de_marca(anterior.get(indice, ""))
                               and not _RE_UN_ANIO.fullmatch(w))
         if (w in _RUIDO_EN_FIRMA or w in palabras_marca or w in _POSICIONES
                 or w in MARCAS_DE_REPUESTO
@@ -1928,7 +1954,10 @@ def _firma_armada(descripcion, producto_id=None, codigo_clean=None):
             "modelos_numericos": modelos_numericos, "modelos": modelos, "marcas": marcas,
             "juego": tipo_de_juego_de_motor(texto), "sensor": tipos_de_sensor(texto),
             "motores_numericos": {a + b for a, b in _RE_MOTOR_NUMERICO.findall(limpio)},
-            "cilindros": {int(n) for n in _RE_CANTIDAD_DE_CILINDROS.findall(limpio)
+            "cilindros": {int(n) for n in
+                          _RE_CANTIDAD_DE_CILINDROS.findall(limpio)
+                          + [x for grupo in _RE_CILINDROS_CON_C.findall(limpio)
+                             for x in grupo.split("/")]
                           if 1 <= int(n) <= 16},
             "bujia": tipo_de_bujia(texto),
             "siglas": siglas, "marca_auto": marca_auto, "posicion": posicion,
@@ -2021,6 +2050,9 @@ _LUGARES_DE_LA_PIEZA = {
     # cortan cuando cada lado nombra uno que el otro no: «Jta carter aceite» contra «Junta para
     # Cárter» sigue pasando.
     "AGUA", "ACEITE",
+    # «JTA LATERAL BOTADORES» y «JTA LATERAL T.V.» son dos tapas distintas del motor. (CAJA no
+    # entra: está entre las palabras que no cuentan, por «caja x 10 unidades».)
+    "BOTADORES",
 }
 
 # Ver «la marca sola no alcanza» en firmas_compatibles().

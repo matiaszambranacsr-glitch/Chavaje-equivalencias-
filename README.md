@@ -4823,6 +4823,22 @@ de un toque.
 **Y los kits que dicen la cantidad** —«KIT BOB BUJ (LEIG030 X 4/LSPR6F13)»— también se reconocen
 como kit con sus componentes.
 
+### 🚜 Modelos con barra, cilindros como «4 C.» y botadores
+
+Tres formas de escribir que la app no leía, casi todas de IMPERIAL y de las juntas de tractor y
+camión:
+
+- **Los modelos con número y barra**: «J.DEERE 2420/2730», «FIAT 128/147», «FIAT 1500/1600». La
+  barra dejaba todo como una sola palabra que no era ni número ni modelo, y la marca con punto
+  («J.DEERE», «M.BENZ») tampoco contaba como marca. Ahora cada número cuenta como modelo.
+  24 pares pasan a limpios —el cárter del Fiat 128/147 con el de Illinois, el del 1500/1600, el
+  de John Deere 3420/4220— y 3 se descartan por modelos distintos.
+- **Los cilindros como «3 C.» o «4/6 C.»** (para 4 y 6 cilindros), además de «4 CIL.». Con el
+  punto después de la C y sin un número pegado adelante: «ORING 12x3.5 C.D.ACE» es una medida.
+  El cárter del Fiat tractor 400 de 4 cilindros ya no se da por igual al de 3.
+- **BOTADORES** como lugar de la pieza: «JTA LATERAL BOTADORES» y «JTA LATERAL T.V.» son dos
+  tapas distintas.
+
 ## Una firma de foto podía ser un programa
 
 Las firmas visuales de las fotos se guardan con `pickle`, y `pickle` **no es un formato de

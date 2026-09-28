@@ -736,6 +736,8 @@ PALABRAS_DE_CONTEXTO = {
 # nombres de PIEZA: por eso este conjunto sirve para descartar modelos y NO sirve para
 # descartar palabras del núcleo de la firma, que es justo lo contrario.
 PALABRAS_NO_MODELO = {
+    # Lugar de la pieza que no estaba: ver _LUGARES_DE_LA_PIEZA.
+    "BOTADORES", "BOTADOR",
     "JUNTA", "JUNTAS", "JUEGO", "DESPIECE", "TAPA", "CILINDROS", "VALVULAS", "CARTER", "BOMBA",
     "ACEITE", "AGUA", "COMBUSTIBLE", "NAFTA", "TERMOSTATO", "RETEN", "ARO", "AROS", "PISTON",
     "CIL", "CILINDRO", "MOTOR", "SERIE", "PICK", "UP", "BUS", "CAMION", "TRACTOR", "DIESEL",
