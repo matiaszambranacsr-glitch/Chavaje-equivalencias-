@@ -1009,6 +1009,16 @@ Administrar → Mantenimiento.
             mn3.metric("🟠 Dudosas", len(por_nivel["🟠"]))
             mn4.metric("🔴 Casi seguro mal", len(por_nivel["🔴"]))
 
+            # 🧭 EL PLAN. Ver plan_de_la_lista(): qué conviene hacer primero y cuánto trabajo
+            # lleva cada paso, para no tener que descubrirlo recorriendo la pantalla.
+            _plan = plan_de_la_lista(limpias, sospechosas, relacionadas)
+            if _plan:
+                with st.expander("🧭 Cómo resolver esta lista, paso a paso", expanded=True):
+                    st.dataframe(_plan, width="stretch", hide_index=True)
+                    st.caption("De arriba hacia abajo: cada paso achica lo que queda para los "
+                               "siguientes. Los que dicen «1 toque» no necesitan mirar par por "
+                               "par; los de muestra, solo los que la app elige al azar.")
+
             # Cuando el problema es UN producto que aparece en decenas de pendientes, se resuelve
             # de una. Antes había que aprobar o descartar cada vínculo por separado, aunque los
             # cincuenta dijeran exactamente lo mismo.

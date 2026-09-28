@@ -1717,6 +1717,55 @@ def es_de_un_abanico(fila):
     return any(a.startswith("🪭") for a in (fila.get("alarmas") or []))
 
 
+def plan_de_la_lista(limpias, sospechosas, relacionadas):
+    """Los pasos para resolver una lista, en el orden que conviene, con cuántos pares resuelve
+    cada uno y cuánto trabajo a mano lleva. [{"Paso", "Pares", "Trabajo", "Dónde"}].
+
+    La pantalla de revisión tiene cinco herramientas —los kits, los descartes por motivo, las
+    muestras de las limpias, las muestras de las dudas y los abanicos— y con 28.000 pares no
+    era obvio por dónde empezar. El orden va de lo que se resuelve de un toque a lo que hay que
+    mirar, porque cada paso achica lo que queda para los siguientes."""
+    pasos = []
+    if relacionadas:
+        pasos.append({"Paso": "📦 Descartar kits y accesorios", "Pares": len(relacionadas),
+                      "Trabajo": "1 toque", "Dónde": "el cartel de arriba"})
+    en_revision = [x for x in sospechosas
+                   if not (x.get("alarmas") and all(a.startswith("🪭") for a in x["alarmas"]))]
+    grupos_mot = grupos_por_motivo(en_revision)
+    descartar = [g for g in grupos_mot if g[1] == "descartar"]
+    con_muestra = [g for g in grupos_mot if g[1] == "muestra"]
+    if descartar:
+        pasos.append({"Paso": "🚫 Descartar lo que el texto contradice",
+                      "Pares": sum(len(g[2]) for g in descartar),
+                      "Trabajo": f"{len(descartar)} toque(s), mirando unos ejemplos",
+                      "Dónde": "📋 Para revisar, por motivo"})
+    grupos_l = grupos_de_limpias(limpias)
+    if grupos_l:
+        marcas = sum(min(len(f), tamano_de_la_muestra(len(f))) for _a, _b, f in grupos_l)
+        pasos.append({"Paso": "🎯 Aprobar las limpias con su muestra",
+                      "Pares": len(limpias),
+                      "Trabajo": f"{marcas:,} marcas en {len(grupos_l)} muestra(s)",
+                      "Dónde": "🎯 Aprobar las limpias por grupos"})
+    if con_muestra:
+        marcas = sum(min(len(g[2]), tamano_de_la_muestra(len(g[2]))) for g in con_muestra)
+        pasos.append({"Paso": "🔍 Resolver las dudas con una muestra",
+                      "Pares": sum(len(g[2]) for g in con_muestra),
+                      "Trabajo": f"{marcas:,} marcas en {len(con_muestra)} muestra(s)",
+                      "Dónde": "📋 Para revisar, por motivo"})
+    abanicos = abanicos_para_elegir(limpias, sospechosas)
+    if abanicos:
+        # Solo los que están en revisión ÚNICAMENTE por el abanico: el mejor candidato, si
+        # quedó limpio, ya se contó con las limpias, y los que además tienen otro motivo, con
+        # su motivo.
+        pasos.append({"Paso": "🪭 Elegir la equivalente entre varias",
+                      "Pares": len({(f["a"], f["b"]) for a in abanicos for f in a["candidatos"]
+                                    if f.get("alarmas")
+                                    and all(x.startswith("🪭") for x in f["alarmas"])}),
+                      "Trabajo": f"{len(abanicos):,} producto(s), uno por uno",
+                      "Dónde": "🪭 Elegí cuál es la equivalente"})
+    return pasos
+
+
 def abanicos_para_elegir(limpias, sospechosas):
     """Los productos que tienen varios candidatos DISTINTOS en otra lista, para elegir a mano.
 

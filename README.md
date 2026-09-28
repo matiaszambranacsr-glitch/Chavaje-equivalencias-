@@ -4955,6 +4955,21 @@ Los autos que la base sabe de cada producto (aplicaciones y lo que el taller le 
 vehículo) también se precargan por tandas con los mismos topes: eran dos consultas por producto.
 FISPA queda en 7,0 s la primera vez y 2,7 las siguientes; el barrido en 2,9 y 2,1.
 
+### 🧭 Cómo resolver esta lista, paso a paso
+
+La pantalla de revisión tiene cinco herramientas —los kits y accesorios, los descartes por
+motivo, las muestras de las limpias, las muestras de las dudas y los abanicos— y con miles de
+pares no era obvio por dónde empezar. Arriba de todo, debajo de los contadores de confianza,
+ahora hay un plan (`plan_de_la_lista()`): los pasos en el orden que conviene —de lo que se
+resuelve de un toque a lo que hay que mirar—, cuántos pares resuelve cada uno, cuánto trabajo a
+mano lleva y en qué parte de la pantalla está. Cada par se cuenta una sola vez: los pasos suman
+el total de la lista.
+
+En el barrido real: 4.360 pares se descartan en 13 toques; 1.879 limpias se aprueban con 307
+marcas en 10 muestras; 1.551 dudas se resuelven con 385 marcas en 22 muestras; y quedan 698
+productos para elegir a mano entre varios candidatos (3.109 pares). En la lista de FISPA, 12.790
+limpias se aprueban con una sola muestra de 80.
+
 ## Una firma de foto podía ser un programa
 
 Las firmas visuales de las fotos se guardan con `pickle`, y `pickle` **no es un formato de
