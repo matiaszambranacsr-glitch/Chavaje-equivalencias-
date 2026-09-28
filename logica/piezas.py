@@ -232,6 +232,20 @@ ETIQUETAS_DE_MEDIDA = {
 def productos_con_medidas_deducibles(limite=500):
     """Productos a los que se les puede leer la medida de la descripción y que todavía la tienen
     vacía. Nunca toca lo cargado a mano: si alguien ya midió la pieza, ese dato manda."""
+    return medidas_deducibles_desde(0, limite)[0]
+
+
+def medidas_deducibles_desde(desde_id, limite=2000):
+    """Lo mismo que productos_con_medidas_deducibles(), mirando solo los productos con id mayor
+    que `desde_id`. Devuelve (filas, hasta_id): hasta dónde llegó a mirar, para seguir de ahí.
+
+    Antes cada tanda de 2.000 volvía a empezar del principio: traía a memoria TODOS los
+    productos con alguna medida vacía (casi todos) y releía de nuevo las descripciones que ya
+    se sabía que no dicen ninguna medida. Con 85.000 productos no se notaba (3 s); con 60
+    proveedores —659.000— eran 172 s y 1,3 GB, y el descubrimiento de después de importar se
+    gastaba todo su tiempo en este paso sin llegar a ninguno de los otros seis. Ahora se lee de
+    a pedazos y en orden, y cada tanda sigue donde terminó la anterior."""
+    hasta_id = desde_id
     try:
         c.execute("""SELECT p.id AS "_id", p.codigo_raw AS "Código", m.nombre AS "Marca",
                             p.descripcion AS "Descripción",
@@ -239,18 +253,27 @@ def productos_con_medidas_deducibles(limite=500):
                             p.cantidad_estrias, p.diametro_rosca_homocinetica, p.paso_rosca,
                             p.espesor, p.cantidad_vias, p.cantidad_canales, p.posicion
                      FROM productos p JOIN marcas m ON m.id = p.marca_id
-                     WHERE p.descripcion IS NOT NULL AND p.descripcion <> ''
+                     WHERE p.id > ? AND p.descripcion IS NOT NULL AND p.descripcion <> ''
                        AND (p.diametro_interno IS NULL OR p.diametro_externo IS NULL
                             OR p.ancho IS NULL OR p.cantidad_estrias IS NULL
                             OR p.espesor IS NULL OR p.cantidad_vias IS NULL
-                            OR p.cantidad_canales IS NULL OR p.posicion IS NULL)""")
-        filas = filas_a_listas(c)
+                            OR p.cantidad_canales IS NULL OR p.posicion IS NULL)
+                     ORDER BY p.id""", (desde_id,))
     except sqlite3.OperationalError as _err:
         anotar_error("productos_con_medidas_deducibles", _err)
-        return []
+        return [], desde_id
+
+    def _filas():
+        while True:
+            pedazo = c.fetchmany(1000)
+            if not pedazo:
+                return
+            for r in pedazo:
+                yield dict(r)
 
     salida = []
-    for f in filas:
+    for f in _filas():
+        hasta_id = f["_id"]
         ceder_al_mostrador()
         leidas = medidas_desde_descripcion(f["Descripción"])
         # Solo lo que está VACÍO hoy. Lo cargado a mano no se pisa nunca.
@@ -271,8 +294,9 @@ def productos_con_medidas_deducibles(limite=500):
         f["_nuevas"] = nuevas
         salida.append(f)
         if len(salida) >= limite:
-            break
-    return salida
+            return salida, hasta_id
+    # Llegó al final: todo lo que hay hasta el último producto quedó mirado.
+    return salida, max(hasta_id, c.execute("SELECT COALESCE(MAX(id), 0) FROM productos").fetchone()[0])
 
 
 def aplicar_medidas_deducidas(filas):

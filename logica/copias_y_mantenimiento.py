@@ -1391,6 +1391,20 @@ es una base SQLite que se abre con la app (Backup y config -> Restaurar).
 """
 
 
+def _cuerpo_json_con_base64(campos, clave, datos):
+    """El cuerpo JSON de la subida, armado en bytes: {campos..., clave: base64(datos)}.
+
+    Con json= de requests, el base64 existía cuatro veces en memoria a la vez (bytes, texto,
+    el JSON como texto y el JSON en bytes). Con 60 proveedores la copia comprimida pesa 58 MB
+    y el base64 77 MB: eran ~300 MB solo para subirla, en un servidor que tiene poca. Así
+    queda en dos. El base64 no lleva comillas ni barras que escapar."""
+    import base64
+    cabeza = json.dumps(campos, ensure_ascii=True)[:-1]
+    separador = ", " if campos else ""
+    return b"".join([cabeza.encode(), separador.encode(), json.dumps(clave).encode(), b': "',
+                     base64.b64encode(datos), b'"}'])
+
+
 def _subir_a_la_rama_de_copias(cfg, datos, mensaje, cabeceras):
     """Sube la copia como el ÚNICO commit de la rama de copias, reemplazando al anterior.
 
@@ -1398,10 +1412,9 @@ def _subir_a_la_rama_de_copias(cfg, datos, mensaje, cabeceras):
     commits encima. Acá se arma un commit sin padres con el archivo y un LEEME, y la rama se
     mueve a ese commit a la fuerza. El commit viejo queda sin nadie que lo apunte y GitHub lo
     limpia solo. Devuelve (ok, código de respuesta, detalle)."""
-    import base64
     base = f"{API_DE_GITHUB}/repos/{cfg['repo']}/git"
-    r = requests.post(f"{base}/blobs", headers=cabeceras, timeout=120,
-                      json={"content": base64.b64encode(datos).decode(), "encoding": "base64"})
+    r = requests.post(f"{base}/blobs", headers={**cabeceras, "Content-Type": "application/json"},
+                      timeout=120, data=_cuerpo_json_con_base64({"encoding": "base64"}, "content", datos))
     if r.status_code != 201:
         return False, r.status_code, r.text[:200]
     r = requests.post(f"{base}/trees", headers=cabeceras, timeout=30, json={"tree": [
@@ -1425,7 +1438,6 @@ def _subir_a_la_rama_de_copias(cfg, datos, mensaje, cabeceras):
 
 
 def _subir_backup_a_github(cfg, datos_db, mensaje):
-    import base64
     url = f"{API_DE_GITHUB}/repos/{cfg['repo']}/contents/{cfg['archivo']}"
     cabeceras = {"Authorization": f"Bearer {cfg['token']}",
                  "Accept": "application/vnd.github+json"}
@@ -1454,14 +1466,11 @@ def _subir_backup_a_github(cfg, datos_db, mensaje):
 
         # GitHub exige el sha del archivo que se reemplaza; si no existe todavía, se crea
         sha = _sha_en_github(cfg, url, cabeceras)
-        cuerpo = {
-            "message": mensaje,
-            "content": base64.b64encode(contenido).decode(),
-            "branch": cfg["rama"],
-        }
+        cuerpo = {"message": mensaje, "branch": cfg["rama"]}
         if sha:
             cuerpo["sha"] = sha
-        r = requests.put(url, headers=cabeceras, json=cuerpo, timeout=90)
+        r = requests.put(url, headers={**cabeceras, "Content-Type": "application/json"},
+                         data=_cuerpo_json_con_base64(cuerpo, "content", contenido), timeout=90)
         if r.status_code in (200, 201):
             guardar_config("ultimo_backup_github",
                            datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
@@ -1862,14 +1871,19 @@ def descubrimiento_post_importacion(presupuesto_segundos=PRESUPUESTO_DESCUBRIMIE
     if queda_tiempo():
         try:
             _completados = 0
+            # Sigue desde donde quedó la vez anterior: lo ya mirado no se vuelve a leer (ver
+            # medidas_deducibles_desde()). Una relectura entera la pide medidas_pendientes.
+            _desde = int(obtener_config("medidas_revisadas_hasta", "0") or 0)
             while queda_tiempo():
-                _pend_med = productos_con_medidas_deducibles(limite=2000)
-                if not _pend_med:
-                    break
-                _aplic = aplicar_medidas_deducidas(_pend_med)
+                _pend_med, _hasta = medidas_deducibles_desde(_desde, limite=2000)
+                _aplic = aplicar_medidas_deducidas(_pend_med) if _pend_med else 0
                 _completados += _aplic
-                if not _aplic:
+                if _pend_med and not _aplic:
                     break      # ver el mismo caso en _trabajo_de_fondo()
+                guardar_config("medidas_revisadas_hasta", str(_hasta))
+                if _hasta <= _desde or len(_pend_med) < 2000:
+                    break      # llegó al final
+                _desde = _hasta
             if _completados:
                 hecho.append(f"{_completados:,} producto(s) con las medidas leídas de su "
                              "descripción")
@@ -1949,7 +1963,9 @@ def descubrimiento_post_importacion(presupuesto_segundos=PRESUPUESTO_DESCUBRIMIE
 
     if queda_tiempo():
         try:
-            _der = derivar_equivalencias_de_aplicaciones()
+            _der = derivar_equivalencias_de_aplicaciones(
+                solo_lo_nuevo=True,
+                tope_segundos=max(5, presupuesto_segundos - (time.time() - arranque)))
             if _der:
                 _n = guardar_equivalencias_derivadas(
                     [(x["_a"], x["_b"]) for x in _der],

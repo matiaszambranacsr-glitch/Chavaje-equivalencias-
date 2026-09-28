@@ -3416,7 +3416,8 @@ def sugerir_entre_todas_las_marcas(limite=TOPE_SUGERENCIAS_TODAS, tope_palabra=2
     return _mejores_primero(salida)[:limite]
 
 
-def derivar_equivalencias_de_aplicaciones(limite=500, minimo_autos=2):
+def derivar_equivalencias_de_aplicaciones(limite=500, minimo_autos=2, solo_lo_nuevo=False,
+                                           tope_segundos=None):
     """Deduce equivalencias cruzando los catálogos de aplicaciones de distintos fabricantes.
 
     El razonamiento: si NGK dice que su bujía U2003 va en un Palio 1.0 2003-2006, y Bosch dice
@@ -3447,8 +3448,67 @@ def derivar_equivalencias_de_aplicaciones(limite=500, minimo_autos=2):
     146 al pedirles además que las descripciones coincidan. Lo que se va es justo eso: cinco
     sondas lambda distintas colgadas del mismo código de Bosch por ir a los mismos 13 autos.
 
-    No las carga: las deja como pendientes para que pasen por la misma revisión que el resto."""
-    c.execute("""SELECT a.codigo_clean AS cod_a, a.marca_repuesto AS marca_a,
+    No las carga: las deja como pendientes para que pasen por la misma revisión que el resto.
+
+    SOLO LO NUEVO (solo_lo_nuevo=True), que es como corre solo después de cada importación.
+    El cruce es de todos contra todos dentro de cada auto, así que crece con el CUADRADO del
+    catálogo: hoy son 53 millones de combinaciones, y con 60 proveedores serían 1.800 millones
+    —«FORD FIESTA» sola tendría 12.000 filas—. Medido así, el paso no terminó en 12 minutos
+    y trababa todo lo que venía después. Y encima era trabajo tirado: repetido entero devuelve
+    los mismos mejores pares, que ya estaban en revisión. Ahora cruza solo los códigos con
+    aplicaciones nuevas, o que llegaron en productos nuevos, contra todo el resto; el botón de
+    Administrar sigue haciendo el cruce entero.
+
+    tope_segundos corta la consulta si se pasa (devuelve [] y lo anota): un solo SELECT no se
+    puede frenar desde afuera, y el presupuesto de la tanda solo se mira ENTRE pasos."""
+    desde_aplic = desde_prod = 0
+    hasta_aplic = c.execute("SELECT COALESCE(MAX(id), 0) FROM aplicaciones").fetchone()[0]
+    hasta_prod = c.execute("SELECT COALESCE(MAX(id), 0) FROM productos").fetchone()[0]
+    if solo_lo_nuevo:
+        desde_aplic = int(obtener_config("aplicaciones_cruzadas_hasta", "0") or 0)
+        desde_prod = int(obtener_config("productos_cruzados_por_auto_hasta", "0") or 0)
+        if desde_aplic >= hasta_aplic and desde_prod >= hasta_prod:
+            return []
+    # La primera vez (sin marca) es el cruce entero, como el botón.
+    incremental = solo_lo_nuevo and (desde_aplic or desde_prod)
+    filtro_nuevos = ("""AND a.codigo_clean IN (
+                            SELECT codigo_clean FROM aplicaciones WHERE id > ?
+                            UNION SELECT codigo_clean FROM productos WHERE id > ?)"""
+                     if incremental else "")
+    orden = "a.codigo_clean <> b.codigo_clean" if incremental else "a.codigo_clean < b.codigo_clean"
+    parametros = (([desde_aplic, desde_prod] if incremental else [])
+                  + [minimo_autos, limite * 4 if incremental else limite])
+    try:
+        with consulta_con_tope(tope_segundos):
+            candidatos = _candidatos_por_auto(filtro_nuevos, orden, parametros)
+    except sqlite3.OperationalError as _err:
+        if "interrupt" not in str(_err).lower():
+            raise
+        anotar_error("derivar_equivalencias_de_aplicaciones/tope", _err)
+        candidatos = None
+    if solo_lo_nuevo:
+        # También si se cortó: si no, cada tanda volvería a intentar el mismo cruce entero,
+        # gastaría el tope completo y se cortaría otra vez, para siempre. Lo que quedó sin
+        # cruzar lo hace el botón de Administrar.
+        guardar_config("aplicaciones_cruzadas_hasta", str(hasta_aplic))
+        guardar_config("productos_cruzados_por_auto_hasta", str(hasta_prod))
+    if candidatos is None:
+        return []
+    if incremental:
+        # El par (a, b) y el (b, a) salen los dos cuando los dos códigos son nuevos.
+        vistos, unicos = set(), []
+        for x in candidatos:
+            clave = tuple(sorted((x["cod_a"], x["cod_b"])))
+            if clave not in vistos:
+                vistos.add(clave)
+                unicos.append(x)
+        candidatos = unicos[:limite]
+    return _equivalencias_de_candidatos_por_auto(candidatos)
+
+
+def _candidatos_por_auto(filtro_nuevos, orden, parametros):
+    """El cruce de aplicaciones: ver derivar_equivalencias_de_aplicaciones()."""
+    c.execute(f"""SELECT a.codigo_clean AS cod_a, a.marca_repuesto AS marca_a,
                         b.codigo_clean AS cod_b, b.marca_repuesto AS marca_b,
                         COUNT(DISTINCT a.marca_auto || '|' || a.modelo_auto || '|' || a.motor) AS autos
                  FROM aplicaciones a
@@ -3479,16 +3539,24 @@ def derivar_equivalencias_de_aplicaciones(limite=500, minimo_autos=2):
                   -- porque las filas viejas lo tienen en NULL y en SQL dos NULL nunca son
                   -- iguales: sin esto, esas filas dejarían de cruzarse entre ellas.
                   AND COALESCE(a.combustible,'') = COALESCE(b.combustible,'')
-                  AND COALESCE(a.tipo_pieza,'') = COALESCE(b.tipo_pieza,'')
+                  -- Igualdad directa y no con COALESCE: a.tipo_pieza nunca es vacío (ver el
+                  -- WHERE), así que da lo mismo, y así usa idx_aplic_auto_pieza y solo cruza
+                  -- piezas del mismo tipo. Son 14 veces menos combinaciones que recorrer.
+                  AND b.tipo_pieza = a.tipo_pieza
                   AND a.marca_repuesto <> b.marca_repuesto
-                  AND a.codigo_clean < b.codigo_clean
+                  AND {orden}
                  WHERE COALESCE(a.tipo_pieza,'') <> ''
                    AND a.marca_repuesto <> 'OEM / FABRICA'
                    AND b.marca_repuesto <> 'OEM / FABRICA'
+                   {filtro_nuevos}
                  GROUP BY a.codigo_clean, b.codigo_clean
                  HAVING autos >= ?
-                 ORDER BY autos DESC LIMIT ?""", (minimo_autos, limite))
-    candidatos = filas_a_listas(c)
+                 ORDER BY autos DESC LIMIT ?""", parametros)
+    return filas_a_listas(c)
+
+
+def _equivalencias_de_candidatos_por_auto(candidatos):
+    """Los candidatos del cruce, llevados a productos del catálogo y filtrados por descripción."""
 
     # Solo sirven los que además existen en el catálogo propio: proponer una equivalencia entre
     # dos códigos que no tenés cargados no le sirve a nadie.

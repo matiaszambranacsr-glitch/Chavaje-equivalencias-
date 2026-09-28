@@ -535,6 +535,9 @@ def _esquema_mostrador(c):
         c.execute("ALTER TABLE aplicaciones ADD COLUMN tipo_pieza TEXT")
     c.execute("CREATE INDEX IF NOT EXISTS idx_aplic_auto ON aplicaciones(marca_auto, modelo_auto)")
     c.execute("CREATE INDEX IF NOT EXISTS idx_aplic_codigo ON aplicaciones(codigo_clean)")
+    # Para el cruce por auto: ver derivar_equivalencias_de_aplicaciones().
+    c.execute("CREATE INDEX IF NOT EXISTS idx_aplic_auto_pieza "
+              "ON aplicaciones(marca_auto, modelo_auto, tipo_pieza)")
 
     c.execute("""CREATE TABLE IF NOT EXISTS importaciones (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -2497,6 +2500,23 @@ c = _CursorPorSesion(conn)
 # ============================================================
 # TODO O NADA: operaciones que son de varias sentencias
 # ============================================================
+@contextlib.contextmanager
+def consulta_con_tope(segundos):
+    """Corta con sqlite3.OperationalError («interrupted») lo que se ejecute adentro si tarda
+    más de `segundos`. None: sin tope. Es por conexión, y la conexión es por hilo (ver
+    _ConexionPorSesion): no toca las consultas de nadie más."""
+    if not segundos:
+        yield
+        return
+    conexion = conn.conexion_real()
+    limite = time.monotonic() + segundos
+    conexion.set_progress_handler(lambda: 1 if time.monotonic() > limite else 0, 20000)
+    try:
+        yield
+    finally:
+        conexion.set_progress_handler(None, 0)
+
+
 @contextlib.contextmanager
 def transaccion():
     """Varias sentencias que tienen que valer TODAS o NINGUNA.

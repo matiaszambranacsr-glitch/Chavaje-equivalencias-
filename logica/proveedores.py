@@ -2151,6 +2151,11 @@ SEGUNDOS_DE_PREFERENCIA = 20
 _HILO_DE_FONDO = threading.local()
 
 
+# Tope del cruce por auto cuando corre solo en la tanda de fondo: ver
+# derivar_equivalencias_de_aplicaciones(). Hoy tarda menos de un minuto entero.
+SEGUNDOS_DEL_CRUCE_POR_AUTO = 300
+
+
 def ceder_al_mostrador():
     """Si esto corre en la tarea de fondo y alguien está esperando una pantalla, espera a que
     termine de dibujarse (con el tope de SEGUNDOS_DE_PREFERENCIA). En cualquier otro hilo no
@@ -2208,17 +2213,20 @@ def _trabajo_de_fondo():
     if _hay_que_hacerlo("medidas_pendientes"):
         try:
             _n_med = 0
-            # Con tope de vueltas, no `while True`. Esto corre en un hilo de fondo: si alguna
-            # vez el lector devuelve una medida que la escritura no deja guardada —una columna
-            # que no existe, un valor que vuelve NULL—, la consulta devuelve las MISMAS filas
-            # para siempre y el hilo queda girando sin que nadie lo vea. 2.000 por vuelta y
-            # 100 vueltas son 200.000 productos, casi el triple del catálogo real.
-            for _ in range(100):
-                _tanda_med = productos_con_medidas_deducibles(limite=2000)
-                if not _tanda_med:
-                    break
-                _aplicadas = aplicar_medidas_deducidas(_tanda_med)
+            # De punta a punta una vez, siguiendo cada tanda donde terminó la anterior (ver
+            # medidas_deducibles_desde()). Al terminar queda todo mirado. Cada vuelta avanza
+            # sí o sí, así que no puede girar sobre las mismas filas; el tope de vueltas y el
+            # corte si no se guarda nada quedan igual, por las dudas: esto corre en un hilo de
+            # fondo y si se trabara no lo vería nadie.
+            _desde = 0
+            for _ in range(100000):
+                _tanda_med, _hasta = medidas_deducibles_desde(_desde, limite=2000)
+                _aplicadas = aplicar_medidas_deducidas(_tanda_med) if _tanda_med else 0
                 _n_med += _aplicadas
+                if len(_tanda_med) < 2000 or _hasta <= _desde:
+                    guardar_config("medidas_revisadas_hasta", str(_hasta))
+                    break
+                _desde = _hasta
                 if not _aplicadas:
                     # Hay filas para completar y no se completó ninguna: seguir es girar.
                     anotar_error("_trabajo_de_fondo/medidas",
@@ -2268,7 +2276,8 @@ def _trabajo_de_fondo():
                 # abrir la app y encontrarlos parece que algo se rompió.
                 # El barrido sigue corriendo después de cada importación, como siempre.
                 try:
-                    _por_auto = derivar_equivalencias_de_aplicaciones()
+                    _por_auto = derivar_equivalencias_de_aplicaciones(
+                        solo_lo_nuevo=True, tope_segundos=SEGUNDOS_DEL_CRUCE_POR_AUTO)
                     if _por_auto:
                         _n_auto = guardar_equivalencias_derivadas(
                             [(x["_a"], x["_b"]) for x in _por_auto],
