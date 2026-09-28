@@ -2294,6 +2294,15 @@ def _trabajo_de_fondo():
             # La bandera sigue prendida: se reintenta en el próximo arranque, hasta el tope.
             anotar_error("_trabajo_de_fondo/confianza", _err)
 
+    # Una lista enorme recién importada: su análisis va ANTES del descubrimiento (que puede
+    # tardar dos minutos), porque quien la importó es probable que vaya derecho a revisarla.
+    if obtener_config("lote_a_analizar", ""):
+        try:
+            ceder_al_mostrador()
+            preparar_el_analisis_del_primer_lote()
+        except Exception as _err:
+            anotar_error("_trabajo_de_fondo/analisis_del_lote", _err)
+
     if obtener_config("descubrimiento_pendiente", "") == "1":
         try:
             guardar_config("descubrimiento_pendiente", "0")

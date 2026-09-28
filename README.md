@@ -5374,6 +5374,46 @@ Y dos menores: los códigos de fábrica van al final de cada nivel (el tope de 4
 proveedores), y si se llegó por la variante del cero o el código de barras, «le sirve a qué
 autos» y «hay más» usan el código encontrado.
 
+### Importar una lista, revisado por otra IA
+
+El mismo revisor pasó por la carga de listas con planillas armadas para cada caso, y encontró
+diez errores. Todos reproducidos antes y comprobados después:
+
+1. **«Aplicar igual esos precios» no aplicaba nada**: el botón vivía adentro del toque de
+   «Procesar», así que al tildar «Revisé la lista» desaparecía. Ahora los frenados quedan
+   guardados en la sesión y se aplican (o se descartan) desde afuera.
+2. **Un precio 0 pisaba el precio real** y encima el freno de saltos no lo miraba: el repuesto
+   quedaba a $0. Ahora 0 o negativo es «sin precio», y si el guardado ya estaba en 0, el freno
+   se compara con el último precio de verdad del historial.
+3. **El mapeo recordado se aplicaba por posición** aunque el proveedor hubiera movido las
+   columnas: el código quedaba apuntando al precio. Ahora se guardan los títulos y se reubica por
+   título; si aun así no cuadra con los datos, se usa la detección automática
+   (`reubicar_mapeo_por_titulos()`, `problemas_del_mapeo()`). Precio y stock en la misma columna
+   no deja importar; un código que parece un importe o que repite siempre lo mismo pide confirmar.
+4. **La fila de títulos y la hoja quedaban pegadas de un archivo al otro**: la lista sin tapa se
+   leía desde la fila 3 y perdía dos productos. Se reinician al cambiar de archivo
+   (`identidad_del_archivo()`).
+5. **El proveedor propuesto quedaba pegado**: «Usar otro archivo», subir la de MAHLE, y se
+   importaba como ILLINOIS. Lo que propuso la app se vuelve a proponer; lo que escribiste, no.
+6. **Títulos que engañaban**: «DESCUENTO %» como descripción, «PESO NETO» como precio,
+   «CANT. X BULTO» como stock, «ORIGEN» (CHINA, BRASIL…) y «FABRICANTE» como código de fábrica.
+   Las pistas van al principio de palabra y hay una lista de las que no son (`PISTAS_QUE_NO_SON`).
+7. **La importación no era todo-o-nada**: cortada a la mitad, quedaban precios pisados sin
+   vínculos ni registro para deshacerla. Ahora va en una transacción: probado cortándola en la
+   fila 25, no quedó nada a medias.
+8. **Cada toque releía el Excel entero dos veces**: con 30.000 filas, 5,2 s por toque. Ahora se
+   lee una vez por archivo (0,0 s después). Y la importación de esa lista bajó de 31,5 s a 5,5 s:
+   25 s eran el análisis de los vínculos nuevos, que en listas de más de 6.000 corre por atrás y
+   en las demás queda guardado para que «Equivalencias sugeridas» abra al instante.
+9. **Deshacer una lista no sacaba los pares que ya esperaban revisión**, que el cartel contaba
+   como nuevos; y el lote tenía minutos sin año, así que dos importaciones del mismo minuto
+   compartían etiqueta. Ahora esos pares se cuentan aparte y el lote lleva año y segundos.
+10. **Números mal leídos**: «2 x 1.500» era 21.500, «1.5E+3» era 1,53, «$ -100» era positivo y
+    una fecha entraba como precio. `leer_numero()` los resuelve o devuelve «sin número».
+
+Y uno más que salió probando: si la lista trae el mismo código dos veces con precios distintos
+(unidad y caja), ahora se avisa con ejemplos.
+
 ## 🔗 Revisar sugeridas: primero lo que hay que hacer
 
 Mirado con capturas sobre la base real (15.308 pendientes en 8 listas):

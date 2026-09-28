@@ -697,6 +697,13 @@ def pares_ya_cargados():
     return {(r["a"], r["b"]) for r in c.fetchall()}
 
 
+def pares_ya_pendientes():
+    """Los pares que ya esperan revisión, como (menor, mayor). Ver pares_ya_cargados()."""
+    c.execute("""SELECT MIN(producto_a_id, producto_b_id) AS a,
+                        MAX(producto_a_id, producto_b_id) AS b FROM equivalencias_pendientes""")
+    return {(r["a"], r["b"]) for r in c.fetchall()}
+
+
 def guardar_equivalencias_pendientes(pares, origen, lote):
     """Guarda vínculos para revisar en vez de cargarlos directo. Devuelve cuántos PARES entraron.
 
@@ -2325,9 +2332,14 @@ def preparar_el_analisis_del_primer_lote():
     Devuelve si lo hizo (False si ya estaba o no hay nada pendiente)."""
     _ANALISIS_DE_LOTE["_intentado"] = True
     lotes = resumen_lotes_pendientes()
+    # La lista recién importada que era muy grande para analizarla en el momento (ver
+    # informe_post_importacion()) va primero: es la que alguien está por abrir.
+    pedido = obtener_config("lote_a_analizar", "")
+    if pedido:
+        guardar_config("lote_a_analizar", "")
     if not lotes:
         return False
-    lote = lotes[0]["lote"]
+    lote = next((l["lote"] for l in lotes if l["lote"] == pedido), lotes[0]["lote"])
     total = contar_pendientes_del_lote(lote)
     cuantos = tanda_que_cubre(total)
     clave = clave_del_analisis_de_lote(lote, cuantos, 0, total)

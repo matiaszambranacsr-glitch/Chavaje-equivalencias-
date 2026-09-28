@@ -1064,6 +1064,10 @@ def _esquema_gestion(c):
     _cols_mapeo = [f[1] for f in c.execute("PRAGMA table_info(mapeo_columnas)").fetchall()]
     if "idx_ean" not in _cols_mapeo:
         c.execute("ALTER TABLE mapeo_columnas ADD COLUMN idx_ean INTEGER")
+    # Los títulos de las columnas cuando se guardó el mapeo: con eso se reubica por título si
+    # el proveedor movió las columnas. Ver reubicar_mapeo_por_titulos().
+    if "encabezado" not in _cols_mapeo:
+        c.execute("ALTER TABLE mapeo_columnas ADD COLUMN encabezado TEXT")
 
     # Decisiones ya tomadas sobre un vínculo puntual. Sirve para dos cosas: que lo revisado no
     # vuelva a aparecer en la auditoría, y que lo rechazado no se vuelva a crear si más adelante

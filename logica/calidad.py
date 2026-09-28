@@ -298,19 +298,64 @@ def peso_de_las_fotos():
 # MAPEO DE COLUMNAS RECORDADO POR PROVEEDOR
 # ============================================================================================
 def guardar_mapeo_columnas(proveedor, idx_prov, idx_oem, idx_desc, idx_precio, idx_stock,
-                            buscar_oem_en_desc, prov_es_oem, idx_ean=None):
+                            buscar_oem_en_desc, prov_es_oem, idx_ean=None, encabezado=None):
     """Recuerda cómo se mapearon las columnas de este proveedor, para que la próxima vez venga
-    preseleccionado igual y no haya que acertarle de nuevo."""
+    preseleccionado igual y no haya que acertarle de nuevo. Con los títulos de las columnas,
+    para poder reubicarlas si la próxima lista las trae en otro orden."""
     if not proveedor or not proveedor.strip():
         return
+    titulos = (json.dumps([_titulo_normalizado(x) for x in encabezado], ensure_ascii=False)
+               if encabezado is not None else None)
     with db_lock:
         c.execute("""INSERT OR REPLACE INTO mapeo_columnas
                      (proveedor, idx_prov, idx_oem, idx_desc, idx_precio, idx_stock,
-                      buscar_oem_en_desc, prov_es_oem, idx_ean, fecha)
-                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))""",
+                      buscar_oem_en_desc, prov_es_oem, idx_ean, encabezado, fecha)
+                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))""",
                   (proveedor.strip().upper(), idx_prov, idx_oem, idx_desc, idx_precio, idx_stock,
-                   1 if buscar_oem_en_desc else 0, 1 if prov_es_oem else 0, idx_ean))
+                   1 if buscar_oem_en_desc else 0, 1 if prov_es_oem else 0, idx_ean, titulos))
         conn.commit()
+
+
+_COLUMNAS_DEL_MAPEO = {"idx_prov": "código", "idx_oem": "código de fábrica",
+                       "idx_desc": "descripción", "idx_precio": "precio", "idx_stock": "stock",
+                       "idx_ean": "código de barras"}
+
+
+def reubicar_mapeo_por_titulos(mapeo, encabezado):
+    """El mapeo recordado, llevado a las columnas de ESTE archivo. None si no sirve.
+
+    Devuelve el mapeo con los índices corregidos y tres datos más: «_como» ("igual" si los
+    títulos no cambiaron, "reubicado" si hubo que buscarlos), «_faltan» (los nombres de lo que
+    no se encontró) y «_faltan_claves». Si no se encuentra NINGUNA de las columnas recordadas,
+    es otra lista —otro formato del mismo proveedor, o el proveedor mal escrito— y no se aplica.
+    Los mapeos guardados antes de recordar los títulos se aplican como antes, por posición."""
+    if not mapeo:
+        return None
+    mapeo = dict(mapeo)
+    mapeo["_faltan"], mapeo["_faltan_claves"] = [], set()
+    ahora = [_titulo_normalizado(x) for x in encabezado]
+    try:
+        antes = json.loads(mapeo.get("encabezado") or "null")
+    except ValueError:
+        antes = None
+    if not antes or antes == ahora:
+        mapeo["_como"] = "igual"
+        return mapeo
+    mapeo["_como"] = "reubicado"
+    hallados = 0
+    for clave, nombre in _COLUMNAS_DEL_MAPEO.items():
+        viejo = mapeo.get(clave)
+        if viejo is None:
+            continue
+        titulo = antes[viejo] if 0 <= viejo < len(antes) else ""
+        if titulo and ahora.count(titulo) == 1:
+            mapeo[clave] = ahora.index(titulo)
+            hallados += 1
+        else:
+            mapeo[clave] = None
+            mapeo["_faltan"].append(nombre)
+            mapeo["_faltan_claves"].add(clave)
+    return mapeo if hallados else None
 
 
 def leer_mapeo_columnas(proveedor):

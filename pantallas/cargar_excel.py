@@ -15,13 +15,21 @@ if pagina == PAGINAS[2]:
 
         # El proveedor casi siempre está en el nombre del archivo ("ILLINOIS 17 07 2026.xlsx").
         # Se propone solo, pero queda editable: nunca se pisa lo que la persona haya escrito.
-        _archivo_previo = st.session_state.get("_archivo_lista")
-        if _archivo_previo and not st.session_state.get("nombre_prov_carga"):
+        # Lo que SÍ se vuelve a proponer es lo que propuso la app, cuando llega otro archivo
+        # (ver más abajo, donde se nota el cambio). Antes la primera sugerencia quedaba pegada:
+        # «Usar otro archivo», subir la de MAHLE, y la importación salía como ILLINOIS, con el
+        # mapeo de columnas de ILLINOIS encima.
+        if st.session_state.pop("_resugerir_proveedor", False):
+            st.session_state.pop("nombre_prov_carga", None)
+        _nombre_del_archivo = (st.session_state.get("_nombre_archivo_de_la_carga")
+                               or (st.session_state.get("_archivo_lista") or {}).get("nombre"))
+        if _nombre_del_archivo and not st.session_state.get("nombre_prov_carga"):
             c.execute("SELECT nombre FROM marcas")
             _marcas_conocidas = [r["nombre"] for r in c.fetchall()]
-            _sugerido_prov = adivinar_proveedor(_archivo_previo["nombre"], _marcas_conocidas)
+            _sugerido_prov = adivinar_proveedor(_nombre_del_archivo, _marcas_conocidas)
             if _sugerido_prov:
                 st.session_state["nombre_prov_carga"] = _sugerido_prov
+                st.session_state["_proveedor_sugerido"] = _sugerido_prov
 
         nombre_prov = st.text_input(
             "Nombre de la Marca / Proveedor:", placeholder="Ej: Mahle, Bosch, Mann...",
@@ -99,6 +107,25 @@ if pagina == PAGINAS[2]:
                 else:
                     archivo = ruta_archivo
 
+        # ¿Llegó OTRO archivo? Lo que se eligió para el anterior no vale para este: la fila de
+        # títulos y la hoja se vuelven a detectar, y el proveedor se vuelve a proponer si lo
+        # había puesto la app. Antes quedaban pegados: la lista de ZETA con dos renglones de
+        # tapa dejaba «fila 3», la siguiente (sin tapa) se leía desde la fila 3, y sus dos
+        # primeros productos se perdían como si fueran los títulos.
+        _identidad = identidad_del_archivo(archivo)
+        if _identidad is not None and _identidad != st.session_state.get("_archivo_de_la_carga"):
+            _habia_otro = st.session_state.get("_archivo_de_la_carga") is not None
+            st.session_state["_archivo_de_la_carga"] = _identidad
+            st.session_state["_nombre_archivo_de_la_carga"] = os.path.basename(
+                archivo if isinstance(archivo, str) else getattr(archivo, "name", ""))
+            for _k in ("fila_encabezado", "hoja_excel", "importar_con_dudas"):
+                st.session_state.pop(_k, None)
+            _prov_ahora = st.session_state.get("nombre_prov_carga") or ""
+            if not _prov_ahora.strip() or (
+                    _habia_otro and _prov_ahora == st.session_state.get("_proveedor_sugerido")):
+                st.session_state["_resugerir_proveedor"] = True
+                st.rerun()
+
         # --- Mapeo dinámico de columnas ---
         # OJO: estos valores por defecto NO son decorativos. Los selectores se crean adentro de
         # un "else" (solo si el archivo tiene columnas), pero el bloque de importar está afuera:
@@ -108,6 +135,7 @@ if pagina == PAGINAS[2]:
         idx_desc = None
         idx_precio = idx_stock = None
         tope_salto = 200
+        _problemas_del_mapeo = []
 
         hoja_elegida = None
         if archivo:
@@ -196,20 +224,50 @@ if pagina == PAGINAS[2]:
 
                 # Si ya se importó una lista de este proveedor, se arranca con el mismo mapeo
                 # que funcionó la vez anterior en vez de tener que acertarle de nuevo.
-                mapeo_previo = leer_mapeo_columnas(nombre_prov)
-                if mapeo_previo:
-                    st.success(
-                        f"💾 Se recordó cómo mapeaste las columnas la última vez que importaste "
-                        f"una lista de **{nombre_prov.strip().upper()}** ({mapeo_previo['fecha'][:10]}). "
-                        "Ya viene preseleccionado — revisá que coincida con este archivo."
+                # Pero por TÍTULO, no por posición: si el proveedor agregó o movió una columna,
+                # «la columna 2» ya es otra. Antes se aplicaba igual, y con la lista nueva el
+                # código de proveedor quedaba apuntando al PRECIO: se importaban «1.500,00»
+                # como números de parte. Ahora cada columna recordada se busca por su título;
+                # la que no aparece se deja a la detección automática.
+                mapeo_previo = reubicar_mapeo_por_titulos(leer_mapeo_columnas(nombre_prov),
+                                                          encabezado)
+                def _valido(indice):
+                    return indice if (indice is not None and 0 <= indice < len(opciones_cols)) else None
+                # Y si aun así no cuadra con los datos (el código cae en una columna de
+                # importes, o de palabras repetidas), se deja de lado: pasa con los mapeos
+                # guardados antes de recordar los títulos, que solo tienen la posición.
+                if mapeo_previo and problemas_del_mapeo(
+                        todas_filas, header_row, mapeo_previo["idx_prov"], mapeo_previo["idx_oem"],
+                        mapeo_previo["idx_precio"], mapeo_previo["idx_stock"]):
+                    st.info(
+                        f"💾 Había un mapeo guardado para **{nombre_prov.strip().upper()}**, pero "
+                        "no cuadra con este archivo (las columnas cambiaron). Usé la detección "
+                        "automática: revisá el mapeo antes de importar."
                     )
-                    def _valido(indice):
-                        return indice if (indice is not None and 0 <= indice < len(opciones_cols)) else None
+                    mapeo_previo = None
+                if mapeo_previo:
+                    if mapeo_previo["_como"] == "igual":
+                        st.success(
+                            f"💾 Se recordó cómo mapeaste las columnas la última vez que importaste "
+                            f"una lista de **{nombre_prov.strip().upper()}** ({mapeo_previo['fecha'][:10]}). "
+                            "Ya viene preseleccionado — revisá que coincida con este archivo."
+                        )
+                    else:
+                        st.info(
+                            f"💾 Las columnas de **{nombre_prov.strip().upper()}** cambiaron de "
+                            "lugar desde la última importación: ubiqué las que recordaba por su "
+                            "título" + (f" (no encontré: {', '.join(mapeo_previo['_faltan'])})"
+                                        if mapeo_previo["_faltan"] else "")
+                            + ". Revisá el mapeo antes de importar."
+                        )
                     if _valido(mapeo_previo["idx_prov"]) is not None:
                         idx_prov_auto = mapeo_previo["idx_prov"]
-                    idx_oem_auto = _valido(mapeo_previo["idx_oem"])
-                    idx_desc_auto = _valido(mapeo_previo["idx_desc"])
-                    if mapeo_previo.get("idx_ean") is not None:
+                    if "idx_oem" not in mapeo_previo["_faltan_claves"]:
+                        idx_oem_auto = _valido(mapeo_previo["idx_oem"])
+                    if "idx_desc" not in mapeo_previo["_faltan_claves"]:
+                        idx_desc_auto = _valido(mapeo_previo["idx_desc"])
+                    if (mapeo_previo.get("idx_ean") is not None
+                            and "idx_ean" not in mapeo_previo["_faltan_claves"]):
                         idx_ean_auto = _valido(mapeo_previo["idx_ean"])
 
                 c_p, c_o, c_d = cols(3)
@@ -242,6 +300,8 @@ if pagina == PAGINAS[2]:
                 idx_stock_auto = (_valido(mapeo_previo["idx_stock"]) if mapeo_previo else None)
                 if idx_stock_auto is None:
                     idx_stock_auto = idx_stock_sug
+                if idx_stock_auto is not None and idx_stock_auto == idx_precio_auto:
+                    idx_stock_auto = None
                 with c_pr:
                     idx_precio = st.selectbox(
                         "Precio (opcional):", opciones_num,
@@ -284,6 +344,12 @@ if pagina == PAGINAS[2]:
                     )
                 else:
                     tope_salto = 200
+
+                # Lo que seguro está mal en el mapeo, con palabras. Ver problemas_del_mapeo().
+                _problemas_del_mapeo = problemas_del_mapeo(todas_filas, header_row, idx_prov,
+                                                           idx_oem, idx_precio, idx_stock)
+                for _grave, _texto in _problemas_del_mapeo:
+                    (st.error if _grave else st.warning)(("🛑 " if _grave else "⚠️ ") + _texto)
 
                 # --- Diagnóstico ANTES de importar ---
                 # Es la respuesta a "se carga mal y no sé por qué": muestra qué entendió la app
@@ -569,7 +635,18 @@ if pagina == PAGINAS[2]:
                 "Equivalencias sugeridas, ya separadas entre las limpias y las que tienen algo raro."
             )
 
-        procesar = st.button("📥 Procesar e Importar Lista", type="primary")
+        # Un mapeo roto seguro (precio y stock en la misma columna) no deja importar; uno
+        # dudoso (el código parece un precio) pide confirmarlo. Es el único momento en que
+        # corregirlo es barato: después hay que deshacer la lista entera.
+        _graves = [t for g, t in _problemas_del_mapeo if g]
+        _importar_igual = True
+        if _problemas_del_mapeo and not _graves:
+            _importar_igual = st.checkbox("Revisé los avisos del mapeo y quiero importar igual",
+                                          key="importar_con_dudas")
+        procesar = st.button("📥 Procesar e Importar Lista", type="primary",
+                             disabled=bool(_graves) or not _importar_igual)
+        if _graves:
+            st.caption("🛑 Corregí el mapeo de columnas de arriba para poder importar.")
 
         if procesar:
             if not archivo:
@@ -619,6 +696,11 @@ if pagina == PAGINAS[2]:
                     descartados_cortos = 0
                     precios_actualizados = 0
                     precios_frenados = []
+                    precios_en_cero = 0
+                    # El mismo código dos veces en la lista con precios distintos («AB-123»
+                    # por unidad y «AB123» por caja de 10): el segundo pisaba al primero, o
+                    # el freno lo paraba sin decir por qué. Ahora se avisa con ejemplos.
+                    _precio_en_esta_lista, repetidos_con_otro_precio = {}, []
                     filas_omitidas = []
                     eq_batch = set()  # inserción en lote: se acumulan los pares y se insertan todos juntos al final
                     _ids_de_la_lista = set()   # los productos DISTINTOS que tocó: ver el cartel del final
@@ -628,7 +710,12 @@ if pagina == PAGINAS[2]:
 
                     # Todo el trabajo de escritura va con el candado tomado, para que ninguna otra
                     # persona pueda buscar/escribir a mitad de una importación larga y quede todo trabado.
-                    with db_lock:
+                    # Y en UNA transacción: antes cada sentencia se confirmaba sola, así que si la
+                    # carga se cortaba en la fila 12.000 (una celda rara, el navegador que se
+                    # cierra, la app que se reinicia) quedaban 12.000 precios pisados, ningún
+                    # vínculo y ningún registro de la importación para poder deshacerla.
+                    # Ahora o entra la lista entera o no entra nada.
+                    with db_lock, transaccion():
                         prov_id = get_or_create_marca(nombre_prov, "PROVEEDOR")
                         oem_id = get_or_create_marca("OEM / FABRICA", "OEM")
 
@@ -684,6 +771,13 @@ if pagina == PAGINAS[2]:
                                 continue
 
                             precio_fila = leer_numero(celda(idx_precio)) if idx_precio is not None else None
+                            # Un precio de 0 o negativo no es un precio: es «consultar», «sin
+                            # stock» o una celda vacía que el Excel guardó como 0. Antes pisaba el
+                            # precio real, y como el freno de saltos no mira los ceros, pasaba
+                            # sin aviso: el repuesto quedaba a $0 en el mostrador.
+                            if precio_fila is not None and precio_fila <= 0:
+                                precios_en_cero += 1
+                                precio_fila = None
                             stock_fila = leer_numero(celda(idx_stock)) if idx_stock is not None else None
 
                             # El código de barras de esta fila, si la lista lo trae. Va pegado
@@ -715,19 +809,36 @@ if pagina == PAGINAS[2]:
                                     if barras_fila:
                                         c.execute("UPDATE productos SET codigo_barras = ? "
                                                   "WHERE id = ?", (barras_fila, pid_nuevo))
+                                    if precio_fila is not None:
+                                        _antes_en_lista = _precio_en_esta_lista.get(pid_nuevo)
+                                        if _antes_en_lista is not None and _antes_en_lista != precio_fila:
+                                            repetidos_con_otro_precio.append(
+                                                f"{raw_p} ({formato_precio(_antes_en_lista)} y {formato_precio(precio_fila)})")
+                                        _precio_en_esta_lista.setdefault(pid_nuevo, precio_fila)
                                     if precio_fila is not None or stock_fila is not None:
                                         c.execute("SELECT precio FROM productos WHERE id = ?", (pid_nuevo,))
                                         _f = c.fetchone()
                                         precio_viejo = _f["precio"] if _f else None
+                                        # Si el precio guardado quedó en 0 (una lista vieja que lo
+                                        # pisó), el freno se compara con el último precio de
+                                        # verdad: si no, cualquier número pasaba sin mirar.
+                                        precio_ref = precio_viejo
+                                        if precio_fila is not None and not (precio_viejo and precio_viejo > 0):
+                                            c.execute("SELECT precio FROM historial_precios "
+                                                      "WHERE producto_id = ? AND precio > 0 "
+                                                      "ORDER BY id DESC LIMIT 1", (pid_nuevo,))
+                                            _h = c.fetchone()
+                                            if _h:
+                                                precio_ref = _h["precio"]
                                         raro, motivo = salto_de_precio_sospechoso(
-                                            precio_viejo, precio_fila, tope_salto
+                                            precio_ref, precio_fila, tope_salto
                                         )
                                         if raro:
                                             # El producto se carga igual; lo único que no se pisa
                                             # es el precio, para no cotizar con un número roto.
                                             precios_frenados.append({
                                                 "Código": raw_p, "Descripción": (desc or "")[:60],
-                                                "Precio actual": precio_viejo,
+                                                "Precio actual": precio_ref,
                                                 "Precio de la lista": precio_fila,
                                                 "Motivo": motivo,
                                                 "_id": pid_nuevo,
@@ -809,13 +920,6 @@ if pagina == PAGINAS[2]:
                             if total and n % 25 == 0:
                                 progreso.progress(min((n + 1) / total, 1.0))
 
-                            # En autocommit cada sentencia se confirma sola, así que este commit
-                            # ya no hace nada (queda porque es inofensivo y evita tocar 89 lugares
-                            # iguales). Se midió: la importación de 10.000 filas tarda lo mismo,
-                            # 0,33 s contra 0,36 s, porque en modo WAL confirmar es barato.
-                            if n % 300 == 0 and n > 0:
-                                conn.commit()
-
                         # Inserción en lote: mucho más rápido que insertar de a un vínculo por vez
                         if eq_batch:
                             # No revivir vínculos que ya fueron rechazados en una revisión
@@ -831,13 +935,25 @@ if pagina == PAGINAS[2]:
                             _vinculos_ya_cargados = len(eq_batch & ya_cargados)
                             eq_batch = {p for p in eq_batch
                                         if p not in rechazados_antes and p not in ya_cargados}
+                            # Los que ya esperaban revisión de una lista anterior tampoco se
+                            # cuentan como nuevos: la cola se queda con la fila vieja (INSERT OR
+                            # IGNORE), así que el cartel decía «N nuevos» con pares que no eran
+                            # de esta lista, y «deshacer esta lista» no los sacaba.
+                            _ya_pendientes = pares_ya_pendientes() if not cargar_directo else set()
+                            _vinculos_ya_pendientes = len(eq_batch & _ya_pendientes)
+                            eq_batch -= _ya_pendientes
                         else:
                             _vinculos_ya_cargados = 0
+                            _vinculos_ya_pendientes = 0
                         # El nombre del lote se arma SIEMPRE, vayan los vínculos a revisión o
                         # directo: es la etiqueta que después permite deshacer toda la lista.
-                        lote_importacion = (f"{nombre_prov.upper()} · "
-                                             f"{getattr(archivo, 'name', 'lista')} · "
-                                             f"{datetime.now():%d/%m %H:%M}")
+                        # Con año y segundos: con solo «día/mes hora:minuto», dos listas del mismo
+                        # proveedor importadas en el mismo minuto (o la del año pasado el mismo
+                        # día) quedaban con la misma etiqueta, y deshacer una se llevaba la otra.
+                        _nombre_arch = (os.path.basename(archivo) if isinstance(archivo, str)
+                                        else getattr(archivo, "name", "lista"))
+                        lote_importacion = (f"{nombre_prov.upper()} · {_nombre_arch} · "
+                                             f"{datetime.now():%d/%m/%Y %H:%M:%S}")
                         if eq_batch:
                             if cargar_directo:
                                 c.executemany(
@@ -863,7 +979,6 @@ if pagina == PAGINAS[2]:
                             (nombre_prov.upper(), getattr(archivo, "name", str(archivo)),
                              cargados, omitidos, _huella, lote_importacion)
                         )
-                        conn.commit()
 
                     progreso.empty()
 
@@ -898,6 +1013,9 @@ if pagina == PAGINAS[2]:
                         # quedaron esperando tu aprobación» con casi todo ya aprobado de antes.
                         _ya_txt = (f" Otros {_vinculos_ya_cargados:,} ya estaban cargados de "
                                    "antes y siguen funcionando." if _vinculos_ya_cargados else "")
+                        if _vinculos_ya_pendientes:
+                            _ya_txt += (f" Y {_vinculos_ya_pendientes:,} ya esperaban revisión "
+                                        "de una lista anterior.")
                         if eq_batch:
                             st.warning(
                                 _resumen + f" Los precios ya están, **pero {len(eq_batch):,} "
@@ -938,6 +1056,11 @@ if pagina == PAGINAS[2]:
                         for nivel, titulo, detalle, donde in _inf["puntos"]:
                             (st.error if nivel == "alto" else st.warning)(
                                 f"**{titulo}**\n\n{detalle}\n\n📍 {donde}")
+                    elif _inf.get("analisis_por_atras"):
+                        st.info(f"🔎 Los {_inf['analisis_por_atras']:,} vínculos nuevos se están "
+                                 "analizando por atrás (en una lista así de grande tarda un "
+                                 "rato). Cuando abras Estadísticas → 🔗 Equivalencias sugeridas "
+                                 "ya vas a ver cuáles están casi seguro mal.")
                     elif _inf.get("pendientes"):
                         st.info(f"🔎 Se revisaron {_inf['pendientes']} vínculo(s) y ninguno "
                                  "disparó alarmas. Siguen esperando tu aprobación.")
@@ -976,7 +1099,7 @@ if pagina == PAGINAS[2]:
                     # Recordar el mapeo que funcionó, para la próxima lista de este proveedor
                     guardar_mapeo_columnas(nombre_prov, idx_prov, idx_oem, idx_desc,
                                             idx_precio, idx_stock, buscar_oem_en_desc, prov_es_oem,
-                                            idx_ean=idx_ean)
+                                            idx_ean=idx_ean, encabezado=encabezado)
                     if not cargar_directo and eq_batch:
                         st.info(
                             f"🔒 {len(eq_batch)} vínculo(s) quedaron **esperando tu revisión** — todavía "
@@ -997,37 +1120,29 @@ if pagina == PAGINAS[2]:
                     if precios_actualizados:
                         st.success(f"💲 Se actualizaron {precios_actualizados} precio(s).")
 
+                    # Los frenados se muestran AFUERA de este bloque (ver más abajo). Adentro no
+                    # servía: este bloque solo corre en el toque de «Procesar», así que al
+                    # tildar «Revisé la lista» la página se redibujaba sin él y el botón de
+                    # aplicarlos no llegaba a aparecer nunca. Probado: 30 precios frenados,
+                    # checkbox tildado, cero botones.
                     if precios_frenados:
+                        st.session_state["precios_frenados_de_la_carga"] = {
+                            "lote": lote_importacion, "filas": precios_frenados}
+                    else:
+                        st.session_state.pop("precios_frenados_de_la_carga", None)
+                    if repetidos_con_otro_precio:
                         st.warning(
-                            f"🛑 {len(precios_frenados)} precio(s) quedaron **sin actualizar** porque "
-                            "el cambio no parece un aumento sino un error de la lista. El producto se "
-                            "cargó igual; lo único que no se tocó es el precio."
+                            f"🔁 {len(repetidos_con_otro_precio):,} código(s) aparecen **más de una "
+                            "vez en la lista con precios distintos** (suele ser la unidad y la caja, "
+                            "o dos presentaciones). Quedó uno solo de los precios: revisalos. "
+                            "Ejemplos: " + ", ".join(repetidos_con_otro_precio[:5])
                         )
-                        st.dataframe(precios_frenados[:100], width="stretch", hide_index=True,
-                                      column_config={"_id": None})
-                        st.download_button(
-                            "⬇️ Bajar la lista completa de precios frenados",
-                            data=to_excel_bytes([{k: v for k, v in f.items() if k != "_id"}
-                                                  for f in precios_frenados]),
-                            file_name="precios_frenados.xlsx",
-                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-                        )
+                    if precios_en_cero:
                         st.caption(
-                            "Si mirás la lista y los precios están bien (por ejemplo, hubo un "
-                            "aumento fuerte de verdad), volvé a importar subiendo el límite."
+                            f"🧹 {precios_en_cero:,} fila(s) traían el precio en 0 o negativo "
+                            "(«consultar», sin precio). Se cargaron sin tocar el precio que ya "
+                            "tenían: un 0 no es un precio."
                         )
-                        if st.checkbox("Revisé la lista y los precios de la planilla son correctos",
-                                        key="confirmar_precios_frenados"):
-                            if st.button(f"💲 Aplicar igual esos {len(precios_frenados)} precios"):
-                                with db_lock:
-                                    for f in precios_frenados:
-                                        if f["Precio de la lista"] is not None:
-                                            c.execute("INSERT INTO historial_precios (producto_id, precio) "
-                                                       "VALUES (?, ?)", (f["_id"], f["Precio de la lista"]))
-                                            c.execute("UPDATE productos SET precio = ? WHERE id = ?",
-                                                       (f["Precio de la lista"], f["_id"]))
-                                    conn.commit()
-                                st.success(f"Se aplicaron {len(precios_frenados)} precio(s).")
 
                     if descartados_cortos:
                         st.caption(
@@ -1072,6 +1187,46 @@ if pagina == PAGINAS[2]:
                 except Exception as e:
                     anotar_error("nivel principal", e)
                     st.error(f"Error procesando la lista: {e}")
+
+        _frenados = st.session_state.get("precios_frenados_de_la_carga")
+        if _frenados:
+            _filas_fr = _frenados["filas"]
+            st.warning(
+                f"🛑 {len(_filas_fr):,} precio(s) de la última lista quedaron **sin actualizar** "
+                "porque el cambio no parece un aumento sino un error de la lista. El producto se "
+                "cargó igual; lo único que no se tocó es el precio."
+            )
+            st.dataframe(_filas_fr[:100], width="stretch", hide_index=True,
+                         column_config={"_id": None})
+            st.download_button(
+                "⬇️ Bajar la lista completa de precios frenados",
+                data=to_excel_bytes([{k: v for k, v in f.items() if k != "_id"}
+                                     for f in _filas_fr]),
+                file_name="precios_frenados.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                key="bajar_precios_frenados"
+            )
+            st.caption("Si mirás la lista y los precios están bien (por ejemplo, hubo un aumento "
+                       "fuerte de verdad), aplicalos igual desde acá.")
+            _cf1, _cf2 = st.columns(2)
+            _revisado = _cf1.checkbox("Revisé la lista y los precios de la planilla son correctos",
+                                      key="confirmar_precios_frenados")
+            if _cf1.button(f"💲 Aplicar igual esos {len(_filas_fr):,} precios",
+                           disabled=not _revisado, key="aplicar_precios_frenados"):
+                with db_lock, transaccion():
+                    for f in _filas_fr:
+                        if f["Precio de la lista"] is not None:
+                            c.execute("INSERT INTO historial_precios (producto_id, precio) "
+                                      "VALUES (?, ?)", (f["_id"], f["Precio de la lista"]))
+                            c.execute("UPDATE productos SET precio = ? WHERE id = ?",
+                                      (f["Precio de la lista"], f["_id"]))
+                st.session_state.pop("precios_frenados_de_la_carga", None)
+                st.session_state.pop("confirmar_precios_frenados", None)
+                invalidar_salud()
+                st.success(f"💲 Se aplicaron {len(_filas_fr):,} precio(s).")
+            elif _cf2.button("🙈 Dejar los precios como estaban", key="descartar_precios_frenados"):
+                st.session_state.pop("precios_frenados_de_la_carga", None)
+                st.rerun()
 
         st.markdown("---")
         st.markdown("**📄 Cargar remito por foto (con IA)**")

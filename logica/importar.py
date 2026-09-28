@@ -17,12 +17,48 @@ PISTAS_COLUMNAS = {
     # se pide el número de parte ("150000-R"), no el EAN: si el EAN ocupa el lugar del código,
     # el número real del repuesto no queda cargado en ningún lado y no se puede buscar.
     "ean":    ["EAN", "BARRA", "BARCODE", "GTIN", "UPC"],
-    "oem":    ["OEM", "ORIG", "EQUIV", "CRUCE", "FABRICA", "FÁBRICA", "APLIC"],
+    # Sin «FABRICA» ni «APLIC» sueltos: «FABRICANTE» es la columna con el NOMBRE de la marca
+    # («BOSCH», «SKF») y «APLICACION» es el auto al que va. Ninguna de las dos es un código, y
+    # tomadas como código de fábrica colgaban cientos de filas de «BOSCH» o de «GOL 1.6»: una
+    # equivalencia falsa por fila. El código de fábrica escrito con todas las letras sí vale.
+    "oem":    ["OEM", "ORIG", "EQUIV", "CRUCE", "COD FABRICA", "CODIGO FABRICA",
+                "COD DE FABRICA", "CODIGO DE FABRICA", "NRO FABRICA", "NRO DE FABRICA"],
     "desc":   ["DESC", "DETALLE", "PROD", "ARTICULO", "ARTÍCULO", "NOMBRE", "RUBRO"],
     "precio": ["PRECIO", "P.VENTA", "PVENTA", "P. VENTA", "IMPORTE", "VALOR", "LISTA",
                 "COSTO", "NETO", "UNITARIO", "$"],
     "stock":  ["STOCK", "EXIST", "CANT", "DISPON", "SALDO", "DEPOSITO", "DEPÓSITO"],
 }
+
+# Títulos que tienen la pista adentro pero NO son esa columna. Probado con títulos reales:
+#   · «DESCUENTO %» tiene «DESC» y quedaba como descripción: cada producto con «15» de nombre.
+#   · «PESO NETO» tiene «NETO» y quedaba como precio: el repuesto costaba lo que pesa.
+#   · «CANT. X BULTO» y «CANT. MINIMA» tienen «CANT» y pisaban el stock con la caja cerrada.
+#   · «ORIGEN» (CHINA, BRASIL, NACIONAL) tiene «ORIG» y quedaba como código de fábrica: tres
+#     «códigos» que unían entre sí a todos los productos del mismo país.
+PISTAS_QUE_NO_SON = {
+    "oem":    ["ORIGEN", "PROCEDENCIA", "FABRICANTE", "APLIC"],
+    "desc":   ["DESCUENTO", "DESC %", "DESC%"],
+    "precio": ["PESO", "KG", "DESCUENTO", "DTO", "BONIF", "ALICUOTA"],
+    "stock":  ["BULTO", "MINIMA", "MINIMO", "X CAJA", "POR CAJA", "EMBALAJE", "PACK", "MULTIPLO"],
+}
+
+
+def _titulo_normalizado(x):
+    """El título en mayúsculas, sin acentos, sin puntos y con los espacios de a uno: «Cód. Fábrica»
+    y «COD FABRICA» son el mismo título."""
+    if x is None:
+        return ""
+    t = unicodedata.normalize("NFKD", str(x).upper())
+    t = "".join(ch for ch in t if not unicodedata.combining(ch))
+    return re.sub(r"\s+", " ", t.replace(".", " ").replace("_", " ")).strip()
+
+
+def _pista_en_titulo(pista, titulo):
+    """La pista al PRINCIPIO de una palabra del título. Adentro de una palabra no vale: «ART»
+    está en «PARTE» y «CANT» en «DESCANTE», y sin esto cualquier título largo caía en
+    cualquier rol."""
+    pista = _titulo_normalizado(pista) or pista
+    return re.search(r"(?<![A-Z0-9])" + re.escape(pista), titulo) is not None
 
 
 def adivinar_columnas(encabezado):
@@ -35,7 +71,7 @@ def adivinar_columnas(encabezado):
 
     Para precio y stock gana la PRIMERA columna que coincide: las listas suelen traer varias
     (costo, lista, con IVA, con descuento) y la primera es casi siempre la que corresponde."""
-    titulos = [str(x).upper().strip() if x else "" for x in encabezado]
+    titulos = [_titulo_normalizado(x) for x in encabezado]
 
     # Para cada columna, su mejor rol: el de la pista más larga que aparezca en el título
     mejor_rol = {}
@@ -44,8 +80,10 @@ def adivinar_columnas(encabezado):
             continue
         candidatos = []
         for clave, pistas in PISTAS_COLUMNAS.items():
+            if any(_pista_en_titulo(n, titulo) for n in PISTAS_QUE_NO_SON.get(clave, ())):
+                continue
             for pista in pistas:
-                if pista in titulo:
+                if _pista_en_titulo(pista, titulo):
                     # "EAN" pesa más que "COD" aunque midan lo mismo: un título como
                     # "CODIGO_EAN" tiene las dos, y sin esta prioridad el empate se resolvía a
                     # favor de "COD" y el código de barras terminaba ocupando el lugar del
@@ -58,7 +96,9 @@ def adivinar_columnas(encabezado):
     hallado = {"prov": None, "oem": None, "desc": None, "precio": None, "stock": None,
                "ean": None}
     for i, clave in mejor_rol.items():
-        if clave in ("precio", "stock"):
+        # La descripción también: la primera. Las listas que traen dos («DESCRIPCION» y
+        # «DESCRIPCION ADICIONAL» o «DESC. RUBRO») ponen primero la del producto.
+        if clave in ("precio", "stock", "desc"):
             if hallado[clave] is None:      # la primera manda
                 hallado[clave] = i
         else:
@@ -177,6 +217,15 @@ def _pinta_columna(ejemplos, esperado):
         limpios = [sanitizar(e) for e in ejemplos]
         if all(l.isdigit() and len(l) <= 2 for l in limpios if l):
             return "❌ no son códigos", "son números sueltos (¿cantidad? ¿número de orden?)"
+        # Palabras sin ningún número que se repiten: «CHINA», «BRASIL», «NACIONAL» (la columna
+        # de origen), o el rubro. Un código de repuesto casi siempre tiene algún dígito, y
+        # nunca se repite fila tras fila.
+        sin_digitos = [l for l in limpios if l and not any(ch.isdigit() for ch in l)]
+        if (len(ejemplos) >= 4 and len(sin_digitos) >= 0.8 * len(ejemplos)
+                and len(set(sin_digitos)) <= max(2, len(ejemplos) // 2)):
+            return "❌ no son códigos", "son palabras que se repiten (¿origen? ¿rubro? ¿marca?)"
+        if _parecen_precios(ejemplos):
+            return "❌ parecen precios", "son importes con decimales, no códigos"
         # Lo que separa un código de una descripción no es el largo sino los ESPACIOS:
         # 'W712/94' y '036115561G' no tienen ninguno, 'FILTRO DE ACEITE FORD' tiene varios.
         # Mirando solo el largo, una descripción de 32 caracteres pasaba como código.
@@ -390,6 +439,57 @@ def importacion_previa(huella):
     return dict(fila) if fila else None
 
 
+_RE_IMPORTE = re.compile(r"^\$?\s*-?\d{1,3}(?:[.,]\d{3})*[.,]\d{2}$|^\$\s*\d")
+
+
+def _parecen_precios(valores):
+    """¿La mayoría de estos valores son importes («1.500,00», «$ 850», «12,50»)?"""
+    valores = [str(v).strip() for v in valores if v is not None and str(v).strip()]
+    if len(valores) < 3:
+        return False
+    return sum(1 for v in valores if _RE_IMPORTE.match(v)) >= 0.6 * len(valores)
+
+
+def problemas_del_mapeo(filas, header_row, idx_prov, idx_oem, idx_precio, idx_stock,
+                        muestra=300):
+    """Lo que está mal en el mapeo elegido, ANTES de importar: [(grave, texto)].
+
+    grave=True frena el botón de importar (la carga saldría rota seguro); False pide confirmar.
+    Sale de errores vistos: el mapeo recordado por posición cuando el proveedor movió las
+    columnas dejaba el PRECIO como código («1.500,00» como número de parte), y elegir la misma
+    columna para precio y stock ponía el stock en $15.000."""
+    problemas = []
+    usados = {"precio": idx_precio, "stock": idx_stock}
+    if idx_precio is not None and idx_precio == idx_stock:
+        problemas.append((True, "**Precio y stock apuntan a la misma columna.** Uno de los dos "
+                                 "está mal: elegí «Ninguna» en el que la lista no trae."))
+    for nombre, idx in usados.items():
+        if idx is not None and idx == idx_prov:
+            problemas.append((True, f"**El código de proveedor y el {nombre} apuntan a la misma "
+                                     "columna.** Revisá el mapeo de arriba."))
+    datos = filas[header_row + 1:header_row + 1 + muestra]
+
+    def valores(idx):
+        if idx is None:
+            return []
+        return [str(f[idx]).strip() for f in datos
+                if idx < len(f) and f[idx] is not None and str(f[idx]).strip()]
+
+    for etiqueta, idx in (("código de proveedor", idx_prov), ("código de fábrica", idx_oem)):
+        v = valores(idx)
+        if not v:
+            continue
+        if _parecen_precios(v):
+            problemas.append((False, f"La columna de **{etiqueta}** trae importes («{v[0]}»), "
+                                      "no códigos. ¿No será la del precio?"))
+        elif len(v) >= 20 and len(set(v)) <= 0.2 * len(v):
+            _repes = collections.Counter(v).most_common(3)
+            problemas.append((False, f"La columna de **{etiqueta}** repite casi siempre lo mismo "
+                                      f"({', '.join(f'«{x}» {n} veces' for x, n in _repes)}): "
+                                      "parece el rubro, el origen o la marca, no un código."))
+    return problemas
+
+
 def leer_numero(valor):
     """Lee un número de una celda de Excel, aguantando cómo lo escribe cada proveedor.
 
@@ -409,13 +509,35 @@ def leer_numero(valor):
         return None
     if isinstance(valor, bool):
         return None
+    # Una fecha no es un precio. openpyxl las devuelve como datetime, y una columna mal
+    # elegida (la de «vigencia») cargaba cualquier cosa.
+    if isinstance(valor, (datetime, date, dtime, timedelta)):
+        return None
     if isinstance(valor, (int, float)):
-        return float(valor)
+        return float(valor) if valor == valor else None      # NaN no es un número
 
     texto = str(valor).strip()
     if not texto:
         return None
-    negativo = texto.lstrip().startswith("-")
+    # Notación científica: Excel muestra así los números largos, y al exportar a CSV queda
+    # «1.5E+3». Sacando todo lo que no es dígito quedaba «1.53»: mil quinientos leído como 1,53.
+    if re.fullmatch(r"[-+]?\d+(?:[.,]\d+)?[eE][-+]?\d+", texto):
+        try:
+            return float(texto.replace(",", "."))
+        except ValueError:
+            return None
+    # Negativo si hay un «-» ANTES del primer dígito: «$ -100» también es negativo, no solo
+    # «-100». Uno después («850.-», «100-200») no lo es.
+    negativo = bool(re.match(r"^[^\d]*-", texto))
+    # Dos números en la misma celda no son un precio: «2 x 1.500» era 21.500, y «05/01/2024»
+    # un número de ocho cifras. Solo se juntan si el espacio separa miles («1 234,56»).
+    grupos = re.findall(r"\d[\d.,]*", texto)
+    if len(grupos) > 1:
+        entre = re.split(r"\d[\d.,]*", texto)[1:-1]
+        miles_con_espacio = (all(e.strip(" \u00a0") == "" and e for e in entre)
+                             and all(re.match(r"\d{3}(?!\d)", g) for g in grupos[1:]))
+        if not miles_con_espacio:
+            return None
     texto = re.sub(r'[^\d,.]', '', texto)
     texto = texto.strip(",.")               # se come el "$850.-" y el "1.234,-"
     if not texto or not any(ch.isdigit() for ch in texto):

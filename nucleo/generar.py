@@ -185,14 +185,27 @@ Dos problemas de verdad, los dos vistos en listas reales:
 
 diagnosticar_lista() simula la importación sobre una muestra y cuenta qué va a pasar con cada
 fila, para poder avisar ANTES de cargar y no después."""
+import hashlib
+import os
 import re
 import unicodedata
+from datetime import date, datetime, time as dtime, timedelta
 
 from .errores import anotar_error
 from .codigos import (dividir_codigos, es_codigo_util, es_fecha_disfrazada, sanitizar,
                       valor_o_vacio)
-''', ["_decodificar_texto", "_detectar_separador", "leer_excel", "leer_numero",
-      "PISTAS_COLUMNAS", "adivinar_columnas", "_perfil_de_columna",
+
+# En la app, lo que dura lo que el proceso vive aparte de cada pasada de Streamlit (ver
+# del_proceso() en logica/base.py). Acá no hay pasadas: alcanza con un diccionario del módulo.
+_DEL_PROCESO = {}
+
+
+def del_proceso(nombre, crear):
+    return _DEL_PROCESO.setdefault(nombre, crear())
+''', ["_decodificar_texto", "_detectar_separador", "huella_de_archivo",
+      "identidad_del_archivo", "LIBROS_EN_MEMORIA", "_libro_de_excel", "leer_excel",
+      "leer_numero", "PISTAS_COLUMNAS", "PISTAS_QUE_NO_SON", "_titulo_normalizado",
+      "_pista_en_titulo", "adivinar_columnas", "_perfil_de_columna",
       "adivinar_columnas_por_datos", "diagnosticar_lista"])
 
 # ---------------------------------------------------------------- equivalencias

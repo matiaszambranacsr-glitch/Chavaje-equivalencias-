@@ -563,6 +563,68 @@ def _parece_fila_de_datos(fila, siguientes):
     return comparadas >= 2 and iguales / comparadas >= 0.6
 
 
+def identidad_del_archivo(archivo):
+    """Qué archivo es, por su CONTENIDO (subido) o por ruta + fecha + tamaño (en el teléfono).
+    None si no se puede saber. Es lo que dice «cambió el archivo» aunque se llame igual."""
+    if not archivo:
+        return None
+    if isinstance(archivo, str):
+        try:
+            _st = os.stat(archivo)
+        except OSError:
+            return None
+        return ("ruta", os.path.abspath(archivo), _st.st_mtime_ns, _st.st_size)
+    try:
+        return ("datos", huella_de_archivo(archivo.getvalue()))
+    except Exception as _err:
+        anotar_error("identidad_del_archivo", _err)
+        return None
+
+
+# Libros de Excel ya leídos, por identidad del archivo: {identidad: {hoja: filas}}. Dura lo que
+# el proceso (ver del_proceso()), no una pasada: la gracia es que el próximo toque no lo relea.
+LIBROS_EN_MEMORIA = 2
+
+
+def _libro_de_excel(archivo):
+    """Todas las hojas del archivo, leídas UNA vez por archivo: {hoja: filas}.
+
+    Antes cada toque en la pantalla de carga abría el libro dos veces enteras (una para contar
+    las hojas y otra para la vista previa) y una tercera al importar. Medido con una lista de
+    30.000 filas: 5,2 segundos por toque, cambiar un selector incluido. Ahora el primer toque
+    lo lee y los demás lo sacan de acá.
+
+    En modo read_only: es varias veces más rápido y gasta menos memoria. El problema que tenía
+    (max_row = None en muchas listas reales, ver hojas_del_excel()) acá no importa, porque las
+    filas se cuentan leyéndolas. Las filas se emparejan al mismo ancho: en read_only una fila
+    termina en su última celda con algo, y la vista previa necesita una tabla pareja."""
+    clave = identidad_del_archivo(archivo)
+    guardados = del_proceso("libros_de_excel_leidos", dict)
+    if clave is not None and clave in guardados:
+        return guardados[clave]
+    if not isinstance(archivo, str):
+        archivo.seek(0)
+    wb = load_workbook(archivo, data_only=True, read_only=True)
+    try:
+        libro = {}
+        for ws in wb.worksheets:
+            filas = [list(r) for r in ws.iter_rows(values_only=True)]
+            while filas and all(v is None or str(v).strip() == "" for v in filas[-1]):
+                filas.pop()
+            ancho = max((len(f) for f in filas), default=0)
+            for f in filas:
+                if len(f) < ancho:
+                    f.extend([None] * (ancho - len(f)))
+            libro[ws.title] = filas
+    finally:
+        wb.close()
+    if clave is not None:
+        while len(guardados) >= LIBROS_EN_MEMORIA:
+            guardados.pop(next(iter(guardados)), None)
+        guardados[clave] = libro
+    return libro
+
+
 def hojas_del_excel(archivo):
     """Las hojas del archivo con cuántas filas tiene cada una.
 
@@ -575,14 +637,10 @@ def hojas_del_excel(archivo):
     try:
         if not isinstance(archivo, str):
             archivo.seek(0)
-        # SIN read_only a propósito. En modo read_only, openpyxl devuelve max_row = None para
-        # muchos archivos (pasa con las listas reales de proveedor), así que todas las hojas
-        # figuraban con 0 filas: el selector no servía para nada y la elección automática de
-        # "la hoja con más filas" terminaba tomando la primera por descarte.
-        wb = load_workbook(archivo, data_only=True)
-        hojas = [(ws.title, ws.max_row or 0) for ws in wb.worksheets]
-        wb.close()
-        return hojas
+        # Las filas se CUENTAN, no se toman de max_row: en modo read_only openpyxl devuelve
+        # max_row = None para muchos archivos (pasa con las listas reales de proveedor), así
+        # que todas las hojas figuraban con 0 filas y el selector no servía para nada.
+        return [(hoja, len(filas)) for hoja, filas in _libro_de_excel(archivo).items()]
     except Exception as _err:
         anotar_error("hojas_del_excel", _err)
         return []
@@ -747,20 +805,18 @@ def leer_excel(archivo, nrows=None, hoja=None):
                                 return filas
         return filas
 
-    wb = load_workbook(archivo, data_only=True)
-    if hoja and hoja in wb.sheetnames:
-        ws = wb[hoja]
+    libro = _libro_de_excel(archivo)
+    if not libro:
+        return []
+    if hoja and hoja in libro:
+        filas = libro[hoja]
     else:
         # Sin hoja elegida, se toma la que MÁS FILAS tiene, no la que quedó activa: la activa
         # es simplemente la que el proveedor tenía abierta al guardar, y muchas veces es la de
         # instrucciones o una en blanco.
-        ws = max(wb.worksheets, key=lambda w: w.max_row or 0)
-    filas = []
-    for i, row in enumerate(ws.iter_rows(values_only=True)):
-        filas.append(list(row))
-        if nrows and i + 1 >= nrows:
-            break
-    return filas
+        filas = max(libro.values(), key=len)
+    # Copias de las filas: quien llama puede tocarlas, y lo guardado tiene que quedar intacto.
+    return [list(f) for f in (filas[:nrows] if nrows else filas)]
 
 
 

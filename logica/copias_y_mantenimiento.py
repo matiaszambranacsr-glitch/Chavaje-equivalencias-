@@ -1724,7 +1724,22 @@ def informe_post_importacion(lote, nombre_prov, cargados):
             # Todos, no los primeros 600: el número sale a pantalla como «N de los 3.185
             # vínculos nuevos están casi seguro mal», y contarlo sobre una parte es dar un
             # número que no es. Los 3.185 de la lista de Illinois tardan 6,6 s.
-            limpias, sospechosas, _relacionadas = analizar_lote_pendiente(lote, limite=None)
+            # Y queda GUARDADO tal como lo pediría «Equivalencias sugeridas»: antes se hacía
+            # acá, se tiraba, y la pantalla de revisión lo volvía a hacer entero al abrirla.
+            # Con una lista enorme no se hace esperar: 30.000 vínculos son 25 s de los 31 que
+            # tardaba la importación entera. Lo hace la tanda de fondo apenas arranca (ver
+            # preparar_el_analisis_del_primer_lote()) y la revisión lo encuentra hecho.
+            total_lote = contar_pendientes_del_lote(lote)
+            if total_lote > PARES_QUE_SE_ANALIZAN_AL_IMPORTAR:
+                guardar_config("lote_a_analizar", lote)
+                informe["analisis_por_atras"] = total_lote
+                return _resto_del_informe(informe, nombre_prov)
+            cuantos = tanda_que_cubre(total_lote)
+            resultado = analizar_lote_pendiente(lote, limite=cuantos, desde=0)
+            guardar_analisis_de_lote({
+                "clave": clave_del_analisis_de_lote(lote, cuantos, 0, total_lote),
+                "resultado": resultado})
+            limpias, sospechosas, _relacionadas = resultado
             rojos = [x for x in (limpias + sospechosas) if x.get("confianza", 50) < 30]
             informe["rojos"] = len(rojos)
             if rojos:
@@ -1737,7 +1752,16 @@ def informe_post_importacion(lote, nombre_prov, cargados):
         except Exception as _err:
             anotar_error("informe_post_importacion", _err)
             pass
+    return _resto_del_informe(informe, nombre_prov)
 
+
+# Más que esto no se analiza en el momento de importar: ver informe_post_importacion().
+# 6.000 pares son unos 5 s; la lista de Illinois (3.185) entra de sobra.
+PARES_QUE_SE_ANALIZAN_AL_IMPORTAR = 6000
+
+
+def _resto_del_informe(informe, nombre_prov):
+    """Los controles del informe que no dependen del análisis de los vínculos."""
     # Códigos que no parecen códigos y entraron igual
     try:
         c.execute("""SELECT COUNT(*) FROM productos p JOIN marcas m ON m.id = p.marca_id

@@ -8,14 +8,25 @@ Dos problemas de verdad, los dos vistos en listas reales:
 
 diagnosticar_lista() simula la importación sobre una muestra y cuenta qué va a pasar con cada
 fila, para poder avisar ANTES de cargar y no después."""
+import hashlib
+import os
 import re
 import unicodedata
 
 from openpyxl import load_workbook
+from datetime import date, datetime, time as dtime, timedelta
 
 from .errores import anotar_error
 from .codigos import (dividir_codigos, es_codigo_util, es_fecha_disfrazada, sanitizar,
                       valor_codigo, valor_o_vacio)
+
+# En la app, lo que dura lo que el proceso vive aparte de cada pasada de Streamlit (ver
+# del_proceso() en logica/base.py). Acá no hay pasadas: alcanza con un diccionario del módulo.
+_DEL_PROCESO = {}
+
+
+def del_proceso(nombre, crear):
+    return _DEL_PROCESO.setdefault(nombre, crear())
 
 
 def _decodificar_texto(crudo):
@@ -59,6 +70,75 @@ def _detectar_separador(texto):
         if puntaje > mejor_puntaje:
             mejor, mejor_puntaje = cand, puntaje
     return mejor
+
+
+def huella_de_archivo(datos):
+    """Huella del contenido del archivo. Reconoce la misma planilla aunque le cambien el nombre."""
+    if not datos:
+        return None
+    return hashlib.sha256(datos).hexdigest()[:32]
+
+
+def identidad_del_archivo(archivo):
+    """Qué archivo es, por su CONTENIDO (subido) o por ruta + fecha + tamaño (en el teléfono).
+    None si no se puede saber. Es lo que dice «cambió el archivo» aunque se llame igual."""
+    if not archivo:
+        return None
+    if isinstance(archivo, str):
+        try:
+            _st = os.stat(archivo)
+        except OSError:
+            return None
+        return ("ruta", os.path.abspath(archivo), _st.st_mtime_ns, _st.st_size)
+    try:
+        return ("datos", huella_de_archivo(archivo.getvalue()))
+    except Exception as _err:
+        anotar_error("identidad_del_archivo", _err)
+        return None
+
+
+# Libros de Excel ya leídos, por identidad del archivo: {identidad: {hoja: filas}}. Dura lo que
+# el proceso (ver del_proceso()), no una pasada: la gracia es que el próximo toque no lo relea.
+LIBROS_EN_MEMORIA = 2
+
+
+def _libro_de_excel(archivo):
+    """Todas las hojas del archivo, leídas UNA vez por archivo: {hoja: filas}.
+
+    Antes cada toque en la pantalla de carga abría el libro dos veces enteras (una para contar
+    las hojas y otra para la vista previa) y una tercera al importar. Medido con una lista de
+    30.000 filas: 5,2 segundos por toque, cambiar un selector incluido. Ahora el primer toque
+    lo lee y los demás lo sacan de acá.
+
+    En modo read_only: es varias veces más rápido y gasta menos memoria. El problema que tenía
+    (max_row = None en muchas listas reales, ver hojas_del_excel()) acá no importa, porque las
+    filas se cuentan leyéndolas. Las filas se emparejan al mismo ancho: en read_only una fila
+    termina en su última celda con algo, y la vista previa necesita una tabla pareja."""
+    clave = identidad_del_archivo(archivo)
+    guardados = del_proceso("libros_de_excel_leidos", dict)
+    if clave is not None and clave in guardados:
+        return guardados[clave]
+    if not isinstance(archivo, str):
+        archivo.seek(0)
+    wb = load_workbook(archivo, data_only=True, read_only=True)
+    try:
+        libro = {}
+        for ws in wb.worksheets:
+            filas = [list(r) for r in ws.iter_rows(values_only=True)]
+            while filas and all(v is None or str(v).strip() == "" for v in filas[-1]):
+                filas.pop()
+            ancho = max((len(f) for f in filas), default=0)
+            for f in filas:
+                if len(f) < ancho:
+                    f.extend([None] * (ancho - len(f)))
+            libro[ws.title] = filas
+    finally:
+        wb.close()
+    if clave is not None:
+        while len(guardados) >= LIBROS_EN_MEMORIA:
+            guardados.pop(next(iter(guardados)), None)
+        guardados[clave] = libro
+    return libro
 
 
 def leer_excel(archivo, nrows=None, hoja=None):
@@ -177,20 +257,18 @@ def leer_excel(archivo, nrows=None, hoja=None):
                                 return filas
         return filas
 
-    wb = load_workbook(archivo, data_only=True)
-    if hoja and hoja in wb.sheetnames:
-        ws = wb[hoja]
+    libro = _libro_de_excel(archivo)
+    if not libro:
+        return []
+    if hoja and hoja in libro:
+        filas = libro[hoja]
     else:
         # Sin hoja elegida, se toma la que MÁS FILAS tiene, no la que quedó activa: la activa
         # es simplemente la que el proveedor tenía abierta al guardar, y muchas veces es la de
         # instrucciones o una en blanco.
-        ws = max(wb.worksheets, key=lambda w: w.max_row or 0)
-    filas = []
-    for i, row in enumerate(ws.iter_rows(values_only=True)):
-        filas.append(list(row))
-        if nrows and i + 1 >= nrows:
-            break
-    return filas
+        filas = max(libro.values(), key=len)
+    # Copias de las filas: quien llama puede tocarlas, y lo guardado tiene que quedar intacto.
+    return [list(f) for f in (filas[:nrows] if nrows else filas)]
 
 
 def leer_numero(valor):
@@ -212,13 +290,35 @@ def leer_numero(valor):
         return None
     if isinstance(valor, bool):
         return None
+    # Una fecha no es un precio. openpyxl las devuelve como datetime, y una columna mal
+    # elegida (la de «vigencia») cargaba cualquier cosa.
+    if isinstance(valor, (datetime, date, dtime, timedelta)):
+        return None
     if isinstance(valor, (int, float)):
-        return float(valor)
+        return float(valor) if valor == valor else None      # NaN no es un número
 
     texto = str(valor).strip()
     if not texto:
         return None
-    negativo = texto.lstrip().startswith("-")
+    # Notación científica: Excel muestra así los números largos, y al exportar a CSV queda
+    # «1.5E+3». Sacando todo lo que no es dígito quedaba «1.53»: mil quinientos leído como 1,53.
+    if re.fullmatch(r"[-+]?\d+(?:[.,]\d+)?[eE][-+]?\d+", texto):
+        try:
+            return float(texto.replace(",", "."))
+        except ValueError:
+            return None
+    # Negativo si hay un «-» ANTES del primer dígito: «$ -100» también es negativo, no solo
+    # «-100». Uno después («850.-», «100-200») no lo es.
+    negativo = bool(re.match(r"^[^\d]*-", texto))
+    # Dos números en la misma celda no son un precio: «2 x 1.500» era 21.500, y «05/01/2024»
+    # un número de ocho cifras. Solo se juntan si el espacio separa miles («1 234,56»).
+    grupos = re.findall(r"\d[\d.,]*", texto)
+    if len(grupos) > 1:
+        entre = re.split(r"\d[\d.,]*", texto)[1:-1]
+        miles_con_espacio = (all(e.strip(" \u00a0") == "" and e for e in entre)
+                             and all(re.match(r"\d{3}(?!\d)", g) for g in grupos[1:]))
+        if not miles_con_espacio:
+            return None
     texto = re.sub(r'[^\d,.]', '', texto)
     texto = texto.strip(",.")               # se come el "$850.-" y el "1.234,-"
     if not texto or not any(ch.isdigit() for ch in texto):
@@ -260,12 +360,49 @@ PISTAS_COLUMNAS = {
     # se pide el número de parte ("150000-R"), no el EAN: si el EAN ocupa el lugar del código,
     # el número real del repuesto no queda cargado en ningún lado y no se puede buscar.
     "ean":    ["EAN", "BARRA", "BARCODE", "GTIN", "UPC"],
-    "oem":    ["OEM", "ORIG", "EQUIV", "CRUCE", "FABRICA", "FÁBRICA", "APLIC"],
+    # Sin «FABRICA» ni «APLIC» sueltos: «FABRICANTE» es la columna con el NOMBRE de la marca
+    # («BOSCH», «SKF») y «APLICACION» es el auto al que va. Ninguna de las dos es un código, y
+    # tomadas como código de fábrica colgaban cientos de filas de «BOSCH» o de «GOL 1.6»: una
+    # equivalencia falsa por fila. El código de fábrica escrito con todas las letras sí vale.
+    "oem":    ["OEM", "ORIG", "EQUIV", "CRUCE", "COD FABRICA", "CODIGO FABRICA",
+                "COD DE FABRICA", "CODIGO DE FABRICA", "NRO FABRICA", "NRO DE FABRICA"],
     "desc":   ["DESC", "DETALLE", "PROD", "ARTICULO", "ARTÍCULO", "NOMBRE", "RUBRO"],
     "precio": ["PRECIO", "P.VENTA", "PVENTA", "P. VENTA", "IMPORTE", "VALOR", "LISTA",
                 "COSTO", "NETO", "UNITARIO", "$"],
     "stock":  ["STOCK", "EXIST", "CANT", "DISPON", "SALDO", "DEPOSITO", "DEPÓSITO"],
 }
+
+
+# Títulos que tienen la pista adentro pero NO son esa columna. Probado con títulos reales:
+#   · «DESCUENTO %» tiene «DESC» y quedaba como descripción: cada producto con «15» de nombre.
+#   · «PESO NETO» tiene «NETO» y quedaba como precio: el repuesto costaba lo que pesa.
+#   · «CANT. X BULTO» y «CANT. MINIMA» tienen «CANT» y pisaban el stock con la caja cerrada.
+#   · «ORIGEN» (CHINA, BRASIL, NACIONAL) tiene «ORIG» y quedaba como código de fábrica: tres
+#     «códigos» que unían entre sí a todos los productos del mismo país.
+PISTAS_QUE_NO_SON = {
+    "oem":    ["ORIGEN", "PROCEDENCIA", "FABRICANTE", "APLIC"],
+    "desc":   ["DESCUENTO", "DESC %", "DESC%"],
+    "precio": ["PESO", "KG", "DESCUENTO", "DTO", "BONIF", "ALICUOTA"],
+    "stock":  ["BULTO", "MINIMA", "MINIMO", "X CAJA", "POR CAJA", "EMBALAJE", "PACK", "MULTIPLO"],
+}
+
+
+def _titulo_normalizado(x):
+    """El título en mayúsculas, sin acentos, sin puntos y con los espacios de a uno: «Cód. Fábrica»
+    y «COD FABRICA» son el mismo título."""
+    if x is None:
+        return ""
+    t = unicodedata.normalize("NFKD", str(x).upper())
+    t = "".join(ch for ch in t if not unicodedata.combining(ch))
+    return re.sub(r"\s+", " ", t.replace(".", " ").replace("_", " ")).strip()
+
+
+def _pista_en_titulo(pista, titulo):
+    """La pista al PRINCIPIO de una palabra del título. Adentro de una palabra no vale: «ART»
+    está en «PARTE» y «CANT» en «DESCANTE», y sin esto cualquier título largo caía en
+    cualquier rol."""
+    pista = _titulo_normalizado(pista) or pista
+    return re.search(r"(?<![A-Z0-9])" + re.escape(pista), titulo) is not None
 
 
 def adivinar_columnas(encabezado):
@@ -278,7 +415,7 @@ def adivinar_columnas(encabezado):
 
     Para precio y stock gana la PRIMERA columna que coincide: las listas suelen traer varias
     (costo, lista, con IVA, con descuento) y la primera es casi siempre la que corresponde."""
-    titulos = [str(x).upper().strip() if x else "" for x in encabezado]
+    titulos = [_titulo_normalizado(x) for x in encabezado]
 
     # Para cada columna, su mejor rol: el de la pista más larga que aparezca en el título
     mejor_rol = {}
@@ -287,8 +424,10 @@ def adivinar_columnas(encabezado):
             continue
         candidatos = []
         for clave, pistas in PISTAS_COLUMNAS.items():
+            if any(_pista_en_titulo(n, titulo) for n in PISTAS_QUE_NO_SON.get(clave, ())):
+                continue
             for pista in pistas:
-                if pista in titulo:
+                if _pista_en_titulo(pista, titulo):
                     # "EAN" pesa más que "COD" aunque midan lo mismo: un título como
                     # "CODIGO_EAN" tiene las dos, y sin esta prioridad el empate se resolvía a
                     # favor de "COD" y el código de barras terminaba ocupando el lugar del
@@ -301,7 +440,9 @@ def adivinar_columnas(encabezado):
     hallado = {"prov": None, "oem": None, "desc": None, "precio": None, "stock": None,
                "ean": None}
     for i, clave in mejor_rol.items():
-        if clave in ("precio", "stock"):
+        # La descripción también: la primera. Las listas que traen dos («DESCRIPCION» y
+        # «DESCRIPCION ADICIONAL» o «DESC. RUBRO») ponen primero la del producto.
+        if clave in ("precio", "stock", "desc"):
             if hallado[clave] is None:      # la primera manda
                 hallado[clave] = i
         else:

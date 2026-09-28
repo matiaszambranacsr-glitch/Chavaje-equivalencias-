@@ -25,8 +25,9 @@ import functools
 import time
 import requests          # se usa en varias funciones; importarlo una vez evita repetirlo
 import sys
+import collections
 import types
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, date, time as dtime
 from urllib.parse import quote
 from openpyxl import load_workbook, Workbook
 
