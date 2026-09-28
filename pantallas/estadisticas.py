@@ -878,6 +878,56 @@ Administrar → Mantenimiento.
                 st.success("✅ No se encontró nada sospechoso entre los vínculos ya cargados.")
 
         st.markdown("---")
+        st.markdown("**🔁 Revisar lo aprobado con las reglas de hoy**")
+        explicar(
+            "Pasa cada vínculo ya cargado por los mismos vetos que usa hoy la revisión.",
+            "Cada vez que la app aprende a distinguir algo —modelos distintos, largo de cable, "
+            "temperaturas, un código que en realidad es un motor— lo aplica a lo que llega. Lo que "
+            "ya habías aprobado antes quedó como estaba, y la auditoría de arriba no lo vuelve a "
+            "mirar. Esto sí. Lo que confirmes como correcto no vuelve a aparecer; lo que cortes "
+            "queda descartado aunque vuelvas a importar la lista."
+        )
+        if st.button("🔁 Revisar lo aprobado", key="revisar_lo_aprobado"):
+            with st.spinner("Revisando..."):
+                st.session_state["resultado_reglas_de_hoy"] = aprobados_que_hoy_se_vetarian()
+        _rh = st.session_state.get("resultado_reglas_de_hoy")
+        if _rh:
+            _n_vetados = sum(len(filas) for _m, filas in _rh["grupos"])
+            if not _n_vetados:
+                st.success(f"✅ Ninguno de los {_rh['revisados']:,} vínculos cargados choca con "
+                           "las reglas de hoy.")
+            else:
+                st.warning(
+                    f"**{_n_vetados:,} de {_rh['revisados']:,} vínculos cargados hoy se "
+                    "vetarían.** Van agrupados por motivo: mirá los ejemplos de cada grupo y "
+                    "resolvelo de un toque.")
+            if _rh["confirmados"]:
+                st.caption(f"({_rh['confirmados']:,} ya confirmados como correctos no se miran.)")
+            for _motivo_rh, _filas_rh in _rh["grupos"][:30]:
+                with st.container(border=True):
+                    st.markdown(f"**{texto_para_html(_motivo_rh)}** — {len(_filas_rh):,} "
+                                "vínculo(s)")
+                    for _f in _filas_rh[:5]:
+                        st.caption(
+                            f"{_f['marca_a']} **{_f['cod_a']}** — {(_f['desc_a'] or '')[:70]}  ↔  "
+                            f"{_f['marca_b']} **{_f['cod_b']}** — {(_f['desc_b'] or '')[:70]}"
+                            + (f"  \n_{_f['vetos'][0]}_" if _f["vetos"][0] != _motivo_rh else ""))
+                    if len(_filas_rh) > 5:
+                        st.caption(f"… y {len(_filas_rh) - 5:,} más.")
+                    _pares_rh = [(_f["a"], _f["b"]) for _f in _filas_rh]
+                    _k_rh = abs(hash(_motivo_rh))
+                    _c1_rh, _c2_rh = st.columns(2)
+                    _c1_rh.button(f"✂️ Cortar los {len(_filas_rh):,}", key=f"rh_cortar_{_k_rh}",
+                                  on_click=cb_reglas_de_hoy, args=(_pares_rh, "cortar"),
+                                  help="Los productos quedan; solo se corta la relación, y no "
+                                       "vuelve aunque reimportes la lista")
+                    _c2_rh.button("✅ Están bien", key=f"rh_ok_{_k_rh}",
+                                  on_click=cb_reglas_de_hoy, args=(_pares_rh, "ok"),
+                                  help="No vuelven a aparecer acá")
+            if len(_rh["grupos"]) > 30:
+                st.caption(f"(mostrando 30 de {len(_rh['grupos'])} motivos)")
+
+        st.markdown("---")
 
         lotes_pendientes = resumen_lotes_pendientes()
         if lotes_pendientes:

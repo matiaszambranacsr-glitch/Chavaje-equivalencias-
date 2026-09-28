@@ -1191,10 +1191,13 @@ def probar_el_codigo_que_hoy_ya_no_se_tomaria():
     Importa que sea la misma función en los dos lugares que la usan —el control de puentes
     viejos y el puntaje de la cola de revisión—: si un código no es un código, el vínculo no
     sirve ni aunque las dos filas tengan la descripción idéntica."""
-    for basura in ("BENZ1618", "240E42", "CLS350", "2003-2008", "14X20X1", "F14000"):
+    for basura in ("BENZ1618", "240E42", "CLS350", "2003-2008", "14X20X1", "F14000", "12345"):
         cierto(codigos.codigo_que_hoy_no_se_tomaria(basura),
                f"«{basura}» no es un código de pieza")
-    for real in ("0280155786", "AT-05103R", "IWP210", "W712/94", "06A906265E", "F000TE1124"):
+    # Los de 6 cifras de Peugeot y Ford llegan declarados («REF ORIG PEUGEOT 453402»): no son
+    # basura aunque un número suelto sin declarar pida 7.
+    for real in ("0280155786", "AT-05103R", "IWP210", "W712/94", "06A906265E", "F000TE1124",
+                 "453402", "024232", "405093"):
         cierto(not codigos.codigo_que_hoy_no_se_tomaria(real),
                f"«{real}» es un código de verdad y no hay que borrarlo")
     cierto(codigos.codigo_que_hoy_no_se_tomaria(""), "un código vacío no es un código")

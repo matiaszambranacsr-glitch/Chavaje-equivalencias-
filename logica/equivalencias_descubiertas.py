@@ -579,6 +579,16 @@ def cb_auditoria_cortar_todos(producto_id):
 
 
 
+def cb_reglas_de_hoy(pares, decision):
+    """«✂️ Cortar» o «✅ Están bien» sobre un grupo de 🔁 Revisar lo aprobado con las reglas de
+    hoy, y vuelve a revisar para que el grupo resuelto desaparezca de la pantalla."""
+    if decision == "cortar":
+        cortar_vinculos_cargados(pares)
+    else:
+        marcar_revision(pares, "ok", motivo=MOTIVO_CONFIRMADO_CON_LAS_REGLAS_DE_HOY)
+    st.session_state["resultado_reglas_de_hoy"] = aprobados_que_hoy_se_vetarian()
+
+
 def cortar_todos_los_vinculos(producto_id, recordar_rechazo=True):
     """Corta TODAS las equivalencias de un producto de una sola vez. Para cuando quedó un
     producto basura de una importación mal mapeada colgado de decenas de códigos."""
@@ -591,6 +601,91 @@ def cortar_todos_los_vinculos(producto_id, recordar_rechazo=True):
         conn.commit()
     if recordar_rechazo and pares:
         marcar_revision(pares, "rechazada")
+    return len(pares)
+
+
+# Lo que la persona confirmó en «🔁 Revisar lo aprobado con las reglas de hoy»: un 'ok' con
+# este motivo no vuelve a aparecer ahí. Un 'ok' común —el de aprobar la cola— sí: se aprobó con
+# las reglas de ese día, y es justo lo que hay que volver a mirar.
+MOTIVO_CONFIRMADO_CON_LAS_REGLAS_DE_HOY = "confirmado"
+
+
+def aprobados_que_hoy_se_vetarian(limite=None):
+    """Los vínculos YA CARGADOS que el análisis de hoy vetaría, agrupados por el motivo.
+
+    Cada regla nueva —modelos distintos, largo de cable, temperaturas, tapa trasera contra tapa
+    de válvulas— se aplica a la cola que viene. Lo que se aprobó antes de que existiera quedó
+    cargado, y la auditoría de siempre no lo vuelve a mirar: salta todo lo marcado 'ok', y
+    aprobar la cola marca 'ok' justamente a todo lo aprobado. Así, cada mejora del análisis
+    arreglaba el futuro y dejaba el pasado como estaba.
+
+    Acá cada vínculo cargado pasa por evidencia_cruzada(), la misma que usa la cola, y se
+    devuelven los que tienen algún veto. No se mira lo que la persona confirmó acá mismo (ver
+    MOTIVO_CONFIRMADO_CON_LAS_REGLAS_DE_HOY).
+
+    Devuelve {"revisados", "confirmados", "grupos": [(motivo, [filas])]}, de los grupos más
+    grandes a los más chicos."""
+    c.execute("""SELECT producto_a_id, producto_b_id FROM equivalencias_revisadas
+                 WHERE decision = 'ok' AND motivo = ?""",
+              (MOTIVO_CONFIRMADO_CON_LAS_REGLAS_DE_HOY,))
+    confirmados = {(r[0], r[1]) for r in c.fetchall()}
+    c.execute("""SELECT DISTINCT MIN(e.producto_a_id, e.producto_b_id) AS a,
+                        MAX(e.producto_a_id, e.producto_b_id) AS b
+                 FROM equivalencias e WHERE e.producto_a_id != e.producto_b_id
+                 ORDER BY 1, 2 LIMIT ?""", (limite if limite else -1,))
+    pares = [(r["a"], r["b"]) for r in c.fetchall() if (r["a"], r["b"]) not in confirmados]
+    grupos = {}
+    with recordando_lo_de_cada_producto():
+        ids = sorted({x for par in pares for x in par})
+        precargar_para_evidencia(ids, cargar_medidas_de_varios(ids))
+        memoria = getattr(_MEMORIA_DEL_ANALISIS, "datos", None) or {}
+        cuenta_pal, total_desc = cuantas_veces_aparece_cada_palabra()
+        rubros_oem = rubros_de_los_codigos_de_fabrica()
+        ya_juzgados = {}
+        for a, b in pares:
+            pa, pb = memoria.get(("producto_ev", a)) or {}, memoria.get(("producto_ev", b)) or {}
+            try:
+                _a_favor, vetos, _veredicto = evidencia_cruzada(
+                    a, b, cuenta_palabras=cuenta_pal, total_descripciones=total_desc,
+                    rubros_oem=rubros_oem)
+            except Exception as _err:
+                anotar_error("aprobados_que_hoy_se_vetarian", _err)
+                continue
+            # El código de fábrica que hoy no se tomaría, como en la cola: solo del lado OEM,
+            # que se adivinó de una descripción (ver _analizar_lote_pendiente()).
+            for p in (pa, pb):
+                cod = p.get("codigo_raw") or ""
+                if p.get("tipo") != "OEM" or not cod:
+                    continue
+                if cod not in ya_juzgados:
+                    ya_juzgados[cod] = codigo_que_hoy_no_se_tomaria(cod)
+                if ya_juzgados[cod]:
+                    vetos = [f"🧯 «{cod}» no es un código de fábrica: es un modelo, una medida "
+                             "o un año. Las reglas de hoy ya no lo tomarían"] + list(vetos)
+                    break
+            if not vetos:
+                continue
+            grupos.setdefault(tipo_de_alarma(vetos[0]), []).append({
+                "a": a, "b": b, "vetos": vetos,
+                "marca_a": pa.get("marca"), "cod_a": pa.get("codigo_raw"),
+                "desc_a": pa.get("descripcion"),
+                "marca_b": pb.get("marca"), "cod_b": pb.get("codigo_raw"),
+                "desc_b": pb.get("descripcion")})
+    return {"revisados": len(pares), "confirmados": len(confirmados) // 2,
+            "grupos": sorted(grupos.items(), key=lambda g: (-len(g[1]), g[0]))}
+
+
+def cortar_vinculos_cargados(pares):
+    """Corta esos vínculos en los dos sentidos, de una, y los recuerda como rechazados para
+    que no vuelvan con la próxima importación. Devuelve cuántos se cortaron."""
+    pares = [tuple(p) for p in pares]
+    if not pares:
+        return 0
+    with transaccion():
+        for a, b in pares:
+            c.execute("DELETE FROM equivalencias WHERE (producto_a_id = ? AND producto_b_id = ?) "
+                      "OR (producto_a_id = ? AND producto_b_id = ?)", (a, b, b, a))
+    marcar_revision(pares, "rechazada")
     return len(pares)
 
 
@@ -2100,6 +2195,12 @@ def tipo_de_alarma(alarma):
         return "🧯 Lo que se tomó como código de fábrica es un modelo, una medida o un año"
     if alarma.startswith("🚫 Código ") and " parece una " in alarma:
         return "🚫 Uno de los dos códigos parece una medida o una especificación"
+    # «63 vs 53 cm», «120/105 vs 98»: el dato de cada par. Lo que decide —que el largo, las
+    # temperaturas o las vías no son las mismas— es igual para todos.
+    m = re.match(r"(🔤 (?:largo de cable distinto|temperaturas distintas|"
+                 r"distinta cantidad de vías)) \(", alarma)
+    if m:
+        return m.group(1)
     return alarma
 
 
@@ -2401,6 +2502,11 @@ def _analizar_lote_pendiente(lote, limite=None, desde=0):
         # Las alarmas estructurales (el código no parece un código, un OEM que apunta a dos
         # productos) descuentan fuerte: son problemas de carga, no matices.
         puntaje -= 35 * len([a for a in alarmas if a.startswith(("🚫", "⚠️"))])
+        # Los topes por un código dudoso valen hasta el final: la evidencia a favor de más abajo
+        # sube el puntaje a 72 o 90, y los pisaba. Con un código de fábrica que no es un código
+        # la descripción coincide siempre —el producto de fábrica se crea copiando la de la
+        # fila—, así que esa evidencia no dice nada del código.
+        _tope_por_el_codigo = 100.0
         # Y un código que parece una medida no se aprueba sin mirar, aunque la descripción
         # coincida entera: «Materiales para junta CORCHO Y GOMA» contra «800MM.X600MM» llegaba
         # a 65 —100 por la descripción igual, menos 35—. Los retenes y o'rings, donde la medida
@@ -2414,6 +2520,7 @@ def _analizar_lote_pendiente(lote, limite=None, desde=0):
             if _m and re.search(r"\d\s*(MM|CM)\s*[.X]|\d\s*X\s*\d|^\d+\s*(MM|CM)$",
                                 _m.group(1).upper()):
                 puntaje = min(puntaje, 50.0)
+                _tope_por_el_codigo = min(_tope_por_el_codigo, 50.0)
                 break
 
         # EL CÓDIGO DE FÁBRICA QUE LAS REGLAS DE HOY YA NO TOMARÍAN. Esto tapa un agujero que
@@ -2441,6 +2548,7 @@ def _analizar_lote_pendiente(lote, limite=None, desde=0):
                 _ya_juzgados[_cod] = codigo_que_hoy_no_se_tomaria(_cod)
             if _cod and _ya_juzgados.get(_cod):
                 puntaje = min(puntaje, 15.0)
+                _tope_por_el_codigo = min(_tope_por_el_codigo, 15.0)
                 _aviso = (f"🧯 «{_cod}» no es un código de fábrica: es un modelo, una medida o "
                           "un año. Las reglas de hoy ya no lo tomarían. Borralo en Mantenimiento "
                           "→ 🧹 Limpiar y corregir → «Puentes que hoy ya no se generarían»")
@@ -2460,6 +2568,8 @@ def _analizar_lote_pendiente(lote, limite=None, desde=0):
             if _cod_ref and el_codigo_no_figura_entre_las_referencias(_cod_ref,
                                                                       f.get(_otra_desc) or ""):
                 puntaje = min(puntaje, PUNTAJE_QUE_NO_LLEGA_A_APROBAR_SOLO)
+                _tope_por_el_codigo = min(_tope_por_el_codigo,
+                                          PUNTAJE_QUE_NO_LLEGA_A_APROBAR_SOLO)
                 _av_ref = (f"🔎 «{_cod_ref}» no aparece entre los números de fábrica que la "
                            "descripción lista al final: parece sacado del texto del medio, "
                            "donde van los motores. Miralo antes de aprobarlo")
@@ -2505,6 +2615,7 @@ def _analizar_lote_pendiente(lote, limite=None, desde=0):
             if not alarmas:
                 alarmas.append("🤷 Nada dice que sean la misma pieza: no los une ningún código y "
                                "las descripciones no alcanzan para decirlo")
+        puntaje = min(puntaje, _tope_por_el_codigo)
         f["evidencia"] = a_favor
         f["veredicto"] = veredicto
 

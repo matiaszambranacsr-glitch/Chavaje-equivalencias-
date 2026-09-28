@@ -1267,11 +1267,18 @@ def codigo_que_hoy_no_se_tomaria(codigo):
     para tirar designaciones de motor y se llevaban puestos códigos reales como «AT-05103R»—.
     Así solo quedan las formas que son texto sin discusión: un modelo de auto, un rango de
     años, una medida. Esas no dejan de serlo porque el proveedor las haya puesto en la columna
-    del código."""
+    del código.
+
+    Y se le pregunta con el código DECLARADO («REF ORIG 453402»), que es como llegan los
+    códigos de fábrica. Se preguntaba con «PIEZA 453402 ORIG», donde el número no queda
+    declarado, y un número solo sin declarar necesita 7 cifras: los de 6 de Peugeot y Ford
+    —«REF ORIG PEUGEOT 453402», «REF ORIG 405093»— salían como basura. En la base real eran 122
+    códigos buenos, y la limpieza de «Puentes que hoy ya no se generarían» los hubiera borrado
+    con sus vínculos."""
     limpio = sanitizar(codigo)
     if not limpio:
         return True
-    return not extraer_codigos_de_texto(f"PIEZA {codigo} ORIG", minimo=1,
+    return not extraer_codigos_de_texto(f"REF ORIG {codigo}", minimo=1,
                                         codigos_conocidos={limpio})
 
 

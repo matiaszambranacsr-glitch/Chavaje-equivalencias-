@@ -5023,6 +5023,33 @@ Tres agujeros, todos probados sobre la base real con la pantalla de verdad:
   ampliar la muestra también se sortea solo entre los de antes, para que la estimación siga
   hablando de un solo grupo.
 
+### 🔁 Lo aprobado, revisado con las reglas de hoy
+
+Cada regla nueva se aplicaba a la cola que llega. Lo aprobado antes quedaba como estaba, y la
+auditoría de siempre no lo vuelve a mirar: salta lo marcado «ok», y aprobar la cola marca «ok» a
+todo lo aprobado. En Estadísticas → 🔗 Equivalencias sugeridas, **«🔁 Revisar lo aprobado»**
+pasa cada vínculo cargado por `evidencia_cruzada()` —los mismos vetos de la cola— y por el control
+del código de fábrica que hoy no se tomaría (`aprobados_que_hoy_se_vetarian()`). Muestra los que
+chocan agrupados por motivo, con ejemplos, y cada grupo se corta o se confirma de un toque; lo
+confirmado no vuelve a aparecer. Probado aprobando las 12.790 limpias de FISPA más 800 vetadas:
+encuentra 78, y ninguna limpia con un veto de verdad. Tarda 1,4 s sobre 13.000 vínculos.
+
+### 🧯 Los códigos de fábrica de 6 cifras no son basura
+
+`codigo_que_hoy_no_se_tomaria()` le preguntaba al extractor con «PIEZA 453402 ORIG», donde el
+número no queda declarado, y un número solo sin declarar pide 7 cifras. Los de Peugeot, Ford o
+Scania que llegan como «REF ORIG PEUGEOT 453402» salían como «no es un código de fábrica»: 122
+de los 14.046 de la base real, y la limpieza de «Puentes que hoy ya no se generarían» los hubiera
+borrado con sus vínculos. Ahora se pregunta con el código declarado («REF ORIG 453402»), que es
+como llegan. En la cola, 136 pares con esos códigos pasan de revisión a limpias —interruptores de
+stop, bulbos, bombas, válvulas EGR, todos con la misma descripción de los dos lados—.
+
+Y los topes por un código dudoso —🧯 a 15, 🔎 a 74, el código con forma de medida a 50— se
+aplicaban antes de sumar la evidencia a favor, que los subía a 72 o 90. Con un código de fábrica
+que no es un código la descripción coincide siempre —el producto de fábrica se crea copiando la de
+la fila—, así que esa evidencia no dice nada del código. Ahora el tope vale hasta el final: la
+junta TC-687-20 contra «4JB1TC», que es un motor Isuzu, estaba limpia con 72.
+
 ## Una firma de foto podía ser un programa
 
 Las firmas visuales de las fotos se guardan con `pickle`, y `pickle` **no es un formato de
