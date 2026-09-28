@@ -5414,6 +5414,19 @@ diez errores. Todos reproducidos antes y comprobados después:
 Y uno más que salió probando: si la lista trae el mismo código dos veces con precios distintos
 (unidad y caja), ahora se avisa con ejemplos.
 
+### Auditar lo ya cargado: los originales no cuentan
+
+- **«Productos con muchísimos vínculos» ya no cuenta los códigos originales.** Un burro de
+  arranque que reemplaza a 30 números de Bosch es una pieza completa, no basura. Ahora cuenta
+  solo los vínculos con productos de otras marcas de repuesto (10 o más), y los originales
+  se muestran aparte como dato. El botón sigue cortando todos.
+- **La revisión ya no queda corta.** Miraba 20.000 vínculos y la base tiene más: lo último
+  cargado no se revisaba nunca. Ahora mira hasta 150.000 (`VINCULOS_QUE_MIRA_LA_AUDITORIA`).
+  Los 32.960 de la base de prueba tardan 1,4 s, y con eso apareció arriba «JL · CHAPA», basura
+  real pegada a 75 cables, que el tope escondía.
+- **Las descripciones sin `<br>` ni `<b>` escritos**: `texto_para_html()` pasa los saltos a « · »
+  y saca las etiquetas de formato que traen algunas listas.
+
 ## 🔗 Revisar sugeridas: primero lo que hay que hacer
 
 Mirado con capturas sobre la base real (15.308 pendientes en 8 listas):

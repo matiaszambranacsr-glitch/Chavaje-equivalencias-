@@ -1696,23 +1696,29 @@ Administrar → Mantenimiento.
             if resultado_aud["productos_sospechosos"]:
                 st.markdown("**🚩 Productos con muchísimos vínculos (revisalos primero)**")
                 explicar(
-                    "Una pieza real rara vez equivale a más de 10 códigos de fábrica.",
-                    "Si un producto tiene decenas, casi siempre es basura de una importación mal mapeada — "
-                    "por ejemplo un código '1' que quedó de una columna equivocada. Cortarle los vínculos "
-                    "de una limpia el problema entero."
+                    "Pegados a 10 productos de otras marcas o más. Los códigos originales no cuentan.",
+                    "Una pieza con muchos números originales es normal: un burro de arranque puede "
+                    "reemplazar a 30 de Bosch. Lo raro es estar pegado a decenas de productos de "
+                    "otras marcas de repuesto: casi siempre es basura de una importación mal "
+                    "mapeada — por ejemplo un código '1' que quedó de una columna equivocada. "
+                    "Cortarle los vínculos de una limpia el problema entero."
                 )
                 # Sin desplegables: Streamlit los cierra en cada refresco, y como cada botón
                 # provoca uno, se cerraba la ventana justo cuando estabas revisando.
                 for p in resultado_aud["productos_sospechosos"][:15]:
                     desc = texto_para_html(p["descripcion"]) or "_(sin descripción)_"
                     ps1, ps2 = st.columns([3, 1])
+                    _con_oem = (f" (y {p['cantidad_oem']} código(s) original(es), que no cuentan)"
+                                if p.get("cantidad_oem") else "")
                     ps1.markdown(f"**{texto_para_html(p['marca'])}** · `{p['codigo']}` — {desc}  \n"
-                                  f"<small>vinculado a {p['cantidad']} códigos distintos</small>",
+                                  f"<small>vinculado a {p['cantidad']} producto(s) de otras "
+                                  f"marcas{_con_oem}</small>",
                                   unsafe_allow_html=True)
-                    ps2.button(f"✂️ Cortar {p['cantidad']}",
+                    ps2.button(f"✂️ Cortar sus {p['total']}",
                                 key=f"cortar_todo_{p['id']}", type="primary",
                                 on_click=cb_auditoria_cortar_todos, args=(p["id"],),
-                                help="El producto queda; solo se cortan todas sus equivalencias")
+                                help="El producto queda; se cortan TODAS sus equivalencias, "
+                                     "las de los códigos originales también")
                 if len(resultado_aud["productos_sospechosos"]) > 15:
                     st.caption(f"(mostrando 15 de {len(resultado_aud['productos_sospechosos'])})")
                 st.markdown("---")

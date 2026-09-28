@@ -128,7 +128,22 @@ def texto_para_html(valor):
     No va en los códigos: esos se muestran entre acentos graves, y adentro de un bloque de
     código markdown ya los escribe literales. Escapándolos se vería «Tow&amp;Country-300M» en
     vez de «Tow&Country-300M», que es un código real de la base."""
-    return html.escape(str(valor if valor is not None else ""))
+    texto = str(valor if valor is not None else "")
+    # Las etiquetas de formato que algunas listas traen pegadas en la descripción (la de FISPA:
+    # «LRSC030140<b> FORD </b><br>- ESCORT...»). Escapadas se veían escritas tal cual, y un
+    # «<br>» cada diez caracteres hacía ilegible la descripción. El salto pasa a « · » y el
+    # resto se saca. Solo esas etiquetas: el «98<» o el «1997<REF» de arriba siguen intactos.
+    if "<" in texto:
+        texto = _RE_SALTO_HTML.sub(" · ", texto)
+        texto = _RE_ETIQUETA_DE_FORMATO.sub("", texto)
+        texto = re.sub(r"\s*·(?:\s*·)*\s*", " · ", texto)
+        texto = re.sub(r"[ \t]{2,}", " ", texto).strip(" ·")
+    return html.escape(texto)
+
+
+_RE_SALTO_HTML = re.compile(r"<\s*br\s*/?\s*>", re.I)
+_RE_ETIQUETA_DE_FORMATO = re.compile(
+    r"<\s*/?\s*(?:b|i|u|strong|em|p|span|div|font|small|big)(?:\s[^<>]*)?>", re.I)
 
 
 def _clave_de_ayuda(texto):

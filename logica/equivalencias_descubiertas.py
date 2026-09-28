@@ -417,7 +417,13 @@ def eliminar_equivalencia(par_a, par_b, recordar_rechazo=True):
         marcar_revision([(par_a, par_b)], "rechazada")
 
 
-def auditar_equivalencias_existentes(limite=20000):
+# Cuántos vínculos cargados mira la auditoría de una vez. Era 20.000 y la base ya tiene más
+# (21.204 en el celular, 32.960 en la de prueba): quedaba corta siempre, y lo que no miraba era
+# siempre lo mismo —lo último cargado—. Los 32.960 tardan 1,3 s.
+VINCULOS_QUE_MIRA_LA_AUDITORIA = 150000
+
+
+def auditar_equivalencias_existentes(limite=VINCULOS_QUE_MIRA_LA_AUDITORIA):
     """Pasa las alarmas por las equivalencias YA cargadas y las devuelve AGRUPADAS por el
     conflicto, no de a pares sueltos. La diferencia importa: si una importación mal mapeada
     creó un producto basura (código '1', por ejemplo) vinculado a cientos de códigos de
@@ -453,17 +459,27 @@ def auditar_equivalencias_existentes(limite=20000):
     c.execute("SELECT producto_a_id, producto_b_id FROM equivalencias_revisadas WHERE decision = 'ok'")
     ya_ok = {(r["producto_a_id"], r["producto_b_id"]) for r in c.fetchall()}
 
-    # Cuántos vínculos tiene cada producto: sirve para detectar productos basura, que
-    # terminan colgados de decenas o cientos de códigos de fábrica.
+    # Cuántos vínculos tiene cada producto: sirve para detectar productos basura.
+    # Se cuentan APARTE los que van a un código original. Un burro de arranque que lista los
+    # 30 números de Bosch a los que reemplaza no está mal cargado: es una pieza con muchos
+    # originales, y así vienen en las listas. Contándolos, la pantalla ponía primero a los
+    # productos más completos del catálogo como «basura para revisar». Lo raro es estar
+    # pegado a muchos productos de OTRAS MARCAS de repuesto: eso sí suele ser una importación
+    # mal mapeada.
     vinculos_por_producto = {}
     for f in filas:
-        for lado in ("a", "b"):
+        for lado, otro in (("a", "b"), ("b", "a")):
             pid = f[lado]
             info = vinculos_por_producto.setdefault(pid, {
                 "id": pid, "codigo": f[f"cod_{lado}"], "descripcion": f[f"desc_{lado}"],
-                "marca": f[f"marca_{lado}"], "tipo": f[f"tipo_{lado}"], "cantidad": 0
+                "marca": f[f"marca_{lado}"], "tipo": f[f"tipo_{lado}"], "total": 0,
+                "cantidad": 0, "cantidad_oem": 0,
             })
-            info["cantidad"] += 1
+            info["total"] += 1
+            if f[f"tipo_{otro}"] == "OEM":
+                info["cantidad_oem"] += 1
+            else:
+                info["cantidad"] += 1
 
     # Conflicto: un código de fábrica que apunta a varios productos del MISMO proveedor
     grupos = {}
@@ -484,7 +500,7 @@ def auditar_equivalencias_existentes(limite=20000):
             "id": pid, "codigo": f[f"cod_{otro_lado}"], "descripcion": f[f"desc_{otro_lado}"] or "",
             "par": (f["a"], f["b"]),
             "revisado_ok": (f["a"], f["b"]) in ya_ok,
-            "vinculos_totales": vinculos_por_producto.get(pid, {}).get("cantidad", 0),
+            "vinculos_totales": vinculos_por_producto.get(pid, {}).get("total", 0),
         }
 
     conflictos = []
@@ -510,7 +526,7 @@ def auditar_equivalencias_existentes(limite=20000):
                 codigos_malos[pid] = {
                     "id": pid, "codigo": f[f"cod_{lado}"], "marca": f[f"marca_{lado}"],
                     "motivo": motivo,
-                    "vinculos": vinculos_por_producto.get(pid, {}).get("cantidad", 0),
+                    "vinculos": vinculos_por_producto.get(pid, {}).get("total", 0),
                 }
 
     por_medidas = []
@@ -537,7 +553,8 @@ def auditar_equivalencias_existentes(limite=20000):
                 "marca_b": f["marca_b"], "detalle": "; ".join(diferencias),
             })
 
-    # Productos con una cantidad de vínculos fuera de lo normal: candidatos a basura
+    # Productos con una cantidad de vínculos fuera de lo normal: candidatos a basura. Solo
+    # cuentan los vínculos con otras marcas de repuesto (ver arriba).
     sospechosos = sorted(
         [v for v in vinculos_por_producto.values() if v["cantidad"] >= 10 and v["tipo"] != "OEM"],
         key=lambda v: -v["cantidad"]
