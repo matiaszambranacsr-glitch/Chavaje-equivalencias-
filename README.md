@@ -5224,6 +5224,35 @@ hasta que vence. Se prueba y se apaga en Administrar → Mantenimiento → «�
 servidor donde se armó esto no llega a la API, así que se probó con un servidor falso que
 responde como ella: token, búsqueda, publicaciones ajenas descartadas, pares y precios.
 
+## 🏭 Los códigos de fábrica unen, pero no se muestran
+
+Un arranque de LUCAS que cita 53 números de Bosch salía en el buscador con 53 filas de «MOTOR DE
+ARRANQUE…» y el cartel de «sin equivalencias»: los códigos de fábrica son los que unen las listas
+de los proveedores, pero no son algo que se venda. Ahora:
+
+- **Buscando por código** se esconden de la tabla —salvo el que se buscó— y no cuentan como
+  equivalencias. El aviso dice cuántos cita («Cita 63 código(s) de fábrica…»), y una casilla
+  «🏭 Mostrar también los N código(s) de fábrica» los muestra si hace falta. Buscar un código de
+  fábrica sigue funcionando igual: lleva a los productos que lo citan.
+- **Buscando por descripción** no aparecen (copian la descripción de la fila y salían
+  repetidos), salvo que se escriba el código exacto. Tampoco en las equivalencias que se abren
+  debajo de cada resultado.
+
+## 📷 Fotos de Mercado Libre y de los fabricantes, para la búsqueda por cámara
+
+La búsqueda por cámara compara contra `producto_fotos`, y en la base real no había ninguna.
+Ahora, cuando Mercado Libre trae publicaciones de un producto tuyo, la foto de la primera (la
+miniatura en tamaño original, «-O.jpg») queda como la del producto; y cuando la ficha de un
+fabricante (SKF, MANN-FILTER, NGK) declara su foto principal (`og:image`), queda para los
+productos que citan ese código. Solo para productos sin foto, nunca para los de fábrica, y sin
+pisar nada (`proponer_foto()`). La tarea de fondo las baja en modo liviano —queda el link y la
+miniatura— y les calcula la firma visual.
+
+De paso, un error de antes: en modo liviano la foto bajada se guarda como el mismo link, así que
+`bajar_fotos_pendientes()` volvía a elegir las ya bajadas y las sumaba repetidas en cada tanda.
+Ahora solo baja las de productos sin fotos, y un link que no existe queda como `link_roto` para
+no reintentarlo siempre.
+
 ## 🎯 Tus propios datos: qué pedir y a quién avisar
 
 - **Qué te conviene cargar o pedir** (Estadísticas → 🔎 Búsquedas sin resultado). La lista de

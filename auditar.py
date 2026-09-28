@@ -366,7 +366,8 @@ VALORES_PAREADOS = {
     "estado": {"ok", "sin_detalle", "error", "solo_forma", "pendiente", "resuelto",
                # de las reservas de stock
                "activa", "vencida", "vendida", "cancelada"},
-    "foto_busqueda_estado": {"sin_foto", "error"},
+    # link_roto: la foto de internet que no bajó (ver bajar_fotos_pendientes()).
+    "foto_busqueda_estado": {"sin_foto", "error", "link_roto"},
     "origen": {"lista_proveedor", "manual", "subida", "url", "ficha", "link", "migrada", "deducida"},
 }
 for campo, permitidos in VALORES_PAREADOS.items():

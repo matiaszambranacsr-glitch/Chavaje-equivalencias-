@@ -708,7 +708,7 @@ def leer_catalogo_de_fabricante(nombre_catalogo, cuantos=20, pausa=PAUSA_ENTRE_F
     tanda = faltan[:int(cuantos)]
     for i, cod in enumerate(tanda):
         url = cat["url"](cod)
-        texto, err = "", None
+        texto, err, foto = "", None, ""
         try:
             r = sesion.get(url, timeout=20)
             if r.status_code == 404:
@@ -722,6 +722,7 @@ def leer_catalogo_de_fabricante(nombre_catalogo, cuantos=20, pausa=PAUSA_ENTRE_F
                     texto = " ".join((pg.extract_text() or "") for pg in _pdf.pages[:5])
             else:
                 texto = _texto_visible(r.text or "")
+                foto = foto_principal_de_la_pagina(r.text or "", url)
         except PermissionError as e:
             resumen["error"] = str(e)
             break
@@ -754,6 +755,11 @@ def leer_catalogo_de_fabricante(nombre_catalogo, cuantos=20, pausa=PAUSA_ENTRE_F
                 resumen["con_productos"] += 1
             pares.extend((min(a, b), max(a, b), a) for a in los_que_citan for b in nombrados)
             leidas.append((nombre_catalogo, cod, len(nombrados)))
+            # La foto del fabricante, para los productos tuyos que citan el código y todavía no
+            # tienen: es la misma pieza, y le sirve a la búsqueda por cámara.
+            if foto:
+                resumen["con_foto"] = resumen.get("con_foto", 0) + proponer_foto(los_que_citan,
+                                                                                  foto)
         resumen["leidas"] += 1
         if progreso:
             progreso((i + 1) / len(tanda), f"{i + 1} de {len(tanda)}...")
@@ -924,8 +930,56 @@ def buscar_en_mercado_libre(texto, limite=20):
                      for a in it.get("attributes") or []}
         salida.append({"titulo": str(it.get("title") or ""), "precio": it.get("price"),
                        "moneda": it.get("currency_id") or "", "link": it.get("permalink") or "",
-                       "atributos": atributos})
+                       "atributos": atributos,
+                       "foto": _foto_grande_de_mercado_libre(it.get("thumbnail") or "")})
     return salida, None
+
+
+def _foto_grande_de_mercado_libre(miniatura):
+    """La miniatura de la búsqueda viene chica («…-I.jpg»); «-O» es la original. Y por https."""
+    url = str(miniatura or "").strip()
+    if not url.startswith(("http://", "https://")):
+        return ""
+    url = "https://" + url.split("://", 1)[1]
+    return re.sub(r"-[A-Z]\.(jpg|jpeg|png|webp)$", r"-O.\1", url, flags=re.I)
+
+
+def proponer_foto(producto_ids, url_foto):
+    """Deja la foto de internet como la de esos productos, si todavía no tienen ninguna. La
+    bajan después las tandas de fondo (ver bajar_fotos_pendientes()), que calculan la firma
+    visual que usa la búsqueda por cámara. Nunca pisa una foto que ya estaba, y no se la pone a
+    los códigos de fábrica, que no se muestran. Devuelve a cuántos se la puso."""
+    ids = sorted({int(i) for i in producto_ids if i})
+    if not ids or not str(url_foto or "").startswith("https://"):
+        return 0
+    puestas = 0
+    for tanda, marcas in en_tandas(ids):
+        c.execute(f"""UPDATE productos SET imagen_url = ?
+                      WHERE id IN ({marcas}) AND imagen_url IS NULL
+                        AND NOT EXISTS (SELECT 1 FROM producto_fotos f
+                                        WHERE f.producto_id = productos.id)
+                        AND marca_id NOT IN (SELECT id FROM marcas WHERE tipo = 'OEM')""",
+                  [url_foto] + list(tanda))
+        puestas += c.rowcount or 0
+    if puestas:
+        guardar_config("fotos_de_internet_pendientes", "1")
+    return puestas
+
+
+_RE_FOTO_PRINCIPAL = re.compile(
+    r'<meta[^>]+(?:property|name)=["\'](?:og:image|twitter:image)["\'][^>]+content=["\']([^"\']+)'
+    r'|<meta[^>]+content=["\']([^"\']+)["\'][^>]+(?:property|name)=["\'](?:og:image|twitter:image)',
+    re.I)
+
+
+def foto_principal_de_la_pagina(html, url_de_la_pagina):
+    """La foto que la página declara como principal (og:image, la de la vista previa de
+    WhatsApp), con la dirección completa. "" si no declara ninguna."""
+    from urllib.parse import urljoin
+    m = _RE_FOTO_PRINCIPAL.search(html or "")
+    if not m:
+        return ""
+    return urljoin(url_de_la_pagina, (m.group(1) or m.group(2) or "").strip())
 
 
 def _codigo_sin_la_marca_pegada(codigo):
@@ -994,6 +1048,10 @@ def leer_mercado_libre(cuantos=30, pausa=PAUSA_ENTRE_BUSQUEDAS_DE_MERCADO_LIBRE,
         mediana, n_precios = None, 0
         if suyas:
             resumen["con_publicaciones"] += 1
+            # La foto de la primera publicación que tenga, para la búsqueda por cámara.
+            _foto = next((p["foto"] for p in suyas if p.get("foto")), "")
+            if _foto and not es_de_fabrica:
+                resumen["con_foto"] = resumen.get("con_foto", 0) + proponer_foto([prod["id"]], _foto)
             texto = " · ".join(p["titulo"] + " " + " ".join(p["atributos"].values())
                                for p in suyas)
             nombrados = [pid for pid, _c in productos_nombrados_en_la_pagina(
@@ -1108,10 +1166,20 @@ def buscar_imagen_en_ficha(url_ficha, tiempo_maximo=12, sesion=None):
         return None, type(e).__name__
 
 
+# Las fotos como link que todavía no se bajaron. Que el link esté en la ficha no alcanza para
+# saberlo: en modo liviano la foto bajada se guarda como el MISMO link (ver
+# agregar_foto_producto()), así que se miraba solo eso y cada tanda volvía a bajar las mismas y
+# a sumarlas repetidas. Lo que dice si ya se bajó es que tenga fotos en producto_fotos. Y un link
+# que no bajó queda marcado, para no reintentarlo en cada vuelta.
+_FOTO_POR_BAJAR = """imagen_url IS NOT NULL AND imagen_url LIKE 'http%'
+                     AND COALESCE(foto_busqueda_estado, '') <> 'link_roto'
+                     AND NOT EXISTS (SELECT 1 FROM producto_fotos f
+                                     WHERE f.producto_id = productos.id)"""
+
+
 def contar_fotos_por_bajar():
     """Productos cuya foto es un link externo (cargado desde Excel) y todavía no se bajó."""
-    c.execute("""SELECT COUNT(*) FROM productos
-                 WHERE imagen_url IS NOT NULL AND imagen_url LIKE 'http%'""")
+    c.execute(f"SELECT COUNT(*) FROM productos WHERE {_FOTO_POR_BAJAR}")
     return c.fetchone()[0]
 
 
@@ -1149,8 +1217,7 @@ def _bajar_en_paralelo(tareas, funcion, hilos=6, progreso=None, cancelado=None):
 
 def bajar_fotos_pendientes(limite=200, progreso=None, hilos=6, liviano=True):
     """Baja las fotos que están como link externo y las guarda, con miniatura y firma visual."""
-    c.execute("""SELECT id, imagen_url FROM productos
-                 WHERE imagen_url IS NOT NULL AND imagen_url LIKE 'http%' LIMIT ?""", (limite,))
+    c.execute(f"SELECT id, imagen_url FROM productos WHERE {_FOTO_POR_BAJAR} LIMIT ?", (limite,))
     pendientes = [(r["id"], r["imagen_url"]) for r in c.fetchall()]
     if not pendientes:
         return 0, []
@@ -1170,6 +1237,11 @@ def bajar_fotos_pendientes(limite=200, progreso=None, hilos=6, liviano=True):
                 fallidas.append((url, type(e).__name__))
         else:
             fallidas.append((url, error))
+            # Solo lo que es una respuesta —no existe, no es una imagen—, no un corte de red.
+            if error and ("respondió 404" in error or "respondió 410" in error
+                          or "no devuelve una imagen" in error):
+                c.execute("UPDATE productos SET foto_busqueda_estado = 'link_roto' WHERE id = ?",
+                          (pid,))
     return bajadas, fallidas
 
 
@@ -1846,6 +1918,23 @@ def _trabajo_de_fondo():
                 _sumar_al_cupo("tanda_fondo_catalogos", FICHAS_DE_CATALOGO_POR_DIA)
                 anotar_error("_trabajo_de_fondo/catalogos", _err)
 
+        # Las fotos que dejaron los catálogos de fabricante y Mercado Libre (ver proponer_foto()):
+        # se bajan y se les calcula la firma visual, que es lo que usa la búsqueda por cámara.
+        # En modo liviano: en la base queda el link y la miniatura, no la foto entera.
+        if obtener_config("fotos_de_internet_pendientes", "") == "1":
+            try:
+                ceder_al_mostrador()
+                _bajadas, _fallidas = bajar_fotos_pendientes(limite=PRODUCTOS_POR_SUBTANDA,
+                                                             hilos=3)
+                # Sin ninguna bajada —no quedaba nada, o todo lo que quedaba falló— se deja de
+                # intentar: vuelve a prenderse cuando llegue una foto nueva.
+                if not _bajadas:
+                    guardar_config("fotos_de_internet_pendientes", "0")
+                hizo_algo = hizo_algo or _bajadas > 0
+            except Exception as _err:
+                guardar_config("fotos_de_internet_pendientes", "0")
+                anotar_error("_trabajo_de_fondo/fotos_de_internet", _err)
+
         # Mercado Libre, si la aplicación está cargada: ver leer_mercado_libre(). Igual que con
         # los catálogos, si no avanzó —nada pendiente, o no responde— el cupo del día se da por
         # gastado.
@@ -1953,7 +2042,8 @@ def arrancar_tanda_de_fondo():
                      and _cupo_de_hoy("tanda_fondo_catalogos", FICHAS_DE_CATALOGO_POR_DIA) > 0)
             and not (mercado_libre_automatico()
                      and _cupo_de_hoy("tanda_fondo_mercado_libre",
-                                      BUSQUEDAS_DE_MERCADO_LIBRE_POR_DIA) > 0)):
+                                      BUSQUEDAS_DE_MERCADO_LIBRE_POR_DIA) > 0)
+            and obtener_config("fotos_de_internet_pendientes", "") != "1"):
         return False
 
     # El candado se toma ACÁ y no adentro del hilo. Mirar si está tomado y después crear el

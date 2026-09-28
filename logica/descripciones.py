@@ -4176,6 +4176,8 @@ def buscar_por_texto(texto):
     minimo = utiles if utiles <= 2 else max(2, (utiles * 2) // 3)
 
     _fabricante = campo_opcional_de_producto(c, "marca_repuesto", "Fabricante")
+    # Siempre al menos uno, para que el IN () no quede vacío.
+    _codigos_escritos = [sanitizar(p) for p in palabras if sanitizar(p)] or [""]
     query = f'''
     SELECT p.id AS "ID", p.codigo_raw AS "Codigo", p.descripcion AS "Descripcion",
            m.nombre AS "Marca", m.tipo AS "Tipo",
@@ -4189,10 +4191,14 @@ def buscar_por_texto(texto):
            p.favorito AS "Favorito", ({suma}) AS _coincidencias
     FROM productos p JOIN marcas m ON m.id = p.marca_id
     WHERE ({suma}) >= ?
+      -- Los códigos de fábrica copian la descripción de la fila que los nombró: buscando
+      -- «motor de arranque corsa» salía el arranque y, abajo, sus veinte números de Bosch con
+      -- la misma descripción. No son algo que se venda: solo si se escribe el código exacto.
+      AND (m.tipo <> 'OEM' OR p.codigo_clean IN ({",".join("?" * len(_codigos_escritos))}))
     ORDER BY _coincidencias DESC, LENGTH(p.descripcion), m.nombre LIMIT 200;
     '''
     with db_lock:
-        c.execute(query, params + params + [minimo])
+        c.execute(query, params + params + [minimo] + _codigos_escritos)
         filas = filas_a_listas(c)
         # Si pidiendo TODAS las palabras no aparece nada, se afloja y se pide una menos.
         # Con dos palabras se exigían las dos, y «rótula suspensión» devolvía CERO resultados
@@ -4200,7 +4206,7 @@ def buscar_por_texto(texto):
         # Cero resultados es la peor respuesta posible —el de adelante concluye que no hay, y
         # hay— así que es mejor mostrar lo que coincide en parte y que decida la persona.
         if not filas and len(palabras) >= 2:
-            c.execute(query, params + params + [minimo - 1])
+            c.execute(query, params + params + [minimo - 1] + _codigos_escritos)
             filas = filas_a_listas(c)
 
     # Filtro por RUBRO. Contar palabras coincidentes no alcanza: buscando «bujía golf 1.4 tsi»

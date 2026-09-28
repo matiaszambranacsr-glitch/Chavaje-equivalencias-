@@ -700,9 +700,17 @@ Casi todo lo que edita o borra algo pide la contraseña de administrador la prim
                 # Cuenta como alternativa de verdad lo que se puede vender en lugar del
                 # buscado: otro producto, de otro proveedor. Los códigos de fábrica que no
                 # cuelgan nada más (_sin_salida) no cuentan, y el buscado tampoco.
+                # LOS CÓDIGOS DE FÁBRICA NO SON UN REPUESTO QUE SE VENDA. Sirven para unir las
+                # listas de los proveedores y para buscar —el que pide «0001108033» encuentra el
+                # arranque de LUCAS—, pero en la tabla eran ruido: un arranque que cita 53 números
+                # de Bosch salía con 53 filas de «MOTOR DE ARRANQUE…» y «sin equivalencias».
+                # Se esconden, salvo el que se buscó, y se pueden mostrar con una casilla.
+                def _es_de_fabrica(f):
+                    return f.get("Tipo") == "OEM" and f.get("Cadena") != "— el buscado"
+                _de_fabrica = [f for f in res if _es_de_fabrica(f)]
                 alternativas = [f for f in res
                                 if f.get("Cadena") != "— el buscado" and not f.get("_sin_salida")
-                                and not f.get("_complementario")]
+                                and not f.get("_complementario") and not _es_de_fabrica(f)]
                 if not res:
                     etiqueta_resultado = f"🔎 {codigo_individual} — sin resultados"
                 elif alternativas:
@@ -750,13 +758,14 @@ Casi todo lo que edita o borra algo pide la contraseña de administrador la prim
                             # la pantalla mostraba dos filas y un tilde verde, y había que
                             # mirar la columna «Cadena» para darse cuenta de que la segunda
                             # fila era el mismo repuesto.
-                            _fabrica = [f for f in res if f.get("_sin_salida")]
                             st.warning(
                                 "🔗 **Este código todavía no tiene equivalencias con otra "
                                 "marca.**"
-                                + (f" Lo único que aparece es su código de fábrica "
-                                   f"(**{_fabrica[0]['Codigo']}**), que por ahora no está en "
-                                   "la lista de ningún otro proveedor." if _fabrica else "")
+                                + ((f" Cita {len(_de_fabrica)} código(s) de fábrica "
+                                    f"(**{_de_fabrica[0]['Codigo']}**"
+                                    + (", …" if len(_de_fabrica) > 1 else "")
+                                    + "), pero por ahora ninguno está en la lista de otro "
+                                    "proveedor.") if _de_fabrica else "")
                                 + "\n\nSe puede cargar a mano desde **🔗 Vincular manual**, y "
                                 "queda para siempre."
                             )
@@ -791,6 +800,13 @@ Casi todo lo que edita o borra algo pide la contraseña de administrador la prim
                                 "(**Qué tan lejos buscar**): poniendo **Toda la cadena** "
                                 "aparecen."
                             )
+
+                        if _de_fabrica and not st.checkbox(
+                                f"🏭 Mostrar también los {len(_de_fabrica)} código(s) de fábrica",
+                                key=f"ver_fabrica_{clean}",
+                                help="Relacionan los productos entre sí y se pueden buscar, pero "
+                                     "no son un repuesto que vendas."):
+                            res = [f for f in res if not _es_de_fabrica(f)]
 
                         # Filtro de stock: un botón que ahorra scroll en cada consulta. Va
                         # antes de la tabla porque decide QUÉ se muestra, no cómo.
@@ -1426,7 +1442,10 @@ Casi todo lo que edita o borra algo pide la contraseña de administrador la prim
                 st.caption("Cada uno abre las otras marcas que sirven, con precio y stock.")
                 for fila_txt in res_texto[:15]:
                     clean_txt = sanitizar(fila_txt["Codigo"])
-                    equivalentes = buscar_por_codigo(clean_txt) if clean_txt else []
+                    # Sin los códigos de fábrica: unen, pero no se venden (ver la búsqueda por
+                    # código, más arriba).
+                    equivalentes = [e for e in (buscar_por_codigo(clean_txt) if clean_txt else [])
+                                    if e.get("Tipo") != "OEM" or e["ID"] == fila_txt["ID"]]
                     otros = [e for e in equivalentes if e["ID"] != fila_txt["ID"]]
                     resumen = (f"{len(otros)} equivalencia(s)" if otros else "sin equivalencias cargadas")
                     with st.expander(f"🔎 {fila_txt['Marca']} · {fila_txt['Codigo']} — {resumen}"):
