@@ -574,9 +574,17 @@ Administrar → Mantenimiento.
                 st.rerun()
             else:
                 st.error(_msg_r)
+        # Los que las listas ya traen escritos se cargan solos una vez por día; esto es para no
+        # esperar después de importar una lista nueva.
+        if st.button("📝 Leer los «reemplaza a» de las descripciones", key="leer_reemplazos"):
+            _n_rd = cargar_reemplazos_de_las_descripciones()
+            avisar("success", f"{_n_rd} reemplazo(s) nuevos leídos de las descripciones."
+                   if _n_rd else "No había reemplazos nuevos escritos en las descripciones.")
+            st.rerun()
         try:
             c.execute("""SELECT codigo_viejo AS "Ya no se fabrica",
                                 codigo_nuevo AS "Lo reemplaza", nota AS "Nota",
+                                COALESCE(cargado_por, '') AS "Cargó",
                                 substr(fecha, 1, 10) AS "Cargado"
                          FROM reemplazos_codigo ORDER BY fecha DESC LIMIT 200""")
             _lista_r = filas_a_listas(c)

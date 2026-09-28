@@ -1580,7 +1580,18 @@ def tareas_automaticas_del_dia(presupuesto_segundos=6):
         except Exception as _err:
             anotar_error("tareas/reservas_vencidas", _err)
 
-    # 2c. Las equivalencias que salen de los reemplazos de código ya cargados. No hay nada que
+    # 2c. Los reemplazos que las listas ya traen escritos («40011 (reemplaza a 40035)»). Van
+    # antes de cruzarlos, así el paso de abajo ya los usa. Ver
+    # cargar_reemplazos_de_las_descripciones().
+    if queda_tiempo():
+        try:
+            n_r = cargar_reemplazos_de_las_descripciones()
+            if n_r:
+                hecho.append(f"{n_r} reemplazo(s) de código leídos de las descripciones")
+        except Exception as _err:
+            anotar_error("tareas/reemplazos_escritos", _err)
+
+    # Las equivalencias que salen de los reemplazos de código ya cargados. No hay nada que
     # investigar: el dato ya está, solo faltaba cruzarlo.
     if queda_tiempo():
         try:

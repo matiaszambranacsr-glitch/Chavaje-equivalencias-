@@ -1080,6 +1080,90 @@ def _cadena_de_reemplazos(clean_code, tope):
     return cadena
 
 
+# LOS REEMPLAZOS QUE YA ESTÁN ESCRITOS. FISPA anota en la descripción qué código viejo
+# reemplaza cada uno: «SENSOR MAP 40011 (reemplaza a 40035)», «… REEMPLAZA AL 10044». Son 185
+# descripciones en la base real, y la tabla de reemplazos estaba vacía porque solo se cargaba a
+# mano. Con el dato cargado, buscar el código viejo lleva al nuevo, y lo que estaba vinculado al
+# viejo se une con el nuevo (ver equivalencias_puenteadas_por_reemplazo()).
+# Se pide un código después: «REEMPLAZO LLAVE DE LUCES» o «REEMPLAZA AL AZUL» no son reemplazos
+# de código. Y el código tiene que tener un número y no ser un año.
+_RE_REEMPLAZA_A = re.compile(r"\bREEMPLAZA(?:\s+AL?)?\s+([A-Z0-9][A-Z0-9-]{2,})")
+_RE_REEMPLAZADO_POR = re.compile(r"\bREEMPLAZAD[OA]\s+POR\s+(?:EL\s+|LA\s+)?([A-Z0-9][A-Z0-9-]{2,})")
+_RE_UN_ANIO_SUELTO = re.compile(r"(19|20)\d{2}")
+
+
+def _parece_codigo_reemplazado(token):
+    limpio = sanitizar(token)
+    return (len(limpio) >= 4 and any(ch.isdigit() for ch in limpio)
+            and not _RE_UN_ANIO_SUELTO.fullmatch(limpio))
+
+
+def reemplazos_escritos_en_las_descripciones():
+    """[(código viejo, código nuevo, marca, de qué producto salió)] leídos de las descripciones.
+
+    Solo de las listas de proveedor: el producto de fábrica copia la descripción de la fila que
+    lo nombró, y leerla ahí daría el mismo reemplazo con el código equivocado.
+    El código viejo se escribe como lo escribe la lista: si el nuevo es «40011FISPA», el viejo
+    «40035» es «40035FISPA» (ver _submarca_del_codigo()). Solo esa forma: «40035» a secas
+    puede ser el código de otra marca."""
+    salida = []
+    c.execute("""SELECT p.codigo_raw, p.descripcion, m.nombre AS marca
+                 FROM productos p JOIN marcas m ON m.id = p.marca_id
+                 WHERE m.tipo <> 'OEM' AND UPPER(p.descripcion) LIKE '%REEMPLAZ%'""")
+    for fila in c.fetchall():
+        texto = normalizar_texto(fila["descripcion"] or "")
+        propio = fila["codigo_raw"]
+        sub = _submarca_del_codigo(propio)
+        for patron, el_producto_es_el_nuevo in ((_RE_REEMPLAZA_A, True),
+                                                (_RE_REEMPLAZADO_POR, False)):
+            for token in patron.findall(texto):
+                # «reemplaza a 90021-90022» son dos códigos.
+                _partes = token.split("-")
+                tokens = (_partes if len(_partes) == 2 and all(x.isdigit() for x in _partes)
+                          and len(_partes[0]) == len(_partes[1]) else [token])
+                for tok in tokens:
+                    if not _parece_codigo_reemplazado(tok) or sanitizar(tok) == sanitizar(propio):
+                        continue
+                    # Como lo escribe la lista y nada más: «10107» a secas es también el
+                    # «10 107» de JL, que es otra pieza, y el cruce los habría unido.
+                    otro = f"{tok}{sub}" if sub and not sanitizar(tok).endswith(sub) else tok
+                    viejo, nuevo = (otro, propio) if el_producto_es_el_nuevo else (propio, otro)
+                    salida.append((viejo, nuevo, fila["marca"], propio))
+    # Sin repetidos, y un código viejo con UN solo reemplazo: si dos filas dicen reemplazar al
+    # mismo, no se sabe cuál es el vigente y no se carga ninguno.
+    por_viejo = {}
+    for viejo, nuevo, marca, de in salida:
+        por_viejo.setdefault(sanitizar(viejo), {})[sanitizar(nuevo)] = (viejo, nuevo, marca, de)
+    return [next(iter(v.values())) for v in por_viejo.values() if len(v) == 1]
+
+
+def cargar_reemplazos_de_las_descripciones():
+    """Carga los reemplazos escritos en las descripciones. Devuelve cuántos entraron.
+
+    NO pisa lo cargado a mano: si el código viejo ya tiene un reemplazo, queda el que estaba. Y
+    no arma círculos (A→B→A), por lo mismo que guardar_reemplazo()."""
+    try:
+        c.execute("SELECT codigo_viejo_clean FROM reemplazos_codigo")
+        ya = {r[0] for r in c.fetchall()}
+    except sqlite3.OperationalError as _err:
+        anotar_error("cargar_reemplazos_de_las_descripciones", _err)
+        return 0
+    filas = []
+    for viejo, nuevo, marca, de in reemplazos_escritos_en_las_descripciones():
+        v, n = sanitizar(viejo), sanitizar(nuevo)
+        if v in ya or any(paso["clean"] == v for paso in cadena_de_reemplazos(n)):
+            continue
+        ya.add(v)
+        filas.append((viejo, v, nuevo, n, marca, f"Leído de la descripción de {de}"))
+    if filas:
+        with transaccion():
+            c.executemany("""INSERT OR IGNORE INTO reemplazos_codigo
+                             (codigo_viejo, codigo_viejo_clean, codigo_nuevo, codigo_nuevo_clean,
+                              marca, nota, cargado_por)
+                             VALUES (?, ?, ?, ?, ?, ?, 'automático')""", filas)
+    return len(filas)
+
+
 # ============================================================================================
 # REPOSICIÓN Y FAVORITOS
 # ============================================================================================

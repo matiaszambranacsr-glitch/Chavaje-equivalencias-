@@ -5180,6 +5180,29 @@ formulario o listan por rubro: no hay una dirección por código. E ILLINOIS, qu
 por juego con las piezas que trae adentro: juntaría cada juego con sus juntas, que no son
 equivalentes.
 
+## 🔄 Los «reemplaza a» de las descripciones, cargados solos
+
+La tabla de reemplazos (`reemplazos_codigo`) ya hacía mucho: el buscador sigue la cadena del
+código viejo al vigente, la evidencia la usa, y una tarea diaria une lo vinculado al viejo con
+el nuevo. Pero se cargaba solo a mano, y en la base real estaba vacía, con 185 descripciones que
+lo dicen: «SENSOR MAP 40011 (reemplaza a 40035)», «… REEMPLAZA AL 10044», «Junta tapa de
+cilindros - Reemplazada por 272008».
+
+`cargar_reemplazos_de_las_descripciones()` los lee una vez por día (y con un botón en
+Estadísticas → Backup y config → «🔄 Códigos reemplazados por el fabricante»):
+
+- solo de las listas de proveedor: el producto de fábrica copia la descripción de la fila y
+  daría el reemplazo con el código equivocado;
+- con un código después, que tenga un número y no sea un año: «REEMPLAZO LLAVE DE LUCES» o
+  «REEMPLAZA AL AZUL» no son reemplazos de código; «reemplaza a 90021-90022» son dos;
+- el código viejo como lo escribe la lista —«40035FISPA», no «40035»—, porque a secas choca con
+  otra marca: el «10 107» de JL se unía con el reemplazo del 10107 de FISPA;
+- sin pisar lo cargado a mano, sin círculos, y si dos filas dicen reemplazar al mismo código no
+  se carga ninguno.
+
+En la base real entran 40 reemplazos, y el cruce propone un par a revisión (Taranto 981308 →
+272008).
+
 ## Una firma de foto podía ser un programa
 
 Las firmas visuales de las fotos se guardan con `pickle`, y `pickle` **no es un formato de
