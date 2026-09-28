@@ -5098,6 +5098,21 @@ De otra muestra de 50 limpias entre proveedores:
 
 13 vínculos de la cola real pasan a revisión, todos con el error a la vista.
 
+### 🔎 La alarma de «no está entre las referencias», solo donde corresponde
+
+`el_codigo_no_figura_entre_las_referencias()` está pensada para el formato de ILLINOIS, que
+pone los números de fábrica entre paréntesis AL FINAL: «... - 3.0 - 4JH1-TC (8974908951/...)».
+Pero miraba cualquier paréntesis, y en FISPA los paréntesis son otra cosa: años —«Fiat Stilo 1.8
+MPI 16V (2003-2008) ... (2003-2006)IWP156»—, «(reemplaza a 40035)», los chasis de un arranque.
+Pasaban por una lista de referencias que no nombraba al código, y el código estaba escrito más
+adelante, en «REF ORIG BOSCH 0261230027». Ahora cuentan solo los paréntesis del final (y lo que va
+después de «//»), y los años no hacen de referencia.
+
+De 851 alarmas 🔎 quedan 166, todas de ILLINOIS con un motor tomado como código (EW10J4RFN,
+DOHC16V, K9K16V, 4JH1-TC). 640 vínculos de inyectores, sensores MAP, arranques y válvulas VVT de
+FISPA pasan de confianza media (74) a alta, donde debían estar: la misma fila trae el número dos
+veces.
+
 ## Una firma de foto podía ser un programa
 
 Las firmas visuales de las fotos se guardan con `pickle`, y `pickle` **no es un formato de

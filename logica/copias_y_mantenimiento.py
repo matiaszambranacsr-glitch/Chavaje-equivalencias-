@@ -627,6 +627,9 @@ def son_variantes_de_la_misma_pieza(codigos):
 
 PUNTAJE_QUE_NO_LLEGA_A_APROBAR_SOLO = 74.0   # el verde arranca en 75
 
+# Un año o un rango de años: «2003», «2003-2008», «1998/06», «2010>».
+_RE_ANOS_DE_FABRICACION = re.compile(r"^(19|20)\d{2}([-/](19|20)?\d{2})?[->+]?$")
+
 
 def el_codigo_no_figura_entre_las_referencias(codigo, descripcion):
     """¿El «número de fábrica» se sacó del texto del vehículo en vez de la lista de referencias?
@@ -652,13 +655,22 @@ def el_codigo_no_figura_entre_las_referencias(codigo, descripcion):
     Sobre la cola real toca 104 de los 2.560 vínculos que hoy se aprueban en bloque."""
     if not codigo or not descripcion:
         return False
-    zona = " ".join([m.group(1) for m in re.finditer(r"\(([^)]*)\)", descripcion)]
+    # Solo los paréntesis del FINAL, que es donde ILLINOIS pone las referencias: «... - 3.0 -
+    # 4JH1-TC (8974908951/8974908961) (MLS)». Los del medio son otra cosa: FISPA escribe
+    # «SENSOR MAP 40011 (reemplaza a 40035) FORD ... REF ORIG BOSCH 0261230027», y el
+    # paréntesis pasaba por la lista de referencias aunque el número estuviera más adelante.
+    _cola = re.search(r"((?:\s*\([^)]*\))+)\s*$", descripcion)
+    zona = " ".join(re.findall(r"\(([^)]*)\)", _cola.group(1) if _cola else "")
                     + re.findall(r"//(.*)$", descripcion))
     if not zona:
         return False
     # La zona tiene que tener al menos un número con pinta de código; si son puras medidas
     # («ESP 1.50MM») no es una lista de referencias y no se puede concluir nada.
-    if not any(any(ch.isdigit() for ch in t)
+    # Tampoco si son años: FISPA escribe los inyectores «Fiat Stilo 1.8 MPI 16V (2003-2008) -
+    # Fiat Doblo … (2003-2006)IWP156», y los paréntesis de los años pasaban por una lista de
+    # referencias que no nombraba al IWP156. 1.000 inyectores de FISPA quedaban en 74 con esta
+    # alarma, con el número escrito dos veces en la misma fila.
+    if not any(any(ch.isdigit() for ch in t) and not _RE_ANOS_DE_FABRICACION.match(t)
                for t in re.findall(r"[A-Z0-9][A-Z0-9./-]{4,}", zona.upper())):
         return False
     return sanitizar(codigo).upper() not in sanitizar(zona).upper()

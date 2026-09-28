@@ -1164,6 +1164,11 @@ def probar_el_codigo_que_no_esta_entre_las_referencias():
     esta_donde_va = [
         ("8200120", "Junta para Carter RENAULT CLIO SCENIC - 1,4/1,5/1,6 - K4M K9K16V (8200120)"),
         ("1743981", "Junta Tapa de Cilindros SCANIA P124 - 10,6 - DSC12.01 (1732456/1743981)"),
+        # Los paréntesis de FISPA son años, no referencias.
+        ("IWP156", "INYECTOR FI-IWP156Fiat Stilo 1.8 MPI 16V (2003-2008) - Fiat Doblo 1.8 MPI "
+                   "16V (2003-2006)IWP156"),
+        ("93267340", "INYECTOR FI-0280155821Chevrolet Vectra 2.0/2.2 MPFI (1998-2006) - "
+                     "Chevrolet Blazer 2.2 MPFI (1997-2000) BOSCH 0280155821 - 93267340"),
     ]
     for codigo, desc in esta_donde_va:
         cierto(not codigos.el_codigo_no_figura_entre_las_referencias(codigo, desc),
