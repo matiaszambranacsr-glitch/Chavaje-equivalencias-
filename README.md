@@ -5224,6 +5224,22 @@ hasta que vence. Se prueba y se apaga en Administrar → Mantenimiento → «�
 servidor donde se armó esto no llega a la API, así que se probó con un servidor falso que
 responde como ella: token, búsqueda, publicaciones ajenas descartadas, pares y precios.
 
+## 🎯 Tus propios datos: qué pedir y a quién avisar
+
+- **Qué te conviene cargar o pedir** (Estadísticas → 🔎 Búsquedas sin resultado). La lista de
+  búsquedas fallidas decía QUÉ faltó; `que_conviene_cargar_o_pedir()` dice qué hacer con cada
+  código, mirando tu base: 🔗 si otro producto lo nombra en su descripción lo tenés con otro
+  número y falta el vínculo; ⌨️ si hay un código que se escribe casi igual
+  (`codigos_por_tipeo()`) probablemente fue un error de tipeo; 🛒 si no aparece en ningún lado y
+  lo pidieron más de una vez, es para pedirle al proveedor. Junta las formas de escribir lo
+  mismo, y lo pedido una sola vez sin ninguna pista no se muestra.
+- **📞 A quién avisar** (Vehículos). El ranking de atrasados comparaba cuántas veces se cambió
+  una pieza contra cuántas debería, con el último km anotado. `a_quien_avisar()` mira la ÚLTIMA
+  vez que se cambió cada pieza y el km de HOY estimado con lo que anda ese auto por día
+  (`km_estimado_hoy()`: entre que se cargó la ficha y la última vez que se anotó el km, con al
+  menos una semana de por medio). Lista lo que ya pasó su vida útil o llega en 30 días, con el
+  mensaje de WhatsApp armado para cada cliente.
+
 ## Una firma de foto podía ser un programa
 
 Las firmas visuales de las fotos se guardan con `pickle`, y `pickle` **no es un formato de

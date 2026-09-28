@@ -436,6 +436,84 @@ def listar_vehiculos_atrasados():
     return resultado
 
 
+def _fecha_de(texto):
+    try:
+        return datetime.strptime(str(texto or "")[:19], "%Y-%m-%d %H:%M:%S")
+    except ValueError:
+        try:
+            return datetime.strptime(str(texto or "")[:10], "%Y-%m-%d")
+        except ValueError:
+            return None
+
+
+def km_estimado_hoy(vehiculo):
+    """(km de hoy estimado, km por día). El km anotado es el de la última vez que el auto pasó
+    por el local; si anda 40 km por día y pasaron tres meses, hoy tiene 3.600 más. El ritmo sale
+    de lo que anduvo entre que se cargó la ficha y la última vez que se anotó el km. Sin eso,
+    (km anotado, None)."""
+    km_reg, km_act = vehiculo.get("km_registro"), vehiculo.get("km_actual")
+    if km_act is None:
+        return None, None
+    desde = _fecha_de(vehiculo.get("created_at"))
+    hasta = _fecha_de(vehiculo.get("km_actualizado_fecha")) or desde
+    if km_reg is None or not desde or not hasta or km_act <= km_reg:
+        return km_act, None
+    dias = (hasta - desde).days
+    if dias < 7:
+        return km_act, None       # con días sueltos el ritmo es cualquier cosa
+    por_dia = (km_act - km_reg) / dias
+    return round(km_act + por_dia * max((datetime.now() - hasta).days, 0)), por_dia
+
+
+def a_quien_avisar(dias_de_aviso=30, limite=100):
+    """Los clientes a los que ya les toca —o les va a tocar en `dias_de_aviso` días— cambiar una
+    pieza, con el mensaje de WhatsApp armado. [dict].
+
+    Mira la ÚLTIMA vez que se cambió cada pieza en cada auto (no cuántas veces: si el filtro se
+    cambió hace 2.000 km, no está atrasado aunque en total se haya cambiado pocas veces), y el km
+    de hoy estimado con el ritmo de ese auto (ver km_estimado_hoy())."""
+    c.execute("""SELECT id, patente, cliente_nombre, cliente_telefono, marca_auto, modelo_auto,
+                        km_registro, km_actual, km_actualizado_fecha, created_at FROM vehiculos
+                 WHERE km_actual IS NOT NULL""")
+    vehiculos = [dict(r) for r in c.fetchall()]
+    salida = []
+    for v in vehiculos:
+        km_hoy, por_dia = km_estimado_hoy(v)
+        if km_hoy is None:
+            continue
+        c.execute("""SELECT descripcion_pieza, codigo_pieza, marca_pieza,
+                            MAX(km_instalacion) AS km_inst, MAX(vida_util_km) AS vida
+                     FROM historial_piezas
+                     WHERE vehiculo_id = ? AND vida_util_km > 0 AND km_instalacion IS NOT NULL
+                     GROUP BY UPPER(descripcion_pieza)""", (v["id"],))
+        for p in c.fetchall():
+            faltan_km = p["km_inst"] + p["vida"] - km_hoy
+            margen = (por_dia * dias_de_aviso) if por_dia else 0.15 * p["vida"]
+            if faltan_km > margen:
+                continue
+            if faltan_km <= 0:
+                cuando = f"ya pasó {-faltan_km:,} km"
+            elif por_dia:
+                cuando = f"en unos {max(round(faltan_km / por_dia), 1)} días"
+            else:
+                cuando = f"en {faltan_km:,} km"
+            auto = f"{v.get('marca_auto') or ''} {v.get('modelo_auto') or ''}".strip()
+            mensaje = (f"Hola {v.get('cliente_nombre') or ''}! Te escribimos de El Chavo. "
+                       f"Según el kilometraje de tu {auto} ({v['patente']}), le toca cambiar: "
+                       f"{p['descripcion_pieza']}. ¿Coordinamos?").replace("Hola !", "Hola!")
+            tel = re.sub(r"\D", "", v.get("cliente_telefono") or "")
+            salida.append({
+                "Patente": v["patente"], "Cliente": v.get("cliente_nombre") or "",
+                "Auto": auto, "Pieza": p["descripcion_pieza"],
+                "Código": p["codigo_pieza"] or "", "Le toca": cuando,
+                "Km hoy (estimado)": km_hoy, "_faltan": faltan_km,
+                "_whatsapp": (f"https://wa.me/{tel}" if tel else "https://wa.me/")
+                             + "?text=" + quote(mensaje),
+                "_vehiculo": v["patente"]})
+    salida.sort(key=lambda x: x["_faltan"])
+    return salida[:limite]
+
+
 def calcular_alertas_vehiculo(vehiculo_id, km_actual):
     """Piezas que ya recorrieron el 85% o más de su vida útil estimada."""
     c.execute("""SELECT descripcion_pieza, marca_pieza, codigo_pieza, km_instalacion, vida_util_km

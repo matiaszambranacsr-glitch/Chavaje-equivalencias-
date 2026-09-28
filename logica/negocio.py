@@ -1137,6 +1137,75 @@ def reemplazos_escritos_en_las_descripciones():
     return [next(iter(v.values())) for v in por_viejo.values() if len(v) == 1]
 
 
+def que_conviene_cargar_o_pedir(dias=90, limite=40):
+    """Lo que te pidieron y no tenías, con qué hacer en cada caso. [dict].
+
+    La lista de búsquedas sin resultado dice QUÉ faltó; esto dice qué hacer, mirando tu propia
+    base:
+      · 🔗 si otro producto tuyo lo nombra en su descripción —«… REF ORIG 0280155929»—, lo tenés
+        con otro número: falta el vínculo, no la pieza;
+      · ⌨️ si hay un código que se escribe casi igual, probablemente fue un error de tipeo;
+      · 🛒 si no aparece en ningún lado y lo pidieron más de una vez, es para pedirle al
+        proveedor.
+    Se juntan las formas de escribir lo mismo («W712/94», «w 712 94») y primero va lo más
+    pedido y más reciente."""
+    desde = (datetime.now() - timedelta(days=int(dias))).strftime("%Y-%m-%d")
+    try:
+        c.execute("""SELECT termino, usuario, fecha FROM historial_busquedas
+                     WHERE sin_resultado = 1 AND fecha >= ?""", (desde,))
+        filas = [dict(r) for r in c.fetchall()]
+    except sqlite3.OperationalError as _err:
+        anotar_error("que_conviene_cargar_o_pedir", _err)
+        return []
+    grupos = {}
+    for f in filas:
+        clave = sanitizar(f["termino"]) or normalizar_texto(f["termino"])
+        if not clave:
+            continue
+        g = grupos.setdefault(clave, {"termino": f["termino"], "veces": 0, "quienes": set(),
+                                      "ultima": ""})
+        g["veces"] += 1
+        g["quienes"].add(f["usuario"] or "")
+        g["ultima"] = max(g["ultima"], f["fecha"] or "")
+    # Primero lo más pedido y, a igual cantidad, lo más reciente.
+    orden = sorted(sorted(grupos.items(), key=lambda kv: kv[1]["ultima"], reverse=True),
+                   key=lambda kv: -kv[1]["veces"])
+    salida = []
+    for clave, g in orden:
+        if len(salida) >= limite:
+            break
+        es_codigo = any(ch.isdigit() for ch in clave) and len(clave) >= 4
+        if es_codigo:
+            c.execute("SELECT 1 FROM productos WHERE codigo_clean = ? LIMIT 1", (clave,))
+            if c.fetchone():
+                continue          # ya entró con alguna lista: eso lo muestra la otra tabla
+        que_hacer, detalle = "", ""
+        if es_codigo:
+            c.execute("""SELECT p.codigo_raw, m.nombre FROM productos p
+                         JOIN marcas m ON m.id = p.marca_id
+                         WHERE m.tipo <> 'OEM' AND UPPER(p.descripcion) LIKE ?""",
+                      (f"%{g['termino'].strip().upper()}%",))
+            # Tres alcanzan para mostrar quién lo nombra.
+            citado = [f"{r[1]} {r[0]}" for r in c.fetchmany(3)]
+            if citado:
+                que_hacer = "🔗 Lo tenés con otro número: vincularlo"
+                detalle = "Lo nombra " + ", ".join(citado)
+            else:
+                parecidos = [f"{p.get('Marca') or ''} {p.get('Codigo') or ''}".strip()
+                             for p in codigos_por_tipeo(clave, limite=3) if p.get("Codigo")]
+                if parecidos:
+                    que_hacer = "⌨️ ¿Error de tipeo?"
+                    detalle = "Se escribe casi igual: " + ", ".join(parecidos)
+        if not que_hacer:
+            if g["veces"] < 2:
+                continue          # una sola vez, sin pistas: todavía no dice nada
+            que_hacer = "🛒 No lo tenés: conviene pedirlo"
+        salida.append({"Buscado": g["termino"], "Veces": g["veces"],
+                       "Personas": len(g["quienes"]), "Última vez": g["ultima"][:10],
+                       "Qué hacer": que_hacer, "Detalle": detalle})
+    return salida
+
+
 def cargar_reemplazos_de_las_descripciones():
     """Carga los reemplazos escritos en las descripciones. Devuelve cuántos entraron.
 

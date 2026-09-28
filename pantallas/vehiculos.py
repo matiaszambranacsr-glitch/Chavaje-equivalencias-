@@ -11,6 +11,29 @@ if pagina == PAGINAS[6]:
         "La app avisa cuándo una pieza ya recorrió casi toda su vida útil estimada."
     )
 
+    # A QUIÉN AVISAR: la última vez que se cambió cada pieza y el km de hoy estimado con el
+    # ritmo de cada auto. Ver a_quien_avisar().
+    _avisar = a_quien_avisar(dias_de_aviso=30)
+    with st.expander(f"📞 A quién avisar ({len({x['Patente'] for x in _avisar})} cliente(s))",
+                     expanded=bool(_avisar)):
+        ayuda(
+            "Se mira la **última vez** que se cambió cada pieza en cada auto y el km de hoy "
+            "**estimado** con lo que anda ese auto por día (entre que se cargó la ficha y la última "
+            "vez que se anotó el km). Aparecen las piezas que ya pasaron su vida útil o que llegan "
+            "en los próximos 30 días. Sin ritmo conocido, las que están a menos del 15% de su "
+            "vida útil."
+        )
+        if not _avisar:
+            st.caption("Nadie por ahora. Hace falta que los autos tengan km cargado y piezas con "
+                       "vida útil en su historial.")
+        for _i_av, _x in enumerate(_avisar):
+            _ca, _cb = st.columns([4, 1])
+            _ca.write(f"**{_x['Patente']}** {_x['Auto']} — {_x['Cliente'] or 'sin nombre'}")
+            _ca.caption(f"{_x['Pieza']}{' (' + _x['Código'] + ')' if _x['Código'] else ''}: "
+                        f"le toca {_x['Le toca']} · hoy tendría unos "
+                        f"{_x['Km hoy (estimado)']:,} km")
+            _cb.link_button("📲 Avisar", _x["_whatsapp"], width="stretch")
+
     vehiculos_atrasados = listar_vehiculos_atrasados()
     with st.expander(f"⚠️ Vehículos con mantenimiento atrasado ({len(vehiculos_atrasados)})", expanded=bool(vehiculos_atrasados)):
         if not vehiculos_atrasados:

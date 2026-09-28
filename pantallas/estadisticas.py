@@ -343,6 +343,29 @@ Administrar → Mantenimiento.
                        "ESTÁN cargados.** Entraron con alguna lista después de que los "
                        "buscaron. Si te acordás quién los pidió, es un llamado.")
             st.dataframe(_ya_estan, width="stretch", hide_index=True)
+
+        st.markdown("**🎯 Qué te conviene cargar o pedir**")
+        explicar(
+            "Lo que te pidieron y no tenías, con qué hacer en cada caso.",
+            "Mira tu propia base por cada código que se buscó sin resultado:\n\n"
+            "- **🔗 Lo tenés con otro número**: otro producto lo nombra en su descripción "
+            "(«… REF ORIG 0280155929»). Falta el vínculo, no la pieza: buscalo en «Vincular "
+            "manual».\n"
+            "- **⌨️ ¿Error de tipeo?**: hay un código que se escribe casi igual.\n"
+            "- **🛒 No lo tenés**: no aparece en ningún lado y lo pidieron más de una vez. Es "
+            "para pedirle al proveedor.\n\n"
+            "Lo pedido una sola vez y sin ninguna pista no se muestra: todavía no dice nada."
+        )
+        st.session_state.setdefault("dias_que_conviene", 90)
+        _dias_qc = st.select_slider("De los últimos:", options=[30, 90, 180, 365],
+                                    format_func=lambda x: f"{x} días", key="dias_que_conviene")
+        _qc = que_conviene_cargar_o_pedir(_dias_qc)
+        if _qc:
+            st.dataframe(_qc, width="stretch", hide_index=True)
+        else:
+            st.caption("Nada para hacer por ahora.")
+
+        st.markdown("**🔎 Todo lo buscado sin resultado**")
         fallidas = listar_busquedas_sin_resultado()
         if fallidas:
             _ya = {sanitizar(x["Buscado"]) for x in _ya_estan}
