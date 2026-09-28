@@ -2618,9 +2618,7 @@ def evidencia_cruzada(id_a, id_b, cuenta_palabras=None, total_descripciones=None
         razon, esperada, razon_real = comparar_precios(
             pa["precio"], pa["marca"], pb["precio"], pb["marca"], escalas_de_precio())
         if razon_real >= 15:
-            vetos.append(f"💲 los precios se diferencian {razon:.0f} veces"
-                         + (f" (entre estas dos listas lo normal es {esperada:.0f})"
-                            if esperada > 2 else ""))
+            vetos.append(texto_de_precios_que_no_cierran(razon, esperada))
 
     # 8. El portal de un proveedor los muestra juntos: en la ficha de uno está el código del
     # otro. Un distribuidor que vende la misma pieza en varias marcas —JL— lo pone ahí para

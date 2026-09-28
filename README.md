@@ -4806,6 +4806,23 @@ Sobre la cola real: 246 pares pasan a limpios, 225 se apartan como kit o accesor
 estaban limpios y eran errores: capuchones contra la bobina, kits contra su componente), y la
 alarma de código ambiguo baja de 1.394 pares a 804.
 
+### 💲 El precio, dicho como se entiende, y el motivo que decide
+
+La alarma del precio decía «los precios se diferencian 1 veces, y entre estos dos proveedores lo
+normal es 9»: correcto e incomprensible. Ahora dice «cuestan casi lo mismo, y entre estos dos
+proveedores lo normal es que uno salga 9 veces más. Puede ser más (o menos) pieza» —que es lo
+que pasa: un juego completo de motor al precio de una junta suelta— (`texto_de_precios_que_no_cierran()`).
+
+Y **el grupo de «Para revisar, por motivo» lo decide la alarma más clara**, no la primera
+(`motivo_para_agrupar()`). El precio sale primero porque lo avisa `evaluar_equivalencia()` antes
+que los vetos, y 386 pares de la cola real con, por ejemplo, «juego completo contra junta
+suelta» caían en el grupo del precio —que pide muestra— en vez del de juegos distintos, que se
+descarta de un toque. En el barrido, de 5.443 pares en revisión, 3.945 quedan ahora en grupos
+de un toque.
+
+**Y los kits que dicen la cantidad** —«KIT BOB BUJ (LEIG030 X 4/LSPR6F13)»— también se reconocen
+como kit con sus componentes.
+
 ## Una firma de foto podía ser un programa
 
 Las firmas visuales de las fotos se guardan con `pickle`, y `pickle` **no es un formato de

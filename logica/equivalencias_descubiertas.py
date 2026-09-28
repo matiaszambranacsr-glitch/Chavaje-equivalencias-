@@ -960,6 +960,21 @@ def comparar_precios(precio_a, marca_a, precio_b, marca_b, escalas):
 LARGO_DESCRIPCION_QUE_CONVENCE = 20
 
 
+def texto_de_precios_que_no_cierran(razon, esperada):
+    """La alarma del precio, dicha como se entiende. Decía «los precios se diferencian 1
+    veces, y entre estos dos proveedores lo normal es 9», que es correcto y no se entiende: que
+    cuesten LO MISMO entre dos listas donde uno suele salir 9 veces más es lo raro — un juego
+    completo de motor al precio de una junta suelta."""
+    if esperada > 2 and razon < esperada:
+        detalle = ("cuestan casi lo mismo" if razon < 1.5
+                   else f"uno cuesta {razon:.0f} veces el otro")
+        return (f"💲 Los precios no cierran: {detalle}, y entre estos dos proveedores lo normal "
+                f"es que uno salga {esperada:.0f} veces más. Puede ser más (o menos) pieza")
+    return (f"💲 Los precios no cierran: uno cuesta {razon:.0f} veces el otro"
+            + (f", y entre estos dos proveedores lo normal es {esperada:.0f}"
+               if esperada > 2 else ""))
+
+
 def evaluar_equivalencia(desc_a, desc_b, medidas_a=None, medidas_b=None,
                          precio_a=None, precio_b=None, veces_confirmada=1,
                          respaldo_fabricante=False, marca_a="", marca_b="", patrones=None,
@@ -1155,9 +1170,7 @@ def evaluar_equivalencia(desc_a, desc_b, medidas_a=None, medidas_b=None,
                                                         escalas)
         if razon_real >= 8:
             puntaje -= 25
-            senales.append(("mal", f"💲 Los precios se diferencian {razon:.0f} veces"
-                                   + (f", y entre estos dos proveedores lo normal es "
-                                      f"{esperada:.0f}" if esperada > 2 else "")))
+            senales.append(("mal", texto_de_precios_que_no_cierran(razon, esperada)))
         elif razon_real <= 2:
             puntaje += 10
             senales.append(("bien", "💲 Los precios son parecidos"
@@ -1434,7 +1447,14 @@ def motivo_para_agrupar(fila):
     dos puntos: «piezas de lugares distintos: CARTER vs CILINDRO» y «...: CARBURADOR vs
     VALVULA» se deciden igual, y separadas eran veinte grupos chicos."""
     alarmas = fila.get("alarmas") or []
-    tipo = tipo_de_alarma(alarmas[0] if alarmas else "")
+    # La que decide: si alguna es una contradicción del texto, esa, aunque no sea la primera.
+    # El precio sale primero porque lo avisa evaluar_equivalencia() antes que los vetos, y 386
+    # pares de la cola real con «juego completo contra junta suelta» caían en el grupo del
+    # precio —que pide muestra— en vez del de juegos distintos, que se descarta de un toque.
+    decisiva = next((a for a in alarmas
+                     if tipo_de_alarma(a).startswith(_MOTIVOS_QUE_SE_DESCARTAN)),
+                    alarmas[0] if alarmas else "")
+    tipo = tipo_de_alarma(decisiva)
     if tipo.startswith(("🔤 ", "🤷 ")):
         tipo = re.split(r"\s*[:(]", tipo, maxsplit=1)[0]
     # «... — alguno de los dos está mal cargado»: la explicación va en la pantalla, no en el
@@ -1592,7 +1612,10 @@ def _numero_de_un_componente(numero, cod, desc):
         return ""
     sub = _submarca_del_codigo(cod)
     for lista in re.findall(r"\(([^)]*[/+][^)]*)\)", texto):
-        if limpio_numero not in [sanitizar(x) for x in re.split(r"[/+]", lista)]:
+        # Con la cantidad afuera: «(LEIG030 X 4/LSPR6F13)» son cuatro bobinas LEIG030.
+        elementos = [sanitizar(re.sub(r"\s+X\s*\d+\s*$", "", x.strip()))
+                     for x in re.split(r"[/+]", lista)]
+        if limpio_numero not in elementos:
             continue
         otro = ""
         if "+" not in lista:
@@ -1833,8 +1856,9 @@ def tipo_de_alarma(alarma):
     siglas de «siglas distintas», qué medida es la que no coincide."""
     if not alarma:
         return "Sin alarma puntual"
-    if alarma.startswith("💲 Los precios se diferencian"):
-        return "💲 Los precios se diferencian 8 veces o más"
+    if alarma.startswith(("💲 Los precios se diferencian", "💲 los precios se diferencian",
+                          "💲 Los precios no cierran")):
+        return "💲 Los precios no cierran"
     m = re.match(r"📐 NO coinciden: (.*)", alarma)
     if m:
         medidas = [p.split(":")[0].strip() for p in m.group(1).split(";")]
