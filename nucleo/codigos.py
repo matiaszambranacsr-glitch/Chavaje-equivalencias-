@@ -1021,7 +1021,7 @@ def parece_un_codigo_y_no_un_modelo(palabra, codigos_del_catalogo):
 # CON QUÉ ANDA EL AUTO. Las siglas valen tanto como la palabra: nadie escribe «diesel» al lado
 # de «HDI», y «MPI» quiere decir nafta sin decirlo.
 FORMAS_DE_DIESEL = (r"DIESEL|D[IÍ]ESEL|TURBODIESEL|TDI|HDI|CRDI|JTD|DCI|TDCI|CDI|MULTIJET|"
-                    r"D4D|CTDI")
+                    r"D4D|CTDI|DURAMAX")
 
 
 FORMAS_DE_NAFTA = r"NAFTA|NAFTERO|NAFTEROS|GASOLINA|MPFI|MPI|TFSI|TSI|GDI|FLEX"
