@@ -5427,6 +5427,21 @@ Y uno más que salió probando: si la lista trae el mismo código dos veces con 
 - **Las descripciones sin `<br>` ni `<b>` escritos**: `texto_para_html()` pasa los saltos a « · »
   y saca las etiquetas de formato que traen algunas listas.
 
+### Auditar lo ya cargado: que cuadre, no cuántos
+
+- **«Muchos vínculos» dejó de ser la señal.** Una sonda lambda que va en 60 autos y cita 7
+  originales tiene, con razón, 15 equivalentes de otras marcas, y salía primera como basura.
+  Ahora un producto aparece solo si al menos 5 de sus vínculos (y el 40%) **no son la misma
+  pieza**: otro rubro, autos sin nada en común, otra posición, cilindrada o tipo de sensor
+  (`vinculos_que_no_cuadran()`). Un vínculo cuadra seguro si los dos citan el mismo original.
+  Sobre la base de prueba: de 30 productos marcados queda 1, JL · CHAPA, con 37 de sus 75
+  cables de otros autos, y se pueden cortar solo esos 37 dejando los buenos.
+- **Un original apuntando a varios productos de la misma lista** tampoco es error por sí solo:
+  la lista de FISPA trae piezas FISPA y LUCAS, y un 40027FISPA y un LEMSM022LUCAS con el mismo
+  original son equivalentes. Ahora salen solo los que se contradicen o mezclan un juego con una
+  pieza suelta (`_por_que_chocan()`), con el motivo a la vista: de 2.466 a 391.
+- Las descripciones largas se muestran cortadas: una de FISPA ocupaba la pantalla entera.
+
 ### ¿Aguanta 60 proveedores? Probado con una base de 63
 
 Se armó una base copiando 8 veces los 7 proveedores reales (63 proveedores, 658.977 productos,

@@ -1694,31 +1694,51 @@ Administrar → Mantenimiento.
             # 2) Productos basura: lo primero a resolver, porque un solo producto mal cargado
             #    puede estar ensuciando cientos de códigos a la vez.
             if resultado_aud["productos_sospechosos"]:
-                st.markdown("**🚩 Productos con muchísimos vínculos (revisalos primero)**")
+                st.markdown("**🚩 Productos con vínculos que no son la misma pieza (revisalos primero)**")
                 explicar(
-                    "Pegados a 10 productos de otras marcas o más. Los códigos originales no cuentan.",
-                    "Una pieza con muchos números originales es normal: un burro de arranque puede "
-                    "reemplazar a 30 de Bosch. Lo raro es estar pegado a decenas de productos de "
-                    "otras marcas de repuesto: casi siempre es basura de una importación mal "
-                    "mapeada — por ejemplo un código '1' que quedó de una columna equivocada. "
-                    "Cortarle los vínculos de una limpia el problema entero."
+                    "Muchos vínculos no es malo: lo malo es que no cuadren entre sí.",
+                    "Una sonda que va en 60 autos y cita 7 originales tiene, con razón, muchos "
+                    "equivalentes. Lo que aparece acá es otra cosa: un producto pegado a piezas "
+                    "de otro rubro o de autos que no tienen nada que ver —casi siempre basura de "
+                    "una importación mal mapeada—. Un vínculo cuadra seguro si los dos citan el "
+                    "mismo código original, y los que ya marcaste como correctos no cuentan.\n\n"
+                    "«Cortar los que no cuadran» deja los buenos; «Cortar todos» limpia el "
+                    "producto entero."
                 )
                 # Sin desplegables: Streamlit los cierra en cada refresco, y como cada botón
                 # provoca uno, se cerraba la ventana justo cuando estabas revisando.
                 for p in resultado_aud["productos_sospechosos"][:15]:
-                    desc = texto_para_html(p["descripcion"]) or "_(sin descripción)_"
-                    ps1, ps2 = st.columns([3, 1])
-                    _con_oem = (f" (y {p['cantidad_oem']} código(s) original(es), que no cuentan)"
-                                if p.get("cantidad_oem") else "")
-                    ps1.markdown(f"**{texto_para_html(p['marca'])}** · `{p['codigo']}` — {desc}  \n"
-                                  f"<small>vinculado a {p['cantidad']} producto(s) de otras "
-                                  f"marcas{_con_oem}</small>",
-                                  unsafe_allow_html=True)
-                    ps2.button(f"✂️ Cortar sus {p['total']}",
-                                key=f"cortar_todo_{p['id']}", type="primary",
-                                on_click=cb_auditoria_cortar_todos, args=(p["id"],),
-                                help="El producto queda; se cortan TODAS sus equivalencias, "
-                                     "las de los códigos originales también")
+                    # La descripción cortada: las de FISPA traen 60 autos y ocupaban una
+                    # pantalla entera de celular cada una.
+                    _desc_p = p["descripcion"] or ""
+                    desc = (texto_para_html(_desc_p[:140] + ("…" if len(_desc_p) > 140 else ""))
+                            or "_(sin descripción)_")
+                    _malos = p["no_cuadran"]
+                    _rubros = ", ".join(f"{r} ({n})" for r, n in p["rubros"].most_common(3))
+                    st.markdown(
+                        f"**{texto_para_html(p['marca'])}** · `{p['codigo']}` — {desc}  \n"
+                        f"<small>**{len(_malos)} de sus {p['cantidad']} vínculos no cuadran**"
+                        + (f" · rubros de sus vínculos: {texto_para_html(_rubros)}" if _rubros else "")
+                        + (f" · y {p['cantidad_oem']} original(es)" if p.get("cantidad_oem") else "")
+                        + "</small>", unsafe_allow_html=True)
+                    for v, motivo in _malos[:3]:
+                        _dv = v["descripcion"] or ""
+                        st.caption(f"✗ {v['marca']} · {v['codigo']} — {_dv[:70]}"
+                                   f"{'…' if len(_dv) > 70 else ''} — {motivo}")
+                    if len(_malos) > 3:
+                        st.caption(f"… y {len(_malos) - 3} más que no cuadran.")
+                    ps1, ps2 = st.columns(2)
+                    ps1.button(f"✂️ Cortar los {len(_malos)} que no cuadran",
+                               key=f"cortar_malos_{p['id']}", type="primary",
+                               on_click=cb_auditoria_cortar_pares,
+                               args=([v["par"] for v, _m in _malos],),
+                               help="Quedan los vínculos que sí son la misma pieza")
+                    ps2.button(f"✂️ Cortar todos ({p['total']})",
+                               key=f"cortar_todo_{p['id']}",
+                               on_click=cb_auditoria_cortar_todos, args=(p["id"],),
+                               help="El producto queda; se cortan TODAS sus equivalencias, "
+                                    "las de los códigos originales también")
+                    st.markdown("")
                 if len(resultado_aud["productos_sospechosos"]) > 15:
                     st.caption(f"(mostrando 15 de {len(resultado_aud['productos_sospechosos'])})")
                 st.markdown("---")
@@ -1729,8 +1749,15 @@ Administrar → Mantenimiento.
                 ayuda(
                     "Acá se ven juntos todos los productos a los que apunta cada código, para poder "
                     "comparar y cortar el que sobra. Normalmente uno tiene descripción real y el otro "
-                    "es el que quedó mal."
+                    "es el que quedó mal.\n\nSolo salen los que NO pueden ser la misma pieza: "
+                    "otro rubro, otros autos, un juego contra una pieza suelta. Que un original "
+                    "apunte a dos productos de la misma lista es normal cuando la lista trae dos "
+                    "fabricantes (FISPA y LUCAS en la de FISPA), y esos no se muestran."
                 )
+                if resultado_aud.get("originales_con_parecidos"):
+                    st.caption(f"✅ Otros {miles(resultado_aud['originales_con_parecidos'])} "
+                               "originales apuntan a varios productos que sí son la misma pieza: "
+                               "no hace falta revisarlos.")
                 total_conf = len(resultado_aud["conflictos"])
                 por_pag_conf = 8
                 pags_conf = (total_conf - 1) // por_pag_conf + 1
@@ -1745,10 +1772,15 @@ Administrar → Mantenimiento.
                 for g in resultado_aud["conflictos"][desde_conf:desde_conf + por_pag_conf]:
                     st.markdown(f"**⚠️ {g['codigo_oem']} → {len(g['productos'])} productos "
                                  f"de {g['marca_proveedor']}**")
+                    if g.get("motivo"):
+                        st.caption(f"❗ {g['motivo']}")
                     if g["descripcion_oem"]:
-                        st.caption(g["descripcion_oem"])
+                        _do = g["descripcion_oem"]
+                        st.caption(_do[:140] + ("…" if len(_do) > 140 else ""))
                     for p in g["productos"]:
-                        desc = texto_para_html(p["descripcion"]) or "⚠️ _(sin descripción — sospechoso)_"
+                        _dp = p["descripcion"] or ""
+                        desc = (texto_para_html(_dp[:140] + ("…" if len(_dp) > 140 else ""))
+                                or "⚠️ _(sin descripción — sospechoso)_")
                         marca_ok = " · ya revisado" if p["revisado_ok"] else ""
                         cg1, cg2, cg3 = st.columns([3, 1, 1])
                         cg1.markdown(f"**`{p['codigo']}`** — {desc}  \n"

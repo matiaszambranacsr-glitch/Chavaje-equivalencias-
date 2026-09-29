@@ -504,11 +504,23 @@ def auditar_equivalencias_existentes(limite=VINCULOS_QUE_MIRA_LA_AUDITORIA):
         }
 
     conflictos = []
-    for clave, g in grupos.items():
-        pendientes = [p for p in g["productos"].values() if not p["revisado_ok"]]
-        if len(g["productos"]) > 1 and pendientes:
-            g["productos"] = sorted(g["productos"].values(), key=lambda p: -p["vinculos_totales"])
-            conflictos.append(g)
+    parecidos = 0
+    with recordando_lo_de_cada_producto():
+        for clave, g in grupos.items():
+            pendientes = [p for p in g["productos"].values() if not p["revisado_ok"]]
+            if len(g["productos"]) > 1 and pendientes:
+                # Que el mismo original apunte a dos productos de la misma lista NO alcanza
+                # para decir que uno está mal: la lista de FISPA trae piezas FISPA y LUCAS, y
+                # «40027FISPA» y «LEMSM022LUCAS» con el mismo original son equivalentes de
+                # verdad. Eran 2.179 de los 2.466 «conflictos». Ahora sale solo si los
+                # productos se contradicen (ver _por_que_chocan()).
+                motivo = _por_que_chocan(list(g["productos"].values()))
+                if not motivo:
+                    parecidos += 1
+                    continue
+                g["motivo"] = motivo
+                g["productos"] = sorted(g["productos"].values(), key=lambda p: -p["vinculos_totales"])
+                conflictos.append(g)
     conflictos.sort(key=lambda g: -len(g["productos"]))
 
     # Medidas contradictorias (esto sí tiene sentido de a pares)
@@ -553,12 +565,36 @@ def auditar_equivalencias_existentes(limite=VINCULOS_QUE_MIRA_LA_AUDITORIA):
                 "marca_b": f["marca_b"], "detalle": "; ".join(diferencias),
             })
 
-    # Productos con una cantidad de vínculos fuera de lo normal: candidatos a basura. Solo
-    # cuentan los vínculos con otras marcas de repuesto (ver arriba).
-    sospechosos = sorted(
-        [v for v in vinculos_por_producto.values() if v["cantidad"] >= 10 and v["tipo"] != "OEM"],
-        key=lambda v: -v["cantidad"]
-    )
+    # Productos con muchos vínculos: candidatos a basura. Pero MUCHOS NO ALCANZA. Una sonda
+    # lambda que va en 60 autos y cita 7 originales tiene, lógicamente, 15 equivalentes de otras
+    # marcas, y la pantalla la ponía primera como «basura para revisar» al lado de la verdadera:
+    # JL · CHAPA pegada a 75 cables de autos distintos. Lo que distingue a la basura no es la
+    # cantidad sino que sus vínculos NO SON LA MISMA PIEZA. Ver vinculos_que_no_cuadran().
+    candidatos = {pid for pid, v in vinculos_por_producto.items()
+                  if v["cantidad"] >= MINIMO_DE_VINCULOS_PARA_REVISAR and v["tipo"] != "OEM"}
+    vecinos, originales = {}, {}
+    for f in filas:
+        for lado, otro in (("a", "b"), ("b", "a")):
+            # Los originales de TODOS, no solo de los candidatos: hace falta saber si el de
+            # enfrente cita el mismo.
+            if f[f"tipo_{otro}"] == "OEM" and f[f"tipo_{lado}"] != "OEM":
+                originales.setdefault(f[lado], set()).add(f[otro])
+            if f[lado] not in candidatos or f[f"tipo_{otro}"] == "OEM":
+                continue
+            vecinos.setdefault(f[lado], []).append({
+                "id": f[otro], "codigo": f[f"cod_{otro}"], "marca": f[f"marca_{otro}"],
+                "descripcion": f[f"desc_{otro}"] or "", "par": (f["a"], f["b"]),
+                "ok": (f["a"], f["b"]) in ya_ok})
+    sospechosos = []
+    with recordando_lo_de_cada_producto():
+        for pid in candidatos:
+            info = vinculos_por_producto[pid]
+            malos, rubros = vinculos_que_no_cuadran(info, vecinos.get(pid, []), originales)
+            evaluados = info["cantidad"]
+            if (len(malos) >= MINIMO_DE_VINCULOS_QUE_NO_CUADRAN
+                    and len(malos) >= evaluados * PROPORCION_QUE_NO_CUADRA):
+                sospechosos.append(dict(info, no_cuadran=malos, rubros=rubros))
+    sospechosos.sort(key=lambda v: (-len(v["no_cuadran"]), -v["cantidad"]))
 
     # Si se llegó al tope, se revisó solo una parte: hay que decirlo, porque si no queda la
     # falsa sensación de que está todo limpio cuando ni siquiera se miró la mitad.
@@ -571,10 +607,94 @@ def auditar_equivalencias_existentes(limite=VINCULOS_QUE_MIRA_LA_AUDITORIA):
         "quedo_corta": len(filas) >= limite and total_en_base > len(filas),
         "ya_revisados_ok": len(ya_ok),
         "conflictos": conflictos,
+        "originales_con_parecidos": parecidos,
         "por_medidas": por_medidas,
         "codigos_malos": sorted(codigos_malos.values(), key=lambda x: -x["vinculos"])[:50],
         "productos_sospechosos": sospechosos[:30],
     }
+
+
+# Ver auditar_equivalencias_existentes() y vinculos_que_no_cuadran().
+MINIMO_DE_VINCULOS_PARA_REVISAR = 10
+MINIMO_DE_VINCULOS_QUE_NO_CUADRAN = 5
+PROPORCION_QUE_NO_CUADRA = 0.4
+
+# Los motivos de firmas_compatibles() que dicen que son piezas DISTINTAS, no solo que no hay
+# pruebas de que sean la misma: los mismos que tumban un par en la revisión (ver
+# _MOTIVOS_QUE_CONTRADICEN en descripciones.py, que se carga después), más el rubro. «Solo
+# comparten 1 palabra» o «piezas distintas: SONDA y SENSOR» no son contradicciones: son dos
+# formas de escribir, y marcarlos llenaba la lista de sondas buenas.
+_MOTIVOS_DE_OTRA_PIEZA = ("rubros distintos", "posiciones distintas", "siglas distintas",
+                          "autos distintos", "marcas distintas", "modelos distintos",
+                          "cilindradas distintas", "distinta cantidad de vías", "juegos distintos",
+                          "largo de cable distinto", "temperaturas distintas",
+                          "carburadores distintos", "piezas de lugares distintos",
+                          "sensores de tipos distintos", "bujías de tipos distintos",
+                          "distinta cantidad de cilindros", "motores de distintas válvulas")
+
+
+def _por_que_chocan(productos):
+    """Por qué los productos a los que apunta un mismo original no pueden ser todos la misma
+    pieza, o None si pueden. Ver auditar_equivalencias_existentes().
+
+    Chocan si dos de ellos se contradicen (otro rubro, otros autos, otra posición… ver
+    _MOTIVOS_DE_OTRA_PIEZA), si uno es un juego y otro una pieza suelta, o si alguno no tiene
+    descripción: ese es el que suele haber quedado de una importación mal mapeada."""
+    if any(not (p["descripcion"] or "").strip() for p in productos):
+        return "uno no tiene descripción"
+    firmas = [(p, firma_de_producto(p["descripcion"], p["id"])) for p in productos]
+    kits = {bool(es_un_kit(p["descripcion"])) for p in productos}
+    if len(kits) > 1:
+        return "mezcla un juego con una pieza suelta"
+    for i in range(len(firmas)):
+        for j in range(i + 1, len(firmas)):
+            (pa, fa), (pb, fb) = firmas[i], firmas[j]
+            if not fa or not fb:
+                continue
+            ok, motivo = firmas_compatibles(fa, fb)
+            if not ok and motivo.startswith(_MOTIVOS_DE_OTRA_PIEZA):
+                return motivo
+    return None
+
+
+def vinculos_que_no_cuadran(info, vecinos, originales):
+    """Los vínculos de un producto que no son la misma pieza: [(vecino, motivo)], y los rubros.
+
+    Un vínculo NO cuadra si la descripción de los dos se contradice: rubros distintos, autos
+    que no tienen nada en común, posición, cilindrada, tipo de sensor… (ver
+    _MOTIVOS_DE_OTRA_PIEZA). Y cuadra seguro, diga lo que diga la descripción, si los dos
+    citan el MISMO código original: eso es la prueba más fuerte que hay.
+    Los que ya marcaste como correctos no cuentan."""
+    firma = firma_de_producto(info["descripcion"] or "", info["id"])
+    if firma and firma["familia"] == "Sin clasificar":
+        firma = None
+    propios = originales.get(info["id"], set())
+    firmas = {}
+    rubros = collections.Counter()
+    for v in vecinos:
+        firma_v = firma_de_producto(v["descripcion"], v["id"])
+        firmas[v["id"]] = firma_v if firma_v and firma_v["familia"] != "Sin clasificar" else None
+        if firmas[v["id"]]:
+            rubros[firma_v["familia"]] += 1
+    # Sin descripción que se entienda (un código «1» que quedó de una columna equivocada), la
+    # referencia es el rubro de la mayoría de sus vínculos: si están pegados a filtros, bombas
+    # y cables a la vez, no es ninguna pieza.
+    dominante = rubros.most_common(1)[0][0] if rubros else None
+    malos = []
+    for v in vecinos:
+        if v["ok"] or (propios & originales.get(v["id"], set())):
+            continue
+        firma_v = firmas[v["id"]]
+        if not firma_v:
+            continue
+        if firma:
+            ok, motivo = firmas_compatibles(firma, firma_v)
+            if not ok and motivo.startswith(_MOTIVOS_DE_OTRA_PIEZA):
+                malos.append((v, motivo))
+        elif dominante and firma_v["familia"] != dominante:
+            malos.append((v, f"rubros distintos: {firma_v['familia']}, y la mayoría de sus "
+                             f"vínculos son {dominante}"))
+    return malos, rubros
 
 
 def cb_auditoria_eliminar(par_a, par_b):
@@ -587,6 +707,12 @@ def cb_auditoria_eliminar(par_a, par_b):
 
 def cb_auditoria_dejar(pares):
     marcar_revision(pares, "ok")
+    st.session_state["resultado_auditoria"] = auditar_equivalencias_existentes()
+
+
+def cb_auditoria_cortar_pares(pares):
+    """Corta solo esos vínculos (los que no cuadran) y vuelve a revisar."""
+    cortar_vinculos_cargados(pares)
     st.session_state["resultado_auditoria"] = auditar_equivalencias_existentes()
 
 
