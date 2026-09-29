@@ -1307,6 +1307,8 @@ Administrar → Mantenimiento.
                         st.markdown(f"**{_prod['marca']} {_prod['cod']}** — "
                                     f"{len(_ab['candidatos'])} candidatos en {_ab['marca_otra']}")
                         st.caption((_prod.get("desc") or "")[:160])
+                        # Lo que distingue a cada opción, a la vista: ver tabla_del_abanico().
+                        st.dataframe(tabla_del_abanico(_ab), width="stretch", hide_index=True)
                         _opciones_ab = {}
                         for _base, _filas_b in candidatos_por_pieza(_ab):
                             _f = _filas_b[0]

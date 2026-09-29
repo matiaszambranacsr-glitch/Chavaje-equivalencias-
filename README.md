@@ -5430,6 +5430,15 @@ Y uno más que salió probando: si la lista trae el mismo código dos veces con 
 - **Las descripciones sin `<br>` ni `<b>` escritos**: `texto_para_html()` pasa los saltos a « · »
   y saca las etiquetas de formato que traen algunas listas.
 
+### Elegir en los abanicos: lo que distingue a cada opción, a la vista
+
+En «🪭 Elegí cuál es la equivalente», arriba de las opciones de cada producto va una tabla
+(`tabla_del_abanico()`): el producto y cada candidato con sus modelos en común, años, motor,
+cilindrada, largo de cable, vías y espesor, con ⚠️ donde los dos dicen algo distinto. Antes
+cada opción era «código — los primeros 80 caracteres», y lo que separa una junta de otra (el
+motor, el espesor) o una sonda de otra (el cable, los años) casi siempre está al final. Las
+columnas que ninguna opción tiene no se muestran, para que entre en el celular.
+
 ### ¿Qué tan bien acierta la app? Medido con lo que decidiste
 
 En Estadísticas → 🔗 Equivalencias sugeridas, plegado: «📏 ¿Qué tan bien acierta la app?»

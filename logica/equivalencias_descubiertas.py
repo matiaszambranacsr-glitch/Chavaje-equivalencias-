@@ -2313,6 +2313,50 @@ def candidatos_por_pieza(abanico):
     return sorted(grupos.items(), key=lambda g: -max(f.get("confianza", 0) for f in g[1]))
 
 
+def tabla_del_abanico(abanico):
+    """Lo que distingue a cada candidato del abanico, al lado del producto: una fila para el
+    producto y una por opción (ver candidatos_por_pieza()), con ⚠️ donde no coincide.
+
+    Elegir con «código — los primeros 80 caracteres de la descripción» era adivinar: lo que
+    separa a una sonda de otra (el largo del cable, los años) o a una junta de otra (el motor,
+    el espesor) casi siempre está al final del texto. Acá se pone a la vista."""
+    def rasgos(desc):
+        firma = firma_de_producto(desc or "") or {}
+        medidas = medidas_desde_descripcion(desc or "")
+        anios = firma.get("anios") or ()
+        return {
+            "modelos": set(firma.get("modelos") or ()),
+            "Años": "/".join(f"{d}-{'…' if h == 2100 else h}" for d, h in anios[:2]),
+            "Motor": "/".join(sorted(firma.get("motores") or ())[:3]),
+            "Cilindrada": "/".join(sorted(firma.get("cilindradas") or ())[:3]),
+            "Cable": f"{firma['cable_mm'] / 10:.0f} cm" if firma.get("cable_mm") else "",
+            "Vías": str(firma["vias"]) if firma.get("vias") else "",
+            "Espesor": f"{medidas['espesor']} mm" if medidas.get("espesor") else "",
+        }
+    pid = abanico["producto"]["id"]
+    propio = rasgos(abanico["producto"].get("desc"))
+    campos = ("Años", "Motor", "Cilindrada", "Cable", "Vías", "Espesor")
+    filas = [dict({"Opción": f"▶ {abanico['producto']['cod']} (este)", "Modelos en común": ""},
+                  **{k: propio[k] for k in campos})]
+    for _base, filas_b in candidatos_por_pieza(abanico):
+        f = filas_b[0]
+        lado = "b" if f["a"] == pid else "a"
+        suyo = rasgos(f.get(f"desc_{lado}"))
+        fila = {"Opción": f[f"cod_{lado}"] + (f" (+{len(filas_b) - 1})" if len(filas_b) > 1
+                                              else ""),
+                "Modelos en común": "/".join(sorted(propio["modelos"] & suyo["modelos"])[:3])
+                                    or ("⚠️ ninguno" if propio["modelos"] and suyo["modelos"]
+                                        else "")}
+        for k in campos:
+            valor = suyo[k]
+            # Se marca lo que los dos dicen y no coincide; lo que uno solo dice no se marca.
+            fila[k] = (f"⚠️ {valor}" if valor and propio[k] and valor != propio[k] else valor)
+        filas.append(fila)
+    # Las columnas que nadie tiene no se muestran: en el celular cada columna cuesta.
+    usadas = [k for k in campos if any(f[k] for f in filas)]
+    return [{k: f[k] for k in ("Opción", "Modelos en común", *usadas)} for f in filas]
+
+
 def pieza_sugerida_del_abanico(abanico):
     """La opción del abanico que conviene traer ya elegida, o None.
 
