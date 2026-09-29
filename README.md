@@ -5587,6 +5587,29 @@ Lo que sigue siendo pesado con 63 proveedores es la búsqueda automática en sí
 procesador por lista importada (corre por atrás) y alrededor de 2 GB de memoria en el barrido.
 Con ese tamaño conviene un servidor con más memoria que el gratuito de Streamlit.
 
+### Preparada para crecer: barrido con interruptor, búsqueda en una pasada, copia en partes
+
+- **El barrido de todo el catálogo se puede apagar.** En el panel de carga automática hay un
+  interruptor nuevo: «Después de importar, barrer todo el catálogo…» (config
+  `barrido_automatico`, prendido por defecto). Es lo que más memoria pide (unos 2 GB con 63
+  proveedores). Apagado, el resto de lo de después de importar sigue igual, el informe lo dice, y
+  el barrido se corre a mano desde Administrar → Mantenimiento → «🧠 Buscar en todo el catálogo».
+- **Buscar por descripción recorre la tabla una vez.** Las coincidencias se contaban dos veces
+  (en el SELECT y en el WHERE), y si no aparecía nada con todas las palabras se volvía a recorrer
+  todo pidiendo una menos. Ahora se trae de una lo que llega al mínimo aflojado y el mínimo de
+  verdad se aplica después. Comparado con la versión anterior en 14 búsquedas: mismos resultados
+  en las dos bases; con 63 proveedores, mediana de 365 a 333 ms y la peor de 594 a 450 ms.
+- **La copia a GitHub puede ir en partes.** GitHub no acepta archivos de más de 100 MB; hoy la
+  copia con 63 proveedores pesa 58 MB. Si pasa de 90 MB (`TOPE_DE_UN_ARCHIVO_EN_GITHUB`) se sube
+  en pedazos de 45 MB (`partes_de_la_copia()`): `archivo.parte1`, `.parte2`… y `archivo.partes`,
+  un índice con cuántas son, cuánto pesan y su huella SHA-256. Al arrancar,
+  `bajar_la_copia_de_github()` busca el archivo único y, si no está, junta las partes; si falta
+  una o no da la huella, no la usa (arranca con la del repositorio, como con cualquier copia
+  fallida). Probado contra un GitHub simulado con partes de 3 MB: sube 4 partes + índice, baja y
+  abre con los mismos 70.893 productos; con una parte alterada o faltante no restaura nada; y
+  cuando la copia vuelve a entrar en un archivo, la rama queda con el archivo solo. El LEEME de
+  la rama explica cómo pegarlas a mano.
+
 ## 🔗 Revisar sugeridas: primero lo que hay que hacer
 
 Mirado con capturas sobre la base real (15.308 pendientes en 8 listas):

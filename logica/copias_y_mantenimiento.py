@@ -1388,7 +1388,32 @@ Cada copia REEMPLAZA a la anterior (un solo commit), para que el repositorio no 
 La app la baja sola cuando arranca con el disco vacio. No hace falta tocar nada aca.
 Para bajarla a mano: el archivo de esta rama, descomprimido con cualquier programa de .gz,
 es una base SQLite que se abre con la app (Backup y config -> Restaurar).
+Si la copia pasa de 90 MB va en partes (.parte1, .parte2...): la app las junta sola. A mano,
+pegalas en orden en un solo archivo (Linux/Mac: cat X.parte1 X.parte2 > X; Windows:
+copy /b X.parte1+X.parte2 X) y segui como arriba. El .partes dice cuántas son.
 """
+
+
+# El tope de GitHub es 100 MB por archivo; se deja margen. Con 60 proveedores la copia
+# comprimida pesa 58 MB: esto es para cuando se pase.
+TOPE_DE_UN_ARCHIVO_EN_GITHUB = 90 * 1024 * 1024
+TAMANO_DE_CADA_PARTE = 45 * 1024 * 1024
+
+
+def partes_de_la_copia(archivo, datos, tope=None, tamano=None):
+    """[(ruta, bytes o texto)] para subir la copia. Si entra en un archivo, es ese solo. Si no,
+    «archivo.parte1», «archivo.parte2»… y «archivo.partes», un índice con cuántas son, cuánto
+    pesan juntas y su huella, para que al bajarlas se pueda comprobar que están todas y
+    enteras. El archivo único NO va: al bajar, que falte es lo que dice «buscá las partes»."""
+    tope = tope or TOPE_DE_UN_ARCHIVO_EN_GITHUB
+    tamano = tamano or TAMANO_DE_CADA_PARTE
+    if len(datos) <= tope:
+        return [(archivo, datos)]
+    partes = [datos[i:i + tamano] for i in range(0, len(datos), tamano)]
+    indice = json.dumps({"partes": len(partes), "bytes": len(datos),
+                         "sha256": hashlib.sha256(datos).hexdigest()})
+    return ([(f"{archivo}.parte{n}", pedazo) for n, pedazo in enumerate(partes, 1)]
+            + [(f"{archivo}.partes", indice)])
 
 
 def _cuerpo_json_con_base64(campos, clave, datos):
@@ -1413,12 +1438,22 @@ def _subir_a_la_rama_de_copias(cfg, datos, mensaje, cabeceras):
     mueve a ese commit a la fuerza. El commit viejo queda sin nadie que lo apunte y GitHub lo
     limpia solo. Devuelve (ok, código de respuesta, detalle)."""
     base = f"{API_DE_GITHUB}/repos/{cfg['repo']}/git"
-    r = requests.post(f"{base}/blobs", headers={**cabeceras, "Content-Type": "application/json"},
-                      timeout=120, data=_cuerpo_json_con_base64({"encoding": "base64"}, "content", datos))
-    if r.status_code != 201:
-        return False, r.status_code, r.text[:200]
-    r = requests.post(f"{base}/trees", headers=cabeceras, timeout=30, json={"tree": [
-        {"path": cfg["archivo"], "mode": "100644", "type": "blob", "sha": r.json()["sha"]},
+    # GitHub no acepta un archivo de más de 100 MB. Si la copia pasa de
+    # TOPE_DE_UN_ARCHIVO_EN_GITHUB va en partes, con un índice al lado: ver
+    # partes_de_la_copia() y bajar_la_copia_de_github(), que las vuelve a juntar.
+    entradas = []
+    for ruta, pedazo in partes_de_la_copia(cfg["archivo"], datos):
+        if isinstance(pedazo, str):          # el índice: texto, va entero en el árbol
+            entradas.append({"path": ruta, "mode": "100644", "type": "blob",
+                             "content": pedazo})
+            continue
+        r = requests.post(f"{base}/blobs", headers={**cabeceras, "Content-Type": "application/json"},
+                          timeout=120,
+                          data=_cuerpo_json_con_base64({"encoding": "base64"}, "content", pedazo))
+        if r.status_code != 201:
+            return False, r.status_code, r.text[:200]
+        entradas.append({"path": ruta, "mode": "100644", "type": "blob", "sha": r.json()["sha"]})
+    r = requests.post(f"{base}/trees", headers=cabeceras, timeout=30, json={"tree": entradas + [
         {"path": "LEEME.txt", "mode": "100644", "type": "blob",
          "content": LEEME_DE_LA_RAMA_DE_COPIAS},
     ]})
@@ -1982,7 +2017,11 @@ def descubrimiento_post_importacion(presupuesto_segundos=PRESUPUESTO_DESCUBRIMIE
     else:
         quedo.append("el cruce por auto")
 
-    if queda_tiempo():
+    # Se puede apagar desde el panel de carga automática: con muchos proveedores es lo que más
+    # memoria pide (ver mostrar_panel_de_carga_automatica()).
+    if obtener_config("barrido_automatico", "1") != "1":
+        hecho.append("el barrido de todo el catálogo está apagado (se corre a mano)")
+    elif queda_tiempo():
         try:
             # Solo lo que trajeron las listas desde el último barrido: ver
             # sugerir_entre_todas_las_marcas(). La primera vez (sin marca) es entero.

@@ -4597,7 +4597,14 @@ def buscar_por_texto(texto):
     _fabricante = campo_opcional_de_producto(c, "marca_repuesto", "Fabricante")
     # Siempre al menos uno, para que el IN () no quede vacío.
     _codigos_escritos = [sanitizar(p) for p in palabras if sanitizar(p)] or [""]
+    # UNA pasada por la tabla: las coincidencias se cuentan una vez (antes se calculaban en el
+    # SELECT y otra vez en el WHERE), y se trae de una lo que llega al mínimo aflojado; el
+    # mínimo de verdad se aplica después, sin volver a recorrer (ver el aflojado más abajo).
+    # Medido con 63 proveedores (659.000 productos), mismos resultados: la mediana de 365 a
+    # 333 ms y la peor de 594 a 450 ms (la que no encuentra todas las palabras: eran 2 pasadas).
+    minimo_flojo = minimo - 1 if (utiles >= 2 and minimo > 1) else minimo
     query = f'''
+    SELECT * FROM (
     SELECT p.id AS "ID", p.codigo_raw AS "Codigo", p.descripcion AS "Descripcion",
            m.nombre AS "Marca", m.tipo AS "Tipo",
            -- Quién FABRICA la pieza, que es otra cosa que la lista de quién te la vende. En el
@@ -4607,18 +4614,22 @@ def buscar_por_texto(texto):
            -- tiene la columna, nombrarla acá tumba el buscador entero.
            {_fabricante},
            p.precio AS "Precio", p.stock AS "Stock",
-           p.favorito AS "Favorito", ({suma}) AS _coincidencias
+           p.favorito AS "Favorito", ({suma}) AS _coincidencias,
+           LENGTH(p.descripcion) AS _largo
     FROM productos p JOIN marcas m ON m.id = p.marca_id
-    WHERE ({suma}) >= ?
+    WHERE 1
       -- Los códigos de fábrica copian la descripción de la fila que los nombró: buscando
       -- «motor de arranque corsa» salía el arranque y, abajo, sus veinte números de Bosch con
       -- la misma descripción. No son algo que se venda: solo si se escribe el código exacto.
       AND (m.tipo <> 'OEM' OR p.codigo_clean IN ({",".join("?" * len(_codigos_escritos))}))
-    ORDER BY _coincidencias DESC, LENGTH(p.descripcion), m.nombre LIMIT 200;
+    ) WHERE _coincidencias >= ?
+    ORDER BY _coincidencias DESC, _largo, "Marca" LIMIT 400;
     '''
     with db_lock:
-        c.execute(query, params + params + [minimo] + _codigos_escritos)
-        filas = filas_a_listas(c)
+        c.execute(query, params + _codigos_escritos + [minimo_flojo])
+        todas = filas_a_listas(c)
+        # Lo que llega al mínimo va primero por el orden; si no hay nada, queda lo aflojado.
+        filas = [f for f in todas if f["_coincidencias"] >= minimo][:200]
         # Si pidiendo TODAS las palabras no aparece nada, se afloja y se pide una menos.
         # Con dos palabras se exigían las dos, y «rótula suspensión» devolvía CERO resultados
         # sobre un catálogo lleno de rótulas: ninguna descripción dice las dos cosas juntas.
@@ -4628,8 +4639,7 @@ def buscar_por_texto(texto):
         # pero una sola útil, y aflojar a «0 coincidencias» devolvía 200 productos cualquiera
         # (lo encontró la revisión independiente del buscador). Nunca se pide menos de una.
         if not filas and utiles >= 2 and minimo > 1:
-            c.execute(query, params + params + [minimo - 1] + _codigos_escritos)
-            filas = filas_a_listas(c)
+            filas = todas[:200]
 
     # Filtro por RUBRO. Contar palabras coincidentes no alcanza: buscando «bujía golf 1.4 tsi»
     # aparecían juntas de tapa y juegos de motor, porque coinciden en «golf», «1.4» y «tsi» —
@@ -4658,4 +4668,5 @@ def buscar_por_texto(texto):
 
     for f in filas:
         f.pop("_coincidencias", None)
+        f.pop("_largo", None)
     return filas

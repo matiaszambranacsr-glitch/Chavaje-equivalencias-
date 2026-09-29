@@ -309,6 +309,35 @@ def la_base_esta_sana(datos=None, ruta=None):
                 pass
 
 
+def _bajar_la_copia_en_partes(url, cabeceras, rama, destino):
+    """Junta en `destino` la copia subida en partes. False si no hay partes (no hay copia) o si
+    falta alguna o no da la huella del índice: una copia incompleta no se usa nunca."""
+    r = requests.get(f"{url}.partes", headers=cabeceras, params={"ref": rama}, timeout=(10, 30))
+    if r.status_code != 200:
+        if r.status_code != 404:       # 404 = no hay copia, ni entera ni en partes
+            anotar_error("bajar_la_copia_de_github", f"GitHub respondió {r.status_code}")
+        return False
+    indice = json.loads(r.content.decode("utf-8"))
+    huella = hashlib.sha256()
+    total = 0
+    with open(destino, "wb") as salida:
+        for n in range(1, int(indice["partes"]) + 1):
+            with requests.get(f"{url}.parte{n}", headers=cabeceras, params={"ref": rama},
+                              timeout=(10, 120), stream=True) as parte:
+                if parte.status_code != 200:
+                    anotar_error("bajar_la_copia_de_github",
+                                 f"falta la parte {n}: GitHub respondió {parte.status_code}")
+                    return False
+                for pedazo in parte.iter_content(1 << 20):
+                    salida.write(pedazo)
+                    huella.update(pedazo)
+                    total += len(pedazo)
+    if total != indice["bytes"] or huella.hexdigest() != indice["sha256"]:
+        anotar_error("bajar_la_copia_de_github", "las partes de la copia no dan la huella")
+        return False
+    return True
+
+
 def bajar_la_copia_de_github():
     """Baja la última copia de la rama de copias y la deja lista para abrir. Devuelve la ruta,
     o None si no hay copia, no está configurado o algo falla: en ese caso se sigue con la del
@@ -330,13 +359,17 @@ def bajar_la_copia_de_github():
         # puede quedarse colgada esperándolo. Sin copia bajada sigue con la del repositorio.
         with requests.get(url, headers=cabeceras, params={"ref": cfg["rama"]},
                           timeout=(10, 60), stream=True) as r:
-            if r.status_code != 200:
-                if r.status_code != 404:       # 404 = todavía no se subió ninguna
-                    anotar_error("bajar_la_copia_de_github", f"GitHub respondió {r.status_code}")
+            if r.status_code == 404:
+                # Sin el archivo único puede estar en partes (ver partes_de_la_copia()).
+                if not _bajar_la_copia_en_partes(url, cabeceras, cfg["rama"], bajado):
+                    return None
+            elif r.status_code != 200:
+                anotar_error("bajar_la_copia_de_github", f"GitHub respondió {r.status_code}")
                 return None
-            with open(bajado, "wb") as salida:
-                for pedazo in r.iter_content(1 << 20):
-                    salida.write(pedazo)
+            else:
+                with open(bajado, "wb") as salida:
+                    for pedazo in r.iter_content(1 << 20):
+                        salida.write(pedazo)
         # Cifrada: se descifra primero (ver cifrar_copia()). Si no se puede, NO se sigue con
         # un archivo ilegible: se anota y la app arranca con la copia del repositorio.
         with open(bajado, "rb") as _f:
