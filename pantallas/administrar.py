@@ -80,7 +80,12 @@ if pagina == PAGINAS[3]:
                 "**Más fácil:** pegá directamente el link de la ficha de un producto de esa marca "
                 "y la app encuentra sola dónde va el código. Si el sitio lo escribe distinto que "
                 "la lista, también sirven `{codigo_pegado}` (sin guiones ni espacios), "
-                "`{codigo_minusculas}` y `{codigo_pegado_minusculas}`."
+                "`{codigo_minusculas}` y `{codigo_pegado_minusculas}`.\n\n"
+                "**Si el sitio no tiene una dirección por código sino un buscador** (TARANTO, "
+                "CRI-FA), pegá la dirección de la búsqueda con `{codigo}` en lugar del texto "
+                "buscado: la app entra al resultado de ese código y lee su ficha. Con eso, la "
+                "tarea de fondo trae los números originales que la lista no trae, y los pares "
+                "que hoy quedan dudosos se deciden solos."
             )
             nombres_para_link = [m["nombre"] for m in marcas_info]
             marca_link = st.selectbox("Marca:", nombres_para_link, key="marca_link_ficha")

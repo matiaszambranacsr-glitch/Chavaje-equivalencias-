@@ -1797,7 +1797,44 @@ def _guardar_pagina(url, respuesta):
         anotar_error("_guardar_pagina", _err)
 
 
-def codigos_en_una_ficha(url_ficha, codigo_propio, tiempo_maximo=12, sesion=None):
+# ¿La plantilla del catálogo es la de un BUSCADOR y no la de una ficha? Ver _link_a_la_ficha().
+_RE_PLANTILLA_DE_BUSQUEDA = re.compile(
+    r"busc|search|query|consulta|filtro|[?&](?:q|s|k|term|texto|codigo)=\{", re.IGNORECASE)
+
+
+def es_plantilla_de_busqueda(plantilla):
+    return bool(_RE_PLANTILLA_DE_BUSQUEDA.search(str(plantilla or "")))
+
+
+def _link_a_la_ficha(html_pagina, url_pagina, codigo_propio):
+    """En una página de RESULTADOS, el link a la ficha de ese código, o None.
+
+    Hace falta para los catálogos que no tienen una dirección por código sino un buscador
+    (TARANTO, CRI-FA): la lista de resultados no trae los números originales, la ficha sí. Se
+    toma el primer link cuyo texto o dirección tenga el código ENTERO —«2503» no es «250321»— y
+    que se quede en el mismo sitio: un resultado no puede mandar a la app a otra parte."""
+    from urllib.parse import urljoin, urlparse
+    propio = sanitizar(codigo_propio)
+    if not propio:
+        return None
+    sitio = urlparse(url_pagina).netloc
+    for href, texto in re.findall(r'(?is)<a\s[^>]*?href=["\']([^"\']+)["\'][^>]*>(.*?)</a>',
+                                  html_pagina or ""):
+        destino = urljoin(url_pagina, html.unescape(href)).split("#")[0]
+        partes = urlparse(destino)
+        if partes.scheme not in ("http", "https") or partes.netloc != sitio:
+            continue
+        if destino.rstrip("/") == url_pagina.split("#")[0].rstrip("/"):
+            continue
+        palabras = (re.split(r"[\s|,;:()\[\]]+", re.sub(r"<[^>]+>", " ", html.unescape(texto)))
+                    + re.split(r"[/?&=]+", partes.path + "?" + partes.query))
+        if any(sanitizar(p) == propio for p in palabras if p):
+            return destino
+    return None
+
+
+def codigos_en_una_ficha(url_ficha, codigo_propio, tiempo_maximo=12, sesion=None,
+                         seguir_resultado=False):
     """Abre la ficha de un producto en el catálogo del proveedor y saca los OTROS códigos que
     aparecen ahí. Devuelve (lista de códigos, error).
 
@@ -1813,6 +1850,17 @@ def codigos_en_una_ficha(url_ficha, codigo_propio, tiempo_maximo=12, sesion=None
         respuesta = _traer_pagina(url_ficha, tiempo_maximo=tiempo_maximo, sesion=sesion)
         if respuesta.status_code != 200:
             return [], f"la ficha respondió {respuesta.status_code}"
+        # Con un buscador, la página es la lista de resultados: se sigue el link a la ficha.
+        if seguir_resultado:
+            ficha = _link_a_la_ficha(respuesta.text, url_ficha, codigo_propio)
+            if not ficha:
+                return [], "la búsqueda no encontró la ficha de ese código"
+            _motivo_interno = direccion_interna(ficha)
+            if _motivo_interno:
+                return [], f"el resultado apunta a una dirección no permitida ({_motivo_interno})"
+            respuesta = _traer_pagina(ficha, tiempo_maximo=tiempo_maximo, sesion=sesion)
+            if respuesta.status_code != 200:
+                return [], f"la ficha respondió {respuesta.status_code}"
     except Exception as e:
         anotar_error("codigos_en_una_ficha", e)
         return [], type(e).__name__
@@ -1878,8 +1926,11 @@ def equivalencias_desde_catalogo(marca_id, limite=50, progreso=None, cancelado=N
         url_ficha = url_de_la_ficha(plantilla, codigo)
         if not url_ficha:
             return None, "ese código no se puede usar en una dirección"
-        return codigos_en_una_ficha(url_ficha, codigo, sesion=sesion)
+        return codigos_en_una_ficha(url_ficha, codigo, sesion=sesion,
+                                    seguir_resultado=_de_busqueda)
 
+    # Si la plantilla es un buscador, se entra al resultado: ver _link_a_la_ficha().
+    _de_busqueda = es_plantilla_de_busqueda(plantilla)
     resultados = _bajar_en_paralelo(pendientes, traer, hilos=hilos, progreso=progreso,
                                     cancelado=cancelado)
 
@@ -1890,9 +1941,13 @@ def equivalencias_desde_catalogo(marca_id, limite=50, progreso=None, cancelado=N
             continue
         for otro in codigos:
             otro_limpio = sanitizar(otro)
+            # De OTRA marca: la ficha —y más la lista de resultados de un buscador— nombra los
+            # otros productos de la misma marca (el juego que la trae, la versión nueva), y eso
+            # no es una equivalencia.
             c.execute("""SELECT p.id, p.codigo_raw, m.nombre AS marca FROM productos p
                          JOIN marcas m ON m.id = p.marca_id
-                         WHERE p.codigo_clean = ? AND p.id <> ? LIMIT 1""", (otro_limpio, pid))
+                         WHERE p.codigo_clean = ? AND p.id <> ? AND p.marca_id <> ?
+                         LIMIT 1""", (otro_limpio, pid, marca_id))
             destino = c.fetchone()
             if not destino:
                 continue        # ese código no está en tu catálogo: no sirve proponerlo
