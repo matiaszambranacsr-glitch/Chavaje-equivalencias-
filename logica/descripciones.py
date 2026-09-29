@@ -87,9 +87,9 @@ def motores_de_la_descripcion(descripcion, excluir=(), codigo_propio=""):
                      and not (propio and w in propio))
 
 
-# Qué motores declara el catálogo que se llevan: ver aprender_motores_que_van_juntos(). Es «de
-# cada pasada» de la lógica a propósito, y se relee cada diez minutos porque la tanda de fondo
-# reescribe la tabla.
+# Qué motores declara el catálogo que se llevan: ver aprender_motores_que_van_juntos().
+# Es de cada pasada de la lógica a propósito, y se relee cada diez minutos porque la tanda de
+# fondo reescribe la tabla.
 _MOTORES_QUE_VAN_JUNTOS = {}
 
 
