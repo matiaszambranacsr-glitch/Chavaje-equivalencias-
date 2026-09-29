@@ -5610,6 +5610,27 @@ Con ese tamaño conviene un servidor con más memoria que el gratuito de Streaml
   cuando la copia vuelve a entrar en un archivo, la rama queda con el archivo solo. El LEEME de
   la rama explica cómo pegarlas a mano.
 
+### Lo ya aprobado se revisa solo con las reglas de hoy, y se avisa arriba
+
+Midiendo las 13.021 aprobaciones de la base de prueba con el análisis de hoy, 86 caen en rojo, y
+mirándolas una por una casi todas están mal de verdad: una junta de tapa de cilindros unida a una
+bujía por el código de motor 4JB1TC, poleas de 54 contra 48,8 mm, un motor paso a paso unido a
+una bomba de agua de otro auto. Se aprobaron en bloque antes de que existieran las reglas de
+rubros, medidas y «ese código es un motor», y el buscador las sigue mostrando como equivalentes.
+
+«🔁 Revisar lo aprobado con las reglas de hoy» ya las encontraba (78 de las 86; las otras 8 son
+de «un código apunta a varios productos de FISPA», que se mira por lista y no por par), pero había
+que apretar el botón, y está al final de la pantalla. Ahora:
+
+- **La tarea de fondo la corre sola** (`revisar_lo_aprobado_por_atras()`) cuando cambia el código
+  de la app (una huella de los archivos de `logica/`) o cambian los vínculos cargados, en ese caso
+  como mucho cada 30 minutos (`MINUTOS_ENTRE_REVISIONES_DE_LO_APROBADO`). Son 7 s con 13.021
+  vínculos, cediéndole el paso al mostrador cada 500. Guarda un resumen en la configuración.
+- **Arriba de 🔗 Equivalencias sugeridas** sale el aviso con cuántos son y los tres motivos más
+  comunes, sin revisar nada al dibujar la pantalla. «🔁 Ver cuáles y resolverlos» los muestra ahí
+  mismo, agrupados, con «✂️ Cortar» y «✅ Están bien» por grupo, y el aviso se actualiza con lo
+  que se resuelva. Probado en la app: 78 → cortando un grupo de 5 → 73.
+
 ## 🔗 Revisar sugeridas: primero lo que hay que hacer
 
 Mirado con capturas sobre la base real (15.308 pendientes en 8 listas):

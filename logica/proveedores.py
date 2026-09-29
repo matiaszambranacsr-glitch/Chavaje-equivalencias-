@@ -2393,6 +2393,13 @@ def _trabajo_de_fondo():
     except Exception as _err:
         anotar_error("_trabajo_de_fondo/analisis_del_lote", _err)
 
+    # Lo ya aprobado, con las reglas de hoy: si la app cambió o cambiaron los vínculos. La
+    # pantalla de sugeridas avisa lo que encuentre (ver revisar_lo_aprobado_por_atras()).
+    try:
+        revisar_lo_aprobado_por_atras()
+    except Exception as _err:
+        anotar_error("_trabajo_de_fondo/lo_aprobado", _err)
+
     # SIN CUPO POR DÍA NI TOPE DE TIEMPO: sigue mientras haya algo que hacer. Lo único que la
     # frena es que un sitio falle cinco veces seguidas (ver _descansar()).
     while True:

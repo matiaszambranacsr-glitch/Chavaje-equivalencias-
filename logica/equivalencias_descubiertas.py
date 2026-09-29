@@ -820,6 +820,97 @@ def cb_reglas_de_hoy(pares, decision):
     else:
         marcar_revision(pares, "ok", motivo=MOTIVO_CONFIRMADO_CON_LAS_REGLAS_DE_HOY)
     st.session_state["resultado_reglas_de_hoy"] = aprobados_que_hoy_se_vetarian()
+    guardar_resumen_de_lo_aprobado(st.session_state["resultado_reglas_de_hoy"])
+
+
+def mostrar_revision_de_lo_aprobado():
+    """«🔁 Revisar lo aprobado con las reglas de hoy», en Equivalencias sugeridas. Es una
+    función porque se dibuja en uno de dos lugares: al final de la pantalla, como siempre, o
+    arriba de todo si se tocó el aviso de mostrar_aviso_de_lo_aprobado()."""
+    st.markdown("**🔁 Revisar lo aprobado con las reglas de hoy**")
+    explicar(
+        "Pasa cada vínculo ya cargado por los mismos vetos que usa hoy la revisión.",
+        "Cada vez que la app aprende a distinguir algo —modelos distintos, largo de cable, "
+        "temperaturas, un código que en realidad es un motor— lo aplica a lo que llega. Lo que "
+        "ya habías aprobado antes quedó como estaba, y «🔍 Auditar lo ya cargado» no lo vuelve "
+        "a mirar. Esto sí. La tarea de fondo lo revisa sola cuando la app cambia, y avisa "
+        "arriba de esta pantalla. Lo que confirmes como correcto no vuelve a aparecer; lo que cortes "
+        "queda descartado aunque vuelvas a importar la lista."
+    )
+    if st.button("🔁 Revisar lo aprobado", key="revisar_lo_aprobado"):
+        with st.spinner("Revisando..."):
+            st.session_state["resultado_reglas_de_hoy"] = aprobados_que_hoy_se_vetarian()
+            guardar_resumen_de_lo_aprobado(st.session_state["resultado_reglas_de_hoy"])
+    _rh = st.session_state.get("resultado_reglas_de_hoy")
+    if _rh:
+        _n_vetados = sum(len(filas) for _m, filas in _rh["grupos"])
+        if not _n_vetados:
+            st.success(f"✅ Ninguno de los {miles(_rh['revisados'])} vínculos cargados choca con "
+                       "las reglas de hoy.")
+        else:
+            st.warning(
+                f"**{miles(_n_vetados)} de {miles(_rh['revisados'])} vínculos cargados hoy se "
+                "vetarían.** Van agrupados por motivo: mirá los ejemplos de cada grupo y "
+                "resolvelo de un toque.")
+        if _rh["confirmados"]:
+            st.caption(f"({miles(_rh['confirmados'])} ya confirmados como correctos no se miran.)")
+        for _motivo_rh, _filas_rh in _rh["grupos"][:30]:
+            with st.container(border=True):
+                st.markdown(f"**{texto_para_html(_motivo_rh)}** — {miles(len(_filas_rh))} "
+                            "vínculo(s)")
+                for _f in _filas_rh[:5]:
+                    st.caption(
+                        f"{_f['marca_a']} **{_f['cod_a']}** — {(_f['desc_a'] or '')[:70]}  ↔  "
+                        f"{_f['marca_b']} **{_f['cod_b']}** — {(_f['desc_b'] or '')[:70]}"
+                        + (f"  \n_{_f['vetos'][0]}_" if _f["vetos"][0] != _motivo_rh else ""))
+                if len(_filas_rh) > 5:
+                    st.caption(f"… y {miles(len(_filas_rh) - 5)} más.")
+                _pares_rh = [(_f["a"], _f["b"]) for _f in _filas_rh]
+                _k_rh = abs(hash(_motivo_rh))
+                _c1_rh, _c2_rh = st.columns(2)
+                _c1_rh.button(f"✂️ Cortar los {miles(len(_filas_rh))}", key=f"rh_cortar_{_k_rh}",
+                              on_click=cb_reglas_de_hoy, args=(_pares_rh, "cortar"),
+                              help="Los productos quedan; solo se corta la relación, y no "
+                                   "vuelve aunque reimportes la lista")
+                _c2_rh.button("✅ Están bien", key=f"rh_ok_{_k_rh}",
+                              on_click=cb_reglas_de_hoy, args=(_pares_rh, "ok"),
+                              help="No vuelven a aparecer acá")
+        if len(_rh["grupos"]) > 30:
+            st.caption(f"(mostrando 30 de {len(_rh['grupos'])} motivos)")
+
+
+def cb_ver_lo_aprobado_arriba(ver):
+    """El botón del aviso: revisa ahora (para ver cuáles son) y lo muestra arriba de todo."""
+    if ver:
+        st.session_state["resultado_reglas_de_hoy"] = aprobados_que_hoy_se_vetarian()
+        guardar_resumen_de_lo_aprobado(st.session_state["resultado_reglas_de_hoy"])
+    st.session_state["reglas_de_hoy_arriba"] = ver
+
+
+def mostrar_aviso_de_lo_aprobado():
+    """Arriba de Equivalencias sugeridas: cuántos vínculos YA CARGADOS chocan con las reglas de
+    hoy, según lo último que revisó la tarea de fondo (ver revisar_lo_aprobado_por_atras()).
+    No revisa nada al dibujarse: con 60 proveedores son más de 100.000 vínculos."""
+    if st.session_state.get("reglas_de_hoy_arriba"):
+        with st.container(border=True):
+            mostrar_revision_de_lo_aprobado()
+            st.button("Listo, cerrar", key="reglas_de_hoy_cerrar",
+                      on_click=cb_ver_lo_aprobado_arriba, args=(False,))
+        return
+    resumen = resumen_de_lo_aprobado()
+    if not resumen or not resumen.get("vetados"):
+        return
+    motivos = " · ".join(f"{texto_para_html(m)} ({miles(n)})" for m, n in resumen["grupos"])
+    try:
+        cuando = datetime.strptime(resumen["fecha"], "%Y-%m-%d %H:%M").strftime("%d/%m %H:%M")
+    except (KeyError, ValueError):
+        cuando = resumen.get("fecha", "")
+    st.warning(
+        f"🔁 **{miles(resumen['vetados'])} vínculo(s) que ya están cargados chocan con las "
+        f"reglas de hoy.** El buscador los muestra como equivalentes. Lo que más hay: "
+        f"{motivos}. (Revisado el {cuando}.)")
+    st.button("🔁 Ver cuáles y resolverlos", key="reglas_de_hoy_ver",
+              on_click=cb_ver_lo_aprobado_arriba, args=(True,))
 
 
 def cortar_todos_los_vinculos(producto_id, recordar_rechazo=True):
@@ -875,7 +966,9 @@ def aprobados_que_hoy_se_vetarian(limite=None):
         cuenta_pal, total_desc = cuantas_veces_aparece_cada_palabra()
         rubros_oem = rubros_de_los_codigos_de_fabrica()
         ya_juzgados = {}
-        for a, b in pares:
+        for n_par, (a, b) in enumerate(pares):
+            if n_par % 500 == 0:
+                ceder_al_mostrador()      # solo hace algo en la tarea de fondo
             pa, pb = memoria.get(("producto_ev", a)) or {}, memoria.get(("producto_ev", b)) or {}
             try:
                 _a_favor, vetos, _veredicto = evidencia_cruzada(
@@ -906,6 +999,69 @@ def aprobados_que_hoy_se_vetarian(limite=None):
                 "desc_b": pb.get("descripcion")})
     return {"revisados": len(pares), "confirmados": len(confirmados) // 2,
             "grupos": sorted(grupos.items(), key=lambda g: (-len(g[1]), g[0]))}
+
+
+# Si lo único que cambió son los vínculos (se aprobó o se cortó algo), la tarea de fondo vuelve
+# a revisar lo aprobado como mucho cada tantos minutos. Con otro código de la app, enseguida.
+MINUTOS_ENTRE_REVISIONES_DE_LO_APROBADO = 30
+
+
+def _huella_de_la_logica():
+    """Cambia con cada versión de la lógica de la app: es lo que dice «las reglas cambiaron»."""
+    import orden
+    huella = hashlib.sha1()
+    for parte in orden.PARTES_DE_LA_LOGICA:
+        with open(os.path.join(orden.AQUI, "logica", parte), "rb") as archivo:
+            huella.update(archivo.read())
+    return huella.hexdigest()
+
+
+def guardar_resumen_de_lo_aprobado(resultado):
+    """Deja anotado lo que dio aprobados_que_hoy_se_vetarian(), para avisarlo sin rehacerlo."""
+    c.execute("SELECT COUNT(*) FROM equivalencias")
+    guardar_config("reglas_de_hoy_resumen", json.dumps({
+        "codigo": _huella_de_la_logica(),
+        "vinculos": c.fetchone()[0],
+        "fecha": datetime.now().strftime("%Y-%m-%d %H:%M"),
+        "revisados": resultado["revisados"],
+        "vetados": sum(len(filas) for _m, filas in resultado["grupos"]),
+        "grupos": [[motivo, len(filas)] for motivo, filas in resultado["grupos"][:3]],
+    }, ensure_ascii=False))
+
+
+def resumen_de_lo_aprobado():
+    """Lo último que dio revisar lo aprobado con las reglas de hoy, o None si no se hizo nunca."""
+    try:
+        return json.loads(obtener_config("reglas_de_hoy_resumen", "") or "null")
+    except ValueError:
+        return None
+
+
+def revisar_lo_aprobado_por_atras():
+    """Para la tarea de fondo: revisa lo aprobado con las reglas de hoy si la app cambió o si
+    cambiaron los vínculos cargados, y lo deja anotado. Devuelve el resumen si lo rehízo.
+
+    «🔁 Revisar lo aprobado» existía, pero había que apretarlo, y está al final de la pantalla.
+    Sobre la base de prueba, lo aprobado en bloque antes de las reglas de rubros, medidas y
+    códigos que son motores dejó 78 vínculos malos cargados —una junta de tapa unida a una
+    bujía, poleas de otro diámetro— que el buscador mostraba como equivalentes. Ahora lo avisa
+    la pantalla de sugeridas apenas se sabe."""
+    guardado = resumen_de_lo_aprobado() or {}
+    c.execute("SELECT COUNT(*) FROM equivalencias")
+    vinculos = c.fetchone()[0]
+    if guardado.get("codigo") == _huella_de_la_logica():
+        if guardado.get("vinculos") == vinculos:
+            return None
+        try:
+            hace = datetime.now() - datetime.strptime(guardado["fecha"], "%Y-%m-%d %H:%M")
+        except (KeyError, ValueError):
+            hace = timedelta(days=1)
+        if hace < timedelta(minutes=MINUTOS_ENTRE_REVISIONES_DE_LO_APROBADO):
+            return None
+    ceder_al_mostrador()
+    resultado = aprobados_que_hoy_se_vetarian()
+    guardar_resumen_de_lo_aprobado(resultado)
+    return resumen_de_lo_aprobado()
 
 
 def cortar_vinculos_cargados(pares):
