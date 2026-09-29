@@ -115,6 +115,7 @@ tocás algo de códigos, planillas o equivalencias, conviene regenerarlo y corre
 
 Antes de subir un cambio: `python3 auditar.py` tiene que dar ERROR 0. Revisa la app entera,
 las tres partes juntas, en el orden en que corren.
+Si el cambio toca el análisis de equivalencias, además `python3 pruebas_de_la_revision.py`.
 """
 import time
 

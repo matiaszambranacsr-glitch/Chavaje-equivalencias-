@@ -13,6 +13,7 @@ qué proveedores, son el mismo repuesto. Corre con Streamlit sobre una base SQLi
 | `orden.py` | En qué orden corren las partes de `logica/` y las pantallas. Lo leen la app y las herramientas. |
 | `nucleo/` | La misma lógica pero **sin Streamlit**, para poder usarla desde otro sistema. Se genera desde `logica/`. |
 | `auditar.py` | Revisa la app entera y busca los errores que ya pasaron alguna vez. Correlo antes de subir un cambio. |
+| `pruebas_de_la_revision.py` | Que el análisis de equivalencias no se equivoque con pares ya revisados a mano, y (con `--base`) que no baje a rojo lo que aprobaste. |
 | `requirements.txt` | Lo que hay que instalar. |
 | `Equivalencias` | El prototipo original, de antes de `app.py`. No lo usa nadie; queda por si querés mirarlo. Se puede borrar. |
 
@@ -22,6 +23,8 @@ qué proveedores, son el mismo repuesto. Corre con Streamlit sobre una base SQLi
 python3 auditar.py               # tiene que dar ERROR 0 (revisa la app entera)
 python3 nucleo/generar.py        # regenerar el paquete desde logica/
 python3 -m nucleo.pruebas        # tiene que decir "todo en verde"
+python3 pruebas_de_la_revision.py   # si tocaste el análisis: "todo en verde"
+python3 pruebas_de_la_revision.py --base copia.db   # y contra tus aprobaciones
 python3 revisar_con_gemini.py    # opcional: una segunda opinión sobre el diff
 ```
 
@@ -5426,6 +5429,23 @@ Y uno más que salió probando: si la lista trae el mismo código dos veces con 
   real pegada a 75 cables, que el tope escondía.
 - **Las descripciones sin `<br>` ni `<b>` escritos**: `texto_para_html()` pasa los saltos a « · »
   y saca las etiquetas de formato que traen algunas listas.
+
+### Una prueba que cuida lo que ya revisaste
+
+`pruebas_de_la_revision.py` deja escrito lo que se aprendió revisando la cola a mano, para que
+la regla siguiente no lo rompa sin que se note:
+
+- **Pares de muestra**: 20 pares reales, cada uno con lo que tiene que dar —«misma» o
+  «distinta»— y de dónde salió. Se corre con una base vacía en una carpeta temporal, así que
+  nunca toca la de trabajo. Los que dependen de modelos de auto se prueban solo con una base,
+  porque los modelos la app los aprende del catálogo.
+- **Con `--base copia.db`**: pone todos los pares que aprobaste como si recién llegaran —sin tus
+  decisiones ni lo aprendido de ellas— y los puntúa. Falla si más del 1 % cae en rojo. Sobre la
+  base de prueba: 13.021 aprobados, 12.853 limpios, 86 en rojo (0,7 %, vínculos por códigos que
+  hoy ya no se tomarían).
+
+Probada rompiendo la regla de motores a propósito: falla y dice cuál par se rompió
+(«Deutz F4L contra F5L: tenían que ser piezas distintas y dio que concuerdan»).
 
 ### Los años y los motores también dicen «son otra pieza»
 
