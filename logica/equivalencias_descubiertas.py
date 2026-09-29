@@ -2700,6 +2700,9 @@ def tipo_de_alarma(alarma):
         return "🚫 Uno de los dos códigos parece una medida o una especificación"
     # «63 vs 53 cm», «120/105 vs 98»: el dato de cada par. Lo que decide —que el largo, las
     # temperaturas o las vías no son las mismas— es igual para todos.
+    if alarma.startswith("🔤 un nombre de modelo de marcas distintas"):
+        return ("🔤 Solo comparten un nombre de modelo, y cada una nombra otra marca: puede ser "
+                "otra cosa en cada una")
     for _sin_detalle in ("🔤 carburadores distintos", "🔤 motores de distintas válvulas"):
         if alarma.startswith(_sin_detalle):
             return _sin_detalle
@@ -3232,7 +3235,10 @@ def _analizar_lote_pendiente(lote, limite=None, desde=0):
             # sin que nada diga que es la misma pieza. Si no los une un código y las
             # descripciones no concuerdan, lo único que se sabe es que son del mismo rubro.
             puntaje = min(puntaje, 50.0)
-            if not alarmas:
+            if not alarmas and " · " in (veredicto or ""):
+                # Las descripciones dicen por qué desconfiar (ver _MOTIVOS_QUE_AVISAN).
+                alarmas.append(f"🔤 {veredicto.split(' · ', 1)[1]}")
+            elif not alarmas:
                 alarmas.append("🤷 Nada dice que sean la misma pieza: no los une ningún código y "
                                "las descripciones no alcanzan para decirlo")
         puntaje = min(puntaje, _tope_por_el_codigo)

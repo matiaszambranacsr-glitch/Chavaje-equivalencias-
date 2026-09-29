@@ -2466,6 +2466,14 @@ def firmas_compatibles(a, b, minimo_nucleo=2, cuenta_palabras=None, total_descri
     # delantero no reemplaza a uno trasero por más que vayan al mismo auto.
     if a["posicion"] and b["posicion"] and a["posicion"] != b["posicion"]:
         return False, f"posiciones distintas ({a['posicion']} vs {b['posicion']})"
+    # «Tapa de válvulas superior» contra «Tapa de Válvulas Lateral» (TARANTO 350332 contra
+    # ILLINOIS JVL-163-43, las dos del OM352): dos tapas distintas del mismo motor. LATERAL no
+    # es una posición más de _POSICIONES a propósito: «soporte motor lateral izquierdo» y
+    # «soporte motor izquierdo» son el mismo soporte. Solo choca contra SUPERIOR.
+    _lat_a = bool(re.search(r"\bLATERAL\b", a.get("texto") or ""))
+    _lat_b = bool(re.search(r"\bLATERAL\b", b.get("texto") or ""))
+    if _lat_a != _lat_b and "SUPERIOR" in (a["posicion"] if _lat_b else b["posicion"],):
+        return False, "posiciones distintas (SUPERIOR vs LATERAL)"
 
     # Cilindrada: si las dos la declaran y no comparten ninguna, no es la misma aplicación
     if a["cilindradas"] and b["cilindradas"] and not (a["cilindradas"] & b["cilindradas"]):
@@ -2635,6 +2643,23 @@ def firmas_compatibles(a, b, minimo_nucleo=2, cuenta_palabras=None, total_descri
             and not (apl_comunes - _mod_a - _mod_b)):
         return False, (f"marcas distintas: {'/'.join(sorted(_mar_a)[:2])} "
                        f"vs {'/'.join(sorted(_mar_b)[:2])}")
+    # LA MARCA DE MOTORES NO SALVA UN NOMBRE DE OTRA MARCA. Que una nombre a MWM y la otra a
+    # FORD no dice que sean autos distintos (ver _MARCAS_DE_MOTORES), pero si lo ÚNICO que
+    # comparten es un nombre de modelo, ese nombre es de otra cosa en cada marca: «Junta Tapa
+    # Valvulas MWM SPRINT 4.07» (el motor Sprint) salía sin alarmas contra la de «FORD FALCON
+    # … 221 SPRINT» y contra la de «CHEVROLET SPRINT SWIFT». Con un motor o un número en común,
+    # o nombrando las dos a la misma marca, no se corta.
+    # Va a REVISIÓN y no a rojo: el motivo no está en _MOTIVOS_QUE_CONTRADICEN. Medido sobre la
+    # cola, lo demás que agarra es «FORD F100» contra «PERKINS F100»: la misma camioneta, que
+    # puede tener el mismo motor o no. Eso lo decide una persona, no se descarta de una.
+    if (_mar_a and _mar_b and not (_mar_a & _mar_b)
+            and not any(fam & _mar_a and fam & _mar_b for fam in _FAMILIAS_DE_MARCAS)
+            and not (apl_comunes - _mod_a - _mod_b)):
+        _comunes = (a.get("autos") or set()) & (b.get("autos") or set())
+        if _comunes and _comunes <= (_mod_a | _mod_b):
+            return False, (f"un nombre de modelo de marcas distintas: "
+                           f"{'/'.join(sorted(_comunes)[:2])} ({'/'.join(sorted(_mar_a)[:2])} vs "
+                           f"{'/'.join(sorted(_mar_b)[:2])}), puede ser otra cosa en cada una")
     # Solo cuando las dos son ESPECÍFICAS: tres modelos o menos de cada lado. Una lista larga
     # —«SENSOR DE DETONACION FIAT 500 BRAVO IDEA PUNTO...» contra «Fiat BRAVA DOBLO»— es de
     # una pieza que va en muchos autos, y cada proveedor anota los que quiere: que no se pisen
@@ -2906,6 +2931,9 @@ _MOTIVOS_QUE_CONTRADICEN = ("posiciones distintas", "siglas distintas", "autos d
                             "distinta cantidad de cilindros", "motores de distintas válvulas",
                             "años distintos", "motores distintos",
                             "sobremedida distinta")
+# Los que no alcanzan para decir que son piezas distintas pero sí para desconfiar: no vetan
+# (el par va a revisión, no a rojo) y se muestran como el porqué. Ver evidencia_cruzada().
+_MOTIVOS_QUE_AVISAN = ("un nombre de modelo de marcas distintas",)
 # Los que hablan del AUTO. Esos no cuentan cuando el par está unido por un código: ver
 # _unidos_por_codigo().
 _MOTIVOS_DEL_AUTO = ("autos distintos", "marcas distintas", "modelos distintos",
@@ -3110,6 +3138,7 @@ def evidencia_cruzada(id_a, id_b, cuenta_palabras=None, total_descripciones=None
     _cuenta, _total = cuenta_palabras, total_descripciones
     ok_desc, motivo_desc = firmas_compatibles(fa, fb, cuenta_palabras=_cuenta,
                                               total_descripciones=_total)
+    aviso_desc = ""
     # Antes del rubro: ¿uno viene adentro del otro? Es cierto que los rubros no coinciden —una
     # bujía no es un juego de cables— y aun así «rubros distintos» no describe lo que pasa. Ver
     # _uno_trae_al_otro(): sobre los 208 vínculos con rubros distintos que hay cargados, 126
@@ -3136,6 +3165,8 @@ def evidencia_cruzada(id_a, id_b, cuenta_palabras=None, total_descripciones=None
         elif (motivo_desc.startswith(_MOTIVOS_QUE_CONTRADICEN)
               and not (motivo_desc.startswith(_MOTIVOS_DEL_AUTO) and _unidos_por_codigo(pa, pb))):
             vetos.append(f"🔤 {motivo_desc}")
+        elif motivo_desc.startswith(_MOTIVOS_QUE_AVISAN):
+            aviso_desc = motivo_desc
 
     # 3. El catálogo del fabricante: ¿los da para el mismo auto?
     _con_fabrica = _recordado(("codigos_con_aplicaciones_de_fabrica",),
@@ -3224,7 +3255,9 @@ def evidencia_cruzada(id_a, id_b, cuenta_palabras=None, total_descripciones=None
     elif len(a_favor) == 1:
         veredicto = "🟠 un solo método, conviene mirarla"
     else:
-        veredicto = "⚪ sin evidencia a favor"
+        # Con el porqué, si las descripciones dicen algo para desconfiar: la revisión lo muestra
+        # en vez de «nada dice que sean la misma pieza» (ver _MOTIVOS_QUE_AVISAN).
+        veredicto = "⚪ sin evidencia a favor" + (f" · {aviso_desc}" if aviso_desc else "")
     return a_favor, vetos, veredicto
 
 

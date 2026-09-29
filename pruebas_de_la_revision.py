@@ -32,6 +32,8 @@ import tempfile
 NECESITA_EL_CATALOGO = "necesita el catálogo"
 
 # (descripción A, descripción B, lo que tiene que dar, de dónde salió[, NECESITA_EL_CATALOGO])
+# «misma»: concuerdan. «distinta»: un motivo que contradice (rojo). «dudosa»: no concuerdan,
+# pero sin un motivo que contradiga: van a revisión.
 PARES_DE_MUESTRA = [
     # --- la misma pieza escrita distinto: tienen que concordar ---
     ("Jta.Tapa Cilindros Renault Master - Trafic - motor G9U 2463cc.",
@@ -87,6 +89,19 @@ PARES_DE_MUESTRA = [
     ("Jta.Tapa Cil.Superm. FIAT 1100",
      "Junta Tapa de Cilindros FIAT 1100/103 - 1,1 - 4 CIL. (4015455)", "distinta",
      "TARANTO 250006 es supermedida; la de ILLINOIS, estándar"),
+    ("Junta Tapa de valvulas superior Mercedes Benz OM352",
+     "Junta Tapa de Válvulas Lateral M. BENZ1215 1620 - 5,7/6,0 - OM352 OM366 (3520150160)",
+     "distinta", "TARANTO 350332 / ILLINOIS JVL-163-43: tapa superior contra lateral"),
+
+    # --- dudosas: no se descartan de una, pero tampoco pasan sin mirarlas ---
+    ("Junta Tapa Valvulas MWM SPRINT 4.07",
+     "Junta Tapa de Válvulas CHEVROLET SPRINT SWIFT CULTUS VAN TURBO 1984/… - 1,0 - 61 G10 G10T "
+     "50 HP", "dudosa", "TARANTO 330510/1 / ILLINOIS JVS-324-30: SPRINT es un motor MWM y un "
+     "Chevrolet", NECESITA_EL_CATALOGO),
+    ("Junta Tapa Valvulas MWM SPRINT 4.07",
+     "Junta Tapa de Válvulas FORD FALCON PICK UP - 2,8/3,1/3,6 - 170 187 188 MAX ECONO 221 221 "
+     "SPRINT 4/7B (CODE6584B)", "dudosa", "TARANTO 330510/1 / ILLINOIS JVS-142-30: el Falcon "
+     "Sprint", NECESITA_EL_CATALOGO),
 ]
 
 
@@ -115,6 +130,9 @@ def probar_pares_de_muestra(logica, con_catalogo):
                 logica._MOTIVOS_QUE_CONTRADICEN)):
             fallas.append(f"«{desc_a[:40]}» / «{desc_b[:40]}» ({origen}): tenían que ser piezas "
                           f"distintas y dio {'que concuerdan' if ok else f'«{motivo}»'}")
+        if esperado == "dudosa" and (ok or motivo.startswith(logica._MOTIVOS_QUE_CONTRADICEN)):
+            fallas.append(f"«{desc_a[:40]}» / «{desc_b[:40]}» ({origen}): tenían que quedar para "
+                          f"revisar y dio {'que concuerdan' if ok else f'«{motivo}» (rojo)'}")
     return fallas, probados
 
 

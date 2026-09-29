@@ -5652,6 +5652,28 @@ una línea entera y no cuenta.
   las que no coinciden con el producto.
 - `pruebas_de_la_revision.py` suma el par: la 250005 con la TC-206-15 es la misma; la 250006, no.
 
+### SPRINT no es lo mismo en cada marca, y la tapa superior no es la lateral
+
+Dos pares que salían sin alarmas en la revisión de TARANTO contra ILLINOIS:
+
+- **«Junta Tapa Valvulas MWM SPRINT 4.07»** (el motor MWM Sprint) contra la tapa de válvulas del
+  «FORD FALCON … 221 SPRINT» y la del «CHEVROLET SPRINT SWIFT». La regla de «marcas distintas»
+  no corta cuando una es marca de motores (una junta de MWM va en una S10 o en una Ranger: ver
+  `_MARCAS_DE_MOTORES`), y lo único en común era SPRINT. Ahora, si las marcas no se cruzan y lo
+  único que comparten es un nombre de modelo, no concuerdan: «un nombre de modelo de marcas
+  distintas». Va a **revisión y no a rojo** (`_MOTIVOS_QUE_AVISAN`): sobre la cola, lo demás que
+  agarra es «FORD F100» contra «PERKINS F100», la misma camioneta, que puede tener el mismo motor
+  o no. En la cola de prueba cambian 7 pares, los 7 de esos. Con un motor o un número en común no
+  se corta, y como es un motivo «del auto», tampoco si los une un código.
+- En revisión, esos pares muestran el motivo en vez de «🤷 Nada dice que sean la misma pieza»:
+  `evidencia_cruzada()` lo pasa en el veredicto cuando no hay nada a favor.
+- **«Junta Tapa de valvulas superior Mercedes Benz OM352»** contra la «Tapa de Válvulas Lateral»
+  del mismo OM352: son dos tapas distintas. SUPERIOR contra LATERAL es ahora «posiciones
+  distintas». LATERAL no pasó a ser una posición más, a propósito: «soporte motor lateral
+  izquierdo» y «soporte motor izquierdo» son el mismo soporte.
+- `pruebas_de_la_revision.py` tiene una tercera respuesta posible, «dudosa» (no concuerdan pero
+  sin un motivo que contradiga), y suma los tres pares.
+
 ## 🔗 Revisar sugeridas: primero lo que hay que hacer
 
 Mirado con capturas sobre la base real (15.308 pendientes en 8 listas):
