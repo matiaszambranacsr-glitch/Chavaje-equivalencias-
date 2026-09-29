@@ -2135,6 +2135,14 @@ def _firma_del_texto(descripcion):
 # escriben y que distingue dos piezas que el resto del texto hacía parecer la misma.
 _RE_CARBURADOR_CARTER = re.compile(r"\bCARTER\s+(YF|YH|RBS|WCD|BBD|AFB|WGD|WO|WA1)\b")
 _MODELOS_DE_SOLEX = {"TEIE", "PAIA", "EISA", "PIBT", "PICT"}
+# La bobina con el módulo de encendido incorporado no es la de sin módulo: «BOBINA IGNICION, VW
+# POLO/ GOLF / PASSAT CON MODULO» (TARANTO) contra «BOBINA … VW POLO-GOLF-PASSAT Sin Modulo».
+_RE_CON_MODULO = re.compile(r"\b(?:CON|C/)\s*MODULO\b")
+_RE_SIN_MODULO = re.compile(r"\b(?:SIN|S/)\s*MODULO\b")
+# El sensor de la temperatura del aire de afuera (el del tablero) no es el del agua del motor:
+# «SENSOR TEMP EXTERIOR VW BORA/GOLF… Masser» (JL) concordaba con «Sensor de temperatura
+# Volkswagen Fox Suran … 2 salidas» (CRI-FA).
+_RE_AIRE_EXTERIOR = re.compile(r"\b(?:TEMP\w*\s+(?:DE\s+)?(?:AIRE\s+)?EXTERIOR|AMBIENTE)\b")
 # El aro de color de los inyectores y de los sensores de temperatura: «Inyector … Magneti
 # Marelli aro gris» (CRI-FA) contra «INYECTOR LEICJ051 … ARO VERDE … IWP 042» (FISPA), «Sensor
 # temperatura inyección VW Gol … Aro rojo» contra «… aro amarillo Masser» (JL). El color es
@@ -2163,6 +2171,19 @@ def _es_juego_de_carburador(firma):
     """El juego de juntas del carburador: «Juego de juntas para Carburador …» (ILLINOIS),
     «Jgo.Jtas.Carburador» (TARANTO), «JUNTAS SIERRA 1.6 WEBER» (JL, en plural y sin decir juego)."""
     return bool(firma.get("kit") or re.match(r"(?:JUNTAS|JUEGO|JGO)\b", firma.get("texto") or ""))
+
+
+# Los Cummins se nombran por la cilindrada y cada una es de una cantidad de cilindros: la serie
+# B de 3.9 y el QSB 4.5 son de 4, la de 5.9, el ISB 6.7 y la serie C de 8.3 son de 6. «Junta
+# para Cárter CUMMINS ELECTRÓNICO - 3,9 - ISBE» concordaba en verde con «JTA CARTER CUMMINS 6
+# CIL ISBe» porque ninguna de las dos decía los cilindros de la misma forma.
+_CILINDROS_DE_CUMMINS = {"3.9": "4", "4.5": "4", "5.9": "6", "6.7": "6", "8.3": "6"}
+
+
+def _cilindros_de_cummins(texto, cilindradas):
+    if "CUMMINS" not in texto:
+        return []
+    return [_CILINDROS_DE_CUMMINS[c] for c in cilindradas if c in _CILINDROS_DE_CUMMINS]
 
 
 def _familia_de_motor_ford(texto):
@@ -2510,9 +2531,13 @@ def _firma_armada(descripcion, producto_id=None, codigo_clean=None):
                           + (_RE_CILINDROS_DEUTZ.findall(limpio) if "DEUTZ" in limpio else [])
                           + _RE_CILINDROS_EN_V.findall(limpio)
                           + _RE_CILINDROS_MWM.findall(limpio)
+                          + _cilindros_de_cummins(limpio, cilindradas)
                           if 1 <= int(n) <= 16},
             "bujia": tipo_de_bujia(texto),
             "aro": frozenset(_RE_ARO_DE_COLOR.findall(limpio)),
+            "modulo": (True if _RE_CON_MODULO.search(limpio)
+                       else False if _RE_SIN_MODULO.search(limpio) else None),
+            "aire_exterior": bool(_RE_AIRE_EXTERIOR.search(limpio)),
             "motor_ford": _familia_de_motor_ford(limpio),
             "termostato_con_carcasa": _termostato_con_carcasa(limpio),
             "kit": bool(es_un_kit(texto)),
@@ -2785,6 +2810,13 @@ def firmas_compatibles(a, b, minimo_nucleo=2, cuenta_palabras=None, total_descri
     if len(_uso_a) == 1 and len(_uso_b) == 1 and _uso_a != _uso_b:
         return False, (f"sensores de tipos distintos: el del {'reloj' if 'RELOJ' in _uso_a else 'testigo'}"
                        f" vs el del {'reloj' if 'RELOJ' in _uso_b else 'testigo'}")
+    if (a.get("modulo") is not None and b.get("modulo") is not None
+            and a["modulo"] != b["modulo"]):
+        return False, "versiones distintas: con módulo de encendido vs sin módulo"
+    if ((a.get("sensor") or b.get("sensor")) and a.get("aire_exterior") != b.get("aire_exterior")
+            and "TEMPERATURA" in ((a.get("sensor") or frozenset()) & (b.get("sensor") or frozenset()))):
+        return False, ("sensores de tipos distintos: el de la temperatura del aire exterior vs el "
+                       "del motor")
     if a.get("aro") and b.get("aro") and not (a["aro"] & b["aro"]):
         return False, (f"aros de distinto color: {'/'.join(sorted(a['aro']))} vs "
                        f"{'/'.join(sorted(b['aro']))}")
@@ -3364,6 +3396,7 @@ _MOTIVOS_QUE_CONTRADICEN = ("posiciones distintas", "siglas distintas", "autos d
                             "años distintos", "motores distintos",
                             "sobremedida distinta", "presiones distintas",
                             "aros de distinto color", "medidas distintas",
+                            "versiones distintas",
                             "combustibles distintos")
 # Los que no alcanzan para decir que son piezas distintas pero sí para desconfiar: no vetan
 # (el par va a revisión, no a rojo) y se muestran como el porqué. Ver evidencia_cruzada().
@@ -4023,7 +4056,7 @@ ABREVIATURAS_DE_PIEZA = {
     "JTA": "JUNTA", "JTAS": "JUNTA", "JUNTAS": "JUNTA", "JGO": "JUEGO", "JGOS": "JUEGO",
     "CIL": "CILINDRO", "CILS": "CILINDRO", "CILINDROS": "CILINDRO",
     "CAB": "CABLE", "CABLES": "CABLE", "BUJ": "BUJIA", "BUJIAS": "BUJIA",
-    "CPO": "CUERPO", "INY": "INYECCION", "INYEC": "INYECCION",
+    "CPO": "CUERPO", "INY": "INYECCION", "INYEC": "INYECCION", "INYECTO": "INYECCION",
     "BBA": "BOMBA", "BOMBAS": "BOMBA", "TEMP": "TEMPERATURA", "MULT": "MULTIPLE",
     "ELECTROV": "ELECTROVENTILADOR", "ELECTROVENT": "ELECTROVENTILADOR",
     "ACEL": "ACELERADOR", "DISTRIB": "DISTRIBUCION", "REFRIG": "REFRIGERACION",

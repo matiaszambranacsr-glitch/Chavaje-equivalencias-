@@ -518,6 +518,10 @@ FORMAS_DE_DESIGNACION_DE_MOTOR = (
     # reparación y una tapa de cilindros — todo lo que menciona ese motor. Va acá porque
     # comparte el problema de arriba: la misma forma la tiene un código real.
     re.compile(r'^[A-Z]{2}\d{1,2}[A-Z]{1,4}\d{0,2}[A-Z]?$'),
+    # Los de Honda: letra, cilindrada, serie y versión. D15Z6, D16Y8, B16A1, B18C5. «Jta.Tapa
+    # Cil. HONDA CIVIC CRX VTEC D15Z6/Z7» concordaba en verde con la del B16A1: sin esta forma
+    # ninguna de las dos nombraba un motor.
+    re.compile(r'^[A-Z]\d{2}[A-Z]\d{1,2}$'),
 )
 
 

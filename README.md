@@ -5799,6 +5799,37 @@ pueden decidir con lo que dicen las listas son de dos clases —un genérico de 
 pieza específica («JTA.TAPA VALVULAS MITSUBISHI CANTER», varios motores posibles) y espesores o
 series que una lista no dice—. `pruebas_de_la_revision.py` suma 14 pares.
 
+### Muestras de los verdes: lo que se aprobaría sin mirar
+
+Los verdes se aprueban en bloque, así que ahí un error cuesta más. Se leyeron dos muestras al
+azar de 70 (una de todos los verdes entre listas, otra de los de 75, los más flojos): la primera
+tenía 6 mal y la segunda 3. De ahí:
+
+- **El espesor sin la unidad**: «JUNTA CABALLETE TAPA DE VAL. FIAT (esp. 0.40)» (TARANTO)
+  concordaba con las de 0,20 / 0,30 / 0,50 y 0,80 mm de ILLINOIS. `medidas_desde_descripcion()`
+  pedía «MM»; ahora también toma «ESP. 0.40» cerrando el paréntesis. Sube `VERSION_MEDIDAS`, así
+  que la app relee las descripciones sola al arrancar.
+- **El sensor del aire de afuera** («SENSOR TEMP EXTERIOR», el del tablero) no es el de
+  temperatura del motor.
+- **«BBA INYECTO»** es la bomba inyectora: no la bomba hidráulica del mismo Iveco.
+- **La bobina con módulo** de encendido no es la «Sin Modulo».
+- **Los motores de Honda** (D15Z6, B16A1, D16W4, B20A3: letra, cilindrada, serie y versión) no
+  se reconocían como motores, así que las juntas de tapa del Civic D15 concordaban con las del
+  B16.
+- **Los cilindros de Cummins** salen de la cilindrada: la serie B 3.9 y el QSB 4.5 son de 4, el
+  5.9, el 6.7 y el 8.3 de 6. «CUMMINS … 3,9 - ISBE» concordaba con «CUMMINS 6 CIL ISBe».
+
+Sube también `VERSION_CONFIANZA`: con todas las reglas nuevas, el puntaje guardado de lo ya
+aprobado se recalcula solo en la tarea de fondo.
+
+Lo que se probó y NO se dejó: bajar también los verdes del «abanico de dos» cuando hay un
+candidato que coincide mejor. Arreglaba la junta del Peugeot 208 EB2 (que queda con la del 208
+que no dice motor), pero de 100 verdes que bajaban muchos eran el bueno perdiendo contra otro
+por cómo está escrito, como el inyector CRI-FA 02-405 con el LEICJ014 de FISPA.
+
+Sobre la cola de prueba: 24 pares más a rojo, todos confirmados a mano. Las 13.021 aprobaciones
+siguen en 82 en rojo. `pruebas_de_la_revision.py` suma 5 pares.
+
 ## 🔗 Revisar sugeridas: primero lo que hay que hacer
 
 Mirado con capturas sobre la base real (15.308 pendientes en 8 listas):

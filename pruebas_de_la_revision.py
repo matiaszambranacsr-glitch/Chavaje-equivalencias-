@@ -171,6 +171,20 @@ PARES_DE_MUESTRA = [
      "distinta", "TARANTO / JL: TEIE es un Solex"),
     ("JUNTA BOMBA DE AGUA - TORINO", "JTA CODO AGUA TORINO 4/7 B.", "distinta",
      "TARANTO / IMPERIAL: el codo no es la bomba"),
+    # Revisando muestras de los verdes.
+    ("Sensor de temperatura Volkswagen Fox Suran Gol Trend Voyage 2 salidas color gris .",
+     "SENSOR TEMP EXTERIOR VW BORA/GOLF 1.6/1.8T/1.9TD-POLO 1.9TD-SURAN- AUDI Masser", "distinta",
+     "CRI-FA / JL: el sensor del aire de afuera"),
+    ("Jta.Bomba Hidraulica IVECO 150", "JTA BBA INYECTO FIAT 150- IVECO", "distinta",
+     "TARANTO / IMPERIAL: la bomba hidráulica no es la inyectora"),
+    ("BOBINA IGNICION,VW POLO/ GOLF / PASSAT CON MODULO",
+     "BOBINA DE IGNICION 70125 VW POLO-GOLF-PASSAT Sin Modulo REF ORIG 6NO 905 104", "distinta",
+     "TARANTO / FISPA: con y sin módulo"),
+    ("Jta.Tapa Cil. HONDA CIVIC CRX VTEC D15Z6/Z7 16V 1590CC 1992/1995",
+     "Junta Tapa de Cilindros HONDA CIVIC CRX - 1.6 - B16A1/2/3 16V VTEC VT (12251P30004/014)",
+     "distinta", "TARANTO / ILLINOIS: motores Honda de otra serie"),
+    ("Junta para Cárter CUMMINS ELECTRÓNICO - 3,9 - ISBE (4897877/4939246)",
+     "JTA CARTER CUMMINS 6 CIL ISBe", "distinta", "ILLINOIS / IMPERIAL: el Cummins 3.9 es de 4"),
 ]
 
 

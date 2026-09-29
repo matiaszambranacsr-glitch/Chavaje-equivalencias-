@@ -613,7 +613,7 @@ ABREVIATURAS_DE_PIEZA = {
     "JTA": "JUNTA", "JTAS": "JUNTA", "JUNTAS": "JUNTA", "JGO": "JUEGO", "JGOS": "JUEGO",
     "CIL": "CILINDRO", "CILS": "CILINDRO", "CILINDROS": "CILINDRO",
     "CAB": "CABLE", "CABLES": "CABLE", "BUJ": "BUJIA", "BUJIAS": "BUJIA",
-    "CPO": "CUERPO", "INY": "INYECCION", "INYEC": "INYECCION",
+    "CPO": "CUERPO", "INY": "INYECCION", "INYEC": "INYECCION", "INYECTO": "INYECCION",
     "BBA": "BOMBA", "BOMBAS": "BOMBA", "TEMP": "TEMPERATURA", "MULT": "MULTIPLE",
     "ELECTROV": "ELECTROVENTILADOR", "ELECTROVENT": "ELECTROVENTILADOR",
     "ACEL": "ACELERADOR", "DISTRIB": "DISTRIBUCION", "REFRIG": "REFRIGERACION",
@@ -892,7 +892,11 @@ def medidas_desde_descripcion(descripcion):
     # fábrica para 0,2 / 0,3 / 0,5 y 0,8 mm a la vez.
     # Se pide la palabra ESP y la unidad MM pegadas al número: así no se confunde con la
     # abreviatura «Esp.» de «especial», que aparece suelta y sin número.
-    espesor = re.search(r"\bESP\.?\s*:?\s*(\d{1,2}(?:\.\d{1,2})?)\s*MM\b", texto)
+    # Y sin la unidad, como escribe TARANTO: «JUNTA CABALLETE TAPA DE VAL. FIAT (esp. 0.40)».
+    # Solo con decimal y cerrando el paréntesis o la descripción, que es donde lo pone: esa junta
+    # concordaba en verde con las de 0,50 y 0,80 mm de ILLINOIS.
+    espesor = (re.search(r"\bESP\.?\s*:?\s*(\d{1,2}(?:\.\d{1,2})?)\s*MM\b", texto)
+               or re.search(r"\bESP\.?\s*:?\s*(\d\.\d{1,2})\s*(?=\)|$)", texto))
     if espesor:
         valor = float(espesor.group(1))
         # Los 630 de la base van de 0,2 a 3 mm. El tope deja lugar de sobra sin dejar entrar

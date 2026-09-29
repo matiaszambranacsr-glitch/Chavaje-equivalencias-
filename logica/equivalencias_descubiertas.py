@@ -722,7 +722,8 @@ _MOTIVOS_DE_OTRA_PIEZA = ("rubros distintos", "posiciones distintas", "siglas di
                           "distinta cantidad de cilindros", "motores de distintas válvulas",
                           "años distintos", "motores distintos",
                           "sobremedida distinta", "presiones distintas",
-                          "combustibles distintos", "aros de distinto color", "medidas distintas")
+                          "combustibles distintos", "aros de distinto color", "medidas distintas",
+                          "versiones distintas")
 
 
 def _por_que_chocan(productos):
@@ -2038,7 +2039,8 @@ _MOTIVO_DE_RECHAZO_DEL_GRUPO = (
       "🔤 cilindradas distintas", "🔤 distinta cantidad de cilindros",
       "🔤 motores de distintas válvulas"), "otro_auto"),
     (("📐 NO coinciden", "🔤 distinta cantidad de vías", "🔤 largo de cable distinto",
-      "🔤 temperaturas distintas", "🔤 medidas distintas"), "variante"),
+      "🔤 temperaturas distintas", "🔤 medidas distintas", "🔤 versiones distintas"),
+     "variante"),
     (("🔤 juegos distintos",), "juego"),
     (("🔤 piezas de lugares distintos", "🔤 sensores de tipos distintos",
       "🔤 bujías de tipos distintos", "🔤 posiciones distintas", "🔤 siglas distintas",
