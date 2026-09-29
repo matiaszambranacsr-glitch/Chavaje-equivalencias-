@@ -5701,6 +5701,38 @@ con 75 contra el 358FISPA (Escort, Gol, Polo: 0,5 bar). Tres agujeros:
   23183 de 3 bar.
 - `pruebas_de_la_revision.py` suma los dos pares del bulbo.
 
+### Revisando a mano los «sin alarmas» del barrido
+
+En vez de esperar la próxima captura, se leyeron a mano 80 pares al azar de los 2.446 que el
+barrido dejaba limpios. Unos 10 estaban mal. Una segunda muestra de otros 60, con los arreglos ya
+hechos, dio 4, y de esos salieron las últimas reglas:
+
+- **Deutz dice los cilindros en el nombre**: F3L, F4L, BF6L, BF4M (`_RE_CILINDROS_DEUTZ`). «Jta.
+  Carter DEUTZ F4L 913» concordaba con los cárteres del 913 de 5 y de 6 cilindros.
+- **«Wb» es Weber** en JL: «JUNTAS FORD ESCORT/ CHEV ETTE 1.6 Wb» es de carburador y concordaba
+  con la junta de cárter del Chevette. Contra «WEBER» no choca: se normaliza.
+- **«JUNTA MPI»** (JL) es la de la inyección, y concordaba con la de tapa de cilindros del mismo
+  Tempra. Una junta que dice MPI, SPI o TBI y ningún otro lugar pasa a ser de INYECCION.
+- **La cilindrada en litros** («CHEROKEE 4 l», «2,5 L», «2.0 lts») y **con el combustible atrás**
+  («HILUX 2200 D», «GACEL 1600 DIESEL», hasta 3900: «FORD TRACTOR 6600» es un modelo). No toma
+  «HILUX 2L» (el motor 2L de Toyota) ni «F4L». De paso, el formato de FISPA con la L pegada
+  —«ASTRA 1 8L 2 0»— ya no pierde el 1,8.
+- **Los años de FISPA con dos cifras**: «FOCUS 2 0L MFI 05 -11» es 2005-2011. Con espacio antes
+  del guion es siempre un rango; «03-97» sin espacio es mes y año y no entra.
+- **Nafta contra diésel** (`combustible_desde_descripcion()`, que ya existía y el análisis no
+  usaba; suma DURAMAX): «Termostato … S10 2.2 … Naftero» concordaba con el de la S10 Duramax.
+  Solo en los rubros del motor (`_RUBROS_QUE_DEPENDEN_DEL_COMBUSTIBLE`): un sensor de velocidad
+  suele ser el mismo en las dos versiones. Es motivo «del auto»: si los une un código, no corta.
+- **El bulbo del reloj contra el de la luz**: «Bulbo de temperatura crítica» (el testigo) contra
+  «BULBO DE TEMPERATURA RELOJ» (el indicador). Son dos piezas aunque los dos sean de temperatura.
+- **Los puentes Dana**: «DANA 70» no es el «DANA 44».
+
+Sobre la cola de prueba: 66 pares pasan a rojo (23 desde verde) y 9 pasan a verde, que el
+abanico o una cilindrada mal leída frenaban y están bien. Queda uno conocido: el termostato de
+«Transit 2023» contra el del Focus 05-11, porque un año suelto no se toma como rango (a
+propósito: «J.DEERE 2030» es un tractor). Las 13.021 aprobaciones no cambian.
+`pruebas_de_la_revision.py` suma los 9 pares.
+
 ## 🔗 Revisar sugeridas: primero lo que hay que hacer
 
 Mirado con capturas sobre la base real (15.308 pendientes en 8 listas):

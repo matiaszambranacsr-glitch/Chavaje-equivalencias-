@@ -431,7 +431,7 @@ EJES_DE_POSICION = [("DELANTERA", "TRASERA"), ("IZQUIERDA", "DERECHA"),
 # CON QUÉ ANDA EL AUTO. Las siglas valen tanto como la palabra: nadie escribe «diesel» al lado
 # de «HDI», y «MPI» quiere decir nafta sin decirlo.
 FORMAS_DE_DIESEL = (r"DIESEL|D[IÍ]ESEL|TURBODIESEL|TDI|HDI|CRDI|JTD|DCI|TDCI|CDI|MULTIJET|"
-                    r"D4D|CTDI")
+                    r"D4D|CTDI|DURAMAX")
 FORMAS_DE_NAFTA = r"NAFTA|NAFTERO|NAFTEROS|GASOLINA|MPFI|MPI|TFSI|TSI|GDI|FLEX"
 _RE_DIESEL = re.compile(r"(?<![A-Z])(" + FORMAS_DE_DIESEL + r")(?![A-Z])", re.IGNORECASE)
 _RE_NAFTA = re.compile(r"(?<![A-Z])(" + FORMAS_DE_NAFTA + r")(?![A-Z])", re.IGNORECASE)

@@ -64,7 +64,19 @@ def rangos_de_anios(descripcion):
         else:
             hasta = 2100
         salida.append((desde, hasta))
+    # Y como los escribe FISPA, con dos cifras y un espacio antes del guion: «FOCUS 2 0L MFI
+    # 05 -11 RANGER 2 3L MFI 01 -06», «XSARA 1 4 1 6 96 -06». Medido sobre el catálogo real, esa
+    # forma es siempre un rango de años. Sin ella, un termostato de Transit 2016/2022 concordaba
+    # con el de Focus 2005-2011. «03-97» sin el espacio no entra: es mes y año.
+    for _d, _h in _RE_ANIOS_DE_DOS_CIFRAS.findall(str(descripcion or "")):
+        desde = int(_d) + (1900 if int(_d) >= 50 else 2000)
+        hasta = int(_h) + (1900 if int(_h) >= 50 else 2000)
+        if desde <= hasta <= desde + 40:
+            salida.append((desde, hasta))
     return tuple(salida)
+
+
+_RE_ANIOS_DE_DOS_CIFRAS = re.compile(r"(?<![\d.,])(\d{2}) -(\d{2})(?![\d.,])")
 
 
 # Donde termina la parte que habla del auto. Después vienen los números de referencia —«//
@@ -789,6 +801,12 @@ _TIPOS_DE_SENSOR = [
     ("RETROMARCHA", r'RETROMARCHA|MARCHA ATRAS|REVERSA'),
     ("ELECTROVENTILADOR", r'ELECTROVENT|ELECTRO VENT'),
     ("PRESION DE ACEITE", r'PRESION (?:DE )?ACEITE|ACEITE'),
+    # Para qué es el bulbo: el del RELOJ (el indicador del tablero, que varía la resistencia) o
+    # el de la LUZ (el testigo, que prende y apaga). «Bulbo de temperatura crítica … Tapón
+    # azul» (CRI-FA) concordaba con «BULBO DE TEMPERATURA RELOJ» (FISPA). Ver
+    # firmas_compatibles(): chocan entre ellos aunque los dos sean de temperatura.
+    ("RELOJ", r'\bRELOJ\b|INDICADOR|MANOMETRO'),
+    ("TESTIGO", r'CRITICA|TESTIGO|\bLUZ\b|ALARMA'),
 ]
 _RE_TIPOS_DE_SENSOR = [(t, re.compile(p)) for t, p in _TIPOS_DE_SENSOR]
 
@@ -814,13 +832,28 @@ _RE_CILINDROS_CON_C = re.compile(r'(?<![\d.,/X])((?:\d/)*\d)\s*C\.(?!\w)')
 # cilindrada.
 _RE_MOTOR_QUE_DICE_SUS_CILINDROS = re.compile(r'\bPERKINS\b|\bM\W?W\W?M\b')
 _RE_CILINDROS_EN_EL_MOTOR = re.compile(r'(?<![\d.,])([2-8])[.\-]\d{2,3}T?(?![\d.,])')
+# En DEUTZ también, con otra forma: F3L, F4L, BF6L, BF4M. El número es la cantidad de cilindros.
+# «Jta.Carter DEUTZ F4L 913» concordaba con «JTA CARTER DEUTZ 913 6 CIL.»: el mismo 913 con otra
+# cantidad de cilindros tiene otro cárter.
+_RE_CILINDROS_DEUTZ = re.compile(r'\bB?F([1-8])[LM]\b')
+# El puente del diferencial: «DANA 70 - F250/F350» no es el «DANA 44 FORD».
+_RE_PUENTE_DANA = re.compile(r'\bDANA\s?(\d{2})\b')
+
+# Los rubros donde nafta contra diésel dice que son piezas distintas: las del motor. Un sensor de
+# velocidad o un interruptor de stop suelen ser los mismos en las dos versiones del auto.
+_RUBROS_QUE_DEPENDEN_DEL_COMBUSTIBLE = {"Juntas y retenes", "Motor - interno", "Refrigeración",
+                                        "Combustible", "Distribución"}
 
 _MARCAS_DE_CARBURADOR = {"WEBER", "SOLEX", "HOLLEY", "STROMBERG", "ZENITH", "CARESA", "BROSOL",
                          "GALILEO", "IAVA", "EIES", "CARTER", "MOTORCRAFT", "ROCHESTER",
                          "AUTOLITE", "DELLORTO",
                          # DFV es la brasileña: «JUNTAS CHEV ETTE 1400 DFV Brasil» de JL es de
                          # carburador, no el cárter del Chevette. MIKUNI y KEIHIN, las japonesas.
-                         "DFV", "MIKUNI", "KEIHIN"}
+                         "DFV", "MIKUNI", "KEIHIN",
+                         # Y WB, como abrevia JL a Weber: «JUNTAS FORD ESCORT/ CHEV ETTE 1.6 Wb»
+                         # concordaba con la junta de cárter del Chevette. En el catálogo real
+                         # aparece solo en JL, y siempre en piezas de carburador.
+                         "WB"}
 
 # BUJÍA DE ENCENDIDO Y BUJÍA DE PRECALENTAMIENTO se llaman igual y no tienen nada que ver: una
 # va en un motor naftero y la otra en un diésel. FISPA vende las de precalentamiento como
@@ -2107,14 +2140,26 @@ def _firma_armada(descripcion, producto_id=None, codigo_clean=None):
     for _cc in re.findall(r'\b(\d{3,4})\s*CC\b', limpio):
         if 600 <= int(_cc) <= 9999:
             cilindradas.add(f"{int(_cc) / 1000:.1f}")
+    # Y sin CC pero con el combustible atrás, como escribe IMPERIAL: «HILUX 2200 D.», «GACEL 1600
+    # DIESEL», «FIAT 1300 D». Hasta 3900: «FORD TRACTOR 4600/6600 DIESEL» son modelos.
+    for _cc in re.findall(r'\b([1-3]\d00)\s?(?:D|TD|TDI|DIESEL)\b', limpio):
+        cilindradas.add(f"{int(_cc) / 1000:.1f}")
+    # Y en litros: «JEEP CHEROKEE 4 l», «2.0 lts», «2,5 L». «Jta.Tapa Cil. JEEP CHEROKEE 4 l» —el
+    # seis en línea de 4 litros— concordaba con la del Cherokee 2013 de 2,4. No pegado a una
+    # letra (F4L es un Deutz de 4 cilindros) ni a otro número («120L H» son litros por hora), ni
+    # detrás de otro número con espacio: «1 6L» es el 1,6 de FISPA. Y sin decimal, solo
+    # separado: «HILUX 2L» es el motor 2L de Toyota, no dos litros.
+    for _ent, _dec in re.findall(r'(?<![\w.,])(?<!\d\s)(\d)(?:[.,](\d)\s?L|\s(?:L|LTS?|LITROS?)'
+                                 r'|(?:LTS?|LITROS?))\b', limpio):
+        cilindradas.add(f"{_ent}.{_dec or 0}")
     # Y sin punto, como escribe FISPA: su lista llega sin ningún signo, y «FOCUS 2 0 DURATEC»
     # o «ASTRA 1 8 - CELTA 1 4» son el 2.0, el 1.8 y el 1.4. Sin leerlas, «Sensor MAP Ford
     # Focus 1.8» no se podía separar del sensor del Focus 2.0 y quedaban empatados. Solo en las
     # descripciones que no traen NINGÚN número con punto o coma —las de esa lista—, y no
-    # después de una «X»: «M 12 x 1 5» es una rosca.
+    # después de una «X»: «M 12 x 1 5» es una rosca. Con la L pegada también: «ASTRA 1 8L».
     if not cilindradas and not re.search(r'\d[.,]\d', limpio):
         cilindradas.update(f"{a}.{b}" for a, b in
-                           re.findall(r'(?<!X )(?<!X)\b([0-6]) (\d)\b(?! ?(?:MM|X)\b)', limpio))
+                           re.findall(r'(?<!X )(?<!X)\b([0-6]) (\d)L?\b(?! ?(?:MM|X)\b)', limpio))
 
     # Los modelos: palabras que quedan después de sacar la marca del auto, el ruido y los
     # números sueltos. Se buscan contra el catálogo propio para no inventar modelos.
@@ -2289,8 +2334,17 @@ def _firma_armada(descripcion, producto_id=None, codigo_clean=None):
     # 1b» quedaba como «JUNTA 128» a secas y concordaba con la junta de tapa de cilindros del
     # 128. Solo en las juntas: un «SENSOR TPS WEBER» es de inyección, no del carburador.
     _marcas_carb = (pieza | set(palabras)) & (_MARCAS_DE_CARBURADOR - {"CARTER"})
+    if "WB" in _marcas_carb:      # la abreviatura de JL: que no salga «carburadores distintos»
+        _marcas_carb = (_marcas_carb - {"WB"}) | {"WEBER"}
     if _marcas_carb and (pieza & {"JUNTA", "JUNTAS"} or "JUNTA" in (cabeza or "")):
         pieza.add("CARBURADOR")
+    # «JUNTA MPI FIAT TEMPRA 2.0 16V» (JL) es la de la inyección, y concordaba con «JTA T.C.
+    # FIAT TEMPRA 2.0»: sin ningún lugar, la tapa de cilindros no tenía con qué chocar. Solo si
+    # no nombra otro lugar: TARANTO escribe «Jta.Tapa Cil. … 1.6 MPI», y ahí MPI es el motor.
+    if ((pieza & {"JUNTA", "JUNTAS"} or "JUNTA" in (cabeza or ""))
+            and set(palabras) & {"MPI", "SPI", "TBI", "MPFI"}
+            and not pieza & _LUGARES_DE_LA_PIEZA):
+        pieza.add("INYECCION")
     aplicacion = [w for w in nucleo if w not in pieza]
 
     # Se completa con lo que la app sepa de este producto por otras vías
@@ -2320,12 +2374,15 @@ def _firma_armada(descripcion, producto_id=None, codigo_clean=None):
                              for x in grupo.split("/")]
                           + (_RE_CILINDROS_EN_EL_MOTOR.findall(limpio)
                              if _RE_MOTOR_QUE_DICE_SUS_CILINDROS.search(limpio) else [])
+                          + (_RE_CILINDROS_DEUTZ.findall(limpio) if "DEUTZ" in limpio else [])
                           if 1 <= int(n) <= 16},
             "bujia": tipo_de_bujia(texto),
             "siglas": siglas, "marca_auto": marca_auto, "posicion": posicion,
             "cilindradas": cilindradas, "vias": vias, "texto": limpio,
             "anios": rangos_de_anios(descripcion),
             "sobremedida": sobremedida_de(descripcion),
+            "combustible": combustible_desde_descripcion(descripcion),
+            "dana": frozenset(_RE_PUENTE_DANA.findall(limpio)),
             "motores": motores_de_la_descripcion(descripcion, excluir=set(modelos) | set(siglas))})
 
 
@@ -2490,6 +2547,15 @@ def firmas_compatibles(a, b, minimo_nucleo=2, cuenta_palabras=None, total_descri
         return False, (f"sobremedida distinta: {_sm(a.get('sobremedida'))} vs "
                        f"{_sm(b.get('sobremedida'))}")
 
+    # El bulbo del reloj contra el de la luz: ver RELOJ y TESTIGO en _TIPOS_DE_SENSOR.
+    _uso_a = (a.get("sensor") or frozenset()) & {"RELOJ", "TESTIGO"}
+    _uso_b = (b.get("sensor") or frozenset()) & {"RELOJ", "TESTIGO"}
+    if len(_uso_a) == 1 and len(_uso_b) == 1 and _uso_a != _uso_b:
+        return False, (f"sensores de tipos distintos: el del {'reloj' if 'RELOJ' in _uso_a else 'testigo'}"
+                       f" vs el del {'reloj' if 'RELOJ' in _uso_b else 'testigo'}")
+    if a.get("dana") and b.get("dana") and not (a["dana"] & b["dana"]):
+        return False, (f"modelos distintos: DANA {'/'.join(sorted(a['dana']))} vs "
+                       f"DANA {'/'.join(sorted(b['dana']))}")
     # «Bulbo presion de aceite … 0.40 BAR» contra «BULBO DE PRESION DE ACEITE … PRESION 0 5
     # BAR»: el bulbo abre a otra presión, la bomba de nafta empuja otra. Ver presiones_en_bar().
     if presiones_que_chocan(a.get("bar"), b.get("bar")):
@@ -2565,6 +2631,13 @@ def firmas_compatibles(a, b, minimo_nucleo=2, cuenta_palabras=None, total_descri
         def _txt(rangos):
             return "/".join(f"{d}-{'…' if h == 2100 else h}" for d, h in rangos[:2])
         return False, f"años distintos: {_txt(a['anios'])} vs {_txt(b['anios'])}"
+
+    # Nafta contra diésel, en las piezas del motor: «Termostato Chevrolet Blazer S10 -2.2 …
+    # Naftero» contra el de la «S10 2012 2013 Motor 180 Duramax». Cuenta como motivo «del auto»:
+    # si los une un código, el código manda. Ver combustible_desde_descripcion().
+    if (a["familia"] in _RUBROS_QUE_DEPENDEN_DEL_COMBUSTIBLE and a.get("combustible")
+            and b.get("combustible") and a["combustible"] != b["combustible"]):
+        return False, f"combustibles distintos: {a['combustible']} vs {b['combustible']}"
 
     # LOS MOTORES. «Jta.Carter DEUTZ F4L 913» contra «Junta para Cárter DEUTZ 913 … F5L»: el
     # mismo tractor, cuatro cilindros contra cinco. «Jta.Tapa Cilindros Renault Master motor
@@ -2982,7 +3055,8 @@ _MOTIVOS_QUE_CONTRADICEN = ("posiciones distintas", "siglas distintas", "autos d
                             "sensores de tipos distintos", "bujías de tipos distintos",
                             "distinta cantidad de cilindros", "motores de distintas válvulas",
                             "años distintos", "motores distintos",
-                            "sobremedida distinta", "presiones distintas")
+                            "sobremedida distinta", "presiones distintas",
+                            "combustibles distintos")
 # Los que no alcanzan para decir que son piezas distintas pero sí para desconfiar: no vetan
 # (el par va a revisión, no a rojo) y se muestran como el porqué. Ver evidencia_cruzada().
 _MOTIVOS_QUE_AVISAN = ("un nombre de modelo de marcas distintas",)
@@ -2990,7 +3064,7 @@ _MOTIVOS_QUE_AVISAN = ("un nombre de modelo de marcas distintas",)
 # _unidos_por_codigo().
 _MOTIVOS_DEL_AUTO = ("autos distintos", "marcas distintas", "modelos distintos",
                      "cilindradas distintas", "motores de distintas válvulas", "años distintos",
-                     "motores distintos")
+                     "motores distintos", "combustibles distintos")
 
 
 def _unidos_por_codigo(pa, pb):

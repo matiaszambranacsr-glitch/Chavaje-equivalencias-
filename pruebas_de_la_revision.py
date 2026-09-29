@@ -103,6 +103,29 @@ PARES_DE_MUESTRA = [
      "I - GOL II - GOL III - POINTER - POLO - QUANTUM - SAVEIRO - PRESION 0 5 BAR - AISLANTE NEGRO "
      "REF ORIG SEAT 0279190811 - VOLKSWAGEN 0309190811", "distinta",
      "CRI-FA 32-42371 / 358FISPA: 0,40 contra 0,5 bar"),
+    ("Jta.Carter DEUTZ F4L 913", "JTA CARTER DEUTZ 913 6 CIL.", "distinta",
+     "TARANTO / IMPERIAL: F4L es de cuatro cilindros"),
+    ("JUNTAS FORD ESCORT/ CHEV ETTE 1.6 Wb", "Jta.Carter CHEVROLET CHEV ETTE", "distinta",
+     "JL / TARANTO: Wb es Weber, la de JL es del carburador"),
+    ("JUNTA MPI FIAT TEMPRA 2.0 16V .", "JTA T.C. FIAT TEMPRA 2.0 cc.", "distinta",
+     "JL / IMPERIAL: la de la inyección contra la de tapa de cilindros"),
+    ("Jta.Tapa Cil. JEEP CHEROKEE 4 l",
+     "Junta Tapa de Cilindros JEEP RENEGADE 2014/... CHEROKEE 2013/... - 2.4 - ED6 // 68188889AF "
+     "(MLS)", "distinta", "TARANTO / ILLINOIS: 4 litros contra 2,4"),
+    ("Termostato carcasa termostática con sensor Ford Transit 2,0 2016/2022 .",
+     "TERMOSTATO CON CARCASA 97012 FORD FOCUS 2 0L MFI 05 -11 RANGER 2 3L MFI 01 -06 MONDEO III 1 "
+     "8 00 -08 REF ORIG VERNET TH6939", "distinta",
+     "CRI-FA 48-6148 / 97012FISPA: los años de FISPA con dos cifras"),
+    ("Termostato Chevrolet Blazer S10 -2.2 inyeccion. Valvula reparacion de carcaza y junta. "
+     "Naftero.", "TERMOSTATO COMPLETO 97066 Chevrolet S10 2012 2013 Motor 180 Duramax REF ORIG "
+     "12650485 12625212", "distinta", "CRI-FA 14-V211.87 / 97066FISPA: nafta contra diésel"),
+    ("JUNTA DE CARTER TOYOTA HILUX 2779CC", "JTA CARTER TOYOTA HILUX 2200 D", "distinta",
+     "TARANTO / IMPERIAL: 2,8 contra 2,2"),
+    ("Juntas para diferencial CHEVROLET / FORD DANA 70 - F250/F350", "JTA DIFERENCIAL DANA 44 FORD",
+     "distinta", "ILLINOIS / IMPERIAL: dos puentes Dana distintos"),
+    ("Bulbo de temperatura crítica. Citroen Evasion - Xantia - ZX 2.0-1.9 - Diesel. Tapón azul. "
+     "Aro verde.", "BULBO DE TEMPERATURA RELOJ 206 CITROEN Berlingo - Xantia - Xsara - ZX - "
+     "PEUGEOT 106 - 306 - 405", "distinta", "CRI-FA / FISPA: el de la luz contra el del reloj"),
 
     # --- dudosas: no se descartan de una, pero tampoco pasan sin mirarlas ---
     ("Junta Tapa Valvulas MWM SPRINT 4.07",
