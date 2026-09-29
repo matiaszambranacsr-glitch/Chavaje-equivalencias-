@@ -1919,7 +1919,7 @@ def _dos_que_citan_el_mismo_numero(cod_a, desc_a, cod_b, desc_b):
     # Illinois les pone a todos la misma lista de números. El par con el tipo que no es lo
     # descarta el análisis por «juegos distintos»; la ambigüedad no agrega nada.
     juego_a, juego_b = tipo_de_juego_de_motor(desc_a), tipo_de_juego_de_motor(desc_b)
-    if juego_a and juego_b and juego_a != juego_b:
+    if juego_a and juego_b and juegos_que_chocan(juego_a, juego_b):
         return f"juegos distintos del mismo motor: {juego_a} y {juego_b}"
     return ""
 

@@ -5427,6 +5427,23 @@ Y uno más que salió probando: si la lista trae el mismo código dos veces con 
 - **Las descripciones sin `<br>` ni `<b>` escritos**: `texto_para_html()` pasa los saltos a « · »
   y saca las etiquetas de formato que traen algunas listas.
 
+### Un juego de juntas no es la junta de tapa de cilindros
+
+«Jgo.Jtas. ROVER 214/216/218» salía entre las «limpias» emparejado con «JTA T.C. ROVER 111/214»:
+el juego completo con la junta de tapa sola. El juego se reconocía como kit, pero como no decía
+«completo» ni «superior» quedaba sin tipo, igual que una junta suelta. Ahora:
+
+- Un juego de juntas que no dice cuál es cuenta como juego (`JUEGO_SIN_DECIR_CUAL`): nunca es
+  equivalente de una junta suelta, y con otro juego no choca, porque puede ser cualquiera
+  (`juegos_que_chocan()`).
+- «Juego de juntas de tapa de cilindros» es el juego superior (el de descarbonización), así que
+  tampoco se empareja con el completo. «Sin TC» se mira antes, para no confundirlos.
+- Los juegos de carburador quedan aparte, como antes.
+
+Sobre la cola de prueba: 110 pares juego contra junta suelta estaban entre las limpias; ahora
+ninguno (395 van a sospechosas y 3 a relacionadas). Lo ya aprobado con esa regla vieja aparece en
+«Revisar lo aprobado con las reglas de hoy».
+
 ### Auditar lo ya cargado: que cuadre, no cuántos
 
 - **«Muchos vínculos» dejó de ser la señal.** Una sonda lambda que va en 60 autos y cita 7

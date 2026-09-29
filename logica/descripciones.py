@@ -631,7 +631,10 @@ PALABRAS_DE_KIT = ("KIT", "JUEGO", "JGO", "COMBO", "SET")
 # WEBER» es el mismo juego escrito de dos formas. Lo que se compara es QUÉ juego de motor: el
 # completo, el superior (descarbonización) o el inferior. Si uno lo es y el otro no, o son de
 # tipos distintos, son productos distintos.
-_RE_JUEGO_SUPERIOR = re.compile(r'\b(SUPERIOR|DESCARBONIZACION|DESCARB|DESM|DESMONTAJE)\b')
+# «Juego de juntas de tapa de cilindros» es el superior (el de descarbonización) dicho de otra
+# forma: «Juego Jtas.tapa cilindros FORD 460», «Jgo.Jta.Tapa Cil. MAZDA».
+_RE_JUEGO_SUPERIOR = re.compile(r'\b(SUPERIOR|DESCARBONIZACION|DESCARB|DESM|DESMONTAJE'
+                                r'|TAPA CIL\w*|TAPA DE CIL\w*|TAPA CILINDROS)\b')
 _RE_JUEGO_INFERIOR = re.compile(r'\bINFERIOR\b')
 # Sobre el texto de _normalizar_desc(), que cambia la barra por un espacio: «P/Motor» llega
 # como «P MOTOR».
@@ -736,15 +739,38 @@ def tipo_de_juego_de_motor(descripcion):
     texto = _normalizar_desc(descripcion)
     if not _RE_ES_KIT.search(texto):
         return None
+    # «Sin TC» va antes que «superior»: «sin tapa de cilindros» también dice «tapa de cil».
+    if _RE_JUEGO_SIN_TAPA.search(texto):
+        return "completo sin tapa de cilindros"
     if _RE_JUEGO_SUPERIOR.search(texto):
         return "superior"
     if _RE_JUEGO_INFERIOR.search(texto):
         return "inferior"
-    if _RE_JUEGO_SIN_TAPA.search(texto):
-        return "completo sin tapa de cilindros"
     if _RE_JUEGO_COMPLETO.search(texto):
         return "completo"
+    # «Jgo.Jtas. ROVER 214/216/218» no dice de qué juego es, pero ES un juego de juntas. Antes
+    # quedaba como None —igual que una junta suelta— y el análisis lo daba por equivalente de
+    # «JTA T.C. ROVER 111/214», la junta de tapa de cilindros sola: salía entre las «limpias».
+    # El de carburador va aparte: se compara con los otros juegos de carburador por el rubro.
+    if _RE_JUEGO_DE_JUNTAS.search(texto) and " CARBURADOR" not in texto:
+        return JUEGO_SIN_DECIR_CUAL
     return None
+
+
+# Ver tipo_de_juego_de_motor(). Es un juego, pero no se sabe cuál: no choca con ningún otro
+# juego (puede ser cualquiera), sí con una junta suelta. Ver juegos_que_chocan().
+JUEGO_SIN_DECIR_CUAL = "de juntas (sin decir cuál)"
+_RE_JUEGO_DE_JUNTAS = re.compile(r'\b(JTAS|JUNTAS|JTA|JUNTA)\b')
+
+
+def juegos_que_chocan(juego_a, juego_b):
+    """¿Estos dos «juego» de firma dicen que son piezas distintas? Un juego contra una junta
+    suelta, o dos juegos que dicen cuál son y no son el mismo (completo contra superior)."""
+    if juego_a == juego_b or not (juego_a or juego_b):
+        return False
+    if juego_a and juego_b and JUEGO_SIN_DECIR_CUAL in (juego_a, juego_b):
+        return False
+    return True
 
 
 def es_un_kit(descripcion):
@@ -2268,7 +2294,7 @@ def firmas_compatibles(a, b, minimo_nucleo=2, cuenta_palabras=None, total_descri
 
     # El juego de juntas del motor contra una junta suelta, o dos juegos distintos (completo
     # contra superior). Ver tipo_de_juego_de_motor().
-    if (a.get("juego") or b.get("juego")) and a.get("juego") != b.get("juego"):
+    if juegos_que_chocan(a.get("juego"), b.get("juego")):
         return False, (f"juegos distintos: {a.get('juego') or 'junta suelta'} vs "
                        f"{b.get('juego') or 'junta suelta'}")
 
