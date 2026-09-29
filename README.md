@@ -5427,6 +5427,37 @@ Y uno más que salió probando: si la lista trae el mismo código dos veces con 
 - **Las descripciones sin `<br>` ni `<b>` escritos**: `texto_para_html()` pasa los saltos a « · »
   y saca las etiquetas de formato que traen algunas listas.
 
+### ¿Aguanta 60 proveedores? Probado con una base de 63
+
+Se armó una base copiando 8 veces los 7 proveedores reales (63 proveedores, 658.977 productos,
+117.189 equivalencias cargadas y 137.763 pendientes, 275 MB) y se midió todo:
+
+| | Hoy (7 proveedores) | 63 proveedores |
+|---|---|---|
+| Buscar un código | 0 ms (peor 19 ms) | 0 ms (peor 24 ms) |
+| Buscar por descripción | 44 ms | 363 ms |
+| Abrir Administrar | 0,5 s | **20,2 s → 1,0 s** (cada toque 16,6 s → 0,1 s) |
+| Importar 10.000 filas | — | 7–13 s |
+| Copia a GitHub | 13 MB | 58 MB (el tope de GitHub es 100 MB) |
+
+Lo que no aguantaba, y se arregló:
+
+- **Administrar**: `marcas_probablemente_duplicadas()` hacía una consulta por par de marcas
+  (2.016 con 64) en cada toque. Ahora es una sola y se guarda hasta que cambian productos o marcas.
+- **La búsqueda automática de después de importar** rehacía todo el catálogo en cada lista:
+  22 minutos con 63 proveedores y picos de 3,6 GB. Ahora cada paso trabaja solo con lo nuevo
+  (medidas, aplicaciones, cruce por auto y barrido guardan hasta dónde llegaron), el cruce por auto
+  usa un índice y tiene tope de tiempo, el barrido no guarda los pares ya vistos y rehace las
+  firmas solo de lo que cambió, y los modelos de las 65 marcas de auto salen de una sola pasada.
+  Cada cambio se comparó con el anterior sobre la base de hoy: mismos resultados.
+- **Escrituras de a una**: las aplicaciones deducidas se confirmaban fila por fila (172 s → 42 s).
+- **La copia**: el cuerpo de la subida se arma en bytes; antes el base64 existía cuatro veces en
+  memoria.
+
+Lo que sigue siendo pesado con 63 proveedores es la búsqueda automática en sí: unos minutos de
+procesador por lista importada (corre por atrás) y alrededor de 2 GB de memoria en el barrido.
+Con ese tamaño conviene un servidor con más memoria que el gratuito de Streamlit.
+
 ## 🔗 Revisar sugeridas: primero lo que hay que hacer
 
 Mirado con capturas sobre la base real (15.308 pendientes en 8 listas):

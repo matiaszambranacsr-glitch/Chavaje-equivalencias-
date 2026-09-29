@@ -1654,8 +1654,10 @@ def aplicar_aplicaciones_deducidas(filas):
     # columna = columna, y en SQL dos NULL nunca son iguales.
     # El candado se suelta cada tanda: son 112.499 filas, y con una sola toma la pantalla de la
     # otra persona espera todo lo que dure el INSERT. Ver FILAS_ANTES_DE_SOLTAR_EL_CANDADO.
+    # Cada tanda en UNA transacción: la conexión está en autocommit, así que executemany
+    # confirmaba fila por fila. Con 60 proveedores, 6.885 aplicaciones tardaban 172 s.
     for tanda in en_tandas_para_no_trabar(filas):
-        with db_lock:
+        with db_lock, transaccion():
             c.executemany("""INSERT OR IGNORE INTO aplicaciones
                              (marca_auto, modelo_auto, motor, combustible, anio_desde,
                               anio_hasta, codigo, codigo_clean, marca_repuesto, tipo_pieza,
@@ -1666,7 +1668,6 @@ def aplicar_aplicaciones_deducidas(filas):
                             f["_desde"], f["_hasta"],
                             f["Código"], f["_clean"], f["Marca"],
                             f.get("Pieza") or "") for f in tanda])
-            conn.commit()
     return len(filas)
 
 
