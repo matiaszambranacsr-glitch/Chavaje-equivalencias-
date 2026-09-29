@@ -2111,6 +2111,16 @@ def _firma_armada(descripcion, producto_id=None, codigo_clean=None):
     # lugares distintos.
     if "TAPA" in pieza and ("TAPADELANTERA" in pieza or "DISTRIBUCION" in pieza):
         pieza.update(("TAPADELANTERA", "DISTRIBUCION"))
+    # La junta de la CAJA. CAJA sola no cuenta («caja x 10 unidades», ver _RUIDO_EN_FIRMA), así
+    # que «Junta Caja JHON DEERE» quedaba como «junta» a secas y en la cola aparecía emparejada
+    # con «JTA T.C. J.DEERE», la de tapa de cilindros del mismo tractor. Cuando la caja viene
+    # pegada a la junta o dice de velocidad / de cambios, es un lugar como cualquier otro.
+    # «JTA CAJA ADMISION» es la caja de admisión (el múltiple), no la de velocidades.
+    if (re.search(r"\b(?:JUNTAS?|JTAS?)\.?\s*(?:DE\s+|PARA\s+)?(?:LA\s+)?CAJA\b"
+                  r"(?!\.?\s*(?:DE\s+)?(?:ADM|AIRE|FILT|TERMOST|AGUA|DIREC|MARIP|ESC|MULT))",
+                  limpio)
+            or re.search(r"\bCAJA\s+(?:DE\s+)?(?:VEL\w*|CAMBIO\w*|TRANSM\w*)", limpio)):
+        pieza.add("CAJAVELOCIDAD")
     # JL escribe «JUNTAS FIAT TEMPRA WEBER» y «JUNTAS DODGE 1500 STROMBERG» sin decir
     # «carburador»: la marca del carburador lo dice. Sin esto se emparejaban con juntas de tapa
     # de cilindros del mismo auto. CARTER no cuenta acá: también es la junta de cárter.
@@ -2259,8 +2269,8 @@ _LUGARES_DE_LA_PIEZA = {
     # «JTA LATERAL BOTADORES» y «JTA LATERAL T.V.» son dos tapas distintas del motor. (CAJA no
     # entra: está entre las palabras que no cuentan, por «caja x 10 unidades».)
     "BOTADORES",
-    # Ver «TAPA TRASERA» en _firma_armada().
-    "TAPATRASERA", "TAPADELANTERA",
+    # Ver «TAPA TRASERA» y «la junta de la CAJA» en _firma_armada().
+    "TAPATRASERA", "TAPADELANTERA", "CAJAVELOCIDAD",
 }
 
 # Ver «la marca sola no alcanza» en firmas_compatibles().
@@ -2398,6 +2408,17 @@ def firmas_compatibles(a, b, minimo_nucleo=2, cuenta_palabras=None, total_descri
         # Salvo que una sea abreviatura o parte de la otra: SENSOR MAF / SENSOR DE MASA
         if not (a["cabeza"] in b["cabeza"] or b["cabeza"] in a["cabeza"]):
             return False, f"piezas distintas: «{a['cabeza']}» y «{b['cabeza']}»"
+
+    # Los lugares, también cuando comparten poco. Si cada una nombra un lugar que la otra no
+    # —la caja contra la tapa de cilindros— no es que falten palabras: son dos juntas distintas.
+    # Sin esto, «Junta Caja JHON DEERE» contra «JTA T.C. J.DEERE» salía por «solo comparten 1
+    # palabra», que no tumba el par, y quedaba dudoso en vez de rojo. Es la misma regla de más
+    # abajo (ver «piezas de lugares distintos»), mirada antes.
+    _lug_a = (set(a.get("pieza") or ()) - set(b.get("pieza") or ())) & _LUGARES_DE_LA_PIEZA
+    _lug_b = (set(b.get("pieza") or ()) - set(a.get("pieza") or ())) & _LUGARES_DE_LA_PIEZA
+    if _lug_a and _lug_b:
+        return False, (f"piezas de lugares distintos: {'/'.join(sorted(_lug_a))} "
+                       f"vs {'/'.join(sorted(_lug_b))}")
 
     comunes = set(a["nucleo"]) & set(b["nucleo"])
     if len(comunes) < minimo_nucleo:
@@ -2567,6 +2588,18 @@ def firmas_compatibles(a, b, minimo_nucleo=2, cuenta_palabras=None, total_descri
     if not _en_comun:
         _en_comun = (a.get("motores_numericos") or set()) & (b.get("motores_numericos") or set())
     if not _en_comun:
+        # Y SI LAS DOS NOMBRAN MODELOS Y NO COMPARTEN NINGUNO, no es «falta un dato»: dicen para
+        # qué autos son, y son otros. «Sonda Lambda Volkswagen Gol Fox Voyage Saveiro Suran»
+        # contra la LUCAS de «GM Astra Celta Corsa … VW Golf» compartían VOLKSWAGEN y nada más,
+        # y la cola la dejaba en 50, «dudosa», como si no se supiera. De los 3.595 dudosos de la
+        # cola, 156 eran esto. Las marcas que hacen motores para otras (Perkins, MWM…) no
+        # cuentan: ahí un lado nombra el motor y el otro el vehículo.
+        _mod_a, _mod_b = a.get("modelos") or set(), b.get("modelos") or set()
+        if (_mod_a and _mod_b and not (_mod_a & _mod_b)
+                and not ({a.get("marca_auto"), b.get("marca_auto")} & _MARCAS_DE_MOTORES)):
+            return False, (f"modelos distintos: {'/'.join(sorted(_mod_a)[:2])} "
+                           f"vs {'/'.join(sorted(_mod_b)[:2])} (misma marca, ningún modelo "
+                           "en común)")
         return False, "solo comparten la marca del auto"
 
     # Se muestran primero las que distinguen: es lo que hay que mirar para decidir.

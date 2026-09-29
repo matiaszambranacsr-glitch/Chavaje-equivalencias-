@@ -5427,6 +5427,33 @@ Y uno más que salió probando: si la lista trae el mismo código dos veces con 
 - **Las descripciones sin `<br>` ni `<b>` escritos**: `texto_para_html()` pasa los saltos a « · »
   y saca las etiquetas de formato que traen algunas listas.
 
+### Los dudosos, revisados uno por uno
+
+Se tomaron los 3.595 pares «🟠 dudosos» de la cola de prueba y se revisaron muestras a mano,
+leyendo las descripciones enteras. Dos cosas que decían «son piezas distintas» y el puntaje no
+escuchaba:
+
+- **Misma marca de auto, ningún modelo en común.** «Sonda Lambda Volkswagen Gol Fox Voyage
+  Saveiro Suran» contra la LUCAS de «GM Astra Celta Corsa … VW Golf» compartían VOLKSWAGEN y nada
+  más, y quedaban en 50, como si faltara un dato. Cuando las dos nombran modelos y no comparten
+  ninguno, ahora es «modelos distintos» (salvo marcas de motores como Perkins o MWM, donde un lado
+  nombra el motor y el otro el vehículo).
+- **Juntas de lugares distintos aunque compartan una sola palabra.** «Junta Caja JHON DEERE»
+  contra «JTA T.C. J.DEERE» (caja contra tapa de cilindros) cortaba antes por «solo comparten 1
+  palabra», que no descarta. Y la junta de caja de velocidades cuenta como lugar (no la «caja de
+  admisión», que es el múltiple).
+
+Resultado sobre la cola: 163 dudosos pasan a 🔴 (las 12 muestras revisadas estaban todas mal) y
+12 pasan a 🟢 porque quedaron como único candidato. Las 13.021 aprobaciones de la base de prueba
+quedan con el mismo puntaje, y lo ya cargado que «hoy se vetaría» sigue igual (78).
+
+Se probó y se descartó un tope más: bajar a amarillo al que queda como único candidato después
+de los vetos. Bajaba 1.029 verdes, y revisando una muestra casi todos estaban bien.
+
+Lo que sigue dudoso es dudoso de verdad: 2.272 pares cuyas descripciones concuerdan pero el
+producto de enfrente concuerda con varios de la misma lista (como mucho uno es el equivalente,
+y la pantalla deja elegir cuál), y 691 donde una de las dos descripciones no nombra ningún modelo.
+
 ### Un juego de juntas no es la junta de tapa de cilindros
 
 «Jgo.Jtas. ROVER 214/216/218» salía entre las «limpias» emparejado con «JTA T.C. ROVER 111/214»:
