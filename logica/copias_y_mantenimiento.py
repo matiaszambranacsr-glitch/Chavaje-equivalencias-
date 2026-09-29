@@ -587,6 +587,14 @@ def codigo_base_sin_variante(codigo):
     piso, «JCA-123» y «JCA-121-15» quedan en bases distintas, que es lo correcto, y «JI-276»
     con «JI-276-R» —el mismo juego, con retenes— quedan en la misma."""
     u = re.sub(r"[\s\.]+", "-", (codigo or "").upper().strip())
+    # IMPERIAL numera distinto: el número de la junta y el material pegado atrás, dos letras y
+    # una cifra —«4505CG1», «4505AD4», «4505CG4» son la junta de cárter del Peugeot 404 en
+    # tres materiales; «1812AC6-COMP» la del Falcon de competición—. Sin esto cada material
+    # contaba como una pieza distinta, y la junta de TARANTO que concordaba con las cuatro
+    # quedaba como «varios productos con la misma descripción».
+    _imperial = re.match(r"^(\d{3,5})[A-Z]{2}\d(?:-COMP)?$", u)
+    if _imperial:
+        return _imperial.group(1)
     partes = [x for x in u.split("-") if x]
     while len(partes) > 2 and len(partes[-1]) <= 4:
         partes = partes[:-1]
@@ -646,11 +654,12 @@ def el_codigo_no_figura_entre_las_referencias(codigo, descripcion):
         «Junta Tapa de Cilindros SCANIA … - 10,6/11,7 - 16… DSC12.01 (…)» -> «DSC12.01».
         «… PERKINS … 4.203/4-PA.203 …» -> «4-PA.203».
 
-    NO BAJA A ROJO, BAJA A AMARILLO, y la diferencia importa. El objetivo es sacarlos del botón
-    de «aprobar sin mirar», no darlos por perdidos. Revisando una muestra de 22 a mano, 17 eran
-    designaciones de motor o de chasis y **5 eran números de fábrica reales con la marca pegada
-    adelante** («AGCO SISU POWER836122282», «JOHN DEERER43413»). Con el castigo en rojo esas 5
-    quedaban como basura; con el castigo en amarillo cuestan una mirada, que es lo que cuestan.
+    Primero bajaba a amarillo y no a rojo: en una muestra de 22, 5 eran números de fábrica
+    reales con la marca pegada adelante («AGCO SISU POWER836122282», «JOHN DEERER43413»). Después
+    se miraron los ~150 de la cola entera y ninguno es el número de la pieza bien escrito: son
+    motores o modelos, el número de otra pieza (el del turbo en el juego de juntas del turbo) o
+    esos números con la marca pegada, que así escritos no los tiene ninguna otra lista. Así que
+    ahora es rojo, y la alarma dice cuál es el número de verdad cuando la marca está pegada.
 
     Sobre la cola real toca 104 de los 2.560 vínculos que hoy se aprueban en bloque."""
     if not codigo or not descripcion:
@@ -662,18 +671,72 @@ def el_codigo_no_figura_entre_las_referencias(codigo, descripcion):
     _cola = re.search(r"((?:\s*\([^)]*\))+)\s*$", descripcion)
     zona = " ".join(re.findall(r"\(([^)]*)\)", _cola.group(1) if _cola else "")
                     + re.findall(r"//(.*)$", descripcion))
-    if not zona:
-        return False
     # La zona tiene que tener al menos un número con pinta de código; si son puras medidas
     # («ESP 1.50MM») no es una lista de referencias y no se puede concluir nada.
     # Tampoco si son años: FISPA escribe los inyectores «Fiat Stilo 1.8 MPI 16V (2003-2008) -
     # Fiat Doblo … (2003-2006)IWP156», y los paréntesis de los años pasaban por una lista de
     # referencias que no nombraba al IWP156. 1.000 inyectores de FISPA quedaban en 74 con esta
     # alarma, con el número escrito dos veces en la misma fila.
-    if not any(any(ch.isdigit() for ch in t) and not _RE_ANOS_DE_FABRICACION.match(t)
-               for t in re.findall(r"[A-Z0-9][A-Z0-9./-]{4,}", zona.upper())):
-        return False
+    if not zona or not any(any(ch.isdigit() for ch in t) and not _RE_ANOS_DE_FABRICACION.match(t)
+                           for t in re.findall(r"[A-Z0-9][A-Z0-9./-]{4,}", zona.upper())):
+        return _codigo_en_el_tramo_de_los_motores(codigo, descripcion)
     return sanitizar(codigo).upper() not in sanitizar(zona).upper()
+
+
+def el_codigo_esta_entre_las_referencias(codigo, descripcion):
+    """¿La descripción pone este número en su lista de números de fábrica? Es la otra cara de
+    el_codigo_no_figura_entre_las_referencias(): los paréntesis del final, lo que va después de
+    «//», y la cabeza de las filas de despiece de ILLINOIS —«Despiece FIAT 4302267/7737202
+    PORTA RETEN»—, que es donde esa lista pone el número de la pieza."""
+    limpio = sanitizar(codigo or "").upper()
+    texto = descripcion or ""
+    if len(limpio) < 5 or not texto:
+        return False
+    _cola = re.search(r"((?:\s*\([^)]*\))+)\s*$", texto)
+    zona = " ".join(re.findall(r"\(([^)]*)\)", _cola.group(1) if _cola else "")
+                    + re.findall(r"//(.*)$", texto))
+    _cabeza = re.match(r"^Despiece\s+(?:[A-Z][A-Z.]*\s+){1,2}?([0-9][\dA-Z/ \-]*?)\s+[A-Z]{3,}",
+                       texto)
+    if _cabeza:
+        zona += " " + _cabeza.group(1)
+    return limpio in {sanitizar(t).upper() for t in re.split(r"[\s/()\-]+", zona) if t}
+
+
+def _codigo_en_el_tramo_de_los_motores(codigo, descripcion):
+    """Sin lista de números al final, ¿el código está en el tramo de la cilindrada y los motores?
+
+    ILLINOIS escribe «pieza MARCA modelos - cilindrada - motores (números)», y cuando la fila no
+    trae números lo que queda cargado como «código de fábrica» es un motor o un modelo:
+    «Juego de Admisión y Escape CHEVROLET SPRINT SWIFT - 993CC - 61-G10-G10T (ADMISIÓN)»,
+    «Despiece RENAULT … - 1.4/1.6/1.8/2.0 - K4JK4M 16V F4P F4R», «Suplementos para camisa de
+    cilindros FIAT 115005 - 700-E800 - SUPL. CAMISA» (los tractores 700 E y 800). Los números
+    de verdad de esas filas van adelante, pegados a la marca («Despiece FIAT 7679315/7633424
+    TAPA…», «FIAT 115005 -»), y esos quedan antes del primer guion.
+
+    Solo con la forma de ILLINOIS —arranca con «Junta», «Juego», «Despiece» en minúsculas y
+    tiene dos guiones o más— y solo códigos con letras, que es como se escribe un motor. FISPA
+    usa los guiones para separar autos y escribe los números sueltos en el medio: «ALTERNADOR
+    … - SPRINTER 310 D - 4120001109413 - 0001218152», «BOMBA DE AGUA … - VW UP … 04C121…»,
+    «INYECTOR FI-0280155794Peugeot 106 … - Peugeot 206 …». Con la regla sin esos dos límites se
+    iban a rojo 81 vínculos buenos de FISPA, y de ILLINOIS los números que la fila escribe
+    sueltos («RENAULT 7701348225 - 7700850660 R18», «1A 3A 11115-15020/30/41)» con el paréntesis
+    sin abrir), que son todos cifras."""
+    texto = (descripcion or "").upper()
+    cod = (codigo or "").upper()
+    if (texto.count(" - ") < 2 or not cod or not re.search(r"[A-Z]", cod)
+            or not re.match(r"^[A-Z][a-zéáíóú]+\s", descripcion or "")):
+        return False
+    corte = texto.index(" - ")
+    lugares = [m.start() for m in
+               re.finditer(r"(?<![A-Z0-9])" + re.escape(cod) + r"(?![A-Z0-9])", texto)]
+    if not lugares:
+        return False
+    for i in lugares:
+        antes = texto[:i]
+        if (i < corte or "//" in antes or antes.count("(") > antes.count(")")
+                or re.search(r"\b(REF|ORIG|ORIGINAL)\b", antes)):
+            return False
+    return True
 
 
 @functools.lru_cache(maxsize=50000)   # depende solo del código: ver codigo_sospechoso()
@@ -890,6 +953,90 @@ def borrar_puente_y_sus_pendientes(producto_oem_id):
     except Exception as _err:
         anotar_error("borrar_puente_y_sus_pendientes", _err)
     return borrar_puente(producto_oem_id), pendientes
+
+
+def codigos_de_fabrica_con_la_marca_pegada():
+    """Los códigos de fábrica cargados con la marca pegada adelante: «POWER836120129»,
+    «DEERER43413», «BENZ3120150080». [{pid, Código, Número, Ya existe}].
+
+    El número es el de la pieza —ILLINOIS escribe «AGCO SISU POWER836120129» y la exportación
+    se come el espacio— pero así escrito no lo tiene ninguna otra lista, y el código no une
+    nada. Hoy el extractor ya lo despega (ver despegar_marca_de_adelante()); esto corrige los
+    que quedaron de antes. «Ya existe» es que el número limpio ya está cargado como otro código
+    de fábrica: ahí se juntan los dos en vez de renombrar."""
+    try:
+        c.execute("""SELECT p.id, p.codigo_raw, p.marca_id FROM productos p
+                     JOIN marcas m ON m.id = p.marca_id WHERE m.tipo = 'OEM'""")
+        filas = filas_a_listas(c)
+    except sqlite3.OperationalError as _err:
+        anotar_error("codigos_de_fabrica_con_la_marca_pegada", _err)
+        return []
+    salida = []
+    for f in filas:
+        despegado = despegar_marca_de_adelante(f["codigo_raw"])
+        if not despegado:
+            continue
+        numero = despegado[1]
+        c.execute("SELECT id FROM productos WHERE codigo_clean = ? AND marca_id = ? AND id <> ?",
+                  (sanitizar(numero), f["marca_id"], f["id"]))
+        salida.append({"pid": f["id"], "Código": f["codigo_raw"], "Número": numero,
+                       "Ya existe": c.fetchone() is not None})
+    salida.sort(key=lambda x: x["Código"])
+    return salida
+
+
+def corregir_codigo_con_la_marca_pegada(producto_oem_id, numero):
+    """Le saca la marca pegada a un código de fábrica. Devuelve True si cambió algo.
+
+    Si el número limpio no está cargado, se renombra el código y listo: los vínculos y los
+    pendientes cuelgan del mismo producto y no se tocan. Si ya está —«POWER836120129» y
+    «836120129», que ILLINOIS escribe los dos en la misma fila— se juntan con
+    fusionar_productos(), pasando antes los PENDIENTES y las decisiones ya tomadas al que queda:
+    fusionar_productos() borra los pendientes del que se va, y eran pares por revisar."""
+    limpio = sanitizar(numero)
+    if not limpio:
+        return False
+    with transaccion():
+        c.execute("SELECT marca_id FROM productos WHERE id = ?", (producto_oem_id,))
+        fila = c.fetchone()
+        if not fila:
+            return False
+        c.execute("SELECT id FROM productos WHERE codigo_clean = ? AND marca_id = ? AND id <> ?",
+                  (limpio, fila["marca_id"], producto_oem_id))
+        otro = c.fetchone()
+        if not otro:
+            c.execute("UPDATE productos SET codigo_raw = ?, codigo_clean = ? WHERE id = ?",
+                      (numero, limpio, producto_oem_id))
+            return True
+        ganador = otro["id"]
+        c.execute("""SELECT CASE WHEN producto_a_id = ? THEN producto_b_id
+                                 ELSE producto_a_id END AS vecino, origen, lote, fecha
+                     FROM equivalencias_pendientes
+                     WHERE producto_a_id = ? OR producto_b_id = ?""",
+                  (producto_oem_id, producto_oem_id, producto_oem_id))
+        for p in c.fetchall():
+            if p["vecino"] == ganador:
+                continue
+            c.execute("""INSERT OR IGNORE INTO equivalencias_pendientes
+                         (producto_a_id, producto_b_id, origen, lote, fecha)
+                         VALUES (?, ?, ?, ?, ?)""",
+                      (min(p["vecino"], ganador), max(p["vecino"], ganador),
+                       p["origen"], p["lote"], p["fecha"]))
+        c.execute("""SELECT CASE WHEN producto_a_id = ? THEN producto_b_id
+                                 ELSE producto_a_id END AS vecino, decision, revisado_por,
+                            fecha, motivo
+                     FROM equivalencias_revisadas
+                     WHERE producto_a_id = ? OR producto_b_id = ?""",
+                  (producto_oem_id, producto_oem_id, producto_oem_id))
+        for r in c.fetchall():
+            if r["vecino"] == ganador:
+                continue
+            c.execute("""INSERT OR IGNORE INTO equivalencias_revisadas
+                         (producto_a_id, producto_b_id, decision, revisado_por, fecha, motivo)
+                         VALUES (?, ?, ?, ?, ?, ?)""",
+                      (min(r["vecino"], ganador), max(r["vecino"], ganador), r["decision"],
+                       r["revisado_por"], r["fecha"], r["motivo"]))
+        return fusionar_productos(producto_oem_id, ganador)
 
 
 def listas_que_no_cruzan():

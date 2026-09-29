@@ -5733,6 +5733,72 @@ abanico o una cilindrada mal leída frenaban y están bien. Queda uno conocido: 
 propósito: «J.DEERE 2030» es un tractor). Las 13.021 aprobaciones no cambian.
 `pruebas_de_la_revision.py` suma los 9 pares.
 
+### Todos los amarillos y rojos de la cola, mirados uno por uno
+
+Se leyeron todos los amarillos (584) y los grupos de rojos que quedaban sin revisar, par por par. Lo
+que el texto de las dos listas decide pasó a regla; lo que no decide quedó en revisión con el
+motivo escrito, en vez de «sin alarma puntual».
+
+**Códigos de fábrica que no lo eran**
+- 🔎 **Sacado del medio de la descripción**: los ~150 de la cola eran motores o modelos
+  (OM651.901, 4JB1TC, THD100, 19320E, DEERE1104) o el número de otra pieza. Ahora es rojo, no
+  amarillo. También cuando la fila no trae números al final y el código está en el tramo de la
+  cilindrada y los motores (`_codigo_en_el_tramo_de_los_motores()`, solo con la forma de ILLINOIS
+  y solo códigos con letras: K4JK4M, 61-G10-G10T, 700-E800).
+- **JC-MAT.15** (el material) y **F100-350** (la gama de Ford) salen del extractor.
+- 🏷️ **La marca pegada adelante** —«AGCO SISU POWER836120129», «JOHN DEERER43413», «M.
+  BENZ3120150080»— no es un error del vínculo: el número es el de la pieza, mal escrito. El
+  extractor ya lo despega (`despegar_marca_de_adelante()`), y **Mantenimiento → 🧹 → «Códigos de
+  fábrica con la marca pegada»** corrige los que están: sobre la base de prueba, 169, y 34 se
+  juntan con el número limpio que ya estaba. No se borra nada.
+
+**Un número de fábrica que la misma lista le pone a piezas distintas** (⚠️, rojo)
+El 36866416 de ILLINOIS es a la vez una junta de escape, una de cárter y un adaptador; el
+E30110271 de Mazda, la de escape, la de tapa de válvulas y la de tapa de cilindros; el 4089998
+de Cummins, el juego de descarbonización y el inferior. Aprobarlos las haría equivalentes. Se
+mira el lugar de la pieza, el sustantivo (solo en las filas de ILLINOIS, que ponen el número
+como suyo; FISPA lo cita: la rampa nombra el de sus inyectores), el tipo de juego y «chica»
+contra «grande». Se miran también los vínculos ya aprobados y los de las otras listas de la
+cola: el aforador de BMW aprobado hace rato es lo que muestra que los dos kits que citan su
+número son kits (van a «relacionadas»). Si la misma lista pone el número en piezas iguales
+—la misma junta para otro motor, otro material, otra cantidad de cilindros—, no hay alarma.
+
+**Lo que ya decía el texto y no se leía** (rojo)
+«CARTER YF» y «CARTER RBS» son carburadores Carter; «JTA LAT.CARTER» es la tapa lateral;
+«69/73» y «74/9» son años; el aro gris no es el aro verde (inyectores y sensores); Sigma no es
+Rocam (no en sensores, que nombran varios motores); el termostato «para carcaza» no es el
+«completo»; un kit no es la pieza suelta (fuera de las juntas, y sin contar el kit que trajo el
+número de fábrica); espárragos de 10 contra 8 mm; diámetro de cilindro 119 contra 115 mm;
+«RAD.ACEITE» es el radiador; el codo no es la bomba; TEIE es un Solex; la base del carburador no
+es el juego de juntas del carburador, ni la intermedia.
+
+**Lo que sube**: un producto de fábrica contra otra fila que lista ese número entre los suyos
+—«(4309957/5957865/4444452)», «// 3281721»—, sin ninguna alarma, va a 90: es la misma
+declaración que la del vínculo de origen (`el_codigo_esta_entre_las_referencias()`).
+
+**Lo que queda en revisión, con el motivo**
+- 🪭 Con **dos** candidatos distintos ya se elige el que mejor coincide, pero solo en los
+  amarillos (los verdes no se tocan: ver `PRODUCTOS_DISTINTOS_PARA_ABANICO`).
+- 🪞 **Mellizos de la otra lista**: «Jgo.Jtas.Carburador FIAT 125» es la descripción de tres
+  productos de TARANTO; el texto no dice cuál. Las variantes de material de IMPERIAL
+  («4505CG1», «4505AD4») son la misma junta y no cuentan (`codigo_base_sin_variante()`).
+
+**Medido sobre la cola de prueba** (14.200 pares entre las cuatro bandas):
+
+| | antes | después |
+|---|---|---|
+| 🟢 | 4.077 | 4.134 |
+| 🟡 | 584 | 176 |
+| 🟠 | 4.873 | 4.756 |
+| 🔴 | 5.546 | 5.788 |
+
+y 216 pasan a «relacionadas» (kits y accesorios del número). Las 13.021 aprobaciones: 82 en rojo
+(0,6 %; eran 87). Los 176 amarillos que quedan son pares donde solo concuerda el texto, sin
+número ni medida que lo confirme: mirados a mano, la gran mayoría están bien, y los que no se
+pueden decidir con lo que dicen las listas son de dos clases —un genérico de TARANTO contra una
+pieza específica («JTA.TAPA VALVULAS MITSUBISHI CANTER», varios motores posibles) y espesores o
+series que una lista no dice—. `pruebas_de_la_revision.py` suma 14 pares.
+
 ## 🔗 Revisar sugeridas: primero lo que hay que hacer
 
 Mirado con capturas sobre la base real (15.308 pendientes en 8 listas):

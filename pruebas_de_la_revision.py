@@ -16,7 +16,7 @@ motivo que tumba el par). Si se agrega una regla, se agregan acá los casos que 
 CON --base: arma una copia de la base en una carpeta temporal, pone todos los pares que
 aprobaste como si recién llegaran —sin tus decisiones ni lo aprendido de ellas, para que no se
 copien la respuesta— y los puntúa con el análisis de siempre. Falla si más del 1 % de lo aprobado
-cae en 🔴. Hoy, sobre la base de prueba de 13.021 aprobados, caen 86 (0,7 %): son vínculos por
+cae en 🔴. Hoy, sobre la base de prueba de 13.021 aprobados, caen 82 (0,6 %): son vínculos por
 código cuyo código las reglas actuales ya no tomarían.
 
 Nunca toca la base de trabajo: corre en una carpeta temporal, con una base propia.
@@ -41,7 +41,7 @@ PARES_DE_MUESTRA = [
      "2,5 - G9U-720/724/730/750/754 (8200406743) (Metal Graf®)", "misma", "TARANTO / ILLINOIS"),
     ("Jta.Tapa Cil.ASTRA KADETT VECTRA",
      "Junta Tapa de Cilindros CHEVROLET MONZA KADETT ASTRA VECTRA ZAFIRA - 2,0/2,2 - "
-     "C20NE/SEH/SER/NEF OHC", "misma", "TARANTO / ILLINOIS"),
+     "C20NE/SEH/SER/NEF OHC", "misma", "TARANTO / ILLINOIS", NECESITA_EL_CATALOGO),
     ("Jta.Carter DEUTZ F5L 913", "Junta para Cárter DEUTZ 913 TRACTOR 5 CIL. - 5,1 - F5L (3018944)",
      "misma", "TARANTO / ILLINOIS"),
     ("Sensor de rotacion Hyundai Accent Elantra .",
@@ -136,6 +136,41 @@ PARES_DE_MUESTRA = [
      "Junta Tapa de Válvulas FORD FALCON PICK UP - 2,8/3,1/3,6 - 170 187 188 MAX ECONO 221 221 "
      "SPRINT 4/7B (CODE6584B)", "dudosa", "TARANTO 330510/1 / ILLINOIS JVS-142-30: el Falcon "
      "Sprint", NECESITA_EL_CATALOGO),
+    # Revisando a mano los amarillos y rojos de la cola, uno por uno.
+    ("JUNTAS JEEP IKA CARTER YF", "Junta para Cárter JEEP IKA BERGANTIN 57/78 - 2,5 - 4L 151 "
+     "(2000169/2016713)", "distinta", "JL / ILLINOIS: el carburador Carter YF no es el cárter"),
+    ("JTA LAT.CARTER DEUTZ 514 2 C.", "Junta para Cárter DEUTZ 514 1114 2 CIL. - 2,7/2,9/3,2 - "
+     "F2L (D1540)", "distinta", "IMPERIAL / ILLINOIS: la tapa lateral del cárter"),
+    ("Juego de juntas para Carburador CITROEN 3CV SOLEX 69/73", "JUNTAS CITROEN 3CV 74/9 SOLEX",
+     "distinta", "ILLINOIS / JL: los años de dos cifras con barra"),
+    ("Juego de juntas para Carburador CITROEN 3CV SOLEX 69/73", "JUNTAS CITROEN 3CV 70/3 SOLEX",
+     "misma", "ILLINOIS / JL: los mismos años"),
+    ("Inyector de combustible Renault Megane Clio Magneti Marelli aro gris.",
+     "INYECTOR LEICJ051 RENAULT CLIO - SCENIC 2 0 16V - LAGUNA II 1 8 - TRAFFIC II 2 0 ARO VERDE "
+     "REF ORIG MARELLI IWP 042", "distinta", "CRI-FA / FISPA: el aro de color"),
+    ("Termostato Ford Fiesta Focus Ecosport 1.6 Sigma Ka 1.5 Sigma 82 grados .",
+     "TERMOSTATO COMPLETO 97010 FORD FIESTA 1 6 8V ROCAM FLEX 05 ECOSPORT 1 6 8V ROCAM FLEX 05",
+     "distinta", "CRI-FA / FISPA: Sigma no es Rocam"),
+    ("Termostato para carcaza Volkswagen Up Fox Gol 1.0 12V Fox Suran Saveiro 1.6 16V 80 Grados .",
+     "TERMOSTATO COMPLETO 97043 Vw Fox Suran Golf POLO SAVEIRO 1 6 16V Msi - VW UP 1 0 12V",
+     "distinta", "CRI-FA / FISPA: el termostato solo contra el que trae la carcasa"),
+    ("KIT DE CORREA POLY V LAKN32000A1 FIAT FIORINO - UNO - STRADA 1.3 MPI - PALIO - PUNTO",
+     "CORREA POLY V 3PK905 PALIO/SIENA 1.3 16v Fire/PUNTO 1.4-FIORINO Bosch", "distinta",
+     "FISPA / JL: el kit contra la correa suelta"),
+    ("Juego de juntas para Turbo Compresor M. BENZ SALIDA TURBO (ESPÁRRAGOS 10MM)",
+     "Juego de juntas para Turbo Compresor M. BENZ SALIDA TURBO (ESPÁRRAGOS 8MM)", "distinta",
+     "ILLINOIS: los espárragos del turbo"),
+    ("Junta Tapa de Cilindros JOHN DEERE 3530 4420 4530 - 5,4/5,9 - 6329D (119MM)",
+     "Junta Tapa de Cilindros JOHN DEERE 3420 6 CIL. - 5,0 - 303 (115MM)", "distinta",
+     "ILLINOIS: el diámetro del cilindro"),
+    ("Junta carter aceite IVECO Euro trakker - Euro star 89/ motor 8210.42L/K",
+     "JTA RAD.ACEITE IVECO EURO TRA", "distinta", "TARANTO / IMPERIAL: el radiador de aceite"),
+    ("JTA BASE CARB F. SIERRA 1.6 cc", "JUNTAS SIERRA 1.6 1983/86 WEBER", "distinta",
+     "IMPERIAL / JL: la base del carburador contra el juego"),
+    ("JUNTA TAPA CUBA HOLLEY- FORD", "JUNTA TAPA CUBA Renault 18/Ford SIERRA TEIE- SEVEL",
+     "distinta", "TARANTO / JL: TEIE es un Solex"),
+    ("JUNTA BOMBA DE AGUA - TORINO", "JTA CODO AGUA TORINO 4/7 B.", "distinta",
+     "TARANTO / IMPERIAL: el codo no es la bomba"),
 ]
 
 

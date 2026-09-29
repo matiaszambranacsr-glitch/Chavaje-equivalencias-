@@ -534,7 +534,10 @@ def clasificar_repuesto(descripcion):
     return familia_de_la_forma[hallado.group(1)] if hallado else "Sin clasificar"
 
 
-_RE_ES_KIT = re.compile(r'\b(KIT|KITS|JUEGO|JUEGOS|JGO|JGOS|COMBO|SET)\b')
+# COMBO solo con «DE» o una cantidad de filtros atrás: «COMBO 3 FILTROS», «COMBO DE
+# FILTROS». En el catálogo real casi todas las veces que aparece es la Chevrolet/Opel Combo, y
+# «Junta para Cárter CHEVROLET CORSA … COMBO DIESEL» quedaba como juego de juntas.
+_RE_ES_KIT = re.compile(r'\b(KIT|KITS|JUEGO|JUEGOS|JGO|JGOS|SET|COMBO(?= (?:\d+ FILTROS?|DE)\b))\b')
 
 
 # Un kit que no dice «kit»: nombra entre paréntesis los DOS códigos que trae, sumados.
@@ -739,6 +742,11 @@ PALABRAS_DE_CONTEXTO = {
 # nombres de PIEZA: por eso este conjunto sirve para descartar modelos y NO sirve para
 # descartar palabras del núcleo de la firma, que es justo lo contrario.
 PALABRAS_NO_MODELO = {
+    # Lugares de la pieza que no estaban en este vocabulario y por eso no llegaban a la pieza:
+    # ver _LUGARES_DE_LA_PIEZA.
+    "HIDRAULICA", "HIDRAULICO", "TRANSMISION", "EMBRAGUE", "PRECAMARA",
+    # «JTA J.DEERE MANDO FINAL»: dice de qué es la junta aunque no sea un lugar del motor.
+    "MANDO",
     # Lugar de la pieza que no estaba: ver _LUGARES_DE_LA_PIEZA.
     "BOTADORES", "BOTADOR",
     "JUNTA", "JUNTAS", "JUEGO", "DESPIECE", "TAPA", "CILINDROS", "VALVULAS", "CARTER", "BOMBA",
@@ -771,7 +779,7 @@ PALABRAS_NO_MODELO = {
     "ALTERNADOR", "ALTERNADORES", "ARRANQUE", "ROTACION", "DETONACION", "TEMPERATURA",
     "PRESION", "RADIADOR", "CALEFACTOR", "ELECTROVENTILADOR", "EGR", "MAP", "ABS", "MASA",
     "AIRE", "CANO", "CANOS", "TUBO", "CORREA", "DISTRIBUCION", "DIST", "SURTIDOR", "AFORADOR",
-    "CUERPO", "VASO", "EXPANSION", "NIVEL", "STOP",
+    "CUERPO", "VASO", "EXPANSION", "NIVEL", "STOP", "CODO",
 } | MARCAS_DE_REPUESTO
 
 

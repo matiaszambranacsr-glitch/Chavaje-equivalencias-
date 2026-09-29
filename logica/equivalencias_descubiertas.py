@@ -722,7 +722,7 @@ _MOTIVOS_DE_OTRA_PIEZA = ("rubros distintos", "posiciones distintas", "siglas di
                           "distinta cantidad de cilindros", "motores de distintas válvulas",
                           "años distintos", "motores distintos",
                           "sobremedida distinta", "presiones distintas",
-                          "combustibles distintos")
+                          "combustibles distintos", "aros de distinto color", "medidas distintas")
 
 
 def _por_que_chocan(productos):
@@ -1817,8 +1817,8 @@ def aplicar_decisiones(lote):
 TAMANO_DE_LA_MUESTRA = 30
 
 # Ver «el abanico» en _analizar_lote_pendiente().
-PRODUCTOS_DISTINTOS_PARA_ABANICO = 4
-MEJORES_EMPATADOS_QUE_SE_ACEPTAN = 2
+PRODUCTOS_DISTINTOS_PARA_ABANICO = 3
+MEJORES_EMPATADOS_QUE_SE_ACEPTAN = 1
 
 
 def tamano_de_la_muestra(total):
@@ -2029,7 +2029,8 @@ def _texto_sin_medidas(texto):
 # código. Un grupo así se descarta entero; mirar unos ejemplos alcanza para confirmarlo.
 # Los demás —«nada dice», el precio, un código que apunta a dos productos— son dudas, y se
 # resuelven como las limpias: con una muestra de control.
-_MOTIVOS_QUE_SE_DESCARTAN = ("🔤 ", "📐 NO coinciden", "🧯", "📦", "🧩")
+_MOTIVOS_QUE_SE_DESCARTAN = ("🔤 ", "📐 NO coinciden", "🧯", "🔎", "📦", "🧩",
+                             "⚠️ Un número de fábrica que")
 
 # Qué motivo de rechazo corresponde a cada grupo, para guardarlo al descartarlo entero.
 _MOTIVO_DE_RECHAZO_DEL_GRUPO = (
@@ -2037,13 +2038,20 @@ _MOTIVO_DE_RECHAZO_DEL_GRUPO = (
       "🔤 cilindradas distintas", "🔤 distinta cantidad de cilindros",
       "🔤 motores de distintas válvulas"), "otro_auto"),
     (("📐 NO coinciden", "🔤 distinta cantidad de vías", "🔤 largo de cable distinto",
-      "🔤 temperaturas distintas"), "variante"),
+      "🔤 temperaturas distintas", "🔤 medidas distintas"), "variante"),
     (("🔤 juegos distintos",), "juego"),
     (("🔤 piezas de lugares distintos", "🔤 sensores de tipos distintos",
       "🔤 bujías de tipos distintos", "🔤 posiciones distintas", "🔤 siglas distintas",
-      "🔤 carburadores distintos", "🧩"), "otra_pieza"),
-    (("🧯",), "codigo"),
+      "🔤 carburadores distintos", "🔤 aros de distinto color", "🧩"), "otra_pieza"),
+    (("🧯", "🔎"), "codigo"),
+    (("⚠️ Un número de fábrica que",), "otra_pieza"),
 )
+
+
+def _aviso_codigo_fuera_de_las_referencias(codigo):
+    """La alarma 🔎 de un código de fábrica que no está en la lista de números del final."""
+    return (f"🔎 «{codigo}» no aparece entre los números de fábrica que la descripción lista al "
+            "final: se sacó del texto del medio, donde van los motores y los modelos")
 
 
 def motivo_para_agrupar(fila):
@@ -2120,6 +2128,14 @@ def _numero_sin_marca(codigo):
     limpio = sanitizar(codigo or "")
     sub = _submarca_del_codigo(codigo)
     return limpio[:-len(sub)] if sub and limpio.endswith(sub) else limpio
+
+
+def _texto_sin_codigos(descripcion, codigo):
+    """La descripción normalizada sin el código propio, para reconocer dos productos de la misma
+    lista que se describen igual."""
+    limpio = sanitizar(codigo or "")
+    return " ".join(w for w in normalizar_texto(descripcion or "").split()
+                    if not (len(sanitizar(w)) >= 3 and sanitizar(w) in limpio))
 
 
 def _dos_que_citan_el_mismo_numero(cod_a, desc_a, cod_b, desc_b):
@@ -2221,6 +2237,84 @@ def _es_accesorio_del_numero(numero, cod, desc, otros):
             return (f"es un kit que trae la pieza con el número {numero}, no un reemplazo "
                     "de ella")
     return ""
+
+
+# Las palabras de la firma que dicen DÓNDE va la pieza, para comparar dos filas que citan el
+# mismo número. «TAPA ARBOL DE LEVAS» y «TAPA DE VALVULAS» son la misma tapa en muchos motores
+# (en el Fiat Tipo, 7679315 es las dos, en los mismos espesores), así que cuentan igual.
+# (Se suma a _LUGARES_DE_LA_PIEZA adentro de la función: descripciones.py se carga después.)
+_LUGARES_EXTRA_PARA_EL_NUMERO = {"INYECTOR", "CAPUCHON"}
+_LUGAR_QUE_ES_EL_MISMO = {"LEVAS": "VALVULA", "SALIDA": "ESCAPE"}
+# Las que nombran la familia y no la pieza: «Despiece», «Juego de…», «KIT DE REPARACION».
+_CABEZAS_QUE_NO_DICEN_LA_PIEZA = {"DESPIECE", "JUEGO", "JUEGOS", "KIT", "JGO", "REPUESTO"}
+_RE_FORMA_DE_ILLINOIS = re.compile(r"^[A-Z][a-záéíóú]+\s")
+_RE_TAMANO_DE_LA_PIEZA = re.compile(r"\b(CHIC[AO]|GRANDE)\b")
+_RE_CONTENEDOR_DE_LA_PIEZA = re.compile(
+    r"\b(?:CAJA|BASE|CARCASA|SOPORTE)\s+(?:DEL?\s+)?(TERMOSTATO|FILTRO|INYECTOR|BOMBA)\b")
+
+
+def _lugares_para_el_numero(desc):
+    pieza = (firma_de_producto(desc or "") or {}).get("pieza") or set()
+    lugares = {_LUGAR_QUE_ES_EL_MISMO.get(p, p) for p in pieza
+               if p in _LUGARES_DE_LA_PIEZA or p in _LUGARES_EXTRA_PARA_EL_NUMERO}
+    # «4.203 INY. INDIRECTA», «C3L INY.»: la inyección del motor, no un lugar de la pieza. Con
+    # otro lugar al lado no cuenta, y era lo que hacía coincidir a la junta de escape con la de
+    # cárter del mismo Perkins.
+    if len(lugares) > 1:
+        lugares.discard("INYECCION")
+    return lugares
+
+
+def _otra_pieza_que_cita_el_numero(desc, otros):
+    """(código, lugares propios, lugares del otro) del primero de `otros` —[(código, desc)]—
+    que es OTRA pieza, o None. Otra pieza es un lugar distinto y ninguno en común —ESCAPE
+    contra VALVULA, FILTRO contra CARTER— o la caja de la pieza contra la pieza: «CAJA
+    TERMOSTATO» y «TERMOSTATO» con el mismo número. Distinto auto, cilindrada o cantidad de
+    cilindros no cuenta: una junta de escape por cilindro sirve para el motor de 4 y el de 6."""
+    propios = _lugares_para_el_numero(desc)
+    texto = normalizar_texto(desc or "")
+    cont = _RE_CONTENEDOR_DE_LA_PIEZA.search(texto)
+    cabeza = _cabeza_de(desc)
+    juego = tipo_de_juego_de_motor(desc)
+    tamano = set(_RE_TAMANO_DE_LA_PIEZA.findall(texto))
+    for otro, d in otros:
+        ajenos = _lugares_para_el_numero(d)
+        if propios and ajenos and not (propios & ajenos):
+            return (otro, "/".join(sorted(propios)), "/".join(sorted(ajenos)))
+        # Dos juegos distintos del mismo motor: ILLINOIS les pone a todos la misma lista de
+        # números —«Juego de Descarbonización CUMMINS QSB // 4089998/4025157» y «Juego Inferior
+        # CUMMINS QSB // 4089998/4025157»—, y cada número es de uno solo.
+        juego_otro = tipo_de_juego_de_motor(d)
+        if juego and juego_otro and juegos_que_chocan(juego, juego_otro):
+            return (otro, f"juego {juego}", f"juego {juego_otro}")
+        # «ADMISION CHICA» contra «ADMISION GRANDE» del mismo Cummins.
+        tamano_otro = set(_RE_TAMANO_DE_LA_PIEZA.findall(normalizar_texto(d or "")))
+        if tamano and tamano_otro and not (tamano & tamano_otro):
+            return (otro, "/".join(sorted(tamano)), "/".join(sorted(tamano_otro)))
+        # Sin lugares que comparar, el sustantivo: «ARANDELA CAMISA … // 1118500» contra
+        # «1118500 RADIADOR INTERCOLLER» de Scania. Solo con la forma de ILLINOIS («Despiece
+        # SCANIA …», «Junta …»), que pone el número como el SUYO. FISPA lo cita: la rampa nombra
+        # el número de sus inyectores y la polea el del alternador, y eso no las hace otra pieza
+        # con el mismo número. Y solo sustantivos de pieza: «Despiece IVECO 150 TURBO» no
+        # tiene cabeza, tiene un modelo. Dos juegos del mismo motor (descarbonización, inferior)
+        # los separa la regla de juegos, a partir de la fila que trajo el número.
+        cabeza_otro = _cabeza_de(d)
+        if (not (propios & ajenos) and cabeza and cabeza_otro
+                and cabeza not in cabeza_otro and cabeza_otro not in cabeza
+                and {cabeza, cabeza_otro} <= PALABRAS_NO_MODELO
+                and not {cabeza, cabeza_otro} & _CABEZAS_QUE_NO_DICEN_LA_PIEZA
+                and not (tipo_de_juego_de_motor(desc) and tipo_de_juego_de_motor(d))
+                and _RE_FORMA_DE_ILLINOIS.match(desc or "") and _RE_FORMA_DE_ILLINOIS.match(d or "")):
+            return (otro, cabeza, cabeza_otro)
+        texto_otro = normalizar_texto(d or "")
+        cont_otro = _RE_CONTENEDOR_DE_LA_PIEZA.search(texto_otro)
+        if bool(cont) != bool(cont_otro):
+            pieza = (cont or cont_otro).group(1)
+            sin_caja = texto_otro if cont else texto
+            if re.search(rf"\b{pieza}\b", sin_caja) and not re.search(r"\bJUNTA", sin_caja):
+                caja = (cont or cont_otro).group(0)
+                return ((otro, caja, pieza) if cont else (otro, pieza, caja))
+    return None
 
 
 def _numero_de_un_componente(numero, cod, desc):
@@ -2686,21 +2780,44 @@ def tipo_de_alarma(alarma):
     if m:
         medidas = [p.split(":")[0].strip() for p in m.group(1).split(";")]
         return "📐 NO coinciden: " + " y ".join(medidas)
+    m = re.match(r"⚠️ El código .+? apunta a más de un producto de (.+?) — y «", alarma)
+    if m:
+        return (f"⚠️ Un número de fábrica que {m.group(1)} le pone a piezas distintas: "
+                "aprobarlo las haría equivalentes")
     m = re.match(r"⚠️ El código .+? apunta a más de un producto de (.+?) — ", alarma)
     if m:
         return (f"⚠️ Un código que apunta a más de un producto de {m.group(1)} — alguno de los "
                 "dos está mal cargado")
+    if alarma.startswith("🎚️ "):
+        return alarma
+    if alarma.startswith("🪞 "):
+        return ("🪞 La otra lista tiene varios productos con la misma descripción y el texto no "
+                "dice cuál es este")
     if alarma.startswith("🪭 "):
         # «emparejado con 4 productos», «con 5», «con 6»...: cada cantidad era un grupo aparte, y
         # en el barrido real eran 30 grupos de la misma cosa.
         return ("🪭 Uno de los dos está emparejado con varios productos distintos de la otra "
                 "lista y este no es el que mejor coincide")
+    if alarma.startswith("🔎 «"):
+        return ("🔎 El código de fábrica se sacó del texto del medio, donde van los motores y los "
+                "modelos, y no de la lista de números del final")
     if alarma.startswith("🧯 «") and "no es un código de fábrica" in alarma:
         return "🧯 Lo que se tomó como código de fábrica es un modelo, una medida o un año"
     if alarma.startswith("🚫 Código ") and " parece una " in alarma:
         return "🚫 Uno de los dos códigos parece una medida o una especificación"
     # «63 vs 53 cm», «120/105 vs 98»: el dato de cada par. Lo que decide —que el largo, las
     # temperaturas o las vías no son las mismas— es igual para todos.
+    if alarma.startswith("🔤 una de las dos no dice de qué es la junta"):
+        return "🔤 Una de las dos no dice de qué es la junta: puede ser esa o no"
+    if alarma.startswith("🔤 una de las dos no dice para qué auto es"):
+        return "🔤 Una de las dos no dice para qué auto es: puede ir en ese o no"
+    if alarma.startswith("🔤 el largo de cable se parece"):
+        return "🔤 El largo de cable se parece pero no es el mismo: puede ser cómo lo mide cada lista"
+    if alarma.startswith("🔤 un juego de juntas de"):
+        return ("🔤 Un juego de juntas de un lugar contra la junta de ese lugar: algunas listas "
+                "llaman «junta» al juego")
+    if alarma.startswith("🔤 el mismo auto con otra cilindrada"):
+        return ("🔤 Un sensor del mismo auto con otra cilindrada: puede servir para las dos, o no")
     if alarma.startswith("🔤 un nombre de modelo de marcas distintas"):
         return ("🔤 Solo comparten un nombre de modelo, y cada una nombra otra marca: puede ser "
                 "otra cosa en cada una")
@@ -2898,6 +3015,43 @@ def _analizar_lote_pendiente(lote, limite=None, desde=0):
             candidatos_a_origen.setdefault(clave, set()).add(cod_otro)
     origen_del_codigo = {k: next(iter(v)) for k, v in candidatos_a_origen.items() if len(v) == 1}
 
+    # Y LOS QUE YA ESTÁN APROBADOS con el mismo número, o esperando en OTRA lista de la cola.
+    # Mirando solo este lote, el aforador de BMW —aprobado hace rato con su número— no estaba, y
+    # los dos kits de reparación que citan ese número quedaban solos: dos kits iguales, nada que
+    # decir, y pasaban a verde como si el kit FUERA la bomba. Y el 36866416 de PERKINS está en
+    # la junta de escape del lote del barrido y en la de cárter del lote de ILLINOIS: cada lote
+    # veía una sola. Con todos adentro del grupo, los kits son lo que son (ver
+    # _es_accesorio_del_numero()) y las piezas distintas se ven. No entran a
+    # candidatos_a_origen: el origen es el de la fila que está en la cola.
+    _oem_ids = {}
+    for f in filas:
+        if "OEM" in (f["tipo_a"], f["tipo_b"]):
+            _oid, _ocod = ((f["a"], f["cod_a"]) if f["tipo_a"] == "OEM" else (f["b"], f["cod_b"]))
+            _oem_ids[_oid] = sanitizar(_ocod)
+    try:
+        for _tanda, _marcas in en_tandas(list(_oem_ids), usos_por_consulta=3):
+            c.execute(f"""SELECT e.producto_a_id AS a, e.producto_b_id AS b,
+                                 p.id AS otro, p.codigo_raw AS cod, p.descripcion AS descr,
+                                 m.nombre AS marca
+                          FROM (SELECT producto_a_id, producto_b_id FROM equivalencias
+                                UNION
+                                SELECT producto_a_id, producto_b_id FROM equivalencias_pendientes
+                                 WHERE COALESCE(lote, '') <> ?) e
+                          JOIN productos p ON p.id = CASE WHEN e.producto_a_id IN ({_marcas})
+                                                          THEN e.producto_b_id
+                                                          ELSE e.producto_a_id END
+                          JOIN marcas m ON m.id = p.marca_id
+                          WHERE (e.producto_a_id IN ({_marcas}) OR e.producto_b_id IN ({_marcas}))
+                            AND m.tipo <> 'OEM'""", [lote] + _tanda + _tanda + _tanda)
+            for r in c.fetchall():
+                _oid = r["a"] if r["a"] in _oem_ids else r["b"]
+                _clave_ap = (_oem_ids[_oid], r["marca"])
+                if _clave_ap in apuntados and r["otro"] not in apuntados[_clave_ap]:
+                    apuntados[_clave_ap][r["otro"]] = r["cod"]
+                    descripcion_de.setdefault(r["cod"], r["descr"] or "")
+    except sqlite3.OperationalError as _err:
+        anotar_error("analizar_lote_pendiente", _err)
+
     # EL JUEGO Y LA PIEZA QUE TRAE ADENTRO, cuando comparten el número de fábrica.
     # _uno_trae_al_otro() ya resuelve el caso en que el kit NOMBRA el código de la pieza
     # —«KIT CAB Y BUJ (LEIHTT06SC/LSPKR6E)»—, pero en esta lista eso no pasa nunca: el juego y
@@ -2945,6 +3099,7 @@ def _analizar_lote_pendiente(lote, limite=None, desde=0):
     ambiguos = set()
     accesorios = {}           # (clave, código del accesorio) -> la relación, para apartarlo
     duenos = {}               # (clave, código de la pieza) -> el accesorio que trajo el número
+    choques = {}              # (clave, código) -> (el otro, sus lugares) si es otra pieza
     for k, v in apuntados.items():
         if len(v) < 2:
             continue
@@ -2954,30 +3109,47 @@ def _analizar_lote_pendiente(lote, limite=None, desde=0):
         for cods in por_submarca.values():
             if len(cods) < 2 or son_variantes_de_la_misma_pieza(cods):
                 continue
-            sin_explicar = False
-            for i in range(len(cods)):
-                for j in range(i + 1, len(cods)):
-                    if not _dos_que_citan_el_mismo_numero(cods[i], descripcion_de.get(cods[i]),
-                                                          cods[j], descripcion_de.get(cods[j])):
-                        sin_explicar = True
-            if sin_explicar:
-                ambiguos.add(k)
-                continue
-            # Explicado. Si alguno es un ACCESORIO o un kit que trae la pieza del número —el
-            # capuchón que «monta en bobina 70213», el kit de reparación del aforador—, su par
+            # Primero se apartan los ACCESORIOS o kits que traen la pieza del número —el
+            # capuchón que «monta en bobina 70213», el kit de reparación del aforador—: su par
             # con el número no es una equivalencia y se aparta con los kits. Ver
-            # _es_accesorio_del_numero().
+            # _es_accesorio_del_numero(). Va antes de decidir si el grupo se explica: el
+            # aforador de BMW lo citan DOS kits de reparación, los dos kits no se explican
+            # entre sí, y el grupo quedaba «ambiguo» sin apartar a ninguno.
             for cod in cods:
                 relacion = _es_accesorio_del_numero(k[0], cod, descripcion_de.get(cod),
                                                     [(o, descripcion_de.get(o))
                                                      for o in cods if o != cod])
                 if relacion:
                     accesorios[(k, cod)] = relacion
+            _apartados = [cod for cod in cods if (k, cod) in accesorios]
+            _quedan = [cod for cod in cods if (k, cod) not in accesorios]
+            sin_explicar = any(
+                not _dos_que_citan_el_mismo_numero(_quedan[i], descripcion_de.get(_quedan[i]),
+                                                   _quedan[j], descripcion_de.get(_quedan[j]))
+                for i in range(len(_quedan)) for j in range(i + 1, len(_quedan)))
+            # OTRA PIEZA CON EL MISMO NÚMERO, se expliquen o no. Que las cabezas sean distintas
+            # «explica» por qué dos filas citan el número —el microfiltro y el inyector—, pero
+            # si las dos lo ponen como SUYO no lo explica: «Junta Salida de Escape PERKINS …
+            # (36866416)», «Junta para Cárter PERKINS … (36866416)» y «36866416/70490267
+            # ADAPTADOR» no pueden ser las tres esa pieza. Lo que sí explica —uno nombra al
+            # otro, la misma pieza en otro material— no se mira.
+            for cod in _quedan:
+                _otros_ch = [(o, descripcion_de.get(o)) for o in _quedan if o != cod
+                             and (_dos_que_citan_el_mismo_numero(
+                                      cod, descripcion_de.get(cod), o, descripcion_de.get(o))
+                                  or "piezas distintas").startswith("piezas distintas")]
+                _choque = _otra_pieza_que_cita_el_numero(descripcion_de.get(cod), _otros_ch)
+                if _choque:
+                    choques[(k, cod)] = _choque
+                    # Y del otro lado también: la regla del sustantivo pide que los dos sean
+                    # palabras de pieza y no siempre se cumple mirando desde el otro.
+                    choques.setdefault((k, _choque[0]), (cod, _choque[2], _choque[1]))
+            if sin_explicar:
+                ambiguos.add(k)
+                continue
             # Si queda UNA sola pieza que no es accesorio, el número es de ella: el kit de
             # reparación de la bomba cita el número de la bomba. Esa pieza queda respaldada por
             # la fila del kit, como la variante por la fila de origen (ver _variante_del_origen).
-            _apartados = [cod for cod in cods if (k, cod) in accesorios]
-            _quedan = [cod for cod in cods if (k, cod) not in accesorios]
             if _apartados and len(_quedan) == 1:
                 duenos[(k, _quedan[0])] = _apartados[0]
 
@@ -3073,9 +3245,19 @@ def _analizar_lote_pendiente(lote, limite=None, desde=0):
                 f["relacion"] = _componente
                 relacionadas.append(f)
                 continue
-            if _clave in ambiguos and not _variante:
+            # El número en varias filas de la misma lista. Si son la MISMA pieza para otros
+            # autos —la junta de escape del Falcon de 4 y de 7 bancadas, la del Escort CHT y la
+            # del Renault 9 (el CHT es un motor Renault)— es un número que sirve para varios
+            # motores y no hay nada mal cargado. Si alguna es OTRA pieza —la junta de escape, la
+            # de tapa de válvulas y la de tapa de cilindros del Mazda con el mismo número, el
+            # «block a filtro» con el de la junta de cárter— el número une piezas distintas y
+            # aprobarlo las haría equivalentes: rojo, sin saber cuál de las filas es la dueña.
+            if not _variante and (_clave, _cod_propio) in choques:
+                _otro_ch, _lug_propio, _lug_otro = choques[(_clave, _cod_propio)]
                 alarmas.append(f"⚠️ El código {oem} apunta a más de un producto de "
-                                f"{marca_otro} — alguno de los dos está mal cargado")
+                                f"{marca_otro} — y «{_otro_ch}» es otra pieza "
+                                f"({_lug_propio} contra {_lug_otro}): el número uniría piezas "
+                                "distintas")
         # ¿Es un kit y la pieza que trae adentro? Entonces no se pregunta: no es una
         # equivalencia y ya lo sabemos. Se aparta y la pantalla lo dice en una línea, en vez de
         # mezclarlo con los que sí hay que decidir. Los nuevos ya no entran a la cola
@@ -3133,6 +3315,11 @@ def _analizar_lote_pendiente(lote, limite=None, desde=0):
         # la descripción coincide siempre —el producto de fábrica se crea copiando la de la
         # fila—, así que esa evidencia no dice nada del código.
         _tope_por_el_codigo = 100.0
+        # El número de fábrica que la misma lista le pone a piezas distintas: aprobarlo las
+        # haría equivalentes, así que no hay evidencia a favor que lo salve.
+        if any("es otra pieza (" in a and a.startswith("⚠️") for a in alarmas):
+            puntaje = min(puntaje, 15.0)
+            _tope_por_el_codigo = 15.0
         # Y un código que parece una medida no se aprueba sin mirar, aunque la descripción
         # coincida entera: «Materiales para junta CORCHO Y GOMA» contra «800MM.X600MM» llegaba
         # a 65 —100 por la descripción igual, menos 35—. Los retenes y o'rings, donde la medida
@@ -3183,22 +3370,25 @@ def _analizar_lote_pendiente(lote, limite=None, desde=0):
                 break
 
         # Y el que se levantó del texto del medio en vez de la lista de referencias del final.
-        # Es más blando a propósito: saca el vínculo del botón de aprobar en bloque y lo manda
-        # a «conviene una mirada», sin darlo por perdido. Ver
-        # el_codigo_no_figura_entre_las_referencias().
+        # Ver el_codigo_no_figura_entre_las_referencias(). Era amarillo —«miralo»— y se miraron
+        # todos: los ~150 de la cola real eran motores o modelos (OM651.901, 4JB1TC, THD100,
+        # 19320E, DEERE1104, FERGUSONMF:165), el número de OTRA pieza (el del turbo en el juego
+        # de juntas del turbo) o un número real con la marca pegada adelante («AGCO SISU
+        # POWER836120129», «JOHN DEERER43413»). Los primeros son rojo. Los de la marca pegada
+        # NO: el número es el de la pieza, mal escrito, igual que los ~130 que la lista escribe
+        # así en el lugar de siempre y ya estaban en verde. Se corrigen todos juntos en
+        # Mantenimiento (ver codigos_de_fabrica_con_la_marca_pegada()), y el vínculo queda.
         for _lado, _tipo, _otra_desc in (("cod_a", "tipo_a", "desc_b"),
                                           ("cod_b", "tipo_b", "desc_a")):
             if f.get(_tipo) != "OEM":
                 continue
             _cod_ref = f.get(_lado) or ""
-            if _cod_ref and el_codigo_no_figura_entre_las_referencias(_cod_ref,
-                                                                      f.get(_otra_desc) or ""):
-                puntaje = min(puntaje, PUNTAJE_QUE_NO_LLEGA_A_APROBAR_SOLO)
-                _tope_por_el_codigo = min(_tope_por_el_codigo,
-                                          PUNTAJE_QUE_NO_LLEGA_A_APROBAR_SOLO)
-                _av_ref = (f"🔎 «{_cod_ref}» no aparece entre los números de fábrica que la "
-                           "descripción lista al final: parece sacado del texto del medio, "
-                           "donde van los motores. Miralo antes de aprobarlo")
+            if (_cod_ref and not despegar_marca_de_adelante(_cod_ref)
+                    and el_codigo_no_figura_entre_las_referencias(_cod_ref,
+                                                                  f.get(_otra_desc) or "")):
+                puntaje = min(puntaje, 15.0)
+                _tope_por_el_codigo = min(_tope_por_el_codigo, 15.0)
+                _av_ref = _aviso_codigo_fuera_de_las_referencias(_cod_ref)
                 if _av_ref not in alarmas:
                     alarmas.append(_av_ref)
                 break
@@ -3215,7 +3405,14 @@ def _analizar_lote_pendiente(lote, limite=None, desde=0):
             anotar_error("analizar_lote_pendiente", _err)
             a_favor, vetos, veredicto = [], [], ""
         if vetos:
-            puntaje = min(puntaje, 15.0)
+            # EL PRECIO SOLO NO ALCANZA PARA «CASI SEGURO MAL». Revisados a mano los 115 rojos
+            # que tenían solo el precio en contra, la mayoría eran piezas distintas —y lo decía
+            # el texto con abreviaturas que faltaban leer («AR.LEVA», «INSP.», «RESP CARTER»)—
+            # pero había pares que son la misma pieza con un precio raro: «JUNTA SALIDA ESCAPE
+            # RASTROJERO» contra la de ILLINOIS del Rastrojero, el juego de compresor Burmor.
+            # Con el precio como único veto el par va a revisión; con otro veto, a rojo.
+            _solo_precio = all(v.startswith("💲") for v in vetos)
+            puntaje = min(puntaje, 45.0 if _solo_precio else 15.0)
             # El precio y los rubros los miran las dos: las señales de arriba y
             # evidencia_cruzada(), cada una con su redacción («Los precios se diferencian 19
             # veces» y «los precios se diferencian 19 veces»). Comparando el texto exacto
@@ -3244,10 +3441,33 @@ def _analizar_lote_pendiente(lote, limite=None, desde=0):
             elif not alarmas:
                 alarmas.append("🤷 Nada dice que sean la misma pieza: no los une ningún código y "
                                "las descripciones no alcanzan para decirlo")
+        # EL NÚMERO QUE LA OTRA FILA DECLARA COMO SUYO. El producto de fábrica 5957865 nació de la
+        # junta TC-454 de ILLINOIS, y la TC-405 —otra junta de tapa del mismo 128— lo lista entre
+        # sus números: «(4309957/5957865/4444452)». Es la misma declaración que dio origen al
+        # vínculo de la TC-454, que queda en 100; la TC-405 quedaba en 65 porque su descripción
+        # no es la del nodo. Sin ninguna alarma —ni otra pieza con el mismo número, ni precio,
+        # ni texto en contra—, es tan firme como el de origen.
+        if (not vetos and not alarmas and "OEM" in (f.get("tipo_a"), f.get("tipo_b"))
+                and el_codigo_esta_entre_las_referencias(
+                    f["cod_a"] if f.get("tipo_a") == "OEM" else f["cod_b"],
+                    f.get("desc_b") if f.get("tipo_a") == "OEM" else f.get("desc_a"))):
+            puntaje = max(puntaje, 90.0)
+            a_favor = a_favor + ["🔢 la otra fila lo lista entre sus números de fábrica"]
         puntaje = min(puntaje, _tope_por_el_codigo)
         f["evidencia"] = a_favor
         f["veredicto"] = veredicto
 
+        # ROJO QUIERE DECIR «CASI SEGURO MAL», y eso lo dice solo una contradicción concreta: el
+        # texto (otra pieza, otro motor, otra cilindrada), las medidas, el rubro, un código de
+        # fábrica que no lo es. El precio, el abanico o «un código apunta a varios productos»
+        # restan, pero juntos podían bajar a rojo un par que el texto no contradice: el juego de
+        # juntas del compresor Burmor de TARANTO contra los de ILLINOIS quedaba en rojo por
+        # precio y abanico. Sin una contradicción, lo más bajo es revisión.
+        _contradiccion = (any(not v.startswith("💲") for v in vetos)
+                          or any(a.startswith(("🧯", "🔎 «")) or "es otra pieza (" in a
+                                 for a in alarmas))
+        if puntaje < 30 and not _contradiccion:
+            puntaje = 30.0
         puntaje = max(0.0, min(100.0, puntaje))
         # En revisión y sin ningún aviso, la pantalla no tenía cómo decir por qué: quedaba en
         # «Sin alarma puntual». Casi siempre es esto.
@@ -3294,8 +3514,14 @@ def _analizar_lote_pendiente(lote, limite=None, desde=0):
                                       set()).add((otro, desc_otro))
     _pieza_ab = {clave: piezas_del_abanico(cands) for clave, cands in _candidatos_ab.items()}
     _abanico = {clave: set(piezas.values()) for clave, piezas in _pieza_ab.items()}
-    _en_abanico = {clave for clave, bases in _abanico.items()
-                   if len(bases) >= PRODUCTOS_DISTINTOS_PARA_ABANICO}
+    # Con DOS candidatos distintos también, pero solo para decidir los amarillos: «Jgo.Jtas.
+    # Carburador PEUGEOT 404» (TARANTO) concordaba con el juego del Solex C34 y con el del
+    # Caresa de ILLINOIS, que son dos juegos distintos, y el texto no dice cuál. Los verdes no
+    # se tocan: con el umbral en dos para todos, 871 verdes bajaban y muchos eran la misma junta
+    # en otro material (ver PRODUCTOS_DISTINTOS_PARA_ABANICO).
+    _en_abanico = {clave for clave, bases in _abanico.items() if len(bases) >= 2}
+    _abanico_de_dos = {clave for clave in _en_abanico
+                       if len(_abanico[clave]) < PRODUCTOS_DISTINTOS_PARA_ABANICO}
     # Dentro del abanico se queda el que MEJOR coincide —más modelos, motor y cilindrada en
     # común (ver fuerza_de_la_coincidencia())— y los demás van a revisión. La junta de
     # ILLINOIS para la Hilux 2,8 motor 3L estaba emparejada con 11 de TARANTO de otros motores
@@ -3327,11 +3553,72 @@ def _analizar_lote_pendiente(lote, limite=None, desde=0):
             # Las otras variantes de la pieza que gana —otro espesor, otro material— no son
             # «otro candidato»: se quedan con ella.
             for f in pares_k:
+                if k in _abanico_de_dos and f["confianza"] >= 75:
+                    continue
                 if (_pieza_del_otro(f) not in _bases_mejores
                         or len(_bases_mejores) > MEJORES_EMPATADOS_QUE_SE_ACEPTAN):
                     _no_es_el_mejor.add((f["a"], f["b"]))
 
+    # EL ESPESOR QUE NO SE SABE. «junta tapa cil. Toyota 1kd-ftv» (TARANTO, sin espesor ni
+    # muescas) concordaba con las cuatro de ILLINOIS —TC-931-20 1M, 2M, 3M y 4M—, que son la
+    # misma junta en cuatro espesores: como mucho una es la suya, y el texto no dice cuál. Se
+    # mandan a revisión cuando la otra lista tiene dos o más espesores de esa junta.
+    _espesor_desconocido = set()
+    _pares_de = {}
     for f in evaluadas:
+        _pares_de.setdefault(f["a"], []).append(f)
+        _pares_de.setdefault(f["b"], []).append(f)
+    for (yo, _marca_otro, _sub), cands in _candidatos_ab.items():
+        _con_muescas = {}
+        for cod, desc in cands:
+            m = re.search(r"[- ](\d)M$", (cod or "").upper().strip())
+            if m and "CIL" in (desc or "").upper():
+                _con_muescas.setdefault(_pieza_ab[(yo, _marca_otro, _sub)].get((cod, desc)),
+                                        set()).add(m.group(1))
+        _bases_con_espesores = {b for b, ms in _con_muescas.items() if len(ms) >= 2}
+        if not _bases_con_espesores:
+            continue
+        for f in _pares_de.get(yo, ()):
+            lado_yo = "a" if f["a"] == yo else "b"
+            lado_otro = "b" if lado_yo == "a" else "a"
+            if f.get(f"marca_{lado_otro}") != _marca_otro:
+                continue
+            _cod_yo = (f.get(f"cod_{lado_yo}") or "").upper().strip()
+            _desc_yo = f.get(f"desc_{lado_yo}") or ""
+            if (re.search(r"[- ]\d{1}M$", _cod_yo)
+                    or re.search(r"(?i)ESP\.?:?\s*\(?\s*\d[.,]\d", _desc_yo)):
+                continue
+            _clave_otro = (f.get(f"cod_{lado_otro}"), f.get(f"desc_{lado_otro}"))
+            if _pieza_ab[(yo, _marca_otro, _sub)].get(_clave_otro) in _bases_con_espesores:
+                _espesor_desconocido.add((f["a"], f["b"]))
+
+    # LOS MELLIZOS DE LA OTRA LISTA. «Jgo.Jtas.Carburador FIAT 125» es la descripción de tres
+    # productos de TARANTO —250720, 250722 y 250723—, y los tres concordaban con el juego del
+    # Solex del 125 de ILLINOIS. Son tres juegos distintos (para otros carburadores del 125) y
+    # el texto no dice cuál es: como mucho uno es el equivalente. Solo baja a los amarillos: un
+    # verde lo es por algo más que el texto.
+    _mellizos = {}            # (a, b) -> los códigos mellizos
+    for (yo, _marca_otro, _sub), cands in _candidatos_ab.items():
+        _por_texto = {}
+        for cod, desc in cands:
+            _por_texto.setdefault(_texto_sin_codigos(desc, cod), []).append(cod)
+        for _cods in _por_texto.values():
+            if len(_cods) >= 2 and not son_variantes_de_la_misma_pieza(_cods):
+                for f in _pares_de.get(yo, ()):
+                    lado_otro = "b" if f["a"] == yo else "a"
+                    if f.get(f"cod_{lado_otro}") in _cods and 55 <= f["confianza"] < 75:
+                        _mellizos[(f["a"], f["b"])] = ", ".join(sorted(_cods)[:4])
+    for f in evaluadas:
+        if (f["a"], f["b"]) in _mellizos:
+            f["confianza"] = min(f["confianza"], 50.0)
+            f["alarmas"].append(f"🪞 La otra lista tiene varios productos con esta misma "
+                                f"descripción ({_mellizos[(f['a'], f['b'])]}) y el texto no dice "
+                                "cuál es este")
+    for f in evaluadas:
+        if (f["a"], f["b"]) in _espesor_desconocido and f["confianza"] > 15:
+            f["confianza"] = min(f["confianza"], 50.0)
+            f["alarmas"].append("🎚️ No dice el espesor, y la otra lista tiene esta junta en "
+                                "varios: como mucho una es la equivalente")
         if (f["a"], f["b"]) in _no_es_el_mejor:
             f["confianza"] = min(f["confianza"], 50.0)
             _cuantos_ab = max(

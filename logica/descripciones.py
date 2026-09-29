@@ -73,10 +73,21 @@ def rangos_de_anios(descripcion):
         hasta = int(_h) + (1900 if int(_h) >= 50 else 2000)
         if desde <= hasta <= desde + 40:
             salida.append((desde, hasta))
+    # Y como los escriben ILLINOIS y JL en los autos viejos, con dos cifras y una barra: «CITROEN
+    # 3CV SOLEX 69/73», «AMI 8 74/79», y JL también con una sola cifra al final: «3CV 70/3»,
+    # «3CV 74/9» (de 1974 a 1979). Solo de 1950 a 1999, que es donde se escriben así, y sin
+    # otra barra ni otro número pegado: «R9/11/12» son modelos.
+    for _d, _h in _RE_ANIOS_VIEJOS_CON_BARRA.findall(str(descripcion or "")):
+        desde = 1900 + int(_d)
+        hasta = (desde - desde % 10 + int(_h)) if len(_h) == 1 else 1900 + int(_h)
+        if desde <= hasta <= desde + 40:
+            salida.append((desde, hasta))
     return tuple(salida)
 
 
 _RE_ANIOS_DE_DOS_CIFRAS = re.compile(r"(?<![\d.,])(\d{2}) -(\d{2})(?![\d.,])")
+_RE_ANIOS_VIEJOS_CON_BARRA = re.compile(
+    r"(?<![\w/.,])([5-9]\d)/(\d{1,2})(?![\w/.,])(?!\s?(?:HP|CV|MM|KW|V|A)\b)")
 
 
 # Donde termina la parte que habla del auto. Después vienen los números de referencia —«//
@@ -223,6 +234,11 @@ PALABRAS_DE_CONTEXTO = {
 # nombres de PIEZA: por eso este conjunto sirve para descartar modelos y NO sirve para
 # descartar palabras del núcleo de la firma, que es justo lo contrario.
 PALABRAS_NO_MODELO = {
+    # Lugares de la pieza que no estaban en este vocabulario y por eso no llegaban a la pieza:
+    # ver _LUGARES_DE_LA_PIEZA.
+    "HIDRAULICA", "HIDRAULICO", "TRANSMISION", "EMBRAGUE", "PRECAMARA",
+    # «JTA J.DEERE MANDO FINAL»: dice de qué es la junta aunque no sea un lugar del motor.
+    "MANDO",
     # Lugar de la pieza que no estaba: ver _LUGARES_DE_LA_PIEZA.
     "BOTADORES", "BOTADOR",
     "JUNTA", "JUNTAS", "JUEGO", "DESPIECE", "TAPA", "CILINDROS", "VALVULAS", "CARTER", "BOMBA",
@@ -255,7 +271,7 @@ PALABRAS_NO_MODELO = {
     "ALTERNADOR", "ALTERNADORES", "ARRANQUE", "ROTACION", "DETONACION", "TEMPERATURA",
     "PRESION", "RADIADOR", "CALEFACTOR", "ELECTROVENTILADOR", "EGR", "MAP", "ABS", "MASA",
     "AIRE", "CANO", "CANOS", "TUBO", "CORREA", "DISTRIBUCION", "DIST", "SURTIDOR", "AFORADOR",
-    "CUERPO", "VASO", "EXPANSION", "NIVEL", "STOP",
+    "CUERPO", "VASO", "EXPANSION", "NIVEL", "STOP", "CODO",
 } | MARCAS_DE_REPUESTO
 
 
@@ -728,7 +744,10 @@ def clasificar_repuesto(descripcion):
     return familia_de_la_forma[hallado.group(1)] if hallado else "Sin clasificar"
 
 
-_RE_ES_KIT = re.compile(r'\b(KIT|KITS|JUEGO|JUEGOS|JGO|JGOS|COMBO|SET)\b')
+# COMBO solo con «DE» o una cantidad de filtros atrás: «COMBO 3 FILTROS», «COMBO DE
+# FILTROS». En el catálogo real casi todas las veces que aparece es la Chevrolet/Opel Combo, y
+# «Junta para Cárter CHEVROLET CORSA … COMBO DIESEL» quedaba como juego de juntas.
+_RE_ES_KIT = re.compile(r'\b(KIT|KITS|JUEGO|JUEGOS|JGO|JGOS|SET|COMBO(?= (?:\d+ FILTROS?|DE)\b))\b')
 
 # Un kit que no dice «kit»: nombra entre paréntesis los DOS códigos que trae, sumados.
 # «DISTRIBUCION C/BOMBA (LKTBN336 + LWPN007)» es el kit de distribución con la bomba de agua
@@ -754,7 +773,7 @@ _MARCAS_QUE_SE_PEGAN_AL_CODIGO = ("LUCAS", "FISPA", "BOSCH", "MARELLI", "MAGNETI
 
 # Para prefiltrar en SQL. Es a propósito más flojo que _RE_ES_KIT —acá «KIT» engancha también
 # dentro de «KITS»— porque después se confirma con es_un_kit(), que sí mira la palabra entera.
-PALABRAS_DE_KIT = ("KIT", "JUEGO", "JGO", "COMBO", "SET")
+PALABRAS_DE_KIT = ("KIT", "JUEGO", "JGO", "SET")
 
 
 # QUÉ JUEGO DE MOTOR ES. Un «Jgo.Jtas.P/Motor FORD FALCON» es el juego completo de juntas del
@@ -821,6 +840,8 @@ _RE_MOTOR_NUMERICO = re.compile(r'(?<![\d.,])(\d{1,2})[.\-](\d{2,3})(?![\d.,])')
 # Ver el control de firmas_compatibles(). «Junta para Cárter DEUTZ 913 TRACTOR 5 CIL.» contra
 # «JTA CARTER DEUTZ 913 3 CIL.»: el mismo motor en otra cantidad de cilindros tiene otro cárter.
 _RE_CANTIDAD_DE_CILINDROS = re.compile(r'\b(\d{1,2})\s*CIL(?:INDROS?|IND|S)?\b')
+# Y la lista: «JTA T.V. DEUTZ 913 3/4/5/6 CIL» sirve para los cuatro; se leía solo el 6.
+_RE_LISTA_DE_CILINDROS = re.compile(r'\b((?:\d/)+\d)\s*CIL(?:INDROS?|IND|S)?\b')
 # Y como escribe IMPERIAL: «JTA CARTER FIAT 400/500 - 3 C.», «JTA TERMOSTATO MWM X-10 4/6 C.»
 # (para 4 y 6 cilindros). Con el punto después de la C, y sin un punto ni un número pegado
 # adelante: «ORING 12x3.5 C.D.ACE» es una medida, no un motor de 5 cilindros.
@@ -836,8 +857,20 @@ _RE_CILINDROS_EN_EL_MOTOR = re.compile(r'(?<![\d.,])([2-8])[.\-]\d{2,3}T?(?![\d.
 # «Jta.Carter DEUTZ F4L 913» concordaba con «JTA CARTER DEUTZ 913 6 CIL.»: el mismo 913 con otra
 # cantidad de cilindros tiene otro cárter.
 _RE_CILINDROS_DEUTZ = re.compile(r'\bB?F([1-8])[LM]\b')
+# Los motores en V: «FORD F-100 V/8», «CAMRY 3.0 V6». Y los MWM que dicen los cilindros al
+# final: «D229-4», «D229-6», «D226-3». «Jta.Salida Escape FORD F-100 V/8» concordaba con la del
+# «F-100/150 … MWM D229-4»: el V8 naftero contra el diésel de cuatro.
+_RE_CILINDROS_EN_V = re.compile(r'\bV/?(6|8|10|12)\b')
+_RE_CILINDROS_MWM = re.compile(r'\bD22[5-9]-?([3-6])\b')
 # El puente del diferencial: «DANA 70 - F250/F350» no es el «DANA 44 FORD».
 _RE_PUENTE_DANA = re.compile(r'\bDANA\s?(\d{2})\b')
+# Las SERIES de motor Deutz: 912/913/914, 511/514 (con sus 1114/2114), 1011/1012/1013, 2011...
+# «Jta.Carter DEUTZ F4L 913» concordaba con la de la serie «514 1114 2114 4 CIL. … F4L»: los
+# dos de cuatro cilindros, pero de otra serie. Solo en descripciones que dicen DEUTZ.
+_RE_SERIE_DEUTZ = re.compile(r'(?<![\d.,])(91[0-4]|51[0-4]|1011|1012|1013|1015|2011|2012|2013|1114|2114)(?![\d.,])')
+# Lo que va en un motor diésel, dicho también como «2.1D» o «1.9 D»: ver firmas_compatibles(),
+# donde se usa para que una junta de carburador no concuerde con algo que va en un diésel.
+_RE_DIESEL_CON_LA_D = re.compile(r'\d\s?D\b(?![.,]?\d)|\bDIESEL\b|\bD[IÍ]ESEL\b|\bTDI\b|\bHDI\b|\bTD\b')
 
 # Los rubros donde nafta contra diésel dice que son piezas distintas: las del motor. Un sensor de
 # velocidad o un interruptor de stop suelen ser los mismos en las dos versiones del auto.
@@ -1435,8 +1468,25 @@ _ABREVIATURAS_CON_PUNTO = [
     (re.compile(r'\bM\.(?=\s?(?:ESC|ADM))'), "MULTIPLE "),
     (re.compile(r'\bS\.(?=\s?ESC)'), "SALIDA "),
     (re.compile(r'\bA\.\s?LEVAS?\b'), "ARBOL LEVAS "),
+    # «JTA TAPA AR.LEVA FIAT 128 0.5m»: la de la tapa del árbol de levas del 128, que no es la de
+    # tapa de cilindros. Sin leerla, solo la separaba el precio.
+    (re.compile(r'\bAR\.\s?LEVAS?\b'), "ARBOL LEVAS "),
+    # «JTA INSP. T.CIL. PEUGEOT XUD9» es la tapita de inspección, no la junta de la tapa.
+    (re.compile(r'\bINSP\b\.?'), "INSPECCION "),
+    (re.compile(r'\bPRECAM\b\.?'), "PRECAMARA "),
+    # «JTA BASE CARB. FIAT REGATTA 100» es la base del carburador.
+    (re.compile(r'\bBASE\s+CARB\b\.?'), "BASE CARBURADOR "),
+    # «JTA.C/TERMOST. J. DEERE», «JTA J.DEERE TAPA SUP. TRANSMIS»
+    (re.compile(r'\bTERMOST\b\.?'), "TERMOSTATO "),
+    (re.compile(r'\bTRANSMIS\b\.?'), "TRANSMISION "),
+    # «JUNTA BASE DIST.- VOLKSWAGEN» es la base del DISTRIBUIDOR de encendido, no la tapa de
+    # distribución («JTA T.DIST VW GOL»).
+    (re.compile(r'\bBASE\s+DIST\b\.?'), "BASE DISTRIBUIDOR "),
     (re.compile(r'\bC\.\s?VEL\b\.?'), "CAJA VELOCIDAD "),
     (re.compile(r'\bR\.\s?V\b\.?'), "RETEN VALVULA "),
+    # «JTA RAD.ACEITE IVECO EURO TRA» es la del radiador de aceite, y concordaba con la junta de
+    # cárter del mismo motor porque las dos dicen ACEITE e IVECO.
+    (re.compile(r'\bRAD\b\.?(?=\s?(?:ACEITE|AGUA))'), "RADIADOR "),
 ]
 
 
@@ -2081,6 +2131,68 @@ def _firma_del_texto(descripcion):
     return _firma_armada(descripcion)
 
 
+# SALIDAS DE REVISAR A MANO LOS AMARILLOS DEL BARRIDO. Cada una es un dato que las dos listas
+# escriben y que distingue dos piezas que el resto del texto hacía parecer la misma.
+_RE_CARBURADOR_CARTER = re.compile(r"\bCARTER\s+(YF|YH|RBS|WCD|BBD|AFB|WGD|WO|WA1)\b")
+_MODELOS_DE_SOLEX = {"TEIE", "PAIA", "EISA", "PIBT", "PICT"}
+# El aro de color de los inyectores y de los sensores de temperatura: «Inyector … Magneti
+# Marelli aro gris» (CRI-FA) contra «INYECTOR LEICJ051 … ARO VERDE … IWP 042» (FISPA), «Sensor
+# temperatura inyección VW Gol … Aro rojo» contra «… aro amarillo Masser» (JL). El color es
+# cómo los distinguen las propias listas.
+_RE_ARO_DE_COLOR = re.compile(
+    r"\bARO\s+(GRIS|VERDE|NEGRO|AZUL|ROJO|MARRON|BLANCO|AMARILLO|NARANJA|VIOLETA|CELESTE|BEIGE)\b")
+# Los espárragos de la junta del turbo: «SALIDA TURBO (ESPÁRRAGOS 10MM)» contra «(… 8MM)».
+_RE_ESPARRAGOS_MM = re.compile(r"\bESPARRAGOS?\s*(\d{1,2})\s*MM\b")
+# El diámetro del cilindro en una junta de tapa: «JOHN DEERE 3530 … 6329D (119MM)» contra la
+# del 3420 «303 (115MM)». Entre paréntesis y sin «ESP» adelante, que es el espesor.
+_RE_DIAMETRO_DE_LA_JUNTA = re.compile(r"\((\d{2,3})(?:[.,]\d+)?\s?MM\)")
+
+
+_RE_PARTE_DEL_CARBURADOR = re.compile(
+    r"(?<!C/)(?<!CON )(?<!SIN )\b(BASE|BSE|CUBA|PLACA|INT|INTE|INTERMEDIA)\b")
+_PARTE_DEL_CARBURADOR = {"BSE": "BASE", "INT": "INTERMEDIA", "INTE": "INTERMEDIA"}
+
+
+def _partes_del_carburador(texto):
+    """BASE, CUBA, PLACA o INTERMEDIA: de qué parte del carburador es una junta suelta
+    («JTA BSE CARB. WEBER FIAT 133», «JTA INT CARB WEBER 2 B RENAULT» de IMPERIAL)."""
+    return {_PARTE_DEL_CARBURADOR.get(p, p) for p in _RE_PARTE_DEL_CARBURADOR.findall(texto)}
+
+
+def _es_juego_de_carburador(firma):
+    """El juego de juntas del carburador: «Juego de juntas para Carburador …» (ILLINOIS),
+    «Jgo.Jtas.Carburador» (TARANTO), «JUNTAS SIERRA 1.6 WEBER» (JL, en plural y sin decir juego)."""
+    return bool(firma.get("kit") or re.match(r"(?:JUNTAS|JUEGO|JGO)\b", firma.get("texto") or ""))
+
+
+def _familia_de_motor_ford(texto):
+    """SIGMA, ROCAM, CHT o ENDURA, si la descripción nombra una sola. «Termostato Ford Fiesta
+    Focus Ecosport 1.6 Sigma» no es el del «FIESTA 1 6 8V ROCAM FLEX»: son dos motores."""
+    familias = set()
+    if re.search(r"\bSIGMA\b|\bZETEC\s+SE\b", texto):
+        familias.add("SIGMA")
+    if re.search(r"\bROCAM\b", texto):
+        familias.add("ROCAM")
+    if re.search(r"\bCHT\b", texto):
+        familias.add("CHT")
+    if re.search(r"\bENDURA\b", texto):
+        familias.add("ENDURA")
+    return next(iter(familias)) if len(familias) == 1 else None
+
+
+def _termostato_con_carcasa(texto):
+    """True si es el termostato con su carcasa, False si es solo el termostato, None si no dice.
+    «Termostato para carcaza Volkswagen Up Fox» (CRI-FA) es el termostato solo; «TERMOSTATO
+    COMPLETO … VERNET THK727411» (FISPA) viene con la carcasa."""
+    if "TERMOSTATO" not in texto:
+        return None
+    if re.search(r"\b(?:PARA|SIN)\s+(?:LA\s+)?CARCA[SZ]A\b", texto):
+        return False
+    if re.search(r"\bTERMOSTATO\s+COMPLETO\b|\b(?:CON|C/)\s*CARCA[SZ]A\b", texto):
+        return True
+    return None
+
+
 def _firma_armada(descripcion, producto_id=None, codigo_clean=None):
     """Saca de una descripción qué pieza es y para qué auto, para poder comparar entre marcas.
 
@@ -2109,6 +2221,10 @@ def _firma_armada(descripcion, producto_id=None, codigo_clean=None):
     # donde importa: 1.6 sigue siendo la cilindrada y 278.897 sigue siendo un código.
     limpio = _expandir_abreviaturas_con_punto(limpio)
     limpio = _RE_PUNTO_ENTRE_LETRAS.sub(r"\1 \2", limpio)
+    # «JUNTAS JEEP IKA CARTER YF» y «JUNTAS RAMBLER TORINO CARTER RBS» (JL) son del carburador
+    # Carter —YF y RBS son sus modelos—, no del cárter, y concordaban con la junta de cárter del
+    # Jeep y del Torino.
+    limpio = _RE_CARBURADOR_CARTER.sub(r"CARBURADOR \1", limpio)
     limpio = _RE_COMA_DECIMAL.sub(".", limpio)   # ver _RE_COMA_DECIMAL
     # El largo del cable ya se lee aparte (ver largo_de_cable_mm()); como palabras, «LARGO» y
     # «CABLE» hacían concordar a cualquier sonda de CRI-FA con cualquiera de FISPA: una de
@@ -2156,10 +2272,11 @@ def _firma_armada(descripcion, producto_id=None, codigo_clean=None):
     # o «ASTRA 1 8 - CELTA 1 4» son el 2.0, el 1.8 y el 1.4. Sin leerlas, «Sensor MAP Ford
     # Focus 1.8» no se podía separar del sensor del Focus 2.0 y quedaban empatados. Solo en las
     # descripciones que no traen NINGÚN número con punto o coma —las de esa lista—, y no
-    # después de una «X»: «M 12 x 1 5» es una rosca. Con la L pegada también: «ASTRA 1 8L».
+    # después de una «X» suelta: «M 12 x 1 5» es una rosca (y «HILUX 2 5 3 0» no: la X era la
+    # de HILUX, y se leía 5,3). Con la L o la T pegadas también: «ASTRA 1 8L», «BORA 1 8T».
     if not cilindradas and not re.search(r'\d[.,]\d', limpio):
         cilindradas.update(f"{a}.{b}" for a, b in
-                           re.findall(r'(?<!X )(?<!X)\b([0-6]) (\d)L?\b(?! ?(?:MM|X)\b)', limpio))
+                           re.findall(r'(?<!\bX )\b([0-6]) (\d)[LT]?\b(?! ?(?:MM|X)\b)', limpio))
 
     # Los modelos: palabras que quedan después de sacar la marca del auto, el ruido y los
     # números sueltos. Se buscan contra el catálogo propio para no inventar modelos.
@@ -2307,6 +2424,9 @@ def _firma_armada(descripcion, producto_id=None, codigo_clean=None):
     # junta de tapa de válvulas del Fire, y salía limpia contra ella.
     # Con las abreviaturas de IMPERIAL («TAPA TRASE.», «TAPA DELAN.», «TAPA DEL.») y sin
     # confundir la preposición: «TAPA DEL CARTER» no es la tapa delantera.
+    # «JTA.TAPA INSP.ARBOL DE LEVA» (TARANTO, en singular) es el lugar LEVAS de las otras listas.
+    if re.search(r"\bLEVA\b", limpio):
+        pieza.add("LEVAS")
     if re.search(r"\bTAPA\s+(TRAS\w*|POST\w*)", limpio):
         pieza.add("TAPATRASERA")
     if re.search(r"\bTAPA\s+(DELANT\w*|DELAN\w*|DEL\.|FRONTAL)", limpio):
@@ -2336,7 +2456,18 @@ def _firma_armada(descripcion, producto_id=None, codigo_clean=None):
     _marcas_carb = (pieza | set(palabras)) & (_MARCAS_DE_CARBURADOR - {"CARTER"})
     if "WB" in _marcas_carb:      # la abreviatura de JL: que no salga «carburadores distintos»
         _marcas_carb = (_marcas_carb - {"WB"}) | {"WEBER"}
+    # Los modelos de Solex sin la marca: «JUNTA TAPA CUBA Renault 18/Ford SIERRA TEIE» (JL) es de
+    # un Solex, y concordaba con la de la cuba del Holley del Ford V8.
+    if set(palabras) & _MODELOS_DE_SOLEX:
+        _marcas_carb = _marcas_carb | {"SOLEX"}
     if _marcas_carb and (pieza & {"JUNTA", "JUNTAS"} or "JUNTA" in (cabeza or "")):
+        pieza.add("CARBURADOR")
+    # «JUNTA TAPA CUBA Renault 18/Ford SIERRA» es la de la cuba del carburador: concordaba con
+    # la junta de tapa de cilindros del Sierra porque las dos dicen JUNTA y TAPA.
+    if "CUBA" in palabras and (pieza & {"JUNTA", "JUNTAS"} or "JUNTA" in (cabeza or "")):
+        pieza.add("CARBURADOR")
+    # «JUNTAS CITROEN VISA 2 bocas» (JL), «(2 BOCAS)» (ILLINOIS): las bocas son del carburador.
+    if re.search(r"\bBOCAS?\b", limpio) and (pieza & {"JUNTA", "JUNTAS"} or "JUNTA" in (cabeza or "")):
         pieza.add("CARBURADOR")
     # «JUNTA MPI FIAT TEMPRA 2.0 16V» (JL) es la de la inyección, y concordaba con «JTA T.C.
     # FIAT TEMPRA 2.0»: sin ningún lugar, la tapa de cilindros no tenía con qué chocar. Solo si
@@ -2370,19 +2501,33 @@ def _firma_armada(descripcion, producto_id=None, codigo_clean=None):
             "motores_numericos": {a + b for a, b in _RE_MOTOR_NUMERICO.findall(limpio)},
             "cilindros": {int(n) for n in
                           _RE_CANTIDAD_DE_CILINDROS.findall(limpio)
+                          + [x for grupo in _RE_LISTA_DE_CILINDROS.findall(limpio)
+                             for x in grupo.split("/")]
                           + [x for grupo in _RE_CILINDROS_CON_C.findall(limpio)
                              for x in grupo.split("/")]
                           + (_RE_CILINDROS_EN_EL_MOTOR.findall(limpio)
                              if _RE_MOTOR_QUE_DICE_SUS_CILINDROS.search(limpio) else [])
                           + (_RE_CILINDROS_DEUTZ.findall(limpio) if "DEUTZ" in limpio else [])
+                          + _RE_CILINDROS_EN_V.findall(limpio)
+                          + _RE_CILINDROS_MWM.findall(limpio)
                           if 1 <= int(n) <= 16},
             "bujia": tipo_de_bujia(texto),
+            "aro": frozenset(_RE_ARO_DE_COLOR.findall(limpio)),
+            "motor_ford": _familia_de_motor_ford(limpio),
+            "termostato_con_carcasa": _termostato_con_carcasa(limpio),
+            "kit": bool(es_un_kit(texto)),
+            "esparragos": frozenset(_RE_ESPARRAGOS_MM.findall(limpio)),
+            "diametro": (frozenset(_RE_DIAMETRO_DE_LA_JUNTA.findall(limpio))
+                         if re.search(r"\bTAPA\s+(?:DE\s+)?CIL", limpio) else _CONJUNTO_VACIO),
             "siglas": siglas, "marca_auto": marca_auto, "posicion": posicion,
             "cilindradas": cilindradas, "vias": vias, "texto": limpio,
             "anios": rangos_de_anios(descripcion),
             "sobremedida": sobremedida_de(descripcion),
             "combustible": combustible_desde_descripcion(descripcion),
             "dana": frozenset(_RE_PUENTE_DANA.findall(limpio)),
+            "deutz": (frozenset("514" if x in ("1114", "2114") else x
+                                for x in _RE_SERIE_DEUTZ.findall(limpio))
+                      if "DEUTZ" in limpio else _CONJUNTO_VACIO),
             "motores": motores_de_la_descripcion(descripcion, excluir=set(modelos) | set(siglas))})
 
 
@@ -2492,7 +2637,26 @@ _LUGARES_DE_LA_PIEZA = {
     "BOTADORES",
     # Ver «TAPA TRASERA» y «la junta de la CAJA» en _firma_armada().
     "TAPATRASERA", "TAPADELANTERA", "CAJAVELOCIDAD",
+    # Salidas de revisar a mano los rojos que solo tenían el precio en contra: «Jta.hidraulica
+    # JHON DEERE» contra la de tapa de cilindros, la base del distribuidor contra la tapa de
+    # distribución, la tapa de la transmisión y la del embrague contra la del termostato.
+    "HIDRAULICA", "HIDRAULICO", "DISTRIBUIDOR", "TRANSMISION", "EMBRAGUE",
+    # «JTA TAPA INSP.PRECAM. FIAT 2.8» es la de la precámara, no la del árbol de levas.
+    "PRECAMARA", "PALIER",
+    # «JTA RAD.ACEITE» contra la junta de cárter, «JTA CODO AGUA TORINO» contra la de la bomba
+    # de agua del Torino: salidas de revisar a mano los amarillos del barrido.
+    "RADIADOR", "CODO",
 }
+
+# Las juntas de una PARTE de otra pieza: la tapita de inspección de la tapa de cilindros, el
+# respiradero del cárter, el frente de la tapa. «JTA INSP. T.CIL. PEUGEOT XUD9» comparte TAPA y
+# CILINDRO con la junta de tapa de cilindros y no es ella. Si una sola de las dos la nombra, son
+# juntas distintas. Ver firmas_compatibles().
+# Y la tapa LATERAL del cárter: «JTA LAT.CARTER DEUTZ 514 2 C.» de IMPERIAL es la de la tapita
+# del costado, y «Junta para Cárter DEUTZ 514» de ILLINOIS la del cárter. IMPERIAL las vende
+# por separado (527AC2 y 528AC2).
+_RE_PARTE_DE_UNA_PIEZA = re.compile(
+    r"\b(INSPECCION|RESP|RESPIRADERO|FRENTE|LAT(?:ERAL)?(?=\s+CARTER\b)|(?<=CARTER )LAT(?:ERAL)?)\b")
 
 # Ver «la marca sola no alcanza» en firmas_compatibles().
 _TECNOLOGIAS_DE_MOTOR = {
@@ -2501,6 +2665,36 @@ _TECNOLOGIAS_DE_MOTOR = {
     "DIESEL", "NAFTA", "GNC", "16V", "8V", "12V", "20V", "24V", "32V", "DOHC", "SOHC", "INY",
     "INYECCION", "CARB", "CARBURADOR", "EFI", "TBI", "ECO", "FLEX", "EVO",
 }
+
+
+def _una_letra_de_diferencia(x, y):
+    """¿Son la misma palabra con una letra de más, de menos o cambiada? CKEROKEE y CHEROKEE."""
+    if abs(len(x) - len(y)) > 1:
+        return False
+    if len(x) == len(y):
+        return sum(1 for p, q in zip(x, y) if p != q) == 1
+    corta, larga = (x, y) if len(x) < len(y) else (y, x)
+    return any(larga[:i] + larga[i + 1:] == corta for i in range(len(larga)))
+
+
+def _modelos_en_comun(modelos_a, modelos_b):
+    """Los modelos que nombran las dos, contando los que las listas escriben mal: FISPA pone
+    «JEEP CKEROKEE DAKOTA RAM» y TARANTO «MAZDA CAPELA … 626-MX-6», y con eso un sensor MAP de
+    Grand Cherokee y la junta del Capella salían en rojo por «modelos distintos». Una letra de
+    diferencia solo en nombres de seis letras o más —ASTRA y ASTRO son dos Chevrolet—, y sin
+    los guiones: MX-6 es el MX6."""
+    comunes = set(modelos_a) & set(modelos_b)
+    if comunes:
+        return comunes
+    sin_guion_b = {m.replace("-", ""): m for m in modelos_b}
+    for m in modelos_a:
+        if m.replace("-", "") in sin_guion_b:
+            comunes.add(m)
+            continue
+        if len(m) >= 6 and any(len(o) >= 6 and _una_letra_de_diferencia(m, o)
+                               for o in modelos_b):
+            comunes.add(m)
+    return comunes
 
 
 def _marcas_que_se_cruzan(marcas_a, marcas_b):
@@ -2534,6 +2728,20 @@ def firmas_compatibles(a, b, minimo_nucleo=2, cuenta_palabras=None, total_descri
     # El juego de juntas del motor contra una junta suelta, o dos juegos distintos (completo
     # contra superior). Ver tipo_de_juego_de_motor().
     if juegos_que_chocan(a.get("juego"), b.get("juego")):
+        # EL JUEGO DE UN LUGAR CONTRA LA JUNTA DE ESE LUGAR no es seguro que sean distintos:
+        # la junta de cárter de un Perkins 4.203 viene en varias piezas, y TARANTO la llama
+        # «Jgo.Jtas.Carter PERKINS 4-203» e ILLINOIS «Junta para Cárter PERKINS … 4.203». Lo
+        # mismo con «Jgo.Jtas.Mult.Adm. y Esc.» contra «JTA ADM y ESC». Solo cuando el juego no
+        # es de motor, comparten el lugar y la suelta no es una parte («CARTER CHICO», «BASE»).
+        _juego, _suelta = ((a, b) if a.get("juego") else (b, a))
+        _lugar_comun = (set(a.get("pieza") or ()) & set(b.get("pieza") or ())
+                        & _LUGARES_DE_LA_PIEZA)
+        if (_juego.get("juego") == JUEGO_SIN_DECIR_CUAL and not _suelta.get("juego")
+                and _lugar_comun
+                and not re.search(r"\b(CHICO|CHICA|GRANDE|BASE|BSE|SOBRE|TAPA)\b",
+                                  _suelta.get("texto") or "")):
+            return False, (f"un juego de juntas de {'/'.join(sorted(_lugar_comun))} contra una "
+                           "junta suelta del mismo lugar: algunas listas llaman «junta» al juego")
         return False, (f"juegos distintos: {a.get('juego') or 'junta suelta'} vs "
                        f"{b.get('juego') or 'junta suelta'}")
 
@@ -2547,12 +2755,67 @@ def firmas_compatibles(a, b, minimo_nucleo=2, cuenta_palabras=None, total_descri
         return False, (f"sobremedida distinta: {_sm(a.get('sobremedida'))} vs "
                        f"{_sm(b.get('sobremedida'))}")
 
+    # La junta de una parte de la pieza contra la de la pieza: ver _RE_PARTE_DE_UNA_PIEZA.
+    _parte_a = set(_RE_PARTE_DE_UNA_PIEZA.findall(a.get("texto") or ""))
+    _parte_b = set(_RE_PARTE_DE_UNA_PIEZA.findall(b.get("texto") or ""))
+    if (bool(_parte_a) != bool(_parte_b) and "JUNTA" in (a.get("pieza") or ())
+            and "JUNTA" in (b.get("pieza") or ())):
+        _cual = {"RESP": "RESPIRADERO", "LAT": "COSTADO", "LATERAL": "COSTADO"}.get(
+            min(_parte_a or _parte_b), min(_parte_a or _parte_b))
+        return False, f"piezas de lugares distintos: la del {_cual} vs la pieza entera"
+
+    # UNA PARTE DEL CARBURADOR CONTRA EL JUEGO DEL CARBURADOR: «JTA BASE CARB F. SIERRA 1.6»
+    # (IMPERIAL, la base sola) contra «JUNTAS SIERRA 1.6 1983/86 WEBER» (JL, el juego). Las dos
+    # son del carburador del Sierra y no son la misma pieza.
+    if ("CARBURADOR" in (a.get("pieza") or ()) and "CARBURADOR" in (b.get("pieza") or ())):
+        _juego_a, _juego_b = _es_juego_de_carburador(a), _es_juego_de_carburador(b)
+        # En un juego, «(CUBA CHICA)» dice para qué cuba es, no que sea la junta de la cuba.
+        _pc_a = set() if _juego_a else _partes_del_carburador(a.get("texto") or "")
+        _pc_b = set() if _juego_b else _partes_del_carburador(b.get("texto") or "")
+        for _pc, _juego_otro in ((_pc_a, _juego_b), (_pc_b, _juego_a)):
+            if _pc and _juego_otro:
+                return False, (f"piezas de lugares distintos: la junta {'/'.join(sorted(_pc))} "
+                               "del carburador vs el juego de juntas del carburador")
+        if _pc_a and _pc_b and not (_pc_a & _pc_b):
+            return False, (f"piezas de lugares distintos: {'/'.join(sorted(_pc_a))} vs "
+                           f"{'/'.join(sorted(_pc_b))} del carburador")
     # El bulbo del reloj contra el de la luz: ver RELOJ y TESTIGO en _TIPOS_DE_SENSOR.
     _uso_a = (a.get("sensor") or frozenset()) & {"RELOJ", "TESTIGO"}
     _uso_b = (b.get("sensor") or frozenset()) & {"RELOJ", "TESTIGO"}
     if len(_uso_a) == 1 and len(_uso_b) == 1 and _uso_a != _uso_b:
         return False, (f"sensores de tipos distintos: el del {'reloj' if 'RELOJ' in _uso_a else 'testigo'}"
                        f" vs el del {'reloj' if 'RELOJ' in _uso_b else 'testigo'}")
+    if a.get("aro") and b.get("aro") and not (a["aro"] & b["aro"]):
+        return False, (f"aros de distinto color: {'/'.join(sorted(a['aro']))} vs "
+                       f"{'/'.join(sorted(b['aro']))}")
+    # En un sensor o una sonda no: nombran varios motores y cada lista anota los que quiere.
+    if (a.get("motor_ford") and b.get("motor_ford") and a["motor_ford"] != b["motor_ford"]
+            and not (a.get("sensor") or b.get("sensor"))):
+        return False, f"motores distintos: {a['motor_ford']} vs {b['motor_ford']}"
+    _tc_a, _tc_b = a.get("termostato_con_carcasa"), b.get("termostato_con_carcasa")
+    if _tc_a is not None and _tc_b is not None and _tc_a != _tc_b:
+        return False, "juegos distintos: el termostato solo vs el termostato con su carcasa"
+    # Un kit contra la pieza suelta, fuera de las juntas (que tienen su propia regla: ver
+    # tipo_de_juego_de_motor()): «KIT DE CORREA POLY V … SKF 32000A1» contra «CORREA POLY V
+    # 3PK905». Se vende uno o el otro.
+    if (a.get("kit") != b.get("kit") and not a.get("juego") and not b.get("juego")
+            and not ({"JUNTA", "JUNTAS"} & (set(a.get("pieza") or ()) | set(b.get("pieza") or ())))):
+        return False, "juegos distintos: un kit vs la pieza suelta"
+    for _clave, _nombre in (("esparragos", "espárragos"), ("diametro", "diámetro del cilindro")):
+        _m_a, _m_b = a.get(_clave), b.get(_clave)
+        if _m_a and _m_b and not (_m_a & _m_b):
+            return False, (f"medidas distintas: {_nombre} {'/'.join(sorted(_m_a))} vs "
+                           f"{'/'.join(sorted(_m_b))} mm")
+    if a.get("deutz") and b.get("deutz") and not (a["deutz"] & b["deutz"]):
+        return False, (f"motores distintos: DEUTZ {'/'.join(sorted(a['deutz']))} vs "
+                       f"DEUTZ {'/'.join(sorted(b['deutz']))}")
+    # La junta de CARBURADOR contra algo que va en un diésel: «JUNTA RENAULT R18 1.6/2.0/2.1D»,
+    # «… TRAFIC nafta/diesel con posicionador» (JL) concordaban con el juego de juntas del
+    # carburador del R18 y del Trafic. Un diésel no tiene carburador.
+    for _carb, _otro in ((a, b), (b, a)):
+        if ("CARBURADOR" in (_carb.get("pieza") or ()) and "CARBURADOR" not in (_otro.get("pieza") or ())
+                and _RE_DIESEL_CON_LA_D.search(_otro.get("texto") or "")):
+            return False, "piezas de lugares distintos: CARBURADOR vs una pieza que va en un diésel"
     if a.get("dana") and b.get("dana") and not (a["dana"] & b["dana"]):
         return False, (f"modelos distintos: DANA {'/'.join(sorted(a['dana']))} vs "
                        f"DANA {'/'.join(sorted(b['dana']))}")
@@ -2589,6 +2852,19 @@ def firmas_compatibles(a, b, minimo_nucleo=2, cuenta_palabras=None, total_descri
 
     # Cilindrada: si las dos la declaran y no comparten ninguna, no es la misma aplicación
     if a["cilindradas"] and b["cilindradas"] and not (a["cilindradas"] & b["cilindradas"]):
+        # En un SENSOR del mismo auto no alcanza: el sensor de rotación o el MAP suelen servir
+        # para varios motores, y cada lista anota los que quiere. «Sensor de rotacion Renault
+        # Fluence Duster Logan 1,6» contra «LEMSR215 RENAULT Duster Oroch Captur 2 0 … Kangoo
+        # 1 5 dci» pueden ser el mismo. Revisando a mano 40 rojos por cilindrada, en las juntas
+        # la regla acertó siempre y en los sensores del mismo auto no se podía afirmar. Esos van
+        # a revisión (ver _MOTIVOS_QUE_AVISAN); sin ningún auto en común siguen en rojo.
+        _mismo_auto = (a.get("modelos") or set()) & (b.get("modelos") or set())
+        if (a.get("sensor") or b.get("sensor")) and _mismo_auto:
+            return False, (f"el mismo auto con otra cilindrada: "
+                           f"{'/'.join(sorted(a['cilindradas'])[:3])} vs "
+                           f"{'/'.join(sorted(b['cilindradas'])[:3])} "
+                           f"({'/'.join(sorted(_mismo_auto)[:2])}); un sensor suele servir para "
+                           "varias")
         return False, "cilindradas distintas"
 
     # El modelo que es un número, con el mismo criterio que la cilindrada y las siglas: si las
@@ -2660,6 +2936,12 @@ def firmas_compatibles(a, b, minimo_nucleo=2, cuenta_palabras=None, total_descri
     # uno redondea y otro no.
     _cab_a, _cab_b = a.get("cable_mm"), b.get("cable_mm")
     if _cab_a and _cab_b and abs(_cab_a - _cab_b) > max(30, 0.1 * max(_cab_a, _cab_b)):
+        # Con poca diferencia no es seguro: revisando a mano los rojos por cable, 40 contra 45 o
+        # 30 contra 34 cm pueden ser la misma sonda medida con la ficha o sin ella. Hasta 8 cm o
+        # el 25%, a revisión (ver _MOTIVOS_QUE_AVISAN); más, a rojo (37 contra 63 es otra).
+        if abs(_cab_a - _cab_b) <= max(80, 0.25 * max(_cab_a, _cab_b)):
+            return False, (f"el largo de cable se parece pero no es el mismo ({_cab_a / 10:.0f} "
+                           f"vs {_cab_b / 10:.0f} cm)")
         return False, f"largo de cable distinto ({_cab_a / 10:.0f} vs {_cab_b / 10:.0f} cm)"
     # Ver _RE_PAR_DE_TEMPERATURAS.
     _tem_a, _tem_b = a.get("temperaturas") or set(), b.get("temperaturas") or set()
@@ -2711,6 +2993,30 @@ def firmas_compatibles(a, b, minimo_nucleo=2, cuenta_palabras=None, total_descri
     if _lug_a and _lug_b:
         return False, (f"piezas de lugares distintos: {'/'.join(sorted(_lug_a))} "
                        f"vs {'/'.join(sorted(_lug_b))}")
+
+    # LA JUNTA QUE NO DICE DE QUÉ ES contra una que sí: «JUNTA FORD F100 2.5TD/3.6 V6/4.3TD»
+    # o «JUNTA RENAULT R9-R11-R19-TRAFIC nafta/diesel con posicionador» (JL) concordaban con la
+    # de palier y con la de cárter de los mismos autos. No se puede decir que sea otra pieza,
+    # pero tampoco que sea esa: a revisión (ver _MOTIVOS_QUE_AVISAN).
+    _lugares_a = set(a.get("pieza") or ()) & _LUGARES_DE_LA_PIEZA
+    _lugares_b = set(b.get("pieza") or ()) & _LUGARES_DE_LA_PIEZA
+    def _no_dice_de_que(f):
+        return (not (set(f.get("pieza") or ()) - {"JUNTA", "JUNTAS", "TAPA"})
+                and not f.get("siglas"))
+    # JUNTAS en plural también: «Juntas para palier FORD F100-350» (ILLINOIS).
+    if ({"JUNTA", "JUNTAS"} & set(a.get("pieza") or ()) and {"JUNTA", "JUNTAS"} & set(b.get("pieza") or ())
+            and not a.get("juego") and not b.get("juego")
+            and bool(_lugares_a) != bool(_lugares_b)
+            and _no_dice_de_que(b if _lugares_a else a)):
+        return False, (f"una de las dos no dice de qué es la junta; la otra es de "
+                       f"{'/'.join(sorted(_lugares_a or _lugares_b))}")
+    # Y LA QUE NO DICE PARA QUÉ AUTO ES contra una que sí: «Junta Acople Agua» (TARANTO) contra
+    # «JTA ACOPLE CAÑO AGUA TOYOTA 1K». Las dos genéricas se comparan igual que siempre.
+    def _nombra_auto(f):
+        return bool(f.get("autos") or f.get("marcas") or f.get("motores")
+                    or f.get("modelos_numericos") or f.get("motores_numericos"))
+    if _nombra_auto(a) != _nombra_auto(b):
+        return False, "una de las dos no dice para qué auto es"
 
     comunes = set(a["nucleo"]) & set(b["nucleo"])
     if len(comunes) < minimo_nucleo:
@@ -2798,7 +3104,8 @@ def firmas_compatibles(a, b, minimo_nucleo=2, cuenta_palabras=None, total_descri
     # el modelo de una esté escrito en cualquier lado de la otra, o un motor en común.
     _especificas = ((len(_mod_a) <= 3 and len(_mod_b) <= 3)
                     or min(len(_mod_a), len(_mod_b)) <= 2)
-    if (_mod_a and _mod_b and not (_mod_a & _mod_b) and not apl_comunes and _especificas):
+    if (_mod_a and _mod_b and not _modelos_en_comun(_mod_a, _mod_b) and not apl_comunes
+            and _especificas):
         _texto_a, _texto_b = a.get("texto") or "", b.get("texto") or ""
         _lo_nombra = (any(re.search(rf'\b{re.escape(m)}\b', _texto_b) for m in _mod_a)
                       or any(re.search(rf'\b{re.escape(m)}\b', _texto_a) for m in _mod_b))
@@ -2910,7 +3217,7 @@ def firmas_compatibles(a, b, minimo_nucleo=2, cuenta_palabras=None, total_descri
         # cola, 156 eran esto. Las marcas que hacen motores para otras (Perkins, MWM…) no
         # cuentan: ahí un lado nombra el motor y el otro el vehículo.
         _mod_a, _mod_b = a.get("modelos") or set(), b.get("modelos") or set()
-        if (_mod_a and _mod_b and not (_mod_a & _mod_b)
+        if (_mod_a and _mod_b and not _modelos_en_comun(_mod_a, _mod_b)
                 and not ({a.get("marca_auto"), b.get("marca_auto")} & _MARCAS_DE_MOTORES)):
             return False, (f"modelos distintos: {'/'.join(sorted(_mod_a)[:2])} "
                            f"vs {'/'.join(sorted(_mod_b)[:2])} (misma marca, ningún modelo "
@@ -3056,10 +3363,13 @@ _MOTIVOS_QUE_CONTRADICEN = ("posiciones distintas", "siglas distintas", "autos d
                             "distinta cantidad de cilindros", "motores de distintas válvulas",
                             "años distintos", "motores distintos",
                             "sobremedida distinta", "presiones distintas",
+                            "aros de distinto color", "medidas distintas",
                             "combustibles distintos")
 # Los que no alcanzan para decir que son piezas distintas pero sí para desconfiar: no vetan
 # (el par va a revisión, no a rojo) y se muestran como el porqué. Ver evidencia_cruzada().
-_MOTIVOS_QUE_AVISAN = ("un nombre de modelo de marcas distintas",)
+_MOTIVOS_QUE_AVISAN = ("un nombre de modelo de marcas distintas", "el mismo auto con otra cilindrada",
+                       "un juego de juntas de", "el largo de cable se parece",
+                       "una de las dos no dice")
 # Los que hablan del AUTO. Esos no cuentan cuando el par está unido por un código: ver
 # _unidos_por_codigo().
 _MOTIVOS_DEL_AUTO = ("autos distintos", "marcas distintas", "modelos distintos",
@@ -3082,7 +3392,44 @@ def _unidos_por_codigo(pa, pb):
         codigo = sanitizar(yo.get("codigo_raw") or "")
         if len(codigo) >= 6 and codigo in sanitizar(otro.get("descripcion") or ""):
             return True
+        # Y como FISPA cita a CRI-FA: «SENSOR MAP 40055 MERCEDES … REF ORIG T7148» es el
+        # 14-R7148 de CRI-FA. Salía en rojo por «modelos distintos» (Sprinter contra Clase A).
+        _cri = re.fullmatch(r"\d{2}R(\d{4,6})", codigo)
+        if _cri and re.search(rf"\bT{_cri.group(1)}\b", (otro.get("descripcion") or "").upper()):
+            return True
     return False
+
+
+_RE_MUESCAS_EN_EL_CODIGO = re.compile(r"[- ](\d)M$")
+_RE_ESPESOR_EN_MM = re.compile(r"(?i)ESP\.?:?\s*\(?\s*\d[.,]\d{1,2}\s*MM")
+# Sin \b adelante: FISPA lo pega a lo de antes, «… 2 0NGK= BKR5EY», «3 ELECTRODOSNGK= BKUR5…».
+# Con el «=» se busca en cualquier lado; sin él, que NGK sea una palabra.
+_RE_NGK_EN_LA_DESCRIPCION = re.compile(
+    r"NGK\s*=\s*([A-Z]{1,6}\d{1,2}[A-Z0-9-]*)|(?<![A-Z])NGK\s*:?\s*([A-Z]{1,6}\d{1,2}[A-Z0-9-]*)")
+
+
+def _muescas_de_la_junta(producto):
+    """Las muescas que marca el código de una junta de tapa («580107-1M», «TC-242-20 5M»)."""
+    if "CIL" not in (producto.get("descripcion") or "").upper():
+        return None
+    m = _RE_MUESCAS_EN_EL_CODIGO.search((producto.get("codigo_raw") or "").upper().strip())
+    return m.group(1) if m else None
+
+
+def _codigo_ngk(producto):
+    """El número de NGK de una bujía: el que la descripción declara («NGK= ZFR6F11»), o el
+    código de TARANTO, que vende las NGK con su número (la J de adelante es el juego de 4:
+    JBPR5ES es la BPR5ES). None si no es una bujía o no lo dice."""
+    desc = (producto.get("descripcion") or "").upper()
+    if "BUJIA" not in _normalizar_desc(desc):
+        return None
+    m = _RE_NGK_EN_LA_DESCRIPCION.search(desc)
+    if m:
+        return sanitizar(m.group(1) or m.group(2))
+    if (producto.get("marca") or "").upper() == "TARANTO":
+        codigo = sanitizar(producto.get("codigo_raw") or "")
+        return codigo[1:] if codigo.startswith("J") and len(codigo) > 4 else codigo or None
+    return None
 
 
 class _NadaQueBuscar(Exception):
@@ -3243,6 +3590,28 @@ def evidencia_cruzada(id_a, id_b, cuenta_palabras=None, total_descripciones=None
     elif coinciden is False:
         vetos.append(f"📐 {detalle_med}")
 
+    # Las MUESCAS de la junta de tapa: «471408-4M» (TARANTO) contra «TC-242-20 5M» (ILLINOIS)
+    # son dos espesores del mismo motor. Las dos listas usan la marca de fábrica (3M es 1,30 mm
+    # en las dos). Solo si alguna no dice el espesor en milímetros: si lo dicen las dos, manda
+    # el espesor (ver comparar_medidas()).
+    _mu_a, _mu_b = _muescas_de_la_junta(pa), _muescas_de_la_junta(pb)
+    if (_mu_a and _mu_b and _mu_a != _mu_b
+            and not (_RE_ESPESOR_EN_MM.search(pa.get("descripcion") or "")
+                     and _RE_ESPESOR_EN_MM.search(pb.get("descripcion") or ""))):
+        vetos.append(f"📐 NO coinciden: muescas de espesor: {_mu_a}M vs {_mu_b}M")
+    # La BUJÍA por su número de NGK: «ZFR6F» (TARANTO, que usa el de NGK como código) contra
+    # «NGK= BKR5EY» (FISPA) son dos bujías distintas aunque vayan a los mismos autos.
+    _ngk_a, _ngk_b = _codigo_ngk(pa), _codigo_ngk(pb)
+    _mismo_ngk = bool(_ngk_a and _ngk_b
+                      and (_ngk_a.startswith(_ngk_b) or _ngk_b.startswith(_ngk_a)))
+    if _ngk_a and _ngk_b and not _mismo_ngk:
+        vetos.append(f"🔤 bujías distintas: NGK {_ngk_a} vs NGK {_ngk_b}")
+    elif _mismo_ngk:
+        # El mismo número de NGK es la misma bujía, y cada lista anota los autos que quiere:
+        # «ZFR6F» (TARANTO, Fiat E.Torq) contra «NGK= ZFR6F11» (FISPA, Honda) salía en rojo por
+        # «autos distintos». Como con un código en común, lo del auto no la contradice.
+        a_favor.append(f"🔢 el mismo número de NGK ({_ngk_a})")
+
     # 2. Descripción
     fa = firma_de_producto(pa["descripcion"], id_a, pa["codigo_clean"])
     fb = firma_de_producto(pb["descripcion"], id_b, pb["codigo_clean"])
@@ -3264,6 +3633,15 @@ def evidencia_cruzada(id_a, id_b, cuenta_palabras=None, total_descripciones=None
     _cuenta, _total = cuenta_palabras, total_descripciones
     ok_desc, motivo_desc = firmas_compatibles(fa, fb, cuenta_palabras=_cuenta,
                                               total_descripciones=_total)
+    # EL KIT DEL LADO DEL NÚMERO DE FÁBRICA NO CUENTA. El producto de fábrica se crea copiando la
+    # descripción de la fila que trajo el número, y si esa fila era el kit de reparación que
+    # CITA el número del aforador, el nodo «parece» un kit: «1J0919051B» con la descripción del
+    # KIT20000A contra el aforador 23127, que es justamente la pieza de ese número. Al revés sí
+    # vale: el número del filtro (el nodo describe el filtro) contra la bomba con kit.
+    if motivo_desc.startswith("juegos distintos: un kit vs la pieza suelta"):
+        for _p, _f in ((pa, fa), (pb, fb)):
+            if (_p.get("tipo") or "").upper() == "OEM" and (_f or {}).get("kit"):
+                motivo_desc = "el número de fábrica lo trajo un kit que lo cita"
     aviso_desc = ""
     # Antes del rubro: ¿uno viene adentro del otro? Es cierto que los rubros no coinciden —una
     # bujía no es un juego de cables— y aun así «rubros distintos» no describe lo que pasa. Ver
@@ -3272,6 +3650,13 @@ def evidencia_cruzada(id_a, id_b, cuenta_palabras=None, total_descripciones=None
     _kit_de = _uno_trae_al_otro(pa.get("descripcion"), pa.get("codigo_raw"),
                                  pb.get("descripcion"), pb.get("codigo_raw"),
                                  pa.get("tipo"), pb.get("tipo"))
+    # El número de uno escrito en la descripción del otro, sin que ninguno sea el nodo de un
+    # código de fábrica: la lista lo cita como su equivalente («… // T36042», «REF ORIG T7148»).
+    # El kit que nombra entre paréntesis lo que trae no llega acá como prueba: ver
+    # _uno_trae_al_otro(), que lo separa antes.
+    if ("OEM" not in {(pa.get("tipo") or "").upper(), (pb.get("tipo") or "").upper()}
+            and _unidos_por_codigo(pa, pb) and not _kit_de):
+        a_favor.append("🔢 el código de uno está escrito en la descripción del otro")
     if ok_desc:
         a_favor.append(f"🔤 las descripciones concuerdan ({motivo_desc})")
         # El espesor solo no prueba que sea la misma pieza (ver el final de
@@ -3286,10 +3671,18 @@ def evidencia_cruzada(id_a, id_b, cuenta_palabras=None, total_descripciones=None
         vetos.append(f"📦 no son equivalentes: {_kit_de}. El buscador te lo ofrece igual, "
                       "como kit, cuando buscás la pieza suelta")
     elif fa and fb and fa["familia"] != "Sin clasificar" and fb["familia"] != "Sin clasificar":
-        if fa["familia"] != fb["familia"]:
+        # Con el código de uno escrito en la descripción del otro, el rubro no contradice: el
+        # número dice cuál es. «Despiece JOHN DEERE TAPA CAJA DE VELOCIDAD // T36042» (ILLINOIS)
+        # contra «JTA T-36042 TAPA CAJA CAMBIOS» (IMPERIAL) es la misma junta, y salía en rojo
+        # porque una quedaba en «Caja y diferencial» y la otra en «Juntas y retenes». El kit que
+        # nombra lo que trae ya se separó arriba (ver _uno_trae_al_otro()).
+        _citado = "OEM" not in {(pa.get("tipo") or "").upper(), (pb.get("tipo") or "").upper()} \
+            and _unidos_por_codigo(pa, pb)
+        if fa["familia"] != fb["familia"] and not _citado:
             vetos.append(f"🧩 rubros distintos: «{fa['familia']}» y «{fb['familia']}»")
         elif (motivo_desc.startswith(_MOTIVOS_QUE_CONTRADICEN)
-              and not (motivo_desc.startswith(_MOTIVOS_DEL_AUTO) and _unidos_por_codigo(pa, pb))):
+              and not (motivo_desc.startswith(_MOTIVOS_DEL_AUTO)
+                       and (_unidos_por_codigo(pa, pb) or _mismo_ngk))):
             vetos.append(f"🔤 {motivo_desc}")
         elif motivo_desc.startswith(_MOTIVOS_QUE_AVISAN):
             aviso_desc = motivo_desc

@@ -478,6 +478,42 @@ _RE_MARCA_DE_AUTO_PEGADA = re.compile(
     + r')\d[\dA-Z.\-]{0,6}$')
 
 
+# LA MARCA PEGADA ADELANTE DE UN NÚMERO DE PIEZA. Es el otro lado de la regla de arriba: ILLINOIS
+# escribe «Despiece AGCO SISU POWER836120129 …», «JOHN DEERER43413», «M. BENZ3521310380»,
+# «M. FERGUSON36867117», y la exportación se come el espacio. Con cinco cifras o más atrás —o
+# la forma letra-cifras-letra de John Deere, «A3817J»— lo de atrás es el número de la pieza y
+# se despega. Con menos es un modelo (DEERE1104, FERGUSON1095, BENZ1618) y lo descarta la
+# regla de arriba. En la base real eran ~150 códigos de fábrica cargados así, que no los tiene
+# escritos así ninguna otra lista.
+_MARCAS_QUE_SE_PEGAN_ADELANTE = ("MERCEDESBENZ", "MERCEDES", "BENZ", "DEERE", "FERGUSON",
+                                 "POWER")
+
+
+_RE_MARCA_PEGADA_ADELANTE = re.compile(
+    r'^(' + "|".join(sorted(_MARCAS_QUE_SE_PEGAN_ADELANTE, key=len, reverse=True))
+    + r')([A-Z0-9][A-Z0-9.\-]*)$')
+
+
+# Lo que queda atrás tiene que tener forma de número de pieza, y la forma se pide entera: con
+# «cinco cifras en algún lado» pasaban BENZMB401.900 y BENZMB403.900, que son motores (OM 401,
+# OM 403), y BENZL1215, que es el camión L-1215. Las formas son las de los que hay de verdad:
+# 3120150080 y 836120129 (Mercedes, SISU), 180904M2 (Massey Ferguson), R43413 y JT10081 (John
+# Deere), A3817J y R20169RJ (John Deere con la letra de atrás).
+_RE_NUMERO_DE_PIEZA_DESPEGADO = re.compile(
+    r'^(?:\d{5,}(?:[A-Z]\d?)?|[A-Z]{1,2}\d{5,6}|[A-Z]\d{3,5}[A-Z]{1,2})$')
+
+
+def despegar_marca_de_adelante(codigo):
+    """(marca, número) si el código es un número de pieza con la marca pegada adelante, o None."""
+    m = _RE_MARCA_PEGADA_ADELANTE.match((codigo or "").upper())
+    if not m:
+        return None
+    numero = m.group(2)
+    if _RE_NUMERO_DE_PIEZA_DESPEGADO.match(numero):
+        return m.group(1), numero
+    return None
+
+
 # MODELOS DE CAMIÓN IVECO: 180E42, 240E42, 440E39, 720E31, 120E20C, 450-E37-M. Es
 # «toneladas + E + caballos», o sea el camión, y aparece en cualquier descripción que lo
 # nombre. Le pega a 7 de los 70.888 códigos del catálogo y los 7 son camiones.
@@ -777,8 +813,10 @@ def extraer_codigos_de_texto(texto, minimo=6, codigo_propio=None, codigos_conoci
         # familias una por una: la forma general —letra, número, letra, tres números— le pega a
         # H3T021, que es una bobina Hitachi y un puente bueno entre dos proveedores.
         re.compile(r'^(C[1-9]|D[4-7]|E[57]|F[3-9]|G[89]|K[4-9]|L7|M[4-9]|R9)[A-Z]-?\d{3}$'),
-        # Iveco/Fiat: F3BE0681, F1AE0481, F4AE0481.
-        re.compile(r'^F\d[A-Z]{2}\d{4}[A-Z]?$'),
+        # Iveco/Fiat: F3BE0681, F1AE0481, F4AE0481. Con la E: en el catálogo real todos la
+        # tienen, y sin ella la forma se llevaba los números de Ford de los 90 —F0UZ6051A, la
+        # junta de tapa del Ranger 4.9— que son códigos de fábrica de verdad.
+        re.compile(r'^F\d[A-Z]E\d{4}[A-Z]?$'),
         # Indenor: XD4.88, XDP4.88. Scania: DSC12.01, DC12.17, y los camiones LK140, LKS140,
         # LBS110. Estos con el 1 adelante a propósito: LKS026 y LKS048 son sensores de
         # detonación Lucas de verdad.
@@ -794,6 +832,11 @@ def extraer_codigos_de_texto(texto, minimo=6, codigo_propio=None, codigos_conoci
         re.compile(r'^\d{1,2}V-?\d{3}$'),
         # Una palabra abreviada con un número: STAND.5 (estándar 5 mm), DIAM.86, EXPL.45.
         re.compile(r'^[A-Z]{4,}\.\d{1,2}$'),
+        # El material de la junta, «(JC-MAT.15 CORDÓN SELLADOR)», y la gama de camionetas de
+        # Ford, «RETEN DISTRIB FORD F100-350». Salieron de revisar a mano los amarillos: cada uno
+        # estaba cargado como código de fábrica y unía piezas distintas.
+        re.compile(r'^[A-Z]{1,3}-?MAT\.?\d{1,3}$'),
+        re.compile(r'^F\d{3}-\d{3}$'),
     )
     formas_prohibidas = formas_ambiguas + formas_solo_texto
     # Palabras de la descripción que quedan pegadas al año y disfrazan el rango:
@@ -850,6 +893,11 @@ def extraer_codigos_de_texto(texto, minimo=6, codigo_propio=None, codigos_conoci
                     and len(limpio) - len(_marca_pegada) >= 4):
                 limpio = limpio[:-len(_marca_pegada)]
                 break
+        # Y la marca pegada ADELANTE: «POWER836120129» es el 836120129. Ver
+        # despegar_marca_de_adelante().
+        _despegado = despegar_marca_de_adelante(limpio)
+        if _despegado:
+            limpio = limpio[len(_despegado[0]):]
         if len(limpio) < minimo:
             continue
         if limpio.upper() in ruido:
@@ -1181,6 +1229,14 @@ def codigo_base_sin_variante(codigo):
     piso, «JCA-123» y «JCA-121-15» quedan en bases distintas, que es lo correcto, y «JI-276»
     con «JI-276-R» —el mismo juego, con retenes— quedan en la misma."""
     u = re.sub(r"[\s\.]+", "-", (codigo or "").upper().strip())
+    # IMPERIAL numera distinto: el número de la junta y el material pegado atrás, dos letras y
+    # una cifra —«4505CG1», «4505AD4», «4505CG4» son la junta de cárter del Peugeot 404 en
+    # tres materiales; «1812AC6-COMP» la del Falcon de competición—. Sin esto cada material
+    # contaba como una pieza distinta, y la junta de TARANTO que concordaba con las cuatro
+    # quedaba como «varios productos con la misma descripción».
+    _imperial = re.match(r"^(\d{3,5})[A-Z]{2}\d(?:-COMP)?$", u)
+    if _imperial:
+        return _imperial.group(1)
     partes = [x for x in u.split("-") if x]
     while len(partes) > 2 and len(partes[-1]) <= 4:
         partes = partes[:-1]
@@ -1210,11 +1266,12 @@ def el_codigo_no_figura_entre_las_referencias(codigo, descripcion):
         «Junta Tapa de Cilindros SCANIA … - 10,6/11,7 - 16… DSC12.01 (…)» -> «DSC12.01».
         «… PERKINS … 4.203/4-PA.203 …» -> «4-PA.203».
 
-    NO BAJA A ROJO, BAJA A AMARILLO, y la diferencia importa. El objetivo es sacarlos del botón
-    de «aprobar sin mirar», no darlos por perdidos. Revisando una muestra de 22 a mano, 17 eran
-    designaciones de motor o de chasis y **5 eran números de fábrica reales con la marca pegada
-    adelante** («AGCO SISU POWER836122282», «JOHN DEERER43413»). Con el castigo en rojo esas 5
-    quedaban como basura; con el castigo en amarillo cuestan una mirada, que es lo que cuestan.
+    Primero bajaba a amarillo y no a rojo: en una muestra de 22, 5 eran números de fábrica
+    reales con la marca pegada adelante («AGCO SISU POWER836122282», «JOHN DEERER43413»). Después
+    se miraron los ~150 de la cola entera y ninguno es el número de la pieza bien escrito: son
+    motores o modelos, el número de otra pieza (el del turbo en el juego de juntas del turbo) o
+    esos números con la marca pegada, que así escritos no los tiene ninguna otra lista. Así que
+    ahora es rojo, y la alarma dice cuál es el número de verdad cuando la marca está pegada.
 
     Sobre la cola real toca 104 de los 2.560 vínculos que hoy se aprueban en bloque."""
     if not codigo or not descripcion:
@@ -1226,18 +1283,72 @@ def el_codigo_no_figura_entre_las_referencias(codigo, descripcion):
     _cola = re.search(r"((?:\s*\([^)]*\))+)\s*$", descripcion)
     zona = " ".join(re.findall(r"\(([^)]*)\)", _cola.group(1) if _cola else "")
                     + re.findall(r"//(.*)$", descripcion))
-    if not zona:
-        return False
     # La zona tiene que tener al menos un número con pinta de código; si son puras medidas
     # («ESP 1.50MM») no es una lista de referencias y no se puede concluir nada.
     # Tampoco si son años: FISPA escribe los inyectores «Fiat Stilo 1.8 MPI 16V (2003-2008) -
     # Fiat Doblo … (2003-2006)IWP156», y los paréntesis de los años pasaban por una lista de
     # referencias que no nombraba al IWP156. 1.000 inyectores de FISPA quedaban en 74 con esta
     # alarma, con el número escrito dos veces en la misma fila.
-    if not any(any(ch.isdigit() for ch in t) and not _RE_ANOS_DE_FABRICACION.match(t)
-               for t in re.findall(r"[A-Z0-9][A-Z0-9./-]{4,}", zona.upper())):
-        return False
+    if not zona or not any(any(ch.isdigit() for ch in t) and not _RE_ANOS_DE_FABRICACION.match(t)
+                           for t in re.findall(r"[A-Z0-9][A-Z0-9./-]{4,}", zona.upper())):
+        return _codigo_en_el_tramo_de_los_motores(codigo, descripcion)
     return sanitizar(codigo).upper() not in sanitizar(zona).upper()
+
+
+def _codigo_en_el_tramo_de_los_motores(codigo, descripcion):
+    """Sin lista de números al final, ¿el código está en el tramo de la cilindrada y los motores?
+
+    ILLINOIS escribe «pieza MARCA modelos - cilindrada - motores (números)», y cuando la fila no
+    trae números lo que queda cargado como «código de fábrica» es un motor o un modelo:
+    «Juego de Admisión y Escape CHEVROLET SPRINT SWIFT - 993CC - 61-G10-G10T (ADMISIÓN)»,
+    «Despiece RENAULT … - 1.4/1.6/1.8/2.0 - K4JK4M 16V F4P F4R», «Suplementos para camisa de
+    cilindros FIAT 115005 - 700-E800 - SUPL. CAMISA» (los tractores 700 E y 800). Los números
+    de verdad de esas filas van adelante, pegados a la marca («Despiece FIAT 7679315/7633424
+    TAPA…», «FIAT 115005 -»), y esos quedan antes del primer guion.
+
+    Solo con la forma de ILLINOIS —arranca con «Junta», «Juego», «Despiece» en minúsculas y
+    tiene dos guiones o más— y solo códigos con letras, que es como se escribe un motor. FISPA
+    usa los guiones para separar autos y escribe los números sueltos en el medio: «ALTERNADOR
+    … - SPRINTER 310 D - 4120001109413 - 0001218152», «BOMBA DE AGUA … - VW UP … 04C121…»,
+    «INYECTOR FI-0280155794Peugeot 106 … - Peugeot 206 …». Con la regla sin esos dos límites se
+    iban a rojo 81 vínculos buenos de FISPA, y de ILLINOIS los números que la fila escribe
+    sueltos («RENAULT 7701348225 - 7700850660 R18», «1A 3A 11115-15020/30/41)» con el paréntesis
+    sin abrir), que son todos cifras."""
+    texto = (descripcion or "").upper()
+    cod = (codigo or "").upper()
+    if (texto.count(" - ") < 2 or not cod or not re.search(r"[A-Z]", cod)
+            or not re.match(r"^[A-Z][a-zéáíóú]+\s", descripcion or "")):
+        return False
+    corte = texto.index(" - ")
+    lugares = [m.start() for m in
+               re.finditer(r"(?<![A-Z0-9])" + re.escape(cod) + r"(?![A-Z0-9])", texto)]
+    if not lugares:
+        return False
+    for i in lugares:
+        antes = texto[:i]
+        if (i < corte or "//" in antes or antes.count("(") > antes.count(")")
+                or re.search(r"\b(REF|ORIG|ORIGINAL)\b", antes)):
+            return False
+    return True
+
+
+def el_codigo_esta_entre_las_referencias(codigo, descripcion):
+    """¿La descripción pone este número en su lista de números de fábrica? Es la otra cara de
+    el_codigo_no_figura_entre_las_referencias(): los paréntesis del final, lo que va después de
+    «//», y la cabeza de las filas de despiece de ILLINOIS —«Despiece FIAT 4302267/7737202
+    PORTA RETEN»—, que es donde esa lista pone el número de la pieza."""
+    limpio = sanitizar(codigo or "").upper()
+    texto = descripcion or ""
+    if len(limpio) < 5 or not texto:
+        return False
+    _cola = re.search(r"((?:\s*\([^)]*\))+)\s*$", texto)
+    zona = " ".join(re.findall(r"\(([^)]*)\)", _cola.group(1) if _cola else "")
+                    + re.findall(r"//(.*)$", texto))
+    _cabeza = re.match(r"^Despiece\s+(?:[A-Z][A-Z.]*\s+){1,2}?([0-9][\dA-Z/ \-]*?)\s+[A-Z]{3,}",
+                       texto)
+    if _cabeza:
+        zona += " " + _cabeza.group(1)
+    return limpio in {sanitizar(t).upper() for t in re.split(r"[\s/()\-]+", zona) if t}
 
 
 def son_variantes_de_la_misma_pieza(codigos):

@@ -463,6 +463,38 @@ _RE_MARCA_DE_AUTO_PEGADA = re.compile(
     r'^(?:' + "|".join(sorted(_MARCAS_DE_AUTO_QUE_SE_PEGAN, key=len, reverse=True))
     + r')\d[\dA-Z.\-]{0,6}$')
 
+# LA MARCA PEGADA ADELANTE DE UN NÚMERO DE PIEZA. Es el otro lado de la regla de arriba: ILLINOIS
+# escribe «Despiece AGCO SISU POWER836120129 …», «JOHN DEERER43413», «M. BENZ3521310380»,
+# «M. FERGUSON36867117», y la exportación se come el espacio. Con cinco cifras o más atrás —o
+# la forma letra-cifras-letra de John Deere, «A3817J»— lo de atrás es el número de la pieza y
+# se despega. Con menos es un modelo (DEERE1104, FERGUSON1095, BENZ1618) y lo descarta la
+# regla de arriba. En la base real eran ~150 códigos de fábrica cargados así, que no los tiene
+# escritos así ninguna otra lista.
+_MARCAS_QUE_SE_PEGAN_ADELANTE = ("MERCEDESBENZ", "MERCEDES", "BENZ", "DEERE", "FERGUSON",
+                                 "POWER")
+_RE_MARCA_PEGADA_ADELANTE = re.compile(
+    r'^(' + "|".join(sorted(_MARCAS_QUE_SE_PEGAN_ADELANTE, key=len, reverse=True))
+    + r')([A-Z0-9][A-Z0-9.\-]*)$')
+# Lo que queda atrás tiene que tener forma de número de pieza, y la forma se pide entera: con
+# «cinco cifras en algún lado» pasaban BENZMB401.900 y BENZMB403.900, que son motores (OM 401,
+# OM 403), y BENZL1215, que es el camión L-1215. Las formas son las de los que hay de verdad:
+# 3120150080 y 836120129 (Mercedes, SISU), 180904M2 (Massey Ferguson), R43413 y JT10081 (John
+# Deere), A3817J y R20169RJ (John Deere con la letra de atrás).
+_RE_NUMERO_DE_PIEZA_DESPEGADO = re.compile(
+    r'^(?:\d{5,}(?:[A-Z]\d?)?|[A-Z]{1,2}\d{5,6}|[A-Z]\d{3,5}[A-Z]{1,2})$')
+
+
+def despegar_marca_de_adelante(codigo):
+    """(marca, número) si el código es un número de pieza con la marca pegada adelante, o None."""
+    m = _RE_MARCA_PEGADA_ADELANTE.match((codigo or "").upper())
+    if not m:
+        return None
+    numero = m.group(2)
+    if _RE_NUMERO_DE_PIEZA_DESPEGADO.match(numero):
+        return m.group(1), numero
+    return None
+
+
 # MODELOS DE CAMIÓN IVECO: 180E42, 240E42, 440E39, 720E31, 120E20C, 450-E37-M. Es
 # «toneladas + E + caballos», o sea el camión, y aparece en cualquier descripción que lo
 # nombre. Le pega a 7 de los 70.888 códigos del catálogo y los 7 son camiones.
@@ -762,8 +794,10 @@ def extraer_codigos_de_texto(texto, minimo=6, codigo_propio=None, codigos_conoci
         # familias una por una: la forma general —letra, número, letra, tres números— le pega a
         # H3T021, que es una bobina Hitachi y un puente bueno entre dos proveedores.
         re.compile(r'^(C[1-9]|D[4-7]|E[57]|F[3-9]|G[89]|K[4-9]|L7|M[4-9]|R9)[A-Z]-?\d{3}$'),
-        # Iveco/Fiat: F3BE0681, F1AE0481, F4AE0481.
-        re.compile(r'^F\d[A-Z]{2}\d{4}[A-Z]?$'),
+        # Iveco/Fiat: F3BE0681, F1AE0481, F4AE0481. Con la E: en el catálogo real todos la
+        # tienen, y sin ella la forma se llevaba los números de Ford de los 90 —F0UZ6051A, la
+        # junta de tapa del Ranger 4.9— que son códigos de fábrica de verdad.
+        re.compile(r'^F\d[A-Z]E\d{4}[A-Z]?$'),
         # Indenor: XD4.88, XDP4.88. Scania: DSC12.01, DC12.17, y los camiones LK140, LKS140,
         # LBS110. Estos con el 1 adelante a propósito: LKS026 y LKS048 son sensores de
         # detonación Lucas de verdad.
@@ -779,6 +813,11 @@ def extraer_codigos_de_texto(texto, minimo=6, codigo_propio=None, codigos_conoci
         re.compile(r'^\d{1,2}V-?\d{3}$'),
         # Una palabra abreviada con un número: STAND.5 (estándar 5 mm), DIAM.86, EXPL.45.
         re.compile(r'^[A-Z]{4,}\.\d{1,2}$'),
+        # El material de la junta, «(JC-MAT.15 CORDÓN SELLADOR)», y la gama de camionetas de
+        # Ford, «RETEN DISTRIB FORD F100-350». Salieron de revisar a mano los amarillos: cada uno
+        # estaba cargado como código de fábrica y unía piezas distintas.
+        re.compile(r'^[A-Z]{1,3}-?MAT\.?\d{1,3}$'),
+        re.compile(r'^F\d{3}-\d{3}$'),
     )
     formas_prohibidas = formas_ambiguas + formas_solo_texto
     # Palabras de la descripción que quedan pegadas al año y disfrazan el rango:
@@ -835,6 +874,11 @@ def extraer_codigos_de_texto(texto, minimo=6, codigo_propio=None, codigos_conoci
                     and len(limpio) - len(_marca_pegada) >= 4):
                 limpio = limpio[:-len(_marca_pegada)]
                 break
+        # Y la marca pegada ADELANTE: «POWER836120129» es el 836120129. Ver
+        # despegar_marca_de_adelante().
+        _despegado = despegar_marca_de_adelante(limpio)
+        if _despegado:
+            limpio = limpio[len(_despegado[0]):]
         if len(limpio) < minimo:
             continue
         if limpio.upper() in ruido:

@@ -859,6 +859,45 @@ if pagina == PAGINAS[3]:
                             st.rerun()
             st.markdown("---")
 
+            # El número de verdad con la marca pegada adelante. No es un puente falso —el número
+            # es el de la pieza— así que no se borra: se le saca la marca. Ver
+            # codigos_de_fabrica_con_la_marca_pegada().
+            st.markdown("**🏷️ Códigos de fábrica con la marca pegada**")
+            explicar(
+                "Números de fábrica que quedaron escritos con la marca adelante: "
+                "«POWER836120129», «DEERER43413», «BENZ3120150080».",
+                "ILLINOIS escribe «AGCO SISU POWER836120129» o «JOHN DEERER43413» y al "
+                "exportar se pierde el espacio. El número es el de la pieza, pero así escrito "
+                "no lo tiene ninguna otra lista, así que no une nada.\n\n"
+                "Corregir le saca la marca. Si el número limpio ya estaba cargado —ILLINOIS "
+                "suele escribirlo dos veces en la misma fila— se juntan los dos en uno, con "
+                "sus vínculos y los pendientes. **Nada se borra**: el producto de fábrica "
+                "queda con el número bien escrito."
+            )
+            if st.button("🏷️ Buscar códigos con la marca pegada", key="btn_marca_pegada"):
+                st.session_state["marca_pegada"] = codigos_de_fabrica_con_la_marca_pegada()
+            _mp = st.session_state.get("marca_pegada")
+            if _mp is not None:
+                if not _mp:
+                    st.success("No quedó ninguno.")
+                else:
+                    st.warning(f"**{len(_mp)} código(s) con la marca pegada**, de los que "
+                               f"{sum(1 for x in _mp if x['Ya existe'])} ya estaban cargados "
+                               "bien escritos.")
+                    st.dataframe([{k: v for k, v in x.items() if k != "pid"} for x in _mp],
+                                  width="stretch", hide_index=True)
+                    if candado("corregir los códigos con la marca pegada",
+                                st.button(f"🏷️ Corregir los {len(_mp)}", type="primary",
+                                           key="btn_corregir_marca_pegada"),
+                                "corregir_marca_pegada"):
+                        _hechos = sum(1 for x in _mp
+                                      if corregir_codigo_con_la_marca_pegada(x["pid"], x["Número"]))
+                        st.session_state.pop("marca_pegada", None)
+                        invalidar_salud()
+                        avisar("ok", f"Se corrigieron {_hechos} código(s) de fábrica.")
+                        st.rerun()
+            st.markdown("---")
+
             # La otra mitad de lo de arriba: los que cuelgan de UN solo producto. Ver
             # codigos_adivinados_que_no_unen_nada().
             st.markdown("**🧽 Códigos adivinados que no unen nada**")
