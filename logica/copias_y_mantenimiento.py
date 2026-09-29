@@ -1932,11 +1932,16 @@ def descubrimiento_post_importacion(presupuesto_segundos=PRESUPUESTO_DESCUBRIMIE
 
     if queda_tiempo():
         try:
-            _apl = aplicaciones_desde_descripciones()
+            # Solo los productos que llegaron desde la última vez: ver
+            # aplicaciones_desde_descripciones().
+            _hasta_apl = c.execute("SELECT COALESCE(MAX(id), 0) FROM productos").fetchone()[0]
+            _apl = aplicaciones_desde_descripciones(
+                desde_id=int(obtener_config("aplicaciones_leidas_hasta", "0") or 0))
             if _apl:
                 _n = aplicar_aplicaciones_deducidas(_apl)
                 if _n:
                     hecho.append(f"{_n:,} aplicación(es) deducidas de las descripciones")
+            guardar_config("aplicaciones_leidas_hasta", str(_hasta_apl))
         except Exception as _err:
             anotar_error("descubrimiento_post_importacion/aplicaciones", _err)
     else:
@@ -1979,7 +1984,12 @@ def descubrimiento_post_importacion(presupuesto_segundos=PRESUPUESTO_DESCUBRIMIE
 
     if queda_tiempo():
         try:
-            _todas = sugerir_entre_todas_las_marcas()
+            # Solo lo que trajeron las listas desde el último barrido: ver
+            # sugerir_entre_todas_las_marcas(). La primera vez (sin marca) es entero.
+            _hasta_prod = c.execute("SELECT COALESCE(MAX(id), 0) FROM productos").fetchone()[0]
+            _todas = sugerir_entre_todas_las_marcas(
+                solo_desde_id=int(obtener_config("barrido_hasta_producto", "0") or 0))
+            guardar_config("barrido_hasta_producto", str(_hasta_prod))
             if _todas:
                 _n = guardar_equivalencias_pendientes(
                     [(x["_a"], x["_b"]) for x in _todas], "descripcion-todas",

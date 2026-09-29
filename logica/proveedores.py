@@ -2261,8 +2261,12 @@ def _trabajo_de_fondo():
     if _hay_que_hacerlo("aplicaciones_pendientes"):
         try:
             aprender_motores_que_van_juntos()
+            _hasta_apl = c.execute("SELECT COALESCE(MAX(id), 0) FROM productos").fetchone()[0]
             _apl_ded = aplicaciones_desde_descripciones()
             _n_apl = aplicar_aplicaciones_deducidas(_apl_ded) if _apl_ded else 0
+            # Leídas todas: la próxima importación sigue desde acá (ver
+            # descubrimiento_post_importacion()).
+            guardar_config("aplicaciones_leidas_hasta", str(_hasta_apl))
             guardar_config("aplicaciones_deducidas", str(_n_apl))
             guardar_config("aplicaciones_fecha", datetime.now().strftime("%Y-%m-%d %H:%M"))
             if _n_apl:

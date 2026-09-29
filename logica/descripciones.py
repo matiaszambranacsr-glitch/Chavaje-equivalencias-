@@ -266,32 +266,41 @@ def modelos_de_marca(marca_vehiculo, version, minimo=2):   # ver descripciones_p
         resto = next((r for m, _cat, r in marcas_vehiculo_en(desc) if m == marca_vehiculo), None)
         if not resto:
             continue
-        # Dos formas de escribir un modelo que este patrón dejaba afuera, y por eso el
-        # desplegable de Peugeot no tenía ni el 206 ni el 307, y el de Audi no tenía el A3:
-        #   · el modelo que es un NÚMERO —Peugeot 206, Fiat 600, Mercedes 1620—, que se
-        #     descartaba por ser puro número;
-        #   · el de dos caracteres —A3, A4, Q7, X5—, que no llegaba al mínimo de tres.
-        # Los dos siguen pasando por el mismo filtro que todo lo demás: solo quedan si
-        # aparecen casi siempre dentro de esta marca, así que un número que además es una
-        # medida o un año se cae ahí.
-        for token in re.findall(r"[A-ZÁÉÍÓÚÑ0-9][A-ZÁÉÍÓÚÑ0-9\-]{1,}", resto.upper()):
-            if (token in PALABRAS_NO_MODELO or token in MARCAS_VEHICULO
-                    or token in MOTORIZACIONES_QUE_NO_SON_MODELO):
-                continue
-            _puro_numero = re.fullmatch(r"\d{2,4}", token)
-            if _puro_numero and re.fullmatch(r"(19|20)\d{2}", token):
-                continue      # un año no es un modelo
-            if not _puro_numero:
-                if re.fullmatch(r"[\d\-]+", token) or len(token) < 2:
-                    continue
-                if not token[0].isalpha():
-                    continue
-                if len(token) == 2 and not (token[0].isalpha() and token[1].isdigit()):
-                    continue   # «A3» sí, «DE» no
-                if not es_nombre_de_modelo(token):
-                    continue
-            cuenta_propia[token] += 1
+        cuenta_propia.update(_candidatos_a_modelo(resto))
+    return _modelos_confirmados(cuenta_propia, version, minimo)
 
+
+def _candidatos_a_modelo(resto):
+    """Las palabras del tramo de una marca que pueden ser un modelo. Ver modelos_de_marca()."""
+    # Dos formas de escribir un modelo que este patrón dejaba afuera, y por eso el
+    # desplegable de Peugeot no tenía ni el 206 ni el 307, y el de Audi no tenía el A3:
+    #   · el modelo que es un NÚMERO —Peugeot 206, Fiat 600, Mercedes 1620—, que se
+    #     descartaba por ser puro número;
+    #   · el de dos caracteres —A3, A4, Q7, X5—, que no llegaba al mínimo de tres.
+    # Los dos siguen pasando por el mismo filtro que todo lo demás: solo quedan si
+    # aparecen casi siempre dentro de esta marca, así que un número que además es una
+    # medida o un año se cae ahí.
+    for token in re.findall(r"[A-ZÁÉÍÓÚÑ0-9][A-ZÁÉÍÓÚÑ0-9\-]{1,}", resto.upper()):
+        if (token in PALABRAS_NO_MODELO or token in MARCAS_VEHICULO
+                or token in MOTORIZACIONES_QUE_NO_SON_MODELO):
+            continue
+        _puro_numero = re.fullmatch(r"\d{2,4}", token)
+        if _puro_numero and re.fullmatch(r"(19|20)\d{2}", token):
+            continue      # un año no es un modelo
+        if not _puro_numero:
+            if re.fullmatch(r"[\d\-]+", token) or len(token) < 2:
+                continue
+            if not token[0].isalpha():
+                continue
+            if len(token) == 2 and not (token[0].isalpha() and token[1].isdigit()):
+                continue   # «A3» sí, «DE» no
+            if not es_nombre_de_modelo(token):
+                continue
+        yield token
+
+
+def _modelos_confirmados(cuenta_propia, version, minimo=2):
+    """De las palabras contadas en una marca, las que son modelos suyos. Ver modelos_de_marca()."""
     if not cuenta_propia:
         return []
 
@@ -305,6 +314,32 @@ def modelos_de_marca(marca_vehiculo, version, minimo=2):   # ver descripciones_p
         if cuenta_propia[token] / total_catalogo >= 0.6:
             modelos.append((token, cuenta_propia[token]))
     return sorted(modelos, key=lambda x: -x[1])
+
+
+@st.cache_data(show_spinner=False, max_entries=1)
+def modelos_de_todas_las_marcas(version, minimo=2):   # ver descripciones_por_palabra()
+    """{marca: modelos_de_marca(marca)} para todas las marcas de auto, en UNA pasada.
+
+    Lo usa el lector de aplicaciones, que necesita los modelos de todas las marcas que
+    aparecen, y las pedía de a una: cada marca relee el catálogo entero con su filtro por
+    texto. Son 65 marcas: con 60 proveedores, 43 s después de cada lista, 19 de ellos solo
+    leyendo las mismas descripciones 65 veces. Acá cada descripción se lee una vez y se reparte
+    entre las marcas que nombra. Da lo mismo que modelos_de_marca() marca por marca."""
+    from collections import Counter, defaultdict
+    lector = conn.conexion_real().cursor()
+    lector.execute("SELECT descripcion FROM productos WHERE descripcion IS NOT NULL")
+    cuenta = defaultdict(Counter)
+    while True:
+        pedazo = lector.fetchmany(5000)
+        if not pedazo:
+            break
+        for (desc,) in pedazo:
+            ceder_al_mostrador()
+            for marca, _cat, resto in marcas_vehiculo_en(desc):
+                if resto:
+                    cuenta[marca].update(_candidatos_a_modelo(resto))
+    return {marca: _modelos_confirmados(cuenta_marca, version, minimo)
+            for marca, cuenta_marca in cuenta.items()}
 
 
 @st.cache_data(show_spinner=False, max_entries=30)
@@ -1418,7 +1453,7 @@ class _ModelosLazy:
 MODELOS_CONOCIDOS = _ModelosLazy()
 
 
-def aplicaciones_desde_descripciones(limite=None):
+def aplicaciones_desde_descripciones(limite=None, desde_id=0):
     """Lee de la descripción a qué auto le va cada producto, para poder buscar por vehículo.
 
     La relación pieza-vehículo ya viene en las listas de los proveedores: «JUNTA TAPA DE
@@ -1434,15 +1469,21 @@ def aplicaciones_desde_descripciones(limite=None):
     propio catálogo, contando en cuántas marcas distintas aparece cada palabra. Un ASTRA aparece
     casi solo en Chevrolet y es un modelo; un BOMBA aparece en todas y no lo es. Si el modelo no
     está confirmado así, la fila no se genera: sin modelo no sirve para buscar por vehículo, y
-    con un modelo inventado sirve para equivocarse."""
+    con un modelo inventado sirve para equivocarse.
+
+    desde_id: solo los productos con id mayor. Es como corre después de importar (ver
+    descubrimiento_post_importacion()). Sin eso releía cada vez todas las descripciones de las
+    que antes no había sacado ningún auto —casi todas—: con 60 proveedores, 75 s de lectura y
+    144 s de escritura después de cada lista. La relectura entera la sigue haciendo la tarea de
+    fondo cuando se la pide (aplicaciones_pendientes), y el botón de Administrar."""
     ceder_al_mostrador()      # antes de la lectura grande. Ver ceder_al_mostrador().
     try:
         c.execute("""SELECT p.id, p.codigo_raw, p.codigo_clean, p.descripcion, m.nombre AS marca
                      FROM productos p JOIN marcas m ON m.id = p.marca_id
-                     WHERE p.descripcion IS NOT NULL AND p.descripcion <> ''
+                     WHERE p.id > ? AND p.descripcion IS NOT NULL AND p.descripcion <> ''
                        AND p.codigo_clean NOT IN (SELECT codigo_clean FROM aplicaciones
                                                    WHERE codigo_clean IS NOT NULL)
-                     ORDER BY p.id""")
+                     ORDER BY p.id""", (desde_id,))
         filas = filas_a_listas(c)
     except sqlite3.OperationalError as _err:
         anotar_error("aplicaciones_desde_descripciones", _err)
@@ -1481,8 +1522,12 @@ def aplicaciones_desde_descripciones(limite=None):
                 continue
             if marca_auto not in modelos_por_marca:
                 try:
+                    # Con muchas filas, todas las marcas de una pasada; con pocas (una lista
+                    # chica), de a una: la pasada entera lee todo el catálogo.
                     modelos_por_marca[marca_auto] = {
-                        t for t, _n in modelos_de_marca(marca_auto, _version_cat)}
+                        t for t, _n in (modelos_de_todas_las_marcas(_version_cat).get(marca_auto, [])
+                                        if len(filas) > 3000
+                                        else modelos_de_marca(marca_auto, _version_cat))}
                 except Exception as _err:
                     anotar_error("aplicaciones_desde_descripciones", _err)
                     modelos_por_marca[marca_auto] = set()
@@ -2062,7 +2107,7 @@ def _firma_armada(descripcion, producto_id=None, codigo_clean=None):
     m_vias = _RE_CANTIDAD_VIAS.search(descripcion or "")
     vias = int(m_vias.group(1)) if m_vias else None
 
-    return {"familia": familia, "nucleo": nucleo, "cabeza": cabeza, "autos": autos,
+    return _sin_conjuntos_vacios({"familia": familia, "nucleo": nucleo, "cabeza": cabeza, "autos": autos,
             "pieza": pieza, "aplicacion": set(aplicacion),
             "modelos_numericos": modelos_numericos, "modelos": modelos, "marcas": marcas,
             "juego": tipo_de_juego_de_motor(texto), "sensor": tipos_de_sensor(texto),
@@ -2080,7 +2125,22 @@ def _firma_armada(descripcion, producto_id=None, codigo_clean=None):
                           if 1 <= int(n) <= 16},
             "bujia": tipo_de_bujia(texto),
             "siglas": siglas, "marca_auto": marca_auto, "posicion": posicion,
-            "cilindradas": cilindradas, "vias": vias, "texto": limpio}
+            "cilindradas": cilindradas, "vias": vias, "texto": limpio})
+
+
+# Un solo conjunto vacío para todas las firmas. Cada firma traía una docena de set() vacíos
+# —autos, modelos, siglas, temperaturas…— de 216 bytes cada uno: con 60 proveedores, las
+# 269.000 firmas del barrido ocupaban 1,7 GB, la mitad en conjuntos vacíos. Es un frozenset:
+# nadie modifica una firma (ver firma_de_producto()), y si alguien lo intentara fallaría en
+# vez de ensuciar las firmas de todos.
+_CONJUNTO_VACIO = frozenset()
+
+
+def _sin_conjuntos_vacios(firma):
+    for clave, valor in firma.items():
+        if isinstance(valor, (set, frozenset)) and not valor:
+            firma[clave] = _CONJUNTO_VACIO
+    return firma
 
 
 # Una palabra que aparece en más de este porcentaje del catálogo no distingue nada: está en
@@ -3265,7 +3325,12 @@ def _mejores_primero(pares):
     return sorted(pares, key=lambda x: x.get("_fuerza") or (0, 0, 0, 0), reverse=True)
 
 
-@st.cache_data(show_spinner=False, max_entries=1)
+# Las firmas del catálogo, producto por producto, para no rehacerlas: ver
+# firmas_de_todo_el_catalogo(). Es de cada pasada de la lógica a propósito: si cambia el código
+# pueden cambiar las reglas de la firma, y ahí hay que rehacerlas todas.
+_FIRMAS_DEL_CATALOGO = {}
+
+
 def firmas_de_todo_el_catalogo(version):
     """(índice de palabras, fichas) de todos los productos de proveedor. Cacheado por catálogo.
 
@@ -3274,30 +3339,87 @@ def firmas_de_todo_el_catalogo(version):
     caché, apretar el botón dos veces cuesta dos veces lo mismo aunque no se haya tocado nada.
     Guardado ocupa 17 MB y volver a leerlo 0,4 s, así que la segunda corrida pasa de 19 a 4 s.
 
-    El testigo va SIN guion bajo a propósito: ver descripciones_por_palabra()."""
+    El testigo va SIN guion bajo a propósito: ver descripciones_por_palabra().
+
+    SE REHACE SOLO LO QUE CAMBIÓ. Antes el testigo cambiaba con cada importación y se rehacían
+    todas: con 60 proveedores eran 151 s y 1,7 GB después de CADA lista, para cambiar las
+    firmas de 10.000 productos de 659.000. Ahora se guarda la firma de cada producto con su
+    descripción, y se rehace solo si el producto es nuevo, cambió su descripción o su marca, o
+    le aparecieron autos nuevos (aplicaciones de su código, o el taller le puso la pieza a un
+    auto: ver autos_de_todas_las_fuentes()).
+
+    Tampoco va más en st.cache_data: ese caché guarda una copia serializada y devuelve otra en
+    cada llamada, o sea el doble de memoria, y serializar 1,7 GB tarda más que armarlo. Lo que
+    devuelve es el mismo objeto para todos, y nadie lo modifica."""
+    guardado = _FIRMAS_DEL_CATALOGO.get("ultimo")
+    if guardado and guardado["version"] == version:
+        return guardado["resultado"]
     ceder_al_mostrador()      # antes de la lectura grande. Ver ceder_al_mostrador().
     from collections import defaultdict
+    previas = guardado["por_producto"] if guardado else {}
     try:
-        c.execute("""SELECT p.id, p.codigo_raw, p.codigo_clean, p.descripcion, p.marca_id,
-                            m.nombre AS marca
-                     FROM productos p JOIN marcas m ON m.id = p.marca_id
-                     WHERE m.tipo <> 'OEM' AND COALESCE(p.descripcion, '') <> ''""")
-        productos = filas_a_listas(c)
+        hasta_aplic = c.execute("SELECT COALESCE(MAX(id), 0) FROM aplicaciones").fetchone()[0]
+        hasta_taller = c.execute("SELECT COALESCE(MAX(id), 0) FROM historial_piezas").fetchone()[0]
+        codigos_con_autos_nuevos, productos_con_autos_nuevos = set(), set()
+        if guardado:
+            c.execute("SELECT DISTINCT codigo_clean FROM aplicaciones WHERE id > ?",
+                      (guardado["hasta_aplic"],))
+            codigos_con_autos_nuevos = {r[0] for r in c.fetchall()}
+            c.execute("SELECT DISTINCT producto_id FROM historial_piezas WHERE id > ?",
+                      (guardado["hasta_taller"],))
+            productos_con_autos_nuevos = {r[0] for r in c.fetchall()}
+        # Con un cursor propio y de a pedazos, no todo junto: 600.000 productos en memoria a la
+        # vez eran casi 1 GB de pico. El cursor `c` no sirve para esto porque la firma hace sus
+        # propias consultas en el medio (los autos de cada producto) y lo reiniciaría.
+        lector = conn.conexion_real().cursor()
+        lector.execute("""SELECT p.id, p.codigo_raw, p.codigo_clean, p.descripcion, p.marca_id,
+                                 m.nombre AS marca
+                          FROM productos p JOIN marcas m ON m.id = p.marca_id
+                          WHERE m.tipo <> 'OEM' AND COALESCE(p.descripcion, '') <> ''
+                          ORDER BY p.id""")
     except sqlite3.OperationalError as _err:
         anotar_error("firmas_de_todo_el_catalogo", _err)
         return {}, {}
-    indice, ficha = defaultdict(list), {}
-    for prod in productos:
-        ceder_al_mostrador()
-        firma = firma_de_producto(prod["descripcion"], prod["id"], prod.get("codigo_clean"))
-        if not firma or firma["familia"] == "Sin clasificar":
+
+    def _productos():
+        while True:
+            pedazo = lector.fetchmany(2000)
+            if not pedazo:
+                return
+            for fila in pedazo:
+                yield dict(fila)
+
+    indice, ficha, por_producto = defaultdict(list), {}, {}
+    for prod in _productos():
+        # Lo que tiene que seguir igual para no rehacerla. Para los que no tienen rubro se
+        # guarda solo esto y no el producto entero: son la mitad del catálogo y no se usan.
+        clave = (prod["descripcion"], prod["marca_id"], prod["codigo_raw"])
+        previa = previas.get(prod["id"])
+        if (previa and previa[0] == clave
+                and prod["codigo_clean"] not in codigos_con_autos_nuevos
+                and prod["id"] not in productos_con_autos_nuevos):
+            por_producto[prod["id"]] = previa
+            _clave, firma, prod, palabras = previa
+        else:
+            ceder_al_mostrador()
+            firma = firma_de_producto(prod["descripcion"], prod["id"], prod.get("codigo_clean"))
+            if not firma or firma["familia"] == "Sin clasificar":
+                por_producto[prod["id"]] = (clave, None, None, ())
+                continue
+            palabras = tuple({p for p in re.split(r'[^A-Z0-9]+',
+                                                  normalizar_texto(prod["descripcion"]))
+                              if len(p) >= 3})
+            por_producto[prod["id"]] = (clave, firma, prod, palabras)
+        if firma is None:
             continue
-        palabras = {p for p in re.split(r'[^A-Z0-9]+', normalizar_texto(prod["descripcion"]))
-                    if len(p) >= 3}
         ficha[prod["id"]] = (firma, prod)
         for palabra in palabras:
             indice[palabra].append(prod["id"])
-    return dict(indice), ficha
+    resultado = (dict(indice), ficha)
+    _FIRMAS_DEL_CATALOGO["ultimo"] = {"version": version, "resultado": resultado,
+                                      "por_producto": por_producto,
+                                      "hasta_aplic": hasta_aplic, "hasta_taller": hasta_taller}
+    return resultado
 
 
 # Sobre el catálogo real salen 8.122, así que 8.000 volvía a cortar justo como cortaba 600
@@ -3307,7 +3429,8 @@ def firmas_de_todo_el_catalogo(version):
 TOPE_SUGERENCIAS_TODAS = 20000  # ver sugerir_entre_todas_las_marcas()
 
 
-def sugerir_entre_todas_las_marcas(limite=TOPE_SUGERENCIAS_TODAS, tope_palabra=250):
+def sugerir_entre_todas_las_marcas(limite=TOPE_SUGERENCIAS_TODAS, tope_palabra=250,
+                                   solo_desde_id=0):
     """Lo mismo que derivar_equivalencias_por_descripcion(), pero de UNA VEZ para todo el
     catálogo en vez de elegir dos proveedores a mano.
 
@@ -3351,22 +3474,40 @@ def sugerir_entre_todas_las_marcas(limite=TOPE_SUGERENCIAS_TODAS, tope_palabra=2
     que hace el tope es esconder pares. Estuvo en 200 y cortaba de verdad —de 284 pares reales
     se veían 84—, se subió a 600 y volvió a cortar en cuanto entró una lista más: con Illinois
     cargada salen 787 y se veían 600. Ahora está en 2.000, y si alguna vez se llega, la
-    pantalla lo dice en vez de callárselo."""
+    pantalla lo dice en vez de callárselo.
+
+    solo_desde_id: solo los pares donde al menos uno es un producto con id mayor, o sea lo que
+    trajeron las listas importadas desde la última vez. Es como corre solo después de importar
+    (ver descubrimiento_post_importacion()); el botón de Administrar lo hace entero.
+
+    CADA PAR SE MIRA UNA VEZ SIN ANOTAR LOS YA VISTOS. Antes se guardaba cada par mirado en un
+    conjunto para no repetirlo: con 60 proveedores eran 17 millones de pares y 1,7 GB solo de
+    ese conjunto —la tanda llegó a 3,6 GB, más de lo que tiene el servidor—. Ahora un par se
+    mira en la primera palabra rara que comparten, y en las demás se saltea: da los mismos
+    pares sin guardar ninguno."""
+    import bisect
     indice, ficha = firmas_de_todo_el_catalogo(version_del_catalogo())
     if not ficha:
         return []
 
     _cuenta_pal, _total_desc = cuantas_veces_aparece_cada_palabra()
     raras = {p: ids for p, ids in indice.items() if 2 <= len(ids) <= tope_palabra}
-    vistos, salida = set(), []
-    for ids in raras.values():
+    # El número de cada palabra rara, y las de cada producto en orden: con eso se sabe cuál es
+    # la primera que comparten dos productos (ver _primera_en_comun()).
+    raras_de = {}
+    for rango, ids in enumerate(raras.values()):
+        for pid in ids:
+            raras_de.setdefault(pid, []).append(rango)
+    salida = []
+    for rango, ids in enumerate(raras.values()):
         ceder_al_mostrador()
-        for i in range(len(ids)):
-            for j in range(i + 1, len(ids)):
-                a, b = (ids[i], ids[j]) if ids[i] < ids[j] else (ids[j], ids[i])
-                if (a, b) in vistos:
+        # Los ids vienen en orden (ver firmas_de_todo_el_catalogo()): los nuevos están al final.
+        primero_nuevo = bisect.bisect_right(ids, solo_desde_id) if solo_desde_id else 1
+        for j in range(max(primero_nuevo, 1), len(ids)):
+            for i in range(j):
+                a, b = ids[i], ids[j]
+                if _primera_en_comun(raras_de[a], raras_de[b]) != rango:
                     continue
-                vistos.add((a, b))
                 firma_a, prod_a = ficha[a]
                 firma_b, prod_b = ficha[b]
                 # Del mismo proveedor no: son dos productos de su catálogo, no equivalentes.
@@ -3414,6 +3555,19 @@ def sugerir_entre_todas_las_marcas(limite=TOPE_SUGERENCIAS_TODAS, tope_palabra=2
     # Se ordena ANTES de cortar. Cortando al llegar al tope, lo que quedaba afuera no eran los
     # peores: eran los que el recorrido del índice tocaba último, o sea cualquiera.
     return _mejores_primero(salida)[:limite]
+
+
+def _primera_en_comun(rangos_a, rangos_b):
+    """El primer número que está en las dos listas ordenadas. Ver sugerir_entre_todas_las_marcas()."""
+    i = j = 0
+    while i < len(rangos_a) and j < len(rangos_b):
+        if rangos_a[i] == rangos_b[j]:
+            return rangos_a[i]
+        if rangos_a[i] < rangos_b[j]:
+            i += 1
+        else:
+            j += 1
+    return None
 
 
 def derivar_equivalencias_de_aplicaciones(limite=500, minimo_autos=2, solo_lo_nuevo=False,
