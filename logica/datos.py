@@ -1087,6 +1087,13 @@ def _esquema_gestion(c):
     # Por qué se rechazó: ver MOTIVOS_DE_RECHAZO. Vacío en lo que se decidió sin decir por qué.
     if "motivo" not in [f[1] for f in c.execute("PRAGMA table_info(equivalencias_revisadas)")]:
         c.execute("ALTER TABLE equivalencias_revisadas ADD COLUMN motivo TEXT")
+    # Con qué confianza y por qué alarma estaba el par cuando se decidió: es lo que permite medir
+    # cuánto acierta la app con tus propias decisiones (ver aciertos_de_la_revision()).
+    _cols_rev = [f[1] for f in c.execute("PRAGMA table_info(equivalencias_revisadas)")]
+    if "confianza" not in _cols_rev:
+        c.execute("ALTER TABLE equivalencias_revisadas ADD COLUMN confianza REAL")
+    if "senal" not in _cols_rev:
+        c.execute("ALTER TABLE equivalencias_revisadas ADD COLUMN senal TEXT")
 
     # Los pares elegidos al azar para controlar un grupo de vínculos antes de aprobarlo entero.
     # Se guardan para que la muestra sea SIEMPRE la misma: si se volviera a sortear en cada

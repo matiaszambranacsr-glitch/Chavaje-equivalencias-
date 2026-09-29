@@ -390,16 +390,105 @@ def marcar_revision(pares, decision, motivo=None):
         return
     filas = []
     usuario = obtener_usuario_actual()
+    como_estaba = _como_estaba_en_la_revision()
     for a, b in pares:
-        filas.append((a, b, decision, usuario, motivo))
-        filas.append((b, a, decision, usuario, motivo))
+        confianza, senal = como_estaba.get((min(a, b), max(a, b)), (None, None))
+        filas.append((a, b, decision, usuario, motivo, confianza, senal))
+        filas.append((b, a, decision, usuario, motivo, confianza, senal))
     with db_lock:
         c.executemany(
             "INSERT OR REPLACE INTO equivalencias_revisadas "
-            "(producto_a_id, producto_b_id, decision, revisado_por, motivo) VALUES (?, ?, ?, ?, ?)",
+            "(producto_a_id, producto_b_id, decision, revisado_por, motivo, confianza, senal) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?)",
             filas
         )
         conn.commit()
+
+
+def _techo_de_error(malos, total):
+    """Hasta cuánto puede estar mal el grupo del que salió la muestra, con 95 % de seguridad
+    (Wilson). Con 0 mal en 30, «hasta 11 %»: la muestra no dice «0 %»."""
+    import math
+    if not total:
+        return None
+    z = 1.96
+    p = malos / total
+    centro = (p + z * z / (2 * total)) / (1 + z * z / total)
+    margen = z * math.sqrt(p * (1 - p) / total + z * z / (4 * total * total)) / (1 + z * z / total)
+    return min(1.0, centro + margen)
+
+
+def aciertos_de_la_revision():
+    """Qué tan bien acierta la app, medido con TUS decisiones. Tres tablas:
+
+    · muestras: de los «limpios» que revisaste en las muestras de control, cuántos estaban mal,
+      por franja de confianza. Es la medida honesta: son pares sorteados al azar y mirados.
+    · por_banda: lo que decidiste, según la confianza que tenía el par en ese momento. Incluye
+      lo aprobado en bloque, que no se miró de a uno: el verde sale mejor de lo que es.
+    · por_alarma: de lo que cada alarma mandó a revisión, cuánto aprobaste igual. Una alarma que
+      se equivoca seguido es una regla para ajustar.
+
+    La confianza y la alarma se anotan al decidir desde que existe esto (ver marcar_revision()):
+    las decisiones de antes cuentan en las muestras pero no en las otras dos."""
+    salida = {"muestras": [], "por_banda": [], "por_alarma": [], "con_datos": 0}
+    c.execute("""SELECT m.grupo, r.decision FROM muestras_de_control m
+                 JOIN equivalencias_revisadas r
+                   ON r.producto_a_id = m.producto_a_id AND r.producto_b_id = m.producto_b_id""")
+    muestras = {}
+    for fila in c.fetchall():
+        partes = (fila["grupo"] or "").split("|")
+        franja = next((x for x in partes[3:] if x in ("alta", "media")), "")
+        tipo = "automático" if "(automático)" in partes[0] or partes[0].startswith(
+            ("BARRIDO", "CRUCE", "CÓDIGO ESCRITO")) else "lista importada"
+        clave = (tipo, {"alta": "confianza alta", "media": "confianza media"}.get(franja, "todas"))
+        cuenta = muestras.setdefault(clave, [0, 0])
+        cuenta[0] += 1
+        cuenta[1] += fila["decision"] == "rechazada"
+    for (tipo, franja), (total, malos) in sorted(muestras.items()):
+        techo = _techo_de_error(malos, total)
+        salida["muestras"].append({
+            "De dónde": tipo, "Franja": franja, "Mirados": total, "Mal": malos,
+            "Mal en la muestra": f"{100 * malos / total:.0f} %",
+            "Mal en el grupo (hasta)": f"{100 * techo:.0f} %"})
+
+    c.execute("""SELECT confianza, senal, decision FROM equivalencias_revisadas
+                 WHERE confianza IS NOT NULL AND producto_a_id < producto_b_id""")
+    filas = c.fetchall()
+    salida["con_datos"] = len(filas)
+    bandas, alarmas = {}, {}
+    for f in filas:
+        nombre, _que_hacer = nivel_de_confianza(f["confianza"])
+        cuenta = bandas.setdefault(nombre, [0, 0])
+        cuenta[0 if f["decision"] == "ok" else 1] += 1
+        if f["confianza"] < 55 and f["senal"]:
+            # Sin los números, para juntar «emparejado con 4» y «con 9» en una sola alarma.
+            clave = re.sub(r"\d[\d.,]*", "N", f["senal"])[:90]
+            cuenta = alarmas.setdefault(clave, [0, 0])
+            cuenta[0 if f["decision"] == "ok" else 1] += 1
+    orden = {"🟢": 0, "🟡": 1, "🟠": 2, "🔴": 3}
+    for nombre, (ok, mal) in sorted(bandas.items(), key=lambda x: orden.get(x[0][:1], 9)):
+        salida["por_banda"].append({"Confianza": nombre, "Aprobaste": ok, "Descartaste": mal,
+                                    "Aprobados": f"{100 * ok / (ok + mal):.0f} %"})
+    for alarma, (ok, mal) in sorted(alarmas.items(), key=lambda x: -(x[1][0] + x[1][1]))[:15]:
+        salida["por_alarma"].append({"Alarma": alarma, "Decididos": ok + mal,
+                                     "Aprobaste igual": ok,
+                                     "La alarma se equivocó": f"{100 * ok / (ok + mal):.0f} %"})
+    return salida
+
+
+def _como_estaba_en_la_revision():
+    """{(a, b): (confianza, primera alarma)} del análisis que tiene la pantalla de revisión.
+    Vacío si no hay: lo que se decide fuera de la revisión (cortar un vínculo cargado) queda sin
+    esos datos, y el panel de aciertos no lo cuenta."""
+    guardado = analisis_de_lote_guardado() or {}
+    salida = {}
+    for lista in guardado.get("resultado") or ():
+        for f in lista or ():
+            if isinstance(f, dict) and "a" in f and "b" in f:
+                alarmas = f.get("alarmas") or []
+                salida[(min(f["a"], f["b"]), max(f["a"], f["b"]))] = (
+                    f.get("confianza"), alarmas[0][:200] if alarmas else None)
+    return salida
 
 
 def pares_rechazados():

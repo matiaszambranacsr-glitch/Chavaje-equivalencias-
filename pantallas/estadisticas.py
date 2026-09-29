@@ -1642,6 +1642,35 @@ Administrar → Mantenimiento.
                               key="pagina_sospechosas_siguiente", on_click=_a_la_pagina_siguiente)
             st.markdown("---")
 
+        # QUÉ TAN BIEN ACIERTA LA APP, con tus decisiones. Plegado: se mira de vez en cuando,
+        # y lo que se viene a hacer acá es revisar. Ver aciertos_de_la_revision().
+        with st.expander("📏 ¿Qué tan bien acierta la app? (medido con lo que decidiste)"):
+            _ac = aciertos_de_la_revision()
+            if _ac["muestras"]:
+                st.markdown("**Muestras de control** — pares «limpios» sorteados al azar que "
+                            "revisaste de a uno. Es la medida más honesta.")
+                st.dataframe(_ac["muestras"], width="stretch", hide_index=True)
+                st.caption("«Mal en el grupo (hasta)»: con 95 % de seguridad, el grupo entero "
+                           "no tiene más mal que eso. Con 0 mal en 30, igual puede haber hasta "
+                           "11 %: mirar más achica el margen.")
+            else:
+                st.info("Todavía no revisaste ninguna muestra de control. Cuando lo hagas, acá "
+                        "vas a ver cuántos de los «limpios» estaban mal de verdad.")
+            if _ac["por_banda"]:
+                st.markdown("**Por confianza** — lo que decidiste según cómo lo había puntuado "
+                            "la app. Incluye lo aprobado en bloque, así que el verde sale mejor "
+                            "de lo que es.")
+                st.dataframe(_ac["por_banda"], width="stretch", hide_index=True)
+            if _ac["por_alarma"]:
+                st.markdown("**Por alarma** — de lo que cada alarma mandó a revisión, cuánto "
+                            "aprobaste igual. Si una se equivoca seguido, avisá: es una regla "
+                            "para ajustar.")
+                st.dataframe(_ac["por_alarma"], width="stretch", hide_index=True)
+            if not _ac["con_datos"]:
+                st.caption("La confianza y la alarma de cada par se anotan al decidir desde "
+                           "esta versión: las tablas por confianza y por alarma se van a ir "
+                           "llenando a medida que revises.")
+
         # LOS CONTROLES DE LO YA CARGADO VAN DESPUÉS de la revisión de las listas. Estaban
         # arriba de todo, y lo que se viene a hacer a esta pantalla —revisar lo que espera
         # aprobación— quedaba tercero, abajo de dos botones que se usan de vez en cuando.

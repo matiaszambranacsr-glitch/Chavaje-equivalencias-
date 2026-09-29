@@ -5430,6 +5430,23 @@ Y uno más que salió probando: si la lista trae el mismo código dos veces con 
 - **Las descripciones sin `<br>` ni `<b>` escritos**: `texto_para_html()` pasa los saltos a « · »
   y saca las etiquetas de formato que traen algunas listas.
 
+### ¿Qué tan bien acierta la app? Medido con lo que decidiste
+
+En Estadísticas → 🔗 Equivalencias sugeridas, plegado: «📏 ¿Qué tan bien acierta la app?»
+(`aciertos_de_la_revision()`). Tres tablas:
+
+- **Muestras de control**: de los «limpios» sorteados al azar que revisaste de a uno, cuántos
+  estaban mal, por origen (lista importada o automático) y franja de confianza, con el techo de
+  error del grupo al 95 % (con 0 mal en 30 el grupo puede tener hasta 11 %).
+- **Por confianza**: lo que decidiste según cómo lo había puntuado la app. Incluye lo aprobado
+  en bloque, así que el verde sale mejor de lo que es.
+- **Por alarma**: de lo que cada alarma mandó a revisión, cuánto aprobaste igual. La alarma
+  que se equivoca seguido es la regla para ajustar.
+
+Para las dos últimas, `marcar_revision()` anota ahora la confianza y la primera alarma que tenía
+el par en la pantalla de revisión al decidir (columnas nuevas `confianza` y `senal` de
+`equivalencias_revisadas`). Lo decidido antes cuenta solo en las muestras.
+
 ### Una prueba que cuida lo que ya revisaste
 
 `pruebas_de_la_revision.py` deja escrito lo que se aprendió revisando la cola a mano, para que
