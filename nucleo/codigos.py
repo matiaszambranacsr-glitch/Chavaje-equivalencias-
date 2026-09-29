@@ -739,6 +739,10 @@ def extraer_codigos_de_texto(texto, minimo=6, codigo_propio=None, codigos_conoci
         # tiene por qué repetirlo. La marcha atrás va en la referencia \1: sin ella el patrón
         # se comería códigos con guion legítimos.
         re.compile(r'^([A-Z]{1,2})\d{1,3}[A-Z]?-\1\d{1,3}[A-Z]?$'),
+        # Y los motores de Renault encadenados aunque cambie la letra: «O´RING 28X4 MM
+        # (K4M-F4P-F4R) 16V CLIO / LAGUNA», «E7J-K4J». En el catálogo le pega a esos dos y
+        # nada más; el primero estaba en verde, con 100, como número de fábrica.
+        re.compile(r'^[A-Z]\d[A-Z](-[A-Z]\d[A-Z])+$'),
         # CUATRO O MÁS NÚMEROS ENCADENADOS: 3350-3550-650-6600-7500, 2017-2018-2019-2020,
         # 1214-1215-1315-1615-1620-608-912-913. El patrón que ya estaba pide segmentos de tres
         # dígitos o menos y se le escapaban los de cuatro; pidiendo CUATRO segmentos en vez de
