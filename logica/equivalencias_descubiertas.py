@@ -721,7 +721,7 @@ _MOTIVOS_DE_OTRA_PIEZA = ("rubros distintos", "posiciones distintas", "siglas di
                           "sensores de tipos distintos", "bujías de tipos distintos",
                           "distinta cantidad de cilindros", "motores de distintas válvulas",
                           "años distintos", "motores distintos",
-                          "sobremedida distinta")
+                          "sobremedida distinta", "presiones distintas")
 
 
 def _por_que_chocan(productos):
@@ -2706,6 +2706,8 @@ def tipo_de_alarma(alarma):
     for _sin_detalle in ("🔤 carburadores distintos", "🔤 motores de distintas válvulas"):
         if alarma.startswith(_sin_detalle):
             return _sin_detalle
+    if alarma.startswith("🔤 presiones distintas"):
+        return "🔤 presiones distintas"
     m = re.match(r"(🔤 (?:largo de cable distinto|temperaturas distintas|"
                  r"distinta cantidad de vías)) \(", alarma)
     if m:

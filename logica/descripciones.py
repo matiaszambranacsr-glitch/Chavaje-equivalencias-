@@ -1461,6 +1461,12 @@ _RUIDO_EN_FIRMA = {
     "HORARIO", "SENTIDO", "LINEA", "LIVIANA", "LIVIANOS", "PESADA", "MOTORES", "CANALES",
     "POTENCIA", "VOLTS", "ANCHO", "DIAMETRO", "AGUJEROS", "DIENTES", "PINES", "VIAS", "BAR",
     "MODULO",
+    # Los COLORES, afuera de las dos preguntas. Del lado del auto, «aislante NEGRO» contra
+    # «tapón NEGRO» contaba como algo en común y salvaba de «modelos distintos» a un bulbo de
+    # Escort y Gol contra uno de F100 y Cargo. Del lado de la pieza tampoco van: probado, «aro
+    # GRIS» contra «aro NARANJA» hacía que dos inyectores «no coincidieran en qué pieza es».
+    "NEGRO", "NEGRA", "BLANCO", "BLANCA", "GRIS", "AZUL", "ROJO", "ROJA", "VERDE", "MARRON",
+    "AMARILLO", "AMARILLA", "NARANJA", "CELESTE", "VIOLETA", "COLOR",
 }
 
 # Siglas técnicas que definen QUÉ pieza es, no de qué auto. Dos válvulas del mismo auto, una
@@ -1590,6 +1596,10 @@ _PALABRAS_QUE_NO_SON_MODELOS = frozenset({
     # «NEW LEONE», «NEW BEETLE», «UNO NUEVO»: la versión, no el auto. Como «modelo en común»
     # unía una junta de Subaru con una de Volkswagen y salteaba el control de marcas distintas.
     "NEW", "NUEVO", "NUEVA",
+    # Marcas de sensores que las listas citan como referencia («Vernet OS3573 ERA 330366 FAE
+    # 12436») y palabras sueltas: «ANTES ERA TAPON NEGRO». ERA como «modelo en común» unía un
+    # bulbo de Ford F100 con uno de Chevrolet Aveo.
+    "ERA", "FAE", "VERNET", "ANTES", "ELECTRONICO", "ELECTRONICA",
 })
 
 
@@ -1922,6 +1932,26 @@ _RE_LARGO_DE_CABLE = re.compile(
 _RE_PAR_DE_TEMPERATURAS = re.compile(
     r'(?<![\d.,])(\d{2,3})\s*[º°?]?\s*[/\- ]\s*(\d{2,3})\s*[º°?]?(?![\d.,])')
 _RE_HABLA_DE_TEMPERATURA = re.compile(r'\b(BULBO|TERMO|TERMOSTATO|TEMP|ELECTROVENT)', re.I)
+
+
+# La presión en bar, como la escribe cada lista: «0.40 BAR», «1.40 Bar», «3BAR», y FISPA con el
+# espacio en lugar de la coma: «PRESION 0 5 BAR», «3 5 BAR». No se toma si viene pegado a una
+# letra o a otro número («M3 3BAR» es el BMW M3 y 3 bar), ni el final de un rango: «0-7 BAR»
+# es lo que mide un sensor continuo, no la presión a la que abre (los rangos arrancan en 0).
+_RE_PRESION_EN_BAR = re.compile(
+    r"(?<![\w.,])(?<!\b0-)(?<!\b0\s-)(?<!\b0-\s)(?<!\b0\s-\s)(\d{1,2}(?:[.,]\d{1,2}|\s\d{1,2})?)"
+    r"\s?-?\s?BAR\b", re.IGNORECASE)
+
+
+def presiones_en_bar(descripcion):
+    """Las presiones que declara la descripción, en bar: {0.4}, {3.5}. Vacío si no dice."""
+    return frozenset(float(re.sub(r"[\s,]", ".", x)) for x in
+                     _RE_PRESION_EN_BAR.findall(descripcion or ""))
+
+
+def presiones_que_chocan(bar_a, bar_b):
+    """Las dos dicen la presión y ninguna coincide (con 0,05 bar de tolerancia)."""
+    return bool(bar_a and bar_b) and not any(abs(x - y) <= 0.05 for x in bar_a for y in bar_b)
 
 
 def largo_de_cable_mm(descripcion):
@@ -2279,6 +2309,7 @@ def _firma_armada(descripcion, producto_id=None, codigo_clean=None):
             "modelos_numericos": modelos_numericos, "modelos": modelos, "marcas": marcas,
             "juego": tipo_de_juego_de_motor(texto), "sensor": tipos_de_sensor(texto),
             "cable_mm": largo_de_cable_mm(descripcion),
+            "bar": presiones_en_bar(descripcion),
             "temperaturas": temperaturas_declaradas(descripcion),
             "carburador": (_marcas_carb if "CARBURADOR" in pieza else set()),
             "valvulas": {int(v) for v in _RE_CANTIDAD_DE_VALVULAS.findall(limpio)},
@@ -2416,10 +2447,18 @@ _TECNOLOGIAS_DE_MOTOR = {
 
 
 def _marcas_que_se_cruzan(marcas_a, marcas_b):
-    """¿Nombran alguna marca en común, o de la misma familia, o una es de motores?"""
-    if (marcas_a & marcas_b) or (marcas_a | marcas_b) & _MARCAS_DE_MOTORES:
+    """¿Nombran alguna marca en común, o de la misma familia, o una nombra solo motores?
+
+    La marca de motores cruza con cualquiera solo si ese lado NO nombra además un vehículo.
+    «Bulbo presion de aceite Ford F100 … Cargo … Cummins Mwm» (CRI-FA 32-42371) contra el de
+    «CHEVROLET AVEO CRUZE TRACKER» (349FISPA) pasaba sin alarmas: Cummins y MWM lo salvaban,
+    y FORD contra CHEVROLET nunca se comparaba."""
+    if marcas_a & marcas_b:
         return True
-    return any(fam & marcas_a and fam & marcas_b for fam in _FAMILIAS_DE_MARCAS)
+    autos_a, autos_b = marcas_a - _MARCAS_DE_MOTORES, marcas_b - _MARCAS_DE_MOTORES
+    if not autos_a or not autos_b:
+        return True
+    return any(fam & autos_a and fam & autos_b for fam in _FAMILIAS_DE_MARCAS)
 
 
 def firmas_compatibles(a, b, minimo_nucleo=2, cuenta_palabras=None, total_descripciones=0):
@@ -2450,6 +2489,13 @@ def firmas_compatibles(a, b, minimo_nucleo=2, cuenta_palabras=None, total_descri
             return ("sobremedida" if x == "SI" else f"+{x}".replace(".", ",")) if x else "estándar"
         return False, (f"sobremedida distinta: {_sm(a.get('sobremedida'))} vs "
                        f"{_sm(b.get('sobremedida'))}")
+
+    # «Bulbo presion de aceite … 0.40 BAR» contra «BULBO DE PRESION DE ACEITE … PRESION 0 5
+    # BAR»: el bulbo abre a otra presión, la bomba de nafta empuja otra. Ver presiones_en_bar().
+    if presiones_que_chocan(a.get("bar"), b.get("bar")):
+        def _bar(x):
+            return "/".join(f"{v:g}".replace(".", ",") for v in sorted(x))
+        return False, f"presiones distintas: {_bar(a['bar'])} vs {_bar(b['bar'])} bar"
 
     if a.get("bujia") and b.get("bujia") and a["bujia"] != b["bujia"]:
         return False, f"bujías de tipos distintos: {a['bujia']} vs {b['bujia']}"
@@ -2639,8 +2685,14 @@ def firmas_compatibles(a, b, minimo_nucleo=2, cuenta_palabras=None, total_descri
     # «coincidían». El modelo compartido no cuenta como respaldo acá, justamente porque es la
     # palabra que se está poniendo en duda; un código de motor en común sí.
     _mar_a, _mar_b = a.get("marcas") or set(), b.get("marcas") or set()
+    # Si una nombra una marca de motores y comparten un nombre de modelo, no se corta acá:
+    # «PERKINS CASE 580H F350 VW680» es una lista de vehículos con ese motor, y la F350 que
+    # nombra es la de Ford. Eso queda para la regla de abajo, que lo manda a revisión.
+    _con_motores_y_modelo = bool(
+        (_mar_a | _mar_b) & _MARCAS_DE_MOTORES
+        and (a.get("autos") or set()) & (b.get("autos") or set()) & (_mod_a | _mod_b))
     if (_mar_a and _mar_b and not _marcas_que_se_cruzan(_mar_a, _mar_b)
-            and not (apl_comunes - _mod_a - _mod_b)):
+            and not (apl_comunes - _mod_a - _mod_b) and not _con_motores_y_modelo):
         return False, (f"marcas distintas: {'/'.join(sorted(_mar_a)[:2])} "
                        f"vs {'/'.join(sorted(_mar_b)[:2])}")
     # LA MARCA DE MOTORES NO SALVA UN NOMBRE DE OTRA MARCA. Que una nombre a MWM y la otra a
@@ -2930,7 +2982,7 @@ _MOTIVOS_QUE_CONTRADICEN = ("posiciones distintas", "siglas distintas", "autos d
                             "sensores de tipos distintos", "bujías de tipos distintos",
                             "distinta cantidad de cilindros", "motores de distintas válvulas",
                             "años distintos", "motores distintos",
-                            "sobremedida distinta")
+                            "sobremedida distinta", "presiones distintas")
 # Los que no alcanzan para decir que son piezas distintas pero sí para desconfiar: no vetan
 # (el par va a revisión, no a rojo) y se muestran como el porqué. Ver evidencia_cruzada().
 _MOTIVOS_QUE_AVISAN = ("un nombre de modelo de marcas distintas",)

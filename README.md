@@ -5674,6 +5674,33 @@ Dos pares que salían sin alarmas en la revisión de TARANTO contra ILLINOIS:
 - `pruebas_de_la_revision.py` tiene una tercera respuesta posible, «dudosa» (no concuerdan pero
   sin un motivo que contradiga), y suma los tres pares.
 
+### El bulbo de F100 no es el de Aveo: marcas de motor, colores y presión
+
+CRI-FA 32-42371 «Bulbo presion de aceite Ford F100 F250 F4000 … Cargo … Cummins Mwm 0.40 BAR …
+ANTES ERA TAPON NEGRO» salía sin alarmas contra el 349FISPA (Chevrolet Aveo, Cruze, Tracker) y
+con 75 contra el 358FISPA (Escort, Gol, Polo: 0,5 bar). Tres agujeros:
+
+- **La marca de motores salvaba aunque el mismo lado nombrara un vehículo.** Cummins y MWM hacían
+  que FORD contra CHEVROLET no se comparara. Ahora `_marcas_que_se_cruzan()` deja pasar la marca
+  de motores solo si ese lado no nombra también un vehículo. Si además comparten un nombre de
+  modelo («PERKINS CASE 580H F350 VW680» contra «FORD F350»), no se corta: va a revisión.
+- **ERA, FAE, VERNET, ANTES, ELECTRONICO se habían aprendido como modelos de auto** («Vernet
+  OS3573 ERA 330366 FAE 12436», «ANTES ERA TAPON NEGRO»), y ERA era el «modelo en común». Van a
+  `_PALABRAS_QUE_NO_SON_MODELOS`.
+- **Los colores contaban como algo del auto**: «aislante NEGRO» contra «tapón NEGRO» salvaba de
+  «modelos distintos». Pasan a `_RUIDO_EN_FIRMA`, afuera de las dos preguntas. Probado ponerlos
+  del lado de la pieza: «aro GRIS» contra «aro NARANJA» hacía que dos inyectores «no coincidieran
+  en qué pieza es», y se descartó. En la cola, sacarlos sube 6 bulbos bien emparejados que el
+  color frenaba y baja a revisión 10 que solo compartían el color y la marca.
+- **Motivo nuevo, «presiones distintas»** (`presiones_en_bar()`): la presión en bar como la escribe
+  cada lista —«0.40 BAR», «1.40 Bar», «3BAR» y FISPA con espacio en vez de coma, «0 5 BAR»—. No
+  toma «M3 3BAR» como 33 ni los rangos de un sensor continuo («0-7 BAR», «0-10 bar»). Si las dos
+  la dicen y no coincide (0,05 de tolerancia), rojo. En la cola corta 14 pares: bulbos de 0,3
+  contra 0,4, 0,5 contra 0,35, el aforador diésel de 0,2 bar contra el de nafta de 3. De las
+  13.021 aprobaciones pasa a rojo una: la bomba Bosch 0580464981 de 4 bar contra el aforador
+  23183 de 3 bar.
+- `pruebas_de_la_revision.py` suma los dos pares del bulbo.
+
 ## 🔗 Revisar sugeridas: primero lo que hay que hacer
 
 Mirado con capturas sobre la base real (15.308 pendientes en 8 listas):

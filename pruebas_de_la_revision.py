@@ -92,6 +92,17 @@ PARES_DE_MUESTRA = [
     ("Junta Tapa de valvulas superior Mercedes Benz OM352",
      "Junta Tapa de Válvulas Lateral M. BENZ1215 1620 - 5,7/6,0 - OM352 OM366 (3520150160)",
      "distinta", "TARANTO 350332 / ILLINOIS JVL-163-43: tapa superior contra lateral"),
+    ("Bulbo presion de aceite Ford F100 F250 F4000 F12000 F14000 Cargo Electronico Cummins Mwm "
+     "0.40 BAR Normal abierto - ANTES ERA TAPON NEGRO",
+     "BULBO DE PRESION DE ACEITE 349 CHEVROLET AVEO 1 6 CRUZE 1 8 TRACKER 1 8 REF ORIG 55354325 "
+     "96802844 PS503 Vernet OS3573 ERA 330366 FAE 12436", "distinta",
+     "CRI-FA 32-42371 / 349FISPA: Ford contra Chevrolet; Cummins y MWM no lo salvan"),
+    ("Bulbo presion de aceite Ford F100 F250 F4000 F12000 F14000 Cargo Electronico Cummins Mwm "
+     "0.40 BAR Normal abierto - ANTES ERA TAPON NEGRO",
+     "BULBO DE PRESION DE ACEITE 358 FORD ESCORT - ORION - SEAT CORDOBA - IBIZA - VOLKSWAGEN GOL "
+     "I - GOL II - GOL III - POINTER - POLO - QUANTUM - SAVEIRO - PRESION 0 5 BAR - AISLANTE NEGRO "
+     "REF ORIG SEAT 0279190811 - VOLKSWAGEN 0309190811", "distinta",
+     "CRI-FA 32-42371 / 358FISPA: 0,40 contra 0,5 bar"),
 
     # --- dudosas: no se descartan de una, pero tampoco pasan sin mirarlas ---
     ("Junta Tapa Valvulas MWM SPRINT 4.07",
