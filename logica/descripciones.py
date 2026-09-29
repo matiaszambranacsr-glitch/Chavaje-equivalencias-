@@ -39,6 +39,96 @@ def extraer_anios(descripcion):
     return None, None
 
 
+# Un RANGO de años escrito como rango: «1969/78», «1998/2006», «1998-2006», «1998 al 2006»,
+# «2013/...», «2005>». El año suelto no entra a propósito: «J.DEERE 2030» es un tractor y
+# «TRANSIT 2000» puede ser el motor. Ver rangos_de_anios().
+_RE_RANGO_DE_ANIOS = re.compile(
+    r"\b(19[5-9]\d|20[0-3]\d)\s*(?:(?:[/\-–—]|\s+AL?\s+)\s*(\d{2}|\d{4})\b"
+    r"|/\s*(?:\.{2,}|…|>)|\s*>)", re.IGNORECASE)
+
+
+def rangos_de_anios(descripcion):
+    """TODOS los rangos de años que escribe una descripción, como tupla de (desde, hasta).
+    «En adelante» es hasta 2100. A diferencia de extraer_anios(), que se queda con el primero,
+    acá hacen falta todos: «HYUNDAI TRAJET 2000/2004 SONATA EF 2001/2004» son dos autos, y
+    comparar contra uno solo tumbaría pares que coinciden en el otro."""
+    salida = []
+    for m in _RE_RANGO_DE_ANIOS.finditer(str(descripcion or "")):
+        desde, fin = int(m.group(1)), m.group(2)
+        if fin:
+            hasta = int(fin) if len(fin) == 4 else int(str(desde)[:2] + fin)
+            if hasta < desde:            # 1998/02 es 1998 a 2002
+                hasta += 100
+            if hasta - desde > 40:       # no es un rango de años: un código o una medida
+                continue
+        else:
+            hasta = 2100
+        salida.append((desde, hasta))
+    return tuple(salida)
+
+
+# Donde termina la parte que habla del auto. Después vienen los números de referencia —«//
+# 1776501/BK3Q6051B1C/B1B», «REF ORIG …», «NGK= BP5HS»— y ahí hay siglas con forma de motor
+# que no son motores: «B1B» es el final de un número de Ford y «BP5HS» es una bujía NGK.
+_RE_FIN_DE_LA_APLICACION = re.compile(
+    r"//|\bREF\b|\bNGK\b|\bBOSCH\b|\bCHAMPION\b|\bEQUIV|=|\bREEMPLAZA", re.IGNORECASE)
+
+
+def motores_de_la_descripcion(descripcion, excluir=(), codigo_propio=""):
+    """Los códigos de motor que nombra la descripción (G9U, K9K, D4F, F5L…), solo de la parte que
+    habla del auto. Ver parece_designacion_de_motor() y «motores distintos» en
+    firmas_compatibles(). `excluir` son los modelos y las siglas, que a veces tienen la misma
+    forma (XR3I); `codigo_propio` es el del producto, que también puede tenerla (KIT20003A)."""
+    texto = _RE_FIN_DE_LA_APLICACION.split(str(descripcion or ""), 1)[0]
+    texto = re.sub(r"(?:\s*\([^)]*\))+\s*$", "", texto)      # las referencias del final
+    propio = sanitizar(codigo_propio or "")
+    return frozenset(w for w in re.findall(r"[A-Z0-9]{3,8}", _normalizar_desc(texto))
+                     if parece_designacion_de_motor(w) and w not in excluir
+                     and not (propio and w in propio))
+
+
+# Qué motores declara el catálogo que se llevan: ver aprender_motores_que_van_juntos(). Es «de
+# cada pasada» de la lógica a propósito, y se relee cada diez minutos porque la tanda de fondo
+# reescribe la tabla.
+_MOTORES_QUE_VAN_JUNTOS = {}
+
+
+def _motores_que_van_juntos():
+    guardado = _MOTORES_QUE_VAN_JUNTOS.get("pares")
+    if guardado and time.time() - guardado[0] < 600:
+        return guardado[1]
+    try:
+        c.execute("SELECT motor_a, motor_b FROM motores_compatibles")
+        pares = frozenset(frozenset((r[0], r[1])) for r in c.fetchall())
+    except Exception as _err:
+        anotar_error("_motores_que_van_juntos", _err)
+        pares = frozenset()
+    _MOTORES_QUE_VAN_JUNTOS["pares"] = (time.time(), pares)
+    return pares
+
+
+_RE_FAMILIA_DE_MOTOR = re.compile(r"[A-Z]+\d+")
+
+
+def algun_motor_en_comun(motores_a, motores_b):
+    """¿Comparten algún motor? De la misma FAMILIA —las letras y el número del principio: G10BB,
+    G10A y G10T son G10; D4F y D4K son D4—, o dos que el catálogo declara que van juntos.
+    F4L contra F5L (cuatro y cinco cilindros del Deutz 913) o G9U contra S8U no."""
+    def familia(m):
+        encontrado = _RE_FAMILIA_DE_MOTOR.match(m)
+        return encontrado.group() if encontrado else m
+    if {familia(a) for a in motores_a} & {familia(b) for b in motores_b}:
+        return True
+    juntos = _motores_que_van_juntos()
+    return any(frozenset((a, b)) in juntos for a in motores_a for b in motores_b)
+
+
+def anios_que_no_se_tocan(rangos_a, rangos_b):
+    """¿Los dos dicen años y ningún rango de uno se cruza con alguno del otro?"""
+    return bool(rangos_a and rangos_b) and not any(
+        a0 <= b1 and b0 <= a1 for a0, a1 in rangos_a for b0, b1 in rangos_b)
+
+
 def sirve_para_anio(descripcion, anio):
     """¿Este repuesto aplica a un vehículo de ese año? Si la descripción no dice nada de años,
     devuelve None: no se puede afirmar ni descartar, y es mejor mostrarlo que ocultarlo."""
@@ -1880,7 +1970,14 @@ def _firma_de_producto(descripcion, producto_id=None, codigo_clean=None):
     if not base or not (producto_id or codigo_clean):
         return base
     autos = autos_de_todas_las_fuentes(producto_id, codigo_clean, base["autos"])
-    return base if autos == base["autos"] else dict(base, autos=autos)
+    # El código del propio producto puede tener forma de motor (KIT20003A): no es un motor.
+    motores = base.get("motores") or frozenset()
+    if codigo_clean and motores:
+        propio = sanitizar(codigo_clean)
+        motores = frozenset(m for m in motores if m not in propio)
+    if autos == base["autos"] and motores == (base.get("motores") or frozenset()):
+        return base
+    return dict(base, autos=autos, motores=motores)
 
 
 @functools.lru_cache(maxsize=20000)
@@ -2162,7 +2259,9 @@ def _firma_armada(descripcion, producto_id=None, codigo_clean=None):
                           if 1 <= int(n) <= 16},
             "bujia": tipo_de_bujia(texto),
             "siglas": siglas, "marca_auto": marca_auto, "posicion": posicion,
-            "cilindradas": cilindradas, "vias": vias, "texto": limpio})
+            "cilindradas": cilindradas, "vias": vias, "texto": limpio,
+            "anios": rangos_de_anios(descripcion),
+            "motores": motores_de_la_descripcion(descripcion, excluir=set(modelos) | set(siglas))})
 
 
 # Un solo conjunto vacío para todas las firmas. Cada firma traía una docena de set() vacíos
@@ -2358,6 +2457,28 @@ def firmas_compatibles(a, b, minimo_nucleo=2, cuenta_palabras=None, total_descri
                            f"vs {'/'.join(sorted(b['autos'])[:2])}")
     else:
         autos_comunes = set()
+
+    # LOS AÑOS. «Jta.Tapa Cil. HONDA CIVIC … 1984/1989» y «Junta Tapa de Cilindros HONDA CIVIC
+    # 2015/... L15B8» comparten el modelo y son de autos con 26 años de diferencia: salían en
+    # verde. Solo cuando las dos escriben rangos (ver rangos_de_anios()) y ninguno se cruza.
+    # Cuenta como motivo «del auto»: si los une un código, el código manda (un inyector de un
+    # Corsa 1993 y uno de un Corsa 1999 con el mismo número ICD00107 son el mismo).
+    if anios_que_no_se_tocan(a.get("anios"), b.get("anios")):
+        def _txt(rangos):
+            return "/".join(f"{d}-{'…' if h == 2100 else h}" for d, h in rangos[:2])
+        return False, f"años distintos: {_txt(a['anios'])} vs {_txt(b['anios'])}"
+
+    # LOS MOTORES. «Jta.Carter DEUTZ F4L 913» contra «Junta para Cárter DEUTZ 913 … F5L»: el
+    # mismo tractor, cuatro cilindros contra cinco. «Jta.Tapa Cilindros Renault Master motor
+    # G9U» contra la del Master S8U. Si las dos nombran motores y no comparten ninguno (ni de la
+    # misma familia, ni declarados juntos: ver algun_motor_en_comun()), son de motores
+    # distintos. Las bujías no: sus códigos de otras marcas tienen forma de motor (W8BC).
+    # Cuenta como motivo «del auto»: si los une un código, el código manda.
+    _mot_a, _mot_b = a.get("motores") or (), b.get("motores") or ()
+    if (_mot_a and _mot_b and "BUJIA" not in (a.get("cabeza"), b.get("cabeza"))
+            and not algun_motor_en_comun(_mot_a, _mot_b)):
+        return False, (f"motores distintos: {'/'.join(sorted(_mot_a)[:2])} "
+                       f"vs {'/'.join(sorted(_mot_b)[:2])}")
 
     # Cantidad de vías / pines: si las dos la declaran y no es la misma, son piezas distintas.
     # Sin esto se proponía una «FICHA 3 Vias Macho» contra una «FICHA 2 vias macho»: mismo
@@ -2738,11 +2859,13 @@ _MOTIVOS_QUE_CONTRADICEN = ("posiciones distintas", "siglas distintas", "autos d
                             "largo de cable distinto", "temperaturas distintas",
                             "carburadores distintos", "piezas de lugares distintos",
                             "sensores de tipos distintos", "bujías de tipos distintos",
-                            "distinta cantidad de cilindros", "motores de distintas válvulas")
+                            "distinta cantidad de cilindros", "motores de distintas válvulas",
+                            "años distintos", "motores distintos")
 # Los que hablan del AUTO. Esos no cuentan cuando el par está unido por un código: ver
 # _unidos_por_codigo().
 _MOTIVOS_DEL_AUTO = ("autos distintos", "marcas distintas", "modelos distintos",
-                     "cilindradas distintas", "motores de distintas válvulas")
+                     "cilindradas distintas", "motores de distintas válvulas", "años distintos",
+                     "motores distintos")
 
 
 def _unidos_por_codigo(pa, pb):

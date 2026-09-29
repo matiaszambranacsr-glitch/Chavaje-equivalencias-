@@ -5427,6 +5427,30 @@ Y uno más que salió probando: si la lista trae el mismo código dos veces con 
 - **Las descripciones sin `<br>` ni `<b>` escritos**: `texto_para_html()` pasa los saltos a « · »
   y saca las etiquetas de formato que traen algunas listas.
 
+### Los años y los motores también dicen «son otra pieza»
+
+Siguiendo con la revisión a mano de la cola, dos datos que las descripciones traen y el análisis
+no miraba:
+
+- **Los años** (`rangos_de_anios()`): todos los rangos que escribe cada descripción («1984/1989»,
+  «2013/...», «2005>2013»), no solo el primero. Si las dos escriben rangos y ninguno se cruza, son
+  de autos distintos: «HONDA CIVIC … 1984/1989» contra «HONDA CIVIC 2015/... L15B8», «Transit
+  2016/2022» contra «Transit 2004-2006». El año suelto no cuenta: «J.DEERE 2030» es un tractor.
+- **Los motores** (`motores_de_la_descripcion()`): los códigos con forma de motor de la parte que
+  habla del auto, sin las referencias del final («// …B1C/B1B», «REF ORIG», «NGK= BP5HS»), sin el
+  código del propio producto y sin contar bujías. Si las dos nombran motores y no comparten la
+  familia (G10BB, G10A y G10T son G10; D4F y D4K son D4) ni el catálogo los declara juntos, son
+  de motores distintos: cárter Deutz F4L contra F5L, junta de tapa Master G9U contra S8U, Sonata
+  D4EA diésel contra G4KA nafta.
+
+Los dos cuentan como motivos «del auto»: si los une un código, el código manda (un inyector
+ICD00107 de un Corsa 1993 y uno de un Corsa 1999 son el mismo).
+
+Sobre la cola de prueba: 28 pares que estaban en 🟢/🟡 pasan a 🔴 —revisados uno por uno, todos
+son otro motor u otra época— y 12 dudosos más también. 22 dudosos suben a 🟢 porque, al caerse
+los de otro motor, quedan como el mejor candidato (juntas de Daily/Ducato, bobinas de Twingo).
+Las 13.021 aprobaciones siguen con el mismo puntaje y lo ya cargado no cambia.
+
 ### Los dudosos, revisados uno por uno
 
 Se tomaron los 3.595 pares «🟠 dudosos» de la cola de prueba y se revisaron muestras a mano,

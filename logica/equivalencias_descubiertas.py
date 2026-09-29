@@ -630,7 +630,8 @@ _MOTIVOS_DE_OTRA_PIEZA = ("rubros distintos", "posiciones distintas", "siglas di
                           "largo de cable distinto", "temperaturas distintas",
                           "carburadores distintos", "piezas de lugares distintos",
                           "sensores de tipos distintos", "bujías de tipos distintos",
-                          "distinta cantidad de cilindros", "motores de distintas válvulas")
+                          "distinta cantidad de cilindros", "motores de distintas válvulas",
+                          "años distintos", "motores distintos")
 
 
 def _por_que_chocan(productos):
