@@ -5631,6 +5631,27 @@ que apretar el botón, y está al final de la pantalla. Ahora:
   mismo, agrupados, con «✂️ Cortar» y «✅ Están bien» por grupo, y el aviso se actualiza con lo
   que se resuelva. Probado en la app: 78 → cortando un grupo de 5 → 73.
 
+### La supermedida no es la estándar
+
+En la revisión salía sin alarmas TARANTO 250006 «Jta.Tapa Cil.Superm. FIAT 1100» con ILLINOIS
+TC-206-15, la junta estándar del mismo motor: todo coincidía —rubro, marca, modelo— y nada
+miraba que una es para motor rectificado. Ahora la firma anota la sobremedida
+(`sobremedida_de()`), escrita como la escribe cada lista: «Superm.» (TARANTO), «SOBREMEDIDA»,
+«SUPERMEDIDA» o «SUPERME» cortado (ILLINOIS, IMPERIAL), «s/m» (JL), o la medida: «+ 0,5»,
+«+0,7», «+0.030». «O.S.» no, porque «OS3573» es un código de Vernet; y si dice también «STD» es
+una línea entera y no cuenta.
+
+- **Motivo nuevo, «sobremedida distinta»** (`sobremedidas_que_chocan()`): una dice sobremedida y
+  la otra no (nadie vende una sobremedida sin avisarlo), o las dos dicen cuánta y no es la misma.
+  Es de los que contradicen, así que el par va a rojo, y no es un motivo «del auto»: corta aunque
+  los una un código, porque la supermedida suele citar el número original de la estándar.
+- En la base real reconoce 75 productos, todos sobremedida de verdad. En la cola de prueba corta
+  17 pares, todos juntas supermedida de TARANTO contra la estándar de ILLINOIS o IMPERIAL. Entre
+  los vínculos ya cargados no había ninguno, y las 13.021 aprobaciones dan igual que antes.
+- **En la tabla del abanico**, columna «Medida» cuando alguna opción es sobremedida, con ⚠️ en
+  las que no coinciden con el producto.
+- `pruebas_de_la_revision.py` suma el par: la 250005 con la TC-206-15 es la misma; la 250006, no.
+
 ## 🔗 Revisar sugeridas: primero lo que hay que hacer
 
 Mirado con capturas sobre la base real (15.308 pendientes en 8 listas):

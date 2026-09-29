@@ -720,7 +720,8 @@ _MOTIVOS_DE_OTRA_PIEZA = ("rubros distintos", "posiciones distintas", "siglas di
                           "carburadores distintos", "piezas de lugares distintos",
                           "sensores de tipos distintos", "bujías de tipos distintos",
                           "distinta cantidad de cilindros", "motores de distintas válvulas",
-                          "años distintos", "motores distintos")
+                          "años distintos", "motores distintos",
+                          "sobremedida distinta")
 
 
 def _por_que_chocan(productos):
@@ -2488,10 +2489,14 @@ def tabla_del_abanico(abanico):
             "Cable": f"{firma['cable_mm'] / 10:.0f} cm" if firma.get("cable_mm") else "",
             "Vías": str(firma["vias"]) if firma.get("vias") else "",
             "Espesor": f"{medidas['espesor']} mm" if medidas.get("espesor") else "",
+            # Se muestra la estándar solo si alguna es sobremedida: ver más abajo.
+            "Medida": ("sobremedida" if firma.get("sobremedida") == "SI"
+                       else f"+{firma['sobremedida']}".replace(".", ",")
+                       if firma.get("sobremedida") else ""),
         }
     pid = abanico["producto"]["id"]
     propio = rasgos(abanico["producto"].get("desc"))
-    campos = ("Años", "Motor", "Cilindrada", "Cable", "Vías", "Espesor")
+    campos = ("Años", "Motor", "Cilindrada", "Cable", "Vías", "Espesor", "Medida")
     filas = [dict({"Opción": f"▶ {abanico['producto']['cod']} (este)", "Modelos en común": ""},
                   **{k: propio[k] for k in campos})]
     for _base, filas_b in candidatos_por_pieza(abanico):
@@ -2508,6 +2513,14 @@ def tabla_del_abanico(abanico):
             # Se marca lo que los dos dicen y no coincide; lo que uno solo dice no se marca.
             fila[k] = (f"⚠️ {valor}" if valor and propio[k] and valor != propio[k] else valor)
         filas.append(fila)
+    # La sobremedida la dice solo la que lo es: si alguna lo dice, las otras son estándar, y
+    # eso también hay que verlo (ver sobremedidas_que_chocan()).
+    if any(f["Medida"] for f in filas):
+        for f in filas:
+            if not f["Medida"]:
+                f["Medida"] = "estándar" if f is filas[0] or not propio["Medida"] else "⚠️ estándar"
+            elif f is not filas[0] and not propio["Medida"]:
+                f["Medida"] = f"⚠️ {f['Medida']}"
     # Las columnas que nadie tiene no se muestran: en el celular cada columna cuesta.
     usadas = [k for k in campos if any(f[k] for f in filas)]
     return [{k: f[k] for k in ("Opción", "Modelos en común", *usadas)} for f in filas]

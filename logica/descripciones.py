@@ -129,6 +129,39 @@ def anios_que_no_se_tocan(rangos_a, rangos_b):
         a0 <= b1 and b0 <= a1 for a0, a1 in rangos_a for b0, b1 in rangos_b)
 
 
+# SOBREMEDIDA: la junta de tapa, el pistón, el aro o el espárrago para un motor rectificado.
+# Cada lista lo escribe a su manera: «Jta.Tapa Cil.Superm. FIAT 1100» (TARANTO), «SUPLEMENTO
+# SOBREMEDIDA» (ILLINOIS), «SUPERMEDIDA» o «SUPERME» cortado (IMPERIAL), «s/m» (JL), o la
+# medida: «Cil.099,7 + 0,5», «+0,7», «+0.030». «O.S.» no: «OS3573» es un código de Vernet.
+_RE_SOBREMEDIDA = re.compile(
+    r"\b(?:SUPER|SOBRE)\s?-?\s?MED(?:IDA)?\b|\b(?:SUPERM|SOBREM|SUPERME)\b|\bS/M\b"
+    r"|\bSOBRE\s+M\b", re.IGNORECASE)
+_RE_CUANTO_DE_SOBREMEDIDA = re.compile(r"\+\s?(0?[.,]\d{1,3})(?!\d)")
+_RE_MEDIDA_ESTANDAR = re.compile(r"\b(?:STD|STANDARD|EST[AÁ]NDAR)\b", re.IGNORECASE)
+
+
+def sobremedida_de(descripcion):
+    """None si no dice sobremedida; si la dice, cuánta («0.5», «0.03») o «SI» sin el número.
+    Si dice las dos cosas —«STD y sobremedida»— es None: habla de una línea entera."""
+    texto = descripcion or ""
+    cuanto = _RE_CUANTO_DE_SOBREMEDIDA.search(texto)
+    if not cuanto and not _RE_SOBREMEDIDA.search(texto):
+        return None
+    if _RE_MEDIDA_ESTANDAR.search(texto):
+        return None
+    if cuanto:
+        return f"{float(cuanto.group(1).replace(',', '.')):g}"
+    return "SI"
+
+
+def sobremedidas_que_chocan(sm_a, sm_b):
+    """Una es sobremedida y la otra no la dice (es la estándar: nadie vende una sobremedida
+    sin avisar), o las dos dicen cuánta y no es la misma."""
+    if bool(sm_a) != bool(sm_b):
+        return True
+    return bool(sm_a and sm_b and "SI" not in (sm_a, sm_b) and sm_a != sm_b)
+
+
 def sirve_para_anio(descripcion, anio):
     """¿Este repuesto aplica a un vehículo de ese año? Si la descripción no dice nada de años,
     devuelve None: no se puede afirmar ni descartar, y es mejor mostrarlo que ocultarlo."""
@@ -2261,6 +2294,7 @@ def _firma_armada(descripcion, producto_id=None, codigo_clean=None):
             "siglas": siglas, "marca_auto": marca_auto, "posicion": posicion,
             "cilindradas": cilindradas, "vias": vias, "texto": limpio,
             "anios": rangos_de_anios(descripcion),
+            "sobremedida": sobremedida_de(descripcion),
             "motores": motores_de_la_descripcion(descripcion, excluir=set(modelos) | set(siglas))})
 
 
@@ -2406,6 +2440,16 @@ def firmas_compatibles(a, b, minimo_nucleo=2, cuenta_palabras=None, total_descri
     if juegos_que_chocan(a.get("juego"), b.get("juego")):
         return False, (f"juegos distintos: {a.get('juego') or 'junta suelta'} vs "
                        f"{b.get('juego') or 'junta suelta'}")
+
+    # La junta de tapa de supermedida contra la estándar: mismo auto, misma pieza, y no
+    # reemplaza una a la otra. No es un motivo «del auto»: corta aunque los una un código,
+    # porque la de supermedida suele citar el número original de la estándar.
+    # Ver sobremedida_de().
+    if sobremedidas_que_chocan(a.get("sobremedida"), b.get("sobremedida")):
+        def _sm(x):
+            return ("sobremedida" if x == "SI" else f"+{x}".replace(".", ",")) if x else "estándar"
+        return False, (f"sobremedida distinta: {_sm(a.get('sobremedida'))} vs "
+                       f"{_sm(b.get('sobremedida'))}")
 
     if a.get("bujia") and b.get("bujia") and a["bujia"] != b["bujia"]:
         return False, f"bujías de tipos distintos: {a['bujia']} vs {b['bujia']}"
@@ -2860,7 +2904,8 @@ _MOTIVOS_QUE_CONTRADICEN = ("posiciones distintas", "siglas distintas", "autos d
                             "carburadores distintos", "piezas de lugares distintos",
                             "sensores de tipos distintos", "bujías de tipos distintos",
                             "distinta cantidad de cilindros", "motores de distintas válvulas",
-                            "años distintos", "motores distintos")
+                            "años distintos", "motores distintos",
+                            "sobremedida distinta")
 # Los que hablan del AUTO. Esos no cuentan cuando el par está unido por un código: ver
 # _unidos_por_codigo().
 _MOTIVOS_DEL_AUTO = ("autos distintos", "marcas distintas", "modelos distintos",

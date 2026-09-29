@@ -60,6 +60,8 @@ PARES_DE_MUESTRA = [
     ("Jta.Tapa Cil. SUZUKI CULTUS G13B 1298CC 1996/...",
      "Junta Tapa de Cilindros SUZUKI SWIFT SAMURAI CULTUS SIDEKICK JIMNY BARINA - 1,3 - G13B/A/K",
      "misma", "motores de la misma familia"),
+    ("Jta.Tapa Cil. FIAT 1100", "Junta Tapa de Cilindros FIAT 1100/103 - 1,1 - 4 CIL. (4015455)",
+     "misma", "TARANTO 250005 / ILLINOIS TC-206-15"),
 
     # --- piezas distintas: la app tiene que decir por qué ---
     ("Jgo.Jtas. ROVER 214/216/218/414/416", "JTA T.C. ROVER 111/214 11/14K", "distinta",
@@ -82,6 +84,9 @@ PARES_DE_MUESTRA = [
     ("Jta.Tapa Cil. HYUNDAI SONATA TCI TUCSON TCI D4EA 16V 2005/...",
      "Junta Tapa de Cilindros HYUNDAI SONATA 2007/... RONDO 2006/... MAGENTIS 2005/... - 2.0 - "
      "G4KA", "distinta", "diésel D4EA contra nafta G4KA"),
+    ("Jta.Tapa Cil.Superm. FIAT 1100",
+     "Junta Tapa de Cilindros FIAT 1100/103 - 1,1 - 4 CIL. (4015455)", "distinta",
+     "TARANTO 250006 es supermedida; la de ILLINOIS, estándar"),
 ]
 
 
