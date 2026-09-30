@@ -5830,6 +5830,47 @@ por cómo está escrito, como el inyector CRI-FA 02-405 con el LEICJ014 de FISPA
 Sobre la cola de prueba: 24 pares más a rojo, todos confirmados a mano. Las 13.021 aprobaciones
 siguen en 82 en rojo. `pruebas_de_la_revision.py` suma 5 pares.
 
+### El kit de reparación no es la bomba que repara
+
+FISPA escribe en la descripción el número de **otra** pieza, la del conjunto donde va la suya, y
+el extractor lo tomaba como el número propio. Así nacían productos OEM unidos a lo que no son:
+
+    KIT DE REPARACION KIT20408K … REF ORIG 9625476280        ← el kit repara la bomba 9625476280
+    TAPA DE FLOTANTE 19009 … Compatible Bombas M Conj Bomba 93374782 93317613
+    RAMPA DE INYECTORES 28005 … REF ORIG F000KV0206 REF Inyectores que montan 0280156020
+
+Sobre la base de prueba eran **353 vínculos aprobados**: 283 entre un kit de reparación y el
+número de la bomba entera, y 70 entre la tapa de flotante, el sensor de nivel o la rampa y la
+bomba o los inyectores donde van. Quien buscaba la bomba de un Ford Ka recibía los dos kits de
+reparación como equivalentes. Revisados los 353, todos estaban mal.
+
+`numero_del_conjunto_donde_va()` reconoce las tres formas, y la misma regla corre en los cuatro
+lugares que tienen que decir lo mismo:
+
+- **La cola** (`evidencia_cruzada()`): veto 🧰, rojo.
+- **La auditoría de lo cargado** y **la confianza guardada** que muestra el buscador: 15. Sube
+  `VERSION_CONFIANZA` a 6 para que se recalculen solas.
+- **El buscador**: el kit sale «🧰 kit de reparación de lo buscado — NO es lo mismo», sin
+  confianza, y no cuenta como equivalencia.
+- **La importación**: de una descripción de kit de reparación ya no se saca ningún número, y de
+  las otras dos se saca el tramo del conjunto. El número propio que va antes («REF ORIG
+  9L559A299AC CONJUNTO DE BOMBA 9L559H307AC…») se sigue tomando.
+
+Entre dos OEM no se aplica: los números que un mismo texto cita juntos son del mismo conjunto.
+`pruebas_de_la_revision.py --base` cuenta aparte los 353 (`ALARMAS_DE_APROBACIONES_MALAS`).
+
+En la cola: 25 verdes y 19 naranjas pasan a rojo.
+
+Y dos más, de la misma ronda:
+
+- **Bujías de moto de FISPA.** El número de NGK va como referencia original, sin decir NGK:
+  «BUJIA NAFTA MOTO LSPC6HSA … REF. ORIG: C6HSA». Ahora se lee, igual que «NKG» mal escrito, y
+  la CR8EH-9S de TARANTO deja de concordar con la C6HSA, la B7ES y la B8ES (3 pares a rojo).
+- **El D4D de Renault es nafta.** Es el 1.0 16V del Clio II y el Twingo, y se leía como el D-4D
+  diésel de Toyota en 60 descripciones. Sube `VERSION_APLICACIONES` a 8 para releerlas.
+
+Otra muestra de 40 verdes al azar, mirados uno por uno: ninguno mal.
+
 ## 🔗 Revisar sugeridas: primero lo que hay que hacer
 
 Mirado con capturas sobre la base real (15.308 pendientes en 8 listas):

@@ -567,6 +567,25 @@ def _es_lista_de_modelos(token):
     return sum(1 for p in partes if p.isdigit() and len(p) == 3) >= 3
 
 
+# EL NÚMERO DEL CONJUNTO DONDE VA LA PIEZA, que no es el de la pieza. FISPA lo escribe de tres
+# maneras, y de las tres salían productos OEM unidos a lo que no son:
+#   «KIT DE REPARACION KIT20408K … REF ORIG 9625476280» — el kit repara la bomba 9625476280;
+#   «TAPA DE FLOTANTE 19009 … Compatible Bombas M Conj Bomba 93374782 93317613»;
+#   «RAMPA DE INYECTORES 28005 … REF ORIG F000KV0206 REF Inyectores que montan 0280156020».
+# En la base de prueba eran 283 vínculos aprobados entre un kit de reparación y el número de la
+# bomba entera: quien buscaba la bomba recibía el kit como si fuera lo mismo.
+_RE_KIT_DE_REPARACION = re.compile(r"^\s*KIT\s+(?:DE\s+)?REPARACI[OÓ]N\b", re.IGNORECASE)
+_RE_ANTES_DEL_NUMERO_DEL_CONJUNTO = re.compile(
+    r"\bCONJ(?:UNTO)?\.?\s+(?:DE\s+)?BOMBAS?\b|\bCOMPATIBLE\s+(?:CON\s+)?BOMBAS?\b"
+    r"|\bINYECTORES\s+QUE\s+MONTAN\b", re.IGNORECASE)
+# Y el tramo entero, con los números que siguen, para sacarlo del texto antes de buscar
+# códigos. Ver extraer_codigos_de_texto().
+_RE_TRAMO_DEL_NUMERO_DEL_CONJUNTO = re.compile(
+    r"(?:\bCONJ(?:UNTO)?\.?\s+(?:DE\s+)?BOMBAS?|\bCOMPATIBLE\s+(?:CON\s+)?BOMBAS?"
+    r"|\bINYECTORES\s+QUE\s+MONTAN)\b"
+    r"(?:[\s,;/()\-]*(?:[A-Z](?![A-Z0-9])|[A-Z0-9.]*\d[A-Z0-9.]*))*", re.IGNORECASE)
+
+
 def extraer_codigos_de_texto(texto, minimo=6, codigo_propio=None, codigos_conocidos=None,
                               solo_declarados=False, declarados_o_conocidos=False):
     """Busca códigos de fábrica escondidos dentro de una descripción.
@@ -847,6 +866,13 @@ def extraer_codigos_de_texto(texto, minimo=6, codigo_propio=None, codigos_conoci
     # pegado atrás. Y de paso tapaban el marcador: «REF ORIG» es el proveedor diciendo cuál es
     # el código de fábrica, que es el mejor dato que trae la lista.
     texto = _RE_REF_PEGADO.sub(r'\1 REF ', texto)
+    # Los números del conjunto donde va la pieza no son de la pieza: ver
+    # numero_del_conjunto_donde_va(). Sin esto, de «TAPA DE FLOTANTE 19009 … Conj Bomba
+    # 93317613» nacía un producto OEM 93317613 con la descripción de la tapa, unido a la tapa.
+    # Y el kit de reparación no trae ningún número suyo: los que cita son de lo que repara.
+    if _RE_KIT_DE_REPARACION.match(texto):
+        return []
+    texto = _RE_TRAMO_DEL_NUMERO_DEL_CONJUNTO.sub(" ", texto)
 
     # Dónde el proveedor DECLARÓ que lo que sigue es el código de fábrica. Sin esto se perdía
     # justo el mejor dato que trae la lista: «JTA SCANIA 113 Nº ORIG 287559» no daba nada,

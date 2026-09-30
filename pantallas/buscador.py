@@ -697,6 +697,23 @@ Casi todo lo que edita o borra algo pide la contraseña de administrador la prim
                     for f in res:
                         if f is _fila_buscada:
                             continue
+                        # El kit de reparación de lo buscado, o la pieza que va en su
+                        # conjunto: tampoco es lo mismo. Ver numero_del_conjunto_donde_va().
+                        if not (_fila_buscada.get("Tipo") == "OEM" and f.get("Tipo") == "OEM"):
+                            _cita_al_buscado = numero_del_conjunto_donde_va(
+                                _fila_buscada.get("Codigo"), f.get("Descripcion"))
+                            _el_buscado_lo_cita = numero_del_conjunto_donde_va(
+                                f.get("Codigo"), _fila_buscada.get("Descripcion"))
+                            if _cita_al_buscado or _el_buscado_lo_cita:
+                                f["_complementario"] = True
+                                f["Cadena"] = (
+                                    "🧰 es donde va lo buscado — NO es lo mismo"
+                                    if _el_buscado_lo_cita else
+                                    "🧰 kit de reparación de lo buscado — NO es lo mismo"
+                                    if _RE_KIT_DE_REPARACION.match(f.get("Descripcion") or "")
+                                    else "🧰 va en lo buscado — NO es lo mismo")
+                                f["Confianza"] = ""
+                                continue
                         _rel = _uno_trae_al_otro(
                             _fila_buscada.get("Descripcion"), _fila_buscada.get("Codigo"),
                             f.get("Descripcion"), f.get("Codigo"),

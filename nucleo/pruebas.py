@@ -1313,6 +1313,49 @@ def probar_marca_pegada_atras_del_numero():
           "el código de Bosch sí, el motor y la marca no")
 
 
+def probar_el_numero_del_conjunto_no_es_de_la_pieza():
+    """El kit de reparación cita la bomba que repara; la tapa de flotante, la bomba que la lleva.
+
+    Esos números son del CONJUNTO donde va la pieza, y tomándolos como de la pieza salían 353
+    vínculos aprobados entre el kit (o la tapa) y la bomba entera. Lo que la descripción da
+    como número PROPIO —«REF ORIG 9L559A299AC» antes de «CONJUNTO DE BOMBA»— se sigue tomando."""
+    tapa = ("TAPA DE FLOTANTE 19009 CHEVROLET Zafira NAFTEROCompatible Bombas M Conj Bomba "
+            "93374782 93317613 93372174")
+    igual(codigos.extraer_codigos_de_texto(tapa), [], "la tapa no trae ningún número suyo")
+    cierto(codigos.numero_del_conjunto_donde_va("93317613", tapa),
+           "93317613 es el número de la bomba que lleva la tapa")
+    sensor = ("SENSOR DE NIVEL DE COMBUSTIBLE 22753A FORD Ranger REF ORIG 9L559A299AC CONJUNTO "
+              "DE BOMBA 9L559H307AC 0580313183")
+    igual(codigos.extraer_codigos_de_texto(sensor, solo_declarados=True), ["9L559A299AC"],
+          "el número propio del sensor sí, los de la bomba no")
+    cierto(not codigos.numero_del_conjunto_donde_va("9L559A299AC", sensor),
+           "el número propio del sensor no es el del conjunto")
+    rampa = ("RAMPA DE INYECTORES 28005 FIAT Palio REF ORIG F000KV0206 REF Inyectores que montan "
+             "0280156020 - 70822420")
+    igual(codigos.extraer_codigos_de_texto(rampa, solo_declarados=True), ["F000KV0206"],
+          "la rampa es la F000KV0206; los inyectores que monta, no")
+    cierto(codigos.numero_del_conjunto_donde_va("70822420", rampa),
+           "70822420 es un inyector de los que monta la rampa")
+    kit = "KIT DE REPARACION KIT64005B CITROEN C4 REF ORIG 9632672180 1525KG"
+    igual(codigos.extraer_codigos_de_texto(kit), [], "el kit de reparación no trae número suyo")
+    cierto(codigos.el_numero_de_uno_es_el_conjunto_del_otro(
+        "1525KG", kit, "OEM", "KIT64005BFISPA", kit, "PROVEEDOR"),
+        "el número de la bomba contra el kit que la repara")
+    cierto(not codigos.el_numero_de_uno_es_el_conjunto_del_otro(
+        "1525KG", kit, "OEM", "9632672180", kit, "OEM"),
+        "dos números de la misma bomba entre sí sí son lo mismo")
+
+
+def probar_el_d4d_de_renault_es_nafta():
+    """El D-4D de Toyota es diésel; el D4D de Renault es el 1.0 16V de nafta del Clio II."""
+    igual(codigos.combustible_desde_descripcion("Jta.Tapa Cilindros Renault D4D D4F 1.0"), None,
+          "el D4D de Renault no es diésel")
+    igual(codigos.combustible_desde_descripcion("RENAULT CLIO 1,0L 16v MOT. D4D"), None,
+          "el D4D del Clio no es diésel")
+    igual(codigos.combustible_desde_descripcion("BUJIA TOYOTA Hilux 2 5 D4D 2KD-FTV"), "diesel",
+          "el D-4D de la Hilux sí")
+
+
 def probar_lista_de_modelos_no_es_codigo():
     """«106-206-306-406-607» es la lista de autos a los que le va la pieza, no un código.
 
@@ -1493,7 +1536,9 @@ def main():
                    probar_la_coma_decimal_es_el_mismo_motor,
                    probar_las_valvulas_no_dicen_para_que_auto_es,
                    probar_modelo_con_cilindrada_pegada,
-                   probar_numero_de_catalogo_no_es_puente):
+                   probar_numero_de_catalogo_no_es_puente,
+                   probar_el_numero_del_conjunto_no_es_de_la_pieza,
+                   probar_el_d4d_de_renault_es_nafta):
         antes = len(fallos)
         prueba()
         print(f"  {'FALLA' if len(fallos) > antes else 'ok   '}  {prueba.__name__}")

@@ -3437,8 +3437,15 @@ _RE_MUESCAS_EN_EL_CODIGO = re.compile(r"[- ](\d)M$")
 _RE_ESPESOR_EN_MM = re.compile(r"(?i)ESP\.?:?\s*\(?\s*\d[.,]\d{1,2}\s*MM")
 # Sin \b adelante: FISPA lo pega a lo de antes, «… 2 0NGK= BKR5EY», «3 ELECTRODOSNGK= BKUR5…».
 # Con el «=» se busca en cualquier lado; sin él, que NGK sea una palabra.
+# «NKG» es como FISPA escribe NGK a veces: «REF ORIG NKG 94951 LZKAR7D-9D».
 _RE_NGK_EN_LA_DESCRIPCION = re.compile(
-    r"NGK\s*=\s*([A-Z]{1,6}\d{1,2}[A-Z0-9-]*)|(?<![A-Z])NGK\s*:?\s*([A-Z]{1,6}\d{1,2}[A-Z0-9-]*)")
+    r"N(?:GK|KG)\s*=\s*([A-Z]{1,6}\d{1,2}[A-Z0-9-]*)"
+    r"|(?<![A-Z])N(?:GK|KG)\s*:?\s*(?:\d{4,6}\s+)?([A-Z]{1,6}\d{1,2}[A-Z0-9-]*)")
+# Y en las de moto de FISPA el número de NGK es la referencia original, sin decir NGK: «BUJIA
+# NAFTA MOTO LSPC6HSA … REF. ORIG: C6HSA». Con forma de bujía —letras, grado, letras: C6HSA,
+# B7ES, CR8EH-9—, que un número de fábrica de un auto (7700…) no tiene.
+_RE_NGK_COMO_REFERENCIA_ORIGINAL = re.compile(
+    r"\bREF\s?\.?\s?ORIG\.?\s*:?\s*([A-Z]{1,5}\d{1,2}[A-Z]{1,4}(?:-\d{1,2}[A-Z]{0,2})?)(?![A-Z0-9])")
 
 
 def _muescas_de_la_junta(producto):
@@ -3456,9 +3463,9 @@ def _codigo_ngk(producto):
     desc = (producto.get("descripcion") or "").upper()
     if "BUJIA" not in _normalizar_desc(desc):
         return None
-    m = _RE_NGK_EN_LA_DESCRIPCION.search(desc)
+    m = _RE_NGK_EN_LA_DESCRIPCION.search(desc) or _RE_NGK_COMO_REFERENCIA_ORIGINAL.search(desc)
     if m:
-        return sanitizar(m.group(1) or m.group(2))
+        return sanitizar(next(g for g in m.groups() if g))
     if (producto.get("marca") or "").upper() == "TARANTO":
         codigo = sanitizar(producto.get("codigo_raw") or "")
         return codigo[1:] if codigo.startswith("J") and len(codigo) > 4 else codigo or None
@@ -3644,6 +3651,13 @@ def evidencia_cruzada(id_a, id_b, cuenta_palabras=None, total_descripciones=None
         # «ZFR6F» (TARANTO, Fiat E.Torq) contra «NGK= ZFR6F11» (FISPA, Honda) salía en rojo por
         # «autos distintos». Como con un código en común, lo del auto no la contradice.
         a_favor.append(f"🔢 el mismo número de NGK ({_ngk_a})")
+    # El número de uno es el del CONJUNTO donde va el otro: el kit de reparación y la bomba que
+    # repara, la tapa de flotante y la bomba que la lleva. Ver numero_del_conjunto_donde_va().
+    _del_conjunto = el_numero_de_uno_es_el_conjunto_del_otro(
+        pa.get("codigo_raw"), pa.get("descripcion"), pa.get("tipo"),
+        pb.get("codigo_raw"), pb.get("descripcion"), pb.get("tipo"))
+    if _del_conjunto:
+        vetos.append(f"🧰 {_del_conjunto}")
 
     # 2. Descripción
     fa = firma_de_producto(pa["descripcion"], id_a, pa["codigo_clean"])

@@ -434,7 +434,7 @@ VERSION_NORMALIZACION = "2"
 # reglas de hoy están mal. Sin esta marca, eso no se entera nadie hasta tropezárselo.
 # Subir el número cuando cambien las reglas de evaluar_equivalencia(). El recálculo NO corre al
 # abrir la app —son 12,8 s— sino en la tarea de fondo, igual que el descubrimiento.
-VERSION_CONFIANZA = "5"
+VERSION_CONFIANZA = "6"
 
 # La versión del LECTOR DE MEDIDAS. Mismo mecanismo: las medidas se deducen de la descripción
 # una vez y quedan guardadas, así que cuando el lector aprende a leer algo nuevo —el espesor de
@@ -449,8 +449,9 @@ VERSION_MEDIDAS = "6"
 # texto ya cargado, contra 0 que había— y el que hace andar la búsqueda por vehículo.
 # Como las otras dos, corría solo después de importar una lista, así que en una base donde no
 # se importó nada desde que la función existe nunca corrió.
-# Subir el número al cambiar cómo se leen los modelos.
-VERSION_APLICACIONES = "7"
+# Subir el número al cambiar cómo se leen los modelos (o el combustible: el 8 es el D4D de
+# Renault, que se leía diésel).
+VERSION_APLICACIONES = "8"
 
 # Quién FABRICA la pieza, leído del final de la descripción. Ver marca_de_repuesto_en().
 # Subir el número al agregar marcas a MARCAS_QUE_FABRICAN_LA_PIEZA o al cambiar cómo se leen.

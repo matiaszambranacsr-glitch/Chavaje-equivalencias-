@@ -746,6 +746,13 @@ def auditar_equivalencias_cargadas(limite=2000, tope_confianza=35, revisar=None)
                                         "modelo, una medida o un año. Las reglas de hoy ya no "
                                         "lo tomarían"))
                 break
+        # El número del conjunto donde va la pieza: el kit de reparación unido a la bomba que
+        # repara. Ver numero_del_conjunto_donde_va().
+        _del_conjunto = el_numero_de_uno_es_el_conjunto_del_otro(
+            f["cod_a"], f["desc_a"], f["tipo_a"], f["cod_b"], f["desc_b"], f["tipo_b"])
+        if _del_conjunto:
+            puntaje = min(puntaje, 15.0)
+            senales.append(("mal", f"🧰 {_del_conjunto}"))
         # Dos productos del MISMO proveedor. Es el mismo control que hace evidencia_cruzada(),
         # repetido acá porque esta función no la llama —serían 24.774 llamadas— y se puede
         # contestar con lo que el lote ya trae. Son 196 vínculos en la base real y ninguno es
@@ -889,6 +896,10 @@ def recalcular_confianzas(limite=20000, progreso=None, solo_faltantes=True):
                 if _cod_oem and _ya_juzgados.get(_cod_oem):
                     puntaje = min(puntaje, 15.0)
                     break
+            # Y el del conjunto donde va la pieza, igual que la auditoría de arriba.
+            if el_numero_de_uno_es_el_conjunto_del_otro(f["cod_a"], f["desc_a"], f["tipo_a"],
+                                                        f["cod_b"], f["desc_b"], f["tipo_b"]):
+                puntaje = min(puntaje, 15.0)
         valores.append((max(0, min(100, round(puntaje))), f["a"], f["b"]))
         if progreso and i % 500 == 0:
             progreso(i, len(filas))

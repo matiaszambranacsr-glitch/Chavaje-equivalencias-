@@ -2030,7 +2030,7 @@ def _texto_sin_medidas(texto):
 # código. Un grupo así se descarta entero; mirar unos ejemplos alcanza para confirmarlo.
 # Los demás —«nada dice», el precio, un código que apunta a dos productos— son dudas, y se
 # resuelven como las limpias: con una muestra de control.
-_MOTIVOS_QUE_SE_DESCARTAN = ("🔤 ", "📐 NO coinciden", "🧯", "🔎", "📦", "🧩",
+_MOTIVOS_QUE_SE_DESCARTAN = ("🔤 ", "📐 NO coinciden", "🧯", "🔎", "📦", "🧩", "🧰",
                              "⚠️ Un número de fábrica que")
 
 # Qué motivo de rechazo corresponde a cada grupo, para guardarlo al descartarlo entero.
@@ -2044,7 +2044,7 @@ _MOTIVO_DE_RECHAZO_DEL_GRUPO = (
     (("🔤 juegos distintos",), "juego"),
     (("🔤 piezas de lugares distintos", "🔤 sensores de tipos distintos",
       "🔤 bujías de tipos distintos", "🔤 posiciones distintas", "🔤 siglas distintas",
-      "🔤 carburadores distintos", "🔤 aros de distinto color", "🧩"), "otra_pieza"),
+      "🔤 carburadores distintos", "🔤 aros de distinto color", "🧩", "🧰"), "otra_pieza"),
     (("🧯", "🔎"), "codigo"),
     (("⚠️ Un número de fábrica que",), "otra_pieza"),
 )
@@ -2803,6 +2803,11 @@ def tipo_de_alarma(alarma):
     if alarma.startswith("🔎 «"):
         return ("🔎 El código de fábrica se sacó del texto del medio, donde van los motores y los "
                 "modelos, y no de la lista de números del final")
+    if alarma.startswith("🧰 «"):
+        if "kit de reparación" in alarma:
+            return ("🧰 El número es el de lo que el kit de reparación repara, no el del kit")
+        return ("🧰 El número es el del conjunto donde va la pieza (la bomba, los inyectores), no "
+                "el de la pieza")
     if alarma.startswith("🧯 «") and "no es un código de fábrica" in alarma:
         return "🧯 Lo que se tomó como código de fábrica es un modelo, una medida o un año"
     if alarma.startswith("🚫 Código ") and " parece una " in alarma:

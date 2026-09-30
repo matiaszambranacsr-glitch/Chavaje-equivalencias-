@@ -586,6 +586,29 @@ def _es_lista_de_modelos(token):
     return sum(1 for p in partes if p.isdigit() and len(p) == 3) >= 3
 
 
+# EL NÚMERO DEL CONJUNTO DONDE VA LA PIEZA, que no es el de la pieza. FISPA lo escribe de tres
+# maneras, y de las tres salían productos OEM unidos a lo que no son:
+#   «KIT DE REPARACION KIT20408K … REF ORIG 9625476280» — el kit repara la bomba 9625476280;
+#   «TAPA DE FLOTANTE 19009 … Compatible Bombas M Conj Bomba 93374782 93317613»;
+#   «RAMPA DE INYECTORES 28005 … REF ORIG F000KV0206 REF Inyectores que montan 0280156020».
+# En la base de prueba eran 283 vínculos aprobados entre un kit de reparación y el número de la
+# bomba entera: quien buscaba la bomba recibía el kit como si fuera lo mismo.
+_RE_KIT_DE_REPARACION = re.compile(r"^\s*KIT\s+(?:DE\s+)?REPARACI[OÓ]N\b", re.IGNORECASE)
+
+
+_RE_ANTES_DEL_NUMERO_DEL_CONJUNTO = re.compile(
+    r"\bCONJ(?:UNTO)?\.?\s+(?:DE\s+)?BOMBAS?\b|\bCOMPATIBLE\s+(?:CON\s+)?BOMBAS?\b"
+    r"|\bINYECTORES\s+QUE\s+MONTAN\b", re.IGNORECASE)
+
+
+# Y el tramo entero, con los números que siguen, para sacarlo del texto antes de buscar
+# códigos. Ver extraer_codigos_de_texto().
+_RE_TRAMO_DEL_NUMERO_DEL_CONJUNTO = re.compile(
+    r"(?:\bCONJ(?:UNTO)?\.?\s+(?:DE\s+)?BOMBAS?|\bCOMPATIBLE\s+(?:CON\s+)?BOMBAS?"
+    r"|\bINYECTORES\s+QUE\s+MONTAN)\b"
+    r"(?:[\s,;/()\-]*(?:[A-Z](?![A-Z0-9])|[A-Z0-9.]*\d[A-Z0-9.]*))*", re.IGNORECASE)
+
+
 def extraer_codigos_de_texto(texto, minimo=6, codigo_propio=None, codigos_conocidos=None,
                               solo_declarados=False, declarados_o_conocidos=False):
     """Busca códigos de fábrica escondidos dentro de una descripción.
@@ -866,6 +889,13 @@ def extraer_codigos_de_texto(texto, minimo=6, codigo_propio=None, codigos_conoci
     # pegado atrás. Y de paso tapaban el marcador: «REF ORIG» es el proveedor diciendo cuál es
     # el código de fábrica, que es el mejor dato que trae la lista.
     texto = _RE_REF_PEGADO.sub(r'\1 REF ', texto)
+    # Los números del conjunto donde va la pieza no son de la pieza: ver
+    # numero_del_conjunto_donde_va(). Sin esto, de «TAPA DE FLOTANTE 19009 … Conj Bomba
+    # 93317613» nacía un producto OEM 93317613 con la descripción de la tapa, unido a la tapa.
+    # Y el kit de reparación no trae ningún número suyo: los que cita son de lo que repara.
+    if _RE_KIT_DE_REPARACION.match(texto):
+        return []
+    texto = _RE_TRAMO_DEL_NUMERO_DEL_CONJUNTO.sub(" ", texto)
 
     # Dónde el proveedor DECLARÓ que lo que sigue es el código de fábrica. Sin esto se perdía
     # justo el mejor dato que trae la lista: «JTA SCANIA 113 Nº ORIG 287559» no daba nada,
@@ -1086,6 +1116,13 @@ FORMAS_DE_NAFTA = r"NAFTA|NAFTERO|NAFTEROS|GASOLINA|MPFI|MPI|TFSI|TSI|GDI|FLEX"
 _RE_DIESEL = re.compile(r"(?<![A-Z])(" + FORMAS_DE_DIESEL + r")(?![A-Z])", re.IGNORECASE)
 
 
+# D4D son dos motores: el D-4D de Toyota (Hilux, Corolla) es diésel, y el D4D de Renault es el
+# 1.0 16V de NAFTA del Clio II, el Twingo y el Kangoo. En 60 descripciones —«Jta.Tapa Cilindros
+# Renault D4D D4F 1.0», «RENAULT CLIO 1,0L 16v MOT. D4D»— se leía diésel.
+_RE_EL_D4D_DE_RENAULT = re.compile(r"RENAULT|CLIO|TWINGO|KANGOO|SANDERO|\bD4F\b|\bD7[DF]\b",
+                                   re.IGNORECASE)
+
+
 _RE_NAFTA = re.compile(r"(?<![A-Z])(" + FORMAS_DE_NAFTA + r")(?![A-Z])", re.IGNORECASE)
 
 
@@ -1102,7 +1139,9 @@ def combustible_desde_descripcion(descripcion):
     if not descripcion:
         return None
     texto = str(descripcion)
-    es_diesel, es_nafta = bool(_RE_DIESEL.search(texto)), bool(_RE_NAFTA.search(texto))
+    formas = {f.upper() for f in _RE_DIESEL.findall(texto)}
+    es_diesel = bool(formas) and not (formas == {"D4D"} and _RE_EL_D4D_DE_RENAULT.search(texto))
+    es_nafta = bool(_RE_NAFTA.search(texto))
     if es_diesel == es_nafta:
         return None      # ninguna, o las dos: no se puede decidir
     return "diesel" if es_diesel else "nafta"
@@ -1357,6 +1396,49 @@ def el_codigo_esta_entre_las_referencias(codigo, descripcion):
     if _cabeza:
         zona += " " + _cabeza.group(1)
     return limpio in {sanitizar(t).upper() for t in re.split(r"[\s/()\-]+", zona) if t}
+
+
+def numero_del_conjunto_donde_va(codigo, descripcion):
+    """Si la descripción cita `codigo` como el número del conjunto donde va la pieza —la bomba
+    que el kit repara, la bomba que lleva esa tapa de flotante, los inyectores que monta la
+    rampa—, el texto que lo explica. "" si no. Ver _RE_ANTES_DEL_NUMERO_DEL_CONJUNTO."""
+    limpio = sanitizar(codigo or "").upper()
+    texto = str(descripcion or "")
+    if len(limpio) < 5 or not texto:
+        return ""
+    if _RE_KIT_DE_REPARACION.match(texto):
+        if limpio in {sanitizar(t).upper() for t in re.split(r"[\s,;/()]+", texto) if t}:
+            return f"«{codigo}» es el número de lo que el kit de reparación repara, no el del kit"
+        return ""
+    for _m in _RE_ANTES_DEL_NUMERO_DEL_CONJUNTO.finditer(texto):
+        # Lo que sigue hasta la primera palabra: «Conj Bomba 93374782 93317613 94737021»,
+        # «Conj bomba 93 360 915», «Inyectores que montan 0280156020 - 70822420». Una letra
+        # suelta no corta —«Compatible Bombas M Conj Bomba 820058355B»—.
+        numeros = []
+        for _t in re.split(r"[\s,;/()]+", texto[_m.end():]):
+            _t = _t.strip(".-:")
+            if not _t:
+                continue
+            if _t.isalpha() and len(_t) > 1:
+                break
+            numeros.append(sanitizar(_t).upper())
+        _juntos = "".join(n for n in numeros if n.isdigit() and len(n) <= 3)
+        if limpio in numeros or (len(_juntos) >= 6 and limpio in _juntos):
+            _como = re.sub(r"\s+", " ", _m.group()).strip()
+            return f"«{codigo}» es el número del conjunto donde va la pieza («{_como}»), no el de la pieza"
+    return ""
+
+
+def el_numero_de_uno_es_el_conjunto_del_otro(cod_a, desc_a, tipo_a, cod_b, desc_b, tipo_b):
+    """numero_del_conjunto_donde_va() de los dos lados de un vínculo: el texto de la alarma, o
+    "". Entre dos OEM no: los números que un mismo texto cita juntos son del mismo conjunto.
+    Es la misma regla para la cola (evidencia_cruzada()), la auditoría de lo cargado y la
+    confianza guardada que muestra el buscador: si no dijeran lo mismo, la auditoría marcaría
+    el vínculo y el buscador lo seguiría mostrando como confiable."""
+    if (tipo_a or "").upper() == "OEM" and (tipo_b or "").upper() == "OEM":
+        return ""
+    return (numero_del_conjunto_donde_va(cod_a, desc_b)
+            or numero_del_conjunto_donde_va(cod_b, desc_a))
 
 
 def son_variantes_de_la_misma_pieza(codigos):
