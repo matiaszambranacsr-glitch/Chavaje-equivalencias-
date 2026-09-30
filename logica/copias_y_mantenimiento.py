@@ -711,11 +711,10 @@ def numero_del_conjunto_donde_va(codigo, descripcion):
     if limpio in _afuera:
         return ""
     for desde, hasta, como in tramos_del_conjunto(texto):
-        # «Conj bomba 93 360 915»: el número partido en grupos de tres.
         numeros = [sanitizar(_t.strip(".-:")).upper()
                    for _t in re.split(r"[\s,;/()]+", texto[desde:hasta]) if _t.strip(".-:")]
-        _juntos = "".join(n for n in numeros if n.isdigit() and len(n) <= 3)
-        if limpio in numeros or (len(_juntos) >= 6 and limpio in _juntos):
+        # Y partido en pedazos: «Conj bomba 93 360 915», «Conj Bomba 97FP 9H307 AG».
+        if limpio in numeros or (len(limpio) >= 6 and limpio in "".join(numeros)):
             return f"«{codigo}» es el número del conjunto donde va la pieza («{como}»), no el de la pieza"
     return ""
 

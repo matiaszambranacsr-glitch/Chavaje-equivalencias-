@@ -5908,8 +5908,20 @@ Cuesta tiempo en segundo plano: recalcular los 13.021 pasa de 6 a 19 s, y la aud
 
 De paso, a la regla del conjunto se suman el **capuchón de bobina** («CAPUCHONES PARA BOBINA
 79002 … REF ORIG SAGEM 2526182A»: los números son de la bobina) y el **microfiltro de
-inyección** (los del inyector): 26 aprobados más, revisados, todos mal. La prueba con `--base`
-cuenta ahora 711 mal aprobados aparte.
+inyección** (los del inyector): 26 aprobados más, revisados, todos mal. Y la frase se buscaba
+con un `\b` adelante, pero FISPA la pega a lo anterior —«NAFTEROCompatible Bombas M», «2015Conj
+Bomba 770100K010»— y a veces parte el número —«Conj Bomba 97FP 9H307 AG»—: 14 tapas y sensores
+más. La prueba con `--base` cuenta ahora 725 mal aprobados aparte.
+
+El **filtro de la bomba** no entra, aunque lo parezca: de 18 aprobados, casi todos citan la
+bomba («24075 VW amarok REF ORIG 2H0919050B»), pero «24077 Toyota Etios REF.ORIG: 23217-0Y020»
+es el número del filtro, y la regla veta.
+
+**Las cadenas.** El buscador también salta: X → número de fábrica → Y. Medido sobre la base de
+prueba, todos los pares de marcas distintas que se unen así tienen además su propio vínculo
+directo, con su propia confianza. Los que no lo tienen son 649, todos de la misma marca (el
+inyector original de FISPA y el Lucas con el mismo número), y de esos 15 se contradicen, casi
+todos por los autos que cada fila nombra, que con el número declarado no cuentan.
 
 ## 🔗 Revisar sugeridas: primero lo que hay que hacer
 

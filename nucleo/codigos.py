@@ -608,6 +608,9 @@ _PIEZAS_QUE_CITAN_SOLO_SU_CONJUNTO = (
 )
 
 
+# El FILTRO de la bomba no entra: casi siempre cita la bomba («24075 VW amarok REF ORIG
+# 2H0919050B»), pero no siempre —«24077 Toyota Etios REF.ORIG: 23217-0Y020» es el número del
+# filtro—, y esto veta.
 def cita_solo_numeros_de_su_conjunto(texto):
     """Si la descripción es de una pieza que cita SOLO números de otra, qué dice de ellos."""
     return next((que for rx, que in _PIEZAS_QUE_CITAN_SOLO_SU_CONJUNTO
@@ -616,16 +619,19 @@ def cita_solo_numeros_de_su_conjunto(texto):
 
 # Y el tramo entero, con los números que siguen, para sacarlo del texto antes de buscar
 # códigos. Ver extraer_codigos_de_texto().
+# Sin \b adelante: FISPA pega la frase a lo anterior —«NAFTEROCompatible Bombas M», «2015Conj
+# Bomba 770100K010»—, y con el \b se perdía la mitad. Y el número a veces va partido, «Conj
+# Bomba 97FP 9H307 AG»: entran también los pedazos de una o dos letras.
 _RE_TRAMO_DEL_NUMERO_DEL_CONJUNTO = re.compile(
-    r"(\bCONJ(?:UNTO)?\.?\s+(?:DE\s+)?BOMBAS?|\bCOMPATIBLE\s+(?:CON\s+)?BOMBAS?"
-    r"|\bINYECTORES\s+QUE\s+MONTAN)\b"
-    r"(?:[\s,;/()\-]*(?:[A-Z](?![A-Z0-9])|[A-Z0-9.]*\d[A-Z0-9.]*))*", re.IGNORECASE)
+    r"(CONJ(?:UNTO)?\.?\s+(?:DE\s+)?BOMBAS?|(?<!IN)COMPATIBLE\s+(?:CON\s+)?BOMBAS?"
+    r"|INYECTORES\s+QUE\s+MONTAN)\b"
+    r"(?:[\s,;/()\-]*(?:[A-Z]{1,2}(?![A-Z0-9])|[A-Z0-9.]*\d[A-Z0-9.]*))*", re.IGNORECASE)
 
 
 # Y la polea de alternador de FISPA, donde de ahí al final todo es de los alternadores —con las
 # marcas en el medio—: «POLEA LRAP005 … VAG 058903119C INA 535000710 Para alternadores OEM
 # 028903028F VW Bosch 120A 0123510045».
-_RE_DE_ACA_AL_FINAL_ES_DEL_CONJUNTO = re.compile(r"(\bPARA\s+ALTERNADOR(?:ES)?)\b.*",
+_RE_DE_ACA_AL_FINAL_ES_DEL_CONJUNTO = re.compile(r"(PARA\s+ALTERNADOR(?:ES)?)\b.*",
                                                  re.IGNORECASE | re.DOTALL)
 
 
@@ -1456,11 +1462,10 @@ def numero_del_conjunto_donde_va(codigo, descripcion):
     if limpio in _afuera:
         return ""
     for desde, hasta, como in tramos_del_conjunto(texto):
-        # «Conj bomba 93 360 915»: el número partido en grupos de tres.
         numeros = [sanitizar(_t.strip(".-:")).upper()
                    for _t in re.split(r"[\s,;/()]+", texto[desde:hasta]) if _t.strip(".-:")]
-        _juntos = "".join(n for n in numeros if n.isdigit() and len(n) <= 3)
-        if limpio in numeros or (len(_juntos) >= 6 and limpio in _juntos):
+        # Y partido en pedazos: «Conj bomba 93 360 915», «Conj Bomba 97FP 9H307 AG».
+        if limpio in numeros or (len(limpio) >= 6 and limpio in "".join(numeros)):
             return f"«{codigo}» es el número del conjunto donde va la pieza («{como}»), no el de la pieza"
     return ""
 

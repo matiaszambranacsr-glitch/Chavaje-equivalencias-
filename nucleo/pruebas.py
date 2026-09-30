@@ -1343,6 +1343,16 @@ def probar_el_numero_del_conjunto_no_es_de_la_pieza():
           "los números de la polea sí, los de los alternadores no")
     cierto(codigos.numero_del_conjunto_donde_va("0123510045", polea),
            "0123510045 es un alternador de los que llevan esa polea")
+    pegada = ("TAPA DE FLOTANTE 19026Ford Focus I 1 8 2 0 - Courier 1 6Conj Bomba 97FP 9H307 AG")
+    cierto(codigos.numero_del_conjunto_donde_va("97FP9H307AG", pegada),
+           "la frase pegada a lo anterior y el número partido en pedazos")
+    cierto(codigos.numero_del_conjunto_donde_va(
+        "XS419H307A", "TAPA DE FLOTANTE 19008 FORD Escort NAFTEROCompatible Bomba XS419H307A"),
+        "«NAFTEROCompatible Bomba»")
+    capuchon = ("CAPUCHONES PARA BOBINA 79002 X4 CITROEN BERLINGO MONTA EN BOBINAS 70021 REF ORIG "
+                "SAGEM 2526182A - 96363378 2526182")
+    igual(codigos.extraer_codigos_de_texto(capuchon), [], "el capuchón cita la bobina")
+    cierto(codigos.numero_del_conjunto_donde_va("2526182", capuchon), "2526182 es la bobina")
     doble = "SENSOR DE NIVEL 22769A FIAT MOBI REF ORIG FIAT 52004841 Conj Bomba 52004841"
     cierto(not codigos.numero_del_conjunto_donde_va("52004841", doble),
            "si también lo da como número propio, no se puede decir")
