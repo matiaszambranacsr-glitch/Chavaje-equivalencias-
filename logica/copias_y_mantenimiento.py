@@ -693,7 +693,8 @@ def el_codigo_no_figura_entre_las_referencias(codigo, descripcion):
 def numero_del_conjunto_donde_va(codigo, descripcion):
     """Si la descripción cita `codigo` como el número del conjunto donde va la pieza —la bomba
     que el kit repara, la bomba que lleva esa tapa de flotante, los inyectores que monta la
-    rampa—, el texto que lo explica. "" si no. Ver _RE_ANTES_DEL_NUMERO_DEL_CONJUNTO."""
+    rampa, los alternadores de la polea—, el texto que lo explica. "" si no. Ver
+    tramos_del_conjunto()."""
     limpio = sanitizar(codigo or "").upper()
     texto = str(descripcion or "")
     if len(limpio) < 5 or not texto:
@@ -702,22 +703,19 @@ def numero_del_conjunto_donde_va(codigo, descripcion):
         if limpio in {sanitizar(t).upper() for t in re.split(r"[\s,;/()]+", texto) if t}:
             return f"«{codigo}» es el número de lo que el kit de reparación repara, no el del kit"
         return ""
-    for _m in _RE_ANTES_DEL_NUMERO_DEL_CONJUNTO.finditer(texto):
-        # Lo que sigue hasta la primera palabra: «Conj Bomba 93374782 93317613 94737021»,
-        # «Conj bomba 93 360 915», «Inyectores que montan 0280156020 - 70822420». Una letra
-        # suelta no corta —«Compatible Bombas M Conj Bomba 820058355B»—.
-        numeros = []
-        for _t in re.split(r"[\s,;/()]+", texto[_m.end():]):
-            _t = _t.strip(".-:")
-            if not _t:
-                continue
-            if _t.isalpha() and len(_t) > 1:
-                break
-            numeros.append(sanitizar(_t).upper())
+    # Si la descripción lo da TAMBIÉN como número propio, fuera del tramo del conjunto, no se
+    # puede decir: «SENSOR DE NIVEL 22769A … REF ORIG FIAT 52004841 … Conj Bomba 52004841».
+    _afuera = {sanitizar(t).upper()
+               for t in re.split(r"[\s,;/()]+", sin_los_tramos_del_conjunto(texto)) if t}
+    if limpio in _afuera:
+        return ""
+    for desde, hasta, como in tramos_del_conjunto(texto):
+        # «Conj bomba 93 360 915»: el número partido en grupos de tres.
+        numeros = [sanitizar(_t.strip(".-:")).upper()
+                   for _t in re.split(r"[\s,;/()]+", texto[desde:hasta]) if _t.strip(".-:")]
         _juntos = "".join(n for n in numeros if n.isdigit() and len(n) <= 3)
         if limpio in numeros or (len(_juntos) >= 6 and limpio in _juntos):
-            _como = re.sub(r"\s+", " ", _m.group()).strip()
-            return f"«{codigo}» es el número del conjunto donde va la pieza («{_como}»), no el de la pieza"
+            return f"«{codigo}» es el número del conjunto donde va la pieza («{como}»), no el de la pieza"
     return ""
 
 

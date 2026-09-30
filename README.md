@@ -5838,14 +5838,17 @@ el extractor lo tomaba como el número propio. Así nacían productos OEM unidos
     KIT DE REPARACION KIT20408K … REF ORIG 9625476280        ← el kit repara la bomba 9625476280
     TAPA DE FLOTANTE 19009 … Compatible Bombas M Conj Bomba 93374782 93317613
     RAMPA DE INYECTORES 28005 … REF ORIG F000KV0206 REF Inyectores que montan 0280156020
+    POLEA LRAP005 … VAG 058903119C INA 535000710 Para alternadores OEM 028903028F VW Bosch …
 
-Sobre la base de prueba eran **353 vínculos aprobados**: 283 entre un kit de reparación y el
-número de la bomba entera, y 70 entre la tapa de flotante, el sensor de nivel o la rampa y la
-bomba o los inyectores donde van. Quien buscaba la bomba de un Ford Ka recibía los dos kits de
-reparación como equivalentes. Revisados los 353, todos estaban mal.
+Sobre la base de prueba eran **685 vínculos aprobados**: 283 entre un kit de reparación y el
+número de la bomba entera, 70 entre la tapa de flotante, el sensor de nivel o la rampa y la
+bomba o los inyectores donde van, y 332 entre una polea y los alternadores que la llevan. Quien
+buscaba la bomba de un Ford Ka recibía los dos kits de reparación como equivalentes, y quien
+buscaba un alternador Bosch podía recibir la polea. Revisados los 685, todos estaban mal.
 
-`numero_del_conjunto_donde_va()` reconoce las tres formas, y la misma regla corre en los cuatro
-lugares que tienen que decir lo mismo:
+`tramos_del_conjunto()` encuentra esos tramos y `numero_del_conjunto_donde_va()` los usa. Si el
+número está también afuera, dado como propio («REF ORIG FIAT 52004841 … Conj Bomba 52004841»),
+no se decide. La misma regla corre en los cuatro lugares que tienen que decir lo mismo:
 
 - **La cola** (`evidencia_cruzada()`): veto 🧰, rojo.
 - **La auditoría de lo cargado** y **la confianza guardada** que muestra el buscador: 15. Sube
@@ -5853,11 +5856,11 @@ lugares que tienen que decir lo mismo:
 - **El buscador**: el kit sale «🧰 kit de reparación de lo buscado — NO es lo mismo», sin
   confianza, y no cuenta como equivalencia.
 - **La importación**: de una descripción de kit de reparación ya no se saca ningún número, y de
-  las otras dos se saca el tramo del conjunto. El número propio que va antes («REF ORIG
+  las otras se saca el tramo del conjunto. El número propio que va antes («REF ORIG
   9L559A299AC CONJUNTO DE BOMBA 9L559H307AC…») se sigue tomando.
 
 Entre dos OEM no se aplica: los números que un mismo texto cita juntos son del mismo conjunto.
-`pruebas_de_la_revision.py --base` cuenta aparte los 353 (`ALARMAS_DE_APROBACIONES_MALAS`).
+`pruebas_de_la_revision.py --base` cuenta aparte los 685 (`ALARMAS_DE_APROBACIONES_MALAS`).
 
 En la cola: 25 verdes y 19 naranjas pasan a rojo.
 

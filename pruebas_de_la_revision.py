@@ -17,7 +17,7 @@ CON --base: arma una copia de la base en una carpeta temporal, pone todos los pa
 aprobaste como si recién llegaran —sin tus decisiones ni lo aprendido de ellas, para que no se
 copien la respuesta— y los puntúa con el análisis de siempre. Falla si más del 1 % de lo aprobado
 cae en 🔴. Hoy, sobre la base de prueba de 13.021 aprobados, caen 83 (0,6 %): son vínculos por
-código cuyo código las reglas actuales ya no tomarían. Aparte caen 353 que estaban mal aprobados
+código cuyo código las reglas actuales ya no tomarían. Aparte caen 685 que estaban mal aprobados
 y ya se revisaron uno por uno (ver ALARMAS_DE_APROBACIONES_MALAS): esos no cuentan.
 
 Nunca toca la base de trabajo: corre en una carpeta temporal, con una base propia.
@@ -247,8 +247,9 @@ def preparar_la_base_de_aprobaciones(ruta_base, destino):
 LOTE_DE_LA_PRUEBA = "PRUEBA DE APROBACIONES"
 
 # Alarmas que, sobre la base de prueba, se revisaron una por una y en todos los casos el vínculo
-# aprobado estaba mal: 🧰 son el kit de reparación unido a la bomba que repara (283) y la tapa de
-# flotante, el sensor de nivel o la rampa unidos a la bomba o a los inyectores donde van (70).
+# aprobado estaba mal: 🧰 son el kit de reparación unido a la bomba que repara (283), la tapa de
+# flotante, el sensor de nivel o la rampa unidos a la bomba o a los inyectores donde van (70) y
+# la polea unida a los alternadores que la llevan (332).
 ALARMAS_DE_APROBACIONES_MALAS = ("🧰",)
 
 

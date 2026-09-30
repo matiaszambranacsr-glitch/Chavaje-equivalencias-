@@ -1336,6 +1336,16 @@ def probar_el_numero_del_conjunto_no_es_de_la_pieza():
           "la rampa es la F000KV0206; los inyectores que monta, no")
     cierto(codigos.numero_del_conjunto_donde_va("70822420", rampa),
            "70822420 es un inyector de los que monta la rampa")
+    polea = ("POLEA LRAP005 Audi A6 1 8 T Diametro interno 17mm - Cantidad de canales 5 BOSCH "
+             "058903119C VAG 058903119C INA 535000710 Para alternadores OEM 028903028F VW Bosch "
+             "120A 0123510045")
+    igual(sorted(codigos.extraer_codigos_de_texto(polea)), ["058903119C", "535000710", "LRAP005"],
+          "los números de la polea sí, los de los alternadores no")
+    cierto(codigos.numero_del_conjunto_donde_va("0123510045", polea),
+           "0123510045 es un alternador de los que llevan esa polea")
+    doble = "SENSOR DE NIVEL 22769A FIAT MOBI REF ORIG FIAT 52004841 Conj Bomba 52004841"
+    cierto(not codigos.numero_del_conjunto_donde_va("52004841", doble),
+           "si también lo da como número propio, no se puede decir")
     kit = "KIT DE REPARACION KIT64005B CITROEN C4 REF ORIG 9632672180 1525KG"
     igual(codigos.extraer_codigos_de_texto(kit), [], "el kit de reparación no trae número suyo")
     cierto(codigos.el_numero_de_uno_es_el_conjunto_del_otro(

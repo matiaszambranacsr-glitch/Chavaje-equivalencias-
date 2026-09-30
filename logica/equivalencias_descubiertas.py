@@ -2806,7 +2806,8 @@ def tipo_de_alarma(alarma):
     if alarma.startswith("🧰 «"):
         if "kit de reparación" in alarma:
             return ("🧰 El número es el de lo que el kit de reparación repara, no el del kit")
-        return ("🧰 El número es el del conjunto donde va la pieza (la bomba, los inyectores), no "
+        return ("🧰 El número es el del conjunto donde va la pieza (la bomba, los inyectores, el "
+                "alternador), no "
                 "el de la pieza")
     if alarma.startswith("🧯 «") and "no es un código de fábrica" in alarma:
         return "🧯 Lo que se tomó como código de fábrica es un modelo, una medida o un año"

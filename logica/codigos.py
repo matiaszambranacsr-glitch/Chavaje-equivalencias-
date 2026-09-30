@@ -567,23 +567,42 @@ def _es_lista_de_modelos(token):
     return sum(1 for p in partes if p.isdigit() and len(p) == 3) >= 3
 
 
-# EL NÚMERO DEL CONJUNTO DONDE VA LA PIEZA, que no es el de la pieza. FISPA lo escribe de tres
-# maneras, y de las tres salían productos OEM unidos a lo que no son:
+# EL NÚMERO DEL CONJUNTO DONDE VA LA PIEZA, que no es el de la pieza. FISPA lo escribe de cuatro
+# maneras (la cuarta, la polea, más abajo), y de todas salían productos OEM unidos a lo que no son:
 #   «KIT DE REPARACION KIT20408K … REF ORIG 9625476280» — el kit repara la bomba 9625476280;
 #   «TAPA DE FLOTANTE 19009 … Compatible Bombas M Conj Bomba 93374782 93317613»;
 #   «RAMPA DE INYECTORES 28005 … REF ORIG F000KV0206 REF Inyectores que montan 0280156020».
-# En la base de prueba eran 283 vínculos aprobados entre un kit de reparación y el número de la
-# bomba entera: quien buscaba la bomba recibía el kit como si fuera lo mismo.
+# En la base de prueba eran 685 vínculos aprobados: 283 entre un kit de reparación y el número de
+# la bomba entera, y quien buscaba la bomba recibía el kit como si fuera lo mismo.
 _RE_KIT_DE_REPARACION = re.compile(r"^\s*KIT\s+(?:DE\s+)?REPARACI[OÓ]N\b", re.IGNORECASE)
-_RE_ANTES_DEL_NUMERO_DEL_CONJUNTO = re.compile(
-    r"\bCONJ(?:UNTO)?\.?\s+(?:DE\s+)?BOMBAS?\b|\bCOMPATIBLE\s+(?:CON\s+)?BOMBAS?\b"
-    r"|\bINYECTORES\s+QUE\s+MONTAN\b", re.IGNORECASE)
 # Y el tramo entero, con los números que siguen, para sacarlo del texto antes de buscar
 # códigos. Ver extraer_codigos_de_texto().
 _RE_TRAMO_DEL_NUMERO_DEL_CONJUNTO = re.compile(
-    r"(?:\bCONJ(?:UNTO)?\.?\s+(?:DE\s+)?BOMBAS?|\bCOMPATIBLE\s+(?:CON\s+)?BOMBAS?"
+    r"(\bCONJ(?:UNTO)?\.?\s+(?:DE\s+)?BOMBAS?|\bCOMPATIBLE\s+(?:CON\s+)?BOMBAS?"
     r"|\bINYECTORES\s+QUE\s+MONTAN)\b"
     r"(?:[\s,;/()\-]*(?:[A-Z](?![A-Z0-9])|[A-Z0-9.]*\d[A-Z0-9.]*))*", re.IGNORECASE)
+# Y la polea de alternador de FISPA, donde de ahí al final todo es de los alternadores —con las
+# marcas en el medio—: «POLEA LRAP005 … VAG 058903119C INA 535000710 Para alternadores OEM
+# 028903028F VW Bosch 120A 0123510045».
+_RE_DE_ACA_AL_FINAL_ES_DEL_CONJUNTO = re.compile(r"(\bPARA\s+ALTERNADOR(?:ES)?)\b.*",
+                                                 re.IGNORECASE | re.DOTALL)
+
+
+def tramos_del_conjunto(texto):
+    """Dónde cita la descripción los números del conjunto donde va la pieza: [(desde, hasta,
+    cómo lo dice)]. Ver numero_del_conjunto_donde_va()."""
+    texto = str(texto or "")
+    return [(m.start(), m.end(), " ".join(m.group(1).split()))
+            for rx in (_RE_TRAMO_DEL_NUMERO_DEL_CONJUNTO, _RE_DE_ACA_AL_FINAL_ES_DEL_CONJUNTO)
+            for m in rx.finditer(texto)]
+
+
+def sin_los_tramos_del_conjunto(texto):
+    """El texto sin los números del conjunto donde va la pieza."""
+    texto = str(texto or "")
+    for desde, hasta, _ in sorted(tramos_del_conjunto(texto), reverse=True):
+        texto = texto[:desde] + " " + texto[hasta:]
+    return texto
 
 
 def extraer_codigos_de_texto(texto, minimo=6, codigo_propio=None, codigos_conocidos=None,
@@ -872,7 +891,7 @@ def extraer_codigos_de_texto(texto, minimo=6, codigo_propio=None, codigos_conoci
     # Y el kit de reparación no trae ningún número suyo: los que cita son de lo que repara.
     if _RE_KIT_DE_REPARACION.match(texto):
         return []
-    texto = _RE_TRAMO_DEL_NUMERO_DEL_CONJUNTO.sub(" ", texto)
+    texto = sin_los_tramos_del_conjunto(texto)
 
     # Dónde el proveedor DECLARÓ que lo que sigue es el código de fábrica. Sin esto se perdía
     # justo el mejor dato que trae la lista: «JTA SCANIA 113 Nº ORIG 287559» no daba nada,
