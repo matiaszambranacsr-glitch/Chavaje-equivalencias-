@@ -2804,11 +2804,13 @@ def tipo_de_alarma(alarma):
         return ("🔎 El código de fábrica se sacó del texto del medio, donde van los motores y los "
                 "modelos, y no de la lista de números del final")
     if alarma.startswith("🧰 «"):
-        if "kit de reparación" in alarma:
-            return ("🧰 El número es el de lo que el kit de reparación repara, no el del kit")
+        # «es el número de lo que el kit de reparación repara…», «…de la bobina donde va el
+        # capuchón…»: el motivo es lo que sigue a «es el número», sin el código de cada par.
+        m = re.search(r"» es el número (.*)", alarma)
+        if m and not m.group(1).startswith("del conjunto donde va la pieza"):
+            return f"🧰 El número es el {m.group(1)}"
         return ("🧰 El número es el del conjunto donde va la pieza (la bomba, los inyectores, el "
-                "alternador), no "
-                "el de la pieza")
+                "alternador), no el de la pieza")
     if alarma.startswith("🧯 «") and "no es un código de fábrica" in alarma:
         return "🧯 Lo que se tomó como código de fábrica es un modelo, una medida o un año"
     if alarma.startswith("🚫 Código ") and " parece una " in alarma:
@@ -2962,6 +2964,44 @@ def analizar_lote_pendiente(lote, limite=None, desde=0):
         return _analizar_lote_pendiente(lote, limite, desde)
 
 
+def vetos_del_analisis_sobre_lo_cargado(filas):
+    """{(menor, mayor): (confianza, motivo)} de los vínculos YA CARGADOS que el análisis de la
+    cola pone en rojo, o aparta porque no son una equivalencia (el kit y su pieza).
+
+    La confianza guardada —la que el buscador muestra en cada resultado— se calculaba con
+    evaluar_equivalencia() sola, y la cola con todo el análisis: las alarmas de grupo (el número
+    que une piezas distintas de un mismo proveedor), las firmas (presiones, largo de cable), los
+    kits. Sobre los 13.021 aprobados de la base de prueba, 26 que la cola pone en rojo el
+    buscador los mostraba confiables. Con esto las dos dicen lo mismo en lo que importa: lo que
+    está mal. Lo demás —«revisalo», «como mucho uno es el equivalente»— es para decidir en la
+    cola, y un vínculo cargado ya se decidió.
+
+    `filas` como las de recalcular_confianzas(): a, b, cod_, marca_, tipo_, desc_, precio_."""
+    unicas = {}
+    for f in filas:
+        if f["a"] == f["b"]:
+            continue
+        if f["a"] < f["b"]:
+            g = dict(f)
+        else:
+            g = {"a": f["b"], "b": f["a"]}
+            for campo in ("cod", "marca", "tipo", "desc", "precio"):
+                g[f"{campo}_a"], g[f"{campo}_b"] = f.get(f"{campo}_b"), f.get(f"{campo}_a")
+        unicas[(g["a"], g["b"])] = g
+    if not unicas:
+        return {}
+    with recordando_lo_de_cada_producto():
+        _limpias, sospechosas, relacionadas = _analizar_filas(list(unicas.values()),
+                                                              _LO_YA_CARGADO)
+    salida = {}
+    for f in sospechosas:
+        if (f.get("confianza") or 0) < 30:
+            salida[(f["a"], f["b"])] = (f["confianza"], (f.get("alarmas") or [""])[0])
+    for f in relacionadas:
+        salida[(f["a"], f["b"])] = (15.0, f"📦 {f.get('relacion') or 'no es una equivalencia'}")
+    return salida
+
+
 def _analizar_lote_pendiente(lote, limite=None, desde=0):
     """Revisa los vínculos de una importación y marca los sospechosos. Dos alarmas:
       - Las medidas mecánicas cargadas se contradicen (prueba física en contra).
@@ -2984,8 +3024,19 @@ def _analizar_lote_pendiente(lote, limite=None, desde=0):
                  WHERE ep.lote = ? AND ep.producto_a_id < ep.producto_b_id
                  ORDER BY ep.producto_a_id, ep.producto_b_id
                  LIMIT ? OFFSET ?""", (lote, limite if limite else -1, desde))
-    filas = [dict(r) for r in c.fetchall()]
+    return _analizar_filas([dict(r) for r in c.fetchall()], lote)
 
+
+# El «lote» de lo que ya está cargado: ningún lote de la cola se llama así, así que al mirar
+# los otros números de fábrica entran todos los pendientes. Ver _analizar_filas().
+_LO_YA_CARGADO = "\x00 lo ya cargado"
+
+
+def _analizar_filas(filas, lote):
+    """El análisis de _analizar_lote_pendiente() sobre filas ya leídas (a < b, con código,
+    marca, tipo, descripción y precio de cada lado). `lote` es el de las filas: los pendientes
+    de los demás lotes entran como contexto. Con _LO_YA_CARGADO, las filas son vínculos
+    cargados: ver vetos_del_analisis_sobre_lo_cargado()."""
     # Todas las medidas de una sola vez, en vez de dos consultas por par
     medidas = cargar_medidas_de_varios([f["a"] for f in filas] + [f["b"] for f in filas])
     # Y lo que evidencia_cruzada() pide de a dos productos, también de una vez.

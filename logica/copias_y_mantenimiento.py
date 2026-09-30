@@ -699,9 +699,10 @@ def numero_del_conjunto_donde_va(codigo, descripcion):
     texto = str(descripcion or "")
     if len(limpio) < 5 or not texto:
         return ""
-    if _RE_KIT_DE_REPARACION.match(texto):
+    _que = cita_solo_numeros_de_su_conjunto(texto)
+    if _que:
         if limpio in {sanitizar(t).upper() for t in re.split(r"[\s,;/()]+", texto) if t}:
-            return f"«{codigo}» es el número de lo que el kit de reparación repara, no el del kit"
+            return f"«{codigo}» es el número {_que}"
         return ""
     # Si la descripción lo da TAMBIÉN como número propio, fuera del tramo del conjunto, no se
     # puede decir: «SENSOR DE NIVEL 22769A … REF ORIG FIAT 52004841 … Conj Bomba 52004841».

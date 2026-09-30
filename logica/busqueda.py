@@ -685,6 +685,7 @@ def auditar_equivalencias_cargadas(limite=2000, tope_confianza=35, revisar=None)
     rubros_oem = rubros_de_los_codigos_de_fabrica()
     _ya_juzgados = {}   # código -> ¿las reglas de hoy ya no lo tomarían? Cacheado: los 24.774
                         # vínculos se apoyan en muchos menos códigos distintos.
+    vetos_del_analisis = vetos_del_analisis_sobre_lo_cargado(filas)
     # Lo mismo que en recalcular_confianzas(): a cuántos productos se cuelga cada código de
     # fábrica, contado de una sola vez para todo el lote.
     grados = {}
@@ -753,6 +754,11 @@ def auditar_equivalencias_cargadas(limite=2000, tope_confianza=35, revisar=None)
         if _del_conjunto:
             puntaje = min(puntaje, 15.0)
             senales.append(("mal", f"🧰 {_del_conjunto}"))
+        # Y lo que el análisis de la cola pone en rojo. Ver vetos_del_analisis_sobre_lo_cargado().
+        _veto = vetos_del_analisis.get((min(f["a"], f["b"]), max(f["a"], f["b"])))
+        if _veto and puntaje > _veto[0]:
+            puntaje = _veto[0]
+            senales.append(("mal", _veto[1]))
         # Dos productos del MISMO proveedor. Es el mismo control que hace evidencia_cruzada(),
         # repetido acá porque esta función no la llama —serían 24.774 llamadas— y se puede
         # contestar con lo que el lote ya trae. Son 196 vínculos en la base real y ninguno es
@@ -853,6 +859,9 @@ def recalcular_confianzas(limite=20000, progreso=None, solo_faltantes=True):
     aprobados = puentes_aprobados_ids()
     ventas_confirman = pares_confirmados_por_ventas()
     _ya_juzgados = {}   # código -> ¿las reglas de hoy ya no lo tomarían? (cacheado)
+    # Lo que el análisis de la cola pone en rojo: el buscador no puede mostrarlo confiable.
+    # Ver vetos_del_analisis_sobre_lo_cargado().
+    vetos_del_analisis = vetos_del_analisis_sobre_lo_cargado(filas)
 
     valores = []
     for i, f in enumerate(filas):
@@ -900,6 +909,9 @@ def recalcular_confianzas(limite=20000, progreso=None, solo_faltantes=True):
             if el_numero_de_uno_es_el_conjunto_del_otro(f["cod_a"], f["desc_a"], f["tipo_a"],
                                                         f["cod_b"], f["desc_b"], f["tipo_b"]):
                 puntaje = min(puntaje, 15.0)
+        _veto = vetos_del_analisis.get((min(f["a"], f["b"]), max(f["a"], f["b"])))
+        if _veto and f["a"] not in aprobados and f["b"] not in aprobados:
+            puntaje = min(puntaje, _veto[0])
         valores.append((max(0, min(100, round(puntaje))), f["a"], f["b"]))
         if progreso and i % 500 == 0:
             progreso(i, len(filas))

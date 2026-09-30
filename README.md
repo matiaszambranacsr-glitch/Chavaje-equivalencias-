@@ -5874,6 +5874,43 @@ Y dos más, de la misma ronda:
 
 Otra muestra de 40 verdes al azar, mirados uno por uno: ninguno mal.
 
+### La confianza del buscador y la de la cola, una sola regla
+
+El número que el buscador muestra al lado de cada resultado es la confianza **guardada**:
+`recalcular_confianzas()` la calcula en la tarea de fondo con `evaluar_equivalencia()`. La cola
+de revisión puntúa con todo el análisis (`_analizar_lote_pendiente()`): además de eso mira las
+alarmas de grupo —el número de fábrica que une piezas distintas de un mismo proveedor—, las
+firmas —presión, largo de cable— y los kits. Eran dos motores, y no siempre decían lo mismo.
+
+Medido sobre los 13.021 aprobados de la base de prueba, la guardada contra la de la cola:
+
+| guardada → cola        | antes  | ahora  |
+|------------------------|-------:|-------:|
+| 🟢 → 🟢                 | 11.958 | 11.932 |
+| 🟢 → 🟡                 |    268 |    268 |
+| 🟢 → 🟠                 |     20 |     20 |
+| **🟢 → 🔴**             | **10** |  **0** |
+| 🟠 → 🔴                 |     16 |      0 |
+| 🔴 → 🔴 (o no es equivalencia) | 742 | 794 |
+
+Los 10 que el buscador mostraba 🟢 y la cola daba 🔴 eran el microfiltro unido al inyector, la
+sonda de 48 cm con la de 153, la bomba de 4 bar con la de 3 y el kit de cables y bujías con la
+bujía. Ahora el análisis de la cola corre también sobre lo cargado
+(`vetos_del_analisis_sobre_lo_cargado()`, con `_analizar_filas()` separado de la lectura del
+lote) y **lo que la cola pone en rojo, o aparta porque no es una equivalencia, baja a ese
+puntaje en la confianza guardada y en la auditoría de lo cargado**. Lo demás no se toca: el
+🟡 de la cola quiere decir «miralo antes de aprobar», y un vínculo cargado ya se aprobó. Los 268
+🟢 → 🟡 son números de fábrica con la descripción copiada de otra fila (la cola los deja en 65
+para que alguien mire), y mirados, están bien.
+
+Cuesta tiempo en segundo plano: recalcular los 13.021 pasa de 6 a 19 s, y la auditoría tarda
+13 s. Sube `VERSION_CONFIANZA` a 6 para que se recalcule todo al desplegar.
+
+De paso, a la regla del conjunto se suman el **capuchón de bobina** («CAPUCHONES PARA BOBINA
+79002 … REF ORIG SAGEM 2526182A»: los números son de la bobina) y el **microfiltro de
+inyección** (los del inyector): 26 aprobados más, revisados, todos mal. La prueba con `--base`
+cuenta ahora 711 mal aprobados aparte.
+
 ## 🔗 Revisar sugeridas: primero lo que hay que hacer
 
 Mirado con capturas sobre la base real (15.308 pendientes en 8 listas):

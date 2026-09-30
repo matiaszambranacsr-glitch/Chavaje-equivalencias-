@@ -575,6 +575,22 @@ def _es_lista_de_modelos(token):
 # En la base de prueba eran 685 vínculos aprobados: 283 entre un kit de reparación y el número de
 # la bomba entera, y quien buscaba la bomba recibía el kit como si fuera lo mismo.
 _RE_KIT_DE_REPARACION = re.compile(r"^\s*KIT\s+(?:DE\s+)?REPARACI[OÓ]N\b", re.IGNORECASE)
+# Y las que, como el kit, citan SOLO números de otra pieza: el capuchón cita la bobina donde va
+# («CAPUCHONES PARA BOBINA 79002 … MONTA EN BOBINAS 70021 REF ORIG SAGEM 2526182A») y el
+# microfiltro, los inyectores. Con el número de la bobina, el capuchón salía equivalente a ella.
+_PIEZAS_QUE_CITAN_SOLO_SU_CONJUNTO = (
+    (_RE_KIT_DE_REPARACION, "de lo que el kit de reparación repara, no el del kit"),
+    (re.compile(r"^\s*CAPUCH[OÓ]N(?:ES)?\s+PARA\s+BOBINA", re.IGNORECASE),
+     "de la bobina donde va el capuchón, no el del capuchón"),
+    (re.compile(r"^\s*MICROFILTRO\s+DE\s+INYECCI[OÓ]N", re.IGNORECASE),
+     "del inyector donde va el microfiltro, no el del microfiltro"),
+)
+
+
+def cita_solo_numeros_de_su_conjunto(texto):
+    """Si la descripción es de una pieza que cita SOLO números de otra, qué dice de ellos."""
+    return next((que for rx, que in _PIEZAS_QUE_CITAN_SOLO_SU_CONJUNTO
+                 if rx.match(str(texto or ""))), "")
 # Y el tramo entero, con los números que siguen, para sacarlo del texto antes de buscar
 # códigos. Ver extraer_codigos_de_texto().
 _RE_TRAMO_DEL_NUMERO_DEL_CONJUNTO = re.compile(
@@ -889,7 +905,7 @@ def extraer_codigos_de_texto(texto, minimo=6, codigo_propio=None, codigos_conoci
     # numero_del_conjunto_donde_va(). Sin esto, de «TAPA DE FLOTANTE 19009 … Conj Bomba
     # 93317613» nacía un producto OEM 93317613 con la descripción de la tapa, unido a la tapa.
     # Y el kit de reparación no trae ningún número suyo: los que cita son de lo que repara.
-    if _RE_KIT_DE_REPARACION.match(texto):
+    if cita_solo_numeros_de_su_conjunto(texto):
         return []
     texto = sin_los_tramos_del_conjunto(texto)
 
