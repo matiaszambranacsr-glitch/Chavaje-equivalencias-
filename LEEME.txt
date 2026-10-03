@@ -1,0 +1,6 @@
+Esta rama la escribe sola la app: guarda la ultima copia de la base de datos.
+
+Cada copia REEMPLAZA a la anterior (un solo commit), para que el repositorio no engorde.
+La app la baja sola cuando arranca con el disco vacio. No hace falta tocar nada aca.
+Para bajarla a mano: el archivo de esta rama, descomprimido con cualquier programa de .gz,
+es una base SQLite que se abre con la app (Backup y config -> Restaurar).
