@@ -290,7 +290,7 @@ def diagnostico_de_salud():
                   f"El control de integridad falló ({_danada}). La última copia buena de GitHub "
                   "está intacta. Bajá un backup ahora y restaurá desde la copia de GitHub o "
                   "desde un backup anterior.",
-                  "Estadísticas → Backup y config")
+                  miga_hasta("Backup y config"))
     except Exception as _err:
         anotar_error("diagnostico_de_salud/base_danada", _err)
 
@@ -305,13 +305,13 @@ def diagnostico_de_salud():
                       "y usuarios. Poné el repositorio en privado (GitHub → Settings → General → "
                       "Change visibility) y agregá en los secretos una línea "
                       "clave_copia = \"una frase larga\" para que la copia viaje cifrada.",
-                      "Estadísticas → Backup y config")
+                      miga_hasta("Backup y config"))
             else:
                 sumar("medio", "El repositorio de la copia es público",
                       "La copia ya se sube cifrada, pero las anteriores al cifrado siguen en el "
                       "historial de la rama «copia-de-seguridad». Poné el repositorio en privado "
                       "(GitHub → Settings → General → Change visibility).",
-                      "Estadísticas → Backup y config")
+                      miga_hasta("Backup y config"))
     except Exception as _err:
         anotar_error("diagnostico_de_salud/repo_publico", _err)
 
@@ -324,7 +324,7 @@ def diagnostico_de_salud():
             sumar("alto", f"{len(esperando)} cliente(s) esperando algo que YA hay",
                   "Preguntaron por algo que en ese momento no tenías y ahora está en stock. "
                   "Un llamado y es una venta. Es lo que más rápido se enfría.",
-                  "Estadísticas → Reposición → Consultas de clientes")
+                  f"{miga_hasta('Para pedir')} → 📞 Consultas de clientes")
     except Exception as _err:
         anotar_error("diagnostico_de_salud/consultas", _err)
 
@@ -342,7 +342,7 @@ def diagnostico_de_salud():
                   f"({obtener_config('dudosos_fecha', 'sin fecha')}). No son sugerencias "
                   "esperando: están activos, y la búsqueda los está devolviendo. Se ven de peor "
                   "a mejor, con el motivo al lado, y se cortan los peores de una.",
-                  "Administrar → Mantenimiento → 🧹 Limpiar vínculos")
+                  miga_hasta("Revisar los vínculos que YA están cargados"))
     except (TypeError, ValueError) as _err:
         anotar_error("diagnostico_de_salud/dudosos", _err)
 
@@ -359,14 +359,14 @@ def diagnostico_de_salud():
                       f"{_vieja['Sube por mes']} por mes — medido con tus propias "
                       f"importaciones, no con ningún índice. Pedile la lista nueva al "
                       f"proveedor.",
-                      "Estadísticas → Importaciones")
+                      miga_hasta("Importaciones"))
             elif _vieja["_ritmo"] is None and _vieja["_dias"] >= 60:
                 sumar("medio",
                       f"La lista de {_vieja['Lista']} tiene {_vieja['_dias']} días",
                       "Todavía no la importaste dos veces, así que no puedo medir cuánto "
                       "sube: con la próxima importación la app va a saber a qué ritmo "
                       "aumenta y te va a avisar sola.",
-                      "Estadísticas → Importaciones")
+                      miga_hasta("Importaciones"))
     except Exception as _err:
         anotar_error("diagnostico_de_salud/precios viejos", _err)
 
@@ -377,7 +377,7 @@ def diagnostico_de_salud():
             sumar("medio", f"${plata:,.0f} inmovilizados en {len(clavos)} producto(s)",
                   "Hace más de un año que no se venden y siguen ocupando estante. No es "
                   "urgente, pero es plata dormida que conviene mirar antes de la próxima compra.",
-                  "Estadísticas → Reposición → Clavos")
+                  f"{miga_hasta('Para pedir')} → 🧊 Clavos: lo que no se mueve")
     except Exception as _err:
         anotar_error("diagnostico_de_salud/clavos", _err)
 
@@ -387,7 +387,7 @@ def diagnostico_de_salud():
             sumar("bajo", f"{len(gratis)} equivalencia(s) esperando, sin trabajo",
                   "Salen de los reemplazos de código que ya cargaste: son productos que el "
                   "cambio de número dejó separados. No hay que investigar nada, solo aprobarlas.",
-                  "Administrar → Mantenimiento → Calidad → Reunir lo que separó un cambio de número")
+                  miga_hasta("Reunir lo que separó un cambio de número"))
     except Exception as _err:
         anotar_error("diagnostico_de_salud/puenteadas", _err)
 
@@ -412,8 +412,7 @@ def diagnostico_de_salud():
                   "existe. El arreglo es un botón: el número pasa a la columna de código de "
                   "barras —se sigue escaneando y buscando igual— y desaparece el producto "
                   "fantasma que lo representaba.",
-                  "Administrar → Mantenimiento → 🏷️ Códigos de barras → "
-                  "🏷️ Códigos de barras cargados como código de fábrica")
+                  miga_hasta("Códigos de barras cargados como código de fábrica"))
     except Exception as _err:
         anotar_error("diagnostico_de_salud/barras_mal_cargados", _err)
 
@@ -426,7 +425,7 @@ def diagnostico_de_salud():
                   "entran. (Un código con muchos vínculos pero todos de una sola marca no entra "
                   "acá: esa es la tabla de referencias cruzadas del propio proveedor, y está "
                   "bien.)",
-                  "Administrar → Mantenimiento → 🧹 Limpiar y corregir → Códigos puente")
+                  miga_hasta("Códigos puente"))
     except Exception as _err:
         anotar_error("diagnostico_de_salud", _err)
         pass
@@ -446,7 +445,7 @@ def diagnostico_de_salud():
                   "un código de esas listas no van a aparecer los equivalentes de los demás "
                   "proveedores. Casi siempre es que se importaron sin indicar la columna de "
                   "código de fábrica (OEM), que es la única que las une con el resto.",
-                  "Administrar → Mantenimiento → ¿Cuánto cruza tu catálogo?")
+                  miga_hasta("¿Cuánto cruza tu catálogo entre proveedores?"))
         # El mismo síntoma con la causa opuesta, y va aparte porque lo que hay que hacer es
         # otra cosa: acá las equivalencias ya están encontradas y lo que falta es aprobarlas.
         # Mandar a reimportar una lista que está bien es hacer perder una tarde.
@@ -462,7 +461,7 @@ def diagnostico_de_salud():
                   "esperando revisión. Hasta que no se aprueben, buscar uno de sus códigos no "
                   "muestra los equivalentes de los otros proveedores — la lista está bien "
                   "importada, lo que falta es revisarlas.",
-                  "Estadísticas → 🔗 Equivalencias sugeridas")
+                  miga_hasta("Equivalencias sugeridas"))
     except Exception as _err:
         anotar_error("diagnostico_de_salud", _err)
         pass
@@ -473,7 +472,7 @@ def diagnostico_de_salud():
             sumar("medio", f"{espejadas:,} equivalencias anotadas dos veces",
                   "La misma relación guardada en las dos direcciones. No cambia lo que encuentra "
                   "el buscador, pero duplica todos los conteos.",
-                  "Administrar → Mantenimiento → Equivalencias anotadas dos veces")
+                  miga_hasta("Equivalencias anotadas dos veces"))
     except Exception as _err:
         anotar_error("diagnostico_de_salud", _err)
         pass
@@ -484,7 +483,7 @@ def diagnostico_de_salud():
             sumar("alto", f"{basura} código(s) que son un número suelto",
                   "Entraron cantidades o números de orden en la columna del código. Cada uno "
                   "vincula entre sí repuestos que no tienen nada que ver.",
-                  "Administrar → Mantenimiento → Códigos que son solo un número suelto")
+                  miga_hasta("Códigos que son solo un número suelto"))
     except Exception as _err:
         anotar_error("diagnostico_de_salud", _err)
         pass
@@ -495,7 +494,7 @@ def diagnostico_de_salud():
             sumar("medio", f"{con_punto} código(s) terminados en '.0'",
                   "Excel los guardó como número. Se encuentran igual, pero el código que se "
                   "muestra y se copia en un presupuesto está mal.",
-                  "Administrar → Mantenimiento → Códigos que quedaron con '.0'")
+                  miga_hasta("Códigos que quedaron con '.0'"))
     except Exception as _err:
         anotar_error("diagnostico_de_salud", _err)
         pass
@@ -518,7 +517,7 @@ def diagnostico_de_salud():
             sumar("alto", f"{precios} par(es) de equivalentes con precios muy distintos",
                   "O el precio está mal cargado, o no son la misma pieza. Cualquiera de las dos "
                   "cuesta plata: o cotizás mal, o vendés algo que no entra.",
-                  "Administrar → Mantenimiento → Precios que no cierran")
+                  miga_hasta("Precios que no cierran entre equivalentes"))
     except Exception as _err:
         anotar_error("diagnostico_de_salud", _err)
         pass
@@ -529,7 +528,7 @@ def diagnostico_de_salud():
         if pendientes > 500:
             sumar("medio", f"{pendientes:,} vínculos esperando revisión",
                   "Mientras no se revisen no están cargados, así que el buscador no los usa.",
-                  "Estadísticas → 🔗 Equivalencias sugeridas")
+                  miga_hasta("Equivalencias sugeridas"))
     except Exception as _err:
         anotar_error("diagnostico_de_salud", _err)
         pass
@@ -541,7 +540,7 @@ def diagnostico_de_salud():
             sumar("medio", f"{sin_punt:,} vínculos sin puntuar",
                   "El buscador no puede decirte qué tan sólido es el camino de cada resultado "
                   "hasta que se calculen. Es un solo botón.",
-                  "Administrar → Mantenimiento → Puntuar los vínculos")
+                  miga_hasta("Puntuar los vínculos para el buscador"))
     except sqlite3.OperationalError as _err:
         anotar_error("diagnostico_de_salud", _err)
         pass
@@ -562,8 +561,7 @@ def diagnostico_de_salud():
                       "trabajar. No hace falta conseguir nada afuera: la app las deduce de las "
                       "descripciones que ya tenés. Se deja pedido solo al abrir la app y lo "
                       "hace la tarea de fondo; si sigue en cero, corrélo a mano.",
-                      "Administrar → Mantenimiento → 🔎 Encontrar equivalencias → "
-                      "🏭 Catálogo de aplicaciones (qué repuesto le va a cada auto)")
+                      miga_hasta("Catálogo de aplicaciones"))
     except sqlite3.OperationalError as _err:
         anotar_error("diagnostico_de_salud", _err)
         pass
@@ -575,11 +573,11 @@ def diagnostico_de_salud():
             sumar("alto", f"{len(en_cero)} producto(s) que se venden seguido están sin stock",
                   "Se venden todos los meses y están en cero. Un cliente los va a pedir y no "
                   "van a estar.",
-                  "Estadísticas → Reposición → Lo que se va a acabar")
+                  f"{miga_hasta('Para pedir')} → ⏳ Lo que se va a acabar")
         elif quiebres:
             sumar("medio", f"{len(quiebres)} producto(s) se acaban en menos de 2 semanas",
                   "Según el ritmo con que se vienen vendiendo y el stock que queda.",
-                  "Estadísticas → Reposición → Lo que se va a acabar")
+                  f"{miga_hasta('Para pedir')} → ⏳ Lo que se va a acabar")
     except sqlite3.OperationalError as _err:
         anotar_error("diagnostico_de_salud", _err)
         pass
@@ -594,7 +592,7 @@ def diagnostico_de_salud():
             sumar("alto", "La copia automática a GitHub está fallando",
                   f"La app intenta subir la copia sola y GitHub la rechaza: {_err_gh}. "
                   "Mientras tanto la copia del repositorio no se actualiza.",
-                  "Estadísticas → Backup y config")
+                  miga_hasta("Backup y config"))
     except Exception as _err:
         anotar_error("diagnostico_de_salud/backup_github", _err)
 
@@ -606,13 +604,13 @@ def diagnostico_de_salud():
             sumar("alto", "No hay copia en el repositorio",
                   "El servidor borra el disco al reiniciar y se restaura desde "
                   "`datos_iniciales.db`, que no está. Hoy un reinicio borra TODO.",
-                  "Estadísticas → Backup y config")
+                  miga_hasta("Backup y config"))
         elif riesgo and riesgo["en_riesgo"] > 200:
             sumar("alto", f"{riesgo['en_riesgo']:,} productos viven solo en el disco",
                   f"La copia del repositorio es del {riesgo['fecha_semilla']} y tiene "
                   f"{riesgo['productos_semilla']:,}; hoy tenés {riesgo['productos_ahora']:,}. "
                   "Si el servidor reinicia, la diferencia se pierde.",
-                  "Estadísticas → Backup y config")
+                  miga_hasta("Backup y config"))
     except Exception as _err:
         anotar_error("diagnostico_de_salud", _err)
         pass
@@ -623,7 +621,7 @@ def diagnostico_de_salud():
             sumar("alto", "Nunca se bajó un backup",
                   "El servidor borra el disco al reiniciar y restaura desde la última copia. "
                   "Hoy podrías perder todo lo cargado.",
-                  "Estadísticas → Backup y config")
+                  miga_hasta("Backup y config"))
         else:
             partes = []
             if bk["productos_nuevos"]:
@@ -635,7 +633,7 @@ def diagnostico_de_salud():
             sumar("alto", "Backup atrasado",
                   "Desde el último hay " + ", ".join(partes) +
                   ". Si el servidor reinicia ahora, eso se pierde.",
-                  "Estadísticas → Backup y config")
+                  miga_hasta("Backup y config"))
 
     orden = {"alto": 0, "medio": 1}
     problemas.sort(key=lambda x: orden.get(x["nivel"], 2))
@@ -740,7 +738,7 @@ def diagnostico_par(codigo_a, codigo_b):
     if esperando:
         pasos.append(("aviso",
                       "El vínculo **existe pero está esperando aprobación**. Andá a "
-                      "Estadísticas → 🔗 Equivalencias sugeridas y aprobalo."))
+                      f"{miga_hasta('Equivalencias sugeridas')} y aprobalo."))
         return pasos
 
     rechazados = pares_rechazados()

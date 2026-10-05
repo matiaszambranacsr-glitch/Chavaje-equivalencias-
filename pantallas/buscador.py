@@ -170,7 +170,7 @@ Casi todo lo que edita o borra algo pide la contraseña de administrador la prim
                                 "uso interno, del rango que usás para tus propias etiquetas, "
                                 "así que lo más probable es que sea una etiqueta tuya que "
                                 "todavía no le pegaste a ningún producto. Se cargan de a "
-                                "muchos en Mantenimiento → 🩺 Estado."
+                                f"muchos en {miga_hasta('Cargar códigos de barras en masa')}."
                             )
                         else:
                             st.warning(
@@ -1027,8 +1027,7 @@ Casi todo lo que edita o borra algo pide la contraseña de administrador la prim
                                             f"({u['Marca B']}) separa {u['Separa']}, y su confianza es "
                                             f"{u['Confianza del vínculo']}/100.\n\n"
                                             "Cortando **ese solo vínculo** se separan las dos familias. "
-                                            "Está en **Administrar → Mantenimiento → Vínculos que unen "
-                                            "familias**."
+                                            f"Está en **{miga_hasta('Vínculos que unen dos familias de repuestos')}**."
                                         )
                                 if puentes_res:
                                     nombres = ", ".join(f"«{p['Código']}» ({p['Vínculos']} vínculos)"
@@ -1038,8 +1037,7 @@ Casi todo lo que edita o borra algo pide la contraseña de administrador la prim
                                         "está vinculado a demasiadas cosas, así que arrastra acá repuestos "
                                         "de otros rubros que no tienen nada que ver. Fijate la columna "
                                         "**Cadena**: lo marcado como 🟢 directo es lo confiable. "
-                                        "Para arreglarlo de raíz: **Administrar → Mantenimiento → "
-                                        "Códigos puente**."
+                                        f"Para arreglarlo de raíz: **{miga_hasta('Códigos puente')}**."
                                     )
 
                                 # ¿Por qué apareció este resultado? Muestra la cadena de vínculos que lo

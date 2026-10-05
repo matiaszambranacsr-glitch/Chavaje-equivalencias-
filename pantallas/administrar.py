@@ -33,8 +33,7 @@ def exportar_configuracion_txt():
 if pagina == PAGINAS[3]:
     st.subheader("🗂️ Administrar")
 
-    SUB_ADMIN = ["🏷️ Marcas", "📦 Productos", "💬 Mensajería y cobros", "🧩 Combos", "🧹 Mantenimiento", "👥 Usuarios",
-                 "💳 Cuentas corrientes"]
+    # SUB_ADMIN está en logica/interfaz.py, con las demás listas de navegación.
     if st.session_state.get("sub_admin") not in SUB_ADMIN:
         st.session_state["sub_admin"] = SUB_ADMIN[0]
     # El mismo buscador que adentro de Mantenimiento, pero acá arriba: el que entra por primera
@@ -270,7 +269,8 @@ if pagina == PAGINAS[3]:
             if res_admin:
                 st.dataframe(res_admin, width="stretch", hide_index=True)
                 st.caption(
-                    "¿Necesitás borrar un producto? Está en '🧹 Mantenimiento' → separado a propósito "
+                    "¿Necesitás borrar un producto? Está en **🗂️ Administrar → 🧹 Mantenimiento**, "
+                    "arriba de todo («🗑️ Eliminar un producto puntual»): separado a propósito "
                     "de la edición, para que un descuido acá no borre nada."
                 )
 
@@ -3101,9 +3101,9 @@ if pagina == PAGINAS[3]:
                         "de fábrica, que todavía no tiene nadie más. El buscador ya se los "
                         "marca así.\n\n"
                         "**A esos no los borres.** Se resuelven solos cuando entre otra lista "
-                        "que traiga el mismo código de fábrica, o con **🧠 Buscar equivalencias "
-                        "en todo el catálogo** (Mantenimiento → Calidad), que los cruza por "
-                        "descripción."
+                        "que traiga el mismo código de fábrica, o con **"
+                        f"{miga_hasta('Buscar equivalencias en TODO el catálogo de una')}**, "
+                        "que los cruza por descripción."
                     )
                 # Una casilla además de la contraseña, como en «Eliminar marca» y «Eliminar
                 # producto». Acá hace más falta que en ninguna: son 34.457 productos —el 48%

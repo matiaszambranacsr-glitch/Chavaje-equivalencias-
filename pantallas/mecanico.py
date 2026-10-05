@@ -7,10 +7,7 @@
 if pagina == PAGINAS[7]:
     st.subheader("🛠️ Modo Mecánico")
 
-    # Ordenadas por cómo se usan: primero identificar el auto (patente, chasis, motor), después
-    # consultarlo. Antes «Códigos DTC» quedaba segundo, entre dos formas de identificar el auto.
-    SUB_MEC = ["🔤 Por patente", "🔢 Chasis / VIN", "⚙️ Número de motor", "🚙 Repuestos por vehículo", "📖 Códigos DTC",
-               "🗺️ Esquemas", "🧮 Conversor de unidades"]
+    # SUB_MEC está en logica/interfaz.py, con las demás listas de navegación.
     if st.session_state.get("sub_mec") not in SUB_MEC:
         st.session_state["sub_mec"] = SUB_MEC[0]
     st.radio("Sub-sección:", SUB_MEC, key="sub_mec", horizontal=True,

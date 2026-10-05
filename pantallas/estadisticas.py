@@ -178,11 +178,11 @@ if pagina == PAGINAS[4]:
                     "**backup completo** de acá abajo y subilo al repositorio renombrado a "
                     "`datos_iniciales.db`. Ahí sí sobreviven los reinicios.\n"
                     "- **Si ya no entra:** subí el backup sin fotos (para no perder el catálogo) y "
-                    "recuperá las fotos después desde **Mantenimiento → Traer fotos en tanda**, que "
-                    "las vuelve a bajar de las fichas de los proveedores sin cargarlas a mano.\n"
+                    "recuperá las fotos después desde "
+                    f"**{miga_hasta('Traer fotos de productos en tanda')}**, que las vuelve a bajar de las fichas de los proveedores sin cargarlas a mano.\n"
                     "- **Lo más prolijo a futuro:** guardar las fotos por dirección web en vez de "
                     "adentro de la base, y dejar cargada la dirección del catálogo de cada marca en "
-                    "**Administrar → Marcas**. Así el backup queda liviano y las fotos se vuelven a "
+                    "**🗂️ Administrar → 🏷️ Marcas**. Así el backup queda liviano y las fotos se vuelven a "
                     "traer solas."
                 )
 
@@ -634,8 +634,7 @@ Administrar → Mantenimiento.
         st.markdown("**💲 Tus precios contra Mercado Libre**")
         explicar(
             "Los productos cuyo precio de lista está lejos de lo que se publica.",
-            "Sale de buscar tus códigos en Mercado Libre (Administrar → Mantenimiento → «🛒 "
-            "Mercado Libre»): de las publicaciones que son de ese producto se toma el precio "
+            f"Sale de buscar tus códigos en Mercado Libre ({miga_hasta('Mercado Libre')}): de las publicaciones que son de ese producto se toma el precio "
             "mediano. Un precio de lista muy por debajo suele ser una lista vieja que nadie "
             "actualizó; uno muy por encima, una pieza que no vas a vender.\n\n"
             "**Es una referencia, no una verdad**: en Mercado Libre se publica con envío, con "
@@ -650,7 +649,7 @@ Administrar → Mantenimiento.
         else:
             st.caption("Todavía no hay precios de Mercado Libre para comparar, o ninguno está "
                        "tan lejos." if config_mercado_libre() else
-                       "Hace falta activar Mercado Libre en Administrar → Mantenimiento.")
+                       f"Hace falta activar Mercado Libre en {miga_hasta('Mercado Libre')}.")
 
         st.markdown("---")
         st.markdown("**🚫 Puede que ya no se fabriquen**")

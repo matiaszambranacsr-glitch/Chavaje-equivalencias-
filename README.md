@@ -6052,6 +6052,30 @@ Una lista de ideas de Gemini para la app, revisada contra lo que hay y contra el
 | Cuentas corrientes de talleres, OTP para retirar | **Se hizo**: cuenta corriente con plazo, límite y cheques, y el código de retiro de un solo uso que genera el taller. Biometría no: no hay cómo hacerla desde una página web de mostrador |
 | Pasaporte de mantenimiento del auto | Ya estaba: la ficha del vehículo con su historial de piezas se descarga en PDF. Firmarla o «blockchain» no agrega nada sin una página pública donde verificarla |
 
+### 📍 Las indicaciones de «andá a…» llevan a donde dicen
+
+Muchos avisos terminan diciendo dónde se arregla («📍 Administrar → Mantenimiento → …»). Una
+revisión de todas encontró **más de 20 que mandaban a un lugar que no existe** o que ya se había
+mudado: «Estadísticas → Reposición» (se llama «📌 Para pedir»), «Mantenimiento → Calidad» (la
+herramienta está en «🔎 Encontrar equivalencias»), «Vínculos que unen familias» (es «…unen DOS
+familias de repuestos», en «🧹 Limpiar y corregir»), «Traer fotos en tanda», «Administrar → 💳
+Alias para QR» (está adentro de «💬 Mensajería y cobros»), «Mantenimiento → 🩺 Estado» para
+cargar códigos de barras (es «🏷️ Códigos de barras»), y otras.
+
+- **Ya no se escriben a mano.** `miga_hasta("Códigos puente")` arma la miga entera desde el
+  nombre de la herramienta, la solapa o el grupo, y si ese nombre no existe da error en vez de
+  mandar a buscar algo que no está. Las listas de pantallas y solapas viven en un solo lugar
+  (`logica/interfaz.py`, «NAVEGACIÓN: DÓNDE ESTÁ CADA COSA»).
+- **El botón «Ir a arreglarlo →» llega a todos lados.** Antes solo sabía de las solapas de
+  Estadísticas: un aviso que apuntaba a «Administrar → 💳 Cuentas corrientes» dejaba en la
+  primera solapa de Administrar. Ahora llega a la pantalla, la solapa, el grupo de Mantenimiento
+  y, si nombra una herramienta, al grupo donde está. Probado con los 69 destinos posibles y con
+  los 6 avisos de la base real.
+- **El auditor lo controla.** `python3 auditar.py` da ERROR si un `miga_hasta("…")` no
+  encuentra su destino, o si un texto que nombra una pantalla sigue con «→» hacia algo que no es
+  una solapa, un grupo ni una herramienta. Si se renombra una herramienta, avisa en qué textos
+  quedó el nombre viejo.
+
 ## 🔗 Revisar sugeridas: primero lo que hay que hacer
 
 Mirado con capturas sobre la base real (15.308 pendientes en 8 listas):

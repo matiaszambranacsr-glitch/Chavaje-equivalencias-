@@ -67,8 +67,9 @@ if pagina == PAGINAS[5]:
                     st.caption("ℹ️ Este alias no tiene QR real cargado — se va a generar uno con el alias/CBU como texto.")
         else:
             st.caption(
-                "Todavía no cargaste ningún alias/CBU — podés hacerlo en 'Administrar' → "
-                "'💳 Alias para QR de transferencia' si querés que la cotización incluya uno."
+                "Todavía no cargaste ningún alias/CBU — podés hacerlo en "
+                f"**{miga_hasta('Mensajería y cobros')} → 💳 Alias para QR de transferencia** "
+                "si querés que la cotización incluya uno."
             )
 
         import urllib.parse

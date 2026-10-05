@@ -2610,7 +2610,7 @@ def _hay_que_hacerlo(clave):
         anotar_error(f"_trabajo_de_fondo/{clave}",
                      RuntimeError(f"se intentó {intentos} veces y nunca terminó; se deja de "
                                   "reintentar. Se puede volver a pedir a mano desde "
-                                  "Administrar → Mantenimiento"))
+                                  "🗂️ Administrar → 🧹 Mantenimiento"))
         return False
     guardar_config(f"{clave}_intentos", str(intentos + 1))
     return True
@@ -2827,13 +2827,14 @@ def mostrar_panel_de_carga_automatica():
             guardar_config("buscar_lo_nuevo_al_importar", "1" if _al_importar else "0")
         # El barrido de todo el catálogo es lo que más memoria pide: medido con 63 proveedores,
         # unos 2 GB. Con un catálogo así de grande, en el servidor gratis conviene apagarlo y
-        # correrlo a mano (Administrar → Mantenimiento → «🧠 Buscar en todo el catálogo»).
+        # correrlo a mano (ver miga_hasta("Buscar equivalencias en TODO el catálogo de una")).
         _barrido = st.toggle(
             "Después de importar, barrer todo el catálogo buscando pares por descripción",
             value=obtener_config("barrido_automatico", "1") == "1",
             key="carga_auto_barrido",
             help="Es lo que más memoria usa de todo lo automático. Con muchos proveedores (más de "
-                 "30 o 40) conviene apagarlo y correrlo a mano de vez en cuando: Administrar → "
-                 "Mantenimiento → «🧠 Buscar en todo el catálogo». Apagado, lo demás de después de importar sigue igual.")
+                 "30 o 40) conviene apagarlo y correrlo a mano de vez en cuando: "
+                 f"{miga_hasta('Buscar equivalencias en TODO el catálogo de una')}. Apagado, lo "
+                 "demás de después de importar sigue igual.")
         if _barrido != (obtener_config("barrido_automatico", "1") == "1"):
             guardar_config("barrido_automatico", "1" if _barrido else "0")

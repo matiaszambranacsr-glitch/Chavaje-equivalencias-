@@ -75,6 +75,7 @@ específico, y las pantallas quedan todas al final:
         · COBROS: alias de transferencia y QR
     logica/interfaz.py
         · PIEZAS DE INTERFAZ QUE SE REPITEN
+        · NAVEGACIÓN: DÓNDE ESTÁ CADA COSA
         · PDF: cotización y ficha del vehículo
         · LEER EL ARCHIVO: encabezado, hojas y codificación
     logica/vehiculos.py
@@ -384,51 +385,6 @@ except Exception as _err:
 
 _cache_salud = salud_compartida()
 
-def ir_a_donde_dice_el_aviso(donde):
-    """Lleva a la pantalla que el aviso nombra en su «📍». Va como on_click.
-
-    Hasta ahora los avisos terminaban en una miga de pan escrita —«📍 Administrar →
-    Mantenimiento → 🧹 Limpiar y corregir → Códigos puente»— y ahí quedaba: había que
-    acordarse del camino y hacerlo a mano. De los 28 textos de la app que mandan a otra
-    pantalla, UNO SOLO tenía botón.
-
-    Se navega leyendo la miga en vez de escribir un destino por aviso, y eso tiene una ventaja
-    que no es de código: si la miga miente, el botón no llega, y se nota. Ya pasó al escribir
-    esto — había 11 lugares que decían «Estadísticas → Mantenimiento» y Mantenimiento vive en
-    Administrar. Nadie lo había visto porque una miga de pan escrita no se prueba sola.
-
-    Como callback y no suelto, por lo mismo que _ir_al_grupo_de_mantenimiento(): Streamlit no
-    deja tocar la clave de un widget que ya se dibujó en esta pasada."""
-    tramos = [t.strip() for t in str(donde or "").split("→")]
-    if not tramos:
-        return
-
-    # Mantenimiento primero, y sin mirar el primer tramo: vive adentro de Administrar aunque
-    # la miga diga otra cosa.
-    if any("Mantenimiento" in t for t in tramos):
-        st.session_state["pagina_actual"] = "🗂️ Administrar"
-        st.session_state["sub_admin"] = "🧹 Mantenimiento"
-        for tramo in tramos:
-            for grupo in GRUPOS_MANTENIMIENTO:
-                if tramo == grupo:
-                    st.session_state["sub_mantenimiento"] = grupo
-                    return
-        return
-
-    for pantalla in PAGINAS:
-        # Se compara sin el emoji: la miga escribe «Estadísticas», no «📊 Estadísticas».
-        if pantalla.split(" ", 1)[-1].lower() in tramos[0].lower():
-            st.session_state["pagina_actual"] = pantalla
-            break
-    for tramo in tramos[1:]:
-        for solapa in SUB_STATS:
-            # Sin el emoji: varias migas escriben «Backup y config» y la solapa se llama
-            # «💾 Backup y config». Exigir el emoji dejaba el botón a mitad de camino.
-            if tramo == solapa or tramo == solapa.split(" ", 1)[-1]:
-                st.session_state["sub_stats"] = solapa
-                return
-
-
 _problemas = _cache_salud["problemas"]
 # Los avisos de salud son del negocio (cuántos productos, qué está roto, clientes esperando):
 # no se le muestran a quien entró sin contraseña. Ver seccion_permitida().
@@ -499,27 +455,8 @@ if _problemas and (es_operador_o_admin() or not hay_claves_configuradas()):
     st.markdown("")
 
 
-PAGINAS = ["🔍 Buscador", "🔗 Vincular manual", "📁 Cargar Excel", "🗂️ Administrar",
-           "📊 Estadísticas", "📋 Lista WhatsApp", "🚗 Vehículos", "🛠️ Modo Mecánico"]
-
-# Las sub-solapas de Estadísticas viven acá arriba y no adentro de la pantalla porque el
-# botón de los avisos de salud —que se dibuja mucho antes— necesita poder llevar hasta una.
-SUB_STATS = ["📈 Resumen", "📥 Importaciones", "💾 Backup y config", "🧮 Auditoría y depósito",
-             "🔎 Búsquedas sin resultado", "📌 Para pedir", "🔗 Equivalencias sugeridas"]
-
-# Una línea por pantalla diciendo para qué sirve. Sin esto hay que entrar a cada una para
-# saber qué hace, y el que atiende el mostrador no tiene tiempo de andar explorando.
-PARA_QUE_SIRVE = {
-    "🔍 Buscador": "Buscar un repuesto y ver todas las marcas que sirven en su lugar.",
-    "🔗 Vincular manual": "Decir a mano que dos códigos son equivalentes.",
-    "📁 Cargar Excel": "Subir la lista de precios de un proveedor.",
-    "🗂️ Administrar": "Editar productos, marcas y usuarios.",
-    "📊 Estadísticas": "Qué comprar, qué no se vende, cuánto aumentó cada proveedor.",
-    "📋 Lista WhatsApp": "Pegar un pedido que llegó por mensaje y resolverlo de una.",
-    "🚗 Vehículos": "Fichas de los autos: qué se le puso a cada uno y cuándo.",
-    "🛠️ Modo Mecánico": "Identificar un auto por patente, chasis o número de motor.",
-}
-
+# PAGINAS, SUB_STATS y PARA_QUE_SIRVE viven en logica/interfaz.py, con las demás listas de
+# navegación: ver «NAVEGACIÓN: DÓNDE ESTÁ CADA COSA».
 if st.session_state.get("pagina_actual") not in PAGINAS:
     st.session_state["pagina_actual"] = PAGINAS[0]
 

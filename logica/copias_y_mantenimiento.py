@@ -2006,14 +2006,14 @@ def _resto_del_informe(informe, nombre_prov):
     # Códigos que no parecen códigos y entraron igual
     try:
         c.execute("""SELECT COUNT(*) FROM productos p JOIN marcas m ON m.id = p.marca_id
-                     WHERE UPPER(m.nombre) = UPPER(?) AND LENGTH(p.codigo_clean) <= 3""",
+                     WHERE UPPER(m.nombre) = UPPER(?) AND LENGTH(p.codigo_clean) <= 2""",
                   (nombre_prov,))
         cortos = c.fetchone()[0]
         if cortos:
             informe["puntos"].append((
-                "medio", f"{cortos} código(s) de 3 caracteres o menos en {nombre_prov.upper()}",
+                "medio", f"{cortos} código(s) de 1 o 2 caracteres en {nombre_prov.upper()}",
                 "Suelen ser cantidades o números de orden que se colaron en la columna del código.",
-                "Administrar → Mantenimiento → 🧹 Limpiar vínculos",
+                miga_hasta("Códigos que son solo un número suelto"),
             ))
     except sqlite3.OperationalError as _err:
         anotar_error("informe_post_importacion", _err)
@@ -2031,7 +2031,7 @@ def _resto_del_informe(informe, nombre_prov):
                     "medio",
                     f"{len(con_stock)} producto(s) con stock no vinieron en esta lista",
                     "Si el proveedor dejó de mandarlos, es mercadería que conviene liquidar.",
-                    "Estadísticas → Reposición → Puede que ya no se fabriquen",
+                    f"{miga_hasta('Para pedir')} → 🚫 Puede que ya no se fabriquen",
                 ))
     except Exception as _err:
         anotar_error("informe_post_importacion", _err)

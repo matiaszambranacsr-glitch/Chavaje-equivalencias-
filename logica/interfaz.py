@@ -62,6 +62,132 @@ def herramientas_que_coinciden(texto):
     return [(t, g, q, c) for _p, t, g, q, c in salida]
 
 
+# ============================================================
+# NAVEGACIÓN: DÓNDE ESTÁ CADA COSA
+# ============================================================
+# Todas las listas de pantallas y solapas en un solo lugar. Estaban repartidas —las páginas y
+# las solapas de Estadísticas en app.py, las de Administrar y del Modo Mecánico adentro de
+# cada pantalla— y de ahí salían los textos que mandaban a lugares que no existen: «Estadísticas
+# → Reposición» (la solapa se llama «📌 Para pedir»), «Administrar → Medidas y fotos», «🧹
+# Limpiar vínculos» (el grupo es «🧹 Limpiar y corregir»), «Mantenimiento → Calidad → Reunir lo
+# que separó un cambio de número» (está en «🔎 Encontrar equivalencias»). Con las listas acá,
+# miga_hasta() arma la miga desde el nombre, ir_a_donde_dice_el_aviso() llega a cualquier
+# solapa, y el auditor controla que cada miga escrita exista.
+PAGINAS = ["🔍 Buscador", "🔗 Vincular manual", "📁 Cargar Excel", "🗂️ Administrar",
+           "📊 Estadísticas", "📋 Lista WhatsApp", "🚗 Vehículos", "🛠️ Modo Mecánico"]
+
+# Una línea por pantalla diciendo para qué sirve: se ve debajo de las pastillas. Sin esto hay
+# que entrar a cada una para saber qué hace, y el que atiende el mostrador no tiene tiempo de
+# andar explorando.
+PARA_QUE_SIRVE = {
+    "🔍 Buscador": "Buscar un repuesto y ver todas las marcas que sirven en su lugar.",
+    "🔗 Vincular manual": "Decir a mano que dos códigos son equivalentes.",
+    "📁 Cargar Excel": "Subir la lista de precios de un proveedor.",
+    "🗂️ Administrar": "Productos, marcas, usuarios, cuentas corrientes de los talleres y las "
+                     "herramientas de mantenimiento.",
+    "📊 Estadísticas": "Aprobar las equivalencias que encontró la app, qué pedir, qué no se "
+                      "vende, y las copias de la base.",
+    "📋 Lista WhatsApp": "Pegar un pedido que llegó por mensaje y resolverlo de una.",
+    "🚗 Vehículos": "Fichas de los autos: qué se le puso a cada uno y cuándo.",
+    "🛠️ Modo Mecánico": "Identificar un auto por patente, chasis o número de motor, y los "
+                       "códigos de falla.",
+}
+
+# Las solapas de cada pantalla. Viven acá y no adentro de la pantalla porque el botón de los
+# avisos —que se dibuja mucho antes— tiene que poder llevar hasta una.
+SUB_STATS = ["📈 Resumen", "📥 Importaciones", "💾 Backup y config", "🧮 Auditoría y depósito",
+             "🔎 Búsquedas sin resultado", "📌 Para pedir", "🔗 Equivalencias sugeridas"]
+SUB_ADMIN = ["🏷️ Marcas", "📦 Productos", "💬 Mensajería y cobros", "🧩 Combos",
+             "🧹 Mantenimiento", "👥 Usuarios", "💳 Cuentas corrientes"]
+# Ordenadas por cómo se usan: primero identificar el auto (patente, chasis, motor), después
+# consultarlo. Antes «Códigos DTC» quedaba segundo, entre dos formas de identificar el auto.
+SUB_MEC = ["🔤 Por patente", "🔢 Chasis / VIN", "⚙️ Número de motor", "🚙 Repuestos por vehículo",
+           "📖 Códigos DTC", "🗺️ Esquemas", "🧮 Conversor de unidades"]
+# Qué solapas tiene cada pantalla, y con qué clave de la sesión se elige.
+SOLAPAS_DE_LA_PAGINA = {
+    "📊 Estadísticas": (SUB_STATS, "sub_stats"),
+    "🗂️ Administrar": (SUB_ADMIN, "sub_admin"),
+    "🛠️ Modo Mecánico": (SUB_MEC, "sub_mec"),
+}
+
+
+def _sin_emoji(texto):
+    """«📌 Para pedir» → «para pedir», sin acentos: así se comparan las migas escritas a mano."""
+    texto = re.sub(r"^[^0-9A-Za-zÁÉÍÓÚÑáéíóúñ]+", "", str(texto or "")).strip()
+    texto = unicodedata.normalize("NFKD", texto).encode("ascii", "ignore").decode("ascii")
+    return re.sub(r"\s+", " ", re.sub(r"[^a-z0-9 ]", " ", texto.lower())).strip()
+
+
+def _es_el_mismo_nombre(escrito, nombre):
+    """¿El tramo de una miga nombra esto? Igual sin el emoji, o el principio del nombre largo:
+    «Códigos puente» es «🌉 Códigos puente — los que rompen la búsqueda»."""
+    a, b = _sin_emoji(escrito), _sin_emoji(nombre)
+    return bool(a) and (a == b or (len(a) >= 6 and b.startswith(a)))
+
+
+def miga_hasta(nombre):
+    """La miga completa hasta una pantalla, una solapa o una herramienta de Mantenimiento, por
+    su nombre (con o sin emoji, o el principio si es largo). ValueError si no existe: una miga
+    que no lleva a ningún lado es peor que ninguna.
+
+        miga_hasta("Reunir lo que separó un cambio de número")
+        → «🗂️ Administrar → 🧹 Mantenimiento → 🔎 Encontrar equivalencias → 🔄 Reunir lo …»"""
+    for pagina in PAGINAS:
+        if _es_el_mismo_nombre(nombre, pagina):
+            return pagina
+    for pagina, (solapas, _clave) in SOLAPAS_DE_LA_PAGINA.items():
+        for solapa in solapas:
+            if _es_el_mismo_nombre(nombre, solapa):
+                return f"{pagina} → {solapa}"
+    for grupo in GRUPOS_MANTENIMIENTO:
+        if _es_el_mismo_nombre(nombre, grupo):
+            return f"🗂️ Administrar → 🧹 Mantenimiento → {grupo}"
+    for titulo, grupo, *_ in HERRAMIENTAS_MANTENIMIENTO:
+        if _es_el_mismo_nombre(nombre, titulo):
+            return (f"🗂️ Administrar → 🧹 Mantenimiento → {GRUPOS_MANTENIMIENTO[grupo]} → "
+                    f"{titulo}")
+    raise ValueError(f"miga_hasta(): no hay ninguna pantalla, solapa ni herramienta «{nombre}»")
+
+
+def ir_a_donde_dice_el_aviso(donde):
+    """Lleva a donde dice una miga («📍 Estadísticas → 📌 Para pedir»). Va como on_click.
+
+    Los avisos terminaban en una miga de pan escrita y ahí quedaba: había que acordarse del
+    camino y hacerlo a mano. Se navega leyendo la miga en vez de escribir un destino por aviso,
+    y eso tiene una ventaja: si la miga miente, el botón no llega, y se nota.
+
+    Llega a la pantalla, a su solapa (de Estadísticas, Administrar o el Modo Mecánico) y, en
+    Mantenimiento, al grupo: el de la miga, o el de la herramienta que nombra. Antes solo
+    sabía de las solapas de Estadísticas: «Administrar → 💳 Cuentas corrientes» dejaba en la
+    primera solapa de Administrar.
+
+    Como callback y no suelto, por lo mismo que _ir_al_grupo_de_mantenimiento(): Streamlit no
+    deja tocar la clave de un widget que ya se dibujó en esta pasada."""
+    tramos = [t.strip(" «»*`'\"📍") for t in str(donde or "").split("→")]
+    tramos = [t for t in tramos if t]
+    if not tramos:
+        return
+    pagina = next((p for p in PAGINAS for t in tramos[:1] if _es_el_mismo_nombre(t, p)), None)
+    # Mantenimiento vive en Administrar aunque la miga empiece por él.
+    if any(_es_el_mismo_nombre(t, "🧹 Mantenimiento") for t in tramos):
+        pagina = "🗂️ Administrar"
+    if pagina:
+        st.session_state["pagina_actual"] = pagina
+    for tramo in tramos:
+        for pag, (solapas, clave) in SOLAPAS_DE_LA_PAGINA.items():
+            for solapa in solapas:
+                if _es_el_mismo_nombre(tramo, solapa) and (pagina in (None, pag)):
+                    st.session_state["pagina_actual"] = pag
+                    st.session_state[clave] = solapa
+        for grupo in GRUPOS_MANTENIMIENTO:
+            if _es_el_mismo_nombre(tramo, grupo):
+                _ir_al_grupo_de_mantenimiento(grupo)
+        for titulo, grupo, *_ in HERRAMIENTAS_MANTENIMIENTO:
+            if _es_el_mismo_nombre(tramo, titulo):
+                st.session_state["pagina_actual"] = "🗂️ Administrar"
+                _ir_al_grupo_de_mantenimiento(GRUPOS_MANTENIMIENTO[grupo])
+
+
 def _ir_al_grupo_de_mantenimiento(nombre_grupo):
     """Cambia de grupo desde un botón, y de paso entra a Mantenimiento si no estabas ahí.
 

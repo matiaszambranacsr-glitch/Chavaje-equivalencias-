@@ -1133,9 +1133,9 @@ def _mensaje_catalogo_visual_vacio():
     return ("Todavía no hay ninguna foto en el catálogo para comparar, así que el **paso 2 no "
             "puede encontrar nada**: compara tu foto contra las que estén cargadas, y no hay "
             "ninguna. Usá el **paso 3, buscar en internet**, que no necesita nada cargado.\n\n"
-            "Las fotos se cargan desde Administrar → Medidas y fotos (subiendo la foto o pegando "
-            "la dirección de la ficha del proveedor), o en tanda desde Estadísticas → "
-            "Mantenimiento. "
+            f"Las fotos se cargan de a una en {miga_hasta('Productos')} (subiendo la foto o "
+            "pegando la dirección de la ficha del proveedor), o en tanda en "
+            f"{miga_hasta('Traer fotos de productos en tanda')}. "
             "Ojo: el *backup sin fotos* que se sube al repositorio no las lleva, así que después "
             "de un reinicio del hosting hay que volver a cargarlas.")
 

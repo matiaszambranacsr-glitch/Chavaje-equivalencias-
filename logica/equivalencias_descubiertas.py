@@ -1535,7 +1535,7 @@ def evaluar_equivalencia(desc_a, desc_b, medidas_a=None, medidas_b=None,
             puntaje -= 30
             senales.append(("mal", f"🕸️ Ese mismo código cuelga {productos_del_puente} productos. "
                                     "Los códigos de fábrica reales casi nunca pasan de 4: "
-                                    "revisalo en Mantenimiento → Puentes falsos"))
+                                    f"revisalo en {miga_hasta('Puentes falsos')}"))
         elif 0 < productos_del_puente <= 2:
             puntaje += 10
             senales.append(("bien", "🕸️ Ese código une solo estos dos: es el mismo repuesto en "
@@ -3432,8 +3432,8 @@ def _analizar_filas(filas, lote):
                 puntaje = min(puntaje, 15.0)
                 _tope_por_el_codigo = min(_tope_por_el_codigo, 15.0)
                 _aviso = (f"🧯 «{_cod}» no es un código de fábrica: es un modelo, una medida o "
-                          "un año. Las reglas de hoy ya no lo tomarían. Borralo en Mantenimiento "
-                          "→ 🧹 Limpiar y corregir → «Puentes que hoy ya no se generarían»")
+                          "un año. Las reglas de hoy ya no lo tomarían. Borralo en "
+                          f"{miga_hasta('Puentes que hoy ya no se generarían')}")
                 if _aviso not in alarmas:
                     alarmas.append(_aviso)
                 break

@@ -2199,6 +2199,82 @@ for (_var, _lista), _ramas in _sangrias_de_seccion.items():
                                   "demás: queda adentro de otra sección y nunca se muestra")
 
 
+# ============ Migas que no llevan a ningún lado ============
+# «Está en Administrar → Mantenimiento → Vínculos que unen familias»: esa herramienta se llama
+# «Vínculos que unen DOS familias de repuestos» y está en «Limpiar y corregir». Una miga mal
+# escrita manda a buscar algo que no está, y el botón «Ir a arreglarlo» no llega. Se revisan:
+#   · cada miga_hasta("…") escrita a mano, que tiene que encontrar su destino;
+#   · cada texto que nombra una pantalla y sigue con «→»: cada tramo tiene que ser una solapa,
+#     un grupo o una herramienta de Mantenimiento (o empezar con su nombre: lo que sigue puede
+#     ser el resto de la oración). Lo que va adentro de {…} no se puede saber y corta la revisión.
+import unicodedata as _unicodedata
+
+
+def _sin_emoji_miga(texto):
+    texto = re.sub(r"^[^0-9A-Za-zÁÉÍÓÚÑáéíóúñ]+", "", str(texto or "")).strip()
+    texto = _unicodedata.normalize("NFKD", texto).encode("ascii", "ignore").decode("ascii")
+    return re.sub(r"\s+", " ", re.sub(r"[^a-z0-9 ]", " ", texto.lower())).strip()
+
+
+def _constante_del_modulo(nombre):
+    for _n in ARBOL.body:
+        if isinstance(_n, ast.Assign) and any(getattr(_t, "id", None) == nombre for _t in _n.targets):
+            return literal(_n.value)
+
+
+_PAGINAS_M = _constante_del_modulo("PAGINAS") or []
+_SOLAPAS_M = sum((_constante_del_modulo(_x) or [] for _x in ("SUB_STATS", "SUB_ADMIN", "SUB_MEC")), [])
+_GRUPOS_M = _constante_del_modulo("GRUPOS_MANTENIMIENTO") or []
+_HERRAMIENTAS_M = [_h[0] for _h in (_constante_del_modulo("HERRAMIENTAS_MANTENIMIENTO") or [])]
+_DESTINOS_M = [_sin_emoji_miga(_x) for _x in _PAGINAS_M + _SOLAPAS_M + _GRUPOS_M + _HERRAMIENTAS_M]
+
+
+def _nombra_un_destino(tramo, prosa_despues=False):
+    """Igual que _es_el_mismo_nombre() de logica/interfaz.py; con prosa_despues, el tramo
+    también puede seguir con el resto de la oración después del nombre."""
+    _a = _sin_emoji_miga(tramo)
+    return bool(_a) and any(_a == _b or (len(_a) >= 6 and _b.startswith(_a))
+                            or (prosa_despues and _a.startswith(_b + " "))
+                            for _b in _DESTINOS_M)
+
+
+if _PAGINAS_M and _HERRAMIENTAS_M:
+    _paginas_sin_emoji = [_sin_emoji_miga(_p) for _p in _PAGINAS_M] + ["mantenimiento"]
+    for _n in ast.walk(ARBOL):
+        if (isinstance(_n, ast.Call) and getattr(_n.func, "id", None) == "miga_hasta"
+                and _n.args and isinstance(literal(_n.args[0]), str)
+                and not _nombra_un_destino(literal(_n.args[0]))):
+            reportar("ERROR", _n.lineno, f"miga_hasta(«{literal(_n.args[0])}»): no hay ninguna "
+                                         "pantalla, solapa ni herramienta que se llame así")
+        if isinstance(_n, ast.JoinedStr) and not any(isinstance(_p, ast.JoinedStr)
+                                                     for _p in _ancestros(_n)):
+            _texto = "".join(_v.value if isinstance(_v, ast.Constant) else "{}" for _v in _n.values)
+        elif (isinstance(_n, ast.Constant) and isinstance(_n.value, str)
+              and not any(isinstance(_p, ast.JoinedStr) for _p in _ancestros(_n))):
+            _texto = _n.value
+        else:
+            continue
+        if "→" not in _texto:
+            continue
+        _tramos = _texto.split("→")
+        # La miga arranca donde el texto antes de la primera flecha termina en una pantalla.
+        _antes = _sin_emoji_miga(re.split(r"[*«'\"(]", _tramos[0].rstrip(" *»'\""))[-1])
+        if not any(_antes.endswith(_p) for _p in _paginas_sin_emoji):
+            continue
+        for _tramo in _tramos[1:]:
+            if "{}" in _tramo:
+                break
+            _tramo = re.split(r"\*\*|»|['\"]", " ".join(_tramo.split()).strip(" «*'\""))[0]
+            if _nombra_un_destino(_tramo):
+                continue
+            # Con el resto de la oración pegada, la miga terminó en este tramo.
+            if not _nombra_un_destino(_tramo, prosa_despues=True):
+                reportar("ERROR", _n.lineno,
+                         f"la miga «…→ {_tramo.strip()[:60]}» no lleva a ningún lado: no hay "
+                         "solapa, grupo ni herramienta que se llame así. Usar miga_hasta(…)")
+            break
+
+
 # ============ Resultado ============
 orden = {"ERROR": 0, "REVISAR": 1, "AVISO": 2}
 problemas.sort(key=lambda x: (orden[x[0]], x[1]))
