@@ -2270,7 +2270,9 @@ def _firma_armada(descripcion, producto_id=None, codigo_clean=None):
     # La cilindrada con la unidad pegada. Taranto escribe «SIGMA 1.6CC 16V» y el \b del final
     # no engancha, porque entre el 6 y la C no hay borde de palabra: ese producto quedaba sin
     # cilindrada y no se podía contrastar contra el «- 1.6 -» de la otra lista.
-    cilindradas = set(re.findall(r'\b(\d[.,]\d)(?!\d)', limpio))
+    # Sin el ESPESOR: «Jta.Tapa Cil. FIAT DAILY/DUCATO ESP 1.6MM» no es un 1.6, y concordaba con
+    # las juntas del Palio 1.6.
+    cilindradas = set(re.findall(r'\b(\d[.,]\d)(?!\d)(?!\s?MM\b)', limpio))
     # Y en centímetros cúbicos, que es como escribe TARANTO: «Hilux 2779cc» es el 2.8, «1587CC»
     # el 1.6. Sin pasarlo a litros, la junta de la Hilux 2,8 no encontraba a su par por la
     # cilindrada y el abanico elegía otra (ver _analizar_lote_pendiente()).

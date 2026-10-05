@@ -432,7 +432,9 @@ EJES_DE_POSICION = [("DELANTERA", "TRASERA"), ("IZQUIERDA", "DERECHA"),
 # de «HDI», y «MPI» quiere decir nafta sin decirlo.
 FORMAS_DE_DIESEL = (r"DIESEL|D[IÍ]ESEL|TURBODIESEL|TDI|HDI|CRDI|JTD|DCI|TDCI|CDI|MULTIJET|"
                     r"D4D|CTDI|DURAMAX")
-FORMAS_DE_NAFTA = r"NAFTA|NAFTERO|NAFTEROS|GASOLINA|MPFI|MPI|TFSI|TSI|GDI|FLEX"
+# MULTIPUNTO es la inyección multipunto, que es de nafta: «Jgo.Jtas.Inyec.Elec.Multipunto Ford
+# Fiesta SE 1.4» no es del 1.4 TDCi.
+FORMAS_DE_NAFTA = r"NAFTA|NAFTERO|NAFTEROS|GASOLINA|MPFI|MPI|TFSI|TSI|GDI|FLEX|MULTIPUNTO"
 _RE_DIESEL = re.compile(r"(?<![A-Z])(" + FORMAS_DE_DIESEL + r")(?![A-Z])", re.IGNORECASE)
 _RE_NAFTA = re.compile(r"(?<![A-Z])(" + FORMAS_DE_NAFTA + r")(?![A-Z])", re.IGNORECASE)
 # D4D son dos motores: el D-4D de Toyota (Hilux, Corolla) es diésel, y el D4D de Renault es el

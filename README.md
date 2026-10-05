@@ -5959,6 +5959,48 @@ con «sin vínculos flojos» los saca. Si el camino pasa por un número de fábr
 tienen, lo del auto no cuenta, igual que en la cola. Cuesta menos de un milisegundo por
 búsqueda.
 
+### 🧩 ¿Qué más lleva este trabajo?
+
+En el buscador, debajo de los resultados, el interruptor **«🧩 ¿Qué más lleva este trabajo, para
+el mismo motor?»**. Quien se lleva la junta de tapa de cilindros del Fire 1.4 también cambia la
+de tapa de válvulas, la de admisión y la de escape de ese motor, y el catálogo ya las tiene:
+
+    Jta.Tapa Cilindros Fiat Fire 8V 1.4CC  →  Junta de tapa de válvulas: 260310 TARANTO, JVL-168-28 ILLINOIS…
+                                              Junta de escape: 260218 TARANTO, JSA-285 ILLINOIS (FIRE MPI 8V)…
+
+`lo_que_va_con()` sale de `TRABAJOS_CON_COMPLEMENTOS`: la junta de tapa de cilindros (tapa de
+válvulas, retenes de válvula, admisión, escape), la bomba de agua (su junta, el termostato), el
+termostato (su junta), la bobina (bujías de encendido, cables) y las bujías (cables). Busca en
+el catálogo por el texto, como todo lo que dice a qué auto le va una pieza: alguna marca de
+auto en común, diésel con diésel, y el mismo motor o la misma cilindrada (con algún modelo en
+común si los dos los nombran, y las mismas válvulas si las dicen). Ordena por cuánto lo dice el
+texto, después lo que tiene stock, después lo más barato, y trae cuatro por pieza.
+
+Probado sobre la base real, en 300 piezas al azar de esos tipos: 81 encuentran algo, a 98 ms.
+Las reglas de combustible salieron de ahí: sin ellas la junta del Fiesta 1.4 TDCi traía la de
+escape del Zetec SE naftero y la del 2.0 HDi la del 504 2.0. Y de ahí salieron dos arreglos que
+sirven también a la cola: «ESP 1.6MM» se leía como cilindrada 1.6 (la junta de la Daily traía las
+del Palio), y «MULTIPUNTO» ahora dice nafta. Solo busca cuando se prende el interruptor, y el
+cartel pide confirmarlo con el cliente: es lo que dice el texto, no un catálogo de aplicaciones.
+
+### Las ideas de otra IA: qué ya estaba, qué se hizo, qué no
+
+Una lista de ideas de Gemini para la app, revisada contra lo que hay y contra el catálogo real
+(juntas de IMPERIAL, TARANTO e ILLINOIS; eléctricos y sensores de FISPA, CRI-FA y JL):
+
+| Idea | Cómo quedó |
+|---|---|
+| Patente → auto | Ya estaba, y sin la consulta paga: la patente dice el año sola (`leer_patente()`) y la foto de la cédula dice el resto (`leer_cedula_por_foto()`) |
+| VIN → auto, y número de fábrica | Ya estaba: VIN (`buscar_vehiculo_por_vin()`), y el número de fábrica es la base de toda la búsqueda |
+| Código de falla OBD → pieza | Ya estaba («Del código de falla al repuesto») |
+| Recordatorios de service, historial por auto | Ya estaba: `historial_piezas`, `calcular_proyeccion_mantenimiento()`, `a_quien_avisar()` |
+| Stock, reservas, reposición | Ya estaba |
+| Venta cruzada de complementos | Estaban los combos a mano (3 cargados). **Se hizo** «¿Qué más lleva este trabajo?», con las piezas del catálogo para el mismo motor |
+| Kit de service / puesta a punto (filtros, frenos, bujías) | No: en el catálogo hay 656 aplicaciones de filtros y 10 de frenos contra 15.438 de juntas. El kit que sí sale de este catálogo es el del trabajo, y es el de arriba |
+| Litros de aceite por motor | No: no hay de dónde sacarlo, y un dato inventado hace vender de menos |
+| VTV, oblea de GNC, multas | No: no hay una consulta pública con una interfaz para programas; hacerlo sería leer páginas de organismos que cambian sin aviso, y no es lo que se resuelve en el mostrador |
+| Complejidad de instalación, tutoriales, modelo 3D, puntos, lockers | No: son de una tienda para el que compra, y esta app es la del que vende |
+
 ## 🔗 Revisar sugeridas: primero lo que hay que hacer
 
 Mirado con capturas sobre la base real (15.308 pendientes en 8 listas):

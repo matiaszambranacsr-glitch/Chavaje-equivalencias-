@@ -1129,6 +1129,31 @@ Casi todo lo que edita o borra algo pide la contraseña de administrador la prim
                                         else:
                                             st.error(f"⚠️ No tenés '{item}' cargado en la base — vas a necesitar pedirlo.")
 
+                        # Lo que va con esto: las otras piezas del mismo trabajo, para el mismo
+                        # motor, sacadas del catálogo. Ver lo_que_va_con().
+                        _buscado_prov = next((f for f in res if f.get("Cadena") == "— el buscado"
+                                              and f.get("Tipo") != "OEM"), None)
+                        # Con un interruptor y no una caja: esta ya está adentro de una, y así
+                        # además no se busca nada hasta que alguien lo pide.
+                        if _buscado_prov and st.toggle(
+                                "🧩 ¿Qué más lleva este trabajo, para el mismo motor?",
+                                key=f"mismo_trabajo_{clean}_{_buscado_prov['ID']}"):
+                            _trabajo, _complementos = lo_que_va_con(_buscado_prov["ID"])
+                            if not _complementos:
+                                st.caption("No es una pieza con complementos cargados (junta de "
+                                           "tapa de cilindros, bomba de agua, termostato, bobina, "
+                                           "bujías), o el catálogo no tiene otra pieza que diga "
+                                           "el mismo motor.")
+                            else:
+                                st.caption(f"Para {_trabajo}. Del catálogo, por lo que dice cada "
+                                           "descripción: la misma marca de auto, el mismo "
+                                           "combustible y el mismo motor o la misma cilindrada. "
+                                           "Confirmalo con el cliente antes de sumarlo.")
+                                for _nombre_c, _filas_c in _complementos:
+                                    st.markdown(f"**{_nombre_c}**")
+                                    st.dataframe(quitar_id(_filas_c), width="stretch",
+                                                 hide_index=True)
+
                         col_dl, col_add = st.columns(2)
                         with col_dl:
                             st.download_button(

@@ -25,6 +25,151 @@ def buscar_combos_para_descripcion(descripcion):
     return resultado
 
 
+# ============================================================
+# LO QUE VA CON ESTO: las otras piezas del MISMO TRABAJO, para el MISMO MOTOR, del catálogo
+# ============================================================
+# Los combos de arriba son a mano y dicen el NOMBRE de la pieza («Bomba de agua»): después hay
+# que buscarla para ese auto. Esto la busca. Quien se lleva la junta de tapa de cilindros del
+# Fire 1.4 también cambia la de tapa de válvulas, la de admisión y la de escape de ese motor, y
+# el catálogo ya las tiene: «Jta.Tapa Valvulas FIAT 1.4 / 1.6», «Junta Salida de Escape FIAT UNO
+# PALIO SIENA - 1,0/1,2/1,4 - FIRE MPI 8V». Va por el texto, como todo lo que dice a qué auto le
+# va una pieza: la misma marca de auto, y el mismo motor, o la misma cilindrada (y las mismas
+# válvulas y modelos si los dos los dicen).
+# (nombre del trabajo, qué tiene que ser la pieza vendida, [(complemento, qué tiene que ser,
+#  LIKE para prefiltrar)]). Las condiciones: ver _la_firma_es().
+TRABAJOS_CON_COMPLEMENTOS = (
+    ("la junta de tapa de cilindros", dict(cabeza="JUNTA", todas=("TAPA", "CILINDRO"), kit=False), (
+        ("Junta de tapa de válvulas",
+         dict(cabeza="JUNTA", todas=("TAPA", "VALVULA"), ninguna=("CILINDRO",), kit=False), "%VAL%"),
+        ("Retenes de válvula", dict(cabeza="RETEN", todas=("VALVULA",)), "%RET%"),
+        ("Junta de admisión", dict(cabeza="JUNTA", todas=("ADMISION",), ninguna=("CILINDRO",)),
+         "%ADM%"),
+        ("Junta de escape", dict(cabeza="JUNTA", todas=("ESCAPE",), ninguna=("CILINDRO",)),
+         "%ESC%"),
+    )),
+    ("la bomba de agua", dict(cabeza="BOMBA", todas=("AGUA",)), (
+        ("Junta de la bomba de agua", dict(cabeza="JUNTA", todas=("BOMBA", "AGUA")), "%AGUA%"),
+        ("Termostato", dict(cabeza="TERMOSTATO"), "%TERMOST%"),
+    )),
+    ("el termostato", dict(cabeza="TERMOSTATO"), (
+        ("Junta del termostato", dict(cabeza="JUNTA", todas=("TERMOSTATO",)), "%TERMOST%"),
+    )),
+    ("la bobina", dict(cabeza="BOBINA"), (
+        ("Bujías", dict(cabeza="BUJIA", encendido=True, kit=False), "%BUJ%"),
+        ("Cables de bujía", dict(cabeza="CABLE", todas=("BUJIA",), kit=False), "%CABLE%"),
+    )),
+    ("las bujías", dict(cabeza="BUJIA", encendido=True), (
+        ("Cables de bujía", dict(cabeza="CABLE", todas=("BUJIA",), kit=False), "%CABLE%"),
+    )),
+)
+
+
+def _la_firma_es(firma, descripcion, cabeza=None, todas=(), ninguna=(), kit=None,
+                 encendido=False):
+    """¿La pieza de esta firma es la que pide la condición de TRABAJOS_CON_COMPLEMENTOS?"""
+    pieza = set(firma.get("pieza") or ())
+    if cabeza and firma.get("cabeza") != cabeza:
+        return False
+    if not set(todas) <= pieza or set(ninguna) & pieza:
+        return False
+    if kit is not None and bool(es_un_kit(descripcion)) != kit:
+        return False
+    # La bujía de la bobina es la de encendido: la de precalentamiento va en un diésel.
+    if encendido and tipo_de_bujia(descripcion) == "precalentamiento":
+        return False
+    return True
+
+
+def _marcas_de_auto(firma):
+    """Todas las marcas de auto que nombra la descripción, escritas de una sola manera: la
+    bobina del «Peugeot Partner - 206 - 307 - Citroen Picasso - C3» es de las dos."""
+    marcas = set(firma.get("marcas") or ()) | ({firma["marca_auto"]} if firma.get("marca_auto")
+                                               else set())
+    return {ALIAS_MARCA_VEHICULO.get(m.upper(), m.upper()) for m in marcas}
+
+
+def _fuerza_del_mismo_motor(fa, fb):
+    """0 si no son del mismo motor (o el texto no alcanza para decirlo); si lo son, cuánto lo
+    dice: 3 el mismo código de motor, 2 la misma cilindrada y algún modelo en común, 1 la misma
+    cilindrada sola. Y en los tres, diésel con diésel: probado sobre la base real, sin esa
+    condición la junta de tapa del Fiesta 1.4 TDCi traía la de escape del Zetec SE 1.4 naftero,
+    y la del 2.0 HDi la de salida del 504 2.0."""
+    if not _marcas_de_auto(fa) & _marcas_de_auto(fb):
+        return 0
+    # El diésel casi siempre se dice y la nafta casi nunca: «FIRE MPI 8V» es nafta y la junta de
+    # tapa del Fire no lo aclara. Lo que separa es que UNO sea diésel.
+    if (fa.get("combustible") == "diesel") != (fb.get("combustible") == "diesel"):
+        return 0
+    if fa.get("motor_ford") and fb.get("motor_ford") and fa["motor_ford"] != fb["motor_ford"]:
+        return 0
+    ma, mb = fa.get("motores") or frozenset(), fb.get("motores") or frozenset()
+    motor_comun = bool(ma and mb and algun_motor_en_comun(ma, mb)) or bool(
+        fa.get("motor_ford") and fa.get("motor_ford") == fb.get("motor_ford"))
+    if ma and mb and not motor_comun:
+        return 0
+    ca, cb = set(fa.get("cilindradas") or ()), set(fb.get("cilindradas") or ())
+    if ca and cb and not ca & cb and not motor_comun:
+        return 0
+    va, vb = set(fa.get("valvulas") or ()), set(fb.get("valvulas") or ())
+    if va and vb and not va & vb:
+        return 0
+    # Los modelos con número también: «PEUGEOT 504-2.0» contra «206 306 406».
+    oa = set(fa.get("modelos") or ()) | set(fa.get("modelos_numericos") or ())
+    ob = set(fb.get("modelos") or ()) | set(fb.get("modelos_numericos") or ())
+    if oa and ob and not oa & ob and not motor_comun:
+        return 0
+    if motor_comun:
+        return 3
+    if ca & cb:
+        return 2 if oa & ob else 1
+    # Sin cilindrada en alguno de los dos, el modelo solo no alcanza para decir que es el mismo
+    # motor: el Palio vino con cinco.
+    return 0
+
+
+def lo_que_va_con(producto_id, por_complemento=4):
+    """Para el producto, las otras piezas del mismo trabajo y el mismo motor que hay en el
+    catálogo: (nombre del trabajo, [(complemento, [filas])]), o (None, []) si no es una pieza
+    de TRABAJOS_CON_COMPLEMENTOS o el texto no dice para qué auto es. Cada fila: ID, Codigo,
+    Marca, Descripcion, Precio, Stock. Primero las que más dicen que son del mismo motor,
+    después las que tienen stock, después la más barata."""
+    c.execute("SELECT descripcion FROM productos WHERE id = ?", (producto_id,))
+    fila = c.fetchone()
+    descripcion = (fila["descripcion"] if fila else "") or ""
+    firma = firma_de_producto(descripcion)
+    marcas = _marcas_de_auto(firma or {})
+    if not firma or not marcas:
+        return None, []
+    trabajo = next((t for t in TRABAJOS_CON_COMPLEMENTOS
+                    if _la_firma_es(firma, descripcion, **t[1])), None)
+    if not trabajo:
+        return None, []
+    escrituras = sorted({e for m in marcas for e in (ESCRITURAS_DE_MARCA.get(m) or [m])})
+    salida = []
+    for nombre, condicion, like in trabajo[2]:
+        _marcas = " OR ".join("UPPER(p.descripcion) LIKE ?" for _ in escrituras)
+        c.execute(f"""SELECT p.id AS "ID", p.codigo_raw AS "Codigo", m.nombre AS "Marca",
+                             p.descripcion AS "Descripcion", p.precio AS "Precio",
+                             p.stock AS "Stock"
+                      FROM productos p JOIN marcas m ON m.id = p.marca_id
+                      WHERE m.tipo <> 'OEM' AND p.id <> ? AND UPPER(p.descripcion) LIKE ?
+                        AND ({_marcas})""",
+                  [producto_id, like] + [f"%{e}%" for e in escrituras])
+        candidatos = []
+        for f in filas_a_listas(c):
+            fb = firma_de_producto(f["Descripcion"] or "")
+            if not fb or not _la_firma_es(fb, f["Descripcion"] or "", **condicion):
+                continue
+            fuerza = _fuerza_del_mismo_motor(firma, fb)
+            if fuerza:
+                candidatos.append((-fuerza, -(1 if (f["Stock"] or 0) > 0 else 0),
+                                   f["Precio"] or float("inf"), f["Codigo"], f))
+        candidatos.sort(key=lambda x: x[:4])
+        if candidatos:
+            salida.append((nombre, [x[-1] for x in candidatos[:por_complemento]]))
+    return trabajo[0], salida
+
+
 def listar_combos():
     c.execute("SELECT DISTINCT disparador FROM combos_sugeridos ORDER BY disparador")
     disparadores = [r["disparador"] for r in c.fetchall()]
