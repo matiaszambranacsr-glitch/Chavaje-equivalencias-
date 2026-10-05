@@ -6251,8 +6251,17 @@ con otra cilindrada; un sensor suele servir para varias»—, que manda a revisi
 de devolver esa duda, se miran las diferencias físicas de la pieza (vías de la ficha, largo de
 cable, temperatura) y si alguna es firme, gana esa (`_lo_fisico_que_no_coincide()`).
 
-Sobre las 1.796 búsquedas de sondas y sensores con equivalencias: cambian 12, salen 20 filas que
-no eran la misma pieza y no entra ninguna. Ninguna aprobación existente cambia de color.
+Y lo mismo en general: **una duda no tapa una contradicción**. Hay cinco reglas que solo dudan
+(«una de las dos no dice para qué auto es», «un nombre de modelo de marcas distintas»…) y,
+corriendo en orden, cortaban antes que las firmes. Ahora, si la respuesta es una duda, se
+compara otra vez salteando las dudas, y si aparece una contradicción, gana esa.
+
+- Cola de pendientes: de 8.201, **21 pasan de duda a contradicción**, todas bien: sondas de 36
+  contra 68 cm de cable, un sensor de Chevrolet Spark contra uno de Alfa «Twin Spark», el de
+  una Renault Master contra el de una «Suzuki Master Van».
+- Búsquedas de sondas y sensores (1.796): cambian 15, salen 25 filas que no eran la misma pieza
+  y no entra ninguna.
+- Aprobaciones existentes: ninguna cambia de color.
 
 ## 🔗 Revisar sugeridas: primero lo que hay que hacer
 

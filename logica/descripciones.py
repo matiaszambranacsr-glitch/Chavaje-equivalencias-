@@ -2802,7 +2802,26 @@ def firmas_compatibles(a, b, minimo_nucleo=2, cuenta_palabras=None, total_descri
 
     Se exige coincidencia en lo que define la pieza y NO contradicción en lo que la distingue.
     Es a propósito conservador: un falso positivo acá es una equivalencia inventada, y ya
-    sabemos lo que eso le hizo a la base."""
+    sabemos lo que eso le hizo a la base.
+
+    UNA DUDA NO TAPA UNA CONTRADICCIÓN. Las reglas corren en orden y la primera que dice algo
+    corta. Algunas son dudas —«el mismo auto con otra cilindrada», «una de las dos no dice para
+    qué auto es»— y mandan a revisión; si una de esas cortaba antes, una contradicción que venía
+    después (36 contra 63 cm de cable) no se veía nunca, y el buscador encadenaba la pieza como
+    «sólida». Así que, si la respuesta es una duda, se compara otra vez salteando las dudas, y
+    si aparece una contradicción, gana esa."""
+    ok, motivo = _comparar_firmas(a, b, minimo_nucleo, cuenta_palabras, total_descripciones)
+    if not ok and motivo.startswith(_MOTIVOS_QUE_AVISAN):
+        ok2, motivo2 = _comparar_firmas(a, b, minimo_nucleo, cuenta_palabras,
+                                        total_descripciones, con_dudas=False)
+        if not ok2 and motivo2.startswith(_MOTIVOS_QUE_CONTRADICEN):
+            return False, motivo2
+    return ok, motivo
+
+
+def _comparar_firmas(a, b, minimo_nucleo=2, cuenta_palabras=None, total_descripciones=0,
+                     con_dudas=True):
+    """Ver firmas_compatibles(). Con con_dudas=False, las reglas que solo dudan no cortan."""
     if not a or not b:
         return False, ""
     if a["familia"] == "Sin clasificar" or b["familia"] == "Sin clasificar":
@@ -2964,18 +2983,15 @@ def firmas_compatibles(a, b, minimo_nucleo=2, cuenta_palabras=None, total_descri
         # a revisión (ver _MOTIVOS_QUE_AVISAN); sin ningún auto en común siguen en rojo.
         _mismo_auto = (a.get("modelos") or set()) & (b.get("modelos") or set())
         if (a.get("sensor") or b.get("sensor")) and _mismo_auto:
-            # Pero si la pieza misma es otra —otro largo de cable, otras vías— eso gana: la
-            # duda por la cilindrada tapaba que una sonda de 36 cm de cable no es una de 63
-            # (14-R7844.30.036 de CRI-FA contra la 80048 de FISPA, las dos «Clio»).
-            _fisico = _lo_fisico_que_no_coincide(a, b)
-            if _fisico and not _fisico.startswith(_MOTIVOS_QUE_AVISAN):
-                return False, _fisico
-            return False, (f"el mismo auto con otra cilindrada: "
-                           f"{'/'.join(sorted(a['cilindradas'])[:3])} vs "
-                           f"{'/'.join(sorted(b['cilindradas'])[:3])} "
-                           f"({'/'.join(sorted(_mismo_auto)[:2])}); un sensor suele servir para "
-                           "varias")
-        return False, "cilindradas distintas"
+            # Es una duda: ver «una duda no tapa una contradicción» en firmas_compatibles().
+            if con_dudas:
+                return False, (f"el mismo auto con otra cilindrada: "
+                               f"{'/'.join(sorted(a['cilindradas'])[:3])} vs "
+                               f"{'/'.join(sorted(b['cilindradas'])[:3])} "
+                               f"({'/'.join(sorted(_mismo_auto)[:2])}); un sensor suele servir "
+                               "para varias")
+        else:
+            return False, "cilindradas distintas"
 
     # El modelo que es un número, con el mismo criterio que la cilindrada y las siglas: si las
     # dos descripciones lo declaran y no comparten ninguno, son de autos distintos. Hasta que
@@ -3104,7 +3120,7 @@ def firmas_compatibles(a, b, minimo_nucleo=2, cuenta_palabras=None, total_descri
     if ({"JUNTA", "JUNTAS"} & set(a.get("pieza") or ()) and {"JUNTA", "JUNTAS"} & set(b.get("pieza") or ())
             and not a.get("juego") and not b.get("juego")
             and bool(_lugares_a) != bool(_lugares_b)
-            and _no_dice_de_que(b if _lugares_a else a)):
+            and _no_dice_de_que(b if _lugares_a else a) and con_dudas):
         return False, (f"una de las dos no dice de qué es la junta; la otra es de "
                        f"{'/'.join(sorted(_lugares_a or _lugares_b))}")
     # Y LA QUE NO DICE PARA QUÉ AUTO ES contra una que sí: «Junta Acople Agua» (TARANTO) contra
@@ -3112,7 +3128,7 @@ def firmas_compatibles(a, b, minimo_nucleo=2, cuenta_palabras=None, total_descri
     def _nombra_auto(f):
         return bool(f.get("autos") or f.get("marcas") or f.get("motores")
                     or f.get("modelos_numericos") or f.get("motores_numericos"))
-    if _nombra_auto(a) != _nombra_auto(b):
+    if _nombra_auto(a) != _nombra_auto(b) and con_dudas:
         return False, "una de las dos no dice para qué auto es"
 
     comunes = set(a["nucleo"]) & set(b["nucleo"])
@@ -3184,7 +3200,7 @@ def firmas_compatibles(a, b, minimo_nucleo=2, cuenta_palabras=None, total_descri
             and not any(fam & _mar_a and fam & _mar_b for fam in _FAMILIAS_DE_MARCAS)
             and not (apl_comunes - _mod_a - _mod_b)):
         _comunes = (a.get("autos") or set()) & (b.get("autos") or set())
-        if _comunes and _comunes <= (_mod_a | _mod_b):
+        if _comunes and _comunes <= (_mod_a | _mod_b) and con_dudas:
             return False, (f"un nombre de modelo de marcas distintas: "
                            f"{'/'.join(sorted(_comunes)[:2])} ({'/'.join(sorted(_mar_a)[:2])} vs "
                            f"{'/'.join(sorted(_mar_b)[:2])}), puede ser otra cosa en cada una")
