@@ -35,6 +35,7 @@ PARTES_DE_LA_LOGICA = [
     "evidencia.py",
     "repuestos_por_auto.py",
     "busqueda_por_texto.py",
+    "parque_automotor.py",
     "negocio.py",
     "interfaz.py",
     "vehiculos.py",

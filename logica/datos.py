@@ -1328,6 +1328,18 @@ def _esquema_gestion(c):
         usado_en TEXT,
         movimiento_id INTEGER
     )""")
+    # EL PARQUE AUTOMOTOR (ver logica/parque_automotor.py): cuántos autos de cada marca,
+    # modelo y año se transfirieron por provincia, según el DNRPA. Solo eso: del archivo
+    # oficial no se lee ni se guarda nada de los titulares.
+    c.execute("""CREATE TABLE IF NOT EXISTS parque_automotor (
+        mes TEXT NOT NULL,
+        provincia TEXT NOT NULL,
+        marca TEXT NOT NULL,
+        modelo TEXT NOT NULL,
+        anio INTEGER,
+        cantidad INTEGER NOT NULL
+    )""")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_parque_marca_modelo ON parque_automotor(marca, modelo)")
 
 
 # Los códigos DTC que se pueden ARMAR en vez de copiar. Buena parte del estándar genérico es

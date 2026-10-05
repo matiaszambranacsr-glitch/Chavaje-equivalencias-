@@ -1234,6 +1234,128 @@ def contexto_de_precios():
     return salida
 
 
+# LOS CHEQUES DENUNCIADOS Y LA CENTRAL DE DEUDORES DEL BCRA. Dos APIs oficiales, públicas y
+# sin clave, para las cuentas corrientes de los talleres: antes de recibir un cheque, si está
+# denunciado (robado, extraviado, adulterado); antes de fiarle a alguien, cómo está en el
+# sistema financiero. Se consultan SOLO cuando alguien aprieta el botón, con el dato que
+# escribió: nada sale solo. Formato: documentación oficial del BCRA (Cheques Denunciados v1.0,
+# Central de Deudores v1.0). Ver pruebas_de_las_fuentes.py.
+URL_BCRA_BANCOS = "https://api.bcra.gob.ar/cheques/v1.0/entidades"
+URL_BCRA_CHEQUE = "https://api.bcra.gob.ar/cheques/v1.0/denunciados/{entidad}/{numero}"
+URL_BCRA_DEUDAS = "https://api.bcra.gob.ar/CentralDeDeudores/v1.0/Deudas/{cuit}"
+SITUACIONES_DEL_BCRA = {1: "normal", 2: "riesgo bajo / con seguimiento especial",
+                        3: "riesgo medio / con problemas", 4: "riesgo alto / alto riesgo de "
+                        "insolvencia", 5: "irrecuperable", 6: "irrecuperable por disposición técnica"}
+
+
+def _pedir_al_bcra(url, tiempo_maximo=8):
+    """(estado HTTP, JSON o None). Como _pedir_json(), pero dice el estado: en estas dos APIs un
+    404 no es una falla, es la respuesta («no figura»)."""
+    try:
+        r = requests.get(url, timeout=tiempo_maximo,
+                         headers={"User-Agent": "EquivalenciasElChavo/1.0"})
+        try:
+            cuerpo = r.json()
+        except ValueError:
+            cuerpo = None
+        return r.status_code, cuerpo
+    except Exception as _err:
+        anotar_error("_pedir_al_bcra", _err)
+        return None, None
+
+
+def cuit_valido(cuit):
+    """El CUIT/CUIL de 11 cifras, limpio, si su dígito verificador da; si no, None."""
+    limpio = re.sub(r"\D", "", str(cuit or ""))
+    if len(limpio) != 11:
+        return None
+    pesos = (5, 4, 3, 2, 7, 6, 5, 4, 3, 2)
+    resto = 11 - sum(int(d) * p for d, p in zip(limpio, pesos)) % 11
+    verificador = 0 if resto == 11 else 9 if resto == 10 else resto
+    return limpio if verificador == int(limpio[10]) else None
+
+
+def bancos_del_bcra():
+    """[(código, nombre)] de las entidades que emiten cheques, según el BCRA. Se recuerda 30
+    días en la configuración; [] si nunca se pudo traer."""
+    try:
+        guardado = json.loads(obtener_config("bancos_del_bcra", "") or "{}")
+    except (ValueError, TypeError):
+        guardado = {}
+    fresco = False
+    try:
+        fresco = (datetime.now() - datetime.strptime(guardado.get("traido", "")[:19],
+                                                     "%Y-%m-%d %H:%M:%S")) < timedelta(days=30)
+    except ValueError:
+        pass
+    if not fresco:
+        estado, cuerpo = _pedir_al_bcra(URL_BCRA_BANCOS)
+        bancos = []
+        for b in ((cuerpo or {}).get("results") or []) if estado == 200 else []:
+            try:
+                bancos.append((int(b["codigoEntidad"]), str(b["denominacion"]).strip()))
+            except (KeyError, TypeError, ValueError):
+                continue
+        if bancos:
+            guardado = {"bancos": sorted(bancos, key=lambda x: x[1]),
+                        "traido": datetime.now().strftime("%Y-%m-%d %H:%M:%S")}
+            guardar_config("bancos_del_bcra", json.dumps(guardado))
+    return [tuple(b) for b in guardado.get("bancos") or []]
+
+
+def consultar_cheque(codigo_entidad, numero):
+    """¿Está denunciado ese cheque? ({"denunciado", "banco", "fecha", "detalles"}, error).
+
+    detalles: [(sucursal, cuenta, causal)]. Si el BCRA contesta que no lo tiene, denunciado es
+    False: no prueba que el cheque tenga fondos, solo que nadie lo denunció."""
+    try:
+        entidad, numero = int(codigo_entidad), int(re.sub(r"\D", "", str(numero)))
+    except (TypeError, ValueError):
+        return None, "Falta el banco o el número del cheque."
+    estado, cuerpo = _pedir_al_bcra(URL_BCRA_CHEQUE.format(entidad=entidad, numero=numero))
+    if estado == 404:
+        return {"denunciado": False, "banco": "", "fecha": "", "detalles": []}, None
+    if estado != 200 or not isinstance(cuerpo, dict):
+        return None, ("No se pudo consultar al BCRA" + (f" (respondió {estado})" if estado
+                                                        else "") + ". Probá en un rato.")
+    r = cuerpo.get("results") or {}
+    detalles = []
+    for d in r.get("detalles") or []:
+        if isinstance(d, dict):
+            detalles.append((d.get("sucursal"), d.get("numeroCuenta"), d.get("causal") or ""))
+    return {"denunciado": bool(r.get("denunciado")), "banco": r.get("denominacionEntidad") or "",
+            "fecha": r.get("fechaProcesamiento") or "", "detalles": detalles}, None
+
+
+def situacion_en_el_bcra(cuit):
+    """Cómo está ese CUIT en el sistema financiero, según la Central de Deudores del BCRA:
+    ({"nombre", "periodo", "peor", "deudas": [(entidad, situación, monto en miles, días de
+    atraso)]}, error). Sin deudas informadas, deudas es [] y peor es 0."""
+    limpio = cuit_valido(cuit)
+    if not limpio:
+        return None, "El CUIT no es válido (revisá las 11 cifras: el último dígito no da)."
+    estado, cuerpo = _pedir_al_bcra(URL_BCRA_DEUDAS.format(cuit=limpio))
+    if estado == 404:
+        return {"nombre": "", "periodo": "", "peor": 0, "deudas": []}, None
+    if estado != 200 or not isinstance(cuerpo, dict):
+        return None, ("No se pudo consultar al BCRA" + (f" (respondió {estado})" if estado
+                                                        else "") + ". Probá en un rato.")
+    r = cuerpo.get("results") or {}
+    periodos = sorted((p for p in r.get("periodos") or [] if isinstance(p, dict)),
+                      key=lambda p: str(p.get("periodo")))
+    ultimo = periodos[-1] if periodos else {}
+    deudas = []
+    for e in ultimo.get("entidades") or []:
+        try:
+            deudas.append((str(e.get("entidad") or "").strip(), int(e.get("situacion") or 0),
+                           float(e.get("monto") or 0), int(e.get("diasAtrasoPago") or 0)))
+        except (TypeError, ValueError):
+            continue
+    return {"nombre": str(r.get("denominacion") or "").strip(),
+            "periodo": str(ultimo.get("periodo") or ""),
+            "peor": max((d[1] for d in deudas), default=0), "deudas": deudas}, None
+
+
 # Un VIN de muestra que la NHTSA usa en su propia documentación (un Honda Accord 2003): sirve
 # para saber si la base responde sin mandarle el de ningún cliente.
 VIN_DE_MUESTRA = "1HGCM82633A004352"
@@ -1267,6 +1389,12 @@ def probar_fuentes_de_afuera():
           lambda: _pedir_json(URL_DOLAR_OFICIAL),
           lambda r: (f"{r[-1].get('fecha')}: ${miles(float(r[-1].get('venta')), 2)}"
                      if isinstance(r, list) and r and r[-1].get("venta") else ""))
+    medir("DNRPA — parque automotor (datos.jus.gob.ar)",
+          lambda: archivo_mas_reciente_del_parque(DATASETS_DEL_PARQUE[0]),
+          lambda r: f"último mes publicado: {r[1]}" if r and r[1] else "")
+    medir("BCRA — bancos para verificar cheques (api.bcra.gob.ar)",
+          lambda: _pedir_al_bcra(URL_BCRA_BANCOS),
+          lambda r: (f"{len((r[1] or {}).get('results') or [])} bancos" if r and r[0] == 200 else ""))
     medir("NHTSA — lector de VIN (vpic.nhtsa.dot.gov)",
           lambda: consultar_vin_en_nhtsa(VIN_DE_MUESTRA)[0],
           lambda r: f"{r.get('marca')} {r.get('modelo')} {r.get('anio')}")

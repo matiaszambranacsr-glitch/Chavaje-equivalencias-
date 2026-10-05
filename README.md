@@ -6361,7 +6361,45 @@ base de VIN de la NHTSA. Revisado:
 |---|---|
 | Catálogos de Bosch, Valeo, Marelli, Hella, INA (los más citados en tus listas: Bosch 4.352 veces) | No tienen una página pública por código: buscan con formularios o JavaScript, o están en TecDoc, que es pago. Leerlos no sería confiable. Si encontrás el link de la ficha de alguno, se carga en «➕ Cargar un portal». |
 | Cruzar entre proveedores los números de fabricante que citan | Ya se hace: cada número citado se carga como código de fábrica. Medido: ningún número citado por dos proveedores queda sin unir. |
-| Marcas y modelos patentados en Argentina (DNRPA, datos.jus.gob.ar) | Es oficial y serviría para reconocer modelos (Gol, Palio, Clio…), pero cambiaría las reglas que deciden si dos piezas son del mismo auto, y sin poder bajarlo no se puede medir el efecto contra las aprobaciones. Queda para cuando se pueda medir. |
+| Usar las marcas y modelos del DNRPA en las reglas de equivalencias | Cambiaría las reglas que deciden si dos piezas son del mismo auto, y sin los datos no se puede medir el efecto contra las aprobaciones. Sí se usa para el informe del parque (abajo), que no toca ninguna regla. |
+
+### 🚗 El parque automotor real (DNRPA) contra tu catálogo
+
+El registro automotor publica cada mes, en el portal de datos abiertos del Ministerio de
+Justicia (`datos.jus.gob.ar`), todos los trámites del país. Se usa el de **transferencias** —el
+parque que circula y se compra usado: el que viene a buscar repuestos—, no el de 0 km.
+
+- La tarea de fondo baja el último mes publicado, una vez por mes: la lista de archivos sale de
+  la API estándar del portal (CKAN, `package_show`) y el CSV se lee de a renglones.
+- **De cada renglón se leen solo marca, modelo, año y provincia.** El archivo trae datos de los
+  titulares —localidad, género, año de nacimiento— que no se leen ni se guardan (la tabla
+  `parque_automotor` no tiene esas columnas, y una prueba lo controla).
+- **«🚗 Los autos que más circulan, contra tu catálogo»** (Estadísticas → 📌 Para pedir): los
+  modelos más transferidos de la provincia, su parte del parque, los años, y cuántos productos
+  del catálogo los nombran. Marca «⚠️ poco cargado» al que tiene menos de un cuarto de la
+  mediana de la tabla. Con el catálogo real: Toyota Etios 91 productos, VW Up 139, Fiat Cronos
+  143, Chevrolet Onix 254, Peugeot 208 176, contra más de mil del Gol, el Palio, el Clio o el
+  Fiesta: autos comunes y nuevos para los que casi no hay nada cargado.
+- El formato sale de la documentación oficial del dataset (github.com/datos-justicia-argentina);
+  desde donde se programó no se llegaba al portal, así que está probado con un CSV con ese mismo
+  encabezado (`pruebas_de_las_fuentes.py`) y se verifica en vivo con «🔌 Probar las fuentes de
+  afuera».
+
+### 🏦 Cheques denunciados y Central de Deudores (BCRA), para las cuentas corrientes
+
+Dos APIs oficiales del BCRA, públicas y sin clave, que se consultan **solo cuando alguien aprieta
+el botón**:
+
+- **«🔎 Verificar un cheque en el BCRA»** (Administrar → 💳 Cuentas corrientes): con el banco y
+  el número, dice si el cheque está denunciado —robado, extraviado, adulterado— antes de
+  recibirlo. La lista de bancos sale del BCRA y se recuerda 30 días.
+- **«🏦 Su situación en el BCRA»** (en la configuración de la cuenta de cada taller): con el
+  CUIT —que se valida con su dígito verificador antes de consultar—, la peor situación en el
+  sistema financiero (1 normal … 5 irrecuperable) y las deudas por entidad del último período
+  informado. Sirve para decidir el límite de crédito.
+- Probado con los ejemplos de la documentación oficial (Cheques Denunciados v1.0, Central de
+  Deudores v1.0): denunciado, no figura (404), sin deudas, el peor de varios bancos, CUIT
+  inválido que no sale a consultar.
 
 ## 🔗 Revisar sugeridas: primero lo que hay que hacer
 

@@ -66,6 +66,39 @@ _VPIC = {"Count": 1, "Message": "Results returned successfully",
                       "PlantCountry": "BRAZIL", "ErrorText": "0 - VIN decoded clean."}]}
 
 
+# El portal del Ministerio de Justicia es un CKAN: package_show lista los archivos del dataset.
+_PORTAL = {"success": True, "result": {"name": "transferencias-de-autos", "resources": [
+    {"name": "DNRPA. Transferencias de autos - 202607", "format": "CSV",
+     "url": "https://datos.jus.gob.ar/dataset/x/resource/a/download/dnrpa-transferencias-autos-202607.csv"},
+    {"name": "DNRPA. Transferencias de autos - 202608", "format": "CSV",
+     "url": "https://datos.jus.gob.ar/dataset/x/resource/b/download/dnrpa-transferencias-autos-202608.csv"},
+    {"name": "DNRPA. Transferencias de autos - 2025", "format": "ZIP",
+     "url": "https://datos.jus.gob.ar/dataset/x/resource/c/download/dnrpa-transferencias-autos-2025.zip"}]}}
+# El encabezado, tal cual la documentación oficial del dataset.
+_ENCABEZADO_DNRPA = ("tramite_tipo,tramite_fecha,fecha_inscripcion_inicial,registro_seccional_codigo,"
+                     "registro_seccional_descripcion,registro_seccional_provincia,automotor_origen,"
+                     "automotor_anio_modelo,automotor_tipo_codigo,automotor_tipo_descripcion,"
+                     "automotor_marca_codigo,automotor_marca_descripcion,automotor_modelo_codigo,"
+                     "automotor_modelo_descripcion,automotor_uso_codigo,automotor_uso_descripcion,"
+                     "titular_tipo_persona,titular_domicilio_localidad,titular_domicilio_provincia,"
+                     "titular_genero,titular_anio_nacimiento,titular_pais_nacimiento,"
+                     "titular_porcentaje_titularidad,titular_domicilio_provincia_id,"
+                     "titular_pais_nacimiento_id")
+
+
+def _renglon_dnrpa(provincia, marca, modelo, anio):
+    return (f"TRANSFERENCIA NACIONAL,2026-08-03,2010-05-04,1001,CAPITAL FEDERAL N° 1,{provincia},N,"
+            f"{anio},A,SEDAN 5 PUERTAS,X,{marca},Y,\"{modelo}\",1,Privado,Física,UNA LOCALIDAD,"
+            f"{provincia},Masculino,1970,ARGENTINA,100,02,200")
+
+
+_CSV_DNRPA = [_ENCABEZADO_DNRPA] + (
+    [_renglon_dnrpa("Buenos Aires", "VOLKSWAGEN", "GOL TREND 1.6 PACK I", 2010)] * 5
+    + [_renglon_dnrpa("Buenos Aires", "FORD", "KA 1.0 FLY VIRAL", 2008)] * 3
+    + [_renglon_dnrpa("Córdoba", "FIAT", "PALIO (326) ATTRACTIVE 5P 1.4 8V", 2014)] * 2
+    + [_renglon_dnrpa("Buenos Aires", "MERCEDES-BENZ", "SPRINTER 415 CDI", 2015)])
+
+
 def probar(L):
     ns = L.todo_lo_de_la_logica()
     g = ns["inflacion_desde"].__globals__
@@ -133,7 +166,99 @@ def probar(L):
     g["guardar_config"]("ultimo_dolar", json.dumps({"venta": 1600.0, "fecha": "2026-10-01"}))
     esperar("coeficiente en dólares, al día siguiente", g["coeficiente_de_lista"](mid), 1600.0)
 
-    # 6. La NHTSA.
+    # 6. El parque automotor del DNRPA.
+    _con_respuestas(g, {g["URL_PORTAL_JUSTICIA"].split("{")[0]: _PORTAL})
+    url, mes = g["archivo_mas_reciente_del_parque"]("transferencias-de-autos")
+    esperar("DNRPA: el mes más reciente", mes, "202608")
+    cuenta = g["contar_el_parque"](iter(_CSV_DNRPA))
+    esperar("DNRPA: Gol en Buenos Aires", cuenta.get(("BUENOS AIRES", "VOLKSWAGEN", "GOL", 2010)), 5)
+    esperar("DNRPA: Mercedes-Benz", cuenta.get(("BUENOS AIRES", "MERCEDES BENZ", "SPRINTER", 2015)), 1)
+    esperar("DNRPA: provincia con tilde", cuenta.get(("CORDOBA", "FIAT", "PALIO", 2014)), 2)
+    esperar("DNRPA: palabra del modelo", [g["palabra_del_modelo"](x) for x in
+                                          ("208 ACTIVE 1.6", "S10 2.8 TDI", "KA 1.0", "1.6 ALGO")],
+            ["208", "S10", "KA", "ALGO"])
+    g["_renglones_de"] = lambda _url: iter(_CSV_DNRPA)
+    resumen = g["actualizar_parque_automotor"](forzar=True)
+    esperar("DNRPA: autos guardados", (resumen or {}).get("autos"), 11)
+    columnas = [r[1] for r in g["c"].execute("PRAGMA table_info(parque_automotor)").fetchall()]
+    esperar("DNRPA: no se guarda nada de los titulares",
+            [x for x in columnas if x.startswith("titular")], [])
+    esperar("DNRPA: provincias", g["provincias_del_parque"](), [("BUENOS AIRES", 9), ("CORDOBA", 2)])
+    for desc in ("JTA TAPA CIL. VW GOL 1.6", "Sonda lambda Volkswagen Gol Trend", "BOMBA AGUA FORD KA",
+                 "FILTRO KA", "Junta tapa Fiat Palio 1.4"):
+        g["c"].execute("INSERT INTO productos (codigo_raw, codigo_clean, descripcion, marca_id) "
+                       "VALUES (?, ?, ?, ?)", (desc[:8], desc[:8].replace(" ", ""), desc, mid))
+    autos = {(a["Marca"], a["Modelo"]): a["Productos que lo nombran"]
+             for a in g["autos_que_mas_circulan_contra_el_catalogo"]("BUENOS AIRES")}
+    esperar("DNRPA: productos que nombran el Gol", autos.get(("VOLKSWAGEN", "GOL")), 2)
+    esperar("DNRPA: «FILTRO KA» sin la marca no cuenta", autos.get(("FORD", "KA")), 1)
+    esperar("DNRPA: el Palio es de Córdoba", ("FIAT", "PALIO") in autos, False)
+    esperar("DNRPA: no se vuelve a bajar enseguida", g["actualizar_parque_automotor"](), None)
+
+    # 7. El BCRA: cheques denunciados, Central de Deudores y el CUIT.
+    import requests as _rq
+
+    class _R:
+        def __init__(self, estado, cuerpo):
+            self.status_code, self._cuerpo = estado, cuerpo
+
+        def json(self):
+            return self._cuerpo
+    _respuestas_bcra = {
+        "/cheques/v1.0/entidades": (200, {"status": 200, "results": [
+            {"codigoEntidad": 11, "denominacion": "BANCO DE LA NACION ARGENTINA"},
+            {"codigoEntidad": 7, "denominacion": "BANCO DE GALICIA Y BUENOS AIRES S.A."}]}),
+        # El ejemplo de la documentación oficial (Cheques Denunciados v1.0).
+        "/denunciados/11/20377516": (200, {"status": 200, "results": {
+            "numeroCheque": 20377516, "denunciado": True, "fechaProcesamiento": "2024-05-24",
+            "denominacionEntidad": "BANCO DE LA NACION ARGENTINA",
+            "detalles": [{"sucursal": 524, "numeroCuenta": 5240055962,
+                          "causal": "Denunciado por tercero"}]}}),
+        "/denunciados/11/12345678": (404, {"status": 404, "errorMessages": ["No se encontró"]}),
+        "/Deudas/33693450239": (200, {"status": 200, "results": {
+            "identificacion": 33693450239, "denominacion": "TALLER DE PRUEBA SA",
+            "periodos": [{"periodo": "202607", "entidades": [
+                             {"entidad": "BANCO A", "situacion": 1, "monto": 120.0,
+                              "diasAtrasoPago": 0}]},
+                         {"periodo": "202608", "entidades": [
+                             {"entidad": "BANCO A", "situacion": 1, "monto": 130.0,
+                              "diasAtrasoPago": 0},
+                             {"entidad": "TARJETA B", "situacion": 3, "monto": 45.5,
+                              "diasAtrasoPago": 75}]}]}}),
+        "/Deudas/30500010912": (404, {"status": 404}),
+    }
+    _original = _rq.get
+
+    def _falso_get(url, *a, **k):
+        for clave, (estado, cuerpo) in _respuestas_bcra.items():
+            if url.endswith(clave):
+                return _R(estado, cuerpo)
+        return _R(500, None)
+    _rq.get = _falso_get
+    try:
+        esperar("CUIT válido", g["cuit_valido"]("33-69345023-9"), "33693450239")
+        esperar("CUIT con el dígito mal", g["cuit_valido"]("33-69345023-8"), None)
+        esperar("bancos del BCRA", g["bancos_del_bcra"](),
+                [(7, "BANCO DE GALICIA Y BUENOS AIRES S.A."), (11, "BANCO DE LA NACION ARGENTINA")])
+        ch, err = g["consultar_cheque"](11, "20.377.516")
+        esperar("cheque denunciado", (err, ch["denunciado"], ch["detalles"][0][2]),
+                (None, True, "Denunciado por tercero"))
+        ch, err = g["consultar_cheque"](11, "12345678")
+        esperar("cheque que no figura", (err, ch["denunciado"]), (None, False))
+        ch, err = g["consultar_cheque"](99, "1")
+        esperar("cheque sin respuesta", (ch, bool(err)), (None, True))
+        sit, err = g["situacion_en_el_bcra"]("33-69345023-9")
+        esperar("deudor: peor situación del último período", (err, sit["peor"], sit["periodo"],
+                                                              len(sit["deudas"])),
+                (None, 3, "202608", 2))
+        sit, err = g["situacion_en_el_bcra"]("30-50001091-2")
+        esperar("sin deudas informadas", (err, sit["deudas"], sit["peor"]), (None, [], 0))
+        sit, err = g["situacion_en_el_bcra"]("20-11111111-1")
+        esperar("deudor: CUIT inválido no sale a consultar", (sit, bool(err)), (None, True))
+    finally:
+        _rq.get = _original
+
+    # 8. La NHTSA.
     import requests
 
     class _Respuesta:

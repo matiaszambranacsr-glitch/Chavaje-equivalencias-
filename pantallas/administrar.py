@@ -883,6 +883,41 @@ if pagina == PAGINAS[3]:
                     else:
                         st.error(_aviso)
 
+            # VERIFICAR UN CHEQUE antes de recibirlo: ver consultar_cheque(). Afuera del
+            # formulario del pago porque un formulario no admite otro botón.
+            with st.container(border=True):
+                st.markdown("**🔎 Verificar un cheque en el BCRA**")
+                st.caption("Antes de recibirlo: si está denunciado como robado, extraviado o "
+                           "adulterado. No dice si tiene fondos. Consulta oficial y gratuita.")
+                _bancos = bancos_del_bcra()
+                _vc1, _vc2 = st.columns([3, 2])
+                if _bancos:
+                    _nombres_b = {f"{n} ({cod})": cod for cod, n in _bancos}
+                    _banco_sel = _vc1.selectbox("Banco del cheque:", list(_nombres_b),
+                                                key=f"cc_banco_cheque_{_mid}", index=None,
+                                                placeholder="Elegí el banco…")
+                    _cod_banco = _nombres_b.get(_banco_sel)
+                else:
+                    _cod_banco = _vc1.number_input(
+                        "Código del banco (las 3 primeras cifras de abajo del cheque):",
+                        min_value=0, step=1, key=f"cc_cod_banco_{_mid}")
+                _nro_cheque = _vc2.text_input("Número del cheque:", key=f"cc_nro_cheque_{_mid}")
+                if st.button("🔎 Verificar", key=f"cc_verificar_cheque_{_mid}",
+                             disabled=not (_cod_banco and _nro_cheque.strip())):
+                    with st.spinner("Consultando al BCRA…"):
+                        _ch, _err_ch = consultar_cheque(_cod_banco, _nro_cheque)
+                    if _err_ch:
+                        st.warning(_err_ch)
+                    elif _ch["denunciado"]:
+                        st.error(
+                            f"🚫 **El cheque {_nro_cheque} está DENUNCIADO** en el BCRA"
+                            + (f" ({_ch['banco']}, {_ch['fecha']})" if _ch["banco"] else "")
+                            + ". " + "; ".join(str(_causal) for _suc, _cta, _causal in _ch["detalles"] if _causal)
+                            + ". No lo recibas.")
+                    else:
+                        st.success(f"✅ El cheque {_nro_cheque} no figura como denunciado en el "
+                                   "BCRA. (No dice si tiene fondos.)")
+
             _movs = movimientos_de_cuenta(_mid)
             if _movs:
                 st.markdown("**📒 Movimientos**")
@@ -921,3 +956,33 @@ if pagina == PAGINAS[3]:
                     configurar_cuenta_de_taller(_mid, _limite, _plazo, _pide)
                     avisar("success", "Configuración guardada.")
                     st.rerun()
+
+                # CÓMO ESTÁ EN EL SISTEMA FINANCIERO: ver situacion_en_el_bcra(). Sirve para
+                # decidir el límite: un taller en situación 3 o peor con algún banco no es
+                # alguien a quien fiarle mucho.
+                st.markdown("**🏦 Su situación en el BCRA (Central de Deudores)**")
+                _cuit_guardado = obtener_config(f"cuit_taller_{_mid}", "")
+                _cuit = st.text_input("CUIT o CUIL del taller:", value=_cuit_guardado,
+                                      key=f"cc_cuit_{_mid}", placeholder="20-12345678-9")
+                if _cuit.strip() and not cuit_valido(_cuit):
+                    st.caption("⚠️ Ese CUIT no es válido: el último dígito no da.")
+                if st.button("🏦 Consultar", key=f"cc_consultar_bcra_{_mid}",
+                             disabled=not cuit_valido(_cuit)):
+                    if cuit_valido(_cuit) != cuit_valido(_cuit_guardado):
+                        guardar_config(f"cuit_taller_{_mid}", cuit_valido(_cuit))
+                    with st.spinner("Consultando al BCRA…"):
+                        _sit, _err_sit = situacion_en_el_bcra(_cuit)
+                    if _err_sit:
+                        st.warning(_err_sit)
+                    elif not _sit["deudas"]:
+                        st.success("✅ No tiene deudas informadas en el sistema financiero.")
+                    else:
+                        _peor = _sit["peor"]
+                        (st.success if _peor <= 1 else st.warning if _peor == 2 else st.error)(
+                            f"{_sit['nombre'] or 'Ese CUIT'} — peor situación: **{_peor} "
+                            f"({SITUACIONES_DEL_BCRA.get(_peor, '?')})**, al período "
+                            f"{_sit['periodo'][:4]}-{_sit['periodo'][4:]}.")
+                        st.dataframe([{"Entidad": e, "Situación": s_,
+                                       "Deuda (miles de $)": miles(m, 1),
+                                       "Días de atraso": d} for e, s_, m, d in _sit["deudas"]],
+                                     width="stretch", hide_index=True)

@@ -564,6 +564,42 @@ Administrar → Mantenimiento.
                        "lista).")
 
         st.markdown("---")
+        st.markdown("**🚗 Los autos que más circulan, contra tu catálogo**")
+        explicar(
+            "Los modelos que más se compran y venden en tu provincia, y cuántos productos de tu "
+            "catálogo los nombran.",
+            "Sale del registro automotor (DNRPA): cada mes publica, en el portal de datos "
+            "abiertos del Ministerio de Justicia, todas las transferencias de autos del país. Se "
+            "usan las transferencias y no los 0 km porque es el parque que circula —el que viene "
+            "a buscar repuestos—. La app lo baja sola una vez por mes y guarda solo marca, "
+            "modelo, año y provincia: los datos de los titulares no se leen.\n\n"
+            "«Productos que lo nombran» cuenta las descripciones que dicen el modelo (y la "
+            "marca, si el nombre solo no alcanza: «KA» o «208»). Un auto común con pocos "
+            "productos es un hueco: o te faltan listas, o las que tenés lo escriben de otra "
+            "forma.")
+        _provincias = provincias_del_parque()
+        if not _provincias:
+            _info_parque = json.loads(obtener_config("parque_automotor", "") or "{}")
+            st.caption("Todavía no se bajó el parque automotor: lo hace la tarea de fondo, una "
+                       "vez por mes. Se puede ver si el portal contesta con «🔌 Probar las fuentes "
+                       f"de afuera», en {miga_hasta('Qué tan atrasada está cada lista')}.")
+        else:
+            _nombres_prov = ["Todo el país"] + [p for p, _n in _provincias]
+            _guardada = obtener_config("provincia_del_negocio", "")
+            _prov = st.selectbox(
+                "Provincia:", _nombres_prov, key="provincia_parque",
+                index=_nombres_prov.index(_guardada) if _guardada in _nombres_prov else 0)
+            if _prov != _guardada:
+                guardar_config("provincia_del_negocio", _prov)
+            _autos = autos_que_mas_circulan_contra_el_catalogo(
+                None if _prov == "Todo el país" else _prov)
+            st.dataframe(quitar_id(_autos), width="stretch", hide_index=True)
+            _info_parque = json.loads(obtener_config("parque_automotor", "") or "{}")
+            st.caption(f"DNRPA, transferencias de {_info_parque.get('mes', '?')[:4]}-"
+                       f"{_info_parque.get('mes', '????')[4:]} "
+                       f"({miles(_info_parque.get('autos', 0))} autos en todo el país).")
+
+        st.markdown("---")
         st.markdown("**🧊 Clavos: lo que no se mueve**")
         explicar(
             "Stock que hace meses no se vende. Es plata dormida en el estante.",

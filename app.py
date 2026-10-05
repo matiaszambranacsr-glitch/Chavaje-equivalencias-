@@ -70,6 +70,8 @@ específico, y las pantallas quedan todas al final:
         · REPUESTOS POR AUTO Y LECTOR DE VIN
     logica/busqueda_por_texto.py
         · DESCRIPCIONES PEGADAS Y BÚSQUEDA POR TEXTO
+    logica/parque_automotor.py
+        · EL PARQUE AUTOMOTOR: QUÉ AUTOS CIRCULAN (DNRPA)
     logica/negocio.py
         · COMBOS DE REPUESTOS RELACIONADOS (ej: correa de distribución -> kit + tensor + bomba de agua)
         · LO QUE VA CON ESTO: las otras piezas del MISMO TRABAJO, para el MISMO MOTOR, del catálogo
