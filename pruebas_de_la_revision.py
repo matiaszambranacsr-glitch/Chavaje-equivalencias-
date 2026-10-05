@@ -192,6 +192,9 @@ PARES_DE_MUESTRA = [
     ("Jta.Carter CHEVROLET SPRINT 4.07T", "JTA CARTER MWM SPRINT 4 CIL.", "dudosa",
      "TARANTO / IMPERIAL: el mismo Sprint de 4, con la marca del auto y la del motor",
      NECESITA_EL_CATALOGO),
+    ("Sonda Lambda Renault Clio II Kangoo 1.4 - Largo cable 36 centimetros -",
+     "SONDA LAMBDA 80048 RENAULT CLIO II MEGANE II 1 6 8 16V Cable de 63cm REF ORIG BOSCH",
+     "distinta", "CRI-FA / FISPA: 36 contra 63 cm de cable, aunque la cilindrada sea solo una duda"),
 ]
 
 

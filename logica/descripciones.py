@@ -2770,6 +2770,33 @@ def _marcas_que_se_cruzan(marcas_a, marcas_b):
     return any(fam & autos_a and fam & autos_b for fam in _FAMILIAS_DE_MARCAS)
 
 
+def _lo_fisico_que_no_coincide(a, b):
+    """El motivo, si las dos firmas declaran algo físico de la pieza y no coincide: las vías de
+    la ficha, el largo del cable, la temperatura. None si no. Ver firmas_compatibles()."""
+    # Cantidad de vías / pines: si las dos la declaran y no es la misma, son piezas distintas.
+    # Sin esto se proponía una «FICHA 3 Vias Macho» contra una «FICHA 2 vias macho»: mismo
+    # rubro, misma primera palabra, mismo tipo de conector, y no entra una donde va la otra.
+    if a.get("vias") and b.get("vias") and a["vias"] != b["vias"]:
+        return f"distinta cantidad de vías ({a['vias']} vs {b['vias']})"
+    # Ver _RE_LARGO_DE_CABLE: con una tolerancia de 3 cm o el 10%, lo que sea más, porque
+    # uno redondea y otro no.
+    _cab_a, _cab_b = a.get("cable_mm"), b.get("cable_mm")
+    if _cab_a and _cab_b and abs(_cab_a - _cab_b) > max(30, 0.1 * max(_cab_a, _cab_b)):
+        # Con poca diferencia no es seguro: revisando a mano los rojos por cable, 40 contra 45 o
+        # 30 contra 34 cm pueden ser la misma sonda medida con la ficha o sin ella. Hasta 8 cm o
+        # el 25%, a revisión (ver _MOTIVOS_QUE_AVISAN); más, a rojo (37 contra 63 es otra).
+        if abs(_cab_a - _cab_b) <= max(80, 0.25 * max(_cab_a, _cab_b)):
+            return (f"el largo de cable se parece pero no es el mismo ({_cab_a / 10:.0f} "
+                    f"vs {_cab_b / 10:.0f} cm)")
+        return f"largo de cable distinto ({_cab_a / 10:.0f} vs {_cab_b / 10:.0f} cm)"
+    # Ver _RE_PAR_DE_TEMPERATURAS.
+    _tem_a, _tem_b = a.get("temperaturas") or set(), b.get("temperaturas") or set()
+    if _tem_a and _tem_b and not (_tem_a & _tem_b):
+        return (f"temperaturas distintas ({'/'.join(map(str, sorted(_tem_a, reverse=True)))}"
+                f" vs {'/'.join(map(str, sorted(_tem_b, reverse=True)))})")
+    return None
+
+
 def firmas_compatibles(a, b, minimo_nucleo=2, cuenta_palabras=None, total_descripciones=0):
     """¿Estas dos descripciones hablan de la misma pieza? Devuelve (sí/no, motivo).
 
@@ -2937,6 +2964,12 @@ def firmas_compatibles(a, b, minimo_nucleo=2, cuenta_palabras=None, total_descri
         # a revisión (ver _MOTIVOS_QUE_AVISAN); sin ningún auto en común siguen en rojo.
         _mismo_auto = (a.get("modelos") or set()) & (b.get("modelos") or set())
         if (a.get("sensor") or b.get("sensor")) and _mismo_auto:
+            # Pero si la pieza misma es otra —otro largo de cable, otras vías— eso gana: la
+            # duda por la cilindrada tapaba que una sonda de 36 cm de cable no es una de 63
+            # (14-R7844.30.036 de CRI-FA contra la 80048 de FISPA, las dos «Clio»).
+            _fisico = _lo_fisico_que_no_coincide(a, b)
+            if _fisico and not _fisico.startswith(_MOTIVOS_QUE_AVISAN):
+                return False, _fisico
             return False, (f"el mismo auto con otra cilindrada: "
                            f"{'/'.join(sorted(a['cilindradas'])[:3])} vs "
                            f"{'/'.join(sorted(b['cilindradas'])[:3])} "
@@ -3009,27 +3042,9 @@ def firmas_compatibles(a, b, minimo_nucleo=2, cuenta_palabras=None, total_descri
         return False, (f"motores distintos: {'/'.join(sorted(_mot_a)[:2])} "
                        f"vs {'/'.join(sorted(_mot_b)[:2])}")
 
-    # Cantidad de vías / pines: si las dos la declaran y no es la misma, son piezas distintas.
-    # Sin esto se proponía una «FICHA 3 Vias Macho» contra una «FICHA 2 vias macho»: mismo
-    # rubro, misma primera palabra, mismo tipo de conector, y no entra una donde va la otra.
-    if a.get("vias") and b.get("vias") and a["vias"] != b["vias"]:
-        return False, f"distinta cantidad de vías ({a['vias']} vs {b['vias']})"
-    # Ver _RE_LARGO_DE_CABLE: con una tolerancia de 3 cm o el 10%, lo que sea más, porque
-    # uno redondea y otro no.
-    _cab_a, _cab_b = a.get("cable_mm"), b.get("cable_mm")
-    if _cab_a and _cab_b and abs(_cab_a - _cab_b) > max(30, 0.1 * max(_cab_a, _cab_b)):
-        # Con poca diferencia no es seguro: revisando a mano los rojos por cable, 40 contra 45 o
-        # 30 contra 34 cm pueden ser la misma sonda medida con la ficha o sin ella. Hasta 8 cm o
-        # el 25%, a revisión (ver _MOTIVOS_QUE_AVISAN); más, a rojo (37 contra 63 es otra).
-        if abs(_cab_a - _cab_b) <= max(80, 0.25 * max(_cab_a, _cab_b)):
-            return False, (f"el largo de cable se parece pero no es el mismo ({_cab_a / 10:.0f} "
-                           f"vs {_cab_b / 10:.0f} cm)")
-        return False, f"largo de cable distinto ({_cab_a / 10:.0f} vs {_cab_b / 10:.0f} cm)"
-    # Ver _RE_PAR_DE_TEMPERATURAS.
-    _tem_a, _tem_b = a.get("temperaturas") or set(), b.get("temperaturas") or set()
-    if _tem_a and _tem_b and not (_tem_a & _tem_b):
-        return False, (f"temperaturas distintas ({'/'.join(map(str, sorted(_tem_a, reverse=True)))}"
-                       f" vs {'/'.join(map(str, sorted(_tem_b, reverse=True)))})")
+    _fisico = _lo_fisico_que_no_coincide(a, b)
+    if _fisico:
+        return False, _fisico
 
     # El carburador que las dos nombran. «Juego de juntas para Carburador FIAT 1500 WEBER 28-36»
     # y «JUNTAS FIAT 128/1500 SOLEX 2 bocas» son del mismo auto y de otro carburador: las juntas

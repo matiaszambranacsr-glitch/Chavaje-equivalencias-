@@ -6242,6 +6242,18 @@ Y con la descripción a la vista apareció un error de la app:
 - La marcación de kits y conjuntos, que vivía adentro del Buscador, pasó a la lógica
   (`marcar_lo_que_no_es_lo_mismo()`) para que la usen los dos.
 
+### 🔌 Lo físico gana sobre la duda
+
+Buscando la sonda Lambda de Clio con **36 cm** de cable (CRI-FA 14-R7844.30.036), el buscador
+ofrecía como equivalentes «sólidas», a 3 saltos, sondas de **63 cm**. La regla del largo de
+cable existía y daba rojo, pero no llegaba a correr: antes cortaba otra, blanda —«el mismo auto
+con otra cilindrada; un sensor suele servir para varias»—, que manda a revisión. Ahora, antes
+de devolver esa duda, se miran las diferencias físicas de la pieza (vías de la ficha, largo de
+cable, temperatura) y si alguna es firme, gana esa (`_lo_fisico_que_no_coincide()`).
+
+Sobre las 1.796 búsquedas de sondas y sensores con equivalencias: cambian 12, salen 20 filas que
+no eran la misma pieza y no entra ninguna. Ninguna aprobación existente cambia de color.
+
 ## 🔗 Revisar sugeridas: primero lo que hay que hacer
 
 Mirado con capturas sobre la base real (15.308 pendientes en 8 listas):
