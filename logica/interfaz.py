@@ -87,7 +87,8 @@ PARA_QUE_SIRVE = {
                      "herramientas de mantenimiento.",
     "📊 Estadísticas": "Aprobar las equivalencias que encontró la app, qué pedir, qué no se "
                       "vende, y las copias de la base.",
-    "📋 Lista WhatsApp": "Pegar un pedido que llegó por mensaje y resolverlo de una.",
+    "📋 Lista WhatsApp": "Pegar los códigos que pidió un cliente y mandarle la cotización por "
+                        "WhatsApp o en PDF.",
     "🚗 Vehículos": "Fichas de los autos: qué se le puso a cada uno y cuándo.",
     "🛠️ Modo Mecánico": "Identificar un auto por patente, chasis o número de motor, y los "
                        "códigos de falla.",

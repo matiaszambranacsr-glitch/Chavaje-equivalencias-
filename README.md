@@ -6227,6 +6227,21 @@ Y con la descripción a la vista apareció un error de la app:
   nombran solo fabricantes de motor (MWM contra Cummins), sí.
 - Los dos casos quedaron en las pruebas de la revisión (57 pares).
 
+### 📋 La cotización por WhatsApp: lo que se le ofrece al cliente, y el pedido pegado
+
+- **Al cliente le llegaba como equivalente lo que la app dice que no lo es.** El mensaje y el PDF
+  se armaban con TODOS los resultados de la búsqueda: los códigos de fábrica (que no se venden),
+  los kits que traen la pieza adentro (🧰), lo que la cadena marca «🔴 no es lo mismo» y lo que
+  cuelga de un vínculo flojo. Ahora van solo lo buscado y sus equivalentes
+  (`filas_para_cotizar()`), y la lista dice cuántos quedaron afuera. Con el sensor Lambda
+  14R784430036: 14 para ofrecer y **69 afuera**, que antes iban en el mensaje.
+- **Pegar el pedido.** El renglón de la sección decía «Pegar un pedido que llegó por mensaje y
+  resolverlo de una», y la pantalla no lo permitía: había que buscar cada código en el Buscador
+  y sumarlo. Ahora se pega la lista del cliente (un código por renglón o separados por coma) y
+  se suman todos; los que no están se dicen y quedan en «🔎 Búsquedas sin resultado».
+- La marcación de kits y conjuntos, que vivía adentro del Buscador, pasó a la lógica
+  (`marcar_lo_que_no_es_lo_mismo()`) para que la usen los dos.
+
 ## 🔗 Revisar sugeridas: primero lo que hay que hacer
 
 Mirado con capturas sobre la base real (15.308 pendientes en 8 listas):

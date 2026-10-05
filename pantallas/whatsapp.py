@@ -7,19 +7,55 @@
 if pagina == PAGINAS[5]:
     st.subheader("Armar lista de productos para enviar por WhatsApp")
     ayuda(
-        "Buscá códigos en la pestaña Buscador y tocá '📋 Agregar a lista de WhatsApp'. "
-        "Acá se arma un mensaje agrupado por producto, con las equivalencias y precios de cada marca."
+        "Pegá los códigos que te pidió el cliente, o sumalos de a uno desde el 🔍 Buscador con "
+        "«📋 Agregar a lista de WhatsApp». Acá se arma un mensaje agrupado por producto, con las "
+        "equivalencias y precios de cada marca, para mandar por WhatsApp o como PDF."
     )
 
     lista = st.session_state.lista_whatsapp
 
+    # PEGAR EL PEDIDO. El cliente manda la lista por WhatsApp; buscarla código por código en el
+    # buscador y sumar cada uno era el trabajo entero. Acá se pega y se suman todos de una.
+    with st.form("form_pedido_whatsapp", clear_on_submit=True):
+        _pedido = st.text_area(
+            "¿Te mandaron una lista? Pegala acá:",
+            placeholder="Un código por renglón, o separados por coma:\nW712/94\n036115561G",
+            height=110)
+        _sumar = st.form_submit_button("➕ Agregar todos a la lista", type="primary")
+    if _sumar and _pedido.strip():
+        _no_estan = []
+        for _cod in [x.strip() for x in re.split(r"[,;\n]+", _pedido) if x.strip()]:
+            _clean = sanitizar(_cod)
+            _res = []
+            if _clean:
+                _res, _ = buscar_con_variantes_del_cero(_clean, "Todas", 3)
+            if not _res:
+                _no_estan.append(_cod)
+                if _clean:
+                    registrar_busqueda_sin_resultado(_cod)
+                continue
+            marcar_lo_que_no_es_lo_mismo(_res)
+            lista.append({"codigo_buscado": _cod, "resultados": _res})
+        if _no_estan:
+            st.warning("No están cargados: " + ", ".join(_no_estan[:15])
+                       + ("…" if len(_no_estan) > 15 else "")
+                       + ". Quedaron en 📊 Estadísticas → 🔎 Búsquedas sin resultado.")
+
     if not lista:
-        st.info("Todavía no agregaste ningún producto a la lista. Andá a Buscador y agregá alguno.")
+        st.info("Todavía no hay nada en la lista: pegá el pedido arriba, o agregá productos "
+                "desde el 🔍 Buscador.")
     else:
+        # Al cliente va solo lo que se le puede ofrecer: ver filas_para_cotizar().
+        lista_cotizar = [dict(item, resultados=filas_para_cotizar(item["resultados"]))
+                         for item in lista]
         st.markdown(f"**{len(lista)} producto(s) en la lista:**")
         for i, item in enumerate(lista):
             colT, colX = st.columns([5, 1])
-            colT.write(f"{i + 1}. {item['codigo_buscado']} ({len(item['resultados'])} equivalencias)")
+            _van = len(lista_cotizar[i]["resultados"])
+            _afuera = len(item["resultados"]) - _van
+            colT.write(f"{i + 1}. {item['codigo_buscado']} ({_van} para ofrecer"
+                       + (f"; {_afuera} afuera: códigos de fábrica, kits o lo que no es "
+                          "seguro" if _afuera else "") + ")")
             if colX.button("🗑️", key=f"quitar_wa_{i}"):
                 lista.pop(i)
                 st.rerun()
@@ -32,7 +68,7 @@ if pagina == PAGINAS[5]:
         encabezado_wa = obtener_config("whatsapp_encabezado", "🔧 *Equivalencias El Chavo*")
         pie_wa = obtener_config("whatsapp_pie", "")
         partes = [f"{encabezado_wa}\n"]
-        for item in lista:
+        for item in lista_cotizar:
             partes.append(f"\n📦 *{item['codigo_buscado']}*")
             for fila in item["resultados"]:
                 linea = f"  • {fila['Marca']}: {fila['Codigo']}"
@@ -76,7 +112,7 @@ if pagina == PAGINAS[5]:
         url_whatsapp = "https://wa.me/?text=" + urllib.parse.quote(mensaje)
         col_wa, col_pdf = st.columns(2)
         col_wa.link_button("📲 Abrir en WhatsApp", url_whatsapp, type="primary", width="stretch")
-        pdf_bytes = pdf_con_cache("cotizacion", generar_pdf_cotizacion, lista, incluir_precio,
+        pdf_bytes = pdf_con_cache("cotizacion", generar_pdf_cotizacion, lista_cotizar, incluir_precio,
                                    incluir_stock, alias_elegido, qr_real_para_pdf)
         col_pdf.download_button(
             "📄 Descargar cotización (PDF)", data=pdf_bytes,

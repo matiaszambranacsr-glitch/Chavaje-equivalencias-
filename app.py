@@ -73,6 +73,7 @@ específico, y las pantallas quedan todas al final:
         · PAPELERA (borrar con red)
         · HISTORIAL, DUPLICADOS Y EXPORTAR A EXCEL
         · COBROS: alias de transferencia y QR
+        · COTIZAR: lo que se le puede ofrecer al cliente
     logica/interfaz.py
         · PIEZAS DE INTERFAZ QUE SE REPITEN
         · NAVEGACIÓN: DÓNDE ESTÁ CADA COSA

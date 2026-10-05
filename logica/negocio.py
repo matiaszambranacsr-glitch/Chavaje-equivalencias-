@@ -2231,3 +2231,70 @@ def generar_qr_bytes(texto):
     salida = io.BytesIO()
     img.save(salida, format="PNG")
     return salida.getvalue()
+
+# ============================================================================================
+# COTIZAR: lo que se le puede ofrecer al cliente
+# ============================================================================================
+def marcar_lo_que_no_es_lo_mismo(res):
+    """Marca entre los resultados de una búsqueda los que NO se pueden vender en lugar de lo
+    buscado aunque estén encadenados: el kit que lo trae adentro, la pieza suelta del kit, el
+    kit de reparación, el conjunto donde va. Les pone _complementario y lo dice en «Cadena».
+
+    Vivía adentro del buscador; ahora también la usa la cotización por WhatsApp, que armaba el
+    mensaje con todos los resultados —kits incluidos— como si fueran equivalentes."""
+    _fila_buscada = next((f for f in res if f.get("Cadena") == "— el buscado"),
+                          None)
+    if _fila_buscada:
+        for f in res:
+            if f is _fila_buscada:
+                continue
+            # El kit de reparación de lo buscado, o la pieza que va en su
+            # conjunto: tampoco es lo mismo. Ver numero_del_conjunto_donde_va().
+            if not (_fila_buscada.get("Tipo") == "OEM" and f.get("Tipo") == "OEM"):
+                _cita_al_buscado = numero_del_conjunto_donde_va(
+                    _fila_buscada.get("Codigo"), f.get("Descripcion"))
+                _el_buscado_lo_cita = numero_del_conjunto_donde_va(
+                    f.get("Codigo"), _fila_buscada.get("Descripcion"))
+                if _cita_al_buscado or _el_buscado_lo_cita:
+                    f["_complementario"] = True
+                    f["Cadena"] = (
+                        "🧰 es donde va lo buscado — NO es lo mismo"
+                        if _el_buscado_lo_cita else
+                        "🧰 kit de reparación de lo buscado — NO es lo mismo"
+                        if _RE_KIT_DE_REPARACION.match(f.get("Descripcion") or "")
+                        else "🧰 va en lo buscado — NO es lo mismo")
+                    f["Confianza"] = ""
+                    continue
+            _rel = _uno_trae_al_otro(
+                _fila_buscada.get("Descripcion"), _fila_buscada.get("Codigo"),
+                f.get("Descripcion"), f.get("Codigo"),
+                _fila_buscada.get("Tipo"), f.get("Tipo"))
+            if not _rel:
+                continue
+            f["_complementario"] = True
+            f["Cadena"] = ("📦 kit que la trae adentro — NO es lo mismo"
+                           if es_un_kit(f.get("Descripcion") or "")
+                           else "🧩 va adentro del kit — NO es lo mismo")
+            # Sin confianza: no hay nada que confiar, la pregunta «¿es la
+            # misma pieza?» ya está contestada y es que no.
+            f["Confianza"] = ""
+
+
+def filas_para_cotizar(resultados):
+    """Lo que se le puede ofrecer a un cliente como lo que pidió: lo buscado y sus
+    equivalentes. Afuera quedan los códigos de fábrica (unen listas, no se venden), lo que la
+    app marcó que no es lo mismo (🧰 kits, 🔴 «no es lo mismo» por la cadena) y lo que cuelga
+    de un vínculo flojo (🔴).
+
+    El mensaje de WhatsApp y el PDF de la cotización usaban TODOS los resultados: al cliente le
+    llegaba como equivalente lo que la propia app, en el buscador, marcaba que no lo era."""
+    salida = []
+    for f in resultados or []:
+        if f.get("Cadena") == "— el buscado":
+            salida.append(f)
+            continue
+        if (f.get("_complementario") or f.get("_sin_salida") or f.get("Tipo") == "OEM"
+                or str(f.get("Confianza") or "").startswith("🔴")):
+            continue
+        salida.append(f)
+    return salida
