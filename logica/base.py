@@ -290,6 +290,12 @@ html, body, [class*="css"] { font-family: 'Inter', -apple-system, sans-serif; }
 [data-testid="stFileUploaderDropzoneInstructions"] span::after {
   content: "Hasta 200 MB por archivo"; font-size: 0.8rem;
 }
+/* Lo mismo con el botón de la cámara (escanear el código de barras): decía «Take Photo» y,
+   después de sacarla, «Clear photo». */
+[data-testid="stCameraInputButton"] { font-size: 0 !important; }
+[data-testid="stCameraInputButton"]::after { content: "📷 Sacar la foto"; font-size: 0.95rem; }
+[data-testid="stCameraInputButton"]:has(span)::after { content: "🔄 Sacar otra"; }
+[data-testid="stCameraInputButton"] svg { display: none; }
 
 /* Expanders */
 [data-testid="stExpander"] { border: 1px solid var(--border) !important; border-radius: 8px !important; margin-bottom: 4px; }

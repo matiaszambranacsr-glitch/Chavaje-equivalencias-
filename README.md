@@ -6207,6 +6207,9 @@ Mirando la cola real (8.201 pendientes) con capturas:
   misma pieza…», y el auditor no deja que otra vuelva a quedar sin texto.
 - El aviso de lo cargado decía «piezas de lugares distintos: **la del INSPECCION** vs la pieza
   entera». Ahora: «la junta de la tapa de inspección vs la de la pieza entera».
+- El botón de la cámara para escanear el código de barras decía **«Take Photo»** y después
+  «Clear photo». Ahora «📷 Sacar la foto» y «🔄 Sacar otra» (con CSS, como ya se hacía con el de
+  subir archivos: Streamlit no deja cambiarlo).
 
 Y con la descripción a la vista apareció un error de la app:
 
