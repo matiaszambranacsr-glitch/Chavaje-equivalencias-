@@ -3155,97 +3155,97 @@ if pagina == PAGINAS[3]:
                 st.caption("También se limpia sola: lo que lleva más de 30 días acá se borra en forma permanente.")
                 st.button("🧹 Vaciar ahora lo de más de 30 días", on_click=vaciar_papelera_antigua, args=(30,))
 
-        if sub_admin == SUB_ADMIN[5]:
-            # seccion_permitida() y no pedir_password_admin(): sin ninguna contraseña todavía,
-            # acá es donde se crea la primera, y pedir una que no existe era un callejón sin
-            # salida (el aviso de «la app no tiene contraseña» manda justo acá).
-            if not seccion_permitida("admin", "gestionar usuarios"):
-                pass
-            else:
-                st.markdown("**👤 Empleados (admin / operador)**")
-                explicar(
-                    "Cuentas creadas desde acá, sin necesidad de tocar la configuración de Streamlit Cloud.",
-                    "'Admin' puede todo, incluso borrar y configurar. 'Operador' puede usar las funciones "
-                    "de IA y cargar cosas, pero no borrar ni configurar nada sensible."
-                )
-                usuarios_actuales = listar_usuarios()
-                if usuarios_actuales:
-                    st.dataframe(usuarios_actuales, width="stretch", hide_index=True)
+    if sub_admin == SUB_ADMIN[5]:
+        # seccion_permitida() y no pedir_password_admin(): sin ninguna contraseña todavía,
+        # acá es donde se crea la primera, y pedir una que no existe era un callejón sin
+        # salida (el aviso de «la app no tiene contraseña» manda justo acá).
+        if not seccion_permitida("admin", "gestionar usuarios"):
+            pass
+        else:
+            st.markdown("**👤 Empleados (admin / operador)**")
+            explicar(
+                "Cuentas creadas desde acá, sin necesidad de tocar la configuración de Streamlit Cloud.",
+                "'Admin' puede todo, incluso borrar y configurar. 'Operador' puede usar las funciones "
+                "de IA y cargar cosas, pero no borrar ni configurar nada sensible."
+            )
+            usuarios_actuales = listar_usuarios()
+            if usuarios_actuales:
+                st.dataframe(usuarios_actuales, width="stretch", hide_index=True)
 
-                cu1, cu2 = st.columns(2)
-                nombre_nuevo_usuario = cu1.text_input("Nombre:", key="nuevo_usuario_nombre")
-                password_nuevo_usuario = cu2.text_input("Contraseña:", type="password", key="nuevo_usuario_pass")
-                rol_nuevo_usuario = st.selectbox("Rol:", ["operador", "admin"], key="nuevo_usuario_rol")
-                if st.button("➕ Crear empleado"):
-                    if not nombre_nuevo_usuario.strip() or not password_nuevo_usuario:
-                        st.warning("Completá nombre y contraseña.")
+            cu1, cu2 = st.columns(2)
+            nombre_nuevo_usuario = cu1.text_input("Nombre:", key="nuevo_usuario_nombre")
+            password_nuevo_usuario = cu2.text_input("Contraseña:", type="password", key="nuevo_usuario_pass")
+            rol_nuevo_usuario = st.selectbox("Rol:", ["operador", "admin"], key="nuevo_usuario_rol")
+            if st.button("➕ Crear empleado"):
+                if not nombre_nuevo_usuario.strip() or not password_nuevo_usuario:
+                    st.warning("Completá nombre y contraseña.")
+                else:
+                    try:
+                        crear_usuario(nombre_nuevo_usuario, password_nuevo_usuario, rol_nuevo_usuario)
+                        avisar("success", f"Empleado '{nombre_nuevo_usuario}' creado.")
+                        st.rerun()
+                    except sqlite3.IntegrityError as _err:
+                        anotar_error("nivel principal", _err)
+                        st.error("Ya existe un empleado con ese nombre.")
+
+            if usuarios_actuales:
+                st.markdown("**Gestionar un empleado existente**")
+                opciones_usuario = {u["Nombre"]: u["ID"] for u in usuarios_actuales}
+                usuario_elegido = st.selectbox("Elegí un empleado:", list(opciones_usuario.keys()), key="sel_usuario_gestionar")
+                usuario_id_sel = opciones_usuario[usuario_elegido]
+                cug1, cug2, cug3 = cols(3)
+                nueva_pass_usuario = cug1.text_input("Nueva contraseña (opcional):", type="password", key="usuario_nueva_pass")
+                if cug1.button("💾 Cambiar contraseña"):
+                    if nueva_pass_usuario:
+                        cambiar_password_usuario(usuario_id_sel, nueva_pass_usuario)
+                        st.success("Contraseña actualizada.")
                     else:
-                        try:
-                            crear_usuario(nombre_nuevo_usuario, password_nuevo_usuario, rol_nuevo_usuario)
-                            avisar("success", f"Empleado '{nombre_nuevo_usuario}' creado.")
-                            st.rerun()
-                        except sqlite3.IntegrityError as _err:
-                            anotar_error("nivel principal", _err)
-                            st.error("Ya existe un empleado con ese nombre.")
+                        st.warning("Escribí la nueva contraseña primero.")
+                usuario_activo_actual = next(u["Activo"] == "Sí" for u in usuarios_actuales if u["ID"] == usuario_id_sel)
+                if cug2.button("🚫 Desactivar" if usuario_activo_actual else "✅ Reactivar"):
+                    activar_desactivar_usuario(usuario_id_sel, not usuario_activo_actual)
+                    st.rerun()
+                if cug3.button("🗑️ Eliminar empleado"):
+                    eliminar_usuario(usuario_id_sel)
+                    avisar("success", "Empleado eliminado.")
+                    st.rerun()
 
-                if usuarios_actuales:
-                    st.markdown("**Gestionar un empleado existente**")
-                    opciones_usuario = {u["Nombre"]: u["ID"] for u in usuarios_actuales}
-                    usuario_elegido = st.selectbox("Elegí un empleado:", list(opciones_usuario.keys()), key="sel_usuario_gestionar")
-                    usuario_id_sel = opciones_usuario[usuario_elegido]
-                    cug1, cug2, cug3 = cols(3)
-                    nueva_pass_usuario = cug1.text_input("Nueva contraseña (opcional):", type="password", key="usuario_nueva_pass")
-                    if cug1.button("💾 Cambiar contraseña"):
-                        if nueva_pass_usuario:
-                            cambiar_password_usuario(usuario_id_sel, nueva_pass_usuario)
-                            st.success("Contraseña actualizada.")
-                        else:
-                            st.warning("Escribí la nueva contraseña primero.")
-                    usuario_activo_actual = next(u["Activo"] == "Sí" for u in usuarios_actuales if u["ID"] == usuario_id_sel)
-                    if cug2.button("🚫 Desactivar" if usuario_activo_actual else "✅ Reactivar"):
-                        activar_desactivar_usuario(usuario_id_sel, not usuario_activo_actual)
-                        st.rerun()
-                    if cug3.button("🗑️ Eliminar empleado"):
-                        eliminar_usuario(usuario_id_sel)
-                        avisar("success", "Empleado eliminado.")
-                        st.rerun()
+            st.markdown("---")
+            st.markdown("**🔧 Mecánicos externos**")
+            ayuda(
+                "Cuentas separadas para mecánicos que no son empleados tuyos — solo ven su propio "
+                "portal para armar presupuestos con su mano de obra, nunca las secciones internas."
+            )
+            mecanicos_actuales = listar_mecanicos()
+            if mecanicos_actuales:
+                st.dataframe(mecanicos_actuales, width="stretch", hide_index=True)
 
-                st.markdown("---")
-                st.markdown("**🔧 Mecánicos externos**")
-                ayuda(
-                    "Cuentas separadas para mecánicos que no son empleados tuyos — solo ven su propio "
-                    "portal para armar presupuestos con su mano de obra, nunca las secciones internas."
-                )
-                mecanicos_actuales = listar_mecanicos()
-                if mecanicos_actuales:
-                    st.dataframe(mecanicos_actuales, width="stretch", hide_index=True)
-
-                cm1, cm2 = st.columns(2)
-                nombre_nuevo_mecanico = cm1.text_input("Nombre:", key="nuevo_mecanico_nombre")
-                password_nuevo_mecanico = cm2.text_input("Contraseña:", type="password", key="nuevo_mecanico_pass")
-                if st.button("➕ Crear mecánico"):
-                    if not nombre_nuevo_mecanico.strip() or not password_nuevo_mecanico:
-                        st.warning("Completá nombre y contraseña.")
-                    else:
-                        try:
-                            crear_mecanico(nombre_nuevo_mecanico, password_nuevo_mecanico)
-                            avisar("success", f"Mecánico '{nombre_nuevo_mecanico}' creado.")
-                            st.rerun()
-                        except sqlite3.IntegrityError as _err:
-                            anotar_error("nivel principal", _err)
-                            st.error("Ya existe un mecánico con ese nombre.")
-
-                if mecanicos_actuales:
-                    st.markdown("**Gestionar un mecánico existente**")
-                    opciones_mecanico = {m["Nombre"]: m["ID"] for m in mecanicos_actuales}
-                    mecanico_elegido = st.selectbox("Elegí un mecánico:", list(opciones_mecanico.keys()), key="sel_mecanico_gestionar")
-                    mecanico_id_sel = opciones_mecanico[mecanico_elegido]
-                    cmg1, cmg2 = st.columns(2)
-                    mecanico_activo_actual = next(m["Activo"] == "Sí" for m in mecanicos_actuales if m["ID"] == mecanico_id_sel)
-                    if cmg1.button("🚫 Desactivar" if mecanico_activo_actual else "✅ Reactivar", key="toggle_mecanico"):
-                        activar_desactivar_mecanico(mecanico_id_sel, not mecanico_activo_actual)
+            cm1, cm2 = st.columns(2)
+            nombre_nuevo_mecanico = cm1.text_input("Nombre:", key="nuevo_mecanico_nombre")
+            password_nuevo_mecanico = cm2.text_input("Contraseña:", type="password", key="nuevo_mecanico_pass")
+            if st.button("➕ Crear mecánico"):
+                if not nombre_nuevo_mecanico.strip() or not password_nuevo_mecanico:
+                    st.warning("Completá nombre y contraseña.")
+                else:
+                    try:
+                        crear_mecanico(nombre_nuevo_mecanico, password_nuevo_mecanico)
+                        avisar("success", f"Mecánico '{nombre_nuevo_mecanico}' creado.")
                         st.rerun()
-                    if cmg2.button("🗑️ Eliminar mecánico"):
-                        eliminar_mecanico(mecanico_id_sel)
-                        avisar("success", "Mecánico eliminado.")
-                        st.rerun()
+                    except sqlite3.IntegrityError as _err:
+                        anotar_error("nivel principal", _err)
+                        st.error("Ya existe un mecánico con ese nombre.")
+
+            if mecanicos_actuales:
+                st.markdown("**Gestionar un mecánico existente**")
+                opciones_mecanico = {m["Nombre"]: m["ID"] for m in mecanicos_actuales}
+                mecanico_elegido = st.selectbox("Elegí un mecánico:", list(opciones_mecanico.keys()), key="sel_mecanico_gestionar")
+                mecanico_id_sel = opciones_mecanico[mecanico_elegido]
+                cmg1, cmg2 = st.columns(2)
+                mecanico_activo_actual = next(m["Activo"] == "Sí" for m in mecanicos_actuales if m["ID"] == mecanico_id_sel)
+                if cmg1.button("🚫 Desactivar" if mecanico_activo_actual else "✅ Reactivar", key="toggle_mecanico"):
+                    activar_desactivar_mecanico(mecanico_id_sel, not mecanico_activo_actual)
+                    st.rerun()
+                if cmg2.button("🗑️ Eliminar mecánico"):
+                    eliminar_mecanico(mecanico_id_sel)
+                    avisar("success", "Mecánico eliminado.")
+                    st.rerun()

@@ -2181,6 +2181,24 @@ if DE_DONDE:
     _revisar_tabla(_symtable.symtable(SRC, "app", "exec"))
 
 
+# ============ Sub-secciones al mismo nivel ============
+# «if sub_admin == SUB_ADMIN[5]:» quedó adentro del bloque de SUB_ADMIN[4] (una sangría de más):
+# elegir «👥 Usuarios» no mostraba nada, y Python no se queja porque es código válido. Todas las
+# ramas que comparan la misma variable de sección con la misma lista van al mismo nivel.
+_RE_RAMA_DE_SECCION = re.compile(r"^( *)if (\w+) == ([A-Z_]+)\[\d+\]:")
+_sangrias_de_seccion = {}
+for _i, _l in enumerate(LINEAS, 1):
+    _m = _RE_RAMA_DE_SECCION.match(_l)
+    if _m:
+        _sangrias_de_seccion.setdefault((_m.group(2), _m.group(3)), []).append((len(_m.group(1)), _i))
+for (_var, _lista), _ramas in _sangrias_de_seccion.items():
+    _comun = Counter(s for s, _ in _ramas).most_common(1)[0][0]
+    for _sangria, _i in _ramas:
+        if _sangria != _comun:
+            reportar("ERROR", _i, f"esta rama de «{_var} == {_lista}[…]» está a otra altura que las "
+                                  "demás: queda adentro de otra sección y nunca se muestra")
+
+
 # ============ Resultado ============
 orden = {"ERROR": 0, "REVISAR": 1, "AVISO": 2}
 problemas.sort(key=lambda x: (orden[x[0]], x[1]))
