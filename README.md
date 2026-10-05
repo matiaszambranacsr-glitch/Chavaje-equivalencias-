@@ -6130,6 +6130,27 @@ decía algo que no es cierto:
 - Más botones que llevan: «🏭 Ir al catálogo de aplicaciones →» cuando se sube a Cargar Excel un
   catálogo de aplicaciones, y «🔢 Ir a Chasis / VIN →» en Repuestos por vehículo.
 
+### 🗂️ Mantenimiento, un archivo por grupo
+
+`pantallas/administrar.py` tenía 3.371 renglones y 2.500 eran Mantenimiento, con las
+herramientas de un mismo grupo repartidas en tramos intercalados con las de otros (las de «🔎
+Encontrar equivalencias» estaban en tres lugares distintos del archivo). Ahora:
+
+| Archivo | Qué tiene |
+|---|---|
+| `pantallas/administrar.py` | Marcas, Productos, Mensajería, Combos, Usuarios, Cuentas corrientes (841 renglones) |
+| `pantallas/mantenimiento.py` | Lo de arriba de Mantenimiento: borrar un producto, el buscador de herramientas, el grupo |
+| `pantallas/mantenimiento_encontrar.py` | 🔎 Encontrar equivalencias |
+| `pantallas/mantenimiento_limpiar.py` | 🧹 Limpiar y corregir |
+| `pantallas/mantenimiento_calidad.py` | 🧠 Calidad y aprendizaje |
+| `pantallas/mantenimiento_barras.py` | 🏷️ Códigos de barras |
+| `pantallas/mantenimiento_fotos.py` | 📷 Fotos |
+| `pantallas/mantenimiento_estado.py` | 🩺 Estado y papelera |
+
+Los bloques se movieron tal cual, sin cambiar un renglón. Comprobado dibujando cada grupo con la
+versión anterior y con esta sobre la base real: los mismos títulos, botones y desplegables, en el
+mismo orden.
+
 ## 🔗 Revisar sugeridas: primero lo que hay que hacer
 
 Mirado con capturas sobre la base real (15.308 pendientes en 8 listas):

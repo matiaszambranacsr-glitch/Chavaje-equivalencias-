@@ -103,6 +103,14 @@ específico, y las pantallas quedan todas al final:
         · CARGAR EXCEL
     pantallas/administrar.py
         · ADMINISTRAR
+    pantallas/mantenimiento.py (y un archivo por grupo: mantenimiento_encontrar.py, …)
+        · MANTENIMIENTO
+        · MANTENIMIENTO → ENCONTRAR EQUIVALENCIAS
+        · MANTENIMIENTO → LIMPIAR Y CORREGIR
+        · MANTENIMIENTO → CALIDAD Y APRENDIZAJE
+        · MANTENIMIENTO → CÓDIGOS DE BARRAS
+        · MANTENIMIENTO → FOTOS
+        · MANTENIMIENTO → ESTADO Y PAPELERA
     pantallas/estadisticas.py
         · ESTADÍSTICAS
     pantallas/whatsapp.py
