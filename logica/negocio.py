@@ -209,6 +209,9 @@ def _lo_que_separa_versiones(descripcion, firma):
     return salida
 
 
+_RE_NO_ALFANUMERICO = re.compile(r"[^A-Z0-9]")
+
+
 def versiones_para_preguntar(producto_id):
     """[(qué preguntar, {valor: [códigos]})] cuando la lista del mismo proveedor tiene otras
     versiones de esta pieza para el mismo auto. [] si no hay nada que preguntar."""
@@ -225,11 +228,22 @@ def versiones_para_preguntar(producto_id):
     if not marcas or not modelos:
         return []
     es_kit = bool(es_un_kit(descripcion))
+    _modelos_pegados = {_RE_NO_ALFANUMERICO.sub("", normalizar_texto(m)) for m in modelos} - {""}
     c.execute("""SELECT id, codigo_raw, descripcion FROM productos
                  WHERE marca_id = ? AND UPPER(descripcion) LIKE ?""",
               (fila["marca_id"], f"%{firma['cabeza'][:5]}%"))
     grupo = []
     for f in c.fetchall():
+        # Antes de armar la firma —lo caro—, que la descripción nombre alguno de los modelos:
+        # los modelos de la firma salen de las palabras de la descripción, así que la que no
+        # nombra ninguno no puede pasar el control de modelos de abajo. Con todas las juntas de
+        # ILLINOIS eran 2.514 firmas y 1,6 s en CADA búsqueda; con esto, las que importan.
+        # Sin espacios ni signos de los dos lados: «S-MAX» en el texto es «SMAX» en la firma.
+        # Así deja pasar de más —«ECO» aparece adentro de otras palabras—, nunca de menos.
+        if f["id"] != producto_id:
+            _pegado = _RE_NO_ALFANUMERICO.sub("", normalizar_texto(f["descripcion"]))
+            if not any(m in _pegado for m in _modelos_pegados):
+                continue
         fb = firma if f["id"] == producto_id else firma_de_producto(f["descripcion"] or "")
         if (not fb or fb.get("cabeza") != firma.get("cabeza")
                 or set(fb.get("pieza") or ()) != set(firma.get("pieza") or ())
@@ -2081,10 +2095,16 @@ def columnas_que_dicen_algo(filas):
             + [c for c in utiles if c not in COLUMNAS_PRIMERO])
 
 
-# El precio con separador de miles según el idioma del navegador (18.375); la imagen como
-# imagen y la ficha como link.
+# El precio SIN separador de miles («$ 18375»); la imagen como imagen y la ficha como link.
+# Iba con el formato del idioma del navegador, que en una computadora con Chrome en inglés —lo
+# más común— mostraba «1,505»: acá eso se lee «uno coma cinco». Streamlit solo sabe separar
+# los miles con coma, así que sin separador: no se puede leer mal y se sigue ordenando como
+# número.
 CONFIG_COLUMNAS_RESULTADO = {
-    "Precio": st.column_config.NumberColumn("Precio $", format="localized"),
+    "Precio": st.column_config.NumberColumn("Precio", format="$ %d"),
+    # Las claves van sin tilde porque así las usa todo el código; el título, con tilde.
+    "Codigo": st.column_config.TextColumn("Código"),
+    "Descripcion": st.column_config.TextColumn("Descripción"),
     "Stock": st.column_config.NumberColumn("Stock", format="%d"),
     "Imagen": st.column_config.ImageColumn("Imagen", width="small"),
     "Ficha": st.column_config.LinkColumn("Ficha", display_text="Ver en proveedor ↗"),

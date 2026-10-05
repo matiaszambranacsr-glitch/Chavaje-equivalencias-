@@ -791,12 +791,15 @@ Casi todo lo que edita o borra algo pide la contraseña de administrador la prim
                         if alternativas:
                             # Antes decía «1 equivalencia, sobre 10 filas en total» y se veían
                             # dos: las otras ocho eran códigos de fábrica, que no se muestran.
+                            # Un renglón y no una caja verde: la caja ocupaba lo mismo que tres
+                            # filas de la tabla, y la tabla es la respuesta.
                             _marcas_alt = sorted({f["Marca"] for f in alternativas})
-                            st.success(
-                                f"✅ **{len(alternativas)} equivalencia(s)**"
-                                + (f" en {len(_marcas_alt)} marca(s): {', '.join(_marcas_alt[:6])}"
+                            st.markdown(
+                                f"✅ :green[**{len(alternativas)} equivalencia(s)**"
+                                + (f" en {len(_marcas_alt)} marca(s):] "
+                                   f"{texto_para_markdown(', '.join(_marcas_alt[:6]))}"
                                    + ("…" if len(_marcas_alt) > 6 else "")
-                                   if _marcas_alt else ""))
+                                   if _marcas_alt else "]"))
                         else:
                             # Decirlo con todas las letras, y decir además qué hacer. Sin esto
                             # la pantalla mostraba dos filas y un tilde verde, y había que
@@ -847,8 +850,14 @@ Casi todo lo que edita o borra algo pide la contraseña de administrador la prim
                                 "aparecen."
                             )
 
-                        if _de_fabrica and not st.checkbox(
-                                f"🏭 Mostrar también los {len(_de_fabrica)} código(s) de fábrica",
+                        # LA TABLA VA PRIMERO. Se le guarda el lugar acá y se dibuja más abajo,
+                        # después de los filtros que deciden qué muestra: los filtros quedan
+                        # debajo de ella. Antes iban arriba, y con el resumen y las casillas la
+                        # tabla —que es la respuesta— empezaba fuera de la pantalla.
+                        _lugar_de_la_tabla = st.container()
+                        _filtro1, _filtro2, _filtro3 = st.columns(3)
+                        if _de_fabrica and not _filtro3.checkbox(
+                                f"🏭 Mostrar los {len(_de_fabrica)} código(s) de fábrica",
                                 key=f"ver_fabrica_{clean}",
                                 help="Relacionan los productos entre sí y se pueden buscar, pero "
                                      "no son un repuesto que vendas."):
@@ -856,10 +865,12 @@ Casi todo lo que edita o borra algo pide la contraseña de administrador la prim
 
                         # Filtro de stock: un botón que ahorra scroll en cada consulta. Va
                         # antes de la tabla porque decide QUÉ se muestra, no cómo.
-                        fs1, fs2 = st.columns([3, 2])
-                        solo_stock = fs1.checkbox(
-                            f"📦 Solo con stock ({sum(1 for f in res if (f.get('Stock') or 0) > 0)}"
-                            f" de {len(res)})", key=f"solo_stock_{clean}")
+                        # Solo si filtra algo: con ninguno en stock —la mayoría de las listas
+                        # no traen stock— o con todos, la casilla no cambia nada.
+                        _n_con_stock = sum(1 for f in res if (f.get('Stock') or 0) > 0)
+                        solo_stock = (0 < _n_con_stock < len(res)) and _filtro2.checkbox(
+                            f"📦 Solo con stock ({_n_con_stock} de {len(res)})",
+                            key=f"solo_stock_{clean}")
                         if solo_stock:
                             con_stock = [f for f in res if (f.get("Stock") or 0) > 0]
                             if con_stock:
@@ -872,7 +883,7 @@ Casi todo lo que edita o borra algo pide la contraseña de administrador la prim
 
                         # Copiar el código para pegarlo en facturación o WhatsApp. st.code trae
                         # el botón de copiar incorporado, así que no hace falta JavaScript.
-                        if fs2.checkbox("📋 Códigos para copiar", key=f"copiar_{clean}"):
+                        if _filtro1.checkbox("📋 Códigos para copiar", key=f"copiar_{clean}"):
                             st.code("\n".join(f["Codigo"] for f in res), language=None)
 
                         # Stock libre = lo que hay menos lo apartado en presupuestos. Es el
@@ -943,16 +954,17 @@ Casi todo lo que edita o borra algo pide la contraseña de administrador la prim
                             mostrar.append(visible)
                         mostrar = para_mostrar(quitar_id(mostrar))
                         # En el celular, tarjetas; la tabla queda a un toque. Ver
-                        # mostrar_tarjetas_de_resultados().
-                        if es_celular() and not st.toggle("📋 Ver como tabla",
-                                                           key=f"como_tabla_{clean}"):
-                            mostrar_tarjetas_de_resultados(mostrar)
-                        else:
-                            st.dataframe(
-                                mostrar, width="stretch", hide_index=True,
-                                column_order=columnas_que_dicen_algo(mostrar),
-                                column_config=CONFIG_COLUMNAS_RESULTADO,
-                            )
+                        # mostrar_tarjetas_de_resultados(). En el lugar guardado arriba.
+                        with _lugar_de_la_tabla:
+                            if es_celular() and not st.toggle("📋 Ver como tabla",
+                                                               key=f"como_tabla_{clean}"):
+                                mostrar_tarjetas_de_resultados(mostrar)
+                            else:
+                                st.dataframe(
+                                    mostrar, width="stretch", hide_index=True,
+                                    column_order=columnas_que_dicen_algo(mostrar),
+                                    column_config=CONFIG_COLUMNAS_RESULTADO,
+                                )
 
                         # La pregunta que sigue siempre a «¿lo tenés?»: ¿le sirve al auto del
                         # cliente? La app tiene el dato en los catálogos de fabricante y no lo

@@ -1205,10 +1205,14 @@ def mostrar_tarjetas_de_resultados(filas, tope=40):
     grande, y la descripción abajo. Lo sugirió la revisión de usabilidad con Gemini, mirando
     capturas del buscador en un iPhone.
     El stock va con color, porque se mira de reojo mientras se habla con el cliente: 🟢 hay,
-    🔴 no hay, ⚪ no se sabe (la lista no trae stock)."""
+    🔴 no hay, ⚪ no se sabe (la lista no trae stock). Si NINGUNO trae stock, no se dice en
+    cada tarjeta: «⚪ stock s/d» repetido diez veces no le contesta nada a nadie."""
+    _alguno_con_stock = any(f.get("Libre", f.get("Stock")) not in (None, "") for f in filas)
     for f in filas[:tope]:
         _stock = f.get("Libre", f.get("Stock"))
-        if _stock is None or _stock == "":
+        if not _alguno_con_stock:
+            _semaforo = ""
+        elif _stock is None or _stock == "":
             _semaforo = "⚪ stock s/d"
         elif _stock > 0:
             _semaforo = f"🟢 **{_stock:,.0f}** en stock".replace(",", ".")
@@ -1219,7 +1223,7 @@ def mostrar_tarjetas_de_resultados(filas, tope=40):
                             if x)
         with st.container(border=True):
             st.markdown(f"**{texto_para_markdown(f.get('Marca'))}** · `{f.get('Codigo', '')}`  \n"
-                        f"**{_precio}** · {_semaforo}")
+                        f"**{_precio}**" + (f" · {_semaforo}" if _semaforo else ""))
             _desc = texto_para_markdown((f.get("Descripcion") or "")[:140])
             st.caption(_desc + (f"  \n{texto_para_markdown(_extra)}" if _extra else ""))
     if len(filas) > tope:

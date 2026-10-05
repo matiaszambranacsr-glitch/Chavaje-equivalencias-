@@ -1614,6 +1614,20 @@ def _modelos_conocidos():
     return modelos
 
 
+def _huella_parecida(guardada, actual, tolerancia=0.02):
+    """¿La huella «productos|último id|modelos» guardada sigue sirviendo? Sí, si la cantidad de
+    productos y la de modelos no se movieron más que la tolerancia. Ver
+    _modelos_que_andan_con_otras_marcas()."""
+    try:
+        g = [int(x) for x in str(guardada).split("|")]
+        a = [int(x) for x in str(actual).split("|")]
+    except ValueError:
+        return False
+    if len(g) != 3 or len(a) != 3:
+        return False
+    return all(abs(a[i] - g[i]) <= tolerancia * max(g[i], 1) for i in (0, 2))
+
+
 def _modelos_que_andan_con_otras_marcas(de_aplicaciones, minimo=20):
     """Las palabras de la columna de modelo que en las descripciones NO andan con su marca.
 
@@ -1631,13 +1645,20 @@ def _modelos_que_andan_con_otras_marcas(de_aplicaciones, minimo=20):
 
     Recorrer el catálogo cuesta 2,6 s con 86.000 descripciones, y eso era en cada arranque de
     la app. Se guarda el resultado en la configuración con una huella del catálogo —cuántos
-    productos, el último id, cuántos modelos— y se rehace solo cuando cambia."""
+    productos, el último id, cuántos modelos— y se rehace solo cuando cambia DE VERDAD.
+
+    Se rehacía con cualquier cambio, y las tareas de fondo agregan aplicaciones todo el día: con
+    UN modelo más sobre 4.038, la búsqueda siguiente del mostrador tardaba 5 s. Lo que se calcula
+    son palabras que aparecen al menos 20 veces y casi nunca con su marca; un 2 % más de
+    catálogo no las cambia. Se rehace cuando productos o modelos cambian más que eso, que es lo
+    que pasa al importar una lista."""
     try:
-        _huella = "|".join(str(x) for x in c.execute(
-            "SELECT COUNT(*), COALESCE(MAX(id), 0) FROM productos").fetchone()) + \
-            f"|{len(de_aplicaciones)}"
+        _n_prod, _max_id = c.execute(
+            "SELECT COUNT(*), COALESCE(MAX(id), 0) FROM productos").fetchone()
+        _huella = f"{_n_prod}|{_max_id}|{len(de_aplicaciones)}"
         _guardado = json.loads(obtener_config("modelos_que_no_son", "") or "{}")
-        if _guardado.get("huella") == _huella:
+        if _guardado.get("huella") == _huella or _huella_parecida(_guardado.get("huella"),
+                                                                   _huella):
             return set(_guardado.get("palabras") or ())
         c.execute("SELECT descripcion FROM productos WHERE descripcion IS NOT NULL")
         descripciones = [r["descripcion"] for r in c.fetchall()]

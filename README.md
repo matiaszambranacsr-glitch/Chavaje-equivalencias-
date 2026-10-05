@@ -6155,6 +6155,31 @@ Los bloques se movieron tal cual, sin cambiar un renglón. Comprobado dibujando 
 versión anterior y con esta sobre la base real: los mismos títulos, botones y desplegables, en el
 mismo orden.
 
+### 🔍 El buscador: la respuesta primero, y más rápido
+
+Mirado con capturas de una búsqueda real (271205, junta tapa Fiat Fire) en una pantalla de
+1366×900 y en un celular:
+
+- **La tabla se veía recién bajando.** Arriba de ella iban una caja verde con el resumen y las
+  casillas de filtro: la primera fila de la respuesta quedaba a 960 px. Ahora el resumen es un
+  renglón, la tabla va primero y los filtros («📋 Códigos para copiar», «📦 Solo con stock», «🏭
+  Mostrar los códigos de fábrica») debajo: las primeras filas se ven sin bajar.
+- **«Solo con stock» aparece solo si filtra algo**: con ningún resultado en stock —la mayoría de
+  las listas no lo traen— no cambiaba nada. Por lo mismo, en las tarjetas del celular ya no dice
+  «⚪ stock s/d» en cada una cuando ninguna trae stock.
+- **Los precios salían «1,505»** en una computadora con el navegador en inglés, que acá se lee
+  «uno coma cinco». Streamlit solo sabe separar miles con coma, así que ahora van sin separador:
+  «$ 1505». Y los títulos de la tabla dicen «Código» y «Descripción», con tilde.
+- **La primera búsqueda después de un cambio tardaba 5 segundos.** Una lista de palabras que
+  parecen modelos y no lo son se arma recorriendo las 87.000 descripciones, y se guardaba con una
+  huella del catálogo que la invalidaba con CUALQUIER cambio: con un modelo más sobre 4.038 —las
+  tareas de fondo agregan aplicaciones todo el día— la búsqueda siguiente del mostrador la volvía
+  a armar. Ahora se rehace cuando el catálogo cambia más de un 2 % (al importar una lista).
+  Primera búsqueda: de 5,1 s a 0,5 s.
+- **«❓ Antes de vender, preguntá»** armaba la ficha de todas las piezas del mismo rubro del
+  proveedor (2.514 juntas de ILLINOIS) antes de mirar si nombraban el mismo auto. Ahora mira
+  primero eso, que es barato. Comprobado sobre 1.500 productos: el mismo resultado.
+
 ## 🔗 Revisar sugeridas: primero lo que hay que hacer
 
 Mirado con capturas sobre la base real (15.308 pendientes en 8 listas):
