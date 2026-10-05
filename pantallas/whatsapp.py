@@ -86,6 +86,12 @@ if pagina == PAGINAS[5]:
             partes.append(f"\n{pie_wa}")
         mensaje = "\n".join(partes)
 
+        _fuera_wa = sorted({f.get("Marca") for item in lista_cotizar for f in item["resultados"]
+                            if f.get("Precio")} & marcas_con_precios_fuera_de_escala())
+        if _fuera_wa and incluir_precio:
+            st.warning(f"⚠️ Los precios de **{', '.join(_fuera_wa)}** están en otra escala que "
+                       "los de las demás marcas: revisalos antes de mandar la cotización (ver "
+                       f"{miga_hasta('Marcas')} → 📏 Coeficiente de la lista).")
         st.text_area("Vista previa del mensaje:", value=mensaje, height=300)
 
         alias_disponibles = listar_alias_transferencia()

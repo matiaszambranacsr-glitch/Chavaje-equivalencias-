@@ -1094,7 +1094,12 @@ def quien_conviene_por_rubro(limite=40, minimo_comparaciones=5):
                    AND COALESCE(e.confianza, 50) >= 50
                    AND MAX(pa.precio, pb.precio) / MIN(pa.precio, pb.precio) < 8""")
     marcador = {}
+    # Una marca con la lista en otra escala no entra: «TARANTO sale más barata en el 100% de
+    # los casos, por 408%» era la lista sin su coeficiente. Ver escala_de_precios_por_marca().
+    _fuera = marcas_con_precios_fuera_de_escala()
     for r in c.fetchall():
+        if r["marca_a"] in _fuera or r["marca_b"] in _fuera:
+            continue
         clave = tuple(sorted((r["marca_a"], r["marca_b"])))
         d = marcador.setdefault(clave, {"total": 0, clave[0]: 0, clave[1]: 0, "dif": []})
         d["total"] += 1
@@ -2141,8 +2146,11 @@ def abrir_la_fila_elegida(clave_tabla, filas):
 
 
 def quitar_id(filas):
-    """Quita la clave ID de cada diccionario para mostrar en pantalla."""
-    return [{k: v for k, v in f.items() if k != "ID"} for f in filas]
+    """Quita la clave ID —y las internas, las que empiezan con «_»— de cada diccionario, para
+    mostrar en pantalla o bajar a Excel. Las internas se veían como columnas: «_mediana»,
+    «_prop», «_total» en «A quién conviene comprarle»."""
+    return [{k: v for k, v in f.items() if k != "ID" and not str(k).startswith("_")}
+            for f in filas]
 
 
 def to_excel_bytes(filas, columnas=None):

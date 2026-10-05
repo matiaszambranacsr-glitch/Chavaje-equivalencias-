@@ -507,12 +507,31 @@ def diagnostico_de_salud():
         # «2 par(es)» habiendo uno solo. Ver precios_incoherentes_entre_equivalentes(), que
         # tenía el mismo agujero y ahí se VEÍA: el par aparecía dos veces en la tabla, con
         # las columnas dadas vuelta.
+        # Una lista entera en otra escala va en su propio aviso (abajo), con el remedio que le
+        # corresponde: contada acá, eran 1.570 «pares» de TARANTO que tapaban los de verdad.
+        _fuera = sorted(marcas_con_precios_fuera_de_escala())
+        _sin_fuera = (" AND ma.nombre NOT IN (" + ",".join("?" * len(_fuera)) + ")"
+                      " AND mb.nombre NOT IN (" + ",".join("?" * len(_fuera)) + ")"
+                      if _fuera else "")
         c.execute(f"""SELECT COUNT(*) FROM equivalencias e
                      JOIN productos pa ON pa.id = e.producto_a_id
                      JOIN productos pb ON pb.id = e.producto_b_id
+                     JOIN marcas ma ON ma.id = pa.marca_id
+                     JOIN marcas mb ON mb.id = pb.marca_id
                      WHERE {SIN_CONTAR_EL_ESPEJO} AND pa.precio > 0 AND pb.precio > 0
-                       AND MAX(pa.precio, pb.precio) / MIN(pa.precio, pb.precio) >= 8""")
+                       AND MAX(pa.precio, pb.precio) / MIN(pa.precio, pb.precio) >= 8
+                       {_sin_fuera}""", _fuera + _fuera)
         precios = c.fetchone()[0]
+        for _marca in _fuera:
+            _d = escala_de_precios_por_marca()[_marca]
+            _cuanto = (f"{miles(1 / _d['factor'], 0)} veces menos" if _d["factor"] < 1
+                       else f"{miles(_d['factor'], 0)} veces más")
+            sumar("alto", f"Los precios de {_marca} están en otra escala",
+                  f"Cuestan {_cuanto} que los mismos repuestos de "
+                  f"{', '.join(_d['contra'][:4])} ({miles(_d['comparaciones'])} comparaciones). "
+                  "Casi seguro la lista necesita un coeficiente o está vieja: hasta "
+                  "corregirlo, se cotiza mal.",
+                  f"{miga_hasta('Marcas')} → 📏 Coeficiente de la lista")
         if precios:
             sumar("alto", f"{precios} par(es) de equivalentes con precios muy distintos",
                   "O el precio está mal cargado, o no son la misma pieza. Cualquiera de las dos "

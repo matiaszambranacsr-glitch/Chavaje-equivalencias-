@@ -171,6 +171,73 @@ if pagina == PAGINAS[3]:
                 st.rerun()
 
             st.markdown("---")
+            st.markdown("**📏 Coeficiente de la lista**")
+            explicar(
+                "Por cuánto se multiplica el precio de la lista de un proveedor, cada vez que se "
+                "importa.",
+                "Muchos distribuidores publican un precio de lista fijo y aparte un coeficiente "
+                "que cambia cada mes. Si la lista entra sin él, todos sus precios quedan en otra "
+                "escala: en la base real, una junta de tapa de TARANTO figuraba a $1.505 y la "
+                "misma de ILLINOIS a $24.140. Y eso no se queda en la lista: se cotiza así por "
+                "WhatsApp, esa marca sale «🏆 más barata» y «a quién conviene comprarle» la "
+                "recomienda.\n\n"
+                "La app lo detecta comparando cada marca con sus equivalentes de los OTROS "
+                "proveedores (la mediana, con al menos 30 comparaciones contra dos o más), y "
+                "sugiere el coeficiente que la pone en línea. **Lo decidís vos**: el sugerido es "
+                "una estimación.\n\n"
+                "Queda guardado y se aplica en cada importación de esa marca. Con la casilla, "
+                "también lleva a la nueva escala lo que ya está cargado —y su historial, para "
+                "que no parezca un aumento—."
+            )
+            _escala = escala_de_precios_por_marca()
+            _marcas_coef = [m for m in marcas_info if m["tipo"] != "OEM"]
+            _tabla_escala = []
+            for _m in _marcas_coef:
+                _d = _escala.get(_m["nombre"])
+                if not _d:
+                    continue
+                _tabla_escala.append({
+                    "Marca": _m["nombre"],
+                    "Cuesta, contra sus equivalentes": f"×{miles(_d['factor'], 2)}",
+                    "Comparaciones": _d["comparaciones"],
+                    "Contra": ", ".join(_d["contra"][:4]),
+                    "Coeficiente": f"×{miles(coeficiente_de_lista(_m['id']), 2)}",
+                    "": "⚠️ fuera de escala" if _d["fuera"] else "",
+                })
+            if _tabla_escala:
+                st.dataframe(_tabla_escala, width="stretch", hide_index=True)
+            _fuera_nombres = [t["Marca"] for t in _tabla_escala if t[""]]
+            _nombres_coef = [m["nombre"] for m in _marcas_coef]
+            _marca_coef = st.selectbox(
+                "Marca:", _nombres_coef, key="marca_coeficiente",
+                index=_nombres_coef.index(_fuera_nombres[0]) if _fuera_nombres else 0)
+            _id_coef = next(m["id"] for m in _marcas_coef if m["nombre"] == _marca_coef)
+            _actual = coeficiente_de_lista(_id_coef)
+            _d_coef = _escala.get(_marca_coef)
+            _sugerido = round(_actual / _d_coef["factor"], 2) if _d_coef and _d_coef["fuera"] else None
+            if _sugerido:
+                st.warning(f"**{_marca_coef}** está fuera de escala: cuesta ×"
+                           f"{miles(_d_coef['factor'], 2)} lo que sus equivalentes. Sugerido: "
+                           f"**×{miles(_sugerido, 2)}**.")
+            _nuevo_coef = st.number_input(
+                "Coeficiente (1 = la lista tal cual):", min_value=0.001,
+                value=float(_sugerido or _actual), step=0.1, format="%.3f",
+                key=f"coef_valor_{_id_coef}")
+            _a_lo_cargado = st.checkbox("Llevar también los precios que ya están cargados a la "
+                                        "nueva escala", value=True, key="coef_a_lo_cargado")
+            if candado('cambiar el coeficiente de una lista',
+                       st.button("📏 Guardar el coeficiente",
+                                 disabled=abs(_nuevo_coef - _actual) < 1e-9),
+                       'cambiar_el_coeficiente_de_una_lista'):
+                _n_coef = guardar_coeficiente_de_lista(_id_coef, _nuevo_coef, _a_lo_cargado)
+                invalidar_salud()
+                avisar("success", f"Coeficiente de {_marca_coef}: ×{miles(_nuevo_coef, 2)}. "
+                                  + (f"Se llevaron {miles(_n_coef)} precio(s) a la nueva escala."
+                                     if _a_lo_cargado else
+                                     "Se aplica desde la próxima importación."))
+                st.rerun()
+
+            st.markdown("---")
             st.markdown("**💲 Aumentar/bajar precios por porcentaje**")
             st.caption("Aplica el ajuste a todos los productos con precio cargado de la marca elegida.")
             marca_precio = st.selectbox("Marca:", nombres_para_fusion, key="marca_ajuste_precio")

@@ -722,6 +722,10 @@ if pagina == PAGINAS[2]:
                     with db_lock, transaccion():
                         prov_id = get_or_create_marca(nombre_prov, "PROVEEDOR")
                         oem_id = get_or_create_marca("OEM / FABRICA", "OEM")
+                        # El coeficiente de la lista de este proveedor, si se cargó uno: ver
+                        # guardar_coeficiente_de_lista(). Sin esto, corregir la escala una
+                        # vez no alcanzaba: la lista siguiente volvía a traer los crudos.
+                        _coef_lista = coeficiente_de_lista(prov_id)
 
                         for n, fila in enumerate(filas_datos):
                             def celda(idx):
@@ -782,6 +786,8 @@ if pagina == PAGINAS[2]:
                             if precio_fila is not None and precio_fila <= 0:
                                 precios_en_cero += 1
                                 precio_fila = None
+                            if precio_fila is not None and _coef_lista != 1:
+                                precio_fila = round(precio_fila * _coef_lista, 2)
                             stock_fila = leer_numero(celda(idx_stock)) if idx_stock is not None else None
 
                             # El código de barras de esta fila, si la lista lo trae. Va pegado
@@ -1121,8 +1127,11 @@ if pagina == PAGINAS[2]:
                             "la equivalencia sola cuando el mismo código llegue desde la lista de otro "
                             "proveedor, o podés vincularlos a mano desde 'Vincular manual'."
                         )
+                    olvidar_la_escala_de_precios()
                     if precios_actualizados:
-                        st.success(f"💲 Se actualizaron {precios_actualizados} precio(s).")
+                        st.success(f"💲 Se actualizaron {precios_actualizados} precio(s)."
+                                   + (f" Con el coeficiente de la lista: ×{miles(_coef_lista)}."
+                                      if _coef_lista != 1 else ""))
 
                     # Los frenados se muestran AFUERA de este bloque (ver más abajo). Adentro no
                     # servía: este bloque solo corre en el toque de «Procesar», así que al

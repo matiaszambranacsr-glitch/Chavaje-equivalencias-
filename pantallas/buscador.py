@@ -898,9 +898,12 @@ if pagina == PAGINAS[0]:
                         # El kit queda afuera de la comparación: casi siempre sale más caro que
                         # la pieza suelta, y coronarlo «el más barato» sería comparar dos cosas
                         # distintas. Al revés, la pieza suelta adentro de un kit tampoco.
+                        # Ni la marca con la lista en otra escala: ver escala_de_precios_por_marca().
+                        _fuera_escala = marcas_con_precios_fuera_de_escala()
                         candidatos_precio = [f for f in res
                                              if f.get("Precio") and (f.get("Stock") or 0) > 0
-                                             and not f.get("_complementario")]
+                                             and not f.get("_complementario")
+                                             and f.get("Marca") not in _fuera_escala]
                         id_mas_barato = min(candidatos_precio, key=lambda f: f["Precio"])["ID"] if candidatos_precio else None
                         for f in res:
                             f["💰"] = "🏆 Más barato en stock" if f["ID"] == id_mas_barato else ""
@@ -933,6 +936,20 @@ if pagina == PAGINAS[0]:
                                     column_order=columnas_que_dicen_algo(mostrar),
                                     column_config=CONFIG_COLUMNAS_RESULTADO,
                                 )
+                            # Debajo de los precios, que es donde se mira antes de cotizar.
+                            _fuera_aca = sorted({f.get("Marca") for f in res
+                                                 if f.get("Precio")} & _fuera_escala)
+                            if _fuera_aca:
+                                st.warning(
+                                    f"⚠️ Los precios de **{', '.join(_fuera_aca)}** están en "
+                                    "otra escala que los de las demás marcas (unas "
+                                    + ", ".join(
+                                        f"{miles(1 / escala_de_precios_por_marca()[_m]['factor'], 0)}"
+                                        f" veces {'menos' if escala_de_precios_por_marca()[_m]['factor'] < 1 else 'más'}"
+                                        for _m in _fuera_aca)
+                                    + "): revisalos antes de cotizar. Se corrige con el "
+                                    "coeficiente de la lista, en "
+                                    f"{miga_hasta('Marcas')} → 📏 Coeficiente de la lista.")
 
                         # La pregunta que sigue siempre a «¿lo tenés?»: ¿le sirve al auto del
                         # cliente? La app tiene el dato en los catálogos de fabricante y no lo

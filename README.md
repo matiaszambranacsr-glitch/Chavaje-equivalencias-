@@ -6263,6 +6263,31 @@ compara otra vez salteando las dudas, y si aparece una contradicción, gana esa.
   y no entra ninguna.
 - Aprobaciones existentes: ninguna cambia de color.
 
+### 📏 Una lista entera en otra escala de precios
+
+En la base real, **TARANTO cuesta 0,07 veces lo que sus equivalentes** —una junta de tapa a
+$1.505 y la misma de ILLINOIS a $24.140— en 1.768 comparaciones, contra los cuatro proveedores
+con que cruza. Ninguna otra marca se aparta así (están entre ×0,6 y ×2,1). No es que sea
+barata: la lista entró sin el coeficiente que muchos distribuidores publican aparte, o es vieja.
+Y la app sacaba conclusiones de eso: «A quién conviene comprarle» recomendaba TARANTO «en el 100%
+de los casos, por 408%», el buscador la coronaba «🏆 Más barato», la cotización por WhatsApp
+mandaba esos precios, y el aviso de «precios que no cierran» contaba 1.570 pares que tapaban los
+de verdad.
+
+- **Se detecta** (`escala_de_precios_por_marca()`): cada marca contra sus equivalentes de los
+  otros proveedores, con al menos 30 comparaciones contra dos o más; fuera de escala si se
+  aparta más de 3 veces.
+- **Se avisa**: en los avisos del día («Los precios de TARANTO están en otra escala»), debajo de
+  los resultados del buscador y en la cotización por WhatsApp.
+- **No se sacan conclusiones con ella**: queda afuera de «A quién conviene comprarle» y del «🏆
+  Más barato». El aviso de precios que no cierran baja de 1.570 pares a **14**.
+- **Se corrige con un coeficiente por proveedor** (Administrar → 🏷️ Marcas → 📏 Coeficiente de
+  la lista): la app sugiere el que la pone en línea (×15,24 para TARANTO), se guarda y **se
+  aplica en cada importación** —el ajuste por porcentaje que había se perdía con la lista
+  siguiente—. Con la casilla, lleva también lo ya cargado y su historial a la nueva escala, para
+  que no parezca un aumento. Probado: 8.708 precios, y la 271205 pasa de $1.505 a $22.936.
+- Arreglado de paso: las tablas mostraban columnas internas («_mediana», «_prop», «_total»).
+
 ## 🔗 Revisar sugeridas: primero lo que hay que hacer
 
 Mirado con capturas sobre la base real (15.308 pendientes en 8 listas):

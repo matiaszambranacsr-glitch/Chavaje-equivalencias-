@@ -656,6 +656,103 @@ def fusionar_marcas(marca_origen_id, marca_destino_id):
     return movidos, fusionados
 
 
+# LA ESCALA DE PRECIOS DE CADA LISTA. En la base real, TARANTO cuesta 0,07 veces lo que sus
+# equivalentes —una junta de tapa a $1.505 contra $24.140 la misma de ILLINOIS— en 1.768
+# comparaciones y contra los cuatro proveedores con que cruza; los demás están entre 0,6 y 2,1.
+# No es «más barata»: la lista viene sin el coeficiente que muchos distribuidores publican
+# aparte, o es vieja. Y la app sacaba conclusiones de eso: la recomendaba en «A quién conviene
+# comprarle», la coronaba «🏆 Más barato», y cotizaba esos precios por WhatsApp.
+FUERA_DE_ESCALA = 3          # más de 3 veces por arriba o por abajo de sus equivalentes
+_MINIMO_PARA_LA_ESCALA = 30  # comparaciones, y con al menos dos proveedores distintos
+
+
+def _escala_guardada():
+    """Del proceso (ver del_proceso()): la comparten todas las sesiones y la tarea de fondo."""
+    return del_proceso("escala_de_precios", lambda: {"cuando": 0.0, "datos": None})
+
+
+def escala_de_precios_por_marca(segundos_de_memoria=300):
+    """{marca: {"factor", "comparaciones", "contra", "fuera"}}: cuántas veces cuesta cada marca
+    lo que sus equivalentes de OTROS proveedores (la mediana), contra cuáles, y si está fuera de
+    escala. Se recuerda unos minutos: la usa cada búsqueda, y cambia solo al importar."""
+    _guardada = _escala_guardada()
+    if (_guardada["datos"] is not None
+            and time.monotonic() - _guardada["cuando"] < segundos_de_memoria):
+        return _guardada["datos"]
+    c.execute("""-- FILA Y NO PAR: cada marca mira su lado de cada vínculo; el espejo es el
+                 -- lado de la otra marca, y es justo lo que hace falta.
+                 SELECT ma.nombre AS marca, mb.nombre AS otra, pa.precio AS pa, pb.precio AS pb
+                 FROM equivalencias e
+                 JOIN productos pa ON pa.id = e.producto_a_id
+                 JOIN productos pb ON pb.id = e.producto_b_id
+                 JOIN marcas ma ON ma.id = pa.marca_id
+                 JOIN marcas mb ON mb.id = pb.marca_id
+                 WHERE pa.precio > 0 AND pb.precio > 0 AND ma.id <> mb.id
+                   AND ma.tipo <> 'OEM' AND mb.tipo <> 'OEM'
+                   AND COALESCE(e.confianza, 50) >= 50""")
+    razones, contra = {}, {}
+    for r in c.fetchall():
+        razones.setdefault(r["marca"], []).append(r["pa"] / r["pb"])
+        contra.setdefault(r["marca"], set()).add(r["otra"])
+    datos = {}
+    for marca, rs in razones.items():
+        rs.sort()
+        factor = rs[len(rs) // 2]
+        datos[marca] = {
+            "factor": factor, "comparaciones": len(rs), "contra": sorted(contra[marca]),
+            "fuera": (len(rs) >= _MINIMO_PARA_LA_ESCALA and len(contra[marca]) >= 2
+                      and not 1 / FUERA_DE_ESCALA <= factor <= FUERA_DE_ESCALA),
+        }
+    _guardada.update(cuando=time.monotonic(), datos=datos)
+    return datos
+
+
+def marcas_con_precios_fuera_de_escala():
+    """Los nombres de las marcas cuyos precios no se pueden comparar con los de las demás."""
+    try:
+        return {m for m, d in escala_de_precios_por_marca().items() if d["fuera"]}
+    except sqlite3.OperationalError as _err:
+        anotar_error("marcas_con_precios_fuera_de_escala", _err)
+        return set()
+
+
+def olvidar_la_escala_de_precios():
+    _escala_guardada().update(cuando=0.0, datos=None)
+
+
+def coeficiente_de_lista(marca_id):
+    """Por cuánto se multiplica el precio de la lista de esta marca al importarla (1 si nada)."""
+    try:
+        return float(obtener_config(f"coeficiente_lista_{marca_id}", "1") or 1) or 1.0
+    except ValueError:
+        return 1.0
+
+
+def guardar_coeficiente_de_lista(marca_id, coeficiente, aplicar_a_lo_cargado=True):
+    """Guarda el coeficiente de la lista de una marca, que se aplica en cada importación. Con
+    aplicar_a_lo_cargado, lleva también los precios que ya están —y su historial— a la nueva
+    escala: es la misma lista en otra unidad, no un aumento, así que «Cuánto te aumentó cada
+    proveedor» no tiene que verlo como uno. Devuelve cuántos precios cambió."""
+    coeficiente = float(coeficiente)
+    if coeficiente <= 0:
+        raise ValueError("El coeficiente tiene que ser mayor que cero.")
+    factor = coeficiente / coeficiente_de_lista(marca_id)
+    afectados = 0
+    with db_lock, transaccion():
+        c.execute("INSERT INTO configuracion (clave, valor) VALUES (?, ?) "
+                  "ON CONFLICT(clave) DO UPDATE SET valor = excluded.valor",
+                  (f"coeficiente_lista_{marca_id}", repr(coeficiente)))
+        if aplicar_a_lo_cargado and factor != 1:
+            c.execute("UPDATE productos SET precio = ROUND(precio * ?, 2) "
+                      "WHERE marca_id = ? AND precio > 0", (factor, marca_id))
+            afectados = c.rowcount
+            c.execute("UPDATE historial_precios SET precio = ROUND(precio * ?, 2) "
+                      "WHERE producto_id IN (SELECT id FROM productos WHERE marca_id = ?)",
+                      (factor, marca_id))
+    olvidar_la_escala_de_precios()
+    return afectados
+
+
 def aumentar_precios_por_marca(marca_id, porcentaje):
     """Sube (o baja, con porcentaje negativo) todos los precios cargados de una marca."""
     with db_lock:
@@ -666,6 +763,7 @@ def aumentar_precios_por_marca(marca_id, porcentaje):
         )
         afectados = c.rowcount
         conn.commit()
+    olvidar_la_escala_de_precios()
     return afectados
 
 

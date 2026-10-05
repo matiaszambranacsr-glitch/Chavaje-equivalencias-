@@ -550,6 +550,12 @@ Administrar → Mantenimiento.
             )
         else:
             st.dataframe(quitar_id(conviene), width="stretch", hide_index=True)
+        _fuera_conv = sorted(marcas_con_precios_fuera_de_escala())
+        if _fuera_conv:
+            st.caption(f"⚠️ No entra{'n' if len(_fuera_conv) > 1 else ''} "
+                       f"{', '.join(_fuera_conv)}: sus precios están en otra escala que los de "
+                       f"sus equivalentes (ver {miga_hasta('Marcas')} → 📏 Coeficiente de la "
+                       "lista).")
 
         st.markdown("---")
         st.markdown("**🧊 Clavos: lo que no se mueve**")
