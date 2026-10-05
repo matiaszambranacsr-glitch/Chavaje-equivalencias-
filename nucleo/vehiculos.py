@@ -193,6 +193,9 @@ MARCAS_DE_REPUESTO = {
 }
 
 
+# ============================================================================================
+# DESCRIPCIONES PEGADAS Y BÚSQUEDA POR TEXTO
+# ============================================================================================
 # Marcas que se usan para despegar descripciones. Se dejan solo las de 5 letras o más y se
 # excluyen las que además son palabras comunes del rubro: separar por "MAN" partiría MANGUERA
 # en "MAN GUERA", y por "RAM" partiría RAMAL. Con las largas el riesgo desaparece y son

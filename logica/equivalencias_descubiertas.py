@@ -710,7 +710,7 @@ PROPORCION_QUE_NO_CUADRA = 0.4
 
 # Los motivos de firmas_compatibles() que dicen que son piezas DISTINTAS, no solo que no hay
 # pruebas de que sean la misma: los mismos que tumban un par en la revisión (ver
-# _MOTIVOS_QUE_CONTRADICEN en descripciones.py, que se carga después), más el rubro. «Solo
+# _MOTIVOS_QUE_CONTRADICEN en firmas.py, que se carga después), más el rubro. «Solo
 # comparten 1 palabra» o «piezas distintas: SONDA y SENSOR» no son contradicciones: son dos
 # formas de escribir, y marcarlos llenaba la lista de sondas buenas.
 _MOTIVOS_DE_OTRA_PIEZA = ("rubros distintos", "posiciones distintas", "siglas distintas",
@@ -2244,7 +2244,7 @@ def _es_accesorio_del_numero(numero, cod, desc, otros):
 # Las palabras de la firma que dicen DÓNDE va la pieza, para comparar dos filas que citan el
 # mismo número. «TAPA ARBOL DE LEVAS» y «TAPA DE VALVULAS» son la misma tapa en muchos motores
 # (en el Fiat Tipo, 7679315 es las dos, en los mismos espesores), así que cuentan igual.
-# (Se suma a _LUGARES_DE_LA_PIEZA adentro de la función: descripciones.py se carga después.)
+# (Se suma a _LUGARES_DE_LA_PIEZA adentro de la función: firmas.py se carga después.)
 _LUGARES_EXTRA_PARA_EL_NUMERO = {"INYECTOR", "CAPUCHON"}
 _LUGAR_QUE_ES_EL_MISMO = {"LEVAS": "VALVULA", "SALIDA": "ESCAPE"}
 # Las que nombran la familia y no la pieza: «Despiece», «Juego de…», «KIT DE REPARACION».

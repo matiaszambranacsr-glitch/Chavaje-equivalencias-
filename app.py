@@ -61,6 +61,14 @@ específico, y las pantallas quedan todas al final:
     logica/descripciones.py
         · AÑOS, MODELOS Y FAMILIAS DE REPUESTO
         · CATÁLOGOS DE APLICACIONES (qué repuesto le va a cada auto)
+    logica/firmas.py
+        · LA FICHA DE CADA PIEZA Y LA COMPARACIÓN ENTRE DOS
+    logica/evidencia.py
+        · LA EVIDENCIA DE CADA PAR Y LAS EQUIVALENCIAS QUE SE DEDUCEN
+    logica/repuestos_por_auto.py
+        · REPUESTOS POR AUTO Y LECTOR DE VIN
+    logica/busqueda_por_texto.py
+        · DESCRIPCIONES PEGADAS Y BÚSQUEDA POR TEXTO
     logica/negocio.py
         · COMBOS DE REPUESTOS RELACIONADOS (ej: correa de distribución -> kit + tensor + bomba de agua)
         · LO QUE VA CON ESTO: las otras piezas del MISMO TRABAJO, para el MISMO MOTOR, del catálogo

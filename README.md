@@ -6305,6 +6305,22 @@ de diferencia. Eso se medía como un aumento.
   herramienta, «💲 Códigos que vinieron dos veces con precios distintos» (Limpiar y corregir),
   con la lista para bajar, y un aviso del día: son 150.
 
+### 🗂️ `descripciones.py`, en cinco archivos por tema
+
+`logica/descripciones.py` tenía 5.400 renglones con cinco temas y dos títulos. Ahora:
+
+| Archivo | Qué tiene |
+|---|---|
+| `logica/descripciones.py` | Años, modelos, familias de repuesto, catálogos de aplicaciones (1.937) |
+| `logica/firmas.py` | La ficha de cada pieza y la comparación entre dos: `firma_de_producto()`, `firmas_compatibles()` (1.586) |
+| `logica/evidencia.py` | La evidencia de cada par y las equivalencias que se deducen (1.174) |
+| `logica/repuestos_por_auto.py` | Los repuestos de un auto y el lector de VIN (439) |
+| `logica/busqueda_por_texto.py` | Descripciones pegadas y búsqueda por texto (298) |
+
+Las partes de la lógica corren una detrás de la otra en el mismo espacio de nombres (ver
+`orden.py`), así que cortar en orden no cambia nada: comprobado con el auditor, el núcleo, las
+pruebas de la revisión contra las 20.306 aprobaciones y las 30 pantallas.
+
 ## 🔗 Revisar sugeridas: primero lo que hay que hacer
 
 Mirado con capturas sobre la base real (15.308 pendientes en 8 listas):
