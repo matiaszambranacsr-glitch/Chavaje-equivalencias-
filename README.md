@@ -6466,18 +6466,32 @@ se sube a `main` es una actualización), y la app arranca desde la copia de la r
 GitHub. Las de los catálogos y Mercado Libre se vuelven a bajar solas por su link; las subidas a
 mano no tienen link, así que se perdían.
 
-- **Ahora la copia lleva las fotos propias** (`ORIGENES_DE_FOTOS_PROPIAS`: las subidas desde el
-  teléfono y las elegidas de una página con «🔗 Desde una dirección web»), enteras y con su
-  firma para comparar: no hay que volver a procesarlas. Pesan unos 45 KB cada una.
-- Tope de 35 MB para esas fotos (unas 600): si se pasa, entran las más nuevas y «💾 Backup y
-  config» avisa cuántas quedaron afuera, para bajar el backup completo.
-- Al restaurar, cada una vuelve a ser la foto de la ficha de su producto
-  (`pedir_de_nuevo_las_fotos()`).
-- La copia se sube cada 15 minutos si hubo cambios: una foto recién subida queda a salvo como
-  mucho 15 minutos después.
+- **Las fotos propias** (`ORIGENES_DE_FOTOS_PROPIAS`: las subidas desde el teléfono y las
+  elegidas de una página con «🔗 Desde una dirección web») **van a la rama de copias en
+  archivos aparte**: `fotos_propias/bloque_NNNNN.db.gz`, de a 300 fotos (~15 MB), enteras y con
+  su firma para comparar. Así no hay tope de 100 MB para las fotos, y la copia de la base —que
+  se sube cada vez que cambia un precio o una venta— sigue liviana.
+  - Un bloque se sube **solo cuando cambian sus fotos** (`subir_las_fotos_si_cambiaron()`,
+    después de la base, cada 15 minutos). Los bloques son por número de foto: una nueva cae en
+    el último y borrar una toca solo el suyo.
+  - Cada subida arma un commit sin padres; **lo que no cambia va por su sha** (sin volver a
+    subirlo): antes el commit tenía solo la base y el LEEME, y subir la base habría borrado los
+    bloques (`_arbol_de_la_rama()`, `_publicar_en_la_rama()`).
+  - Al arrancar, después de restaurar la base se bajan los bloques y cada foto vuelve a ser la
+    de la ficha de su producto. **Si no se pueden bajar**, queda anotado
+    (`fotos_github_sin_bajar`): la copia automática lo reintenta y **no sube ni borra fotos**
+    hasta tenerlas, para no pisar en GitHub lo que falta acá.
+  - Lo que hace falta para bajarlos está en `logica/datos.py`: la restauración corre mientras se
+    carga ese archivo, antes que las demás partes.
+  - Van comprimidos y cifrados con `clave_copia`, igual que la base.
+- El backup liviano que se baja a mano (y la copia si va a otra rama que no sea la de copias)
+  lleva las fotos propias adentro, con un tope de 35 MB.
 - El mensaje del paso 2 ahora distingue los tres casos: no hay fotos, hay fotos sin procesar
   (antes decía «no hay ninguna») o las que hay no sirven para comparar.
-- Pruebas: `python3 pruebas_de_las_copias.py`.
+- Pruebas: `python3 pruebas_de_las_copias.py` y `python3 pruebas_de_las_copias_en_github.py`,
+  que levanta un GitHub de mentira en la máquina y prueba el ciclo entero: subir, «reiniciar»
+  con el disco vacío y recuperar las fotos; que subir la base no borre los bloques; que una
+  foto nueva suba un solo bloque; y que sin poder bajarlas no se borre nada.
 
 ## 🚗 Repuestos por auto: el Gol no es el Golf
 

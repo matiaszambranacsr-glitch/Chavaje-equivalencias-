@@ -410,6 +410,103 @@ def bajar_la_copia_de_github():
                 pass
 
 
+# LOS BLOQUES DE FOTOS PROPIAS EN LA RAMA DE COPIAS (ver subir_las_fotos_si_cambiaron() y
+# _sacar_las_fotos()). Lo que hace falta para BAJARLOS está acá y no al lado de la subida: la
+# restauración del arranque corre mientras se carga este archivo, antes que las otras partes.
+CARPETA_DE_FOTOS_EN_GITHUB = "fotos_propias"
+_COLUMNAS_DE_UN_BLOQUE = ("id", "producto_id", "imagen_data", "firma_blob", "estado", "origen",
+                          "fuente", "created_at", "firma_version")
+
+
+def _cabeceras_de_github(cfg, accept="application/vnd.github+json"):
+    return {"Authorization": f"Bearer {cfg['token']}", "Accept": accept}
+
+
+def _arbol_de_la_rama(cfg, cabeceras):
+    """[{path, mode, type, sha}] de los archivos que hay hoy en la rama de copias; [] si la
+    rama todavía no existe; None si GitHub no contestó.
+
+    Hace falta porque cada subida arma un commit nuevo y sin padres: lo que no se ponga en el
+    árbol desaparece de la rama. Antes la rama era la base y el LEEME, y daba igual; con los
+    bloques de fotos al lado, subir la base sin traerlos los borraba."""
+    try:
+        r = requests.get(f"{API_DE_GITHUB}/repos/{cfg['repo']}/git/trees/{cfg['rama']}",
+                         headers=cabeceras, params={"recursive": "1"}, timeout=30)
+    except Exception as _err:
+        anotar_error("_arbol_de_la_rama", _err)
+        return None
+    if r.status_code in (404, 409):         # la rama no existe, o está vacía
+        return []
+    if r.status_code != 200:
+        anotar_error("_arbol_de_la_rama", f"GitHub respondió {r.status_code}")
+        return None
+    cuerpo = r.json()
+    if cuerpo.get("truncated"):
+        # Con el árbol cortado no se sabe qué hay: mejor no subir que borrar sin querer.
+        anotar_error("_arbol_de_la_rama", "GitHub devolvió el árbol incompleto")
+        return None
+    return [e for e in cuerpo.get("tree") or [] if e.get("type") == "blob"]
+
+
+def filas_de_un_bloque_de_fotos(datos):
+    """Lo contrario de archivo_del_bloque_de_fotos(): [(columnas…)] de un bloque bajado."""
+    ruta = f"{ARCHIVO_COPIA_BAJADA}.{uuid.uuid4().hex}.bloque"
+    try:
+        with open(ruta, "wb") as f:
+            f.write(gzip.decompress(descifrar_copia(datos)))
+        origen = sqlite3.connect(f"file:{ruta}?mode=ro&immutable=1", uri=True)
+        try:
+            return [tuple(r) for r in origen.execute(
+                f"SELECT {', '.join(_COLUMNAS_DE_UN_BLOQUE)} FROM producto_fotos ORDER BY id")]
+        finally:
+            origen.close()
+    finally:
+        try:
+            os.remove(ruta)
+        except OSError as _err:
+            anotar_error("filas_de_un_bloque_de_fotos", _err)
+
+
+def meter_las_fotos_bajadas(conexion, filas):
+    """Pone en una base las fotos de los bloques bajados. Solo las de productos que existen: la
+    base y los bloques se suben por separado, y un producto borrado entre una y otra copia no
+    tiene que volver como foto huérfana."""
+    conexion.executemany(
+        f"""INSERT OR REPLACE INTO producto_fotos ({', '.join(_COLUMNAS_DE_UN_BLOQUE)})
+            SELECT {', '.join('?' * len(_COLUMNAS_DE_UN_BLOQUE))}
+            WHERE EXISTS (SELECT 1 FROM productos WHERE id = ?)""",
+        [fila + (fila[1],) for fila in filas])
+    conexion.commit()
+
+
+def bajar_los_bloques_de_fotos(cfg=None):
+    """[(columnas de producto_fotos…)] de todos los bloques de la rama de copias; [] si no hay
+    ninguno; None si alguno no se pudo bajar o abrir: o están todos, o no se usa ninguno."""
+    cfg = cfg or config_github()
+    if not cfg or cfg["rama"] != RAMA_DE_LA_COPIA:
+        return []
+    arbol = _arbol_de_la_rama(cfg, _cabeceras_de_github(cfg))
+    if arbol is None:
+        return None
+    filas = []
+    for e in sorted(arbol, key=lambda e: e["path"]):
+        if not e["path"].startswith(CARPETA_DE_FOTOS_EN_GITHUB + "/"):
+            continue
+        try:
+            r = requests.get(f"{API_DE_GITHUB}/repos/{cfg['repo']}/contents/{e['path']}",
+                             headers=_cabeceras_de_github(cfg, "application/vnd.github.raw"),
+                             params={"ref": cfg["rama"]}, timeout=(10, 120))
+            if r.status_code != 200:
+                anotar_error("bajar_los_bloques_de_fotos",
+                             f"{e['path']}: GitHub respondió {r.status_code}")
+                return None
+            filas.extend(filas_de_un_bloque_de_fotos(r.content))
+        except Exception as _err:
+            anotar_error("bajar_los_bloques_de_fotos", _err)
+            return None
+    return filas
+
+
 def pedir_de_nuevo_las_fotos(conexion):
     """Después de restaurar una copia: la copia no trae las fotos, solo sus links (ver
     _sacar_las_fotos()), así que se piden de nuevo y se reabren las tareas de fotos y firmas
@@ -466,6 +563,17 @@ def _restaurar_desde_semilla(conexion):
         origen = sqlite3.connect(semilla)
         origen.backup(conexion)
         origen.close()
+        # Las fotos propias vienen aparte, en sus bloques (ver subir_las_fotos_si_cambiaron()).
+        # Si no se pueden bajar ahora, se anota: la copia automática las reintenta y no sube
+        # fotos hasta tenerlas, para no borrar de GitHub lo que falta acá.
+        if semilla == ARCHIVO_COPIA_BAJADA:
+            filas = bajar_los_bloques_de_fotos()
+            if filas is None:
+                conexion.execute("INSERT OR REPLACE INTO configuracion (clave, valor) "
+                                 "VALUES ('fotos_github_sin_bajar', '1')")
+                conexion.commit()
+            elif filas:
+                meter_las_fotos_bajadas(conexion, filas)
         pedir_de_nuevo_las_fotos(conexion)
         return True
     except Exception as _err:

@@ -1588,6 +1588,9 @@ es una base SQLite que se abre con la app (Backup y config -> Restaurar).
 Si la copia pasa de 90 MB va en partes (.parte1, .parte2...): la app las junta sola. A mano,
 pegalas en orden en un solo archivo (Linux/Mac: cat X.parte1 X.parte2 > X; Windows:
 copy /b X.parte1+X.parte2 X) y segui como arriba. El .partes dice cuántas son.
+Las fotos que se subieron a mano van aparte, en la carpeta fotos_propias, en bloques de 300:
+cada bloque es una base SQLite comprimida (y cifrada si la copia lo está) con esas fotos. La
+app los baja y los vuelve a poner solos al arrancar.
 """
 
 
@@ -1627,26 +1630,30 @@ def _cuerpo_json_con_base64(campos, clave, datos):
                      base64.b64encode(datos), b'"}'])
 
 
-def _subir_a_la_rama_de_copias(cfg, datos, mensaje, cabeceras):
-    """Sube la copia como el ÚNICO commit de la rama de copias, reemplazando al anterior.
+def _publicar_en_la_rama(cfg, cabeceras, arbol, nuevos, quitar, mensaje):
+    """Deja la rama de copias como el ÚNICO commit, con los archivos de `arbol` que siguen
+    (los que no se reemplazan ni cumplen `quitar(ruta)`) más los `nuevos` [(ruta, bytes, texto
+    o una función que devuelve los bytes)]. Devuelve (ok, código de respuesta, detalle).
 
     Es la API de datos de git en vez de la de archivos: la de archivos solo sabe agregar
-    commits encima. Acá se arma un commit sin padres con el archivo y un LEEME, y la rama se
-    mueve a ese commit a la fuerza. El commit viejo queda sin nadie que lo apunte y GitHub lo
-    limpia solo. Devuelve (ok, código de respuesta, detalle)."""
+    commits encima. El commit viejo queda sin nadie que lo apunte y GitHub lo limpia solo.
+    Los archivos que siguen no se vuelven a subir: van por su sha."""
     base = f"{API_DE_GITHUB}/repos/{cfg['repo']}/git"
-    # GitHub no acepta un archivo de más de 100 MB. Si la copia pasa de
-    # TOPE_DE_UN_ARCHIVO_EN_GITHUB va en partes, con un índice al lado: ver
-    # partes_de_la_copia() y bajar_la_copia_de_github(), que las vuelve a juntar.
-    entradas = []
-    for ruta, pedazo in partes_de_la_copia(cfg["archivo"], datos):
-        if isinstance(pedazo, str):          # el índice: texto, va entero en el árbol
-            entradas.append({"path": ruta, "mode": "100644", "type": "blob",
-                             "content": pedazo})
+    rutas_nuevas = {ruta for ruta, _ in nuevos}
+    entradas = [{"path": e["path"], "mode": e.get("mode", "100644"), "type": "blob",
+                 "sha": e["sha"]}
+                for e in arbol if e["path"] not in rutas_nuevas and e["path"] != "LEEME.txt"
+                and not quitar(e["path"])]
+    for ruta, pedazo in nuevos:
+        if callable(pedazo):                 # se arma recién ahora: de a uno en memoria
+            pedazo = pedazo()
+        if isinstance(pedazo, str):          # texto: va entero en el árbol
+            entradas.append({"path": ruta, "mode": "100644", "type": "blob", "content": pedazo})
             continue
         r = requests.post(f"{base}/blobs", headers={**cabeceras, "Content-Type": "application/json"},
                           timeout=120,
                           data=_cuerpo_json_con_base64({"encoding": "base64"}, "content", pedazo))
+        del pedazo
         if r.status_code != 201:
             return False, r.status_code, r.text[:200]
         entradas.append({"path": ruta, "mode": "100644", "type": "blob", "sha": r.json()["sha"]})
@@ -1667,6 +1674,87 @@ def _subir_a_la_rama_de_copias(cfg, datos, mensaje, cabeceras):
         r = requests.post(f"{base}/refs", headers=cabeceras, timeout=30,
                           json={"ref": f"refs/heads/{cfg['rama']}", "sha": commit})
     return r.status_code in (200, 201), r.status_code, r.text[:200]
+
+
+def _subir_a_la_rama_de_copias(cfg, datos, mensaje, cabeceras):
+    """Sube la copia de la base a la rama de copias, reemplazando la anterior y dejando lo
+    demás que haya (los bloques de fotos). Devuelve (ok, código de respuesta, detalle).
+
+    GitHub no acepta un archivo de más de 100 MB. Si la copia pasa de
+    TOPE_DE_UN_ARCHIVO_EN_GITHUB va en partes, con un índice al lado: ver partes_de_la_copia()
+    y bajar_la_copia_de_github(), que las vuelve a juntar. Las partes de una copia anterior se
+    sacan: todo lo que empieza con el nombre del archivo es de la copia vieja."""
+    arbol = _arbol_de_la_rama(cfg, cabeceras)
+    if arbol is None:
+        return False, None, "no se pudo leer qué hay en la rama de copias"
+    return _publicar_en_la_rama(cfg, cabeceras, arbol, partes_de_la_copia(cfg["archivo"], datos),
+                                lambda ruta: ruta.startswith(cfg["archivo"]), mensaje)
+
+
+def subir_las_fotos_si_cambiaron():
+    """Sube a la rama de copias los bloques de fotos propias que cambiaron, y saca los que ya no
+    tienen fotos. Devuelve (ok, mensaje); ok=None quiere decir que no hacía falta.
+
+    Si al arrancar no se pudieron bajar los bloques (ver traer_las_fotos_de_github()), primero
+    se reintenta eso, y no se sube NADA hasta que salga: con la base sin sus fotos, «sincronizar»
+    sería borrar de GitHub justo lo que hay que recuperar."""
+    cfg = config_github()
+    if not cfg or cfg["rama"] != RAMA_DE_LA_COPIA:
+        return None, "Las fotos van adentro de la copia (no es la rama de copias)."
+    if obtener_config("fotos_github_sin_bajar", "") == "1":
+        traidas = traer_las_fotos_de_github()
+        if traidas is None:
+            return False, "Todavía no se pudieron bajar las fotos de GitHub: no se sube nada."
+    locales = huellas_de_los_bloques_de_fotos()
+    try:
+        subidas = {int(k): v for k, v in
+                   json.loads(obtener_config("huellas_fotos_github", "") or "{}").items()}
+    except (ValueError, TypeError, AttributeError):
+        subidas = {}
+    cabeceras = _cabeceras_de_github(cfg)
+    arbol = _arbol_de_la_rama(cfg, cabeceras)
+    if arbol is None:
+        return False, "No se pudo leer qué hay en la rama de copias."
+    if not any(e["path"] == cfg["archivo"] or e["path"].startswith(cfg["archivo"] + ".")
+               for e in arbol):
+        # Sin la copia de la base en la rama, las fotos solas no sirven para arrancar: primero
+        # tiene que subir la base (ver subir_la_copia_si_cambio()).
+        return None, "Todavía no hay copia de la base en la rama."
+    en_github = {e["path"] for e in arbol}
+    cambiados = sorted(n for n, h in locales.items()
+                       if subidas.get(n) != h or ruta_del_bloque_de_fotos(n) not in en_github)
+    rutas_locales = {ruta_del_bloque_de_fotos(n) for n in locales}
+    sobran = [r for r in en_github
+              if r.startswith(CARPETA_DE_FOTOS_EN_GITHUB + "/") and r not in rutas_locales]
+    if not cambiados and not sobran:
+        return None, "Las fotos no cambiaron."
+    nuevos = [(ruta_del_bloque_de_fotos(n), (lambda n=n: archivo_del_bloque_de_fotos(n)))
+              for n in cambiados]
+    ok, codigo, texto = _publicar_en_la_rama(
+        cfg, cabeceras, arbol, nuevos,
+        lambda ruta: ruta.startswith(CARPETA_DE_FOTOS_EN_GITHUB + "/") and ruta not in rutas_locales,
+        f"Fotos propias — {len(cambiados)} bloque(s)")
+    if not ok:
+        texto = f"No se pudieron subir las fotos: GitHub respondió {codigo}. {texto}"
+        guardar_config("ultimo_backup_fotos_error", f"{datetime.now():%d/%m %H:%M} — {texto}")
+        return False, texto
+    guardar_config("huellas_fotos_github", json.dumps({str(n): h for n, h in locales.items()}))
+    guardar_config("ultimo_backup_fotos", datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+    guardar_config("ultimo_backup_fotos_error", "")
+    return True, f"Fotos subidas: {len(cambiados)} bloque(s)."
+
+
+def traer_las_fotos_de_github():
+    """Para cuando al arrancar no se pudieron bajar: las baja y las pone en la base de
+    trabajo. Devuelve cuántas, o None si todavía no se puede."""
+    filas = bajar_los_bloques_de_fotos()
+    if filas is None:
+        return None
+    with db_lock:
+        meter_las_fotos_bajadas(conn.conexion_real(), filas)
+        pedir_de_nuevo_las_fotos(conn.conexion_real())
+    guardar_config("fotos_github_sin_bajar", "")
+    return len(filas)
 
 
 def _subir_backup_a_github(cfg, datos_db, mensaje):

@@ -162,23 +162,34 @@ if pagina == PAGINAS[4]:
 
         if cantidad_fotos:
             # Antes era un cartel rojo: «cada reinicio te borra todas las fotos». Ya no pasa con
-            # las propias (ver _sacar_las_fotos()); queda avisar si alguna no entró por el tope.
+            # las propias: van a GitHub en bloques aparte (ver subir_las_fotos_si_cambiaron()).
+            if obtener_config("fotos_github_sin_bajar", "") == "1":
+                st.warning("⚠️ Al arrancar no se pudieron bajar de GitHub las fotos que subiste "
+                           "vos. La app lo reintenta sola cada 15 minutos, y mientras tanto no "
+                           "toca las que están guardadas allá.")
+            _err_fotos = obtener_config("ultimo_backup_fotos_error", "")
+            if _err_fotos:
+                st.warning(f"⚠️ La última subida de las fotos falló: {_err_fotos}")
+            _ult_fotos = obtener_config("ultimo_backup_fotos", "")
+            if _ult_fotos:
+                st.caption(f"📷 Tus fotos se guardaron en GitHub por última vez el {_ult_fotos[:16]}.")
             _fuera = fotos_propias_fuera_de_la_copia()
             if _fuera:
-                st.warning(
-                    f"⚠️ **{_fuera} foto(s) que subiste vos no entraron en la copia automática** "
-                    "(hay un tope para que siga entrando en GitHub): las más viejas se perderían "
-                    "en el próximo reinicio. Descargá el **backup completo** de acá abajo y "
-                    "guardalo vos.")
+                st.caption(f"En el último backup liviano bajado a mano no entraron {_fuera} "
+                           "foto(s) tuyas (tiene un tope de 35 MB): para tenerlas todas, bajá el "
+                           "backup completo.")
             explicar(
                 "Las fotos que subís vos sobreviven a los reinicios; las de internet se vuelven "
                 "a bajar solas.",
                 "El hosting borra el disco cada vez que la app se reinicia o se actualiza, y al "
-                "arrancar se restaura sola desde la copia del repositorio. Esa copia lleva las "
-                "fotos que subiste vos —desde el teléfono, o elegidas de una página—, que no "
-                "tienen de dónde volver a bajarse. Las que trajo la app de los catálogos y de "
-                "Mercado Libre van solo con su link, y se vuelven a bajar solas después del "
-                "reinicio: así la copia sigue entrando en GitHub (acepta hasta 100 MB).",
+                "arrancar se restaura sola desde la copia de GitHub.\n\n"
+                "· **Las fotos que subiste vos** —desde el teléfono, o elegidas de una página— "
+                "no tienen de dónde volver a bajarse, así que se guardan en GitHub en archivos "
+                "aparte, de a 300 fotos (unos 15 MB cada uno). Cada archivo se sube solo cuando "
+                "cambian sus fotos, así la copia de todo lo demás —que se sube cada vez que "
+                "cambia un precio— sigue liviana, y no hay un tope de 100 MB para las fotos.\n"
+                "· **Las que trajo la app** de los catálogos y de Mercado Libre van solo con su "
+                "link, y se vuelven a bajar solas después del reinicio.",
                 en_expander=True)
 
         if mb_fotos > 60:

@@ -66,21 +66,28 @@ def generar_backup_completo():
             anotar_error("generar_backup_completo", _err)
 
 
-# LAS FOTOS PROPIAS SE QUEDAN EN LA COPIA. Las que subiste a mano (desde el teléfono, o
+# LAS FOTOS PROPIAS NO SE PIERDEN EN UN REINICIO. Las que subiste a mano (desde el teléfono, o
 # elegidas de una página en «🔗 Desde una dirección web») no tienen un link de donde volver a
 # bajarlas: si la copia se las saca, se pierden en el próximo reinicio, y Streamlit Cloud
 # reinicia la app en cada actualización. Pasó: se subieron fotos, la app se actualizó, y la
 # búsqueda por foto decía «no hay ninguna foto cargada».
-# Pesan unos 45 KB cada una (500 px, ver agregar_foto_producto()) más su firma; con el tope,
-# la copia sigue lejos de los 100 MB que acepta GitHub. Si se pasa, quedan las más nuevas y se
-# anota cuántas no entraron (ver fotos_propias_fuera_de_la_copia()).
+#
+# Con la copia automática a la rama de copias van APARTE de la base, en bloques de
+# FOTOS_POR_BLOQUE (ver subir_las_fotos_si_cambiaron()): la base se sube entera cada vez que
+# cambia cualquier cosa —un precio, una venta—, y con cientos de MB de fotos adentro eso
+# trabaría el servidor cada quince minutos. Un bloque se sube solo cuando cambian SUS fotos.
+# En el backup que se baja a mano (y si la copia va a otra rama) van adentro de la base, con
+# el tope de abajo para que el archivo siga entrando en GitHub.
 ORIGENES_DE_FOTOS_PROPIAS = ("subida", "url")
 TOPE_FOTOS_PROPIAS_EN_LA_COPIA = 35 * 1024 * 1024
+_SQL_FOTOS_PROPIAS = (f"origen IN ({','.join('?' * len(ORIGENES_DE_FOTOS_PROPIAS))}) "
+                      "AND imagen_data LIKE 'data:%'")
 
 
-def _sacar_las_fotos(destino):
-    """Le saca las fotos a una copia recién hecha (ver generar_backup_sin_fotos()), MENOS las
-    propias (ver ORIGENES_DE_FOTOS_PROPIAS).
+def _sacar_las_fotos(destino, dejar_las_propias=True):
+    """Le saca las fotos a una copia recién hecha (ver generar_backup_sin_fotos()). Las propias
+    (ver ORIGENES_DE_FOTOS_PROPIAS) se dejan si `dejar_las_propias`; si no, es porque viajan
+    aparte, en los bloques de fotos.
 
     Los LINKS se quedan: lo que pesa es la foto guardada adentro (data:…), las miniaturas y las
     firmas, no una dirección de cien letras. Antes se borraba todo, y después de cada reinicio
@@ -89,33 +96,37 @@ def _sacar_las_fotos(destino):
     como leídos. Con el link, se vuelven a bajar solas (ver _restaurar_desde_semilla()). Las
     propias no tienen link: van enteras, y al restaurar vuelven a ser la foto de su ficha (ver
     pedir_de_nuevo_las_fotos())."""
-    marcadores = ",".join("?" * len(ORIGENES_DE_FOTOS_PROPIAS))
+    # La miniatura de los productos con foto propia se queda (4 KB): sin ella, al restaurar la
+    # ficha no muestra nada hasta que pedir_de_nuevo_las_fotos() le devuelve la foto. Va
+    # primero, mientras las fotos propias todavía están en la copia.
     try:
-        destino.execute(f"""DELETE FROM producto_fotos
-                            WHERE NOT (origen IN ({marcadores}) AND imagen_data LIKE 'data:%')""",
+        destino.execute(f"""UPDATE productos SET imagen_url = CASE WHEN imagen_url LIKE 'http%'
+                                                                    THEN imagen_url END,
+                                   imagen_thumb = CASE WHEN id IN (
+                                                    SELECT producto_id FROM producto_fotos
+                                                    WHERE {_SQL_FOTOS_PROPIAS})
+                                                       THEN imagen_thumb END,
+                                   imagen_orb_blob = NULL, imagen_orb_estado = NULL""",
                         ORIGENES_DE_FOTOS_PROPIAS)
-        acumulado, sobran = 0, []
-        for id_foto, peso in destino.execute(
-                """SELECT id, LENGTH(imagen_data) + COALESCE(LENGTH(firma_blob), 0)
-                   FROM producto_fotos ORDER BY id DESC""").fetchall():
-            acumulado += peso or 0
-            if acumulado > TOPE_FOTOS_PROPIAS_EN_LA_COPIA:
-                sobran.append((id_foto,))
-        destino.executemany("DELETE FROM producto_fotos WHERE id = ?", sobran)
-        # En la base de trabajo, no en la copia: es lo que lee la pantalla.
-        guardar_config("fotos_propias_fuera_de_la_copia", str(len(sobran)))
     except sqlite3.OperationalError as _err:
         # La tabla puede no existir si el backup sale de una base vieja: se sigue.
         anotar_error("generar_backup_sin_fotos", _err)
-    # La miniatura de los productos con foto propia se queda (4 KB): sin ella, al restaurar la
-    # ficha no muestra nada hasta que pedir_de_nuevo_las_fotos() le devuelve la foto.
     try:
-        destino.execute("""UPDATE productos SET imagen_url = CASE WHEN imagen_url LIKE 'http%'
-                                                                   THEN imagen_url END,
-                                  imagen_thumb = CASE WHEN id IN (SELECT producto_id
-                                                                  FROM producto_fotos)
-                                                      THEN imagen_thumb END,
-                                  imagen_orb_blob = NULL, imagen_orb_estado = NULL""")
+        if not dejar_las_propias:
+            destino.execute("DELETE FROM producto_fotos")
+        else:
+            destino.execute(f"DELETE FROM producto_fotos WHERE NOT ({_SQL_FOTOS_PROPIAS})",
+                            ORIGENES_DE_FOTOS_PROPIAS)
+            acumulado, sobran = 0, []
+            for id_foto, peso in destino.execute(
+                    """SELECT id, LENGTH(imagen_data) + COALESCE(LENGTH(firma_blob), 0)
+                       FROM producto_fotos ORDER BY id DESC""").fetchall():
+                acumulado += peso or 0
+                if acumulado > TOPE_FOTOS_PROPIAS_EN_LA_COPIA:
+                    sobran.append((id_foto,))
+            destino.executemany("DELETE FROM producto_fotos WHERE id = ?", sobran)
+            # En la base de trabajo, no en la copia: es lo que lee la pantalla.
+            guardar_config("fotos_propias_fuera_de_la_copia", str(len(sobran)))
     except sqlite3.OperationalError as _err:
         anotar_error("generar_backup_sin_fotos", _err)
     for _limpieza in ("UPDATE esquemas SET imagen_blob = NULL",
@@ -125,6 +136,59 @@ def _sacar_las_fotos(destino):
         except sqlite3.OperationalError as _err:
             anotar_error("generar_backup_sin_fotos", _err)
     destino.commit()
+
+
+# LOS BLOQUES DE FOTOS. Cada bloque son las fotos propias con id entre n·FOTOS_POR_BLOQUE y el
+# siguiente: como los id no se reusan, una foto nueva cae siempre en el último bloque y borrar
+# una toca solo el suyo. 300 fotos de unos 45 KB son ~15 MB: lejos de los 100 MB por archivo.
+FOTOS_POR_BLOQUE = 300
+def ruta_del_bloque_de_fotos(numero):
+    return f"{CARPETA_DE_FOTOS_EN_GITHUB}/bloque_{int(numero):05d}.db.gz"
+
+
+def huellas_de_los_bloques_de_fotos():
+    """{número de bloque: huella} de las fotos propias de la base de trabajo. La huella mira el
+    id, el producto, el peso, el estado y la versión de la firma de cada foto —no la foto
+    entera—: una foto guardada no cambia, y así no hay que leer cien megas cada quince
+    minutos para saber que no pasó nada."""
+    with db_lock:
+        c.execute(f"""SELECT id, producto_id, LENGTH(imagen_data), COALESCE(LENGTH(firma_blob), 0),
+                             COALESCE(estado, ''), COALESCE(firma_version, 0)
+                      FROM producto_fotos WHERE {_SQL_FOTOS_PROPIAS} ORDER BY id""",
+                  ORIGENES_DE_FOTOS_PROPIAS)
+        filas = [tuple(r) for r in c.fetchall()]
+    por_bloque = {}
+    for fila in filas:
+        por_bloque.setdefault(fila[0] // FOTOS_POR_BLOQUE, []).append(fila)
+    return {n: hashlib.sha256(repr(v).encode()).hexdigest() for n, v in por_bloque.items()}
+
+
+def archivo_del_bloque_de_fotos(numero):
+    """El bloque listo para subir: una base SQLite con esas fotos, comprimida y cifrada si
+    está la clave (ver cifrar_copia())."""
+    ruta = _ruta_temporal_de_backup(f"bloque_{numero}.db")
+    try:
+        destino = sqlite3.connect(ruta)
+        try:
+            destino.execute(f"CREATE TABLE producto_fotos ({', '.join(_COLUMNAS_DE_UN_BLOQUE)})")
+            desde = int(numero) * FOTOS_POR_BLOQUE
+            with db_lock:
+                c.execute(f"""SELECT {', '.join(_COLUMNAS_DE_UN_BLOQUE)} FROM producto_fotos
+                              WHERE id >= ? AND id < ? AND {_SQL_FOTOS_PROPIAS} ORDER BY id""",
+                          (desde, desde + FOTOS_POR_BLOQUE) + ORIGENES_DE_FOTOS_PROPIAS)
+                filas = [tuple(r) for r in c.fetchall()]
+            destino.executemany(f"INSERT INTO producto_fotos VALUES "
+                                f"({', '.join('?' * len(_COLUMNAS_DE_UN_BLOQUE))})", filas)
+            destino.commit()
+        finally:
+            destino.close()
+        with open(ruta, "rb") as f:
+            return cifrar_copia(gzip.compress(f.read(), 6))
+    finally:
+        try:
+            os.remove(ruta)
+        except OSError as _err:
+            anotar_error("archivo_del_bloque_de_fotos", _err)
 
 
 def fotos_propias_fuera_de_la_copia():
@@ -153,7 +217,10 @@ def copia_para_github(huella_anterior=""):
     try:
         with db_lock:
             conn.backup(destino)
-        _sacar_las_fotos(destino)
+        # A la rama de copias, las fotos propias van en sus bloques (ver
+        # subir_las_fotos_si_cambiaron()); a otra rama, adentro de la base como siempre.
+        _cfg = config_github()
+        _sacar_las_fotos(destino, dejar_las_propias=not (_cfg and _cfg["rama"] == RAMA_DE_LA_COPIA))
         configuracion = destino.execute("SELECT clave, valor FROM configuracion").fetchall()
         destino.execute("DELETE FROM configuracion")
         destino.commit()
@@ -282,6 +349,12 @@ def vigilar_la_copia():
                     subir_la_copia_si_cambio()
                 except Exception as _err:
                     anotar_error("vigilar_la_copia", _err)
+                # Las fotos propias, aparte y después de la base: ver
+                # subir_las_fotos_si_cambiaron().
+                try:
+                    subir_las_fotos_si_cambiaron()
+                except Exception as _err:
+                    anotar_error("vigilar_la_copia/fotos", _err)
                 time.sleep(MINUTOS_ENTRE_COPIAS * 60)
         finally:
             candado.release()
