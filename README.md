@@ -6288,6 +6288,23 @@ de verdad.
   que no parezca un aumento. Probado: 8.708 precios, y la 271205 pasa de $1.505 a $22.936.
 - Arreglado de paso: las tablas mostraban columnas internas («_mediana», «_prop», «_total»).
 
+### 💲 «IMPERIAL aumentó 314%»: era la misma lista
+
+«Cuánto te aumentó cada proveedor» decía **IMPERIAL +314 % en seis meses**, con un producto en
++1.837 %. Todo el historial de IMPERIAL es de UNA importación: la lista trae 151 códigos dos
+veces, en dos renglones con dos precios, y cada uno dejó su renglón de historial con segundos
+de diferencia. Eso se medía como un aumento.
+
+- Ahora se compara el precio con que quedó la primera importación del período contra el de la
+  última, y tienen que estar separadas al menos una hora. Con la base real: ningún aumento
+  inventado; con una segunda importación simulada a +10 % (también con códigos repetidos):
+  +10 %.
+- Esos códigos repetidos son un problema por sí solos: quedó el último renglón sin que nadie
+  eligiera. Un bulón 3/16×1¼ quedó a **$236.234** (también venía a $3.069: la caja contra la
+  unidad), una junta HI-LON a $48.209 contra $643. Hoy se avisa solo al importar. Ahora hay una
+  herramienta, «💲 Códigos que vinieron dos veces con precios distintos» (Limpiar y corregir),
+  con la lista para bajar, y un aviso del día: son 150.
+
 ## 🔗 Revisar sugeridas: primero lo que hay que hacer
 
 Mirado con capturas sobre la base real (15.308 pendientes en 8 listas):

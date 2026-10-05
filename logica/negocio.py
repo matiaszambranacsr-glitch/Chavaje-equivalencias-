@@ -1146,16 +1146,29 @@ def variacion_de_precios_por_marca(meses=6, minimo_productos=10):
     que es cuando alguien está usando la app— cada una de las 70.888 espera su turno para
     agarrar el intérprete: la pantalla pasaba a tardar 9 s por clic. Con un solo precio, el
     «antes» y el «ahora» son el mismo y el producto se descartaba igual, así que filtrar acá
-    no cambia el resultado: se comprobó con el mismo historial por los dos caminos."""
-    c.execute("""WITH con_cambios AS (SELECT producto_id FROM historial_precios
+    no cambia el resultado: se comprobó con el mismo historial por los dos caminos.
+
+    EL «ANTES» ES DE OTRA IMPORTACIÓN: al menos una hora antes del último precio. Una lista que
+    trae el mismo código dos veces con dos precios (IMPERIAL: la unidad y la caja, ×17) deja
+    dos renglones de historial con segundos de diferencia, y eso se medía como un aumento:
+    «IMPERIAL +314% en seis meses», con todo el historial de UNA sola importación."""
+    c.execute("""WITH con_cambios AS (SELECT producto_id, MAX(fecha) AS ultima
+                                      FROM historial_precios
                                       GROUP BY producto_id HAVING COUNT(*) >= 2)
                  SELECT m.nombre AS marca, p.id AS pid,
-                        (SELECT hp.precio FROM historial_precios hp
-                          WHERE hp.producto_id = p.id AND hp.fecha >= datetime('now', ?)
-                          ORDER BY hp.fecha ASC LIMIT 1) AS antes,
+                        -- El precio con que QUEDÓ la primera importación del período (su
+                        -- último renglón), igual que «ahora» es con el que quedó la última.
                         (SELECT hp.precio FROM historial_precios hp
                           WHERE hp.producto_id = p.id
-                          ORDER BY hp.fecha DESC LIMIT 1) AS ahora
+                            AND hp.fecha <= datetime(cc.ultima, '-1 hour')
+                            AND hp.fecha <= datetime(
+                                  (SELECT MIN(h2.fecha) FROM historial_precios h2
+                                    WHERE h2.producto_id = p.id
+                                      AND h2.fecha >= datetime('now', ?)), '+1 hour')
+                          ORDER BY hp.fecha DESC, hp.id DESC LIMIT 1) AS antes,
+                        (SELECT hp.precio FROM historial_precios hp
+                          WHERE hp.producto_id = p.id
+                          ORDER BY hp.fecha DESC, hp.id DESC LIMIT 1) AS ahora
                  FROM con_cambios cc
                  JOIN productos p ON p.id = cc.producto_id
                  JOIN marcas m ON m.id = p.marca_id""",

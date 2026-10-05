@@ -610,3 +610,22 @@ if pagina == PAGINAS[3]:
                     avisar("success", f"Se unificaron {miles(borradas)} duplicadas "
                                        f"y se ordenaron {miles(vueltas)}.")
                     st.rerun()
+
+        if _grupo_mant == GRUPOS_MANTENIMIENTO[1]:
+            _dos_precios = codigos_con_dos_precios_en_la_misma_lista()
+            if _dos_precios:
+                st.markdown("---")
+                st.markdown("**💲 Códigos que vinieron dos veces con precios distintos**")
+                explicar(
+                    f"{miles(len(_dos_precios))} código(s) vinieron en dos renglones de la misma "
+                    "lista con dos precios distintos, y quedó el último sin que nadie eligiera.",
+                    "Puede ser la unidad y la caja, o —más seguido cuando la diferencia es "
+                    "enorme— dos productos que se escriben casi igual y que, sin los signos, "
+                    "quedan en el mismo código. Mirá la descripción y corregí el precio a mano "
+                    f"en {miga_hasta('Productos')} si el que quedó no es el que vendés.")
+                st.dataframe(quitar_id(_dos_precios[:200]), width="stretch", hide_index=True)
+                st.download_button("⬇️ Bajar la lista (Excel)",
+                                   data=to_excel_bytes(quitar_id(_dos_precios)),
+                                   file_name="codigos_con_dos_precios.xlsx",
+                                   mime="application/vnd.openxmlformats-officedocument."
+                                        "spreadsheetml.sheet")

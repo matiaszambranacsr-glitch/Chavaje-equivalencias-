@@ -1128,6 +1128,9 @@ HERRAMIENTAS_MANTENIMIENTO = [
     ("🔁 Equivalencias anotadas dos veces", 1,
      "La misma relación guardada de ida y de vuelta.",
      "duplicadas espejadas dos veces repetidas"),
+    ("💲 Códigos que vinieron dos veces con precios distintos", 1,
+     "La lista traía el mismo código en dos renglones con dos precios, y quedó el último.",
+     "precio repetido dos veces lista unidad caja duplicado"),
 
     ("🎯 Puntuar los vínculos para el buscador", 2,
      "Le pone nota a cada vínculo para que el buscador muestre primero los buenos.",

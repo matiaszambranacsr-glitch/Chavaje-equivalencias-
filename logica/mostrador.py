@@ -720,6 +720,35 @@ def olvidar_la_escala_de_precios():
     _escala_guardada().update(cuando=0.0, datos=None)
 
 
+def codigos_con_dos_precios_en_la_misma_lista(limite=500):
+    """Los productos cuya última importación trajo el mismo código en dos renglones con dos
+    precios distintos. Queda el último, sin que nadie elija.
+
+    En la base real son 155, casi todos de IMPERIAL, y no siempre son la unidad y la caja: la
+    junta «H21A1/2"RF1,5» vino a $643 y a $48.209 —75 veces—, que es más bien dos productos que
+    se escriben casi igual y que, sin los signos, quedan en el mismo código. Se avisaba solo en
+    el momento de importar."""
+    # FILA Y NO PAR: es el historial de cada producto, no una relación.
+    c.execute("""SELECT p.id AS "ID", m.nombre AS "Marca", p.codigo_raw AS "Código",
+                        p.descripcion AS "Descripción", p.precio AS "Precio que quedó",
+                        GROUP_CONCAT(DISTINCT h.precio) AS "Precios en la lista"
+                 FROM historial_precios h
+                 JOIN productos p ON p.id = h.producto_id
+                 JOIN marcas m ON m.id = p.marca_id
+                 WHERE h.fecha >= datetime((SELECT MAX(h2.fecha) FROM historial_precios h2
+                                            WHERE h2.producto_id = h.producto_id), '-1 hour')
+                 GROUP BY h.producto_id
+                 HAVING COUNT(DISTINCT h.precio) >= 2
+                    AND MAX(h.precio) > MIN(h.precio) * 1.05
+                 ORDER BY MAX(h.precio) / MIN(h.precio) DESC
+                 LIMIT ?""", (limite,))
+    filas = filas_a_listas(c)
+    for f in filas:
+        f["Precios en la lista"] = " / ".join(
+            formato_precio(x) for x in sorted(float(v) for v in str(f["Precios en la lista"]).split(",")))
+    return filas
+
+
 def coeficiente_de_lista(marca_id):
     """Por cuánto se multiplica el precio de la lista de esta marca al importarla (1 si nada)."""
     try:

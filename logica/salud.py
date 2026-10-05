@@ -532,6 +532,13 @@ def diagnostico_de_salud():
                   "Casi seguro la lista necesita un coeficiente o está vieja: hasta "
                   "corregirlo, se cotiza mal.",
                   f"{miga_hasta('Marcas')} → 📏 Coeficiente de la lista")
+        _dos = len(codigos_con_dos_precios_en_la_misma_lista())
+        if _dos:
+            sumar("medio", f"{miles(_dos)} código(s) vinieron dos veces en la lista con precios "
+                           "distintos",
+                  "Quedó el último renglón, sin que nadie eligiera: puede ser la unidad contra "
+                  "la caja, o dos productos que se escriben casi igual.",
+                  miga_hasta("Códigos que vinieron dos veces con precios distintos"))
         if precios:
             sumar("alto", f"{precios} par(es) de equivalentes con precios muy distintos",
                   "O el precio está mal cargado, o no son la misma pieza. Cualquiera de las dos "
