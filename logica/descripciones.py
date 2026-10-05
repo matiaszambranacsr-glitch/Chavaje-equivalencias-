@@ -2680,8 +2680,15 @@ _LUGARES_DE_LA_PIEZA = {
 # Y la tapa LATERAL del cárter: «JTA LAT.CARTER DEUTZ 514 2 C.» de IMPERIAL es la de la tapita
 # del costado, y «Junta para Cárter DEUTZ 514» de ILLINOIS la del cárter. IMPERIAL las vende
 # por separado (527AC2 y 528AC2).
+# La tapa de INSPECCIÓN es una parte solo de las tapas grandes: la de cilindros, la de válvulas,
+# el cárter. De lo demás ES la tapa: «JTA. TAPA CAM.AGUA DIESEL» (TARANTO) y «JTA T.INSP.CAM.AGUA
+# FIAT REGAT» (IMPERIAL) son la misma junta, igual que la tapa del árbol de levas y la tapa de
+# inspección del árbol de levas. Las cuatro salían en rojo; revisadas, eran la misma pieza.
+# «INSP» va también sin expandir: «JTA TAPA INSP BLOCK» contra «JTA TAPA.INSP. BLOCK».
 _RE_PARTE_DE_UNA_PIEZA = re.compile(
-    r"\b(INSPECCION|RESP|RESPIRADERO|FRENTE|LAT(?:ERAL)?(?=\s+CARTER\b)|(?<=CARTER )LAT(?:ERAL)?)\b")
+    r"\b(INSP(?:ECCION)?|RESP|RESPIRADERO|FRENTE|LAT(?:ERAL)?(?=\s+CARTER\b)"
+    r"|(?<=CARTER )LAT(?:ERAL)?)\b")
+_PIEZAS_CON_TAPA_DE_INSPECCION = {"CILINDRO", "VALVULA", "CARTER"}
 
 # Ver «la marca sola no alcanza» en firmas_compatibles().
 _TECNOLOGIAS_DE_MOTOR = {
@@ -2781,8 +2788,15 @@ def firmas_compatibles(a, b, minimo_nucleo=2, cuenta_palabras=None, total_descri
                        f"{_sm(b.get('sobremedida'))}")
 
     # La junta de una parte de la pieza contra la de la pieza: ver _RE_PARTE_DE_UNA_PIEZA.
-    _parte_a = set(_RE_PARTE_DE_UNA_PIEZA.findall(a.get("texto") or ""))
-    _parte_b = set(_RE_PARTE_DE_UNA_PIEZA.findall(b.get("texto") or ""))
+    def _partes(f):
+        return {"INSPECCION" if p == "INSP" else p
+                for p in _RE_PARTE_DE_UNA_PIEZA.findall(f.get("texto") or "")}
+    _parte_a, _parte_b = _partes(a), _partes(b)
+    # La inspección, solo contra la junta de una tapa grande: ver _PIEZAS_CON_TAPA_DE_INSPECCION.
+    for _con, _sin in ((_parte_a, b), (_parte_b, a)):
+        if _con == {"INSPECCION"} and not (_PIEZAS_CON_TAPA_DE_INSPECCION
+                                           & set(_sin.get("pieza") or ())):
+            _con.clear()
     if (bool(_parte_a) != bool(_parte_b) and "JUNTA" in (a.get("pieza") or ())
             and "JUNTA" in (b.get("pieza") or ())):
         _cual = {"RESP": "RESPIRADERO", "LAT": "COSTADO", "LATERAL": "COSTADO"}.get(

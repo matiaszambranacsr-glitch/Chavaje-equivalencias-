@@ -16,9 +16,10 @@ motivo que tumba el par). Si se agrega una regla, se agregan acá los casos que 
 CON --base: arma una copia de la base en una carpeta temporal, pone todos los pares que
 aprobaste como si recién llegaran —sin tus decisiones ni lo aprendido de ellas, para que no se
 copien la respuesta— y los puntúa con el análisis de siempre. Falla si más del 1 % de lo aprobado
-cae en 🔴. Hoy, sobre la base de prueba de 13.021 aprobados, caen 83 (0,6 %): son vínculos por
-código cuyo código las reglas actuales ya no tomarían. Aparte caen 725 que estaban mal aprobados
-y ya se revisaron uno por uno (ver ALARMAS_DE_APROBACIONES_MALAS): esos no cuentan.
+cae en 🔴. Sobre la copia de la base real del 5/10 —20.306 aprobados, con las decisiones de quien
+atiende el mostrador— caen 127 (0,6 %), y aparte 117 que estaban mal aprobados y ya se revisaron
+(ver ALARMAS_DE_APROBACIONES_MALAS): esos no cuentan. Sobre la base de prueba anterior (13.021
+aprobados) eran 83, y 725 mal aprobados.
 
 Nunca toca la base de trabajo: corre en una carpeta temporal, con una base propia.
 """
@@ -252,7 +253,9 @@ LOTE_DE_LA_PRUEBA = "PRUEBA DE APROBACIONES"
 # la polea unida a los alternadores que la llevan (332), el capuchón o el microfiltro unidos a
 # la bobina o al inyector donde van (26) y 14 tapas y sensores más con la frase pegada
 # («2015Conj Bomba»).
-ALARMAS_DE_APROBACIONES_MALAS = ("🧰",)
+# 🔎 se sumó con la base real del 5/10: 117 aprobados en bloque con reglas viejas, y el
+# «número de fábrica» es el nombre del motor o del modelo (X12SZ8V, SQR472, F2CFE601A, N13B16A).
+ALARMAS_DE_APROBACIONES_MALAS = ("🧰", "🔎")
 
 
 def probar_aprobaciones(logica, cuantos):

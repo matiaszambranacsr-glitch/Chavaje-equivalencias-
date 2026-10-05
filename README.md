@@ -5923,6 +5923,42 @@ directo, con su propia confianza. Los que no lo tienen son 649, todos de la mism
 inyector original de FISPA y el Lucas con el mismo número), y de esos 15 se contradicen, casi
 todos por los autos que cada fila nombra, que con el número declarado no cuentan.
 
+### Lo que se revisó a mano en el mostrador, y las cadenas largas
+
+Mirando la lista de lo aprobado que choca con las reglas de hoy, quien atiende el mostrador
+marcó dos errores de la regla:
+
+- **La tapa de inspección es la tapa.** «JTA. TAPA CAM.AGUA DIESEL» (TARANTO) y «JTA
+  T.INSP.CAM.AGUA FIAT REGAT» (IMPERIAL) son la misma junta, igual que la tapa del árbol de
+  levas y la de inspección del árbol de levas. El veto «la del INSPECCION vs la pieza entera»
+  existía por la tapita de inspección de la tapa de cilindros, que no es la junta de tapa de
+  cilindros. Ahora vale solo contra las tapas grandes (`_PIEZAS_CON_TAPA_DE_INSPECCION`:
+  cilindros, válvulas, cárter), y «INSP» se lee también sin el punto: «JTA TAPA INSP BLOCK»
+  contra «JTA TAPA.INSP. BLOCK» salía rojo con las dos diciendo lo mismo.
+- **La tapa de flotante se vende por el número del conjunto.** «TAPA DE FLOTANTE 19012 … Conj
+  Bomba 7S65 9H307CB» y el 9H307CB son el mismo producto. Sale de la regla del conjunto
+  (`_RE_SE_VENDE_POR_EL_NUMERO_DEL_CONJUNTO`); el sensor de nivel, el kit, la rampa, la polea y
+  el capuchón siguen en ella.
+
+Y uno que salió de pasar la prueba con la copia de la base real (20.306 aprobados): de los 74
+que ponía en rojo «⚠️ un número de fábrica que ILLINOIS le pone a piezas distintas», 62 eran
+**la fila dueña del número** —la que lo trajo y lo pone en su propia lista de referencias—, que
+se llevaba la culpa de la otra fila que lo cita. Ahora la alarma queda solo en la otra. En rojo
+quedan 127 (0,6 %), y aparte 117 🔎 revisados: el «número de fábrica» es el nombre del motor
+(X12SZ8V, SQR472, N13B16A), aprobados en bloque con reglas viejas.
+
+**Las cadenas largas.** El buscador encadena hasta tres saltos y a cada resultado le pone lo que
+vale su eslabón más flojo. Pero cada eslabón puede estar bien y el primero y el último no ser la
+misma pieza: el del medio es vago y une dos específicos. Medido en la base real, 2.000
+búsquedas al azar: **9.979 resultados a dos saltos o más, y 3.604 se contradicen con lo
+buscado** —la junta de cárter MWM de 6 cilindros llegaba a la Perkins 4-203 de 4, a la del
+Sprint 1.0 y a la del V8; el diferencial DANA 70 al DANA 30—, todos con «🟢 sólida».
+`marcar_cadenas_que_no_aguantan()` compara lo buscado con cada resultado lejano con la regla de
+la cola, y a los que se contradicen los pone «🔴 no es lo mismo», dice por qué en la cadena, y
+con «sin vínculos flojos» los saca. Si el camino pasa por un número de fábrica que los dos
+tienen, lo del auto no cuenta, igual que en la cola. Cuesta menos de un milisegundo por
+búsqueda.
+
 ## 🔗 Revisar sugeridas: primero lo que hay que hacer
 
 Mirado con capturas sobre la base real (15.308 pendientes en 8 listas):

@@ -1321,9 +1321,10 @@ def probar_el_numero_del_conjunto_no_es_de_la_pieza():
     como número PROPIO —«REF ORIG 9L559A299AC» antes de «CONJUNTO DE BOMBA»— se sigue tomando."""
     tapa = ("TAPA DE FLOTANTE 19009 CHEVROLET Zafira NAFTEROCompatible Bombas M Conj Bomba "
             "93374782 93317613 93372174")
-    igual(codigos.extraer_codigos_de_texto(tapa), [], "la tapa no trae ningún número suyo")
-    cierto(codigos.numero_del_conjunto_donde_va("93317613", tapa),
-           "93317613 es el número de la bomba que lleva la tapa")
+    cierto("93317613" in codigos.extraer_codigos_de_texto(tapa),
+           "la tapa de flotante se vende por el número del conjunto: ese número es de ella")
+    cierto(not codigos.numero_del_conjunto_donde_va("93317613", tapa),
+           "la tapa y el número del conjunto son el mismo producto")
     sensor = ("SENSOR DE NIVEL DE COMBUSTIBLE 22753A FORD Ranger REF ORIG 9L559A299AC CONJUNTO "
               "DE BOMBA 9L559H307AC 0580313183")
     igual(codigos.extraer_codigos_de_texto(sensor, solo_declarados=True), ["9L559A299AC"],
@@ -1343,12 +1344,12 @@ def probar_el_numero_del_conjunto_no_es_de_la_pieza():
           "los números de la polea sí, los de los alternadores no")
     cierto(codigos.numero_del_conjunto_donde_va("0123510045", polea),
            "0123510045 es un alternador de los que llevan esa polea")
-    pegada = ("TAPA DE FLOTANTE 19026Ford Focus I 1 8 2 0 - Courier 1 6Conj Bomba 97FP 9H307 AG")
+    pegada = "SENSOR DE NIVEL DE COMBUSTIBLE 22700 Ford Focus I 1 6Conj Bomba 97FP 9H307 AG"
     cierto(codigos.numero_del_conjunto_donde_va("97FP9H307AG", pegada),
            "la frase pegada a lo anterior y el número partido en pedazos")
     cierto(codigos.numero_del_conjunto_donde_va(
-        "XS419H307A", "TAPA DE FLOTANTE 19008 FORD Escort NAFTEROCompatible Bomba XS419H307A"),
-        "«NAFTEROCompatible Bomba»")
+        "7700426211", "SENSOR DE NIVEL 22632A PEUGEOT 206 Vacio 330 a 350Compatible Bomba "
+                      "7700426211 7700436928"), "«350Compatible Bomba»")
     capuchon = ("CAPUCHONES PARA BOBINA 79002 X4 CITROEN BERLINGO MONTA EN BOBINAS 70021 REF ORIG "
                 "SAGEM 2526182A - 96363378 2526182")
     igual(codigos.extraer_codigos_de_texto(capuchon), [], "el capuchón cita la bobina")

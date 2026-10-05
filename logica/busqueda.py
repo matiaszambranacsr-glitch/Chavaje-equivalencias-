@@ -293,7 +293,70 @@ def buscar_por_codigo(clean_code, marca_filtro="Todas", max_saltos=None, confian
         fila["Nota"] = "" if sin_salida else (rel.get("nota") or "")
         template = fila.pop("_template", None)
         fila["Ficha"] = url_de_la_ficha(template, fila["Codigo"]) if template else ""
+    rotas = marcar_cadenas_que_no_aguantan(res)
+    if confianza_minima and rotas:
+        res = [f for f in res if f["ID"] not in rotas]
     return res
+
+
+def marcar_cadenas_que_no_aguantan(res):
+    """A dos saltos o más, compara lo buscado con el resultado DIRECTAMENTE. Devuelve los ids
+    de los que se contradicen, y a esos les cambia la confianza y lo dice en la cadena.
+
+    Una cadena valía lo que su eslabón más flojo, y eso no alcanza: cada eslabón puede estar
+    bien y el primero y el último no ser la misma pieza. Pasa cuando el del medio es vago:
+    «Jta.tapa Diferencial Dana FORD F100» de TARANTO concuerda con el DANA 70 de ILLINOIS y con
+    el DANA 30 de IMPERIAL, y buscando uno salía el otro «🟢 sólida». Medido sobre la cola,
+    como si se aprobaran todos sus verdes, en 1.500 búsquedas al azar: 59 resultados lejanos se
+    contradicen con lo buscado —DANA 70 contra 30, 4 contra 3 cilindros, la bujía APR6F contra
+    la BP6EFS—. Cuesta 0,1 a 0,7 ms por búsqueda.
+
+    Es la regla de la cola (firmas_compatibles()) sobre las dos descripciones, sin tocar la
+    base salvo una consulta. Si el camino pasa por un número de fábrica que los dos tienen, lo
+    del auto no cuenta, igual que en la cola: el número manda."""
+    buscados = [f for f in res if f.get("Cadena") == "— el buscado" and f.get("Tipo") != "OEM"]
+    lejanos = [f for f in res if f.get("Tipo") != "OEM" and f.get("Confianza")
+               and str(f.get("Cadena") or "").startswith(("🟡", "🔴"))]
+    if len(buscados) != 1 or not lejanos:
+        return set()
+    buscado = buscados[0]
+    firma_buscado = firma_de_producto(buscado.get("Descripcion") or "")
+    if not firma_buscado:
+        return set()
+    # Los números de fábrica de cada uno, para saber si el camino pasa por uno compartido.
+    ids = [buscado["ID"]] + [f["ID"] for f in lejanos]
+    numeros_de = {}
+    with db_lock:
+        for tanda, marcadores in en_tandas(ids, usos_por_consulta=2):
+            c.execute(f"""-- FILA Y NO PAR: arma el conjunto de números de cada producto, y la
+                          -- fila anotada de ida y de vuelta cae en el mismo conjunto.
+                          SELECT e.producto_a_id AS a, e.producto_b_id AS b,
+                                 ma.tipo AS ta, mb.tipo AS tb
+                          FROM equivalencias e
+                          JOIN productos pa ON pa.id = e.producto_a_id
+                          JOIN marcas ma ON ma.id = pa.marca_id
+                          JOIN productos pb ON pb.id = e.producto_b_id
+                          JOIN marcas mb ON mb.id = pb.marca_id
+                          WHERE e.producto_a_id IN ({marcadores})
+                             OR e.producto_b_id IN ({marcadores})""", tanda + tanda)
+            for r in c.fetchall():
+                if r["tb"] == "OEM":
+                    numeros_de.setdefault(r["a"], set()).add(r["b"])
+                if r["ta"] == "OEM":
+                    numeros_de.setdefault(r["b"], set()).add(r["a"])
+    rotas = set()
+    for f in lejanos:
+        ok, motivo = firmas_compatibles(firma_buscado,
+                                        firma_de_producto(f.get("Descripcion") or ""))
+        if ok or not motivo.startswith(_MOTIVOS_QUE_CONTRADICEN):
+            continue
+        if (numeros_de.get(buscado["ID"], set()) & numeros_de.get(f["ID"], set())
+                and motivo.startswith(_MOTIVOS_DEL_AUTO)):
+            continue
+        f["Confianza"] = "🔴 no es lo mismo"
+        f["Cadena"] = f"{f['Cadena']} · ⚠️ contra lo buscado: {motivo}"
+        rotas.add(f["ID"])
+    return rotas
 
 
 def el_mismo_numero_en_dos_piezas(res):

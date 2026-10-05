@@ -3311,7 +3311,17 @@ def _analizar_filas(filas, lote):
             # de tapa de válvulas y la de tapa de cilindros del Mazda con el mismo número, el
             # «block a filtro» con el de la junta de cárter— el número une piezas distintas y
             # aprobarlo las haría equivalentes: rojo, sin saber cuál de las filas es la dueña.
-            if not _variante and (_clave, _cod_propio) in choques:
+            # Salvo que esta fila SEA la dueña: la que trajo el número (el OEM tiene su misma
+            # descripción) y lo pone en su propia lista de referencias. «Juego de juntas para
+            # Turbo CUMMINS ISBE (4891288)» es el dueño del 4891288; el que está de más es el
+            # juego de admisión que también lo cita. Sobre la base real eran 62 de los 74
+            # aprobados que esta alarma ponía en rojo: el dueño se llevaba la culpa del otro.
+            _desc_oem, _desc_propia = ((f.get("desc_a"), f.get("desc_b")) if f["tipo_a"] == "OEM"
+                                       else (f.get("desc_b"), f.get("desc_a")))
+            _es_el_dueno = bool(
+                _desc_oem and normalizar_texto(_desc_oem) == normalizar_texto(_desc_propia or "")
+                and el_codigo_esta_entre_las_referencias(oem, _desc_propia))
+            if not _variante and not _es_el_dueno and (_clave, _cod_propio) in choques:
                 _otro_ch, _lug_propio, _lug_otro = choques[(_clave, _cod_propio)]
                 alarmas.append(f"⚠️ El código {oem} apunta a más de un producto de "
                                 f"{marca_otro} — y «{_otro_ch}» es otra pieza "
