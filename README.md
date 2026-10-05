@@ -5935,10 +5935,10 @@ marcó dos errores de la regla:
   cilindros. Ahora vale solo contra las tapas grandes (`_PIEZAS_CON_TAPA_DE_INSPECCION`:
   cilindros, válvulas, cárter), y «INSP» se lee también sin el punto: «JTA TAPA INSP BLOCK»
   contra «JTA TAPA.INSP. BLOCK» salía rojo con las dos diciendo lo mismo.
-- **La tapa de flotante se vende por el número del conjunto.** «TAPA DE FLOTANTE 19012 … Conj
-  Bomba 7S65 9H307CB» y el 9H307CB son el mismo producto. Sale de la regla del conjunto
-  (`_RE_SE_VENDE_POR_EL_NUMERO_DEL_CONJUNTO`); el sensor de nivel, el kit, la rampa, la polea y
-  el capuchón siguen en ella.
+- **La tapa de flotante NO es el conjunto de la bomba.** Se probó sacarla de la regla del
+  conjunto («TAPA DE FLOTANTE 19012 … Conj Bomba 7S65 9H307CB») por un malentendido, y quien
+  atiende el mostrador lo aclaró: la tapa y el conjunto son dos productos. Sigue en la regla,
+  igual que el sensor de nivel, el kit, la rampa, la polea y el capuchón.
 
 Y uno que salió de pasar la prueba con la copia de la base real (20.306 aprobados): de los 74
 que ponía en rojo «⚠️ un número de fábrica que ILLINOIS le pone a piezas distintas», 62 eran
@@ -5983,6 +5983,28 @@ sirven también a la cola: «ESP 1.6MM» se leía como cilindrada 1.6 (la junta 
 del Palio), y «MULTIPUNTO» ahora dice nafta. Solo busca cuando se prende el interruptor, y el
 cartel pide confirmarlo con el cliente: es lo que dice el texto, no un catálogo de aplicaciones.
 
+### ❓ Antes de vender, preguntá
+
+Un proveedor tiene a veces varias versiones de la misma pieza para el mismo auto, y lo que las
+separa es lo que hay que preguntar en el mostrador. Ahora el buscador lo dice arriba de los
+resultados:
+
+    ❓ Antes de vender, preguntá. FISPA tiene otras versiones de esta pieza para el mismo auto:
+       - largo de cable: 58 cm → 80026FISPA, LECS020LUCAS · 128 cm → 80058FISPA
+
+`versiones_para_preguntar()` busca en la lista del MISMO proveedor la misma pieza (la misma
+cabeza, las mismas partes, el mismo tipo de sensor, kit con kit) para el mismo auto (alguna
+marca y algún modelo en común, la cilindrada que no choque, diésel con diésel), y muestra lo
+que las separa: vías, forma de la ficha, color, fase, largo de cable, espesor y años (estos solo
+si son uno o dos rangos; los despieces listan diez autos con sus años). Sobre la base real, en
+500 productos al azar aparece en 13, a 42 ms: la llave de luces de la Ranger de 14 o de 19
+pines, la F100 fase I o fase II, la carcasa termostática de 2 o de 4 vías, los años del sensor
+de rotación de la Ranger. Es lo que otra IA proponía como «variación de fase/restyling» con dos
+fotos para elegir; fotos de las fichas no hay, pero el texto del proveedor dice qué preguntar.
+
+Y en las cadenas largas, los resultados que no son lo mismo que lo buscado tampoco cuentan como
+equivalencia ni compiten por «el más barato en stock», igual que los kits.
+
 ### Las ideas de otra IA: qué ya estaba, qué se hizo, qué no
 
 Una lista de ideas de Gemini para la app, revisada contra lo que hay y contra el catálogo real
@@ -6000,6 +6022,8 @@ Una lista de ideas de Gemini para la app, revisada contra lo que hay y contra el
 | Litros de aceite por motor | No: no hay de dónde sacarlo, y un dato inventado hace vender de menos |
 | VTV, oblea de GNC, multas | No: no hay una consulta pública con una interfaz para programas; hacerlo sería leer páginas de organismos que cambian sin aviso, y no es lo que se resuelve en el mostrador |
 | Complejidad de instalación, tutoriales, modelo 3D, puntos, lockers | No: son de una tienda para el que compra, y esta app es la del que vende |
+| Variación de fase / restyling / ficha | **Se hizo** «❓ Antes de vender, preguntá», con lo que dicen las descripciones (no hay fotos de fichas) |
+| Pasaporte de mantenimiento del auto | Ya estaba: la ficha del vehículo con su historial de piezas se descarga en PDF. Firmarla o «blockchain» no agrega nada sin una página pública donde verificarla |
 
 ## 🔗 Revisar sugeridas: primero lo que hay que hacer
 

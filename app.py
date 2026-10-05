@@ -64,6 +64,7 @@ específico, y las pantallas quedan todas al final:
     logica/negocio.py
         · COMBOS DE REPUESTOS RELACIONADOS (ej: correa de distribución -> kit + tensor + bomba de agua)
         · LO QUE VA CON ESTO: las otras piezas del MISMO TRABAJO, para el MISMO MOTOR, del catálogo
+        · ANTES DE VENDER, PREGUNTÁ: las versiones de la misma pieza para el mismo auto
         · INTELIGENCIA ARTIFICIAL: fotos, audio y remitos
         · BUSCAR POR PIEZA Y AUTO
         · DISCONTINUADOS Y REEMPLAZOS DE FÁBRICA

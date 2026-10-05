@@ -119,7 +119,7 @@ from .errores import anotar_error
       "_RE_KIT_DE_REPARACION", "_PIEZAS_QUE_CITAN_SOLO_SU_CONJUNTO",
       "cita_solo_numeros_de_su_conjunto",
       "_RE_TRAMO_DEL_NUMERO_DEL_CONJUNTO", "_RE_DE_ACA_AL_FINAL_ES_DEL_CONJUNTO",
-      "_RE_SE_VENDE_POR_EL_NUMERO_DEL_CONJUNTO", "tramos_del_conjunto", "sin_los_tramos_del_conjunto",
+      "tramos_del_conjunto", "sin_los_tramos_del_conjunto",
       "extraer_codigos_de_texto", "_RE_MOTOR_TRAS_LA_PALABRA", "_RE_MOTOR_TRAS_LA_CILINDRADA",
       "motor_desde_descripcion", "_RE_FORMA_DE_CODIGO_DE_PROVEEDOR",
       "parece_un_codigo_y_no_un_modelo",

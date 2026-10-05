@@ -1321,10 +1321,13 @@ def probar_el_numero_del_conjunto_no_es_de_la_pieza():
     como número PROPIO —«REF ORIG 9L559A299AC» antes de «CONJUNTO DE BOMBA»— se sigue tomando."""
     tapa = ("TAPA DE FLOTANTE 19009 CHEVROLET Zafira NAFTEROCompatible Bombas M Conj Bomba "
             "93374782 93317613 93372174")
-    cierto("93317613" in codigos.extraer_codigos_de_texto(tapa),
-           "la tapa de flotante se vende por el número del conjunto: ese número es de ella")
-    cierto(not codigos.numero_del_conjunto_donde_va("93317613", tapa),
-           "la tapa y el número del conjunto son el mismo producto")
+    igual(codigos.extraer_codigos_de_texto(tapa), [], "la tapa no trae ningún número suyo")
+    cierto(codigos.numero_del_conjunto_donde_va("93317613", tapa),
+           "93317613 es el número de la bomba que lleva la tapa: la tapa y el conjunto no son "
+           "lo mismo")
+    cierto(codigos.numero_del_conjunto_donde_va(
+        "XS419H307A", "TAPA DE FLOTANTE 19008 FORD Escort NAFTEROCompatible Bomba XS419H307A"),
+        "«NAFTEROCompatible Bomba», pegada")
     sensor = ("SENSOR DE NIVEL DE COMBUSTIBLE 22753A FORD Ranger REF ORIG 9L559A299AC CONJUNTO "
               "DE BOMBA 9L559H307AC 0580313183")
     igual(codigos.extraer_codigos_de_texto(sensor, solo_declarados=True), ["9L559A299AC"],

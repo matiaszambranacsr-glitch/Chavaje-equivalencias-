@@ -635,19 +635,13 @@ _RE_DE_ACA_AL_FINAL_ES_DEL_CONJUNTO = re.compile(r"(PARA\s+ALTERNADOR(?:ES)?)\b.
                                                  re.IGNORECASE | re.DOTALL)
 
 
-# LA TAPA DE FLOTANTE NO: se la vende por el número del conjunto de la bomba. «TAPA DE
-# FLOTANTE 19012 … Conj Bomba 7S65 9H307CB» y el OEM 9H307CB son el mismo producto —revisado por
-# quien atiende el mostrador—, así que ese número es de ella.
-_RE_SE_VENDE_POR_EL_NUMERO_DEL_CONJUNTO = re.compile(r"^\s*TAPA\s+(?:DE\s+|DEL\s+)?FLOTANTE",
-                                                     re.IGNORECASE)
-
-
+# LA TAPA DE FLOTANTE TAMBIÉN: «TAPA DE FLOTANTE 19012 … Conj Bomba 7S65 9H307CB» cita el
+# conjunto de la bomba, y la tapa y el conjunto no son lo mismo. Se probó sacarla de la regla y
+# quien atiende el mostrador lo corrigió.
 def tramos_del_conjunto(texto):
     """Dónde cita la descripción los números del conjunto donde va la pieza: [(desde, hasta,
     cómo lo dice)]. Ver numero_del_conjunto_donde_va()."""
     texto = str(texto or "")
-    if _RE_SE_VENDE_POR_EL_NUMERO_DEL_CONJUNTO.match(texto):
-        return []
     return [(m.start(), m.end(), " ".join(m.group(1).split()))
             for rx in (_RE_TRAMO_DEL_NUMERO_DEL_CONJUNTO, _RE_DE_ACA_AL_FINAL_ES_DEL_CONJUNTO)
             for m in rx.finditer(texto)]

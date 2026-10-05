@@ -1133,6 +1133,21 @@ Casi todo lo que edita o borra algo pide la contraseña de administrador la prim
                         # motor, sacadas del catálogo. Ver lo_que_va_con().
                         _buscado_prov = next((f for f in res if f.get("Cadena") == "— el buscado"
                                               and f.get("Tipo") != "OEM"), None)
+                        # Antes de vender, preguntá: ver versiones_para_preguntar().
+                        if _buscado_prov:
+                            _preguntas = versiones_para_preguntar(_buscado_prov["ID"])
+                            if _preguntas:
+                                st.info(
+                                    f"❓ **Antes de vender, preguntá.** {_buscado_prov['Marca']} "
+                                    "tiene otras versiones de esta pieza para el mismo auto, y se "
+                                    "distinguen por:\n\n" + "\n".join(
+                                        f"- **{_que}:** " + " · ".join(
+                                            f"{_valor} → {', '.join(_cods[:4])}"
+                                            + (f" y {len(_cods) - 4} más" if len(_cods) > 4 else "")
+                                            for _valor, _cods in _vals.items())
+                                        for _que, _vals in _preguntas)
+                                    + "\n\nMirá la pieza vieja o preguntale al cliente.")
+
                         # Con un interruptor y no una caja: esta ya está adentro de una, y así
                         # además no se busca nada hasta que alguien lo pide.
                         if _buscado_prov and st.toggle(

@@ -355,6 +355,8 @@ def marcar_cadenas_que_no_aguantan(res):
             continue
         f["Confianza"] = "🔴 no es lo mismo"
         f["Cadena"] = f"{f['Cadena']} · ⚠️ contra lo buscado: {motivo}"
+        # Como el kit: no cuenta como equivalencia ni compite por «el más barato en stock».
+        f["_complementario"] = True
         rotas.add(f["ID"])
     return rotas
 

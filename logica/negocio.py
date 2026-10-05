@@ -170,6 +170,94 @@ def lo_que_va_con(producto_id, por_complemento=4):
     return trabajo[0], salida
 
 
+# ============================================================
+# ANTES DE VENDER, PREGUNTÁ: las versiones de la misma pieza para el mismo auto
+# ============================================================
+# Un proveedor tiene a veces varias versiones de la misma pieza para el mismo auto, y lo que las
+# separa es justo lo que hay que preguntarle al cliente o mirar en la pieza vieja: la sonda
+# lambda del 206 con cable de 58 o de 128 cm, la llave de luces de la Ranger de 14 o de 19
+# pines, la F100 fase I o fase II, la carcasa termostática de 2 o de 4 vías. Medido sobre la
+# base real, en 500 productos al azar: 13 tienen versiones así, a 42 ms cada uno.
+# Se compara solo dentro de la lista del mismo proveedor: entre listas distintas, que una diga
+# las vías y la otra no es cómo escribe cada una, no otra versión.
+_RX_DE_LO_QUE_SEPARA_VERSIONES = (
+    ("ficha", re.compile(r"FICHA\s+(RECTANGULAR|REDONDA|CUADRADA|OVALADA|PLANA|CHATA)")),
+    ("color", re.compile(r"COLOR\s+(NEGR[OA]|GRIS|BLANC[OA]|MARRON|VERDE|AZUL|ROJ[OA]|CELESTE"
+                         r"|AMARILL[OA]|NARANJA|VIOLETA|BEIGE)")),
+    ("fase", re.compile(r"\bFASE\s*(IV|I{1,3}|[1-4])\b")),
+    ("espesor", re.compile(r"ESP\.?\s*:?\s*\(?\s*(\d[.,]\d{1,2})\s*MM")),
+)
+
+
+def _lo_que_separa_versiones(descripcion, firma):
+    """{qué: valor} de lo que distingue una versión de otra: vías, ficha, color, fase, largo de
+    cable, espesor, años."""
+    texto = (descripcion or "").upper()
+    salida = {}
+    if firma.get("vias"):
+        salida["vías"] = str(firma["vias"])
+    for que, rx in _RX_DE_LO_QUE_SEPARA_VERSIONES:
+        m = rx.search(texto)
+        if m:
+            salida[que] = m.group(1).replace(",", ".")
+    if firma.get("cable_mm"):
+        salida["largo de cable"] = f"{firma['cable_mm'] / 10:.0f} cm"
+    # Los años solo si son uno o dos rangos: los despieces de ILLINOIS listan diez autos con sus
+    # años, y eso no es una versión.
+    if firma.get("anios") and len(firma["anios"]) <= 2:
+        salida["años"] = " y ".join(f"{d}–{'' if h >= 2100 else h}" for d, h in firma["anios"])
+    return salida
+
+
+def versiones_para_preguntar(producto_id):
+    """[(qué preguntar, {valor: [códigos]})] cuando la lista del mismo proveedor tiene otras
+    versiones de esta pieza para el mismo auto. [] si no hay nada que preguntar."""
+    c.execute("SELECT descripcion, marca_id FROM productos WHERE id = ?", (producto_id,))
+    fila = c.fetchone()
+    if not fila:
+        return []
+    descripcion = fila["descripcion"] or ""
+    firma = firma_de_producto(descripcion)
+    if not firma or not firma.get("cabeza"):
+        return []
+    marcas = _marcas_de_auto(firma)
+    modelos = set(firma.get("modelos") or ()) | set(firma.get("modelos_numericos") or ())
+    if not marcas or not modelos:
+        return []
+    es_kit = bool(es_un_kit(descripcion))
+    c.execute("""SELECT id, codigo_raw, descripcion FROM productos
+                 WHERE marca_id = ? AND UPPER(descripcion) LIKE ?""",
+              (fila["marca_id"], f"%{firma['cabeza'][:5]}%"))
+    grupo = []
+    for f in c.fetchall():
+        fb = firma if f["id"] == producto_id else firma_de_producto(f["descripcion"] or "")
+        if (not fb or fb.get("cabeza") != firma.get("cabeza")
+                or set(fb.get("pieza") or ()) != set(firma.get("pieza") or ())
+                or (fb.get("sensor") or None) != (firma.get("sensor") or None)
+                or bool(es_un_kit(f["descripcion"] or "")) != es_kit
+                or not _marcas_de_auto(fb) & marcas):
+            continue
+        if not modelos & (set(fb.get("modelos") or ()) | set(fb.get("modelos_numericos") or ())):
+            continue
+        ca, cb = set(firma.get("cilindradas") or ()), set(fb.get("cilindradas") or ())
+        if ca and cb and not ca & cb:
+            continue
+        if (firma.get("combustible") == "diesel") != (fb.get("combustible") == "diesel"):
+            continue
+        grupo.append((f["codigo_raw"], _lo_que_separa_versiones(f["descripcion"], fb)))
+    if len(grupo) < 2:
+        return []
+    salida = []
+    for que in ("vías", "ficha", "color", "fase", "largo de cable", "espesor", "años"):
+        valores = {}
+        for codigo, separa in grupo:
+            if que in separa:
+                valores.setdefault(separa[que], []).append(codigo)
+        if len(valores) >= 2:
+            salida.append((que, valores))
+    return salida
+
+
 def listar_combos():
     c.execute("SELECT DISTINCT disparador FROM combos_sugeridos ORDER BY disparador")
     disparadores = [r["disparador"] for r in c.fetchall()]
