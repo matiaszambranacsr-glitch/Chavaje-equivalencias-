@@ -6462,8 +6462,8 @@ con «la descripción contiene la marca y contiene el modelo». Medido sobre el 
 
 | Auto | Antes | Ahora | Qué pasaba |
 |---|---|---|---|
-| VW Gol | 1.332 (241 sin «GOL» como palabra) | 1.395, todos del Gol | «GOL» está adentro de «GOLF»: salían repuestos del Golf, el Bora o el Polo |
-| «VW» Gol | 1.922 | 1.395 | lo mismo; y escribir «VOLKSWAGEN» se perdía los que dicen «VW» (5.530 productos) |
+| «VOLKSWAGEN» Gol | 1.332 (280 sin «GOL» como palabra) | 1.395, todos del Gol | «GOL» está adentro de «GOLF»: salían repuestos del Golf, el Bora o el Polo |
+| «VW» Gol | 1.922 (241 sin «GOL» como palabra) | 1.395 | lo mismo; y escribir «VOLKSWAGEN» se perdía los que dicen «VW» (5.530 productos) |
 | VW Up | 283 (205 no eran del Up) | 123 | «UP» adentro de «PICK UP» y de cualquier palabra |
 | Peugeot 208 | 377 (176 no eran del 208) | 190 | «208» adentro de «71208» |
 | Ford Ka | 975 (95 dudosos) | 856 | «KA» adentro de «KALOS» y otras |

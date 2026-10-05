@@ -203,7 +203,7 @@ def _nombra_este_auto(descripcion, marca, modelo):
 
     Antes era «la descripción contiene el texto», y con modelos cortos eso no sirve: «GOL» está
     adentro de «GOLF», «UP» adentro de «PICK UP» y «208» adentro de «71208». Medido sobre el
-    catálogo real: VW Gol traía 241 productos del Golf, el Bora o el Polo; VW Up, 205 de 283 que
+    catálogo real: «VW» Gol traía 241 productos del Golf, el Bora o el Polo; VW Up, 205 de 283 que
     no eran del Up; Peugeot 208, 176 de 377.
 
     Un modelo que lleva NÚMEROS («208», «C3», «S10», «500») tiene que estar en el pedazo de la
