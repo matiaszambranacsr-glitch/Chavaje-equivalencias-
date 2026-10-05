@@ -1175,8 +1175,8 @@ def precios_lejos_de_mercado_libre(veces=1.6, limite=200):
     for f in filas:
         razon = f["Tu precio"] / f["Mercado Libre"]
         if razon >= veces or razon <= 1 / veces:
-            f["Diferencia"] = (f"{razon:.1f} veces más caro" if razon > 1
-                               else f"{1 / razon:.1f} veces más barato")
+            f["Diferencia"] = (f"{miles(razon, 1)} veces más caro" if razon > 1
+                               else f"{miles(1 / razon, 1)} veces más barato")
             f["_orden"] = max(razon, 1 / razon)
             salida.append(f)
     salida.sort(key=lambda f: (-(f["Stock"] > 0), -f["_orden"]))
@@ -2392,6 +2392,14 @@ def _trabajo_de_fondo():
         preparar_el_analisis_del_primer_lote()
     except Exception as _err:
         anotar_error("_trabajo_de_fondo/analisis_del_lote", _err)
+
+    # El dólar y la inflación oficiales (ver contexto_de_precios()): acá, por atrás, para que
+    # los avisos y la importación los tengan sin salir a internet desde una pantalla. Si ya
+    # están frescos no sale a ningún lado.
+    try:
+        contexto_de_precios()
+    except Exception as _err:
+        anotar_error("_trabajo_de_fondo/contexto_de_precios", _err)
 
     # Lo ya aprobado, con las reglas de hoy: si la app cambió o cambiaron los vínculos. La
     # pantalla de sugeridas avisa lo que encuentre (ver revisar_lo_aprobado_por_atras()).

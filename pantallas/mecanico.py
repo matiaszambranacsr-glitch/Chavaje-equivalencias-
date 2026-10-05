@@ -938,7 +938,7 @@ if pagina == PAGINAS[7]:
                 "Nm → lb-in": (valor / 0.112985, "lb-in"),
             }
             resultado, unidad = factores[direccion]
-            st.metric("Resultado", f"{resultado:.2f} {unidad}")
+            st.metric("Resultado", f"{miles(resultado, 2)} {unidad}")
 
         elif categoria_conv == "Presión":
             direccion = st.radio("Convertir:", ["PSI → Bar", "Bar → PSI", "PSI → kPa", "kPa → PSI"],
@@ -951,7 +951,7 @@ if pagina == PAGINAS[7]:
                 "kPa → PSI": (valor / 6.89476, "PSI"),
             }
             resultado, unidad = factores[direccion]
-            st.metric("Resultado", f"{resultado:.2f} {unidad}")
+            st.metric("Resultado", f"{miles(resultado, 2)} {unidad}")
 
         else:  # Longitud
             direccion = st.radio("Convertir:", ["Pulgadas → mm", "mm → Pulgadas", "Pulgadas → cm", "cm → Pulgadas"],
@@ -964,4 +964,4 @@ if pagina == PAGINAS[7]:
                 "cm → Pulgadas": (valor / 2.54, "pulgadas"),
             }
             resultado, unidad = factores[direccion]
-            st.metric("Resultado", f"{resultado:.3f} {unidad}")
+            st.metric("Resultado", f"{miles(resultado, 3)} {unidad}")

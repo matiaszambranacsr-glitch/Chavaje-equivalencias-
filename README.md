@@ -6321,6 +6321,48 @@ Las partes de la lógica corren una detrás de la otra en el mismo espacio de no
 `orden.py`), así que cortar en orden no cambia nada: comprobado con el auditor, el núcleo, las
 pruebas de la revisión contra las 20.306 aprobaciones y las 30 pantallas.
 
+### 🏛️ Fuentes oficiales y gratuitas: INDEC, BCRA y NHTSA
+
+La app ya consultaba el IPC del INDEC (por datos.gob.ar), el dólar oficial (argentinadatos) y la
+base de VIN de la NHTSA. Revisado:
+
+- **La inflación estaba mal leída.** Lo último guardado en la base real dice que la inflación de
+  agosto 2026 fue **−21,5%**. La serie que se consultaba es la VARIACIÓN mensual, no el índice,
+  y se la dividía como si fuera el índice: 1,9% contra 2,42% da −21,5%. Ahora se pide el índice
+  (`148.3_INIVELNAL_DICI_M_26`) y, de respaldo, la de la variación, y **se reconoce qué trae
+  cada serie por sus valores** (miles = índice; menos de 1 = fracción; menos de 40 =
+  porcentaje). Un mes fuera de −5% / +30% invalida todo: no se le cree. Lo guardado con el
+  formato viejo se descarta y se vuelve a traer.
+- **El dólar se controla contra el BCRA.** El minorista de argentinadatos (el que usan las listas
+  en dólares) se compara con el de referencia de la API oficial del BCRA
+  (`api.bcra.gob.ar/estadisticascambiarias`); si se separan más de un 15%, se usa el del BCRA.
+- **Para qué se usan ahora:**
+  - «⏳ Qué tan atrasada está cada lista» muestra **la inflación oficial desde la última carga**:
+    con una sola importación no había ritmo propio y solo decía los días. Es un piso (meses
+    enteros ya publicados). También en los avisos del día.
+  - «📈 Cuánto te aumentó cada proveedor» dice la inflación del mismo período: el que aumentó
+    menos está quedando barato.
+  - **Listas en dólares**: en «📏 Coeficiente de la lista», la casilla «💵 Esta lista viene en
+    dólares» hace que el coeficiente sea el dólar oficial del día, y se actualiza solo en cada
+    importación.
+  - La tarea de fondo los trae (cada 6 horas como mucho); las pantallas y los avisos usan lo
+    guardado, sin salir a internet.
+- **«🔌 Probar las fuentes de afuera»** (Mantenimiento → 🩺 Estado y papelera → ⏳ Qué tan
+  atrasada está cada lista): consulta cada una en vivo, desde el servidor, y dice si contesta,
+  cuánto tardó y qué trajo. Desde donde se programó esto la red no llegaba a esos sitios: las
+  lecturas están probadas con respuestas de muestra en `pruebas_de_las_fuentes.py` —que
+  reproduce el −21,5% con la lectura vieja y da 1,9% con la nueva—, y este botón es la prueba
+  en vivo.
+- Los porcentajes y decimales que se muestran van con coma: «1,9%», no «1.9%».
+
+**Lo que se buscó y no se sumó, y por qué:**
+
+| Fuente | Por qué no |
+|---|---|
+| Catálogos de Bosch, Valeo, Marelli, Hella, INA (los más citados en tus listas: Bosch 4.352 veces) | No tienen una página pública por código: buscan con formularios o JavaScript, o están en TecDoc, que es pago. Leerlos no sería confiable. Si encontrás el link de la ficha de alguno, se carga en «➕ Cargar un portal». |
+| Cruzar entre proveedores los números de fabricante que citan | Ya se hace: cada número citado se carga como código de fábrica. Medido: ningún número citado por dos proveedores queda sin unir. |
+| Marcas y modelos patentados en Argentina (DNRPA, datos.jus.gob.ar) | Es oficial y serviría para reconocer modelos (Gol, Palio, Clio…), pero cambiaría las reglas que deciden si dos piezas son del mismo auto, y sin poder bajarlo no se puede medir el efecto contra las aprobaciones. Queda para cuando se pueda medir. |
+
 ## 🔗 Revisar sugeridas: primero lo que hay que hacer
 
 Mirado con capturas sobre la base real (15.308 pendientes en 8 listas):

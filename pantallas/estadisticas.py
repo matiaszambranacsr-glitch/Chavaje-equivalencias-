@@ -527,7 +527,13 @@ Administrar → Mantenimiento.
             )
         else:
             st.dataframe(quitar_id(variacion), width="stretch", hide_index=True)
-            st.caption("Ordenado de mayor a menor aumento.")
+            # Contra qué comparar: la inflación oficial del mismo período (ver inflacion_desde()).
+            _inf, _hasta = inflacion_desde(
+                (datetime.now() - timedelta(days=int(meses_var) * 30)).strftime("%Y-%m-%d"))
+            st.caption("Ordenado de mayor a menor aumento."
+                       + (f" La inflación oficial del INDEC en el mismo período fue "
+                          f"**{miles(_inf * 100, 1)}%** (hasta {_hasta}): el que aumentó menos "
+                          "que eso está quedando barato." if _inf else ""))
 
         st.markdown("---")
         st.markdown("**💰 A quién conviene comprarle**")

@@ -219,17 +219,31 @@ if pagina == PAGINAS[3]:
                 st.warning(f"**{_marca_coef}** está fuera de escala: cuesta ×"
                            f"{miles(_d_coef['factor'], 2)} lo que sus equivalentes. Sugerido: "
                            f"**×{miles(_sugerido, 2)}**.")
+            # Las listas en dólares: el coeficiente es el dólar oficial del día, y se actualiza
+            # solo en cada importación (ver coeficiente_de_lista()).
+            _dolar_hoy, _dolar_fecha, _dolar_fuente = dolar_guardado()
+            _en_dolares = st.checkbox(
+                "💵 Esta lista viene en dólares: usar el dólar oficial del día"
+                + (f" (hoy ${miles(_dolar_hoy, 2)}, al {_dolar_fecha})" if _dolar_hoy else ""),
+                value=lista_en_dolares(_id_coef), key=f"coef_dolares_{_id_coef}",
+                disabled=not _dolar_hoy and not lista_en_dolares(_id_coef),
+                help=("El dólar se trae solo, por atrás, del oficial minorista controlado con el "
+                      "de referencia del BCRA" + (f" (último: {_dolar_fuente})." if _dolar_fuente
+                                                  else ". Todavía no se pudo traer.")))
             _nuevo_coef = st.number_input(
                 "Coeficiente (1 = la lista tal cual):", min_value=0.001,
-                value=float(_sugerido or _actual), step=0.1, format="%.3f",
-                key=f"coef_valor_{_id_coef}")
+                value=float(_dolar_hoy if (_en_dolares and _dolar_hoy) else (_sugerido or _actual)),
+                step=0.1, format="%.3f", key=f"coef_valor_{_id_coef}_{_en_dolares}",
+                disabled=bool(_en_dolares and _dolar_hoy))
             _a_lo_cargado = st.checkbox("Llevar también los precios que ya están cargados a la "
                                         "nueva escala", value=True, key="coef_a_lo_cargado")
             if candado('cambiar el coeficiente de una lista',
                        st.button("📏 Guardar el coeficiente",
-                                 disabled=abs(_nuevo_coef - _actual) < 1e-9),
+                                 disabled=(abs(_nuevo_coef - _actual) < 1e-9
+                                           and _en_dolares == lista_en_dolares(_id_coef))),
                        'cambiar_el_coeficiente_de_una_lista'):
-                _n_coef = guardar_coeficiente_de_lista(_id_coef, _nuevo_coef, _a_lo_cargado)
+                _n_coef = guardar_coeficiente_de_lista(_id_coef, _nuevo_coef, _a_lo_cargado,
+                                                       en_dolares=_en_dolares)
                 invalidar_salud()
                 avisar("success", f"Coeficiente de {_marca_coef}: ×{miles(_nuevo_coef, 2)}. "
                                   + (f"Se llevaron {miles(_n_coef)} precio(s) a la nueva escala."

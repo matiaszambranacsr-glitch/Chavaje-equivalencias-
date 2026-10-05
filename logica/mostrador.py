@@ -749,15 +749,38 @@ def codigos_con_dos_precios_en_la_misma_lista(limite=500):
     return filas
 
 
+def lista_en_dolares(marca_id):
+    """¿La lista de esta marca viene en dólares? Entonces su coeficiente es el dólar del día."""
+    return obtener_config(f"lista_en_dolares_{marca_id}", "") == "1"
+
+
+def dolar_guardado():
+    """El último dólar oficial que se trajo (ver contexto_de_precios()), sin salir a internet:
+    (cotización, fecha, fuente), o (None, None, None)."""
+    try:
+        d = json.loads(obtener_config("ultimo_dolar", "") or "{}")
+        venta = float(d.get("venta") or 0)
+    except (ValueError, TypeError, AttributeError):
+        return None, None, None
+    return (venta, d.get("fecha"), d.get("fuente")) if venta > 0 else (None, None, None)
+
+
 def coeficiente_de_lista(marca_id):
-    """Por cuánto se multiplica el precio de la lista de esta marca al importarla (1 si nada)."""
+    """Por cuánto se multiplica el precio de la lista de esta marca al importarla (1 si nada).
+    Si la lista viene en dólares, el dólar oficial del día —el último que se trajo—; si no se
+    pudo traer nunca, el último coeficiente guardado."""
+    if lista_en_dolares(marca_id):
+        venta, _fecha, _fuente = dolar_guardado()
+        if venta:
+            return venta
     try:
         return float(obtener_config(f"coeficiente_lista_{marca_id}", "1") or 1) or 1.0
     except ValueError:
         return 1.0
 
 
-def guardar_coeficiente_de_lista(marca_id, coeficiente, aplicar_a_lo_cargado=True):
+def guardar_coeficiente_de_lista(marca_id, coeficiente, aplicar_a_lo_cargado=True,
+                                 en_dolares=None):
     """Guarda el coeficiente de la lista de una marca, que se aplica en cada importación. Con
     aplicar_a_lo_cargado, lleva también los precios que ya están —y su historial— a la nueva
     escala: es la misma lista en otra unidad, no un aumento, así que «Cuánto te aumentó cada
@@ -771,6 +794,10 @@ def guardar_coeficiente_de_lista(marca_id, coeficiente, aplicar_a_lo_cargado=Tru
         c.execute("INSERT INTO configuracion (clave, valor) VALUES (?, ?) "
                   "ON CONFLICT(clave) DO UPDATE SET valor = excluded.valor",
                   (f"coeficiente_lista_{marca_id}", repr(coeficiente)))
+        if en_dolares is not None:
+            c.execute("INSERT INTO configuracion (clave, valor) VALUES (?, ?) "
+                      "ON CONFLICT(clave) DO UPDATE SET valor = excluded.valor",
+                      (f"lista_en_dolares_{marca_id}", "1" if en_dolares else ""))
         if aplicar_a_lo_cargado and factor != 1:
             c.execute("UPDATE productos SET precio = ROUND(precio * ?, 2) "
                       "WHERE marca_id = ? AND precio > 0", (factor, marca_id))

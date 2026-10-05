@@ -70,11 +70,14 @@ if pagina == PAGINAS[3]:
             # lo que se hace con este número es pedir la lista nueva.
             st.markdown("**⏳ Qué tan atrasada está cada lista**")
             explicar(
-                "Los días que pasaron desde la última carga y, si la importaste más de una vez, "
-                "a qué ritmo viene aumentando.",
-                "No usa ningún índice ni ninguna consulta: sale de tu propio historial de "
-                "precios. La app ya guarda cada cambio, así que puede medir cuánto aumentó ESE "
-                "proveedor entre tus importaciones y cruzarlo con los días que pasaron.\n\n"
+                "Los días que pasaron desde la última carga, la inflación oficial desde entonces "
+                "y, si la importaste más de una vez, a qué ritmo viene aumentando.",
+                "El ritmo sale de tu propio historial de precios: la app guarda cada cambio, así "
+                "que puede medir cuánto aumentó ESE proveedor entre tus importaciones y cruzarlo "
+                "con los días que pasaron.\n\n"
+                "Con una sola importación no hay ritmo propio, y para eso está la **inflación "
+                "del INDEC** desde la última carga: cuenta los meses enteros ya publicados, así "
+                "que es un piso —el INDEC publica cada mes a mediados del siguiente—.\n\n"
                 "El ritmo sale de la MEDIANA y no del promedio a propósito: en cada lista hay "
                 "siempre un puñado de productos que pasan de 100 a 100.000 porque cambió la "
                 "unidad, y con el promedio esos pocos deciden el número de toda la lista.\n\n"
@@ -92,6 +95,12 @@ if pagina == PAGINAS[3]:
                         f"{_peor['_dias']} días y viene subiendo {_peor['Sube por mes']} por "
                         "mes. Cada venta de esa lista se hace con esa diferencia en contra."
                     )
+                elif _peor["_atraso"] >= 0.05:
+                    # Sin ritmo propio, con la inflación oficial: ver inflacion_desde().
+                    st.warning(
+                        f"⏳ **Desde la última carga de {_peor['Lista']} la inflación oficial "
+                        f"fue {_peor['Inflación desde la última carga (INDEC)']}.** Es un piso: "
+                        "sus precios están, como mínimo, eso abajo.")
                 elif all(x["_ritmo"] is None for x in _envejecidas):
                     st.caption(
                         "Todavía no puedo medir el ritmo de ninguna lista: hace falta haber "
@@ -115,15 +124,16 @@ if pagina == PAGINAS[3]:
                     if _var.get("30") is not None:
                         _lineas.append(
                             f"El **dólar oficial** subió "
-                            f"{_var['30'] * 100:.1f}% en los últimos 30 días"
-                            + (f" y {_var['90'] * 100:.1f}% en 90"
+                            f"{miles(_var['30'] * 100, 1)}% en los últimos 30 días"
+                            + (f" y {miles(_var['90'] * 100, 1)}% en 90"
                                if _var.get("90") is not None else "")
-                            + f" (al {_d.get('fecha', 'sin fecha')}).")
+                            + f" (al {_d.get('fecha', 'sin fecha')}"
+                            + (f"; {_d['fuente']}" if _d.get("fuente") else "") + ").")
                     _i = _ctx.get("ipc") or {}
                     if _i.get("variacion") is not None:
                         _lineas.append(
                             f"La **inflación** del último mes publicado por el INDEC "
-                            f"({_i.get('mes', '')[:7]}) fue {_i['variacion'] * 100:.1f}%.")
+                            f"({_i.get('mes', '')[:7]}) fue {miles(_i['variacion'] * 100, 1)}%.")
                         # La comparación que sirve: quién sube menos que la inflación.
                         _baratas = [x["Lista"] for x in _envejecidas
                                     if x["_ritmo"] is not None
@@ -138,6 +148,13 @@ if pagina == PAGINAS[3]:
                                 + ("\n\n⚠️ Son los últimos datos que pude traer, no los de hoy: "
                                    "ahora mismo no llego a internet."
                                    if _ctx.get("viejos") else ""))
+                # La prueba en vivo de las fuentes de afuera: ver probar_fuentes_de_afuera().
+                if st.button("🔌 Probar las fuentes de afuera", key="probar_fuentes",
+                             help="INDEC, BCRA, dólar minorista y NHTSA: una consulta a cada "
+                                  "una, para ver si contestan desde el servidor."):
+                    with st.spinner("Consultando…"):
+                        st.dataframe(probar_fuentes_de_afuera(), width="stretch",
+                                     hide_index=True)
             st.markdown("---")
 
             st.markdown("**↩️ Deshacer una importación**")

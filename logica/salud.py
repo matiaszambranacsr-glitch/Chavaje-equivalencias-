@@ -79,6 +79,7 @@ def envejecimiento_de_precios():
         return []
 
     hoy = datetime.now()
+    ipc = ipc_guardado()
     salida = []
     for m in marcas:
         if not m["con_precio"]:
@@ -94,177 +95,23 @@ def envejecimiento_de_precios():
                 dias = None
         ritmo = ritmo_por_marca.get(m["id"])
         atraso = (((1 + ritmo) ** (dias / 30.0) - 1) if (ritmo is not None and dias) else None)
+        # La inflación oficial desde la última carga: con UNA sola importación no hay ritmo
+        # propio, y «tiene 40 días» no decía cuánto. Es un piso (ver inflacion_desde()).
+        inflacion, _hasta = inflacion_desde(m["ultima"], ipc)
         salida.append({
             "Lista": m["nombre"], "Productos con precio": m["con_precio"],
             "Días desde la última carga": dias,
-            "Sube por mes": (f"{ritmo * 100:.1f}%" if ritmo is not None else "—"),
-            "Estarían atrasados": (f"{atraso * 100:.0f}%" if atraso else "—"),
-            "_atraso": atraso or 0, "_dias": dias or 0, "_ritmo": ritmo,
+            "Sube por mes": (f"{miles(ritmo * 100, 1)}%" if ritmo is not None else "—"),
+            "Estarían atrasados": (f"{atraso * 100:.0f}%" if atraso else
+                                   f"≈{inflacion * 100:.0f}% (inflación)" if inflacion else "—"),
+            "Inflación desde la última carga (INDEC)": (
+                f"{miles(inflacion * 100, 1)}% (a {_hasta})" if inflacion is not None else "—"),
+            "_atraso": atraso or inflacion or 0, "_dias": dias or 0, "_ritmo": ritmo,
         })
     salida.sort(key=lambda x: (-x["_atraso"], -x["_dias"]))
     return salida
 
 
-# La única fuente de afuera de toda la app que no es el catálogo de un proveedor. Son dos APIs
-# públicas, sin clave y sin costo: argentinadatos publica el dólar oficial del BCRA día por día,
-# y datos.gob.ar publica el IPC del INDEC. Se usan para una sola cosa —poner en contexto cuánto
-# atrasada está una lista de precios— y la app funciona igual sin ellas.
-URL_DOLAR_OFICIAL = "https://api.argentinadatos.com/v1/cotizaciones/dolares/oficial"
-URL_IPC_INDEC = ("https://apis.datos.gob.ar/series/api/series"
-                 "?ids=145.3_INGNACUAL_DICI_M_38&limit=5&sort=desc&format=json")
-
-
-def _pedir_json(url, tiempo_maximo=4):
-    """Trae un JSON de afuera, o None. Nunca levanta excepción ni tarda más de unos segundos.
-
-    El tope de tiempo es lo importante: esto se llama desde una pantalla, y una API que no
-    contesta no puede dejar colgada la app de alguien que entró a buscar un repuesto."""
-    try:
-        r = requests.get(url, timeout=tiempo_maximo,
-                         headers={"User-Agent": "EquivalenciasElChavo/1.0"})
-        if r.status_code != 200:
-            return None
-        return r.json()
-    except Exception as _err:      # de red, de JSON, de lo que sea: acá nada puede romper
-        anotar_error("_pedir_json", _err)
-        return None
-
-
-# Cada cuánto se vuelve a preguntar, y cuánto se espera después de un fallo. El segundo número
-# es el que importa: sin él, con internet caído la app reintentaba en cada dibujo de pantalla y
-# se comía cuatro segundos por vez.
-HORAS_CONTEXTO_FRESCO = 6
-MINUTOS_ANTES_DE_REINTENTAR = 30
-
-
-def _dolar_oficial():
-    """El dólar oficial de hoy y cuánto subió en 30, 60 y 90 días. {} si no se pudo."""
-    datos = _pedir_json(URL_DOLAR_OFICIAL)
-    if not isinstance(datos, list):
-        return {}
-    # Vienen como [{"fecha": "2026-09-16", "compra": .., "venta": ..}, ...].
-    serie = []
-    for x in datos:
-        try:
-            serie.append((str(x["fecha"])[:10], float(x["venta"])))
-        except (KeyError, TypeError, ValueError):
-            continue
-    if not serie:
-        return {}
-    serie.sort()
-    hoy_f, hoy_v = serie[-1]
-    if hoy_v <= 0:
-        return {}
-    salida = {"fecha": hoy_f, "venta": hoy_v, "variacion": {}}
-    for dias in (30, 60, 90):
-        objetivo = (datetime.now() - timedelta(days=dias)).strftime("%Y-%m-%d")
-        # El último día con cotización ANTERIOR o igual al objetivo: los fines de semana y
-        # feriados no cotizan, y buscar la fecha exacta no devolvería nada uno de cada tres días.
-        previos = [v for f, v in serie if f <= objetivo and v > 0]
-        if previos:
-            salida["variacion"][str(dias)] = hoy_v / previos[-1] - 1
-    return salida
-
-
-def _inflacion_mensual_indec():
-    """La última variación mensual del IPC del INDEC, como fracción. {} si no se pudo.
-
-    OJO con el desfasaje: el INDEC publica el dato de un mes a mediados del siguiente, así que
-    esto siempre va una o dos semanas atrás. Por eso el ritmo con el que se decide algo sigue
-    siendo el de historial_precios —tus propias importaciones—, y esto es solo el contexto."""
-    datos = _pedir_json(URL_IPC_INDEC)
-    filas = datos.get("data") if isinstance(datos, dict) else None
-    if not isinstance(filas, list):
-        return {}
-    valores = []
-    for fila in filas:
-        try:
-            if fila[1] is not None:
-                valores.append((str(fila[0])[:10], float(fila[1])))
-        except (IndexError, TypeError, ValueError):
-            continue
-    if len(valores) < 2:
-        return {}
-    valores.sort()
-    v_ant, (f_ult, v_ult) = valores[-2][1], valores[-1]
-    if not v_ant:
-        return {}
-    return {"mes": f_ult, "variacion": v_ult / v_ant - 1}
-
-
-def contexto_de_precios():
-    """El dólar oficial y la inflación, juntos y sin poder fallar. {} si no hay nada que decir.
-
-    Es lo único que esta app va a buscar afuera además de los catálogos de los proveedores, y
-    no decide nada: lo que dice a qué ritmo aumenta un proveedor sigue siendo TU historial de
-    importaciones. Esto contesta las dos cosas que el historial propio no puede — si el
-    proveedor viene subiendo por debajo de la inflación (está quedando barato) y cuánto se movió
-    el dólar, que es lo que manda en lo importado.
-
-    El guardado va en la tabla de configuración y NO en st.cache_data, por dos razones que se
-    probaron:
-
-      · st.cache_data también cachea el FALLO. Si justo cuando se pide no hay internet, el {}
-        vacío queda seis horas guardado y la pantalla no dice nada aunque la conexión haya
-        vuelto a los dos minutos.
-      · El caché de Streamlit se pierde cuando se reinicia el servidor, que en Streamlit Cloud
-        pasa seguido. Guardado en la base, lo último que se supo sobrevive.
-
-    Y si hoy no se puede, se muestra lo último que se supo con la fecha de cuándo fue, que es
-    más útil que no decir nada. Se marca como viejo para no hacerlo pasar por de hoy."""
-    ahora = datetime.now()
-    salida = {}
-    _guardados = {}
-    for clave, config in (("dolar", "ultimo_dolar"), ("ipc", "ultimo_ipc")):
-        try:
-            crudo = obtener_config(config, "")
-            _guardados[clave] = json.loads(crudo) if crudo else None
-        except (ValueError, TypeError):
-            _guardados[clave] = None
-
-    def esta_fresco(guardado):
-        if not guardado or not guardado.get("_traido"):
-            return False
-        try:
-            visto = datetime.strptime(guardado["_traido"][:19], "%Y-%m-%d %H:%M:%S")
-        except ValueError:
-            return False
-        return (ahora - visto).total_seconds() < HORAS_CONTEXTO_FRESCO * 3600
-
-    # Si todo lo guardado está fresco no se sale a internet, y si hace poco falló tampoco:
-    # reintentar en cada dibujo de pantalla cuesta cuatro segundos por vez.
-    frescos = all(esta_fresco(_guardados[k]) for k in ("dolar", "ipc"))
-    espera = obtener_config("contexto_reintentar_despues", "")
-    en_penitencia = bool(espera) and espera > ahora.strftime("%Y-%m-%d %H:%M:%S")
-
-    if not frescos and not en_penitencia:
-        fallo = False
-        for clave, config, traer in (("dolar", "ultimo_dolar", _dolar_oficial),
-                                     ("ipc", "ultimo_ipc", _inflacion_mensual_indec)):
-            if esta_fresco(_guardados[clave]):
-                continue
-            try:
-                nuevo = traer()
-            except Exception as _err:          # nada de acá puede romper una pantalla
-                anotar_error("contexto_de_precios", _err)
-                nuevo = {}
-            if nuevo:
-                nuevo["_traido"] = ahora.strftime("%Y-%m-%d %H:%M:%S")
-                _guardados[clave] = nuevo
-                guardar_config(config, json.dumps(nuevo))
-            else:
-                fallo = True
-        if fallo:
-            guardar_config("contexto_reintentar_despues",
-                           (ahora + timedelta(minutes=MINUTOS_ANTES_DE_REINTENTAR)
-                            ).strftime("%Y-%m-%d %H:%M:%S"))
-
-    for clave in ("dolar", "ipc"):
-        if _guardados[clave]:
-            salida[clave] = _guardados[clave]
-            if not esta_fresco(_guardados[clave]):
-                salida.setdefault("viejos", []).append(clave)
-    return salida
 
 
 def diagnostico_de_salud():
@@ -360,13 +207,18 @@ def diagnostico_de_salud():
                       f"importaciones, no con ningún índice. Pedile la lista nueva al "
                       f"proveedor.",
                       miga_hasta("Importaciones"))
-            elif _vieja["_ritmo"] is None and _vieja["_dias"] >= 60:
+            elif _vieja["_ritmo"] is None and (_vieja["_dias"] >= 60 or _vieja["_atraso"] >= 0.05):
+                _inf_txt = _vieja.get("Inflación desde la última carga (INDEC)") or "—"
                 sumar("medio",
-                      f"La lista de {_vieja['Lista']} tiene {_vieja['_dias']} días",
+                      f"La lista de {_vieja['Lista']} tiene {_vieja['_dias']} días"
+                      + (f": la inflación oficial desde entonces fue {_inf_txt}"
+                         if _inf_txt != "—" else ""),
                       "Todavía no la importaste dos veces, así que no puedo medir cuánto "
-                      "sube: con la próxima importación la app va a saber a qué ritmo "
-                      "aumenta y te va a avisar sola.",
-                      miga_hasta("Importaciones"))
+                      "sube ese proveedor"
+                      + (" —la inflación del INDEC es un piso de cuánto quedó abajo—"
+                         if _inf_txt != "—" else "")
+                      + ". Con la próxima importación la app va a saber a qué ritmo aumenta.",
+                      miga_hasta("Qué tan atrasada está cada lista"))
     except Exception as _err:
         anotar_error("diagnostico_de_salud/precios viejos", _err)
 
@@ -1116,3 +968,307 @@ def borrar_codigos_basura():
         c.executemany("DELETE FROM productos WHERE id = ?", [(i["ID"],) for i in items])
         conn.commit()
     return len(items)
+
+
+# ============================================================================================
+# FUENTES OFICIALES DE AFUERA: INDEC Y BCRA
+# ============================================================================================
+# Las únicas fuentes de afuera de la app que no son el catálogo de un proveedor. Todas públicas,
+# sin clave y sin costo, y la app funciona igual sin ellas:
+#   · el IPC del INDEC, por la API de series de tiempo de datos.gob.ar (el Estado argentino);
+#   · el dólar: el oficial minorista día por día de argentinadatos, CONTROLADO contra el de
+#     referencia del BCRA (api.bcra.gob.ar). Si se separan más de un 15%, se usa el del BCRA.
+# Para qué: cuánto atrasada está una lista contra la inflación, cuánto aumentó cada proveedor
+# contra la inflación, y el coeficiente de las listas que vienen en dólares.
+URL_DOLAR_OFICIAL = "https://api.argentinadatos.com/v1/cotizaciones/dolares/oficial"
+URL_DOLAR_BCRA = ("https://api.bcra.gob.ar/estadisticascambiarias/v1.0/Cotizaciones/USD"
+                  "?fechadesde={desde}&fechahasta={hasta}")
+# El NIVEL del IPC nacional (índice, base dic-2016 = 100), y como respaldo la serie que había:
+# esa es la VARIACIÓN mensual, no el índice, y se la dividía como si fuera el índice —1,9%
+# contra 2,42% daba una «inflación» de −21,5%, que es lo que quedó guardado en la base real—.
+# Ahora se reconoce qué trae cada serie por sus valores (ver _variaciones_del_ipc()).
+SERIES_IPC_INDEC = ("148.3_INIVELNAL_DICI_M_26", "145.3_INGNACUAL_DICI_M_38")
+URL_IPC_INDEC = ("https://apis.datos.gob.ar/series/api/series"
+                 "?ids={serie}&limit=40&sort=desc&format=json")
+# Una inflación mensual fuera de esto no es un dato: es una serie leída al revés.
+INFLACION_MENSUAL_CREIBLE = (-0.05, 0.30)
+
+
+def _pedir_json(url, tiempo_maximo=4):
+    """Trae un JSON de afuera, o None. Nunca levanta excepción ni tarda más de unos segundos.
+
+    El tope de tiempo es lo importante: esto se llama desde una pantalla, y una API que no
+    contesta no puede dejar colgada la app de alguien que entró a buscar un repuesto."""
+    try:
+        r = requests.get(url, timeout=tiempo_maximo,
+                         headers={"User-Agent": "EquivalenciasElChavo/1.0"})
+        if r.status_code != 200:
+            return None
+        return r.json()
+    except Exception as _err:      # de red, de JSON, de lo que sea: acá nada puede romper
+        anotar_error("_pedir_json", _err)
+        return None
+
+
+# Cada cuánto se vuelve a preguntar, y cuánto se espera después de un fallo. El segundo número
+# es el que importa: sin él, con internet caído la app reintentaba en cada dibujo de pantalla y
+# se comía cuatro segundos por vez.
+HORAS_CONTEXTO_FRESCO = 6
+MINUTOS_ANTES_DE_REINTENTAR = 30
+
+
+def _serie_del_dolar_bcra(dias=100):
+    """[(fecha, cotización)] del dólar de referencia del BCRA, o [].
+
+    La respuesta es {"results": [{"fecha": "2026-09-26", "detalle": [{"codigoMoneda": "USD",
+    "tipoCotizacion": 1530.5, ...}]}, ...]}. Se lee a la defensiva: lo que no tenga esa forma
+    no cuenta."""
+    hasta = datetime.now()
+    datos = _pedir_json(URL_DOLAR_BCRA.format(
+        desde=(hasta - timedelta(days=dias)).strftime("%Y-%m-%d"),
+        hasta=hasta.strftime("%Y-%m-%d")), tiempo_maximo=6)
+    resultados = datos.get("results") if isinstance(datos, dict) else None
+    if isinstance(resultados, dict):        # con un solo día viene sin la lista
+        resultados = [resultados]
+    serie = []
+    for r in resultados or []:
+        try:
+            for d in r.get("detalle") or []:
+                if str(d.get("codigoMoneda", "")).upper() == "USD" and float(d["tipoCotizacion"]) > 0:
+                    serie.append((str(r["fecha"])[:10], float(d["tipoCotizacion"])))
+        except (AttributeError, KeyError, TypeError, ValueError):
+            continue
+    return sorted(serie)
+
+
+def _dolar_oficial():
+    """El dólar oficial de hoy y cuánto subió en 30, 60 y 90 días. {} si no se pudo.
+
+    El de argentinadatos es el minorista, que es el que usan las listas en dólares; el del BCRA
+    es el de referencia (mayorista), un poco más bajo. Se controla uno con el otro: si se
+    separan más de un 15%, alguno está mal leído, y se usa el del BCRA, que es la fuente."""
+    datos = _pedir_json(URL_DOLAR_OFICIAL)
+    # Vienen como [{"fecha": "2026-09-16", "compra": .., "venta": ..}, ...].
+    serie = []
+    for x in (datos if isinstance(datos, list) else []):
+        try:
+            serie.append((str(x["fecha"])[:10], float(x["venta"])))
+        except (KeyError, TypeError, ValueError):
+            continue
+    serie = sorted(s for s in serie if s[1] > 0)
+    bcra = _serie_del_dolar_bcra()
+    fuente = "argentinadatos (minorista), controlado con el BCRA" if bcra else "argentinadatos"
+    if bcra and (not serie or abs(serie[-1][1] / bcra[-1][1] - 1) > 0.15):
+        serie, fuente = bcra, "BCRA (referencia)"
+    if not serie:
+        return {}
+    hoy_f, hoy_v = serie[-1]
+    salida = {"fecha": hoy_f, "venta": hoy_v, "variacion": {}, "fuente": fuente}
+    for dias in (30, 60, 90):
+        objetivo = (datetime.now() - timedelta(days=dias)).strftime("%Y-%m-%d")
+        # El último día con cotización ANTERIOR o igual al objetivo: los fines de semana y
+        # feriados no cotizan, y buscar la fecha exacta no devolvería nada uno de cada tres días.
+        previos = [v for f, v in serie if f <= objetivo and v > 0]
+        if previos:
+            salida["variacion"][str(dias)] = hoy_v / previos[-1] - 1
+    return salida
+
+
+def _variaciones_del_ipc(valores):
+    """{mes: variación mensual} a partir de lo que traiga la serie, o {} si no se le cree.
+
+    La serie puede traer el ÍNDICE (miles: base 100 en 2016) o la VARIACIÓN mensual (como
+    fracción, 0,019, o como porcentaje, 1,9). Se reconoce por los valores y no por el nombre de
+    la serie: así un cambio de serie del lado del INDEC no vuelve a dar una inflación de −21%.
+    Si algún mes queda fuera de INFLACION_MENSUAL_CREIBLE, no se le cree a nada."""
+    valores = sorted((f, v) for f, v in valores if v is not None)
+    if len(valores) < 2:
+        return {}
+    if all(v > 50 for _f, v in valores):                     # el índice
+        variaciones = {f: v / ant - 1 for (_fa, ant), (f, v) in zip(valores, valores[1:]) if ant}
+    elif all(abs(v) < 1 for _f, v in valores):               # variación como fracción
+        variaciones = dict(valores)
+    elif all(abs(v) < 40 for _f, v in valores):              # variación como porcentaje
+        variaciones = {f: v / 100 for f, v in valores}
+    else:
+        return {}
+    bajo, alto = INFLACION_MENSUAL_CREIBLE
+    if not variaciones or any(not bajo <= v <= alto for v in variaciones.values()):
+        return {}
+    return variaciones
+
+
+def _inflacion_mensual_indec():
+    """La inflación mes por mes del INDEC: {"mensual": {mes: fracción}, "mes", "variacion"}
+    con el último mes publicado. {} si no se pudo o no se le cree.
+
+    OJO con el desfasaje: el INDEC publica el dato de un mes a mediados del siguiente, así que
+    esto siempre va una o dos semanas atrás."""
+    for serie in SERIES_IPC_INDEC:
+        datos = _pedir_json(URL_IPC_INDEC.format(serie=serie), tiempo_maximo=6)
+        filas = datos.get("data") if isinstance(datos, dict) else None
+        valores = []
+        for fila in filas if isinstance(filas, list) else []:
+            try:
+                if fila[1] is not None:
+                    valores.append((str(fila[0])[:7], float(fila[1])))
+            except (IndexError, TypeError, ValueError):
+                continue
+        mensual = _variaciones_del_ipc(valores)
+        if mensual:
+            ultimo = max(mensual)
+            return {"mensual": mensual, "mes": ultimo, "variacion": mensual[ultimo],
+                    "serie": serie}
+    return {}
+
+
+def ipc_guardado():
+    """Lo último que se trajo del INDEC, SIN salir a internet ({} si nada creíble). Es lo que
+    usan los avisos del día, que corren en cada pantalla."""
+    try:
+        guardado = json.loads(obtener_config("ultimo_ipc", "") or "{}")
+    except (ValueError, TypeError):
+        return {}
+    # Lo guardado antes del arreglo tiene solo el último mes, y puede ser el −21,5%.
+    if not isinstance(guardado.get("mensual"), dict) or not _variaciones_del_ipc(
+            list(guardado["mensual"].items())):
+        return {}
+    return guardado
+
+
+def inflacion_desde(fecha, ipc=None):
+    """(inflación acumulada desde esa fecha, hasta qué mes) según el INDEC, o (None, None).
+
+    Cuenta los meses ENTEROS después del de la fecha: lo de adentro del mes de la fecha no se
+    sabe cuánto fue, y es mejor quedarse corto que inventar. Va hasta el último mes publicado,
+    que está una o dos semanas atrás: es un piso, no el número exacto."""
+    ipc = ipc if ipc is not None else ipc_guardado()
+    mensual = (ipc or {}).get("mensual") or {}
+    if not mensual or not fecha:
+        return None, None
+    desde = str(fecha)[:7]
+    meses = sorted(m for m in mensual if m > desde)
+    if not meses:
+        return 0.0, max(mensual)
+    acumulada = 1.0
+    for m in meses:
+        acumulada *= 1 + mensual[m]
+    return acumulada - 1, meses[-1]
+
+
+def contexto_de_precios():
+    """El dólar oficial y la inflación, juntos y sin poder fallar. {} si no hay nada que decir.
+
+    Es lo único que esta app va a buscar afuera además de los catálogos de los proveedores, y
+    no decide nada: lo que dice a qué ritmo aumenta un proveedor sigue siendo TU historial de
+    importaciones. Esto contesta las dos cosas que el historial propio no puede — si el
+    proveedor viene subiendo por debajo de la inflación (está quedando barato) y cuánto se movió
+    el dólar, que es lo que manda en lo importado.
+
+    El guardado va en la tabla de configuración y NO en st.cache_data, por dos razones que se
+    probaron:
+
+      · st.cache_data también cachea el FALLO. Si justo cuando se pide no hay internet, el {}
+        vacío queda seis horas guardado y la pantalla no dice nada aunque la conexión haya
+        vuelto a los dos minutos.
+      · El caché de Streamlit se pierde cuando se reinicia el servidor, que en Streamlit Cloud
+        pasa seguido. Guardado en la base, lo último que se supo sobrevive.
+
+    Y si hoy no se puede, se muestra lo último que se supo con la fecha de cuándo fue, que es
+    más útil que no decir nada. Se marca como viejo para no hacerlo pasar por de hoy."""
+    ahora = datetime.now()
+    salida = {}
+    _guardados = {}
+    for clave, config in (("dolar", "ultimo_dolar"), ("ipc", "ultimo_ipc")):
+        try:
+            crudo = obtener_config(config, "")
+            _guardados[clave] = json.loads(crudo) if crudo else None
+        except (ValueError, TypeError):
+            _guardados[clave] = None
+
+    def esta_fresco(guardado):
+        if not guardado or not guardado.get("_traido"):
+            return False
+        # El IPC guardado antes del arreglo (sin la serie mes por mes) no vale: se trae de nuevo.
+        if "variacion" in guardado and "mes" in guardado and "mensual" not in guardado:
+            return False
+        try:
+            visto = datetime.strptime(guardado["_traido"][:19], "%Y-%m-%d %H:%M:%S")
+        except ValueError:
+            return False
+        return (ahora - visto).total_seconds() < HORAS_CONTEXTO_FRESCO * 3600
+
+    # Si todo lo guardado está fresco no se sale a internet, y si hace poco falló tampoco:
+    # reintentar en cada dibujo de pantalla cuesta cuatro segundos por vez.
+    frescos = all(esta_fresco(_guardados[k]) for k in ("dolar", "ipc"))
+    espera = obtener_config("contexto_reintentar_despues", "")
+    en_penitencia = bool(espera) and espera > ahora.strftime("%Y-%m-%d %H:%M:%S")
+
+    if not frescos and not en_penitencia:
+        fallo = False
+        for clave, config, traer in (("dolar", "ultimo_dolar", _dolar_oficial),
+                                     ("ipc", "ultimo_ipc", _inflacion_mensual_indec)):
+            if esta_fresco(_guardados[clave]):
+                continue
+            try:
+                nuevo = traer()
+            except Exception as _err:          # nada de acá puede romper una pantalla
+                anotar_error("contexto_de_precios", _err)
+                nuevo = {}
+            if nuevo:
+                nuevo["_traido"] = ahora.strftime("%Y-%m-%d %H:%M:%S")
+                _guardados[clave] = nuevo
+                guardar_config(config, json.dumps(nuevo))
+            else:
+                fallo = True
+        if fallo:
+            guardar_config("contexto_reintentar_despues",
+                           (ahora + timedelta(minutes=MINUTOS_ANTES_DE_REINTENTAR)
+                            ).strftime("%Y-%m-%d %H:%M:%S"))
+
+    for clave in ("dolar", "ipc"):
+        if _guardados[clave]:
+            salida[clave] = _guardados[clave]
+            if not esta_fresco(_guardados[clave]):
+                salida.setdefault("viejos", []).append(clave)
+    return salida
+
+
+# Un VIN de muestra que la NHTSA usa en su propia documentación (un Honda Accord 2003): sirve
+# para saber si la base responde sin mandarle el de ningún cliente.
+VIN_DE_MUESTRA = "1HGCM82633A004352"
+
+
+def probar_fuentes_de_afuera():
+    """Consulta cada fuente de afuera UNA vez y dice si contesta, cuánto tardó y qué trajo.
+    [{"Fuente", "Estado", "Tardó", "Trajo"}]. Para apretar a mano: sale a internet.
+
+    Las lecturas se probaron con respuestas de muestra (pruebas_de_las_fuentes.py), porque desde
+    donde se programaron estas APIs no se llegaba. Esto es la prueba en vivo, en el servidor."""
+    filas = []
+
+    def medir(nombre, funcion, resumen):
+        inicio = time.monotonic()
+        try:
+            resultado = funcion()
+        except Exception as _err:
+            anotar_error("probar_fuentes_de_afuera", _err)
+            resultado = None
+        tardo = f"{miles(time.monotonic() - inicio, 1)} s"
+        texto = resumen(resultado) if resultado else ""
+        filas.append({"Fuente": nombre, "Estado": "✅ contesta" if texto else "❌ no contesta",
+                      "Tardó": tardo, "Trajo": texto or "—"})
+
+    medir("INDEC — inflación (datos.gob.ar)", _inflacion_mensual_indec,
+          lambda r: f"{r['mes']}: {miles(r['variacion'] * 100, 1)}% (serie {r['serie']})")
+    medir("BCRA — dólar de referencia (api.bcra.gob.ar)", _serie_del_dolar_bcra,
+          lambda r: f"{r[-1][0]}: ${miles(r[-1][1], 2)}")
+    medir("Dólar oficial minorista (argentinadatos)",
+          lambda: _pedir_json(URL_DOLAR_OFICIAL),
+          lambda r: (f"{r[-1].get('fecha')}: ${miles(float(r[-1].get('venta')), 2)}"
+                     if isinstance(r, list) and r and r[-1].get("venta") else ""))
+    medir("NHTSA — lector de VIN (vpic.nhtsa.dot.gov)",
+          lambda: consultar_vin_en_nhtsa(VIN_DE_MUESTRA)[0],
+          lambda r: f"{r.get('marca')} {r.get('modelo')} {r.get('anio')}")
+    return filas
+

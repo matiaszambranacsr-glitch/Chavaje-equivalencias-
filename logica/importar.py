@@ -592,9 +592,9 @@ def salto_de_precio_sospechoso(precio_viejo, precio_nuevo, tope_pct=200):
     # se divide por veinte. Mirando la razón, multiplicar por 3 y dividir por 3 pesan igual.
     factor = 1 + tope_pct / 100.0
     if razon > factor:
-        return True, f"queda {razon:.1f} veces más caro (+{(razon - 1) * 100:.0f}%)"
+        return True, f"queda {miles(razon, 1)} veces más caro (+{(razon - 1) * 100:.0f}%)"
     if razon < 1 / factor:
-        return True, f"queda {1 / razon:.1f} veces más barato ({(razon - 1) * 100:.0f}%)"
+        return True, f"queda {miles(1 / razon, 1)} veces más barato ({(razon - 1) * 100:.0f}%)"
     return False, None
 
 

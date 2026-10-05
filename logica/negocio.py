@@ -1607,7 +1607,7 @@ def productos_por_quebrar(dias_aviso=21, minimo_ventas=3, limite=100):
             "Código": f["Código"], "Marca": f["Marca"],
             "Descripción": (f["Descripción"] or "")[:48],
             "Stock": stock,
-            "Se vende": f"{por_dia * 30:.1f} por mes",
+            "Se vende": f"{miles(por_dia * 30, 1)} por mes",
             "Se acaba en": ("ya sin stock" if stock <= 0
                              else f"{dias_restantes:.0f} día(s)"),
             "_dias": dias_restantes, "_id": f["_id"],

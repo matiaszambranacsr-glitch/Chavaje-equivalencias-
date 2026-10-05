@@ -50,6 +50,7 @@ específico, y las pantallas quedan todas al final:
     logica/salud.py
         · DIAGNÓSTICO DE SALUD DEL CATÁLOGO
         · POR QUÉ DOS CÓDIGOS NO SE RELACIONAN
+        · FUENTES OFICIALES DE AFUERA: INDEC Y BCRA
     logica/proveedores.py
         · CATÁLOGO WEB DEL PROVEEDOR (fotos y equivalencias)
         · LAS TANDAS QUE CORREN SOLAS, EN SEGUNDO PLANO
