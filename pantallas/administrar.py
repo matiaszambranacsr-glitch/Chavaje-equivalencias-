@@ -500,14 +500,13 @@ if pagina == PAGINAS[3]:
                         colC, colM, colB = st.columns([3, 2, 1.2])
                         colC.write(f"{fila['Codigo']}" + (f" — {fila['Descripcion']}" if fila.get('Descripcion') else ""))
                         colM.write(fila['Marca'])
-                        if colB.button("🔗 Usar", key=f"usar_huerfano_{fila['ID']}"):
-                            st.session_state["vincular_pendiente"] = {
-                                "cod_a": fila["Codigo"],
-                                "marca_a": fila["Marca"],
-                                "desc_a": fila.get("Descripcion") or ""
-                            }
-                            avisar("success", "Cargado. Andá a la pestaña '🔗 Vincular manual' para completar el Código B.")
-                            st.rerun()
+                        # Lleva directo a Vincular manual con el Código A puesto, en vez de
+                        # decir «andá a la pestaña…». Como on_click, por lo mismo que
+                        # ir_a_donde_dice_el_aviso(): el menú ya se dibujó en esta pasada.
+                        colB.button("🔗 Usar", key=f"usar_huerfano_{fila['ID']}",
+                                    on_click=usar_para_vincular,
+                                    args=(fila["Codigo"], fila["Marca"],
+                                          fila.get("Descripcion") or ""))
                 else:
                     st.info("Sin resultados para esa marca.")
 

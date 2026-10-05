@@ -1183,7 +1183,13 @@ Casi todo lo que edita o borra algo pide la contraseña de administrador la prim
                                     "codigo_buscado": codigo_individual,
                                     "resultados": res
                                 })
-                                st.success("Agregado a la lista. Andá a la pestaña 'Lista WhatsApp' para armarla.")
+                                st.success("Agregado a la lista.")
+                            # Un botón que lleva, en vez de «andá a la pestaña Lista WhatsApp»:
+                            # el que está atendiendo no tiene que buscarla en el menú.
+                            if st.session_state.lista_whatsapp:
+                                st.button(f"📋 Ir a la lista ({len(st.session_state.lista_whatsapp)}) →",
+                                          key=f"ir_wa_{clean}", on_click=ir_a_donde_dice_el_aviso,
+                                          args=(PAGINAS[5],))
 
                         # Kits: la pregunta del mostrador es «¿y el kit con las bujías?».
                         # Sale de las descripciones de las propias listas — cuando el proveedor

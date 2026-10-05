@@ -238,6 +238,14 @@ def ir_a_donde_dice_el_aviso(donde):
                 _ir_al_grupo_de_mantenimiento(GRUPOS_MANTENIMIENTO[grupo])
 
 
+def usar_para_vincular(codigo, marca, descripcion=""):
+    """Lleva a «🔗 Vincular manual» con ese producto ya puesto como Código A. Va como on_click."""
+    st.session_state["vincular_pendiente"] = {"cod_a": codigo, "marca_a": marca,
+                                              "desc_a": descripcion}
+    st.session_state["pagina_actual"] = PAGINAS[1]
+    avisar("success", f"«{codigo}» ({marca}) quedó cargado abajo. Tocá «➕ Agregar a la "
+                      "tanda» y sumale los códigos que son lo mismo.")
+
 def _ir_al_grupo_de_mantenimiento(nombre_grupo):
     """Cambia de grupo desde un botón, y de paso entra a Mantenimiento si no estabas ahí.
 

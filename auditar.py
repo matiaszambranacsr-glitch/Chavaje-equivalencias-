@@ -666,6 +666,14 @@ for n in ast.walk(ARBOL):
                 _ubicacion[id(sent)] = (cuerpo, i, n)
 
 
+# Las funciones que se pasan como on_click/on_change corren ANTES de la pasada que redibuja la
+# pantalla, así que lo que guardan con avisar() se muestra en esa misma pasada: no necesitan
+# st.rerun() (adentro de un callback, además, no se puede).
+_CALLBACKS = {kw.value.id for n in ast.walk(ARBOL) if isinstance(n, ast.Call)
+              for kw in n.keywords
+              if kw.arg in ("on_click", "on_change") and isinstance(kw.value, ast.Name)}
+
+
 def _hay_rerun_despues(sent):
     """True si algún st.rerun() puede correr después de esta sentencia, en su bloque o afuera."""
     actual = sent
@@ -675,7 +683,7 @@ def _hay_rerun_despues(sent):
                for s in cuerpo[i:] for x in ast.walk(s)):
             return True
         if isinstance(dueño, (ast.FunctionDef, ast.AsyncFunctionDef)):
-            return False    # más afuera ya es otra corrida, no esta
+            return dueño.name in _CALLBACKS    # más afuera ya es otra corrida, no esta
         actual = dueño
     return False
 

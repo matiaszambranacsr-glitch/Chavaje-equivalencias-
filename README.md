@@ -6098,6 +6098,11 @@ Capturas de la base real en una pantalla de 1366×768, antes y después:
   botón es «🔄 Procesar las … que faltan ahora»), «cargala desde 'Administrar'» (es
   Administrar → 📦 Productos), «traerlas desde Mantenimiento» (dice ahora a qué herramienta).
 
+- **Botones que llevan, en vez de «andá a la pestaña…».** Después de agregar un código a la
+  lista de WhatsApp aparece «📋 Ir a la lista (N) →». En «🧩 Productos sin equivalencias», «🔗
+  Usar» lleva directo a Vincular manual con el código ya puesto. Ese aviso, además, decía
+  «completá el Código B», y Vincular manual ya no tiene Código A y B: se arma una tanda.
+
 Recorridas las 30 pantallas, solapas y grupos de Mantenimiento como administrador sobre la base
 real: ninguna da error.
 
