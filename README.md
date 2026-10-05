@@ -6455,6 +6455,30 @@ el botón**:
 - «🔌 Probar las fuentes de afuera» suma la Central de Deudores (con el CUIT de la AFIP, nunca el
   de un cliente) y la inflación de respaldo.
 
+## 📷 Las fotos que subís vos sobreviven a los reinicios
+
+Pasó: se subieron fotos de productos, la app se actualizó, y la búsqueda por foto decía «No hay
+ninguna foto cargada en el catálogo». No era un error del mensaje: **las fotos ya no estaban**.
+
+Streamlit Cloud borra el disco cada vez que la app se reinicia o se actualiza (cada cambio que
+se sube a `main` es una actualización), y la app arranca desde la copia de la rama
+`copia-de-seguridad`. Esa copia les sacaba **todas** las fotos para no pasarse de los 100 MB de
+GitHub. Las de los catálogos y Mercado Libre se vuelven a bajar solas por su link; las subidas a
+mano no tienen link, así que se perdían.
+
+- **Ahora la copia lleva las fotos propias** (`ORIGENES_DE_FOTOS_PROPIAS`: las subidas desde el
+  teléfono y las elegidas de una página con «🔗 Desde una dirección web»), enteras y con su
+  firma para comparar: no hay que volver a procesarlas. Pesan unos 45 KB cada una.
+- Tope de 35 MB para esas fotos (unas 600): si se pasa, entran las más nuevas y «💾 Backup y
+  config» avisa cuántas quedaron afuera, para bajar el backup completo.
+- Al restaurar, cada una vuelve a ser la foto de la ficha de su producto
+  (`pedir_de_nuevo_las_fotos()`).
+- La copia se sube cada 15 minutos si hubo cambios: una foto recién subida queda a salvo como
+  mucho 15 minutos después.
+- El mensaje del paso 2 ahora distingue los tres casos: no hay fotos, hay fotos sin procesar
+  (antes decía «no hay ninguna») o las que hay no sirven para comparar.
+- Pruebas: `python3 pruebas_de_las_copias.py`.
+
 ## 🚗 Repuestos por auto: el Gol no es el Golf
 
 «Repuestos por auto» (y lo que el Modo Mecánico ofrece para una patente) buscaba en el catálogo

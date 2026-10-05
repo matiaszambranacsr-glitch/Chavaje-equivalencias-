@@ -1155,12 +1155,14 @@ for _cuerpo in _bloques:
 # Para eso está el bloque transaccion(). Esto marca a las que escriben en dos tablas distintas
 # y no lo usan. Se dejan afuera:
 #   · las que arman el esquema o corren migraciones (van una vez, al arrancar, y sin usuarios);
-#   · las que escriben en OTRA base (generar_backup_sin_fotos abre su propio archivo).
+#   · las que escriben en OTRA base (generar_backup_sin_fotos abre su propio archivo;
+#     _sacar_las_fotos limpia esa copia y pedir_de_nuevo_las_fotos la recién restaurada).
 _TABLAS_SQL = re.compile(
     r'\b(?:insert\s+(?:or\s+\w+\s+)?into|update|delete\s+from|replace\s+into)\s+'
     r'([a-z_][a-z_0-9]*)', re.I)
 _SIN_TRANSACCION_OK = ("_esquema_", "_datos_precargados", "crear_esquema", "_migracion",
-                       "generar_backup", "restaurar_")
+                       "generar_backup", "restaurar_", "_sacar_las_fotos",
+                       "pedir_de_nuevo_las_fotos")
 
 def _tablas_que_escribe(nodo):
     tablas = {}

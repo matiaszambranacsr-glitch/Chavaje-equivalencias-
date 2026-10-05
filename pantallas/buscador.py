@@ -409,16 +409,29 @@ if pagina == PAGINAS[0]:
                             else:
                                 st.info(f"«{cod_leido}» no figura en tu catálogo ni se parece a nada "
                                          "cargado. Podés probar la comparación por parecido.")
-                _fotos_hay = contar_fotos_comparables()[0]
+                _fotos_hay, _, _fotos_sin_procesar, _fotos_lisas = contar_fotos_comparables()
                 st.markdown("**Paso 2 — comparar por parecido** (si no se pudo leer el código)")
                 if not _fotos_hay:
                     # Decirlo ACÁ y no después de apretar el botón. El paso 2 compara contra las
                     # fotos del catálogo: con cero cargadas no puede dar nada, nunca, y dejar el
                     # botón como si fuera a servir hace perder el tiempo dos veces — una
                     # apretándolo y otra entendiendo por qué no salió nada.
-                    st.caption("⚠️ No hay ninguna foto cargada en el catálogo, así que este paso "
-                                "no va a encontrar nada. Saltá al **paso 3**, que no necesita "
-                                "fotos cargadas.")
+                    # Y decir cuál de los tres casos es: «no hay ninguna» era mentira cuando
+                    # había fotos sin procesar o que no sirven para comparar.
+                    if _fotos_sin_procesar:
+                        st.caption(f"⚠️ Hay {_fotos_sin_procesar} foto(s) en el catálogo que "
+                                   "todavía no se procesaron: tocá «🔄 Procesar las … que faltan "
+                                   "ahora», más arriba en este panel.")
+                    elif _fotos_lisas:
+                        st.caption(f"⚠️ Las {_fotos_lisas} foto(s) del catálogo no sirven para "
+                                   "comparar: no tienen detalles para agarrarse (pieza lisa, "
+                                   "fondo del mismo color, poca luz). Saltá al **paso 3**.")
+                    else:
+                        st.caption("⚠️ No hay ninguna foto cargada en el catálogo, así que este "
+                                   "paso no va a encontrar nada. Saltá al **paso 3**, que no "
+                                   "necesita fotos cargadas. Si ya habías subido fotos y no "
+                                   "están, se perdieron en un reinicio de la app: desde esta "
+                                   "versión las que subís vos quedan en la copia de seguridad.")
 
             if st.button("🖼️ Comparar con el catálogo", disabled=bytes_consulta is None,
                          type="primary", key="btn_comparar_visual"):

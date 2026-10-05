@@ -1136,8 +1136,9 @@ def _mensaje_catalogo_visual_vacio():
             f"Las fotos se cargan de a una en {miga_hasta('Productos')} (subiendo la foto o "
             "pegando la dirección de la ficha del proveedor), o en tanda en "
             f"{miga_hasta('Traer fotos de productos en tanda')}. "
-            "Ojo: el *backup sin fotos* que se sube al repositorio no las lleva, así que después "
-            "de un reinicio del hosting hay que volver a cargarlas.")
+            "Las que subís vos quedan en la copia de seguridad y sobreviven a los reinicios de "
+            "la app (antes no: si ya habías subido fotos y no están, se perdieron en un "
+            "reinicio y hay que volver a subirlas, por única vez).")
 
 
 def nivel_de_parecido(fila):

@@ -66,26 +66,73 @@ def generar_backup_completo():
             anotar_error("generar_backup_completo", _err)
 
 
+# LAS FOTOS PROPIAS SE QUEDAN EN LA COPIA. Las que subiste a mano (desde el teléfono, o
+# elegidas de una página en «🔗 Desde una dirección web») no tienen un link de donde volver a
+# bajarlas: si la copia se las saca, se pierden en el próximo reinicio, y Streamlit Cloud
+# reinicia la app en cada actualización. Pasó: se subieron fotos, la app se actualizó, y la
+# búsqueda por foto decía «no hay ninguna foto cargada».
+# Pesan unos 45 KB cada una (500 px, ver agregar_foto_producto()) más su firma; con el tope,
+# la copia sigue lejos de los 100 MB que acepta GitHub. Si se pasa, quedan las más nuevas y se
+# anota cuántas no entraron (ver fotos_propias_fuera_de_la_copia()).
+ORIGENES_DE_FOTOS_PROPIAS = ("subida", "url")
+TOPE_FOTOS_PROPIAS_EN_LA_COPIA = 35 * 1024 * 1024
+
+
 def _sacar_las_fotos(destino):
-    """Le saca las fotos a una copia recién hecha (ver generar_backup_sin_fotos()).
+    """Le saca las fotos a una copia recién hecha (ver generar_backup_sin_fotos()), MENOS las
+    propias (ver ORIGENES_DE_FOTOS_PROPIAS).
 
     Los LINKS se quedan: lo que pesa es la foto guardada adentro (data:…), las miniaturas y las
     firmas, no una dirección de cien letras. Antes se borraba todo, y después de cada reinicio
     —la copia es con lo que arranca la app— se perdían las fotos que habían traído los
     catálogos y Mercado Libre, sin que nada las volviera a buscar: esos códigos ya figuraban
-    como leídos. Con el link, se vuelven a bajar solas (ver _restaurar_desde_semilla())."""
-    destino.execute("UPDATE productos SET imagen_url = CASE WHEN imagen_url LIKE 'http%' "
-                    "THEN imagen_url END, imagen_thumb = NULL, "
-                    "imagen_orb_blob = NULL, imagen_orb_estado = NULL")
-    for _limpieza in ("DELETE FROM producto_fotos",
-                      "UPDATE esquemas SET imagen_blob = NULL",
+    como leídos. Con el link, se vuelven a bajar solas (ver _restaurar_desde_semilla()). Las
+    propias no tienen link: van enteras, y al restaurar vuelven a ser la foto de su ficha (ver
+    pedir_de_nuevo_las_fotos())."""
+    marcadores = ",".join("?" * len(ORIGENES_DE_FOTOS_PROPIAS))
+    try:
+        destino.execute(f"""DELETE FROM producto_fotos
+                            WHERE NOT (origen IN ({marcadores}) AND imagen_data LIKE 'data:%')""",
+                        ORIGENES_DE_FOTOS_PROPIAS)
+        acumulado, sobran = 0, []
+        for id_foto, peso in destino.execute(
+                """SELECT id, LENGTH(imagen_data) + COALESCE(LENGTH(firma_blob), 0)
+                   FROM producto_fotos ORDER BY id DESC""").fetchall():
+            acumulado += peso or 0
+            if acumulado > TOPE_FOTOS_PROPIAS_EN_LA_COPIA:
+                sobran.append((id_foto,))
+        destino.executemany("DELETE FROM producto_fotos WHERE id = ?", sobran)
+        # En la base de trabajo, no en la copia: es lo que lee la pantalla.
+        guardar_config("fotos_propias_fuera_de_la_copia", str(len(sobran)))
+    except sqlite3.OperationalError as _err:
+        # La tabla puede no existir si el backup sale de una base vieja: se sigue.
+        anotar_error("generar_backup_sin_fotos", _err)
+    # La miniatura de los productos con foto propia se queda (4 KB): sin ella, al restaurar la
+    # ficha no muestra nada hasta que pedir_de_nuevo_las_fotos() le devuelve la foto.
+    try:
+        destino.execute("""UPDATE productos SET imagen_url = CASE WHEN imagen_url LIKE 'http%'
+                                                                   THEN imagen_url END,
+                                  imagen_thumb = CASE WHEN id IN (SELECT producto_id
+                                                                  FROM producto_fotos)
+                                                      THEN imagen_thumb END,
+                                  imagen_orb_blob = NULL, imagen_orb_estado = NULL""")
+    except sqlite3.OperationalError as _err:
+        anotar_error("generar_backup_sin_fotos", _err)
+    for _limpieza in ("UPDATE esquemas SET imagen_blob = NULL",
                       "UPDATE alias_transferencia SET qr_real_blob = NULL"):
         try:
             destino.execute(_limpieza)
         except sqlite3.OperationalError as _err:
-            # La tabla puede no existir si el backup sale de una base vieja: se sigue.
             anotar_error("generar_backup_sin_fotos", _err)
     destino.commit()
+
+
+def fotos_propias_fuera_de_la_copia():
+    """Cuántas fotos propias no entraron en la última copia por el tope (0 si entraron todas)."""
+    try:
+        return int(obtener_config("fotos_propias_fuera_de_la_copia", "0") or 0)
+    except ValueError:
+        return 0
 
 
 def copia_para_github(huella_anterior=""):

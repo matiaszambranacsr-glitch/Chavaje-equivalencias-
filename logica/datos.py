@@ -416,6 +416,20 @@ def pedir_de_nuevo_las_fotos(conexion):
     aunque hubieran quedado terminadas. No es repetir por repetir: lo que había se perdió.
     La usan el arranque (_restaurar_desde_semilla()) y «Restaurar backup» (restaurar_backup())."""
     try:
+        # Las fotos propias SÍ vienen en la copia (ver _sacar_las_fotos()): vuelven a ser la
+        # foto de la ficha de su producto, que la copia dejó sin la grande.
+        conexion.execute("""UPDATE productos
+                            SET imagen_url = (SELECT f.imagen_data FROM producto_fotos f
+                                              WHERE f.producto_id = productos.id
+                                              ORDER BY f.id LIMIT 1),
+                                imagen_orb_estado = (SELECT f.estado FROM producto_fotos f
+                                                     WHERE f.producto_id = productos.id
+                                                     ORDER BY f.id LIMIT 1)
+                            WHERE imagen_url IS NULL
+                              AND id IN (SELECT producto_id FROM producto_fotos)""")
+    except sqlite3.Error as _err:
+        anotar_error("pedir_de_nuevo_las_fotos", _err)
+    try:
         conexion.executemany(
             "INSERT OR REPLACE INTO configuracion (clave, valor) VALUES (?, ?)",
             [("fotos_de_internet_pendientes", "1"), ("descanso_fotos_de_internet", ""),

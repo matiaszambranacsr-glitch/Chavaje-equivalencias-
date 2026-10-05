@@ -161,26 +161,25 @@ if pagina == PAGINAS[4]:
             st.markdown("---")
 
         if cantidad_fotos:
-            st.error(
-                "🔴 **Importante sobre las fotos.** El hosting borra el disco cada vez que la app se "
-                "reinicia o se redespliega, y al arrancar se restaura sola desde el `datos_iniciales.db` "
-                "del repositorio. Ese archivo lo genera el **backup sin fotos**, que las saca a "
-                "propósito para no pasarse del límite de GitHub. Resultado: **cada reinicio te borra "
-                "todas las fotos**, y por eso la búsqueda por parecido aparece sin nada para comparar."
-            )
-            with st.expander("¿Y entonces qué hago con las fotos?"):
-                st.markdown(
-                    "- **Si son pocas y el archivo entra en GitHub (menos de 100 MB):** usá el "
-                    "**backup completo** de acá abajo y subilo al repositorio renombrado a "
-                    "`datos_iniciales.db`. Ahí sí sobreviven los reinicios.\n"
-                    "- **Si ya no entra:** subí el backup sin fotos (para no perder el catálogo) y "
-                    "recuperá las fotos después desde "
-                    f"**{miga_hasta('Traer fotos de productos en tanda')}**, que las vuelve a bajar de las fichas de los proveedores sin cargarlas a mano.\n"
-                    "- **Lo más prolijo a futuro:** guardar las fotos por dirección web en vez de "
-                    "adentro de la base, y dejar cargada la dirección del catálogo de cada marca en "
-                    "**🗂️ Administrar → 🏷️ Marcas**. Así el backup queda liviano y las fotos se vuelven a "
-                    "traer solas."
-                )
+            # Antes era un cartel rojo: «cada reinicio te borra todas las fotos». Ya no pasa con
+            # las propias (ver _sacar_las_fotos()); queda avisar si alguna no entró por el tope.
+            _fuera = fotos_propias_fuera_de_la_copia()
+            if _fuera:
+                st.warning(
+                    f"⚠️ **{_fuera} foto(s) que subiste vos no entraron en la copia automática** "
+                    "(hay un tope para que siga entrando en GitHub): las más viejas se perderían "
+                    "en el próximo reinicio. Descargá el **backup completo** de acá abajo y "
+                    "guardalo vos.")
+            explicar(
+                "Las fotos que subís vos sobreviven a los reinicios; las de internet se vuelven "
+                "a bajar solas.",
+                "El hosting borra el disco cada vez que la app se reinicia o se actualiza, y al "
+                "arrancar se restaura sola desde la copia del repositorio. Esa copia lleva las "
+                "fotos que subiste vos —desde el teléfono, o elegidas de una página—, que no "
+                "tienen de dónde volver a bajarse. Las que trajo la app de los catálogos y de "
+                "Mercado Libre van solo con su link, y se vuelven a bajar solas después del "
+                "reinicio: así la copia sigue entrando en GitHub (acepta hasta 100 MB).",
+                en_expander=True)
 
         if mb_fotos > 60:
             st.warning(
@@ -256,8 +255,8 @@ Listo: cada vez que el servidor borre el disco, la app se levanta sola con esos 
 Repetí los 2 pasos cada tanto (una vez por semana, o después de cargar una lista grande).
 
 **¿Por qué sin fotos?** Porque son lo que más pesa y GitHub rechaza archivos de más de 100 MB.
-Sin ellas el archivo queda chico, y las fotos se vuelven a traer solas desde
-Administrar → Mantenimiento.
+Lleva solo las que subiste vos (no hay de dónde volver a bajarlas); las de internet se vuelven
+a traer solas desde Administrar → Mantenimiento.
         """)
         _en_repo = semilla_del_repositorio()
         if _en_repo:
