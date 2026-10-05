@@ -7,11 +7,7 @@
 if pagina == PAGINAS[4]:
     st.subheader("📊 Estadísticas")
 
-    if st.session_state.get("sub_stats") not in SUB_STATS:
-        st.session_state["sub_stats"] = SUB_STATS[0]
-    st.radio("Sub-sección:", SUB_STATS, key="sub_stats", horizontal=True,
-             label_visibility="collapsed")
-    sub_stats = st.session_state["sub_stats"]
+    sub_stats = elegir_solapa(PAGINAS[4])
 
     if sub_stats == SUB_STATS[0]:
         st.subheader("Estadísticas generales")
@@ -224,7 +220,7 @@ if pagina == PAGINAS[4]:
                 st.caption(
                     f"Lleva los {total_prod_backup} productos con precios, equivalencias, vehículos e "
                     "historial. ⚠️ **No lleva las fotos**: si restaurás desde este archivo hay que "
-                    "volver a traerlas desde Mantenimiento.\n\n"
+                    f"volver a traerlas desde {miga_hasta('Traer fotos de productos en tanda')}.\n\n"
                     "🔒 **No lo subas a un repositorio público**: lleva tus precios, clientes y "
                     "usuarios, y cualquiera lo podría bajar. Para la copia automática usá un "
                     "repositorio privado y `clave_copia` en los secretos (se sube cifrada)."
@@ -341,7 +337,9 @@ Administrar → Mantenimiento.
         matriz = calcular_matriz_abc()
         if matriz:
             st.dataframe(quitar_id(matriz), width="stretch", hide_index=True)
-            st.caption("Para cargar o corregir la ubicación de un producto, andá a la pestaña 'Administrar'.")
+            st.caption("Para cargar o corregir la ubicación de un producto: "
+                       f"{miga_hasta('Productos')} → buscalo → «📐 Cargar medidas mecánicas / "
+                       "ubicación en depósito».")
         else:
             st.caption("Todavía no hay suficientes búsquedas registradas para armar la matriz.")
 

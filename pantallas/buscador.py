@@ -270,7 +270,8 @@ Casi todo lo que edita o borra algo pide la contraseña de administrador la prim
                 if r["sin_detalle"]:
                     partes.append(f"{r['sin_detalle']} sin detalle suficiente")
                 if r["links"]:
-                    partes.append(f"{r['links']} son links externos (bajalas desde Mantenimiento)")
+                    partes.append(f"{r['links']} son links externos (se bajan en "
+                                  f"{miga_hasta('Fotos')})")
                 if r["error"]:
                     partes.append(f"{r['error']} con error")
                 avisar("success", "Procesadas: " + (", ".join(partes) if partes else "no había nada pendiente") + ".")
@@ -1767,7 +1768,7 @@ Casi todo lo que edita o borra algo pide la contraseña de administrador la prim
                     if sin_ubicacion:
                         st.caption(
                             f"⚠️ {len(sin_ubicacion)} producto(s) todavía no tienen ubicación cargada "
-                            "(aparecen al final) — cargala desde 'Administrar' para que la próxima vez "
+                            f"(aparecen al final) — cargala en {miga_hasta('Productos')} para que la próxima vez "
                             "el orden sea completo."
                         )
                 else:
@@ -1831,7 +1832,7 @@ Casi todo lo que edita o borra algo pide la contraseña de administrador la prim
             else:
                 st.warning(
                     "Sin resultados. Puede ser que no haya piezas con esas medidas cargadas todavía — "
-                    "cargalas desde la pestaña 'Administrar' a medida que las vayas midiendo."
+                    f"cargalas en {miga_hasta('Productos')} a medida que las vayas midiendo."
                 )
 
     if es_operador_o_admin():

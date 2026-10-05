@@ -37,17 +37,15 @@ if pagina == PAGINAS[3]:
     if st.session_state.get("sub_admin") not in SUB_ADMIN:
         st.session_state["sub_admin"] = SUB_ADMIN[0]
     # El mismo buscador que adentro de Mantenimiento, pero acá arriba: el que entra por primera
-    # vez no tiene por qué saber que las 36 herramientas viven detrás de una solapa que se
-    # llama «Mantenimiento». Escribiendo «papelera» o «fotos» llega igual.
+    # vez no tiene por qué saber que las herramientas viven detrás de una solapa que se llama
+    # «Mantenimiento». Escribiendo «papelera» o «fotos» llega igual.
     # Estando YA en Mantenimiento no: ahí está el de adentro, y se veían los dos seguidos en la
     # misma pantalla —mismo texto de ayuda, dos cajas— sin que se entendiera cuál usar.
     if st.session_state["sub_admin"] != "🧹 Mantenimiento":
         buscador_de_herramientas("buscar_herramienta_admin",
                                   "¿Qué querés hacer? (buscá entre las herramientas)")
 
-    st.radio("Sub-sección:", SUB_ADMIN, key="sub_admin", horizontal=True,
-             label_visibility="collapsed")
-    sub_admin = st.session_state["sub_admin"]
+    sub_admin = elegir_solapa(PAGINAS[3])
 
     c.execute("""SELECT m.id, m.nombre, m.tipo, COUNT(p.id) AS productos,
                         COALESCE(m.url_ficha_template, '') AS plantilla

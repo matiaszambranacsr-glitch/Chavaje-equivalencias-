@@ -8,11 +8,7 @@ if pagina == PAGINAS[7]:
     st.subheader("🛠️ Modo Mecánico")
 
     # SUB_MEC está en logica/interfaz.py, con las demás listas de navegación.
-    if st.session_state.get("sub_mec") not in SUB_MEC:
-        st.session_state["sub_mec"] = SUB_MEC[0]
-    st.radio("Sub-sección:", SUB_MEC, key="sub_mec", horizontal=True,
-             label_visibility="collapsed")
-    sub_mec = st.session_state["sub_mec"]
+    sub_mec = elegir_solapa(PAGINAS[7])
 
     # -------- Diccionario de códigos OBD2 / DTC --------
     if sub_mec == SUB_MEC[4]:

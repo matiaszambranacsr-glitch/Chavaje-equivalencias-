@@ -2275,6 +2275,14 @@ if _PAGINAS_M and _HERRAMIENTAS_M:
             break
 
 
+# Cada pantalla y cada solapa con su renglón de para qué sirve: una solapa nueva sin él queda
+# como la única que no se explica, y nadie lo nota hasta que alguien pregunta qué es.
+for _lista, _nombre_dict in ((_PAGINAS_M, "PARA_QUE_SIRVE"), (_SOLAPAS_M, "PARA_QUE_SIRVE_LA_SOLAPA")):
+    _dict = _constante_del_modulo(_nombre_dict) or {}
+    for _x in _lista:
+        if _x not in _dict:
+            reportar("ERROR", 0, f"«{_x}» no tiene su renglón en {_nombre_dict} (logica/interfaz.py)")
+
 # ============ Resultado ============
 orden = {"ERROR": 0, "REVISAR": 1, "AVISO": 2}
 problemas.sort(key=lambda x: (orden[x[0]], x[1]))

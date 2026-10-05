@@ -1129,7 +1129,7 @@ def _mensaje_catalogo_visual_vacio():
     fotos = c.fetchone()[0]
     if fotos:
         return (f"Hay {fotos} foto(s) en el catálogo pero ninguna procesada todavía. Tocá "
-                "«🔄 Procesar fotos pendientes» acá arriba y volvé a intentar.")
+                "«🔄 Procesar las … que faltan ahora», en este mismo panel, y volvé a intentar.")
     return ("Todavía no hay ninguna foto en el catálogo para comparar, así que el **paso 2 no "
             "puede encontrar nada**: compara tu foto contra las que estén cargadas, y no hay "
             "ninguna. Usá el **paso 3, buscar en internet**, que no necesita nada cargado.\n\n"

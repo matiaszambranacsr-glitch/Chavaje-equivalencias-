@@ -6076,6 +6076,31 @@ cargar códigos de barras (es «🏷️ Códigos de barras»), y otras.
   una solapa, un grupo ni una herramienta. Si se renombra una herramienta, avisa en qué textos
   quedó el nombre viejo.
 
+### 🧭 Más simple de recorrer
+
+Capturas de la base real en una pantalla de 1366×768, antes y después:
+
+- **El menú va arriba de todo.** Iba debajo de los avisos del día, y con cuatro avisos abiertos
+  quedaba a media pantalla en TODAS las secciones: para pasar de Administrar a Estadísticas había
+  que bajar a buscarlo. Ahora es lo primero debajo del encabezado.
+- **Los avisos se abren solo en el Buscador**, que es donde se arranca. En las demás secciones
+  quedan en un renglón plegado («🔴 4 cosa(s) que conviene mirar hoy · 🟡 2 sin apuro»), y lo que
+  uno vino a hacer aparece enseguida: en Administrar, el contenido pasó de empezar debajo de los
+  cuatro avisos a empezar a los 380 px.
+- **Cada sección y cada solapa dice para qué sirve, a la vista.** La de la sección estaba
+  escondida detrás de «ℹ️ ¿Para qué sirve esta sección?», que ocupaba el mismo renglón que la
+  respuesta. Las solapas no tenían ninguna: «🧹 Mantenimiento» o «🧮 Auditoría y depósito» no
+  dicen solos qué hay adentro. Ahora las 21 tienen su renglón (`PARA_QUE_SIRVE_LA_SOLAPA`), y el
+  auditor da ERROR si se agrega una solapa sin él.
+- **Una sola forma de dibujar las solapas** (`elegir_solapa()`): las tres pantallas que tienen
+  solapas repetían las mismas líneas, cada una con su lista.
+- Textos que mandaban a un botón o lugar con otro nombre: «🔄 Procesar fotos pendientes» (el
+  botón es «🔄 Procesar las … que faltan ahora»), «cargala desde 'Administrar'» (es
+  Administrar → 📦 Productos), «traerlas desde Mantenimiento» (dice ahora a qué herramienta).
+
+Recorridas las 30 pantallas, solapas y grupos de Mantenimiento como administrador sobre la base
+real: ninguna da error.
+
 ## 🔗 Revisar sugeridas: primero lo que hay que hacer
 
 Mirado con capturas sobre la base real (15.308 pendientes en 8 listas):

@@ -315,6 +315,35 @@ if "lista_whatsapp" not in st.session_state:
 #  2) st.tabs dibuja TODAS las pestañas en cada refresco, aunque no las estés mirando —
 #     con 8 pestañas haciendo consultas a la base, eso era trabajo al pedo. Ahora solo se
 #     arma la sección que estás viendo, así que la app responde bastante más rápido.
+# PAGINAS, SUB_STATS y PARA_QUE_SIRVE viven en logica/interfaz.py, con las demás listas de
+# navegación: ver «NAVEGACIÓN: DÓNDE ESTÁ CADA COSA».
+if st.session_state.get("pagina_actual") not in PAGINAS:
+    st.session_state["pagina_actual"] = PAGINAS[0]
+
+# El menú va ANTES que los avisos del día. Iba después, y con cuatro avisos abiertos quedaba
+# a media pantalla en TODAS las secciones: para pasar de Administrar a Estadísticas había que
+# bajar a buscarlo. Ver más abajo dónde se abren los avisos.
+#
+# En los dos modos se usa st.radio en vez de un desplegable: el desplegable de Streamlit lleva
+# un campo de texto adentro para filtrar, y en el celular eso abre el teclado cada vez que lo
+# tocás, que es molesto para algo que se usa todo el tiempo. Con radio es un toque y listo.
+# El CSS los muestra como pastillas: en el celular se acomodan solas en varias filas.
+with st.container(key="nav_principal"):
+    st.radio("Sección:", PAGINAS, key="pagina_actual", horizontal=True,
+             label_visibility="collapsed")
+
+pagina = st.session_state["pagina_actual"]
+
+# Debajo de las pastillas, una línea que dice para qué sirve la sección elegida. Es lo que
+# convierte una fila de ocho botones en algo que se entiende sin que nadie te lo explique.
+# En el celular, en el buscador no: es la pantalla que se explica sola, y cada renglón arriba de
+# la caja de búsqueda es un renglón que hay que bajar para llegar a ella.
+# A la vista y no plegada: plegada ocupaba el mismo renglón («ℹ️ ¿Para qué sirve esta
+# sección?») y escondía justo la respuesta. Las ayudas largas sí van plegadas (ver ayuda());
+# esta es de una línea.
+if PARA_QUE_SIRVE.get(pagina) and not (es_celular() and pagina == PAGINAS[0]):
+    st.caption(f"ℹ️ {PARA_QUE_SIRVE[pagina]}")
+
 # Aviso fuerte si la base quedó vacía: Streamlit Cloud borra el disco al redesplegar, y sin
 # este cartel uno se entera recién cuando busca un código y no aparece nada.
 c.execute("SELECT COUNT(*) FROM productos")
@@ -401,8 +430,10 @@ if _problemas and (es_operador_o_admin() or not hay_claves_configuradas()):
     # sacando capturas de las dos—. Quien atiende el mostrador entra a buscar un código, y estos
     # avisos son tareas de administración: «Ir a arreglarlo» igual le pide la clave. Siguen
     # arriba de todo, en rojo, con el número, y se abren con un toque. Abiertos quedan solo para
-    # el administrador en la computadora, que es quien los arregla.
-    _plegar_avisos = es_celular() or not es_admin()
+    # el administrador en la computadora, que es quien los arregla, y solo en el Buscador, que
+    # es donde se arranca: en las demás secciones ya se vieron, y abiertos tapaban la pantalla
+    # a la que uno acababa de entrar.
+    _plegar_avisos = es_celular() or not es_admin() or pagina != PAGINAS[0]
 
     if _graves:
         if _plegar_avisos:
@@ -454,29 +485,6 @@ if _problemas and (es_operador_o_admin() or not hay_claves_configuradas()):
             st.rerun()
     st.markdown("")
 
-
-# PAGINAS, SUB_STATS y PARA_QUE_SIRVE viven en logica/interfaz.py, con las demás listas de
-# navegación: ver «NAVEGACIÓN: DÓNDE ESTÁ CADA COSA».
-if st.session_state.get("pagina_actual") not in PAGINAS:
-    st.session_state["pagina_actual"] = PAGINAS[0]
-
-# En los dos modos se usa st.radio en vez de un desplegable: el desplegable de Streamlit lleva
-# un campo de texto adentro para filtrar, y en el celular eso abre el teclado cada vez que lo
-# tocás, que es molesto para algo que se usa todo el tiempo. Con radio es un toque y listo.
-# El CSS los muestra como pastillas: en el celular se acomodan solas en varias filas.
-with st.container(key="nav_principal"):
-    st.radio("Sección:", PAGINAS, key="pagina_actual", horizontal=True,
-             label_visibility="collapsed")
-
-pagina = st.session_state["pagina_actual"]
-
-# Debajo de las pastillas, una línea que dice para qué sirve la sección elegida. Es lo que
-# convierte una fila de ocho botones en algo que se entiende sin que nadie te lo explique.
-# En el celular, en el buscador no: es la pantalla que se explica sola, y cada renglón arriba de
-# la caja de búsqueda es un renglón que hay que bajar para llegar a ella.
-# Plegada, como todas las ayudas: ver ayuda().
-if PARA_QUE_SIRVE.get(pagina) and not (es_celular() and pagina == PAGINAS[0]):
-    ayuda(PARA_QUE_SIRVE[pagina], titulo="ℹ️ ¿Para qué sirve esta sección?")
 
 # Los avisos que quedaron guardados antes del último refresco. Van acá, arriba del contenido
 # de la página, para que se vean sí o sí — sin esto, cada "Guardado" se perdía en el refresco.

@@ -111,6 +111,56 @@ SOLAPAS_DE_LA_PAGINA = {
 }
 
 
+# Lo mismo que PARA_QUE_SIRVE, una solapa por renglón. Se lee abajo de las solapas: «🧹
+# Mantenimiento» o «🧮 Auditoría y depósito» no dicen solos qué hay adentro, y había que
+# entrar a cada una para saberlo.
+PARA_QUE_SIRVE_LA_SOLAPA = {
+    "📈 Resumen": "Cuántos productos y marcas hay cargados, y cuánto se usó la IA este mes.",
+    "📥 Importaciones": "Cada lista que se subió: cuándo, de qué proveedor y cuántas filas.",
+    "💾 Backup y config": "Bajar una copia de la base, dejarla guardada en el repositorio, o "
+                         "restaurar una.",
+    "🧮 Auditoría y depósito": "Qué productos contar hoy para controlar el stock, y dónde "
+                              "conviene ubicar cada uno.",
+    "🔎 Búsquedas sin resultado": "Lo que te pidieron y no encontraste: lo que conviene cargar o "
+                                 "pedir.",
+    "📌 Para pedir": "Lo que se va a acabar, a quién comprarle, lo que no se mueve, y el mensaje "
+                    "para el proveedor.",
+    "🔗 Equivalencias sugeridas": "Las equivalencias que encontró la app: aprobalas o "
+                                 "descartalas. Hasta entonces no aparecen al buscar.",
+    "🏷️ Marcas": "Los proveedores y marcas: unir las repetidas, cambiar precios por "
+                "porcentaje, y el link a sus fichas.",
+    "📦 Productos": "Buscar un producto para corregirlo: precio, medidas, ubicación y fotos.",
+    "💬 Mensajería y cobros": "El texto del mensaje de WhatsApp y el alias para cobrar por "
+                             "transferencia.",
+    "🧩 Combos": "Repuestos que se venden juntos, para ofrecerlos al buscar uno.",
+    "🧹 Mantenimiento": "Las herramientas para encontrar equivalencias nuevas, corregir las que "
+                       "están mal y cuidar la base. Buscalas por lo que querés hacer.",
+    "👥 Usuarios": "Las contraseñas de los empleados y de los talleres que entran a su portal.",
+    "💳 Cuentas corrientes": "Lo que se lleva cada taller a cuenta, lo que paga y lo que debe.",
+    "🔤 Por patente": "Todo lo de un auto a partir de la patente: qué es y qué se le puso.",
+    "🔢 Chasis / VIN": "Leer el número de chasis para saber marca, modelo y año.",
+    "⚙️ Número de motor": "Qué motor es por su número, y qué repuestos se le pusieron.",
+    "🚙 Repuestos por vehículo": "Elegí marca y modelo y mirá los repuestos que le van.",
+    "📖 Códigos DTC": "Qué significa un código de falla del escáner y qué pieza revisar.",
+    "🗺️ Esquemas": "Los despieces que subiste, por marca, vehículo y sistema, y subir uno nuevo.",
+    "🧮 Conversor de unidades": "Torque, presión y medidas de manuales viejos o importados.",
+}
+
+
+def elegir_solapa(pagina):
+    """Las solapas de una pantalla, con el renglón de para qué sirve la elegida. Devuelve la
+    elegida. Las tres pantallas con solapas repetían las mismas cuatro líneas —validar lo que
+    hay en la sesión, dibujar las pastillas, leerlas—, cada una con su lista."""
+    solapas, clave = SOLAPAS_DE_LA_PAGINA[pagina]
+    if st.session_state.get(clave) not in solapas:
+        st.session_state[clave] = solapas[0]
+    st.radio("Sub-sección:", solapas, key=clave, horizontal=True, label_visibility="collapsed")
+    elegida = st.session_state[clave]
+    if PARA_QUE_SIRVE_LA_SOLAPA.get(elegida):
+        st.caption(f"ℹ️ {PARA_QUE_SIRVE_LA_SOLAPA[elegida]}")
+    return elegida
+
+
 def _sin_emoji(texto):
     """«📌 Para pedir» → «para pedir», sin acentos: así se comparan las migas escritas a mano."""
     texto = re.sub(r"^[^0-9A-Za-zÁÉÍÓÚÑáéíóúñ]+", "", str(texto or "")).strip()
@@ -202,7 +252,7 @@ def _ir_al_grupo_de_mantenimiento(nombre_grupo):
 
 
 def buscador_de_herramientas(clave, titulo="¿Qué querés hacer?"):
-    """El buscador de las 36 herramientas de mantenimiento. Devuelve True si mostró algo.
+    """El buscador de las herramientas de mantenimiento. Devuelve True si mostró algo.
 
     Está en dos lugares y es a propósito: arriba de Administrar, para el que no sabe todavía
     que existe una pantalla llamada «Mantenimiento», y arriba de Mantenimiento, para el que ya
@@ -962,7 +1012,7 @@ def leer_excel(archivo, nrows=None, hoja=None):
 
 
 
-# Mantenimiento tiene 36 herramientas. Cuatro grupos no alcanzaban: «Calidad y aprendizaje»
+# Mantenimiento tiene unas 40 herramientas. Cuatro grupos no alcanzaban: «Calidad y aprendizaje»
 # se había quedado con 17 de las 36 —1.060 líneas de una sola tirada— y era donde la pregunta
 # «¿dónde estaba eso?» terminaba en bajar y bajar. Ahora se agrupan por LO QUE UNO VIENE A
 # HACER, que es lo que una persona sabe antes de entrar: busco vínculos nuevos, limpio los que
