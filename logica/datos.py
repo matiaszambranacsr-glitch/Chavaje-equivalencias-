@@ -1294,6 +1294,41 @@ def _esquema_gestion(c):
         creado_en TEXT DEFAULT (datetime('now'))
     )""")
 
+    # La CUENTA CORRIENTE de cada taller: lo que se lleva fiado y lo que paga. Ver la sección
+    # «CUENTA CORRIENTE DE LOS TALLERES» en logica/mecanico.py.
+    # Sin clave foránea a propósito: borrar un mecánico no puede borrar lo que debe.
+    c.execute("""CREATE TABLE IF NOT EXISTS cuentas_de_taller (
+        mecanico_id INTEGER PRIMARY KEY,
+        limite REAL DEFAULT 0,
+        dias_de_plazo INTEGER DEFAULT 30,
+        pide_codigo INTEGER DEFAULT 1
+    )""")
+    c.execute("""CREATE TABLE IF NOT EXISTS movimientos_de_cuenta (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        mecanico_id INTEGER NOT NULL,
+        fecha TEXT DEFAULT (datetime('now', 'localtime')),
+        concepto TEXT,
+        importe REAL NOT NULL,
+        vence TEXT,
+        medio TEXT,
+        cheque_fecha TEXT,
+        usuario TEXT,
+        anulado INTEGER DEFAULT 0
+    )""")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_movimientos_cuenta ON movimientos_de_cuenta(mecanico_id)")
+    # El código que el taller genera en su portal para que alguien retire a su nombre. Se guarda
+    # el hash, no el código.
+    c.execute("""CREATE TABLE IF NOT EXISTS codigos_de_retiro (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        mecanico_id INTEGER NOT NULL,
+        codigo_hash TEXT NOT NULL,
+        salt TEXT NOT NULL,
+        creado TEXT DEFAULT (datetime('now', 'localtime')),
+        vence TEXT NOT NULL,
+        usado_en TEXT,
+        movimiento_id INTEGER
+    )""")
+
 
 # Los códigos DTC que se pueden ARMAR en vez de copiar. Buena parte del estándar genérico es
 # sistemática: el mismo texto con el número de cilindro, el banco o el sensor cambiado. Copiarlos

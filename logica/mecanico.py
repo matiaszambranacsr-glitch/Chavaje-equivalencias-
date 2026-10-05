@@ -992,6 +992,215 @@ def generar_pdf_presupuesto_mecanico(nombre_mecanico, cliente_nombre, items, man
     return bytes(pdf.output())
 
 
+# ============================================================
+# CUENTA CORRIENTE DE LOS TALLERES
+# ============================================================
+# Lo que cada taller se lleva fiado y lo que va pagando, con plazo, límite y cheques diferidos.
+# Y el CÓDIGO DE RETIRO: el taller lo genera en su portal (un solo uso, 24 horas) y se lo da a
+# quien manda a buscar; sin él, el mostrador no puede cargarle nada a su cuenta. Es la forma
+# práctica de lo que otra IA proponía como «OTP o biometría para retirar a nombre de un
+# taller»: alguien que se presenta diciendo «vengo de parte de Pérez» no alcanza.
+VIGENCIA_DEL_CODIGO_DE_RETIRO_HORAS = 24
+MEDIOS_DE_PAGO = ["Efectivo", "Transferencia", "Cheque", "Otro"]
+
+
+def _hash_del_codigo(codigo, salt):
+    return hashlib.sha256(f"{salt}:{codigo}".encode()).hexdigest()
+
+
+def configuracion_de_cuenta(mecanico_id):
+    """{limite, dias_de_plazo, pide_codigo}. Sin configurar: sin límite, 30 días, pide código."""
+    c.execute("SELECT limite, dias_de_plazo, pide_codigo FROM cuentas_de_taller "
+              "WHERE mecanico_id = ?", (mecanico_id,))
+    f = c.fetchone()
+    return {"limite": float(f["limite"] or 0) if f else 0.0,
+            "dias_de_plazo": (int(f["dias_de_plazo"]) if f and f["dias_de_plazo"] is not None
+                              else 30),
+            "pide_codigo": bool(f["pide_codigo"]) if f else True}
+
+
+def configurar_cuenta_de_taller(mecanico_id, limite, dias_de_plazo, pide_codigo):
+    with db_lock:
+        c.execute("""INSERT INTO cuentas_de_taller (mecanico_id, limite, dias_de_plazo, pide_codigo)
+                     VALUES (?, ?, ?, ?)
+                     ON CONFLICT(mecanico_id) DO UPDATE SET limite = excluded.limite,
+                        dias_de_plazo = excluded.dias_de_plazo,
+                        pide_codigo = excluded.pide_codigo""",
+                  (mecanico_id, max(0.0, float(limite or 0)), max(0, int(dias_de_plazo or 0)),
+                   1 if pide_codigo else 0))
+        conn.commit()
+
+
+def estado_de_cuenta(mecanico_id):
+    """Saldo, vencido, disponible y cheques en cartera de un taller.
+
+    VENCIDO: los pagos se imputan a lo más viejo, así que lo vencido es lo que queda del saldo
+    después de descontar los cargos que todavía no vencieron (y nunca más que el saldo)."""
+    c.execute("""SELECT COALESCE(SUM(importe), 0) AS saldo,
+                        COALESCE(SUM(CASE WHEN importe > 0 AND vence >= date('now', 'localtime')
+                                          THEN importe END), 0) AS a_vencer
+                 FROM movimientos_de_cuenta WHERE mecanico_id = ? AND anulado = 0""",
+              (mecanico_id,))
+    f = c.fetchone()
+    saldo, a_vencer = float(f["saldo"]), float(f["a_vencer"])
+    config = configuracion_de_cuenta(mecanico_id)
+    c.execute("""SELECT COALESCE(SUM(-importe), 0) AS total, COUNT(*) AS cuantos
+                 FROM movimientos_de_cuenta
+                 WHERE mecanico_id = ? AND anulado = 0 AND medio = 'Cheque'
+                   AND cheque_fecha > date('now', 'localtime')""", (mecanico_id,))
+    ch = c.fetchone()
+    return {"saldo": saldo,
+            "vencido": max(0.0, min(saldo, saldo - a_vencer)),
+            "limite": config["limite"],
+            "disponible": (config["limite"] - saldo) if config["limite"] else None,
+            "cheques_en_cartera": float(ch["total"]), "cheques_cuantos": int(ch["cuantos"])}
+
+
+def movimientos_de_cuenta(mecanico_id, limite=200):
+    """Los movimientos, del más nuevo al más viejo, con el saldo después de cada uno."""
+    c.execute("""SELECT id, fecha, concepto, importe, vence, medio, cheque_fecha, usuario, anulado
+                 FROM movimientos_de_cuenta WHERE mecanico_id = ? ORDER BY id""", (mecanico_id,))
+    filas, saldo = [], 0.0
+    for f in c.fetchall():
+        if not f["anulado"]:
+            saldo += f["importe"]
+        filas.append({
+            "ID": f["id"], "Fecha": (f["fecha"] or "")[:16],
+            "Concepto": (f["concepto"] or "") + (" (ANULADO)" if f["anulado"] else ""),
+            "Debe": f["importe"] if f["importe"] > 0 else None,
+            "Haber": -f["importe"] if f["importe"] < 0 else None,
+            "Saldo": saldo,
+            "Vence / cheque": f["vence"] or (f"cheque al {f['cheque_fecha']}"
+                                             if f["cheque_fecha"] else (f["medio"] or "")),
+            "Cargó": f["usuario"] or ""})
+    return list(reversed(filas))[:limite]
+
+
+def generar_codigo_de_retiro(mecanico_id):
+    """Un código nuevo de 6 cifras para este taller; los anteriores sin usar dejan de valer.
+    Devuelve (código, hasta cuándo vale). El código no se guarda: solo su hash."""
+    import secrets
+    codigo = f"{secrets.randbelow(1_000_000):06d}"
+    salt = secrets.token_hex(8)
+    vence = (datetime.now() + timedelta(hours=VIGENCIA_DEL_CODIGO_DE_RETIRO_HORAS)
+             ).strftime("%Y-%m-%d %H:%M:%S")
+    with db_lock:
+        with transaccion():
+            c.execute("""UPDATE codigos_de_retiro SET vence = datetime('now', 'localtime')
+                         WHERE mecanico_id = ? AND usado_en IS NULL""", (mecanico_id,))
+            c.execute("""INSERT INTO codigos_de_retiro (mecanico_id, codigo_hash, salt, vence)
+                         VALUES (?, ?, ?, ?)""",
+                      (mecanico_id, _hash_del_codigo(codigo, salt), salt, vence))
+    return codigo, vence[:16]
+
+
+def _codigo_de_retiro_vigente(mecanico_id, codigo):
+    """El id del código si es de este taller, no se usó y no venció. None si no."""
+    codigo = re.sub(r"\D", "", str(codigo or ""))
+    if len(codigo) != 6:
+        return None
+    c.execute("""SELECT id, codigo_hash, salt FROM codigos_de_retiro
+                 WHERE mecanico_id = ? AND usado_en IS NULL
+                   AND vence > datetime('now', 'localtime')""", (mecanico_id,))
+    for f in c.fetchall():
+        if hmac.compare_digest(f["codigo_hash"], _hash_del_codigo(codigo, f["salt"])):
+            return f["id"]
+    return None
+
+
+def cargar_a_la_cuenta(mecanico_id, concepto, importe, codigo_de_retiro="", usuario="",
+                       pasar_el_limite=False):
+    """Carga lo que se llevó a la cuenta del taller. Devuelve (True, aviso) o (False, por qué no).
+
+    Pide el código de retiro si la cuenta lo pide (así viene por defecto), y lo gasta: el
+    mismo código no sirve para dos retiros. Si el cargo pasa el límite de crédito, no lo hace
+    salvo que se lo pida explícitamente (pasar_el_limite)."""
+    try:
+        importe = round(float(importe), 2)
+    except (TypeError, ValueError):
+        return False, "El importe no es un número."
+    if importe <= 0:
+        return False, "El importe tiene que ser mayor que cero."
+    config = configuracion_de_cuenta(mecanico_id)
+    estado = estado_de_cuenta(mecanico_id)
+    if config["limite"] and estado["saldo"] + importe > config["limite"] and not pasar_el_limite:
+        return False, (f"Pasa el límite de crédito: debe ${estado['saldo']:,.0f}, el límite es "
+                       f"${config['limite']:,.0f} y esto suma ${importe:,.0f}.")
+    vence = (date.today() + timedelta(days=config["dias_de_plazo"])).isoformat()
+    with db_lock:
+        with transaccion():
+            codigo_id = None
+            if config["pide_codigo"]:
+                codigo_id = _codigo_de_retiro_vigente(mecanico_id, codigo_de_retiro)
+                if not codigo_id:
+                    return False, ("El código de retiro no es válido, ya se usó o venció. El "
+                                   "taller genera uno nuevo en su portal.")
+            c.execute("""INSERT INTO movimientos_de_cuenta
+                            (mecanico_id, concepto, importe, vence, usuario)
+                         VALUES (?, ?, ?, ?, ?)""",
+                      (mecanico_id, (concepto or "").strip() or "Repuestos", importe, vence,
+                       usuario))
+            movimiento_id = c.lastrowid
+            if codigo_id:
+                c.execute("""UPDATE codigos_de_retiro SET usado_en = datetime('now', 'localtime'),
+                                    movimiento_id = ? WHERE id = ?""", (movimiento_id, codigo_id))
+    aviso = f"Cargado: ${importe:,.0f}, vence el {vence}."
+    if config["limite"] and estado["saldo"] + importe > config["limite"]:
+        aviso += " Quedó por encima del límite de crédito."
+    return True, aviso
+
+
+def registrar_pago_de_cuenta(mecanico_id, importe, medio, concepto="", cheque_fecha=None,
+                             usuario=""):
+    """Un pago del taller. Con cheque diferido, la fecha del cheque queda anotada: el pago
+    descuenta ya, y aparece en «cheques en cartera» hasta esa fecha."""
+    try:
+        importe = round(float(importe), 2)
+    except (TypeError, ValueError):
+        return False, "El importe no es un número."
+    if importe <= 0:
+        return False, "El importe tiene que ser mayor que cero."
+    if medio not in MEDIOS_DE_PAGO:
+        return False, "Elegí cómo pagó."
+    if isinstance(cheque_fecha, (tuple, list)):
+        cheque_fecha = cheque_fecha[0] if cheque_fecha else None
+    if medio == "Cheque" and not cheque_fecha:
+        return False, "Poné la fecha del cheque: hasta esa fecha queda en cartera, sin cobrar."
+    with db_lock:
+        c.execute("""INSERT INTO movimientos_de_cuenta
+                        (mecanico_id, concepto, importe, medio, cheque_fecha, usuario)
+                     VALUES (?, ?, ?, ?, ?, ?)""",
+                  (mecanico_id, (concepto or "").strip() or f"Pago ({medio.lower()})", -importe,
+                   medio, str(cheque_fecha) if (medio == "Cheque" and cheque_fecha) else None,
+                   usuario))
+        conn.commit()
+    return True, f"Pago registrado: ${importe:,.0f}."
+
+
+def anular_movimiento_de_cuenta(movimiento_id):
+    """No se borra: queda tachado («ANULADO») para que se vea qué pasó."""
+    with db_lock:
+        c.execute("UPDATE movimientos_de_cuenta SET anulado = 1 WHERE id = ?", (movimiento_id,))
+        conn.commit()
+
+
+def resumen_de_cuentas():
+    """Una fila por taller con movimientos o con la cuenta configurada, los que más deben
+    vencido primero."""
+    c.execute("""SELECT id, nombre FROM mecanicos WHERE id IN (
+                    SELECT mecanico_id FROM movimientos_de_cuenta
+                    UNION SELECT mecanico_id FROM cuentas_de_taller)""")
+    salida = []
+    for f in c.fetchall():
+        e = estado_de_cuenta(f["id"])
+        salida.append({"ID": f["id"], "Taller": f["nombre"], "Saldo": e["saldo"],
+                       "Vencido": e["vencido"], "Límite": e["limite"] or None,
+                       "Disponible": e["disponible"],
+                       "Cheques en cartera": e["cheques_en_cartera"] or None})
+    salida.sort(key=lambda x: (-x["Vencido"], -x["Saldo"]))
+    return salida
+
+
 def mostrar_portal_mecanico():
     """Portal separado para mecánicos externos — no ven ninguna de las pestañas internas del
     negocio, solo esto: buscar repuestos, armar su presupuesto con su propia mano de obra, y
@@ -1071,6 +1280,31 @@ def mostrar_portal_mecanico():
         colb3.link_button("📲 WhatsApp", url_wa_mec)
     else:
         st.caption("Todavía no agregaste ningún repuesto al presupuesto.")
+
+    st.markdown("---")
+    st.markdown("**💳 Mi cuenta corriente**")
+    _estado_cc = estado_de_cuenta(mecanico_id)
+    _cm1, _cm2, _cm3 = st.columns(3)
+    _cm1.metric("Saldo", f"${_estado_cc['saldo']:,.0f}")
+    _cm2.metric("Vencido", f"${_estado_cc['vencido']:,.0f}")
+    _cm3.metric("Disponible", "sin límite" if _estado_cc["disponible"] is None
+                else f"${_estado_cc['disponible']:,.0f}")
+    st.caption("Para que alguien retire repuestos a tu nombre y se carguen a tu cuenta, generá "
+               "un código y dáselo: vale una sola vez y por "
+               f"{VIGENCIA_DEL_CODIGO_DE_RETIRO_HORAS} horas. Sin el código, en el mostrador no "
+               "se puede cargar nada a tu cuenta.")
+    if st.button("🔑 Generar código de retiro", key="mec_generar_codigo"):
+        _codigo_r, _vence_r = generar_codigo_de_retiro(mecanico_id)
+        st.session_state["mec_codigo_retiro"] = (_codigo_r, _vence_r)
+    if st.session_state.get("mec_codigo_retiro"):
+        _codigo_r, _vence_r = st.session_state["mec_codigo_retiro"]
+        st.success(f"Tu código de retiro: **{_codigo_r}** — vale hasta el {_vence_r}, una sola "
+                   "vez. Si generás otro, este deja de valer.")
+    _movs_mec = movimientos_de_cuenta(mecanico_id, limite=30)
+    if _movs_mec:
+        st.dataframe(quitar_id(_movs_mec), width="stretch", hide_index=True)
+    else:
+        st.caption("Todavía no hay movimientos en tu cuenta.")
 
     st.markdown("---")
     st.markdown("**📁 Mis presupuestos anteriores**")

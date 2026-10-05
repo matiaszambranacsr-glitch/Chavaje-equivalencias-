@@ -6005,6 +6005,32 @@ fotos para elegir; fotos de las fichas no hay, pero el texto del proveedor dice 
 Y en las cadenas largas, los resultados que no son lo mismo que lo buscado tampoco cuentan como
 equivalencia ni compiten por «el más barato en stock», igual que los kits.
 
+### 💳 Cuenta corriente de los talleres, y el código de retiro
+
+En **Administrar → 💳 Cuentas corrientes**, cada taller (los mecánicos de 👥 Usuarios) tiene su
+cuenta: lo que se lleva fiado (con vencimiento según los días de plazo de su cuenta), lo que
+paga (efectivo, transferencia o cheque con su fecha), el saldo, lo **vencido** —los pagos se
+imputan a lo más viejo, así que es lo que queda del saldo después de los cargos que todavía no
+vencieron—, el límite de crédito y los cheques en cartera. Arriba, lo que hay para cobrar entre
+todos, ordenado por quién debe más vencido; abajo, los movimientos con el saldo después de cada
+uno y un botón para mandarle el saldo por WhatsApp. Un movimiento mal cargado se **anula**, no
+se borra: queda a la vista, marcado.
+
+**El código de retiro.** Para cargarle algo a la cuenta de un taller hace falta un código de 6
+cifras que el taller genera en su portal (🔑 Generar código de retiro): vale una sola vez y por
+24 horas, y generar otro anula el anterior. Se guarda el hash, no el código. Así nadie se lleva
+repuestos a nombre de un taller diciendo «vengo de parte de Pérez». Es lo que otra IA
+proponía como «OTP o biometría para retirar a nombre de un taller», en la forma que se puede
+usar en el mostrador. Se apaga por taller en su configuración.
+
+El taller ve en su portal su saldo, lo vencido, lo disponible y sus movimientos. Un mecánico
+que debe plata no se puede eliminar (se lo desactiva): su cuenta se lista por los mecánicos que
+existen, y borrándolo la deuda desaparecería de la pantalla.
+
+Y de paso: **«👥 Usuarios» no se mostraba.** La rama de esa sección tenía una sangría de más y
+quedaba adentro de la de Mantenimiento: elegirla dejaba la pantalla vacía, sin empleados ni
+mecánicos. El auditor ahora marca como ERROR una rama de sección a otra altura que las demás.
+
 ### Las ideas de otra IA: qué ya estaba, qué se hizo, qué no
 
 Una lista de ideas de Gemini para la app, revisada contra lo que hay y contra el catálogo real
@@ -6023,6 +6049,7 @@ Una lista de ideas de Gemini para la app, revisada contra lo que hay y contra el
 | VTV, oblea de GNC, multas | No: no hay una consulta pública con una interfaz para programas; hacerlo sería leer páginas de organismos que cambian sin aviso, y no es lo que se resuelve en el mostrador |
 | Complejidad de instalación, tutoriales, modelo 3D, puntos, lockers | No: son de una tienda para el que compra, y esta app es la del que vende |
 | Variación de fase / restyling / ficha | **Se hizo** «❓ Antes de vender, preguntá», con lo que dicen las descripciones (no hay fotos de fichas) |
+| Cuentas corrientes de talleres, OTP para retirar | **Se hizo**: cuenta corriente con plazo, límite y cheques, y el código de retiro de un solo uso que genera el taller. Biometría no: no hay cómo hacerla desde una página web de mostrador |
 | Pasaporte de mantenimiento del auto | Ya estaba: la ficha del vehículo con su historial de piezas se descarga en PDF. Firmarla o «blockchain» no agrega nada sin una página pública donde verificarla |
 
 ## 🔗 Revisar sugeridas: primero lo que hay que hacer

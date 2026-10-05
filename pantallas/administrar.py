@@ -33,7 +33,8 @@ def exportar_configuracion_txt():
 if pagina == PAGINAS[3]:
     st.subheader("🗂️ Administrar")
 
-    SUB_ADMIN = ["🏷️ Marcas", "📦 Productos", "💬 Mensajería y cobros", "🧩 Combos", "🧹 Mantenimiento", "👥 Usuarios"]
+    SUB_ADMIN = ["🏷️ Marcas", "📦 Productos", "💬 Mensajería y cobros", "🧩 Combos", "🧹 Mantenimiento", "👥 Usuarios",
+                 "💳 Cuentas corrientes"]
     if st.session_state.get("sub_admin") not in SUB_ADMIN:
         st.session_state["sub_admin"] = SUB_ADMIN[0]
     # El mismo buscador que adentro de Mantenimiento, pero acá arriba: el que entra por primera
@@ -3245,7 +3246,126 @@ if pagina == PAGINAS[3]:
                 if cmg1.button("🚫 Desactivar" if mecanico_activo_actual else "✅ Reactivar", key="toggle_mecanico"):
                     activar_desactivar_mecanico(mecanico_id_sel, not mecanico_activo_actual)
                     st.rerun()
-                if cmg2.button("🗑️ Eliminar mecánico"):
+                # Si debe plata, no: la cuenta corriente se lista por los mecánicos que existen,
+                # y borrándolo su deuda desaparecería de la pantalla.
+                _saldo_mecanico = estado_de_cuenta(mecanico_id_sel)["saldo"]
+                if _saldo_mecanico:
+                    cmg2.caption(f"Tiene saldo en su cuenta corriente (${_saldo_mecanico:,.0f}): "
+                                 "no se puede eliminar. Desactivalo.")
+                elif cmg2.button("🗑️ Eliminar mecánico"):
                     eliminar_mecanico(mecanico_id_sel)
                     avisar("success", "Mecánico eliminado.")
+                    st.rerun()
+
+    # La cuenta corriente de cada taller: ver «CUENTA CORRIENTE DE LOS TALLERES» en
+    # logica/mecanico.py. Los talleres son los mecánicos de «👥 Usuarios».
+    if sub_admin == SUB_ADMIN[6]:
+        st.markdown("**💳 Cuentas corrientes de los talleres**")
+        explicar(
+            "Lo que cada taller se lleva fiado y lo que va pagando, con plazo, límite y cheques.",
+            "Para cargarle algo a la cuenta hace falta el **código de retiro** que el taller genera "
+            "en su portal (6 cifras, un solo uso, 24 horas): así nadie retira a su nombre "
+            "diciendo «vengo de parte de». Se puede apagar por taller, en su configuración.\n\n"
+            "Los talleres son los mecánicos de **👥 Usuarios**: el que no tiene usuario no tiene "
+            "portal ni código."
+        )
+        _talleres = {m["Nombre"]: m["ID"] for m in listar_mecanicos()}
+        if not _talleres:
+            st.info("Todavía no hay ningún taller. Se crean en 👥 Usuarios → Mecánicos externos.")
+        else:
+            _resumen_cc = resumen_de_cuentas()
+            if _resumen_cc:
+                _cc1, _cc2, _cc3 = st.columns(3)
+                _cc1.metric("A cobrar", f"${sum(max(0, r['Saldo']) for r in _resumen_cc):,.0f}")
+                _cc2.metric("Vencido", f"${sum(r['Vencido'] for r in _resumen_cc):,.0f}")
+                _cc3.metric("Cheques en cartera",
+                            f"${sum(r['Cheques en cartera'] or 0 for r in _resumen_cc):,.0f}")
+                st.dataframe(quitar_id(_resumen_cc), width="stretch", hide_index=True)
+
+            _taller = st.selectbox("Taller:", list(_talleres), key="cc_taller")
+            _mid = _talleres[_taller]
+            _estado = estado_de_cuenta(_mid)
+            _config = configuracion_de_cuenta(_mid)
+            _e1, _e2, _e3 = st.columns(3)
+            _e1.metric("Saldo", f"${_estado['saldo']:,.0f}")
+            _e2.metric("Vencido", f"${_estado['vencido']:,.0f}")
+            _e3.metric("Disponible", "sin límite" if _estado["disponible"] is None
+                       else f"${_estado['disponible']:,.0f}")
+            if _estado["cheques_cuantos"]:
+                st.caption(f"🧾 {_estado['cheques_cuantos']} cheque(s) en cartera por "
+                           f"${_estado['cheques_en_cartera']:,.0f}, todavía sin cobrar.")
+
+            with st.form(f"cc_cargo_{_mid}", clear_on_submit=True):
+                st.markdown("**➕ Cargar a la cuenta**")
+                _concepto = st.text_input("Qué se llevó:", placeholder="Ej: junta tapa 271205 x1")
+                _importe = st.number_input("Importe ($):", min_value=0.0, step=100.0)
+                _codigo = (st.text_input("Código de retiro (6 cifras):", max_chars=6)
+                           if _config["pide_codigo"] else "")
+                _pasar = (st.checkbox("Cargar igual aunque pase el límite")
+                          if _config["limite"] else False)
+                if st.form_submit_button("➕ Cargar", type="primary"):
+                    _ok, _aviso = cargar_a_la_cuenta(_mid, _concepto, _importe, _codigo,
+                                                     usuario=obtener_usuario_actual(),
+                                                     pasar_el_limite=_pasar)
+                    if _ok:
+                        avisar("success", _aviso)
+                        st.rerun()
+                    else:
+                        st.error(_aviso)
+
+            with st.form(f"cc_pago_{_mid}", clear_on_submit=True):
+                st.markdown("**💵 Registrar un pago**")
+                _importe_p = st.number_input("Importe ($):", min_value=0.0, step=100.0,
+                                             key=f"cc_importe_pago_{_mid}")
+                _medio = st.selectbox("Cómo pagó:", MEDIOS_DE_PAGO)
+                _fecha_cheque = st.date_input("Fecha del cheque (si es cheque):",
+                                              value=date.today(), key=f"cc_fecha_cheque_{_mid}")
+                _concepto_p = st.text_input("Nota (opcional):", key=f"cc_nota_pago_{_mid}")
+                if st.form_submit_button("💵 Registrar pago"):
+                    _ok, _aviso = registrar_pago_de_cuenta(_mid, _importe_p, _medio, _concepto_p,
+                                                           _fecha_cheque,
+                                                           usuario=obtener_usuario_actual())
+                    if _ok:
+                        avisar("success", _aviso)
+                        st.rerun()
+                    else:
+                        st.error(_aviso)
+
+            _movs = movimientos_de_cuenta(_mid)
+            if _movs:
+                st.markdown("**📒 Movimientos**")
+                st.dataframe(quitar_id(_movs), width="stretch", hide_index=True)
+                _mensaje_cc = (f"Hola! Te escribimos de El Chavo. El saldo de tu cuenta corriente "
+                               f"es ${_estado['saldo']:,.0f}"
+                               + (f", de los que ${_estado['vencido']:,.0f} ya vencieron"
+                                  if _estado["vencido"] else "") + ". ¡Gracias!")
+                st.link_button("📲 Mandarle el saldo por WhatsApp",
+                               "https://wa.me/?text=" + quote(_mensaje_cc))
+                _anulables = {f"{m['Fecha']} — {m['Concepto']} — "
+                              f"${(m['Debe'] or m['Haber'] or 0):,.0f}": m["ID"]
+                              for m in _movs if "(ANULADO)" not in m["Concepto"]}
+                if _anulables:
+                    _a_anular = st.selectbox("Anular un movimiento (queda a la vista, tachado):",
+                                             list(_anulables), key=f"cc_anular_sel_{_mid}")
+                    if candado("anular un movimiento de cuenta corriente",
+                               st.button("🚫 Anular ese movimiento", key=f"cc_anular_{_mid}"),
+                               f"cc_anular_{_mid}"):
+                        anular_movimiento_de_cuenta(_anulables[_a_anular])
+                        avisar("success", "Movimiento anulado.")
+                        st.rerun()
+
+            with st.expander(f"⚙️ Configuración de la cuenta de {_taller}"):
+                _limite = st.number_input("Límite de crédito ($, 0 = sin límite):", min_value=0.0,
+                                          step=1000.0, value=float(_config["limite"]),
+                                          key=f"cc_limite_{_mid}")
+                _plazo = st.number_input("Días de plazo para pagar:", min_value=0, step=1,
+                                         value=int(_config["dias_de_plazo"]),
+                                         key=f"cc_plazo_{_mid}")
+                _pide = st.checkbox("Pedir el código de retiro para cargarle algo",
+                                    value=_config["pide_codigo"], key=f"cc_pide_{_mid}")
+                if candado("cambiar la configuración de una cuenta corriente",
+                           st.button("💾 Guardar configuración", key=f"cc_guardar_{_mid}"),
+                           f"cc_guardar_{_mid}"):
+                    configurar_cuenta_de_taller(_mid, _limite, _plazo, _pide)
+                    avisar("success", "Configuración guardada.")
                     st.rerun()

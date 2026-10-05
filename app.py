@@ -90,6 +90,7 @@ específico, y las pantallas quedan todas al final:
         · MODO MECÁNICO — DICCIONARIO DE CÓDIGOS OBD2 / DTC
         · MODO MECÁNICO — LECTOR DE VIN
         · MODO MECÁNICO — VISOR DE ESQUEMAS
+        · CUENTA CORRIENTE DE LOS TALLERES
     app.py
         · ENCABEZADO
         · NAVEGACIÓN PRINCIPAL
