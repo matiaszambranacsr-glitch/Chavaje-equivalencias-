@@ -492,11 +492,11 @@ def a_quien_avisar(dias_de_aviso=30, limite=100):
             if faltan_km > margen:
                 continue
             if faltan_km <= 0:
-                cuando = f"ya pasó {-faltan_km:,} km"
+                cuando = f"ya pasó {miles(-faltan_km)} km"
             elif por_dia:
                 cuando = f"en unos {max(round(faltan_km / por_dia), 1)} días"
             else:
-                cuando = f"en {faltan_km:,} km"
+                cuando = f"en {miles(faltan_km)} km"
             auto = f"{v.get('marca_auto') or ''} {v.get('modelo_auto') or ''}".strip()
             mensaje = (f"Hola {v.get('cliente_nombre') or ''}! Te escribimos de El Chavo. "
                        f"Según el kilometraje de tu {auto} ({v['patente']}), le toca cambiar: "

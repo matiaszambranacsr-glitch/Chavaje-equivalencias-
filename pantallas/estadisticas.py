@@ -82,16 +82,16 @@ if pagina == PAGINAS[4]:
             if not _riesgo["hay_semilla"]:
                 st.error(
                     f"🔴 **No hay copia en el repositorio.** Tenés "
-                    f"{_riesgo['productos_ahora']:,} producto(s) viviendo solo en el disco del "
+                    f"{miles(_riesgo['productos_ahora'])} producto(s) viviendo solo en el disco del "
                     "servidor, que se borra en cada reinicio. **Hoy un reinicio borra todo.**"
                 )
             elif _riesgo["en_riesgo"]:
                 st.warning(
-                    f"⚠️ **{_riesgo['en_riesgo']:,} producto(s) y "
-                    f"{_riesgo['equivalencias_en_riesgo']:,} vínculo(s) viven solo en el disco.**\n\n"
+                    f"⚠️ **{miles(_riesgo['en_riesgo'])} producto(s) y "
+                    f"{miles(_riesgo['equivalencias_en_riesgo'])} vínculo(s) viven solo en el disco.**\n\n"
                     f"La copia del repositorio es del {_riesgo['fecha_semilla']} y tiene "
-                    f"{_riesgo['productos_semilla']:,} productos; hoy tenés "
-                    f"{_riesgo['productos_ahora']:,}. Si el servidor reinicia, esa diferencia "
+                    f"{miles(_riesgo['productos_semilla'])} productos; hoy tenés "
+                    f"{miles(_riesgo['productos_ahora'])}. Si el servidor reinicia, esa diferencia "
                     "se pierde."
                 )
             elif _riesgo.get("en_github"):
@@ -103,7 +103,7 @@ if pagina == PAGINAS[4]:
                 )
             else:
                 st.success(
-                    f"✅ La copia del repositorio está al día ({_riesgo['productos_semilla']:,} "
+                    f"✅ La copia del repositorio está al día ({miles(_riesgo['productos_semilla'])} "
                     f"productos, del {_riesgo['fecha_semilla']}). Un reinicio no te haría perder nada."
                 )
             # Si están los secretos de GitHub, se puede resolver de un botón en vez de a mano.
@@ -184,12 +184,12 @@ if pagina == PAGINAS[4]:
 
         if mb_fotos > 60:
             st.warning(
-                f"⚠️ Las fotos ({cantidad_fotos} productos) ocupan unos {mb_fotos:,.0f} MB. "
+                f"⚠️ Las fotos ({cantidad_fotos} productos) ocupan unos {miles(mb_fotos, 0)} MB. "
                 "GitHub no acepta archivos de más de 100 MB, así que para la copia del repositorio "
                 "conviene usar el **backup sin fotos** de acá abajo."
             )
         elif cantidad_fotos:
-            st.caption(f"Las fotos de {cantidad_fotos} producto(s) ocupan {mb_fotos:,.1f} MB de la base.")
+            st.caption(f"Las fotos de {cantidad_fotos} producto(s) ocupan {miles(mb_fotos, 1)} MB de la base.")
 
         cbk1, cbk2 = st.columns(2)
         with cbk1:
@@ -199,7 +199,7 @@ if pagina == PAGINAS[4]:
                     st.session_state["backup_bytes"] = generar_backup_completo()
             if "backup_bytes" in st.session_state:
                 st.download_button(
-                    f"⬇️ Descargar ({len(st.session_state['backup_bytes'])/(1024*1024):,.0f} MB)",
+                    f"⬇️ Descargar ({miles(len(st.session_state['backup_bytes'])/(1024*1024), 0)} MB)",
                     data=st.session_state["backup_bytes"],
                     file_name=f"equivalencias_backup_{datetime.now():%Y%m%d}.db",
                     on_click=marcar_backup_hecho
@@ -211,7 +211,7 @@ if pagina == PAGINAS[4]:
                     st.session_state["backup_liviano"] = generar_backup_sin_fotos()
             if "backup_liviano" in st.session_state:
                 st.download_button(
-                    f"⬇️ Descargar ({len(st.session_state['backup_liviano'])/(1024*1024):,.1f} MB)",
+                    f"⬇️ Descargar ({miles(len(st.session_state['backup_liviano'])/(1024*1024), 1)} MB)",
                     data=st.session_state["backup_liviano"],
                     file_name="datos_iniciales.db",
                     help="Ya viene con el nombre listo para subir al repositorio",
@@ -264,7 +264,7 @@ Administrar → Mantenimiento.
             try:
                 marca_tiempo = datetime.fromtimestamp(os.path.getmtime(_en_repo))
                 peso = os.path.getsize(_en_repo) / (1024 * 1024)
-                st.success(f"✅ Hay una copia en el repositorio ({peso:,.1f} MB, del {marca_tiempo:%d/%m/%Y}).")
+                st.success(f"✅ Hay una copia en el repositorio ({miles(peso, 1)} MB, del {marca_tiempo:%d/%m/%Y}).")
             except Exception as _err:
                 anotar_error("nivel principal", _err)
                 st.success("✅ Hay una copia en el repositorio.")
@@ -576,7 +576,7 @@ Administrar → Mantenimiento.
             st.success("✅ Nada estancado con ese criterio.")
         else:
             _plata = sum(x["Plata parada"] or 0 for x in _clavos)
-            st.warning(f"⚠️ {len(_clavos)} producto(s) con **${_plata:,.0f}** inmovilizados.")
+            st.warning(f"⚠️ {len(_clavos)} producto(s) con **${miles(_plata, 0)}** inmovilizados.")
             st.dataframe(quitar_id([{k: v for k, v in x.items() if not k.startswith("_")}
                                      for x in _clavos]),
                           width="stretch", hide_index=True)
@@ -683,7 +683,7 @@ Administrar → Mantenimiento.
                 "comparar. Con una sola no hay con qué."
             )
         elif not discont:
-            st.success(f"✅ De {revisados_disc:,} producto(s) revisados, ninguno faltó en las "
+            st.success(f"✅ De {miles(revisados_disc)} producto(s) revisados, ninguno faltó en las "
                         f"últimas {listas_disc} listas.")
         else:
             con_stock = [x for x in discont if (x["_stock"] or 0) > 0]
@@ -822,7 +822,7 @@ Administrar → Mantenimiento.
                 "para que apruebes en bloque los limpios y mires con lupa solo los pocos sospechosos."
             )
 
-            with st.expander(f"🧹 Descartar TODO lo pendiente ({total_pendientes:,} vínculos de "
+            with st.expander(f"🧹 Descartar TODO lo pendiente ({miles(total_pendientes)} vínculos de "
                               f"{len(lotes_pendientes)} lista(s))"):
                 st.warning(
                     "Borra de una todos los vínculos que están esperando revisión, de todas las listas. "
@@ -836,7 +836,7 @@ Administrar → Mantenimiento.
                     borrados = 0
                     for l in lotes_pendientes:
                         borrados += rechazar_pendientes(l["lote"], None)
-                    avisar("success", f"Se descartaron {borrados:,} vínculo(s) pendientes.")
+                    avisar("success", f"Se descartaron {miles(borrados)} vínculo(s) pendientes.")
                     st.rerun()
 
             # Una lista por vez, elegida con un selector. Antes cada lista estaba dentro de un
@@ -919,8 +919,8 @@ Administrar → Mantenimiento.
                     "resultado": (limpias, sospechosas, relacionadas),
                 })
             analizados = len(limpias) + len(sospechosas) + len(relacionadas)
-            st.caption(f"Analizados {analizados:,} de {total_lote:,} vínculo(s) de esta lista." +
-                       (f" Quedan {total_lote - analizados:,} — cambiá de tanda para verlos."
+            st.caption(f"Analizados {miles(analizados)} de {miles(total_lote)} vínculo(s) de esta lista." +
+                       (f" Quedan {miles(total_lote - analizados)} — cambiá de tanda para verlos."
                         if total_lote > analizados else ""))
 
             # El kit y la pieza que trae adentro no son una equivalencia, así que no se
@@ -1169,7 +1169,7 @@ Administrar → Mantenimiento.
 
                 if _entraron_despues:
                     st.info(
-                        f"➕ **{len(_entraron_despues):,} par(es) entraron a este grupo después "
+                        f"➕ **{miles(len(_entraron_despues))} par(es) entraron a este grupo después "
                         "de sortear la muestra** —una prueba nueva los subió, o llegaron con "
                         "otra tanda—. Esta muestra no habla de ellos, así que no se aprueban con "
                         "ella: cuando termines con los de esta muestra, van a tener la suya.")
@@ -1187,30 +1187,30 @@ Administrar → Mantenimiento.
                             (f"✅ **Ningún error en {_revisados_m}.** " if _mal_m == 0 else
                              f"🟡 **{_mal_m} error(es) en {_revisados_m}.** ")
                             + f"Del resto del grupo se puede esperar como mucho {_tope_m:.0%} "
-                            f"mal —unos {_n_tope_m} de {len(_resto):,}—. Alcanza para aprobarlo.")
+                            f"mal —unos {_n_tope_m} de {miles(len(_resto))}—. Alcanza para aprobarlo.")
                     elif _mal_m * 2 < _revisados_m and _tope_m <= 0.25:
                         st.warning(
                             f"🟡 **{_mal_m} error(es) en {_revisados_m}.** Todavía no alcanza: "
                             f"en el resto podría haber hasta {_tope_m:.0%} mal (unos "
-                            f"{_n_tope_m} de {len(_resto):,}). Mirá "
+                            f"{_n_tope_m} de {miles(len(_resto))}). Mirá "
                             f"{TAMANO_DE_LA_MUESTRA} más: si no aparecen errores nuevos, se "
                             "habilita la aprobación.")
                     else:
                         st.error(
                             f"🔴 **{_mal_m} errores en {_revisados_m}.** Aprobar el resto a "
-                            f"ciegas metería alrededor de {_p_m * len(_resto):,.0f} vínculos "
+                            f"ciegas metería alrededor de {miles(_p_m * len(_resto), 0)} vínculos "
                             "malos. Mejor revisarlos uno por uno abajo, o mirar 30 más para "
                             "ver si los errores se concentran en algo que se pueda descartar "
                             "de una.")
                     if _resto:
                         _v1, _v2 = st.columns(2)
                         if se_puede_aprobar_el_resto(_mal_m, _revisados_m) and _v1.button(
-                                f"✅ Aprobar los {len(_resto):,} que quedan del grupo",
+                                f"✅ Aprobar los {miles(len(_resto))} que quedan del grupo",
                                 type="primary" if _mal_m == 0 else "secondary",
                                 key=f"apr_resto_{abs(hash(clave_g))}"):
                             _n_ap = aprobar_pendientes(lote, _pares_resto)
                             invalidar_salud()
-                            avisar("success", f"Se aprobaron {_n_ap:,} vínculo(s) del grupo "
+                            avisar("success", f"Se aprobaron {miles(_n_ap)} vínculo(s) del grupo "
                                               f"{nombre}.")
                             st.rerun()
                         if _v2.button(f"➕ Mirar {TAMANO_DE_LA_MUESTRA} más",
@@ -1218,7 +1218,7 @@ Administrar → Mantenimiento.
                             muestra_de_control(clave_g, list(_por_par_g), ampliar=True)
                             st.rerun()
                         if _mal_m >= 2 and _mal_m * 2 >= _revisados_m:
-                            if st.button(f"🚫 Descartar los {len(_resto):,} que quedan del grupo",
+                            if st.button(f"🚫 Descartar los {miles(len(_resto))} que quedan del grupo",
                                          key=f"rec_resto_{abs(hash(clave_g))}"):
                                 rechazar_pendientes(lote, _pares_resto)
                                 invalidar_salud()
@@ -1256,7 +1256,7 @@ Administrar → Mantenimiento.
                     format_func=lambda g: (f"{g[0]} ↔ {g[1]}"
                                            + {"alta": " · confianza alta",
                                               "media": " · confianza media"}.get(g[2], "")
-                                           + f" — {len(_por_grupo[g]):,} limpias"))
+                                           + f" — {miles(len(_por_grupo[g]))} limpias"))
                 _ma_g, _mb_g, _fr_g = _elegido_g
                 _filas_g = _por_grupo[_elegido_g]
                 _clave_g = clave_de_grupo(_lote_m, _ma_g, _mb_g, _fr_g)
@@ -1403,7 +1403,7 @@ Administrar → Mantenimiento.
                 for x in items:
                     pares_comb.extend([(x["a"], x["b"]), (x["b"], x["a"])])
                 st.warning(
-                    f"📚 **De {dato['decisiones']:,} vínculos {ma}↔{mb} que revisaste, descartaste "
+                    f"📚 **De {miles(dato['decisiones'])} vínculos {ma}↔{mb} que revisaste, descartaste "
                     f"el {(1-dato['tasa_ok'])*100:.0f}%.** En esta tanda hay {len(items)} más de "
                     "esa misma combinación. Si van a terminar igual, resolvelos de una."
                 )
@@ -1435,7 +1435,7 @@ Administrar → Mantenimiento.
             _grupos_mot = grupos_por_motivo(sospechosas)
             if _grupos_mot:
                 st.markdown("---")
-                st.markdown(f"**📋 Para revisar, por motivo** — {len(sospechosas):,} par(es) "
+                st.markdown(f"**📋 Para revisar, por motivo** — {miles(len(sospechosas))} par(es) "
                             f"en {len(_grupos_mot)} motivo(s)")
                 explicar(
                     "Los pares en revisión agrupados por el motivo. Los que el texto contradice "
@@ -1460,7 +1460,7 @@ Administrar → Mantenimiento.
                     st.session_state.pop(_clave_sel_mot, None)
                 _motivo_g = st.selectbox(
                     "Motivo:", list(_por_motivo_g), key=_clave_sel_mot,
-                    format_func=lambda m: f"{m} — {len(_por_motivo_g[m][1]):,} "
+                    format_func=lambda m: f"{m} — {miles(len(_por_motivo_g[m][1]))} "
                                           f"({_etiqueta_rec[_por_motivo_g[m][0]]})")
                 _rec_g, _filas_mot = _por_motivo_g[_motivo_g]
                 if _rec_g == "descartar":
@@ -1472,13 +1472,13 @@ Administrar → Mantenimiento.
                                    "Por qué": (f["alarmas"][0] if f.get("alarmas") else "")[:80]}
                                   for f in _ejemplos], width="stretch", hide_index=True)
                     _dm1, _dm2 = st.columns(2)
-                    if _dm1.button(f"🚫 Descartar los {len(_filas_mot):,}", type="primary",
+                    if _dm1.button(f"🚫 Descartar los {miles(len(_filas_mot))}", type="primary",
                                    key=f"desc_motivo_{_lote_m}_{abs(hash(_motivo_g))}"):
                         _n_dm = rechazar_pendientes(
                             _lote_m, [p for f in _filas_mot for p in ((f["a"], f["b"]), (f["b"], f["a"]))],
                             motivo=motivo_de_rechazo_del_grupo(_motivo_g))
                         invalidar_salud()
-                        avisar("success", f"Se descartaron {_n_dm:,} par(es) de «{_motivo_g}».")
+                        avisar("success", f"Se descartaron {miles(_n_dm)} par(es) de «{_motivo_g}».")
                         st.rerun()
                     _mirar_antes = _dm2.checkbox("Prefiero mirar una muestra antes",
                                                  key=f"muestra_motivo_{_lote_m}_{abs(hash(_motivo_g))}")
@@ -1698,8 +1698,8 @@ Administrar → Mantenimiento.
 
             if resultado_aud.get("quedo_corta"):
                 st.warning(
-                    f"⚠️ **La revisión quedó corta.** Se miraron {resultado_aud['total_revisados']:,} "
-                    f"de {resultado_aud['total_en_base']:,} vínculos que hay cargados. Resolvé estos "
+                    f"⚠️ **La revisión quedó corta.** Se miraron {miles(resultado_aud['total_revisados'])} "
+                    f"de {miles(resultado_aud['total_en_base'])} vínculos que hay cargados. Resolvé estos "
                     "y volvé a auditar para seguir con el resto — todavía puede haber problemas sin ver."
                 )
 

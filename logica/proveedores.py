@@ -2722,14 +2722,14 @@ def mostrar_avance_de_tanda(que, unidad):
     if terminado or not faltan:
         st.caption(f"✅ Terminado{' el ' + _fecha_corta(terminado) if terminado else ''}: no "
                    "se vuelve a correr hasta que lo pidas, y al pedirlo busca solo lo que falta"
-                   + (f" ({faltan:,} ahora)." if faltan else "."))
+                   + (f" ({miles(faltan)} ahora)." if faltan else "."))
         if terminado and st.button("🔄 Buscar lo nuevo", key=f"lo_nuevo_tanda_{que}"):
             buscar_lo_nuevo([que])
             st.rerun()
         return
     descanso = resumen.get(f"descanso_{que}", "")
     st.caption(
-        f"Faltan **{faltan:,}** {unidad} · hoy van {hoy:,} · ⚡ sin tope por día"
+        f"Faltan **{miles(faltan)}** {unidad} · hoy van {miles(hoy)} · ⚡ sin tope por día"
         + (" · 🟢 corriendo ahora" if resumen.get("corriendo") else "")
         + (f" · 😴 retoma {_fecha_corta(descanso)}" if descanso else "")
         + (f" · última vez: {resumen['ultima']}" if resumen.get("ultima") else "")
@@ -2804,7 +2804,7 @@ def mostrar_panel_de_carga_automatica():
         # tabla costaba 0,3 s en cada toque de Mantenimiento, donde este panel va arriba de todo.
         st.markdown("  \n".join(
             f"{f['Estado']} — **{f['Tarea']}**"
-            + (f" · {f['Dejadas de intentar']:,} dejadas de intentar"
+            + (f" · {miles(f['Dejadas de intentar'])} dejadas de intentar"
                if f["Dejadas de intentar"] else "")
             for f in filas))
         _c1, _c2 = st.columns(2)
@@ -2813,10 +2813,10 @@ def mostrar_panel_de_carga_automatica():
             buscar_lo_nuevo()
             st.success("Listo: va a buscar solo lo que falta, en segundo plano.")
         _n_f = sum(f["Dejadas de intentar"] for f in filas)
-        if _n_f and _c2.button(f"♻️ Reintentar las {_n_f:,} que fallaron",
+        if _n_f and _c2.button(f"♻️ Reintentar las {miles(_n_f)} que fallaron",
                                key="carga_auto_reintentar", width="stretch"):
             reintentar_descargas_fallidas()
-            st.success(f"Se van a volver a probar {_n_f:,}. Lo que ya bajó no se toca.")
+            st.success(f"Se van a volver a probar {miles(_n_f)}. Lo que ya bajó no se toca.")
         _al_importar = st.toggle(
             "Al importar una lista, buscar solo lo nuevo de esa lista",
             value=obtener_config("buscar_lo_nuevo_al_importar", "0") == "1",

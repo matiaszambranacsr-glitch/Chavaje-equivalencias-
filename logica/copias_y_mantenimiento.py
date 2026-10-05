@@ -1173,7 +1173,7 @@ def listas_que_no_cruzan():
         if cruzan:
             motivo = ""
         elif esperan:
-            motivo = (f"{esperan:,} de sus productos YA tienen equivalencias encontradas, "
+            motivo = (f"{miles(esperan)} de sus productos YA tienen equivalencias encontradas, "
                       "esperando que las apruebes en Estadísticas → 🔗 Equivalencias "
                       "sugeridas. Mientras no se aprueben, la búsqueda no las usa")
         elif es_barras:
@@ -1834,7 +1834,7 @@ def tareas_automaticas_del_dia(presupuesto_segundos=6):
             if c.fetchone()[0]:
                 n = recalcular_confianzas(limite=3000)
                 if n:
-                    hecho.append(f"{n:,} vínculo(s) puntuados")
+                    hecho.append(f"{miles(n)} vínculo(s) puntuados")
         except Exception as _err:
             anotar_error("tareas_automaticas_del_dia", _err)
             pass
@@ -2117,7 +2117,7 @@ def descubrimiento_post_importacion(presupuesto_segundos=PRESUPUESTO_DESCUBRIMIE
                     break      # llegó al final
                 _desde = _hasta
             if _completados:
-                hecho.append(f"{_completados:,} producto(s) con las medidas leídas de su "
+                hecho.append(f"{miles(_completados)} producto(s) con las medidas leídas de su "
                              "descripción")
         except Exception as _err:
             anotar_error("descubrimiento_post_importacion/medidas", _err)
@@ -2140,7 +2140,7 @@ def descubrimiento_post_importacion(presupuesto_segundos=PRESUPUESTO_DESCUBRIMIE
                 guardar_config("marcas_repuesto_puestas", str(_n_mr))
                 guardar_config("marcas_repuesto_fecha",
                                datetime.now().strftime("%Y-%m-%d %H:%M"))
-                hecho.append(f"{_n_mr:,} producto(s) con la marca del repuesto leída de su "
+                hecho.append(f"{miles(_n_mr)} producto(s) con la marca del repuesto leída de su "
                              "descripción")
         except Exception as _err:
             anotar_error("descubrimiento_post_importacion/marcas_repuesto", _err)
@@ -2172,7 +2172,7 @@ def descubrimiento_post_importacion(presupuesto_segundos=PRESUPUESTO_DESCUBRIMIE
             if _apl:
                 _n = aplicar_aplicaciones_deducidas(_apl)
                 if _n:
-                    hecho.append(f"{_n:,} aplicación(es) deducidas de las descripciones")
+                    hecho.append(f"{miles(_n)} aplicación(es) deducidas de las descripciones")
             guardar_config("aplicaciones_leidas_hasta", str(_hasta_apl))
         except Exception as _err:
             anotar_error("descubrimiento_post_importacion/aplicaciones", _err)
@@ -2191,7 +2191,7 @@ def descubrimiento_post_importacion(presupuesto_segundos=PRESUPUESTO_DESCUBRIMIE
         try:
             _n_mot = aprender_motores_que_van_juntos()
             if _n_mot:
-                hecho.append(f"{_n_mot:,} par(es) de motores que el catálogo declara "
+                hecho.append(f"{miles(_n_mot)} par(es) de motores que el catálogo declara "
                              "compatibles, al día")
         except Exception as _err:
             anotar_error("descubrimiento_post_importacion/motores", _err)

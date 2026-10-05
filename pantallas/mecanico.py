@@ -293,7 +293,7 @@ if pagina == PAGINAS[7]:
                        if _v.get("cliente_telefono") and es_empleado_o_abierto() else "")
                 )
                 if _v.get("km_actual"):
-                    st.caption(f"Último kilometraje registrado: {_v['km_actual']:,} km")
+                    st.caption(f"Último kilometraje registrado: {miles(_v['km_actual'])} km")
 
                 if _todo["historial"]:
                     st.markdown("**🔧 Lo que YA se le puso a este auto**")
@@ -373,9 +373,9 @@ if pagina == PAGINAS[7]:
                         )
                     if _sug.get("total_catalogo", 0) > len(_sug.get("del_catalogo") or []):
                         st.caption(
-                            f"El catálogo tiene {_sug['total_catalogo']:,} repuestos para este "
+                            f"El catálogo tiene {miles(_sug['total_catalogo'])} repuestos para este "
                             f"auto y acá se listan los primeros "
-                            f"{len(_sug.get('del_catalogo') or []):,}: escribí qué pieza "
+                            f"{miles(len(_sug.get('del_catalogo') or []))}: escribí qué pieza "
                             "necesitás para achicar la lista."
                         )
 
@@ -727,7 +727,7 @@ if pagina == PAGINAS[7]:
                         cvv1, cvv2 = st.columns([1.2, 3])
                         cvv1.button(f"🔎 {it['Codigo']}", key=f"veh_{it['ID']}",
                                      on_click=cb_ver_equivalencias, args=(it["Codigo"],))
-                        precio_v = f"${it['Precio']:,.0f}" if it.get("Precio") else "s/precio"
+                        precio_v = f"${miles(it['Precio'], 0)}" if it.get("Precio") else "s/precio"
                         stock_v = it.get("Stock")
                         detalle = it.get("_aplicacion") or it.get("Descripcion") or ""
                         desde_a, hasta_a = extraer_anios(it["Descripcion"])

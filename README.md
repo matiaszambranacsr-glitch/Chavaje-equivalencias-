@@ -6180,6 +6180,22 @@ Mirado con capturas de una búsqueda real (271205, junta tapa Fiat Fire) en una 
   proveedor (2.514 juntas de ILLINOIS) antes de mirar si nombraban el mismo auto. Ahora mira
   primero eso, que es barato. Comprobado sobre 1.500 productos: el mismo resultado.
 
+### 🔢 Los números, como se escriben acá
+
+Había 211 números en la app formateados a la inglesa, con coma de miles: arriba de todo decía
+«1,380 par(es) de motores», los conteos de Mantenimiento «20,306», y el presupuesto en armado
+«$1,505», que acá se lee uno coma cinco. Ahora todos pasan por `miles()`: «1.380», «$ 1.505»,
+«1.234,5». Era también lo que hacía la vieja `miles()` de las métricas, que quedó unificada.
+
+### ❓ La guía rápida decía algo que no pasa
+
+Decía que Cargar Excel «arma las equivalencias sola». No: quedan esperando aprobación, y hasta
+que se aprueban no aparecen al buscar —que es la duda más común («importé la lista y no me
+relaciona»)—. Ahora la guía empieza con **cómo se trabaja, en tres pasos** (cargar la lista →
+aprobar las sugeridas → buscar), y la lista de secciones sale de los mismos renglones que se
+ven debajo del menú, así que no se puede volver a desactualizar. El cartel de «equivalencias
+esperando aprobación» trae ahora el botón «🔗 Ir a aprobarlas →».
+
 ## 🔗 Revisar sugeridas: primero lo que hay que hacer
 
 Mirado con capturas sobre la base real (15.308 pendientes en 8 listas):

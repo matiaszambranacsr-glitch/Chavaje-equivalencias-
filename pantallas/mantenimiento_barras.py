@@ -28,14 +28,14 @@ if pagina == PAGINAS[3]:
                 for _lista in _barras_mal:
                     _n = _lista["Códigos de barras cargados como código de fábrica"]
                     if candado(f"mover los códigos de barras de {_lista['Lista']}",
-                                st.button(f"🏷️ Arreglar los {_n:,} de {_lista['Lista']}",
+                                st.button(f"🏷️ Arreglar los {miles(_n)} de {_lista['Lista']}",
                                            key=f"barras_{_lista['marca_id']}"),
                                 f"barras_{_lista['marca_id']}"):
                         _mov, _ya = mover_codigos_de_barras_a_su_columna(_lista["marca_id"])
                         avisar("success",
-                                f"Se movieron {_mov:,} código(s) de barras a su columna y se "
-                                f"sacaron {_mov:,} vínculo(s) que no llevaban a ningún lado."
-                                + (f" {_ya:,} producto(s) ya tenían uno cargado y se respetó."
+                                f"Se movieron {miles(_mov)} código(s) de barras a su columna y se "
+                                f"sacaron {miles(_mov)} vínculo(s) que no llevaban a ningún lado."
+                                + (f" {miles(_ya)} producto(s) ya tenían uno cargado y se respetó."
                                    if _ya else ""))
                         st.rerun()
 
@@ -87,7 +87,7 @@ if pagina == PAGINAS[3]:
                                  WHERE m.tipo <> 'OEM' GROUP BY m.id ORDER BY n DESC""")
                     _marcas_b = filas_a_listas(c)
                     _opc_b = {"— todas las listas (más riesgoso) —": None}
-                    _opc_b.update({f"{m['nombre']} ({m['n']:,})": m["id"] for m in _marcas_b})
+                    _opc_b.update({f"{m['nombre']} ({miles(m['n'])})": m["id"] for m in _marcas_b})
                     _marca_b = _opc_b[st.selectbox("¿De qué lista son estos códigos?",
                                                     list(_opc_b.keys()), key="bm_marca")]
                     _pisar = st.checkbox("Pisar los que ya tengan un código de barras cargado",
@@ -103,7 +103,7 @@ if pagina == PAGINAS[3]:
                     _rotos_prev = [(a, b) for a, b in _pares_b if excel_le_comio_digitos(b)]
                     if _rotos_prev:
                         st.error(
-                            f"🛑 **Excel se comió los dígitos de {len(_rotos_prev):,} código(s) "
+                            f"🛑 **Excel se comió los dígitos de {miles(len(_rotos_prev))} código(s) "
                             f"de barras.** Vienen escritos como `{_rotos_prev[0][1]}` y el "
                             "número entero ya no está en el archivo: no hay forma de "
                             "recuperarlo desde acá, y reconstruirlo daría un código que parece "
@@ -115,8 +115,8 @@ if pagina == PAGINAS[3]:
                             "antes de subirlo — abrirlo y guardarlo es lo que los rompe.\n\n"
                             "Esas filas no se van a cargar. El resto sí."
                         )
-                    st.caption(f"{len(_pares_b):,} fila(s) con los dos datos"
-                                + (f", {len(_pares_b) - len(_rotos_prev):,} cargables."
+                    st.caption(f"{miles(len(_pares_b))} fila(s) con los dos datos"
+                                + (f", {miles(len(_pares_b) - len(_rotos_prev))} cargables."
                                    if _rotos_prev else "."))
                     if _pares_b:
                         st.dataframe([{"Código": a, "Código de barras": b,
@@ -126,15 +126,15 @@ if pagina == PAGINAS[3]:
                                        for a, b in _pares_b[:8]],
                                       width="stretch", hide_index=True)
                         if candado("cargar códigos de barras en masa",
-                                    st.button(f"🏷️ Pegar los {len(_pares_b):,} códigos de barras",
+                                    st.button(f"🏷️ Pegar los {miles(len(_pares_b))} códigos de barras",
                                                type="primary", key="bm_aplicar"),
                                     "bm_aplicar_candado"):
                             _res = cargar_codigos_de_barras_masivo(_pares_b, _marca_b, _pisar)
-                            _partes = [f"{_res['puestos']:,} código(s) de barras cargados"]
+                            _partes = [f"{miles(_res['puestos'])} código(s) de barras cargados"]
                             if _res["sin_cambio"]:
-                                _partes.append(f"{_res['sin_cambio']:,} ya estaban igual")
+                                _partes.append(f"{miles(_res['sin_cambio'])} ya estaban igual")
                             if _res["ya_tenian"]:
-                                _partes.append(f"{len(_res['ya_tenian']):,} se respetaron")
+                                _partes.append(f"{miles(len(_res['ya_tenian']))} se respetaron")
                             avisar("success", " · ".join(_partes) + ".")
                             st.session_state["bm_resultado"] = _res
                             st.rerun()
@@ -181,7 +181,7 @@ if pagina == PAGINAS[3]:
                 # Decirlo, no callarlo: que un control decida NO mirar una lista es información.
                 st.caption(
                     "🏷️ No se controla el dígito verificador de "
-                    + ", ".join(f"**{x['Lista']}** ({x['Códigos']:,})" for x in _barras_propias)
+                    + ", ".join(f"**{x['Lista']}** ({miles(x['Códigos'])})" for x in _barras_propias)
                     + ": ahí la mayoría de los códigos no cumple la cuenta de GS1, así que son "
                       "etiquetas propias del negocio y no del fabricante. Esas se escanean "
                       "perfecto igual —la etiqueta se imprimió desde ese número— y revisarlas "

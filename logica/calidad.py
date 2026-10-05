@@ -201,7 +201,7 @@ def subir_la_copia_si_cambio(aunque_no_haya_cambios=False):
     huella, datos = copia_para_github("" if aunque_no_haya_cambios else huella_anterior)
     if datos is None:
         return None, "No cambió nada desde la última copia."
-    ok, texto = subir_backup_a_github(datos, f"Copia automática — {productos:,} productos")
+    ok, texto = subir_backup_a_github(datos, f"Copia automática — {miles(productos)} productos")
     if ok:
         guardar_config("huella_copia_github", huella)
     return ok, texto
@@ -503,7 +503,7 @@ def mostrar_lista_clickeable(filas, prefijo_key, limite=15, nota=None):
                         on_click=cb_ver_equivalencias, args=(f["Codigo"],),
                         help="Ver sus equivalencias")
         descripcion = (f.get("Descripcion") or "")[:90]
-        precio = f"${f['Precio']:,.0f}" if f.get("Precio") else ""
+        precio = f"${miles(f['Precio'], 0)}" if f.get("Precio") else ""
         stock = f" · stock {f['Stock']}" if f.get("Stock") is not None else ""
         col_desc.caption(f"**{f.get('Marca', '')}** {descripcion}  \n{precio}{stock}")
     if len(filas) > limite:

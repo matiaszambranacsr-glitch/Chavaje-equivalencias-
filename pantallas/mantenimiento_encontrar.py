@@ -54,7 +54,7 @@ if pagina == PAGINAS[3]:
                                        datetime.now().strftime("%Y-%m-%d %H:%M"))
                         _quedo_hecho("aplicaciones_pendientes")
                         invalidar_salud()
-                        avisar("success", f"Se dedujeron {_n_ded:,} aplicaciones de tus "
+                        avisar("success", f"Se dedujeron {miles(_n_ded)} aplicaciones de tus "
                                           "descripciones.")
                     except Exception as _err:
                         anotar_error("deducir_aplicaciones_a_mano", _err)
@@ -107,7 +107,7 @@ if pagina == PAGINAS[3]:
                                 "**📁 Cargar Excel**."
                             )
                         marcas_detectadas = sorted({a["marca_auto"] for a in apps})
-                        st.success(f"Se reconocieron {len(apps):,} aplicaciones de "
+                        st.success(f"Se reconocieron {miles(len(apps))} aplicaciones de "
                                    f"{len(marcas_detectadas)} marca(s) de auto.")
                         st.caption("Revisá esta muestra antes de guardar:")
                         st.dataframe(apps[:40], width="stretch", hide_index=True)
@@ -120,12 +120,12 @@ if pagina == PAGINAS[3]:
 
             if st.session_state.get("aplic_leidas"):
                 apps_pend = st.session_state["aplic_leidas"]
-                if st.button(f"💾 Guardar las {len(apps_pend):,} aplicaciones", type="primary"):
+                if st.button(f"💾 Guardar las {miles(len(apps_pend))} aplicaciones", type="primary"):
                     n = guardar_aplicaciones(apps_pend, marca_aplic,
                                               getattr(arch_aplic, "name", "catálogo"), tipo_aplic)
                     st.session_state.pop("aplic_leidas", None)
                     invalidar_salud()
-                    avisar("success", f"Se guardaron {n:,} aplicaciones de {marca_aplic.upper()}.")
+                    avisar("success", f"Se guardaron {miles(n)} aplicaciones de {marca_aplic.upper()}.")
                     st.rerun()
 
             # Un índice arriba de todo: son seis formas distintas de generar equivalencias y
@@ -160,11 +160,11 @@ if pagina == PAGINAS[3]:
             st.dataframe([
                 {"Método": "🔤 Por descripción",
                  "Qué necesita": "dos proveedores con descripciones",
-                 "Estado": f"listo — {_n_desc:,} productos con descripción" if _n_desc > 50
+                 "Estado": f"listo — {miles(_n_desc)} productos con descripción" if _n_desc > 50
                             else "faltan productos con descripción"},
                 {"Método": "📐 Por medidas",
                  "Qué necesita": "3 o más medidas cargadas, en marcas distintas",
-                 "Estado": f"listo — {_n_med:,} con medidas" if _n_med > 5
+                 "Estado": f"listo — {miles(_n_med)} con medidas" if _n_med > 5
                             else "todavía no hay medidas cargadas"},
                 {"Método": "🔄 Por cambio de número",
                  "Qué necesita": "reemplazos cargados a mano",
@@ -326,7 +326,7 @@ if pagina == PAGINAS[3]:
                 if not _marcas_portal:
                     st.caption("Primero cargá la lista de algún proveedor.")
                 else:
-                    _et_nuevo = {f"{x['nombre']} ({x['n']:,} productos)"
+                    _et_nuevo = {f"{x['nombre']} ({miles(x['n'])} productos)"
                                  + (" · ya tiene portal" if x["plantilla"] else ""): x
                                  for x in _marcas_portal}
                     _marca_n = _et_nuevo[st.selectbox("Proveedor:", list(_et_nuevo),
@@ -421,7 +421,7 @@ if pagina == PAGINAS[3]:
                     "portal: bajarlo y cargarlo por «Cargar Excel» es todavía más confiable."
                 )
             else:
-                _et_p = {f"{x['nombre']} ({x['n']:,} productos) · "
+                _et_p = {f"{x['nombre']} ({miles(x['n'])} productos) · "
                          + ("público" if config_portal(x["nombre"]).get("publico")
                             else "con usuario y clave"): x
                          for x in _con_portal}
@@ -441,10 +441,10 @@ if pagina == PAGINAS[3]:
                     _leidas_p, _pares_p = (0, 0, 0), 0
                 if _leidas_p and _leidas_p[0]:
                     st.caption(
-                        f"Leídas {_leidas_p[0]:,} de {_marca_p['n']:,} fichas · "
-                        f"{int(_leidas_p[1] or 0):,} mostraban otros productos tuyos · "
-                        f"{_pares_p:,} pares vistos juntos"
-                        + (f" · {int(_leidas_p[2]):,} sin ficha" if _leidas_p[2] else ""))
+                        f"Leídas {miles(_leidas_p[0])} de {miles(_marca_p['n'])} fichas · "
+                        f"{miles(int(_leidas_p[1] or 0))} mostraban otros productos tuyos · "
+                        f"{miles(_pares_p)} pares vistos juntos"
+                        + (f" · {miles(int(_leidas_p[2]))} sin ficha" if _leidas_p[2] else ""))
                 _cuantos = st.select_slider("Leer fichas de:", options=[10, 25, 50, 100, 200],
                                              format_func=lambda x: f"{x} productos",
                                              key="portal_cuantos")
@@ -576,9 +576,9 @@ if pagina == PAGINAS[3]:
                                        FROM mercado_libre_leidos""").fetchone()
                     _ml_pares = c.execute("""SELECT COUNT(*) FROM productos_juntos_en_portal
                                              WHERE portal = 'MERCADO LIBRE'""").fetchone()[0]
-                    st.caption(f"Buscados: {_ml[0] or 0:,} · con publicaciones suyas: "
-                               f"{_ml[1] or 0:,} · con precio de mercado: {_ml[2] or 0:,} · "
-                               f"pares vistos juntos: {_ml_pares:,}")
+                    st.caption(f"Buscados: {miles(_ml[0] or 0)} · con publicaciones suyas: "
+                               f"{miles(_ml[1] or 0)} · con precio de mercado: {miles(_ml[2] or 0)} · "
+                               f"pares vistos juntos: {miles(_ml_pares)}")
                 except sqlite3.OperationalError as _err:
                     anotar_error("panel de Mercado Libre", _err)
                 _prueba_ml = st.text_input("Probar con un código:", key="ml_prueba",
@@ -633,7 +633,7 @@ if pagina == PAGINAS[3]:
             if len(_marcas_desc) < 2:
                 st.caption("Hacen falta al menos dos marcas con descripciones cargadas.")
             else:
-                _et = {f"{x['nombre']} ({x['n']:,} productos)": x["id"] for x in _marcas_desc}
+                _et = {f"{x['nombre']} ({miles(x['n'])} productos)": x["id"] for x in _marcas_desc}
                 cd1, cd2 = cols(2)
                 _ma = cd1.selectbox("Proveedor A:", list(_et.keys()), key="desc_marca_a")
                 _mb = cd2.selectbox("Proveedor B:", list(_et.keys()),
@@ -648,10 +648,10 @@ if pagina == PAGINAS[3]:
                             if _cuenta.get(mid, 0) > TOPE_PRODUCTOS_POR_COMPARACION]
                 if _grandes:
                     st.warning(
-                        "⚠️ " + " y ".join(f"**{n.split(' (')[0]}** tiene {c:,} productos"
+                        "⚠️ " + " y ".join(f"**{n.split(' (')[0]}** tiene {miles(c)} productos"
                                             for n, c in _grandes)
                         + f", y esta comparación mira las primeras "
-                          f"{TOPE_PRODUCTOS_POR_COMPARACION:,} de cada una. El resto no se "
+                          f"{miles(TOPE_PRODUCTOS_POR_COMPARACION)} de cada una. El resto no se "
                           "compara nunca, porque son siempre las mismas filas las que quedan "
                           "afuera.\n\nPara recorrer el catálogo entero sin tope, usá "
                           "**🧠 Buscar equivalencias en TODO el catálogo de una**, más abajo."
@@ -757,7 +757,7 @@ if pagina == PAGINAS[3]:
                                 "escritos en la descripción.")
                     if len(_st_escritos) >= TOPE_CODIGOS_ESCRITOS:
                         st.warning(
-                            f"⚠️ Se cortó en **{TOPE_CODIGOS_ESCRITOS:,} pares**, así que hay "
+                            f"⚠️ Se cortó en **{miles(TOPE_CODIGOS_ESCRITOS)} pares**, así que hay "
                             "más. Mandá estos a la cola, resolvelos, y volvé a correrlo."
                         )
                     _muestra_esc = []
@@ -820,7 +820,7 @@ if pagina == PAGINAS[3]:
                     # lista de Illinois cargada salían 787 pares y se veían 600.
                     if len(_st_todas) >= TOPE_SUGERENCIAS_TODAS:
                         st.warning(
-                            f"⚠️ Se cortó en **{TOPE_SUGERENCIAS_TODAS:,} pares**, así que hay "
+                            f"⚠️ Se cortó en **{miles(TOPE_SUGERENCIAS_TODAS)} pares**, así que hay "
                             "más. Mandá estos a la cola, aprobalos o descartalos, y volvé a "
                             "correrlo: los que ya resolviste no vuelven a salir."
                         )
@@ -873,7 +873,7 @@ if pagina == PAGINAS[3]:
                                  FROM marcas m JOIN productos p ON p.marca_id = m.id
                                  WHERE m.tipo <> 'OEM'
                                  GROUP BY m.id ORDER BY n DESC LIMIT 8""")
-                    _sin_dir = [f"{r['nombre']} ({r['n']:,} productos)" for r in c.fetchall()]
+                    _sin_dir = [f"{r['nombre']} ({miles(r['n'])} productos)" for r in c.fetchall()]
                 except sqlite3.OperationalError as _err:
                     anotar_error("catálogo digital", _err)
                     _sin_dir = []

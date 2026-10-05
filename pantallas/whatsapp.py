@@ -40,7 +40,7 @@ if pagina == PAGINAS[5]:
                     linea += f" - {fila['Descripcion']}"
                 extras = []
                 if incluir_precio and fila.get("Precio"):
-                    extras.append(f"${fila['Precio']:,.0f}")
+                    extras.append(f"${miles(fila['Precio'], 0)}")
                 if incluir_stock and fila.get("Stock") is not None:
                     extras.append(f"Stock: {fila['Stock']}")
                 if extras:

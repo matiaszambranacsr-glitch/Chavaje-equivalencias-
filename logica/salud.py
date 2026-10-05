@@ -338,7 +338,7 @@ def diagnostico_de_salud():
         if _dud:
             _rev = int(obtener_config("dudosos_revisados", "0") or 0)
             sumar("alto", f"{_dud} vínculo(s) YA cargados tienen evidencia en contra",
-                  f"De {_rev:,} vínculos revisados después de la última importación "
+                  f"De {miles(_rev)} vínculos revisados después de la última importación "
                   f"({obtener_config('dudosos_fecha', 'sin fecha')}). No son sugerencias "
                   "esperando: están activos, y la búsqueda los está devolviendo. Se ven de peor "
                   "a mejor, con el motivo al lado, y se cortan los peores de una.",
@@ -374,7 +374,7 @@ def diagnostico_de_salud():
         clavos = productos_estancados(365)
         if len(clavos) >= 10:
             plata = sum(x["Plata parada"] or 0 for x in clavos)
-            sumar("medio", f"${plata:,.0f} inmovilizados en {len(clavos)} producto(s)",
+            sumar("medio", f"${miles(plata, 0)} inmovilizados en {len(clavos)} producto(s)",
                   "Hace más de un año que no se venden y siguen ocupando estante. No es "
                   "urgente, pero es plata dormida que conviene mirar antes de la próxima compra.",
                   f"{miga_hasta('Para pedir')} → 🧊 Clavos: lo que no se mueve")
@@ -405,7 +405,7 @@ def diagnostico_de_salud():
                            for x in _mal_barras)
             _listas_b = ", ".join(x["Lista"] for x in _mal_barras[:4])
             sumar("alto",
-                  f"{_total_b:,} código(s) de barras cargados como código de fábrica",
+                  f"{miles(_total_b)} código(s) de barras cargados como código de fábrica",
                   f"En {_listas_b} lo que se importó en la columna del código original son "
                   "códigos de barras. Cada uno deja una equivalencia que no lleva a ningún "
                   "lado, y son las que hacen que el buscador prometa un equivalente que no "
@@ -457,7 +457,7 @@ def diagnostico_de_salud():
                              if f["Marca"] in _res_cr["listas_esperando"])
             sumar("alto",
                   f"{_cuales_e}: las equivalencias están encontradas y sin aprobar",
-                  f"{_cuantos_e:,} producto(s) de esa(s) lista(s) ya tienen equivalencias "
+                  f"{miles(_cuantos_e)} producto(s) de esa(s) lista(s) ya tienen equivalencias "
                   "esperando revisión. Hasta que no se aprueben, buscar uno de sus códigos no "
                   "muestra los equivalentes de los otros proveedores — la lista está bien "
                   "importada, lo que falta es revisarlas.",
@@ -469,7 +469,7 @@ def diagnostico_de_salud():
     try:
         espejadas = contar_equivalencias_espejadas()
         if espejadas:
-            sumar("medio", f"{espejadas:,} equivalencias anotadas dos veces",
+            sumar("medio", f"{miles(espejadas)} equivalencias anotadas dos veces",
                   "La misma relación guardada en las dos direcciones. No cambia lo que encuentra "
                   "el buscador, pero duplica todos los conteos.",
                   miga_hasta("Equivalencias anotadas dos veces"))
@@ -526,7 +526,7 @@ def diagnostico_de_salud():
         c.execute("SELECT COUNT(*) FROM equivalencias_pendientes")
         pendientes = c.fetchone()[0]
         if pendientes > 500:
-            sumar("medio", f"{pendientes:,} vínculos esperando revisión",
+            sumar("medio", f"{miles(pendientes)} vínculos esperando revisión",
                   "Mientras no se revisen no están cargados, así que el buscador no los usa.",
                   miga_hasta("Equivalencias sugeridas"))
     except Exception as _err:
@@ -537,7 +537,7 @@ def diagnostico_de_salud():
         c.execute("SELECT COUNT(*) FROM equivalencias WHERE confianza IS NULL")
         sin_punt = c.fetchone()[0]
         if sin_punt > 200:
-            sumar("medio", f"{sin_punt:,} vínculos sin puntuar",
+            sumar("medio", f"{miles(sin_punt)} vínculos sin puntuar",
                   "El buscador no puede decirte qué tan sólido es el camino de cada resultado "
                   "hasta que se calculen. Es un solo botón.",
                   miga_hasta("Puntuar los vínculos para el buscador"))
@@ -606,9 +606,9 @@ def diagnostico_de_salud():
                   "`datos_iniciales.db`, que no está. Hoy un reinicio borra TODO.",
                   miga_hasta("Backup y config"))
         elif riesgo and riesgo["en_riesgo"] > 200:
-            sumar("alto", f"{riesgo['en_riesgo']:,} productos viven solo en el disco",
+            sumar("alto", f"{miles(riesgo['en_riesgo'])} productos viven solo en el disco",
                   f"La copia del repositorio es del {riesgo['fecha_semilla']} y tiene "
-                  f"{riesgo['productos_semilla']:,}; hoy tenés {riesgo['productos_ahora']:,}. "
+                  f"{miles(riesgo['productos_semilla'])}; hoy tenés {miles(riesgo['productos_ahora'])}. "
                   "Si el servidor reinicia, la diferencia se pierde.",
                   miga_hasta("Backup y config"))
     except Exception as _err:
@@ -625,7 +625,7 @@ def diagnostico_de_salud():
         else:
             partes = []
             if bk["productos_nuevos"]:
-                partes.append(f"{bk['productos_nuevos']:,} productos nuevos")
+                partes.append(f"{miles(bk['productos_nuevos'])} productos nuevos")
             if bk["importaciones"]:
                 partes.append(f"{bk['importaciones']} lista(s) importadas")
             if bk["dias"]:

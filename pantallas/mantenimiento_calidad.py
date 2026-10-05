@@ -25,7 +25,7 @@ if pagina == PAGINAS[3]:
                 "por vínculos buenos es más confiable que uno directo colgado de un vínculo malo."
             )
             if sin_puntuar:
-                st.info(f"Hay {sin_puntuar:,} vínculo(s) sin puntuar de {total_eq:,}. "
+                st.info(f"Hay {miles(sin_puntuar)} vínculo(s) sin puntuar de {miles(total_eq)}. "
                          "Mientras tanto cuentan como neutros.")
             if candado('puntuar los vínculos', total_eq and st.button("🎯 Calcular la confianza de los vínculos que faltan"), 'puntuar_los_v_nculos'):
                 barra_conf = st.progress(0.0, text="Puntuando...")
@@ -40,12 +40,12 @@ if pagina == PAGINAS[3]:
                         break
                     hechos += n
                     barra_conf.progress(min(hechos / max(pendientes, 1), 1.0),
-                                        text=f"Puntuando {hechos:,} de {pendientes:,}...")
+                                        text=f"Puntuando {miles(hechos)} de {miles(pendientes)}...")
                     if hechos >= pendientes:
                         break
                 barra_conf.empty()
                 invalidar_salud()
-                avisar("success", f"Se puntuaron {hechos:,} vínculo(s). El buscador ya lo está "
+                avisar("success", f"Se puntuaron {miles(hechos)} vínculo(s). El buscador ya lo está "
                                   "usando.")
                 st.rerun()
             if candado('volver a puntuar todos los vínculos', total_eq and st.button("♻️ Volver a puntuar TODO", help="Los puntajes cambian cuando aparece evidencia nueva " "—ventas que confirman un reemplazo, decisiones que " "tomaste al revisar—. Esto los recalcula de cero."), 'volver_a_puntuar_todos_los_v_nculo'):
@@ -53,10 +53,10 @@ if pagina == PAGINAS[3]:
                 n = recalcular_confianzas(
                     limite=max(total_eq, 1), solo_faltantes=False,
                     progreso=lambda i, t: barra_re.progress(min(i / max(t, 1), 1.0),
-                                                            text=f"Recalculando {i:,} de {t:,}..."))
+                                                            text=f"Recalculando {miles(i)} de {miles(t)}..."))
                 barra_re.empty()
                 invalidar_salud()
-                avisar("success", f"Se recalcularon {n:,} vínculo(s).")
+                avisar("success", f"Se recalcularon {miles(n)} vínculo(s).")
                 st.rerun()
             st.markdown("**🧾 Equivalencias que confirmó el mostrador**")
             explicar(

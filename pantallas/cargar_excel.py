@@ -1000,12 +1000,12 @@ if pagina == PAGINAS[2]:
                     # quedaron cargados 43.347 productos» —más productos que filas— y la marca
                     # quedó con 43.101.
                     _productos = len(_ids_de_la_lista)
-                    _resumen = (f"Se leyeron **{_total_filas:,} fila(s)** y quedaron cargados "
-                                f"**{_productos:,} producto(s)**"
-                                + (f", {omitidos:,} fila(s) se saltearon" if omitidos else "")
+                    _resumen = (f"Se leyeron **{miles(_total_filas)} fila(s)** y quedaron cargados "
+                                f"**{miles(_productos)} producto(s)**"
+                                + (f", {miles(omitidos)} fila(s) se saltearon" if omitidos else "")
                                 + ".")
                     if cargar_directo:
-                        st.success(_resumen + f" {_con_equiv:,} de esas filas traían además un "
+                        st.success(_resumen + f" {miles(_con_equiv)} de esas filas traían además un "
                                               "código de fábrica y ya generaron equivalencias.")
                     else:
                         # En verde y con la palabra "equivalencia" parecía que ya estaban puestas.
@@ -1015,14 +1015,14 @@ if pagina == PAGINAS[2]:
                         # Y se cuentan los vínculos NUEVOS, no las filas con código de fábrica:
                         # reimportando la lista de FISPA, que ya estaba, decía «las 4.446 filas
                         # quedaron esperando tu aprobación» con casi todo ya aprobado de antes.
-                        _ya_txt = (f" Otros {_vinculos_ya_cargados:,} ya estaban cargados de "
+                        _ya_txt = (f" Otros {miles(_vinculos_ya_cargados)} ya estaban cargados de "
                                    "antes y siguen funcionando." if _vinculos_ya_cargados else "")
                         if _vinculos_ya_pendientes:
-                            _ya_txt += (f" Y {_vinculos_ya_pendientes:,} ya esperaban revisión "
+                            _ya_txt += (f" Y {miles(_vinculos_ya_pendientes)} ya esperaban revisión "
                                         "de una lista anterior.")
                         if eq_batch:
                             st.warning(
-                                _resumen + f" Los precios ya están, **pero {len(eq_batch):,} "
+                                _resumen + f" Los precios ya están, **pero {miles(len(eq_batch))} "
                                 "vínculo(s) nuevos todavía NO**: quedaron esperando tu "
                                 "aprobación, y hasta que los apruebes buscar esos códigos no va "
                                 "a traer los equivalentes de otras marcas." + _ya_txt
@@ -1061,7 +1061,7 @@ if pagina == PAGINAS[2]:
                             (st.error if nivel == "alto" else st.warning)(
                                 f"**{titulo}**\n\n{detalle}\n\n📍 {donde}")
                     elif _inf.get("analisis_por_atras"):
-                        st.info(f"🔎 Los {_inf['analisis_por_atras']:,} vínculos nuevos se están "
+                        st.info(f"🔎 Los {miles(_inf['analisis_por_atras'])} vínculos nuevos se están "
                                  "analizando por atrás (en una lista así de grande tarda un "
                                  "rato). Cuando abras Estadísticas → 🔗 Equivalencias sugeridas "
                                  "ya vas a ver cuáles están casi seguro mal.")
@@ -1116,7 +1116,7 @@ if pagina == PAGINAS[2]:
                     _sin_codigo = len(_ids_de_la_lista - _ids_con_codigo_de_fabrica)
                     if _sin_codigo:
                         st.info(
-                            f"📦 Además se cargaron {_sin_codigo:,} producto(s) que no traían código "
+                            f"📦 Además se cargaron {miles(_sin_codigo)} producto(s) que no traían código "
                             "de fábrica. Quedan buscables por código y por descripción; les va a aparecer "
                             "la equivalencia sola cuando el mismo código llegue desde la lista de otro "
                             "proveedor, o podés vincularlos a mano desde 'Vincular manual'."
@@ -1136,14 +1136,14 @@ if pagina == PAGINAS[2]:
                         st.session_state.pop("precios_frenados_de_la_carga", None)
                     if repetidos_con_otro_precio:
                         st.warning(
-                            f"🔁 {len(repetidos_con_otro_precio):,} código(s) aparecen **más de una "
+                            f"🔁 {miles(len(repetidos_con_otro_precio))} código(s) aparecen **más de una "
                             "vez en la lista con precios distintos** (suele ser la unidad y la caja, "
                             "o dos presentaciones). Quedó uno solo de los precios: revisalos. "
                             "Ejemplos: " + ", ".join(repetidos_con_otro_precio[:5])
                         )
                     if precios_en_cero:
                         st.caption(
-                            f"🧹 {precios_en_cero:,} fila(s) traían el precio en 0 o negativo "
+                            f"🧹 {miles(precios_en_cero)} fila(s) traían el precio en 0 o negativo "
                             "(«consultar», sin precio). Se cargaron sin tocar el precio que ya "
                             "tenían: un 0 no es un precio."
                         )
@@ -1196,7 +1196,7 @@ if pagina == PAGINAS[2]:
         if _frenados:
             _filas_fr = _frenados["filas"]
             st.warning(
-                f"🛑 {len(_filas_fr):,} precio(s) de la última lista quedaron **sin actualizar** "
+                f"🛑 {miles(len(_filas_fr))} precio(s) de la última lista quedaron **sin actualizar** "
                 "porque el cambio no parece un aumento sino un error de la lista. El producto se "
                 "cargó igual; lo único que no se tocó es el precio."
             )
@@ -1215,7 +1215,7 @@ if pagina == PAGINAS[2]:
             _cf1, _cf2 = st.columns(2)
             _revisado = _cf1.checkbox("Revisé la lista y los precios de la planilla son correctos",
                                       key="confirmar_precios_frenados")
-            if _cf1.button(f"💲 Aplicar igual esos {len(_filas_fr):,} precios",
+            if _cf1.button(f"💲 Aplicar igual esos {miles(len(_filas_fr))} precios",
                            disabled=not _revisado, key="aplicar_precios_frenados"):
                 with db_lock, transaccion():
                     for f in _filas_fr:
@@ -1227,7 +1227,7 @@ if pagina == PAGINAS[2]:
                 st.session_state.pop("precios_frenados_de_la_carga", None)
                 st.session_state.pop("confirmar_precios_frenados", None)
                 invalidar_salud()
-                st.success(f"💲 Se aplicaron {len(_filas_fr):,} precio(s).")
+                st.success(f"💲 Se aplicaron {miles(len(_filas_fr))} precio(s).")
             elif _cf2.button("🙈 Dejar los precios como estaban", key="descartar_precios_frenados"):
                 st.session_state.pop("precios_frenados_de_la_carga", None)
                 st.rerun()

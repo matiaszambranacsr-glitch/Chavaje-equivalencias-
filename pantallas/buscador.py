@@ -13,25 +13,24 @@ if pagina == PAGINAS[0]:
         a buscar un código, y el cartel de lo que espera aprobación explica los resultados:
         abajo de ellos también se entiende."""
         with st.expander("❓ Guía rápida — cómo usar esta app"):
-            st.markdown("""
-- **🔍 Buscador** — el corazón de la app. Buscá por código (acepta varios separados por coma) o por
-  descripción. Los resultados muestran todas las marcas equivalentes, precio, stock y un link directo
-  a la ficha del proveedor si lo cargaste.
-- **🔗 Vincular manual** — cuando encontrás que dos o más códigos de distintos proveedores son la misma
-  pieza y todavía no están relacionados, los agrupás acá de una sola vez.
-- **📁 Cargar Excel** — subís la lista completa de un proveedor (Excel, CSV o PDF con tabla) y la app
-  arma las equivalencias sola comparando código OEM. También lee remitos por foto.
-- **🗂️ Administrar** — todo lo de mantenimiento: marcas, medidas de piezas, fotos de productos,
-  combos relacionados, mensajería y cobros.
-- **📊 Estadísticas** — números generales, backups, auditoría de stock y qué se buscó sin encontrar nada.
-- **📋 Lista WhatsApp** — armá una cotización con varios productos y mandala por WhatsApp o como PDF.
-- **🚗 Vehículos** — ficha por patente: historial de piezas, alertas de mantenimiento, y podés cargar
-  los datos sacándole una foto a la cédula.
-- **🛠️ Modo Mecánico** — diccionario de códigos de falla (DTC), lector de VIN, esquemas técnicos y
-  un conversor de unidades.
-
-Casi todo lo que edita o borra algo pide la contraseña de administrador la primera vez que lo usás.
-        """)
+            # Las secciones salen de PARA_QUE_SIRVE, el mismo renglón que se ve debajo del menú:
+            # escritas aparte, la guía decía que Cargar Excel «arma las equivalencias sola»,
+            # cuando quedan esperando aprobación —que es justo lo que explica que un código
+            # recién importado no traiga sus equivalentes—.
+            st.markdown(
+                "**Cómo se trabaja, en tres pasos:**\n\n"
+                "1. **📁 Cargar Excel** — subís la lista de precios de cada proveedor (Excel, CSV "
+                "o PDF con tabla). Los productos y precios quedan buscables enseguida.\n"
+                "2. **📊 Estadísticas → 🔗 Equivalencias sugeridas** — la app propone qué códigos "
+                "de distintos proveedores son la misma pieza, y vos las aprobás (en bloque las "
+                "limpias). **Hasta que no se aprueban, no aparecen al buscar.**\n"
+                "3. **🔍 Buscador** — escribís el código que te piden y ves todas las marcas que "
+                "sirven en su lugar, con precio, stock y qué tan segura es cada una.\n\n"
+                "**Cada sección:**\n\n"
+                + "\n".join(f"- **{_p}** — {PARA_QUE_SIRVE[_p]}" for _p in PAGINAS
+                             if PARA_QUE_SIRVE.get(_p))
+                + "\n\nLo que borra o configura algo pide la contraseña de administrador."
+            )
 
         # Lo que está esperando aprobación se avisa ACÁ, no solo en Estadísticas. Mientras haya
         # vínculos sin aprobar, la búsqueda no cruza marcas: se busca un código de un proveedor y no
@@ -43,14 +42,18 @@ Casi todo lo que edita o borra algo pide la contraseña de administrador la prim
         if _esperando and es_celular():
             # Lo mismo en una línea: en el celular este cartel ocupaba media pantalla justo arriba
             # de la caja de búsqueda.
-            st.warning(f"🔒 **{_esperando:,} equivalencia(s) esperando aprobación**: todavía no "
+            st.warning(f"🔒 **{miles(_esperando)} equivalencia(s) esperando aprobación**: todavía no "
                        "aparecen al buscar. Se aprueban en Estadísticas → 🔗 Equivalencias sugeridas.")
         elif _esperando:
             st.warning(
-                f"🔒 Hay **{_esperando:,} equivalencia(s) esperando aprobación**. Hasta que las "
+                f"🔒 Hay **{miles(_esperando)} equivalencia(s) esperando aprobación**. Hasta que las "
                 "apruebes no se usan: buscar un código no va a traer los equivalentes de las otras "
                 "marcas. Se aprueban en bloque desde **Estadísticas → 🔗 Equivalencias sugeridas**."
             )
+        if _esperando:
+            st.button("🔗 Ir a aprobarlas →", key="ir_a_aprobar_sugeridas",
+                      on_click=ir_a_donde_dice_el_aviso,
+                      args=(miga_hasta("Equivalencias sugeridas"),))
 
     # Arriba de la caja de búsqueda solo para el administrador en la computadora: para quien
     # atiende el mostrador —en el celular o en la computadora— van al final. Medido en una
@@ -71,7 +74,7 @@ Casi todo lo que edita o borra algo pide la contraseña de administrador la prim
     if st.session_state.get("carrito"):
         _cart = st.session_state["carrito"]
         _total = sum((x["precio"] or 0) * x["cantidad"] for x in _cart.values())
-        with st.expander(f"🛒 Presupuesto en armado — {len(_cart)} ítem(s) · ${_total:,.0f}",
+        with st.expander(f"🛒 Presupuesto en armado — {len(_cart)} ítem(s) · ${miles(_total, 0)}",
                           expanded=False):
             for _pid, _item in list(_cart.items()):
                 ci1, ci2, ci3 = st.columns([5, 2, 1])
@@ -91,8 +94,8 @@ Casi todo lo que edita o borra algo pide la contraseña de administrador la prim
                     st.rerun()
 
             _lineas = [f"{x['marca']} {x['codigo']} x{x['cantidad']} — "
-                       f"${(x['precio'] or 0) * x['cantidad']:,.0f}" for x in _cart.values()]
-            _texto = "\n".join(_lineas) + f"\n\nTOTAL: ${_total:,.0f}"
+                       f"${miles((x['precio'] or 0) * x['cantidad'], 0)}" for x in _cart.values()]
+            _texto = "\n".join(_lineas) + f"\n\nTOTAL: ${miles(_total, 0)}"
             st.caption("Para copiar y mandar por WhatsApp:")
             st.code(_texto, language=None)
             cb1, cb2 = st.columns(2)
@@ -921,8 +924,8 @@ Casi todo lo que edita o borra algo pide la contraseña de administrador la prim
                                 st.info(
                                     f"💰 **Mejor margen entre los que tenés en stock:** "
                                     f"{mejor_marg['marca']} {mejor_marg['codigo']} — te deja "
-                                    f"${mejor_marg['ganancia']:,.0f} "
-                                    f"(${mejor_marg['diferencia']:,.0f} más que el peor de la lista)."
+                                    f"${miles(mejor_marg['ganancia'], 0)} "
+                                    f"(${miles(mejor_marg['diferencia'], 0)} más que el peor de la lista)."
                                 )
                         puentes_res = puentes_en_el_resultado([f["ID"] for f in res])
 
@@ -1351,7 +1354,7 @@ Casi todo lo que edita o borra algo pide la contraseña de administrador la prim
                                                                   f"costo_{fila['ID']}_{clean}"))
                                     if _pct is not None:
                                         cc2.caption(f"Margen: **{_pct:.0f}%** "
-                                                     f"(${_pesos:,.0f} por unidad)")
+                                                     f"(${miles(_pesos, 0)} por unidad)")
                                     else:
                                         cc2.caption("Cargá el costo para ver el margen.")
 
@@ -1714,7 +1717,7 @@ Casi todo lo que edita o borra algo pide la contraseña de administrador la prim
                         )
                         for f in (equivalentes or [fila_txt]):
                             cv1, cv2 = st.columns([4, 1])
-                            precio_txt = f"${f['Precio']:,.0f}" if f.get("Precio") else "s/precio"
+                            precio_txt = f"${miles(f['Precio'], 0)}" if f.get("Precio") else "s/precio"
                             cv1.write(f"{f['Marca']} - {f['Codigo']} ({precio_txt}, "
                                        f"stock: {f.get('Stock') if f.get('Stock') is not None else 's/d'})")
                             cv2.button("🛒 Se llevó", key=f"vendido_txt_{fila_txt['ID']}_{f['ID']}",

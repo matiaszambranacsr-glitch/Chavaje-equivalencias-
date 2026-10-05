@@ -466,7 +466,7 @@ def agregar_margen(filas):
     empiezan con guión bajo."""
     for f in filas:
         pct, pesos = margen_de(f.get("Precio"), f.get("_costo"))
-        f["Margen"] = f"{pct:.0f}% (${pesos:,.0f})" if pct is not None else ""
+        f["Margen"] = f"{pct:.0f}% (${miles(pesos, 0)})" if pct is not None else ""
     return filas
 
 

@@ -237,8 +237,8 @@ if pagina == PAGINAS[3]:
                     _adv_pend = sum(x.get("Esperando revisión") or 0 for x in _adv)
                     _adv_listas = sorted({x["Lista"] for x in _adv})
                     st.warning(
-                        f"**{len(_adv):,} código(s) adivinados** de {', '.join(_adv_listas)}, "
-                        f"con {_adv_pend:,} par(es) esperando revisión que se van con ellos."
+                        f"**{miles(len(_adv))} código(s) adivinados** de {', '.join(_adv_listas)}, "
+                        f"con {miles(_adv_pend)} par(es) esperando revisión que se van con ellos."
                     )
                     st.dataframe([{k: v for k, v in x.items() if k != "pid"} for x in _adv],
                                   width="stretch", hide_index=True)
@@ -254,7 +254,7 @@ if pagina == PAGINAS[3]:
                                "quedan igual.")
                     if st.checkbox("Miré la lista y entiendo qué se borra", key="conf_adivinados"):
                         if candado("borrar los códigos adivinados",
-                                    st.button(f"🗑️ Borrar los {len(_adv):,}", type="primary",
+                                    st.button(f"🗑️ Borrar los {miles(len(_adv))}", type="primary",
                                                key="btn_borrar_adivinados"),
                                     "borrar_los_codigos_adivinados"):
                             _barra_adv = st.progress(0.0, text="Borrando...")
@@ -263,13 +263,13 @@ if pagina == PAGINAS[3]:
                                 _tot_adv += borrar_puente_y_sus_pendientes(_x["pid"])[1]
                                 if _i_adv % 50 == 0:
                                     _barra_adv.progress((_i_adv + 1) / len(_adv),
-                                                        text=f"Borrando... {_i_adv + 1:,} de "
-                                                             f"{len(_adv):,}")
+                                                        text=f"Borrando... {miles(_i_adv + 1)} de "
+                                                             f"{miles(len(_adv))}")
                             _barra_adv.empty()
                             st.session_state.pop("codigos_adivinados", None)
                             invalidar_salud()
-                            avisar("ok", f"Se borraron {len(_adv):,} código(s) adivinados y "
-                                          f"{_tot_adv:,} pendiente(s). Los productos quedaron "
+                            avisar("ok", f"Se borraron {miles(len(_adv))} código(s) adivinados y "
+                                          f"{miles(_tot_adv)} pendiente(s). Los productos quedaron "
                                           "intactos.")
                             st.rerun()
             st.markdown("---")
@@ -336,7 +336,7 @@ if pagina == PAGINAS[3]:
             elif obtener_config("confianza_fecha", ""):
                 st.caption(
                     f"Puntajes guardados al día: se repuntuaron "
-                    f"{int(obtener_config('confianza_repuntuada', '0') or 0):,} vínculo(s) el "
+                    f"{miles(int(obtener_config('confianza_repuntuada', '0') or 0))} vínculo(s) el "
                     f"{obtener_config('confianza_fecha', '')}."
                 )
             # Lo que ya se midió solo después de la última importación. Sin esto, el número
@@ -346,12 +346,12 @@ if pagina == PAGINAS[3]:
                 _rev_prev = obtener_config("dudosos_revisados", "0")
                 _fec_prev = obtener_config("dudosos_fecha", "")
                 if _dud_prev == "0":
-                    st.success(f"✅ En la última importación se revisaron {int(_rev_prev):,} "
+                    st.success(f"✅ En la última importación se revisaron {miles(int(_rev_prev))} "
                                 f"vínculos y ninguno quedó por debajo del umbral ({_fec_prev}).")
                 else:
                     st.warning(f"⚠️ En la última importación ({_fec_prev}) quedaron "
                                 f"**{int(_dud_prev)} vínculo(s) con evidencia en contra** de "
-                                f"{int(_rev_prev):,} revisados. Analizalos acá para verlos y "
+                                f"{miles(int(_rev_prev))} revisados. Analizalos acá para verlos y "
                                 "decidir cuáles cortar.")
             if st.button("🔎 Analizar los vínculos cargados"):
                 with st.spinner("Analizando..."):
@@ -366,7 +366,7 @@ if pagina == PAGINAS[3]:
                     # confianza — pasa este control con el mejor puntaje y sigue estando mal.
                     # Decirlo importa: alguien vio este cartel en verde, entendió «no hay nada
                     # que limpiar», y los puentes falsos seguían ahí arriba en la misma pantalla.
-                    st.success(f"✅ Se revisaron {revisadas:,} vínculos y ninguno quedó por debajo del "
+                    st.success(f"✅ Se revisaron {miles(revisadas)} vínculos y ninguno quedó por debajo del "
                                 "umbral de confianza.")
                     st.caption("Ojo: esto mide la **confianza** de cada vínculo, no si el "
                                 "código que los unió es un código de verdad.")
@@ -380,7 +380,7 @@ if pagina == PAGINAS[3]:
                     )
                 else:
                     st.warning(
-                        f"⚠️ De {revisadas:,} vínculos revisados, **{len(dudosas)} tienen evidencia en "
+                        f"⚠️ De {miles(revisadas)} vínculos revisados, **{len(dudosas)} tienen evidencia en "
                         "contra**. Están ordenados de peor a mejor, con el motivo al lado."
                     )
                     st.dataframe(quitar_id(dudosas), width="stretch", hide_index=True)
@@ -532,7 +532,7 @@ if pagina == PAGINAS[3]:
             )
             pegadas = contar_descripciones_pegadas()
             if pegadas:
-                st.warning(f"⚠️ Hay {pegadas:,} descripción(es) con ese problema.")
+                st.warning(f"⚠️ Hay {miles(pegadas)} descripción(es) con ese problema.")
                 if candado('reescribir las descripciones de todo el catálogo', st.button("🔧 Separar las descripciones pegadas"), 'reescribir_las_descripciones_de_to'):
                     arregladas = reparar_descripciones_pegadas()
                     st.success(f"Se separaron {arregladas} descripción(es).")
@@ -593,7 +593,7 @@ if pagina == PAGINAS[3]:
                 st.markdown("---")
                 st.markdown("**🔁 Equivalencias anotadas dos veces**")
                 st.warning(
-                    f"⚠️ Hay {espejadas:,} equivalencia(s) guardadas por duplicado: la misma relación "
+                    f"⚠️ Hay {miles(espejadas)} equivalencia(s) guardadas por duplicado: la misma relación "
                     "anotada en las dos direcciones (A↔B y B↔A). No son vínculos distintos, es la "
                     "misma información dos veces."
                 )
@@ -607,6 +607,6 @@ if pagina == PAGINAS[3]:
                 if st.button("🔁 Unificar duplicadas"):
                     borradas, vueltas = unificar_equivalencias_espejadas()
                     invalidar_salud()
-                    avisar("success", f"Se unificaron {borradas:,} duplicadas "
-                                       f"y se ordenaron {vueltas:,}.")
+                    avisar("success", f"Se unificaron {miles(borradas)} duplicadas "
+                                       f"y se ordenaron {miles(vueltas)}.")
                     st.rerun()

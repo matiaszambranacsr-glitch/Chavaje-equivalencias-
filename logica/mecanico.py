@@ -981,13 +981,13 @@ def generar_pdf_presupuesto_mecanico(nombre_mecanico, cliente_nombre, items, man
     pdf.set_font("Helvetica", "", 10)
     for it in items:
         subtotal = it["precio"] * it["cantidad"]
-        linea = f"- {it['codigo']} ({it['marca']}) x{it['cantidad']} - ${subtotal:,.0f}"
+        linea = f"- {it['codigo']} ({it['marca']}) x{it['cantidad']} - ${miles(subtotal, 0)}"
         pdf.multi_cell(0, 6, limpiar(linea), new_x="LMARGIN", new_y="NEXT")
     pdf.ln(2)
     pdf.set_font("Helvetica", "", 10)
-    pdf.cell(0, 6, limpiar(f"Mano de obra: ${mano_obra:,.0f}"), new_x="LMARGIN", new_y="NEXT")
+    pdf.cell(0, 6, limpiar(f"Mano de obra: ${miles(mano_obra, 0)}"), new_x="LMARGIN", new_y="NEXT")
     pdf.set_font("Helvetica", "B", 12)
-    pdf.cell(0, 8, limpiar(f"TOTAL: ${total:,.0f}"), new_x="LMARGIN", new_y="NEXT")
+    pdf.cell(0, 8, limpiar(f"TOTAL: ${miles(total, 0)}"), new_x="LMARGIN", new_y="NEXT")
 
     return bytes(pdf.output())
 
@@ -1124,8 +1124,8 @@ def cargar_a_la_cuenta(mecanico_id, concepto, importe, codigo_de_retiro="", usua
     config = configuracion_de_cuenta(mecanico_id)
     estado = estado_de_cuenta(mecanico_id)
     if config["limite"] and estado["saldo"] + importe > config["limite"] and not pasar_el_limite:
-        return False, (f"Pasa el límite de crédito: debe ${estado['saldo']:,.0f}, el límite es "
-                       f"${config['limite']:,.0f} y esto suma ${importe:,.0f}.")
+        return False, (f"Pasa el límite de crédito: debe ${miles(estado['saldo'], 0)}, el límite es "
+                       f"${miles(config['limite'], 0)} y esto suma ${miles(importe, 0)}.")
     vence = (date.today() + timedelta(days=config["dias_de_plazo"])).isoformat()
     with db_lock:
         with transaccion():
@@ -1144,7 +1144,7 @@ def cargar_a_la_cuenta(mecanico_id, concepto, importe, codigo_de_retiro="", usua
             if codigo_id:
                 c.execute("""UPDATE codigos_de_retiro SET usado_en = datetime('now', 'localtime'),
                                     movimiento_id = ? WHERE id = ?""", (movimiento_id, codigo_id))
-    aviso = f"Cargado: ${importe:,.0f}, vence el {vence}."
+    aviso = f"Cargado: ${miles(importe, 0)}, vence el {vence}."
     if config["limite"] and estado["saldo"] + importe > config["limite"]:
         aviso += " Quedó por encima del límite de crédito."
     return True, aviso
@@ -1174,7 +1174,7 @@ def registrar_pago_de_cuenta(mecanico_id, importe, medio, concepto="", cheque_fe
                    medio, str(cheque_fecha) if (medio == "Cheque" and cheque_fecha) else None,
                    usuario))
         conn.commit()
-    return True, f"Pago registrado: ${importe:,.0f}."
+    return True, f"Pago registrado: ${miles(importe, 0)}."
 
 
 def anular_movimiento_de_cuenta(movimiento_id):
@@ -1227,7 +1227,7 @@ def mostrar_portal_mecanico():
         if resultados_mec:
             for fila in resultados_mec[:20]:
                 colm1, colm2, colm3 = st.columns([3, 1, 1])
-                precio_txt = f"${fila['Precio']:,.0f}" if fila.get("Precio") else "s/precio"
+                precio_txt = f"${miles(fila['Precio'], 0)}" if fila.get("Precio") else "s/precio"
                 colm1.write(f"{fila['Marca']} - {fila['Codigo']} — {fila.get('Descripcion') or ''} ({precio_txt})")
                 cantidad_mec = colm2.number_input("Cant.", min_value=1, value=1, step=1,
                                                     key=f"cant_mec_{fila['ID']}", label_visibility="collapsed")
@@ -1250,14 +1250,14 @@ def mostrar_portal_mecanico():
             subtotal_item = it["precio"] * it["cantidad"]
             subtotal_repuestos += subtotal_item
             coli1, coli2 = st.columns([4, 1])
-            coli1.write(f"{it['marca']} - {it['codigo']} x{it['cantidad']} — ${subtotal_item:,.0f}")
+            coli1.write(f"{it['marca']} - {it['codigo']} x{it['cantidad']} — ${miles(subtotal_item, 0)}")
             coli2.button("🗑️", key=f"quitar_mec_{i}",
                           on_click=quitar_item_lista_sesion, args=("presupuesto_mecanico_items", i))
 
         cliente_nombre_mec = st.text_input("Nombre del cliente (opcional):", key="mec_cliente")
         mano_obra_mec = st.number_input("Mano de obra ($):", min_value=0.0, step=500.0, key="mec_mano_obra")
         total_mec = subtotal_repuestos + mano_obra_mec
-        st.metric("Total", f"${total_mec:,.0f}")
+        st.metric("Total", f"${miles(total_mec, 0)}")
 
         colb1, colb2, colb3 = st.columns(3)
         if colb1.button("💾 Guardar presupuesto", type="primary"):
@@ -1274,8 +1274,8 @@ def mostrar_portal_mecanico():
 
         mensaje_mec = f"Presupuesto de {nombre_mecanico}:\n"
         for it in items_actuales:
-            mensaje_mec += f"- {it['codigo']} ({it['marca']}) x{it['cantidad']} — ${it['precio']*it['cantidad']:,.0f}\n"
-        mensaje_mec += f"Mano de obra: ${mano_obra_mec:,.0f}\nTOTAL: ${total_mec:,.0f}"
+            mensaje_mec += f"- {it['codigo']} ({it['marca']}) x{it['cantidad']} — ${miles(it['precio']*it['cantidad'], 0)}\n"
+        mensaje_mec += f"Mano de obra: ${miles(mano_obra_mec, 0)}\nTOTAL: ${miles(total_mec, 0)}"
         url_wa_mec = "https://wa.me/?text=" + quote(mensaje_mec)
         colb3.link_button("📲 WhatsApp", url_wa_mec)
     else:
@@ -1285,10 +1285,10 @@ def mostrar_portal_mecanico():
     st.markdown("**💳 Mi cuenta corriente**")
     _estado_cc = estado_de_cuenta(mecanico_id)
     _cm1, _cm2, _cm3 = st.columns(3)
-    _cm1.metric("Saldo", f"${_estado_cc['saldo']:,.0f}")
-    _cm2.metric("Vencido", f"${_estado_cc['vencido']:,.0f}")
+    _cm1.metric("Saldo", f"${miles(_estado_cc['saldo'], 0)}")
+    _cm2.metric("Vencido", f"${miles(_estado_cc['vencido'], 0)}")
     _cm3.metric("Disponible", "sin límite" if _estado_cc["disponible"] is None
-                else f"${_estado_cc['disponible']:,.0f}")
+                else f"${miles(_estado_cc['disponible'], 0)}")
     st.caption("Para que alguien retire repuestos a tu nombre y se carguen a tu cuenta, generá "
                "un código y dáselo: vale una sola vez y por "
                f"{VIGENCIA_DEL_CODIGO_DE_RETIRO_HORAS} horas. Sin el código, en el mostrador no "
@@ -1311,10 +1311,10 @@ def mostrar_portal_mecanico():
     anteriores = listar_presupuestos_mecanico(mecanico_id)
     if anteriores:
         for p in anteriores[:20]:
-            with st.expander(f"{p['Fecha']} — {p['Cliente'] or 'sin nombre'} — ${p['Total']:,.0f}"):
+            with st.expander(f"{p['Fecha']} — {p['Cliente'] or 'sin nombre'} — ${miles(p['Total'], 0)}"):
                 items_p = json.loads(p["items_json"])
                 for it in items_p:
-                    st.write(f"- {it['codigo']} ({it['marca']}) x{it['cantidad']} — ${it['precio']*it['cantidad']:,.0f}")
-                st.write(f"Mano de obra: ${p['Mano de obra']:,.0f}")
+                    st.write(f"- {it['codigo']} ({it['marca']}) x{it['cantidad']} — ${miles(it['precio']*it['cantidad'], 0)}")
+                st.write(f"Mano de obra: ${miles(p['Mano de obra'], 0)}")
     else:
         st.caption("Todavía no guardaste ningún presupuesto.")

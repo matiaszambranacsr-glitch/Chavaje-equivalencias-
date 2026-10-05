@@ -80,7 +80,7 @@ if pagina == PAGINAS[3]:
                 faltan_marca = contar_fotos_por_traer_de_catalogo(id_marca_fotos, filtro_fotos)
                 faltan_todos = contar_fotos_por_traer_de_catalogo(id_marca_fotos, "todos")
                 if filtro_fotos != "todos":
-                    st.caption(f"Con ese filtro quedan {faltan_marca:,} de {faltan_todos:,} códigos.")
+                    st.caption(f"Con ese filtro quedan {miles(faltan_marca)} de {miles(faltan_todos)} códigos.")
 
                 explicar(
                     "Entra a la ficha de cada código y busca la foto ahí.",
@@ -108,11 +108,11 @@ if pagina == PAGINAS[3]:
                 st.caption(
                     f"Cada foto ocupa unos {kb_por_foto} KB en la base "
                     f"({'modo liviano' if modo_liviano else 'guardando la imagen entera'}). "
-                    f"Las {faltan_marca:,} de este filtro serían unos {mb_estimados:,.0f} MB."
+                    f"Las {miles(faltan_marca)} de este filtro serían unos {miles(mb_estimados, 0)} MB."
                 )
                 if mb_estimados > 80:
                     st.warning(
-                        f"⚠️ {mb_estimados:,.0f} MB no entran en el backup de GitHub (tope 100 MB), y "
+                        f"⚠️ {miles(mb_estimados, 0)} MB no entran en el backup de GitHub (tope 100 MB), y "
                         "como el hosting borra el disco al reiniciar y restaura desde ahí, esas fotos "
                         "se te van a perder en cada reinicio. "
                         + ("Probá con «solo los que tienen stock»: es lo que realmente movés."
@@ -131,7 +131,7 @@ if pagina == PAGINAS[3]:
                             "bajadas": 0, "sin_foto": 0, "fallos": 0, "hasta_terminar": False,
                         }
                         st.rerun()
-                    if bc2.button(f"♾️ Seguir hasta terminar las {faltan_marca:,}",
+                    if bc2.button(f"♾️ Seguir hasta terminar las {miles(faltan_marca)}",
                                    disabled=not faltan_marca):
                         st.session_state["bajada_fotos_en_curso"] = {
                             "marca_id": id_marca_fotos, "restantes": faltan_marca,
@@ -190,7 +190,7 @@ if pagina == PAGINAS[3]:
                     else:
                         st.session_state["bajada_fotos_en_curso"] = en_curso
                         st.caption(
-                            f"Van {en_curso['bajadas']} foto(s) — quedan unas {en_curso['restantes']:,}. "
+                            f"Van {en_curso['bajadas']} foto(s) — quedan unas {miles(en_curso['restantes'])}. "
                             "Dejá esta pantalla abierta; sigue sola."
                         )
                         st.rerun()
@@ -205,7 +205,7 @@ if pagina == PAGINAS[3]:
             marcados_sin_foto = c.fetchone()[0]
             if marcados_sin_foto:
                 st.caption(
-                    f"🔕 {marcados_sin_foto:,} código(s) quedaron marcados como «la ficha no tiene foto» "
+                    f"🔕 {miles(marcados_sin_foto)} código(s) quedaron marcados como «la ficha no tiene foto» "
                     "(o fallaron tres días) y ya no se vuelven a consultar."
                 )
                 if st.button("🔄 Volver a probar esos códigos"):

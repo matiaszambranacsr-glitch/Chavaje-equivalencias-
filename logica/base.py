@@ -66,6 +66,25 @@ _ULTIMOS_ERRORES = del_proceso("ultimos_errores", list)
 MAXIMO_ERRORES_ANOTADOS = 150
 
 
+def miles(numero, decimales=None):
+    """Un número como se escribe acá: «1.380», «87.155», «1.234,5».
+
+    Los f-string con «:,» separan los miles con coma, a la inglesa, y había 211 en la app:
+    arriba de todo decía «1,380 par(es) de motores», y el presupuesto, «$1,505», que acá se lee
+    uno coma cinco. decimales=None deja los que traiga el número (como «:,»); 0 o 1 los fija
+    (como «:,.0f» y «:,.1f»).
+
+    Lo que no es un número vuelve tal cual: también se usa para st.metric, que recibe lo que
+    sea —un None, un «—»— y lo muestra crudo."""
+    if isinstance(numero, bool) or not isinstance(numero, (int, float)):
+        return numero
+    try:
+        texto = format(numero, ",") if decimales is None else format(float(numero), f",.{decimales}f")
+    except (TypeError, ValueError):
+        return str(numero)
+    return texto.replace(",", "\x00").replace(".", ",").replace("\x00", ".")
+
+
 def anotar_error(donde, error):
     """Deja registrado un error que la app decidió ignorar. NUNCA puede fallar.
 

@@ -2473,13 +2473,13 @@ def plan_de_la_lista(limpias, sospechosas, relacionadas):
         marcas = sum(min(len(f), tamano_de_la_muestra(len(f))) for _a, _b, f, _fr in grupos_l)
         pasos.append({"Paso": "🎯 Aprobar las limpias con su muestra",
                       "Pares": len(limpias),
-                      "Trabajo": f"{marcas:,} marcas en {len(grupos_l)} muestra(s)",
+                      "Trabajo": f"{miles(marcas)} marcas en {len(grupos_l)} muestra(s)",
                       "Dónde": "🎯 Aprobar las limpias por grupos"})
     if con_muestra:
         marcas = sum(min(len(g[2]), tamano_de_la_muestra(len(g[2]))) for g in con_muestra)
         pasos.append({"Paso": "🔍 Resolver las dudas con una muestra",
                       "Pares": sum(len(g[2]) for g in con_muestra),
-                      "Trabajo": f"{marcas:,} marcas en {len(con_muestra)} muestra(s)",
+                      "Trabajo": f"{miles(marcas)} marcas en {len(con_muestra)} muestra(s)",
                       "Dónde": "📋 Para revisar, por motivo"})
     abanicos = abanicos_para_elegir(limpias, sospechosas)
     if abanicos:
@@ -2490,7 +2490,7 @@ def plan_de_la_lista(limpias, sospechosas, relacionadas):
                       "Pares": len({(f["a"], f["b"]) for a in abanicos for f in a["candidatos"]
                                     if f.get("alarmas")
                                     and all(x.startswith("🪭") for x in f["alarmas"])}),
-                      "Trabajo": f"{len(abanicos):,} producto(s), uno por uno",
+                      "Trabajo": f"{miles(len(abanicos))} producto(s), uno por uno",
                       "Dónde": "🪭 Elegí cuál es la equivalente"})
     return pasos
 

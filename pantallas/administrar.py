@@ -721,7 +721,7 @@ if pagina == PAGINAS[3]:
                 # y borrándolo su deuda desaparecería de la pantalla.
                 _saldo_mecanico = estado_de_cuenta(mecanico_id_sel)["saldo"]
                 if _saldo_mecanico:
-                    cmg2.caption(f"Tiene saldo en su cuenta corriente (${_saldo_mecanico:,.0f}): "
+                    cmg2.caption(f"Tiene saldo en su cuenta corriente (${miles(_saldo_mecanico, 0)}): "
                                  "no se puede eliminar. Desactivalo.")
                 elif cmg2.button("🗑️ Eliminar mecánico"):
                     eliminar_mecanico(mecanico_id_sel)
@@ -747,10 +747,10 @@ if pagina == PAGINAS[3]:
             _resumen_cc = resumen_de_cuentas()
             if _resumen_cc:
                 _cc1, _cc2, _cc3 = st.columns(3)
-                _cc1.metric("A cobrar", f"${sum(max(0, r['Saldo']) for r in _resumen_cc):,.0f}")
-                _cc2.metric("Vencido", f"${sum(r['Vencido'] for r in _resumen_cc):,.0f}")
+                _cc1.metric("A cobrar", f"${miles(sum(max(0, r['Saldo']) for r in _resumen_cc), 0)}")
+                _cc2.metric("Vencido", f"${miles(sum(r['Vencido'] for r in _resumen_cc), 0)}")
                 _cc3.metric("Cheques en cartera",
-                            f"${sum(r['Cheques en cartera'] or 0 for r in _resumen_cc):,.0f}")
+                            f"${miles(sum(r['Cheques en cartera'] or 0 for r in _resumen_cc), 0)}")
                 st.dataframe(quitar_id(_resumen_cc), width="stretch", hide_index=True)
 
             _taller = st.selectbox("Taller:", list(_talleres), key="cc_taller")
@@ -758,13 +758,13 @@ if pagina == PAGINAS[3]:
             _estado = estado_de_cuenta(_mid)
             _config = configuracion_de_cuenta(_mid)
             _e1, _e2, _e3 = st.columns(3)
-            _e1.metric("Saldo", f"${_estado['saldo']:,.0f}")
-            _e2.metric("Vencido", f"${_estado['vencido']:,.0f}")
+            _e1.metric("Saldo", f"${miles(_estado['saldo'], 0)}")
+            _e2.metric("Vencido", f"${miles(_estado['vencido'], 0)}")
             _e3.metric("Disponible", "sin límite" if _estado["disponible"] is None
-                       else f"${_estado['disponible']:,.0f}")
+                       else f"${miles(_estado['disponible'], 0)}")
             if _estado["cheques_cuantos"]:
                 st.caption(f"🧾 {_estado['cheques_cuantos']} cheque(s) en cartera por "
-                           f"${_estado['cheques_en_cartera']:,.0f}, todavía sin cobrar.")
+                           f"${miles(_estado['cheques_en_cartera'], 0)}, todavía sin cobrar.")
 
             with st.form(f"cc_cargo_{_mid}", clear_on_submit=True):
                 st.markdown("**➕ Cargar a la cuenta**")
@@ -807,13 +807,13 @@ if pagina == PAGINAS[3]:
                 st.markdown("**📒 Movimientos**")
                 st.dataframe(quitar_id(_movs), width="stretch", hide_index=True)
                 _mensaje_cc = (f"Hola! Te escribimos de El Chavo. El saldo de tu cuenta corriente "
-                               f"es ${_estado['saldo']:,.0f}"
-                               + (f", de los que ${_estado['vencido']:,.0f} ya vencieron"
+                               f"es ${miles(_estado['saldo'], 0)}"
+                               + (f", de los que ${miles(_estado['vencido'], 0)} ya vencieron"
                                   if _estado["vencido"] else "") + ". ¡Gracias!")
                 st.link_button("📲 Mandarle el saldo por WhatsApp",
                                "https://wa.me/?text=" + quote(_mensaje_cc))
                 _anulables = {f"{m['Fecha']} — {m['Concepto']} — "
-                              f"${(m['Debe'] or m['Haber'] or 0):,.0f}": m["ID"]
+                              f"${miles((m['Debe'] or m['Haber'] or 0), 0)}": m["ID"]
                               for m in _movs if "(ANULADO)" not in m["Concepto"]}
                 if _anulables:
                     _a_anular = st.selectbox("Anular un movimiento (queda a la vista, tachado):",

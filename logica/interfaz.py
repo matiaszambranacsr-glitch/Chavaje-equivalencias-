@@ -467,7 +467,7 @@ def archivo_listo(archivo, etiqueta="archivo"):
         )
         return False
     tamano = getattr(archivo, "size", None)
-    detalle = f" ({tamano/1024:,.0f} KB)" if tamano else ""
+    detalle = f" ({miles(tamano/1024, 0)} KB)" if tamano else ""
     st.caption(f"✅ Recibido: {getattr(archivo, 'name', etiqueta)}{detalle}")
     return True
 
@@ -523,7 +523,7 @@ def generar_pdf_cotizacion(lista_productos, incluir_precio=True, incluir_stock=F
                 linea += f" - {fila['Descripcion']}"
             extras = []
             if incluir_precio and fila.get("Precio"):
-                extras.append(f"${fila['Precio']:,.0f}")
+                extras.append(f"${miles(fila['Precio'], 0)}")
             if incluir_stock and fila.get("Stock") is not None:
                 extras.append(f"Stock: {fila['Stock']}")
             if extras:
@@ -586,9 +586,9 @@ def generar_pdf_ficha_vehiculo(vehiculo, km_calc, alertas, proyeccion, historial
     pdf.cell(0, 6, limpiar(f"Km de registro: {km_reg if km_reg is not None else '-'}"), new_x="LMARGIN", new_y="NEXT")
     pdf.cell(0, 6, limpiar(f"Km actual: {km_act if km_act is not None else '-'}"), new_x="LMARGIN", new_y="NEXT")
     if km_calc.get("km_recorridos") is not None:
-        pdf.cell(0, 6, limpiar(f"Km recorridos: {km_calc['km_recorridos']:,}"), new_x="LMARGIN", new_y="NEXT")
+        pdf.cell(0, 6, limpiar(f"Km recorridos: {miles(km_calc['km_recorridos'])}"), new_x="LMARGIN", new_y="NEXT")
     if km_calc.get("promedio_mensual") is not None:
-        pdf.cell(0, 6, limpiar(f"Promedio aproximado: {km_calc['promedio_mensual']:,} km/mes"),
+        pdf.cell(0, 6, limpiar(f"Promedio aproximado: {miles(km_calc['promedio_mensual'])} km/mes"),
                   new_x="LMARGIN", new_y="NEXT")
     pdf.ln(2)
 
@@ -1192,7 +1192,7 @@ def texto_para_markdown(valor):
 def formato_precio(valor):
     """$ 18.375, con punto de miles como se escribe acá."""
     try:
-        return "$ " + f"{float(valor):,.0f}".replace(",", ".")
+        return "$ " + f"{miles(float(valor), 0)}".replace(",", ".")
     except (TypeError, ValueError):
         return ""
 
@@ -1215,7 +1215,7 @@ def mostrar_tarjetas_de_resultados(filas, tope=40):
         elif _stock is None or _stock == "":
             _semaforo = "⚪ stock s/d"
         elif _stock > 0:
-            _semaforo = f"🟢 **{_stock:,.0f}** en stock".replace(",", ".")
+            _semaforo = f"🟢 **{miles(_stock, 0)}** en stock".replace(",", ".")
         else:
             _semaforo = "🔴 sin stock"
         _precio = formato_precio(f.get("Precio")) if f.get("Precio") else "sin precio"
@@ -1258,9 +1258,3 @@ def resaltar_lo_que_difiere(texto, otro):
     return "".join(salida)
 
 
-def miles(valor):
-    """Un número con punto de miles, como se escribe acá (85.705 y no 85705). Lo que no es un
-    número entero vuelve tal cual. Para st.metric, que muestra el número crudo."""
-    if isinstance(valor, bool) or not isinstance(valor, int):
-        return valor
-    return f"{valor:,}".replace(",", ".")

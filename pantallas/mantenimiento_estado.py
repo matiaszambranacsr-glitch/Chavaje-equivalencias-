@@ -35,7 +35,7 @@ if pagina == PAGINAS[3]:
                     _pct = _res_sc["cruzan"] * 100 // _tot
                     (st.error if _pct < 25 else st.warning if _pct < 60 else st.success)(
                         f"**{_pct}% de tus productos de proveedor cruzan a otra marca** "
-                        f"({_res_sc['cruzan']:,} de {_res_sc['productos']:,})."
+                        f"({miles(_res_sc['cruzan'])} de {miles(_res_sc['productos'])})."
                     )
                     # Antes que el cartel de «reimportá»: una lista que ya tiene todo
                     # encontrado y sin aprobar da el mismo cero, y mandarla a reimportar es
@@ -47,7 +47,7 @@ if pagina == PAGINAS[3]:
                             "**No hace falta reimportar nada: "
                             + ", ".join(_res_sc["listas_esperando"][:12])
                             + (" y otras" if len(_res_sc["listas_esperando"]) > 12 else "")
-                            + f" ya tienen las equivalencias encontradas.** Son {_esp_n:,} "
+                            + f" ya tienen las equivalencias encontradas.** Son {miles(_esp_n)} "
                               "producto(s) esperando que alguien las apruebe en Estadísticas → "
                               "🔗 Equivalencias sugeridas. Hasta que no se aprueben, la búsqueda "
                               "no las usa y la columna de arriba sigue en cero."
@@ -206,7 +206,7 @@ if pagina == PAGINAS[3]:
                     st.warning(
                         "⏳ **No hace falta reimportar "
                         + ", ".join(f["Lista"] for f in _esperan)
-                        + f"**: {sum(f['Esperando revisión'] for f in _esperan):,} "
+                        + f"**: {miles(sum(f['Esperando revisión'] for f in _esperan))} "
                           "producto(s) ya tienen las equivalencias encontradas y esperan que "
                           "alguien las apruebe en Estadísticas → 🔗 Equivalencias sugeridas."
                     )
@@ -272,7 +272,7 @@ if pagina == PAGINAS[3]:
                 st.caption("✅ No hay productos sin equivalencias.")
             else:
                 (st.warning if _porcentaje >= 20 else st.info)(
-                    f"Hay **{_sueltos:,}** producto(s) sin ninguna equivalencia, de {_todos:,} "
+                    f"Hay **{miles(_sueltos)}** producto(s) sin ninguna equivalencia, de {miles(_todos)} "
                     f"— el {_porcentaje}% del catálogo."
                 )
                 # Y los que tienen una equivalencia que no lleva a ningún lado. El buscador ya
@@ -281,7 +281,7 @@ if pagina == PAGINAS[3]:
                 _muertos = contar_con_equivalencia_muerta()
                 if _muertos:
                     st.info(
-                        f"➕ Otros **{_muertos:,}** tienen una equivalencia cargada que **no "
+                        f"➕ Otros **{miles(_muertos)}** tienen una equivalencia cargada que **no "
                         "lleva a ningún lado**: el único código vinculado es su propio código "
                         "de fábrica, que todavía no tiene nadie más. El buscador ya se los "
                         "marca así.\n\n"
@@ -296,14 +296,14 @@ if pagina == PAGINAS[3]:
                 # no hay papelera para esto. La contraseña sola protege de que lo toque quien
                 # no debe; la casilla protege del dedo equivocado del que sí puede.
                 _confirmar_sueltos = st.checkbox(
-                    f"Confirmo que quiero borrar {_sueltos:,} productos y que esto NO se puede "
+                    f"Confirmo que quiero borrar {miles(_sueltos)} productos y que esto NO se puede "
                     "deshacer", key="confirmar_borrar_sueltos")
                 if candado('borrar productos sin equivalencias',
-                            st.button(f"🧹 Borrar esos {_sueltos:,} productos",
+                            st.button(f"🧹 Borrar esos {miles(_sueltos)} productos",
                                        disabled=not _confirmar_sueltos),
                             'borrar_productos_sin_equivalencias'):
                     borrados = depurar_huerfanos()
-                    avisar("success", f"Se borraron {borrados:,} producto(s) sin equivalencias.")
+                    avisar("success", f"Se borraron {miles(borrados)} producto(s) sin equivalencias.")
                     st.rerun()
             st.markdown("**🗑️ Papelera**")
             explicar(

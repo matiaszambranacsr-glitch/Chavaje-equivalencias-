@@ -1238,7 +1238,7 @@ def salud_de_los_cruces():
         elif not f["Cruzan a otra marca"] and f["Esperando revisión"]:
             # Este caso va ANTES que el de la lista aislada y no se cuenta como aislada: el
             # síntoma es el mismo —cero cruces— pero lo que hay que hacer es lo contrario.
-            f["Qué pasa"] = (f"⏳ Todavía ninguno cruza, pero {f['Esperando revisión']:,} "
+            f["Qué pasa"] = (f"⏳ Todavía ninguno cruza, pero {miles(f['Esperando revisión'])} "
                               "producto(s) ya tienen equivalencias encontradas esperando que "
                               "las apruebes. No falta la columna: falta revisarlas.")
             resumen["listas_esperando"].append(f["Marca"])

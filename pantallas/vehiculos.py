@@ -33,7 +33,7 @@ if pagina == PAGINAS[6]:
             _ca.write(f"**{_x['Patente']}** {_x['Auto']} — {_x['Cliente'] or 'sin nombre'}")
             _ca.caption(f"{_x['Pieza']}{' (' + _x['Código'] + ')' if _x['Código'] else ''}: "
                         f"le toca {_x['Le toca']} · hoy tendría unos "
-                        f"{_x['Km hoy (estimado)']:,} km")
+                        f"{miles(_x['Km hoy (estimado)'])} km")
             _cb.link_button("📲 Avisar", _x["_whatsapp"], width="stretch")
 
     vehiculos_atrasados = listar_vehiculos_atrasados()
@@ -228,7 +228,7 @@ if pagina == PAGINAS[6]:
             mk3.metric("Km recorridos", miles(km_calc["km_recorridos"] if km_calc["km_recorridos"] is not None else "—"))
             if km_calc["promedio_mensual"] is not None:
                 st.caption(
-                    f"📈 Promedio aproximado: **{km_calc['promedio_mensual']:,} km/mes** "
+                    f"📈 Promedio aproximado: **{miles(km_calc['promedio_mensual'])} km/mes** "
                     f"(en base a {km_calc['dias_transcurridos']} día(s) desde que se registró el vehículo)."
                 )
 
