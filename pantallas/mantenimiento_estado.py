@@ -150,8 +150,8 @@ if pagina == PAGINAS[3]:
                                    if _ctx.get("viejos") else ""))
                 # La prueba en vivo de las fuentes de afuera: ver probar_fuentes_de_afuera().
                 if st.button("🔌 Probar las fuentes de afuera", key="probar_fuentes",
-                             help="INDEC, BCRA, dólar minorista y NHTSA: una consulta a cada "
-                                  "una, para ver si contestan desde el servidor."):
+                             help="INDEC (general y transporte), BCRA, dólar minorista, DNRPA y NHTSA: una "
+                                  "consulta a cada una, para ver si contestan desde el servidor."):
                     with st.spinner("Consultando…"):
                         st.dataframe(probar_fuentes_de_afuera(), width="stretch",
                                      hide_index=True)

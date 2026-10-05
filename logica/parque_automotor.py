@@ -18,24 +18,38 @@ import csv
 # más transferidos de la provincia con cuántos productos del catálogo los nombran. Ahí se ven los
 # autos comunes para los que casi no hay nada cargado. No toca ninguna regla de equivalencias.
 #
-# Lo que NO se hace: del archivo oficial se leen solo marca, modelo, año y provincia. Trae datos
-# de los titulares —localidad, género, año de nacimiento—; no se leen ni se guardan.
+# Y LOS 0 KM: el mismo registro publica las INSCRIPCIONES INICIALES (los patentamientos) con el
+# mismo formato. No son el parque de hoy —un 0 km pasa años en el service del concesionario—,
+# sino el de dentro de unos años: el Cronos o la Tera que hoy se patentan por miles son los que
+# van a venir a buscar repuestos cuando se les venza la garantía. Se cuentan aparte y nunca se
+# mezclan con las transferencias (antes las inscripciones eran el respaldo si las transferencias
+# no se podían bajar, y eso contaba como «parque» autos que todavía no lo son).
 #
-# El formato está en la documentación oficial del dataset (github.com/datos-justicia-argentina/
-# dnrpa-transferencias-autos): CSV con comas, UTF-8, un archivo por mes
-# «dnrpa-transferencias-autos-AAAAMM.csv». El portal es un CKAN, y la lista de archivos sale de
-# su API estándar (package_show). Ver pruebas_de_las_fuentes.py.
+# Lo que NO se hace: del archivo oficial se leen solo marca, modelo, año, provincia y la fecha
+# del trámite. Trae datos de los titulares —localidad, género, año de nacimiento—; no se leen ni
+# se guardan.
+#
+# El formato está en la documentación oficial de cada dataset (github.com/datos-justicia-
+# argentina/dnrpa-transferencias-autos y …/dnrpa-inscripciones-iniciales-autos): CSV con comas,
+# UTF-8, un archivo por mes «dnrpa-…-autos-AAAAMM.csv». El portal es un CKAN, y la lista de
+# archivos sale de su API estándar (package_show). Ver pruebas_de_las_fuentes.py.
 URL_PORTAL_JUSTICIA = "https://datos.jus.gob.ar/api/3/action/package_show?id={dataset}"
-DATASETS_DEL_PARQUE = ("transferencias-de-autos", "inscripciones-iniciales-de-autos")
+# Lo que se cuenta: {clave: (dataset del portal, tabla, clave de configuración)}.
+CONTEOS_DEL_DNRPA = {
+    "parque": ("transferencias-de-autos", "parque_automotor", "parque_automotor"),
+    "0km": ("inscripciones-iniciales-de-autos", "patentamientos_0km", "patentamientos_0km"),
+}
 _RE_ARCHIVO_DEL_MES = re.compile(r"dnrpa-[a-z-]+-(\d{6})\.csv$", re.I)
 # Cada cuánto se vuelve a bajar: el DNRPA publica una vez por mes.
 DIAS_ENTRE_ACTUALIZACIONES_DEL_PARQUE = 25
 # Topes para no colgar el servidor con un archivo raro: renglones y minutos.
 MAXIMO_RENGLONES_DEL_PARQUE = 600_000
 MINUTOS_MAXIMOS_DEL_PARQUE = 8
-# Las columnas que se leen. Nada más.
+# Las columnas que se leen. Nada más. La fecha del trámite es opcional: sirve para decir de qué
+# días son los datos, no para contar.
 _COLUMNAS_DEL_PARQUE = ("automotor_marca_descripcion", "automotor_modelo_descripcion",
                         "automotor_anio_modelo", "registro_seccional_provincia")
+_COLUMNA_DE_LA_FECHA = "tramite_fecha"
 
 
 def _nombre_normalizado(texto):
@@ -70,20 +84,27 @@ def archivo_mas_reciente_del_parque(dataset):
     return mejor
 
 
-def contar_el_parque(renglones):
+def contar_el_parque(renglones, rango=None):
     """{(provincia, marca, palabra del modelo, año): cantidad} a partir de los renglones del CSV
-    (texto, con el encabezado primero). Lee solo las columnas de _COLUMNAS_DEL_PARQUE."""
+    (texto, con el encabezado primero). Lee solo las columnas de _COLUMNAS_DEL_PARQUE.
+
+    Si se le pasa un dict en `rango`, le anota de qué días son los trámites («desde», «hasta»)
+    y si se cortó por los topes («cortado»): es lo que la pantalla dice debajo de la tabla."""
     lector = csv.reader(renglones)
-    encabezado = [h.strip().lstrip("﻿").lower() for h in next(lector, [])]
+    encabezado = [h.strip().lstrip("\ufeff").lower() for h in next(lector, [])]
     try:
-        i_marca, i_modelo, i_anio, i_prov = (encabezado.index(c) for c in _COLUMNAS_DEL_PARQUE)
+        i_marca, i_modelo, i_anio, i_prov = (encabezado.index(col) for col in _COLUMNAS_DEL_PARQUE)
     except ValueError:
         return {}
+    i_fecha = encabezado.index(_COLUMNA_DE_LA_FECHA) if _COLUMNA_DE_LA_FECHA in encabezado else None
+    fechas = set()
     cuenta = collections.Counter()
     inicio = time.monotonic()
+    cortado = False
     for n, fila in enumerate(lector):
         if n >= MAXIMO_RENGLONES_DEL_PARQUE or (
                 n % 5000 == 0 and time.monotonic() - inicio > MINUTOS_MAXIMOS_DEL_PARQUE * 60):
+            cortado = True
             break
         if n % 5000 == 0:
             ceder_al_mostrador()
@@ -92,10 +113,15 @@ def contar_el_parque(renglones):
             modelo = palabra_del_modelo(fila[i_modelo])
             anio = int(fila[i_anio]) if str(fila[i_anio]).strip().isdigit() else None
             provincia = _nombre_normalizado(fila[i_prov]) or "SIN PROVINCIA"
+            if i_fecha is not None and re.fullmatch(r"\d{4}-\d{2}-\d{2}", fila[i_fecha][:10]):
+                fechas.add(fila[i_fecha][:10])
         except IndexError:
             continue
         if marca and modelo:
             cuenta[(provincia, marca, modelo, anio)] += 1
+    if rango is not None:
+        rango.update({"desde": min(fechas, default=""), "hasta": max(fechas, default=""),
+                      "cortado": cortado})
     return cuenta
 
 
@@ -110,15 +136,32 @@ def _renglones_de(url):
 
 
 def actualizar_parque_automotor(forzar=False):
-    """Baja el último mes publicado y guarda los conteos. Para la tarea de fondo: sale a internet
-    y puede tardar unos minutos. Devuelve un resumen, o None si no hacía falta.
+    """Baja el último mes publicado de las transferencias y de los 0 km, y guarda los conteos.
+    Para la tarea de fondo: sale a internet y puede tardar unos minutos. Devuelve
+    {clave: resumen} de lo que se bajó, o None si no hacía falta nada."""
+    bajados = {}
+    for clave in CONTEOS_DEL_DNRPA:
+        try:
+            resumen = _actualizar_un_conteo(clave, forzar)
+        except Exception as _err:      # de red o de formato: se reintenta en la próxima vuelta
+            anotar_error(f"actualizar_parque_automotor/{clave}", _err)
+            resumen = None
+        if resumen:
+            bajados[clave] = resumen
+    return bajados or None
+
+
+def _actualizar_un_conteo(clave, forzar=False):
+    """Uno de CONTEOS_DEL_DNRPA. El resumen, o None si no hacía falta o no se pudo.
 
     No hace falta si se bajó hace menos de DIAS_ENTRE_ACTUALIZACIONES_DEL_PARQUE días, ni
     tampoco si el mes más reciente del portal es el que ya está."""
+    dataset, tabla, config = CONTEOS_DEL_DNRPA[clave]
     try:
-        ultimo = json.loads(obtener_config("parque_automotor", "") or "{}")
+        ultimo = json.loads(obtener_config(config, "") or "{}")
     except (ValueError, TypeError):
         ultimo = {}
+    ahora = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     if not forzar and ultimo.get("traido"):
         try:
             hace = datetime.now() - datetime.strptime(ultimo["traido"][:19], "%Y-%m-%d %H:%M:%S")
@@ -126,41 +169,48 @@ def actualizar_parque_automotor(forzar=False):
                 return None
         except ValueError:
             pass
-    for dataset in DATASETS_DEL_PARQUE:
-        url, mes = archivo_mas_reciente_del_parque(dataset)
-        if not url:
-            continue
-        if not forzar and ultimo.get("mes") == mes and ultimo.get("dataset") == dataset:
-            guardar_config("parque_automotor", json.dumps(dict(ultimo, traido=datetime.now().strftime("%Y-%m-%d %H:%M:%S"))))
-            return None
-        try:
-            cuenta = contar_el_parque(_renglones_de(url))
-        except Exception as _err:      # de red o de formato: se reintenta en la próxima vuelta
-            anotar_error("actualizar_parque_automotor", _err)
-            continue
-        if not cuenta:
-            continue
-        guardar_el_parque(cuenta, mes)
-        resumen = {"dataset": dataset, "mes": mes, "url": url,
-                   "autos": sum(cuenta.values()),
-                   "traido": datetime.now().strftime("%Y-%m-%d %H:%M:%S")}
-        guardar_config("parque_automotor", json.dumps(resumen))
-        return resumen
-    return None
+    url, mes = archivo_mas_reciente_del_parque(dataset)
+    if not url:
+        return None
+    if not forzar and ultimo.get("mes") == mes and ultimo.get("dataset") == dataset:
+        guardar_config(config, json.dumps(dict(ultimo, traido=ahora)))
+        return None
+    rango = {}
+    cuenta = contar_el_parque(_renglones_de(url), rango)
+    if not cuenta:
+        return None
+    guardar_el_parque(cuenta, mes, tabla)
+    resumen = {"dataset": dataset, "mes": mes, "url": url, "autos": sum(cuenta.values()),
+               "traido": ahora, **rango}
+    guardar_config(config, json.dumps(resumen))
+    return resumen
 
 
-def guardar_el_parque(cuenta, mes):
-    """Reemplaza lo guardado por estos conteos, todo o nada."""
+def guardar_el_parque(cuenta, mes, tabla="parque_automotor"):
+    """Reemplaza lo guardado en esa tabla por estos conteos, todo o nada."""
+    if tabla not in {t for _d, t, _c in CONTEOS_DEL_DNRPA.values()}:
+        raise ValueError(f"tabla desconocida: {tabla}")
     with db_lock, transaccion():
-        c.execute("DELETE FROM parque_automotor")
-        c.executemany("INSERT INTO parque_automotor (mes, provincia, marca, modelo, anio, cantidad) "
+        c.execute(f"DELETE FROM {tabla}")
+        c.executemany(f"INSERT INTO {tabla} (mes, provincia, marca, modelo, anio, cantidad) "
                       "VALUES (?, ?, ?, ?, ?, ?)",
                       [(mes, p, m, mo, a, n) for (p, m, mo, a), n in cuenta.items()])
 
 
+def resumen_del_conteo(clave):
+    """Lo que se guardó la última vez que se bajó ese conteo ({} si nunca)."""
+    try:
+        return json.loads(obtener_config(CONTEOS_DEL_DNRPA[clave][2], "") or "{}")
+    except (ValueError, TypeError):
+        return {}
+
+
 def provincias_del_parque():
-    """[(provincia, autos)] de mayor a menor."""
-    c.execute("SELECT provincia, SUM(cantidad) AS n FROM parque_automotor "
+    """[(provincia, autos)] de mayor a menor, de las transferencias y los 0 km juntos (es solo
+    para el selector: una provincia con datos en cualquiera de los dos tiene que estar)."""
+    c.execute("SELECT provincia, SUM(n) AS n FROM ("
+              "  SELECT provincia, cantidad AS n FROM parque_automotor"
+              "  UNION ALL SELECT provincia, cantidad AS n FROM patentamientos_0km) "
               "GROUP BY provincia ORDER BY n DESC")
     return [(r["provincia"], r["n"]) for r in c.fetchall()]
 
@@ -193,25 +243,35 @@ def _cuantos_productos_nombran(modelos):
 def autos_que_mas_circulan_contra_el_catalogo(provincia=None, limite=40):
     """Los modelos más transferidos (de la provincia, o de todo el país), con cuántos productos
     del catálogo los nombran. [] si todavía no se bajó el parque."""
+    return _modelos_contra_el_catalogo("parque", provincia, limite)
+
+
+def cero_km_contra_el_catalogo(provincia=None, limite=40):
+    """Los 0 km más patentados (de la provincia, o de todo el país), con cuántos productos del
+    catálogo los nombran. [] si todavía no se bajaron."""
+    return _modelos_contra_el_catalogo("0km", provincia, limite)
+
+
+def _modelos_contra_el_catalogo(clave, provincia, limite):
+    _dataset, tabla, _config = CONTEOS_DEL_DNRPA[clave]
     filtro, params = ("WHERE provincia = ?", [provincia]) if provincia else ("", [])
     c.execute(f"""SELECT marca, modelo, SUM(cantidad) AS n,
                          MIN(anio) AS desde, MAX(anio) AS hasta
-                  FROM parque_automotor {filtro}
+                  FROM {tabla} {filtro}
                   GROUP BY marca, modelo ORDER BY n DESC LIMIT ?""", params + [limite])
     filas = filas_a_listas(c)
     if not filas:
         return []
     # Recorrer el catálogo cuesta casi 2 s: se recuerda mientras no cambien ni el catálogo ni
-    # el mes del parque. Del proceso (ver del_proceso()): lo comparten todas las sesiones.
+    # los modelos de la tabla. Del proceso (ver del_proceso()): lo comparten todas las sesiones.
     _memoria = del_proceso("autos_contra_el_catalogo", dict)
     _clave = (tuple((f["marca"], f["modelo"]) for f in filas), version_del_catalogo())
     if _clave not in _memoria:
-        _memoria.clear()
+        if len(_memoria) > 8:
+            _memoria.clear()
         _memoria[_clave] = _cuantos_productos_nombran([(f["marca"], f["modelo"]) for f in filas])
     productos = _memoria[_clave]
-    total_pais = sum(r["n"] for r in c.execute(
-        "SELECT SUM(cantidad) AS n FROM parque_automotor" + (" WHERE provincia = ?" if provincia else ""),
-        params).fetchall()) or 1
+    total = c.execute(f"SELECT SUM(cantidad) FROM {tabla} {filtro}", params).fetchone()[0] or 1
     # «Poco cargado» es contra los demás de la tabla, no un número fijo: la mediana de los
     # modelos más comunes. Con el catálogo real: Etios 91, Up 139 y Cronos 143 productos,
     # contra más de mil del Gol, el Palio, el Clio o el Fiesta.
@@ -220,13 +280,17 @@ def autos_que_mas_circulan_contra_el_catalogo(provincia=None, limite=40):
     salida = []
     for f in filas:
         n_prod = productos.get((f["marca"], f["modelo"]), 0)
-        salida.append({
-            "Marca": f["marca"], "Modelo": f["modelo"],
-            "Se transfirieron": f["n"],
-            "Del parque": f"{miles(f['n'] / total_pais * 100, 1)}%",
-            "Años": (f"{f['desde']}–{f['hasta']}" if f["desde"] and f["hasta"] else "—"),
-            "Productos que lo nombran": n_prod,
-            "": "⚠️ poco cargado" if n_prod < umbral else "",
-            "_n": f["n"], "_prod": n_prod,
-        })
+        fila = {"Marca": f["marca"], "Modelo": f["modelo"]}
+        if clave == "parque":
+            fila.update({"Se transfirieron": f["n"],
+                         "Del parque": f"{miles(f['n'] / total * 100, 1)}%",
+                         "Años": (f"{f['desde']}–{f['hasta']}" if f["desde"] and f["hasta"]
+                                  else "—")})
+        else:
+            fila.update({"Se patentaron": f["n"],
+                         "De los 0 km": f"{miles(f['n'] / total * 100, 1)}%"})
+        fila.update({"Productos que lo nombran": n_prod,
+                     "": "⚠️ poco cargado" if n_prod < umbral else "",
+                     "_n": f["n"], "_prod": n_prod})
+        salida.append(fila)
     return salida

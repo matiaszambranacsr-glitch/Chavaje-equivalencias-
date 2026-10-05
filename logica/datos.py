@@ -1340,6 +1340,15 @@ def _esquema_gestion(c):
         cantidad INTEGER NOT NULL
     )""")
     c.execute("CREATE INDEX IF NOT EXISTS idx_parque_marca_modelo ON parque_automotor(marca, modelo)")
+    # Los 0 km: lo mismo, de las inscripciones iniciales (los patentamientos del mes).
+    c.execute("""CREATE TABLE IF NOT EXISTS patentamientos_0km (
+        mes TEXT NOT NULL,
+        provincia TEXT NOT NULL,
+        marca TEXT NOT NULL,
+        modelo TEXT NOT NULL,
+        anio INTEGER,
+        cantidad INTEGER NOT NULL
+    )""")
 
 
 # Los códigos DTC que se pueden ARMAR en vez de copiar. Buena parte del estándar genérico es

@@ -528,12 +528,19 @@ Administrar → Mantenimiento.
         else:
             st.dataframe(quitar_id(variacion), width="stretch", hide_index=True)
             # Contra qué comparar: la inflación oficial del mismo período (ver inflacion_desde()).
-            _inf, _hasta = inflacion_desde(
-                (datetime.now() - timedelta(days=int(meses_var) * 30)).strftime("%Y-%m-%d"))
-            st.caption("Ordenado de mayor a menor aumento."
-                       + (f" La inflación oficial del INDEC en el mismo período fue "
-                          f"**{miles(_inf * 100, 1)}%** (hasta {_hasta}): el que aumentó menos "
-                          "que eso está quedando barato." if _inf else ""))
+            # Y la de transporte, que es la que incluye los repuestos: es mejor vara que el
+            # nivel general (ver actualizar_ipc_de_transporte()).
+            _desde_var = (datetime.now() - timedelta(days=int(meses_var) * 30)).strftime("%Y-%m-%d")
+            _inf, _hasta = inflacion_desde(_desde_var)
+            _inf_t, _hasta_t = inflacion_desde(_desde_var, ipc_de_transporte_guardado())
+            _transporte = (f"**{miles(_inf_t * 100, 1)}%** la de **transporte**, que incluye "
+                           "los repuestos" if _inf_t else "")
+            _medidas = ", y ".join(x for x in (
+                f"**{miles(_inf * 100, 1)}%** la general" if _inf else "", _transporte) if x)
+            _contra = (f" Inflación del INDEC en el mismo período: {_medidas} (hasta "
+                       f"{_hasta_t or _hasta}): el que aumentó menos que eso está quedando "
+                       "barato." if _medidas else "")
+            st.caption("Ordenado de mayor a menor aumento." + _contra)
 
         st.markdown("---")
         st.markdown("**💰 A quién conviene comprarle**")
@@ -564,40 +571,62 @@ Administrar → Mantenimiento.
                        "lista).")
 
         st.markdown("---")
-        st.markdown("**🚗 Los autos que más circulan, contra tu catálogo**")
+        st.markdown("**🚗 Los autos de tu zona, contra tu catálogo**")
         explicar(
-            "Los modelos que más se compran y venden en tu provincia, y cuántos productos de tu "
-            "catálogo los nombran.",
+            "Los modelos que más se compran y venden en tu provincia —y los 0 km que más se "
+            "patentan—, y cuántos productos de tu catálogo los nombran.",
             "Sale del registro automotor (DNRPA): cada mes publica, en el portal de datos "
-            "abiertos del Ministerio de Justicia, todas las transferencias de autos del país. Se "
-            "usan las transferencias y no los 0 km porque es el parque que circula —el que viene "
-            "a buscar repuestos—. La app lo baja sola una vez por mes y guarda solo marca, "
-            "modelo, año y provincia: los datos de los titulares no se leen.\n\n"
+            "abiertos del Ministerio de Justicia, todas las transferencias y todos los "
+            "patentamientos de autos del país. La app los baja sola una vez por mes y guarda "
+            "solo marca, modelo, año y provincia: los datos de los titulares no se leen.\n\n"
+            "· **Los que circulan** (transferencias de usados): el parque que hoy viene a "
+            "buscar repuestos.\n"
+            "· **Los 0 km**: los que van a venir dentro de unos años, cuando se les venza la "
+            "garantía y dejen el service del concesionario. Sirve para empezar a tener lo de "
+            "esos autos antes de que te los pidan.\n\n"
             "«Productos que lo nombran» cuenta las descripciones que dicen el modelo (y la "
             "marca, si el nombre solo no alcanza: «KA» o «208»). Un auto común con pocos "
             "productos es un hueco: o te faltan listas, o las que tenés lo escriben de otra "
             "forma.")
         _provincias = provincias_del_parque()
         if not _provincias:
-            _info_parque = json.loads(obtener_config("parque_automotor", "") or "{}")
-            st.caption("Todavía no se bajó el parque automotor: lo hace la tarea de fondo, una "
-                       "vez por mes. Se puede ver si el portal contesta con «🔌 Probar las fuentes "
-                       f"de afuera», en {miga_hasta('Qué tan atrasada está cada lista')}.")
+            st.caption("Todavía no se bajaron los datos del registro automotor: lo hace la tarea "
+                       "de fondo, una vez por mes. Se puede ver si el portal contesta con «🔌 "
+                       "Probar las fuentes de afuera», en "
+                       f"{miga_hasta('Qué tan atrasada está cada lista')}.")
         else:
             _nombres_prov = ["Todo el país"] + [p for p, _n in _provincias]
             _guardada = obtener_config("provincia_del_negocio", "")
-            _prov = st.selectbox(
-                "Provincia:", _nombres_prov, key="provincia_parque",
-                index=_nombres_prov.index(_guardada) if _guardada in _nombres_prov else 0)
+            _col_prov, _col_cuales = st.columns([1, 1])
+            with _col_prov:
+                _prov = st.selectbox(
+                    "Provincia:", _nombres_prov, key="provincia_parque",
+                    index=_nombres_prov.index(_guardada) if _guardada in _nombres_prov else 0)
+            with _col_cuales:
+                _cuales = st.radio("Qué autos:", ["Los que circulan", "Los 0 km"],
+                                   key="cuales_autos_parque", horizontal=True)
             if _prov != _guardada:
                 guardar_config("provincia_del_negocio", _prov)
-            _autos = autos_que_mas_circulan_contra_el_catalogo(
-                None if _prov == "Todo el país" else _prov)
-            st.dataframe(quitar_id(_autos), width="stretch", hide_index=True)
-            _info_parque = json.loads(obtener_config("parque_automotor", "") or "{}")
-            st.caption(f"DNRPA, transferencias de {_info_parque.get('mes', '?')[:4]}-"
-                       f"{_info_parque.get('mes', '????')[4:]} "
-                       f"({miles(_info_parque.get('autos', 0))} autos en todo el país).")
+            _de_la_prov = None if _prov == "Todo el país" else _prov
+            if _cuales == "Los 0 km":
+                _autos = cero_km_contra_el_catalogo(_de_la_prov)
+                _info_parque = resumen_del_conteo("0km")
+                _que = "patentamientos de 0 km"
+            else:
+                _autos = autos_que_mas_circulan_contra_el_catalogo(_de_la_prov)
+                _info_parque = resumen_del_conteo("parque")
+                _que = "transferencias"
+            if not _autos:
+                st.caption(f"Todavía no se bajaron los {_que} (o no hay de esa provincia).")
+            else:
+                st.dataframe(quitar_id(_autos), width="stretch", hide_index=True)
+                _mes = str(_info_parque.get("mes") or "")
+                _dias = (f", trámites del {_info_parque['desde']} al {_info_parque['hasta']}"
+                         if _info_parque.get("desde") else "")
+                st.caption(f"DNRPA, {_que} de {_mes[:4]}-{_mes[4:]}{_dias} "
+                           f"({miles(_info_parque.get('autos', 0))} autos en todo el país"
+                           + ("; el archivo era más largo y se leyó hasta el tope"
+                              if _info_parque.get("cortado") else "") + ").")
 
         st.markdown("---")
         st.markdown("**🧊 Clavos: lo que no se mueve**")

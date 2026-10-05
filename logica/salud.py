@@ -1098,6 +1098,25 @@ def _variaciones_del_ipc(valores):
     return variaciones
 
 
+def _ipc_de_la_serie(serie):
+    """{"mensual": {mes: fracción}, "mes", "variacion", "serie"} de UNA serie del INDEC en la
+    API de series de tiempo, o {} si no contesta o no se le cree (ver _variaciones_del_ipc())."""
+    datos = _pedir_json(URL_IPC_INDEC.format(serie=serie), tiempo_maximo=6)
+    filas = datos.get("data") if isinstance(datos, dict) else None
+    valores = []
+    for fila in filas if isinstance(filas, list) else []:
+        try:
+            if fila[1] is not None:
+                valores.append((str(fila[0])[:7], float(fila[1])))
+        except (IndexError, TypeError, ValueError):
+            continue
+    mensual = _variaciones_del_ipc(valores)
+    if not mensual:
+        return {}
+    ultimo = max(mensual)
+    return {"mensual": mensual, "mes": ultimo, "variacion": mensual[ultimo], "serie": serie}
+
+
 def _inflacion_mensual_indec():
     """La inflación mes por mes del INDEC: {"mensual": {mes: fracción}, "mes", "variacion"}
     con el último mes publicado. {} si no se pudo o no se le cree.
@@ -1105,21 +1124,96 @@ def _inflacion_mensual_indec():
     OJO con el desfasaje: el INDEC publica el dato de un mes a mediados del siguiente, así que
     esto siempre va una o dos semanas atrás."""
     for serie in SERIES_IPC_INDEC:
-        datos = _pedir_json(URL_IPC_INDEC.format(serie=serie), tiempo_maximo=6)
-        filas = datos.get("data") if isinstance(datos, dict) else None
-        valores = []
-        for fila in filas if isinstance(filas, list) else []:
-            try:
-                if fila[1] is not None:
-                    valores.append((str(fila[0])[:7], float(fila[1])))
-            except (IndexError, TypeError, ValueError):
-                continue
-        mensual = _variaciones_del_ipc(valores)
-        if mensual:
-            ultimo = max(mensual)
-            return {"mensual": mensual, "mes": ultimo, "variacion": mensual[ultimo],
-                    "serie": serie}
+        ipc = _ipc_de_la_serie(serie)
+        if ipc:
+            return ipc
     return {}
+
+
+# EL IPC DE TRANSPORTE. El INDEC publica el IPC por división, y una es «Transporte»: el
+# combustible, la compra de autos y —lo que importa acá— el mantenimiento y los repuestos. Para
+# comparar cuánto aumentó un proveedor de repuestos es mejor vara que el nivel general, que
+# mezcla alimentos y alquileres.
+#
+# Desde donde se programó esto la API no contestaba, y el código de una serie no se inventa: en
+# vez de escribirlo a mano, se lo pide al BUSCADOR de la misma API (/search, documentado en
+# github.com/datosgobar/series-tiempo-ar-api), y se elige por lo que dice la serie de sí misma:
+# del INDEC, mensual, nacional, de transporte, y que no sea la variación INTERANUAL (un 40%
+# interanual leído como mensual sería un desastre) ni la incidencia. Se prefiere el índice.
+URL_BUSCAR_SERIES = "https://apis.datos.gob.ar/series/api/search/?q={q}&limit=50"
+_BUSQUEDA_IPC_TRANSPORTE = "precios al consumidor transporte nacional"
+_REGIONES_DEL_IPC = {"GBA", "PAMPEANA", "NORESTE", "NOROESTE", "CUYO", "PATAGONIA", "REGION"}
+DIAS_ENTRE_ACTUALIZACIONES_DEL_TRANSPORTE = 7
+
+
+def _es_el_ipc_de_transporte(resultado):
+    """Si un resultado del buscador es la serie mensual nacional del IPC de transporte."""
+    campo = (resultado or {}).get("field") or {}
+    dataset = (resultado or {}).get("dataset") or {}
+    texto = normalizar_texto(" ".join(str(x or "") for x in (
+        campo.get("description"), campo.get("title"), campo.get("units"), dataset.get("title"))))
+    palabras = set(re.findall(r"[A-Z0-9]+", texto.replace("_", " ")))
+    fuente = normalizar_texto(str(dataset.get("source") or ""))
+    return bool(
+        campo.get("id")
+        and "TRANSPORTE" in palabras
+        and ("NACIONAL" in palabras or "NAC" in palabras)
+        and ("CONSUMIDOR" in palabras or "IPC" in palabras)
+        and not palabras & _REGIONES_DEL_IPC
+        and not palabras & {"INTERANUAL", "INCIDENCIA", "PONDERACION", "PONDERADOR"}
+        and str(campo.get("frequency") or "R/P1M") == "R/P1M"
+        and (not fuente or "INDEC" in fuente or "ESTADISTICA Y CENSOS" in fuente))
+
+
+def serie_del_ipc_de_transporte():
+    """El código de la serie según el buscador oficial, o None. El índice primero; entre
+    iguales, la que llega más lejos."""
+    datos = _pedir_json(URL_BUSCAR_SERIES.format(q=quote(_BUSQUEDA_IPC_TRANSPORTE)),
+                        tiempo_maximo=8)
+    resultados = datos.get("data") if isinstance(datos, dict) else None
+    candidatas = [r for r in (resultados if isinstance(resultados, list) else [])
+                  if _es_el_ipc_de_transporte(r)]
+    if not candidatas:
+        return None
+    candidatas.sort(key=lambda r: (
+        "INDICE" in normalizar_texto(str(r["field"].get("units") or "")),
+        str(r["field"].get("time_index_end") or "")), reverse=True)
+    return str(candidatas[0]["field"]["id"])
+
+
+def ipc_de_transporte_guardado():
+    """Lo último que se trajo del IPC de transporte, SIN salir a internet ({} si nada creíble).
+    Con la misma forma que ipc_guardado(): sirve tal cual para inflacion_desde()."""
+    try:
+        guardado = json.loads(obtener_config("ultimo_ipc_transporte", "") or "{}")
+    except (ValueError, TypeError):
+        return {}
+    if not isinstance(guardado.get("mensual"), dict) or not _variaciones_del_ipc(
+            list(guardado["mensual"].items())):
+        return {}
+    return guardado
+
+
+def actualizar_ipc_de_transporte(forzar=False):
+    """Para la tarea de fondo: busca la serie (la primera vez, o si dejó de contestar) y trae
+    sus valores. Devuelve lo guardado, o None si no hacía falta o no se pudo."""
+    guardado = ipc_de_transporte_guardado()
+    if not forzar and guardado.get("_traido"):
+        try:
+            hace = datetime.now() - datetime.strptime(guardado["_traido"][:19], "%Y-%m-%d %H:%M:%S")
+            if hace < timedelta(days=DIAS_ENTRE_ACTUALIZACIONES_DEL_TRANSPORTE):
+                return None
+        except ValueError:
+            pass
+    nuevo = _ipc_de_la_serie(guardado["serie"]) if guardado.get("serie") else {}
+    if not nuevo:
+        serie = serie_del_ipc_de_transporte()
+        nuevo = _ipc_de_la_serie(serie) if serie else {}
+    if not nuevo:
+        return None
+    nuevo["_traido"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    guardar_config("ultimo_ipc_transporte", json.dumps(nuevo))
+    return nuevo
 
 
 def ipc_guardado():
@@ -1383,15 +1477,20 @@ def probar_fuentes_de_afuera():
 
     medir("INDEC — inflación (datos.gob.ar)", _inflacion_mensual_indec,
           lambda r: f"{r['mes']}: {miles(r['variacion'] * 100, 1)}% (serie {r['serie']})")
+    medir("INDEC — IPC de transporte (buscador de datos.gob.ar)",
+          lambda: _ipc_de_la_serie(serie_del_ipc_de_transporte() or ""),
+          lambda r: f"{r['mes']}: {miles(r['variacion'] * 100, 1)}% (serie {r['serie']})")
     medir("BCRA — dólar de referencia (api.bcra.gob.ar)", _serie_del_dolar_bcra,
           lambda r: f"{r[-1][0]}: ${miles(r[-1][1], 2)}")
     medir("Dólar oficial minorista (argentinadatos)",
           lambda: _pedir_json(URL_DOLAR_OFICIAL),
           lambda r: (f"{r[-1].get('fecha')}: ${miles(float(r[-1].get('venta')), 2)}"
                      if isinstance(r, list) and r and r[-1].get("venta") else ""))
-    medir("DNRPA — parque automotor (datos.jus.gob.ar)",
-          lambda: archivo_mas_reciente_del_parque(DATASETS_DEL_PARQUE[0]),
-          lambda r: f"último mes publicado: {r[1]}" if r and r[1] else "")
+    for _nombre, (_dataset, _t, _c) in (("transferencias", CONTEOS_DEL_DNRPA["parque"]),
+                                         ("0 km", CONTEOS_DEL_DNRPA["0km"])):
+        medir(f"DNRPA — {_nombre} (datos.jus.gob.ar)",
+              lambda _d=_dataset: archivo_mas_reciente_del_parque(_d),
+              lambda r: f"último mes publicado: {r[1]}" if r and r[1] else "")
     medir("BCRA — bancos para verificar cheques (api.bcra.gob.ar)",
           lambda: _pedir_al_bcra(URL_BCRA_BANCOS),
           lambda r: (f"{len((r[1] or {}).get('results') or [])} bancos" if r and r[0] == 200 else ""))

@@ -1,4 +1,4 @@
-"""Pruebas de las FUENTES DE AFUERA: el INDEC, el BCRA y la NHTSA, sin salir a internet.
+"""Pruebas de las FUENTES DE AFUERA: el INDEC, el BCRA, el DNRPA y la NHTSA, sin salir a internet.
 
 Uso:
     python3 pruebas_de_las_fuentes.py
@@ -178,12 +178,20 @@ def probar(L):
                                           ("208 ACTIVE 1.6", "S10 2.8 TDI", "KA 1.0", "1.6 ALGO")],
             ["208", "S10", "KA", "ALGO"])
     g["_renglones_de"] = lambda _url: iter(_CSV_DNRPA)
-    resumen = g["actualizar_parque_automotor"](forzar=True)
-    esperar("DNRPA: autos guardados", (resumen or {}).get("autos"), 11)
+    resumen = g["actualizar_parque_automotor"](forzar=True) or {}
+    esperar("DNRPA: autos guardados", (resumen.get("parque") or {}).get("autos"), 11)
+    esperar("DNRPA: 0 km guardados", (resumen.get("0km") or {}).get("autos"), 11)
+    esperar("DNRPA: de qué días son", ((resumen.get("parque") or {}).get("desde"),
+                                       (resumen.get("parque") or {}).get("hasta")),
+            ("2026-08-03", "2026-08-03"))
+    esperar("DNRPA: cada uno de su dataset",
+            [(resumen.get(k) or {}).get("dataset") for k in ("parque", "0km")],
+            ["transferencias-de-autos", "inscripciones-iniciales-de-autos"])
     columnas = [r[1] for r in g["c"].execute("PRAGMA table_info(parque_automotor)").fetchall()]
     esperar("DNRPA: no se guarda nada de los titulares",
             [x for x in columnas if x.startswith("titular")], [])
-    esperar("DNRPA: provincias", g["provincias_del_parque"](), [("BUENOS AIRES", 9), ("CORDOBA", 2)])
+    esperar("DNRPA: provincias (transferencias y 0 km)", g["provincias_del_parque"](),
+            [("BUENOS AIRES", 18), ("CORDOBA", 4)])
     for desc in ("JTA TAPA CIL. VW GOL 1.6", "Sonda lambda Volkswagen Gol Trend", "BOMBA AGUA FORD KA",
                  "FILTRO KA", "Junta tapa Fiat Palio 1.4"):
         g["c"].execute("INSERT INTO productos (codigo_raw, codigo_clean, descripcion, marca_id) "
@@ -194,6 +202,46 @@ def probar(L):
     esperar("DNRPA: «FILTRO KA» sin la marca no cuenta", autos.get(("FORD", "KA")), 1)
     esperar("DNRPA: el Palio es de Córdoba", ("FIAT", "PALIO") in autos, False)
     esperar("DNRPA: no se vuelve a bajar enseguida", g["actualizar_parque_automotor"](), None)
+    cero = g["cero_km_contra_el_catalogo"]("BUENOS AIRES")
+    esperar("DNRPA: 0 km con su columna", [(a["Modelo"], a.get("Se patentaron"),
+                                            a["Productos que lo nombran"]) for a in cero],
+            [("GOL", 5, 2), ("KA", 3, 1), ("SPRINTER", 1, 0)])
+    esperar("DNRPA: los 0 km no dicen años", any("Años" in a for a in cero), False)
+    esperar("DNRPA: un CSV sin las columnas no cuenta nada",
+            g["contar_el_parque"](iter(["a,b,c", "1,2,3"])), {})
+
+    # 6b. El IPC de transporte: el código de la serie sale del buscador oficial, no a mano.
+    _hallado = {"field": {"id": "999.9_TRANSPORTE_NAC", "frequency": "R/P1M",
+                          "title": "ipc_transporte_nacional", "units": "Índice",
+                          "description": "Índice de Precios al Consumidor. Transporte. Nacional. "
+                                         "Base diciembre 2016. Valores mensuales.",
+                          "time_index_end": "2026-08-01"},
+                "dataset": {"source": "Instituto Nacional de Estadística y Censos (INDEC)"}}
+    _interanual = {"field": dict(_hallado["field"], id="1.1_INTERANUAL", units="Variación interanual",
+                                 description="IPC. Transporte. Nacional. Variación interanual.")}
+    _region = {"field": dict(_hallado["field"], id="2.2_GBA",
+                             description="Índice de Precios al Consumidor. Transporte. GBA.")}
+    _trimestral = {"field": dict(_hallado["field"], id="3.3_TRIM", frequency="R/P3M")}
+    _de_otro = {"field": dict(_hallado["field"], id="4.4_OTRO"),
+                "dataset": {"source": "Una consultora"}}
+    url_buscar = g["URL_BUSCAR_SERIES"].split("?")[0]
+    _con_respuestas(g, {url_buscar: {"data": [_interanual, _region, _trimestral, _de_otro, _hallado]},
+                        url_ipc: _INDICE})
+    esperar("IPC transporte: la serie que corresponde", g["serie_del_ipc_de_transporte"](),
+            "999.9_TRANSPORTE_NAC")
+    traido = g["actualizar_ipc_de_transporte"](forzar=True) or {}
+    esperar("IPC transporte: el último mes", traido.get("mes"), "2026-08")
+    esperar("IPC transporte: guardado", g["ipc_de_transporte_guardado"]().get("serie"),
+            "999.9_TRANSPORTE_NAC")
+    acumulada, _hasta = g["inflacion_desde"]("2026-06-15", g["ipc_de_transporte_guardado"]())
+    cerca("IPC transporte: acumulada desde junio", acumulada, 9234.56 / 8849.97 - 1)
+    esperar("IPC transporte: no se vuelve a traer enseguida",
+            g["actualizar_ipc_de_transporte"](), None)
+    _con_respuestas(g, {url_buscar: {"data": [_interanual, _region]}})
+    esperar("IPC transporte: si el buscador no trae la serie, nada", g["serie_del_ipc_de_transporte"](),
+            None)
+    _con_respuestas(g, {})
+    esperar("IPC transporte: sin internet, nada", g["serie_del_ipc_de_transporte"](), None)
 
     # 7. El BCRA: cheques denunciados, Central de Deudores y el CUIT.
     import requests as _rq

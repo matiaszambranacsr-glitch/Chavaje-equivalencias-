@@ -6321,7 +6321,7 @@ Las partes de la lógica corren una detrás de la otra en el mismo espacio de no
 `orden.py`), así que cortar en orden no cambia nada: comprobado con el auditor, el núcleo, las
 pruebas de la revisión contra las 20.306 aprobaciones y las 30 pantallas.
 
-### 🏛️ Fuentes oficiales y gratuitas: INDEC, BCRA y NHTSA
+### 🏛️ Fuentes oficiales y gratuitas: INDEC, BCRA, DNRPA y NHTSA
 
 La app ya consultaba el IPC del INDEC (por datos.gob.ar), el dólar oficial (argentinadatos) y la
 base de VIN de la NHTSA. Revisado:
@@ -6384,6 +6384,42 @@ parque que circula y se compra usado: el que viene a buscar repuestos—, no el 
   desde donde se programó no se llegaba al portal, así que está probado con un CSV con ese mismo
   encabezado (`pruebas_de_las_fuentes.py`) y se verifica en vivo con «🔌 Probar las fuentes de
   afuera».
+
+### 🆕 Los 0 km que más se patentan (DNRPA) y el IPC de transporte (INDEC)
+
+- **Los 0 km.** El mismo registro publica las **inscripciones iniciales** (los patentamientos del
+  mes) con el mismo formato. Se bajan aparte —tabla `patentamientos_0km`— y la tabla de
+  «Para pedir» pasó a llamarse **«🚗 Los autos de tu zona, contra tu catálogo»**, con un selector
+  «Los que circulan / Los 0 km». Los 0 km son los clientes de dentro de unos años, cuando dejen
+  el service del concesionario. Con el catálogo real: **VW Tera 0 productos, Renault Kardian 1,
+  Ford Territory 2**, Toyota Yaris 118, Chevrolet Tracker 133, contra 623 de la Hilux o 1.071 de
+  la Ranger.
+- Antes las inscripciones eran el **respaldo** de las transferencias: si no se podían bajar las
+  transferencias, se contaban los 0 km como si fueran el parque. Ya no se mezclan.
+- Debajo de la tabla se dice **de qué días son los trámites** (de la columna `tramite_fecha`) y
+  si el archivo se leyó hasta el tope de 600.000 renglones.
+- **El IPC de transporte.** El INDEC publica el IPC por división, y «Transporte» incluye el
+  mantenimiento y los repuestos: para medir cuánto aumentó un proveedor de repuestos es mejor
+  vara que el nivel general. «📈 Cuánto te aumentó cada proveedor» muestra las dos.
+  - **El código de la serie no está escrito a mano**: desde donde se programó la API no
+    contestaba y un código no se inventa. Se lo pide al **buscador** de la misma API
+    (`/series/api/search`, documentado en github.com/datosgobar/series-tiempo-ar-api) y se elige
+    por lo que la serie dice de sí misma: del INDEC, mensual, nacional, de transporte, sin
+    región, y **que no sea la variación interanual** (un 40% interanual leído como mensual sería
+    otro −21,5%) ni la incidencia. Se prefiere el índice. Una vez encontrada se recuerda; si deja
+    de contestar, se vuelve a buscar.
+  - Los valores pasan por el mismo control que el IPC general (`_variaciones_del_ipc()`).
+  - La tarea de fondo lo trae una vez por semana; la pantalla usa lo guardado.
+- Las dos fuentes nuevas están en «🔌 Probar las fuentes de afuera», y probadas con respuestas
+  de muestra en `pruebas_de_las_fuentes.py` (incluido un buscador que devuelve la interanual, una
+  región, una trimestral y una serie de otra fuente antes de la buena).
+
+**Lo que se miró y no se sumó:**
+
+| Fuente | Por qué no |
+|---|---|
+| Robos y recuperos de autos (DNRPA) | Lo que se repone después de un robo —cerraduras, espejos, ópticas, estéreos— casi no está en el catálogo: 24 cerraduras en 87.155 productos. La tabla saldría en cero. |
+| Recalls de la NHTSA (EE. UU.) | Son campañas por número de chasis de autos de EE. UU.: no dicen nada de un Gol o un Cronos. En Argentina no hay un listado oficial descargable. |
 
 ### 🏦 Cheques denunciados y Central de Deudores (BCRA), para las cuentas corrientes
 

@@ -2400,7 +2400,13 @@ def _trabajo_de_fondo():
         contexto_de_precios()
     except Exception as _err:
         anotar_error("_trabajo_de_fondo/contexto_de_precios", _err)
-    # El parque automotor del DNRPA: una vez por mes (ver actualizar_parque_automotor()).
+    # El IPC de transporte: una vez por semana (ver actualizar_ipc_de_transporte()).
+    try:
+        actualizar_ipc_de_transporte()
+    except Exception as _err:
+        anotar_error("_trabajo_de_fondo/ipc_de_transporte", _err)
+    # El parque automotor y los 0 km del DNRPA: una vez por mes (ver
+    # actualizar_parque_automotor()).
     try:
         ceder_al_mostrador()
         actualizar_parque_automotor()
