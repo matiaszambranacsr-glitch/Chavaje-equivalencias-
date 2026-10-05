@@ -332,8 +332,8 @@ if pagina == PAGINAS[3]:
                          "el mismo auto."
                 )
                 explicar(
-                    "La copa es cónica, así que se cargan sus dos diámetros:",
-                    "el de la **base** (donde se une al eje) y el de la **boca** (el borde abierto). Con "
+                    "La copa es cónica: se cargan sus dos diámetros, el de la base y el de la boca.",
+                    "La **base** es donde se une al eje; la **boca**, el borde abierto. Con "
                     "uno solo no se distinguen dos copas que arrancan igual y terminan distinto — y son "
                     "justo esas las que no se pueden intercambiar."
                 )
@@ -1002,15 +1002,15 @@ if pagina == PAGINAS[3]:
                             st.rerun()
             st.markdown("**🔍 Revisar los vínculos que YA están cargados**")
             explicar(
-                "El análisis de confianza mira los vínculos pendientes de revisión, pero el problema "
-                "grande está en los que ya entraron:",
-                "los que cargaron importaciones viejas que nadie revisó. Esto les pasa el mismo "
-                "análisis y te muestra los peores. Hasta ahora la única forma de encontrarlos era "
-                "tropezarse con uno buscando un código.\n\n"
+                "Les pasa el análisis de confianza a los vínculos que ya están cargados y te "
+                "muestra los peores.",
+                "El análisis mira solo lo que espera revisión, pero el problema grande está en lo "
+                "que ya entró: lo que cargaron importaciones viejas que nadie revisó. Sin esto, la "
+                "única forma de encontrarlos es tropezarse con uno buscando un código.\n\n"
                 "**Vuelve a mirar TODO cada vez que lo corrés, con las reglas de hoy.** No queda "
                 "nada marcado como «ya revisado»: los vínculos se cargaron con las reglas de su "
                 "momento y las reglas fueron cambiando, así que uno que pasaba limpio hace un mes "
-                "puede no pasar hoy. En la base actual son 24.774 vínculos y tarda 12 segundos."
+                "puede no pasar hoy. Tarda unos segundos."
             )
             # Lo mismo de arriba pero del lado del puntaje GUARDADO, que es el que ve el
             # buscador en cada búsqueda: cuando cambian las reglas queda viejo, y el repuntaje
@@ -1128,7 +1128,10 @@ if pagina == PAGINAS[3]:
                 )
                 ayuda(
                     "Revisá primero los de arriba. Si el precio está bien, entonces lo que está mal "
-                    "es el vínculo: cortalo desde «Vincular manual» o con los códigos puente de acá abajo."
+                    "es el vínculo: buscá uno de los dos códigos en el 🔍 Buscador, abrí «🧭 ¿Por qué "
+                    "apareció alguno de estos?» y tocá «✂️ Cortar ese vínculo». Si el mismo código "
+                    "aparece en muchos pares, es un puente: "
+                    f"{miga_hasta('Códigos puente')}."
                 )
             else:
                 st.caption(f"✅ Ningún par de equivalentes se diferencia más de {factor_precio} veces.")
@@ -2192,7 +2195,7 @@ if pagina == PAGINAS[3]:
                 "criterio de siempre —posición, cilindrada, siglas, sustantivo principal y que "
                 "coincida el auto—, así que no hay dos reglas distintas conviviendo.\n\n"
                 "Lo único distinto es cómo elige qué pares mirar: comparar todo contra todo "
-                "serían seis mil millones de pares sobre un catálogo de 110.000 productos. En "
+                "serían miles de millones de pares sobre un catálogo de casi cien mil productos. En "
                 "vez de eso mira solo los que comparten alguna palabra POCO COMÚN, que quedan "
                 "en unos ciento cincuenta mil y se resuelven en segundos.\n\n"
                 "No carga nada solo: todo va a la cola de pendientes."
@@ -2582,9 +2585,9 @@ if pagina == PAGINAS[3]:
                     "misma información dos veces."
                 )
                 explicar(
-                    "No cambia lo que encuentra el buscador —consulta las dos columnas igual—, pero sí "
-                    "infla todos los conteos:",
-                    "un código con 100 equivalencias reales figura con 200, y el control de precios lista "
+                    "No cambia lo que encuentra el buscador, pero sí infla todos los conteos.",
+                    "El buscador consulta las dos columnas igual. Pero un código con 100 equivalencias "
+                    "reales figura con 200, y el control de precios lista "
                     "cada par dos veces. Unificarlas no borra ninguna equivalencia, solo deja una sola fila "
                     "por cada una."
                 )
@@ -2670,7 +2673,7 @@ if pagina == PAGINAS[3]:
 
                 explicar(
                     "Entra a la ficha de cada código y busca la foto ahí.",
-                    "Ahora va de a 6 fichas a la vez en vez de una por una, así que rinde bastante más. Los "
+                    "Va de a varias fichas a la vez (lo elegís abajo, en «Fichas a la vez»). Los "
                     "códigos cuya ficha no tiene foto quedan marcados y no se vuelven a consultar, para que "
                     "cada tanda avance de verdad."
                 )

@@ -2291,6 +2291,18 @@ for _lista, _nombre_dict in ((_PAGINAS_M, "PARA_QUE_SIRVE"), (_SOLAPAS_M, "PARA_
         if _x not in _dict:
             reportar("ERROR", 0, f"«{_x}» no tiene su renglón en {_nombre_dict} (logica/interfaz.py)")
 
+# ============ Una ayuda con la frase cortada a la mitad ============
+# explicar(resumen, detalle) muestra el resumen como título y esconde el detalle. Un resumen
+# que termina en «:» («La copa es cónica, así que se cargan sus dos diámetros:») deja la frase
+# colgando a la vista y la respuesta adentro, a un toque de distancia. El resumen tiene que
+# decir algo completo.
+for _n in ast.walk(ARBOL):
+    if (isinstance(_n, ast.Call) and getattr(_n.func, "id", None) == "explicar" and _n.args
+            and isinstance(literal(_n.args[0]), str) and literal(_n.args[0]).rstrip().endswith(":")):
+        reportar("ERROR", _n.lineno, "el resumen de explicar() termina en «:» y la frase sigue "
+                                     "escondida en el detalle: el resumen tiene que decir algo "
+                                     "completo")
+
 # ============ Resultado ============
 orden = {"ERROR": 0, "REVISAR": 1, "AVISO": 2}
 problemas.sort(key=lambda x: (orden[x[0]], x[1]))

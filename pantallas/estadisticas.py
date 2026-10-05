@@ -45,9 +45,9 @@ if pagina == PAGINAS[4]:
             st.markdown("---")
             st.markdown("**🤖 Uso de las funciones de IA (últimos 30 días)**")
             ayuda(
-                "Las primeras 4 funciones usan una API key; en el peor caso fallan por límite de "
-                "uso y hay que reintentar. 'Generar imagen orientativa' usa una key aparte, "
-                "configurada por separado."
+                "Cada fila es una función que usó la IA, con cuántas veces falló. Un error casi "
+                "siempre es el límite de uso de la clave: se reintenta más tarde. «Generar imagen "
+                "orientativa» usa una clave aparte, que se configura por separado."
             )
             st.dataframe(uso_ia_actual, width="stretch", hide_index=True)
 
@@ -331,8 +331,9 @@ Administrar → Mantenimiento.
         st.markdown("---")
         st.markdown("**📦 Matriz ABC — ubicación sugerida en depósito**")
         ayuda(
-            "Como la app no tiene un módulo de ventas, la rotación se aproxima con la cantidad de veces que "
-            "se buscó cada código. Los más buscados (A) conviene tenerlos más a mano."
+            "Lo que más rota (A) conviene tenerlo más a mano. La rotación sale de lo que se "
+            "vendió en los últimos seis meses —lo que se anota con «🛒 Se llevó» en el "
+            "buscador— y, entre los que se vendieron igual, de cuántas veces se buscó."
         )
         matriz = calcular_matriz_abc()
         if matriz:
@@ -341,7 +342,7 @@ Administrar → Mantenimiento.
                        f"{miga_hasta('Productos')} → buscalo → «📐 Cargar medidas mecánicas / "
                        "ubicación en depósito».")
         else:
-            st.caption("Todavía no hay suficientes búsquedas registradas para armar la matriz.")
+            st.caption("Todavía no hay ventas ni búsquedas registradas para armar la matriz.")
 
     if sub_stats == SUB_STATS[4]:
         st.markdown("**🔎 Códigos buscados sin resultado**")
@@ -390,8 +391,8 @@ Administrar → Mantenimiento.
         st.markdown("**⏳ Lo que se va a acabar**")
         explicar(
             "Calculado con el ritmo real de venta de cada producto y el stock que queda.",
-            "La reposición hasta ahora era 100% manual: alguien tenía que acordarse de tocar "
-            "«Pedir». Y de lo que uno no se acuerda es justamente de lo que se vende parejo "
+            "Sin esto, la reposición depende de que alguien se acuerde de tocar «📌 Pedir». Y "
+            "de lo que uno no se acuerda es justamente de lo que se vende parejo "
             "todos los días — el filtro común que nadie mira hasta que un cliente lo pide y no "
             "está.\n\nSe ignora lo que se vendió una o dos veces: con eso no se puede calcular "
             "un ritmo, es ruido."

@@ -835,7 +835,7 @@ def mostrar_revision_de_lo_aprobado():
         "Pasa cada vínculo ya cargado por los mismos vetos que usa hoy la revisión.",
         "Cada vez que la app aprende a distinguir algo —modelos distintos, largo de cable, "
         "temperaturas, un código que en realidad es un motor— lo aplica a lo que llega. Lo que "
-        "ya habías aprobado antes quedó como estaba, y «🔍 Auditar lo ya cargado» no lo vuelve "
+        "ya habías aprobado antes quedó como estaba, y «🔍 Auditar lo ya cargado» (de acá arriba) no lo vuelve "
         "a mirar. Esto sí. La tarea de fondo lo revisa sola cuando la app cambia, y avisa "
         "arriba de esta pantalla. Lo que confirmes como correcto no vuelve a aparecer; lo que cortes "
         "queda descartado aunque vuelvas a importar la lista."

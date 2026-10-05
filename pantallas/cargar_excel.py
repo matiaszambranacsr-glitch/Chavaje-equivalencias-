@@ -419,10 +419,14 @@ if pagina == PAGINAS[2]:
                             "Si lo importás acá, se van a cargar los **modelos de auto como si "
                             "fueran códigos de repuesto** (A4, Q3, Golf...) y los años como "
                             "precios.\n\n"
-                            "Para este archivo andá a **Administrar → Mantenimiento → "
-                            "🏭 Catálogo de aplicaciones**: ahí se lee bien y sirve para que la "
-                            "búsqueda por vehículo sepa qué repuesto le va a cada auto."
+                            "Este archivo va en "
+                            f"**{miga_hasta('Catálogo de aplicaciones')}**: ahí se lee bien y "
+                            "sirve para que la búsqueda por vehículo sepa qué repuesto le va a "
+                            "cada auto."
                         )
+                        st.button("🏭 Ir al catálogo de aplicaciones →", key="ir_catalogo_aplic",
+                                  on_click=ir_a_donde_dice_el_aviso,
+                                  args=(miga_hasta("Catálogo de aplicaciones"),))
 
                     # Una lista sin columna de código de fábrica no puede cruzar con otras por
                     # sí sola. Pero muchas listas de acá SÍ traen el código de fábrica, metido

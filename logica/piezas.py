@@ -1399,13 +1399,23 @@ def registrar_conteo_auditoria(auditoria_id, stock_contado):
 # UBICACIÓN EN DEPÓSITO (matriz ABC)
 # ============================================================
 def calcular_matriz_abc(limite=300):
-    """Clasifica productos en A/B/C usando la frecuencia de búsqueda como indicador de rotación
-    (no hay módulo de ventas en la app, así que esto es una aproximación de demanda)."""
+    """Clasifica productos en A/B/C por rotación: primero lo que se VENDIÓ en los últimos seis
+    meses («🛒 Se llevó»), y entre los que se vendieron igual —o nada—, lo más buscado.
+
+    Antes usaba solo las búsquedas, con la explicación de que «la app no tiene un módulo de
+    ventas». Lo tiene desde que existe «🛒 Se llevó», y una venta dice más que una búsqueda: se
+    busca también lo que no se tiene, y lo que se termina llevando otra marca."""
     c.execute("""SELECT p.id AS "ID", p.codigo_raw AS "Codigo", m.nombre AS "Marca",
-                 p.ubicacion AS "Ubicación", COALESCE(p.veces_buscado, 0) AS "Veces buscado"
+                 p.ubicacion AS "Ubicación",
+                 (SELECT COUNT(*) FROM ventas_registradas v
+                  WHERE v.producto_id = p.id
+                    AND v.fecha >= datetime('now', '-180 days')) AS "Vendidos (6 meses)",
+                 COALESCE(p.veces_buscado, 0) AS "Veces buscado"
                  FROM productos p JOIN marcas m ON m.id = p.marca_id
                  WHERE COALESCE(p.veces_buscado, 0) > 0 OR p.favorito = 1
-                 ORDER BY COALESCE(p.veces_buscado, 0) DESC LIMIT ?""", (limite,))
+                    OR p.id IN (SELECT producto_id FROM ventas_registradas
+                                WHERE fecha >= datetime('now', '-180 days'))
+                 ORDER BY "Vendidos (6 meses)" DESC, "Veces buscado" DESC LIMIT ?""", (limite,))
     filas = filas_a_listas(c)
     total = len(filas)
     for i, f in enumerate(filas):

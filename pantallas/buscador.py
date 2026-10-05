@@ -448,9 +448,9 @@ Casi todo lo que edita o borra algo pide la contraseña de administrador la prim
                     })
                 st.dataframe(filas_visual, width="stretch", hide_index=True)
                 explicar(
-                    "«Detalles que coinciden» son los puntos de la pieza que además dieron geométricamente "
-                    "coherentes entre las dos fotos:",
-                    "es el número que más conviene mirar. Muchos detalles y parecido alto = vale la pena "
+                    "Mirá sobre todo «Detalles que coinciden»: es el número que más dice.",
+                    "Son los puntos de la pieza que además dieron geométricamente coherentes entre las "
+                    "dos fotos. Muchos detalles y parecido alto = vale la pena "
                     "revisarla. Si el que buscabas no aparece, cargale a ese producto una segunda foto del "
                     "ángulo que usás vos y la próxima vez lo encuentra.", en_expander=True
                 )
@@ -1233,8 +1233,8 @@ Casi todo lo que edita o borra algo pide la contraseña de administrador la prim
                         ayuda(
                             "Marcá cuál se llevó el cliente: con eso el sistema va aprendiendo qué "
                             "sirve para qué, y después te propone equivalencias nuevas en "
-                            "Estadísticas → Equivalencias sugeridas. Si falta stock, 'Pedir' lo manda "
-                            "a la lista de reposición."
+                            "📊 Estadísticas → 🔗 Equivalencias sugeridas. Si falta stock, «📌 Pedir» lo "
+                            "anota en 📊 Estadísticas → 📌 Para pedir."
                         )
                         def _rotulo_stock(f):
                             _s = f.get("Stock")

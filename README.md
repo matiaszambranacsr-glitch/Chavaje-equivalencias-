@@ -6106,6 +6106,30 @@ Capturas de la base real en una pantalla de 1366×768, antes y después:
 Recorridas las 30 pantallas, solapas y grupos de Mantenimiento como administrador sobre la base
 real: ninguna da error.
 
+### 📝 Los textos de ayuda, revisados uno por uno
+
+Se leyeron los ~210 textos de ayuda (los plegables «ℹ️» y los «?» de cada control). Lo que
+decía algo que no es cierto:
+
+- **Matriz ABC**: decía «como la app no tiene un módulo de ventas, la rotación se aproxima con
+  las búsquedas». Las ventas se anotan con «🛒 Se llevó». Ahora la matriz ordena primero por lo
+  vendido en los últimos seis meses y después por lo buscado, y muestra las dos columnas.
+- **Precios que no cierran**: mandaba a cortar el vínculo «desde Vincular manual», que no corta
+  vínculos. Ahora dice dónde: en el Buscador, «🧭 ¿Por qué apareció…?» → «✂️ Cortar ese
+  vínculo», o «🌉 Códigos puente» si es un mismo código en muchos pares.
+- **Números viejos escritos a mano**: «son 24.774 vínculos y tarda 12 segundos», «un catálogo
+  de 110.000 productos» (hoy son 10.153 y 87.155).
+- **«Las primeras 4 funciones usan una API key»** en el uso de la IA, sobre una tabla que no
+  tiene orden fijo.
+- **Resúmenes con la frase cortada** («La copa es cónica, así que se cargan sus dos
+  diámetros:» y la respuesta adentro del plegable): cinco. El auditor ahora no deja que el
+  resumen de una ayuda termine en «:».
+- Ayudas escritas como lista de cambios («Ahora va de a 6 fichas en vez de una por una», «la
+  reposición hasta ahora era manual», «antes había que hacerlo de a pares»): para quien la lee
+  por primera vez no hay «antes».
+- Más botones que llevan: «🏭 Ir al catálogo de aplicaciones →» cuando se sube a Cargar Excel un
+  catálogo de aplicaciones, y «🔢 Ir a Chasis / VIN →» en Repuestos por vehículo.
+
 ## 🔗 Revisar sugeridas: primero lo que hay que hacer
 
 Mirado con capturas sobre la base real (15.308 pendientes en 8 listas):

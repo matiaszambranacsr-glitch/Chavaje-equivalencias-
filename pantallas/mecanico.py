@@ -617,10 +617,12 @@ if pagina == PAGINAS[7]:
             mapa_marcas = {f"{m} ({n} productos)": m for m, n in disponibles}
 
             st.info(
-                "🔢 ¿Tenés el número de chasis? Andá a **🛠️ Modo Mecánico → 🔢 Chasis / VIN**: "
-                "pegás el VIN y te da directamente los repuestos que lleva ese auto, sin tener "
-                "que elegir marca y modelo acá a mano."
+                "🔢 ¿Tenés el número de chasis? En **🔢 Chasis / VIN** pegás el VIN y te da "
+                "directamente los repuestos que lleva ese auto, sin tener que elegir marca y "
+                "modelo acá a mano."
             )
+            st.button("🔢 Ir a Chasis / VIN →", key="ir_vin_desde_vehiculo",
+                      on_click=ir_a_donde_dice_el_aviso, args=(miga_hasta("Chasis / VIN"),))
 
             etiqueta_elegida = st.selectbox("Marca del vehículo:", etiquetas_marcas,
                                              key="sel_marca_vehiculo")
@@ -873,9 +875,9 @@ if pagina == PAGINAS[7]:
                     boton_otro_archivo("esquema", "🗑️ Usar otra imagen", key="otra_img_esquema")
             else:
                 explicar(
-                    "Para cuando no tenés el auto físico enfrente (útil en el mostrador de una casa de "
-                    "repuestos):",
-                    "la IA arma un dibujo genérico de referencia, **no una foto real de ese vehículo**. "
+                    "Un dibujo de referencia para cuando no tenés el auto enfrente, como en el "
+                    "mostrador.",
+                    "La IA arma un dibujo genérico, **no una foto real de ese vehículo**. "
                     "Sirve para orientar, no para identificar piezas con precisión milimétrica. Usa Gemini, "
                     "con una API key configurada por separado del resto de las funciones."
                 )

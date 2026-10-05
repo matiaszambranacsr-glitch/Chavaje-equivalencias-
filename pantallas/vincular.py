@@ -54,7 +54,7 @@ if pagina == PAGINAS[1]:
     explicar(
         "Armá un grupo de códigos — de la marca/proveedor que sea, se pueden mezclar — y "
         "vinculalos todos entre sí de una sola vez.",
-        "Antes había que hacerlo de a pares; ahora si tenés 5 productos de 5 proveedores "
+        "Si tenés 5 productos de 5 proveedores "
         "distintos que son lo mismo, los sumás todos a la tanda y los vinculás juntos."
     )
 
