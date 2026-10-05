@@ -58,7 +58,15 @@ def repuestos_de_este_auto(marca_auto, modelo="", anio=None, motor="", vin="", l
     motor = (motor or "").strip().upper()
     vin = re.sub(r'\s', '', (vin or "").strip().upper())
     resultado = {"de_este_auto": [], "de_otros_iguales": [], "del_catalogo": [],
-                 "del_fabricante": [], "modelo_usado": modelo, "sin_datos": True}
+                 "del_fabricante": [], "modelo_usado": modelo, "sin_datos": True,
+                 "marca_deducida": ""}
+    # Una ficha con el modelo y sin la marca no buscaba nada en el catálogo: la marca se
+    # deduce del modelo cuando no hay dudas (ver marca_del_modelo()).
+    if modelo and not marca_auto:
+        try:
+            marca_auto = resultado["marca_deducida"] = marca_del_modelo(modelo) or ""
+        except sqlite3.OperationalError as _err:
+            anotar_error("repuestos_de_este_auto/marca_del_modelo", _err)
 
     # Fuente nueva y la más confiable de las que no son propias: el catálogo de aplicaciones
     # del fabricante del repuesto. No es una coincidencia de texto, es el fabricante diciendo
@@ -85,26 +93,55 @@ def repuestos_de_este_auto(marca_auto, modelo="", anio=None, motor="", vin="", l
 
     # --- 2. Lo que se le puso a otros autos del mismo modelo ---
     if modelo:
-        c.execute("""SELECT h.descripcion_pieza AS "Pieza", h.codigo_pieza AS "Código",
-                            h.marca_pieza AS "Marca", COUNT(*) AS "Veces",
-                            COUNT(DISTINCT v.id) AS "Autos"
-                     FROM historial_piezas h JOIN vehiculos v ON v.id = h.vehiculo_id
-                     WHERE UPPER(COALESCE(v.modelo_auto,'')) LIKE ?
-                       AND (? = '' OR UPPER(COALESCE(v.marca_auto,'')) LIKE ?)
-                       AND (v.id IS NOT ?)
-                       AND h.codigo_pieza IS NOT NULL AND h.codigo_pieza <> ''
-                     GROUP BY UPPER(h.codigo_pieza)
-                     ORDER BY "Autos" DESC, "Veces" DESC LIMIT 100""",
-                  (f"%{modelo}%", marca_auto, f"%{marca_auto}%", vehiculo_id))
-        resultado["de_otros_iguales"] = filas_a_listas(c)
+        # El modelo como palabra entera, igual que en el catálogo: con LIKE, la ficha de un
+        # Golf contaba como un Gol (ver _nombra_este_auto()).
+        _patron_modelo = re.compile(
+            r"(?<![A-Z0-9])" + r"[\s\-/.]*".join(map(re.escape, normalizar_texto(modelo).split()))
+            + r"(?![A-Z0-9])")
+        _marca_canon = ALIAS_MARCA_VEHICULO.get(marca_auto, marca_auto)
+        c.execute("""SELECT id, marca_auto, modelo_auto FROM vehiculos
+                     WHERE UPPER(COALESCE(modelo_auto,'')) LIKE ? AND id IS NOT ?""",
+                  (f"%{modelo.split()[0]}%", vehiculo_id))
+        iguales = [f["id"] for f in c.fetchall()
+                   if _patron_modelo.search(normalizar_texto(f["modelo_auto"] or ""))
+                   and (not marca_auto or normalizar_texto(ALIAS_MARCA_VEHICULO.get(
+                       (f["marca_auto"] or "").strip().upper(),
+                       (f["marca_auto"] or "").strip().upper())) == normalizar_texto(_marca_canon)
+                        or not (f["marca_auto"] or "").strip())]
+        # Por tandas (ver en_tandas()), y se suman por código: el mismo repuesto puede
+        # aparecer en más de una tanda.
+        por_codigo = {}
+        for tanda, marcadores in en_tandas(iguales):
+            c.execute(f"""SELECT h.descripcion_pieza AS "Pieza", h.codigo_pieza AS "Código",
+                                 h.marca_pieza AS "Marca", h.vehiculo_id AS "_vid"
+                          FROM historial_piezas h
+                          WHERE h.vehiculo_id IN ({marcadores})
+                            AND h.codigo_pieza IS NOT NULL AND h.codigo_pieza <> ''""", tanda)
+            for f in filas_a_listas(c):
+                fila = por_codigo.setdefault(f["Código"].upper(), {
+                    "Pieza": f["Pieza"], "Código": f["Código"], "Marca": f["Marca"],
+                    "Veces": 0, "_autos": set()})
+                fila["Veces"] += 1
+                fila["_autos"].add(f["_vid"])
+        resultado["de_otros_iguales"] = sorted(
+            ({"Pieza": f["Pieza"], "Código": f["Código"], "Marca": f["Marca"],
+              "Veces": f["Veces"], "Autos": len(f["_autos"])} for f in por_codigo.values()),
+            key=lambda f: (-f["Autos"], -f["Veces"]))
+        del resultado["de_otros_iguales"][100:]
 
     # --- 3. El catálogo, por lo que dicen las descripciones ---
     if marca_auto:
-        condiciones = ["p.descripcion IS NOT NULL", "UPPER(p.descripcion) LIKE ?"]
-        params = [f"%{marca_auto}%"]
+        # Todas las formas de escribir la marca: «VOLKSWAGEN» en la consulta se perdía los
+        # productos que dicen «VW». El SQL es solo el prefiltro; quién le va de verdad lo
+        # decide _nombra_este_auto().
+        marca_canon = ALIAS_MARCA_VEHICULO.get(marca_auto, marca_auto)
+        escrituras = ESCRITURAS_DE_MARCA.get(marca_canon) or [marca_auto]
+        condiciones = ["p.descripcion IS NOT NULL",
+                       "(" + " OR ".join(["UPPER(p.descripcion) LIKE ?"] * len(escrituras)) + ")"]
+        params = [f"%{e}%" for e in escrituras]
         if modelo:
             condiciones.append("UPPER(p.descripcion) LIKE ?")
-            params.append(f"%{modelo}%")
+            params.append(f"%{modelo.split()[0]}%")
         # QUÉ PIEZA, y va en la CONSULTA y no después. Un auto con 1.855 repuestos en el
         # catálogo se lista cortado en los primeros 200, así que filtrar el resultado por
         # «junta de tapa» buscaba adentro de 200 que casi nunca son juntas. Filtrando en la
@@ -121,8 +158,9 @@ def repuestos_de_este_auto(marca_auto, modelo="", anio=None, motor="", vin="", l
                              m.nombre AS "Marca", p.precio AS "Precio", p.stock AS "Stock"
                       FROM productos p JOIN marcas m ON m.id = p.marca_id
                       WHERE {" AND ".join(condiciones)}
-                      LIMIT 4000""", params)
-        candidatos = filas_a_listas(c)
+                      LIMIT 20000""", params)
+        candidatos = [f for f in filas_a_listas(c)
+                      if _nombra_este_auto(f["Descripcion"], marca_canon, modelo)]
 
         # La cilindrada es lo que más afina ("1.6", "2.0"): si el motor la trae, se usa para
         # filtrar, pero solo descartando lo que declara OTRA cilindrada — lo que no dice nada
@@ -157,6 +195,57 @@ def repuestos_de_este_auto(marca_auto, modelo="", anio=None, motor="", vin="", l
     resultado["sin_datos"] = not (resultado["de_este_auto"] or resultado["de_otros_iguales"]
                                    or resultado["del_catalogo"] or resultado["del_fabricante"])
     return resultado
+
+
+def _nombra_este_auto(descripcion, marca, modelo):
+    """Si la descripción nombra ESE auto: la marca (por cualquiera de sus escrituras) y el
+    modelo como palabra entera.
+
+    Antes era «la descripción contiene el texto», y con modelos cortos eso no sirve: «GOL» está
+    adentro de «GOLF», «UP» adentro de «PICK UP» y «208» adentro de «71208». Medido sobre el
+    catálogo real: VW Gol traía 241 productos del Golf, el Bora o el Polo; VW Up, 205 de 283 que
+    no eran del Up; Peugeot 208, 176 de 377.
+
+    Un modelo que lleva NÚMEROS («208», «C3», «S10», «500») tiene que estar en el pedazo de la
+    descripción que le toca a esa marca o antes de la primera marca (ver marcas_vehiculo_en()):
+    un número suelto en otro lado es una medida o un código. Uno de letras («GOL», «KA»,
+    «PALIO») alcanza con que esté como palabra en cualquier lado, porque las listas ponen el
+    modelo antes que la marca («Gol - Saveiro … Camiones VW») o lo pegan al de otra («SEAT,
+    SURAN, GOL TREND»), y exigir el pedazo de la marca perdía 118 productos del Gol que sí son."""
+    if not descripcion:
+        return False
+    marcas = [(normalizar_texto(ALIAS_MARCA_VEHICULO.get(m.upper(), m.upper())), cat, resto)
+              for m, cat, resto in marcas_vehiculo_en(descripcion)]
+    propias = [resto or "" for m, _cat, resto in marcas if m == normalizar_texto(marca)]
+    if not propias and _marca_pegada_en(descripcion, marca):
+        # La lista pegó la marca al código de adelante («97053Vw Gol», «LEIHTF30CSFord
+        # Fiesta»): marcas_vehiculo_en() no la ve, pero está. Se busca el modelo en toda la
+        # descripción.
+        marcas, propias = [(normalizar_texto(marca), descripcion, descripcion)], [descripcion]
+    if not propias:
+        return False
+    if not modelo:
+        return True
+    palabras = re.split(r"\s+", normalizar_texto(modelo).strip())
+    patron = re.compile(r"(?<![A-Z0-9])" + r"[\s\-/.]*".join(map(re.escape, palabras))
+                        + r"(?![A-Z0-9])")
+    if re.search(r"\d", modelo):
+        pedazos = propias + [marcas[0][1] or ""]
+        return any(patron.search(normalizar_texto(separar_texto_pegado(x))) for x in pedazos)
+    texto = re.sub(r"PICK[\s\-]*UP", " ", normalizar_texto(separar_texto_pegado(descripcion)))
+    return bool(patron.search(texto))
+
+
+def _marca_pegada_en(descripcion, marca):
+    """Si la marca está en la descripción aunque venga pegada a un código: después de un número
+    («97053Vw»), o escrita con mayúscula inicial después de letras («LEIHTF30CSFord»)."""
+    for escritura in ESCRITURAS_DE_MARCA.get(marca) or [marca]:
+        if re.search(r"(?<![A-Za-z])" + re.escape(escritura) + r"(?![A-Za-z])", descripcion, re.I):
+            return True
+        titulo = escritura.title()
+        if re.search(re.escape(titulo) + r"(?![a-z])", descripcion):
+            return True
+    return False
 
 
 def panel_vin(clave="vin", mostrar_ensenar=True):

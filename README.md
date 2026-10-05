@@ -6455,6 +6455,39 @@ el botón**:
 - «🔌 Probar las fuentes de afuera» suma la Central de Deudores (con el CUIT de la AFIP, nunca el
   de un cliente) y la inflación de respaldo.
 
+## 🚗 Repuestos por auto: el Gol no es el Golf
+
+«Repuestos por auto» (y lo que el Modo Mecánico ofrece para una patente) buscaba en el catálogo
+con «la descripción contiene la marca y contiene el modelo». Medido sobre el catálogo real:
+
+| Auto | Antes | Ahora | Qué pasaba |
+|---|---|---|---|
+| VW Gol | 1.332 (241 sin «GOL» como palabra) | 1.395, todos del Gol | «GOL» está adentro de «GOLF»: salían repuestos del Golf, el Bora o el Polo |
+| «VW» Gol | 1.922 | 1.395 | lo mismo; y escribir «VOLKSWAGEN» se perdía los que dicen «VW» (5.530 productos) |
+| VW Up | 283 (205 no eran del Up) | 123 | «UP» adentro de «PICK UP» y de cualquier palabra |
+| Peugeot 208 | 377 (176 no eran del 208) | 190 | «208» adentro de «71208» |
+| Ford Ka | 975 (95 dudosos) | 856 | «KA» adentro de «KALOS» y otras |
+| Mercedes Benz Sprinter | 215 | 358 | no veía «M.BENZ» ni «MERCEDES» solo |
+
+La regla (`_nombra_este_auto()`): la marca por cualquiera de sus escrituras y el modelo como
+**palabra entera**. Si el modelo lleva números («208», «C3», «S10»), además tiene que estar en
+el pedazo de la descripción que le toca a esa marca o antes de la primera marca: un número
+suelto en otro lado es una medida o un código. Uno de letras alcanza con que esté en cualquier
+lado, porque las listas ponen el modelo antes de la marca («Gol - Saveiro … Camiones VW») o lo
+pegan al de otra («SEAT, SURAN, GOL TREND»); exigir el pedazo de la marca perdía 118 del Gol que
+sí son. Y si la lista pegó la marca a un código («97053Vw Gol»), se la reconoce igual.
+
+Lo mismo para **«se le puso a otros autos del mismo modelo»**: la ficha de un Golf contaba como
+un Gol.
+
+**Fichas con el modelo y sin la marca**: no buscaban nada en el catálogo. Ahora la marca se
+deduce del modelo (`marca_del_modelo()`): primero con el registro automotor (DNRPA) —qué marcas
+tienen autos con ese nombre— y, si todavía no se bajó, con el catálogo. Solo si una marca se
+lleva el 90%: sobre 51 modelos comunes acertó 38 y en los otros 13 no dijo nada (Corsa aparece
+como Chevrolet, GM y Opel; Ducato como Fiat y Peugeot); **ninguno mal**.
+
+Pruebas: `python3 pruebas_de_repuestos_por_auto.py`.
+
 ## 🔗 Revisar sugeridas: primero lo que hay que hacer
 
 Mirado con capturas sobre la base real (15.308 pendientes en 8 listas):

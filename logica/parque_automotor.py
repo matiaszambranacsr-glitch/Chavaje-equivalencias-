@@ -294,3 +294,47 @@ def _modelos_contra_el_catalogo(clave, provincia, limite):
                      "_n": f["n"], "_prod": n_prod})
         salida.append(fila)
     return salida
+
+
+def marca_del_modelo(modelo):
+    """La marca de un modelo escrito solo («Gol Trend» → «VOLKSWAGEN»), o None si no se puede
+    saber sin adivinar. Para las fichas que tienen el modelo y no la marca: sin marca,
+    «Repuestos por auto» no buscaba nada en el catálogo.
+
+    Primero el registro automotor (los autos que de verdad existen con ese nombre); si todavía
+    no se bajó, las descripciones del catálogo (en el pedazo de qué marca aparece el modelo).
+    En los dos casos hace falta que una marca se lleve casi todo: «KA» es Ford, pero «C3» o
+    «500» se usan para varias cosas y ahí se prefiere no decir nada."""
+    palabra = palabra_del_modelo(modelo)
+    if len(palabra) < 2 or palabra.isdigit():
+        return None
+    c.execute("""SELECT marca, SUM(cantidad) AS n FROM (
+                     SELECT marca, modelo, cantidad FROM parque_automotor
+                     UNION ALL SELECT marca, modelo, cantidad FROM patentamientos_0km)
+                 WHERE modelo = ? GROUP BY marca ORDER BY n DESC""", (palabra,))
+    del_registro = [(r["marca"], r["n"]) for r in c.fetchall()]
+    if del_registro:
+        return _la_que_se_lleva_casi_todo(del_registro, minimo=20)
+    _memoria = del_proceso("marca_del_modelo", dict)
+    _clave = (palabra, version_del_catalogo())
+    if _clave not in _memoria:
+        if len(_memoria) > 500:
+            _memoria.clear()
+        _patron = re.compile(r"(?<![A-Z0-9])" + re.escape(palabra) + r"(?![A-Z0-9])")
+        cuenta = collections.Counter()
+        _cond, _par = like_en_descripcion(f"%{palabra}%")
+        c.execute(f"SELECT DISTINCT descripcion FROM productos p WHERE {_cond} LIMIT 5000", _par)
+        for (desc,) in c.fetchall():
+            for m, _cat, resto in marcas_vehiculo_en(desc):
+                if _patron.search(normalizar_texto(separar_texto_pegado(resto or ""))):
+                    cuenta[ALIAS_MARCA_VEHICULO.get(m.upper(), m.upper())] += 1
+        _memoria[_clave] = _la_que_se_lleva_casi_todo(cuenta.most_common(), minimo=10)
+    return _memoria[_clave]
+
+
+def _la_que_se_lleva_casi_todo(conteos, minimo, parte=0.9):
+    """La primera de [(marca, cantidad)] si tiene al menos `parte` del total y `minimo`."""
+    total = sum(n for _m, n in conteos)
+    if not conteos or conteos[0][1] < minimo or conteos[0][1] < parte * total:
+        return None
+    return conteos[0][0]

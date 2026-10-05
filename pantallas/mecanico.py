@@ -321,6 +321,9 @@ if pagina == PAGINAS[7]:
                      "Es lo más amplio y lo menos seguro: depende de cómo escriba cada "
                      "proveedor."),
                 ]
+                if _sug.get("marca_deducida"):
+                    st.caption(f"La ficha no dice la marca: por el modelo es "
+                               f"**{_sug['marca_deducida']}**, y se buscó con esa.")
                 if any(_sug.get(k) for k, _t, _a in _fuentes):
                     # LA PREGUNTA DEL MOSTRADOR. El cliente no pide «todo lo que le entra al
                     # auto», pide una pieza. Filtra por palabras sobre todas las columnas, así
