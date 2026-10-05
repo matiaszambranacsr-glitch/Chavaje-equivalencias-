@@ -6103,6 +6103,10 @@ Capturas de la base real en una pantalla de 1366×768, antes y después:
   Usar» lleva directo a Vincular manual con el código ya puesto. Ese aviso, además, decía
   «completá el Código B», y Vincular manual ya no tiene Código A y B: se arma una tanda.
 
+- **Las pastillas sin el circulito.** El CSS escondía el punto de adentro de cada opción pero no
+  el aro, y en todos los menús quedaba un círculo vacío al lado de cada nombre. En el celular, las
+  solapas de Administrar pasan de cuatro renglones a tres.
+
 Recorridas las 30 pantallas, solapas y grupos de Mantenimiento como administrador sobre la base
 real: ninguna da error.
 

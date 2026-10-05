@@ -320,8 +320,10 @@ hr { border-color: var(--border) !important; margin: 1.1rem 0 !important; }
 }
 .app-bar__sub { font-size: 0.78rem; color: var(--text-muted); line-height: 1.2; }
 
-/* Las opciones de un radio como pastillas, sin el puntito de formulario. */
-[data-testid="stRadioOption"] > div > div > div:not([data-testid="stMarkdownContainer"]) {
+/* Las opciones de un radio como pastillas, sin el puntito de formulario. Se esconde el aro
+   entero (label > div > div), no solo el punto de adentro: con el punto solo, en cada pastilla
+   quedaba un circulito vacío al lado del nombre. */
+[data-testid="stRadioOption"] > div > div:not([data-testid="stMarkdownContainer"]) {
   display: none !important;
 }
 .stRadio [role="radiogroup"] label { padding: 6px 14px !important; border-radius: 10px !important; }

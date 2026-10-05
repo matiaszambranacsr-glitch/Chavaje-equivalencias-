@@ -335,7 +335,8 @@ if st.session_state.get("pagina_actual") not in PAGINAS:
 # En los dos modos se usa st.radio en vez de un desplegable: el desplegable de Streamlit lleva
 # un campo de texto adentro para filtrar, y en el celular eso abre el teclado cada vez que lo
 # tocás, que es molesto para algo que se usa todo el tiempo. Con radio es un toque y listo.
-# El CSS los muestra como pastillas: en el celular se acomodan solas en varias filas.
+# El CSS los muestra como pastillas, en un solo renglón: en el celular se deslizan de costado
+# (ver «La navegación principal» en logica/base.py).
 with st.container(key="nav_principal"):
     st.radio("Sección:", PAGINAS, key="pagina_actual", horizontal=True,
              label_visibility="collapsed")
