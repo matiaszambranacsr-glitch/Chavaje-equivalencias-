@@ -851,7 +851,10 @@ _RE_CILINDROS_CON_C = re.compile(r'(?<![\d.,/X])((?:\d/)*\d)\s*C\.(?!\w)')
 # cuatro cilindros, y concordaba con «JTA BASE.TERM. MWM SPRINT 6 C.». Solo en esas marcas: en
 # otra, «4.10» puede ser cualquier cosa. Con dos o tres cifras después, que «2.8» es la
 # cilindrada.
-_RE_MOTOR_QUE_DICE_SUS_CILINDROS = re.compile(r'\bPERKINS\b|\bM\W?W\W?M\b')
+# También SPRINT —la familia MWM, que TARANTO escribe «CHEVROLET SPRINT 6.07 T», sin decir
+# MWM— y MAXION —los Perkins hechos en Brasil: «4.236», «6.358»—. Sin SPRINT, la junta de cárter
+# del 6.07 se proponía igual a la de IMPERIAL «JTA CARTER MWM SPRINT 4 CIL.».
+_RE_MOTOR_QUE_DICE_SUS_CILINDROS = re.compile(r'\bPERKINS\b|\bM\W?W\W?M\b|\bSPRINT\b|\bMAXION\b')
 _RE_CILINDROS_EN_EL_MOTOR = re.compile(r'(?<![\d.,])([2-8])[.\-]\d{2,3}T?(?![\d.,])')
 # En DEUTZ también, con otra forma: F3L, F4L, BF6L, BF4M. El número es la cantidad de cilindros.
 # «Jta.Carter DEUTZ F4L 913» concordaba con «JTA CARTER DEUTZ 913 6 CIL.»: el mismo 913 con otra
@@ -2822,9 +2825,14 @@ def firmas_compatibles(a, b, minimo_nucleo=2, cuenta_palabras=None, total_descri
             _con.clear()
     if (bool(_parte_a) != bool(_parte_b) and "JUNTA" in (a.get("pieza") or ())
             and "JUNTA" in (b.get("pieza") or ())):
-        _cual = {"RESP": "RESPIRADERO", "LAT": "COSTADO", "LATERAL": "COSTADO"}.get(
-            min(_parte_a or _parte_b), min(_parte_a or _parte_b))
-        return False, f"piezas de lugares distintos: la del {_cual} vs la pieza entera"
+        # En castellano y no la palabra de la lista: se leía «la del INSPECCION vs la pieza
+        # entera».
+        _cual = {"INSPECCION": "la tapa de inspección", "RESP": "el respiradero",
+                 "RESPIRADERO": "el respiradero", "FRENTE": "el frente", "LAT": "el costado",
+                 "LATERAL": "el costado"}.get(min(_parte_a or _parte_b),
+                                              min(_parte_a or _parte_b).lower())
+        return False, (f"piezas de lugares distintos: la junta de {_cual} vs la de la pieza "
+                       "entera")
 
     # UNA PARTE DEL CARBURADOR CONTRA EL JUEGO DEL CARBURADOR: «JTA BASE CARB F. SIERRA 1.6»
     # (IMPERIAL, la base sola) contra «JUNTAS SIERRA 1.6 1983/86 WEBER» (JL, el juego). Las dos
@@ -2961,7 +2969,12 @@ def firmas_compatibles(a, b, minimo_nucleo=2, cuenta_palabras=None, total_descri
     # la otra de un BMW.
     if a["autos"] and b["autos"]:
         autos_comunes = a["autos"] & b["autos"]
-        if not autos_comunes:
+        # Cuando UNA sola nombra nada más que al que hizo el motor —«JTA CARTER MWM SPRINT»
+        # contra «Jta.Carter CHEVROLET SPRINT 4.07T»— no se contradicen: la S10 lleva el MWM.
+        # Si las dos nombran solo motoristas, sí: un MWM no es un Cummins.
+        _solo_motor_a = a["autos"] <= _MARCAS_DE_MOTORES
+        _solo_motor_b = b["autos"] <= _MARCAS_DE_MOTORES
+        if not autos_comunes and _solo_motor_a == _solo_motor_b:
             return False, (f"autos distintos: {'/'.join(sorted(a['autos'])[:2])} "
                            f"vs {'/'.join(sorted(b['autos'])[:2])}")
     else:

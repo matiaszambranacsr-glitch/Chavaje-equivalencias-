@@ -6196,6 +6196,34 @@ aprobar las sugeridas → buscar), y la lista de secciones sale de los mismos re
 ven debajo del menú, así que no se puede volver a desactualizar. El cartel de «equivalencias
 esperando aprobación» trae ahora el botón «🔗 Ir a aprobarlas →».
 
+### 🧭 Revisar sugeridas: lo que se necesita para decidir, a la vista
+
+Mirando la cola real (8.201 pendientes) con capturas:
+
+- **«Elegí cuál es la equivalente» no mostraba la descripción del candidato** si no había
+  rasgos que lo distinguieran (años, motor, espesor…): se veía «25675AC6 (+2)» y «SPRINT», y la
+  descripción estaba adentro de la lista desplegable. Ahora va en la tabla.
+- Esa lista desplegable decía **«Choose options»**, en inglés. Ahora «Elegí la o las que son la
+  misma pieza…», y el auditor no deja que otra vuelva a quedar sin texto.
+- El aviso de lo cargado decía «piezas de lugares distintos: **la del INSPECCION** vs la pieza
+  entera». Ahora: «la junta de la tapa de inspección vs la de la pieza entera».
+
+Y con la descripción a la vista apareció un error de la app:
+
+- **El Sprint 6.07 se proponía igual a un Sprint de 4 cilindros.** En los MWM y Perkins el
+  primer número del motor es la cantidad de cilindros («4.07», «6.354»), y la app ya lo leía,
+  pero solo si la descripción decía «MWM» o «PERKINS». TARANTO escribe «CHEVROLET SPRINT 6.07
+  T». Ahora también SPRINT y MAXION (los Perkins brasileños).
+- Contra las 20.306 aprobaciones reales, esto encontró **3 pares mal aprobados** que el
+  buscador muestra hoy como equivalentes: el 4.07T de TARANTO con dos juntas de cárter MWM de 6
+  cilindros de ILLINOIS, y el 6.07 con una de 4. Van a aparecer en el aviso amarillo de
+  «🔗 Equivalencias sugeridas» (lo cargado que choca con las reglas de hoy) para cortarlos.
+- Al revés, «Jta.Carter CHEVROLET SPRINT 4.07T» contra «JTA CARTER MWM SPRINT 4 CIL.» daba
+  «autos distintos: CHEVROLET vs MWM». MWM hace el motor que lleva la S10: cuando una de las
+  dos nombra solo al fabricante del motor, eso no contradice la marca del auto. Si las dos
+  nombran solo fabricantes de motor (MWM contra Cummins), sí.
+- Los dos casos quedaron en las pruebas de la revisión (57 pares).
+
 ## 🔗 Revisar sugeridas: primero lo que hay que hacer
 
 Mirado con capturas sobre la base real (15.308 pendientes en 8 listas):

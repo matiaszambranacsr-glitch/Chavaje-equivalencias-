@@ -187,6 +187,11 @@ PARES_DE_MUESTRA = [
      "distinta", "TARANTO / ILLINOIS: motores Honda de otra serie"),
     ("Junta para Cárter CUMMINS ELECTRÓNICO - 3,9 - ISBE (4897877/4939246)",
      "JTA CARTER CUMMINS 6 CIL ISBe", "distinta", "ILLINOIS / IMPERIAL: el Cummins 3.9 es de 4"),
+    ("Jta.Carter CHEVROLET SPRINT 6.07 T", "JTA CARTER MWM SPRINT 4 CIL.", "distinta",
+     "TARANTO / IMPERIAL: el Sprint 6.07 es de 6, aunque no diga MWM"),
+    ("Jta.Carter CHEVROLET SPRINT 4.07T", "JTA CARTER MWM SPRINT 4 CIL.", "dudosa",
+     "TARANTO / IMPERIAL: el mismo Sprint de 4, con la marca del auto y la del motor",
+     NECESITA_EL_CATALOGO),
 ]
 
 

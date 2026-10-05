@@ -2303,6 +2303,27 @@ for _n in ast.walk(ARBOL):
                                      "escondida en el detalle: el resumen tiene que decir algo "
                                      "completo")
 
+# ============ Números con coma de miles ============
+# «{n:,}» escribe «1,380», a la inglesa: acá se lee uno coma tres. Había 211. Van con miles().
+for _n in ast.walk(ARBOL):
+    if (isinstance(_n, ast.FormattedValue) and isinstance(_n.format_spec, ast.JoinedStr)
+            and any(isinstance(_v, ast.Constant) and str(_v.value).startswith(",")
+                    for _v in _n.format_spec.values)):
+        reportar("ERROR", _n.lineno, "número con coma de miles («:,»): acá se lee como decimal. "
+                                     "Usar miles(n) —o miles(n, 0) para redondear—")
+
+# ============ Listas desplegables que hablan en inglés ============
+# Un st.multiselect sin placeholder dice «Choose options», y un st.selectbox que arranca vacío
+# (index=None), «Choose an option»: lo único en inglés de toda la pantalla.
+for _n in ast.walk(ARBOL):
+    if isinstance(_n, ast.Call) and getattr(_n.func, "attr", None) in ("multiselect", "selectbox"):
+        _kw = {k.arg: k.value for k in _n.keywords}
+        _vacio = (_n.func.attr == "multiselect"
+                  or (isinstance(_kw.get("index"), ast.Constant) and _kw["index"].value is None))
+        if _vacio and "placeholder" not in _kw:
+            reportar("ERROR", _n.lineno, f"st.{_n.func.attr} sin placeholder: cuando no hay nada "
+                                         "elegido dice «Choose options» en inglés")
+
 # ============ Resultado ============
 orden = {"ERROR": 0, "REVISAR": 1, "AVISO": 2}
 problemas.sort(key=lambda x: (orden[x[0]], x[1]))

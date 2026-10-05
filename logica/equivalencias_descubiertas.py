@@ -2609,6 +2609,7 @@ def tabla_del_abanico(abanico):
             valor = suyo[k]
             # Se marca lo que los dos dicen y no coincide; lo que uno solo dice no se marca.
             fila[k] = (f"⚠️ {valor}" if valor and propio[k] and valor != propio[k] else valor)
+        fila["Descripción"] = (f.get(f"desc_{lado}") or "")[:110]
         filas.append(fila)
     # La sobremedida la dice solo la que lo es: si alguna lo dice, las otras son estándar, y
     # eso también hay que verlo (ver sobremedidas_que_chocan()).
@@ -2619,8 +2620,14 @@ def tabla_del_abanico(abanico):
             elif f is not filas[0] and not propio["Medida"]:
                 f["Medida"] = f"⚠️ {f['Medida']}"
     # Las columnas que nadie tiene no se muestran: en el celular cada columna cuesta.
+    # La descripción de cada candidato va al final, siempre: cuando los rasgos no distinguen
+    # nada —«25675AC6 (+2)» y «SPRINT» en común, y ninguna otra columna—, era lo único que
+    # servía para decidir, y estaba escondida adentro de la lista desplegable de abajo. La del
+    # producto ya está escrita arriba de la tabla.
+    filas[0]["Descripción"] = ""
     usadas = [k for k in campos if any(f[k] for f in filas)]
-    return [{k: f[k] for k in ("Opción", "Modelos en común", *usadas)} for f in filas]
+    return [{k: f[k] for k in ("Opción", "Modelos en común", *usadas, "Descripción")}
+            for f in filas]
 
 
 def pieza_sugerida_del_abanico(abanico):

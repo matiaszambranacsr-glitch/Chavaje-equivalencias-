@@ -1322,6 +1322,7 @@ Administrar → Mantenimiento.
                         if _sugerida_ab in _opciones_ab:
                             _opciones_ab[_sugerida_ab] = "⭐ " + _opciones_ab[_sugerida_ab]
                         st.multiselect("Las que son la misma pieza:", list(_opciones_ab),
+                                       placeholder="Elegí la o las que son la misma pieza…",
                                        default=[_sugerida_ab] if _sugerida_ab in _opciones_ab
                                        else [],
                                        format_func=lambda k, o=_opciones_ab: o[k],
