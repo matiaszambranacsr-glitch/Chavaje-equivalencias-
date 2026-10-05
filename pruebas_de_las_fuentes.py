@@ -123,6 +123,19 @@ def probar(L):
     # Una serie que mezcla índice y variación no se cree.
     _con_respuestas(g, {url_ipc: _ROTA})
     esperar("IPC roto", g["_inflacion_mensual_indec"](), {})
+    # Si el Estado no contesta, el respaldo de argentinadatos (porcentaje mensual), sin la
+    # hiperinflación del 89 que viene al principio de la serie.
+    _argdatos = ([{"fecha": "1989-07-31", "valor": 196.6}]
+                 + [{"fecha": f"2026-{m:02d}-28", "valor": v}
+                    for m, v in ((6, 1.6), (7, 2.42), (8, 1.9))])
+    _con_respuestas(g, {g["URL_INFLACION_ARGENTINADATOS"]: _argdatos})
+    ipc = g["_inflacion_mensual_indec"]()
+    esperar("IPC de respaldo: de dónde vino", (ipc.get("mes"), ipc.get("serie")),
+            ("2026-08", "argentinadatos (republica el INDEC)"))
+    cerca("IPC de respaldo: agosto", ipc.get("variacion"), 0.019, tol=0.0002)
+    _con_respuestas(g, {url_ipc: _INDICE, g["URL_INFLACION_ARGENTINADATOS"]: _argdatos})
+    esperar("IPC: el del INDEC antes que el respaldo", g["_inflacion_mensual_indec"]().get("serie"),
+            g["SERIES_IPC_INDEC"][0])
 
     # 2. La inflación desde una fecha: meses ENTEROS después del de la fecha.
     _con_respuestas(g, {url_ipc: _INDICE})
@@ -272,8 +285,39 @@ def probar(L):
                              {"entidad": "BANCO A", "situacion": 1, "monto": 130.0,
                               "diasAtrasoPago": 0},
                              {"entidad": "TARJETA B", "situacion": 3, "monto": 45.5,
-                              "diasAtrasoPago": 75}]}]}}),
+                              "diasAtrasoPago": 75, "refinanciaciones": True,
+                              "procesoJud": True, "situacionJuridica": False}]}]}}),
         "/Deudas/30500010912": (404, {"status": 404}),
+        # El período con guion, como en otros ejemplos de la misma API.
+        "/Deudas/20111111112": (200, {"status": 200, "results": {
+            "denominacion": "OTRO", "periodos": [{"periodo": "2026-08", "entidades": [
+                {"entidad": "BANCO C", "situacion": 1, "monto": 1.0, "situacionJuridica": True}]}]}}),
+        # Historicas: el formato de la especificación OpenAPI (HistorialDeuda).
+        "/Historicas/33693450239": (200, {"status": 200, "results": {
+            "identificacion": 33693450239, "denominacion": "TALLER DE PRUEBA SA",
+            "periodos": [{"periodo": p, "entidades": [
+                             {"entidad": "BANCO A", "situacion": 1, "monto": 100.0},
+                             {"entidad": "TARJETA B", "situacion": sit, "monto": 40.0}]}
+                         for p, sit in (("202601", 1), ("202602", 1), ("202603", 2),
+                                        ("202604", 1), ("202605", 1), ("202606", 1),
+                                        ("202607", 1), ("202608", 3))]}}),
+        "/Historicas/30500010912": (404, {"status": 404}),
+        # ChequesRechazados: el formato de la especificación OpenAPI (ChequeRechazado).
+        "/ChequesRechazados/33693450239": (200, {"status": 200, "results": {
+            "identificacion": 33693450239, "denominacion": "TALLER DE PRUEBA SA",
+            "causales": [{"causal": "SIN FONDOS SUFICIENTES", "entidades": [
+                {"entidad": 44, "detalle": [
+                    {"nroCheque": 12345678.0, "fechaRechazo": "2026-05-10", "monto": 50000.0,
+                     "fechaPago": None, "fechaPagoMulta": None, "estadoMulta": None,
+                     "ctaPersonal": True, "denomJuridica": None, "enRevision": False,
+                     "procesoJud": False},
+                    {"nroCheque": 12345679.0, "fechaRechazo": "2026-02-01", "monto": 20000.0,
+                     "fechaPago": "2026-02-20", "ctaPersonal": True}]}]},
+                {"causal": "DEFECTOS FORMALES", "entidades": [
+                    {"entidad": 11, "detalle": [
+                        {"nroCheque": 555.0, "fechaRechazo": "2026-07-01", "monto": 1000.0,
+                         "fechaPago": None}]}]}]}}),
+        "/ChequesRechazados/30500010912": (404, {"status": 404}),
     }
     _original = _rq.get
 
@@ -298,7 +342,32 @@ def probar(L):
         sit, err = g["situacion_en_el_bcra"]("33-69345023-9")
         esperar("deudor: peor situación del último período", (err, sit["peor"], sit["periodo"],
                                                               len(sit["deudas"])),
-                (None, 3, "202608", 2))
+                (None, 3, "2026-08", 2))
+        esperar("deudor: lo que marca el banco", [d[4] for d in sit["deudas"]],
+                ["", "en juicio, refinanciada"])
+        sit, err = g["situacion_en_el_bcra"]("20-11111111-2")
+        esperar("deudor: período con guion y concurso", (err, sit["periodo"], sit["deudas"][0][4]),
+                (None, "2026-08", "concurso o quiebra"))
+        hist, err = g["historia_en_el_bcra"]("33-69345023-9")
+        esperar("historia: meses, peor y total", (err, len(hist["meses"]), hist["meses"][2],
+                                                  hist["meses"][-1][0]),
+                (None, 8, ("2026-03", 2, 140.0), "2026-08"))
+        esperar("historia: empeoró", hist["tendencia"], "empeoró")
+        hist, err = g["historia_en_el_bcra"]("30-50001091-2")
+        esperar("historia: no figura", (err, hist["meses"], hist["tendencia"]), (None, [], ""))
+        rech, err = g["cheques_rechazados_en_el_bcra"]("33-69345023-9")
+        esperar("cheques rechazados: todos, el más nuevo primero",
+                (err, [(f, c_, n) for f, c_, n, _m, _p in rech["cheques"]]),
+                (None, [("2026-07-01", "Defectos formales", "555"),
+                        ("2026-05-10", "Sin fondos suficientes", "12345678"),
+                        ("2026-02-01", "Sin fondos suficientes", "12345679")]))
+        esperar("cheques rechazados: sin pagar", (rech["sin_pagar"], rech["monto_sin_pagar"]),
+                (2, 51000.0))
+        rech, err = g["cheques_rechazados_en_el_bcra"]("30-50001091-2")
+        esperar("cheques rechazados: no figura", (err, rech["cheques"], rech["sin_pagar"]),
+                (None, [], 0))
+        rech, err = g["cheques_rechazados_en_el_bcra"]("20-11111111-1")
+        esperar("cheques rechazados: CUIT inválido", (rech, bool(err)), (None, True))
         sit, err = g["situacion_en_el_bcra"]("30-50001091-2")
         esperar("sin deudas informadas", (err, sit["deudas"], sit["peor"]), (None, [], 0))
         sit, err = g["situacion_en_el_bcra"]("20-11111111-1")

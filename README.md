@@ -6436,6 +6436,24 @@ el botón**:
 - Probado con los ejemplos de la documentación oficial (Cheques Denunciados v1.0, Central de
   Deudores v1.0): denunciado, no figura (404), sin deudas, el peor de varios bancos, CUIT
   inválido que no sale a consultar.
+- **Las otras dos consultas de la Central de Deudores**, según su especificación OpenAPI:
+  - **Cheques rechazados del CUIT** (`Deudas/ChequesRechazados`): los cheques que libró el
+    taller y le rechazaron, por causal, con fecha, monto y si los pagó. Si hay alguno sin pagar
+    sale en rojo con el total. Es la otra cara de «Verificar un cheque»: aquella dice si UN
+    cheque está denunciado; esta, si el taller tiene la costumbre de librarlos sin fondos.
+  - **Los últimos 24 meses** (`Deudas/Historicas`): en cuántos estuvo en situación 2 o peor, la
+    última vez, y si **viene empeorando** (la peor del último período contra la de los seis
+    anteriores).
+- **Lo que el banco marca sobre cada deuda** —concurso o quiebra, en juicio, refinanciada,
+  irrecuperable por disposición técnica, en revisión— se leía y se tiraba. Ahora va en una
+  columna «Observaciones», y un concurso pone el aviso en rojo aunque la situación sea 1.
+- **El período se mostraba mal si venía con guion**: «2026-08» salía «2026--08». Ahora se
+  normaliza venga como «202608» o «2026-08».
+- **Inflación de respaldo**: si la API de series del Estado no contesta, se usa la inflación
+  mensual del INDEC que republica argentinadatos (la misma que da el dólar), y se guarda de
+  dónde vino. Solo los últimos tres años: la serie arranca en los cuarenta y trae el 89.
+- «🔌 Probar las fuentes de afuera» suma la Central de Deudores (con el CUIT de la AFIP, nunca el
+  de un cliente) y la inflación de respaldo.
 
 ## 🔗 Revisar sugeridas: primero lo que hay que hacer
 

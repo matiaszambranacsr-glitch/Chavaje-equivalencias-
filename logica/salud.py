@@ -975,7 +975,8 @@ def borrar_codigos_basura():
 # ============================================================================================
 # Las únicas fuentes de afuera de la app que no son el catálogo de un proveedor. Todas públicas,
 # sin clave y sin costo, y la app funciona igual sin ellas:
-#   · el IPC del INDEC, por la API de series de tiempo de datos.gob.ar (el Estado argentino);
+#   · el IPC del INDEC, por la API de series de tiempo de datos.gob.ar (el Estado argentino),
+#     y si no contesta, el mismo dato republicado por argentinadatos;
 #   · el dólar: el oficial minorista día por día de argentinadatos, CONTROLADO contra el de
 #     referencia del BCRA (api.bcra.gob.ar). Si se separan más de un 15%, se usa el del BCRA.
 # Para qué: cuánto atrasada está una lista contra la inflación, cuánto aumentó cada proveedor
@@ -1127,7 +1128,35 @@ def _inflacion_mensual_indec():
         ipc = _ipc_de_la_serie(serie)
         if ipc:
             return ipc
-    return {}
+    return _inflacion_de_argentinadatos()
+
+
+# El respaldo, si la API del Estado no contesta: argentinadatos (la misma que da el dólar)
+# republica la inflación mensual del INDEC como [{"fecha": "2026-08-31", "valor": 1.9}, ...],
+# en porcentaje. No es el INDEC, así que va último y se dice de dónde vino. Se toman solo los
+# últimos meses: la serie empieza en los años cuarenta y trae la hiperinflación del 89, que con
+# razón no pasa el control de _variaciones_del_ipc().
+URL_INFLACION_ARGENTINADATOS = "https://api.argentinadatos.com/v1/finanzas/indices/inflacion"
+
+
+def _inflacion_de_argentinadatos():
+    datos = _pedir_json(URL_INFLACION_ARGENTINADATOS, tiempo_maximo=6)
+    valores = []
+    for x in (datos if isinstance(datos, list) else []):
+        try:
+            if re.fullmatch(r"\d{4}-\d{2}", str(x["fecha"])[:7]):
+                valores.append((str(x["fecha"])[:7], float(x["valor"])))
+        except (KeyError, TypeError, ValueError):
+            continue
+    # Los últimos tres años, por fecha y no por cantidad: una serie corta no tiene que
+    # arrastrar el 89.
+    desde = f"{int(max(valores)[0][:4]) - 3}{max(valores)[0][4:]}" if valores else ""
+    mensual = _variaciones_del_ipc([(m, v) for m, v in valores if m > desde])
+    if not mensual:
+        return {}
+    ultimo = max(mensual)
+    return {"mensual": mensual, "mes": ultimo, "variacion": mensual[ultimo],
+            "serie": "argentinadatos (republica el INDEC)"}
 
 
 # EL IPC DE TRANSPORTE. El INDEC publica el IPC por división, y una es «Transporte»: el
@@ -1337,6 +1366,18 @@ def contexto_de_precios():
 URL_BCRA_BANCOS = "https://api.bcra.gob.ar/cheques/v1.0/entidades"
 URL_BCRA_CHEQUE = "https://api.bcra.gob.ar/cheques/v1.0/denunciados/{entidad}/{numero}"
 URL_BCRA_DEUDAS = "https://api.bcra.gob.ar/CentralDeDeudores/v1.0/Deudas/{cuit}"
+# Las otras dos consultas de la misma API (especificación OpenAPI oficial, «Central de Deudores
+# v1.0»): los últimos 24 meses, y los cheques rechazados del CUIT —los que libró él—.
+URL_BCRA_HISTORIA = "https://api.bcra.gob.ar/CentralDeDeudores/v1.0/Deudas/Historicas/{cuit}"
+URL_BCRA_RECHAZADOS = ("https://api.bcra.gob.ar/CentralDeDeudores/v1.0/Deudas/"
+                       "ChequesRechazados/{cuit}")
+# Lo que el banco marca sobre una deuda además de la situación. El orden es el de la gravedad:
+# el concurso o la quiebra primero.
+OBSERVACIONES_DEL_BCRA = (("situacionJuridica", "concurso o quiebra"), ("procesoJud", "en juicio"),
+                          ("irrecDisposicionTecnica", "irrecuperable por disposición técnica"),
+                          ("refinanciaciones", "refinanciada"),
+                          ("recategorizacionOblig", "recategorizada por el banco"),
+                          ("enRevision", "en revisión"))
 SITUACIONES_DEL_BCRA = {1: "normal", 2: "riesgo bajo / con seguimiento especial",
                         3: "riesgo medio / con problemas", 4: "riesgo alto / alto riesgo de "
                         "insolvencia", 5: "irrecuperable", 6: "irrecuperable por disposición técnica"}
@@ -1421,38 +1462,120 @@ def consultar_cheque(codigo_entidad, numero):
             "fecha": r.get("fechaProcesamiento") or "", "detalles": detalles}, None
 
 
-def situacion_en_el_bcra(cuit):
-    """Cómo está ese CUIT en el sistema financiero, según la Central de Deudores del BCRA:
-    ({"nombre", "periodo", "peor", "deudas": [(entidad, situación, monto en miles, días de
-    atraso)]}, error). Sin deudas informadas, deudas es [] y peor es 0."""
+def _periodo_legible(periodo):
+    """«202608» o «2026-08» → «2026-08». La especificación dice solo que es texto, y los
+    ejemplos que circulan traen las dos formas: se muestra igual venga como venga."""
+    cifras = re.sub(r"\D", "", str(periodo or ""))
+    return f"{cifras[:4]}-{cifras[4:6]}" if len(cifras) >= 6 else str(periodo or "")
+
+
+def _consulta_de_deudores(url, cuit):
+    """(resultado, error) de una consulta de la Central de Deudores por CUIT. 404 es «no figura»
+    y devuelve ({}, None): no es una falla."""
     limpio = cuit_valido(cuit)
     if not limpio:
         return None, "El CUIT no es válido (revisá las 11 cifras: el último dígito no da)."
-    estado, cuerpo = _pedir_al_bcra(URL_BCRA_DEUDAS.format(cuit=limpio))
+    estado, cuerpo = _pedir_al_bcra(url.format(cuit=limpio))
     if estado == 404:
-        return {"nombre": "", "periodo": "", "peor": 0, "deudas": []}, None
+        return {}, None
     if estado != 200 or not isinstance(cuerpo, dict):
         return None, ("No se pudo consultar al BCRA" + (f" (respondió {estado})" if estado
                                                         else "") + ". Probá en un rato.")
-    r = cuerpo.get("results") or {}
+    return (cuerpo.get("results") if isinstance(cuerpo.get("results"), dict) else {}), None
+
+
+def situacion_en_el_bcra(cuit):
+    """Cómo está ese CUIT en el sistema financiero, según la Central de Deudores del BCRA:
+    ({"nombre", "periodo", "peor", "deudas": [(entidad, situación, monto en miles, días de
+    atraso, observaciones)]}, error). Sin deudas informadas, deudas es [] y peor es 0.
+
+    Las observaciones son lo que el banco marca además de la situación (ver
+    OBSERVACIONES_DEL_BCRA): un concurso preventivo puede convivir con una situación 1 en una
+    tarjeta, y es lo primero que hay que saber antes de fiarle."""
+    r, error = _consulta_de_deudores(URL_BCRA_DEUDAS, cuit)
+    if r is None:
+        return None, error
     periodos = sorted((p for p in r.get("periodos") or [] if isinstance(p, dict)),
-                      key=lambda p: str(p.get("periodo")))
+                      key=lambda p: _periodo_legible(p.get("periodo")))
     ultimo = periodos[-1] if periodos else {}
     deudas = []
     for e in ultimo.get("entidades") or []:
         try:
             deudas.append((str(e.get("entidad") or "").strip(), int(e.get("situacion") or 0),
-                           float(e.get("monto") or 0), int(e.get("diasAtrasoPago") or 0)))
-        except (TypeError, ValueError):
+                           float(e.get("monto") or 0), int(e.get("diasAtrasoPago") or 0),
+                           ", ".join(texto for campo, texto in OBSERVACIONES_DEL_BCRA
+                                     if e.get(campo) is True)))
+        except (AttributeError, TypeError, ValueError):
             continue
     return {"nombre": str(r.get("denominacion") or "").strip(),
-            "periodo": str(ultimo.get("periodo") or ""),
+            "periodo": _periodo_legible(ultimo.get("periodo")),
             "peor": max((d[1] for d in deudas), default=0), "deudas": deudas}, None
+
+
+def historia_en_el_bcra(cuit):
+    """Los últimos 24 meses del CUIT en la Central de Deudores: ({"meses": [(período, peor
+    situación, deuda total en miles)] del más viejo al más nuevo, "tendencia": «empeoró»,
+    «mejoró», «igual» o ""}, error).
+
+    La tendencia compara la peor situación del último período con la peor de los seis
+    anteriores: un 3 hace un año que ya volvió a 1 no es lo mismo que un 1 que pasó a 3."""
+    r, error = _consulta_de_deudores(URL_BCRA_HISTORIA, cuit)
+    if r is None:
+        return None, error
+    meses = {}
+    for p in r.get("periodos") or []:
+        if not isinstance(p, dict) or not p.get("periodo"):
+            continue
+        peor, total = 0, 0.0
+        for e in p.get("entidades") or []:
+            try:
+                peor = max(peor, int(e.get("situacion") or 0))
+                total += float(e.get("monto") or 0)
+            except (AttributeError, TypeError, ValueError):
+                continue
+        meses[_periodo_legible(p["periodo"])] = (peor, total)
+    lista = [(m, peor, total) for m, (peor, total) in sorted(meses.items())]
+    tendencia = ""
+    if len(lista) >= 2:
+        antes = max(peor for _m, peor, _t in lista[-7:-1])
+        ahora = lista[-1][1]
+        tendencia = "empeoró" if ahora > antes else "mejoró" if ahora < antes else "igual"
+    return {"meses": lista, "tendencia": tendencia}, None
+
+
+def cheques_rechazados_en_el_bcra(cuit):
+    """Los cheques que libró ese CUIT y le rechazaron, según la Central de Deudores: ({"cheques":
+    [(fecha de rechazo, causal, número, monto, pagado)] del más nuevo al más viejo, "sin_pagar",
+    "monto_sin_pagar"}, error). Sin cheques rechazados, la lista va vacía.
+
+    Es la otra cara de «🔎 Verificar un cheque»: aquella dice si UN cheque está denunciado; esta,
+    si el taller tiene la costumbre de librar cheques sin fondos."""
+    r, error = _consulta_de_deudores(URL_BCRA_RECHAZADOS, cuit)
+    if r is None:
+        return None, error
+    cheques = []
+    for causal in r.get("causales") or []:
+        if not isinstance(causal, dict):
+            continue
+        for entidad in causal.get("entidades") or []:
+            for d in (entidad or {}).get("detalle") or []:
+                try:
+                    cheques.append((str(d.get("fechaRechazo") or "")[:10],
+                                    str(causal.get("causal") or "").strip().capitalize(),
+                                    str(int(float(d.get("nroCheque") or 0))),
+                                    float(d.get("monto") or 0), bool(d.get("fechaPago"))))
+                except (AttributeError, TypeError, ValueError):
+                    continue
+    cheques.sort(reverse=True)
+    sin_pagar = [ch for ch in cheques if not ch[4]]
+    return {"cheques": cheques, "sin_pagar": len(sin_pagar),
+            "monto_sin_pagar": sum(ch[3] for ch in sin_pagar)}, None
 
 
 # Un VIN de muestra que la NHTSA usa en su propia documentación (un Honda Accord 2003): sirve
 # para saber si la base responde sin mandarle el de ningún cliente.
 VIN_DE_MUESTRA = "1HGCM82633A004352"
+CUIT_DE_MUESTRA = "33693450239"
 
 
 def probar_fuentes_de_afuera():
@@ -1494,6 +1617,13 @@ def probar_fuentes_de_afuera():
     medir("BCRA — bancos para verificar cheques (api.bcra.gob.ar)",
           lambda: _pedir_al_bcra(URL_BCRA_BANCOS),
           lambda r: (f"{len((r[1] or {}).get('results') or [])} bancos" if r and r[0] == 200 else ""))
+    medir("Inflación de respaldo (argentinadatos)", _inflacion_de_argentinadatos,
+          lambda r: f"{r['mes']}: {miles(r['variacion'] * 100, 1)}%")
+    # Con el CUIT de un organismo público (la AFIP), nunca el de un cliente: alcanza con saber
+    # si contesta. 404 («no figura») también es contestar.
+    medir("BCRA — Central de Deudores (api.bcra.gob.ar)",
+          lambda: _pedir_al_bcra(URL_BCRA_DEUDAS.format(cuit=CUIT_DE_MUESTRA)),
+          lambda r: (f"contesta ({r[0]})" if r and r[0] in (200, 404) else ""))
     medir("NHTSA — lector de VIN (vpic.nhtsa.dot.gov)",
           lambda: consultar_vin_en_nhtsa(VIN_DE_MUESTRA)[0],
           lambda r: f"{r.get('marca')} {r.get('modelo')} {r.get('anio')}")

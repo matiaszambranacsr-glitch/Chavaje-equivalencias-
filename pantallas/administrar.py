@@ -972,17 +972,50 @@ if pagina == PAGINAS[3]:
                         guardar_config(f"cuit_taller_{_mid}", cuit_valido(_cuit))
                     with st.spinner("Consultando al BCRA…"):
                         _sit, _err_sit = situacion_en_el_bcra(_cuit)
+                        _hist, _err_hist = historia_en_el_bcra(_cuit)
+                        _rech, _err_rech = cheques_rechazados_en_el_bcra(_cuit)
                     if _err_sit:
                         st.warning(_err_sit)
                     elif not _sit["deudas"]:
                         st.success("✅ No tiene deudas informadas en el sistema financiero.")
                     else:
                         _peor = _sit["peor"]
-                        (st.success if _peor <= 1 else st.warning if _peor == 2 else st.error)(
+                        _graves = sorted({o for *_x, o in _sit["deudas"] if o})
+                        (st.success if _peor <= 1 and not _graves else
+                         st.warning if _peor <= 2 else st.error)(
                             f"{_sit['nombre'] or 'Ese CUIT'} — peor situación: **{_peor} "
                             f"({SITUACIONES_DEL_BCRA.get(_peor, '?')})**, al período "
-                            f"{_sit['periodo'][:4]}-{_sit['periodo'][4:]}.")
+                            f"{_sit['periodo']}."
+                            + (f" Ojo: **{', '.join(_graves)}**." if _graves else ""))
                         st.dataframe([{"Entidad": e, "Situación": s_,
                                        "Deuda (miles de $)": miles(m, 1),
-                                       "Días de atraso": d} for e, s_, m, d in _sit["deudas"]],
+                                       "Días de atraso": d, "Observaciones": o or "—"}
+                                      for e, s_, m, d, o in _sit["deudas"]],
+                                     width="stretch", hide_index=True)
+                    # Cómo viene: ver historia_en_el_bcra().
+                    if _hist and _hist["meses"]:
+                        _malos = [(m_, p_) for m_, p_, _t in _hist["meses"] if p_ >= 2]
+                        st.caption(
+                            f"📅 Últimos {len(_hist['meses'])} meses: "
+                            + (f"en situación 2 o peor en {len(_malos)} (la última vez en "
+                               f"{_malos[-1][0]}, situación {_malos[-1][1]})"
+                               if _malos else "siempre en situación 1 (normal)")
+                            + {"empeoró": ". **Viene empeorando.**",
+                               "mejoró": ". Viene mejorando.", "igual": ".", "": "."}[
+                                _hist["tendencia"]])
+                    # Los cheques que libró y le rechazaron: ver cheques_rechazados_en_el_bcra().
+                    if _err_rech and not _err_sit:
+                        st.caption(f"Cheques rechazados: {_err_rech}")
+                    elif _rech is not None and not _rech["cheques"]:
+                        st.caption("🧾 No tiene cheques rechazados informados.")
+                    elif _rech:
+                        (st.error if _rech["sin_pagar"] else st.info)(
+                            f"🧾 {len(_rech['cheques'])} cheque(s) rechazado(s)"
+                            + (f", **{_rech['sin_pagar']} sin pagar** por "
+                               f"{formato_precio(_rech['monto_sin_pagar'])}"
+                               if _rech["sin_pagar"] else ", todos pagados") + ".")
+                        st.dataframe([{"Rechazado el": f_, "Por": c_, "Cheque N°": n_,
+                                       "Monto": formato_precio(m_),
+                                       "Pagado": "✅" if p_ else "❌ no"}
+                                      for f_, c_, n_, m_, p_ in _rech["cheques"]],
                                      width="stretch", hide_index=True)
