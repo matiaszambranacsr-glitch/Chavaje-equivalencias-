@@ -392,6 +392,71 @@ def probar(L):
     esperar("NHTSA: error", error, None)
     esperar("NHTSA: marca y modelo", (datos or {}).get("marca"), "FIAT")
     esperar("NHTSA: motor", (datos or {}).get("motor"), "1.4L 4cil Gasoline")
+
+    # 9. La NHTSA: campañas de seguridad y reclamos por componente.
+    esperar("componente: freno de mano antes que frenos",
+            ns["componente_en_castellano"]("PARKING BRAKE:CONVENTIONAL"), "Freno de mano")
+    esperar("componente: motor y refrigeración",
+            ns["componente_en_castellano"]("ENGINE AND ENGINE COOLING:ENGINE"),
+            "Motor y refrigeración")
+    esperar("componente: no se reconoce", ns["componente_en_castellano"]("ALGO RARO"), None)
+    esperar("reclamo con coma adentro del nombre",
+            ns["_componentes_del_reclamo"]("SERVICE BRAKES, HYDRAULIC,ENGINE"), ["Frenos", "Motor"])
+    esperar("reclamo sin nada reconocible", ns["_componentes_del_reclamo"](""), ["Otro"])
+    esperar("modelo: F150 es F-150", ns["el_mismo_modelo"]("F150", ["RANGER", "F-150"]), "F-150")
+    esperar("modelo: CRUZE es CRUZE", ns["el_mismo_modelo"]("CRUZE", ["CRUZE LIMITED", "CRUZE"]),
+            "CRUZE")
+    esperar("modelo: CRUZE es CRUZE LIMITED", ns["el_mismo_modelo"]("CRUZE", ["CRUZE LIMITED"]),
+            "CRUZE LIMITED")
+    esperar("modelo: el Gol no es el Golf", ns["el_mismo_modelo"]("GOL", ["GOLF", "JETTA"]), None)
+    esperar("marca: VW", ns["marca_para_la_nhtsa"]("vw"), "VOLKSWAGEN")
+    esperar("marca: Mercedes", ns["marca_para_la_nhtsa"]("MERCEDES BENZ"), "MERCEDES-BENZ")
+    _campanias = {"Count": 1, "Message": "Results returned successfully", "results": [
+        {"Manufacturer": "Ford Motor Company", "NHTSACampaignNumber": "20V332000",
+         "parkIt": False, "parkOutSide": False, "ReportReceivedDate": "02/06/2020",
+         "Component": "SEAT BELTS:FRONT:RETRACTORS", "Summary": "The seat belt may not lock.",
+         "Consequence": "Increased risk of injury.", "Remedy": "Dealers will replace it.",
+         "ModelYear": "2019", "Make": "FORD", "Model": "RANGER"}]}
+    _reclamos = {"count": 3, "message": "Results returned successfully", "results": [
+        {"odiNumber": 1, "crash": False, "fire": False,
+         "components": "SERVICE BRAKES, HYDRAULIC,ENGINE", "summary": "..."},
+        {"odiNumber": 2, "crash": True, "fire": False, "components": "POWER TRAIN"},
+        {"odiNumber": 3, "crash": False, "fire": True, "components": "SERVICE BRAKES"}]}
+    _modelos = {"Count": 2, "results": [{"modelYear": "2019", "make": "FORD", "model": "RANGER"},
+                                         {"modelYear": "2019", "make": "FORD", "model": "F-150"}]}
+    pedidas = []
+    _respuestas_nhtsa = {"https://api.nhtsa.gov/recalls/": _campanias,
+                         "https://api.nhtsa.gov/complaints/": _reclamos,
+                         "https://api.nhtsa.gov/products/": _modelos}
+
+    def _nhtsa_falsa(url, tiempo_maximo=4):
+        pedidas.append(url)
+        return next((r for prefijo, r in _respuestas_nhtsa.items() if url.startswith(prefijo)),
+                    None)
+    g["_pedir_json"] = _nhtsa_falsa
+    ns["del_proceso"]("lo_traido_de_la_nhtsa", dict).clear()
+    esperar("modelos de la NHTSA", ns["modelos_en_la_nhtsa"]("FORD", 2019), ["F-150", "RANGER"])
+    datos, error = ns["fallas_reportadas"]("Ford", "Ranger", 2019)
+    esperar("fallas: sin error", error, None)
+    esperar("fallas: la campaña", [(x["numero"], x["componente"], x["no_usar"])
+                                   for x in (datos or {}).get("campanias", [])],
+            [("20V332000", "Cinturones de seguridad", False)])
+    esperar("fallas: reclamos", (datos or {}).get("reclamos"), 3)
+    esperar("fallas: por componente", (datos or {}).get("por_componente"),
+            [("Frenos", 2, 0, 1), ("Caja y transmisión", 1, 1, 0), ("Motor", 1, 0, 0)])
+    esperar("fallas: el modelo va en mayúsculas en la consulta",
+            any("model=RANGER" in u and "make=FORD" in u for u in pedidas), True)
+    antes = len(pedidas)
+    ns["fallas_reportadas"]("Ford", "Ranger", 2019)
+    esperar("fallas: la segunda vez no sale a internet", len(pedidas), antes)
+    ns["fallas_reportadas"]("MERCEDES BENZ", "SPRINTER", 2019)
+    esperar("fallas: Mercedes como la escribe la NHTSA",
+            any("make=MERCEDES-BENZ" in u for u in pedidas), True)
+    g["_pedir_json"] = lambda url, tiempo_maximo=4: None
+    ns["del_proceso"]("lo_traido_de_la_nhtsa", dict).clear()
+    esperar("fallas: sin internet, el error", bool(ns["fallas_reportadas"]("FORD", "RANGER", 2019)[1]),
+            True)
+    esperar("fallas: sin año", bool(ns["fallas_reportadas"]("FORD", "RANGER", "")[1]), True)
     return fallas
 
 

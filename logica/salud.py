@@ -1666,5 +1666,10 @@ def probar_fuentes_de_afuera():
     medir("NHTSA — lector de VIN (vpic.nhtsa.dot.gov)",
           lambda: consultar_vin_en_nhtsa(VIN_DE_MUESTRA)[0],
           lambda r: f"{r.get('marca')} {r.get('modelo')} {r.get('anio')}")
+    # El auto de muestra es el mismo del VIN de muestra: un Honda Accord 2003.
+    medir("NHTSA — campañas y reclamos (api.nhtsa.gov)",
+          lambda: fallas_reportadas("HONDA", "ACCORD", 2003)[0],
+          lambda r: (f"{len(r['campanias'])} campaña(s), {miles(r['reclamos'])} reclamo(s)"
+                     if r.get("campanias") or r.get("reclamos") else ""))
     return filas
 

@@ -1449,6 +1449,11 @@ def _esquema_gestion(c):
         movimiento_id INTEGER,
         facturado_en TEXT
     )""")
+    # LA TANDA: los ítems que un vendedor pidió juntos (un presupuesto entero). El depósito los
+    # ve agrupados, para que cuatro vendedores con diez productos cada uno no lleguen como
+    # cuarenta renglones mezclados.
+    if "tanda" not in [f[1] for f in c.execute("PRAGMA table_info(pedidos_deposito)")]:
+        c.execute("ALTER TABLE pedidos_deposito ADD COLUMN tanda TEXT")
     c.execute("CREATE INDEX IF NOT EXISTS idx_pedidos_deposito_estado ON pedidos_deposito(estado)")
     c.execute("""CREATE TABLE IF NOT EXISTS movimientos_de_cuenta (
         id INTEGER PRIMARY KEY AUTOINCREMENT,

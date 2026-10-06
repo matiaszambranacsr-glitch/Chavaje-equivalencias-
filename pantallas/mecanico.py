@@ -664,6 +664,11 @@ if pagina == PAGINAS[7]:
                              "se muestra igual, marcado aparte."
                     )
 
+                # Campañas de seguridad y lo que más falla (NHTSA), con modelo y año elegidos.
+                if modelo_elegido and anio_filtro:
+                    mostrar_fallas_reportadas(marca_elegida, modelo_elegido, anio_filtro,
+                                              "rpv")
+
                 filtro_modelo = st.text_input(
                     "Además, filtrar por texto (opcional):",
                     key="filtro_modelo_vehiculo", placeholder="Ej: 1.6, inyección, turbo..."

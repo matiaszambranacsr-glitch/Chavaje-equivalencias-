@@ -378,6 +378,9 @@ def panel_vin(clave="vin", mostrar_ensenar=True):
             help="Se completa solo con lo que reconoce del VIN. Corregilo si no acertó; si lo "
                  "dejás vacío, busca todos los repuestos de la marca."
         ).strip()
+        # Las campañas de seguridad y lo que más falla en ese auto (NHTSA): ver
+        # «CAMPAÑAS DE SEGURIDAD Y FALLAS REPORTADAS» en logica/mecanico.py.
+        mostrar_fallas_reportadas(marca_para_buscar, modelo_manual, anio_usar, clave)
 
         motor_reconocido = d.get("motor") or ""
         if motor_reconocido:

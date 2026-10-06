@@ -85,8 +85,18 @@ if pagina == PAGINAS[0]:
         with st.expander(f"🛒 Presupuesto en armado — {len(_cart)} ítem(s) · ${miles(_total, 0)}"
                          + (f" · para {cuenta_elegida()['nombre']}" if cuenta_elegida() else ""),
                           expanded=False):
+            _pedir_de_a_uno = es_empleado_o_abierto()
             for _pid, _item in list(_cart.items()):
-                ci1, ci2, ci3 = st.columns([5, 2, 1])
+                if _pedir_de_a_uno:
+                    ci1, ci2, ci4, ci3 = st.columns([5, 2, 1, 1])
+                    # De a uno: el que atiende va pidiendo lo que el cliente ya confirmó, sin
+                    # mandar el presupuesto entero (ver pedir_uno_del_presupuesto()).
+                    ci4.button("📦", key=f"pedir_uno_cart_{_pid}",
+                               help=f"Pedir solo este al depósito, para "
+                                    f"{nombre_de_la_cuenta_elegida()}",
+                               on_click=pedir_uno_del_presupuesto, args=(_pid,))
+                else:
+                    ci1, ci2, ci3 = st.columns([5, 2, 1])
                 ci1.markdown(f"**{_item['marca']} {_item['codigo']}** — "
                               f"{(_item['descripcion'] or '')[:40]}")
                 _nueva_cant = ci2.number_input("Cant.", min_value=1, value=_item["cantidad"],
@@ -112,7 +122,10 @@ if pagina == PAGINAS[0]:
             st.code(_texto, language=None)
             # Pedir todo junto al depósito, para la cuenta elegida arriba (o Mostrador). Lo
             # pedido sale del presupuesto: tocarlo dos veces no lo pide dos veces.
-            if es_empleado_o_abierto() and st.button(
+            if _pedir_de_a_uno:
+                st.caption("«📦» al lado de cada uno lo pide solo a ese. «Pedir todo» los manda "
+                           "juntos: el depósito los ve como un solo pedido.")
+            if _pedir_de_a_uno and st.button(
                     f"📦 Pedir todo al depósito — para {nombre_de_la_cuenta_elegida()}",
                     type="primary", key="pedir_todo_el_presupuesto"):
                 _pedidos, _fallas = pedir_lo_elegido_al_deposito(

@@ -204,6 +204,44 @@ def probar(L):
     esperar("sin nada", ns["_resumen_de_tiempos"]([])["promedio"], None)
 
     esperar("últimos resueltos", len(ns["ultimos_pedidos_del_deposito"]()) >= 4, True)
+
+    # Varios vendedores: cada presupuesto mandado entero es UN pedido para el depósito, y lo
+    # pedido de a uno es un pedido suelto. Por orden de llegada.
+    c.execute("DELETE FROM pedidos_deposito")
+    ns["configurar_cuenta_de_taller"](taller, 0, 30, False)
+    st.session_state["cuenta_elegida"] = {"id": taller, "nombre": "Taller Pérez",
+                                          "desde": ns["time"].time()}
+    ns["pedir_lo_elegido_al_deposito"]([(filtro, 1), (junta, 1)], usuario="ana")
+    st.session_state.pop("cuenta_elegida")
+    ns["pedir_lo_elegido_al_deposito"]([(junta, 3)], usuario="beto")
+    ns["pedir_lo_elegido_al_deposito"]([(filtro, 2), (junta, 2)], usuario="carla")
+    c.execute("UPDATE pedidos_deposito SET pedido_en = datetime('now', 'localtime', '-' || "
+              "(1000 - id) || ' seconds')")      # en el orden en que se pidieron
+    grupos = ns["pendientes_por_pedido"]()
+    esperar("tres pedidos", [(g["pedido_por"], len(g["items"])) for g in grupos],
+            [("ana", 2), ("beto", 1), ("carla", 2)])
+    esperar("adentro, por ubicación", [p["ubicacion"] for p in grupos[0]["items"]], ["A1", "B2"])
+    esperar("el suelto no lleva tanda", grupos[1]["tanda"], None)
+    esperar("la tanda de ana es de la cuenta", grupos[0]["cuenta"], "Taller Pérez")
+    ns["entregar_pedido"](grupos[0]["items"][0]["id"])            # uno ya entregado suelto
+    esperar("entregar todo", ns["entregar_la_tanda"](grupos[0]["tanda"]), (1, 0))
+    esperar("quedan los otros dos", [g["pedido_por"] for g in ns["pendientes_por_pedido"]()],
+            ["beto", "carla"])
+    esperar("entregar todo otra vez no hace nada", ns["entregar_la_tanda"](grupos[0]["tanda"]),
+            (0, 0))
+
+    # Del presupuesto, de a uno: pide ese solo y lo saca del presupuesto.
+    st.session_state["carrito"] = {filtro: {"codigo": "F100", "marca": "PRUEBA", "descripcion": "",
+                                            "precio": 10000, "cantidad": 4},
+                                   junta: {"codigo": "J200", "marca": "PRUEBA", "descripcion": "",
+                                           "precio": 2500, "cantidad": 1}}
+    antes = len(ns["pedidos_pendientes"]())
+    ns["pedir_uno_del_presupuesto"](filtro)
+    esperar("de a uno: sale del presupuesto", list(st.session_state["carrito"]), [junta])
+    nuevos = [p for p in ns["pedidos_pendientes"]() if p["pedido_por"] not in ("beto", "carla")]
+    esperar("de a uno: un pedido suelto con su cantidad",
+            [(p["producto_id"], p["cantidad"], p["tanda"]) for p in nuevos], [(filtro, 4, None)])
+    esperar("de a uno: uno más en la cola", len(ns["pedidos_pendientes"]()), antes + 1)
     return fallas
 
 

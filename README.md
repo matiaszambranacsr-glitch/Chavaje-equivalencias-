@@ -6456,6 +6456,52 @@ el botón**:
 - «🔌 Probar las fuentes de afuera» suma la Central de Deudores (con el CUIT de la AFIP, nunca el
   de un cliente) y la inflación de respaldo.
 
+## 📦 Cuatro vendedores pidiendo a la vez, y pedir de a uno
+
+Con varios vendedores mandando presupuestos de diez productos, la cola por ubicación quedaba con
+cuarenta renglones mezclados y no se sabía qué era de quién. Ahora:
+
+- **Del presupuesto se pide de a uno**: al lado de cada ítem del «🛒 Presupuesto en armado» hay
+  un «📦» que pide solo ese y lo saca del presupuesto. «Pedir todo» sigue estando.
+- **La cola del depósito se ve por pedido** (la vista por defecto): cada presupuesto mandado
+  entero es un recuadro con quién lo pidió, para quién, cuánto lleva esperando y «✅ Entregar
+  todo»; lo pedido de a uno es un renglón suelto. Por orden de llegada: el que pidió primero,
+  arriba. Adentro de cada pedido, por ubicación. «📍 Por ubicación» sigue estando, para una sola
+  vuelta cuando hay poco.
+- Los ítems pedidos juntos llevan la misma **tanda** (columna nueva de `pedidos_deposito`).
+  «Entregar todo» entrega cada uno con su propio todo-o-nada: si otro ya había entregado uno,
+  los demás se entregan igual y lo dice.
+
+Probado en `pruebas_del_deposito.py` (tres vendedores en orden de llegada, el suelto sin tanda,
+entregar todo con uno ya entregado, pedir de a uno desde el presupuesto; cuatro fallas puestas
+a propósito, todas detectadas) y en el navegador sobre la copia de hoy del servidor.
+
+## 🇺🇸 Campañas de seguridad y lo que más falla en cada auto (NHTSA)
+
+La NHTSA —el organismo de seguridad vial del gobierno de EE.UU., el mismo del lector de VIN—
+publica gratis y sin clave, por marca, modelo y año, las **campañas de seguridad** (recalls) y
+los **reclamos de los dueños** con el componente que falló. Lo segundo es lo útil para el
+negocio: el componente con más reclamos es la pieza que más se rompe, la que conviene tener en
+stock y la que el mecánico mira primero.
+
+Está en Modo Mecánico, en **🔢 Chasis / VIN** (con el auto que sale del VIN) y en **🚙 Repuestos
+por vehículo** (con modelo y año elegidos): «🇺🇸 Campañas de seguridad y fallas más reportadas».
+Muestra los reclamos por componente en castellano (con cuántos terminaron en choque o
+incendio) y cada campaña con su componente, fecha, resumen y solución, marcando las que la NHTSA
+dice que no hay que usar el auto hasta arreglarlo. Los textos de las campañas vienen en inglés:
+así los publica.
+
+Vale para los modelos que se venden en EE.UU. con el mismo nombre (Ranger, Cruze, Tracker,
+Corolla, Renegade, Compass, Kicks, Frontier, Civic, CR-V, Tucson, Sportage, 500, Sprinter, Taos,
+Tiguan…). Si el nombre no coincide, muestra los modelos que la NHTSA tiene para esa marca y año
+para elegir; la comparación es por palabras, así que el Gol no se confunde con el Golf. Sale a
+internet solo al apretar «Consultar», y lo traído queda un día en memoria. Se suma a «🔌 Probar
+las fuentes de afuera».
+
+Fuentes que se miraron y **no** se usaron: los «vehículos expuestos a riesgo» de la
+Superintendencia de Seguros vienen sumados por aseguradora y categoría, no por modelo; y las
+alertas de productos de Defensa del Consumidor no tienen un formato para leer automáticamente.
+
 ## 📦 El depósito y el descuento de cada cuenta
 
 Como trabaja el negocio: se busca el código en el mostrador, se pide al depósito, los chicos

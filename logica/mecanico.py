@@ -678,6 +678,242 @@ def listar_fabricantes_vin():
 
 
 # ============================================================
+# MODO MECÁNICO — CAMPAÑAS DE SEGURIDAD Y FALLAS REPORTADAS (NHTSA)
+# ============================================================
+# La NHTSA (el organismo de seguridad vial del gobierno de EE.UU.) publica, gratis y sin clave,
+# dos cosas por marca, modelo y año:
+#   · las CAMPAÑAS de seguridad (recalls): el defecto, qué puede pasar y cómo se arregla;
+#   · los RECLAMOS de los dueños, con el componente que falló.
+# Para el negocio sirve lo segundo sobre todo: el componente con más reclamos es la pieza que
+# más se rompe en ese auto, la que conviene tener en stock y la que el mecánico va a mirar
+# primero. Los dos son del mercado de EE.UU.: valen para los autos que se venden allá con el
+# mismo nombre (Ranger, Cruze, Tracker, Corolla, Renegade, Compass, Kicks, Frontier, Civic,
+# CR-V, Tucson, Sportage, 500, Sprinter, Taos, Tiguan…). Un Gol, un Palio o un 208 no están.
+# Se consulta solo cuando se aprieta el botón, y lo traído queda un día en memoria.
+URL_NHTSA_CAMPANIAS = ("https://api.nhtsa.gov/recalls/recallsByVehicle?make={marca}"
+                       "&model={modelo}&modelYear={anio}")
+URL_NHTSA_RECLAMOS = ("https://api.nhtsa.gov/complaints/complaintsByVehicle?make={marca}"
+                      "&model={modelo}&modelYear={anio}")
+URL_NHTSA_MODELOS = ("https://api.nhtsa.gov/products/vehicle/models?modelYear={anio}"
+                     "&make={marca}&issueType=c")
+HORAS_DE_LO_TRAIDO_DE_LA_NHTSA = 24
+# Cómo se llaman allá las marcas que acá se escriben distinto.
+MARCAS_PARA_LA_NHTSA = {"VW": "VOLKSWAGEN", "MERCEDES BENZ": "MERCEDES-BENZ",
+                        "MERCEDES": "MERCEDES-BENZ", "CHEV": "CHEVROLET", "CHEVY": "CHEVROLET"}
+# El componente, en castellano. Se mira la primera que aparece, de la más específica a la más
+# general: «PARKING BRAKE» es freno de mano antes que frenos, «ENGINE AND ENGINE COOLING» es
+# motor. La NHTSA escribe el componente como «SISTEMA:PARTE:PIEZA».
+COMPONENTES_EN_CASTELLANO = [
+    ("AIR BAG", "Airbags"), ("SEAT BELT", "Cinturones de seguridad"),
+    ("PARKING BRAKE", "Freno de mano"), ("BRAKE", "Frenos"), ("STEERING", "Dirección"),
+    ("SUSPENSION", "Suspensión"), ("POWER TRAIN", "Caja y transmisión"),
+    ("ENGINE COOLING", "Motor y refrigeración"), ("ENGINE", "Motor"),
+    ("FUEL", "Sistema de combustible"), ("EXHAUST", "Escape"),
+    ("ELECTRICAL", "Sistema eléctrico"), ("LIGHTING", "Luces"), ("TIRE", "Cubiertas"),
+    ("WHEEL", "Ruedas y llantas"), ("STRUCTURE", "Carrocería y estructura"),
+    ("VISIBILITY", "Visibilidad (limpiaparabrisas, espejos, vidrios)"),
+    ("SPEED CONTROL", "Acelerador y control de velocidad"),
+    ("LATCHES", "Cerraduras y trabas"), ("SEAT", "Asientos"),
+    ("COLLISION", "Asistencias de manejo"), ("BACK OVER", "Cámara y sensores de retroceso"),
+    ("STABILITY CONTROL", "Control de estabilidad"), ("HYBRID", "Sistema híbrido"),
+    ("EQUIPMENT", "Equipamiento"),
+]
+
+
+def componente_en_castellano(texto):
+    """«SERVICE BRAKES, HYDRAULIC:FOUNDATION COMPONENTS» → «Frenos». None si no se reconoce."""
+    sistema = str(texto or "").upper().split(":")[0]
+    return next((castellano for clave, castellano in COMPONENTES_EN_CASTELLANO
+                 if clave in sistema), None)
+
+
+def _componentes_del_reclamo(texto):
+    """Los componentes de un reclamo, en castellano y sin repetir. La NHTSA los manda en un
+    solo texto separado por comas, y algunos nombres llevan coma adentro («SERVICE BRAKES,
+    HYDRAULIC»): un pedazo que solo no se reconoce se descarta."""
+    salida = []
+    for pedazo in str(texto or "").split(","):
+        nombre = componente_en_castellano(pedazo)
+        if nombre and nombre not in salida:
+            salida.append(nombre)
+    return salida or ["Otro"]
+
+
+def _sin_signos(texto):
+    return re.sub(r"[^A-Z0-9]", "", str(texto or "").upper())
+
+
+def marca_para_la_nhtsa(marca):
+    marca = re.sub(r"\s+", " ", str(marca or "").upper()).strip()
+    return MARCAS_PARA_LA_NHTSA.get(marca, marca)
+
+
+def _de_la_nhtsa(url):
+    """Lo mismo que _pedir_json(), guardado un día por URL: la NHTSA es un servidor ajeno."""
+    guardado = del_proceso("lo_traido_de_la_nhtsa", dict)
+    previo = guardado.get(url)
+    if previo and time.time() - previo[0] < HORAS_DE_LO_TRAIDO_DE_LA_NHTSA * 3600:
+        return previo[1]
+    respuesta = _pedir_json(url, tiempo_maximo=10)
+    if respuesta is not None:
+        guardado[url] = (time.time(), respuesta)
+    return respuesta
+
+
+def _resultados(respuesta):
+    """La lista de resultados: las campañas la mandan en «results», los reclamos también, y
+    alguna versión vieja en «Results»."""
+    if not isinstance(respuesta, dict):
+        return None
+    lista = respuesta.get("results", respuesta.get("Results"))
+    return lista if isinstance(lista, list) else None
+
+
+def _campo(fila, *nombres):
+    """El primer campo que exista, sin importar mayúsculas: las campañas vienen con
+    «Component», los reclamos con «components»."""
+    por_nombre = {str(k).lower(): v for k, v in (fila or {}).items()}
+    for nombre in nombres:
+        valor = por_nombre.get(nombre.lower())
+        if valor not in (None, ""):
+            return valor
+    return None
+
+
+def modelos_en_la_nhtsa(marca, anio):
+    """Los modelos de esa marca y año que la NHTSA tiene, o None si no contesta."""
+    resultados = _resultados(_de_la_nhtsa(URL_NHTSA_MODELOS.format(
+        marca=quote(marca_para_la_nhtsa(marca)), anio=int(anio))))
+    if resultados is None:
+        return None
+    return sorted({str(_campo(r, "model") or "").strip().upper() for r in resultados} - {""})
+
+
+def el_mismo_modelo(modelo, modelos):
+    """El modelo de la lista de la NHTSA que es el nuestro, o None. Igual sin signos («F150» y
+    «F-150»), o uno cuyas PALABRAS empiezan con las del otro («CRUZE» y «CRUZE LIMITED»). Por
+    palabras y no por letras: el Gol no es el Golf."""
+    buscado = _sin_signos(modelo)
+    if not buscado:
+        return None
+    for m in modelos or []:
+        if _sin_signos(m) == buscado:
+            return m
+    palabras = [_sin_signos(p) for p in str(modelo).split() if _sin_signos(p)]
+    parecidos = []
+    for m in modelos or []:
+        otras = [_sin_signos(p) for p in str(m).split() if _sin_signos(p)]
+        corto = min(len(palabras), len(otras))
+        if corto and palabras[:corto] == otras[:corto]:
+            parecidos.append(m)
+    return min(parecidos, key=len) if parecidos else None
+
+
+def fallas_reportadas(marca, modelo, anio):
+    """(datos, error). datos: {"campanias": [...], "reclamos": cuántos, "por_componente":
+    [(componente, reclamos, con_choque, con_incendio)] de más a menos}.
+
+    Cada campaña: número, fecha, componente (en castellano y el original), resumen,
+    consecuencia, solución y si la NHTSA dice que no hay que usar el auto hasta arreglarlo.
+    Los textos vienen en inglés: así los publica la NHTSA."""
+    try:
+        anio = int(anio)
+    except (TypeError, ValueError):
+        return None, "Falta el año."
+    marca_n = marca_para_la_nhtsa(marca)
+    if not marca_n or not str(modelo or "").strip():
+        return None, "Falta la marca o el modelo."
+    pedido = dict(marca=quote(marca_n), modelo=quote(str(modelo).strip().upper()), anio=anio)
+    campanias_r = _resultados(_de_la_nhtsa(URL_NHTSA_CAMPANIAS.format(**pedido)))
+    reclamos_r = _resultados(_de_la_nhtsa(URL_NHTSA_RECLAMOS.format(**pedido)))
+    if campanias_r is None and reclamos_r is None:
+        return None, "La NHTSA no contestó. Puede ser la conexión: probá en un rato."
+    campanias = []
+    for r in campanias_r or []:
+        original = str(_campo(r, "Component") or "")
+        campanias.append({
+            "numero": str(_campo(r, "NHTSACampaignNumber") or ""),
+            "fecha": str(_campo(r, "ReportReceivedDate") or "")[:10],
+            "componente": componente_en_castellano(original) or "Otro",
+            "componente_original": original,
+            "resumen": str(_campo(r, "Summary") or ""),
+            "consecuencia": str(_campo(r, "Consequence") or ""),
+            "solucion": str(_campo(r, "Remedy") or ""),
+            "no_usar": bool(_campo(r, "parkIt")),
+        })
+    conteo = {}
+    for r in reclamos_r or []:
+        for nombre in _componentes_del_reclamo(_campo(r, "components", "Component")):
+            fila = conteo.setdefault(nombre, [0, 0, 0])
+            fila[0] += 1
+            fila[1] += 1 if _campo(r, "crash") in (True, "Y", "Yes", "true") else 0
+            fila[2] += 1 if _campo(r, "fire") in (True, "Y", "Yes", "true") else 0
+    por_componente = sorted(((n, *v) for n, v in conteo.items()), key=lambda x: (-x[1], x[0]))
+    return {"campanias": campanias, "reclamos": len(reclamos_r or []),
+            "por_componente": por_componente, "marca": marca_n,
+            "modelo": str(modelo).strip().upper(), "anio": anio}, None
+
+
+def mostrar_fallas_reportadas(marca, modelo, anio, clave):
+    """El recuadro «🇺🇸 Campañas y fallas reportadas (NHTSA)» de un auto. No sale a internet
+    hasta que se aprieta el botón."""
+    if not (marca and modelo and anio):
+        return
+    if not seccion_plegable("🇺🇸 Campañas de seguridad y fallas más reportadas (NHTSA)",
+                            key=f"nhtsa_fallas_{clave}"):
+        return
+    st.caption("De la NHTSA, el organismo de seguridad vial de EE.UU.: gratis y oficial. Vale "
+               "para los modelos que se venden allá con el mismo nombre (Ranger, Cruze, "
+               "Corolla, Renegade, Kicks, Civic, Tucson…); un Gol o un Palio no están.")
+    modelo_us = str(modelo).strip().upper()
+    modelos = modelos_en_la_nhtsa(marca, anio)
+    if modelos:
+        igual = el_mismo_modelo(modelo_us, modelos)
+        if not igual:
+            st.info(f"La NHTSA no tiene un {marca_para_la_nhtsa(marca)} «{modelo_us}» {anio}. "
+                    "Si allá se llama distinto, elegilo:")
+        modelo_us = st.selectbox("Modelo en EE.UU.:", modelos,
+                                 index=modelos.index(igual) if igual else None,
+                                 placeholder="Elegí el modelo",
+                                 key=f"nhtsa_modelo_{clave}_{_sin_signos(marca)}_{anio}")
+    if not modelo_us:
+        return
+    # Lo traído se guarda con el auto que se consultó: si después se cambia el modelo o el año,
+    # no queda a la vista el resultado de otro.
+    consultado = (marca_para_la_nhtsa(marca), modelo_us, int(anio))
+    if st.button("🌐 Consultar", key=f"nhtsa_consultar_{clave}"):
+        with st.spinner("Consultando a la NHTSA…"):
+            st.session_state[f"nhtsa_fallas_res_{clave}"] = (
+                consultado, fallas_reportadas(marca, modelo_us, anio))
+    guardado = st.session_state.get(f"nhtsa_fallas_res_{clave}")
+    if not guardado or guardado[0] != consultado:
+        return
+    datos, error = guardado[1]
+    if error:
+        st.warning(error)
+        return
+    st.markdown(f"**{datos['marca']} {datos['modelo']} {datos['anio']}** — "
+                f"{len(datos['campanias'])} campaña(s) de seguridad · "
+                f"{miles(datos['reclamos'])} reclamo(s) de dueños")
+    if datos["por_componente"]:
+        st.markdown("**🔧 Lo que más falla, según los reclamos** (la pieza a tener en stock y "
+                    "a mirar primero):")
+        st.dataframe([{"Componente": n, "Reclamos": r, "Con choque": ch, "Con incendio": fu}
+                      for n, r, ch, fu in datos["por_componente"][:12]],
+                     hide_index=True, width="stretch")
+    for camp in datos["campanias"]:
+        with st.container(border=True):
+            st.markdown(f"**{'⛔ ' if camp['no_usar'] else '⚠️ '}{camp['componente']}** · "
+                        f"campaña {camp['numero']} · {camp['fecha']}"
+                        + (" · **la NHTSA dice no usarlo hasta arreglarlo**"
+                           if camp["no_usar"] else ""))
+            st.caption(f"{camp['componente_original']}\n\n{camp['resumen']}\n\n"
+                       f"Solución: {camp['solucion']}")
+    if not datos["campanias"] and not datos["reclamos"]:
+        st.caption("Sin campañas ni reclamos para ese modelo y año.")
+
+
+# ============================================================
 # MODO MECÁNICO — VISOR DE ESQUEMAS
 # ============================================================
 def guardar_esquema(titulo, marca_auto, modelo_auto, sistema, descripcion, imagen_bytes, imagen_nombre, generado_ia=False):

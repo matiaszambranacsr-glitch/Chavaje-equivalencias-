@@ -102,6 +102,7 @@ específico, y las pantallas quedan todas al final:
     logica/mecanico.py
         · MODO MECÁNICO — DICCIONARIO DE CÓDIGOS OBD2 / DTC
         · MODO MECÁNICO — LECTOR DE VIN
+        · MODO MECÁNICO — CAMPAÑAS DE SEGURIDAD Y FALLAS REPORTADAS (NHTSA)
         · MODO MECÁNICO — VISOR DE ESQUEMAS
         · CUENTA CORRIENTE DE LOS TALLERES
     logica/deposito.py

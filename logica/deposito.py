@@ -59,7 +59,7 @@ def _pendiente_de_la_cuenta(mecanico_id, descuento):
 
 
 def pedir_al_deposito(producto_id, cantidad=1, mecanico_id=None, codigo_de_retiro="",
-                      usuario="", nota="", retiro_autorizado=False):
+                      usuario="", nota="", retiro_autorizado=False, tanda=None):
     """El pedido del mostrador. Devuelve (True, aviso) o (False, por qué no).
 
     Si es para una cuenta que pide código de retiro, el código se pide y se gasta ACÁ, en el
@@ -98,10 +98,10 @@ def pedir_al_deposito(producto_id, cantidad=1, mecanico_id=None, codigo_de_retir
             c.execute("UPDATE codigos_de_retiro SET usado_en = datetime('now', 'localtime') "
                       "WHERE id = ?", (codigo_id,))
         c.execute("""INSERT INTO pedidos_deposito (producto_id, cantidad, mecanico_id, nota,
-                                                   pedido_por)
-                     VALUES (?, ?, ?, ?, ?)""",
+                                                   pedido_por, tanda)
+                     VALUES (?, ?, ?, ?, ?, ?)""",
                   (producto_id, cantidad, mecanico_id or None, (nota or "").strip()[:200],
-                   usuario or obtener_usuario_actual()))
+                   usuario or obtener_usuario_actual(), tanda))
     return True, "📦 Pedido al depósito. Lo ven en «📦 Depósito»."
 
 
@@ -110,7 +110,7 @@ def pedidos_pendientes():
     al final) para juntarlo en un solo recorrido. Sin precios: no le hacen falta al depósito,
     y es la pantalla que puede estar a la vista de un cliente."""
     c.execute("""SELECT d.id, d.cantidad, d.nota, d.pedido_por, d.pedido_en, d.mecanico_id,
-                        p.id AS producto_id, p.codigo_raw, p.descripcion, p.stock,
+                        d.tanda, p.id AS producto_id, p.codigo_raw, p.descripcion, p.stock,
                         COALESCE(NULLIF(TRIM(p.ubicacion), ''), '') AS ubicacion,
                         m.nombre AS marca, k.nombre AS cuenta
                  FROM pedidos_deposito d
@@ -120,6 +120,33 @@ def pedidos_pendientes():
                  WHERE d.estado = 'pendiente'
                  ORDER BY ubicacion = '', ubicacion, d.pedido_en""")
     return [dict(r) for r in c.fetchall()]
+
+
+def pendientes_por_pedido(pendientes=None):
+    """Lo pendiente agrupado como se pidió: cada presupuesto mandado entero es un grupo, y cada
+    producto pedido suelto es un grupo de uno. Los grupos por orden de llegada (el que pidió
+    primero, primero); adentro de cada uno, por ubicación. [{"clave", "pedido_por", "cuenta",
+    "pedido_en", "items"}]"""
+    grupos = {}
+    for p in pendientes if pendientes is not None else pedidos_pendientes():
+        clave = p["tanda"] or f"solo-{p['id']}"
+        grupo = grupos.setdefault(clave, {"clave": clave, "tanda": p["tanda"],
+                                          "pedido_por": p["pedido_por"], "cuenta": p["cuenta"],
+                                          "pedido_en": p["pedido_en"], "items": []})
+        grupo["items"].append(p)
+        grupo["pedido_en"] = min(grupo["pedido_en"] or "", p["pedido_en"] or "")
+    return sorted(grupos.values(), key=lambda g: (g["pedido_en"] or "", g["clave"]))
+
+
+def entregar_la_tanda(tanda, usuario=""):
+    """«✅ Entregar todo» de un presupuesto pedido entero. Cada ítem va por entregar_pedido(), con
+    su propio todo-o-nada: si uno ya lo había resuelto otro, los demás se entregan igual.
+    Devuelve (cuántos se entregaron, cuántos no)."""
+    c.execute("SELECT id FROM pedidos_deposito WHERE tanda = ? AND estado = 'pendiente'",
+              (tanda,))
+    ids = [r["id"] for r in c.fetchall()]
+    hechos = sum(1 for i in ids if entregar_pedido(i, usuario)[0])
+    return hechos, len(ids) - hechos
 
 
 def entregar_pedido(pedido_id, usuario=""):
@@ -400,9 +427,13 @@ def pedir_lo_elegido_al_deposito(items, usuario="", nota=""):
     Devuelve (los que se pidieron, [por qué no, de los otros])."""
     elegida = cuenta_elegida()
     pedidos, fallas = [], []
+    # Varios juntos son una tanda: el depósito los ve como un solo pedido (ver
+    # pendientes_por_pedido()). Uno solo no lleva tanda: es un pedido suelto.
+    tanda = uuid.uuid4().hex[:12] if len(items) > 1 else None
     for producto_id, cantidad in items:
         ok, aviso = pedir_al_deposito(producto_id, cantidad, elegida["id"] if elegida else None,
-                                      usuario=usuario, nota=nota, retiro_autorizado=True)
+                                      usuario=usuario, nota=nota, retiro_autorizado=True,
+                                      tanda=tanda)
         (pedidos.append(producto_id) if ok else fallas.append(aviso))
     return pedidos, fallas
 
@@ -463,6 +494,22 @@ def mostrar_pedir_al_deposito(resultados, clave):
 def _sumar_desde_el_recuadro(fila, cantidad, clave):
     sumar_al_presupuesto(fila, cantidad)
     st.session_state[f"_sumado_{clave}"] = True
+
+
+def pedir_uno_del_presupuesto(producto_id):
+    """«📦» al lado de un ítem del presupuesto: pide solo ese, y sale del presupuesto. Para no
+    mandarle al depósito diez productos de golpe cuando el cliente todavía está decidiendo."""
+    item = st.session_state.get("carrito", {}).get(producto_id)
+    if not item:
+        return
+    pedidos, fallas = pedir_lo_elegido_al_deposito([(producto_id, item["cantidad"])])
+    if pedidos:
+        st.session_state["carrito"].pop(producto_id, None)
+        st.session_state.pop(f"cant_cart_{producto_id}", None)
+        avisar("success", f"📦 {item['marca']} {item['codigo']} x{item['cantidad']} pedido al "
+                          f"depósito, para {nombre_de_la_cuenta_elegida()}.")
+    for falla in fallas:
+        avisar("warning", falla)
 
 
 def sumar_al_presupuesto(fila, cantidad=1):
