@@ -25,7 +25,9 @@ if pagina == PAGINAS[0]:
                 "de distintos proveedores son la misma pieza, y vos las aprobás (en bloque las "
                 "limpias). **Hasta que no se aprueban, no aparecen al buscar.**\n"
                 "3. **🔍 Buscador** — escribís el código que te piden y ves todas las marcas que "
-                "sirven en su lugar, con precio, stock y qué tan segura es cada una.\n\n"
+                "sirven en su lugar, con precio, stock y qué tan segura es cada una (🟢 "
+                "confirmada, 🟡 probable, 🟠 revisar). También sirve escribir palabras —«filtro "
+                "aceite gol», «mannol»—: busca solo en las descripciones y las marcas.\n\n"
                 "**Cada sección:**\n\n"
                 + "\n".join(f"- **{_p}** — {PARA_QUE_SIRVE[_p]}" for _p in PAGINAS
                              if PARA_QUE_SIRVE.get(_p))
@@ -578,6 +580,25 @@ if pagina == PAGINAS[0]:
                         st.caption("⚠️ No devolvió ninguna página de respaldo, así que esta "
                                     "identificación no se puede verificar. Tomala con pinzas.")
 
+    def _ver_toda_la_cadena():
+        """«Mostrarlas»: la misma búsqueda otra vez, con «Toda la cadena» (ver más abajo)."""
+        st.session_state["saltos_busqueda"] = "Toda la cadena"
+        st.session_state["_buscar_codigo_ya"] = True
+
+    # UN SOLO BUSCADOR. Lo que se escribe en el de códigos y son solo palabras —«filtro aceite
+    # gol», «rótula»— se busca por descripción, sin hacer cambiar de modo a nadie (ver
+    # parece_una_descripcion()). El cambio se pide en una vuelta y se hace en la siguiente,
+    # ANTES de dibujar el selector: Streamlit no deja cambiar un widget ya dibujado.
+    _a_codigo = st.session_state.pop("_pasar_a_codigo", None)
+    if _a_codigo:
+        st.session_state["modo_busqueda"] = "Código"
+        st.session_state["busqueda_input"] = _a_codigo
+        st.session_state["_buscar_codigo_ya"] = True
+    _a_descripcion = st.session_state.pop("_pasar_a_descripcion", None)
+    if _a_descripcion:
+        st.session_state["modo_busqueda"] = "Descripción"
+        st.session_state["texto_input"] = _a_descripcion
+        st.session_state["_buscar_texto_ya"] = True
     modo = st.radio("Buscar por:", ["Código", "Descripción"], horizontal=True, key="modo_busqueda")
 
     c.execute("SELECT nombre FROM marcas ORDER BY nombre")
@@ -601,9 +622,11 @@ if pagina == PAGINAS[0]:
             + (["sin vínculos flojos"] if st.session_state.get("solo_confiables") else []))
         with st.form("form_buscar_codigo"):
             busqueda = st.text_input(
-                "Ingresá uno o varios códigos (separados por coma):",
+                "Código, marca o descripción (varios códigos, separados por coma):",
                 placeholder="Ej: W712/94, 036115561G...",
-                key="busqueda_input"
+                key="busqueda_input",
+                help="Con un código busca sus equivalencias. Si escribís palabras —«filtro "
+                     "aceite gol», «mannol»— busca en las descripciones y en las marcas."
             )
             buscar_click = st.form_submit_button("🔍 Buscar Equivalencias", type="primary",
                                                  width="stretch")
@@ -613,9 +636,12 @@ if pagina == PAGINAS[0]:
                 # La búsqueda encadena: el código buscado trae sus equivalentes, y los
                 # equivalentes de esos, y así. Cuanto más larga la cadena, más chances de que
                 # un eslabón esté mal y aparezcan cosas que no entran. Este control la corta.
+                # Sin index=: el valor de arranque va en la sesión, porque «Mostrarlas» (ver
+                # _ver_toda_la_cadena()) lo cambia desde ahí, y Streamlit no quiere las dos.
+                st.session_state.setdefault("saltos_busqueda", "Hasta 3 saltos (recomendado)")
                 etiqueta_saltos = st.radio(
                     "Qué tan lejos buscar:", list(opciones_saltos.keys()),
-                    index=1, horizontal=True, key="saltos_busqueda",
+                    horizontal=True, key="saltos_busqueda",
                     help="«Directo» es lo que alguna lista puso en la misma fila que tu código. "
                          "Cada salto más se apoya en el vínculo anterior: si uno está mal "
                          "cargado, todo lo que cuelga de ahí también."
@@ -639,6 +665,12 @@ if pagina == PAGINAS[0]:
         # reruns siguientes — si el despliegue dependiera de "buscar_click", cualquier otro botón
         # que se toque después haría que buscar_click vuelva a False y todo el bloque desaparezca
         # antes de que el click en el botón de adentro llegue a registrarse.
+        # Y al revés: lo que vino del buscador de descripción porque era un código.
+        buscar_click = buscar_click or st.session_state.pop("_buscar_codigo_ya", False)
+        if buscar_click and parece_una_descripcion(busqueda):
+            st.session_state["_pasar_a_descripcion"] = busqueda.strip()
+            st.session_state.pop("ultima_busqueda_codigo", None)
+            st.rerun()
         if buscar_click:
             # Sin sacar los repetidos, pegar "ABC, abc" dibujaba dos veces los mismos widgets
             # con la misma key —todas se arman con el código limpio— y Streamlit corta la app
@@ -827,12 +859,13 @@ if pagina == PAGINAS[0]:
                             _de_quien = (" de " + ", ".join(_marcas_mas[:4])
                                           + (" y otras" if len(_marcas_mas) > 4 else "")
                                           ) if _marcas_mas else ""
-                            st.info(
-                                f"🔗 Hay **{_mas} equivalencia(s) más**{_de_quien}, un poco más "
-                                "lejos en la cadena. No se muestran por el límite de arriba "
-                                "(**Qué tan lejos buscar**): poniendo **Toda la cadena** "
-                                "aparecen."
-                            )
+                            # Un renglón y un botón, no un recuadro: era media pantalla del
+                            # celular entre el «✅ N equivalencias» y las tarjetas.
+                            _c_mas, _b_mas = st.columns([3, 1.3])
+                            _c_mas.caption(f"🔗 Hay **{_mas} más**{_de_quien}, más lejos en la "
+                                           "cadena.")
+                            _b_mas.button("Mostrarlas", key=f"toda_la_cadena_{clean}",
+                                          on_click=_ver_toda_la_cadena)
 
                         # LA TABLA VA PRIMERO. Se le guarda el lugar acá y se dibuja más abajo,
                         # después de los filtros que deciden qué muestra: los filtros quedan
@@ -1003,6 +1036,12 @@ if pagina == PAGINAS[0]:
                         # La advertencia sigue estando, pero deja de tapar la respuesta.
                         _hay_indirectos = any(
                             f.get("Cadena", "").startswith(("🟡", "🔴")) for f in res)
+                        # Sin ninguna equivalencia de otra marca, el «código puente» no arrastró
+                        # nada: lo que cuelga son sus propios códigos de fábrica. El cartel rojo
+                        # salía igual, abierto, abajo de «todavía no tiene equivalencias», y
+                        # se contradecían (pasó con LRSC030140LUCAS, que cita 52 de Bosch).
+                        if not alternativas:
+                            puentes_res = []
                         if puentes_res or _hay_indirectos:
                             if seccion_plegable(
                                 "⚠️ Revisar la calidad de estos resultados" if puentes_res
@@ -1542,7 +1581,19 @@ if pagina == PAGINAS[0]:
         # Igual que en la búsqueda por código: los resultados se guardan en la sesión en vez de
         # depender de que el botón "Buscar" haya sido lo último que se tocó. Si no, al apretar
         # cualquier botón de adentro el bloque entero desaparece y el click se pierde.
-        if buscar_texto_click:
+        # Un código escrito acá —todo lo escrito son códigos cargados— va al buscador de
+        # códigos, que es el que trae las equivalencias.
+        if buscar_texto_click and texto.strip() and all(
+                sanitizar(x) and existe_el_codigo(sanitizar(x))
+                for x in texto.split(",") if x.strip()) and not parece_una_descripcion(texto):
+            st.session_state["_pasar_a_codigo"] = texto.strip()
+            st.session_state.pop("ultima_busqueda_texto", None)
+            st.rerun()
+        _desde_codigos = st.session_state.pop("_buscar_texto_ya", False)
+        if _desde_codigos:
+            st.caption("🔤 Eso no es un código, así que se buscó en las descripciones y las "
+                       "marcas.")
+        if buscar_texto_click or _desde_codigos:
             if not texto.strip():
                 st.info("Ingresá un texto para buscar.")
                 st.session_state.pop("ultima_busqueda_texto", None)

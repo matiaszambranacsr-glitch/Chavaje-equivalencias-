@@ -923,7 +923,7 @@ def es_empleado_o_abierto():
 def seccion_permitida(nivel, motivo=""):
     """El candado de una SECCIÓN entera: 'empleado' (operador o administrador) o 'admin'.
 
-    La app está publicada en internet y «➡️ Continuar» entra sin contraseña. Hasta acá solo
+    La app está publicada en internet y se entra sin contraseña, como Invitado. Hasta acá solo
     pedían clave los botones que borran; todo lo demás quedaba abierto a cualquiera que tuviera
     el link. Probado entrando como invitado: se podía armar y DESCARGAR LA BASE ENTERA (61 MB,
     con precios, clientes, teléfonos y usuarios), aprobar o descartar equivalencias en bloque,
@@ -969,14 +969,14 @@ def pedir_password_admin(motivo=""):
 
 
 def mostrar_login_inicial():
-    """Pide la contraseña apenas se abre la app, con opción de seguir sin loguearse para
-    quien solo quiera buscar/consultar. Las acciones destructivas van a seguir pidiendo la
+    """El nombre y la contraseña, adentro de «🔑 Ingresar». Sin contraseña se sigue igual,
+    como Invitado o con el nombre que se ponga. Las acciones destructivas van a seguir pidiendo la
     contraseña de administrador completo aparte, esto es solo la pantalla de entrada."""
-    st.markdown("### 👋 ¿Quién sos?")
+    # Va adentro de «🔑 Ingresar», arriba de todo (ver app.py): ya no es una pantalla que hay
+    # que pasar para llegar al buscador.
     st.caption(
-        "Poné tu nombre para que tus búsquedas recientes queden separadas de las de tus "
-        "compañeros — el resto de la información (catálogo, esquemas, etc.) la ven todos igual. "
-        "Es opcional, si lo dejás vacío vas a figurar como 'Invitado'."
+        "Tu nombre separa tus búsquedas recientes de las de tus compañeros. Es opcional: "
+        "sin nombre figurás como «Invitado»."
     )
     with st.form("login_inicial"):
         nombre_usuario = st.text_input("Tu nombre:", placeholder="Ej: Matías", key="login_inicial_nombre")
@@ -988,7 +988,7 @@ def mostrar_login_inicial():
         clave = st.text_input("Contraseña (opcional):", type="password", key="login_inicial_clave")
         col_a, col_b = st.columns(2)
         entrar = col_a.form_submit_button("🔓 Ingresar con contraseña", type="primary", width="stretch")
-        seguir = col_b.form_submit_button("➡️ Continuar", width="stretch")
+        seguir = col_b.form_submit_button("👤 Continuar sin contraseña", width="stretch")
 
     if entrar:
         nombre, nivel, error = validar_password(clave)

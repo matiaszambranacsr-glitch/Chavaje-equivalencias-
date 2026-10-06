@@ -6455,6 +6455,30 @@ el botón**:
 - «🔌 Probar las fuentes de afuera» suma la Central de Deudores (con el CUIT de la AFIP, nunca el
   de un cliente) y la inflación de respaldo.
 
+## 🧭 La revisión de la interfaz con ChatGPT: qué se hizo y qué ya estaba
+
+Una revisión de la interfaz con ChatGPT propuso una lista de cambios. Mirados uno por uno contra
+la app, con capturas en tamaño celular sobre la copia del servidor:
+
+| Propuesta | Estado |
+|---|---|
+| Abrir directo en el buscador, «ingresar» discreto | **Hecho.** Ya no hay pantalla «👋 ¿Quién sos?»: se entra como Invitado y «🔑 Ingresar» (nombre y contraseña) queda arriba, chico. Lo que pide contraseña la sigue pidiendo. |
+| Un solo buscador para código, marca, descripción | **Hecho.** En el de códigos, lo que son palabras —«filtro aceite gol», «rótula», «mannol», «bomba agua gol 1.6»— se busca solo por descripción (`parece_una_descripcion()`), y un código escrito en el de descripción va al de códigos. Los 77 códigos de solo letras del catálogo («BAFAH») se siguen buscando como código. |
+| Avisos de administración fuera del buscador | **Hecho.** En el Buscador son un botón «🔔 N aviso(s) · 🔴 N» que se abre encima; en las demás secciones, como antes. |
+| «Seguro» contra «posible», en palabras | **Hecho.** La tarjeta decía «🟢 directo · 🟢 sólida»; ahora 🟢 equivalencia confirmada / 🟡 probable (por N códigos en el medio) / 🟠 revisar antes de vender / 🔴 dudosa (`veredicto_de_la_equivalencia()`). La tabla sigue con las dos columnas. |
+| Contraseña «36369» escrita en el código | **No está**: ni en el código ni en el historial del repositorio. Las claves van en los Secrets de Streamlit y se guardan con PBKDF2. |
+| Tarjetas, stock en el resultado, copiar, WhatsApp, «¿a qué autos le sirve?», «¿por qué apareció?», favoritos, recientes, precio solo para empleados | **Ya estaban.** El stock con semáforo sale cuando la lista trae stock (hoy ninguna lo trae). |
+| Menú inferior fijo tipo app | No: Streamlit no tiene un menú fijo al pie, y armarlo con CSS rompe con cada actualización de Streamlit. |
+| Partir `app.py` | Ya está partido: la lógica en `logica/` (22 partes) y cada pantalla en `pantallas/`. Lo que queda en `app.py` es el orden de arranque. |
+
+De paso:
+- «🔗 Hay N equivalencias más, más lejos en la cadena» era un recuadro de media pantalla en el
+  celular: ahora es un renglón con un botón «Mostrarlas», que repite la búsqueda con «Toda la
+  cadena».
+- El cartel rojo de «código puente» salía, abierto, abajo de «todavía no tiene equivalencias»
+  (LRSC030140LUCAS, que cita 52 números de Bosch): sin equivalencias de otra marca no arrastró
+  nada, y ya no sale.
+
 ## 🔎 Lo que se buscó de verdad y no apareció
 
 Mirado en el historial de búsquedas de la copia del servidor (30 búsquedas reales):

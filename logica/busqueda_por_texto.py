@@ -174,6 +174,33 @@ def reparar_descripciones_pegadas():
     return len(cambios)
 
 
+def parece_una_descripcion(texto):
+    """Si lo escrito en el buscador de CÓDIGOS es en realidad una descripción: solo palabras
+    (ningún número), y no es un código cargado. «filtro aceite gol» o «mannol» sí —el nombre de
+    una lista también se busca así, y aparecen todos sus productos—; «W712/94» o «filtro
+    24058» no: esos los resuelve la búsqueda por código.
+    En el catálogo real hay 77 códigos de solo letras («BAFAH», «BRAGS»): por eso se pregunta
+    si existe antes de decidir. Una sola palabra de menos de cuatro letras se deja como código."""
+    texto = (texto or "").strip()
+    if not texto or "," in texto:
+        return False
+    palabras = [p for p in re.split(r"\s+", texto) if p]
+    if re.search(r"\d", texto):
+        # Con números, solo si son datos chicos de una descripción —«1.6», «4», «16V»— y hay
+        # al menos dos palabras de verdad: «bomba agua gol 1.6», «ficha 4 vias». Un número
+        # que parece código («24058», «W712/94») deja la búsqueda por código.
+        if any(re.search(r"\d", p) and len(sanitizar(p)) >= 5 for p in palabras):
+            return False
+        if sum(1 for p in palabras if re.fullmatch(r"[A-Za-zÁÉÍÓÚÑáéíóúñ]{3,}", p)) < 2:
+            return False
+    if len(palabras) == 1 and len(sanitizar(palabras[0])) < 4:
+        return False
+    limpio = sanitizar(texto)
+    if not limpio or existe_el_codigo(limpio):
+        return False
+    return any(re.search(r"[A-Za-zÁÉÍÓÚÑáéíóúñ]{3,}", p) for p in palabras)
+
+
 def marcas_que_nombra(palabra):
     """Los id de las listas (no los códigos de fábrica) cuyo nombre tiene esa palabra entera:
     «mannol» → MANNOL LUBRICANTES, «crifa» → CRI-FA. Palabras de tres letras o más: «JL» o

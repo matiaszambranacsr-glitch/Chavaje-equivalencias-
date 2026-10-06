@@ -1201,6 +1201,40 @@ def formato_precio(valor):
         return ""
 
 
+def veredicto_de_la_equivalencia(fila):
+    """Lo que dicen «Cadena» y «Confianza» de un resultado, en una frase del mostrador.
+
+    En la tarjeta decía «🟢 directo · 🟢 sólida» o «🟡 3 saltos · 🟢 sólida»: hay que saber qué
+    es un salto y qué mide la solidez para saber si se puede vender. La tabla sigue mostrando
+    las dos columnas, para quien quiera el detalle; ver busqueda.buscar_por_codigo().
+      🟢 confirmada — un vínculo directo y sólido, o verificado a mano;
+      🟡 probable  — sólido pero por otro código en el medio, o directo y razonable;
+      🟠 revisar   — lejos en la cadena, o algún vínculo flojo;
+      🔴 dudosa    — algún vínculo muy débil."""
+    cadena = str(fila.get("Cadena") or "")
+    confianza = str(fila.get("Confianza") or "")
+    if cadena.startswith("— el buscado"):
+        return "el que buscaste"
+    if cadena.startswith("⚪"):
+        return "⚪ código de fábrica: ningún otro proveedor lo tiene"
+    if cadena.startswith("🔵"):
+        return "🔵 el mismo número en otra marca: confirmá que sea la misma pieza"
+    m = re.search(r"(\d+) saltos", cadena)
+    saltos = int(m.group(1)) if m else (1 if "directo" in cadena else None)
+    if fila.get("Verificada"):
+        return "🟢 equivalencia confirmada (verificada)"
+    if "muy débil" in confianza:
+        return "🔴 dudosa: no la vendas sin mirar la pieza"
+    if "floja" in confianza or (saltos or 0) > 3:
+        return "🟠 revisar antes de vender"
+    if "sólida" in confianza:
+        return ("🟢 equivalencia confirmada" if saltos == 1
+                else f"🟡 probable: llega por {saltos - 1} código(s) en el medio")
+    if "razonable" in confianza:
+        return "🟡 probable" if saltos == 1 else "🟠 revisar antes de vender"
+    return cadena
+
+
 def mostrar_tarjetas_de_resultados(filas, tope=40):
     """Los resultados como tarjetas, para el celular.
 
@@ -1223,8 +1257,8 @@ def mostrar_tarjetas_de_resultados(filas, tope=40):
         else:
             _semaforo = "🔴 sin stock"
         _precio = formato_precio(f.get("Precio")) if f.get("Precio") else "sin precio"
-        _extra = " · ".join(str(x) for x in (f.get("💰"), f.get("Cadena"), f.get("Confianza"))
-                            if x)
+        _extra = " · ".join(str(x) for x in (f.get("💰"), veredicto_de_la_equivalencia(f),
+                                             f.get("Nota")) if x)
         with st.container(border=True):
             st.markdown(f"**{texto_para_markdown(f.get('Marca'))}** · `{f.get('Codigo', '')}`  \n"
                         f"**{_precio}**" + (f" · {_semaforo}" if _semaforo else ""))

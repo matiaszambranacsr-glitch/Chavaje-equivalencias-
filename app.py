@@ -273,10 +273,8 @@ if st.session_state.get("nivel_usuario") in ("admin", "operador", "mecanico"):
         st.session_state.mecanico_id = None
         st.session_state.saltar_login = False
         st.session_state.pop("_ultimo_toque", None)
-        # Directo y no con avisar(): lo que sigue es la pantalla de ingreso, que corta antes
-        # de donde se muestran los avisos guardados.
         st.info(f"🔒 La sesión se cerró sola: pasaron más de {HORAS_DE_SESION_SIN_USO} horas "
-                "sin usarla. Volvé a poner la contraseña.")
+                "sin usarla. Para volver a entrar, «🔑 Ingresar», arriba.")
     else:
         st.session_state["_ultimo_toque"] = time.time()
 else:
@@ -285,10 +283,11 @@ else:
     # nueva apenas entraba, si habían pasado más de cuatro horas desde aquella.
     st.session_state.pop("_ultimo_toque", None)
 
-# Pantalla de login apenas se abre la app, con opción de seguir sin loguearse.
-if not es_admin() and not st.session_state.get("saltar_login"):
-    mostrar_login_inicial()
-    st.stop()
+# LA APP ABRE EN EL BUSCADOR. Antes abría en «👋 ¿Quién sos?», con nombre y contraseña, y el
+# que entraba a buscar un código tenía que pasar por ahí primero —aunque las dos cosas eran
+# opcionales—. Ahora se entra como Invitado, y «🔑 Ingresar» queda arriba, chico (lo sugirió
+# una revisión de la interfaz con ChatGPT). Lo que pide contraseña la sigue pidiendo: ver
+# NIVEL_DE_CADA_SECCION y seccion_permitida().
 
 def selector_de_vista(donde, **extra):
     """El selector de vista, en el lugar que toque (arriba en la computadora, al pie en el
@@ -314,10 +313,12 @@ if es_admin() or es_operador_o_admin() or st.session_state.get("nivel_usuario") 
         st.session_state.mecanico_id = None
         st.rerun()
 else:
-    col_estado, col_modo = st.columns([3, 1.4])
-    col_estado.caption(f"👤 Usando como: {obtener_usuario_actual()}")
+    col_estado, col_modo, col_ingresar = st.columns([3, 1.4, 1])
+    col_estado.caption(f"👤 {obtener_usuario_actual()}")
     if not _VISTA_AL_PIE:
         selector_de_vista(col_modo, label_visibility="collapsed")
+    with col_ingresar.popover("🔑 Ingresar"):
+        mostrar_login_inicial()
 
 if st.session_state.get("nivel_usuario") == "mecanico":
     mostrar_portal_mecanico()
@@ -455,9 +456,20 @@ if _problemas and (es_operador_o_admin() or not hay_claves_configuradas()):
     # es donde se arranca: en las demás secciones ya se vieron, y abiertos tapaban la pantalla
     # a la que uno acababa de entrar.
     _plegar_avisos = es_celular() or not es_admin() or pagina != PAGINAS[0]
+    # EN EL BUSCADOR, UN BOTÓN CHICO. Plegados seguían siendo un renglón rojo entre el
+    # encabezado y la caja de búsqueda, y quien atiende entra a buscar un código, no a
+    # administrar. Ahí van en un «🔔 N avisos» que se abre encima, cuando uno quiere (lo
+    # sugirió una revisión de la interfaz con ChatGPT). En las demás secciones, como antes.
+    _en_el_buscador = pagina == PAGINAS[0]
+    if _en_el_buscador:
+        _plegar_avisos = True
+        _caja_graves = _caja_resto = st.popover(
+            f"🔔 {len(_problemas)} aviso(s)" + (f" · 🔴 {len(_graves)}" if _graves else ""))
 
     if _graves:
-        if _plegar_avisos:
+        if _en_el_buscador:
+            pass
+        elif _plegar_avisos:
             _caja_graves = st.expander(
                 f"🔴 {len(_graves)} cosa(s) que conviene mirar hoy"
                 + (f" · 🟡 {len(_resto)} sin apuro" if _resto else ""), expanded=False)
@@ -487,6 +499,8 @@ if _problemas and (es_operador_o_admin() or not hay_claves_configuradas()):
             with _caja_graves:
                 st.markdown("**🟡 Sin apuro**")
             _caja_resto = _caja_graves
+        elif _en_el_buscador:
+            pass
         else:
             _caja_resto = st.expander(f"🟡 {len(_resto)} cosa(s) más, sin apuro", expanded=False)
         with _caja_resto:
@@ -500,7 +514,7 @@ if _problemas and (es_operador_o_admin() or not hay_claves_configuradas()):
 
     # En el celular va adentro del aviso plegado: suelto era una fila más entre el encabezado y
     # la caja de búsqueda. Si no hay avisos graves, queda donde estaba.
-    with (_caja_graves if (_graves and _plegar_avisos) else st.container()):
+    with (_caja_graves if ((_graves and _plegar_avisos) or _en_el_buscador) else st.container()):
         if st.button("🔄 Volver a revisar", key="refrescar_salud"):
             invalidar_salud()
             st.rerun()
