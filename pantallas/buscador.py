@@ -71,12 +71,19 @@ if pagina == PAGINAS[0]:
     if "sugerencia_busqueda" in st.session_state:
         st.session_state["busqueda_input"] = st.session_state.pop("sugerencia_busqueda")
 
+    # A QUIÉN SE ATIENDE: se elige una vez, antes de pedir o de armar el presupuesto, y todo lo
+    # que se pida al depósito va a esa cuenta. Ver «A QUIÉN SE ESTÁ ATENDIENDO» en
+    # logica/deposito.py.
+    if es_empleado_o_abierto():
+        mostrar_cuenta_elegida("buscador")
+
     # El carrito arriba de todo: si está armándose un presupuesto, tiene que estar a la vista.
     # Escondido en otra pantalla, la gente se olvida de lo que ya sumó y lo suma dos veces.
     if st.session_state.get("carrito"):
         _cart = st.session_state["carrito"]
         _total = sum((x["precio"] or 0) * x["cantidad"] for x in _cart.values())
-        with st.expander(f"🛒 Presupuesto en armado — {len(_cart)} ítem(s) · ${miles(_total, 0)}",
+        with st.expander(f"🛒 Presupuesto en armado — {len(_cart)} ítem(s) · ${miles(_total, 0)}"
+                         + (f" · para {cuenta_elegida()['nombre']}" if cuenta_elegida() else ""),
                           expanded=False):
             for _pid, _item in list(_cart.items()):
                 ci1, ci2, ci3 = st.columns([5, 2, 1])
@@ -97,9 +104,28 @@ if pagina == PAGINAS[0]:
 
             _lineas = [f"{x['marca']} {x['codigo']} x{x['cantidad']} — "
                        f"${miles((x['precio'] or 0) * x['cantidad'], 0)}" for x in _cart.values()]
-            _texto = "\n".join(_lineas) + f"\n\nTOTAL: ${miles(_total, 0)}"
+            # Con la cuenta elegida, el presupuesto dice para quién es. Los precios son los de
+            # lista: el descuento de la cuenta no se ve (ver «EL DESCUENTO NO SE VE»).
+            _texto = ((f"Para: {cuenta_elegida()['nombre']}\n\n" if cuenta_elegida() else "")
+                      + "\n".join(_lineas) + f"\n\nTOTAL: ${miles(_total, 0)}")
             st.caption("Para copiar y mandar por WhatsApp:")
             st.code(_texto, language=None)
+            # Pedir todo junto al depósito, para la cuenta elegida arriba (o Mostrador). Lo
+            # pedido sale del presupuesto: tocarlo dos veces no lo pide dos veces.
+            if es_empleado_o_abierto() and st.button(
+                    f"📦 Pedir todo al depósito — para {nombre_de_la_cuenta_elegida()}",
+                    type="primary", key="pedir_todo_el_presupuesto"):
+                _pedidos, _fallas = pedir_lo_elegido_al_deposito(
+                    [(_pid, _item["cantidad"]) for _pid, _item in _cart.items()])
+                for _pid in _pedidos:
+                    st.session_state["carrito"].pop(_pid, None)
+                    st.session_state.pop(f"cant_cart_{_pid}", None)
+                if _pedidos:
+                    avisar("success", f"📦 {len(_pedidos)} ítem(s) pedidos al depósito, para "
+                                      f"{nombre_de_la_cuenta_elegida()}.")
+                for _f in _fallas:
+                    avisar("warning", _f)
+                st.rerun()
             cb1, cb2 = st.columns(2)
             if cb1.button("🔒 Apartar todo el presupuesto"):
                 _apartados, _fallaron = 0, []
@@ -1700,11 +1726,7 @@ if pagina == PAGINAS[0]:
                             elegido_c = next((f for f in opciones_carrito
                                                if f"{f['Marca']} {f['Codigo']}" == agregar_cod), None)
                             if elegido_c:
-                                st.session_state["carrito"][elegido_c["ID"]] = {
-                                    "codigo": elegido_c["Codigo"], "marca": elegido_c["Marca"],
-                                    "descripcion": elegido_c.get("Descripcion") or "",
-                                    "precio": elegido_c.get("Precio") or 0, "cantidad": 1,
-                                }
+                                sumar_al_presupuesto(elegido_c)
                                 avisar("success", f"{elegido_c['Codigo']} sumado al presupuesto.")
                                 st.rerun()
 

@@ -106,6 +106,8 @@ específico, y las pantallas quedan todas al final:
         · CUENTA CORRIENTE DE LOS TALLERES
     logica/deposito.py
         · EL DEPÓSITO: DEL MOSTRADOR A LA CUENTA
+        · CUÁNTO TARDA EL DEPÓSITO
+        · A QUIÉN SE ESTÁ ATENDIENDO
     app.py
         · ENCABEZADO
         · NAVEGACIÓN PRINCIPAL

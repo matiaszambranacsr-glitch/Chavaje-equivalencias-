@@ -6483,10 +6483,33 @@ facturarlo. La lógica está en `logica/deposito.py` y la pantalla en `pantallas
   facturar» y en la configuración. El cargo a mano («➕ Cargar a la cuenta») se carga tal cual se
   escribe, y avisa que esa cuenta tiene descuento.
 
+**La cuenta se elige una vez.** Arriba del buscador (y de la lista de WhatsApp) está «🧾
+Atendiendo a: Mostrador». Se elige ahí la cuenta antes de pedir o de armar el presupuesto, y todo
+lo que sigue va a esa cuenta: «📦 Pedir» ya no pregunta para quién. Si la cuenta pide código de
+retiro, se pone **una sola vez**, al elegirla (antes hacía falta un código nuevo por producto,
+porque es de un solo uso). Queda elegida hasta «↩️ Volver a Mostrador», hasta salir, o 3 horas.
+Con la cuenta elegida:
+
+- el recuadro de cada resultado tiene «🛒 Al presupuesto» además de «📦 Pedir»;
+- el «🛒 Presupuesto en armado» dice para quién es y tiene «📦 Pedir todo al depósito», que pide
+  todos los ítems juntos y los saca del presupuesto (tocarlo dos veces no pide dos veces);
+- el mensaje de WhatsApp puede llevar «Para: …».
+
+Los precios siguen siendo los de lista en todos lados. El límite de crédito ahora suma también lo
+pedido que el depósito todavía no entregó: antes, diez pedidos seguidos pasaban todos.
+
+**Cuánto tarda el depósito**, desde que se pide hasta que se da de baja (✅ o ❌; lo cancelado no
+cuenta). Las dos horas las pone la base, no el reloj de cada computadora. En la cola, cada pedido
+dice cuánto lleva esperando (🟡 desde 10 minutos, 🔴 desde 20) y arriba el que más espera. Abajo:
+promedio y el más lento de hoy, la mediana de los últimos 7 días (no la mueve un pedido olvidado
+una hora) y, plegado, lo mismo por persona con el % «a tiempo». «Lo último que se resolvió» dice
+cuánto tardó cada uno, quién lo pidió y quién lo resolvió.
+
 Probado en `pruebas_del_deposito.py` (descuento, tope, cola sin precios y por ubicación,
 entregar una sola vez, stock, venta, cuenta, Mostrador a precio de lista, facturar, no hay,
-cancelar, código de retiro gastado, límite de crédito), con tres fallas puestas a propósito que
-las pruebas detectan. Y en un navegador sobre la copia de hoy del servidor: 2 × $58.885,94 con
+cancelar, código de retiro gastado, límite de crédito con lo pedido sin entregar, la cuenta
+elegida una vez y su vencimiento, los tiempos), con siete fallas puestas a propósito que las
+pruebas detectan. Y en un navegador sobre la copia de hoy del servidor: 2 × $58.885,94 con
 20% quedó en la cuenta como $94.217,50, a 30 días.
 
 ## 🔍 La revisión técnica con ChatGPT, punto por punto

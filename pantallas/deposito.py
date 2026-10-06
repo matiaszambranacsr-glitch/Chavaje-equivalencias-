@@ -11,7 +11,9 @@ if pagina == PAGINAS[8]:
         "ordenado por **ubicación**, para juntarlo todo en una vuelta. **✅ Entregado** lo da de "
         "baja: descuenta el stock, anota la venta y, si es para la cuenta de un taller o un "
         "mayorista, lo carga en su cuenta. **❌ No hay** lo manda a 📊 Estadísticas → 📌 Para "
-        "pedir. Acá no se ven precios."
+        "pedir. Se mide cuánto tarda cada uno, desde que se pide hasta que se da de baja: 🟡 "
+        f"desde {MINUTOS_PARA_AVISAR[0]} minutos de espera, 🔴 desde {MINUTOS_PARA_AVISAR[1]}. "
+        "Acá no se ven precios."
     )
 
     def _resolver_pedido(funcion, pedido_id, rotulo):
@@ -34,7 +36,10 @@ if pagina == PAGINAS[8]:
         if _aviso:
             (st.success if _aviso[0] else st.warning)(_aviso[1])
         _pendientes = pedidos_pendientes()
-        st.markdown(f"#### ⏳ Para buscar: {len(_pendientes)}")
+        _esperas = [minutos_entre(_p["pedido_en"]) or 0 for _p in _pendientes]
+        st.markdown(f"#### ⏳ Para buscar: {len(_pendientes)}"
+                    + (f" · el que más espera: {como_se_lee_la_espera(max(_esperas))}"
+                       if _esperas else ""))
         if not _pendientes:
             st.caption("Nada pendiente. Lo que pidan desde el buscador aparece acá solo.")
         for _p in _pendientes:
@@ -46,7 +51,8 @@ if pagina == PAGINAS[8]:
                              f" × **{_p['cantidad']}**")
                 _detalle = [(_p["descripcion"] or "")[:90],
                             f"para {_p['cuenta'] or NOMBRE_DEL_MOSTRADOR}",
-                            f"pidió {_p['pedido_por'] or '¿?'} a las {_hora_corta(_p['pedido_en'])}"]
+                            f"pidió {_p['pedido_por'] or '¿?'} a las {_hora_corta(_p['pedido_en'])}",
+                            f"esperando {como_se_lee_la_espera(minutos_entre(_p['pedido_en']))}"]
                 if _p["stock"] is not None:
                     _detalle.append(f"stock: {_p['stock']}")
                 _ca.caption(" · ".join(x for x in _detalle if x))
@@ -64,6 +70,38 @@ if pagina == PAGINAS[8]:
                            on_click=_cancelar_pedido, args=(_p["id"], _rotulo))
 
     _cola_del_deposito()
+
+    # CUÁNTO TARDA: desde que el mostrador lo pide hasta que el depósito lo da de baja. Ver
+    # «CUÁNTO TARDA EL DEPÓSITO» en logica/deposito.py.
+    _tiempos = tiempos_del_deposito(dias=7)
+
+    def _min(valor):
+        return "—" if valor is None else f"{miles(valor, 1)} min"
+
+    _t1, _t2, _t3 = st.columns(3)
+    _t1.metric("⏱️ Hoy, en promedio", _min(_tiempos["hoy"]["promedio"]),
+               help=f"{_tiempos['hoy']['cuantos']} pedido(s) resueltos hoy, desde que se "
+                    "pidieron hasta que el depósito los dio de baja.")
+    _t2.metric("Hoy, el más lento", _min(_tiempos["hoy"]["maximo"]))
+    _t3.metric(f"Últimos {_tiempos['dias']} días (mediana)", _min(_tiempos["periodo"]["mediana"]),
+               help="La mediana: la mitad tardó menos que esto. No la mueve un pedido que quedó "
+                    "olvidado una hora, como al promedio.")
+    if seccion_plegable("⏱️ Tiempos del depósito, por persona", key="deposito_tiempos"):
+        if not _tiempos["por_persona"]:
+            st.caption("Todavía no hay pedidos resueltos en estos días.")
+        else:
+            st.caption(f"Últimos {_tiempos['dias']} días. «A tiempo» es lo que tardó menos de "
+                       f"{MINUTOS_PARA_AVISAR[0]} minutos.")
+            st.dataframe([{"Quién lo dio de baja": _q, "Pedidos": _r["cuantos"],
+                           "Promedio": _min(_r["promedio"]), "Mediana": _min(_r["mediana"]),
+                           "El más lento": _min(_r["maximo"]), "A tiempo": f"{_r['a_tiempo']}%"}
+                          for _q, _r in _tiempos["por_persona"].items()]
+                         + [{"Quién lo dio de baja": "Todos", "Pedidos": _tiempos["periodo"]["cuantos"],
+                             "Promedio": _min(_tiempos["periodo"]["promedio"]),
+                             "Mediana": _min(_tiempos["periodo"]["mediana"]),
+                             "El más lento": _min(_tiempos["periodo"]["maximo"]),
+                             "A tiempo": f"{_tiempos['periodo']['a_tiempo']}%"}],
+                         hide_index=True, width="stretch")
 
     # PARA FACTURAR: con precios, y con el descuento de cada cuenta. Plegado: la pantalla del
     # depósito puede estar a la vista de un cliente, y el descuento no lo tiene que ver.
@@ -103,5 +141,9 @@ if pagina == PAGINAS[8]:
                            "Qué": f"{r['marca']} {r['codigo_raw']} x{r['cantidad']}",
                            "Para": r["cuenta"] or NOMBRE_DEL_MOSTRADOR,
                            "Cómo": ESTADOS_DEL_PEDIDO.get(r["estado"], r["estado"]),
-                           "Quién": r["resuelto_por"] or ""}
+                           "Tardó": (como_se_lee_la_espera(minutos_entre(r["pedido_en"],
+                                                                         r["resuelto_en"]))
+                                     if r["estado"] != "cancelado" else ""),
+                           "Pidió": r["pedido_por"] or "",
+                           "Lo resolvió": r["resuelto_por"] or ""}
                           for r in _ultimos], hide_index=True, width="stretch")

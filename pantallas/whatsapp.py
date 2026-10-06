@@ -12,6 +12,9 @@ if pagina == PAGINAS[5]:
         "equivalencias y precios de cada marca, para mandar por WhatsApp o como PDF."
     )
 
+    if es_empleado_o_abierto():
+        mostrar_cuenta_elegida("whatsapp")
+
     lista = st.session_state.lista_whatsapp
 
     # PEGAR EL PEDIDO. El cliente manda la lista por WhatsApp; buscarla código por código en el
@@ -68,6 +71,11 @@ if pagina == PAGINAS[5]:
         encabezado_wa = obtener_config("whatsapp_encabezado", "🔧 *Equivalencias El Chavo*")
         pie_wa = obtener_config("whatsapp_pie", "")
         partes = [f"{encabezado_wa}\n"]
+        # Para quién es, si se está atendiendo a una cuenta. Con precios de lista: el descuento
+        # de la cuenta no va en la cotización (ver «EL DESCUENTO NO SE VE»).
+        if cuenta_elegida() and st.checkbox(f"Poner «Para: {cuenta_elegida()['nombre']}» en el "
+                                            "mensaje", value=True, key="wa_para_la_cuenta"):
+            partes.append(f"Para: *{cuenta_elegida()['nombre']}*\n")
         for item in lista_cotizar:
             partes.append(f"\n📦 *{item['codigo_buscado']}*")
             for fila in item["resultados"]:

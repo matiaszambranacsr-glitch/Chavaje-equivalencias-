@@ -133,12 +133,75 @@ def probar(L):
     esperar("con código sí", ns["pedir_al_deposito"](filtro, 1, taller, codigo)[0], True)
     esperar("el código se gastó", ns["pedir_al_deposito"](filtro, 1, taller, codigo)[0], False)
 
-    # Límite de crédito: se mira contra el precio con descuento.
+    # Límite de crédito: contra el precio con descuento, y sumando lo pedido sin entregar.
+    # Debe 17.000 y tiene pedido (pendiente) 1 filtro = 8.500. Uno más = 8.500.
+    ns["configurar_cuenta_de_taller"](taller, 25500, 30, False)
+    esperar("lo pedido sin entregar cuenta para el límite",
+            ns["pedir_al_deposito"](filtro, 1, taller)[0], False)
+    pendiente = [p["id"] for p in ns["pedidos_pendientes"]() if p["mecanico_id"] == taller]
+    esperar("había uno pendiente de la cuenta", len(pendiente), 1)
+    ns["cancelar_pedido_del_deposito"](pendiente[0])
     ns["configurar_cuenta_de_taller"](taller, 25000, 30, False)
-    # debe 17.000; uno más = 8.500 → 25.500 > 25.000
     esperar("pasa el límite", ns["pedir_al_deposito"](filtro, 1, taller)[0], False)
     ns["configurar_cuenta_de_taller"](taller, 25500, 30, False)
     esperar("justo en el límite", ns["pedir_al_deposito"](filtro, 1, taller)[0], True)
+    for p in ns["pedidos_pendientes"]():
+        ns["cancelar_pedido_del_deposito"](p["id"])
+    ns["configurar_cuenta_de_taller"](taller, 0, 30, True)
+
+    # La cuenta se elige UNA vez: el código se gasta al elegirla y después no se pide más.
+    esperar("autorizar sin código", ns["autorizar_retiro"](taller, "")[0], False)
+    codigo, _ = ns["generar_codigo_de_retiro"](taller)
+    esperar("autorizar con código", ns["autorizar_retiro"](taller, codigo)[0], True)
+    esperar("el código ya no sirve", ns["autorizar_retiro"](taller, codigo)[0], False)
+    st = ns["st"]
+    st.session_state["cuenta_elegida"] = {"id": taller, "nombre": "Taller Pérez",
+                                          "desde": ns["time"].time()}
+    esperar("cuenta elegida", ns["nombre_de_la_cuenta_elegida"](), "Taller Pérez")
+    pedidos, fallas_ = ns["pedir_lo_elegido_al_deposito"]([(filtro, 1), (junta, 2)],
+                                                         usuario="mostrador")
+    esperar("varios a la cuenta elegida, sin código", (len(pedidos), fallas_), (2, []))
+    esperar("quedaron a nombre de la cuenta",
+            sorted(p["mecanico_id"] for p in ns["pedidos_pendientes"]()), [taller, taller])
+    st.session_state["cuenta_elegida"]["desde"] -= ns["HORAS_DE_LA_CUENTA_ELEGIDA"] * 3600 + 1
+    esperar("la cuenta elegida vence", ns["cuenta_elegida"](), None)
+    pedidos, _ = ns["pedir_lo_elegido_al_deposito"]([(junta, 1)], usuario="mostrador")
+    esperar("vencida, va a Mostrador",
+            c.execute("SELECT mecanico_id FROM pedidos_deposito ORDER BY id DESC LIMIT 1"
+                      ).fetchone()[0], None)
+    for p in ns["pedidos_pendientes"]():
+        ns["cancelar_pedido_del_deposito"](p["id"])
+
+    # Cuánto tarda: desde que se pide hasta que se da de baja. Lo cancelado no cuenta.
+    esperar("minutos entre", ns["minutos_entre"]("2026-10-06 10:00:00", "2026-10-06 10:12:59"), 12)
+    esperar("minutos ilegibles", ns["minutos_entre"]("cualquier cosa"), None)
+    esperar("espera corta", ns["como_se_lee_la_espera"](3), "⏱️ 3 min")
+    esperar("recién pedido", ns["como_se_lee_la_espera"](0), "⏱️ <1 min")
+    esperar("espera amarilla", ns["como_se_lee_la_espera"](12), "🟡 12 min")
+    esperar("espera roja", ns["como_se_lee_la_espera"](65), "🔴 1 h 05")
+    c.execute("DELETE FROM pedidos_deposito")
+    for minutos, quien, estado in ((4, "Juan", "entregado"), (6, "Juan", "entregado"),
+                                   (30, "Pedro", "no_hay"), (90, "Pedro", "cancelado")):
+        c.execute("""INSERT INTO pedidos_deposito (producto_id, cantidad, estado, resuelto_por,
+                                                   pedido_en, resuelto_en)
+                     VALUES (?, 1, ?, ?, datetime('now', 'localtime', ?),
+                             datetime('now', 'localtime'))""",
+                  (filtro, estado, quien, f"-{minutos} minutes"))
+    c.execute("""INSERT INTO pedidos_deposito (producto_id, cantidad, estado, resuelto_por,
+                                               pedido_en, resuelto_en)
+                 VALUES (?, 1, 'entregado', 'Juan', datetime('now', 'localtime', '-20 days'),
+                         datetime('now', 'localtime', '-20 days', '+50 minutes'))""", (filtro,))
+    conn.commit()
+    t = ns["tiempos_del_deposito"](dias=7)
+    redondo = lambda r: {k: (round(v) if isinstance(v, float) else v) for k, v in r.items()}
+    esperar("tiempos de hoy", redondo(t["periodo"]),
+            {"cuantos": 3, "promedio": 13, "mediana": 6, "maximo": 30, "a_tiempo": 67})
+    esperar("por persona", {q: r["cuantos"] for q, r in t["por_persona"].items()},
+            {"Juan": 2, "Pedro": 1})
+    esperar("hoy = período", t["hoy"]["cuantos"], 3)
+    esperar("con 30 días entra el viejo", ns["tiempos_del_deposito"](dias=30)["periodo"]["cuantos"],
+            4)
+    esperar("sin nada", ns["_resumen_de_tiempos"]([])["promedio"], None)
 
     esperar("últimos resueltos", len(ns["ultimos_pedidos_del_deposito"]()) >= 4, True)
     return fallas

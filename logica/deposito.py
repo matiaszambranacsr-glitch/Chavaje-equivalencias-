@@ -48,13 +48,25 @@ def cuentas_para_pedir():
     return [(r["id"], r["nombre"]) for r in c.fetchall()]
 
 
+def _pendiente_de_la_cuenta(mecanico_id, descuento):
+    """Lo que la cuenta ya tiene pedido al depósito y todavía no se entregó, con su descuento.
+    Cuenta para el límite: sin esto, diez pedidos seguidos pasaban todos, porque el saldo
+    recién sube cuando el depósito los entrega."""
+    c.execute("""SELECT COALESCE(SUM(p.precio * d.cantidad), 0) FROM pedidos_deposito d
+                 JOIN productos p ON p.id = d.producto_id
+                 WHERE d.mecanico_id = ? AND d.estado = 'pendiente'""", (mecanico_id,))
+    return precio_de_la_cuenta(c.fetchone()[0], descuento)
+
+
 def pedir_al_deposito(producto_id, cantidad=1, mecanico_id=None, codigo_de_retiro="",
-                      usuario="", nota=""):
+                      usuario="", nota="", retiro_autorizado=False):
     """El pedido del mostrador. Devuelve (True, aviso) o (False, por qué no).
 
     Si es para una cuenta que pide código de retiro, el código se pide y se gasta ACÁ, en el
-    mostrador, que es donde está el que viene a buscar: el depósito no lo ve. El límite de
-    crédito también se mira acá, contra el precio con descuento."""
+    mostrador, que es donde está el que viene a buscar: el depósito no lo ve. Con
+    retiro_autorizado ya se pidió una vez, al elegir la cuenta (ver autorizar_retiro()): así
+    no hace falta un código nuevo por cada producto. El límite de crédito también se mira acá,
+    contra el precio con descuento y sumando lo que ya está pedido."""
     try:
         cantidad = int(cantidad)
     except (TypeError, ValueError):
@@ -69,12 +81,16 @@ def pedir_al_deposito(producto_id, cantidad=1, mecanico_id=None, codigo_de_retir
         config = configuracion_de_cuenta(mecanico_id)
         importe = precio_de_la_cuenta(prod["precio"], config["descuento"]) * cantidad
         estado = estado_de_cuenta(mecanico_id)
-        if config["limite"] and estado["saldo"] + importe > config["limite"]:
+        pedido = _pendiente_de_la_cuenta(mecanico_id, config["descuento"])
+        if config["limite"] and estado["saldo"] + pedido + importe > config["limite"] + 0.005:
             return False, (f"Pasa el límite de crédito de la cuenta: debe "
-                           f"{formato_precio(estado['saldo'])} y el límite es "
-                           f"{formato_precio(config['limite'])}.")
+                           f"{formato_precio(estado['saldo'])}"
+                           + (f", tiene pedido sin entregar {formato_precio(pedido)}"
+                              if pedido else "")
+                           + f" y el límite es {formato_precio(config['limite'])}.")
     with db_lock, transaccion():
-        if mecanico_id and configuracion_de_cuenta(mecanico_id)["pide_codigo"]:
+        if (mecanico_id and not retiro_autorizado
+                and configuracion_de_cuenta(mecanico_id)["pide_codigo"]):
             codigo_id = _codigo_de_retiro_vigente(mecanico_id, codigo_de_retiro)
             if not codigo_id:
                 return False, ("El código de retiro no es válido, ya se usó o venció. El taller "
@@ -217,8 +233,8 @@ def marcar_facturado(ids_de_pedidos):
 
 def ultimos_pedidos_del_deposito(limite=30):
     """Los últimos resueltos, para ver qué se entregó y quién (sin precios)."""
-    c.execute("""SELECT d.id, d.cantidad, d.estado, d.resuelto_por, d.resuelto_en,
-                        p.codigo_raw, m.nombre AS marca, k.nombre AS cuenta
+    c.execute("""SELECT d.id, d.cantidad, d.estado, d.pedido_por, d.pedido_en, d.resuelto_por,
+                        d.resuelto_en, p.codigo_raw, m.nombre AS marca, k.nombre AS cuenta
                  FROM pedidos_deposito d
                  JOIN productos p ON p.id = d.producto_id
                  JOIN marcas m ON m.id = p.marca_id
@@ -226,6 +242,169 @@ def ultimos_pedidos_del_deposito(limite=30):
                  WHERE d.estado <> 'pendiente'
                  ORDER BY d.resuelto_en DESC LIMIT ?""", (limite,))
     return [dict(r) for r in c.fetchall()]
+
+
+# ============================================================================================
+# CUÁNTO TARDA EL DEPÓSITO
+# ============================================================================================
+# Desde que el mostrador lo pide hasta que el depósito lo da de baja (entregado o «no hay»).
+# Las dos horas las pone la base (datetime('now', 'localtime')), así que no depende del reloj
+# de cada computadora. Lo cancelado no cuenta: no lo fueron a buscar.
+# En la cola, el que espera más que esto se marca: 🟡 desde el primero, 🔴 desde el segundo.
+MINUTOS_PARA_AVISAR = (10, 20)
+
+
+def minutos_entre(desde, hasta=None):
+    """Minutos enteros entre dos «AAAA-MM-DD HH:MM:SS» (hasta=None: ahora). None si no se leen."""
+    try:
+        inicio = datetime.strptime(str(desde)[:19], "%Y-%m-%d %H:%M:%S")
+        fin = (datetime.strptime(str(hasta)[:19], "%Y-%m-%d %H:%M:%S") if hasta
+               else datetime.now())
+    except (TypeError, ValueError):
+        return None
+    return max(0, int((fin - inicio).total_seconds() // 60))
+
+
+def como_se_lee_la_espera(minutos):
+    """«⏱️ <1 min», «⏱️ 7 min», «🟡 12 min», «🔴 1 h 05»."""
+    if minutos is None:
+        return ""
+    marca = ("🔴" if minutos >= MINUTOS_PARA_AVISAR[1] else
+             "🟡" if minutos >= MINUTOS_PARA_AVISAR[0] else "⏱️")
+    texto = ("<1 min" if minutos < 1 else f"{minutos} min" if minutos < 60
+             else f"{minutos // 60} h {minutos % 60:02d}")
+    return f"{marca} {texto}"
+
+
+def _resumen_de_tiempos(minutos):
+    if not minutos:
+        return {"cuantos": 0, "promedio": None, "mediana": None, "maximo": None, "a_tiempo": None}
+    orden = sorted(minutos)
+    medio = len(orden) // 2
+    mediana = orden[medio] if len(orden) % 2 else (orden[medio - 1] + orden[medio]) / 2
+    return {"cuantos": len(orden), "promedio": round(sum(orden) / len(orden), 1),
+            "mediana": round(mediana, 1), "maximo": round(orden[-1], 1),
+            "a_tiempo": round(100 * sum(1 for m in orden if m < MINUTOS_PARA_AVISAR[0])
+                              / len(orden))}
+
+
+def tiempos_del_deposito(dias=7):
+    """{"hoy": resumen, "periodo": resumen, "por_persona": {quién: resumen}, "dias": dias}.
+    Cada resumen: cuántos, promedio, mediana y máximo en minutos, y el % que tardó menos de
+    MINUTOS_PARA_AVISAR[0]."""
+    c.execute("""SELECT d.resuelto_por,
+                        (julianday(d.resuelto_en) - julianday(d.pedido_en)) * 1440 AS minutos,
+                        date(d.resuelto_en) = date('now', 'localtime') AS es_de_hoy
+                 FROM pedidos_deposito d
+                 WHERE d.estado IN ('entregado', 'no_hay') AND d.resuelto_en IS NOT NULL
+                   AND d.resuelto_en >= datetime('now', 'localtime', ?)""",
+              (f"-{int(dias)} days",))
+    filas = [(r["resuelto_por"] or "¿?", max(0.0, float(r["minutos"] or 0)), r["es_de_hoy"])
+             for r in c.fetchall()]
+    personas = {}
+    for quien, minutos, _hoy in filas:
+        personas.setdefault(quien, []).append(minutos)
+    return {"hoy": _resumen_de_tiempos([m for _q, m, hoy in filas if hoy]),
+            "periodo": _resumen_de_tiempos([m for _q, m, _h in filas]),
+            "por_persona": {q: _resumen_de_tiempos(ms) for q, ms in sorted(personas.items())},
+            "dias": int(dias)}
+
+
+# ============================================================================================
+# A QUIÉN SE ESTÁ ATENDIENDO
+# ============================================================================================
+# La cuenta se elige UNA vez, antes de empezar a pedir o a armar el presupuesto, y queda para
+# todo lo que sigue: cada «📦 Pedir» va a esa cuenta. Antes había que elegirla en cada producto,
+# y si pedía código de retiro, un código nuevo por producto (el código es de un solo uso).
+# Ahora el código se pide y se gasta al elegir la cuenta. Queda elegida hasta «Volver a
+# Mostrador», hasta salir, o HORAS_DE_LA_CUENTA_ELEGIDA después: una computadora del mostrador
+# que quedó con una cuenta abierta no puede seguir cargándole cosas toda la tarde.
+HORAS_DE_LA_CUENTA_ELEGIDA = 3
+
+
+def autorizar_retiro(mecanico_id, codigo):
+    """Al elegir la cuenta: si pide código de retiro, lo valida y lo gasta. (True, "") o
+    (False, por qué no)."""
+    if not configuracion_de_cuenta(mecanico_id)["pide_codigo"]:
+        return True, ""
+    with db_lock, transaccion():
+        codigo_id = _codigo_de_retiro_vigente(mecanico_id, codigo)
+        if not codigo_id:
+            return False, ("El código de retiro no es válido, ya se usó o venció. El taller "
+                           "genera uno nuevo en su portal.")
+        c.execute("UPDATE codigos_de_retiro SET usado_en = datetime('now', 'localtime') "
+                  "WHERE id = ?", (codigo_id,))
+    return True, ""
+
+
+def cuenta_elegida():
+    """{"id", "nombre", "desde"} de la cuenta que se está atendiendo, o None (Mostrador)."""
+    elegida = st.session_state.get("cuenta_elegida")
+    if not elegida:
+        return None
+    if time.time() - elegida.get("desde", 0) > HORAS_DE_LA_CUENTA_ELEGIDA * 3600:
+        st.session_state.pop("cuenta_elegida", None)
+        return None
+    return elegida
+
+
+def nombre_de_la_cuenta_elegida():
+    elegida = cuenta_elegida()
+    return elegida["nombre"] if elegida else NOMBRE_DEL_MOSTRADOR
+
+
+def _dejar_la_cuenta():
+    st.session_state.pop("cuenta_elegida", None)
+
+
+def mostrar_cuenta_elegida(clave):
+    """«🧾 Atendiendo a: …», arriba del buscador y de la lista de WhatsApp. Un toque abre el
+    recuadro para elegir la cuenta (y poner el código de retiro, si lo pide) o volver a
+    Mostrador. Sin precios ni saldos: el cliente puede estar mirando."""
+    elegida = cuenta_elegida()
+    # Con clave: sin ella, Streamlit lo arma de nuevo al elegir la cuenta y se cerraba antes
+    # de poder tocar «Atender a esta cuenta» (medido en el navegador).
+    with st.popover(f"🧾 Atendiendo a: {nombre_de_la_cuenta_elegida().replace('🧾 ', '')}",
+                    type="primary" if elegida else "secondary", key=f"cuenta_pop_{clave}"):
+        nombres = dict(cuentas_para_pedir())
+        if not nombres:
+            st.caption(f"Todavía no hay cuentas: se crean en {miga_hasta('Usuarios')}, en "
+                       "«Mecánicos externos».")
+            return
+        st.caption("Elegila antes de pedir o de armar el presupuesto: todo lo que pidas al "
+                   "depósito va a esa cuenta, sin elegirla de nuevo en cada producto.")
+        nueva = st.selectbox("Cuenta:", list(nombres), format_func=nombres.get, index=None,
+                             placeholder="El taller o mayorista", key=f"cuenta_sel_{clave}")
+        codigo = ""
+        if nueva and configuracion_de_cuenta(nueva)["pide_codigo"]:
+            codigo = st.text_input("Código de retiro", max_chars=6, key=f"cuenta_cod_{clave}",
+                                   placeholder="6 números, del portal del taller",
+                                   help="Se pide una sola vez, acá. Sirve para todo lo que se "
+                                        "pida mientras esté elegida la cuenta.")
+        if st.button("✅ Atender a esta cuenta", type="primary", disabled=not nueva,
+                     key=f"cuenta_ok_{clave}", width="stretch"):
+            ok, aviso = autorizar_retiro(nueva, codigo)
+            if ok:
+                st.session_state["cuenta_elegida"] = {"id": nueva, "nombre": nombres[nueva],
+                                                      "desde": time.time()}
+                st.session_state.pop(f"cuenta_cod_{clave}", None)
+                st.rerun()
+            st.error(aviso)
+        if elegida:
+            st.button(f"↩️ Volver a {NOMBRE_DEL_MOSTRADOR}", key=f"cuenta_fin_{clave}",
+                      on_click=_dejar_la_cuenta, width="stretch")
+
+
+def pedir_lo_elegido_al_deposito(items, usuario="", nota=""):
+    """[(producto_id, cantidad)] → pide cada uno para la cuenta elegida (o Mostrador).
+    Devuelve (los que se pidieron, [por qué no, de los otros])."""
+    elegida = cuenta_elegida()
+    pedidos, fallas = [], []
+    for producto_id, cantidad in items:
+        ok, aviso = pedir_al_deposito(producto_id, cantidad, elegida["id"] if elegida else None,
+                                      usuario=usuario, nota=nota, retiro_autorizado=True)
+        (pedidos.append(producto_id) if ok else fallas.append(aviso))
+    return pedidos, fallas
 
 
 def _hora_corta(fecha_y_hora):
@@ -240,13 +419,15 @@ def _hora_corta(fecha_y_hora):
 
 def mostrar_pedir_al_deposito(resultados, clave):
     """El botón «📦 Pedir al depósito» abajo del resultado de una búsqueda. Abre un recuadro chico:
-    cuál (si hay varios), cuántos, para quién y, si esa cuenta lo pide, el código de retiro.
+    cuál (si hay varios), cuántos y una nota. Va a la cuenta que se está atendiendo («🧾
+    Atendiendo a», arriba de todo): no se elige en cada producto. También suma al presupuesto.
 
     No muestra ningún precio: lo puede estar mirando el cliente del otro lado del mostrador, y
     el de la cuenta lleva el descuento (ver «EL DESCUENTO NO SE VE»)."""
     if not resultados:
         return
-    with st.popover("📦 Pedir al depósito", width="stretch"):
+    with st.popover("📦 Pedir al depósito / 🛒 presupuesto", width="stretch",
+                    key=f"dep_pop_{clave}"):
         rotulos = {f["ID"]: f"{f['Marca']} - {f['Codigo']}" for f in resultados}
         if len(rotulos) == 1:
             producto_id = next(iter(rotulos))
@@ -256,19 +437,41 @@ def mostrar_pedir_al_deposito(resultados, clave):
                                        key=f"dep_cual_{clave}")
         cantidad = st.number_input("Cantidad", min_value=1, max_value=CANTIDAD_MAXIMA_POR_PEDIDO,
                                    value=1, step=1, key=f"dep_cant_{clave}")
-        nombres = dict([(None, NOMBRE_DEL_MOSTRADOR)] + cuentas_para_pedir())
-        para = st.selectbox("Para:", list(nombres), format_func=nombres.get,
-                            key=f"dep_para_{clave}",
-                            help="Si es para la cuenta de un taller o mayorista, al entregarlo "
-                                 "queda cargado en su cuenta, para facturar.")
-        codigo = ""
-        if para and configuracion_de_cuenta(para)["pide_codigo"]:
-            codigo = st.text_input("Código de retiro", max_chars=6, key=f"dep_cod_{clave}",
-                                   placeholder="6 números, del portal del taller")
+        st.markdown(f"Para: **{texto_para_html(nombre_de_la_cuenta_elegida())}**")
+        st.caption("Se cambia arriba, en «🧾 Atendiendo a».")
         nota = st.text_input("Nota para el depósito (opcional)", max_chars=200,
                              key=f"dep_nota_{clave}", placeholder="Ej.: lo espera en el mostrador")
-        if st.button("📦 Pedir", type="primary", key=f"dep_pedir_{clave}", width="stretch"):
-            ok, aviso = pedir_al_deposito(producto_id, cantidad, para, codigo, nota=nota)
-            (st.success if ok else st.error)(aviso)
+        b_pedir, b_sumar = st.columns(2)
+        if b_pedir.button("📦 Pedir", type="primary", key=f"dep_pedir_{clave}", width="stretch"):
+            pedidos, fallas = pedir_lo_elegido_al_deposito([(producto_id, cantidad)], nota=nota)
+            if pedidos:
+                st.success("📦 Pedido al depósito. Lo ven en «📦 Depósito».")
+            for falla in fallas:
+                st.error(falla)
+        # Como callback: el presupuesto se dibuja arriba de todo, antes que este botón, y sumado
+        # recién al volver del botón no aparecía hasta el toque siguiente.
+        b_sumar.button("🛒 Al presupuesto", key=f"dep_sumar_{clave}", width="stretch",
+                       on_click=_sumar_desde_el_recuadro,
+                       args=(next(f for f in resultados if f["ID"] == producto_id), cantidad,
+                             clave))
+        if st.session_state.pop(f"_sumado_{clave}", None):
+            st.success("🛒 Sumado al presupuesto (arriba de todo, en «Presupuesto en armado»).")
         st.caption("No hace falta tocar «🛒 Se llevó»: la venta se anota sola cuando el depósito "
                    "lo entrega.")
+
+
+def _sumar_desde_el_recuadro(fila, cantidad, clave):
+    sumar_al_presupuesto(fila, cantidad)
+    st.session_state[f"_sumado_{clave}"] = True
+
+
+def sumar_al_presupuesto(fila, cantidad=1):
+    """Suma un resultado al «🛒 Presupuesto en armado» (o le suma cantidad si ya estaba)."""
+    carrito = st.session_state.setdefault("carrito", {})
+    if fila["ID"] in carrito:
+        carrito[fila["ID"]]["cantidad"] += int(cantidad)
+        st.session_state.pop(f"cant_cart_{fila['ID']}", None)
+    else:
+        carrito[fila["ID"]] = {"codigo": fila["Codigo"], "marca": fila["Marca"],
+                               "descripcion": fila.get("Descripcion") or "",
+                               "precio": fila.get("Precio") or 0, "cantidad": int(cantidad)}
