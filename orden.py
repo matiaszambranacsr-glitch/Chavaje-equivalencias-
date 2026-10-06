@@ -36,6 +36,7 @@ PARTES_DE_LA_LOGICA = [
     "repuestos_por_auto.py",
     "busqueda_por_texto.py",
     "parque_automotor.py",
+    "homologaciones.py",
     "negocio.py",
     "interfaz.py",
     "vehiculos.py",

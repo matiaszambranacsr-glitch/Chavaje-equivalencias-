@@ -1480,6 +1480,18 @@ def _esquema_gestion(c):
         usado_en TEXT,
         movimiento_id INTEGER
     )""")
+    # LOS CHAS VIGENTES (ver logica/homologaciones.py): el registro oficial de autopartes de
+    # seguridad homologadas, de la Secretaría de Industria. Se reemplaza entero cada vez.
+    c.execute("""CREATE TABLE IF NOT EXISTS chas_emitidos (
+        numero TEXT,
+        empresa TEXT,
+        marca TEXT,
+        marca_norm TEXT,
+        autoparte TEXT,
+        detalle TEXT,
+        fecha TEXT
+    )""")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_chas_marca ON chas_emitidos(marca_norm)")
     # EL PARQUE AUTOMOTOR (ver logica/parque_automotor.py): cuántos autos de cada marca,
     # modelo y año se transfirieron por provincia, según el DNRPA. Solo eso: del archivo
     # oficial no se lee ni se guarda nada de los titulares.

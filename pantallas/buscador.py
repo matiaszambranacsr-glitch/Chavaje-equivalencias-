@@ -1259,6 +1259,17 @@ if pagina == PAGINAS[0]:
                                     st.dataframe(quitar_id(_filas_c), width="stretch",
                                                  hide_index=True)
 
+                        # Autopartes de seguridad: las marcas de estos resultados que tienen
+                        # CHAS. Solo lo que hay: «no figura» se mira en Administrar → Marcas
+                        # (ver chas_en_los_resultados()).
+                        _con_chas = chas_en_los_resultados(res)
+                        if _con_chas:
+                            st.caption("🛡️ Con CHAS vigente (autoparte de seguridad homologada): "
+                                       + " · ".join(f"**{texto_para_html(_m)}**"
+                                                    + (f" ({texto_para_html(', '.join(_d['autopartes'][:2]))})"
+                                                       if _d["autopartes"] else "")
+                                                    for _m, _d in _con_chas[:6]))
+
                         col_dl, col_add = st.columns(2)
                         with col_dl:
                             st.download_button(

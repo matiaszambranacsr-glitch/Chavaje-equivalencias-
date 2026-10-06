@@ -8,11 +8,12 @@ qué proveedores, son el mismo repuesto. Corre con Streamlit sobre una base SQLi
 | archivo | qué es |
 |---|---|
 | `app.py` | Lo que Streamlit corre en cada toque: la configuración de la página, el encabezado, la entrada y la navegación. Arranca con el mapa de todas las secciones de la app. |
-| `logica/` | Todo lo que no es una pantalla: la base, los códigos, las equivalencias, las copias, los proveedores. 23 archivos (el orden, en `orden.py`). Se carga **una vez** por proceso. |
+| `logica/` | Todo lo que no es una pantalla: la base, los códigos, las equivalencias, las copias, los proveedores. 24 archivos (el orden, en `orden.py`). Se carga **una vez** por proceso. |
 | `pantallas/` | Una pantalla por archivo (buscador, administrar, estadísticas...). Corren en cada toque, al final de `app.py`. |
 | `orden.py` | En qué orden corren las partes de `logica/` y las pantallas. Lo leen la app y las herramientas. |
 | `nucleo/` | La misma lógica pero **sin Streamlit**, para poder usarla desde otro sistema. Se genera desde `logica/`. |
 | `auditar.py` | Revisa la app entera y busca los errores que ya pasaron alguna vez. Correlo antes de subir un cambio. |
+| `pruebas_de_las_homologaciones.py` | El registro oficial de CHAS (autopartes de seguridad): leerlo en varios formatos y cruzarlo con tus marcas. |
 | `pruebas_del_deposito.py` | El circuito del depósito y el descuento de cada cuenta: pedir, entregar, cargar en la cuenta y facturar. |
 | `pruebas_de_la_revision.py` | Que el análisis de equivalencias no se equivoque con pares ya revisados a mano, y (con `--base`) que no baje a rojo lo que aprobaste. |
 | `requirements.txt` | Lo que hay que instalar. |
@@ -6455,6 +6456,43 @@ el botón**:
   dónde vino. Solo los últimos tres años: la serie arranca en los cuarenta y trae el 89.
 - «🔌 Probar las fuentes de afuera» suma la Central de Deudores (con el CUIT de la AFIP, nunca el
   de un cliente) y la inflación de respaldo.
+
+## 🛡️ Autopartes de seguridad: el registro oficial de CHAS
+
+En Argentina, una autoparte de seguridad (frenos, cinturones, vidrios, luces, espejos, cubiertas)
+solo se puede vender de reposición con su **CHAS**, el Certificado de Homologación de Autopartes
+de Seguridad (Decreto 779/95, Anexo C; Resolución 166/2019). La Secretaría de Industria publica
+cada mes los CHAS vigentes en datos abiertos (datos.produccion.gob.ar, «Registro de CHAS
+Emitidos»). La app lo baja sola una vez por mes (en el trabajo de fondo); también se puede bajar
+desde Administrar → 🏷️ Marcas → «🛡️ Autopartes de seguridad», o subir el CSV del portal a mano.
+Está en `logica/homologaciones.py`.
+
+- **Las columnas se buscan por nombre** (marca, empresa o razón social, autoparte, número de CHAS,
+  fecha), no por posición: el formato no se pudo leer desde donde se programó y puede cambiar.
+  Acepta coma o punto y coma, UTF-8 o Windows-1252. La pantalla dice qué columna usó para qué.
+- **Tus proveedores contra el registro**: cuántas piezas de seguridad vende cada uno y cuántas
+  tienen un CHAS a la vista. Las listas de los distribuidores cargan todo con el nombre del
+  distribuidor y la marca del producto va en el texto («LAMPARA H4… zócalo Marelli»), así que se
+  mira también la marca que nombra la descripción, como palabra entera y sin palabras comunes
+  («FRENO», «ORIGINAL»). Los códigos de fábrica (marca OEM) no van.
+- **Qué es una pieza de seguridad**: el nombre tiene que ser la primera palabra (o la segunda
+  detrás de una sigla, como «MN DOT 4»). Mirado en la base real: «Tecla faros antiniebla»,
+  «Portátil para lámpara» y «Llave de luces… doble faro» nombran un faro o una lámpara pero no lo
+  son; con la regla anterior CRI-FA figuraba con 176 «piezas de seguridad» que eran teclas y
+  portalámparas. «Cubierta» no cuenta: en las listas también es la tapa de distribución.
+- **En el buscador**, una línea «🛡️ Con CHAS vigente: MARELLI (lámparas)» cuando un resultado es
+  una pieza de seguridad con CHAS. Solo dice lo que hay: «no figura» no quiere decir «no tiene»,
+  y eso se mira en Administrar.
+
+Probado en `pruebas_de_las_homologaciones.py` (encabezados en varias formas, separadores,
+codificaciones, el archivo más reciente del portal por el mes del nombre, el tope de tamaño, la
+marca en la descripción, las falsas piezas de seguridad de la base real; ocho fallas puestas a
+propósito, todas detectadas) y en el navegador sobre la copia de hoy: con un registro de ejemplo
+encontró 62 lámparas Marelli de JL y el líquido de frenos de Mannol.
+
+Fuentes de Argentina que se miraron y quedaron para más adelante: las inscripciones de
+maquinaria agrícola del DNRPA (vienen por provincia y mes, sin marca ni modelo) y los vehículos
+expuestos a riesgo de la Superintendencia de Seguros (por aseguradora, no por modelo).
 
 ## 📦 Cuatro vendedores pidiendo a la vez, y pedir de a uno
 

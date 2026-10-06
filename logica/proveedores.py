@@ -2550,6 +2550,13 @@ def _trabajo_de_fondo():
         actualizar_parque_automotor()
     except Exception as _err:
         anotar_error("_trabajo_de_fondo/parque_automotor", _err)
+    # El registro de CHAS de la Secretaría de Industria: una vez por mes (ver
+    # actualizar_el_registro_chas()).
+    try:
+        ceder_al_mostrador()
+        actualizar_el_registro_chas()
+    except Exception as _err:
+        anotar_error("actualizar_el_registro_chas", _err)
 
     # Lo ya aprobado, con las reglas de hoy: si la app cambió o cambiaron los vínculos. La
     # pantalla de sugeridas avisa lo que encuentre (ver revisar_lo_aprobado_por_atras()).

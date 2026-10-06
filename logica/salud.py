@@ -122,7 +122,8 @@ TAREAS_QUE_SE_VIGILAN = (("_trabajo_de_fondo", "trabajo de fondo"), ("vigilar_la
                    ("descargar_imagen", "fotos de las fichas"),
                    ("actualizar_parque_automotor", "parque automotor (DNRPA)"),
                    ("contexto_de_precios", "dólar e inflación"),
-                   ("actualizar_ipc_de_transporte", "IPC de transporte"))
+                   ("actualizar_ipc_de_transporte", "IPC de transporte"),
+                   ("actualizar_el_registro_chas", "registro de CHAS"))
 # Desde cuántas veces se avisa. Una sola es un sitio que no contestó justo esa vez.
 FALLAS_PARA_AVISAR = 5
 
@@ -1663,6 +1664,10 @@ def probar_fuentes_de_afuera():
     medir("BCRA — Central de Deudores (api.bcra.gob.ar)",
           lambda: _pedir_al_bcra(URL_BCRA_DEUDAS.format(cuit=CUIT_DE_MUESTRA)),
           lambda r: (f"contesta ({r[0]})" if r and r[0] in (200, 404) else ""))
+    medir("Secretaría de Industria — registro de CHAS (datos.produccion.gob.ar)",
+          lambda: _pedir_json(URL_PORTAL_PRODUCCION, tiempo_maximo=20),
+          lambda r: (f"último archivo: {archivo_mas_reciente_del_chas().rsplit('/', 1)[-1]}"
+                     if isinstance(r, dict) and r.get("success") else ""))
     medir("NHTSA — lector de VIN (vpic.nhtsa.dot.gov)",
           lambda: consultar_vin_en_nhtsa(VIN_DE_MUESTRA)[0],
           lambda r: f"{r.get('marca')} {r.get('modelo')} {r.get('anio')}")

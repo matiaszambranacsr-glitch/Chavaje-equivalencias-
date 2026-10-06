@@ -270,6 +270,79 @@ if pagina == PAGINAS[3]:
                 avisar("success", f"Marca '{marca_a_borrar}' eliminada (podés restaurarla desde la papelera).")
                 st.rerun()
 
+        # AUTOPARTES DE SEGURIDAD: el registro oficial de CHAS contra tus marcas. Ver
+        # «AUTOPARTES DE SEGURIDAD: EL REGISTRO DE CHAS» en logica/homologaciones.py.
+        _chas = resumen_del_chas()
+        if seccion_plegable("🛡️ Autopartes de seguridad: ¿tus marcas tienen CHAS?"
+                            + (f" ({miles(_chas['certificados'])} certificados cargados)"
+                               if _chas.get("certificados") else ""),
+                            key="marcas_chas"):
+            explicar(
+                "El registro oficial de la Secretaría de Industria: qué marcas tienen el "
+                "certificado para vender frenos, luces, vidrios, cinturones o cubiertas de "
+                "reposición.",
+                "Una autoparte de seguridad solo se puede vender con su **CHAS** (Certificado de "
+                "Homologación de Autopartes de Seguridad, Decreto 779/95 y Resolución 166/2019). "
+                "La Secretaría de Industria publica cada mes los vigentes, gratis. La app lo baja "
+                "sola una vez por mes; también se puede bajar ahora, o subir el CSV del portal "
+                "a mano.\n\n**«No figura» no quiere decir «no tiene»**: muchas listas nombran "
+                "al distribuidor y no a la marca del producto, o la escriben distinto. Es una "
+                "pregunta para hacerle al proveedor.",
+                en_expander=True)
+            if _chas.get("certificados"):
+                st.caption(f"Cargado el {_chas.get('traido', '')[:16]}: "
+                           f"{miles(_chas['certificados'])} certificados de "
+                           f"{miles(_chas.get('marcas', 0))} marcas. Columnas leídas: "
+                           + ", ".join(f"{k} = «{v}»" for k, v in
+                                       (_chas.get("columnas") or {}).items()))
+            else:
+                st.caption("Todavía no se cargó el registro.")
+            _ch1, _ch2 = st.columns(2)
+            if es_empleado_o_abierto() and _ch1.button("🌐 Bajar el registro ahora",
+                                                      key="chas_bajar"):
+                with st.spinner("Bajando el registro de CHAS…"):
+                    try:
+                        _r = actualizar_el_registro_chas(forzar=True)
+                        avisar("success", f"Registro de CHAS cargado: {miles(_r['certificados'])} "
+                                          "certificados.")
+                        st.rerun()
+                    except Exception as _err:
+                        anotar_error("actualizar_el_registro_chas", _err)
+                        st.warning("No se pudo bajar el registro "
+                                   f"({type(_err).__name__}). Probá subiendo el CSV a mano: "
+                                   "se baja de datos.produccion.gob.ar, «Registro de CHAS "
+                                   "Emitidos».")
+            if es_empleado_o_abierto():
+                _arch_chas = _ch2.file_uploader("…o subí el CSV del portal", type=["csv"],
+                                                key="chas_archivo")
+                if _arch_chas is not None and st.button("📥 Cargar ese archivo",
+                                                        key="chas_cargar"):
+                    _r, _e = cargar_el_registro_chas_a_mano(_arch_chas.getvalue(),
+                                                            _arch_chas.name)
+                    if _e:
+                        st.error(_e)
+                    else:
+                        avisar("success", f"Registro de CHAS cargado: "
+                                          f"{miles(_r['certificados'])} certificados.")
+                        st.rerun()
+            if _chas.get("certificados"):
+                _contra = marcas_del_catalogo_contra_el_chas()
+                _sin = sum(f["Sin dato"] for f in _contra)
+                st.markdown(f"**Tus proveedores con piezas de seguridad: {len(_contra)}** — "
+                            f"{miles(_sin)} pieza(s) sin un CHAS a la vista.")
+                st.caption("«Con CHAS a la vista»: la marca con que está cargada, o una marca "
+                           "del registro que nombra la descripción, tiene CHAS. «Sin dato» es "
+                           "para preguntarle al proveedor qué marca es y si la tiene.")
+                st.dataframe(_contra, hide_index=True, width="stretch")
+                _q_chas = st.text_input("Buscar en el registro (marca, empresa o autoparte):",
+                                        key="chas_buscar", placeholder="Ej: FRAS-LE, pastilla")
+                if _q_chas.strip():
+                    _encontrados = buscar_en_el_chas(_q_chas)
+                    if _encontrados:
+                        st.dataframe(_encontrados, hide_index=True, width="stretch")
+                    else:
+                        st.caption("No figura en el registro.")
+
         st.markdown("**Catálogos externos**")
         st.caption("Agregá los sitios de proveedores que querés que aparezcan como botones al buscar un código.")
 
