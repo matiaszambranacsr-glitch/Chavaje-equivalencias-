@@ -247,6 +247,44 @@ class Pisadas(ast.NodeVisitor):
 
 Pisadas().visit(ARBOL)
 
+# ============ 6b. app.py o una pantalla que pisa un nombre de la lógica ============
+# app.py trae TODOS los nombres de la lógica a su espacio (globals().update(...)), y las
+# pantallas corren ahí mismo. Una pantalla que hace «c = …» o «conn = …» a nivel de pantalla
+# deja a todo lo que viene después usando lo suyo en vez de la conexión a la base, sin ningún
+# error a la vista (lo señaló una revisión con ChatGPT). Las funciones ya las cuida el control
+# 6; este cuida las variables. Adentro de una función o de una comprensión es local: no pisa.
+if DE_DONDE:
+    def _archivo_de(linea):
+        return DE_DONDE[linea - 1][0] if 0 < linea <= len(DE_DONDE) else ""
+
+    _DE_LA_LOGICA = {}
+    for _n in ARBOL.body:
+        if not _archivo_de(_n.lineno).startswith("logica"):
+            continue
+        if isinstance(_n, (ast.Assign, ast.AnnAssign)):
+            for _t in (_n.targets if isinstance(_n, ast.Assign) else [_n.target]):
+                for _x in ast.walk(_t):
+                    if isinstance(_x, ast.Name):
+                        _DE_LA_LOGICA[_x.id] = _n.lineno
+
+    class _PisaLaLogica(ast.NodeVisitor):
+        def visit_FunctionDef(self, n):
+            pass
+        visit_AsyncFunctionDef = visit_Lambda = visit_FunctionDef
+        visit_ListComp = visit_SetComp = visit_DictComp = visit_GeneratorExp = visit_FunctionDef
+
+        def visit_Name(self, n):
+            if isinstance(n.ctx, ast.Store) and n.id in _DE_LA_LOGICA:
+                _origen = DE_DONDE[_DE_LA_LOGICA[n.id] - 1]
+                reportar("ERROR", n.lineno,
+                         f"«{n.id}» es de la lógica ({_origen[0]}:{_origen[1]}) y acá se le "
+                         "asigna otra cosa: todo lo que corre después usa este valor. Usar "
+                         "otro nombre")
+
+    for _n in ARBOL.body:
+        if not _archivo_de(_n.lineno).startswith("logica"):
+            _PisaLaLogica().visit(_n)
+
 # ============ 7. Columnas SQL que no existen ============
 # Un INSERT o un UPDATE contra una columna que no está en el CREATE TABLE no falla al escribir
 # el código ni al abrir la app: revienta con "no such column" recién cuando alguien toca ese

@@ -2590,9 +2590,27 @@ def get_connection():
     return conn
 
 
+# LA BASE QUE NO SE PUEDE LEER. Con el archivo dañado («file is not a database», «database
+# disk image is malformed») esto reventaba acá, al cargar la lógica, y la app no abría: ni el
+# cartel que manda a restaurar un backup llegaba a dibujarse (probado con un archivo de bytes
+# al azar). Ahora queda anotado en BASE_ILEGIBLE y app.py abre en modo recuperación (ver
+# mostrar_modo_recuperacion()). Una base OCUPADA no es una base dañada: OperationalError
+# («database is locked») sigue saliendo como siempre, para no ofrecer reemplazar una base sana.
+BASE_ILEGIBLE = ""
+
+
+def es_una_base_danada(error):
+    return isinstance(error, sqlite3.DatabaseError) and not isinstance(error, sqlite3.OperationalError)
+
+
 # Se llama una vez para crear las tablas y correr las migraciones. La conexión que devuelve
 # no se usa después: cada hilo abre la suya con el proxy de abajo.
-get_connection()
+try:
+    get_connection()
+except sqlite3.DatabaseError as _err_al_abrir:
+    if not es_una_base_danada(_err_al_abrir):
+        raise
+    BASE_ILEGIBLE = str(_err_al_abrir) or type(_err_al_abrir).__name__
 
 # Y el esquema se pone al día de nuevo cada vez que se carga la lógica, aparte de
 # get_connection(). Hace falta: al subir código nuevo, logica/ se vuelve a cargar pero
@@ -2600,11 +2618,12 @@ get_connection()
 # código no cambie, y lo que cambia es crear_esquema()—. Así, una tabla nueva no se creaba
 # hasta reiniciar la app: «sqlite3.OperationalError» al abrir la muestra de control, porque
 # muestras_de_control no existía. Todo es CREATE ... IF NOT EXISTS: en la base real tarda 15 ms.
-with contextlib.closing(sqlite3.connect(DB_PATH, isolation_level=None)) as _conn_esquema:
-    _conn_esquema.row_factory = sqlite3.Row
-    _conn_esquema.execute("PRAGMA foreign_keys = ON")
-    _conn_esquema.execute("PRAGMA busy_timeout = 8000")
-    crear_esquema(_conn_esquema.cursor())
+if not BASE_ILEGIBLE:
+    with contextlib.closing(sqlite3.connect(DB_PATH, isolation_level=None)) as _conn_esquema:
+        _conn_esquema.row_factory = sqlite3.Row
+        _conn_esquema.execute("PRAGMA foreign_keys = ON")
+        _conn_esquema.execute("PRAGMA busy_timeout = 8000")
+        crear_esquema(_conn_esquema.cursor())
 
 
 class _ConexionPorSesion:

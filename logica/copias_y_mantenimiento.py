@@ -1503,6 +1503,139 @@ def restaurar_backup(archivo_subido):
 
 
 
+# ============================================================
+# MODO RECUPERACIÓN: CUANDO LA BASE NO SE PUEDE LEER
+# ============================================================
+# Con el archivo de la base dañado, la app no abría (ver BASE_ILEGIBLE en datos.py), y si se
+# dañaba con la app abierta seguía dibujando pantallas que fallaban una por una. Ahora abre
+# SOLO esto: no se puede buscar, vender ni cargar nada hasta arreglarla, para no trabajar sobre
+# datos dañados (lo propuso una revisión con ChatGPT). Dos salidas:
+#   · «Volver a la última copia»: aparta el archivo dañado —no lo borra: queda al lado, con la
+#     fecha, por si hace falta rescatar algo— y vuelve a cargar la app. Al encontrar la base
+#     vacía, el arranque de siempre trae la copia de GitHub con sus fotos, o la del
+#     repositorio (ver _restaurar_desde_semilla()).
+#   · Subir un backup: se controla que sea una base sana antes de ponerla en lugar de la otra.
+# CON QUÉ CONTRASEÑA. Las cuentas de los empleados están en la base, que no se puede leer: vale
+# la de administrador de los Secrets. Si no hay ninguna configurada, queda abierto, igual que
+# el resto de la app (ver seccion_permitida()). El freno de intentos va en memoria del proceso
+# por lo mismo: el de siempre se guarda en la base.
+INTENTOS_EN_RECUPERACION = 5
+MINUTOS_DE_FRENO_EN_RECUPERACION = 5
+
+
+def _claves_de_administrador_de_los_secretos():
+    secretos = secretos_app()
+    claves = [p for n, p in dict(secretos.get("admin_passwords", {})).items()
+              if es_un_usuario_de_los_secretos(n)]
+    if secretos.get("admin_password"):
+        claves.append(secretos.get("admin_password"))
+    return [str(p) for p in claves if p]
+
+
+def clave_de_recuperacion_valida(clave):
+    """(True, "") si la clave es de administrador según los Secrets (o no hay ninguna), o
+    (False, por qué no). Con freno: INTENTOS_EN_RECUPERACION fallidos y espera."""
+    claves = _claves_de_administrador_de_los_secretos()
+    if not claves:
+        return True, ""
+    fallidos = del_proceso("intentos_en_recuperacion", list)
+    ahora = time.time()
+    fallidos[:] = [t for t in fallidos if ahora - t < MINUTOS_DE_FRENO_EN_RECUPERACION * 60]
+    if len(fallidos) >= INTENTOS_EN_RECUPERACION:
+        return False, (f"Demasiados intentos. Esperá {MINUTOS_DE_FRENO_EN_RECUPERACION} "
+                       "minutos y probá una sola vez.")
+    if any(hmac.compare_digest(p, str(clave or "")) for p in claves):
+        fallidos.clear()
+        return True, ""
+    fallidos.append(ahora)
+    return False, "Esa no es la contraseña de administrador (la de los Secrets de Streamlit)."
+
+
+def _volver_a_cargar_la_logica():
+    """La próxima pasada carga la lógica de cero, con una conexión nueva a la base nueva. Ver
+    cambio_algun_archivo(): una entrada que no existe en el disco cuenta como cambio."""
+    _VERSIONES[os.path.join(_CARPETA, "(se cambió la base)")] = 0
+
+
+def apartar_la_base_danada():
+    """Renombra la base (y sus -wal / -shm) a «….danada-AAAAMMDD-HHMMSS», y vuelve a cargar
+    la lógica. Devuelve el nombre nuevo. No borra nada."""
+    destino = f"{DB_PATH}.danada-{datetime.now():%Y%m%d-%H%M%S}"
+    for sufijo in ("", "-wal", "-shm"):
+        if os.path.exists(DB_PATH + sufijo):
+            os.replace(DB_PATH + sufijo, destino + sufijo)
+    _volver_a_cargar_la_logica()
+    return destino
+
+
+def reemplazar_la_base_danada(contenido):
+    """Pone este backup en lugar de la base dañada. (True, aviso) o (False, por qué no).
+    Acepta la copia tal como está en GitHub (cifrada y comprimida) o un .db."""
+    try:
+        contenido = descifrar_copia(contenido)
+        if contenido[:2] == b"\x1f\x8b":
+            contenido = gzip.decompress(contenido)
+    except (ValueError, OSError) as _err:
+        return False, f"No se pudo abrir el archivo: {_err}"
+    sana, detalle = la_base_esta_sana(datos=contenido)
+    if not sana:
+        return False, f"El archivo no es una base sana ({detalle}): no se tocó nada."
+    temporal = f"{DB_PATH}.{uuid.uuid4().hex}.subiendo"
+    with open(temporal, "wb") as f:
+        f.write(contenido)
+    apartada = apartar_la_base_danada()
+    os.replace(temporal, DB_PATH)
+    return True, (f"Backup puesto. La base dañada quedó aparte, sin borrar: "
+                  f"{os.path.basename(apartada)}.")
+
+
+def mostrar_modo_recuperacion(detalle=""):
+    """La pantalla del modo recuperación. Quien la llama corta después con st.stop()."""
+    st.error("🛟 **La base de datos no se puede leer.** La app está en modo recuperación: "
+             "hasta arreglarla no se puede buscar, vender ni cargar nada, para no trabajar "
+             "sobre datos dañados.")
+    # El detalle técnico solo al administrador: puede nombrar rutas y archivos del servidor
+    # (lo señaló una revisión con ChatGPT). Queda siempre en el registro de errores.
+    if detalle and es_admin():
+        st.caption(f"Detalle técnico: {detalle}")
+    clave = ""
+    if _claves_de_administrador_de_los_secretos():
+        clave = st.text_input("Contraseña de administrador (la de los Secrets de Streamlit):",
+                              type="password", key="clave_recuperacion")
+    c1, c2 = st.columns(2)
+    with c1:
+        st.markdown("**☁️ Volver a la última copia**")
+        st.caption("La de GitHub si está configurada (con las fotos), o la del repositorio. "
+                   "Lo cargado después de esa copia no va a estar. El archivo dañado queda "
+                   "aparte, sin borrar.")
+        if st.button("☁️ Volver a la última copia", type="primary", key="recuperar_copia"):
+            ok, error = clave_de_recuperacion_valida(clave)
+            if not ok:
+                st.error(error)
+            else:
+                apartada = apartar_la_base_danada()
+                anotar_error("modo recuperación", f"base apartada en {apartada}")
+                st.rerun()
+    with c2:
+        st.markdown("**♻️ Subir un backup**")
+        archivo = st.file_uploader("Un .db, o la copia .gz de GitHub:", type=["db", "gz"],
+                                   key="backup_recuperacion")
+        if archivo is not None and st.button("♻️ Poner este backup", key="recuperar_subido"):
+            ok, error = clave_de_recuperacion_valida(clave)
+            if not ok:
+                st.error(error)
+            else:
+                ok, aviso = reemplazar_la_base_danada(archivo.getvalue())
+                if ok:
+                    anotar_error("modo recuperación", aviso)
+                    st.rerun()
+                st.error(aviso)
+    if st.button("🔄 Probar de nuevo", key="recuperar_reintentar",
+                 help="Por si el problema era pasajero: vuelve a abrir la base."):
+        _volver_a_cargar_la_logica()
+        st.rerun()
+
+
 def subir_backup_a_github(datos_db, mensaje=""):
     """Sube la copia de la base al repositorio, que es lo único que sobrevive a un reinicio.
 

@@ -1349,7 +1349,9 @@ def _ejecutar_migracion_orb_una_vez():
     return migrar_imagenes_pendientes()
 
 
-_ejecutar_migracion_orb_una_vez()
+# Con la base dañada no: la app abre en modo recuperación (ver BASE_ILEGIBLE en datos.py).
+if not BASE_ILEGIBLE:
+    _ejecutar_migracion_orb_una_vez()
 
 
 # ============================================================

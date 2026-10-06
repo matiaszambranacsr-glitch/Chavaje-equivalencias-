@@ -1140,6 +1140,22 @@ def invalidar_salud():
     del_proceso("salud_compartida", dict).clear()
 
 
+# «🔄 Volver a revisar» no recalcula si se revisó hace menos que esto: en el celular un toque
+# doble —o tres, si no se nota nada— eran tres revisiones enteras del catálogo seguidas (lo
+# señaló una revisión con ChatGPT). Lo de las acciones (importar, cortar vínculos…) sigue
+# invalidando siempre, con invalidar_salud().
+SEGUNDOS_ENTRE_REVISIONES_A_MANO = 15
+
+
+def revisar_la_salud_a_mano():
+    """El botón «🔄 Volver a revisar». Devuelve si de verdad pidió recalcular."""
+    guardado = del_proceso("salud_compartida", dict)
+    if guardado.get("momento") and time.time() - guardado["momento"] < SEGUNDOS_ENTRE_REVISIONES_A_MANO:
+        return False
+    invalidar_salud()
+    return True
+
+
 def salud_compartida(segundos_de_vida=180):
     """El chequeo de salud, UNO para todos los que usan la app. Devuelve {momento, problemas}.
 

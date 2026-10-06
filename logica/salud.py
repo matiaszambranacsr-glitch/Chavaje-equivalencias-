@@ -124,7 +124,9 @@ TAREAS_QUE_SE_VIGILAN = (("_trabajo_de_fondo", "trabajo de fondo"), ("vigilar_la
                    ("contexto_de_precios", "dólar e inflación"),
                    ("actualizar_ipc_de_transporte", "IPC de transporte"),
                    ("actualizar_el_registro_chas", "registro de CHAS"),
-                   ("tasas_de_referencia", "tasas del BCRA"))
+                   ("tasas_de_referencia", "tasas del BCRA"),
+                   ("arrancar_tanda_de_fondo", "trabajo de fondo"),
+                   ("tareas_automaticas_del_dia", "mantenimiento del día"))
 # Desde cuántas veces se avisa. Una sola es un sitio que no contestó justo esa vez.
 FALLAS_PARA_AVISAR = 5
 

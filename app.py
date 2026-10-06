@@ -28,6 +28,7 @@ específico, y las pantallas quedan todas al final:
         · MARCAS Y CATÁLOGOS EXTERNOS DE PROVEEDOR
     logica/copias_y_mantenimiento.py
         · INTEGRIDAD DE LA BASE, BACKUP Y RESTAURACIÓN
+        · MODO RECUPERACIÓN: CUANDO LA BASE NO SE PUEDE LEER
         · MANTENIMIENTO QUE CORRE SOLO AL ABRIR
     logica/mostrador.py
         · BÚSQUEDA POR NÚMERO DE MOTOR Y POR PATENTE
@@ -193,6 +194,13 @@ logica, pantallas = sys.modules["logica"], sys.modules["pantallas"]
 globals().update(logica.todo_lo_de_la_logica())
 _corte("cargar la lógica")
 
+# Con la base dañada, la app abre solo para recuperarla: ver «MODO RECUPERACIÓN» en
+# logica/copias_y_mantenimiento.py.
+if BASE_ILEGIBLE:
+    anotar_error("nivel principal/base ilegible", BASE_ILEGIBLE)
+    mostrar_modo_recuperacion(BASE_ILEGIBLE)
+    st.stop()
+
 # Hay alguien esperando esta pantalla: la tarea de fondo le cede el paso hasta que termine de
 # dibujarse (la marca de «terminó» está en la última línea del archivo). Ver ceder_al_mostrador().
 _actividad_del_mostrador()["empezo"] = time.monotonic()
@@ -275,10 +283,13 @@ st.markdown(
 # se queda en esta pantalla. Con la llamada más abajo, el st.stop() del login la cortaba, y
 # lo que se cargara después no tenía copia hasta que alguien iniciara sesión. Casi siempre
 # vuelve enseguida: el hilo ya está corriendo.
+# Con el nombre de la tarea y no «nivel principal»: así cuenta para el aviso de las tareas que
+# fallan seguido (ver errores_de_las_tareas_de_fondo()). Anotado como «nivel principal», un
+# vigilante roto no avisaba nunca (lo señaló una revisión con ChatGPT).
 try:
     vigilar_la_copia()
 except Exception as _err:
-    anotar_error("nivel principal", _err)
+    anotar_error("vigilar_la_copia/arranque", _err)
 
 # LA SESIÓN CON CONTRASEÑA SE CIERRA SOLA si nadie la usa por un rato. En la computadora del
 # mostrador la pestaña queda abierta días: sin esto, la sesión de administrador que abrió el
@@ -387,20 +398,26 @@ if PARA_QUE_SIRVE.get(pagina) and not (es_celular() and pagina == PAGINAS[0]):
 # Con la base ilegible —dañada, o un archivo que no es una base— esto era un error técnico
 # en rojo y la pantalla cortada. Ahora lo dice, y se sigue: la restauración de un backup está
 # en Estadísticas → 💾 Backup y config, y para llegar ahí la app tiene que seguir dibujándose.
+# Si se dañó con la app abierta: el mismo modo recuperación. Una base OCUPADA no es una base
+# dañada («database is locked» es OperationalError): eso se dice y se sigue.
 try:
     c.execute("SELECT COUNT(*) FROM productos")
     _total_productos = c.fetchone()[0]
 except sqlite3.DatabaseError as _err:
     anotar_error("nivel principal/base ilegible", _err)
+    if es_una_base_danada(_err):
+        mostrar_modo_recuperacion(str(_err))
+        st.stop()
     _total_productos = None
-    st.error(f"❌ **No se puede leer la base de datos** ({_err}). Restaurá el último backup "
-             f"desde {miga_hasta('Backup y config')}.")
+    st.warning("⏳ La base está ocupada en este momento. Esperá unos segundos y tocá de nuevo.")
 if _total_productos == 0:
+    # Sin afirmar la causa: lo más común es un redespliegue, pero no es la única (lo señaló una
+    # revisión con ChatGPT).
     st.error(
-        "⚠️ **La base está vacía.** Esto pasa porque el servidor borra el disco de la app cuando "
-        "se redespliega o se reinicia. Si tenés un backup (.db) descargado, restauralo desde "
-        "**Estadísticas → 💾 Backup y config**. Para que no vuelva a pasar, mirá ahí abajo la "
-        "sección de copia permanente."
+        "⚠️ **La base no tiene productos.** Puede haberse perdido el archivo de datos en un "
+        "despliegue o un reinicio del servidor. Si tenés un backup (.db) descargado, restauralo "
+        "desde **Estadísticas → 💾 Backup y config**; para que no vuelva a pasar, mirá ahí abajo "
+        "la sección de copia permanente."
     )
 elif st.session_state.get("_restaurado_de_semilla"):
     st.info(
@@ -426,8 +443,7 @@ if not st.session_state.get("_tareas_dia_corridas"):
         if _hecho_hoy:
             st.session_state["_aviso_tareas"] = _hecho_hoy
     except Exception as _err:
-        anotar_error("nivel principal", _err)
-        pass
+        anotar_error("tareas_automaticas_del_dia", _err)
 
 # Las bajadas del catálogo del proveedor, en un hilo aparte. Va afuera del «una vez por día»:
 # mientras la app esté abierta puede seguir avanzando, que es lo único que hace que un catálogo
@@ -436,7 +452,7 @@ if not st.session_state.get("_tareas_dia_corridas"):
 try:
     arrancar_tanda_de_fondo()
 except Exception as _err:
-    anotar_error("nivel principal", _err)
+    anotar_error("arrancar_tanda_de_fondo/arranque", _err)
 
 
 # Los partes del mantenimiento y del descubrimiento son para quien administra, no para el
@@ -551,8 +567,9 @@ if _problemas and (es_operador_o_admin() or not hay_claves_configuradas()):
     # la caja de búsqueda. Si no hay avisos graves, queda donde estaba.
     with (_caja_graves if ((_graves and _plegar_avisos) or _en_el_buscador) else st.container()):
         if st.button("🔄 Volver a revisar", key="refrescar_salud"):
-            invalidar_salud()
-            st.rerun()
+            if revisar_la_salud_a_mano():
+                st.rerun()
+            st.caption("Recién revisado: esto ya es lo de ahora.")
     st.markdown("")
 
 

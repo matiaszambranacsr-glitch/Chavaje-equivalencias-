@@ -13,6 +13,8 @@ qué proveedores, son el mismo repuesto. Corre con Streamlit sobre una base SQLi
 | `orden.py` | En qué orden corren las partes de `logica/` y las pantallas. Lo leen la app y las herramientas. |
 | `nucleo/` | La misma lógica pero **sin Streamlit**, para poder usarla desde otro sistema. Se genera desde `logica/`. |
 | `auditar.py` | Revisa la app entera y busca los errores que ya pasaron alguna vez. Correlo antes de subir un cambio. |
+| `pruebas_de_carga.py` | Diez personas a la vez con el mantenimiento y la copia corriendo: sin errores, sin dobles entregas ni cobros, sin ventas perdidas. |
+| `pruebas_de_la_recuperacion.py` | La app con la base dañada: abre en modo recuperación y se puede volver a una copia sin perder el archivo dañado. |
 | `pruebas_de_las_cuentas.py` | El interés por mora de las cuentas corrientes, con fechas fijas. |
 | `pruebas_de_las_homologaciones.py` | El registro oficial de CHAS (autopartes de seguridad): leerlo en varios formatos y cruzarlo con tus marcas. |
 | `pruebas_del_deposito.py` | El circuito del depósito y el descuento de cada cuenta: pedir, entregar, cargar en la cuenta y facturar. |
@@ -6457,6 +6459,30 @@ el botón**:
   dónde vino. Solo los últimos tres años: la serie arranca en los cuarenta y trae el 89.
 - «🔌 Probar las fuentes de afuera» suma la Central de Deudores (con el CUIT de la AFIP, nunca el
   de un cliente) y la inflación de respaldo.
+
+## 🔍 La tercera revisión técnica con ChatGPT, punto por punto
+
+Cada punto se miró contra el código de hoy y, donde se podía, se probó:
+
+| Punto | Qué se encontró | Qué se hizo |
+|---|---|---|
+| `_caja_resto` no existe (NameError) | No pasa: en el buscador se crea arriba de todo (`_caja_graves = _caja_resto = st.popover(…)`), y en las otras ramas antes de usarse. | Sin cambio. |
+| `VISTAS.index(vista_detectada())` puede fallar | No puede: `vista_detectada()` solo devuelve `VISTAS[0]` o `VISTAS[1]`. | Sin cambio. |
+| La recarga no borra `pantallas.*` | `pantallas` sí se borra, y no tiene submódulos: las pantallas se recompilan solas cuando cambia su archivo. | Sin cambio. |
+| `except Exception` esconde una tarea rota | Cierto en un caso: si fallaba la llamada a `vigilar_la_copia()` desde app.py, se anotaba como «nivel principal» y el aviso de tareas que fallan seguido no la contaba. Lo mismo el mantenimiento del día y el arranque del trabajo de fondo. | Se anotan con el nombre de su tarea, que el aviso vigila. |
+| El error de la base muestra el detalle | Cierto: podía mostrar rutas del servidor. | Mensaje para la persona; el detalle, solo al administrador y en el registro. |
+| La base ilegible: modo recuperación | **Era peor de lo que dice**: con el archivo dañado la lógica no llegaba a cargar y la app no abría (probado con un archivo de bytes al azar). | Modo recuperación: la app abre solo para eso. «Volver a la última copia» aparta el archivo dañado sin borrarlo y el arranque trae la copia de GitHub con sus fotos; o se sube un backup, que se controla antes de usarlo. Con la contraseña de administrador de los Secrets. Una base ocupada («database is locked») no cuenta como dañada. |
+| «El servidor borra el disco» es muy absoluto | Cierto. | «La base no tiene productos. Puede haberse perdido el archivo de datos en un despliegue o un reinicio». |
+| El mantenimiento del día depende de la sesión | Ya estaba resuelto: candado del proceso y la fecha se vuelve a mirar adentro. | Sin cambio. |
+| Mantenimiento contra operaciones del usuario | Hay un candado de escritura, transacciones y `busy_timeout`; se midió con la prueba de carga de abajo. | Prueba de carga nueva. |
+| `arrancar_tanda_de_fondo()` en cada toque | Toma un candado del proceso sin esperar: si hay una corriendo vuelve enseguida. | Sin cambio. |
+| «🔄 Volver a revisar» con toques repetidos | Cierto: cada toque era una revisión entera. | Si se revisó hace menos de 15 s, no recalcula y lo dice. |
+| Presentación mezclada con lógica | Cierto en parte; es un cambio grande que no arregla un error. | Pendiente. |
+| Medir cada etapa | Ya se mide y se muestra en Estado y papelera. | Con un color por etapa: 🟢 menos de 100 ms, 🟡 hasta 500, 🔴 más. |
+| Prueba de estrés | Buena idea. | `pruebas_de_carga.py`: 10 personas a la vez (buscar, precios, ventas, apartar stock escaso, pedir y entregar al depósito compitiendo por los mismos pedidos, vínculos, pagos) con la copia, la salud y el mantenimiento corriendo. Controla cero errores, base sana, ningún pedido entregado o cobrado dos veces, saldo exacto, lo apartado nunca por encima del stock y ninguna venta perdida. Rompiendo a propósito el control de «entregar una sola vez» da 24 fallas. |
+| `globals().update(…)` puede pisar un nombre | Las funciones ya las cuidaba el auditor; las variables no. | Control nuevo del auditor: app.py o una pantalla que le asigna algo a una variable de la lógica (`c`, `conn`, `DB_PATH`…) es ERROR. |
+| `exec()` de las pantallas | Es a propósito y lee solo archivos del repositorio, de una lista fija. | Sin cambio. |
+| Aviso antes de que venza la sesión | Streamlit no corre nada mientras nadie toca la pantalla, y la cuenta es desde el último toque. | Sin cambio. |
 
 ## 📈 Interés por mora con la tasa del BCRA
 

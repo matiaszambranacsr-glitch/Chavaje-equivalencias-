@@ -373,7 +373,10 @@ if pagina == PAGINAS[3]:
                     "sección pasa por la sesión, la navegación, las tareas automáticas y los "
                     "avisos. Esto dice cuánto tardó cada parte la última vez, para saber qué "
                     "conviene mejorar si algo se siente lento.")
-                st.dataframe([{"Etapa": e, "Tardó (ms)": miles(ms, 0)} for e, ms in _tiempos],
+                # Con un color, para ver de un vistazo cuál pesa: 🟢 menos de 100 ms, 🟡 hasta
+                # medio segundo, 🔴 más (lo sugirió una revisión con ChatGPT).
+                st.dataframe([{"": "🔴" if ms >= 500 else "🟡" if ms >= 100 else "🟢",
+                               "Etapa": e, "Tardó (ms)": miles(ms, 0)} for e, ms in _tiempos],
                              width="stretch", hide_index=True)
             if _ULTIMOS_ERRORES and es_admin():
                 st.markdown("---")
