@@ -6455,6 +6455,35 @@ el botón**:
 - «🔌 Probar las fuentes de afuera» suma la Central de Deudores (con el CUIT de la AFIP, nunca el
   de un cliente) y la inflación de respaldo.
 
+## 🗣️ Buscar con una frase, y los errores de las tareas automáticas a la vista
+
+De la segunda tanda de ideas de la revisión con ChatGPT:
+
+- **Una frase en vez de un código.** «Necesito pastillas delanteras para un Corsa Classic
+  2012» daba **0**: eran ocho palabras y se exigían cinco. Ahora (`palabras_de_la_busqueda()`):
+  - sin las palabras de relleno («necesito», «para», «un»…; «Uno» no, que es un Fiat) ni los
+    signos de las puntas («¿Qué», «1.6?»);
+  - el año no se busca como texto —las listas escriben «2008-2011»—: filtra con
+    `sirve_para_anio()`, descartando solo lo que declara otros años;
+  - a igual cantidad de palabras, primero lo que las tiene como **palabra entera**: «junta de
+    tapa de cilindros gol» traía primero las del Golf;
+  - y dice lo que **ningún resultado dice** (`palabras_que_no_aparecen()`): en el catálogo real
+    no hay pastillas de freno, y la frase trae 53 productos del Corsa Classic con «⚠️ Ninguno de
+    estos dice «pastillas» ni «delanteras»».
+- **Los errores de las tareas automáticas.** Se anotaban y se veían solo entrando a buscarlos,
+  en «📌 Para pedir»: así estuvieron escondidas las 5.063 fotos de FISPA. Ahora el panel «🐞
+  Errores que la app se tragó» está en Mantenimiento → 🩺 Estado y papelera, y una tarea que
+  falló 5 veces o más sale en los avisos («La tarea automática «fotos de las fichas» falló 7
+  veces», con el último error) — ver `errores_de_las_tareas_de_fondo()`.
+
+Del resto de esa tanda, ya estaba: cotización por WhatsApp (PDF y texto), la ficha del auto
+con su historial y el mantenimiento que le toca, los combos («también podés necesitar»), buscar
+con una foto, leer un remito, el portal del mecánico, el escáner de código de barras, la
+ubicación en el depósito, lo que se va a acabar, el centro de calidad, «búsquedas sin
+resultado» y las consultas de clientes, las equivalencias descubiertas con aprobación por
+grupos. No se hizo: precio por tipo de cliente (no hay listas por cliente cargadas), mapa del
+depósito, permisos por acción y un chat con IA sobre el catálogo.
+
 ## 🧭 La revisión de la interfaz con ChatGPT: qué se hizo y qué ya estaba
 
 Una revisión de la interfaz con ChatGPT propuso una lista de cambios. Mirados uno por uno contra

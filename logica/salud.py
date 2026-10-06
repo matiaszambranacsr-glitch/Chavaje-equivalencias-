@@ -114,6 +114,33 @@ def envejecimiento_de_precios():
 
 
 
+# Las tareas que corren solas, por atrás, y que nadie mira mientras corren: por dónde
+# empiezan los «donde» de sus errores, y con qué nombre se muestran.
+TAREAS_QUE_SE_VIGILAN = (("_trabajo_de_fondo", "trabajo de fondo"), ("vigilar_la_copia", "copia a GitHub"),
+                   ("subir_backup", "copia a GitHub"), ("bajar_fotos", "fotos de las fichas"),
+                   ("buscar_imagen_en_ficha", "fotos de las fichas"),
+                   ("descargar_imagen", "fotos de las fichas"),
+                   ("actualizar_parque_automotor", "parque automotor (DNRPA)"),
+                   ("contexto_de_precios", "dólar e inflación"),
+                   ("actualizar_ipc_de_transporte", "IPC de transporte"))
+# Desde cuántas veces se avisa. Una sola es un sitio que no contestó justo esa vez.
+FALLAS_PARA_AVISAR = 5
+
+
+def errores_de_las_tareas_de_fondo():
+    """[(tarea, cuántas veces, el último error)] de las tareas automáticas que fallaron al menos
+    FALLAS_PARA_AVISAR veces desde que arrancó el servidor, de la que más a la que menos."""
+    por_tarea = {}
+    for e in list(_ULTIMOS_ERRORES):
+        nombre = next((n for prefijo, n in TAREAS_QUE_SE_VIGILAN
+                       if str(e.get("donde", "")).startswith(prefijo)), None)
+        if nombre:
+            cuantos, _ = por_tarea.get(nombre, (0, None))
+            por_tarea[nombre] = (cuantos + 1, e)
+    return sorted(((t, n, e) for t, (n, e) in por_tarea.items() if n >= FALLAS_PARA_AVISAR),
+                  key=lambda x: -x[1])
+
+
 def diagnostico_de_salud():
     """Corre todos los controles de mantenimiento de una y devuelve solo lo que necesita atención.
 
@@ -127,6 +154,18 @@ def diagnostico_de_salud():
 
     def sumar(nivel, titulo, detalle, donde):
         problemas.append({"nivel": nivel, "titulo": titulo, "detalle": detalle, "donde": donde})
+
+    # LAS TAREAS AUTOMÁTICAS QUE VIENEN FALLANDO. Sus errores se anotaban (anotar_error()) y
+    # se veían solo entrando a buscarlos: las 5.063 fotos de FISPA fallaron por el certificado
+    # sin que ningún aviso lo dijera. Ver errores_de_las_tareas_de_fondo().
+    try:
+        for _tarea, _cuantos, _ultimo in errores_de_las_tareas_de_fondo()[:2]:
+            sumar("medio", f"La tarea automática «{_tarea}» falló {_cuantos} veces",
+                  f"Lo último: {_ultimo['tipo']} ({_ultimo['detalle'][:90]}), el "
+                  f"{_ultimo['cuando']}. La app sigue andando, pero eso no se está haciendo.",
+                  "🗂️ Administrar → 🧹 Mantenimiento → 🩺 Estado y papelera")
+    except Exception as _err:
+        anotar_error("diagnostico_de_salud/errores_de_fondo", _err)
 
     # LA BASE DAÑADA. Lo anota la subida de la copia (ver la_base_esta_sana()), que en ese caso
     # no sube nada para no pisar la última copia buena.

@@ -223,7 +223,7 @@ def buscar_por_texto(texto, aflojar=True):
     (descripción o código), sin importar el orden ni las tildes. Así 'ruleman delantero gol'
     encuentra 'Gol 1.6 - Ruleman de rueda delantero', y 'rótula' encuentra 'ROTULA' aunque el
     catálogo la tenga cargada sin tilde (frecuente en listas de proveedores)."""
-    palabras = [normalizar_texto(p.strip()) for p in texto.upper().split() if p.strip()]
+    palabras, anio_pedido = palabras_de_la_busqueda(texto)
     if not palabras:
         return []
     # Compara contra la columna 'busqueda', que ya tiene la descripción y el código en
@@ -345,7 +345,57 @@ def buscar_por_texto(texto, aflojar=True):
         if del_rubro:
             filas = del_rubro + sin_clasificar
 
+    # EL AÑO NO SE BUSCA COMO TEXTO: las listas escriben «2008-2011» o «2010/15», casi nunca
+    # «2012». Se descarta solo lo que declara OTROS años (ver sirve_para_anio()); lo que no
+    # dice años se deja.
+    if anio_pedido:
+        filas = [f for f in filas if sirve_para_anio(f.get("Descripcion") or "", anio_pedido)
+                 is not False]
+    # LA PALABRA ENTERA PRIMERO. El LIKE encuentra «GOL» adentro de «GOLF», y con el mismo
+    # número de coincidencias ganaba la descripción más corta: «junta de tapa de cilindros
+    # gol» traía primero las del Golf, y «filtro de aceite para Gol 1.6» un «Filtro para
+    # aceite sellado» que no dice ningún auto. Ahora, a igual cantidad de palabras, va primero
+    # la que las tiene como palabra entera.
+    def _enteras(f):
+        texto_fila = " " + re.sub(r"[^A-Z0-9.]+", " ", normalizar_texto(
+            f"{f.get('Descripcion') or ''} {f.get('Codigo') or ''}")) + " "
+        return sum(1 for p in palabras if f" {p} " in texto_fila)
+    filas.sort(key=lambda f: (-f.get("_coincidencias", 0), -_enteras(f), f.get("_largo") or 0))
     for f in filas:
         f.pop("_coincidencias", None)
         f.pop("_largo", None)
     return filas
+
+
+# Las palabras que no buscan nada: «necesito pastillas delanteras para un Corsa Classic
+# 2012» son ocho palabras, y con «necesito», «para» y «un» adentro se exigían cinco
+# coincidencias: daba cero. «UNO» no está: es un Fiat.
+PALABRAS_DE_RELLENO = {"NECESITO", "NECESITA", "NECESITAN", "QUIERO", "BUSCO", "BUSCA", "TENES",
+                       "TENGO", "TIENE", "TIENEN", "HAY", "PARA", "POR", "CON", "UN", "UNA", "EL",
+                       "LA", "LOS", "LAS", "DE", "DEL", "AL", "A", "Y", "O", "QUE", "ME", "MI",
+                       "SE", "LE", "LO", "ES", "SI", "TE", "QUE", "CUAL", "CUANTO", "ALGUN",
+                       "ALGUNA", "DAME", "PASAME", "FAVOR", "HOLA"}
+
+
+def palabras_de_la_busqueda(texto):
+    """(palabras para buscar, año pedido o None). Sin signos en las puntas («¿Qué», «1.6?»),
+    sin las palabras de relleno (si queda alguna otra) y sin el año, que se usa para filtrar."""
+    palabras = [normalizar_texto(re.sub(r"^[^\w]+|[^\w]+$", "", p))
+                for p in str(texto or "").upper().split()]
+    palabras = [p for p in palabras if p]
+    anio = None
+    for p in palabras:
+        if re.fullmatch(r"(19[5-9]\d|20[0-4]\d)", p) and len(palabras) > 1:
+            anio = int(p)
+    utiles = [p for p in palabras if p not in PALABRAS_DE_RELLENO and p != str(anio)]
+    return (utiles or [p for p in palabras if p != str(anio)] or palabras), anio
+
+
+def palabras_que_no_aparecen(texto, filas):
+    """Las palabras pedidas que no dice ninguno de los resultados: «pastillas» en un catálogo
+    sin pastillas de freno. Para decirlo, en vez de mostrar «Corsa Classic» sin explicar por
+    qué no hay lo que se pidió."""
+    palabras, _ = palabras_de_la_busqueda(texto)
+    juntos = " ".join(normalizar_texto(f"{f.get('Descripcion') or ''} {f.get('Codigo') or ''} "
+                                       f"{f.get('Marca') or ''}") for f in filas)
+    return [p for p in palabras if len(p) >= 3 and p not in juntos]

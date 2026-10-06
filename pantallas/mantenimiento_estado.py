@@ -357,3 +357,27 @@ if pagina == PAGINAS[3]:
 
                 st.caption("También se limpia sola: lo que lleva más de 30 días acá se borra en forma permanente.")
                 st.button("🧹 Vaciar ahora lo de más de 30 días", on_click=vaciar_papelera_antigua, args=(30,))
+
+            # LOS ERRORES QUE LA APP SE TRAGÓ, acá y no en «📌 Para pedir», donde estaban: son
+            # del estado de la app, no de qué conviene pedir. Si una tarea automática viene
+            # fallando, además sale en los avisos (ver errores_de_las_tareas_de_fondo()).
+            if _ULTIMOS_ERRORES and es_admin():
+                st.markdown("---")
+                st.markdown("**🐞 Errores que la app se tragó**")
+                explicar(
+                    f"{len(_ULTIMOS_ERRORES)} cosa(s) fallaron sin que nadie se enterara.",
+                    "Hay muchos lugares donde algo puede fallar y la app sigue igual: una tabla "
+                    "que todavía no existe, una función opcional que no está. Son a propósito.\n\n"
+                    "Pero si ahí se esconde un bug real, sin este registro nadie se entera nunca. "
+                    "Acá quedan anotados los últimos, con dónde y qué pasó.\n\nQue aparezcan cosas "
+                    "acá no significa que algo esté roto. Lo que importa es si el mismo error se "
+                    "repite muchas veces, o si aparece justo cuando algo no funcionó."
+                )
+                from collections import Counter as _Cnt
+                _repetidos = _Cnt((e["donde"], e["tipo"]) for e in _ULTIMOS_ERRORES)
+                st.dataframe(
+                    [{"Veces": v, "Dónde": d, "Tipo": t} for (d, t), v in _repetidos.most_common(15)],
+                    width="stretch", hide_index=True)
+                if seccion_plegable("Ver el detalle de los últimos", key="detalle_errores"):
+                    st.dataframe(list(reversed(_ULTIMOS_ERRORES))[:40],
+                                  width="stretch", hide_index=True)

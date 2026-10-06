@@ -1610,6 +1610,14 @@ if pagina == PAGINAS[0]:
             if res_texto:
                 st.success(f"Se encontraron {len(res_texto)} coincidencia(s). 👆 Tocá una fila "
                            "para abrir ese código con todas sus equivalencias.")
+                # Lo pedido que ningún resultado dice: «necesito pastillas delanteras para un
+                # Corsa Classic 2012» trae cosas del Corsa Classic, y sin esto parecía que eran
+                # pastillas. Ver palabras_que_no_aparecen().
+                _faltan = palabras_que_no_aparecen(texto_pedido, res_texto)
+                if _faltan:
+                    st.warning("⚠️ Ninguno de estos dice " + " ni ".join(
+                        f"«{x.lower()}»" for x in _faltan[:3]) + ": puede que no lo tengas "
+                        "cargado. Se muestra lo que coincide con el resto.")
                 # La fila se toca en la misma tabla. Antes abajo se repetía la lista entera como
                 # botones —uno por resultado, con su descripción—, y en el celular la página
                 # medía tres pantallas más para mostrar lo que la tabla ya decía.
