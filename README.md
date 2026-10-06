@@ -13,6 +13,8 @@ qué proveedores, son el mismo repuesto. Corre con Streamlit sobre una base SQLi
 | `orden.py` | En qué orden corren las partes de `logica/` y las pantallas. Lo leen la app y las herramientas. |
 | `nucleo/` | La misma lógica pero **sin Streamlit**, para poder usarla desde otro sistema. Se genera desde `logica/`. |
 | `auditar.py` | Revisa la app entera y busca los errores que ya pasaron alguna vez. Correlo antes de subir un cambio. |
+| `pruebas_del_buscador.py` | Una búsqueda que falla no se confunde con «no hay», y cada búsqueda queda medida. |
+| `pruebas_de_la_sesion.py` | Salir no deja nada del anterior, y los permisos siguen a la cuenta. |
 | `pruebas_de_carga.py` | Diez personas a la vez con el mantenimiento y la copia corriendo: sin errores, sin dobles entregas ni cobros, sin ventas perdidas. |
 | `pruebas_de_la_recuperacion.py` | La app con la base dañada: abre en modo recuperación y se puede volver a una copia sin perder el archivo dañado. |
 | `pruebas_de_las_cuentas.py` | El interés por mora de las cuentas corrientes, con fechas fijas. |
@@ -6459,6 +6461,27 @@ el botón**:
   dónde vino. Solo los últimos tres años: la serie arranca en los cuarenta y trae el 89.
 - «🔌 Probar las fuentes de afuera» suma la Central de Deudores (con el CUIT de la AFIP, nunca el
   de un cliente) y la inflación de respaldo.
+
+## 🔍 La revisión técnica con ChatGPT, puntos 22 a 40
+
+| Punto | Qué se encontró | Qué se hizo |
+|---|---|---|
+| 22. `exec()` de las pantallas | A propósito, de una lista fija de archivos del repositorio. Lo que sí podía pasar —que una pantalla pisara una variable de la lógica— ya lo controla el auditor (control 6b). | Sin cambio. |
+| 23–24. La recarga y los objetos viejos | No hay submódulos de `pantallas`, y en la sesión se guardan datos simples (textos, números, listas, diccionarios), no objetos de la lógica. | Sin cambio. |
+| 26. Salir: que no quede nada del anterior | **Encontrado en un navegador de verdad**: después de «Salir» la última búsqueda seguía escrita en la caja (los resultados no). El navegador recuerda lo escrito en los campos que no se desarman, y al salir se vuelve al buscador. La contraseña de «Ingresar», probado, no queda. | `cerrar_sesion()` vacía a propósito los campos del buscador; control 6c del auditor para que uno nuevo no quede afuera. `pruebas_de_la_sesion.py`: entra A, deja búsqueda, presupuesto, cuenta elegida y lista de WhatsApp, sale, entra B: no ve nada. |
+| 27. Cambio de rol con la sesión abierta | **Cierto**: el nivel se guardaba al entrar y no se volvía a mirar. A un empleado desactivado o al que le bajaban el rol le seguían valiendo los permisos viejos hasta salir. | `nivel_vigente_de_la_sesion()` en cada toque: rol nuevo → permisos nuevos; desactivado o sin clave → la sesión se cierra y lo dice. Probado con la app. |
+| 28. Restaurar no es copiar un archivo | Ya se restauraba con la API de SQLite (no copiando el archivo), con control antes de entrar, las migraciones de nuevo y los cachés limpios. | Ahora además se controla la base ya restaurada (sana y cuántos productos quedaron), se recalculan los avisos y la pantalla lo dice. |
+| 29–30. Corrupción parcial; `COUNT(*)` no alcanza | La copia a GitHub pasa `PRAGMA quick_check` cada vez y avisa si la base tiene daño; las tablas que falten las crea el arranque; el diagnóstico de salud mira mucho más que contar productos. La base que no abre, desde la tanda anterior, tiene su modo recuperación. | Sin cambio. |
+| 31–32. Versión de esquema y migraciones | Las migraciones son explícitas e idempotentes (cada columna nueva con su `ALTER` condicionado) y corren al arrancar y después de restaurar un backup viejo; está probado con un backup anterior a una columna. | Sin cambio. |
+| 33. Errores que «no rompen» la app | Cierto que no se veían de un vistazo. | «🚦 Las tareas automáticas» en Estado y papelera: cada tarea con 🟢 / 🟡 / 🔴, cuántas fallas y la última. |
+| 34. «No hay» no es «falló» | **Cierto, y era peor**: una búsqueda que fallaba cortaba la pantalla entera con el error técnico. | Ahora dice «no se pudo consultar — no quiere decir que no esté», con un código, y no se anota como algo que falta. |
+| 35–36. Un código por operación y métricas | Buena idea. | Cada búsqueda queda anotada (en memoria, las últimas 500) con un código de seis letras: en Estado y papelera, cuántas, mediana, P95, % sin resultados, errores, las más lentas, y se busca una por su código. |
+| 37. Búsquedas demasiado amplias | Medido sobre la copia de hoy: el código es exacto («123» no trae nada) y el texto tiene tope de 200 y tarda menos de 70 ms. Pero «a» traía 200 cosas sin sentido. | Al menos 2 letras o números para buscar por texto. |
+| 38–40. Ranking, normalización, equivalencia contra compatibilidad | El buscado va primero («— el buscado») y después por saltos y confianza; la normalización es una sola (`sanitizar()`, también en `nucleo/`); los kits, «lo que va con esto» y las piezas de un kit se muestran como «no es lo mismo». | Sin cambio. |
+
+Probado en `pruebas_del_buscador.py` y `pruebas_de_la_sesion.py` (con la app de verdad), y en
+`pruebas_de_la_recuperacion.py`. La caja vacía después de «Salir» se probó en un navegador:
+AppTest no tiene la memoria del navegador y no alcanza para verlo.
 
 ## 🔍 La tercera revisión técnica con ChatGPT, punto por punto
 

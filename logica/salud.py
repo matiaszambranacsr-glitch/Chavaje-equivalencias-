@@ -145,6 +145,78 @@ def errores_de_las_tareas_de_fondo():
                   key=lambda x: -x[1])
 
 
+def estado_de_las_tareas():
+    """[{"Tarea", "Estado", "Fallas", "Última falla", "Qué pasó"}] de cada tarea automática:
+    🟢 sin fallas desde que arrancó el servidor, 🟡 falló alguna vez, 🔴 falló
+    FALLAS_PARA_AVISAR veces o más. Para ver de un vistazo que «la app anda» no esconde «la
+    copia falla desde hace tres días» (lo pidió una revisión con ChatGPT)."""
+    por_tarea = {}
+    for _prefijo, nombre in TAREAS_QUE_SE_VIGILAN:
+        por_tarea.setdefault(nombre, [0, None])
+    for e in list(_ULTIMOS_ERRORES):
+        nombre = next((n for prefijo, n in TAREAS_QUE_SE_VIGILAN
+                       if str(e.get("donde", "")).startswith(prefijo)), None)
+        if nombre:
+            por_tarea[nombre][0] += 1
+            por_tarea[nombre][1] = e
+    filas = []
+    for nombre, (fallas, ultimo) in por_tarea.items():
+        filas.append({"Tarea": nombre,
+                      "Estado": ("🔴" if fallas >= FALLAS_PARA_AVISAR else "🟡" if fallas
+                                 else "🟢"),
+                      "Fallas": fallas,
+                      "Última falla": (ultimo or {}).get("cuando", ""),
+                      "Qué pasó": f"{(ultimo or {}).get('tipo', '')} {(ultimo or {}).get('detalle', '')}"[:120].strip()})
+    filas.sort(key=lambda f: (-f["Fallas"], f["Tarea"]))
+    return filas
+
+
+# LO QUE PASA CON CADA BÚSQUEDA. En memoria del proceso, las últimas MEDICIONES_DE_BUSQUEDA:
+# qué se buscó, quién, cuánto tardó, cuántos resultados y si falló, con un código corto. Si
+# alguien dice «busqué tal cosa y me salió cualquier cosa», o una búsqueda falla, la pantalla
+# le muestra el código y en Estado y papelera se encuentra qué pasó (lo propuso una revisión
+# con ChatGPT, como «request_id» y métricas del buscador). No va a la base: es para mirar el
+# día, y lo que se busca son consultas de clientes.
+MEDICIONES_DE_BUSQUEDA = 500
+# Lo mínimo para buscar en las descripciones: con una letra sola, todo coincide.
+MINIMO_PARA_BUSCAR_POR_TEXTO = 2
+
+
+def anotar_busqueda(tipo, termino, segundos, resultados, error=""):
+    """Anota una búsqueda y devuelve su código (seis caracteres)."""
+    codigo = uuid.uuid4().hex[:6].upper()
+    try:
+        registro = del_proceso("mediciones_de_busqueda",
+                               lambda: collections.deque(maxlen=MEDICIONES_DE_BUSQUEDA))
+        registro.append({"codigo": codigo, "cuando": datetime.now().strftime("%d/%m %H:%M:%S"),
+                         "tipo": tipo, "termino": str(termino)[:80],
+                         "usuario": obtener_usuario_actual(), "ms": round(segundos * 1000, 1),
+                         "resultados": resultados, "error": str(error)[:200]})
+    except Exception as _err:      # medir nunca puede romper una búsqueda
+        anotar_error("anotar_busqueda", _err)
+    return codigo
+
+
+def resumen_de_las_busquedas():
+    """{"cuantas", "mediana_ms", "p95_ms", "sin_resultados", "errores", "lentas": [...],
+    "todas": [...]} de lo anotado. {} si no hay nada."""
+    registro = list(del_proceso("mediciones_de_busqueda",
+                                lambda: collections.deque(maxlen=MEDICIONES_DE_BUSQUEDA)))
+    if not registro:
+        return {}
+    tiempos = sorted(r["ms"] for r in registro)
+
+    def percentil(p):
+        return tiempos[min(len(tiempos) - 1, int(round(p * (len(tiempos) - 1))))]
+    return {"cuantas": len(registro), "mediana_ms": percentil(0.5), "p95_ms": percentil(0.95),
+            "sin_resultados": round(100 * sum(1 for r in registro
+                                              if not r["error"] and not r["resultados"])
+                                    / len(registro)),
+            "errores": sum(1 for r in registro if r["error"]),
+            "lentas": sorted(registro, key=lambda r: -r["ms"])[:5],
+            "todas": registro}
+
+
 def diagnostico_de_salud():
     """Corre todos los controles de mantenimiento de una y devuelve solo lo que necesita atención.
 

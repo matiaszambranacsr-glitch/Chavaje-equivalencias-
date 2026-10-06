@@ -378,6 +378,39 @@ if pagina == PAGINAS[3]:
                 st.dataframe([{"": "🔴" if ms >= 500 else "🟡" if ms >= 100 else "🟢",
                                "Etapa": e, "Tardó (ms)": miles(ms, 0)} for e, ms in _tiempos],
                              width="stretch", hide_index=True)
+            # Cada tarea automática con su semáforo, y lo que pasa con las búsquedas. Ver
+            # estado_de_las_tareas() y anotar_busqueda().
+            st.markdown("---")
+            st.markdown("**🚦 Las tareas automáticas**")
+            st.caption("🟢 sin fallas desde que arrancó el servidor · 🟡 falló alguna vez · "
+                       f"🔴 falló {FALLAS_PARA_AVISAR} veces o más. Una tarea que falla no "
+                       "tira la app abajo: por eso hay que mirarlo acá.")
+            st.dataframe(estado_de_las_tareas(), width="stretch", hide_index=True)
+            _busq = resumen_de_las_busquedas()
+            if _busq and es_admin():
+                st.markdown("---")
+                st.markdown("**🔎 Las búsquedas desde que arrancó el servidor**")
+                _b1, _b2, _b3, _b4 = st.columns(4)
+                _b1.metric("Búsquedas", miles(_busq["cuantas"]))
+                _b2.metric("Mediana", f"{miles(_busq['mediana_ms'], 0)} ms",
+                           help="La mitad tardó menos que esto.")
+                _b3.metric("P95", f"{miles(_busq['p95_ms'], 0)} ms",
+                           help="El 95% tardó menos que esto: las lentas de verdad.")
+                _b4.metric("Sin resultados", f"{_busq['sin_resultados']}%",
+                           help=f"Y {_busq['errores']} que fallaron.")
+                st.caption("Las más lentas:")
+                st.dataframe([{"Código": r["codigo"], "Cuándo": r["cuando"], "Qué": r["termino"],
+                               "Tipo": r["tipo"], "ms": miles(r["ms"], 0),
+                               "Resultados": r["resultados"]} for r in _busq["lentas"]],
+                             width="stretch", hide_index=True)
+                _cod = st.text_input("Buscar una por su código (el que muestra la pantalla "
+                                     "cuando falla):", key="codigo_de_busqueda", max_chars=6)
+                if _cod.strip():
+                    _hallada = [r for r in _busq["todas"] if r["codigo"] == _cod.strip().upper()]
+                    if _hallada:
+                        st.json(_hallada[0])
+                    else:
+                        st.caption(f"No está entre las últimas {MEDICIONES_DE_BUSQUEDA}.")
             if _ULTIMOS_ERRORES and es_admin():
                 st.markdown("---")
                 st.markdown("**🐞 Errores que la app se tragó**")

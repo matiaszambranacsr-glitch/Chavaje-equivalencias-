@@ -285,6 +285,30 @@ if DE_DONDE:
         if not _archivo_de(_n.lineno).startswith("logica"):
             _PisaLaLogica().visit(_n)
 
+# ============ 6c. Un campo de texto del buscador que no se vacía al salir ============
+# Después de «Salir» se vuelve al buscador, que no se desarma, y el navegador recuerda lo que
+# tenía escrito cada campo: la búsqueda del que se fue le quedaba al que se sentaba después.
+# cerrar_sesion() los vacía a propósito, uno por uno: uno nuevo que no esté en la lista vuelve
+# a dejar a la vista lo del anterior.
+if DE_DONDE:
+    _lista = None
+    for _n in ARBOL.body:
+        if (isinstance(_n, ast.Assign) and any(isinstance(t, ast.Name) and
+                t.id == "CAMPOS_DEL_BUSCADOR_QUE_SE_VACIAN_AL_SALIR" for t in _n.targets)):
+            _lista = set(literal(_n.value) or ())
+    if _lista is not None:
+        for _n in ast.walk(ARBOL):
+            if (isinstance(_n, ast.Call) and isinstance(_n.func, ast.Attribute)
+                    and _n.func.attr in ("text_input", "text_area")
+                    and DE_DONDE[_n.lineno - 1][0] == "pantallas/buscador.py"):
+                for _k in _n.keywords:
+                    if (_k.arg == "key" and isinstance(_k.value, ast.Constant)
+                            and _k.value.value not in _lista):
+                        reportar("ERROR", _n.lineno,
+                                 f"el campo «{_k.value.value}» del buscador no está en "
+                                 "CAMPOS_DEL_BUSCADOR_QUE_SE_VACIAN_AL_SALIR: después de «Salir» "
+                                 "le queda escrito lo del anterior al que se sienta después")
+
 # ============ 7. Columnas SQL que no existen ============
 # Un INSERT o un UPDATE contra una columna que no está en el CREATE TABLE no falla al escribir
 # el código ni al abrir la app: revienta con "no such column" recién cuando alguien toca ese

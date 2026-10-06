@@ -528,6 +528,12 @@ def secretos_app():
 CLAVES_QUE_QUEDAN_AL_SALIR = ("modo_vista",)
 
 
+# Los campos de texto del buscador (ver cerrar_sesion()). auditar.py controla que estén todos.
+CAMPOS_DEL_BUSCADOR_QUE_SE_VACIAN_AL_SALIR = ("busqueda_input", "texto_input", "pista_internet",
+                                             "picking_codigos", "url_foto_visual",
+                                             "med_paso", "med_seguro")
+
+
 def cerrar_sesion():
     """«Salir», y la sesión que se cerró sola por estar sin uso: se borra TODO lo de la sesión
     menos la vista. Antes se borraban el nivel, el nombre y el mecánico, y quedaba lo demás:
@@ -537,6 +543,51 @@ def cerrar_sesion():
     for clave in list(st.session_state.keys()):
         if clave not in CLAVES_QUE_QUEDAN_AL_SALIR:
             del st.session_state[clave]
+    # Borrar la clave no alcanza para lo que sigue a la vista: el navegador recuerda lo escrito
+    # en cada campo que no se desarma, y después de «Salir» se vuelve al buscador, que no se
+    # desarma nunca. Probado en un navegador: la última búsqueda seguía en la caja para el que
+    # se sentaba después (los resultados no, el texto sí). Hay que ponerlos vacíos A PROPÓSITO,
+    # que es lo que le dice al navegador que los vacíe. Los de las otras pantallas no hacen
+    # falta: al salir se desarman, y ahí el navegador los olvida (la contraseña de «Ingresar»,
+    # también probado, no queda).
+    for clave in CAMPOS_DEL_BUSCADOR_QUE_SE_VACIAN_AL_SALIR:
+        try:
+            st.session_state[clave] = ""
+        except Exception as _err:      # ya dibujado en esta pasada: Streamlit no deja tocarlo
+            anotar_error("cerrar_sesion", _err)
+
+
+def nivel_vigente_de_la_sesion():
+    """El nivel que tiene que tener HOY quien está adentro: el de los Secrets, el de su cuenta
+    de empleado o el de su cuenta de mecánico. None si ya no puede entrar (lo desactivaron, lo
+    borraron o le sacaron la clave).
+
+    El nivel se guarda en la sesión al entrar, y antes no se volvía a mirar: a un empleado
+    desactivado, o al que le bajaban el rol de administrador a operador, le seguían valiendo
+    los permisos viejos hasta que tocaba «Salir» o pasaban cuatro horas sin usarla (lo señaló
+    una revisión con ChatGPT). Se mira en cada toque: es una consulta chica."""
+    nivel = st.session_state.get("nivel_usuario")
+    nombre = str(st.session_state.get("admin_nombre") or "")
+    if nivel == "mecanico":
+        c.execute("SELECT 1 FROM mecanicos WHERE id = ? AND activo = 1",
+                  (st.session_state.get("mecanico_id"),))
+        return "mecanico" if c.fetchone() else None
+    if nivel not in ("admin", "operador"):
+        return nivel
+    secretos = secretos_app()
+    admins = {n for n in dict(secretos.get("admin_passwords", {}))
+              if es_un_usuario_de_los_secretos(n)}
+    if secretos.get("admin_password"):
+        admins.add("admin")
+    operadores = {n for n in dict(secretos.get("operador_passwords", {}))
+                  if es_un_usuario_de_los_secretos(n)}
+    if nombre in admins:
+        return "admin"
+    if nombre in operadores:
+        return "operador"
+    c.execute("SELECT rol FROM usuarios WHERE nombre = ? AND activo = 1", (nombre,))
+    fila = c.fetchone()
+    return (fila["rol"] if fila["rol"] in ("admin", "operador") else None) if fila else None
 
 
 def es_admin():

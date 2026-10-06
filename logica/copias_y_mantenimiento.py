@@ -1500,6 +1500,16 @@ def restaurar_backup(archivo_subido):
     # exactamente el caso que _columnas_de_medidas_que_existen() existe para cubrir.
     _columnas_de_medidas_que_existen.cache_clear()
     olvidar_analisis_de_lote()
+    # Y se controla la base YA RESTAURADA, no solo el archivo antes de entrar: que esté sana y
+    # cuántos productos quedaron. Los avisos de arriba se recalculan con la base nueva (lo
+    # pidió una revisión con ChatGPT: «no confiar en que la copia terminó bien»).
+    invalidar_salud()
+    sana, detalle = la_base_esta_sana(ruta=DB_PATH)
+    c.execute("SELECT COUNT(*) FROM productos")
+    productos = c.fetchone()[0]
+    if not sana:
+        anotar_error("restaurar_backup", f"la base restaurada no pasó el control: {detalle}")
+    return {"sana": sana, "detalle": detalle, "productos": productos}
 
 
 

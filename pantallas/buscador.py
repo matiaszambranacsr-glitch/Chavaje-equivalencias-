@@ -738,9 +738,26 @@ if pagina == PAGINAS[0]:
                             {"codigo_individual": codigo_individual, "clean": None, "res": None}
                         )
                         continue
-                    res, aviso_cero = buscar_con_variantes_del_cero(
-                        clean, marca_filtro, max_saltos,
-                        confianza_minima=50 if solo_confiables else None)
+                    # Si la búsqueda FALLA no es «no hay»: se dice distinto, con el código
+                    # para encontrarla en Estado y papelera, y no se anota como algo que falta
+                    # (lo señaló una revisión con ChatGPT). Antes un fallo cortaba la pantalla
+                    # entera con el error técnico. Ver anotar_busqueda().
+                    _t_busqueda = time.perf_counter()
+                    res, aviso_cero = [], None
+                    try:
+                        res, aviso_cero = buscar_con_variantes_del_cero(
+                            clean, marca_filtro, max_saltos,
+                            confianza_minima=50 if solo_confiables else None)
+                    except sqlite3.Error as _err_busqueda:
+                        anotar_error("buscador", _err_busqueda)
+                        resultados_guardados.append(
+                            {"codigo_individual": codigo_individual, "clean": clean,
+                             "res": None, "error": anotar_busqueda(
+                                 "código", codigo_individual,
+                                 time.perf_counter() - _t_busqueda, 0, _err_busqueda)})
+                        continue
+                    anotar_busqueda("código", codigo_individual, time.perf_counter() - _t_busqueda,
+                                    len(res or []))
                     # Si se llegó por la variante del cero o por el código de barras, lo que
                     # sigue (autos, «hay más», contador) va con el código que se encontró: con
                     # el tipeado no encontraban nada.
@@ -770,6 +787,11 @@ if pagina == PAGINAS[0]:
                 res = item["res"]
                 if not clean:
                     st.warning(f"🔎 {codigo_individual} — código no válido, se omitió.")
+                    continue
+                if item.get("error"):
+                    st.error(f"⚠️ **{codigo_individual}: no se pudo consultar** — no quiere decir "
+                             "que no esté. La base estaba ocupada o algo falló: tocá «Buscar» "
+                             f"de nuevo. Si se repite, avisá con este código: `{item['error']}`.")
                     continue
 
                 # EL KIT QUE APARECE ENTRE LOS RESULTADOS. Que esté en la tabla está
@@ -1651,11 +1673,29 @@ if pagina == PAGINAS[0]:
             if not texto.strip():
                 st.info("Ingresá un texto para buscar.")
                 st.session_state.pop("ultima_busqueda_texto", None)
+            elif len(re.sub(r"\W", "", texto)) < MINIMO_PARA_BUSCAR_POR_TEXTO:
+                # Una letra sola trae 200 cosas que solo tienen esa letra (medido: «a» → 200).
+                st.info(f"Escribí al menos {MINIMO_PARA_BUSCAR_POR_TEXTO} letras o números.")
+                st.session_state.pop("ultima_busqueda_texto", None)
             else:
                 guardar_busqueda(texto.strip())
-                st.session_state["ultima_busqueda_texto"] = {
-                    "texto": texto.strip(), "res": buscar_por_texto(texto)
-                }
+                _t_busqueda = time.perf_counter()
+                try:
+                    _res_texto = buscar_por_texto(texto)
+                except sqlite3.Error as _err_busqueda:
+                    anotar_error("buscador", _err_busqueda)
+                    _res_texto = None
+                    st.error("⚠️ **No se pudo consultar** — no quiere decir que no esté. Tocá "
+                             "«Buscar» de nuevo. Si se repite, avisá con este código: `"
+                             + anotar_busqueda("texto", texto, time.perf_counter() - _t_busqueda,
+                                               0, _err_busqueda) + "`.")
+                    st.session_state.pop("ultima_busqueda_texto", None)
+                if _res_texto is not None:
+                    anotar_busqueda("texto", texto, time.perf_counter() - _t_busqueda,
+                                    len(_res_texto))
+                    st.session_state["ultima_busqueda_texto"] = {
+                        "texto": texto.strip(), "res": _res_texto
+                    }
 
         busqueda_texto_guardada = st.session_state.get("ultima_busqueda_texto")
         if busqueda_texto_guardada:

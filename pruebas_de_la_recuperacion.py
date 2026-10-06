@@ -55,6 +55,19 @@ def probar():
         ns = logica.todo_lo_de_la_logica()
         g = ns["inflacion_desde"].__globals__
         esperar("con la base sana, nada", ns["BASE_ILEGIBLE"], "")
+
+        # Restaurar un backup devuelve el control de la base YA restaurada.
+        c = ns["c"]
+        c.execute("INSERT INTO marcas (nombre, tipo) VALUES ('PRUEBA', 'PROVEEDOR')")
+        c.execute("INSERT INTO productos (codigo_raw, codigo_clean, descripcion, marca_id) "
+                  "VALUES ('P1', 'P1', 'PIEZA', ?)", (c.lastrowid,))
+        ns["conn"].commit()
+        copia = ns["generar_backup_sin_fotos"]()
+        c.execute("DELETE FROM productos")
+        ns["conn"].commit()
+        import io
+        control = ns["restaurar_backup"](io.BytesIO(copia))      # la copia vuelve en bytes
+        esperar("restaurado y controlado", (control["sana"], control["productos"]), (True, 1))
         esperar("ocupada no es dañada",
                 ns["es_una_base_danada"](sqlite3.OperationalError("database is locked")), False)
         esperar("dañada es dañada",

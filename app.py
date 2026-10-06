@@ -304,6 +304,19 @@ if st.session_state.get("nivel_usuario") in ("admin", "operador", "mecanico"):
                 "sin usarla. Para volver a entrar, «🔑 Ingresar», arriba.")
     else:
         st.session_state["_ultimo_toque"] = time.time()
+        # Y que siga pudiendo entrar con ese nivel: ver nivel_vigente_de_la_sesion().
+        try:
+            _nivel_hoy = nivel_vigente_de_la_sesion()
+        except sqlite3.Error as _err:
+            anotar_error("nivel_vigente_de_la_sesion", _err)
+            _nivel_hoy = st.session_state.get("nivel_usuario")
+        if _nivel_hoy is None:
+            cerrar_sesion()
+            st.warning("🔒 La sesión se cerró: esa cuenta ya no está activa o cambió su "
+                       "contraseña. Para volver a entrar, «🔑 Ingresar», arriba.")
+        elif _nivel_hoy != st.session_state.get("nivel_usuario"):
+            st.session_state["nivel_usuario"] = _nivel_hoy
+            st.info(f"🔑 Tu cuenta ahora es de {_nivel_hoy}: los permisos ya se actualizaron.")
 else:
     # Sin sesión con contraseña no hay nada que contar, y así el próximo ingreso arranca la
     # cuenta de cero. Antes el reloj de una sesión anterior («Salir» no lo borraba) cerraba la

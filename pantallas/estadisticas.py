@@ -299,11 +299,16 @@ a traer solas desde Administrar → Mantenimiento.
         confirmar_restore = st.checkbox("Entiendo que esto borra los datos actuales y los reemplaza")
         if candado('restaurar un backup', st.button("♻️ Restaurar backup", disabled=not (archivo_restaurar and confirmar_restore)), 'restaurar_un_backup'):
             try:
-                restaurar_backup(archivo_restaurar)
+                _control = restaurar_backup(archivo_restaurar)
             except ValueError as _err_rest:
                 st.error(f"No se restauró nada: {_err_rest}.")
             else:
-                avisar("success", "Backup restaurado. Recargando...")
+                if _control["sana"]:
+                    avisar("success", f"Backup restaurado y controlado: base sana, "
+                                      f"{miles(_control['productos'])} productos.")
+                else:
+                    avisar("error", "El backup se restauró pero la base no pasó el control "
+                                    f"({_control['detalle']}). Probá con otro backup.")
                 st.rerun()
 
     if sub_stats == SUB_STATS[3]:
