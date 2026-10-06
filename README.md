@@ -8,11 +8,12 @@ qué proveedores, son el mismo repuesto. Corre con Streamlit sobre una base SQLi
 | archivo | qué es |
 |---|---|
 | `app.py` | Lo que Streamlit corre en cada toque: la configuración de la página, el encabezado, la entrada y la navegación. Arranca con el mapa de todas las secciones de la app. |
-| `logica/` | Todo lo que no es una pantalla: la base, los códigos, las equivalencias, las copias, los proveedores. 17 archivos. Se carga **una vez** por proceso. |
+| `logica/` | Todo lo que no es una pantalla: la base, los códigos, las equivalencias, las copias, los proveedores. 23 archivos (el orden, en `orden.py`). Se carga **una vez** por proceso. |
 | `pantallas/` | Una pantalla por archivo (buscador, administrar, estadísticas...). Corren en cada toque, al final de `app.py`. |
 | `orden.py` | En qué orden corren las partes de `logica/` y las pantallas. Lo leen la app y las herramientas. |
 | `nucleo/` | La misma lógica pero **sin Streamlit**, para poder usarla desde otro sistema. Se genera desde `logica/`. |
 | `auditar.py` | Revisa la app entera y busca los errores que ya pasaron alguna vez. Correlo antes de subir un cambio. |
+| `pruebas_del_deposito.py` | El circuito del depósito y el descuento de cada cuenta: pedir, entregar, cargar en la cuenta y facturar. |
 | `pruebas_de_la_revision.py` | Que el análisis de equivalencias no se equivoque con pares ya revisados a mano, y (con `--base`) que no baje a rojo lo que aprobaste. |
 | `requirements.txt` | Lo que hay que instalar. |
 | `Equivalencias` | El prototipo original, de antes de `app.py`. No lo usa nadie; queda por si querés mirarlo. Se puede borrar. |
@@ -1891,7 +1892,7 @@ repartido en muchas partes chicas del motor que puntúa, y tocarlo por uno o dos
 el riesgo.
 
 **En pantalla:**
-- En «Para pedir», lo que marcaron los empleados con «📌 Pedir» (y los favoritos con poco
+- En «Para pedir», lo que marcaron los empleados con «📌 Reponer» (y los favoritos con poco
   stock y el mensaje para el proveedor) va arriba, pegado a «lo que se va a acabar». Estaba al
   final, casi cinco pantallas abajo en el celular.
 - Estando en Mantenimiento se veían dos buscadores de herramientas seguidos, el de Administrar
@@ -2088,7 +2089,7 @@ celular ahora:
 En la computadora no cambia nada. La pantalla es ancha y todo eso entra sin tapar la búsqueda.
 
 **124 botones para decir qué se llevó el cliente.** Abajo de los resultados, cada uno tenía su
-par «🛒 Se llevó» / «📌 Pedir». En el celular las columnas se apilan, así que con 62 resultados
+par «🛒 Se llevó» / «📌 Reponer». En el celular las columnas se apilan, así que con 62 resultados
 eran 124 botones del ancho de la pantalla, uno abajo del otro: 13 de las 17 pantallas. Hasta 5
 resultados sigue igual, que es un toque. Con más aparece un selector «¿Cuál? (62 resultados)» y
 los dos botones una sola vez. El selector elige por ID y no por el texto, porque dos productos con
@@ -6454,6 +6455,39 @@ el botón**:
   dónde vino. Solo los últimos tres años: la serie arranca en los cuarenta y trae el 89.
 - «🔌 Probar las fuentes de afuera» suma la Central de Deudores (con el CUIT de la AFIP, nunca el
   de un cliente) y la inflación de respaldo.
+
+## 📦 El depósito y el descuento de cada cuenta
+
+Como trabaja el negocio: se busca el código en el mostrador, se pide al depósito, los chicos
+del depósito lo buscan y lo dan de baja, y queda en la cuenta de cada taller o mayorista para
+facturarlo. La lógica está en `logica/deposito.py` y la pantalla en `pantallas/deposito.py`.
+
+- **En el buscador**, abajo de «🛒 Se llevó» / «📌 Reponer» (antes «📌 Pedir», que era para
+  reponer y se confundía), el botón **📦 Pedir al depósito**: cuál, cuántos (de 1 a 50), para
+  quién (🧾 Mostrador o la cuenta de un taller) y una nota. Si la cuenta pide código de retiro,
+  se pide y se gasta acá. El límite de crédito se mira acá, contra el precio con descuento.
+  Solo lo ven los empleados: un invitado no.
+- **📦 Depósito** (sección nueva, para empleados): lo pendiente ordenado por **ubicación** para
+  juntarlo en una vuelta, con quién lo pidió, a qué hora y la nota. Se actualiza solo cada 20
+  segundos. **✅ Entregado** hace todo junto o nada: pasa a entregado, baja el stock (si el
+  producto lo lleva; en la base de hoy ninguno tiene stock cargado, así que queda igual), anota
+  la venta (no hace falta tocar «Se llevó») y, si es de una cuenta, la carga con el descuento y
+  el plazo de esa cuenta. Si dos lo tocan a la vez, el segundo encuentra que ya estaba
+  entregado y no carga nada dos veces. **❌ No hay** lo manda a 📊 Estadísticas → 📌 Para pedir.
+  **🚫** lo cancela.
+- **🧾 Para facturar**, en la misma sección y plegado: cuenta por cuenta, lo entregado y sin
+  facturar, con precio de lista, descuento e importe, y «✔️ Marcar facturado».
+- **El descuento** se pone en Administrar → 💳 Cuentas corrientes → ⚙️ Configuración (de 0 a
+  90%; un 100% es regalar y más daría cargos negativos). **No se ve** en el buscador, la lista
+  de WhatsApp, las cotizaciones ni la cola del depósito: solo en la cuenta corriente, en «Para
+  facturar» y en la configuración. El cargo a mano («➕ Cargar a la cuenta») se carga tal cual se
+  escribe, y avisa que esa cuenta tiene descuento.
+
+Probado en `pruebas_del_deposito.py` (descuento, tope, cola sin precios y por ubicación,
+entregar una sola vez, stock, venta, cuenta, Mostrador a precio de lista, facturar, no hay,
+cancelar, código de retiro gastado, límite de crédito), con tres fallas puestas a propósito que
+las pruebas detectan. Y en un navegador sobre la copia de hoy del servidor: 2 × $58.885,94 con
+20% quedó en la cuenta como $94.217,50, a 30 días.
 
 ## 🔍 La revisión técnica con ChatGPT, punto por punto
 

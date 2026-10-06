@@ -41,6 +41,7 @@ PARTES_DE_LA_LOGICA = [
     "vehiculos.py",
     "piezas.py",
     "mecanico.py",
+    "deposito.py",
 ]
 
 # En el orden en que estaban: cada una empieza con su «if pagina == PAGINAS[n]:», así que
@@ -62,6 +63,7 @@ PANTALLAS = [
     "whatsapp.py",
     "vehiculos.py",
     "mecanico.py",
+    "deposito.py",
 ]
 
 # En app.py, la línea donde se ejecutan las pantallas. fuente_completa() pone ahí su texto.

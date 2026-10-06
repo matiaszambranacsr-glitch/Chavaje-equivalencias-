@@ -365,7 +365,9 @@ VALORES_PAREADOS = {
     "decision": {"ok", "rechazada"},
     "estado": {"ok", "sin_detalle", "error", "solo_forma", "pendiente", "resuelto",
                # de las reservas de stock
-               "activa", "vencida", "vendida", "cancelada"},
+               "activa", "vencida", "vendida", "cancelada",
+               # de los pedidos al depósito (ver ESTADOS_DEL_PEDIDO)
+               "entregado", "no_hay", "cancelado"},
     # link_roto: la foto de internet que no bajó (ver bajar_fotos_pendientes()).
     # fallo: falló por la red tres días distintos y se dejó de intentar (ver _anotar_fallas()).
     "foto_busqueda_estado": {"sin_foto", "error", "link_roto", "fallo"},

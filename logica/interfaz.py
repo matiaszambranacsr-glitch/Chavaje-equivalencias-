@@ -74,7 +74,8 @@ def herramientas_que_coinciden(texto):
 # miga_hasta() arma la miga desde el nombre, ir_a_donde_dice_el_aviso() llega a cualquier
 # solapa, y el auditor controla que cada miga escrita exista.
 PAGINAS = ["🔍 Buscador", "🔗 Vincular manual", "📁 Cargar Excel", "🗂️ Administrar",
-           "📊 Estadísticas", "📋 Lista WhatsApp", "🚗 Vehículos", "🛠️ Modo Mecánico"]
+           "📊 Estadísticas", "📋 Lista WhatsApp", "🚗 Vehículos", "🛠️ Modo Mecánico",
+           "📦 Depósito"]
 
 # Una línea por pantalla diciendo para qué sirve: se ve debajo de las pastillas. Sin esto hay
 # que entrar a cada una para saber qué hace, y el que atiende el mostrador no tiene tiempo de
@@ -92,6 +93,8 @@ PARA_QUE_SIRVE = {
     "🚗 Vehículos": "Fichas de los autos: qué se le puso a cada uno y cuándo.",
     "🛠️ Modo Mecánico": "Identificar un auto por patente, chasis o número de motor, y los "
                        "códigos de falla.",
+    "📦 Depósito": "Lo que pidió el mostrador, para buscarlo y darlo de baja; y lo que quedó en "
+                  "cada cuenta para facturar.",
 }
 
 # Las solapas de cada pantalla. Viven acá y no adentro de la pantalla porque el botón de los

@@ -1425,6 +1425,31 @@ def _esquema_gestion(c):
         dias_de_plazo INTEGER DEFAULT 30,
         pide_codigo INTEGER DEFAULT 1
     )""")
+    # El DESCUENTO de cada cuenta: lo que se le cobra al taller o al mayorista por debajo del
+    # precio de lista. Se aplica solo al cargar en su cuenta; ningún otro lado lo muestra (ver
+    # logica/deposito.py).
+    if "descuento" not in [f[1] for f in c.execute("PRAGMA table_info(cuentas_de_taller)")]:
+        c.execute("ALTER TABLE cuentas_de_taller ADD COLUMN descuento REAL DEFAULT 0")
+    # LOS PEDIDOS AL DEPÓSITO: el mostrador pide, el depósito lo busca y lo da de baja, y queda
+    # cargado en la cuenta de quien se lo lleva, para facturar. Ver logica/deposito.py.
+    c.execute("""CREATE TABLE IF NOT EXISTS pedidos_deposito (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        producto_id INTEGER NOT NULL REFERENCES productos(id) ON DELETE CASCADE,
+        cantidad INTEGER NOT NULL DEFAULT 1,
+        mecanico_id INTEGER,
+        nota TEXT,
+        pedido_por TEXT,
+        pedido_en TEXT DEFAULT (datetime('now', 'localtime')),
+        estado TEXT NOT NULL DEFAULT 'pendiente',
+        resuelto_por TEXT,
+        resuelto_en TEXT,
+        precio_lista REAL,
+        descuento REAL,
+        importe REAL,
+        movimiento_id INTEGER,
+        facturado_en TEXT
+    )""")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_pedidos_deposito_estado ON pedidos_deposito(estado)")
     c.execute("""CREATE TABLE IF NOT EXISTS movimientos_de_cuenta (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         mecanico_id INTEGER NOT NULL,

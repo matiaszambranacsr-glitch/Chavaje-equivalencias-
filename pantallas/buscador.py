@@ -1285,8 +1285,10 @@ if pagina == PAGINAS[0]:
                         ayuda(
                             "Marcá cuál se llevó el cliente: con eso el sistema va aprendiendo qué "
                             "sirve para qué, y después te propone equivalencias nuevas en "
-                            "📊 Estadísticas → 🔗 Equivalencias sugeridas. Si falta stock, «📌 Pedir» lo "
-                            "anota en 📊 Estadísticas → 📌 Para pedir."
+                            "📊 Estadísticas → 🔗 Equivalencias sugeridas. Si falta stock, «📌 Reponer» lo "
+                            "anota en 📊 Estadísticas → 📌 Para pedir. «📦 Pedir al depósito» "
+                            "le avisa al depósito que lo busque, y al entregarlo queda en la cuenta "
+                            "del que se lo lleva."
                         )
                         def _rotulo_stock(f):
                             _s = f.get("Stock")
@@ -1308,7 +1310,7 @@ if pagina == PAGINAS[0]:
                                                     f"{fila_stock['Marca']} - {fila_stock['Codigo']}",
                                                     f"stock_{clean}"),
                                               help="Anota la venta para ir descubriendo equivalencias solas")
-                                colr3.button("📌 Pedir", key=f"pedir_repo_{fila_stock['ID']}_{clean}",
+                                colr3.button("📌 Reponer", key=f"pedir_repo_{fila_stock['ID']}_{clean}",
                                               on_click=pedir_reposicion_y_avisar,
                                               args=(fila_stock["ID"], f"{fila_stock['Marca']} - {fila_stock['Codigo']}",
                                                     f"stock_{clean}"),
@@ -1326,12 +1328,14 @@ if pagina == PAGINAS[0]:
                                           args=(_elegido, codigo_individual, _rotulos[_elegido],
                                                 f"stock_{clean}"),
                                           help="Anota la venta para ir descubriendo equivalencias solas")
-                            colr3.button("📌 Pedir", key=f"pedir_elegido_{clean}",
+                            colr3.button("📌 Reponer", key=f"pedir_elegido_{clean}",
                                           on_click=pedir_reposicion_y_avisar,
                                           args=(_elegido, _rotulos[_elegido], f"stock_{clean}"),
                                           help="Marcar para reposición")
 
                         mostrar_lo_anotado(f"stock_{clean}")
+                        if es_empleado_o_abierto():
+                            mostrar_pedir_al_deposito(res, clean)
 
                         # Marcar favoritos / editar precio y stock
                         if seccion_plegable("✏️ Marcar favorito / editar precio, costo y stock",

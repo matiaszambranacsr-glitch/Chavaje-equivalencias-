@@ -1009,25 +1009,38 @@ def _hash_del_codigo(codigo, salt):
 
 
 def configuracion_de_cuenta(mecanico_id):
-    """{limite, dias_de_plazo, pide_codigo}. Sin configurar: sin límite, 30 días, pide código."""
-    c.execute("SELECT limite, dias_de_plazo, pide_codigo FROM cuentas_de_taller "
+    """{limite, dias_de_plazo, pide_codigo, descuento}. Sin configurar: sin límite, 30 días,
+    pide código, sin descuento."""
+    c.execute("SELECT limite, dias_de_plazo, pide_codigo, descuento FROM cuentas_de_taller "
               "WHERE mecanico_id = ?", (mecanico_id,))
     f = c.fetchone()
     return {"limite": float(f["limite"] or 0) if f else 0.0,
             "dias_de_plazo": (int(f["dias_de_plazo"]) if f and f["dias_de_plazo"] is not None
                               else 30),
-            "pide_codigo": bool(f["pide_codigo"]) if f else True}
+            "pide_codigo": bool(f["pide_codigo"]) if f else True,
+            "descuento": float(f["descuento"] or 0) if f else 0.0}
 
 
-def configurar_cuenta_de_taller(mecanico_id, limite, dias_de_plazo, pide_codigo):
+# El descuento más alto que se acepta. Un 100% es regalar, y un 1.000% escrito de más daría
+# cargos negativos: la cuenta quedaría a favor del taller.
+DESCUENTO_MAXIMO = 90.0
+
+
+def configurar_cuenta_de_taller(mecanico_id, limite, dias_de_plazo, pide_codigo, descuento=None):
+    """Guarda la configuración. descuento=None deja el que tenía."""
+    if descuento is None:
+        descuento = configuracion_de_cuenta(mecanico_id)["descuento"]
+    descuento = min(DESCUENTO_MAXIMO, max(0.0, float(descuento or 0)))
     with db_lock:
-        c.execute("""INSERT INTO cuentas_de_taller (mecanico_id, limite, dias_de_plazo, pide_codigo)
-                     VALUES (?, ?, ?, ?)
+        c.execute("""INSERT INTO cuentas_de_taller (mecanico_id, limite, dias_de_plazo, pide_codigo,
+                                                    descuento)
+                     VALUES (?, ?, ?, ?, ?)
                      ON CONFLICT(mecanico_id) DO UPDATE SET limite = excluded.limite,
                         dias_de_plazo = excluded.dias_de_plazo,
-                        pide_codigo = excluded.pide_codigo""",
+                        pide_codigo = excluded.pide_codigo,
+                        descuento = excluded.descuento""",
                   (mecanico_id, max(0.0, float(limite or 0)), max(0, int(dias_de_plazo or 0)),
-                   1 if pide_codigo else 0))
+                   1 if pide_codigo else 0, descuento))
         conn.commit()
 
 

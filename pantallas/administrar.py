@@ -851,6 +851,10 @@ if pagina == PAGINAS[3]:
                 st.markdown("**➕ Cargar a la cuenta**")
                 _concepto = st.text_input("Qué se llevó:", placeholder="Ej: junta tapa 271205 x1")
                 _importe = st.number_input("Importe ($):", min_value=0.0, step=100.0)
+                if _config["descuento"]:
+                    st.caption(f"Esta cuenta tiene {miles(_config['descuento'], 1)}% de "
+                               "descuento. Lo que se pide al depósito se carga ya descontado; "
+                               "acá se carga el importe tal cual lo escribas.")
                 _codigo = (st.text_input("Código de retiro (6 cifras):", max_chars=6)
                            if _config["pide_codigo"] else "")
                 _pasar = (st.checkbox("Cargar igual aunque pase el límite")
@@ -950,10 +954,21 @@ if pagina == PAGINAS[3]:
                                          key=f"cc_plazo_{_mid}")
                 _pide = st.checkbox("Pedir el código de retiro para cargarle algo",
                                     value=_config["pide_codigo"], key=f"cc_pide_{_mid}")
+                # El descuento de la cuenta: ver «EL DESCUENTO NO SE VE» en logica/deposito.py.
+                _descuento = st.number_input(
+                    "Descuento sobre la lista (%):", min_value=0.0, max_value=DESCUENTO_MAXIMO,
+                    step=1.0, value=float(_config["descuento"]), key=f"cc_descuento_{_mid}",
+                    help="Lo que se pide al depósito para esta cuenta se carga con este "
+                         "descuento. No se ve en el buscador, ni en WhatsApp, ni en las "
+                         "cotizaciones, ni en el depósito: solo en la cuenta y en «🧾 Para "
+                         "facturar».")
+                if _descuento:
+                    st.caption(f"Ejemplo: un repuesto de lista {formato_precio(10000)} se le "
+                               f"carga a {formato_precio(precio_de_la_cuenta(10000, _descuento))}.")
                 if candado("cambiar la configuración de una cuenta corriente",
                            st.button("💾 Guardar configuración", key=f"cc_guardar_{_mid}"),
                            f"cc_guardar_{_mid}"):
-                    configurar_cuenta_de_taller(_mid, _limite, _plazo, _pide)
+                    configurar_cuenta_de_taller(_mid, _limite, _plazo, _pide, _descuento)
                     avisar("success", "Configuración guardada.")
                     st.rerun()
 

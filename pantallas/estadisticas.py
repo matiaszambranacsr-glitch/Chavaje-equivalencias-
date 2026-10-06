@@ -401,7 +401,7 @@ a traer solas desde Administrar → Mantenimiento.
         st.markdown("**⏳ Lo que se va a acabar**")
         explicar(
             "Calculado con el ritmo real de venta de cada producto y el stock que queda.",
-            "Sin esto, la reposición depende de que alguien se acuerde de tocar «📌 Pedir». Y "
+            "Sin esto, la reposición depende de que alguien se acuerde de tocar «📌 Reponer». Y "
             "de lo que uno no se acuerda es justamente de lo que se vende parejo "
             "todos los días — el filtro común que nadie mira hasta que un cliente lo pide y no "
             "está.\n\nSe ignora lo que se vendió una o dos veces: con eso no se puede calcular "
