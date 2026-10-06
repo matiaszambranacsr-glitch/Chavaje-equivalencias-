@@ -1018,6 +1018,65 @@ if pagina == PAGINAS[3]:
                         avisar("success", "Movimiento anulado.")
                         st.rerun()
 
+            # INTERÉS POR MORA con la tasa del BCRA: ver «INTERÉS POR MORA» en
+            # logica/mecanico.py. Plegado con un interruptor y no con un expander: el expander
+            # corre su contenido aunque esté cerrado, y esto puede salir a internet.
+            if seccion_plegable("📈 Interés por mora (tasa del BCRA)", key=f"cc_mora_{_mid}"):
+                _cfg_mora = configuracion_de_la_mora()
+                _tasas = tasas_de_referencia()
+                if not _tasas:
+                    st.warning("Todavía no se pudo traer ninguna tasa del BCRA.")
+                    if st.button("🔄 Traer las tasas del BCRA", key=f"cc_tasas_{_mid}"):
+                        with st.spinner("Consultando al BCRA…"):
+                            tasas_de_referencia(forzar=True)
+                        st.rerun()
+                else:
+                    _claves_t = [k for k, _n, _p in TASAS_DE_REFERENCIA if k in _tasas]
+                    _m1, _m2 = st.columns([3, 1])
+                    _ref = _m1.selectbox(
+                        "Tasa de referencia:", _claves_t,
+                        index=(_claves_t.index(_cfg_mora["referencia"])
+                               if _cfg_mora["referencia"] in _claves_t else 0),
+                        format_func=lambda k: (f"{_tasas[k]['nombre']} — "
+                                               f"{miles(_tasas[k]['tna'], 2)}% TNA"
+                                               + (f" (al {_tasas[k]['fecha']})"
+                                                  if _tasas[k].get("fecha") else "")),
+                        key=f"cc_mora_ref_{_mid}")
+                    _puntos = _m2.number_input("+ puntos:", min_value=0.0, max_value=200.0,
+                                               step=1.0, value=_cfg_mora["puntos"],
+                                               key=f"cc_mora_puntos_{_mid}",
+                                               help="Lo que se suma a la tasa del BCRA.")
+                    if (_ref, _puntos) != (_cfg_mora["referencia"], _cfg_mora["puntos"]):
+                        if candado("cambiar la tasa del interés por mora",
+                                   st.button("💾 Usar esta tasa para todas las cuentas",
+                                             key=f"cc_mora_guardar_{_mid}"),
+                                   f"cc_mora_guardar_{_mid}"):
+                            guardar_configuracion_de_la_mora(_ref, _puntos)
+                            avisar("success", "Tasa del interés por mora guardada.")
+                            st.rerun()
+                    _tna, _origen = tasa_de_mora()
+                    _calc = interes_por_mora(_mid, _tna)
+                    st.caption(f"Con {_origen}: **{miles(_tna, 2)}% anual**, interés simple "
+                               "por días sobre lo vencido e impago de cada cargo (los pagos van "
+                               "a lo más viejo)."
+                               + (f" Ya se cobró hasta el {_calc['desde']:%d/%m/%Y}."
+                                  if _calc["desde"] else ""))
+                    if not _calc["renglones"]:
+                        st.success("No hay saldo vencido sin cobrar: no corresponde interés.")
+                    else:
+                        st.dataframe(_calc["renglones"], hide_index=True, width="stretch")
+                        st.markdown(f"**Interés a hoy: ${miles(_calc['total'], 0)}**")
+                        if candado("cargar el interés por mora",
+                                   st.button("➕ Cargar el interés a la cuenta",
+                                             key=f"cc_mora_cargar_{_mid}"),
+                                   f"cc_mora_cargar_{_mid}"):
+                            # En el movimiento, la tasa en corto: el valor ya va en la TNA.
+                            _ok, _aviso = cargar_el_interes_por_mora(
+                                _mid, _tna, f"{_origen.split(' (')[0]}, BCRA",
+                                usuario=obtener_usuario_actual())
+                            avisar("success" if _ok else "warning", _aviso)
+                            st.rerun()
+
             with st.expander(f"⚙️ Configuración de la cuenta de {_taller}"):
                 _limite = st.number_input("Límite de crédito ($, 0 = sin límite):", min_value=0.0,
                                           step=1000.0, value=float(_config["limite"]),

@@ -1433,6 +1433,122 @@ def anular_movimiento_de_cuenta(movimiento_id):
         conn.commit()
 
 
+# ============================================================
+# INTERÉS POR MORA (con la tasa del BCRA)
+# ============================================================
+# A los talleres se les fía, y con inflación un saldo vencido que se paga tres meses tarde se
+# paga con plata que vale menos. La app sugiere el interés con una tasa oficial y pública —la
+# del BCRA que se elija (ver tasas_de_referencia() en logica/salud.py)— más los puntos que se
+# quieran sumar. Nunca lo carga sola: se mira y se carga con un botón.
+#
+# CÓMO SE CALCULA. Interés simple por días, solo sobre lo VENCIDO E IMPAGO de cada cargo: los
+# pagos se imputan a los cargos más viejos (como «Vencido» en estado_de_cuenta()), y lo que
+# queda de cada cargo después de su vencimiento genera saldo × TNA × días / 365.
+# NO SE COBRA DOS VECES. Al cargarlo queda un movimiento «Interés por mora…»; el cálculo
+# siguiente cuenta desde la fecha del último que no esté anulado. Si se anula, esos días
+# vuelven a contar solos: no hay una fecha guardada aparte que se desincronice.
+PREFIJO_DEL_INTERES = "Interés por mora"
+CONFIG_DE_LA_MORA = "tasa_de_mora"
+
+
+def configuracion_de_la_mora():
+    """{"referencia": clave de TASAS_DE_REFERENCIA, "puntos": lo que se suma a la TNA}."""
+    try:
+        cfg = json.loads(obtener_config(CONFIG_DE_LA_MORA, "") or "{}")
+    except (ValueError, TypeError):
+        cfg = {}
+    return {"referencia": cfg.get("referencia") or TASAS_DE_REFERENCIA[0][0],
+            "puntos": float(cfg.get("puntos") or 0)}
+
+
+def guardar_configuracion_de_la_mora(referencia, puntos):
+    guardar_config(CONFIG_DE_LA_MORA, json.dumps(
+        {"referencia": referencia, "puntos": min(200.0, max(0.0, float(puntos or 0)))}))
+
+
+def tasa_de_mora():
+    """(TNA en %, de dónde sale) o (None, por qué no). Si la elegida no vino, la primera que
+    haya, y lo dice."""
+    cfg = configuracion_de_la_mora()
+    tasas = tasas_de_referencia()
+    elegida = tasas.get(cfg["referencia"])
+    if not elegida:
+        elegida = next((tasas[k] for k, _n, _p in TASAS_DE_REFERENCIA if k in tasas), None)
+    if not elegida:
+        return None, "No se pudo traer ninguna tasa del BCRA todavía."
+    tna = round(elegida["tna"] + cfg["puntos"], 2)
+    origen = (f"{elegida['nombre']} del BCRA ({miles(elegida['tna'], 2)}% TNA"
+              + (f", al {elegida['fecha']}" if elegida.get("fecha") else "") + ")"
+              + (f" + {miles(cfg['puntos'], 2)} puntos" if cfg["puntos"] else ""))
+    return tna, origen
+
+
+def _interes_cobrado_hasta(mecanico_id):
+    c.execute("""SELECT MAX(date(fecha)) FROM movimientos_de_cuenta
+                 WHERE mecanico_id = ? AND anulado = 0 AND concepto LIKE ?""",
+              (mecanico_id, PREFIJO_DEL_INTERES + "%"))
+    valor = c.fetchone()[0]
+    try:
+        return date.fromisoformat(valor) if valor else None
+    except ValueError:
+        return None
+
+
+def interes_por_mora(mecanico_id, tna, hoy=None):
+    """{"total", "desde": hasta dónde ya se cobró (o None), "renglones": [{"Cargo", "Venció",
+    "Cuenta desde", "Días", "Impago", "Interés"}]}. Ver «INTERÉS POR MORA»."""
+    hoy = hoy or date.today()
+    c.execute("""SELECT COALESCE(SUM(-importe), 0) FROM movimientos_de_cuenta
+                 WHERE mecanico_id = ? AND anulado = 0 AND importe < 0""", (mecanico_id,))
+    pagos = float(c.fetchone()[0])
+    # Antes de la consulta de los cargos: usa el mismo cursor, y en el medio pisaba su
+    # resultado (medido: el interés daba siempre cero).
+    cobrado_hasta = _interes_cobrado_hasta(mecanico_id)
+    c.execute("""SELECT fecha, concepto, importe, vence FROM movimientos_de_cuenta
+                 WHERE mecanico_id = ? AND anulado = 0 AND importe > 0
+                 ORDER BY COALESCE(vence, substr(fecha, 1, 10)), id""", (mecanico_id,))
+    renglones, total = [], 0.0
+    for f in c.fetchall():
+        cubre = min(pagos, float(f["importe"]))
+        pagos -= cubre
+        impago = float(f["importe"]) - cubre
+        try:
+            vencio = date.fromisoformat(str(f["vence"] or "")[:10])
+        except ValueError:
+            continue
+        if impago < 0.01 or vencio >= hoy:
+            continue
+        desde = max(vencio, cobrado_hasta) if cobrado_hasta else vencio
+        dias = (hoy - desde).days
+        if dias <= 0:
+            continue
+        interes = impago * float(tna) / 100 * dias / 365
+        total += interes
+        renglones.append({"Cargo": (f["concepto"] or "")[:60], "Venció": vencio.isoformat(),
+                          "Cuenta desde": desde.isoformat(), "Días": dias,
+                          "Impago": round(impago, 2), "Interés": round(interes, 2)})
+    return {"total": round(total, 2), "desde": cobrado_hasta, "renglones": renglones}
+
+
+def cargar_el_interes_por_mora(mecanico_id, tna, origen="", usuario="", hoy=None):
+    """Carga en la cuenta el interés calculado hoy. (True, aviso) o (False, por qué no). Se
+    vuelve a calcular adentro, con el candado, por si alguien cargó otro pago mientras tanto."""
+    hoy = hoy or date.today()
+    with db_lock, transaccion():
+        calculo = interes_por_mora(mecanico_id, tna, hoy)
+        if calculo["total"] < 1:
+            return False, "No hay interés para cargar: no hay saldo vencido sin cobrar."
+        vence = (hoy + timedelta(days=configuracion_de_cuenta(mecanico_id)["dias_de_plazo"]))
+        c.execute("""INSERT INTO movimientos_de_cuenta (mecanico_id, fecha, concepto, importe,
+                                                        vence, usuario)
+                     VALUES (?, ?, ?, ?, ?, ?)""",
+                  (mecanico_id, f"{hoy.isoformat()} {datetime.now():%H:%M:%S}",
+                   f"{PREFIJO_DEL_INTERES} al {hoy:%d/%m/%Y} — TNA {miles(tna, 2)}%"
+                   + (f" ({origen})" if origen else ""),
+                   calculo["total"], vence.isoformat(), usuario))
+    return True, f"Interés cargado: ${miles(calculo['total'], 0)}, vence el {vence.isoformat()}."
+
+
 def resumen_de_cuentas():
     """Una fila por taller con movimientos o con la cuenta configurada, los que más deben
     vencido primero."""

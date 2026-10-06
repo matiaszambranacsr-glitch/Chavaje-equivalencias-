@@ -2550,6 +2550,11 @@ def _trabajo_de_fondo():
         actualizar_parque_automotor()
     except Exception as _err:
         anotar_error("_trabajo_de_fondo/parque_automotor", _err)
+    # Las tasas del BCRA para el interés por mora: una vez por día (ver tasas_de_referencia()).
+    try:
+        tasas_de_referencia()
+    except Exception as _err:
+        anotar_error("tasas_de_referencia", _err)
     # El registro de CHAS de la Secretaría de Industria: una vez por mes (ver
     # actualizar_el_registro_chas()).
     try:

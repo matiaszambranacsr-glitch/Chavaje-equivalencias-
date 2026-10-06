@@ -13,6 +13,7 @@ qué proveedores, son el mismo repuesto. Corre con Streamlit sobre una base SQLi
 | `orden.py` | En qué orden corren las partes de `logica/` y las pantallas. Lo leen la app y las herramientas. |
 | `nucleo/` | La misma lógica pero **sin Streamlit**, para poder usarla desde otro sistema. Se genera desde `logica/`. |
 | `auditar.py` | Revisa la app entera y busca los errores que ya pasaron alguna vez. Correlo antes de subir un cambio. |
+| `pruebas_de_las_cuentas.py` | El interés por mora de las cuentas corrientes, con fechas fijas. |
 | `pruebas_de_las_homologaciones.py` | El registro oficial de CHAS (autopartes de seguridad): leerlo en varios formatos y cruzarlo con tus marcas. |
 | `pruebas_del_deposito.py` | El circuito del depósito y el descuento de cada cuenta: pedir, entregar, cargar en la cuenta y facturar. |
 | `pruebas_de_la_revision.py` | Que el análisis de equivalencias no se equivoque con pares ya revisados a mano, y (con `--base`) que no baje a rojo lo que aprobaste. |
@@ -6456,6 +6457,32 @@ el botón**:
   dónde vino. Solo los últimos tres años: la serie arranca en los cuarenta y trae el 89.
 - «🔌 Probar las fuentes de afuera» suma la Central de Deudores (con el CUIT de la AFIP, nunca el
   de un cliente) y la inflación de respaldo.
+
+## 📈 Interés por mora con la tasa del BCRA
+
+A los talleres se les fía, y con inflación un saldo que se paga tres meses tarde se paga con
+plata que vale menos. En Administrar → 💳 Cuentas corrientes, cada taller tiene «📈 Interés por
+mora (tasa del BCRA)»:
+
+- **La tasa** sale del listado de variables del BCRA (api.bcra.gob.ar, estadísticas monetarias
+  v4.0, y si no contesta la v3.0): adelantos en cuenta corriente, préstamos personales, TAMAR o
+  BADLAR, siempre en % nominal anual (las «efectiva anual» y los valores imposibles no se
+  toman). Se elige una para todas las cuentas y se le pueden sumar puntos. Se trae una vez por
+  día; si el BCRA no contesta se sigue con la última, y no se reintenta en cada toque.
+- **El cálculo**: interés simple por días, solo sobre lo vencido e impago de cada cargo; los
+  pagos se imputan a lo más viejo, igual que «Vencido». Se ve cargo por cargo (venció, desde
+  cuándo cuenta, días, impago, interés).
+- **Nunca se carga solo**: con «➕ Cargar el interés a la cuenta» (pide contraseña) queda un
+  movimiento «Interés por mora al …» con su vencimiento. El cálculo siguiente cuenta desde la
+  fecha del último que no esté anulado: los mismos días no se cobran dos veces, y si se anula,
+  vuelven a contar solos.
+
+Un error encontrado al probarlo: la consulta de «hasta cuándo se cobró» usaba el mismo cursor
+entre la consulta de los cargos y su lectura, y pisaba el resultado: el interés daba siempre
+cero. Probado en `pruebas_de_las_cuentas.py` (con fechas fijas, cuentas hechas a mano) y en
+`pruebas_de_las_fuentes.py` (las tasas en formato v4 y v3), con ocho fallas puestas a propósito,
+todas detectadas; y en el navegador sobre la copia de hoy: 80.000 impagos 65 días y 90.000
+impagos 20 días al 55,2% dieron $10.586,30, que es la cuenta a mano.
 
 ## 🛡️ Autopartes de seguridad: el registro oficial de CHAS
 

@@ -123,7 +123,8 @@ TAREAS_QUE_SE_VIGILAN = (("_trabajo_de_fondo", "trabajo de fondo"), ("vigilar_la
                    ("actualizar_parque_automotor", "parque automotor (DNRPA)"),
                    ("contexto_de_precios", "dólar e inflación"),
                    ("actualizar_ipc_de_transporte", "IPC de transporte"),
-                   ("actualizar_el_registro_chas", "registro de CHAS"))
+                   ("actualizar_el_registro_chas", "registro de CHAS"),
+                   ("tasas_de_referencia", "tasas del BCRA"))
 # Desde cuántas veces se avisa. Una sola es un sitio que no contestó justo esa vez.
 FALLAS_PARA_AVISAR = 5
 
@@ -1439,6 +1440,86 @@ def _pedir_al_bcra(url, tiempo_maximo=8):
         return None, None
 
 
+# LAS TASAS DE INTERÉS DEL BCRA, para el interés por mora de las cuentas corrientes (ver
+# «INTERÉS POR MORA» en logica/mecanico.py). Se leen del LISTADO de variables, que trae el
+# último valor de cada una: así no depende de cómo viene la serie día por día, que cambió entre
+# versiones de la API. Primero la v4.0; si no contesta, la v3.0 (que el BCRA da de baja).
+URLS_VARIABLES_BCRA = ("https://api.bcra.gob.ar/estadisticas/v4.0/monetarias",
+                       "https://api.bcra.gob.ar/estadisticas/v3.0/monetarias")
+# Cuáles interesan, y cómo se reconocen en la descripción. Todas en % nominal anual (TNA).
+TASAS_DE_REFERENCIA = (
+    ("adelantos", "Adelantos en cuenta corriente (empresas)", ("adelanto",)),
+    ("personales", "Préstamos personales", ("prestamos personales",)),
+    ("tamar", "TAMAR (bancos privados)", ("tamar",)),
+    ("badlar", "BADLAR (bancos privados)", ("badlar",)),
+)
+# Una TNA fuera de esto no es una tasa: es otra variable que se llama parecido.
+TASA_CREIBLE = (1.0, 400.0)
+CONFIG_DE_LAS_TASAS = "tasas_bcra"
+HORAS_DE_LAS_TASAS = 24
+
+
+def _tasas_del_listado(resultados):
+    """{clave: {"nombre", "tna", "fecha", "descripcion", "id"}} de las tasas que se reconocen
+    en el listado. Nominal anual: una que dice «efectiva» o «e.a.» no va."""
+    salida = {}
+    for r in resultados or []:
+        if not isinstance(r, dict):
+            continue
+        descripcion = str(r.get("descripcion") or "")
+        texto = normalizar_texto(descripcion).lower()
+        es_una_tasa = "tasa" in texto or "tamar" in texto or "badlar" in texto
+        if not es_una_tasa or "efectiva" in texto or "e.a" in texto:
+            continue
+        try:
+            valor = float(r.get("ultValorInformado", r.get("valor")))
+        except (TypeError, ValueError):
+            continue
+        if not TASA_CREIBLE[0] <= valor <= TASA_CREIBLE[1]:
+            continue
+        for clave, nombre, palabras in TASAS_DE_REFERENCIA:
+            if clave not in salida and all(p in texto for p in palabras):
+                salida[clave] = {"nombre": nombre, "tna": valor, "descripcion": descripcion,
+                                 "fecha": str(r.get("ultFechaInformada") or r.get("fecha") or "")[:10],
+                                 "id": r.get("idVariable")}
+    return salida
+
+
+def tasas_de_referencia(forzar=False):
+    """Las tasas del BCRA, guardadas un día. {} si nunca se pudieron traer. Lo guardado se usa
+    aunque esté viejo si el BCRA no contesta: una tasa de hace una semana sirve igual."""
+    try:
+        guardado = json.loads(obtener_config(CONFIG_DE_LAS_TASAS, "") or "{}")
+    except (ValueError, TypeError):
+        guardado = {}
+    def _hace(clave):
+        try:
+            return datetime.now() - datetime.strptime(str(guardado.get(clave))[:19],
+                                                      "%Y-%m-%d %H:%M:%S")
+        except ValueError:
+            return None
+    if not forzar:
+        traido, intentado = _hace("traido"), _hace("intentado")
+        if traido is not None and traido < timedelta(hours=HORAS_DE_LAS_TASAS):
+            return guardado.get("tasas") or {}
+        # Después de un intento fallido se espera: sin esto, con el BCRA caído, cada toque en
+        # la pantalla de cuentas esperaba veinte segundos.
+        if intentado is not None and intentado < timedelta(minutes=MINUTOS_ANTES_DE_REINTENTAR):
+            return guardado.get("tasas") or {}
+    for url in URLS_VARIABLES_BCRA:
+        estado, cuerpo = _pedir_al_bcra(url, tiempo_maximo=10)
+        tasas = _tasas_del_listado((cuerpo or {}).get("results") if isinstance(cuerpo, dict)
+                                   else None) if estado == 200 else {}
+        if tasas:
+            guardar_config(CONFIG_DE_LAS_TASAS, json.dumps(
+                {"traido": datetime.now().strftime("%Y-%m-%d %H:%M:%S"), "url": url,
+                 "tasas": tasas}))
+            return tasas
+    guardar_config(CONFIG_DE_LAS_TASAS, json.dumps(
+        dict(guardado, intentado=datetime.now().strftime("%Y-%m-%d %H:%M:%S"))))
+    return guardado.get("tasas") or {}
+
+
 def cuit_valido(cuit):
     """El CUIT/CUIL de 11 cifras, limpio, si su dígito verificador da; si no, None."""
     limpio = re.sub(r"\D", "", str(cuit or ""))
@@ -1668,6 +1749,8 @@ def probar_fuentes_de_afuera():
           lambda: _pedir_json(URL_PORTAL_PRODUCCION, tiempo_maximo=20),
           lambda r: (f"último archivo: {archivo_mas_reciente_del_chas().rsplit('/', 1)[-1]}"
                      if isinstance(r, dict) and r.get("success") else ""))
+    medir("BCRA — tasas de interés (api.bcra.gob.ar)", lambda: tasas_de_referencia(forzar=True),
+          lambda r: ", ".join(f"{v['nombre']}: {miles(v['tna'], 1)}%" for v in r.values()))
     medir("NHTSA — lector de VIN (vpic.nhtsa.dot.gov)",
           lambda: consultar_vin_en_nhtsa(VIN_DE_MUESTRA)[0],
           lambda r: f"{r.get('marca')} {r.get('modelo')} {r.get('anio')}")

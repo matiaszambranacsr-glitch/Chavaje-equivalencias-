@@ -107,6 +107,7 @@ específico, y las pantallas quedan todas al final:
         · MODO MECÁNICO — CAMPAÑAS DE SEGURIDAD Y FALLAS REPORTADAS (NHTSA)
         · MODO MECÁNICO — VISOR DE ESQUEMAS
         · CUENTA CORRIENTE DE LOS TALLERES
+        · INTERÉS POR MORA (con la tasa del BCRA)
     logica/deposito.py
         · EL DEPÓSITO: DEL MOSTRADOR A LA CUENTA
         · CUÁNTO TARDA EL DEPÓSITO

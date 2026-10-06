@@ -393,6 +393,58 @@ def probar(L):
     esperar("NHTSA: marca y modelo", (datos or {}).get("marca"), "FIAT")
     esperar("NHTSA: motor", (datos or {}).get("motor"), "1.4L 4cil Gasoline")
 
+    # 8b. Las tasas del BCRA (para el interés por mora), del listado de variables.
+    # Las que no sirven van ANTES que las buenas: si el filtro fallara, ganarían ellas.
+    _listado_v4 = [
+        {"idVariable": 99, "descripcion": "Tasa de interés de préstamos personales (variación)",
+         "ultValorInformado": 0.5},
+        {"idVariable": 8, "descripcion": "BADLAR en pesos de bancos privados (en % e.a.)",
+         "ultFechaInformada": "2026-10-01", "ultValorInformado": 42.0},
+        {"idVariable": 7, "descripcion": "BADLAR en pesos de bancos privados (en % n.a.)",
+         "ultFechaInformada": "2026-10-01", "ultValorInformado": 35.5},
+        {"idVariable": 44, "descripcion": "TAMAR en pesos de bancos privados (en % n.a.)",
+         "ultValorInformado": 38.1},
+        {"idVariable": 13, "descripcion": "Tasa de interés de adelantos en cuenta corriente",
+         "ultFechaInformada": "2026-09-30", "ultValorInformado": 55.2},
+        {"idVariable": 14, "descripcion": "Tasa de interés de préstamos personales",
+         "ultValorInformado": 70.3},
+        {"idVariable": 1, "descripcion": "Reservas Internacionales del BCRA (en millones de dólares)",
+         "ultValorInformado": 38000}]
+    tasas = g["_tasas_del_listado"](_listado_v4)
+    esperar("tasas: las cuatro", {k: v["tna"] for k, v in tasas.items()},
+            {"badlar": 35.5, "tamar": 38.1, "adelantos": 55.2, "personales": 70.3})
+    esperar("tasas: la fecha", tasas["adelantos"]["fecha"], "2026-09-30")
+    esperar("tasas: formato v3 (valor y fecha)", g["_tasas_del_listado"](
+        [{"idVariable": 2, "descripcion": "Tasa de interés de préstamos personales",
+          "fecha": "2024-12-09", "valor": 61.0}]).get("personales", {}).get("fecha"), "2024-12-09")
+    _pedidas_bcra = []
+
+    def _bcra_falso(url, tiempo_maximo=8):
+        _pedidas_bcra.append(url)
+        if "v4.0" in url:
+            return 500, None
+        return 200, {"status": 200, "results": _listado_v4}
+    _pedir_al_bcra_original = g["_pedir_al_bcra"]
+    g["_pedir_al_bcra"] = _bcra_falso
+    try:
+        esperar("tasas: si la v4 no contesta, la v3",
+                g["tasas_de_referencia"](forzar=True).get("tamar", {}).get("tna"), 38.1)
+        _antes = len(_pedidas_bcra)
+        g["tasas_de_referencia"]()
+        esperar("tasas: guardadas un día", len(_pedidas_bcra), _antes)
+        g["_pedir_al_bcra"] = lambda url, tiempo_maximo=8: (None, None)
+        esperar("tasas: sin internet queda la guardada",
+                g["tasas_de_referencia"](forzar=True).get("badlar", {}).get("tna"), 35.5)
+        g["guardar_config"]("tasas_bcra", "{}")
+        _llamadas = []
+        g["_pedir_al_bcra"] = lambda url, tiempo_maximo=8: _llamadas.append(url) or (None, None)
+        g["tasas_de_referencia"]()
+        _n = len(_llamadas)
+        g["tasas_de_referencia"]()
+        esperar("tasas: después de un fallo espera antes de reintentar", len(_llamadas), _n)
+    finally:
+        g["_pedir_al_bcra"] = _pedir_al_bcra_original
+
     # 9. La NHTSA: campañas de seguridad y reclamos por componente.
     esperar("componente: freno de mano antes que frenos",
             ns["componente_en_castellano"]("PARKING BRAKE:CONVENTIONAL"), "Freno de mano")
