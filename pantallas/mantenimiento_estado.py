@@ -361,6 +361,20 @@ if pagina == PAGINAS[3]:
             # LOS ERRORES QUE LA APP SE TRAGÓ, acá y no en «📌 Para pedir», donde estaban: son
             # del estado de la app, no de qué conviene pedir. Si una tarea automática viene
             # fallando, además sale en los avisos (ver errores_de_las_tareas_de_fondo()).
+            # LO QUE TARDÓ LA ÚLTIMA PANTALLA, por etapas (ver _corte() en app.py).
+            _tiempos = st.session_state.get("_tiempos_de_la_pasada")
+            if _tiempos:
+                st.markdown("---")
+                st.markdown("**⏱️ Lo que tardó la pantalla anterior**")
+                explicar(
+                    f"{st.session_state.get('_tiempos_de_la_pasada_de', '')}: "
+                    f"{miles(sum(ms for _e, ms in _tiempos), 0)} ms en total.",
+                    "Cada toque vuelve a dibujar la pantalla entera, y antes de llegar a la "
+                    "sección pasa por la sesión, la navegación, las tareas automáticas y los "
+                    "avisos. Esto dice cuánto tardó cada parte la última vez, para saber qué "
+                    "conviene mejorar si algo se siente lento.")
+                st.dataframe([{"Etapa": e, "Tardó (ms)": miles(ms, 0)} for e, ms in _tiempos],
+                             width="stretch", hide_index=True)
             if _ULTIMOS_ERRORES and es_admin():
                 st.markdown("---")
                 st.markdown("**🐞 Errores que la app se tragó**")

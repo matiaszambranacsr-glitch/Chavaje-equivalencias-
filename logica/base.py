@@ -524,6 +524,21 @@ def secretos_app():
         return {}
 
 
+# Lo que sobrevive a «Salir»: cómo se ve la app, no qué se hizo en ella.
+CLAVES_QUE_QUEDAN_AL_SALIR = ("modo_vista",)
+
+
+def cerrar_sesion():
+    """«Salir», y la sesión que se cerró sola por estar sin uso: se borra TODO lo de la sesión
+    menos la vista. Antes se borraban el nivel, el nombre y el mecánico, y quedaba lo demás:
+    la última búsqueda, la lista de WhatsApp, el cliente o la cuenta corriente que se estaba
+    mirando. En la computadora del mostrador, el que se sentaba después lo encontraba ahí (lo
+    señaló una revisión con ChatGPT)."""
+    for clave in list(st.session_state.keys()):
+        if clave not in CLAVES_QUE_QUEDAN_AL_SALIR:
+            del st.session_state[clave]
+
+
 def es_admin():
     return st.session_state.get("nivel_usuario") == "admin"
 

@@ -1908,7 +1908,22 @@ def tareas_automaticas_del_dia(presupuesto_segundos=6):
     hoy = datetime.now().strftime("%Y-%m-%d")
     if obtener_config("ultimas_tareas_dia", "") == hoy:
         return None
+    # Una sola a la vez: la fecha de arriba se anota al terminar, y dos personas que abrían la
+    # app en el mismo momento las corrían las dos (lo señaló una revisión con ChatGPT).
+    candado = del_proceso("candado_de_las_tareas_del_dia", threading.Lock)
+    if not candado.acquire(blocking=False):
+        return None
+    try:
+        return _tareas_automaticas_del_dia(hoy, presupuesto_segundos)
+    finally:
+        candado.release()
 
+
+def _tareas_automaticas_del_dia(hoy, presupuesto_segundos):
+    """El cuerpo de tareas_automaticas_del_dia(), con el candado tomado."""
+    # Otra vez, ya con el candado: la otra sesión pudo terminar mientras esta esperaba.
+    if obtener_config("ultimas_tareas_dia", "") == hoy:
+        return None
     arranque = time.time()
     hecho = []
 

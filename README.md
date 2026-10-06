@@ -6455,6 +6455,24 @@ el botón**:
 - «🔌 Probar las fuentes de afuera» suma la Central de Deudores (con el CUIT de la AFIP, nunca el
   de un cliente) y la inflación de respaldo.
 
+## 🔍 La revisión técnica con ChatGPT, punto por punto
+
+Revisó una versión vieja de `app.py`; cada punto se miró contra el código de hoy:
+
+| Punto | Qué se encontró | Qué se hizo |
+|---|---|---|
+| Errores que quedan ocultos | Cierto: así estuvieron escondidas las fotos de FISPA. | Ya resuelto en la tanda anterior: aviso cuando una tarea automática falla seguido. |
+| Consultas a la base sin proteger al arrancar | Cierto: con la base ilegible salía un error técnico y la pantalla cortada. | Ahora dice «No se puede leer la base de datos» con el camino al backup, y sigue dibujándose para poder restaurarlo. Los avisos de salud, si fallan, no impiden abrir. |
+| HTML armado con datos | Cierto en un lugar: los títulos de los avisos llevan nombres de marcas de las listas importadas y se metían en HTML sin escapar. Los demás ya usaban `texto_para_html()`. | Escapados. |
+| `exec()` de las pantallas | Es a propósito: ejecuta solo los archivos de `pantallas/` del repositorio, por una lista fija (`orden.PANTALLAS`); nada que venga de un usuario o de la base. | Sin cambio. |
+| Medir el tiempo de cada etapa | Se midió: en el buscador con resultados, todo lo que corre antes de la pantalla son ~14 ms y la pantalla 173 ms. | Queda medido en cada pasada (`_corte()` en `app.py`) y se ve en Mantenimiento → 🩺 Estado y papelera, «⏱️ Lo que tardó la pantalla anterior». |
+| Avisar antes de que venza la sesión de 4 h | Streamlit no corre nada mientras nadie toca la pantalla: no hay cómo avisar a los 3 h 55. La cuenta es desde el último toque, así que usándola no vence nunca, y al vencer la página que se estaba mirando sigue ahí. | Sin cambio. |
+| «Salir» no limpia todo | Cierto: borraba el nivel, el nombre y el mecánico; la última búsqueda, la lista de WhatsApp o la cuenta corriente que se miraba quedaban para el que se sentaba después. | `cerrar_sesion()` borra todo menos la vista; también cuando la sesión vence sola. |
+| Tareas del día por sesión | Estaban protegidas por fecha guardada en la base, pero la fecha se anota al terminar: dos personas abriendo a la vez las corrían las dos. | Un candado del proceso: corren una vez, y la segunda vuelve a mirar la fecha. |
+| La base en el disco de Streamlit Cloud | Cierto, y es el motivo de la copia a GitHub (base + bloques de fotos). Pasar a PostgreSQL/Supabase sería otra app. | Sin cambio; la copia queda como la protección. |
+| Qué va a GitHub | La base entera: productos, precios, clientes, autos, mecánicos, cuentas corrientes, y los usuarios con la contraseña en hash PBKDF2 con sal. Ningún token ni clave en texto (esos están en los Secrets de Streamlit, no en la base). Una sola subida a la vez (candado del proceso); si GitHub falla, se anota y se reintenta; la copia se arma con la API de backup de SQLite, consistente aunque haya gente escribiendo. | Por eso el repositorio tiene que ser **privado** y la copia ir **cifrada** con `clave_copia`. |
+| `es_admin()` y el ingreso | La pantalla de ingreso ya no existe (se entra directo al buscador). `es_admin()` es solo administrador a propósito; el operador y el mecánico tienen `es_operador_o_admin()` y su propio portal. | Sin cambio. |
+
 ## 🗣️ Buscar con una frase, y los errores de las tareas automáticas a la vista
 
 De la segunda tanda de ideas de la revisión con ChatGPT:

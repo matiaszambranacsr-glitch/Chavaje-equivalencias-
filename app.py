@@ -145,6 +145,15 @@ import time
 
 import streamlit as st
 
+# LO QUE TARDA CADA ETAPA DE UNA PASADA (lo sugirió una revisión con ChatGPT: «medí antes de
+# optimizar»). Se anotan los cortes y se muestran en Mantenimiento → 🩺 Estado y papelera.
+# Es de cada pasada a propósito: se crea de nuevo en cada toque y mide solo ese.
+_RELOJ = [("inicio", time.perf_counter())]
+
+
+def _corte(etapa):
+    _RELOJ.append((etapa, time.perf_counter()))
+
 # Antes que nada: Streamlit pide que la configuración de la página sea lo primero que se dibuja,
 # y cargar la lógica (abajo) ya abre la base.
 st.set_page_config(page_title="Equivalencias El Chavo", page_icon="🔧", layout="wide")
@@ -172,6 +181,7 @@ if _cambio is None or _cambio():
 logica, pantallas = sys.modules["logica"], sys.modules["pantallas"]
 
 globals().update(logica.todo_lo_de_la_logica())
+_corte("cargar la lógica")
 
 # Hay alguien esperando esta pantalla: la tarea de fondo le cede el paso hasta que termine de
 # dibujarse (la marca de «terminó» está en la última línea del archivo). Ver ceder_al_mostrador().
@@ -268,11 +278,7 @@ HORAS_DE_SESION_SIN_USO = 4
 if st.session_state.get("nivel_usuario") in ("admin", "operador", "mecanico"):
     _ultimo_toque = st.session_state.get("_ultimo_toque", time.time())
     if time.time() - _ultimo_toque > HORAS_DE_SESION_SIN_USO * 3600:
-        st.session_state.nivel_usuario = None
-        st.session_state.admin_nombre = None
-        st.session_state.mecanico_id = None
-        st.session_state.saltar_login = False
-        st.session_state.pop("_ultimo_toque", None)
+        cerrar_sesion()
         st.info(f"🔒 La sesión se cerró sola: pasaron más de {HORAS_DE_SESION_SIN_USO} horas "
                 "sin usarla. Para volver a entrar, «🔑 Ingresar», arriba.")
     else:
@@ -308,9 +314,7 @@ if es_admin() or es_operador_o_admin() or st.session_state.get("nivel_usuario") 
     if not _VISTA_AL_PIE:
         selector_de_vista(col_modo, label_visibility="collapsed")
     if col_salir.button("Salir"):
-        st.session_state.nivel_usuario = None
-        st.session_state.admin_nombre = None
-        st.session_state.mecanico_id = None
+        cerrar_sesion()
         st.rerun()
 else:
     col_estado, col_modo, col_ingresar = st.columns([3, 1.4, 1])
@@ -326,6 +330,8 @@ if st.session_state.get("nivel_usuario") == "mecanico":
 
 if "lista_whatsapp" not in st.session_state:
     st.session_state.lista_whatsapp = []  # lista de códigos agregados para el mensaje
+
+_corte("sesión y encabezado")
 
 # ============================================================
 # NAVEGACIÓN PRINCIPAL
@@ -368,8 +374,17 @@ if PARA_QUE_SIRVE.get(pagina) and not (es_celular() and pagina == PAGINAS[0]):
 
 # Aviso fuerte si la base quedó vacía: Streamlit Cloud borra el disco al redesplegar, y sin
 # este cartel uno se entera recién cuando busca un código y no aparece nada.
-c.execute("SELECT COUNT(*) FROM productos")
-_total_productos = c.fetchone()[0]
+# Con la base ilegible —dañada, o un archivo que no es una base— esto era un error técnico
+# en rojo y la pantalla cortada. Ahora lo dice, y se sigue: la restauración de un backup está
+# en Estadísticas → 💾 Backup y config, y para llegar ahí la app tiene que seguir dibujándose.
+try:
+    c.execute("SELECT COUNT(*) FROM productos")
+    _total_productos = c.fetchone()[0]
+except sqlite3.DatabaseError as _err:
+    anotar_error("nivel principal/base ilegible", _err)
+    _total_productos = None
+    st.error(f"❌ **No se puede leer la base de datos** ({_err}). Restaurá el último backup "
+             f"desde {miga_hasta('Backup y config')}.")
 if _total_productos == 0:
     st.error(
         "⚠️ **La base está vacía.** Esto pasa porque el servidor borra el disco de la app cuando "
@@ -393,6 +408,7 @@ elif st.session_state.get("_restaurado_de_semilla"):
 # Mantenimiento del día. Va acá porque es el único lugar por el que pasan todos, sin importar
 # a qué sección entren. Se protege con try porque una tarea de fondo que falla NUNCA puede
 # impedir que la app abra.
+_corte("navegación y base")
 if not st.session_state.get("_tareas_dia_corridas"):
     st.session_state["_tareas_dia_corridas"] = True
     try:
@@ -434,7 +450,12 @@ try:
 except Exception as _err:
     anotar_error("nivel principal", _err)
 
-_cache_salud = salud_compartida()
+_corte("tareas automáticas")
+try:
+    _cache_salud = salud_compartida()
+except Exception as _err:             # los avisos no pueden impedir que la app abra
+    anotar_error("nivel principal/salud", _err)
+    _cache_salud = {"problemas": []}
 
 _problemas = _cache_salud["problemas"]
 # Los avisos de salud son del negocio (cuántos productos, qué está roto, clientes esperando):
@@ -484,8 +505,12 @@ if _problemas and (es_operador_o_admin() or not hay_claves_configuradas()):
         with _caja_graves:
             for _i_p, _p in enumerate(_graves):
                 cS1, cS2 = st.columns([5, 2])
-                cS1.markdown(f"**{_p['titulo']}**  \n<span style='opacity:.75;font-size:.87em'>"
-                              f"{_p['detalle']}</span>", unsafe_allow_html=True)
+                # Escapados: el título y el detalle llevan nombres de marcas y códigos que
+                # vienen de las listas importadas, y acá van adentro de HTML (lo señaló una
+                # revisión con ChatGPT). Ver texto_para_html().
+                cS1.markdown(f"**{texto_para_html(_p['titulo'])}**  \n<span style='opacity:.75;"
+                              f"font-size:.87em'>{texto_para_html(_p['detalle'])}</span>",
+                              unsafe_allow_html=True)
                 cS2.button("Ir a arreglarlo →", key=f"ir_salud_alto_{_i_p}",
                             on_click=ir_a_donde_dice_el_aviso, args=(_p["donde"],),
                             help=_p["donde"])
@@ -524,6 +549,7 @@ if _problemas and (es_operador_o_admin() or not hay_claves_configuradas()):
 # Los avisos que quedaron guardados antes del último refresco. Van acá, arriba del contenido
 # de la página, para que se vean sí o sí — sin esto, cada "Guardado" se perdía en el refresco.
 mostrar_avisos_pendientes()
+_corte("avisos")
 
 
 # QUIÉN PUEDE ENTRAR A CADA SECCIÓN. El Buscador, la lista de WhatsApp y el modo mecánico
@@ -548,6 +574,12 @@ for _pantalla in pantallas.PANTALLAS:
 if _VISTA_AL_PIE:
     st.markdown("---")
     selector_de_vista(st)
+
+_corte("la pantalla")
+# Se guarda la pasada que terminó; la pantalla de Estado muestra la anterior a la propia.
+st.session_state["_tiempos_de_la_pasada"] = [
+    (etapa, (t - t_antes) * 1000) for (_e, t_antes), (etapa, t) in zip(_RELOJ, _RELOJ[1:])]
+st.session_state["_tiempos_de_la_pasada_de"] = pagina
 
 # La pantalla terminó de dibujarse: la tarea de fondo puede volver a correr a toda velocidad.
 # Ver ceder_al_mostrador().
