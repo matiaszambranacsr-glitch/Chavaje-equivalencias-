@@ -81,6 +81,22 @@ if pagina == PAGINAS[3]:
                 faltan_todos = contar_fotos_por_traer_de_catalogo(id_marca_fotos, "todos")
                 if filtro_fotos != "todos":
                     st.caption(f"Con ese filtro quedan {miles(faltan_marca)} de {miles(faltan_todos)} códigos.")
+                # Por qué fallaron las de antes. Ver por_que_fallaron_las_fotos().
+                _fallas_fotos = por_que_fallaron_las_fotos(id_marca_fotos)
+                if _fallas_fotos:
+                    _motivo, _cuantas = _fallas_fotos[0]
+                    if _motivo.startswith("SSLError"):
+                        st.warning(
+                            f"⚠️ **{miles(_cuantas)} foto(s) fallaron por el certificado de "
+                            f"seguridad del sitio** ({_motivo}). Si le falta el certificado "
+                            "intermedio —lo más común—, desde esta versión la app lo completa "
+                            "sola, como hace el navegador, y se vuelven a probar solas al otro "
+                            "día. Si es otra cosa (vencido, de otro sitio), lo tiene que arreglar "
+                            "el proveedor: la app no se saltea la verificación.")
+                    else:
+                        st.caption("Fallaron por la red o el sitio, y se reintentan solas hasta "
+                                   "tres días: " + ", ".join(f"{miles(n)} por «{m}»"
+                                                             for m, n in _fallas_fotos[:3]) + ".")
 
                 explicar(
                     "Entra a la ficha de cada código y busca la foto ahí.",

@@ -1113,6 +1113,15 @@ def url_de_la_ficha(plantilla, codigo):
     plantilla = str(plantilla or "")
     if not any(forma in plantilla for forma in FORMAS_DEL_CODIGO_EN_LA_URL):
         return ""
+    # LA MARCA PEGADA AL CÓDIGO, en el sitio de esa misma marca: la lista de FISPA trae
+    # «24058FISPA», y su catálogo busca «24058». Se saca solo cuando el nombre pegado está en
+    # la dirección del sitio (fispaargentina.com.ar): un «…LUCAS» de la misma lista queda como
+    # está, porque es de otra marca. Ver _submarca_del_codigo().
+    _pegada = _submarca_del_codigo(codigo)
+    if _pegada and _pegada.lower() in re.sub(r"[^a-z0-9]", "", plantilla.lower().split("?")[0]):
+        _sin = _codigo_sin_la_marca_pegada(codigo)
+        if _sin and _sin != sanitizar(codigo):
+            codigo = _sin
     como_en_la_lista = re.sub(r"\s+", " ",
                               re.sub(r"[^A-Za-z0-9._/ -]", "", str(codigo or "").strip()))[:60]
     como_en_la_lista = como_en_la_lista.strip()

@@ -679,9 +679,10 @@ if pagina == PAGINAS[0]:
                         clean = sanitizar(_buscada["Codigo"])
                     if res:
                         incrementar_veces_buscado(clean)
-                    elif not existe_el_codigo(clean):
+                    elif not existe_el_codigo(clean) and not marcas_que_nombra(clean):
                         # Sin resultado porque el filtro de marca lo dejó afuera no es «no lo
-                        # tenemos»: no va a la lista de lo que conviene pedir.
+                        # tenemos»: no va a la lista de lo que conviene pedir. Tampoco el
+                        # nombre de una de las listas escrito en el buscador de códigos.
                         registrar_busqueda_sin_resultado(codigo_individual)
                     resultados_guardados.append(
                         {"codigo_individual": codigo_individual, "clean": clean, "res": res,
@@ -730,7 +731,9 @@ if pagina == PAGINAS[0]:
                 alternativas = [f for f in res
                                 if f.get("Cadena") != "— el buscado" and not f.get("_sin_salida")
                                 and not f.get("_complementario") and not _es_de_fabrica(f)]
-                if not res:
+                if not res and marcas_que_nombra(clean):
+                    etiqueta_resultado = f"🏷️ {codigo_individual} — es una de tus listas"
+                elif not res:
                     etiqueta_resultado = f"🔎 {codigo_individual} — sin resultados"
                 elif alternativas:
                     etiqueta_resultado = (f"🔎 {codigo_individual} — {len(alternativas)} "
@@ -1374,6 +1377,19 @@ if pagina == PAGINAS[0]:
                                 with col:
                                     st.link_button(f"🌐 {cat['nombre']}", cat["url"],
                                                     width="stretch", key=f"link_{cat['id']}_{clean}")
+                    elif marcas_que_nombra(clean):
+                        # El nombre de una lista en el buscador de CÓDIGOS. Pasó: «mannol», con
+                        # 81 productos de MANNOL LUBRICANTES, y la pantalla decía que no había
+                        # nada. Se muestran sus productos.
+                        _de_la_marca = buscar_por_texto(codigo_individual)
+                        _nombres_m = sorted({f["Marca"] for f in _de_la_marca}) or [clean]
+                        st.info(f"🏷️ **«{codigo_individual}» es una de tus listas: "
+                                f"{', '.join(_nombres_m)}** ({len(_de_la_marca)} producto(s)"
+                                + (", se muestran los primeros" if len(_de_la_marca) > 12 else "")
+                                + "). Para buscar adentro de ella, escribí la marca y lo que "
+                                "buscás en «Por descripción» (por ejemplo «"
+                                f"{codigo_individual.lower()} 5w40»).")
+                        mostrar_lista_clickeable(_de_la_marca, f"marca_{clean}", limite=12)
                     else:
                         st.warning("No hay ningún producto con ese código exacto.")
 
@@ -1481,7 +1497,11 @@ if pagina == PAGINAS[0]:
                             if len(parecidos) > 12:
                                 st.caption(f"(mostrando 12 de {len(parecidos)})")
                         else:
-                            parcial = buscar_por_texto(clean)
+                            # Con lo escrito tal cual y no con el código limpio: «filtro 24058»
+                            # limpio es «FILTRO24058», que no está en ningún lado; con las dos
+                            # palabras aparece el 24058FISPA. Y sin aflojar: con una sola de las
+                            # palabras, «kit 22382» traía 200 productos cualesquiera.
+                            parcial = buscar_por_texto(codigo_individual, aflojar=False)
                             if parcial:
                                 st.info("¿Quisiste decir alguno de estos? Tocá el código para ver sus equivalencias:")
                                 mostrar_lista_clickeable(parcial, f"sug_{clean}", limite=12)

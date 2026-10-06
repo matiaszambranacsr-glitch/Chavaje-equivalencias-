@@ -6455,6 +6455,50 @@ el botón**:
 - «🔌 Probar las fuentes de afuera» suma la Central de Deudores (con el CUIT de la AFIP, nunca el
   de un cliente) y la inflación de respaldo.
 
+## 🔎 Lo que se buscó de verdad y no apareció
+
+Mirado en el historial de búsquedas de la copia del servidor (30 búsquedas reales):
+
+| Se buscó | Antes | Ahora | Qué pasaba |
+|---|---|---|---|
+| «mannol» | nada | los 81 productos de MANNOL LUBRICANTES | el buscador no miraba el nombre de la lista: las descripciones dicen «Extreme 5W-40 - 4L» |
+| «mannol 5w40 4L» | 200 mezclados, IMPERIAL primero | los 9 aceites MANNOL | ídem |
+| «taranto junta» | 3 | 200 juntas de TARANTO | ídem |
+| «filtro 24058» en el buscador de códigos | nada | el 24058FISPA | se buscaba «FILTRO24058» todo junto |
+| «kit 22382» en el buscador de códigos | 200 productos cualesquiera | nada (no está) | con una sola palabra de las dos alcanzaba |
+
+- `marcas_que_nombra()`: una palabra de tres letras o más que es el nombre (o una palabra del
+  nombre) de una lista cuenta como coincidencia para todos sus productos. Los códigos de
+  fábrica no: «OEM / FABRICA» no es una marca que alguien busque.
+- El nombre de una lista escrito en el buscador de CÓDIGOS dice «es una de tus listas», muestra
+  sus productos y no se anota como «producto que falta».
+- `buscar_por_texto(…, aflojar=False)` para el buscador de códigos: ahí aflojar a «alguna de
+  las palabras» traía cualquier cosa.
+
+## 📷 Las fotos de FISPA: certificado incompleto y marca pegada
+
+En la copia del servidor, **los 5.063 productos de FISPA** tenían la búsqueda de foto en
+«error», todos por `SSLError`, y la pantalla de Fotos solo decía «5.063 por probar».
+
+- **El certificado.** Lo más común en sitios de acá es que el servidor no mande el certificado
+  intermedio: el navegador lo baja solo (el certificado dice de dónde, en «CA Issuers») y la
+  página abre; Python no. `pedir_con_la_cadena_completa()` hace lo mismo que el navegador: baja
+  ese intermedio (con el control de direcciones internas de siempre) y repite el pedido
+  **verificando la cadena completa**. Nunca se apaga la verificación: con un certificado de una
+  autoridad desconocida, vencido o de otro sitio, sigue fallando. Se usa al leer fichas, bajar
+  imágenes y traer fotos de una dirección.
+- **El motivo queda anotado**: «SSLError: le falta un certificado intermedio», «certificado
+  vencido»… en vez de «SSLError» a secas (`motivo_del_error()`), y la pantalla de Fotos muestra
+  por qué fallaron las de cada marca (`por_que_fallaron_las_fotos()`).
+- **La marca pegada.** La lista de FISPA trae «24058FISPA», y la dirección de la ficha se
+  armaba con eso: `catalogo.php?b=24058FISPA`. Ahora, si la marca pegada está en la dirección
+  del sitio (fispaargentina.com.ar), se saca: `b=24058`. Un «…LUCAS» de la misma lista queda
+  como está, porque es de otra marca.
+- No se pudo probar contra el sitio de FISPA (desde donde se programó no hay salida a
+  internet). Las dos cosas están probadas en `pruebas_de_los_certificados.py`, con
+  certificados de verdad hechos con openssl: un sitio que no manda el intermedio, uno con otra
+  autoridad, y el intermedio en una dirección interna.
+
 ## 📷 Las fotos que subís vos sobreviven a los reinicios
 
 Pasó: se subieron fotos de productos, la app se actualizó, y la búsqueda por foto decía «No hay

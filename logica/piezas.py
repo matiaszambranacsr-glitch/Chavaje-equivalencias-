@@ -1203,8 +1203,9 @@ def imagenes_de_una_direccion(url, maximo=8):
     from urllib.parse import urljoin
 
     try:
-        cabecera = requests.head(url, timeout=8, allow_redirects=True,
-                                 headers={"User-Agent": "Mozilla/5.0 (compatible; EquivalenciasElChavo/1.0)"})
+        cabecera = pedir_con_la_cadena_completa(
+            requests.head, url, timeout=8, allow_redirects=True,
+            headers={"User-Agent": "Mozilla/5.0 (compatible; EquivalenciasElChavo/1.0)"})
         tipo = cabecera.headers.get("Content-Type", "")
     except Exception as _err:
         anotar_error("imagenes_de_una_direccion", _err)
@@ -1215,14 +1216,15 @@ def imagenes_de_una_direccion(url, maximo=8):
         return ([(url, datos)], None) if datos else (None, error or "no se pudo bajar esa imagen")
 
     try:
-        respuesta = requests.get(url, timeout=15,
-                                 headers={"User-Agent": "Mozilla/5.0 (compatible; EquivalenciasElChavo/1.0)"})
+        respuesta = pedir_con_la_cadena_completa(
+            requests.get, url, timeout=15,
+            headers={"User-Agent": "Mozilla/5.0 (compatible; EquivalenciasElChavo/1.0)"})
         if respuesta.status_code != 200:
             return None, f"la página respondió {respuesta.status_code}"
         html = respuesta.text
     except Exception as e:
         anotar_error("imagenes_de_una_direccion", e)
-        return None, f"no se pudo abrir la página ({type(e).__name__})"
+        return None, f"no se pudo abrir la página ({motivo_del_error(e)})"
 
     candidatas, vistas = [], set()
 

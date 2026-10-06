@@ -174,7 +174,24 @@ def reparar_descripciones_pegadas():
     return len(cambios)
 
 
-def buscar_por_texto(texto):
+def marcas_que_nombra(palabra):
+    """Los id de las listas (no los códigos de fábrica) cuyo nombre tiene esa palabra entera:
+    «mannol» → MANNOL LUBRICANTES, «crifa» → CRI-FA. Palabras de tres letras o más: «JL» o
+    «VW» solas engancharían cualquier cosa."""
+    limpia = re.sub(r"[^A-Z0-9]", "", normalizar_texto(palabra))
+    if len(limpia) < 3:
+        return []
+    c.execute("SELECT id, nombre FROM marcas WHERE tipo <> 'OEM'")
+    salida = []
+    for fila in c.fetchall():
+        nombre = normalizar_texto(fila["nombre"] or "")
+        palabras_del_nombre = {re.sub(r"[^A-Z0-9]", "", x) for x in re.split(r"\s+", nombre)}
+        if limpia in palabras_del_nombre or limpia == re.sub(r"[^A-Z0-9]", "", nombre):
+            salida.append(fila["id"])
+    return salida
+
+
+def buscar_por_texto(texto, aflojar=True):
     """Busca por descripción de forma flexible: cada palabra tiene que aparecer en algún lado
     (descripción o código), sin importar el orden ni las tildes. Así 'ruleman delantero gol'
     encuentra 'Gol 1.6 - Ruleman de rueda delantero', y 'rótula' encuentra 'ROTULA' aunque el
@@ -193,6 +210,10 @@ def buscar_por_texto(texto):
     # que más se parecen quedan arriba. Antes, si fallaba una sola palabra, no aparecía nada.
     puntajes = []
     params = []
+    # EL NOMBRE DE LA MARCA TAMBIÉN CUENTA. En el mostrador se buscó «mannol» y no salió nada,
+    # con 81 productos de MANNOL LUBRICANTES cargados: sus descripciones dicen «Extreme 5W-40 -
+    # 4L», no la marca. Ver marcas_que_nombra().
+    _marcas_por_palabra = {p: marcas_que_nombra(p) for p in palabras}
     for palabra in palabras:
         # También se compara contra el código sin guiones ni espacios: si alguien escribe
         # "TC421" o "tc-421", tiene que encontrar igual el producto cargado como "TC-421-15".
@@ -207,6 +228,9 @@ def buscar_por_texto(texto):
                 continue
             ramas.append(f"{columna} LIKE ? ESCAPE '\\'")
             suyos.append(f"%{como_texto_en_like(valor)}%")
+        if _marcas_por_palabra.get(palabra):
+            ramas.append(f"p.marca_id IN ({','.join('?' * len(_marcas_por_palabra[palabra]))})")
+            suyos.extend(_marcas_por_palabra[palabra])
         if not ramas:
             continue        # la palabra era solo símbolos: no aporta nada para buscar
         puntajes.append("(CASE WHEN " + " OR ".join(ramas) + " THEN 1 ELSE 0 END)")
@@ -264,7 +288,9 @@ def buscar_por_texto(texto):
         # Con las palabras que CUENTAN, no con todas las escritas: «QQQZZZ °» son dos palabras
         # pero una sola útil, y aflojar a «0 coincidencias» devolvía 200 productos cualquiera
         # (lo encontró la revisión independiente del buscador). Nunca se pide menos de una.
-        if not filas and utiles >= 2 and minimo > 1:
+        # aflojar=False es para el buscador de CÓDIGOS (ver «kit 22382» en buscador.py): ahí
+        # una sola de las dos palabras traía 200 productos cualesquiera.
+        if aflojar and not filas and utiles >= 2 and minimo > 1:
             filas = todas[:200]
 
     # Filtro por RUBRO. Contar palabras coincidentes no alcanza: buscando «bujía golf 1.4 tsi»

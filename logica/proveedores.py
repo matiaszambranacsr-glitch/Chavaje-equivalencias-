@@ -40,6 +40,126 @@ def direccion_interna(url):
     return ""
 
 
+# LA CADENA DE CERTIFICADOS INCOMPLETA. Las 5.063 búsquedas de foto de FISPA fallaron con
+# «SSLError», todas, desde el servidor. Lo más común en sitios de acá: el servidor manda su
+# certificado pero no el «intermedio» que lo une con una autoridad conocida. Los navegadores lo
+# completan solos —el certificado dice de dónde bajar el intermedio (el campo «CA Issuers»)—, y
+# por eso la página abre bien en el teléfono; Python no, y falla.
+# Acá se hace lo mismo que el navegador: se baja ese intermedio, y el pedido se vuelve a hacer
+# VERIFICANDO la cadena completa contra las autoridades de siempre. Nunca se apaga la
+# verificación: si con el intermedio tampoco da, sigue fallando.
+_OID_CA_ISSUERS = bytes.fromhex("06082b06010505073002")
+MINUTOS_PARA_REINTENTAR_UNA_CADENA = 60
+
+
+def _direcciones_del_emisor(der):
+    """Las direcciones «CA Issuers» de un certificado (DER): de dónde bajar el que lo firmó."""
+    urls, i = [], der.find(_OID_CA_ISSUERS)
+    while i != -1:
+        j = i + len(_OID_CA_ISSUERS)
+        if j + 1 < len(der) and der[j] == 0x86:          # [6] uniformResourceIdentifier
+            largo, k = der[j + 1], j + 2
+            if largo & 0x80:
+                cuantos = largo & 0x7F
+                largo, k = int.from_bytes(der[k:k + cuantos], "big"), k + cuantos
+            urls.append(der[k:k + largo].decode("ascii", "ignore"))
+        i = der.find(_OID_CA_ISSUERS, j)
+    return urls
+
+
+def _certificado_del_servidor(host, puerto):
+    """El certificado que presenta el servidor, en DER. Se lee SIN verificar porque es justo lo
+    que se va a completar; no se usa para confiar en nada, solo para saber de dónde bajar el
+    intermedio."""
+    import socket
+    import ssl
+    contexto = ssl.create_default_context()
+    contexto.check_hostname = False
+    contexto.verify_mode = ssl.CERT_NONE
+    with socket.create_connection((host, puerto), timeout=10) as crudo:
+        with contexto.wrap_socket(crudo, server_hostname=host) as tls:
+            return tls.getpeercert(binary_form=True)
+
+
+def _autoridades_de_siempre():
+    """El archivo de autoridades que usa requests (el de la variable de entorno si está)."""
+    import certifi
+    return os.environ.get("REQUESTS_CA_BUNDLE") or os.environ.get("CURL_CA_BUNDLE") or certifi.where()
+
+
+def paquete_con_la_cadena_completa(url):
+    """Un archivo con las autoridades de siempre MÁS los intermedios que le faltan a ese sitio,
+    o None si el certificado no dice de dónde bajarlos. Uno por sitio, y se recuerda."""
+    import ssl
+    import tempfile
+    from urllib.parse import urlparse
+    partes = urlparse(url)
+    host, puerto = partes.hostname, partes.port or 443
+    memoria = del_proceso("paquetes_de_certificados", dict)
+    recordado = memoria.get(host)
+    if recordado and (recordado[0] or time.time() - recordado[1] < MINUTOS_PARA_REINTENTAR_UNA_CADENA * 60):
+        return recordado[0]
+    paquete = None
+    try:
+        der, pems = _certificado_del_servidor(host, puerto), []
+        for _ in range(3):           # hasta tres niveles de intermedios
+            urls = [u for u in _direcciones_del_emisor(der)
+                    if u.startswith(("http://", "https://")) and not direccion_interna(u)]
+            if not urls:
+                break
+            r = requests.get(urls[0], timeout=10)
+            if r.status_code != 200 or not r.content or len(r.content) > 65536:
+                break
+            if r.content.lstrip().startswith(b"-----BEGIN"):
+                pem = r.content.decode("ascii", "ignore")
+                der = ssl.PEM_cert_to_DER_cert(pem)
+            else:
+                der, pem = r.content, ssl.DER_cert_to_PEM_cert(r.content)
+            pems.append(pem)
+        if pems:
+            with open(_autoridades_de_siempre(), encoding="utf-8", errors="ignore") as f:
+                base = f.read()
+            ruta = os.path.join(tempfile.gettempdir(),
+                                f"cadena_{re.sub(r'[^a-z0-9.-]', '_', host.lower())}.pem")
+            with open(ruta, "w", encoding="utf-8") as f:
+                f.write(base.rstrip() + "\n" + "\n".join(pems))
+            paquete = ruta
+    except Exception as _err:
+        anotar_error("paquete_con_la_cadena_completa", _err)
+    memoria[host] = (paquete, time.time())
+    return paquete
+
+
+def pedir_con_la_cadena_completa(pedir, url, **kwargs):
+    """pedir(url, **kwargs) —requests.get, o el de una sesión—, y si falla porque al
+    certificado del sitio le falta el intermedio, otra vez con la cadena completa (ver
+    paquete_con_la_cadena_completa()). Cualquier otro error sale igual que antes."""
+    try:
+        return pedir(url, **kwargs)
+    except requests.exceptions.SSLError as err:
+        if "verify" in kwargs or "issuer" not in str(err).lower():
+            raise
+        paquete = paquete_con_la_cadena_completa(url)
+        if not paquete:
+            raise
+        return pedir(url, verify=paquete, **kwargs)
+
+
+def motivo_del_error(error):
+    """«SSLError: certificado vencido» en vez de «SSLError» a secas: anotado así, la próxima
+    vez que algo falle en masa se sabe por qué sin tener que adivinar."""
+    texto = str(error).lower()
+    for clave, motivo in (("issuer", "le falta un certificado intermedio"),
+                          ("expired", "certificado vencido"),
+                          ("hostname", "el certificado es de otro sitio"),
+                          ("self signed", "certificado hecho por el mismo sitio"),
+                          ("wrong version", "versión de TLS que no se entiende"),
+                          ("handshake", "no se pudo negociar la conexión segura")):
+        if clave in texto:
+            return f"{type(error).__name__}: {motivo}"
+    return type(error).__name__
+
+
 def descargar_imagen(url, tiempo_maximo=12, tamano_maximo_mb=8):
     """Baja una imagen de una dirección web. Devuelve (bytes, error).
 
@@ -51,8 +171,9 @@ def descargar_imagen(url, tiempo_maximo=12, tamano_maximo_mb=8):
             _motivo = direccion_interna(url)
             if _motivo:
                 return None, f"bloqueado: {_motivo}"
-            respuesta = requests.get(url, timeout=tiempo_maximo, stream=True, allow_redirects=False,
-                                      headers={"User-Agent": "Mozilla/5.0 (compatible; EquivalenciasElChavo/1.0)"})
+            respuesta = pedir_con_la_cadena_completa(
+                requests.get, url, timeout=tiempo_maximo, stream=True, allow_redirects=False,
+                headers={"User-Agent": "Mozilla/5.0 (compatible; EquivalenciasElChavo/1.0)"})
             if respuesta.is_redirect and respuesta.headers.get("Location"):
                 from urllib.parse import urljoin
                 url = urljoin(url, respuesta.headers["Location"])
@@ -74,7 +195,7 @@ def descargar_imagen(url, tiempo_maximo=12, tamano_maximo_mb=8):
         return datos, None
     except Exception as e:
         anotar_error("descargar_imagen", e)
-        return None, type(e).__name__
+        return None, motivo_del_error(e)
 
 
 def config_portal(nombre_marca):
@@ -1236,7 +1357,7 @@ def buscar_imagen_en_ficha(url_ficha, tiempo_maximo=12, sesion=None, con_direcci
         return None, "no encontré una foto de producto en esa ficha"
     except Exception as e:
         anotar_error("buscar_imagen_en_ficha", e)
-        return None, type(e).__name__
+        return None, motivo_del_error(e)
 
 
 # LO QUE FALLÓ POR LA RED: UNA VEZ POR DÍA Y HASTA TRES DÍAS. Un sitio que no contesta no dice
@@ -1518,6 +1639,22 @@ def contar_fotos_por_traer_de_catalogo(marca_id, filtro="todos"):
     return c.fetchone()[0]
 
 
+def por_que_fallaron_las_fotos(marca_id):
+    """[(motivo, cuántos)] de las fotos de esa marca que fallaron por la red o el sitio, de más
+    a menos. Antes no se veía en ningún lado: en la base real los 5.063 códigos de FISPA
+    estaban en «error» por SSLError, y la pantalla solo decía «5.063 por probar»."""
+    try:
+        c.execute("""SELECT d.error AS motivo, COUNT(*) AS n
+                     FROM descargas_fallidas d
+                     JOIN productos p ON p.id = CAST(d.clave AS INTEGER)
+                     WHERE d.fuente = 'foto_ficha' AND p.marca_id = ?
+                     GROUP BY d.error ORDER BY n DESC""", (marca_id,))
+        return [(r["motivo"] or "?", r["n"]) for r in c.fetchall()]
+    except sqlite3.OperationalError as _err:
+        anotar_error("por_que_fallaron_las_fotos", _err)
+        return []
+
+
 def reintentar_codigos_sin_foto(marca_id=None):
     """Vuelve a habilitar los códigos marcados como 'sin foto en la ficha', por si el proveedor
     la subió después o se cayó el sitio justo esa vez.
@@ -1737,7 +1874,8 @@ def _traer_pagina(url, tiempo_maximo=12, sesion=None, **extra):
         return guardada
     pedir = (sesion or requests).get
     cabeceras = {"User-Agent": "Mozilla/5.0 (compatible; EquivalenciasElChavo/1.0)"}
-    respuesta = pedir(url, timeout=tiempo_maximo, headers=cabeceras, **extra)
+    respuesta = pedir_con_la_cadena_completa(pedir, url, timeout=tiempo_maximo,
+                                             headers=cabeceras, **extra)
     if not extra:
         _guardar_pagina(url, respuesta)
     return respuesta
