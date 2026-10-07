@@ -383,11 +383,12 @@ if pagina == PAGINAS[3]:
             if es_admin():
                 st.markdown("---")
                 st.markdown("**🕵️ Quién cambió qué**")
-                st.caption("Precios y stock, vínculos cortados, marcas borradas, empleados, "
-                           "cuentas de los talleres, intereses y backups restaurados: quién, "
-                           "cuándo, y qué había antes.")
+                st.caption("Vínculos cortados, marcas borradas, empleados, cuentas de los "
+                           "talleres, intereses, entregas con stock de menos y backups "
+                           "restaurados: quién, cuándo, y qué había antes. Los cambios de "
+                           "precio no se anotan.")
                 _q_cambios = st.text_input("Buscar (un código, un nombre, una acción):",
-                                           key="buscar_cambios", placeholder="Ej: Ana, precio, 1823")
+                                           key="buscar_cambios", placeholder="Ej: Ana, vínculo, 1823")
                 _cambios = cambios_registrados(_q_cambios, limite=200)
                 if _cambios:
                     st.dataframe(_cambios, width="stretch", hide_index=True)

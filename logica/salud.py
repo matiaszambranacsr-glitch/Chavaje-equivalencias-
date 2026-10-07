@@ -217,6 +217,49 @@ def resumen_de_las_busquedas():
             "todas": registro}
 
 
+# EL CATÁLOGO DE AYER CONTRA EL DE HOY. Una foto por día de lo que más importa —productos,
+# vínculos, unidades en stock—, las últimas dos semanas. Una caída de un tercio o más de un día
+# para el otro casi nunca es el negocio: es una importación que salió mal, una marca borrada
+# por error o una base vieja restaurada (lo propuso una revisión con ChatGPT: «ayer 42.000
+# productos, hoy 17.000»). Para no avisar por nada, solo desde cien.
+CAIDA_ANORMAL = 1 / 3
+DIAS_DE_CONTEOS = 14
+
+
+def conteos_del_catalogo():
+    c.execute("""SELECT (SELECT COUNT(*) FROM productos),
+                        (SELECT COUNT(*) FROM equivalencias),
+                        (SELECT COALESCE(SUM(stock), 0) FROM productos WHERE stock > 0)""")
+    productos, equivalencias, stock = c.fetchone()
+    return {"productos": productos, "equivalencias": equivalencias, "stock": stock}
+
+
+def cambio_anormal_del_catalogo(hoy=None):
+    """([«productos: 42.000 → 17.000», ...], fecha de la foto con que se compara). Anota la foto
+    de hoy si todavía no está."""
+    hoy = (hoy or date.today()).isoformat()
+    try:
+        fotos = json.loads(obtener_config("conteos_por_dia", "") or "{}")
+    except ValueError:
+        fotos = {}
+    ahora = conteos_del_catalogo()
+    if hoy not in fotos:
+        fotos[hoy] = ahora
+        fotos = {k: fotos[k] for k in sorted(fotos)[-DIAS_DE_CONTEOS:]}
+        guardar_config("conteos_por_dia", json.dumps(fotos))
+    anteriores = [k for k in sorted(fotos) if k < hoy]
+    if not anteriores:
+        return [], ""
+    antes = fotos[anteriores[-1]]
+    cambios = []
+    for clave, nombre in (("productos", "productos"), ("equivalencias", "vínculos"),
+                          ("stock", "unidades en stock")):
+        a, b = int(antes.get(clave) or 0), int(ahora[clave] or 0)
+        if a >= 100 and b < a * (1 - CAIDA_ANORMAL):
+            cambios.append(f"{nombre} {miles(a)} → {miles(b)}")
+    return cambios, date.fromisoformat(anteriores[-1]).strftime("%d/%m")
+
+
 def diagnostico_de_salud():
     """Corre todos los controles de mantenimiento de una y devuelve solo lo que necesita atención.
 
@@ -228,15 +271,22 @@ def diagnostico_de_salud():
     Cada punto trae a dónde ir y qué pasa si no se toca, porque un número suelto no dice nada."""
     problemas = []
 
-    def sumar(nivel, titulo, detalle, donde):
-        problemas.append({"nivel": nivel, "titulo": titulo, "detalle": detalle, "donde": donde})
+    def sumar(nivel, titulo, detalle, donde, solo_admin=False):
+        problemas.append({"nivel": nivel, "titulo": titulo, "detalle": detalle, "donde": donde,
+                          "solo_admin": solo_admin})
+
+    # LO TÉCNICO, SOLO AL ADMINISTRADOR: la copia, las tareas de fondo, el repositorio, la base.
+    # Al mostrador no le sirve y lo asusta: no lo puede arreglar (lo señaló una revisión con
+    # ChatGPT). Lo del negocio —clientes esperando, faltantes, vínculos dudosos— lo ven todos.
+    def sumar_tecnico(nivel, titulo, detalle, donde):
+        sumar(nivel, titulo, detalle, donde, solo_admin=True)
 
     # LAS TAREAS AUTOMÁTICAS QUE VIENEN FALLANDO. Sus errores se anotaban (anotar_error()) y
     # se veían solo entrando a buscarlos: las 5.063 fotos de FISPA fallaron por el certificado
     # sin que ningún aviso lo dijera. Ver errores_de_las_tareas_de_fondo().
     try:
         for _tarea, _cuantos, _ultimo in errores_de_las_tareas_de_fondo()[:2]:
-            sumar("medio", f"La tarea automática «{_tarea}» falló {_cuantos} veces",
+            sumar_tecnico("medio", f"La tarea automática «{_tarea}» falló {_cuantos} veces",
                   f"Lo último: {_ultimo['tipo']} ({_ultimo['detalle'][:90]}), el "
                   f"{_ultimo['cuando']}. La app sigue andando, pero eso no se está haciendo.",
                   "🗂️ Administrar → 🧹 Mantenimiento → 🩺 Estado y papelera")
@@ -248,7 +298,7 @@ def diagnostico_de_salud():
     try:
         _danada = obtener_config("base_danada", "")
         if _danada:
-            sumar("alto", "🧯 La base tiene daño y la copia a GitHub quedó frenada",
+            sumar_tecnico("alto", "🧯 La base tiene daño y la copia a GitHub quedó frenada",
                   f"El control de integridad falló ({_danada}). La última copia buena de GitHub "
                   "está intacta. Bajá un backup ahora y restaurá desde la copia de GitHub o "
                   "desde un backup anterior.",
@@ -262,14 +312,14 @@ def diagnostico_de_salud():
     try:
         if obtener_config("repo_copia_publico", "") == "1":
             if not clave_de_la_copia():
-                sumar("alto", "🔓 La copia de tu base se sube SIN CIFRAR a un repositorio PÚBLICO",
+                sumar_tecnico("alto", "🔓 La copia de tu base se sube SIN CIFRAR a un repositorio PÚBLICO",
                       "Cualquiera puede bajarla de GitHub: precios, clientes, teléfonos, patentes "
                       "y usuarios. Poné el repositorio en privado (GitHub → Settings → General → "
                       "Change visibility) y agregá en los secretos una línea "
                       "clave_copia = \"una frase larga\" para que la copia viaje cifrada.",
                       miga_hasta("Backup y config"))
             else:
-                sumar("medio", "El repositorio de la copia es público",
+                sumar_tecnico("medio", "El repositorio de la copia es público",
                       "La copia ya se sube cifrada, pero las anteriores al cifrado siguen en el "
                       "historial de la rama «copia-de-seguridad». Poné el repositorio en privado "
                       "(GitHub → Settings → General → Change visibility).",
@@ -582,24 +632,49 @@ def diagnostico_de_salud():
     try:
         _err_gh = obtener_config("ultimo_backup_github_error", "")
         if _err_gh and config_github():
-            sumar("alto", "La copia automática a GitHub está fallando",
+            sumar_tecnico("alto", "La copia automática a GitHub está fallando",
                   f"La app intenta subir la copia sola y GitHub la rechaza: {_err_gh}. "
                   "Mientras tanto la copia del repositorio no se actualiza.",
                   miga_hasta("Backup y config"))
     except Exception as _err:
         anotar_error("diagnostico_de_salud/backup_github", _err)
 
+    # LA COPIA QUE NO SE PUDO RECUPERAR en la prueba de todos los días (ver
+    # verificar_la_copia_de_github()): subida no quiere decir recuperable.
+    try:
+        _verif = estado_de_la_verificacion()
+        if config_github() and _verif and not _verif.get("ok"):
+            sumar_tecnico("alto", "La copia de GitHub no pasó la prueba de recuperación",
+                          f"Se la bajó como después de un reinicio y {_verif.get('detalle')} "
+                          f"({_verif.get('cuando', '')[:16]}). Bajá un backup ahora y probá "
+                          "«Subir el backup al repositorio ahora».",
+                          miga_hasta("Backup y config"))
+    except Exception as _err:
+        anotar_error("diagnostico_de_salud/verificacion_de_la_copia", _err)
+
+    # EL CATÁLOGO QUE SE ACHICÓ DE GOLPE desde ayer. Ver cambio_anormal_del_catalogo().
+    try:
+        _anormal, _desde = cambio_anormal_del_catalogo()
+        if _anormal:
+            sumar_tecnico("alto", "⚠️ Cambio anormal del catálogo",
+                          f"Desde el {_desde}: {'; '.join(_anormal)}. Si no fue a propósito "
+                          "(borrar una marca, una lista que reemplazó otra), puede ser un error "
+                          "de importación: mirá la papelera, deshacé la importación o restaurá "
+                          "la copia.", miga_hasta("Backup y config"))
+    except Exception as _err:
+        anotar_error("diagnostico_de_salud/cambio_anormal", _err)
+
     # El número concreto de lo que se perdería. Un aviso genérico se ignora; «perdés 3.412
     # productos» no.
     try:
         riesgo = cuanto_perderias_si_reinicia()
         if riesgo and not riesgo["hay_semilla"] and riesgo.get("productos_ahora", 0) > 100:
-            sumar("alto", "No hay copia en el repositorio",
+            sumar_tecnico("alto", "No hay copia en el repositorio",
                   "El servidor borra el disco al reiniciar y se restaura desde "
                   "`datos_iniciales.db`, que no está. Hoy un reinicio borra TODO.",
                   miga_hasta("Backup y config"))
         elif riesgo and riesgo["en_riesgo"] > 200:
-            sumar("alto", f"{miles(riesgo['en_riesgo'])} productos viven solo en el disco",
+            sumar_tecnico("alto", f"{miles(riesgo['en_riesgo'])} productos viven solo en el disco",
                   f"La copia del repositorio es del {riesgo['fecha_semilla']} y tiene "
                   f"{miles(riesgo['productos_semilla'])}; hoy tenés {miles(riesgo['productos_ahora'])}. "
                   "Si el servidor reinicia, la diferencia se pierde.",
@@ -611,7 +686,7 @@ def diagnostico_de_salud():
     bk = estado_del_backup()
     if bk["urgente"]:
         if not bk["hay_backup"]:
-            sumar("alto", "Nunca se bajó un backup",
+            sumar_tecnico("alto", "Nunca se bajó un backup",
                   "El servidor borra el disco al reiniciar y restaura desde la última copia. "
                   "Hoy podrías perder todo lo cargado.",
                   miga_hasta("Backup y config"))
@@ -623,7 +698,7 @@ def diagnostico_de_salud():
                 partes.append(f"{bk['importaciones']} lista(s) importadas")
             if bk["dias"]:
                 partes.append(f"{bk['dias']} día(s)")
-            sumar("alto", "Backup atrasado",
+            sumar_tecnico("alto", "Backup atrasado",
                   "Desde el último hay " + ", ".join(partes) +
                   ". Si el servidor reinicia ahora, eso se pierde.",
                   miga_hasta("Backup y config"))

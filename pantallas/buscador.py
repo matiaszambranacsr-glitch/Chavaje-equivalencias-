@@ -1451,15 +1451,6 @@ if pagina == PAGINAS[0]:
                                         st.error("Ese producto ya no está en el catálogo: "
                                                  "alguien lo borró mientras tenías esta "
                                                  "pantalla abierta. Refrescá y fijate.")
-                                # «¿Quién cambió este precio?»: el último cambio, a la vista
-                                # donde se edita. Ver anotar_cambio().
-                                _ultimo_cambio = cambios_registrados(
-                                    entidad="producto", entidad_id=fila["ID"], limite=1)
-                                if _ultimo_cambio:
-                                    _uc = _ultimo_cambio[0]
-                                    colC.caption(f"Último cambio: {_uc['Quién']}, "
-                                                 f"{_uc['Cuándo'][:16]} — {_uc['Antes']} → "
-                                                 f"{_uc['Después']}")
                                 if es_admin():
                                     c.execute("SELECT precio_costo FROM productos WHERE id = ?",
                                               (fila["ID"],))
@@ -1582,8 +1573,13 @@ if pagina == PAGINAS[0]:
                         # W71249 por W71294 no daba nada aunque fuera el mismo filtro.
                         tipeos = codigos_por_tipeo(clean)
                         if tipeos:
+                            # Son OTROS códigos: un 6205 y un 6206 son rulemanes distintos.
+                            # Se ofrecen por si fue un error de tipeo, nunca como equivalencia
+                            # (lo señaló una revisión con ChatGPT).
                             st.info(f"⌨️ ¿No será alguno de estos? Se escriben casi igual a lo que "
-                                     f"pusiste ({len(tipeos)} encontrado(s)):")
+                                     f"pusiste ({len(tipeos)} encontrado(s)). **Son códigos "
+                                     "distintos, no equivalencias**: confirmá que sea el que "
+                                     "quería el cliente.")
                             st.dataframe(
                                 [{"Código": t["Codigo"], "Marca": t["Marca"],
                                   "Descripción": t["Descripcion"], "Precio": t["Precio"],

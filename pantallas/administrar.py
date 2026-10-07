@@ -1025,7 +1025,10 @@ if pagina == PAGINAS[3]:
             # INTERÉS POR MORA con la tasa del BCRA: ver «INTERÉS POR MORA» en
             # logica/mecanico.py. Plegado con un interruptor y no con un expander: el expander
             # corre su contenido aunque esté cerrado, y esto puede salir a internet.
-            if seccion_plegable("📈 Interés por mora (tasa del BCRA)", key=f"cc_mora_{_mid}"):
+            if not _config["cobra_mora"]:
+                st.caption("📈 Sin recargo por mora: se prende en «⚙️ Configuración de la "
+                           "cuenta», si a este taller se le cobra.")
+            elif seccion_plegable("📈 Interés por mora (tasa del BCRA)", key=f"cc_mora_{_mid}"):
                 _cfg_mora = configuracion_de_la_mora()
                 _tasas = tasas_de_referencia()
                 if not _tasas:
@@ -1098,13 +1101,20 @@ if pagina == PAGINAS[3]:
                          "descuento. No se ve en el buscador, ni en WhatsApp, ni en las "
                          "cotizaciones, ni en el depósito: solo en la cuenta y en «🧾 Para "
                          "facturar».")
+                _cobra_mora = st.checkbox(
+                    "Cobrarle recargo por pagar tarde (interés por mora)",
+                    value=_config["cobra_mora"], key=f"cc_cobra_mora_{_mid}",
+                    help="Prendido, aparece «📈 Interés por mora» con lo que corresponde "
+                         "sobre lo vencido. Apagado, a esta cuenta no se le calcula ni se le "
+                         "carga nada.")
                 if _descuento:
                     st.caption(f"Ejemplo: un repuesto de lista {formato_precio(10000)} se le "
                                f"carga a {formato_precio(precio_de_la_cuenta(10000, _descuento))}.")
                 if candado("cambiar la configuración de una cuenta corriente",
                            st.button("💾 Guardar configuración", key=f"cc_guardar_{_mid}"),
                            f"cc_guardar_{_mid}"):
-                    configurar_cuenta_de_taller(_mid, _limite, _plazo, _pide, _descuento)
+                    configurar_cuenta_de_taller(_mid, _limite, _plazo, _pide, _descuento,
+                                                _cobra_mora)
                     avisar("success", "Configuración guardada.")
                     st.rerun()
 

@@ -116,6 +116,26 @@ if pagina == PAGINAS[4]:
                 _ult_gh = obtener_config("ultimo_backup_github", "")
                 if _ult_gh:
                     st.caption(f"Última subida automática: {_ult_gh}")
+                # Subida no es recuperable: ver verificar_la_copia_de_github().
+                _verif = estado_de_la_verificacion()
+                if _verif.get("ok"):
+                    st.caption(f"✅ Copia verificada el {_verif['cuando'][:16]}: "
+                               f"{_verif['detalle']}.")
+                elif _verif:
+                    st.error(f"⚠️ La copia de GitHub no pasó la prueba de recuperación "
+                             f"({_verif['cuando'][:16]}): {_verif['detalle']}.")
+                else:
+                    st.caption("La prueba de recuperación de la copia todavía no se hizo: "
+                               "corre sola una vez por día.")
+                if st.button("🧪 Probar ahora que la copia se puede recuperar",
+                             key="verificar_copia"):
+                    with st.spinner("Bajando la copia de GitHub y abriéndola…"):
+                        _ok_v, _det_v = verificar_la_copia_de_github()
+                    invalidar_salud()
+                    avisar("success" if _ok_v else "error",
+                           ("✅ La copia se puede recuperar: " if _ok_v
+                            else "⚠️ La copia no pasó la prueba: ") + _det_v)
+                    st.rerun()
                 _err_gh = obtener_config("ultimo_backup_github_error", "")
                 if _err_gh:
                     st.error(f"⚠️ El último intento de subir la copia falló: {_err_gh}")

@@ -468,7 +468,7 @@ def mostrar_pedir_al_deposito(resultados, clave):
 
     No muestra ningún precio: lo puede estar mirando el cliente del otro lado del mostrador, y
     el de la cuenta lleva el descuento (ver «EL DESCUENTO NO SE VE»)."""
-    if not resultados:
+    if not resultados or modo_solo_lectura():
         return
     with st.popover("📦 Pedir al depósito / 🛒 presupuesto", width="stretch",
                     key=f"dep_pop_{clave}"):

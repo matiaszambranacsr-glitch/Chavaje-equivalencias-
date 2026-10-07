@@ -63,17 +63,19 @@ def probar(L):
             [tuple(r) for r in c.execute("SELECT producto_a_id, producto_b_id "
                                          "FROM equivalencias_pendientes")], [(x, y)])
 
-    # 2. Precio y stock: quién, cuándo, antes y después.
+    # 2. Precio y stock: se guardan, pero NO se anota quién los cambió (no se quiere). Y lo
+    # que había quedado anotado de antes se borra al arrancar.
     ns["actualizar_precio_stock"](a, 1500, 1, stock_mostrado=1)
-    cambio = ns["cambios_registrados"](entidad="producto", entidad_id=a)
-    esperar("precio: anotado", len(cambio), 1)
-    esperar("precio: antes y después, solo lo que cambió",
-            (json.loads(cambio[0]["Antes"]), json.loads(cambio[0]["Después"])),
-            ({"precio": 1000.0}, {"precio": 1500.0}))
-    ns["actualizar_precio_stock"](a, 1500, 1, stock_mostrado=1)
-    esperar("sin cambio, no se anota", len(ns["cambios_registrados"](entidad="producto",
-                                                                      entidad_id=a)), 1)
-    esperar("se encuentra buscando", len(ns["cambios_registrados"]("precio")), 1)
+    esperar("precio guardado", c.execute("SELECT precio FROM productos WHERE id = ?",
+                                         (a,)).fetchone()[0], 1500.0)
+    esperar("precio: no se anota quién", ns["cambios_registrados"](entidad="producto",
+                                                                   entidad_id=a), [])
+    c.execute("INSERT INTO registro_de_cambios (usuario, accion, entidad, entidad_id) "
+              "VALUES ('ana', 'cambió precio/stock', 'producto', ?)", (str(a),))
+    conn.commit()
+    ns["crear_esquema"](c)
+    conn.commit()
+    esperar("lo anotado de antes se borra", ns["cambios_registrados"]("precio"), [])
 
     # 3. La cuenta de un taller: el descuento que se cambió.
     ns["crear_mecanico"]("Taller Ruiz", "clave-ruiz-1")

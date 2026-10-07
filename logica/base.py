@@ -612,12 +612,35 @@ def _nivel_de_quien_esta_adentro():
     return st.session_state.get("nivel_usuario") or ""
 
 
+# LA BASE CON DAÑO: SOLO LECTURA. La base abre, pero el control de integridad que corre antes
+# de cada copia (ver la_base_esta_sana()) encontró daño. Hasta acá era un aviso y se seguía
+# cargando encima; ahora solo el administrador, que es quien la arregla, puede cambiar algo.
+# Los demás pueden buscar (lo propuso una revisión con ChatGPT: «no dejar que un empleado siga
+# modificando datos»).
+TEXTO_DE_SOLO_LECTURA = ("🧯 La base tiene un problema y el administrador tiene que revisarla. "
+                         "Mientras tanto se puede buscar, pero no cargar ni cambiar nada.")
+
+
+def la_base_tiene_dano():
+    return bool(obtener_config("base_danada", ""))
+
+
+def modo_solo_lectura():
+    """True si quien está adentro no puede cambiar nada porque la base tiene daño."""
+    return la_base_tiene_dano() and not es_admin()
+
+
 def exigir_nivel(nivel, accion):
-    """Levanta PermissionError si quien está adentro no tiene `nivel` («admin» o «empleado»)."""
+    """Levanta PermissionError si quien está adentro no tiene `nivel` («admin» o «empleado»),
+    o si es empleado y la base tiene daño (ver TEXTO_DE_SOLO_LECTURA)."""
     adentro = _nivel_de_quien_esta_adentro()
     if adentro is None or not hay_claves_configuradas():
         return
-    if adentro == "admin" or (nivel == "empleado" and adentro == "operador"):
+    if adentro == "admin":
+        return
+    if nivel == "empleado" and adentro == "operador":
+        if la_base_tiene_dano():
+            raise PermissionError(TEXTO_DE_SOLO_LECTURA)
         return
     anotar_error("exigir_nivel", PermissionError(f"{accion}: nivel «{adentro}»"))
     raise PermissionError(f"Para {accion} hace falta entrar como "
@@ -1005,6 +1028,10 @@ def candado(motivo, disparador, clave, nivel="admin"):
     if disparador:
         st.session_state[pendiente] = True
     if not st.session_state.get(pendiente):
+        return False
+    if modo_solo_lectura():
+        st.session_state.pop(pendiente, None)
+        st.error(TEXTO_DE_SOLO_LECTURA)
         return False
     autorizado = (pedir_password_operador_o_admin(motivo) if nivel == "empleado"
                   else pedir_password_admin(motivo))

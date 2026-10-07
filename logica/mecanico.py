@@ -1245,16 +1245,17 @@ def _hash_del_codigo(codigo, salt):
 
 
 def configuracion_de_cuenta(mecanico_id):
-    """{limite, dias_de_plazo, pide_codigo, descuento}. Sin configurar: sin límite, 30 días,
-    pide código, sin descuento."""
-    c.execute("SELECT limite, dias_de_plazo, pide_codigo, descuento FROM cuentas_de_taller "
-              "WHERE mecanico_id = ?", (mecanico_id,))
+    """{limite, dias_de_plazo, pide_codigo, descuento, cobra_mora}. Sin configurar: sin
+    límite, 30 días, pide código, sin descuento y sin recargo por mora."""
+    c.execute("SELECT limite, dias_de_plazo, pide_codigo, descuento, cobra_mora "
+              "FROM cuentas_de_taller WHERE mecanico_id = ?", (mecanico_id,))
     f = c.fetchone()
     return {"limite": float(f["limite"] or 0) if f else 0.0,
             "dias_de_plazo": (int(f["dias_de_plazo"]) if f and f["dias_de_plazo"] is not None
                               else 30),
             "pide_codigo": bool(f["pide_codigo"]) if f else True,
-            "descuento": float(f["descuento"] or 0) if f else 0.0}
+            "descuento": float(f["descuento"] or 0) if f else 0.0,
+            "cobra_mora": bool(f["cobra_mora"]) if f else False}
 
 
 # El descuento más alto que se acepta. Un 100% es regalar, y un 1.000% escrito de más daría
@@ -1262,23 +1263,27 @@ def configuracion_de_cuenta(mecanico_id):
 DESCUENTO_MAXIMO = 90.0
 
 
-def configurar_cuenta_de_taller(mecanico_id, limite, dias_de_plazo, pide_codigo, descuento=None):
-    """Guarda la configuración. descuento=None deja el que tenía."""
+def configurar_cuenta_de_taller(mecanico_id, limite, dias_de_plazo, pide_codigo, descuento=None,
+                                cobra_mora=None):
+    """Guarda la configuración. descuento=None y cobra_mora=None dejan lo que tenía."""
     exigir_nivel("admin", "cambiar la configuración de una cuenta")
     antes = configuracion_de_cuenta(mecanico_id)
     if descuento is None:
         descuento = antes["descuento"]
     descuento = min(DESCUENTO_MAXIMO, max(0.0, float(descuento or 0)))
+    if cobra_mora is None:
+        cobra_mora = antes["cobra_mora"]
     with db_lock:
         c.execute("""INSERT INTO cuentas_de_taller (mecanico_id, limite, dias_de_plazo, pide_codigo,
-                                                    descuento)
-                     VALUES (?, ?, ?, ?, ?)
+                                                    descuento, cobra_mora)
+                     VALUES (?, ?, ?, ?, ?, ?)
                      ON CONFLICT(mecanico_id) DO UPDATE SET limite = excluded.limite,
                         dias_de_plazo = excluded.dias_de_plazo,
                         pide_codigo = excluded.pide_codigo,
-                        descuento = excluded.descuento""",
+                        descuento = excluded.descuento,
+                        cobra_mora = excluded.cobra_mora""",
                   (mecanico_id, max(0.0, float(limite or 0)), max(0, int(dias_de_plazo or 0)),
-                   1 if pide_codigo else 0, descuento))
+                   1 if pide_codigo else 0, descuento, 1 if cobra_mora else 0))
         despues = configuracion_de_cuenta(mecanico_id)
         if despues != antes:
             anotar_cambio("configuró la cuenta", "taller", mecanico_id,
@@ -1453,6 +1458,7 @@ def anular_movimiento_de_cuenta(movimiento_id):
 # paga con plata que vale menos. La app sugiere el interés con una tasa oficial y pública —la
 # del BCRA que se elija (ver tasas_de_referencia() en logica/salud.py)— más los puntos que se
 # quieran sumar. Nunca lo carga sola: se mira y se carga con un botón.
+# CUENTA POR CUENTA: solo a las que tienen prendido el recargo (ver configurar_cuenta_de_taller()).
 #
 # CÓMO SE CALCULA. Interés simple por días, solo sobre lo VENCIDO E IMPAGO de cada cargo: los
 # pagos se imputan a los cargos más viejos (como «Vencido» en estado_de_cuenta()), y lo que
@@ -1551,6 +1557,9 @@ def cargar_el_interes_por_mora(mecanico_id, tna, origen="", usuario="", hoy=None
     vuelve a calcular adentro, con el candado, por si alguien cargó otro pago mientras tanto."""
     exigir_nivel("admin", "cargar el interés por mora")
     hoy = hoy or date.today()
+    if not configuracion_de_cuenta(mecanico_id)["cobra_mora"]:
+        return False, ("Esta cuenta no tiene recargo por mora: se prende en «⚙️ Configuración "
+                       "de la cuenta».")
     with db_lock, transaccion():
         calculo = interes_por_mora(mecanico_id, tna, hoy)
         if calculo["total"] < 1:

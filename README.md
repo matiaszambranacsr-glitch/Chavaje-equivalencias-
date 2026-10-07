@@ -17,11 +17,12 @@ qué proveedores, son el mismo repuesto. Corre con Streamlit sobre una base SQLi
 | `pruebas_de_la_sesion.py` | Salir no deja nada del anterior, y los permisos siguen a la cuenta. |
 | `pruebas_de_carga.py` | Diez personas a la vez con el mantenimiento y la copia corriendo: sin errores, sin dobles entregas ni cobros, sin ventas perdidas. |
 | `pruebas_de_la_recuperacion.py` | La app con la base dañada: abre en modo recuperación y se puede volver a una copia sin perder el archivo dañado. |
-| `pruebas_de_las_cuentas.py` | El interés por mora de las cuentas corrientes, con fechas fijas. |
+| `pruebas_de_las_cuentas.py` | El interés por mora de las cuentas corrientes, con fechas fijas, y que se cobre solo en las cuentas que lo tienen prendido. |
+| `pruebas_de_los_frenos.py` | Lo que hace la app cuando algo anda mal: la base con daño queda de solo lectura, los avisos técnicos solo al administrador, el descanso de un proveedor caído, el catálogo que se achica de golpe y la prueba de que la copia de GitHub se puede recuperar. |
 | `pruebas_de_las_homologaciones.py` | El registro oficial de CHAS (autopartes de seguridad): leerlo en varios formatos y cruzarlo con tus marcas. |
 | `pruebas_del_deposito.py` | El circuito del depósito y el descuento de cada cuenta: pedir, entregar, cargar en la cuenta y facturar. |
 | `pruebas_de_la_revision.py` | Que el análisis de equivalencias no se equivoque con pares ya revisados a mano, y (con `--base`) que no baje a rojo lo que aprobaste. |
-| `pruebas_de_los_cambios.py` | El registro de quién cambió qué, los permisos adentro de las funciones, el orden de los vínculos en la base, la entrega con stock de menos, el vistazo de un backup y el mensaje de WhatsApp. |
+| `pruebas_de_los_cambios.py` | El registro de quién cambió qué (sin los precios), los permisos adentro de las funciones, el orden de los vínculos en la base, la entrega con stock de menos, el vistazo de un backup y el mensaje de WhatsApp. |
 | `requirements.txt` | Lo que hay que instalar. |
 | `Equivalencias` | El prototipo original, de antes de `app.py`. No lo usa nadie; queda por si querés mirarlo. Se puede borrar. |
 
@@ -6463,6 +6464,31 @@ el botón**:
 - «🔌 Probar las fuentes de afuera» suma la Central de Deudores (con el CUIT de la AFIP, nunca el
   de un cliente) y la inflación de respaldo.
 
+## 🔍 La revisión técnica con ChatGPT, puntos 59 a 78
+
+| Punto | Qué se encontró | Qué se hizo |
+|---|---|---|
+| 59. Buscar con errores sin inventar coincidencias | Las sugerencias por tipeo («¿no será alguno de estos?») salen solo si el código exacto no está, y nunca se guardan como vínculo. | Ahora además dicen **«son códigos distintos, no equivalencias»**: un 6205 y un 6206 son rulemanes distintos. |
+| 60. Modo seguro | Con la base que no abre ya había modo recuperación. **Faltaba** el caso de la base que abre pero el control de integridad encontró daño: era solo un aviso y se seguía cargando encima. | Solo lectura: los empleados pueden buscar y nada más (cartel arriba, las otras secciones cortadas, los botones que cambian algo frenados también adentro de las funciones). El administrador entra a todo, porque es quien restaura. |
+| 61. Avisos según quién entra | **Cierto**: el empleado veía «la copia a GitHub está fallando», «el repositorio es público», «backup atrasado». | Los avisos técnicos (copia, backup, tareas de fondo, repositorio, base) solo al administrador. Los del negocio (clientes esperando, faltantes, vínculos dudosos) los siguen viendo todos. |
+| 62–63. Si falla un proveedor | Todo lo que sale a internet corre por atrás, en la tanda de fondo: con los sitios caídos el buscador, el stock y los vínculos andan igual. Se vio al probar: este entorno bloquea al BCRA y a datos.gob.ar y la app siguió como si nada. La base local es el núcleo. | Sin cambio. |
+| 64. Varias sesiones a la vez | Ya está: `pruebas_de_carga.py`, diez personas buscando, editando, entregando y vinculando con la copia y el mantenimiento corriendo. | Sin cambio. |
+| 65. Pruebas de «caos» | Ya hay: base que desaparece, vacía o dañada (`pruebas_de_la_recuperacion.py`), backup dañado o que no es una base (`pruebas_de_las_copias.py`, `pruebas_de_los_cambios.py`), proveedor que no contesta o contesta basura (`pruebas_de_las_fuentes.py`), sesión perdida (`pruebas_de_la_sesion.py`), dos editando (`pruebas_de_carga.py`). | `pruebas_de_los_frenos.py`, con lo de esta tanda. |
+| 66–67. Tiempo máximo y «circuit breaker» | Cada pedido a internet tiene su tiempo máximo; cinco fichas seguidas que fallan cortan la tanda y el sitio descansa. | Sin cambio. |
+| 68. Reintentos con espera creciente | **El descanso era siempre de una hora**: un sitio caído una semana se golpeaba 24 veces por día. | Crece: 1, 2, 4, 8, 16 horas, hasta un día. Si después anduvo bien, vuelve a una hora. |
+| 69. Fecha de los datos de afuera | Las tasas del BCRA y el registro CHAS muestran de cuándo son, y las tareas de fondo, cuándo corrieron (en «🚦 Las tareas automáticas»). | Sin cambio. |
+| 70–72. Caché con vencimiento y claves | Las cachés grandes van atadas a la versión del catálogo (cambia, se rehacen) y las fichas de los proveedores vencen a las 3 horas. Ninguna guarda nada que dependa de quién está adentro (precios especiales, permisos). | Sin cambio. |
+| 73. Tamaño de la sesión | Medido con la app recorriendo las 32 pantallas y buscando: **1 KB, 78 claves**. Los resultados no se guardan en la sesión. | Sin cambio. |
+| 74. Fotos | En la base va la miniatura y el link; la foto grande se baja aparte (modo liviano). | Sin cambio. |
+| 75–76. Importación en cuarentena y transaccional | Antes de importar se ve el diagnóstico y el mapeo (un mapeo roto no deja importar); los precios que saltan raro se frenan; los vínculos nuevos van a revisión; y la carga es **toda o nada**, con su registro para deshacerla. | Sin cambio. |
+| 77. Cambios masivos sospechosos | **No había nada** que comparara el catálogo de hoy con el de ayer. | Una foto por día (productos, vínculos, unidades en stock): si alguno cae un tercio o más, aviso «⚠️ Cambio anormal del catálogo». Y si los productos caen a la mitad desde la última copia, **la copia buena de GitHub no se pisa sola**: hay que confirmarlo con el botón. |
+| 78. Backup verificado, no solo subido | **Cierto**: «subida» quería decir que GitHub la aceptó. | Una vez por día la copia se baja como después de un reinicio (partes, descifrado, descompresión, control de integridad), y se mira que sea la última que se subió y que tenga sus tablas. «✅ Copia verificada» queda aparte de «Última subida», con un botón para probarla en el momento; si falla, aviso y se reintenta a las dos horas. |
+
+Probado en `pruebas_de_los_frenos.py` y `pruebas_de_las_cuentas.py`, con ocho fallas puestas a
+propósito, todas detectadas. En la app (como administrador y como empleado): el recargo por
+mora apagado y prendido desde la pantalla, y la base con daño — el empleado ve el cartel, el
+depósito cortado y el buscador andando.
+
 ## 🔍 La revisión técnica con ChatGPT, puntos 41 a 58
 
 | Punto | Qué se encontró | Qué se hizo |
@@ -6472,7 +6498,7 @@ el botón**:
 | 43–44. Los permisos solo en la pantalla | **Cierto**: si una pantalla se olvidaba de preguntar, la función hacía el cambio igual. | `exigir_nivel()` adentro de las funciones que cambian cosas sensibles (empleados, mecánicos, precios y stock, borrar marcas, cuentas de los talleres, interés por mora, restaurar): una segunda barrera. Fuera de una sesión (pruebas, tareas de fondo) no frena. |
 | 45. Confirmar con una casilla | **Cierto**: se tilda sin leer. | Restaurar pide escribir RESTAURAR y antes muestra qué trae el backup (productos, marcas, vínculos, último precio) contra lo que hay hoy; borrar una marca pide escribir su nombre. |
 | 46. Borrar sin vuelta atrás | Ya hay papelera para marcas y productos, y `activo` para empleados y mecánicos. | Sin cambio. |
-| 47–48. Quién cambió qué | **Cierto**: no se sabía quién había cambiado un precio. | Tabla `registro_de_cambios` (quién, cuándo, qué, antes y después) para precios y stock, vínculos cortados, marcas borradas, empleados, cuentas, intereses y backups. Se ve en «🕵️ Quién cambió qué» (Estado y papelera, solo administrador), y el último cambio de precio debajo del editor del buscador. Guarda los últimos 50.000. |
+| 47–48. Quién cambió qué | No se sabía quién había cambiado algo. | Tabla `registro_de_cambios` (quién, cuándo, qué, antes y después) para vínculos cortados, marcas borradas, empleados, cuentas, intereses, entregas con stock de menos y backups. Se ve en «🕵️ Quién cambió qué» (Estado y papelera, solo administrador). Guarda los últimos 50.000. **Los cambios de precio se anotaron unos días y se sacaron a pedido**: no se anota quién cambia un precio, y lo que había quedado anotado se borra al arrancar. |
 | 49–50. Vínculos dudosos y de dónde salen | Ya existen: pendientes, confianza, origen, lote y evidencia. | Sin cambio. |
 | 51. Duplicados | Ya hay claves únicas en las tablas. | Sin cambio. |
 | 52. El par al revés | La app siempre guarda el par en orden (a < b) y la copia de hoy no tiene ninguno al revés, pero la base no lo aseguraba. | Un trigger en `equivalencias` y `equivalencias_pendientes` da vuelta el par al revés, ignora el repetido y el de un producto consigo mismo. |
@@ -6483,7 +6509,7 @@ el botón**:
 | 58. El mensaje de WhatsApp | Se armaba en la pantalla. | `armar_mensaje_de_cotizacion()` en la lógica, con la opción de poner «Para:» la cuenta elegida. |
 
 Probado en `pruebas_de_los_cambios.py`. Rompiendo a propósito el trigger, el control de
-permisos, el registro de la entrega o el del precio, la prueba falla. «Quién cambió qué» y
+permisos o el registro de la entrega, la prueba falla. «Quién cambió qué» y
 la confirmación de restaurar se probaron con la app entrando como administrador y como
 empleado (el empleado no lo ve).
 
@@ -6537,6 +6563,11 @@ Cada punto se miró contra el código de hoy y, donde se podía, se probó:
 A los talleres se les fía, y con inflación un saldo que se paga tres meses tarde se paga con
 plata que vale menos. En Administrar → 💳 Cuentas corrientes, cada taller tiene «📈 Interés por
 mora (tasa del BCRA)»:
+
+- **Es de cada cuenta**: viene apagado y se prende en «⚙️ Configuración de la cuenta» →
+  «Cobrarle recargo por pagar tarde». Apagado, a ese taller no se le calcula ni se le carga
+  nada (la función lo frena aunque una pantalla se olvide de preguntar). Las cuentas a las que
+  ya se les había cargado un interés quedaron prendidas al actualizar.
 
 - **La tasa** sale del listado de variables del BCRA (api.bcra.gob.ar, estadísticas monetarias
   v4.0, y si no contesta la v3.0): adelantos en cuenta corriente, préstamos personales, TAMAR o

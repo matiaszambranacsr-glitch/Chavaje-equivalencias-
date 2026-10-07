@@ -338,10 +338,11 @@ def _bajar_la_copia_en_partes(url, cabeceras, rama, destino):
     return True
 
 
-def bajar_la_copia_de_github():
+def bajar_la_copia_de_github(destino=None):
     """Baja la última copia de la rama de copias y la deja lista para abrir. Devuelve la ruta,
     o None si no hay copia, no está configurado o algo falla: en ese caso se sigue con la del
-    repositorio, si hay, como siempre.
+    repositorio, si hay, como siempre. `destino`: dónde dejarla (la prueba de recuperación de
+    verificar_la_copia_de_github() la deja aparte, para no tocar la del arranque).
 
     Se valida antes de usarla —que abra y tenga productos—, y se escribe a un temporal que se
     renombra al final: una bajada cortada no puede quedar con el nombre bueno."""
@@ -397,8 +398,8 @@ def bajar_la_copia_de_github():
         if not _sana:
             anotar_error("bajar_la_copia_de_github", f"la copia está dañada: {_detalle}")
             return None
-        os.replace(abierto, ARCHIVO_COPIA_BAJADA)
-        return ARCHIVO_COPIA_BAJADA
+        os.replace(abierto, destino or ARCHIVO_COPIA_BAJADA)
+        return destino or ARCHIVO_COPIA_BAJADA
     except Exception as _err:
         anotar_error("bajar_la_copia_de_github", _err)
         return None
@@ -1430,6 +1431,18 @@ def _esquema_gestion(c):
     # logica/deposito.py).
     if "descuento" not in [f[1] for f in c.execute("PRAGMA table_info(cuentas_de_taller)")]:
         c.execute("ALTER TABLE cuentas_de_taller ADD COLUMN descuento REAL DEFAULT 0")
+    # EL RECARGO POR MORA, cuenta por cuenta: a algunos talleres se les cobra el interés por
+    # pagar tarde y a otros no. Apagado de entrada; las cuentas a las que ya se les cargó un
+    # interés quedan prendidas, para no cambiarles nada.
+    # Una sola vez, al agregar la columna (en una base nueva no hay movimientos todavía).
+    if "cobra_mora" not in [f[1] for f in c.execute("PRAGMA table_info(cuentas_de_taller)")]:
+        c.execute("ALTER TABLE cuentas_de_taller ADD COLUMN cobra_mora INTEGER DEFAULT 0")
+        if c.execute("""SELECT 1 FROM sqlite_master WHERE type = 'table'
+                        AND name = 'movimientos_de_cuenta'""").fetchone():
+            c.execute("""INSERT INTO cuentas_de_taller (mecanico_id, cobra_mora)
+                         SELECT DISTINCT mecanico_id, 1 FROM movimientos_de_cuenta
+                         WHERE concepto LIKE 'Interés por mora%'
+                         ON CONFLICT(mecanico_id) DO UPDATE SET cobra_mora = 1""")
     # LOS PEDIDOS AL DEPÓSITO: el mostrador pide, el depósito lo busca y lo da de baja, y queda
     # cargado en la cuenta de quien se lo lleva, para facturar. Ver logica/deposito.py.
     c.execute("""CREATE TABLE IF NOT EXISTS pedidos_deposito (
@@ -2553,8 +2566,8 @@ def _esquema_registro_y_reglas(c):
     """El registro de cambios y las reglas que cuida la base misma, no el código.
 
     REGISTRO DE CAMBIOS: quién cambió qué, cuándo, y qué había antes (ver anotar_cambio() en
-    logica/negocio.py). El historial de precios guardaba el precio y la fecha, pero no quién:
-    «¿quién cambió este precio?» no tenía respuesta (lo señaló una revisión con ChatGPT).
+    logica/base.py). Los cambios de PRECIO no: se anotaron unos días y no se quiere saber quién
+    cambió un precio. Los que quedaron anotados se borran.
 
     LOS PARES VAN SIEMPRE ORDENADOS. Un vínculo A↔B se guarda una sola vez, con el id menor
     primero: guardado como B↔A sería un vínculo «distinto» para la clave primaria, y la
@@ -2575,6 +2588,7 @@ def _esquema_registro_y_reglas(c):
         despues TEXT
     )""")
     c.execute("CREATE INDEX IF NOT EXISTS idx_registro_entidad ON registro_de_cambios(entidad, entidad_id)")
+    c.execute("DELETE FROM registro_de_cambios WHERE accion = 'cambió precio/stock'")
     for tabla in ("equivalencias", "equivalencias_pendientes"):
         columnas = [f[1] for f in c.execute(f"PRAGMA table_info({tabla})")]
         valores = ", ".join("NEW.producto_b_id" if col == "producto_a_id" else

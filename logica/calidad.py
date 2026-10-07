@@ -312,13 +312,103 @@ def subir_la_copia_si_cambio(aunque_no_haya_cambios=False):
                  "lo bueno es lo que hay acá, tocá «Subir el backup al repositorio ahora».")
         guardar_config("ultimo_backup_github_error", f"{datetime.now():%d/%m %H:%M} — {texto}")
         return False, texto
+    # EL CATÁLOGO SE ACHICÓ DE GOLPE: la mitad de los productos o más desde la última copia. Puede
+    # ser a propósito (se borró una marca grande) o un error (una lista mal importada, una base
+    # restaurada vieja). Sola no se pisa la copia buena: lo decide una persona con el botón
+    # (lo propuso una revisión con ChatGPT: «ayer 42.000, hoy 17.000»).
+    _en_la_copia = int(obtener_config("productos_en_la_copia", "0") or 0)
+    if (not aunque_no_haya_cambios and _en_la_copia >= PRODUCTOS_PARA_CUIDAR_LA_COPIA
+            and productos < _en_la_copia * (1 - CAIDA_QUE_FRENA_LA_COPIA)):
+        texto = (f"El catálogo bajó de {miles(_en_la_copia)} a {miles(productos)} productos "
+                 "desde la última copia, y la copia buena no se pisa sola. Si fue a propósito, "
+                 "tocá «Subir el backup al repositorio ahora»; si no, restaurá la copia.")
+        guardar_config("ultimo_backup_github_error", f"{datetime.now():%d/%m %H:%M} — {texto}")
+        return False, texto
     huella, datos = copia_para_github("" if aunque_no_haya_cambios else huella_anterior)
     if datos is None:
         return None, "No cambió nada desde la última copia."
     ok, texto = subir_backup_a_github(datos, f"Copia automática — {miles(productos)} productos")
     if ok:
         guardar_config("huella_copia_github", huella)
+        guardar_config("productos_en_la_copia", str(productos))
     return ok, texto
+
+
+# Ver «EL CATÁLOGO SE ACHICÓ DE GOLPE» en subir_la_copia_si_cambio().
+PRODUCTOS_PARA_CUIDAR_LA_COPIA = 100
+CAIDA_QUE_FRENA_LA_COPIA = 0.5
+
+
+# LA COPIA SE PRUEBA, NO SOLO SE SUBE. «Subida» quiere decir que GitHub la aceptó, no que se
+# pueda recuperar. Una vez por día se baja como lo haría el arranque después de un reinicio —con
+# las partes, descifrada, descomprimida, con el control de integridad— y se mira que sea LA
+# ÚLTIMA que se subió (la huella que lleva adentro) y que tenga sus tablas. Queda anotado como
+# un estado aparte: «subida» y «verificada» (lo propuso una revisión con ChatGPT).
+HORAS_ENTRE_VERIFICACIONES = 24
+HORAS_PARA_REINTENTAR_LA_VERIFICACION = 2
+
+
+def estado_de_la_verificacion():
+    """{"cuando", "ok", "detalle", "productos"} de la última prueba, o {} si nunca se hizo."""
+    try:
+        return json.loads(obtener_config("copia_verificada", "") or "{}")
+    except ValueError:
+        return {}
+
+
+def toca_verificar_la_copia(ahora=None):
+    ahora = ahora or datetime.now()
+    ultima = estado_de_la_verificacion()
+    try:
+        cuando = datetime.strptime(ultima["cuando"], "%Y-%m-%d %H:%M:%S")
+    except (KeyError, ValueError, TypeError):
+        return True
+    horas = HORAS_ENTRE_VERIFICACIONES if ultima.get("ok") else HORAS_PARA_REINTENTAR_LA_VERIFICACION
+    return ahora - cuando >= timedelta(hours=horas)
+
+
+def verificar_la_copia_de_github():
+    """Baja la copia de GitHub aparte y la prueba. Devuelve (ok, detalle) y lo anota."""
+    temporal = f"{DB_PATH}.{uuid.uuid4().hex}.verificar"
+    productos = None
+    try:
+        ruta = bajar_la_copia_de_github(destino=temporal)
+        if not ruta:
+            ok, detalle = False, ("no se pudo bajar, descifrar o abrir, o no tiene productos "
+                                  "(el detalle está en los errores de «bajar_la_copia_de_github»)")
+        else:
+            prueba = sqlite3.connect(f"file:{ruta}?mode=ro&immutable=1", uri=True)
+            try:
+                tablas = {r[0] for r in prueba.execute(
+                    "SELECT name FROM sqlite_master WHERE type = 'table'")}
+                faltan = [x for x in ("productos", "marcas", "equivalencias", "configuracion")
+                          if x not in tablas]
+                if faltan:
+                    ok, detalle = False, f"le faltan tablas: {', '.join(faltan)}"
+                else:
+                    productos = prueba.execute("SELECT COUNT(*) FROM productos").fetchone()[0]
+                    fila = prueba.execute("SELECT valor FROM configuracion "
+                                          "WHERE clave = 'huella_copia_github'").fetchone()
+                    huella_local = obtener_config("huella_copia_github", "")
+                    if huella_local and (not fila or fila[0] != huella_local):
+                        ok, detalle = False, ("la copia de GitHub no es la última que se subió "
+                                              "(no coincide su huella)")
+                    else:
+                        ok, detalle = True, f"se bajó, se abrió y está sana: {miles(productos)} productos"
+            finally:
+                prueba.close()
+    except Exception as _err:
+        anotar_error("verificar_la_copia_de_github", _err)
+        ok, detalle = False, f"{type(_err).__name__}: {_err}"
+    finally:
+        try:
+            os.remove(temporal)
+        except OSError:
+            pass
+    guardar_config("copia_verificada", json.dumps(
+        {"cuando": datetime.now().strftime("%Y-%m-%d %H:%M:%S"), "ok": ok, "detalle": detalle,
+         "productos": productos}))
+    return ok, detalle
 
 
 # Cada cuánto se mira si hay algo nuevo para subir. Armar la copia y compararla cuesta 0,7 s de
@@ -349,6 +439,14 @@ def vigilar_la_copia():
                     subir_la_copia_si_cambio()
                 except Exception as _err:
                     anotar_error("vigilar_la_copia", _err)
+                # Y una vez por día, la prueba de que se puede recuperar. Ver
+                # verificar_la_copia_de_github().
+                try:
+                    if (obtener_config("huella_copia_github", "")
+                            and toca_verificar_la_copia()):
+                        verificar_la_copia_de_github()
+                except Exception as _err:
+                    anotar_error("vigilar_la_copia/verificar", _err)
                 # Las fotos propias, aparte y después de la base: ver
                 # subir_las_fotos_si_cambiaron().
                 try:

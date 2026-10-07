@@ -424,6 +424,12 @@ except sqlite3.DatabaseError as _err:
         st.stop()
     _total_productos = None
     st.warning("⏳ La base está ocupada en este momento. Esperá unos segundos y tocá de nuevo.")
+# LA BASE CON DAÑO: se puede buscar, y nada más (ver TEXTO_DE_SOLO_LECTURA en logica/base.py).
+# El administrador sigue entrando a todo: es quien restaura.
+if _total_productos and modo_solo_lectura():
+    st.error(TEXTO_DE_SOLO_LECTURA)
+    if pagina != PAGINAS[0]:
+        st.stop()
 if _total_productos == 0:
     # Sin afirmar la causa: lo más común es un redespliegue, pero no es la única (lo señaló una
     # revisión con ChatGPT).
@@ -498,6 +504,8 @@ except Exception as _err:             # los avisos no pueden impedir que la app 
     _cache_salud = {"problemas": []}
 
 _problemas = _cache_salud["problemas"]
+if not es_admin() and hay_claves_configuradas():
+    _problemas = [p for p in _problemas if not p.get("solo_admin")]
 # Los avisos de salud son del negocio (cuántos productos, qué está roto, clientes esperando):
 # no se le muestran a quien entró sin contraseña. Ver seccion_permitida().
 if _problemas and (es_operador_o_admin() or not hay_claves_configuradas()):

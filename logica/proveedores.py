@@ -1016,9 +1016,9 @@ def tanda_de_catalogos_de_fabricante(cupo):
         # pero no llega a contarse como leída, y la resta daba -1.
         consultadas += max(res["leidas"] - res.get("fallidas", 0), 0)
         if res["error"] or res.get("fallidas", 0) * 2 > res["leidas"]:
+            _minutos = _descansar_por_falla(f"catalogo_{nombre}")
             guardar_config(f"catalogo_pausado_{nombre}",
-                           (datetime.now() + timedelta(minutes=MINUTOS_DE_DESCANSO_SI_FALLA)
-                            ).strftime("%Y-%m-%d %H:%M"))
+                           (datetime.now() + timedelta(minutes=_minutos)).strftime("%Y-%m-%d %H:%M"))
     return consultadas
 
 
@@ -2223,6 +2223,37 @@ def _descansar(que, minutos=MINUTOS_DE_DESCANSO):
                    (datetime.now() + timedelta(minutes=minutos)).strftime("%Y-%m-%d %H:%M:%S"))
 
 
+# EL DESCANSO CRECE SI SIGUE FALLANDO: una hora, después dos, cuatro… hasta un día. Un sitio
+# caído una hora vuelve a probarse enseguida; uno caído una semana no se golpea 24 veces por
+# día (lo propuso una revisión con ChatGPT). Cuenta como «seguida» la falla que llega antes de
+# que pase una hora desde que terminó el descanso anterior: si anduvo bien un rato, vuelve a
+# empezar de una hora.
+MINUTOS_DE_DESCANSO_MAXIMO = 24 * 60
+
+
+def minutos_de_descanso_por_falla(fallas_seguidas):
+    return min(MINUTOS_DE_DESCANSO_SI_FALLA * 2 ** max(0, fallas_seguidas - 1),
+               MINUTOS_DE_DESCANSO_MAXIMO)
+
+
+def _descansar_por_falla(que, ahora=None):
+    """Descansa por una falla y devuelve cuántos minutos."""
+    ahora = ahora or datetime.now()
+    try:
+        anterior = json.loads(obtener_config(f"fallas_seguidas_{que}", "") or "{}")
+        hasta = datetime.strptime(anterior["hasta"], "%Y-%m-%d %H:%M:%S")
+        seguidas = (int(anterior["n"]) + 1 if ahora < hasta + timedelta(
+            minutes=MINUTOS_DE_DESCANSO_SI_FALLA) else 1)
+    except (ValueError, KeyError, TypeError):
+        seguidas = 1
+    minutos = minutos_de_descanso_por_falla(seguidas)
+    hasta = ahora + timedelta(minutes=minutos)
+    guardar_config(f"fallas_seguidas_{que}", json.dumps(
+        {"n": seguidas, "hasta": hasta.strftime("%Y-%m-%d %H:%M:%S")}))
+    guardar_config(f"descanso_{que}", hasta.strftime("%Y-%m-%d %H:%M:%S"))
+    return minutos
+
+
 # UNA VEZ QUE TERMINA, NO SE REPITE. Cuando una tarea no encuentra nada pendiente queda
 # «terminada» y la tanda de fondo ya no la vuelve a mirar: ni cada media hora, ni al importar una
 # lista, ni al reiniciar el servidor. Se reabre solo cuando lo pedís (buscar_lo_nuevo(), el botón
@@ -2603,7 +2634,7 @@ def _trabajo_de_fondo():
                     # tope por día, si el sitio anda mal la tanda giraría sobre las mismas
                     # cincuenta. Si falla más de la mitad, descansa una hora.
                     if (len(_fall) - _sin) * 2 > consultadas:
-                        _descansar("fotos", MINUTOS_DE_DESCANSO_SI_FALLA)
+                        _descansar_por_falla("fotos")
                     # Y el bucle sigue solo si esto AVANZÓ. Darlo por hecho porque había una
                     # marca pendiente deja girar el bucle diez minutos contra la base cuando la
                     # consulta que elige la marca y la que trae las fichas no miran exactamente
@@ -2613,7 +2644,7 @@ def _trabajo_de_fondo():
                     if not consultadas:
                         _descansar("fotos")
                 except Exception as _err:
-                    _descansar("fotos", MINUTOS_DE_DESCANSO_SI_FALLA)
+                    _descansar_por_falla("fotos")
                     anotar_error("_trabajo_de_fondo/fotos", _err)
 
         if _tarea_prendida("equiv"):
@@ -2639,9 +2670,9 @@ def _trabajo_de_fondo():
                     elif sum(1 for _c, _e in _fall if _falla_de_la_red(_e)) * 2 > consultados:
                         # La ficha se anota como leída igual: con el sitio caído, sin este freno
                         # la tanda recorrería todo el catálogo marcándolo leído sin leer nada.
-                        _descansar("equiv", MINUTOS_DE_DESCANSO_SI_FALLA)
+                        _descansar_por_falla("equiv")
                 except Exception as _err:
-                    _descansar("equiv", MINUTOS_DE_DESCANSO_SI_FALLA)
+                    _descansar_por_falla("equiv")
                     anotar_error("_trabajo_de_fondo/equiv", _err)
 
         # Los catálogos de fabricante (SKF, NGK, MANN-FILTER): ver
@@ -2658,11 +2689,11 @@ def _trabajo_de_fondo():
                     # Nada resuelto: si algún sitio quedó pausado es que falla, y se reintenta
                     # en una hora. Si no, no queda nada por leer.
                     if any(_catalogo_de_fabricante_pausado(n) for n in CATALOGOS_DE_FABRICANTE):
-                        _descansar("catalogos", MINUTOS_DE_DESCANSO_SI_FALLA)
+                        _descansar_por_falla("catalogos")
                     else:
                         _dar_por_terminada("catalogos")
             except Exception as _err:
-                _descansar("catalogos", MINUTOS_DE_DESCANSO_SI_FALLA)
+                _descansar_por_falla("catalogos")
                 anotar_error("_trabajo_de_fondo/catalogos", _err)
 
         # Las fotos que dejaron los catálogos de fabricante y Mercado Libre (ver proponer_foto()):
@@ -2699,11 +2730,11 @@ def _trabajo_de_fondo():
                 _sumar_al_cupo("tanda_fondo_mercado_libre", _res_ml["buscados"])
                 hizo_algo = hizo_algo or _res_ml["buscados"] > 0
                 if _res_ml["error"]:
-                    _descansar("mercado_libre", MINUTOS_DE_DESCANSO_SI_FALLA)
+                    _descansar_por_falla("mercado_libre")
                 elif not _res_ml["buscados"]:
                     _dar_por_terminada("mercado_libre")
             except Exception as _err:
-                _descansar("mercado_libre", MINUTOS_DE_DESCANSO_SI_FALLA)
+                _descansar_por_falla("mercado_libre")
                 anotar_error("_trabajo_de_fondo/mercado_libre", _err)
 
         # Las fotos viejas sin firma visual (la que usa la cámara): antes se procesaban de a 20
@@ -2719,7 +2750,7 @@ def _trabajo_de_fondo():
                 if not _hechas:
                     _dar_por_terminada("firmas")
             except Exception as _err:
-                _descansar("firmas", MINUTOS_DE_DESCANSO_SI_FALLA)
+                _descansar_por_falla("firmas")
                 anotar_error("_trabajo_de_fondo/firmas", _err)
 
         if not hizo_algo:

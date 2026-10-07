@@ -819,12 +819,11 @@ def actualizar_precio_stock(producto_id, precio, stock, costo=None, stock_mostra
     # sin el otro, el historial deja de servir justo para lo que está: saber cuándo subió.
     exigir_nivel("empleado", "cambiar precios y stock")
     with db_lock, transaccion():
-        c.execute("SELECT precio, stock, precio_costo FROM productos WHERE id = ?", (producto_id,))
+        c.execute("SELECT precio FROM productos WHERE id = ?", (producto_id,))
         fila = c.fetchone()
         if not fila:
             return False
         precio_anterior = fila["precio"]
-        antes = {"precio": fila["precio"], "stock": fila["stock"], "costo": fila["precio_costo"]}
         if costo is not None:
             c.execute("UPDATE productos SET precio_costo = ? WHERE id = ?",
                       (costo, producto_id))
@@ -841,14 +840,8 @@ def actualizar_precio_stock(producto_id, precio, stock, costo=None, stock_mostra
         # (evita ensuciar el historial cada vez que se toca el stock sin tocar el precio).
         if precio_anterior != precio:
             c.execute("INSERT INTO historial_precios (producto_id, precio) VALUES (?, ?)", (producto_id, precio))
-        # Quién lo cambió y qué había antes: el historial de precios no lo decía.
-        c.execute("SELECT precio, stock, precio_costo FROM productos WHERE id = ?", (producto_id,))
-        f = c.fetchone()
-        despues = {"precio": f["precio"], "stock": f["stock"], "costo": f["precio_costo"]}
-        if despues != antes:
-            anotar_cambio("cambió precio/stock", "producto", producto_id,
-                          {k: v for k, v in antes.items() if despues[k] != v},
-                          {k: v for k, v in despues.items() if antes[k] != v})
+        # QUIÉN CAMBIÓ EL PRECIO NO SE ANOTA, a propósito: se probó y no se quiere (el
+        # historial de precios dice cuándo y a cuánto, no quién).
     return resultado
 
 
@@ -1649,12 +1642,18 @@ def anotar_venta_y_avisar(producto_id, termino_pedido, rotulo, donde=""):
     no aparecía nunca; quedaba el viejo hasta vencerse. «Se llevó» y enseguida «Pedir», que es
     lo normal en el mostrador, mostraba solo el primero, y el segundo invitaba a tocar de nuevo.
     Tampoco con avisar(), que escribe arriba de todo y en el celular no se ve."""
+    if modo_solo_lectura():
+        st.session_state.setdefault("_lo_anotado", {})[donde] = TEXTO_DE_SOLO_LECTURA
+        return
     registrar_venta(producto_id, termino_pedido)
     st.session_state.setdefault("_lo_anotado", {})[donde] = f"🛒 Anotado: se llevó {rotulo}"
 
 
 def pedir_reposicion_y_avisar(producto_id, rotulo, donde=""):
     """Lo mismo para «Pedir»: cada toque suma uno a «veces pedido»."""
+    if modo_solo_lectura():
+        st.session_state.setdefault("_lo_anotado", {})[donde] = TEXTO_DE_SOLO_LECTURA
+        return
     solicitar_reposicion(producto_id)
     st.session_state.setdefault("_lo_anotado", {})[donde] = f"📌 {rotulo} quedó en la lista para pedir"
 

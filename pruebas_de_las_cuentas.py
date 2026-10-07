@@ -57,6 +57,17 @@ def probar(L):
                                              hoy=date(2026, 1, 15))
     esperar("sin vencido no se carga", ok, False)
 
+    # El recargo es de cada cuenta, y viene apagado: sin prenderlo no se carga nada.
+    esperar("sin configurar, la cuenta no cobra mora",
+            ns["configuracion_de_cuenta"](taller)["cobra_mora"], False)
+    ok, _ = ns["cargar_el_interes_por_mora"](taller, 60, "prueba", usuario="ana",
+                                             hoy=date(2026, 3, 31))
+    esperar("con el recargo apagado no se carga", ok, False)
+    ns["configurar_cuenta_de_taller"](taller, 0, 30, False, cobra_mora=True)
+    ns["configurar_cuenta_de_taller"](taller, 0, 45, False)
+    esperar("cambiar otra cosa no apaga el recargo",
+            ns["configuracion_de_cuenta"](taller)["cobra_mora"], True)
+    ns["configurar_cuenta_de_taller"](taller, 0, 30, False)
     ok, aviso = ns["cargar_el_interes_por_mora"](taller, 60, "prueba", usuario="ana",
                                                  hoy=date(2026, 3, 31))
     esperar("cargado", (ok, aviso), (True, aviso))
@@ -94,6 +105,24 @@ def probar(L):
     esperar("puntos negativos no", ns["configuracion_de_la_mora"]()["puntos"], 0.0)
     ns["guardar_config"]("tasas_bcra", json.dumps({"traido": ahora, "tasas": {}}))
     esperar("sin tasas, lo dice", ns["tasa_de_mora"]()[0], None)
+
+    # Una base de antes del recargo por cuenta: a la que ya se le cargó un interés le queda
+    # prendido; a las demás, apagado. Y correr el esquema otra vez no lo vuelve a prender.
+    ns["crear_mecanico"]("Taller Sin Mora", "clave-de-prueba-3")
+    otro = c.execute("SELECT id FROM mecanicos WHERE nombre = 'Taller Sin Mora'").fetchone()[0]
+    ns["configurar_cuenta_de_taller"](otro, 0, 30, False)
+    c.execute("ALTER TABLE cuentas_de_taller DROP COLUMN cobra_mora")
+    conn.commit()
+    ns["crear_esquema"](c)
+    conn.commit()
+    esperar("la que ya tenía intereses queda prendida",
+            (ns["configuracion_de_cuenta"](taller)["cobra_mora"],
+             ns["configuracion_de_cuenta"](otro)["cobra_mora"]), (True, False))
+    ns["configurar_cuenta_de_taller"](taller, 0, 30, False, cobra_mora=False)
+    ns["crear_esquema"](c)
+    conn.commit()
+    esperar("apagada a mano, el arranque no la vuelve a prender",
+            ns["configuracion_de_cuenta"](taller)["cobra_mora"], False)
     return fallas
 
 
