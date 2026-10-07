@@ -20,6 +20,7 @@ específico, y las pantallas quedan todas al final:
     logica/base.py
         · CONFIGURACIÓN DE PÁGINA
         · MODO DE VISTA (celular / computadora)
+        · PERMISOS ADENTRO DE LAS FUNCIONES Y REGISTRO DE CAMBIOS
     logica/datos.py
         · CONEXIÓN Y ESQUEMA
         · TODO O NADA: operaciones que son de varias sentencias

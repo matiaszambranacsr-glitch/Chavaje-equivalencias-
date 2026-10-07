@@ -1431,6 +1431,43 @@ def listar_productos_sin_equivalencias(marca_filtro="Todas", limite=None):
     return filas_a_listas(c)
 
 
+def vistazo_de_un_backup(contenido):
+    """Qué trae un backup antes de restaurarlo: {"productos", "marcas", "equivalencias",
+    "ultimo_precio"} o {"error"}. Para que «restaurar» muestre qué se va a poner en lugar de lo
+    que hay (lo pidió una revisión con ChatGPT): el que sube un backup de hace un mes por
+    error lo ve antes de perder el mes."""
+    try:
+        contenido = descifrar_copia(contenido)
+        if contenido[:2] == b"\x1f\x8b":
+            contenido = gzip.decompress(contenido)
+    except (ValueError, OSError) as _err:
+        return {"error": str(_err)}
+    temporal = f"{DB_PATH}.{uuid.uuid4().hex}.vistazo"
+    try:
+        with open(temporal, "wb") as f:
+            f.write(contenido)
+        with contextlib.closing(sqlite3.connect(temporal)) as base:
+            # connect() no lee nada: con bytes que no son una base, falla recién acá.
+            base.execute("PRAGMA schema_version").fetchone()
+
+            def uno(sql):
+                try:
+                    return base.execute(sql).fetchone()[0]
+                except sqlite3.Error:
+                    return None
+            return {"productos": uno("SELECT COUNT(*) FROM productos"),
+                    "marcas": uno("SELECT COUNT(*) FROM marcas"),
+                    "equivalencias": uno("SELECT COUNT(*) FROM equivalencias"),
+                    "ultimo_precio": uno("SELECT MAX(fecha) FROM historial_precios")}
+    except sqlite3.Error as _err:
+        return {"error": f"no es una base ({_err})"}
+    finally:
+        try:
+            os.remove(temporal)
+        except OSError as _err:
+            anotar_error("vistazo_de_un_backup", _err)
+
+
 def restaurar_backup(archivo_subido):
     """Reemplaza la base de datos actual por un archivo .db subido.
 
@@ -1463,6 +1500,7 @@ def restaurar_backup(archivo_subido):
     _sana, _detalle = la_base_esta_sana(datos=contenido)
     if not _sana:
         raise ValueError(f"el archivo no es una base sana ({_detalle})")
+    exigir_nivel("admin", "restaurar un backup")
     temporal = DB_PATH + ".subido"
     with open(temporal, "wb") as f:
         f.write(contenido)
@@ -1509,6 +1547,9 @@ def restaurar_backup(archivo_subido):
     productos = c.fetchone()[0]
     if not sana:
         anotar_error("restaurar_backup", f"la base restaurada no pasó el control: {detalle}")
+    # En la base NUEVA: lo anotado en la vieja se fue con ella.
+    anotar_cambio("restauró un backup", "base", "", detalle=f"{productos} productos, "
+                  + ("sana" if sana else f"NO pasó el control: {detalle}"))
     return {"sana": sana, "detalle": detalle, "productos": productos}
 
 

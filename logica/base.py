@@ -590,6 +590,91 @@ def nivel_vigente_de_la_sesion():
     return (fila["rol"] if fila["rol"] in ("admin", "operador") else None) if fila else None
 
 
+# ============================================================
+# PERMISOS ADENTRO DE LAS FUNCIONES Y REGISTRO DE CAMBIOS
+# ============================================================
+# LA SEGUNDA BARRERA. Los botones que borran o configuran están detrás de una contraseña en la
+# pantalla (candado(), seccion_permitida()). En Streamlit la pantalla corre en el servidor y
+# no hay otra forma de llamar a una función que pasar por ella, así que esa ya es una barrera
+# de verdad. Pero si un día un botón nuevo se escribe sin su candado, la función igual borraba.
+# Ahora las que borran, restauran o tocan permisos y cuentas vuelven a mirar quién está adentro
+# (lo propuso una revisión con ChatGPT). Sin una sesión de Streamlit —el trabajo de fondo, las
+# pruebas— no se mira: ahí no hay nadie a quien pedirle nada. Sin ninguna contraseña
+# configurada tampoco: la app está abierta a propósito (ver seccion_permitida()).
+def _nivel_de_quien_esta_adentro():
+    """El nivel de la sesión de Streamlit que está corriendo, o None si no hay sesión."""
+    try:
+        from streamlit.runtime.scriptrunner import get_script_run_ctx
+        if get_script_run_ctx() is None:
+            return None
+    except Exception:
+        return None
+    return st.session_state.get("nivel_usuario") or ""
+
+
+def exigir_nivel(nivel, accion):
+    """Levanta PermissionError si quien está adentro no tiene `nivel` («admin» o «empleado»)."""
+    adentro = _nivel_de_quien_esta_adentro()
+    if adentro is None or not hay_claves_configuradas():
+        return
+    if adentro == "admin" or (nivel == "empleado" and adentro == "operador"):
+        return
+    anotar_error("exigir_nivel", PermissionError(f"{accion}: nivel «{adentro}»"))
+    raise PermissionError(f"Para {accion} hace falta entrar como "
+                          f"{'administrador' if nivel == 'admin' else 'empleado'}.")
+
+
+# Lo que se guarda en el registro: hasta tantos cambios, los más viejos se van.
+CAMBIOS_QUE_SE_GUARDAN = 50_000
+
+
+def anotar_cambio(accion, entidad, entidad_id="", antes=None, despues=None, detalle="",
+                  usuario=None):
+    """Una línea en el registro de cambios: quién, cuándo, qué, y el antes y el después. Nunca
+    toma db_lock (lo llaman funciones que ya lo tienen) y nunca rompe lo que se estaba haciendo:
+    si no se puede anotar, se anota el error y se sigue."""
+    def texto(valor):
+        if valor is None:
+            return None
+        return valor if isinstance(valor, str) else json.dumps(valor, ensure_ascii=False,
+                                                                default=str)
+    try:
+        c.execute("""INSERT INTO registro_de_cambios (usuario, accion, entidad, entidad_id,
+                                                      detalle, antes, despues)
+                     VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                  (usuario or obtener_usuario_actual(), accion, entidad, str(entidad_id),
+                   str(detalle or "")[:300], texto(antes), texto(despues)))
+        ultimo = c.lastrowid or 0
+        if ultimo % 1000 == 0:
+            c.execute("DELETE FROM registro_de_cambios WHERE id <= ?",
+                      (ultimo - CAMBIOS_QUE_SE_GUARDAN,))
+    except Exception as _err:
+        anotar_error("anotar_cambio", _err)
+
+
+def cambios_registrados(buscar="", entidad=None, entidad_id=None, limite=200):
+    """Lo último del registro, del más nuevo al más viejo. Con `buscar`, lo que lo nombra en
+    el usuario, la acción, la entidad, el detalle o los valores."""
+    condiciones, valores = [], []
+    if entidad:
+        condiciones.append("entidad = ?")
+        valores.append(entidad)
+    if entidad_id is not None:
+        condiciones.append("entidad_id = ?")
+        valores.append(str(entidad_id))
+    if buscar.strip():
+        condiciones.append("(usuario LIKE ? OR accion LIKE ? OR entidad LIKE ? OR entidad_id "
+                           "LIKE ? OR detalle LIKE ? OR antes LIKE ? OR despues LIKE ?)")
+        valores += [f"%{buscar.strip()}%"] * 7
+    c.execute(f"""SELECT cuando, usuario, accion, entidad, entidad_id, detalle, antes, despues
+                  FROM registro_de_cambios
+                  {"WHERE " + " AND ".join(condiciones) if condiciones else ""}
+                  ORDER BY id DESC LIMIT ?""", valores + [int(limite)])
+    return [{"Cuándo": r["cuando"], "Quién": r["usuario"], "Qué": r["accion"],
+             "Sobre": f"{r['entidad']} {r['entidad_id'] or ''}".strip(), "Detalle": r["detalle"],
+             "Antes": r["antes"], "Después": r["despues"]} for r in c.fetchall()]
+
+
 def es_admin():
     return st.session_state.get("nivel_usuario") == "admin"
 
@@ -664,10 +749,12 @@ def verificar_password(password, guardado, salt):
 
 
 def crear_usuario(nombre, password, rol="operador"):
+    exigir_nivel("admin", "crear empleados")
     h, salt = hash_password(password)
     with db_lock:
         c.execute("INSERT INTO usuarios (nombre, password_hash, salt, rol) VALUES (?, ?, ?, ?)",
                    (nombre.strip(), h, salt, rol))
+        anotar_cambio("creó empleado", "usuario", nombre.strip(), despues={"rol": rol})
         conn.commit()
 
 
@@ -699,29 +786,42 @@ def validar_password_usuario(password):
 
 
 def cambiar_password_usuario(usuario_id, nueva_password):
+    exigir_nivel("admin", "cambiar contraseñas")
     h, salt = hash_password(nueva_password)
     with db_lock:
         c.execute("UPDATE usuarios SET password_hash=?, salt=? WHERE id=?", (h, salt, usuario_id))
+        # La contraseña no: solo que se cambió.
+        anotar_cambio("cambió la contraseña", "usuario", usuario_id)
         conn.commit()
 
 
 def activar_desactivar_usuario(usuario_id, activo):
+    exigir_nivel("admin", "activar o desactivar empleados")
     with db_lock:
         c.execute("UPDATE usuarios SET activo=? WHERE id=?", (1 if activo else 0, usuario_id))
+        anotar_cambio("reactivó empleado" if activo else "desactivó empleado", "usuario",
+                      usuario_id)
         conn.commit()
 
 
 def eliminar_usuario(usuario_id):
+    exigir_nivel("admin", "eliminar empleados")
     with db_lock:
+        c.execute("SELECT nombre, rol FROM usuarios WHERE id=?", (usuario_id,))
+        antes = c.fetchone()
         c.execute("DELETE FROM usuarios WHERE id=?", (usuario_id,))
+        anotar_cambio("eliminó empleado", "usuario", usuario_id,
+                      antes=dict(antes) if antes else None)
         conn.commit()
 
 
 def crear_mecanico(nombre, password):
+    exigir_nivel("admin", "crear cuentas de taller")
     h, salt = hash_password(password)
     with db_lock:
         c.execute("INSERT INTO mecanicos (nombre, password_hash, salt) VALUES (?, ?, ?)",
                    (nombre.strip(), h, salt))
+        anotar_cambio("creó taller", "taller", nombre.strip())
         conn.commit()
 
 
@@ -748,8 +848,13 @@ def activar_desactivar_mecanico(mecanico_id, activo):
 
 
 def eliminar_mecanico(mecanico_id):
+    exigir_nivel("admin", "eliminar cuentas de taller")
     with db_lock:
+        c.execute("SELECT nombre FROM mecanicos WHERE id=?", (mecanico_id,))
+        antes = c.fetchone()
         c.execute("DELETE FROM mecanicos WHERE id=?", (mecanico_id,))
+        anotar_cambio("eliminó taller", "taller", mecanico_id,
+                      antes=antes["nombre"] if antes else None)
         conn.commit()
 
 
@@ -1061,7 +1166,6 @@ def mostrar_login_inicial():
         if nivel:
             st.session_state.nivel_usuario = nivel
             st.session_state.admin_nombre = nombre
-            st.session_state.saltar_login = True
             st.rerun()
         else:
             mecanico_id, nombre_mecanico = validar_password_mecanico(clave)
@@ -1069,7 +1173,6 @@ def mostrar_login_inicial():
                 st.session_state.nivel_usuario = "mecanico"
                 st.session_state.admin_nombre = nombre_mecanico
                 st.session_state.mecanico_id = mecanico_id
-                st.session_state.saltar_login = True
                 st.rerun()
             elif error:
                 st.error(error)
@@ -1077,5 +1180,4 @@ def mostrar_login_inicial():
                 st.error("Contraseña incorrecta.")
     if seguir:
         st.session_state.usuario_nombre = nombre_usuario.strip() or "Invitado"
-        st.session_state.saltar_login = True
         st.rerun()

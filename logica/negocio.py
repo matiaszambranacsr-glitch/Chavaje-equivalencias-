@@ -817,12 +817,14 @@ def actualizar_precio_stock(producto_id, precio, stock, costo=None, stock_mostra
     por sesión. Reproducido con un id inexistente."""
     # Todo o nada: el precio nuevo y su renglón en el historial van juntos. Si se guarda uno
     # sin el otro, el historial deja de servir justo para lo que está: saber cuándo subió.
+    exigir_nivel("empleado", "cambiar precios y stock")
     with db_lock, transaccion():
-        c.execute("SELECT precio FROM productos WHERE id = ?", (producto_id,))
+        c.execute("SELECT precio, stock, precio_costo FROM productos WHERE id = ?", (producto_id,))
         fila = c.fetchone()
         if not fila:
             return False
         precio_anterior = fila["precio"]
+        antes = {"precio": fila["precio"], "stock": fila["stock"], "costo": fila["precio_costo"]}
         if costo is not None:
             c.execute("UPDATE productos SET precio_costo = ? WHERE id = ?",
                       (costo, producto_id))
@@ -839,6 +841,14 @@ def actualizar_precio_stock(producto_id, precio, stock, costo=None, stock_mostra
         # (evita ensuciar el historial cada vez que se toca el stock sin tocar el precio).
         if precio_anterior != precio:
             c.execute("INSERT INTO historial_precios (producto_id, precio) VALUES (?, ?)", (producto_id, precio))
+        # Quién lo cambió y qué había antes: el historial de precios no lo decía.
+        c.execute("SELECT precio, stock, precio_costo FROM productos WHERE id = ?", (producto_id,))
+        f = c.fetchone()
+        despues = {"precio": f["precio"], "stock": f["stock"], "costo": f["precio_costo"]}
+        if despues != antes:
+            anotar_cambio("cambió precio/stock", "producto", producto_id,
+                          {k: v for k, v in antes.items() if despues[k] != v},
+                          {k: v for k, v in despues.items() if antes[k] != v})
     return resultado
 
 
@@ -1850,6 +1860,7 @@ def eliminar_marca_con_papelera(nombre_marca):
     """Guarda la marca completa (con todos sus productos y las equivalencias que los tocan)
     en la papelera antes de borrarla — es la operación más destructiva de la app, así que
     ahora también tiene red de seguridad."""
+    exigir_nivel("admin", "eliminar una marca")
     c.execute("SELECT * FROM marcas WHERE nombre = ?", (nombre_marca,))
     marca_row = c.fetchone()
     if not marca_row:
@@ -1894,6 +1905,9 @@ def eliminar_marca_con_papelera(nombre_marca):
     with db_lock, transaccion():
         _guardar_en_papelera_sin_candado("marca", snapshot)
         c.execute("DELETE FROM marcas WHERE id = ?", (marca_id,))
+        anotar_cambio("eliminó marca (a la papelera)", "marca", nombre_marca,
+                      detalle=f"{len(productos_rows)} productos, "
+                              f"{len(equivalencias_rows)} equivalencias")
     return True
 
 
@@ -2256,6 +2270,35 @@ def generar_qr_bytes(texto):
 # ============================================================================================
 # COTIZAR: lo que se le puede ofrecer al cliente
 # ============================================================================================
+def armar_mensaje_de_cotizacion(lista, encabezado="", pie="", incluir_precio=True,
+                                incluir_stock=False, para=None):
+    """El texto de la cotización para WhatsApp, agrupado por lo que se pidió. `lista` es la de
+    la pantalla: [{"codigo_buscado", "resultados": [filas con Marca, Codigo, Descripcion,
+    Precio, Stock]}], ya filtrada con filas_para_cotizar(). Separado de la pantalla para poder
+    probarlo y usarlo en otros lados (lo propuso una revisión con ChatGPT). Precios de lista:
+    el descuento de una cuenta no va nunca acá."""
+    partes = [f"{encabezado}\n"] if encabezado else []
+    if para:
+        partes.append(f"Para: *{para}*\n")
+    for item in lista:
+        partes.append(f"\n📦 *{item['codigo_buscado']}*")
+        for fila in item["resultados"]:
+            linea = f"  • {fila['Marca']}: {fila['Codigo']}"
+            if fila.get("Descripcion"):
+                linea += f" - {fila['Descripcion']}"
+            extras = []
+            if incluir_precio and fila.get("Precio"):
+                extras.append(f"${miles(fila['Precio'], 0)}")
+            if incluir_stock and fila.get("Stock") is not None:
+                extras.append(f"Stock: {fila['Stock']}")
+            if extras:
+                linea += " (" + " · ".join(extras) + ")"
+            partes.append(linea)
+    if (pie or "").strip():
+        partes.append(f"\n{pie}")
+    return "\n".join(partes)
+
+
 def marcar_lo_que_no_es_lo_mismo(res):
     """Marca entre los resultados de una búsqueda los que NO se pueden vender en lugar de lo
     buscado aunque estén encadenados: el kit que lo trae adentro, la pieza suelta del kit, el

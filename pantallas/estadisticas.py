@@ -296,7 +296,31 @@ a traer solas desde Administrar → Mantenimiento.
         if archivo_restaurar:
             archivo_listo(archivo_restaurar, "backup")
             boton_otro_archivo("restaurar", "🗑️ Usar otro backup", key="otro_backup")
-        confirmar_restore = st.checkbox("Entiendo que esto borra los datos actuales y los reemplaza")
+        # LO QUE TRAE, CONTRA LO QUE HAY, y escribir RESTAURAR: una casilla se tilda sin leer
+        # (lo pidió una revisión con ChatGPT). Ver vistazo_de_un_backup().
+        confirmar_restore = False
+        if archivo_restaurar:
+            _bytes_backup = (archivo_restaurar.getvalue() if hasattr(archivo_restaurar, "getvalue")
+                             else archivo_restaurar.read())
+            if hasattr(archivo_restaurar, "seek"):
+                archivo_restaurar.seek(0)
+            _vistazo = vistazo_de_un_backup(_bytes_backup)
+            if _vistazo.get("error"):
+                st.error(f"No se puede leer ese archivo: {_vistazo['error']}")
+            else:
+                c.execute("SELECT COUNT(*) FROM productos")
+                _hoy_productos = c.fetchone()[0]
+                st.warning(
+                    f"⚠️ **Esto reemplaza los datos actuales.** El backup trae "
+                    f"**{miles(_vistazo['productos'] or 0)} productos**, "
+                    f"{miles(_vistazo['marcas'] or 0)} marcas y "
+                    f"{miles(_vistazo['equivalencias'] or 0)} equivalencias"
+                    + (f"; el último precio que tiene es del {_vistazo['ultimo_precio'][:10]}"
+                       if _vistazo.get("ultimo_precio") else "")
+                    + f". Hoy la base tiene **{miles(_hoy_productos)} productos**.")
+                confirmar_restore = st.text_input(
+                    "Escribí RESTAURAR para confirmar:", key="confirmar_restaurar"
+                ).strip().upper() == "RESTAURAR"
         if candado('restaurar un backup', st.button("♻️ Restaurar backup", disabled=not (archivo_restaurar and confirmar_restore)), 'restaurar_un_backup'):
             try:
                 _control = restaurar_backup(archivo_restaurar)

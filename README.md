@@ -21,6 +21,7 @@ qué proveedores, son el mismo repuesto. Corre con Streamlit sobre una base SQLi
 | `pruebas_de_las_homologaciones.py` | El registro oficial de CHAS (autopartes de seguridad): leerlo en varios formatos y cruzarlo con tus marcas. |
 | `pruebas_del_deposito.py` | El circuito del depósito y el descuento de cada cuenta: pedir, entregar, cargar en la cuenta y facturar. |
 | `pruebas_de_la_revision.py` | Que el análisis de equivalencias no se equivoque con pares ya revisados a mano, y (con `--base`) que no baje a rojo lo que aprobaste. |
+| `pruebas_de_los_cambios.py` | El registro de quién cambió qué, los permisos adentro de las funciones, el orden de los vínculos en la base, la entrega con stock de menos, el vistazo de un backup y el mensaje de WhatsApp. |
 | `requirements.txt` | Lo que hay que instalar. |
 | `Equivalencias` | El prototipo original, de antes de `app.py`. No lo usa nadie; queda por si querés mirarlo. Se puede borrar. |
 
@@ -6461,6 +6462,30 @@ el botón**:
   dónde vino. Solo los últimos tres años: la serie arranca en los cuarenta y trae el 89.
 - «🔌 Probar las fuentes de afuera» suma la Central de Deudores (con el CUIT de la AFIP, nunca el
   de un cliente) y la inflación de respaldo.
+
+## 🔍 La revisión técnica con ChatGPT, puntos 41 a 58
+
+| Punto | Qué se encontró | Qué se hizo |
+|---|---|---|
+| 41. Que la sesión no quede con permisos viejos | Ya resuelto en la tanda anterior: `nivel_vigente_de_la_sesion()` se mira en cada toque. | Sin cambio. |
+| 42. `saltar_login` | **Cierto**: se guardaba y nadie lo leía. | Borrado. |
+| 43–44. Los permisos solo en la pantalla | **Cierto**: si una pantalla se olvidaba de preguntar, la función hacía el cambio igual. | `exigir_nivel()` adentro de las funciones que cambian cosas sensibles (empleados, mecánicos, precios y stock, borrar marcas, cuentas de los talleres, interés por mora, restaurar): una segunda barrera. Fuera de una sesión (pruebas, tareas de fondo) no frena. |
+| 45. Confirmar con una casilla | **Cierto**: se tilda sin leer. | Restaurar pide escribir RESTAURAR y antes muestra qué trae el backup (productos, marcas, vínculos, último precio) contra lo que hay hoy; borrar una marca pide escribir su nombre. |
+| 46. Borrar sin vuelta atrás | Ya hay papelera para marcas y productos, y `activo` para empleados y mecánicos. | Sin cambio. |
+| 47–48. Quién cambió qué | **Cierto**: no se sabía quién había cambiado un precio. | Tabla `registro_de_cambios` (quién, cuándo, qué, antes y después) para precios y stock, vínculos cortados, marcas borradas, empleados, cuentas, intereses y backups. Se ve en «🕵️ Quién cambió qué» (Estado y papelera, solo administrador), y el último cambio de precio debajo del editor del buscador. Guarda los últimos 50.000. |
+| 49–50. Vínculos dudosos y de dónde salen | Ya existen: pendientes, confianza, origen, lote y evidencia. | Sin cambio. |
+| 51. Duplicados | Ya hay claves únicas en las tablas. | Sin cambio. |
+| 52. El par al revés | La app siempre guarda el par en orden (a < b) y la copia de hoy no tiene ninguno al revés, pero la base no lo aseguraba. | Un trigger en `equivalencias` y `equivalencias_pendientes` da vuelta el par al revés, ignora el repetido y el de un producto consigo mismo. |
+| 53. Cadenas largas | Ya se muestran los saltos y la confianza baja con cada uno. | Sin cambio. |
+| 54. Stock apartado | Ya se cuenta lo libre (stock menos apartado) y se reserva en la misma transacción. | Sin cambio. |
+| 55. Stock negativo | **Cierto en parte**: al entregar más de lo que figuraba, el stock quedaba en 0 sin decir nada. | Sigue quedando en 0, pero lo dice al entregar («conviene contarlo») y queda en el registro de cambios. |
+| 56–57. El precio de un presupuesto viejo | El presupuesto guarda el precio del momento en que se agregó, y existe el historial de precios. | Sin cambio. |
+| 58. El mensaje de WhatsApp | Se armaba en la pantalla. | `armar_mensaje_de_cotizacion()` en la lógica, con la opción de poner «Para:» la cuenta elegida. |
+
+Probado en `pruebas_de_los_cambios.py`. Rompiendo a propósito el trigger, el control de
+permisos, el registro de la entrega o el del precio, la prueba falla. «Quién cambió qué» y
+la confirmación de restaurar se probaron con la app entrando como administrador y como
+empleado (el empleado no lo ve).
 
 ## 🔍 La revisión técnica con ChatGPT, puntos 22 a 40
 

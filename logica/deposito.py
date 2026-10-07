@@ -168,9 +168,20 @@ def entregar_pedido(pedido_id, usuario=""):
                      FROM pedidos_deposito d JOIN productos p ON p.id = d.producto_id
                      WHERE d.id = ?""", (pedido_id,))
         f = c.fetchone()
+        # EL STOCK NO QUEDA NEGATIVO, y que no alcance no se calla (lo pidió una revisión con
+        # ChatGPT: «que SQLite/Python no decida solo»). Si el depósito encontró la pieza, la
+        # pieza estaba: el número estaba mal. Se entrega igual, el stock queda en 0, y queda
+        # anotado con cuánto faltaba para que alguien lo cuente.
+        faltante = 0
         if f["stock"] is not None:
+            faltante = max(0, f["cantidad"] - f["stock"])
             c.execute("UPDATE productos SET stock = MAX(0, stock - ?) WHERE id = ?",
                       (f["cantidad"], f["producto_id"]))
+            if faltante:
+                anotar_cambio("entregó con stock de menos", "producto", f["producto_id"],
+                              {"stock": f["stock"]}, {"stock": 0},
+                              f"se entregaron {f['cantidad']} y figuraban {f['stock']}: "
+                              "conviene contarlo", usuario=usuario)
         c.execute("""INSERT INTO ventas_registradas (producto_id, termino_pedido,
                                                      codigo_pedido_clean, usuario)
                      VALUES (?, ?, ?, ?)""",
@@ -196,7 +207,9 @@ def entregar_pedido(pedido_id, usuario=""):
                   (precio_lista, descuento, round(importe, 2), movimiento_id, pedido_id))
     olvidar_la_escala_de_precios()
     return True, (f"✅ Entregado: {f['codigo_raw']} x{f['cantidad']}"
-                  + (" — cargado en la cuenta." if movimiento_id else "."))
+                  + (" — cargado en la cuenta." if movimiento_id else ".")
+                  + (f" ⚠️ El stock decía {f['stock']}: quedó en 0, conviene contarlo."
+                     if faltante else ""))
 
 
 def no_hay_en_el_deposito(pedido_id, usuario=""):

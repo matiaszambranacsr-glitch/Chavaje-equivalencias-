@@ -1264,8 +1264,10 @@ DESCUENTO_MAXIMO = 90.0
 
 def configurar_cuenta_de_taller(mecanico_id, limite, dias_de_plazo, pide_codigo, descuento=None):
     """Guarda la configuración. descuento=None deja el que tenía."""
+    exigir_nivel("admin", "cambiar la configuración de una cuenta")
+    antes = configuracion_de_cuenta(mecanico_id)
     if descuento is None:
-        descuento = configuracion_de_cuenta(mecanico_id)["descuento"]
+        descuento = antes["descuento"]
     descuento = min(DESCUENTO_MAXIMO, max(0.0, float(descuento or 0)))
     with db_lock:
         c.execute("""INSERT INTO cuentas_de_taller (mecanico_id, limite, dias_de_plazo, pide_codigo,
@@ -1277,6 +1279,11 @@ def configurar_cuenta_de_taller(mecanico_id, limite, dias_de_plazo, pide_codigo,
                         descuento = excluded.descuento""",
                   (mecanico_id, max(0.0, float(limite or 0)), max(0, int(dias_de_plazo or 0)),
                    1 if pide_codigo else 0, descuento))
+        despues = configuracion_de_cuenta(mecanico_id)
+        if despues != antes:
+            anotar_cambio("configuró la cuenta", "taller", mecanico_id,
+                          {k: v for k, v in antes.items() if despues[k] != v},
+                          {k: v for k, v in despues.items() if antes[k] != v})
         conn.commit()
 
 
@@ -1428,8 +1435,14 @@ def registrar_pago_de_cuenta(mecanico_id, importe, medio, concepto="", cheque_fe
 
 def anular_movimiento_de_cuenta(movimiento_id):
     """No se borra: queda tachado («ANULADO») para que se vea qué pasó."""
+    exigir_nivel("admin", "anular un movimiento de cuenta")
     with db_lock:
+        c.execute("SELECT mecanico_id, concepto, importe FROM movimientos_de_cuenta WHERE id = ?",
+                  (movimiento_id,))
+        antes = c.fetchone()
         c.execute("UPDATE movimientos_de_cuenta SET anulado = 1 WHERE id = ?", (movimiento_id,))
+        anotar_cambio("anuló movimiento de cuenta", "movimiento", movimiento_id,
+                      antes=dict(antes) if antes else None)
         conn.commit()
 
 
@@ -1462,6 +1475,9 @@ def configuracion_de_la_mora():
 
 
 def guardar_configuracion_de_la_mora(referencia, puntos):
+    exigir_nivel("admin", "cambiar la tasa del interés por mora")
+    anotar_cambio("cambió la tasa de mora", "configuración", "tasa_de_mora",
+                  configuracion_de_la_mora(), {"referencia": referencia, "puntos": puntos})
     guardar_config(CONFIG_DE_LA_MORA, json.dumps(
         {"referencia": referencia, "puntos": min(200.0, max(0.0, float(puntos or 0)))}))
 
@@ -1533,6 +1549,7 @@ def interes_por_mora(mecanico_id, tna, hoy=None):
 def cargar_el_interes_por_mora(mecanico_id, tna, origen="", usuario="", hoy=None):
     """Carga en la cuenta el interés calculado hoy. (True, aviso) o (False, por qué no). Se
     vuelve a calcular adentro, con el candado, por si alguien cargó otro pago mientras tanto."""
+    exigir_nivel("admin", "cargar el interés por mora")
     hoy = hoy or date.today()
     with db_lock, transaccion():
         calculo = interes_por_mora(mecanico_id, tna, hoy)
@@ -1546,6 +1563,8 @@ def cargar_el_interes_por_mora(mecanico_id, tna, origen="", usuario="", hoy=None
                    f"{PREFIJO_DEL_INTERES} al {hoy:%d/%m/%Y} — TNA {miles(tna, 2)}%"
                    + (f" ({origen})" if origen else ""),
                    calculo["total"], vence.isoformat(), usuario))
+        anotar_cambio("cargó interés por mora", "taller", mecanico_id,
+                      despues={"importe": calculo["total"], "tna": tna}, usuario=usuario or None)
     return True, f"Interés cargado: ${miles(calculo['total'], 0)}, vence el {vence.isoformat()}."
 
 

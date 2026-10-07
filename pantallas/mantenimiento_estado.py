@@ -378,6 +378,22 @@ if pagina == PAGINAS[3]:
                 st.dataframe([{"": "🔴" if ms >= 500 else "🟡" if ms >= 100 else "🟢",
                                "Etapa": e, "Tardó (ms)": miles(ms, 0)} for e, ms in _tiempos],
                              width="stretch", hide_index=True)
+            # QUIÉN CAMBIÓ QUÉ: el registro de cambios (ver anotar_cambio()). Solo para el
+            # administrador: dice quién hizo cada cosa.
+            if es_admin():
+                st.markdown("---")
+                st.markdown("**🕵️ Quién cambió qué**")
+                st.caption("Precios y stock, vínculos cortados, marcas borradas, empleados, "
+                           "cuentas de los talleres, intereses y backups restaurados: quién, "
+                           "cuándo, y qué había antes.")
+                _q_cambios = st.text_input("Buscar (un código, un nombre, una acción):",
+                                           key="buscar_cambios", placeholder="Ej: Ana, precio, 1823")
+                _cambios = cambios_registrados(_q_cambios, limite=200)
+                if _cambios:
+                    st.dataframe(_cambios, width="stretch", hide_index=True)
+                else:
+                    st.caption("Nada registrado todavía." if not _q_cambios.strip()
+                               else "Nada con eso.")
             # Cada tarea automática con su semáforo, y lo que pasa con las búsquedas. Ver
             # estado_de_las_tareas() y anotar_busqueda().
             st.markdown("---")

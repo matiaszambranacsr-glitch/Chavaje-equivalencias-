@@ -2549,6 +2549,48 @@ def _datos_precargados_y_migraciones(c):
     c.execute("CREATE INDEX IF NOT EXISTS idx_presup_mecanico ON presupuestos_mecanico(mecanico_id)")
 
 
+def _esquema_registro_y_reglas(c):
+    """El registro de cambios y las reglas que cuida la base misma, no el código.
+
+    REGISTRO DE CAMBIOS: quién cambió qué, cuándo, y qué había antes (ver anotar_cambio() en
+    logica/negocio.py). El historial de precios guardaba el precio y la fecha, pero no quién:
+    «¿quién cambió este precio?» no tenía respuesta (lo señaló una revisión con ChatGPT).
+
+    LOS PARES VAN SIEMPRE ORDENADOS. Un vínculo A↔B se guarda una sola vez, con el id menor
+    primero: guardado como B↔A sería un vínculo «distinto» para la clave primaria, y la
+    búsqueda lo contaría dos veces. Hasta acá lo cuidaba cada lugar que inserta (min/max), y
+    sobre la base real está todo bien (20.037 equivalencias, ninguna al revés); con esta regla
+    ya no depende de que nadie se olvide: lo que entre al revés se da vuelta solo, y un
+    producto vinculado consigo mismo no entra. Las revisadas NO: ahí cada decisión se guarda a
+    propósito en las dos direcciones, para encontrarla desde cualquiera de los dos."""
+    c.execute("""CREATE TABLE IF NOT EXISTS registro_de_cambios (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        cuando TEXT DEFAULT (datetime('now', 'localtime')),
+        usuario TEXT,
+        accion TEXT NOT NULL,
+        entidad TEXT NOT NULL,
+        entidad_id TEXT,
+        detalle TEXT,
+        antes TEXT,
+        despues TEXT
+    )""")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_registro_entidad ON registro_de_cambios(entidad, entidad_id)")
+    for tabla in ("equivalencias", "equivalencias_pendientes"):
+        columnas = [f[1] for f in c.execute(f"PRAGMA table_info({tabla})")]
+        valores = ", ".join("NEW.producto_b_id" if col == "producto_a_id" else
+                            "NEW.producto_a_id" if col == "producto_b_id" else f"NEW.{col}"
+                            for col in columnas)
+        # Se rehace siempre: si una migración agregó una columna, la regla tiene que copiarla.
+        c.execute(f"DROP TRIGGER IF EXISTS {tabla}_en_orden")
+        c.execute(f"""CREATE TRIGGER {tabla}_en_orden BEFORE INSERT ON {tabla}
+                      WHEN NEW.producto_a_id >= NEW.producto_b_id
+                      BEGIN
+                          INSERT OR IGNORE INTO {tabla} ({", ".join(columnas)})
+                          SELECT {valores} WHERE NEW.producto_a_id > NEW.producto_b_id;
+                          SELECT RAISE(IGNORE);
+                      END""")
+
+
 def crear_esquema(c):
     _esquema_catalogo(c)
     _esquema_mostrador(c)
@@ -2556,6 +2598,7 @@ def crear_esquema(c):
     _esquema_vehiculos_y_mecanico(c)
     _esquema_gestion(c)
     _datos_precargados_y_migraciones(c)
+    _esquema_registro_y_reglas(c)
 
 
 

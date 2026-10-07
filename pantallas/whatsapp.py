@@ -70,29 +70,14 @@ if pagina == PAGINAS[5]:
         # Armado del texto del mensaje, agrupado por producto buscado
         encabezado_wa = obtener_config("whatsapp_encabezado", "🔧 *Equivalencias El Chavo*")
         pie_wa = obtener_config("whatsapp_pie", "")
-        partes = [f"{encabezado_wa}\n"]
         # Para quién es, si se está atendiendo a una cuenta. Con precios de lista: el descuento
         # de la cuenta no va en la cotización (ver «EL DESCUENTO NO SE VE»).
+        _para_wa = None
         if cuenta_elegida() and st.checkbox(f"Poner «Para: {cuenta_elegida()['nombre']}» en el "
                                             "mensaje", value=True, key="wa_para_la_cuenta"):
-            partes.append(f"Para: *{cuenta_elegida()['nombre']}*\n")
-        for item in lista_cotizar:
-            partes.append(f"\n📦 *{item['codigo_buscado']}*")
-            for fila in item["resultados"]:
-                linea = f"  • {fila['Marca']}: {fila['Codigo']}"
-                if fila.get("Descripcion"):
-                    linea += f" - {fila['Descripcion']}"
-                extras = []
-                if incluir_precio and fila.get("Precio"):
-                    extras.append(f"${miles(fila['Precio'], 0)}")
-                if incluir_stock and fila.get("Stock") is not None:
-                    extras.append(f"Stock: {fila['Stock']}")
-                if extras:
-                    linea += " (" + " · ".join(extras) + ")"
-                partes.append(linea)
-        if pie_wa.strip():
-            partes.append(f"\n{pie_wa}")
-        mensaje = "\n".join(partes)
+            _para_wa = cuenta_elegida()["nombre"]
+        mensaje = armar_mensaje_de_cotizacion(lista_cotizar, encabezado_wa, pie_wa,
+                                              incluir_precio, incluir_stock, _para_wa)
 
         _fuera_wa = sorted({f.get("Marca") for item in lista_cotizar for f in item["resultados"]
                             if f.get("Precio")} & marcas_con_precios_fuera_de_escala())

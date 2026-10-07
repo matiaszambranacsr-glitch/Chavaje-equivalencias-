@@ -264,7 +264,11 @@ if pagina == PAGINAS[3]:
             st.markdown("---")
             st.markdown("**Eliminar una marca** (borra también sus productos y equivalencias asociadas)")
             marca_a_borrar = st.selectbox("Elegí una marca", [m["nombre"] for m in marcas_info])
-            confirmar = st.checkbox(f"Confirmo que quiero borrar '{marca_a_borrar}' y todo lo asociado")
+            # Escribir el nombre, no tildar una casilla: es la operación más destructiva de la
+            # app y una casilla se tilda sin leer (lo pidió una revisión con ChatGPT).
+            confirmar = st.text_input(
+                f"Para confirmar, escribí el nombre de la marca ({marca_a_borrar}):",
+                key="confirmar_borrar_marca").strip().upper() == str(marca_a_borrar).strip().upper()
             if candado('eliminar una marca', st.button("🗑️ Eliminar marca", disabled=not confirmar), 'eliminar_una_marca'):
                 eliminar_marca_con_papelera(marca_a_borrar)
                 avisar("success", f"Marca '{marca_a_borrar}' eliminada (podés restaurarla desde la papelera).")

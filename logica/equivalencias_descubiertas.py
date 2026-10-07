@@ -501,6 +501,9 @@ def eliminar_equivalencia(par_a, par_b, recordar_rechazo=True):
     with db_lock:
         c.execute("DELETE FROM equivalencias WHERE (producto_a_id = ? AND producto_b_id = ?) "
                    "OR (producto_a_id = ? AND producto_b_id = ?)", (par_a, par_b, par_b, par_a))
+        if c.rowcount:
+            anotar_cambio("cortó vínculo", "equivalencia", f"{min(par_a, par_b)}-{max(par_a, par_b)}",
+                          detalle="queda como rechazado" if recordar_rechazo else "")
         conn.commit()
     if recordar_rechazo:
         marcar_revision([(par_a, par_b)], "rechazada")
@@ -925,6 +928,10 @@ def cortar_todos_los_vinculos(producto_id, recordar_rechazo=True):
     with db_lock:
         c.execute("DELETE FROM equivalencias WHERE producto_a_id = ? OR producto_b_id = ?",
                    (producto_id, producto_id))
+        if pares:
+            anotar_cambio("cortó todos los vínculos", "producto", producto_id,
+                          antes=[f"{a}-{b}" for a, b in pares[:200]],
+                          detalle=f"{len(pares)} vínculo(s)")
         conn.commit()
     if recordar_rechazo and pares:
         marcar_revision(pares, "rechazada")
