@@ -817,6 +817,8 @@ if pagina == PAGINAS[3]:
                     except sqlite3.IntegrityError as _err:
                         anotar_error("nivel principal", _err)
                         st.error("Ya existe un empleado con ese nombre.")
+                    except ValueError as _err:          # ver clave_ya_usada()
+                        st.error(str(_err))
 
             if usuarios_actuales:
                 st.markdown("**Gestionar un empleado existente**")
@@ -827,8 +829,11 @@ if pagina == PAGINAS[3]:
                 nueva_pass_usuario = cug1.text_input("Nueva contraseña (opcional):", type="password", key="usuario_nueva_pass")
                 if cug1.button("💾 Cambiar contraseña"):
                     if nueva_pass_usuario:
-                        cambiar_password_usuario(usuario_id_sel, nueva_pass_usuario)
-                        st.success("Contraseña actualizada.")
+                        try:
+                            cambiar_password_usuario(usuario_id_sel, nueva_pass_usuario)
+                            st.success("Contraseña actualizada.")
+                        except ValueError as _err:      # ver clave_ya_usada()
+                            st.error(str(_err))
                     else:
                         st.warning("Escribí la nueva contraseña primero.")
                 usuario_activo_actual = next(u["Activo"] == "Sí" for u in usuarios_actuales if u["ID"] == usuario_id_sel)
@@ -864,6 +869,8 @@ if pagina == PAGINAS[3]:
                     except sqlite3.IntegrityError as _err:
                         anotar_error("nivel principal", _err)
                         st.error("Ya existe un mecánico con ese nombre.")
+                    except ValueError as _err:          # ver clave_ya_usada()
+                        st.error(str(_err))
 
             if mecanicos_actuales:
                 st.markdown("**Gestionar un mecánico existente**")

@@ -590,6 +590,11 @@ def fusionar_productos(id_perdedor, id_ganador):
     # Probado cortando el borrado final a propósito: el producto duplicado seguía existiendo
     # pero ya se le habían borrado TODAS las equivalencias. Se perdieron sin aviso.
     with transaccion():
+        # Los dos tienen que seguir estando AHORA, no cuando se armó la pantalla: si otra
+        # sesión borró o fusionó uno mientras tanto, no se hace nada (y se dice que no).
+        c.execute("SELECT COUNT(*) FROM productos WHERE id IN (?, ?)", (id_perdedor, id_ganador))
+        if c.fetchone()[0] != 2:
+            return False
         # Las equivalencias del que se va pasan al que queda, sin duplicar ni auto-vincular
         c.execute("""SELECT CASE WHEN producto_a_id = ? THEN producto_b_id ELSE producto_a_id END AS otro,
                             lote

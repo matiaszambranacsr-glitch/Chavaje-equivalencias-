@@ -769,18 +769,49 @@ def cotejar_items_remito(items):
     return resultado
 
 
+# EL MISMO REMITO NO SE SUMA DOS VECES. La suma es relativa (stock + lo que llegó), así que
+# aplicarlo otra vez —la misma foto subida de nuevo, o la lectura abierta en otra pestaña—
+# duplicaba el stock sin aviso. Se guarda la huella de los últimos remitos sumados.
+REMITOS_RECORDADOS = 200
+
+
+def huella_del_remito(items_cotejados):
+    renglones = sorted((int(i["_producto_id"]), float(i.get("Cantidad") or 0))
+                       for i in items_cotejados if i.get("_producto_id"))
+    return hashlib.sha256(json.dumps(renglones).encode()).hexdigest()[:20]
+
+
 def aplicar_carga_remito(items_cotejados):
-    """Suma la cantidad recibida al stock de los ítems que sí coinciden con un producto ya cargado."""
+    """Suma la cantidad recibida al stock de los ítems que sí coinciden con un producto ya
+    cargado. Devuelve cuántos, o None si ese mismo remito ya se sumó (ver REMITOS_RECORDADOS)."""
     actualizados = 0
-    with db_lock:
+    huella = huella_del_remito(items_cotejados)
+    with db_lock, transaccion():
+        try:
+            sumados = json.loads(obtener_config("remitos_sumados", "") or "{}")
+        except ValueError:
+            sumados = {}
+        if huella in sumados:
+            return None
+        sumados[huella] = datetime.now().strftime("%d/%m %H:%M")
+        c.execute("INSERT INTO configuracion (clave, valor) VALUES ('remitos_sumados', ?) "
+                  "ON CONFLICT(clave) DO UPDATE SET valor = excluded.valor",
+                  (json.dumps(dict(list(sumados.items())[-REMITOS_RECORDADOS:])),))
         for item in items_cotejados:
             if item.get("_producto_id"):
                 cantidad = item.get("Cantidad") or 0
                 c.execute("UPDATE productos SET stock = COALESCE(stock, 0) + ? WHERE id = ?",
                           (cantidad, item["_producto_id"]))
                 actualizados += 1
-        conn.commit()
     return actualizados
+
+
+def cuando_se_sumo_el_remito(items_cotejados):
+    try:
+        return json.loads(obtener_config("remitos_sumados", "") or "{}").get(
+            huella_del_remito(items_cotejados))
+    except ValueError:
+        return None
 
 
 def actualizar_precio_stock(producto_id, precio, stock, costo=None, stock_mostrado=None):

@@ -77,18 +77,22 @@ def pedir_al_deposito(producto_id, cantidad=1, mecanico_id=None, codigo_de_retir
     prod = c.fetchone()
     if not prod:
         return False, "Ese producto ya no está en el catálogo."
-    if mecanico_id:
-        config = configuracion_de_cuenta(mecanico_id)
-        importe = precio_de_la_cuenta(prod["precio"], config["descuento"]) * cantidad
-        estado = estado_de_cuenta(mecanico_id)
-        pedido = _pendiente_de_la_cuenta(mecanico_id, config["descuento"])
-        if config["limite"] and estado["saldo"] + pedido + importe > config["limite"] + 0.005:
-            return False, (f"Pasa el límite de crédito de la cuenta: debe "
-                           f"{formato_precio(estado['saldo'])}"
-                           + (f", tiene pedido sin entregar {formato_precio(pedido)}"
-                              if pedido else "")
-                           + f" y el límite es {formato_precio(config['limite'])}.")
     with db_lock, transaccion():
+        # EL LÍMITE, ADENTRO DEL CANDADO. Se miraba antes de tomarlo: con $20.000 disponibles,
+        # dos vendedores pidiendo $15.000 cada uno al mismo tiempo veían los dos «hay lugar» y
+        # entraban los dos (lo señaló una revisión con ChatGPT). Mirado acá, el segundo ya ve el
+        # pedido del primero. Ver pruebas_del_deposito.py.
+        if mecanico_id:
+            config = configuracion_de_cuenta(mecanico_id)
+            importe = precio_de_la_cuenta(prod["precio"], config["descuento"]) * cantidad
+            estado = estado_de_cuenta(mecanico_id)
+            pedido = _pendiente_de_la_cuenta(mecanico_id, config["descuento"])
+            if config["limite"] and estado["saldo"] + pedido + importe > config["limite"] + 0.005:
+                return False, (f"Pasa el límite de crédito de la cuenta: debe "
+                               f"{formato_precio(estado['saldo'])}"
+                               + (f", tiene pedido sin entregar {formato_precio(pedido)}"
+                                  if pedido else "")
+                               + f" y el límite es {formato_precio(config['limite'])}.")
         if (mecanico_id and not retiro_autorizado
                 and configuracion_de_cuenta(mecanico_id)["pide_codigo"]):
             codigo_id = _codigo_de_retiro_vigente(mecanico_id, codigo_de_retiro)

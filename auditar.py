@@ -2406,6 +2406,28 @@ for _carpeta, _subcarpetas, _archivos in os.walk(_RAIZ_DEL_REPO):
                 reportar("ERROR", 0, f"{os.path.relpath(_ruta, _RAIZ_DEL_REPO)}:{_i}: ruta de una "
                                      "máquina escrita en el código; armarla desde __file__")
 
+# ============ El paquete nucleo/ al día con logica/ ============
+# nucleo/ se genera desde logica/ (nucleo/generar.py). Si alguien cambia logica/ y no lo
+# regenera, nucleo/pruebas.py sigue en verde —prueba lo viejo— y el paquete queda atrasado sin
+# que nada lo diga (lo señaló una revisión con ChatGPT). Se regenera en una carpeta aparte y se
+# compara archivo por archivo con lo que hay.
+import subprocess
+import tempfile
+_GENERADOS = ("codigos.py", "equivalencias.py", "errores.py", "planillas.py", "vehiculos.py")
+with tempfile.TemporaryDirectory() as _aparte:
+    _gen = subprocess.run([sys.executable, os.path.join(_RAIZ_DEL_REPO, "nucleo", "generar.py"),
+                           _aparte], capture_output=True, text=True, cwd=_RAIZ_DEL_REPO)
+    if _gen.returncode:
+        reportar("ERROR", 0, "nucleo/generar.py no corre: "
+                             + (_gen.stderr.strip().splitlines() or ["?"])[-1][:150])
+    else:
+        for _g in _GENERADOS:
+            _nuevo = open(os.path.join(_aparte, _g), encoding="utf-8").read()
+            _actual = open(os.path.join(_RAIZ_DEL_REPO, "nucleo", _g), encoding="utf-8").read()
+            if _nuevo != _actual:
+                reportar("ERROR", 0, f"nucleo/{_g} está atrasado respecto de logica/: correr "
+                                     "python3 nucleo/generar.py")
+
 # ============ Resultado ============
 orden = {"ERROR": 0, "REVISAR": 1, "AVISO": 2}
 problemas.sort(key=lambda x: (orden[x[0]], x[1]))

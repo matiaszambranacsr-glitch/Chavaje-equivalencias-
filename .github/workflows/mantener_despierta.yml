@@ -22,7 +22,7 @@ jobs:
           sparse-checkout: .github
       - uses: actions/setup-python@v6
         with:
-          python-version: "3.12"
+          python-version: "3.11"
       - name: Instalar el navegador
         run: |
           pip install playwright==1.63.0

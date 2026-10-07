@@ -215,6 +215,101 @@ def probar(L):
     esperar("sin descripción y pendiente ya aprobado",
             (chequeo["Productos sin descripción"], chequeo["Vínculos pendientes que ya están aprobados"],
              chequeo["Equivalencias de un producto consigo mismo"]), (1, 1, 0))
+
+    # 12. Cada cuenta con su clave: la contraseña sola dice quién entra.
+    def repetida(funcion, *args):
+        try:
+            funcion(*args)
+            return False
+        except ValueError:
+            return True
+    esperar("un taller con la clave de otro taller", repetida(ns["crear_mecanico"], "Otro Taller",
+                                                              "clave-del-taller-7"), True)
+    esperar("un empleado con la clave de un taller", repetida(ns["crear_usuario"], "zoe",
+                                                              "clave-del-taller-7"), True)
+    esperar("con una clave nueva, sí", repetida(ns["crear_usuario"], "zoe", "clave-de-zoe-1"), False)
+    zoe = c.execute("SELECT id FROM usuarios WHERE nombre = 'zoe'").fetchone()[0]
+    esperar("cambiarle la clave a la de un taller, no",
+            repetida(ns["cambiar_password_usuario"], zoe, "clave-del-taller-7"), True)
+    esperar("volver a ponerle la suya, sí",
+            repetida(ns["cambiar_password_usuario"], zoe, "clave-de-zoe-1"), False)
+
+    # 13. Completar medidas no pisa lo que alguien cargó a mano mientras se revisaba.
+    pid = c.execute("SELECT MAX(id) FROM productos").fetchone()[0]
+    fila = {"_id": pid, "_nuevas": {"diametro_interno": 35, "ancho": 7}}
+    c.execute("UPDATE productos SET diametro_interno = 40 WHERE id = ?", (pid,))
+    conn.commit()
+    esperar("se completa solo lo vacío", (ns["aplicar_medidas_deducidas"]([fila]),
+            tuple(c.execute("SELECT diametro_interno, ancho FROM productos WHERE id = ?",
+                            (pid,)).fetchone())), (1, (40, 7)))
+    esperar("si ya está todo cargado, no cuenta como completado",
+            ns["aplicar_medidas_deducidas"]([fila]), 0)
+
+    # 14. El mismo remito no suma el stock dos veces.
+    c.execute("UPDATE productos SET stock = 5 WHERE id = ?", (pid,))
+    conn.commit()
+    remito = [{"_producto_id": pid, "Cantidad": 3}, {"Código": "NO-ESTA", "Cantidad": 9}]
+    esperar("el remito se suma una vez", (ns["aplicar_carga_remito"](remito),
+                                          ns["aplicar_carga_remito"](remito)), (1, None))
+    esperar("y el stock quedó en 5 + 3", c.execute("SELECT stock FROM productos WHERE id = ?",
+                                                   (pid,)).fetchone()[0], 8)
+    esperar("otro remito distinto, sí", ns["aplicar_carga_remito"](
+        [{"_producto_id": pid, "Cantidad": 2}]), 1)
+
+    # 15. Fusionar con un producto que otra sesión ya borró: no hace nada y lo dice.
+    esperar("fusionar con uno que ya no está", ns["fusionar_productos"](999999, pid), False)
+
+    # 16. IDA Y VUELTA DE UN BACKUP: lo que importa del negocio, backup, borrar todo, restaurar
+    # y comparar tabla por tabla. Dos veces: el backup tal cual y como va a GitHub (comprimido y
+    # cifrado). Y uno dañado no toca nada.
+    import gzip
+    import io
+    criticas = {
+        "productos": "SELECT id, codigo_clean, marca_id, precio, stock, descripcion FROM productos",
+        "marcas": "SELECT id, nombre, tipo FROM marcas",
+        "equivalencias": "SELECT producto_a_id, producto_b_id, lote FROM equivalencias",
+        "pendientes": "SELECT producto_a_id, producto_b_id FROM equivalencias_pendientes",
+        "usuarios": "SELECT id, nombre, rol, activo FROM usuarios",
+        "mecanicos": "SELECT id, nombre, activo FROM mecanicos",
+        "cuentas": "SELECT * FROM cuentas_de_taller",
+        "presupuestos": "SELECT id, mecanico_id, items_json, total FROM presupuestos_mecanico",
+    }
+
+    def foto():
+        return {k: sorted(tuple(r) for r in c.execute(q)) for k, q in criticas.items()}
+    ns["configurar_cuenta_de_taller"](taller, 50000, 15, False, 10, cobra_mora=True)
+    antes = foto()
+    esperar("hay datos para probar", all(antes[k] for k in ("productos", "equivalencias",
+                                                            "usuarios", "mecanicos", "cuentas")), True)
+    crudo = ns["generar_backup_sin_fotos"]()
+    g["secretos_app"] = lambda: {"clave_copia": "una-frase-de-prueba-larga"}
+    try:
+        como_en_github = ns["cifrar_copia"](gzip.compress(crudo))
+        esperar("el de GitHub va cifrado", como_en_github[:4] != crudo[:4], True)
+        for nombre, contenido in (("tal cual", crudo), ("comprimido y cifrado", como_en_github)):
+            for tabla in ("equivalencias_pendientes", "equivalencias", "presupuestos_mecanico",
+                          "cuentas_de_taller", "productos"):
+                c.execute(f"DELETE FROM {tabla}")
+            conn.commit()
+            esperar(f"{nombre}: la base quedó vacía", c.execute(
+                "SELECT COUNT(*) FROM productos").fetchone()[0], 0)
+            control = ns["restaurar_backup"](io.BytesIO(contenido))
+            esperar(f"{nombre}: restaurada y sana", (control["sana"], control["productos"]),
+                    (True, len(antes["productos"])))
+            esperar(f"{nombre}: integrity_check", c.execute("PRAGMA integrity_check").fetchone()[0], "ok")
+            despues = foto()
+            esperar(f"{nombre}: todo igual que antes",
+                    [k for k in criticas if despues[k] != antes[k]], [])
+        # Un backup dañado (cortado a la mitad) no entra y no toca nada.
+        try:
+            ns["restaurar_backup"](io.BytesIO(crudo[:len(crudo) // 2]))
+            entro = True
+        except ValueError:
+            entro = False
+        esperar("uno cortado a la mitad no entra", entro, False)
+        esperar("y la base sigue como estaba", foto() == antes, True)
+    finally:
+        g.update(originales)
     return fallas
 
 

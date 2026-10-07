@@ -1280,10 +1280,16 @@ if pagina == PAGINAS[2]:
                 )
             colr1, colr2 = st.columns(2)
             if coinciden and colr1.button(f"💾 Sumar stock de los {len(coinciden)} que coinciden"):
+                _cuando_remito = cuando_se_sumo_el_remito(items_actuales)
                 actualizados = aplicar_carga_remito(items_actuales)
-                st.success(f"Stock actualizado en {actualizados} producto(s).")
-                st.session_state.pop("items_remito", None)
-                st.rerun()
+                if actualizados is None:
+                    st.warning(f"Este mismo remito ya se sumó al stock el {_cuando_remito}: no "
+                               "se suma dos veces. Si de verdad llegó dos veces la misma "
+                               "mercadería, cargá el stock a mano desde el buscador.")
+                else:
+                    st.success(f"Stock actualizado en {actualizados} producto(s).")
+                    st.session_state.pop("items_remito", None)
+                    st.rerun()
             if colr2.button("🗑️ Descartar esta lectura"):
                 st.session_state.pop("items_remito", None)
                 st.rerun()

@@ -242,6 +242,45 @@ def probar(L):
     esperar("de a uno: un pedido suelto con su cantidad",
             [(p["producto_id"], p["cantidad"], p["tanda"]) for p in nuevos], [(filtro, 4, None)])
     esperar("de a uno: uno más en la cola", len(ns["pedidos_pendientes"]()), antes + 1)
+
+    # EL LÍMITE CON VARIOS A LA VEZ. Ocho vendedores piden $20.000 al mismo tiempo para una
+    # cuenta con $30.000 de límite: entra uno solo. La consulta de lo pedido se hace lenta a
+    # propósito, para que todos lleguen a mirar antes de que el primero termine: así se veía
+    # la carrera cuando el límite se miraba fuera del candado.
+    import threading
+    import time
+    ns["crear_mecanico"]("Taller Carrera", "clave-de-prueba-9")
+    otro = c.execute("SELECT id FROM mecanicos WHERE nombre = 'Taller Carrera'").fetchone()[0]
+    ns["configurar_cuenta_de_taller"](otro, 30000, 30, False, 0)
+    g = ns["inflacion_desde"].__globals__
+    original = g["_pendiente_de_la_cuenta"]
+
+    def lento(mid, descuento):
+        # Lee lo pendiente y DESPUÉS espera: entre mirar y escribir, que es donde pasaba.
+        pendiente = original(mid, descuento)
+        time.sleep(0.05)
+        return pendiente
+    g["_pendiente_de_la_cuenta"] = lento
+    largada = threading.Barrier(8)
+    resultados = []
+
+    def vendedor(n):
+        largada.wait()
+        resultados.append(ns["pedir_al_deposito"](filtro, 2, otro, usuario=f"v{n}",
+                                                  retiro_autorizado=True)[0])
+    hilos = [threading.Thread(target=vendedor, args=(n,)) for n in range(8)]
+    try:
+        for h in hilos:
+            h.start()
+        for h in hilos:
+            h.join(timeout=60)
+    finally:
+        g["_pendiente_de_la_cuenta"] = original
+    esperar("ocho a la vez contra el límite: entra uno solo", sorted(resultados),
+            [False] * 7 + [True])
+    esperar("y en la cola hay uno solo de esa cuenta",
+            c.execute("SELECT COUNT(*) FROM pedidos_deposito WHERE mecanico_id = ?",
+                      (otro,)).fetchone()[0], 1)
     return fallas
 
 

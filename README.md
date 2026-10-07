@@ -23,13 +23,19 @@ qué proveedores, son el mismo repuesto. Corre con Streamlit sobre una base SQLi
 | `pruebas_del_deposito.py` | El circuito del depósito y el descuento de cada cuenta: pedir, entregar, cargar en la cuenta y facturar. |
 | `pruebas_de_la_revision.py` | Que el análisis de equivalencias no se equivoque con pares ya revisados a mano, y (con `--base`) que no baje a rojo lo que aprobaste. |
 | `pruebas_de_los_cambios.py` | El registro de quién cambió qué (sin los precios), los permisos adentro de las funciones, el orden de los vínculos en la base, la entrega con stock de menos, el vistazo de un backup y el mensaje de WhatsApp. |
-| `requirements.txt` | Lo que hay que instalar. |
+| `requirements.txt` | Lo que hay que instalar, con los rangos de versiones con que se probó (ver el comentario de arriba del archivo). |
 | `Equivalencias` | El prototipo original, de antes de `app.py`. No lo usa nadie; queda por si querés mirarlo. Se puede borrar. |
 
 ## Antes de subir un cambio
 
+Con las mismas librerías que usa la app (`requirements.txt`, con rangos probados), en un entorno
+aparte: las del sistema pueden ser otras. Acá pasó: la `cryptography` que traía el sistema era
+vieja y ni se podía importar.
+
 ```bash
-python3 auditar.py               # tiene que dar ERROR 0 (revisa la app entera)
+python3 -m venv .venv && .venv/bin/pip install -r requirements.txt   # una vez
+source .venv/bin/activate
+python3 auditar.py               # tiene que dar ERROR 0 (revisa la app entera, y que nucleo/ esté al día)
 python3 nucleo/generar.py        # regenerar el paquete desde logica/
 python3 -m nucleo.pruebas        # tiene que decir "todo en verde"
 python3 pruebas_de_la_revision.py   # si tocaste el análisis: "todo en verde"
@@ -6463,6 +6469,26 @@ el botón**:
   dónde vino. Solo los últimos tres años: la serie arranca en los cuarenta y trae el 89.
 - «🔌 Probar las fuentes de afuera» suma la Central de Deudores (con el CUIT de la AFIP, nunca el
   de un cliente) y la inflación de respaldo.
+
+## 🔍 La revisión técnica con ChatGPT: la auditoría del ZIP
+
+| Lo que marcó | Qué se encontró | Qué se hizo |
+|---|---|---|
+| 🔴 El límite de crédito, con dos pedidos a la vez | **Cierto**: se miraba antes de tomar el candado. Reproducido: con $30.000 de límite, ocho vendedores pidiendo $20.000 a la vez entraban **los ocho** ($160.000). | Se mira adentro de la misma transacción que guarda el pedido: entra uno solo. `pruebas_del_deposito.py` lo prueba con ocho a la vez (con el código viejo falla). |
+| 🔴 «Completar medidas» pisaba lo cargado a mano | **Cierto**: la lista se arma antes y queda a la vista; si en el medio alguien cargaba una medida, el botón la pisaba con la leída de la descripción. | Cada medida se escribe solo si sigue vacía **al guardar** (`COALESCE`). |
+| 🔴 `nucleo/` en verde con el generador roto | Cierto: `nucleo/pruebas.py` prueba lo que hay, no si está al día. | El auditor regenera `nucleo/` en una carpeta aparte y lo compara archivo por archivo: si `logica/` cambió y no se regeneró, ERROR. Probado cambiando una constante. |
+| 🔴 Freno de intentos y mecánicos | Ya arreglado en la tanda anterior (un solo freno, `compare_digest`). | — |
+| 🟠 Dos mecánicos con la misma clave | **Cierto, y más amplio**: la contraseña sola dice quién entra, así que dos cuentas con la misma clave entraban como la primera — y un taller con la clave de un empleado entraba **como empleado**. | Al crear una cuenta o cambiarle la clave, no puede ser la de otra cuenta (de los Secrets, de empleado o de taller). |
+| 🟠 «Vista previa → aplicar» en toda la app | Revisado uno por uno: las decisiones de un lote ya saltean lo que otro resolvió; las aplicaciones y los vínculos de los catálogos son `INSERT OR IGNORE`; el precio y el stock ya miraban si cambiaron. **Faltaban dos**: un remito sumado dos veces duplicaba el stock, y fusionar productos no miraba si los dos seguían existiendo. | El remito lleva huella y no se suma dos veces (avisa cuándo se sumó); la fusión mira los dos adentro de la transacción. |
+| 🟠 Python 3.11 y 3.12 mezclados | El 3.12 es del trabajo de GitHub que solo **abre** la app en un navegador para despertarla: no la corre. | Igual quedó en 3.11, como el entorno de desarrollo. |
+| 🟠 `requirements.txt` sin versiones | **Cierto.** Además, la `cryptography` de este entorno (41.0.7) era vieja, con fallas conocidas, y ni se podía importar. | Rangos probados: todas las pruebas en verde en un entorno limpio con esas versiones, y hay paquetes armados para Python 3.12, 3.13 y 3.14 (lo que puede elegir Streamlit Cloud): un despliegue no se cae por eso. Streamlit queda en 1.65.x. |
+| 🟠 XSRF apagado en `.devcontainer` | Es solo para desarrollar en Codespaces (la vista previa no deja subir archivos con la protección prendida). Streamlit Cloud no usa ese archivo: allá está prendida. | Un comentario en el archivo que lo dice, para que nadie lo copie a producción. |
+| Prueba de recuperación real | La que había restauraba una base de un producto y contaba productos. | Ida y vuelta: datos de verdad (productos, vínculos, pendientes, empleados, talleres, cuentas, presupuestos), backup tal cual y como va a GitHub (comprimido y cifrado), borrar, restaurar, `integrity_check` y **comparar tabla por tabla**. Y uno cortado a la mitad no entra ni toca nada. |
+| Prueba de concurrencia | Ya existe `pruebas_de_carga.py` (diez personas a la vez), y ahora la del límite. | — |
+
+Probado en `pruebas_de_los_frenos.py` y `pruebas_del_deposito.py`, con seis fallas puestas a
+propósito (el límite, las medidas, el remito, la clave repetida, la fusión y la restauración),
+todas detectadas, y el auditor con `nucleo/` atrasado.
 
 ## 🔍 La revisión técnica con ChatGPT, puntos 79 a 92 y dos «P0»
 

@@ -18,3 +18,6 @@ datos_iniciales_desde_gz.db.*.tmp
 # temporales. Ver bajar_la_copia_de_github() en app.py.
 datos_desde_github.db.*.bajando
 datos_desde_github.db.*.tmp
+
+# El entorno con las librerías de requirements.txt (ver «Antes de subir un cambio»)
+.venv/

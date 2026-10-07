@@ -304,17 +304,23 @@ def medidas_deducibles_desde(desde_id, limite=2000):
 
 
 def aplicar_medidas_deducidas(filas):
-    """Escribe las medidas leídas. Devuelve cuántos productos se completaron."""
+    """Escribe las medidas leídas. Devuelve cuántos productos se completaron.
+
+    SOLO LO QUE SIGUE VACÍO AL ESCRIBIR, no al leer. La lista se arma antes —en la pantalla
+    queda a la vista mientras alguien la revisa, a veces varios minutos— y si en el medio otro
+    cargó una medida a mano, el «✅ Completar» la pisaba con la leída de la descripción (lo
+    señaló una revisión con ChatGPT). Con COALESCE, lo cargado manda siempre."""
     hechos = 0
     with db_lock:
         for f in filas:
             nuevas = f.get("_nuevas") or {}
             if not nuevas:
                 continue
-            sets = ", ".join(f"{campo} = ?" for campo in nuevas)
-            c.execute(f"UPDATE productos SET {sets} WHERE id = ?",
+            sets = ", ".join(f"{campo} = COALESCE({campo}, ?)" for campo in nuevas)
+            vacios = " OR ".join(f"{campo} IS NULL" for campo in nuevas)
+            c.execute(f"UPDATE productos SET {sets} WHERE id = ? AND ({vacios})",
                       list(nuevas.values()) + [f["_id"]])
-            hechos += 1
+            hechos += 1 if c.rowcount else 0
         conn.commit()
     return hechos
 

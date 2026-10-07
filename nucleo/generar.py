@@ -12,6 +12,11 @@ import orden
 # Las rutas, al lado de este archivo: estaban escritas con la carpeta de una máquina, y desde
 # otra copia del repositorio fallaba apenas arrancaba (lo encontró una revisión con ChatGPT).
 CARPETA_NUCLEO = os.path.dirname(os.path.abspath(__file__))
+# Con una carpeta como argumento escribe AHÍ y no en nucleo/: es lo que usa el auditor para ver
+# que el paquete esté al día con logica/ (regenera aparte y compara; ver auditar.py).
+if len(_sys.argv) > 1:
+    CARPETA_NUCLEO = os.path.abspath(_sys.argv[1])
+    os.makedirs(CARPETA_NUCLEO, exist_ok=True)
 
 SRC, _ = orden.fuente_completa()
 ARBOL = ast.parse(SRC)

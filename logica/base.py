@@ -856,8 +856,37 @@ def verificar_password(password, guardado, salt):
     return hmac.compare_digest(viejo, str(guardado)), True
 
 
+# CADA CUENTA CON SU CLAVE. Al entrar no se escribe el nombre: la contraseña sola dice quién
+# sos. Con dos cuentas con la misma clave, entraba siempre la primera que se encontraba —un
+# taller como otro taller, o peor, un taller como un empleado— (lo señaló una revisión con
+# ChatGPT). Al crear una cuenta o cambiarle la clave, se mira que nadie más la use.
+TEXTO_CLAVE_REPETIDA = ("Esa contraseña ya la usa otra cuenta. Cada cuenta necesita la suya: al "
+                        "entrar, la contraseña sola dice quién sos.")
+
+
+def clave_ya_usada(password, excepto_usuario=None, excepto_mecanico=None):
+    """True si alguna cuenta activa —de los Secrets, de empleado o de taller— ya usa esa clave."""
+    secretos = secretos_app()
+    de_los_secretos = [p for seccion in ("admin_passwords", "operador_passwords")
+                       for n, p in dict(secretos.get(seccion, {})).items()
+                       if es_un_usuario_de_los_secretos(n)]
+    if secretos.get("admin_password"):
+        de_los_secretos.append(secretos["admin_password"])
+    if any(hmac.compare_digest(str(p), str(password)) for p in de_los_secretos):
+        return True
+    for tabla, excepto in (("usuarios", excepto_usuario), ("mecanicos", excepto_mecanico)):
+        c.execute(f"SELECT id, password_hash, salt FROM {tabla} WHERE activo = 1 AND id IS NOT ?",
+                  (excepto,))
+        if any(verificar_password(password, f["password_hash"], f["salt"])[0]
+               for f in c.fetchall()):
+            return True
+    return False
+
+
 def crear_usuario(nombre, password, rol="operador"):
     exigir_nivel("admin", "crear empleados")
+    if clave_ya_usada(password):
+        raise ValueError(TEXTO_CLAVE_REPETIDA)
     h, salt = hash_password(password)
     with db_lock:
         c.execute("INSERT INTO usuarios (nombre, password_hash, salt, rol) VALUES (?, ?, ?, ?)",
@@ -895,6 +924,8 @@ def validar_password_usuario(password):
 
 def cambiar_password_usuario(usuario_id, nueva_password):
     exigir_nivel("admin", "cambiar contraseñas")
+    if clave_ya_usada(nueva_password, excepto_usuario=usuario_id):
+        raise ValueError(TEXTO_CLAVE_REPETIDA)
     h, salt = hash_password(nueva_password)
     with db_lock:
         c.execute("UPDATE usuarios SET password_hash=?, salt=? WHERE id=?", (h, salt, usuario_id))
@@ -925,6 +956,8 @@ def eliminar_usuario(usuario_id):
 
 def crear_mecanico(nombre, password):
     exigir_nivel("admin", "crear cuentas de taller")
+    if clave_ya_usada(password):
+        raise ValueError(TEXTO_CLAVE_REPETIDA)
     h, salt = hash_password(password)
     with db_lock:
         c.execute("INSERT INTO mecanicos (nombre, password_hash, salt) VALUES (?, ?, ?)",
