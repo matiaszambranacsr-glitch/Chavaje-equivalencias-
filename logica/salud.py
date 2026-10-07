@@ -145,6 +145,113 @@ def errores_de_las_tareas_de_fondo():
                   key=lambda x: -x[1])
 
 
+# LA VERSIÓN DE LA APP: el commit de git con que se desplegó (Streamlit Cloud baja el
+# repositorio con su historia). Para saber, cuando aparece un problema, con qué versión pasó:
+# va en el panel «Sistema» y en la ficha de cada copia (lo propuso una revisión con ChatGPT).
+@functools.lru_cache(maxsize=1)
+def version_de_la_app():
+    raiz = os.path.dirname(_CARPETA)
+    try:
+        cabeza = open(os.path.join(raiz, ".git", "HEAD"), encoding="utf-8").read().strip()
+        if not cabeza.startswith("ref: "):
+            return cabeza[:7]
+        ref = cabeza[5:]
+        rama = ref.rsplit("/", 1)[-1]
+        suelto = os.path.join(raiz, ".git", ref)
+        if os.path.exists(suelto):
+            return f"{open(suelto, encoding='utf-8').read().strip()[:7]} ({rama})"
+        for renglon in open(os.path.join(raiz, ".git", "packed-refs"), encoding="utf-8"):
+            if renglon.strip().endswith(" " + ref):
+                return f"{renglon.split()[0][:7]} ({rama})"
+    except OSError:
+        pass
+    return "desconocida"
+
+
+def estado_del_sistema():
+    """[{"": semáforo, "Qué": ..., "Cómo está": ...}]: la app de un vistazo, para el
+    administrador. Todo sale de lo que ya se mide en otros lados; acá no se prueba nada pesado
+    (para eso están los botones «🧪 Probar» de la pantalla)."""
+    filas = []
+
+    def fila(semaforo, que, como):
+        filas.append({"": semaforo, "Qué": que, "Cómo está": como})
+
+    # La base: lo que dijo el último control de integridad (corre con cada copia).
+    _danada = obtener_config("base_danada", "")
+    try:
+        _mb = os.path.getsize(DB_PATH) / 1048576
+    except OSError:
+        _mb = 0
+    c.execute("SELECT COUNT(*) FROM productos")
+    fila("🔴" if _danada else "🟢", "Base de datos",
+         (f"DAÑO en el último control: {_danada}" if _danada
+          else f"sana en el último control · {miles(c.fetchone()[0])} productos · {miles(_mb, 0)} MB"))
+    # La copia: subida y verificada.
+    if config_github():
+        _verif = estado_de_la_verificacion()
+        _err = obtener_config("ultimo_backup_github_error", "")
+        _ult = obtener_config("ultimo_backup_github", "")
+        fila("🔴" if _err or (_verif and not _verif.get("ok")) else "🟡" if not _verif else "🟢",
+             "Copia en GitHub",
+             (f"falla: {_err[:80]}" if _err else f"última subida {_ult[:16] or 'nunca'}")
+             + (f" · verificada {_verif.get('cuando', '')[:16]}" if _verif.get("ok")
+                else " · NO pasó la prueba de recuperación" if _verif else " · sin verificar todavía"))
+    else:
+        fila("🔴", "Copia en GitHub", "no está configurada: un reinicio puede borrar lo cargado")
+    # Las tareas de fondo y los proveedores que están descansando por fallas.
+    _tareas = estado_de_las_tareas()
+    _rojas = [x["Tarea"] for x in _tareas if x["Estado"] == "🔴"]
+    _amarillas = [x["Tarea"] for x in _tareas if x["Estado"] == "🟡"]
+    fila("🔴" if _rojas else "🟡" if _amarillas else "🟢", "Tareas automáticas",
+         ("fallando: " + ", ".join(_rojas) if _rojas else
+          "fallaron alguna vez: " + ", ".join(_amarillas) if _amarillas else "sin fallas"))
+    ahora = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    c.execute("SELECT clave, valor FROM configuracion WHERE clave LIKE 'fallas_seguidas_%'")
+    _descansando = []
+    for f in c.fetchall():
+        try:
+            if json.loads(f["valor"])["hasta"] > ahora:
+                _descansando.append(f["clave"][len("fallas_seguidas_"):])
+        except (ValueError, KeyError, TypeError):
+            pass
+    fila("🟡" if _descansando else "🟢", "Proveedores y fuentes de afuera",
+         ("descansando por fallas: " + ", ".join(_descansando)) if _descansando
+         else "ninguno descansando por fallas")
+    # El disco: la base, las copias temporales y las fotos viven ahí.
+    try:
+        _libre = shutil.disk_usage(os.path.dirname(os.path.abspath(DB_PATH))).free / 1048576
+        fila("🔴" if _libre < 200 else "🟡" if _libre < 1024 else "🟢", "Espacio libre",
+             f"{miles(_libre, 0)} MB")
+    except OSError as _err_disco:
+        fila("🟡", "Espacio libre", f"no se pudo medir ({_err_disco})")
+    # El buscador y el último error.
+    _busq = resumen_de_las_busquedas()
+    fila("🟡" if _busq and _busq["p95_ms"] > 2000 else "🟢", "Buscador",
+         (f"{miles(_busq['cuantas'])} búsquedas · mediana {miles(_busq['mediana_ms'], 0)} ms · "
+          f"P95 {miles(_busq['p95_ms'], 0)} ms") if _busq else "sin búsquedas desde que arrancó")
+    _ultimo = _ULTIMOS_ERRORES[-1] if _ULTIMOS_ERRORES else None
+    fila("🟢" if not _ultimo else "🟡", "Último error",
+         f"{_ultimo['cuando']} · {_ultimo['donde']} · {_ultimo['tipo']}" if _ultimo
+         else "ninguno desde que arrancó")
+    fila("⚪", "Versión", f"{version_de_la_app()} · Streamlit {st.__version__}")
+    return filas
+
+
+def probar_la_busqueda(veces=20):
+    """Busca `veces` códigos al azar del catálogo y mira que cada uno se encuentre a sí mismo.
+    (encontrados, veces, ms promedio)."""
+    c.execute("SELECT codigo_clean FROM productos ORDER BY RANDOM() LIMIT ?", (veces,))
+    codigos = [r[0] for r in c.fetchall()]
+    encontrados, inicio = 0, time.monotonic()
+    for codigo in codigos:
+        if any(sanitizar(str(r.get("Codigo", ""))) == codigo
+               for r in buscar_con_variantes_del_cero(codigo, "Todas", 3)[0]):
+            encontrados += 1
+    ms = (time.monotonic() - inicio) * 1000 / max(1, len(codigos))
+    return encontrados, len(codigos), ms
+
+
 def estado_de_las_tareas():
     """[{"Tarea", "Estado", "Fallas", "Última falla", "Qué pasó"}] de cada tarea automática:
     🟢 sin fallas desde que arrancó el servidor, 🟡 falló alguna vez, 🔴 falló

@@ -23,6 +23,8 @@ qué proveedores, son el mismo repuesto. Corre con Streamlit sobre una base SQLi
 | `pruebas_del_deposito.py` | El circuito del depósito y el descuento de cada cuenta: pedir, entregar, cargar en la cuenta y facturar. |
 | `pruebas_de_la_revision.py` | Que el análisis de equivalencias no se equivoque con pares ya revisados a mano, y (con `--base`) que no baje a rojo lo que aprobaste. |
 | `pruebas_de_los_cambios.py` | El registro de quién cambió qué (sin los precios), los permisos adentro de las funciones, el orden de los vínculos en la base, la entrega con stock de menos, el vistazo de un backup y el mensaje de WhatsApp. |
+| `CONTRATOS.md` | Lo que no se puede romper, regla por regla, con la prueba que sostiene cada una. |
+| `medir_el_buscador.py` | Cuánto tarda el buscador con 10, 50 y 100 personas buscando a la vez, sobre una copia de la base real. |
 | `requirements.txt` | Lo que hay que instalar, con los rangos de versiones con que se probó (ver el comentario de arriba del archivo). |
 | `Equivalencias` | El prototipo original, de antes de `app.py`. No lo usa nadie; queda por si querés mirarlo. Se puede borrar. |
 
@@ -6469,6 +6471,21 @@ el botón**:
   dónde vino. Solo los últimos tres años: la serie arranca en los cuarenta y trae el 89.
 - «🔌 Probar las fuentes de afuera» suma la Central de Deudores (con el CUIT de la AFIP, nunca el
   de un cliente) y la inflación de respaldo.
+
+## 🔍 La revisión técnica con ChatGPT: «antes de considerarlo cerrado»
+
+| Punto | Qué se encontró | Qué se hizo |
+|---|---|---|
+| 3. Datos viejos al guardar | **Cierto, y no solo en las medidas.** El editor de precio y stock del buscador guardaba SIEMPRE el precio que tenía al abrirse: reproducido en la app, otro sube el precio a $1.700, el primero guarda solo el stock y el precio **vuelve a $1.500**. Y algo de fondo: Streamlit conserva lo que muestra un campo aunque la base cambie, y los resultados de la búsqueda quedan en memoria, así que «lo que se mostró» no se podía sacar de la búsqueda. | Precio, stock y costo campo por campo: lo que no se tocó no se escribe, y lo que se tocó solo si en la base sigue lo que se vio al abrir (`valor_con_que_se_abrio()`, leído de la base). Si otro lo cambió, no se pisa y se avisa; después de guardar, el editor vuelve a mostrar lo que hay. No es una columna «versión» del producto: las tareas de fondo lo tocan todo el tiempo y daría avisos falsos. Probado en la app con dos sesiones y en `pruebas_de_los_frenos.py`. |
+| 4. Migraciones numeradas | Las migraciones son aditivas e idempotentes (tablas y columnas nuevas, condicionadas), corren al arrancar y después de restaurar, y está probado con un backup viejo. Un sistema numerado hace falta el día que una migración tenga que transformar datos (renombrar o partir una columna). | Sin cambio, por ahora. |
+| 5. Desarrollo y producción | Las claves van en los Secrets de Streamlit Cloud y, para desarrollar, en `.streamlit/secrets.toml`. **Ese archivo no estaba en `.gitignore`**: un `git add -A` lo subía al repositorio (revisado: nunca se subió). | Ignorado, y el auditor marca si alguna vez entra uno en git (probado forzándolo). |
+| 6, 7 y 13. El sistema de un vistazo, la versión y «modo diagnóstico» | Las piezas existían, repartidas. | «🩺 Sistema» arriba de Estado y papelera (solo administrador): base, copia (subida y verificada), tareas, proveedores descansando, espacio libre, buscador, último error y **versión** (el commit desplegado y la de Streamlit). Con «🧪 Probar la base», «🧪 Probar el buscador» (20 códigos al azar) y «🧪 Probar la copia». La versión va también en la ficha de cada copia. |
+| 8. Exportar el catálogo | Había backup (SQLite) y listas sueltas. | «📦 Armar el ZIP del catálogo» en Backup y config: un CSV por tabla (productos, marcas, equivalencias, pendientes, aplicaciones, reemplazos, vehículos, historial de precios, talleres, cuentas, movimientos, pedidos), sin fotos ni contraseñas. Con la copia real: 1,5 s y 3,5 MB. |
+| 9. Simulacro antes de lo peligroso | Ya es así: las limpiezas primero «🔎 Buscan» y muestran cuántos y cuáles (con la lista para bajar), y recién después aparece «🗑️ Borrar los N», con clave; importar muestra el diagnóstico antes. | Sin cambio. |
+| 10. Auditoría del código y de los datos | Ya están separadas: `auditar.py` es el código, «🔍 Revisar salud de los datos» son los datos (16 controles). | Sin cambio. |
+| 11. Carga del buscador | Medido con `medir_el_buscador.py` sobre la copia real (86.946 productos): 10 a la vez, promedio 82 ms y P95 169 ms; 50, 412 ms y P95 1 s; 100, 0,86 s y P95 2,2 s. **Cero errores y cero «database is locked».** Atiende unas 107 búsquedas por segundo: la espera crece con la cola, no se traba. | Sin cambio. |
+| 12. Observabilidad | Cada búsqueda queda con código, usuario, tiempo y resultado; cada error, con código, dónde, renglón y categoría, sin datos sensibles. | Sin cambio. |
+| 14. Lo que no se puede romper | — | `CONTRATOS.md`: cada regla con la prueba que la sostiene, y las que todavía no tienen prueba, dichas. Se sumaron dos pruebas que faltaban: un taller ve su portal y nada más, y un presupuesto guardado no cambia si cambia un precio. |
 
 ## 🔍 La revisión técnica con ChatGPT: la auditoría del ZIP
 

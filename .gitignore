@@ -21,3 +21,10 @@ datos_desde_github.db.*.tmp
 
 # El entorno con las librerías de requirements.txt (ver «Antes de subir un cambio»)
 .venv/
+
+# LAS CLAVES NUNCA VAN AL REPOSITORIO. Para desarrollar, van en .streamlit/secrets.toml (o en
+# un .env); en Streamlit Cloud, en Settings → Secrets. Sin estas líneas, un «git add -A» las
+# subía junto con todo lo demás. auditar.py además controla que no haya ninguno en git.
+.streamlit/secrets.toml
+.env
+*.env

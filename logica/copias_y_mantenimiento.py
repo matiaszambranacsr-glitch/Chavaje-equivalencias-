@@ -1468,6 +1468,77 @@ def listar_productos_sin_equivalencias(marca_filtro="Todas", limite=None):
     return filas_a_listas(c)
 
 
+# EL CATÁLOGO EN PLANILLAS: la salida de emergencia. El backup es una base SQLite, que se abre
+# con esta app y poco más. Esto es lo mismo en CSV —un archivo por tabla, adentro de un ZIP—,
+# que abre cualquier planilla o cualquier otro sistema: si algún día la app no está, los datos
+# del negocio siguen siendo tuyos (lo propuso una revisión con ChatGPT). Sin fotos ni índices
+# internos, y SIN claves: de empleados y talleres va el nombre, nunca la contraseña.
+# Las columnas van por nombre y solo las que existen: una base vieja exporta lo que tenga.
+TABLAS_DEL_CATALOGO_EXPORTADO = (
+    ("productos", "productos", ("id", "marca_id", "codigo_raw", "codigo_clean", "descripcion",
+                                "precio", "precio_costo", "stock", "ubicacion", "codigo_barras",
+                                "marca_repuesto", "diametro_interno", "diametro_externo", "ancho",
+                                "espesor", "paso_rosca", "cantidad_estrias", "posicion",
+                                "largo_total", "created_at")),
+    ("marcas", "marcas", ("id", "nombre", "tipo")),
+    ("equivalencias", "equivalencias", ("producto_a_id", "producto_b_id", "lote", "confianza",
+                                        "verificada", "nivel", "nota", "created_at")),
+    ("equivalencias_pendientes", "equivalencias_pendientes",
+     ("producto_a_id", "producto_b_id", "origen", "lote", "fecha")),
+    ("aplicaciones", "aplicaciones", ("marca_auto", "modelo_auto", "motor", "combustible",
+                                      "anio_desde", "anio_hasta", "codigo", "codigo_clean",
+                                      "marca_repuesto", "tipo_pieza", "origen")),
+    ("reemplazos_codigo", "reemplazos_codigo", None),
+    ("vehiculos", "vehiculos", ("id", "patente", "cliente_nombre", "cliente_telefono",
+                                "marca_auto", "modelo_auto", "anio", "motorizacion", "km_actual",
+                                "numero_motor", "vin")),
+    ("historial_precios", "historial_precios", ("producto_id", "precio", "fecha")),
+    ("talleres", "mecanicos", ("id", "nombre", "activo", "creado_en")),
+    ("cuentas_de_taller", "cuentas_de_taller", ("mecanico_id", "limite", "dias_de_plazo",
+                                                "descuento", "cobra_mora")),
+    ("movimientos_de_cuenta", "movimientos_de_cuenta", ("id", "mecanico_id", "fecha", "concepto",
+                                                        "importe", "vence", "medio",
+                                                        "cheque_fecha", "anulado")),
+    ("pedidos_deposito", "pedidos_deposito", None),
+)
+COLUMNAS_QUE_NUNCA_SE_EXPORTAN = {"password_hash", "salt", "imagen_url", "imagen_thumb",
+                                  "imagen_orb_blob", "busqueda", "imagen_data", "firma_blob"}
+
+
+def exportar_catalogo_zip():
+    """(bytes del ZIP, {archivo: filas}). Un CSV por tabla (UTF-8 con BOM, para que Excel lea
+    los acentos), más un LEEME."""
+    import csv
+    import zipfile
+    salida = io.BytesIO()
+    cuantas = {}
+    with zipfile.ZipFile(salida, "w", zipfile.ZIP_DEFLATED) as z:
+        for archivo, tabla, columnas in TABLAS_DEL_CATALOGO_EXPORTADO:
+            existen = [r[1] for r in c.execute(f"PRAGMA table_info({tabla})")]
+            if not existen:
+                continue
+            elegidas = [x for x in (columnas or existen)
+                        if x in existen and x not in COLUMNAS_QUE_NUNCA_SE_EXPORTAN]
+            texto = io.StringIO()
+            escritor = csv.writer(texto)
+            escritor.writerow(elegidas)
+            c.execute(f"SELECT {', '.join(elegidas)} FROM {tabla}")
+            n = 0
+            for fila in c.fetchall():
+                escritor.writerow(list(fila))
+                n += 1
+            z.writestr(f"{archivo}.csv", "\ufeff" + texto.getvalue())
+            cuantas[archivo] = n
+        z.writestr("LEEME.txt", (
+            f"Catálogo exportado el {datetime.now():%d/%m/%Y %H:%M}.\n\n"
+            "Un archivo CSV por tabla, separado por comas, con el punto como decimal.\n"
+            "Los productos se unen con las marcas por marca_id, y las equivalencias con los\n"
+            "productos por producto_a_id / producto_b_id (el id de productos.csv).\n"
+            "No lleva fotos ni contraseñas. Para volver a la app, usar el backup (.db), no esto.\n\n"
+            + "\n".join(f"{a}: {miles(n)} filas" for a, n in cuantas.items())))
+    return salida.getvalue(), cuantas
+
+
 def vistazo_de_un_backup(contenido):
     """Qué trae un backup antes de restaurarlo: {"productos", "marcas", "equivalencias",
     "ultimo_precio"} o {"error"}. Para que «restaurar» muestre qué se va a poner en lugar de lo
@@ -1995,7 +2066,8 @@ def ficha_de_la_copia(datos):
                        "productos": productos, "equivalencias": equivalencias, "marcas": marcas,
                        "bytes": len(datos), "sha256": hashlib.sha256(datos).hexdigest(),
                        "cifrada": esta_cifrada(datos[:len(MARCA_DE_COPIA_CIFRADA)]),
-                       "control_de_integridad": "ok"}, ensure_ascii=False, indent=1)
+                       "control_de_integridad": "ok", "version_de_la_app": version_de_la_app()},
+                      ensure_ascii=False, indent=1)
 
 
 def subir_las_fotos_si_cambiaron():

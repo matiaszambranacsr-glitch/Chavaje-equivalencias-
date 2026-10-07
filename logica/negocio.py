@@ -814,10 +814,22 @@ def cuando_se_sumo_el_remito(items_cotejados):
         return None
 
 
-def actualizar_precio_stock(producto_id, precio, stock, costo=None, stock_mostrado=None):
+def actualizar_precio_stock(producto_id, precio, stock, costo=None, stock_mostrado=None,
+                            precio_mostrado=None, costo_mostrado=None):
     """Guarda precio, stock y —si se pasa— el precio de costo. Devuelve False si el producto ya no
-    está, "stock_cambio" si no se tocó el stock porque otro lo cambió mientras se editaba, y True
-    si se guardó todo.
+    está, True si se guardó todo, o el texto de lo que NO se guardó porque otro lo cambió
+    mientras se editaba: "stock_cambio", "precio_cambio", "costo_cambio" (o varios, con coma).
+
+    LO QUE SE MOSTRÓ, CAMPO POR CAMPO (precio_mostrado, stock_mostrado, costo_mostrado): un
+    campo que no se tocó no se escribe, y uno que se tocó se escribe solo si en la base sigue lo
+    que se mostraba. Antes solo el stock se cuidaba así, y el precio se escribía siempre: el que
+    abría el editor con $1.000 y guardaba solo el stock devolvía a $1.000 el precio que otro
+    acababa de subir a $1.200 (lo señaló una revisión con ChatGPT). No es una columna «versión»
+    de todo el producto a propósito: las tareas de fondo tocan productos todo el tiempo (el
+    índice de búsqueda, las medidas, la marca del repuesto) y daría «alguien lo cambió» sin que
+    nadie haya tocado el precio. OJO: «lo que se mostró» es el valor con que se ABRIÓ el campo,
+    no el de la base en la pasada del clic: Streamlit conserva lo que muestra un campo aunque la
+    base cambie (ver valor_con_que_se_abrio()).
 
     EL STOCK NO SE PISA. La pantalla de edición mandaba siempre el stock que mostraba al
     dibujarse, aunque solo se hubiera cambiado el precio. Con varias personas a la vez: uno abre
@@ -849,6 +861,20 @@ def actualizar_precio_stock(producto_id, precio, stock, costo=None, stock_mostra
     # Todo o nada: el precio nuevo y su renglón en el historial van juntos. Si se guarda uno
     # sin el otro, el historial deja de servir justo para lo que está: saber cuándo subió.
     exigir_nivel("empleado", "cambiar precios y stock")
+    no_guardado = []
+
+    def escribir(campo, valor, mostrado, nombre):
+        """None en mostrado: se escribe siempre (llamadas viejas). Si no, ver arriba."""
+        if mostrado is None:
+            c.execute(f"UPDATE productos SET {campo} = ? WHERE id = ?", (valor, producto_id))
+            return
+        if abs(float(valor) - float(mostrado)) < 0.005:
+            return
+        c.execute(f"UPDATE productos SET {campo} = ? WHERE id = ? "
+                  f"AND ABS(COALESCE({campo}, 0) - ?) < 0.005", (valor, producto_id, mostrado))
+        if c.rowcount == 0:
+            no_guardado.append(nombre)
+
     with db_lock, transaccion():
         c.execute("SELECT precio FROM productos WHERE id = ?", (producto_id,))
         fila = c.fetchone()
@@ -856,24 +882,18 @@ def actualizar_precio_stock(producto_id, precio, stock, costo=None, stock_mostra
             return False
         precio_anterior = fila["precio"]
         if costo is not None:
-            c.execute("UPDATE productos SET precio_costo = ? WHERE id = ?",
-                      (costo, producto_id))
-        c.execute("UPDATE productos SET precio = ? WHERE id = ?", (precio, producto_id))
-        resultado = True
-        if stock_mostrado is None:
-            c.execute("UPDATE productos SET stock = ? WHERE id = ?", (stock, producto_id))
-        elif stock != stock_mostrado:
-            c.execute("UPDATE productos SET stock = ? WHERE id = ? AND COALESCE(stock, 0) = ?",
-                      (stock, producto_id, stock_mostrado))
-            if c.rowcount == 0:
-                resultado = "stock_cambio"
+            escribir("precio_costo", costo, costo_mostrado, "costo_cambio")
+        escribir("precio", precio, precio_mostrado, "precio_cambio")
+        escribir("stock", stock, stock_mostrado, "stock_cambio")
         # Solo se guarda un registro nuevo en el historial si el precio realmente cambió
         # (evita ensuciar el historial cada vez que se toca el stock sin tocar el precio).
-        if precio_anterior != precio:
-            c.execute("INSERT INTO historial_precios (producto_id, precio) VALUES (?, ?)", (producto_id, precio))
+        c.execute("SELECT precio FROM productos WHERE id = ?", (producto_id,))
+        if c.fetchone()["precio"] != precio_anterior:
+            c.execute("INSERT INTO historial_precios (producto_id, precio) VALUES (?, ?)",
+                      (producto_id, precio))
         # QUIÉN CAMBIÓ EL PRECIO NO SE ANOTA, a propósito: se probó y no se quiere (el
         # historial de precios dice cuándo y a cuánto, no quién).
-    return resultado
+    return ",".join(no_guardado) if no_guardado else True
 
 
 def historial_precio_producto(producto_id, limite=50):

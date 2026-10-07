@@ -257,6 +257,27 @@ if pagina == PAGINAS[4]:
                 )
 
         st.markdown("---")
+        st.markdown("**📦 Exportar el catálogo en planillas (CSV)**")
+        explicar(
+            "Todo el catálogo en archivos que abre cualquier planilla, por si algún día la app "
+            "no está.",
+            "Productos, marcas, equivalencias (aprobadas y pendientes), aplicaciones por auto, "
+            "reemplazos de código, vehículos, historial de precios, talleres con su cuenta, "
+            "movimientos y pedidos al depósito: un CSV por cada uno, adentro de un ZIP. Sin "
+            "fotos y sin contraseñas.\n\nNo reemplaza al backup: para volver a la app se usa el "
+            "backup (.db). Esto es para que los datos del negocio se puedan abrir con cualquier "
+            "otra cosa. Ver exportar_catalogo_zip().")
+        if st.button("📦 Armar el ZIP del catálogo", key="armar_zip_catalogo"):
+            with st.spinner("Armando las planillas…"):
+                st.session_state["_zip_catalogo"] = exportar_catalogo_zip()
+        if st.session_state.get("_zip_catalogo"):
+            _zip, _cuantas = st.session_state["_zip_catalogo"]
+            st.caption(" · ".join(f"{a}: {miles(n)}" for a, n in _cuantas.items()))
+            st.download_button(f"⬇️ Bajar el catálogo ({miles(len(_zip) / 1048576, 1)} MB)",
+                               data=_zip, file_name=f"catalogo_{datetime.now():%Y%m%d}.zip",
+                               mime="application/zip", key="bajar_zip_catalogo")
+
+        st.markdown("---")
         st.markdown("**📦 Exportar configuración (sin el catálogo de productos)**")
         ayuda(
             "Combos de repuestos, códigos DTC y fabricantes por WMI en un solo archivo de texto — útil "

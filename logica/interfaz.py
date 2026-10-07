@@ -179,6 +179,37 @@ def _es_el_mismo_nombre(escrito, nombre):
     return bool(a) and (a == b or (len(a) >= 6 and b.startswith(a)))
 
 
+def valor_con_que_se_abrio(clave, valor_de_la_base):
+    """El valor que tenía el campo `clave` cuando se abrió, no el de la base ahora.
+
+    Streamlit conserva lo que muestra un campo con clave aunque cambie el valor de arriba: si
+    otro cambia el precio de 1.000 a 1.200, el campo de esta pantalla sigue diciendo 1.000
+    (probado). Comparar al guardar contra el valor de la base en la pasada del clic no protege
+    nada: siempre «coincide». Se anota acá la primera vez que se dibuja el campo, y se renueva
+    después de guardar (ver ya_se_guardo())."""
+    marca = f"_abierto_con_{clave}"
+    refrescar = st.session_state.setdefault("_campos_a_refrescar", set())
+    if clave in refrescar:
+        # Después de guardar: el campo vuelve a mostrar lo que hay en la base. Se puede tocar
+        # porque todavía no se dibujó en esta pasada.
+        refrescar.discard(clave)
+        st.session_state[clave] = valor_de_la_base
+        st.session_state[marca] = valor_de_la_base
+    elif clave not in st.session_state or marca not in st.session_state:
+        # El campo arranca con este valor: se dibuja SIN value= (ver el editor del buscador),
+        # así lo que muestra y lo que se anotó son lo mismo.
+        st.session_state[clave] = valor_de_la_base
+        st.session_state[marca] = valor_de_la_base
+    return st.session_state[marca]
+
+
+def ya_se_guardo(clave):
+    """Después de guardar (todo o en parte): en la próxima pasada el campo se recarga con lo que
+    hay en la base, que pasa a ser «lo que se mostró». Sin esto seguía mostrando el stock que
+    tenía al abrirse aunque otro hubiera vendido en el medio."""
+    st.session_state.setdefault("_campos_a_refrescar", set()).add(clave)
+
+
 def miga_hasta(nombre):
     """La miga completa hasta una pantalla, una solapa o una herramienta de Mantenimiento, por
     su nombre (con o sin emoji, o el principio si es largo). ValueError si no existe: una miga

@@ -9,6 +9,38 @@ en que se muestran. Corre después de pantallas/mantenimiento.py, que elige el g
 # ============================================================
 if pagina == PAGINAS[3]:
     if sub_admin == SUB_ADMIN[4]:
+        # EL SISTEMA DE UN VISTAZO, arriba de todo: ver estado_del_sistema(). Solo el
+        # administrador; los botones prueban en el momento lo que el resto mira de lejos.
+        if _grupo_mant == GRUPOS_MANTENIMIENTO[5] and es_admin():
+            st.markdown("**🩺 Sistema**")
+            st.dataframe(estado_del_sistema(), width="stretch", hide_index=True)
+            _p1, _p2, _p3 = st.columns(3)
+            if _p1.button("🧪 Probar la base", key="probar_la_base"):
+                with st.spinner("Controlando la base entera…"):
+                    _sana, _detalle = la_base_esta_sana(ruta=DB_PATH)
+                guardar_config("base_danada", "" if _sana else
+                               f"{datetime.now():%d/%m %H:%M} — {_detalle}")
+                invalidar_salud()
+                avisar("success" if _sana else "error",
+                       "✅ La base está sana (control de integridad)." if _sana
+                       else f"🧯 La base tiene daño: {_detalle}. Desde ahora queda de solo lectura "
+                            "para los empleados hasta que la restaures.")
+                st.rerun()
+            if _p2.button("🧪 Probar el buscador", key="probar_el_buscador"):
+                _hallados, _total, _ms = probar_la_busqueda()
+                avisar("success" if _hallados == _total else "error",
+                       f"{'✅' if _hallados == _total else '⚠️'} {_hallados} de {_total} códigos al "
+                       f"azar se encontraron a sí mismos · {miles(_ms, 1)} ms cada uno.")
+                st.rerun()
+            if config_github() and _p3.button("🧪 Probar la copia de GitHub", key="probar_la_copia"):
+                with st.spinner("Bajando la copia y abriéndola…"):
+                    _ok_c, _det_c = verificar_la_copia_de_github()
+                invalidar_salud()
+                avisar("success" if _ok_c else "error",
+                       ("✅ La copia se puede recuperar: " if _ok_c else "⚠️ La copia no pasó: ")
+                       + _det_c)
+                st.rerun()
+            st.markdown("---")
         if _grupo_mant == GRUPOS_MANTENIMIENTO[5]:
             st.markdown("**🔀 ¿Cuánto cruza tu catálogo entre proveedores?**")
             explicar(

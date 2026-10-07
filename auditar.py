@@ -2406,6 +2406,18 @@ for _carpeta, _subcarpetas, _archivos in os.walk(_RAIZ_DEL_REPO):
                 reportar("ERROR", 0, f"{os.path.relpath(_ruta, _RAIZ_DEL_REPO)}:{_i}: ruta de una "
                                      "máquina escrita en el código; armarla desde __file__")
 
+import subprocess
+# ============ Claves en el repositorio ============
+# Las claves van en .streamlit/secrets.toml para desarrollar y en Settings → Secrets en
+# Streamlit Cloud: nunca en git. Si alguna vez entró una, esto lo marca.
+_en_git = subprocess.run(["git", "ls-files"], capture_output=True, text=True,
+                         cwd=_RAIZ_DEL_REPO).stdout.split("\n") if os.path.isdir(
+    os.path.join(_RAIZ_DEL_REPO, ".git")) else []
+for _f in _en_git:
+    if os.path.basename(_f) in ("secrets.toml", ".env") or _f.endswith(".env"):
+        reportar("ERROR", 0, f"{_f} está en el repositorio: ahí van claves. Sacarlo de git "
+                             "(git rm --cached) y cambiar las claves que tenía")
+
 # ============ El paquete nucleo/ al día con logica/ ============
 # nucleo/ se genera desde logica/ (nucleo/generar.py). Si alguien cambia logica/ y no lo
 # regenera, nucleo/pruebas.py sigue en verde —prueba lo viejo— y el paquete queda atrasado sin

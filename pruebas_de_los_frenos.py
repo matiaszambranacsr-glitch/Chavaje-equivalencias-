@@ -204,6 +204,13 @@ def probar(L):
     ns["guardar_presupuesto_mecanico"](taller, "Juan", items, 800)
     esperar("doble toque: uno solo; otro distinto, sí",
             c.execute("SELECT COUNT(*) FROM presupuestos_mecanico").fetchone()[0], 2)
+    total_antes = [p["Total"] if "Total" in p else p.get("total")
+                   for p in ns["listar_presupuestos_mecanico"](taller)]
+    c.execute("UPDATE productos SET precio = precio * 2")
+    conn.commit()
+    esperar("un presupuesto guardado no cambia si cambia el precio",
+            [p["Total"] if "Total" in p else p.get("total")
+             for p in ns["listar_presupuestos_mecanico"](taller)], total_antes)
 
     # 11. La consistencia del catálogo encuentra lo que se le pone.
     c.execute("UPDATE productos SET descripcion = '' WHERE id = (SELECT MIN(id) FROM productos)")
@@ -258,6 +265,37 @@ def probar(L):
 
     # 15. Fusionar con un producto que otra sesión ya borró: no hace nada y lo dice.
     esperar("fusionar con uno que ya no está", ns["fusionar_productos"](999999, pid), False)
+
+    # 15b. Precio, stock y costo: lo que otro cambió mientras se editaba no se pisa.
+    c.execute("UPDATE productos SET precio = 1000, stock = 10, precio_costo = 600 WHERE id = ?",
+              (pid,))
+    conn.commit()
+
+    def estado():
+        return tuple(c.execute("SELECT precio, stock, precio_costo FROM productos WHERE id = ?",
+                               (pid,)).fetchone())
+    vio = {"precio_mostrado": 1000, "stock_mostrado": 10, "costo_mostrado": 600}
+    # A abrió con 1000/10/600. B sube el precio a 1200. A cambia solo el stock a 12.
+    c.execute("UPDATE productos SET precio = 1200 WHERE id = ?", (pid,))
+    conn.commit()
+    esperar("A guarda el stock: se guarda", ns["actualizar_precio_stock"](pid, 1000, 12, 600, **vio), True)
+    esperar("y el precio de B queda", estado(), (1200, 12, 600))
+    # B vende (stock 12 → 9). A, que todavía ve 12... cambia el precio a 1300.
+    c.execute("UPDATE productos SET stock = 9 WHERE id = ?", (pid,))
+    conn.commit()
+    vio = {"precio_mostrado": 1200, "stock_mostrado": 12, "costo_mostrado": 600}
+    esperar("A cambia el precio: se guarda", ns["actualizar_precio_stock"](pid, 1300, 12, 600, **vio), True)
+    esperar("y el stock de la venta queda", estado(), (1300, 9, 600))
+    # Los dos cambian el mismo campo: el segundo no pisa, y lo dice.
+    c.execute("UPDATE productos SET precio_costo = 650 WHERE id = ?", (pid,))
+    conn.commit()
+    vio = {"precio_mostrado": 1300, "stock_mostrado": 9, "costo_mostrado": 600}
+    esperar("los dos cambian el costo: no se pisa",
+            ns["actualizar_precio_stock"](pid, 1300, 9, 700, **vio), "costo_cambio")
+    esperar("queda el del otro", estado(), (1300, 9, 650))
+    esperar("dos campos a la vez",
+            ns["actualizar_precio_stock"](pid, 1400, 3, 650, precio_mostrado=1250, stock_mostrado=8,
+                                          costo_mostrado=650), "precio_cambio,stock_cambio")
 
     # 16. IDA Y VUELTA DE UN BACKUP: lo que importa del negocio, backup, borrar todo, restaurar
     # y comparar tabla por tabla. Dos veces: el backup tal cual y como va a GitHub (comprimido y

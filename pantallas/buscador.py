@@ -1419,30 +1419,54 @@ if pagina == PAGINAS[0]:
                                 if nuevo_fav != es_fav:
                                     alternar_favorito(fila["ID"], nuevo_fav)
                                 colC.write(f"{fila['Marca']} - {fila['Codigo']}")
+                                # Con qué valores se abrió el editor: ver valor_con_que_se_abrio().
+                                _k_precio = f"precio_{fila['ID']}_{clean}"
+                                _k_stock = f"stock_{fila['ID']}_{clean}"
+                                _k_costo = f"costo_{fila['ID']}_{clean}"
+                                # De la base y no de `fila`: los resultados de la búsqueda
+                                # quedan en memoria y pueden ser de hace un rato.
+                                c.execute("SELECT precio, stock FROM productos WHERE id = ?",
+                                          (fila["ID"],))
+                                _en_la_base = c.fetchone() or {"precio": 0, "stock": 0}
+                                _precio_visto = valor_con_que_se_abrio(
+                                    _k_precio, float(_en_la_base["precio"] or 0))
+                                _stock_visto = valor_con_que_se_abrio(
+                                    _k_stock, int(_en_la_base["stock"] or 0))
                                 nuevo_precio = colP.number_input(
-                                    "Precio", value=float(fila.get("Precio") or 0),
-                                    key=f"precio_{fila['ID']}_{clean}", min_value=0.0, step=100.0,
+                                    "Precio", key=_k_precio, min_value=0.0, step=100.0,
                                     label_visibility="collapsed"
                                 )
                                 nuevo_stock = colS.number_input(
-                                    "Stock", value=int(fila.get("Stock") or 0),
-                                    key=f"stock_{fila['ID']}_{clean}", min_value=0, step=1,
+                                    "Stock", key=_k_stock, min_value=0, step=1,
                                     label_visibility="collapsed"
                                 )
                                 if candado('tocar precios y stock', colG.button("💾", key=f"save_{fila['ID']}_{clean}"), 'tocar_precios_y_stock', nivel="empleado"):
+                                    _nuevo_costo = st.session_state.get(_k_costo)
                                     _guardado = actualizar_precio_stock(
-                                        fila["ID"], nuevo_precio, nuevo_stock,
-                                        st.session_state.get(f"costo_{fila['ID']}_{clean}"),
-                                        stock_mostrado=int(fila.get("Stock") or 0))
-                                    if _guardado == "stock_cambio":
-                                        c.execute("SELECT stock FROM productos WHERE id = ?",
-                                                  (fila["ID"],))
-                                        _ahora = (c.fetchone() or {"stock": None})["stock"]
+                                        fila["ID"], nuevo_precio, nuevo_stock, _nuevo_costo,
+                                        stock_mostrado=_stock_visto, precio_mostrado=_precio_visto,
+                                        costo_mostrado=st.session_state.get(f"_abierto_con_{_k_costo}"))
+                                    if isinstance(_guardado, str):
+                                        # Lo que otro cambió mientras se editaba NO se pisó. Lo
+                                        # que hay ahora pasa a ser lo «mostrado»: guardar de nuevo
+                                        # después del aviso es corregirlo a sabiendas.
+                                        c.execute("SELECT precio, stock, precio_costo FROM productos "
+                                                  "WHERE id = ?", (fila["ID"],))
+                                        _ahora = c.fetchone()
+                                        _que = {"precio_cambio": f"el precio (ahora {formato_precio(_ahora['precio'] or 0)})",
+                                                "stock_cambio": f"el stock (ahora hay {_ahora['stock']})",
+                                                "costo_cambio": f"el costo (ahora {formato_precio(_ahora['precio_costo'] or 0)})"}
+                                        for _clave_ed in (_k_precio, _k_stock, _k_costo):
+                                            ya_se_guardo(_clave_ed)
                                         st.warning(
-                                            f"Precio guardado. El stock NO: mientras editabas, "
-                                            f"alguien lo cambió y ahora hay {_ahora}. Si igual "
-                                            "querés corregirlo, buscá de nuevo y ponelo otra vez.")
+                                            "Mientras editabas, alguien cambió "
+                                            + " y ".join(_que[x] for x in _guardado.split(","))
+                                            + ": eso NO se guardó, para no pisarlo. Lo demás sí. "
+                                            "Al tocar algo el editor muestra lo que hay ahora; si "
+                                            "igual querés tu valor, escribilo otra vez y guardá.")
                                     elif _guardado:
+                                        for _clave_ed in (_k_precio, _k_stock, _k_costo):
+                                            ya_se_guardo(_clave_ed)
                                         st.success("Guardado.")
                                     else:
                                         # Decirlo y no mentir un «Guardado»: el producto lo
@@ -1455,10 +1479,12 @@ if pagina == PAGINAS[0]:
                                     c.execute("SELECT precio_costo FROM productos WHERE id = ?",
                                               (fila["ID"],))
                                     _fc = c.fetchone()
-                                    _costo_actual = float((_fc["precio_costo"] if _fc else 0) or 0)
+                                    valor_con_que_se_abrio(
+                                        f"costo_{fila['ID']}_{clean}",
+                                        float((_fc["precio_costo"] if _fc else 0) or 0))
                                     cc1, cc2 = st.columns([2, 3])
                                     cc1.number_input(
-                                        "Costo", value=_costo_actual, min_value=0.0, step=100.0,
+                                        "Costo", min_value=0.0, step=100.0,
                                         key=f"costo_{fila['ID']}_{clean}",
                                         help="Lo que te cuesta a vos. Solo lo ve el administrador."
                                     )

@@ -89,6 +89,21 @@ def probar():
             "nivel_usuario" in at.session_state, False)
     esperar("y lo dice", any("ya no está activa" in w.value for w in at.warning), True)
     esperar("sin errores en pantalla", [e.value for e in at.exception], [])
+
+    # 4. Un taller ve su portal y nada más, aunque la sesión diga que está en Administrar.
+    ns["crear_mecanico"]("Taller Sesión", "clave-taller-sesion-1")
+    taller = ns["c"].execute("SELECT id FROM mecanicos WHERE nombre = 'Taller Sesión'").fetchone()[0]
+    at.session_state["nivel_usuario"] = "mecanico"
+    at.session_state["admin_nombre"] = "Taller Sesión"
+    at.session_state["mecanico_id"] = taller
+    at.session_state["pagina_actual"] = "🗂️ Administrar"
+    at.run()
+    textos = " ".join(m.value for m in at.markdown)
+    esperar("el taller ve su portal", "Portal de mecánico" in textos, True)
+    esperar("y no la administración", any(x in textos for x in ("Cuentas corrientes de los talleres",
+                                                              "Usuarios", "Backup")), False)
+    esperar("ni las pestañas del negocio", [b.label for b in at.button if "Administrar" in b.label], [])
+    esperar("sin errores", [e.value for e in at.exception], [])
     return fallas
 
 
