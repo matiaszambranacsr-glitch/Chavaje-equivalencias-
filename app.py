@@ -618,8 +618,15 @@ if (NIVEL_DE_CADA_SECCION.get(pagina)
 # este mismo espacio de nombres, como si estuvieran escritas en este lugar (ver
 # pantallas/__init__.py).
 # «AQUÍ CORREN LAS PANTALLAS»
-for _pantalla in pantallas.PANTALLAS:
-    exec(pantallas.codigo_de_la_pantalla(_pantalla), globals())
+# Un error que se escapa de una pantalla: un código para dictar en vez del error técnico (ver
+# mostrar_error_inesperado()). st.stop() y st.rerun() no son Exception: pasan de largo.
+try:
+    for _pantalla in pantallas.PANTALLAS:
+        exec(pantallas.codigo_de_la_pantalla(_pantalla), globals())
+except Exception as _err_de_la_pantalla:
+    mostrar_error_inesperado(
+        f"pantalla {pagina}", _err_de_la_pantalla,
+        PREFIJOS_DE_LAS_PANTALLAS[PAGINAS.index(pagina)] if pagina in PAGINAS else "APP")
 
 if _VISTA_AL_PIE:
     st.markdown("---")

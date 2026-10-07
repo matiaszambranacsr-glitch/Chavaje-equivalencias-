@@ -147,6 +147,74 @@ def probar(L):
                 [f for f in os.listdir(".") if f.endswith(".verificar")], [])
     finally:
         g.update(originales)
+
+    # 7. El ingreso de los mecánicos pasa por el mismo freno de intentos que el resto.
+    ns["crear_mecanico"]("Taller Freno", "clave-del-taller-7")
+    ns["guardar_config"]("login_fallidos", "8")
+    ns["guardar_config"]("login_ultimo_fallo", datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+    nombre, nivel, error = ns["validar_password"]("clave-del-taller-7", con_mecanicos=True)
+    esperar("frenado: ni la clave correcta de un taller entra", (nivel, bool(error)), (None, True))
+    ns["guardar_config"]("login_fallidos", "1")
+    nombre, nivel, error = ns["validar_password"]("clave-del-taller-7", con_mecanicos=True)
+    esperar("sin freno, el taller entra", (nombre, nivel), ("Taller Freno", "mecanico"))
+    esperar("y acertar reinicia la cuenta de fallos", ns["obtener_config"]("login_fallidos"), "0")
+    ns["validar_password"]("otra-clave-cualquiera", con_mecanicos=True)
+    esperar("una clave equivocada cuenta como fallo", ns["obtener_config"]("login_fallidos"), "1")
+    esperar("la clave de un taller no autoriza acciones adentro",
+            ns["validar_password"]("clave-del-taller-7")[1], None)
+
+    # 8. Los errores: sin datos sensibles, con categoría, renglón y código.
+    tapado = ns["tapar_lo_sensible"](
+        "GET https://api.x.com/v1?key=AIzaSyA1234567890abcdefghijk&q=filtro token=abc123 "
+        "Authorization: Bearer ghp_ABCdef123456 https://ana:secreto@portal.com/x password=hola")
+    esperar("lo sensible se tapa", [x for x in ("AIzaSyA123", "abc123", "ghp_ABCdef", "secreto",
+                                                 "hola") if x in tapado], [])
+    esperar("y lo demás queda", ("q=filtro" in tapado, "api.x.com" in tapado), (True, True))
+    try:
+        raise ValueError("algo con password=1234 adentro")
+    except ValueError as _e:
+        ns["anotar_error"]("prueba/renglon", _e, codigo="BUS-0001")
+    ultimo = g["_ULTIMOS_ERRORES"][-1]
+    esperar("el error anotado: tapado, con renglón y código",
+            ("1234" in ultimo["detalle"], ultimo["lugar"].startswith("pruebas_de_los_frenos.py:"),
+             ultimo["codigo"]), (False, True, "BUS-0001"))
+    categorias = {d: ns["categoria_del_error"]({"donde": d, "tipo": tipo}) for d, tipo in (
+        ("_trabajo_de_fondo/fotos", "ConnectionError"), ("cualquiera", "OperationalError"),
+        ("vigilar_la_copia", "ValueError"), ("tasas_de_referencia", "KeyError"),
+        ("nivel principal", "KeyError"), ("exigir_nivel", "PermissionError"))}
+    esperar("cada error en su categoría", [v.split(" ", 1)[1] for v in categorias.values()],
+            ["Internet y proveedores", "Base de datos", "Copias", "Internet y proveedores",
+             "Pantallas y otros", "Ingreso y permisos"])
+    esperar("el código de error se puede dictar",
+            bool(__import__("re").fullmatch(r"BUS-[0-9A-F]{4}", ns["codigo_de_error"]("BUS"))), True)
+
+    # 9. Las búsquedas viejas se borran; las del último año quedan.
+    c.execute("INSERT INTO historial_busquedas (termino, usuario, fecha) VALUES "
+              "('viejo', 'ana', datetime('now', '-400 days')), ('nuevo', 'ana', datetime('now'))")
+    conn.commit()
+    esperar("se borra la de hace más de un año", ns["borrar_busquedas_viejas"](), 1)
+    esperar("queda la de hoy", [r[0] for r in c.execute("SELECT termino FROM historial_busquedas")],
+            ["nuevo"])
+
+    # 10. El mismo presupuesto dos veces seguidas (doble toque) se guarda una sola vez.
+    taller = c.execute("SELECT id FROM mecanicos").fetchone()[0]
+    items = [{"codigo": "F0001", "precio": 1000, "cantidad": 2}]
+    for _ in range(3):
+        ns["guardar_presupuesto_mecanico"](taller, "Juan", items, 500)
+    ns["guardar_presupuesto_mecanico"](taller, "Juan", items, 800)
+    esperar("doble toque: uno solo; otro distinto, sí",
+            c.execute("SELECT COUNT(*) FROM presupuestos_mecanico").fetchone()[0], 2)
+
+    # 11. La consistencia del catálogo encuentra lo que se le pone.
+    c.execute("UPDATE productos SET descripcion = '' WHERE id = (SELECT MIN(id) FROM productos)")
+    a, b = [r[0] for r in c.execute("SELECT id FROM productos LIMIT 2")]
+    c.execute("INSERT INTO equivalencias (producto_a_id, producto_b_id, lote) VALUES (?, ?, 'X')", (a, b))
+    c.execute("INSERT INTO equivalencias_pendientes (producto_a_id, producto_b_id) VALUES (?, ?)", (a, b))
+    conn.commit()
+    chequeo = {r["Chequeo"]: r["Problemas"] for r in ns["chequear_integridad_bd"]()}
+    esperar("sin descripción y pendiente ya aprobado",
+            (chequeo["Productos sin descripción"], chequeo["Vínculos pendientes que ya están aprobados"],
+             chequeo["Equivalencias de un producto consigo mismo"]), (1, 1, 0))
     return fallas
 
 

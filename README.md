@@ -18,7 +18,7 @@ qué proveedores, son el mismo repuesto. Corre con Streamlit sobre una base SQLi
 | `pruebas_de_carga.py` | Diez personas a la vez con el mantenimiento y la copia corriendo: sin errores, sin dobles entregas ni cobros, sin ventas perdidas. |
 | `pruebas_de_la_recuperacion.py` | La app con la base dañada: abre en modo recuperación y se puede volver a una copia sin perder el archivo dañado. |
 | `pruebas_de_las_cuentas.py` | El interés por mora de las cuentas corrientes, con fechas fijas, y que se cobre solo en las cuentas que lo tienen prendido. |
-| `pruebas_de_los_frenos.py` | Lo que hace la app cuando algo anda mal: la base con daño queda de solo lectura, los avisos técnicos solo al administrador, el descanso de un proveedor caído, el catálogo que se achica de golpe y la prueba de que la copia de GitHub se puede recuperar. |
+| `pruebas_de_los_frenos.py` | Lo que hace la app cuando algo anda mal: la base con daño queda de solo lectura, los avisos técnicos solo al administrador, el descanso de un proveedor caído, el catálogo que se achica de golpe, la prueba de que la copia de GitHub se puede recuperar, el freno de intentos también para los mecánicos, los errores (sin datos sensibles, con categoría y código), las búsquedas viejas, el doble toque y la consistencia del catálogo. |
 | `pruebas_de_las_homologaciones.py` | El registro oficial de CHAS (autopartes de seguridad): leerlo en varios formatos y cruzarlo con tus marcas. |
 | `pruebas_del_deposito.py` | El circuito del depósito y el descuento de cada cuenta: pedir, entregar, cargar en la cuenta y facturar. |
 | `pruebas_de_la_revision.py` | Que el análisis de equivalencias no se equivoque con pares ya revisados a mano, y (con `--base`) que no baje a rojo lo que aprobaste. |
@@ -6463,6 +6463,47 @@ el botón**:
   dónde vino. Solo los últimos tres años: la serie arranca en los cuarenta y trae el 89.
 - «🔌 Probar las fuentes de afuera» suma la Central de Deudores (con el CUIT de la AFIP, nunca el
   de un cliente) y la inflación de respaldo.
+
+## 🔍 La revisión técnica con ChatGPT, puntos 79 a 92 y dos «P0»
+
+| Punto | Qué se encontró | Qué se hizo |
+|---|---|---|
+| P0. `nucleo/generar.py` roto fuera de esta máquina | **Cierto**: tenía la carpeta de una máquina escrita (`/home/user/…`) en tres lugares; desde otra copia del repositorio fallaba al arrancar. | Las rutas salen de dónde está el archivo. Probado desde otra copia en otra carpeta: genera el paquete idéntico. Y un control nuevo del auditor: ningún `.py` del repositorio puede tener una ruta así (probado con la versión vieja: marca las tres). |
+| P0. El freno de intentos no protegía el ingreso de los mecánicos | **Cierto, y grave**: si la clave general estaba frenada («esperá»), el ingreso igual probaba la clave contra todos los talleres, sin freno y con un PBKDF2 por taller. Un taller que acertaba no reiniciaba la cuenta de fallos, y su clave se comparaba con `==`. | Un solo freno: las claves de los talleres se prueban adentro de `validar_password(con_mecanicos=True)`, detrás del freno, y acertar reinicia la cuenta. Con `compare_digest`. La clave de un taller sigue sin autorizar nada adentro del negocio. Encontrado al probarlo: sin claves de empleados pero con talleres, una clave equivocada no contaba como fallo; ahora cuenta. |
+| 79. Retención de copias | **Cierto**: en GitHub había UNA copia; cada subida pisaba la anterior. Una copia con datos malos y a la media hora no había a qué volver. | `historial/AAAA-MM-DD/` en la rama de copias: las últimas 7 diarias, 4 semanales y 6 mensuales, con tope de 400 MB (se sueltan las más viejas). No se sube nada dos veces: la de hoy es el mismo archivo que la de arriba, por su sha. |
+| 80. Copia identificable | La copia lleva adentro su huella y su fecha. | Al lado de cada copia, su ficha (`.json`): fecha, productos, vínculos, marcas, tamaño, huella, si está cifrada y que pasó el control de integridad. Y al restaurar se ve **de cuándo es** el backup. |
+| 81. No depender del nombre del archivo | La copia que vale se reconoce por su huella (ver el punto 78), no por el nombre. | Sin cambio. |
+| 82. Doble clic | Los botones con clave usan `candado()`; los vínculos son clave primaria (un par no entra dos veces); una lista ya importada se reconoce por su huella; una entrega no se cobra dos veces (probado en `pruebas_de_carga.py`). **Faltaba** guardar un presupuesto en el portal de mecánicos: un doble toque dejaba dos iguales. | El mismo presupuesto guardado hace menos de dos minutos no se guarda otra vez. |
+| 83. Botones con estado | Lo que tarda muestra «…» (spinner) mientras corre. Streamlit no desactiva el botón: un segundo toque se procesa después, y por eso lo que importa es que guardar dos veces no duplique (punto 82). | Sin cambio. |
+| 84. Dos pestañas del mismo empleado | En Streamlit cada pestaña es una sesión aparte, con su propia memoria: no comparten nada. Entre las dos pasa lo mismo que entre dos personas, y eso ya está cuidado (el stock que se editaba con otro valor no se pisa, la entrega una sola vez, etc.). | Sin cambio. |
+| 85. Historial de búsquedas | **Cierto**: cada búsqueda quedaba guardada con quién la hizo, para siempre. | Se borran solas las de más de un año (tarea del día). Las mediciones del buscador van en memoria, las últimas 500. Solo el administrador las ve. |
+| 86. Papelera | Ya existe para marcas y productos. | Sin cambio. |
+| 87. Errores por categoría | Era una lista. | Arriba de la lista: «🌐 Internet y proveedores: 140 · 🗄️ Base de datos: 0 · ☁️ Copias: 2…». |
+| 88. Un código para el error | El buscador ya daba uno. **Una pantalla que fallaba** mostraba el error técnico de Streamlit, con rutas del servidor, y no quedaba anotado. | «No se pudo terminar de mostrar esta pantalla. Código: ADM-3D58»: queda en «🐞 Errores» con dónde y en qué renglón, y se busca por el código. El administrador ve además el error completo. Probado rompiendo una función a propósito, entrando como empleado y como administrador. |
+| 89. Rotación de logs | No hay archivo: los errores van a memoria, los últimos 150. | Sin cambio. |
+| 90. Nada sensible en los errores | Ninguna clave viaja en una dirección (Gemini y GitHub la mandan en la cabecera). | Igual, antes de anotar un error se tapan claves, tokens, contraseñas y usuario:clave en direcciones. |
+| 91. El escenario de las 9:00 a las 9:08 | Ver abajo. | — |
+| 92. Consistencia del catálogo | «🔍 Revisar salud de los datos» ya miraba 8 cosas. | Ahora 16: también equivalencias consigo mismo, al revés o repetidas, pendientes rotas o ya aprobadas, equivalencias sin lote, productos sin descripción, aplicaciones repetidas y vínculos esperando hace más de 90 días. Sobre la copia de hoy: **todo en cero salvo 9 productos sin descripción**. |
+
+Y un error del propio paquete `nucleo/` encontrado de paso: al sumarle a `anotar_error()` el tapado
+de lo sensible, el paquete se regeneraba sin esa función, y como `anotar_error()` no puede fallar,
+dejaba de anotar en silencio. Arreglado, y `nucleo/pruebas.py` ahora lo controla.
+
+**El escenario del punto 91**, paso por paso: 9:00 A entra (su sesión, su memoria). 9:01 busca
+(lectura; no espera a nadie). 9:02 empieza la copia: `backup()` de SQLite toma el candado de
+escritura un instante y copia una foto coherente; las lecturas siguen. 9:03 A cambia un producto:
+espera ese instante y entra; queda para la copia siguiente (cada 15 minutos). 9:04 falla un
+proveedor: es la tanda de fondo, que descansa (1 h, y más si sigue fallando); el mostrador no se
+entera. 9:05 la base «queda bloqueada»: con WAL las lecturas siguen; una escritura espera hasta
+8 s (`busy_timeout`) y si no, el aviso dice «la base está ocupada, tocá de nuevo» — no se toma
+como base dañada. 9:06 otro entra: sesión aparte. 9:07 el administrador restaura: ve qué trae y de
+cuándo, escribe RESTAURAR; la restauración va por `backup()` con el candado tomado, y después se
+controla la base restaurada. 9:08 A toca algo: su sesión sigue, con los datos nuevos; si lo que
+estaba editando ya no existe, lo dice («alguien lo borró»), y su nivel se vuelve a mirar en cada
+toque.
+
+Probado en `pruebas_de_los_frenos.py`, `pruebas_de_las_copias_en_github.py` y `nucleo/pruebas.py`,
+con ocho fallas puestas a propósito, todas detectadas.
 
 ## 🔍 La revisión técnica con ChatGPT, puntos 59 a 78
 

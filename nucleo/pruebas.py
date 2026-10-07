@@ -7,7 +7,7 @@ y eso es peor que no tener la equivalencia.
 import sqlite3
 import sys
 
-from . import codigos, equivalencias, planillas, vehiculos
+from . import codigos, equivalencias, errores, planillas, vehiculos
 
 fallos = []
 
@@ -23,6 +23,20 @@ def cierto(condicion, que):
 
 
 # ------------------------------------------------------------------ códigos
+def probar_que_los_errores_se_anotan():
+    """anotar_error() no puede fallar nunca, así que si le falta algo (una función que no se
+    copió al paquete) no lo dice: deja de anotar en silencio. Pasó al sumarle tapar_lo_sensible()."""
+    antes = len(errores.errores_anotados())
+    try:
+        raise ValueError("falló con token=abc123")
+    except ValueError as e:
+        errores.anotar_error("prueba", e)
+    anotados = errores.errores_anotados()
+    igual(len(anotados), antes + 1, "anotar_error anota")
+    if len(anotados) > antes:
+        cierto("abc123" not in anotados[-1]["detalle"], "y tapa lo sensible")
+
+
 def probar_sanitizar():
     # Excel guarda los códigos numéricos como número: '2776400' llega '2776400.0'. Sin sacar el
     # '.0' queda '27764000', un cero de más, y el producto no se encuentra nunca por su código.
@@ -1522,7 +1536,8 @@ def probar_numero_de_catalogo_no_es_puente():
 
 
 def main():
-    for prueba in (probar_sanitizar, probar_codigo_util, probar_codigo_sospechoso,
+    for prueba in (probar_que_los_errores_se_anotan,
+                   probar_sanitizar, probar_codigo_util, probar_codigo_sospechoso,
                    probar_extractor,
                    probar_filtro_por_repeticion, probar_dividir, probar_vehiculos,
                    probar_familias_de_pieza, probar_precision_del_rubro, probar_comodines_y_kits,

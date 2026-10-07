@@ -2,6 +2,8 @@
 
 Está aparte y sin dependencias porque lo usan todos los demás módulos: si esto importara algo,
 ese algo no podría anotar sus propios errores."""
+import os
+import re
 import sys
 import types
 from datetime import datetime
@@ -43,7 +45,38 @@ MAXIMO_ERRORES_ANOTADOS = 150
 _ULTIMOS_ERRORES = del_proceso("ultimos_errores", list)
 
 
-def anotar_error(donde, error):
+# LO SENSIBLE NO SE ANOTA. El detalle de un error es el texto de la excepción, y una excepción de
+# red trae la dirección entera: si alguna vez una clave fuera en la dirección (?key=…, un token,
+# la contraseña de un portal), quedaría a la vista en «Los errores» (lo señaló una revisión con
+# ChatGPT). Hoy ninguna va así —Gemini y GitHub la mandan en la cabecera—; esto es para que, si
+# alguna vez va, no se copie.
+_PATRONES_SENSIBLES = [
+    (re.compile(r"(?i)\b(api[_-]?key|key|token|access_token|password|passwd|pass|clave|secret|"
+                r"contrase[ñn]a|usuario|user)=([^&\s'\"]+)"), r"\1=***"),
+    (re.compile(r"(?i)\bbearer\s+[\w.\-]+"), "Bearer ***"),
+    (re.compile(r"\b(ghp_|gho_|ghs_|github_pat_)[\w]+"), r"\1***"),
+    (re.compile(r"\bAIza[\w\-]{20,}"), "AIza***"),
+    (re.compile(r"(?i)(https?://)[^/\s:@]+:[^/\s@]+@"), r"\1***:***@"),
+]
+
+
+def tapar_lo_sensible(texto):
+    texto = str(texto)
+    for patron, reemplazo in _PATRONES_SENSIBLES:
+        texto = patron.sub(reemplazo, texto)
+    return texto
+
+
+def _renglon_del_error(error):
+    try:
+        import traceback
+        ultimo = traceback.extract_tb(error.__traceback__)[-1]
+        return f"{os.path.basename(ultimo.filename)}:{ultimo.lineno}"
+    except Exception:          # sin traceback (un texto, un error armado a mano): no hay renglón
+        return ""
+
+
+def anotar_error(donde, error, codigo=""):
     """Deja registrado un error que la app decidió ignorar. NUNCA puede fallar.
 
     Va a memoria y no a la base a propósito: si lo que falló ES la base, escribir ahí sería
@@ -53,7 +86,11 @@ def anotar_error(donde, error):
             "cuando": datetime.now().strftime("%d/%m %H:%M:%S"),
             "donde": str(donde)[:60],
             "tipo": type(error).__name__,
-            "detalle": str(error)[:200],
+            "detalle": tapar_lo_sensible(error)[:200],
+            # El renglón donde saltó (ver mostrar_error_inesperado()) y el código que vio quien
+            # estaba usando la app, si hubo uno.
+            "lugar": _renglon_del_error(error),
+            "codigo": codigo,
         })
         if len(_ULTIMOS_ERRORES) > MAXIMO_ERRORES_ANOTADOS:
             del _ULTIMOS_ERRORES[:-MAXIMO_ERRORES_ANOTADOS]

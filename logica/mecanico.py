@@ -1177,12 +1177,23 @@ def eliminar_punto_esquema(punto_id):
 
 
 def guardar_presupuesto_mecanico(mecanico_id, cliente_nombre, items, mano_obra):
+    """Guarda el presupuesto y devuelve el total. El MISMO presupuesto guardado hace menos de dos
+    minutos no se guarda otra vez: un doble toque en «Guardar» (o un toque mientras la pantalla
+    todavía se estaba dibujando, que Streamlit vuelve a correr) dejaba dos iguales (lo señaló
+    una revisión con ChatGPT)."""
     total = sum(it["precio"] * it["cantidad"] for it in items) + mano_obra
+    items_json = json.dumps(items, ensure_ascii=False)
     with db_lock:
+        c.execute("""SELECT 1 FROM presupuestos_mecanico
+                     WHERE mecanico_id = ? AND COALESCE(cliente_nombre, '') = ? AND items_json = ?
+                       AND mano_obra = ? AND creado_en >= datetime('now', '-2 minutes')""",
+                  (mecanico_id, cliente_nombre.strip(), items_json, mano_obra))
+        if c.fetchone():
+            return total
         c.execute(
             "INSERT INTO presupuestos_mecanico (mecanico_id, cliente_nombre, items_json, mano_obra, total) "
             "VALUES (?, ?, ?, ?, ?)",
-            (mecanico_id, cliente_nombre.strip(), json.dumps(items, ensure_ascii=False), mano_obra, total)
+            (mecanico_id, cliente_nombre.strip(), items_json, mano_obra, total)
         )
         conn.commit()
     return total

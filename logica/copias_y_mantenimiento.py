@@ -1409,6 +1409,43 @@ def chequear_integridad_bd():
     n = c.fetchone()[0]
     resultados.append({"Chequeo": "Piezas de historial que apuntan a un vehículo que ya no existe", "Problemas": n})
 
+    # Los que sumó una revisión con ChatGPT («una prueba de consistencia del catálogo»).
+    for chequeo, sql in (
+            ("Equivalencias de un producto consigo mismo",
+             "SELECT COUNT(*) FROM equivalencias WHERE producto_a_id = producto_b_id"),
+            ("Equivalencias guardadas al revés o dos veces",
+             """SELECT COUNT(*) FROM equivalencias e WHERE e.producto_a_id > e.producto_b_id
+                   OR EXISTS (SELECT 1 FROM equivalencias x WHERE x.producto_a_id = e.producto_b_id
+                              AND x.producto_b_id = e.producto_a_id AND e.producto_a_id < e.producto_b_id)"""),
+            ("Vínculos pendientes que apuntan a un producto que ya no existe",
+             """SELECT COUNT(*) FROM equivalencias_pendientes
+                WHERE producto_a_id NOT IN (SELECT id FROM productos)
+                   OR producto_b_id NOT IN (SELECT id FROM productos)"""),
+            ("Vínculos pendientes que ya están aprobados",
+             """SELECT COUNT(*) FROM equivalencias_pendientes p JOIN equivalencias e
+                ON e.producto_a_id = p.producto_a_id AND e.producto_b_id = p.producto_b_id"""),
+            ("Equivalencias sin de dónde salieron (sin lote)",
+             "SELECT COUNT(*) FROM equivalencias WHERE lote IS NULL OR TRIM(lote) = ''"),
+            ("Productos sin descripción",
+             "SELECT COUNT(*) FROM productos WHERE descripcion IS NULL OR TRIM(descripcion) = ''"),
+            ("Aplicaciones (auto ↔ código) repetidas",
+             """SELECT COALESCE(SUM(n - 1), 0) FROM (SELECT COUNT(*) AS n FROM aplicaciones
+                GROUP BY marca_auto, modelo_auto, motor, anio_desde, anio_hasta, codigo_clean,
+                         marca_repuesto HAVING COUNT(*) > 1)"""),
+    ):
+        try:
+            c.execute(sql)
+            resultados.append({"Chequeo": chequeo, "Problemas": c.fetchone()[0] or 0})
+        except sqlite3.OperationalError as _err:      # una tabla que esta base todavía no tiene
+            anotar_error("chequear_integridad_bd", _err)
+    # Esperando revisión hace más de 90 días: no es un dato roto, pero es una cola que nadie mira.
+    try:
+        c.execute("""SELECT COUNT(*) FROM equivalencias_pendientes
+                     WHERE fecha < datetime('now', '-90 days')""")
+        resultados.append({"Chequeo": "Vínculos esperando revisión hace más de 90 días",
+                           "Problemas": c.fetchone()[0] or 0})
+    except sqlite3.OperationalError as _err:
+        anotar_error("chequear_integridad_bd", _err)
     return resultados
 
 
@@ -1452,13 +1489,17 @@ def vistazo_de_un_backup(contenido):
 
             def uno(sql):
                 try:
-                    return base.execute(sql).fetchone()[0]
+                    fila = base.execute(sql).fetchone()
+                    return fila[0] if fila else None
                 except sqlite3.Error:
                     return None
             return {"productos": uno("SELECT COUNT(*) FROM productos"),
                     "marcas": uno("SELECT COUNT(*) FROM marcas"),
                     "equivalencias": uno("SELECT COUNT(*) FROM equivalencias"),
-                    "ultimo_precio": uno("SELECT MAX(fecha) FROM historial_precios")}
+                    "ultimo_precio": uno("SELECT MAX(fecha) FROM historial_precios"),
+                    # De cuándo es: la copia automática lo anota adentro al armarse.
+                    "fecha": uno("SELECT valor FROM configuracion "
+                                 "WHERE clave = 'ultimo_backup_github'")}
     except sqlite3.Error as _err:
         return {"error": f"no es una base ({_err})"}
     finally:
@@ -1767,6 +1808,10 @@ LEEME_DE_LA_RAMA_DE_COPIAS = """Esta rama la escribe sola la app: guarda la ulti
 
 Cada copia REEMPLAZA a la anterior (un solo commit), para que el repositorio no engorde.
 La app la baja sola cuando arranca con el disco vacio. No hace falta tocar nada aca.
+Al lado de la copia va su ficha (.json): fecha, productos, vinculos, tamano y huella.
+COPIAS ANTERIORES: en la carpeta historial, una por dia (las ultimas 7), una por semana
+(4) y una por mes (6), cada una con su ficha. Para volver a una: bajala y restaurala desde
+la app (Backup y config -> Restaurar), igual que la de arriba.
 Para bajarla a mano: el archivo de esta rama, descomprimido con cualquier programa de .gz,
 es una base SQLite que se abre con la app (Backup y config -> Restaurar).
 Si la copia pasa de 90 MB va en partes (.parte1, .parte2...): la app las junta sola. A mano,
@@ -1814,14 +1859,16 @@ def _cuerpo_json_con_base64(campos, clave, datos):
                      base64.b64encode(datos), b'"}'])
 
 
-def _publicar_en_la_rama(cfg, cabeceras, arbol, nuevos, quitar, mensaje):
+def _publicar_en_la_rama(cfg, cabeceras, arbol, nuevos, quitar, mensaje, copias=None):
     """Deja la rama de copias como el ÚNICO commit, con los archivos de `arbol` que siguen
     (los que no se reemplazan ni cumplen `quitar(ruta)`) más los `nuevos` [(ruta, bytes, texto
     o una función que devuelve los bytes)]. Devuelve (ok, código de respuesta, detalle).
 
     Es la API de datos de git en vez de la de archivos: la de archivos solo sabe agregar
     commits encima. El commit viejo queda sin nadie que lo apunte y GitHub lo limpia solo.
-    Los archivos que siguen no se vuelven a subir: van por su sha."""
+    Los archivos que siguen no se vuelven a subir: van por su sha.
+    `copias` {ruta nueva: ruta de uno de los nuevos}: el mismo archivo en otro lugar, por su
+    sha, sin subirlo dos veces (ver «LAS COPIAS ANTERIORES»)."""
     base = f"{API_DE_GITHUB}/repos/{cfg['repo']}/git"
     rutas_nuevas = {ruta for ruta, _ in nuevos}
     entradas = [{"path": e["path"], "mode": e.get("mode", "100644"), "type": "blob",
@@ -1841,6 +1888,9 @@ def _publicar_en_la_rama(cfg, cabeceras, arbol, nuevos, quitar, mensaje):
         if r.status_code != 201:
             return False, r.status_code, r.text[:200]
         entradas.append({"path": ruta, "mode": "100644", "type": "blob", "sha": r.json()["sha"]})
+    por_ruta = {e["path"]: e for e in entradas}
+    for destino, origen in (copias or {}).items():
+        entradas.append({**por_ruta[origen], "path": destino})
     r = requests.post(f"{base}/trees", headers=cabeceras, timeout=30, json={"tree": entradas + [
         {"path": "LEEME.txt", "mode": "100644", "type": "blob",
          "content": LEEME_DE_LA_RAMA_DE_COPIAS},
@@ -1871,8 +1921,81 @@ def _subir_a_la_rama_de_copias(cfg, datos, mensaje, cabeceras):
     arbol = _arbol_de_la_rama(cfg, cabeceras)
     if arbol is None:
         return False, None, "no se pudo leer qué hay en la rama de copias"
-    return _publicar_en_la_rama(cfg, cabeceras, arbol, partes_de_la_copia(cfg["archivo"], datos),
-                                lambda ruta: ruta.startswith(cfg["archivo"]), mensaje)
+    hoy = date.today().isoformat()
+    partes = partes_de_la_copia(cfg["archivo"], datos)
+    ficha = (f"{cfg['archivo']}.json", ficha_de_la_copia(datos))
+    # Las copias anteriores: cuáles quedan, con la de hoy (que reemplaza a otra de hoy).
+    tamanos = collections.defaultdict(int)
+    for e in arbol:
+        if fecha_del_historial(e["path"]):
+            tamanos[fecha_del_historial(e["path"])] += int(e.get("size") or 0)
+    tamanos[hoy] = len(datos)
+    quedan = copias_a_guardar(tamanos, hoy)
+    copias = {f"{CARPETA_DEL_HISTORIAL}/{hoy}/{ruta}": ruta for ruta, _ in partes + [ficha]}
+
+    def quitar(ruta):
+        fecha = fecha_del_historial(ruta)
+        return ruta.startswith(cfg["archivo"]) or (fecha and (fecha == hoy or fecha not in quedan))
+    return _publicar_en_la_rama(cfg, cabeceras, arbol, partes + [ficha], quitar, mensaje, copias)
+
+
+# LAS COPIAS ANTERIORES. La rama guardaba UNA copia: cada subida pisaba la anterior. Si se subía
+# una copia con datos malos —una lista mal importada, algo borrado sin querer—, a la media hora
+# ya no había a qué volver. Ahora quedan también, en historial/AAAA-MM-DD/, la última de cada
+# uno de los últimos 7 días, de las últimas 4 semanas y de los últimos 6 meses (lo propuso una
+# revisión con ChatGPT). No se suben dos veces: la de hoy es el mismo archivo que la de arriba,
+# por su sha; las viejas siguen siendo los archivos que ya estaban. Con un tope de tamaño, para
+# que el repositorio no pase de lo razonable si la base crece: se sueltan las más viejas.
+CARPETA_DEL_HISTORIAL = "historial"
+COPIAS_DIARIAS, COPIAS_SEMANALES, COPIAS_MENSUALES = 7, 4, 6
+MB_DEL_HISTORIAL = 400
+
+
+def fecha_del_historial(ruta):
+    """La fecha (AAAA-MM-DD) de una ruta de historial/, o None."""
+    prefijo = CARPETA_DEL_HISTORIAL + "/"
+    if not ruta.startswith(prefijo):
+        return None
+    fecha = ruta[len(prefijo):len(prefijo) + 10]
+    try:
+        date.fromisoformat(fecha)
+    except ValueError:
+        return None
+    return fecha
+
+
+def copias_a_guardar(tamanos, hoy):
+    """De {fecha: bytes}, las fechas que quedan: las últimas COPIAS_DIARIAS, la última de cada
+    una de las últimas COPIAS_SEMANALES semanas y de los últimos COPIAS_MENSUALES meses, sin
+    pasar MB_DEL_HISTORIAL (se sueltan las más viejas; la de hoy queda siempre)."""
+    fechas = sorted(tamanos, reverse=True)
+    semanas, meses = {}, {}
+    for f in fechas:
+        d = date.fromisoformat(f)
+        semanas.setdefault(d.isocalendar()[:2], f)
+        meses.setdefault((d.year, d.month), f)
+    quedan = (set(fechas[:COPIAS_DIARIAS]) | set(list(semanas.values())[:COPIAS_SEMANALES])
+              | set(list(meses.values())[:COPIAS_MENSUALES]))
+    for f in sorted(quedan):
+        if sum(tamanos[x] for x in quedan) <= MB_DEL_HISTORIAL * 1024 * 1024:
+            break
+        if f != hoy:
+            quedan.discard(f)
+    return quedan
+
+
+def ficha_de_la_copia(datos):
+    """Lo que dice qué es una copia sin tener que abrirla: fecha, cuántos productos, vínculos y
+    marcas, tamaño, huella y si está cifrada. La base se controla (quick_check) antes de subirla
+    —ver subir_backup_a_github()—: si se subió, pasó el control."""
+    c.execute("""SELECT (SELECT COUNT(*) FROM productos), (SELECT COUNT(*) FROM equivalencias),
+                        (SELECT COUNT(*) FROM marcas)""")
+    productos, equivalencias, marcas = c.fetchone()
+    return json.dumps({"fecha": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                       "productos": productos, "equivalencias": equivalencias, "marcas": marcas,
+                       "bytes": len(datos), "sha256": hashlib.sha256(datos).hexdigest(),
+                       "cifrada": esta_cifrada(datos[:len(MARCA_DE_COPIA_CIFRADA)]),
+                       "control_de_integridad": "ok"}, ensure_ascii=False, indent=1)
 
 
 def subir_las_fotos_si_cambiaron():
@@ -2103,6 +2226,19 @@ def tareas_automaticas_del_dia(presupuesto_segundos=6):
         candado.release()
 
 
+DIAS_DE_BUSQUEDAS_GUARDADAS = 365
+
+
+def borrar_busquedas_viejas(dias=None):
+    """Borra del historial las búsquedas de hace más de `dias`. Devuelve cuántas."""
+    with db_lock:
+        c.execute("DELETE FROM historial_busquedas WHERE fecha < datetime('now', ?)",
+                  (f"-{int(dias or DIAS_DE_BUSQUEDAS_GUARDADAS)} days",))
+        n = c.rowcount
+        conn.commit()
+    return n
+
+
 def _tareas_automaticas_del_dia(hoy, presupuesto_segundos):
     """El cuerpo de tareas_automaticas_del_dia(), con el candado tomado."""
     # Otra vez, ya con el candado: la otra sesión pudo terminar mientras esta esperaba.
@@ -2145,6 +2281,18 @@ def _tareas_automaticas_del_dia(hoy, presupuesto_segundos):
                 hecho.append(f"{n_venc} reserva(s) vencida(s) liberadas")
         except Exception as _err:
             anotar_error("tareas/reservas_vencidas", _err)
+
+    # 2b'. Las búsquedas viejas. Cada búsqueda queda anotada con quién la hizo, y eso crecía
+    # para siempre (lo señaló una revisión con ChatGPT). Sirven para «buscaste hace poco» y para
+    # saber qué piden y no hay: más de un año no aporta, y es saber qué buscó cada empleado
+    # sin necesidad. Se borran las de más de DIAS_DE_BUSQUEDAS_GUARDADAS.
+    if queda_tiempo():
+        try:
+            n_busq = borrar_busquedas_viejas()
+            if n_busq:
+                hecho.append(f"{miles(n_busq)} búsqueda(s) de hace más de un año borradas")
+        except Exception as _err:
+            anotar_error("tareas/busquedas_viejas", _err)
 
     # 2c. Los reemplazos que las listas ya traen escritos («40011 (reemplaza a 40035)»). Van
     # antes de cruzarlos, así el paso de abajo ya los usa. Ver

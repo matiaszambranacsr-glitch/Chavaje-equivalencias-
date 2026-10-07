@@ -441,10 +441,24 @@ if pagina == PAGINAS[3]:
                     "repite muchas veces, o si aparece justo cuando algo no funcionó."
                 )
                 from collections import Counter as _Cnt
+                # Primero por categoría: dice de un vistazo si es la base o un proveedor caído.
+                # Ver categoria_del_error().
+                _por_categoria = _Cnt(categoria_del_error(e) for e in _ULTIMOS_ERRORES)
+                st.markdown(" · ".join(f"{cat}: **{n}**" for cat, n in _por_categoria.most_common()))
                 _repetidos = _Cnt((e["donde"], e["tipo"]) for e in _ULTIMOS_ERRORES)
                 st.dataframe(
                     [{"Veces": v, "Dónde": d, "Tipo": t} for (d, t), v in _repetidos.most_common(15)],
                     width="stretch", hide_index=True)
+                # El código que dictó quien estaba en el mostrador: ver mostrar_error_inesperado().
+                _cod_err = st.text_input("Buscar un código de error (ej. BUS-8F31):",
+                                         key="buscar_codigo_de_error").strip().upper()
+                if _cod_err:
+                    _con_codigo = [e for e in _ULTIMOS_ERRORES if e.get("codigo") == _cod_err]
+                    if _con_codigo:
+                        st.json(_con_codigo[-1])
+                    else:
+                        st.caption(f"No está entre los últimos {MAXIMO_ERRORES_ANOTADOS}: o es "
+                                   "viejo, o la app se reinició después.")
                 if seccion_plegable("Ver el detalle de los últimos", key="detalle_errores"):
                     st.dataframe(list(reversed(_ULTIMOS_ERRORES))[:40],
                                   width="stretch", hide_index=True)

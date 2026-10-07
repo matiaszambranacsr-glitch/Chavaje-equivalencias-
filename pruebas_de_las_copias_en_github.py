@@ -169,6 +169,45 @@ def probar(ns, gh, carpeta):
     esperar("la copia de la base ya no lleva las fotos",
             sqlite3.connect(ruta_copia).execute("SELECT COUNT(*) FROM producto_fotos").fetchone()[0], 0)
 
+    # La ficha de la copia y la copia de hoy en el historial: el mismo archivo, sin subirlo de nuevo.
+    from datetime import date, timedelta
+    hoy = date.today()
+    arbol = gh.arbol_de(rama)
+    esperar("la de hoy en el historial es el mismo archivo",
+            arbol.get(f"historial/{hoy.isoformat()}/datos_iniciales.db.gz"),
+            arbol["datos_iniciales.db.gz"])
+    ficha = json.loads(gh.blobs[arbol["datos_iniciales.db.gz.json"]])
+    esperar("la ficha dice qué tiene", (ficha["productos"], ficha["control_de_integridad"],
+                                        ficha["bytes"]), (4, "ok", len(copia)))
+    esperar("y la del historial también tiene su ficha",
+            f"historial/{hoy.isoformat()}/datos_iniciales.db.gz.json" in arbol, True)
+
+    # Qué copias viejas quedan: 200 días seguidos de copias, y se sube la de hoy.
+    viejo = gh.blobs[arbol["datos_iniciales.db.gz"]]
+    for d in range(1, 201):
+        arbol[f"historial/{(hoy - timedelta(days=d)).isoformat()}/datos_iniciales.db.gz"] = \
+            arbol["datos_iniciales.db.gz"]
+    c.execute("UPDATE productos SET precio = 7 WHERE id = ?", (ids[0],))
+    ns["conn"].commit()
+    ok, _ = ns["subir_la_copia_si_cambio"]()
+    fechas = sorted({p.split("/")[1] for p in gh.arbol_de(rama) if p.startswith("historial/")})
+    esperar("quedan las 7 diarias, las semanales y las mensuales",
+            fechas, sorted(ns["copias_a_guardar"]({f: 1 for f in fechas + [
+                (hoy - timedelta(days=d)).isoformat() for d in range(1, 201)]}, hoy.isoformat())))
+    esperar("cuántas quedan (entre 7 y 17)", 7 <= len(fechas) <= 17, True)
+    esperar("los últimos 7 días están", all((hoy - timedelta(days=d)).isoformat() in fechas
+                                            for d in range(7)), True)
+    esperar("la de hoy es la nueva, no la de antes",
+            gh.blobs[gh.arbol_de(rama)[f"historial/{hoy.isoformat()}/datos_iniciales.db.gz"]] != viejo,
+            True)
+    # Con el tope de tamaño se sueltan las más viejas, y la de hoy queda siempre.
+    g["MB_DEL_HISTORIAL"] = 3
+    quedan = ns["copias_a_guardar"]({(hoy - timedelta(days=d)).isoformat(): 1024 * 1024
+                                     for d in range(30)}, hoy.isoformat())
+    esperar("con tope: las 3 más nuevas", sorted(quedan),
+            sorted((hoy - timedelta(days=d)).isoformat() for d in range(3)))
+    g["MB_DEL_HISTORIAL"] = 400
+
     # Subir la base otra vez (cambió un precio) no borra los bloques.
     c.execute("UPDATE productos SET precio = 99 WHERE id = ?", (ids[0],))
     ns["conn"].commit()

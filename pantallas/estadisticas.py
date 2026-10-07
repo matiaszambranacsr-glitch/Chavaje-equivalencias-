@@ -331,7 +331,10 @@ a traer solas desde Administrar → Mantenimiento.
                 c.execute("SELECT COUNT(*) FROM productos")
                 _hoy_productos = c.fetchone()[0]
                 st.warning(
-                    f"⚠️ **Esto reemplaza los datos actuales.** El backup trae "
+                    f"⚠️ **Esto reemplaza los datos actuales.** "
+                    + (f"Es una copia del **{_vistazo['fecha'][:16]}**. "
+                       if _vistazo.get("fecha") else "")
+                    + f"El backup trae "
                     f"**{miles(_vistazo['productos'] or 0)} productos**, "
                     f"{miles(_vistazo['marcas'] or 0)} marcas y "
                     f"{miles(_vistazo['equivalencias'] or 0)} equivalencias"

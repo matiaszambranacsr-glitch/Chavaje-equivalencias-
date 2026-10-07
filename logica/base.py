@@ -85,7 +85,88 @@ def miles(numero, decimales=None):
     return texto.replace(",", "\x00").replace(".", ",").replace("\x00", ".")
 
 
-def anotar_error(donde, error):
+# LO SENSIBLE NO SE ANOTA. El detalle de un error es el texto de la excepción, y una excepción de
+# red trae la dirección entera: si alguna vez una clave fuera en la dirección (?key=…, un token,
+# la contraseña de un portal), quedaría a la vista en «Los errores» (lo señaló una revisión con
+# ChatGPT). Hoy ninguna va así —Gemini y GitHub la mandan en la cabecera—; esto es para que, si
+# alguna vez va, no se copie.
+_PATRONES_SENSIBLES = [
+    (re.compile(r"(?i)\b(api[_-]?key|key|token|access_token|password|passwd|pass|clave|secret|"
+                r"contrase[ñn]a|usuario|user)=([^&\s'\"]+)"), r"\1=***"),
+    (re.compile(r"(?i)\bbearer\s+[\w.\-]+"), "Bearer ***"),
+    (re.compile(r"\b(ghp_|gho_|ghs_|github_pat_)[\w]+"), r"\1***"),
+    (re.compile(r"\bAIza[\w\-]{20,}"), "AIza***"),
+    (re.compile(r"(?i)(https?://)[^/\s:@]+:[^/\s@]+@"), r"\1***:***@"),
+]
+
+
+def tapar_lo_sensible(texto):
+    texto = str(texto)
+    for patron, reemplazo in _PATRONES_SENSIBLES:
+        texto = patron.sub(reemplazo, texto)
+    return texto
+
+
+# DE QUÉ ES CADA ERROR. Una lista de 150 errores sueltos no dice si el problema es la base o un
+# proveedor caído; agrupados sí: «140 de internet y proveedores, 0 de la base» (lo propuso una
+# revisión con ChatGPT). Se decide por el tipo de error y por dónde pasó, en este orden.
+CATEGORIAS_DE_ERRORES = (
+    ("🗄️ Base de datos", lambda d, t: t in ("OperationalError", "DatabaseError", "IntegrityError",
+                                            "ProgrammingError", "InterfaceError")),
+    ("🌐 Internet y proveedores", lambda d, t: t in (
+        "ConnectionError", "Timeout", "ReadTimeout", "ConnectTimeout", "SSLError", "HTTPError",
+        "ChunkedEncodingError", "TooManyRedirects", "ProxyError", "RequestException")
+        or any(x in d for x in ("proveedor", "portal", "catalogo", "mercado_libre", "fotos",
+                                "equiv", "bcra", "tasas", "dnrpa", "parque", "chas", "nhtsa",
+                                "ipc", "contexto_de_precios", "certificado"))),
+    ("☁️ Copias", lambda d, t: any(x in d for x in ("copia", "github", "backup", "restaurar",
+                                                     "semilla"))),
+    ("📥 Importación", lambda d, t: any(x in d for x in ("import", "excel", "lista", "mapeo"))),
+    ("🔑 Ingreso y permisos", lambda d, t: t == "PermissionError"
+        or any(x in d for x in ("password", "login", "exigir", "sesion", "ingreso"))),
+    ("🔍 Buscador", lambda d, t: "busc" in d),
+    ("🧹 Mantenimiento y tareas", lambda d, t: any(x in d for x in (
+        "_trabajo_de_fondo", "mantenimiento", "tareas", "salud", "diagnostico", "descubrimiento"))),
+)
+
+
+def _renglon_del_error(error):
+    try:
+        import traceback
+        ultimo = traceback.extract_tb(error.__traceback__)[-1]
+        return f"{os.path.basename(ultimo.filename)}:{ultimo.lineno}"
+    except Exception:          # sin traceback (un texto, un error armado a mano): no hay renglón
+        return ""
+
+
+# UN CÓDIGO PARA DICTAR. Una pantalla que fallaba mostraba el error técnico de Streamlit, en rojo
+# y con rutas del servidor, y el error no quedaba en «Los errores». Ahora dice «no se pudo
+# mostrar, código BUS-8F31»: quien está en el mostrador se lo pasa al administrador, que lo
+# encuentra en Estado y papelera → «🐞 Errores» con dónde y en qué renglón (lo propuso una
+# revisión con ChatGPT). El administrador ve además el error completo ahí mismo.
+PREFIJOS_DE_LAS_PANTALLAS = ("BUS", "VIN", "EXC", "ADM", "EST", "WSP", "VEH", "MEC", "DEP")
+
+
+def codigo_de_error(prefijo):
+    return f"{prefijo}-{uuid.uuid4().hex[:4].upper()}"
+
+
+def mostrar_error_inesperado(donde, error, prefijo="APP"):
+    codigo = codigo_de_error(prefijo)
+    anotar_error(donde, error, codigo=codigo)
+    st.error(f"😕 No se pudo terminar de mostrar esta pantalla. Código: **{codigo}**. Pasáselo "
+             "al administrador: con eso encuentra qué pasó. El resto de la app sigue andando.")
+    if es_admin():
+        st.exception(error)
+    return codigo
+
+
+def categoria_del_error(error_anotado):
+    d, t = str(error_anotado.get("donde", "")).lower(), str(error_anotado.get("tipo", ""))
+    return next((nombre for nombre, es in CATEGORIAS_DE_ERRORES if es(d, t)), "🖥️ Pantallas y otros")
+
+
+def anotar_error(donde, error, codigo=""):
     """Deja registrado un error que la app decidió ignorar. NUNCA puede fallar.
 
     Va a memoria y no a la base a propósito: si lo que falló ES la base, escribir ahí sería
@@ -95,7 +176,11 @@ def anotar_error(donde, error):
             "cuando": datetime.now().strftime("%d/%m %H:%M:%S"),
             "donde": str(donde)[:60],
             "tipo": type(error).__name__,
-            "detalle": str(error)[:200],
+            "detalle": tapar_lo_sensible(error)[:200],
+            # El renglón donde saltó (ver mostrar_error_inesperado()) y el código que vio quien
+            # estaba usando la app, si hubo uno.
+            "lugar": _renglon_del_error(error),
+            "codigo": codigo,
         })
         if len(_ULTIMOS_ERRORES) > MAXIMO_ERRORES_ANOTADOS:
             del _ULTIMOS_ERRORES[:-MAXIMO_ERRORES_ANOTADOS]
@@ -856,10 +941,12 @@ def listar_mecanicos():
 
 
 def validar_password_mecanico(password):
+    """(id, nombre) del taller con esa clave, o (None, None). NO tiene freno propio: el ingreso
+    la llama desde validar_password(con_mecanicos=True), detrás del freno de intentos."""
     c.execute("SELECT id, nombre, password_hash, salt FROM mecanicos WHERE activo = 1")
     for fila in c.fetchall():
-        h, _ = hash_password(password, fila["salt"])
-        if h == fila["password_hash"]:
+        # verificar_password() compara con compare_digest; acá estaba con ==.
+        if verificar_password(password, fila["password_hash"], fila["salt"])[0]:
             return fila["id"], fila["nombre"]
     return None, None
 
@@ -933,11 +1020,18 @@ def _anotar_intento(acerto):
         anotar_error("_anotar_intento", _err)
 
 
-def validar_password(clave):
+def validar_password(clave, con_mecanicos=False):
     """Chequea la contraseña contra los secrets de admin/operador Y contra las cuentas creadas
     desde la propia app (tabla usuarios). Devuelve (nombre, nivel, error) — nivel es 'admin',
-    'operador', o None si no matcheó ninguna. Los mecánicos externos se validan aparte, con
-    validar_password_mecanico(), porque tienen su propio portal separado."""
+    'operador', o None si no matcheó ninguna.
+
+    con_mecanicos=True (solo el ingreso): también las claves de los talleres, que dan nivel
+    'mecanico'. Van ADENTRO y no después, a propósito: el ingreso probaba la clave de los
+    mecánicos aparte, aunque este freno hubiera dicho «esperá», así que contra el portal de
+    mecánicos se podían probar claves sin límite —y cada una calculaba un PBKDF2 por taller—, y
+    un mecánico que acertaba no reiniciaba la cuenta de fallos (lo encontró una revisión con
+    ChatGPT). Las pantallas que piden clave para una acción no los incluyen: la clave de un
+    taller no autoriza nada adentro del negocio."""
     secretos = secretos_app()
     # [admin_passwords] / [operador_passwords] en Streamlit Secrets, cada una con nombre:clave.
     # También soporta la forma anterior de una sola clave (admin_password) por compatibilidad.
@@ -990,9 +1084,20 @@ def validar_password(clave):
         _anotar_intento(True)
         return nombre_db, rol_db, None
 
+    if con_mecanicos:
+        _mecanico_id, nombre_mecanico = validar_password_mecanico(clave)
+        if _mecanico_id:
+            _anotar_intento(True)
+            return nombre_mecanico, "mecanico", None
+
     if not admin_passwords and not operador_passwords:
         c.execute("SELECT COUNT(*) FROM usuarios")
-        if c.fetchone()[0] == 0:
+        _sin_usuarios = c.fetchone()[0] == 0
+        # Con talleres cargados SÍ hay contra qué acertar en el ingreso: un fallo cuenta.
+        if _sin_usuarios and con_mecanicos:
+            c.execute("SELECT COUNT(*) FROM mecanicos WHERE activo = 1")
+            _sin_usuarios = c.fetchone()[0] == 0
+        if _sin_usuarios:
             # No es un intento fallido: no hay contra qué acertar. Contarlo acá dejaría a una
             # instalación recién hecha frenándose sola antes de poder configurar la primera clave.
             return None, None, (
@@ -1189,22 +1294,22 @@ def mostrar_login_inicial():
         seguir = col_b.form_submit_button("👤 Continuar sin contraseña", width="stretch")
 
     if entrar:
-        nombre, nivel, error = validar_password(clave)
-        if nivel:
+        nombre, nivel, error = validar_password(clave, con_mecanicos=True)
+        if nivel == "mecanico":
+            # El nombre del taller es único (ver la tabla mecanicos).
+            c.execute("SELECT id FROM mecanicos WHERE nombre = ? AND activo = 1", (nombre,))
+            st.session_state.nivel_usuario = "mecanico"
+            st.session_state.admin_nombre = nombre
+            st.session_state.mecanico_id = c.fetchone()["id"]
+            st.rerun()
+        elif nivel:
             st.session_state.nivel_usuario = nivel
             st.session_state.admin_nombre = nombre
             st.rerun()
+        elif error:
+            st.error(error)
         else:
-            mecanico_id, nombre_mecanico = validar_password_mecanico(clave)
-            if mecanico_id:
-                st.session_state.nivel_usuario = "mecanico"
-                st.session_state.admin_nombre = nombre_mecanico
-                st.session_state.mecanico_id = mecanico_id
-                st.rerun()
-            elif error:
-                st.error(error)
-            else:
-                st.error("Contraseña incorrecta.")
+            st.error("Contraseña incorrecta.")
     if seguir:
         st.session_state.usuario_nombre = nombre_usuario.strip() or "Invitado"
         st.rerun()

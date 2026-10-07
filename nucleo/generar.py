@@ -9,6 +9,10 @@ import sys as _sys
 _sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import orden
 
+# Las rutas, al lado de este archivo: estaban escritas con la carpeta de una máquina, y desde
+# otra copia del repositorio fallaba apenas arrancaba (lo encontró una revisión con ChatGPT).
+CARPETA_NUCLEO = os.path.dirname(os.path.abspath(__file__))
+
 SRC, _ = orden.fuente_completa()
 ARBOL = ast.parse(SRC)
 
@@ -68,7 +72,7 @@ def armar(nombres):
     return "\n\n\n".join(partes) + "\n"
 
 def escribir(archivo, cabecera, nombres, extra=""):
-    ruta = "/home/user/Chavaje-equivalencias-/nucleo/" + archivo
+    ruta = os.path.join(CARPETA_NUCLEO, archivo)
     with open(ruta, "w", encoding="utf-8") as f:
         f.write(cabecera.rstrip() + "\n\n\n" + armar(nombres))
         if extra:
@@ -80,10 +84,13 @@ escribir("errores.py", '''"""Registro de los errores que la app decide ignorar.
 
 Está aparte y sin dependencias porque lo usan todos los demás módulos: si esto importara algo,
 ese algo no podría anotar sus propios errores."""
+import os
+import re
 import sys
 import types
 from datetime import datetime
-''', ["del_proceso", "MAXIMO_ERRORES_ANOTADOS", "_ULTIMOS_ERRORES", "anotar_error"], '''
+''', ["del_proceso", "MAXIMO_ERRORES_ANOTADOS", "_ULTIMOS_ERRORES", "_PATRONES_SENSIBLES",
+      "tapar_lo_sensible", "_renglon_del_error", "anotar_error"], '''
 def errores_anotados():
     """Los últimos errores ignorados, del más viejo al más nuevo. Para mostrarlos en una
     pantalla de diagnóstico sin tocar la lista de adentro."""
@@ -339,7 +346,7 @@ cuerpo = "\n\n\n".join([
     + adaptar_a_cursor(BLOQUES["buscar_por_codigo"], "buscar_por_codigo"),
     adaptar_a_cursor(BLOQUES["equivalentes_mas_alla_del_tope"], "equivalentes_mas_alla_del_tope"),
 ])
-with open("/home/user/Chavaje-equivalencias-/nucleo/equivalencias.py", "w", encoding="utf-8") as f:
+with open(os.path.join(CARPETA_NUCLEO, "equivalencias.py"), "w", encoding="utf-8") as f:
     f.write(CABECERA_EQ.rstrip() + "\n\n\n" + cuerpo + "\n")
 print("  equivalencias.py escrito")
 
@@ -348,7 +355,7 @@ print("  equivalencias.py escrito")
 # todo. Al partirlo en módulos hay que decir en cada uno qué usa, y mover alguna constante al
 # módulo de quien realmente la usa. Se hace acá y no a mano para que regenerar el paquete
 # vuelva a dar exactamente lo mismo.
-D = "/home/user/Chavaje-equivalencias-/nucleo/"
+D = CARPETA_NUCLEO + os.sep
 
 # _RE_PIEZA_POR_MEDIDA venía junto a las medidas, pero el único que lo usa es codigo_sospechoso.
 # Se muda a codigos.py: si se quedara en vehiculos.py, codigos tendría que importar de vehiculos

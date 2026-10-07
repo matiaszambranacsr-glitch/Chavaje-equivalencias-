@@ -2390,6 +2390,22 @@ for _n in ast.walk(ARBOL):
             reportar("ERROR", _n.lineno, f"st.{_n.func.attr} sin placeholder: cuando no hay nada "
                                          "elegido dice «Choose options» en inglés")
 
+# ============ Rutas de una máquina escritas en el código ============
+# nucleo/generar.py tenía «/home/user/…» escrito: en otra copia del repositorio fallaba al
+# arrancar (lo encontró una revisión con ChatGPT). Se miran todos los .py del repositorio, no
+# solo la app: las herramientas y las pruebas también tienen que andar en cualquier carpeta.
+_RAIZ_DEL_REPO = os.path.dirname(os.path.abspath(__file__))
+for _carpeta, _subcarpetas, _archivos in os.walk(_RAIZ_DEL_REPO):
+    _subcarpetas[:] = [s for s in _subcarpetas if not s.startswith(".") and s != "__pycache__"]
+    for _nombre in _archivos:
+        if not _nombre.endswith(".py"):
+            continue
+        _ruta = os.path.join(_carpeta, _nombre)
+        for _i, _renglon in enumerate(open(_ruta, encoding="utf-8", errors="ignore"), 1):
+            if re.search(r"""["'](/home/|/root/|/Users/|[A-Za-z]:\\\\Users)""", _renglon):
+                reportar("ERROR", 0, f"{os.path.relpath(_ruta, _RAIZ_DEL_REPO)}:{_i}: ruta de una "
+                                     "máquina escrita en el código; armarla desde __file__")
+
 # ============ Resultado ============
 orden = {"ERROR": 0, "REVISAR": 1, "AVISO": 2}
 problemas.sort(key=lambda x: (orden[x[0]], x[1]))
