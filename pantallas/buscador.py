@@ -1004,6 +1004,7 @@ if pagina == PAGINAS[0]:
                         candidatos_precio = [f for f in res
                                              if f.get("Precio") and (f.get("Stock") or 0) > 0
                                              and not f.get("_complementario")
+                                             and not no_compite_por_precio(f)
                                              and f.get("Marca") not in _fuera_escala]
                         id_mas_barato = min(candidatos_precio, key=lambda f: f["Precio"])["ID"] if candidatos_precio else None
                         for f in res:
@@ -1021,6 +1022,9 @@ if pagina == PAGINAS[0]:
                         mostrar = []
                         for f in res:
                             visible = {k: v for k, v in f.items() if not k.startswith("_")}
+                            # El veredicto va en la tabla y en el Excel: lo que se descarga
+                            # o se copia lleva el estado con el código.
+                            visible["Veredicto"] = veredicto_de_la_equivalencia(f)
                             if hay_reservas:
                                 visible["Libre"] = libres.get(f["ID"], f.get("Stock") or 0)
                             mostrar.append(visible)
@@ -1800,8 +1804,10 @@ if pagina == PAGINAS[0]:
                         if fila_txt.get("Descripcion"):
                             st.caption(fila_txt["Descripcion"])
                         if equivalentes:
+                            anotar_el_respaldo(equivalentes, clean_txt)
                             candidatos_precio = [f for f in equivalentes
-                                                  if f.get("Precio") and (f.get("Stock") or 0) > 0]
+                                                  if f.get("Precio") and (f.get("Stock") or 0) > 0
+                                                  and not no_compite_por_precio(f)]
                             id_barato = (min(candidatos_precio, key=lambda f: f["Precio"])["ID"]
                                           if candidatos_precio else None)
                             for f in equivalentes:

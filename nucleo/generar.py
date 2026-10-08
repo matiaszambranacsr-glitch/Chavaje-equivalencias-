@@ -139,7 +139,7 @@ from .errores import anotar_error
       "_RE_NAFTA", "combustible_desde_descripcion",
       "FORMAS_DE_POSICION", "_RE_POSICION", "EJES_DE_POSICION",
       "posicion_desde_descripcion", "MARCAS_QUE_FABRICAN_LA_PIEZA", "_RE_MARCA_DE_REPUESTO",
-      "marca_de_repuesto_en", "codigo_base_sin_variante",
+      "marca_de_repuesto_en", "TRAMOS_DE_LADO", "codigo_base_sin_variante",
       "PUNTAJE_QUE_NO_LLEGA_A_APROBAR_SOLO", "_RE_ANOS_DE_FABRICACION",
       "el_codigo_no_figura_entre_las_referencias", "_codigo_en_el_tramo_de_los_motores",
       "el_codigo_esta_entre_las_referencias", "numero_del_conjunto_donde_va",

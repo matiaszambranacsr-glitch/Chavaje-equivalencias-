@@ -267,7 +267,23 @@ _RE_CON_Y_SIN_EQUIPAMIENTO = {
 # 8/10: lo declaran 98 (tensión), 220 (caudal), 260 (rosca), 586 (giro), 111 (cantidad) y 17
 # (reacondicionada) productos; ningún par cargado ni pendiente se contradice, y un rechazado sí
 # (una bomba de 120 l/h contra un aforador con bomba de 145).
-_RE_TENSION = re.compile(r"\b(6|12|24|48)\s*(?:VOLTS?|VOLTIOS?|VCC|VDC|V\s*CC|V\s*DC)\b")
+# Después se sumaron los dientes del piñón y la fase del auto (puntos 91 y 105 de la misma
+# revisión), y la tensión escrita al revés, como la escribe FISPA en los motores de arranque y
+# alternadores: «Volts V 24 Potencia Kw 4 0 Dientes 10». Con eso la tensión la declaran 605
+# productos (antes 98), los dientes 437 y la fase 244. Sobre los vínculos cargados chocan 2, y
+# los dos son el mismo caso: los números DELCO 19011403 y 8200103 los citan a la vez el motor de
+# arranque de 24 V y 10 dientes (LRSC080058) y el de 12 V y 9 dientes (LRSN200295), así que por
+# ese número el de 12 V llegaba al de 24 V. El asiento de bujía (cónico o plano) no se sumó: no
+# lo declara ningún producto de la base.
+_RE_TENSION = re.compile(r"\b(6|12|24|48)\s*(?:VOLTS?|VOLTIOS?|VCC|VDC|V\s*CC|V\s*DC)\b"
+                         r"|\bVOLTS?\s*(?:V\s*)?(6|12|24|48)\b")
+# Los dientes se leen ADELANTE del número —«Polea 20 dientes 98 02 93»: lo de atrás son años—,
+# salvo en el rótulo de FISPA de los motores de arranque, «Potencia Kw 4 0 Dientes 10», donde el
+# de adelante es la potencia. Medido sobre los 523 textos que nombran dientes.
+_RE_DIENTES_DEL_ROTULO = re.compile(r"\bKW\s+\d+(?:\s+\d+)?\s+DIENTES\s+(\d{1,2})\b")
+_RE_DIENTES = re.compile(r"\b(\d{1,2})\s*(?:DIENTES|DTES)\b")
+_FASES = {"1": "I", "2": "II", "3": "III", "4": "IV", "I": "I", "II": "II", "III": "III", "IV": "IV"}
+_RE_FASE = re.compile(r"\bFASE\s*((?:IV|III|II|I|[1-4])(?:\s*(?:/|-|,|Y)\s*(?:IV|III|II|I|[1-4])\b)*)\b")
 _RE_CAUDAL = re.compile(r"\b(\d{2,3})\s*(?:L\s*/?\s*H|LTS?\s*/\s*H(?:ORA)?|LITROS\s*/?\s*HORA)\b")
 _RE_ROSCA_METRICA = re.compile(r"\bM\s?(\d{1,2})\s?[X*]\s?(\d(?:[.,]\d{1,2})?)\b")
 _RE_SENTIDO_DE_GIRO = re.compile(
@@ -284,8 +300,12 @@ TOLERANCIA_DEL_CAUDAL = 0.10
 
 def parametros_declarados(limpio):
     """{parámetro: valores} de lo que la descripción declara. Ver arriba."""
+    _dientes = _RE_DIENTES_DEL_ROTULO.findall(limpio) or _RE_DIENTES.findall(limpio)
     salida = {
-        "tensión": frozenset(int(v) for v in _RE_TENSION.findall(limpio)),
+        "tensión": frozenset(int(a or b) for a, b in _RE_TENSION.findall(limpio)),
+        "dientes": frozenset(int(x) for x in _dientes if int(x) > 0),
+        "fase": frozenset(_FASES[x] for grupo in _RE_FASE.findall(limpio)
+                          for x in re.split(r"\s*(?:/|-|,|Y)\s*", grupo) if x in _FASES),
         "caudal": frozenset(int(v) for v in _RE_CAUDAL.findall(limpio)),
         "rosca": frozenset((int(d), float(p.replace(",", ".")))
                            for d, p in _RE_ROSCA_METRICA.findall(limpio)),
@@ -321,6 +341,12 @@ def parametros_que_chocan(a, b):
             if clave == "tensión":
                 return (f"versiones distintas: de {'/'.join(map(str, sorted(va)))} V contra de "
                         f"{'/'.join(map(str, sorted(vb)))} V")
+            if clave == "dientes":
+                return (f"versiones distintas: de {'/'.join(map(str, sorted(va)))} dientes "
+                        f"contra de {'/'.join(map(str, sorted(vb)))}")
+            if clave == "fase":
+                return (f"versiones distintas: fase {'/'.join(sorted(va))} contra fase "
+                        f"{'/'.join(sorted(vb))}")
             return (f"versiones distintas: giro {'/'.join(sorted(va))} contra "
                     f"{'/'.join(sorted(vb))}")
     return None

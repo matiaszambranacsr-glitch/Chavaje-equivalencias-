@@ -457,9 +457,10 @@ _RE_RIESGO_ALTO = re.compile(r"\b(?:CORREA|KIT|TENSOR|CADENA)\s+(?:DE\s+)?DISTRI
                              r"|\b(?:JUNTA|JTA)\s+(?:DE\s+)?TAPA\s+(?:DE\s+)?CIL")
 
 
-# Cada cuántos meses se vuelve a mirar una equivalencia según su riesgo. El resto, solo si
-# algo la contradice. Ver ficha_de_prueba().
-MESES_DE_VIGENCIA_POR_RIESGO = {"🛑": 6, "🟠": 12}
+# Cada cuántos meses se vuelve a mirar una equivalencia según su riesgo. La de riesgo normal,
+# cada tres años: las listas cambian y una revisión de hace cinco años ya no dice mucho. Ver
+# ficha_de_prueba().
+MESES_DE_VIGENCIA_POR_RIESGO = {"🛑": 6, "🟠": 12, "🟢": 36}
 
 
 def riesgo_de_la_pieza(*descripciones):
@@ -729,6 +730,46 @@ def ficha_de_prueba(id_a, id_b, tolerancia_pct=3):
     ficha["a_favor"] = a_favor
     ficha["contradicciones"] = [v for v in vetos if not v.startswith("💲")]
     ficha["avisos"] = [v for v in vetos if v.startswith("💲")]
+    # Que una persona la haya rechazado también la contradice, aunque llegue por otro camino:
+    # ver anotar_el_respaldo().
+    c.execute("""SELECT revisado_por, substr(fecha, 1, 10) AS fecha, motivo
+                 FROM equivalencias_revisadas
+                 WHERE decision = 'rechazada' AND ((producto_a_id = ? AND producto_b_id = ?)
+                                                 OR (producto_a_id = ? AND producto_b_id = ?))""",
+              (id_a, id_b, id_b, id_a))
+    _rechazo = c.fetchone()
+    if _rechazo:
+        ficha["contradicciones"].insert(0, (
+            f"🚫 {_rechazo['revisado_por'] or 'alguien'} la rechazó en la revisión el "
+            f"{_rechazo['fecha'] or '—'}"
+            + (f" ({MOTIVOS_DE_RECHAZO.get(_rechazo['motivo'], _rechazo['motivo'])})"
+               if _rechazo["motivo"] else "")
+            + ": dijo que no es la misma pieza"))
+
+    # EL HISTORIAL de lo que se decidió sobre el par y sobre cada paso de la cadena, del más
+    # nuevo al más viejo, con la versión de las reglas. Ver historial_de_revisiones.
+    _pares = {(min(id_a, id_b), max(id_a, id_b))} | {
+        (min(p["_a"], p["_b"]), max(p["_a"], p["_b"])) for p in pasos}
+    _historial = []
+    for _x, _y in sorted(_pares):
+        c.execute("""SELECT id, decision, motivo, revisado_por, substr(fecha, 1, 16) AS fecha,
+                            confianza, lote, version_reglas
+                     FROM historial_de_revisiones
+                     WHERE producto_a_id = ? AND producto_b_id = ?""", (_x, _y))
+        for r in c.fetchall():
+            _historial.append(((r["fecha"] or "", r["id"]), {
+                "Fecha": r["fecha"] or "",
+                "Par": "A ↔ B" if {_x, _y} == {id_a, id_b} else f"paso {_x} ↔ {_y}",
+                "Decisión": ("✅ aprobada" if r["decision"] == "ok" else "🚫 rechazada"
+                             if r["decision"] == "rechazada" else r["decision"])
+                            + (f" ({MOTIVOS_DE_RECHAZO.get(r['motivo'], r['motivo'])})"
+                               if r["motivo"] else ""),
+                "Quién": r["revisado_por"] or "—",
+                "Confianza": "" if r["confianza"] is None else f"{r['confianza']:.0f}",
+                "Lista": (r["lote"] or "—").split(" · ")[0],
+                "Reglas": f"v{r['version_reglas']}" if r["version_reglas"] else "anteriores"}))
+    # Del más nuevo al más viejo; en el mismo minuto, el último anotado primero.
+    ficha["historial"] = [h for _orden, h in sorted(_historial, key=lambda x: x[0], reverse=True)]
 
     if ficha["contradicciones"]:
         estado = "🔴 CON CONTRADICCIONES"
@@ -737,6 +778,22 @@ def ficha_de_prueba(id_a, id_b, tolerancia_pct=3):
     # EL RIESGO Y QUÉ HACER: aparte del estado. Una pieza de seguridad bien respaldada igual
     # se mira antes de venderla, salvo que alguien ya la haya comprobado en la mano.
     ficha["riesgo"], ficha["por_que_riesgo"] = riesgo_de_la_pieza(*_descs)
+    # Y en una pieza de seguridad, si cada marca tiene CHAS (la homologación obligatoria). Solo
+    # dice lo que hay: que no figure no prueba que no lo tenga. Lo pidió una revisión con ChatGPT.
+    ficha["chas"] = []
+    if ficha["riesgo"].startswith("🛑"):
+        if not resumen_del_chas().get("certificados"):
+            ficha["chas"] = ["🛡️ El registro CHAS no está cargado: no se puede decir si estas "
+                             "marcas están homologadas (se carga en Administrar → Marcas)."]
+        else:
+            for lado, p in (("A", pa), ("B", pb)):
+                if (p["tipo"] or "").upper() == "OEM":
+                    continue
+                chas = chas_de_la_pieza(p["marca"], p["descripcion"])
+                ficha["chas"].append(
+                    f"🛡️ {lado}: {chas['marca_en_el_registro']} tiene CHAS ({chas['certificados']} "
+                    "certificado(s))" if chas else
+                    f"🛡️ {lado}: {p['marca']} no figura en el registro CHAS")
     _comprobada = bool(ficha["comprobaciones"]) or (pasos and all(p["_verificada"] for p in pasos))
     ficha["accion"] = (
         "" if _comprobada or ficha["riesgo"].startswith("🟢") else
@@ -757,6 +814,10 @@ def ficha_de_prueba(id_a, id_b, tolerancia_pct=3):
     resumen += [x for x in a_favor if x.startswith(("🏭", "🔄", "🌐"))][:1]
     if ficha["comprobaciones"]:
         resumen.append("✋ comprobada en la mano")
+    # Si algo la contradice, la línea ARRANCA por eso: lo que la sostiene, después. Lo pidió una
+    # revisión con ChatGPT: en una ficha roja lo primero que se lee tiene que ser el porqué.
+    if ficha["contradicciones"]:
+        resumen.insert(0, ficha["contradicciones"][0])
     ficha["resumen"] = resumen
 
     # CUÁNDO SE MIRÓ POR ÚLTIMA VEZ, y si para su riesgo ya toca volver a mirarla. Lo pidió una
@@ -788,6 +849,14 @@ def ficha_de_prueba(id_a, id_b, tolerancia_pct=3):
         falta.append("o comprobarla con la pieza en la mano"
                      + (f" (medir: {', '.join(ficha['para_medir'])})" if ficha["para_medir"]
                         else ""))
+    # LA PRÓXIMA COMPROBACIÓN: una sola cosa, la primera que hay que mirar. Lo pidió una revisión
+    # con ChatGPT: la lista de lo que falta dice todo, esto dice por dónde empezar. La medida que
+    # importa y no está cargada en uno de los dos; si no falta ninguna, la pieza en la mano.
+    ficha["proxima_comprobacion"] = (
+        "" if estado.startswith("✅") else
+        f"medí {ficha['para_medir'][0]} en las dos" if ficha["para_medir"] else
+        "compará las dos piezas en la mano" if estado.startswith("🔴") or ficha["accion"] else
+        "")
     ficha["estado"], ficha["falta"] = estado, falta
     return ficha
 

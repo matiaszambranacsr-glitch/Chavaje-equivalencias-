@@ -2147,7 +2147,7 @@ def detectar_posibles_duplicados(marca_id, umbral=0.87, limite_productos=1500):
 # tres columnas sin deslizar, y antes eran Código y Descripción: la marca, el precio y el stock
 # —lo que se le contesta al cliente— quedaban afuera de la pantalla. La descripción es la más
 # larga y va después.
-COLUMNAS_PRIMERO = ["Codigo", "Marca", "Precio", "Stock", "Libre", "💰", "Cadena", "Confianza",
+COLUMNAS_PRIMERO = ["Codigo", "Marca", "Precio", "Stock", "Libre", "💰", "Veredicto", "Cadena", "Confianza",
                     "Fabricante", "Descripcion"]
 
 
@@ -2320,13 +2320,22 @@ def generar_qr_bytes(texto):
 # ============================================================================================
 # COTIZAR: lo que se le puede ofrecer al cliente
 # ============================================================================================
+def hay_que_confirmarla(fila):
+    """¿Esta fila sale de la app como algo a confirmar? Lo que el buscador da por 🟡 probable,
+    🟠 revisar o 🔴 dudosa (ver veredicto_de_la_equivalencia()). Lo pidió una revisión con
+    ChatGPT: el estado tiene que viajar con el código, porque el mensaje de WhatsApp y el Excel
+    salían sin él y del otro lado «probable» y «confirmada» se leían igual."""
+    return veredicto_de_la_equivalencia(fila)[:1] in ("🟡", "🟠", "🔴")
+
+
 def armar_mensaje_de_cotizacion(lista, encabezado="", pie="", incluir_precio=True,
-                                incluir_stock=False, para=None):
+                                incluir_stock=False, para=None, marcar_a_confirmar=True):
     """El texto de la cotización para WhatsApp, agrupado por lo que se pidió. `lista` es la de
     la pantalla: [{"codigo_buscado", "resultados": [filas con Marca, Codigo, Descripcion,
     Precio, Stock]}], ya filtrada con filas_para_cotizar(). Separado de la pantalla para poder
     probarlo y usarlo en otros lados (lo propuso una revisión con ChatGPT). Precios de lista:
-    el descuento de una cuenta no va nunca acá."""
+    el descuento de una cuenta no va nunca acá. Con marcar_a_confirmar, lo que no está
+    confirmado dice «⚠️ a confirmar»: ver hay_que_confirmarla()."""
     partes = [f"{encabezado}\n"] if encabezado else []
     if para:
         partes.append(f"Para: *{para}*\n")
@@ -2343,6 +2352,8 @@ def armar_mensaje_de_cotizacion(lista, encabezado="", pie="", incluir_precio=Tru
                 extras.append(f"Stock: {fila['Stock']}")
             if extras:
                 linea += " (" + " · ".join(extras) + ")"
+            if marcar_a_confirmar and hay_que_confirmarla(fila):
+                linea += " ⚠️ a confirmar"
             partes.append(linea)
     if (pie or "").strip():
         partes.append(f"\n{pie}")
@@ -2397,8 +2408,8 @@ def marcar_lo_que_no_es_lo_mismo(res):
 def filas_para_cotizar(resultados):
     """Lo que se le puede ofrecer a un cliente como lo que pidió: lo buscado y sus
     equivalentes. Afuera quedan los códigos de fábrica (unen listas, no se venden), lo que la
-    app marcó que no es lo mismo (🧰 kits, 🔴 «no es lo mismo» por la cadena) y lo que cuelga
-    de un vínculo flojo (🔴).
+    app marcó que no es lo mismo (🧰 kits, 🔴 «no es lo mismo» por la cadena), lo que cuelga
+    de un vínculo flojo (🔴) y lo que volvió o alguien rechazó (ver no_compite_por_precio()).
 
     El mensaje de WhatsApp y el PDF de la cotización usaban TODOS los resultados: al cliente le
     llegaba como equivalente lo que la propia app, en el buscador, marcaba que no lo era."""
@@ -2408,7 +2419,8 @@ def filas_para_cotizar(resultados):
             salida.append(f)
             continue
         if (f.get("_complementario") or f.get("_sin_salida") or f.get("Tipo") == "OEM"
-                or str(f.get("Confianza") or "").startswith("🔴")):
+                or str(f.get("Confianza") or "").startswith("🔴")
+                or no_compite_por_precio(f)):
             continue
         salida.append(f)
     return salida

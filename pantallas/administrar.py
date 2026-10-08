@@ -508,7 +508,12 @@ if pagina == PAGINAS[3]:
                                         e_estrias_int, e_estrias_ext, e_seguro, e_abs,
                                         e_diam_int_b, e_diam_ext_b, e_rosca_homo, e_copa,
                                         e_copa_sup, e_largo_total)
-                    st.success("Guardado.")
+                    # Las equivalencias se puntuaron con las medidas viejas: se vuelven a puntuar.
+                    _n_rep, _n_franja = repuntuar_los_vinculos_de(id_medidas)
+                    st.success("Guardado." + (
+                        f" Afecta a {_n_rep} equivalencia(s): se volvieron a puntuar"
+                        + (f", y {_n_franja} cambió/cambiaron de franja." if _n_franja
+                           else "; ninguna cambió de franja.") if _n_rep else ""))
 
                 st.markdown("**📷 Fotos del producto**")
                 explicar(

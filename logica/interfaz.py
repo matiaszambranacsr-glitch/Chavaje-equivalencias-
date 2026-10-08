@@ -530,10 +530,13 @@ def pdf_con_cache(nombre, generador, *args):
     return resultado
 
 
-def generar_pdf_cotizacion(lista_productos, incluir_precio=True, incluir_stock=False, alias_qr=None, qr_real_bytes=None):
+def generar_pdf_cotizacion(lista_productos, incluir_precio=True, incluir_stock=False, alias_qr=None, qr_real_bytes=None,
+                           marcar_a_confirmar=True):
     """Genera un PDF simple de cotización a partir de la lista armada para WhatsApp.
     Si se pasa alias_qr (un dict con nombre/alias/cbu/titular), agrega un QR con esos datos
-    para transferencia — el cliente lo escanea y ve el alias/CBU listo para pegar, sin tipear."""
+    para transferencia — el cliente lo escanea y ve el alias/CBU listo para pegar, sin tipear.
+    Con marcar_a_confirmar, lo que no está confirmado dice «(a confirmar)»: ver
+    hay_que_confirmarla()."""
     from fpdf import FPDF
 
     pdf = FPDF()
@@ -563,6 +566,8 @@ def generar_pdf_cotizacion(lista_productos, incluir_precio=True, incluir_stock=F
                 extras.append(f"Stock: {fila['Stock']}")
             if extras:
                 linea += " (" + " / ".join(extras) + ")"
+            if marcar_a_confirmar and hay_que_confirmarla(fila):
+                linea += " (a confirmar)"
             pdf.multi_cell(0, 6, limpiar(linea), new_x="LMARGIN", new_y="NEXT")
         pdf.ln(3)
 
@@ -1263,6 +1268,10 @@ def veredicto_de_la_equivalencia(fila):
     # pasó en un auto de verdad. Ver registrar_devolucion().
     if fila.get("Devuelto"):
         return "🔴 la devolvieron porque no le iba: mirá la ficha de prueba antes de venderla"
+    # Lo que alguien rechazó en la revisión y vuelve por otro código: ver anotar_el_respaldo().
+    if fila.get("Rechazada"):
+        return ("🔴 rechazada en la revisión: alguien dijo que no es la misma pieza "
+                "(llega por otro código en el medio)")
     if fila.get("Verificada"):
         return "🟢 equivalencia confirmada (verificada)"
     if "muy débil" in confianza:
@@ -1321,8 +1330,12 @@ def mostrar_ficha_de_prueba(id_a, id_b, clave):
                + (f" · pieza: {ficha['pieza']}" if ficha["pieza"] else "")
                + f" · riesgo: {ficha['riesgo']}"
                + (f" ({ficha['por_que_riesgo']})" if ficha["por_que_riesgo"] else ""))
+    for x in ficha["chas"]:
+        st.caption(texto_para_markdown(x))
     if ficha["accion"]:
         st.warning(f"**Acción:** {ficha['accion']}.")
+    if ficha["proxima_comprobacion"]:
+        st.markdown(f"👉 **Próxima comprobación:** {texto_para_markdown(ficha['proxima_comprobacion'])}.")
     if ficha["ultima_revision"]:
         st.caption(f"🕰️ Última revisión: {ficha['ultima_revision']}"
                    + (f" (hace {ficha['meses_sin_revisar']} meses)"
@@ -1375,6 +1388,14 @@ def mostrar_ficha_de_prueba(id_a, id_b, clave):
         st.success(texto_para_markdown(x))
     for x in ficha["devoluciones"]:
         st.caption(texto_para_markdown(x))
+    # Todas las decisiones, no solo la última: quién aprobó, quién rechazó, con qué reglas.
+    # Un interruptor y no una caja desplegable: la ficha ya va adentro de una en el buscador.
+    if ficha["historial"] and st.toggle(f"🗂️ Historial de decisiones ({len(ficha['historial'])})",
+                                        key=f"historial_{clave}_{id_b}"):
+        st.dataframe(ficha["historial"], hide_index=True, width="stretch")
+        st.caption("No se corrige ni se borra. «Reglas» es la versión del puntaje con que "
+                   "estaba el par al decidirlo; «anteriores», lo decidido antes de que "
+                   "existiera el historial.")
 
     # La validación física: quién, cuándo y qué miró. Ver comprobar_en_la_mano().
     if not ficha["estado"].startswith("✅"):

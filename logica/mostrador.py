@@ -470,14 +470,22 @@ def agregar_margen(filas):
     return filas
 
 
+def no_compite_por_precio(f):
+    """¿Esta fila queda afuera del «más barato» y del «mejor margen»? La que volvió porque no le
+    iba y la que alguien rechazó en la revisión: coronarla es ofrecerla como la mejor opción
+    cuando hay una persona que dijo que no sirve. Ver anotar_el_respaldo()."""
+    return bool(f.get("Devuelto") or f.get("Rechazada"))
+
+
 def mejor_margen_entre_equivalentes(res):
     """De los equivalentes con stock, cuál te deja más ganancia.
 
     No es lo mismo que el más barato: entre dos que sirven igual, el que te deja más margen
     puede ser el más caro para el cliente o el más barato. Este dato hoy no existía y la
-    decisión se tomaba a ojo."""
+    decisión se tomaba a ojo. Sin las que no compiten: ver no_compite_por_precio()."""
     candidatos = [f for f in res
-                  if (f.get("Stock") or 0) > 0 and f.get("Precio") and f.get("_costo")]
+                  if (f.get("Stock") or 0) > 0 and f.get("Precio") and f.get("_costo")
+                  and not no_compite_por_precio(f)]
     if len(candidatos) < 2:
         return None
     def ganancia(f):

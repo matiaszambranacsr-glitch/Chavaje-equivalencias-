@@ -25,13 +25,21 @@ Las pruebas se corren como dice el README, en «Antes de subir un cambio».
 | Un rechazo no se pisa: sale de la cola, no se aprueba en grupo, y vincularlo a mano pide confirmarlo | `marcar_revision()`, `aprobar_pendientes()`, `rechazos_del_grupo()` | `pruebas_de_la_precision.py` (12) |
 | Una pieza de seguridad confirmada igual pide mirarla en la mano | `riesgo_de_la_pieza()`, `veredicto_de_la_equivalencia()` | `pruebas_de_la_precision.py` (13) |
 | Al volver a puntuar todo queda anotado qué cambió de franja | `anotar_la_deriva()` | `pruebas_de_la_precision.py` (14) |
-| Otra tensión, caudal, rosca, giro, cantidad o una reacondicionada son otra pieza | `parametros_que_chocan()` | `pruebas_de_la_revision.py` (pares de muestra), `pruebas_de_la_precision.py` (17) |
+| Otra tensión, caudal, rosca, giro, cantidad, otros dientes, otra fase o una reacondicionada son otra pieza | `parametros_que_chocan()` | `pruebas_de_la_revision.py` (pares de muestra), `pruebas_de_la_precision.py` (17) |
 | Dos medidas coinciden con la tolerancia de cada una y la precisión con que se escribieron | `diferencia_que_se_acepta()` | `pruebas_de_la_precision.py` (18) |
 | Un código leído de una foto nunca se acepta solo | `codigos_por_tipeo(de_una_foto=True)` | `pruebas_de_la_precision.py` (19) |
 | Una ficha distinta al reimportar se avisa y no se pisa | `fichas_que_cambiaron()` | `pruebas_de_la_precision.py` (20) y en la app |
 | Cada decisión guarda todo lo que había a favor y en contra | `marcar_revision()` | `pruebas_de_la_precision.py` (21) |
-| Una pieza de seguridad revisada hace más de 6 meses deja de estar verificada | `ficha_de_prueba()` | `pruebas_de_la_precision.py` (22) |
+| Una revisión vence según el riesgo: a los 6 meses una pieza de seguridad, a los 12 una que rompe el motor y a los 36 el resto | `ficha_de_prueba()`, `MESES_DE_VIGENCIA_POR_RIESGO` | `pruebas_de_la_precision.py` (22) |
 | Un cambio de reglas que hace pasar limpio algo rechazado se frena | La línea de base | `pruebas_de_la_revision.py --linea-base` |
+| Lo que alguien rechazó y vuelve por otro camino sale «🔴 rechazada», no compite por el más barato ni por el margen y no va a la cotización | `anotar_el_respaldo()`, `no_compite_por_precio()`, `filas_para_cotizar()` | `pruebas_de_la_precision.py` (23) |
+| Una ficha con algo en contra arranca diciendo qué; la de una pieza de seguridad dice si cada marca tiene CHAS | `ficha_de_prueba()` | `pruebas_de_la_precision.py` (22, 23) |
+| Cada decisión queda en el historial con la lista y la versión de las reglas, y el historial no se corrige ni se borra | `marcar_revision()`, disparadores de `historial_de_revisiones` | `pruebas_de_la_precision.py` (24) |
+| Cualquier «no le iba» (medida, rosca, ficha, lado, versión, le faltaba algo, hubo que modificarla) baja el vínculo; «vino fallada», no | `MOTIVOS_DE_NO_ERA_LA_PIEZA` | `pruebas_de_la_precision.py` (25) |
+| El lado no es una variante: la rosca izquierda o el borne del otro lado no se agrupan con la otra | `codigo_base_sin_variante()`, `TRAMOS_DE_LADO` | `pruebas_de_la_precision.py` (26), `nucleo/pruebas.py` |
+| Lo que no está confirmado sale «a confirmar» en WhatsApp y en el PDF, y con su veredicto en el Excel | `hay_que_confirmarla()` | `pruebas_de_la_precision.py` (27) |
+| Aprobar en bloque nunca aprueba una pieza de seguridad | `aprobar_pendientes(en_bloque=True)` | `pruebas_de_la_precision.py` (28) |
+| Corregir las medidas a mano vuelve a puntuar los vínculos de ese producto, y solo esos | `repuntuar_los_vinculos_de()` | `pruebas_de_la_precision.py` (29) |
 
 ## El stock, los precios y la plata
 

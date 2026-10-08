@@ -1009,6 +1009,7 @@ def probar_la_misma_junta_en_otro_espesor_no_es_un_error_de_carga():
         ("JVL-168-24", "JVL-168-28", "JVL-168-34"),
         ("TC-696-MG 2M", "TC-696-11 2M"),                    # mismo espesor, otro material
         ("JI-276", "JI-276-R"),                              # el mismo juego, con retenes
+        ("PZ-500-20 LH", "PZ-500-MG LH"),                    # mismo lado, otro material
     ]
     for grupo in variantes:
         cierto(codigos.son_variantes_de_la_misma_pieza(grupo),
@@ -1017,6 +1018,9 @@ def probar_la_misma_junta_en_otro_espesor_no_es_un_error_de_carga():
         ("JCA-121-15", "JCA-120-15", "JCA-123"),   # tres kits de compresor distintos
         ("2712800", "2627400"),                     # guarnición de bomba y arandela de fibra
         ("TC-963-17", "JR-602-17R"),                # la junta sola y el juego completo
+        ("CAMBA265.32", "CAMBA265.32.I"),           # tuerca trapecial de rosca izquierda
+        ("MATEO-12/95-D", "MATEO-12/95-I"),         # la batería con el borne del otro lado
+        ("PZ-500-20 LH", "PZ-500-20 RH"),           # la pieza del otro lado
     ]
     for grupo in distintos:
         cierto(not codigos.son_variantes_de_la_misma_pieza(grupo),

@@ -131,6 +131,8 @@ def probar(L):
             estados.get("diám. externo", "").startswith("≈"), True)
     esperar("el ancho falta en B", estados.get("ancho"), "❓ falta en B")
     esperar("y se pide medirlo", ficha["para_medir"], ["ancho"])
+    esperar("la próxima comprobación es medir lo que falta", ficha["proxima_comprobacion"],
+            "medí ancho en las dos")
 
     # Sin el vínculo del barrido, llega por el número de fábrica: probable.
     c.execute("DELETE FROM equivalencias WHERE lote LIKE 'BARRIDO%'")
@@ -143,6 +145,7 @@ def probar(L):
     conn.commit()
     ficha = ns["ficha_de_prueba"](ret_f, ret_i)
     esperar("directo y declarado: verificada", ficha["estado"], "✅ VERIFICADA")
+    esperar("verificada no pide otra comprobación", ficha["proxima_comprobacion"], "")
     esperar("la misma lista dos veces es una fuente", ficha["fuentes"], ["FISPA", "ILLINOIS"])
     # Floja: probable, aunque la declare una lista.
     c.execute("UPDATE equivalencias SET confianza = 40 WHERE producto_a_id = ? AND producto_b_id = ?",
@@ -400,6 +403,22 @@ def probar(L):
             "versiones distintas: reacondicionada contra nueva")
     esperar("si solo una lo dice, no choca", chocan(p_("RELAY 12 VOLTS"), p_("RELAY")), None)
     esperar("4X4 no es una cantidad", p_("HILUX 4X4"), ())
+    # Los dientes, la fase y la tensión escrita al revés.
+    arranque_24 = "MOTOR DE ARRANQUE Familia 28MT Volts V 24 Potencia Kw 4 0 Dientes 10 Sentido"
+    arranque_12 = "MOTOR DE ARRANQUE Familia 29MT Volts V 12 Potencia Kw 2 9 Dientes 9 Sentido"
+    esperar("el rótulo de FISPA: la tensión y los dientes", dict(p_(arranque_24)).get("dientes"),
+            frozenset({10}))
+    esperar("«Volts V 24» es 24 V", dict(p_(arranque_24)).get("tensión"), frozenset({24}))
+    esperar("dos motores de arranque distintos", chocan(p_(arranque_24), p_(arranque_12)),
+            "versiones distintas: de 10 dientes contra de 9")
+    esperar("en la polea, los dientes van adelante (lo de atrás son años)",
+            dict(p_("BOMBA DE AGUA POLEA 20 DIENTES 98 02 93")).get("dientes"), frozenset({20}))
+    esperar("fase II contra fase III", chocan(p_("JUNTA PALIO FASE II"), p_("JUNTA PALIO FASE 3")),
+            "versiones distintas: fase II contra fase III")
+    esperar("la que sirve para las dos fases no choca",
+            chocan(p_("JUNTA PALIO FASE II/III"), p_("JUNTA PALIO FASE III")), None)
+    esperar("y declara las dos", dict(p_("JUNTA PALIO FASE II/III")).get("fase"),
+            frozenset({"II", "III"}))
 
     # 18. Cuánto pueden diferir dos medidas: en mm, por medida, con la precisión que se escribió.
     cm = ns["comparar_medidas"]
@@ -443,10 +462,18 @@ def probar(L):
     esperar("una coma o una palabra más no cuenta", cambia("RETEN 35X52X7 FIAT", "RETEN 35X52X7 FIAT 128"),
             "")
     reten_viejo = producto("RV100", "RETEN 35X52X7 FIAT 128", fispa)
+    vincular(reten_viejo, ret_o, "FISPA · lista.xlsx · 01/10/2026 10:00:00")
     conn.commit()
     fichas = ns["fichas_que_cambiaron"]({reten_viejo: "RETEN 35X52X8 FIAT 128"})
     esperar("la lista nueva trae otra medida", (fichas["cambiaron"], fichas["ejemplos"][0]["Qué cambió"]),
             (1, "ancho: 7 → 8"))
+    esperar("y dice a cuántas equivalencias toca", fichas["ejemplos"][0]["Vínculos"], 1)
+    reten_suelto = producto("RV200", "RETEN 35X52X7 FIAT 147", fispa)
+    conn.commit()
+    fichas = ns["fichas_que_cambiaron"]({reten_suelto: "RETEN 35X52X9 FIAT 147",
+                                          reten_viejo: "RETEN 35X52X8 FIAT 128"})
+    esperar("la que más equivalencias toca va primero",
+            [x["Código"] for x in fichas["ejemplos"]], ["RV100", "RV200"])
     esperar("otra redacción de la misma pieza no se cuenta",
             ns["fichas_que_cambiaron"]({reten_viejo: "RETEN 35X52X7 FIAT 128 ORIGINAL"})["cambiaron"],
             0)
@@ -475,6 +502,17 @@ def probar(L):
     conn.commit()
     ficha = ns["ficha_de_prueba"](pas_a, pas_b)
     esperar("sabe cuándo se revisó", ficha["ultima_revision"], "2025-01-10")
+    esperar("una pieza de seguridad dice si hay registro CHAS",
+            "no está cargado" in " ".join(ficha["chas"]), True)
+    esperar("una que no es de seguridad, no", ns["ficha_de_prueba"](ret_f, ret_i)["chas"], [])
+    c.execute("INSERT INTO chas_emitidos (numero, empresa, marca, marca_norm, autoparte) "
+              "VALUES ('C1', 'FISPA SA', 'FISPA', 'FISPA', 'PASTILLAS DE FRENO')")
+    ns["guardar_config"](ns["CONFIG_DEL_CHAS"], '{"certificados": 1}')
+    conn.commit()
+    esperar("con el registro, dice quién tiene CHAS y quién no figura",
+            ns["ficha_de_prueba"](pas_a, pas_b)["chas"],
+            ["🛡️ A: FISPA tiene CHAS (1 certificado(s))",
+             "🛡️ B: ILLINOIS no figura en el registro CHAS"])
     esperar("una pieza de seguridad revisada hace más de 6 meses vuelve a probable",
             ficha["estado"], "🟡 PROBABLE")
     esperar("y dice por qué", any("volver a mirarla" in f for f in ficha["falta"]), True)
@@ -483,6 +521,167 @@ def probar(L):
     conn.commit()
     esperar("revisada hace poco, sigue verificada", ns["ficha_de_prueba"](pas_a, pas_b)["estado"],
             "✅ VERIFICADA")
+    # La de riesgo normal también vence, a los tres años.
+    fa_a = producto("FA1", "FILTRO DE AIRE FIAT PALIO", fispa)
+    fa_b = producto("IFA1", "FILTRO DE AIRE FIAT PALIO 1.4", illinois)
+    vincular(fa_a, fa_b, "FISPA · lista.xlsx · 01/10/2026 10:00:00")
+    c.execute("INSERT OR REPLACE INTO equivalencias_revisadas (producto_a_id, producto_b_id, decision, "
+              "revisado_por, fecha) VALUES (?, ?, 'ok', 'Ana', '2022-01-10 10:00:00')",
+              (min(fa_a, fa_b), max(fa_a, fa_b)))
+    conn.commit()
+    ficha = ns["ficha_de_prueba"](fa_a, fa_b)
+    esperar("un filtro es de riesgo normal", ficha["riesgo"][:1], "🟢")
+    esperar("revisado hace más de tres años vuelve a probable", ficha["estado"], "🟡 PROBABLE")
+    c.execute("UPDATE equivalencias_revisadas SET fecha = '2025-01-10 10:00:00' WHERE "
+              "producto_a_id = ? AND producto_b_id = ?", (min(fa_a, fa_b), max(fa_a, fa_b)))
+    conn.commit()
+    esperar("revisado hace menos de tres años, sigue verificado",
+            ns["ficha_de_prueba"](fa_a, fa_b)["estado"], "✅ VERIFICADA")
+
+    # 23. Lo que alguien rechazó y vuelve por otro camino: se marca, no compite y la ficha lo dice.
+    rx_a = producto("BX1", "BOMBA DE AGUA VW GOL 1.6", fispa)
+    rx_b = producto("IBX1", "BOMBA DE AGUA VW GOL 1.6", illinois)
+    rx_o = producto("030121008", "BOMBA DE AGUA", oem)
+    vincular(rx_a, rx_o, "FISPA · lista.xlsx · 01/10/2026 10:00:00")
+    vincular(rx_b, rx_o, "ILLINOIS · lista.xlsx · 01/10/2026 11:00:00")
+    c.execute("UPDATE productos SET precio = 100, stock = 2 WHERE id = ?", (rx_b,))
+    c.execute("UPDATE productos SET precio = 300, stock = 2 WHERE id = ?", (rx_a,))
+    conn.commit()
+    res, _ = ns["buscar_con_variantes_del_cero"]("BX1", "Todas", 3)
+    fila_rx = {f["ID"]: f for f in res}.get(rx_b, {})
+    esperar("antes del rechazo no está marcada", "Rechazada" in fila_rx, False)
+    ns["marcar_revision"]([(rx_a, rx_b)], "rechazada", "otra_pieza")
+    res, _ = ns["buscar_con_variantes_del_cero"]("BX1", "Todas", 3)
+    por_id = {f["ID"]: f for f in res}
+    fila_rx = por_id.get(rx_b, {})
+    esperar("sigue apareciendo, por el número de fábrica", bool(fila_rx), True)
+    esperar("pero marcada como rechazada", str(fila_rx.get("Rechazada", "")).startswith("🚫 "),
+            True)
+    esperar("el número de fábrica no está rechazado", "Rechazada" in por_id.get(rx_o, {}), False)
+    esperar("y el veredicto lo dice primero",
+            ns["veredicto_de_la_equivalencia"](dict(fila_rx, Confianza="🟢 sólida"))
+            .startswith("🔴 rechazada"), True)
+    esperar("no compite por el más barato", ns["no_compite_por_precio"](fila_rx), True)
+    esperar("ni por el mejor margen", ns["mejor_margen_entre_equivalentes"]([
+        dict(fila_rx, _costo=10), {"Codigo": "X", "Marca": "Y", "Stock": 1, "Precio": 100,
+                                    "_costo": 90}]), None)
+    esperar("ni va a la cotización", rx_b in [f["ID"] for f in ns["filas_para_cotizar"](res)],
+            False)
+    esperar("buscando el otro, también", {f["ID"]: f for f in ns["buscar_con_variantes_del_cero"](
+        "IBX1", "Todas", 3)[0]}.get(rx_a, {}).get("Rechazada", "")[:1], "🚫")
+    # Una base de antes puede tener el rechazo anotado en un solo sentido: se marca igual.
+    c.execute("DELETE FROM equivalencias_revisadas WHERE producto_a_id = ? AND producto_b_id = ?",
+              (rx_b, rx_a))
+    conn.commit()
+    esperar("con el rechazo anotado en un solo sentido, también",
+            {f["ID"]: f for f in ns["buscar_con_variantes_del_cero"]("BX1", "Todas", 3)[0]}
+            .get(rx_b, {}).get("Rechazada", "")[:1], "🚫")
+    ficha = ns["ficha_de_prueba"](rx_a, rx_b)
+    esperar("la ficha la da con contradicciones", ficha["estado"], "🔴 CON CONTRADICCIONES")
+    esperar("y lo primero que dice es el rechazo", ficha["resumen"][0][:1], "🚫")
+    esperar("con el motivo", "Es otra pieza" in ficha["contradicciones"][0], True)
+    esperar("y pide mirarla en la mano", ficha["proxima_comprobacion"],
+            "compará las dos piezas en la mano")
+    esperar("abierta al revés, también", ns["ficha_de_prueba"](rx_b, rx_a)["estado"],
+            "🔴 CON CONTRADICCIONES")
+
+    # 24. El historial de las decisiones: todas, con la lista y la versión, y no se toca.
+    hist = c.execute("SELECT decision, lote, version_reglas FROM historial_de_revisiones "
+                     "WHERE producto_a_id = ? AND producto_b_id = ? ORDER BY id",
+                     (min(ja, jb), max(ja, jb))).fetchall()
+    esperar("el rechazo queda con la lista de la que vino", [tuple(h) for h in hist],
+            [("rechazada", "ILLINOIS · otra.xlsx · x", ns["VERSION_CONFIANZA"])])
+    ns["marcar_revision"]([(rx_a, rx_b)], "ok")
+    esperar("aprobar después pisa la última decisión", c.execute(
+        "SELECT decision FROM equivalencias_revisadas WHERE producto_a_id = ? AND producto_b_id = ?",
+        (rx_a, rx_b)).fetchone()[0], "ok")
+    ficha = ns["ficha_de_prueba"](rx_a, rx_b)
+    esperar("pero el historial guarda las dos, la nueva primero",
+            [h["Decisión"][:1] for h in ficha["historial"] if h["Par"] == "A ↔ B"], ["✅", "🚫"])
+    esperar("con la versión de las reglas", ficha["historial"][0]["Reglas"],
+            "v" + ns["VERSION_CONFIANZA"])
+    esperar("ya no está rechazada", "Rechazada" in {f["ID"]: f for f in ns[
+        "buscar_con_variantes_del_cero"]("BX1", "Todas", 3)[0]}.get(rx_b, {}), False)
+    esperar("el historial no se corrige", _falla(
+        c.execute, "UPDATE historial_de_revisiones SET decision = 'ok'"), "IntegrityError")
+    esperar("ni se borra", _falla(c.execute, "DELETE FROM historial_de_revisiones"),
+            "IntegrityError")
+    conn.rollback()
+
+    # 25. Por qué no le iba: cada motivo de «no era la pieza» baja el vínculo; la fallada, no.
+    tr_a = producto("TR1", "TERMINAL DE DIRECCION VW GOL", fispa)
+    tr_b = producto("ITR1", "TERMINAL DE DIRECCION VW GOL", illinois)
+    vincular(tr_a, tr_b, "FISPA · lista.xlsx · 01/10/2026 10:00:00", confianza=95)
+    conn.commit()
+    esperar("otra rosca baja el vínculo", ns["registrar_devolucion"](tr_b, "TR1", "rosca"), 1)
+    esperar("y cuenta como devuelto",
+            ns["pares_devueltos"]().get((min(tr_a, tr_b), max(tr_a, tr_b))), 1)
+    for motivo in ("medida", "conector", "lado", "aplicacion", "faltante", "modificacion"):
+        esperar(f"«{motivo}» dice que no era la pieza",
+                motivo in ns["MOTIVOS_DE_NO_ERA_LA_PIEZA"], True)
+    esperar("«fallada» no", "fallada" in ns["MOTIVOS_DE_NO_ERA_LA_PIEZA"], False)
+    esperar("«otro» tampoco", "otro" in ns["MOTIVOS_DE_NO_ERA_LA_PIEZA"], False)
+
+    # 26. El lado no es una variante: la rosca izquierda y el borne del otro lado.
+    base = ns["codigo_base_sin_variante"]
+    esperar("rosca izquierda", base("CAMBA265.32.I") == base("CAMBA265.32"), False)
+    esperar("borne del otro lado", base("MATEO-12/95-D") == base("MATEO-12/95-I"), False)
+    esperar("izquierda y derecha", base("PZ-500-20 LH") == base("PZ-500-20 RH"), False)
+    esperar("el mismo lado en otro material, sí", base("PZ-500-20 LH"), base("PZ-500-MG LH"))
+    esperar("«-R» sigue siendo con retenes", base("SJ-252-R"), "SJ-252")
+
+    # 27. El estado viaja con el código: lo que no está confirmado sale «a confirmar».
+    item = [{"codigo_buscado": "W712", "resultados": [
+        {"Marca": "MANN", "Codigo": "W712", "Cadena": "— el buscado"},
+        {"Marca": "FRAM", "Codigo": "PH1", "Cadena": "🟢 directo", "Confianza": "🟢 sólida",
+         "Respaldo": "📋 lo declara la lista de FISPA"},
+        {"Marca": "WEGA", "Codigo": "W1", "Cadena": "🟡 3 saltos", "Confianza": "🟢 sólida"}]}]
+    mensaje = ns["armar_mensaje_de_cotizacion"](item)
+    esperar("la probable sale a confirmar", "• WEGA: W1 ⚠️ a confirmar" in mensaje, True)
+    esperar("la confirmada no", "• FRAM: PH1\n" in mensaje + "\n", True)
+    esperar("lo buscado no", "• MANN: W712\n" in mensaje, True)
+    esperar("y se puede apagar", "a confirmar" in ns["armar_mensaje_de_cotizacion"](
+        item, marcar_a_confirmar=False), False)
+
+    # 28. Aprobar en bloque deja afuera las piezas de seguridad; de a una, se aprueban.
+    pf_a = producto("PB1", "PASTILLA DE FRENO DELANTERA VW GOL", fispa)
+    pf_b = producto("IPB1", "PASTILLA DE FRENO DELANTERA VW GOL", illinois)
+    fl_a = producto("FL1", "FILTRO DE ACEITE VW GOL", fispa)
+    fl_b = producto("IFL1", "FILTRO DE ACEITE VW GOL", illinois)
+    for x, y in ((pf_a, pf_b), (fl_a, fl_b)):
+        c.execute("INSERT INTO equivalencias_pendientes (producto_a_id, producto_b_id, origen, lote) "
+                  "VALUES (?, ?, 'lista_proveedor', 'BLOQUE')", (min(x, y), max(x, y)))
+    conn.commit()
+    esperar("la pastilla es de seguridad", ns["pares_de_piezas_de_seguridad"](
+        [(pf_a, pf_b), (fl_a, fl_b)]), {(pf_a, pf_b)})
+    esperar("en bloque se aprueba solo el filtro", ns["aprobar_pendientes"](
+        "BLOQUE", [(pf_a, pf_b), (fl_a, fl_b)], en_bloque=True), 1)
+    esperar("y la pastilla sigue en la cola", c.execute(
+        "SELECT COUNT(*) FROM equivalencias_pendientes WHERE lote = 'BLOQUE'").fetchone()[0], 1)
+    esperar("de a una, sí se aprueba", ns["aprobar_pendientes"]("BLOQUE", [(pf_a, pf_b)]), 1)
+
+    # 29. Corregir las medidas a mano vuelve a puntuar los vínculos de ese producto, y nada más.
+    md_a = producto("RM1", "RETEN CIGUEÑAL VW GOL 40X60X8", fispa, diametro_interno=40,
+                    diametro_externo=60)
+    md_b = producto("IRM1", "RETEN CIGUEÑAL VW GOL 40X60X8", illinois, diametro_interno=40,
+                    diametro_externo=60)
+    vincular(md_a, md_b, "FISPA · lista.xlsx · 01/10/2026 10:00:00", confianza=90)
+    conn.commit()
+    _conf_otro = c.execute("SELECT confianza FROM equivalencias WHERE producto_a_id = ? AND "
+                           "producto_b_id = ?", (min(fa_a, fa_b), max(fa_a, fa_b))).fetchone()[0]
+    esperar("sin productos con vínculos, no hace nada", ns["repuntuar_los_vinculos_de"](-1), (0, 0))
+    ns["actualizar_medidas"](md_b, 52, 60, None, None, None, None)
+    n_rep, n_franja = ns["repuntuar_los_vinculos_de"](md_b)
+    esperar("repuntúa el vínculo del producto", n_rep, 1)
+    esperar("y con la medida que no da cambia de franja", n_franja, 1)
+    esperar("repuntuar otra vez no cambia ninguna franja", ns["repuntuar_los_vinculos_de"](md_b),
+            (1, 0))
+    esperar("queda flojo", c.execute("SELECT confianza FROM equivalencias WHERE producto_a_id = ? "
+                                     "AND producto_b_id = ?", (min(md_a, md_b), max(md_a, md_b))
+                                     ).fetchone()[0] < 50, True)
+    esperar("los otros vínculos no se tocan", c.execute(
+        "SELECT confianza FROM equivalencias WHERE producto_a_id = ? AND producto_b_id = ?",
+        (min(fa_a, fa_b), max(fa_a, fa_b))).fetchone()[0], _conf_otro)
     return fallas
 
 

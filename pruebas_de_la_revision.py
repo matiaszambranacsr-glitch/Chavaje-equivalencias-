@@ -232,6 +232,14 @@ PARES_DE_MUESTRA = [
      "reacondicionada contra nueva"),
     ("PORTA FUSIBLE AEREO UNIVERSAL 20 AMPERES 2 UNIDADES",
      "PORTA FUSIBLE AEREO UNIVERSAL 20 AMPERES 10 UNIDADES", "distinta", "2 contra 10 unidades"),
+    # Estos dos sí salieron de la base real (FISPA, LUCAS): los cita el mismo número DELCO.
+    ("MOTOR DE ARRANQUE LINEA PESADA LRSC080058 Cummins ISB 5 9L Familia 28MT Volts V 24 "
+     "Potencia Kw 4 0 Dientes 10 Sentido de Rotacion Horario",
+     "MOTOR DE ARRANQUE LINEA PESADA LRSN200295 MERCEDES-BENZ Camiones 710 Familia 29MT Volts V 12 "
+     "Potencia Kw 2 9 Dientes 9 Sentido de Rotacion Horario", "distinta",
+     "24 V y 10 dientes contra 12 V y 9 dientes"),
+    ("JUNTA TAPA DE VALVULAS FIAT PALIO FASE II 1.4 FIRE", "JUNTA TAPA DE VALVULAS FIAT PALIO FASE III 1.4 FIRE",
+     "distinta", "fase II contra fase III"),
 ]
 
 
@@ -341,7 +349,8 @@ def probar_aprobaciones(logica, cuantos):
     # Los mal aprobados no van en la matriz: ahí el rojo es el acierto (ver el resumen).
     conteo = {"limpias": len(limpias), "rojo": len(rojos),
               "revisión": len(todos) - len(limpias) - len(rojos) - len(mal_aprobados),
-              "_filas": clasificadas(limpias, todos)}
+              "_filas": clasificadas(limpias, todos,
+                                     logica.todo_lo_de_la_logica()["familia_para_comparar"])}
     fallas = []
     if len(rojos) > 0.01 * cuantos:
         fallas.append(f"más del 1 % de lo aprobado cae en rojo: {resumen}. Ejemplos: "
@@ -365,7 +374,7 @@ def probar_rechazos(logica):
     rojos = sum(1 for f in todos if (f.get("confianza") or 0) < 30)
     conteo = {"limpias": len(limpias), "rojo": rojos,
               "revisión": len(todos) - len(limpias) - rojos,
-              "_filas": clasificadas(limpias, todos)}
+              "_filas": clasificadas(limpias, todos, logica_ns["familia_para_comparar"])}
     return n, len(limpias), len(altas), limpias, conteo
 
 
@@ -376,15 +385,18 @@ def clave_del_par(f):
     return " ↔ ".join(lados)
 
 
-def clasificadas(limpias, todos):
-    """{clave: (estado, señales a favor)} de cada par: «limpia», «revisión» o «rojo»."""
+def clasificadas(limpias, todos, familia=None):
+    """{clave: (estado, señales a favor, confianza, familia)} de cada par: estado es «limpia»,
+    «revisión» o «rojo»; familia, el rubro de la pieza (ver familia_para_comparar()), si se pasa
+    con qué sacarlo."""
     ids_limpias = {id(f) for f in limpias}
     salida = {}
     for f in todos:
         estado = ("limpia" if id(f) in ids_limpias
                   else "rojo" if (f.get("confianza") or 0) < 30 else "revisión")
         a_favor = [t for tipo, t in (f.get("senales") or ()) if tipo == "bien"]
-        salida[clave_del_par(f)] = (estado, a_favor)
+        rubro = (familia(f.get("desc_a") or f.get("desc_b") or "") if familia else "") or "—"
+        salida[clave_del_par(f)] = (estado, a_favor, f.get("confianza") or 0, rubro)
     return salida
 
 
@@ -404,7 +416,7 @@ def imprimir_las_reglas(aprobados, rechazados, cuantas=12):
     están causando más errores»)."""
     cuenta = {}
     for nombre, conteo in (("aprobados", aprobados), ("rechazados", rechazados)):
-        for _estado, a_favor in (conteo or {}).get("_filas", {}).values():
+        for _estado, a_favor, _conf, _rubro in (conteo or {}).get("_filas", {}).values():
             for senal in {_nombre_de_la_senal(t) for t in a_favor}:
                 cuenta.setdefault(senal, {"aprobados": 0, "rechazados": 0})[nombre] += 1
     filas = [(s_, c_["aprobados"], c_["rechazados"]) for s_, c_ in cuenta.items()
@@ -413,6 +425,27 @@ def imprimir_las_reglas(aprobados, rechazados, cuantas=12):
     print("   reglas a favor, de la que más aparece en lo rechazado a la que menos:")
     for senal, ap, re_ in filas[:cuantas]:
         print(f"     {100 * re_ / (ap + re_):5.1f} % rechazados ({re_:,} de {ap + re_:,})  {senal}")
+
+
+# Las franjas del puntaje, de arriba abajo: el verde aprueba solo desde 75.
+FRANJAS_DE_LA_CALIBRACION = ((75, "≥75"), (70, "70–74"), (50, "50–69"), (30, "30–49"),
+                             (0, "<30"))
+
+
+def imprimir_la_calibracion(aprobados, rechazados):
+    """CUÁNTO ACIERTA CADA FRANJA DEL PUNTAJE, con lo que ya decidiste: de los pares que hoy
+    caen en cada franja, qué parte rechazaste. Si el puntaje está bien calibrado, el porcentaje
+    baja de franja en franja hacia arriba. Lo pidió una revisión con ChatGPT («calibración: un 90
+    tiene que acertar más que un 70»)."""
+    print("   calibración, % rechazado a mano por franja del puntaje:")
+    for piso, nombre in FRANJAS_DE_LA_CALIBRACION:
+        techo = next((p for p, _n in reversed(FRANJAS_DE_LA_CALIBRACION) if p > piso), 1e9)
+        ap = sum(1 for v in (aprobados or {}).get("_filas", {}).values() if piso <= v[2] < techo)
+        re_ = sum(1 for v in (rechazados or {}).get("_filas", {}).values()
+                  if piso <= v[2] < techo)
+        if ap + re_:
+            print(f"     {nombre:>6}: {100 * re_ / (ap + re_):5.1f} % rechazados "
+                  f"({re_:,} de {ap + re_:,})")
 
 
 def comparar_con_la_linea_de_base(ruta, aprobados, rechazados, actualizar=False):
@@ -442,6 +475,16 @@ def comparar_con_la_linea_de_base(ruta, aprobados, rechazados, actualizar=False)
                 cambios.setdefault(f"{previo} → {estado}", []).append(clave)
         print(f"   {grupo} contra la línea de base: "
               + (", ".join(f"{k}: {len(v):,}" for k, v in sorted(cambios.items())) or "sin cambios"))
+        # Por familia: un cambio que se concentra en un rubro dice qué regla lo movió. Lo pidió
+        # una revisión con ChatGPT («ver los cambios por familia de pieza»).
+        filas = ((aprobados if grupo == "aprobados" else rechazados) or {}).get("_filas", {})
+        for transicion, claves in sorted(cambios.items()):
+            por_rubro = {}
+            for clave in claves:
+                rubro = filas.get(clave, (None, None, None, "—"))[3]
+                por_rubro[rubro] = por_rubro.get(rubro, 0) + 1
+            print(f"     {transicion}: " + ", ".join(
+                f"{r} {n:,}" for r, n in sorted(por_rubro.items(), key=lambda x: -x[1])[:5]))
         for transicion, claves in cambios.items():
             if transicion.endswith(f"→ {malo}"):
                 texto = (f"{len(claves)} {grupo} pasaron a {malo}: " + "; ".join(claves[:5]))
@@ -494,6 +537,7 @@ def main():
             imprimir_la_matriz(conteo_ap, conteo_re)
             if "--reglas" in sys.argv:
                 imprimir_las_reglas(conteo_ap, conteo_re)
+                imprimir_la_calibracion(conteo_ap, conteo_re)
             if ruta_linea:
                 fallas += comparar_con_la_linea_de_base(ruta_linea, conteo_ap, conteo_re,
                                                         actualizar="--actualizar" in sys.argv)

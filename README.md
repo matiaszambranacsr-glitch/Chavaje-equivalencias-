@@ -6475,6 +6475,55 @@ el botón**:
 - «🔌 Probar las fuentes de afuera» suma la Central de Deudores (con el CUIT de la AFIP, nunca el
   de un cliente) y la inflación de respaldo.
 
+## 🧷 La precisión, cuarta parte: lo rechazado no vuelve, el historial no se pisa
+
+Puntos 53 a 127 de la misma revisión con ChatGPT, medidos sobre la copia de la base real del 8/10
+(86.946 productos, 20.037 vínculos y 2.633 pares rechazados con los dos productos cargados).
+
+| Punto | Qué se encontró | Qué se hizo |
+|---|---|---|
+| 53. Validar lo leído de una foto | Hecho en la tanda anterior. | — |
+| 54, 55 y 107 a 110. Fotos del envase y de la pieza, medidas y escala desde una foto, puntos de montaje | La base no tiene fotos de productos (0), y la IA de la app no estima medidas: lee el código y el tipo de pieza. | Sin cambio. |
+| 56, 57, 93 y 94. Mercado, planta, plataforma | Las listas son del mercado argentino y no traen planta, período de producción ni plataforma. El código de barras ya dice el país de la caja. | Sin cambio. |
+| 58. Homologación como condición dura | El CHAS se mira por marca, no por pieza: no puede bloquear una equivalencia. El registro de la base está vacío (0 certificados). | En una pieza de seguridad, la ficha dice si cada marca tiene CHAS, o que el registro no está cargado. |
+| 59 y 60. Vigencia y caducidad | La ficha ya vencía las piezas de seguridad a los 6 meses y las de riesgo alto a los 12. | Las de riesgo normal vencen a los 3 años: pasan de VERIFICADA a PROBABLE («volver a mirarla»). |
+| 61. Qué evidencia falta | Ya: «Falta para que quede verificada» y las medidas que hay que mirar. | — |
+| 62. La próxima comprobación | No había. | «👉 Próxima comprobación»: la primera medida que importa y no está cargada («medí ancho en las dos») o, si no falta ninguna, compararlas en la mano. |
+| 63, 78 y 79. Refutación, severidad, bloqueo | Ya: los vetos (medidas, rubro, lado, motor, parámetros) dejan el puntaje en 20 como mucho; el precio distinto solo avisa. | — |
+| 64 y 65. Revisor a ciegas, desacuerdo entre revisores | Las 23.081 decisiones son de una sola persona: no hay con quién discrepar. | El historial (punto 74) deja medirlo el día que decidan dos. |
+| 66. Reglas por familia | Ya: medidas por clase de pieza (13 clases) y vetos por rubro. | — |
+| 67. Umbral aprendido de los datos | No se medía por franja. | `--reglas` imprime la calibración: con 75 o más, **0,0 % rechazado** (2 de 17.265); 50 a 69, 2,4 %; menos de 30, 99,6 %. El 75 está bien puesto. Devoluciones anotadas: 0. |
+| 68. Un error en un freno cuesta más | No había diferencia al aprobar en bloque. | Aprobar en bloque (el resto de un grupo con muestra, o la lista entera) **deja afuera las piezas de seguridad**: quedan en la cola para mirarlas de a una. Hoy no hay ninguna pendiente (de 7.827). |
+| 69 y 70. Casos trampa y conjunto fijo | Ya: 68 pares de muestra y los 22.670 decididos con `--base`. | Dos pares más (70): el motor de arranque de 24 V contra el de 12 V, y fase II contra fase III. |
+| 71. Regresión por familia | La línea de base comparaba par por par. | Cada cambio contra la línea de base dice en qué familia cae. |
+| 72, 73 y 82. Impacto de cambiar una ficha | La importación nunca pisa una descripción (ya avisa); las medidas se corrigen a mano en Administrar → Productos, y los vínculos seguían con el puntaje viejo. | Guardar las medidas **vuelve a puntuar los vínculos de ese producto**, y dice «afecta a N equivalencias; M cambiaron de franja». El aviso de fichas distintas al importar dice cuántos vínculos toca cada una y ordena por eso. |
+| 74, 111, 120, 122 y 123. Historial reproducible, versión de las reglas, no pisar decisiones | Se guardaba la ÚLTIMA decisión de cada par (aprobar después de rechazar la pisaba), con la confianza y el por qué, pero sin la versión de las reglas ni la lista de la que vino. | **Historial de decisiones** aparte, que no se corrige ni se borra (dos disparadores de la base lo impiden): cada decisión con quién, cuándo, la confianza, el por qué, **la lista** y **la versión de las reglas**. Se llenó con las 23.081 de antes («reglas anteriores»). La ficha lo muestra. Volver a correr una decisión vieja con las reglas viejas es volver a esa versión del código. |
+| 75 y 121. Lo que agrega la IA | La IA no agrega datos técnicos: solo lee códigos de fotos, que nunca se aceptan solos. | — |
+| 76 y 77. Confianza por campo, tres estados del dato faltante | Ya: la ficha muestra cada medida (✅ igual, ≈ en tolerancia, ❓ falta en A o en B, ❌ distinta) y la que no importa para esa pieza no sale. | — |
+| **80. Lo rechazado no puede volver como «probable»** | **Cierto, y era lo más grave.** Rechazar saca el vínculo directo, no los demás: **91 de los 2.633 pares rechazados volvían a salir** al buscar el primero (hasta 3 saltos), **48 como «🟡 probable»**. | Ahora salen **«🔴 rechazada en la revisión»**, con quién y cuándo; no compiten por «el más barato» ni por el mejor margen, no van a la cotización de WhatsApp ni al PDF, y la ficha queda 🔴 diciéndolo primero. No se esconden: puede que el rechazo esté mal. Medido después: los 91 salen rojos. |
+| 81. Buscar parecidos no es demostrar | Ya: las sugerencias por tipeo no se guardan, el barrido es una pista y «confirmada» pide una fuente. | — |
+| 83. Uso real | Ya: una venta que no vuelve confirma, una que vuelve baja el vínculo. Hoy hay 0 ventas anotadas. | — |
+| 84 y 85. Por qué volvió | Solo «no le iba», «vino fallada» u «otro». | El motivo exacto: otra medida, otra rosca, otra ficha o conector, del otro lado, de otra versión del auto, le faltaba algo, hubo que modificarla. Todos bajan el vínculo; «vino fallada», no. |
+| 86. Aprender sin crear vínculos | Ya: lo aprendido sube o baja un puntaje, nunca crea una equivalencia. | — |
+| 87 a 90 y 92. Excepciones por auto, VIN, años salteados | El rechazo es global. Las excepciones por auto necesitan aplicaciones del fabricante, y las 111.795 de la base salen de las descripciones. El VIN ya es un filtro duro (año y cilindrada). | Sin cambio. |
+| 91, 104 y 105. Fase, giro, dientes | El giro ya estaba. | **Dientes** (437 productos) y **fase** (244): otra cantidad u otra fase es otra pieza; «fase II/III» sirve para las dos. Y la tensión escrita al revés, «Volts V 24» (605 productos; antes 98). Agarran dos vínculos aprobados: los números DELCO 19011403 y 8200103 los citan a la vez el motor de arranque de 24 V y 10 dientes y el de 12 V y 9 dientes, así que por ese número uno llegaba al otro. |
+| 95 y 96. El mismo código en dos fabricantes, cómo numera cada uno | Ya: el salto «mismo número, otra marca» pide 8 dígitos o más y avisa 🔵; las variantes de ILLINOIS e IMPERIAL tienen su lectura. | — |
+| **97. No destruir información al normalizar** | **Cierto, en un caso.** El código guardado no se toca, pero para agrupar variantes se recortaban los tramos cortos del final, y el lado también: «CAMBA265.32.I» (tuerca trapecial de rosca **izquierda**) quedaba con la de rosca derecha, y la batería con el borne del otro lado con la otra. | El lado se queda (LH, RH, IZQ, DER, D, I…). Medido: se separan 10 pares que estaban agrupados, y los 10 son eso. «-R» sigue siendo «con retenes». |
+| 98 a 101. Original y normalizado, unidades, redondeo y tolerancia | Ya, de las tandas anteriores. | — |
+| 102 y 103. Asiento, par de apriete | Ningún producto de la base declara el asiento («asiento cónico»: 0) ni el par de apriete. | Sin cambio. |
+| 106. El peso | Ninguna lista trae el peso. | Sin cambio. |
+| 112 a 115. Fuentes duplicadas, jerarquía e historial de cada fuente | Ya: la ficha cuenta las fuentes por nombre, fuente y pista son cosas distintas, y lo aprendido de tus decisiones pesa cada par de listas. | — |
+| 116 y 117. Contradicciones a la vista | Ya: una medida distinta sale ❌ y tumba la equivalencia, aunque coincida todo lo demás. | — |
+| 118 y 119. Qué depende de una fuente | Ya: deshacer una lista muestra antes cuántos vínculos se van, y «🧭 De dónde salen los vínculos» los cuenta por origen. | — |
+| 124 a 126. La explicación corta | Ya: una línea de lo que la sostiene. | En una ficha roja, la línea **arranca por lo que la contradice**. |
+| 127. El estado viaja con el código | **Cierto.** El Excel y el mensaje de WhatsApp salían sin el veredicto: del otro lado «probable» y «confirmada» se leían igual. | La tabla y el Excel tienen la columna «Veredicto», y en WhatsApp y el PDF lo que no está confirmado dice «⚠️ a confirmar» (se puede apagar). |
+
+`VERSION_CONFIANZA` pasa a 13. La matriz: 3 falsos positivos (igual que antes) y 8 aprobados en
+rojo (antes 6: los dos motores de arranque, a propósito). Probado en `pruebas_de_la_precision.py`
+y `pruebas_de_la_revision.py` (35 fallas puestas a mano, las 35 detectadas) y en la app: el
+buscador, la ficha y el historial de un par rechazado de verdad, la cotización por WhatsApp, la
+edición de medidas y el recorrido de las 32 pantallas, sin errores.
+
 ## 🔬 La precisión, tercera parte: lo que la pieza declara, tolerancias y regresión
 
 Puntos 24 a 53 de la misma revisión con ChatGPT, medidos sobre la copia de la base real.

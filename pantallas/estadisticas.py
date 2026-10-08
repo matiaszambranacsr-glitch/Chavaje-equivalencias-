@@ -1347,10 +1347,14 @@ a traer solas desde Administrar → Mantenimiento.
                                 f"✅ Aprobar los {miles(len(_resto))} que quedan del grupo",
                                 type="primary" if _mal_m == 0 else "secondary",
                                 key=f"apr_resto_{abs(hash(clave_g))}"):
-                            _n_ap = aprobar_pendientes(lote, _pares_resto)
+                            _n_seg = len({(min(a, b), max(a, b)) for a, b in
+                                          pares_de_piezas_de_seguridad(_pares_resto)})
+                            _n_ap = aprobar_pendientes(lote, _pares_resto, en_bloque=True)
                             invalidar_salud()
                             avisar("success", f"Se aprobaron {miles(_n_ap)} vínculo(s) del grupo "
-                                              f"{nombre}.")
+                                              f"{nombre}."
+                                   + (f" {_n_seg} de piezas de seguridad quedaron en la cola, "
+                                      "para mirarlas de a una." if _n_seg else ""))
                             st.rerun()
                         if _v2.button(f"➕ Mirar {TAMANO_DE_LA_MUESTRA} más",
                                       key=f"ampliar_{abs(hash(clave_g))}"):
@@ -1504,7 +1508,9 @@ a traer solas desde Administrar → Mantenimiento.
                 bl1.button(f"✅ Aprobar los {len(limpias)} sin alarmas, sin muestra",
                             key=f"apr_limpias_{lote_info['lote']}",
                             disabled=not limpias,
-                            on_click=aprobar_pendientes, args=(lote_info["lote"], pares_limpios))
+                            on_click=aprobar_pendientes, args=(lote_info["lote"], pares_limpios),
+                            kwargs={"en_bloque": True},
+                            help="Las piezas de seguridad no entran: quedan para mirarlas de a una.")
                 bl2.button("🚫 Descartar toda esta lista",
                             key=f"rec_lote_{lote_info['lote']}",
                             on_click=rechazar_pendientes, args=(lote_info["lote"], None),

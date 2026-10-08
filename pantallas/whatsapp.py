@@ -66,6 +66,9 @@ if pagina == PAGINAS[5]:
         st.markdown("---")
         incluir_precio = st.checkbox("Incluir precios en el mensaje", value=True)
         incluir_stock = st.checkbox("Incluir stock en el mensaje", value=False)
+        # El estado viaja con el código: lo probable no sale igual que lo confirmado.
+        marcar_a_confirmar = st.checkbox("Marcar «⚠️ a confirmar» lo que no está confirmado",
+                                         value=True, key="wa_a_confirmar")
 
         # Armado del texto del mensaje, agrupado por producto buscado
         encabezado_wa = obtener_config("whatsapp_encabezado", "🔧 *Equivalencias El Chavo*")
@@ -77,7 +80,8 @@ if pagina == PAGINAS[5]:
                                             "mensaje", value=True, key="wa_para_la_cuenta"):
             _para_wa = cuenta_elegida()["nombre"]
         mensaje = armar_mensaje_de_cotizacion(lista_cotizar, encabezado_wa, pie_wa,
-                                              incluir_precio, incluir_stock, _para_wa)
+                                              incluir_precio, incluir_stock, _para_wa,
+                                              marcar_a_confirmar)
 
         _fuera_wa = sorted({f.get("Marca") for item in lista_cotizar for f in item["resultados"]
                             if f.get("Precio")} & marcas_con_precios_fuera_de_escala())
@@ -112,7 +116,8 @@ if pagina == PAGINAS[5]:
         col_wa, col_pdf = st.columns(2)
         col_wa.link_button("📲 Abrir en WhatsApp", url_whatsapp, type="primary", width="stretch")
         pdf_bytes = pdf_con_cache("cotizacion", generar_pdf_cotizacion, lista_cotizar, incluir_precio,
-                                   incluir_stock, alias_elegido, qr_real_para_pdf)
+                                   incluir_stock, alias_elegido, qr_real_para_pdf,
+                                   marcar_a_confirmar)
         col_pdf.download_button(
             "📄 Descargar cotización (PDF)", data=pdf_bytes,
             file_name=f"cotizacion_{datetime.now():%Y%m%d_%H%M}.pdf",

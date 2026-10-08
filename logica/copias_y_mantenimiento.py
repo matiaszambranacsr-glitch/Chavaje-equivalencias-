@@ -574,6 +574,11 @@ def posicion_desde_descripcion(descripcion):
     return "+".join(partes) or None
 
 
+# Tramos del final del código que dicen de qué lado va la pieza (o de qué lado tiene la rosca o el
+# borne). codigo_base_sin_variante() no los recorta. Ver ahí.
+TRAMOS_DE_LADO = frozenset({"LH", "RH", "IZQ", "DER", "ISQ", "IZDO", "DCHO", "D", "I"})
+
+
 def codigo_base_sin_variante(codigo):
     """De «TC-687-20 2M» devuelve «TC-687-20»; de «JVL-168-28», «JVL-168». None si no queda nada.
 
@@ -605,9 +610,16 @@ def codigo_base_sin_variante(codigo):
     if _imperial:
         return _imperial.group(1)
     partes = [x for x in u.split("-") if x]
+    recortados = []
     while len(partes) > 2 and len(partes[-1]) <= 4:
-        partes = partes[:-1]
-    base = "-".join(partes)
+        recortados.insert(0, partes.pop())
+    # El lado NO es una variante: se queda en la base. «CAMBA265.32.I» es la tuerca trapecial de
+    # rosca IZQUIERDA y «CAMBA265.32» la de rosca derecha; «MATEO-12/95-I» y «MATEO-12/95-D» son la
+    # misma batería con el borne de un lado o del otro, y no entra una en el lugar de la otra.
+    # Medido sobre el catálogo real: conservar el lado separa 10 pares que estaban agrupados, y
+    # los 10 son eso (rosca izquierda, borne del otro lado, o el «-D» de una tapa de otro motor).
+    # «-R» y «-L» NO se cuentan: «JI-276-R» es «con retenes» y «-L» es talle de ropa.
+    base = "-".join(partes + [x for x in recortados if x in TRAMOS_DE_LADO])
     return base if any(ch.isdigit() for ch in base) else None
 
 

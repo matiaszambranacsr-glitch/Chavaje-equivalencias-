@@ -773,6 +773,27 @@ def anotar_el_respaldo(res, clean_code):
             veces = sum(devueltos.get((min(o, f["ID"]), max(o, f["ID"])), 0) for o in origenes)
             if veces:
                 f["Devuelto"] = f"↩️ {veces}"
+    # LO QUE UNA PERSONA RECHAZÓ y vuelve por otro camino. Rechazar en la revisión saca el
+    # vínculo directo, no los demás: medido sobre la base real, 91 de los 2.633 pares rechazados
+    # volvían a salir al buscar el primero (hasta 3 saltos), 48 de ellos como «🟡 probable». No se
+    # esconde —puede que el rechazo esté mal—, se marca, y el veredicto lo dice primero.
+    rechazadas = {}
+    ids = [f["ID"] for f in res]
+    for tanda, marcadores in (en_tandas(ids, usos_por_consulta=2) if origenes else ()):
+        marcadores_o = ",".join("?" * len(origenes))
+        c.execute(f"""SELECT producto_a_id AS a, producto_b_id AS b, revisado_por AS quien,
+                             substr(fecha, 1, 10) AS fecha
+                      FROM equivalencias_revisadas
+                      WHERE decision = 'rechazada'
+                        AND ((producto_a_id IN ({marcadores_o}) AND producto_b_id IN ({marcadores}))
+                          OR (producto_b_id IN ({marcadores_o}) AND producto_a_id IN ({marcadores})))""",
+                  origenes + tanda + origenes + tanda)
+        for r in c.fetchall():
+            otro = r["b"] if r["a"] in origenes else r["a"]
+            rechazadas[otro] = f"🚫 {r['quien'] or 'alguien'}, {r['fecha'] or 'sin fecha'}"
+    for f in res:
+        if f["ID"] in rechazadas and f["ID"] not in origenes:
+            f["Rechazada"] = rechazadas[f["ID"]]
     return res
 
 
@@ -799,8 +820,15 @@ def fichas_que_cambiaron(descripciones_que_trae, tope=30):
         que = lo_que_cambia_la_pieza(vieja, nueva)
         if que:
             cambios.append({"Código": codigo, "Qué cambió": que, "Guardada": vieja[:90],
-                            "En la lista nueva": nueva[:90]})
-    return {"cambiaron": len(cambios), "ejemplos": cambios[:tope]}
+                            "En la lista nueva": nueva[:90], "_id": pid})
+    # A cuántas equivalencias toca cada cambio: la ficha con más vínculos va primero.
+    for cambio in cambios:
+        c.execute("SELECT COUNT(*) FROM equivalencias WHERE producto_a_id = ? OR producto_b_id = ?",
+                  (cambio["_id"], cambio["_id"]))
+        cambio["Vínculos"] = c.fetchone()[0]
+    cambios.sort(key=lambda x: -x["Vínculos"])
+    return {"cambiaron": len(cambios),
+            "ejemplos": [{k: v for k, v in x.items() if k != "_id"} for x in cambios[:tope]]}
 
 
 def lo_que_cambia_la_pieza(vieja, nueva):
@@ -1090,7 +1118,28 @@ def faltan_por_puntuar():
         return 0
 
 
-def recalcular_confianzas(limite=20000, progreso=None, solo_faltantes=True):
+def repuntuar_los_vinculos_de(producto_id):
+    """Vuelve a puntuar los vínculos de UN producto, después de corregirle las medidas a mano.
+
+    Lo pidió una revisión con ChatGPT: si cambia la ficha de una pieza, las equivalencias que se
+    puntuaron con la ficha vieja tienen que volver a evaluarse, y hay que decir a cuántas toca.
+    Devuelve (vínculos repuntuados, cuántos cambiaron de franja)."""
+    c.execute("SELECT producto_a_id AS a, producto_b_id AS b, confianza FROM equivalencias "
+              "WHERE producto_a_id = ? OR producto_b_id = ?", (producto_id, producto_id))
+    antes = {(r["a"], r["b"]): r["confianza"] for r in c.fetchall()}
+    if not antes:
+        return 0, 0
+    n = recalcular_confianzas(limite=len(antes), solo_faltantes=False, de_producto=producto_id)
+    c.execute("SELECT producto_a_id AS a, producto_b_id AS b, confianza FROM equivalencias "
+              "WHERE producto_a_id = ? OR producto_b_id = ?", (producto_id, producto_id))
+    cambiaron = sum(1 for r in c.fetchall()
+                    if (r["a"], r["b"]) in antes and antes[(r["a"], r["b"])] is not None
+                    and franja_de_confianza(antes[(r["a"], r["b"])])
+                    != franja_de_confianza(r["confianza"]))
+    return n, cambiaron
+
+
+def recalcular_confianzas(limite=20000, progreso=None, solo_faltantes=True, de_producto=None):
     """Calcula y guarda la confianza de cada vínculo cargado.
 
     Se guarda en vez de calcularse al vuelo porque el buscador la necesita en CADA búsqueda:
@@ -1108,9 +1157,14 @@ def recalcular_confianzas(limite=20000, progreso=None, solo_faltantes=True):
 
     Con solo_faltantes se puntúa lo que falta y cada corrida avanza. En False vuelve a puntuar
     todo, que es lo que hace falta cuando cambió la evidencia (ventas nuevas, decisiones nuevas)
-    y los puntajes viejos quedaron desactualizados."""
+    y los puntajes viejos quedaron desactualizados. Con de_producto, solo los vínculos de ese
+    producto (ver repuntuar_los_vinculos_de()), y sin anotar la deriva: es una corrección, no un
+    cambio de reglas."""
     ceder_al_mostrador()      # antes de la lectura grande. Ver ceder_al_mostrador().
-    filtro = "WHERE e.confianza IS NULL" if solo_faltantes else ""
+    condiciones = (["e.confianza IS NULL"] if solo_faltantes else []) + (
+        ["(e.producto_a_id = ? OR e.producto_b_id = ?)"] if de_producto is not None else [])
+    filtro = ("WHERE " + " AND ".join(condiciones)) if condiciones else ""
+    parametros = ([de_producto, de_producto] if de_producto is not None else []) + [limite]
     c.execute(f"""-- FILA Y NO PAR: esta consulta ESCRIBE la confianza de cada fila. Si la
                   -- relación está anotada de ida y de vuelta hay que puntuar las dos, porque
                   -- la que quede sin puntuar cuenta como neutra en el buscador. Descartar el
@@ -1126,7 +1180,7 @@ def recalcular_confianzas(limite=20000, progreso=None, solo_faltantes=True):
                  JOIN marcas ma ON ma.id = pa.marca_id
                  JOIN marcas mb ON mb.id = pb.marca_id
                  {filtro}
-                 LIMIT ?""", (limite,))
+                 LIMIT ?""", parametros)
     filas = [dict(r) for r in c.fetchall()]
     if not filas:
         return 0
@@ -1211,7 +1265,7 @@ def recalcular_confianzas(limite=20000, progreso=None, solo_faltantes=True):
         c.executemany("UPDATE equivalencias SET confianza = ? "
                       "WHERE producto_a_id = ? AND producto_b_id = ?", valores)
         conn.commit()
-    if not solo_faltantes:
+    if not solo_faltantes and de_producto is None:
         anotar_la_deriva(filas, valores)
     return len(valores)
 

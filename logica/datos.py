@@ -1267,6 +1267,46 @@ def _esquema_gestion(c):
     # error, se puede ver qué regla lo dejó pasar. Ver marcar_revision().
     if "por_que" not in _cols_rev:
         c.execute("ALTER TABLE equivalencias_revisadas ADD COLUMN por_que TEXT")
+    # EL HISTORIAL de las decisiones: equivalencias_revisadas guarda la ÚLTIMA (aprobar después de
+    # rechazar la pisa), esto guarda TODAS, y no se corrige ni se borra —lo cuidan los dos
+    # disparadores—. Con la versión de las reglas que puntuó el par y la lista de la que vino:
+    # si después aparece un error, se sabe qué regla y qué lista lo dejaron pasar, y si otra
+    # persona había decidido distinto antes. Lo pidió una revisión con ChatGPT. Ver
+    # marcar_revision(). La primera vez se llena con lo que ya estaba decidido, sin versión.
+    _historial_nuevo = not c.execute("SELECT 1 FROM sqlite_master WHERE type = 'table' "
+                                     "AND name = 'historial_de_revisiones'").fetchone()
+    c.execute("""CREATE TABLE IF NOT EXISTS historial_de_revisiones (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        producto_a_id INTEGER NOT NULL,
+        producto_b_id INTEGER NOT NULL,
+        decision TEXT NOT NULL,
+        motivo TEXT,
+        revisado_por TEXT,
+        fecha TEXT DEFAULT (datetime('now')),
+        confianza REAL,
+        senal TEXT,
+        por_que TEXT,
+        lote TEXT,
+        version_reglas TEXT
+    )""")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_historial_par "
+              "ON historial_de_revisiones(producto_a_id, producto_b_id)")
+    c.execute("DROP TRIGGER IF EXISTS historial_no_se_corrige")
+    c.execute("DROP TRIGGER IF EXISTS historial_no_se_borra")
+    c.execute("""CREATE TRIGGER IF NOT EXISTS historial_no_se_corrige
+                 BEFORE UPDATE ON historial_de_revisiones
+                 BEGIN SELECT RAISE(ABORT, 'el historial de decisiones no se corrige'); END""")
+    c.execute("""CREATE TRIGGER IF NOT EXISTS historial_no_se_borra
+                 BEFORE DELETE ON historial_de_revisiones
+                 BEGIN SELECT RAISE(ABORT, 'el historial de decisiones no se borra'); END""")
+    if _historial_nuevo:
+        c.execute("""INSERT INTO historial_de_revisiones
+                         (producto_a_id, producto_b_id, decision, motivo, revisado_por, fecha,
+                          confianza, senal, por_que)
+                     SELECT producto_a_id, producto_b_id, decision, motivo, revisado_por, fecha,
+                            confianza, senal, por_que
+                     FROM equivalencias_revisadas WHERE producto_a_id < producto_b_id
+                     ORDER BY fecha""")
 
     # Los pares elegidos al azar para controlar un grupo de vínculos antes de aprobarlo entero.
     # Se guardan para que la muestra sea SIEMPRE la misma: si se volviera a sortear en cada

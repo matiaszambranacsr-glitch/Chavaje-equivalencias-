@@ -418,19 +418,38 @@ def marcar_revision(pares, decision, motivo=None):
     if not pares:
         return
     filas = []
+    historial = []
     usuario = obtener_usuario_actual()
     como_estaba = _como_estaba_en_la_revision()
     for a, b in pares:
         confianza, senal, por_que = como_estaba.get((min(a, b), max(a, b)), (None, None, None))
         filas.append((a, b, decision, usuario, motivo, confianza, senal, por_que))
         filas.append((b, a, decision, usuario, motivo, confianza, senal, por_que))
-    with db_lock:
+        historial.append((min(a, b), max(a, b), decision, motivo, usuario, confianza, senal,
+                          por_que))
+    # Todo o nada: la última decisión y el historial van juntos.
+    with db_lock, transaccion():
         c.executemany(
             "INSERT OR REPLACE INTO equivalencias_revisadas "
             "(producto_a_id, producto_b_id, decision, revisado_por, motivo, confianza, senal, "
             "por_que) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
             filas
         )
+        # Y al historial, que no se pisa: ver historial_de_revisiones en datos.py. La lista de la
+        # que vino el par se busca antes de sacarlo de la cola: pendiente o ya vinculado.
+        c.executemany(
+            """INSERT INTO historial_de_revisiones
+                   (producto_a_id, producto_b_id, decision, motivo, revisado_por, confianza,
+                    senal, por_que, lote, version_reglas)
+               VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8,
+                       COALESCE((SELECT MAX(lote) FROM equivalencias_pendientes
+                                 WHERE (producto_a_id = ?1 AND producto_b_id = ?2)
+                                    OR (producto_a_id = ?2 AND producto_b_id = ?1)),
+                                (SELECT MAX(lote) FROM equivalencias
+                                 WHERE (producto_a_id = ?1 AND producto_b_id = ?2)
+                                    OR (producto_a_id = ?2 AND producto_b_id = ?1))),
+                       ?9)""",
+            [h + (VERSION_CONFIANZA,) for h in historial])
         # UN RECHAZO SACA EL PAR DE LA COLA, de la lista que sea. Si no, el mismo par esperando
         # en otra lista se aprobaba con ella y el rechazo quedaba pisado por un «ok»: deshacer
         # una lista marca sus pares como rechazados, pero solo borraba los pendientes de ESA
@@ -438,7 +457,6 @@ def marcar_revision(pares, decision, motivo=None):
         if decision == "rechazada":
             c.executemany(_BORRAR_PENDIENTE_EN_LOS_DOS_SENTIDOS,
                           [(a, b, b, a) for a, b in pares])
-        conn.commit()
 
 
 def _techo_de_error(malos, total):
@@ -1293,13 +1311,27 @@ def sustituciones_reales(minimo_veces=2, limite=300):
     return salida
 
 
-# Por qué volvió una pieza. Solo «no le iba» habla de la equivalencia: la que vino fallada era
-# la pieza correcta, con un defecto.
+# Por qué volvió una pieza. Los de «no le iba» hablan de la equivalencia; la que vino fallada era
+# la pieza correcta, con un defecto. El detalle de POR QUÉ no le iba lo pidió una revisión con
+# ChatGPT: «no le iba» solo no dice qué mirar la próxima vez, y «otra rosca» o «era del otro
+# lado» sí. «no_le_iba» queda como estaba, para las devoluciones ya anotadas y para cuando no se
+# sabe el detalle.
 MOTIVOS_DE_DEVOLUCION = {
-    "no_le_iba": "🔧 No le iba: no era la pieza",
+    "no_le_iba": "🔧 No le iba: no era la pieza (sin más detalle)",
+    "medida": "📏 No le iba: otra medida",
+    "rosca": "🔩 No le iba: otra rosca",
+    "conector": "🔌 No le iba: otra ficha o conector",
+    "lado": "↔️ No le iba: era la del otro lado",
+    "aplicacion": "🚗 No le iba: es de otra versión del auto",
+    "faltante": "🧩 No le iba: le faltaba algo que trae la original",
+    "modificacion": "🛠️ Entró, pero hubo que modificarla",
     "fallada": "💥 Vino fallada (era la pieza, con un defecto)",
     "otro": "Otro motivo",
 }
+# Los que dicen que NO era la pieza: bajan el vínculo y lo marcan en rojo. Hubo que modificarla
+# cuenta: una equivalencia es la que entra tal cual.
+MOTIVOS_DE_NO_ERA_LA_PIEZA = frozenset({"no_le_iba", "medida", "rosca", "conector", "lado",
+                                        "aplicacion", "faltante", "modificacion"})
 
 
 def registrar_devolucion(producto_id, termino_pedido, motivo, detalle=""):
@@ -1319,7 +1351,7 @@ def registrar_devolucion(producto_id, termino_pedido, motivo, detalle=""):
         c.execute("INSERT INTO devoluciones (producto_id, codigo_pedido_clean, motivo, detalle, "
                   "usuario) VALUES (?, ?, ?, ?, ?)",
                   (producto_id, pedido, motivo, (detalle or "").strip(), obtener_usuario_actual()))
-        if motivo != "no_le_iba" or not pedido:
+        if motivo not in MOTIVOS_DE_NO_ERA_LA_PIEZA or not pedido:
             return 0
         c.execute("SELECT id FROM productos WHERE codigo_clean = ? AND id <> ?",
                   (pedido, producto_id))
@@ -1333,14 +1365,16 @@ def registrar_devolucion(producto_id, termino_pedido, motivo, detalle=""):
 
 
 def pares_devueltos():
-    """{(a, b): veces} de lo que volvió porque no le iba: a es lo pedido, b lo vendido."""
+    """{(a, b): veces} de lo que volvió porque no le iba: a es lo pedido, b lo vendido. Cuenta
+    todos los motivos de MOTIVOS_DE_NO_ERA_LA_PIEZA, no solo «no_le_iba»."""
     try:
-        c.execute("""SELECT p1.id AS a, d.producto_id AS b, COUNT(*) AS veces
-                     FROM devoluciones d
-                     JOIN productos p1 ON p1.codigo_clean = d.codigo_pedido_clean
-                     WHERE d.motivo = 'no_le_iba' AND d.codigo_pedido_clean <> ''
-                       AND p1.id <> d.producto_id
-                     GROUP BY p1.id, d.producto_id""")
+        motivos = sorted(MOTIVOS_DE_NO_ERA_LA_PIEZA)
+        c.execute(f"""SELECT p1.id AS a, d.producto_id AS b, COUNT(*) AS veces
+                      FROM devoluciones d
+                      JOIN productos p1 ON p1.codigo_clean = d.codigo_pedido_clean
+                      WHERE d.motivo IN ({",".join("?" * len(motivos))})
+                        AND d.codigo_pedido_clean <> '' AND p1.id <> d.producto_id
+                      GROUP BY p1.id, d.producto_id""", motivos)
         salida = {}
         for r in c.fetchall():
             par = (min(r["a"], r["b"]), max(r["a"], r["b"]))
@@ -3989,8 +4023,25 @@ def _los_que_siguen_pendientes(pares):
     return [par for par in normalizados if par in siguen]
 
 
-def aprobar_pendientes(lote, solo_estos_pares=None):
-    """Pasa los vínculos pendientes a equivalencias reales."""
+def pares_de_piezas_de_seguridad(pares):
+    """Los pares en los que alguno de los dos es una pieza de seguridad (frenos, dirección,
+    suspensión: ver es_pieza_de_seguridad())."""
+    ids = sorted({x for par in pares for x in par})
+    seguridad = set()
+    for tanda, marcadores in en_tandas(ids):
+        c.execute(f"SELECT id, descripcion FROM productos WHERE id IN ({marcadores})", tanda)
+        seguridad |= {r["id"] for r in c.fetchall() if es_pieza_de_seguridad(r["descripcion"])}
+    return {(a, b) for a, b in pares if a in seguridad or b in seguridad}
+
+
+def aprobar_pendientes(lote, solo_estos_pares=None, en_bloque=False):
+    """Pasa los vínculos pendientes a equivalencias reales.
+
+    en_bloque=True es aprobar sin mirarlos de a uno (el resto de un grupo con muestra, o la lista
+    entera): ahí las piezas de seguridad NO entran y quedan en la cola, para mirarlas de a una.
+    Lo pidió una revisión con ChatGPT: una muestra que salió bien habla del grupo, no de la
+    pastilla de freno que quedó afuera de la muestra. Medido sobre la base del 8/10: hoy no hay
+    ninguna pendiente (de 7.827), y de las 22.670 decisiones tomadas, una sola era de seguridad."""
     # Todo o nada: se crean las equivalencias y se borran los pendientes. Cortado en el medio,
     # o quedan los dos (el pendiente vuelve a aparecer ya aprobado) o ninguno (se perdieron).
     with db_lock, transaccion():
@@ -4004,6 +4055,9 @@ def aprobar_pendientes(lote, solo_estos_pares=None):
         # cola; esto es para las bases de antes.
         _rechazados = pares_rechazados()
         pares = [(a, b) for a, b in pares if (a, b) not in _rechazados]
+        if en_bloque:
+            _seguridad = pares_de_piezas_de_seguridad(pares)
+            pares = [p for p in pares if p not in _seguridad]
         if not pares:
             return 0
         # El lote viaja con el vínculo: es lo que después permite deshacer toda una lista.
