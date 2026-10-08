@@ -342,6 +342,11 @@ def evidencia_cruzada(id_a, id_b, cuenta_palabras=None, total_descripciones=None
         (min(id_a, id_b), max(id_a, id_b)), 0)
     if veces >= 2:
         a_favor.append(f"🧾 ya lo vendiste como reemplazo {veces} vez(ces)")
+    # Y lo que VOLVIÓ porque no le iba: gana sobre todo lo de arriba. Ver registrar_devolucion().
+    _devuelto = _recordado(("devueltos_ev",), pares_devueltos).get(
+        (min(id_a, id_b), max(id_a, id_b)), 0)
+    if _devuelto:
+        vetos.append(f"↩️ lo devolvieron {_devuelto} vez(ces) porque no le iba")
 
     # 5. Un código de fábrica compartido
     if (min(id_a, id_b), max(id_a, id_b)) in _recordado(("vinculados_ev",), _pares_vinculados):
@@ -441,6 +446,24 @@ _MEDIDAS_EXACTAS = (("paso_rosca", "paso de rosca"), ("cantidad_estrias", "estr�
                     ("posicion", "posición"))
 # Desde acá un vínculo es «sólido» en el buscador. Ver buscar_por_codigo().
 CONFIANZA_SOLIDA = 70
+
+
+# QUÉ TAN GRAVE ES VENDERLA MAL, aparte de cuánta evidencia haya. Lo propuso una revisión con
+# ChatGPT: «una equivalencia puede tener evidencia excelente y ser una pieza crítica».
+# Crítica: las autopartes de seguridad (es_pieza_de_seguridad(), la lista del Decreto 779/95
+# que usa el CHAS). Alta: la que si está mal rompe el motor.
+_RE_RIESGO_ALTO = re.compile(r"\b(?:CORREA|KIT|TENSOR|CADENA)\s+(?:DE\s+)?DISTRIB"
+                             r"|\bBOMBA\s+(?:DE\s+)?ACEITE"
+                             r"|\b(?:JUNTA|JTA)\s+(?:DE\s+)?TAPA\s+(?:DE\s+)?CIL")
+
+
+def riesgo_de_la_pieza(*descripciones):
+    """(nivel, por qué) de la pieza: 🛑 crítico, 🟠 alto o 🟢 normal."""
+    if any(es_pieza_de_seguridad(d) for d in descripciones if d):
+        return "🛑 crítico", "es una pieza de seguridad: si está mal, falla en la calle"
+    if any(_RE_RIESGO_ALTO.search(_normalizar_desc(d)) for d in descripciones if d):
+        return "🟠 alto", "si está mal, puede romper el motor"
+    return "🟢 normal", ""
 
 
 def que_pieza_es(*descripciones):
@@ -569,6 +592,12 @@ def _evaluar_la_cadena(pasos):
     for p in flojos:
         falta.append(f"que {p['Paso']} sea sólido: tiene {p['Confianza']}/100 y sólido es "
                      f"{CONFIANZA_SOLIDA} o más (mirá sus señales en Revisar vínculos)")
+    # Un CAMBIO DE NÚMERO no es una equivalencia técnica: el nuevo reemplaza al viejo, pero no
+    # siempre al revés ni en todas las aplicaciones (lo marcó la misma revisión).
+    for p in pasos:
+        if not p["_verificada"] and (p["_lote"] or "").upper().startswith("POR REEMPLAZO"):
+            falta.append(f"{p['Paso']} es un cambio de número del fabricante: el nuevo "
+                         "reemplaza al viejo, no siempre al revés; confirmá que sirva en este auto")
     return ("🟠 CANDIDATA" if sin_fuente else "🟡 PROBABLE" if falta else "✅ VERIFICADA"), falta
 
 
@@ -655,6 +684,16 @@ def ficha_de_prueba(id_a, id_b, tolerancia_pct=3):
     ficha["para_medir"] = [m["Medida"] for m in ficha["medidas"]
                            if m["Importa"] and m["Estado"].startswith("❓")]
 
+    # Lo que volvió, en los dos sentidos (se pidió A y se llevó B, o al revés). Ver
+    # registrar_devolucion(): la que volvió porque no le iba ya está entre los vetos.
+    c.execute("""SELECT d.motivo, d.detalle, d.usuario, substr(d.fecha, 1, 10) AS fecha
+                 FROM devoluciones d JOIN productos p ON p.codigo_clean = d.codigo_pedido_clean
+                 WHERE (d.producto_id = ? AND p.id = ?) OR (d.producto_id = ? AND p.id = ?)
+                 ORDER BY d.fecha DESC""", (id_b, id_a, id_a, id_b))
+    ficha["devoluciones"] = [
+        f"↩️ {MOTIVOS_DE_DEVOLUCION.get(r['motivo'], r['motivo'])} — {r['usuario'] or 'alguien'}, "
+        f"{r['fecha']}" + (f": {r['detalle']}" if r["detalle"] else "") for r in c.fetchall()]
+
     # Lo que la contradice. El precio no prueba nada a favor y en contra solo avisa: dos listas
     # pueden estar en escalas distintas. Ver evidencia_cruzada(), punto 7.
     a_favor, vetos, _ = evidencia_cruzada(id_a, id_b)
@@ -666,6 +705,31 @@ def ficha_de_prueba(id_a, id_b, tolerancia_pct=3):
         estado = "🔴 CON CONTRADICCIONES"
         falta = ["que no haya nada en contra: con esto, no es la misma pieza hasta que alguien "
                  "la compare en la mano"]
+    # EL RIESGO Y QUÉ HACER: aparte del estado. Una pieza de seguridad bien respaldada igual
+    # se mira antes de venderla, salvo que alguien ya la haya comprobado en la mano.
+    ficha["riesgo"], ficha["por_que_riesgo"] = riesgo_de_la_pieza(*_descs)
+    _comprobada = bool(ficha["comprobaciones"]) or (pasos and all(p["_verificada"] for p in pasos))
+    ficha["accion"] = (
+        "" if _comprobada or ficha["riesgo"].startswith("🟢") else
+        "comparala con la pieza en la mano antes de venderla" if ficha["riesgo"].startswith("🛑")
+        else "mirá las medidas o la pieza antes de venderla")
+
+    # LA EXPLICACIÓN MÍNIMA: lo que la sostiene, en una línea. El detalle va abajo. Lo pidió la
+    # misma revisión: «para el mostrador no mostraría 20 datos».
+    resumen = []
+    if pasos and len(pasos) == 1 and pasos[0]["_primaria"]:
+        resumen.append(pasos[0]["Respaldo"])
+    _n_comunes = sum(1 for n in ficha["numeros_en_comun"] if n["_primarias"])
+    if _n_comunes:
+        resumen.append(f"🔢 los dos citan {_n_comunes} número(s) de fábrica")
+    _iguales = sum(1 for m in ficha["medidas"] if m["Estado"].startswith(("✅", "≈")))
+    if _iguales:
+        resumen.append(f"📐 {_iguales} medida(s) iguales")
+    resumen += [x for x in a_favor if x.startswith(("🏭", "🔄", "🌐"))][:1]
+    if ficha["comprobaciones"]:
+        resumen.append("✋ comprobada en la mano")
+    ficha["resumen"] = resumen
+
     if not estado.startswith(("✅", "🔴")):
         falta.append("o comprobarla con la pieza en la mano"
                      + (f" (medir: {', '.join(ficha['para_medir'])})" if ficha["para_medir"]

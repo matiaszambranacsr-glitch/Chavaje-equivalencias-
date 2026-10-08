@@ -58,6 +58,23 @@ if pagina == PAGINAS[3]:
                 invalidar_salud()
                 avisar("success", f"Se recalcularon {miles(n)} vínculo(s).")
                 st.rerun()
+            # DE DÓNDE SALEN LOS VÍNCULOS: lo que aporta cada origen y cuántos productos quedan
+            # unidos solo por pistas. Ver vinculos_por_origen().
+            if seccion_plegable("🧭 De dónde salen los vínculos", key="vinculos_por_origen"):
+                try:
+                    _por_origen, _solo_pistas = vinculos_por_origen()
+                except sqlite3.Error as _err:
+                    anotar_error("vinculos_por_origen", _err)
+                    _por_origen, _solo_pistas = [], 0
+                st.dataframe(_por_origen, width="stretch", hide_index=True)
+                st.caption(
+                    "**Fuente** es quien conoce la pieza y lo declara (la lista del proveedor, el "
+                    "catálogo del fabricante, una persona); **pista**, que se parecen las "
+                    "descripciones o van en el mismo auto. "
+                    + (f"**{miles(_solo_pistas)} producto(s)** están unidos a otros solo por "
+                       "pistas: ninguno de sus vínculos lo declara una fuente."
+                       if _solo_pistas else "Todos los productos vinculados tienen al menos "
+                                            "un vínculo que declara una fuente."))
             st.markdown("**🧾 Equivalencias que confirmó el mostrador**")
             explicar(
                 "Cada venta guarda qué código te pidieron y cuál le vendiste.",

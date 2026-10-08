@@ -1207,6 +1207,19 @@ def _esquema_gestion(c):
     # ENTERA una vez por producto. Con el estante lleno eso es minutos de espera.
     c.execute("CREATE INDEX IF NOT EXISTS idx_ventas_prod ON ventas_registradas(producto_id)")
     c.execute("CREATE INDEX IF NOT EXISTS idx_ventas_codigo ON ventas_registradas(codigo_pedido_clean)")
+    # Lo que VOLVIÓ. Una venta que no vuelve confirma (ver pares_confirmados_por_ventas()); una
+    # que vuelve porque no le iba es la prueba más fuerte en contra que hay, más que cualquier
+    # catálogo. Ver registrar_devolucion().
+    c.execute("""CREATE TABLE IF NOT EXISTS devoluciones (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        producto_id INTEGER NOT NULL REFERENCES productos(id) ON DELETE CASCADE,
+        codigo_pedido_clean TEXT,
+        motivo TEXT NOT NULL,
+        detalle TEXT,
+        usuario TEXT,
+        fecha TEXT DEFAULT (datetime('now'))
+    )""")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_devoluciones_prod ON devoluciones(producto_id)")
 
     # Mapeo de columnas recordado por proveedor. Cada vez que se importa una lista hay que
     # volver a indicar qué columna es el código, cuál el precio, etc. Un error ahí es lo que

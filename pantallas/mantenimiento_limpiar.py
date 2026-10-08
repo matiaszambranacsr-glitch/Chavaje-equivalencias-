@@ -339,6 +339,21 @@ if pagina == PAGINAS[3]:
                     f"{miles(int(obtener_config('confianza_repuntuada', '0') or 0))} vínculo(s) el "
                     f"{obtener_config('confianza_fecha', '')}."
                 )
+            # LA DERIVA: qué cambió la última vez que se volvió a puntuar todo. Ver
+            # anotar_la_deriva().
+            _deriva = la_ultima_deriva()
+            if _deriva and (_deriva["bajaron"] or _deriva["subieron"]):
+                st.caption(
+                    f"🧭 Con las reglas v{_deriva['version']} ({_deriva['fecha']}), de "
+                    f"{miles(_deriva['total'])} vínculos **{miles(_deriva['bajaron'])} bajaron** y "
+                    f"**{miles(_deriva['subieron'])} subieron** de franja en el buscador: "
+                    + ", ".join(f"{k}: {miles(v)}" for k, v in sorted(
+                        _deriva["cambios"].items(), key=lambda x: -x[1])) + ".")
+                if seccion_plegable("Ver los que más cambiaron", key="ver_deriva"):
+                    st.dataframe(_deriva["ejemplos"], width="stretch", hide_index=True)
+            elif _deriva:
+                st.caption(f"🧭 Con las reglas v{_deriva['version']} ({_deriva['fecha']}) ningún "
+                           "vínculo cambió de franja en el buscador.")
             # Lo que ya se midió solo después de la última importación. Sin esto, el número
             # existía pero no lo veía nadie hasta apretar un botón que tarda 11 s.
             _dud_prev = obtener_config("dudosos_cargados", "")

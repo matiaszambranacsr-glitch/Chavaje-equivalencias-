@@ -746,11 +746,9 @@ def anotar_el_respaldo(res, clean_code):
               (clean_code, clean_code))
     origenes = [r["id"] for r in c.fetchall()]
     directos = [f["ID"] for f in res if str(f.get("Cadena", "")).startswith("🟢 directo")]
-    if not origenes or not directos:
-        return res
     mejor = {}
     orden = {True: 2, None: 1, False: 0}
-    for tanda, marcadores in en_tandas(directos, usos_por_consulta=2):
+    for tanda, marcadores in (en_tandas(directos, usos_por_consulta=2) if origenes else ()):
         marcadores_o = ",".join("?" * len(origenes))
         c.execute(f"""SELECT producto_a_id AS a, producto_b_id AS b, lote,
                              COALESCE(verificada, 0) AS v
@@ -766,6 +764,15 @@ def anotar_el_respaldo(res, clean_code):
     for f in res:
         if f["ID"] in mejor:
             f["Respaldo"] = mejor[f["ID"]][1]
+    # LO QUE VOLVIÓ porque no le iba, aunque lleguen por un código en el medio: ahí no hay un
+    # vínculo directo que bajar (no se sabe cuál de los dos pasos está mal), pero el mostrador
+    # tiene que verlo igual. Ver registrar_devolucion().
+    devueltos = pares_devueltos()
+    if devueltos:
+        for f in res:
+            veces = sum(devueltos.get((min(o, f["ID"]), max(o, f["ID"])), 0) for o in origenes)
+            if veces:
+                f["Devuelto"] = f"↩️ {veces}"
     return res
 
 
@@ -816,6 +823,29 @@ def equivalentes_que_la_lista_dejo_de_declarar(nombre_prov, lote_actual, ids_de_
                  "Ahora dice": lista(ahora.get(p, set()))} for p in elegidos]
     return {"codigos": len(dejados), "sin_ninguno": sum(1 for p in dejados if p not in ahora),
             "ejemplos": ejemplos}
+
+
+def vinculos_por_origen():
+    """De dónde salen los vínculos cargados: cuántos aporta cada origen, cuántos son sólidos y
+    cuántos productos quedan unidos SOLO por pistas. (filas, productos_solo_por_pistas).
+
+    Lo propuso una revisión con ChatGPT («equivalencias demasiado fáciles»): si miles de
+    productos están unidos únicamente porque se parecen las descripciones, una regla está
+    siendo demasiado permisiva, y eso se ve contando, no mirando de a uno."""
+    c.execute("SELECT producto_a_id AS a, producto_b_id AS b, lote, "
+              "COALESCE(verificada, 0) AS v, COALESCE(confianza, 50) AS conf FROM equivalencias")
+    por_origen, por_producto = {}, {}
+    for r in c.fetchall():
+        primaria, texto = respaldo_del_origen(r["lote"], r["v"])
+        fila = por_origen.setdefault(texto, {"Origen": texto,
+                                             "Es": "fuente" if primaria else "pista",
+                                             "Vínculos": 0, "Sólidos": 0})
+        fila["Vínculos"] += 1
+        fila["Sólidos"] += r["conf"] >= 70
+        for pid in (r["a"], r["b"]):
+            por_producto[pid] = por_producto.get(pid, False) or bool(primaria)
+    filas = sorted(por_origen.values(), key=lambda f: -f["Vínculos"])
+    return filas, sum(1 for tiene_fuente in por_producto.values() if not tiene_fuente)
 
 
 def origenes_de_los_vinculos_directos(producto_id, ids_resultado):
@@ -888,6 +918,7 @@ def auditar_equivalencias_cargadas(limite=2000, tope_confianza=35, revisar=None)
     aprobados = puentes_aprobados_ids()
     patrones = aprender_de_las_decisiones()
     ventas_confirman = pares_confirmados_por_ventas()
+    devueltos = pares_devueltos()      # lo que volvió porque no le iba
 
     escalas = escalas_de_precio()
     rubros_oem = rubros_de_los_codigos_de_fabrica()
@@ -924,6 +955,7 @@ def auditar_equivalencias_cargadas(limite=2000, tope_confianza=35, revisar=None)
             marca_a=f["marca_a"], marca_b=f["marca_b"], patrones=patrones,
             vendido_como_reemplazo=ventas_confirman.get((min(f["a"], f["b"]),
                                                           max(f["a"], f["b"])), 0),
+            devuelto=devueltos.get((min(f["a"], f["b"]), max(f["a"], f["b"])), 0),
             codigo_puente=puente, productos_del_puente=grados.get(id_puente, 0),
             escalas=escalas,
             familia_a=rubro_del_codigo_frente_a(rubros_oem, f["a"], f["desc_a"], f["desc_b"]),
@@ -1034,7 +1066,7 @@ def recalcular_confianzas(limite=20000, progreso=None, solo_faltantes=True):
                   -- relación está anotada de ida y de vuelta hay que puntuar las dos, porque
                   -- la que quede sin puntuar cuenta como neutra en el buscador. Descartar el
                   -- espejo acá dejaría la mitad de los vínculos en NULL para siempre.
-                  SELECT e.producto_a_id AS a, e.producto_b_id AS b,
+                  SELECT e.producto_a_id AS a, e.producto_b_id AS b, e.confianza AS antes,
                         pa.codigo_raw AS cod_a, pa.descripcion AS desc_a, pa.precio AS precio_a,
                         ma.nombre AS marca_a,
                         pb.codigo_raw AS cod_b, pb.descripcion AS desc_b, pb.precio AS precio_b,
@@ -1066,6 +1098,7 @@ def recalcular_confianzas(limite=20000, progreso=None, solo_faltantes=True):
         anotar_error("recalcular_confianzas", _err)
     aprobados = puentes_aprobados_ids()
     ventas_confirman = pares_confirmados_por_ventas()
+    devueltos = pares_devueltos()      # lo que volvió porque no le iba
     _ya_juzgados = {}   # código -> ¿las reglas de hoy ya no lo tomarían? (cacheado)
     # Lo que el análisis de la cola pone en rojo: el buscador no puede mostrarlo confiable.
     # Ver vetos_del_analisis_sobre_lo_cargado().
@@ -1087,6 +1120,7 @@ def recalcular_confianzas(limite=20000, progreso=None, solo_faltantes=True):
             marca_a=f["marca_a"], marca_b=f["marca_b"], patrones=patrones,
             vendido_como_reemplazo=ventas_confirman.get((min(f["a"], f["b"]),
                                                           max(f["a"], f["b"])), 0),
+            devuelto=devueltos.get((min(f["a"], f["b"]), max(f["a"], f["b"])), 0),
             codigo_puente=puente, productos_del_puente=grados.get(id_puente, 0),
             escalas=escalas,
             familia_a=rubro_del_codigo_frente_a(rubros_oem, f["a"], f["desc_a"], f["desc_b"]),
@@ -1128,7 +1162,59 @@ def recalcular_confianzas(limite=20000, progreso=None, solo_faltantes=True):
         c.executemany("UPDATE equivalencias SET confianza = ? "
                       "WHERE producto_a_id = ? AND producto_b_id = ?", valores)
         conn.commit()
+    if not solo_faltantes:
+        anotar_la_deriva(filas, valores)
     return len(valores)
+
+
+def franja_de_confianza(confianza):
+    """La franja con que el buscador muestra un vínculo. Ver buscar_por_codigo()."""
+    confianza = 50 if confianza is None else confianza
+    return ("🟢 sólida" if confianza >= 70 else "🟡 razonable" if confianza >= 50
+            else "🟠 floja" if confianza >= 30 else "🔴 muy débil")
+
+
+_ORDEN_DE_LAS_FRANJAS = ("🔴 muy débil", "🟠 floja", "🟡 razonable", "🟢 sólida")
+
+
+def anotar_la_deriva(filas, valores, tope_de_ejemplos=30):
+    """Cuántos vínculos cambiaron de franja al volver a puntuar todo, y cuáles. Queda guardado.
+
+    Lo pidió una revisión con ChatGPT («control de deriva del motor»): cambiar una regla y no
+    saber qué pasó con las equivalencias de antes es cambiar a ciegas. El buscador muestra la
+    franja, no el número, así que se cuenta lo que se ve: un vínculo que pasa de sólido a
+    razonable cambia lo que dice la pantalla; uno que pasa de 82 a 78, no."""
+    antes = {(f["a"], f["b"]): f.get("antes") for f in filas}
+    codigos = {(f["a"], f["b"]): f"{f['cod_a']} ({f['marca_a']}) ↔ {f['cod_b']} ({f['marca_b']})"
+               for f in filas}
+    cambios, ejemplos = {}, []
+    for ahora, a, b in valores:
+        de, a_franja = franja_de_confianza(antes.get((a, b))), franja_de_confianza(ahora)
+        if antes.get((a, b)) is None or de == a_franja:
+            continue
+        cambios[f"{de} → {a_franja}"] = cambios.get(f"{de} → {a_franja}", 0) + 1
+        ejemplos.append({"Vínculo": codigos.get((a, b), f"{a} ↔ {b}"),
+                         "Antes": antes[(a, b)], "Ahora": ahora,
+                         "_baja": _ORDEN_DE_LAS_FRANJAS.index(a_franja)
+                                  < _ORDEN_DE_LAS_FRANJAS.index(de)})
+    ejemplos.sort(key=lambda e: (not e["_baja"], -abs(e["Ahora"] - e["Antes"])))
+    resumen = {"version": VERSION_CONFIANZA, "fecha": datetime.now().strftime("%Y-%m-%d %H:%M"),
+               "total": len(valores),
+               "bajaron": sum(1 for e in ejemplos if e["_baja"]),
+               "subieron": sum(1 for e in ejemplos if not e["_baja"]),
+               "cambios": cambios,
+               "ejemplos": [{k: v for k, v in e.items() if not k.startswith("_")}
+                            for e in ejemplos[:tope_de_ejemplos]]}
+    guardar_config("confianza_deriva", json.dumps(resumen, ensure_ascii=False))
+    return resumen
+
+
+def la_ultima_deriva():
+    """Lo que guardó anotar_la_deriva(), o None."""
+    try:
+        return json.loads(obtener_config("confianza_deriva", "") or "null")
+    except ValueError:
+        return None
 
 
 def borrar_equivalencias_dudosas(pares):

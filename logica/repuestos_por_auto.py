@@ -398,6 +398,47 @@ def panel_vin(clave="vin", mostrar_ensenar=True):
     return d
 
 
+# Las versiones que separan dos piezas del mismo auto, con la pregunta que las decide.
+_PREGUNTAS_DE_VERSION = (
+    ("DELANTERA", "TRASERA", "¿Va adelante o atrás?"),
+    ("IZQUIERDA", "DERECHA", "¿Del lado izquierdo o del derecho?"),
+    ("SUPERIOR", "INFERIOR", "¿La de arriba o la de abajo?"),
+)
+
+
+def version_de_la_fila(descripcion):
+    """{pregunta: respuesta} de lo que la descripción dice de su versión: el lado, el
+    combustible y lo que trae el auto (con o sin ABS, aire, sensor). Ver
+    versiones_que_hay_que_preguntar()."""
+    salida = {}
+    posicion = (posicion_desde_descripcion(descripcion) or "").split("+")
+    for uno, otro, pregunta in _PREGUNTAS_DE_VERSION:
+        for lado in (uno, otro):
+            if lado in posicion:
+                salida[pregunta] = lado.lower()
+    combustible = combustible_desde_descripcion(descripcion)
+    if combustible:
+        salida["¿Es nafta o diésel?"] = combustible
+    for cual, con in equipamiento_declarado(normalizar_texto(descripcion or "")).items():
+        salida[f"¿Tiene {cual}?"] = f"{'con' if con else 'sin'} {cual}"
+    return salida
+
+
+def versiones_que_hay_que_preguntar(filas):
+    """Las preguntas que hay que hacerle al cliente antes de elegir: las que dividen a los
+    repuestos de la lista en dos versiones. {pregunta: {respuesta: cuántos}}.
+
+    Lo propuso una revisión con ChatGPT: si para el Corsa 1.6 hay pastillas con ABS y sin ABS,
+    la app no puede elegir una en silencio. Tiene que decir que hay dos y preguntar. Solo cuenta
+    lo que la descripción dice: la que no aclara no es de ninguna de las dos."""
+    cuentas = {}
+    for f in filas:
+        for pregunta, respuesta in version_de_la_fila(f.get("Descripcion")).items():
+            cuentas.setdefault(pregunta, {}).setdefault(respuesta, 0)
+            cuentas[pregunta][respuesta] += 1
+    return {p: r for p, r in cuentas.items() if len(r) >= 2}
+
+
 def _mostrar_repuestos_del_auto(r, marca, modelo, anio, clave):
     """Muestra los códigos separados por fuente. Van separados a propósito: uno es un hecho
     (se lo pusiste a este auto) y el otro es una coincidencia de texto en una descripción.
@@ -463,6 +504,23 @@ def _mostrar_repuestos_del_auto(r, marca, modelo, anio, clave):
             filas = [f for f in filas
                      if all(pal in normalizar_texto(f"{f['Código']} {f['Descripcion']}")
                             for pal in palabras)]
+        # DOS VERSIONES DE LA MISMA PIEZA: se pregunta en vez de elegir. Solo con un tipo de
+        # pieza a la vista: entre rubros distintos, que haya delanteras y traseras es normal
+        # (las pastillas de adelante, los amortiguadores de atrás). Ver
+        # versiones_que_hay_que_preguntar().
+        if len({f["Categoría"] for f in filas}) == 1:
+            for _pregunta, _respuestas in versiones_que_hay_que_preguntar(filas).items():
+                _opciones = sorted(_respuestas)
+                st.warning(f"⚠️ **Hay {len(_opciones)} versiones** para este auto ("
+                           + ", ".join(f"{_respuestas[o]} {o}" for o in _opciones)
+                           + f"). **{_pregunta}** Preguntale al cliente antes de vender.")
+                _elegida = st.radio(_pregunta, ["Todavía no sé"] + _opciones, horizontal=True,
+                                    key=f"{clave}_version_{_pregunta}")
+                if _elegida != "Todavía no sé":
+                    # Las que no aclaran se quedan: no son de la otra versión, no lo dicen.
+                    filas = [f for f in filas
+                             if version_de_la_fila(f.get("Descripcion")).get(_pregunta)
+                             in (None, _elegida)]
         st.caption(f"Mostrando {len(filas)} de {len(r['del_catalogo'])}.")
         st.dataframe(quitar_id(filas), width="stretch", hide_index=True)
         st.download_button(

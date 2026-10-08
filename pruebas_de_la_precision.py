@@ -245,6 +245,139 @@ def probar(L):
             (cambios["codigos"], cambios["sin_ninguno"]), (2, 2))
     cambios = ns["equivalentes_que_la_lista_dejo_de_declarar"]("FISPA", hoy, {r300}, set())
     esperar("el que dejó de venir en la lista no cuenta", cambios["codigos"], 1)
+
+    # 9. Con o sin ABS, aire o sensor: dos versiones de la misma pieza.
+    equip = ns["equipamiento_declarado"]
+    esperar("C/ABS", equip("MAZA DE RUEDA GOL C/ABS"), {"ABS": True})
+    esperar("SIN AIRE ACONDICIONADO", equip("CORREA UNO SIN AIRE ACONDICIONADO"),
+            {"aire acondicionado": False})
+    esperar("S/AA", equip("CONECTOR SERVO SENDA/GOL S/AA"), {"aire acondicionado": False})
+    esperar("C/S AIRE sirve para los dos", equip("CORREA UNO C/S AIRE"), {})
+    esperar("CON Y SIN AIRE sirve para los dos", equip("CORREA UNO CON Y SIN AIRE"), {})
+    esperar("no dice nada", equip("PASTILLA DE FRENO GOL"), {})
+
+    # 10. Las medidas que salen del mismo texto no suman: ya suma «la misma descripción».
+    evaluar = ns["evaluar_equivalencia"]
+    texto = "RETEN CIGUEÑAL FORD FIESTA 1.6 35X52X7 DELANTERO"
+    med = {"diametro_interno": 35, "diametro_externo": 52, "ancho": 7}
+    # Con un puente flojo, para que el puntaje no llegue al techo de 100 y la diferencia se vea.
+    flojo = {"codigo_puente": "1234", "productos_del_puente": 8}
+    con_med, _ = evaluar(texto, texto, med, med, **flojo)
+    sin_med, _ = evaluar(texto, texto, **flojo)
+    esperar("la misma descripción con sus medidas suma lo mismo que sin ellas", con_med, sin_med)
+    otro = "RETEN DE CIGUEÑAL DELANTERO FORD FIESTA 1.6 (35X52X7)"
+    con_med, _ = evaluar(texto, otro, med, med)
+    sin_med, _ = evaluar(texto, otro)
+    esperar("con descripciones distintas, las medidas sí suman", con_med > sin_med, True)
+
+    # 11. Lo que volvió porque no le iba gana sobre todo, también sobre la lista que lo declara.
+    disco_a = producto("D100", "DISCO DE FRENO DELANTERO FIAT PALIO", fispa)
+    disco_b = producto("ILD100", "DISCO DE FRENO DELANTERO FIAT PALIO", illinois)
+    vincular(disco_a, disco_b, "FISPA · lista.xlsx · 01/10/2026 10:00:00", confianza=95)
+    conn.commit()
+    esperar("una devolución de una pieza fallada no toca el vínculo",
+            ns["registrar_devolucion"](disco_b, "D100", "fallada", "se partió"), 0)
+    esperar("y no cuenta en contra", ns["pares_devueltos"](), {})
+    esperar("la que no le iba baja el vínculo", ns["registrar_devolucion"](
+        disco_b, "D100", "no_le_iba", "otro diámetro"), 1)
+    conf = c.execute("SELECT confianza FROM equivalencias WHERE producto_a_id = ? AND "
+                     "producto_b_id = ?", (min(disco_a, disco_b), max(disco_a, disco_b))).fetchone()[0]
+    esperar("a «muy débil» en el acto", conf <= ns["TOPE_CON_VETO"], True)
+    esperar("y queda contada", ns["pares_devueltos"](),
+            {(min(disco_a, disco_b), max(disco_a, disco_b)): 1})
+    ficha = ns["ficha_de_prueba"](disco_a, disco_b)
+    esperar("la ficha la da con contradicciones", ficha["estado"], "🔴 CON CONTRADICCIONES")
+    esperar("y muestra las dos devoluciones", len(ficha["devoluciones"]), 2)
+    puntaje, _ = evaluar("DISCO DE FRENO DELANTERO FIAT PALIO", "DISCO DE FRENO DELANTERO FIAT PALIO",
+                         respaldo_fabricante=True, devuelto=1)
+    esperar("y el puntaje no pasa del tope", puntaje <= ns["TOPE_CON_VETO"], True)
+    c.execute("INSERT INTO ventas_registradas (producto_id, termino_pedido, codigo_pedido_clean) "
+              "VALUES (?, 'D100', 'D100'), (?, 'D100', 'D100')", (disco_b, disco_b))
+    conn.commit()
+    esperar("una venta que volvió no confirma nada", ns["pares_confirmados_por_ventas"](), {})
+    res, _ = ns["buscar_con_variantes_del_cero"]("D100", "Todas", 3)
+    fila_b = {f["ID"]: f for f in res}.get(disco_b, {})
+    esperar("el buscador lo muestra devuelto", fila_b.get("Devuelto"), "↩️ 1")
+    esperar("y no la ofrece como segura",
+            ns["veredicto_de_la_equivalencia"](fila_b).startswith("🔴 la devolvieron"), True)
+    esperar("un motivo inventado no entra",
+            _falla(ns["registrar_devolucion"], disco_b, "D100", "porque si"), "ValueError")
+
+    # 12. Un rechazo no se pisa: sale de la cola de todas las listas y no se aprueba en grupo.
+    ja, jb = producto("J1", "JUNTA TAPA CIL FIAT 128", fispa), producto("IJ1", "JUNTA FIAT 128", illinois)
+    c.execute("INSERT INTO equivalencias_pendientes (producto_a_id, producto_b_id, origen, lote) "
+              "VALUES (?, ?, 'lista_proveedor', 'ILLINOIS · otra.xlsx · x')", (min(ja, jb), max(ja, jb)))
+    conn.commit()
+    ns["marcar_revision"]([(ja, jb)], "rechazada")
+    esperar("el rechazo saca el par de la cola", c.execute(
+        "SELECT COUNT(*) FROM equivalencias_pendientes").fetchone()[0], 0)
+    c.execute("INSERT INTO equivalencias_pendientes (producto_a_id, producto_b_id, origen, lote) "
+              "VALUES (?, ?, 'lista_proveedor', 'VIEJA')", (min(ja, jb), max(ja, jb)))
+    conn.commit()
+    esperar("una base de antes con el rechazado en la cola: no se aprueba",
+            ns["aprobar_pendientes"]("VIEJA"), 0)
+    esperar("y el rechazo sigue", c.execute(
+        "SELECT decision FROM equivalencias_revisadas WHERE producto_a_id = ? AND producto_b_id = ?",
+        (ja, jb)).fetchone()[0], "rechazada")
+    esperar("vincular a mano avisa quién lo rechazó",
+            [(r["cod_a"], r["cod_b"]) for r in ns["rechazos_del_grupo"](
+                [{"codigo": "J1", "marca": "FISPA"}, {"codigo": "IJ1", "marca": "illinois"}])],
+            [("J1", "IJ1")])
+
+    # 13. El riesgo, aparte de la confianza.
+    riesgo = ns["riesgo_de_la_pieza"]
+    esperar("pastilla: crítico", riesgo("PASTILLA DE FRENO DELANTERA GOL")[0], "🛑 crítico")
+    esperar("junta de tapa: alto", riesgo("JTA.TAPA CIL. FIAT 128")[0], "🟠 alto")
+    esperar("filtro: normal", riesgo("FILTRO DE AIRE GOL")[0], "🟢 normal")
+    veredicto = ns["veredicto_de_la_equivalencia"]
+    confirmado = {"Cadena": "🟢 directo", "Confianza": "🟢 sólida",
+                  "Respaldo": "📋 lo declara la lista de FISPA",
+                  "Descripcion": "PASTILLA DE FRENO DELANTERA GOL"}
+    esperar("la de seguridad confirmada pide mirarla", "pieza de seguridad" in veredicto(confirmado),
+            True)
+    esperar("salvo que alguien la haya verificado", veredicto(dict(confirmado, Verificada="✅")),
+            "🟢 equivalencia confirmada (verificada)")
+    esperar("un cambio de número no es «confirmada»",
+            veredicto(dict(confirmado, Descripcion="FILTRO",
+                           Respaldo="🔁 el proveedor declara el cambio de código")).startswith(
+                "🟡 probable: es un cambio de número"), True)
+    esperar("la ficha pide mirar la de seguridad",
+            bool(ns["ficha_de_prueba"](disco_a, disco_b)["accion"]), True)
+    viejo_r = producto("R555", "FILTRO DE ACEITE FIAT UNO", fispa)
+    nuevo_r = producto("IR556", "FILTRO ACEITE FIAT UNO 1.3", illinois)
+    vincular(viejo_r, nuevo_r, "POR REEMPLAZO (automático) · 08/10", confianza=90)
+    conn.commit()
+    esperar("en la ficha, un cambio de número es probable",
+            ns["ficha_de_prueba"](viejo_r, nuevo_r)["estado"], "🟡 PROBABLE")
+
+    # 14. La deriva: cuántos cambian de franja al volver a puntuar.
+    filas = [{"a": 1, "b": 2, "antes": 80, "cod_a": "A", "marca_a": "X", "cod_b": "B", "marca_b": "Y"},
+             {"a": 3, "b": 4, "antes": 60, "cod_a": "C", "marca_a": "X", "cod_b": "D", "marca_b": "Y"},
+             {"a": 5, "b": 6, "antes": 72, "cod_a": "E", "marca_a": "X", "cod_b": "F", "marca_b": "Y"},
+             {"a": 7, "b": 8, "antes": None, "cod_a": "G", "marca_a": "X", "cod_b": "H", "marca_b": "Y"}]
+    deriva = ns["anotar_la_deriva"](filas, [(55, 1, 2), (75, 3, 4), (90, 5, 6), (10, 7, 8)])
+    esperar("uno bajó y uno subió", (deriva["bajaron"], deriva["subieron"]), (1, 1))
+    esperar("dicho por franja", deriva["cambios"],
+            {"🟢 sólida → 🟡 razonable": 1, "🟡 razonable → 🟢 sólida": 1})
+    esperar("y queda guardada", ns["la_ultima_deriva"]()["bajaron"], 1)
+
+    # 15. Las versiones que hay que preguntarle al cliente.
+    preguntas = ns["versiones_que_hay_que_preguntar"]([
+        {"Descripcion": "PASTILLA DE FRENO DELANTERA GOL"},
+        {"Descripcion": "PASTILLA DE FRENO TRASERA GOL"},
+        {"Descripcion": "PASTILLA DE FRENO GOL"}])
+    esperar("adelante o atrás", preguntas, {"¿Va adelante o atrás?": {"delantera": 1, "trasera": 1}})
+    esperar("si son todas iguales, no se pregunta", ns["versiones_que_hay_que_preguntar"]([
+        {"Descripcion": "PASTILLA DE FRENO DELANTERA GOL"},
+        {"Descripcion": "PASTILLA DELANTERA GOL 1.6"}]), {})
+
+    # 16. De dónde salen los vínculos.
+    filas, solo_pistas = ns["vinculos_por_origen"]()
+    por_origen = {f["Origen"]: f for f in filas}
+    esperar("la lista de FISPA es fuente",
+            por_origen.get("📋 lo declara la lista de FISPA", {}).get("Es"), "fuente")
+    # El gemelo «R100» de ILLINOIS: su único vínculo es el del barrido (ver 7).
+    esperar("cuenta los productos unidos solo por pistas", solo_pistas, 1)
     return fallas
 
 

@@ -235,6 +235,39 @@ _MODELOS_DE_SOLEX = {"TEIE", "PAIA", "EISA", "PIBT", "PICT"}
 # POLO/ GOLF / PASSAT CON MODULO» (TARANTO) contra «BOBINA … VW POLO-GOLF-PASSAT Sin Modulo».
 _RE_CON_MODULO = re.compile(r"\b(?:CON|C/)\s*MODULO\b")
 _RE_SIN_MODULO = re.compile(r"\b(?:SIN|S/)\s*MODULO\b")
+# CON O SIN un equipamiento del auto: la misma pieza viene en dos versiones. La correa del Uno
+# con aire no es la del Uno sin aire, la pastilla con sensor de desgaste no es la sin sensor,
+# y el depósito del Corsa «con sensor» no es el de sin. Lo pidió una revisión con ChatGPT («la
+# misma pieza pero con ABS, con o sin sensor, con o sin climatizador»). Solo lo que se declara
+# con «con/sin» o «C/ S/»: «PARA AUTOS CON Y SIN AIRE» sirve para los dos y no cuenta.
+# Medido sobre la base real del 7/10: lo declaran 81 productos y ningún par cargado, rechazado
+# ni pendiente se contradice; ABS no lo dice ninguno. Está para cuando aparezca.
+_EQUIPAMIENTO_DEL_AUTO = {
+    "ABS": r"ABS\b",
+    "aire acondicionado": r"(?:AIRE(?:\s+ACOND\w*)?|A\s*/\s*A\b|AA\b|CLIMATIZ\w*)",
+    "sensor": r"(?:SENSOR|TESTIGO)\b",
+    "dirección hidráulica": r"(?:DIRECCION\s+HIDR\w*|DIR\s+HIDR\w*|D\s*/\s*H\b|DH\b)",
+}
+_RE_CON_EQUIPAMIENTO = {k: re.compile(r"(?:\bCON\s+|\bC\s*/\s*)" + p)
+                        for k, p in _EQUIPAMIENTO_DEL_AUTO.items()}
+_RE_SIN_EQUIPAMIENTO = {k: re.compile(r"(?:\bSIN\s+|\bS\s*/\s*)" + p)
+                        for k, p in _EQUIPAMIENTO_DEL_AUTO.items()}
+_RE_CON_Y_SIN_EQUIPAMIENTO = {
+    k: re.compile(r"(?:\bC\s*/\s*S\s*/?\s*|\bCON\s+Y\s+SIN\s+|\bCON\s*/\s*SIN\s+"
+                  r"|\bC\s*/\s*Y\s*S\s*/\s*)" + p)
+    for k, p in _EQUIPAMIENTO_DEL_AUTO.items()}
+
+
+def equipamiento_declarado(limpio):
+    """{equipamiento: True con / False sin} de lo que la descripción declara. Ver arriba."""
+    salida = {}
+    for k in _EQUIPAMIENTO_DEL_AUTO:
+        if _RE_CON_Y_SIN_EQUIPAMIENTO[k].search(limpio):
+            continue
+        con = bool(_RE_CON_EQUIPAMIENTO[k].search(limpio))
+        if con != bool(_RE_SIN_EQUIPAMIENTO[k].search(limpio)):
+            salida[k] = con
+    return salida
 # El sensor de la temperatura del aire de afuera (el del tablero) no es el del agua del motor:
 # «SENSOR TEMP EXTERIOR VW BORA/GOLF… Masser» (JL) concordaba con «Sensor de temperatura
 # Volkswagen Fox Suran … 2 salidas» (CRI-FA).
@@ -635,6 +668,7 @@ def _firma_armada(descripcion, producto_id=None, codigo_clean=None):
             "aro": frozenset(_RE_ARO_DE_COLOR.findall(limpio)),
             "modulo": (True if _RE_CON_MODULO.search(limpio)
                        else False if _RE_SIN_MODULO.search(limpio) else None),
+            "equipamiento": tuple(sorted(equipamiento_declarado(limpio).items())),
             "aire_exterior": bool(_RE_AIRE_EXTERIOR.search(limpio)),
             "motor_ford": _familia_de_motor_ford(limpio),
             "termostato_con_carcasa": _termostato_con_carcasa(limpio),
@@ -976,6 +1010,11 @@ def _comparar_firmas(a, b, minimo_nucleo=2, cuenta_palabras=None, total_descripc
     if (a.get("modulo") is not None and b.get("modulo") is not None
             and a["modulo"] != b["modulo"]):
         return False, "versiones distintas: con módulo de encendido vs sin módulo"
+    _eq_a, _eq_b = dict(a.get("equipamiento") or ()), dict(b.get("equipamiento") or ())
+    for _cual in sorted(set(_eq_a) & set(_eq_b)):
+        if _eq_a[_cual] != _eq_b[_cual]:
+            return False, (f"versiones distintas: {'con' if _eq_a[_cual] else 'sin'} {_cual} vs "
+                           f"{'con' if _eq_b[_cual] else 'sin'} {_cual}")
     if ((a.get("sensor") or b.get("sensor")) and a.get("aire_exterior") != b.get("aire_exterior")
             and "TEMPERATURA" in ((a.get("sensor") or frozenset()) & (b.get("sensor") or frozenset()))):
         return False, ("sensores de tipos distintos: el de la temperatura del aire exterior vs el "

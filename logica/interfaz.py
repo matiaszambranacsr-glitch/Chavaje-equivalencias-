@@ -1259,6 +1259,10 @@ def veredicto_de_la_equivalencia(fila):
         return "🔵 el mismo número en otra marca: confirmá que sea la misma pieza"
     m = re.search(r"(\d+) saltos", cadena)
     saltos = int(m.group(1)) if m else (1 if "directo" in cadena else None)
+    # Lo que volvió porque no le iba gana sobre todo, también sobre la verificación: es lo que
+    # pasó en un auto de verdad. Ver registrar_devolucion().
+    if fila.get("Devuelto"):
+        return "🔴 la devolvieron porque no le iba: mirá la ficha de prueba antes de venderla"
     if fila.get("Verificada"):
         return "🟢 equivalencia confirmada (verificada)"
     if "muy débil" in confianza:
@@ -1272,6 +1276,12 @@ def veredicto_de_la_equivalencia(fila):
         if respaldo and not es_respaldo_primario(respaldo):
             return ("🟡 probable, sin una fuente que lo declare ("
                     + str(respaldo).split(" ", 1)[-1] + ")")
+        if str(respaldo or "").startswith("🔁"):
+            return "🟡 probable: es un cambio de número; confirmá que sirva en este auto"
+        # Una pieza de seguridad confirmada igual se mira antes de venderla (ver
+        # riesgo_de_la_pieza()): lo que se confirma es la equivalencia, no que no haya riesgo.
+        if riesgo_de_la_pieza(fila.get("Descripcion"))[0].startswith("🛑"):
+            return "🟢 equivalencia confirmada · 🛑 pieza de seguridad: comparala en la mano"
         return "🟢 equivalencia confirmada"
     if "razonable" in confianza:
         return "🟡 probable" if saltos == 1 else "🟠 revisar antes de vender"
@@ -1293,8 +1303,14 @@ def mostrar_ficha_de_prueba(id_a, id_b, clave):
          + "  \n".join(f"**{lado}:** {texto_para_markdown(p['marca'])} `{p['codigo_raw']}` — "
                        f"{texto_para_markdown((p['descripcion'] or '')[:90])}"
                        for lado, p in (("A", a), ("B", b))))
+    if ficha["resumen"]:
+        st.markdown(" · ".join(texto_para_markdown(x) for x in ficha["resumen"]))
     st.caption(f"Rubro: {ficha['rubro']}"
-               + (f" · pieza: {ficha['pieza']}" if ficha["pieza"] else ""))
+               + (f" · pieza: {ficha['pieza']}" if ficha["pieza"] else "")
+               + f" · riesgo: {ficha['riesgo']}"
+               + (f" ({ficha['por_que_riesgo']})" if ficha["por_que_riesgo"] else ""))
+    if ficha["accion"]:
+        st.warning(f"**Acción:** {ficha['accion']}.")
     if ficha["falta"]:
         st.markdown("**Falta para que quede verificada:**\n"
                     + "\n".join(f"- {texto_para_markdown(x)}" for x in ficha["falta"]))
@@ -1327,6 +1343,8 @@ def mostrar_ficha_de_prueba(id_a, id_b, clave):
         st.markdown("**A favor:** " + " · ".join(texto_para_markdown(x) for x in ficha["a_favor"]))
     for x in ficha["comprobaciones"]:
         st.success(texto_para_markdown(x))
+    for x in ficha["devoluciones"]:
+        st.caption(texto_para_markdown(x))
 
     # La validación física: quién, cuándo y qué miró. Ver comprobar_en_la_mano().
     if not ficha["estado"].startswith("✅"):
@@ -1345,6 +1363,26 @@ def mostrar_ficha_de_prueba(id_a, id_b, clave):
                 avisar("success", "Quedó anotada como comprobada en la mano. Buscala de nuevo "
                                   "para verla verificada en los resultados.")
                 st.rerun()
+
+    # Lo que VOLVIÓ: la prueba más fuerte en contra. Ver registrar_devolucion().
+    st.markdown(f"**↩️ ¿Se vendió `{b['codigo_raw']}` por `{a['codigo_raw']}` y volvió?**")
+    motivo = st.selectbox("¿Por qué volvió?", list(MOTIVOS_DE_DEVOLUCION),
+                          format_func=MOTIVOS_DE_DEVOLUCION.get,
+                          key=f"motivo_devolucion_{clave}_{id_b}")
+    detalle = st.text_input("Qué pasó (opcional):", key=f"detalle_devolucion_{clave}_{id_b}",
+                            placeholder="Ej.: la rosca era más chica, la ficha no entraba")
+    if candado("anotar una devolución",
+               st.button("↩️ Anotar la devolución", key=f"boton_devolucion_{clave}_{id_b}"),
+               f"devolucion_{clave}_{id_b}", nivel="empleado"):
+        try:
+            bajados = registrar_devolucion(id_b, a["codigo_raw"], motivo, detalle)
+        except (PermissionError, ValueError) as _err:
+            st.error(str(_err))
+        else:
+            avisar("success", "Devolución anotada."
+                   + (" El vínculo bajó a «muy débil»: el buscador ya no lo ofrece como seguro."
+                      if bajados else ""))
+            st.rerun()
 
 
 def mostrar_tarjetas_de_resultados(filas, tope=40):

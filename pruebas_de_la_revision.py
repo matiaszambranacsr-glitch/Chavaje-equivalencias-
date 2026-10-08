@@ -200,6 +200,18 @@ PARES_DE_MUESTRA = [
     ("Sonda Lambda Renault Clio II Kangoo 1.4 - Largo cable 36 centimetros -",
      "SONDA LAMBDA 80048 RENAULT CLIO II MEGANE II 1 6 8 16V Cable de 63cm REF ORIG BOSCH",
      "distinta", "CRI-FA / FISPA: 36 contra 63 cm de cable, aunque la cilindrada sea solo una duda"),
+    # --- los casos difíciles que pidió una revisión con ChatGPT. Estos NO salieron de la cola:
+    # están armados, porque en la base real no hay ningún par así (ver equipamiento_declarado()).
+    ("MAZA DE RUEDA DELANTERA VW GOL C/ABS", "MAZA DE RUEDA DELANTERA VW GOL S/ABS", "distinta",
+     "con ABS contra sin ABS"),
+    ("CORREA ALTERNADOR FIAT UNO 1.3 MPI CON AIRE ACONDICIONADO",
+     "CORREA ALTERNADOR FIAT UNO 1.3 MPI SIN AIRE ACONDICIONADO", "distinta",
+     "con aire contra sin aire"),
+    ("PASTILLA DE FRENO DELANTERA VW GOL TREND C/SENSOR",
+     "PASTILLA DE FRENO DELANTERA VW GOL TREND S/SENSOR", "distinta",
+     "con sensor de desgaste contra sin sensor"),
+    ("AMORTIGUADOR DELANTERO FORD KA 1.6", "AMORTIGUADOR TRASERO FORD KA 1.6", "distinta",
+     "el mismo auto, otro lado"),
 ]
 
 
@@ -290,9 +302,9 @@ ALARMAS_DE_APROBACIONES_MALAS = ("🧰", "🔎")
 
 
 def probar_aprobaciones(logica, cuantos):
-    """Puntúa las aprobaciones preparadas. Devuelve (fallas, resumen)."""
+    """Puntúa las aprobaciones preparadas. Devuelve (fallas, resumen, conteo)."""
     if not cuantos:
-        return [], "la base no tiene aprobaciones con los dos productos cargados"
+        return [], "la base no tiene aprobaciones con los dos productos cargados", None
     limpias, sospechosas, relacionadas = logica.analizar_lote_pendiente(LOTE_DE_LA_PRUEBA,
                                                                         limite=None)
     todos = limpias + sospechosas + relacionadas
@@ -306,26 +318,50 @@ def probar_aprobaciones(logica, cuantos):
                f"revisión, {len(rojos):,} en rojo ({100 * len(rojos) / cuantos:.1f} %)"
                + (f", y {len(mal_aprobados):,} que estaban mal aprobados" if mal_aprobados
                   else ""))
+    # Los mal aprobados no van en la matriz: ahí el rojo es el acierto (ver el resumen).
+    conteo = {"limpias": len(limpias), "rojo": len(rojos),
+              "revisión": len(todos) - len(limpias) - len(rojos) - len(mal_aprobados)}
     fallas = []
     if len(rojos) > 0.01 * cuantos:
         fallas.append(f"más del 1 % de lo aprobado cae en rojo: {resumen}. Ejemplos: "
                       + "; ".join(f"{f.get('cod_a')} / {f.get('cod_b')}: "
                                   f"{(f.get('alarmas') or [''])[0][:70]}" for f in rojos[:5]))
-    return fallas, resumen
+    return fallas, resumen, conteo
 
 
 def probar_rechazos(logica):
     """Los FALSOS POSITIVOS: lo que rechazaste a mano, puntuado como si recién llegara.
-    Devuelve (cuántos, cuántos quedan limpios, cuántos 🟢 ≥75, ejemplos de los limpios)."""
+    Devuelve (cuántos, cuántos quedan limpios, cuántos 🟢 ≥75, ejemplos de los limpios, conteo)."""
     logica_ns = logica.todo_lo_de_la_logica()
     n = logica_ns["c"].execute("SELECT COUNT(*) FROM equivalencias_pendientes WHERE lote = ?",
                                (LOTE_DE_LOS_RECHAZOS,)).fetchone()[0]
     if not n:
-        return 0, 0, 0, []
+        return 0, 0, 0, [], None
     limpias, sospechosas, relacionadas = logica.analizar_lote_pendiente(LOTE_DE_LOS_RECHAZOS,
                                                                         limite=None)
     altas = [f for f in limpias if (f.get("confianza") or 0) >= 75]
-    return n, len(limpias), len(altas), limpias
+    todos = limpias + sospechosas + relacionadas
+    rojos = sum(1 for f in todos if (f.get("confianza") or 0) < 30)
+    conteo = {"limpias": len(limpias), "rojo": rojos,
+              "revisión": len(todos) - len(limpias) - rojos}
+    return n, len(limpias), len(altas), limpias, conteo
+
+
+def imprimir_la_matriz(aprobados, rechazados):
+    """Lo que haría el análisis con lo que ya decidiste: la matriz de aciertos y errores.
+
+    Lo pidió una revisión con ChatGPT («verdaderos y falsos positivos y negativos»). Hay una
+    columna del medio porque el análisis no decide solo: lo que no es limpio ni rojo va a
+    revisión, y eso no es un error, es trabajo. Los errores son las dos esquinas: lo rechazado
+    que pasaría limpio (falso positivo, el caro) y lo aprobado que caería en rojo."""
+    print(f"   {'matriz':<12}" + "".join(f"{t:<24}" for t in ("pasa limpia", "a revisión", "rojo")))
+    for nombre, conteo, marcas in (("aprobados", aprobados, ("acierto", "", "falso negativo")),
+                                   ("rechazados", rechazados, ("falso positivo", "", "acierto"))):
+        if not conteo:
+            continue
+        celdas = [f"{conteo[k]:>6,}" + (f" {m}" if m else "")
+                  for k, m in zip(("limpias", "revisión", "rojo"), marcas)]
+        print(f"   {nombre:<12}" + "".join(f"{c_:<24}" for c_ in celdas))
 
 
 def main():
@@ -343,10 +379,11 @@ def main():
               f"{probados} bien" + (f" ({salteados} necesitan el catálogo: correlo con --base)"
                                     if salteados else ""))
         if ruta_base:
-            f2, resumen = probar_aprobaciones(logica, cuantos)
+            f2, resumen, conteo_ap = probar_aprobaciones(logica, cuantos)
             print(f"{'✅' if not f2 else '❌'} aprobaciones: {resumen}")
             fallas += f2
-            n_r, limpios_r, altos_r, _ejemplos = probar_rechazos(logica)
+            n_r, limpios_r, altos_r, _ejemplos, conteo_re = probar_rechazos(logica)
+            imprimir_la_matriz(conteo_ap, conteo_re)
             if n_r:
                 print(f"   rechazos (falsos positivos): {n_r:,} rechazados a mano: "
                       f"{limpios_r:,} quedarían limpios ({100 * limpios_r / n_r:.1f} %), "

@@ -128,9 +128,26 @@ if pagina == PAGINAS[1]:
         verificar = st.checkbox("✅ Marcar como verificada", value=True,
                                  help="Verificada = confirmaste vos mismo que son intercambiables.")
 
+        # UN RECHAZO NO SE LEVANTA SIN QUERER. Si alguien ya dijo que dos de estos no son
+        # equivalentes, se muestra quién y cuándo, y hay que confirmarlo para vincularlos igual.
+        # Lo pidió una revisión con ChatGPT: «nunca borrar una decisión negativa; exigir una
+        # revisión explícita para levantarla».
+        _rechazos = rechazos_del_grupo(grupo) if len(grupo) >= 2 else []
+        _levantar = True
+        if _rechazos:
+            st.warning(
+                "🚫 **Alguien ya dijo que estos no son equivalentes:**\n"
+                + "\n".join(f"- `{r['cod_a']}` ↔ `{r['cod_b']}`: lo rechazó "
+                            f"{r['revisado_por'] or 'alguien'} el {r['fecha']}"
+                            + (f" ({MOTIVOS_DE_RECHAZO.get(r['motivo'], r['motivo'])})"
+                               if r["motivo"] else "")
+                            for r in _rechazos))
+            _levantar = st.checkbox("Lo revisé y son equivalentes: vincularlos igual",
+                                    key="levantar_rechazo")
         if len(grupo) < 2:
             st.info("Agregá al menos 2 códigos a la tanda para poder vincularlos.")
-        elif st.button(f"🔗 Vincular los {len(grupo)} códigos entre sí", type="primary"):
+        elif st.button(f"🔗 Vincular los {len(grupo)} códigos entre sí", type="primary",
+                       disabled=not _levantar):
             cantidad_prod, cantidad_pares = vincular_grupo_equivalencias(grupo, nivel_equiv, nota_tecnica, verificar)
             st.success(f"Listo: {cantidad_prod} productos quedaron vinculados entre sí ({cantidad_pares} relaciones creadas).")
             st.session_state["grupo_equivalencia"] = []

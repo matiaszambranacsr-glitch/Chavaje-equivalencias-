@@ -22,7 +22,7 @@ qué proveedores, son el mismo repuesto. Corre con Streamlit sobre una base SQLi
 | `pruebas_de_las_homologaciones.py` | El registro oficial de CHAS (autopartes de seguridad): leerlo en varios formatos y cruzarlo con tus marcas. |
 | `pruebas_del_deposito.py` | El circuito del depósito y el descuento de cada cuenta: pedir, entregar, cargar en la cuenta y facturar. |
 | `pruebas_de_la_revision.py` | Que el análisis de equivalencias no se equivoque con pares ya revisados a mano, y (con `--base`) que no baje a rojo lo que aprobaste ni deje limpio lo que rechazaste. |
-| `pruebas_de_la_precision.py` | Cuándo una equivalencia se da por verificada: la fuente de cada vínculo, la ficha de prueba, el veto que gana siempre, la comprobación en la mano y el proveedor que cambia de equivalente sin avisar. |
+| `pruebas_de_la_precision.py` | Cuándo una equivalencia se da por verificada: la fuente de cada vínculo, la ficha de prueba, el veto que gana siempre, la comprobación en la mano, el proveedor que cambia de equivalente sin avisar, las devoluciones, el riesgo, la deriva al cambiar las reglas y que un rechazo no se pise. |
 | `pruebas_de_los_cambios.py` | El registro de quién cambió qué (sin los precios), los permisos adentro de las funciones, el orden de los vínculos en la base, la entrega con stock de menos, el vistazo de un backup y el mensaje de WhatsApp. |
 | `CONTRATOS.md` | Lo que no se puede romper, regla por regla, con la prueba que sostiene cada una. |
 | `medir_el_buscador.py` | Cuánto tarda el buscador con 10, 50 y 100 personas buscando a la vez, sobre una copia de la base real. |
@@ -6473,6 +6473,37 @@ el botón**:
   dónde vino. Solo los últimos tres años: la serie arranca en los cuarenta y trae el 89.
 - «🔌 Probar las fuentes de afuera» suma la Central de Deudores (con el CUIT de la AFIP, nunca el
   de un cliente) y la inflación de respaldo.
+
+## 🧮 La precisión, segunda parte: devoluciones, riesgo y qué cambia al cambiar las reglas
+
+Otra revisión con ChatGPT, puntos 6 a 24, medida sobre la misma copia de la base real del 7/10.
+
+| Punto | Qué se encontró | Qué se hizo |
+|---|---|---|
+| 6. Falsos positivos y negativos con un conjunto conocido | Ya estaba (la tanda anterior). | `pruebas_de_la_revision.py --base` imprime la matriz. **Aprobados:** 18.269 pasan limpios, 1.759 van a revisión y 6 caen en rojo (falso negativo). **Rechazados:** 3 pasarían limpios (falso positivo), 66 van a revisión y 2.564 caen en rojo. Los 3 no tienen arreglo con una regla: dos son «bomba eléctrica con kit» contra el número Bosch de la bomba, y ese mismo caso se aprobó 5 veces y se rechazó 2; el tercero es un número de fábrica que copió la descripción del filtro que lo citaba. |
+| 7. Los casos difíciles, como prueba permanente | Las 2.633 decisiones de rechazo ya se usan con `--base`. | Cuatro pares armados más: con y sin ABS, con y sin aire, con y sin sensor, y otro lado. Sin la regla nueva (punto 17), 3 de los 4 daban «concuerdan». |
+| 8. Explicación mínima, y «ver por qué» | El buscador ya da una frase por resultado, y la ficha es el «ver por qué». | La ficha arranca con una línea («📋 lo declara la lista de FISPA · 🔢 los dos citan 2 números de fábrica · 📐 3 medidas iguales»); el detalle va abajo. |
+| 9. Preguntar cuando hay dos versiones | La búsqueda por auto las mostraba mezcladas. | Con un tipo de pieza a la vista, si los resultados se dividen (adelante o atrás, izquierda o derecha, arriba o abajo, nafta o diésel, con o sin ABS, aire o sensor) aparece «⚠️ Hay 2 versiones… ¿Va adelante o atrás?», y la respuesta filtra; los que no aclaran quedan. Medido: aparece en el Palio, el Corsa, el Gol y el Fiesta (10 piezas de distribución de nafta y 9 de diésel del Palio, por ejemplo). |
+| 10. El VIN como filtro duro | Ya es así: la búsqueda por auto descarta lo que declara otro año u otra cilindrada, no le suma puntos; lo que no aclara queda marcado «— no aclara». | Sin cambio. |
+| 11. Una pieza para demasiados autos | Medido: las que van en más marcas (13 marcas, 36 modelos) son sondas lambda universales, y está bien. El peligro real —un vínculo que junta familias— ya lo buscan «Códigos puente» y «Vínculos que unen dos familias». | Sin cambio. |
+| 12. Equivalencias demasiado fáciles | No había un panel. | «🧭 De dónde salen los vínculos» (Mantenimiento, junto a la confianza): cuántos aporta cada origen, si es fuente o pista y cuántos son sólidos. El barrido por descripciones aporta 2.930 (2.332 sólidos), y **1.757 productos están unidos solo por pistas**. |
+| 13. Deriva al cambiar una regla | No se guardaba qué cambiaba. | Al volver a puntuar todo, queda guardado cuántos vínculos cambiaron de franja en el buscador, y cuáles; se ve junto a «Puntajes guardados al día». Con esta tanda (reglas 9 → 11), de 20.037: 2 bajaron y 2 subieron. |
+| 14. Nunca borrar una decisión negativa | En la base, 0 rechazos pisados. Pero el camino existía: deshacer una lista marca sus pares como rechazados y solo sacaba de la cola los de esa lista; si el mismo par esperaba en otra, aprobarla lo revivía y el «ok» pisaba el rechazo. | Un rechazo saca el par de la cola de todas las listas; aprobar en grupo saltea lo rechazado; vincular a mano un par rechazado dice quién y cuándo lo rechazó, y el botón queda trabado hasta confirmarlo. Probado en la app con un par rechazado de verdad. |
+| 15. Riesgo, además de confianza | No había. | 🛑 crítico (piezas de seguridad, la lista del Decreto 779/95 que ya usa el CHAS), 🟠 alto (distribución, bomba de aceite, junta de tapa: si fallan, rompen el motor), 🟢 normal. La ficha dice qué hacer («comparala en la mano antes de venderla») y el buscador agrega «🛑 pieza de seguridad» a la equivalencia confirmada. En el catálogo: 241 productos críticos y 2.603 de riesgo alto. |
+| 16. Aprender de las devoluciones | No existía. | «↩️ Anotar la devolución» en la ficha, con el motivo. «No le iba» baja el vínculo a muy débil en el acto, la ficha queda 🔴 y el buscador muestra «🔴 la devolvieron porque no le iba», aunque lleguen por un código en el medio (ahí no se toca ningún vínculo: no se sabe cuál de los dos pasos está mal). «Vino fallada» no cuenta en contra. Una venta que volvió deja de confirmar. Hoy hay 0 ventas anotadas: se va a notar cuando se use «🛒 Se llevó». |
+| 17. Incompatibilidad por contexto | No había. | «Con» contra «sin» ABS, aire, sensor o dirección hidráulica es otra pieza («versiones distintas»); «con y sin aire» sirve para los dos y no cuenta. Lo declaran 81 productos y ningún par real se contradice: está para cuando aparezca. |
+| 18. «No hay suficiente información» | La medida que le falta a uno ya salía «❓ falta» y no sumaba. Buscándolo apareció otra cosa: cuando el número de fábrica copia la descripción de la fila, sus medidas salen del mismo texto y sumaban +30 encima de los +35 de «la misma descripción». Era el 96 % de los «las medidas coinciden» (262 de 274 aprobados, 315 de 329 rechazados). | Las medidas del mismo texto ya no suman. No cambia ninguna decisión —esos pares ya pasaban por la descripción—, pero el puntaje deja de contar dos veces lo mismo. |
+| 19. Intento de refutación | Es lo que hacen los vetos (medidas, rubro, posición, motor, cilindrada, kit, conjunto, y ahora con o sin y las devoluciones); la ficha muestra lo que va a favor y lo que va en contra por separado. «¿Hay un auto donde A sirve y B no?» necesita aplicaciones del fabricante, y las 111.795 de la base salen de las descripciones. | Sin cambio. |
+| 20. Excepciones de aplicación | Los catálogos que se leen no las traen. | Sin cambio. |
+| 21. Años que no son continuos | Las aplicaciones del fabricante son una fila por rango: dos rangos separados son dos filas. La descripción de un proveedor trae uno solo. | Sin cambio. |
+| 22. Sustituido no es equivalente | El buscador ya avisaba aparte «🔄 Ese código fue reemplazado». | Un vínculo que sale de un cambio de número ya no es «confirmada»: «🟡 probable: es un cambio de número; confirmá que sirva en este auto», y en la ficha queda PROBABLE. |
+| 23. Códigos parecidos de otro fabricante | El salto «mismo número, otra marca» no se da con números de menos de 8 dígitos ni con códigos de menos de 4 caracteres (medido: los 19 números cortos compartidos eran casualidad). 12345 y 12345A son códigos distintos para la app. | Sin cambio. Sumar la familia a la clave sería rehacer la base. |
+| 24. Normalización conservadora | `sanitizar()` saca espacios, guiones y puntos, nada más; el cero de adelante se prueba solo si no hay nada, y lo dice; una sugerencia por tipeo nunca se guarda como vínculo. | Sin cambio. |
+
+`VERSION_CONFIANZA` pasa a 11. Probado en `pruebas_de_la_precision.py` y `pruebas_de_la_revision.py`
+(con 20 fallas puestas a mano, las 20 detectadas) y en la app: la ficha con una devolución, el
+aviso al vincular un par rechazado y el recorrido de todas las pantallas. El buscador, con 10
+personas a la vez: promedio 87 ms, P95 215 ms, sin errores.
 
 ## 🧾 La precisión de las equivalencias: «limpia no es confirmada»
 

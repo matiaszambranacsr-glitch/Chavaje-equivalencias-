@@ -19,6 +19,12 @@ Las pruebas se corren como dice el README, en «Antes de subir un cambio».
 | Las ventas solas no pasan un vínculo de franja | `sin_cruzar_la_linea_por_lo_aprendido()` | `pruebas_de_la_precision.py` (3) |
 | Comprobar en la mano no borra de qué lista vino el vínculo | `comprobar_en_la_mano()` | `pruebas_de_la_precision.py` (5) |
 | Si el proveedor cambia de equivalente, se avisa y no se borra nada | `equivalentes_que_la_lista_dejo_de_declarar()` | `pruebas_de_la_precision.py` (8) |
+| Con y sin ABS, aire o sensor son piezas distintas | `firmas_compatibles()`, `equipamiento_declarado()` | `pruebas_de_la_revision.py` (pares de muestra), `pruebas_de_la_precision.py` (9) |
+| Las medidas que salen del mismo texto no suman dos veces | `evaluar_equivalencia()` | `pruebas_de_la_precision.py` (10) |
+| Lo que volvió porque no le iba baja el vínculo y gana sobre cualquier fuente | `registrar_devolucion()`, `pares_devueltos()` | `pruebas_de_la_precision.py` (11) |
+| Un rechazo no se pisa: sale de la cola, no se aprueba en grupo, y vincularlo a mano pide confirmarlo | `marcar_revision()`, `aprobar_pendientes()`, `rechazos_del_grupo()` | `pruebas_de_la_precision.py` (12) |
+| Una pieza de seguridad confirmada igual pide mirarla en la mano | `riesgo_de_la_pieza()`, `veredicto_de_la_equivalencia()` | `pruebas_de_la_precision.py` (13) |
+| Al volver a puntuar todo queda anotado qué cambió de franja | `anotar_la_deriva()` | `pruebas_de_la_precision.py` (14) |
 
 ## El stock, los precios y la plata
 

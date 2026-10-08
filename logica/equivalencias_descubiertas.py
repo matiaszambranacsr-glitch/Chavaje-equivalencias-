@@ -402,6 +402,13 @@ def marcar_revision(pares, decision, motivo=None):
             "VALUES (?, ?, ?, ?, ?, ?, ?)",
             filas
         )
+        # UN RECHAZO SACA EL PAR DE LA COLA, de la lista que sea. Si no, el mismo par esperando
+        # en otra lista se aprobaba con ella y el rechazo quedaba pisado por un «ok»: deshacer
+        # una lista marca sus pares como rechazados, pero solo borraba los pendientes de ESA
+        # lista. Lo pidió una revisión con ChatGPT: «nunca borrar una decisión negativa».
+        if decision == "rechazada":
+            c.executemany(_BORRAR_PENDIENTE_EN_LOS_DOS_SENTIDOS,
+                          [(a, b, b, a) for a, b in pares])
         conn.commit()
 
 
@@ -1251,8 +1258,73 @@ def sustituciones_reales(minimo_veces=2, limite=300):
     return salida
 
 
+# Por qué volvió una pieza. Solo «no le iba» habla de la equivalencia: la que vino fallada era
+# la pieza correcta, con un defecto.
+MOTIVOS_DE_DEVOLUCION = {
+    "no_le_iba": "🔧 No le iba: no era la pieza",
+    "fallada": "💥 Vino fallada (era la pieza, con un defecto)",
+    "otro": "Otro motivo",
+}
+
+
+def registrar_devolucion(producto_id, termino_pedido, motivo, detalle=""):
+    """Anota que la pieza que se vendió por lo que el cliente pidió volvió, y por qué.
+
+    Lo propuso una revisión con ChatGPT: «37 ventas y 4 devoluciones tiene que disparar revisar
+    la equivalencia, aunque el catálogo diga que son equivalentes». Si volvió porque no le iba,
+    el vínculo entre lo pedido y lo vendido baja a «muy débil» en el acto —el buscador deja de
+    ofrecerlo como seguro— y la ficha de prueba lo muestra en rojo. No se borra nada: lo decide
+    una persona. Devuelve cuántos vínculos se bajaron."""
+    if modo_solo_lectura():
+        raise PermissionError(TEXTO_DE_SOLO_LECTURA)
+    if motivo not in MOTIVOS_DE_DEVOLUCION:
+        raise ValueError(f"Motivo desconocido: {motivo}")
+    pedido = sanitizar(termino_pedido or "")
+    with db_lock, transaccion():
+        c.execute("INSERT INTO devoluciones (producto_id, codigo_pedido_clean, motivo, detalle, "
+                  "usuario) VALUES (?, ?, ?, ?, ?)",
+                  (producto_id, pedido, motivo, (detalle or "").strip(), obtener_usuario_actual()))
+        if motivo != "no_le_iba" or not pedido:
+            return 0
+        c.execute("SELECT id FROM productos WHERE codigo_clean = ? AND id <> ?",
+                  (pedido, producto_id))
+        pares = [(min(r["id"], producto_id), max(r["id"], producto_id)) for r in c.fetchall()]
+        c.executemany("UPDATE equivalencias SET confianza = MIN(COALESCE(confianza, 50), ?) "
+                      "WHERE producto_a_id = ? AND producto_b_id = ?",
+                      [(int(TOPE_CON_VETO), a, b) for a, b in pares])
+        return sum(1 for a, b in pares if c.execute(
+            "SELECT 1 FROM equivalencias WHERE producto_a_id = ? AND producto_b_id = ?",
+            (a, b)).fetchone())
+
+
+def pares_devueltos():
+    """{(a, b): veces} de lo que volvió porque no le iba: a es lo pedido, b lo vendido."""
+    try:
+        c.execute("""SELECT p1.id AS a, d.producto_id AS b, COUNT(*) AS veces
+                     FROM devoluciones d
+                     JOIN productos p1 ON p1.codigo_clean = d.codigo_pedido_clean
+                     WHERE d.motivo = 'no_le_iba' AND d.codigo_pedido_clean <> ''
+                       AND p1.id <> d.producto_id
+                     GROUP BY p1.id, d.producto_id""")
+        salida = {}
+        for r in c.fetchall():
+            par = (min(r["a"], r["b"]), max(r["a"], r["b"]))
+            salida[par] = salida.get(par, 0) + r["veces"]
+        return salida
+    except sqlite3.OperationalError as _err:
+        anotar_error("pares_devueltos", _err)
+        return {}
+
+
 def pares_confirmados_por_ventas(minimo_veces=2):
-    """Los pares que la venta real confirmó, para usarlos como señal de confianza."""
+    """Los pares que la venta real confirmó, para usarlos como señal de confianza. Uno que
+    volvió alguna vez porque no le iba no cuenta como confirmado: ver pares_devueltos()."""
+    devueltos = pares_devueltos()
+    return {par: veces for par, veces in _pares_vendidos(minimo_veces).items()
+            if par not in devueltos}
+
+
+def _pares_vendidos(minimo_veces):
     try:
         c.execute("""SELECT p1.id AS a, v.producto_id AS b, COUNT(*) AS veces
                      FROM ventas_registradas v
@@ -1472,6 +1544,12 @@ def comparar_precios(precio_a, marca_a, precio_b, marca_b, escalas):
 LARGO_DESCRIPCION_QUE_CONVENCE = 20
 
 
+def _misma_descripcion_larga(desc_a, desc_b):
+    """Las dos descripciones palabra por palabra iguales, y largas: salieron de la misma fila."""
+    _da, _db = normalizar_texto(desc_a or ""), normalizar_texto(desc_b or "")
+    return bool(_da) and _da == _db and len(_da) >= LARGO_DESCRIPCION_QUE_CONVENCE
+
+
 def texto_de_precios_que_no_cierran(razon, esperada):
     """La alarma del precio, dicha como se entiende. Decía «los precios se diferencian 1
     veces, y entre estos dos proveedores lo normal es 9», que es correcto y no se entiende: que
@@ -1492,7 +1570,7 @@ def evaluar_equivalencia(desc_a, desc_b, medidas_a=None, medidas_b=None,
                          respaldo_fabricante=False, marca_a="", marca_b="", patrones=None,
                          vendido_como_reemplazo=0, codigo_puente=None,
                          productos_del_puente=0, escalas=None, trae_al_otro="",
-                         variante_del_origen="", familia_a=None, familia_b=None):
+                         variante_del_origen="", familia_a=None, familia_b=None, devuelto=0):
     """Pesa toda la evidencia disponible sobre un vínculo. Devuelve (puntaje 0-100, señales).
 
     La diferencia con lo que había antes: las alarmas eran una lista plana, así que 397 vínculos
@@ -1570,6 +1648,16 @@ def evaluar_equivalencia(desc_a, desc_b, medidas_a=None, medidas_b=None,
             # distinto: lo primero es una pista sobre el número, lo segundo es la pieza.
             puntaje = min(puntaje - 45, 15.0)
             senales.append(("mal", f"📐 {detalle}"))
+        elif coinciden is True and _misma_descripcion_larga(desc_a, desc_b):
+            # LAS MEDIDAS DEL MISMO TEXTO NO SON UNA PRUEBA APARTE. El nodo de fábrica copia la
+            # descripción de la fila que lo trajo, y las medidas se leen de esa descripción: los
+            # dos lados «miden igual» porque son el mismo texto. Eso ya suma abajo, como «la
+            # misma descripción»; contarlo dos veces era sumar +30 por la misma fila. Lo señaló
+            # una revisión con ChatGPT («la ausencia de una diferencia no es evidencia», y las
+            # fuentes que se copian cuentan como una). Medido sobre la base real del 7/10: de
+            # los pares con las medidas iguales, 262 de 274 aprobados y 315 de 329 rechazados
+            # eran este caso.
+            senales.append(("bien", f"📐 {detalle} (del mismo texto: no suma)"))
         elif coinciden is True:
             puntaje += 30
             senales.append(("bien", f"📐 {detalle}"))
@@ -1606,8 +1694,7 @@ def evaluar_equivalencia(desc_a, desc_b, medidas_a=None, medidas_b=None,
     #
     # Se pide una descripción larga: «JUNTA» igual de los dos lados no dice nada, y las
     # descripciones vacías coincidirían entre sí.
-    _da, _db = normalizar_texto(desc_a or ""), normalizar_texto(desc_b or "")
-    if _da and _da == _db and len(_da) >= LARGO_DESCRIPCION_QUE_CONVENCE:
+    if _misma_descripcion_larga(desc_a, desc_b):
         puntaje += 35
         senales.append(("bien", "📄 Los dos tienen EXACTAMENTE la misma descripción: salieron "
                                  "de la misma fila de la lista del proveedor"))
@@ -1701,6 +1788,10 @@ def evaluar_equivalencia(desc_a, desc_b, medidas_a=None, medidas_b=None,
     # Medido sobre la base real: hoy no pasa con ningún par (ni de los 20.037 aprobados ni de
     # los 2.633 rechazados), así que no cambia nada de lo que hay; cierra la puerta para lo que
     # venga (lo propuso una revisión con ChatGPT: «un veto crítico gana siempre»).
+    # LO QUE VOLVIÓ PORQUE NO LE IBA gana sobre todo, también sobre el catálogo: es la pieza
+    # que no entró en un auto de verdad. Ver registrar_devolucion().
+    if devuelto:
+        senales.append(("mal", f"↩️ Lo devolvieron {devuelto} vez(ces) porque no le iba"))
     if any(s.startswith(VETOS_DEL_PUNTAJE) for que, s in senales if que == "mal"):
         puntaje = min(puntaje, TOPE_CON_VETO)
     return sin_cruzar_la_linea_por_lo_aprendido(puntaje, ajuste_aprendido + ajuste_por_ventas), senales
@@ -1708,7 +1799,7 @@ def evaluar_equivalencia(desc_a, desc_b, medidas_a=None, medidas_b=None,
 
 # Ver «LOS VETOS GANAN SIEMPRE AL PUNTAJE». Por cómo empieza la señal: las medidas («📐»
 # con «NO coinciden») ya tienen su tope propio arriba.
-VETOS_DEL_PUNTAJE = ("🧩 Son de rubros distintos", "📦 No son equivalentes")
+VETOS_DEL_PUNTAJE = ("🧩 Son de rubros distintos", "📦 No son equivalentes", "↩️ Lo devolvieron")
 TOPE_CON_VETO = 20.0
 
 
@@ -3293,6 +3384,7 @@ def _analizar_filas(filas, lote):
     escalas_precio = escalas_de_precio()
     _ya_juzgados = {}   # código -> ¿las reglas de hoy ya no lo tomarían? (ver más abajo)
     ventas_confirman = pares_confirmados_por_ventas()
+    devueltos = pares_devueltos()      # lo que volvió porque no le iba
 
     limpias, sospechosas, relacionadas = [], [], []
     evaluadas = []
@@ -3396,6 +3488,7 @@ def _analizar_filas(filas, lote):
             patrones=patrones_aprendidos,
             vendido_como_reemplazo=ventas_confirman.get((min(f["a"], f["b"]),
                                                           max(f["a"], f["b"])), 0),
+            devuelto=devueltos.get((min(f["a"], f["b"]), max(f["a"], f["b"])), 0),
             escalas=escalas_precio,
             variante_del_origen=_variante,
             # Solo se consulta cuando uno de los dos DICE que es un kit, que es una prueba de
@@ -3871,6 +3964,11 @@ def aprobar_pendientes(lote, solo_estos_pares=None):
             pares = [(r["producto_a_id"], r["producto_b_id"]) for r in c.fetchall()]
         else:
             pares = _los_que_siguen_pendientes(solo_estos_pares)
+        # Lo que alguien rechazó no se aprueba en grupo: levantarlo es una decisión aparte (se
+        # vincula a mano, que avisa). Con marcar_revision() ya no debería quedar ninguno en la
+        # cola; esto es para las bases de antes.
+        _rechazados = pares_rechazados()
+        pares = [(a, b) for a, b in pares if (a, b) not in _rechazados]
         if not pares:
             return 0
         # El lote viaja con el vínculo: es lo que después permite deshacer toda una lista.
@@ -3910,6 +4008,36 @@ def rechazar_pendientes(lote, solo_estos_pares=None, motivo=None):
     # Se recuerda el rechazo para que no vuelva a aparecer si se reimporta la misma lista
     marcar_revision(marcar_para_recordar, "rechazada", motivo)
     return borrados
+
+
+def rechazos_entre(ids):
+    """Los pares de estos productos que alguien rechazó, con quién y cuándo. Para avisar antes
+    de vincularlos a mano: un rechazo se levanta solo a sabiendas."""
+    ids = list({int(i) for i in ids})
+    if len(ids) < 2:
+        return []
+    marcadores = ",".join("?" * len(ids))
+    c.execute(f"""SELECT r.producto_a_id AS a, r.producto_b_id AS b, r.revisado_por,
+                         substr(r.fecha, 1, 10) AS fecha, r.motivo,
+                         pa.codigo_raw AS cod_a, pb.codigo_raw AS cod_b
+                  FROM equivalencias_revisadas r
+                  JOIN productos pa ON pa.id = r.producto_a_id
+                  JOIN productos pb ON pb.id = r.producto_b_id
+                  WHERE r.decision = 'rechazada' AND r.producto_a_id < r.producto_b_id
+                    AND r.producto_a_id IN ({marcadores}) AND r.producto_b_id IN ({marcadores})""",
+              ids + ids)
+    return [dict(r) for r in c.fetchall()]
+
+
+def rechazos_del_grupo(grupo):
+    """rechazos_entre() de un grupo armado a mano ({codigo, marca}), con los que ya existen."""
+    ids = []
+    for p in grupo:
+        c.execute("""SELECT p.id FROM productos p JOIN marcas m ON m.id = p.marca_id
+                     WHERE p.codigo_clean = ? AND UPPER(m.nombre) = UPPER(?)""",
+                  (sanitizar(p.get("codigo") or ""), (p.get("marca") or "").strip()))
+        ids += [r["id"] for r in c.fetchall()]
+    return rechazos_entre(ids)
 
 
 def descartar_candidata(codigo_clean, producto_id):
