@@ -263,6 +263,36 @@ def _columnas_de_medidas_que_existen():
     return ", ".join(x for x in pedidas if x in existen) or "id"
 
 
+# CUÁNTO PUEDEN DIFERIR DOS MEDIDAS DE LA MISMA PIEZA, en milímetros y según la medida. Era un
+# 3 % para todo, y para un diámetro es demasiado: 35 contra 36 mm es 2,8 % y son dos rulemanes
+# distintos; en un disco de 256 mm el 3 % son casi 8 mm. Lo marcó una revisión con ChatGPT
+# («tolerancias específicas por característica»). La tolerancia en milímetros cubre el redondeo
+# de una lista a otra (52 contra 52,2) y nunca pasa del 3 % de antes: solo puede ser más
+# estricta. Medido sobre la base real del 8/10: ningún par comparado cae entre «igual» y
+# «distinta por más del 3 %», así que hoy no cambia nada; está para el 35 contra 36.
+#
+# Y LA PRECISIÓN QUE DIO LA FUENTE: «52» escrito sin decimales puede ser un 52,4 redondeado, así
+# que un número entero vale ±0,5 mm; «52,4», ±0,05. Es lo que la misma revisión llamó «no fingir
+# una precisión que la fuente nunca dio». 52 contra 52,4 coincide; 35 contra 36, no.
+TOLERANCIA_POR_MEDIDA_MM = {"espesor": 0.02, "largo_total": 1.0}
+TOLERANCIA_MM_POR_DEFECTO = 0.25
+
+
+def _media_precision(valor):
+    """La mitad del último dígito que se escribió: 0,5 para 52; 0,05 para 52,4."""
+    for decimales, mitad in ((0, 0.5), (1, 0.05), (2, 0.005)):
+        if abs(valor - round(valor, decimales)) < 1e-9:
+            return mitad
+    return 0.0
+
+
+def diferencia_que_se_acepta(campo, va, vb, tolerancia_pct=3):
+    """La diferencia en mm que todavía es la misma medida. Ver TOLERANCIA_POR_MEDIDA_MM."""
+    return min(max(TOLERANCIA_POR_MEDIDA_MM.get(campo, TOLERANCIA_MM_POR_DEFECTO),
+                   _media_precision(va), _media_precision(vb)),
+               max(va, vb) * tolerancia_pct / 100)
+
+
 def comparar_medidas(a, b, tolerancia_pct=3):
     """El núcleo de la comparación, sobre dos diccionarios de medidas ya leídos."""
     campos = CAMPOS_MEDIDAS
@@ -280,8 +310,7 @@ def comparar_medidas(a, b, tolerancia_pct=3):
         comparadas.append(etiqueta)
         if va == 0 or vb == 0:
             continue
-        diferencia = abs(va - vb) / max(va, vb) * 100
-        if diferencia > tolerancia_pct:
+        if abs(va - vb) > diferencia_que_se_acepta(campo, va, vb, tolerancia_pct):
             diferencias.append(f"{etiqueta}: {va} vs {vb}")
 
     # Las vías van por igualdad exacta y no por tolerancia: una ficha de 2 vías y una de 3 no
@@ -392,14 +421,14 @@ def marcar_revision(pares, decision, motivo=None):
     usuario = obtener_usuario_actual()
     como_estaba = _como_estaba_en_la_revision()
     for a, b in pares:
-        confianza, senal = como_estaba.get((min(a, b), max(a, b)), (None, None))
-        filas.append((a, b, decision, usuario, motivo, confianza, senal))
-        filas.append((b, a, decision, usuario, motivo, confianza, senal))
+        confianza, senal, por_que = como_estaba.get((min(a, b), max(a, b)), (None, None, None))
+        filas.append((a, b, decision, usuario, motivo, confianza, senal, por_que))
+        filas.append((b, a, decision, usuario, motivo, confianza, senal, por_que))
     with db_lock:
         c.executemany(
             "INSERT OR REPLACE INTO equivalencias_revisadas "
-            "(producto_a_id, producto_b_id, decision, revisado_por, motivo, confianza, senal) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?)",
+            "(producto_a_id, producto_b_id, decision, revisado_por, motivo, confianza, senal, "
+            "por_que) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
             filas
         )
         # UN RECHAZO SACA EL PAR DE LA COLA, de la lista que sea. Si no, el mismo par esperando
@@ -484,7 +513,9 @@ def aciertos_de_la_revision():
 
 
 def _como_estaba_en_la_revision():
-    """{(a, b): (confianza, primera alarma)} del análisis que tiene la pantalla de revisión.
+    """{(a, b): (confianza, primera alarma, por qué)} del análisis que tiene la pantalla de
+    revisión. «Por qué» es todo lo que había a favor (+) y en contra (−), en una línea: lo pidió
+    una revisión con ChatGPT («guardar el motivo exacto de cada decisión, no confianza = 87»).
     Vacío si no hay: lo que se decide fuera de la revisión (cortar un vínculo cargado) queda sin
     esos datos, y el panel de aciertos no lo cuenta."""
     guardado = analisis_de_lote_guardado() or {}
@@ -493,8 +524,12 @@ def _como_estaba_en_la_revision():
         for f in lista or ():
             if isinstance(f, dict) and "a" in f and "b" in f:
                 alarmas = f.get("alarmas") or []
+                razones = [("+ " if tipo == "bien" else "− ") + texto
+                           for tipo, texto in (f.get("senales") or ()) if texto]
+                razones += [f"− {x}" for x in alarmas if f"− {x}" not in razones]
                 salida[(min(f["a"], f["b"]), max(f["a"], f["b"]))] = (
-                    f.get("confianza"), alarmas[0][:200] if alarmas else None)
+                    f.get("confianza"), alarmas[0][:200] if alarmas else None,
+                    " · ".join(razones)[:1000] or None)
     return salida
 
 

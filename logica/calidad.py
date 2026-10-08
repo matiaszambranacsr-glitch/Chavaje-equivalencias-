@@ -767,7 +767,24 @@ def _distancia_edicion(a, b, tope=2):
     return anterior[-1]
 
 
-def codigos_por_tipeo(clean_code, limite=10):
+# Lo que se confunde al LEER un grabado o una foto: no es un error de tipeo (una letra de más),
+# es una forma parecida. Lo pidió una revisión con ChatGPT («OCR con validación: que no haya
+# confundido 0/O, 1/I, 5/S»). Nunca se acepta sola: se ofrece primero, para que una persona elija.
+_CONFUSIONES_DE_LECTURA = {frozenset(p) for p in ("0O", "0D", "1I", "1L", "5S", "8B", "2Z", "6G")}
+
+
+def es_confusion_de_lectura(leido, codigo):
+    """«O↔0, I↔1» si los dos códigos difieren SOLO en caracteres que se confunden al leer; si no,
+    "". Mismo largo: lo que lee mal una foto es la forma de un carácter, no la cantidad."""
+    if not leido or not codigo or len(leido) != len(codigo) or leido == codigo:
+        return ""
+    cambios = [(x, y) for x, y in zip(leido, codigo) if x != y]
+    if all(frozenset((x, y)) in _CONFUSIONES_DE_LECTURA for x, y in cambios):
+        return ", ".join(f"{x}↔{y}" for x, y in cambios)
+    return ""
+
+
+def codigos_por_tipeo(clean_code, limite=10, de_una_foto=False):
     """Códigos que se escriben casi igual al que buscaste. Es para el error de tipeo.
 
     Lo que ya existía busca códigos que EMPIECEN igual o que lo CONTENGAN, y eso no sirve
@@ -840,6 +857,12 @@ def codigos_por_tipeo(clean_code, limite=10):
     # que es lo común— el orden era el que se le ocurría a SQLite al recorrer la tabla, y al
     # cortar en diez quedaban unos u otros según el plan de la consulta.
     candidatos.sort(key=lambda f: (f["_dist"], -(f["Stock"] or 0), f["Codigo"] or ""))
+    # Leído de una foto: primero los que difieren solo en lo que se confunde al leer (ver
+    # es_confusion_de_lectura()), y se dice cuál fue.
+    if de_una_foto:
+        for f in candidatos:
+            f["Lectura"] = es_confusion_de_lectura(clean_code, f.get("_clean") or "")
+        candidatos.sort(key=lambda f: not f["Lectura"])
     return candidatos[:limite]
 
 

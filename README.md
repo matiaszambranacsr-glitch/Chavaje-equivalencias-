@@ -21,7 +21,7 @@ qué proveedores, son el mismo repuesto. Corre con Streamlit sobre una base SQLi
 | `pruebas_de_los_frenos.py` | Lo que hace la app cuando algo anda mal: la base con daño queda de solo lectura, los avisos técnicos solo al administrador, el descanso de un proveedor caído, el catálogo que se achica de golpe, la prueba de que la copia de GitHub se puede recuperar, el freno de intentos también para los mecánicos, los errores (sin datos sensibles, con categoría y código), las búsquedas viejas, el doble toque y la consistencia del catálogo. |
 | `pruebas_de_las_homologaciones.py` | El registro oficial de CHAS (autopartes de seguridad): leerlo en varios formatos y cruzarlo con tus marcas. |
 | `pruebas_del_deposito.py` | El circuito del depósito y el descuento de cada cuenta: pedir, entregar, cargar en la cuenta y facturar. |
-| `pruebas_de_la_revision.py` | Que el análisis de equivalencias no se equivoque con pares ya revisados a mano, y (con `--base`) que no baje a rojo lo que aprobaste ni deje limpio lo que rechazaste. |
+| `pruebas_de_la_revision.py` | Que el análisis de equivalencias no se equivoque con pares ya revisados a mano, y (con `--base`) que no baje a rojo lo que aprobaste ni deje limpio lo que rechazaste. Con `--reglas`, qué reglas aparecen más en lo rechazado; con `--linea-base archivo.json`, la prueba de regresión (falla si algo rechazado pasa a limpio). |
 | `pruebas_de_la_precision.py` | Cuándo una equivalencia se da por verificada: la fuente de cada vínculo, la ficha de prueba, el veto que gana siempre, la comprobación en la mano, el proveedor que cambia de equivalente sin avisar, las devoluciones, el riesgo, la deriva al cambiar las reglas y que un rechazo no se pise. |
 | `pruebas_de_los_cambios.py` | El registro de quién cambió qué (sin los precios), los permisos adentro de las funciones, el orden de los vínculos en la base, la entrega con stock de menos, el vistazo de un backup y el mensaje de WhatsApp. |
 | `CONTRATOS.md` | Lo que no se puede romper, regla por regla, con la prueba que sostiene cada una. |
@@ -44,6 +44,7 @@ python3 -m nucleo.pruebas        # tiene que decir "todo en verde"
 python3 pruebas_de_la_revision.py   # si tocaste el análisis: "todo en verde"
 python3 pruebas_de_la_precision.py  # y cuándo se da por verificada una equivalencia
 python3 pruebas_de_la_revision.py --base copia.db   # y contra tus aprobaciones
+python3 pruebas_de_la_revision.py --base copia.db --linea-base antes.json   # y contra la vez anterior
 python3 revisar_con_gemini.py    # opcional: una segunda opinión sobre el diff
 ```
 
@@ -6473,6 +6474,37 @@ el botón**:
   dónde vino. Solo los últimos tres años: la serie arranca en los cuarenta y trae el 89.
 - «🔌 Probar las fuentes de afuera» suma la Central de Deudores (con el CUIT de la AFIP, nunca el
   de un cliente) y la inflación de respaldo.
+
+## 🔬 La precisión, tercera parte: lo que la pieza declara, tolerancias y regresión
+
+Puntos 24 a 53 de la misma revisión con ChatGPT, medidos sobre la copia de la base real.
+
+| Punto | Qué se encontró | Qué se hizo |
+|---|---|---|
+| 24. Normalización conservadora | Ya era así: se guardan el código original y el normalizado; `sanitizar()` saca espacios, guiones y puntos, y los sufijos (-R, L, S) quedan. Las variantes («TC-882-20 1M») solo se usan para agrupar y explicar, nunca para vincular. Hay 4 códigos con su espejo L/R en el catálogo y ninguno está vinculado con el otro. | Sin cambio. |
+| 25. Unidades | La app no convierte: lee milímetros, saltea a propósito las fracciones de pulgada («1/2»), y la descripción original siempre queda. | En la ficha, una medida 10 o 25,4 veces la otra dice «¿una en mm y la otra en cm?» o «¿una en pulgadas?». |
+| 26. Tolerancia por característica | **Cierto.** Era 3 % para todo: 35 contra 36 mm (2,8 %) daba «coinciden», y en un disco de 256 mm el 3 % aceptaba casi 8. | En milímetros, por medida: diámetros y anchos 0,25, espesor 0,02, largo 1; nunca más que el 3 % de antes. Ningún par real cae entre «igual» y «más del 3 %», así que hoy no cambia nada. |
+| 27. Precisión del redondeo | — | Cuenta la que se escribió: un entero vale ±0,5 (52 contra 52,4 coincide), un decimal ±0,05. |
+| 28. Fotos comparadas | No había. | La ficha muestra las dos fotos una al lado de la otra («la foto no confirma nada»). Hoy la base no tiene fotos de productos: aparece cuando se carguen. |
+| 29. Medidas sacadas de una foto | La IA de la app no estima medidas: lee el código y el tipo de pieza. | Sin cambio. |
+| 30. Fotos distintas con el mismo código | No hay comparación de imágenes entre productos, y la base no tiene fotos. | Sin cambio. |
+| 31 y 32. Vigencia y revisión según el riesgo | No había. | La ficha dice cuándo se revisó por última vez (cada paso, y la comprobación en la mano). Una pieza de seguridad se vuelve a mirar cada 6 meses y una que rompe el motor cada 12: pasado eso deja de estar VERIFICADA («volver a mirarla»). Hoy todas las revisiones son de septiembre y octubre. |
+| 33. Presupuestos congelados | Ya: el presupuesto guarda sus piezas y precios y no se rearma con el catálogo de hoy. | Sin cambio. |
+| 34. El motivo exacto de cada decisión | Se guardaba la confianza y la primera alarma. | Ahora todo lo que había a favor (+) y en contra (−); la ficha lo muestra («lo que había al decidirlo»). |
+| 35. Qué reglas causan más errores | No se medía. | `--reglas`: por cada señal a favor, qué parte de sus pares rechazaste (en tu base, el 11,6 % de todo lo decidido). «Los precios son parecidos» aparece en el 21 % y el 38 % de rechazados: no distingue nada (ya se había medido que sacarla manda 577 aprobados a revisión sin bajar los falsos positivos). «La misma descripción», 5,2 %; las medidas del mismo texto, 69 % (ya no suman). |
+| 36. Estados y cuarentena | Existen con otros nombres: esperando aprobación; verificada, probable o candidata en la ficha; rechazada, que no vuelve nunca (ni reimportando, y sale de la cola de todas las listas); y el aviso de «el proveedor ya no lo declara». | Sin cambio. |
+| 37. Pruebas de regresión | Había topes (1 % de rojo, 1 % de falsos positivos), no una comparación par por par. | `--linea-base archivo.json` guarda cómo quedó cada uno de los 22.670 pares; la vez siguiente compara y **falla si algo rechazado pasa a limpio**, nombrándolo. Probado marcando 3 a mano: frena y los nombra. |
+| 38. El camino de una equivalencia | Es el que hay: la cola, las contradicciones, la evidencia y la fuente, los vetos y las devoluciones, la muestra por grupo (con techo de error al 95 %) y la ficha. La validación de cada par se saltea solo en un grupo cuya muestra probó el error bajo. | Sin cambio. |
+| 39. Cadena de sustitución separada | Ya: los reemplazos son una tabla aparte, con dirección; dan pares de un paso (A con B, B con C), nunca A con C, y van a revisión. | Sin cambio. |
+| 40 a 50. Lo que la pieza declara | Ya vetaban el lado, las vías, el combustible, la presión, la temperatura, el paso de rosca y el kit contra la pieza suelta. | Seis reglas nuevas, que contradicen aunque no se sepa el rubro: **tensión** (12 contra 24 V), **caudal** (85 contra 105 l/h, con 10 % por redondeo), **rosca métrica** (M10x1 contra M12x1,5), **sentido de giro**, **cantidad** («2 unidades» contra «10»; «4X4» no cuenta) y **reacondicionada** contra nueva. Medido: ningún par aprobado ni pendiente choca, y agarran un rechazado (una bomba de 120 l/h contra un aforador con bomba de 145). Geometría de montaje, pinout y carga máxima no vienen en las listas. |
+| 51. El fabricante cambia la ficha | **Cierto.** La importación nunca reemplaza una descripción guardada: si el proveedor cambiaba una medida, la app se quedaba con la vieja sin avisar. | Al importar: «📝 N productos vienen con otra ficha», con qué cambió (una medida, el lado, la tensión). No se toca nada. Otra redacción de la misma pieza no cuenta. Probado en la app. |
+| 52. Código de barras | Ya: va aparte, se controla el dígito verificador y escanear la caja encuentra el repuesto. | Sin cambio. |
+| 53. Lectura de fotos con validación | Ya: un código leído de una foto nunca se acepta solo. | Los parecidos que solo difieren en lo que se confunde al leer (O y 0, I y 1, S y 5, B y 8…) salen primero, diciendo cuál; y «identificar la pieza» ahora también los ofrece (antes solo decía que la IA pudo leer mal). |
+
+`VERSION_CONFIANZA` pasa a 12. La matriz no cambia: 3 falsos positivos y 6 aprobados en rojo, igual
+que antes. El análisis tarda un 5 % más (80 s contra 76 s sobre los 22.670 pares). Probado en
+`pruebas_de_la_precision.py` y `pruebas_de_la_revision.py` (14 fallas puestas a mano, las 14
+detectadas) y en la app.
 
 ## 🧮 La precisión, segunda parte: devoluciones, riesgo y qué cambia al cambiar las reglas
 

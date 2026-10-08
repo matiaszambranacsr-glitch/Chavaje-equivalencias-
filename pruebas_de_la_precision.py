@@ -378,6 +378,111 @@ def probar(L):
             por_origen.get("📋 lo declara la lista de FISPA", {}).get("Es"), "fuente")
     # El gemelo «R100» de ILLINOIS: su único vínculo es el del barrido (ver 7).
     esperar("cuenta los productos unidos solo por pistas", solo_pistas, 1)
+
+    # 17. Lo que la descripción declara de cómo funciona la pieza.
+    parametros = ns["parametros_declarados"]
+    chocan = ns["parametros_que_chocan"]
+
+    def p_(texto):
+        return tuple(parametros(ns["normalizar_texto"](texto)).items())
+    esperar("12 contra 24 V", chocan(p_("RELAY 12 VOLTS"), p_("RELAY 24 VOLTS")),
+            "versiones distintas: de 12 V contra de 24 V")
+    esperar("85 contra 90 l/h es la misma bomba (redondeo)",
+            chocan(p_("BOMBA 85L/H"), p_("BOMBA 90 L/H")), None)
+    esperar("85 contra 105 l/h, no", chocan(p_("BOMBA 85L/H"), p_("BOMBA 105L/H")) is not None, True)
+    esperar("la rosca", chocan(p_("BULBO M10X1"), p_("BULBO M12X1,5")),
+            "medidas distintas: rosca M10x1 contra M12x1,5")
+    esperar("el giro", chocan(p_("TPS SENTIDO HORARIO"), p_("TPS SENTIDO ANTIHORARIO")),
+            "versiones distintas: giro horario contra antihorario")
+    esperar("la cantidad", chocan(p_("FUSIBLE 2 UNIDADES"), p_("FUSIBLE 10 UNIDADES")),
+            "juegos distintos: de 2 contra de 10")
+    esperar("reacondicionada contra nueva", chocan(p_("BOMBA (REACONDICIONADO)"), p_("BOMBA")),
+            "versiones distintas: reacondicionada contra nueva")
+    esperar("si solo una lo dice, no choca", chocan(p_("RELAY 12 VOLTS"), p_("RELAY")), None)
+    esperar("4X4 no es una cantidad", p_("HILUX 4X4"), ())
+
+    # 18. Cuánto pueden diferir dos medidas: en mm, por medida, con la precisión que se escribió.
+    cm = ns["comparar_medidas"]
+    esperar("35 contra 36 mm son dos rulemanes", cm({"diametro_interno": 35},
+                                                    {"diametro_interno": 36})[0], False)
+    esperar("52 contra 52,4: el 52 puede estar redondeado",
+            cm({"diametro_externo": 52}, {"diametro_externo": 52.4})[0], True)
+    esperar("52,2 contra 52,6: no", cm({"diametro_externo": 52.2}, {"diametro_externo": 52.6})[0],
+            False)
+    esperar("un disco de 256 contra uno de 257", cm({"diametro_externo": 256},
+                                                     {"diametro_externo": 257})[0], False)
+    esperar("espesor 1,45 contra 1,50", cm({"espesor": 1.45, "diametro_interno": 80},
+                                           {"espesor": 1.5, "diametro_interno": 80})[0], False)
+    estados = {m["Medida"]: m["Estado"] for m in ns["medidas_lado_a_lado"](
+        {"diametro_interno": 35, "diametro_externo": 25.4}, {"diametro_interno": 350,
+                                                             "diametro_externo": 1})}
+    esperar("diez veces: ¿mm contra cm?", "cm?" in estados.get("diám. interno", ""), True)
+    esperar("25,4 veces: ¿pulgadas?", "pulgadas" in estados.get("diám. externo", ""), True)
+
+    # 19. Lo que se lee de una foto: primero lo que se confunde al leer.
+    confusion = ns["es_confusion_de_lectura"]
+    esperar("O por 0", confusion("W712O4", "W71204"), "O↔0")
+    esperar("una letra de más no es confundir la forma", confusion("W71204", "W712044"), "")
+    esperar("dos que no se confunden", confusion("W71204", "W71294"), "")
+    producto("W71204", "FILTRO DE ACEITE", fispa)
+    # Uno con stock y a un carácter, pero que no es una confusión de lectura: sin el orden de
+    # la foto, saldría primero por tener stock.
+    producto("W712A4", "FILTRO DE ACEITE", fispa, stock=5)
+    conn.commit()
+    parecidos = ns["codigos_por_tipeo"]("W712O4", de_una_foto=True)
+    esperar("el que solo difiere en O/0 sale primero",
+            (parecidos[0]["Codigo"], parecidos[0]["Lectura"]) if parecidos else None,
+            ("W71204", "O↔0"))
+
+    # 20. La ficha que cambió al reimportar: se avisa y no se pisa.
+    cambia = ns["lo_que_cambia_la_pieza"]
+    esperar("otra medida", cambia("RETEN 35X52X7 FIAT", "RETEN 35X52X8 FIAT"), "ancho: 7 → 8")
+    esperar("otro lado", "posición" in cambia("AMORTIGUADOR DELANTERO KA", "AMORTIGUADOR TRASERO KA"),
+            True)
+    esperar("otra tensión", "12 V" in cambia("RELAY 12 VOLTS", "RELAY 24 VOLTS"), True)
+    esperar("una coma o una palabra más no cuenta", cambia("RETEN 35X52X7 FIAT", "RETEN 35X52X7 FIAT 128"),
+            "")
+    reten_viejo = producto("RV100", "RETEN 35X52X7 FIAT 128", fispa)
+    conn.commit()
+    fichas = ns["fichas_que_cambiaron"]({reten_viejo: "RETEN 35X52X8 FIAT 128"})
+    esperar("la lista nueva trae otra medida", (fichas["cambiaron"], fichas["ejemplos"][0]["Qué cambió"]),
+            (1, "ancho: 7 → 8"))
+    esperar("otra redacción de la misma pieza no se cuenta",
+            ns["fichas_que_cambiaron"]({reten_viejo: "RETEN 35X52X7 FIAT 128 ORIGINAL"})["cambiaron"],
+            0)
+    esperar("y la guardada no se tocó", c.execute("SELECT descripcion FROM productos WHERE id = ?",
+                                                   (reten_viejo,)).fetchone()[0],
+            "RETEN 35X52X7 FIAT 128")
+
+    # 21. El por qué de cada decisión: todo lo que había a favor y en contra.
+    pa_, pb_ = producto("PQ1", "BUJIA NGK", fispa), producto("IPQ1", "BUJIA NGK BKR6", illinois)
+    conn.commit()
+    ns["guardar_analisis_de_lote"]({"resultado": [[{
+        "a": pa_, "b": pb_, "confianza": 80, "alarmas": ["💲 precios raros"],
+        "senales": [("bien", "📄 la misma descripción"), ("mal", "💲 precios raros")]}]]})
+    ns["marcar_revision"]([(pa_, pb_)], "ok")
+    esperar("queda guardado", c.execute(
+        "SELECT por_que FROM equivalencias_revisadas WHERE producto_a_id = ? AND producto_b_id = ?",
+        (pa_, pb_)).fetchone()[0], "+ 📄 la misma descripción · − 💲 precios raros")
+
+    # 22. La última revisión, y si para su riesgo ya toca volver a mirarla.
+    pas_a = producto("PF1", "PASTILLA DE FRENO DELANTERA FIAT PALIO", fispa)
+    pas_b = producto("IPF1", "PASTILLA DE FRENO DELANTERA FIAT PALIO 1.6", illinois)
+    vincular(pas_a, pas_b, "FISPA · lista.xlsx · 01/10/2026 10:00:00")
+    c.execute("INSERT OR REPLACE INTO equivalencias_revisadas (producto_a_id, producto_b_id, decision, "
+              "revisado_por, fecha) VALUES (?, ?, 'ok', 'Ana', '2025-01-10 10:00:00')",
+              (min(pas_a, pas_b), max(pas_a, pas_b)))
+    conn.commit()
+    ficha = ns["ficha_de_prueba"](pas_a, pas_b)
+    esperar("sabe cuándo se revisó", ficha["ultima_revision"], "2025-01-10")
+    esperar("una pieza de seguridad revisada hace más de 6 meses vuelve a probable",
+            ficha["estado"], "🟡 PROBABLE")
+    esperar("y dice por qué", any("volver a mirarla" in f for f in ficha["falta"]), True)
+    c.execute("UPDATE equivalencias_revisadas SET fecha = datetime('now') WHERE producto_a_id = ? "
+              "AND producto_b_id = ?", (min(pas_a, pas_b), max(pas_a, pas_b)))
+    conn.commit()
+    esperar("revisada hace poco, sigue verificada", ns["ficha_de_prueba"](pas_a, pas_b)["estado"],
+            "✅ VERIFICADA")
     return fallas
 
 

@@ -776,6 +776,55 @@ def anotar_el_respaldo(res, clean_code):
     return res
 
 
+def fichas_que_cambiaron(descripciones_que_trae, tope=30):
+    """Los productos que ya estaban y la lista nueva describe distinto. No se pisa nada: se avisa.
+
+    La importación nunca reemplaza una descripción guardada (ver get_or_create_producto()), así
+    que si el proveedor cambió la ficha —otra medida, otro lado, otra tensión— la app se quedaba
+    con la vieja y nadie se enteraba. Lo pidió una revisión con ChatGPT («revisión por cambio de
+    fabricante: detectar que la ficha técnica cambió»). Lo que importa es lo que cambia la pieza:
+    una medida, la posición o un parámetro (ver parametros_declarados()); que cambie una coma o
+    el orden de las palabras no se cuenta. Devuelve {"cambiaron", "ejemplos"}."""
+    ids = list(descripciones_que_trae)
+    guardadas = {}
+    for tanda, marcadores in en_tandas(ids):
+        c.execute(f"SELECT id, codigo_raw, descripcion FROM productos WHERE id IN ({marcadores})",
+                  tanda)
+        guardadas.update({r["id"]: (r["codigo_raw"], r["descripcion"] or "") for r in c.fetchall()})
+    cambios = []
+    for pid, nueva in descripciones_que_trae.items():
+        codigo, vieja = guardadas.get(pid, ("", ""))
+        if not vieja or not nueva or normalizar_texto(vieja) == normalizar_texto(nueva):
+            continue
+        que = lo_que_cambia_la_pieza(vieja, nueva)
+        if que:
+            cambios.append({"Código": codigo, "Qué cambió": que, "Guardada": vieja[:90],
+                            "En la lista nueva": nueva[:90]})
+    return {"cambiaron": len(cambios), "ejemplos": cambios[:tope]}
+
+
+def lo_que_cambia_la_pieza(vieja, nueva):
+    """Qué cambió entre dos descripciones del mismo producto que hace otra pieza, o ""."""
+    cambios = []
+    m_vieja, m_nueva = medidas_desde_descripcion(vieja), medidas_desde_descripcion(nueva)
+    def _valor(v):
+        return f"{v:g}" if isinstance(v, (int, float)) else str(v).lower()
+    # La posición va aparte, abajo: medidas_desde_descripcion() también la trae.
+    for campo in sorted((set(m_vieja) & set(m_nueva)) - {"posicion"}):
+        if m_vieja[campo] != m_nueva[campo]:
+            cambios.append(f"{campo.replace('_', ' ')}: {_valor(m_vieja[campo])} → "
+                           f"{_valor(m_nueva[campo])}")
+    p_vieja, p_nueva = posicion_desde_descripcion(vieja), posicion_desde_descripcion(nueva)
+    if p_vieja and p_nueva and p_vieja != p_nueva:
+        cambios.append(f"posición: {p_vieja.lower()} → {p_nueva.lower()}")
+    choque = parametros_que_chocan(
+        tuple(parametros_declarados(normalizar_texto(vieja)).items()),
+        tuple(parametros_declarados(normalizar_texto(nueva)).items()))
+    if choque:
+        cambios.append(choque.split(": ", 1)[-1])
+    return "; ".join(cambios)
+
+
 def equivalentes_que_la_lista_dejo_de_declarar(nombre_prov, lote_actual, ids_de_la_lista,
                                                 pares_de_la_lista, tope=30):
     """Los códigos de esta lista que la importación anterior del MISMO proveedor vinculaba con

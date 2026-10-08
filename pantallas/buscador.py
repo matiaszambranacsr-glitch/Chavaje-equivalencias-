@@ -434,19 +434,10 @@ if pagina == PAGINAS[0]:
                         else:
                             # El OCR se come una letra seguido: es exactamente el caso que
                             # resuelve la búsqueda por tipeo.
-                            parecidos_ocr = codigos_por_tipeo(sanitizar(cod_leido))
+                            parecidos_ocr = codigos_por_tipeo(sanitizar(cod_leido),
+                                                              de_una_foto=True)
                             if parecidos_ocr:
-                                st.warning(
-                                    f"«{cod_leido}» no está en tu catálogo, pero hay códigos que se "
-                                    "escriben casi igual. Leer un carácter de más o de menos es lo "
-                                    "más común al leer un grabado, así que fijate si es alguno:"
-                                )
-                                st.dataframe(
-                                    [{"Código": x["Codigo"], "Marca": x["Marca"],
-                                      "Descripción": x["Descripcion"], "Precio": x["Precio"],
-                                      "Stock": x["Stock"]} for x in parecidos_ocr],
-                                    width="stretch", hide_index=True
-                                )
+                                mostrar_parecidos_de_una_lectura(cod_leido, parecidos_ocr)
                             else:
                                 st.info(f"«{cod_leido}» no figura en tu catálogo ni se parece a nada "
                                          "cargado. Podés probar la comparación por parecido.")
@@ -2130,6 +2121,11 @@ if pagina == PAGINAS[0]:
                             f"El código `{codigo_detectado}` no coincide con nada cargado — puede que la "
                             "IA haya leído mal algún carácter, o que sea un código que todavía no tenés."
                         )
+                        # Los que se escriben casi igual, primero los que solo difieren en lo que
+                        # se confunde al leer. Ver es_confusion_de_lectura().
+                        _parecidos_foto = codigos_por_tipeo(clean_foto, de_una_foto=True)
+                        if _parecidos_foto:
+                            mostrar_parecidos_de_una_lectura(codigo_detectado, _parecidos_foto)
                         if datos_pieza.get("tipo_pieza") and st.button("🔍 Buscar por el tipo de pieza en vez del código"):
                             st.session_state["buscar_tipo_pieza_click"] = True
 

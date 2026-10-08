@@ -3,6 +3,10 @@
 Uso:
     python3 pruebas_de_la_revision.py                 # los pares de muestra, siempre
     python3 pruebas_de_la_revision.py --base copia.db # además, tus aprobaciones de esa base
+    python3 pruebas_de_la_revision.py --base copia.db --reglas   # y qué reglas dejan pasar más
+    python3 pruebas_de_la_revision.py --base copia.db --linea-base antes.json [--actualizar]
+        # la primera vez guarda cómo quedó cada par; las siguientes compara, y falla si algo
+        # que rechazaste pasa a limpio. Con --actualizar, la vuelve a guardar.
 
 Por qué existe: cada regla nueva del análisis («modelos distintos», «años distintos», «motores
 distintos»…) se probó contra pares reales antes de subirla, pero con scripts sueltos que no
@@ -28,7 +32,9 @@ Falla si pasa del 1 % (TOPE_DE_FALSOS_POSITIVOS). Sobre la base real del 7/10: 3
 
 Nunca toca la base de trabajo: corre en una carpeta temporal, con una base propia.
 """
+import json
 import os
+import re
 import shutil
 import sqlite3
 import sys
@@ -212,6 +218,20 @@ PARES_DE_MUESTRA = [
      "con sensor de desgaste contra sin sensor"),
     ("AMORTIGUADOR DELANTERO FORD KA 1.6", "AMORTIGUADOR TRASERO FORD KA 1.6", "distinta",
      "el mismo auto, otro lado"),
+    # Los parámetros que declara la descripción (ver parametros_declarados()), también armados.
+    ("RELAY DESTELLADOR 12 VOLTS 10 SALIDAS MERCEDES BENZ",
+     "RELAY DESTELLADOR 24 VOLTS 10 SALIDAS MERCEDES BENZ", "distinta", "12 contra 24 V"),
+    ("BOMBA ELECTRICA DE NAFTA FIAT PALIO 1.6 3 BAR 85L/H",
+     "BOMBA ELECTRICA DE NAFTA FIAT PALIO 1.6 3 BAR 105L/H", "distinta", "85 contra 105 l/h"),
+    ("BULBO DE PRESION DE ACEITE FORD F100 M10X1", "BULBO DE PRESION DE ACEITE FORD F100 M12X1,5",
+     "distinta", "rosca M10x1 contra M12x1,5"),
+    ("TPS FORD F100 4.9 SENTIDO HORARIO", "TPS FORD F100 4.9 SENTIDO ANTIHORARIO", "distinta",
+     "giro horario contra antihorario"),
+    ("BOMBA DE NAFTA DE ALTA PRESION CHEVROLET CRUZE 1.4 TURBO (REACONDICIONADO)",
+     "BOMBA DE NAFTA DE ALTA PRESION CHEVROLET CRUZE 1.4 TURBO", "distinta",
+     "reacondicionada contra nueva"),
+    ("PORTA FUSIBLE AEREO UNIVERSAL 20 AMPERES 2 UNIDADES",
+     "PORTA FUSIBLE AEREO UNIVERSAL 20 AMPERES 10 UNIDADES", "distinta", "2 contra 10 unidades"),
 ]
 
 
@@ -320,7 +340,8 @@ def probar_aprobaciones(logica, cuantos):
                   else ""))
     # Los mal aprobados no van en la matriz: ahí el rojo es el acierto (ver el resumen).
     conteo = {"limpias": len(limpias), "rojo": len(rojos),
-              "revisión": len(todos) - len(limpias) - len(rojos) - len(mal_aprobados)}
+              "revisión": len(todos) - len(limpias) - len(rojos) - len(mal_aprobados),
+              "_filas": clasificadas(limpias, todos)}
     fallas = []
     if len(rojos) > 0.01 * cuantos:
         fallas.append(f"más del 1 % de lo aprobado cae en rojo: {resumen}. Ejemplos: "
@@ -343,8 +364,92 @@ def probar_rechazos(logica):
     todos = limpias + sospechosas + relacionadas
     rojos = sum(1 for f in todos if (f.get("confianza") or 0) < 30)
     conteo = {"limpias": len(limpias), "rojo": rojos,
-              "revisión": len(todos) - len(limpias) - rojos}
+              "revisión": len(todos) - len(limpias) - rojos,
+              "_filas": clasificadas(limpias, todos)}
     return n, len(limpias), len(altas), limpias, conteo
+
+
+def clave_del_par(f):
+    """El par por sus códigos y marcas, no por sus ids: así se puede comparar con la línea de base
+    de otra copia de la base."""
+    lados = sorted((f"{f.get('cod_a')}|{f.get('marca_a')}", f"{f.get('cod_b')}|{f.get('marca_b')}"))
+    return " ↔ ".join(lados)
+
+
+def clasificadas(limpias, todos):
+    """{clave: (estado, señales a favor)} de cada par: «limpia», «revisión» o «rojo»."""
+    ids_limpias = {id(f) for f in limpias}
+    salida = {}
+    for f in todos:
+        estado = ("limpia" if id(f) in ids_limpias
+                  else "rojo" if (f.get("confianza") or 0) < 30 else "revisión")
+        a_favor = [t for tipo, t in (f.get("senales") or ()) if tipo == "bien"]
+        salida[clave_del_par(f)] = (estado, a_favor)
+    return salida
+
+
+def _nombre_de_la_senal(texto):
+    """La señal sin los números ni lo que cambia de un par a otro: «🔑 El código que los une
+    (0221604014) es largo…» y la del 0280155868 son la misma regla."""
+    # Los paréntesis con números se van (el código, la medida); «(del mismo texto: no suma)» se
+    # queda, porque es otra regla.
+    return re.sub(r"\s+", " ", re.sub(r"\([^)]*\d[^)]*\)|«[^»]*»|\d[\d.,]*", "",
+                                      texto)).strip()[:70]
+
+
+def imprimir_las_reglas(aprobados, rechazados, cuantas=12):
+    """QUÉ REGLAS DEJAN PASAR MÁS ERRORES. Por cada señal a favor, en cuántos aprobados y en
+    cuántos rechazados aparece. Una que está tanto en lo que rechazaste como en lo que aprobaste
+    no distingue nada, aunque sume puntos. Lo pidió una revisión con ChatGPT («detectar qué reglas
+    están causando más errores»)."""
+    cuenta = {}
+    for nombre, conteo in (("aprobados", aprobados), ("rechazados", rechazados)):
+        for _estado, a_favor in (conteo or {}).get("_filas", {}).values():
+            for senal in {_nombre_de_la_senal(t) for t in a_favor}:
+                cuenta.setdefault(senal, {"aprobados": 0, "rechazados": 0})[nombre] += 1
+    filas = [(s_, c_["aprobados"], c_["rechazados"]) for s_, c_ in cuenta.items()
+             if c_["aprobados"] + c_["rechazados"] >= 20]
+    filas.sort(key=lambda x: -x[2] / (x[1] + x[2]))
+    print("   reglas a favor, de la que más aparece en lo rechazado a la que menos:")
+    for senal, ap, re_ in filas[:cuantas]:
+        print(f"     {100 * re_ / (ap + re_):5.1f} % rechazados ({re_:,} de {ap + re_:,})  {senal}")
+
+
+def comparar_con_la_linea_de_base(ruta, aprobados, rechazados, actualizar=False):
+    """LA PRUEBA DE REGRESIÓN. Guarda cómo quedó cada par; la vez siguiente compara.
+
+    Lo pidió una revisión con ChatGPT («cada vez que cambies una regla, correr las equivalencias
+    conocidas y comparar antes y después; si una que no era equivalente pasa a verificada, el
+    cambio se detiene»). Un rechazado que antes no pasaba y ahora pasa limpio es una falla; un
+    aprobado que antes no estaba en rojo y ahora sí, un aviso (lo mide también el tope del 1 %).
+    Devuelve las fallas."""
+    ahora = {"aprobados": {k: v[0] for k, v in (aprobados or {}).get("_filas", {}).items()},
+             "rechazados": {k: v[0] for k, v in (rechazados or {}).get("_filas", {}).items()}}
+    if not os.path.exists(ruta) or actualizar:
+        existia = os.path.exists(ruta)
+        with open(ruta, "w", encoding="utf-8") as f:
+            json.dump(ahora, f, ensure_ascii=False)
+        print(f"   línea de base {'actualizada' if existia else 'guardada'}: {ruta}")
+        return []
+    with open(ruta, encoding="utf-8") as f:
+        antes = json.load(f)
+    fallas = []
+    for grupo, malo in (("aprobados", "rojo"), ("rechazados", "limpia")):
+        cambios = {}
+        for clave, estado in ahora[grupo].items():
+            previo = antes.get(grupo, {}).get(clave)
+            if previo and previo != estado:
+                cambios.setdefault(f"{previo} → {estado}", []).append(clave)
+        print(f"   {grupo} contra la línea de base: "
+              + (", ".join(f"{k}: {len(v):,}" for k, v in sorted(cambios.items())) or "sin cambios"))
+        for transicion, claves in cambios.items():
+            if transicion.endswith(f"→ {malo}"):
+                texto = (f"{len(claves)} {grupo} pasaron a {malo}: " + "; ".join(claves[:5]))
+                if grupo == "rechazados":
+                    fallas.append(texto)
+                else:
+                    print(f"   ⚠️ {texto}")
+    return fallas
 
 
 def imprimir_la_matriz(aprobados, rechazados):
@@ -368,6 +473,9 @@ def main():
     ruta_base = None
     if "--base" in sys.argv:
         ruta_base = os.path.abspath(sys.argv[sys.argv.index("--base") + 1])
+    # Antes de cambiar de carpeta: una ruta relativa es relativa a donde se corrió.
+    ruta_linea = (os.path.abspath(sys.argv[sys.argv.index("--linea-base") + 1])
+                  if "--linea-base" in sys.argv else None)
     carpeta = tempfile.mkdtemp(prefix="pruebas_revision_")
     try:
         cuantos = (preparar_la_base_de_aprobaciones(
@@ -384,6 +492,11 @@ def main():
             fallas += f2
             n_r, limpios_r, altos_r, _ejemplos, conteo_re = probar_rechazos(logica)
             imprimir_la_matriz(conteo_ap, conteo_re)
+            if "--reglas" in sys.argv:
+                imprimir_las_reglas(conteo_ap, conteo_re)
+            if ruta_linea:
+                fallas += comparar_con_la_linea_de_base(ruta_linea, conteo_ap, conteo_re,
+                                                        actualizar="--actualizar" in sys.argv)
             if n_r:
                 print(f"   rechazos (falsos positivos): {n_r:,} rechazados a mano: "
                       f"{limpios_r:,} quedarían limpios ({100 * limpios_r / n_r:.1f} %), "

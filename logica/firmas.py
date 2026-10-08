@@ -258,6 +258,74 @@ _RE_CON_Y_SIN_EQUIPAMIENTO = {
     for k, p in _EQUIPAMIENTO_DEL_AUTO.items()}
 
 
+# LO QUE LA DESCRIPCIÓN DECLARA DE CÓMO FUNCIONA LA PIEZA: la tensión, el caudal, la rosca, el
+# sentido de giro, cuántas trae y si es reacondicionada. Dos piezas iguales a la vista con otro
+# de estos valores no se reemplazan: el relay de 12 V no va en el camión de 24, la bomba de
+# 85 l/h no es la de 105, la rosca M10x1 no entra donde va una M12x1,5, el TPS de giro horario
+# no es el antihorario, la caja de 2 fusibles no es la de 10, y la bomba reacondicionada no es
+# una nueva. Lo pidió una revisión con ChatGPT (puntos 40 a 50). Medido sobre la base real del
+# 8/10: lo declaran 98 (tensión), 220 (caudal), 260 (rosca), 586 (giro), 111 (cantidad) y 17
+# (reacondicionada) productos; ningún par cargado ni pendiente se contradice, y un rechazado sí
+# (una bomba de 120 l/h contra un aforador con bomba de 145).
+_RE_TENSION = re.compile(r"\b(6|12|24|48)\s*(?:VOLTS?|VOLTIOS?|VCC|VDC|V\s*CC|V\s*DC)\b")
+_RE_CAUDAL = re.compile(r"\b(\d{2,3})\s*(?:L\s*/?\s*H|LTS?\s*/\s*H(?:ORA)?|LITROS\s*/?\s*HORA)\b")
+_RE_ROSCA_METRICA = re.compile(r"\bM\s?(\d{1,2})\s?[X*]\s?(\d(?:[.,]\d{1,2})?)\b")
+_RE_SENTIDO_DE_GIRO = re.compile(
+    r"\b(?:GIRO|ROTACION|ROT|SENTIDO(?:\s+DE\s+GIRO)?)\s*:?\s*(?:A\s+LA\s+)?"
+    r"(HORARIO|ANTIHORARIO|ANTI\s*HORARIO|IZQUIERD[OA]|DERECH[OA]|IZQ|DER|CW|CCW)\b")
+_GIRO_HORARIO = {"HORARIO", "CW", "DERECHO", "DERECHA", "DER"}
+_RE_CANTIDAD_QUE_TRAE = re.compile(
+    r"\b(?:JUEGO|JGO|KIT|SET|CAJA|PACK)\s*(?:DE|X)\s*(\d{1,2})\b"
+    r"|\b(\d{1,2})\s*(?:UNIDADES|UNID|UDS|PIEZAS|PZAS)\b")
+_RE_REACONDICIONADA = re.compile(r"\b(?:RECONSTRUID[OA]|REMANUFACTURAD[OA]|REACONDICIONAD[OA])\b")
+# El caudal se compara con tolerancia: dos listas redondean distinto la misma bomba.
+TOLERANCIA_DEL_CAUDAL = 0.10
+
+
+def parametros_declarados(limpio):
+    """{parámetro: valores} de lo que la descripción declara. Ver arriba."""
+    salida = {
+        "tensión": frozenset(int(v) for v in _RE_TENSION.findall(limpio)),
+        "caudal": frozenset(int(v) for v in _RE_CAUDAL.findall(limpio)),
+        "rosca": frozenset((int(d), float(p.replace(",", ".")))
+                           for d, p in _RE_ROSCA_METRICA.findall(limpio)),
+        "giro": frozenset("horario" if g in _GIRO_HORARIO else "antihorario"
+                          for g in (re.sub(r"\s+", "", x) for x in _RE_SENTIDO_DE_GIRO.findall(limpio))),
+        "cantidad": frozenset(int(a or b) for a, b in _RE_CANTIDAD_QUE_TRAE.findall(limpio)),
+    }
+    salida = {k: v for k, v in salida.items() if v}
+    if _RE_REACONDICIONADA.search(limpio):
+        salida["reacondicionada"] = frozenset({True})
+    return salida
+
+
+def parametros_que_chocan(a, b):
+    """El motivo si dos descripciones declaran un parámetro distinto, o None. Ver arriba."""
+    pa, pb = dict(a or ()), dict(b or ())
+    if ("reacondicionada" in pa) != ("reacondicionada" in pb):
+        return "versiones distintas: reacondicionada contra nueva"
+    for clave in sorted(set(pa) & set(pb)):
+        va, vb = pa[clave], pb[clave]
+        if clave == "caudal":
+            if not any(abs(x - y) <= TOLERANCIA_DEL_CAUDAL * max(x, y) for x in va for y in vb):
+                return (f"versiones distintas: {'/'.join(map(str, sorted(va)))} l/h contra "
+                        f"{'/'.join(map(str, sorted(vb)))} l/h")
+        elif not (va & vb):
+            if clave == "rosca":
+                def _r(v):
+                    return "/".join(f"M{d}x{p:g}".replace(".", ",") for d, p in sorted(v))
+                return f"medidas distintas: rosca {_r(va)} contra {_r(vb)}"
+            if clave == "cantidad":
+                return (f"juegos distintos: de {'/'.join(map(str, sorted(va)))} contra de "
+                        f"{'/'.join(map(str, sorted(vb)))}")
+            if clave == "tensión":
+                return (f"versiones distintas: de {'/'.join(map(str, sorted(va)))} V contra de "
+                        f"{'/'.join(map(str, sorted(vb)))} V")
+            return (f"versiones distintas: giro {'/'.join(sorted(va))} contra "
+                    f"{'/'.join(sorted(vb))}")
+    return None
+
+
 def equipamiento_declarado(limpio):
     """{equipamiento: True con / False sin} de lo que la descripción declara. Ver arriba."""
     salida = {}
@@ -669,6 +737,7 @@ def _firma_armada(descripcion, producto_id=None, codigo_clean=None):
             "modulo": (True if _RE_CON_MODULO.search(limpio)
                        else False if _RE_SIN_MODULO.search(limpio) else None),
             "equipamiento": tuple(sorted(equipamiento_declarado(limpio).items())),
+            "parametros": tuple(sorted(parametros_declarados(limpio).items())),
             "aire_exterior": bool(_RE_AIRE_EXTERIOR.search(limpio)),
             "motor_ford": _familia_de_motor_ford(limpio),
             "termostato_con_carcasa": _termostato_con_carcasa(limpio),
@@ -930,6 +999,17 @@ def _comparar_firmas(a, b, minimo_nucleo=2, cuenta_palabras=None, total_descripc
     """Ver firmas_compatibles(). Con con_dudas=False, las reglas que solo dudan no cortan."""
     if not a or not b:
         return False, ""
+    # Lo que la descripción DECLARA (la tensión, la rosca, el giro, con o sin ABS…) contradice
+    # aunque no se sepa el rubro: un relay de 12 V contra uno de 24 no necesita saber qué es
+    # para no ser el mismo. Ver parametros_declarados() y equipamiento_declarado().
+    _choque_de_parametros = parametros_que_chocan(a.get("parametros"), b.get("parametros"))
+    if _choque_de_parametros:
+        return False, _choque_de_parametros
+    _eq_a, _eq_b = dict(a.get("equipamiento") or ()), dict(b.get("equipamiento") or ())
+    for _cual in sorted(set(_eq_a) & set(_eq_b)):
+        if _eq_a[_cual] != _eq_b[_cual]:
+            return False, (f"versiones distintas: {'con' if _eq_a[_cual] else 'sin'} {_cual} vs "
+                           f"{'con' if _eq_b[_cual] else 'sin'} {_cual}")
     if a["familia"] == "Sin clasificar" or b["familia"] == "Sin clasificar":
         return False, "no se pudo clasificar el rubro"
     if a["familia"] != b["familia"]:
@@ -1010,11 +1090,6 @@ def _comparar_firmas(a, b, minimo_nucleo=2, cuenta_palabras=None, total_descripc
     if (a.get("modulo") is not None and b.get("modulo") is not None
             and a["modulo"] != b["modulo"]):
         return False, "versiones distintas: con módulo de encendido vs sin módulo"
-    _eq_a, _eq_b = dict(a.get("equipamiento") or ()), dict(b.get("equipamiento") or ())
-    for _cual in sorted(set(_eq_a) & set(_eq_b)):
-        if _eq_a[_cual] != _eq_b[_cual]:
-            return False, (f"versiones distintas: {'con' if _eq_a[_cual] else 'sin'} {_cual} vs "
-                           f"{'con' if _eq_b[_cual] else 'sin'} {_cual}")
     if ((a.get("sensor") or b.get("sensor")) and a.get("aire_exterior") != b.get("aire_exterior")
             and "TEMPERATURA" in ((a.get("sensor") or frozenset()) & (b.get("sensor") or frozenset()))):
         return False, ("sensores de tipos distintos: el de la temperatura del aire exterior vs el "

@@ -1263,6 +1263,10 @@ def _esquema_gestion(c):
         c.execute("ALTER TABLE equivalencias_revisadas ADD COLUMN confianza REAL")
     if "senal" not in _cols_rev:
         c.execute("ALTER TABLE equivalencias_revisadas ADD COLUMN senal TEXT")
+    # Y TODO lo que había a favor y en contra, no solo la primera alarma: si después aparece un
+    # error, se puede ver qué regla lo dejó pasar. Ver marcar_revision().
+    if "por_que" not in _cols_rev:
+        c.execute("ALTER TABLE equivalencias_revisadas ADD COLUMN por_que TEXT")
 
     # Los pares elegidos al azar para controlar un grupo de vínculos antes de aprobarlo entero.
     # Se guardan para que la muestra sea SIEMPRE la misma: si se volviera a sortear en cada

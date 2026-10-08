@@ -708,6 +708,7 @@ if pagina == PAGINAS[2]:
                     filas_omitidas = []
                     eq_batch = set()  # inserción en lote: se acumulan los pares y se insertan todos juntos al final
                     _pares_de_la_lista = set()   # todo lo que la lista declara, nuevo o no
+                    _descripciones_que_trae = {}   # id -> la descripción de ESTA lista
                     _ids_de_la_lista = set()   # los productos DISTINTOS que tocó: ver el cartel del final
                     _ids_con_codigo_de_fabrica = set()
                     progreso = st.progress(0, text="Procesando filas...")
@@ -815,6 +816,9 @@ if pagina == PAGINAS[2]:
                                 if clean_p:
                                     pid_nuevo = get_or_create_producto(raw_p, clean_p, desc, prov_id)
                                     ids_prov.append(pid_nuevo)
+                                    # Lo que dice ESTA lista: ver fichas_que_cambiaron().
+                                    if desc:
+                                        _descripciones_que_trae.setdefault(pid_nuevo, desc)
                                     if not any(ch.isdigit() for ch in clean_p):
                                         ids_prov_sin_digitos.add(pid_nuevo)
                                     if barras_fila:
@@ -1059,6 +1063,22 @@ if pagina == PAGINAS[2]:
                                "ningún número: si son muchos, fijate si la columna de códigos "
                                "de fábrica quedó elegida." if _cambios["sin_ninguno"] else ""))
                         st.dataframe(_cambios["ejemplos"], hide_index=True, width="stretch")
+                    # LA FICHA QUE CAMBIÓ: el producto ya estaba y esta lista lo describe con
+                    # otra medida, otro lado u otra tensión. La descripción guardada no se pisa
+                    # (nunca se pisó): se avisa. Ver fichas_que_cambiaron().
+                    try:
+                        _fichas = fichas_que_cambiaron(_descripciones_que_trae)
+                    except sqlite3.Error as _err:
+                        anotar_error("importar/fichas que cambiaron", _err)
+                        _fichas = {"cambiaron": 0}
+                    if _fichas["cambiaron"]:
+                        st.warning(
+                            f"📝 **{miles(_fichas['cambiaron'])} producto(s) de {nombre_prov} "
+                            "vienen con otra ficha**: una medida, el lado o la tensión no son los "
+                            "que estaban guardados. **No se cambió nada**: la app sigue con la "
+                            "descripción de antes. Mirá cuál es la buena; si es la nueva, "
+                            "corregila a mano en el producto.")
+                        st.dataframe(_fichas["ejemplos"], hide_index=True, width="stretch")
                     # Los números del chequeo de salud cambiaron: que se recalculen
                     invalidar_salud()
 

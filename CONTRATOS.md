@@ -25,6 +25,13 @@ Las pruebas se corren como dice el README, en «Antes de subir un cambio».
 | Un rechazo no se pisa: sale de la cola, no se aprueba en grupo, y vincularlo a mano pide confirmarlo | `marcar_revision()`, `aprobar_pendientes()`, `rechazos_del_grupo()` | `pruebas_de_la_precision.py` (12) |
 | Una pieza de seguridad confirmada igual pide mirarla en la mano | `riesgo_de_la_pieza()`, `veredicto_de_la_equivalencia()` | `pruebas_de_la_precision.py` (13) |
 | Al volver a puntuar todo queda anotado qué cambió de franja | `anotar_la_deriva()` | `pruebas_de_la_precision.py` (14) |
+| Otra tensión, caudal, rosca, giro, cantidad o una reacondicionada son otra pieza | `parametros_que_chocan()` | `pruebas_de_la_revision.py` (pares de muestra), `pruebas_de_la_precision.py` (17) |
+| Dos medidas coinciden con la tolerancia de cada una y la precisión con que se escribieron | `diferencia_que_se_acepta()` | `pruebas_de_la_precision.py` (18) |
+| Un código leído de una foto nunca se acepta solo | `codigos_por_tipeo(de_una_foto=True)` | `pruebas_de_la_precision.py` (19) |
+| Una ficha distinta al reimportar se avisa y no se pisa | `fichas_que_cambiaron()` | `pruebas_de_la_precision.py` (20) y en la app |
+| Cada decisión guarda todo lo que había a favor y en contra | `marcar_revision()` | `pruebas_de_la_precision.py` (21) |
+| Una pieza de seguridad revisada hace más de 6 meses deja de estar verificada | `ficha_de_prueba()` | `pruebas_de_la_precision.py` (22) |
+| Un cambio de reglas que hace pasar limpio algo rechazado se frena | La línea de base | `pruebas_de_la_revision.py --linea-base` |
 
 ## El stock, los precios y la plata
 

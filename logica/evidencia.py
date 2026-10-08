@@ -457,6 +457,11 @@ _RE_RIESGO_ALTO = re.compile(r"\b(?:CORREA|KIT|TENSOR|CADENA)\s+(?:DE\s+)?DISTRI
                              r"|\b(?:JUNTA|JTA)\s+(?:DE\s+)?TAPA\s+(?:DE\s+)?CIL")
 
 
+# Cada cuántos meses se vuelve a mirar una equivalencia según su riesgo. El resto, solo si
+# algo la contradice. Ver ficha_de_prueba().
+MESES_DE_VIGENCIA_POR_RIESGO = {"🛑": 6, "🟠": 12}
+
+
 def riesgo_de_la_pieza(*descripciones):
     """(nivel, por qué) de la pieza: 🛑 crítico, 🟠 alto o 🟢 normal."""
     if any(es_pieza_de_seguridad(d) for d in descripciones if d):
@@ -474,6 +479,21 @@ def que_pieza_es(*descripciones):
             if re.search(patron, texto):
                 return nombre, campos
     return None, ()
+
+
+def _unidad_confundida(va, vb):
+    """« (¿mm contra cm?)» si una medida es diez veces la otra, o 25,4 (pulgadas). Es la pista
+    de un dato mal cargado, no de otra pieza: lo pidió una revisión con ChatGPT («25,4 mm contra
+    25,4 cm»). La app no convierte unidades: las medidas se leen en milímetros."""
+    chica, grande = sorted((va, vb))
+    if not chica:
+        return ""
+    razon = grande / chica
+    if abs(razon - 10) <= 0.2:
+        return " (¿una en mm y la otra en cm?)"
+    if abs(razon - 25.4) <= 0.5:
+        return " (¿una en pulgadas?)"
+    return ""
 
 
 def medidas_lado_a_lado(med_a, med_b, campos_que_importan=(), tolerancia_pct=3):
@@ -500,12 +520,17 @@ def medidas_lado_a_lado(med_a, med_b, campos_que_importan=(), tolerancia_pct=3):
                       else "❌ distinta")
         else:
             try:
-                diferencia = abs(float(va) - float(vb)) / max(float(va), float(vb)) * 100
+                fa, fb = float(va), float(vb)
             except (TypeError, ValueError):     # una medida cargada como texto
-                diferencia = 0 if str(va).strip() == str(vb).strip() else 100
-            estado = ("✅ igual" if diferencia == 0
-                      else f"≈ dentro de la tolerancia ({diferencia:.1f} %)"
-                      if diferencia <= tolerancia_pct else f"❌ distinta ({diferencia:.0f} %)")
+                fa = fb = None
+            if fa is None:
+                estado = "✅ igual" if str(va).strip() == str(vb).strip() else "❌ distinta"
+            elif fa == fb:
+                estado = "✅ igual"
+            elif abs(fa - fb) <= diferencia_que_se_acepta(campo, fa, fb, tolerancia_pct):
+                estado = f"≈ dentro de la tolerancia ({abs(fa - fb):g} mm)".replace(".", ",")
+            else:
+                estado = f"❌ distinta ({abs(fa - fb):g} mm)".replace(".", ",") + _unidad_confundida(fa, fb)
         filas.append({"Medida": etiqueta, "A": "—" if va is None else va,
                       "B": "—" if vb is None else vb, "Importa": "sí" if importa else "",
                       "Estado": estado})
@@ -613,9 +638,10 @@ def ficha_de_prueba(id_a, id_b, tolerancia_pct=3):
       ⚪ SIN CADENA — no hay vínculos entre los dos (a lo sumo, el mismo número en otra marca);
       🔴 CON CONTRADICCIONES — las medidas, el rubro, la posición o el motor dicen que no.
     «Falta» dice qué la llevaría a VERIFICADA. None si alguno de los dos ya no existe."""
-    c.execute("""SELECT p.id, p.codigo_raw, p.codigo_clean, p.descripcion, m.nombre AS marca,
-                        m.tipo AS tipo
-                 FROM productos p JOIN marcas m ON m.id = p.marca_id WHERE p.id IN (?, ?)""",
+    c.execute(f"""SELECT p.id, p.codigo_raw, p.codigo_clean, p.descripcion, m.nombre AS marca,
+                         m.tipo AS tipo,
+                         {campo_opcional_de_producto(c, "imagen_thumb", "foto")}
+                  FROM productos p JOIN marcas m ON m.id = p.marca_id WHERE p.id IN (?, ?)""",
               (id_a, id_b))
     info = {r["id"]: dict(r) for r in c.fetchall()}
     if id_a not in info or id_b not in info or id_a == id_b:
@@ -650,7 +676,7 @@ def ficha_de_prueba(id_a, id_b, tolerancia_pct=3):
     for paso in (p for pasos in cadenas for p in pasos):
         paso["_primaria"], paso["Respaldo"] = respaldo_del_origen(paso["_lote"],
                                                                   paso["_verificada"])
-        c.execute("""SELECT e.nota, r.decision, r.revisado_por, r.fecha
+        c.execute("""SELECT e.nota, r.decision, r.revisado_por, r.fecha, r.por_que
                      FROM equivalencias e LEFT JOIN equivalencias_revisadas r
                        ON r.producto_a_id = e.producto_a_id AND r.producto_b_id = e.producto_b_id
                      WHERE e.producto_a_id = ? AND e.producto_b_id = ?""",
@@ -658,9 +684,12 @@ def ficha_de_prueba(id_a, id_b, tolerancia_pct=3):
         fila = c.fetchone()
         paso["Revisión"] = ""
         paso["_nota"] = (fila["nota"] or "") if fila else ""
+        paso["_fecha_revision"] = ""
+        paso["_por_que"] = (fila["por_que"] or "") if fila else ""
         if fila and fila["decision"] == "ok":
             paso["Revisión"] = (f"aprobado por {fila['revisado_por'] or 'alguien'}"
                                 f" el {(fila['fecha'] or '')[:10]}")
+            paso["_fecha_revision"] = (fila["fecha"] or "")[:10]
     evaluadas = [(_evaluar_la_cadena(pasos), pasos) for pasos in cadenas]
     evaluadas.sort(key=lambda x: _ORDEN_DE_LOS_ESTADOS.index(x[0][0]))
     (estado, falta), pasos = evaluadas[0] if evaluadas else (
@@ -729,6 +758,31 @@ def ficha_de_prueba(id_a, id_b, tolerancia_pct=3):
     if ficha["comprobaciones"]:
         resumen.append("✋ comprobada en la mano")
     ficha["resumen"] = resumen
+
+    # CUÁNDO SE MIRÓ POR ÚLTIMA VEZ, y si para su riesgo ya toca volver a mirarla. Lo pidió una
+    # revisión con ChatGPT («fecha de vigencia» y «revisión basada en riesgo»): una pieza de
+    # seguridad se vuelve a mirar cada 6 meses, una que rompe el motor cada 12, y el resto solo si
+    # algo la contradice. Las fechas son la de la revisión de cada paso y la de la comprobación
+    # en la mano.
+    fechas = [p["_fecha_revision"] for p in pasos if p.get("_fecha_revision")]
+    for nota in ficha["comprobaciones"]:
+        m = re.search(r"(\d{2})/(\d{2})/(\d{4})", nota)
+        if m:
+            fechas.append(f"{m.group(3)}-{m.group(2)}-{m.group(1)}")
+    ficha["ultima_revision"] = max(fechas) if fechas else ""
+    ficha["meses_sin_revisar"] = None
+    if ficha["ultima_revision"]:
+        try:
+            _desde = datetime.strptime(ficha["ultima_revision"], "%Y-%m-%d")
+            ficha["meses_sin_revisar"] = max(0, (datetime.now() - _desde).days // 30)
+        except ValueError:
+            pass
+    _vigencia = MESES_DE_VIGENCIA_POR_RIESGO.get(ficha["riesgo"][:1])
+    if (_vigencia and ficha["meses_sin_revisar"] is not None
+            and ficha["meses_sin_revisar"] >= _vigencia and estado.startswith("✅")):
+        falta.append(f"volver a mirarla: se revisó hace {ficha['meses_sin_revisar']} meses y "
+                     f"para una pieza de riesgo {ficha['riesgo'][2:]} toca cada {_vigencia}")
+        estado = "🟡 PROBABLE"
 
     if not estado.startswith(("✅", "🔴")):
         falta.append("o comprobarla con la pieza en la mano"

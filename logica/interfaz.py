@@ -1288,6 +1288,18 @@ def veredicto_de_la_equivalencia(fila):
     return cadena
 
 
+def mostrar_parecidos_de_una_lectura(leido, parecidos):
+    """Los códigos que se escriben casi igual al que se leyó de una foto, para que una persona
+    elija. Nunca se toma uno solo: la lectura es una pista, no un dato."""
+    st.warning(f"«{leido}» no está en tu catálogo, pero hay códigos que se escriben casi igual. "
+               "Al leer un grabado se confunden letras con números (O y 0, I y 1, S y 5): "
+               "fijate si es alguno, con la pieza en la mano.")
+    st.dataframe([{"Código": x["Codigo"], "Marca": x["Marca"],
+                   "Descripción": x["Descripcion"], "Precio": x["Precio"], "Stock": x["Stock"],
+                   "Se confundió": x.get("Lectura") or ""} for x in parecidos],
+                 width="stretch", hide_index=True)
+
+
 def mostrar_ficha_de_prueba(id_a, id_b, clave):
     """La ficha de prueba de una equivalencia, en pantalla. Ver ficha_de_prueba().
 
@@ -1311,6 +1323,22 @@ def mostrar_ficha_de_prueba(id_a, id_b, clave):
                + (f" ({ficha['por_que_riesgo']})" if ficha["por_que_riesgo"] else ""))
     if ficha["accion"]:
         st.warning(f"**Acción:** {ficha['accion']}.")
+    if ficha["ultima_revision"]:
+        st.caption(f"🕰️ Última revisión: {ficha['ultima_revision']}"
+                   + (f" (hace {ficha['meses_sin_revisar']} meses)"
+                      if ficha["meses_sin_revisar"] else ""))
+    # Las fotos, una al lado de la otra. La foto no confirma la equivalencia: sirve para ver una
+    # diferencia (otra ficha, otro soporte) que pida mirarla. Lo pidió una revisión con ChatGPT.
+    if a.get("foto") or b.get("foto"):
+        _fa, _fb = st.columns(2)
+        for _col, _p, _lado in ((_fa, a, "A"), (_fb, b, "B")):
+            with _col:
+                if _p.get("foto"):
+                    st.image(_p["foto"], width="stretch",
+                             caption=f"{_lado}: {_p['codigo_raw']}")
+                else:
+                    st.caption(f"{_lado}: sin foto")
+        st.caption("La foto no confirma nada: sirve para ver una diferencia que haya que mirar.")
     if ficha["falta"]:
         st.markdown("**Falta para que quede verificada:**\n"
                     + "\n".join(f"- {texto_para_markdown(x)}" for x in ficha["falta"]))
@@ -1321,6 +1349,8 @@ def mostrar_ficha_de_prueba(id_a, id_b, clave):
             st.markdown(f"{'✅' if p['_primaria'] else '⚠️'} {texto_para_markdown(p['Paso'])} — "
                         f"{p['Confianza']}/100 · {texto_para_markdown(p['Respaldo'])}"
                         + (f" · {texto_para_markdown(p['Revisión'])}" if p["Revisión"] else ""))
+            if p.get("_por_que"):
+                st.caption("Lo que había al decidirlo: " + texto_para_markdown(p["_por_que"]))
     if ficha["numeros_en_comun"]:
         st.markdown(f"**Números de fábrica que citan los dos** ({len(ficha['numeros_en_comun'])})")
         st.dataframe([{k: v for k, v in n.items() if not k.startswith("_")}
