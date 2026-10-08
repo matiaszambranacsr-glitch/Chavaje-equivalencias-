@@ -21,6 +21,11 @@ atiende el mostrador— caen 127 (0,6 %), y aparte 117 que estaban mal aprobados
 (ver ALARMAS_DE_APROBACIONES_MALAS): esos no cuentan. Sobre la base de prueba anterior (13.021
 aprobados) eran 83, y 725 mal aprobados.
 
+Y AL REVÉS, LOS FALSOS POSITIVOS: lo que RECHAZASTE va en otra tanda, puntuado igual. Un
+rechazado que queda entre las «limpias» es uno que se habría aprobado en grupo con la muestra.
+Falla si pasa del 1 % (TOPE_DE_FALSOS_POSITIVOS). Sobre la base real del 7/10: 3 de 2.633
+(0,1 %), los tres con la descripción idéntica y del mismo rubro.
+
 Nunca toca la base de trabajo: corre en una carpeta temporal, con una base propia.
 """
 import os
@@ -240,6 +245,20 @@ def preparar_la_base_de_aprobaciones(ruta_base, destino):
     pares = [(a, b) for a, b in sorted(aprobados)
              if con.execute("SELECT COUNT(*) FROM productos WHERE id IN (?, ?)",
                             (a, b)).fetchone()[0] == 2]
+    # Y LO QUE RECHAZASTE, en otra tanda: es lo que dice cuántos vínculos malos dejaría pasar
+    # el puntaje (los falsos positivos). Un par rechazado que el análisis pone entre las
+    # «limpias» es uno que se hubiera aprobado en grupo con la muestra.
+    rechazados = {(min(a, b), max(a, b)) for a, b in con.execute(
+        "SELECT producto_a_id, producto_b_id FROM equivalencias_revisadas "
+        "WHERE decision = 'rechazada'")} - aprobados
+    rechazados = [(a, b) for a, b in sorted(rechazados)
+                  if con.execute("SELECT COUNT(*) FROM productos WHERE id IN (?, ?)",
+                                 (a, b)).fetchone()[0] == 2]
+    con.executemany("DELETE FROM equivalencias_pendientes WHERE MIN(producto_a_id, "
+                    "producto_b_id) = ? AND MAX(producto_a_id, producto_b_id) = ?", rechazados)
+    con.executemany("INSERT INTO equivalencias_pendientes (producto_a_id, producto_b_id, origen, "
+                    "lote) VALUES (?, ?, 'lista_proveedor', ?)",
+                    [(a, b, LOTE_DE_LOS_RECHAZOS) for a, b in rechazados])
     con.execute("DELETE FROM equivalencias_revisadas")
     con.executemany("DELETE FROM equivalencias WHERE MIN(producto_a_id, producto_b_id) = ? "
                     "AND MAX(producto_a_id, producto_b_id) = ?", pares)
@@ -254,6 +273,10 @@ def preparar_la_base_de_aprobaciones(ruta_base, destino):
 
 
 LOTE_DE_LA_PRUEBA = "PRUEBA DE APROBACIONES"
+LOTE_DE_LOS_RECHAZOS = "PRUEBA DE RECHAZOS"
+# Cuántos de los rechazados a mano pueden quedar entre las «limpias», en %. Sobre la base real
+# del 7/10 eran 3 de 2.633 (0,1 %); más del 1 % es que una regla nueva abrió la puerta.
+TOPE_DE_FALSOS_POSITIVOS = 1.0
 
 # Alarmas que, sobre la base de prueba, se revisaron una por una y en todos los casos el vínculo
 # aprobado estaba mal: 🧰 son el kit de reparación unido a la bomba que repara (283), la tapa de
@@ -291,6 +314,20 @@ def probar_aprobaciones(logica, cuantos):
     return fallas, resumen
 
 
+def probar_rechazos(logica):
+    """Los FALSOS POSITIVOS: lo que rechazaste a mano, puntuado como si recién llegara.
+    Devuelve (cuántos, cuántos quedan limpios, cuántos 🟢 ≥75, ejemplos de los limpios)."""
+    logica_ns = logica.todo_lo_de_la_logica()
+    n = logica_ns["c"].execute("SELECT COUNT(*) FROM equivalencias_pendientes WHERE lote = ?",
+                               (LOTE_DE_LOS_RECHAZOS,)).fetchone()[0]
+    if not n:
+        return 0, 0, 0, []
+    limpias, sospechosas, relacionadas = logica.analizar_lote_pendiente(LOTE_DE_LOS_RECHAZOS,
+                                                                        limite=None)
+    altas = [f for f in limpias if (f.get("confianza") or 0) >= 75]
+    return n, len(limpias), len(altas), limpias
+
+
 def main():
     ruta_base = None
     if "--base" in sys.argv:
@@ -309,6 +346,18 @@ def main():
             f2, resumen = probar_aprobaciones(logica, cuantos)
             print(f"{'✅' if not f2 else '❌'} aprobaciones: {resumen}")
             fallas += f2
+            n_r, limpios_r, altos_r, _ejemplos = probar_rechazos(logica)
+            if n_r:
+                print(f"   rechazos (falsos positivos): {n_r:,} rechazados a mano: "
+                      f"{limpios_r:,} quedarían limpios ({100 * limpios_r / n_r:.1f} %), "
+                      f"{altos_r:,} con 75 o más ({100 * altos_r / n_r:.1f} %)")
+                if 100 * limpios_r / n_r > TOPE_DE_FALSOS_POSITIVOS:
+                    fallas.append(f"{limpios_r} de {n_r} rechazados a mano quedarían limpios: "
+                                  f"más del {TOPE_DE_FALSOS_POSITIVOS:g} %")
+                if "--ver" in sys.argv:
+                    for f in _ejemplos[:25]:
+                        print(f"     {f.get('confianza')}: {f.get('cod_a')} / {f.get('cod_b')} — "
+                              f"{[s for _, s in (f.get('senales') or [])][:4]}")
         for f in fallas:
             print("   ✗", f)
         print("todo en verde" if not fallas else f"{len(fallas)} falla(s)")

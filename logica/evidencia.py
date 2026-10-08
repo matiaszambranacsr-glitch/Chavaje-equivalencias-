@@ -404,6 +404,308 @@ def evidencia_cruzada(id_a, id_b, cuenta_palabras=None, total_descripciones=None
     return a_favor, vetos, veredicto
 
 
+# LA FICHA DE PRUEBA DE UNA EQUIVALENCIA. El puntaje junta todo en un número y el buscador lo
+# dice en una frase; esto lo abre: quién declara cada paso, qué medidas coinciden, qué la
+# contradice y quién la comprobó. Lo propuso una revisión con ChatGPT: «limpia no es
+# confirmada; cada equivalencia tiene que tener su ficha, y sin una fuente primaria no puede
+# ser VERIFICADA». La fuente primaria es la que conoce la pieza y lo declara —la lista de un
+# proveedor, el catálogo de un fabricante, una persona con la pieza en la mano—; que se
+# parezcan las descripciones o que vayan en el mismo auto son pistas. Ver respaldo_del_origen().
+#
+# Las medidas no pueden ser obligatorias: las tiene cargadas el 1 o 2 % del catálogo (sobre la
+# base real del 7/10, 1.142 productos con diámetro interno de 86.946). Se muestran las que
+# importan para esa clase de pieza como «para confirmar en la mano», y la que se contradice sí
+# tumba la equivalencia, como siempre.
+_PIEZAS_Y_SUS_MEDIDAS = (
+    (r"\b(HOMOCINETICA|TRIPOIDE|SEMIEJE)", "homocinética",
+     ("cantidad_estrias", "diametro_rosca_homocinetica", "diametro_externo")),
+    (r"\b(RULEMAN|RODAMIENTO|CRAPODINA|COLLARIN)", "rodamiento",
+     ("diametro_interno", "diametro_externo", "ancho")),
+    (r"\bRETEN", "retén", ("diametro_interno", "diametro_externo", "ancho")),
+    (r"\bBUJIA", "bujía", ("paso_rosca", "largo_total")),
+    (r"\bFILTRO", "filtro", ("diametro_externo", "diametro_interno", "largo_total", "paso_rosca")),
+    (r"\bCORREA", "correa", ("cantidad_canales", "largo_total", "ancho")),
+    (r"\b(POLEA|TENSOR)", "polea o tensor", ("cantidad_canales", "diametro_externo", "ancho")),
+    (r"\b(PASTILLA|ZAPATA)", "pastilla o zapata", ("largo_total", "ancho", "espesor", "posicion")),
+    (r"\b(DISCO DE FRENO|CAMPANA)", "disco o campana", ("diametro_externo", "espesor", "posicion")),
+    (r"\bABS\b", "sensor de ABS", ("cantidad_vias", "posicion")),
+    (r"\b(JUNTA|JTA)\b", "junta", ("espesor",)),
+    (r"\b(FICHA|CONECTOR|SENSOR|SONDA|BOBINA|BULBO|INTERRUPTOR)", "pieza eléctrica",
+     ("cantidad_vias",)),
+    (r"\b(AMORTIGUADOR|PARRILLA|BRAZO|ROTULA|BIELETA|EXTREMO|MAZA|OPTICA|FARO|ESPEJO)",
+     "pieza que va de un lado", ("posicion",)),
+)
+# Las que se comparan por igualdad y no con tolerancia: ver comparar_medidas().
+_MEDIDAS_EXACTAS = (("paso_rosca", "paso de rosca"), ("cantidad_estrias", "estrías"),
+                    ("cantidad_vias", "vías de la ficha"), ("cantidad_canales", "canales de la polea"),
+                    ("posicion", "posición"))
+# Desde acá un vínculo es «sólido» en el buscador. Ver buscar_por_codigo().
+CONFIANZA_SOLIDA = 70
+
+
+def que_pieza_es(*descripciones):
+    """(nombre de la clase de pieza, las medidas que la identifican), por la descripción."""
+    for descripcion in descripciones:
+        texto = _normalizar_desc(descripcion)
+        for patron, nombre, campos in _PIEZAS_Y_SUS_MEDIDAS:
+            if re.search(patron, texto):
+                return nombre, campos
+    return None, ()
+
+
+def medidas_lado_a_lado(med_a, med_b, campos_que_importan=(), tolerancia_pct=3):
+    """Cada medida de los dos productos con su estado: igual, dentro de la tolerancia, falta o
+    distinta. Las que importan para esa pieza salen aunque no las tenga ninguno de los dos."""
+    med_a, med_b = med_a or {}, med_b or {}
+    exactas = dict(_MEDIDAS_EXACTAS)
+    filas = []
+    for campo, etiqueta in list(CAMPOS_MEDIDAS) + list(_MEDIDAS_EXACTAS):
+        va, vb = med_a.get(campo), med_b.get(campo)
+        # Vacío o en cero es «no se midió»: comparar_medidas() tampoco compara un cero.
+        va = None if va in (None, "", 0) else va
+        vb = None if vb in (None, "", 0) else vb
+        importa = campo in campos_que_importan
+        if va is None and vb is None:
+            if importa:
+                filas.append({"Medida": etiqueta, "A": "—", "B": "—", "Importa": "sí",
+                              "Estado": "❓ no la tiene ninguno"})
+            continue
+        if va is None or vb is None:
+            estado = f"❓ falta en {'A' if va is None else 'B'}"
+        elif campo in exactas:
+            estado = ("✅ igual" if str(va).strip().upper() == str(vb).strip().upper()
+                      else "❌ distinta")
+        else:
+            try:
+                diferencia = abs(float(va) - float(vb)) / max(float(va), float(vb)) * 100
+            except (TypeError, ValueError):     # una medida cargada como texto
+                diferencia = 0 if str(va).strip() == str(vb).strip() else 100
+            estado = ("✅ igual" if diferencia == 0
+                      else f"≈ dentro de la tolerancia ({diferencia:.1f} %)"
+                      if diferencia <= tolerancia_pct else f"❌ distinta ({diferencia:.0f} %)")
+        filas.append({"Medida": etiqueta, "A": "—" if va is None else va,
+                      "B": "—" if vb is None else vb, "Importa": "sí" if importa else "",
+                      "Estado": estado})
+    return filas
+
+
+def _fuente_del_paso(lote, verificada):
+    """El nombre de quien declara un paso. Dos importaciones de la misma lista son UNA fuente."""
+    if verificada:
+        return "a mano"
+    return (lote or "").split(" · ")[0].strip().upper() or "—"
+
+
+def numeros_en_comun(id_a, id_b, tope=12):
+    """Los códigos que unen a los dos en dos pasos, con quién declara cada mitad.
+
+    Es la forma más común de una equivalencia entre dos proveedores: los dos citan el mismo
+    número de fábrica. Cuantos más números distintos compartan, más difícil que sea casualidad.
+    Las fuentes se cuentan por nombre: la lista de FISPA importada tres veces es una fuente."""
+    vecinos = {}
+    for pid in (id_a, id_b):
+        c.execute("""SELECT CASE WHEN producto_a_id = ? THEN producto_b_id ELSE producto_a_id END
+                            AS x, lote, COALESCE(verificada, 0) AS v
+                     FROM equivalencias WHERE producto_a_id = ? OR producto_b_id = ?""",
+                  (pid, pid, pid))
+        vecinos[pid] = {r["x"]: (r["lote"], r["v"]) for r in c.fetchall()}
+    comunes = sorted(set(vecinos[id_a]) & set(vecinos[id_b]))
+    if not comunes:
+        return []
+    marcadores = ",".join("?" * len(comunes[:tope]))
+    c.execute(f"""SELECT p.id, p.codigo_raw, m.nombre AS marca FROM productos p
+                  JOIN marcas m ON m.id = p.marca_id WHERE p.id IN ({marcadores})""",
+              comunes[:tope])
+    nombres = {r["id"]: f"{r['codigo_raw']} ({r['marca']})" for r in c.fetchall()}
+    salida = []
+    for x in comunes[:tope]:
+        mitades = [vecinos[id_a][x], vecinos[id_b][x]]
+        respaldos = [respaldo_del_origen(lote, v) for lote, v in mitades]
+        salida.append({"Número": nombres.get(x, str(x)),
+                       "Fuentes": " + ".join(_fuente_del_paso(lote, v) for lote, v in mitades),
+                       "Las dos mitades con fuente": "sí" if all(r[0] for r in respaldos) else "no",
+                       "_fuentes": {_fuente_del_paso(lote, v) for lote, v in mitades},
+                       "_primarias": all(r[0] for r in respaldos)})
+    return salida
+
+
+def el_buscado_mas_cercano(origenes, destino):
+    """De los productos con el código buscado —puede estar cargado en varias marcas—, el que se
+    une a `destino`: primero el que tiene un vínculo directo, después el que tiene alguna cadena.
+
+    Sin esto la ficha salía «sin cadena» para un resultado directo: el buscado de una marca no
+    tenía vínculos, y el resultado colgaba del mismo número cargado en otra."""
+    origenes = list(dict.fromkeys(origenes))
+    if len(origenes) <= 1:
+        return origenes[0] if origenes else None
+    marcadores = ",".join("?" * len(origenes))
+    c.execute(f"""SELECT CASE WHEN producto_b_id = ? THEN producto_a_id ELSE producto_b_id END
+                         AS origen
+                  FROM equivalencias
+                  WHERE (producto_a_id IN ({marcadores}) AND producto_b_id = ?)
+                     OR (producto_b_id IN ({marcadores}) AND producto_a_id = ?)""",
+              [destino] + origenes + [destino] + origenes + [destino])
+    directos = {r["origen"] for r in c.fetchall()}
+    for o in origenes:
+        if o in directos:
+            return o
+    return next((o for o in origenes if camino_entre(o, destino)), origenes[0])
+
+
+_ORDEN_DE_LOS_ESTADOS = ("✅ VERIFICADA", "🟡 PROBABLE", "🟠 CANDIDATA", "⚪ SIN CADENA",
+                         "🔴 CON CONTRADICCIONES")
+
+
+def _evaluar_la_cadena(pasos):
+    """(estado, falta) de una cadena de vínculos, sin mirar todavía lo que la contradice."""
+    falta = []
+    sin_fuente = [p for p in pasos if not p["_primaria"]]
+    flojos = [p for p in pasos if not p["_verificada"] and p["Confianza"] < CONFIANZA_SOLIDA]
+    for p in sin_fuente:
+        falta.append(f"una fuente que declare {p['Paso']} — hoy: {p['Respaldo']}")
+    if len(pasos) > 1:
+        falta.append(f"una fuente que nombre los dos códigos juntos: hoy llega por "
+                     f"{len(pasos) - 1} código(s) en el medio")
+    for p in flojos:
+        falta.append(f"que {p['Paso']} sea sólido: tiene {p['Confianza']}/100 y sólido es "
+                     f"{CONFIANZA_SOLIDA} o más (mirá sus señales en Revisar vínculos)")
+    return ("🟠 CANDIDATA" if sin_fuente else "🟡 PROBABLE" if falta else "✅ VERIFICADA"), falta
+
+
+def ficha_de_prueba(id_a, id_b, tolerancia_pct=3):
+    """Todo lo que sostiene —o no— que A y B son la misma pieza, y el estado que sale de eso.
+
+    Estados, de mejor a peor:
+      ✅ VERIFICADA — un vínculo directo que declara una fuente (o que una persona comprobó),
+                      sólido, y nada que la contradiga;
+      🟡 PROBABLE   — todos los pasos tienen fuente, pero llega por un código en el medio o el
+                      vínculo no es sólido;
+      🟠 CANDIDATA  — algún paso es solo una pista (se parecen las descripciones, el mismo auto);
+      ⚪ SIN CADENA — no hay vínculos entre los dos (a lo sumo, el mismo número en otra marca);
+      🔴 CON CONTRADICCIONES — las medidas, el rubro, la posición o el motor dicen que no.
+    «Falta» dice qué la llevaría a VERIFICADA. None si alguno de los dos ya no existe."""
+    c.execute("""SELECT p.id, p.codigo_raw, p.codigo_clean, p.descripcion, m.nombre AS marca,
+                        m.tipo AS tipo
+                 FROM productos p JOIN marcas m ON m.id = p.marca_id WHERE p.id IN (?, ?)""",
+              (id_a, id_b))
+    info = {r["id"]: dict(r) for r in c.fetchall()}
+    if id_a not in info or id_b not in info or id_a == id_b:
+        return None
+    pa, pb = info[id_a], info[id_b]
+    # La pieza se toma de la descripción de un proveedor y no del código de fábrica, que copia
+    # la de la fila que lo trajo primero.
+    _descs = [p["descripcion"] for p in (pa, pb) if (p["tipo"] or "").upper() != "OEM"] or \
+             [pa["descripcion"], pb["descripcion"]]
+    pieza, campos_de_la_pieza = que_pieza_es(*_descs)
+    ficha = {"a": pa, "b": pb, "rubro": familia_para_comparar(_descs[0]), "pieza": pieza}
+
+    # La cadena, paso por paso, con quién declara cada uno y si alguien lo revisó. Se miran
+    # dos: el vínculo directo, si lo hay, y la cadena más confiable (la que muestra el
+    # buscador). No siempre coinciden —un directo flojo del barrido y una cadena sólida por el
+    # número de fábrica— y la ficha se queda con la que mejor la sostiene.
+    cadenas = []
+    c.execute("""SELECT COALESCE(confianza, 50) AS conf, lote, COALESCE(verificada, 0) AS v
+                 FROM equivalencias WHERE producto_a_id = ? AND producto_b_id = ?""",
+              (min(id_a, id_b), max(id_a, id_b)))
+    directo = c.fetchone()
+    if directo:
+        cadenas.append([{"Paso": f"{pa['codigo_raw']} ({pa['marca']}) → "
+                                 f"{pb['codigo_raw']} ({pb['marca']})",
+                         "Confianza": directo["conf"],
+                         "Vino de": (directo["lote"] or "—").split(" · ")[0],
+                         "_lote": directo["lote"], "_verificada": bool(directo["v"]),
+                         "_a": id_a, "_b": id_b}])
+    mejor_camino = camino_entre(id_a, id_b)
+    if mejor_camino and len(mejor_camino) > 1:
+        cadenas.append(mejor_camino)
+    for paso in (p for pasos in cadenas for p in pasos):
+        paso["_primaria"], paso["Respaldo"] = respaldo_del_origen(paso["_lote"],
+                                                                  paso["_verificada"])
+        c.execute("""SELECT e.nota, r.decision, r.revisado_por, r.fecha
+                     FROM equivalencias e LEFT JOIN equivalencias_revisadas r
+                       ON r.producto_a_id = e.producto_a_id AND r.producto_b_id = e.producto_b_id
+                     WHERE e.producto_a_id = ? AND e.producto_b_id = ?""",
+                  (min(paso["_a"], paso["_b"]), max(paso["_a"], paso["_b"])))
+        fila = c.fetchone()
+        paso["Revisión"] = ""
+        paso["_nota"] = (fila["nota"] or "") if fila else ""
+        if fila and fila["decision"] == "ok":
+            paso["Revisión"] = (f"aprobado por {fila['revisado_por'] or 'alguien'}"
+                                f" el {(fila['fecha'] or '')[:10]}")
+    evaluadas = [(_evaluar_la_cadena(pasos), pasos) for pasos in cadenas]
+    evaluadas.sort(key=lambda x: _ORDEN_DE_LOS_ESTADOS.index(x[0][0]))
+    (estado, falta), pasos = evaluadas[0] if evaluadas else (
+        ("⚪ SIN CADENA", ["es el mismo número en otra marca, pero ninguna lista ni catálogo "
+                          "dice que sea la misma pieza" if pa["codigo_clean"] == pb["codigo_clean"]
+                          else "no hay ningún vínculo entre los dos"]), [])
+    ficha["pasos"] = pasos
+    ficha["numeros_en_comun"] = numeros_en_comun(id_a, id_b)
+    ficha["fuentes"] = sorted({_fuente_del_paso(p["_lote"], p["_verificada"])
+                               for pasos_ in cadenas for p in pasos_ if p["_primaria"]}
+                              | {f for n in ficha["numeros_en_comun"] if n["_primarias"]
+                                 for f in n["_fuentes"]})
+    ficha["comprobaciones"] = list(dict.fromkeys(
+        parte.strip() for pasos_ in cadenas for p in pasos_
+        for parte in p["_nota"].split(" · ") if parte.strip().startswith("✋")))
+
+    # Las medidas, una por una.
+    medidas = cargar_medidas_de_varios([id_a, id_b])
+    ficha["medidas"] = medidas_lado_a_lado(medidas.get(id_a), medidas.get(id_b),
+                                           campos_de_la_pieza, tolerancia_pct)
+    ficha["para_medir"] = [m["Medida"] for m in ficha["medidas"]
+                           if m["Importa"] and m["Estado"].startswith("❓")]
+
+    # Lo que la contradice. El precio no prueba nada a favor y en contra solo avisa: dos listas
+    # pueden estar en escalas distintas. Ver evidencia_cruzada(), punto 7.
+    a_favor, vetos, _ = evidencia_cruzada(id_a, id_b)
+    ficha["a_favor"] = a_favor
+    ficha["contradicciones"] = [v for v in vetos if not v.startswith("💲")]
+    ficha["avisos"] = [v for v in vetos if v.startswith("💲")]
+
+    if ficha["contradicciones"]:
+        estado = "🔴 CON CONTRADICCIONES"
+        falta = ["que no haya nada en contra: con esto, no es la misma pieza hasta que alguien "
+                 "la compare en la mano"]
+    if not estado.startswith(("✅", "🔴")):
+        falta.append("o comprobarla con la pieza en la mano"
+                     + (f" (medir: {', '.join(ficha['para_medir'])})" if ficha["para_medir"]
+                        else ""))
+    ficha["estado"], ficha["falta"] = estado, falta
+    return ficha
+
+
+def comprobar_en_la_mano(id_a, id_b, como):
+    """Anota que alguien comparó las dos piezas en la mano: quién, cuándo y qué miró.
+
+    Es la validación física de la ficha de prueba. Si ya hay un vínculo directo se le pone la
+    marca y se le suma la nota, sin tocar de qué lista vino; si no lo hay —llegaban por un
+    código en el medio—, se crea uno directo, verificado. Devuelve la nota que quedó."""
+    exigir_nivel("empleado", "marcar una equivalencia como comprobada")
+    # « · » es lo que separa las notas de un mismo vínculo: adentro de una, partiría la nota.
+    como = (como or "").replace(" · ", ", ").strip()
+    if not como:
+        raise ValueError("Escribí qué miraste: la medida, la rosca, la ficha…")
+    a, b = min(id_a, id_b), max(id_a, id_b)
+    nota = (f"✋ Comprobada en la mano por {obtener_usuario_actual()} el "
+            f"{datetime.now():%d/%m/%Y}: {como}")
+    with db_lock, transaccion():
+        c.execute("SELECT nota FROM equivalencias WHERE producto_a_id = ? AND producto_b_id = ?",
+                  (a, b))
+        fila = c.fetchone()
+        if fila:
+            c.execute("""UPDATE equivalencias SET verificada = 1,
+                                nota = CASE WHEN COALESCE(nota, '') = '' THEN ?
+                                            ELSE nota || ' · ' || ? END
+                         WHERE producto_a_id = ? AND producto_b_id = ?""", (nota, nota, a, b))
+        else:
+            c.execute("""INSERT INTO equivalencias
+                             (producto_a_id, producto_b_id, created_at, verificada, nivel, nota, lote)
+                         VALUES (?, ?, datetime('now'), 1, 'Exacta', ?, ?)""",
+                      (a, b, nota, f"COMPROBADA EN LA MANO · {datetime.now():%d/%m/%Y %H:%M}"))
+    marcar_revision([(a, b)], "ok")
+    return nota
+
+
 def derivar_equivalencias_por_medidas(minimo_medidas=3, limite=400):
     """Encuentra equivalencias cruzando las MEDIDAS cargadas, entre marcas distintas.
 

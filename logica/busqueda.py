@@ -30,7 +30,7 @@ def buscar_con_variantes_del_cero(clean_code, marca_filtro="Todas", max_saltos=N
     encuentra algo, así que el reintento no llega a correr nunca."""
     res = buscar_por_codigo(clean_code, marca_filtro, max_saltos, confianza_minima)
     if res or not clean_code:
-        return res, None
+        return anotar_el_respaldo(res, clean_code), None
     # Con filtro de marca, que no haya resultado puede ser solo que el código es de otra marca.
     # Reintentar ahí traía OTRA pieza: «041064» (una lente de CRI-FA) filtrando por IMPERIAL
     # devolvía el 41064 de IMPERIAL, un repuesto de Toyota, diciendo «no hay nada cargado como
@@ -41,9 +41,10 @@ def buscar_con_variantes_del_cero(clean_code, marca_filtro="Todas", max_saltos=N
         if variante and variante != clean_code:
             res = buscar_por_codigo(variante, marca_filtro, max_saltos, confianza_minima)
             if res:
-                return res, (f"No hay nada cargado como «{clean_code}», pero sí como "
-                             f"«{variante}» — los códigos que empiezan con cero se escriben "
-                             "de las dos formas. Confirmá que sea el mismo repuesto.")
+                return anotar_el_respaldo(res, variante), (
+                    f"No hay nada cargado como «{clean_code}», pero sí como "
+                    f"«{variante}» — los códigos que empiezan con cero se escriben "
+                    "de las dos formas. Confirmá que sea el mismo repuesto.")
     return [], None
 
 
@@ -673,6 +674,148 @@ def deshacer_importacion(lote, borrar_pendientes=True):
         marcar_revision(pares, "rechazada")
     return borrados, pend
 
+
+
+# EL RESPALDO DE UN VÍNCULO: quién lo dijo. El puntaje junta señales; esto separa la FUENTE
+# (alguien que conoce la pieza lo declara: la lista del proveedor, el catálogo del fabricante,
+# una persona que la verificó) de las PISTAS (dos descripciones que se parecen, el mismo auto,
+# una venta). Lo propuso una revisión con ChatGPT: «limpia no es confirmada; no puede ser
+# verificada sin al menos una evidencia primaria». Sale del lote con que se guardó cada
+# vínculo, que dice de dónde vino. Sobre la base real del 7/10: 17.013 vínculos los declara
+# la lista de un proveedor y 74 un catálogo de fabricante; 2.930 son del barrido por
+# descripciones y 13 del cruce por auto (aprobados por una persona, pero sin una fuente).
+_ORIGENES_SECUNDARIOS = (
+    ("BARRIDO", "🔤 se parecen las descripciones (barrido de todo el catálogo)"),
+    ("TODAS-", "🔤 se parecen las descripciones (barrido de todo el catálogo)"),
+    ("POR DESCRIPCIÓN", "🔤 se parecen las descripciones"),
+    ("POR MEDIDAS", "📐 miden igual (solo por medidas)"),
+    ("CRUCE POR AUTO", "🚗 van en el mismo auto"),
+    ("CONFIRMADAS EN EL MOSTRADOR", "🛒 se vendió uno en lugar del otro"),
+    ("MERCADO LIBRE", "🛍️ lo dice el título de una publicación de Mercado Libre"),
+)
+_ORIGENES_PRIMARIOS = (
+    ("CATÁLOGOS DE FABRICANTE", "🏭 lo publica el catálogo del fabricante"),
+    ("CATÁLOGO ", "🏭 lo publica el catálogo de {resto}"),
+    ("PORTAL ", "🏭 lo publica el portal de {resto}"),
+    ("CÓDIGO ESCRITO EN LA DESCRIPCIÓN", "📄 el proveedor escribe el código en la descripción"),
+    ("POR REEMPLAZO", "🔁 el proveedor declara el cambio de código"),
+)
+
+
+def respaldo_del_origen(lote, verificada=False):
+    """(primaria: True / False / None si no se sabe, texto) de un vínculo, por su lote."""
+    if verificada:
+        return True, "👤 una persona lo verificó al cargarlo a mano"
+    nombre = (lote or "").split(" · ")[0].strip()
+    if not nombre:
+        return None, "❔ no quedó anotado de dónde salió"
+    arriba = nombre.upper()
+    for prefijo, texto in _ORIGENES_SECUNDARIOS:
+        if arriba.startswith(prefijo):
+            return False, texto
+    for prefijo, texto in _ORIGENES_PRIMARIOS:
+        if arriba.startswith(prefijo):
+            return True, texto.format(resto=nombre[len(prefijo):].strip())
+    if arriba.startswith("PRUEBA"):
+        return None, f"❔ {nombre}"
+    # Lo demás es una lista importada: «FISPA · archivo.xlsx · fecha».
+    return True, f"📋 lo declara la lista de {nombre}"
+
+
+# Con qué empieza el texto de una fuente que declara (ver respaldo_del_origen()). El buscador lo
+# lee de la columna «Respaldo» porque las tarjetas reciben las filas sin las claves internas.
+_EMOJIS_DE_FUENTE = ("📋", "🏭", "📄", "🔁", "👤")
+
+
+def es_respaldo_primario(texto):
+    """¿El «Respaldo» de un resultado es una fuente que declara, y no una pista?"""
+    return str(texto or "").startswith(_EMOJIS_DE_FUENTE)
+
+
+def anotar_el_respaldo(res, clean_code):
+    """Pone en cada resultado DIRECTO quién declara su vínculo con el buscado: «Respaldo».
+
+    Va acá y no adentro de buscar_por_codigo() porque esa se lleva tal cual al paquete nucleo,
+    que no guarda de qué lista salió cada vínculo. Si el buscado aparece bajo dos marcas y las
+    dos lo vinculan, gana el mejor respaldo: una fuente le gana a una pista.
+    Los orígenes se consultan igual que en buscar_por_codigo() y no se toman de las filas: con
+    el filtro de marca, el buscado de otra marca no está entre ellas."""
+    if not res:
+        return res
+    c.execute("SELECT id FROM productos WHERE codigo_clean = ? OR codigo_barras = ?",
+              (clean_code, clean_code))
+    origenes = [r["id"] for r in c.fetchall()]
+    directos = [f["ID"] for f in res if str(f.get("Cadena", "")).startswith("🟢 directo")]
+    if not origenes or not directos:
+        return res
+    mejor = {}
+    orden = {True: 2, None: 1, False: 0}
+    for tanda, marcadores in en_tandas(directos, usos_por_consulta=2):
+        marcadores_o = ",".join("?" * len(origenes))
+        c.execute(f"""SELECT producto_a_id AS a, producto_b_id AS b, lote,
+                             COALESCE(verificada, 0) AS v
+                      FROM equivalencias
+                      WHERE (producto_a_id IN ({marcadores_o}) AND producto_b_id IN ({marcadores}))
+                         OR (producto_b_id IN ({marcadores_o}) AND producto_a_id IN ({marcadores}))""",
+                  origenes + tanda + origenes + tanda)
+        for r in c.fetchall():
+            otro = r["b"] if r["a"] in origenes else r["a"]
+            primaria, texto = respaldo_del_origen(r["lote"], r["v"])
+            if otro not in mejor or orden[primaria] > orden[mejor[otro][0]]:
+                mejor[otro] = (primaria, texto)
+    for f in res:
+        if f["ID"] in mejor:
+            f["Respaldo"] = mejor[f["ID"]][1]
+    return res
+
+
+def equivalentes_que_la_lista_dejo_de_declarar(nombre_prov, lote_actual, ids_de_la_lista,
+                                                pares_de_la_lista, tope=30):
+    """Los códigos de esta lista que la importación anterior del MISMO proveedor vinculaba con
+    otro número, y que esta ya no vincula. No se borra nada: se avisa.
+
+    Lo propuso una revisión con ChatGPT: «ayer ABC123 → XYZ456, hoy ABC123 → XYZ999; no
+    reemplazar en silencio». Hasta ahora el vínculo viejo quedaba cargado y nadie se enteraba
+    de que el proveedor ya no lo sostiene. Puede ser una corrección del proveedor (el vínculo
+    viejo estaba mal) o un error de la lista nueva: eso lo decide una persona.
+    Solo cuenta los productos que la lista nueva SÍ trae: el que dejó de venir no cambió de
+    equivalente, dejó de estar. Devuelve {"codigos", "sin_ninguno", "ejemplos"}: sin_ninguno
+    son los que ahora no traen ningún número, que en cantidad suele ser la columna de códigos
+    de fábrica que quedó sin elegir al importar."""
+    vacio = {"codigos": 0, "sin_ninguno": 0, "ejemplos": []}
+    if not ids_de_la_lista:
+        return vacio
+    prefijo = f"{str(nombre_prov).upper()} · "
+    c.execute("""SELECT producto_a_id AS a, producto_b_id AS b, lote FROM equivalencias
+                 WHERE lote LIKE ? ESCAPE '\\' AND lote <> ?""",
+              (como_texto_en_like(prefijo) + "%", lote_actual))
+    dejados = {}
+    for r in c.fetchall():
+        if (r["a"], r["b"]) in pares_de_la_lista:
+            continue
+        for propio, otro in ((r["a"], r["b"]), (r["b"], r["a"])):
+            if propio in ids_de_la_lista and otro not in ids_de_la_lista:
+                dejados.setdefault(propio, set()).add(otro)
+    if not dejados:
+        return vacio
+    ahora = {}
+    for a, b in pares_de_la_lista:
+        for propio, otro in ((a, b), (b, a)):
+            if propio in dejados:
+                ahora.setdefault(propio, set()).add(otro)
+    elegidos = sorted(dejados)[:tope]
+    ids = set(elegidos) | {x for p in elegidos for x in dejados[p] | ahora.get(p, set())}
+    codigos = {}
+    for tanda, marcadores in en_tandas(list(ids)):
+        c.execute(f"SELECT id, codigo_raw FROM productos WHERE id IN ({marcadores})", tanda)
+        codigos.update({r["id"]: r["codigo_raw"] for r in c.fetchall()})
+
+    def lista(xs):
+        return ", ".join(sorted(codigos.get(x, str(x)) for x in xs)) or "(ninguno)"
+    ejemplos = [{"Código": codigos.get(p, str(p)), "Antes decía": lista(dejados[p]),
+                 "Ahora dice": lista(ahora.get(p, set()))} for p in elegidos]
+    return {"codigos": len(dejados), "sin_ninguno": sum(1 for p in dejados if p not in ahora),
+            "ejemplos": ejemplos}
 
 
 def origenes_de_los_vinculos_directos(producto_id, ids_resultado):

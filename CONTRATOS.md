@@ -13,6 +13,12 @@ Las pruebas se corren como dice el README, en «Antes de subir un cambio».
 | Un producto no se vincula consigo mismo | El mismo trigger | `pruebas_de_los_cambios.py` (1) |
 | Una sugerencia por tipeo nunca se guarda como vínculo | Solo se muestra, con «son códigos distintos» | — (es solo pantalla) |
 | El análisis no se equivoca con pares ya revisados a mano | El análisis del lote | `pruebas_de_la_revision.py` |
+| Lo rechazado a mano no queda entre las limpias (más del 1 % es una falla) | El análisis del lote | `pruebas_de_la_revision.py --base` |
+| «Confirmada» solo con una fuente que declare el vínculo (una lista, un catálogo, una persona) | `veredicto_de_la_equivalencia()`, `respaldo_del_origen()` | `pruebas_de_la_precision.py` (1, 2) |
+| Una contradicción (medidas, rubro, posición) gana sobre cualquier fuente y cualquier puntaje | `ficha_de_prueba()`, `TOPE_CON_VETO` | `pruebas_de_la_precision.py` (3, 4) |
+| Las ventas solas no pasan un vínculo de franja | `sin_cruzar_la_linea_por_lo_aprendido()` | `pruebas_de_la_precision.py` (3) |
+| Comprobar en la mano no borra de qué lista vino el vínculo | `comprobar_en_la_mano()` | `pruebas_de_la_precision.py` (5) |
+| Si el proveedor cambia de equivalente, se avisa y no se borra nada | `equivalentes_que_la_lista_dejo_de_declarar()` | `pruebas_de_la_precision.py` (8) |
 
 ## El stock, los precios y la plata
 

@@ -1207,6 +1207,27 @@ if pagina == PAGINAS[0]:
 
                                 # Marca la opción más barata ENTRE LAS QUE TIENEN STOCK, para no tener que
 
+                        # LA FICHA DE PRUEBA de un resultado: quién declara cada paso, las
+                        # medidas lado a lado, lo que la contradice y lo que falta para darla por
+                        # verificada. Plegada: se calcula solo si se abre. Ver ficha_de_prueba().
+                        _origenes_ficha = [f["ID"] for f in res
+                                           if f.get("Cadena") == "— el buscado"]
+                        _para_ficha = [f for f in res if f.get("Cadena") != "— el buscado"
+                                       and not f.get("_sin_salida")]
+                        if _origenes_ficha and _para_ficha and seccion_plegable(
+                                "🧾 Ficha de prueba: ¿por qué es equivalente?",
+                                key=f"ficha_prueba_{clean}"):
+                            _opciones_ficha = {
+                                f"{f['Codigo']} ({f['Marca']}) — {veredicto_de_la_equivalencia(f)}":
+                                    f["ID"] for f in _para_ficha}
+                            _elegido_ficha = st.selectbox("Elegí un resultado:",
+                                                          list(_opciones_ficha),
+                                                          key=f"ficha_resultado_{clean}")
+                            _destino_ficha = _opciones_ficha[_elegido_ficha]
+                            mostrar_ficha_de_prueba(
+                                el_buscado_mas_cercano(_origenes_ficha, _destino_ficha),
+                                _destino_ficha, clave=clean)
+
                         # Botones de link aparte, para no depender de scrollear la tabla al costado en el celular.
                         # La key incluye el código buscado (clean) además del ID: si se buscan varios códigos
                         # a la vez y dos están vinculados entre sí, el mismo producto puede aparecer en más de

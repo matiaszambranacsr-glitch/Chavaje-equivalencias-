@@ -1241,10 +1241,14 @@ def veredicto_de_la_equivalencia(fila):
     En la tarjeta decía «🟢 directo · 🟢 sólida» o «🟡 3 saltos · 🟢 sólida»: hay que saber qué
     es un salto y qué mide la solidez para saber si se puede vender. La tabla sigue mostrando
     las dos columnas, para quien quiera el detalle; ver busqueda.buscar_por_codigo().
-      🟢 confirmada — un vínculo directo y sólido, o verificado a mano;
-      🟡 probable  — sólido pero por otro código en el medio, o directo y razonable;
+      🟢 confirmada — un vínculo directo y sólido que declara una fuente, o verificado a mano;
+      🟡 probable  — sólido pero por otro código en el medio, directo y razonable, o directo y
+                     sólido pero sin una fuente que lo declare (solo pistas);
       🟠 revisar   — lejos en la cadena, o algún vínculo flojo;
-      🔴 dudosa    — algún vínculo muy débil."""
+      🔴 dudosa    — algún vínculo muy débil.
+    «Una fuente que lo declare» es el «Respaldo» del resultado: ver anotar_el_respaldo(). Lo
+    pidió una revisión con ChatGPT: «limpia no es confirmada». Si la fila no trae el respaldo
+    (el paquete nucleo no lo guarda), se juzga como antes."""
     cadena = str(fila.get("Cadena") or "")
     confianza = str(fila.get("Confianza") or "")
     if cadena.startswith("— el buscado"):
@@ -1262,11 +1266,85 @@ def veredicto_de_la_equivalencia(fila):
     if "floja" in confianza or (saltos or 0) > 3:
         return "🟠 revisar antes de vender"
     if "sólida" in confianza:
-        return ("🟢 equivalencia confirmada" if saltos == 1
-                else f"🟡 probable: llega por {saltos - 1} código(s) en el medio")
+        if saltos != 1:
+            return f"🟡 probable: llega por {saltos - 1} código(s) en el medio"
+        respaldo = fila.get("Respaldo")
+        if respaldo and not es_respaldo_primario(respaldo):
+            return ("🟡 probable, sin una fuente que lo declare ("
+                    + str(respaldo).split(" ", 1)[-1] + ")")
+        return "🟢 equivalencia confirmada"
     if "razonable" in confianza:
         return "🟡 probable" if saltos == 1 else "🟠 revisar antes de vender"
     return cadena
+
+
+def mostrar_ficha_de_prueba(id_a, id_b, clave):
+    """La ficha de prueba de una equivalencia, en pantalla. Ver ficha_de_prueba().
+
+    De arriba abajo, en el orden en que se decide: el estado y lo que falta, quién declara cada
+    paso, las medidas lado a lado, lo que la contradice y quién la comprobó en la mano."""
+    ficha = ficha_de_prueba(id_a, id_b)
+    if not ficha:
+        st.caption("Alguno de los dos productos ya no existe.")
+        return
+    a, b = ficha["a"], ficha["b"]
+    caja = {"✅": st.success, "🔴": st.error, "🟠": st.warning}.get(ficha["estado"][0], st.info)
+    caja(f"**{ficha['estado']}**  \n"
+         + "  \n".join(f"**{lado}:** {texto_para_markdown(p['marca'])} `{p['codigo_raw']}` — "
+                       f"{texto_para_markdown((p['descripcion'] or '')[:90])}"
+                       for lado, p in (("A", a), ("B", b))))
+    st.caption(f"Rubro: {ficha['rubro']}"
+               + (f" · pieza: {ficha['pieza']}" if ficha["pieza"] else ""))
+    if ficha["falta"]:
+        st.markdown("**Falta para que quede verificada:**\n"
+                    + "\n".join(f"- {texto_para_markdown(x)}" for x in ficha["falta"]))
+
+    if ficha["pasos"]:
+        st.markdown("**Quién declara cada paso**")
+        for p in ficha["pasos"]:
+            st.markdown(f"{'✅' if p['_primaria'] else '⚠️'} {texto_para_markdown(p['Paso'])} — "
+                        f"{p['Confianza']}/100 · {texto_para_markdown(p['Respaldo'])}"
+                        + (f" · {texto_para_markdown(p['Revisión'])}" if p["Revisión"] else ""))
+    if ficha["numeros_en_comun"]:
+        st.markdown(f"**Números de fábrica que citan los dos** ({len(ficha['numeros_en_comun'])})")
+        st.dataframe([{k: v for k, v in n.items() if not k.startswith("_")}
+                      for n in ficha["numeros_en_comun"]], hide_index=True, width="stretch")
+    st.caption(f"Fuentes distintas que la sostienen: **{', '.join(ficha['fuentes']) or 'ninguna'}**. "
+               "La misma lista importada varias veces cuenta como una. Dos listas que copian "
+               "el mismo catálogo no se pueden distinguir desde acá.")
+
+    if ficha["medidas"]:
+        st.markdown("**Medidas**" + (f" — para confirmar en la mano: {', '.join(ficha['para_medir'])}"
+                                     if ficha["para_medir"] else ""))
+        st.dataframe(ficha["medidas"], hide_index=True, width="stretch")
+    else:
+        st.caption("📏 Ninguno de los dos tiene medidas cargadas.")
+    for x in ficha["contradicciones"]:
+        st.error(texto_para_markdown(x))
+    for x in ficha["avisos"]:
+        st.warning(texto_para_markdown(x))
+    if ficha["a_favor"]:
+        st.markdown("**A favor:** " + " · ".join(texto_para_markdown(x) for x in ficha["a_favor"]))
+    for x in ficha["comprobaciones"]:
+        st.success(texto_para_markdown(x))
+
+    # La validación física: quién, cuándo y qué miró. Ver comprobar_en_la_mano().
+    if not ficha["estado"].startswith("✅"):
+        como = st.text_input("✋ ¿Las comparaste con la pieza en la mano? Contá qué miraste:",
+                             key=f"en_la_mano_{clave}_{id_b}",
+                             placeholder="Ej.: medí 35x52x7 las dos, misma rosca, misma ficha")
+        if candado("marcar una equivalencia como comprobada",
+                   st.button("✋ La comprobé en la mano", key=f"boton_en_la_mano_{clave}_{id_b}",
+                             disabled=not como.strip()),
+                   f"en_la_mano_{clave}_{id_b}", nivel="empleado"):
+            try:
+                comprobar_en_la_mano(id_a, id_b, como)
+            except (PermissionError, ValueError) as _err:
+                st.error(str(_err))
+            else:
+                avisar("success", "Quedó anotada como comprobada en la mano. Buscala de nuevo "
+                                  "para verla verificada en los resultados.")
+                st.rerun()
 
 
 def mostrar_tarjetas_de_resultados(filas, tope=40):

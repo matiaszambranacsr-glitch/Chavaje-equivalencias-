@@ -959,7 +959,8 @@ def camino_entre(origen_id, destino_id, tope_nodos=3000):
         if nodo == destino_id:
             break
         c.execute("""SELECT CASE WHEN producto_a_id = ? THEN producto_b_id ELSE producto_a_id END
-                            AS otro, COALESCE(confianza, 50) AS conf, lote
+                            AS otro, COALESCE(confianza, 50) AS conf, lote,
+                            COALESCE(verificada, 0) AS verif
                      FROM equivalencias
                      WHERE producto_a_id = ? OR producto_b_id = ?""", (nodo, nodo, nodo))
         for fila in c.fetchall():
@@ -969,7 +970,7 @@ def camino_entre(origen_id, destino_id, tope_nodos=3000):
             nuevo_peor = min(-peor_neg, conf)
             if nuevo_peor > mejor.get(otro, -1):
                 mejor[otro] = nuevo_peor
-                previo[otro] = (nodo, conf, fila["lote"])
+                previo[otro] = (nodo, conf, fila["lote"], fila["verif"])
                 heapq.heappush(monton, (-nuevo_peor, otro))
 
     if destino_id not in previo and destino_id != origen_id:
@@ -979,8 +980,8 @@ def camino_entre(origen_id, destino_id, tope_nodos=3000):
     pasos = []
     actual = destino_id
     while actual != origen_id:
-        anterior, conf, lote = previo[actual]
-        pasos.append((anterior, actual, conf, lote))
+        anterior, conf, lote, verif = previo[actual]
+        pasos.append((anterior, actual, conf, lote, verif))
         actual = anterior
     pasos.reverse()
 
@@ -992,7 +993,7 @@ def camino_entre(origen_id, destino_id, tope_nodos=3000):
     info = {r["id"]: r for r in c.fetchall()}
 
     salida = []
-    for a, b, conf, lote in pasos:
+    for a, b, conf, lote, verif in pasos:
         if a not in info or b not in info:
             continue
         salida.append({
@@ -1000,6 +1001,8 @@ def camino_entre(origen_id, destino_id, tope_nodos=3000):
                      f"{info[b]['codigo_raw']} ({info[b]['marca']})",
             "Confianza": conf,
             "Vino de": (lote or "—").split(" · ")[0],
+            # Para la ficha de prueba: quién declara cada paso. Ver respaldo_del_origen().
+            "_lote": lote, "_verificada": bool(verif),
             "_a": a, "_b": b,
         })
     return salida

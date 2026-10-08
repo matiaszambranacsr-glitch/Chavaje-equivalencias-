@@ -707,6 +707,7 @@ if pagina == PAGINAS[2]:
                     _precio_en_esta_lista, repetidos_con_otro_precio = {}, []
                     filas_omitidas = []
                     eq_batch = set()  # inserción en lote: se acumulan los pares y se insertan todos juntos al final
+                    _pares_de_la_lista = set()   # todo lo que la lista declara, nuevo o no
                     _ids_de_la_lista = set()   # los productos DISTINTOS que tocó: ver el cartel del final
                     _ids_con_codigo_de_fabrica = set()
                     progreso = st.progress(0, text="Procesando filas...")
@@ -940,6 +941,7 @@ if pagina == PAGINAS[2]:
                             # eran equivalencias aprobadas. El informe de la importación encima
                             # decía «539 de los 13.943 vínculos nuevos están casi seguro mal».
                             # Mismo criterio que guardar_equivalencias_pendientes().
+                            _pares_de_la_lista = set(eq_batch)
                             rechazados_antes = pares_rechazados()
                             ya_cargados = pares_ya_cargados()
                             _vinculos_ya_cargados = len(eq_batch & ya_cargados)
@@ -1036,6 +1038,27 @@ if pagina == PAGINAS[2]:
                         else:
                             st.success(_resumen + " Los precios ya están, y esta lista no trajo "
                                        "vínculos nuevos para revisar." + _ya_txt)
+                    # EL PROVEEDOR CAMBIÓ DE EQUIVALENTE SIN AVISAR: la lista anterior decía
+                    # ABC123 = XYZ456 y esta dice ABC123 = XYZ999. El vínculo viejo queda (no se
+                    # borra nada solo), pero se avisa: puede ser una corrección del proveedor o
+                    # un error de la lista nueva. Ver equivalentes_que_la_lista_dejo_de_declarar().
+                    try:
+                        _cambios = equivalentes_que_la_lista_dejo_de_declarar(
+                            nombre_prov, lote_importacion, _ids_de_la_lista, _pares_de_la_lista)
+                    except sqlite3.Error as _err:
+                        anotar_error("importar/cambios de equivalente", _err)
+                        _cambios = {"codigos": 0}
+                    if _cambios["codigos"]:
+                        st.warning(
+                            f"🔀 **{miles(_cambios['codigos'])} código(s) de {nombre_prov} ya no "
+                            "dicen lo mismo que en la lista anterior**: antes los vinculaba con un "
+                            "número y esta lista no. **No se borró nada**: los vínculos viejos "
+                            "siguen cargados. Si el proveedor los corrigió, buscá el código y "
+                            "cortá el viejo; si la que está mal es esta lista, no hagas nada."
+                            + (f" {miles(_cambios['sin_ninguno'])} de ellos ahora no traen "
+                               "ningún número: si son muchos, fijate si la columna de códigos "
+                               "de fábrica quedó elegida." if _cambios["sin_ninguno"] else ""))
+                        st.dataframe(_cambios["ejemplos"], hide_index=True, width="stretch")
                     # Los números del chequeo de salud cambiaron: que se recalculen
                     invalidar_salud()
 

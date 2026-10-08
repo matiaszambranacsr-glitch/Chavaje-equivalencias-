@@ -21,7 +21,8 @@ qué proveedores, son el mismo repuesto. Corre con Streamlit sobre una base SQLi
 | `pruebas_de_los_frenos.py` | Lo que hace la app cuando algo anda mal: la base con daño queda de solo lectura, los avisos técnicos solo al administrador, el descanso de un proveedor caído, el catálogo que se achica de golpe, la prueba de que la copia de GitHub se puede recuperar, el freno de intentos también para los mecánicos, los errores (sin datos sensibles, con categoría y código), las búsquedas viejas, el doble toque y la consistencia del catálogo. |
 | `pruebas_de_las_homologaciones.py` | El registro oficial de CHAS (autopartes de seguridad): leerlo en varios formatos y cruzarlo con tus marcas. |
 | `pruebas_del_deposito.py` | El circuito del depósito y el descuento de cada cuenta: pedir, entregar, cargar en la cuenta y facturar. |
-| `pruebas_de_la_revision.py` | Que el análisis de equivalencias no se equivoque con pares ya revisados a mano, y (con `--base`) que no baje a rojo lo que aprobaste. |
+| `pruebas_de_la_revision.py` | Que el análisis de equivalencias no se equivoque con pares ya revisados a mano, y (con `--base`) que no baje a rojo lo que aprobaste ni deje limpio lo que rechazaste. |
+| `pruebas_de_la_precision.py` | Cuándo una equivalencia se da por verificada: la fuente de cada vínculo, la ficha de prueba, el veto que gana siempre, la comprobación en la mano y el proveedor que cambia de equivalente sin avisar. |
 | `pruebas_de_los_cambios.py` | El registro de quién cambió qué (sin los precios), los permisos adentro de las funciones, el orden de los vínculos en la base, la entrega con stock de menos, el vistazo de un backup y el mensaje de WhatsApp. |
 | `CONTRATOS.md` | Lo que no se puede romper, regla por regla, con la prueba que sostiene cada una. |
 | `medir_el_buscador.py` | Cuánto tarda el buscador con 10, 50 y 100 personas buscando a la vez, sobre una copia de la base real. |
@@ -41,6 +42,7 @@ python3 auditar.py               # tiene que dar ERROR 0 (revisa la app entera, 
 python3 nucleo/generar.py        # regenerar el paquete desde logica/
 python3 -m nucleo.pruebas        # tiene que decir "todo en verde"
 python3 pruebas_de_la_revision.py   # si tocaste el análisis: "todo en verde"
+python3 pruebas_de_la_precision.py  # y cuándo se da por verificada una equivalencia
 python3 pruebas_de_la_revision.py --base copia.db   # y contra tus aprobaciones
 python3 revisar_con_gemini.py    # opcional: una segunda opinión sobre el diff
 ```
@@ -6471,6 +6473,33 @@ el botón**:
   dónde vino. Solo los últimos tres años: la serie arranca en los cuarenta y trae el 89.
 - «🔌 Probar las fuentes de afuera» suma la Central de Deudores (con el CUIT de la AFIP, nunca el
   de un cliente) y la inflación de respaldo.
+
+## 🧾 La precisión de las equivalencias: «limpia no es confirmada»
+
+Una revisión con ChatGPT sobre cuándo dar dos códigos por la misma pieza. Medido sobre la copia
+de la base real del 7/10 (86.946 productos, 20.037 vínculos —todos aprobados— y 2.633 pares
+rechazados a mano).
+
+| Punto | Qué se encontró | Qué se hizo |
+|---|---|---|
+| Limpia no es confirmada; sin evidencia primaria no hay «verificada» | **Cierto.** El buscador decía «🟢 equivalencia confirmada» de cualquier vínculo directo y sólido, aunque lo único que lo sostuviera fuera que se parecen las descripciones. | Cada vínculo dice quién lo declara (`respaldo_del_origen()`, por su lote). **Fuentes:** la lista de un proveedor (17.013), el catálogo de un fabricante (74), el código escrito por el proveedor en la descripción (6), un reemplazo declarado (1) y una persona que lo verificó. **Pistas:** el barrido por descripciones (2.930), el cruce por auto (13), las medidas solas, las ventas, Mercado Libre. «Confirmada» ahora pide una fuente: **2.346 vínculos sólidos que eran solo pistas pasan a «🟡 probable, sin una fuente que lo declare»**; 16.904 siguen confirmados. La tabla muestra la columna «Respaldo». |
+| Estados y ficha de prueba de cada equivalencia | No había. | «🧾 Ficha de prueba» en el buscador: A y B, rubro y clase de pieza, quién declara cada paso (y quién lo aprobó y cuándo), los números de fábrica que citan los dos, las medidas lado a lado, lo que la contradice y el estado: **✅ VERIFICADA** (directo, con fuente, sólido y sin nada en contra), **🟡 PROBABLE** (todo con fuente, pero por un código en el medio o flojo), **🟠 CANDIDATA** (algún paso es solo una pista), **⚪ SIN CADENA**, **🔴 CON CONTRADICCIONES**, con «Falta: …». Mira el vínculo directo y la cadena más confiable, y se queda con la que mejor la sostiene. 0,1 s (1,5 s la primera vez del proceso). |
+| Validación física: quién, cuándo, foto, medición | No había. | «✋ La comprobé en la mano», con lo que se miró: deja el vínculo verificado, con quién, la fecha y la medición en la nota, **sin perder de qué lista vino**; si llegaban por un código en el medio, crea el directo. La foto por validación no se guarda: las del producto ya están aparte. |
+| Medidas: exacta, en tolerancia, ausente, contradictoria, no aplica | `comparar_medidas()` ya separaba «falta» de «coincide» (sin dato no prueba nada) y la que se contradice veta. | La ficha las muestra una por una: ✅ igual, ≈ dentro del 3 %, ❓ falta (en A, en B o en ninguno), ❌ distinta. La que no importa para esa pieza y nadie tiene no se muestra. |
+| Obligatorias y secundarias, por familia | **Las medidas no pueden ser obligatorias**: las tiene el 1 o 2 % del catálogo (1.142 productos con diámetro interno; largo total y estrías, ninguno). Exigirlas dejaría casi nada verificado. | Una matriz de 13 clases de pieza (rodamiento, retén, bujía, filtro, correa, polea, pastilla, disco, sensor de ABS, junta, eléctrica, homocinética, de un lado) con las medidas que la identifican: salen en la ficha como «para confirmar en la mano». La que se contradice tumba la equivalencia, como siempre. |
+| El precio parecido no debería sumar | Medido: sacar los +10 no cambia los falsos positivos (3 de 2.633 con y sin) y manda **577 pares bien aprobados** a revisión. | Queda en el puntaje, que ordena la cola; en la ficha el precio nunca cuenta a favor, y en contra solo avisa (dos listas pueden estar en escalas distintas). |
+| Las ventas (+35) no deberían confirmar solas | En la base real no hay ninguna venta registrada como reemplazo, así que hoy no pesa. | Suben el puntaje pero **no pasan un vínculo de franja solas**, igual que lo aprendido de tus decisiones. El vínculo que nace de una venta es una pista. El auto, el motor y la devolución de cada venta no se registran. |
+| Vetos absolutos | Ya existían en la evidencia cruzada (medidas, rubro, posición, vías, motor, cilindrada, tipo de sensor, bujía, kit y conjunto), pero en el puntaje otras señales podían volver a subir un par de rubros distintos. | «Rubros distintos» y «no son equivalentes» dejan el puntaje en 20 como mucho, sume lo que sume lo demás. Sobre la base real no cambia nada (no había un caso así): es para que no pase. Los dientes de una correa no son una medida que la app registre. |
+| Reglas nuevas que invalidan aprobaciones viejas | Ya es así: subir `VERSION_CONFIANZA` vuelve a puntuar todos los vínculos, la auditoría de los cargados los revisa, y `pruebas_de_la_revision.py --base` puntúa los 20.037 aprobados como si recién llegaran. | `VERSION_CONFIANZA` pasa a 10 por los cambios de esta tanda. |
+| Versiones de la ficha técnica | No hay historial de medidas; sí de precios. Las medidas solo cambian a mano («completar medidas» no pisa nada). | Sin cambio, hasta que haga falta. |
+| El proveedor que cambia de equivalente sin avisar | **Cierto.** Reimportando, el vínculo viejo quedaba cargado y nadie se enteraba de que el proveedor ya no lo sostiene. | Al importar, se compara con la lista anterior del mismo proveedor: «🔀 N código(s) ya no dicen lo mismo», con antes y ahora. **No se borra nada** (puede ser una corrección del proveedor o un error de la lista nueva). Si muchos quedan sin ningún número, avisa que puede ser la columna de códigos de fábrica sin elegir. Probado en la app importando dos veces. |
+| Conflicto entre fuentes | Ya estaba la alarma del número que apunta a dos piezas distintas de una marca y la de rubros distintos; ahora también el cambio de equivalente. | La ficha muestra las contradicciones juntas. |
+| Fuentes independientes | La señal del puntaje «lo confirman N listas» nunca se encendía: quien la llama no le pasa la cuenta. | La ficha cuenta las fuentes por nombre: la misma lista importada tres veces es una. Dos listas que copian el mismo catálogo no se pueden distinguir desde acá, y la ficha lo dice. |
+| Falsos positivos y negativos con un conjunto conocido | Los negativos se medían (aprobados que caen en rojo); los positivos no. | `pruebas_de_la_revision.py --base` pone también los rechazados como si recién llegaran: **3 de 2.633 quedarían limpios (0,1 %)**, los tres con la descripción idéntica y del mismo rubro; falla si pasa del 1 %. De los aprobados: 18.269 limpios, 1.768 a revisión y 6 en rojo (0,03 %). |
+
+Probado en `pruebas_de_la_precision.py` (con 18 fallas puestas a mano, las 18 detectadas), en
+`pruebas_de_la_revision.py --base` y en la app: la ficha, la comprobación en la mano y la
+importación de una lista que cambia un equivalente.
 
 ## 🔍 La revisión técnica con ChatGPT: «antes de considerarlo cerrado»
 

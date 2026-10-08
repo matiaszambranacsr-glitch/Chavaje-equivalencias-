@@ -1645,9 +1645,13 @@ def evaluar_equivalencia(desc_a, desc_b, medidas_a=None, medidas_b=None,
             puntaje += 15
             senales.append(("bien", f"🧩 Los dos son de «{fam_a}»"))
 
-    # La venta real es la señal más fuerte de todas: no es lo que alguien cree que sirve, es
-    # lo que efectivamente se vendió en su lugar y el cliente se llevó.
+    # La venta real: no es lo que alguien cree que sirve, es lo que se vendió en su lugar. Pero
+    # no prueba que haya estado bien —una devolución que no se anotó, un vehículo distinto, un
+    # error del vendedor— (lo señaló una revisión con ChatGPT): es evidencia de uso, no una
+    # fuente. Suma, pero como lo aprendido, sola no pasa un par de franja (ver abajo).
+    ajuste_por_ventas = 0
     if vendido_como_reemplazo >= 2:
+        ajuste_por_ventas = 35
         puntaje += 35
         senales.append(("bien", f"🧾 Ya lo vendiste como reemplazo {vendido_como_reemplazo} "
                                  "vez(ces): funcionó en el mostrador"))
@@ -1691,7 +1695,21 @@ def evaluar_equivalencia(desc_a, desc_b, medidas_a=None, medidas_b=None,
                                     + (" para lo que suele haber entre estas dos listas"
                                        if esperada > 2 else "")))
 
-    return sin_cruzar_la_linea_por_lo_aprendido(puntaje, ajuste_aprendido), senales
+    # LOS VETOS GANAN SIEMPRE AL PUNTAJE. Las medidas que se contradicen ya tenían tope (arriba);
+    # el rubro distinto y «uno viene adentro del otro» restaban 40, y un par con muchas señales a
+    # favor —descripción igual, código distintivo, catálogo— podía compensarlo y quedar limpio.
+    # Medido sobre la base real: hoy no pasa con ningún par (ni de los 20.037 aprobados ni de
+    # los 2.633 rechazados), así que no cambia nada de lo que hay; cierra la puerta para lo que
+    # venga (lo propuso una revisión con ChatGPT: «un veto crítico gana siempre»).
+    if any(s.startswith(VETOS_DEL_PUNTAJE) for que, s in senales if que == "mal"):
+        puntaje = min(puntaje, TOPE_CON_VETO)
+    return sin_cruzar_la_linea_por_lo_aprendido(puntaje, ajuste_aprendido + ajuste_por_ventas), senales
+
+
+# Ver «LOS VETOS GANAN SIEMPRE AL PUNTAJE». Por cómo empieza la señal: las medidas («📐»
+# con «NO coinciden») ya tienen su tope propio arriba.
+VETOS_DEL_PUNTAJE = ("🧩 Son de rubros distintos", "📦 No son equivalentes")
+TOPE_CON_VETO = 20.0
 
 
 # Las líneas que deciden qué se aprueba sin mirar: 55 separa las limpias de las que se revisan,
@@ -1700,7 +1718,8 @@ LINEAS_DE_CONFIANZA = (55, 85)
 
 
 def sin_cruzar_la_linea_por_lo_aprendido(puntaje, ajuste_aprendido):
-    """El puntaje final, entre 0 y 100, sin que lo aprendido de las marcas lo suba de franja.
+    """El puntaje final, entre 0 y 100, sin que lo aprendido de las marcas —ni las ventas como
+    reemplazo, que entran por el mismo lado— lo suba de franja.
 
     LO APRENDIDO SUMA, PERO NO ALCANZA SOLO PARA PASAR UNA LÍNEA. «De 30 ILLINOIS↔TARANTO que
     revisaste, aprobaste el 100%» sale de los pares que se revisaron, y los que se revisan son
@@ -1722,7 +1741,9 @@ def sin_cruzar_la_linea_por_lo_aprendido(puntaje, ajuste_aprendido):
 def nivel_de_confianza(puntaje):
     """Traduce el puntaje a algo accionable, sin prometer de más."""
     if puntaje >= 75:
-        return "🟢 Muy probable", "se puede aprobar sin mirar"
+        # «Muy probable» no es «confirmada»: decía «se puede aprobar sin mirar», y lo que decide
+        # es la muestra de control o una persona (lo señaló una revisión con ChatGPT).
+        return "🟢 Muy probable", "todas las señales a favor; igual la decide la muestra o vos"
     if puntaje >= 55:
         return "🟡 Probable", "razonable, pero conviene una mirada"
     if puntaje >= 30:
