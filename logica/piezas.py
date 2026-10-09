@@ -331,22 +331,67 @@ def actualizar_medidas(producto_id, diam_int, diam_ext, ancho, paso_rosca, estri
                         diam_rosca_homocinetica=None, diam_copa=None,
                         diam_copa_superior=None, largo_total=None):
     tiene_abs_valor = None if tiene_abs == "Cualquiera" else (1 if tiene_abs == "Sí" else 0)
-    with db_lock:
-        c.execute(
-            "UPDATE productos SET diametro_interno=?, diametro_externo=?, ancho=?, paso_rosca=?, "
-            "cantidad_estrias=?, ubicacion=?, estrias_internas=?, estrias_externas=?, posicion_seguro=?, "
-            "tiene_abs=?, diametro_interno_cara_b=?, diametro_externo_cara_b=?, "
-            "diametro_rosca_homocinetica=?, diametro_copa=?, diametro_copa_superior=?, "
-            "largo_total=? WHERE id=?",
-            (diam_int or None, diam_ext or None, ancho or None, (paso_rosca.strip() or None) if paso_rosca else None,
-             estrias or None, (ubicacion.strip() or None) if ubicacion else None,
-             estrias_internas or None, estrias_externas or None,
-             (posicion_seguro.strip() or None) if posicion_seguro else None, tiene_abs_valor,
-             diam_int_cara_b or None, diam_ext_cara_b or None,
-             diam_rosca_homocinetica or None, diam_copa or None,
-             diam_copa_superior or None, largo_total or None, producto_id)
-        )
-        conn.commit()
+    nuevos = {
+        "diametro_interno": diam_int or None, "diametro_externo": diam_ext or None,
+        "ancho": ancho or None,
+        "paso_rosca": (paso_rosca.strip() or None) if paso_rosca else None,
+        "cantidad_estrias": estrias or None,
+        "ubicacion": (ubicacion.strip() or None) if ubicacion else None,
+        "estrias_internas": estrias_internas or None, "estrias_externas": estrias_externas or None,
+        "posicion_seguro": (posicion_seguro.strip() or None) if posicion_seguro else None,
+        "tiene_abs": tiene_abs_valor,
+        "diametro_interno_cara_b": diam_int_cara_b or None,
+        "diametro_externo_cara_b": diam_ext_cara_b or None,
+        "diametro_rosca_homocinetica": diam_rosca_homocinetica or None,
+        "diametro_copa": diam_copa or None, "diametro_copa_superior": diam_copa_superior or None,
+        "largo_total": largo_total or None}
+    with db_lock, transaccion():
+        c.execute(f"SELECT {', '.join(nuevos)} FROM productos WHERE id = ?", (producto_id,))
+        antes = c.fetchone()
+        c.execute(f"UPDATE productos SET {', '.join(f'{k} = ?' for k in nuevos)} WHERE id = ?",
+                  list(nuevos.values()) + [producto_id])
+        # LA FICHA TIENE VERSIONES: cada medida que cambia queda anotada con lo que había, quién
+        # la cambió y cuándo, en vez de pisarse sin rastro. Lo pidió una revisión con ChatGPT
+        # («versión 1 → 54 mm, versión 2 → 56 mm, y qué fuente produjo el cambio»).
+        cambios = [(producto_id, campo, _como_texto(antes[campo]) if antes else None,
+                    _como_texto(valor), obtener_usuario_actual())
+                   for campo, valor in nuevos.items()
+                   if antes is not None and _como_texto(antes[campo]) != _como_texto(valor)]
+        c.executemany("INSERT INTO historial_de_medidas (producto_id, campo, antes, despues, "
+                      "usuario) VALUES (?, ?, ?, ?, ?)", cambios)
+    return len(cambios)
+
+
+def _como_texto(valor):
+    """Una medida como texto comparable: 52.0 y 52 son lo mismo; vacío y 0, también."""
+    if valor in (None, "", 0):
+        return None
+    if isinstance(valor, float) and valor.is_integer():
+        return str(int(valor))
+    return str(valor).strip() or None
+
+
+def autos_que_nombran_al_producto(producto_id):
+    """Cuántos autos distintos nombran las aplicaciones del código de ese producto: es parte de
+    lo que toca un cambio en su ficha."""
+    c.execute("""SELECT COUNT(DISTINCT UPPER(a.marca_auto) || '|' || UPPER(a.modelo_auto))
+                 FROM aplicaciones a JOIN productos p ON p.codigo_clean = a.codigo_clean
+                 WHERE p.id = ?""", (producto_id,))
+    return c.fetchone()[0] or 0
+
+
+def historial_de_medidas(producto_id, tope=50):
+    """Los cambios de medidas a mano de un producto, del más nuevo al más viejo."""
+    c.execute("""SELECT substr(fecha, 1, 16) AS fecha, campo, antes, despues, usuario
+                 FROM historial_de_medidas WHERE producto_id = ?
+                 ORDER BY fecha DESC, id DESC LIMIT ?""", (producto_id, tope))
+    etiquetas = {**dict(CAMPOS_MEDIDAS), **dict(_MEDIDAS_EXACTAS),
+                 "ubicacion": "ubicación en el depósito", "estrias_internas": "estrías internas",
+                 "estrias_externas": "estrías externas", "posicion_seguro": "posición del seguro",
+                 "tiene_abs": "ABS"}
+    return [{"Fecha": r["fecha"], "Medida": etiquetas.get(r["campo"], r["campo"]),
+             "Antes": r["antes"] or "—", "Ahora": r["despues"] or "—",
+             "Quién": r["usuario"] or "—"} for r in c.fetchall()]
 
 
 # ============================================================

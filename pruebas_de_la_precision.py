@@ -557,6 +557,7 @@ def probar(L):
     esperar("sigue apareciendo, por el número de fábrica", bool(fila_rx), True)
     esperar("pero marcada como rechazada", str(fila_rx.get("Rechazada", "")).startswith("🚫 "),
             True)
+    esperar("con el motivo", "Es otra pieza" in str(fila_rx.get("Rechazada", "")), True)
     esperar("el número de fábrica no está rechazado", "Rechazada" in por_id.get(rx_o, {}), False)
     esperar("y el veredicto lo dice primero",
             ns["veredicto_de_la_equivalencia"](dict(fila_rx, Confianza="🟢 sólida"))
@@ -790,9 +791,8 @@ def probar(L):
             tablero["numeros"]["devoluciones_no_era_la_pieza"], 2)
     esperar("mide cuánto tardó en decidirse lo que estaba en la cola",
             tablero["numeros"]["con_dias"] >= 1, True)
-    esperar("y por familia", bool(tablero["por_familia"]) and
-            set(tablero["por_familia"][0]) == {"Familia", "Decididos", "Rechazados", "% rechazado"},
-            True)
+    esperar("y por familia, con su semáforo", bool(tablero["por_familia"]) and
+            tablero["por_familia"][0]["Semáforo"] in ("🔴", "🟡", "🟢"), True)
 
     # 36. Una regla que hace subir de franja demasiados vínculos de una vez.
     sospecha = ns["deriva_sospechosa"]
@@ -800,6 +800,134 @@ def probar(L):
                                                        "version": "13"}).startswith("⚠️"), True)
     esperar("60 de 10.000, no", sospecha({"subieron": 60, "total": 10000}), "")
     esperar("10 de 100, no", sospecha({"subieron": 10, "total": 100}), "")
+
+    # 37. Lo que se buscó en contra en las descripciones.
+    pd_a = producto("PD7", "PASTILLA DE FRENO DELANTERA VW GOL 1.6 1995/2000", fispa)
+    pd_b = producto("IPD7", "PASTILLA DE FRENO TRASERA VW GOL 1.8 2008/2012 KIT", illinois)
+    vincular(pd_a, pd_b, "BARRIDO (automático) · 02/10 10:00")
+    conn.commit()
+    hoy = {t["Característica"]: t["Hoy"] for t in ns["ficha_de_prueba"](pd_a, pd_b)["la_tumbaria"]}
+    esperar("otro lado", hoy.get("lado o posición", "")[:2], "⚠️")
+    esperar("otra cilindrada", hoy.get("cilindrada", "")[:2], "⚠️")
+    esperar("otros años", hoy.get("años", "")[:2], "⚠️")
+    esperar("kit contra pieza suelta", hoy.get("kit o pieza suelta", "")[:2], "⚠️")
+    esperar("el mismo rubro", hoy.get("rubro"), "✅ los dos dicen lo mismo")
+    esperar("lo que no se pudo comparar, primero o después, pero figura",
+            ns["ficha_de_prueba"](pd_a, pd_b)["la_tumbaria"][0]["Hoy"][:1] in ("⚠", "❌"), True)
+
+    # 38. De dónde y cuándo.
+    donde = ns["de_donde_y_cuando"]
+    esperar("la lista y la fecha", donde("FISPA · lista.xlsx · 01/10/2026 10:00:00"),
+            "FISPA (01/10/2026 10:00:00)")
+    esperar("una tanda automática", donde("BARRIDO (automático) · 25/09 20:43"),
+            "BARRIDO (automático) (25/09 20:43)")
+    esperar("sin fecha", donde("VIEJA"), "VIEJA")
+    esperar("sin nada", donde(None), "—")
+
+    # 39. Las medidas tienen versiones, y el cambio dice a qué toca.
+    esperar("el cambio de antes quedó anotado", [(h["Medida"], h["Antes"], h["Ahora"])
+                                                  for h in ns["historial_de_medidas"](md_b)],
+            [("diám. interno", "40", "52")])
+    esperar("guardar lo mismo no anota nada",
+            ns["actualizar_medidas"](md_b, 52, 60, None, None, None, None), 0)
+    esperar("otro cambio, otra versión",
+            ns["actualizar_medidas"](md_b, 52, 61.5, None, None, None, None), 1)
+    esperar("la más nueva primero", ns["historial_de_medidas"](md_b)[0]["Ahora"], "61.5")
+    esperar("y cuántos autos nombra su código", ns["autos_que_nombran_al_producto"](fi_b), 2)
+
+    # 40. Vender lo que no está confirmado: queda como alternativa comercial y no confirma.
+    como = ns["como_se_vende"]
+    esperar("confirmada: equivalente", como("🟢 equivalencia confirmada"), "equivalente")
+    esperar("probable: alternativa", como("🟡 probable: llega por 1 código(s) en el medio"),
+            "alternativa")
+    esperar("lo buscado: nada", como("el que buscaste"), None)
+    esperar("el botón lo dice", ns["rotulo_del_boton_de_venta"](probable),
+            "🛒 Se llevó como alternativa")
+    vt_a = producto("VT1", "BOMBA DE AGUA FIAT PALIO", fispa)
+    vt_b = producto("IVT1", "BOMBA DE AGUA FIAT PALIO", illinois)
+    conn.commit()
+    for _ in range(2):
+        ns["registrar_venta"](vt_b, "VT1", "🟡 probable")
+    esperar("queda congelado el veredicto de ese momento", tuple(c.execute(
+        "SELECT veredicto, como FROM ventas_registradas WHERE producto_id = ? LIMIT 1",
+        (vt_b,)).fetchone()), ("🟡 probable", "alternativa"))
+    esperar("vendida como alternativa no confirma",
+            (min(vt_a, vt_b), max(vt_a, vt_b)) in ns["pares_confirmados_por_ventas"](), False)
+    for _ in range(2):
+        ns["registrar_venta"](vt_b, "VT1", "🟢 equivalencia confirmada")
+    esperar("vendida como equivalente, sí",
+            (min(vt_a, vt_b), max(vt_a, vt_b)) in ns["pares_confirmados_por_ventas"](), True)
+
+    # 41. El tablero: semáforo, degradación, registro de errores y la foto de cada día.
+    for _ in range(2):
+        ns["registrar_devolucion"](vt_b, "VT1", "medida")
+    ns["marcar_revision"]([(rl_a, rl_b)], "ok")
+    ns["marcar_revision"]([(rl_a, rl_b)], "rechazada", "otra_pieza")
+    tablero = ns["tablero_de_calidad"](minimo_por_grupo=1)
+    familia_bomba = ns["familia_para_comparar"]("BOMBA DE AGUA FIAT PALIO")
+    esperar("la familia con devoluciones nuevas está empeorando",
+            familia_bomba in tablero["empeorando"], True)
+    esperar("y su semáforo está en rojo", {f["Familia"]: f["Semáforo"] for f in
+                                           tablero["por_familia"]}.get(familia_bomba), "🔴")
+    detectado = [e["Detectado por"] for e in tablero["errores"]]
+    esperar("el registro trae las devoluciones y lo aprobado y después rechazado",
+            (any(x.startswith("↩️") for x in detectado), any(x.startswith("🔍") for x in detectado)),
+            (True, True))
+    esperar("sin una foto de hace un mes, nada que comparar", tablero["hace_un_mes"], None)
+    import json as _json
+    _fotos = _json.loads(ns["obtener_config"]("calidad_fotos", "[]"))
+    esperar("se guardó la foto de hoy", len(_fotos), 1)
+    _vieja = (__import__("datetime").datetime.now()
+              - __import__("datetime").timedelta(days=40)).strftime("%Y-%m-%d")
+    ns["guardar_config"]("calidad_fotos", _json.dumps([dict(_fotos[0], fecha=_vieja)] + _fotos))
+    esperar("con una de hace 40 días, compara contra esa",
+            ns["tablero_de_calidad"]()["hace_un_mes"]["fecha"], _vieja)
+
+    # 42. Una tanda automática que trae demasiado de una vez.
+    anomalia = ns["anomalia_de_la_tanda"]
+    umbrales = dict(ns["ANOMALIA_DE_TANDA"])
+    ns["ANOMALIA_DE_TANDA"].update(veces=2, minimo=2, primera_minimo=2, primera_proporcion=0.0)
+    try:
+        for x, y in ((pd_a, vt_a), (pd_b, vt_a), (rl_a, vt_a)):
+            c.execute("INSERT INTO equivalencias_pendientes (producto_a_id, producto_b_id, origen, "
+                      "lote) VALUES (?, ?, 'medidas', 'POR MEDIDAS · 05/10 10:00')",
+                      (min(x, y), max(x, y)))
+        conn.commit()
+        esperar("la primera tanda de una regla, grande: avisa",
+                anomalia("POR MEDIDAS · 05/10 10:00").startswith("⚠️ Primera tanda"), True)
+        esperar("una lista de un proveedor, no", anomalia("FISPA · lista.xlsx · 01/10/2026 10:00:00"),
+                "")
+        c.execute("INSERT INTO equivalencias_pendientes (producto_a_id, producto_b_id, origen, lote) "
+                  "VALUES (?, ?, 'medidas', 'POR MEDIDAS · 06/10 10:00')",
+                  (min(rl_b, vt_a), max(rl_b, vt_a)))
+        conn.commit()
+        esperar("contra las anteriores de la misma regla",
+                anomalia("POR MEDIDAS · 05/10 10:00").startswith("⚠️ Tanda anómala"), True)
+        esperar("la chica, no", anomalia("POR MEDIDAS · 06/10 10:00"), "")
+        c.execute("INSERT INTO equivalencias_pendientes (producto_a_id, producto_b_id, origen, lote) "
+                  "VALUES (?, ?, 'medidas', 'POR MEDIDAS · 06/10 10:00')",
+                  (min(rl_b, vt_b), max(rl_b, vt_b)))
+        conn.commit()
+        esperar("pasar el mínimo no alcanza: tiene que traer mucho más que las otras",
+                anomalia("POR MEDIDAS · 06/10 10:00"), "")
+    finally:
+        ns["ANOMALIA_DE_TANDA"].update(umbrales)
+
+    # 43. El laboratorio: dos códigos cualesquiera, por dimensión.
+    esperar("los productos de un código", ns["productos_del_codigo"]("FI9"), [(fi_a, "FI9 (FISPA)")])
+    perfil = {d: v for d, v, _q in ns["perfil_de_la_equivalencia"](ns["ficha_de_prueba"](fi_a, fi_b))}
+    esperar("identidad: un vínculo directo que declara una lista", perfil["Identidad"], 100)
+    esperar("aplicación: el único auto de A está en B", perfil["Aplicación"], 100)
+    esperar("dimensiones: sin medidas, sin datos", perfil["Dimensiones"], None)
+    esperar("evidencia: una fuente", perfil["Evidencia"], 50)
+    perfil = {d: v for d, v, _q in ns["perfil_de_la_equivalencia"](ns["ficha_de_prueba"](pd_a, pd_b))}
+    esperar("lo que declaran: el rubro coincide, lo demás no", perfil["Lo que declaran"], 20)
+    perfil = {d: v for d, v, _q in ns["perfil_de_la_equivalencia"](ns["ficha_de_prueba"](rl_a, rl_b))}
+    esperar("lo que dice uno solo no cuenta ni a favor ni en contra: sin datos",
+            perfil["Lo que declaran"], None)
+    esperar("«sin clasificar» no es un rubro que se contradiga",
+            dict(ns["_lo_que_dicen_las_descripciones"]("ZZQ 123", "FILTRO DE ACEITE VW GOL"))
+            .get("rubro", "❓")[:1], "❓")
     return fallas
 
 

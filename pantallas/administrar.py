@@ -504,16 +504,27 @@ if pagina == PAGINAS[3]:
                                                key="e_copa_sup")
 
                 if st.button("💾 Guardar medidas y ubicación"):
-                    actualizar_medidas(id_medidas, e_diam_int, e_diam_ext, e_ancho, e_paso, e_estrias, e_ubicacion,
-                                        e_estrias_int, e_estrias_ext, e_seguro, e_abs,
-                                        e_diam_int_b, e_diam_ext_b, e_rosca_homo, e_copa,
-                                        e_copa_sup, e_largo_total)
-                    # Las equivalencias se puntuaron con las medidas viejas: se vuelven a puntuar.
-                    _n_rep, _n_franja = repuntuar_los_vinculos_de(id_medidas)
-                    st.success("Guardado." + (
-                        f" Afecta a {_n_rep} equivalencia(s): se volvieron a puntuar"
-                        + (f", y {_n_franja} cambió/cambiaron de franja." if _n_franja
-                           else "; ninguna cambió de franja.") if _n_rep else ""))
+                    _n_camb = actualizar_medidas(
+                        id_medidas, e_diam_int, e_diam_ext, e_ancho, e_paso, e_estrias, e_ubicacion,
+                        e_estrias_int, e_estrias_ext, e_seguro, e_abs, e_diam_int_b, e_diam_ext_b,
+                        e_rosca_homo, e_copa, e_copa_sup, e_largo_total)
+                    # Las equivalencias se puntuaron con las medidas viejas: se vuelven a puntuar,
+                    # y se dice a qué toca el cambio (equivalencias y autos).
+                    _n_rep, _n_franja = (repuntuar_los_vinculos_de(id_medidas) if _n_camb
+                                         else (0, 0))
+                    _n_autos = autos_que_nombran_al_producto(id_medidas) if _n_camb else 0
+                    st.success(
+                        "Guardado: no cambió ninguna medida." if not _n_camb else
+                        f"Guardado: cambiaron {_n_camb} dato(s)."
+                        + (f" Afecta a {_n_rep} equivalencia(s), que se volvieron a puntuar"
+                           + (f" ({_n_franja} cambió/cambiaron de franja)" if _n_franja
+                              else " (ninguna cambió de franja)") if _n_rep else "")
+                        + (f", y a {_n_autos} auto(s) que nombra su código." if _n_autos else "."))
+                _hist_med = historial_de_medidas(id_medidas)
+                if _hist_med:
+                    st.caption("🕰️ Cambios de medidas de este producto (no se pisa nada: queda lo "
+                               "que había):")
+                    st.dataframe(_hist_med, width="stretch", hide_index=True)
 
                 st.markdown("**📷 Fotos del producto**")
                 explicar(

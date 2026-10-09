@@ -6475,6 +6475,34 @@ el botón**:
 - «🔌 Probar las fuentes de afuera» suma la Central de Deudores (con el CUIT de la AFIP, nunca el
   de un cliente) y la inflación de respaldo.
 
+## 🧪 La precisión, sexta parte: refutar, el laboratorio, la venta como alternativa y si la app mejora
+
+Las ideas finales 3 a 15 de la misma revisión con ChatGPT y sus puntos 165 a 177, medidos sobre la
+copia de la base real del 8/10.
+
+| Punto | Qué se encontró | Qué se hizo |
+|---|---|---|
+| Idea 3. Un motor de prueba destructiva | Los vetos ya bloquean (medidas, lado, motor, cilindrada, parámetros, con o sin equipamiento, kit), pero la ficha no mostraba qué se había buscado en contra. | «🎯 Lo que la tumbaría» suma lo que dicen las dos descripciones: lado, cilindrada, motor, válvulas, años, combustible, con o sin equipamiento, kit y rubro, cada uno «✅ dicen lo mismo», «⚠️ dicen distinto» o «❓ solo lo dice A». En 300 vínculos al azar: 6 dicen distinto en kit, 2 en cilindrada, 2 en rubro y 1 en motor. |
+| Ideas 4, 6 y 11. La IA investiga, los bloqueos no se compensan, tres niveles | Ya: la IA solo lee códigos de fotos; un veto deja el puntaje en 20 como mucho; el vendedor ve el veredicto, el técnico la ficha y el auditor el expediente y el historial. | — |
+| Idea 5. Ficha por familia | Ya: 13 clases de pieza con sus medidas. Que sean obligatorias no se puede (las tiene el 1 o 2 % del catálogo). El sellado de los rodamientos (2RS, ZZ) lo declaran 2 productos. | Sin cambio. |
+| Idea 7. Aprender de los errores | Lo que se rechaza con motivo ya busca los parecidos en la cola. | **«🧾 Registro de errores»** en el tablero: lo que volvió porque no le iba y lo que se aprobó y después se rechazó, cada uno con el motivo, lo que lo dejó pasar, la lista de la que vino y quién lo detectó (una devolución o una revisión). Hoy está vacío. |
+| Idea 8. Memoria negativa | Lo rechazado ya sale «🔴 rechazada». | Ahora dice también por qué («🚫 Chavo, 05/10 (🔩 Es otra pieza)»). |
+| Idea 9. Equivalencias sospechosamente fáciles | Nada automático se aprueba solo, pero una tanda enorme se podía aprobar en bloque. | **Tanda anómala**: si una regla automática trae 10 veces más que sus tandas anteriores, o la primera vez más del 20 % de lo cargado, la cola lo avisa y pide revisarla con la muestra. Salta una sola: el barrido por descripciones, que trajo 9.323 pares de una vez (el 54 % de lo que había). Las listas de proveedores no cuentan. |
+| Idea 10. Laboratorio de equivalencias | — | **«🧪 Laboratorio»** (Estadísticas → Equivalencias sugeridas): dos códigos cualesquiera, vinculados o no, con una barra por dimensión —identidad, aplicación, dimensiones, lo que declaran, evidencia— y las contradicciones, y la ficha completa abajo. No toca nada. |
+| Idea 12. Modo mostrador | Ya: en el celular, tarjetas con el veredicto; la ficha es el «ver por qué». | — |
+| Ideas 13 y 14. Proteger al vendedor, alternativa comercial | Cualquier venta anotada contaba como que la equivalencia sirvió. | Si lo que se lleva no está confirmado, el botón dice **«🛒 Se llevó como alternativa»** (y con varios resultados, un aviso arriba), la venta queda anotada como alternativa comercial y **no confirma la equivalencia**. |
+| Idea 15 y puntos 165 y 166. ¿Mejora? Degradación y semáforo | El tablero decía cómo está, no hacia dónde va. | Una **foto por día** de las cifras (cuando se abre el tablero) y la comparación con la de hace un mes; el porcentaje de vínculos con una fuente que los declara (hoy 85,3 %: 17.094 de 20.037); un **semáforo por familia** (🔴 distribución, caños y juntas; 🟡 sin clasificar; 🟢 escape, motor, eléctrico…) y un aviso si una familia **empeora**: más devoluciones en los últimos 30 días que en los 30 de antes. |
+| 167, 168 y 173. El proveedor que cambia, cambios silenciosos | Ya: al importar, «🔀 ya no dicen lo mismo» y «📝 vienen con otra ficha», sin pisar nada. | — |
+| 169 y 170. Versiones de la ficha e impacto | Las medidas corregidas a mano se pisaban sin rastro. | Cada cambio queda con lo que había, quién y cuándo («🕰️ Cambios de medidas»), y el aviso dice a cuántas equivalencias y a cuántos autos toca. Guardar sin cambiar nada no vuelve a puntuar. |
+| 171. Congelar lo vendido | Los presupuestos ya guardan sus piezas y precios. | La venta guarda el veredicto que tenía en ese momento. |
+| 172. Evidencia temporal | La ficha decía de qué lista venía cada paso. | Y cuándo se importó: «FISPA (25/09 20:33)». |
+| 174 a 177. Estados, obsoleta, retirada, sustitución oficial | Los estados existen con otros nombres: pendiente, limpia o a revisión, aprobada (probable, candidata o verificada), vigilada por la vigencia, rechazada o devuelta. La sustitución oficial es la tabla de reemplazos (🔁). «Discontinuado» lo dicen 2 productos, ninguno vinculado. | Sin cambio. |
+
+`VERSION_CONFIANZA` sigue en 13. Probado en `pruebas_de_la_precision.py` (24 fallas puestas a
+mano, las 24 detectadas) y en la app: el laboratorio, el aviso de la tanda del barrido, el
+tablero, la venta de un resultado probable (queda «alternativa», con su veredicto), el cambio de
+una medida con su versión y el recorrido de las 32 pantallas, sin errores.
+
 ## 🧭 La precisión, quinta parte: no recomendar lo dudoso, el expediente y el tablero
 
 Puntos 127 a 164 de la misma revisión con ChatGPT, y sus dos ideas finales («que Chavaje no

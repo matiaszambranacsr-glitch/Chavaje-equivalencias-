@@ -668,7 +668,7 @@ def ficha_de_prueba(id_a, id_b, tolerancia_pct=3):
         cadenas.append([{"Paso": f"{pa['codigo_raw']} ({pa['marca']}) → "
                                  f"{pb['codigo_raw']} ({pb['marca']})",
                          "Confianza": directo["conf"],
-                         "Vino de": (directo["lote"] or "—").split(" · ")[0],
+                         "Vino de": de_donde_y_cuando(directo["lote"]),
                          "_lote": directo["lote"], "_verificada": bool(directo["v"]),
                          "_a": id_a, "_b": id_b}])
     mejor_camino = camino_entre(id_a, id_b)
@@ -887,6 +887,7 @@ def ficha_de_prueba(id_a, id_b, tolerancia_pct=3):
         nombre = _etiqueta.get(cp, cp)
         tumbaria.append((nombre, "la que más la identifica" if i == 0 else "importante",
                          _estado_de.get(nombre, "❓ no la tiene ninguno")))
+    declarado = []      # lo que dicen las descripciones (no las medidas): ver el laboratorio
     _pa_dec = parametros_declarados(normalizar_texto(pa["descripcion"] or ""))
     _pb_dec = parametros_declarados(normalizar_texto(pb["descripcion"] or ""))
     for clave in sorted(set(_pa_dec) | set(_pb_dec)):
@@ -897,19 +898,139 @@ def ficha_de_prueba(id_a, id_b, tolerancia_pct=3):
         else:
             hoy = f"❓ solo lo dice {'A' if clave in _pa_dec else 'B'}"
         tumbaria.append((clave, "importante", hoy))
+        declarado.append((clave, hoy))
+    # Y lo que se buscó EN CONTRA en las descripciones: otro lado, otra cilindrada, otro motor,
+    # otros años, otro combustible, con o sin un equipamiento, kit contra pieza suelta, otro
+    # rubro. Lo pidió una revisión con ChatGPT («un motor de prueba destructiva: intentá
+    # demostrar que NO lo son»). Lo que bloquea son los vetos (ver evidencia_cruzada()); acá
+    # se ve qué se comparó y qué no se pudo comparar.
+    for nombre, hoy in _lo_que_dicen_las_descripciones(pa["descripcion"], pb["descripcion"]):
+        tumbaria.append((nombre, "importante", hoy))
+        declarado.append((nombre, hoy))
+    ficha["declarado"] = declarado
     if ficha["autos"]["solo_a"] or ficha["autos"]["solo_b"]:
         tumbaria.append(("aplicación (autos)", "importante",
                          f"✅ {len(ficha['autos']['comun'])} en común" if ficha["autos"]["comun"]
                          else "❌ ninguno en común" if ficha["autos"]["solo_a"]
                          and ficha["autos"]["solo_b"]
                          else f"❓ solo los nombra {'A' if ficha['autos']['solo_a'] else 'B'}"))
-    _grupo = {"❌": 0, "❓": 1}
+    _grupo = {"❌": 0, "⚠": 0, "❓": 1}
     tumbaria.sort(key=lambda t: (_grupo.get(t[2][:1], 2),
                                  0 if t[1] == "la que más la identifica" else 1))
     ficha["la_tumbaria"] = [{"Característica": n_, "Importancia": i_, "Hoy": h_}
                             for n_, i_, h_ in tumbaria]
     ficha["estado"], ficha["falta"] = estado, falta
     return ficha
+
+
+def perfil_de_la_equivalencia(ficha):
+    """Cuánto sostiene cada dimensión de la ficha, de 0 a 100, o None si no hay con qué
+    medirla: [(dimensión, valor, qué dice)]. Es la vista del «laboratorio de equivalencias» que
+    pidió una revisión con ChatGPT (identidad, aplicación, dimensiones, evidencia,
+    contradicciones). No es un puntaje nuevo: lo que decide sigue siendo la ficha."""
+    perfil = []
+    n_comunes = sum(1 for n in ficha["numeros_en_comun"] if n["_primarias"])
+    directo_con_fuente = any(p["_primaria"] for p in ficha["pasos"]) and len(ficha["pasos"]) == 1
+    perfil.append(("Identidad", 100 if directo_con_fuente or n_comunes >= 2
+                   else 50 if n_comunes == 1 else 0,
+                   "un vínculo directo que declara una fuente" if directo_con_fuente
+                   else f"{n_comunes} número(s) de fábrica en común"))
+    autos = ficha["autos"]
+    total_a = len(autos["comun"]) + autos["solo_a"]
+    total_b = len(autos["comun"]) + autos["solo_b"]
+    if total_a and total_b:
+        n_comun = len([x for x in autos["comun"] if not x.startswith("y ")])
+        perfil.append(("Aplicación", round(100 * n_comun / min(total_a, total_b)),
+                       f"{n_comun} auto(s) en común"))
+    else:
+        perfil.append(("Aplicación", None, "alguno de los dos no nombra autos"))
+    comparables = [m for m in ficha["medidas"] if not m["Estado"].startswith("❓")]
+    if comparables:
+        iguales = sum(1 for m in comparables if m["Estado"].startswith(("✅", "≈")))
+        perfil.append(("Dimensiones", round(100 * iguales / len(comparables)),
+                       f"{iguales} de {len(comparables)} medidas coinciden"))
+    else:
+        perfil.append(("Dimensiones", None, "no hay ninguna medida para comparar"))
+    declarado = [(n_, h_) for n_, h_ in ficha["declarado"] if h_[:1] in ("✅", "❌", "⚠")]
+    if declarado:
+        iguales = sum(1 for _n, h_ in declarado if h_.startswith("✅"))
+        perfil.append(("Lo que declaran", round(100 * iguales / len(declarado)),
+                       f"{iguales} de {len(declarado)} coinciden"))
+    else:
+        perfil.append(("Lo que declaran", None, "las descripciones no declaran nada comparable"))
+    perfil.append(("Evidencia", min(100, 50 * len(ficha["fuentes"])),
+                   f"{len(ficha['fuentes'])} fuente(s): {', '.join(ficha['fuentes']) or 'ninguna'}"))
+    return perfil
+
+
+def productos_del_codigo(texto, tope=20):
+    """[(id, «código (marca)»)] de los productos con ese código, para elegir uno."""
+    clean = sanitizar(texto or "")
+    if not clean:
+        return []
+    c.execute("""SELECT p.id, p.codigo_raw, m.nombre FROM productos p JOIN marcas m ON m.id = p.marca_id
+                 WHERE p.codigo_clean = ? OR p.codigo_barras = ? ORDER BY m.nombre LIMIT ?""",
+              (clean, clean, tope))
+    return [(r["id"], f"{r['codigo_raw']} ({r['nombre']})") for r in c.fetchall()]
+
+
+def de_donde_y_cuando(lote):
+    """«FISPA (25/09 20:33)»: quién lo dijo y cuándo se cargó. Lo pidió una revisión con
+    ChatGPT («evidencia temporal: no "el fabricante dice X", sino "decía X el 14/09"»): las
+    listas cambian, y lo que declara una lista vale para la fecha en que se importó."""
+    partes = [x.strip() for x in (lote or "").split(" · ") if x.strip()]
+    if not partes:
+        return "—"
+    cuando = partes[-1] if len(partes) > 1 and re.search(r"\d{1,2}/\d{1,2}", partes[-1]) else ""
+    return partes[0] + (f" ({cuando})" if cuando else "")
+
+
+def _lo_que_dicen_las_descripciones(desc_a, desc_b):
+    """[(qué, cómo está)] de lo que las dos descripciones declaran y se puede comparar: «✅ los
+    dos dicen lo mismo», «⚠️ dicen distinto: …» o «❓ solo lo dice A/B». Lo que no dice ninguno
+    no sale."""
+    fa, fb = firma_de_producto(desc_a or ""), firma_de_producto(desc_b or "")
+    if not fa or not fb:
+        return []
+
+    def _txt(v):
+        if isinstance(v, (set, frozenset, tuple, list)):
+            return "/".join(sorted(f"{x[0]}-{x[1]}" if isinstance(x, tuple) else str(x) for x in v))
+        return str(v)
+
+    def _anios_se_tocan(a, b):
+        return any(d1 <= h2 and d2 <= h1 for d1, h1 in a for d2, h2 in b)
+    salida = []
+    for nombre, clave in (("lado o posición", "posicion"), ("cilindrada", "cilindradas"),
+                          ("motor", "motores"), ("válvulas", "valvulas"), ("años", "anios"),
+                          ("combustible", "combustible"), ("rubro", "familia")):
+        va, vb = fa.get(clave), fb.get(clave)
+        if clave == "familia":      # «Sin clasificar» no declara nada
+            va, vb = (None if x == "Sin clasificar" else x for x in (va, vb))
+        if not va and not vb:
+            continue
+        if va and vb:
+            if clave == "anios":
+                igual = _anios_se_tocan(va, vb)
+            elif isinstance(va, (set, frozenset)):
+                igual = bool(set(va) & set(vb))
+            else:
+                igual = va == vb
+            salida.append((nombre, "✅ los dos dicen lo mismo" if igual
+                           else f"⚠️ dicen distinto: {_txt(va)} contra {_txt(vb)}"))
+        else:
+            salida.append((nombre, f"❓ solo lo dice {'A' if va else 'B'}"))
+    ea, eb = dict(fa.get("equipamiento") or ()), dict(fb.get("equipamiento") or ())
+    for equipo in sorted(set(ea) | set(eb)):
+        if equipo in ea and equipo in eb:
+            salida.append((f"con o sin {equipo}", "✅ los dos dicen lo mismo" if ea[equipo] == eb[equipo]
+                           else "⚠️ dicen distinto: una con y la otra sin"))
+        else:
+            salida.append((f"con o sin {equipo}", f"❓ solo lo dice {'A' if equipo in ea else 'B'}"))
+    if bool(fa.get("kit")) != bool(fb.get("kit")):
+        salida.append(("kit o pieza suelta", f"⚠️ dicen distinto: {'A' if fa.get('kit') else 'B'} "
+                                             "es un kit"))
+    return salida
 
 
 def autos_de_los_dos(clean_a, clean_b, tope=8):

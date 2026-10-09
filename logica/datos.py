@@ -1203,6 +1203,14 @@ def _esquema_gestion(c):
         fecha TEXT DEFAULT (datetime('now'))
     )""")
     c.execute("CREATE INDEX IF NOT EXISTS idx_ventas_fecha ON ventas_registradas(fecha)")
+    # CÓMO SE VENDIÓ: el veredicto que tenía la equivalencia en ese momento, congelado (si
+    # después cambia, la venta conserva lo que se sabía), y si se vendió como equivalente o como
+    # alternativa comercial. Ver registrar_venta().
+    _cols_ventas = [f[1] for f in c.execute("PRAGMA table_info(ventas_registradas)")]
+    if "veredicto" not in _cols_ventas:
+        c.execute("ALTER TABLE ventas_registradas ADD COLUMN veredicto TEXT")
+    if "como" not in _cols_ventas:
+        c.execute("ALTER TABLE ventas_registradas ADD COLUMN como TEXT")
     # Sin este, "cuándo se vendió por última vez este producto" recorría la tabla de ventas
     # ENTERA una vez por producto. Con el estante lleno eso es minutos de espera.
     c.execute("CREATE INDEX IF NOT EXISTS idx_ventas_prod ON ventas_registradas(producto_id)")
@@ -1267,6 +1275,19 @@ def _esquema_gestion(c):
     # error, se puede ver qué regla lo dejó pasar. Ver marcar_revision().
     if "por_que" not in _cols_rev:
         c.execute("ALTER TABLE equivalencias_revisadas ADD COLUMN por_que TEXT")
+    # LAS VERSIONES DE LAS MEDIDAS: cada medida que se cambia a mano queda anotada con lo que
+    # había antes. Ver actualizar_medidas().
+    c.execute("""CREATE TABLE IF NOT EXISTS historial_de_medidas (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        producto_id INTEGER NOT NULL,
+        campo TEXT NOT NULL,
+        antes TEXT,
+        despues TEXT,
+        usuario TEXT,
+        fecha TEXT DEFAULT (datetime('now'))
+    )""")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_historial_medidas_prod "
+              "ON historial_de_medidas(producto_id)")
     # EL HISTORIAL de las decisiones: equivalencias_revisadas guarda la ÚLTIMA (aprobar después de
     # rechazar la pisa), esto guarda TODAS, y no se corrige ni se borra —lo cuidan los dos
     # disparadores—. Con la versión de las reglas que puntuó el par y la lista de la que vino:

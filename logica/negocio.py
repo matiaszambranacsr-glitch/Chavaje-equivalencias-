@@ -1683,7 +1683,7 @@ def solicitar_reposicion(producto_id):
         conn.commit()
 
 
-def anotar_venta_y_avisar(producto_id, termino_pedido, rotulo, donde=""):
+def anotar_venta_y_avisar(producto_id, termino_pedido, rotulo, donde="", veredicto=None):
     """Lo que corre al tocar «Se llevó». Sin el aviso el botón no mostraba nada: en el celular
     eso invita a tocar de nuevo, y cada toque es otra venta anotada que después pesa en las
     equivalencias sugeridas como si el cliente hubiera vuelto.
@@ -1696,8 +1696,18 @@ def anotar_venta_y_avisar(producto_id, termino_pedido, rotulo, donde=""):
     if modo_solo_lectura():
         st.session_state.setdefault("_lo_anotado", {})[donde] = TEXTO_DE_SOLO_LECTURA
         return
-    registrar_venta(producto_id, termino_pedido)
-    st.session_state.setdefault("_lo_anotado", {})[donde] = f"🛒 Anotado: se llevó {rotulo}"
+    registrar_venta(producto_id, termino_pedido, veredicto)
+    st.session_state.setdefault("_lo_anotado", {})[donde] = (
+        f"🛒 Anotado como alternativa comercial: se llevó {rotulo}. No confirma que sea "
+        "equivalente." if como_se_vende(veredicto) == "alternativa"
+        else f"🛒 Anotado: se llevó {rotulo}")
+
+
+def rotulo_del_boton_de_venta(fila):
+    """«🛒 Se llevó», o «🛒 Se llevó como alternativa» si la equivalencia no está confirmada: el
+    botón mismo dice cómo queda anotada la venta. Ver registrar_venta()."""
+    return ("🛒 Se llevó como alternativa"
+            if como_se_vende(veredicto_de_la_equivalencia(fila)) == "alternativa" else "🛒 Se llevó")
 
 
 def pedir_reposicion_y_avisar(producto_id, rotulo, donde=""):

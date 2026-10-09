@@ -12,15 +12,30 @@ se usan sin importarlos los nombres que definen las partes anteriores."""
 # pidió contra lo que se vendió, el sistema propone equivalencias candidatas para que el dueño
 # las confirme. No inventa nada solo: propone, y una persona decide.
 
-def registrar_venta(producto_id, termino_pedido=""):
-    """Anota que un producto se vendió, y qué había pedido el cliente cuando lo pidió."""
+def registrar_venta(producto_id, termino_pedido="", veredicto=None):
+    """Anota que un producto se vendió, y qué había pedido el cliente cuando lo pidió.
+
+    Con el veredicto que tenía en el buscador en ese momento, congelado: si mañana la
+    equivalencia cambia, la venta conserva lo que se sabía cuando se hizo. Y si no estaba
+    confirmada, queda como ALTERNATIVA COMERCIAL: puede resolverle el problema al cliente, pero
+    no confirma que sean equivalentes (ver _pares_vendidos()). Lo pidió una revisión con ChatGPT
+    («que el sistema proteja al vendedor» y «alternativa comercial como categoría aparte»)."""
+    como = como_se_vende(veredicto)
     with db_lock:
         c.execute(
-            "INSERT INTO ventas_registradas (producto_id, termino_pedido, codigo_pedido_clean, usuario) "
-            "VALUES (?, ?, ?, ?)",
-            (producto_id, termino_pedido.strip(), sanitizar(termino_pedido), obtener_usuario_actual())
+            "INSERT INTO ventas_registradas (producto_id, termino_pedido, codigo_pedido_clean, "
+            "usuario, veredicto, como) VALUES (?, ?, ?, ?, ?, ?)",
+            (producto_id, termino_pedido.strip(), sanitizar(termino_pedido), obtener_usuario_actual(),
+             veredicto, como)
         )
         conn.commit()
+
+
+def como_se_vende(veredicto):
+    """«equivalente», «alternativa» o None (lo buscado mismo, o sin dato) según el veredicto."""
+    if not veredicto or veredicto == "el que buscaste":
+        return None
+    return "equivalente" if str(veredicto).startswith("🟢") else "alternativa"
 
 
 def red_de_equivalencias(codigo_clean):
@@ -571,8 +586,42 @@ def tablero_de_calidad(minimo_por_grupo=30, tope=10):
                   "% rechazado": round(100 * mal / (ok + mal), 1)}
                  for k, (ok, mal) in grupo.items() if ok + mal >= minimo_por_grupo]
         return sorted(tabla, key=lambda x: -x["% rechazado"])[:tope]
-    salida["por_familia"] = _tabla(por_familia, "Familia")
     salida["por_listas"] = _tabla(por_listas, "Listas")
+    # LO QUE VOLVIÓ EN LOS ÚLTIMOS 30 DÍAS, por familia, contra los 30 de antes: si crece, la
+    # precisión de esa familia está empeorando. Lo pidió una revisión con ChatGPT («detector de
+    # degradación» y «semáforo de salud de cada familia»).
+    devueltas = {}
+    try:
+        motivos = sorted(MOTIVOS_DE_NO_ERA_LA_PIEZA)
+        c.execute(f"""SELECT p.descripcion,
+                             julianday('now') - julianday(d.fecha) AS dias
+                      FROM devoluciones d JOIN productos p ON p.id = d.producto_id
+                      WHERE d.motivo IN ({",".join("?" * len(motivos))})
+                        AND julianday('now') - julianday(d.fecha) <= 60""", motivos)
+        for r in c.fetchall():
+            familia = familia_para_comparar(r["descripcion"] or "") or "sin clasificar"
+            cuenta = devueltas.setdefault(familia, [0, 0])
+            cuenta[0 if r["dias"] <= 30 else 1] += 1
+    except sqlite3.OperationalError as _err:
+        anotar_error("tablero_de_calidad", _err)
+    familias = []
+    for familia in set(por_familia) | set(devueltas):
+        ok, mal = por_familia.get(familia, [0, 0])
+        ahora, antes = devueltas.get(familia, [0, 0])
+        if ok + mal < minimo_por_grupo and not ahora:
+            continue
+        pct = round(100 * mal / (ok + mal), 1) if ok + mal else 0.0
+        empeora = ahora >= 2 and ahora > antes
+        semaforo = ("🔴" if empeora or pct >= 25 else "🟡" if pct >= 5 or ahora else "🟢")
+        familias.append({"Semáforo": semaforo, "Familia": familia, "Decididos": ok + mal,
+                         "Rechazados": mal, "% rechazado": pct,
+                         "Devueltas (30 días)": ahora, "Devueltas (30 días antes)": antes})
+    _orden = {"🔴": 0, "🟡": 1, "🟢": 2}
+    familias.sort(key=lambda x: (_orden[x["Semáforo"]], -x["% rechazado"]))
+    salida["por_familia"] = familias[:tope]
+    salida["empeorando"] = [f["Familia"] for f in familias
+                            if f["Devueltas (30 días)"] >= 2
+                            and f["Devueltas (30 días)"] > f["Devueltas (30 días antes)"]]
     # Las anuladas: un par aprobado que después se rechazó (o al revés), según el historial.
     c.execute("""SELECT producto_a_id, producto_b_id, decision FROM historial_de_revisiones
                  ORDER BY producto_a_id, producto_b_id, fecha, id""")
@@ -598,15 +647,112 @@ def tablero_de_calidad(minimo_por_grupo=30, tope=10):
         anotar_error("tablero_de_calidad", _err)
         devoluciones = {}
     no_era = sum(n for m, n in devoluciones.items() if m in MOTIVOS_DE_NO_ERA_LA_PIEZA)
+    # Cuántos vínculos tienen una FUENTE que los declara (una lista, un catálogo, una persona),
+    # y no solo pistas. Ver respaldo_del_origen().
+    c.execute("SELECT lote, COALESCE(verificada, 0) AS v, COUNT(*) AS n FROM equivalencias "
+              "GROUP BY lote, COALESCE(verificada, 0)")
+    con_fuente = sum(r["n"] for r in c.fetchall() if respaldo_del_origen(r["lote"], r["v"])[0])
     salida["numeros"] = {
         "decididos": len(filas), "aprobados": aprobadas, "rechazados": rechazadas,
         "aprobados_y_despues_rechazados": aprobadas_y_rechazadas,
         "rechazados_y_despues_aprobados": rechazadas_y_aprobadas,
         "devoluciones": sum(devoluciones.values()), "devoluciones_no_era_la_pieza": no_era,
-        "vinculos": vinc["n"], "comprobados_en_la_mano": vinc["v"],
+        "vinculos": vinc["n"], "comprobados_en_la_mano": vinc["v"], "con_fuente": con_fuente,
         "dias_hasta_decidir": dias[len(dias) // 2] if dias else None,
         "con_dias": len(dias)}
+    salida["errores"] = registro_de_errores()
+    salida["hace_un_mes"] = _foto_de_calidad(salida["numeros"])
     return salida
+
+
+# Las cifras que se guardan una vez por día para ver si la app mejora. Ver _foto_de_calidad().
+CIFRAS_DE_LA_FOTO = ("decididos", "rechazados", "aprobados_y_despues_rechazados",
+                     "devoluciones_no_era_la_pieza", "comprobados_en_la_mano", "con_fuente",
+                     "vinculos")
+
+
+def _foto_de_calidad(numeros, dias_atras=30):
+    """Guarda las cifras de hoy (una foto por día, el último año) y devuelve la foto más cercana
+    a hace un mes, o None si todavía no hay. Es lo que permite decir si la app MEJORA, y no solo
+    cómo está: lo pidió una revisión con ChatGPT («medir si Chavaje realmente mejora»)."""
+    hoy = datetime.now().strftime("%Y-%m-%d")
+    try:
+        fotos = json.loads(obtener_config("calidad_fotos", "") or "[]")
+    except (ValueError, TypeError):
+        fotos = []
+    if not fotos or fotos[-1].get("fecha") != hoy:
+        fotos.append(dict({k: numeros.get(k) for k in CIFRAS_DE_LA_FOTO}, fecha=hoy))
+        guardar_config("calidad_fotos", json.dumps(fotos[-400:]))
+    limite = (datetime.now() - timedelta(days=dias_atras - 2)).strftime("%Y-%m-%d")
+    viejas = [f for f in fotos if f.get("fecha", "") <= limite]
+    return viejas[-1] if viejas else None
+
+
+def registro_de_errores(tope=50):
+    """Los errores de verdad, cada uno con lo que se sabe de él: qué equivalencia, por qué estaba
+    mal, qué la había dejado pasar, de qué lista vino y quién lo detectó. Dos clases: lo que
+    volvió porque no le iba (lo detectó una instalación real) y lo que se aprobó y después se
+    rechazó (lo detectó una revisión). Lo pidió una revisión con ChatGPT («que aprenda de los
+    errores: ERROR #892, motivo, regla que falló, fuente, detectado por»)."""
+    salida = []
+    try:
+        motivos = sorted(MOTIVOS_DE_NO_ERA_LA_PIEZA)
+        c.execute(f"""-- FILA Y NO PAR: una fila por devolución; las subconsultas traen UN valor
+                      -- (LIMIT 1), así que un vínculo anotado de ida y de vuelta no cuenta doble.
+                      SELECT substr(d.fecha, 1, 16) AS fecha, d.motivo, d.detalle,
+                             d.codigo_pedido_clean AS pedido, p.id AS vendido_id,
+                             p.codigo_raw AS vendido, m.nombre AS marca,
+                             (SELECT e.lote FROM equivalencias e JOIN productos q
+                                ON q.codigo_clean = d.codigo_pedido_clean
+                              WHERE (e.producto_a_id = q.id AND e.producto_b_id = p.id)
+                                 OR (e.producto_b_id = q.id AND e.producto_a_id = p.id)
+                              ORDER BY e.created_at LIMIT 1) AS lote,
+                             (SELECT r.por_que FROM equivalencias_revisadas r JOIN productos q
+                                ON q.codigo_clean = d.codigo_pedido_clean
+                              WHERE r.producto_a_id = q.id AND r.producto_b_id = p.id
+                              ORDER BY r.fecha LIMIT 1) AS por_que
+                      FROM devoluciones d JOIN productos p ON p.id = d.producto_id
+                      JOIN marcas m ON m.id = p.marca_id
+                      WHERE d.motivo IN ({",".join("?" * len(motivos))})
+                      ORDER BY d.fecha DESC LIMIT ?""", motivos + [tope])
+        for r in c.fetchall():
+            salida.append({
+                "Fecha": r["fecha"], "Equivalencia": f"{r['pedido']} → {r['vendido']} ({r['marca']})",
+                "Motivo": MOTIVOS_DE_DEVOLUCION.get(r["motivo"], r["motivo"])
+                          + (f": {r['detalle']}" if r["detalle"] else ""),
+                "Lo que la dejó pasar": (r["por_que"] or "—")[:160],
+                "Fuente": (r["lote"] or "por un código en el medio").split(" · ")[0],
+                "Detectado por": "↩️ una devolución (instalación real)"})
+    except sqlite3.OperationalError as _err:
+        anotar_error("registro_de_errores", _err)
+    # Lo aprobado y después rechazado, del historial.
+    c.execute("""SELECT h.producto_a_id AS a, h.producto_b_id AS b, h.decision, h.motivo,
+                        substr(h.fecha, 1, 16) AS fecha, h.lote, h.por_que
+                 FROM historial_de_revisiones h ORDER BY h.producto_a_id, h.producto_b_id,
+                                                          h.fecha, h.id""")
+    previa = {}
+    anuladas = []
+    for r in c.fetchall():
+        par = (r["a"], r["b"])
+        antes = previa.get(par)
+        if antes and antes["decision"] == "ok" and r["decision"] == "rechazada":
+            anuladas.append((r, antes))
+        previa[par] = r
+    ids = sorted({x for r, _ in anuladas for x in (r["a"], r["b"])})
+    codigos = {}
+    for tanda, marcadores in en_tandas(ids):
+        c.execute(f"SELECT id, codigo_raw FROM productos WHERE id IN ({marcadores})", tanda)
+        codigos.update({x["id"]: x["codigo_raw"] for x in c.fetchall()})
+    for r, antes in anuladas:
+        salida.append({
+            "Fecha": r["fecha"],
+            "Equivalencia": f"{codigos.get(r['a'], r['a'])} ↔ {codigos.get(r['b'], r['b'])}",
+            "Motivo": MOTIVOS_DE_RECHAZO.get(r["motivo"], r["motivo"] or "sin motivo"),
+            "Lo que la dejó pasar": (antes["por_que"] or "—")[:160],
+            "Fuente": (antes["lote"] or r["lote"] or "—").split(" · ")[0],
+            "Detectado por": "🔍 una revisión (estaba aprobada)"})
+    salida.sort(key=lambda x: x["Fecha"] or "", reverse=True)
+    return salida[:tope]
 
 
 def _como_estaba_en_la_revision():
@@ -1306,6 +1452,51 @@ def guardar_equivalencias_pendientes(pares, origen, lote):
 PARES_DE_UNA_LISTA_CHICA = 20
 
 
+# Una tanda de una regla automática es sospechosa si trae 10 veces más que las anteriores de la
+# misma regla; la primera vez, si trae más del 20 % de lo que hay cargado (y al menos 1.000).
+ANOMALIA_DE_TANDA = {"veces": 10, "minimo": 300, "primera_proporcion": 0.20,
+                     "primera_minimo": 1000}
+
+
+def anomalia_de_la_tanda(lote):
+    """El aviso si una tanda AUTOMÁTICA trajo demasiados pares de una vez, o "". Lo pidió una
+    revisión con ChatGPT: «si una regla nueva genera 14.328 equivalencias, Chavaje debería
+    detenerse y pedir revisión». Nada automático se aprueba solo (va a la cola), pero una
+    tanda así no se aprueba en bloque: se revisa con la muestra de control. Las listas de los
+    proveedores no cuentan: una lista grande es lo normal.
+    Medido sobre la base del 8/10: el barrido por descripciones trajo 9.323 pares de una vez
+    (el 47 % de lo cargado) y es la única tanda que salta."""
+    if respaldo_del_origen(lote)[0] is not False:
+        return ""
+    tipo = (lote or "").split(" · ")[0].strip()
+    tamanos = {}
+    for tabla in ("equivalencias", "equivalencias_pendientes"):
+        c.execute(f"SELECT lote, COUNT(*) AS n FROM {tabla} WHERE lote LIKE ? GROUP BY lote",
+                  (tipo + "%",))
+        for r in c.fetchall():
+            if (r["lote"] or "").split(" · ")[0].strip() == tipo:
+                tamanos[r["lote"]] = tamanos.get(r["lote"], 0) + r["n"]
+    esta = tamanos.pop(lote, 0)
+    a = ANOMALIA_DE_TANDA
+    if tamanos:
+        otros = sorted(tamanos.values())
+        mediana = otros[len(otros) // 2]
+        if esta >= a["minimo"] and esta > a["veces"] * mediana:
+            return (f"⚠️ Tanda anómala: trajo {esta} pares, {esta / max(mediana, 1):.0f} veces "
+                    f"más que las anteriores de la misma regla (la mitad trajo {mediana} o menos). "
+                    "Puede ser una regla que se aflojó: revisala con la muestra de control, no "
+                    "la apruebes en bloque.")
+        return ""
+    c.execute("SELECT COUNT(*) FROM equivalencias WHERE COALESCE(lote, '') <> ?", (lote,))
+    cargados = c.fetchone()[0] or 0
+    if esta >= a["primera_minimo"] and esta > a["primera_proporcion"] * cargados:
+        return (f"⚠️ Primera tanda de esta regla, y trajo {esta} pares de una vez (el "
+                f"{100 * esta / max(cargados, 1):.0f} % de lo que había cargado). Una regla "
+                "automática que encuentra tanto puede estar demasiado floja: revisala con la "
+                "muestra de control, no la apruebes en bloque.")
+    return ""
+
+
 def resumen_lotes_pendientes():
     """Las listas esperando revisión, la primera es la que la pantalla abre.
 
@@ -1481,6 +1672,7 @@ def _pares_vendidos(minimo_veces):
                      WHERE v.codigo_pedido_clean IS NOT NULL
                        AND v.codigo_pedido_clean <> ''
                        AND p1.id <> v.producto_id
+                       AND COALESCE(v.como, '') <> 'alternativa'
                      GROUP BY p1.id, v.producto_id
                      HAVING COUNT(*) >= ?""", (minimo_veces,))
         return {(min(r["a"], r["b"]), max(r["a"], r["b"])): r["veces"] for r in c.fetchall()}

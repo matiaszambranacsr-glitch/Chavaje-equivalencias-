@@ -45,6 +45,11 @@ Las pruebas se corren como dice el README, en «Antes de subir un cambio».
 | Que no nombren autos en común avisa, pero no tumba la equivalencia | `autos_de_los_dos()` | `pruebas_de_la_precision.py` (32) |
 | Lo que se exporta lleva el estado de cada vínculo, y los rechazados van aparte | `estado_del_vinculo()`, `exportar_catalogo_zip()` | `pruebas_de_la_precision.py` (34) |
 | Si al volver a puntuar suben de franja demasiados vínculos de una vez, se avisa | `deriva_sospechosa()` | `pruebas_de_la_precision.py` (36) |
+| La ficha dice qué se buscó en contra en las descripciones y cómo salió | `_lo_que_dicen_las_descripciones()` | `pruebas_de_la_precision.py` (37) |
+| Cada medida cambiada a mano queda con lo que había; guardar sin cambios no anota nada | `actualizar_medidas()`, `historial_de_medidas()` | `pruebas_de_la_precision.py` (39) |
+| Lo vendido sin estar confirmado queda como alternativa comercial y no confirma la equivalencia; la venta guarda el veredicto de ese momento | `registrar_venta()`, `_pares_vendidos()` | `pruebas_de_la_precision.py` (40) |
+| Una familia con más devoluciones que el mes anterior se marca como empeorando | `tablero_de_calidad()` | `pruebas_de_la_precision.py` (41) |
+| Una tanda automática que trae demasiado de una vez se avisa en la cola | `anomalia_de_la_tanda()` | `pruebas_de_la_precision.py` (42) |
 
 ## El stock, los precios y la plata
 

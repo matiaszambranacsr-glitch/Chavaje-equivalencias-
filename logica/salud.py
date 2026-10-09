@@ -1000,7 +1000,7 @@ def camino_entre(origen_id, destino_id, tope_nodos=3000):
             "Paso": f"{info[a]['codigo_raw']} ({info[a]['marca']}) → "
                      f"{info[b]['codigo_raw']} ({info[b]['marca']})",
             "Confianza": conf,
-            "Vino de": (lote or "—").split(" · ")[0],
+            "Vino de": de_donde_y_cuando(lote),
             # Para la ficha de prueba: quién declara cada paso. Ver respaldo_del_origen().
             "_lote": lote, "_verificada": bool(verif),
             "_a": a, "_b": b,

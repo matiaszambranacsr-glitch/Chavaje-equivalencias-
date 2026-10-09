@@ -1392,11 +1392,13 @@ if pagina == PAGINAS[0]:
                             for fila_stock in res:
                                 colr1, colr2, colr3 = st.columns([3, 1, 1])
                                 colr1.write(_rotulo_stock(fila_stock))
-                                colr2.button("🛒 Se llevó", key=f"vendido_{fila_stock['ID']}_{clean}",
+                                colr2.button(rotulo_del_boton_de_venta(fila_stock),
+                                              key=f"vendido_{fila_stock['ID']}_{clean}",
                                               on_click=anotar_venta_y_avisar,
                                               args=(fila_stock["ID"], codigo_individual,
                                                     f"{fila_stock['Marca']} - {fila_stock['Codigo']}",
-                                                    f"stock_{clean}"),
+                                                    f"stock_{clean}",
+                                                    veredicto_de_la_equivalencia(fila_stock)),
                                               help="Anota la venta para ir descubriendo equivalencias solas")
                                 colr3.button("📌 Reponer", key=f"pedir_repo_{fila_stock['ID']}_{clean}",
                                               on_click=pedir_reposicion_y_avisar,
@@ -1410,11 +1412,20 @@ if pagina == PAGINAS[0]:
                             _elegido = st.selectbox(f"¿Cuál? ({len(res)} resultados)",
                                                     list(_rotulos), format_func=_rotulos.get,
                                                     key=f"cual_vendido_{clean}")
+                            # Lo que no está confirmado se avisa antes de venderlo: queda como
+                            # alternativa comercial, no como equivalente (ver registrar_venta()).
+                            _fila_elegida = next((f for f in res if f["ID"] == _elegido), {})
+                            if como_se_vende(veredicto_de_la_equivalencia(_fila_elegida)) == "alternativa":
+                                st.warning("⚠️ Esta referencia no está confirmada como equivalente "
+                                           f"({veredicto_de_la_equivalencia(_fila_elegida)}). Se "
+                                           "anota como alternativa comercial.")
                             colr2, colr3 = st.columns(2)
-                            colr2.button("🛒 Se llevó", key=f"vendido_elegido_{clean}",
+                            colr2.button(rotulo_del_boton_de_venta(_fila_elegida),
+                                          key=f"vendido_elegido_{clean}",
                                           on_click=anotar_venta_y_avisar,
                                           args=(_elegido, codigo_individual, _rotulos[_elegido],
-                                                f"stock_{clean}"),
+                                                f"stock_{clean}",
+                                                veredicto_de_la_equivalencia(_fila_elegida)),
                                           help="Anota la venta para ir descubriendo equivalencias solas")
                             colr3.button("📌 Reponer", key=f"pedir_elegido_{clean}",
                                           on_click=pedir_reposicion_y_avisar,
@@ -1933,10 +1944,12 @@ if pagina == PAGINAS[0]:
                             precio_txt = f"${miles(f['Precio'], 0)}" if f.get("Precio") else "s/precio"
                             cv1.write(f"{f['Marca']} - {f['Codigo']} ({precio_txt}, "
                                        f"stock: {f.get('Stock') if f.get('Stock') is not None else 's/d'})")
-                            cv2.button("🛒 Se llevó", key=f"vendido_txt_{fila_txt['ID']}_{f['ID']}",
+                            cv2.button(rotulo_del_boton_de_venta(f),
+                                        key=f"vendido_txt_{fila_txt['ID']}_{f['ID']}",
                                         on_click=anotar_venta_y_avisar,
                                         args=(f["ID"], texto_pedido, f"{f['Marca']} - {f['Codigo']}",
-                                              f"txt_{fila_txt['ID']}"))
+                                              f"txt_{fila_txt['ID']}",
+                                              veredicto_de_la_equivalencia(f)))
                         mostrar_lo_anotado(f"txt_{fila_txt['ID']}")
                 if len(res_texto) > 15:
                     st.caption(f"(mostrando las primeras 15 de {len(res_texto)} — afiná la búsqueda "

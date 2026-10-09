@@ -986,6 +986,10 @@ a traer solas desde Administrar → Mantenimiento.
             etiqueta_lote = st.selectbox("Lista a revisar:", list(opciones_lotes.keys()),
                                           key="lote_en_revision")
             lote_info = opciones_lotes[etiqueta_lote]
+            # Una tanda automática que trajo demasiado de una vez: ver anomalia_de_la_tanda().
+            _anomalia = anomalia_de_la_tanda(lote_info["lote"])
+            if _anomalia:
+                st.warning(_anomalia)
 
             total_lote = contar_pendientes_del_lote(lote_info["lote"])
             ca1, ca2 = st.columns([2, 1])
@@ -1821,6 +1825,36 @@ a traer solas desde Administrar → Mantenimiento.
                            "esta versión: las tablas por confianza y por alarma se van a ir "
                            "llenando a medida que revises.")
 
+        # EL LABORATORIO: dos códigos cualesquiera, vinculados o no, y lo que diría la app de
+        # ellos. Para probar el motor sin tocar nada. Ver perfil_de_la_equivalencia().
+        if seccion_plegable("🧪 Laboratorio: comparar dos códigos cualesquiera",
+                            key="laboratorio_equivalencias"):
+            _lab1, _lab2 = st.columns(2)
+            _cod_a = _lab1.text_input("Código A", key="lab_codigo_a")
+            _cod_b = _lab2.text_input("Código B", key="lab_codigo_b")
+            _prod_a, _prod_b = productos_del_codigo(_cod_a), productos_del_codigo(_cod_b)
+            if _cod_a.strip() and not _prod_a:
+                st.caption(f"«{_cod_a}» no está cargado.")
+            if _cod_b.strip() and not _prod_b:
+                st.caption(f"«{_cod_b}» no está cargado.")
+            if _prod_a and _prod_b:
+                _id_a = _lab1.selectbox("¿Cuál?", [x for x, _ in _prod_a], key="lab_cual_a",
+                                        format_func=dict(_prod_a).get)
+                _id_b = _lab2.selectbox("¿Cuál?", [x for x, _ in _prod_b], key="lab_cual_b",
+                                        format_func=dict(_prod_b).get)
+                _ficha_lab = ficha_de_prueba(_id_a, _id_b) if _id_a != _id_b else None
+                if not _ficha_lab:
+                    st.caption("Elegí dos productos distintos.")
+                else:
+                    for _dim, _valor, _que in perfil_de_la_equivalencia(_ficha_lab):
+                        if _valor is None:
+                            st.caption(f"**{_dim}** — sin datos: {_que}")
+                        else:
+                            st.progress(_valor / 100, text=f"**{_dim}** {_valor} % — {_que}")
+                    st.markdown(f"**Contradicciones:** {len(_ficha_lab['contradicciones'])}"
+                                + (" ⚠️" if _ficha_lab["contradicciones"] else ""))
+                    mostrar_ficha_de_prueba(_id_a, _id_b, clave="laboratorio")
+
         # EL TABLERO DE CALIDAD: dónde propone mal la app, cuánto se anuló, cuánto volvió y
         # cuánto se comprobó en la mano. Ver tablero_de_calidad().
         with st.expander("📈 Tablero de calidad de las equivalencias"):
@@ -1837,6 +1871,30 @@ a traer solas desde Administrar → Mantenimiento.
                            "vínculos cargados")
             q4.metric("Devoluciones «no era la pieza»", miles(_n["devoluciones_no_era_la_pieza"]),
                       help=f"de {miles(_n['devoluciones'])} devoluciones anotadas")
+            st.caption(f"Con una fuente que las declara (una lista, un catálogo, una persona): "
+                       f"{100 * _n['con_fuente'] / max(_n['vinculos'], 1):.1f} % de los "
+                       f"{miles(_n['vinculos'])} vínculos; el resto son pistas.")
+            # ¿MEJORA? Contra la foto de hace un mes, si la hay. Ver _foto_de_calidad().
+            _mes = _tc["hace_un_mes"]
+            if _mes:
+                def _pct(n_, d_):
+                    return 100 * (n_ or 0) / max(d_ or 0, 1)
+                st.markdown(
+                    f"**Contra el {_mes['fecha']}:** rechazado "
+                    f"{_pct(_mes['rechazados'], _mes['decididos']):.1f} % → "
+                    f"{_pct(_n['rechazados'], _n['decididos']):.1f} % · con fuente "
+                    f"{_pct(_mes['con_fuente'], _mes['vinculos']):.1f} % → "
+                    f"{_pct(_n['con_fuente'], _n['vinculos']):.1f} % · comprobados en la mano "
+                    f"{miles(_mes['comprobados_en_la_mano'] or 0)} → "
+                    f"{miles(_n['comprobados_en_la_mano'])} · devueltos «no era la pieza» "
+                    f"{miles(_mes['devoluciones_no_era_la_pieza'] or 0)} → "
+                    f"{miles(_n['devoluciones_no_era_la_pieza'])}.")
+            else:
+                st.caption("📅 Se guarda una foto de estas cifras por día, cuando se abre el "
+                           "tablero: dentro de un mes, acá se ve si la app mejora.")
+            for _fam in _tc["empeorando"]:
+                st.error(f"⚠️ La precisión de **{_fam}** está empeorando: volvieron más piezas "
+                         "en los últimos 30 días que en los 30 de antes.")
             st.caption(
                 f"Anuladas: {miles(_n['aprobados_y_despues_rechazados'])} aprobadas que después "
                 f"se rechazaron y {miles(_n['rechazados_y_despues_aprobados'])} al revés. "
@@ -1845,12 +1903,19 @@ a traer solas desde Administrar → Mantenimiento.
                    if _n["dias_hasta_decidir"] is not None else
                    "El tiempo de la cola a la decisión se empieza a medir desde esta versión."))
             if _tc["por_familia"]:
-                st.markdown("**Familias donde la app propone peor** — de lo que te llegó de "
-                            "esa familia, qué parte rechazaste")
+                st.markdown("**Semáforo por familia** — 🔴 si vuelven más piezas que el mes "
+                            "anterior o rechazaste un 25 % o más de lo que llegó; 🟡 desde el 5 %")
                 st.dataframe(_tc["por_familia"], width="stretch", hide_index=True)
             if _tc["por_listas"]:
                 st.markdown("**Pares de listas que más proponen mal**")
                 st.dataframe(_tc["por_listas"], width="stretch", hide_index=True)
+            st.markdown("**🧾 Registro de errores** — lo que volvió porque no le iba y lo que "
+                        "se aprobó y después se rechazó, con lo que lo dejó pasar")
+            if _tc["errores"]:
+                st.dataframe(_tc["errores"], width="stretch", hide_index=True)
+            else:
+                st.caption("Todavía no hay ninguno: ni devoluciones «no era la pieza» ni "
+                           "aprobaciones anuladas.")
             st.caption("Los falsos positivos y negativos con todo lo decidido se miden fuera de "
                        "la app, con `pruebas_de_la_revision.py --base` (ver el README).")
 

@@ -782,7 +782,7 @@ def anotar_el_respaldo(res, clean_code):
     for tanda, marcadores in (en_tandas(ids, usos_por_consulta=2) if origenes else ()):
         marcadores_o = ",".join("?" * len(origenes))
         c.execute(f"""SELECT producto_a_id AS a, producto_b_id AS b, revisado_por AS quien,
-                             substr(fecha, 1, 10) AS fecha
+                             substr(fecha, 1, 10) AS fecha, motivo
                       FROM equivalencias_revisadas
                       WHERE decision = 'rechazada'
                         AND ((producto_a_id IN ({marcadores_o}) AND producto_b_id IN ({marcadores}))
@@ -790,7 +790,10 @@ def anotar_el_respaldo(res, clean_code):
                   origenes + tanda + origenes + tanda)
         for r in c.fetchall():
             otro = r["b"] if r["a"] in origenes else r["a"]
-            rechazadas[otro] = f"🚫 {r['quien'] or 'alguien'}, {r['fecha'] or 'sin fecha'}"
+            # Con el motivo, si lo dijo: «ya hay evidencia de que no es», y cuál.
+            rechazadas[otro] = (f"🚫 {r['quien'] or 'alguien'}, {r['fecha'] or 'sin fecha'}"
+                                + (f" ({MOTIVOS_DE_RECHAZO.get(r['motivo'], r['motivo'])})"
+                                   if r["motivo"] else ""))
     for f in res:
         if f["ID"] in rechazadas and f["ID"] not in origenes:
             f["Rechazada"] = rechazadas[f["ID"]]
