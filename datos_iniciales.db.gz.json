@@ -1,0 +1,11 @@
+{
+ "fecha": "2026-10-09 01:48:07",
+ "productos": 86946,
+ "equivalencias": 20037,
+ "marcas": 8,
+ "bytes": 17098693,
+ "sha256": "cb1cf82893942a6ad8d467d17d0ea4ee45051995a5214fbc3d5cbcc57521e493",
+ "cifrada": false,
+ "control_de_integridad": "ok",
+ "version_de_la_app": "bd7501b (main)"
+}
