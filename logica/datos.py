@@ -1211,6 +1211,10 @@ def _esquema_gestion(c):
         c.execute("ALTER TABLE ventas_registradas ADD COLUMN veredicto TEXT")
     if "como" not in _cols_ventas:
         c.execute("ALTER TABLE ventas_registradas ADD COLUMN como TEXT")
+    # Y LA EVIDENCIA de ese momento —la cadena, la confianza, quién la declaraba, la versión de
+    # las reglas—: la «caja negra» de la venta. Ver evidencia_de_la_fila().
+    if "evidencia" not in _cols_ventas:
+        c.execute("ALTER TABLE ventas_registradas ADD COLUMN evidencia TEXT")
     # Sin este, "cuándo se vendió por última vez este producto" recorría la tabla de ventas
     # ENTERA una vez por producto. Con el estante lleno eso es minutos de espera.
     c.execute("CREATE INDEX IF NOT EXISTS idx_ventas_prod ON ventas_registradas(producto_id)")
@@ -1288,6 +1292,11 @@ def _esquema_gestion(c):
     )""")
     c.execute("CREATE INDEX IF NOT EXISTS idx_historial_medidas_prod "
               "ON historial_de_medidas(producto_id)")
+    # POR QUÉ CAMBIÓ: no es lo mismo corregir un dato mal cargado que anotar que la pieza cambió
+    # (otra versión del fabricante), ni que la medida la haya leído el lector de descripciones.
+    # Ver MOTIVOS_DE_CAMBIO_DE_MEDIDA.
+    if "motivo" not in [f[1] for f in c.execute("PRAGMA table_info(historial_de_medidas)")]:
+        c.execute("ALTER TABLE historial_de_medidas ADD COLUMN motivo TEXT")
     # EL HISTORIAL de las decisiones: equivalencias_revisadas guarda la ÚLTIMA (aprobar después de
     # rechazar la pisa), esto guarda TODAS, y no se corrige ni se borra —lo cuidan los dos
     # disparadores—. Con la versión de las reglas que puntuó el par y la lista de la que vino:
@@ -1314,8 +1323,13 @@ def _esquema_gestion(c):
               "ON historial_de_revisiones(producto_a_id, producto_b_id)")
     # Desde cuándo esperaba en la cola: con la fecha de la decisión da cuánto se tarda en
     # verificar (ver tablero_de_calidad()).
-    if "pendiente_desde" not in [f[1] for f in c.execute("PRAGMA table_info(historial_de_revisiones)")]:
+    _cols_hist = [f[1] for f in c.execute("PRAGMA table_info(historial_de_revisiones)")]
+    if "pendiente_desde" not in _cols_hist:
         c.execute("ALTER TABLE historial_de_revisiones ADD COLUMN pendiente_desde TEXT")
+    # CÓMO se decidió: de a uno, en grupo, una lista entera de una vez, comprobada en la mano.
+    # Ver COMO_SE_DECIDIO.
+    if "como" not in _cols_hist:
+        c.execute("ALTER TABLE historial_de_revisiones ADD COLUMN como TEXT")
     c.execute("DROP TRIGGER IF EXISTS historial_no_se_corrige")
     c.execute("DROP TRIGGER IF EXISTS historial_no_se_borra")
     c.execute("""CREATE TRIGGER IF NOT EXISTS historial_no_se_corrige

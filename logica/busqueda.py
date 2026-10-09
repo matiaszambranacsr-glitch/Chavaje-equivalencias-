@@ -671,7 +671,7 @@ def deshacer_importacion(lote, borrar_pendientes=True):
     # OJO con el valor: tiene que ser exactamente "rechazada" — es el que busca pares_rechazados().
     # Escrito de cualquier otra forma se guarda igual y no filtra nada, y encima en silencio.
     if pares:
-        marcar_revision(pares, "rechazada")
+        marcar_revision(pares, "rechazada", como="deshacer")
     return borrados, pend
 
 

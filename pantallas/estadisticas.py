@@ -1860,6 +1860,15 @@ a traer solas desde Administrar → Mantenimiento.
         with st.expander("📈 Tablero de calidad de las equivalencias"):
             _tc = tablero_de_calidad()
             _n = _tc["numeros"]
+            # La métrica principal va primero y sola: es el error que le cuesta al mostrador.
+            _vend = _n["vendidas_como_equivalente"]
+            st.metric("🎯 Vendidas como equivalentes que no eran la pieza",
+                      f"{100 * _n['vendidas_como_equivalente_y_devueltas'] / _vend:.1f} %"
+                      if _vend else "—",
+                      help=f"{miles(_n['vendidas_como_equivalente_y_devueltas'])} devueltas "
+                           f"«no era la pieza» de {miles(_vend)} vendidas con el veredicto 🟢. "
+                           "Lo vendido como alternativa no cuenta: ya se avisó que no estaba "
+                           "confirmado. Se mide desde que se anota «Se llevó».")
             q1, q2, q3, q4 = st.columns(4)
             q1.metric("Decididos", miles(_n["decididos"]),
                       help=f"{miles(_n['aprobados'])} aprobados y {miles(_n['rechazados'])} "
@@ -1918,6 +1927,16 @@ a traer solas desde Administrar → Mantenimiento.
                            "aprobaciones anuladas.")
             st.caption("Los falsos positivos y negativos con todo lo decidido se miden fuera de "
                        "la app, con `pruebas_de_la_revision.py --base` (ver el README).")
+            # Las reglas versionadas: qué cambió en cada una. Ver VERSIONES_DE_LAS_REGLAS.
+            if st.toggle(f"📜 Versiones de las reglas (hoy: v{VERSION_CONFIANZA})",
+                         key="tablero_versiones"):
+                st.dataframe([{"Versión": f"v{v}", "Fecha": f, "Qué cambió": q}
+                              for v, f, q in VERSIONES_DE_LAS_REGLAS],
+                             width="stretch", hide_index=True)
+                st.caption("Cada vínculo se vuelve a puntuar al cambiar la versión, y cada "
+                           "decisión del historial dice con qué versión se tomó. Antes de subir "
+                           "una versión se simula sobre todo lo ya decidido "
+                           "(`pruebas_de_la_revision.py --base copia.db --linea-base`).")
 
         # LOS CONTROLES DE LO YA CARGADO VAN DESPUÉS de la revisión de las listas. Estaban
         # arriba de todo, y lo que se viene a hacer a esta pantalla —revisar lo que espera

@@ -2436,6 +2436,12 @@ def _trabajo_de_fondo():
     # que hacerlo dos veces. Ver VERSION_MEDIDAS.
     if _hay_que_hacerlo("medidas_pendientes"):
         try:
+            # Antes de completar: lo que una versión vieja del lector leyó mal y el lector de
+            # hoy ya no lee así se saca (queda anotado en el historial de medidas). Si no, como
+            # solo se completa lo vacío, el dato mal leído se quedaba para siempre. Ver
+            # medidas_mal_leidas().
+            guardar_config("medidas_descartadas",
+                           str(len(descartar_medidas_mal_leidas(medidas_mal_leidas()))))
             _n_med = 0
             # De punta a punta una vez, siguiendo cada tanda donde terminó la anterior (ver
             # medidas_deducibles_desde()). Al terminar queda todo mirado. Cada vuelta avanza

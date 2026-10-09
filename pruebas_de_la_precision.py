@@ -433,10 +433,9 @@ def probar(L):
     esperar("espesor 1,45 contra 1,50", cm({"espesor": 1.45, "diametro_interno": 80},
                                            {"espesor": 1.5, "diametro_interno": 80})[0], False)
     estados = {m["Medida"]: m["Estado"] for m in ns["medidas_lado_a_lado"](
-        {"diametro_interno": 35, "diametro_externo": 25.4}, {"diametro_interno": 350,
-                                                             "diametro_externo": 1})}
-    esperar("diez veces: ¿mm contra cm?", "cm?" in estados.get("diám. interno", ""), True)
-    esperar("25,4 veces: ¿pulgadas?", "pulgadas" in estados.get("diám. externo", ""), True)
+        {"ancho": 35, "largo_total": 25.4}, {"ancho": 350, "largo_total": 1})}
+    esperar("diez veces: ¿mm contra cm?", "cm?" in estados.get("ancho", ""), True)
+    esperar("25,4 veces: ¿pulgadas?", "pulgadas" in estados.get("largo total", ""), True)
 
     # 19. Lo que se lee de una foto: primero lo que se confunde al leer.
     confusion = ns["es_confusion_de_lectura"]
@@ -519,8 +518,14 @@ def probar(L):
     c.execute("UPDATE equivalencias_revisadas SET fecha = datetime('now') WHERE producto_a_id = ? "
               "AND producto_b_id = ?", (min(pas_a, pas_b), max(pas_a, pas_b)))
     conn.commit()
-    esperar("revisada hace poco, sigue verificada", ns["ficha_de_prueba"](pas_a, pas_b)["estado"],
-            "✅ VERIFICADA")
+    ficha = ns["ficha_de_prueba"](pas_a, pas_b)
+    esperar("revisada hace poco, ya no pide volver a mirarla",
+            any("volver a mirarla" in f for f in ficha["falta"]), False)
+    # Pero una pieza de seguridad pide además un auto en común y una medida igual (ver la 49).
+    esperar("y le falta la evidencia mínima de una pieza de seguridad", ficha["estado"],
+            "🟡 PROBABLE")
+    esperar("que dice las dos cosas", any("un auto en común en las descripciones y una medida"
+                                          in f for f in ficha["falta"]), True)
     # La de riesgo normal también vence, a los tres años.
     fa_a = producto("FA1", "FILTRO DE AIRE FIAT PALIO", fispa)
     fa_b = producto("IFA1", "FILTRO DE AIRE FIAT PALIO 1.4", illinois)
@@ -859,6 +864,12 @@ def probar(L):
             (min(vt_a, vt_b), max(vt_a, vt_b)) in ns["pares_confirmados_por_ventas"](), True)
 
     # 41. El tablero: semáforo, degradación, registro de errores y la foto de cada día.
+    # La venta guarda lo que la sostenía en ese momento: la «caja negra».
+    caja = ns["evidencia_de_la_fila"]({"Cadena": "🟢 directo", "Confianza": "🟢 sólida",
+                                       "Respaldo": "📋 lo declara la lista de FISPA"})
+    esperar("la caja negra de la venta", caja, "cadena 🟢 directo · confianza 🟢 sólida · "
+            f"📋 lo declara la lista de FISPA · reglas v{ns['VERSION_CONFIANZA']}")
+    ns["registrar_venta"](vt_b, "VT1", "🟢 equivalencia confirmada", caja)
     for _ in range(2):
         ns["registrar_devolucion"](vt_b, "VT1", "medida")
     ns["marcar_revision"]([(rl_a, rl_b)], "ok")
@@ -873,6 +884,12 @@ def probar(L):
     esperar("el registro trae las devoluciones y lo aprobado y después rechazado",
             (any(x.startswith("↩️") for x in detectado), any(x.startswith("🔍") for x in detectado)),
             (True, True))
+    esperar("la métrica principal: vendidas como equivalentes y devueltas porque no eran",
+            (tablero["numeros"]["vendidas_como_equivalente"],
+             tablero["numeros"]["vendidas_como_equivalente_y_devueltas"]), (3, 2))
+    esperar("y lo que decía al venderla", [e["Lo que la dejó pasar"] for e in tablero["errores"]
+                                           if e["Equivalencia"].startswith("VT1 →")][0],
+            "🟢 equivalencia confirmada · " + caja)
     esperar("sin una foto de hace un mes, nada que comparar", tablero["hace_un_mes"], None)
     import json as _json
     _fotos = _json.loads(ns["obtener_config"]("calidad_fotos", "[]"))
@@ -928,6 +945,193 @@ def probar(L):
     esperar("«sin clasificar» no es un rubro que se contradiga",
             dict(ns["_lo_que_dicen_las_descripciones"]("ZZQ 123", "FILTRO DE ACEITE VW GOL"))
             .get("rubro", "❓")[:1], "❓")
+
+    # 44. Datos imposibles: lo que el lector leía mal, y lo que no puede ser aunque esté guardado.
+    leer = ns["medidas_desde_descripcion"]
+    for desc in ("Kit Tornillo Seguridad FORD Ranger 1/2X20X37_A",
+                 "TORNILLO TAPA CILINDRO M11X012X210 29 FO FA",
+                 "66M012X162-12.9FA TORNILLO TAPA CILINDRO C/ARANDELA",
+                 "SONDA LAMBDA AUDI A3 - BMW X1 X3 X4 X5 Z4",
+                 "Jgo. Retenes VW Polo Mot. 1Y-AAZ -1X 64-75-61cc",
+                 "RETEN 6X60X8", "ARANDELA 1/4X20X30"):
+        esperar(f"no lee «{desc}»", leer(desc).get("diametro_interno"), None)
+    for desc, medida in (("ARANDELA A7X17X1.5F", (7, 17, 1.5)), ("ANILLO G88X99X5", (88, 99, 5)),
+                         ("DUO POWER 5 X 25 X 100 UNID.", (5, 25, 100)),
+                         ("Reten Arbol Secund.30x44x8", (30, 44, 8))):
+        _m = leer(desc)
+        esperar(f"sí lee «{desc}»", (_m.get("diametro_interno"), _m.get("diametro_externo"),
+                                     _m.get("ancho")), medida)
+    imposibles = ns["medidas_imposibles"]
+    esperar("un externo 14 veces el interno", imposibles(
+        {"diametro_interno": 12, "diametro_externo": 162}), ["el externo (162) es 14 veces el interno (12)"])
+    esperar("un interno mayor que el externo", len(imposibles(
+        {"diametro_interno": 40, "diametro_externo": 35})), 1)
+    esperar("ni igual", len(imposibles({"diametro_interno": 40, "diametro_externo": 40})), 1)
+    esperar("8 veces todavía puede ser", imposibles({"diametro_interno": 5, "diametro_externo": 40}),
+            [])
+    esperar("en la cara B también", "(cara B)" in " ".join(imposibles(
+        {"diametro_interno_cara_b": 50, "diametro_externo_cara_b": 40})), True)
+    esperar("una medida normal, nada", imposibles({"diametro_interno": 35, "diametro_externo": 52,
+                                                   "ancho": 7}), [])
+    esperar("un diámetro imposible no prueba nada", ns["comparar_medidas"](
+        {"diametro_interno": 12, "diametro_externo": 162},
+        {"diametro_interno": 12, "diametro_externo": 20})[0], None)
+    esperar("y en la ficha se ve, marcado", {m["Medida"]: m["Estado"] for m in ns["medidas_lado_a_lado"](
+        {"diametro_interno": 12, "diametro_externo": 162}, {"diametro_interno": 12})}
+            .get("diám. externo"), "⚠️ imposible en A: no se usa")
+    # Lo guardado que el lector de hoy ya no lee así: se descarta, salvo lo cargado a mano.
+    ml_a = producto("SL1", "SONDA LAMBDA BMW X1 X3 X4", fispa, diametro_interno=1,
+                    diametro_externo=3, ancho=4)
+    ml_b = producto("SL2", "SONDA LAMBDA BMW X1 X3 X4", illinois, diametro_interno=1,
+                    diametro_externo=3, ancho=4)
+    c.execute("INSERT INTO historial_de_medidas (producto_id, campo, antes, despues, usuario, "
+              "motivo) VALUES (?, 'diametro_interno', NULL, '1', 'ana', 'correccion')", (ml_b,))
+    conn.commit()
+    mal = ns["medidas_mal_leidas"]()
+    esperar("encuentra las dos sondas y nada más", [f["_id"] for f in mal], [ml_a, ml_b])
+    esperar("lo cargado a mano no se toca", sorted(mal[1]["_cambios"]),
+            ["ancho", "diametro_externo"])
+    c.execute("UPDATE productos SET ancho = 18 WHERE id = ?", (ml_a,))     # alguien la corrigió
+    conn.commit()
+    esperar("descarta las dos", ns["descartar_medidas_mal_leidas"](mal), [ml_a, ml_b])
+    esperar("lo corregido en el medio queda", tuple(c.execute(
+        "SELECT diametro_interno, diametro_externo, ancho FROM productos WHERE id = ?",
+        (ml_a,)).fetchone()), (None, None, 18))
+    esperar("y queda anotado quién y por qué", [tuple(r) for r in c.execute(
+        "SELECT campo, antes, despues, usuario, motivo FROM historial_de_medidas "
+        "WHERE producto_id = ? ORDER BY id", (ml_a,))],
+            [("diametro_interno", "1", None, "lector de descripciones", "descartada"),
+             ("diametro_externo", "3", None, "lector de descripciones", "descartada")])
+    esperar("después no queda ninguna", ns["medidas_mal_leidas"](), [])
+    # Lo que completa el lector queda anotado, y la ficha dice de dónde salió cada medida.
+    ap = producto("AP1", "RETEN 20X35X7", fispa)
+    conn.commit()
+    esperar("completa", ns["aplicar_medidas_deducidas"](
+        [{"_id": ap, "_nuevas": {"diametro_interno": 20.0, "diametro_externo": 35.0}}]), 1)
+    esperar("lo anota como leído de la descripción", ns["origen_de_las_medidas"]([ap])[ap],
+            {"diametro_interno": "📄 de la descripción", "diametro_externo": "📄 de la descripción"})
+    esperar("lo ya cargado no lo vuelve a completar", ns["aplicar_medidas_deducidas"](
+        [{"_id": ap, "_nuevas": {"diametro_interno": 99.0}}]), 0)
+    ns["actualizar_medidas"](ap, 21, 35, None, None, None, None, motivo="cambio")
+    esperar("a mano, con quién", ns["origen_de_las_medidas"]([ap])[ap]["diametro_interno"]
+            .startswith("✋ a mano ("), True)
+    esperar("el historial dice por qué", ns["historial_de_medidas"](ap)[0]["Por qué"],
+            ns["MOTIVOS_DE_CAMBIO_DE_MEDIDA"]["cambio"])
+
+    # Lo que no salió de la descripción ni tiene historial: no se sabe de dónde salió.
+    esperar("una medida que la descripción no dice y nadie anotó", {
+        m["Medida"]: m.get("De dónde") for m in ns["ficha_de_prueba"](ret_f, ret_i)["medidas"]}
+            .get("diám. externo"), "A: 📄 de la descripción · B: ❔ sin anotar")
+
+    # 45. La explicación contrafactual: qué diferencia la cambiaría.
+    cambiaria = {m["Medida"]: m["Qué la cambiaría"] for m in ns["medidas_lado_a_lado"](
+        {"diametro_interno": 35, "diametro_externo": 52, "paso_rosca": "1.5"},
+        {"diametro_interno": 35, "diametro_externo": 54, "paso_rosca": "1.5"})}
+    esperar("igual: hasta dónde sigue siendo la misma", cambiaria["diám. interno"],
+            "deja de coincidir si difieren más de 0,5 mm")
+    esperar("distinta: cuánto falta para coincidir", cambiaria["diám. externo"],
+            "coincidiría con 0,5 mm de diferencia o menos")
+    esperar("exacta: cualquier diferencia", cambiaria["paso de rosca"],
+            "cualquier diferencia la separa")
+
+    # 46. Nada cambia en silencio: una medida que cambió después de aprobarla la baja a 🟡.
+    rv_a = producto("RV1", "RETEN CIGUEÑAL VW GOL 30X47X7", fispa, diametro_interno=30,
+                    diametro_externo=47)
+    rv_b = producto("IRV1", "RETEN CIGUEÑAL VW GOL 30X47X7", illinois, diametro_interno=30,
+                    diametro_externo=47)
+    vincular(rv_a, rv_b, "FISPA · lista.xlsx · 01/10/2026 10:00:00", confianza=90)
+    conn.commit()
+    ns["marcar_revision"]([(rv_a, rv_b), (rv_b, rv_a)], "ok")
+    esperar("la ida y la vuelta son una sola decisión", c.execute(
+        "SELECT COUNT(*), MAX(como) FROM historial_de_revisiones WHERE producto_a_id = ? "
+        "AND producto_b_id = ?", (min(rv_a, rv_b), max(rv_a, rv_b))).fetchone()[:], (1, "uno"))
+    c.execute("UPDATE equivalencias_revisadas SET fecha = datetime('now', '-1 hour') "
+              "WHERE producto_a_id IN (?, ?)", (rv_a, rv_b))
+    conn.commit()
+    ficha = ns["ficha_de_prueba"](rv_a, rv_b)
+    esperar("aprobada y sin cambios: verificada", ficha["estado"], "✅ VERIFICADA")
+    esperar("el historial dice cómo se decidió", ficha["historial"][0]["Cómo"], "👤 de a uno")
+    esperar("y de dónde salió cada medida", {m["Medida"]: m["De dónde"] for m in ficha["medidas"]}
+            .get("diám. interno"), "A: 📄 de la descripción · B: 📄 de la descripción")
+    ns["actualizar_medidas"](rv_b, 30, 47, 7, None, None, None)
+    esperar("completar una vacía no la baja", ns["ficha_de_prueba"](rv_a, rv_b)["estado"],
+            "✅ VERIFICADA")
+    ns["actualizar_medidas"](rv_b, 30, 47.2, 7, None, None, None, motivo="cambio")
+    ficha = ns["ficha_de_prueba"](rv_a, rv_b)
+    esperar("cambiar una que estaba sí", ficha["estado"], "🟡 PROBABLE")
+    esperar("y dice qué cambió", "diám. externo 47 → 47.2" in " ".join(ficha["cambios_despues"]),
+            True)
+    esperar("cuántas aprobadas tocaba", ns["vinculos_revisados_de"](rv_b), 1)
+    ns["marcar_revision"]([(rv_a, rv_b)], "ok")
+    c.execute("UPDATE historial_de_medidas SET fecha = datetime('now', '-2 hour') "
+              "WHERE producto_id = ?", (rv_b,))
+    conn.commit()
+    esperar("vuelta a mirar, verificada otra vez", ns["ficha_de_prueba"](rv_a, rv_b)["estado"],
+            "✅ VERIFICADA")
+
+    # 48. Lo que dice la descripción veta aunque la medida no esté guardada todavía.
+    lz_a = producto("PZ1", "PARRILLA DE SUSPENSION DELANTERA IZQUIERDA VW GOL", fispa)
+    lz_b = producto("IPZ1", "PARRILLA DE SUSPENSION DELANTERA DERECHA VW GOL", illinois)
+    lz_c = producto("XPZ1", "PARRILLA DE SUSPENSION DELANTERA IZQUIERDA VW GOL", illinois)
+    conn.commit()
+    _a_favor, _vetos, _v = ns["evidencia_cruzada"](lz_a, lz_b)
+    esperar("el otro lado, sin medidas guardadas: veta", [v for v in _vetos if
+                                                          v.startswith("📐 según las descripciones")]
+            != [], True)
+    _a_favor, _vetos, _v = ns["evidencia_cruzada"](lz_a, lz_c)
+    esperar("el mismo lado: no veta ni suma por medidas",
+            [x for x in _vetos + _a_favor if x.startswith("📐")], [])
+    c.execute("UPDATE productos SET posicion = 'DELANTERA+IZQUIERDA' WHERE id = ?", (lz_b,))
+    conn.commit()
+    _a_favor, _vetos, _v = ns["evidencia_cruzada"](lz_a, lz_b)
+    esperar("lo guardado manda sobre la descripción", [x for x in _vetos if x.startswith("📐")], [])
+
+    # 49. La evidencia mínima según el riesgo: un kit de distribución declarado por una lista
+    # necesita además un auto en común o una medida igual.
+    kd_a = producto("KD1", "KIT DE DISTRIBUCION VW GOL 1.6", fispa)
+    kd_b = producto("IKD1", "KIT DE DISTRIBUCION VW GOL 1.6", illinois)
+    kd_c = producto("XKD1", "KIT DE DISTRIBUCION 1.6", illinois)
+    vincular(kd_a, kd_b, "FISPA · lista.xlsx · 01/10/2026 10:00:00")
+    vincular(kd_a, kd_c, "FISPA · lista.xlsx · 01/10/2026 10:00:00")
+    aplicacion("KD1", "VOLKSWAGEN", "GOL"); aplicacion("IKD1", "VOLKSWAGEN", "GOL")
+    conn.commit()
+    esperar("riesgo alto con un auto en común: verificada",
+            ns["ficha_de_prueba"](kd_a, kd_b)["estado"], "✅ VERIFICADA")
+    ficha = ns["ficha_de_prueba"](kd_a, kd_c)
+    esperar("sin autos en común ni medida: probable", ficha["estado"], "🟡 PROBABLE")
+    esperar("y dice qué le falta", any("evidencia mínima pide además un auto en común en las "
+                                       "descripciones o una medida" in f for f in ficha["falta"]),
+            True)
+    ns["comprobar_en_la_mano"](kd_a, kd_c, "las comparé en la caja")
+    esperar("comprobada en la mano, alcanza", ns["ficha_de_prueba"](kd_a, kd_c)["estado"],
+            "✅ VERIFICADA")
+
+    # 47. La cola: desde cuándo esperaba y de qué lista venía, aunque ya no esté en la cola.
+    for x, y, lote in ((ml_a, ap, "COLA · 01/10"), (ml_b, ap, "COLA · 01/10"),
+                       (rv_a, ap, "COLA · 01/10")):
+        c.execute("INSERT INTO equivalencias_pendientes (producto_a_id, producto_b_id, origen, "
+                  "lote, fecha) VALUES (?, ?, 'x', ?, '2026-10-01 10:00:00')",
+                  (min(x, y), max(x, y), lote))
+    conn.commit()
+    c.execute("INSERT INTO equivalencias_pendientes (producto_a_id, producto_b_id, origen, lote) "
+              "VALUES (?, ?, 'x', 'COLA2 · 02/10')", (min(ap, kd_c), max(ap, kd_c)))
+    conn.commit()
+    ns["aprobar_pendientes"]("COLA2 · 02/10", en_bloque=True)
+    ns["marcar_revision"]([(lz_a, lz_c), (kd_b, kd_c)], "ok")
+    esperar("en bloque, en grupo", [r[0] for r in c.execute(
+        "SELECT como FROM historial_de_revisiones WHERE (producto_a_id, producto_b_id) IN "
+        "((?, ?), (?, ?), (?, ?)) ORDER BY id", (min(ap, kd_c), max(ap, kd_c), min(lz_a, lz_c),
+                                                 max(lz_a, lz_c), min(kd_b, kd_c), max(kd_b, kd_c)))],
+            ["bloque", "grupo", "grupo"])
+    ns["aprobar_pendientes"]("COLA · 01/10", [(ml_a, ap)])
+    ns["rechazar_pendientes"]("COLA · 01/10", [(ml_b, ap)], "otra_pieza")
+    ns["rechazar_pendientes"]("COLA · 01/10")
+    esperar("aprobada y rechazadas desde la cola, con fecha y lista", [tuple(r) for r in c.execute(
+        "SELECT decision, pendiente_desde, lote, como FROM historial_de_revisiones "
+        "WHERE lote = 'COLA · 01/10' ORDER BY id")],
+            [("ok", "2026-10-01 10:00:00", "COLA · 01/10", "uno"),
+             ("rechazada", "2026-10-01 10:00:00", "COLA · 01/10", "uno"),
+             ("rechazada", "2026-10-01 10:00:00", "COLA · 01/10", "bloque")])
     return fallas
 
 

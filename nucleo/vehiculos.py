@@ -809,6 +809,29 @@ def es_nombre_de_modelo(token):
 
 
 
+# Ver «dos números, solo cuando se sabe qué pieza es» en medidas_desde_descripcion().
+_RE_ES_ORING = re.compile(r"\bO\W?\s?RING|\bORING|\bANILLO\s+O\b|\bO-?RINGS?\b")
+
+
+_RE_ES_RETEN_O_ARANDELA = re.compile(r"\bRET(?:EN|ENES)?\b|\bARAND(?:ELA)?S?\b|\bSELLO\b")
+
+
+# EL EXTERNO NO PUEDE SER DIEZ VECES EL INTERNO. En la base, el más estirado que es de verdad
+# es un taco Fischer «5 X 25» (5 veces) y una polea LUCAS (4,3 veces); el resto de las piezas
+# con las dos medidas no llega a 4. Lo que pasaba de 8 eran todos números de otra cosa: «Mot.
+# 1Y-AAZ -1X 64-75» (interno 1, externo 64), «1Y - AAZ 1X 56,8X79MM» (la medida real es 56,8 x
+# 79), tornillos «M012X162» leídos como interno 12 y externo 162. Lo pidió una revisión con
+# ChatGPT («detector de datos imposibles»): un dato así no es una medida, es un error de lectura,
+# y como comparar_medidas() veta con las medidas, un error de lectura puede cortar un vínculo
+# bueno o dejar pasar uno malo.
+PROPORCION_MAXIMA_EXTERNO_INTERNO = 8
+
+
+def _diametros_posibles(interno, externo):
+    return (0 < interno < externo <= 500
+            and externo <= PROPORCION_MAXIMA_EXTERNO_INTERNO * interno)
+
+
 def medidas_desde_descripcion(descripcion):
     """Lee las medidas que la descripción ya trae escritas. Devuelve solo lo que es SEGURO.
 
@@ -838,14 +861,16 @@ def medidas_desde_descripcion(descripcion):
     medidas = {}
 
     # Antes del primer número no puede haber otro número ni un decimal (1.30x...), pero sí el
-    # punto de una abreviatura: «Reten Arbol Secund.30x44x8» no se leía.
-    tres = re.search(r"(?<!\d)(?<!\d\.)(\d{1,3}(?:\.\d+)?)\s*[X×]\s*(\d{1,3}(?:\.\d+)?)"
+    # punto de una abreviatura: «Reten Arbol Secund.30x44x8» no se leía. Tampoco una barra:
+    # «Kit Tornillo Seguridad 1/2X20X37» es media pulgada, y se leía interno 2, externo 20. Ni
+    # una M pegada: «TORNILLO M11X012X210» es la rosca de un tornillo, no interno 11 externo 12.
+    tres = re.search(r"(?<![\d/MX])(?<!\d\.)(\d{1,3}(?:\.\d+)?)\s*[X×]\s*(\d{1,3}(?:\.\d+)?)"
                      r"\s*[X×]\s*(\d{1,3}(?:\.\d+)?)(?![\d.])", texto)
     if tres:
         interno, externo, ancho = (float(tres.group(i)) for i in (1, 2, 3))
         # Cordura: una pieza real tiene el interno menor que el externo, y ninguna de estas
         # medidas pasa de 500 mm. Si no cierra, son números de otra cosa (un año, una potencia).
-        if 0 < interno < externo <= 500 and 0 < ancho <= 500:
+        if _diametros_posibles(interno, externo) and 0 < ancho <= 500:
             medidas["diametro_interno"] = interno
             medidas["diametro_externo"] = externo
             medidas["ancho"] = ancho
@@ -858,7 +883,7 @@ def medidas_desde_descripcion(descripcion):
     # En estas piezas la medida decide todo: un o'ring de 36,5 no entra donde va uno de 37,7.
     # No se toma lo que viene después de una barra («1/2 x100» es media pulgada por cien).
     if "diametro_interno" not in medidas:
-        dos = re.search(r"(?<![\d/])(?<!\d\.)(\d{1,3}(?:\.\d+)?)\s*[X×]\s*(\d{1,3}(?:\.\d+)?)"
+        dos = re.search(r"(?<![\d/MX])(?<!\d\.)(\d{1,3}(?:\.\d+)?)\s*[X×]\s*(\d{1,3}(?:\.\d+)?)"
                         r"(?![\d.])", texto)
         if dos:
             a, b = float(dos.group(1)), float(dos.group(2))
@@ -868,7 +893,7 @@ def medidas_desde_descripcion(descripcion):
                     medidas["diametro_interno"] = a
                     medidas["espesor"] = b
             elif _RE_ES_RETEN_O_ARANDELA.search(texto):
-                if 0 < a < b <= 500:
+                if _diametros_posibles(a, b):
                     medidas["diametro_interno"] = a
                     medidas["diametro_externo"] = b
 

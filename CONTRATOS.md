@@ -50,13 +50,25 @@ Las pruebas se corren como dice el README, en «Antes de subir un cambio».
 | Lo vendido sin estar confirmado queda como alternativa comercial y no confirma la equivalencia; la venta guarda el veredicto de ese momento | `registrar_venta()`, `_pares_vendidos()` | `pruebas_de_la_precision.py` (40) |
 | Una familia con más devoluciones que el mes anterior se marca como empeorando | `tablero_de_calidad()` | `pruebas_de_la_precision.py` (41) |
 | Una tanda automática que trae demasiado de una vez se avisa en la cola | `anomalia_de_la_tanda()` | `pruebas_de_la_precision.py` (42) |
+| El lector de medidas no lee media pulgada («1/2X20»), la rosca de un tornillo («M11X012»), modelos («X1 X3 X4») ni un externo más de 8 veces el interno | `medidas_desde_descripcion()`, `_diametros_posibles()` | `pruebas_de_la_precision.py` (44), `nucleo.pruebas` |
+| Un diámetro imposible no prueba nada, ni a favor ni en contra, y la ficha lo marca | `medidas_imposibles()`, `sin_diametros_imposibles()`, `comparar_medidas()` | `pruebas_de_la_precision.py` (44) |
+| Lo que el lector leyó mal se descarta solo, nunca lo cargado a mano, nunca lo corregido después de listarlo, y queda en el historial de medidas | `medidas_mal_leidas()`, `descartar_medidas_mal_leidas()` | `pruebas_de_la_precision.py` (44) |
+| Cada medida dice de dónde salió: de la descripción o a mano, quién y cuándo | `origen_de_las_medidas()`, `aplicar_medidas_deducidas()` | `pruebas_de_la_precision.py` (44, 46) |
+| Cada medida dice qué diferencia la cambiaría (la explicación contrafactual) | `medidas_lado_a_lado()` | `pruebas_de_la_precision.py` (45) |
+| Si cambia una medida que ya estaba después de aprobarla, la ficha deja de darla por verificada hasta que alguien la vuelva a mirar; completar una vacía no | `medidas_cambiadas_desde()`, `ficha_de_prueba()` | `pruebas_de_la_precision.py` (46) |
+| El historial dice cómo se decidió cada par, una fila por par aunque llegue la ida y la vuelta, y desde cuándo esperaba en la cola | `marcar_revision()`, `_lo_que_dice_la_cola()`, `COMO_SE_DECIDIO` | `pruebas_de_la_precision.py` (46, 47) |
+| Lo que dicen las descripciones veta aunque la medida no esté guardada; lo guardado manda | `evidencia_cruzada()`, `_medidas_con_lo_que_dice_el_texto()` | `pruebas_de_la_precision.py` (48) |
+| Una pieza de seguridad o de riesgo alto necesita, aparte de la fuente, la evidencia mínima de su riesgo (o la comprobación en la mano) | `EVIDENCIA_MINIMA_POR_RIESGO`, `ficha_de_prueba()` | `pruebas_de_la_precision.py` (22, 49) |
+| La venta guarda lo que la sostenía en ese momento, y el registro de errores lo muestra | `evidencia_de_la_fila()`, `registrar_venta()`, `registro_de_errores()` | `pruebas_de_la_precision.py` (41) |
+| La métrica principal cuenta solo lo vendido como equivalente que volvió porque no era la pieza | `tablero_de_calidad()` | `pruebas_de_la_precision.py` (41) |
+| Un caso de muestra sellado no se borra ni se le cambia lo que tiene que dar | `verificar_los_casos_sellados()`, `casos_sellados.txt` | `pruebas_de_la_revision.py` |
 
 ## El stock, los precios y la plata
 
 | Regla | Dónde se cuida | La prueba |
 |---|---|---|
 | Lo que otro cambió mientras se editaba (precio, stock, costo) no se pisa | `actualizar_precio_stock()` con lo mostrado, campo por campo; `valor_con_que_se_abrio()` | `pruebas_de_los_frenos.py` (15b) y en la app con dos sesiones |
-| «Completar medidas» no pisa lo cargado a mano | `aplicar_medidas_deducidas()` con `COALESCE` | `pruebas_de_los_frenos.py` (13) |
+| «Completar medidas» no pisa lo cargado a mano | `aplicar_medidas_deducidas()`: completa solo lo que sigue vacío con el candado tomado | `pruebas_de_los_frenos.py` (13), `pruebas_de_la_precision.py` (44) |
 | Lo apartado nunca pasa el stock | `reservar_stock()` en una transacción | `pruebas_de_carga.py` |
 | El mismo remito no suma el stock dos veces | `aplicar_carga_remito()` con huella | `pruebas_de_los_frenos.py` (14) |
 | Un pedido al depósito se entrega y se cobra una sola vez | `entregar_pedido()` | `pruebas_de_carga.py` |

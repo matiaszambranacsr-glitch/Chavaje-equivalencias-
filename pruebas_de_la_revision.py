@@ -7,6 +7,8 @@ Uso:
     python3 pruebas_de_la_revision.py --base copia.db --linea-base antes.json [--actualizar]
         # la primera vez guarda cómo quedó cada par; las siguientes compara, y falla si algo
         # que rechazaste pasa a limpio. Con --actualizar, la vuelve a guardar.
+    python3 pruebas_de_la_revision.py --sellar
+        # agrega a casos_sellados.txt los pares de muestra nuevos (ver CASOS SELLADOS)
 
 Por qué existe: cada regla nueva del análisis («modelos distintos», «años distintos», «motores
 distintos»…) se probó contra pares reales antes de subirla, pero con scripts sueltos que no
@@ -30,8 +32,16 @@ rechazado que queda entre las «limpias» es uno que se habría aprobado en grup
 Falla si pasa del 1 % (TOPE_DE_FALSOS_POSITIVOS). Sobre la base real del 7/10: 3 de 2.633
 (0,1 %), los tres con la descripción idéntica y del mismo rubro.
 
+CASOS SELLADOS: cada par de muestra queda anotado en casos_sellados.txt con una huella de sus
+dos descripciones y de lo que tiene que dar. Se pueden agregar casos (con --sellar), pero si uno
+sellado se borra o se le cambia lo que tiene que dar, la prueba falla: así no se «arregla» una
+regla cambiando el caso que la contradice. Para sacar uno a propósito hay que borrar su renglón
+del archivo, y eso queda a la vista en el historial de git. Lo pidió una revisión con ChatGPT
+(«golden set bloqueado»).
+
 Nunca toca la base de trabajo: corre en una carpeta temporal, con una base propia.
 """
+import hashlib
 import json
 import os
 import re
@@ -240,7 +250,60 @@ PARES_DE_MUESTRA = [
      "24 V y 10 dientes contra 12 V y 9 dientes"),
     ("JUNTA TAPA DE VALVULAS FIAT PALIO FASE II 1.4 FIRE", "JUNTA TAPA DE VALVULAS FIAT PALIO FASE III 1.4 FIRE",
      "distinta", "fase II contra fase III"),
+    # LOS ADVERSARIALES: los casos que una revisión con ChatGPT propuso para intentar engañar a
+    # las reglas («casi lo mismo, otra pieza»). Los que ya estaban arriba: otro lado (delantero
+    # y trasero), con y sin ABS, reacondicionada, otra rosca, el espesor de la junta. El código
+    # casi idéntico (una O por un cero) y el catálogo que se contradice se prueban en
+    # pruebas_de_la_precision.py (es_confusion_de_lectura() y los rechazos que vuelven).
+    ("BULBO DE PRESION DE ACEITE VW GOL M12X1,5", "BULBO DE PRESION DE ACEITE VW GOL M12X1,25",
+     "distinta", "adversarial: la misma medida, otro paso de rosca"),
+    ("PARRILLA DE SUSPENSION DELANTERA IZQUIERDA VW GOL", "PARRILLA DE SUSPENSION DELANTERA DERECHA VW GOL",
+     "distinta", "adversarial: el lado contrario"),
+    ("BOMBA DE AGUA VW GOL 1.6 NAFTA", "BOMBA DE AGUA VW GOL 1.9 DIESEL", "distinta",
+     "adversarial: el mismo auto con otro motor"),
+    ("Junta Tapa de Cilindros RENAULT (ESP 1.20MM) CLIO", "Junta Tapa de Cilindros RENAULT (ESP 1.30MM) CLIO",
+     "distinta", "adversarial: la misma junta, una décima más gruesa"),
+    ("PASTILLA DE FRENO DELANTERA VW GOL TREND", "PASTILLA DE FRENO TRASERA VW GOL TREND", "distinta",
+     "adversarial: la misma pastilla, el otro eje"),
 ]
+
+
+ARCHIVO_DE_LOS_CASOS_SELLADOS = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                             "casos_sellados.txt")
+
+
+def _huella(desc_a, desc_b, esperado):
+    return hashlib.sha256(f"{desc_a}\x1f{desc_b}\x1f{esperado}".encode("utf-8")).hexdigest()[:16]
+
+
+def verificar_los_casos_sellados(sellar=False):
+    """Falla si un caso sellado ya no está tal cual en PARES_DE_MUESTRA. Con `sellar`, agrega
+    los nuevos al archivo (nunca saca ninguno). Devuelve las fallas."""
+    actuales = {_huella(a, b, e): f"{e}: {a[:45]} / {b[:45]}"
+                for a, b, e, *_ in PARES_DE_MUESTRA}
+    sellados = {}
+    if os.path.exists(ARCHIVO_DE_LOS_CASOS_SELLADOS):
+        with open(ARCHIVO_DE_LOS_CASOS_SELLADOS, encoding="utf-8") as f:
+            for renglon in f:
+                if renglon.strip() and not renglon.startswith("#"):
+                    huella, _, texto = renglon.rstrip("\n").partition(" ")
+                    sellados[huella] = texto.strip()
+    nuevos = [h for h in actuales if h not in sellados]
+    if sellar and nuevos:
+        nuevo_archivo = not os.path.exists(ARCHIVO_DE_LOS_CASOS_SELLADOS)
+        with open(ARCHIVO_DE_LOS_CASOS_SELLADOS, "a", encoding="utf-8") as f:
+            if nuevo_archivo:
+                f.write("# Casos sellados de pruebas_de_la_revision.py: se agregan con --sellar.\n"
+                        "# Borrar un renglón saca ese caso a propósito (queda en git).\n")
+            for h in nuevos:
+                f.write(f"{h} {actuales[h]}\n")
+        print(f"   🔒 se sellaron {len(nuevos)} caso(s) nuevo(s)")
+        nuevos = []
+    faltan = [texto for h, texto in sellados.items() if h not in actuales]
+    print(f"{'✅' if not faltan else '❌'} casos sellados: {len(sellados) - len(faltan)} de "
+          f"{len(sellados)} siguen tal cual"
+          + (f"; {len(nuevos)} nuevo(s) sin sellar (correlo con --sellar)" if nuevos else ""))
+    return [f"un caso sellado se borró o se le cambió lo que tiene que dar: {t}" for t in faltan]
 
 
 def _cargar_la_logica(carpeta):
@@ -261,14 +324,21 @@ def probar_pares_de_muestra(logica, con_catalogo):
         probados += 1
         fa, fb = logica.firma_de_producto(desc_a), logica.firma_de_producto(desc_b)
         ok, motivo = logica.firmas_compatibles(fa, fb)
+        contradice = not ok and motivo.startswith(logica._MOTIVOS_QUE_CONTRADICEN)
+        # Y las medidas que dicen las dos descripciones, que vetan por su lado (la posición, el
+        # espesor de la junta: ver evidencia_cruzada()). Así un par «misma» también avisa si el
+        # lector de medidas lo vetaría sin razón.
+        med_ok, med_motivo = logica.comparar_medidas(logica.medidas_desde_descripcion(desc_a),
+                                                     logica.medidas_desde_descripcion(desc_b))
+        if med_ok is False:
+            ok, contradice, motivo = False, True, f"📐 {med_motivo}"
         if esperado == "misma" and not ok:
             fallas.append(f"«{desc_a[:40]}» / «{desc_b[:40]}» ({origen}): tenían que concordar "
                           f"y dio «{motivo}»")
-        if esperado == "distinta" and (ok or not motivo.startswith(
-                logica._MOTIVOS_QUE_CONTRADICEN)):
+        if esperado == "distinta" and not contradice:
             fallas.append(f"«{desc_a[:40]}» / «{desc_b[:40]}» ({origen}): tenían que ser piezas "
                           f"distintas y dio {'que concuerdan' if ok else f'«{motivo}»'}")
-        if esperado == "dudosa" and (ok or motivo.startswith(logica._MOTIVOS_QUE_CONTRADICEN)):
+        if esperado == "dudosa" and (ok or contradice):
             fallas.append(f"«{desc_a[:40]}» / «{desc_b[:40]}» ({origen}): tenían que quedar para "
                           f"revisar y dio {'que concuerdan' if ok else f'«{motivo}» (rojo)'}")
     return fallas, probados
@@ -280,6 +350,12 @@ def preparar_la_base_de_aprobaciones(ruta_base, destino):
     ANTES de cargar la lógica, que abre la conexión al arrancar. Devuelve cuántos pares quedan."""
     shutil.copy(ruta_base, destino)
     con = sqlite3.connect(destino)
+    # Cuándo se decidió cada par, antes de borrar las decisiones: lo decidido después del último
+    # cambio de reglas es un caso que las reglas nunca vieron (ver imprimir_la_matriz()).
+    FECHA_DE_LA_DECISION.clear()
+    FECHA_DE_LA_DECISION.update({(min(a, b), max(a, b)): (f or "")[:10] for a, b, f in con.execute(
+        "SELECT producto_a_id, producto_b_id, MAX(fecha) FROM equivalencias_revisadas "
+        "GROUP BY producto_a_id, producto_b_id")})
     aprobados = {(min(a, b), max(a, b)) for a, b in con.execute(
         "SELECT producto_a_id, producto_b_id FROM equivalencias_revisadas WHERE decision = 'ok'")}
     pares = [(a, b) for a, b in sorted(aprobados)
@@ -313,6 +389,19 @@ def preparar_la_base_de_aprobaciones(ruta_base, destino):
 
 
 LOTE_DE_LA_PRUEBA = "PRUEBA DE APROBACIONES"
+# {(menor, mayor): "AAAA-MM-DD"}: cuándo se decidió cada par. Lo llena
+# preparar_la_base_de_aprobaciones().
+FECHA_DE_LA_DECISION = {}
+# LOS CASOS RESERVADOS: uno de cada cinco pares, elegido por su código y marca (siempre el mismo,
+# en cualquier copia de la base), que no se mira al escribir una regla. Si las reglas aciertan
+# mucho más en los que se miraron que en los reservados, se ajustaron a esos casos y no a la
+# pieza. Lo pidió una revisión con ChatGPT («casos nunca vistos: entrenamiento y validación»).
+PARTE_RESERVADA = 5
+
+
+def es_reservado(clave):
+    """Si el par (por clave_del_par()) es de los reservados."""
+    return int(hashlib.sha256(clave.encode("utf-8")).hexdigest(), 16) % PARTE_RESERVADA == 0
 LOTE_DE_LOS_RECHAZOS = "PRUEBA DE RECHAZOS"
 # Cuántos de los rechazados a mano pueden quedar entre las «limpias», en %. Sobre la base real
 # del 7/10 eran 3 de 2.633 (0,1 %); más del 1 % es que una regla nueva abrió la puerta.
@@ -386,9 +475,9 @@ def clave_del_par(f):
 
 
 def clasificadas(limpias, todos, familia=None):
-    """{clave: (estado, señales a favor, confianza, familia)} de cada par: estado es «limpia»,
-    «revisión» o «rojo»; familia, el rubro de la pieza (ver familia_para_comparar()), si se pasa
-    con qué sacarlo."""
+    """{clave: (estado, señales a favor, confianza, familia, alarmas, (id menor, id mayor))} de
+    cada par: estado es «limpia», «revisión» o «rojo»; familia, el rubro de la pieza (ver
+    familia_para_comparar()), si se pasa con qué sacarlo."""
     ids_limpias = {id(f) for f in limpias}
     salida = {}
     for f in todos:
@@ -396,7 +485,9 @@ def clasificadas(limpias, todos, familia=None):
                   else "rojo" if (f.get("confianza") or 0) < 30 else "revisión")
         a_favor = [t for tipo, t in (f.get("senales") or ()) if tipo == "bien"]
         rubro = (familia(f.get("desc_a") or f.get("desc_b") or "") if familia else "") or "—"
-        salida[clave_del_par(f)] = (estado, a_favor, f.get("confianza") or 0, rubro)
+        par = (min(f.get("a") or 0, f.get("b") or 0), max(f.get("a") or 0, f.get("b") or 0))
+        salida[clave_del_par(f)] = (estado, a_favor, f.get("confianza") or 0, rubro,
+                                    list(f.get("alarmas") or []), par)
     return salida
 
 
@@ -416,8 +507,8 @@ def imprimir_las_reglas(aprobados, rechazados, cuantas=12):
     están causando más errores»)."""
     cuenta = {}
     for nombre, conteo in (("aprobados", aprobados), ("rechazados", rechazados)):
-        for _estado, a_favor, _conf, _rubro in (conteo or {}).get("_filas", {}).values():
-            for senal in {_nombre_de_la_senal(t) for t in a_favor}:
+        for v in (conteo or {}).get("_filas", {}).values():
+            for senal in {_nombre_de_la_senal(t) for t in v[1]}:
                 cuenta.setdefault(senal, {"aprobados": 0, "rechazados": 0})[nombre] += 1
     filas = [(s_, c_["aprobados"], c_["rechazados"]) for s_, c_ in cuenta.items()
              if c_["aprobados"] + c_["rechazados"] >= 20]
@@ -425,6 +516,43 @@ def imprimir_las_reglas(aprobados, rechazados, cuantas=12):
     print("   reglas a favor, de la que más aparece en lo rechazado a la que menos:")
     for senal, ap, re_ in filas[:cuantas]:
         print(f"     {100 * re_ / (ap + re_):5.1f} % rechazados ({re_:,} de {ap + re_:,})  {senal}")
+    # LAS QUE NO DISTINGUEN: una regla que está en lo rechazado en la misma proporción que todo
+    # lo decidido suma puntos sin decir nada. Y las que casi nunca aparecen no se pueden medir.
+    # Lo pidió una revisión con ChatGPT («detectar reglas irrelevantes»).
+    n_ap = len((aprobados or {}).get("_filas", {}))
+    n_re = len((rechazados or {}).get("_filas", {}))
+    if n_ap + n_re:
+        base = n_re / (n_ap + n_re)
+        no_distinguen = [s_ for s_, ap, re_ in filas if abs(re_ / (ap + re_) - base) <= 0.2 * base]
+        print(f"   de todo lo decidido, {100 * base:.1f} % es rechazado; reglas que no se alejan de "
+              f"eso (no distinguen): {len(no_distinguen)}"
+              + (" — " + "; ".join(no_distinguen[:4]) if no_distinguen else ""))
+        print(f"   reglas que aparecen en menos de 20 pares (no se pueden medir): "
+              f"{sum(1 for c_ in cuenta.values() if c_['aprobados'] + c_['rechazados'] < 20)}")
+    imprimir_las_responsables(aprobados, rechazados)
+
+
+def imprimir_las_responsables(aprobados, rechazados, cuantas=5):
+    """LA REGLA DETRÁS DE CADA ERROR: en los falsos positivos (rechazados que pasarían limpios),
+    qué señal a favor los empujó; en los falsos negativos (aprobados en rojo, sin contar los mal
+    aprobados ya revisados), qué alarma los tumbó. «La regla R-27 es responsable del 68 % de los
+    errores», como lo pidió una revisión con ChatGPT."""
+    for titulo, conteo, estado, columna in (
+            ("falsos positivos", rechazados, "limpia", 1),
+            ("falsos negativos", aprobados, "rojo", 4)):
+        errores = [v for v in (conteo or {}).get("_filas", {}).values() if v[0] == estado
+                   and not (columna == 4 and (v[4] or [""])[0].startswith(
+                       ALARMAS_DE_APROBACIONES_MALAS))]
+        if not errores:
+            continue
+        cuenta = {}
+        for v in errores:
+            senales = v[columna] if columna == 1 else v[columna][:1]
+            for senal in {_nombre_de_la_senal(t) for t in senales}:
+                cuenta[senal] = cuenta.get(senal, 0) + 1
+        print(f"   {titulo} ({len(errores):,}), la regla que está en más de ellos:")
+        for senal, n in sorted(cuenta.items(), key=lambda x: -x[1])[:cuantas]:
+            print(f"     {100 * n / len(errores):5.1f} % ({n:,} de {len(errores):,})  {senal}")
 
 
 # Las franjas del puntaje, de arriba abajo: el verde aprueba solo desde 75.
@@ -495,13 +623,17 @@ def comparar_con_la_linea_de_base(ruta, aprobados, rechazados, actualizar=False)
     return fallas
 
 
-def imprimir_la_matriz(aprobados, rechazados):
+def imprimir_la_matriz(aprobados, rechazados, desde=None):
     """Lo que haría el análisis con lo que ya decidiste: la matriz de aciertos y errores.
 
     Lo pidió una revisión con ChatGPT («verdaderos y falsos positivos y negativos»). Hay una
     columna del medio porque el análisis no decide solo: lo que no es limpio ni rojo va a
     revisión, y eso no es un error, es trabajo. Los errores son las dos esquinas: lo rechazado
-    que pasaría limpio (falso positivo, el caro) y lo aprobado que caería en rojo."""
+    que pasaría limpio (falso positivo, el caro) y lo aprobado que caería en rojo.
+
+    Y la tasa de error en tres grupos (ver es_reservado()): los pares que se miraron al
+    escribir las reglas, los reservados que no, y los decididos después de `desde` —la fecha del
+    último cambio de reglas—, que las reglas nunca pudieron ver."""
     print(f"   {'matriz':<12}" + "".join(f"{t:<24}" for t in ("pasa limpia", "a revisión", "rojo")))
     for nombre, conteo, marcas in (("aprobados", aprobados, ("acierto", "", "falso negativo")),
                                    ("rechazados", rechazados, ("falso positivo", "", "acierto"))):
@@ -510,6 +642,24 @@ def imprimir_la_matriz(aprobados, rechazados):
         celdas = [f"{conteo[k]:>6,}" + (f" {m}" if m else "")
                   for k, m in zip(("limpias", "revisión", "rojo"), marcas)]
         print(f"   {nombre:<12}" + "".join(f"{c_:<24}" for c_ in celdas))
+    grupos = {}
+    for grupo, conteo, malo in (("aprobados", aprobados, "rojo"),
+                                ("rechazados", rechazados, "limpia")):
+        for clave, v in (conteo or {}).get("_filas", {}).items():
+            if grupo == "aprobados" and (v[4] or [""])[0].startswith(ALARMAS_DE_APROBACIONES_MALAS):
+                continue
+            nombres = ["reservados" if es_reservado(clave) else "mirados"]
+            if desde and FECHA_DE_LA_DECISION.get(tuple(v[5]), "") > desde:
+                nombres.append(f"nuevos (después del {desde})")
+            for n in nombres:
+                g = grupos.setdefault(n, {"aprobados": [0, 0], "rechazados": [0, 0]})
+                g[grupo][0] += 1
+                g[grupo][1] += v[0] == malo
+    for n, g in grupos.items():
+        print(f"   {n:<30} " + " · ".join(
+            f"{grupo} {g[grupo][0]:,}: {100 * g[grupo][1] / g[grupo][0]:.1f} % "
+            f"{'en rojo' if grupo == 'aprobados' else 'pasarían limpios'}"
+            for grupo in ("aprobados", "rechazados") if g[grupo][0]))
 
 
 def main():
@@ -529,12 +679,14 @@ def main():
         print(f"{'✅' if not fallas else '❌'} pares de muestra: {probados - len(fallas)} de "
               f"{probados} bien" + (f" ({salteados} necesitan el catálogo: correlo con --base)"
                                     if salteados else ""))
+        fallas += verificar_los_casos_sellados(sellar="--sellar" in sys.argv)
         if ruta_base:
             f2, resumen, conteo_ap = probar_aprobaciones(logica, cuantos)
             print(f"{'✅' if not f2 else '❌'} aprobaciones: {resumen}")
             fallas += f2
             n_r, limpios_r, altos_r, _ejemplos, conteo_re = probar_rechazos(logica)
-            imprimir_la_matriz(conteo_ap, conteo_re)
+            imprimir_la_matriz(conteo_ap, conteo_re,
+                               logica.todo_lo_de_la_logica()["VERSIONES_DE_LAS_REGLAS"][1][1])
             if "--reglas" in sys.argv:
                 imprimir_las_reglas(conteo_ap, conteo_re)
                 imprimir_la_calibracion(conteo_ap, conteo_re)

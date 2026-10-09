@@ -188,7 +188,11 @@ from .codigos import _RE_REF_PEGADO, normalizar_texto, posicion_desde_descripcio
       "_parecido_nombre_pieza", "extraer_anios",
       "PALABRAS_DE_CONTEXTO", "PALABRAS_NO_MODELO",
       "es_nombre_de_modelo",
-      "_RE_PIEZA_POR_MEDIDA", "medidas_desde_descripcion",
+      # Las dos expresiones de «dos números, solo cuando se sabe qué pieza es»: sin ellas el
+      # paquete reventaba con NameError en cualquier «O´RING 36,5X3.53».
+      "_RE_PIEZA_POR_MEDIDA", "_RE_ES_ORING", "_RE_ES_RETEN_O_ARANDELA",
+      "PROPORCION_MAXIMA_EXTERNO_INTERNO", "_diametros_posibles",
+      "medidas_desde_descripcion",
       # La patente argentina: qué se lee de ella sin consultar ninguna base
       "PROVINCIAS_PATENTE", "ANCLAS_PATENTE_VIEJA", "ANCLAS_PATENTE_MERCOSUR",
       "_RE_PATENTE_VIEJA", "_RE_PATENTE_MERCOSUR", "_RE_PATENTE_MOTO_MERCOSUR",

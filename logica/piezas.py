@@ -76,6 +76,66 @@ _RE_ES_ORING = re.compile(r"\bO\W?\s?RING|\bORING|\bANILLO\s+O\b|\bO-?RINGS?\b")
 _RE_ES_RETEN_O_ARANDELA = re.compile(r"\bRET(?:EN|ENES)?\b|\bARAND(?:ELA)?S?\b|\bSELLO\b")
 
 
+# EL EXTERNO NO PUEDE SER DIEZ VECES EL INTERNO. En la base, el más estirado que es de verdad
+# es un taco Fischer «5 X 25» (5 veces) y una polea LUCAS (4,3 veces); el resto de las piezas
+# con las dos medidas no llega a 4. Lo que pasaba de 8 eran todos números de otra cosa: «Mot.
+# 1Y-AAZ -1X 64-75» (interno 1, externo 64), «1Y - AAZ 1X 56,8X79MM» (la medida real es 56,8 x
+# 79), tornillos «M012X162» leídos como interno 12 y externo 162. Lo pidió una revisión con
+# ChatGPT («detector de datos imposibles»): un dato así no es una medida, es un error de lectura,
+# y como comparar_medidas() veta con las medidas, un error de lectura puede cortar un vínculo
+# bueno o dejar pasar uno malo.
+PROPORCION_MAXIMA_EXTERNO_INTERNO = 8
+
+
+def _diametros_posibles(interno, externo):
+    return (0 < interno < externo <= 500
+            and externo <= PROPORCION_MAXIMA_EXTERNO_INTERNO * interno)
+
+
+# Los pares interno/externo de las dos caras. Ver medidas_imposibles().
+_PARES_DE_DIAMETROS = (("diametro_interno", "diametro_externo", ""),
+                       ("diametro_interno_cara_b", "diametro_externo_cara_b", " (cara B)"))
+
+
+def medidas_imposibles(med):
+    """Lo que no puede ser en las medidas GUARDADAS de un producto: [texto]. Vacío si nada.
+
+    Un interno igual o mayor que el externo, un externo más de 8 veces el interno, una medida
+    negativa. No es una pieza rara: es un dato mal cargado o mal leído, y no sirve como prueba
+    ni a favor ni en contra (comparar_medidas() no lo usa). Lo pidió una revisión con ChatGPT
+    («detector de datos imposibles»)."""
+    med = med or {}
+    problemas = []
+    for campo, valor in med.items():
+        if isinstance(valor, (int, float)) and not isinstance(valor, bool) and valor < 0:
+            problemas.append(f"{campo.replace('_', ' ')} negativo ({valor:g})")
+    for interno, externo, cara in _PARES_DE_DIAMETROS:
+        di, de = med.get(interno), med.get(externo)
+        if not isinstance(di, (int, float)) or not isinstance(de, (int, float)) or not di or not de:
+            continue
+        if di >= de:
+            problemas.append(f"el interno{cara} ({di:g}) no es menor que el externo ({de:g})")
+        elif de > PROPORCION_MAXIMA_EXTERNO_INTERNO * di:
+            problemas.append(f"el externo{cara} ({de:g}) es {de / di:.0f} veces el interno "
+                             f"({di:g})")
+    return problemas
+
+
+def sin_diametros_imposibles(med):
+    """Las medidas sin los diámetros que no pueden ser (ver medidas_imposibles()): una copia,
+    con el interno y el externo de esa cara vacíos."""
+    if not med:
+        return med
+    salida = None
+    for interno, externo, _cara in _PARES_DE_DIAMETROS:
+        di, de = med.get(interno), med.get(externo)
+        if (isinstance(di, (int, float)) and isinstance(de, (int, float)) and di > 0 and de > 0
+                and not _diametros_posibles(di, de)):
+            salida = dict(salida or med)
+            salida[interno] = salida[externo] = None
+    return salida if salida is not None else med
+
+
 def medidas_desde_descripcion(descripcion):
     """Lee las medidas que la descripción ya trae escritas. Devuelve solo lo que es SEGURO.
 
@@ -105,14 +165,16 @@ def medidas_desde_descripcion(descripcion):
     medidas = {}
 
     # Antes del primer número no puede haber otro número ni un decimal (1.30x...), pero sí el
-    # punto de una abreviatura: «Reten Arbol Secund.30x44x8» no se leía.
-    tres = re.search(r"(?<!\d)(?<!\d\.)(\d{1,3}(?:\.\d+)?)\s*[X×]\s*(\d{1,3}(?:\.\d+)?)"
+    # punto de una abreviatura: «Reten Arbol Secund.30x44x8» no se leía. Tampoco una barra:
+    # «Kit Tornillo Seguridad 1/2X20X37» es media pulgada, y se leía interno 2, externo 20. Ni
+    # una M pegada: «TORNILLO M11X012X210» es la rosca de un tornillo, no interno 11 externo 12.
+    tres = re.search(r"(?<![\d/MX])(?<!\d\.)(\d{1,3}(?:\.\d+)?)\s*[X×]\s*(\d{1,3}(?:\.\d+)?)"
                      r"\s*[X×]\s*(\d{1,3}(?:\.\d+)?)(?![\d.])", texto)
     if tres:
         interno, externo, ancho = (float(tres.group(i)) for i in (1, 2, 3))
         # Cordura: una pieza real tiene el interno menor que el externo, y ninguna de estas
         # medidas pasa de 500 mm. Si no cierra, son números de otra cosa (un año, una potencia).
-        if 0 < interno < externo <= 500 and 0 < ancho <= 500:
+        if _diametros_posibles(interno, externo) and 0 < ancho <= 500:
             medidas["diametro_interno"] = interno
             medidas["diametro_externo"] = externo
             medidas["ancho"] = ancho
@@ -125,7 +187,7 @@ def medidas_desde_descripcion(descripcion):
     # En estas piezas la medida decide todo: un o'ring de 36,5 no entra donde va uno de 37,7.
     # No se toma lo que viene después de una barra («1/2 x100» es media pulgada por cien).
     if "diametro_interno" not in medidas:
-        dos = re.search(r"(?<![\d/])(?<!\d\.)(\d{1,3}(?:\.\d+)?)\s*[X×]\s*(\d{1,3}(?:\.\d+)?)"
+        dos = re.search(r"(?<![\d/MX])(?<!\d\.)(\d{1,3}(?:\.\d+)?)\s*[X×]\s*(\d{1,3}(?:\.\d+)?)"
                         r"(?![\d.])", texto)
         if dos:
             a, b = float(dos.group(1)), float(dos.group(2))
@@ -135,7 +197,7 @@ def medidas_desde_descripcion(descripcion):
                     medidas["diametro_interno"] = a
                     medidas["espesor"] = b
             elif _RE_ES_RETEN_O_ARANDELA.search(texto):
-                if 0 < a < b <= 500:
+                if _diametros_posibles(a, b):
                     medidas["diametro_interno"] = a
                     medidas["diametro_externo"] = b
 
@@ -303,33 +365,153 @@ def medidas_deducibles_desde(desde_id, limite=2000):
     return salida, max(hasta_id, c.execute("SELECT COALESCE(MAX(id), 0) FROM productos").fetchone()[0])
 
 
+# POR QUÉ CAMBIÓ UNA MEDIDA, para historial_de_medidas. Lo pidió una revisión con ChatGPT:
+# «diferenciar corrección de edición» —corregir un 52 que se cargó 25 no es lo mismo que anotar
+# que el fabricante sacó otra versión de la pieza— y «separar el dato observado del inferido»:
+# una medida que alguien midió no vale lo mismo que una que el lector sacó de la descripción.
+MOTIVOS_DE_CAMBIO_DE_MEDIDA = {
+    "correccion": "✏️ corrección de un dato mal cargado",
+    "cambio": "🔧 la pieza cambió (otra versión del fabricante)",
+    "descripcion": "📄 leída de la descripción",
+    "descartada": "🧹 lectura descartada (el lector la había leído mal)",
+}
+# Quién figura en el historial cuando la medida la escribió la app y no una persona.
+LECTOR_DE_DESCRIPCIONES = "lector de descripciones"
+
+
 def aplicar_medidas_deducidas(filas):
     """Escribe las medidas leídas. Devuelve cuántos productos se completaron.
 
     SOLO LO QUE SIGUE VACÍO AL ESCRIBIR, no al leer. La lista se arma antes —en la pantalla
     queda a la vista mientras alguien la revisa, a veces varios minutos— y si en el medio otro
     cargó una medida a mano, el «✅ Completar» la pisaba con la leída de la descripción (lo
-    señaló una revisión con ChatGPT). Con COALESCE, lo cargado manda siempre."""
+    señaló una revisión con ChatGPT). Se mira qué sigue vacío con el candado tomado: lo
+    cargado manda siempre.
+
+    Y cada medida que se escribe queda en historial_de_medidas como «leída de la descripción»:
+    la ficha dice de dónde salió cada dato (ver origen_de_las_medidas())."""
     hechos = 0
-    with db_lock:
+    with db_lock, transaccion():
         for f in filas:
             nuevas = f.get("_nuevas") or {}
             if not nuevas:
                 continue
-            sets = ", ".join(f"{campo} = COALESCE({campo}, ?)" for campo in nuevas)
-            vacios = " OR ".join(f"{campo} IS NULL" for campo in nuevas)
-            c.execute(f"UPDATE productos SET {sets} WHERE id = ? AND ({vacios})",
-                      list(nuevas.values()) + [f["_id"]])
-            hechos += 1 if c.rowcount else 0
-        conn.commit()
+            c.execute(f"SELECT {', '.join(nuevas)} FROM productos WHERE id = ?", (f["_id"],))
+            antes = c.fetchone()
+            vacias = {campo: valor for campo, valor in nuevas.items()
+                      if antes is not None and antes[campo] is None}
+            if not vacias:
+                continue
+            c.execute(f"UPDATE productos SET {', '.join(f'{k} = ?' for k in vacias)} WHERE id = ?",
+                      list(vacias.values()) + [f["_id"]])
+            c.executemany("INSERT INTO historial_de_medidas (producto_id, campo, antes, despues, "
+                          "usuario, motivo) VALUES (?, ?, NULL, ?, ?, 'descripcion')",
+                          [(f["_id"], campo, _como_texto(valor), LECTOR_DE_DESCRIPCIONES)
+                           for campo, valor in vacias.items()])
+            hechos += 1
     return hechos
+
+
+# Las que salen de los números con una X en el medio («35x52x7», «36,5X3.53»): las únicas que
+# una versión vieja del lector pudo haber leído mal. Ver medidas_mal_leidas().
+_MEDIDAS_DE_LA_X = ("diametro_interno", "diametro_externo", "ancho", "espesor")
+
+
+def _numeros_junto_a_una_x(texto):
+    """Los números de la descripción que tienen una X pegada adelante o atrás, como float."""
+    texto = str(texto or "").upper().replace(",", ".")
+    salida = set()
+    for m in re.finditer(r"\d+(?:\.\d+)?", texto):
+        antes, despues = texto[:m.start()].rstrip(), texto[m.end():].lstrip()
+        if antes.endswith(("X", "×")) or despues.startswith(("X", "×")):
+            try:
+                salida.add(float(m.group()))
+            except ValueError:
+                pass
+    return salida
+
+
+def medidas_mal_leidas(tope=None):
+    """Productos con una medida que salió de la descripción con una versión vieja del lector y
+    que el lector de hoy ya no lee así. [{"_id", "_cambios": {campo: valor nuevo o None},
+    Código, Marca, Descripción, Medida, Guardada, Hoy se lee}].
+
+    Medido sobre la base real del 9/10: «Mot. 1Y-AAZ -1X 64» guardado como interno 1 y externo
+    64, «BMW X1 X3 X4» como 1 × 3 × 4 en nueve sondas lambda, «1/2X20X37» (media pulgada) como 2
+    × 20 × 37, tornillos «M012X162» como interno 12 y externo 162. Es una medida guardada que la
+    descripción no respalda, y comparar_medidas() la usa para vetar o confirmar.
+
+    Solo se toca lo que salió de la X —el número guardado está escrito en la descripción con una
+    X pegada— y nunca lo que una persona cargó o corrigió a mano (está en el historial)."""
+    c.execute("""SELECT DISTINCT producto_id, campo FROM historial_de_medidas
+                 WHERE COALESCE(motivo, '') NOT IN ('descripcion', 'descartada')""")
+    a_mano = {(r["producto_id"], r["campo"]) for r in c.fetchall()}
+    c.execute(f"""SELECT p.id, p.codigo_raw, m.nombre AS marca, p.descripcion,
+                         {", ".join("p." + cp for cp in _MEDIDAS_DE_LA_X)}
+                  FROM productos p JOIN marcas m ON m.id = p.marca_id
+                  WHERE p.descripcion IS NOT NULL
+                    AND ({" OR ".join(f"p.{cp} IS NOT NULL" for cp in _MEDIDAS_DE_LA_X)})
+                  ORDER BY p.id""")
+    etiquetas = dict(CAMPOS_MEDIDAS)
+    salida = []
+    for r in c.fetchall():
+        hoy = medidas_desde_descripcion(r["descripcion"])
+        junto_a_x = None
+        cambios = {}
+        for campo in _MEDIDAS_DE_LA_X:
+            guardada = r[campo]
+            if guardada is None or hoy.get(campo) == guardada or (r["id"], campo) in a_mano:
+                continue
+            if junto_a_x is None:
+                junto_a_x = _numeros_junto_a_una_x(r["descripcion"])
+            if float(guardada) in junto_a_x:
+                cambios[campo] = hoy.get(campo)
+        if cambios:
+            salida.append({
+                "_id": r["id"], "_cambios": cambios,
+                "_guardadas": {cp: r[cp] for cp in cambios}, "Código": r["codigo_raw"],
+                "Marca": r["marca"], "Descripción": (r["descripcion"] or "")[:90],
+                "Medida": ", ".join(etiquetas.get(cp, cp) for cp in cambios),
+                "Guardada": ", ".join(_como_texto(r[cp]) or "—" for cp in cambios),
+                "Hoy se lee": ", ".join(_como_texto(v) or "nada" for v in cambios.values())})
+            if tope and len(salida) >= tope:
+                break
+    return salida
+
+
+def descartar_medidas_mal_leidas(filas):
+    """Pone la lectura de hoy (o vacío) donde quedó una mal leída, y lo anota en el historial
+    de medidas como «lectura descartada». Solo si el valor sigue siendo el que se mostró
+    (`_guardadas`): si en el medio alguien lo corrigió a mano, manda lo de esa persona.
+    Devuelve [ids tocados]."""
+    tocados = []
+    with db_lock, transaccion():
+        for f in filas:
+            cambios = f.get("_cambios") or {}
+            guardadas = f.get("_guardadas") or {}
+            hechos = []
+            for campo, nuevo in cambios.items():
+                if guardadas.get(campo) is None:
+                    continue
+                c.execute(f"UPDATE productos SET {campo} = ? WHERE id = ? AND {campo} = ?",
+                          (nuevo, f["_id"], guardadas[campo]))
+                if c.rowcount:
+                    hechos.append((f["_id"], campo, _como_texto(guardadas[campo]),
+                                   _como_texto(nuevo), LECTOR_DE_DESCRIPCIONES))
+            c.executemany("INSERT INTO historial_de_medidas (producto_id, campo, antes, despues, "
+                          "usuario, motivo) VALUES (?, ?, ?, ?, ?, 'descartada')", hechos)
+            if hechos:
+                tocados.append(f["_id"])
+    return tocados
 
 
 def actualizar_medidas(producto_id, diam_int, diam_ext, ancho, paso_rosca, estrias, ubicacion,
                         estrias_internas=None, estrias_externas=None, posicion_seguro=None, tiene_abs="Cualquiera",
                         diam_int_cara_b=None, diam_ext_cara_b=None,
                         diam_rosca_homocinetica=None, diam_copa=None,
-                        diam_copa_superior=None, largo_total=None):
+                        diam_copa_superior=None, largo_total=None, motivo="correccion"):
+    """Guarda las medidas cargadas a mano. 'motivo' es una clave de MOTIVOS_DE_CAMBIO_DE_MEDIDA:
+    corrección de un dato mal cargado, o que la pieza cambió. Devuelve cuántos datos cambiaron."""
     tiene_abs_valor = None if tiene_abs == "Cualquiera" else (1 if tiene_abs == "Sí" else 0)
     nuevos = {
         "diametro_interno": diam_int or None, "diametro_externo": diam_ext or None,
@@ -354,11 +536,11 @@ def actualizar_medidas(producto_id, diam_int, diam_ext, ancho, paso_rosca, estri
         # la cambió y cuándo, en vez de pisarse sin rastro. Lo pidió una revisión con ChatGPT
         # («versión 1 → 54 mm, versión 2 → 56 mm, y qué fuente produjo el cambio»).
         cambios = [(producto_id, campo, _como_texto(antes[campo]) if antes else None,
-                    _como_texto(valor), obtener_usuario_actual())
+                    _como_texto(valor), obtener_usuario_actual(), motivo)
                    for campo, valor in nuevos.items()
                    if antes is not None and _como_texto(antes[campo]) != _como_texto(valor)]
         c.executemany("INSERT INTO historial_de_medidas (producto_id, campo, antes, despues, "
-                      "usuario) VALUES (?, ?, ?, ?, ?)", cambios)
+                      "usuario, motivo) VALUES (?, ?, ?, ?, ?, ?)", cambios)
     return len(cambios)
 
 
@@ -380,18 +562,85 @@ def autos_que_nombran_al_producto(producto_id):
     return c.fetchone()[0] or 0
 
 
+def _etiquetas_de_medidas():
+    return {**dict(CAMPOS_MEDIDAS), **dict(_MEDIDAS_EXACTAS),
+            "ubicacion": "ubicación en el depósito", "estrias_internas": "estrías internas",
+            "estrias_externas": "estrías externas", "posicion_seguro": "posición del seguro",
+            "tiene_abs": "ABS"}
+
+
 def historial_de_medidas(producto_id, tope=50):
-    """Los cambios de medidas a mano de un producto, del más nuevo al más viejo."""
-    c.execute("""SELECT substr(fecha, 1, 16) AS fecha, campo, antes, despues, usuario
+    """Los cambios de medidas de un producto, del más nuevo al más viejo: a mano y los que
+    escribió el lector de descripciones."""
+    c.execute("""SELECT substr(fecha, 1, 16) AS fecha, campo, antes, despues, usuario, motivo
                  FROM historial_de_medidas WHERE producto_id = ?
                  ORDER BY fecha DESC, id DESC LIMIT ?""", (producto_id, tope))
-    etiquetas = {**dict(CAMPOS_MEDIDAS), **dict(_MEDIDAS_EXACTAS),
-                 "ubicacion": "ubicación en el depósito", "estrias_internas": "estrías internas",
-                 "estrias_externas": "estrías externas", "posicion_seguro": "posición del seguro",
-                 "tiene_abs": "ABS"}
+    etiquetas = _etiquetas_de_medidas()
     return [{"Fecha": r["fecha"], "Medida": etiquetas.get(r["campo"], r["campo"]),
              "Antes": r["antes"] or "—", "Ahora": r["despues"] or "—",
-             "Quién": r["usuario"] or "—"} for r in c.fetchall()]
+             "Quién": r["usuario"] or "—",
+             # Los de antes de que se anotara el motivo son todos cambios a mano.
+             "Por qué": MOTIVOS_DE_CAMBIO_DE_MEDIDA.get(r["motivo"] or "correccion",
+                                                       r["motivo"])}
+            for r in c.fetchall()]
+
+
+def origen_de_las_medidas(ids):
+    """{producto_id: {campo: de dónde salió el valor de hoy}}: «📄 de la descripción», «✋ a
+    mano (quién, cuándo)». Lo pidió una revisión con ChatGPT: «separar el dato observado del
+    inferido» y «la evidencia de cada característica». Sale del último cambio anotado de cada
+    medida; una medida sin nada anotado se cargó antes de que existiera el historial."""
+    ids = sorted({int(i) for i in ids if i is not None})
+    if not ids:
+        return {}
+    marcadores = ",".join("?" * len(ids))
+    c.execute(f"""SELECT producto_id, campo, despues, usuario, substr(fecha, 1, 10) AS fecha, motivo
+                  FROM historial_de_medidas WHERE producto_id IN ({marcadores})
+                  ORDER BY fecha, id""", ids)
+    salida = {i: {} for i in ids}
+    for r in c.fetchall():
+        if r["despues"] is None:
+            salida[r["producto_id"]].pop(r["campo"], None)
+            continue
+        salida[r["producto_id"]][r["campo"]] = (
+            "📄 de la descripción" if r["motivo"] == "descripcion" else
+            f"✋ a mano ({r['usuario'] or 'alguien'}, {r['fecha']})")
+    return salida
+
+
+def medidas_cambiadas_desde(ids, desde):
+    """Los cambios de una medida que YA ESTABA cargada, hechos después de `desde` (una fecha
+    «AAAA-MM-DD HH:MM:SS» o «AAAA-MM-DD»), en esos productos: [texto]. Completar una vacía no
+    cuenta —la medida nueva se compara sola—; cambiar una que existía sí: la persona que aprobó
+    el vínculo miró la medida de antes. Ver ficha_de_prueba(), «bloqueo contra modificaciones
+    silenciosas»."""
+    ids = sorted({int(i) for i in ids if i is not None})
+    if not ids or not desde:
+        return []
+    marcadores = ",".join("?" * len(ids))
+    c.execute(f"""SELECT h.producto_id, p.codigo_raw, h.campo, h.antes, h.despues, h.usuario,
+                         substr(h.fecha, 1, 10) AS fecha, h.motivo
+                  FROM historial_de_medidas h JOIN productos p ON p.id = h.producto_id
+                  WHERE h.producto_id IN ({marcadores}) AND h.antes IS NOT NULL AND h.fecha > ?
+                  ORDER BY h.fecha, h.id""", ids + [desde])
+    etiquetas = _etiquetas_de_medidas()
+    return [f"{r['codigo_raw']}: {etiquetas.get(r['campo'], r['campo'])} {r['antes']} → "
+            f"{r['despues'] or 'vacía'} ({r['usuario'] or 'alguien'}, {r['fecha']}, "
+            f"{MOTIVOS_DE_CAMBIO_DE_MEDIDA.get(r['motivo'] or 'correccion', r['motivo'])})"
+            for r in c.fetchall()]
+
+
+def vinculos_revisados_de(producto_id):
+    """Cuántos vínculos de ese producto aprobó o comprobó alguien: los que una medida cambiada
+    deja para volver a mirar (ver medidas_cambiadas_desde())."""
+    c.execute("""SELECT COUNT(*) FROM equivalencias e
+                 WHERE (e.producto_a_id = ?1 OR e.producto_b_id = ?1)
+                   AND (COALESCE(e.verificada, 0) = 1 OR EXISTS (
+                        SELECT 1 FROM equivalencias_revisadas r
+                        WHERE r.producto_a_id = e.producto_a_id
+                          AND r.producto_b_id = e.producto_b_id AND r.decision = 'ok'))""",
+              (producto_id,))
+    return c.fetchone()[0] or 0
 
 
 # ============================================================

@@ -415,6 +415,30 @@ if pagina == PAGINAS[3]:
                         st.session_state.pop("medidas_deducidas", None)
                         avisar("success", f"Se completaron las medidas de {_n} producto(s).")
                         st.rerun()
+            # Lo que una versión vieja del lector leyó mal. Lo hace solo la tarea de fondo
+            # cuando cambia el lector; esto es para verlo. Ver medidas_mal_leidas().
+            if st.button("🧹 Ver medidas mal leídas", key="btn_ver_mal_leidas"):
+                st.session_state["medidas_mal_leidas"] = medidas_mal_leidas()
+            _mal = st.session_state.get("medidas_mal_leidas")
+            if _mal is not None:
+                if not _mal:
+                    st.info("No hay medidas guardadas que el lector de hoy lea distinto.")
+                else:
+                    st.warning(f"**{len(_mal)} producto(s)** tienen una medida que salió de la "
+                               "descripción y que el lector de hoy no lee así (nunca se toca lo "
+                               "cargado a mano):")
+                    st.dataframe([{k: v for k, v in f.items() if not k.startswith("_")}
+                                  for f in _mal[:200]], width="stretch", hide_index=True)
+                    if st.button("🧹 Descartar esas lecturas", type="primary",
+                                 key="btn_descartar_mal_leidas"):
+                        _tocados = descartar_medidas_mal_leidas(_mal)
+                        _n_rep = sum(repuntuar_los_vinculos_de(pid)[0] for pid in _tocados)
+                        st.session_state.pop("medidas_mal_leidas", None)
+                        avisar("success", f"Se descartaron las lecturas de {len(_tocados)} "
+                                          f"producto(s) y se volvieron a puntuar {_n_rep} "
+                                          "equivalencia(s). Quedó anotado en el historial de "
+                                          "medidas de cada uno.")
+                        st.rerun()
         st.markdown("**Buscar y editar un producto puntual**")
         texto_prod = st.text_input("Buscar producto por código o descripción", key="admin_buscar")
         if texto_prod.strip():
@@ -503,16 +527,28 @@ if pagina == PAGINAS[3]:
                                                value=float(actual["diametro_copa_superior"] or 0),
                                                key="e_copa_sup")
 
+                # No es lo mismo corregir un dato mal cargado que anotar que la pieza cambió: queda
+                # en el historial de medidas. Ver MOTIVOS_DE_CAMBIO_DE_MEDIDA.
+                _motivo_med = st.radio(
+                    "Si cambiás una medida, ¿por qué?", ["correccion", "cambio"], horizontal=True,
+                    format_func=MOTIVOS_DE_CAMBIO_DE_MEDIDA.get, key="motivo_medidas")
                 if st.button("💾 Guardar medidas y ubicación"):
+                    c.execute("SELECT datetime('now', '-1 second')")
+                    _antes_de_guardar = c.fetchone()[0]
                     _n_camb = actualizar_medidas(
                         id_medidas, e_diam_int, e_diam_ext, e_ancho, e_paso, e_estrias, e_ubicacion,
                         e_estrias_int, e_estrias_ext, e_seguro, e_abs, e_diam_int_b, e_diam_ext_b,
-                        e_rosca_homo, e_copa, e_copa_sup, e_largo_total)
+                        e_rosca_homo, e_copa, e_copa_sup, e_largo_total, motivo=_motivo_med)
                     # Las equivalencias se puntuaron con las medidas viejas: se vuelven a puntuar,
                     # y se dice a qué toca el cambio (equivalencias y autos).
                     _n_rep, _n_franja = (repuntuar_los_vinculos_de(id_medidas) if _n_camb
                                          else (0, 0))
                     _n_autos = autos_que_nombran_al_producto(id_medidas) if _n_camb else 0
+                    # Y si cambió una medida que ya estaba, lo aprobado con la de antes se vuelve
+                    # a mirar: la ficha lo baja a 🟡 (ver medidas_cambiadas_desde()).
+                    _n_a_mirar = (vinculos_revisados_de(id_medidas)
+                                  if medidas_cambiadas_desde([id_medidas], _antes_de_guardar)
+                                  else 0)
                     st.success(
                         "Guardado: no cambió ninguna medida." if not _n_camb else
                         f"Guardado: cambiaron {_n_camb} dato(s)."
@@ -520,6 +556,10 @@ if pagina == PAGINAS[3]:
                            + (f" ({_n_franja} cambió/cambiaron de franja)" if _n_franja
                               else " (ninguna cambió de franja)") if _n_rep else "")
                         + (f", y a {_n_autos} auto(s) que nombra su código." if _n_autos else "."))
+                    if _n_a_mirar:
+                        st.warning(f"🔧 {_n_a_mirar} equivalencia(s) aprobada(s) o comprobada(s) "
+                                   "con la medida de antes requieren volver a mirarse: la ficha "
+                                   "las muestra 🟡 hasta que alguien las revise.")
                 _hist_med = historial_de_medidas(id_medidas)
                 if _hist_med:
                     st.caption("🕰️ Cambios de medidas de este producto (no se pisa nada: queda lo "

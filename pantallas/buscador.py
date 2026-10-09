@@ -1398,7 +1398,8 @@ if pagina == PAGINAS[0]:
                                               args=(fila_stock["ID"], codigo_individual,
                                                     f"{fila_stock['Marca']} - {fila_stock['Codigo']}",
                                                     f"stock_{clean}",
-                                                    veredicto_de_la_equivalencia(fila_stock)),
+                                                    veredicto_de_la_equivalencia(fila_stock),
+                                                    evidencia_de_la_fila(fila_stock)),
                                               help="Anota la venta para ir descubriendo equivalencias solas")
                                 colr3.button("📌 Reponer", key=f"pedir_repo_{fila_stock['ID']}_{clean}",
                                               on_click=pedir_reposicion_y_avisar,
@@ -1425,7 +1426,8 @@ if pagina == PAGINAS[0]:
                                           on_click=anotar_venta_y_avisar,
                                           args=(_elegido, codigo_individual, _rotulos[_elegido],
                                                 f"stock_{clean}",
-                                                veredicto_de_la_equivalencia(_fila_elegida)),
+                                                veredicto_de_la_equivalencia(_fila_elegida),
+                                                evidencia_de_la_fila(_fila_elegida)),
                                           help="Anota la venta para ir descubriendo equivalencias solas")
                             colr3.button("📌 Reponer", key=f"pedir_elegido_{clean}",
                                           on_click=pedir_reposicion_y_avisar,
@@ -1949,7 +1951,8 @@ if pagina == PAGINAS[0]:
                                         on_click=anotar_venta_y_avisar,
                                         args=(f["ID"], texto_pedido, f"{f['Marca']} - {f['Codigo']}",
                                               f"txt_{fila_txt['ID']}",
-                                              veredicto_de_la_equivalencia(f)))
+                                              veredicto_de_la_equivalencia(f),
+                                              evidencia_de_la_fila(f)))
                         mostrar_lo_anotado(f"txt_{fila_txt['ID']}")
                 if len(res_texto) > 15:
                     st.caption(f"(mostrando las primeras 15 de {len(res_texto)} — afiná la búsqueda "

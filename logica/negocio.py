@@ -1683,7 +1683,8 @@ def solicitar_reposicion(producto_id):
         conn.commit()
 
 
-def anotar_venta_y_avisar(producto_id, termino_pedido, rotulo, donde="", veredicto=None):
+def anotar_venta_y_avisar(producto_id, termino_pedido, rotulo, donde="", veredicto=None,
+                          evidencia=None):
     """Lo que corre al tocar «Se llevó». Sin el aviso el botón no mostraba nada: en el celular
     eso invita a tocar de nuevo, y cada toque es otra venta anotada que después pesa en las
     equivalencias sugeridas como si el cliente hubiera vuelto.
@@ -1696,11 +1697,24 @@ def anotar_venta_y_avisar(producto_id, termino_pedido, rotulo, donde="", veredic
     if modo_solo_lectura():
         st.session_state.setdefault("_lo_anotado", {})[donde] = TEXTO_DE_SOLO_LECTURA
         return
-    registrar_venta(producto_id, termino_pedido, veredicto)
+    registrar_venta(producto_id, termino_pedido, veredicto, evidencia)
     st.session_state.setdefault("_lo_anotado", {})[donde] = (
         f"🛒 Anotado como alternativa comercial: se llevó {rotulo}. No confirma que sea "
         "equivalente." if como_se_vende(veredicto) == "alternativa"
         else f"🛒 Anotado: se llevó {rotulo}")
+
+
+def evidencia_de_la_fila(fila):
+    """Lo que sostenía a ese resultado del buscador en el momento de venderlo, en una línea: la
+    «caja negra» de la recomendación que pidió una revisión con ChatGPT. Se guarda con la venta
+    (ver registrar_venta()) porque la cadena, la confianza y el respaldo cambian con cada
+    importación y con cada versión de las reglas."""
+    partes = [f"cadena {fila['Cadena']}" if fila.get("Cadena") else "",
+              f"confianza {fila['Confianza']}" if fila.get("Confianza") else "",
+              str(fila.get("Respaldo") or ""),
+              "verificada a mano" if fila.get("Verificada") else "",
+              f"reglas v{VERSION_CONFIANZA}"]
+    return " · ".join(p for p in partes if p)
 
 
 def rotulo_del_boton_de_venta(fila):

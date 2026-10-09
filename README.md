@@ -42,6 +42,7 @@ python3 auditar.py               # tiene que dar ERROR 0 (revisa la app entera, 
 python3 nucleo/generar.py        # regenerar el paquete desde logica/
 python3 -m nucleo.pruebas        # tiene que decir "todo en verde"
 python3 pruebas_de_la_revision.py   # si tocaste el análisis: "todo en verde"
+python3 pruebas_de_la_revision.py --sellar   # si agregaste pares de muestra: quedan sellados
 python3 pruebas_de_la_precision.py  # y cuándo se da por verificada una equivalencia
 python3 pruebas_de_la_revision.py --base copia.db   # y contra tus aprobaciones
 python3 pruebas_de_la_revision.py --base copia.db --linea-base antes.json   # y contra la vez anterior
@@ -6474,6 +6475,44 @@ el botón**:
   dónde vino. Solo los últimos tres años: la serie arranca en los cuarenta y trae el 89.
 - «🔌 Probar las fuentes de afuera» suma la Central de Deudores (con el CUIT de la AFIP, nunca el
   de un cliente) y la inflación de respaldo.
+
+## 🔬 La precisión, séptima parte: datos imposibles, nada cambia en silencio y las reglas versionadas
+
+Puntos 177 a 213 de la misma revisión con ChatGPT, medidos sobre la copia de la base real
+(86.946 productos, 20.037 vínculos, 2.633 pares rechazados).
+
+| Punto | Qué se encontró | Qué se hizo |
+|---|---|---|
+| 177 a 179. Qué significa A→B, relaciones con tipo, no mezclar tipos | Ya son tablas distintas: la equivalencia (la misma pieza), el reemplazo (🔁, con dirección), el rechazo (no es la misma pieza) y la venta como alternativa comercial, que no confirma nada. Una cadena por un número de fábrica nunca sale «confirmada». | Sin cambio. |
+| 180. Explicación causal | Ya: la línea «en una línea» de la ficha y lo que sumó y restó cada señal. | — |
+| 181 y 182. Explicación contrafactual y sensibilidad | — | La tabla de medidas de la ficha suma **«Qué la cambiaría»**: «deja de coincidir si difieren más de 0,5 mm», o en una distinta, «coincidiría con 0,5 mm de diferencia o menos». En el paso de rosca y las estrías, «cualquier diferencia la separa». |
+| 183 y 184. Reglas irrelevantes y reglas peligrosas | `--reglas` decía en qué parte de lo rechazado aparece cada señal. | Dice además **qué reglas no distinguen** (las que están en lo rechazado en la misma proporción que todo lo decidido, 11,6 %) y **qué regla está detrás de cada error**. Medido: «🧩 los dos son del mismo rubro» (+15) está en los 3 falsos positivos y no distingue (9,9 %); es una condición necesaria, no una prueba, y sacarla mandaría miles de aprobados a revisión: no se cambió. «📐 coinciden interno, externo y canales» está en 239 rechazados de 345 (69 %), pero ninguno pasa limpio. Los 8 falsos negativos: 2 por rubros distintos, 2 por un código que apunta a dos productos, 2 por dientes. |
+| 185. Quién decidió y cómo | Todo lo decidido lo decidió una persona; lo importado sin revisar está en «Vino de», y lo heredado es una cadena con una decisión por paso. | El historial dice **cómo**: de a uno, en grupo, la lista entera de una vez, comprobada en la mano, al repasar con las reglas de hoy, al deshacer una importación o todos los de un producto. Y un error: al decidir desde la cola el historial quedaba **sin «pendiente desde»** (el tiempo de verificación del tablero salía siempre vacío) y el descarte, sin la lista: ahora se leen antes de sacar el par de la cola. |
+| 186. Firma de cada decisión | Ya: quién, cuándo, con qué versión de las reglas, de qué lista y lo que había a favor y en contra. No se corrige ni se borra. | — |
+| 187 a 190. Nada cambia en silencio, corrección o cambio, quién cambió cada dato, cuántas hay que volver a mirar | Las medidas ya tenían historial. | Al guardar se elige **«✏️ corrección de un dato mal cargado»** o **«🔧 la pieza cambió»**, y queda en el historial. Si cambia una medida que ya estaba, el aviso dice **«N equivalencias aprobadas con la medida de antes requieren volver a mirarse»** (8, en la prueba con una polea) y la ficha **deja de darlas por verificadas** y dice qué cambió, hasta que alguien las vuelva a aprobar. Completar una medida vacía no las baja: la medida nueva se compara sola. |
+| 191, 192, 212 y 213. Simular, volver atrás y comparar versiones de reglas | Las reglas son código: antes de subir una versión se corre `pruebas_de_la_revision.py --base copia.db --linea-base`, que es la simulación sobre todo lo ya decidido. | **`VERSIONES_DE_LAS_REGLAS`**: cada versión con su fecha y qué cambió, a la vista en el tablero («📜 Versiones de las reglas»). La v14, simulada contra la línea de base de la v13: **sin cambios** en los 20.037 aprobados ni en los 2.633 rechazados. Volver atrás una regla es volver atrás el cambio en git y subir el número. |
+| 193. La caja negra de cada recomendación | La venta guardaba el veredicto. | Guarda también **lo que la sostenía**: la cadena, la confianza, quién la declaraba y la versión de las reglas. Si vuelve, el registro de errores lo muestra en «lo que la dejó pasar». |
+| 194. Casos nunca vistos | — | La matriz de `--base` separa **uno de cada cinco pares, reservado** (elegido por su código y marca, siempre el mismo), de los que se miraron al escribir las reglas, y los decididos después del último cambio de reglas. Medido: reservados 0,0 % de aprobados en rojo y 0,0 % de rechazados limpios; mirados 0,0 % y 0,1 %. No hay señales de reglas ajustadas a los casos. |
+| 195. Golden set bloqueado | — | **`casos_sellados.txt`**: los 75 pares de muestra con una huella de sus descripciones y de lo que tienen que dar. Se agregan con `--sellar`; si uno se borra o se le cambia lo esperado, la prueba falla. |
+| 196. Pruebas adversariales | Ya estaban otro lado, con y sin ABS, reacondicionada, otra rosca y el espesor. | Cinco más: M12×1,5 contra M12×1,25, izquierda contra derecha, el mismo auto con otro motor, la junta una décima más gruesa y la pastilla del otro eje. **Encontraron un hueco**: izquierda/derecha y el espesor solo los ataja la medida guardada, y un par recién importado se puntúa antes de que el lector la complete (pasaba con 90). Ahora, si la medida guardada falta, **veta lo que dice la descripción**. El código casi idéntico y el catálogo que se contradice ya se prueban en `pruebas_de_la_precision.py`. |
+| 197. La métrica principal | — | Arriba de todo en el tablero: **«🎯 Vendidas como equivalentes que no eran la pieza»**. Lo vendido como alternativa no cuenta. La copia no tiene ventas anotadas todavía: se mide desde que se usa «Se llevó». |
+| 198. La evidencia primero | Ya: la ficha y el expediente muestran la evidencia y el estado sale de ella. | — |
+| 199 a 201. Datos imposibles, unidades, coma decimal | El lector de medidas leía mal 19 productos: «BMW X1 X3 X4» como 1 × 3 × 4 en nueve sondas lambda, «Mot. 1Y-AAZ -1X 64» como interno 1 y externo 64, «1/2X20X37» (media pulgada), tornillos «M012X162» y «M11X012X210». La «mm contra cm» y la pulgada ya se avisaban (hoy 0 pares vinculados con medidas distintas). La coma decimal ya se lee. | El lector no lee después de una barra, de una M ni de una X pegadas, ni un externo más de 8 veces el interno (el más estirado de verdad es un taco de 5 × 25). **Lo ya guardado se descarta solo** al arrancar (52 valores en 19 productos, nada cargado a mano), queda en el historial de medidas, y se ve en «🧹 Ver medidas mal leídas». Una medida imposible guardada (interno ≥ externo, externo 8 veces el interno) **no prueba nada** y la ficha la marca. Se pierde una lectura ambigua: «43/46X60X15». |
+| 202 a 204. Traducciones | No hay traducción automática: el texto original se guarda tal cual y ninguna característica sale de una traducción. | Sin cambio. |
+| 205 a 207. Dato observado o inferido, lo que dice la fuente y lo que concluye la app, evidencia por característica | La tabla de medidas ya muestra lo que dice cada fuente (A y B) y lo que concluye (Estado). | Columna **«De dónde»**: «📄 de la descripción» o «✋ a mano (quién, cuándo)». Lo que completa el lector queda en el historial de medidas. |
+| 208 y 209. Evidencia mínima por familia, configurable | — | **`EVIDENCIA_MINIMA_POR_RIESGO`**, en un solo lugar: aparte de la fuente, una pieza de seguridad (🛑) necesita un auto en común **y** una medida que la identifica igual; una de riesgo alto (🟠), una de las dos. Comprobarla en la mano alcanza siempre. Medido sobre los 16.904 vínculos directos, sólidos y con fuente: 1 de seguridad y 257 de riesgo alto (kits de distribución, sobre todo) pasan de ✅ a 🟡 en la ficha y dicen qué les falta. |
+| 210. Motor de reglas declarativo | Lo que más cambia ya son tablas: las medidas de cada pieza, las tolerancias, la evidencia mínima, los vetos. Pasar todo el puntaje a reglas declarativas sería reescribirlo. | Sin cambio. |
+| 211. Versionar las reglas | Ver 191. | — |
+
+Además, el paquete `nucleo` (la lógica sin pantallas) reventaba con cualquier descripción de dos
+números («O´RING 36,5X3.53»): le faltaban dos expresiones. Arreglado y probado.
+
+`VERSION_CONFIANZA` pasa a 14 y `VERSION_MEDIDAS` a 7. Probado en `pruebas_de_la_precision.py`
+(32 fallas puestas a mano, las 32 detectadas), en `pruebas_de_la_revision.py` (75 de 75 pares,
+los 75 sellados) y en la app: el descarte de las medidas mal leídas al arrancar, el cambio de una
+medida con su motivo y las equivalencias a volver a mirar, la ficha con lo que la cambiaría y de
+dónde salió cada medida, el tablero con la métrica principal y las versiones, una venta con su
+caja negra y el recorrido de las 32 pantallas, sin errores.
 
 ## 🧪 La precisión, sexta parte: refutar, el laboratorio, la venta como alternativa y si la app mejora
 

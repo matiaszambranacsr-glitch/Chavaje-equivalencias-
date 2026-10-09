@@ -206,6 +206,18 @@ def evidencia_cruzada(id_a, id_b, cuenta_palabras=None, total_descripciones=None
         a_favor.append(f"📐 las medidas coinciden ({detalle_med})")
     elif coinciden is False:
         vetos.append(f"📐 {detalle_med}")
+    else:
+        # LO QUE DICE LA DESCRIPCIÓN, si la medida guardada falta: solo para vetar. Las medidas
+        # las completa el lector de descripciones en la tarea de fondo, y un par recién
+        # importado se puntúa antes de que corra: «PARRILLA DELANTERA IZQUIERDA» contra «…
+        # DERECHA», o la junta «ESP 1.20MM» contra la «ESP 1.30MM», pasaban con 90. Lo encontró
+        # una prueba adversarial que pidió una revisión con ChatGPT. A favor no suma: dos
+        # descripciones que dicen lo mismo ya suman por la descripción.
+        _con_texto = [_medidas_con_lo_que_dice_el_texto(medidas.get(pid), p["descripcion"])
+                      for pid, p in ((id_a, pa), (id_b, pb))]
+        coinciden_txt, detalle_txt = comparar_medidas(*_con_texto)
+        if coinciden_txt is False:
+            vetos.append(f"📐 según las descripciones, {detalle_txt[0].lower()}{detalle_txt[1:]}")
 
     # Las MUESCAS de la junta de tapa: «471408-4M» (TARANTO) contra «TC-242-20 5M» (ILLINOIS)
     # son dos espesores del mismo motor. Las dos listas usan la marca de fábrica (3M es 1,30 mm
@@ -461,6 +473,15 @@ _RE_RIESGO_ALTO = re.compile(r"\b(?:CORREA|KIT|TENSOR|CADENA)\s+(?:DE\s+)?DISTRI
 # cada tres años: las listas cambian y una revisión de hace cinco años ya no dice mucho. Ver
 # ficha_de_prueba().
 MESES_DE_VIGENCIA_POR_RIESGO = {"🛑": 6, "🟠": 12, "🟢": 36}
+# LA EVIDENCIA MÍNIMA POR RIESGO, en un solo lugar: cuántas de estas dos pruebas, aparte de la
+# fuente que la declara, hacen falta para que la ficha la dé por VERIFICADA —que las
+# descripciones nombren un auto en común, y que una medida que identifica a la pieza sea
+# igual—. Comprobarla en la mano alcanza siempre. Lo pidió una revisión con ChatGPT («evidencia
+# mínima por familia: una crítica pide aplicación, dimensiones críticas y fuente primaria»).
+# Medido sobre la base real del 9/10: de los 16.904 vínculos directos, sólidos y con fuente,
+# 1 es de seguridad (una lámpara, sin autos ni medida) y 1.302 de riesgo alto, de los que 257
+# —kits de distribución, sobre todo— no tienen ni autos en común ni una medida igual.
+EVIDENCIA_MINIMA_POR_RIESGO = {"🛑": 2, "🟠": 1, "🟢": 0}
 
 
 def riesgo_de_la_pieza(*descripciones):
@@ -482,6 +503,21 @@ def que_pieza_es(*descripciones):
     return None, ()
 
 
+@functools.lru_cache(maxsize=50000)
+def _medidas_del_texto(descripcion):
+    return tuple(sorted(medidas_desde_descripcion(descripcion or "").items()))
+
+
+def _medidas_con_lo_que_dice_el_texto(med, descripcion):
+    """Las medidas guardadas, con las vacías completadas por lo que se lee de la descripción.
+    Lo guardado manda: si alguien la corrigió a mano, eso es lo que vale."""
+    salida = dict(med or {})
+    for campo, valor in _medidas_del_texto(descripcion):
+        if salida.get(campo) in (None, "", 0):
+            salida[campo] = valor
+    return salida
+
+
 def _unidad_confundida(va, vb):
     """« (¿mm contra cm?)» si una medida es diez veces la otra, o 25,4 (pulgadas). Es la pista
     de un dato mal cargado, no de otra pieza: lo pidió una revisión con ChatGPT («25,4 mm contra
@@ -497,11 +533,28 @@ def _unidad_confundida(va, vb):
     return ""
 
 
-def medidas_lado_a_lado(med_a, med_b, campos_que_importan=(), tolerancia_pct=3):
+def _mm(x):
+    return f"{round(x, 3):g}".replace(".", ",")
+
+
+def medidas_lado_a_lado(med_a, med_b, campos_que_importan=(), tolerancia_pct=3,
+                        origen_a=None, origen_b=None):
     """Cada medida de los dos productos con su estado: igual, dentro de la tolerancia, falta o
-    distinta. Las que importan para esa pieza salen aunque no las tenga ninguno de los dos."""
+    distinta. Las que importan para esa pieza salen aunque no las tenga ninguno de los dos.
+
+    «Qué la cambiaría» es la explicación contrafactual que pidió una revisión con ChatGPT («si
+    el diámetro de B fuera 2 mm mayor, dejarían de ser equivalentes»): hasta qué diferencia
+    sigue siendo la misma medida, y cuánto falta para que una distinta coincida. Con
+    `origen_a`/`origen_b` ({campo: de dónde salió}, ver origen_de_las_medidas()) sale también
+    «De dónde»: si la midió una persona o la leyó la app de la descripción."""
     med_a, med_b = med_a or {}, med_b or {}
     exactas = dict(_MEDIDAS_EXACTAS)
+    # Los diámetros que no pueden ser no se comparan (ver medidas_imposibles()): se muestran,
+    # marcados, para que se vea qué corregir.
+    imposibles = {lado: {cp for cp, v in (med or {}).items()
+                         if v is not None and (sin_diametros_imposibles(med) or {}).get(cp) is None}
+                  for lado, med in (("A", med_a), ("B", med_b))}
+    con_origen = origen_a is not None or origen_b is not None
     filas = []
     for campo, etiqueta in list(CAMPOS_MEDIDAS) + list(_MEDIDAS_EXACTAS):
         va, vb = med_a.get(campo), med_b.get(campo)
@@ -512,13 +565,19 @@ def medidas_lado_a_lado(med_a, med_b, campos_que_importan=(), tolerancia_pct=3):
         if va is None and vb is None:
             if importa:
                 filas.append({"Medida": etiqueta, "A": "—", "B": "—", "Importa": "sí",
-                              "Estado": "❓ no la tiene ninguno"})
+                              "Estado": "❓ no la tiene ninguno", "Qué la cambiaría": ""}
+                             | ({"De dónde": ""} if con_origen else {}))
             continue
-        if va is None or vb is None:
+        cambiaria = ""
+        lado_imposible = [x for x in ("A", "B") if campo in imposibles[x]]
+        if lado_imposible:
+            estado = f"⚠️ imposible en {' y '.join(lado_imposible)}: no se usa"
+        elif va is None or vb is None:
             estado = f"❓ falta en {'A' if va is None else 'B'}"
         elif campo in exactas:
-            estado = ("✅ igual" if str(va).strip().upper() == str(vb).strip().upper()
-                      else "❌ distinta")
+            iguales = str(va).strip().upper() == str(vb).strip().upper()
+            estado = "✅ igual" if iguales else "❌ distinta"
+            cambiaria = "cualquier diferencia la separa" if iguales else ""
         else:
             try:
                 fa, fb = float(va), float(vb)
@@ -526,15 +585,27 @@ def medidas_lado_a_lado(med_a, med_b, campos_que_importan=(), tolerancia_pct=3):
                 fa = fb = None
             if fa is None:
                 estado = "✅ igual" if str(va).strip() == str(vb).strip() else "❌ distinta"
-            elif fa == fb:
-                estado = "✅ igual"
-            elif abs(fa - fb) <= diferencia_que_se_acepta(campo, fa, fb, tolerancia_pct):
-                estado = f"≈ dentro de la tolerancia ({abs(fa - fb):g} mm)".replace(".", ",")
             else:
-                estado = f"❌ distinta ({abs(fa - fb):g} mm)".replace(".", ",") + _unidad_confundida(fa, fb)
-        filas.append({"Medida": etiqueta, "A": "—" if va is None else va,
-                      "B": "—" if vb is None else vb, "Importa": "sí" if importa else "",
-                      "Estado": estado})
+                diferencia = abs(fa - fb)
+                aceptada = diferencia_que_se_acepta(campo, fa, fb, tolerancia_pct)
+                if fa == fb:
+                    estado = "✅ igual"
+                elif diferencia <= aceptada:
+                    estado = f"≈ dentro de la tolerancia ({_mm(diferencia)} mm)"
+                else:
+                    estado = f"❌ distinta ({_mm(diferencia)} mm)" + _unidad_confundida(fa, fb)
+                cambiaria = (f"deja de coincidir si difieren más de {_mm(aceptada)} mm"
+                             if diferencia <= aceptada else
+                             f"coincidiría con {_mm(aceptada)} mm de diferencia o menos")
+        fila = {"Medida": etiqueta, "A": "—" if va is None else va,
+                "B": "—" if vb is None else vb, "Importa": "sí" if importa else "",
+                "Estado": estado, "Qué la cambiaría": cambiaria}
+        if con_origen:
+            fila["De dónde"] = " · ".join(
+                f"{lado}: {(origen or {}).get(campo, '❔ sin anotar')}"
+                for lado, valor, origen in (("A", va, origen_a), ("B", vb, origen_b))
+                if valor is not None)
+        filas.append(fila)
     return filas
 
 
@@ -685,12 +756,13 @@ def ficha_de_prueba(id_a, id_b, tolerancia_pct=3):
         fila = c.fetchone()
         paso["Revisión"] = ""
         paso["_nota"] = (fila["nota"] or "") if fila else ""
-        paso["_fecha_revision"] = ""
+        paso["_fecha_revision"] = paso["_fecha_revision_completa"] = ""
         paso["_por_que"] = (fila["por_que"] or "") if fila else ""
         if fila and fila["decision"] == "ok":
             paso["Revisión"] = (f"aprobado por {fila['revisado_por'] or 'alguien'}"
                                 f" el {(fila['fecha'] or '')[:10]}")
             paso["_fecha_revision"] = (fila["fecha"] or "")[:10]
+            paso["_fecha_revision_completa"] = fila["fecha"] or ""
     evaluadas = [(_evaluar_la_cadena(pasos), pasos) for pasos in cadenas]
     evaluadas.sort(key=lambda x: _ORDEN_DE_LOS_ESTADOS.index(x[0][0]))
     (estado, falta), pasos = evaluadas[0] if evaluadas else (
@@ -707,10 +779,24 @@ def ficha_de_prueba(id_a, id_b, tolerancia_pct=3):
         parte.strip() for pasos_ in cadenas for p in pasos_
         for parte in p["_nota"].split(" · ") if parte.strip().startswith("✋")))
 
-    # Las medidas, una por una.
+    # Las medidas, una por una, con de dónde salió cada una.
     medidas = cargar_medidas_de_varios([id_a, id_b])
+    _origen = origen_de_las_medidas([id_a, id_b])
+    for _pid, _p in ((id_a, pa), (id_b, pb)):
+        # Lo cargado antes de que existiera el historial: si es lo que el lector de hoy saca
+        # de la descripción, salió de ahí (las importaciones no cargan medidas).
+        _leidas = medidas_desde_descripcion(_p["descripcion"])
+        for _cp, _v in (medidas.get(_pid) or {}).items():
+            if (_v not in (None, "", 0) and _cp not in _origen[_pid]
+                    and _leidas.get(_cp) is not None and str(_leidas[_cp]) == str(_v)):
+                _origen[_pid][_cp] = "📄 de la descripción"
     ficha["medidas"] = medidas_lado_a_lado(medidas.get(id_a), medidas.get(id_b),
-                                           campos_de_la_pieza, tolerancia_pct)
+                                           campos_de_la_pieza, tolerancia_pct,
+                                           _origen[id_a], _origen[id_b])
+    ficha["imposibles"] = [f"⚠️ {lado} tiene una medida que no puede ser: {problema}. No se usa "
+                           "para comparar: corregila en Administrar → Productos."
+                           for lado, pid in (("A", id_a), ("B", id_b))
+                           for problema in medidas_imposibles(medidas.get(pid))]
     # Lo que falta medir, de la que más identifica a la pieza a la que menos: el orden es el
     # de _PIEZAS_Y_SUS_MEDIDAS. Lo pidió una revisión con ChatGPT («el dato faltante más
     # importante primero»).
@@ -741,7 +827,7 @@ def ficha_de_prueba(id_a, id_b, tolerancia_pct=3):
     a_favor, vetos, _ = evidencia_cruzada(id_a, id_b)
     ficha["a_favor"] = a_favor
     ficha["contradicciones"] = [v for v in vetos if not v.startswith("💲")]
-    ficha["avisos"] = [v for v in vetos if v.startswith("💲")]
+    ficha["avisos"] = [v for v in vetos if v.startswith("💲")] + ficha["imposibles"]
     if ficha["autos"]["solo_a"] and ficha["autos"]["solo_b"] and not ficha["autos"]["comun"]:
         ficha["avisos"].append(
             "🚗 Las descripciones no nombran ningún auto en común (A: "
@@ -771,7 +857,7 @@ def ficha_de_prueba(id_a, id_b, tolerancia_pct=3):
     _historial = []
     for _x, _y in sorted(_pares):
         c.execute("""SELECT id, decision, motivo, revisado_por, substr(fecha, 1, 16) AS fecha,
-                            confianza, lote, version_reglas
+                            confianza, lote, version_reglas, como
                      FROM historial_de_revisiones
                      WHERE producto_a_id = ? AND producto_b_id = ?""", (_x, _y))
         for r in c.fetchall():
@@ -783,6 +869,7 @@ def ficha_de_prueba(id_a, id_b, tolerancia_pct=3):
                             + (f" ({MOTIVOS_DE_RECHAZO.get(r['motivo'], r['motivo'])})"
                                if r["motivo"] else ""),
                 "Quién": r["revisado_por"] or "—",
+                "Cómo": COMO_SE_DECIDIO.get(r["como"], r["como"] or "—"),
                 "Confianza": "" if r["confianza"] is None else f"{r['confianza']:.0f}",
                 "Lista": (r["lote"] or "—").split(" · ")[0],
                 "Reglas": f"v{r['version_reglas']}" if r["version_reglas"] else "anteriores"}))
@@ -863,6 +950,31 @@ def ficha_de_prueba(id_a, id_b, tolerancia_pct=3):
             and ficha["meses_sin_revisar"] >= _vigencia and estado.startswith("✅")):
         falta.append(f"volver a mirarla: se revisó hace {ficha['meses_sin_revisar']} meses y "
                      f"para una pieza de riesgo {ficha['riesgo'][2:]} toca cada {_vigencia}")
+        estado = "🟡 PROBABLE"
+    # NADA CAMBIA EN SILENCIO: si después de la última revisión alguien cambió una medida que
+    # ya estaba cargada en A o en B, la persona que la aprobó miró otra cosa. Deja de estar
+    # verificada hasta que alguien la vuelva a mirar. Lo pidió una revisión con ChatGPT
+    # («bloqueo contra modificaciones silenciosas» y «7 equivalencias requieren revisión»).
+    # La fecha con hora de la revisión; si no hay, la de la comprobación en la mano, que tiene
+    # solo el día y vale hasta el final de ese día.
+    _con_hora = [p["_fecha_revision_completa"] for p in pasos if p.get("_fecha_revision_completa")]
+    _desde = max(_con_hora) if _con_hora else (f"{ficha['ultima_revision']} 23:59:59"
+                                               if ficha["ultima_revision"] else "")
+    ficha["cambios_despues"] = medidas_cambiadas_desde([id_a, id_b], _desde)
+    if ficha["cambios_despues"] and estado.startswith("✅"):
+        falta.append("volver a mirarla: después de la última revisión cambió "
+                     + "; ".join(ficha["cambios_despues"][:3]))
+        estado = "🟡 PROBABLE"
+    # LA EVIDENCIA MÍNIMA para su riesgo (ver EVIDENCIA_MINIMA_POR_RIESGO).
+    _pruebas = {"un auto en común en las descripciones": bool(ficha["autos"]["comun"]),
+                "una medida que la identifica, igual": any(
+                    m["Importa"] and m["Estado"].startswith(("✅", "≈")) for m in ficha["medidas"])}
+    _minimo = EVIDENCIA_MINIMA_POR_RIESGO.get(ficha["riesgo"][:1], 0)
+    if estado.startswith("✅") and not _comprobada and sum(_pruebas.values()) < _minimo:
+        _faltan = [k for k, v in _pruebas.items() if not v]
+        falta.append(f"para una pieza de riesgo {ficha['riesgo'][2:]}, la evidencia mínima pide "
+                     "además " + (" y ".join(_faltan) if _minimo >= len(_pruebas)
+                                  else " o ".join(_faltan)))
         estado = "🟡 PROBABLE"
 
     if not estado.startswith(("✅", "🔴")):
@@ -1074,6 +1186,8 @@ def expediente_en_texto(ficha):
                           ("Avisos", ficha["avisos"]), ("A favor", ficha["a_favor"]),
                           ("Comprobaciones en la mano", ficha["comprobaciones"]),
                           ("Devoluciones", ficha["devoluciones"]),
+                          ("Cambió después de la última revisión",
+                           ficha.get("cambios_despues", [])),
                           ("Falta para que quede verificada", ficha["falta"])):
         if lista:
             renglones += ["", f"## {titulo}"] + [f"- {x}" for x in lista]
@@ -1082,8 +1196,11 @@ def expediente_en_texto(ficha):
         renglones += [f"- {p['Paso']} — {p['Confianza']}/100 · {p['Respaldo']}"
                       + (f" · {p['Revisión']}" if p["Revisión"] else "") for p in ficha["pasos"]]
     if ficha["medidas"]:
-        renglones += ["", "## Medidas", "| Medida | A | B | Estado |", "|---|---|---|---|"]
-        renglones += [f"| {m['Medida']} | {m['A']} | {m['B']} | {m['Estado']} |"
+        renglones += ["", "## Medidas",
+                      "| Medida | A | B | Estado | Qué la cambiaría | De dónde |",
+                      "|---|---|---|---|---|---|"]
+        renglones += [f"| {m['Medida']} | {m['A']} | {m['B']} | {m['Estado']} | "
+                      f"{m.get('Qué la cambiaría', '')} | {m.get('De dónde', '')} |"
                       for m in ficha["medidas"]]
     if ficha["la_tumbaria"]:
         renglones += ["", "## Lo que la tumbaría (alcanza con que difiera una)"]
@@ -1091,8 +1208,9 @@ def expediente_en_texto(ficha):
                       for t in ficha["la_tumbaria"]]
     if ficha["historial"]:
         renglones += ["", "## Historial de decisiones"]
-        renglones += [f"- {h['Fecha']} · {h['Par']} · {h['Decisión']} · {h['Quién']} · "
-                      f"lista {h['Lista']} · reglas {h['Reglas']}" for h in ficha["historial"]]
+        renglones += [f"- {h['Fecha']} · {h['Par']} · {h['Decisión']} · {h['Quién']} "
+                      f"({h['Cómo']}) · lista {h['Lista']} · reglas {h['Reglas']}"
+                      for h in ficha["historial"]]
     return "\n".join(renglones) + "\n"
 
 
@@ -1124,7 +1242,7 @@ def comprobar_en_la_mano(id_a, id_b, como):
                              (producto_a_id, producto_b_id, created_at, verificada, nivel, nota, lote)
                          VALUES (?, ?, datetime('now'), 1, 'Exacta', ?, ?)""",
                       (a, b, nota, f"COMPROBADA EN LA MANO · {datetime.now():%d/%m/%Y %H:%M}"))
-    marcar_revision([(a, b)], "ok")
+    marcar_revision([(a, b)], "ok", como="mano")
     return nota
 
 

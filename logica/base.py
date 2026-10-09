@@ -546,7 +546,29 @@ VERSION_NORMALIZACION = "2"
 # reglas de hoy están mal. Sin esta marca, eso no se entera nadie hasta tropezárselo.
 # Subir el número cuando cambien las reglas de evaluar_equivalencia(). El recálculo NO corre al
 # abrir la app —son 12,8 s— sino en la tarea de fondo, igual que el descubrimiento.
-VERSION_CONFIANZA = "13"   # 13: dientes, fase y la tensión escrita «Volts V 24»; 12: tensión, caudal, rosca, giro, cantidad y reacondicionada; tolerancia en mm
+VERSION_CONFIANZA = "14"   # ver VERSIONES_DE_LAS_REGLAS
+
+# LAS REGLAS VERSIONADAS, con la fecha y qué cambió en cada una. Lo pidió una revisión con
+# ChatGPT («versionar reglas como datos» y «comparar versiones»): cada vínculo guarda con qué
+# versión se puntuó, cada decisión del historial también, y antes de subir una versión se
+# corre pruebas_de_la_revision.py --base copia.db --linea-base: es la simulación de la regla
+# nueva sobre todo lo que ya se decidió. Volver atrás una regla es volver atrás el cambio en
+# git y subir el número otra vez (el repuntaje lo hace la tarea de fondo).
+VERSIONES_DE_LAS_REGLAS = [
+    ("14", "2026-10-09", "un diámetro imposible (el interno mayor que el externo, el externo "
+                         "más de 8 veces el interno) no prueba nada"),
+    ("13", "2026-10-08", "dientes, fase y la tensión escrita «Volts V 24»"),
+    ("12", "2026-10-08", "tensión, caudal, rosca, giro, cantidad y reacondicionada; tolerancia "
+                         "en mm"),
+    ("11", "2026-10-08", "con o sin ABS, aire o sensor; las medidas del mismo texto no suman"),
+    ("10", "2026-10-08", "los vetos ganan siempre; las ventas no pasan de franja solas"),
+    ("9", "2026-10-05", "el Sprint 6.07 no es un 4 cilindros"),
+    ("8", "2026-10-05", "la tapa de flotante no es el conjunto"),
+    ("7", "2026-10-05", "la tapa de inspección es la tapa; el dueño del número"),
+    ("6", "2026-09-30", "el kit de reparación no es la bomba que repara"),
+    ("5", "2026-09-29", "espesor sin unidad, sensor exterior, módulo, motores Honda y Cummins"),
+    ("4", "2026-09-28", "los códigos de fábrica no se muestran en el buscador"),
+]
 
 # La versión del LECTOR DE MEDIDAS. Mismo mecanismo: las medidas se deducen de la descripción
 # una vez y quedan guardadas, así que cuando el lector aprende a leer algo nuevo —el espesor de
@@ -554,7 +576,7 @@ VERSION_CONFIANZA = "13"   # 13: dientes, fase y la tensión escrita «Volts V 2
 # Sobre la base real eran 1.402 productos con la medida escrita en el texto y 0 cargadas,
 # porque llenarlas era un botón de Mantenimiento que había que saber apretar.
 # Subir el número al agregar una medida nueva a medidas_desde_descripcion().
-VERSION_MEDIDAS = "6"
+VERSION_MEDIDAS = "7"   # 7: no lee «1/2X20», «M12X162» ni «X1 X3 X4», ni un externo 8 veces el interno, y descarta lo que leyó así
 
 # La versión del LECTOR DE APLICACIONES: a qué auto le va cada pieza, deducido de la
 # descripción. Es el dato gratis más grande que tiene esta base —114.673 filas que salen de

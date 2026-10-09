@@ -994,6 +994,14 @@ def probar_el_espesor_y_las_vias_que_estaban_escritos():
     igual(vehiculos.medidas_desde_descripcion("RETEN 35X52X7 SKF"),
           {"diametro_interno": 35.0, "diametro_externo": 52.0, "ancho": 7.0},
           "los tres números de un retén")
+    igual(vehiculos.medidas_desde_descripcion("Kit Tornillo Seguridad FORD 1/2X20X37"), {},
+          "media pulgada no es un interno de 2")
+    igual(vehiculos.medidas_desde_descripcion("SONDA LAMBDA BMW X1 X3 X4"), {},
+          "los modelos X1 X3 X4 no son una medida")
+    igual(vehiculos.medidas_desde_descripcion("Jgo. Retenes VW Polo Mot. 1Y-AAZ -1X 64-75"), {},
+          "un externo 64 veces el interno no es una medida")
+    igual(vehiculos.medidas_desde_descripcion("O´RING 36,5X3.53MM"),
+          {"diametro_interno": 36.5, "espesor": 3.53}, "dos números en un o'ring")
 
 
 def probar_la_misma_junta_en_otro_espesor_no_es_un_error_de_carga():

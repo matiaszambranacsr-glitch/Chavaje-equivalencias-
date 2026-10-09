@@ -12,21 +12,23 @@ se usan sin importarlos los nombres que definen las partes anteriores."""
 # pidió contra lo que se vendió, el sistema propone equivalencias candidatas para que el dueño
 # las confirme. No inventa nada solo: propone, y una persona decide.
 
-def registrar_venta(producto_id, termino_pedido="", veredicto=None):
+def registrar_venta(producto_id, termino_pedido="", veredicto=None, evidencia=None):
     """Anota que un producto se vendió, y qué había pedido el cliente cuando lo pidió.
 
     Con el veredicto que tenía en el buscador en ese momento, congelado: si mañana la
     equivalencia cambia, la venta conserva lo que se sabía cuando se hizo. Y si no estaba
     confirmada, queda como ALTERNATIVA COMERCIAL: puede resolverle el problema al cliente, pero
     no confirma que sean equivalentes (ver _pares_vendidos()). Lo pidió una revisión con ChatGPT
-    («que el sistema proteja al vendedor» y «alternativa comercial como categoría aparte»)."""
+    («que el sistema proteja al vendedor» y «alternativa comercial como categoría aparte»).
+    'evidencia' es lo que la sostenía en ese momento (ver evidencia_de_la_fila()): si vuelve,
+    el registro de errores dice qué se sabía al venderla."""
     como = como_se_vende(veredicto)
     with db_lock:
         c.execute(
             "INSERT INTO ventas_registradas (producto_id, termino_pedido, codigo_pedido_clean, "
-            "usuario, veredicto, como) VALUES (?, ?, ?, ?, ?, ?)",
+            "usuario, veredicto, como, evidencia) VALUES (?, ?, ?, ?, ?, ?, ?)",
             (producto_id, termino_pedido.strip(), sanitizar(termino_pedido), obtener_usuario_actual(),
-             veredicto, como)
+             veredicto, como, evidencia)
         )
         conn.commit()
 
@@ -313,6 +315,10 @@ def comparar_medidas(a, b, tolerancia_pct=3):
     campos = CAMPOS_MEDIDAS
     if not a or not b:
         return None, "No se pudo leer alguno de los dos productos."
+    # Un diámetro imposible —el interno mayor que el externo, el externo 60 veces el interno—
+    # es un dato mal cargado, no una medida: no prueba nada, ni a favor ni en contra. Ver
+    # medidas_imposibles().
+    a, b = sin_diametros_imposibles(a), sin_diametros_imposibles(b)
 
     comparadas, diferencias = [], []
     for campo, etiqueta in campos:
@@ -425,23 +431,69 @@ def nivel_por_evidencias(evidencias):
     return "🔴 Solo por repetición", puntaje
 
 
-def marcar_revision(pares, decision, motivo=None):
+# CÓMO SE DECIDIÓ, para el historial: no pesa lo mismo un par mirado de a uno que una lista
+# entera aprobada de un golpe, ni que una comprobación con la pieza en la mano. Lo pidió una
+# revisión con ChatGPT («quién decidió qué: humana, automática con revisión, importada,
+# heredada»). La app no decide sola: todo lo que está en el historial lo decidió una persona;
+# lo importado sin revisar no está acá (se ve en «Vino de» de la ficha) y lo heredado es una
+# cadena de pasos, cada uno con su propia decisión.
+COMO_SE_DECIDIO = {
+    "uno": "👤 de a uno",
+    "grupo": "👥 en grupo",
+    "bloque": "📦 la lista entera de una vez",
+    "mano": "✋ comprobada en la mano",
+    "reglas_de_hoy": "🔁 al repasar con las reglas de hoy",
+    "deshacer": "↩️ al deshacer una importación",
+    "todo_el_producto": "✂️ todos los de un producto de una vez",
+}
+
+
+def _lo_que_dice_la_cola(pares):
+    """{(menor, mayor): (desde cuándo espera, de qué lista)} de los pares que están en la cola.
+    El que llama tiene el candado tomado, y lo lee ANTES de sacarlos de la cola: si no,
+    marcar_revision() ya no sabe desde cuándo esperaban ni de qué lista venían. Pasaba: al
+    aprobar o descartar desde la cola el historial quedaba sin «pendiente desde» —el tiempo de
+    verificación del tablero salía siempre vacío— y el descarte, sin la lista."""
+    normalizados = sorted({(min(a, b), max(a, b)) for a, b in pares if a != b})
+    salida = {}
+    for i in range(0, len(normalizados), 200):
+        tanda = normalizados[i:i + 200]
+        c.execute(
+            "SELECT producto_a_id, producto_b_id, fecha, lote FROM equivalencias_pendientes WHERE "
+            + " OR ".join(["(producto_a_id = ? AND producto_b_id = ?) OR "
+                           "(producto_a_id = ? AND producto_b_id = ?)"] * len(tanda)),
+            [v for a, b in tanda for v in (a, b, b, a)])
+        for r in c.fetchall():
+            par = (min(r[0], r[1]), max(r[0], r[1]))
+            desde, lote = salida.get(par, (None, None))
+            salida[par] = (min([x for x in (desde, r["fecha"]) if x], default=None),
+                           max([x for x in (lote, r["lote"]) if x], default=None))
+    return salida
+
+
+def marcar_revision(pares, decision, motivo=None, como=None, cola=None):
     """Recuerda la decisión tomada sobre un vínculo, en los dos sentidos. 'ok' = ya lo miré y
     está bien (no volver a marcarlo en la auditoría). 'rechazada' = no es equivalente (además
     de borrarlo, no se vuelve a crear aunque se reimporte la lista del proveedor).
-    'motivo' es una clave de MOTIVOS_DE_RECHAZO, cuando la persona dijo por qué."""
+    'motivo' es una clave de MOTIVOS_DE_RECHAZO, cuando la persona dijo por qué.
+    'como' es una clave de COMO_SE_DECIDIO; si no se dice, «de a uno» o «en grupo».
+    'cola' es lo que devolvió _lo_que_dice_la_cola() antes de sacar los pares de la cola."""
     if not pares:
         return
     filas = []
     historial = []
     usuario = obtener_usuario_actual()
     como_estaba = _como_estaba_en_la_revision()
-    for a, b in pares:
-        confianza, senal, por_que = como_estaba.get((min(a, b), max(a, b)), (None, None, None))
+    cola = cola or {}
+    # Una fila de historial por par aunque la pantalla mande la ida y la vuelta.
+    normalizados = sorted({(min(a, b), max(a, b)) for a, b in pares})
+    como = como or ("uno" if len(normalizados) == 1 else "grupo")
+    for a, b in normalizados:
+        confianza, senal, por_que = como_estaba.get((a, b), (None, None, None))
         filas.append((a, b, decision, usuario, motivo, confianza, senal, por_que))
         filas.append((b, a, decision, usuario, motivo, confianza, senal, por_que))
-        historial.append((min(a, b), max(a, b), decision, motivo, usuario, confianza, senal,
-                          por_que))
+        historial.append((a, b, decision, motivo, usuario, confianza, senal, por_que,
+                          VERSION_CONFIANZA) + cola.get((a, b), (None, None)) + (como,))
     # Todo o nada: la última decisión y el historial van juntos.
     with db_lock, transaccion():
         c.executemany(
@@ -455,19 +507,20 @@ def marcar_revision(pares, decision, motivo=None):
         c.executemany(
             """INSERT INTO historial_de_revisiones
                    (producto_a_id, producto_b_id, decision, motivo, revisado_por, confianza,
-                    senal, por_que, pendiente_desde, lote, version_reglas)
+                    senal, por_que, pendiente_desde, lote, version_reglas, como)
                VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8,
-                       (SELECT MIN(fecha) FROM equivalencias_pendientes
-                        WHERE (producto_a_id = ?1 AND producto_b_id = ?2)
-                           OR (producto_a_id = ?2 AND producto_b_id = ?1)),
-                       COALESCE((SELECT MAX(lote) FROM equivalencias_pendientes
+                       COALESCE(?10, (SELECT MIN(fecha) FROM equivalencias_pendientes
+                                      WHERE (producto_a_id = ?1 AND producto_b_id = ?2)
+                                         OR (producto_a_id = ?2 AND producto_b_id = ?1))),
+                       COALESCE(?11,
+                                (SELECT MAX(lote) FROM equivalencias_pendientes
                                  WHERE (producto_a_id = ?1 AND producto_b_id = ?2)
                                     OR (producto_a_id = ?2 AND producto_b_id = ?1)),
                                 (SELECT MAX(lote) FROM equivalencias
                                  WHERE (producto_a_id = ?1 AND producto_b_id = ?2)
                                     OR (producto_a_id = ?2 AND producto_b_id = ?1))),
-                       ?9)""",
-            [h + (VERSION_CONFIANZA,) for h in historial])
+                       ?9, ?12)""",
+            historial)
         # UN RECHAZO SACA EL PAR DE LA COLA, de la lista que sea. Si no, el mismo par esperando
         # en otra lista se aprobaba con ella y el rechazo quedaba pisado por un «ok»: deshacer
         # una lista marca sus pares como rechazados, pero solo borraba los pendientes de ESA
@@ -647,6 +700,26 @@ def tablero_de_calidad(minimo_por_grupo=30, tope=10):
         anotar_error("tablero_de_calidad", _err)
         devoluciones = {}
     no_era = sum(n for m, n in devoluciones.items() if m in MOTIVOS_DE_NO_ERA_LA_PIEZA)
+    # LA MÉTRICA PRINCIPAL: de lo que se vendió como equivalente (con el veredicto 🟢 de ese
+    # momento), cuánto volvió porque no era la pieza. Es el error que le cuesta al mostrador;
+    # lo pidió una revisión con ChatGPT («tasa de equivalencias incorrectas vendidas como
+    # correctas»). Lo vendido como alternativa no cuenta: ya se avisó que no estaba confirmado.
+    c.execute("SELECT COUNT(*) FROM ventas_registradas WHERE como = 'equivalente'")
+    vendidas_como_equivalente = c.fetchone()[0] or 0
+    vendidas_y_devueltas = 0
+    try:
+        _motivos = sorted(MOTIVOS_DE_NO_ERA_LA_PIEZA)
+        c.execute(f"""-- FILA Y NO PAR: una fila por devolución; EXISTS no repite.
+                      SELECT COUNT(*) FROM devoluciones d
+                      WHERE d.motivo IN ({",".join("?" * len(_motivos))})
+                        AND EXISTS (SELECT 1 FROM ventas_registradas v
+                                    WHERE v.producto_id = d.producto_id
+                                      AND v.codigo_pedido_clean = d.codigo_pedido_clean
+                                      AND v.como = 'equivalente' AND v.fecha <= d.fecha)""",
+                  _motivos)
+        vendidas_y_devueltas = c.fetchone()[0] or 0
+    except sqlite3.OperationalError as _err:
+        anotar_error("tablero_de_calidad", _err)
     # Cuántos vínculos tienen una FUENTE que los declara (una lista, un catálogo, una persona),
     # y no solo pistas. Ver respaldo_del_origen().
     c.execute("SELECT lote, COALESCE(verificada, 0) AS v, COUNT(*) AS n FROM equivalencias "
@@ -659,7 +732,9 @@ def tablero_de_calidad(minimo_por_grupo=30, tope=10):
         "devoluciones": sum(devoluciones.values()), "devoluciones_no_era_la_pieza": no_era,
         "vinculos": vinc["n"], "comprobados_en_la_mano": vinc["v"], "con_fuente": con_fuente,
         "dias_hasta_decidir": dias[len(dias) // 2] if dias else None,
-        "con_dias": len(dias)}
+        "con_dias": len(dias),
+        "vendidas_como_equivalente": vendidas_como_equivalente,
+        "vendidas_como_equivalente_y_devueltas": vendidas_y_devueltas}
     salida["errores"] = registro_de_errores()
     salida["hace_un_mes"] = _foto_de_calidad(salida["numeros"])
     return salida
@@ -668,7 +743,8 @@ def tablero_de_calidad(minimo_por_grupo=30, tope=10):
 # Las cifras que se guardan una vez por día para ver si la app mejora. Ver _foto_de_calidad().
 CIFRAS_DE_LA_FOTO = ("decididos", "rechazados", "aprobados_y_despues_rechazados",
                      "devoluciones_no_era_la_pieza", "comprobados_en_la_mano", "con_fuente",
-                     "vinculos")
+                     "vinculos", "vendidas_como_equivalente",
+                     "vendidas_como_equivalente_y_devueltas")
 
 
 def _foto_de_calidad(numeros, dias_atras=30):
@@ -710,7 +786,14 @@ def registro_de_errores(tope=50):
                              (SELECT r.por_que FROM equivalencias_revisadas r JOIN productos q
                                 ON q.codigo_clean = d.codigo_pedido_clean
                               WHERE r.producto_a_id = q.id AND r.producto_b_id = p.id
-                              ORDER BY r.fecha LIMIT 1) AS por_que
+                              ORDER BY r.fecha LIMIT 1) AS por_que,
+                             (SELECT COALESCE(v.veredicto, '') || CASE WHEN v.evidencia IS NULL
+                                     THEN '' ELSE ' · ' || v.evidencia END
+                              FROM ventas_registradas v
+                              WHERE v.producto_id = p.id
+                                AND v.codigo_pedido_clean = d.codigo_pedido_clean
+                                AND v.fecha <= d.fecha
+                              ORDER BY v.fecha DESC, v.id DESC LIMIT 1) AS al_venderla
                       FROM devoluciones d JOIN productos p ON p.id = d.producto_id
                       JOIN marcas m ON m.id = p.marca_id
                       WHERE d.motivo IN ({",".join("?" * len(motivos))})
@@ -720,7 +803,7 @@ def registro_de_errores(tope=50):
                 "Fecha": r["fecha"], "Equivalencia": f"{r['pedido']} → {r['vendido']} ({r['marca']})",
                 "Motivo": MOTIVOS_DE_DEVOLUCION.get(r["motivo"], r["motivo"])
                           + (f": {r['detalle']}" if r["detalle"] else ""),
-                "Lo que la dejó pasar": (r["por_que"] or "—")[:160],
+                "Lo que la dejó pasar": (r["por_que"] or r["al_venderla"] or "—")[:160],
                 "Fuente": (r["lote"] or "por un código en el medio").split(" · ")[0],
                 "Detectado por": "↩️ una devolución (instalación real)"})
     except sqlite3.OperationalError as _err:
@@ -1109,7 +1192,8 @@ def cb_reglas_de_hoy(pares, decision):
     if decision == "cortar":
         cortar_vinculos_cargados(pares)
     else:
-        marcar_revision(pares, "ok", motivo=MOTIVO_CONFIRMADO_CON_LAS_REGLAS_DE_HOY)
+        marcar_revision(pares, "ok", motivo=MOTIVO_CONFIRMADO_CON_LAS_REGLAS_DE_HOY,
+                        como="reglas_de_hoy")
     st.session_state["resultado_reglas_de_hoy"] = aprobados_que_hoy_se_vetarian()
     guardar_resumen_de_lo_aprobado(st.session_state["resultado_reglas_de_hoy"])
 
@@ -1219,7 +1303,7 @@ def cortar_todos_los_vinculos(producto_id, recordar_rechazo=True):
                           detalle=f"{len(pares)} vínculo(s)")
         conn.commit()
     if recordar_rechazo and pares:
-        marcar_revision(pares, "rechazada")
+        marcar_revision(pares, "rechazada", como="todo_el_producto")
     return len(pares)
 
 
@@ -4250,6 +4334,7 @@ def rechazar_pendientes_de_producto(producto_id, lote=None):
                          WHERE producto_a_id = ? OR producto_b_id = ?""",
                       (producto_id, producto_id))
         pares = [(r["producto_a_id"], r["producto_b_id"]) for r in c.fetchall()]
+        cola = _lo_que_dice_la_cola(pares)
         if lote:
             c.execute("""DELETE FROM equivalencias_pendientes
                          WHERE lote = ? AND (producto_a_id = ? OR producto_b_id = ?)""",
@@ -4262,7 +4347,7 @@ def rechazar_pendientes_de_producto(producto_id, lote=None):
         conn.commit()
     if pares:
         # Quedan registrados como rechazados para que una reimportación no los reviva
-        marcar_revision(pares, "rechazada")
+        marcar_revision(pares, "rechazada", como="todo_el_producto", cola=cola)
     return borrados
 
 
@@ -4331,6 +4416,7 @@ def aprobar_pendientes(lote, solo_estos_pares=None, en_bloque=False):
             pares = [p for p in pares if p not in _seguridad]
         if not pares:
             return 0
+        cola = _lo_que_dice_la_cola(pares)
         # El lote viaja con el vínculo: es lo que después permite deshacer toda una lista.
         # Y el par va siempre ordenado (menor primero), para no dejar la misma equivalencia
         # guardada dos veces en direcciones opuestas.
@@ -4344,7 +4430,7 @@ def aprobar_pendientes(lote, solo_estos_pares=None, en_bloque=False):
         # pantalla no siempre la manda.
         c.executemany(_BORRAR_PENDIENTE_EN_LOS_DOS_SENTIDOS, [(a, b, b, a) for a, b in pares])
     # Queda registrado que ya se revisó, así la auditoría de lo existente no lo vuelve a marcar
-    marcar_revision(pares, "ok")
+    marcar_revision(pares, "ok", como="bloque" if en_bloque else None, cola=cola)
     return len(pares)
 
 
@@ -4354,10 +4440,12 @@ def rechazar_pendientes(lote, solo_estos_pares=None, motivo=None):
             # Hay que leer los pares ANTES de borrarlos, si no queda sin registrar el rechazo
             c.execute("SELECT producto_a_id, producto_b_id FROM equivalencias_pendientes WHERE lote = ?", (lote,))
             marcar_para_recordar = [(r["producto_a_id"], r["producto_b_id"]) for r in c.fetchall()]
+            cola = _lo_que_dice_la_cola(marcar_para_recordar)
             c.execute("DELETE FROM equivalencias_pendientes WHERE lote = ?", (lote,))
             borrados = c.rowcount
         else:
             pares = _los_que_siguen_pendientes(solo_estos_pares)
+            cola = _lo_que_dice_la_cola(pares)
             # Las dos direcciones, y se cuenta lo que se BORRÓ. Antes se devolvía len(pares), y
             # la pantalla manda casi siempre ida y vuelta: decía el doble. Y el botón de «kit y
             # pieza» mandaba solo la ida, así que la vuelta se quedaba en la cola.
@@ -4366,7 +4454,8 @@ def rechazar_pendientes(lote, solo_estos_pares=None, motivo=None):
             marcar_para_recordar = pares
         conn.commit()
     # Se recuerda el rechazo para que no vuelva a aparecer si se reimporta la misma lista
-    marcar_revision(marcar_para_recordar, "rechazada", motivo)
+    marcar_revision(marcar_para_recordar, "rechazada", motivo,
+                    como="bloque" if solo_estos_pares is None else None, cola=cola)
     return borrados
 
 

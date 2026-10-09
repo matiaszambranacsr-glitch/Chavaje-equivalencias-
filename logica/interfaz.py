@@ -1385,7 +1385,9 @@ def mostrar_ficha_de_prueba(id_a, id_b, clave):
     if ficha["medidas"]:
         st.markdown("**Medidas**" + (f" — para confirmar en la mano: {', '.join(ficha['para_medir'])}"
                                      if ficha["para_medir"] else ""))
-        st.dataframe(ficha["medidas"], hide_index=True, width="stretch")
+        # Como texto: una columna con números y «—» no la puede mostrar la tabla.
+        st.dataframe([{**m, "A": str(m["A"]).replace(".", ","), "B": str(m["B"]).replace(".", ",")}
+                      for m in ficha["medidas"]], hide_index=True, width="stretch")
     else:
         st.caption("📏 Ninguno de los dos tiene medidas cargadas.")
     if ficha["la_tumbaria"]:
@@ -1396,6 +1398,8 @@ def mostrar_ficha_de_prueba(id_a, id_b, clave):
         st.error(texto_para_markdown(x))
     for x in ficha["avisos"]:
         st.warning(texto_para_markdown(x))
+    for x in ficha.get("cambios_despues", []):
+        st.warning("🔧 Cambió después de la última revisión: " + texto_para_markdown(x))
     if ficha["a_favor"]:
         st.markdown("**A favor:** " + " · ".join(texto_para_markdown(x) for x in ficha["a_favor"]))
     for x in ficha["comprobaciones"]:
