@@ -40,6 +40,11 @@ Las pruebas se corren como dice el README, en «Antes de subir un cambio».
 | Lo que no está confirmado sale «a confirmar» en WhatsApp y en el PDF, y con su veredicto en el Excel | `hay_que_confirmarla()` | `pruebas_de_la_precision.py` (27) |
 | Aprobar en bloque nunca aprueba una pieza de seguridad | `aprobar_pendientes(en_bloque=True)` | `pruebas_de_la_precision.py` (28) |
 | Corregir las medidas a mano vuelve a puntuar los vínculos de ese producto, y solo esos | `repuntuar_los_vinculos_de()` | `pruebas_de_la_precision.py` (29) |
+| Una pieza de seguridad sin confirmar se muestra, pero no se corona «más barato» ni «mejor margen» | `no_se_recomienda()` | `pruebas_de_la_precision.py` (30) |
+| Lo que falta medir va de lo que más identifica a la pieza a lo que menos | `ficha_de_prueba()`, `_PIEZAS_Y_SUS_MEDIDAS` | `pruebas_de_la_precision.py` (31) |
+| Que no nombren autos en común avisa, pero no tumba la equivalencia | `autos_de_los_dos()` | `pruebas_de_la_precision.py` (32) |
+| Lo que se exporta lleva el estado de cada vínculo, y los rechazados van aparte | `estado_del_vinculo()`, `exportar_catalogo_zip()` | `pruebas_de_la_precision.py` (34) |
+| Si al volver a puntuar suben de franja demasiados vínculos de una vez, se avisa | `deriva_sospechosa()` | `pruebas_de_la_precision.py` (36) |
 
 ## El stock, los precios y la plata
 

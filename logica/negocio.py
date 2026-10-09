@@ -2353,7 +2353,9 @@ def armar_mensaje_de_cotizacion(lista, encabezado="", pie="", incluir_precio=Tru
             if extras:
                 linea += " (" + " · ".join(extras) + ")"
             if marcar_a_confirmar and hay_que_confirmarla(fila):
-                linea += " ⚠️ a confirmar"
+                linea += " ⚠️ a confirmar" + (" · 🛑 pieza de seguridad"
+                                              if es_pieza_de_seguridad(fila.get("Descripcion"))
+                                              else "")
             partes.append(linea)
     if (pie or "").strip():
         partes.append(f"\n{pie}")

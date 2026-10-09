@@ -682,6 +682,124 @@ def probar(L):
     esperar("los otros vínculos no se tocan", c.execute(
         "SELECT confianza FROM equivalencias WHERE producto_a_id = ? AND producto_b_id = ?",
         (min(fa_a, fa_b), max(fa_a, fa_b))).fetchone()[0], _conf_otro)
+
+    # 30. Una pieza de seguridad que no está confirmada se muestra, pero no se recomienda.
+    no_se = ns["no_se_recomienda"]
+    pastilla = "PASTILLA DE FRENO DELANTERA VW GOL"
+    probable = {"Cadena": "🟡 3 saltos", "Confianza": "🟢 sólida", "Descripcion": pastilla}
+    confirmada = {"Cadena": "🟢 directo", "Confianza": "🟢 sólida", "Descripcion": pastilla,
+                  "Respaldo": "📋 lo declara la lista de FISPA"}
+    esperar("pastilla probable: no se corona", no_se(probable), True)
+    esperar("pastilla confirmada: sí", no_se(confirmada), False)
+    esperar("la pastilla que buscó el cliente: sí", no_se({"Cadena": "— el buscado",
+                                                           "Descripcion": pastilla}), False)
+    esperar("un filtro probable: sí", no_se(dict(probable, Descripcion="FILTRO DE ACEITE")), False)
+    esperar("ni el mejor margen", ns["mejor_margen_entre_equivalentes"]([
+        dict(probable, Codigo="P1", Marca="X", Stock=1, Precio=500, _costo=10),
+        dict(confirmada, Codigo="P2", Marca="Y", Stock=1, Precio=100, _costo=90),
+        {"Codigo": "F", "Marca": "Z", "Stock": 1, "Precio": 100, "_costo": 80,
+         "Cadena": "— el buscado", "Descripcion": pastilla}])["codigo"], "F")
+    esperar("en WhatsApp dice que es de seguridad",
+            "⚠️ a confirmar · 🛑 pieza de seguridad" in ns["armar_mensaje_de_cotizacion"](
+                [{"codigo_buscado": "X", "resultados": [dict(probable, Marca="M", Codigo="C")]}]),
+            True)
+
+    # 31. Lo que falta, de lo que más identifica a la pieza a lo que menos, y lo que la tumbaría.
+    fi_a = producto("FI9", "FILTRO DE ACEITE VW GOL 1.6", fispa)
+    fi_b = producto("IFI9", "FILTRO DE ACEITE VW GOL 1.6", illinois)
+    vincular(fi_a, fi_b, "FISPA · lista.xlsx · 01/10/2026 10:00:00")
+    conn.commit()
+    ficha = ns["ficha_de_prueba"](fi_a, fi_b)
+    esperar("en un filtro, primero el diámetro externo", ficha["para_medir"],
+            ["diám. externo", "diám. interno", "largo total", "paso de rosca"])
+    esperar("lo que la tumbaría arranca por lo que más la identifica",
+            (ficha["la_tumbaria"][0]["Característica"], ficha["la_tumbaria"][0]["Importancia"]),
+            ("diám. externo", "la que más la identifica"))
+    tumbaria = {t["Característica"]: t["Hoy"] for t in ns["ficha_de_prueba"](ret_f, ret_i)["la_tumbaria"]}
+    esperar("lo que ya coincide figura", tumbaria.get("diám. interno"), "✅ igual")
+    esperar("y lo que falta va primero",
+            ns["ficha_de_prueba"](ret_f, ret_i)["la_tumbaria"][0]["Característica"], "ancho")
+    rl_a = producto("RL1", "RELAY 12 VOLTS 4 PATAS", fispa)
+    rl_b = producto("IRL1", "RELAY 4 PATAS", illinois)
+    vincular(rl_a, rl_b, "FISPA · lista.xlsx · 01/10/2026 10:00:00")
+    conn.commit()
+    esperar("un parámetro que dice uno solo", {t["Característica"]: t["Hoy"] for t in
+                                               ns["ficha_de_prueba"](rl_a, rl_b)["la_tumbaria"]}
+            .get("tensión"), "❓ solo lo dice A")
+
+    # 32. Los autos que nombran los dos.
+    def aplicacion(codigo, marca_auto, modelo):
+        c.execute("INSERT INTO aplicaciones (marca_auto, modelo_auto, codigo, codigo_clean, origen) "
+                  "VALUES (?, ?, ?, ?, 'deducida')", (marca_auto, modelo, codigo, ns["sanitizar"](codigo)))
+    aplicacion("FI9", "VOLKSWAGEN", "GOL"); aplicacion("IFI9", "volkswagen", "gol")
+    aplicacion("IFI9", "VOLKSWAGEN", "SAVEIRO")
+    aplicacion("RL1", "FIAT", "PALIO"); aplicacion("IRL1", "FORD", "KA")
+    conn.commit()
+    ficha = ns["ficha_de_prueba"](fi_a, fi_b)
+    esperar("nombran un auto en común", ficha["autos"]["comun"], ["Volkswagen Gol"])
+    esperar("y lo dice en la línea", "🚗 nombran 1 auto(s) en común" in ficha["resumen"], True)
+    ficha = ns["ficha_de_prueba"](rl_a, rl_b)
+    esperar("ninguno en común: avisa, no tumba", (ficha["estado"].startswith("🔴"),
+                                                  any(x.startswith("🚗") for x in ficha["avisos"])),
+            (False, True))
+
+    # 33. El expediente.
+    texto = ns["expediente_en_texto"](ns["ficha_de_prueba"](rx_a, rx_b))
+    esperar("el expediente lleva el estado, lo que la tumbaría y el historial",
+            all(x in texto for x in ("# Expediente de equivalencia", "**Estado:**",
+                                     "## Historial de decisiones", "## Quién declara cada paso")),
+            True)
+
+    # 34. Lo que se exporta lleva el estado.
+    estado = ns["estado_del_vinculo"]
+    esperar("de una lista y sólido: confirmada", estado(90, "FISPA · a.xlsx · x", 0), "confirmada")
+    esperar("del barrido: probable", estado(90, "BARRIDO (automático) · x", 0), "probable")
+    esperar("flojo: revisar", estado(40, "FISPA · a.xlsx · x", 0), "revisar")
+    esperar("muy débil: dudosa", estado(10, "FISPA · a.xlsx · x", 0), "dudosa")
+    esperar("verificado a mano: confirmada", estado(90, "BARRIDO · x", 1), "confirmada")
+    esperar("verificado a mano, aunque el puntaje sea flojo", estado(40, "FISPA · a.xlsx · x", 1),
+            "confirmada")
+    import csv, io, zipfile
+    c.execute("INSERT INTO equivalencias_pendientes (producto_a_id, producto_b_id, origen, lote) "
+              "VALUES (?, ?, 'lista_proveedor', 'EXPORTAR')", (min(fi_a, rl_b), max(fi_a, rl_b)))
+    conn.commit()
+    zip_bytes, cuantas = ns["exportar_catalogo_zip"]()
+    with zipfile.ZipFile(io.BytesIO(zip_bytes)) as z:
+        eq = list(csv.DictReader(io.StringIO(z.read("equivalencias.csv").decode("utf-8-sig"))))
+        rech = list(csv.DictReader(io.StringIO(z.read("rechazadas.csv").decode("utf-8-sig"))))
+        pend = z.read("equivalencias_pendientes.csv").decode("utf-8-sig")
+        leeme = z.read("LEEME.txt").decode("utf-8")
+    esperar("cada equivalencia con su estado", all(f["estado"] in ("confirmada", "probable",
+                                                                   "revisar", "dudosa") for f in eq)
+            and bool(eq), True)
+    esperar("y los rechazados aparte", ((str(min(ja, jb)), str(max(ja, jb))) in
+                                        {(f["producto_a_id"], f["producto_b_id"]) for f in rech}),
+            True)
+    esperar("lo pendiente dice que no es una equivalencia",
+            (pend.splitlines()[0].endswith(",estado"),
+             all(x.endswith(",pendiente: todavía no es una equivalencia")
+                 for x in pend.splitlines()[1:]) and len(pend.splitlines()) > 1), (True, True))
+    esperar("el LEEME lo explica", "solo\n«confirmada»" in leeme, True)
+
+    # 35. El tablero de calidad.
+    tablero = ns["tablero_de_calidad"](minimo_por_grupo=1)
+    esperar("cuenta lo rechazado y después aprobado",
+            tablero["numeros"]["rechazados_y_despues_aprobados"] >= 1, True)
+    esperar("y lo comprobado en la mano", tablero["numeros"]["comprobados_en_la_mano"] >= 1, True)
+    esperar("y las devoluciones que dicen que no era la pieza",
+            tablero["numeros"]["devoluciones_no_era_la_pieza"], 2)
+    esperar("mide cuánto tardó en decidirse lo que estaba en la cola",
+            tablero["numeros"]["con_dias"] >= 1, True)
+    esperar("y por familia", bool(tablero["por_familia"]) and
+            set(tablero["por_familia"][0]) == {"Familia", "Decididos", "Rechazados", "% rechazado"},
+            True)
+
+    # 36. Una regla que hace subir de franja demasiados vínculos de una vez.
+    sospecha = ns["deriva_sospechosa"]
+    esperar("60 de 1.000 suben: sospechosa", sospecha({"subieron": 60, "total": 1000,
+                                                       "version": "13"}).startswith("⚠️"), True)
+    esperar("60 de 10.000, no", sospecha({"subieron": 60, "total": 10000}), "")
+    esperar("10 de 100, no", sospecha({"subieron": 10, "total": 100}), "")
     return fallas
 
 

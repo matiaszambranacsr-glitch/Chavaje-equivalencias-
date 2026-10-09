@@ -261,7 +261,8 @@ if pagina == PAGINAS[4]:
         explicar(
             "Todo el catálogo en archivos que abre cualquier planilla, por si algún día la app "
             "no está.",
-            "Productos, marcas, equivalencias (aprobadas y pendientes), aplicaciones por auto, "
+            "Productos, marcas, equivalencias (aprobadas, con su estado —confirmada, probable, "
+            "revisar o dudosa—, pendientes y rechazadas), aplicaciones por auto, "
             "reemplazos de código, vehículos, historial de precios, talleres con su cuenta, "
             "movimientos y pedidos al depósito: un CSV por cada uno, adentro de un ZIP. Sin "
             "fotos y sin contraseñas.\n\nNo reemplaza al backup: para volver a la app se usa el "
@@ -1819,6 +1820,39 @@ a traer solas desde Administrar → Mantenimiento.
                 st.caption("La confianza y la alarma de cada par se anotan al decidir desde "
                            "esta versión: las tablas por confianza y por alarma se van a ir "
                            "llenando a medida que revises.")
+
+        # EL TABLERO DE CALIDAD: dónde propone mal la app, cuánto se anuló, cuánto volvió y
+        # cuánto se comprobó en la mano. Ver tablero_de_calidad().
+        with st.expander("📈 Tablero de calidad de las equivalencias"):
+            _tc = tablero_de_calidad()
+            _n = _tc["numeros"]
+            q1, q2, q3, q4 = st.columns(4)
+            q1.metric("Decididos", miles(_n["decididos"]),
+                      help=f"{miles(_n['aprobados'])} aprobados y {miles(_n['rechazados'])} "
+                           "rechazados")
+            q2.metric("Rechazados", f"{100 * _n['rechazados'] / max(_n['decididos'], 1):.1f} %")
+            q3.metric("Comprobados en la mano",
+                      f"{100 * _n['comprobados_en_la_mano'] / max(_n['vinculos'], 1):.1f} %",
+                      help=f"{miles(_n['comprobados_en_la_mano'])} de {miles(_n['vinculos'])} "
+                           "vínculos cargados")
+            q4.metric("Devoluciones «no era la pieza»", miles(_n["devoluciones_no_era_la_pieza"]),
+                      help=f"de {miles(_n['devoluciones'])} devoluciones anotadas")
+            st.caption(
+                f"Anuladas: {miles(_n['aprobados_y_despues_rechazados'])} aprobadas que después "
+                f"se rechazaron y {miles(_n['rechazados_y_despues_aprobados'])} al revés. "
+                + (f"De la cola a la decisión: {_n['dias_hasta_decidir']:.1f} días (la mitad "
+                   f"tarda menos; {miles(_n['con_dias'])} decisiones medidas)."
+                   if _n["dias_hasta_decidir"] is not None else
+                   "El tiempo de la cola a la decisión se empieza a medir desde esta versión."))
+            if _tc["por_familia"]:
+                st.markdown("**Familias donde la app propone peor** — de lo que te llegó de "
+                            "esa familia, qué parte rechazaste")
+                st.dataframe(_tc["por_familia"], width="stretch", hide_index=True)
+            if _tc["por_listas"]:
+                st.markdown("**Pares de listas que más proponen mal**")
+                st.dataframe(_tc["por_listas"], width="stretch", hide_index=True)
+            st.caption("Los falsos positivos y negativos con todo lo decidido se miden fuera de "
+                       "la app, con `pruebas_de_la_revision.py --base` (ver el README).")
 
         # LOS CONTROLES DE LO YA CARGADO VAN DESPUÉS de la revisión de las listas. Estaban
         # arriba de todo, y lo que se viene a hacer a esta pantalla —revisar lo que espera

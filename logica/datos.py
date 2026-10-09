@@ -1291,6 +1291,10 @@ def _esquema_gestion(c):
     )""")
     c.execute("CREATE INDEX IF NOT EXISTS idx_historial_par "
               "ON historial_de_revisiones(producto_a_id, producto_b_id)")
+    # Desde cuándo esperaba en la cola: con la fecha de la decisión da cuánto se tarda en
+    # verificar (ver tablero_de_calidad()).
+    if "pendiente_desde" not in [f[1] for f in c.execute("PRAGMA table_info(historial_de_revisiones)")]:
+        c.execute("ALTER TABLE historial_de_revisiones ADD COLUMN pendiente_desde TEXT")
     c.execute("DROP TRIGGER IF EXISTS historial_no_se_corrige")
     c.execute("DROP TRIGGER IF EXISTS historial_no_se_borra")
     c.execute("""CREATE TRIGGER IF NOT EXISTS historial_no_se_corrige

@@ -6475,6 +6475,41 @@ el botón**:
 - «🔌 Probar las fuentes de afuera» suma la Central de Deudores (con el CUIT de la AFIP, nunca el
   de un cliente) y la inflación de respaldo.
 
+## 🧭 La precisión, quinta parte: no recomendar lo dudoso, el expediente y el tablero
+
+Puntos 127 a 164 de la misma revisión con ChatGPT, y sus dos ideas finales («que Chavaje no
+responda solo qué pieza sirve» y «que cada equivalencia tenga un expediente»), medidos sobre la
+copia de la base real del 8/10.
+
+| Punto | Qué se encontró | Qué se hizo |
+|---|---|---|
+| 127. Que el estado se vea | Ya: cada resultado dice 🟢 confirmada, 🟡 probable, 🟠 revisar o 🔴 (dudosa, rechazada o devuelta), y 🔵 el mismo número en otra marca. Lo pendiente no aparece en el buscador hasta aprobarlo. | — |
+| 128 y 129. El estado viaja con el código | Hecho en la tanda anterior para la tabla, el Excel, WhatsApp y el PDF. | En WhatsApp y el PDF, la pieza de seguridad sin confirmar dice además «🛑 pieza de seguridad». |
+| 130. Que otro programa no confunda una candidata con una confirmada | El ZIP del catálogo exportaba los vínculos con su puntaje, pero sin decir cuáles están confirmados, y no llevaba los rechazados. | `equivalencias.csv` lleva la columna **estado** (el mismo veredicto del buscador): 16.903 confirmadas, 3.116 probables, 11 a revisar, 7 dudosas. Lo pendiente dice que no es una equivalencia, y **`rechazadas.csv`** trae los 3.011 pares que una persona dijo que no son la misma pieza. El LEEME lo explica. |
+| 131 y 149. Qué tendría que ser falso, y el dato faltante más importante | La ficha decía qué medir, en el orden de la tabla y no por importancia. | **«🎯 Lo que la tumbaría»**: las características que identifican a esa clase de pieza, de la que más la identifica a la que menos, más lo que declaran las descripciones (tensión, rosca, dientes…) y los autos; primero lo que nadie comparó. Lo que falta medir sale en ese orden, y la próxima comprobación es la más importante (en un filtro, el diámetro externo antes que el interno). |
+| 132 a 134. Pieza, referencia y código cruzado | Ya: el código de fábrica es una marca aparte, el de barras va aparte, los reemplazos son una tabla con dirección (🔁) y una cadena por un número de fábrica nunca sale «confirmada»: es probable. | — |
+| 135 a 137. Kits, accesorios, «equivalente pero incompleto» | El kit contra la pieza suelta ya va aparte («🧰 va en lo buscado — NO es lo mismo»). Medido: ningún vínculo cargado ni pendiente choca en «con / sin» tornillos, juntas, retenes, soporte o polea. | Sin cambio. |
+| 138, 139 y 141. Dependencias, sistema completo, qué modificación | Las listas no lo traen. Lo que hubo que modificar ya se anota al registrar una devolución. | Sin cambio. |
+| 140. Adaptable contra directa | Hubo que modificarla ya cuenta como «no era la pieza». Ningún vínculo une una pieza «universal» o «adaptable» con una que no lo es. | Sin cambio. |
+| 142. No recomendar lo peligroso | Una pastilla de freno probable podía salir «🏆 más barato en stock». | Una pieza de seguridad que no está confirmada **se muestra pero no se recomienda**: no compite por el más barato ni por el mejor margen. Lo buscado por el cliente sí. |
+| 143. Riesgo aparte de la confianza | Ya (🛑 crítico, 🟠 alto, 🟢 normal). | — |
+| 144 a 147. Revisores | Las 23.081 decisiones son de una sola persona. | El historial lo deja medir el día que decidan dos. |
+| 148 y 163. Tablero de calidad | Había «¿Qué tan bien acierta la app?». | **«📈 Tablero de calidad»**: decididos y rechazados, anuladas (aprobadas y después rechazadas, y al revés), comprobadas en la mano, devoluciones «no era la pieza», días de la cola a la decisión (se mide desde esta versión), y **dónde propone mal la app**: por familia (distribución 38 %, juntas y retenes 28 %) y por par de listas (**IMPERIAL ↔ JL: 95 % rechazado**; ILLINOIS ↔ IMPERIAL: 60 %). 0,7 s. |
+| 150. Búsqueda dirigida | — | Al lado de la próxima comprobación, «🔎 Buscar «"código" la medida» en la web». |
+| 151 y 152. Cuándo parar, lo negativo primero | Ya: VERIFICADA es el criterio de parada, y un veto tumba el par aunque coincida todo lo demás. | — |
+| 153. Aplicaciones sospechosamente amplias | Medido en la tanda del 6 al 24: las que van en más marcas son sondas lambda universales, y está bien. | — |
+| 154. Reglas demasiado permisivas | La deriva se anotaba sin avisar. | Si al volver a puntuar suben de franja 50 vínculos o más, y más del 2 %, avisa «puede ser una regla demasiado permisiva». |
+| 155 a 158. Índices, huella técnica, huella negativa | Ya: los candidatos salen por códigos, números de fábrica y medidas, no comparando todo contra todo; la firma de cada descripción es la huella; lo aprendido de tus decisiones por par de listas es la huella negativa. | — |
+| 159 a 161. Puntaje explicado, bloqueos, reglas duras | Ya: cada par muestra lo que sumó y lo que restó, y un veto deja el puntaje en 20 como mucho. | — |
+| 162. «No sé» | Ya: ⚪ SIN CADENA, ❓ falta, y CANDIDATA cuando solo hay pistas. | — |
+| 164 y la idea final 1. Responder más que «qué pieza sirve» | — | La ficha dice además **los autos que nombran las dos** (de las aplicaciones de las descripciones): 14.307 de los 14.842 vínculos con autos en los dos lados comparten alguno; si no comparten ninguno, avisa sin tumbarla. |
+| La idea final 2. El expediente | La ficha estaba solo en pantalla. | **«📄 Bajar el expediente»**: la ficha entera en un texto, con estado, pasos y quién los declara, medidas, lo que la tumbaría, lo que la contradice, CHAS, autos e historial de decisiones. |
+
+Las reglas del puntaje no cambian: `VERSION_CONFIANZA` sigue en 13. Probado en
+`pruebas_de_la_precision.py` (21 fallas puestas a mano, las 21 detectadas) y en la app: la ficha
+de una bujía con lo que la tumbaría, los autos en común, la búsqueda dirigida y el expediente; el
+tablero; el ZIP; y el recorrido de las 32 pantallas, sin errores.
+
 ## 🧷 La precisión, cuarta parte: lo rechazado no vuelve, el historial no se pisa
 
 Puntos 53 a 127 de la misma revisión con ChatGPT, medidos sobre la copia de la base real del 8/10

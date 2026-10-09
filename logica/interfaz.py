@@ -567,7 +567,8 @@ def generar_pdf_cotizacion(lista_productos, incluir_precio=True, incluir_stock=F
             if extras:
                 linea += " (" + " / ".join(extras) + ")"
             if marcar_a_confirmar and hay_que_confirmarla(fila):
-                linea += " (a confirmar)"
+                linea += (" (a confirmar, pieza de seguridad)"
+                          if es_pieza_de_seguridad(fila.get("Descripcion")) else " (a confirmar)")
             pdf.multi_cell(0, 6, limpiar(linea), new_x="LMARGIN", new_y="NEXT")
         pdf.ln(3)
 
@@ -1336,6 +1337,15 @@ def mostrar_ficha_de_prueba(id_a, id_b, clave):
         st.warning(f"**Acción:** {ficha['accion']}.")
     if ficha["proxima_comprobacion"]:
         st.markdown(f"👉 **Próxima comprobación:** {texto_para_markdown(ficha['proxima_comprobacion'])}.")
+        # La búsqueda dirigida: el dato que falta, no «el código» a secas. Lo pidió una revisión
+        # con ChatGPT («si falta el pinout, buscar "código A" "pinout"»).
+        if ficha["para_medir"]:
+            import urllib.parse
+            # Sin la puntuación que algunas listas dejan pegada al final («14 FR 7DUX :»).
+            _cod_q = re.sub(r"[\s:;.,-]+$", "", b["codigo_raw"] or "")
+            _q = f'"{_cod_q}" {ficha["para_medir"][0]}'
+            st.link_button(f"🔎 Buscar «{_q}» en la web",
+                           "https://www.google.com/search?q=" + urllib.parse.quote_plus(_q))
     if ficha["ultima_revision"]:
         st.caption(f"🕰️ Última revisión: {ficha['ultima_revision']}"
                    + (f" (hace {ficha['meses_sin_revisar']} meses)"
@@ -1378,6 +1388,10 @@ def mostrar_ficha_de_prueba(id_a, id_b, clave):
         st.dataframe(ficha["medidas"], hide_index=True, width="stretch")
     else:
         st.caption("📏 Ninguno de los dos tiene medidas cargadas.")
+    if ficha["la_tumbaria"]:
+        st.markdown("**🎯 Lo que la tumbaría** — alcanza con que difiera una; lo que nadie "
+                    "comparó va primero")
+        st.dataframe(ficha["la_tumbaria"], hide_index=True, width="stretch")
     for x in ficha["contradicciones"]:
         st.error(texto_para_markdown(x))
     for x in ficha["avisos"]:
@@ -1389,6 +1403,10 @@ def mostrar_ficha_de_prueba(id_a, id_b, clave):
     for x in ficha["devoluciones"]:
         st.caption(texto_para_markdown(x))
     # Todas las decisiones, no solo la última: quién aprobó, quién rechazó, con qué reglas.
+    # El expediente: la ficha entera en un texto, para guardarla o mandarla.
+    st.download_button("📄 Bajar el expediente", data=expediente_en_texto(ficha).encode("utf-8"),
+                       file_name=f"expediente_{a['codigo_clean']}_{b['codigo_clean']}.md",
+                       mime="text/markdown", key=f"expediente_{clave}_{id_b}")
     # Un interruptor y no una caja desplegable: la ficha ya va adentro de una en el buscador.
     if ficha["historial"] and st.toggle(f"🗂️ Historial de decisiones ({len(ficha['historial'])})",
                                         key=f"historial_{clave}_{id_b}"):

@@ -477,15 +477,29 @@ def no_compite_por_precio(f):
     return bool(f.get("Devuelto") or f.get("Rechazada"))
 
 
+def no_se_recomienda(f):
+    """¿Esta fila queda afuera de lo que la app RECOMIENDA («🏆 más barato», «mejor margen»)?
+    Las que no compiten (ver no_compite_por_precio()) y, además, la pieza de seguridad que no
+    está confirmada: se muestra como candidata, pero no se la corona. Lo pidió una revisión con
+    ChatGPT: «"candidata encontrada" sí; "reemplazo recomendado" no, hasta superar controles
+    adicionales». Lo buscado siempre compite: es lo que pidió el cliente."""
+    if no_compite_por_precio(f):
+        return True
+    if f.get("Cadena") == "— el buscado":
+        return False
+    return (es_pieza_de_seguridad(f.get("Descripcion"))
+            and not veredicto_de_la_equivalencia(f).startswith("🟢"))
+
+
 def mejor_margen_entre_equivalentes(res):
     """De los equivalentes con stock, cuál te deja más ganancia.
 
     No es lo mismo que el más barato: entre dos que sirven igual, el que te deja más margen
     puede ser el más caro para el cliente o el más barato. Este dato hoy no existía y la
-    decisión se tomaba a ojo. Sin las que no compiten: ver no_compite_por_precio()."""
+    decisión se tomaba a ojo. Sin las que no se recomiendan: ver no_se_recomienda()."""
     candidatos = [f for f in res
                   if (f.get("Stock") or 0) > 0 and f.get("Precio") and f.get("_costo")
-                  and not no_compite_por_precio(f)]
+                  and not no_se_recomienda(f)]
     if len(candidatos) < 2:
         return None
     def ganancia(f):

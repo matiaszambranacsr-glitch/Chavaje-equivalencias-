@@ -711,8 +711,20 @@ def ficha_de_prueba(id_a, id_b, tolerancia_pct=3):
     medidas = cargar_medidas_de_varios([id_a, id_b])
     ficha["medidas"] = medidas_lado_a_lado(medidas.get(id_a), medidas.get(id_b),
                                            campos_de_la_pieza, tolerancia_pct)
-    ficha["para_medir"] = [m["Medida"] for m in ficha["medidas"]
-                           if m["Importa"] and m["Estado"].startswith("❓")]
+    # Lo que falta medir, de la que más identifica a la pieza a la que menos: el orden es el
+    # de _PIEZAS_Y_SUS_MEDIDAS. Lo pidió una revisión con ChatGPT («el dato faltante más
+    # importante primero»).
+    _etiqueta = dict(list(CAMPOS_MEDIDAS) + list(_MEDIDAS_EXACTAS))
+    _orden = {_etiqueta.get(cp, cp): i for i, cp in enumerate(campos_de_la_pieza)}
+    ficha["para_medir"] = sorted((m["Medida"] for m in ficha["medidas"]
+                                  if m["Importa"] and m["Estado"].startswith("❓")),
+                                 key=lambda x: _orden.get(x, 99))
+
+    # LOS AUTOS QUE NOMBRAN LOS DOS, según las aplicaciones leídas de las descripciones. No es
+    # el catálogo del fabricante: sirve para decir «los dos nombran el Gol y el Golf», y para
+    # avisar cuando no nombran ninguno en común. Medido: de los 14.842 vínculos con autos en los
+    # dos lados, 14.307 comparten alguno y 535 ninguno.
+    ficha["autos"] = autos_de_los_dos(pa["codigo_clean"], pb["codigo_clean"])
 
     # Lo que volvió, en los dos sentidos (se pidió A y se llevó B, o al revés). Ver
     # registrar_devolucion(): la que volvió porque no le iba ya está entre los vetos.
@@ -730,6 +742,12 @@ def ficha_de_prueba(id_a, id_b, tolerancia_pct=3):
     ficha["a_favor"] = a_favor
     ficha["contradicciones"] = [v for v in vetos if not v.startswith("💲")]
     ficha["avisos"] = [v for v in vetos if v.startswith("💲")]
+    if ficha["autos"]["solo_a"] and ficha["autos"]["solo_b"] and not ficha["autos"]["comun"]:
+        ficha["avisos"].append(
+            "🚗 Las descripciones no nombran ningún auto en común (A: "
+            + ", ".join(ficha["autos"]["ejemplos_a"]) + "; B: "
+            + ", ".join(ficha["autos"]["ejemplos_b"]) + "). Puede ser que cada lista nombre otros "
+            "autos de la misma pieza: confirmá la aplicación.")
     # Que una persona la haya rechazado también la contradice, aunque llegue por otro camino:
     # ver anotar_el_respaldo().
     c.execute("""SELECT revisado_por, substr(fecha, 1, 10) AS fecha, motivo
@@ -812,6 +830,8 @@ def ficha_de_prueba(id_a, id_b, tolerancia_pct=3):
     if _iguales:
         resumen.append(f"📐 {_iguales} medida(s) iguales")
     resumen += [x for x in a_favor if x.startswith(("🏭", "🔄", "🌐"))][:1]
+    if ficha["autos"]["comun"]:
+        resumen.append(f"🚗 nombran {len(ficha['autos']['comun'])} auto(s) en común")
     if ficha["comprobaciones"]:
         resumen.append("✋ comprobada en la mano")
     # Si algo la contradice, la línea ARRANCA por eso: lo que la sostiene, después. Lo pidió una
@@ -857,8 +877,102 @@ def ficha_de_prueba(id_a, id_b, tolerancia_pct=3):
         f"medí {ficha['para_medir'][0]} en las dos" if ficha["para_medir"] else
         "compará las dos piezas en la mano" if estado.startswith("🔴") or ficha["accion"] else
         "")
+    # LO QUE LA TUMBARÍA: para descartarla alcanza con que difiera UNA de estas. Primero lo que
+    # todavía nadie comparó, de lo que más identifica a la pieza a lo que menos; después lo que
+    # ya coincide. Lo pidió una revisión con ChatGPT («¿qué tendría que ser falso para que esto
+    # NO sea equivalente?»): es la lista de dónde buscar la diferencia.
+    _estado_de = {m["Medida"]: m["Estado"] for m in ficha["medidas"]}
+    tumbaria = []
+    for i, cp in enumerate(campos_de_la_pieza):
+        nombre = _etiqueta.get(cp, cp)
+        tumbaria.append((nombre, "la que más la identifica" if i == 0 else "importante",
+                         _estado_de.get(nombre, "❓ no la tiene ninguno")))
+    _pa_dec = parametros_declarados(normalizar_texto(pa["descripcion"] or ""))
+    _pb_dec = parametros_declarados(normalizar_texto(pb["descripcion"] or ""))
+    for clave in sorted(set(_pa_dec) | set(_pb_dec)):
+        if clave in _pa_dec and clave in _pb_dec:
+            hoy = ("❌ distinta" if parametros_que_chocan(((clave, _pa_dec[clave]),),
+                                                         ((clave, _pb_dec[clave]),))
+                   else "✅ los dos dicen lo mismo")
+        else:
+            hoy = f"❓ solo lo dice {'A' if clave in _pa_dec else 'B'}"
+        tumbaria.append((clave, "importante", hoy))
+    if ficha["autos"]["solo_a"] or ficha["autos"]["solo_b"]:
+        tumbaria.append(("aplicación (autos)", "importante",
+                         f"✅ {len(ficha['autos']['comun'])} en común" if ficha["autos"]["comun"]
+                         else "❌ ninguno en común" if ficha["autos"]["solo_a"]
+                         and ficha["autos"]["solo_b"]
+                         else f"❓ solo los nombra {'A' if ficha['autos']['solo_a'] else 'B'}"))
+    _grupo = {"❌": 0, "❓": 1}
+    tumbaria.sort(key=lambda t: (_grupo.get(t[2][:1], 2),
+                                 0 if t[1] == "la que más la identifica" else 1))
+    ficha["la_tumbaria"] = [{"Característica": n_, "Importancia": i_, "Hoy": h_}
+                            for n_, i_, h_ in tumbaria]
     ficha["estado"], ficha["falta"] = estado, falta
     return ficha
+
+
+def autos_de_los_dos(clean_a, clean_b, tope=8):
+    """{"comun": [(marca, modelo)…], "solo_a": n, "solo_b": n, "ejemplos_a", "ejemplos_b"}: los
+    autos que nombran las aplicaciones de cada código (leídas de las descripciones)."""
+    autos = {}
+    for lado, clean in (("a", clean_a), ("b", clean_b)):
+        c.execute("SELECT DISTINCT UPPER(marca_auto) AS ma, UPPER(modelo_auto) AS mo "
+                  "FROM aplicaciones WHERE codigo_clean = ?", (clean or "",))
+        autos[lado] = {(r["ma"], r["mo"]) for r in c.fetchall()}
+    comun = sorted(autos["a"] & autos["b"])
+
+    def _ej(conjunto):
+        return [f"{ma.title()} {mo.title()}" for ma, mo in sorted(conjunto)[:3]]
+    return {"comun": [f"{ma.title()} {mo.title()}" for ma, mo in comun[:tope]]
+                     + ([f"y {len(comun) - tope} más"] if len(comun) > tope else []),
+            "solo_a": len(autos["a"] - autos["b"]), "solo_b": len(autos["b"] - autos["a"]),
+            "ejemplos_a": _ej(autos["a"] - autos["b"]), "ejemplos_b": _ej(autos["b"] - autos["a"])}
+
+
+def expediente_en_texto(ficha):
+    """La ficha de prueba como un texto para guardar o mandar: el «expediente» de la
+    equivalencia, con todo lo que la sostiene y lo que la contradice, y la fecha en que se armó.
+    Lo pidió una revisión con ChatGPT («que cada equivalencia tenga un expediente técnico»)."""
+    a, b = ficha["a"], ficha["b"]
+    renglones = [f"# Expediente de equivalencia — {datetime.now():%d/%m/%Y %H:%M}", "",
+                 f"**Estado:** {ficha['estado']}",
+                 f"- A: {a['marca']} {a['codigo_raw']} — {a['descripcion'] or ''}",
+                 f"- B: {b['marca']} {b['codigo_raw']} — {b['descripcion'] or ''}",
+                 f"- Rubro: {ficha['rubro']}" + (f" · pieza: {ficha['pieza']}" if ficha['pieza'] else ""),
+                 f"- Riesgo: {ficha['riesgo']}" + (f" ({ficha['por_que_riesgo']})"
+                                                    if ficha['por_que_riesgo'] else "")]
+    if ficha["resumen"]:
+        renglones.append(f"- En una línea: {' · '.join(ficha['resumen'])}")
+    if ficha["autos"]["comun"]:
+        renglones.append(f"- Autos que nombran los dos: {', '.join(ficha['autos']['comun'])}")
+    renglones += [f"- {x}" for x in ficha["chas"]]
+    if ficha["ultima_revision"]:
+        renglones.append(f"- Última revisión: {ficha['ultima_revision']}")
+    for titulo, lista in (("Lo que la contradice", ficha["contradicciones"]),
+                          ("Avisos", ficha["avisos"]), ("A favor", ficha["a_favor"]),
+                          ("Comprobaciones en la mano", ficha["comprobaciones"]),
+                          ("Devoluciones", ficha["devoluciones"]),
+                          ("Falta para que quede verificada", ficha["falta"])):
+        if lista:
+            renglones += ["", f"## {titulo}"] + [f"- {x}" for x in lista]
+    if ficha["pasos"]:
+        renglones += ["", "## Quién declara cada paso"]
+        renglones += [f"- {p['Paso']} — {p['Confianza']}/100 · {p['Respaldo']}"
+                      + (f" · {p['Revisión']}" if p["Revisión"] else "") for p in ficha["pasos"]]
+    if ficha["medidas"]:
+        renglones += ["", "## Medidas", "| Medida | A | B | Estado |", "|---|---|---|---|"]
+        renglones += [f"| {m['Medida']} | {m['A']} | {m['B']} | {m['Estado']} |"
+                      for m in ficha["medidas"]]
+    if ficha["la_tumbaria"]:
+        renglones += ["", "## Lo que la tumbaría (alcanza con que difiera una)"]
+        renglones += [f"- {t['Característica']} ({t['Importancia']}): {t['Hoy']}"
+                      for t in ficha["la_tumbaria"]]
+    if ficha["historial"]:
+        renglones += ["", "## Historial de decisiones"]
+        renglones += [f"- {h['Fecha']} · {h['Par']} · {h['Decisión']} · {h['Quién']} · "
+                      f"lista {h['Lista']} · reglas {h['Reglas']}" for h in ficha["historial"]]
+    return "\n".join(renglones) + "\n"
 
 
 def comprobar_en_la_mano(id_a, id_b, como):

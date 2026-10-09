@@ -1004,7 +1004,7 @@ if pagina == PAGINAS[0]:
                         candidatos_precio = [f for f in res
                                              if f.get("Precio") and (f.get("Stock") or 0) > 0
                                              and not f.get("_complementario")
-                                             and not no_compite_por_precio(f)
+                                             and not no_se_recomienda(f)
                                              and f.get("Marca") not in _fuera_escala]
                         id_mas_barato = min(candidatos_precio, key=lambda f: f["Precio"])["ID"] if candidatos_precio else None
                         for f in res:
@@ -1807,7 +1807,7 @@ if pagina == PAGINAS[0]:
                             anotar_el_respaldo(equivalentes, clean_txt)
                             candidatos_precio = [f for f in equivalentes
                                                   if f.get("Precio") and (f.get("Stock") or 0) > 0
-                                                  and not no_compite_por_precio(f)]
+                                                  and not no_se_recomienda(f)]
                             id_barato = (min(candidatos_precio, key=lambda f: f["Precio"])["ID"]
                                           if candidatos_precio else None)
                             for f in equivalentes:

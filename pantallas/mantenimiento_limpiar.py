@@ -349,6 +349,8 @@ if pagina == PAGINAS[3]:
                     f"**{miles(_deriva['subieron'])} subieron** de franja en el buscador: "
                     + ", ".join(f"{k}: {miles(v)}" for k, v in sorted(
                         _deriva["cambios"].items(), key=lambda x: -x[1])) + ".")
+                if deriva_sospechosa(_deriva):
+                    st.warning(deriva_sospechosa(_deriva))
                 if seccion_plegable("Ver los que más cambiaron", key="ver_deriva"):
                     st.dataframe(_deriva["ejemplos"], width="stretch", hide_index=True)
             elif _deriva:

@@ -1533,19 +1533,52 @@ def exportar_catalogo_zip():
                         if x in existen and x not in COLUMNAS_QUE_NUNCA_SE_EXPORTAN]
             texto = io.StringIO()
             escritor = csv.writer(texto)
-            escritor.writerow(elegidas)
+            # EL ESTADO VIAJA CON EL VÍNCULO: una columna más, para que quien lea el CSV no tome
+            # una candidata por confirmada (ver estado_del_vinculo()). Lo pendiente lo dice.
+            con_estado = tabla in ("equivalencias", "equivalencias_pendientes")
+            escritor.writerow(elegidas + (["estado"] if con_estado else []))
             c.execute(f"SELECT {', '.join(elegidas)} FROM {tabla}")
             n = 0
             for fila in c.fetchall():
-                escritor.writerow(list(fila))
+                if tabla == "equivalencias":
+                    d = dict(zip(elegidas, fila))
+                    extra = [estado_del_vinculo(d.get("confianza"), d.get("lote"),
+                                                d.get("verificada"))]
+                elif con_estado:
+                    extra = ["pendiente: todavía no es una equivalencia"]
+                else:
+                    extra = []
+                escritor.writerow(list(fila) + extra)
                 n += 1
             z.writestr(f"{archivo}.csv", "\ufeff" + texto.getvalue())
             cuantas[archivo] = n
+        # LO QUE UNA PERSONA DIJO QUE NO ES EQUIVALENTE: sin esto, un programa que lea los CSV
+        # no se entera, y podría unir por otro camino lo que acá se rechazó.
+        texto = io.StringIO()
+        escritor = csv.writer(texto)
+        escritor.writerow(["producto_a_id", "producto_b_id", "estado", "motivo", "revisado_por",
+                           "fecha"])
+        c.execute("""SELECT producto_a_id, producto_b_id, motivo, revisado_por, fecha
+                     FROM equivalencias_revisadas
+                     WHERE decision = 'rechazada' AND producto_a_id < producto_b_id
+                     ORDER BY producto_a_id, producto_b_id""")
+        n = 0
+        for r in c.fetchall():
+            escritor.writerow([r["producto_a_id"], r["producto_b_id"],
+                               "rechazada: NO son equivalentes", r["motivo"] or "",
+                               r["revisado_por"] or "", r["fecha"] or ""])
+            n += 1
+        z.writestr("rechazadas.csv", "\ufeff" + texto.getvalue())
+        cuantas["rechazadas"] = n
         z.writestr("LEEME.txt", (
             f"Catálogo exportado el {datetime.now():%d/%m/%Y %H:%M}.\n\n"
             "Un archivo CSV por tabla, separado por comas, con el punto como decimal.\n"
             "Los productos se unen con las marcas por marca_id, y las equivalencias con los\n"
             "productos por producto_a_id / producto_b_id (el id de productos.csv).\n"
+            "La columna «estado» de equivalencias.csv es el veredicto del buscador: solo\n"
+            "«confirmada» es una equivalencia confirmada; «probable», «revisar» y «dudosa» no.\n"
+            "equivalencias_pendientes.csv NO son equivalencias, y rechazadas.csv son pares que\n"
+            "una persona revisó y dijo que NO son la misma pieza.\n"
             "No lleva fotos ni contraseñas. Para volver a la app, usar el backup (.db), no esto.\n\n"
             + "\n".join(f"{a}: {miles(n)} filas" for a, n in cuantas.items())))
     return salida.getvalue(), cuantas

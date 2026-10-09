@@ -440,8 +440,11 @@ def marcar_revision(pares, decision, motivo=None):
         c.executemany(
             """INSERT INTO historial_de_revisiones
                    (producto_a_id, producto_b_id, decision, motivo, revisado_por, confianza,
-                    senal, por_que, lote, version_reglas)
+                    senal, por_que, pendiente_desde, lote, version_reglas)
                VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8,
+                       (SELECT MIN(fecha) FROM equivalencias_pendientes
+                        WHERE (producto_a_id = ?1 AND producto_b_id = ?2)
+                           OR (producto_a_id = ?2 AND producto_b_id = ?1)),
                        COALESCE((SELECT MAX(lote) FROM equivalencias_pendientes
                                  WHERE (producto_a_id = ?1 AND producto_b_id = ?2)
                                     OR (producto_a_id = ?2 AND producto_b_id = ?1)),
@@ -527,6 +530,82 @@ def aciertos_de_la_revision():
         salida["por_alarma"].append({"Alarma": alarma, "Decididos": ok + mal,
                                      "Aprobaste igual": ok,
                                      "La alarma se equivocó": f"{100 * ok / (ok + mal):.0f} %"})
+    return salida
+
+
+def tablero_de_calidad(minimo_por_grupo=30, tope=10):
+    """Cómo viene la precisión de las equivalencias, en números, con lo que hay en la base. Lo
+    pidió una revisión con ChatGPT («crear un tablero de calidad: falsos positivos, devoluciones,
+    equivalencias anuladas, porcentaje confirmado físicamente, tiempo de verificación, familias
+    con más errores y fuentes con más contradicciones»).
+
+    Los rechazos por familia y por par de listas dicen DÓNDE propone mal la app: de lo que te
+    llegó de esa familia o de esas dos listas, qué parte dijiste que no. Con una sola persona
+    revisando no hay «calidad del revisor» que medir: el día que decidan dos, el historial lo
+    permite."""
+    salida = {}
+    c.execute("""SELECT r.decision, pa.descripcion AS da, pb.descripcion AS db,
+                        ma.nombre AS ma, mb.nombre AS mb, ma.tipo AS ta, mb.tipo AS tb
+                 FROM equivalencias_revisadas r
+                 JOIN productos pa ON pa.id = r.producto_a_id
+                 JOIN productos pb ON pb.id = r.producto_b_id
+                 JOIN marcas ma ON ma.id = pa.marca_id
+                 JOIN marcas mb ON mb.id = pb.marca_id
+                 WHERE r.producto_a_id < r.producto_b_id""")
+    filas = c.fetchall()
+    aprobadas = sum(1 for f in filas if f["decision"] == "ok")
+    rechazadas = len(filas) - aprobadas
+    por_familia, por_listas = {}, {}
+    for f in filas:
+        # La familia se lee del lado del proveedor: el código de fábrica copia la descripción
+        # de la fila que lo trajo.
+        desc = f["db"] if (f["ta"] or "").upper() == "OEM" else f["da"]
+        familia = familia_para_comparar(desc or "") or "sin clasificar"
+        listas = " ↔ ".join(sorted((f["ma"] or "", f["mb"] or "")))
+        for grupo, clave in ((por_familia, familia), (por_listas, listas)):
+            cuenta = grupo.setdefault(clave, [0, 0])
+            cuenta[0 if f["decision"] == "ok" else 1] += 1
+
+    def _tabla(grupo, nombre):
+        tabla = [{nombre: k, "Decididos": ok + mal, "Rechazados": mal,
+                  "% rechazado": round(100 * mal / (ok + mal), 1)}
+                 for k, (ok, mal) in grupo.items() if ok + mal >= minimo_por_grupo]
+        return sorted(tabla, key=lambda x: -x["% rechazado"])[:tope]
+    salida["por_familia"] = _tabla(por_familia, "Familia")
+    salida["por_listas"] = _tabla(por_listas, "Listas")
+    # Las anuladas: un par aprobado que después se rechazó (o al revés), según el historial.
+    c.execute("""SELECT producto_a_id, producto_b_id, decision FROM historial_de_revisiones
+                 ORDER BY producto_a_id, producto_b_id, fecha, id""")
+    ultima, aprobadas_y_rechazadas, rechazadas_y_aprobadas = {}, 0, 0
+    for r in c.fetchall():
+        par = (r["producto_a_id"], r["producto_b_id"])
+        antes = ultima.get(par)
+        if antes == "ok" and r["decision"] == "rechazada":
+            aprobadas_y_rechazadas += 1
+        elif antes == "rechazada" and r["decision"] == "ok":
+            rechazadas_y_aprobadas += 1
+        ultima[par] = r["decision"]
+    c.execute("""SELECT julianday(fecha) - julianday(pendiente_desde) AS dias
+                 FROM historial_de_revisiones
+                 WHERE pendiente_desde IS NOT NULL ORDER BY dias""")
+    dias = [r["dias"] for r in c.fetchall() if r["dias"] is not None]
+    c.execute("SELECT COUNT(*) AS n, COALESCE(SUM(COALESCE(verificada, 0)), 0) AS v FROM equivalencias")
+    vinc = c.fetchone()
+    try:
+        c.execute("SELECT motivo, COUNT(*) AS n FROM devoluciones GROUP BY motivo")
+        devoluciones = {r["motivo"]: r["n"] for r in c.fetchall()}
+    except sqlite3.OperationalError as _err:
+        anotar_error("tablero_de_calidad", _err)
+        devoluciones = {}
+    no_era = sum(n for m, n in devoluciones.items() if m in MOTIVOS_DE_NO_ERA_LA_PIEZA)
+    salida["numeros"] = {
+        "decididos": len(filas), "aprobados": aprobadas, "rechazados": rechazadas,
+        "aprobados_y_despues_rechazados": aprobadas_y_rechazadas,
+        "rechazados_y_despues_aprobados": rechazadas_y_aprobadas,
+        "devoluciones": sum(devoluciones.values()), "devoluciones_no_era_la_pieza": no_era,
+        "vinculos": vinc["n"], "comprobados_en_la_mano": vinc["v"],
+        "dias_hasta_decidir": dias[len(dias) // 2] if dias else None,
+        "con_dias": len(dias)}
     return salida
 
 

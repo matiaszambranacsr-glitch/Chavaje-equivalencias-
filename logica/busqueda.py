@@ -1270,6 +1270,21 @@ def recalcular_confianzas(limite=20000, progreso=None, solo_faltantes=True, de_p
     return len(valores)
 
 
+# El veredicto del buscador en una palabra, para lo que sale de la app sin los emojis.
+ESTADOS_PARA_EXPORTAR = {"🟢": "confirmada", "🟡": "probable", "🟠": "revisar", "🔴": "dudosa"}
+
+
+def estado_del_vinculo(confianza, lote, verificada):
+    """El estado de un vínculo cargado, en una palabra: «confirmada», «probable», «revisar» o
+    «dudosa». Es el mismo veredicto que da el buscador para un resultado directo (ver
+    veredicto_de_la_equivalencia()). Lo pidió una revisión con ChatGPT: lo que se exporta tiene
+    que llevar el estado, para que otro programa no tome una candidata por confirmada."""
+    fila = {"Cadena": "🟢 directo", "Confianza": franja_de_confianza(confianza),
+            "Respaldo": respaldo_del_origen(lote, verificada)[1],
+            "Verificada": "✅" if verificada else ""}
+    return ESTADOS_PARA_EXPORTAR.get(veredicto_de_la_equivalencia(fila)[:1], "revisar")
+
+
 def franja_de_confianza(confianza):
     """La franja con que el buscador muestra un vínculo. Ver buscar_por_codigo()."""
     confianza = 50 if confianza is None else confianza
@@ -1310,6 +1325,27 @@ def anotar_la_deriva(filas, valores, tope_de_ejemplos=30):
                             for e in ejemplos[:tope_de_ejemplos]]}
     guardar_config("confianza_deriva", json.dumps(resumen, ensure_ascii=False))
     return resumen
+
+
+# Desde cuántos vínculos que SUBEN de franja de una vez se sospecha de la regla nueva: 50, y
+# más del 2 % de lo que se volvió a puntuar.
+DERIVA_SOSPECHOSA = (50, 0.02)
+
+
+def deriva_sospechosa(deriva):
+    """El aviso si al volver a puntuar subieron de franja demasiados vínculos de una vez, o "".
+    Lo pidió una revisión con ChatGPT: «si una regla nueva empieza a producir 3.000
+    equivalencias de golpe, probablemente algo cambió mal». Que BAJEN muchos es lo esperable
+    cuando se agrega un control; que SUBAN muchos quiere decir que una regla se aflojó."""
+    if not deriva:
+        return ""
+    minimo, proporcion = DERIVA_SOSPECHOSA
+    subieron, total = deriva.get("subieron") or 0, deriva.get("total") or 0
+    if subieron >= minimo and subieron > proporcion * total:
+        return (f"⚠️ Con las reglas v{deriva.get('version')} subieron de franja {subieron} "
+                f"vínculos de {total} de una vez: puede ser una regla demasiado permisiva. "
+                "Mirá «Ver los que más cambiaron» antes de confiar en el buscador.")
+    return ""
 
 
 def la_ultima_deriva():
