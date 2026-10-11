@@ -367,6 +367,50 @@ def toca_verificar_la_copia(ahora=None):
     return ahora - cuando >= timedelta(hours=horas)
 
 
+def _usarla_como_la_usaria_el_mostrador(prueba):
+    """Lo que no alcanza con abrir la copia: usarla. Que estén las tablas que hay acá, que los
+    vínculos apunten a productos que existen, y una búsqueda de equivalencias de verdad —el
+    código más vinculado, con sus equivalentes a dos saltos y su marca—. Lo pidió una revisión
+    con ChatGPT («una copia que nunca se restauró es una suposición de copia: restaurar, abrir,
+    consultar, buscar equivalencias»). Devuelve los problemas; vacío si anda."""
+    problemas = []
+    en_la_copia = {r[0] for r in prueba.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
+    c.execute("SELECT name FROM sqlite_master WHERE type = 'table'")
+    aca = {r[0] for r in c.fetchall()}
+    faltan = sorted(t for t in aca - en_la_copia
+                    if t in ("equivalencias_revisadas", "historial_de_revisiones", "ventas_registradas",
+                             "devoluciones", "historial_de_medidas", "reemplazos_codigo",
+                             "aplicaciones", "vehiculos", "usuarios"))
+    if faltan:
+        problemas.append(f"le faltan tablas que acá están: {', '.join(faltan)}")
+    huerfanos = prueba.execute("""SELECT COUNT(*) FROM equivalencias e
+                                  WHERE NOT EXISTS (SELECT 1 FROM productos p WHERE p.id = e.producto_a_id)
+                                     OR NOT EXISTS (SELECT 1 FROM productos p WHERE p.id = e.producto_b_id)
+                               """).fetchone()[0]
+    if huerfanos:
+        problemas.append(f"{huerfanos} vínculo(s) apuntan a productos que no están")
+    vinculos = prueba.execute("SELECT COUNT(*) FROM equivalencias").fetchone()[0]
+    if vinculos:
+        # -- FILA Y NO PAR: se elige un producto, no se cuentan pares.
+        semilla = prueba.execute("""SELECT x FROM (SELECT producto_a_id AS x FROM equivalencias
+                                                   UNION ALL SELECT producto_b_id FROM equivalencias)
+                                    GROUP BY x ORDER BY COUNT(*) DESC, x LIMIT 1""").fetchone()[0]
+        encontrados = prueba.execute("""
+            WITH RECURSIVE red(id, saltos) AS (
+                SELECT ?, 0
+                UNION
+                SELECT CASE WHEN e.producto_a_id = r.id THEN e.producto_b_id ELSE e.producto_a_id END,
+                       r.saltos + 1
+                FROM equivalencias e JOIN red r
+                  ON (e.producto_a_id = r.id OR e.producto_b_id = r.id)
+                WHERE r.saltos < 2)
+            SELECT COUNT(DISTINCT p.id) FROM red JOIN productos p ON p.id = red.id
+            JOIN marcas m ON m.id = p.marca_id WHERE red.id <> ?""", (semilla, semilla)).fetchone()[0]
+        if not encontrados:
+            problemas.append("la búsqueda de equivalencias no encuentra nada en la copia")
+    return problemas
+
+
 def verificar_la_copia_de_github():
     """Baja la copia de GitHub aparte y la prueba. Devuelve (ok, detalle) y lo anota."""
     temporal = f"{DB_PATH}.{uuid.uuid4().hex}.verificar"
@@ -394,7 +438,10 @@ def verificar_la_copia_de_github():
                         ok, detalle = False, ("la copia de GitHub no es la última que se subió "
                                               "(no coincide su huella)")
                     else:
-                        ok, detalle = True, f"se bajó, se abrió y está sana: {miles(productos)} productos"
+                        problemas = _usarla_como_la_usaria_el_mostrador(prueba)
+                        ok, detalle = (False, "; ".join(problemas)) if problemas else (
+                            True, f"se bajó, se abrió, se buscó en ella y está sana: "
+                                  f"{miles(productos)} productos")
             finally:
                 prueba.close()
     except Exception as _err:

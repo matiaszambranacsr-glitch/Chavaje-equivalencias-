@@ -1147,7 +1147,7 @@ def familia_para_comparar(descripcion):
     return clasificar_repuesto(descripcion)
 
 
-def rubros_de_los_codigos_de_fabrica():
+def rubros_de_los_codigos_de_fabrica(ids=None):
     """{id de un producto OEM: su rubro}, para los códigos de fábrica cuyo rubro no es el de
     su propia descripción sino el de los productos que lo citan.
 
@@ -1164,10 +1164,16 @@ def rubros_de_los_codigos_de_fabrica():
     que sean más de la mitad. Si no hay mayoría clara, queda el de la descripción.
     Se devuelven solo los que cambian. Una consulta por tabla, para todos los códigos de una
     vez: lo llaman el análisis de la cola, la auditoría y el recálculo de confianzas, que
-    recorren miles de vínculos."""
+    recorren miles de vínculos. Con `ids`, solo los de esos productos: es lo que piden la ficha
+    de un par y el buscador, que miran unos pocos."""
     from collections import Counter
     vecinos = {}
     propias = {}
+    if ids is not None:
+        ids = sorted({int(i) for i in ids if i is not None})
+        if not ids:
+            return {}
+    solo = f" AND o.id IN ({','.join('?' * len(ids))})" if ids else ""
     for tabla in ("equivalencias", "equivalencias_pendientes"):
         for lado, otro in (("producto_a_id", "producto_b_id"), ("producto_b_id", "producto_a_id")):
             try:
@@ -1178,7 +1184,7 @@ def rubros_de_los_codigos_de_fabrica():
                               JOIN marcas mo ON mo.id = o.marca_id
                               JOIN productos x ON x.id = e.{otro}
                               JOIN marcas mx ON mx.id = x.marca_id
-                              WHERE mo.tipo = 'OEM' AND mx.tipo <> 'OEM'""")
+                              WHERE mo.tipo = 'OEM' AND mx.tipo <> 'OEM'{solo}""", ids or [])
                 for r in c.fetchall():
                     propias[r["oem"]] = r["desc_oem"]
                     vecinos.setdefault(r["oem"], {})[r["xid"]] = r["desc_x"]

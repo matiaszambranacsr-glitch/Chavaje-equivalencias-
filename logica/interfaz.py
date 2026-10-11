@@ -1273,6 +1273,27 @@ def veredicto_de_la_equivalencia(fila):
     if fila.get("Rechazada"):
         return ("🔴 rechazada en la revisión: alguien dijo que no es la misma pieza "
                 "(llega por otro código en el medio)")
+    # EL ESTADO DE LA FICHA, si el buscador lo anotó (ver anotar_el_estado()): es el mismo que
+    # dice la ficha de prueba, con las mismas reglas. Lo de abajo queda para lo que no lo trae
+    # (el paquete nucleo, una fila armada a mano).
+    estado = fila.get("_estado")
+    if estado:
+        motivo = fila.get("_por_que_estado") or ""
+        if estado.startswith("✅"):
+            if fila.get("Verificada"):
+                return "🟢 equivalencia confirmada (verificada)"
+            if riesgo_de_la_pieza(fila.get("Descripcion"))[0].startswith("🛑"):
+                return "🟢 equivalencia confirmada · 🛑 pieza de seguridad: comparala en la mano"
+            return "🟢 equivalencia confirmada"
+        if estado.startswith("🟡"):
+            return "🟡 probable" + (f": {motivo}" if motivo else "")
+        if estado.startswith("🟠"):
+            return "🟠 revisar antes de vender" + (f": {motivo}" if motivo else "")
+        if estado.startswith("🔴"):
+            return "🔴 no es la misma pieza" + (f": {motivo}" if motivo else "")
+        if estado.startswith("⚪"):
+            return "⚪ sin cadena" + (f": {motivo}" if motivo else "")
+        return "🟠 no se pudo comprobar: mirá la ficha antes de venderla"
     if fila.get("Verificada"):
         return "🟢 equivalencia confirmada (verificada)"
     if "muy débil" in confianza:

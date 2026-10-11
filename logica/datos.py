@@ -1845,16 +1845,20 @@ def _datos_precargados_y_migraciones(c):
         item TEXT NOT NULL
     )""")
     c.execute("CREATE INDEX IF NOT EXISTS idx_combos_disp ON combos_sugeridos(disparador)")
-    c.execute("SELECT COUNT(*) FROM combos_sugeridos")
-    if c.fetchone()[0] == 0:
-        c.executemany(
-            "INSERT INTO combos_sugeridos (disparador, item) VALUES (?, ?)",
-            [
-                ("correa de distribucion", "Kit de distribución"),
-                ("correa de distribucion", "Tensor de distribución"),
-                ("correa de distribucion", "Bomba de agua"),
-            ]
-        )
+    # LOS COMBOS DE FÁBRICA, una vez por versión y sin repetir lo que ya está: lo que alguien
+    # borró a mano vuelve solo si cambia la versión. El de la correa no se mostraba nunca: en la
+    # base real del 9/10 ninguna descripción dice «correa de distribución»; «kit de
+    # distribución» lo dicen 410 y «bomba de agua» 726. Lo pidió una revisión con ChatGPT («qué
+    # más necesito: relaciones de mantenimiento, no equivalencias»).
+    c.execute("SELECT valor FROM configuracion WHERE clave = 'semilla_combos_version'")
+    _fila_combos = c.fetchone()
+    if (_fila_combos["valor"] if _fila_combos else None) != SEMILLA_COMBOS_VERSION:
+        c.executemany("""INSERT INTO combos_sugeridos (disparador, item)
+                         SELECT ?, ? WHERE NOT EXISTS (SELECT 1 FROM combos_sugeridos
+                                                       WHERE disparador = ? AND item = ?)""",
+                      [(d, i, d, i) for d, i in COMBOS_DE_FABRICA])
+        c.execute("INSERT INTO configuracion (clave, valor) VALUES ('semilla_combos_version', ?) "
+                  "ON CONFLICT(clave) DO UPDATE SET valor = excluded.valor", (SEMILLA_COMBOS_VERSION,))
 
     # Semilla inicial de códigos DTC genéricos (estándar OBD-II / SAE J2012, no específicos de
     # marca), verificados contra fuentes de referencia. Es un punto de partida — sumá o corregí
@@ -2701,6 +2705,56 @@ def _esquema_registro_y_reglas(c):
                       END""")
 
 
+# Lo que suele cambiarse junto con una pieza: lo que se revisa antes de cerrar la venta (ver
+# lo_que_suele_ir_con()). Son avisos, no equivalencias; se editan en Administrar → Combos.
+COMBOS_DE_FABRICA = (
+    ("correa de distribucion", "Kit de distribución"),
+    ("correa de distribucion", "Tensor de distribución"),
+    ("correa de distribucion", "Bomba de agua"),
+    ("kit de distribucion", "Bomba de agua"),
+    ("kit distribucion", "Bomba de agua"),
+    ("bomba de agua", "Termostato"),
+    ("bomba de agua", "Kit de distribución (si la mueve la correa)"),
+)
+
+
+# LOS NÚMEROS SON NÚMEROS: el precio, el stock y cada medida. SQLite guarda «banana» en una
+# columna REAL sin quejarse, y el que la lea después se encuentra un texto donde esperaba un
+# diámetro. Lo pidió una revisión con ChatGPT («protección contra datos corruptos: rechazar el
+# dato y explicar "Campo inválido: diámetro"»). Hoy no hay ninguno (base real del 9/10): las
+# importaciones convierten los números antes de guardar y la app los carga con campos de
+# número; esto es por si algún día entra uno por otro lado. Un número escrito como texto
+# («54») SQLite lo convierte solo, y pasa.
+CAMPOS_QUE_SON_NUMEROS = (
+    ("precio", "precio"), ("stock", "stock"), ("precio_costo", "costo"),
+    ("diametro_interno", "diámetro interno"), ("diametro_externo", "diámetro externo"),
+    ("diametro_interno_cara_b", "diámetro interno cara B"),
+    ("diametro_externo_cara_b", "diámetro externo cara B"), ("ancho", "ancho"),
+    ("espesor", "espesor"), ("largo_total", "largo total"),
+    ("diametro_rosca_homocinetica", "diámetro de rosca"), ("diametro_copa", "diámetro de copa"),
+    ("diametro_copa_superior", "diámetro de copa (boca)"), ("cantidad_estrias", "estrías"),
+    ("estrias_internas", "estrías internas"), ("estrias_externas", "estrías externas"),
+    ("cantidad_vias", "vías"), ("cantidad_canales", "canales"))
+
+
+def _esquema_numeros_que_son_numeros(c):
+    """Un disparador para las altas (uno solo, que mira todo: uno por campo hacía las altas 13
+    veces más lentas) y uno por campo para las modificaciones, que dice cuál."""
+    existen = {r[1] for r in c.execute("PRAGMA table_info(productos)")}
+    campos = [(cp, et) for cp, et in CAMPOS_QUE_SON_NUMEROS if cp in existen]
+    c.execute("DROP TRIGGER IF EXISTS productos_numeros_al_crear")
+    if campos:
+        c.execute(f"""CREATE TRIGGER productos_numeros_al_crear BEFORE INSERT ON productos
+                      WHEN {" OR ".join(f"typeof(NEW.{cp}) IN ('text', 'blob')" for cp, _ in campos)}
+                      BEGIN SELECT RAISE(ABORT, 'Campo inválido: el precio, el stock o una medida no es un número'); END""")
+    for cp, et in CAMPOS_QUE_SON_NUMEROS:
+        c.execute(f"DROP TRIGGER IF EXISTS productos_numero_{cp}")
+        if cp in existen:
+            c.execute(f"""CREATE TRIGGER productos_numero_{cp} BEFORE UPDATE OF {cp} ON productos
+                          WHEN typeof(NEW.{cp}) IN ('text', 'blob')
+                          BEGIN SELECT RAISE(ABORT, 'Campo inválido: {et} (no es un número)'); END""")
+
+
 def crear_esquema(c):
     _esquema_catalogo(c)
     _esquema_mostrador(c)
@@ -2709,6 +2763,7 @@ def crear_esquema(c):
     _esquema_gestion(c)
     _datos_precargados_y_migraciones(c)
     _esquema_registro_y_reglas(c)
+    _esquema_numeros_que_son_numeros(c)
 
 
 

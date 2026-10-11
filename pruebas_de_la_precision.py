@@ -1106,6 +1106,118 @@ def probar(L):
     esperar("comprobada en la mano, alcanza", ns["ficha_de_prueba"](kd_a, kd_c)["estado"],
             "✅ VERIFICADA")
 
+    # 50. Una sola verdad: el veredicto del buscador sale del mismo estado que la ficha.
+    distintos = []
+    for codigo in ("R100", "FI9", "RV1", "KD1", "PZ1", "RL1", "VT1", "PF1"):
+        res, _nota = ns["buscar_con_variantes_del_cero"](ns["sanitizar"](codigo))
+        origenes = [f["ID"] for f in res if f.get("Cadena") == "— el buscado"]
+        for f in res:
+            if f.get("Cadena") == "— el buscado" or str(f.get("Cadena", "")).startswith(("⚪", "🔵")):
+                continue
+            ficha = ns["ficha_de_prueba"](ns["el_buscado_mas_cercano"](origenes, f["ID"]), f["ID"])
+            v = ns["veredicto_de_la_equivalencia"](f)
+            if {"🟢": "✅"}.get(v[:1], v[:1]) != ficha["estado"][:1]:
+                distintos.append((codigo, f["Codigo"], v, ficha["estado"]))
+    esperar("el buscador y la ficha dicen lo mismo", distintos, [])
+    esperar("y probó algo", sum(1 for codigo in ("R100", "KD1") for f in
+                                ns["buscar_con_variantes_del_cero"](codigo)[0]
+                                if f.get("_estado")) >= 2, True)
+    # Si no se puede calcular, no se recomienda («fail closed»).
+    _globales = ns["anotar_el_estado"].__globals__      # el espacio de nombres de verdad
+    _ficha_real = _globales["ficha_de_prueba"]
+    _globales["ficha_de_prueba"] = lambda *a, **k: 1 / 0
+    try:
+        res, _nota = ns["buscar_con_variantes_del_cero"]("KD1")
+    finally:
+        _globales["ficha_de_prueba"] = _ficha_real
+    esperar("lo que no se pudo comprobar no sale confirmado",
+            {ns["veredicto_de_la_equivalencia"](f)[:1] for f in res
+             if f.get("Cadena") != "— el buscado"}, {"🟠"})
+
+    # 51. Los números son números: «banana» en un diámetro se rechaza y dice cuál.
+    import sqlite3 as _sqlite3
+    try:
+        c.execute("UPDATE productos SET diametro_interno = 'banana' WHERE id = ?", (ap,))
+        _msj = "pasó"
+    except _sqlite3.IntegrityError as _err:
+        _msj = str(_err)
+    esperar("una medida que no es un número", _msj, "Campo inválido: diámetro interno (no es un número)")
+    c.execute("UPDATE productos SET diametro_interno = '54' WHERE id = ?", (ap,))
+    esperar("un número escrito como texto se guarda como número", c.execute(
+        "SELECT typeof(diametro_interno) FROM productos WHERE id = ?", (ap,)).fetchone()[0], "real")
+    try:
+        producto("BAN1", "BANANA", fispa, precio="caro")
+        _msj = "pasó"
+    except _sqlite3.IntegrityError as _err:
+        _msj = str(_err)
+    esperar("ni al crear el producto", _msj.startswith("Campo inválido"), True)
+
+    # 53. El código de fábrica toma el rubro de los que lo citan, también en la ficha.
+    oe = producto("2H0919050B", "FILTRO BOMBA DE COMBUSTIBLE VW AMAROK REF ORIG 2H0919050B", oem)
+    bc1 = producto("BC1", "BOMBA DE COMBUSTIBLE VW AMAROK 2.0", fispa)
+    bc2 = producto("BC2", "BOMBA DE NAFTA VW AMAROK 2.0 TDI", illinois)
+    vincular(bc1, oe, "FISPA · lista.xlsx · 01/10/2026 10:00:00")
+    vincular(bc2, oe, "ILLINOIS · lista.xlsx · 01/10/2026 10:00:00")
+    conn.commit()
+    esperar("de entrada, la descripción del código es la de un filtro",
+            ns["familia_para_comparar"]("FILTRO BOMBA DE COMBUSTIBLE VW AMAROK"), "Filtros")
+    esperar("pero la ficha no ve rubros distintos", [x for x in ns["ficha_de_prueba"](bc1, oe)
+                                                     ["contradicciones"] if "rubros" in x], [])
+    # El estado del ZIP sale de la misma ficha: un directo del barrido es candidato, no probable.
+    bz_a = producto("BZ1", "TERMOSTATO FIAT PALIO 1.4", fispa)
+    bz_b = producto("IBZ1", "TERMOSTATO FIAT PALIO 1.4", illinois)
+    vincular(bz_a, bz_b, "BARRIDO (automático) · 05/10 10:00", confianza=90)
+    conn.commit()
+    with zipfile.ZipFile(io.BytesIO(ns["exportar_catalogo_zip"]()[0])) as z:
+        _eq = {(f["producto_a_id"], f["producto_b_id"]): f["estado"] for f in csv.DictReader(
+            io.StringIO(z.read("equivalencias.csv").decode("utf-8-sig")))}
+    esperar("en el ZIP, lo mismo que la ficha", _eq[(str(min(bz_a, bz_b)), str(max(bz_a, bz_b)))],
+            "revisar")
+    _fila_bz = [f for f in ns["buscar_con_variantes_del_cero"]("BZ1")[0] if f["ID"] == bz_b][0]
+    esperar("y el buscador dice por qué", ns["veredicto_de_la_equivalencia"](_fila_bz).startswith(
+        "🟠 revisar antes de vender: solo una pista"), True)
+    esperar("una candidata es 🟠", ns["veredicto_de_la_equivalencia"](
+        {"Cadena": "🟢 directo", "Confianza": "🟢 sólida", "_estado": "🟠 CANDIDATA"})[:1], "🟠")
+    # Las palabras se cuentan una vez por búsqueda, no una por resultado.
+    _g = ns["evidencia_cruzada"].__globals__
+    _contar_real, _veces = _g["cuantas_veces_aparece_cada_palabra"], []
+    _g["cuantas_veces_aparece_cada_palabra"] = lambda: _veces.append(1) or _contar_real()
+    try:
+        ns["buscar_con_variantes_del_cero"]("R100")
+    finally:
+        _g["cuantas_veces_aparece_cada_palabra"] = _contar_real
+    esperar("una vez por búsqueda", len(_veces), 1)
+    # Un cambio de reglas que mueve demasiado, para cualquier lado.
+    esperar("el 40 % que baja de franja también es anormal", ns["deriva_sospechosa"](
+        {"version": "99", "total": 100, "subieron": 0, "bajaron": 50}).startswith("🔴"), True)
+    esperar("el 10 %, no", ns["deriva_sospechosa"]({"version": "99", "total": 100, "subieron": 0,
+                                                     "bajaron": 10}), "")
+    # La pregunta que más separa, primero.
+    esperar("primero la que más separa", [q for q, _v in ns["ordenar_por_lo_que_separa"](
+        [("vías", {"2": ["A", "B", "C"], "3": ["D"]}), ("ficha", {"x": ["A", "B"], "y": ["C", "D"]})])],
+            ["ficha", "vías"])
+    # Las alarmas para una persona: lo vendido que volvió, el cambio de reglas, las medidas.
+    import json as _json2
+    ns["guardar_config"]("confianza_deriva", _json2.dumps(
+        {"version": "99", "total": 100, "subieron": 0, "bajaron": 60, "cambios": {}, "ejemplos": []}))
+    _titulos = " | ".join(p_["titulo"] for p_ in ns["diagnostico_de_salud"]())
+    esperar("la alarma de lo vendido que volvió", "vendida(s) como equivalente volvieron" in _titulos,
+            True)
+    esperar("la del cambio de reglas", "movió demasiados vínculos" in _titulos, True)
+    esperar("la de las medidas que no pueden ser", "medidas que no pueden ser" in _titulos, True)
+
+    # 52. Lo que suele cambiarse junto: se avisa al anotar la venta.
+    esperar("el kit de distribución lleva la bomba de agua", ns["lo_que_suele_ir_con"](kd_a),
+            ["Bomba de agua"])
+    ns["anotar_venta_y_avisar"](kd_a, "KD1", "FISPA - KD1", "prueba_combo", "🟢 equivalencia confirmada")
+    esperar("y lo dice al vender", "⚠️ Antes de cerrar: suele cambiarse junto con Bomba de agua"
+            in ns["st"].session_state["_lo_anotado"]["prueba_combo"], True)
+    esperar("la bomba de agua, el termostato", "Termostato" in ns["lo_que_suele_ir_con"](vt_a), True)
+    ns["eliminar_combo"]("bomba de agua")
+    ns["crear_esquema"](c)
+    esperar("lo que se borró a mano no vuelve solo", ns["lo_que_suele_ir_con"](vt_a), [])
+    esperar("un filtro, nada", ns["lo_que_suele_ir_con"](fi_a), [])
+
     # 47. La cola: desde cuándo esperaba y de qué lista venía, aunque ya no esté en la cola.
     for x, y, lote in ((ml_a, ap, "COLA · 01/10"), (ml_b, ap, "COLA · 01/10"),
                        (rv_a, ap, "COLA · 01/10")):

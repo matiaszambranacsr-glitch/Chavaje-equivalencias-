@@ -14,6 +14,16 @@ def normalizar_texto(texto):
     return texto.upper().strip()
 
 
+def lo_que_suele_ir_con(producto_id):
+    """Los nombres de lo que suele cambiarse junto con ese producto, según los combos: [str]."""
+    c.execute("SELECT descripcion FROM productos WHERE id = ?", (producto_id,))
+    fila = c.fetchone()
+    if not fila:
+        return []
+    return sorted({i for items in buscar_combos_para_descripcion(fila["descripcion"] or "").values()
+                   for i in items})
+
+
 def buscar_combos_para_descripcion(descripcion):
     """Devuelve {disparador: [items]} para los disparadores que aparecen dentro de la descripción dada."""
     desc_norm = normalizar_texto(descripcion)
@@ -269,7 +279,17 @@ def versiones_para_preguntar(producto_id):
                 valores.setdefault(separa[que], []).append(codigo)
         if len(valores) >= 2:
             salida.append((que, valores))
-    return salida
+    # PRIMERO LA QUE MÁS SEPARA: la pregunta cuya respuesta deja menos versiones posibles, en
+    # promedio (Σ n²/N: con 4 versiones, una pregunta que las parte 2 y 2 deja 2; una que las
+    # parte 3 y 1, 2,5). Lo pidió una revisión con ChatGPT («la pregunta con mayor valor
+    # informativo»). A igual valor, el orden de siempre.
+    return ordenar_por_lo_que_separa(salida)
+
+
+def ordenar_por_lo_que_separa(preguntas):
+    """[(qué, {valor: [códigos]})] de la que más separa a la que menos. Ver arriba."""
+    return sorted(preguntas, key=lambda x: sum(len(v) ** 2 for v in x[1].values())
+                  / max(1, sum(len(v) for v in x[1].values())))
 
 
 def listar_combos():
@@ -1698,10 +1718,16 @@ def anotar_venta_y_avisar(producto_id, termino_pedido, rotulo, donde="", veredic
         st.session_state.setdefault("_lo_anotado", {})[donde] = TEXTO_DE_SOLO_LECTURA
         return
     registrar_venta(producto_id, termino_pedido, veredicto, evidencia)
+    # LA VENTA INCOMPLETA: si lo que se lleva suele cambiarse junto con otra pieza, se avisa
+    # antes de que se vaya el cliente. Lo pidió una revisión con ChatGPT («detección de venta
+    # incompleta: revisar el componente relacionado antes de cerrar la venta»).
+    _junto = lo_que_suele_ir_con(producto_id)
     st.session_state.setdefault("_lo_anotado", {})[donde] = (
-        f"🛒 Anotado como alternativa comercial: se llevó {rotulo}. No confirma que sea "
-        "equivalente." if como_se_vende(veredicto) == "alternativa"
-        else f"🛒 Anotado: se llevó {rotulo}")
+        (f"🛒 Anotado como alternativa comercial: se llevó {rotulo}. No confirma que sea "
+         "equivalente." if como_se_vende(veredicto) == "alternativa"
+         else f"🛒 Anotado: se llevó {rotulo}")
+        + (f" ⚠️ Antes de cerrar: suele cambiarse junto con {', '.join(_junto)}. Preguntale al "
+           "cliente si ya lo tiene." if _junto else ""))
 
 
 def evidencia_de_la_fila(fila):
@@ -2244,6 +2270,18 @@ def abrir_la_fila_elegida(clave_tabla, filas):
     filas_elegidas = getattr(getattr(elegida, "selection", None), "rows", None) or []
     if filas_elegidas and filas_elegidas[0] < len(filas):
         cb_ver_equivalencias(filas[filas_elegidas[0]]["Codigo"])
+
+
+def con_veredicto(res, clean_code):
+    """Los resultados de una búsqueda con su veredicto como columna, calculado igual que en el
+    buscador (ver anotar_el_estado()). Para las búsquedas que se muestran fuera de la tabla
+    principal —la foto, el código leído, el número nuevo, los parecidos—: antes mostraban la
+    cadena y la confianza sueltas, sin decir si se puede vender."""
+    res = anotar_el_respaldo(res, clean_code) if res else res
+    for f in res or []:
+        if f.get("Cadena") != "— el buscado":
+            f["Veredicto"] = veredicto_de_la_equivalencia(f)
+    return res
 
 
 def quitar_id(filas):

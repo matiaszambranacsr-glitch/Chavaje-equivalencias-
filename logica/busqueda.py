@@ -797,6 +797,40 @@ def anotar_el_respaldo(res, clean_code):
     for f in res:
         if f["ID"] in rechazadas and f["ID"] not in origenes:
             f["Rechazada"] = rechazadas[f["ID"]]
+    return anotar_el_estado(res, origenes)
+
+
+# Lo que dice el estado cuando no se pudo calcular: no se recomienda (ver anotar_el_estado()).
+ESTADO_SIN_COMPROBAR = "⚠️ NO SE PUDO COMPROBAR"
+
+
+def anotar_el_estado(res, origenes):
+    """Pone en cada resultado el ESTADO TÉCNICO de su ficha de prueba: «Estado» y, en pocas
+    palabras, por qué («_por_que_estado»). El veredicto del buscador, WhatsApp, el PDF y la
+    venta salen de acá (ver veredicto_de_la_equivalencia()), así que la ficha y el mostrador
+    dicen lo mismo: es la «una sola verdad» que pidió una revisión con ChatGPT. Medido sobre 370
+    resultados de 250 búsquedas reales, antes coincidían en 144.
+
+    Si algo falla al calcularlo, el resultado queda «no se pudo comprobar» y no se recomienda:
+    nunca se toma por bueno lo que no se pudo mirar («fail closed»)."""
+    destinos = [f for f in res if f.get("Cadena") != "— el buscado" and f.get("ID") is not None
+                and f["ID"] not in origenes]
+    if not origenes or not destinos:
+        return res
+    ids = list({f["ID"] for f in destinos} | set(origenes))
+    with recordando_lo_de_cada_producto():
+        precargar_para_evidencia(ids, cargar_medidas_de_varios(ids))
+        for f in destinos:
+            try:
+                ficha = ficha_de_prueba(el_buscado_mas_cercano(origenes, f["ID"]), f["ID"],
+                                        liviana=True)
+            except Exception as _err:     # noqa: BLE001 — se anota y no se recomienda
+                anotar_error("anotar_el_estado", _err)
+                ficha = None
+            if not ficha:
+                f["_estado"], f["_por_que_estado"] = ESTADO_SIN_COMPROBAR, ""
+                continue
+            f["_estado"], f["_por_que_estado"] = ficha["estado"], motivo_corto(ficha)
     return res
 
 
@@ -1288,6 +1322,32 @@ def estado_del_vinculo(confianza, lote, verificada):
     return ESTADOS_PARA_EXPORTAR.get(veredicto_de_la_equivalencia(fila)[:1], "revisar")
 
 
+# El estado de la ficha de prueba en una palabra, para el CSV. Ver estados_de_los_vinculos().
+ESTADOS_DE_LA_FICHA_PARA_EXPORTAR = {"✅": "confirmada", "🟡": "probable", "🟠": "revisar",
+                                     "🔴": "dudosa", "⚪": "revisar"}
+
+
+def estados_de_los_vinculos(pares):
+    """{(a, b): «confirmada», «probable», «revisar» o «dudosa»} con la MISMA ficha de prueba que
+    usa el buscador (ver anotar_el_estado()), para lo que se exporta. Antes salía de la cuenta
+    rápida de estado_del_vinculo(), y en 1 de cada 6 vínculos no coincidía con la ficha (medido
+    sobre 2.004 de la base real: 295 «probable» que la ficha da por candidatas, 14 «confirmada»
+    que la ficha no confirma). 2,5 ms por vínculo. Lo que no se pudo calcular no se confirma."""
+    salida = {}
+    ids = list({x for par in pares for x in par})
+    with recordando_lo_de_cada_producto():
+        precargar_para_evidencia(ids, cargar_medidas_de_varios(ids))
+        for a, b in pares:
+            try:
+                ficha = ficha_de_prueba(a, b, liviana=True)
+            except Exception as _err:     # noqa: BLE001 — se anota y no se confirma
+                anotar_error("estados_de_los_vinculos", _err)
+                ficha = None
+            salida[(a, b)] = (ESTADOS_DE_LA_FICHA_PARA_EXPORTAR.get(ficha["estado"][:1], "revisar")
+                              if ficha else "no se pudo comprobar")
+    return salida
+
+
 def franja_de_confianza(confianza):
     """La franja con que el buscador muestra un vínculo. Ver buscar_por_codigo()."""
     confianza = 50 if confianza is None else confianza
@@ -1333,6 +1393,9 @@ def anotar_la_deriva(filas, valores, tope_de_ejemplos=30):
 # Desde cuántos vínculos que SUBEN de franja de una vez se sospecha de la regla nueva: 50, y
 # más del 2 % de lo que se volvió a puntuar.
 DERIVA_SOSPECHOSA = (50, 0.02)
+# Y desde qué parte de lo cargado que cambia de franja, en cualquier dirección, es un cambio
+# anormal. La v14 no movió ninguno; la v10, la que más tocó, 145 de 24.774.
+CAMBIO_ANORMALMENTE_GRANDE = 0.40
 
 
 def deriva_sospechosa(deriva):
@@ -1344,6 +1407,15 @@ def deriva_sospechosa(deriva):
         return ""
     minimo, proporcion = DERIVA_SOSPECHOSA
     subieron, total = deriva.get("subieron") or 0, deriva.get("total") or 0
+    # UN CAMBIO DEMASIADO GRANDE, para arriba o para abajo: si una versión de las reglas mueve
+    # de franja el 40 % de lo cargado, algo se rompió, aunque sea para el lado prudente. Lo
+    # pidió una revisión con ChatGPT («detector de cambios demasiado grandes»).
+    movidos = subieron + (deriva.get("bajaron") or 0)
+    if total >= minimo and movidos > CAMBIO_ANORMALMENTE_GRANDE * total:
+        return (f"🔴 Cambio anormalmente grande: con las reglas v{deriva.get('version')} cambió "
+                f"de franja el {100 * movidos / total:.0f} % de los vínculos ({movidos} de "
+                f"{total}). Mirá «Ver los que más cambiaron» y la simulación contra la línea de "
+                "base antes de confiar en el buscador.")
     if subieron >= minimo and subieron > proporcion * total:
         return (f"⚠️ Con las reglas v{deriva.get('version')} subieron de franja {subieron} "
                 f"vínculos de {total} de una vez: puede ser una regla demasiado permisiva. "

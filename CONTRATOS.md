@@ -62,6 +62,16 @@ Las pruebas se corren como dice el README, en «Antes de subir un cambio».
 | La venta guarda lo que la sostenía en ese momento, y el registro de errores lo muestra | `evidencia_de_la_fila()`, `registrar_venta()`, `registro_de_errores()` | `pruebas_de_la_precision.py` (41) |
 | La métrica principal cuenta solo lo vendido como equivalente que volvió porque no era la pieza | `tablero_de_calidad()` | `pruebas_de_la_precision.py` (41) |
 | Un caso de muestra sellado no se borra ni se le cambia lo que tiene que dar | `verificar_los_casos_sellados()`, `casos_sellados.txt` | `pruebas_de_la_revision.py` |
+| El buscador, WhatsApp, el PDF, la venta y el ZIP dicen el mismo estado que la ficha de prueba | `anotar_el_estado()`, `estados_de_los_vinculos()`, `ficha_de_prueba(liviana=True)` | `pruebas_de_la_precision.py` (50, 53), `pruebas_de_la_revision.py --base` (una sola verdad) |
+| Lo que no se pudo comprobar no sale confirmado | `anotar_el_estado()`, `veredicto_de_la_equivalencia()` | `pruebas_de_la_precision.py` (50) |
+| El código de fábrica toma el rubro de los que lo citan, también en la ficha | `rubros_de_los_codigos_de_fabrica(ids)` | `pruebas_de_la_precision.py` (53) |
+| Un texto donde va un número no entra a la base, y dice qué campo | `_esquema_numeros_que_son_numeros()` | `pruebas_de_la_precision.py` (51) |
+| Una versión de reglas que mueve de franja el 40 % de lo cargado avisa | `deriva_sospechosa()` | `pruebas_de_la_precision.py` (53) |
+| Lo vendido como equivalente que volvió, el cambio de reglas grande y las medidas imposibles aparecen en lo que necesita atención | `diagnostico_de_salud()` | `pruebas_de_la_precision.py` (53) |
+| La copia diaria no solo se abre: se busca en ella y no puede tener vínculos huérfanos | `_usarla_como_la_usaria_el_mostrador()` | `pruebas_de_los_frenos.py` (6) |
+| La versión anterior del programa trabaja sobre la base migrada por esta | — | `pruebas_de_compatibilidad.py --base` |
+| Lo que suele cambiarse junto se avisa al vender; un combo borrado a mano no vuelve solo | `lo_que_suele_ir_con()`, `COMBOS_DE_FABRICA` | `pruebas_de_la_precision.py` (52) |
+| Antes de vender, primero la pregunta que más separa | `ordenar_por_lo_que_separa()` | `pruebas_de_la_precision.py` (53) |
 
 ## El stock, los precios y la plata
 

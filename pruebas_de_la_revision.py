@@ -467,6 +467,66 @@ def probar_rechazos(logica):
     return n, len(limpias), len(altas), limpias, conteo
 
 
+def probar_una_sola_verdad(logica, cuantas=100):
+    """UNA SOLA VERDAD: busca `cuantas` códigos de la base y, para cada resultado, compara el
+    veredicto del buscador con el estado de la ficha de prueba. Tienen que decir lo mismo. Lo
+    pidió una revisión con ChatGPT («test de una sola verdad: misma entrada, mismo resultado
+    técnico»). Antes de unificarlos, sobre 370 resultados de 250 búsquedas reales coincidían 144.
+    Devuelve (fallas, cuántos se compararon)."""
+    ns = logica.todo_lo_de_la_logica()
+    c = ns["c"]
+    c.execute("""SELECT DISTINCT p.codigo_clean FROM productos p
+                 JOIN equivalencias e ON e.producto_a_id = p.id
+                 JOIN marcas m ON m.id = p.marca_id WHERE m.tipo <> 'OEM' ORDER BY p.id""")
+    codigos = [r[0] for r in c.fetchall()]
+    codigos = codigos[::max(1, len(codigos) // cuantas)][:cuantas]
+    distintos, comparados = [], 0
+    for codigo in codigos:
+        res, _nota = ns["buscar_con_variantes_del_cero"](codigo)
+        origenes = [f["ID"] for f in res if f.get("Cadena") == "— el buscado"]
+        for f in res:
+            if f.get("Cadena") == "— el buscado" or str(f.get("Cadena", "")).startswith(("⚪", "🔵")):
+                continue
+            ficha = ns["ficha_de_prueba"](ns["el_buscado_mas_cercano"](origenes, f["ID"]), f["ID"])
+            if not ficha:
+                continue
+            comparados += 1
+            v = ns["veredicto_de_la_equivalencia"](f)
+            if {"🟢": "✅"}.get(v[:1], v[:1]) != ficha["estado"][:1]:
+                distintos.append(f"{codigo} → {f.get('Codigo')}: buscador «{v[:50]}», "
+                                 f"ficha «{ficha['estado']}»")
+    if not comparados:
+        return ["una sola verdad: no se comparó ningún resultado"], 0
+    return ([f"el buscador y la ficha no dicen lo mismo en {len(distintos)} de {comparados}: "
+             + "; ".join(distintos[:5])] if distintos else []), comparados
+
+
+def correr_una_sola_verdad_aparte(ruta_base):
+    """La prueba de una sola verdad, en otro proceso y sobre una copia INTACTA de la base: la
+    de las aprobaciones saca de la copia todo lo aprobado (para puntuarlo como si recién
+    llegara), y ahí no queda nada que buscar. Devuelve las fallas."""
+    import subprocess
+    r = subprocess.run([sys.executable, os.path.abspath(__file__), "--una-sola-verdad", ruta_base],
+                       capture_output=True, text=True, timeout=3600)
+    renglon = next((x for x in r.stdout.splitlines() if "una sola verdad" in x),
+                   (r.stderr.strip().splitlines() or ["sin salida"])[-1])
+    print(renglon)
+    return [] if r.returncode == 0 else [renglon]
+
+
+def _solo_una_sola_verdad(ruta_base):
+    carpeta = tempfile.mkdtemp(prefix="una_verdad_")
+    try:
+        shutil.copy(ruta_base, os.path.join(carpeta, "equivalencias_app.db"))
+        fallas, n = probar_una_sola_verdad(_cargar_la_logica(carpeta))
+        print(f"✅ una sola verdad: el buscador y la ficha dicen lo mismo en los {n:,} resultados "
+              "comparados" if not fallas else f"❌ {fallas[0][:300]}")
+        return 1 if fallas else 0
+    finally:
+        os.chdir(os.path.dirname(os.path.abspath(__file__)))
+        shutil.rmtree(carpeta, ignore_errors=True)
+
+
 def clave_del_par(f):
     """El par por sus códigos y marcas, no por sus ids: así se puede comparar con la línea de base
     de otra copia de la base."""
@@ -663,6 +723,8 @@ def imprimir_la_matriz(aprobados, rechazados, desde=None):
 
 
 def main():
+    if "--una-sola-verdad" in sys.argv:
+        return _solo_una_sola_verdad(os.path.abspath(sys.argv[sys.argv.index("--una-sola-verdad") + 1]))
     ruta_base = None
     if "--base" in sys.argv:
         ruta_base = os.path.abspath(sys.argv[sys.argv.index("--base") + 1])
@@ -693,6 +755,7 @@ def main():
             if ruta_linea:
                 fallas += comparar_con_la_linea_de_base(ruta_linea, conteo_ap, conteo_re,
                                                         actualizar="--actualizar" in sys.argv)
+            fallas += correr_una_sola_verdad_aparte(ruta_base)
             if n_r:
                 print(f"   rechazos (falsos positivos): {n_r:,} rechazados a mano: "
                       f"{limpios_r:,} quedarían limpios ({100 * limpios_r / n_r:.1f} %), "

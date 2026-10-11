@@ -426,7 +426,8 @@ if pagina == PAGINAS[0]:
                     else:
                         st.success(f"Código leído: **`{cod_leido}`** (la IA lo da con confianza "
                                     f"{conf_ocr})")
-                        res_ocr = buscar_por_codigo(sanitizar(cod_leido))
+                        res_ocr = con_veredicto(buscar_por_codigo(sanitizar(cod_leido)),
+                                                sanitizar(cod_leido))
                         if res_ocr:
                             st.success(f"✅ Está en tu catálogo — {len(res_ocr)} coincidencia(s):")
                             st.dataframe(quitar_id(res_ocr), width="stretch", hide_index=True)
@@ -1579,7 +1580,8 @@ if pagina == PAGINAS[0]:
                                 + (f" ({_ultimo['marca']})" if _ultimo["marca"] else "")
                                 + (f". {_ultimo['nota']}" if _ultimo["nota"] else ".")
                             )
-                            _res_nuevo = buscar_por_codigo(_ultimo["clean"])
+                            _res_nuevo = con_veredicto(buscar_por_codigo(_ultimo["clean"]),
+                                                       _ultimo["clean"])
                             if _res_nuevo:
                                 st.dataframe(quitar_id(_res_nuevo), width="stretch",
                                               hide_index=True)
@@ -1662,7 +1664,8 @@ if pagina == PAGINAS[0]:
                                     if p.get("Descripcion"):
                                         st.caption(p["Descripcion"])
                                     if equivalentes_p:
-                                        st.dataframe(quitar_id(equivalentes_p),
+                                        st.dataframe(quitar_id(con_veredicto(equivalentes_p,
+                                                                             p["_clean"])),
                                                       width="stretch", hide_index=True)
                                     else:
                                         st.caption("Todavía no tiene equivalencias cargadas.")
@@ -2129,10 +2132,11 @@ if pagina == PAGINAS[0]:
 
                 if codigo_detectado:
                     clean_foto = sanitizar(codigo_detectado)
-                    res_foto = buscar_por_codigo(clean_foto) if clean_foto else []
+                    res_foto = (con_veredicto(buscar_por_codigo(clean_foto), clean_foto)
+                                if clean_foto else [])
                     if res_foto:
                         incrementar_veces_buscado(clean_foto)
-                        st.success(f"✅ Coincidencia CONFIRMADA en tu catálogo — {len(res_foto)} resultado(s):")
+                        st.success(f"✅ El código está en tu catálogo — {len(res_foto)} resultado(s):")
                         st.caption(
                             "Esto es un match exacto por código, con las equivalencias que ya tenés "
                             "cargadas — no es una suposición de la IA."

@@ -530,6 +530,8 @@ SEMILLA_WMI_VERSION = "3"
 # vuelva a aplicar una vez, con INSERT OR IGNORE, así quien ya tiene la app recibe los códigos
 # nuevos sin perder los que cargó o corrigió a mano.
 SEMILLA_DTC_VERSION = "3"
+# Y para los combos de fábrica («suelen cambiarse junto»): ver COMBOS_DE_FABRICA en datos.py.
+SEMILLA_COMBOS_VERSION = "2"
 # Y lo mismo para la columna `busqueda`: subir este número hace que se vuelva a calcular una vez
 # sobre todos los productos ya cargados. Hace falta cada vez que cambie _sql_sin_acentos(), si
 # no las filas viejas se quedan con la normalización anterior y dejan de encontrarse por lo

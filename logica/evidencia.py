@@ -265,7 +265,10 @@ def evidencia_cruzada(id_a, id_b, cuenta_palabras=None, total_descripciones=None
     # palabras. Son 34 ms; parece nada hasta que se revisan 400 vínculos de una importación:
     # la pantalla de «Equivalencias sugeridas» tardaba 37 segundos y 13 eran esto.
     if cuenta_palabras is None or total_descripciones is None:
-        cuenta_palabras, total_descripciones = cuantas_veces_aparece_cada_palabra()
+        # Una vez por análisis o por búsqueda, no una por par: eran 37 ms de cada par del
+        # buscador (ver anotar_el_estado()).
+        cuenta_palabras, total_descripciones = _recordado(("cuenta_palabras_ev",),
+                                                          cuantas_veces_aparece_cada_palabra)
     _cuenta, _total = cuenta_palabras, total_descripciones
     ok_desc, motivo_desc = firmas_compatibles(fa, fb, cuenta_palabras=_cuenta,
                                               total_descripciones=_total)
@@ -698,7 +701,7 @@ def _evaluar_la_cadena(pasos):
     return ("🟠 CANDIDATA" if sin_fuente else "🟡 PROBABLE" if falta else "✅ VERIFICADA"), falta
 
 
-def ficha_de_prueba(id_a, id_b, tolerancia_pct=3):
+def ficha_de_prueba(id_a, id_b, tolerancia_pct=3, liviana=False):
     """Todo lo que sostiene —o no— que A y B son la misma pieza, y el estado que sale de eso.
 
     Estados, de mejor a peor:
@@ -709,7 +712,13 @@ def ficha_de_prueba(id_a, id_b, tolerancia_pct=3):
       🟠 CANDIDATA  — algún paso es solo una pista (se parecen las descripciones, el mismo auto);
       ⚪ SIN CADENA — no hay vínculos entre los dos (a lo sumo, el mismo número en otra marca);
       🔴 CON CONTRADICCIONES — las medidas, el rubro, la posición o el motor dicen que no.
-    «Falta» dice qué la llevaría a VERIFICADA. None si alguno de los dos ya no existe."""
+    «Falta» dice qué la llevaría a VERIFICADA. None si alguno de los dos ya no existe.
+
+    ES LA ÚNICA QUE DECIDE EL ESTADO. El buscador, WhatsApp, el PDF y la venta lo toman de acá
+    (ver anotar_el_estado()), con `liviana`: lo mismo, sin lo que no cambia el estado (los
+    números en común, lo que la tumbaría). Lo pidió una revisión con ChatGPT («una sola
+    verdad»): medido sobre 370 resultados de 250 búsquedas reales, el buscador y la ficha
+    decían lo mismo en 144; en 2, el buscador decía «confirmada» y la ficha «contradicciones»."""
     c.execute(f"""SELECT p.id, p.codigo_raw, p.codigo_clean, p.descripcion, m.nombre AS marca,
                          m.tipo AS tipo,
                          {campo_opcional_de_producto(c, "imagen_thumb", "foto")}
@@ -770,7 +779,7 @@ def ficha_de_prueba(id_a, id_b, tolerancia_pct=3):
                           "dice que sea la misma pieza" if pa["codigo_clean"] == pb["codigo_clean"]
                           else "no hay ningún vínculo entre los dos"]), [])
     ficha["pasos"] = pasos
-    ficha["numeros_en_comun"] = numeros_en_comun(id_a, id_b)
+    ficha["numeros_en_comun"] = [] if liviana else numeros_en_comun(id_a, id_b)
     ficha["fuentes"] = sorted({_fuente_del_paso(p["_lote"], p["_verificada"])
                                for pasos_ in cadenas for p in pasos_ if p["_primaria"]}
                               | {f for n in ficha["numeros_en_comun"] if n["_primarias"]
@@ -824,7 +833,11 @@ def ficha_de_prueba(id_a, id_b, tolerancia_pct=3):
 
     # Lo que la contradice. El precio no prueba nada a favor y en contra solo avisa: dos listas
     # pueden estar en escalas distintas. Ver evidencia_cruzada(), punto 7.
-    a_favor, vetos, _ = evidencia_cruzada(id_a, id_b)
+    # Con el rubro de los códigos de fábrica por mayoría, como el puntaje: la descripción de un
+    # código de fábrica es la de la fila que lo nombró primero, y la bujía BKR5E-11 contra el
+    # LEIHTR13SC (que publica el catálogo de NGK) salía «rubros distintos: encendido y cables».
+    a_favor, vetos, _ = evidencia_cruzada(
+        id_a, id_b, rubros_oem=rubros_de_los_codigos_de_fabrica([id_a, id_b]))
     ficha["a_favor"] = a_favor
     ficha["contradicciones"] = [v for v in vetos if not v.startswith("💲")]
     ficha["avisos"] = [v for v in vetos if v.startswith("💲")] + ficha["imposibles"]
@@ -989,6 +1002,10 @@ def ficha_de_prueba(id_a, id_b, tolerancia_pct=3):
         f"medí {ficha['para_medir'][0]} en las dos" if ficha["para_medir"] else
         "compará las dos piezas en la mano" if estado.startswith("🔴") or ficha["accion"] else
         "")
+    if liviana:
+        ficha["la_tumbaria"], ficha["declarado"] = [], []
+        ficha["estado"], ficha["falta"] = estado, falta
+        return ficha
     # LO QUE LA TUMBARÍA: para descartarla alcanza con que difiera UNA de estas. Primero lo que
     # todavía nadie comparó, de lo que más identifica a la pieza a lo que menos; después lo que
     # ya coincide. Lo pidió una revisión con ChatGPT («¿qué tendría que ser falso para que esto
@@ -1033,6 +1050,35 @@ def ficha_de_prueba(id_a, id_b, tolerancia_pct=3):
                             for n_, i_, h_ in tumbaria]
     ficha["estado"], ficha["falta"] = estado, falta
     return ficha
+
+
+# Del texto largo de «falta» a lo que entra en una línea del mostrador. Ver motivo_corto().
+_MOTIVOS_CORTOS = (
+    (re.compile(r"hoy llega por (\d+) código"), lambda m: f"llega por {m.group(1)} código(s) en el medio"),
+    (re.compile(r"sea sólido: tiene (\d+)"), lambda m: f"un vínculo flojo ({m.group(1)}/100)"),
+    (re.compile(r"es un cambio de número"), lambda m: "es un cambio de número: confirmá que sirva en este auto"),
+    (re.compile(r"se revisó hace (\d+) meses"), lambda m: f"hace {m.group(1)} meses que no se revisa"),
+    (re.compile(r"después de la última revisión cambió"), lambda m: "cambió una medida después de aprobarla"),
+    (re.compile(r"la evidencia mínima pide además (.*)$"), lambda m: f"le falta {m.group(1)}"),
+)
+
+
+def motivo_corto(ficha):
+    """Por qué la ficha quedó en su estado, en pocas palabras: lo que va al lado del veredicto."""
+    estado = ficha["estado"]
+    if estado.startswith("✅"):
+        return ""
+    if estado.startswith("🔴"):
+        return (ficha["contradicciones"] or [""])[0]
+    if estado.startswith("🟠"):
+        sin_fuente = [p for p in ficha["pasos"] if not p["_primaria"]]
+        return f"solo una pista ({sin_fuente[0]['Respaldo']})" if sin_fuente else ""
+    for texto in ficha["falta"]:
+        for patron, corto in _MOTIVOS_CORTOS:
+            m = patron.search(texto)
+            if m:
+                return corto(m)
+    return (ficha["falta"] or [""])[0]
 
 
 def perfil_de_la_equivalencia(ficha):

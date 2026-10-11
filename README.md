@@ -46,6 +46,7 @@ python3 pruebas_de_la_revision.py --sellar   # si agregaste pares de muestra: qu
 python3 pruebas_de_la_precision.py  # y cuándo se da por verificada una equivalencia
 python3 pruebas_de_la_revision.py --base copia.db   # y contra tus aprobaciones
 python3 pruebas_de_la_revision.py --base copia.db --linea-base antes.json   # y contra la vez anterior
+python3 pruebas_de_compatibilidad.py --base copia.db   # y la versión anterior con la base migrada
 python3 revisar_con_gemini.py    # opcional: una segunda opinión sobre el diff
 ```
 
@@ -6475,6 +6476,36 @@ el botón**:
   dónde vino. Solo los últimos tres años: la serie arranca en los cuarenta y trae el 89.
 - «🔌 Probar las fuentes de afuera» suma la Central de Deudores (con el CUIT de la AFIP, nunca el
   de un cliente) y la inflación de respaldo.
+
+## 🧭 La precisión, octava parte: una sola verdad, fallar cerrado y la recuperación probada
+
+Puntos 214 a 252 de la misma revisión con ChatGPT, medidos sobre la copia de la base real.
+
+| Punto | Qué se encontró | Qué se hizo |
+|---|---|---|
+| 218 a 222 y 239. Una sola verdad | **El buscador y la ficha de prueba calculaban el estado cada uno a su manera**: en 370 resultados de 250 búsquedas reales coincidían en 144 (39 %). El buscador decía «🟡 probable» para cadenas que la ficha veía contradichas (bujías BKR6E de otro grado térmico al buscar la BKR5E-11) o con solo pistas. Y al revés: en 2 la ficha decía 🔴 por un error suyo (tomaba el rubro del código de fábrica de su descripción copiada, y la bujía contra su código NGK salía «rubros distintos: encendido y cables»). | **Una sola función decide el estado**: la ficha de prueba. El buscador la corre en versión liviana para cada resultado (`anotar_el_estado()`) y el veredicto sale de ahí, con el motivo en pocas palabras («🟠 revisar antes de vender: solo una pista (🔤 se parecen las descripciones)»). Lo usan la tabla, las tarjetas, WhatsApp, el PDF, la venta, el ZIP del catálogo (antes no coincidía con la ficha en 1 de cada 6 vínculos) y las búsquedas por foto, OCR y número nuevo, que antes no decían si se podía vender. Medido después: **370 de 370**, y con `pruebas_de_la_revision.py --base`, **755 de 755** en 100 búsquedas. Cuesta: mediana 101 ms por búsqueda, P90 133 ms, la peor (224 resultados) 1 s. |
+| 236. Fallar cerrado | Si la cuenta del estado fallaba, el resultado quedaba con el veredicto viejo, que podía ser «confirmada». | Si no se puede calcular, dice **«🟠 no se pudo comprobar: mirá la ficha antes de venderla»** y no se recomienda; el ZIP dice «no se pudo comprobar». |
+| 223 y 224. Datos corruptos | Hoy no hay ninguno (0 textos en columnas de números, 0 negativos). | **La base rechaza un texto donde va un número**: «Campo inválido: diámetro interno (no es un número)». Un disparador por campo para las modificaciones y uno solo para las altas (uno por campo hacía las altas 13 veces más lentas; uno solo, 0,3 s más cada 100.000). «54» escrito como texto se guarda como número. |
+| 225 y 226. Vista previa y deshacer | Ya: la importación simula sobre la lista antes de cargar y cuenta filas vacías, sin código, códigos basura, fechas y números en notación científica; cada lista se deshace sola (sus vínculos y pendientes; los productos, precios y stock quedan). | — |
+| 227. Quién introdujo cada dato | Ya: de dónde salió cada medida, de qué lista y cuándo cada vínculo, quién y cómo cada decisión, la caja negra de cada venta. La IA solo lee códigos de fotos y nunca guarda nada sola. | — |
+| 228 y 229. Ambientes separados | Las 17 pruebas corren en carpetas temporales con su propia base, y la de GitHub contra un GitHub de mentira. En la base real no hay ningún dato de prueba (ni listas, ni marcas, ni códigos). | — |
+| 214. Cambios demasiado grandes | La deriva avisaba solo si **subían** muchos vínculos de franja. | Si una versión de las reglas mueve de franja el **40 % o más** de lo cargado, para cualquier lado: «🔴 Cambio anormalmente grande», también en la lista de lo que necesita atención. |
+| 215 a 217. Activación gradual, dos motores, discrepancias | Hay una sola base y una sola persona revisando: no hay a quién mandar «una parte de las consultas». Lo equivalente ya está: la simulación sobre todo lo decidido antes de subir una versión (motor viejo contra nuevo, sin tocar ninguna decisión), la deriva guardada y «🔁 Revisar lo aprobado con las reglas de hoy» (lo que una persona aprobó y las reglas nuevas tumban). | — |
+| 230. Probar la recuperación entera | La copia de GitHub se bajaba una vez por día, se abría y se miraba la huella y las tablas. | Ahora además **se la usa**: tienen que estar las tablas que hay acá, ningún vínculo puede apuntar a un producto que no está, y se hace una búsqueda de equivalencias de verdad dentro de la copia (el código más vinculado, a dos saltos). |
+| 231. Programa anterior con base nueva | — | **`pruebas_de_compatibilidad.py`**: este programa abre y migra la base, y el programa de la versión anterior (en un worktree de git aparte) trabaja sobre la base migrada: buscar, ficha, aprobar, medidas, venta, tablero, exportar. Medido con las dos versiones anteriores: **todo anda**. La copia del 8/10 con este programa, también. |
+| 232 y 233. Plan de desastre | Lo que se puede perder: lo hecho en los últimos **15 minutos** (la copia sube cada 15 si hubo cambios). | Lo que tarda volver, medido acá: armar la copia 5,4 s; descifrar, descomprimir y controlar 0,2 s; abrir la app y migrar 8,3 s. A eso se suma bajar 79 MB de GitHub y el arranque de Streamlit Cloud, que no se pueden medir desde acá. Vuelve primero el buscador; las fotos, después, en bloques. |
+| 234 y 235. Modo degradado, solo lectura | Ya: la IA solo lee fotos y todo lo demás anda sin ella (las pruebas corren sin clave); con la base dañada el mostrador queda en solo lectura y la copia se frena para no pisar la buena. | — |
+| 237 y 238. Una alarma para una persona | Ya: «lo que necesita atención» junta los controles y dice qué pasa y a dónde ir. | Tres más: **lo vendido como equivalente que volvió** en los últimos 30 días, **el cambio de reglas que movió demasiado** y **las medidas que no pueden ser** (en la copia, 8 antes de que la tarea de fondo las descarte). |
+| 240. Buscar por síntoma | Necesita entender lenguaje libre: no se hizo. | — |
+| 241 a 245. Descripción imperfecta, códigos, medidas, vehículo, al revés | Ya: búsqueda por texto, «0 986 479 123» es «0986479123», el tipeo muestra todos los parecidos y nunca elige solo, 📐 buscar por medidas, repuestos por vehículo y a qué autos le va un código. Medido: «rulemán rueda delantero gol» trae 4 resultados que no son; el catálogo tiene 9 rulemanes y 120 mazas, y «maza delantera gol» trae 52. | Sin cambio: la maza no es lo mismo que el rulemán y no se las mezcla. |
+| 246 a 248. Lo que va con esto y la venta incompleta | El único combo de fábrica («correa de distribución → kit, tensor, bomba de agua») **no se mostraba nunca**: ninguna descripción del catálogo dice «correa de distribución». | Combos de fábrica que sí aparecen: **kit de distribución → bomba de agua** (410 productos lo dicen), **bomba de agua → termostato y kit** (726). Una vez por versión, sin repetir y sin devolver lo que alguien borró. Y al anotar la venta: **«⚠️ Antes de cerrar: suele cambiarse junto con Bomba de agua. Preguntale al cliente si ya lo tiene»**. |
+| 249 a 252. Antes de vender, preguntas mínimas | Ya: «Antes de vender, preguntá» pregunta solo lo que separa a las versiones de la misma pieza para el mismo auto. | Ahora **primero la pregunta que más separa** (la que deja menos versiones posibles en promedio). |
+
+`VERSION_CONFIANZA` sigue en 14: el puntaje no cambia (la simulación contra la línea de base da
+«sin cambios»). Probado en `pruebas_de_la_precision.py` y `pruebas_de_los_frenos.py` (24 fallas
+puestas a mano, las 24 detectadas), en `pruebas_de_compatibilidad.py` y en la app: la búsqueda
+con el estado de la ficha (4 de 4 coinciden), la venta del kit de distribución con su aviso y el
+recorrido de las 32 pantallas, sin errores.
 
 ## 🔬 La precisión, séptima parte: datos imposibles, nada cambia en silencio y las reglas versionadas
 

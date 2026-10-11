@@ -129,6 +129,28 @@ def probar(L):
         ns["guardar_config"]("huella_copia_github", huella)
         ok, detalle = ns["verificar_la_copia_de_github"]()
         esperar("la copia se puede recuperar", (ok, "50 productos" in detalle), (True, True))
+        # Abrir no alcanza: se la usa. Una copia con un vínculo a un producto que no está no pasa.
+        import sqlite3 as _sq
+        rota = os.path.abspath("rota.db.tmp")
+        with open(rota, "wb") as f:
+            f.write(datos if datos[:2] != b"\x1f\x8b" else __import__("gzip").decompress(datos))
+        _con = _sq.connect(rota)
+        _con.execute("DROP TRIGGER IF EXISTS equivalencias_en_orden")
+        _con.execute("INSERT INTO equivalencias (producto_a_id, producto_b_id, lote) "
+                     "VALUES (1, 99999999, 'x')")
+        _con.commit()
+        _con.close()
+
+        def bajar_rota(destino=None):
+            shutil.copy(rota, destino)
+            return destino
+        g["bajar_la_copia_de_github"] = bajar_rota
+        ok, detalle = ns["verificar_la_copia_de_github"]()
+        esperar("una copia con vínculos huérfanos no se da por buena",
+                (ok, "apuntan a productos que no están" in detalle), (False, True))
+        os.remove(rota)
+        g["bajar_la_copia_de_github"] = bajar
+        ns["verificar_la_copia_de_github"]()
         esperar("verificada hace un rato: no toca", ns["toca_verificar_la_copia"](), False)
         esperar("al día siguiente, sí",
                 ns["toca_verificar_la_copia"](datetime.now() + timedelta(hours=25)), True)

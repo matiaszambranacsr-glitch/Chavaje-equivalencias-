@@ -1539,11 +1539,19 @@ def exportar_catalogo_zip():
             escritor.writerow(elegidas + (["estado"] if con_estado else []))
             c.execute(f"SELECT {', '.join(elegidas)} FROM {tabla}")
             n = 0
-            for fila in c.fetchall():
+            filas_de_la_tabla = c.fetchall()
+            # El estado de cada vínculo con la misma ficha que usa el buscador: ver
+            # estados_de_los_vinculos().
+            estados = (estados_de_los_vinculos(
+                [(f_["producto_a_id"], f_["producto_b_id"]) for f_ in filas_de_la_tabla])
+                if tabla == "equivalencias" and {"producto_a_id", "producto_b_id"} <= set(elegidas)
+                else {})
+            for fila in filas_de_la_tabla:
                 if tabla == "equivalencias":
                     d = dict(zip(elegidas, fila))
-                    extra = [estado_del_vinculo(d.get("confianza"), d.get("lote"),
-                                                d.get("verificada"))]
+                    extra = [estados.get((d.get("producto_a_id"), d.get("producto_b_id")))
+                             or estado_del_vinculo(d.get("confianza"), d.get("lote"),
+                                                   d.get("verificada"))]
                 elif con_estado:
                     extra = ["pendiente: todavía no es una equivalencia"]
                 else:
@@ -1575,7 +1583,8 @@ def exportar_catalogo_zip():
             "Un archivo CSV por tabla, separado por comas, con el punto como decimal.\n"
             "Los productos se unen con las marcas por marca_id, y las equivalencias con los\n"
             "productos por producto_a_id / producto_b_id (el id de productos.csv).\n"
-            "La columna «estado» de equivalencias.csv es el veredicto del buscador: solo\n"
+            "La columna «estado» de equivalencias.csv es el de la ficha de prueba, el mismo que\n"
+            "da el buscador: solo\n"
             "«confirmada» es una equivalencia confirmada; «probable», «revisar» y «dudosa» no.\n"
             "equivalencias_pendientes.csv NO son equivalencias, y rechazadas.csv son pares que\n"
             "una persona revisó y dijo que NO son la misma pieza.\n"

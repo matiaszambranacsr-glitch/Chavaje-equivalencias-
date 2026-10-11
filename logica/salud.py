@@ -465,6 +465,58 @@ def diagnostico_de_salud():
     except (TypeError, ValueError) as _err:
         anotar_error("diagnostico_de_salud/dudosos", _err)
 
+    # LO VENDIDO COMO EQUIVALENTE QUE VOLVIÓ porque no era la pieza, en los últimos 30 días: la
+    # métrica principal del tablero (ver tablero_de_calidad()), como alarma. Lo pidió una
+    # revisión con ChatGPT («una alarma para humanos: ACCIÓN REQUERIDA, y qué revisar»).
+    try:
+        _motivos = sorted(MOTIVOS_DE_NO_ERA_LA_PIEZA)
+        c.execute(f"""-- FILA Y NO PAR: una fila por devolución; EXISTS no repite.
+                      SELECT COUNT(*) FROM devoluciones d
+                      WHERE d.motivo IN ({",".join("?" * len(_motivos))})
+                        AND d.fecha >= datetime('now', '-30 days')
+                        AND EXISTS (SELECT 1 FROM ventas_registradas v
+                                    WHERE v.producto_id = d.producto_id
+                                      AND v.codigo_pedido_clean = d.codigo_pedido_clean
+                                      AND v.como = 'equivalente' AND v.fecha <= d.fecha)""",
+                  _motivos)
+        _volvieron = c.fetchone()[0] or 0
+        if _volvieron:
+            sumar("alto", f"🎯 {_volvieron} pieza(s) vendida(s) como equivalente volvieron porque "
+                          "no eran (últimos 30 días)",
+                  "Se vendieron con el veredicto 🟢 confirmada y el cliente las devolvió. En el "
+                  "registro de errores del tablero de calidad está qué la dejó pasar (la lista, "
+                  "la regla, lo que decía al venderla): eso es lo que hay que corregir.",
+                  miga_hasta("Equivalencias sugeridas"))
+    except sqlite3.OperationalError as _err:
+        anotar_error("diagnostico_de_salud/vendidas_y_devueltas", _err)
+
+    # UN CAMBIO DE REGLAS QUE MOVIÓ DEMASIADO de una vez (ver deriva_sospechosa()).
+    try:
+        _aviso_deriva = deriva_sospechosa(la_ultima_deriva())
+        if _aviso_deriva:
+            sumar_tecnico("alto", "🧭 La última versión de las reglas movió demasiados vínculos",
+                          _aviso_deriva, miga_hasta("Revisar los vínculos que YA están cargados"))
+    except Exception as _err:
+        anotar_error("diagnostico_de_salud/deriva", _err)
+
+    # MEDIDAS QUE NO PUEDEN SER, guardadas (ver medidas_imposibles()): no se usan para
+    # comparar, así que un retén con el interno y el externo cruzados queda sin prueba física.
+    try:
+        c.execute("""SELECT codigo_raw, diametro_interno, diametro_externo, diametro_interno_cara_b,
+                            diametro_externo_cara_b FROM productos
+                     WHERE (diametro_interno IS NOT NULL AND diametro_externo IS NOT NULL)
+                        OR (diametro_interno_cara_b IS NOT NULL
+                            AND diametro_externo_cara_b IS NOT NULL)""")
+        _imposibles = [r["codigo_raw"] for r in c.fetchall() if medidas_imposibles(dict(r))]
+        if _imposibles:
+            sumar_tecnico("medio", f"{len(_imposibles)} producto(s) con medidas que no pueden ser",
+                          f"Por ejemplo {', '.join(_imposibles[:3])}: el interno no es menor que "
+                          "el externo, o el externo es más de 8 veces el interno. Hasta "
+                          "corregirlas no sirven como prueba física.",
+                          miga_hasta("Productos"))
+    except sqlite3.OperationalError as _err:
+        anotar_error("diagnostico_de_salud/medidas_imposibles", _err)
+
     # Los precios viejos. Es el único punto de esta lista que cuesta plata en CADA venta, no
     # cuando algo sale mal: vender con una lista de hace dos meses es vender perdiendo la
     # diferencia, y nadie se entera hasta que repone.
