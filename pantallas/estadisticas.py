@@ -525,6 +525,13 @@ a traer solas desde Administrar → Mantenimiento.
         )
         pedidos = listar_pedidos_reposicion("pendiente")
         seleccionados = []
+        # ANTES DE COMPRAR, lo que ya hay: una equivalente confirmada en stock puede hacer
+        # innecesario comprar esta. A pedido, porque es una búsqueda por cada renglón. Ver
+        # equivalentes_confirmadas_con_stock().
+        _mirar_equivalentes = bool(pedidos) and st.toggle(
+            "🔁 Mirar si hay equivalentes confirmadas en stock",
+            key="pedidos_con_equivalentes",
+            help="Para cada renglón, busca sus equivalentes 🟢 confirmadas que tengas en stock.")
         if pedidos:
             for p in pedidos:
                 colp1, colp2, colp3 = st.columns([4, 1, 1])
@@ -534,6 +541,18 @@ a traer solas desde Administrar → Mantenimiento.
                     f"(stock: {stock_txt}, pedido {p['Veces pedido']}x, último: {p['Último en pedirlo']})",
                     key=f"chk_pedido_{p['ID']}"
                 )
+                if _mirar_equivalentes:
+                    try:
+                        _hay = equivalentes_confirmadas_con_stock(p["ProductoID"])
+                    except Exception as _err:
+                        anotar_error("equivalentes_confirmadas_con_stock", _err)
+                        _hay = []
+                    if _hay:
+                        colp1.caption("↪️ Quizá no haga falta comprarlo: hay "
+                                      + ", ".join(f"{miles(f['Stock'], 0)} de {f['Marca']} "
+                                                  f"{f['Codigo']}" for f in _hay[:3])
+                                      + (f" y {len(_hay) - 3} más" if len(_hay) > 3 else "")
+                                      + " (equivalente confirmada).")
                 if marcado:
                     seleccionados.append(p)
                 # on_click en vez de "if boton: accion + st.rerun()": el callback corre ANTES de
@@ -1855,6 +1874,58 @@ a traer solas desde Administrar → Mantenimiento.
                                 + (" ⚠️" if _ficha_lab["contradicciones"] else ""))
                     mostrar_ficha_de_prueba(_id_a, _id_b, clave="laboratorio")
 
+        # EL MODO ENTRENAMIENTO: casos que ya decidió alguien con experiencia, para practicar
+        # antes de revisar de verdad. No cambia nada en la base. Ver casos_para_practicar().
+        if seccion_plegable("🎓 Practicar: ¿la aprobarías?", key="practicar_equivalencias"):
+            st.caption("Casos que ya se decidieron, mitad aprobados y mitad rechazados. Contestá "
+                       "y mirá qué decidió quien la revisó y por qué. No cambia nada.")
+            if "practica" not in st.session_state:
+                st.session_state["practica"] = {"casos": casos_para_practicar(),
+                                                "i": 0, "bien": 0, "hechos": 0, "respuesta": None}
+            _pr = st.session_state["practica"]
+            if not _pr["casos"]:
+                st.caption("Todavía no hay equivalencias decididas para practicar.")
+            else:
+                _caso = _pr["casos"][_pr["i"] % len(_pr["casos"])]
+                _ficha_caso = ficha_de_prueba(_caso["a"], _caso["b"])
+                if _ficha_caso:
+                    _pa, _pb = _ficha_caso["a"], _ficha_caso["b"]
+                    st.markdown(f"**A:** `{_pa['codigo_raw']}` ({_pa.get('marca', '')}) — "
+                                + resaltar_lo_que_difiere(_pa["descripcion"], _pb["descripcion"]))
+                    st.markdown(f"**B:** `{_pb['codigo_raw']}` ({_pb.get('marca', '')}) — "
+                                + resaltar_lo_que_difiere(_pb["descripcion"], _pa["descripcion"]))
+                    if _ficha_caso["medidas"]:
+                        st.dataframe([{k: str(v) for k, v in m.items()}
+                                      for m in _ficha_caso["medidas"]],
+                                     hide_index=True, width="stretch")
+                _r1, _r2, _r3 = st.columns(3)
+                if _pr["respuesta"] is None:
+                    if _r1.button("✅ La aprobaría", key="practica_si"):
+                        _pr["respuesta"] = "ok"
+                        st.rerun()
+                    if _r2.button("🚫 La rechazaría", key="practica_no"):
+                        _pr["respuesta"] = "rechazada"
+                        st.rerun()
+                else:
+                    _resp = la_respuesta_del_caso(_caso)
+                    _acerto = _pr["respuesta"] == _resp["correcta"]
+                    (st.success if _acerto else st.error)(
+                        ("🎯 Acertaste. " if _acerto else "❌ No. ") + _resp["texto"])
+                    if _resp["ficha"]:
+                        st.markdown(f"Hoy la ficha dice **{_resp['ficha']['estado']}**.")
+                        for _x in _resp["ficha"]["contradicciones"][:3]:
+                            st.caption(f"⚠️ Lo contradice: {texto_para_markdown(_x)}")
+                        for _x in _resp["ficha"]["falta"][:3]:
+                            st.caption(f"❓ Faltaba: {texto_para_markdown(_x)}")
+                    if _r3.button("Siguiente ➡️", key="practica_siguiente"):
+                        _pr["hechos"] += 1
+                        _pr["bien"] += _acerto
+                        _pr["i"] += 1
+                        _pr["respuesta"] = None
+                        st.rerun()
+                if _pr["hechos"]:
+                    st.caption(f"Llevás {_pr['bien']} de {_pr['hechos']} bien.")
+
         # EL TABLERO DE CALIDAD: dónde propone mal la app, cuánto se anuló, cuánto volvió y
         # cuánto se comprobó en la mano. Ver tablero_de_calidad().
         with st.expander("📈 Tablero de calidad de las equivalencias"):
@@ -1925,6 +1996,22 @@ a traer solas desde Administrar → Mantenimiento.
             else:
                 st.caption("Todavía no hay ninguno: ni devoluciones «no era la pieza» ni "
                            "aprobaciones anuladas.")
+            # LA CALIDAD DE CADA MARCA, aparte de la equivalencia. Ver calidad_por_marca().
+            if _tc["por_marca"]:
+                st.markdown("**🏭 Lo que volvió, por marca y por causa** — «falladas» es la "
+                            "calidad de la marca; «no era la pieza», la equivalencia; lo demás "
+                            "(instalación, otro auto, transporte) no es de ninguna de las dos. "
+                            "🔴 si vienen más falladas que el mes anterior")
+                st.dataframe(_tc["por_marca"], width="stretch", hide_index=True)
+            # LO QUE SE VENDIÓ EN LUGAR DE LO RECOMENDADO. Ver ventas_contra_la_recomendacion().
+            _contra = _tc["contra_la_recomendacion"]
+            if _contra["ventas"]:
+                st.caption(f"🧭 En los últimos 90 días se vendió **otra cosa que la recomendada** "
+                           f"{miles(_contra['contra'])} de {miles(_contra['ventas'])} veces"
+                           + (f"; de esas, {miles(_contra['contra_y_devueltas'])} volvieron "
+                              "porque no era la pieza" if _contra["contra"] else "") + ".")
+                if _contra["ejemplos"] and st.toggle("Ver cuáles", key="tablero_contra_reco"):
+                    st.dataframe(_contra["ejemplos"], width="stretch", hide_index=True)
             st.caption("Los falsos positivos y negativos con todo lo decidido se miden fuera de "
                        "la app, con `pruebas_de_la_revision.py --base` (ver el README).")
             # Las reglas versionadas: qué cambió en cada una. Ver VERSIONES_DE_LAS_REGLAS.

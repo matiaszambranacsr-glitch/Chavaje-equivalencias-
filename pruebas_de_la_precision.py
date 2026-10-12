@@ -1244,6 +1244,203 @@ def probar(L):
             [("ok", "2026-10-01 10:00:00", "COLA · 01/10", "uno"),
              ("rechazada", "2026-10-01 10:00:00", "COLA · 01/10", "uno"),
              ("rechazada", "2026-10-01 10:00:00", "COLA · 01/10", "bloque")])
+
+    # 54. Primero que sirva, después que convenga: la recomendada, por qué, y por qué no la más
+    # barata. Solo lo buscado, lo 🟢 y lo 🟡 (lo 🟡 no, si es de seguridad).
+    reco = ns["la_recomendacion_explicada"]
+    _filtro = "FILTRO DE ACEITE VW GOL 1.6"
+    r_bus = {"ID": -1, "Cadena": "— el buscado", "Marca": "FISPA", "Codigo": "A1", "Precio": 1000,
+             "Stock": 0, "Descripcion": _filtro}
+    r_ok = {"ID": -2, "Cadena": "🟢 directo", "Confianza": "🟢 sólida", "_estado": "✅ VERIFICADA",
+            "Marca": "ILLINOIS", "Codigo": "B1", "Precio": 820, "Stock": 7, "Descripcion": _filtro}
+    r_cand = {"ID": -3, "Cadena": "🟢 directo", "Confianza": "🟢 sólida", "_estado": "🟠 CANDIDATA",
+              "_por_que_estado": "solo una pista (barrido)", "Marca": "JL", "Codigo": "C1",
+              "Precio": 500, "Stock": 12, "Descripcion": _filtro}
+    r_mal = {"ID": -4, "Cadena": "🟢 directo", "Confianza": "🟢 sólida",
+             "_estado": "🔴 CON CONTRADICCIONES", "_por_que_estado": "otro grado térmico",
+             "Marca": "TARANTO", "Codigo": "D1", "Precio": 400, "Stock": 3, "Descripcion": _filtro}
+    r_prob = {"ID": -5, "Cadena": "🟡 2 saltos", "Confianza": "🟢 sólida", "_estado": "🟡 PROBABLE",
+              "Marca": "CRI-FA", "Codigo": "E1", "Precio": 900, "Stock": 2, "Descripcion": _filtro}
+    _r = reco([r_bus, r_ok, r_cand, r_mal, r_prob])
+    esperar("recomienda la confirmada, no la más barata", _r["recomendada"]["Codigo"], "B1")
+    esperar("y dice por qué", _r["texto"],
+            "🏆 No hay de lo buscado. **Recomendada: ILLINOIS B1** — equivalencia confirmada, "
+            "hay 7 en stock, y cuesta 18 % menos que lo buscado.")
+    esperar("y por qué no la más barata", _r["por_que_no"],
+            "La más barata, TARANTO D1, no se recomienda: no es la misma pieza: otro grado "
+            "térmico.")
+    esperar("el stock, sin mezclar lo confirmado con lo que no", _r["stock"],
+            "📦 En stock — lo buscado: 0 · equivalentes confirmadas: 7 · probables, sin "
+            "confirmar: 2 · para revisar o que no son la misma pieza: 15")
+    esperar("sin el stock de lo buscado cargado, no dice que no hay", reco(
+        [dict(r_bus, Stock=None), r_ok])["texto"].startswith("🏆 **Recomendada"), True)
+    esperar("con stock de lo buscado y más barato, lo buscado", reco(
+        [dict(r_bus, Stock=3, Precio=700), r_ok])["texto"],
+            "🏆 **Recomendada: FISPA A1** — es lo que pidió el cliente, hay 3 en stock.")
+    esperar("una candidata sola no se recomienda", reco([r_bus, r_cand])["recomendada"], None)
+    esperar("y dice por qué", reco([r_bus, r_cand])["por_que_no"],
+            "Ninguna se recomienda: lo que hay en stock no está confirmado. La más barata, JL C1: "
+            "revisar antes de vender: solo una pista (barrido).")
+    esperar("sin nada en stock, nada que explicar", reco([r_bus, dict(r_cand, Stock=0)]),
+            {"recomendada": None, "texto": "", "por_que_no": "", "stock": ""})
+    esperar("una probable sí", reco([r_bus, r_prob])["recomendada"]["Codigo"], "E1")
+    _pastilla = "PASTILLA DE FRENO DELANTERA VW GOL"
+    _r_seg = reco([dict(r_ok, Descripcion=_pastilla, Precio=950),
+                   dict(r_prob, Descripcion=_pastilla, Precio=600)])
+    esperar("la pastilla probable no, aunque sea más barata", _r_seg["recomendada"]["Codigo"], "B1")
+    esperar("y lo dice", _r_seg["por_que_no"].startswith(
+        "La más barata, CRI-FA E1, no se recomienda: es una pieza de seguridad y la "
+        "equivalencia no está confirmada (probable"), True)
+    esperar("ni la marca con la lista en otra escala", reco([r_bus, r_ok, r_prob],
+                                                           ("ILLINOIS",))["recomendada"]["Codigo"],
+            "E1")
+    esperar("ni el kit", reco([r_bus, dict(r_ok, _complementario=True)])["recomendada"], None)
+    esperar("ordenadas: lo buscado, lo confirmado, lo probable, lo demás", [
+        f["Codigo"] for f in ns["ordenar_por_seguridad_y_disponibilidad"](
+            [r_mal, r_cand, dict(r_prob, Stock=0, Codigo="E0"), r_prob, r_ok, r_bus])],
+            ["A1", "B1", "E1", "E0", "C1", "D1"])
+    _filas_c, _reco_c = ns["coronar_la_recomendada"]([r_mal, r_ok, r_bus])
+    esperar("la corona, solo en la recomendada", [(f["Codigo"], f["💰"]) for f in _filas_c],
+            [("A1", ""), ("B1", "🏆 Recomendada"), ("D1", "")])
+    esperar("la venta anota lo que la app recomendaba si se vendió otra",
+            ns["evidencia_de_la_fila"](r_mal, r_ok).endswith(
+                "la app recomendaba ILLINOIS B1 a $ 820"), True)
+    esperar("y nada si se vendió la recomendada",
+            "recomendaba" in ns["evidencia_de_la_fila"](r_ok, r_ok), False)
+
+    # 55. Lo que volvió, por causa: la instalación no culpa a la equivalencia, «vino fallada»
+    # es la calidad de la marca, y se ve qué se vendió en lugar de lo recomendado.
+    calx = marca("CALIDADX")
+    dv_a = producto("DV1", "AMORTIGUADOR DELANTERO FIAT PALIO", fispa)
+    dv_b = producto("CDV1", "AMORTIGUADOR DELANTERO FIAT PALIO", calx)
+    vincular(dv_a, dv_b, "FISPA · lista.xlsx · 01/10/2026 10:00:00", confianza=90)
+    conn.commit()
+    for _motivo in ("instalacion", "otro_auto", "transporte", "se_entrego_otra"):
+        esperar(f"«{_motivo}» no baja el vínculo",
+                ns["registrar_devolucion"](dv_b, "DV1", _motivo), 0)
+    esperar("y no cuenta como «no era la pieza»",
+            (min(dv_a, dv_b), max(dv_a, dv_b)) in ns["pares_devueltos"](), False)
+    esperar("el vínculo sigue sólido", c.execute(
+        "SELECT confianza FROM equivalencias WHERE producto_a_id = ? AND producto_b_id = ?",
+        (min(dv_a, dv_b), max(dv_a, dv_b))).fetchone()[0], 90)
+    ns["registrar_devolucion"](dv_b, "DV1", "fallada")
+    ns["registrar_devolucion"](dv_b, "DV1", "fallada")
+    ns["registrar_devolucion"](dv_b, "DV1", "medida")
+    c.execute("INSERT INTO devoluciones (producto_id, codigo_pedido_clean, motivo, fecha) "
+              "VALUES (?, 'DV1', 'fallada', datetime('now', '-45 days'))", (dv_b,))
+    conn.commit()
+    _cal = {x["Marca"]: x for x in ns["calidad_por_marca"]()}.get("CALIDADX", {})
+    esperar("por causa, separado", (_cal.get("💥 Falladas (calidad)"), _cal.get("Falladas (30 días)"),
+                                    _cal.get("Falladas (30 días antes)"),
+                                    _cal.get("No era la pieza (equivalencia)"),
+                                    _cal.get("Otras causas")), (3, 2, 1, 1, 4))
+    esperar("vienen más falladas que antes: 🔴", _cal.get("Semáforo"), "🔴")
+    esperar("la alarma", "Vienen más piezas falladas de CALIDADX" in " | ".join(
+        p_["titulo"] for p_ in ns["diagnostico_de_salud"]()), True)
+    ns["registrar_venta"](dv_b, "DV1", "🟢 equivalencia confirmada",
+                          "cadena 🟢 directo · la app recomendaba FISPA DV1 a $ 900")
+    ns["registrar_venta"](dv_a, "DV1", None, "cadena — el buscado")
+    _contra = ns["ventas_contra_la_recomendacion"]()
+    esperar("vendida otra que la recomendada", (_contra["contra"], _contra["contra_y_devueltas"],
+                                                _contra["ejemplos"][0]["La app recomendaba"]),
+            (1, 1, "FISPA DV1 a $ 900"))
+
+    # 56. La comprobación guiada: la app pregunta lo que decide.
+    _ficha_g = {"la_tumbaria": [
+        {"Característica": "diámetro exterior", "Hoy": "❓ no la tiene ninguno"},
+        {"Característica": "rosca", "Hoy": "✅ igual"},
+        {"Característica": "conector", "Hoy": "❌ distinta"}]}
+    esperar("pregunta lo que no coincide a la vista", ns["preguntas_para_comprobar"](_ficha_g),
+            ["diámetro exterior", "conector"])
+    esperar("si todo coincide en los papeles, igual pregunta", ns["preguntas_para_comprobar"](
+        {"la_tumbaria": [{"Característica": "rosca", "Hoy": "✅ igual"}]}), ["rosca"])
+    _res_g = ns["resultado_de_la_comprobacion"]
+    esperar("alcanza con que difiera una", _res_g({"rosca": "coincide", "conector": "difiere"}),
+            ("🔴", "difiere conector; coinciden rosca"))
+    esperar("todo coincide", _res_g({"rosca": "coincide", "conector": "coincide"}),
+            ("✅", "coinciden rosca, conector"))
+    esperar("falta mirar", _res_g({"rosca": "coincide", "conector": "no lo miré"}),
+            ("", "coinciden rosca; falta mirar conector"))
+    esperar("sin preguntas, nada", _res_g({}), ("", ""))
+    rg_a = producto("RG1", "BOMBA DE ACEITE FORD KA 1.6", fispa)
+    rg_b = producto("IRG1", "BOMBA DE ACEITE FORD KA 1.6", illinois)
+    vincular(rg_a, rg_b, "FISPA · lista.xlsx · 01/10/2026 10:00:00")
+    conn.commit()
+    _nota_g = ns["rechazar_por_la_comprobacion"](rg_a, rg_b, "difiere rosca")
+    esperar("rechazada en la mano: se corta", c.execute(
+        "SELECT COUNT(*) FROM equivalencias WHERE producto_a_id = ? AND producto_b_id = ?",
+        (min(rg_a, rg_b), max(rg_a, rg_b))).fetchone()[0], 0)
+    esperar("y queda rechazada, para que no vuelva por otro camino", c.execute(
+        "SELECT decision, motivo FROM equivalencias_revisadas WHERE producto_a_id = ? AND "
+        "producto_b_id = ?", (rg_a, rg_b)).fetchone()[:], ("rechazada", "variante"))
+    esperar("con lo que difiere", _nota_g.endswith(": difiere rosca"), True)
+    esperar("sin decir qué difiere, no", _falla(ns["rechazar_por_la_comprobacion"], rg_a, rg_b,
+                                                " "), "ValueError")
+
+    # 57. Practicar con lo ya decidido: mitad y mitad, primero los rechazos con motivo.
+    # Veinte rechazos sin motivo, para que elegir al azar no alcance.
+    for _i in range(20):
+        _x = producto(f"PR{_i}", "DISCO DE FRENO VW GOL", fispa)
+        _y = producto(f"IPR{_i}", "DISCO DE FRENO VW GOL", illinois)
+        ns["marcar_revision"]([(_x, _y)], "rechazada")
+    esperar("con un solo rechazo para mostrar, es uno con motivo", {
+        bool([x for x in ns["casos_para_practicar"](2, semilla=_s)
+              if x["decision"] == "rechazada"][0]["motivo"]) for _s in range(8)}, {True})
+    _casos = ns["casos_para_practicar"](10, semilla=7)
+    _decididos = c.execute("SELECT decision, COUNT(*) FROM equivalencias_revisadas WHERE "
+                           "producto_a_id < producto_b_id GROUP BY decision").fetchall()
+    _n_rech = dict((d, n) for d, n in _decididos).get("rechazada", 0)
+    esperar("mitad rechazados (o los que haya)", sum(x["decision"] == "rechazada" for x in _casos),
+            min(5, _n_rech))
+    esperar("la misma semilla, los mismos casos", [(x["a"], x["b"]) for x in _casos],
+            [(x["a"], x["b"]) for x in ns["casos_para_practicar"](10, semilla=7)])
+    _con_motivo = [x for x in _casos if x["decision"] == "rechazada" and x["motivo"]]
+    esperar("hay rechazos con motivo para enseñar", bool(_con_motivo), True)
+    if _con_motivo:
+        _resp_p = ns["la_respuesta_del_caso"](_con_motivo[0])
+        esperar("la respuesta: quién la rechazó y por qué", (
+            _resp_p["correcta"], _resp_p["texto"].startswith("🚫 **La rechazó**"),
+            ns["MOTIVOS_DE_RECHAZO"][_con_motivo[0]["motivo"]] in _resp_p["texto"]),
+            ("rechazada", True, True))
+
+    # 58. Dónde está, si suele faltar y si hay una equivalente confirmada antes de comprar.
+    eq_a = producto("EQ1", "BOMBA DE AGUA VW GOL 1.6", fispa)
+    eq_b = producto("IEQ1", "BOMBA DE AGUA VW GOL 1.6", illinois)
+    vincular(eq_a, eq_b, "FISPA · lista.xlsx · 01/10/2026 10:00:00")
+    c.execute("UPDATE productos SET ubicacion = 'Estante 4', stock = 4 WHERE id = ?", (eq_b,))
+    conn.commit()
+    ns["comprobar_en_la_mano"](eq_a, eq_b, "las comparé en la caja")
+    # Y una que llega solo por una pista, con stock: no cuenta para no comprar.
+    eq_c = producto("JEQ1", "BOMBA DE AGUA VW GOL 1.6", marca("JL"))
+    vincular(eq_a, eq_c, "BARRIDO (automático) · 01/10 12:00")
+    c.execute("UPDATE productos SET stock = 5 WHERE id = ?", (eq_c,))
+    conn.commit()
+    _fila_eq = {f["ID"]: f for f in ns["buscar_por_codigo"]("EQ1")}.get(eq_b, {})
+    esperar("la ubicación, en el resultado", _fila_eq.get("Ubicación"), "Estante 4")
+    esperar("y en la búsqueda por descripción", {f["ID"]: f for f in ns["buscar_por_texto"](
+        "bomba de agua gol")}.get(eq_b, {}).get("Ubicación"), "Estante 4")
+    ns["solicitar_reposicion"](eq_a)
+    ns["solicitar_reposicion"](eq_a)
+    esperar("suele faltar", ns["veces_que_falto"]([eq_a, eq_b]).get(eq_a, (0,))[0], 2)
+    esperar("hay una equivalente confirmada en stock",
+            [f["ID"] for f in ns["equivalentes_confirmadas_con_stock"](eq_a)], [eq_b])
+    c.execute("UPDATE productos SET stock = 0 WHERE id = ?", (eq_b,))
+    conn.commit()
+    esperar("sin stock, no", ns["equivalentes_confirmadas_con_stock"](eq_a), [])
+
+    # 59. Lo que el auto ya dice no se pregunta: el motor nafta deja afuera lo diésel.
+    producto("BUJ9", "BUJIA DE ENCENDIDO FIAT PALIO 1.3 NAFTA", fispa)
+    producto("BUJ9D", "BUJIA DE PRECALENTAMIENTO FIAT PALIO 1.3 DIESEL", fispa)
+    conn.commit()
+    _r_auto = ns["repuestos_de_este_auto"]("FIAT", "PALIO", None, "1.3 NAFTA")
+    _cods_auto = {f.get("Código") or f.get("Codigo") for f in _r_auto["del_catalogo"]}
+    esperar("lo nafta sí, lo diésel no", ("BUJ9" in _cods_auto, "BUJ9D" in _cods_auto),
+            (True, False))
+    esperar("y no pregunta el combustible", "¿Es nafta o diésel?" in ns[
+        "versiones_que_hay_que_preguntar"](_r_auto["del_catalogo"]), False)
+    _r_auto2 = ns["repuestos_de_este_auto"]("FIAT", "PALIO", None, "")
+    esperar("sin el motor, pregunta", "¿Es nafta o diésel?" in ns[
+        "versiones_que_hay_que_preguntar"](_r_auto2["del_catalogo"]), True)
     return fallas
 
 

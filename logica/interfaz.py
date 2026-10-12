@@ -1440,14 +1440,47 @@ def mostrar_ficha_de_prueba(id_a, id_b, clave):
                    "estaba el par al decidirlo; «anteriores», lo decidido antes de que "
                    "existiera el historial.")
 
-    # La validación física: quién, cuándo y qué miró. Ver comprobar_en_la_mano().
+    # La validación física: quién, cuándo y qué miró. Ver comprobar_en_la_mano(). Primero las
+    # preguntas que deciden (ver preguntas_para_comprobar()); el texto libre, para lo demás.
     if not ficha["estado"].startswith("✅"):
-        como = st.text_input("✋ ¿Las comparaste con la pieza en la mano? Contá qué miraste:",
-                             key=f"en_la_mano_{clave}_{id_b}",
-                             placeholder="Ej.: medí 35x52x7 las dos, misma rosca, misma ficha")
+        _preguntas = preguntas_para_comprobar(ficha)
+        _estado_guiado, _texto_guiado = "", ""
+        if _preguntas:
+            st.markdown("**✋ Comprobala en la mano** — mirá esto, en este orden:")
+            _respuestas = {}
+            for _i, _q in enumerate(_preguntas):
+                _respuestas[_q] = st.radio(f"{_q[:1].upper()}{_q[1:]}",
+                                           RESPUESTAS_DE_LA_COMPROBACION, horizontal=True,
+                                           key=f"guiada_{clave}_{id_b}_{_i}")
+            _estado_guiado, _texto_guiado = resultado_de_la_comprobacion(_respuestas)
+            if _estado_guiado == "🔴":
+                st.error(f"🔴 **No es la misma pieza:** {_texto_guiado}. Alcanza con que difiera "
+                         "una.")
+                if candado("rechazar una equivalencia",
+                           st.button("🚫 Rechazarla", key=f"rechazar_guiada_{clave}_{id_b}"),
+                           f"rechazar_guiada_{clave}_{id_b}", nivel="empleado"):
+                    try:
+                        rechazar_por_la_comprobacion(id_a, id_b, _texto_guiado)
+                    except (PermissionError, ValueError) as _err:
+                        st.error(str(_err))
+                    else:
+                        avisar("success", "Quedó rechazada, con lo que difiere anotado: el "
+                                          "buscador ya no la ofrece como equivalente.")
+                        st.rerun()
+            elif _estado_guiado == "✅":
+                st.success(f"✅ **Coincide todo lo que la decide** ({_texto_guiado}).")
+        _libre = st.text_input("✋ ¿Algo más que miraste? Contalo:" if _preguntas else
+                               "✋ ¿Las comparaste con la pieza en la mano? Contá qué miraste:",
+                               key=f"en_la_mano_{clave}_{id_b}",
+                               placeholder="Ej.: medí 35x52x7 las dos, misma rosca, misma ficha")
+        # Lo guiado entra en la nota si dice algo (lo que coincidió); con algo que difiere no se
+        # puede marcar como comprobada.
+        como = "; ".join(x for x in (_texto_guiado if _estado_guiado != "🔴" else "",
+                                     _libre.strip()) if x)
         if candado("marcar una equivalencia como comprobada",
                    st.button("✋ La comprobé en la mano", key=f"boton_en_la_mano_{clave}_{id_b}",
-                             disabled=not como.strip()),
+                             disabled=(_estado_guiado == "🔴"
+                                       or not (_estado_guiado == "✅" or _libre.strip()))),
                    f"en_la_mano_{clave}_{id_b}", nivel="empleado"):
             try:
                 comprobar_en_la_mano(id_a, id_b, como)
@@ -1505,7 +1538,9 @@ def mostrar_tarjetas_de_resultados(filas, tope=40):
                                              f.get("Nota")) if x)
         with st.container(border=True):
             st.markdown(f"**{texto_para_markdown(f.get('Marca'))}** · `{f.get('Codigo', '')}`  \n"
-                        f"**{_precio}**" + (f" · {_semaforo}" if _semaforo else ""))
+                        f"**{_precio}**" + (f" · {_semaforo}" if _semaforo else "")
+                        + (f" · 📍 {texto_para_markdown(f['Ubicación'])}"
+                           if f.get("Ubicación") else ""))
             _desc = texto_para_markdown((f.get("Descripcion") or "")[:140])
             st.caption(_desc + (f"  \n{texto_para_markdown(_extra)}" if _extra else ""))
     if len(filas) > tope:

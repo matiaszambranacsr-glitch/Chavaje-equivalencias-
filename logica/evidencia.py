@@ -1260,6 +1260,56 @@ def expediente_en_texto(ficha):
     return "\n".join(renglones) + "\n"
 
 
+# LA COMPROBACIÓN GUIADA: la app pregunta lo que decide, en vez de esperar que la persona sepa
+# qué mirar. Lo pidió una revisión con ChatGPT («un motor de preguntas propio: ¿mismo motor?
+# ¿podés medir el diámetro? ¿la rosca es M12x1,5? ¿el conector tiene 3 pines? → verificada
+# según criterios configurados»). Las preguntas son las de «lo que la tumbaría».
+RESPUESTAS_DE_LA_COMPROBACION = ("no lo miré", "coincide", "difiere")
+PREGUNTAS_DE_LA_COMPROBACION = 5
+
+
+def preguntas_para_comprobar(ficha, tope=PREGUNTAS_DE_LA_COMPROBACION):
+    """Lo que hay que mirar en la mano, de lo que más identifica a la pieza a lo que menos: lo
+    de «lo que la tumbaría» que todavía no coincide a la vista (❌, ⚠️, ❓). Si todo coincide en
+    los papeles, las primeras igual: la comprobación es en la mano."""
+    tumbaria = ficha.get("la_tumbaria") or []
+    pendientes = [t["Característica"] for t in tumbaria if not str(t["Hoy"]).startswith("✅")]
+    return (pendientes or [t["Característica"] for t in tumbaria])[:tope]
+
+
+def resultado_de_la_comprobacion(respuestas):
+    """(estado, texto) de las respuestas {característica: una de RESPUESTAS_DE_LA_COMPROBACION}.
+    «🔴» si alguna difiere —alcanza con una—; «✅» si TODAS coinciden; «» si falta mirar alguna
+    (o no hay ninguna). El texto dice qué coincidió y qué difiere o falta, para la nota."""
+    coinciden = [k for k, v in respuestas.items() if v == "coincide"]
+    difieren = [k for k, v in respuestas.items() if v == "difiere"]
+    faltan = [k for k, v in respuestas.items() if v not in ("coincide", "difiere")]
+    partes = ([f"difiere {', '.join(difieren)}"] if difieren else []) + \
+             ([f"coinciden {', '.join(coinciden)}"] if coinciden else [])
+    if difieren:
+        return "🔴", "; ".join(partes)
+    if faltan or not respuestas:
+        return "", "; ".join(partes + ([f"falta mirar {', '.join(faltan)}"] if faltan else []))
+    return "✅", "; ".join(partes)
+
+
+def rechazar_por_la_comprobacion(id_a, id_b, que_difiere):
+    """Lo que difiere en la mano tumba la equivalencia: se corta el vínculo directo, si lo hay,
+    y queda rechazada —con lo que difiere anotado— para que no vuelva por otro camino (ver
+    anotar_el_respaldo()). Devuelve la nota."""
+    exigir_nivel("empleado", "rechazar una equivalencia")
+    que_difiere = (que_difiere or "").strip()
+    if not que_difiere:
+        raise ValueError("Decí qué difiere.")
+    a, b = min(id_a, id_b), max(id_a, id_b)
+    nota = (f"✋ Rechazada en la mano por {obtener_usuario_actual()} el "
+            f"{datetime.now():%d/%m/%Y}: {que_difiere}")
+    eliminar_equivalencia(a, b, recordar_rechazo=False)
+    marcar_revision([(a, b)], "rechazada", motivo="variante", como="mano")
+    anotar_cambio("rechazó en la mano", "equivalencia", f"{a}-{b}", detalle=nota)
+    return nota
+
+
 def comprobar_en_la_mano(id_a, id_b, como):
     """Anota que alguien comparó las dos piezas en la mano: quién, cuándo y qué miró.
 

@@ -490,6 +490,21 @@ def diagnostico_de_salud():
     except sqlite3.OperationalError as _err:
         anotar_error("diagnostico_de_salud/vendidas_y_devueltas", _err)
 
+    # UNA MARCA QUE EMPIEZA A VENIR FALLADA más que el mes anterior (ver calidad_por_marca()).
+    # No bloquea nada: avisa para mirar más de cerca lo que entra de esa marca. Es calidad, no
+    # equivalencia: el veredicto de sus equivalencias no cambia.
+    try:
+        _con_fallas = marcas_con_fallas_en_aumento()
+        if _con_fallas:
+            sumar("medio", f"💥 Vienen más piezas falladas de {', '.join(_con_fallas[:3])}"
+                           + (" y otras" if len(_con_fallas) > 3 else ""),
+                  "En los últimos 30 días volvieron más piezas «vino fallada» que en los 30 de "
+                  "antes. No es la equivalencia: es la calidad de la marca o de una tanda. Mirá "
+                  "lo que entra de esa marca antes de venderlo, y avisale al proveedor.",
+                  miga_hasta("Equivalencias sugeridas"))
+    except sqlite3.OperationalError as _err:
+        anotar_error("diagnostico_de_salud/marcas_con_fallas", _err)
+
     # UN CAMBIO DE REGLAS QUE MOVIÓ DEMASIADO de una vez (ver deriva_sospechosa()).
     try:
         _aviso_deriva = deriva_sospechosa(la_ultima_deriva())

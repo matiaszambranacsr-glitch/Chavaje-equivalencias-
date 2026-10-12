@@ -200,6 +200,9 @@ def buscar_por_codigo(cur, clean_code, marca_filtro="Todas", max_saltos=None, co
     # f-string para poder meter la columna opcional del fabricante. Las llaves que SQLite
     # usa no existen en esta consulta, así que no hay nada que escapar.
     _fabricante = campo_opcional_de_producto(cur, "marca_repuesto", "Fabricante")
+    # Dónde está en el depósito, si se cargó: «📍 Estante 4» al lado del stock. Lo pidió una
+    # revisión con ChatGPT («ubicación física del repuesto, y desde la búsqueda»).
+    _ubicacion = campo_opcional_de_producto(cur, "ubicacion", "Ubicación")
     # DOS CORTES MÁS, de la revisión independiente del buscador:
     #  · la rama por código va con «<=» y no «<»: no suma saltos, así que el gemelo de un
     #    producto que está justo en el tope también entra. Con «Solo directos», la bujía
@@ -245,7 +248,7 @@ def buscar_por_codigo(cur, clean_code, marca_filtro="Todas", max_saltos=None, co
            -- Va por campo_opcional_de_producto() y no directo: contra una base que todavía no
            -- tiene la columna, nombrarla acá tumba el buscador entero.
            {_fabricante},
-           p.precio AS "Precio", p.stock AS "Stock",
+           p.precio AS "Precio", p.stock AS "Stock", {_ubicacion},
            p.favorito AS "Favorito", COALESCE(p.imagen_thumb, p.imagen_url) AS "Imagen",
            p.precio_costo AS "_costo",
            m.url_ficha_template AS "_template", MIN(r.saltos) AS "_saltos",

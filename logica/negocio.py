@@ -1730,16 +1730,28 @@ def anotar_venta_y_avisar(producto_id, termino_pedido, rotulo, donde="", veredic
            "cliente si ya lo tiene." if _junto else ""))
 
 
-def evidencia_de_la_fila(fila):
+# Con qué empieza, en la evidencia de una venta, lo que la app recomendaba si se vendió otra.
+# Ver evidencia_de_la_fila() y ventas_contra_la_recomendacion().
+VENDIDA_OTRA_QUE_LA_RECOMENDADA = "la app recomendaba "
+
+
+def evidencia_de_la_fila(fila, recomendada=None):
     """Lo que sostenía a ese resultado del buscador en el momento de venderlo, en una línea: la
     «caja negra» de la recomendación que pidió una revisión con ChatGPT. Se guarda con la venta
     (ver registrar_venta()) porque la cadena, la confianza y el respaldo cambian con cada
-    importación y con cada versión de las reglas."""
+    importación y con cada versión de las reglas.
+    Con `recomendada` (la fila que la app recomendaba en esa búsqueda, ver
+    la_recomendacion_explicada()), si se vendió OTRA queda anotada cuál: lo pidió la misma
+    revisión («historial de decisiones comerciales: el vendedor eligió B aunque A era más
+    barata»). Ver ventas_contra_la_recomendacion()."""
     partes = [f"cadena {fila['Cadena']}" if fila.get("Cadena") else "",
               f"confianza {fila['Confianza']}" if fila.get("Confianza") else "",
               str(fila.get("Respaldo") or ""),
               "verificada a mano" if fila.get("Verificada") else "",
               f"reglas v{VERSION_CONFIANZA}"]
+    if recomendada and recomendada.get("ID") != fila.get("ID"):
+        partes.append(f"{VENDIDA_OTRA_QUE_LA_RECOMENDADA}{recomendada.get('Marca', '')} "
+                      f"{recomendada.get('Codigo', '')} a {formato_precio(recomendada.get('Precio'))}")
     return " · ".join(p for p in partes if p)
 
 
@@ -1765,6 +1777,44 @@ def mostrar_lo_anotado(donde=""):
     texto = st.session_state.get("_lo_anotado", {}).pop(donde, None)
     if texto:
         st.success(texto)
+
+
+def veces_que_falto(producto_ids):
+    """{id: (veces, última fecha)} de los que alguna vez se marcaron para reponer («📌 Reponer»
+    en el buscador, o «no hay» en el depósito), estén pendientes o ya resueltos. Es el
+    historial de «esta pieza suele faltar» que pidió una revisión con ChatGPT: sirve para
+    decidir qué equivalente tener en el depósito."""
+    salida = {}
+    for tanda, marcadores in en_tandas(list(producto_ids)):
+        c.execute(f"""SELECT producto_id, veces_solicitado, ultima_fecha FROM pedidos_reposicion
+                      WHERE producto_id IN ({marcadores})""", tanda)
+        salida.update({r["producto_id"]: (r["veces_solicitado"] or 0, r["ultima_fecha"] or "")
+                       for r in c.fetchall()})
+    return salida
+
+
+# Desde cuántas veces se dice que una pieza «suele faltar». Ver veces_que_falto().
+VECES_QUE_FALTO_PARA_AVISAR = 2
+
+
+def equivalentes_confirmadas_con_stock(producto_id):
+    """Las equivalentes 🟢 confirmadas de este producto que HAY en stock, con el mismo veredicto
+    que muestra el buscador (ver anotar_el_respaldo()). Lo pidió una revisión con ChatGPT
+    («recomendación de compra basada en equivalencias: si A tiene poco stock pero existen tres
+    equivalentes verificados, quizá no sea necesario comprar A»). Lo probable no cuenta: para
+    no comprar, tiene que servir seguro."""
+    c.execute("SELECT codigo_clean FROM productos WHERE id = ?", (producto_id,))
+    fila = c.fetchone()
+    if not fila or not fila["codigo_clean"]:
+        return []
+    res = buscar_por_codigo(fila["codigo_clean"])
+    if not res:
+        return []
+    anotar_el_respaldo(res, fila["codigo_clean"])
+    return [f for f in res
+            if f.get("Cadena") != "— el buscado" and f.get("Tipo") != "OEM"
+            and (f.get("Stock") or 0) > 0
+            and veredicto_de_la_equivalencia(f).startswith("🟢")]
 
 
 def listar_pedidos_reposicion(estado="pendiente"):
@@ -2197,7 +2247,7 @@ def detectar_posibles_duplicados(marca_id, umbral=0.87, limite_productos=1500):
 # tres columnas sin deslizar, y antes eran Código y Descripción: la marca, el precio y el stock
 # —lo que se le contesta al cliente— quedaban afuera de la pantalla. La descripción es la más
 # larga y va después.
-COLUMNAS_PRIMERO = ["Codigo", "Marca", "Precio", "Stock", "Libre", "💰", "Veredicto", "Cadena", "Confianza",
+COLUMNAS_PRIMERO = ["Codigo", "Marca", "Precio", "Stock", "Libre", "Ubicación", "💰", "Veredicto", "Cadena", "Confianza",
                     "Fabricante", "Descripcion"]
 
 

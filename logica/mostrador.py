@@ -487,8 +487,133 @@ def no_se_recomienda(f):
         return True
     if f.get("Cadena") == "— el buscado":
         return False
-    return (es_pieza_de_seguridad(f.get("Descripcion"))
-            and not veredicto_de_la_equivalencia(f).startswith("🟢"))
+    veredicto = veredicto_de_la_equivalencia(f)
+    # NUNCA LO QUE SOLO «PARECE»: lo que tiene algo en contra (🔴), lo que llega solo por pistas
+    # o no se pudo comprobar (🟠) y el mismo número en otra marca sin nada que lo confirme (🔵,
+    # ⚪) se muestran, pero no se coronan. Medido sobre 390 búsquedas reales sin mirar el stock
+    # (la copia no lo tiene cargado), el más barato «recomendable» era en 83 una candidata o una
+    # contradicha —una bujía de otro grado térmico—. Lo pidió una revisión con ChatGPT
+    # («protección contra sustitución incorrecta: exigir el nivel de relación»).
+    if veredicto[:1] in ("🔴", "🟠", "🔵", "⚪"):
+        return True
+    return es_pieza_de_seguridad(f.get("Descripcion")) and not veredicto.startswith("🟢")
+
+
+# PRIMERO QUE SIRVA, DESPUÉS QUE CONVENGA: el orden en que se muestran los resultados. Lo pidió
+# una revisión con ChatGPT («ranking por seguridad técnica, y recién después stock, proveedor y
+# precio»). Lo buscado va primero; después lo confirmado, lo probable, lo que hay que revisar y
+# lo que no es la misma pieza; dentro de cada uno, lo que hay en stock y lo más barato.
+_ORDEN_POR_SEGURIDAD = {"🟢": 1, "🟡": 2, "🔵": 3, "🟠": 4, "⚪": 5, "🔴": 6}
+
+
+def ordenar_por_seguridad_y_disponibilidad(filas):
+    """Las filas en el orden de arriba. No cambia las filas: devuelve otra lista."""
+    def clave(f):
+        if f.get("Cadena") == "— el buscado":
+            return (0, 0, 0)
+        tecnica = _ORDEN_POR_SEGURIDAD.get(veredicto_de_la_equivalencia(f)[:1], 7)
+        return (tecnica, 0 if (f.get("Stock") or 0) > 0 else 1, f.get("Precio") or float("inf"))
+    return sorted(filas, key=clave)
+
+
+def por_que_no_se_recomienda(f):
+    """En palabras, por qué esta fila no se corona. Ver no_se_recomienda()."""
+    if f.get("Devuelto"):
+        return "la devolvieron porque no le iba"
+    if f.get("Rechazada"):
+        return "alguien la rechazó en la revisión"
+    veredicto = veredicto_de_la_equivalencia(f)
+    if veredicto[:1] in ("🔴", "🟠", "🔵", "⚪"):
+        return veredicto.split(" ", 1)[-1]
+    return ("es una pieza de seguridad y la equivalencia no está confirmada ("
+            + veredicto.split(" ", 1)[-1] + ")")
+
+
+def la_recomendacion_explicada(filas, fuera_de_escala=()):
+    """Lo que se recomienda y POR QUÉ, en palabras, y por qué no la más barata si no es esa:
+    {"recomendada": fila o None, "texto": str, "por_que_no": str, "stock": str}. Lo pidió una
+    revisión con ChatGPT: «"Recomendada: B, porque es equivalente confirmada, hay stock y cuesta
+    18 % menos" es mucho mejor que "Mejor opción: B"», y «por qué NO recomiendo esta: C es más
+    barata, pero…». Si de lo buscado no hay, lo dice primero («no hay stock de A: hay 7 de B»).
+    También dice cuánto hay de lo buscado y de cada clase de equivalente, sin mezclar lo
+    confirmado con lo que no («inventario por equivalencia»).
+    Solo compite lo que tiene stock y precio (como la corona de antes), sin los kits ni las
+    marcas con la lista en otra escala (ver escala_de_precios_por_marca())."""
+    filas = [f for f in filas if not f.get("_complementario")]
+    con_stock = [f for f in filas if (f.get("Stock") or 0) > 0]
+    buscado = [f for f in filas if f.get("Cadena") == "— el buscado"]
+    unidades = {"buscado": sum(f.get("Stock") or 0 for f in buscado), "🟢": 0, "🟡": 0, "otros": 0}
+    for f in con_stock:
+        if f in buscado:
+            continue
+        clase = veredicto_de_la_equivalencia(f)[:1]
+        unidades[clase if clase in ("🟢", "🟡") else "otros"] += f.get("Stock") or 0
+    partes = [f"lo buscado: {miles(unidades['buscado'], 0)}"]
+    if unidades["🟢"]:
+        partes.append(f"equivalentes confirmadas: {miles(unidades['🟢'], 0)}")
+    if unidades["🟡"]:
+        partes.append(f"probables, sin confirmar: {miles(unidades['🟡'], 0)}")
+    if unidades["otros"]:
+        partes.append(f"para revisar o que no son la misma pieza: {miles(unidades['otros'], 0)}")
+    salida = {"recomendada": None, "texto": "", "por_que_no": "",
+              "stock": "📦 En stock — " + " · ".join(partes) if con_stock else ""}
+    con_precio = [f for f in con_stock if f.get("Precio") and f.get("Marca") not in fuera_de_escala]
+    candidatas = [f for f in con_precio if not no_se_recomienda(f)]
+    if not candidatas:
+        # Hay en stock, pero nada que se pueda recomendar: se dice, y por qué la más barata no.
+        # Callar dejaba la tabla sin corona y sin explicación, como si faltara algo.
+        if con_precio:
+            la_mas_barata = min(con_precio, key=lambda f: f["Precio"])
+            salida["por_que_no"] = (f"Ninguna se recomienda: lo que hay en stock no está "
+                                    f"confirmado. La más barata, {la_mas_barata.get('Marca', '')} "
+                                    f"{la_mas_barata.get('Codigo', '')}: "
+                                    f"{por_que_no_se_recomienda(la_mas_barata)}.")
+        return salida
+    mejor = min(candidatas, key=lambda f: f["Precio"])
+    salida["recomendada"] = mejor
+    if mejor in buscado:
+        por_que = "es lo que pidió el cliente"
+    else:
+        por_que = veredicto_de_la_equivalencia(mejor).split(" ", 1)[-1]
+    precio_buscado = min((f["Precio"] for f in buscado if f.get("Precio")), default=None)
+    ahorro = (f", y cuesta {100 * (1 - mejor['Precio'] / precio_buscado):.0f} % menos que lo "
+              "buscado" if precio_buscado and mejor not in buscado
+              and mejor["Precio"] < precio_buscado else "")
+    # «No hay stock de A»: solo si el stock de lo buscado está cargado y es cero. Sin el dato
+    # (None) no se sabe, y decir «no hay» sería inventarlo.
+    sin_lo_buscado = (mejor not in buscado and bool(buscado)
+                      and all(f.get("Stock") is not None and f["Stock"] <= 0 for f in buscado))
+    salida["texto"] = ("🏆 " + ("No hay de lo buscado. " if sin_lo_buscado else "")
+                       + f"**Recomendada: {mejor.get('Marca', '')} {mejor.get('Codigo', '')}** — "
+                       f"{por_que}, hay {miles(mejor.get('Stock') or 0, 0)} en stock{ahorro}.")
+    la_mas_barata = min(con_precio, key=lambda f: f["Precio"])
+    if la_mas_barata is not mejor and la_mas_barata["Precio"] < mejor["Precio"]:
+        salida["por_que_no"] = (f"La más barata, {la_mas_barata.get('Marca', '')} "
+                                f"{la_mas_barata.get('Codigo', '')}, no se recomienda: "
+                                f"{por_que_no_se_recomienda(la_mas_barata)}.")
+    return salida
+
+
+def coronar_la_recomendada(filas, fuera_de_escala=()):
+    """Ordena las filas (ver ordenar_por_seguridad_y_disponibilidad()), pone la corona en «💰»
+    a la recomendada y devuelve (filas ordenadas, la_recomendacion_explicada()). La corona
+    decía «🏆 Más barato en stock» y era eso: la más barata de lo que no estaba descartado.
+    Medido sobre 390 búsquedas reales, en 83 esa era una candidata o una contradicha."""
+    filas = ordenar_por_seguridad_y_disponibilidad(filas)
+    reco = la_recomendacion_explicada(filas, fuera_de_escala)
+    for f in filas:
+        f["💰"] = "🏆 Recomendada" if f is reco["recomendada"] else ""
+    return filas, reco
+
+
+def mostrar_la_recomendacion(reco):
+    """La recomendación y su porqué, arriba de la tabla. Ver la_recomendacion_explicada()."""
+    if reco["texto"]:
+        st.success(reco["texto"])
+    if reco["por_que_no"]:
+        st.caption("🚫 " + reco["por_que_no"])
+    if reco["stock"]:
+        st.caption(reco["stock"])
 
 
 def mejor_margen_entre_equivalentes(res):

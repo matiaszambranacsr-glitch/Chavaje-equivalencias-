@@ -1001,15 +1001,11 @@ if pagina == PAGINAS[0]:
                         # la pieza suelta, y coronarlo «el más barato» sería comparar dos cosas
                         # distintas. Al revés, la pieza suelta adentro de un kit tampoco.
                         # Ni la marca con la lista en otra escala: ver escala_de_precios_por_marca().
+                        # PRIMERO QUE SIRVA, DESPUÉS QUE CONVENGA: se ordena por el veredicto y
+                        # recién después por stock y precio, y la recomendada va con su porqué.
+                        # Ver coronar_la_recomendada().
                         _fuera_escala = marcas_con_precios_fuera_de_escala()
-                        candidatos_precio = [f for f in res
-                                             if f.get("Precio") and (f.get("Stock") or 0) > 0
-                                             and not f.get("_complementario")
-                                             and not no_se_recomienda(f)
-                                             and f.get("Marca") not in _fuera_escala]
-                        id_mas_barato = min(candidatos_precio, key=lambda f: f["Precio"])["ID"] if candidatos_precio else None
-                        for f in res:
-                            f["💰"] = "🏆 Más barato en stock" if f["ID"] == id_mas_barato else ""
+                        res, _reco = coronar_la_recomendada(res, _fuera_escala)
 
                         # Acá se arma lo que se ve, SIN tocar las filas guardadas. Dos motivos,
                         # los dos aprendidos a los golpes:
@@ -1033,6 +1029,21 @@ if pagina == PAGINAS[0]:
                         # En el celular, tarjetas; la tabla queda a un toque. Ver
                         # mostrar_tarjetas_de_resultados(). En el lugar guardado arriba.
                         with _lugar_de_la_tabla:
+                            mostrar_la_recomendacion(_reco)
+                            # «ESTA PIEZA SUELE FALTAR». Ver veces_que_falto().
+                            _buscados_aca = [f for f in res if f.get("Cadena") == "— el buscado"]
+                            try:
+                                _falto = veces_que_falto([f["ID"] for f in _buscados_aca])
+                            except sqlite3.Error as _err:
+                                anotar_error("veces_que_falto", _err)
+                                _falto = {}
+                            for _fb in _buscados_aca:
+                                _veces, _ultima = _falto.get(_fb["ID"], (0, ""))
+                                if _veces >= VECES_QUE_FALTO_PARA_AVISAR:
+                                    st.caption(f"🔔 **{_fb['Marca']} {_fb['Codigo']} suele "
+                                               f"faltar**: se marcó para reponer {_veces} veces "
+                                               f"(la última, {_ultima[:10]}). Conviene tener "
+                                               "una equivalente confirmada en el depósito.")
                             if es_celular() and not st.toggle("📋 Ver como tabla",
                                                                key=f"como_tabla_{clean}"):
                                 mostrar_tarjetas_de_resultados(mostrar)
@@ -1056,6 +1067,20 @@ if pagina == PAGINAS[0]:
                                     + "): revisalos antes de cotizar. Se corrige con el "
                                     "coeficiente de la lista, en "
                                     f"{miga_hasta('Marcas')} → 📏 Coeficiente de la lista.")
+                            # UNA MARCA QUE VIENE FALLADA más que antes: se avisa al venderla.
+                            # No cambia el veredicto: es calidad, no equivalencia. Ver
+                            # calidad_por_marca().
+                            try:
+                                _fallan = set(marcas_con_fallas_en_aumento())
+                            except sqlite3.Error as _err:
+                                anotar_error("marcas_con_fallas_en_aumento", _err)
+                                _fallan = set()
+                            _fallan_aca = sorted({f.get("Fabricante") or f.get("Marca")
+                                                  for f in res} & _fallan)
+                            if _fallan_aca:
+                                st.warning(f"💥 De **{', '.join(_fallan_aca)}** vienen más piezas "
+                                           "falladas que el mes pasado: revisala antes de "
+                                           "entregarla. La equivalencia no cambia; es la calidad.")
 
                         # La pregunta que sigue siempre a «¿lo tenés?»: ¿le sirve al auto del
                         # cliente? La app tiene el dato en los catálogos de fabricante y no lo
@@ -1400,7 +1425,7 @@ if pagina == PAGINAS[0]:
                                                     f"{fila_stock['Marca']} - {fila_stock['Codigo']}",
                                                     f"stock_{clean}",
                                                     veredicto_de_la_equivalencia(fila_stock),
-                                                    evidencia_de_la_fila(fila_stock)),
+                                                    evidencia_de_la_fila(fila_stock, _reco["recomendada"])),
                                               help="Anota la venta para ir descubriendo equivalencias solas")
                                 colr3.button("📌 Reponer", key=f"pedir_repo_{fila_stock['ID']}_{clean}",
                                               on_click=pedir_reposicion_y_avisar,
@@ -1428,7 +1453,7 @@ if pagina == PAGINAS[0]:
                                           args=(_elegido, codigo_individual, _rotulos[_elegido],
                                                 f"stock_{clean}",
                                                 veredicto_de_la_equivalencia(_fila_elegida),
-                                                evidencia_de_la_fila(_fila_elegida)),
+                                                evidencia_de_la_fila(_fila_elegida, _reco["recomendada"])),
                                           help="Anota la venta para ir descubriendo equivalencias solas")
                             colr3.button("📌 Reponer", key=f"pedir_elegido_{clean}",
                                           on_click=pedir_reposicion_y_avisar,
@@ -1821,13 +1846,9 @@ if pagina == PAGINAS[0]:
                             st.caption(fila_txt["Descripcion"])
                         if equivalentes:
                             anotar_el_respaldo(equivalentes, clean_txt)
-                            candidatos_precio = [f for f in equivalentes
-                                                  if f.get("Precio") and (f.get("Stock") or 0) > 0
-                                                  and not no_se_recomienda(f)]
-                            id_barato = (min(candidatos_precio, key=lambda f: f["Precio"])["ID"]
-                                          if candidatos_precio else None)
-                            for f in equivalentes:
-                                f["💰"] = "🏆 Más barato en stock" if f["ID"] == id_barato else ""
+                            equivalentes, _reco_txt = coronar_la_recomendada(
+                                equivalentes, marcas_con_precios_fuera_de_escala())
+                            mostrar_la_recomendacion(_reco_txt)
                             _tabla_eq = para_mostrar(quitar_id(equivalentes))
                             st.dataframe(_tabla_eq, width="stretch", hide_index=True,
                                          column_order=columnas_que_dicen_algo(_tabla_eq),

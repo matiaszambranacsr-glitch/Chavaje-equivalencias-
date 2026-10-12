@@ -737,6 +737,154 @@ def tablero_de_calidad(minimo_por_grupo=30, tope=10):
         "vendidas_como_equivalente_y_devueltas": vendidas_y_devueltas}
     salida["errores"] = registro_de_errores()
     salida["hace_un_mes"] = _foto_de_calidad(salida["numeros"])
+    salida["por_marca"] = calidad_por_marca()
+    salida["contra_la_recomendacion"] = ventas_contra_la_recomendacion()
+    return salida
+
+
+def casos_para_practicar(cuantos=10, semilla=None):
+    """Pares que ya decidió alguien con experiencia, para practicar «¿la aprobarías?» antes de
+    revisar de verdad. Lo pidió una revisión con ChatGPT («modo entrenamiento: usar los casos
+    difíciles para capacitar empleados nuevos, y después mostrar qué faltaba, qué contradicción
+    existía y cuál era la respuesta correcta»).
+    Mitad aprobados y mitad rechazados —contestar siempre lo mismo no sirve—, y de los
+    rechazados primero los que tienen el motivo anotado: son los que enseñan por qué no. Solo
+    los que tienen los dos productos todavía cargados. [{a, b, decision, revisado_por, fecha,
+    motivo, por_que}], en un orden al azar (con `semilla`, siempre el mismo)."""
+    import random
+    rnd = random.Random(semilla)
+    c.execute("""SELECT r.producto_a_id AS a, r.producto_b_id AS b, r.decision, r.revisado_por,
+                        r.fecha, r.motivo, r.por_que
+                 FROM equivalencias_revisadas r
+                 JOIN productos pa ON pa.id = r.producto_a_id
+                 JOIN productos pb ON pb.id = r.producto_b_id
+                 WHERE r.producto_a_id < r.producto_b_id
+                   AND r.decision IN ('ok', 'rechazada')
+                 ORDER BY r.producto_a_id, r.producto_b_id""")
+    filas = [dict(r) for r in c.fetchall()]
+    rechazadas = [f for f in filas if f["decision"] == "rechazada"]
+    rnd.shuffle(rechazadas)
+    rechazadas.sort(key=lambda f: not f["motivo"])      # estable: primero las con motivo
+    aprobadas = [f for f in filas if f["decision"] == "ok"]
+    rnd.shuffle(aprobadas)
+    mitad = min(cuantos // 2, len(rechazadas))
+    casos = rechazadas[:mitad] + aprobadas[:cuantos - mitad]
+    rnd.shuffle(casos)
+    return casos
+
+
+def la_respuesta_del_caso(caso):
+    """Lo que se muestra después de contestar: la decisión de verdad, quién y cuándo, por qué
+    (el motivo y lo que había al decidir), y lo que dice HOY la ficha de prueba del par: qué
+    faltaba y qué lo contradecía. {"correcta": "ok"|"rechazada", "texto": str, "ficha": ficha}"""
+    ficha = ficha_de_prueba(caso["a"], caso["b"])
+    quien = f"{caso['revisado_por'] or 'alguien'} el {(caso['fecha'] or '')[:10]}"
+    if caso["decision"] == "ok":
+        texto = f"✅ **La aprobó** {quien}."
+    else:
+        texto = (f"🚫 **La rechazó** {quien}"
+                 + (f": {MOTIVOS_DE_RECHAZO.get(caso['motivo'], caso['motivo'])}"
+                    if caso["motivo"] else "") + ".")
+    if caso["por_que"]:
+        texto += f" Lo que había al decidir: {caso['por_que']}"
+    return {"correcta": caso["decision"], "texto": texto, "ficha": ficha}
+
+
+def calidad_por_marca(dias=30):
+    """Lo que volvió, por la marca que FABRICA la pieza (o la de la lista, si no se sabe), y
+    separado por causa: «💥 vino fallada» es la calidad de la marca; «no era la pieza» es la
+    equivalencia; lo demás (la instalaron mal, otro auto, transporte, se entregó otra) no es de
+    ninguna de las dos. Lo pidió una revisión con ChatGPT: «separar "equivalente" de "calidad":
+    una pieza barata y una premium pueden ser equivalentes en aplicación pero no en duración», e
+    «historial de fallas por fabricante: si empieza a generar muchas devoluciones, no bloquear,
+    pero sí elevar el nivel de revisión». El semáforo: 🔴 si en los últimos `dias` vinieron
+    falladas dos o más y más que en los `dias` de antes; 🟡 si vino alguna fallada en ese
+    tiempo. No toca el veredicto de ninguna equivalencia: es otra pregunta."""
+    try:
+        no_era = sorted(MOTIVOS_DE_NO_ERA_LA_PIEZA)
+        calidad = sorted(MOTIVOS_DE_CALIDAD)
+        c.execute(f"""SELECT COALESCE(NULLIF(TRIM(p.marca_repuesto), ''), m.nombre) AS marca,
+                             SUM(d.motivo IN ({",".join("?" * len(calidad))})) AS falladas,
+                             SUM(d.motivo IN ({",".join("?" * len(no_era))})) AS no_era,
+                             COUNT(*) AS todas,
+                             SUM(d.motivo IN ({",".join("?" * len(calidad))})
+                                 AND julianday('now') - julianday(d.fecha) <= ?) AS ahora,
+                             SUM(d.motivo IN ({",".join("?" * len(calidad))})
+                                 AND julianday('now') - julianday(d.fecha) > ?
+                                 AND julianday('now') - julianday(d.fecha) <= ?) AS antes
+                      FROM devoluciones d JOIN productos p ON p.id = d.producto_id
+                      JOIN marcas m ON m.id = p.marca_id
+                      GROUP BY 1""", calidad + no_era + calidad + [dias] + calidad
+                  + [dias, 2 * dias])
+        devueltas = c.fetchall()
+        c.execute("""SELECT COALESCE(NULLIF(TRIM(p.marca_repuesto), ''), m.nombre) AS marca,
+                            COUNT(*) AS n
+                     FROM ventas_registradas v JOIN productos p ON p.id = v.producto_id
+                     JOIN marcas m ON m.id = p.marca_id GROUP BY 1""")
+        vendidas = {r["marca"]: r["n"] for r in c.fetchall()}
+    except sqlite3.OperationalError as _err:
+        anotar_error("calidad_por_marca", _err)
+        return []
+    salida = []
+    for r in devueltas:
+        ahora, antes = r["ahora"] or 0, r["antes"] or 0
+        semaforo = "🔴" if ahora >= 2 and ahora > antes else "🟡" if ahora else "🟢"
+        salida.append({"Semáforo": semaforo, "Marca": r["marca"],
+                       "Vendidas": vendidas.get(r["marca"], 0),
+                       "💥 Falladas (calidad)": r["falladas"] or 0,
+                       "Falladas (30 días)": ahora, "Falladas (30 días antes)": antes,
+                       "No era la pieza (equivalencia)": r["no_era"] or 0,
+                       "Otras causas": (r["todas"] or 0) - (r["falladas"] or 0) - (r["no_era"] or 0)})
+    _orden = {"🔴": 0, "🟡": 1, "🟢": 2}
+    salida.sort(key=lambda x: (_orden[x["Semáforo"]], -x["💥 Falladas (calidad)"], x["Marca"]))
+    return salida
+
+
+def marcas_con_fallas_en_aumento(dias=30):
+    """Las marcas con el semáforo de calidad en 🔴: ver calidad_por_marca()."""
+    return [x["Marca"] for x in calidad_por_marca(dias) if x["Semáforo"] == "🔴"]
+
+
+def ventas_contra_la_recomendacion(dias=90):
+    """De lo vendido en los últimos `dias` con la «caja negra» anotada, cuánto fue OTRA cosa
+    que lo que la app recomendaba, y cuánto de eso volvió porque no era la pieza. Ver
+    evidencia_de_la_fila(). Lo pidió una revisión con ChatGPT («historial de decisiones
+    comerciales: sirve para entender el comportamiento y mejorar las recomendaciones»).
+    {"ventas": n, "contra": n, "contra_y_devueltas": n, "ejemplos": [...]}"""
+    salida = {"ventas": 0, "contra": 0, "contra_y_devueltas": 0, "ejemplos": []}
+    try:
+        c.execute("""SELECT v.fecha, v.usuario, v.evidencia, v.codigo_pedido_clean AS pedido,
+                            v.producto_id, p.codigo_raw AS vendido, m.nombre AS marca
+                     FROM ventas_registradas v JOIN productos p ON p.id = v.producto_id
+                     JOIN marcas m ON m.id = p.marca_id
+                     WHERE v.evidencia IS NOT NULL
+                       AND julianday('now') - julianday(v.fecha) <= ?
+                     ORDER BY v.fecha DESC, v.id DESC""", (dias,))
+        filas = c.fetchall()
+        devueltos = pares_devueltos()
+    except sqlite3.OperationalError as _err:
+        anotar_error("ventas_contra_la_recomendacion", _err)
+        return salida
+    ids_del_pedido = {}
+    salida["ventas"] = len(filas)
+    for r in filas:
+        evidencia = r["evidencia"] or ""
+        if VENDIDA_OTRA_QUE_LA_RECOMENDADA not in evidencia:
+            continue
+        salida["contra"] += 1
+        if r["pedido"] and r["pedido"] not in ids_del_pedido:
+            c.execute("SELECT id FROM productos WHERE codigo_clean = ?", (r["pedido"],))
+            ids_del_pedido[r["pedido"]] = [x["id"] for x in c.fetchall()]
+        volvio = any((min(a, r["producto_id"]), max(a, r["producto_id"])) in devueltos
+                     for a in ids_del_pedido.get(r["pedido"], ()))
+        salida["contra_y_devueltas"] += volvio
+        if len(salida["ejemplos"]) < 20:
+            salida["ejemplos"].append({
+                "Fecha": (r["fecha"] or "")[:16], "Quién": r["usuario"] or "",
+                "Pidieron": r["pedido"] or "", "Se llevó": f"{r['marca']} {r['vendido']}",
+                "La app recomendaba": evidencia.split(VENDIDA_OTRA_QUE_LA_RECOMENDADA, 1)[1]
+                                      .split(" · ")[0],
+                "Volvió": "↩️ sí" if volvio else ""})
     return salida
 
 
@@ -1680,8 +1828,18 @@ MOTIVOS_DE_DEVOLUCION = {
     "faltante": "🧩 No le iba: le faltaba algo que trae la original",
     "modificacion": "🛠️ Entró, pero hubo que modificarla",
     "fallada": "💥 Vino fallada (era la pieza, con un defecto)",
+    # LO QUE NO ES CULPA DE LA PIEZA NI DE LA EQUIVALENCIA: no baja el vínculo ni cuenta como
+    # error. Lo pidió una revisión con ChatGPT («no mezclar fallas de instalación con fallas de
+    # pieza: instalación incorrecta, vehículo incorrecto, daño durante el transporte, error
+    # humano»). La información de catálogo incorrecta sí es de la equivalencia: es «aplicacion».
+    "instalacion": "🧰 La instalaron mal (la pieza estaba bien)",
+    "otro_auto": "🚙 El auto no era el que dijeron (otro modelo, motor o año)",
+    "transporte": "📦 Llegó dañada (golpe o transporte)",
+    "se_entrego_otra": "🙋 Se entregó otra cosa por error (no la que dijo la app)",
     "otro": "Otro motivo",
 }
+# Las que dicen algo de la CALIDAD de la marca, no de la equivalencia: ver calidad_por_marca().
+MOTIVOS_DE_CALIDAD = frozenset({"fallada"})
 # Los que dicen que NO era la pieza: bajan el vínculo y lo marcan en rojo. Hubo que modificarla
 # cuenta: una equivalencia es la que entra tal cual.
 MOTIVOS_DE_NO_ERA_LA_PIEZA = frozenset({"no_le_iba", "medida", "rosca", "conector", "lado",

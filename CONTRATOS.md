@@ -72,6 +72,16 @@ Las pruebas se corren como dice el README, en «Antes de subir un cambio».
 | La versión anterior del programa trabaja sobre la base migrada por esta | — | `pruebas_de_compatibilidad.py --base` |
 | Lo que suele cambiarse junto se avisa al vender; un combo borrado a mano no vuelve solo | `lo_que_suele_ir_con()`, `COMBOS_DE_FABRICA` | `pruebas_de_la_precision.py` (52) |
 | Antes de vender, primero la pregunta que más separa | `ordenar_por_lo_que_separa()` | `pruebas_de_la_precision.py` (53) |
+| Solo se recomienda lo buscado, lo 🟢 y lo 🟡 (lo 🟡 no, si es de seguridad); lo 🟠, 🔴, 🔵 y ⚪ se muestra pero no se corona | `no_se_recomienda()`, `la_recomendacion_explicada()` | `pruebas_de_la_precision.py` (30, 54) |
+| La recomendación dice por qué, por qué no la más barata (o por qué ninguna) y el stock por clase, sin mezclar lo confirmado con lo que no | `la_recomendacion_explicada()`, `por_que_no_se_recomienda()` | `pruebas_de_la_precision.py` (54) |
+| Primero lo que sirve, después lo que conviene: lo buscado, 🟢, 🟡, 🔵, 🟠, ⚪, 🔴, y dentro de cada uno el stock y el precio | `ordenar_por_seguridad_y_disponibilidad()`, `coronar_la_recomendada()` | `pruebas_de_la_precision.py` (54) |
+| Si se vende otra que la recomendada, la venta lo anota, y el tablero cuenta cuántas y cuántas volvieron | `evidencia_de_la_fila(recomendada=)`, `ventas_contra_la_recomendacion()` | `pruebas_de_la_precision.py` (54, 55) |
+| Una devolución por instalación, otro auto, transporte o error al entregar no baja el vínculo ni cuenta como error | `MOTIVOS_DE_DEVOLUCION`, `MOTIVOS_DE_NO_ERA_LA_PIEZA` | `pruebas_de_la_precision.py` (55) |
+| «Vino fallada» es calidad de la marca, no equivalencia: se cuenta aparte y avisa si crece | `calidad_por_marca()`, `marcas_con_fallas_en_aumento()`, `diagnostico_de_salud()` | `pruebas_de_la_precision.py` (55) |
+| La comprobación guiada: alcanza con que difiera una para rechazarla, y solo con todo coincidiendo se marca sin texto | `preguntas_para_comprobar()`, `resultado_de_la_comprobacion()`, `rechazar_por_la_comprobacion()` | `pruebas_de_la_precision.py` (56) |
+| Practicar no cambia nada: mitad aprobados y mitad rechazados, primero los rechazos con motivo | `casos_para_practicar()`, `la_respuesta_del_caso()` | `pruebas_de_la_precision.py` (57) |
+| Para no comprar, la equivalente tiene que estar confirmada y en stock | `equivalentes_confirmadas_con_stock()` | `pruebas_de_la_precision.py` (58) |
+| Lo que el motor del auto ya dice (nafta o diésel) no se pregunta | `repuestos_de_este_auto()` | `pruebas_de_la_precision.py` (59) |
 
 ## El stock, los precios y la plata
 

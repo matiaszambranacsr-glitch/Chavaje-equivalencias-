@@ -6477,6 +6477,42 @@ el botón**:
 - «🔌 Probar las fuentes de afuera» suma la Central de Deudores (con el CUIT de la AFIP, nunca el
   de un cliente) y la inflación de respaldo.
 
+## 🏆 La precisión, novena parte: primero que sirva, después que convenga
+
+Puntos 253 a 300 de la misma revisión con ChatGPT, medidos sobre la copia de la base real. La
+copia no trae stock: para medir la recomendación se simuló stock en todo.
+
+| Punto | Qué se encontró | Qué se hizo |
+|---|---|---|
+| 263. Nunca sustituir porque «parece» | **La corona «🏆 Más barato en stock» caía en una candidata o una contradicha en 85 de 390 búsquedas** (81 🟠 solo con pistas, 2 🔴, 2 🔵): solo dejaba afuera lo devuelto, lo rechazado y la pieza de seguridad sin confirmar. En 400 búsquedas hay 1.197 equivalentes: 3 🟢, 63 🟡, 484 🟠 y 642 🔴; de las más baratas que lo buscado, 508 son 🟠 o 🔴 y 5 son 🟢 o 🟡. | **Solo se recomienda lo buscado, lo 🟢 y lo 🟡** (lo 🟡 no, si es de seguridad). Lo demás se muestra, pero no se corona. Medido después: 350 veces lo buscado, 3 una 🟡, **0 una 🟠, 🔴 o 🔵**; en 37 no hay nada para recomendar y lo dice. |
+| 267 a 269. El orden: primero que sirva | La tabla salía en el orden de la búsqueda. | **Lo buscado, después 🟢, 🟡, 🔵, 🟠, ⚪ y 🔴, y dentro de cada uno lo que hay en stock y lo más barato.** El veredicto (lo técnico) y el precio y el margen (lo comercial) siguen en columnas aparte. Del proveedor y el plazo no hay datos. |
+| 270 y 272. Por qué esta, y por qué no la más barata | Decía «🏆 Más barato en stock», sin más. | **«🏆 Recomendada: CRI-FA 14-R265.82 — es lo que pidió el cliente, hay 3 en stock»**, o «— equivalencia confirmada, hay 7 en stock, y cuesta 18 % menos que lo buscado». Abajo: **«🚫 La más barata, CRI-FA 48-6036, no se recomienda: revisar antes de vender: solo una pista (🔤 se parecen las descripciones)»**. Si no hay ninguna: «Ninguna se recomienda: lo que hay en stock no está confirmado» (BKR5E-11: lo buscado es TARANTO, con la lista en otra escala, y las 9 bujías en stock tienen algo en contra). |
+| 261 y 262. Stock por equivalencia; «no hay de A, hay de B» | — | Debajo de la recomendación: **«📦 En stock — lo buscado: 0 · equivalentes confirmadas: 7 · probables, sin confirmar: 2 · para revisar o que no son la misma pieza: 15»**. Si de lo buscado no hay (con el stock cargado en cero), empieza «No hay de lo buscado.». |
+| 273. Historial de decisiones comerciales | La venta guardaba el veredicto y lo que lo sostenía. | Si se vende **otra que la recomendada**, queda anotado («la app recomendaba CRI-FA 14-R265.82 a $ 30.561»), y el tablero cuenta cuántas veces pasó en 90 días y cuántas de esas volvieron. |
+| 299 y 300. Sesgo por marca y neutralidad frente al precio | El puntaje técnico no premia lo barato: suma 10 cuando los precios **se parecen** (quitárselo no cambia los errores —3 falsos positivos, 8 negativos— y manda 577 aprobados correctos a revisión: se deja). Ni el orden ni la recomendación miran la marca ni cuántas veces aparece en el catálogo. Medido: cada marca gana en el 47 al 92 % de las búsquedas en las que está, porque casi siempre gana lo buscado; con la regla vieja, IMPERIAL ganaba en el 98 % y CRI-FA en el 10 %. | — |
+| 260. Ubicación | Se cargaba y se usaba solo para ordenar el picking. | **Columna «Ubicación» en los resultados y «📍 Estante 4» en la tarjeta del celular.** Hoy ningún producto tiene ubicación cargada. |
+| 265. «Esta pieza suele faltar» | Lo que se marcaba para reponer se contaba. | Si lo buscado se marcó dos veces o más: **«🔔 TARANTO BKR5E-11 suele faltar: se marcó para reponer 3 veces»**. |
+| 266. Comprar sabiendo lo que ya hay | — | En «📌 Para pedir», **«🔁 Mirar si hay equivalentes confirmadas en stock»**: «↪️ Quizá no haga falta comprarlo: hay 4 de ILLINOIS IEQ1 (equivalente confirmada)». Solo 🟢 y con stock. |
+| 287 y 290. No mezclar fallas | Las devoluciones ya separaban «no le iba» (baja el vínculo) de «vino fallada». | Cuatro causas más, que **no bajan el vínculo ni cuentan como error**: la instalaron mal, el auto no era el que dijeron, llegó dañada y se entregó otra cosa por error. La información de catálogo equivocada sí es de la equivalencia («es de otra versión del auto»). Una sola devolución «no era la pieza» ya baja el vínculo: no espera a veinte. |
+| 282, 283 y 286. Calidad no es equivalencia | — | **«🏭 Lo que volvió, por marca y por causa»** en el tablero: falladas (la calidad de la marca), no era la pieza (la equivalencia) y otras causas, con 🔴 si vienen más falladas que el mes anterior. Eso avisa en «lo que necesita atención» y en el buscador («💥 De X vienen más piezas falladas que el mes pasado: revisala antes de entregarla»), sin tocar el veredicto. Lo que volvió porque no era la pieza deja de recomendarse al instante. |
+| 276. Un motor de preguntas | La ficha decía lo que faltaba y pedía contar en texto lo que se miró. | **La comprobación guiada**: la ficha pregunta lo que decide, de lo que más identifica a la pieza a lo que menos (lo que todavía no coincide a la vista, hasta 5), y cada una se contesta «coincide», «difiere» o «no lo miré». **Con una que difiera: «🔴 No es la misma pieza» y el botón «🚫 Rechazarla»** (corta el vínculo y queda rechazada con lo que difiere, para que no vuelva por otro camino). Con todo coincidiendo se marca comprobada sin escribir nada. |
+| 291 y 292. Casos difíciles y modo entrenamiento | — | **«🎓 Practicar: ¿la aprobarías?»**, en Equivalencias sugeridas: casos ya decididos, mitad aprobados y mitad rechazados, primero los rechazos con motivo. Se ven las dos descripciones (con lo que difiere en negrita) y las medidas; al contestar, quién la decidió, por qué, qué dice hoy la ficha y qué le faltaba. Lleva la cuenta. No cambia nada. |
+| 253. No preguntar lo que ya se sabe | — | En repuestos por vehículo, si el motor conocido (del VIN o de la ficha) dice nafta o diésel, **lo del otro combustible no se muestra y «¿Es nafta o diésel?» no se pregunta**. |
+| 294 a 296. Permisos por riesgo, doble firma, cuatro ojos | Hay invitado, empleado, administrador y taller. **Las 46.147 decisiones las tomó una sola persona**, y no hay ningún vínculo verificado a mano: pedir dos firmas pararía todo. Las reglas no se tocan desde la app: son código, y antes de subir una versión se simula sobre todo lo decidido. | Sin cambio. |
+| 297 y 298. Probar reglas sin tocar nada | Ya: el laboratorio y `pruebas_de_la_revision.py --base --linea-base` (qué habría hecho la regla con todo lo decidido). | — |
+| 255, 256 y 264. Escanear y discontinuados | Ya: el código de barras de la caja (varios por foto, cada uno con si está o no), la lectura del código con una foto y los «probablemente discontinuados» (faltaron en las últimas listas). | — |
+| 259. Duplicados físicos | La base no deja dos productos con la misma marca y el mismo código. Medido: 0, y 0 con el mismo código de fabricante en dos listas. | — |
+| 274, 275, 278 y 279. Lo que pasó después de vender | Ya: «✋ La comprobé en la mano», la devolución con su causa («otra ficha o conector», «hubo que modificarla») y la ficha de cada auto con lo que se le puso, cuándo y con qué kilometraje. Hoy no hay ningún auto cargado. | — |
+| 254, 257, 258, 277, 280, 281, 284, 285, 288, 289 y 293 | Leer el VIN con la cámara (va estampado; el lector lee EAN, UPC y QR), inventario y etiquetas por foto, vida útil observada, lotes (la app no registra las compras por lote), fotos de la instalación, comparar piezas devueltas y exámenes por especialidad: necesitan datos que la app no tiene o una lectura que no es confiable. | No se hicieron. |
+
+`VERSION_CONFIANZA` sigue en 14: el puntaje no cambia (la simulación contra la línea de base da
+«sin cambios», y el buscador y la ficha coinciden en 755 de 755). Probado en
+`pruebas_de_la_precision.py` (54 a 59; 28 fallas puestas a mano, las 28 detectadas), en
+`pruebas_de_compatibilidad.py` y en la app: la búsqueda con la recomendación y su porqué, una sola
+corona, la venta de otra que la recomendada anotada, la comprobación guiada que rechaza, la
+práctica con su cuenta, «para pedir» y el recorrido de las 32 pantallas, sin errores. La búsqueda
+tarda lo mismo: mediana 101 ms.
+
 ## 🧭 La precisión, octava parte: una sola verdad, fallar cerrado y la recuperación probada
 
 Puntos 214 a 252 de la misma revisión con ChatGPT, medidos sobre la copia de la base real.

@@ -272,6 +272,9 @@ def buscar_por_texto(texto, aflojar=True):
     minimo = utiles if utiles <= 2 else max(2, (utiles * 2) // 3)
 
     _fabricante = campo_opcional_de_producto(c, "marca_repuesto", "Fabricante")
+    # Dónde está en el depósito, si se cargó: «📍 Estante 4» al lado del stock. Lo pidió una
+    # revisión con ChatGPT («ubicación física del repuesto, y desde la búsqueda»).
+    _ubicacion = campo_opcional_de_producto(c, "ubicacion", "Ubicación")
     # Siempre al menos uno, para que el IN () no quede vacío.
     _codigos_escritos = [sanitizar(p) for p in palabras if sanitizar(p)] or [""]
     # UNA pasada por la tabla: las coincidencias se cuentan una vez (antes se calculaban en el
@@ -290,7 +293,7 @@ def buscar_por_texto(texto, aflojar=True):
            -- Va por campo_opcional_de_producto() y no directo: contra una base que todavía no
            -- tiene la columna, nombrarla acá tumba el buscador entero.
            {_fabricante},
-           p.precio AS "Precio", p.stock AS "Stock",
+           p.precio AS "Precio", p.stock AS "Stock", {_ubicacion},
            p.favorito AS "Favorito", ({suma}) AS _coincidencias,
            LENGTH(p.descripcion) AS _largo
     FROM productos p JOIN marcas m ON m.id = p.marca_id

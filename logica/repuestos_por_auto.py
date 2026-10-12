@@ -169,6 +169,12 @@ def repuestos_de_este_auto(marca_auto, modelo="", anio=None, motor="", vin="", l
         if motor:
             m_cil = re.search(r'\d[.,]\d', motor)
             cilindrada = m_cil.group(0).replace(",", ".") if m_cil else None
+        # «NO HACE FALTA PREGUNTAR» lo que el auto ya dice: si el motor conocido (del VIN o de
+        # la ficha) dice nafta o diésel, lo del otro combustible no le va, y «¿es nafta o
+        # diésel?» deja de preguntarse (ver versiones_que_hay_que_preguntar()). Lo pidió una
+        # revisión con ChatGPT («si el sistema ya sabe VIN → versión → motor, no hacer perder
+        # tiempo al vendedor»). Como con la cilindrada, lo que no lo dice se deja pasar.
+        combustible = combustible_desde_descripcion(motor) if motor else None
 
         filtrados = []
         for f in candidatos:
@@ -178,6 +184,9 @@ def repuestos_de_este_auto(marca_auto, modelo="", anio=None, motor="", vin="", l
                 if sirve is False:
                     continue
                 f["Año"] = "✅ coincide" if sirve else "— no aclara"
+            if combustible and combustible_desde_descripcion(f["Descripcion"]) not in (
+                    None, combustible):
+                continue
             if cilindrada:
                 otras = set(re.findall(r'\d[.,]\d', desc))
                 if otras and cilindrada not in {o.replace(",", ".") for o in otras}:
