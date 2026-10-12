@@ -1259,10 +1259,6 @@ def veredicto_de_la_equivalencia(fila):
     confianza = str(fila.get("Confianza") or "")
     if cadena.startswith("— el buscado"):
         return "el que buscaste"
-    if cadena.startswith("⚪"):
-        return "⚪ código de fábrica: ningún otro proveedor lo tiene"
-    if cadena.startswith("🔵"):
-        return "🔵 el mismo número en otra marca: confirmá que sea la misma pieza"
     m = re.search(r"(\d+) saltos", cadena)
     saltos = int(m.group(1)) if m else (1 if "directo" in cadena else None)
     # Lo que volvió porque no le iba gana sobre todo, también sobre la verificación: es lo que
@@ -1273,6 +1269,21 @@ def veredicto_de_la_equivalencia(fila):
     if fila.get("Rechazada"):
         return ("🔴 rechazada en la revisión: alguien dijo que no es la misma pieza "
                 "(llega por otro código en el medio)")
+    # LO QUE LA FICHA DA POR OTRA PIEZA, también con el mismo número: el «🔵 confirmá que sea la
+    # misma pieza» iba antes que todo, y la ficha ya sabía que no lo era. Medido sobre la base
+    # real: de los 14 códigos que están en dos listas de proveedor, 10 son piezas distintas
+    # (una junta de tapa de cilindros y un prefiltro con el mismo número). Lo pidió una revisión
+    # con ChatGPT («detector de códigos reutilizados»). Y lo devuelto o rechazado, arriba, ya no
+    # queda tapado por el 🔵 o el ⚪.
+    _estado = str(fila.get("_estado") or "")
+    if _estado.startswith("🔴") and cadena.startswith(("🔵", "⚪")):
+        _motivo = fila.get("_por_que_estado") or ""
+        return ("🔴 el mismo número, pero no es la misma pieza" if cadena.startswith("🔵")
+                else "🔴 no es la misma pieza") + (f": {_motivo}" if _motivo else "")
+    if cadena.startswith("⚪"):
+        return "⚪ código de fábrica: ningún otro proveedor lo tiene"
+    if cadena.startswith("🔵"):
+        return "🔵 el mismo número en otra marca: confirmá que sea la misma pieza"
     # EL ESTADO DE LA FICHA, si el buscador lo anotó (ver anotar_el_estado()): es el mismo que
     # dice la ficha de prueba, con las mismas reglas. Lo de abajo queda para lo que no lo trae
     # (el paquete nucleo, una fila armada a mano).

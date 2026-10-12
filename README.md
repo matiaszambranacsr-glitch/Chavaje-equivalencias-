@@ -6478,6 +6478,32 @@ el botón**:
 - «🔌 Probar las fuentes de afuera» suma la Central de Deudores (con el CUIT de la AFIP, nunca el
   de un cliente) y la inflación de respaldo.
 
+## 🔏 La precisión, undécima parte: el mismo número no es la misma pieza, vender lo 🔴 y el expediente con huella
+
+Puntos 571 a 590 y 601 a 717 de la misma revisión con ChatGPT (591 a 600 no vinieron), medidos
+sobre la copia de la base real.
+
+| Punto | Qué se encontró | Qué se hizo |
+|---|---|---|
+| 609. Códigos reutilizados | De los **14 códigos que están en dos listas de proveedor, 10 son piezas distintas** (una junta de tapa de cilindros y un prefiltro con el mismo número). El buscador decía «🔵 confirmá que sea la misma pieza» aunque la ficha ya sabía que no lo era, y lo devuelto o rechazado quedaba tapado por el 🔵 o el ⚪. | Si la ficha la da por otra pieza, el buscador dice **«🔴 el mismo número, pero no es la misma pieza: (motivo)»**. Lo devuelto y lo rechazado van antes que el 🔵 y el ⚪. |
+| 652, 653 y 690. Vender lo bloqueado | En 400 búsquedas reales, **642 de los 1.197 resultados son 🔴, y tenían el mismo botón «🛒 Se llevó» que una 🟡**. Ninguno era una pieza de seguridad. | Una fila 🔴 dice **«🛒 Se llevó igual (🔴)»** y pregunta antes de anotar («¿Se la llevó igual? Queda como alternativa comercial»). Si además es de seguridad, el botón queda apagado: «🛑 No se anota». El freno está también del lado del servidor (`anotar_venta_y_avisar()`), no solo en el botón. Lo buscado mismo se vende siempre. |
+| 572 a 575. El expediente: congelado, con huella, reproducible | El expediente ya se bajaba (quinta parte), pero sin la versión de las reglas ni nada que mostrara si alguien lo tocó después. | Lleva **«Reglas: v15»** y una **huella** (SHA-256 de todo, menos la fecha en que se armó): con los mismos datos y las mismas reglas da la misma huella. En el laboratorio, **«🔏 Verificar un expediente bajado»** dice si está como salió de la app, si lo tocaron o si es de antes. |
+| 587 y 647. Que una corrección no borre lo de antes | El historial de las decisiones ya no se podía corregir ni borrar; **el de las medidas sí**, aunque ningún lugar de la app lo hacía. | `historial_de_medidas` tampoco se corrige ni se borra (dos disparadores en la base): una corrección es un renglón nuevo. |
+| 661 a 665, 679, 680, 701 y 703. La cobertura, sin promedios | **El 60 % de lo de los proveedores (42.639 de 71.659) no tiene una familia reconocible** por la descripción, y no había dónde verlo. | En el tablero, **«🗺️ Cobertura del catálogo, por familia y por lista»**: productos, % con equivalente, % con una que declara una fuente, % con medidas y cuántos se comprobaron en la mano, de lo que menos tiene a lo que más. Tarda unos 2 s y se guarda 10 minutos. |
+| 704. Relaciones redundantes | **909 de los 7.827 pendientes unen dos productos que ya se encuentran por otro camino**: aprobarlos no suma búsquedas nuevas. | La cola lo dice arriba de cada lista: «🔁 N de esta lista unen dos productos que ya se encuentran por otro camino». |
+| 612. Aplicaciones demasiado amplias | Medido: el código con más modelos tiene 44, y el 99 % tiene 16 o menos. No hay ninguno absurdo. | — |
+| 571, 576 a 586, 588 a 590. El expediente atado a todo | Ya: el expediente junta estado, motivos, fuentes, quién decidió, con qué reglas y las contradicciones; la venta guarda la evidencia de ese momento (novena parte); el historial de decisiones no se corrige ni se borra. | — |
+| 601 a 608, 610, 611, 613 a 620 | Ya: lados y posiciones, medidas que contradicen, cambios de ficha anotados, datos imposibles, el código de fábrica con la marca pegada, la auditoría agrupada. | — |
+| 621 a 640. La búsqueda | Ya: el error de tipeo (con «son códigos distintos, no equivalencias»), lo que se lee mal en una foto (O↔0, I↔1), por fragmento, por medidas, por foto, por voz, por vehículo, «sin resultados» separado de «no hay», y las búsquedas sin resultado. | — |
+| 641 a 660 | Ya: la evidencia mínima por riesgo, que lo de seguridad y los puentes no se aprueben en bloque, el veto que ningún puntaje compensa, la versión de las reglas y el desafío antes de publicar. | — |
+| 666 a 678, 681 a 689, 691 a 700, 702, 705 a 710 | Ya: de dónde salió cada medida, la cola de lo que falta medir, las pruebas negativas, las de concurrencia y de recuperación, el impacto de borrar, los puentes, las relaciones imposibles. | — |
+| 711 a 716. La IA | La IA devuelve JSON con campos fijos y lo que lee va a un formulario para revisar: nunca aprueba ni carga nada sola. Medido: **la base real no tiene ningún uso de la IA anotado**. | — |
+
+Probado en `pruebas_de_la_precision.py` (65 a 70; 23 fallas puestas a mano, las 23 detectadas),
+en `pruebas_de_la_revision.py --base` (las reglas no cambiaron: el mismo veredicto, se puede
+publicar), en `pruebas_de_compatibilidad.py` y en la app: una fila 🔴 que al primer toque no se
+anota y al confirmar sí, la cobertura en el tablero y el verificador del expediente.
+
 ## 🧪 La precisión, décima parte: el silencio no confirma, los puentes de a uno y borrar sin perder
 
 Puntos 300 a 321 y 501 a 570 de la misma revisión con ChatGPT (la 322 a 500 no vinieron), medidos

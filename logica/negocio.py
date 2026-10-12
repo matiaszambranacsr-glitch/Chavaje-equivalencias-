@@ -1703,8 +1703,26 @@ def solicitar_reposicion(producto_id):
         conn.commit()
 
 
+def bloqueo_de_venta(veredicto, descripcion):
+    """Qué hace falta para anotar como vendida EN LUGAR DE LO PEDIDO una fila con este veredicto:
+    «» nada; «confirmar» si la app dice que no es la misma pieza (🔴); «bloqueada» si además es
+    una pieza de seguridad. Lo pidió una revisión con ChatGPT («prueba de seguridad comercial:
+    intentar vender una referencia bloqueada por una incompatibilidad crítica y comprobar que el
+    sistema lo impida» y «evitar aprobar por accidente con un botón mal ubicado»). Medido sobre
+    400 búsquedas reales: 642 de los 1.197 resultados son 🔴, y tenían el mismo botón que una 🟡.
+    Lo buscado mismo se vende siempre: es lo que pidió el cliente."""
+    if not str(veredicto or "").startswith("🔴"):
+        return ""
+    return "bloqueada" if es_pieza_de_seguridad(descripcion) else "confirmar"
+
+
+TEXTO_DE_VENTA_BLOQUEADA = ("🛑 No se anota como reemplazo: es una pieza de seguridad y la app dice "
+                            "que no es la misma pieza que pidió. Si igual se la lleva, buscala por "
+                            "su propio código y vendela como lo que es.")
+
+
 def anotar_venta_y_avisar(producto_id, termino_pedido, rotulo, donde="", veredicto=None,
-                          evidencia=None):
+                          evidencia=None, confirmado=False):
     """Lo que corre al tocar «Se llevó». Sin el aviso el botón no mostraba nada: en el celular
     eso invita a tocar de nuevo, y cada toque es otra venta anotada que después pesa en las
     equivalencias sugeridas como si el cliente hubiera vuelto.
@@ -1717,6 +1735,18 @@ def anotar_venta_y_avisar(producto_id, termino_pedido, rotulo, donde="", veredic
     if modo_solo_lectura():
         st.session_state.setdefault("_lo_anotado", {})[donde] = TEXTO_DE_SOLO_LECTURA
         return
+    # LO 🔴 no se anota sin confirmar, y la pieza de seguridad 🔴 no se anota: ver
+    # bloqueo_de_venta(). Se mira acá también, y no solo en el botón: si no, cualquier otro
+    # camino que llame a esto la anotaba igual.
+    if str(veredicto or "").startswith("🔴"):
+        c.execute("SELECT descripcion FROM productos WHERE id = ?", (producto_id,))
+        _fila_v = c.fetchone()
+        _bloqueo = bloqueo_de_venta(veredicto, _fila_v["descripcion"] if _fila_v else "")
+        if _bloqueo == "bloqueada" or (_bloqueo == "confirmar" and not confirmado):
+            st.session_state.setdefault("_lo_anotado", {})[donde] = (
+                TEXTO_DE_VENTA_BLOQUEADA if _bloqueo == "bloqueada" else
+                f"⚠️ No se anotó: {rotulo} no es la misma pieza ({veredicto}). Confirmalo primero.")
+            return
     registrar_venta(producto_id, termino_pedido, veredicto, evidencia)
     # LA VENTA INCOMPLETA: si lo que se lleva suele cambiarse junto con otra pieza, se avisa
     # antes de que se vaya el cliente. Lo pidió una revisión con ChatGPT («detección de venta
@@ -1757,9 +1787,61 @@ def evidencia_de_la_fila(fila, recomendada=None):
 
 def rotulo_del_boton_de_venta(fila):
     """«🛒 Se llevó», o «🛒 Se llevó como alternativa» si la equivalencia no está confirmada: el
-    botón mismo dice cómo queda anotada la venta. Ver registrar_venta()."""
+    botón mismo dice cómo queda anotada la venta. Ver registrar_venta(). Y si no es la misma
+    pieza, también lo dice: ver bloqueo_de_venta()."""
+    veredicto = veredicto_de_la_equivalencia(fila)
+    if veredicto.startswith("🔴"):
+        return "🛒 Se llevó igual (🔴)"
     return ("🛒 Se llevó como alternativa"
-            if como_se_vende(veredicto_de_la_equivalencia(fila)) == "alternativa" else "🛒 Se llevó")
+            if como_se_vende(veredicto) == "alternativa" else "🛒 Se llevó")
+
+
+def pedir_confirmacion_de_venta(clave, argumentos):
+    """El primer toque sobre una fila 🔴: no anota, guarda qué se iba a anotar para preguntar."""
+    st.session_state.setdefault("_venta_a_confirmar", {})[clave] = argumentos
+
+
+def confirmar_la_venta(clave):
+    argumentos = st.session_state.get("_venta_a_confirmar", {}).pop(clave, None)
+    if argumentos:
+        anotar_venta_y_avisar(*argumentos, confirmado=True)
+
+
+def cancelar_la_venta(clave):
+    st.session_state.get("_venta_a_confirmar", {}).pop(clave, None)
+
+
+def mostrar_boton_de_venta(columna, fila, argumentos, clave):
+    """El botón «Se llevó» de una fila, según lo que pide bloqueo_de_venta(): directo, con
+    confirmación (🔴) o apagado (🔴 de seguridad). La confirmación la dibuja
+    mostrar_ventas_a_confirmar()."""
+    bloqueo = bloqueo_de_venta(argumentos[4] if len(argumentos) > 4 else None,
+                               fila.get("Descripcion"))
+    if bloqueo == "bloqueada":
+        columna.button("🛑 No se anota", key=clave, disabled=True, help=TEXTO_DE_VENTA_BLOQUEADA)
+    elif bloqueo == "confirmar":
+        columna.button(rotulo_del_boton_de_venta(fila), key=clave,
+                       on_click=pedir_confirmacion_de_venta, args=(clave, argumentos),
+                       help="La app dice que no es la misma pieza: pide confirmarlo.")
+    else:
+        columna.button(rotulo_del_boton_de_venta(fila), key=clave,
+                       on_click=anotar_venta_y_avisar, args=argumentos,
+                       help="Anota la venta para ir descubriendo equivalencias solas")
+
+
+def mostrar_ventas_a_confirmar(sufijo):
+    """La pregunta de las filas 🔴 que se tocaron, abajo de los botones: «¿se la llevó igual?».
+    `sufijo` es el del código buscado (las claves terminan en «_{código}»)."""
+    for clave, argumentos in list(st.session_state.get("_venta_a_confirmar", {}).items()):
+        if not clave.endswith(sufijo):
+            continue
+        st.warning(f"🔴 **{argumentos[2]} no es la misma pieza** que pidió ({argumentos[4]}). "
+                   "¿Se la llevó igual? Queda anotada como alternativa comercial, no como "
+                   "equivalente.")
+        _si, _no = st.columns(2)
+        _si.button("Sí, se la llevó igual", key=f"si_{clave}", on_click=confirmar_la_venta,
+                   args=(clave,))
+        _no.button("No", key=f"no_{clave}", on_click=cancelar_la_venta, args=(clave,))
 
 
 def pedir_reposicion_y_avisar(producto_id, rotulo, donde=""):

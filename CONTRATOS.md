@@ -88,6 +88,10 @@ Las pruebas se corren como dice el README, en «Antes de subir un cambio».
 | Antes de borrar se dice lo que toca, y la papelera devuelve el producto con toda su historia | `impacto_de_borrar()`, `borrar_producto_con_papelera()`, `restaurar_de_papelera()` | `pruebas_de_la_precision.py` (63) |
 | Un vínculo cargado y rechazado a la vez (y las otras relaciones imposibles) se ve y avisa | `relaciones_imposibles()`, `chequear_integridad_bd()`, `diagnostico_de_salud()` | `pruebas_de_la_precision.py` (64) |
 | Una versión de las reglas no se publica con regresiones ni con un rechazo de seguridad que vuelve limpio | `imprimir_el_veredicto()` | `pruebas_de_la_revision.py --base --linea-base` |
+| El mismo número en otra lista no tapa lo que la ficha sabe: si es otra pieza, el buscador lo dice; lo devuelto o rechazado tampoco queda tapado | `veredicto_de_la_equivalencia()` | `pruebas_de_la_precision.py` (65) |
+| Lo 🔴 no se anota como vendido sin confirmarlo, y lo 🔴 de seguridad no se anota nunca, ni llamando de otro lado | `bloqueo_de_venta()`, `anotar_venta_y_avisar()`, `mostrar_boton_de_venta()` | `pruebas_de_la_precision.py` (66) y en la app |
+| El historial de medidas no se corrige ni se borra | Disparadores de `historial_de_medidas` | `pruebas_de_la_precision.py` (46) |
+| Un expediente tocado después de bajarlo no pasa la verificación | `expediente_en_texto()`, `verificar_el_expediente()` | `pruebas_de_la_precision.py` (68) |
 
 ## El stock, los precios y la plata
 

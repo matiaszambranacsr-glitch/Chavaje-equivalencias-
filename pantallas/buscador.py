@@ -1418,15 +1418,15 @@ if pagina == PAGINAS[0]:
                             for fila_stock in res:
                                 colr1, colr2, colr3 = st.columns([3, 1, 1])
                                 colr1.write(_rotulo_stock(fila_stock))
-                                colr2.button(rotulo_del_boton_de_venta(fila_stock),
-                                              key=f"vendido_{fila_stock['ID']}_{clean}",
-                                              on_click=anotar_venta_y_avisar,
-                                              args=(fila_stock["ID"], codigo_individual,
-                                                    f"{fila_stock['Marca']} - {fila_stock['Codigo']}",
-                                                    f"stock_{clean}",
-                                                    veredicto_de_la_equivalencia(fila_stock),
-                                                    evidencia_de_la_fila(fila_stock, _reco["recomendada"])),
-                                              help="Anota la venta para ir descubriendo equivalencias solas")
+                                # Directo, con confirmación (🔴) o apagado (🔴 de seguridad):
+                                # ver mostrar_boton_de_venta().
+                                mostrar_boton_de_venta(
+                                    colr2, fila_stock,
+                                    (fila_stock["ID"], codigo_individual,
+                                     f"{fila_stock['Marca']} - {fila_stock['Codigo']}",
+                                     f"stock_{clean}", veredicto_de_la_equivalencia(fila_stock),
+                                     evidencia_de_la_fila(fila_stock, _reco["recomendada"])),
+                                    f"vendido_{fila_stock['ID']}_{clean}")
                                 colr3.button("📌 Reponer", key=f"pedir_repo_{fila_stock['ID']}_{clean}",
                                               on_click=pedir_reposicion_y_avisar,
                                               args=(fila_stock["ID"], f"{fila_stock['Marca']} - {fila_stock['Codigo']}",
@@ -1447,19 +1447,18 @@ if pagina == PAGINAS[0]:
                                            f"({veredicto_de_la_equivalencia(_fila_elegida)}). Se "
                                            "anota como alternativa comercial.")
                             colr2, colr3 = st.columns(2)
-                            colr2.button(rotulo_del_boton_de_venta(_fila_elegida),
-                                          key=f"vendido_elegido_{clean}",
-                                          on_click=anotar_venta_y_avisar,
-                                          args=(_elegido, codigo_individual, _rotulos[_elegido],
-                                                f"stock_{clean}",
-                                                veredicto_de_la_equivalencia(_fila_elegida),
-                                                evidencia_de_la_fila(_fila_elegida, _reco["recomendada"])),
-                                          help="Anota la venta para ir descubriendo equivalencias solas")
+                            mostrar_boton_de_venta(
+                                colr2, _fila_elegida,
+                                (_elegido, codigo_individual, _rotulos[_elegido], f"stock_{clean}",
+                                 veredicto_de_la_equivalencia(_fila_elegida),
+                                 evidencia_de_la_fila(_fila_elegida, _reco["recomendada"])),
+                                f"vendido_elegido_{clean}")
                             colr3.button("📌 Reponer", key=f"pedir_elegido_{clean}",
                                           on_click=pedir_reposicion_y_avisar,
                                           args=(_elegido, _rotulos[_elegido], f"stock_{clean}"),
                                           help="Marcar para reposición")
 
+                        mostrar_ventas_a_confirmar(f"_{clean}")
                         mostrar_lo_anotado(f"stock_{clean}")
                         if es_empleado_o_abierto():
                             mostrar_pedir_al_deposito(res, clean)

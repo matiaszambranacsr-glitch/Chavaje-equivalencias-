@@ -791,6 +791,66 @@ def la_respuesta_del_caso(caso):
     return {"correcta": caso["decision"], "texto": texto, "ficha": ficha}
 
 
+def cobertura_del_catalogo(segundos_de_memoria=600):
+    """Cuánto de cada familia y de cada lista tiene con qué responder, sin promedios que tapen
+    las zonas débiles: {"por_familia": [...], "por_lista": [...], "sin_familia": %}. Cada fila:
+    productos, % con alguna equivalente, % con una equivalente que declara una fuente (no solo
+    pistas), % con alguna medida cargada y cuántos tienen una comprobada en la mano. De lo que
+    menos tiene a lo que más.
+
+    Lo pidió una revisión con ChatGPT («medir qué porcentaje del catálogo tiene ficha técnica
+    completa, evidencia independiente y verificación física; detectar familias con poca
+    cobertura; mostrar la calidad sin esconder las zonas débiles detrás de un promedio»).
+    Medido sobre la base real: el 60 % de lo de los proveedores no tiene una familia
+    reconocible por la descripción. Tarda unos 2 s: se guarda unos minutos."""
+    import time as _time
+    # Del proceso (ver del_proceso): si fuera de la pasada, cada toque la volvía a calcular.
+    # Por base, para que una prueba o una copia restaurada no vean la de otra.
+    memoria = del_proceso("cobertura_del_catalogo", dict).setdefault(DB_PATH, {})
+    guardada = memoria.get("valor")
+    if guardada and _time.time() - memoria.get("cuando", 0) < segundos_de_memoria:
+        return guardada
+    c.execute(f"""SELECT p.id, p.descripcion, m.nombre AS lista,
+                         ({" OR ".join(f"p.{x.strip()} IS NOT NULL"
+                                       for x in _columnas_de_medidas_que_existen().split(","))})
+                         AS con_medidas
+                  FROM productos p JOIN marcas m ON m.id = p.marca_id
+                  WHERE m.tipo <> 'OEM'""")
+    productos = c.fetchall()
+    con_equivalente, con_fuente, en_la_mano = set(), set(), set()
+    c.execute("SELECT producto_a_id, producto_b_id, lote, COALESCE(verificada, 0) FROM equivalencias")
+    for a, b, lote, verificada in [tuple(r) for r in c.fetchall()]:
+        con_equivalente.update((a, b))
+        if respaldo_del_origen(lote, verificada)[0]:
+            con_fuente.update((a, b))
+        if verificada:
+            en_la_mano.update((a, b))
+    grupos = {"familia": {}, "lista": {}}
+    for r in productos:
+        familia = familia_para_comparar(r["descripcion"] or "") or "Sin clasificar"
+        for clave, valor in (("familia", familia), ("lista", r["lista"])):
+            g = grupos[clave].setdefault(valor, [0, 0, 0, 0, 0])
+            g[0] += 1
+            g[1] += r["id"] in con_equivalente
+            g[2] += r["id"] in con_fuente
+            g[3] += bool(r["con_medidas"])
+            g[4] += r["id"] in en_la_mano
+
+    def _tabla(nombre, grupo, minimo):
+        filas = [{nombre: k, "Productos": n, "Con equivalente": f"{100 * e / n:.0f} %",
+                  "Con una fuente": f"{100 * f / n:.0f} %", "Con medidas": f"{100 * md / n:.0f} %",
+                  "Comprobados en la mano": v, "_orden": e / n}
+                 for k, (n, e, f, md, v) in grupo.items() if n >= minimo]
+        filas.sort(key=lambda x: (x["_orden"], -x["Productos"]))
+        return [{k: v for k, v in x.items() if k != "_orden"} for x in filas]
+    total = sum(g[0] for g in grupos["familia"].values()) or 1
+    salida = {"por_familia": _tabla("Familia", grupos["familia"], 100),
+              "por_lista": _tabla("Lista", grupos["lista"], 1),
+              "sin_familia": round(100 * grupos["familia"].get("Sin clasificar", [0])[0] / total)}
+    memoria.update(valor=salida, cuando=_time.time())
+    return salida
+
+
 def calidad_por_marca(dias=30):
     """Lo que volvió, por la marca que FABRICA la pieza (o la de la lista, si no se sabe), y
     separado por causa: «💥 vino fallada» es la calidad de la marca; «no era la pieza» es la
@@ -4675,6 +4735,16 @@ def puentes_del_lote(lote, tope=50):
                "Encadena": n} for (a, b), n in une.items()]
     salida.sort(key=lambda x: -x["Encadena"])
     return salida[:tope] if tope else salida
+
+
+def cuantos_ya_estan_unidos(lote):
+    """Cuántos pendientes de una lista unen dos productos que ya se encuentran por otro camino:
+    aprobarlos suma un vínculo directo, no búsquedas nuevas. Lo pidió una revisión con ChatGPT
+    («detectar relaciones redundantes»). Medido sobre la base real: 909 de los 7.827."""
+    c.execute("SELECT producto_a_id, producto_b_id FROM equivalencias_pendientes WHERE lote = ?",
+              (lote,))
+    return sum(1 for n in cuanto_une_cada_par([(r[0], r[1]) for r in c.fetchall()]).values()
+               if n == 0)
 
 
 def aprobar_pendientes(lote, solo_estos_pares=None, en_bloque=False):

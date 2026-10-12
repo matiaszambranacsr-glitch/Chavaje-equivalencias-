@@ -1025,6 +1025,16 @@ a traer solas desde Administrar → Mantenimiento.
                 if st.toggle("Ver cuáles", key=f"ver_puentes_{lote_info['lote']}"):
                     st.dataframe([{k: v for k, v in x.items() if k not in ("a", "b")}
                                   for x in _puentes[:50]], width="stretch", hide_index=True)
+            # Y LOS QUE YA ESTÁN UNIDOS por otro camino. Ver cuantos_ya_estan_unidos().
+            try:
+                _ya_unidos = cuantos_ya_estan_unidos(lote_info["lote"])
+            except sqlite3.Error as _err:
+                anotar_error("cuantos_ya_estan_unidos", _err)
+                _ya_unidos = 0
+            if _ya_unidos:
+                st.caption(f"🔁 {miles(_ya_unidos)} de esta lista unen dos productos que ya se "
+                           "encuentran por otro camino: aprobarlos suma un vínculo directo, no "
+                           "búsquedas nuevas.")
 
             total_lote = contar_pendientes_del_lote(lote_info["lote"])
             ca1, ca2 = st.columns([2, 1])
@@ -1894,6 +1904,18 @@ a traer solas desde Administrar → Mantenimiento.
                     st.markdown(f"**Contradicciones:** {len(_ficha_lab['contradicciones'])}"
                                 + (" ⚠️" if _ficha_lab["contradicciones"] else ""))
                     mostrar_ficha_de_prueba(_id_a, _id_b, clave="laboratorio")
+            # ¿ALGUIEN TOCÓ UN EXPEDIENTE GUARDADO? Ver verificar_el_expediente().
+            _exp_subido = subir_archivo("🔏 Verificar un expediente bajado: ¿está como salió de la app?",
+                                        ["md", "txt"], "verificar_expediente")
+            if _exp_subido is not None:
+                _ok_exp = verificar_el_expediente(
+                    _exp_subido.getvalue().decode("utf-8", errors="replace"))
+                if _ok_exp is None:
+                    st.info("Ese expediente no trae huella: es de antes de que existiera.")
+                elif _ok_exp:
+                    st.success("✅ Está como salió de la app: nadie lo modificó.")
+                else:
+                    st.error("❌ Lo modificaron después de bajarlo: no coincide con su huella.")
 
         # EL MODO ENTRENAMIENTO: casos que ya decidió alguien con experiencia, para practicar
         # antes de revisar de verdad. No cambia nada en la base. Ver casos_para_practicar().
@@ -2024,6 +2046,16 @@ a traer solas desde Administrar → Mantenimiento.
                             "(instalación, otro auto, transporte) no es de ninguna de las dos. "
                             "🔴 si vienen más falladas que el mes anterior")
                 st.dataframe(_tc["por_marca"], width="stretch", hide_index=True)
+            # DÓNDE HAY CON QUÉ RESPONDER, por familia y por lista. Ver cobertura_del_catalogo().
+            if st.toggle("🗺️ Cobertura del catálogo, por familia y por lista",
+                         key="tablero_cobertura"):
+                with st.spinner("Contando…"):
+                    _cob = cobertura_del_catalogo()
+                st.caption(f"De lo que menos tiene a lo que más. El {_cob['sin_familia']} % de lo "
+                           "de los proveedores no tiene una familia reconocible por la "
+                           "descripción: ahí la app no sabe qué medidas pedir.")
+                st.dataframe(_cob["por_familia"], width="stretch", hide_index=True)
+                st.dataframe(_cob["por_lista"], width="stretch", hide_index=True)
             # EL SILENCIO NO ES UNA CONFIRMACIÓN. Ver seguimiento_de_lo_vendido().
             _seg = _tc["seguimiento"]
             if _seg["vendidas"]:

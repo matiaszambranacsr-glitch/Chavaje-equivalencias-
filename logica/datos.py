@@ -1308,6 +1308,18 @@ def _esquema_gestion(c):
     # Ver MOTIVOS_DE_CAMBIO_DE_MEDIDA.
     if "motivo" not in [f[1] for f in c.execute("PRAGMA table_info(historial_de_medidas)")]:
         c.execute("ALTER TABLE historial_de_medidas ADD COLUMN motivo TEXT")
+    # Y como el de las decisiones, NO SE CORRIGE NI SE BORRA: una corrección a mano es un renglón
+    # nuevo, y el valor de antes queda. Lo pidió una revisión con ChatGPT («prohibir que una
+    # corrección manual borre la evidencia original» y «nunca borrar el motivo del cambio»).
+    # Ningún lugar de la app lo modificaba; ahora tampoco se puede desde afuera de ella.
+    c.execute("DROP TRIGGER IF EXISTS historial_de_medidas_no_se_corrige")
+    c.execute("DROP TRIGGER IF EXISTS historial_de_medidas_no_se_borra")
+    c.execute("""CREATE TRIGGER IF NOT EXISTS historial_de_medidas_no_se_corrige
+                 BEFORE UPDATE ON historial_de_medidas
+                 BEGIN SELECT RAISE(ABORT, 'el historial de medidas no se corrige'); END""")
+    c.execute("""CREATE TRIGGER IF NOT EXISTS historial_de_medidas_no_se_borra
+                 BEFORE DELETE ON historial_de_medidas
+                 BEGIN SELECT RAISE(ABORT, 'el historial de medidas no se borra'); END""")
     # EL HISTORIAL de las decisiones: equivalencias_revisadas guarda la ÚLTIMA (aprobar después de
     # rechazar la pisa), esto guarda TODAS, y no se corrige ni se borra —lo cuidan los dos
     # disparadores—. Con la versión de las reglas que puntuó el par y la lista de la que vino:

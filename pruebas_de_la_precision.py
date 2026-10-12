@@ -1071,8 +1071,15 @@ def probar(L):
             True)
     esperar("cuántas aprobadas tocaba", ns["vinculos_revisados_de"](rv_b), 1)
     ns["marcar_revision"]([(rv_a, rv_b)], "ok")
-    c.execute("UPDATE historial_de_medidas SET fecha = datetime('now', '-2 hour') "
-              "WHERE producto_id = ?", (rv_b,))
+    # El historial de medidas no se toca (lo cuidan sus disparadores): el tiempo se simula
+    # corriendo la revisión, no el cambio.
+    esperar("el historial de medidas no se corrige", _falla(
+        c.execute, "UPDATE historial_de_medidas SET fecha = datetime('now', '-2 hour') "
+                   "WHERE producto_id = ?", (rv_b,)), "IntegrityError")
+    esperar("ni se borra", _falla(c.execute, "DELETE FROM historial_de_medidas WHERE producto_id = ?",
+                                  (rv_b,)), "IntegrityError")
+    c.execute("UPDATE equivalencias_revisadas SET fecha = datetime('now', '+2 hour') "
+              "WHERE producto_a_id IN (?, ?) AND producto_b_id IN (?, ?)", (rv_a, rv_b, rv_a, rv_b))
     conn.commit()
     esperar("vuelta a mirar, verificada otra vez", ns["ficha_de_prueba"](rv_a, rv_b)["estado"],
             "✅ VERIFICADA")
@@ -1600,6 +1607,132 @@ def probar(L):
     conn.commit()
     esperar("y deja de verla", dict(ns["relaciones_imposibles"]()).get(_clave_rel, 0),
             _rel_antes.get(_clave_rel, 0))
+
+    # 65. El mismo número en otra marca, pero otra pieza: lo dice la ficha, y lo devuelto o
+    # rechazado no queda tapado por el 🔵 o el ⚪.
+    _v = ns["veredicto_de_la_equivalencia"]
+    esperar("🔵 que la ficha da por otra pieza", _v({"Cadena": "🔵 mismo código, otra marca",
+                                                      "_estado": "🔴 CON CONTRADICCIONES",
+                                                      "_por_que_estado": "rubros distintos"}),
+            "🔴 el mismo número, pero no es la misma pieza: rubros distintos")
+    esperar("⚪ que la ficha da por otra pieza", _v({"Cadena": "⚪ código de fábrica, nadie más lo tiene",
+                                                      "_estado": "🔴 CON CONTRADICCIONES"}),
+            "🔴 no es la misma pieza")
+    esperar("🔵 devuelto", _v({"Cadena": "🔵 mismo código, otra marca", "Devuelto": "↩️"})[:1], "🔴")
+    esperar("🔵 rechazado", _v({"Cadena": "🔵 mismo código, otra marca", "Rechazada": "🚫"})[:1], "🔴")
+    esperar("🔵 sin nada en contra, sigue 🔵", _v({"Cadena": "🔵 mismo código, otra marca",
+                                                    "_estado": "🟡 PROBABLE"})[:1], "🔵")
+    jt_k = producto("KJ1", "JTA TAPA CILINDROS FORD RANGER V8", fispa)
+    jt_a = producto("JT500", "JTA TAPA CILINDROS FORD RANGER V8", illinois)
+    jt_b = producto("JT500", "PRE-FILTRO COMBUSTIBLE UNIVERSAL", marca("CRI-FA"))
+    vincular(jt_k, jt_a, "FISPA · lista.xlsx · 01/10/2026 10:00:00")
+    conn.commit()
+    _filas_jt = {f["ID"]: f for f in ns["buscar_con_variantes_del_cero"]("KJ1")[0]}
+    esperar("el prefiltro llega por tener el mismo número que la junta",
+            str(_filas_jt.get(jt_b, {}).get("Cadena", ""))[:1], "🔵")
+    esperar("y el buscador dice que no es la misma pieza", _v(_filas_jt.get(jt_b, {})).startswith(
+        "🔴 el mismo número, pero no es la misma pieza"), True)
+
+    # 66. Vender lo 🔴 en lugar de lo pedido pide confirmarlo; y si es de seguridad, no se anota.
+    _bloqueo = ns["bloqueo_de_venta"]
+    esperar("🔴 de un filtro: confirmar", _bloqueo("🔴 no es la misma pieza", "FILTRO DE ACEITE"),
+            "confirmar")
+    esperar("🔴 de una pastilla: no", _bloqueo("🔴 no es la misma pieza",
+                                               "PASTILLA DE FRENO DELANTERA VW GOL"), "bloqueada")
+    esperar("🟡: nada", _bloqueo("🟡 probable", "PASTILLA DE FRENO DELANTERA VW GOL"), "")
+    esperar("el botón lo dice", ns["rotulo_del_boton_de_venta"](
+        {"Cadena": "🟢 directo", "_estado": "🔴 CON CONTRADICCIONES"}), "🛒 Se llevó igual (🔴)")
+    vr_a = producto("VR1", "FILTRO DE AIRE FIAT UNO", fispa)
+    vr_b = producto("IVR1", "FILTRO DE AIRE FIAT UNO", illinois)
+    vr_s = producto("IVR2", "PASTILLA DE FRENO DELANTERA FIAT UNO", illinois)
+    conn.commit()
+    def _ventas_de(pid):
+        return c.execute("SELECT COUNT(*) FROM ventas_registradas WHERE producto_id = ?",
+                         (pid,)).fetchone()[0]
+    _args = (vr_b, "VR1", "ILLINOIS - IVR1", "prueba_rojo", "🔴 no es la misma pieza: otra medida",
+             "cadena 🟢 directo")
+    ns["anotar_venta_y_avisar"](*_args)
+    esperar("sin confirmar no se anota", (_ventas_de(vr_b), "Confirmalo primero" in
+                                          ns["st"].session_state["_lo_anotado"]["prueba_rojo"]),
+            (0, True))
+    ns["pedir_confirmacion_de_venta"]("vendido_x_VR1", _args)
+    ns["confirmar_la_venta"]("vendido_x_VR1")
+    esperar("confirmado, sí", _ventas_de(vr_b), 1)
+    esperar("y la pregunta se va", "vendido_x_VR1" in ns["st"].session_state["_venta_a_confirmar"],
+            False)
+    ns["pedir_confirmacion_de_venta"]("vendido_y_VR1", _args)
+    ns["cancelar_la_venta"]("vendido_y_VR1")
+    ns["confirmar_la_venta"]("vendido_y_VR1")
+    esperar("«No»: no queda la pregunta ni se anota",
+            ("vendido_y_VR1" in ns["st"].session_state["_venta_a_confirmar"], _ventas_de(vr_b)),
+            (False, 1))
+
+    class _Columna:
+        def button(self, rotulo, key=None, on_click=None, args=(), help=None, disabled=False):
+            self.boton = (rotulo, getattr(on_click, "__name__", None), disabled)
+    def _boton(fila, veredicto):
+        col = _Columna()
+        ns["mostrar_boton_de_venta"](col, fila, _args[:4] + (veredicto, ""), "clave_prueba")
+        return col.boton
+    esperar("el botón de una 🔴 pregunta antes", _boton(
+        {"Cadena": "🟢 directo", "_estado": "🔴 CON CONTRADICCIONES",
+         "Descripcion": "FILTRO DE AIRE FIAT UNO"}, "🔴 no es la misma pieza"),
+            ("🛒 Se llevó igual (🔴)", "pedir_confirmacion_de_venta", False))
+    esperar("el de una 🔴 de seguridad, apagado", _boton(
+        {"Cadena": "🟢 directo", "_estado": "🔴 CON CONTRADICCIONES",
+         "Descripcion": "PASTILLA DE FRENO DELANTERA FIAT UNO"}, "🔴 no es la misma pieza")[1:],
+            (None, True))
+    esperar("el de una 🟡, directo", _boton(
+        {"Cadena": "🟢 directo", "_estado": "🟡 PROBABLE", "Descripcion": "FILTRO DE AIRE"},
+        "🟡 probable")[1:], ("anotar_venta_y_avisar", False))
+    ns["anotar_venta_y_avisar"](vr_s, "VR1", "ILLINOIS - IVR2", "prueba_rojo",
+                                "🔴 no es la misma pieza: otra medida", "", confirmado=True)
+    esperar("la de seguridad, ni confirmada", (_ventas_de(vr_s),
+                                               ns["st"].session_state["_lo_anotado"]["prueba_rojo"]),
+            (0, ns["TEXTO_DE_VENTA_BLOQUEADA"]))
+
+    # 67. El historial de medidas no se corrige ni se borra: ver la sección 46.
+
+    # 68. El expediente lleva las reglas y una huella que detecta si alguien lo tocó.
+    _fic = ns["ficha_de_prueba"](rx_a, rx_b)
+    _exp = ns["expediente_en_texto"](_fic)
+    esperar("con la versión de las reglas", f"- Reglas: v{ns['VERSION_CONFIANZA']}" in _exp, True)
+    esperar("la huella coincide", ns["verificar_el_expediente"](_exp), True)
+    esperar("tocado, no", ns["verificar_el_expediente"](_exp.replace("**Estado:**", "**Estado:** ✅", 1)),
+            False)
+    esperar("uno de antes, sin huella", ns["verificar_el_expediente"]("# Expediente\n\nalgo\n"), None)
+    esperar("reproducible: los mismos datos dan la misma huella",
+            _exp.rstrip().splitlines()[-1],
+            ns["expediente_en_texto"](ns["ficha_de_prueba"](rx_a, rx_b)).rstrip().splitlines()[-1])
+
+    # 69. La cobertura, por lista y por familia, sin promedios.
+    cob = marca("COBERTURA")
+    cb_a = producto("CB1", "RETEN CIGUEÑAL FIAT PALIO", cob, diametro_interno=35, diametro_externo=50)
+    cb_b = producto("CB2", "RETEN CIGUEÑAL FIAT PALIO", cob)
+    cb_c = producto("CB3", "RETEN CIGUEÑAL FIAT PALIO", cob)
+    vincular(cb_a, ret_f, "COBERTURA · lista.xlsx · 01/10/2026 10:00:00")
+    vincular(cb_c, ret_f, "")      # sin anotar de dónde salió: no es una fuente
+    conn.commit()
+    def _cobertura(**kw):
+        return {k: v for k, v in {x["Lista"]: x for x in ns["cobertura_del_catalogo"](**kw)[
+            "por_lista"]}.get("COBERTURA", {}).items() if k != "Lista"}
+    esperar("la lista, con lo que tiene", _cobertura(segundos_de_memoria=0),
+            {"Productos": 3, "Con equivalente": "67 %", "Con una fuente": "33 %",
+             "Con medidas": "33 %", "Comprobados en la mano": 0})
+    producto("CB4", "RETEN CIGUEÑAL FIAT PALIO", cob)
+    conn.commit()
+    esperar("se guarda unos minutos", _cobertura()["Productos"], 3)
+    esperar("y sin memoria, la de ahora", _cobertura(segundos_de_memoria=0)["Productos"], 4)
+    esperar("y lo que no tiene familia, aparte", isinstance(
+        ns["cobertura_del_catalogo"]()["sin_familia"], int), True)
+
+    # 70. Lo que ya está unido por otro camino, contado.
+    c.execute("INSERT INTO equivalencias_pendientes (producto_a_id, producto_b_id, origen, lote) "
+              "VALUES (?, ?, 'x', 'REDUNDANTES · 03/10')", (min(_red1[1], _red1[2]), max(_red1[1], _red1[2])))
+    c.execute("INSERT INTO equivalencias_pendientes (producto_a_id, producto_b_id, origen, lote) "
+              "VALUES (?, ?, 'x', 'REDUNDANTES · 03/10')", (min(cb_b, _red1[3]), max(cb_b, _red1[3])))
+    conn.commit()
+    esperar("ya unidos", ns["cuantos_ya_estan_unidos"]("REDUNDANTES · 03/10"), 1)
     return fallas
 
 

@@ -1233,8 +1233,8 @@ def expediente_en_texto(ficha):
     equivalencia, con todo lo que la sostiene y lo que la contradice, y la fecha en que se armó.
     Lo pidió una revisión con ChatGPT («que cada equivalencia tenga un expediente técnico»)."""
     a, b = ficha["a"], ficha["b"]
-    renglones = [f"# Expediente de equivalencia — {datetime.now():%d/%m/%Y %H:%M}", "",
-                 f"**Estado:** {ficha['estado']}",
+    renglones = [f"**Estado:** {ficha['estado']}",
+                 f"- Reglas: v{VERSION_CONFIANZA}",
                  f"- A: {a['marca']} {a['codigo_raw']} — {a['descripcion'] or ''}",
                  f"- B: {b['marca']} {b['codigo_raw']} — {b['descripcion'] or ''}",
                  f"- Rubro: {ficha['rubro']}" + (f" · pieza: {ficha['pieza']}" if ficha['pieza'] else ""),
@@ -1276,7 +1276,33 @@ def expediente_en_texto(ficha):
         renglones += [f"- {h['Fecha']} · {h['Par']} · {h['Decisión']} · {h['Quién']} "
                       f"({h['Cómo']}) · lista {h['Lista']} · reglas {h['Reglas']}"
                       for h in ficha["historial"]]
-    return "\n".join(renglones) + "\n"
+    # LA HUELLA: de todo lo de arriba, sin la fecha en que se armó. Con los mismos datos y las
+    # mismas reglas da la misma huella; si alguien toca el texto guardado, deja de dar. Ver
+    # verificar_el_expediente(). Lo pidió una revisión con ChatGPT («hash del dossier: permite
+    # detectar modificaciones posteriores» y «dossier reproducible»).
+    cuerpo = "\n".join(renglones) + "\n"
+    return (f"# Expediente de equivalencia — {datetime.now():%d/%m/%Y %H:%M}\n\n" + cuerpo
+            + f"\n{_HUELLA_DEL_EXPEDIENTE}{_huella_de(cuerpo)}\n")
+
+
+_HUELLA_DEL_EXPEDIENTE = "Huella: "
+
+
+def _huella_de(texto):
+    import hashlib
+    return hashlib.sha256(texto.encode("utf-8")).hexdigest()[:16]
+
+
+def verificar_el_expediente(texto):
+    """¿El expediente guardado está como salió de la app? True si la huella del final coincide
+    con lo de arriba, False si alguien lo tocó, None si no trae huella (uno de antes)."""
+    renglones = (texto or "").rstrip("\n").split("\n")
+    if not renglones or not renglones[-1].startswith(_HUELLA_DEL_EXPEDIENTE):
+        return None
+    huella = renglones[-1][len(_HUELLA_DEL_EXPEDIENTE):].strip()
+    # Sin el título con la fecha (dos renglones) ni el renglón en blanco antes de la huella.
+    cuerpo = "\n".join(renglones[2:-2]) + "\n"
+    return _huella_de(cuerpo) == huella
 
 
 # LA COMPROBACIÓN GUIADA: la app pregunta lo que decide, en vez de esperar que la persona sepa
