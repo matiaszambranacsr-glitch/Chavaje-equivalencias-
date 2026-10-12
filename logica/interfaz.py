@@ -1491,6 +1491,32 @@ def mostrar_ficha_de_prueba(id_a, id_b, clave):
                                   "para verla verificada en los resultados.")
                 st.rerun()
 
+    # LO QUE PASÓ DESPUÉS DE VENDER: lo confirmado, lo devuelto y el silencio, por separado.
+    # Ver registrar_que_anduvo().
+    _dv = ficha.get("despues_de_vender") or {}
+    if _dv.get("vendidas") or _dv.get("anduvieron") or _dv.get("volvieron"):
+        _sin = max(0, _dv["vendidas"] - _dv["anduvieron"] - _dv["volvieron"])
+        st.caption(f"🧾 Vendida una por la otra: {_dv['vendidas']} vez(ces). Se confirmó que "
+                   f"anduvo {_dv['anduvieron']}, volvió {_dv['volvieron']}"
+                   + (f", y de {_sin} no hay noticias: el silencio no cuenta ni a favor ni en "
+                      "contra." if _sin else "."))
+    st.markdown(f"**🔧 ¿Se vendió `{b['codigo_raw']}` por `{a['codigo_raw']}`, la instalaron y "
+                "anduvo?**")
+    _nota_anduvo = st.text_input("Quién lo dijo o qué se vio (opcional):",
+                                 key=f"nota_anduvo_{clave}_{id_b}",
+                                 placeholder="Ej.: el taller de Juan, entró sin tocar nada")
+    if candado("anotar que una pieza anduvo",
+               st.button("🔧 Anduvo", key=f"boton_anduvo_{clave}_{id_b}"),
+               f"anduvo_{clave}_{id_b}", nivel="empleado"):
+        try:
+            registrar_que_anduvo(id_b, a["codigo_raw"], _nota_anduvo)
+        except (PermissionError, ValueError) as _err:
+            st.error(str(_err))
+        else:
+            avisar("success", "Anotado: se instaló y anduvo. Cuenta como lo que vio el mostrador, "
+                              "no como prueba técnica.")
+            st.rerun()
+
     # Lo que VOLVIÓ: la prueba más fuerte en contra. Ver registrar_devolucion().
     st.markdown(f"**↩️ ¿Se vendió `{b['codigo_raw']}` por `{a['codigo_raw']}` y volvió?**")
     motivo = st.selectbox("¿Por qué volvió?", list(MOTIVOS_DE_DEVOLUCION),

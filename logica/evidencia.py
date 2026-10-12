@@ -352,11 +352,12 @@ def evidencia_cruzada(id_a, id_b, cuenta_palabras=None, total_descripciones=None
         anotar_error("evidencia_cruzada", _err)
         pass
 
-    # 4. El mostrador: ¿ya se vendió uno en lugar del otro?
-    veces = _recordado(("ventas_ev",), pares_confirmados_por_ventas).get(
+    # 4. El mostrador: ¿alguien confirmó que se instaló uno en lugar del otro y anduvo? Vender
+    # solo no alcanza: ver registrar_que_anduvo().
+    veces = _recordado(("anduvieron_ev",), pares_que_anduvieron).get(
         (min(id_a, id_b), max(id_a, id_b)), 0)
     if veces >= 2:
-        a_favor.append(f"🧾 ya lo vendiste como reemplazo {veces} vez(ces)")
+        a_favor.append(f"🔧 lo instalaron y anduvo {veces} vez(ces)")
     # Y lo que VOLVIÓ porque no le iba: gana sobre todo lo de arriba. Ver registrar_devolucion().
     _devuelto = _recordado(("devueltos_ev",), pares_devueltos).get(
         (min(id_a, id_b), max(id_a, id_b)), 0)
@@ -830,6 +831,24 @@ def ficha_de_prueba(id_a, id_b, tolerancia_pct=3, liviana=False):
     ficha["devoluciones"] = [
         f"↩️ {MOTIVOS_DE_DEVOLUCION.get(r['motivo'], r['motivo'])} — {r['usuario'] or 'alguien'}, "
         f"{r['fecha']}" + (f": {r['detalle']}" if r["detalle"] else "") for r in c.fetchall()]
+    # Y lo que se vendió en su lugar: cuánto se confirmó que anduvo y de cuánto no se sabe nada.
+    # El silencio no suma ni resta (ver registrar_que_anduvo()): se dice, para no confundirlo.
+    try:
+        c.execute("""SELECT COUNT(*) FROM ventas_registradas v JOIN productos p
+                       ON p.codigo_clean = v.codigo_pedido_clean
+                     WHERE (v.producto_id = ? AND p.id = ?) OR (v.producto_id = ? AND p.id = ?)""",
+                  (id_b, id_a, id_a, id_b))
+        _vendidas = c.fetchone()[0] or 0
+        c.execute("""SELECT COUNT(*) FROM instalaciones_confirmadas i JOIN productos p
+                       ON p.codigo_clean = i.codigo_pedido_clean
+                     WHERE (i.producto_id = ? AND p.id = ?) OR (i.producto_id = ? AND p.id = ?)""",
+                  (id_b, id_a, id_a, id_b))
+        _anduvieron = c.fetchone()[0] or 0
+    except sqlite3.OperationalError as _err:
+        anotar_error("ficha_de_prueba/ventas", _err)
+        _vendidas = _anduvieron = 0
+    ficha["despues_de_vender"] = {"vendidas": _vendidas, "anduvieron": _anduvieron,
+                                  "volvieron": len(ficha["devoluciones"])}
 
     # Lo que la contradice. El precio no prueba nada a favor y en contra solo avisa: dos listas
     # pueden estar en escalas distintas. Ver evidencia_cruzada(), punto 7.

@@ -28,10 +28,13 @@ if pagina == PAGINAS[3]:
                 elegido_borrar_label = st.selectbox("Elegí el producto a eliminar:", list(opciones_borrar.keys()),
                                                      key="mant_sel_borrar")
                 id_a_borrar = opciones_borrar[elegido_borrar_label]
-                st.caption(
-                    "Se borran también sus equivalencias con otros productos, pero quedan "
-                    "guardadas con él en la papelera: si lo restaurás, vuelve **con** sus vínculos."
-                )
+                # LO QUE TOCA, antes de confirmar: ver impacto_de_borrar().
+                _texto_impacto = texto_del_impacto(impacto_de_borrar(id_a_borrar))
+                if _texto_impacto:
+                    st.warning(_texto_impacto)
+                else:
+                    st.caption("No tiene vínculos ni historia: se borra solo el producto, y queda "
+                               "en la papelera.")
                 confirmar_borrado = st.checkbox(f"Confirmo que quiero borrar '{elegido_borrar_label}'",
                                                  key="mant_confirmar_borrar")
                 if candado('eliminar un producto', st.button("🗑️ Eliminar producto", disabled=not confirmar_borrado), 'eliminar_un_producto'):

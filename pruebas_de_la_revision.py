@@ -504,14 +504,16 @@ def probar_una_sola_verdad(logica, cuantas=100):
 def correr_una_sola_verdad_aparte(ruta_base):
     """La prueba de una sola verdad, en otro proceso y sobre una copia INTACTA de la base: la
     de las aprobaciones saca de la copia todo lo aprobado (para puntuarlo como si recién
-    llegara), y ahí no queda nada que buscar. Devuelve las fallas."""
+    llegara), y ahí no queda nada que buscar. Devuelve (fallas, cuántos se compararon)."""
     import subprocess
     r = subprocess.run([sys.executable, os.path.abspath(__file__), "--una-sola-verdad", ruta_base],
                        capture_output=True, text=True, timeout=3600)
     renglon = next((x for x in r.stdout.splitlines() if "una sola verdad" in x),
                    (r.stderr.strip().splitlines() or ["sin salida"])[-1])
     print(renglon)
-    return [] if r.returncode == 0 else [renglon]
+    m = re.search(r"en los ([\d,.]+) resultados", renglon)
+    comparados = int(re.sub(r"\D", "", m.group(1))) if m else 0
+    return ([] if r.returncode == 0 else [renglon]), comparados
 
 
 def _solo_una_sola_verdad(ruta_base):
@@ -636,6 +638,11 @@ def imprimir_la_calibracion(aprobados, rechazados):
                   f"({re_:,} de {ap + re_:,})")
 
 
+# Cuántos pares empeoraron contra la línea de base, por grupo: los cuenta
+# comparar_con_la_linea_de_base() para el veredicto de publicación.
+REGRESIONES = {}
+
+
 def comparar_con_la_linea_de_base(ruta, aprobados, rechazados, actualizar=False):
     """LA PRUEBA DE REGRESIÓN. Guarda cómo quedó cada par; la vez siguiente compara.
 
@@ -675,6 +682,7 @@ def comparar_con_la_linea_de_base(ruta, aprobados, rechazados, actualizar=False)
                 f"{r} {n:,}" for r, n in sorted(por_rubro.items(), key=lambda x: -x[1])[:5]))
         for transicion, claves in cambios.items():
             if transicion.endswith(f"→ {malo}"):
+                REGRESIONES[grupo] = REGRESIONES.get(grupo, 0) + len(claves)
                 texto = (f"{len(claves)} {grupo} pasaron a {malo}: " + "; ".join(claves[:5]))
                 if grupo == "rechazados":
                     fallas.append(texto)
@@ -722,6 +730,21 @@ def imprimir_la_matriz(aprobados, rechazados, desde=None):
             for grupo in ("aprobados", "rechazados") if g[grupo][0]))
 
 
+def imprimir_el_veredicto(version, casos, criticos, fallas):
+    """EL VEREDICTO DE PUBLICACIÓN, al final y en una línea: cuántos casos se probaron, cuántas
+    regresiones, cuántos falsos positivos de piezas de seguridad, y si se puede subir. Lo pidió
+    una revisión con ChatGPT («Chavaje Challenge: 4.812 casos probados, 3 regresiones, 0 falsos
+    positivos críticos → NO AUTORIZAR PUBLICACIÓN»): pasar de «agregué una función, parece
+    funcionar» a «demostré que no rompió lo que ya funcionaba»."""
+    total = sum(casos.values())
+    print(f"🏁 Reglas v{version}: {total:,} casos probados — "
+          + ", ".join(f"{n:,} {que}" for que, n in casos.items() if n))
+    print(f"   regresiones contra la línea de base: {sum(REGRESIONES.values()):,} · falsos "
+          f"positivos de piezas de seguridad: {len(criticos):,}")
+    print("   ✅ SE PUEDE PUBLICAR" if not fallas else
+          f"   ❌ NO PUBLICAR: {len(fallas)} falla(s), abajo")
+
+
 def main():
     if "--una-sola-verdad" in sys.argv:
         return _solo_una_sola_verdad(os.path.abspath(sys.argv[sys.argv.index("--una-sola-verdad") + 1]))
@@ -737,6 +760,8 @@ def main():
             ruta_base, os.path.join(carpeta, "equivalencias_app.db")) if ruta_base else 0)
         logica = _cargar_la_logica(carpeta)
         fallas, probados = probar_pares_de_muestra(logica, con_catalogo=bool(ruta_base))
+        casos = {"de muestra": probados}
+        criticos = []
         salteados = len(PARES_DE_MUESTRA) - probados
         print(f"{'✅' if not fallas else '❌'} pares de muestra: {probados - len(fallas)} de "
               f"{probados} bien" + (f" ({salteados} necesitan el catálogo: correlo con --base)"
@@ -744,9 +769,20 @@ def main():
         fallas += verificar_los_casos_sellados(sellar="--sellar" in sys.argv)
         if ruta_base:
             f2, resumen, conteo_ap = probar_aprobaciones(logica, cuantos)
+            casos["aprobados"] = cuantos
             print(f"{'✅' if not f2 else '❌'} aprobaciones: {resumen}")
             fallas += f2
             n_r, limpios_r, altos_r, _ejemplos, conteo_re = probar_rechazos(logica)
+            casos["rechazados"] = n_r
+            # Un rechazo de una PIEZA DE SEGURIDAD que volvería a pasar limpio es el error que
+            # no se puede publicar, aunque el total quede debajo del tope.
+            _seguridad = logica.todo_lo_de_la_logica()["es_pieza_de_seguridad"]
+            criticos = [f for f in _ejemplos
+                        if _seguridad(f.get("desc_a")) or _seguridad(f.get("desc_b"))]
+            if criticos:
+                fallas.append(f"{len(criticos)} rechazado(s) a mano de piezas de seguridad "
+                              "quedarían limpios: " + "; ".join(
+                                  f"{f.get('cod_a')} / {f.get('cod_b')}" for f in criticos[:5]))
             imprimir_la_matriz(conteo_ap, conteo_re,
                                logica.todo_lo_de_la_logica()["VERSIONES_DE_LAS_REGLAS"][1][1])
             if "--reglas" in sys.argv:
@@ -755,7 +791,8 @@ def main():
             if ruta_linea:
                 fallas += comparar_con_la_linea_de_base(ruta_linea, conteo_ap, conteo_re,
                                                         actualizar="--actualizar" in sys.argv)
-            fallas += correr_una_sola_verdad_aparte(ruta_base)
+            _f_verdad, casos["resultados de búsqueda"] = correr_una_sola_verdad_aparte(ruta_base)
+            fallas += _f_verdad
             if n_r:
                 print(f"   rechazos (falsos positivos): {n_r:,} rechazados a mano: "
                       f"{limpios_r:,} quedarían limpios ({100 * limpios_r / n_r:.1f} %), "
@@ -767,6 +804,8 @@ def main():
                     for f in _ejemplos[:25]:
                         print(f"     {f.get('confianza')}: {f.get('cod_a')} / {f.get('cod_b')} — "
                               f"{[s for _, s in (f.get('senales') or [])][:4]}")
+        imprimir_el_veredicto(logica.todo_lo_de_la_logica()["VERSION_CONFIANZA"], casos, criticos,
+                              fallas)
         for f in fallas:
             print("   ✗", f)
         print("todo en verde" if not fallas else f"{len(fallas)} falla(s)")

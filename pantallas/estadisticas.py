@@ -1009,6 +1009,22 @@ a traer solas desde Administrar → Mantenimiento.
             _anomalia = anomalia_de_la_tanda(lote_info["lote"])
             if _anomalia:
                 st.warning(_anomalia)
+            # LO QUE UNE REDES GRANDES, primero y de a uno: no entra en la aprobación en bloque.
+            # Ver puentes_del_lote().
+            try:
+                _puentes = puentes_del_lote(lote_info["lote"], tope=None)
+            except sqlite3.Error as _err:
+                anotar_error("puentes_del_lote", _err)
+                _puentes = []
+            if _puentes:
+                st.warning(f"🔥 **{miles(len(_puentes))} de esta lista unen redes que hoy están "
+                           f"separadas**: cada uno, aprobado, deja encadenados {UNE_REDES_GRANDES} "
+                           f"pares o más (el que más, {miles(_puentes[0]['Encadena'])}). Si uno "
+                           "está mal, no es un vínculo malo: son cientos. No entran en la "
+                           "aprobación en bloque; conviene mirarlos primero, de a uno.")
+                if st.toggle("Ver cuáles", key=f"ver_puentes_{lote_info['lote']}"):
+                    st.dataframe([{k: v for k, v in x.items() if k not in ("a", "b")}
+                                  for x in _puentes[:50]], width="stretch", hide_index=True)
 
             total_lote = contar_pendientes_del_lote(lote_info["lote"])
             ca1, ca2 = st.columns([2, 1])
@@ -1373,12 +1389,16 @@ a traer solas desde Administrar → Mantenimiento.
                                 key=f"apr_resto_{abs(hash(clave_g))}"):
                             _n_seg = len({(min(a, b), max(a, b)) for a, b in
                                           pares_de_piezas_de_seguridad(_pares_resto)})
+                            _n_pte = len({(min(a, b), max(a, b)) for a, b in
+                                          pares_que_unen_redes(_pares_resto)})
                             _n_ap = aprobar_pendientes(lote, _pares_resto, en_bloque=True)
                             invalidar_salud()
                             avisar("success", f"Se aprobaron {miles(_n_ap)} vínculo(s) del grupo "
                                               f"{nombre}."
                                    + (f" {_n_seg} de piezas de seguridad quedaron en la cola, "
-                                      "para mirarlas de a una." if _n_seg else ""))
+                                      "para mirarlas de a una." if _n_seg else "")
+                                   + (f" {_n_pte} que unen redes grandes quedaron en la cola "
+                                      "(🔥, arriba)." if _n_pte else ""))
                             st.rerun()
                         if _v2.button(f"➕ Mirar {TAMANO_DE_LA_MUESTRA} más",
                                       key=f"ampliar_{abs(hash(clave_g))}"):
@@ -1534,7 +1554,8 @@ a traer solas desde Administrar → Mantenimiento.
                             disabled=not limpias,
                             on_click=aprobar_pendientes, args=(lote_info["lote"], pares_limpios),
                             kwargs={"en_bloque": True},
-                            help="Las piezas de seguridad no entran: quedan para mirarlas de a una.")
+                            help="Las piezas de seguridad y lo que une redes grandes no entran: "
+                                 "quedan para mirarlos de a uno.")
                 bl2.button("🚫 Descartar toda esta lista",
                             key=f"rec_lote_{lote_info['lote']}",
                             on_click=rechazar_pendientes, args=(lote_info["lote"], None),
@@ -2003,6 +2024,14 @@ a traer solas desde Administrar → Mantenimiento.
                             "(instalación, otro auto, transporte) no es de ninguna de las dos. "
                             "🔴 si vienen más falladas que el mes anterior")
                 st.dataframe(_tc["por_marca"], width="stretch", hide_index=True)
+            # EL SILENCIO NO ES UNA CONFIRMACIÓN. Ver seguimiento_de_lo_vendido().
+            _seg = _tc["seguimiento"]
+            if _seg["vendidas"]:
+                st.caption(f"🔧 De lo vendido en lugar de lo pedido en 90 días "
+                           f"({miles(_seg['vendidas'])}): se confirmó que anduvo "
+                           f"{miles(_seg['anduvieron'])}, volvió {miles(_seg['volvieron'])} y de "
+                           f"**{miles(_seg['sin_noticias'])} no hay noticias**. Solo lo confirmado "
+                           "suma a favor: el silencio no prueba que haya andado.")
             # LO QUE SE VENDIÓ EN LUGAR DE LO RECOMENDADO. Ver ventas_contra_la_recomendacion().
             _contra = _tc["contra_la_recomendacion"]
             if _contra["ventas"]:

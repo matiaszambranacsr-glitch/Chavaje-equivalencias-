@@ -1219,7 +1219,7 @@ def _esquema_gestion(c):
     # ENTERA una vez por producto. Con el estante lleno eso es minutos de espera.
     c.execute("CREATE INDEX IF NOT EXISTS idx_ventas_prod ON ventas_registradas(producto_id)")
     c.execute("CREATE INDEX IF NOT EXISTS idx_ventas_codigo ON ventas_registradas(codigo_pedido_clean)")
-    # Lo que VOLVIÓ. Una venta que no vuelve confirma (ver pares_confirmados_por_ventas()); una
+    # Lo que VOLVIÓ. Una instalación que anduvo confirma (ver pares_que_anduvieron()); una
     # que vuelve porque no le iba es la prueba más fuerte en contra que hay, más que cualquier
     # catálogo. Ver registrar_devolucion().
     c.execute("""CREATE TABLE IF NOT EXISTS devoluciones (
@@ -1232,6 +1232,17 @@ def _esquema_gestion(c):
         fecha TEXT DEFAULT (datetime('now'))
     )""")
     c.execute("CREATE INDEX IF NOT EXISTS idx_devoluciones_prod ON devoluciones(producto_id)")
+    # Lo que SE INSTALÓ Y ANDUVO, dicho por alguien: lo único de después de la venta que suma a
+    # favor. Vender y no oír nada no es lo mismo. Ver registrar_que_anduvo().
+    c.execute("""CREATE TABLE IF NOT EXISTS instalaciones_confirmadas (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        producto_id INTEGER NOT NULL REFERENCES productos(id) ON DELETE CASCADE,
+        codigo_pedido_clean TEXT,
+        nota TEXT,
+        usuario TEXT,
+        fecha TEXT DEFAULT (datetime('now'))
+    )""")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_instalaciones_prod ON instalaciones_confirmadas(producto_id)")
 
     # Mapeo de columnas recordado por proveedor. Cada vez que se importa una lista hay que
     # volver a indicar qué columna es el código, cuál el precio, etc. Un error ahí es lo que

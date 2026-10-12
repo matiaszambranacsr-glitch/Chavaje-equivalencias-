@@ -45,7 +45,8 @@ python3 pruebas_de_la_revision.py   # si tocaste el análisis: "todo en verde"
 python3 pruebas_de_la_revision.py --sellar   # si agregaste pares de muestra: quedan sellados
 python3 pruebas_de_la_precision.py  # y cuándo se da por verificada una equivalencia
 python3 pruebas_de_la_revision.py --base copia.db   # y contra tus aprobaciones
-python3 pruebas_de_la_revision.py --base copia.db --linea-base antes.json   # y contra la vez anterior
+python3 pruebas_de_la_revision.py --base copia.db --linea-base antes.json   # y contra la vez anterior:
+                                 # termina con «✅ SE PUEDE PUBLICAR» o «❌ NO PUBLICAR»
 python3 pruebas_de_compatibilidad.py --base copia.db   # y la versión anterior con la base migrada
 python3 revisar_con_gemini.py    # opcional: una segunda opinión sobre el diff
 ```
@@ -6476,6 +6477,33 @@ el botón**:
   dónde vino. Solo los últimos tres años: la serie arranca en los cuarenta y trae el 89.
 - «🔌 Probar las fuentes de afuera» suma la Central de Deudores (con el CUIT de la AFIP, nunca el
   de un cliente) y la inflación de respaldo.
+
+## 🧪 La precisión, décima parte: el silencio no confirma, los puentes de a uno y borrar sin perder
+
+Puntos 300 a 321 y 501 a 570 de la misma revisión con ChatGPT (la 322 a 500 no vinieron), medidos
+sobre la copia de la base real.
+
+| Punto | Qué se encontró | Qué se hizo |
+|---|---|---|
+| 302, 303, 508, 513 a 515. Vendida no es «funcionó» | **Dos ventas que no volvían sumaban 35 al puntaje** («funcionó en el mostrador»), más que el catálogo del fabricante (25). Era tomar el silencio por prueba, y en círculo: se vende lo que la app dice que es equivalente. | Lo único de después de la venta que suma es lo que **alguien confirmó**: en la ficha, **«🔧 Anduvo»** (quién lo dijo, qué se vio). La ficha separa lo vendido, lo que anduvo, lo que volvió y lo que no tiene noticias, y el tablero lo cuenta: «de lo vendido en 90 días, se confirmó que anduvo N, volvió M y de K no hay noticias». |
+| 300, 301 y 306. Lo que no es evidencia técnica no cruza ninguna línea | El freno que impide que lo aprendido (de las marcas y de lo vendido) haga pasar una franja **solo miraba las líneas 55 y 85**, pero el buscador y la ficha cortan «sólida» en 70. Medido: **289 vínculos quedaban «🟢 sólida» solo por lo aprendido de su par de marcas**. El stock y el precio no entran al puntaje (los +10 son por precios parecidos, no por baratos). | El freno mira todas las líneas (30, 50, 55, 70 y 85). Los 289 pasan a «razonable» (todos aprobados en la revisión; en una muestra de 60, 24 quedan 🟡 en la ficha y 36 ya eran 🟠 por llegar solo con pistas). Lo aprendido sigue bajando sin freno: IMPERIAL↔JL tiene el 95 % rechazado, FISPA↔fábrica el 6,5 %. **`VERSION_CONFIANZA` pasa a 15.** |
+| 314 a 316. La cola: primero lo que más une | La cola se revisa por lista y con muestra de control. **El 10 % de los 7.827 pendientes suma el 88 % de los pares nuevos**: 942 unen redes que hoy están separadas (100 pares o más cada uno; 937 son del barrido) y el que más encadena **6.944**, todos alrededor de un mismo código (80105FISPA). 909 ya están en la misma red. | **«🔥 Unen redes»**: arriba de cada lista, cuántos son y cuáles (el que más une primero), y **no entran en la aprobación en bloque** —como las piezas de seguridad—: un error ahí no es un vínculo malo, son cientos. |
+| 317 y 318. Borrar sin perder | La papelera guardaba el producto, sus vínculos y su cola, pero **las claves foráneas borraban con él sus ventas, devoluciones, precios anteriores, fotos y reservas**: restaurado, volvía sin nada de eso. Y un producto con su firma de foto guardada no se podía borrar («bytes is not JSON serializable»). | **Antes de confirmar**: «Este producto tiene 65 vínculo(s) (lo encadenan con 70 producto(s)), 2 venta(s), 1 precio(s) anteriores. Va todo a la papelera con él». La papelera guarda **toda su historia** (también lo binario) y la devuelve, aunque el producto haya vuelto a entrar con una importación. Las tablas salen de la base: una nueva entra sola. |
+| 319 y 320. Huérfanos y relaciones imposibles | Ya había 13 controles en «🔍 Salud de los datos». Medido: 0 vínculos de un producto consigo mismo, 0 al revés, 0 cargados y rechazados a la vez, 0 cambios de número en círculo. Quedan 822 decisiones de productos borrados (se guardan por la papelera: los números no se reusan), 2 muestras y 18 pares de portal. | Seis controles más: **cargado y rechazado a la vez** (el «EQUIVALENTE y NO_COMPATIBLE» del ejemplo), pendiente consigo mismo o ya rechazado, ida y vuelta con decisiones distintas, cambio de número a sí mismo o en círculo, y lo que quedó de productos borrados. Los imposibles **avisan solos** en «lo que necesita atención». Ningún flujo de la app los produce: todos cortan el vínculo al rechazarlo. |
+| 321. El «Chavaje Challenge» | `pruebas_de_la_revision.py --base --linea-base` ya probaba los pares de muestra sellados, todo lo aprobado y rechazado, la línea de base y la «una sola verdad». | Termina con un veredicto: **«🏁 Reglas v15: 23.500 casos probados — 75 de muestra, 20.037 aprobados, 2.633 rechazados, 755 resultados de búsqueda · regresiones: 0 · falsos positivos de piezas de seguridad: 0 · ✅ SE PUEDE PUBLICAR»**. Un rechazo de una pieza de seguridad que vuelve limpio frena la publicación aunque el total quede debajo del tope. |
+| 304, 305 y 568 a 570. Fuentes que se copian | Medido: en los 2.959 vínculos directos entre dos listas de proveedor, **la descripción es idéntica en 2** (0 a 1 % por par de listas): no se copian. Y la app nunca suma por «lo dicen N listas» (esa cuenta existía y no se usaba). Cada vínculo ya dice si lo declara una fuente (📋 lista, 🏭 catálogo, 👤 persona), si es una pista derivada (🔤 barrido, cruce por auto) o si no se sabe (❔). | Sin cambio. |
+| 307 a 313. Siguiente acción, procedimiento, checklist, evidencia por riesgo | Ya: «👉 Próxima comprobación: medí X en las dos», la comprobación guiada (la tanda anterior), «Falta para que quede verificada» y `EVIDENCIA_MINIMA_POR_RIESGO`. El diagrama de dónde medir y el tiempo estimado no se hicieron: no hay imágenes ni tiempos medidos. | — |
+| 501 a 507, 509, 510, 519 y 520. Inteligencia sobre errores | Ya: una devolución «no era la pieza» baja el vínculo; las causas separadas; por par de listas, por familia, por marca (la tanda anterior) y por origen; falsos positivos y negativos en `--base`. | — |
+| 511, 512, 516 a 518. Costo del error, garantías, lotes | El riesgo de la pieza (🛑 seguridad, 🟠 alto) ya decide la evidencia mínima y qué no se aprueba en bloque; las garantías son las devoluciones «vino fallada». Los lotes de mercadería no se registran. | — |
+| 521 a 540. Explicar | Ya: la ficha muestra qué coincide y qué no, lado a lado, lo desconocido (❓) aparte de lo que difiere (❌), de dónde salió cada medida y quién la cargó, lo que la tumbaría, lo que falta, quién decidió, con qué versión de las reglas, y una vista corta (el buscador) y una completa (ficha y expediente). | — |
+| 541 a 567. Datos contaminados | Medido: el grupo más grande de medidas idénticas son 115 poleas 17 × 61 (la medida común de los tensores; buscar por medidas pide tres); solo 2 valores están diez veces lejos de la mediana de su familia; PSI solo en 11 herramientas neumáticas, °F en ninguna. Ya estaban el freno de precios por producto (×3 o el separador de decimales), los campos vacíos que no borran, la vista previa, deshacer una lista y los historiales de medidas y precios. Restaurar un solo campo no se hizo: se vuelve a cargar a mano y queda en el historial. | — |
+
+Probado en `pruebas_de_la_precision.py` (60 a 64; 24 fallas puestas a mano, las 24 detectadas;
+las 28 de la tanda anterior también), en `pruebas_de_la_revision.py --base` (el veredicto de
+arriba), en `pruebas_de_compatibilidad.py` y en la app: «🔧 Anduvo» en la ficha, los 937 puentes
+en la cola del barrido, borrar y restaurar un producto con 65 vínculos y 2 ventas, la salud de
+los datos con los controles nuevos y el recorrido de las 32 pantallas, sin errores. La búsqueda
+tarda lo mismo: mediana 97 ms.
 
 ## 🏆 La precisión, novena parte: primero que sirva, después que convenga
 

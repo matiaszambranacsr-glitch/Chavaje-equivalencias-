@@ -77,20 +77,20 @@ def probar(L):
     evaluar = ns["evaluar_equivalencia"]
     tope = ns["TOPE_CON_VETO"]
     puntaje, senales = evaluar("FILTRO DE ACEITE FORD FIESTA", "FILTRO DE ACEITE FORD FIESTA",
-                               respaldo_fabricante=True, vendido_como_reemplazo=5,
+                               respaldo_fabricante=True, anduvo_como_reemplazo=5,
                                familia_a="Filtros", familia_b="Frenos")
     esperar("con rubros distintos, el puntaje no pasa del tope aunque todo lo demás sume",
             puntaje <= tope, True)
     sin, _ = evaluar("BOMBA DE AGUA FORD KA", "BOMBA DE AGUA FIAT UNO")
     con, senales = evaluar("BOMBA DE AGUA FORD KA", "BOMBA DE AGUA FIAT UNO",
-                           vendido_como_reemplazo=5)
+                           anduvo_como_reemplazo=5)
     franja = ns["LINEAS_DE_CONFIANZA"]
 
     def franja_de(x):
         return sum(x >= linea for linea in franja)
-    esperar("las ventas suben el puntaje", con > sin, True)
+    esperar("las instalaciones que anduvieron suben el puntaje", con > sin, True)
     esperar("pero no lo pasan de franja", franja_de(con), franja_de(sin))
-    esperar("y la señal se ve", any("reemplazo" in s for _, s in senales), True)
+    esperar("y la señal se ve", any("anduvo" in s for _, s in senales), True)
 
     # 4. La ficha de prueba, con una base chica armada a mano.
     def marca(nombre, tipo="PROVEEDOR"):
@@ -297,7 +297,7 @@ def probar(L):
     c.execute("INSERT INTO ventas_registradas (producto_id, termino_pedido, codigo_pedido_clean) "
               "VALUES (?, 'D100', 'D100'), (?, 'D100', 'D100')", (disco_b, disco_b))
     conn.commit()
-    esperar("una venta que volvió no confirma nada", ns["pares_confirmados_por_ventas"](), {})
+    esperar("una venta que volvió no confirma nada", ns["pares_que_anduvieron"](), {})
     res, _ = ns["buscar_con_variantes_del_cero"]("D100", "Todas", 3)
     fila_b = {f["ID"]: f for f in res}.get(disco_b, {})
     esperar("el buscador lo muestra devuelto", fila_b.get("Devuelto"), "↩️ 1")
@@ -857,11 +857,19 @@ def probar(L):
         "SELECT veredicto, como FROM ventas_registradas WHERE producto_id = ? LIMIT 1",
         (vt_b,)).fetchone()), ("🟡 probable", "alternativa"))
     esperar("vendida como alternativa no confirma",
-            (min(vt_a, vt_b), max(vt_a, vt_b)) in ns["pares_confirmados_por_ventas"](), False)
+            (min(vt_a, vt_b), max(vt_a, vt_b)) in ns["pares_que_anduvieron"](), False)
     for _ in range(2):
         ns["registrar_venta"](vt_b, "VT1", "🟢 equivalencia confirmada")
-    esperar("vendida como equivalente, sí",
-            (min(vt_a, vt_b), max(vt_a, vt_b)) in ns["pares_confirmados_por_ventas"](), True)
+    esperar("vendida como equivalente y sin noticias, tampoco: el silencio no confirma",
+            (min(vt_a, vt_b), max(vt_a, vt_b)) in ns["pares_que_anduvieron"](), False)
+    ns["registrar_que_anduvo"](vt_b, "VT1", "el taller de Juan")
+    esperar("con una que anduvo, todavía no",
+            (min(vt_a, vt_b), max(vt_a, vt_b)) in ns["pares_que_anduvieron"](), False)
+    ns["registrar_que_anduvo"](vt_b, "VT1")
+    esperar("con dos que anduvieron, sí",
+            ns["pares_que_anduvieron"]().get((min(vt_a, vt_b), max(vt_a, vt_b))), 2)
+    esperar("sin decir qué se pidió, no", _falla(ns["registrar_que_anduvo"], vt_b, " "),
+            "ValueError")
 
     # 41. El tablero: semáforo, degradación, registro de errores y la foto de cada día.
     # La venta guarda lo que la sostenía en ese momento: la «caja negra».
@@ -1441,6 +1449,157 @@ def probar(L):
     _r_auto2 = ns["repuestos_de_este_auto"]("FIAT", "PALIO", None, "")
     esperar("sin el motor, pregunta", "¿Es nafta o diésel?" in ns[
         "versiones_que_hay_que_preguntar"](_r_auto2["del_catalogo"]), True)
+
+    # 60. Lo aprendido (marcas, instalaciones) suma, pero no hace pasar NINGUNA franja: tampoco
+    # la de «sólida», que es la que mira la ficha.
+    _linea = ns["sin_cruzar_la_linea_por_lo_aprendido"]
+    esperar("sin lo aprendido 65, con 75: queda en 69", _linea(75, 10), 69.0)
+    esperar("sin lo aprendido 60, con 90: no pasa la 70 ni la 85", _linea(90, 30), 69.0)
+    esperar("si ya estaba arriba, sube libre", _linea(95, 10), 95.0)
+    esperar("lo que baja, baja", _linea(40, -25), 40.0)
+    esperar("las franjas del buscador y la de la ficha son líneas", {30, 50, 70, ns["CONFIANZA_SOLIDA"]}
+            <= set(ns["LINEAS_DE_CONFIANZA"]), True)
+    esperar("y las de la cola también", {55, ns["CONFIANZA_ALTA"]} <= set(ns["LINEAS_DE_CONFIANZA"]),
+            True)
+    esperar("la franja del buscador corta donde las líneas",
+            [ns["franja_de_confianza"](x) for x in (69, 70, 49, 50, 29, 30)],
+            ["🟡 razonable", "🟢 sólida", "🟠 floja", "🟡 razonable", "🔴 muy débil", "🟠 floja"])
+
+    # 61. Lo que pasó después de vender: confirmado, devuelto y silencio, por separado.
+    sv_a = producto("SV1", "TERMOSTATO RENAULT CLIO 1.6", fispa)
+    sv_b = producto("ISV1", "TERMOSTATO RENAULT CLIO 1.6", illinois)
+    vincular(sv_a, sv_b, "FISPA · lista.xlsx · 01/10/2026 10:00:00")
+    conn.commit()
+    for _ in range(4):
+        ns["registrar_venta"](sv_b, "SV1", "🟢 equivalencia confirmada")
+    ns["registrar_que_anduvo"](sv_b, "SV1")
+    ns["registrar_devolucion"](sv_b, "SV1", "instalacion")
+    _seg_v = ns["seguimiento_de_lo_vendido"]()
+    esperar("la instalación mal hecha no es una devolución «no era»", _seg_v["volvieron"] >= 0, True)
+    _ficha_sv = ns["ficha_de_prueba"](sv_a, sv_b)
+    esperar("la ficha separa lo vendido, lo que anduvo y lo que volvió",
+            _ficha_sv["despues_de_vender"], {"vendidas": 4, "anduvieron": 1, "volvieron": 1})
+    _antes_seg = ns["seguimiento_de_lo_vendido"]()
+    ns["registrar_venta"](sv_b, "SV1", "🟢 equivalencia confirmada")
+    _desp_seg = ns["seguimiento_de_lo_vendido"]()
+    esperar("una venta más sin noticias es silencio, no confirmación",
+            (_desp_seg["vendidas"] - _antes_seg["vendidas"],
+             _desp_seg["sin_noticias"] - _antes_seg["sin_noticias"],
+             _desp_seg["anduvieron"] - _antes_seg["anduvieron"]), (1, 1, 0))
+    esperar("una con motivo «no era» cuenta como volvió", (lambda antes: (
+        ns["registrar_devolucion"](sv_b, "SV1", "medida"),
+        ns["seguimiento_de_lo_vendido"]()["volvieron"] - antes)[1])(_desp_seg["volvieron"]), 1)
+    ns["registrar_que_anduvo"](sv_b, "SV1")
+    ns["registrar_que_anduvo"](sv_b, "SV1")
+    esperar("lo que volvió porque no era no suma, aunque otras veces haya andado",
+            (min(sv_a, sv_b), max(sv_a, sv_b)) in ns["pares_que_anduvieron"](), False)
+
+    # 62. Lo que une dos redes grandes no se aprueba en bloque y se mira primero.
+    pu = marca("PUENTES")
+    _red1 = [producto(f"RA{i}", "BUJIA DE ENCENDIDO", pu) for i in range(11)]
+    _red2 = [producto(f"RB{i}", "BUJIA DE ENCENDIDO", pu) for i in range(11)]
+    for _x in _red1[1:]:
+        vincular(_red1[0], _x, "PUENTES · lista · 01/10")
+    for _x in _red2[1:]:
+        vincular(_red2[0], _x, "PUENTES · lista · 01/10")
+    _red3 = [producto(f"RC{i}", "BUJIA DE ENCENDIDO", pu) for i in range(16)]
+    _red4 = [producto(f"RD{i}", "BUJIA DE ENCENDIDO", pu) for i in range(16)]
+    for _x in _red3[1:]:
+        vincular(_red3[0], _x, "PUENTES · lista · 01/10")
+    for _x in _red4[1:]:
+        vincular(_red4[0], _x, "PUENTES · lista · 01/10")
+    _suelto_a = producto("RS1", "BUJIA DE ENCENDIDO", pu)
+    _suelto_b = producto("RS2", "BUJIA DE ENCENDIDO", pu)
+    for _x, _y in ((_red1[3], _red2[5]), (_suelto_a, _suelto_b), (_red3[2], _red4[7])):
+        c.execute("INSERT INTO equivalencias_pendientes (producto_a_id, producto_b_id, origen, lote) "
+                  "VALUES (?, ?, 'x', 'PUENTES · 02/10')", (min(_x, _y), max(_x, _y)))
+    conn.commit()
+    _une = ns["cuanto_une_cada_par"]([(_red1[3], _red2[5]), (_suelto_a, _suelto_b), (_red1[1], _red1[2])])
+    esperar("cuánto encadena cada uno", [_une[(_red1[3], _red2[5])], _une[(_suelto_a, _suelto_b)],
+                                          _une[(_red1[1], _red1[2])]], [121, 1, 0])
+    _pts = ns["puentes_del_lote"]("PUENTES · 02/10")
+    esperar("los puentes, primero en la cola y el que más une arriba",
+            [(x["Código A"], x["Código B"], x["Encadena"]) for x in _pts],
+            [("RC2", "RD7", 256), ("RA3", "RB5", 121)])
+    esperar("en bloque, los puentes no entran", ns["aprobar_pendientes"]("PUENTES · 02/10",
+                                                                        en_bloque=True), 1)
+    esperar("y siguen en la cola", c.execute(
+        "SELECT COUNT(*) FROM equivalencias_pendientes WHERE lote = 'PUENTES · 02/10'").fetchone()[0], 2)
+    esperar("de a uno, sí", ns["aprobar_pendientes"]("PUENTES · 02/10", [(_red1[3], _red2[5])]), 1)
+
+    # 63. Antes de borrar, lo que toca; y la papelera devuelve la historia, también lo binario.
+    bh = producto("BH1", "RADIADOR VW GOL 1.6", fispa)
+    bh_o = producto("IBH1", "RADIADOR VW GOL 1.6", illinois)
+    vincular(bh, bh_o, "FISPA · lista.xlsx · 01/10/2026 10:00:00")
+    c.execute("UPDATE productos SET imagen_orb_blob = ? WHERE id = ?", (b"\x00\x01firma", bh))
+    c.execute("INSERT INTO producto_fotos (producto_id, imagen_data, estado) VALUES (?, ?, 'ok')",
+              (bh, b"\x89PNG\r\nfoto"))
+    c.execute("INSERT INTO historial_precios (producto_id, precio) VALUES (?, 100), (?, 120)", (bh, bh))
+    c.execute("INSERT INTO consultas_cliente (cliente, producto_id, codigo_buscado) VALUES ('Ana', ?, 'BH1')",
+              (bh,))
+    conn.commit()
+    for _ in range(3):
+        ns["registrar_venta"](bh, "IBH1", "🟢 equivalencia confirmada")
+    ns["registrar_devolucion"](bh, "IBH1", "fallada")
+    _imp = ns["impacto_de_borrar"](bh)
+    esperar("lo que toca borrarlo", (_imp["vínculos"], _imp["historia"].get("ventas_registradas"),
+                                     _imp["historia"].get("devoluciones"),
+                                     _imp["historia"].get("producto_fotos"),
+                                     _imp["historia"].get("historial_precios"),
+                                     _imp["historia"].get("consultas_cliente")),
+            (1, 3, 1, 1, 2, 1))
+    esperar("y lo dice en una frase", ns["texto_del_impacto"](_imp).startswith(
+        "⚠️ Este producto tiene 1 vínculo(s), 3 venta(s)"), True)
+    esperar("un producto sin nada, nada", ns["texto_del_impacto"](
+        ns["impacto_de_borrar"](producto("BH9", "TAPA", fispa))), "")
+    esperar("se borra aunque tenga datos binarios", ns["borrar_producto_con_papelera"](bh), 1)
+    esperar("y se lleva sus ventas", c.execute("SELECT COUNT(*) FROM ventas_registradas WHERE "
+                                               "producto_id = ?", (bh,)).fetchone()[0], 0)
+    _pap = c.execute("SELECT id FROM papelera WHERE tipo = 'producto' ORDER BY id DESC LIMIT 1").fetchone()[0]
+    _ok_r, _det_r = ns["restaurar_de_papelera"](_pap)
+    esperar("vuelve", _ok_r, True)
+    esperar("con su historia", tuple(c.execute(f"SELECT COUNT(*) FROM {t} WHERE producto_id = ?",
+                                               (bh,)).fetchone()[0]
+                                     for t in ("ventas_registradas", "devoluciones",
+                                               "historial_precios", "producto_fotos",
+                                               "consultas_cliente")), (3, 1, 2, 1, 1))
+    esperar("y lo binario, igual", (c.execute("SELECT imagen_data FROM producto_fotos WHERE producto_id = ?",
+                                              (bh,)).fetchone()[0],
+                                    c.execute("SELECT imagen_orb_blob FROM productos WHERE id = ?",
+                                              (bh,)).fetchone()[0]),
+            (b"\x89PNG\r\nfoto", b"\x00\x01firma"))
+    esperar("y lo dice", "3 venta(s)" in (_det_r or ""), True)
+    # Si mientras estuvo en la papelera volvió a entrar con una importación, la historia va al
+    # que entró.
+    ns["borrar_producto_con_papelera"](bh)
+    bh_nuevo = producto("BH1", "RADIADOR VW GOL 1.6", fispa)
+    conn.commit()
+    _pap = c.execute("SELECT id FROM papelera WHERE tipo = 'producto' ORDER BY id DESC LIMIT 1").fetchone()[0]
+    ns["restaurar_de_papelera"](_pap)
+    esperar("la historia va al que volvió a entrar", (bh_nuevo != bh, c.execute(
+        "SELECT COUNT(*) FROM ventas_registradas WHERE producto_id = ?", (bh_nuevo,)).fetchone()[0],
+        c.execute("SELECT COUNT(*) FROM consultas_cliente WHERE producto_id = ?", (bh_nuevo,)).fetchone()[0]),
+            (True, 3, 1))
+
+    # 64. Las relaciones que no pueden existir: equivalente y rechazada a la vez.
+    _rel_antes = dict(ns["relaciones_imposibles"]())
+    _clave_rel = "Vínculos cargados que alguien rechazó (equivalente y no equivalente a la vez)"
+    ri_a = producto("RI1", "FILTRO DE AIRE FORD KA", fispa)
+    ri_b = producto("IRI1", "FILTRO DE AIRE FORD KA", illinois)
+    ns["marcar_revision"]([(ri_a, ri_b)], "rechazada")
+    vincular(ri_a, ri_b, "a mano, por fuera de la app")
+    conn.commit()
+    esperar("la ve", dict(ns["relaciones_imposibles"]()).get(_clave_rel, 0)
+            - _rel_antes.get(_clave_rel, 0), 1)
+    esperar("en la salud de los datos", {r["Chequeo"]: r["Problemas"] for r in ns["chequear_integridad_bd"]()}
+            .get(_clave_rel), dict(ns["relaciones_imposibles"]()).get(_clave_rel))
+    esperar("y avisa", "relación(es) que no pueden existir" in " | ".join(
+        p_["titulo"] for p_ in ns["diagnostico_de_salud"]()), True)
+    c.execute("DELETE FROM equivalencias WHERE producto_a_id = ? AND producto_b_id = ?",
+              (min(ri_a, ri_b), max(ri_a, ri_b)))
+    conn.commit()
+    esperar("y deja de verla", dict(ns["relaciones_imposibles"]()).get(_clave_rel, 0),
+            _rel_antes.get(_clave_rel, 0))
     return fallas
 
 

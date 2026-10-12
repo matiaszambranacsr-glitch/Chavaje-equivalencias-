@@ -1375,6 +1375,57 @@ def depurar_huerfanos():
     return borrados
 
 
+# LAS RELACIONES IMPOSIBLES: lo que no puede pasar nunca y, si pasa, rompe una respuesta del
+# mostrador. Lo pidió una revisión con ChatGPT («auditoría de relaciones imposibles: una pieza
+# marcada a la vez como EQUIVALENTE y NO_COMPATIBLE»). Hoy, sobre la base real, dan todas 0.
+# Son baratas (la clave de cada tabla), así que también las mira la alarma: ver
+# relaciones_imposibles().
+CHEQUEOS_DE_RELACIONES_IMPOSIBLES = (
+    ("Vínculos cargados que alguien rechazó (equivalente y no equivalente a la vez)",
+     """SELECT COUNT(*) FROM equivalencias e JOIN equivalencias_revisadas r
+        ON r.producto_a_id = e.producto_a_id AND r.producto_b_id = e.producto_b_id
+        WHERE r.decision = 'rechazada'"""),
+    ("Vínculos pendientes de un producto consigo mismo",
+     "SELECT COUNT(*) FROM equivalencias_pendientes WHERE producto_a_id = producto_b_id"),
+    ("Vínculos pendientes que alguien ya rechazó",
+     """SELECT COUNT(*) FROM equivalencias_pendientes p JOIN equivalencias_revisadas r
+        ON r.producto_a_id = p.producto_a_id AND r.producto_b_id = p.producto_b_id
+        WHERE r.decision = 'rechazada'"""),
+    ("Decisiones con la ida y la vuelta distintas (aprobada y rechazada)",
+     """SELECT COUNT(*) FROM equivalencias_revisadas r JOIN equivalencias_revisadas s
+        ON s.producto_a_id = r.producto_b_id AND s.producto_b_id = r.producto_a_id
+        WHERE r.decision <> s.decision AND r.producto_a_id < r.producto_b_id"""),
+    ("Cambios de número de un código a sí mismo",
+     "SELECT COUNT(*) FROM reemplazos_codigo WHERE codigo_viejo_clean = codigo_nuevo_clean"),
+    ("Cambios de número en círculo (A pasa a B y B pasa a A)",
+     """SELECT COUNT(*) FROM reemplazos_codigo r JOIN reemplazos_codigo s
+        ON s.codigo_viejo_clean = r.codigo_nuevo_clean AND s.codigo_nuevo_clean = r.codigo_viejo_clean
+        WHERE r.codigo_viejo_clean < r.codigo_nuevo_clean"""),
+)
+
+
+def relaciones_imposibles():
+    """[(chequeo, cuántos)] de CHEQUEOS_DE_RELACIONES_IMPOSIBLES que no dan 0, más los vínculos
+    que apuntan a un producto que no está y los de un producto consigo mismo."""
+    salida = []
+    for chequeo, sql in CHEQUEOS_DE_RELACIONES_IMPOSIBLES + (
+            ("Vínculos de un producto consigo mismo",
+             "SELECT COUNT(*) FROM equivalencias WHERE producto_a_id = producto_b_id"),
+            ("Vínculos que apuntan a un producto que ya no existe",
+             """SELECT COUNT(*) FROM equivalencias e
+                WHERE NOT EXISTS (SELECT 1 FROM productos p WHERE p.id = e.producto_a_id)
+                   OR NOT EXISTS (SELECT 1 FROM productos p WHERE p.id = e.producto_b_id)""")):
+        try:
+            c.execute(sql)
+            n = c.fetchone()[0] or 0
+        except sqlite3.OperationalError as _err:
+            anotar_error("relaciones_imposibles", _err)
+            continue
+        if n:
+            salida.append((chequeo, n))
+    return salida
+
+
 def chequear_integridad_bd():
     """Revisa la base en busca de datos rotos o inconsistentes — sobre todo útil para detectar
     algo que se haya colado antes de que ciertas protecciones existieran, o algo que se rompió
@@ -1444,11 +1495,27 @@ def chequear_integridad_bd():
              """SELECT COALESCE(SUM(n - 1), 0) FROM (SELECT COUNT(*) AS n FROM aplicaciones
                 GROUP BY marca_auto, modelo_auto, motor, anio_desde, anio_hasta, codigo_clean,
                          marca_repuesto HAVING COUNT(*) > 1)"""),
-    ):
+    ) + CHEQUEOS_DE_RELACIONES_IMPOSIBLES:
         try:
             c.execute(sql)
             resultados.append({"Chequeo": chequeo, "Problemas": c.fetchone()[0] or 0})
         except sqlite3.OperationalError as _err:      # una tabla que esta base todavía no tiene
+            anotar_error("chequear_integridad_bd", _err)
+    # LO QUE QUEDÓ DE PRODUCTOS BORRADOS. No es un error: las decisiones se guardan para que, si
+    # el producto vuelve de la papelera, vuelva con ellas (los números de producto no se
+    # reusan). Se cuenta para que se vea, no para borrarlo. Lo pidió una revisión con ChatGPT
+    # («auditoría de huérfanos»). Sobre la base real: 822 decisiones, 2 muestras y 18 pares de
+    # portal.
+    for chequeo, tabla in (("Decisiones sobre productos borrados (se guardan por la papelera)",
+                            "equivalencias_revisadas"),
+                           ("Muestras de control de productos borrados", "muestras_de_control"),
+                           ("Pares de un portal con productos borrados", "productos_juntos_en_portal")):
+        try:
+            c.execute(f"""SELECT COUNT(*) FROM {tabla} x
+                          WHERE NOT EXISTS (SELECT 1 FROM productos p WHERE p.id = x.producto_a_id)
+                             OR NOT EXISTS (SELECT 1 FROM productos p WHERE p.id = x.producto_b_id)""")
+            resultados.append({"Chequeo": chequeo, "Problemas": c.fetchone()[0] or 0})
+        except sqlite3.OperationalError as _err:
             anotar_error("chequear_integridad_bd", _err)
     # Esperando revisión hace más de 90 días: no es un dato roto, pero es una cola que nadie mira.
     try:

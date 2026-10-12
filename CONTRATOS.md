@@ -82,6 +82,12 @@ Las pruebas se corren como dice el README, en «Antes de subir un cambio».
 | Practicar no cambia nada: mitad aprobados y mitad rechazados, primero los rechazos con motivo | `casos_para_practicar()`, `la_respuesta_del_caso()` | `pruebas_de_la_precision.py` (57) |
 | Para no comprar, la equivalente tiene que estar confirmada y en stock | `equivalentes_confirmadas_con_stock()` | `pruebas_de_la_precision.py` (58) |
 | Lo que el motor del auto ya dice (nafta o diésel) no se pregunta | `repuestos_de_este_auto()` | `pruebas_de_la_precision.py` (59) |
+| Lo aprendido (marcas, instalaciones) suma, pero no hace pasar ninguna franja del buscador, de la ficha ni de la cola | `LINEAS_DE_CONFIANZA`, `sin_cruzar_la_linea_por_lo_aprendido()` | `pruebas_de_la_precision.py` (3, 60) |
+| Vender y no oír nada no confirma: solo suma lo que alguien dijo que anduvo, y nunca lo que volvió | `registrar_que_anduvo()`, `pares_que_anduvieron()`, `seguimiento_de_lo_vendido()` | `pruebas_de_la_precision.py` (40, 61) |
+| Lo que une dos redes grandes no se aprueba en bloque, y se ve primero | `cuanto_une_cada_par()`, `pares_que_unen_redes()`, `puentes_del_lote()`, `aprobar_pendientes(en_bloque=True)` | `pruebas_de_la_precision.py` (62) |
+| Antes de borrar se dice lo que toca, y la papelera devuelve el producto con toda su historia | `impacto_de_borrar()`, `borrar_producto_con_papelera()`, `restaurar_de_papelera()` | `pruebas_de_la_precision.py` (63) |
+| Un vínculo cargado y rechazado a la vez (y las otras relaciones imposibles) se ve y avisa | `relaciones_imposibles()`, `chequear_integridad_bd()`, `diagnostico_de_salud()` | `pruebas_de_la_precision.py` (64) |
+| Una versión de las reglas no se publica con regresiones ni con un rechazo de seguridad que vuelve limpio | `imprimir_el_veredicto()` | `pruebas_de_la_revision.py --base --linea-base` |
 
 ## El stock, los precios y la plata
 

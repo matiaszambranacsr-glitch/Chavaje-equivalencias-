@@ -1034,7 +1034,7 @@ def auditar_equivalencias_cargadas(limite=2000, tope_confianza=35, revisar=None)
     medidas = cargar_medidas_de_varios([f["a"] for f in filas] + [f["b"] for f in filas])
     aprobados = puentes_aprobados_ids()
     patrones = aprender_de_las_decisiones()
-    ventas_confirman = pares_confirmados_por_ventas()
+    ventas_confirman = pares_que_anduvieron()
     devueltos = pares_devueltos()      # lo que volvió porque no le iba
 
     escalas = escalas_de_precio()
@@ -1070,7 +1070,7 @@ def auditar_equivalencias_cargadas(limite=2000, tope_confianza=35, revisar=None)
             f["desc_a"], f["desc_b"], medidas.get(f["a"]), medidas.get(f["b"]),
             f["precio_a"], f["precio_b"],
             marca_a=f["marca_a"], marca_b=f["marca_b"], patrones=patrones,
-            vendido_como_reemplazo=ventas_confirman.get((min(f["a"], f["b"]),
+            anduvo_como_reemplazo=ventas_confirman.get((min(f["a"], f["b"]),
                                                           max(f["a"], f["b"])), 0),
             devuelto=devueltos.get((min(f["a"], f["b"]), max(f["a"], f["b"])), 0),
             codigo_puente=puente, productos_del_puente=grados.get(id_puente, 0),
@@ -1240,7 +1240,7 @@ def recalcular_confianzas(limite=20000, progreso=None, solo_faltantes=True, de_p
     except sqlite3.OperationalError as _err:
         anotar_error("recalcular_confianzas", _err)
     aprobados = puentes_aprobados_ids()
-    ventas_confirman = pares_confirmados_por_ventas()
+    ventas_confirman = pares_que_anduvieron()
     devueltos = pares_devueltos()      # lo que volvió porque no le iba
     _ya_juzgados = {}   # código -> ¿las reglas de hoy ya no lo tomarían? (cacheado)
     # Lo que el análisis de la cola pone en rojo: el buscador no puede mostrarlo confiable.
@@ -1261,7 +1261,7 @@ def recalcular_confianzas(limite=20000, progreso=None, solo_faltantes=True, de_p
             f["desc_a"], f["desc_b"], medidas.get(f["a"]), medidas.get(f["b"]),
             f["precio_a"], f["precio_b"],
             marca_a=f["marca_a"], marca_b=f["marca_b"], patrones=patrones,
-            vendido_como_reemplazo=ventas_confirman.get((min(f["a"], f["b"]),
+            anduvo_como_reemplazo=ventas_confirman.get((min(f["a"], f["b"]),
                                                           max(f["a"], f["b"])), 0),
             devuelto=devueltos.get((min(f["a"], f["b"]), max(f["a"], f["b"])), 0),
             codigo_puente=puente, productos_del_puente=grados.get(id_puente, 0),

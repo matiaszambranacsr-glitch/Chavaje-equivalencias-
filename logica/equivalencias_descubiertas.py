@@ -18,7 +18,7 @@ def registrar_venta(producto_id, termino_pedido="", veredicto=None, evidencia=No
     Con el veredicto que tenía en el buscador en ese momento, congelado: si mañana la
     equivalencia cambia, la venta conserva lo que se sabía cuando se hizo. Y si no estaba
     confirmada, queda como ALTERNATIVA COMERCIAL: puede resolverle el problema al cliente, pero
-    no confirma que sean equivalentes (ver _pares_vendidos()). Lo pidió una revisión con ChatGPT
+    no confirma que sean equivalentes (ver registrar_que_anduvo()). Lo pidió una revisión con ChatGPT
     («que el sistema proteja al vendedor» y «alternativa comercial como categoría aparte»).
     'evidencia' es lo que la sostenía en ese momento (ver evidencia_de_la_fila()): si vuelve,
     el registro de errores dice qué se sabía al venderla."""
@@ -739,6 +739,7 @@ def tablero_de_calidad(minimo_por_grupo=30, tope=10):
     salida["hace_un_mes"] = _foto_de_calidad(salida["numeros"])
     salida["por_marca"] = calidad_por_marca()
     salida["contra_la_recomendacion"] = ventas_contra_la_recomendacion()
+    salida["seguimiento"] = seguimiento_de_lo_vendido()
     return salida
 
 
@@ -1897,30 +1898,81 @@ def pares_devueltos():
         return {}
 
 
-def pares_confirmados_por_ventas(minimo_veces=2):
-    """Los pares que la venta real confirmó, para usarlos como señal de confianza. Uno que
-    volvió alguna vez porque no le iba no cuenta como confirmado: ver pares_devueltos()."""
-    devueltos = pares_devueltos()
-    return {par: veces for par, veces in _pares_vendidos(minimo_veces).items()
-            if par not in devueltos}
+def registrar_que_anduvo(producto_id, termino_pedido, nota=""):
+    """Anota que la pieza que se vendió por lo que el cliente pidió SE INSTALÓ Y ANDUVO: lo que
+    dijo el mecánico o el cliente. Es la contracara de registrar_devolucion(), y es lo único de
+    después de la venta que suma a favor (ver pares_que_anduvieron()).
+
+    Lo pidió una revisión con ChatGPT: «no confundir ausencia de queja con evidencia positiva»,
+    «separar "vendida" de "funcionó"» y «confirmación posterior a la venta». Antes, dos ventas
+    que no volvían sumaban 35 al puntaje («funcionó en el mostrador»): el silencio contaba como
+    prueba, y además en círculo —se vende lo que la app dice que es equivalente—."""
+    if modo_solo_lectura():
+        raise PermissionError(TEXTO_DE_SOLO_LECTURA)
+    pedido = sanitizar(termino_pedido or "")
+    if not pedido:
+        raise ValueError("Falta qué había pedido el cliente.")
+    with db_lock, transaccion():
+        c.execute("INSERT INTO instalaciones_confirmadas (producto_id, codigo_pedido_clean, nota, "
+                  "usuario) VALUES (?, ?, ?, ?)",
+                  (producto_id, pedido, (nota or "").strip(), obtener_usuario_actual()))
 
 
-def _pares_vendidos(minimo_veces):
+def pares_que_anduvieron(minimo_veces=2):
+    """{(a, b): veces} de lo que alguien confirmó que se instaló y anduvo (a lo pedido, b lo
+    vendido), desde `minimo_veces`. Uno que volvió alguna vez porque no le iba no cuenta: ver
+    pares_devueltos(). Las ventas solas no entran: ver registrar_que_anduvo()."""
     try:
-        c.execute("""SELECT p1.id AS a, v.producto_id AS b, COUNT(*) AS veces
-                     FROM ventas_registradas v
-                     JOIN productos p ON p.id = v.producto_id
-                     JOIN productos p1 ON p1.codigo_clean = v.codigo_pedido_clean
-                     WHERE v.codigo_pedido_clean IS NOT NULL
-                       AND v.codigo_pedido_clean <> ''
-                       AND p1.id <> v.producto_id
-                       AND COALESCE(v.como, '') <> 'alternativa'
-                     GROUP BY p1.id, v.producto_id
-                     HAVING COUNT(*) >= ?""", (minimo_veces,))
-        return {(min(r["a"], r["b"]), max(r["a"], r["b"])): r["veces"] for r in c.fetchall()}
+        c.execute("""SELECT p1.id AS a, i.producto_id AS b, COUNT(*) AS veces
+                     FROM instalaciones_confirmadas i
+                     JOIN productos p1 ON p1.codigo_clean = i.codigo_pedido_clean
+                     WHERE i.codigo_pedido_clean <> '' AND p1.id <> i.producto_id
+                     GROUP BY p1.id, i.producto_id""")
+        salida = {}
+        for r in c.fetchall():
+            par = (min(r["a"], r["b"]), max(r["a"], r["b"]))
+            salida[par] = salida.get(par, 0) + r["veces"]
     except sqlite3.OperationalError as _err:
-        anotar_error("pares_confirmados_por_ventas", _err)
+        anotar_error("pares_que_anduvieron", _err)
         return {}
+    devueltos = pares_devueltos()
+    return {par: veces for par, veces in salida.items()
+            if veces >= minimo_veces and par not in devueltos}
+
+
+def seguimiento_de_lo_vendido(dias=90):
+    """De lo vendido en lugar de lo pedido en los últimos `dias`: cuánto se confirmó que anduvo,
+    cuánto volvió y de cuánto no hay noticias. Lo pidió una revisión con ChatGPT («medir el
+    silencio peligroso: casos donde se recomienda algo y nadie reporta si funcionó»).
+    {"vendidas": n, "anduvieron": n, "volvieron": n, "sin_noticias": n}"""
+    salida = {"vendidas": 0, "anduvieron": 0, "volvieron": 0, "sin_noticias": 0}
+    try:
+        c.execute("""SELECT v.producto_id, v.codigo_pedido_clean AS pedido, COUNT(*) AS n
+                     FROM ventas_registradas v JOIN productos p ON p.id = v.producto_id
+                     WHERE COALESCE(v.codigo_pedido_clean, '') <> ''
+                       AND v.codigo_pedido_clean <> p.codigo_clean
+                       AND julianday('now') - julianday(v.fecha) <= ?
+                     GROUP BY v.producto_id, v.codigo_pedido_clean""", (dias,))
+        vendidas = {(r["producto_id"], r["pedido"]): r["n"] for r in c.fetchall()}
+        def _contar(tabla, extra="", params=()):
+            c.execute(f"""SELECT producto_id, codigo_pedido_clean AS pedido, COUNT(*) AS n
+                          FROM {tabla} WHERE julianday('now') - julianday(fecha) <= ? {extra}
+                          GROUP BY producto_id, codigo_pedido_clean""", (dias,) + tuple(params))
+            return {(r["producto_id"], r["pedido"]): r["n"] for r in c.fetchall()}
+        anduvieron = _contar("instalaciones_confirmadas")
+        _motivos = sorted(MOTIVOS_DE_NO_ERA_LA_PIEZA)
+        volvieron = _contar("devoluciones",
+                            f"AND motivo IN ({','.join('?' * len(_motivos))})", _motivos)
+    except sqlite3.OperationalError as _err:
+        anotar_error("seguimiento_de_lo_vendido", _err)
+        return salida
+    for clave, n in vendidas.items():
+        bien, mal = min(n, anduvieron.get(clave, 0)), min(n, volvieron.get(clave, 0))
+        salida["vendidas"] += n
+        salida["anduvieron"] += bien
+        salida["volvieron"] += mal
+        salida["sin_noticias"] += max(0, n - bien - mal)
+    return salida
 
 
 def aprender_de_las_decisiones():
@@ -2150,7 +2202,7 @@ def texto_de_precios_que_no_cierran(razon, esperada):
 def evaluar_equivalencia(desc_a, desc_b, medidas_a=None, medidas_b=None,
                          precio_a=None, precio_b=None, veces_confirmada=1,
                          respaldo_fabricante=False, marca_a="", marca_b="", patrones=None,
-                         vendido_como_reemplazo=0, codigo_puente=None,
+                         anduvo_como_reemplazo=0, codigo_puente=None,
                          productos_del_puente=0, escalas=None, trae_al_otro="",
                          variante_del_origen="", familia_a=None, familia_b=None, devuelto=0):
     """Pesa toda la evidencia disponible sobre un vínculo. Devuelve (puntaje 0-100, señales).
@@ -2319,11 +2371,11 @@ def evaluar_equivalencia(desc_a, desc_b, medidas_a=None, medidas_b=None,
     # error del vendedor— (lo señaló una revisión con ChatGPT): es evidencia de uso, no una
     # fuente. Suma, pero como lo aprendido, sola no pasa un par de franja (ver abajo).
     ajuste_por_ventas = 0
-    if vendido_como_reemplazo >= 2:
+    if anduvo_como_reemplazo >= 2:
         ajuste_por_ventas = 35
         puntaje += 35
-        senales.append(("bien", f"🧾 Ya lo vendiste como reemplazo {vendido_como_reemplazo} "
-                                 "vez(ces): funcionó en el mostrador"))
+        senales.append(("bien", f"🔧 Lo instalaron y anduvo {anduvo_como_reemplazo} vez(ces) "
+                                 "(lo anotó el mostrador)"))
 
     if respaldo_fabricante:
         puntaje += 25
@@ -2385,9 +2437,14 @@ VETOS_DEL_PUNTAJE = ("🧩 Son de rubros distintos", "📦 No son equivalentes",
 TOPE_CON_VETO = 20.0
 
 
-# Las líneas que deciden qué se aprueba sin mirar: 55 separa las limpias de las que se revisan,
-# y CONFIANZA_ALTA parte los grupos grandes en dos muestras (ver grupos_de_limpias()).
-LINEAS_DE_CONFIANZA = (55, 85)
+# Las líneas que deciden algo: 55 separa las limpias de las que se revisan y CONFIANZA_ALTA
+# parte los grupos grandes en dos muestras (ver grupos_de_limpias()); 30, 50 y 70 son las
+# franjas del buscador (ver franja_de_confianza()), y 70 es además lo que la ficha de prueba
+# llama «sólido» (CONFIANZA_SOLIDA). Estaban solo la 55 y la 85, así que lo aprendido de las
+# marcas sí pasaba la 70: medido sobre la base real, 1.387 puntajes quedaban «🟢 sólida» solo
+# por lo aprendido, y la ficha los contaba como sólidos. Lo encontró una revisión con ChatGPT
+# («la popularidad no es evidencia técnica»).
+LINEAS_DE_CONFIANZA = (30, 50, 55, 70, 85)
 
 
 def sin_cruzar_la_linea_por_lo_aprendido(puntaje, ajuste_aprendido):
@@ -2553,7 +2610,7 @@ def clave_de_grupo(lote, marca_a, marca_b, franja=""):
 # tiene que tener cada franja para que valga la pena su propia muestra.
 TAMANO_PARA_PARTIR_EL_GRUPO = 500
 MINIMO_POR_FRANJA = 100
-CONFIANZA_ALTA = LINEAS_DE_CONFIANZA[1]
+CONFIANZA_ALTA = LINEAS_DE_CONFIANZA[-1]
 
 
 def grupos_de_limpias(limpias):
@@ -3965,7 +4022,7 @@ def _analizar_filas(filas, lote):
     patrones_aprendidos = aprender_de_las_decisiones()
     escalas_precio = escalas_de_precio()
     _ya_juzgados = {}   # código -> ¿las reglas de hoy ya no lo tomarían? (ver más abajo)
-    ventas_confirman = pares_confirmados_por_ventas()
+    ventas_confirman = pares_que_anduvieron()
     devueltos = pares_devueltos()      # lo que volvió porque no le iba
 
     limpias, sospechosas, relacionadas = [], [], []
@@ -4068,7 +4125,7 @@ def _analizar_filas(filas, lote):
                                   or sanitizar(f["cod_b"]) in codigos_con_respaldo),
             marca_a=f.get("marca_a", ""), marca_b=f.get("marca_b", ""),
             patrones=patrones_aprendidos,
-            vendido_como_reemplazo=ventas_confirman.get((min(f["a"], f["b"]),
+            anduvo_como_reemplazo=ventas_confirman.get((min(f["a"], f["b"]),
                                                           max(f["a"], f["b"])), 0),
             devuelto=devueltos.get((min(f["a"], f["b"]), max(f["a"], f["b"])), 0),
             escalas=escalas_precio,
@@ -4548,11 +4605,84 @@ def pares_de_piezas_de_seguridad(pares):
     return {(a, b) for a, b in pares if a in seguridad or b in seguridad}
 
 
+# Desde cuántos pares nuevos se dice que un vínculo «une redes»: aprobarlo deja equivalentes,
+# por la cadena, a todos los de un lado con todos los del otro. Ver cuanto_une_cada_par().
+UNE_REDES_GRANDES = 100
+
+
+def cuanto_une_cada_par(pares):
+    """{(a, b): pares de productos que quedarían encadenados por primera vez} si se aprobara
+    cada uno solo: el tamaño de la red de a por el de la red de b, o 0 si ya están en la misma.
+
+    Lo pidió una revisión con ChatGPT («priorizar las equivalencias que desbloquean muchas
+    otras» y «detectar nodos centrales: si una de esas referencias está mal, el impacto es
+    enorme»). Medido sobre la base real: de los 7.827 pendientes, el 10 % que más une suma el
+    89 % de los pares nuevos; 868 del barrido unen 100 pares o más cada uno, y uno solo,
+    6.690."""
+    raiz = {}
+
+    def buscar(x):
+        r = x
+        while raiz.get(r, r) != r:
+            r = raiz[r]
+        while raiz.get(x, x) != r:
+            raiz[x], x = r, raiz[x]
+        return r
+    c.execute("SELECT producto_a_id, producto_b_id FROM equivalencias")
+    for fila in c.fetchall():
+        # Cada producto con su entrada, también las raíces: si no, la red se contaba con uno
+        # menos (la de 11 daba 10).
+        raiz.setdefault(fila[0], fila[0])
+        raiz.setdefault(fila[1], fila[1])
+        ra, rb = buscar(fila[0]), buscar(fila[1])
+        if ra != rb:
+            raiz[ra] = rb
+    tamano = {}
+    for x in list(raiz):
+        r = buscar(x)
+        tamano[r] = tamano.get(r, 0) + 1
+    salida = {}
+    for a, b in pares:
+        ra, rb = buscar(a), buscar(b)
+        salida[(a, b)] = 0 if ra == rb else max(1, tamano.get(ra, 1)) * max(1, tamano.get(rb, 1))
+    return salida
+
+
+def pares_que_unen_redes(pares, minimo=UNE_REDES_GRANDES):
+    """Los pares que, aprobados, encadenarían `minimo` pares nuevos o más. No se aprueban en
+    bloque: un error ahí no es un vínculo malo, son cientos. Ver cuanto_une_cada_par()."""
+    return {par for par, n in cuanto_une_cada_par(pares).items() if n >= minimo}
+
+
+def puentes_del_lote(lote, tope=50):
+    """Los pendientes de una lista que unen redes grandes, de los que más unen a los que menos:
+    son los primeros que conviene mirar, de a uno. [{"a", "b", "Código A", "Marca A",
+    "Código B", "Marca B", "Encadena"}]. Ver cuanto_une_cada_par()."""
+    c.execute("SELECT producto_a_id, producto_b_id FROM equivalencias_pendientes WHERE lote = ?",
+              (lote,))
+    pares = [(r[0], r[1]) for r in c.fetchall()]
+    une = {par: n for par, n in cuanto_une_cada_par(pares).items() if n >= UNE_REDES_GRANDES}
+    if not une:
+        return []
+    ids = sorted({x for par in une for x in par})
+    info = {}
+    for tanda, marcadores in en_tandas(ids):
+        c.execute(f"""SELECT p.id, p.codigo_raw, m.nombre FROM productos p
+                      JOIN marcas m ON m.id = p.marca_id WHERE p.id IN ({marcadores})""", tanda)
+        info.update({r[0]: (r[1], r[2]) for r in c.fetchall()})
+    salida = [{"a": a, "b": b, "Código A": info.get(a, ("?", ""))[0], "Marca A": info.get(a, ("", ""))[1],
+               "Código B": info.get(b, ("?", ""))[0], "Marca B": info.get(b, ("", ""))[1],
+               "Encadena": n} for (a, b), n in une.items()]
+    salida.sort(key=lambda x: -x["Encadena"])
+    return salida[:tope] if tope else salida
+
+
 def aprobar_pendientes(lote, solo_estos_pares=None, en_bloque=False):
     """Pasa los vínculos pendientes a equivalencias reales.
 
     en_bloque=True es aprobar sin mirarlos de a uno (el resto de un grupo con muestra, o la lista
-    entera): ahí las piezas de seguridad NO entran y quedan en la cola, para mirarlas de a una.
+    entera): ahí las piezas de seguridad NO entran y quedan en la cola, para mirarlas de a una, y
+    tampoco lo que une dos redes grandes (ver pares_que_unen_redes()).
     Lo pidió una revisión con ChatGPT: una muestra que salió bien habla del grupo, no de la
     pastilla de freno que quedó afuera de la muestra. Medido sobre la base del 8/10: hoy no hay
     ninguna pendiente (de 7.827), y de las 22.670 decisiones tomadas, una sola era de seguridad."""
@@ -4571,7 +4701,9 @@ def aprobar_pendientes(lote, solo_estos_pares=None, en_bloque=False):
         pares = [(a, b) for a, b in pares if (a, b) not in _rechazados]
         if en_bloque:
             _seguridad = pares_de_piezas_de_seguridad(pares)
-            pares = [p for p in pares if p not in _seguridad]
+            # Ni lo que une dos redes grandes: ver pares_que_unen_redes().
+            _puentes = pares_que_unen_redes(pares)
+            pares = [p for p in pares if p not in _seguridad and p not in _puentes]
         if not pares:
             return 0
         cola = _lo_que_dice_la_cola(pares)

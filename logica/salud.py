@@ -505,6 +505,19 @@ def diagnostico_de_salud():
     except sqlite3.OperationalError as _err:
         anotar_error("diagnostico_de_salud/marcas_con_fallas", _err)
 
+    # LAS RELACIONES IMPOSIBLES: equivalente y rechazada a la vez, un cambio de número en
+    # círculo… Ver relaciones_imposibles(). Hoy no hay ninguna: si aparece, se dice.
+    try:
+        _imposibles_rel = relaciones_imposibles()
+        if _imposibles_rel:
+            sumar_tecnico("alto", f"🧩 {sum(n for _, n in _imposibles_rel)} relación(es) que no "
+                                  "pueden existir",
+                          "; ".join(f"{q}: {n}" for q, n in _imposibles_rel[:3])
+                          + ". Mirá «🔍 Salud de los datos».",
+                          miga_hasta("Salud de los datos"))
+    except Exception as _err:
+        anotar_error("diagnostico_de_salud/relaciones_imposibles", _err)
+
     # UN CAMBIO DE REGLAS QUE MOVIÓ DEMASIADO de una vez (ver deriva_sospechosa()).
     try:
         _aviso_deriva = deriva_sospechosa(la_ultima_deriva())

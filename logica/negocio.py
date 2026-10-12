@@ -1951,8 +1951,111 @@ def _guardar_en_papelera_sin_candado(tipo, datos_dict):
                _resumen_de_papelera(tipo, datos_dict)))
 
 
+# LA HISTORIA DE UN PRODUCTO: lo que apunta a él desde otras tablas. Las que se borran con él
+# (ON DELETE CASCADE: ventas, devoluciones, precios anteriores, fotos, reservas…) y las que
+# quedan sin él (SET NULL: los autos que lo llevan, las consultas). Se leen de la base y no de
+# una lista escrita a mano: una tabla nueva entra sola. Los vínculos y la cola van aparte.
+def _tablas_que_cuelgan_de_productos():
+    """{tabla: [(columna, "CASCADE" | "SET NULL" | …)]} de las que apuntan a productos."""
+    salida = {}
+    c.execute("SELECT name FROM sqlite_master WHERE type = 'table'")
+    for tabla in [r[0] for r in c.fetchall()]:
+        if tabla in ("equivalencias", "equivalencias_pendientes", "productos"):
+            continue
+        c.execute(f'PRAGMA foreign_key_list("{tabla}")')
+        for fk in c.fetchall():
+            if fk[2] == "productos":
+                salida.setdefault(tabla, []).append((fk[3], (fk[6] or "").upper()))
+    return salida
+
+
+# Cómo se llama cada tabla en el mostrador. Ver impacto_de_borrar().
+NOMBRES_DE_LA_HISTORIA = {
+    "ventas_registradas": "venta(s)", "devoluciones": "devolución(es)",
+    "instalaciones_confirmadas": "instalación(es) que anduvieron",
+    "historial_precios": "precio(s) anteriores", "producto_fotos": "foto(s)",
+    "reservas_stock": "reserva(s)", "pedidos_reposicion": "pedido(s) para reponer",
+    "historial_piezas": "auto(s) que la llevan", "consultas_cliente": "consulta(s) de clientes",
+    "historial_de_medidas": "cambio(s) de medidas", "auditoria_diaria": "conteo(s) de stock",
+    "esquema_puntos": "punto(s) en esquemas", "puentes_aprobados": "aprobación(es) como puente",
+}
+
+
+def _a_json(fila):
+    """La fila lista para la papelera: los datos binarios (fotos, firmas) en base64. Sin esto,
+    borrar un producto con su firma de foto guardada se cortaba con «bytes is not JSON
+    serializable», y el producto no se podía borrar."""
+    import base64
+    return {k: ({"__bytes_b64__": base64.b64encode(v).decode("ascii")}
+                if isinstance(v, (bytes, bytearray, memoryview)) else v)
+            for k, v in fila.items()}
+
+
+def _de_json(fila):
+    """Al revés que _a_json()."""
+    import base64
+    return {k: (base64.b64decode(v["__bytes_b64__"])
+                if isinstance(v, dict) and "__bytes_b64__" in v else v)
+            for k, v in fila.items()}
+
+
+def _red_del_producto(producto_id, tope=2000):
+    """Cuántos productos se encadenan con este (incluido él). Hasta `tope`."""
+    vistos, cola = {producto_id}, [producto_id]
+    while cola and len(vistos) < tope:
+        actual = cola.pop()
+        c.execute("""SELECT producto_b_id FROM equivalencias WHERE producto_a_id = ?
+                     UNION SELECT producto_a_id FROM equivalencias WHERE producto_b_id = ?""",
+                  (actual, actual))
+        for (otro,) in [tuple(r) for r in c.fetchall()]:
+            if otro not in vistos:
+                vistos.add(otro)
+                cola.append(otro)
+    return len(vistos)
+
+
+def impacto_de_borrar(producto_id):
+    """Lo que toca borrar este producto, contado, para decirlo ANTES: {"vínculos", "pendientes",
+    "red", "historia": {tabla: filas}}. Lo pidió una revisión con ChatGPT («análisis de impacto
+    antes de borrar: esta pieza participa en 48 equivalencias y 17 ventas históricas; no
+    permitir un borrado ciego»)."""
+    c.execute("SELECT COUNT(*) FROM equivalencias WHERE producto_a_id = ? OR producto_b_id = ?",
+              (producto_id, producto_id))
+    vinculos = c.fetchone()[0]
+    c.execute("SELECT COUNT(*) FROM equivalencias_pendientes "
+              "WHERE producto_a_id = ? OR producto_b_id = ?", (producto_id, producto_id))
+    pendientes = c.fetchone()[0]
+    historia = {}
+    for tabla, columnas in _tablas_que_cuelgan_de_productos().items():
+        for columna, _al_borrar in columnas:
+            c.execute(f'SELECT COUNT(*) FROM "{tabla}" WHERE "{columna}" = ?', (producto_id,))
+            n = c.fetchone()[0]
+            if n:
+                historia[tabla] = historia.get(tabla, 0) + n
+    return {"vínculos": vinculos, "pendientes": pendientes,
+            "red": _red_del_producto(producto_id) if vinculos else 1, "historia": historia}
+
+
+def texto_del_impacto(impacto):
+    """El impacto en una frase del mostrador. Vacío si no toca nada."""
+    partes = []
+    if impacto["vínculos"]:
+        partes.append(f"{impacto['vínculos']} vínculo(s)"
+                      + (f" (lo encadenan con {impacto['red'] - 1} producto(s))"
+                         if impacto["red"] > 2 else ""))
+    if impacto["pendientes"]:
+        partes.append(f"{impacto['pendientes']} vínculo(s) esperando revisión")
+    partes += [f"{n} {NOMBRES_DE_LA_HISTORIA.get(t, t)}" for t, n in
+               sorted(impacto["historia"].items(), key=lambda x: -x[1])]
+    if not partes:
+        return ""
+    return ("⚠️ Este producto tiene " + ", ".join(partes) + ". Va todo a la papelera con él, y "
+            "vuelve todo si lo restaurás.")
+
+
 def borrar_producto_con_papelera(producto_id):
-    """Borra un producto dejándolo en la papelera CON sus vínculos. Devuelve cuántos guardó.
+    """Borra un producto dejándolo en la papelera CON sus vínculos y su historia. Devuelve
+    cuántos vínculos guardó.
 
     Antes se guardaba la fila del producto sola, y la pantalla lo avisaba: «si lo restaurás, el
     producto vuelve pero SIN esos vínculos — hay que volver a vincularlo manualmente». Medido con
@@ -1961,7 +2064,11 @@ def borrar_producto_con_papelera(producto_id):
     lo que lo hacía útil es un borrado con otro nombre.
 
     Se guardan también sus pendientes: el trigger productos_sin_pendientes_colgando los borra
-    con el producto, y restaurar tiene que devolverlos.
+    con el producto, y restaurar tiene que devolverlos. Y SU HISTORIA (ver
+    _tablas_que_cuelgan_de_productos()): las claves foráneas borraban con él sus ventas, sus
+    devoluciones, sus precios anteriores y sus fotos, y la papelera no los guardaba: restaurado,
+    volvía sin nada de eso. Lo marcó una revisión con ChatGPT («eliminar no es hacer
+    desaparecer»).
 
     Todo en una transacción: guardarlo en la papelera y borrarlo pasan juntos o no pasan. Antes
     eran dos pasos sueltos, y cortado en el medio quedaba en la papelera y también en la base."""
@@ -1970,16 +2077,59 @@ def borrar_producto_con_papelera(producto_id):
         fila = c.fetchone()
         if not fila:
             return None
-        datos = dict(fila)
+        datos = _a_json(dict(fila))
         c.execute("""SELECT * FROM equivalencias
                      WHERE producto_a_id = ? OR producto_b_id = ?""", (producto_id, producto_id))
         datos["_equivalencias"] = [dict(r) for r in c.fetchall()]
         c.execute("""SELECT * FROM equivalencias_pendientes
                      WHERE producto_a_id = ? OR producto_b_id = ?""", (producto_id, producto_id))
         datos["_pendientes"] = [dict(r) for r in c.fetchall()]
+        historia, sueltas = [], []
+        for tabla, columnas in _tablas_que_cuelgan_de_productos().items():
+            for columna, al_borrar in columnas:
+                c.execute(f'SELECT * FROM "{tabla}" WHERE "{columna}" = ?', (producto_id,))
+                filas = [_a_json(dict(r)) for r in c.fetchall()]
+                if not filas:
+                    continue
+                if al_borrar == "CASCADE":
+                    historia.append({"tabla": tabla, "columna": columna, "filas": filas})
+                elif "id" in filas[0]:
+                    # Las que quedan sin él: se recuerda cuáles, para volver a apuntarlas.
+                    sueltas.append({"tabla": tabla, "columna": columna,
+                                    "ids": [f["id"] for f in filas]})
+        datos["_historia"], datos["_sueltas"] = historia, sueltas
         _guardar_en_papelera_sin_candado("producto", datos)
         c.execute("DELETE FROM productos WHERE id = ?", (producto_id,))
     return len(datos["_equivalencias"])
+
+
+def _reponer_la_historia(historia, sueltas, nuevo_id):
+    """Vuelve a meter la historia guardada por borrar_producto_con_papelera(), apuntando a
+    `nuevo_id`. Devuelve {tabla: filas repuestas}. Lo que ya no entra (una clave foránea que
+    apunta a algo que se borró mientras tanto) se saltea: no frena la restauración."""
+    repuestas = {}
+    for bloque in historia or []:
+        tabla, columna = bloque["tabla"], bloque["columna"]
+        for fila in bloque["filas"]:
+            fila = _de_json(fila)
+            fila[columna] = nuevo_id
+            columnas = ", ".join(f'"{k}"' for k in fila)
+            try:
+                c.execute(f'INSERT OR IGNORE INTO "{tabla}" ({columnas}) '
+                          f'VALUES ({", ".join("?" * len(fila))})', list(fila.values()))
+                repuestas[tabla] = repuestas.get(tabla, 0) + c.rowcount
+            except sqlite3.Error as _err:      # la tabla cambió o el otro lado ya no está
+                anotar_error(f"reponer la historia ({tabla})", _err)
+    for bloque in sueltas or []:
+        tabla, columna = bloque["tabla"], bloque["columna"]
+        for tanda, marcadores in en_tandas(bloque["ids"]):
+            try:
+                c.execute(f'UPDATE "{tabla}" SET "{columna}" = ? WHERE id IN ({marcadores}) '
+                          f'AND "{columna}" IS NULL', [nuevo_id] + list(tanda))
+                repuestas[tabla] = repuestas.get(tabla, 0) + c.rowcount
+            except sqlite3.Error as _err:
+                anotar_error(f"reponer la historia ({tabla})", _err)
+    return repuestas
 
 
 def _reponer_vinculos(tabla, filas, cambiar_id):
@@ -2137,9 +2287,12 @@ def restaurar_de_papelera(item_id):
                         (datos["nombre"], datos["alias"], datos["cbu"], datos["titular"])
                     )
                 elif tipo == "producto":
-                    # Los de antes de este cambio no traen vínculos: se restauran igual.
+                    # Los de antes de este cambio no traen vínculos ni historia: se restauran igual.
                     _equivs = datos.pop("_equivalencias", None) or []
                     _pends = datos.pop("_pendientes", None) or []
+                    _historia = datos.pop("_historia", None) or []
+                    _sueltas = datos.pop("_sueltas", None) or []
+                    datos = _de_json(datos)
                     # Si mientras estuvo en la papelera volvió a entrar con una importación, ya
                     # existe otro con el mismo código y la misma marca, y la base no deja dos
                     # (UNIQUE codigo_clean, marca_id). Antes eso era «No se pudo restaurar:
@@ -2157,11 +2310,18 @@ def restaurar_de_papelera(item_id):
                                   list(datos.values()))
                     _rep, _perd = _reponer_vinculos("equivalencias", _equivs, _cambiar)
                     _reponer_vinculos("equivalencias_pendientes", _pends, _cambiar)
+                    _id_viejo = datos.get("id")
+                    _historia_repuesta = _reponer_la_historia(
+                        _historia, _sueltas, _cambiar.get(_id_viejo, _id_viejo))
                     if _equivs:
                         detalle = f"Restaurado con {_rep} de sus {len(_equivs)} vínculo(s)."
                         if _perd:
                             detalle += (f" {_perd} no se pudieron reponer: el otro producto ya "
                                         "no existe.")
+                    if _historia_repuesta:
+                        detalle = ((detalle or "Restaurado.") + " Y con su historia: "
+                                   + ", ".join(f"{n} {NOMBRES_DE_LA_HISTORIA.get(t, t)}"
+                                               for t, n in _historia_repuesta.items() if n) + ".")
                     if _ya_esta:
                         detalle = ("Ese código ya había vuelto a entrar con una importación: "
                                    "se le devolvieron los vínculos a ese. " + (detalle or ""))
