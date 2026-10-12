@@ -974,6 +974,10 @@ if pagina == PAGINAS[3]:
                             f"${miles(sum(r['Cheques en cartera'] or 0 for r in _resumen_cc), 0)}")
                 st.dataframe(quitar_id(_resumen_cc), width="stretch", hide_index=True)
 
+            # LOS PERMISOS PARA PASAR EL LÍMITE que esperan respuesta. Ver
+            # mostrar_permisos_de_limite().
+            mostrar_permisos_de_limite()
+
             _taller = st.selectbox("Taller:", list(_talleres), key="cc_taller")
             _mid = _talleres[_taller]
             _estado = estado_de_cuenta(_mid)
@@ -997,17 +1001,30 @@ if pagina == PAGINAS[3]:
                                "acá se carga el importe tal cual lo escribas.")
                 _codigo = (st.text_input("Código de retiro (6 cifras):", max_chars=6)
                            if _config["pide_codigo"] else "")
-                _pasar = (st.checkbox("Cargar igual aunque pase el límite")
-                          if _config["limite"] else False)
+                # Pasar el límite sin pedir permiso, solo el administrador; los demás lo piden
+                # (ver pedir_permiso_de_limite()). cargar_a_la_cuenta() lo vuelve a mirar.
+                _pasar = (st.checkbox("Cargar igual aunque pase el límite (administrador)")
+                          if _config["limite"] and puede_autorizar_limites() else False)
                 if st.form_submit_button("➕ Cargar", type="primary"):
-                    _ok, _aviso = cargar_a_la_cuenta(_mid, _concepto, _importe, _codigo,
-                                                     usuario=obtener_usuario_actual(),
-                                                     pasar_el_limite=_pasar)
+                    try:
+                        _ok, _aviso = cargar_a_la_cuenta(_mid, _concepto, _importe, _codigo,
+                                                         usuario=obtener_usuario_actual(),
+                                                         pasar_el_limite=_pasar)
+                    except PermissionError as _err:
+                        _ok, _aviso = False, str(_err)
                     if _ok:
+                        st.session_state.pop(f"_limite_cc_{_mid}", None)
                         avisar("success", _aviso)
                         st.rerun()
                     else:
+                        if es_por_el_limite(_aviso):
+                            st.session_state[f"_limite_cc_{_mid}"] = _importe
                         st.error(_aviso)
+            # SI NO ENTRÓ POR EL LÍMITE: pedir permiso. Ver mostrar_permiso_de_limite().
+            if f"_limite_cc_{_mid}" in st.session_state:
+                mostrar_permiso_de_limite(
+                    _mid, cuanto_pasa_del_limite(_mid, st.session_state[f"_limite_cc_{_mid}"]),
+                    f"cc_{_mid}")
 
             with st.form(f"cc_pago_{_mid}", clear_on_submit=True):
                 st.markdown("**💵 Registrar un pago**")

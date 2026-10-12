@@ -408,6 +408,13 @@ def _usarla_como_la_usaria_el_mostrador(prueba):
             JOIN marcas m ON m.id = p.marca_id WHERE red.id <> ?""", (semilla, semilla)).fetchone()[0]
         if not encontrados:
             problemas.append("la búsqueda de equivalencias no encuentra nada en la copia")
+    # LO QUE APUNTA A ALGO QUE NO ESTÁ, en cualquier tabla y no solo en los vínculos: el control
+    # de integridad no lo mira (lo señaló una revisión con ChatGPT: «quick_check no sustituye a
+    # foreign_key_check»). En la base real del 12/10: ninguna, en 0,1 s.
+    rotas = prueba.execute("PRAGMA foreign_key_check").fetchall()
+    if rotas:
+        problemas.append(f"{len(rotas)} fila(s) apuntan a algo que no está (en "
+                         f"{', '.join(sorted({str(r[0]) for r in rotas}))})")
     return problemas
 
 

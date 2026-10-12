@@ -159,6 +159,97 @@ def probar(L):
     esperar("ocho cargos a la vez contra el límite: entra uno solo", sorted(resultados),
             [False] * 7 + [True])
     esperar("y la deuda no pasa el límite", ns["estado_de_cuenta"](carrera)["saldo"], 98000.0)
+
+    # EL PERMISO PARA PASAR EL LÍMITE: lo pide el que atiende y lo da solo un administrador.
+    ns["crear_mecanico"]("Taller Permiso", "clave-de-prueba-5")
+    tp = c.execute("SELECT id FROM mecanicos WHERE nombre = 'Taller Permiso'").fetchone()[0]
+    ns["configurar_cuenta_de_taller"](tp, 100000, 30, False)
+    esperar("la deuda de antes, al borde", ns["cargar_a_la_cuenta"](tp, "Deuda", 95000)[0], True)
+    ok, aviso = ns["cargar_a_la_cuenta"](tp, "Repuestos", 10000)
+    esperar("sin permiso no pasa, y dice que se puede pedir",
+            (ok, ns["es_por_el_limite"](aviso), ns["SE_PUEDE_PEDIR_PERMISO"] in aviso),
+            (False, True, True))
+    esperar("cuánto hay que pedir", ns["cuanto_pasa_del_limite"](tp, 10000), 5000.0)
+    pedir, contestar = ns["pedir_permiso_de_limite"], ns["contestar_permiso_de_limite"]
+    esperar("sin monto, no", pedir(tp, 0, "paga el viernes")[0], False)
+    esperar("sin motivo, no", pedir(tp, 5000, "   ")[0], False)
+    esperar("una cuenta sin límite no lo necesita", pedir(taller, 5000, "x")[0], False)
+    esperar("pedido", pedir(tp, 5000, "paga el viernes", usuario="beto")[0], True)
+    esperar("uno a la vez por cuenta", pedir(tp, 8000, "otra vez", usuario="carla")[0], False)
+    permiso = ns["permisos_de_limite"](mecanico_id=tp)[0]
+    esperar("esperando respuesta",
+            (permiso["estado"], permiso["esperando"], permiso["pedido_por"], permiso["importe"],
+             ns["cuantos_permisos_esperando"]()), ("pendiente", 1, "beto", 5000.0, 1))
+    esperar("pedido no es autorizado", ns["cargar_a_la_cuenta"](tp, "Repuestos", 10000)[0], False)
+
+    def _sin_permiso(funcion, *args, **kwargs):
+        try:
+            funcion(*args, **kwargs)
+            return False
+        except PermissionError:
+            return True
+    originales = (g["_nivel_de_quien_esta_adentro"], g["hay_claves_configuradas"])
+    g["hay_claves_configuradas"] = lambda: True
+    try:
+        g["_nivel_de_quien_esta_adentro"] = lambda: "operador"
+        esperar("un empleado no lo autoriza", _sin_permiso(contestar, permiso["id"], True), True)
+        esperar("ni lo rechaza", _sin_permiso(contestar, permiso["id"], False), True)
+        esperar("ni pasa el límite a mano",
+                _sin_permiso(ns["cargar_a_la_cuenta"], tp, "x", 10000, pasar_el_limite=True), True)
+        esperar("pero pedirlo, sí", _sin_permiso(pedir, tp, 1000, "x"), False)
+        g["_nivel_de_quien_esta_adentro"] = lambda: ""                  # entró sin contraseña
+        esperar("sin contraseña, ni pedirlo", _sin_permiso(pedir, tp, 1000, "x"), True)
+        esperar("y sigue esperando", ns["permisos_de_limite"](mecanico_id=tp)[0]["estado"],
+                "pendiente")
+        g["_nivel_de_quien_esta_adentro"] = lambda: "admin"
+        esperar("el administrador sí", contestar(permiso["id"], True, "lo conozco",
+                                                 usuario="dueño")[0], True)
+        esperar("y contestado no se vuelve a contestar", contestar(permiso["id"], False)[0], False)
+    finally:
+        g["_nivel_de_quien_esta_adentro"], g["hay_claves_configuradas"] = originales
+    esperar("quién y cuánto dura", tuple(c.execute(
+        "SELECT estado, resuelto_por, nota, ROUND((julianday(vence) - julianday(resuelto_en)) * 24) "
+        "FROM permisos_de_credito WHERE id = ?", (permiso["id"],)).fetchone()),
+        ("autorizada", "dueño", "lo conozco", float(ns["HORAS_QUE_VALE_UN_PERMISO"])))
+    esperar("con el permiso, pasa", ns["cargar_a_la_cuenta"](tp, "Repuestos", 10000)[0], True)
+    esperar("y el cargo queda con su número", c.execute(
+        "SELECT autorizacion_id FROM movimientos_de_cuenta WHERE mecanico_id = ? "
+        "ORDER BY id DESC LIMIT 1", (tp,)).fetchone()[0], permiso["id"])
+    esperar("más de lo autorizado, no", ns["cargar_a_la_cuenta"](tp, "Más", 1000)[0], False)
+    esperar("una venta con el permiso", ns["permisos_de_limite"](mecanico_id=tp)[0]["usos"], 1)
+    esperar("no sirve para otra cuenta", ns["cargar_a_la_cuenta"](carrera, "x", 5000)[0], False)
+    esperar("los cambios quedan anotados", sorted({r["Qué"] for r in ns["cambios_registrados"](
+        entidad="cuenta") if "límite" in r["Qué"]}),
+        ["autorizó pasar el límite", "pidió permiso para pasar el límite"])
+
+    # VENCIDO, el tope vuelve a ser el límite.
+    c.execute("UPDATE permisos_de_credito SET vence = datetime('now', 'localtime', '-1 minutes') "
+              "WHERE id = ?", (permiso["id"],))
+    conn.commit()
+    ns["registrar_pago_de_cuenta"](tp, 3000, "Efectivo")
+    esperar("vencido, no pasa", ns["cargar_a_la_cuenta"](tp, "x", 4000)[0], False)
+    esperar("y ya no está vigente", ns["permisos_de_limite"](mecanico_id=tp)[0]["vigente"], 0)
+
+    # RECHAZADO no suma nada; y lo muy viejo no se contesta ni impide pedir de nuevo.
+    esperar("se pide de nuevo", pedir(tp, 4000, "de nuevo")[0], True)
+    otro_permiso = ns["permisos_de_limite"](mecanico_id=tp)[0]["id"]
+    esperar("no autorizado", contestar(otro_permiso, False, "que pague primero")[0], True)
+    esperar("y no pasa", ns["cargar_a_la_cuenta"](tp, "x", 4000)[0], False)
+    esperar("otro pedido", pedir(tp, 4000, "otra vez")[0], True)
+    viejo = ns["permisos_de_limite"](mecanico_id=tp)[0]["id"]
+    c.execute("UPDATE permisos_de_credito SET pedido_en = datetime('now', 'localtime', ?) "
+              "WHERE id = ?", (f"-{ns['HORAS_QUE_VALE_UN_PERMISO'] + 1} hours", viejo))
+    conn.commit()
+    esperar("de hace más de un día no se contesta", contestar(viejo, True)[0], False)
+    esperar("ni cuenta como esperando", ns["cuantos_permisos_esperando"](), 0)
+    esperar("y se puede pedir otro", pedir(tp, 6000, "hoy")[0], True)
+    # EL ADMINISTRADOR PUEDE DAR MENOS de lo pedido.
+    nuevo = ns["permisos_de_limite"](mecanico_id=tp)[0]["id"]
+    esperar("autoriza otro monto", contestar(nuevo, True, importe=4000)[0], True)
+    esperar("el margen es lo autorizado", ns["margen_autorizado"](tp), (4000.0, nuevo))
+    esperar("lo que falta pedir descuenta el permiso", ns["cuanto_pasa_del_limite"](tp, 4000), 2000.0)
+    esperar("entra lo que cabe", (ns["cargar_a_la_cuenta"](tp, "x", 4000)[0],
+                                  ns["cargar_a_la_cuenta"](tp, "x", 2000)[0]), (False, True))
     return fallas
 
 

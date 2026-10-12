@@ -1600,6 +1600,29 @@ def _esquema_gestion(c):
         anulado INTEGER DEFAULT 0
     )""")
     c.execute("CREATE INDEX IF NOT EXISTS idx_movimientos_cuenta ON movimientos_de_cuenta(mecanico_id)")
+    # LOS PERMISOS PARA PASAR EL LÍMITE DE CRÉDITO: el que atiende lo pide, con un motivo, y solo
+    # un administrador lo da (ver «PASAR EL LÍMITE CON PERMISO» en logica/mecanico.py). Lo que se
+    # vendió gracias a uno queda con su número en el cargo o en el pedido.
+    c.execute("""CREATE TABLE IF NOT EXISTS permisos_de_credito (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        mecanico_id INTEGER NOT NULL,
+        importe REAL NOT NULL CHECK (importe > 0),
+        motivo TEXT NOT NULL,
+        pedido_por TEXT,
+        pedido_en TEXT DEFAULT (datetime('now', 'localtime')),
+        estado TEXT NOT NULL DEFAULT 'pendiente'
+            CHECK (estado IN ('pendiente', 'autorizada', 'rechazada')),
+        resuelto_por TEXT,
+        resuelto_en TEXT,
+        nota TEXT,
+        vence TEXT
+    )""")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_permisos_de_credito "
+              "ON permisos_de_credito(mecanico_id, estado)")
+    if "autorizacion_id" not in [f[1] for f in c.execute("PRAGMA table_info(movimientos_de_cuenta)")]:
+        c.execute("ALTER TABLE movimientos_de_cuenta ADD COLUMN autorizacion_id INTEGER")
+    if "autorizacion_id" not in [f[1] for f in c.execute("PRAGMA table_info(pedidos_deposito)")]:
+        c.execute("ALTER TABLE pedidos_deposito ADD COLUMN autorizacion_id INTEGER")
     # El código que el taller genera en su portal para que alguien retire a su nombre. Se guarda
     # el hash, no el código.
     c.execute("""CREATE TABLE IF NOT EXISTS codigos_de_retiro (

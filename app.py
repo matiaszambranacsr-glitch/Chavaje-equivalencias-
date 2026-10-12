@@ -109,6 +109,7 @@ específico, y las pantallas quedan todas al final:
         · MODO MECÁNICO — CAMPAÑAS DE SEGURIDAD Y FALLAS REPORTADAS (NHTSA)
         · MODO MECÁNICO — VISOR DE ESQUEMAS
         · CUENTA CORRIENTE DE LOS TALLERES
+        · PASAR EL LÍMITE CON PERMISO
         · INTERÉS POR MORA (con la tasa del BCRA)
     logica/deposito.py
         · EL DEPÓSITO: DEL MOSTRADOR A LA CUENTA
@@ -594,6 +595,21 @@ if _problemas and (es_operador_o_admin() or not hay_claves_configuradas()):
             st.caption("Recién revisado: esto ya es lo de ahora.")
     st.markdown("")
 
+
+# LOS PERMISOS PARA PASAR EL LÍMITE que esperan respuesta, a quien puede darlos, en cualquier
+# pantalla: el que atiende está esperando con el cliente adelante. Ver pedir_permiso_de_limite().
+if puede_autorizar_limites() and hay_claves_configuradas():
+    try:
+        _permisos_esperando = cuantos_permisos_esperando()
+    except sqlite3.Error as _err:
+        anotar_error("cuantos_permisos_esperando", _err)
+        _permisos_esperando = 0
+    if _permisos_esperando:
+        _pe1, _pe2 = st.columns([5, 2])
+        _pe1.warning(f"🙋 {_permisos_esperando} pedido(s) de permiso para pasar el límite de "
+                     "crédito, esperando que un administrador los conteste.")
+        _pe2.button("Contestar →", key="ir_a_los_permisos", on_click=ir_a_donde_dice_el_aviso,
+                    args=("🗂️ Administrar → 💳 Cuentas corrientes",))
 
 # Los avisos que quedaron guardados antes del último refresco. Van acá, arriba del contenido
 # de la página, para que se vean sí o sí — sin esto, cada "Guardado" se perdía en el refresco.

@@ -129,7 +129,8 @@ if pagina == PAGINAS[0]:
                     f"📦 Pedir todo al depósito — para {nombre_de_la_cuenta_elegida()}",
                     type="primary", key="pedir_todo_el_presupuesto"):
                 _pedidos, _fallas = pedir_lo_elegido_al_deposito(
-                    [(_pid, _item["cantidad"]) for _pid, _item in _cart.items()])
+                    [(_pid, _item["cantidad"]) for _pid, _item in _cart.items()],
+                    clave="presupuesto")
                 for _pid in _pedidos:
                     st.session_state["carrito"].pop(_pid, None)
                     st.session_state.pop(f"cant_cart_{_pid}", None)
@@ -139,6 +140,10 @@ if pagina == PAGINAS[0]:
                 for _f in _fallas:
                     avisar("warning", _f)
                 st.rerun()
+            # Lo que no entró por el límite de crédito: pedir permiso. Ver
+            # mostrar_permiso_si_hace_falta().
+            if _pedir_de_a_uno:
+                mostrar_permiso_si_hace_falta("presupuesto")
             cb1, cb2 = st.columns(2)
             if cb1.button("🔒 Apartar todo el presupuesto"):
                 _apartados, _fallaron = 0, []

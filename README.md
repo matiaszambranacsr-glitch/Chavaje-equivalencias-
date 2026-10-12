@@ -6478,6 +6478,64 @@ el botón**:
 - «🔌 Probar las fuentes de afuera» suma la Central de Deudores (con el CUIT de la AFIP, nunca el
   de un cliente) y la inflación de respaldo.
 
+## 🙋 Pasar el límite de crédito con permiso, y la copia que no sale sin cifrar
+
+### El permiso para pasar el límite (lo pidió el dueño)
+
+Cuando el límite de crédito de una cuenta frena una venta —el pedido al depósito, el
+presupuesto entero o un cargo en Cuentas corrientes—, abajo del aviso aparece **«🙋 Pedir
+permiso a un administrador»**: cuánto de más hace falta (la app lo sugiere: lo que pasa del
+límite, contando lo pedido sin entregar) y por qué. Lo contesta **solo un administrador**, el
+que tiene todos los permisos:
+
+- **Le aparece arriba de todo**, en cualquier pantalla: «🙋 N pedido(s) de permiso para pasar el
+  límite», con un botón que lo lleva a Cuentas corrientes. Ahí ve la cuenta como está hoy (lo
+  que debe, lo vencido, el límite y lo pedido sin entregar), el motivo, y autoriza —por lo
+  pedido o por otro monto— o no, con una nota.
+- **Un permiso es un monto de más para esa cuenta, por 24 horas**: mientras vale, el tope es el
+  límite más lo autorizado. Sirve igual para un cargo suelto que para un presupuesto de diez
+  ítems; no se estira (lo vendido con él ya suma a la deuda) y no sirve para otra cuenta.
+- **Un pedido por cuenta a la vez**; lo de más de 24 horas sin contestar ya no se contesta (se
+  pide de nuevo).
+- **Queda todo anotado**: quién lo pidió, quién lo contestó, la nota, y cada cargo o pedido que
+  entró gracias al permiso lleva su número; «📜 Los últimos permisos contestados» dice en
+  cuántas ventas se usó.
+- **«Cargar igual aunque pase el límite» ahora es solo del administrador.** Lo podía tildar
+  cualquier empleado que entrara a Cuentas corrientes. Y el cargo a mano ahora cuenta lo pedido
+  al depósito sin entregar, como ya lo hacía el pedido.
+
+La función lo vuelve a mirar aunque el botón no se vea: un empleado que llegue a
+`contestar_permiso_de_limite()` recibe «hace falta entrar como administrador».
+
+### Lo que dijo otra revisión con ChatGPT (puntos 1 a 33 y las «6 mejoras»)
+
+| Punto | Qué se encontró | Qué se hizo |
+|---|---|---|
+| 1 y A1. Copias sin cifrar | **Real y en curso.** Sin `clave_copia` la copia se subía igual a un repositorio público, con un aviso. Medido el 12/10 en GitHub: el repositorio es **público** y la copia de ese día (86.946 productos, 17 MB) dice **«cifrada»: false**. | Sin clave, la copia (y las fotos) **solo sube si GitHub confirma en ese momento que el repositorio es privado**. Si es público o no contesta, no sube y la salud lo dice en rojo («la copia NO SE ESTÁ SUBIENDO»), con cómo arreglarlo. Subirla igual a uno público se puede, pero solo poniendo a propósito `subir_copia_sin_cifrar = true` en los secretos. |
+| 4 y A4. Permisos adentro de la lógica | **Real a medias.** Medido: de las funciones que borran, cobran o aprueban, 9 no volvían a mirar quién estaba adentro (borrar un producto, fusionar marcas, deshacer una importación, aprobar pendientes, registrar un pago, cargar un remito, cortar vínculos, restaurar de la papelera). | Las 9 piden adentro lo mismo que su pantalla: administrador para borrar, fusionar y deshacer; empleado para lo demás. |
+| 2 y 26. La compatibilidad con resultados | **Real.** `pruebas_de_compatibilidad.py` daba «ok» si el paso no reventaba. | Cada paso mira que dé lo que tiene que dar: la búsqueda encuentra al equivalente, la decisión y la medida quedan guardadas, la venta suma una, se exportan todos los vínculos. |
+| 10. `foreign_key_check` | La prueba de la copia miraba los vínculos huérfanos, no todas las tablas. Medido: 0 filas rotas, en 0,1 s. | La prueba diaria de la copia también lo mira. |
+| 21. Fórmulas en lo exportado | **Real en el Excel**: openpyxl guardaba como **fórmula** el texto que empieza con «=». En la base real no hay ninguno (sí un código que empieza con «-», «-OX123/1D»). | Se guarda como texto, sin cambiar un carácter. El CSV del catálogo queda igual: es para que lo lea un programa, y cambiarle valores lo rompería. |
+| 3 y A3. Freno de intentos global | Ya, a propósito: Streamlit no da la IP, así que el freno es para todos y la espera no pasa de un minuto. | — |
+| A2. Invitado sin contraseña | Ya: solo en una instalación nueva, con un aviso a la vista, y una vez que hubo contraseñas no vuelve a abrirse sola. | — |
+| A5, A6, 32. Datos, segunda barrera, historial | Ya: las secciones con datos del negocio piden contraseña, lo que borra o configura pide la de administrador, el historial de decisiones y de medidas no se corrige ni se borra. | — |
+| B7. Una copia fuera de GitHub | Falta: necesitaría otra cuenta y otra clave. Mientras tanto, «⬇️ Bajar backup» en Backup y config. | — |
+| B8, B9, B11 | Ya: la copia que falla y la que no pasa la prueba de recuperación avisan en rojo; la prueba la baja, la descifra, la abre y busca en ella; quedan 7 diarias, 4 semanales y 6 mensuales. | — |
+| C12 a C17. Stock, pedidos, cuentas | Ya: apartar y entregar en una transacción, el stock que no queda negativo en silencio, el pedido que se entrega una sola vez, lo anulado tachado y no borrado, y el límite adentro de la transacción (duodécima parte). | — |
+| D18 a D20 | Ya: la vista previa, deshacer una lista solo corta vínculos (nunca precios ni productos), el freno de precios. | — |
+| E22 a E25, 5 | Ya: `pruebas_de_la_revision.py --base` con 23.500 casos, la evidencia por riesgo, las pruebas adversariales. | — |
+| 27 y 4. Toda la batería antes de publicar | Falta automatizarla en GitHub: hoy se corre a mano antes de cada subida. | Se propone aparte: corre en los servidores de GitHub. |
+| 28 a 31 | Ya: la compatibilidad en los dos sentidos, la de carga (10 personas a la vez), las fuentes de afuera que fallan. Las librerías van con rangos; un archivo de versiones exactas no se agregó. | — |
+| 33. HTML | Ya: el auditor revisa cada `unsafe_allow_html` y lo que viene de afuera se escapa (`texto_para_html()`). | — |
+
+Probado en `pruebas_de_las_cuentas.py` y `pruebas_del_deposito.py` (el permiso: pedirlo, que
+solo el administrador lo dé, el tope, que venza, que no se estire, el presupuesto entero; 23
+fallas puestas a mano, 22 detectadas y una que no cambia nada), en
+`pruebas_de_las_copias_en_github.py` (repositorio público: no sube; con clave: sube cifrada), en
+`pruebas_de_los_cambios.py` (las 9 funciones, con cada nivel), y en la app: un empleado que
+choca con el límite, lo pide, el administrador lo ve arriba, lo autoriza, y el cargo entra con
+el número del permiso.
+
 ## 🧾 La precisión, duodécima parte: la revisión del código, de cuándo es el precio y a quién avisarle
 
 ### Lo que encontró una revisión del código con ChatGPT

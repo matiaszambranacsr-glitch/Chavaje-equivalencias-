@@ -788,6 +788,7 @@ def fusionar_marcas(marca_origen_id, marca_destino_id):
     no se pueden mover —la base no admite dos veces el mismo código en una marca— así que se
     fusionan con el que ya estaba, conservando sus equivalencias. Antes esto no se contemplaba
     y la operación entera fallaba con IntegrityError, sin mover nada."""
+    exigir_nivel("admin", "fusionar marcas")
     movidos = fusionados = 0
     # Todo o nada: mover miles de productos y borrar la marca vieja es UNA operación. Cortada
     # en el medio quedaban productos repartidos entre las dos marcas y la vieja todavía viva.

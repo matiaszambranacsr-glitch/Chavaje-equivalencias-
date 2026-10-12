@@ -804,6 +804,7 @@ def huella_del_remito(items_cotejados):
 def aplicar_carga_remito(items_cotejados):
     """Suma la cantidad recibida al stock de los ítems que sí coinciden con un producto ya
     cargado. Devuelve cuántos, o None si ese mismo remito ya se sumó (ver REMITOS_RECORDADOS)."""
+    exigir_nivel("empleado", "cargar un remito al stock")
     actualizados = 0
     huella = huella_del_remito(items_cotejados)
     with db_lock, transaccion():
@@ -2154,6 +2155,7 @@ def borrar_producto_con_papelera(producto_id):
 
     Todo en una transacción: guardarlo en la papelera y borrarlo pasan juntos o no pasan. Antes
     eran dos pasos sueltos, y cortado en el medio quedaba en la papelera y también en la base."""
+    exigir_nivel("admin", "eliminar un producto")
     with db_lock, transaccion():
         c.execute("SELECT * FROM productos WHERE id = ?", (producto_id,))
         fila = c.fetchone()
@@ -2345,6 +2347,7 @@ def vaciar_papelera_antigua(dias=30):
 
 def restaurar_de_papelera(item_id):
     """Devuelve (ok, texto): el error si no se pudo, o un detalle de lo restaurado si hay."""
+    exigir_nivel("empleado", "restaurar algo de la papelera")
     detalle = None
     c.execute("SELECT tipo, datos_json FROM papelera WHERE id = ?", (item_id,))
     row = c.fetchone()
@@ -2596,6 +2599,13 @@ def to_excel_bytes(filas, columnas=None):
     ws.append(columnas)
     for fila in filas:
         ws.append([fila.get(col, "") for col in columnas])
+        # LO QUE EMPIEZA CON «=» ES TEXTO: openpyxl lo guardaba como FÓRMULA, y Excel la
+        # calculaba al abrir el archivo. Las descripciones y los códigos vienen de las listas de
+        # los proveedores (lo señaló una revisión con ChatGPT: «evitar fórmulas peligrosas en
+        # archivos exportados»). Se guarda como texto, sin cambiarle un carácter.
+        for celda in ws[ws.max_row]:
+            if isinstance(celda.value, str) and celda.value.startswith("="):
+                celda.data_type = "s"
     buf = io.BytesIO()
     wb.save(buf)
     return buf.getvalue()

@@ -69,7 +69,7 @@ Las pruebas se corren como dice el README, en «Antes de subir un cambio».
 | Una versión de reglas que mueve de franja el 40 % de lo cargado avisa | `deriva_sospechosa()` | `pruebas_de_la_precision.py` (53) |
 | Lo vendido como equivalente que volvió, el cambio de reglas grande y las medidas imposibles aparecen en lo que necesita atención | `diagnostico_de_salud()` | `pruebas_de_la_precision.py` (53) |
 | La copia diaria no solo se abre: se busca en ella y no puede tener vínculos huérfanos | `_usarla_como_la_usaria_el_mostrador()` | `pruebas_de_los_frenos.py` (6) |
-| La versión anterior del programa trabaja sobre la base migrada por esta | — | `pruebas_de_compatibilidad.py --base` |
+| La versión anterior del programa trabaja sobre la base migrada por esta, y cada paso da lo que tiene que dar | — | `pruebas_de_compatibilidad.py --base` |
 | Lo que suele cambiarse junto se avisa al vender; un combo borrado a mano no vuelve solo | `lo_que_suele_ir_con()`, `COMBOS_DE_FABRICA` | `pruebas_de_la_precision.py` (52) |
 | Antes de vender, primero la pregunta que más separa | `ordenar_por_lo_que_separa()` | `pruebas_de_la_precision.py` (53) |
 | Solo se recomienda lo buscado, lo 🟢 y lo 🟡 (lo 🟡 no, si es de seguridad); lo 🟠, 🔴, 🔵 y ⚪ se muestra pero no se corona | `no_se_recomienda()`, `la_recomendacion_explicada()` | `pruebas_de_la_precision.py` (30, 54) |
@@ -103,7 +103,7 @@ Las pruebas se corren como dice el README, en «Antes de subir un cambio».
 | Lo apartado nunca pasa el stock | `reservar_stock()` en una transacción | `pruebas_de_carga.py` |
 | El mismo remito no suma el stock dos veces | `aplicar_carga_remito()` con huella | `pruebas_de_los_frenos.py` (14) |
 | Un pedido al depósito se entrega y se cobra una sola vez | `entregar_pedido()` | `pruebas_de_carga.py` |
-| El límite de crédito no se pasa, ni con varios pidiendo o cargando a la vez, ni con el precio de antes de esperar | `pedir_al_deposito()` y `cargar_a_la_cuenta()`: el precio, el saldo y el límite adentro de la transacción | `pruebas_del_deposito.py`, `pruebas_de_las_cuentas.py` (ocho a la vez) |
+| El límite de crédito no se pasa, ni con varios pidiendo o cargando a la vez, ni con el precio de antes de esperar; el cargo a mano también cuenta lo pedido sin entregar | `pedir_al_deposito()` y `cargar_a_la_cuenta()`: el precio, el saldo y el límite adentro de la transacción | `pruebas_del_deposito.py`, `pruebas_de_las_cuentas.py` (ocho a la vez) |
 | El saldo de una cuenta es lo entregado menos lo pagado | `estado_de_cuenta()` | `pruebas_de_carga.py` |
 | El interés por mora solo en las cuentas que lo tienen prendido, y nunca dos veces los mismos días | `cargar_el_interes_por_mora()` | `pruebas_de_las_cuentas.py` |
 | Un presupuesto guardado no cambia si después cambia un precio | Se guarda con sus precios (`items_json`) | `pruebas_de_los_frenos.py` (10) |
@@ -117,7 +117,8 @@ Las pruebas se corren como dice el README, en «Antes de subir un cambio».
 | Cada cuenta tiene su clave (la clave sola dice quién entra) | `clave_ya_usada()` | `pruebas_de_los_frenos.py` (12) |
 | El freno de intentos vale para todos, también para los talleres | `validar_password(con_mecanicos=True)` | `pruebas_de_los_frenos.py` (7) |
 | Un taller ve su portal y nada más | `mostrar_portal_mecanico()` | `pruebas_de_la_sesion.py` (4) |
-| Las funciones sensibles vuelven a mirar quién está adentro | `exigir_nivel()` | `pruebas_de_los_cambios.py` (5) |
+| Las funciones sensibles vuelven a mirar quién está adentro (también borrar, fusionar, deshacer, aprobar, cobrar y restaurar) | `exigir_nivel()` | `pruebas_de_los_cambios.py` (5) |
+| Pasar el límite de crédito: lo pide el empleado y lo da solo un administrador, por un monto y 24 horas | `pedir_permiso_de_limite()`, `contestar_permiso_de_limite()`, `margen_autorizado()` | `pruebas_de_las_cuentas.py`, `pruebas_del_deposito.py` |
 | Un empleado desactivado o con otro rol pierde los permisos al instante | `nivel_vigente_de_la_sesion()` | `pruebas_de_la_sesion.py` |
 | Después de «Salir» no queda nada del anterior | `cerrar_sesion()` | `pruebas_de_la_sesion.py` |
 | Con la base dañada, los empleados solo pueden buscar | `modo_solo_lectura()` | `pruebas_de_los_frenos.py` (1) |
@@ -127,6 +128,9 @@ Las pruebas se corren como dice el README, en «Antes de subir un cambio».
 | Regla | Dónde se cuida | La prueba |
 |---|---|---|
 | Restaurar deja la base sana y con los mismos datos, también desde la copia cifrada de GitHub | `restaurar_backup()` | `pruebas_de_los_frenos.py` (16) |
+| La copia sin cifrar no sube a un repositorio público | `se_puede_subir_sin_cifrar()` | `pruebas_de_las_copias_en_github.py` |
+| La prueba de la copia mira las claves foráneas de todas las tablas | `_usarla_como_la_usaria_el_mostrador()` | `pruebas_de_las_copias_en_github.py` |
+| Lo que empieza con «=» va como texto al Excel | `to_excel_bytes()` | `pruebas_de_los_frenos.py` |
 | Un backup dañado no entra ni toca nada | `la_base_esta_sana()` antes de restaurar | `pruebas_de_los_frenos.py` (16), `pruebas_de_la_recuperacion.py` |
 | Una base dañada no se sube y no pisa la copia buena | `subir_backup_a_github()` | — (ver «Sin prueba automática») |
 | Si el catálogo cae a la mitad, la copia buena no se pisa sola | `subir_la_copia_si_cambio()` | `pruebas_de_los_frenos.py` (5) |

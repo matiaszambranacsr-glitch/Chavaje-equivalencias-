@@ -111,6 +111,29 @@ def probar(L):
                 precio = False
             esperar(f"nivel «{nivel or 'invitado'}»: tocar empleados / precios",
                     (borro, precio), (puede_borrar, puede_precio))
+        # LAS QUE FALTABAN (lo señaló una revisión con ChatGPT: «verificar los permisos también
+        # en la lógica»): cada una pide adentro lo mismo que su pantalla. Con ids que no existen:
+        # lo que se mira es si deja entrar, no lo que hace.
+        _de_admin = (("eliminar un producto", ns["borrar_producto_con_papelera"], (999999,)),
+                     ("deshacer una importación", ns["deshacer_importacion"], ("NO-EXISTE",)),
+                     ("fusionar marcas", ns["fusionar_marcas"], (999998, 999999)))
+        _de_empleado = (("aprobar", ns["aprobar_pendientes"], ("NO-EXISTE", [])),
+                        ("registrar un pago", ns["registrar_pago_de_cuenta"], (999999, 0, "Efectivo")),
+                        ("un remito", ns["aplicar_carga_remito"], ([],)),
+                        ("cortar un vínculo", ns["eliminar_equivalencia"], (999998, 999999, False)),
+                        ("cortar los vínculos", ns["cortar_todos_los_vinculos"], (999999, False)),
+                        ("restaurar de la papelera", ns["restaurar_de_papelera"], (999999,)))
+        for nivel, entran in (("", ()), ("operador", ("empleado",)),
+                              ("admin", ("empleado", "admin"))):
+            g["_nivel_de_quien_esta_adentro"] = lambda n=nivel: n
+            for de, lista in (("admin", _de_admin), ("empleado", _de_empleado)):
+                for nombre, funcion, args in lista:
+                    try:
+                        funcion(*args)
+                        entro = True
+                    except PermissionError:
+                        entro = False
+                    esperar(f"nivel «{nivel or 'invitado'}»: {nombre}", entro, de in entran)
         g["_nivel_de_quien_esta_adentro"] = lambda: ""
         try:
             ns["eliminar_usuario"](eva)

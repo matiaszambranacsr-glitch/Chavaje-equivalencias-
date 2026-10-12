@@ -1389,13 +1389,18 @@ def cargar_a_la_cuenta(mecanico_id, concepto, importe, codigo_de_retiro="", usua
 
     Pide el código de retiro si la cuenta lo pide (así viene por defecto), y lo gasta: el
     mismo código no sirve para dos retiros. Si el cargo pasa el límite de crédito, no lo hace
-    salvo que se lo pida explícitamente (pasar_el_limite)."""
+    salvo con un permiso vigente (ver pedir_permiso_de_limite()) o si un administrador lo pide
+    explícitamente (pasar_el_limite)."""
     try:
         importe = round(float(importe), 2)
     except (TypeError, ValueError):
         return False, "El importe no es un número."
     if importe <= 0:
         return False, "El importe tiene que ser mayor que cero."
+    if pasar_el_limite:
+        # Pasarlo sin un permiso, solo un administrador: el resto lo pide. Hasta acá «Cargar igual
+        # aunque pase el límite» lo podía tildar cualquier empleado que entrara a la pantalla.
+        exigir_nivel("admin", "pasar el límite de crédito sin un permiso")
     with db_lock:
         with transaccion():
             # EL LÍMITE, ADENTRO DEL CANDADO Y DE LA TRANSACCIÓN (BEGIN IMMEDIATE), como en
@@ -1405,11 +1410,21 @@ def cargar_a_la_cuenta(mecanico_id, concepto, importe, codigo_de_retiro="", usua
             # ChatGPT. Ver pruebas_de_las_cuentas.py.
             config = configuracion_de_cuenta(mecanico_id)
             estado = estado_de_cuenta(mecanico_id)
-            if (config["limite"] and estado["saldo"] + importe > config["limite"]
+            # Lo pedido al depósito y todavía sin entregar también cuenta, como en
+            # pedir_al_deposito(): se carga a la cuenta cuando se entrega.
+            pedido = (_pendiente_de_la_cuenta(mecanico_id, config["descuento"])
+                      if config["limite"] else 0.0)
+            autorizacion_id = None
+            if (config["limite"] and estado["saldo"] + pedido + importe > config["limite"] + 0.005
                     and not pasar_el_limite):
-                return False, (f"Pasa el límite de crédito: debe ${miles(estado['saldo'], 0)}, el "
-                               f"límite es ${miles(config['limite'], 0)} y esto suma "
-                               f"${miles(importe, 0)}.")
+                margen, autorizacion_id = margen_autorizado(mecanico_id)
+                if estado["saldo"] + pedido + importe > config["limite"] + margen + 0.005:
+                    return False, (f"{PASA_EL_LIMITE}: debe ${miles(estado['saldo'], 0)}"
+                                   + (f", tiene pedido sin entregar ${miles(pedido, 0)}"
+                                      if pedido else "")
+                                   + f", el límite es ${miles(config['limite'], 0)}"
+                                   + (f" (más ${miles(margen, 0)} de un permiso)" if margen else "")
+                                   + f" y esto suma ${miles(importe, 0)}. {SE_PUEDE_PEDIR_PERMISO}")
             vence = (date.today() + timedelta(days=config["dias_de_plazo"])).isoformat()
             codigo_id = None
             if config["pide_codigo"]:
@@ -1418,17 +1433,23 @@ def cargar_a_la_cuenta(mecanico_id, concepto, importe, codigo_de_retiro="", usua
                     return False, ("El código de retiro no es válido, ya se usó o venció. El "
                                    "taller genera uno nuevo en su portal.")
             c.execute("""INSERT INTO movimientos_de_cuenta
-                            (mecanico_id, concepto, importe, vence, usuario)
-                         VALUES (?, ?, ?, ?, ?)""",
+                            (mecanico_id, concepto, importe, vence, usuario, autorizacion_id)
+                         VALUES (?, ?, ?, ?, ?, ?)""",
                       (mecanico_id, (concepto or "").strip() or "Repuestos", importe, vence,
-                       usuario))
+                       usuario, autorizacion_id))
             movimiento_id = c.lastrowid
             if codigo_id:
                 c.execute("""UPDATE codigos_de_retiro SET usado_en = datetime('now', 'localtime'),
                                     movimiento_id = ? WHERE id = ?""", (movimiento_id, codigo_id))
+            pasa = config["limite"] and estado["saldo"] + pedido + importe > config["limite"] + 0.005
+            if pasa and pasar_el_limite:
+                anotar_cambio("pasó el límite sin permiso", "cuenta", mecanico_id,
+                              detalle=f"cargo de ${miles(importe, 0)}: {(concepto or '').strip()}",
+                              usuario=usuario or None)
     aviso = f"Cargado: ${miles(importe, 0)}, vence el {vence}."
-    if config["limite"] and estado["saldo"] + importe > config["limite"]:
-        aviso += " Quedó por encima del límite de crédito."
+    if pasa:
+        aviso += (" Quedó por encima del límite de crédito, con el permiso que había."
+                  if autorizacion_id else " Quedó por encima del límite de crédito.")
     return True, aviso
 
 
@@ -1436,6 +1457,7 @@ def registrar_pago_de_cuenta(mecanico_id, importe, medio, concepto="", cheque_fe
                              usuario=""):
     """Un pago del taller. Con cheque diferido, la fecha del cheque queda anotada: el pago
     descuenta ya, y aparece en «cheques en cartera» hasta esa fecha."""
+    exigir_nivel("empleado", "registrar un pago de una cuenta")
     try:
         importe = round(float(importe), 2)
     except (TypeError, ValueError):
@@ -1470,6 +1492,261 @@ def anular_movimiento_de_cuenta(movimiento_id):
         anotar_cambio("anuló movimiento de cuenta", "movimiento", movimiento_id,
                       antes=dict(antes) if antes else None)
         conn.commit()
+
+
+# ============================================================
+# PASAR EL LÍMITE CON PERMISO
+# ============================================================
+# Lo pidió el dueño: cuando el límite de crédito frena una venta, el que atiende puede pedir
+# permiso para seguir vendiendo, y solo un administrador —el que tiene todos los permisos— lo
+# da. Hasta acá no había término medio: el pedido al depósito no pasaba nunca, y en Cuentas
+# corrientes «Cargar igual aunque pase el límite» lo podía tildar cualquier empleado.
+#
+# UN PERMISO ES UN MONTO DE MÁS PARA UNA CUENTA, POR UN RATO: mientras vale, el tope de esa
+# cuenta es el límite más lo autorizado. Así sirve igual para un cargo suelto que para un
+# presupuesto de diez ítems pedido de una vez (cada ítem se mira contra el mismo tope), y no se
+# puede estirar: lo vendido con él ya suma a la deuda. Vencido, el tope vuelve a ser el límite.
+# Lo que se vendió gracias a uno queda con su número (autorizacion_id) en el cargo o el pedido.
+HORAS_QUE_VALE_UN_PERMISO = 24
+PASA_EL_LIMITE = "Pasa el límite de crédito"
+SE_PUEDE_PEDIR_PERMISO = "Se le puede pedir permiso a un administrador."
+
+
+def es_por_el_limite(aviso):
+    """¿Ese «no» es por el límite de crédito (y entonces se puede pedir permiso)?"""
+    return str(aviso or "").startswith(PASA_EL_LIMITE)
+
+
+def margen_autorizado(mecanico_id):
+    """(cuánto de más se autorizó y sigue vigente, el número del permiso más nuevo o None).
+    No toma el candado: se llama adentro de las transacciones que miran el límite."""
+    c.execute("""SELECT id, importe FROM permisos_de_credito
+                 WHERE mecanico_id = ? AND estado = 'autorizada'
+                   AND vence > datetime('now', 'localtime')
+                 ORDER BY id DESC""", (mecanico_id,))
+    filas = c.fetchall()
+    return round(sum(float(r["importe"]) for r in filas), 2), (filas[0]["id"] if filas else None)
+
+
+def cuanto_pasa_del_limite(mecanico_id, importe):
+    """Cuánto le falta de tope a esta cuenta para `importe` más, contando lo pedido sin entregar
+    y los permisos vigentes. 0 si entra. Es lo que se sugiere pedir."""
+    config = configuracion_de_cuenta(mecanico_id)
+    if not config["limite"]:
+        return 0.0
+    saldo = estado_de_cuenta(mecanico_id)["saldo"]
+    pedido = _pendiente_de_la_cuenta(mecanico_id, config["descuento"])
+    margen = margen_autorizado(mecanico_id)[0]
+    return round(max(0.0, saldo + pedido + float(importe or 0) - config["limite"] - margen), 2)
+
+
+def puede_autorizar_limites():
+    """Solo el administrador; o cualquiera si la app todavía no tiene contraseñas (abierta a
+    propósito, con el aviso de siempre: ver seccion_permitida())."""
+    return es_admin() or not hay_claves_configuradas()
+
+
+def pedir_permiso_de_limite(mecanico_id, importe, motivo, usuario=""):
+    """El que atiende pide permiso para vender `importe` de más a esa cuenta. (True, aviso) o
+    (False, por qué no). Un pedido por cuenta a la vez: el segundo no se suma, dice cuál espera."""
+    exigir_nivel("empleado", "pedir permiso para pasar el límite de crédito")
+    try:
+        importe = round(float(importe), 2)
+    except (TypeError, ValueError):
+        return False, "El monto no es un número."
+    if importe <= 0:
+        return False, "Decí cuánto de más hace falta."
+    motivo = (motivo or "").strip()
+    if not motivo:
+        return False, "Decí por qué: es lo que lee el que lo autoriza."
+    if not configuracion_de_cuenta(mecanico_id)["limite"]:
+        return False, "Esa cuenta no tiene límite de crédito: no hace falta permiso."
+    quien = usuario or obtener_usuario_actual()
+    with db_lock, transaccion():
+        c.execute("""SELECT importe, pedido_por, pedido_en FROM permisos_de_credito
+                     WHERE mecanico_id = ? AND estado = 'pendiente'
+                       AND pedido_en > datetime('now', 'localtime', ?)""",
+                  (mecanico_id, f"-{HORAS_QUE_VALE_UN_PERMISO} hours"))
+        ya = c.fetchone()
+        if ya:
+            return False, (f"Ya hay un pedido sin contestar para esta cuenta: ${miles(ya['importe'], 0)}"
+                           f", de {ya['pedido_por'] or 'alguien'} a las {str(ya['pedido_en'])[11:16]}.")
+        c.execute("""INSERT INTO permisos_de_credito (mecanico_id, importe, motivo, pedido_por)
+                     VALUES (?, ?, ?, ?)""", (mecanico_id, importe, motivo[:300], quien))
+        anotar_cambio("pidió permiso para pasar el límite", "cuenta", mecanico_id,
+                      detalle=f"${miles(importe, 0)} de más: {motivo[:300]}", usuario=quien)
+    return True, ("🙋 Pedido. Lo ve un administrador arriba de todo y en Administrar → 💳 Cuentas "
+                  "corrientes; cuando lo autorice, volvé a tocar el botón.")
+
+
+def contestar_permiso_de_limite(autorizacion_id, autorizar, nota="", importe=None, usuario=""):
+    """Un administrador lo autoriza (por lo pedido o por `importe`) o no. Vale
+    HORAS_QUE_VALE_UN_PERMISO desde ahora. Solo lo que sigue esperando y es de las últimas
+    HORAS_QUE_VALE_UN_PERMISO: lo contestado por otro, o lo muy viejo, no se toca."""
+    exigir_nivel("admin", "autorizar a pasar el límite de crédito")
+    quien = usuario or obtener_usuario_actual()
+    if importe is not None:
+        try:
+            importe = round(float(importe), 2)
+        except (TypeError, ValueError):
+            return False, "El monto no es un número."
+        if autorizar and importe <= 0:
+            return False, "Para autorizar, un monto mayor que cero."
+    with db_lock, transaccion():
+        c.execute("""UPDATE permisos_de_credito
+                     SET estado = ?, resuelto_por = ?, resuelto_en = datetime('now', 'localtime'),
+                         nota = ?, importe = COALESCE(?, importe),
+                         vence = CASE WHEN ? THEN datetime('now', 'localtime', ?) END
+                     WHERE id = ? AND estado = 'pendiente'
+                       AND pedido_en > datetime('now', 'localtime', ?)""",
+                  ("autorizada" if autorizar else "rechazada", quien, (nota or "").strip()[:300],
+                   importe if autorizar else None, 1 if autorizar else 0,
+                   f"+{HORAS_QUE_VALE_UN_PERMISO} hours", autorizacion_id,
+                   f"-{HORAS_QUE_VALE_UN_PERMISO} hours"))
+        if c.rowcount != 1:
+            return False, ("Ese pedido ya no está esperando: lo contestó otro, o es de hace más de "
+                           f"{HORAS_QUE_VALE_UN_PERMISO} horas (que lo pidan de nuevo).")
+        c.execute("SELECT mecanico_id, importe, vence FROM permisos_de_credito WHERE id = ?",
+                  (autorizacion_id,))
+        fila = c.fetchone()
+        anotar_cambio("autorizó pasar el límite" if autorizar else "no autorizó pasar el límite",
+                      "cuenta", fila["mecanico_id"],
+                      detalle=f"permiso {autorizacion_id}: ${miles(fila['importe'], 0)}"
+                              + (f" · {nota.strip()}" if (nota or "").strip() else ""),
+                      usuario=quien)
+    if autorizar:
+        return True, (f"✅ Autorizado: ${miles(fila['importe'], 0)} de más, hasta el "
+                      f"{fila['vence'][8:10]}/{fila['vence'][5:7]} a las {fila['vence'][11:16]}.")
+    return True, "🚫 No autorizado. Lo ve el que lo pidió."
+
+
+def permisos_de_limite(mecanico_id=None, solo_esperando=False, limite=30):
+    """Los pedidos de permiso, del más nuevo al más viejo, con la cuenta, si sigue esperando, si
+    está vigente y en cuántas ventas se usó."""
+    c.execute(f"""SELECT a.id, a.mecanico_id, k.nombre AS cuenta, a.importe, a.motivo, a.pedido_por,
+                         a.pedido_en, a.estado, a.resuelto_por, a.resuelto_en, a.nota, a.vence,
+                         (a.estado = 'pendiente'
+                          AND a.pedido_en > datetime('now', 'localtime', ?)) AS esperando,
+                         (a.estado = 'autorizada'
+                          AND a.vence > datetime('now', 'localtime')) AS vigente,
+                         (SELECT COUNT(*) FROM movimientos_de_cuenta m
+                          WHERE m.autorizacion_id = a.id AND m.anulado = 0)
+                         + (SELECT COUNT(*) FROM pedidos_deposito d
+                            WHERE d.autorizacion_id = a.id AND d.estado <> 'cancelado') AS usos
+                  FROM permisos_de_credito a LEFT JOIN mecanicos k ON k.id = a.mecanico_id
+                  WHERE (? IS NULL OR a.mecanico_id = ?)
+                  {"AND a.estado = 'pendiente' AND a.pedido_en > datetime('now', 'localtime', ?)"
+                   if solo_esperando else "AND ? IS NULL"}
+                  ORDER BY a.id DESC LIMIT ?""",
+              (f"-{HORAS_QUE_VALE_UN_PERMISO} hours", mecanico_id, mecanico_id,
+               f"-{HORAS_QUE_VALE_UN_PERMISO} hours" if solo_esperando else None, limite))
+    return [dict(r) for r in c.fetchall()]
+
+
+def cuantos_permisos_esperando():
+    c.execute("""SELECT COUNT(*) FROM permisos_de_credito
+                 WHERE estado = 'pendiente' AND pedido_en > datetime('now', 'localtime', ?)""",
+              (f"-{HORAS_QUE_VALE_UN_PERMISO} hours",))
+    return c.fetchone()[0]
+
+
+def _hora_del_permiso(fecha_y_hora):
+    texto = str(fecha_y_hora or "")
+    return (texto[11:16] if texto[:10] == date.today().isoformat()
+            else f"{texto[8:10]}/{texto[5:7]} {texto[11:16]}")
+
+
+def mostrar_permiso_de_limite(mecanico_id, exceso, clave):
+    """Abajo de un «Pasa el límite»: cómo está el permiso de esa cuenta y, si no hay uno
+    esperando, el recuadro para pedirlo. `exceso` es lo que se sugiere pedir."""
+    ultimo = (permisos_de_limite(mecanico_id=mecanico_id, limite=1) or [None])[0]
+    if ultimo and ultimo["esperando"]:
+        st.info(f"⏳ Se pidió permiso por ${miles(ultimo['importe'], 0)} a las "
+                f"{_hora_del_permiso(ultimo['pedido_en'])} y todavía no lo contestaron. Lo "
+                "autoriza un administrador; cuando lo haga, volvé a tocar el botón.")
+        if puede_autorizar_limites():
+            mostrar_contestar_permiso(ultimo, f"{clave}_ya")
+        return
+    if ultimo and ultimo["vigente"]:
+        st.success(f"✅ {ultimo['resuelto_por'] or 'Un administrador'} autorizó "
+                   f"${miles(ultimo['importe'], 0)} de más, hasta las "
+                   f"{_hora_del_permiso(ultimo['vence'])}. Con esto todavía no alcanza: se "
+                   "puede pedir más.")
+    elif ultimo and ultimo["estado"] == "rechazada" and str(ultimo["resuelto_en"] or "")[:10] == \
+            date.today().isoformat():
+        st.warning(f"🚫 {ultimo['resuelto_por'] or 'Un administrador'} no lo autorizó a las "
+                   f"{_hora_del_permiso(ultimo['resuelto_en'])}"
+                   + (f": {ultimo['nota']}" if ultimo["nota"] else "") + ".")
+    with st.form(f"permiso_limite_{clave}", clear_on_submit=True):
+        st.markdown("**🙋 Pedir permiso para pasar el límite**")
+        monto = st.number_input("¿Cuánto de más hace falta? ($)", min_value=0.0, step=1000.0,
+                                value=float(-(-max(exceso, 0) // 100) * 100))
+        motivo = st.text_input("¿Por qué? (lo lee el que autoriza)", max_chars=300,
+                               placeholder="Ej.: paga el viernes, cliente de hace años")
+        if st.form_submit_button("🙋 Pedir permiso a un administrador", type="primary"):
+            try:
+                ok, aviso = pedir_permiso_de_limite(mecanico_id, monto, motivo)
+            except PermissionError as _err:
+                ok, aviso = False, str(_err)
+            (st.success if ok else st.error)(aviso)
+
+
+def _contestar_desde_la_pantalla(autorizacion_id, autorizar, clave):
+    try:
+        ok, aviso = contestar_permiso_de_limite(
+            autorizacion_id, autorizar, st.session_state.get(f"nota_permiso_{clave}", ""),
+            st.session_state.get(f"monto_permiso_{clave}") if autorizar else None)
+    except PermissionError as _err:
+        ok, aviso = False, str(_err)
+    avisar("success" if ok else "error", aviso)
+
+
+def mostrar_contestar_permiso(permiso, clave):
+    """Autorizar (por lo pedido o por otro monto) o no. Solo se dibuja para quien puede: ver
+    puede_autorizar_limites(). La función vuelve a mirarlo igual."""
+    _m, _n = st.columns([1, 2])
+    _m.number_input("Monto ($)", min_value=0.0, step=1000.0, value=float(permiso["importe"]),
+                    key=f"monto_permiso_{clave}")
+    _n.text_input("Nota (opcional)", max_chars=300, key=f"nota_permiso_{clave}")
+    _si, _no = st.columns(2)
+    _si.button("✅ Autorizar", type="primary", key=f"si_permiso_{clave}", width="stretch",
+               on_click=_contestar_desde_la_pantalla, args=(permiso["id"], True, clave))
+    _no.button("🚫 No autorizar", key=f"no_permiso_{clave}", width="stretch",
+               on_click=_contestar_desde_la_pantalla, args=(permiso["id"], False, clave))
+
+
+def mostrar_permisos_de_limite():
+    """En Cuentas corrientes: lo que espera respuesta, con la cuenta como está hoy, y los
+    últimos contestados con en cuántas ventas se usaron."""
+    esperando = permisos_de_limite(solo_esperando=True)
+    if esperando:
+        st.markdown(f"**🙋 {len(esperando)} pedido(s) de permiso para pasar el límite**")
+        for p in esperando:
+            with st.container(border=True):
+                _estado = estado_de_cuenta(p["mecanico_id"])
+                _config = configuracion_de_cuenta(p["mecanico_id"])
+                st.markdown(f"**{p['cuenta'] or 'Cuenta borrada'}** — "
+                            f"${miles(p['importe'], 0)} de más · lo pidió "
+                            f"{p['pedido_por'] or 'alguien'} a las "
+                            f"{_hora_del_permiso(p['pedido_en'])}")
+                st.caption(f"Por qué: {p['motivo']}  \nHoy debe ${miles(_estado['saldo'], 0)} "
+                           f"(vencido ${miles(_estado['vencido'], 0)}), el límite es "
+                           f"${miles(_config['limite'], 0)} y tiene pedido sin entregar "
+                           f"${miles(_pendiente_de_la_cuenta(p['mecanico_id'], _config['descuento']), 0)}.")
+                if puede_autorizar_limites():
+                    mostrar_contestar_permiso(p, f"lista_{p['id']}")
+                else:
+                    st.caption("🔒 Lo autoriza un administrador (el que tiene todos los permisos).")
+    historial = [p for p in permisos_de_limite(limite=40) if not p["esperando"]]
+    if historial and st.toggle("📜 Los últimos permisos contestados", key="permisos_historial"):
+        st.dataframe([{"Cuenta": p["cuenta"], "Monto": p["importe"],
+                       "Estado": ("✅ vigente" if p["vigente"] else
+                                  "✅ vencido" if p["estado"] == "autorizada" else
+                                  "🚫 no" if p["estado"] == "rechazada" else "⌛ sin contestar"),
+                       "Pidió": p["pedido_por"], "Por qué": p["motivo"],
+                       "Contestó": p["resuelto_por"], "Cuándo": p["resuelto_en"],
+                       "Nota": p["nota"], "Ventas con el permiso": p["usos"]}
+                      for p in historial], width="stretch", hide_index=True)
 
 
 # ============================================================

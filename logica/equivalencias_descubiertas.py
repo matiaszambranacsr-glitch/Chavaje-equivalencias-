@@ -1075,6 +1075,7 @@ def pares_rechazados():
 
 def eliminar_equivalencia(par_a, par_b, recordar_rechazo=True):
     """Borra el vínculo en los dos sentidos. Los productos quedan; solo se corta la relación."""
+    exigir_nivel("empleado", "cortar un vínculo")
     with db_lock:
         c.execute("DELETE FROM equivalencias WHERE (producto_a_id = ? AND producto_b_id = ?) "
                    "OR (producto_a_id = ? AND producto_b_id = ?)", (par_a, par_b, par_b, par_a))
@@ -1500,6 +1501,7 @@ def mostrar_aviso_de_lo_aprobado():
 def cortar_todos_los_vinculos(producto_id, recordar_rechazo=True):
     """Corta TODAS las equivalencias de un producto de una sola vez. Para cuando quedó un
     producto basura de una importación mal mapeada colgado de decenas de códigos."""
+    exigir_nivel("empleado", "cortar los vínculos de un producto")
     c.execute("""SELECT producto_a_id, producto_b_id FROM equivalencias
                  WHERE producto_a_id = ? OR producto_b_id = ?""", (producto_id, producto_id))
     pares = [(r["producto_a_id"], r["producto_b_id"]) for r in c.fetchall()]
@@ -4791,6 +4793,7 @@ def aprobar_pendientes(lote, solo_estos_pares=None, en_bloque=False):
     Lo pidió una revisión con ChatGPT: una muestra que salió bien habla del grupo, no de la
     pastilla de freno que quedó afuera de la muestra. Medido sobre la base del 8/10: hoy no hay
     ninguna pendiente (de 7.827), y de las 22.670 decisiones tomadas, una sola era de seguridad."""
+    exigir_nivel("empleado", "aprobar equivalencias")
     # Todo o nada: se crean las equivalencias y se borran los pendientes. Cortado en el medio,
     # o quedan los dos (el pendiente vuelve a aparecer ya aprobado) o ninguno (se perdieron).
     with db_lock, transaccion():

@@ -85,17 +85,24 @@ def pedir_al_deposito(producto_id, cantidad=1, mecanico_id=None, codigo_de_retir
         # dos vendedores pidiendo $15.000 cada uno al mismo tiempo veían los dos «hay lugar» y
         # entraban los dos (lo señaló una revisión con ChatGPT). Mirado acá, el segundo ya ve el
         # pedido del primero. Ver pruebas_del_deposito.py.
+        autorizacion_id = None
         if mecanico_id:
             config = configuracion_de_cuenta(mecanico_id)
             importe = precio_de_la_cuenta(prod["precio"], config["descuento"]) * cantidad
             estado = estado_de_cuenta(mecanico_id)
             pedido = _pendiente_de_la_cuenta(mecanico_id, config["descuento"])
             if config["limite"] and estado["saldo"] + pedido + importe > config["limite"] + 0.005:
-                return False, (f"Pasa el límite de crédito de la cuenta: debe "
-                               f"{formato_precio(estado['saldo'])}"
-                               + (f", tiene pedido sin entregar {formato_precio(pedido)}"
-                                  if pedido else "")
-                               + f" y el límite es {formato_precio(config['limite'])}.")
+                # CON UN PERMISO VIGENTE, el tope sube lo autorizado. Ver pedir_permiso_de_limite().
+                margen, autorizacion_id = margen_autorizado(mecanico_id)
+                if estado["saldo"] + pedido + importe > config["limite"] + margen + 0.005:
+                    return False, (f"{PASA_EL_LIMITE} de la cuenta: debe "
+                                   f"{formato_precio(estado['saldo'])}"
+                                   + (f", tiene pedido sin entregar {formato_precio(pedido)}"
+                                      if pedido else "")
+                                   + f" y el límite es {formato_precio(config['limite'])}"
+                                   + (f" (más {formato_precio(margen)} de un permiso)"
+                                      if margen else "")
+                                   + f". {SE_PUEDE_PEDIR_PERMISO}")
         if (mecanico_id and not retiro_autorizado
                 and configuracion_de_cuenta(mecanico_id)["pide_codigo"]):
             codigo_id = _codigo_de_retiro_vigente(mecanico_id, codigo_de_retiro)
@@ -105,10 +112,10 @@ def pedir_al_deposito(producto_id, cantidad=1, mecanico_id=None, codigo_de_retir
             c.execute("UPDATE codigos_de_retiro SET usado_en = datetime('now', 'localtime') "
                       "WHERE id = ?", (codigo_id,))
         c.execute("""INSERT INTO pedidos_deposito (producto_id, cantidad, mecanico_id, nota,
-                                                   pedido_por, tanda)
-                     VALUES (?, ?, ?, ?, ?, ?)""",
+                                                   pedido_por, tanda, autorizacion_id)
+                     VALUES (?, ?, ?, ?, ?, ?, ?)""",
                   (producto_id, cantidad, mecanico_id or None, (nota or "").strip()[:200],
-                   usuario or obtener_usuario_actual(), tanda))
+                   usuario or obtener_usuario_actual(), tanda, autorizacion_id))
     return True, "📦 Pedido al depósito. Lo ven en «📦 Depósito»."
 
 
@@ -442,9 +449,44 @@ def mostrar_cuenta_elegida(clave):
                       on_click=_dejar_la_cuenta, width="stretch")
 
 
-def pedir_lo_elegido_al_deposito(items, usuario="", nota=""):
+def importe_para_la_cuenta(mecanico_id, items):
+    """Lo que suman [(producto_id, cantidad)] para esa cuenta, con su descuento."""
+    descuento = configuracion_de_cuenta(mecanico_id)["descuento"]
+    total = 0.0
+    for producto_id, cantidad in items:
+        c.execute("SELECT precio FROM productos WHERE id = ?", (producto_id,))
+        fila = c.fetchone()
+        total += precio_de_la_cuenta((fila["precio"] if fila else 0) or 0, descuento) * cantidad
+    return round(total, 2)
+
+
+def _recordar_si_fue_por_el_limite(clave, items, pedidos, fallas):
+    """Si algo no entró por el límite de crédito, se recuerda qué, para ofrecer pedir permiso
+    (ver mostrar_permiso_si_hace_falta()); si entró todo, se olvida."""
+    elegida = cuenta_elegida()
+    faltan = [(pid, cant) for pid, cant in items if pid not in pedidos]
+    if elegida and faltan and any(es_por_el_limite(f) for f in fallas):
+        st.session_state[f"_limite_{clave}"] = {"mecanico_id": elegida["id"], "items": faltan}
+    else:
+        st.session_state.pop(f"_limite_{clave}", None)
+
+
+def mostrar_permiso_si_hace_falta(clave):
+    """El recuadro del permiso (ver mostrar_permiso_de_limite()), si lo último que se pidió con
+    esta `clave` no entró por el límite y se sigue atendiendo a la misma cuenta."""
+    bloqueo = st.session_state.get(f"_limite_{clave}")
+    elegida = cuenta_elegida()
+    if not bloqueo or not elegida or elegida["id"] != bloqueo["mecanico_id"]:
+        return
+    mid = bloqueo["mecanico_id"]
+    mostrar_permiso_de_limite(mid, cuanto_pasa_del_limite(
+        mid, importe_para_la_cuenta(mid, bloqueo["items"])), clave)
+
+
+def pedir_lo_elegido_al_deposito(items, usuario="", nota="", clave=None):
     """[(producto_id, cantidad)] → pide cada uno para la cuenta elegida (o Mostrador).
-    Devuelve (los que se pidieron, [por qué no, de los otros])."""
+    Devuelve (los que se pidieron, [por qué no, de los otros]). Con `clave`, si algo no entró
+    por el límite, queda para ofrecer pedir permiso (ver mostrar_permiso_si_hace_falta())."""
     elegida = cuenta_elegida()
     pedidos, fallas = [], []
     # Varios juntos son una tanda: el depósito los ve como un solo pedido (ver
@@ -455,6 +497,8 @@ def pedir_lo_elegido_al_deposito(items, usuario="", nota=""):
                                       usuario=usuario, nota=nota, retiro_autorizado=True,
                                       tanda=tanda)
         (pedidos.append(producto_id) if ok else fallas.append(aviso))
+    if clave:
+        _recordar_si_fue_por_el_limite(clave, items, pedidos, fallas)
     return pedidos, fallas
 
 
@@ -494,11 +538,14 @@ def mostrar_pedir_al_deposito(resultados, clave):
                              key=f"dep_nota_{clave}", placeholder="Ej.: lo espera en el mostrador")
         b_pedir, b_sumar = st.columns(2)
         if b_pedir.button("📦 Pedir", type="primary", key=f"dep_pedir_{clave}", width="stretch"):
-            pedidos, fallas = pedir_lo_elegido_al_deposito([(producto_id, cantidad)], nota=nota)
+            pedidos, fallas = pedir_lo_elegido_al_deposito([(producto_id, cantidad)], nota=nota,
+                                                           clave=f"dep_{clave}")
             if pedidos:
                 st.success("📦 Pedido al depósito. Lo ven en «📦 Depósito».")
             for falla in fallas:
                 st.error(falla)
+        # SI NO ENTRÓ POR EL LÍMITE: pedir permiso. Ver mostrar_permiso_de_limite().
+        mostrar_permiso_si_hace_falta(f"dep_{clave}")
         # Como callback: el presupuesto se dibuja arriba de todo, antes que este botón, y sumado
         # recién al volver del botón no aparecía hasta el toque siguiente.
         b_sumar.button("🛒 Al presupuesto", key=f"dep_sumar_{clave}", width="stretch",
@@ -522,7 +569,8 @@ def pedir_uno_del_presupuesto(producto_id):
     item = st.session_state.get("carrito", {}).get(producto_id)
     if not item:
         return
-    pedidos, fallas = pedir_lo_elegido_al_deposito([(producto_id, item["cantidad"])])
+    pedidos, fallas = pedir_lo_elegido_al_deposito([(producto_id, item["cantidad"])],
+                                                   clave="presupuesto")
     if pedidos:
         st.session_state["carrito"].pop(producto_id, None)
         st.session_state.pop(f"cant_cart_{producto_id}", None)

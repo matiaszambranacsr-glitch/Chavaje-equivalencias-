@@ -417,7 +417,19 @@ def diagnostico_de_salud():
     # entera —precios, clientes, teléfonos, usuarios— descargable por cualquiera. Lo anota el
     # hilo que sube la copia (ver _anotar_si_el_repositorio_es_publico()); acá solo se lee.
     try:
-        if obtener_config("repo_copia_publico", "") == "1":
+        if obtener_config("copia_frenada_sin_cifrar", ""):
+            # Ya no se sube (ver se_puede_subir_sin_cifrar()): lo grave ahora es que la copia
+            # se va quedando vieja, y un reinicio arranca desde la última que subió.
+            sumar_tecnico("alto", "🔓 La copia de tu base NO SE ESTÁ SUBIENDO: sin cifrar no va "
+                          "a un repositorio público",
+                  "Desde el " + obtener_config("copia_frenada_sin_cifrar", "")[:16] + ". Si la "
+                  "app se reinicia, arranca desde la última copia que subió y lo de después se "
+                  "pierde. Poné el repositorio en privado (GitHub → Settings → General → Change "
+                  "visibility) o agregá en los secretos clave_copia = \"una frase larga\". Las "
+                  "copias viejas siguen en el historial de la rama «copia-de-seguridad»: con el "
+                  "repositorio privado ya no se ven.",
+                  miga_hasta("Backup y config"))
+        elif obtener_config("repo_copia_publico", "") == "1":
             if not clave_de_la_copia():
                 sumar_tecnico("alto", "🔓 La copia de tu base se sube SIN CIFRAR a un repositorio PÚBLICO",
                       "Cualquiera puede bajarla de GitHub: precios, clientes, teléfonos, patentes "

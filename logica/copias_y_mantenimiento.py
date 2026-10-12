@@ -2212,6 +2212,12 @@ def subir_las_fotos_si_cambiaron():
     except (ValueError, TypeError, AttributeError):
         subidas = {}
     cabeceras = _cabeceras_de_github(cfg)
+    # Las fotos, igual que la base: sin clave, solo a un repositorio privado. Ver
+    # se_puede_subir_sin_cifrar().
+    _se_puede, _por_que = se_puede_subir_sin_cifrar(cfg, cabeceras)
+    if not _se_puede:
+        guardar_config("ultimo_backup_fotos_error", f"{datetime.now():%d/%m %H:%M} — {_por_que}")
+        return False, _por_que
     arbol = _arbol_de_la_rama(cfg, cabeceras)
     if arbol is None:
         return False, "No se pudo leer qué hay en la rama de copias."
@@ -2257,10 +2263,52 @@ def traer_las_fotos_de_github():
     return len(filas)
 
 
+# SIN CIFRAR, SOLO A UN REPOSITORIO PRIVADO. Sin «clave_copia» la copia viaja tal cual, y hasta
+# acá se subía igual a un repositorio público, con un aviso. Medido el 12/10: el repositorio
+# era público y la copia de ese día —86.946 productos, con precios y listas— estaba sin
+# cifrar, descargable por cualquiera. Lo señaló una revisión con ChatGPT («si no se puede
+# cifrar, no subirla; una excepción para repositorios privados, como decisión explícita»).
+# Ahora, sin clave, se pregunta a GitHub en el momento: si es privado, sube; si es público o
+# no contesta, NO sube, y la salud lo dice en rojo. Subirla igual a uno público se puede, pero
+# solo poniéndolo a propósito en los secretos: subir_copia_sin_cifrar = true.
+TEXTO_COPIA_FRENADA_SIN_CIFRAR = (
+    "🔓 La copia no se subió: el repositorio es público (o no se pudo confirmar que sea "
+    "privado) y en los secretos no está «clave_copia», así que viajaría sin cifrar y cualquiera "
+    "la podría bajar. Se arregla con una de dos: poné el repositorio en privado (GitHub → "
+    "Settings → General → Change visibility) o agregá en los secretos una línea "
+    "clave_copia = \"una frase larga\".")
+
+
+def se_puede_subir_sin_cifrar(cfg, cabeceras):
+    """(True, "") si la copia puede subir: va cifrada (hay clave), el repositorio es privado
+    (GitHub lo confirma ahora) o el dueño lo aceptó en los secretos. Si no, (False, por qué)."""
+    if clave_de_la_copia():
+        return True, ""
+    if str(secretos_app().get("subir_copia_sin_cifrar", "")).strip().lower() in ("true", "1",
+                                                                                 "si", "sí"):
+        return True, ""
+    privado = False
+    try:
+        r = requests.get(f"{API_DE_GITHUB}/repos/{cfg['repo']}", headers=cabeceras, timeout=15)
+        if r.status_code == 200 and isinstance(r.json(), dict):
+            privado = r.json().get("private") is True
+            guardar_config("repo_copia_publico", "0" if privado else "1")
+    except Exception as _err:
+        anotar_error("se_puede_subir_sin_cifrar", _err)
+    if privado:
+        return True, ""
+    guardar_config("copia_frenada_sin_cifrar", datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+    return False, TEXTO_COPIA_FRENADA_SIN_CIFRAR
+
+
 def _subir_backup_a_github(cfg, datos_db, mensaje):
     url = f"{API_DE_GITHUB}/repos/{cfg['repo']}/contents/{cfg['archivo']}"
     cabeceras = {"Authorization": f"Bearer {cfg['token']}",
                  "Accept": "application/vnd.github+json"}
+    _se_puede, _por_que = se_puede_subir_sin_cifrar(cfg, cabeceras)
+    if not _se_puede:
+        return False, _por_que
+    guardar_config("copia_frenada_sin_cifrar", "")
     try:
         # Comprimida si el nombre lo dice. Ver ARCHIVO_SEMILLA_COMPRIMIDA.
         contenido = gzip.compress(datos_db, 6) if cfg["archivo"].endswith(".gz") else datos_db

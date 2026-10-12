@@ -657,6 +657,7 @@ def deshacer_importacion(lote, borrar_pendientes=True):
     Solo toca las equivalencias, nunca los productos: los precios, el stock, la ubicación y el
     historial que hayas cargado sobre esos productos se quedan donde están. Lo que se deshace
     es la parte peligrosa —los vínculos falsos— y eso es reversible sin perder trabajo."""
+    exigir_nivel("admin", "deshacer una importación")
     if not lote:
         return 0, 0
     # Todo o nada: los vínculos y los pendientes de la misma lista se van juntos. Si se borran

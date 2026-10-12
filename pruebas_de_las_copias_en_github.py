@@ -29,6 +29,7 @@ class GitHubDeMentira:
     def __init__(self):
         self.blobs, self.arboles, self.commits, self.ramas = {}, {}, {}, {}
         self.fallar_contenidos = ()          # rutas que contestan 500 al bajarlas
+        self.privado = True                  # lo que contesta /repos/dueño/repo
         self.subidas = []                    # rutas de los blobs subidos, en orden
 
     def _sha(self, datos):
@@ -75,7 +76,7 @@ def _manejador(gh):
                     return self._responder(404, {"message": "Not Found"})
                 return self._responder(200, crudo=gh.blobs[arbol[ruta]])
             if len(partes) == 4:            # /repos/dueño/repo
-                return self._responder(200, {"private": True})
+                return self._responder(200, {"private": gh.privado})
             return self._responder(404, {})
 
         def do_POST(self):
@@ -168,6 +169,17 @@ def probar(ns, gh, carpeta):
         f.write(gzip.decompress(copia))
     esperar("la copia de la base ya no lleva las fotos",
             sqlite3.connect(ruta_copia).execute("SELECT COUNT(*) FROM producto_fotos").fetchone()[0], 0)
+    # Lo que apunta a algo que no está, en cualquier tabla: la prueba de la copia lo ve.
+    _mirar = sqlite3.connect(ruta_copia)
+    def _rotas():
+        return [p_ for p_ in ns["_usarla_como_la_usaria_el_mostrador"](_mirar)
+                if "apuntan a algo que no está" in p_]
+    esperar("la copia sana, sin filas rotas", _rotas(), [])
+    _mirar.execute("INSERT INTO ventas_registradas (producto_id, termino_pedido) VALUES (999999, 'x')")
+    _mirar.commit()
+    esperar("una venta de un producto que no está, se ve", _rotas(),
+            ["1 fila(s) apuntan a algo que no está (en ventas_registradas)"])
+    _mirar.close()
 
     # La ficha de la copia y la copia de hoy en el historial: el mismo archivo, sin subirlo de nuevo.
     from datetime import date, timedelta
@@ -266,6 +278,40 @@ def probar(ns, gh, carpeta):
     esperar("cuando GitHub vuelve, se bajan las fotos", ns["obtener_config"]("fotos_github_sin_bajar", ""), "")
     esperar("y están otra vez en la base",
             c.execute("SELECT COUNT(*) FROM producto_fotos").fetchone()[0], len(restantes) + 0)
+
+    # SIN CIFRAR, SOLO A UN REPOSITORIO PRIVADO (ver se_puede_subir_sin_cifrar()). Público y sin
+    # clave: no sube nada, ni la base ni las fotos, y la salud lo dice en rojo.
+    gh.privado = False
+    cfg_gh = ns["config_github"]()
+    cab_gh = ns["_cabeceras_de_github"](cfg_gh)
+    esperar("público y sin clave, no", ns["se_puede_subir_sin_cifrar"](cfg_gh, cab_gh),
+            (False, ns["TEXTO_COPIA_FRENADA_SIN_CIFRAR"]))
+    antes_de_frenar = dict(gh.arbol_de(rama))
+    c.execute("INSERT INTO productos (codigo_raw, codigo_clean, descripcion, marca_id) "
+              "VALUES ('P90', 'P90', 'PIEZA NUEVA', ?)", (mid,))
+    ns["conn"].commit()
+    ok, texto = ns["subir_la_copia_si_cambio"](aunque_no_haya_cambios=True)
+    esperar("la base no sube", (ok, texto.startswith("🔓")), (False, True))
+    esperar("ni las fotos", ns["subir_las_fotos_si_cambiaron"]()[0], False)
+    esperar("y en GitHub no cambió nada", gh.arbol_de(rama), antes_de_frenar)
+    esperar("la salud lo dice en rojo", [p["nivel"] for p in ns["diagnostico_de_salud"]()
+                                         if "NO SE ESTÁ SUBIENDO" in p["titulo"]], ["alto"])
+    # Con la clave sube, y cifrada; el aviso se va.
+    g["secretos_app"] = lambda: {"github_token": "x", "github_repo": "yo/repo",
+                                 "clave_copia": "una frase larga de prueba"}
+    ok, texto = ns["subir_la_copia_si_cambio"](aunque_no_haya_cambios=True)
+    esperar(f"con clave, sube ({texto})", ok, True)
+    esperar("y va cifrada", ns["esta_cifrada"](gh.blobs[gh.arbol_de(rama)["datos_iniciales.db.gz"]]),
+            True)
+    esperar("y el aviso se fue", [p for p in ns["diagnostico_de_salud"]()
+                                  if "NO SE ESTÁ SUBIENDO" in p["titulo"]], [])
+    # Subirla sin cifrar a uno público se puede, pero solo puesto a propósito en los secretos.
+    g["secretos_app"] = lambda: {"github_token": "x", "github_repo": "yo/repo",
+                                 "subir_copia_sin_cifrar": True}
+    esperar("aceptado a propósito, sí", ns["se_puede_subir_sin_cifrar"](cfg_gh, cab_gh), (True, ""))
+    g["secretos_app"] = lambda: {"github_token": "x", "github_repo": "yo/repo"}
+    gh.privado = True
+    esperar("privado y sin clave, sí", ns["se_puede_subir_sin_cifrar"](cfg_gh, cab_gh), (True, ""))
     return fallas
 
 

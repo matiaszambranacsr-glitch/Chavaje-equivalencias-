@@ -302,6 +302,52 @@ def probar(L):
         conn.commit()
     hilo.join(timeout=30)
     esperar("con el precio de ahora, no del que leyó antes de esperar", resultado, [False])
+
+    # CON PERMISO PARA PASAR EL LÍMITE: el tope sube lo autorizado, también para un presupuesto
+    # de varios ítems, y cada pedido queda con el número del permiso.
+    c.execute("UPDATE productos SET precio = 2500 WHERE id = ?", (junta,))
+    conn.commit()
+    ns["crear_mecanico"]("Taller Permiso", "clave-de-prueba-11")
+    tp = c.execute("SELECT id FROM mecanicos WHERE nombre = 'Taller Permiso'").fetchone()[0]
+    ns["configurar_cuenta_de_taller"](tp, 25000, 30, False, 0)
+    esperar("lo que entra", ns["pedir_al_deposito"](filtro, 2, tp, usuario="v",
+                                                     retiro_autorizado=True)[0], True)
+    ok, aviso = ns["pedir_al_deposito"](filtro, 1, tp, usuario="v", retiro_autorizado=True)
+    esperar("lo que no entra, por el límite", (ok, ns["es_por_el_limite"](aviso)), (False, True))
+    esperar("cuánto suma para la cuenta", ns["importe_para_la_cuenta"](tp, [(filtro, 1), (junta, 2)]),
+            15000.0)
+    esperar("cuánto hay que pedir", ns["cuanto_pasa_del_limite"](tp, 15000), 10000.0)
+    # Lo que no entró queda para ofrecer el permiso, con la cuenta que se está atendiendo; lo que
+    # entra lo olvida.
+    sesion = ns["st"].session_state
+    sesion["cuenta_elegida"] = {"id": tp, "nombre": "Taller Permiso", "desde": time.time()}
+    ns["pedir_lo_elegido_al_deposito"]([(filtro, 1), (junta, 2)], usuario="v", clave="prueba")
+    esperar("queda lo que no entró", sesion.get("_limite_prueba"),
+            {"mecanico_id": tp, "items": [(filtro, 1)]})
+    esperar("la junta sí entró", c.execute("SELECT COUNT(*) FROM pedidos_deposito WHERE mecanico_id = ? "
+                                           "AND producto_id = ?", (tp, junta)).fetchone()[0], 1)
+    ns["pedir_permiso_de_limite"](tp, 15000, "lo paga el lunes", usuario="v")
+    ns["contestar_permiso_de_limite"](ns["permisos_de_limite"](mecanico_id=tp)[0]["id"], True,
+                                      usuario="dueño")
+    permiso = ns["permisos_de_limite"](mecanico_id=tp)[0]["id"]
+    pedidos, fallas_p = ns["pedir_lo_elegido_al_deposito"]([(filtro, 1), (junta, 1)], usuario="v",
+                                                           clave="prueba")
+    esperar("con el permiso, el presupuesto entra entero", (pedidos, fallas_p,
+                                                            "_limite_prueba" in sesion),
+            ([filtro, junta], [], False))
+    esperar("cada pedido con su permiso", [r[0] for r in c.execute(
+        "SELECT autorizacion_id FROM pedidos_deposito WHERE mecanico_id = ? ORDER BY id",
+        (tp,)).fetchall()], [None, None, permiso, permiso])
+    esperar("dos ventas con el permiso", ns["permisos_de_limite"](mecanico_id=tp)[0]["usos"], 2)
+    ultimo = c.execute("SELECT MAX(id) FROM pedidos_deposito WHERE mecanico_id = ?",
+                       (tp,)).fetchone()[0]
+    ns["cancelar_pedido_del_deposito"](ultimo, usuario="v")
+    esperar("lo cancelado no cuenta como uso", ns["permisos_de_limite"](mecanico_id=tp)[0]["usos"], 1)
+    esperar("y no se estira", ns["pedir_al_deposito"](filtro, 1, tp, usuario="v",
+                                                      retiro_autorizado=True)[0], False)
+    esperar("un cargo a mano también cuenta lo pedido sin entregar",
+            ns["cargar_a_la_cuenta"](tp, "a mano", 6000)[0], False)
+    sesion.pop("cuenta_elegida", None)
     return fallas
 
 

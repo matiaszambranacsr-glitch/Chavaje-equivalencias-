@@ -407,6 +407,15 @@ def probar(L):
         esperar("y la base sigue como estaba", foto() == antes, True)
     finally:
         g.update(originales)
+    # LO QUE EMPIEZA CON «=» VA COMO TEXTO al Excel, sin cambiarle un carácter (ver
+    # to_excel_bytes()).
+    import io as _io
+    from openpyxl import load_workbook as _load
+    _hoja = _load(_io.BytesIO(ns["to_excel_bytes"]([{"Código": "=HYPERLINK(\"x\")",
+                                                     "Precio": 10, "Nota": "-OX123/1D"}]))).active
+    esperar("una fórmula de una lista queda como texto",
+            [(x.value, x.data_type) for x in _hoja[2]],
+            [("=HYPERLINK(\"x\")", "s"), (10, "n"), ("-OX123/1D", "s")])
     return fallas
 
 

@@ -6,8 +6,10 @@ Uso:
 Qué prueba: la versión de hoy abre la base (y la migra: columnas, tablas y disparadores
 nuevos); después, la versión `--contra` (por defecto, la anterior en git) abre ESA base
 migrada y hace lo de todos los días: buscar, la ficha de un par, aprobar, corregir una medida,
-anotar una venta, el tablero y exportar. Si algo falla, volver atrás un cambio dejaría la app
-rota con la base de hoy.
+anotar una venta, el tablero y exportar. Cada paso mira que dé lo que tiene que dar (que la
+búsqueda encuentre al equivalente, que la decisión y la medida queden guardadas, que la venta
+sume una, que se exporten todos los vínculos), no solo que no reviente. Si algo falla, volver
+atrás un cambio dejaría la app rota con la base de hoy.
 
 Por qué existe: lo pidió una revisión con ChatGPT («recuperación con versión anterior del
 programa: base nueva + programa anterior, y base antigua + programa nuevo»). La segunda mitad
@@ -40,29 +42,74 @@ def _hacer_los_pasos(raiz, base, salida=None):
         import logica
         ns = logica.todo_lo_de_la_logica()
         c = ns["c"]
+        # Un vínculo que nadie rechazó: el buscador no muestra lo rechazado aunque siga cargado.
         c.execute("""SELECT e.producto_a_id, e.producto_b_id, p.codigo_clean FROM equivalencias e
                      JOIN productos p ON p.id = e.producto_a_id
+                     WHERE NOT EXISTS (SELECT 1 FROM equivalencias_revisadas r
+                                       WHERE r.producto_a_id = e.producto_a_id
+                                         AND r.producto_b_id = e.producto_b_id
+                                         AND r.decision = 'rechazada')
                      ORDER BY e.producto_a_id, e.producto_b_id LIMIT 1""")
         fila = c.fetchone()
         a, b, codigo = (fila[0], fila[1], fila[2]) if fila else (None, None, "X")
 
+        def contar(sql, *valores):
+            c.execute(sql, valores)
+            return c.fetchone()[0]
+
+        # CADA PASO DICE SI DIO LO QUE TENÍA QUE DAR, no solo si no reventó (lo señaló una
+        # revisión con ChatGPT: «puede imprimir ok aunque una búsqueda devuelva un resultado
+        # incorrecto o una operación no produzca el cambio esperado»). (salió bien, qué dio)
+        def buscar():
+            ids = {r.get("ID") for r in ns["buscar_con_variantes_del_cero"](codigo)[0]}
+            return b in ids, f"{len(ids)} resultados; su equivalente {'sí' if b in ids else 'NO'} aparece"
+
+        def ficha():
+            estado = str(ns["ficha_de_prueba"](a, b)["estado"])
+            return estado.startswith(("✅", "🟡", "🟠", "⚪", "🔴")), estado
+
+        def aprobar():
+            ns["marcar_revision"]([(a, b)], "ok")
+            n = contar("SELECT COUNT(*) FROM equivalencias_revisadas WHERE producto_a_id = ? "
+                       "AND producto_b_id = ? AND decision = 'ok'", min(a, b), max(a, b))
+            return n == 1, f"decisión guardada: {n}"
+
+        def medidas():
+            ns["actualizar_medidas"](a, 35, 52, 7, None, None, None)
+            c.execute("SELECT diametro_interno, diametro_externo, ancho FROM productos WHERE id = ?",
+                      (a,))
+            guardadas = tuple(c.fetchone())
+            return guardadas == (35, 52, 7), f"quedaron {guardadas}"
+
         def venta():
+            antes = contar("SELECT COUNT(*) FROM ventas_registradas WHERE producto_id = ?", b)
             if ns["registrar_venta"].__code__.co_argcount >= 3:
-                return ns["registrar_venta"](b, codigo, "🟢 equivalencia confirmada")
-            return ns["registrar_venta"](b, codigo)
-        hacer = {
-            "buscar": lambda: len(ns["buscar_con_variantes_del_cero"](codigo)[0]),
-            "ficha": lambda: ns["ficha_de_prueba"](a, b)["estado"] if a else "sin vínculos",
-            "aprobar": lambda: ns["marcar_revision"]([(a, b)], "ok") if a else None,
-            "medidas": lambda: ns["actualizar_medidas"](a, 35, 52, 7, None, None, None) if a else None,
-            "venta": lambda: venta() if b else None,
-            "tablero": lambda: (ns["tablero_de_calidad"]()["numeros"]["decididos"]
-                                if "tablero_de_calidad" in ns else "no existía en esa versión"),
-            "exportar": lambda: ns["exportar_catalogo_zip"]()[1].get("equivalencias"),
-        }
+                ns["registrar_venta"](b, codigo, "🟢 equivalencia confirmada")
+            else:
+                ns["registrar_venta"](b, codigo)
+            despues = contar("SELECT COUNT(*) FROM ventas_registradas WHERE producto_id = ?", b)
+            return despues == antes + 1, f"ventas {antes} → {despues}"
+
+        def tablero():
+            if "tablero_de_calidad" not in ns:
+                return True, "no existía en esa versión"
+            decididos = ns["tablero_de_calidad"]()["numeros"]["decididos"]
+            return decididos >= 1, f"{decididos} decididos"
+
+        def exportar():
+            exportados = ns["exportar_catalogo_zip"]()[1].get("equivalencias")
+            total = contar("SELECT COUNT(*) FROM equivalencias")
+            return exportados == total, f"{exportados} de {total} vínculos"
+        hacer = {"buscar": buscar, "ficha": ficha, "aprobar": aprobar, "medidas": medidas,
+                 "venta": venta, "tablero": tablero, "exportar": exportar}
         for paso in PASOS:
             try:
-                print(f"{paso} ok {str(hacer[paso]())[:60]}", flush=True)
+                if a is None and paso != "exportar":
+                    print(f"{paso} ok sin vínculos para probar", flush=True)
+                    continue
+                bien, que_dio = hacer[paso]()
+                print(f"{paso} {'ok' if bien else 'FALLA no dio lo esperado:'} {str(que_dio)[:120]}",
+                      flush=True)
             except Exception as _err:     # noqa: BLE001 — es lo que se mide
                 print(f"{paso} FALLA {type(_err).__name__}: {str(_err)[:200]}", flush=True)
         if salida:
