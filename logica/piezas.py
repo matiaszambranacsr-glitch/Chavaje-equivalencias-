@@ -323,7 +323,8 @@ def medidas_deducibles_desde(desde_id, limite=2000):
                        AND (p.diametro_interno IS NULL OR p.diametro_externo IS NULL
                             OR p.ancho IS NULL OR p.cantidad_estrias IS NULL
                             OR p.espesor IS NULL OR p.cantidad_vias IS NULL
-                            OR p.cantidad_canales IS NULL OR p.posicion IS NULL)
+                            OR p.cantidad_canales IS NULL
+                            OR NULLIF(TRIM(p.posicion), '') IS NULL)
                      ORDER BY p.id""", (desde_id,))
     except sqlite3.OperationalError as _err:
         anotar_error("productos_con_medidas_deducibles", _err)
@@ -343,7 +344,7 @@ def medidas_deducibles_desde(desde_id, limite=2000):
         ceder_al_mostrador()
         leidas = medidas_desde_descripcion(f["Descripción"])
         # Solo lo que está VACÍO hoy. Lo cargado a mano no se pisa nunca.
-        nuevas = {k: v for k, v in leidas.items() if f.get(k) in (None, "")}
+        nuevas = {k: v for k, v in leidas.items() if medida_vacia(f.get(k))}
         if not nuevas:
             continue
         # Se recorre `nuevas` y no una lista escrita acá adentro, y el cambio salió de un
@@ -379,6 +380,14 @@ MOTIVOS_DE_CAMBIO_DE_MEDIDA = {
 LECTOR_DE_DESCRIPCIONES = "lector de descripciones"
 
 
+def medida_vacia(valor):
+    """¿No hay nada cargado? None, o un texto en blanco: la posición es texto y una carga a mano
+    la puede dejar en «» (lo señaló una revisión de código con ChatGPT). Las columnas de números
+    no aceptan texto (ver CAMPOS_QUE_SON_NUMEROS), así que ahí solo puede ser None. Un 0 sí es
+    un dato."""
+    return valor is None or (isinstance(valor, str) and not valor.strip())
+
+
 def aplicar_medidas_deducidas(filas):
     """Escribe las medidas leídas. Devuelve cuántos productos se completaron.
 
@@ -399,7 +408,7 @@ def aplicar_medidas_deducidas(filas):
             c.execute(f"SELECT {', '.join(nuevas)} FROM productos WHERE id = ?", (f["_id"],))
             antes = c.fetchone()
             vacias = {campo: valor for campo, valor in nuevas.items()
-                      if antes is not None and antes[campo] is None}
+                      if antes is not None and medida_vacia(antes[campo])}
             if not vacias:
                 continue
             c.execute(f"UPDATE productos SET {', '.join(f'{k} = ?' for k in vacias)} WHERE id = ?",

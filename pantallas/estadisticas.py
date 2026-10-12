@@ -2064,6 +2064,14 @@ a traer solas desde Administrar → Mantenimiento.
                            f"{miles(_seg['anduvieron'])}, volvió {miles(_seg['volvieron'])} y de "
                            f"**{miles(_seg['sin_noticias'])} no hay noticias**. Solo lo confirmado "
                            "suma a favor: el silencio no prueba que haya andado.")
+            # LO QUE SE VENDIÓ CON UN PAR QUE DESPUÉS SE RECHAZÓ: a quién avisarle. Ver
+            # vendido_con_lo_que_despues_se_rechazo().
+            _afectadas = vendido_con_lo_que_despues_se_rechazo()
+            if _afectadas:
+                st.warning(f"📣 **{len(_afectadas)} venta(s) con un par que después se "
+                           "rechazó**: ese cliente puede tener puesta una pieza que no era. "
+                           "Conviene avisarle.")
+                st.dataframe(_afectadas, width="stretch", hide_index=True)
             # LO QUE SE VENDIÓ EN LUGAR DE LO RECOMENDADO. Ver ventas_contra_la_recomendacion().
             _contra = _tc["contra_la_recomendacion"]
             if _contra["ventas"]:

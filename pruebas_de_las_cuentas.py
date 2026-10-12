@@ -123,6 +123,42 @@ def probar(L):
     conn.commit()
     esperar("apagada a mano, el arranque no la vuelve a prender",
             ns["configuracion_de_cuenta"](taller)["cobra_mora"], False)
+
+    # EL LÍMITE CON VARIOS CARGANDO A LA VEZ (lo señaló una revisión de código con ChatGPT): un
+    # taller que debe $90.000 con $100.000 de límite, y ocho cargos de $8.000 al mismo tiempo.
+    # Entra uno solo. El saldo se lee lento a propósito, para que todos lleguen a mirarlo antes
+    # de que el primero escriba: así se veía la carrera cuando se miraba antes de la transacción.
+    import threading
+    import time
+    ns["crear_mecanico"]("Taller Carrera", "clave-de-prueba-4")
+    carrera = c.execute("SELECT id FROM mecanicos WHERE nombre = 'Taller Carrera'").fetchone()[0]
+    ns["configurar_cuenta_de_taller"](carrera, 100000, 30, False)
+    esperar("la deuda de antes", ns["cargar_a_la_cuenta"](carrera, "Deuda vieja", 90000)[0], True)
+    g = ns["cargar_a_la_cuenta"].__globals__
+    original = g["estado_de_cuenta"]
+
+    def lento(mid):
+        estado = original(mid)
+        time.sleep(0.05)
+        return estado
+    g["estado_de_cuenta"] = lento
+    largada = threading.Barrier(8)
+    resultados = []
+
+    def vendedor(n):
+        largada.wait()
+        resultados.append(ns["cargar_a_la_cuenta"](carrera, f"Cargo {n}", 8000)[0])
+    hilos = [threading.Thread(target=vendedor, args=(n,)) for n in range(8)]
+    try:
+        for h in hilos:
+            h.start()
+        for h in hilos:
+            h.join(timeout=60)
+    finally:
+        g["estado_de_cuenta"] = original
+    esperar("ocho cargos a la vez contra el límite: entra uno solo", sorted(resultados),
+            [False] * 7 + [True])
+    esperar("y la deuda no pasa el límite", ns["estado_de_cuenta"](carrera)["saldo"], 98000.0)
     return fallas
 
 

@@ -2035,6 +2035,41 @@ def seguimiento_de_lo_vendido(dias=90):
     return salida
 
 
+def vendido_con_lo_que_despues_se_rechazo(limite=200):
+    """Las ventas hechas en lugar de lo pedido con un par que DESPUÉS se rechazó: ese cliente
+    puede tener puesta una pieza que no era. [{Vendido el, Se llevó, Pidió, Vendió, Rechazada
+    el, Por qué}], de lo más nuevo a lo más viejo. Lo que se rechazó antes de la venta no
+    entra: se vendió sabiendo, y ya quedó como alternativa comercial.
+
+    Lo pidió una revisión con ChatGPT («alertas de consecuencias: si una equivalencia aprobada
+    se invalida, identificar las ventas potencialmente afectadas»). En la base real del 25/9 no
+    hay ventas anotadas todavía: es para cuando se usen."""
+    try:
+        c.execute("""SELECT v.fecha AS "Vendido el", m.nombre || ' ' || p.codigo_raw AS "Se llevó",
+                            COALESCE(NULLIF(v.termino_pedido, ''), v.codigo_pedido_clean) AS "Pidió",
+                            COALESCE(v.usuario, '') AS "Vendió", r.fecha AS "Rechazada el",
+                            COALESCE(r.motivo, '') AS "_motivo"
+                     FROM ventas_registradas v
+                     JOIN productos p ON p.id = v.producto_id
+                     JOIN marcas m ON m.id = p.marca_id
+                     JOIN productos q ON q.codigo_clean = v.codigo_pedido_clean AND q.id <> p.id
+                     JOIN equivalencias_revisadas r
+                       ON r.producto_a_id = MIN(p.id, q.id) AND r.producto_b_id = MAX(p.id, q.id)
+                      AND r.decision = 'rechazada' AND r.fecha >= v.fecha
+                     WHERE COALESCE(v.codigo_pedido_clean, '') <> ''
+                       AND v.codigo_pedido_clean <> p.codigo_clean
+                     GROUP BY v.id
+                     ORDER BY v.fecha DESC LIMIT ?""", (limite,))
+        filas = filas_a_listas(c)
+    except sqlite3.OperationalError as _err:
+        anotar_error("vendido_con_lo_que_despues_se_rechazo", _err)
+        return []
+    for f in filas:
+        _m = f.pop("_motivo")
+        f["Por qué"] = MOTIVOS_DE_RECHAZO.get(_m, _m)
+    return filas
+
+
 def aprender_de_las_decisiones():
     """Mira lo que fuiste aprobando y descartando, y saca patrones para usarlos después.
 

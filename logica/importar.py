@@ -439,6 +439,71 @@ def importacion_previa(huella):
     return dict(fila) if fila else None
 
 
+# DE CUÁNDO ES EL PRECIO. El buscador mostraba el precio sin fecha, y la lista de un proveedor
+# puede tener meses: en la base real del 25/9, la de ILLINOIS era del 17/7 y la de MANNOL del
+# 14/4, cargadas el mismo día que las otras. Lo pidió una revisión con ChatGPT («fecha de
+# actualización de precio y stock» y «aviso cuando el usuario trabaja con datos
+# desactualizados»). Desde estos días se avisa: con la inflación de 2026, una lista de dos
+# meses ya cotiza por debajo.
+DIAS_PARA_AVISAR_PRECIO_VIEJO = 60
+_RE_FECHA_EN_EL_ARCHIVO = re.compile(r"(?<!\d)(\d{1,2})[ ._-](\d{1,2})[ ._-](\d{4}|\d{2})(?!\d)")
+
+
+def fecha_de_la_lista(archivo, cargada):
+    """(fecha, de dónde) de los precios de una lista: la que trae el nombre del archivo
+    («ILLINOIS 17 07 2026.xlsx») si tiene sentido —no después de cargarla ni dos años antes—, y
+    si no, el día en que se cargó. (None, "") si no se sabe ni eso."""
+    try:
+        dia_de_carga = datetime.strptime(str(cargada or "")[:10], "%Y-%m-%d").date()
+    except ValueError:
+        return None, ""
+    for m in _RE_FECHA_EN_EL_ARCHIVO.finditer(str(archivo or "")):
+        dia, mes, anio = (int(x) for x in m.groups())
+        anio += 2000 if anio < 100 else 0
+        try:
+            fecha = date(anio, mes, dia)
+        except ValueError:
+            continue
+        if dia_de_carga - timedelta(days=730) <= fecha <= dia_de_carga:
+            return fecha, "de la lista"
+    return dia_de_carga, "cargada"
+
+
+def fecha_de_los_precios(hoy=None):
+    """{marca en mayúsculas: {"fecha", "de_donde", "dias"}} según la última lista cargada de
+    cada una. Una marca que nunca se cargó por una lista no está."""
+    hoy = hoy or date.today()
+    c.execute("""SELECT i.marca, i.archivo, i.fecha FROM importaciones i
+                 WHERE i.fecha = (SELECT MAX(j.fecha) FROM importaciones j
+                                  WHERE UPPER(j.marca) = UPPER(i.marca))""")
+    salida = {}
+    for r in c.fetchall():
+        fecha, de_donde = fecha_de_la_lista(r["archivo"], r["fecha"])
+        if fecha:
+            salida[str(r["marca"]).upper()] = {"fecha": fecha, "de_donde": de_donde,
+                                               "dias": (hoy - fecha).days}
+    return salida
+
+
+def texto_de_la_fecha_de_los_precios(marcas, hoy=None):
+    """La línea que va abajo de los precios en el buscador, solo con las marcas que se ven.
+    Lo viejo, en negrita y con ⚠️. «» si no hay ninguna marca con precio."""
+    marcas = sorted({str(m) for m in marcas if m})
+    if not marcas:
+        return ""
+    fechas = fecha_de_los_precios(hoy)
+    partes = []
+    for marca in marcas:
+        f = fechas.get(marca.upper())
+        if not f:
+            partes.append(f"{marca}: sin fecha (no entró por una lista)")
+            continue
+        texto = (f"{marca}: {'lista del' if f['de_donde'] == 'de la lista' else 'cargada el'} "
+                 f"{f['fecha']:%d/%m/%Y} (hace {f['dias']} días)")
+        partes.append(f"**⚠️ {texto}**" if f["dias"] >= DIAS_PARA_AVISAR_PRECIO_VIEJO else texto)
+    return "💲 Precios — " + " · ".join(partes)
+
+
 _RE_IMPORTE = re.compile(r"^\$?\s*-?\d{1,3}(?:[.,]\d{3})*[.,]\d{2}$|^\$\s*\d")
 
 

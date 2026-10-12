@@ -6478,6 +6478,41 @@ el botón**:
 - «🔌 Probar las fuentes de afuera» suma la Central de Deudores (con el CUIT de la AFIP, nunca el
   de un cliente) y la inflación de respaldo.
 
+## 🧾 La precisión, duodécima parte: la revisión del código, de cuándo es el precio y a quién avisarle
+
+### Lo que encontró una revisión del código con ChatGPT
+
+Cada uno se reprodujo primero con una prueba que fallaba, y después se arregló.
+
+| Dónde | Qué pasaba (medido) | Qué se hizo |
+|---|---|---|
+| `cargar_a_la_cuenta()` | El límite de crédito se miraba **antes** de tomar el candado. Un taller con $90.000 de deuda y $100.000 de límite, ocho cargos de $8.000 al mismo tiempo: **entraban los ocho y la deuda quedaba en $154.000**. | El saldo y el límite se leen adentro del candado y de la transacción (`BEGIN IMMEDIATE`), como ya hacía `pedir_al_deposito()`. Ahora entra uno solo y la deuda queda en $98.000. |
+| `pedir_al_deposito()` | El límite ya se miraba adentro, pero **el precio se leía antes de esperar el turno**: si mientras tanto otro le subía el precio (una lista nueva), el límite se miraba con el viejo. Probado: un precio de $5.000 que pasa a $50.000 con una cuenta de $10.000 de límite entraba igual. | El precio se lee adentro también. |
+| `guardar_presupuesto_mecanico()` | El doble toque ya no guardaba dos (`db_lock`), pero ese candado es de **este** proceso: otra conexión a la misma base con el mismo presupuesto sin confirmar terminaba en **dos guardados**. | Mira y guarda adentro de `transaccion()` (`BEGIN IMMEDIATE`): espera a la otra, la ve y no guarda otro. Sin clave nueva ni cambio en la base. |
+| `aplicar_medidas_deducidas()` | Una medida guardada como **texto en blanco** no se tomaba como vacía: la lista no la ofrecía y «Completar» no la llenaba. Pasa solo con la **posición**, que es texto: las 18 columnas de números ya no aceptan texto (un disparador de la base). La base real no tiene ninguna en blanco. | `medida_vacia()`: None o un texto en blanco. La usan la lista y el «Completar»; lo cargado sigue sin pisarse. |
+
+### Puntos 717 a 870
+
+| Punto | Qué se encontró | Qué se hizo |
+|---|---|---|
+| 756 y 839. De cuándo es el precio | El buscador mostraba el precio sin fecha. En la base real, **la lista de ILLINOIS es del 17/7 (87 días; 6.898 productos)**, la de MANNOL del 14/4 (181 días), la de IMPERIAL del 18/8 (55) y la de FISPA del 2/9 (40), aunque se cargaron todas el 25/9. | Abajo de los precios: «💲 Precios — **⚠️ ILLINOIS: lista del 17/07/2026 (hace 87 días)**». La fecha sale del nombre del archivo si la trae; si no, del día en que se cargó. Desde 60 días va en negrita con ⚠️. Tarda 2 ms. |
+| 867. Alertas de consecuencias | Si un par que se vendió en lugar de lo pedido después se rechaza, nada lo decía. En la base real todavía no hay ventas anotadas. | En el tablero: «📣 N ventas con un par que después se rechazó», con quién la vendió, qué se pidió, qué se llevó y por qué se rechazó. Lo rechazado antes de la venta no entra (ya se vendió como alternativa). |
+| 717 a 730. La IA | La IA lee fotos, remitos, cédulas y voz; devuelve JSON con campos fijos, lo que lee va a un formulario para revisar y nunca aprueba ni carga nada sola. Lo que se lee mal en una foto (O↔0, I↔1, 5↔S) se ofrece como «se escriben casi igual», nunca como equivalencia. **La base real no tiene ningún uso de la IA anotado**, así que comparar modelos, la deriva o el presupuesto no tienen con qué medirse todavía. | — |
+| 731 a 743. Cambios de reglas y migraciones | Las reglas son código con versión (`VERSIONES_DE_LAS_REGLAS`: quién, cuándo y por qué en cada commit); `pruebas_de_la_revision.py --reglas --linea-base` simula sobre toda la base y no deja publicar con regresiones; `pruebas_de_compatibilidad.py` es el ensayo de la migración (el programa nuevo con la base vieja y al revés), y una base se controla antes y después de restaurarla (`la_base_esta_sana()`). Volver atrás es volver el commit: la base no se toca. Un interruptor para apagar una regla en caliente no se hizo: saltearía ese control. | — |
+| 744 a 750, 768, 778, 868 y 869. Copias, recuperación, carga | Ya: la copia se verifica (y se baja y se abre), la restauración pasa por `backup()` y el control de la base, las pruebas de recuperación cortan una operación a la mitad, la de carga prueba muchos a la vez, la salud mira el disco y la mediana y el P95 del buscador. | — |
+| 751 a 755, 757 a 762, 764 a 766, 769, 770 y 776. La capa comercial | Ya: primero lo seguro y después lo que hay (novena parte), la recomendación separada de la conveniencia, la venta como alternativa, lo que suele faltar, los probablemente discontinuados, los reemplazos de código del fabricante (40 cargados), las búsquedas sin resultado, y ahora lo 🔴 que no se vende sin confirmar. Plazos de reposición y stock del proveedor no hay de dónde sacarlos. | — |
+| 771 a 777, 779 y 780 | Ya: el veto que ningún puntaje compensa, las muestras de control, las pruebas adversariales, el expediente, los cambios de las listas, la cobertura por familia (undécima parte) y no recomendar lo dudoso. | — |
+| 781 a 800. El auto | Ya: las 111.795 aplicaciones con motor y años, el VIN, el número de motor, lados y posiciones, y pedir el dato que falta. El rango de chasis y la fecha exacta de fabricación no vienen en ninguna lista. | — |
+| 801 a 820. La recepción | Ya: el remito por foto, cotejado antes de tocar el stock y sin sumar dos veces; los códigos de barras con su dígito verificador (medido: 8.372 cierran, 0 mal, 0 repetidos entre productos distintos). Lotes, cuarentena y fotos de recepción no se registran. | — |
+| 821 a 840. Errores humanos | Ya: lo que otro cambió mientras se editaba no se pisa, el doble toque, la papelera y deshacer una lista, los motivos de rechazo con nota, el texto además del color, el celular, la ayuda en cada pantalla. | — |
+| 841 a 866, 870 | Ya: el tablero por familia y por lista, la calibración, los casos sellados, el veredicto de publicación por versión, el impacto de borrar, la deriva, la cobertura y fallar cerrado. | — |
+
+Probado en `pruebas_de_las_cuentas.py` (ocho cargos a la vez), `pruebas_del_deposito.py` (el
+precio que cambia mientras espera), `pruebas_de_los_frenos.py` (10 y 13: el presupuesto desde
+otra conexión y la posición en blanco), `pruebas_de_la_precision.py` (71 y 72); 20 fallas puestas
+a mano, las 20 detectadas. En la app: la fecha de los precios en el buscador, la venta afectada
+en el tablero y el recorrido de las 32 pantallas, sin errores.
+
 ## 🔏 La precisión, undécima parte: el mismo número no es la misma pieza, vender lo 🔴 y el expediente con huella
 
 Puntos 571 a 590 y 601 a 717 de la misma revisión con ChatGPT (591 a 600 no vinieron), medidos

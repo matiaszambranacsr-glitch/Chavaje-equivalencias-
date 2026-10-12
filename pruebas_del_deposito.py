@@ -281,6 +281,27 @@ def probar(L):
     esperar("y en la cola hay uno solo de esa cuenta",
             c.execute("SELECT COUNT(*) FROM pedidos_deposito WHERE mecanico_id = ?",
                       (otro,)).fetchone()[0], 1)
+
+    # EL PRECIO TAMBIÉN SE LEE ADENTRO (lo señaló una revisión de código con ChatGPT): se leía
+    # antes de tomar el candado, y si mientras esperaba el turno alguien le subía el precio (una
+    # lista nueva), el límite se miraba con el precio viejo. Acá el candado lo tiene otro, que
+    # sube el precio de $5.000 a $50.000 mientras el pedido espera: la cuenta tiene $10.000 de
+    # límite, así que no entra.
+    ns["crear_mecanico"]("Taller Precio", "clave-de-prueba-10")
+    con_limite = c.execute("SELECT id FROM mecanicos WHERE nombre = 'Taller Precio'").fetchone()[0]
+    ns["configurar_cuenta_de_taller"](con_limite, 10000, 30, False, 0)
+    c.execute("UPDATE productos SET precio = 5000 WHERE id = ?", (junta,))
+    conn.commit()
+    resultado = []
+    hilo = threading.Thread(target=lambda: resultado.append(ns["pedir_al_deposito"](
+        junta, 1, con_limite, usuario="v", retiro_autorizado=True)[0]))
+    with ns["db_lock"]:
+        hilo.start()
+        time.sleep(0.4)
+        c.execute("UPDATE productos SET precio = 50000 WHERE id = ?", (junta,))
+        conn.commit()
+    hilo.join(timeout=30)
+    esperar("con el precio de ahora, no del que leyó antes de esperar", resultado, [False])
     return fallas
 
 

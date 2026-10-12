@@ -92,21 +92,23 @@ Las pruebas se corren como dice el README, en «Antes de subir un cambio».
 | Lo 🔴 no se anota como vendido sin confirmarlo, y lo 🔴 de seguridad no se anota nunca, ni llamando de otro lado | `bloqueo_de_venta()`, `anotar_venta_y_avisar()`, `mostrar_boton_de_venta()` | `pruebas_de_la_precision.py` (66) y en la app |
 | El historial de medidas no se corrige ni se borra | Disparadores de `historial_de_medidas` | `pruebas_de_la_precision.py` (46) |
 | Un expediente tocado después de bajarlo no pasa la verificación | `expediente_en_texto()`, `verificar_el_expediente()` | `pruebas_de_la_precision.py` (68) |
+| Lo vendido con un par que después se rechazó se ve, para avisarle al cliente | `vendido_con_lo_que_despues_se_rechazo()` | `pruebas_de_la_precision.py` (72) |
 
 ## El stock, los precios y la plata
 
 | Regla | Dónde se cuida | La prueba |
 |---|---|---|
 | Lo que otro cambió mientras se editaba (precio, stock, costo) no se pisa | `actualizar_precio_stock()` con lo mostrado, campo por campo; `valor_con_que_se_abrio()` | `pruebas_de_los_frenos.py` (15b) y en la app con dos sesiones |
-| «Completar medidas» no pisa lo cargado a mano | `aplicar_medidas_deducidas()`: completa solo lo que sigue vacío con el candado tomado | `pruebas_de_los_frenos.py` (13), `pruebas_de_la_precision.py` (44) |
+| «Completar medidas» no pisa lo cargado a mano, y una medida en blanco cuenta como vacía | `aplicar_medidas_deducidas()`: completa solo lo que sigue vacío con el candado tomado; `medida_vacia()` | `pruebas_de_los_frenos.py` (13), `pruebas_de_la_precision.py` (44) |
 | Lo apartado nunca pasa el stock | `reservar_stock()` en una transacción | `pruebas_de_carga.py` |
 | El mismo remito no suma el stock dos veces | `aplicar_carga_remito()` con huella | `pruebas_de_los_frenos.py` (14) |
 | Un pedido al depósito se entrega y se cobra una sola vez | `entregar_pedido()` | `pruebas_de_carga.py` |
-| El límite de crédito no se pasa, ni con varios pidiendo a la vez | `pedir_al_deposito()`: el límite adentro de la transacción | `pruebas_del_deposito.py` (ocho a la vez) |
+| El límite de crédito no se pasa, ni con varios pidiendo o cargando a la vez, ni con el precio de antes de esperar | `pedir_al_deposito()` y `cargar_a_la_cuenta()`: el precio, el saldo y el límite adentro de la transacción | `pruebas_del_deposito.py`, `pruebas_de_las_cuentas.py` (ocho a la vez) |
 | El saldo de una cuenta es lo entregado menos lo pagado | `estado_de_cuenta()` | `pruebas_de_carga.py` |
 | El interés por mora solo en las cuentas que lo tienen prendido, y nunca dos veces los mismos días | `cargar_el_interes_por_mora()` | `pruebas_de_las_cuentas.py` |
 | Un presupuesto guardado no cambia si después cambia un precio | Se guarda con sus precios (`items_json`) | `pruebas_de_los_frenos.py` (10) |
-| Un presupuesto no se guarda dos veces por un doble toque | `guardar_presupuesto_mecanico()` | `pruebas_de_los_frenos.py` (10) |
+| Un presupuesto no se guarda dos veces por un doble toque, ni desde otro proceso | `guardar_presupuesto_mecanico()` en `transaccion()` | `pruebas_de_los_frenos.py` (10) |
+| El buscador dice de cuándo es el precio de cada lista, y marca lo viejo | `fecha_de_la_lista()`, `texto_de_la_fecha_de_los_precios()` | `pruebas_de_la_precision.py` (71) |
 
 ## Las cuentas y los permisos
 

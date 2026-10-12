@@ -73,11 +73,14 @@ def pedir_al_deposito(producto_id, cantidad=1, mecanico_id=None, codigo_de_retir
         return False, "La cantidad no es un número."
     if not 1 <= cantidad <= CANTIDAD_MAXIMA_POR_PEDIDO:
         return False, f"La cantidad va de 1 a {CANTIDAD_MAXIMA_POR_PEDIDO}."
-    c.execute("SELECT precio FROM productos WHERE id = ?", (producto_id,))
-    prod = c.fetchone()
-    if not prod:
-        return False, "Ese producto ya no está en el catálogo."
     with db_lock, transaccion():
+        # EL PRECIO TAMBIÉN, ADENTRO: se leía antes de tomar el candado, y si mientras esperaba
+        # el turno otro le cambiaba el precio (una lista nueva), el límite se miraba con el viejo
+        # (lo señaló una revisión de código con ChatGPT).
+        c.execute("SELECT precio FROM productos WHERE id = ?", (producto_id,))
+        prod = c.fetchone()
+        if not prod:
+            return False, "Ese producto ya no está en el catálogo."
         # EL LÍMITE, ADENTRO DEL CANDADO. Se miraba antes de tomarlo: con $20.000 disponibles,
         # dos vendedores pidiendo $15.000 cada uno al mismo tiempo veían los dos «hay lugar» y
         # entraban los dos (lo señaló una revisión con ChatGPT). Mirado acá, el segundo ya ve el

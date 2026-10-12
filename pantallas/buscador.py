@@ -1067,6 +1067,15 @@ if pagina == PAGINAS[0]:
                                     + "): revisalos antes de cotizar. Se corrige con el "
                                     "coeficiente de la lista, en "
                                     f"{miga_hasta('Marcas')} → 📏 Coeficiente de la lista.")
+                            # DE CUÁNDO SON ESOS PRECIOS. Ver texto_de_la_fecha_de_los_precios().
+                            try:
+                                _fecha_precios = texto_de_la_fecha_de_los_precios(
+                                    f.get("Marca") for f in res if f.get("Precio"))
+                            except sqlite3.Error as _err:
+                                anotar_error("texto_de_la_fecha_de_los_precios", _err)
+                                _fecha_precios = ""
+                            if _fecha_precios:
+                                st.caption(_fecha_precios)
                             # UNA MARCA QUE VIENE FALLADA más que antes: se avisa al venderla.
                             # No cambia el veredicto: es calidad, no equivalencia. Ver
                             # calidad_por_marca().

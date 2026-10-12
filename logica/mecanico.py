@@ -1183,7 +1183,11 @@ def guardar_presupuesto_mecanico(mecanico_id, cliente_nombre, items, mano_obra):
     una revisión con ChatGPT)."""
     total = sum(it["precio"] * it["cantidad"] for it in items) + mano_obra
     items_json = json.dumps(items, ensure_ascii=False)
-    with db_lock:
+    # Con transaccion() (BEGIN IMMEDIATE) y no solo con db_lock, que es de ESTE proceso: si
+    # otro proceso guarda el mismo presupuesto, este espera a que termine y lo ve, en vez de
+    # mirar, no encontrar nada y guardar otro (lo señaló una revisión de código con ChatGPT;
+    # ver pruebas_de_los_frenos.py, 10).
+    with db_lock, transaccion():
         c.execute("""SELECT 1 FROM presupuestos_mecanico
                      WHERE mecanico_id = ? AND COALESCE(cliente_nombre, '') = ? AND items_json = ?
                        AND mano_obra = ? AND creado_en >= datetime('now', '-2 minutes')""",
@@ -1195,7 +1199,6 @@ def guardar_presupuesto_mecanico(mecanico_id, cliente_nombre, items, mano_obra):
             "VALUES (?, ?, ?, ?, ?)",
             (mecanico_id, cliente_nombre.strip(), items_json, mano_obra, total)
         )
-        conn.commit()
     return total
 
 
@@ -1393,14 +1396,21 @@ def cargar_a_la_cuenta(mecanico_id, concepto, importe, codigo_de_retiro="", usua
         return False, "El importe no es un número."
     if importe <= 0:
         return False, "El importe tiene que ser mayor que cero."
-    config = configuracion_de_cuenta(mecanico_id)
-    estado = estado_de_cuenta(mecanico_id)
-    if config["limite"] and estado["saldo"] + importe > config["limite"] and not pasar_el_limite:
-        return False, (f"Pasa el límite de crédito: debe ${miles(estado['saldo'], 0)}, el límite es "
-                       f"${miles(config['limite'], 0)} y esto suma ${miles(importe, 0)}.")
-    vence = (date.today() + timedelta(days=config["dias_de_plazo"])).isoformat()
     with db_lock:
         with transaccion():
+            # EL LÍMITE, ADENTRO DEL CANDADO Y DE LA TRANSACCIÓN (BEGIN IMMEDIATE), como en
+            # pedir_al_deposito(). Se miraba antes: con $90.000 de deuda y $100.000 de límite,
+            # ocho cargos de $8.000 al mismo tiempo veían todos «hay lugar» y entraban todos
+            # (medido: la deuda quedaba en $154.000). Lo señaló una revisión de código con
+            # ChatGPT. Ver pruebas_de_las_cuentas.py.
+            config = configuracion_de_cuenta(mecanico_id)
+            estado = estado_de_cuenta(mecanico_id)
+            if (config["limite"] and estado["saldo"] + importe > config["limite"]
+                    and not pasar_el_limite):
+                return False, (f"Pasa el límite de crédito: debe ${miles(estado['saldo'], 0)}, el "
+                               f"límite es ${miles(config['limite'], 0)} y esto suma "
+                               f"${miles(importe, 0)}.")
+            vence = (date.today() + timedelta(days=config["dias_de_plazo"])).isoformat()
             codigo_id = None
             if config["pide_codigo"]:
                 codigo_id = _codigo_de_retiro_vigente(mecanico_id, codigo_de_retiro)

@@ -13,6 +13,7 @@ De la revisión con ChatGPT (puntos 59 a 78):
 Corre en una carpeta temporal: nunca toca la base de trabajo, ni sale a internet (lo que
 hablaría con GitHub se reemplaza por funciones de prueba).
 """
+import json
 import os
 import shutil
 import sys
@@ -226,6 +227,27 @@ def probar(L):
     ns["guardar_presupuesto_mecanico"](taller, "Juan", items, 800)
     esperar("doble toque: uno solo; otro distinto, sí",
             c.execute("SELECT COUNT(*) FROM presupuestos_mecanico").fetchone()[0], 2)
+    # Y desde OTRO PROCESO (lo señaló una revisión de código con ChatGPT): db_lock es de este
+    # proceso. Otra conexión a la misma base guarda el mismo presupuesto y todavía no lo
+    # confirmó; el de acá tiene que esperarla y verlo, no mirar, no encontrar nada y guardar otro.
+    import sqlite3 as _sqlite3
+    import threading as _threading
+    import time as _time
+    _items = json.dumps(items, ensure_ascii=False)
+    _otro = _sqlite3.connect(ns["DB_PATH"], timeout=8, isolation_level=None)
+    _otro.execute("BEGIN IMMEDIATE")
+    _otro.execute("INSERT INTO presupuestos_mecanico (mecanico_id, cliente_nombre, items_json, "
+                  "mano_obra, total) VALUES (?, 'Ana', ?, 300, 2300)", (taller, _items))
+    _hilo = _threading.Thread(target=ns["guardar_presupuesto_mecanico"],
+                              args=(taller, "Ana", items, 300))
+    _hilo.start()
+    _time.sleep(0.4)
+    _otro.execute("COMMIT")
+    _hilo.join(timeout=30)
+    _otro.close()
+    esperar("el mismo presupuesto desde otro proceso: uno solo",
+            c.execute("SELECT COUNT(*) FROM presupuestos_mecanico WHERE cliente_nombre = 'Ana'")
+            .fetchone()[0], 1)
     total_antes = [p["Total"] if "Total" in p else p.get("total")
                    for p in ns["listar_presupuestos_mecanico"](taller)]
     c.execute("UPDATE productos SET precio = precio * 2")
@@ -273,6 +295,21 @@ def probar(L):
                             (pid,)).fetchone())), (1, (40, 7)))
     esperar("si ya está todo cargado, no cuenta como completado",
             ns["aplicar_medidas_deducidas"]([fila]), 0)
+    # Una medida guardada como texto vacío es una medida vacía (lo señaló una revisión de código
+    # con ChatGPT): ni la lista la ofrecía ni «Completar» la llenaba. Pasa solo con la posición,
+    # que es texto: en las columnas de números la base no acepta texto (ver
+    # CAMPOS_QUE_SON_NUMEROS). La base real no tiene ninguna; una carga a mano la puede dejar.
+    c.execute("UPDATE productos SET posicion = '  ', descripcion = 'RETEN 35X52X7 DELANTERO', "
+              "diametro_externo = 52, espesor = 1, cantidad_estrias = 1, cantidad_vias = 1, "
+              "cantidad_canales = 1 WHERE id = ?", (pid,))
+    conn.commit()
+    _ofrecidos = {f["_id"]: f["_nuevas"] for f in ns["productos_con_medidas_deducibles"](
+        limite=100000)}
+    esperar("la lista ofrece la posición en blanco", _ofrecidos.get(pid), {"posicion": "DELANTERA"})
+    fila = {"_id": pid, "_nuevas": {"posicion": "DELANTERA", "diametro_interno": 35}}
+    esperar("y «Completar» la llena, sin pisar lo cargado", (ns["aplicar_medidas_deducidas"]([fila]),
+            tuple(c.execute("SELECT posicion, diametro_interno FROM productos WHERE id = ?",
+                            (pid,)).fetchone())), (1, ("DELANTERA", 40)))
 
     # 14. El mismo remito no suma el stock dos veces.
     c.execute("UPDATE productos SET stock = 5 WHERE id = ?", (pid,))

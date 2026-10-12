@@ -1733,6 +1733,61 @@ def probar(L):
               "VALUES (?, ?, 'x', 'REDUNDANTES · 03/10')", (min(cb_b, _red1[3]), max(cb_b, _red1[3])))
     conn.commit()
     esperar("ya unidos", ns["cuantos_ya_estan_unidos"]("REDUNDANTES · 03/10"), 1)
+
+    # 71. De cuándo es el precio: la fecha del nombre de la lista, o el día que se cargó.
+    from datetime import date as _date
+    _fl = ns["fecha_de_la_lista"]
+    esperar("del nombre del archivo", _fl("ILLINOIS 17 07 2026.xlsx", "2026-09-25 20:29:55"),
+            (_date(2026, 7, 17), "de la lista"))
+    esperar("con el año en dos cifras", _fl("MANNOL ADITIVOS OK 14 04 26 (1).xlsx",
+                                            "2026-09-25 17:47:34"), (_date(2026, 4, 14), "de la lista"))
+    esperar("sin fecha en el nombre, el día de la carga", _fl("11680359842.xlsx", "2026-09-25 20:28:58"),
+            (_date(2026, 9, 25), "cargada"))
+    esperar("una fecha después de cargarla no es la de la lista",
+            _fl("LISTA 30 12 2026.xlsx", "2026-09-25 10:00:00"), (_date(2026, 9, 25), "cargada"))
+    esperar("ni una que no existe", _fl("LISTA 31 02 2026.xlsx", "2026-09-25 10:00:00"),
+            (_date(2026, 9, 25), "cargada"))
+    esperar("si la primera no existe, mira la siguiente",
+            _fl("LISTA 31 02 2026 - 15 07 2026.xlsx", "2026-09-25 10:00:00"),
+            (_date(2026, 7, 15), "de la lista"))
+    esperar("sin nada, nada", _fl("x.xlsx", None), (None, ""))
+    c.execute("INSERT INTO importaciones (marca, archivo, filas_cargadas, filas_omitidas, fecha) "
+              "VALUES ('VIEJA', 'VIEJA 01 07 2026.xlsx', 1, 0, '2026-09-25 10:00:00'), "
+              "('VIEJA', 'VIEJA 01 09 2026.xlsx', 1, 0, '2026-09-30 10:00:00'), "
+              "('NUEVA', 'nueva.xlsx', 1, 0, '2026-10-10 10:00:00'), "
+              "('ANTIGUA', 'ANTIGUA 01 06 2026.xlsx', 1, 0, '2026-06-02 10:00:00')")
+    conn.commit()
+    esperar("la línea del buscador, con lo viejo marcado",
+            ns["texto_de_la_fecha_de_los_precios"](["NUEVA", "VIEJA", "ANTIGUA", "SUELTA", None, "NUEVA"],
+                                                   hoy=_date(2026, 10, 12)),
+            "💲 Precios — **⚠️ ANTIGUA: lista del 01/06/2026 (hace 133 días)** · NUEVA: cargada el "
+            "10/10/2026 (hace 2 días) · SUELTA: sin fecha (no entró por una lista) · VIEJA: lista "
+            "del 01/09/2026 (hace 41 días)")
+    esperar("sin marcas con precio, nada", ns["texto_de_la_fecha_de_los_precios"]([]), "")
+
+    # 72. Lo vendido con un par que después se rechazó: a quién avisarle.
+    vd_a = producto("VD1", "FILTRO DE ACEITE FIAT UNO", fispa)
+    vd_b = producto("IVD1", "FILTRO DE ACEITE FIAT UNO", illinois)
+    vd_c = producto("IVD2", "FILTRO DE ACEITE FIAT UNO", illinois)
+    vd_d = producto("VD1", "FILTRO DE ACEITE FIAT UNO", illinois)   # el mismo número, otra marca
+    c.execute("INSERT INTO ventas_registradas (producto_id, termino_pedido, codigo_pedido_clean, "
+              "usuario, fecha) VALUES (?, 'VD1', 'VD1', 'ana', '2026-10-01 10:00:00'), "
+              "(?, 'VD1', 'VD1', 'beto', '2026-10-06 10:00:00'), "
+              "(?, 'VD1', 'VD1', 'carla', '2026-10-01 10:00:00'), "
+              "(?, 'VD1', 'VD1', 'dani', '2026-10-01 10:00:00'), "
+              "(?, 'VD1', 'VD1', 'eli', '2026-10-01 10:00:00')", (vd_b, vd_b, vd_c, vd_a, vd_d))
+    c.execute("INSERT OR REPLACE INTO equivalencias_revisadas (producto_a_id, producto_b_id, decision, "
+              "fecha) VALUES (?, ?, 'rechazada', '2026-10-05 10:00:00')", (min(vd_a, vd_d), max(vd_a, vd_d)))
+    c.execute("INSERT OR REPLACE INTO equivalencias_revisadas (producto_a_id, producto_b_id, decision, "
+              "fecha, motivo) VALUES (?, ?, 'rechazada', '2026-10-05 10:00:00', 'variante')",
+              (min(vd_a, vd_b), max(vd_a, vd_b)))
+    c.execute("INSERT OR REPLACE INTO equivalencias_revisadas (producto_a_id, producto_b_id, decision, "
+              "fecha) VALUES (?, ?, 'ok', '2026-10-05 10:00:00')", (min(vd_a, vd_c), max(vd_a, vd_c)))
+    conn.commit()
+    _afect = [(f["Vendió"], f["Se llevó"], f["Pidió"], f["Por qué"])
+              for f in ns["vendido_con_lo_que_despues_se_rechazo"]()]
+    esperar("solo la venta de antes del rechazo, de un par rechazado y en lugar de lo pedido",
+            _afect, [("ana", "ILLINOIS IVD1", "VD1", "📐 Otra medida o variante")])
     return fallas
 
 
