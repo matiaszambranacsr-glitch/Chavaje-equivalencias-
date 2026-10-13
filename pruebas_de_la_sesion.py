@@ -69,6 +69,27 @@ def probar():
                                           at.session_state["admin_nombre"]), ("admin", "duenio"))
     esperar("el dueño no ve el presupuesto de Ana", "carrito" in at.session_state
             and bool(at.session_state["carrito"]), False)
+
+    # 2b. Ir a otra pantalla y volver no borra lo que se estaba haciendo (lo señaló una
+    # revisión con Gemini): la caja de búsqueda volvía vacía, con los resultados de antes abajo.
+    # Ver recordar_lo_elegido_al_cambiar_de_pantalla().
+    at.session_state["pagina_actual"] = "🔍 Buscador"
+    at.run()
+    at.text_input(key="busqueda_input").set_value("W712/94")
+    [b for b in at.button if "Buscar Equivalencias" in b.label][0].click().run()
+    at.session_state["pagina_actual"] = "📊 Estadísticas"
+    at.run()
+    at.radio(key="sub_stats").set_value("📌 Para pedir").run()
+    for pagina in ("🗂️ Administrar", "🛠️ Modo Mecánico", "🔍 Buscador"):
+        at.session_state["pagina_actual"] = pagina
+        at.run()
+    esperar("al volver al buscador, lo escrito sigue ahí",
+            at.text_input(key="busqueda_input").value, "W712/94")
+    at.session_state["pagina_actual"] = "📊 Estadísticas"
+    at.run()
+    esperar("y en Estadísticas, la solapa que estaba", at.radio(key="sub_stats").value,
+            "📌 Para pedir")
+    esperar("sin errores al ir y venir", [e.value for e in at.exception], [])
     [b for b in at.button if b.label == "Salir"][0].click().run()
 
     # 3. Ana vuelve a entrar; mientras está adentro le cambian el rol, y después la desactivan.

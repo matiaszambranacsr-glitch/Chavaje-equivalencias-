@@ -401,10 +401,7 @@ if pagina == PAGINAS[3]:
                                 "página con JavaScript y no se puede leer así.")
                         if st.button("💾 Guardar el portal", key="portal_nuevo_guardar",
                                      type="primary" if _anda else "secondary"):
-                            with db_lock:
-                                c.execute("UPDATE marcas SET url_ficha_template = ? WHERE id = ?",
-                                          (_nuevo["plantilla"], _nuevo["marca_id"]))
-                                conn.commit()
+                            guardar_plantilla_de_ficha(_nuevo["marca_id"], _nuevo["plantilla"])
                             olvidar_sesion_de_catalogo(_nuevo["nombre"])
                             _SESIONES_PORTAL.pop(_nuevo["nombre"], None)
                             st.session_state.pop("portal_nuevo", None)

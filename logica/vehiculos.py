@@ -9,6 +9,9 @@ se usan sin importarlos los nombres que definen las partes anteriores."""
 # ============================================================
 def get_or_create_vehiculo(patente, cliente_nombre="", cliente_telefono="", marca_auto="", modelo_auto="",
                             km_actual=None, anio="", motorizacion="", vin=""):
+    """La ficha del vehículo, nueva o actualizada. Lleva datos del cliente: solo empleados (las
+    dos pantallas que la llaman ya lo piden; esto es la segunda barrera, ver exigir_nivel())."""
+    exigir_nivel("empleado", "guardar la ficha de un vehículo")
     patente = patente.strip().upper()
     vin = re.sub(r'\s', '', (vin or "").strip().upper())
     with db_lock:
@@ -53,6 +56,23 @@ def get_or_create_vehiculo(patente, cliente_nombre="", cliente_telefono="", marc
             anotar_error("get_or_create_vehiculo", _err)
             pass
     return vid
+
+
+def guardar_numero_de_motor(patente, numero):
+    """El número de motor de la ficha del vehículo. Aparte de get_or_create_vehiculo(), que ya
+    tiene nueve parámetros; antes lo escribían a mano las dos pantallas que lo piden (Vehículos y
+    la cédula del Modo Mecánico), con el mismo UPDATE copiado y sin mirar el permiso (lo señaló
+    una revisión con Gemini: «la lógica, en logica/; las pantallas, solo la interfaz»)."""
+    exigir_nivel("empleado", "guardar el número de motor de un vehículo")
+    numero, patente = (numero or "").strip(), (patente or "").strip()
+    if not numero or not patente:
+        return False
+    with db_lock:
+        c.execute("UPDATE vehiculos SET numero_motor = ? WHERE UPPER(patente) = UPPER(?)",
+                  (numero, patente))
+        cambio = c.rowcount > 0
+        conn.commit()
+    return cambio
 
 
 def enseniar_motor_vin(wmi, codigo, motor, notas=None):

@@ -1184,6 +1184,17 @@ def plantilla_desde_un_ejemplo(url_ejemplo, codigos):
                     "de la ficha de UN producto que esté en tu lista, o escribí el código.")
 
 
+def guardar_plantilla_de_ficha(marca_id, plantilla):
+    """El link de la ficha de una marca, con «{codigo}» donde va el código (None la borra).
+    Lo escribían a mano dos pantallas (Marcas y «Encontrar el portal»), con el mismo UPDATE y sin
+    mirar el permiso. Ver url_de_la_ficha()."""
+    exigir_nivel("empleado", "guardar el link de la ficha de una marca")
+    with db_lock:
+        c.execute("UPDATE marcas SET url_ficha_template = ? WHERE id = ?",
+                  (plantilla or None, marca_id))
+        conn.commit()
+
+
 def get_or_create_marca(nombre, tipo="PROVEEDOR"):
     nombre = nombre.strip().upper()
     c.execute("INSERT OR IGNORE INTO marcas (nombre, tipo) VALUES (?, ?)", (nombre, tipo))

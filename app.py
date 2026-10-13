@@ -382,6 +382,7 @@ _corte("sesión y encabezado")
 # navegación: ver «NAVEGACIÓN: DÓNDE ESTÁ CADA COSA».
 if st.session_state.get("pagina_actual") not in PAGINAS:
     st.session_state["pagina_actual"] = PAGINAS[0]
+recordar_lo_elegido_al_cambiar_de_pantalla()
 
 # El menú va ANTES que los avisos del día. Iba después, y con cuatro avisos abiertos quedaba
 # a media pantalla en TODAS las secciones: para pasar de Administrar a Estadísticas había que

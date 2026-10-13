@@ -830,50 +830,18 @@ if pagina == PAGINAS[2]:
                                             repetidos_con_otro_precio.append(
                                                 f"{raw_p} ({formato_precio(_antes_en_lista)} y {formato_precio(precio_fila)})")
                                         _precio_en_esta_lista.setdefault(pid_nuevo, precio_fila)
-                                    if precio_fila is not None or stock_fila is not None:
-                                        c.execute("SELECT precio FROM productos WHERE id = ?", (pid_nuevo,))
-                                        _f = c.fetchone()
-                                        precio_viejo = _f["precio"] if _f else None
-                                        # Si el precio guardado quedó en 0 (una lista vieja que lo
-                                        # pisó), el freno se compara con el último precio de
-                                        # verdad: si no, cualquier número pasaba sin mirar.
-                                        precio_ref = precio_viejo
-                                        if precio_fila is not None and not (precio_viejo and precio_viejo > 0):
-                                            c.execute("SELECT precio FROM historial_precios "
-                                                      "WHERE producto_id = ? AND precio > 0 "
-                                                      "ORDER BY id DESC LIMIT 1", (pid_nuevo,))
-                                            _h = c.fetchone()
-                                            if _h:
-                                                precio_ref = _h["precio"]
-                                        raro, motivo = salto_de_precio_sospechoso(
-                                            precio_ref, precio_fila, tope_salto
-                                        )
-                                        if raro:
-                                            # El producto se carga igual; lo único que no se pisa
-                                            # es el precio, para no cotizar con un número roto.
-                                            precios_frenados.append({
-                                                "Código": raw_p, "Descripción": (desc or "")[:60],
-                                                "Precio actual": precio_ref,
-                                                "Precio de la lista": precio_fila,
-                                                "Motivo": motivo,
-                                                "_id": pid_nuevo,
-                                            })
-                                            if stock_fila is not None:
-                                                c.execute("UPDATE productos SET stock = ? WHERE id = ?",
-                                                          (int(stock_fila), pid_nuevo))
-                                        else:
-                                            if precio_fila is not None and precio_viejo != precio_fila:
-                                                c.execute("INSERT INTO historial_precios (producto_id, precio) "
-                                                          "VALUES (?, ?)", (pid_nuevo, precio_fila))
-                                                precios_actualizados += 1
-                                            c.execute(
-                                                "UPDATE productos SET "
-                                                "precio = COALESCE(?, precio), stock = COALESCE(?, stock) "
-                                                "WHERE id = ?",
-                                                (precio_fila,
-                                                 int(stock_fila) if stock_fila is not None else None,
-                                                 pid_nuevo)
-                                            )
+                                    # El freno de saltos: ver poner_precio_y_stock_de_la_lista().
+                                    _frenado, _cambio = poner_precio_y_stock_de_la_lista(
+                                        pid_nuevo, precio_fila, stock_fila, tope_salto)
+                                    precios_actualizados += _cambio
+                                    if _frenado:
+                                        precios_frenados.append({
+                                            "Código": raw_p, "Descripción": (desc or "")[:60],
+                                            "Precio actual": _frenado[0],
+                                            "Precio de la lista": precio_fila,
+                                            "Motivo": _frenado[1],
+                                            "_id": pid_nuevo,
+                                        })
 
                             if not ids_prov:
                                 omitidos += 1
@@ -1269,17 +1237,11 @@ if pagina == PAGINAS[2]:
                                       key="confirmar_precios_frenados")
             if _cf1.button(f"💲 Aplicar igual esos {miles(len(_filas_fr))} precios",
                            disabled=not _revisado, key="aplicar_precios_frenados"):
-                with db_lock, transaccion():
-                    for f in _filas_fr:
-                        if f["Precio de la lista"] is not None:
-                            c.execute("INSERT INTO historial_precios (producto_id, precio) "
-                                      "VALUES (?, ?)", (f["_id"], f["Precio de la lista"]))
-                            c.execute("UPDATE productos SET precio = ? WHERE id = ?",
-                                      (f["Precio de la lista"], f["_id"]))
+                _aplicados = aplicar_precios_frenados(_filas_fr)
                 st.session_state.pop("precios_frenados_de_la_carga", None)
                 st.session_state.pop("confirmar_precios_frenados", None)
                 invalidar_salud()
-                st.success(f"💲 Se aplicaron {miles(len(_filas_fr))} precio(s).")
+                st.success(f"💲 Se aplicaron {miles(_aplicados)} precio(s).")
             elif _cf2.button("🙈 Dejar los precios como estaban", key="descartar_precios_frenados"):
                 st.session_state.pop("precios_frenados_de_la_carga", None)
                 st.rerun()

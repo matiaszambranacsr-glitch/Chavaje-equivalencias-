@@ -265,14 +265,8 @@ if pagina == PAGINAS[7]:
                                 get_or_create_vehiculo(
                                     _f_dom, cliente_nombre=_f_cli, marca_auto=_f_mar,
                                     modelo_auto=_f_mod, anio=_f_anio, vin=_f_vin)
-                                # El número de motor va aparte, igual que en la ficha de arriba:
-                                # get_or_create_vehiculo() ya tiene ocho parámetros.
-                                if _f_mot.strip():
-                                    with db_lock:
-                                        c.execute("""UPDATE vehiculos SET numero_motor = ?
-                                                     WHERE UPPER(patente) = UPPER(?)""",
-                                                  (_f_mot.strip(), _f_dom.strip()))
-                                        conn.commit()
+                                # El número de motor va aparte: ver guardar_numero_de_motor().
+                                guardar_numero_de_motor(_f_dom, _f_mot)
                                 st.session_state.pop("cedula_leida", None)
                                 avisar("success", f"Ficha de **{_f_dom}** guardada. Ahora la patente "
                                                   "sola te trae todo.")

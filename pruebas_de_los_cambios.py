@@ -116,13 +116,17 @@ def probar(L):
         # lo que se mira es si deja entrar, no lo que hace.
         _de_admin = (("eliminar un producto", ns["borrar_producto_con_papelera"], (999999,)),
                      ("deshacer una importación", ns["deshacer_importacion"], ("NO-EXISTE",)),
-                     ("fusionar marcas", ns["fusionar_marcas"], (999998, 999999)))
+                     ("fusionar marcas", ns["fusionar_marcas"], (999998, 999999)),
+                     ("aplicar los precios frenados", ns["aplicar_precios_frenados"], ([],)))
         _de_empleado = (("aprobar", ns["aprobar_pendientes"], ("NO-EXISTE", [])),
                         ("registrar un pago", ns["registrar_pago_de_cuenta"], (999999, 0, "Efectivo")),
                         ("un remito", ns["aplicar_carga_remito"], ([],)),
                         ("cortar un vínculo", ns["eliminar_equivalencia"], (999998, 999999, False)),
                         ("cortar los vínculos", ns["cortar_todos_los_vinculos"], (999999, False)),
-                        ("restaurar de la papelera", ns["restaurar_de_papelera"], (999999,)))
+                        ("restaurar de la papelera", ns["restaurar_de_papelera"], (999999,)),
+                        ("la ficha de un vehículo", ns["get_or_create_vehiculo"], ("AB123CD",)),
+                        ("el número de motor", ns["guardar_numero_de_motor"], ("AB123CD", "M1")),
+                        ("el link de una marca", ns["guardar_plantilla_de_ficha"], (999999, None)))
         for nivel, entran in (("", ()), ("operador", ("empleado",)),
                               ("admin", ("empleado", "admin"))):
             g["_nivel_de_quien_esta_adentro"] = lambda n=nivel: n
@@ -134,6 +138,54 @@ def probar(L):
                     except PermissionError:
                         entro = False
                     esperar(f"nivel «{nivel or 'invitado'}»: {nombre}", entro, de in entran)
+        # Y lo que guardan hace lo que dice (antes lo escribían las pantallas a mano).
+        g["_nivel_de_quien_esta_adentro"] = lambda: "operador"
+        esperar("el número de motor, con la patente en minúsculas",
+                (ns["guardar_numero_de_motor"]("ab123cd", " K9K-123 "),
+                 c.execute("SELECT numero_motor FROM vehiculos WHERE patente = 'AB123CD'").fetchone()[0],
+                 ns["guardar_numero_de_motor"]("ZZ999ZZ", "X")), (True, "K9K-123", False))
+        _marca_link = c.execute("SELECT id FROM marcas LIMIT 1").fetchone()[0]
+        ns["guardar_plantilla_de_ficha"](_marca_link, "https://x.example/{codigo}")
+        esperar("el link de la marca", c.execute("SELECT url_ficha_template FROM marcas WHERE id = ?",
+                                                 (_marca_link,)).fetchone()[0], "https://x.example/{codigo}")
+        ns["guardar_plantilla_de_ficha"](_marca_link, "")
+        esperar("y vacío lo borra", c.execute("SELECT url_ficha_template FROM marcas WHERE id = ?",
+                                              (_marca_link,)).fetchone()[0], None)
+        # El freno de precios de la importación (estaba adentro del ciclo, en la pantalla).
+        _m_fr = ns["get_or_create_marca"]("PRUEBA FRENO")
+        poner = ns["poner_precio_y_stock_de_la_lista"]
+        with ns["db_lock"], ns["transaccion"]():
+            _p_fr = ns["get_or_create_producto"]("FR-1", "FR1", "Filtro de prueba", _m_fr)
+            _r = [poner(_p_fr, 100.0, None, 200),       # sin precio antes: entra
+                  poner(_p_fr, 120.0, 5, 200),          # +20 %: entra, con el stock
+                  poner(_p_fr, 12000.0, 7, 200),        # cien veces: se frena; el stock no
+                  poner(_p_fr, None, None, 200),        # la fila no trae nada
+                  poner(_p_fr, 120.0, None, 200)]       # el mismo precio: no va al historial
+        _precio_stock = lambda: tuple(c.execute("SELECT precio, stock FROM productos WHERE id = ?",
+                                                (_p_fr,)).fetchone())
+        _historial = lambda: [r[0] for r in c.execute(
+            "SELECT precio FROM historial_precios WHERE producto_id = ? ORDER BY id", (_p_fr,))]
+        esperar("el freno de precios: qué entra y qué se frena",
+                [(f[0] if f else None, cambio) for f, cambio in _r],
+                [(None, True), (None, True), (120.0, False), (None, False), (None, False)])
+        esperar("y dice por qué", "cien veces" in (_r[2][0] or ("", ""))[1], True)
+        esperar("el precio frenado no se pisa, el stock sí", _precio_stock(), (120.0, 7))
+        esperar("el historial, sin repetidos", _historial(), [100.0, 120.0])
+        # Un precio que quedó en 0 se compara con el último de verdad, no con el 0.
+        c.execute("UPDATE productos SET precio = 0 WHERE id = ?", (_p_fr,))
+        with ns["db_lock"], ns["transaccion"]():
+            _r0 = poner(_p_fr, 12000.0, None, 200)
+        esperar("con el precio en 0, se compara con el del historial", _r0[0] and _r0[0][0], 120.0)
+        g["_nivel_de_quien_esta_adentro"] = lambda: "admin"
+        esperar("aplicar igual lo frenado: solo lo que trae precio",
+                (ns["aplicar_precios_frenados"]([{"_id": _p_fr, "Precio de la lista": 12000.0},
+                                                {"_id": _p_fr, "Precio de la lista": None}]),
+                 _precio_stock()[0], _historial()[-1]), (1, 12000.0, 12000.0))
+        # Se saca lo creado: más abajo se cuentan los productos y las marcas.
+        c.execute("DELETE FROM historial_precios WHERE producto_id = ?", (_p_fr,))
+        c.execute("DELETE FROM productos WHERE id = ?", (_p_fr,))
+        c.execute("DELETE FROM marcas WHERE id = ?", (_m_fr,))
+        ns["conn"].commit()
         g["_nivel_de_quien_esta_adentro"] = lambda: ""
         try:
             ns["eliminar_usuario"](eva)

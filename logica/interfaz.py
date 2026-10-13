@@ -151,6 +151,28 @@ PARA_QUE_SIRVE_LA_SOLAPA = {
 }
 
 
+# Lo que tiene que seguir ahí al volver a una pantalla: lo escrito en el buscador, sus
+# filtros, y en qué solapa estabas. Streamlit borra lo que tenía un campo en cuanto una pasada
+# no lo dibuja, y solo se dibuja la pantalla que estás mirando: ir a Estadísticas y volver
+# dejaba la caja de búsqueda vacía con los resultados de antes abajo, sin decir de qué eran, y
+# los filtros y la solapa en lo de fábrica (lo señaló una revisión con Gemini; probado). Los
+# resultados no se perdían: viven en la sesión con otro nombre (ultima_busqueda_codigo).
+# «Salir» los borra igual, como todo (ver cerrar_sesion()).
+CAMPOS_QUE_SE_RECUERDAN_AL_CAMBIAR_DE_PANTALLA = (
+    "busqueda_input", "texto_input", "modo_busqueda", "marca_filtro_busqueda",
+    "saltos_busqueda", "solo_confiables", "filtro_marca_texto", "sub_mantenimiento",
+    *(clave for _solapas, clave in SOLAPAS_DE_LA_PAGINA.values()))
+
+
+def recordar_lo_elegido_al_cambiar_de_pantalla():
+    """Lo que dice la documentación de Streamlit para que no lo borre: volver a ponerle a cada
+    campo su propio valor al principio de cada pasada, antes de dibujar nada. Así deja de ser
+    «lo que tenía el campo» y pasa a ser algo guardado en la sesión, que no se borra solo."""
+    for clave in CAMPOS_QUE_SE_RECUERDAN_AL_CAMBIAR_DE_PANTALLA:
+        if clave in st.session_state:
+            st.session_state[clave] = st.session_state[clave]
+
+
 def elegir_solapa(pagina):
     """Las solapas de una pantalla, con el renglón de para qué sirve la elegida. Devuelve la
     elegida. Las tres pantallas con solapas repetían las mismas cuatro líneas —validar lo que

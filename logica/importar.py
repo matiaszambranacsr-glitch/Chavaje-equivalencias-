@@ -663,6 +663,63 @@ def salto_de_precio_sospechoso(precio_viejo, precio_nuevo, tope_pct=200):
     return False, None
 
 
+def poner_precio_y_stock_de_la_lista(producto_id, precio, stock, tope_salto):
+    """El precio y el stock que trae una fila de la lista, con el freno de saltos. Devuelve
+    (frenado, cambio): frenado es (precio con que se comparó, motivo) si el precio NO se pisó
+    —el stock sí—; cambio, si el precio cambió (va al historial).
+
+    Estaba adentro del ciclo de la importación, en la pantalla (lo señaló una revisión con
+    Gemini: «la lógica, en logica/»). El candado lo toma quien la llama (la importación ya lo
+    tiene). La transacción es la de la importación: adentro de otra, transaccion() no abre una
+    nueva; suelta, el historial y el precio van juntos."""
+    if precio is None and stock is None:
+        return None, False
+    with transaccion():
+        c.execute("SELECT precio FROM productos WHERE id = ?", (producto_id,))
+        _f = c.fetchone()
+        precio_viejo = _f["precio"] if _f else None
+        # Si el precio guardado quedó en 0 (una lista vieja que lo pisó), el freno se compara con
+        # el último precio de verdad: si no, cualquier número pasaba sin mirar.
+        precio_ref = precio_viejo
+        if precio is not None and not (precio_viejo and precio_viejo > 0):
+            c.execute("SELECT precio FROM historial_precios WHERE producto_id = ? AND precio > 0 "
+                      "ORDER BY id DESC LIMIT 1", (producto_id,))
+            _h = c.fetchone()
+            if _h:
+                precio_ref = _h["precio"]
+        raro, motivo = salto_de_precio_sospechoso(precio_ref, precio, tope_salto)
+        if raro:
+            # El producto se carga igual; lo único que no se pisa es el precio, para no cotizar con
+            # un número roto.
+            if stock is not None:
+                c.execute("UPDATE productos SET stock = ? WHERE id = ?", (int(stock), producto_id))
+            return (precio_ref, motivo), False
+        cambio = precio is not None and precio_viejo != precio
+        if cambio:
+            c.execute("INSERT INTO historial_precios (producto_id, precio) VALUES (?, ?)",
+                      (producto_id, precio))
+        c.execute("UPDATE productos SET precio = COALESCE(?, precio), stock = COALESCE(?, stock) "
+                  "WHERE id = ?", (precio, int(stock) if stock is not None else None, producto_id))
+        return None, cambio
+
+
+def aplicar_precios_frenados(frenados):
+    """«💲 Aplicar igual» los precios que frenó la importación, después de que alguien los
+    miró: cada uno va al historial y queda como precio. Todo o nada. Lo hacía la pantalla, sin
+    volver a mirar el permiso; cargar listas es del administrador."""
+    exigir_nivel("admin", "aplicar los precios que frenó la importación")
+    aplicados = 0
+    with db_lock, transaccion():
+        for f in frenados:
+            if f.get("Precio de la lista") is not None:
+                c.execute("INSERT INTO historial_precios (producto_id, precio) VALUES (?, ?)",
+                          (f["_id"], f["Precio de la lista"]))
+                c.execute("UPDATE productos SET precio = ? WHERE id = ?",
+                          (f["Precio de la lista"], f["_id"]))
+                aplicados += 1
+    return aplicados
+
+
 def get_or_create_producto(raw, clean, desc, marca_id, imagen_url=None):
     c.execute(
         "INSERT OR IGNORE INTO productos (codigo_raw, codigo_clean, descripcion, marca_id) VALUES (?, ?, ?, ?)",

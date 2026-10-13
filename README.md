@@ -6478,6 +6478,76 @@ el botón**:
 - «🔌 Probar las fuentes de afuera» suma la Central de Deudores (con el CUIT de la AFIP, nunca el
   de un cliente) y la inflación de respaldo.
 
+## 🧭 Lo que dijo una revisión con Gemini: la búsqueda que se perdía al cambiar de pantalla, y la lógica fuera de las pantallas
+
+### Ir a otra pantalla y volver ya no borra la búsqueda
+
+Gemini pedía que «los filtros y las selecciones se mantengan al cambiar de pestaña». Probado con
+la app real sobre la copia de la base: se buscaba 14R26582, se iba a Estadísticas, al Modo
+Mecánico y a Administrar, y al volver al Buscador **la caja de búsqueda estaba vacía con los
+resultados de antes abajo**, sin decir de qué eran. Los filtros (marca, saltos, «esconder los
+flojos») volvían a lo de fábrica, y cada pantalla con solapas volvía a la primera.
+
+Los resultados no se perdían porque viven en la sesión con otro nombre. Lo que se perdía era lo
+de cada campo: Streamlit lo borra en cuanto una pasada no lo dibuja, y como solo se dibuja la
+pantalla que estás mirando, todo lo de las otras se borraba. Ahora, al principio de cada
+pasada, `recordar_lo_elegido_al_cambiar_de_pantalla()` vuelve a ponerle a cada campo de la
+lista su propio valor, que es lo que indica la documentación de Streamlit para que no lo borre.
+La lista (`CAMPOS_QUE_SE_RECUERDAN_AL_CAMBIAR_DE_PANTALLA`, en `logica/interfaz.py`) tiene lo
+escrito en los dos buscadores, sus filtros, y la solapa elegida de Estadísticas, Administrar,
+Modo Mecánico y Mantenimiento. «Salir» sigue borrando todo.
+
+`auditar.py` (control 6d) avisa si un campo de la lista se renombra y la lista no: se volvería
+a perder sin que nada falle.
+
+### La lógica, en `logica/`
+
+Medido: de las 1.168 consultas a la base, **1.109 (el 95 %) están en `logica/`**. Las de las
+pantallas son lecturas para mostrar, salvo 13 que escribían a mano; quedan 4. Las que salieron:
+
+| Qué | Antes | Ahora |
+|---|---|---|
+| El número de motor del vehículo | El mismo `UPDATE` copiado en Vehículos y en la cédula del Modo Mecánico, sin mirar el permiso | `guardar_numero_de_motor()`, para empleados |
+| El link de la ficha de una marca | El mismo `UPDATE` en Marcas y en «Encontrar el portal» | `guardar_plantilla_de_ficha()`, para empleados |
+| La ficha del vehículo | `get_or_create_vehiculo()` no miraba el permiso (las dos pantallas sí) | Lo mira: datos del cliente, solo empleados |
+| El freno de precios de cada producto de una lista | Adentro del ciclo de la importación, en la pantalla | `poner_precio_y_stock_de_la_lista()`, con su prueba |
+| «💲 Aplicar igual los precios frenados» | En la pantalla, sin volver a mirar el permiso | `aplicar_precios_frenados()`, solo administrador |
+
+Las 4 que quedan son de la importación misma (el código de barras de cada fila, los vínculos de
+la lista y el registro de la importación): un ciclo con la barra de avance que corre entero
+adentro de una transacción, todo o nada. Probado sobre la copia de la base con una lista de JL
+de tres filas: la de +10 % entró y fue al historial, la de cien veces más se frenó (el precio
+quedó en $1.002,14 y el stock sí se actualizó), la nueva se cargó, y «Aplicar igual» la dejó en
+$100.214.
+
+### El resto de los puntos
+
+| Punto | Qué se encontró | Qué se hizo |
+|---|---|---|
+| 1 y 5. Las pruebas en `tests/`, con pytest | Las 15 baterías son programas que se corren solos (`python pruebas_de_….py`), cada una en una carpeta temporal y muchas con la app real (AppTest). Moverlas cambia las rutas y las instrucciones sin probar nada nuevo, y pytest sería una dependencia más. | — |
+| 2 y 9. `requirements.txt` y `.streamlit/config.toml` | Ya: las librerías van con rango (lo probado), con el porqué escrito; `config.toml` fija el tema oscuro y saca el recolector de basura de cada toque (medido con 15 personas). | — |
+| 2 y 6. Caché en la búsqueda | Ya: 17 cachés (`st.cache_data`/`st.cache_resource`) en lo que no cambia seguido. La búsqueda por código no se guarda a propósito: lo que se aprueba o se carga tiene que aparecer en la búsqueda siguiente. Medido: mediana 23 ms por código. | — |
+| 3 y 9. Mantener la app despierta | Ya: `.github/workflows/mantener_despierta.yml` la visita cada 4 horas con un navegador y, si no levanta, GitHub manda un mail. No usa ninguna clave (la dirección va en las Variables de GitHub). Las claves de la app van en los Secrets de Streamlit; `.streamlit/secrets.toml` está en `.gitignore`. | — |
+| 4. Normalizar los códigos | Ya: `sanitizar()` saca espacios, guiones, puntos y barras y pasa a mayúsculas. Medido en 400 códigos reales con 7 formas de escribirlos (con guiones, espacios, puntos, barras, minúsculas…): **2.800 de 2.800 encontrados**. | — |
+| 7. Alembic y transacciones | La app no usa SQLAlchemy (es `sqlite3` directo) y Alembic no aplica. Las migraciones corren al abrir la base y las controla `pruebas_de_compatibilidad.py` (el programa nuevo con la base vieja, y al revés). La importación ya va entera en una transacción. | — |
+| 8. Recordar filtros y avisar lo que tarda | **Real**: ver arriba. Lo que tarda ya tiene su indicador (61 `spinner` y barras de avance). | Arreglado. |
+| 10. Validar el Excel con pydantic; ciclos A→B→C→A | La importación ya valida cada fila (precio en 0, código sin dígitos, columnas adivinadas con vista previa antes de cargar); pydantic sería otra librería para lo mismo. Un ciclo en las equivalencias no es un error (si A=B y B=C, C=A es cierto): la búsqueda corta por saltos y no se cuelga. Lo que sí rompe son los códigos puente, y para eso está su detector. | — |
+| 11. Unificar las herramientas de mantenimiento | Ya: un solo panel, «🧹 Mantenimiento», por grupos y con buscador de herramientas. | — |
+| 12. Pruebas de errores de tipeo | Ya: `pruebas_del_buscador.py` y la medición de arriba (2.800 de 2.800). Un código mal tipeado se ofrece aparte («se escriben casi igual… son códigos distintos, no equivalencias»), nunca como equivalencia. | — |
+| 13. Un `app.log` | El disco de Streamlit Cloud se borra con cada despliegue: el archivo se perdería. Los errores se anotan en memoria (los últimos 150, con las claves tapadas) y se ven en «Estado y papelera». | — |
+| 14. Conexiones con `with` y pool | Ya: una conexión por proceso (WAL), `db_lock` y `transaccion()` (`BEGIN IMMEDIATE`), probado con diez personas a la vez (`pruebas_de_carga.py`). Un pool no tiene sentido con SQLite en un solo archivo. | — |
+| 15. Inyección SQL | Medido: todo lo que escribe el usuario va a la consulta con «?». Lo que se arma con texto son pedazos fijos del programa (nombres de columnas, condiciones), nunca algo escrito por alguien. | — |
+| 16. Textos centralizados para traducir | La app es para un mostrador en Argentina; nadie la va a usar en otro idioma. Los textos de navegación ya están juntos en `logica/interfaz.py`. | — |
+| 17. Locust | Ya: `pruebas_de_carga.py` con diez personas a la vez. Locust prueba por HTTP y Streamlit habla por websocket: no mediría lo que importa. | — |
+
+Probado en `pruebas_de_la_sesion.py` (buscar, ir a tres pantallas y volver: la búsqueda y la
+solapa siguen ahí) y en `pruebas_de_los_cambios.py` (los permisos de las funciones nuevas, el
+freno de precios —lo que entra, lo que se frena, el precio en 0, el historial sin repetidos— y
+aplicar lo frenado); 19 fallas puestas a mano, 18 detectadas y una que no cambia nada
+(saltear la fila sin precio ni stock solo ahorra dos consultas). En la app, sobre la copia de la base: buscar 14R26582, ir a
+Estadísticas, al Modo Mecánico y a Administrar y volver (sigue escrito, con sus resultados), la
+importación de JL de arriba, y el recorrido de las 32 pantallas, sin errores.
+
 ## 🙋 Pasar el límite de crédito con permiso, y la copia que no sale sin cifrar
 
 ### El permiso para pasar el límite (lo pidió el dueño)
@@ -7742,6 +7812,11 @@ respetarlo a mano.
 Nada de `st.tabs` en pantallas con botones: no recuerda qué pestaña estabas mirando y cada
 clic te devuelve a la primera. Va un `st.radio` con `key` en session_state, como la navegación
 principal y como Mantenimiento.
+
+Y esa `key` va en `CAMPOS_QUE_SE_RECUERDAN_AL_CAMBIAR_DE_PANTALLA` (`logica/interfaz.py`; las de
+`SOLAPAS_DE_LA_PAGINA` ya entran solas). Si no, ir a otra pantalla y volver te deja en la
+primera solapa: Streamlit borra lo de cada campo que una pasada no dibuja. Lo mismo para un
+filtro que tenga que seguir puesto al volver.
 
 ## El cursor es uno solo
 

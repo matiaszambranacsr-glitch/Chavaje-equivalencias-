@@ -198,14 +198,8 @@ if pagina == PAGINAS[6]:
                 get_or_create_vehiculo(patente_input, cliente_nombre, cliente_tel, marca_auto, modelo_auto,
                                         km_actual_input or None, anio_auto, motorizacion_auto,
                                         vin=vin_limpio)
-                # El número de motor se guarda aparte: get_or_create_vehiculo tiene ya ocho
-                # parámetros y sumarle uno más es la forma de romper las diez llamadas que tiene.
-                if (numero_motor_auto or "").strip():
-                    with db_lock:
-                        c.execute("""UPDATE vehiculos SET numero_motor = ?
-                                     WHERE UPPER(patente) = UPPER(?)""",
-                                  (numero_motor_auto.strip(), patente_input.strip()))
-                        conn.commit()
+                # El número de motor se guarda aparte: ver guardar_numero_de_motor().
+                guardar_numero_de_motor(patente_input, numero_motor_auto)
                 st.success(f"Vehículo {patente_input} guardado.")
                 if vin_limpio and modelo_auto.strip():
                     st.caption(f"📚 De paso quedó aprendido que el patrón {vin_limpio[:3]}-"

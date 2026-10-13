@@ -119,10 +119,7 @@ if pagina == PAGINAS[3]:
                 if _plantilla_ok is None:
                     pass
                 else:
-                    with db_lock:
-                        c.execute("UPDATE marcas SET url_ficha_template = ? WHERE id = ?",
-                                  (_plantilla_ok or None, id_marca_link))
-                        conn.commit()
+                    guardar_plantilla_de_ficha(id_marca_link, _plantilla_ok)
                     avisar("success", f"Patrón de link guardado para '{marca_link}'"
                                       + (f": `{_plantilla_ok}`" if _plantilla_ok else "") + ".")
                     st.rerun()

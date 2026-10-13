@@ -108,6 +108,8 @@ Las pruebas se corren como dice el README, en «Antes de subir un cambio».
 | El interés por mora solo en las cuentas que lo tienen prendido, y nunca dos veces los mismos días | `cargar_el_interes_por_mora()` | `pruebas_de_las_cuentas.py` |
 | Un presupuesto guardado no cambia si después cambia un precio | Se guarda con sus precios (`items_json`) | `pruebas_de_los_frenos.py` (10) |
 | Un presupuesto no se guarda dos veces por un doble toque, ni desde otro proceso | `guardar_presupuesto_mecanico()` en `transaccion()` | `pruebas_de_los_frenos.py` (10) |
+| Una lista con un precio que salta mucho no lo pisa (el stock sí), y se compara con el último precio de verdad si el guardado quedó en 0 | `poner_precio_y_stock_de_la_lista()` | `pruebas_de_los_cambios.py` |
+| «Aplicar igual» lo frenado es del administrador, todo o nada | `aplicar_precios_frenados()` | `pruebas_de_los_cambios.py` |
 | El buscador dice de cuándo es el precio de cada lista, y marca lo viejo | `fecha_de_la_lista()`, `texto_de_la_fecha_de_los_precios()` | `pruebas_de_la_precision.py` (71) |
 
 ## Las cuentas y los permisos
@@ -117,10 +119,11 @@ Las pruebas se corren como dice el README, en «Antes de subir un cambio».
 | Cada cuenta tiene su clave (la clave sola dice quién entra) | `clave_ya_usada()` | `pruebas_de_los_frenos.py` (12) |
 | El freno de intentos vale para todos, también para los talleres | `validar_password(con_mecanicos=True)` | `pruebas_de_los_frenos.py` (7) |
 | Un taller ve su portal y nada más | `mostrar_portal_mecanico()` | `pruebas_de_la_sesion.py` (4) |
-| Las funciones sensibles vuelven a mirar quién está adentro (también borrar, fusionar, deshacer, aprobar, cobrar y restaurar) | `exigir_nivel()` | `pruebas_de_los_cambios.py` (5) |
+| Las funciones sensibles vuelven a mirar quién está adentro (también borrar, fusionar, deshacer, aprobar, cobrar, restaurar, la ficha y el motor del vehículo, el link de una marca y aplicar los precios frenados) | `exigir_nivel()` | `pruebas_de_los_cambios.py` (5) |
 | Pasar el límite de crédito: lo pide el empleado y lo da solo un administrador, por un monto y 24 horas | `pedir_permiso_de_limite()`, `contestar_permiso_de_limite()`, `margen_autorizado()` | `pruebas_de_las_cuentas.py`, `pruebas_del_deposito.py` |
 | Un empleado desactivado o con otro rol pierde los permisos al instante | `nivel_vigente_de_la_sesion()` | `pruebas_de_la_sesion.py` |
 | Después de «Salir» no queda nada del anterior | `cerrar_sesion()` | `pruebas_de_la_sesion.py` |
+| Ir a otra pantalla y volver no borra la búsqueda, los filtros ni la solapa elegida | `recordar_lo_elegido_al_cambiar_de_pantalla()` | `pruebas_de_la_sesion.py` (2b), `auditar.py` (6d) |
 | Con la base dañada, los empleados solo pueden buscar | `modo_solo_lectura()` | `pruebas_de_los_frenos.py` (1) |
 
 ## Las copias

@@ -309,6 +309,23 @@ if DE_DONDE:
                                  "CAMPOS_DEL_BUSCADOR_QUE_SE_VACIAN_AL_SALIR: después de «Salir» "
                                  "le queda escrito lo del anterior al que se sienta después")
 
+# ============ 6d. Un campo que se recuerda al cambiar de pantalla y ya no existe ============
+# recordar_lo_elegido_al_cambiar_de_pantalla() va por nombre: si un campo se renombra y la
+# lista no, vuelve a perderse al ir a otra pantalla, sin que nada falle.
+if DE_DONDE:
+    _claves_de_campos = {_k.value.value for _n in ast.walk(ARBOL) if isinstance(_n, ast.Call)
+                         for _k in _n.keywords
+                         if _k.arg == "key" and isinstance(_k.value, ast.Constant)}
+    for _n in ARBOL.body:
+        if (isinstance(_n, ast.Assign) and any(isinstance(t, ast.Name) and
+                t.id == "CAMPOS_QUE_SE_RECUERDAN_AL_CAMBIAR_DE_PANTALLA" for t in _n.targets)):
+            for _e in getattr(_n.value, "elts", []):
+                if isinstance(_e, ast.Constant) and _e.value not in _claves_de_campos:
+                    reportar("ERROR", _n.lineno,
+                             f"«{_e.value}» está en CAMPOS_QUE_SE_RECUERDAN_AL_CAMBIAR_DE_PANTALLA "
+                             "y ningún campo usa esa clave: si se renombró, lo elegido vuelve a "
+                             "perderse al ir a otra pantalla")
+
 # ============ 7. Columnas SQL que no existen ============
 # Un INSERT o un UPDATE contra una columna que no está en el CREATE TABLE no falla al escribir
 # el código ni al abrir la app: revienta con "no such column" recién cuando alguien toca ese
