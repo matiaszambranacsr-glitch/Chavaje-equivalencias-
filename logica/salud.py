@@ -420,14 +420,16 @@ def diagnostico_de_salud():
         if obtener_config("copia_frenada_sin_cifrar", ""):
             # Ya no se sube (ver se_puede_subir_sin_cifrar()): lo grave ahora es que la copia
             # se va quedando vieja, y un reinicio arranca desde la última que subió.
+            _ultima_buena = obtener_config("ultimo_backup_github", "")[:16]
             sumar_tecnico("alto", "🔓 La copia de tu base NO SE ESTÁ SUBIENDO: sin cifrar no va "
                           "a un repositorio público",
-                  "Desde el " + obtener_config("copia_frenada_sin_cifrar", "")[:16] + ". Si la "
-                  "app se reinicia, arranca desde la última copia que subió y lo de después se "
-                  "pierde. Poné el repositorio en privado (GitHub → Settings → General → Change "
-                  "visibility) o agregá en los secretos clave_copia = \"una frase larga\". Las "
-                  "copias viejas siguen en el historial de la rama «copia-de-seguridad»: con el "
-                  "repositorio privado ya no se ven.",
+                  "Frenada desde el " + obtener_config("copia_frenada_sin_cifrar", "")[:16]
+                  + (f"; la última copia que subió es del {_ultima_buena}" if _ultima_buena
+                     else "") + ". Si la app se reinicia (también al publicar una versión "
+                  "nueva), arranca desde esa copia y lo cargado después se pierde. Agregá en los "
+                  "secretos clave_copia = \"una frase larga\" (en Backup y config está cómo) o "
+                  "poné el repositorio en privado. Las copias viejas siguen en el historial de la "
+                  "rama «copia-de-seguridad»: con el repositorio privado ya no se ven.",
                   miga_hasta("Backup y config"))
         elif obtener_config("repo_copia_publico", "") == "1":
             if not clave_de_la_copia():

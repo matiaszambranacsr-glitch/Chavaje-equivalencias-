@@ -4707,15 +4707,22 @@ def pares_de_piezas_de_seguridad(pares):
 UNE_REDES_GRANDES = 100
 
 
-def cuanto_une_cada_par(pares):
-    """{(a, b): pares de productos que quedarían encadenados por primera vez} si se aprobara
-    cada uno solo: el tamaño de la red de a por el de la red de b, o 0 si ya están en la misma.
+def _red_de_equivalencias():
+    """({producto: raíz de su red}, {raíz: cuántos productos tiene}) de las equivalencias
+    aprobadas. Ver cuanto_une_cada_par().
 
-    Lo pidió una revisión con ChatGPT («priorizar las equivalencias que desbloquean muchas
-    otras» y «detectar nodos centrales: si una de esas referencias está mal, el impacto es
-    enorme»). Medido sobre la base real: de los 7.827 pendientes, el 10 % que más une suma el
-    89 % de los pares nuevos; 868 del barrido unen 100 pares o más cada uno, y uno solo,
-    6.690."""
+    Se guarda entre pasadas, con una firma de la tabla: armarla son 0,15 s y la pantalla de
+    sugeridas la pedía dos veces en cada toque (medido sobre la copia de la base, 13/10). La
+    firma son la cantidad y tres sumas (2 ms): un alta, una baja o un cambio de par la mueve —
+    también cambiar dos pares cruzados, por la suma de los productos—, así que no hace falta
+    acordarse de limpiarla al aprobar, cortar o restaurar."""
+    c.execute("""SELECT COUNT(*), TOTAL(producto_a_id), TOTAL(producto_b_id),
+                        TOTAL(producto_a_id * producto_b_id) FROM equivalencias""")
+    firma = tuple(c.fetchone())
+    memoria = del_proceso("red_de_equivalencias", dict)
+    guardada = memoria.get(DB_PATH)
+    if guardada and guardada[0] == firma:
+        return guardada[1], guardada[2]
     raiz = {}
 
     def buscar(x):
@@ -4734,13 +4741,29 @@ def cuanto_une_cada_par(pares):
         ra, rb = buscar(fila[0]), buscar(fila[1])
         if ra != rb:
             raiz[ra] = rb
+    # Aplanada: cada producto apunta directo a su raíz y nadie la vuelve a tocar. La comparten
+    # todas las sesiones, así que leerla no puede cambiarla.
+    plana = {x: buscar(x) for x in list(raiz)}
     tamano = {}
-    for x in list(raiz):
-        r = buscar(x)
+    for r in plana.values():
         tamano[r] = tamano.get(r, 0) + 1
+    memoria[DB_PATH] = (firma, plana, tamano)
+    return plana, tamano
+
+
+def cuanto_une_cada_par(pares):
+    """{(a, b): pares de productos que quedarían encadenados por primera vez} si se aprobara
+    cada uno solo: el tamaño de la red de a por el de la red de b, o 0 si ya están en la misma.
+
+    Lo pidió una revisión con ChatGPT («priorizar las equivalencias que desbloquean muchas
+    otras» y «detectar nodos centrales: si una de esas referencias está mal, el impacto es
+    enorme»). Medido sobre la base real: de los 7.827 pendientes, el 10 % que más une suma el
+    89 % de los pares nuevos; 868 del barrido unen 100 pares o más cada uno, y uno solo,
+    6.690."""
+    raiz, tamano = _red_de_equivalencias()
     salida = {}
     for a, b in pares:
-        ra, rb = buscar(a), buscar(b)
+        ra, rb = raiz.get(a, a), raiz.get(b, b)
         salida[(a, b)] = 0 if ra == rb else max(1, tamano.get(ra, 1)) * max(1, tamano.get(rb, 1))
     return salida
 

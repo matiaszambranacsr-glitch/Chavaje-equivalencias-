@@ -1533,6 +1533,35 @@ def probar(L):
     esperar("y siguen en la cola", c.execute(
         "SELECT COUNT(*) FROM equivalencias_pendientes WHERE lote = 'PUENTES · 02/10'").fetchone()[0], 2)
     esperar("de a uno, sí", ns["aprobar_pendientes"]("PUENTES · 02/10", [(_red1[3], _red2[5])]), 1)
+    # La red se guarda entre pasadas (ver _red_de_equivalencias()): aprobado el puente, las dos
+    # redes son una, y eso se tiene que ver ya, sin limpiar nada a mano.
+    _une = ns["cuanto_une_cada_par"]([(_red1[3], _red2[5]), (_red1[0], _red3[0])])
+    esperar("aprobado el puente, la red guardada se rehace sola",
+            [_une[(_red1[3], _red2[5])], _une[(_red1[0], _red3[0])]], [0, 22 * 16])
+    _par_34 = (min(_red3[0], _red4[0]), max(_red3[0], _red4[0]))
+    c.execute("INSERT INTO equivalencias (producto_a_id, producto_b_id) VALUES (?, ?)", _par_34)
+    conn.commit()
+    _antes = ns["cuanto_une_cada_par"]([(_red3[2], _red4[7])])[(_red3[2], _red4[7])]
+    c.execute("DELETE FROM equivalencias WHERE producto_a_id = ? AND producto_b_id = ?", _par_34)
+    conn.commit()
+    esperar("una alta y una baja también la rehacen", (_antes, ns["cuanto_une_cada_par"](
+        [(_red3[2], _red4[7])])[(_red3[2], _red4[7])]), (0, 256))
+    # Cambiar un vínculo por otro deja la misma cantidad: la firma lo tiene que ver igual. La
+    # fila aprobada vuelve después tal cual estaba.
+    _par_12 = (min(_red1[3], _red2[5]), max(_red1[3], _red2[5]))
+    _fila_12 = c.execute("SELECT * FROM equivalencias WHERE producto_a_id = ? AND producto_b_id = ?",
+                         _par_12).fetchone()
+    _cols_12 = list(_fila_12.keys())
+    c.execute("DELETE FROM equivalencias WHERE producto_a_id = ? AND producto_b_id = ?", _par_12)
+    c.execute("INSERT INTO equivalencias (producto_a_id, producto_b_id) VALUES (?, ?)", _par_34)
+    conn.commit()
+    _une = ns["cuanto_une_cada_par"]([_par_12, (_red3[2], _red4[7])])
+    c.execute("DELETE FROM equivalencias WHERE producto_a_id = ? AND producto_b_id = ?", _par_34)
+    c.execute(f"INSERT INTO equivalencias ({', '.join(_cols_12)}) "
+              f"VALUES ({', '.join('?' * len(_cols_12))})", tuple(_fila_12))
+    conn.commit()
+    esperar("cambiar un vínculo por otro (la misma cantidad) también la rehace",
+            [_une[_par_12], _une[(_red3[2], _red4[7])]], [121, 0])
 
     # 63. Antes de borrar, lo que toca; y la papelera devuelve la historia, también lo binario.
     bh = producto("BH1", "RADIADOR VW GOL 1.6", fispa)

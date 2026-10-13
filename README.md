@@ -6478,6 +6478,67 @@ el botón**:
 - «🔌 Probar las fuentes de afuera» suma la Central de Deudores (con el CUIT de la AFIP, nunca el
   de un cliente) y la inflación de respaldo.
 
+## 🔑 La copia que dice la verdad, cómo poner `clave_copia`, y la cola de sugeridas más rápida
+
+### La pantalla de la copia decía «al día» con la copia frenada
+
+Medido el 13/10 en GitHub: la última copia es del **12/10 a las 15:56 (UTC)**, y desde entonces
+no subió ninguna: el repositorio sigue público y en los secretos no está `clave_copia`, así que
+la copia no sale (ver «🙋 Pasar el límite de crédito con permiso, y la copia que no sale sin
+cifrar»). Mientras tanto, «Backup y config» decía **«✅ La copia en GitHub se actualiza sola…
+si el servidor se reinicia, se pierde como mucho lo de los últimos 15 minutos»**, con el error
+en rojo más abajo. `cuanto_perderias_si_reinicia()` solo miraba que alguna vez se hubiera subido
+una copia.
+
+- Ahora, si la última vuelta no pudo subir —frenada por ir sin cifrar a un repositorio público,
+  la clave de GitHub vencida, el catálogo que se achicó de golpe—, dice **«🔴 La copia de GitHub
+  está atrasada: la última que subió es del 12/10/2026 15:56»**, que lo de después vive solo en
+  el disco, que un reinicio (también publicar una versión nueva) lo borra, y por qué no sube.
+- El aviso de salud decía «Desde el…» con la hora de la **última** vuelta del vigía (se
+  reescribía cada 15 minutos). Ahora dice desde cuándo está frenada y de cuándo es la última
+  copia buena.
+
+### Cómo poner `clave_copia`
+
+En «Backup y config», abajo de la subida automática:
+
+- ✅ o ❌ si la copia se sube **cifrada**, y ✅ o ⚠️ si el repositorio es **privado**.
+- Sin la clave, **«🔑 Cómo agregar `clave_copia`»** con los pasos y un botón **«🎲 Generar una
+  frase»** (`frase_para_la_copia()`: seis grupos de cinco letras y números, 150 bits de azar, sin
+  los caracteres que se confunden al copiarla ni los que rompen el archivo de secretos). La
+  frase no se guarda en ningún lado: se muestra, se copia a los secretos y a un lugar seguro.
+- **No hace falta reiniciar la app** para que tome la clave: Streamlit vuelve a leer el archivo
+  de secretos cuando cambia (lo vigila: `watch_file` en `st.secrets`), y reiniciar borra lo que
+  todavía no está en la copia.
+- Al poner el repositorio en privado, conviene abrir la app en una ventana de incógnito: si
+  pide iniciar sesión, en Streamlit hay que elegir que la pueda ver cualquiera (Settings →
+  Sharing).
+
+### La cola de sugeridas, de 0,7 s a 0,2 s por toque
+
+Medidas las 32 pantallas en caliente (la segunda vez que se dibujan), sobre la copia de la base.
+«🔗 Equivalencias sugeridas», la pantalla donde se revisan los 7.827 pendientes, tardaba
+**0,7 s en cada toque**, y ahí cada aprobar o rechazar es un toque:
+
+- 0,44 s eran del **tablero de calidad**, que está en un desplegable cerrado: Streamlit calcula
+  igual lo que hay adentro. Ahora es un interruptor y se calcula solo al abrirlo.
+- 0,3 s eran **la red de equivalencias armada dos veces** (cuánto une cada pendiente, y cuáles
+  ya están unidos). Ahora `_red_de_equivalencias()` la guarda entre pasadas con una firma de la
+  tabla —la cantidad y tres sumas, 2 ms—, que cambia con cualquier alta, baja o cambio de par, así
+  que no hay que acordarse de limpiarla. Comparada con la de antes sobre los 7.827 pendientes:
+  **0 diferencias**; de 92 ms a 7 ms.
+
+Queda en **0,2 s**. Ninguna otra pantalla pasa de 0,6 s por toque; «Para pedir» y «Repuestos por
+vehículo» tardan 2,5 y 5 s solo la primera vez (arman sus cachés).
+
+Probado en `pruebas_de_las_copias_en_github.py` (frenada: atrasada desde la última buena, la
+salud lo dice, «desde» es la primera vez; con la clave deja de estar atrasada; la frase) y en
+`pruebas_de_la_precision.py` (62: aprobado un puente, cortado o agregado un vínculo, la red
+guardada se rehace sola, también si se cambia un vínculo por otro); 10 fallas puestas a mano,
+las 10 detectadas. En la app, sobre la copia de la base: la pantalla de la copia
+con la situación del 12/10 (en rojo, sin el verde), la frase generada, la guía que desaparece
+con la clave puesta, el tablero y la cobertura al abrirlos, y el recorrido de las 32 pantallas.
+
 ## 🧭 Lo que dijo una revisión con Gemini: la búsqueda que se perdía al cambiar de pantalla, y la lógica fuera de las pantallas
 
 ### Ir a otra pantalla y volver ya no borra la búsqueda
@@ -7623,9 +7684,11 @@ Vehículos y crear vínculos a mano. Solo pedían clave los botones que borran.
   administrador de la mañana la heredaba el que se sentara después. Usándola no se corta.
 - **La copia a GitHub se sube cifrada** si en los secretos está
   `clave_copia = "una frase larga"` (AES-GCM, clave estirada con PBKDF2; ver
-  `cifrar_copia()`). Al arrancar se descifra sola. Sin la frase se sigue subiendo como antes —
-  perder la copia es peor—. **Guardá la frase también fuera de la app: sin ella la copia
-  cifrada no se puede abrir.** Las copias viejas, sin cifrar, se siguen pudiendo leer.
+  `cifrar_copia()`). Al arrancar se descifra sola. Sin la frase, solo sube a un repositorio
+  privado (ver «🙋 Pasar el límite de crédito con permiso, y la copia que no sale sin cifrar»). **Guardá la
+  frase también fuera de la app: sin ella la copia cifrada no se puede abrir.** Las copias
+  viejas, sin cifrar, se siguen pudiendo leer. Cómo agregarla: «Backup y config» → «🔑 Cómo
+  agregar `clave_copia`», que además genera una.
 - **Lo dañado no se sube ni se baja** (`la_base_esta_sana()`, un `PRAGMA quick_check` de
   0,1 s). Si la base se dañara, la copia automática la subía igual y pisaba la última copia
   buena —la que se usa para arrancar después de un reinicio—. Ahora no se sube, queda la buena

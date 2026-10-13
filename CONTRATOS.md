@@ -93,6 +93,7 @@ Las pruebas se corren como dice el README, en «Antes de subir un cambio».
 | El historial de medidas no se corrige ni se borra | Disparadores de `historial_de_medidas` | `pruebas_de_la_precision.py` (46) |
 | Un expediente tocado después de bajarlo no pasa la verificación | `expediente_en_texto()`, `verificar_el_expediente()` | `pruebas_de_la_precision.py` (68) |
 | Lo vendido con un par que después se rechazó se ve, para avisarle al cliente | `vendido_con_lo_que_despues_se_rechazo()` | `pruebas_de_la_precision.py` (72) |
+| La red con que se calcula cuánto une cada pendiente se rehace sola cuando cambian las equivalencias (alta, baja o un vínculo por otro) | `_red_de_equivalencias()` con su firma | `pruebas_de_la_precision.py` (62) |
 
 ## El stock, los precios y la plata
 
@@ -132,6 +133,8 @@ Las pruebas se corren como dice el README, en «Antes de subir un cambio».
 |---|---|---|
 | Restaurar deja la base sana y con los mismos datos, también desde la copia cifrada de GitHub | `restaurar_backup()` | `pruebas_de_los_frenos.py` (16) |
 | La copia sin cifrar no sube a un repositorio público | `se_puede_subir_sin_cifrar()` | `pruebas_de_las_copias_en_github.py` |
+| Si la última vuelta no pudo subir, la pantalla dice «atrasada» y desde cuándo, nunca «al día» | `cuanto_perderias_si_reinicia()` | `pruebas_de_las_copias_en_github.py` |
+| La frase que propone la app para `clave_copia` es al azar, larga y no rompe los secretos | `frase_para_la_copia()` | `pruebas_de_las_copias_en_github.py` |
 | La prueba de la copia mira las claves foráneas de todas las tablas | `_usarla_como_la_usaria_el_mostrador()` | `pruebas_de_las_copias_en_github.py` |
 | Lo que empieza con «=» va como texto al Excel | `to_excel_bytes()` | `pruebas_de_los_frenos.py` |
 | Un backup dañado no entra ni toca nada | `la_base_esta_sana()` antes de restaurar | `pruebas_de_los_frenos.py` (16), `pruebas_de_la_recuperacion.py` |

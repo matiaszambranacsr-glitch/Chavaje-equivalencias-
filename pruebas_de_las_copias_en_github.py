@@ -296,6 +296,21 @@ def probar(ns, gh, carpeta):
     esperar("y en GitHub no cambió nada", gh.arbol_de(rama), antes_de_frenar)
     esperar("la salud lo dice en rojo", [p["nivel"] for p in ns["diagnostico_de_salud"]()
                                          if "NO SE ESTÁ SUBIENDO" in p["titulo"]], ["alto"])
+    # Y la pantalla de la copia no dice «al día»: decía «✅ se actualiza sola, se pierden como
+    # mucho 15 minutos» con la copia frenada (ver cuanto_perderias_si_reinicia()).
+    _ultima_buena = ns["obtener_config"]("ultimo_backup_github", "")
+    _r = ns["cuanto_perderias_si_reinicia"]()
+    esperar("la copia frenada se ve atrasada, desde la última buena",
+            (_r["atrasada"], _r["fecha_semilla"][:10], "🔓" in _r["por_que"]),
+            (True, f"{_ultima_buena[8:10]}/{_ultima_buena[5:7]}/{_ultima_buena[:4]}", True))
+    esperar("y la salud dice de cuándo es la última copia buena",
+            [f"la última copia que subió es del {_ultima_buena[:16]}" in p["detalle"]
+             for p in ns["diagnostico_de_salud"]() if "NO SE ESTÁ SUBIENDO" in p["titulo"]], [True])
+    # «Frenada desde»: la primera vez, no la última vuelta del vigía.
+    ns["guardar_config"]("copia_frenada_sin_cifrar", "2026-10-12 15:56:00")
+    ns["se_puede_subir_sin_cifrar"](cfg_gh, cab_gh)
+    esperar("frenada desde la primera vez", ns["obtener_config"]("copia_frenada_sin_cifrar", ""),
+            "2026-10-12 15:56:00")
     # Con la clave sube, y cifrada; el aviso se va.
     g["secretos_app"] = lambda: {"github_token": "x", "github_repo": "yo/repo",
                                  "clave_copia": "una frase larga de prueba"}
@@ -305,6 +320,11 @@ def probar(ns, gh, carpeta):
             True)
     esperar("y el aviso se fue", [p for p in ns["diagnostico_de_salud"]()
                                   if "NO SE ESTÁ SUBIENDO" in p["titulo"]], [])
+    esperar("y la copia ya no está atrasada", ns["cuanto_perderias_si_reinicia"]()["atrasada"], False)
+    _frases = {ns["frase_para_la_copia"]() for _ in range(50)}
+    esperar("la frase que propone la app: larga, distinta cada vez y sin lo que rompe los secretos",
+            (len(_frases), min(len(f) for f in _frases),
+             any(ch in f for f in _frases for ch in "\"\\'0O1lI ")), (50, 35, False))
     # Subirla sin cifrar a uno público se puede, pero solo puesto a propósito en los secretos.
     g["secretos_app"] = lambda: {"github_token": "x", "github_repo": "yo/repo",
                                  "subir_copia_sin_cifrar": True}

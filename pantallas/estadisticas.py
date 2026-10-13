@@ -94,6 +94,15 @@ if pagina == PAGINAS[4]:
                     f"{miles(_riesgo['productos_ahora'])}. Si el servidor reinicia, esa diferencia "
                     "se pierde."
                 )
+            elif _riesgo.get("en_github") and _riesgo.get("atrasada"):
+                # La última vuelta no pudo subir: lo de después de la última copia vive solo en
+                # el disco. Ver cuanto_perderias_si_reinicia().
+                st.error(
+                    f"🔴 **La copia de GitHub está atrasada: la última que subió es del "
+                    f"{_riesgo['fecha_semilla']}.** Lo cargado después vive solo en el disco del "
+                    "servidor, y si se reinicia —también al publicar una versión nueva de la "
+                    f"app— se pierde.\n\nPor qué no sube: {_riesgo['por_que']}"
+                )
             elif _riesgo.get("en_github"):
                 st.success(
                     f"✅ **La copia en GitHub se actualiza sola.** Cada {MINUTOS_ENTRE_COPIAS} "
@@ -116,6 +125,43 @@ if pagina == PAGINAS[4]:
                 _ult_gh = obtener_config("ultimo_backup_github", "")
                 if _ult_gh:
                     st.caption(f"Última subida automática: {_ult_gh}")
+                # CÓMO ESTÁ PROTEGIDA: cifrada y en un repositorio privado. Sin clave, a uno
+                # público no sube (ver se_puede_subir_sin_cifrar()), y lo que había que hacer
+                # estaba en un aviso, sin los pasos.
+                _cifrada = bool(clave_de_la_copia())
+                st.markdown(
+                    ("✅ Se sube **cifrada**: `clave_copia` está en los secretos." if _cifrada else
+                     "❌ **Sin `clave_copia`** en los secretos: no se cifra.") + "  \n" +
+                    {"0": "✅ El repositorio es **privado**.",
+                     "1": "⚠️ El repositorio es **público**: las copias de antes del cifrado se "
+                          "pueden bajar del historial. Ponelo en privado (GitHub → Settings → "
+                          "General → Change visibility) y después abrí la app en una ventana de "
+                          "incógnito: si pide iniciar sesión, en share.streamlit.io → ⋮ → "
+                          "Settings → Sharing elegí que la pueda ver cualquiera."}.get(
+                        obtener_config("repo_copia_publico", ""),
+                        "❔ Todavía no se sabe si el repositorio es público o privado."))
+                if _cifrada:
+                    st.session_state.pop("_frase_para_la_copia", None)
+                elif seccion_plegable("🔑 Cómo agregar `clave_copia` (cinco minutos)",
+                                      key="ver_como_clave_copia", abierto=True):
+                    if st.button("🎲 Generar una frase", key="generar_frase_copia"):
+                        st.session_state["_frase_para_la_copia"] = frase_para_la_copia()
+                    _frase = st.session_state.get("_frase_para_la_copia")
+                    if _frase:
+                        st.code(f'clave_copia = "{_frase}"', language="toml")
+                    st.markdown(
+                        "1. Tocá **🎲 Generar una frase** (o inventá una de 30 caracteres o más, "
+                        "sin comillas ni barras).\n"
+                        "2. **Guardala fuera de la app** —en el administrador de contraseñas del "
+                        "celular, o anotada en papel en un lugar seguro—. Sin ella, las copias "
+                        "cifradas no se pueden abrir nunca más: ni vos, ni nadie.\n"
+                        "3. Entrá a **share.streamlit.io**, en esta app tocá **⋮ → Settings → "
+                        "Secrets**, pegá la línea de arriba **arriba de todo** (antes de "
+                        "cualquier renglón entre corchetes) y tocá **Save**.\n"
+                        "4. **No toques «Reboot»**: no hace falta (la app lee los secretos sola "
+                        "en unos segundos) y reiniciar borra lo que todavía no está en la copia.\n"
+                        "5. Volvé acá en un minuto: arriba tiene que decir «✅ Se sube cifrada». "
+                        "Tocá **☁️ Subir el backup al repositorio ahora** y listo.")
                 # Subida no es recuperable: ver verificar_la_copia_de_github().
                 _verif = estado_de_la_verificacion()
                 if _verif.get("ok"):
@@ -137,7 +183,7 @@ if pagina == PAGINAS[4]:
                             else "⚠️ La copia no pasó la prueba: ") + _det_v)
                     st.rerun()
                 _err_gh = obtener_config("ultimo_backup_github_error", "")
-                if _err_gh:
+                if _err_gh and not (_riesgo and _riesgo.get("atrasada")):   # ya lo dijo arriba
                     st.error(f"⚠️ El último intento de subir la copia falló: {_err_gh}")
                 if st.button("☁️ Subir el backup al repositorio ahora", type="primary"):
                     with st.spinner("Armando la copia y subiéndola..."):
@@ -1971,7 +2017,10 @@ a traer solas desde Administrar → Mantenimiento.
 
         # EL TABLERO DE CALIDAD: dónde propone mal la app, cuánto se anuló, cuánto volvió y
         # cuánto se comprobó en la mano. Ver tablero_de_calidad().
-        with st.expander("📈 Tablero de calidad de las equivalencias"):
+        # Con un interruptor y no un st.expander: lo de adentro de un expander cerrado se calcula
+        # igual en cada toque, y el tablero son 0,44 s de los 0,7 s que tardaba esta pantalla
+        # (medido sobre la copia de la base, 13/10). Aprobando de a uno, eso era cada clic.
+        if seccion_plegable("📈 Tablero de calidad de las equivalencias", key="ver_tablero_calidad"):
             _tc = tablero_de_calidad()
             _n = _tc["numeros"]
             # La métrica principal va primero y sola: es el error que le cuesta al mostrador.

@@ -2297,7 +2297,10 @@ def se_puede_subir_sin_cifrar(cfg, cabeceras):
         anotar_error("se_puede_subir_sin_cifrar", _err)
     if privado:
         return True, ""
-    guardar_config("copia_frenada_sin_cifrar", datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+    # Desde cuándo: la PRIMERA vez. Se reescribía en cada vuelta y el aviso decía «desde
+    # hace un rato» aunque llevara días.
+    if not obtener_config("copia_frenada_sin_cifrar", ""):
+        guardar_config("copia_frenada_sin_cifrar", datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
     return False, TEXTO_COPIA_FRENADA_SIN_CIFRAR
 
 
@@ -2393,9 +2396,15 @@ def cuanto_perderias_si_reinicia():
             _fecha_gh = datetime.strptime(_ultima_gh, "%Y-%m-%d %H:%M:%S").strftime("%d/%m/%Y %H:%M")
         except ValueError:
             _fecha_gh = _ultima_gh
+        # ...salvo que la última vuelta NO haya podido subir (frenada por ir sin cifrar a un
+        # repositorio público, la clave de GitHub vencida, el catálogo que se achicó de golpe):
+        # entonces la copia se quedó en _fecha_gh y lo de después vive solo en el disco. Antes
+        # la pantalla decía igual «✅ se actualiza sola, se pierden como mucho 15 minutos»,
+        # con el error en rojo más abajo; el 12/10 la copia llevaba nueve horas sin subir.
+        _fallo = obtener_config("ultimo_backup_github_error", "")
         return {"hay_semilla": True, "en_github": True, "productos_ahora": ahora_total,
                 "productos_semilla": ahora_total, "en_riesgo": 0, "equivalencias_en_riesgo": 0,
-                "fecha_semilla": _fecha_gh}
+                "fecha_semilla": _fecha_gh, "atrasada": bool(_fallo), "por_que": _fallo}
 
     semilla = ruta_de_la_semilla()
     if not semilla:

@@ -204,8 +204,9 @@ def config_github():
 # —el de esta app lo era— cualquiera la baja: precios, clientes, teléfonos, patentes y las
 # contraseñas de los usuarios (con hash, pero con hash también se prueban de a millones).
 # Con una clave en los secretos, la copia se cifra antes de salir (AES-GCM, la clave estirada
-# con PBKDF2) y se descifra al bajarla. Sin la clave se sigue subiendo como antes —perder la
-# copia es peor— y el control de salud lo avisa en rojo. Ver cifrar_copia().
+# con PBKDF2) y se descifra al bajarla. Sin la clave, solo sube a un repositorio que GitHub
+# confirma privado (ver se_puede_subir_sin_cifrar()); si no, no sube y el control de salud y
+# «Backup y config» lo dicen en rojo. Ver cifrar_copia() y frase_para_la_copia().
 #
 #     clave_copia = "una frase larga que no uses en otro lado"
 #
@@ -234,6 +235,17 @@ def clave_de_la_copia():
     except Exception as _err:
         anotar_error("clave_de_la_copia", _err)
         return None
+
+
+def frase_para_la_copia(grupos=6):
+    """Una frase al azar para `clave_copia`, para el que no quiere inventarla: seis grupos de
+    cinco letras y números separados por guiones (150 bits de azar). Sin los caracteres que se
+    confunden al copiarla a mano (0 y O, 1, l e I) ni los que rompen el archivo de secretos
+    (comillas, barras). No se guarda en ningún lado: se muestra una vez, y quien la pide la
+    copia a los secretos y a un lugar seguro."""
+    import secrets as _azar
+    letras = "abcdefghijkmnpqrstuvwxyz23456789"
+    return "-".join("".join(_azar.choice(letras) for _ in range(5)) for _ in range(grupos))
 
 
 def _clave_aes(frase, sal, marca=MARCA_DE_COPIA_CIFRADA):
