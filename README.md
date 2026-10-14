@@ -6489,7 +6489,9 @@ llegaba a la app sin pasar por nada. Ahora `.github/workflows/pruebas.yml` corre
 a `main` y a las ramas de trabajo **el auditor, las 15 baterías y las del núcleo**
 (`.github/correr_las_pruebas.py`, que también se corre a mano). Si algo falla, GitHub pone la ✗
 roja al lado del cambio y le manda un mail a quien lo subió, con lo último que dijo cada prueba
-que falló. Tarda menos de un minuto en correr (medido: 18 de 18 en 0,6 minutos, de a cuatro).
+que falló. La primera corrida en GitHub (14/10, el cambio `4f95541`): **18 de 18 en verde, 1 minuto
+17 segundos en total**, de los que 23 son instalar las librerías y 36 las pruebas. Con el
+repositorio privado, eso alcanza para más de mil subidas por mes dentro de lo gratis.
 
 - No corre en la rama `copia-de-seguridad`: ahí la app sube la copia cada vez que cambia algo, y
   cada subida gastaría minutos sin probar nada. Tampoco cuando solo cambia un `.md`.
