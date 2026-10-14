@@ -399,7 +399,7 @@ a traer solas desde Administrar → Mantenimiento.
                 c.execute("SELECT COUNT(*) FROM productos")
                 _hoy_productos = c.fetchone()[0]
                 st.warning(
-                    f"⚠️ **Esto reemplaza los datos actuales.** "
+                    "⚠️ **Esto reemplaza los datos actuales.** "
                     + (f"Es una copia del **{_vistazo['fecha'][:16]}**. "
                        if _vistazo.get("fecha") else "")
                     + f"El backup trae "

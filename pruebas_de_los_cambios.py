@@ -181,6 +181,12 @@ def probar(L):
                 (ns["aplicar_precios_frenados"]([{"_id": _p_fr, "Precio de la lista": 12000.0},
                                                 {"_id": _p_fr, "Precio de la lista": None}]),
                  _precio_stock()[0], _historial()[-1]), (1, 12000.0, 12000.0))
+        # ¿La de internet? Ahí el repositorio está en /mount/src (ver corre_en_streamlit_cloud()).
+        _carpeta = g["_CARPETA"]
+        esperar("acá no es la app de internet", ns["corre_en_streamlit_cloud"](), False)
+        g["_CARPETA"] = "/mount/src/chavaje-equivalencias-/logica"
+        esperar("en /mount/src sí", ns["corre_en_streamlit_cloud"](), True)
+        g["_CARPETA"] = _carpeta
         # Se saca lo creado: más abajo se cuentan los productos y las marcas.
         c.execute("DELETE FROM historial_precios WHERE producto_id = ?", (_p_fr,))
         c.execute("DELETE FROM productos WHERE id = ?", (_p_fr,))

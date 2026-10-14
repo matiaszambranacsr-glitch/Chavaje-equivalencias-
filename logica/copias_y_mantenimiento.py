@@ -1771,6 +1771,9 @@ def restaurar_backup(archivo_subido):
     # exactamente el caso que _columnas_de_medidas_que_existen() existe para cubrir.
     _columnas_de_medidas_que_existen.cache_clear()
     olvidar_analisis_de_lote()
+    # Y lo guardado en el proceso: la cobertura, la escala de precios, las marcas con CHAS…
+    # seguían contestando con la base anterior. Ver MEMORIAS_DE_LA_BASE.
+    olvidar_lo_guardado_de_la_base()
     # Y se controla la base YA RESTAURADA, no solo el archivo antes de entrar: que esté sana y
     # cuántos productos quedaron. Los avisos de arriba se recalculan con la base nueva (lo
     # pidió una revisión con ChatGPT: «no confiar en que la copia terminó bien»).
@@ -1869,6 +1872,8 @@ def reemplazar_la_base_danada(contenido):
         f.write(contenido)
     apartada = apartar_la_base_danada()
     os.replace(temporal, DB_PATH)
+    # La lógica se vuelve a cargar, pero lo guardado en el proceso no: ver del_proceso().
+    olvidar_lo_guardado_de_la_base()
     return True, (f"Backup puesto. La base dañada quedó aparte, sin borrar: "
                   f"{os.path.basename(apartada)}.")
 

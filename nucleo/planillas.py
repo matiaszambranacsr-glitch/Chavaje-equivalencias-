@@ -158,7 +158,10 @@ def leer_excel(archivo, nrows=None, hoja=None):
     if nombre_lower.endswith((".csv", ".txt", ".tsv")):
         import csv as csv_module
         if isinstance(archivo, str):
-            crudo = open(archivo, "rb").read()
+            # Con «with»: abierto suelto quedaba abierto hasta que lo juntara la basura, uno por
+            # cada lista leída por ruta (lo mostró Python con -X dev en las pruebas).
+            with open(archivo, "rb") as _f:
+                crudo = _f.read()
         else:
             archivo.seek(0)
             crudo = archivo.read()

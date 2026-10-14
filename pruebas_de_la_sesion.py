@@ -90,6 +90,50 @@ def probar():
     esperar("y en Estadísticas, la solapa que estaba", at.radio(key="sub_stats").value,
             "📌 Para pedir")
     esperar("sin errores al ir y venir", [e.value for e in at.exception], [])
+
+    # 2c. Una importación que se corta a la mitad no deja nada: corre entera adentro de una
+    # transacción (ver pantallas/cargar_excel.py). No tenía prueba. Se corta en la segunda fila.
+    with open("corte.csv", "w", encoding="utf-8") as f:
+        f.write("Codigo;Descripcion;Precio;Stock\nCORTE1;FILTRO UNO;100;1\n"
+                "CORTE2;FILTRO DOS;200;2\nCORTE3;FILTRO TRES;300;3\n")
+    _g = ns["poner_precio_y_stock_de_la_lista"].__globals__
+    _original = _g["poner_precio_y_stock_de_la_lista"]
+    _llamadas = []
+
+    def _se_corta(*args, **kwargs):
+        _llamadas.append(1)
+        if len(_llamadas) == 2:
+            raise RuntimeError("corte de prueba a mitad de la lista")
+        return _original(*args, **kwargs)
+
+    def _lo_que_hay():
+        c = ns["c"]
+        return tuple(c.execute(q).fetchone()[0] for q in (
+            "SELECT COUNT(*) FROM productos WHERE codigo_clean LIKE 'CORTE%'",
+            "SELECT COUNT(*) FROM importaciones", "SELECT COUNT(*) FROM historial_precios"))
+    _antes = _lo_que_hay()
+    _g["poner_precio_y_stock_de_la_lista"] = _se_corta
+    at.session_state["pagina_actual"] = "📁 Cargar Excel"
+    at.run()
+    _ruta = [x for x in at.radio if "Subir archivo" in x.options][0]
+    _ruta.set_value([o for o in _ruta.options if o != "Subir archivo"][0]).run()
+    [t for t in at.text_input if "Ruta completa" in t.label][0].set_value(
+        os.path.abspath("corte.csv")).run()
+    at.text_input(key="nombre_prov_carga").set_value("PRUEBACORTE").run()
+    [b for b in at.button if "Procesar e Importar" in b.label][0].click().run()
+    esperar("cortada a la mitad, no queda nada de la lista", (len(_llamadas), _lo_que_hay()),
+            (2, _antes))
+    _g["poner_precio_y_stock_de_la_lista"] = _original
+    [b for b in at.button if "Procesar e Importar" in b.label][0].click().run()
+    esperar("y entera, entra entera", _lo_que_hay(), (3, _antes[1] + 1, _antes[2] + 3))
+    esperar("sin errores al importar", [e.value for e in at.exception], [])
+    # En la app de internet la ruta se leería en el servidor, no en el teléfono: no se ofrece.
+    _en_la_nube = _g["corre_en_streamlit_cloud"]
+    _g["corre_en_streamlit_cloud"] = lambda: True
+    at.run()
+    esperar("en la app de internet no se ofrece leer por ruta",
+            [r.options for r in at.radio if "Subir archivo" in r.options], [])
+    _g["corre_en_streamlit_cloud"] = _en_la_nube
     [b for b in at.button if b.label == "Salir"][0].click().run()
 
     # 3. Ana vuelve a entrar; mientras está adentro le cambian el rol, y después la desactivan.

@@ -65,9 +65,44 @@ def probar():
         copia = ns["generar_backup_sin_fotos"]()
         c.execute("DELETE FROM productos")
         ns["conn"].commit()
+        # Lo guardado en el proceso que sale de la base (ver MEMORIAS_DE_LA_BASE): restaurada
+        # otra base, seguía contestando con la de antes.
+        _guardados = sys.modules["_equivalencias_el_chavo_del_proceso"].__dict__
+
+        def _llenas():
+            ns["cobertura_del_catalogo"]()
+            ns["escala_de_precios_por_marca"]()
+            ns["_marcas_con_chas"]()
+            ns["cuanto_une_cada_par"]([])
+            return _que_tienen()
+
+        def _que_tienen():
+            return {"cobertura": bool(_guardados.get("cobertura_del_catalogo")),
+                    "escala": (_guardados.get("escala_de_precios") or {}).get("datos") is not None,
+                    "chas": "mapa" in (_guardados.get("marcas_con_chas") or {}),
+                    "red": bool(_guardados.get("red_de_equivalencias"))}
+        _vacias = {"cobertura": False, "escala": False, "chas": False, "red": False}
+        esperar("antes de restaurar, guardadas", _llenas(), {k: True for k in _vacias})
         import io
         control = ns["restaurar_backup"](io.BytesIO(copia))      # la copia vuelve en bytes
         esperar("restaurado y controlado", (control["sana"], control["productos"]), (True, 1))
+        esperar("restaurar olvida lo guardado de la base anterior", _que_tienen(), _vacias)
+        # Cada memoria del proceso dice si sale de la base: una nueva sin decidir no se olvidaría
+        # al restaurar sin que nada avise.
+        import glob
+        import re
+        _usadas = set()
+        for _archivo in (glob.glob(os.path.join(RAIZ, "logica", "*.py"))
+                         + glob.glob(os.path.join(RAIZ, "pantallas", "*.py"))
+                         + [os.path.join(RAIZ, "app.py")]):
+            with open(_archivo, encoding="utf-8") as _f:
+                _usadas |= set(re.findall(r'del_proceso\(\s*"([a-z_]+)"', _f.read()))
+        esperar("cada del_proceso() está en MEMORIAS_DE_LA_BASE o en MEMORIAS_QUE_NO_SON_DE_LA_BASE",
+                sorted(_usadas - set(ns["MEMORIAS_DE_LA_BASE"])
+                       - set(ns["MEMORIAS_QUE_NO_SON_DE_LA_BASE"])), [])
+        esperar("y las listas no nombran ninguna que ya no exista",
+                sorted((set(ns["MEMORIAS_DE_LA_BASE"]) | set(ns["MEMORIAS_QUE_NO_SON_DE_LA_BASE"]))
+                       - _usadas), [])
         esperar("ocupada no es dañada",
                 ns["es_una_base_danada"](sqlite3.OperationalError("database is locked")), False)
         esperar("dañada es dañada",
@@ -100,9 +135,11 @@ def probar():
         con.close()
         with open(db, "rb") as f:
             vieja = f.read()
+        _llenas()
         with open(sana, "rb") as f:
             ok, aviso = g["reemplazar_la_base_danada"](f.read())
         esperar("sana: sí", ok, True)
+        esperar("y también olvida lo guardado de la base anterior", _que_tienen(), _vacias)
         apartadas = [n for n in os.listdir(".") if ".danada-" in n and not n.endswith(("-wal", "-shm"))]
         esperar("la vieja quedó aparte", len(apartadas), 1)
         with open(apartadas[0], "rb") as f:

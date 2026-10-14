@@ -60,6 +60,39 @@ def del_proceso(nombre, crear):
     return guardados[nombre]
 
 
+# LO GUARDADO EN EL PROCESO QUE SALE DE LA BASE. Restaurar una copia —o cambiar una base dañada
+# por otra— deja OTRA base en el mismo archivo, y estas memorias seguían contestando con la de
+# antes: la cobertura del catálogo hasta 10 minutos, la escala de precios 5, y las marcas con
+# CHAS hasta que se reiniciara el servidor. Ver olvidar_lo_guardado_de_la_base(). Cada
+# del_proceso() de la app está en una de las dos listas: pruebas_de_la_recuperacion.py falla si
+# aparece uno nuevo sin decidir de cuál es.
+MEMORIAS_DE_LA_BASE = ("autos_contra_el_catalogo", "cobertura_del_catalogo", "escala_de_precios",
+                       "marca_del_modelo", "marcas_con_chas", "red_de_equivalencias",
+                       "salud_compartida")
+MEMORIAS_QUE_NO_SON_DE_LA_BASE = (
+    # Candados, sesiones con los sitios de afuera, lo bajado de internet y lo que se midió.
+    "candado_de_la_copia_a_github", "candado_de_la_salud_compartida",
+    "candado_de_la_tanda_de_fondo", "candado_de_las_tareas_del_dia",
+    "candado_de_paginas_recientes", "candado_de_sesiones_de_catalogo", "intentos_en_recuperacion",
+    "libros_de_excel_leidos", "lo_traido_de_la_nhtsa", "mediciones_de_busqueda",
+    "paginas_recientes", "paquetes_de_certificados", "sesiones_de_catalogo",
+    "sesiones_de_portal", "token_de_mercado_libre", "ultimos_errores")
+
+
+def olvidar_lo_guardado_de_la_base():
+    """Vacía las memorias de MEMORIAS_DE_LA_BASE que ya existen, sin crear las que no: cada
+    una se crea con su forma la primera vez que se usa (ver del_proceso())."""
+    guardados = sys.modules.setdefault("_equivalencias_el_chavo_del_proceso",
+                                       types.ModuleType("_equivalencias_el_chavo_del_proceso")
+                                       ).__dict__
+    for nombre in MEMORIAS_DE_LA_BASE:
+        memoria = guardados.get(nombre)
+        if nombre == "escala_de_precios" and isinstance(memoria, dict):
+            memoria.update(cuando=0.0, datos=None)       # ver _escala_guardada()
+        elif hasattr(memoria, "clear"):
+            memoria.clear()
+
+
 # Del proceso y no de la pasada (ver del_proceso): si no, la pantalla que los muestra veía solo
 # los errores de su propia pasada, y los de los hilos de fondo no los veía nunca nadie.
 _ULTIMOS_ERRORES = del_proceso("ultimos_errores", list)
@@ -634,6 +667,13 @@ def secretos_app():
         return st.secrets
     except Exception:
         return {}
+
+
+def corre_en_streamlit_cloud():
+    """¿La app corre en los servidores de Streamlit (la de internet) y no en una máquina propia?
+    Ahí el repositorio se clona en /mount/src. Lo que se lee del disco por ruta es del servidor,
+    no del teléfono ni de la computadora de quien la usa."""
+    return _CARPETA.startswith("/mount/src/")
 
 
 # Lo que sobrevive a «Salir»: cómo se ve la app, no qué se hizo en ella.

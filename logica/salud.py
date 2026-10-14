@@ -151,16 +151,19 @@ def errores_de_las_tareas_de_fondo():
 @functools.lru_cache(maxsize=1)
 def version_de_la_app():
     raiz = os.path.dirname(_CARPETA)
+
+    def _leer(*partes):
+        with open(os.path.join(raiz, ".git", *partes), encoding="utf-8") as f:
+            return f.read()
     try:
-        cabeza = open(os.path.join(raiz, ".git", "HEAD"), encoding="utf-8").read().strip()
+        cabeza = _leer("HEAD").strip()
         if not cabeza.startswith("ref: "):
             return cabeza[:7]
         ref = cabeza[5:]
         rama = ref.rsplit("/", 1)[-1]
-        suelto = os.path.join(raiz, ".git", ref)
-        if os.path.exists(suelto):
-            return f"{open(suelto, encoding='utf-8').read().strip()[:7]} ({rama})"
-        for renglon in open(os.path.join(raiz, ".git", "packed-refs"), encoding="utf-8"):
+        if os.path.exists(os.path.join(raiz, ".git", ref)):
+            return f"{_leer(ref).strip()[:7]} ({rama})"
+        for renglon in _leer("packed-refs").splitlines():
             if renglon.strip().endswith(" " + ref):
                 return f"{renglon.split()[0][:7]} ({rama})"
     except OSError:

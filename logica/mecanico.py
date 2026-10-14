@@ -62,17 +62,17 @@ PIEZAS_QUE_NOMBRA_UN_DTC = {
     "KIT DE DISTRIBUCION": ("DISTRIBUCION",),
     "BUJIA INCANDESCENTE": {"dtc": ("BUJIA INCANDESCENTE", "INCANDESCENTE"),
                             "catalogo": ("INCANDESCENTE",)},
-    "ELECTROVENTILADOR": ("ELECTROVENTILADOR",),
-    "ALTERNADOR": ("ALTERNADOR",),
-    "BOMBA DE AGUA": ("BOMBA DE AGUA",),
-    "FILTRO DE AIRE": ("FILTRO DE AIRE",),
     # Acá el código y el catálogo no se llaman igual: la norma dice «ventilador del radiador»
     # (P0480) y el mostrador lo pide como «electroventilador». Cuando pasa eso, van separadas
     # las palabras que hay que leer EN EL CÓDIGO y las que hay que buscar EN EL CATÁLOGO —
-    # «VENTILADOR» a secas trae 253 productos que no son eso.
+    # «VENTILADOR» a secas trae 253 productos que no son eso. (Estaba dos veces: Python se
+    # quedaba con esta, en el lugar de la primera.)
     "ELECTROVENTILADOR": {"dtc": ("ELECTROVENTILADOR", "VENTILADOR DEL RADIADOR",
                                   "VENTILADOR DE ENFRIAMIENTO"),
                           "catalogo": ("ELECTROVENTILADOR",)},
+    "ALTERNADOR": ("ALTERNADOR",),
+    "BOMBA DE AGUA": ("BOMBA DE AGUA",),
+    "FILTRO DE AIRE": ("FILTRO DE AIRE",),
 }
 
 

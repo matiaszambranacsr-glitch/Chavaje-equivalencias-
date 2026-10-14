@@ -1711,7 +1711,6 @@ def bajar_fotos_desde_catalogo(marca_id, limite=100, progreso=None, hilos=6, liv
 
     bajadas, fallidas, sin_foto, por_la_red, bien = 0, [], 0, [], []
     for (pid, codigo), datos, error in resultados:
-        url_ficha = url_de_la_ficha(plantilla, codigo)
         if datos:
             datos, url_imagen = datos
             try:
@@ -2870,7 +2869,10 @@ def arrancar_tanda_de_fondo():
             # Vuelve a arrancar mientras _trabajo_de_fondo() corte porque llegó trabajo nuevo
             # de los que van primero. Con tope, por si alguna bandera quedara prendida siempre.
             for _ in range(20):
-                if not _trabajo_de_fondo():
+                # Si mientras tanto llegó código nuevo, corta entre vuelta y vuelta y la versión
+                # nueva larga la suya (ver llego_otra_version_de_la_logica()). Si no, cada vuelta
+                # seguía con el código con que arrancó la tanda.
+                if not _trabajo_de_fondo() or llego_otra_version_de_la_logica():
                     break
         except Exception as _err:
             anotar_error("arrancar_tanda_de_fondo", _err)

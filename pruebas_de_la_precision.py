@@ -1817,6 +1817,38 @@ def probar(L):
               for f in ns["vendido_con_lo_que_despues_se_rechazo"]()]
     esperar("solo la venta de antes del rechazo, de un par rechazado y en lugar de lo pedido",
             _afect, [("ana", "ILLINOIS IVD1", "VD1", "📐 Otra medida o variante")])
+    # 73. Aplicar lo decidido en una tanda saltea lo que otro resolvió mientras tanto (ver
+    # aplicar_decisiones() y _los_que_siguen_pendientes()). No tenía prueba: con dos personas
+    # revisando, aprobar volvía a crear lo que el otro acababa de descartar, y descartar anotaba
+    # como rechazado lo que el otro acababa de aprobar.
+    ot = marca("OTRO REVISOR")
+    _p = [producto(f"OR{i}", "FILTRO DE ACEITE", ot) for i in range(8)]
+    _pares = [(min(_p[i], _p[i + 1]), max(_p[i], _p[i + 1])) for i in (0, 2, 4, 6)]
+    for _a, _b in _pares:
+        c.execute("INSERT INTO equivalencias_pendientes (producto_a_id, producto_b_id, origen, lote) "
+                  "VALUES (?, ?, 'x', 'OTRO · 04/10')", (_a, _b))
+    conn.commit()
+    ns["decisiones_del_lote"]("OTRO · 04/10").update(
+        {_pares[0]: "bien", _pares[1]: "bien", _pares[2]: "mal", _pares[3]: "mal"})
+    # Mientras tanto, otra persona descarta el segundo y aprueba el tercero.
+    ns["rechazar_pendientes"]("OTRO · 04/10", [_pares[1]])
+    ns["aprobar_pendientes"]("OTRO · 04/10", [_pares[2]])
+    ns["aplicar_decisiones"]("OTRO · 04/10")
+
+    def _es_equivalencia(par):
+        return c.execute("SELECT COUNT(*) FROM equivalencias WHERE producto_a_id = ? "
+                         "AND producto_b_id = ?", par).fetchone()[0]
+
+    def _lo_revisado(par):
+        fila = c.execute("SELECT decision FROM equivalencias_revisadas WHERE producto_a_id = ? "
+                         "AND producto_b_id = ?", par).fetchone()
+        return fila[0] if fila else None
+    esperar("lo mío se aplica, y lo que resolvió otro queda como lo dejó",
+            [_es_equivalencia(par) for par in _pares], [1, 0, 1, 0])
+    esperar("y lo revisado dice lo que decidió cada uno", [_lo_revisado(par) for par in _pares],
+            ["ok", "rechazada", "ok", "rechazada"])
+    esperar("la tanda quedó vacía", c.execute("SELECT COUNT(*) FROM equivalencias_pendientes "
+                                              "WHERE lote = 'OTRO · 04/10'").fetchone()[0], 0)
     return fallas
 
 

@@ -471,9 +471,41 @@ def verificar_la_copia_de_github():
 MINUTOS_ENTRE_COPIAS = 15
 
 
+# Cuánto espera el vigía antes de la primera copia, y cada cuánto mira, mientras espera, si
+# llegó código nuevo. Ver vigilar_la_copia().
+SEGUNDOS_ANTES_DE_LA_PRIMERA_COPIA = 60
+SEGUNDOS_ENTRE_MIRADAS = 30
+
+
+def llego_otra_version_de_la_logica():
+    """¿app.py cargó otra lógica después de esta (se subió código nuevo)? Ver
+    cambio_algun_archivo(): la recarga arma un módulo nuevo, y lo que corre en un hilo largado
+    por el viejo sigue con el código viejo mientras el hilo viva."""
+    actual = sys.modules.get("logica")
+    return actual is not None and getattr(actual, "__dict__", None) is not globals()
+
+
+def _esperar_o_retirarse(segundos):
+    """Espera esos segundos. True si mientras tanto llegó otra versión de la lógica: el hilo
+    que espera se tiene que ir para que el código nuevo largue el suyo."""
+    fin = time.time() + segundos
+    while time.time() < fin:
+        if llego_otra_version_de_la_logica():
+            return True
+        time.sleep(max(0.0, min(SEGUNDOS_ENTRE_MIRADAS, fin - time.time())))
+    return llego_otra_version_de_la_logica()
+
+
 def vigilar_la_copia():
     """Larga el hilo que sube la copia cuando hay cambios. Uno solo por proceso: se llama en
     cada pasada y casi siempre vuelve enseguida porque ya está corriendo.
+
+    CUANDO LLEGA CÓDIGO NUEVO, EL HILO SE VA. El candado es del proceso (sobrevive a la recarga
+    de la lógica) y el hilo no terminaba nunca: seguía corriendo el código con que arrancó el
+    servidor hasta que se reiniciara. Se vio en GitHub: la copia del 12/10 la subió una versión
+    del 7/10, cinco días y trece cambios atrás, y con ella cualquier arreglo de la copia (el
+    freno a subirla sin cifrar, por ejemplo) no regía. Ahora, al ver otra versión, suelta el
+    candado y se va; la pasada siguiente de la app (que llama a esta función) larga uno nuevo.
 
     Antes la subida era un paso de las tareas del día: UNA vez por día, el último, dentro de
     los seis segundos que tienen esas tareas —si los pasos de antes los gastaban, ese día no
@@ -487,7 +519,9 @@ def vigilar_la_copia():
 
     def correr():
         try:
-            time.sleep(60)          # que termine de arrancar la app primero
+            # Primero, que termine de arrancar la app.
+            if _esperar_o_retirarse(SEGUNDOS_ANTES_DE_LA_PRIMERA_COPIA):
+                return
             while True:
                 try:
                     subir_la_copia_si_cambio()
@@ -507,7 +541,8 @@ def vigilar_la_copia():
                     subir_las_fotos_si_cambiaron()
                 except Exception as _err:
                     anotar_error("vigilar_la_copia/fotos", _err)
-                time.sleep(MINUTOS_ENTRE_COPIAS * 60)
+                if _esperar_o_retirarse(MINUTOS_ENTRE_COPIAS * 60):
+                    return
         finally:
             candado.release()
 

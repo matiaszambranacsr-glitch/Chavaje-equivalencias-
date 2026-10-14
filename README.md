@@ -25,6 +25,7 @@ qué proveedores, son el mismo repuesto. Corre con Streamlit sobre una base SQLi
 | `pruebas_de_la_precision.py` | Cuándo una equivalencia se da por verificada: la fuente de cada vínculo, la ficha de prueba, el veto que gana siempre, la comprobación en la mano, el proveedor que cambia de equivalente sin avisar, las devoluciones, el riesgo, la deriva al cambiar las reglas y que un rechazo no se pise. |
 | `pruebas_de_los_cambios.py` | El registro de quién cambió qué (sin los precios), los permisos adentro de las funciones, el orden de los vínculos en la base, la entrega con stock de menos, el vistazo de un backup y el mensaje de WhatsApp. |
 | `CONTRATOS.md` | Lo que no se puede romper, regla por regla, con la prueba que sostiene cada una. |
+| `.github/correr_las_pruebas.py` | El auditor y todas las pruebas de una, de a cuatro a la vez, y qué falló. Es lo que corre GitHub en cada subida (`.github/workflows/pruebas.yml`). |
 | `medir_el_buscador.py` | Cuánto tarda el buscador con 10, 50 y 100 personas buscando a la vez, sobre una copia de la base real. |
 | `requirements.txt` | Lo que hay que instalar, con los rangos de versiones con que se probó (ver el comentario de arriba del archivo). |
 | `Equivalencias` | El prototipo original, de antes de `app.py`. No lo usa nadie; queda por si querés mirarlo. Se puede borrar. |
@@ -38,6 +39,7 @@ vieja y ni se podía importar.
 ```bash
 python3 -m venv .venv && .venv/bin/pip install -r requirements.txt   # una vez
 source .venv/bin/activate
+python3 .github/correr_las_pruebas.py   # todo de una: el auditor, las 15 baterías y el núcleo (menos de un minuto)
 python3 auditar.py               # tiene que dar ERROR 0 (revisa la app entera, y que nucleo/ esté al día)
 python3 nucleo/generar.py        # regenerar el paquete desde logica/
 python3 -m nucleo.pruebas        # tiene que decir "todo en verde"
@@ -6477,6 +6479,64 @@ el botón**:
   dónde vino. Solo los últimos tres años: la serie arranca en los cuarenta y trae el 89.
 - «🔌 Probar las fuentes de afuera» suma la Central de Deudores (con el CUIT de la AFIP, nunca el
   de un cliente) y la inflación de respaldo.
+
+## 🤖 Las pruebas en GitHub, lo que no tenía prueba, y los errores que aparecieron buscando
+
+### Las pruebas corren solas en cada subida
+
+Hasta ahora la batería se corría a mano antes de cada subida: un cambio hecho por otro lado
+llegaba a la app sin pasar por nada. Ahora `.github/workflows/pruebas.yml` corre en cada subida
+a `main` y a las ramas de trabajo **el auditor, las 15 baterías y las del núcleo**
+(`.github/correr_las_pruebas.py`, que también se corre a mano). Si algo falla, GitHub pone la ✗
+roja al lado del cambio y le manda un mail a quien lo subió, con lo último que dijo cada prueba
+que falló. Tarda menos de un minuto en correr (medido: 18 de 18 en 0,6 minutos, de a cuatro).
+
+- No corre en la rama `copia-de-seguridad`: ahí la app sube la copia cada vez que cambia algo, y
+  cada subida gastaría minutos sin probar nada. Tampoco cuando solo cambia un `.md`.
+- Lo que necesita la base real (`pruebas_de_la_revision.py --base`,
+  `pruebas_de_compatibilidad.py`) no corre ahí: GitHub no tiene la base. Se sigue corriendo a
+  mano antes de publicar.
+
+### Lo que CONTRATOS decía «sin prueba automática»
+
+| Regla | La prueba nueva |
+|---|---|
+| La importación es todo o nada | `pruebas_de_la_sesion.py` (2c): con la app de verdad, una lista de tres filas que se corta en la segunda no deja ni productos, ni precios, ni el registro de la importación; la misma lista entera entra entera. |
+| Una base dañada no se sube | `pruebas_de_las_copias_en_github.py`: cortada a la mitad, con el encabezado roto o que no es una base, no sube, en GitHub sigue la buena y la salud lo sabe; con la base sana vuelve a subir y el aviso se va. |
+| Aplicar lo decidido saltea lo que otro resolvió | `pruebas_de_la_precision.py` (73): lo que otro descartó no se aprueba, lo que otro aprobó no se descarta, y lo revisado dice lo que decidió cada uno. |
+| Los cachés se limpian al restaurar | `pruebas_de_la_recuperacion.py`: ver abajo, porque no era cierto del todo. |
+
+### Los errores que aparecieron buscando
+
+- **El hilo que sube la copia seguía con el código viejo.** Al subir código nuevo, `app.py`
+  vuelve a cargar la lógica en un módulo nuevo, pero el hilo del vigía —uno por proceso, con su
+  candado— seguía corriendo el código con que arrancó el servidor. Se vio en GitHub: **la copia
+  del 12/10 la subió la versión del 7/10** (`bd7501b`, trece cambios atrás). Con eso, cualquier
+  arreglo de la copia —el freno a subirla sin cifrar, por ejemplo— no regía hasta reiniciar.
+  Ahora el vigía mira cada 30 segundos si llegó otra versión (`llego_otra_version_de_la_logica()`)
+  y, si llegó, suelta el candado y se va; la pasada siguiente larga uno con el código nuevo. La
+  tanda de fondo hace lo mismo entre vuelta y vuelta.
+- **Restaurar no olvidaba todo lo de la base anterior.** Limpiaba los cachés de Streamlit, pero
+  no lo guardado en el proceso: la cobertura del catálogo seguía hasta 10 minutos, la escala de
+  precios 5 y **las marcas con CHAS hasta reiniciar el servidor**. Cambiar una base dañada por
+  otra tampoco. Ahora `olvidar_lo_guardado_de_la_base()` las vacía en los dos casos, y la prueba
+  controla que cada `del_proceso()` de la app esté anotado como «sale de la base» o «no»: una
+  memoria nueva sin decidir hace fallar la prueba.
+- **«Escribir la ruta en el teléfono» no podía andar en la app de internet.** La ruta se lee en
+  el servidor, no en el teléfono, y la ayuda la recomendaba justo cuando fallaba el botón de
+  subir en el celular. En la app de internet ya no se ofrece (`corre_en_streamlit_cloud()`); en
+  una instalada a mano se llama «Escribir la ruta del archivo» y dice para qué sirve.
+- **Archivos que quedaban abiertos**: cada lista leída por ruta, y la versión de la app (lo
+  mostró Python con `-X dev` corriendo las pruebas).
+- Una clave repetida en las piezas que nombra un código de falla (`ELECTROVENTILADOR` estaba dos
+  veces; Python usaba la segunda en el lugar de la primera: queda una sola, igual) y un cálculo
+  por cada foto que nadie usaba.
+
+Lo que se buscó y no apareció: las 32 pantallas recorridas como administrador, como empleado y
+como invitado sobre la copia de la base, **sin errores en pantalla ni errores anotados** (salvo
+los de red de este entorno, que no llega al dólar ni al IPC), y `pyflakes` sobre todo el código.
+
+Probado: las pruebas nuevas, y 11 fallas puestas a mano en lo arreglado, las 11 detectadas.
 
 ## 🔑 La copia que dice la verdad, cómo poner `clave_copia`, y la cola de sugeridas más rápida
 

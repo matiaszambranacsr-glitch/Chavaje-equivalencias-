@@ -321,6 +321,20 @@ def probar(ns, gh, carpeta):
     esperar("y el aviso se fue", [p for p in ns["diagnostico_de_salud"]()
                                   if "NO SE ESTÁ SUBIENDO" in p["titulo"]], [])
     esperar("y la copia ya no está atrasada", ns["cuanto_perderias_si_reinicia"]()["atrasada"], False)
+    # LO DAÑADO NO SE SUBE (ver la_base_esta_sana()): pisaría la última copia buena, que es la
+    # que se usa para arrancar después de un reinicio.
+    _buena = ns["generar_backup_sin_fotos"]()
+    antes_del_dano = dict(gh.arbol_de(rama))
+    for _nombre, _danada in (("cortada a la mitad", _buena[:len(_buena) // 2]),
+                             ("con el encabezado roto", b"\x00" * 100 + _buena[100:]),
+                             ("que no es una base", b"esto no es una base" * 500)):
+        ok, texto = ns["subir_backup_a_github"](_danada, "prueba")
+        esperar(f"una base {_nombre} no se sube", (ok, "daño" in texto), (False, True))
+    esperar("y en GitHub sigue la buena", gh.arbol_de(rama), antes_del_dano)
+    esperar("la salud lo sabe", bool(ns["obtener_config"]("base_danada", "")), True)
+    ok, texto = ns["subir_la_copia_si_cambio"](aunque_no_haya_cambios=True)
+    esperar("con la base sana vuelve a subir, y el aviso se va",
+            (ok, ns["obtener_config"]("base_danada", "")), (True, ""))
     _frases = {ns["frase_para_la_copia"]() for _ in range(50)}
     esperar("la frase que propone la app: larga, distinta cada vez y sin lo que rompe los secretos",
             (len(_frases), min(len(f) for f in _frases),
@@ -332,6 +346,35 @@ def probar(ns, gh, carpeta):
     g["secretos_app"] = lambda: {"github_token": "x", "github_repo": "yo/repo"}
     gh.privado = True
     esperar("privado y sin clave, sí", ns["se_puede_subir_sin_cifrar"](cfg_gh, cab_gh), (True, ""))
+
+    # EL VIGÍA SE VA CUANDO LLEGA CÓDIGO NUEVO (ver vigilar_la_copia()). Seguía corriendo el
+    # código con que arrancó el servidor: la copia del 12/10 la subió una versión del 7/10.
+    import time
+    import types
+    g["SEGUNDOS_ANTES_DE_LA_PRIMERA_COPIA"] = 0
+    g["SEGUNDOS_ENTRE_MIRADAS"] = 0.05
+    g["MINUTOS_ENTRE_COPIAS"] = 0.02                      # 1,2 segundos entre vueltas
+    vueltas = []
+    g["subir_la_copia_si_cambio"] = lambda *a, **k: vueltas.append(1) or (None, "")
+    candado = ns["del_proceso"]("candado_de_la_copia_a_github", threading.Lock)
+    esperar("el vigía arranca", ns["vigilar_la_copia"](), True)
+    esperar("y uno solo", ns["vigilar_la_copia"](), False)
+    time.sleep(0.5)
+    esperar("y da vueltas", len(vueltas) >= 1, True)
+    esperar("con la misma lógica no se va", candado.locked(), True)
+    _logica = sys.modules["logica"]
+    sys.modules["logica"] = types.ModuleType("logica")    # lo que hace app.py al recargarla
+    try:
+        libre = False
+        for _ in range(100):
+            if not candado.locked():
+                libre = True
+                break
+            time.sleep(0.05)
+    finally:
+        sys.modules["logica"] = _logica
+    esperar("con otra versión de la lógica se va y suelta el candado", libre, True)
+    esperar("y la de ahora larga el suyo", ns["vigilar_la_copia"](), True)
     return fallas
 
 

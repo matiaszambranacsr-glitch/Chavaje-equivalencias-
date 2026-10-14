@@ -22,6 +22,7 @@ Las pruebas se corren como dice el README, en «Antes de subir un cambio».
 | Con y sin ABS, aire o sensor son piezas distintas | `firmas_compatibles()`, `equipamiento_declarado()` | `pruebas_de_la_revision.py` (pares de muestra), `pruebas_de_la_precision.py` (9) |
 | Las medidas que salen del mismo texto no suman dos veces | `evaluar_equivalencia()` | `pruebas_de_la_precision.py` (10) |
 | Lo que volvió porque no le iba baja el vínculo y gana sobre cualquier fuente | `registrar_devolucion()`, `pares_devueltos()` | `pruebas_de_la_precision.py` (11) |
+| Aplicar lo decidido en una tanda saltea lo que otro resolvió mientras tanto | `aplicar_decisiones()`, `_los_que_siguen_pendientes()` | `pruebas_de_la_precision.py` (73) |
 | Un rechazo no se pisa: sale de la cola, no se aprueba en grupo, y vincularlo a mano pide confirmarlo | `marcar_revision()`, `aprobar_pendientes()`, `rechazos_del_grupo()` | `pruebas_de_la_precision.py` (12) |
 | Una pieza de seguridad confirmada igual pide mirarla en la mano | `riesgo_de_la_pieza()`, `veredicto_de_la_equivalencia()` | `pruebas_de_la_precision.py` (13) |
 | Al volver a puntuar todo queda anotado qué cambió de franja | `anotar_la_deriva()` | `pruebas_de_la_precision.py` (14) |
@@ -109,6 +110,7 @@ Las pruebas se corren como dice el README, en «Antes de subir un cambio».
 | El interés por mora solo en las cuentas que lo tienen prendido, y nunca dos veces los mismos días | `cargar_el_interes_por_mora()` | `pruebas_de_las_cuentas.py` |
 | Un presupuesto guardado no cambia si después cambia un precio | Se guarda con sus precios (`items_json`) | `pruebas_de_los_frenos.py` (10) |
 | Un presupuesto no se guarda dos veces por un doble toque, ni desde otro proceso | `guardar_presupuesto_mecanico()` en `transaccion()` | `pruebas_de_los_frenos.py` (10) |
+| Una importación que se corta a la mitad no deja nada; entera, entra entera | La transacción de `pantallas/cargar_excel.py` | `pruebas_de_la_sesion.py` (2c) |
 | Una lista con un precio que salta mucho no lo pisa (el stock sí), y se compara con el último precio de verdad si el guardado quedó en 0 | `poner_precio_y_stock_de_la_lista()` | `pruebas_de_los_cambios.py` |
 | «Aplicar igual» lo frenado es del administrador, todo o nada | `aplicar_precios_frenados()` | `pruebas_de_los_cambios.py` |
 | El buscador dice de cuándo es el precio de cada lista, y marca lo viejo | `fecha_de_la_lista()`, `texto_de_la_fecha_de_los_precios()` | `pruebas_de_la_precision.py` (71) |
@@ -131,6 +133,7 @@ Las pruebas se corren como dice el README, en «Antes de subir un cambio».
 
 | Regla | Dónde se cuida | La prueba |
 |---|---|---|
+| Restaurar (o cambiar una base dañada por otra) olvida lo guardado de la base anterior: cobertura, escala de precios, marcas con CHAS, la red | `olvidar_lo_guardado_de_la_base()`, `MEMORIAS_DE_LA_BASE` | `pruebas_de_la_recuperacion.py` (también controla que cada memoria del proceso esté clasificada) |
 | Restaurar deja la base sana y con los mismos datos, también desde la copia cifrada de GitHub | `restaurar_backup()` | `pruebas_de_los_frenos.py` (16) |
 | La copia sin cifrar no sube a un repositorio público | `se_puede_subir_sin_cifrar()` | `pruebas_de_las_copias_en_github.py` |
 | Si la última vuelta no pudo subir, la pantalla dice «atrasada» y desde cuándo, nunca «al día» | `cuanto_perderias_si_reinicia()` | `pruebas_de_las_copias_en_github.py` |
@@ -138,7 +141,7 @@ Las pruebas se corren como dice el README, en «Antes de subir un cambio».
 | La prueba de la copia mira las claves foráneas de todas las tablas | `_usarla_como_la_usaria_el_mostrador()` | `pruebas_de_las_copias_en_github.py` |
 | Lo que empieza con «=» va como texto al Excel | `to_excel_bytes()` | `pruebas_de_los_frenos.py` |
 | Un backup dañado no entra ni toca nada | `la_base_esta_sana()` antes de restaurar | `pruebas_de_los_frenos.py` (16), `pruebas_de_la_recuperacion.py` |
-| Una base dañada no se sube y no pisa la copia buena | `subir_backup_a_github()` | — (ver «Sin prueba automática») |
+| Una base dañada (cortada, con el encabezado roto o que no es una base) no se sube y no pisa la copia buena | `subir_backup_a_github()` con `la_base_esta_sana()` | `pruebas_de_las_copias_en_github.py` |
 | Si el catálogo cae a la mitad, la copia buena no se pisa sola | `subir_la_copia_si_cambio()` | `pruebas_de_los_frenos.py` (5) |
 | La copia de GitHub se puede recuperar (se prueba sola cada día) | `verificar_la_copia_de_github()` | `pruebas_de_los_frenos.py` (6) |
 | Quedan copias anteriores (7 diarias, 4 semanales, 6 mensuales) | `copias_a_guardar()` | `pruebas_de_las_copias_en_github.py` |
@@ -149,6 +152,8 @@ Las pruebas se corren como dice el README, en «Antes de subir un cambio».
 
 | Regla | Dónde se cuida | La prueba |
 |---|---|---|
+| El auditor y todas las pruebas corren solos en cada subida a `main` y a las ramas de trabajo | `.github/workflows/pruebas.yml`, `.github/correr_las_pruebas.py` | GitHub Actions (la ✗ roja y el mail) |
+| El vigía de la copia y la tanda de fondo corren el código de ahora, no el con que arrancó el servidor | `llego_otra_version_de_la_logica()` | `pruebas_de_las_copias_en_github.py` |
 | `nucleo/` se regenera desde `logica/` y está al día | `nucleo/generar.py` | `auditar.py` (lo regenera aparte y compara) |
 | Ningún archivo tiene escrita la carpeta de una máquina | — | `auditar.py` |
 | Un error anotado no lleva claves ni contraseñas | `tapar_lo_sensible()` | `pruebas_de_los_frenos.py` (8), `nucleo/pruebas.py` |
@@ -157,9 +162,5 @@ Las pruebas se corren como dice el README, en «Antes de subir un cambio».
 
 ## Sin prueba automática todavía
 
-- La importación de una lista es todo o nada: va en una transacción (ver
-  pantallas/cargar_excel.py), pero no hay prueba que la corte a la mitad.
-- Una base dañada no se sube a GitHub: `subir_backup_a_github()` la controla antes, sin prueba
-  propia (la de la copia que no se pisa con el catálogo a la mitad es otra).
-- La revisión de un lote saltea lo que otro ya resolvió (`aplicar_decisiones()`).
-- Los cachés se limpian al restaurar.
+- Lo que necesita la base real (`pruebas_de_la_revision.py --base`, `pruebas_de_compatibilidad.py`)
+  no corre en GitHub: se corre a mano antes de publicar.

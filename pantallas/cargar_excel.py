@@ -37,12 +37,20 @@ if pagina == PAGINAS[2]:
             help="Se propone solo a partir del nombre del archivo. Corregilo si no acertó."
         )
 
-        metodo = st.radio(
-            "¿Cómo querés indicar el archivo?",
-            ["Subir archivo", "Escribir la ruta en el teléfono"],
-            horizontal=True,
-            help="Si el botón de subir no responde en el navegador del celular, usá la opción de ruta."
-        )
+        # La ruta se lee en la máquina donde CORRE la app, no en el teléfono que la mira: sirve
+        # solo con la app instalada en ese mismo aparato. En la de internet la ruta del teléfono
+        # no existe en el servidor, y la ayuda la recomendaba justo cuando fallaba el botón de
+        # subir en el celular: no podía andar nunca. Ahí no se ofrece.
+        if corre_en_streamlit_cloud():
+            metodo = "Subir archivo"
+        else:
+            metodo = st.radio(
+                "¿Cómo querés indicar el archivo?",
+                ["Subir archivo", "Escribir la ruta del archivo"],
+                horizontal=True,
+                help="La ruta sirve solo si la app corre en este mismo aparato (instalada a "
+                     "mano). Si el botón de subir no responde, probá con otro navegador."
+            )
 
         archivo = None
 
@@ -95,7 +103,7 @@ if pagina == PAGINAS[2]:
                 "Ejemplo: /storage/emulated/0/Download/lista.xlsx "
                 "(si el archivo está en Descargas, esa es la ruta de siempre)."
             )
-            ruta_archivo = st.text_input("Ruta completa del archivo en el teléfono:",
+            ruta_archivo = st.text_input("Ruta completa del archivo en este aparato:",
                                           placeholder="/storage/emulated/0/Download/lista.xlsx")
             EXTENSIONES_OK = (".xlsx", ".xlsm", ".csv", ".txt", ".tsv", ".pdf")
             if ruta_archivo:

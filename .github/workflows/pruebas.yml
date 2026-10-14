@@ -1,0 +1,39 @@
+# El auditor y todas las pruebas, en cada subida a main y a las ramas de trabajo. Si algo falla,
+# GitHub lo marca en rojo (la ✗ al lado del cambio) y le manda un mail a quien lo subió. Lo que
+# corre está en .github/correr_las_pruebas.py, que también se puede correr a mano.
+#
+# No corre en la rama «copia-de-seguridad»: ahí la app sube la copia de la base cada vez que
+# cambia, y cada subida gastaría minutos de GitHub sin probar nada. Tampoco cuando solo cambia
+# un .md. Con el repositorio privado, GitHub da 2.000 minutos gratis por mes.
+name: Pruebas
+
+on:
+  push:
+    branches: [main, "claude/**"]
+    paths-ignore: ["**.md"]
+  pull_request:
+    paths-ignore: ["**.md"]
+  workflow_dispatch:
+
+# Dos subidas seguidas a la misma rama: la primera se cancela, importa la última.
+concurrency:
+  group: pruebas-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  pruebas:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Instalar las librerías
+        run: pip install -r requirements.txt
+      - name: Auditor y pruebas
+        run: python .github/correr_las_pruebas.py

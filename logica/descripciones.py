@@ -1086,7 +1086,7 @@ def que_trae_este_kit(producto_id, limite=12):
     limpios = [x for x in limpios if len(x) >= LARGO_MINIMO_CODIGO_EN_KIT]
     if not limpios:
         return []
-    salida, vistos, por_descripcion = [], set(), {}
+    vistos, por_descripcion = set(), {}
     for tanda, marcadores in en_tandas(limpios):
         c.execute(f"""SELECT p.id AS "ID", p.codigo_raw AS "Codigo", p.descripcion AS "Descripcion",
                              m.nombre AS "Marca", p.precio AS "Precio", p.stock AS "Stock"
