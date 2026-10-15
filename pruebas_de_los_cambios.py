@@ -117,7 +117,10 @@ def probar(L):
         _de_admin = (("eliminar un producto", ns["borrar_producto_con_papelera"], (999999,)),
                      ("deshacer una importación", ns["deshacer_importacion"], ("NO-EXISTE",)),
                      ("fusionar marcas", ns["fusionar_marcas"], (999998, 999999)),
-                     ("aplicar los precios frenados", ns["aplicar_precios_frenados"], ([],)))
+                     ("aplicar los precios frenados", ns["aplicar_precios_frenados"], ([],)),
+                     ("ajustar los precios de una marca", ns["aumentar_precios_por_marca"], (999999, 5)),
+                     ("corregir un código con la marca pegada",
+                      ns["corregir_codigo_con_la_marca_pegada"], (999999, "123")))
         _de_empleado = (("aprobar", ns["aprobar_pendientes"], ("NO-EXISTE", [])),
                         ("registrar un pago", ns["registrar_pago_de_cuenta"], (999999, 0, "Efectivo")),
                         ("un remito", ns["aplicar_carga_remito"], ([],)),
@@ -187,10 +190,141 @@ def probar(L):
         g["_CARPETA"] = "/mount/src/chavaje-equivalencias-/logica"
         esperar("en /mount/src sí", ns["corre_en_streamlit_cloud"](), True)
         g["_CARPETA"] = _carpeta
+        # EL AJUSTE DE PRECIOS POR PORCENTAJE (Marcas): con su renglón en el historial, sin tocar
+        # los que no tienen precio, y con tope (ver aumentar_precios_por_marca()). No tenía
+        # ninguna prueba.
+        g["_nivel_de_quien_esta_adentro"] = lambda: "admin"
+        _m_aj = ns["get_or_create_marca"]("PRUEBA AJUSTE")
+        with ns["db_lock"], ns["transaccion"]():
+            _aj = [ns["get_or_create_producto"](f"AJ-{i}", f"AJ{i}", "Pieza de prueba", _m_aj)
+                   for i in range(3)]
+        for _pid, _precio in zip(_aj, (1000.0, 0.0, None)):
+            c.execute("UPDATE productos SET precio = ? WHERE id = ?", (_precio, _pid))
+        ns["conn"].commit()
+
+        def _precios_aj():
+            return [c.execute("SELECT precio FROM productos WHERE id = ?", (p,)).fetchone()[0]
+                    for p in _aj]
+
+        def _historial_aj(pid):
+            return [r[0] for r in c.execute("SELECT precio FROM historial_precios WHERE "
+                                            "producto_id = ? ORDER BY id", (pid,))]
+        esperar("subir 10 %: solo el que tiene precio, y queda en su historial",
+                (ns["productos_con_precio_de_la_marca"](_m_aj),
+                 ns["aumentar_precios_por_marca"](_m_aj, 10), _precios_aj(), _historial_aj(_aj[0]),
+                 _historial_aj(_aj[1])), (1, 1, [1100.0, 0.0, None], [1100.0], []))
+        for _malo in (-100, -150, 5000):
+            try:
+                ns["aumentar_precios_por_marca"](_m_aj, _malo)
+                _paso = True
+            except ValueError:
+                _paso = False
+            esperar(f"un ajuste de {_malo} % no se aplica", _paso, False)
+        esperar("y los precios quedan como estaban", _precios_aj(), [1100.0, 0.0, None])
+        esperar("bajar 99 % se puede", (ns["aumentar_precios_por_marca"](_m_aj, -99), _precios_aj()[0]),
+                (1, 11.0))
+
+        # EL MARGEN, sobre el precio de venta (ver margen_de()). Tampoco tenía prueba.
+        esperar("el margen, sobre el precio de venta", ns["margen_de"](1000, 650), (35.0, 350))
+        esperar("sin costo o sin precio no hay margen",
+                [ns["margen_de"](1000, None), ns["margen_de"](0, 500), ns["margen_de"](1000, 0)],
+                [(None, None)] * 3)
+        esperar("y en la fila, sin borrar el costo",
+                [(f.get("Margen"), "_costo" in f) for f in ns["agregar_margen"](
+                    [{"Precio": 1000, "_costo": 650}, {"Precio": 1000}])],
+                [("35% ($350)", True), ("", False)])
+
+        # CERRAR UNA RESERVA: vendida descuenta del stock UNA vez; cancelada solo libera (ver
+        # cerrar_reserva()). Sin prueba hasta ahora.
+        c.execute("UPDATE productos SET stock = 10 WHERE id = ?", (_aj[0],))
+        ns["conn"].commit()
+
+        def _stock_aj():
+            return c.execute("SELECT stock FROM productos WHERE id = ?", (_aj[0],)).fetchone()[0]
+
+        def _ultima_reserva():
+            return c.execute("SELECT id FROM reservas_stock WHERE producto_id = ? ORDER BY id DESC",
+                             (_aj[0],)).fetchone()[0]
+        ns["reservar_stock"](_aj[0], 3, "Cliente de prueba")
+        _r1 = _ultima_reserva()
+        esperar("vendida, descuenta del stock una sola vez",
+                (ns["cerrar_reserva"](_r1, True), _stock_aj(), ns["cerrar_reserva"](_r1, True),
+                 _stock_aj()), (True, 7, False, 7))
+        ns["reservar_stock"](_aj[0], 2, "Cliente de prueba")
+        _r2 = _ultima_reserva()
+        esperar("cancelada, solo libera",
+                (ns["cerrar_reserva"](_r2, False), _stock_aj(),
+                 c.execute("SELECT estado FROM reservas_stock WHERE id = ?", (_r2,)).fetchone()[0]),
+                (True, 7, "cancelada"))
+
+        # BORRAR UNA MARCA Y RESTAURARLA (ver eliminar_marca_con_papelera()). No tenía prueba, y
+        # una marca con un solo producto con foto no se podía borrar: «bytes is not JSON
+        # serializable». Y volvía sin la historia de sus productos.
+        _m_bo = ns["get_or_create_marca"]("MARCA CON FOTOS")
+        _m_otra = ns["get_or_create_marca"]("OTRA MARCA")
+        with ns["db_lock"], ns["transaccion"]():
+            _mf1 = ns["get_or_create_producto"]("MF-1", "MF1", "Filtro con foto", _m_bo)
+            _mf2 = ns["get_or_create_producto"]("MF-2", "MF2", "Filtro sin foto", _m_bo)
+            _ot1 = ns["get_or_create_producto"]("OT-1", "OT1", "Filtro de otra marca", _m_otra)
+        c.execute("UPDATE productos SET imagen_orb_blob = ?, precio = 100 WHERE id = ?",
+                  (b"\x00\x01firma", _mf1))
+        c.execute("INSERT INTO historial_precios (producto_id, precio) VALUES (?, 90), (?, 100)",
+                  (_mf1, _mf1))
+        c.execute("INSERT INTO producto_fotos (producto_id, imagen_data, estado) "
+                  "VALUES (?, ?, 'ok')", (_mf1, b"\x89PNGfoto"))
+        c.execute("INSERT INTO equivalencias (producto_a_id, producto_b_id) VALUES (?, ?)",
+                  (min(_mf1, _ot1), max(_mf1, _ot1)))
+        ns["conn"].commit()
+        g["_nivel_de_quien_esta_adentro"] = lambda: "admin"
+        esperar("una marca con un producto con foto se puede borrar",
+                (ns["eliminar_marca_con_papelera"]("MARCA CON FOTOS"),
+                 c.execute("SELECT COUNT(*) FROM marcas WHERE nombre = 'MARCA CON FOTOS'"
+                           ).fetchone()[0]), (True, 0))
+        # Mientras está en la papelera, se vuelve a importar la lista: la marca y un producto
+        # vuelven con otro id.
+        _m_bo2 = ns["get_or_create_marca"]("MARCA CON FOTOS")
+        with ns["db_lock"], ns["transaccion"]():
+            _mf1_nuevo = ns["get_or_create_producto"]("MF-1", "MF1", "Filtro con foto", _m_bo2)
+        _papel = c.execute("SELECT id FROM papelera WHERE tipo = 'marca' ORDER BY id DESC"
+                           ).fetchone()[0]
+        _ok_rest, _detalle_rest = ns["restaurar_de_papelera"](_papel)
+        esperar(f"y se restaura aunque la hayan vuelto a crear ({_detalle_rest})", _ok_rest, True)
+        _mf1_ahora = c.execute("SELECT p.id, p.imagen_orb_blob FROM productos p JOIN marcas m ON "
+                               "m.id = p.marca_id WHERE m.nombre = 'MARCA CON FOTOS' AND "
+                               "p.codigo_clean = 'MF1'").fetchall()
+        esperar("una sola marca y un solo MF1: el que volvió con la importación",
+                (c.execute("SELECT COUNT(*) FROM marcas WHERE nombre = 'MARCA CON FOTOS'"
+                           ).fetchone()[0], [r[0] for r in _mf1_ahora]), (1, [_mf1_nuevo]))
+        esperar("y el otro producto también volvió",
+                c.execute("SELECT COUNT(*) FROM productos WHERE codigo_clean = 'MF2'"
+                          ).fetchone()[0], 1)
+        esperar("con su historia: los precios anteriores, la foto y el vínculo",
+                (c.execute("SELECT COUNT(*) FROM historial_precios WHERE producto_id = ?",
+                           (_mf1_nuevo,)).fetchone()[0],
+                 c.execute("SELECT COUNT(*) FROM producto_fotos WHERE producto_id = ?",
+                           (_mf1_nuevo,)).fetchone()[0],
+                 c.execute("SELECT COUNT(*) FROM equivalencias WHERE ? IN (producto_a_id, "
+                           "producto_b_id) AND ? IN (producto_a_id, producto_b_id)",
+                           (_mf1_nuevo, _ot1)).fetchone()[0]), (2, 1, 1))
+        g["_nivel_de_quien_esta_adentro"] = lambda: "operador"
+
         # Se saca lo creado: más abajo se cuentan los productos y las marcas.
+        for _m in (_m_bo2, _m_otra):
+            for (_pid,) in c.execute("SELECT id FROM productos WHERE marca_id = ?", (_m,)).fetchall():
+                for _t in ("historial_precios", "producto_fotos"):
+                    c.execute(f"DELETE FROM {_t} WHERE producto_id = ?", (_pid,))
+                c.execute("DELETE FROM equivalencias WHERE ? IN (producto_a_id, producto_b_id)",
+                          (_pid,))
+                c.execute("DELETE FROM productos WHERE id = ?", (_pid,))
+            c.execute("DELETE FROM marcas WHERE id = ?", (_m,))
         c.execute("DELETE FROM historial_precios WHERE producto_id = ?", (_p_fr,))
         c.execute("DELETE FROM productos WHERE id = ?", (_p_fr,))
         c.execute("DELETE FROM marcas WHERE id = ?", (_m_fr,))
+        for _pid in _aj:
+            c.execute("DELETE FROM reservas_stock WHERE producto_id = ?", (_pid,))
+            c.execute("DELETE FROM historial_precios WHERE producto_id = ?", (_pid,))
+            c.execute("DELETE FROM productos WHERE id = ?", (_pid,))
+        c.execute("DELETE FROM marcas WHERE id = ?", (_m_aj,))
         ns["conn"].commit()
         g["_nivel_de_quien_esta_adentro"] = lambda: ""
         try:
@@ -235,6 +369,86 @@ def probar(L):
     conn.commit()
     esperar("el registro se recorta", c.execute("SELECT COUNT(*) FROM registro_de_cambios"
                                                 ).fetchone()[0] < 1000, True)
+
+    # 9b. Qué es cada columna en una lista SIN TÍTULOS (ver adivinar_columnas_por_datos()). No
+    # tenía prueba, y con el precio primero, ordenado de menor a mayor —precios que no se
+    # repiten— y códigos numéricos, tomaba el precio como código y el código como precio.
+    _descs = ["FILTRO DE ACEITE VW GOL 1.6", "PASTILLA DE FRENO FORD KA", "BOMBA DE AGUA FIAT",
+              "CORREA DISTRIBUCION RENAULT", "BUJIA NGK BPR6ES"]
+    _adiv = ns["adivinar_columnas_por_datos"]
+    _casos = {
+        "típica": ([[f"W{700 + i}/{i % 9}", _descs[i % 5], str((1500, 2300, 4100)[i % 3]),
+                     str(i % 7)] for i in range(40)], 4, (0, 1, 2)),
+        "precio con decimales primero, sin repetir": (
+            [[f"{1000 + i * 37.25:.2f}", str(100000 + i * 7), _descs[i % 5]] for i in range(40)],
+            3, (1, 2, 0)),
+        "precio entero primero, sin repetir": (
+            [[str(500 + i * i * 41), str(100000 + i * 7), _descs[i % 5]] for i in range(40)],
+            3, (1, 2, 0)),
+        "código numérico y precio con coma": (
+            [[str(3000 + i), _descs[i % 5], ("1500,50", "2300,50")[i % 2]] for i in range(40)],
+            3, (0, 1, 2)),
+    }
+    for _nombre, (_filas, _ancho, _esperado) in _casos.items():
+        _h = _adiv(_filas, _ancho)
+        esperar(f"columnas de una lista sin títulos ({_nombre}): código, descripción, precio",
+                (_h["prov"], _h["desc"], _h["precio"]), _esperado)
+
+    # 9c. El dígito verificador del VIN (ver digito_verificador_vin() y verificar_vin()). No tenía
+    # prueba. El de la norma: 1M8GDM9AXKP042788 lleva X.
+    esperar("el dígito verificador de la norma", [ns["digito_verificador_vin"](v) for v in
+                                                  ("1M8GDM9AXKP042788", "11111111111111111")],
+            ["X", "1"])
+    esperar("un carácter mal copiado en un VIN de Estados Unidos se marca",
+            [ns["verificar_vin"](v)[0] for v in ("1M8GDM9AXKP042788", "1M8GDM9A1KP042788",
+                                                 "9BWZZZ377VT004251")],
+            ["ok", "mal", "no_aplica"])
+    esperar("la O donde va un cero se corrige", ns["corregir_confusiones_vin"]("1M8GDM9AXKPO42788")[0],
+            "1M8GDM9AXKP042788")
+
+    # 10. «Borrar los productos vacíos» (ver depurar_huerfanos()). Borraba todos los que no
+    # tenían una equivalencia aprobada: en la copia de la base, el 72 % del catálogo, casi
+    # todos con precio. Ahora solo los que no tienen nada. Va al final: borra los vacíos que
+    # dejaron las pruebas de arriba.
+    _mv = ns["get_or_create_marca"]("PRUEBA VACIOS")
+    with ns["db_lock"], ns["transaccion"]():
+        _v = {n: ns["get_or_create_producto"](f"V-{n}", f"V{n}", "Pieza de prueba", _mv)
+              for n in ("vacio", "precio", "stock", "pendiente", "rechazado", "historia",
+                        "vinculado", "socio")}
+
+    def _par(x, y):
+        return (min(_v[x], _v[y]), max(_v[x], _v[y]))
+    # Cada uno con UNA sola cosa; los vínculos, con un socio que tiene precio (no está vacío).
+    c.execute("UPDATE productos SET precio = 100 WHERE id IN (?, ?)", (_v["precio"], _v["socio"]))
+    c.execute("UPDATE productos SET stock = 2 WHERE id = ?", (_v["stock"],))
+    c.execute("INSERT INTO equivalencias_pendientes (producto_a_id, producto_b_id, origen, lote) "
+              "VALUES (?, ?, 'x', 'VACIOS')", _par("pendiente", "socio"))
+    c.execute("INSERT INTO equivalencias_revisadas (producto_a_id, producto_b_id, decision) "
+              "VALUES (?, ?, 'rechazada')", _par("rechazado", "socio"))
+    c.execute("INSERT INTO historial_precios (producto_id, precio) VALUES (?, 50)",
+              (_v["historia"],))
+    c.execute("INSERT INTO equivalencias (producto_a_id, producto_b_id) VALUES (?, ?)",
+              _par("vinculado", "socio"))
+    conn.commit()
+    _vacios_antes = ns["contar_productos_vacios"]()
+    g["_nivel_de_quien_esta_adentro"] = lambda: "operador"
+    try:
+        ns["depurar_huerfanos"]()
+        _paso = True
+    except PermissionError:
+        _paso = False
+    esperar("un empleado no borra productos vacíos", _paso, False)
+    g["_nivel_de_quien_esta_adentro"] = lambda: "admin"
+    _borrados = ns["depurar_huerfanos"]()
+    _quedan = {n for n, pid in _v.items()
+               if c.execute("SELECT 1 FROM productos WHERE id = ?", (pid,)).fetchone()}
+    esperar("borra solo lo vacío: lo que tiene precio, stock, algo por revisar, un rechazo, "
+            "historia o un vínculo se queda",
+            (_borrados == _vacios_antes, _quedan),
+            (True, {"precio", "stock", "pendiente", "rechazado", "historia", "vinculado",
+                    "socio"}))
+    esperar("y no queda ninguno vacío", ns["contar_productos_vacios"](), 0)
+    g["_nivel_de_quien_esta_adentro"] = lambda: None
     return fallas
 
 

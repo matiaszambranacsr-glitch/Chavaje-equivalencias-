@@ -315,7 +315,8 @@ if pagina == PAGINAS[3]:
             ayuda(
                 "Un producto «sin equivalencia» es uno que todavía NO cruzaste con ningún otro "
                 "código. No quiere decir que esté mal cargado: puede tener precio, stock y "
-                "venderse igual. Borralos solo si sabés que entraron por una importación fallida."
+                "venderse igual. Por eso acá solo se pueden borrar los vacíos. Si una lista "
+                f"entró mal, sacala con {miga_hasta('Deshacer una importación')}."
             )
             if not _sueltos:
                 st.caption("✅ No hay productos sin equivalencias.")
@@ -339,21 +340,28 @@ if pagina == PAGINAS[3]:
                         f"{miga_hasta('Buscar equivalencias en TODO el catálogo de una')}**, "
                         "que los cruza por descripción."
                     )
-                # Una casilla además de la contraseña, como en «Eliminar marca» y «Eliminar
-                # producto». Acá hace más falta que en ninguna: son 34.457 productos —el 48%
-                # del catálogo, casi todos vendibles y con precio— detrás de un solo botón, y
-                # no hay papelera para esto. La contraseña sola protege de que lo toque quien
-                # no debe; la casilla protege del dedo equivocado del que sí puede.
-                _confirmar_sueltos = st.checkbox(
-                    f"Confirmo que quiero borrar {miles(_sueltos)} productos y que esto NO se puede "
-                    "deshacer", key="confirmar_borrar_sueltos")
-                if candado('borrar productos sin equivalencias',
-                            st.button(f"🧹 Borrar esos {miles(_sueltos)} productos",
-                                       disabled=not _confirmar_sueltos),
-                            'borrar_productos_sin_equivalencias'):
-                    borrados = depurar_huerfanos()
-                    avisar("success", f"Se borraron {miles(borrados)} producto(s) sin equivalencias.")
-                    st.rerun()
+                # LO QUE SE PUEDE BORRAR ES SOLO LO VACÍO. Este botón borraba los de arriba: en la
+                # copia de la base del 12/10, 62.856 productos —el 72 % del catálogo, 61.804 con
+                # precio— de una vez y sin papelera. Ver depurar_huerfanos().
+                _vacios = contar_productos_vacios()
+                if not _vacios:
+                    st.caption("Ninguno está vacío: todos tienen precio, stock, algo por revisar, "
+                               "una decisión tomada o historia. Desde acá no hay nada que borrar.")
+                else:
+                    st.caption(f"De todos, **{miles(_vacios)}** están vacíos: sin precio, sin "
+                               "stock, sin vínculos por revisar, sin decisiones tomadas y sin "
+                               "historia. Son los únicos que se pueden borrar desde acá.")
+                    # Una casilla además de la contraseña: no hay papelera para esto.
+                    _confirmar_sueltos = st.checkbox(
+                        f"Confirmo que quiero borrar los {miles(_vacios)} productos vacíos y que "
+                        "esto NO se puede deshacer", key="confirmar_borrar_sueltos")
+                    if candado('borrar productos vacíos',
+                                st.button(f"🧹 Borrar los {miles(_vacios)} vacíos",
+                                           disabled=not _confirmar_sueltos),
+                                'borrar_productos_sin_equivalencias'):
+                        borrados = depurar_huerfanos()
+                        avisar("success", f"Se borraron {miles(borrados)} producto(s) vacíos.")
+                        st.rerun()
             st.markdown("**🗑️ Papelera**")
             explicar(
                 "Cuando borrás una marca entera, un combo, un alias de transferencia o un producto "

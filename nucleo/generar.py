@@ -230,8 +230,8 @@ def del_proceso(nombre, crear):
 ''', ["_decodificar_texto", "_detectar_separador", "huella_de_archivo",
       "identidad_del_archivo", "LIBROS_EN_MEMORIA", "_libro_de_excel", "leer_excel",
       "leer_numero", "PISTAS_COLUMNAS", "PISTAS_QUE_NO_SON", "_titulo_normalizado",
-      "_pista_en_titulo", "adivinar_columnas", "_perfil_de_columna",
-      "adivinar_columnas_por_datos", "diagnosticar_lista"])
+      "_pista_en_titulo", "adivinar_columnas", "_RE_IMPORTE", "_parecen_precios",
+      "_perfil_de_columna", "adivinar_columnas_por_datos", "diagnosticar_lista"])
 
 # ---------------------------------------------------------------- equivalencias
 # Acá sí hay que ADAPTAR, no solo copiar: en app.py estas funciones usan un cursor global 'c' y

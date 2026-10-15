@@ -252,9 +252,18 @@ if pagina == PAGINAS[3]:
             st.markdown("**💲 Aumentar/bajar precios por porcentaje**")
             st.caption("Aplica el ajuste a todos los productos con precio cargado de la marca elegida.")
             marca_precio = st.selectbox("Marca:", nombres_para_fusion, key="marca_ajuste_precio")
-            porcentaje = st.number_input("Porcentaje (usá negativo para bajar, ej: -5):", value=0.0, step=1.0)
+            porcentaje = st.number_input("Porcentaje (usá negativo para bajar, ej: -5):", value=0.0, step=1.0,
+                                         min_value=AJUSTE_DE_PRECIOS_MINIMO,
+                                         max_value=AJUSTE_DE_PRECIOS_MAXIMO)
+            id_marca_precio = next(m["id"] for m in marcas_info if m["nombre"] == marca_precio)
+            # Lo que va a pasar, antes de apretar: un cero de más o un signo olvidado se ven acá.
+            if porcentaje:
+                st.caption(f"Toca {miles(productos_con_precio_de_la_marca(id_marca_precio))} "
+                           f"producto(s) con precio de '{marca_precio}'. Por ejemplo, uno de "
+                           f"{formato_precio(10000)} queda en "
+                           f"{formato_precio(round(10000 * (1 + porcentaje / 100), 2))}. Cada "
+                           "precio queda anotado en su historial.")
             if candado('ajustar precios masivamente', st.button("💲 Aplicar ajuste de precios", disabled=(porcentaje == 0)), 'ajustar_precios_masivamente'):
-                id_marca_precio = next(m["id"] for m in marcas_info if m["nombre"] == marca_precio)
                 afectados = aumentar_precios_por_marca(id_marca_precio, porcentaje)
                 st.success(f"Se ajustaron {afectados} precio(s) de '{marca_precio}' en {porcentaje:+.1f}%.")
 

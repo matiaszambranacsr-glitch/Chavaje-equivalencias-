@@ -347,6 +347,40 @@ def probar(ns, gh, carpeta):
     gh.privado = True
     esperar("privado y sin clave, sí", ns["se_puede_subir_sin_cifrar"](cfg_gh, cab_gh), (True, ""))
 
+    # LA COPIA EN PARTES, Y BAJARLA: lo que hace la app al arrancar, y lo que pasa cuando la
+    # copia pase de 90 MB (ver partes_de_la_copia() y bajar_la_copia_de_github()). No tenía
+    # prueba. Con topes chicos, para que la copia de prueba se parta.
+    def _productos_de(ruta):
+        con = sqlite3.connect(ruta)
+        try:
+            return con.execute("SELECT COUNT(*) FROM productos").fetchone()[0]
+        finally:
+            con.close()
+    _en_la_base = c.execute("SELECT COUNT(*) FROM productos").fetchone()[0]
+    _archivo = ns["config_github"]()["archivo"]
+    _tope, _tamano = g["TOPE_DE_UN_ARCHIVO_EN_GITHUB"], g["TAMANO_DE_CADA_PARTE"]
+    g["TOPE_DE_UN_ARCHIVO_EN_GITHUB"], g["TAMANO_DE_CADA_PARTE"] = 2_000, 1_000
+    ok, texto = ns["subir_la_copia_si_cambio"](aunque_no_haya_cambios=True)
+    _arbol = gh.arbol_de(rama)
+    esperar(f"grande, va en partes y sin el archivo entero de antes ({texto})",
+            (ok, _archivo in _arbol, f"{_archivo}.partes" in _arbol, f"{_archivo}.parte2" in _arbol),
+            (True, False, True, True))
+    _bajada = ns["bajar_la_copia_de_github"](os.path.join(tempfile.mkdtemp(), "bajada.db"))
+    esperar("al bajarla se juntan las partes y se abre",
+            (bool(_bajada), _productos_de(_bajada) if _bajada else None), (True, _en_la_base))
+    gh.fallar_contenidos = (f"{_archivo}.parte2",)
+    esperar("si falta una parte, una copia incompleta no se usa",
+            ns["bajar_la_copia_de_github"](os.path.join(tempfile.mkdtemp(), "b2.db")), None)
+    gh.fallar_contenidos = ()
+    g["TOPE_DE_UN_ARCHIVO_EN_GITHUB"], g["TAMANO_DE_CADA_PARTE"] = _tope, _tamano
+    ok, texto = ns["subir_la_copia_si_cambio"](aunque_no_haya_cambios=True)
+    _arbol = gh.arbol_de(rama)
+    esperar("chica otra vez, va entera y las partes viejas se van",
+            (ok, _archivo in _arbol, any(r.startswith(f"{_archivo}.parte") for r in _arbol)),
+            (True, True, False))
+    _bajada = ns["bajar_la_copia_de_github"](os.path.join(tempfile.mkdtemp(), "b3.db"))
+    esperar("y entera también se baja", _productos_de(_bajada) if _bajada else None, _en_la_base)
+
     # EL VIGÍA SE VA CUANDO LLEGA CÓDIGO NUEVO (ver vigilar_la_copia()). Seguía corriendo el
     # código con que arrancó el servidor: la copia del 12/10 la subió una versión del 7/10.
     import time

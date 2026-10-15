@@ -108,6 +108,23 @@ def probar():
         esperar("dañada es dañada",
                 ns["es_una_base_danada"](sqlite3.DatabaseError("file is not a database")), True)
 
+        # El backup COMPLETO (con fotos) también se restaura, y con sus fotos (ver
+        # generar_backup_completo()). No tenía prueba: el liviano sí.
+        _pid = c.execute("SELECT id FROM productos").fetchone()[0]
+        c.execute("INSERT INTO producto_fotos (producto_id, imagen_data, estado) "
+                  "VALUES (?, ?, 'ok')", (_pid, b"\x89PNG foto de prueba"))
+        ns["conn"].commit()
+        completo = ns["generar_backup_completo"]()
+        c.execute("DELETE FROM producto_fotos")
+        c.execute("DELETE FROM productos")
+        ns["conn"].commit()
+        control = ns["restaurar_backup"](io.BytesIO(completo))
+        esperar("el completo se restaura, con sus productos y sus fotos",
+                (control["sana"], control["productos"],
+                 c.execute("SELECT COUNT(*) FROM producto_fotos").fetchone()[0],
+                 c.execute("SELECT imagen_data FROM producto_fotos").fetchone()[0]),
+                (True, 1, 1, b"\x89PNG foto de prueba"))
+
         # La contraseña: la de administrador de los Secrets, con freno.
         g["secretos_app"] = lambda: {"admin_password": "clave-rec-1"}
         esperar("clave buena", g["clave_de_recuperacion_valida"]("clave-rec-1")[0], True)

@@ -6480,6 +6480,41 @@ el botón**:
 - «🔌 Probar las fuentes de afuera» suma la Central de Deudores (con el CUIT de la AFIP, nunca el
   de un cliente) y la inflación de respaldo.
 
+## 🔧 Lo que ninguna prueba tocaba, y cuatro errores que aparecieron ahí
+
+### Cómo se buscó
+
+Se midió qué parte de la lógica ejecuta alguna de las baterías (`coverage`): **el 43 % de los
+renglones**. Las pantallas casi no cuentan ahí (las recorre la prueba de las 32 pantallas, que
+corre aparte), pero sí aparecieron funciones de la lógica que **ninguna prueba llegaba a
+llamar**, entre ellas varias que tocan plata, stock o datos que se borran. Se empezó por esas, y
+cuatro tenían errores.
+
+### Los errores
+
+| Qué | Qué pasaba (medido) | Qué se hizo |
+|---|---|---|
+| Borrar una marca | **Una marca con un solo producto con foto o firma no se podía borrar**: «bytes is not JSON serializable» y la pantalla se caía (el mismo error ya se había arreglado para un producto suelto). Además, la papelera de la marca no guardaba la historia de sus productos —precios anteriores, fotos, ventas, devoluciones—, que la base borra en cascada, y restaurarla después de volver a importar la lista chocaba con el nombre de la marca y fallaba entera. | Se borra, guarda la historia de todos sus productos, y al restaurar usa la marca y los productos que ya volvieron (y les devuelve lo suyo) en vez de chocar. |
+| «Borrar productos sin equivalencias» (Estado y papelera) | En la copia de la base del 12/10: **62.856 de 86.946 productos —el 72 %—, y 61.804 con precio**, de una vez y sin papelera. Se llevaba también los 2.184 que esperan revisión y los que tienen un rechazo anotado, que es lo que impide que un vínculo malo vuelva con la próxima lista. | Borra solo los **vacíos**: sin vínculos (aprobados, por revisar ni decididos), sin precio, sin stock y sin historia. Hoy son **66**. Para sacar una lista que salió mal está «Deshacer una importación». |
+| El ajuste de precios por porcentaje (Marcas) | No anotaba el historial de precios (la regla de cualquier otro cambio de precio), aceptaba **−100 % (toda la marca a $0) o −150 % (precios negativos)**, contaba como ajustados los de precio 0, y no volvía a mirar el permiso. | Con historial, solo los que tienen precio, entre −99 % y 1000 %, solo administrador, y la pantalla muestra antes cuántos toca y cómo queda uno de $10.000. |
+| Listas sin títulos | Con el precio en la primera columna y precios que no se repiten —una lista ordenada por precio— y códigos numéricos, **el precio salía como código y el código como precio**. Y un importe escrito «1037.25» (como lo exporta la planilla) no se reconocía como importe: solo «1.037,25». | El código nunca es una columna con forma de importe, y entre dos números que no se repiten gana el de largo parejo. «1037.25» cuenta como importe, también para el aviso «la columna de código trae importes». |
+
+Y `corregir_codigo_con_la_marca_pegada()` (la herramienta de «Códigos de fábrica con la marca
+pegada») no volvía a mirar el permiso: ahora sí.
+
+### Lo que ahora tiene prueba (y andaba)
+
+El margen sobre el precio de venta, cerrar una reserva (vendida descuenta una sola vez,
+cancelada solo libera), la copia en partes para cuando pase de 90 MB —se junta al bajarla, una
+parte que falta hace que no se use, y al volver a entrar en un archivo las partes viejas se
+van—, el backup completo con sus fotos, los códigos de fábrica con la marca pegada (renombrar o
+juntar sin perder pendientes ni decisiones) y el dígito verificador del VIN.
+
+Probado: 17 fallas puestas a mano en lo arreglado, las 17 detectadas (una al principio no, y
+mostró que la prueba de la limpieza no separaba bien cada caso: se corrigió). En la app: Marcas
+con el tope y el ejemplo, Estado y papelera ofreciendo borrar los 66 vacíos, y el recorrido de
+las 32 pantallas.
+
 ## 🤖 Las pruebas en GitHub, lo que no tenía prueba, y los errores que aparecieron buscando
 
 ### Las pruebas corren solas en cada subida

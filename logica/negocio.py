@@ -2240,6 +2240,86 @@ def _reponer_vinculos(tabla, filas, cambiar_id):
     return repuestos, perdidos
 
 
+def _reponer_marca_y_productos(datos):
+    """Vuelve a meter la marca y sus productos de la papelera. Devuelve ({id viejo: id nuevo}
+    de los productos que no volvieron con su id, cuántos ya estaban).
+
+    Si mientras estuvo en la papelera se la volvió a crear —se volvió a importar la lista, lo
+    más común después de borrar una que salió mal—, el INSERT de la marca chocaba con su
+    nombre y la restauración entera fallaba. Ahora se usa la que está, y un producto que ya
+    volvió a entrar (mismo código, misma marca) se queda como está y recibe lo suyo. Un id que
+    mientras tanto usó otro producto se cambia por uno nuevo. Va adentro de la transacción de
+    restaurar_de_papelera(): ahí transaccion() no abre otra."""
+    with transaccion():
+        marca = dict(datos["marca"])
+        c.execute("SELECT id FROM marcas WHERE nombre = ?", (marca.get("nombre"),))
+        existente = c.fetchone()
+        if existente:
+            marca_id = existente["id"]
+        else:
+            c.execute("SELECT 1 FROM marcas WHERE id = ?", (marca.get("id"),))
+            if c.fetchone():
+                marca.pop("id", None)
+            c.execute(f"INSERT INTO marcas ({', '.join(marca)}) VALUES "
+                      f"({', '.join('?' * len(marca))})", list(marca.values()))
+            marca_id = marca.get("id") or c.lastrowid
+        cambiar, ya_estaban = {}, 0
+        for producto in datos["productos"]:
+            producto = _de_json(dict(producto))
+            id_viejo = producto.get("id")
+            producto["marca_id"] = marca_id
+            c.execute("SELECT id FROM productos WHERE codigo_clean = ? AND marca_id = ?",
+                      (producto.get("codigo_clean"), marca_id))
+            ya = c.fetchone()
+            if ya:
+                ya_estaban += 1
+                if ya["id"] != id_viejo:
+                    cambiar[id_viejo] = ya["id"]
+                continue
+            c.execute("SELECT 1 FROM productos WHERE id = ?", (id_viejo,))
+            if c.fetchone():
+                producto.pop("id", None)
+            c.execute(f"INSERT INTO productos ({', '.join(producto)}) VALUES "
+                      f"({', '.join('?' * len(producto))})", list(producto.values()))
+            if "id" not in producto:
+                cambiar[id_viejo] = c.lastrowid
+        return cambiar, ya_estaban
+
+
+def _reponer_la_historia_de_la_marca(historia, sueltas, cambiar):
+    """Lo mismo que _reponer_la_historia(), para todos los productos de una marca: cada fila
+    vuelve apuntando a su producto (al nuevo, si cambió de id). Devuelve {tabla: filas}."""
+    repuestas = {}
+    for bloque in historia or []:
+        tabla, columna = bloque["tabla"], bloque["columna"]
+        for fila in bloque["filas"]:
+            fila = _de_json(dict(fila))
+            fila[columna] = cambiar.get(fila[columna], fila[columna])
+            if "id" in fila:
+                # La fila conserva su id si está libre; si otro lo tomó, va con uno nuevo.
+                c.execute(f'SELECT 1 FROM "{tabla}" WHERE id = ?', (fila["id"],))
+                if c.fetchone():
+                    fila.pop("id")
+            columnas = ", ".join(f'"{k}"' for k in fila)
+            try:
+                c.execute(f'INSERT OR IGNORE INTO "{tabla}" ({columnas}) '
+                          f'VALUES ({", ".join("?" * len(fila))})', list(fila.values()))
+                repuestas[tabla] = repuestas.get(tabla, 0) + c.rowcount
+            except sqlite3.Error as _err:      # la tabla cambió o el otro lado ya no está
+                anotar_error(f"reponer la historia de la marca ({tabla})", _err)
+    for bloque in sueltas or []:
+        tabla, columna = bloque["tabla"], bloque["columna"]
+        for id_fila, id_producto in bloque["pares"]:
+            try:
+                c.execute(f'UPDATE "{tabla}" SET "{columna}" = ? WHERE id = ? '
+                          f'AND "{columna}" IS NULL',
+                          (cambiar.get(id_producto, id_producto), id_fila))
+                repuestas[tabla] = repuestas.get(tabla, 0) + c.rowcount
+            except sqlite3.Error as _err:
+                anotar_error(f"reponer la historia de la marca ({tabla})", _err)
+    return repuestas
+
+
 def eliminar_marca_con_papelera(nombre_marca):
     """Guarda la marca completa (con todos sus productos y las equivalencias que los tocan)
     en la papelera antes de borrarla — es la operación más destructiva de la app, así que
@@ -2277,8 +2357,28 @@ def eliminar_marca_con_papelera(nombre_marca):
                      WHERE p.marca_id = ?""", (marca_id,))
         pendientes_rows = [dict(r) for r in c.fetchall()]
 
-    snapshot = {"marca": dict(marca_row), "productos": productos_rows,
-                "equivalencias": equivalencias_rows, "pendientes": pendientes_rows}
+    # SU HISTORIA, como la de un producto suelto (ver borrar_producto_con_papelera()): las claves
+    # foráneas borraban con la marca los precios anteriores, las fotos, las ventas y las
+    # devoluciones de todos sus productos, y la papelera no los guardaba. Y los productos con su
+    # foto o su firma binaria pasan por _a_json(): sin eso, borrar una marca con un solo producto
+    # con foto se cortaba con «bytes is not JSON serializable» y la marca no se podía borrar.
+    historia, sueltas = [], []
+    if producto_ids:
+        for tabla, columnas in _tablas_que_cuelgan_de_productos().items():
+            for columna, al_borrar in columnas:
+                c.execute(f'SELECT * FROM "{tabla}" WHERE "{columna}" IN '
+                          f'(SELECT id FROM productos WHERE marca_id = ?)', (marca_id,))
+                filas = [_a_json(dict(r)) for r in c.fetchall()]
+                if not filas:
+                    continue
+                if al_borrar == "CASCADE":
+                    historia.append({"tabla": tabla, "columna": columna, "filas": filas})
+                elif "id" in filas[0]:
+                    sueltas.append({"tabla": tabla, "columna": columna,
+                                    "pares": [[f["id"], f[columna]] for f in filas]})
+    snapshot = {"marca": dict(marca_row), "productos": [_a_json(p) for p in productos_rows],
+                "equivalencias": equivalencias_rows, "pendientes": pendientes_rows,
+                "historia": historia, "sueltas": sueltas}
     # Todo o nada: la copia en la papelera y el borrado de la marca. Si se guarda la copia y
     # el borrado falla, la marca aparece duplicada al restaurarla; si se borra sin copia, no
     # hay vuelta atrás de la operación más destructiva de la app.
@@ -2411,28 +2511,30 @@ def restaurar_de_papelera(item_id):
                         detalle = ("Ese código ya había vuelto a entrar con una importación: "
                                    "se le devolvieron los vínculos a ese. " + (detalle or ""))
                 elif tipo == "marca":
-                    marca = datos["marca"]
-                    columnas_marca = ", ".join(marca.keys())
-                    placeholders_marca = ", ".join("?" * len(marca))
-                    c.execute(f"INSERT INTO marcas ({columnas_marca}) VALUES ({placeholders_marca})",
-                              list(marca.values()))
-                    for producto in datos["productos"]:
-                        columnas_p = ", ".join(producto.keys())
-                        placeholders_p = ", ".join("?" * len(producto))
-                        c.execute(f"INSERT INTO productos ({columnas_p}) VALUES ({placeholders_p})",
-                                  list(producto.values()))
+                    _cambiar, _ya_estaban = _reponer_marca_y_productos(datos)
                     # Con _reponer_vinculos() y no un INSERT por fila: el otro lado de un vínculo
                     # es casi siempre un código de fábrica de OTRA marca, y si mientras tanto se
                     # lo borró —depurar huérfanos, cortar un puente, los códigos basura— la clave
                     # foránea rechazaba el INSERT y con él la restauración ENTERA: «No se pudo
                     # restaurar: FOREIGN KEY constraint failed», y la marca no volvía nunca.
-                    _rep, _perd = _reponer_vinculos("equivalencias", datos["equivalencias"], {})
-                    _reponer_vinculos("equivalencias_pendientes", datos.get("pendientes") or [], {})
+                    _rep, _perd = _reponer_vinculos("equivalencias", datos["equivalencias"],
+                                                    _cambiar)
+                    _reponer_vinculos("equivalencias_pendientes", datos.get("pendientes") or [],
+                                      _cambiar)
+                    _historia_repuesta = _reponer_la_historia_de_la_marca(
+                        datos.get("historia"), datos.get("sueltas"), _cambiar)
                     detalle = (f"Restaurada con {len(datos['productos'])} producto(s) y {_rep} "
                                "vínculo(s).")
                     if _perd:
                         detalle += (f" {_perd} vínculo(s) no se pudieron reponer: el otro "
                                     "producto ya no existe.")
+                    if _historia_repuesta:
+                        detalle += (" Y con su historia: "
+                                    + ", ".join(f"{n} {NOMBRES_DE_LA_HISTORIA.get(t, t)}"
+                                                for t, n in _historia_repuesta.items() if n) + ".")
+                    if _ya_estaban:
+                        detalle += (f" {_ya_estaban} producto(s) ya habían vuelto a entrar con "
+                                    "una importación: se les devolvió lo suyo a esos.")
                 else:
                     return False, f"No sé cómo restaurar el tipo '{tipo}'."
                 c.execute("DELETE FROM papelera WHERE id = ?", (item_id,))

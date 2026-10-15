@@ -258,12 +258,20 @@ def _perfil_de_columna(valores):
     distintos = len(set(llenos))
     numericos = sum(1 for v in llenos
                     if str(v).replace(".", "").replace(",", "").replace("-", "").isdigit())
+    largos = {}      # sin collections: esto va también a nucleo/, que no lo importa
+    for v in llenos:
+        largos[len(v)] = largos.get(len(v), 0) + 1
     return {
         "llenado": len(llenos) / max(len(valores), 1),
         "unicidad": distintos / len(llenos),        # los códigos casi no se repiten
         "largo": sum(len(v) for v in llenos) / len(llenos),
         "espacios": sum(1 for v in llenos if " " in v) / len(llenos),
         "numerico": numericos / len(llenos),
+        # Para separar un código numérico de un precio que tampoco se repite (una lista
+        # ordenada por precio): los importes tienen forma de importe, y los códigos de un
+        # proveedor suelen tener todos el mismo largo; los precios, no.
+        "importes": _parecen_precios(llenos),
+        "largo_fijo": max(largos.values()) / len(llenos),
         "muestra": llenos[:3],
     }
 
@@ -299,9 +307,16 @@ def adivinar_columnas_por_datos(filas_datos, ancho):
 
     libres = [i for i in perfiles if i != hallado["desc"]]
 
-    # Código: el más único de los que quedan
+    # Código: el más único de los que quedan, pero nunca uno con forma de importe, y entre dos
+    # números que no se repiten, el de largo parejo. Sin esto, en una lista sin títulos con el
+    # precio primero, ordenada de menor a mayor —precios que no se repiten— y códigos
+    # numéricos, el precio salía como código y el código como precio (encontrado probando las
+    # funciones que ninguna batería tocaba).
     if libres:
-        hallado["prov"] = max(libres, key=lambda i: (perfiles[i]["unicidad"], -perfiles[i]["numerico"]))
+        hallado["prov"] = max(libres, key=lambda i: (not perfiles[i]["importes"],
+                                                     perfiles[i]["unicidad"],
+                                                     -perfiles[i]["numerico"],
+                                                     perfiles[i]["largo_fijo"]))
 
     # Precio ANTES que el código de fábrica, y a propósito: es la columna numérica que queda.
     # Al revés, una lista de precios ordenada de menor a mayor tiene precios casi todos
@@ -309,7 +324,9 @@ def adivinar_columnas_por_datos(filas_datos, ancho):
     # vincularía entre sí todos los productos que valen lo mismo.
     numericas = [i for i in libres if i != hallado["prov"] and perfiles[i]["numerico"] >= 0.9]
     if numericas:
-        hallado["precio"] = min(numericas, key=lambda i: perfiles[i]["unicidad"])
+        hallado["precio"] = min(numericas, key=lambda i: (not perfiles[i]["importes"],
+                                                          perfiles[i]["unicidad"],
+                                                          perfiles[i]["largo_fijo"]))
 
     # Código de fábrica: solo si queda una columna muy única y que NO sea numérica pura.
     # Ante la duda se deja vacío: que falte es un inconveniente, que esté mal genera
@@ -504,7 +521,9 @@ def texto_de_la_fecha_de_los_precios(marcas, hoy=None):
     return "💲 Precios — " + " · ".join(partes)
 
 
-_RE_IMPORTE = re.compile(r"^\$?\s*-?\d{1,3}(?:[.,]\d{3})*[.,]\d{2}$|^\$\s*\d")
+# Con separador de miles («1.037,25») o sin él («1037.25», como exporta la planilla): antes
+# solo la primera forma, y una columna de precios así pasaba por código.
+_RE_IMPORTE = re.compile(r"^\$?\s*-?(?:\d{1,3}(?:[.,]\d{3})*|\d+)[.,]\d{2}$|^\$\s*\d")
 
 
 def _parecen_precios(valores):

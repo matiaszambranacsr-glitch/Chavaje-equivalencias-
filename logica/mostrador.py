@@ -962,18 +962,45 @@ def guardar_coeficiente_de_lista(marca_id, coeficiente, aplicar_a_lo_cargado=Tru
     return afectados
 
 
+# Hasta dónde se acepta un ajuste por porcentaje. Bajar el 100 % deja la marca entera en $0, y
+# más que eso, en precios negativos; subir más de diez veces es casi seguro un cero de más.
+AJUSTE_DE_PRECIOS_MINIMO = -99.0
+AJUSTE_DE_PRECIOS_MAXIMO = 1000.0
+
+
 def aumentar_precios_por_marca(marca_id, porcentaje):
-    """Sube (o baja, con porcentaje negativo) todos los precios cargados de una marca."""
-    with db_lock:
-        c.execute(
-            "UPDATE productos SET precio = ROUND(precio * (1 + ? / 100.0), 2) "
-            "WHERE marca_id = ? AND precio IS NOT NULL",
-            (porcentaje, marca_id)
-        )
-        afectados = c.rowcount
-        conn.commit()
+    """Sube (o baja, con porcentaje negativo) todos los precios cargados de una marca.
+    Devuelve cuántos cambiaron.
+
+    Tenía tres agujeros, encontrados al medir qué funciones no probaba ninguna batería:
+      · no anotaba el historial de precios, que es la regla de cualquier otro cambio de
+        precio (ver actualizar_precio_stock()): el producto mostraba el precio nuevo y su
+        historial decía que nunca había cambiado;
+      · aceptaba cualquier porcentaje: −100 dejaba la marca entera en $0 y −150 en negativo;
+      · contaba como ajustados los que tenían precio 0 («consultar»), que no cambian;
+    y no volvía a mirar el permiso (la pantalla sí)."""
+    exigir_nivel("admin", "ajustar los precios de una marca")
+    porcentaje = float(porcentaje)
+    if not AJUSTE_DE_PRECIOS_MINIMO <= porcentaje <= AJUSTE_DE_PRECIOS_MAXIMO:
+        raise ValueError(f"El ajuste tiene que estar entre {AJUSTE_DE_PRECIOS_MINIMO:g} % y "
+                         f"{AJUSTE_DE_PRECIOS_MAXIMO:g} %: {porcentaje:g} % no.")
+    with db_lock, transaccion():
+        c.execute("""SELECT id, ROUND(precio * (1 + ? / 100.0), 2) AS nuevo FROM productos
+                     WHERE marca_id = ? AND precio > 0
+                       AND ROUND(precio * (1 + ? / 100.0), 2) <> precio""",
+                  (porcentaje, marca_id, porcentaje))
+        cambios = [(r["nuevo"], r["id"]) for r in c.fetchall() if r["nuevo"] > 0]
+        c.executemany("UPDATE productos SET precio = ? WHERE id = ?", cambios)
+        c.executemany("INSERT INTO historial_precios (producto_id, precio) VALUES (?, ?)",
+                      [(i, p) for p, i in cambios])
     olvidar_la_escala_de_precios()
-    return afectados
+    return len(cambios)
+
+
+def productos_con_precio_de_la_marca(marca_id):
+    """Cuántos productos de la marca tienen precio: los que tocaría un ajuste por porcentaje."""
+    c.execute("SELECT COUNT(*) FROM productos WHERE marca_id = ? AND precio > 0", (marca_id,))
+    return c.fetchone()[0]
 
 
 def listar_favoritos_stock_bajo(umbral=2):

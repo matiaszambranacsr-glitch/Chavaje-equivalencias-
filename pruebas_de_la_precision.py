@@ -1849,6 +1849,46 @@ def probar(L):
             ["ok", "rechazada", "ok", "rechazada"])
     esperar("la tanda quedó vacía", c.execute("SELECT COUNT(*) FROM equivalencias_pendientes "
                                               "WHERE lote = 'OTRO · 04/10'").fetchone()[0], 0)
+    # 74. Los códigos de fábrica con la marca pegada («POWER836120129»): renombrar si el número
+    # limpio no está, juntar si está, con sus pendientes y sus decisiones (ver
+    # corregir_codigo_con_la_marca_pegada()). La herramienta no tenía prueba.
+    of = marca("OEM PEGADA", "OEM")
+    il = marca("ILLINOIS PEGADA")
+    _a = producto("POWER836120129", "Filtro", of)
+    _b1 = producto("BENZ3120150080", "Junta", of)
+    _b2 = producto("3120150080", "Junta", of)
+    _pv = producto("ILP-1", "Junta Illinois", il)
+    _pv2 = producto("ILP-2", "Filtro Illinois", il)
+    vincular(_a, _pv2, "PEGADA · 05/10")
+    c.execute("INSERT INTO equivalencias_pendientes (producto_a_id, producto_b_id, origen, lote) "
+              "VALUES (?, ?, 'x', 'PEGADA · 05/10')", (min(_b1, _pv), max(_b1, _pv)))
+    c.execute("INSERT INTO equivalencias_revisadas (producto_a_id, producto_b_id, decision) "
+              "VALUES (?, ?, 'rechazada')", (min(_b1, _pv2), max(_b1, _pv2)))
+    conn.commit()
+    _pegadas = {x["Código"]: (x["Número"], x["Ya existe"])
+                for x in ns["codigos_de_fabrica_con_la_marca_pegada"]()
+                if x["Código"] in ("POWER836120129", "BENZ3120150080")}
+    esperar("las encuentra, y sabe cuál ya está limpia",
+            _pegadas, {"POWER836120129": ("836120129", False), "BENZ3120150080": ("3120150080", True)})
+    esperar("sin la limpia, la renombra y el vínculo sigue",
+            (ns["corregir_codigo_con_la_marca_pegada"](_a, "836120129"),
+             tuple(c.execute("SELECT codigo_raw, codigo_clean FROM productos WHERE id = ?",
+                             (_a,)).fetchone()),
+             c.execute("SELECT COUNT(*) FROM equivalencias WHERE ? IN (producto_a_id, "
+                       "producto_b_id)", (_a,)).fetchone()[0]),
+            (True, ("836120129", "836120129"), 1))
+    esperar("con la limpia, las junta: el pendiente y el rechazo pasan a la que queda",
+            (ns["corregir_codigo_con_la_marca_pegada"](_b1, "3120150080"),
+             c.execute("SELECT COUNT(*) FROM productos WHERE id = ?", (_b1,)).fetchone()[0],
+             c.execute("SELECT COUNT(*) FROM equivalencias_pendientes WHERE ? IN (producto_a_id, "
+                       "producto_b_id) AND ? IN (producto_a_id, producto_b_id)",
+                       (_b2, _pv)).fetchone()[0],
+             (c.execute("SELECT decision FROM equivalencias_revisadas WHERE ? IN (producto_a_id, "
+                        "producto_b_id) AND ? IN (producto_a_id, producto_b_id)",
+                        (_b2, _pv2)).fetchone() or [None])[0]),
+            (True, 0, 1, "rechazada"))
+    esperar("y ya no quedan", [x for x in ns["codigos_de_fabrica_con_la_marca_pegada"]()
+                               if x["Código"] in ("POWER836120129", "BENZ3120150080")], [])
     return fallas
 
 

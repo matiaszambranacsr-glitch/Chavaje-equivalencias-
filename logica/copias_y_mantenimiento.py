@@ -1055,6 +1055,7 @@ def corregir_codigo_con_la_marca_pegada(producto_oem_id, numero):
     «836120129», que ILLINOIS escribe los dos en la misma fila— se juntan con
     fusionar_productos(), pasando antes los PENDIENTES y las decisiones ya tomadas al que queda:
     fusionar_productos() borra los pendientes del que se va, y eran pares por revisar."""
+    exigir_nivel("admin", "corregir los códigos con la marca pegada")
     limpio = sanitizar(numero)
     if not limpio:
         return False
@@ -1356,23 +1357,42 @@ def contar_con_equivalencia_muerta():
     return (fila[0] if fila else 0) or 0
 
 
-def depurar_huerfanos():
-    """Borra productos que no tienen ninguna equivalencia vinculada (quedaron sueltos).
+def _condicion_de_producto_vacio():
+    """SQL (sobre «productos»): el producto no tiene NADA. Ni un vínculo aprobado, por revisar
+    o ya decidido; ni precio ni stock; ni nada que cuelgue de él (ventas, precios anteriores,
+    fotos, reservas, consultas…, ver _tablas_que_cuelgan_de_productos()). Ver
+    depurar_huerfanos()."""
+    partes = [f"productos.id NOT IN (SELECT {lado} FROM {tabla})"
+              for tabla in ("equivalencias", "equivalencias_pendientes", "equivalencias_revisadas")
+              for lado in ("producto_a_id", "producto_b_id")]
+    partes += ["COALESCE(productos.precio, 0) <= 0", "COALESCE(productos.stock, 0) <= 0"]
+    for tabla, columnas in _tablas_que_cuelgan_de_productos().items():
+        for columna, _al_borrar in columnas:
+            partes.append(f'NOT EXISTS (SELECT 1 FROM "{tabla}" x WHERE x."{columna}" = productos.id)')
+    return " AND ".join(partes)
 
-    OJO con lo que esto significa de verdad. «Sin equivalencia» NO quiere decir «cargado por
-    error»: quiere decir que todavía nadie lo cruzó con nada. En el catálogo real son 25.143
-    productos de 61.574 —el 41%—, casi todos perfectamente vendibles, con su precio y su stock.
-    Borrarlos es tirar cuatro de cada diez repuestos del mostrador.
-    Por eso la pantalla muestra el número antes de preguntar, en vez de ofrecer «limpiar»."""
-    with db_lock:
-        c.execute("""
-            DELETE FROM productos
-            WHERE id NOT IN (SELECT DISTINCT producto_a_id FROM equivalencias)
-              AND id NOT IN (SELECT DISTINCT producto_b_id FROM equivalencias)
-        """)
-        borrados = c.rowcount
-        conn.commit()
-    return borrados
+
+def contar_productos_vacios():
+    """Cuántos borraría depurar_huerfanos(): para decir el número antes del botón."""
+    c.execute(f"SELECT COUNT(*) FROM productos WHERE {_condicion_de_producto_vacio()}")
+    return c.fetchone()[0]
+
+
+def depurar_huerfanos():
+    """Borra los productos VACÍOS: los que no tienen nada (ver _condicion_de_producto_vacio()).
+    Devuelve cuántos.
+
+    ANTES BORRABA TODOS LOS QUE NO TENÍAN UNA EQUIVALENCIA APROBADA, de una vez y sin papelera.
+    «Sin equivalencia» no quiere decir «cargado por error»: quiere decir que todavía nadie lo
+    cruzó. Sobre la copia de la base del 12/10 eran **62.856 de 86.946 —el 72 %—, y 61.804 con
+    precio**: el botón vaciaba el mostrador. Se llevaba también los 2.184 que esperan revisión
+    (con sus pares por revisar) y los que tienen un rechazo anotado, que es lo que impide que un
+    vínculo malo vuelva a entrar con la próxima lista. Vacíos de verdad hay 66: eso es lo que
+    borra ahora. Para sacar una lista que salió mal está «Deshacer una importación»."""
+    exigir_nivel("admin", "borrar los productos vacíos")
+    with db_lock, transaccion():
+        c.execute(f"DELETE FROM productos WHERE {_condicion_de_producto_vacio()}")
+        return c.rowcount
 
 
 # LAS RELACIONES IMPOSIBLES: lo que no puede pasar nunca y, si pasa, rompe una respuesta del
