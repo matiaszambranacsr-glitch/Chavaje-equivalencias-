@@ -405,6 +405,78 @@ def probar(L):
             ["ok", "mal", "no_aplica"])
     esperar("la O donde va un cero se corrige", ns["corregir_confusiones_vin"]("1M8GDM9AXKPO42788")[0],
             "1M8GDM9AXKP042788")
+    # Y lo que llega a la pantalla: decodificar_vin() lo pisaba más abajo con None o True/False,
+    # y el «❌ VIN mal copiado» no salía nunca (lo encontró el control 6e de auditar.py).
+    esperar("lo que ve la pantalla del VIN, bien, mal copiado y de afuera",
+            [(ns["decodificar_vin"](v)["digito_verificador"],
+              bool(ns["decodificar_vin"](v)["mensaje_digito"]))
+             for v in ("1M8GDM9AXKP042788", "1M8GDM9A1KP042788", "9BWZZZ377VT004251")],
+            [("ok", True), ("mal", True), ("no_aplica", True)])
+    esperar("el país por los dos primeros del VIN donde todas las tablas de ISO 3779 coinciden",
+            [ns["PAISES_VIN_2"].get(x) for x in ("VA", "VC", "VE", "8K", "8L", "8R")],
+            ["Austria", "Austria", "Austria", "Chile", "Ecuador", "Ecuador"])
+
+    # 9d. Los códigos de falla de la sonda lambda (ver _dtc_sistematicos()). P0134 es «sin
+    # actividad» y P0135 el calefactor; el generador los tenía corridos y pisaba los buenos.
+    def _dtc(codigo):
+        return c.execute("SELECT descripcion FROM codigos_dtc WHERE codigo = ? AND fabricante = ''",
+                         (codigo,)).fetchone()[0]
+    esperar("P0134 y P0135 de cada sonda, como dice la norma",
+            [_dtc(x).split(",")[0] for x in ("P0134", "P0135", "P0140", "P0141", "P0166", "P0167")],
+            ["Sin actividad detectada en el sensor de oxígeno",
+             "Falla eléctrica en el calefactor del sensor de oxígeno"] * 3)
+    esperar("P0451 es fuera de rango, no falla eléctrica", _dtc("P0451"),
+            "Sensor de presión del sistema EVAP fuera de rango")
+    # Y en una base que ya tenía los textos viejos: se corrigen solos, salvo lo editado a mano.
+    _viejo = "Circuito del calefactor del sensor de oxígeno, banco 1 sensor 1"
+    c.execute("UPDATE codigos_dtc SET descripcion = ?, editado = 0 WHERE codigo = 'P0134'", (_viejo,))
+    c.execute("UPDATE codigos_dtc SET descripcion = 'lo que puso el taller', editado = 1 "
+              "WHERE codigo = 'P0140'")
+    c.execute("UPDATE configuracion SET valor = '3' WHERE clave = 'semilla_dtc_version'")
+    ns["_datos_precargados_y_migraciones"](c)
+    conn.commit()
+    esperar("al actualizar la app se corrige el texto viejo y se respeta lo editado a mano",
+            (_dtc("P0134").split(",")[0], _dtc("P0140")),
+            ("Sin actividad detectada en el sensor de oxígeno", "lo que puso el taller"))
+    # Una falla del turbo no ofrece solenoides de caja automática (la causa decía «válvula
+    # solenoide»); una de la caja, sí.
+    c.execute("INSERT INTO productos (codigo_raw, codigo_clean, descripcion, marca_id) "
+              "VALUES ('SOLCAJA1', 'SOLCAJA1', 'SOLENOIDE CAJA AUTOMATICA', ?)", (marca,))
+    conn.commit()
+    esperar("qué piezas ofrece un código del turbo y uno de la caja",
+            [[r["pieza"] for r in ns["repuestos_para_el_dtc"](x)] for x in ("P0045", "P0750")],
+            [[], ["SOLENOIDE DE CAJA"]])
+    c.execute("DELETE FROM productos WHERE codigo_clean = 'SOLCAJA1'")
+    conn.commit()
+
+    # 9e. Los años imposibles de las aplicaciones ya deducidas (ver
+    # _corregir_anios_imposibles_de_aplicaciones()): se vuelven a leer de la descripción.
+    c.execute("INSERT INTO productos (codigo_raw, codigo_clean, descripcion, marca_id) "
+              "VALUES ('ANIO1', 'ANIO1', 'JUNTA PEUGEOT 2061.0 16V 2000/.', ?)", (marca,))
+    c.execute("INSERT INTO productos (codigo_raw, codigo_clean, descripcion, marca_id) "
+              "VALUES ('ANIO2', 'ANIO2', 'BOBINA PEUGEOT 2051.0/1.1', ?)", (marca,))
+    c.executemany("INSERT INTO aplicaciones (marca_auto, modelo_auto, motor, anio_desde, anio_hasta, "
+                  "codigo, codigo_clean, marca_repuesto, origen) VALUES "
+                  "('PEUGEOT', ?, '', ?, ?, ?, ?, 'PRUEBA', ?)",
+                  [("206", 2061, 2061, "ANIO1", "ANIO1", "deducida"),
+                   ("205", 2051, 2051, "ANIO2", "ANIO2", "deducida"),
+                   ("106", 2051, 2051, "ANIO2", "ANIO2", "catálogo")])
+    c.execute("DELETE FROM configuracion WHERE clave = 'version_anios_de_aplicaciones'")
+    conn.commit()
+    ns["_poner_al_dia_los_anios_de_aplicaciones"]()
+    esperar("los años imposibles se releen de la descripción; lo del catálogo no se toca",
+            [tuple(f) for f in c.execute("SELECT codigo_clean, origen, anio_desde, anio_hasta "
+                                         "FROM aplicaciones WHERE codigo_clean IN ('ANIO1', 'ANIO2') "
+                                         "ORDER BY 1, 2").fetchall()],
+            [("ANIO1", "deducida", 2000, 2000), ("ANIO2", "catálogo", 2051, 2051),
+             ("ANIO2", "deducida", None, None)])
+    esperar("y queda anotado: no se vuelve a hacer",
+            c.execute("SELECT valor FROM configuracion "
+                      "WHERE clave = 'version_anios_de_aplicaciones'").fetchone()[0],
+            ns["VERSION_ANIOS_DE_APLICACIONES"])
+    c.execute("DELETE FROM aplicaciones WHERE codigo_clean IN ('ANIO1', 'ANIO2')")
+    c.execute("DELETE FROM productos WHERE codigo_clean IN ('ANIO1', 'ANIO2')")
+    conn.commit()
 
     # 10. «Borrar los productos vacíos» (ver depurar_huerfanos()). Borraba todos los que no
     # tenían una equivalencia aprobada: en la copia de la base, el 72 % del catálogo, casi

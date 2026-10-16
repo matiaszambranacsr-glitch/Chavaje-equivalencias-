@@ -271,13 +271,17 @@ PAISES_VIN = {
     "Y": "Suecia / Finlandia", "Z": "Italia",
 }
 # Con los DOS primeros caracteres se distingue mucho mejor: "8" solo dice Sudamérica, pero
-# "8A" es Argentina y "8B" Chile. Se usa esto primero y, si no está, se cae al de una letra.
+# "8A" es Argentina y "8F" Chile. Se usa esto primero y, si no está, se cae al de una letra.
+# Revisada el 16/10/2026 contra varias tablas de ISO 3779 (las fuentes no coinciden en todos
+# los bordes, así que solo se tocó donde coinciden todas): Austria es VA a VE —con una sola
+# letra un VIN VBK… de KTM decía «Francia / España»—, y Ecuador empieza en 8L, así que 8K no
+# es Ecuador (casi todas lo dan a Chile, 8F-8K).
 PAISES_VIN_2 = {
     # --- Sudamérica ---
     "8A": "Argentina", "8B": "Argentina", "8C": "Argentina", "8D": "Argentina",
     "8E": "Argentina",
-    "8F": "Chile", "8G": "Chile", "8H": "Chile", "8J": "Chile",
-    "8K": "Ecuador", "8L": "Ecuador", "8M": "Ecuador",
+    "8F": "Chile", "8G": "Chile", "8H": "Chile", "8J": "Chile", "8K": "Chile",
+    "8L": "Ecuador", "8M": "Ecuador", "8N": "Ecuador", "8P": "Ecuador", "8R": "Ecuador",
     "8S": "Perú", "8T": "Perú",
     "8X": "Venezuela", "8Y": "Venezuela", "8Z": "Venezuela",
     "9A": "Brasil", "9B": "Brasil", "9C": "Brasil", "9D": "Brasil", "9E": "Brasil",
@@ -298,7 +302,8 @@ PAISES_VIN_2 = {
     "TM": "República Checa", "TN": "República Checa", "TR": "Hungría", "TS": "Hungría",
     "TW": "Portugal", "TY": "Portugal", "TC": "Suiza", "TD": "Suiza",
     "UU": "Rumania", "U5": "Eslovaquia", "U6": "Eslovaquia",
-    "VA": "Austria", "VN": "Francia", "VF": "Francia", "VG": "Francia", "VL": "Francia",
+    "VA": "Austria", "VB": "Austria", "VC": "Austria", "VD": "Austria", "VE": "Austria",
+    "VN": "Francia", "VF": "Francia", "VG": "Francia", "VL": "Francia",
     "VS": "España", "VT": "España", "VV": "España", "VW": "España", "VX": "Serbia",
     "WA": "Alemania", "WB": "Alemania", "WD": "Alemania", "WE": "Alemania",
     "WF": "Alemania", "WJ": "Alemania", "WM": "Alemania", "WP": "Alemania",
@@ -590,23 +595,10 @@ def decodificar_vin(vin):
                 if len(candidatos) > 1:
                     resultado["anio_alternativo"] = candidatos[0]
 
-    # --- Dígito verificador (9ª posición) ---
-    # Obligatorio en Norteamérica: se calcula con el resto del VIN, así que si no coincide es
-    # porque hay un carácter mal tipeado. Sirve para no buscar repuestos de un auto equivocado.
-    resultado["digito_verificador"] = None
-    if vin[0] in "12345":
-        valores = {**{str(d): d for d in range(10)},
-                   "A": 1, "B": 2, "C": 3, "D": 4, "E": 5, "F": 6, "G": 7, "H": 8,
-                   "J": 1, "K": 2, "L": 3, "M": 4, "N": 5, "P": 7, "R": 9,
-                   "S": 2, "T": 3, "U": 4, "V": 5, "W": 6, "X": 7, "Y": 8, "Z": 9}
-        pesos = [8, 7, 6, 5, 4, 3, 2, 10, 0, 9, 8, 7, 6, 5, 4, 3, 2]
-        try:
-            suma = sum(valores[ch] * peso for ch, peso in zip(vin, pesos))
-            esperado = "X" if suma % 11 == 10 else str(suma % 11)
-            resultado["digito_verificador"] = (vin[8] == esperado)
-        except KeyError as _err:
-            anotar_error("decodificar_vin", _err)
-            resultado["digito_verificador"] = None
+    # El dígito verificador (9ª posición) ya quedó arriba, con verificar_vin(). Acá había una
+    # segunda cuenta que lo PISABA: dejaba None o True/False donde la pantalla espera "ok",
+    # "mal" o "no_aplica", así que el «❌ el VIN está mal copiado» no salía nunca, ni en un VIN
+    # de Estados Unidos con un carácter cambiado. Lo encontró el control 6e de auditar.py.
 
     # --- Lo más confiable de todo: que el auto ya esté en una ficha ---
     # Si este VIN exacto ya pasó por el mostrador, no hay nada que estimar: el modelo, el año y

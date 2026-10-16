@@ -1729,12 +1729,17 @@ def _dtc_sistematicos():
                            "Emisiones", "Sonda gastada, mezcla rica, inyector con pérdida"))
             salida.append((f"P0{base + 3:03d}", f"Sensor de oxígeno con respuesta lenta, {donde}",
                            "Emisiones", "Sonda al final de su vida, contaminada por aceite o silicona"))
+            # El quinto es «sin actividad» y recién el sexto es el calefactor (P0134 / P0135).
+            # Estaban corridos —el quinto decía «calefactor» y el sexto «calefactor con señal
+            # baja»— y, como esta lista se aplica después de la escrita a mano, pisaba los
+            # P0134, P0135, P0140, P0141 y P0155 que ahí estaban bien. Un P0134 es una sonda
+            # muerta o desconectada; mandar a revisar el calefactor es mandar a otra parte.
             salida.append((f"P0{base + 4:03d}",
-                           f"Circuito del calefactor del sensor de oxígeno, {donde}", "Emisiones",
-                           causa_electrica))
+                           f"Sin actividad detectada en el sensor de oxígeno, {donde}", "Emisiones",
+                           "Sonda desconectada o sin señal, cableado cortado, sonda muerta"))
             salida.append((f"P0{base + 5:03d}",
-                           f"Circuito del calefactor del sensor de oxígeno con señal baja, {donde}",
-                           "Emisiones", causa_electrica))
+                           f"Falla eléctrica en el calefactor del sensor de oxígeno, {donde}",
+                           "Emisiones", "Calefactor de la sonda dañado, fusible, cableado"))
     # Pérdida de comunicación entre módulos (U0xxx). En un auto moderno es de lo que más
     # aparece y el diccionario no tenía ninguno.
     for codigo, modulo in (("U0100", "el módulo de motor (ECM/PCM)"),
@@ -1801,11 +1806,19 @@ def _dtc_sistematicos():
     # Turbo. P0234 (sobrepresión) ya estaba suelto; faltaba la falta de presión, que es lo que
     # el cliente describe como «le falta fuerza».
     for codigo, texto, causa in (
-            ("P0045", "Circuito de control de la geometría variable del turbo",
-             "Actuador de la geometría variable trabado por carbón, válvula solenoide de vacío, "
-             "cañería de vacío partida, cableado"),
-            ("P0046", "Actuador de la geometría del turbo fuera de rango",
-             "Geometría variable trabada, actuador gastado, vacío insuficiente"),
+            # P0045 y P0046 son el control de presión del turbo «A» en la norma: en un diesel
+            # con geometría variable es ese actuador, pero en un turbo con válvula de descarga
+            # (wastegate) es la válvula. Decir solo «geometría variable» mandaba a buscar una
+            # pieza que ese auto no tiene.
+            ("P0045", "Circuito de control de la presión del turbo A abierto (actuador de "
+                      "geometría variable o válvula de descarga)",
+             # «electroválvula» y no «válvula solenoide»: con esa palabra repuestos_para_el_dtc()
+             # ofrecía solenoides de caja automática para una falla del turbo.
+             "Actuador de la geometría variable o válvula de descarga trabados por carbón, "
+             "electroválvula de vacío que comanda el turbo, cañería de vacío partida, cableado"),
+            ("P0046", "Control de la presión del turbo A fuera de rango",
+             "Geometría variable o válvula de descarga trabada, actuador gastado, vacío "
+             "insuficiente"),
             ("P0299", "El turbo no da la presión esperada (subalimentación)",
              "Manguera de aire del intercooler suelta o partida, geometría variable trabada, "
              "filtro de aire tapado, turbo gastado, válvula de alivio perdiendo")):
@@ -2031,7 +2044,7 @@ def _datos_precargados_y_migraciones(c):
             ("P0446","Falla eléctrica en la válvula de ventilación del sistema EVAP","Emisiones","Válvula de venteo, cableado"),
             ("P0447","Circuito de ventilación EVAP abierto","Emisiones","Cableado cortado, válvula desconectada"),
             ("P0448","Circuito de ventilación EVAP en corto","Emisiones","Cableado en corto, válvula dañada"),
-            ("P0451","Falla eléctrica en el sensor de presión del sistema EVAP","Emisiones","Sensor de presión, cableado"),
+            ("P0451","Sensor de presión del sistema EVAP fuera de rango","Emisiones","Sensor de presión, manguera del sensor tapada o suelta, tapa de nafta, cableado"),
             ("P0452","Señal baja en el sensor de presión del sistema EVAP","Emisiones","Cortocircuito a masa, sensor dañado"),
             ("P0453","Señal alta en el sensor de presión del sistema EVAP","Emisiones","Circuito abierto, sensor dañado"),
             ("P0455","Fuga grande detectada en el sistema EVAP","Emisiones","Tapa de nafta, manguera desconectada"),

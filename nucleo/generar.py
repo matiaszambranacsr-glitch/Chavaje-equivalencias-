@@ -185,7 +185,7 @@ from .codigos import _RE_REF_PEGADO, normalizar_texto, posicion_desde_descripcio
       "_armar_buscador_de_familias", "_BUSCADOR_DE_FAMILIAS", "clasificar_repuesto",
       "_RE_ES_KIT", "_RE_KIT_POR_SUMA", "familia_para_comparar", "es_un_kit",
       "ABREVIATURAS_DE_PIEZA", "RELLENO_EN_NOMBRE_DE_PIEZA", "_nombre_de_la_pieza",
-      "_parecido_nombre_pieza", "extraer_anios",
+      "_parecido_nombre_pieza", "_anio_de_modelo_posible", "extraer_anios",
       "PALABRAS_DE_CONTEXTO", "PALABRAS_NO_MODELO",
       "es_nombre_de_modelo",
       # Las dos expresiones de «dos números, solo cuando se sabe qué pieza es»: sin ellas el

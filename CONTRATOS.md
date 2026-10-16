@@ -168,6 +168,11 @@ Las pruebas se corren como dice el README, en «Antes de subir un cambio».
 | Un error anotado no lleva claves ni contraseñas | `tapar_lo_sensible()` | `pruebas_de_los_frenos.py` (8), `nucleo/pruebas.py` |
 | Una búsqueda que falla no se confunde con «no hay» | El buscador | `pruebas_del_buscador.py` |
 | Las librerías son las que se probaron | `requirements.txt` con rangos | Correr las pruebas con esas versiones |
+| Un dato que se calcula no se pisa antes de que alguien lo lea | — | `auditar.py` (control 6e) |
+| El VIN mal copiado se avisa en la pantalla («mal», no None ni False) | `decodificar_vin()` con `verificar_vin()` | `pruebas_de_los_cambios.py` (9c) |
+| El país del VIN y del código de barras sale de las tablas de la norma (ISO 3779, GS1) | `PAISES_VIN_2`, `PREFIJOS_GS1` | `pruebas_de_los_cambios.py` (9c), `nucleo/pruebas.py` |
+| Los códigos de falla dicen lo que dice la norma, y al actualizar se corrigen sin pisar lo editado a mano | `_dtc_sistematicos()`, `SEMILLA_DTC_VERSION` | `pruebas_de_los_cambios.py` (9d) |
+| Un año que no puede ser de un auto no se toma, y los ya guardados se releen una vez | `extraer_anios()`, `_corregir_anios_imposibles_de_aplicaciones()` | `nucleo/pruebas.py`, `pruebas_de_los_cambios.py` (9e) |
 
 ## Sin prueba automática todavía
 

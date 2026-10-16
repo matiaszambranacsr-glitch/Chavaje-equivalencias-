@@ -562,7 +562,10 @@ SEMILLA_WMI_VERSION = "3"
 # Lo mismo para el diccionario de códigos de falla: subir este número hace que la lista se
 # vuelva a aplicar una vez, con INSERT OR IGNORE, así quien ya tiene la app recibe los códigos
 # nuevos sin perder los que cargó o corrigió a mano.
-SEMILLA_DTC_VERSION = "3"
+# "4": se corrigieron P0134/P0135 y sus pares de cada sonda (estaban corridos), P0045, P0046 y
+# P0451, y la causa de P0045, que ofrecía solenoides de caja automática para una falla del turbo.
+# Los que alguien editó a mano (editado = 1) no se tocan.
+SEMILLA_DTC_VERSION = "4"
 # Y para los combos de fábrica («suelen cambiarse junto»): ver COMBOS_DE_FABRICA en datos.py.
 SEMILLA_COMBOS_VERSION = "2"
 # Y lo mismo para la columna `busqueda`: subir este número hace que se vuelva a calcular una vez
@@ -624,6 +627,10 @@ VERSION_MEDIDAS = "7"   # 7: no lee «1/2X20», «M12X162» ni «X1 X3 X4», ni 
 # Subir el número al cambiar cómo se leen los modelos (o el combustible: el 8 es el D4D de
 # Renault, que se leía diésel).
 VERSION_APLICACIONES = "8"
+# Los años imposibles de las aplicaciones ya deducidas (2035 a 2120, de «PEUGEOT 2061.0»). No
+# hace falta volver a leer las 111.795: se corrigen las que tienen un año que no puede ser. Ver
+# _anio_de_modelo_posible() y _corregir_anios_imposibles_de_aplicaciones().
+VERSION_ANIOS_DE_APLICACIONES = "1"
 
 # Quién FABRICA la pieza, leído del final de la descripción. Ver marca_de_repuesto_en().
 # Subir el número al agregar marcas a MARCAS_QUE_FABRICAN_LA_PIEZA o al cambiar cómo se leen.

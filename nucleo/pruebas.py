@@ -242,6 +242,14 @@ def probar_vehiculos():
            or vehiculos.clasificar_repuesto("FILTRO DE ACEITE MANN"),
            "un filtro se tiene que clasificar")
     igual(vehiculos.extraer_anios("GOL 1998-2006"), (1998, 2006), "años de la descripción")
+    # Un número con forma de año que no puede ser el de un auto se saltea: modelo y cilindrada
+    # pegados («2061.0» es un 206 1.0) o un código de motor («C.2038/20»). En la base del 12/10
+    # eran 261 aplicaciones de los años 2035 a 2120.
+    igual([vehiculos.extraer_anios(t) for t in ("PEUGEOT 2061.0 16V 2000/.",
+                                                 "PEUGEOT 106 1.0 2051.0/1.1/ 606",
+                                                 "115 C/BT.038 115 C.2038/20", "RANGER 2035")],
+          [(2000, 2000), (None, None), (None, None), (None, None)],
+          "los años que no pueden ser de un auto no se toman")
 
 
 def probar_precision_del_rubro():
@@ -849,6 +857,11 @@ def probar_el_pais_del_codigo_de_barras():
            "y la app tiene que poder distinguir eso de un país de verdad")
     igual(codigos.pais_del_codigo_de_barras("123"), "",
           "con tres dígitos no se puede decir nada")
+    # Revisado contra la tabla oficial de GS1: China es 680-681 y 690-699, no solo 690-695.
+    igual([codigos.pais_del_codigo_de_barras(x) for x in ("6971234567894", "6801234567891",
+                                                          "8811234567890", "6941234567895")],
+          ["China", "China", "Corea del Sur", "China"],
+          "los prefijos que faltaban según la tabla oficial de GS1")
     # Y por lista: es como se detecta que una lista entera cargó códigos de barras.
     igual(codigos.pais_de_estos_codigos(["7793960026946", "7793960026947", "7793960026948"]),
           "Argentina", "una lista con todos los códigos del mismo prefijo tiene un país")

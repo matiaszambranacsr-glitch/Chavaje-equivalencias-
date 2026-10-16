@@ -326,6 +326,57 @@ if DE_DONDE:
                              "y ningún campo usa esa clave: si se renombró, lo elegido vuelve a "
                              "perderse al ir a otra pantalla")
 
+# ============ 6e. Un dato que se calcula y se pisa antes de usarlo ============
+# decodificar_vin() armaba resultado["digito_verificador"] con verificar_vin() ("ok", "mal",
+# "no_aplica") y cien renglones más abajo lo volvía a poner, con None o True/False. La pantalla
+# pregunta por "mal": el aviso de VIN mal copiado no salió nunca, y nada fallaba. Se busca eso:
+# dos `x["clave"] = ...` en el cuerpo de la misma función, sin que entre medio nadie lea esa
+# clave ni use `x` entero (pasarlo, devolverlo, .get, .update). Solo cuenta lo que está al nivel
+# de la función, no adentro de un if: ahí la segunda puede ser la que vale en otro camino.
+
+
+def _clave_de(nodo):
+    if (isinstance(nodo, ast.Subscript) and isinstance(nodo.value, ast.Name)
+            and isinstance(nodo.slice, ast.Constant)):
+        return (nodo.value.id, nodo.slice.value)
+    return None
+
+
+def _lee_la_clave(nodo, clave):
+    for _n in ast.walk(nodo):
+        if not (isinstance(_n, ast.Name) and _n.id == clave[0] and isinstance(_n.ctx, ast.Load)):
+            continue
+        _padre = _PADRES.get(id(_n))
+        if (isinstance(_padre, ast.Subscript) and _padre.value is _n
+                and isinstance(_padre.slice, ast.Constant)):
+            if _padre.slice.value == clave[1] and isinstance(_padre.ctx, ast.Load):
+                return True
+            continue
+        return True
+    return False
+
+
+list(_ancestros(ARBOL))        # arma _PADRES
+for _f in ast.walk(ARBOL):
+    if not isinstance(_f, (ast.FunctionDef, ast.AsyncFunctionDef)):
+        continue
+    _pendientes = {}
+    for _st in _f.body:
+        _destino = (_clave_de(_st.targets[0]) if isinstance(_st, ast.Assign)
+                    and len(_st.targets) == 1 else None)
+        _leido = _st.value if _destino else _st
+        for _k in [k for k in _pendientes if _lee_la_clave(_leido, k)]:
+            del _pendientes[_k]
+        if _destino:
+            if _destino in _pendientes:
+                _antes = _pendientes[_destino]
+                _antes = (f"{DE_DONDE[_antes - 1][0]}:{DE_DONDE[_antes - 1][1]}" if DE_DONDE
+                          else f"la línea {_antes}")
+                reportar("REVISAR", _st.lineno,
+                         f"{_f.name}(): {_destino[0]}[{_destino[1]!r}] ya se había puesto en "
+                         f"{_antes} y nadie lo leyó: lo de arriba se pierde")
+            _pendientes[_destino] = _st.lineno
+
 # ============ 7. Columnas SQL que no existen ============
 # Un INSERT o un UPDATE contra una columna que no está en el CREATE TABLE no falla al escribir
 # el código ni al abrir la app: revienta con "no such column" recién cuando alguien toca ese

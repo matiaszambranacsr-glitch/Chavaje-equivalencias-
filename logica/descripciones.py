@@ -7,10 +7,23 @@ se usan sin importarlos los nombres que definen las partes anteriores."""
 # ============================================================================================
 # AÑOS, MODELOS Y FAMILIAS DE REPUESTO
 # ============================================================================================
+def _anio_de_modelo_posible(anio):
+    """¿Puede ser el año de un auto? De 1900 hasta el que viene: el modelo 2027 se vende en 2026.
+
+    No es un detalle. extraer_anios() tomaba cualquier 19xx o 20xx, y las listas escriben
+    modelo y motor pegados: «PEUGEOT 2061.0 16V» es un 206 1.0, «2051.0/1.1» un 205, y
+    «115 C.2038/20» un código de motor FIAT. En la copia de la base del 12/10 eso eran 261
+    aplicaciones de los años 2035 a 2120: el filtro por año las escondía de todo auto real."""
+    return 1900 <= anio <= datetime.now().year + 1
+
+
 def extraer_anios(descripcion):
     """Saca el rango de años de una descripción. Las listas los escriben de varias formas:
     '1969/78' (1969 a 1978), '1998/...' (1998 en adelante), '2005' (solo ese año).
-    Devuelve (desde, hasta) — hasta=None significa 'en adelante'."""
+    Devuelve (desde, hasta) — hasta=None significa 'en adelante'.
+
+    Se queda con el primero que PUEDE ser un año de auto (ver _anio_de_modelo_posible()): un
+    número con forma de año pero imposible se saltea y se sigue buscando."""
     if not descripcion:
         return None, None
     texto = str(descripcion)
@@ -19,24 +32,83 @@ def extraer_anios(descripcion):
     # 1.116 filas (331 en una, 778 en otra). Sin él, «GOL 1998-2006» se leía como el año 1998
     # solo, así que filtrar por 2003 ESCONDÍA un repuesto que sirve. Un filtro que oculta lo que
     # corresponde es peor que no tener filtro: el de adelante no se entera de que hay stock.
-    m = re.search(r'\b(19\d{2}|20\d{2})\s*(?:[/\-–—]|\s+AL?\s+)\s*(\d{2}|\d{4})\b',
-                  texto, re.IGNORECASE)
-    if m:
+    for m in re.finditer(r'\b(19\d{2}|20\d{2})\s*(?:[/\-–—]|\s+AL?\s+)\s*(\d{2}|\d{4})\b',
+                         texto, re.IGNORECASE):
         desde = int(m.group(1))
         fin = m.group(2)
         hasta = int(fin) if len(fin) == 4 else int(str(desde)[:2] + fin)
         if hasta < desde:            # 1998/02 significa 1998 a 2002
             hasta += 100
-        return desde, hasta
+        if _anio_de_modelo_posible(desde) and _anio_de_modelo_posible(hasta):
+            return desde, hasta
     # Año en adelante: 1998/... o 1998/…
-    m = re.search(r'\b(19\d{2}|20\d{2})\s*/\s*\.{2,}', texto)
-    if m:
-        return int(m.group(1)), None
+    for m in re.finditer(r'\b(19\d{2}|20\d{2})\s*/\s*\.{2,}', texto):
+        if _anio_de_modelo_posible(int(m.group(1))):
+            return int(m.group(1)), None
     # Un año suelto
-    m = re.search(r'\b(19\d{2}|20\d{2})\b', texto)
-    if m:
-        return int(m.group(1)), int(m.group(1))
+    for m in re.finditer(r'\b(19\d{2}|20\d{2})\b', texto):
+        if _anio_de_modelo_posible(int(m.group(1))):
+            return int(m.group(1)), int(m.group(1))
     return None, None
+
+
+def _corregir_anios_imposibles_de_aplicaciones(cur):
+    """Vuelve a leer el año de las aplicaciones deducidas que tienen uno imposible. Devuelve
+    cuántas revisó.
+
+    Salen de la MISMA descripción con el lector ya arreglado (ver _anio_de_modelo_posible()):
+    «PEUGEOT 2061.0 16V 2000/.» pasa de 2061 a 2000, y donde no hay ningún año de verdad queda
+    sin año, que el filtro trata como «no se sabe» en vez de esconderla. Si con el año bueno
+    ya había una fila igual, la mala sobra y se borra. Las que vinieron del catálogo de un
+    fabricante no se tocan: no salen de una descripción que se pueda volver a leer."""
+    tope = datetime.now().year + 1
+    malas = cur.execute("""SELECT a.id, MIN(p.descripcion) AS descripcion FROM aplicaciones a
+                           LEFT JOIN marcas m ON m.nombre = a.marca_repuesto
+                           LEFT JOIN productos p ON p.codigo_clean = a.codigo_clean
+                                                AND p.marca_id = m.id
+                           WHERE a.origen = 'deducida'
+                             AND (a.anio_desde NOT BETWEEN 1900 AND ?
+                                  OR a.anio_hasta NOT BETWEEN 1900 AND ?)
+                           GROUP BY a.id""", (tope, tope)).fetchall()
+    if not malas:
+        return 0
+    cur.executemany("UPDATE OR IGNORE aplicaciones SET anio_desde = ?, anio_hasta = ? "
+                    "WHERE id = ?", [(*extraer_anios(f["descripcion"]), f["id"]) for f in malas])
+    cur.execute("""DELETE FROM aplicaciones WHERE origen = 'deducida'
+                     AND (anio_desde NOT BETWEEN 1900 AND ? OR anio_hasta NOT BETWEEN 1900 AND ?)""",
+                (tope, tope))
+    return len(malas)
+
+
+def _poner_al_dia_los_anios_de_aplicaciones():
+    """Corre _corregir_anios_imposibles_de_aplicaciones() una vez por versión. Ver
+    VERSION_ANIOS_DE_APLICACIONES.
+
+    No va con las otras migraciones de datos.py porque esas corren al cargar ESA parte, cuando
+    extraer_anios() todavía no existe: en la base real, con 261 filas para corregir, la app no
+    habría arrancado. Acá ya existe."""
+    if BASE_ILEGIBLE:
+        return 0
+    try:
+        fila = c.execute("SELECT valor FROM configuracion "
+                         "WHERE clave = 'version_anios_de_aplicaciones'").fetchone()
+        if (fila["valor"] if fila else None) == VERSION_ANIOS_DE_APLICACIONES:
+            return 0
+        with db_lock, transaccion():
+            n = _corregir_anios_imposibles_de_aplicaciones(c)
+            c.execute("INSERT INTO configuracion (clave, valor) VALUES "
+                      "('version_anios_de_aplicaciones', ?) "
+                      "ON CONFLICT(clave) DO UPDATE SET valor = excluded.valor",
+                      (VERSION_ANIOS_DE_APLICACIONES,))
+        return n
+    except Exception as _err:
+        # Que no se pueda corregir no puede frenar la app: queda como estaba y se reintenta en
+        # la próxima carga.
+        anotar_error("_poner_al_dia_los_anios_de_aplicaciones", _err)
+        return 0
+
+
+_poner_al_dia_los_anios_de_aplicaciones()
 
 
 # Un RANGO de años escrito como rango: «1969/78», «1998/2006», «1998-2006», «1998 al 2006»,

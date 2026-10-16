@@ -6480,6 +6480,46 @@ el botón**:
 - «🔌 Probar las fuentes de afuera» suma la Central de Deudores (con el CUIT de la AFIP, nunca el
   de un cliente) y la inflación de respaldo.
 
+## 📏 Lo que se puede comprobar contra una norma, comprobado sobre la base real
+
+### Cómo se buscó
+
+Se tomaron los datos de la copia de la base del 12/10 que tienen una **regla fija afuera de la
+app** —el dígito verificador y el prefijo del código de barras (GS1), el VIN (ISO 3779), los
+códigos de falla (SAE J2012) y los años de un auto— y se comprobó cada fila contra esa regla. No
+se agregó ningún dato que no se pudiera confirmar: lo que las fuentes no daban igual quedó como
+estaba.
+
+### Lo que estaba mal
+
+| Qué | Qué pasaba (medido) | Qué se hizo |
+|---|---|---|
+| El aviso «❌ el VIN está mal copiado» | **No salía nunca.** `decodificar_vin()` armaba el resultado con `verificar_vin()` («ok», «mal», «no_aplica») y cien renglones más abajo lo pisaba con None o True/False. Un VIN de Estados Unidos con un carácter cambiado pasaba sin aviso. | Se sacó la segunda cuenta. Y para que no vuelva: **control 6e de `auditar.py`**, que marca un `x["clave"] = …` que se pisa sin que nadie lo haya leído (sobre la versión vieja encuentra exactamente este caso y ningún otro). |
+| Los códigos de falla de la sonda lambda | **P0134, P0140, P0146, P0154, P0160 y P0166 decían «calefactor»** y son «sin actividad»; los seis siguientes decían «calefactor con señal baja» y son la falla del calefactor. El generador de la serie estaba corrido un lugar y, como se aplica después de la lista escrita a mano, **pisaba los que ahí estaban bien**. | Corregidos, y la versión de la lista sube a «4»: la app los arregla sola al arrancar en las bases que ya existen (15 códigos en la copia real), **sin tocar los que alguien editó a mano**. |
+| P0045, P0046 y P0451 | P0045/P0046 decían «geometría variable del turbo» y la norma dice control de presión del turbo «A» (en un turbo con válvula de descarga no hay geometría variable). P0451 decía «falla eléctrica» y es «fuera de rango». Además, P0045 **ofrecía solenoides de caja automática** como repuesto (su causa decía «válvula solenoide»). | Texto de la norma; P0045 ya no ofrece piezas de la caja. |
+| Los años de las aplicaciones deducidas | **261 aplicaciones con años de 2035 a 2120** (y una «1997 a 3237»): el lector de años tomaba cualquier 19xx o 20xx, y las listas escriben modelo y cilindrada pegados —«PEUGEOT 2061.0» es un 206 1.0— o códigos de motor como «C.2038/20». El filtro por año las escondía de cualquier auto real. | `extraer_anios()` saltea los años que no pueden ser de un auto (de 1900 al año que viene). Las 261 se vuelven a leer **una sola vez** de su descripción: 255 quedan con su año verdadero (1998, 2000…) y el resto sin año, que se muestra en vez de esconderse. Las de un catálogo de fabricante no se tocan. |
+| El país del código de barras | La tabla tenía China solo como 690-695 (una lista vieja). **Un repuesto chino con 680, 681 o 696-699 salía «sin país».** Faltaban también Corea del Sur 881, Myanmar 883, Catar 630 y Namibia 631. | Agregados, revisados contra la tabla oficial de GS1. El 894, que GS1 da como reservado, no se agrega aunque otras listas lo den a Bangladesh. |
+| El país del VIN | Un VIN que empieza con VB, VC, VD o VE salía «Francia / España»: es **Austria** (VA a VE). Y 8K decía Ecuador, que empieza en 8L. | Corregido solo donde coinciden todas las tablas de ISO 3779 consultadas (en algunos bordes no coinciden, y ahí no se tocó). |
+
+### Lo que se comprobó y estaba bien
+
+- **Los 8.708 códigos de barras de la base cierran con su dígito verificador.** Los 336 de 11
+  dígitos son UPC de 12 a los que Excel les comió el cero de adelante (NGK, 087295…): cierran
+  todos con el cero, y el escáner y el buscador ya los encuentran con y sin él.
+- Los 348 fabricantes por VIN coinciden con el país de su prefijo; los dos que no (7SA Tesla, VBK
+  KTM) son la tabla vieja la que estaba mal, no el fabricante.
+- De los 316 códigos de falla, el resto coincide con la norma.
+- Los datos del DNRPA (transferencias y 0 km) no tienen cantidades negativas ni años imposibles.
+
+### Lo que NO se agregó, y por qué
+
+- **Los WMI 9BH (Hyundai Brasil) y 988 (Jeep y Fiat de Goiana)**, que en Argentina se ven mucho
+  (HB20, Renegade, Compass, Toro): ninguna fuente que se pudo consultar los confirmó. Se cargan
+  desde «Modo Mecánico → VIN» con un VIN real en la mano.
+- Las páginas oficiales (NHTSA, GS1, datos.gob.ar, BCRA) no se pueden abrir desde donde se hizo
+  este trabajo; se usó lo que publican a través del buscador, y donde las fuentes no coincidían
+  no se cambió nada.
+
 ## 🔧 Lo que ninguna prueba tocaba, y cuatro errores que aparecieron ahí
 
 ### Cómo se buscó

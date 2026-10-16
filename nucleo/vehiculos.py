@@ -695,10 +695,23 @@ def _parecido_nombre_pieza(desc_a, desc_b):
 # ============================================================================================
 # AÑOS, MODELOS Y FAMILIAS DE REPUESTO
 # ============================================================================================
+def _anio_de_modelo_posible(anio):
+    """¿Puede ser el año de un auto? De 1900 hasta el que viene: el modelo 2027 se vende en 2026.
+
+    No es un detalle. extraer_anios() tomaba cualquier 19xx o 20xx, y las listas escriben
+    modelo y motor pegados: «PEUGEOT 2061.0 16V» es un 206 1.0, «2051.0/1.1» un 205, y
+    «115 C.2038/20» un código de motor FIAT. En la copia de la base del 12/10 eso eran 261
+    aplicaciones de los años 2035 a 2120: el filtro por año las escondía de todo auto real."""
+    return 1900 <= anio <= datetime.now().year + 1
+
+
 def extraer_anios(descripcion):
     """Saca el rango de años de una descripción. Las listas los escriben de varias formas:
     '1969/78' (1969 a 1978), '1998/...' (1998 en adelante), '2005' (solo ese año).
-    Devuelve (desde, hasta) — hasta=None significa 'en adelante'."""
+    Devuelve (desde, hasta) — hasta=None significa 'en adelante'.
+
+    Se queda con el primero que PUEDE ser un año de auto (ver _anio_de_modelo_posible()): un
+    número con forma de año pero imposible se saltea y se sigue buscando."""
     if not descripcion:
         return None, None
     texto = str(descripcion)
@@ -707,23 +720,23 @@ def extraer_anios(descripcion):
     # 1.116 filas (331 en una, 778 en otra). Sin él, «GOL 1998-2006» se leía como el año 1998
     # solo, así que filtrar por 2003 ESCONDÍA un repuesto que sirve. Un filtro que oculta lo que
     # corresponde es peor que no tener filtro: el de adelante no se entera de que hay stock.
-    m = re.search(r'\b(19\d{2}|20\d{2})\s*(?:[/\-–—]|\s+AL?\s+)\s*(\d{2}|\d{4})\b',
-                  texto, re.IGNORECASE)
-    if m:
+    for m in re.finditer(r'\b(19\d{2}|20\d{2})\s*(?:[/\-–—]|\s+AL?\s+)\s*(\d{2}|\d{4})\b',
+                         texto, re.IGNORECASE):
         desde = int(m.group(1))
         fin = m.group(2)
         hasta = int(fin) if len(fin) == 4 else int(str(desde)[:2] + fin)
         if hasta < desde:            # 1998/02 significa 1998 a 2002
             hasta += 100
-        return desde, hasta
+        if _anio_de_modelo_posible(desde) and _anio_de_modelo_posible(hasta):
+            return desde, hasta
     # Año en adelante: 1998/... o 1998/…
-    m = re.search(r'\b(19\d{2}|20\d{2})\s*/\s*\.{2,}', texto)
-    if m:
-        return int(m.group(1)), None
+    for m in re.finditer(r'\b(19\d{2}|20\d{2})\s*/\s*\.{2,}', texto):
+        if _anio_de_modelo_posible(int(m.group(1))):
+            return int(m.group(1)), None
     # Un año suelto
-    m = re.search(r'\b(19\d{2}|20\d{2})\b', texto)
-    if m:
-        return int(m.group(1)), int(m.group(1))
+    for m in re.finditer(r'\b(19\d{2}|20\d{2})\b', texto):
+        if _anio_de_modelo_posible(int(m.group(1))):
+            return int(m.group(1)), int(m.group(1))
     return None, None
 
 

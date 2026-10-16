@@ -1647,6 +1647,10 @@ def columna_es_codigo_de_barras(valores):
 # fábrica —todos con el mismo prefijo de empresa— que es el error que más vínculos muertos deja.
 # OJO con lo que NO es un país: 020-029 y 200-299 son de uso interno del comercio (los que
 # imprime la balanza del supermercado), y 977-979 son revistas y libros.
+# Revisada contra la tabla oficial de GS1 (gs1.org/standards/id-keys/company-prefix) el
+# 16/10/2026: faltaban China 680-681 y 696-699 (la tabla tenía solo 690-695, una lista vieja),
+# Corea del Sur 881, Myanmar 883, Catar 630 y Namibia 631. Un repuesto chino con 696 o 680
+# salía «sin país». Lo que esa tabla da como reservado (894, por ejemplo) no se agrega.
 PREFIJOS_GS1 = [
     ((0, 19), "Estados Unidos y Canadá"), ((20, 29), "uso interno del comercio"),
     ((30, 39), "Estados Unidos"), ((40, 49), "uso interno del comercio"),
@@ -1671,7 +1675,8 @@ PREFIJOS_GS1 = [
     ((618, 618), "Costa de Marfil"), ((619, 619), "Túnez"), ((621, 621), "Siria"),
     ((622, 622), "Egipto"), ((624, 624), "Libia"), ((625, 625), "Jordania"),
     ((626, 626), "Irán"), ((627, 627), "Kuwait"), ((628, 628), "Arabia Saudita"),
-    ((629, 629), "Emiratos Árabes Unidos"), ((640, 649), "Finlandia"), ((690, 695), "China"),
+    ((629, 629), "Emiratos Árabes Unidos"), ((630, 630), "Catar"), ((631, 631), "Namibia"),
+    ((640, 649), "Finlandia"), ((680, 681), "China"), ((690, 699), "China"),
     ((700, 709), "Noruega"), ((729, 729), "Israel"), ((730, 739), "Suecia"),
     ((740, 740), "Guatemala"), ((741, 741), "El Salvador"), ((742, 742), "Honduras"),
     ((743, 743), "Nicaragua"), ((744, 744), "Costa Rica"), ((745, 745), "Panamá"),
@@ -1683,7 +1688,7 @@ PREFIJOS_GS1 = [
     ((840, 849), "España"), ((850, 850), "Cuba"), ((858, 858), "Eslovaquia"),
     ((859, 859), "Chequia"), ((860, 860), "Serbia"), ((865, 865), "Mongolia"),
     ((867, 867), "Corea del Norte"), ((868, 869), "Turquía"), ((870, 879), "Países Bajos"),
-    ((880, 880), "Corea del Sur"), ((884, 884), "Camboya"), ((885, 885), "Tailandia"),
+    ((880, 881), "Corea del Sur"), ((883, 883), "Myanmar"), ((884, 884), "Camboya"), ((885, 885), "Tailandia"),
     ((888, 888), "Singapur"), ((890, 890), "India"), ((893, 893), "Vietnam"),
     ((896, 896), "Pakistán"), ((899, 899), "Indonesia"), ((900, 919), "Austria"),
     ((930, 939), "Australia"), ((940, 949), "Nueva Zelanda"), ((955, 955), "Malasia"),
