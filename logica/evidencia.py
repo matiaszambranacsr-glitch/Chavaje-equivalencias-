@@ -1643,7 +1643,7 @@ ABREVIATURAS_DE_PIEZA = {
     # Salidas de comparar las dos listas de juntas, que abrevian distinto la misma pieza:
     # Taranto escribe «Jta.Tapa Cilind.Ford» e Illinois «Junta Tapa de Cilindros FORD».
     "CILIND": "CILINDRO", "CILINDRICO": "CILINDRO", "CILIN": "CILINDRO", "JTO": "JUEGO",
-    "JUEGOS": "JUEGO", "VAL": "VALVULA", "VALV": "VALVULA", "VALVS": "VALVULA",
+    "JUEGOS": "JUEGO", "VAL": "VALVULA", "VALVS": "VALVULA",
     "ADMIS": "ADMISION", "ESCAP": "ESCAPE",
     # Las de IMPERIAL, contadas en su lista: «M.ESC», «M.ADM», «T.DIST», «SAL.AGUA», «T.VALVUL».
     "ESC": "ESCAPE", "ADM": "ADMISION", "ADMISI": "ADMISION", "DIST": "DISTRIBUCION",

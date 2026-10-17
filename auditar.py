@@ -377,6 +377,26 @@ for _f in ast.walk(ARBOL):
                          f"{_antes} y nadie lo leyó: lo de arriba se pierde")
             _pendientes[_destino] = _st.lineno
 
+# ============ 6f. Una clave repetida en un diccionario escrito a mano ============
+# Python se queda con la ÚLTIMA sin avisar. Pasó con ELECTROVENTILADOR en
+# PIEZAS_QUE_NOMBRA_UN_DTC: estaba dos veces, y la primera —la que separaba las palabras del
+# código de las del catálogo— no se usaba nunca. Si las dos dicen lo mismo es solo ruido; si
+# dicen distinto, una de las dos es un error que nadie ve.
+for _n in ast.walk(ARBOL):
+    if not isinstance(_n, ast.Dict):
+        continue
+    _vistas = {}
+    for _k, _v in zip(_n.keys, _n.values):
+        if not isinstance(_k, ast.Constant):
+            continue
+        if _k.value in _vistas:
+            _igual = ast.dump(_vistas[_k.value]) == ast.dump(_v)
+            reportar("REVISAR" if _igual else "ERROR", _k.lineno,
+                     f"la clave {_k.value!r} está dos veces en el mismo diccionario"
+                     + ("" if _igual else ", con valores distintos: vale solo la segunda"))
+        _vistas[_k.value] = _v
+
+
 # ============ 7. Columnas SQL que no existen ============
 # Un INSERT o un UPDATE contra una columna que no está en el CREATE TABLE no falla al escribir
 # el código ni al abrir la app: revienta con "no such column" recién cuando alguien toca ese

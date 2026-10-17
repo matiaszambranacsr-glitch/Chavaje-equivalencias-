@@ -6504,6 +6504,22 @@ milla de EE.UU.), y suma lo que traen los manuales que se usan acá:
 
 Una prueba compara contra valores conocidos y que cada conversión vuelva al número de partida.
 
+### Un control más en `auditar.py`: la clave repetida (6f)
+
+Un diccionario escrito a mano con la misma clave dos veces se queda con la última **sin avisar**.
+Ya había pasado con ELECTROVENTILADOR (la versión buena no se usaba nunca). El control 6f lo
+marca como ERROR si los dos valores son distintos y como REVISAR si son iguales; encontró una,
+«VALV» en las abreviaturas de pieza, con el mismo valor las dos veces (se sacó la segunda).
+
+### Lo que se probó antes de publicar
+
+- Las 32 pantallas abiertas una por una con la copia de la base: ninguna da error.
+- La compatibilidad **contra la versión que estaba publicada** (no contra el cambio anterior):
+  la base que deja este programa la abre bien la versión vieja, por si hay que volver atrás.
+- Las 8 búsquedas del mostrador que no habían encontrado nada (mannol, 1485844, kit 22382…):
+  hoy «mannol» trae los 81 productos de MANNOL; las otras son códigos que no están en ninguna
+  lista cargada, y la app lo dice y ofrece los que se escriben parecido.
+
 ### Lo que se midió y no hacía falta tocar
 
 - **El arranque en frío.** Con el disco ya leído una vez, entrar tarda 2,8 s (0,9 de ellos
