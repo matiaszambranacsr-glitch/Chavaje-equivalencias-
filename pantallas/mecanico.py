@@ -927,43 +927,15 @@ if pagina == PAGINAS[7]:
     if sub_mec == SUB_MEC[6]:
         st.caption("Conversiones rápidas de unidades que se usan seguido en manuales de taller antiguos o importados.")
 
-        categoria_conv = st.radio("Categoría:", ["Torque", "Presión", "Longitud"], horizontal=True, key="conv_categoria")
-
-        if categoria_conv == "Torque":
-            direccion = st.radio("Convertir:", ["lb-ft → Nm", "Nm → lb-ft", "lb-in → Nm", "Nm → lb-in"],
-                                  key="conv_torque_dir")
-            valor = st.number_input("Valor a convertir:", min_value=0.0, step=0.1, key="conv_torque_valor")
-            factores = {
-                "lb-ft → Nm": (valor * 1.35582, "Nm"),
-                "Nm → lb-ft": (valor / 1.35582, "lb-ft"),
-                "lb-in → Nm": (valor * 0.112985, "Nm"),
-                "Nm → lb-in": (valor / 0.112985, "lb-in"),
-            }
-            resultado, unidad = factores[direccion]
-            st.metric("Resultado", f"{miles(resultado, 2)} {unidad}")
-
-        elif categoria_conv == "Presión":
-            direccion = st.radio("Convertir:", ["PSI → Bar", "Bar → PSI", "PSI → kPa", "kPa → PSI"],
-                                  key="conv_presion_dir")
-            valor = st.number_input("Valor a convertir:", min_value=0.0, step=0.1, key="conv_presion_valor")
-            factores = {
-                "PSI → Bar": (valor * 0.0689476, "Bar"),
-                "Bar → PSI": (valor / 0.0689476, "PSI"),
-                "PSI → kPa": (valor * 6.89476, "kPa"),
-                "kPa → PSI": (valor / 6.89476, "PSI"),
-            }
-            resultado, unidad = factores[direccion]
-            st.metric("Resultado", f"{miles(resultado, 2)} {unidad}")
-
-        else:  # Longitud
-            direccion = st.radio("Convertir:", ["Pulgadas → mm", "mm → Pulgadas", "Pulgadas → cm", "cm → Pulgadas"],
-                                  key="conv_longitud_dir")
-            valor = st.number_input("Valor a convertir:", min_value=0.0, step=0.1, key="conv_longitud_valor")
-            factores = {
-                "Pulgadas → mm": (valor * 25.4, "mm"),
-                "mm → Pulgadas": (valor / 25.4, "pulgadas"),
-                "Pulgadas → cm": (valor * 2.54, "cm"),
-                "cm → Pulgadas": (valor / 2.54, "pulgadas"),
-            }
-            resultado, unidad = factores[direccion]
-            st.metric("Resultado", f"{miles(resultado, 3)} {unidad}")
+        categoria_conv = st.radio("Categoría:", list(CONVERSIONES_DE_TALLER), horizontal=True,
+                                  key="conv_categoria")
+        _clave_conv = {"Torque": "torque", "Presión": "presion", "Longitud": "longitud"}.get(
+            categoria_conv, categoria_conv.lower())
+        direccion = st.radio("Convertir:", direcciones_de_conversion(categoria_conv),
+                             key=f"conv_{_clave_conv}_dir")
+        # La temperatura es la única que puede ser negativa: -10 °C en invierno.
+        valor = st.number_input("Valor a convertir:",
+                                min_value=None if categoria_conv == "Temperatura" else 0.0,
+                                step=0.1, key=f"conv_{_clave_conv}_valor")
+        resultado, unidad = convertir_unidad(valor, categoria_conv, direccion)
+        st.metric("Resultado", f"{miles(resultado, 3 if categoria_conv == 'Longitud' else 2)} {unidad}")

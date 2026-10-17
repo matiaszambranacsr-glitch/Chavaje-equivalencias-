@@ -175,6 +175,7 @@ Las pruebas se corren como dice el README, en «Antes de subir un cambio».
 | Un año que no puede ser de un auto no se toma, y los ya guardados se releen una vez | `extraer_anios()`, `_corregir_anios_imposibles_de_aplicaciones()` | `nucleo/pruebas.py`, `pruebas_de_los_cambios.py` (9e) |
 | «Según el catálogo del fabricante» muestra solo lo que vino de un catálogo, nunca lo deducido de una descripción | `buscar_aplicaciones()` | `pruebas_de_repuestos_por_auto.py` |
 | Una motorización o una versión (MPFI, SDI, GLX…) no es un modelo de auto, y las ya deducidas se borran una vez | `MOTORIZACIONES_QUE_NO_SON_MODELO`, `_borrar_modelos_que_no_son_autos()` | `pruebas_de_los_cambios.py` (9e) |
+| El conversor de unidades sale de definiciones exactas y cada conversión va y vuelve al mismo número | `CONVERSIONES_DE_TALLER`, `convertir_unidad()` | `pruebas_de_los_cambios.py` (9c bis) |
 
 ## Sin prueba automática todavía
 

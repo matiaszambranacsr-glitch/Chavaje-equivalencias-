@@ -253,6 +253,69 @@ def listar_fabricantes_dtc():
 
 
 # ============================================================
+# MODO MECÁNICO — CONVERSOR DE UNIDADES
+# ============================================================
+# Todo sale de seis DEFINICIONES, no de mediciones: son exactas por norma (la libra y el pie
+# internacionales de 1959, el kilogramo fuerza de la CGPM, el galón y la milla de EE.UU.), así
+# que la cuenta no tiene redondeos escondidos. Antes cada factor estaba escrito a mano y con
+# seis cifras (1.35582); ahora se arma de estas, y una prueba compara contra valores conocidos.
+_LIBRA_FUERZA_EN_N = 4.4482216152605
+_PIE_EN_M = 0.3048
+_PULGADA_EN_M = 0.0254
+_KILOGRAMO_FUERZA_EN_N = 9.80665
+_GALON_EEUU_EN_L = 3.785411784
+_MILLA_EN_KM = 1.609344
+_PSI_EN_PA = _LIBRA_FUERZA_EN_N / _PULGADA_EN_M ** 2          # 6.894,757…
+_HP_EN_W = 550 * _PIE_EN_M * _LIBRA_FUERZA_EN_N               # 745,699… (HP mecánico)
+_CV_EN_W = 75 * _KILOGRAMO_FUERZA_EN_N                        # 735,49875 (el CV de acá)
+
+# Por categoría: (unidad A, unidad B, factor, suma) quiere decir B = A × factor + suma, y se
+# ofrecen las dos direcciones. Las que se agregaron son las que traen los manuales que se usan
+# acá: los japoneses dan el torque en kgf·m y kgf·cm, los manómetros viejos marcan kg/cm², los
+# autos importados de EE.UU. vienen en millas y galones, y la potencia se dice en CV o en HP,
+# que NO son lo mismo (el HP es 1,4 % más).
+CONVERSIONES_DE_TALLER = {
+    "Torque": (("lb-ft", "Nm", _LIBRA_FUERZA_EN_N * _PIE_EN_M, 0.0),
+               ("lb-in", "Nm", _LIBRA_FUERZA_EN_N * _PULGADA_EN_M, 0.0),
+               ("kgf·m", "Nm", _KILOGRAMO_FUERZA_EN_N, 0.0),
+               ("kgf·cm", "Nm", _KILOGRAMO_FUERZA_EN_N / 100, 0.0)),
+    "Presión": (("PSI", "Bar", _PSI_EN_PA / 1e5, 0.0),
+                ("PSI", "kPa", _PSI_EN_PA / 1e3, 0.0),
+                ("kg/cm²", "Bar", _KILOGRAMO_FUERZA_EN_N * 1e4 / 1e5, 0.0),
+                ("kg/cm²", "PSI", _KILOGRAMO_FUERZA_EN_N * 1e4 / _PSI_EN_PA, 0.0)),
+    "Longitud": (("Pulgadas", "mm", _PULGADA_EN_M * 1e3, 0.0),
+                 ("Pulgadas", "cm", _PULGADA_EN_M * 1e2, 0.0),
+                 ("Millas", "km", _MILLA_EN_KM, 0.0)),
+    "Volumen": (("Galones (EE.UU.)", "Litros", _GALON_EEUU_EN_L, 0.0),
+                ("Onzas líquidas (EE.UU.)", "ml", _GALON_EEUU_EN_L * 1e3 / 128, 0.0)),
+    "Potencia": (("HP", "kW", _HP_EN_W / 1e3, 0.0),
+                 ("CV", "kW", _CV_EN_W / 1e3, 0.0),
+                 ("HP", "CV", _HP_EN_W / _CV_EN_W, 0.0)),
+    "Temperatura": (("°C", "°F", 9 / 5, 32.0),),
+}
+
+
+def direcciones_de_conversion(categoria):
+    """«lb-ft → Nm», «Nm → lb-ft»… en el orden de la tabla. Ver CONVERSIONES_DE_TALLER."""
+    salida = []
+    for a, b, _f, _s in CONVERSIONES_DE_TALLER[categoria]:
+        salida += [f"{a} → {b}", f"{b} → {a}"]
+    return salida
+
+
+def convertir_unidad(valor, categoria, direccion):
+    """(resultado, unidad) para una de las direcciones_de_conversion(). Ver
+    CONVERSIONES_DE_TALLER."""
+    de, _, a = direccion.partition(" → ")
+    for u1, u2, factor, suma in CONVERSIONES_DE_TALLER[categoria]:
+        if (u1, u2) == (de, a):
+            return valor * factor + suma, a
+        if (u2, u1) == (de, a):
+            return (valor - suma) / factor, a
+    raise KeyError(direccion)
+
+
+# ============================================================
 # MODO MECÁNICO — LECTOR DE VIN
 # ============================================================
 # Primer carácter del VIN = región/país de fabricación (estándar ISO 3779, dato genérico).

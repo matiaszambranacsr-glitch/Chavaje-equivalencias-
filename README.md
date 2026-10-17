@@ -6489,6 +6489,21 @@ el botón**:
 | «🚙 Repuestos por vehículo» → «🏭 Según el catálogo del fabricante» | Decía «esto no es una coincidencia de texto: es el fabricante del repuesto diciendo a qué auto le va su pieza», y mostraba **las 111.795 aplicaciones de la base, que son todas deducidas**: leídas de las mismas descripciones que la sección «del catálogo, según las descripciones», la menos segura. El que atiende confiaba de más justo en lo que menos se sabe. El puntaje de los vínculos ya las dejaba afuera por esa misma razón; esta pantalla no. | `buscar_aplicaciones()` trae solo lo que vino de un catálogo o de la ficha de un portal. Lo deducido sigue apareciendo, en su sección y con su aviso. |
 | Modelos de auto que no son autos | En el desplegable de modelos, **MPFI era el modelo número 13 de Chevrolet** (260 descripciones: «CORSA 1.6 MPFI»), SDI el 12 de Volkswagen; también salían VTEC y CTDI en Honda, SIGMA y GLX en Ford, y VIII («CIVIC VIII»). Y el cruce por auto juntaba como «del mismo auto» todo lo que dijera MPFI, fuera de un Corsa, un Astra o un Vectra. | Las siete van a la lista de lo que no es un modelo (con TDI, ZETEC, ROCAM, que ya estaban). Las **801 aplicaciones deducidas** con esos «modelos» se borran una sola vez al arrancar: la misma descripción dio también el modelo de verdad, así que no se pierde ninguna. ECO se queda: es la mitad de «ECO SPORT». |
 
+### Lo que se agregó: el conversor de unidades, completo y exacto
+
+«🛠️ Modo Mecánico → 🧮 Conversor de unidades» tenía torque en lb-ft y lb-in, presión en PSI y
+longitud en pulgadas, con los factores escritos a mano con seis cifras. Ahora todo sale de seis
+**definiciones exactas** (la libra y el pie internacionales, el kilogramo fuerza, el galón y la
+milla de EE.UU.), y suma lo que traen los manuales que se usan acá:
+
+- **kgf·m y kgf·cm**, el torque de los manuales japoneses (10 kgf·m = 98,07 Nm);
+- **kg/cm²**, el de los manómetros viejos (2 kg/cm² = 28,45 PSI);
+- **millas y galones**, de los autos importados de EE.UU.;
+- **HP, CV y kW**, que no son lo mismo: el HP es 1,4 % más que el CV (100 CV = 73,55 kW);
+- **°C y °F**, la única que acepta negativos (−10 °C = 14 °F).
+
+Una prueba compara contra valores conocidos y que cada conversión vuelva al número de partida.
+
 ### Lo que se midió y no hacía falta tocar
 
 - **El arranque en frío.** Con el disco ya leído una vez, entrar tarda 2,8 s (0,9 de ellos

@@ -416,6 +416,24 @@ def probar(L):
             [ns["PAISES_VIN_2"].get(x) for x in ("VA", "VC", "VE", "8K", "8L", "8R")],
             ["Austria", "Austria", "Austria", "Chile", "Ecuador", "Ecuador"])
 
+    # 9c bis. El conversor de unidades (ver CONVERSIONES_DE_TALLER): contra valores conocidos,
+    # que salen de las definiciones (1 kgf = 9,80665 N; 1 milla = 1,609344 km; 1 CV = 75 kgf·m/s).
+    _conv = ns["convertir_unidad"]
+    esperar("el conversor, contra valores conocidos",
+            [round(_conv(v, cat, d)[0], 4) for v, cat, d in (
+                (100, "Torque", "lb-ft → Nm"), (10, "Torque", "kgf·m → Nm"),
+                (135.5818, "Torque", "Nm → lb-ft"), (32, "Presión", "PSI → Bar"),
+                (2, "Presión", "kg/cm² → PSI"), (100, "Temperatura", "°C → °F"),
+                (-40, "Temperatura", "°F → °C"), (1, "Longitud", "Millas → km"),
+                (1, "Volumen", "Galones (EE.UU.) → Litros"), (100, "Potencia", "CV → kW"),
+                (100, "Potencia", "HP → kW"), (1, "Longitud", "Pulgadas → mm"))],
+            [135.5818, 98.0665, 100.0, 2.2063, 28.4467, 212.0, -40.0, 1.6093, 3.7854, 73.5499,
+             74.57, 25.4])
+    esperar("cada dirección que se ofrece se puede convertir, ida y vuelta",
+            [d for cat in ns["CONVERSIONES_DE_TALLER"] for d in ns["direcciones_de_conversion"](cat)
+             if round(_conv(_conv(7.5, cat, d)[0], cat,
+                            " → ".join(reversed(d.split(" → "))))[0], 9) != 7.5], [])
+
     # 9d. Los códigos de falla de la sonda lambda (ver _dtc_sistematicos()). P0134 es «sin
     # actividad» y P0135 el calefactor; el generador los tenía corridos y pisaba los buenos.
     def _dtc(codigo):

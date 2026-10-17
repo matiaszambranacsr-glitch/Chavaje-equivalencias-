@@ -105,6 +105,7 @@ específico, y las pantallas quedan todas al final:
         · UBICACIÓN EN DEPÓSITO (matriz ABC)
     logica/mecanico.py
         · MODO MECÁNICO — DICCIONARIO DE CÓDIGOS OBD2 / DTC
+        · MODO MECÁNICO — CONVERSOR DE UNIDADES
         · MODO MECÁNICO — LECTOR DE VIN
         · MODO MECÁNICO — CAMPAÑAS DE SEGURIDAD Y FALLAS REPORTADAS (NHTSA)
         · MODO MECÁNICO — VISOR DE ESQUEMAS
