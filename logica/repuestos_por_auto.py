@@ -13,8 +13,15 @@ def buscar_aplicaciones(marca_auto, modelo="", anio=None, limite=200):
     """Los códigos que un catálogo de aplicaciones dice que le van a este auto.
 
     A diferencia de buscar por la descripción del proveedor, acá el dato lo puso el fabricante
-    del repuesto: si NGK dice que a un Fiat Argo 1.3 le va la U5443, le va."""
-    condiciones = ["UPPER(marca_auto) LIKE ?"]
+    del repuesto: si NGK dice que a un Fiat Argo 1.3 le va la U5443, le va.
+
+    Por eso NO entran las aplicaciones 'deducida', que salen de leer las descripciones del
+    proveedor: son la misma fuente que «del catálogo, según las descripciones», la menos segura.
+    Entraban, y en la base del 12/10 eran las 111.795 que había: la pantalla mostraba texto
+    leído de una descripción bajo «🏭 Según el catálogo del fabricante — esto no es una
+    coincidencia de texto». La señal de catálogo del puntaje ya las dejaba afuera por lo mismo
+    (ver _analizar_filas() en equivalencias_descubiertas.py)."""
+    condiciones = ["UPPER(marca_auto) LIKE ?", "COALESCE(origen, '') <> 'deducida'"]
     params = [f"%{(marca_auto or '').strip().upper()}%"]
     if modelo:
         condiciones.append("UPPER(modelo_auto) LIKE ?")

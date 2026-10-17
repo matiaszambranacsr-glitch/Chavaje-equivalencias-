@@ -80,6 +80,16 @@ def probar(L):
     r = ns["repuestos_de_este_auto"]("VOLKSWAGEN", "GOL")
     esperar("otros Gol: no cuenta el Golf", [f["Código"] for f in r["de_otros_iguales"]], ["BA-1"])
 
+    # «Según el catálogo del fabricante» es solo lo que vino de un catálogo: lo leído de una
+    # descripción ya está en «del catálogo» y es lo menos seguro. Ver buscar_aplicaciones().
+    c.executemany("INSERT INTO aplicaciones (marca_auto, modelo_auto, motor, codigo, codigo_clean, "
+                  "marca_repuesto, origen) VALUES ('VOLKSWAGEN', 'GOL', '', ?, ?, 'PRUEBA', ?)",
+                  [("DED-1", "DED1", "deducida"), ("CAT-1", "CAT1", "catálogo NGK"),
+                   ("POR-1", "POR1", "ficha del portal")])
+    r = ns["repuestos_de_este_auto"]("VOLKSWAGEN", "GOL")
+    esperar("del fabricante: lo de un catálogo, no lo leído de una descripción",
+            sorted(f["Código"] for f in r["del_fabricante"]), ["CAT-1", "POR-1"])
+
     # Sin la marca: se deduce del modelo, primero por el registro automotor.
     r = ns["repuestos_de_este_auto"]("", "GOL")
     esperar("sin marca y pocos productos: no adivina", r["marca_deducida"], "")

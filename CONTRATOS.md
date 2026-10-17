@@ -173,6 +173,8 @@ Las pruebas se corren como dice el README, en «Antes de subir un cambio».
 | El país del VIN y del código de barras sale de las tablas de la norma (ISO 3779, GS1) | `PAISES_VIN_2`, `PREFIJOS_GS1` | `pruebas_de_los_cambios.py` (9c), `nucleo/pruebas.py` |
 | Los códigos de falla dicen lo que dice la norma, y al actualizar se corrigen sin pisar lo editado a mano | `_dtc_sistematicos()`, `SEMILLA_DTC_VERSION` | `pruebas_de_los_cambios.py` (9d) |
 | Un año que no puede ser de un auto no se toma, y los ya guardados se releen una vez | `extraer_anios()`, `_corregir_anios_imposibles_de_aplicaciones()` | `nucleo/pruebas.py`, `pruebas_de_los_cambios.py` (9e) |
+| «Según el catálogo del fabricante» muestra solo lo que vino de un catálogo, nunca lo deducido de una descripción | `buscar_aplicaciones()` | `pruebas_de_repuestos_por_auto.py` |
+| Una motorización o una versión (MPFI, SDI, GLX…) no es un modelo de auto, y las ya deducidas se borran una vez | `MOTORIZACIONES_QUE_NO_SON_MODELO`, `_borrar_modelos_que_no_son_autos()` | `pruebas_de_los_cambios.py` (9e) |
 
 ## Sin prueba automática todavía
 

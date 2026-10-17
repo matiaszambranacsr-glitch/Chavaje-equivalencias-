@@ -80,9 +80,23 @@ def _corregir_anios_imposibles_de_aplicaciones(cur):
     return len(malas)
 
 
-def _poner_al_dia_los_anios_de_aplicaciones():
-    """Corre _corregir_anios_imposibles_de_aplicaciones() una vez por versión. Ver
-    VERSION_ANIOS_DE_APLICACIONES.
+def _borrar_modelos_que_no_son_autos(cur):
+    """Borra las aplicaciones deducidas cuyo «modelo» es una motorización o una versión (ver
+    MOTORIZACIONES_QUE_NO_SON_MODELO). Devuelve cuántas borró.
+
+    No se pierde nada: la misma descripción que dio «CHEVROLET MPFI» dio «CHEVROLET CORSA».
+    Sí se pierde lo que hacían mal: el cruce por auto juntaba como «del mismo auto» todo lo que
+    dijera MPFI, fuera de un Corsa, un Astra o un Vectra. Solo las deducidas: lo que vino de un
+    catálogo se queda como el catálogo lo escribió."""
+    palabras = sorted(MOTORIZACIONES_QUE_NO_SON_MODELO)
+    cur.execute(f"""DELETE FROM aplicaciones WHERE origen = 'deducida'
+                     AND UPPER(modelo_auto) IN ({",".join("?" * len(palabras))})""", palabras)
+    return cur.rowcount
+
+
+def _poner_al_dia_las_aplicaciones_deducidas():
+    """Corre _corregir_anios_imposibles_de_aplicaciones() y _borrar_modelos_que_no_son_autos()
+    una vez por versión. Ver VERSION_LIMPIEZA_DE_APLICACIONES.
 
     No va con las otras migraciones de datos.py porque esas corren al cargar ESA parte, cuando
     extraer_anios() todavía no existe: en la base real, con 261 filas para corregir, la app no
@@ -91,24 +105,22 @@ def _poner_al_dia_los_anios_de_aplicaciones():
         return 0
     try:
         fila = c.execute("SELECT valor FROM configuracion "
-                         "WHERE clave = 'version_anios_de_aplicaciones'").fetchone()
-        if (fila["valor"] if fila else None) == VERSION_ANIOS_DE_APLICACIONES:
+                         "WHERE clave = 'version_limpieza_de_aplicaciones'").fetchone()
+        if (fila["valor"] if fila else None) == VERSION_LIMPIEZA_DE_APLICACIONES:
             return 0
         with db_lock, transaccion():
             n = _corregir_anios_imposibles_de_aplicaciones(c)
+            n += _borrar_modelos_que_no_son_autos(c)
             c.execute("INSERT INTO configuracion (clave, valor) VALUES "
-                      "('version_anios_de_aplicaciones', ?) "
+                      "('version_limpieza_de_aplicaciones', ?) "
                       "ON CONFLICT(clave) DO UPDATE SET valor = excluded.valor",
-                      (VERSION_ANIOS_DE_APLICACIONES,))
+                      (VERSION_LIMPIEZA_DE_APLICACIONES,))
         return n
     except Exception as _err:
         # Que no se pueda corregir no puede frenar la app: queda como estaba y se reintenta en
         # la próxima carga.
-        anotar_error("_poner_al_dia_los_anios_de_aplicaciones", _err)
+        anotar_error("_poner_al_dia_las_aplicaciones_deducidas", _err)
         return 0
-
-
-_poner_al_dia_los_anios_de_aplicaciones()
 
 
 # Un RANGO de años escrito como rango: «1969/78», «1998/2006», «1998-2006», «1998 al 2006»,
@@ -454,7 +466,17 @@ MOTORIZACIONES_QUE_NO_SON_MODELO = {
     "MONOPUNTO", "NAFTA", "DIESEL", "TURBO", "BITURBO",
     "QUATTRO", "AVANT", "SPORTBACK", "ALLROAD", "CABRIOLET", "COUPE", "BREAK", "WEEKEND",
     "SEDAN", "FURGON", "PICKUP", "RURAL",
+    # Las que todavía salían en el desplegable, contadas en la base del 12/10: MPFI era el
+    # «modelo» número 13 de Chevrolet (260 descripciones: «CORSA 1.6 MPFI»), SDI el 12 de
+    # Volkswagen, VTEC uno de Honda, SIGMA (el motor Ford, como ZETEC y ROCAM de arriba) y GLX
+    # (la versión: «TAUNUS GLX») dos de Ford. ECO se queda: es la mitad de «ECO SPORT». Y de
+    # Honda, CTDI (el diésel i-CTDi, como TDCI y CRDI) y VIII (la generación: «CIVIC VIII»).
+    "MPFI", "SDI", "VTEC", "SIGMA", "GLX", "CTDI", "VIII",
 }
+
+# Acá y no antes: usa extraer_anios() y la lista de arriba. Ver
+# _poner_al_dia_las_aplicaciones_deducidas().
+_poner_al_dia_las_aplicaciones_deducidas()
 
 
 

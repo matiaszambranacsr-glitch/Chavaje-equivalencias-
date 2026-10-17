@@ -6480,6 +6480,27 @@ el botón**:
 - «🔌 Probar las fuentes de afuera» suma la Central de Deudores (con el CUIT de la AFIP, nunca el
   de un cliente) y la inflación de respaldo.
 
+## 🏭 «Según el catálogo del fabricante» era texto leído de las descripciones
+
+### Lo que estaba mal
+
+| Qué | Qué pasaba (medido en la base del 12/10) | Qué se hizo |
+|---|---|---|
+| «🚙 Repuestos por vehículo» → «🏭 Según el catálogo del fabricante» | Decía «esto no es una coincidencia de texto: es el fabricante del repuesto diciendo a qué auto le va su pieza», y mostraba **las 111.795 aplicaciones de la base, que son todas deducidas**: leídas de las mismas descripciones que la sección «del catálogo, según las descripciones», la menos segura. El que atiende confiaba de más justo en lo que menos se sabe. El puntaje de los vínculos ya las dejaba afuera por esa misma razón; esta pantalla no. | `buscar_aplicaciones()` trae solo lo que vino de un catálogo o de la ficha de un portal. Lo deducido sigue apareciendo, en su sección y con su aviso. |
+| Modelos de auto que no son autos | En el desplegable de modelos, **MPFI era el modelo número 13 de Chevrolet** (260 descripciones: «CORSA 1.6 MPFI»), SDI el 12 de Volkswagen; también salían VTEC y CTDI en Honda, SIGMA y GLX en Ford, y VIII («CIVIC VIII»). Y el cruce por auto juntaba como «del mismo auto» todo lo que dijera MPFI, fuera de un Corsa, un Astra o un Vectra. | Las siete van a la lista de lo que no es un modelo (con TDI, ZETEC, ROCAM, que ya estaban). Las **801 aplicaciones deducidas** con esos «modelos» se borran una sola vez al arrancar: la misma descripción dio también el modelo de verdad, así que no se pierde ninguna. ECO se queda: es la mitad de «ECO SPORT». |
+
+### Lo que se midió y no hacía falta tocar
+
+- **El arranque en frío.** Con el disco ya leído una vez, entrar tarda 2,8 s (0,9 de ellos
+  el diagnóstico de salud, que se calcula una vez por proceso) y la primera búsqueda 0,7 s.
+  Los 6 a 14 s que se veían eran el disco frío (Python, pandas y la base leídos por primera
+  vez), no código de la app.
+- **Un analizador de código (ruff)** sobre toda la lógica y las pantallas, y sobre el programa
+  entero junto como lo ve Python: ningún nombre sin definir, y lo demás que marcó (claves
+  repetidas con el mismo valor, variables de un bucle reutilizadas a propósito) no cambia nada.
+- **Las alertas de salud sobre la base real** dicen lo que pasa: copia sin cifrar, TARANTO,
+  los 14 pares, las medidas imposibles, los «.0», los 150 códigos con dos precios y la cola.
+
 ## 📏 Lo que se puede comprobar contra una norma, comprobado sobre la base real
 
 ### Cómo se buscó

@@ -627,10 +627,11 @@ VERSION_MEDIDAS = "7"   # 7: no lee «1/2X20», «M12X162» ni «X1 X3 X4», ni 
 # Subir el número al cambiar cómo se leen los modelos (o el combustible: el 8 es el D4D de
 # Renault, que se leía diésel).
 VERSION_APLICACIONES = "8"
-# Los años imposibles de las aplicaciones ya deducidas (2035 a 2120, de «PEUGEOT 2061.0»). No
-# hace falta volver a leer las 111.795: se corrigen las que tienen un año que no puede ser. Ver
-# _anio_de_modelo_posible() y _corregir_anios_imposibles_de_aplicaciones().
-VERSION_ANIOS_DE_APLICACIONES = "1"
+# Lo que se arregla de las aplicaciones YA deducidas sin volver a leer las 111.795: los años
+# imposibles (2035 a 2120, de «PEUGEOT 2061.0») y los «modelos» que son una motorización
+# («CHEVROLET MPFI»). Subir el número para que se vuelva a correr una vez. Ver
+# _poner_al_dia_las_aplicaciones_deducidas().
+VERSION_LIMPIEZA_DE_APLICACIONES = "1"
 
 # Quién FABRICA la pieza, leído del final de la descripción. Ver marca_de_repuesto_en().
 # Subir el número al agregar marcas a MARCAS_QUE_FABRICAN_LA_PIEZA o al cambiar cómo se leen.

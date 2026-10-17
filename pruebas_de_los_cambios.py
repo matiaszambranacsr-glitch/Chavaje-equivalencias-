@@ -450,7 +450,8 @@ def probar(L):
     conn.commit()
 
     # 9e. Los años imposibles de las aplicaciones ya deducidas (ver
-    # _corregir_anios_imposibles_de_aplicaciones()): se vuelven a leer de la descripción.
+    # _corregir_anios_imposibles_de_aplicaciones()): se vuelven a leer de la descripción. Y el
+    # «modelo» MPFI, que es la inyección, se borra (ver _borrar_modelos_que_no_son_autos()).
     c.execute("INSERT INTO productos (codigo_raw, codigo_clean, descripcion, marca_id) "
               "VALUES ('ANIO1', 'ANIO1', 'JUNTA PEUGEOT 2061.0 16V 2000/.', ?)", (marca,))
     c.execute("INSERT INTO productos (codigo_raw, codigo_clean, descripcion, marca_id) "
@@ -461,9 +462,12 @@ def probar(L):
                   [("206", 2061, 2061, "ANIO1", "ANIO1", "deducida"),
                    ("205", 2051, 2051, "ANIO2", "ANIO2", "deducida"),
                    ("106", 2051, 2051, "ANIO2", "ANIO2", "catálogo")])
-    c.execute("DELETE FROM configuracion WHERE clave = 'version_anios_de_aplicaciones'")
+    c.execute("INSERT INTO aplicaciones (marca_auto, modelo_auto, motor, codigo, codigo_clean, "
+              "marca_repuesto, origen) VALUES ('CHEVROLET', 'MPFI', '', 'ANIO1', 'ANIO1', 'PRUEBA', "
+              "'deducida')")
+    c.execute("DELETE FROM configuracion WHERE clave = 'version_limpieza_de_aplicaciones'")
     conn.commit()
-    ns["_poner_al_dia_los_anios_de_aplicaciones"]()
+    ns["_poner_al_dia_las_aplicaciones_deducidas"]()
     esperar("los años imposibles se releen de la descripción; lo del catálogo no se toca",
             [tuple(f) for f in c.execute("SELECT codigo_clean, origen, anio_desde, anio_hasta "
                                          "FROM aplicaciones WHERE codigo_clean IN ('ANIO1', 'ANIO2') "
@@ -472,8 +476,8 @@ def probar(L):
              ("ANIO2", "deducida", None, None)])
     esperar("y queda anotado: no se vuelve a hacer",
             c.execute("SELECT valor FROM configuracion "
-                      "WHERE clave = 'version_anios_de_aplicaciones'").fetchone()[0],
-            ns["VERSION_ANIOS_DE_APLICACIONES"])
+                      "WHERE clave = 'version_limpieza_de_aplicaciones'").fetchone()[0],
+            ns["VERSION_LIMPIEZA_DE_APLICACIONES"])
     c.execute("DELETE FROM aplicaciones WHERE codigo_clean IN ('ANIO1', 'ANIO2')")
     c.execute("DELETE FROM productos WHERE codigo_clean IN ('ANIO1', 'ANIO2')")
     conn.commit()
