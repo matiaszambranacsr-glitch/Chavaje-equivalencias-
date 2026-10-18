@@ -177,6 +177,9 @@ Las pruebas se corren como dice el README, en «Antes de subir un cambio».
 | «Según el catálogo del fabricante» muestra solo lo que vino de un catálogo, nunca lo deducido de una descripción | `buscar_aplicaciones()` | `pruebas_de_repuestos_por_auto.py` |
 | Una motorización o una versión (MPFI, SDI, GLX…) no es un modelo de auto, y las ya deducidas se borran una vez | `MOTORIZACIONES_QUE_NO_SON_MODELO`, `_borrar_modelos_que_no_son_autos()` | `pruebas_de_los_cambios.py` (9e) |
 | El conversor de unidades sale de definiciones exactas y cada conversión va y vuelve al mismo número | `CONVERSIONES_DE_TALLER`, `convertir_unidad()` | `pruebas_de_los_cambios.py` (9c bis) |
+| Un error de tipeo se corrige solo si la palabra no aparece en ningún producto, y la pantalla lo dice | `palabras_corregidas()`, `texto_con_las_correcciones()` | `pruebas_del_buscador.py` (2c) |
+| La escala de precios de cada lista se ve contra cada proveedor, no solo el promedio | `escala_de_precios_por_marca()` («por_proveedor») | `pruebas_de_los_cambios.py` (9f) |
+| La limpieza de una vez de las aplicaciones se reintenta cada día hasta que sale | `_tareas_automaticas_del_dia()` | `pruebas_de_los_cambios.py` (9e) |
 
 ## Sin prueba automática todavía
 

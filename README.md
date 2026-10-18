@@ -6480,6 +6480,27 @@ el botón**:
 - «🔌 Probar las fuentes de afuera» suma la Central de Deudores (con el CUIT de la AFIP, nunca el
   de un cliente) y la inflación de respaldo.
 
+## 🔤 Los errores de tipeo en el buscador, y la escala de TARANTO contra cada proveedor
+
+### Lo que se agregó
+
+| Qué | Por qué (medido en la base del 12/10) | Cómo |
+|---|---|---|
+| **Corrector de tipeo** en la búsqueda por descripción | «bomba de agau gol» traía juntas y bombas de lavaparabrisas: «agau» no está en ningún producto, así que se buscaba solo «bomba» y «gol». | Se corrige **solo** la palabra que hoy no puede encontrar nada —no aparece en ninguna descripción, ni adentro de otra, ni es el nombre de una lista— y solo si a **un tecleo** (una letra de más, de menos, cambiada, o dos vecinas al revés) hay una que el catálogo usa en 3 productos o más. La pantalla lo dice: «"agau" no está en ningún producto: se buscó "agua"». Con la copia real: agau→agua, viaa→vías, embrage→embrague, rulemna→rulemán, cilindor→cilindro, radiadro→radiador, bobian→bobina. Lo bien escrito y las abreviaturas de las listas («jta», «filt») no se tocan. La primera búsqueda después de un reinicio tarda 1 s más (arma el vocabulario); las demás, 25 ms. |
+| **La escala de precios contra cada proveedor** («🗂️ Administrar → 🏷️ Marcas → 📏 Coeficiente de la lista») | La alerta decía «TARANTO cuesta 15 veces menos» y sugería ×15,29, sin mostrar si eso es parejo. | Ahora muestra la mediana contra cada uno: FISPA ×0,08 · ILLINOIS ×0,06 · IMPERIAL ×0,09 · JL ×0,06. Es parejo contra los cuatro, así que lo más probable es que a la lista le falte el coeficiente que publica el proveedor; ese número es mejor que el sugerido. |
+| **La limpieza de las aplicaciones se reintenta** | Corre al cargar la lógica; si en ese momento la base estaba ocupada, fallaba y no se volvía a intentar hasta el próximo cambio de código. | La tarea del día la reintenta (si ya se hizo, es una consulta). Y la cuenta correcta es **852** filas borradas, no 801: CTDI (32) y VIII (19) se sumaron después de medir. |
+
+### Lo que se revisó y estaba bien
+
+- **La consistencia de la base real:** ningún código repetido en una lista, ningún vínculo que
+  apunte a un producto borrado, a sí mismo o al revés, ningún par aprobado y rechazado a la
+  vez, ni pendiente y rechazado; `integrity_check` y las claves foráneas, sin errores.
+- **Las 5.063 fotos de FISPA que fallaron el 05/10** con «SSLError»: es del código de antes.
+  El de ahora anota el motivo («le falta un certificado intermedio», «vencido»…), pide la
+  cadena completa del certificado y no reintenta todo el mismo día.
+- **Lo que se publicó ayer**, mirado de nuevo: las aplicaciones que muestra «del fabricante»
+  vienen de un archivo de catálogo o de la ficha de un portal, nunca de una descripción.
+
 ## 🏭 «Según el catálogo del fabricante» era texto leído de las descripciones
 
 ### Lo que estaba mal
@@ -6487,7 +6508,7 @@ el botón**:
 | Qué | Qué pasaba (medido en la base del 12/10) | Qué se hizo |
 |---|---|---|
 | «🚙 Repuestos por vehículo» → «🏭 Según el catálogo del fabricante» | Decía «esto no es una coincidencia de texto: es el fabricante del repuesto diciendo a qué auto le va su pieza», y mostraba **las 111.795 aplicaciones de la base, que son todas deducidas**: leídas de las mismas descripciones que la sección «del catálogo, según las descripciones», la menos segura. El que atiende confiaba de más justo en lo que menos se sabe. El puntaje de los vínculos ya las dejaba afuera por esa misma razón; esta pantalla no. | `buscar_aplicaciones()` trae solo lo que vino de un catálogo o de la ficha de un portal. Lo deducido sigue apareciendo, en su sección y con su aviso. |
-| Modelos de auto que no son autos | En el desplegable de modelos, **MPFI era el modelo número 13 de Chevrolet** (260 descripciones: «CORSA 1.6 MPFI»), SDI el 12 de Volkswagen; también salían VTEC y CTDI en Honda, SIGMA y GLX en Ford, y VIII («CIVIC VIII»). Y el cruce por auto juntaba como «del mismo auto» todo lo que dijera MPFI, fuera de un Corsa, un Astra o un Vectra. | Las siete van a la lista de lo que no es un modelo (con TDI, ZETEC, ROCAM, que ya estaban). Las **801 aplicaciones deducidas** con esos «modelos» se borran una sola vez al arrancar: la misma descripción dio también el modelo de verdad, así que no se pierde ninguna. ECO se queda: es la mitad de «ECO SPORT». |
+| Modelos de auto que no son autos | En el desplegable de modelos, **MPFI era el modelo número 13 de Chevrolet** (260 descripciones: «CORSA 1.6 MPFI»), SDI el 12 de Volkswagen; también salían VTEC y CTDI en Honda, SIGMA y GLX en Ford, y VIII («CIVIC VIII»). Y el cruce por auto juntaba como «del mismo auto» todo lo que dijera MPFI, fuera de un Corsa, un Astra o un Vectra. | Las siete van a la lista de lo que no es un modelo (con TDI, ZETEC, ROCAM, que ya estaban). Las **852 aplicaciones deducidas** con esos «modelos» se borran una sola vez al arrancar: la misma descripción dio también el modelo de verdad, así que no se pierde ninguna. ECO se queda: es la mitad de «ECO SPORT». |
 
 ### Lo que se agregó: el conversor de unidades, completo y exacto
 

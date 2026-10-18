@@ -2525,6 +2525,16 @@ def _tareas_automaticas_del_dia(hoy, presupuesto_segundos):
     def queda_tiempo():
         return time.time() - arranque < presupuesto_segundos
 
+    # 0. La limpieza de una sola vez de las aplicaciones deducidas. Corre al cargar la lógica,
+    # pero si en ese momento la base estaba ocupada (la tanda de fondo escribiendo) fallaba y
+    # no volvía a intentarse hasta el próximo cambio de código. Acá se reintenta una vez por
+    # día; si ya se hizo, es una consulta y vuelve. Ver _poner_al_dia_las_aplicaciones_deducidas().
+    try:
+        if _poner_al_dia_las_aplicaciones_deducidas():
+            hecho.append("aplicaciones deducidas puestas al día")
+    except Exception as _err:
+        anotar_error("tareas/aplicaciones_deducidas", _err)
+
     # 1. Puntuar los vínculos que quedaron sin nota: es lo que usa el buscador
     if queda_tiempo():
         try:

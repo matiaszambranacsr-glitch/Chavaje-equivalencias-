@@ -496,9 +496,49 @@ def probar(L):
             c.execute("SELECT valor FROM configuracion "
                       "WHERE clave = 'version_limpieza_de_aplicaciones'").fetchone()[0],
             ns["VERSION_LIMPIEZA_DE_APLICACIONES"])
+    # Si al cargar la lógica no se pudo (la base ocupada), la tarea del día la reintenta.
+    c.execute("DELETE FROM configuracion WHERE clave IN ('version_limpieza_de_aplicaciones', "
+              "'ultimas_tareas_dia')")
+    conn.commit()
+    ns["tareas_automaticas_del_dia"](presupuesto_segundos=0)
+    esperar("la tarea del día reintenta la limpieza que no se pudo hacer al cargar",
+            tuple(c.execute("SELECT valor FROM configuracion "
+                            "WHERE clave = 'version_limpieza_de_aplicaciones'").fetchone() or ()),
+            (ns["VERSION_LIMPIEZA_DE_APLICACIONES"],))
     c.execute("DELETE FROM aplicaciones WHERE codigo_clean IN ('ANIO1', 'ANIO2')")
     c.execute("DELETE FROM productos WHERE codigo_clean IN ('ANIO1', 'ANIO2')")
     conn.commit()
+
+    # 9f. La escala de precios, contra cada proveedor (ver escala_de_precios_por_marca()): una
+    # lista que cuesta 15 veces menos que TODOS sus equivalentes está corrida pareja.
+    _ids = {}
+    for _nom in ("ESCALA-A", "ESCALA-B", "ESCALA-C"):
+        c.execute("INSERT INTO marcas (nombre, tipo) VALUES (?, 'PROVEEDOR')", (_nom,))
+        _ids[_nom] = c.lastrowid
+    _pares = []
+    for i in range(6):
+        _de_a = []
+        for _nom, _precio in (("ESCALA-A", 100.0), ("ESCALA-B", 1500.0), ("ESCALA-C", 1600.0)):
+            c.execute("INSERT INTO productos (codigo_raw, codigo_clean, descripcion, marca_id, "
+                      "precio) VALUES (?, ?, 'PIEZA DE ESCALA', ?, ?)",
+                      (f"ESC{_nom[-1]}{i}", f"ESC{_nom[-1]}{i}", _ids[_nom], _precio))
+            _de_a.append(c.lastrowid)
+        _pares += [(min(_de_a[0], x), max(_de_a[0], x)) for x in _de_a[1:]]
+    c.executemany("INSERT INTO equivalencias (producto_a_id, producto_b_id, confianza) "
+                  "VALUES (?, ?, 80)", _pares)
+    conn.commit()
+    ns["olvidar_la_escala_de_precios"]()
+    _esc = ns["escala_de_precios_por_marca"]()["ESCALA-A"]
+    esperar("la escala contra cada proveedor",
+            {k: round(v, 4) for k, v in _esc["por_proveedor"].items()},
+            {"ESCALA-B": round(100 / 1500, 4), "ESCALA-C": round(100 / 1600, 4)})
+    c.execute("DELETE FROM equivalencias WHERE producto_a_id IN (SELECT id FROM productos "
+              "WHERE codigo_clean LIKE 'ESC%')")
+    c.execute("DELETE FROM productos WHERE codigo_clean LIKE 'ESC%' AND descripcion = "
+              "'PIEZA DE ESCALA'")
+    c.execute("DELETE FROM marcas WHERE nombre LIKE 'ESCALA-%'")
+    conn.commit()
+    ns["olvidar_la_escala_de_precios"]()
 
     # 10. «Borrar los productos vacíos» (ver depurar_huerfanos()). Borraba todos los que no
     # tenían una equivalencia aprobada: en la copia de la base, el 72 % del catálogo, casi

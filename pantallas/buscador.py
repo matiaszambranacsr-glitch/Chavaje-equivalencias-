@@ -1782,7 +1782,10 @@ if pagina == PAGINAS[0]:
                 guardar_busqueda(texto.strip())
                 _t_busqueda = time.perf_counter()
                 try:
-                    _res_texto = buscar_por_texto(texto)
+                    # Los errores de tipeo que no pueden encontrar nada (ver
+                    # palabras_corregidas()): se busca corregido y se dice abajo.
+                    _correcciones = palabras_corregidas(texto)
+                    _res_texto = buscar_por_texto(texto_con_las_correcciones(texto, _correcciones))
                 except sqlite3.Error as _err_busqueda:
                     anotar_error("buscador", _err_busqueda)
                     _res_texto = None
@@ -1795,13 +1798,19 @@ if pagina == PAGINAS[0]:
                     anotar_busqueda("texto", texto, time.perf_counter() - _t_busqueda,
                                     len(_res_texto))
                     st.session_state["ultima_busqueda_texto"] = {
-                        "texto": texto.strip(), "res": _res_texto
+                        "texto": texto_con_las_correcciones(texto.strip(), _correcciones),
+                        "res": _res_texto, "correcciones": _correcciones,
                     }
 
         busqueda_texto_guardada = st.session_state.get("ultima_busqueda_texto")
         if busqueda_texto_guardada:
             res_texto = busqueda_texto_guardada["res"]
             texto_pedido = busqueda_texto_guardada["texto"]
+            _corregidas = busqueda_texto_guardada.get("correcciones") or {}
+            if _corregidas:
+                st.caption("🔤 " + "; ".join(
+                    f"«{mal.lower()}» no está en ningún producto: se buscó «{bien.lower()}»"
+                    for mal, bien in _corregidas.items()) + ".")
             if res_texto:
                 st.success(f"Se encontraron {len(res_texto)} coincidencia(s). 👆 Tocá una fila "
                            "para abrir ese código con todas sus equivalencias.")

@@ -213,9 +213,16 @@ if pagina == PAGINAS[3]:
             _d_coef = _escala.get(_marca_coef)
             _sugerido = round(_actual / _d_coef["factor"], 2) if _d_coef and _d_coef["fuera"] else None
             if _sugerido:
+                _cada_uno = _d_coef.get("por_proveedor") or {}
                 st.warning(f"**{_marca_coef}** está fuera de escala: cuesta ×"
                            f"{miles(_d_coef['factor'], 2)} lo que sus equivalentes. Sugerido: "
-                           f"**×{miles(_sugerido, 2)}**.")
+                           f"**×{miles(_sugerido, 2)}**."
+                           + ("\n\nContra cada proveedor: " + " · ".join(
+                               f"{_o} ×{miles(_f, 2)}" for _o, _f in sorted(_cada_uno.items()))
+                              + ". Si da parecido contra todos, lo más probable es que a la "
+                              "lista le falte el coeficiente: el número exacto lo publica el "
+                              "proveedor, y es mejor ese que el sugerido."
+                              if len(_cada_uno) >= 2 else ""))
             # Las listas en dólares: el coeficiente es el dólar oficial del día, y se actualiza
             # solo en cada importación (ver coeficiente_de_lista()).
             _dolar_hoy, _dolar_fecha, _dolar_fuente = dolar_guardado()

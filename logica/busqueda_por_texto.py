@@ -394,6 +394,78 @@ def palabras_de_la_busqueda(texto):
     return (utiles or [p for p in palabras if p != str(anio)] or palabras), anio
 
 
+# ERRORES DE TIPEO. En el mostrador se escribe rápido: «bomba de agau gol» traía juntas y bombas
+# de lavaparabrisas —«agau» no está en ningún producto, así que buscaba solo «bomba» y «gol»—.
+# Se corrige SOLO lo que no puede encontrar nada: una palabra que no aparece en ninguna
+# descripción, ni siquiera adentro de otra, ni es el nombre de una lista. Y solo si a un tecleo
+# de distancia hay una que el catálogo sí usa. Lo escrito bien no se toca nunca, y la pantalla
+# dice qué se cambió.
+_LETRAS_DE_UNA_PALABRA = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+# Cuántos productos tiene que tener la palabra correcta para proponerla: con menos, lo que hay
+# es otro error de tipeo del proveedor, no una palabra del rubro.
+MINIMO_DE_PRODUCTOS_PARA_CORREGIR = 3
+
+
+@st.cache_data(show_spinner=False, max_entries=2)
+def vocabulario_de_busqueda(version):   # ver descripciones_por_palabra(): sin guion bajo
+    """{palabra sin acentos: en cuántos productos aparece}, sacado de descripciones_por_palabra()."""
+    salida = {}
+    for palabra, cuantos in descripciones_por_palabra(version).items():
+        clave = normalizar_texto(palabra)
+        salida[clave] = salida.get(clave, 0) + cuantos
+    return salida
+
+
+def _a_un_tecleo(palabra):
+    """Las palabras a un tecleo de distancia: una letra de menos, una de más, una cambiada, o dos
+    vecinas al revés («AGAU» → «AGUA», que es el error más común escribiendo rápido)."""
+    cortes = [(palabra[:i], palabra[i:]) for i in range(len(palabra) + 1)]
+    salida = {a + b[1:] for a, b in cortes if b}
+    salida |= {a + b[1] + b[0] + b[2:] for a, b in cortes if len(b) > 1}
+    salida |= {a + letra + b[1:] for a, b in cortes if b for letra in _LETRAS_DE_UNA_PALABRA}
+    salida |= {a + letra + b for a, b in cortes for letra in _LETRAS_DE_UNA_PALABRA}
+    salida.discard(palabra)
+    return salida
+
+
+def palabras_corregidas(texto):
+    """{escrita: corregida} para las palabras de la búsqueda con un error de tipeo seguro. Ver
+    _LETRAS_DE_UNA_PALABRA: solo las que hoy no pueden encontrar nada."""
+    palabras, _ = palabras_de_la_busqueda(texto)
+    candidatas = [p for p in palabras if len(p) >= 4 and p.isalpha()]
+    if not candidatas:
+        return {}
+    # Es una ayuda: si algo falla acá, se busca lo escrito, como antes.
+    try:
+        vocabulario = vocabulario_de_busqueda(version_del_catalogo())
+    except Exception as _err:
+        anotar_error("palabras_corregidas", _err)
+        return {}
+    salida = {}
+    for palabra in candidatas:
+        if palabra in vocabulario or any(palabra in w for w in vocabulario):
+            continue           # está, aunque sea adentro de otra: el LIKE la encuentra
+        if marcas_que_nombra(palabra):
+            continue           # es el nombre de una lista («mannol»)
+        opciones = [(vocabulario[w], w) for w in _a_un_tecleo(palabra)
+                    if vocabulario.get(w, 0) >= MINIMO_DE_PRODUCTOS_PARA_CORREGIR]
+        if opciones:
+            salida[palabra] = max(opciones)[1]
+    return salida
+
+
+def texto_con_las_correcciones(texto, correcciones):
+    """El texto como se escribió, con las palabras de palabras_corregidas() cambiadas y el resto
+    igual —«de», el año, los signos—, para que la búsqueda lo lea como lo leería sin el error."""
+    if not correcciones:
+        return texto
+    trozos = []
+    for trozo in str(texto or "").split():
+        limpio = normalizar_texto(re.sub(r"^[^\w]+|[^\w]+$", "", trozo.upper()))
+        trozos.append(correcciones.get(limpio, trozo))
+    return " ".join(trozos)
+
+
 def palabras_que_no_aparecen(texto, filas):
     """Las palabras pedidas que no dice ninguno de los resultados: «pastillas» en un catálogo
     sin pastillas de freno. Para decirlo, en vez de mostrar «Corsa Classic» sin explicar por

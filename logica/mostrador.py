@@ -843,10 +843,11 @@ def escala_de_precios_por_marca(segundos_de_memoria=300):
                  WHERE pa.precio > 0 AND pb.precio > 0 AND ma.id <> mb.id
                    AND ma.tipo <> 'OEM' AND mb.tipo <> 'OEM'
                    AND COALESCE(e.confianza, 50) >= 50""")
-    razones, contra = {}, {}
+    razones, contra, por_otra = {}, {}, {}
     for r in c.fetchall():
         razones.setdefault(r["marca"], []).append(r["pa"] / r["pb"])
         contra.setdefault(r["marca"], set()).add(r["otra"])
+        por_otra.setdefault((r["marca"], r["otra"]), []).append(r["pa"] / r["pb"])
     datos = {}
     for marca, rs in razones.items():
         rs.sort()
@@ -855,6 +856,12 @@ def escala_de_precios_por_marca(segundos_de_memoria=300):
             "factor": factor, "comparaciones": len(rs), "contra": sorted(contra[marca]),
             "fuera": (len(rs) >= _MINIMO_PARA_LA_ESCALA and len(contra[marca]) >= 2
                       and not 1 / FUERA_DE_ESCALA <= factor <= FUERA_DE_ESCALA),
+            # La mediana contra CADA proveedor, con al menos 5 comparaciones. Es lo que separa
+            # «a la lista le falta el coeficiente» —está corrida parejo contra todos: TARANTO da
+            # ×0,06 contra ILLINOIS y JL, ×0,08 contra FISPA y ×0,09 contra IMPERIAL— de «un
+            # proveedor caro»: ahí la diferencia sale contra uno solo.
+            "por_proveedor": {otra: sorted(v)[len(v) // 2]
+                              for (m, otra), v in por_otra.items() if m == marca and len(v) >= 5},
         }
     _guardada.update(cuando=time.monotonic(), datos=datos)
     return datos

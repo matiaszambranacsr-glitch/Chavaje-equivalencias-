@@ -70,6 +70,33 @@ def probar():
             sin_resultado_antes)
     esperar("quedó como error", g["resumen_de_las_busquedas"]()["errores"], 1)
 
+    # 2c. Un error de tipeo que no puede encontrar nada se corrige, y se dice (ver
+    # palabras_corregidas()). Lo bien escrito, una abreviatura que está adentro de otra palabra
+    # («FILT») o el nombre de una lista no se tocan.
+    _marca = c.execute("SELECT id FROM marcas WHERE nombre = 'PRUEBA'").fetchone()[0]
+    c.executemany("INSERT INTO productos (codigo_raw, codigo_clean, descripcion, marca_id) "
+                  "VALUES (?, ?, ?, ?)",
+                  [(f"BA{i}", f"BA{i}", f"BOMBA DE AGUA GOL 1.6 V{i}", _marca) for i in range(3)]
+                  + [("BL1", "BL1", "BOMBA LAVA GOL", _marca)])
+    conn.commit()
+    _pc = ns["palabras_corregidas"]
+    esperar("la palabra a un tecleo se corrige; lo que existe, no",
+            [_pc(x) for x in ("bomba de agau gol", "bomba de agua gol", "filt aceite", "prueba",
+                              "zzzzzz")],
+            [{"AGAU": "AGUA"}, {}, {}, {}, {}])
+    esperar("se cambia solo esa palabra",
+            ns["texto_con_las_correcciones"]("Bomba de agau, Gol", {"AGAU": "AGUA"}),
+            "Bomba de AGUA Gol")
+    at.session_state["modo_busqueda"] = "Código"
+    at.run()
+    buscar("bomba de agau gol")
+    esperar("en la pantalla: dice qué cambió", any("«agau» no está en ningún producto: se buscó "
+                                                   "«agua»" in x.value for x in at.caption), True)
+    esperar("y trae la bomba de agua primero",
+            str(at.dataframe[0].value.iloc[0]["Descripcion"]).startswith("BOMBA DE AGUA GOL"), True)
+    at.session_state["modo_busqueda"] = "Código"
+    at.run()
+
     # 3. Los números: mediana y P95 de lo anotado.
     g["del_proceso"]("mediciones_de_busqueda", list).clear()
     for ms in range(1, 101):
