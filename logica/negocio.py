@@ -304,13 +304,13 @@ def listar_combos():
 
 def guardar_combo(disparador, items_lista):
     disparador = disparador.strip().lower()
-    with db_lock:
+    # Todo o nada: cortado entre el DELETE y el INSERT, el combo se perdía entero.
+    with db_lock, transaccion():
         c.execute("DELETE FROM combos_sugeridos WHERE disparador = ?", (disparador,))
         c.executemany(
             "INSERT INTO combos_sugeridos (disparador, item) VALUES (?, ?)",
             [(disparador, item.strip()) for item in items_lista if item.strip()]
         )
-        conn.commit()
 
 
 def eliminar_combo(disparador):
@@ -1368,7 +1368,9 @@ def guardar_reemplazo(codigo_viejo, codigo_nuevo, marca="", nota=""):
     except sqlite3.OperationalError as _err:
         anotar_error("guardar_reemplazo", _err)
         anterior = None
-    with db_lock:
+    # Todo o nada: borrar el anterior y escribir el nuevo son UNA operación. Con la conexión en
+    # autocommit, si el INSERT fallaba el código quedaba sin ningún reemplazo.
+    with db_lock, transaccion():
         c.execute("DELETE FROM reemplazos_codigo WHERE codigo_viejo_clean = ?", (v,))
         c.execute("""INSERT OR REPLACE INTO reemplazos_codigo
                      (codigo_viejo, codigo_viejo_clean, codigo_nuevo, codigo_nuevo_clean,
@@ -1377,7 +1379,6 @@ def guardar_reemplazo(codigo_viejo, codigo_nuevo, marca="", nota=""):
                   (codigo_viejo.strip(), v, codigo_nuevo.strip(), n,
                    (marca or "").strip().upper() or None, (nota or "").strip() or None,
                    obtener_usuario_actual()))
-        conn.commit()
     if anterior:
         return True, (f"{codigo_viejo} → {codigo_nuevo} anotado. "
                       f"Antes decía que lo reemplazaba {anterior}; quedó este.")

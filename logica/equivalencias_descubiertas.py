@@ -4922,13 +4922,17 @@ def _guardar_equivalencia_una_vez(a, b, verificada, nivel, nota):
     """Carga (o actualiza) una equivalencia como UNA fila (menor, mayor).
 
     Si ya existía anotada al revés, esa fila se va: si no, el par quedaría espejado, que es
-    justo lo que esto viene a evitar. El que llama tiene el candado tomado."""
+    justo lo que esto viene a evitar. El que llama tiene el candado tomado.
+    Va en su transacción aunque quien llama ya la abra (adentro de otra, no hace nada): así no
+    depende de que cada uno se acuerde."""
     a, b = min(a, b), max(a, b)
-    c.execute("DELETE FROM equivalencias WHERE producto_a_id = ? AND producto_b_id = ?", (b, a))
-    c.execute("INSERT OR REPLACE INTO equivalencias "
-              "(producto_a_id, producto_b_id, created_at, verificada, nivel, nota) "
-              "VALUES (?, ?, datetime('now'), ?, ?, ?)",
-              (a, b, verificada, nivel, nota))
+    with transaccion():
+        c.execute("DELETE FROM equivalencias WHERE producto_a_id = ? AND producto_b_id = ?",
+                  (b, a))
+        c.execute("INSERT OR REPLACE INTO equivalencias "
+                  "(producto_a_id, producto_b_id, created_at, verificada, nivel, nota) "
+                  "VALUES (?, ?, datetime('now'), ?, ?, ?)",
+                  (a, b, verificada, nivel, nota))
 
 
 def confirmar_candidata(codigo_clean, producto_id, codigo_original, marca_para_nuevo=None):

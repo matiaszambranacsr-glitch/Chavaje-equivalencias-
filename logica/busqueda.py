@@ -488,9 +488,25 @@ def armar_lista_picking(codigos_texto):
 
 
 
+# El «.0» que pega Excel es el de un NÚMERO ENTERO guardado como número: «2776400.0». Un código
+# que termina en «.0» por otra razón no tiene nada que arreglar, y en la base del 12/10 eran los
+# 37 que había: IMPERIAL numera así («707994.00.0») y otros llevan el espesor («981707-2.0»,
+# «900E-2.0»). La alerta los contaba a todos y el arreglo —bien— no tocaba ninguno: se apretaba
+# «Arreglar los 37 códigos», decía «se arreglaron 0», y el aviso quedaba para siempre. Ahora
+# los dos miran lo mismo.
+_RE_DECIMAL_DE_EXCEL = re.compile(r"\d+\.0+")
+
+
+def _codigos_con_decimal_de_excel():
+    """[(id, codigo_raw)] de los que tienen el «.0» de Excel. Ver _RE_DECIMAL_DE_EXCEL."""
+    c.execute(r"""SELECT id, codigo_raw FROM productos
+                  WHERE codigo_raw LIKE '%.0' AND codigo_raw GLOB '[0-9]*'""")
+    return [(r["id"], r["codigo_raw"]) for r in c.fetchall()
+            if _RE_DECIMAL_DE_EXCEL.fullmatch(str(r["codigo_raw"]).strip())]
+
+
 def contar_codigos_con_decimal():
-    c.execute(r"SELECT COUNT(*) FROM productos WHERE codigo_raw LIKE '%.0' AND codigo_raw GLOB '[0-9]*'")
-    return c.fetchone()[0]
+    return len(_codigos_con_decimal_de_excel())
 
 
 def codigos_limpios_desfasados(limite=None):
@@ -588,14 +604,10 @@ def reparar_codigos_con_decimal():
     """Arregla los códigos que quedaron con '.0' del final por venir de una celda numérica de
     Excel. Además de verse feo, los volvía imposibles de encontrar: '2776400.0' se limpiaba
     como '27764000' (con un cero de más) y nunca coincidía con el código real."""
-    c.execute(r"""SELECT id, codigo_raw FROM productos
-                  WHERE codigo_raw LIKE '%.0' AND codigo_raw GLOB '[0-9]*'""")
-    filas = [(r["id"], r["codigo_raw"]) for r in c.fetchall()]
+    filas = _codigos_con_decimal_de_excel()
     arreglados = 0
     with db_lock:
         for pid, raw in filas:
-            if not re.fullmatch(r"\d+\.0+", str(raw).strip()):
-                continue
             nuevo_raw = str(raw).strip().split(".")[0]
             nuevo_clean = sanitizar(nuevo_raw)
             try:
@@ -1492,7 +1504,7 @@ def unificar_equivalencias_espejadas():
     No cambia ninguna equivalencia: son exactamente las mismas, solo que estaban anotadas dos
     veces. La búsqueda nunca lo notó porque consulta las dos columnas con OR, pero los conteos
     sí: un código con 100 equivalencias reales figuraba con 200."""
-    with db_lock:
+    with db_lock, transaccion():
         # Primero las que están espejadas (existe la pareja al revés): se borra la invertida
         c.execute("""DELETE FROM equivalencias
                      WHERE producto_a_id > producto_b_id
@@ -1506,7 +1518,6 @@ def unificar_equivalencias_espejadas():
                      WHERE producto_a_id > producto_b_id""")
         dadas_vuelta = c.rowcount
         c.execute("DELETE FROM equivalencias WHERE producto_a_id = producto_b_id")
-        conn.commit()
     return borradas, dadas_vuelta
 
 

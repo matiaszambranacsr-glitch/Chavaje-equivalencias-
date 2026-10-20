@@ -1310,13 +1310,14 @@ for _cuerpo in _bloques:
 # y no lo usan. Se dejan afuera:
 #   · las que arman el esquema o corren migraciones (van una vez, al arrancar, y sin usuarios);
 #   · las que escriben en OTRA base (generar_backup_sin_fotos abre su propio archivo;
-#     _sacar_las_fotos limpia esa copia y pedir_de_nuevo_las_fotos la recién restaurada).
+#     _sacar_las_fotos limpia esa copia, pedir_de_nuevo_las_fotos la recién restaurada y
+#     copia_para_github la copia temporal que se sube).
 _TABLAS_SQL = re.compile(
     r'\b(?:insert\s+(?:or\s+\w+\s+)?into|update|delete\s+from|replace\s+into)\s+'
     r'([a-z_][a-z_0-9]*)', re.I)
 _SIN_TRANSACCION_OK = ("_esquema_", "_datos_precargados", "crear_esquema", "_migracion",
                        "generar_backup", "restaurar_", "_sacar_las_fotos",
-                       "pedir_de_nuevo_las_fotos")
+                       "pedir_de_nuevo_las_fotos", "copia_para_github")
 
 def _tablas_que_escribe(nodo):
     tablas = {}
@@ -1339,6 +1340,33 @@ def _tablas_que_escribe(nodo):
                 tablas.setdefault(nombre, x.lineno)
     return tablas
 
+def _borra_y_despues_escribe(nodo):
+    """[(tabla, renglón del DELETE)] de las tablas que la función borra y DESPUÉS vuelve a
+    escribir (INSERT, UPDATE o REPLACE), en el orden en que aparecen en el código."""
+    borradas, salida = {}, []
+    llamadas = sorted((x for x in ast.walk(nodo) if isinstance(x, ast.Call)
+                       and isinstance(x.func, ast.Attribute)
+                       and x.func.attr in ("execute", "executemany") and x.args),
+                      key=lambda x: (x.lineno, x.col_offset))
+    for x in llamadas:
+        a = x.args[0]
+        if isinstance(a, ast.Constant) and isinstance(a.value, str):
+            texto = a.value
+        elif isinstance(a, ast.JoinedStr):
+            texto = " ".join(p.value for p in a.values if isinstance(p, ast.Constant))
+        else:
+            continue
+        for m in _TABLAS_SQL.finditer(" ".join(texto.split())):
+            nombre = m.group(1).lower()
+            if nombre in ("set", "or", "into", "from", "table", "index", "trigger", "view"):
+                continue
+            if m.group(0).lower().startswith("delete"):
+                borradas.setdefault(nombre, x.lineno)
+            elif nombre in borradas and (nombre, borradas[nombre]) not in salida:
+                salida.append((nombre, borradas[nombre]))
+    return salida
+
+
 def _usa_transaccion(nodo):
     for x in ast.walk(nodo):
         if isinstance(x, ast.Call) and isinstance(x.func, ast.Name) and x.func.id == "transaccion":
@@ -1355,6 +1383,15 @@ for _f in ast.walk(ARBOL):
         reportar("REVISAR", _f.lineno,
                  f"'{_f.name}' escribe en {len(_tablas)} tablas ({', '.join(sorted(_tablas))}) "
                  "y no usa transaccion(): si se corta en el medio, la base queda a medias")
+    # Y en UNA sola tabla, cuando primero BORRA y después vuelve a escribir: si se corta entre
+    # las dos, lo viejo ya no está y lo nuevo todavía no. Pasaba con guardar_reemplazo() —el
+    # código quedaba sin ningún reemplazo— y con guardar_combo() —el combo entero—. Al revés
+    # (escribir y después recortar, como el registro de cambios) cortado en el medio no pierde
+    # nada, y no se marca.
+    for _tabla, _primero in _borra_y_despues_escribe(_f):
+        reportar("REVISAR", _primero,
+                 f"'{_f.name}' borra de {_tabla} y después vuelve a escribir ahí, sin "
+                 "transaccion(): cortada entre las dos, lo viejo ya no está y lo nuevo tampoco")
 
 
 

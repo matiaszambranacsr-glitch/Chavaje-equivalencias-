@@ -642,6 +642,49 @@ def probar(L):
     c.execute("DELETE FROM marcas WHERE nombre LIKE 'BARRAS-%'")
     conn.commit()
 
+    # 9j. El «.0» de Excel (ver _RE_DECIMAL_DE_EXCEL): la alerta cuenta lo mismo que arregla el
+    # botón. Un código que termina en «.0» porque así es («707994.00.0» de IMPERIAL, el espesor
+    # de «900E-2.0») no es un error.
+    for _cod in ("2776400.0", "707994.00.0", "900E-2.0"):
+        c.execute("INSERT INTO productos (codigo_raw, codigo_clean, descripcion, marca_id) "
+                  "VALUES (?, ?, 'PIEZA', ?)", (_cod, ns["sanitizar"](_cod), marca))
+    conn.commit()
+    _antes_dec = ns["contar_codigos_con_decimal"]()
+    _arreglados = ns["reparar_codigos_con_decimal"]()
+    esperar("el «.0» de Excel: cuenta, arregla y queda en cero",
+            (_antes_dec, _arreglados, ns["contar_codigos_con_decimal"](),
+             sorted(r[0] for r in c.execute("SELECT codigo_raw FROM productos WHERE codigo_raw "
+                                            "IN ('2776400', '707994.00.0', '900E-2.0')"))),
+            (1, 1, 0, ["2776400", "707994.00.0", "900E-2.0"]))
+    c.execute("DELETE FROM productos WHERE codigo_raw IN ('2776400', '707994.00.0', '900E-2.0')")
+    conn.commit()
+
+    # 9k. Los reemplazos de código (ver guardar_reemplazo()). No tenía prueba: un código viejo
+    # tiene UN reemplazo vigente, un círculo no se acepta, y borrar el anterior y escribir el
+    # nuevo es todo o nada.
+    _gr = ns["guardar_reemplazo"]
+    _r = [_gr("REEMP-A", "REEMP-B")[0], _gr("REEMP-A", "REEMP-C"), _gr("REEMP-C", "REEMP-A")[0],
+          _gr("REEMP-A", "reemp a")[0]]
+    esperar("reemplazos: uno vigente, sin círculos ni el mismo código",
+            (_r[0], _r[1][0], "REEMP-B" in _r[1][1], _r[2], _r[3],
+             [tuple(x) for x in c.execute("SELECT codigo_viejo_clean, codigo_nuevo_clean FROM "
+                                          "reemplazos_codigo WHERE codigo_viejo_clean LIKE 'REEMP%'")]),
+            (True, True, True, False, False, [("REEMPA", "REEMPC")]))
+    _gn = ns["guardar_reemplazo"].__globals__
+    _obtener = _gn["obtener_usuario_actual"]
+    _gn["obtener_usuario_actual"] = lambda: (_ for _ in ()).throw(RuntimeError("corte"))
+    try:
+        _gr("REEMP-A", "REEMP-D")
+    except RuntimeError:
+        pass
+    _gn["obtener_usuario_actual"] = _obtener
+    esperar("si escribir el nuevo falla, el anterior sigue",
+            [tuple(x) for x in c.execute("SELECT codigo_viejo_clean, codigo_nuevo_clean FROM "
+                                         "reemplazos_codigo WHERE codigo_viejo_clean LIKE 'REEMP%'")],
+            [("REEMPA", "REEMPC")])
+    c.execute("DELETE FROM reemplazos_codigo WHERE codigo_viejo_clean LIKE 'REEMP%'")
+    conn.commit()
+
     # 10. «Borrar los productos vacíos» (ver depurar_huerfanos()). Borraba todos los que no
     # tenían una equivalencia aprobada: en la copia de la base, el 72 % del catálogo, casi
     # todos con precio. Ahora solo los que no tienen nada. Va al final: borra los vacíos que

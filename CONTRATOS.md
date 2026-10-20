@@ -184,6 +184,9 @@ Las pruebas se corren como dice el README, en «Antes de subir un cambio».
 | La auditoría de stock sortea solo lo que tiene stock cargado, y sin stock no hay diferencia | `generar_auditoria_hoy()`, `registrar_conteo_auditoria()`, `texto_del_conteo()` | `pruebas_de_los_cambios.py` (9g) |
 | Un cliente se encuentra por teléfono como sea que esté anotado | `historial_de_un_cliente()` | `pruebas_de_los_cambios.py` (9h) |
 | Un código de barras que no cierra o que ya tiene otro producto de la misma lista no se pega | `cargar_codigos_de_barras_masivo()` | `pruebas_de_los_cambios.py` (9i) |
+| La alerta del «.0» cuenta lo mismo que arregla su botón | `_RE_DECIMAL_DE_EXCEL`, `contar_codigos_con_decimal()` | `pruebas_de_los_cambios.py` (9j) |
+| Un código viejo tiene un reemplazo vigente, sin círculos, y cambiarlo es todo o nada | `guardar_reemplazo()` | `pruebas_de_los_cambios.py` (9k) |
+| Lo que borra y vuelve a escribir en una tabla va en una transacción | — | `auditar.py` (control 15) |
 
 ## Sin prueba automática todavía
 

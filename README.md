@@ -6480,6 +6480,22 @@ el botón**:
 - «🔌 Probar las fuentes de afuera» suma la Central de Deudores (con el CUIT de la AFIP, nunca el
   de un cliente) y la inflación de respaldo.
 
+## 🧷 Una alerta que no se iba nunca, y lo que se borraba antes de escribir lo nuevo
+
+| Qué | Qué pasaba (medido en la base del 12/10) | Qué se hizo |
+|---|---|---|
+| **«37 código(s) terminados en '.0'»** | La alerta contaba todo código que terminara en «.0»; el botón «Arreglar», bien, solo arregla el «.0» que pega Excel a un número entero («2776400.0»). Los 37 de la base eran códigos de verdad —IMPERIAL numera «707994.00.0», otros llevan el espesor: «981707-2.0», «900E-2.0»—, así que se apretaba «Arreglar los 37», decía «se arreglaron 0» y la alerta quedaba para siempre. | La alerta y el botón miran lo mismo. En la base real: 0, y la alerta se va. |
+| **Borrar y volver a escribir, sin todo-o-nada** | `guardar_reemplazo()` borraba el reemplazo anterior y después escribía el nuevo, en dos pasos que se confirmaban por separado: cortado en el medio, el código quedaba **sin ningún reemplazo**. Lo mismo `guardar_combo()` (se perdía el combo entero) y otros dos. | Los cuatro van en una transacción. Y el **control 15 de `auditar.py`** ahora también marca esto en una sola tabla: borrar y después volver a escribir sin `transaccion()` (sobre la versión anterior encuentra exactamente estos cuatro). Al revés —escribir y después recortar, como el registro de cambios— no pierde nada si se corta, y no se marca. |
+| **Los reemplazos de código, sin prueba** | Ninguna batería los tocaba. | Prueba: un reemplazo vigente por código, sin círculos, y si escribir el nuevo falla, el anterior sigue (con el código de antes, esa prueba falla). |
+
+### Lo que se revisó y estaba bien
+
+- Las otras alertas con botón de arreglo («un número suelto», «columnas pegadas», «el buscador no
+  los encuentra») cuentan lo mismo que arreglan: en la base real, 0 y 0.
+- **«8 producto(s) con medidas que no pueden ser»** se va sola: la base está en la versión 6 del
+  lector de medidas, el código en la 7, y la tarea de fondo descarta esas medidas mal leídas
+  (19, de tornillos y códigos de motor) apenas corre. Probado sobre una copia.
+
 ## 📲 Lo que le llega al cliente, la auditoría de stock y los códigos de barras en masa
 
 Salió de armar cotizaciones con la copia de la base del 12/10 y de buscar las funciones que
