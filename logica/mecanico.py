@@ -202,6 +202,7 @@ def repuestos_para_el_dtc(codigo, marca_auto="", modelo="", limite=8):
 
 
 def agregar_dtc(codigo, descripcion, sistema, causas, fabricante=""):
+    exigir_nivel("empleado", "cargar un código de falla")
     codigo = codigo.strip().upper()
     fabricante = fabricante.strip()
     with db_lock:
@@ -219,6 +220,7 @@ def agregar_dtc(codigo, descripcion, sistema, causas, fabricante=""):
 def importar_dtc_masivo(texto):
     """Importa códigos DTC pegados como texto, una línea por código:
     codigo;descripcion;sistema;causas;fabricante (fabricante es opcional, vacío = código genérico)."""
+    exigir_nivel("empleado", "cargar códigos de falla")
     cargados = 0
     with db_lock:
         for linea in texto.strip().splitlines():
@@ -686,6 +688,7 @@ def decodificar_vin(vin):
 
 
 def agregar_fabricante_vin(wmi, fabricante, pais):
+    exigir_nivel("empleado", "cargar un fabricante del VIN")
     wmi = wmi.strip().upper()
     with db_lock:
         c.execute(
@@ -698,6 +701,7 @@ def agregar_fabricante_vin(wmi, fabricante, pais):
 
 def enseniar_modelo_vin(wmi, vds, modelo, notas=None):
     """Guarda que este patrón de VIN corresponde a este modelo. La próxima vez se autocompleta."""
+    exigir_nivel("empleado", "enseñarle un modelo al lector de VIN")
     wmi, vds = wmi.strip().upper(), vds.strip().upper()
     if not wmi or not vds or not modelo.strip():
         return False
@@ -711,6 +715,7 @@ def enseniar_modelo_vin(wmi, vds, modelo, notas=None):
 
 
 def olvidar_modelo_vin(wmi, vds):
+    exigir_nivel("empleado", "borrar un modelo aprendido del VIN")
     with db_lock:
         c.execute("DELETE FROM modelos_vin WHERE wmi = ? AND vds = ?",
                   (wmi.strip().upper(), vds.strip().upper()))
@@ -972,6 +977,7 @@ def mostrar_fallas_reportadas(marca, modelo, anio, clave):
 # MODO MECÁNICO — VISOR DE ESQUEMAS
 # ============================================================
 def guardar_esquema(titulo, marca_auto, modelo_auto, sistema, descripcion, imagen_bytes, imagen_nombre, generado_ia=False):
+    exigir_nivel("empleado", "subir un esquema")
     with db_lock:
         c.execute(
             "INSERT INTO esquemas (titulo, marca_auto, modelo_auto, sistema, descripcion, imagen_blob, "
@@ -1100,6 +1106,7 @@ def listar_esquemas_por_categoria(marca, modelo, sistema):
 
 
 def agregar_vehiculo_catalogo(marca, modelo):
+    exigir_nivel("empleado", "precargar un vehículo de los esquemas")
     with db_lock:
         c.execute("INSERT OR IGNORE INTO esquemas_catalogo (marca, modelo) VALUES (?, ?)",
                    (marca.strip(), modelo.strip()))
@@ -1107,6 +1114,7 @@ def agregar_vehiculo_catalogo(marca, modelo):
 
 
 def eliminar_vehiculo_catalogo(marca, modelo):
+    exigir_nivel("empleado", "sacar un vehículo de los esquemas")
     with db_lock:
         c.execute("DELETE FROM esquemas_catalogo WHERE marca = ? AND modelo = ?", (marca, modelo))
         conn.commit()
@@ -1141,6 +1149,7 @@ def obtener_imagen_esquema(esquema_id):
 
 
 def eliminar_esquema(esquema_id):
+    exigir_nivel("empleado", "eliminar un esquema")
     with db_lock:
         c.execute("DELETE FROM esquemas WHERE id = ?", (esquema_id,))
         conn.commit()
@@ -1150,6 +1159,7 @@ def agregar_punto_esquema(esquema_id, numero, nombre_pieza, codigo, pos_x=None, 
     """Agrega una pieza marcada dentro de un esquema. Si el código coincide con un producto
     ya cargado, lo vincula (producto_id); si no, igual guarda el código como texto de referencia.
     pos_x/pos_y son porcentajes (0-100) de dónde está la pieza en la imagen, para dibujar el marcador."""
+    exigir_nivel("empleado", "marcar una pieza en un esquema")
     codigo = (codigo or "").strip()
     producto_id = None
     if codigo:
@@ -1226,6 +1236,7 @@ def generar_imagen_con_marcadores(imagen_bytes, puntos):
 
 
 def eliminar_punto_esquema(punto_id):
+    exigir_nivel("empleado", "sacar una pieza de un esquema")
     with db_lock:
         c.execute("DELETE FROM esquema_puntos WHERE id = ?", (punto_id,))
         conn.commit()

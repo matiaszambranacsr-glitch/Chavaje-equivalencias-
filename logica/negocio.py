@@ -1693,6 +1693,7 @@ def productos_por_quebrar(dias_aviso=21, minimo_ventas=3, limite=100):
 
 
 def solicitar_reposicion(producto_id):
+    exigir_nivel("empleado", "anotar algo para reponer")
     with db_lock:
         c.execute(
             "INSERT INTO pedidos_reposicion (producto_id, veces_solicitado, ultimo_solicitado_por, ultima_fecha, estado) "
@@ -1819,7 +1820,11 @@ def mostrar_boton_de_venta(columna, fila, argumentos, clave):
     mostrar_ventas_a_confirmar()."""
     bloqueo = bloqueo_de_venta(argumentos[4] if len(argumentos) > 4 else None,
                                fila.get("Descripcion"))
-    if bloqueo == "bloqueada":
+    if solo_mirar():
+        # Ver «EL INVITADO MIRA, NO TOCA» en logica/base.py.
+        columna.button(rotulo_del_boton_de_venta(fila), key=clave, disabled=True,
+                       help=TEXTO_SOLO_MIRAR)
+    elif bloqueo == "bloqueada":
         columna.button("🛑 No se anota", key=clave, disabled=True, help=TEXTO_DE_VENTA_BLOQUEADA)
     elif bloqueo == "confirmar":
         columna.button(rotulo_del_boton_de_venta(fila), key=clave,
@@ -1927,6 +1932,7 @@ def descartar_pedido_reposicion(pedido_id):
 
 
 def alternar_favorito(producto_id, valor):
+    exigir_nivel("empleado", "marcar un favorito")
     with db_lock:
         c.execute("UPDATE productos SET favorito = ? WHERE id = ?", (1 if valor else 0, producto_id))
         conn.commit()

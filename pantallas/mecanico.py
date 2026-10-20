@@ -484,7 +484,8 @@ if pagina == PAGINAS[7]:
         fichas_con_vin = c.fetchone()[0]
         if fichas_con_vin:
             st.caption(f"Tenés {fichas_con_vin} ficha(s) de vehículo con VIN cargado.")
-            if st.button("📚 Aprender modelos y motores de esas fichas"):
+            if st.button("📚 Aprender modelos y motores de esas fichas", disabled=solo_mirar(),
+                         help=TEXTO_SOLO_MIRAR if solo_mirar() else None):
                 n_mod, n_mot = aprender_modelos_de_fichas_existentes()
                 avisar("success", f"Se aprendieron {n_mod} modelo(s) y {n_mot} motor(es) de tus fichas.")
                 st.rerun()

@@ -67,6 +67,7 @@ def pedir_al_deposito(producto_id, cantidad=1, mecanico_id=None, codigo_de_retir
     retiro_autorizado ya se pidió una vez, al elegir la cuenta (ver autorizar_retiro()): así
     no hace falta un código nuevo por cada producto. El límite de crédito también se mira acá,
     contra el precio con descuento y sumando lo que ya está pedido."""
+    exigir_nivel("empleado", "pedir algo al depósito")
     try:
         cantidad = int(cantidad)
     except (TypeError, ValueError):
@@ -379,6 +380,7 @@ HORAS_DE_LA_CUENTA_ELEGIDA = 3
 def autorizar_retiro(mecanico_id, codigo):
     """Al elegir la cuenta: si pide código de retiro, lo valida y lo gasta. (True, "") o
     (False, por qué no)."""
+    exigir_nivel("empleado", "autorizar un retiro a cuenta")
     if not configuracion_de_cuenta(mecanico_id)["pide_codigo"]:
         return True, ""
     with db_lock, transaccion():

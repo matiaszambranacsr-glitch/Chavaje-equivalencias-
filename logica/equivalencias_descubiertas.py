@@ -22,6 +22,7 @@ def registrar_venta(producto_id, termino_pedido="", veredicto=None, evidencia=No
     («que el sistema proteja al vendedor» y «alternativa comercial como categoría aparte»).
     'evidencia' es lo que la sostenía en ese momento (ver evidencia_de_la_fila()): si vuelve,
     el registro de errores dice qué se sabía al venderla."""
+    exigir_nivel("empleado", "anotar una venta")
     como = como_se_vende(veredicto)
     with db_lock:
         c.execute(
@@ -1917,6 +1918,7 @@ def registrar_devolucion(producto_id, termino_pedido, motivo, detalle=""):
     el vínculo entre lo pedido y lo vendido baja a «muy débil» en el acto —el buscador deja de
     ofrecerlo como seguro— y la ficha de prueba lo muestra en rojo. No se borra nada: lo decide
     una persona. Devuelve cuántos vínculos se bajaron."""
+    exigir_nivel("empleado", "anotar una devolución")
     if modo_solo_lectura():
         raise PermissionError(TEXTO_DE_SOLO_LECTURA)
     if motivo not in MOTIVOS_DE_DEVOLUCION:
@@ -1969,6 +1971,7 @@ def registrar_que_anduvo(producto_id, termino_pedido, nota=""):
     «separar "vendida" de "funcionó"» y «confirmación posterior a la venta». Antes, dos ventas
     que no volvían sumaban 35 al puntaje («funcionó en el mostrador»): el silencio contaba como
     prueba, y además en círculo —se vende lo que la app dice que es equivalente—."""
+    exigir_nivel("empleado", "anotar que una pieza anduvo")
     if modo_solo_lectura():
         raise PermissionError(TEXTO_DE_SOLO_LECTURA)
     pedido = sanitizar(termino_pedido or "")

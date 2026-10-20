@@ -1334,6 +1334,25 @@ def es_empleado_o_abierto():
     return es_operador_o_admin() or not hay_claves_configuradas()
 
 
+# EL INVITADO MIRA, NO TOCA. El Buscador, la lista de WhatsApp y el Modo Mecánico quedan
+# abiertos para mirar —es el mostrador, y «Por patente» lo puede consultar cualquiera—, pero
+# anotar o cambiar algo pide entrar con contraseña. Recorriendo la app como invitado y tocando
+# cada botón se encontró que, sin contraseña, se podía anotar «Se llevó» (pesa en las
+# equivalencias sugeridas), «Reponer», marcar favoritos, apartar stock, anotar consultas de
+# clientes con nombre y teléfono, enseñarle modelos y fabricantes al lector de VIN y prender
+# las fotos en segundo plano. Ahora esos botones se ven apagados, con este aviso, y la función
+# de cada uno lo vuelve a mirar adentro (ver exigir_nivel()). Lo que la app anota sola al
+# buscar —el historial de búsquedas, las veces que se buscó cada código— sigue igual.
+TEXTO_SOLO_MIRAR = ("🔒 Mirar se puede sin entrar. Para anotar o cambiar algo, entrá con tu "
+                    "contraseña («🔑 Ingresar», arriba).")
+
+
+def solo_mirar():
+    """True para un invitado cuando la app tiene contraseñas: ve lo abierto y no cambia nada.
+    Ver «EL INVITADO MIRA, NO TOCA»."""
+    return not es_empleado_o_abierto()
+
+
 def seccion_permitida(nivel, motivo=""):
     """El candado de una SECCIÓN entera: 'empleado' (operador o administrador) o 'admin'.
 

@@ -145,7 +145,8 @@ if pagina == PAGINAS[0]:
             if _pedir_de_a_uno:
                 mostrar_permiso_si_hace_falta("presupuesto")
             cb1, cb2 = st.columns(2)
-            if cb1.button("🔒 Apartar todo el presupuesto"):
+            if cb1.button("🔒 Apartar todo el presupuesto", disabled=solo_mirar(),
+                          help=TEXTO_SOLO_MIRAR if solo_mirar() else None):
                 _apartados, _fallaron = 0, []
                 for _pid, _item in list(_cart.items()):
                     _ok, _msg = reservar_stock(_pid, _item["cantidad"], "presupuesto")
@@ -288,7 +289,7 @@ if pagina == PAGINAS[0]:
             # quedaban con la firma vieja sin que nadie se enterara: la mejora no llegaba nunca
             # al catálogo que ya estaba cargado. La tanda es de 25 a propósito, para que abrir
             # el panel no se cuelgue.
-            if fotos_pendientes:
+            if fotos_pendientes and not solo_mirar():
                 with st.spinner(f"Poniendo al día {min(fotos_pendientes, 25)} foto(s)..."):
                     _r = migrar_imagenes_pendientes(limite=25)
                 if _r["listas"]:
@@ -299,7 +300,7 @@ if pagina == PAGINAS[0]:
             st.checkbox(
                 "🤖 Traer fotos solas, en segundo plano",
                 value=obtener_config("fotos_automaticas", "0") == "1",
-                key="fotos_auto_check",
+                key="fotos_auto_check", disabled=solo_mirar(),
                 on_change=lambda: prender_tarea_de_fondo(
                     "fotos", "fotos_automaticas", st.session_state["fotos_auto_check"]),
                 help="Mientras la app esté abierta, va trayendo fotos de las fichas del "
@@ -310,7 +311,7 @@ if pagina == PAGINAS[0]:
                 mostrar_avance_de_tanda("fotos", "foto(s)")
 
             if fotos_pendientes and st.button(
-                    f"🔄 Procesar las {fotos_pendientes} que faltan ahora"):
+                    f"🔄 Procesar las {fotos_pendientes} que faltan ahora", disabled=solo_mirar()):
                 with st.spinner("Procesando fotos..."):
                     r = migrar_imagenes_pendientes()
                 partes = []
@@ -1418,6 +1419,8 @@ if pagina == PAGINAS[0]:
                             "le avisa al depósito que lo busque, y al entregarlo queda en la cuenta "
                             "del que se lo lleva."
                         )
+                        if solo_mirar():
+                            st.caption(TEXTO_SOLO_MIRAR)
                         def _rotulo_stock(f):
                             _s = f.get("Stock")
                             return (f"{f['Marca']} - {f['Codigo']} "
@@ -1442,6 +1445,7 @@ if pagina == PAGINAS[0]:
                                      evidencia_de_la_fila(fila_stock, _reco["recomendada"])),
                                     f"vendido_{fila_stock['ID']}_{clean}")
                                 colr3.button("📌 Reponer", key=f"pedir_repo_{fila_stock['ID']}_{clean}",
+                                              disabled=solo_mirar(),
                                               on_click=pedir_reposicion_y_avisar,
                                               args=(fila_stock["ID"], f"{fila_stock['Marca']} - {fila_stock['Codigo']}",
                                                     f"stock_{clean}"),
@@ -1468,6 +1472,7 @@ if pagina == PAGINAS[0]:
                                  evidencia_de_la_fila(_fila_elegida, _reco["recomendada"])),
                                 f"vendido_elegido_{clean}")
                             colr3.button("📌 Reponer", key=f"pedir_elegido_{clean}",
+                                          disabled=solo_mirar(),
                                           on_click=pedir_reposicion_y_avisar,
                                           args=(_elegido, _rotulos[_elegido], f"stock_{clean}"),
                                           help="Marcar para reposición")
@@ -1483,8 +1488,9 @@ if pagina == PAGINAS[0]:
                             for fila in res:
                                 colF, colC, colP, colS, colG, colH = cols([0.5, 1.7, 1.1, 0.9, 0.7, 0.7])
                                 es_fav = bool(fila.get("Favorito"))
-                                nuevo_fav = colF.checkbox("⭐", value=es_fav, key=f"fav_{fila['ID']}_{clean}")
-                                if nuevo_fav != es_fav:
+                                nuevo_fav = colF.checkbox("⭐", value=es_fav, key=f"fav_{fila['ID']}_{clean}",
+                                                          disabled=solo_mirar())
+                                if nuevo_fav != es_fav and not solo_mirar():
                                     alternar_favorito(fila["ID"], nuevo_fav)
                                 colC.write(f"{fila['Marca']} - {fila['Codigo']}")
                                 # Con qué valores se abrió el editor: ver valor_con_que_se_abrio().
@@ -1932,7 +1938,8 @@ if pagina == PAGINAS[0]:
                                                      placeholder="Ej: tiene un Gol 2012, "
                                                                  "consulta con el mecánico")
                             if st.button("📞 Anotar la consulta",
-                                          key=f"btn_cc_{fila_txt['ID']}"):
+                                          key=f"btn_cc_{fila_txt['ID']}", disabled=solo_mirar(),
+                                          help=TEXTO_SOLO_MIRAR if solo_mirar() else None):
                                 _f = etq_cc[cual_cc]
                                 ok_cc, msg_cc = anotar_consulta_cliente(
                                     nom_cc, tel_cc, _f["ID"], _f["Codigo"],
@@ -1973,7 +1980,9 @@ if pagina == PAGINAS[0]:
                                 cliente_ap = ap2.text_input(
                                     "¿Para quién?", key=f"cliente_apartar_txt_{fila_txt['ID']}",
                                     placeholder="Nombre o patente, para saber a quién reclamarle")
-                                if st.button("🔒 Apartar", key=f"btn_apartar_txt_{fila_txt['ID']}"):
+                                if st.button("🔒 Apartar", key=f"btn_apartar_txt_{fila_txt['ID']}",
+                                             disabled=solo_mirar(),
+                                             help=TEXTO_SOLO_MIRAR if solo_mirar() else None):
                                     ok_ap, msg_ap = reservar_stock(
                                         etq_ap[elegido_ap], cant_ap, cliente_ap)
                                     if ok_ap:
@@ -1987,6 +1996,8 @@ if pagina == PAGINAS[0]:
                             "Marcá el que se lleva — vale también si se lleva un equivalente y no "
                             "el que apareció en la búsqueda. Así el sistema aprende esa relación."
                         )
+                        if solo_mirar():
+                            st.caption(TEXTO_SOLO_MIRAR)
                         for f in (equivalentes or [fila_txt]):
                             cv1, cv2 = st.columns([4, 1])
                             precio_txt = f"${miles(f['Precio'], 0)}" if f.get("Precio") else "s/precio"
@@ -1994,6 +2005,7 @@ if pagina == PAGINAS[0]:
                                        f"stock: {f.get('Stock') if f.get('Stock') is not None else 's/d'})")
                             cv2.button(rotulo_del_boton_de_venta(f),
                                         key=f"vendido_txt_{fila_txt['ID']}_{f['ID']}",
+                                        disabled=solo_mirar(),
                                         on_click=anotar_venta_y_avisar,
                                         args=(f["ID"], texto_pedido, f"{f['Marca']} - {f['Codigo']}",
                                               f"txt_{fila_txt['ID']}",

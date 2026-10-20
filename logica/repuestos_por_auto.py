@@ -343,7 +343,12 @@ def panel_vin(clave="vin", mostrar_ensenar=True):
                     "Esto viene de una base ajena y **no se guardó**. Si es correcto, "
                     "confirmalo y queda aprendido para todos los VIN de ese patrón."
                 )
-                if st.button("✅ Es correcto, guardarlo", key=f"nhtsa_ok_{clave}"):
+                if st.button("✅ Es correcto, guardarlo", key=f"nhtsa_ok_{clave}",
+                             disabled=solo_mirar(),
+                             help=TEXTO_SOLO_MIRAR if solo_mirar() else None):
+                    # aprender_modelo_de_vin() no lo mira adentro: también la usa la tarea de
+                    # todos los días, que puede correr en la visita de un invitado.
+                    exigir_nivel("empleado", "enseñarle un modelo al lector de VIN")
                     _modelo_n = " ".join(x for x in [_dn["marca"], _dn["modelo"]] if x)
                     aprender_modelo_de_vin(d["vin"], _modelo_n, _dn.get("marca") or "",
                                             _dn.get("motor") or "")
@@ -353,8 +358,11 @@ def panel_vin(clave="vin", mostrar_ensenar=True):
 
     ficha = d.get("vehiculo")
     if ficha:
+        # El cliente, solo con contraseña: como en «Por patente» (ver es_empleado_o_abierto()).
+        # Pegando un VIN, un invitado veía el nombre del dueño del auto.
         st.info(f"🎯 Este chasis ya está en tus fichas: patente **{ficha.get('patente')}**"
-                 + (f" — cliente {ficha['cliente_nombre']}" if ficha.get("cliente_nombre") else ""))
+                 + (f" — cliente {ficha['cliente_nombre']}"
+                    if ficha.get("cliente_nombre") and not solo_mirar() else ""))
 
     anio_usar = d.get("anio_estimado")
     if d.get("anio_alternativo"):
@@ -408,7 +416,9 @@ def panel_vin(clave="vin", mostrar_ensenar=True):
         )
         _mostrar_repuestos_del_auto(r, marca_para_buscar, modelo_manual, anio_usar, clave)
 
-    if mostrar_ensenar:
+    if mostrar_ensenar and solo_mirar():
+        st.caption(TEXTO_SOLO_MIRAR)
+    elif mostrar_ensenar:
         with st.expander("✏️ Enseñarle a la app este auto (para que la próxima salga solo)"):
             _formulario_ensenar_vin(d, clave)
     return d

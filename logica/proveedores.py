@@ -2299,6 +2299,7 @@ def buscar_lo_nuevo(tareas=None):
 
 def prender_tarea_de_fondo(que, clave_config, prendida):
     """Para los interruptores: prenderla es pedirla, así que también la reabre."""
+    exigir_nivel("empleado", "prender o apagar una tarea en segundo plano")
     guardar_config(clave_config, "1" if prendida else "0")
     if prendida:
         buscar_lo_nuevo([que])
@@ -2932,7 +2933,9 @@ def mostrar_avance_de_tanda(que, unidad):
         st.caption(f"✅ Terminado{' el ' + _fecha_corta(terminado) if terminado else ''}: no "
                    "se vuelve a correr hasta que lo pidas, y al pedirlo busca solo lo que falta"
                    + (f" ({miles(faltan)} ahora)." if faltan else "."))
-        if terminado and st.button("🔄 Buscar lo nuevo", key=f"lo_nuevo_tanda_{que}"):
+        # Apagados para un invitado: se ven también en el Buscador (ver solo_mirar()).
+        if terminado and st.button("🔄 Buscar lo nuevo", key=f"lo_nuevo_tanda_{que}",
+                                   disabled=solo_mirar()):
             buscar_lo_nuevo([que])
             st.rerun()
         return
@@ -2943,7 +2946,8 @@ def mostrar_avance_de_tanda(que, unidad):
         + (f" · 😴 retoma {_fecha_corta(descanso)}" if descanso else "")
         + (f" · última vez: {resumen['ultima']}" if resumen.get("ultima") else "")
     )
-    if descanso and st.button("▶️ Retomar ahora", key=f"retomar_tanda_{que}"):
+    if descanso and st.button("▶️ Retomar ahora", key=f"retomar_tanda_{que}",
+                              disabled=solo_mirar()):
         guardar_config(f"descanso_{que}", "")
         arrancar_tanda_de_fondo()
         st.rerun()

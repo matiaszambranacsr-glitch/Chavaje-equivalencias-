@@ -152,6 +152,55 @@ def probar(L):
                     except PermissionError:
                         entro = False
                     esperar(f"nivel «{nivel or 'invitado'}»: {nombre}", entro, de in entran)
+        # EL INVITADO MIRA, NO TOCA (ver logica/base.py): lo que se podía anotar o cambiar
+        # desde las secciones abiertas sin contraseña. Con datos inventados: lo que importa es si
+        # deja pasar; si pasa y después falla por el dato (un id que no existe), igual entró.
+        _al_mirar = (
+            ("anotar una venta", ns["registrar_venta"], (999999, "PERMISO")),
+            ("anotar para reponer", ns["solicitar_reposicion"], (999999,)),
+            ("marcar un favorito", ns["alternar_favorito"], (999999, True)),
+            ("anotar una consulta", ns["anotar_consulta_cliente"], ("", "")),
+            ("apartar stock", ns["reservar_stock"], (999999, 1)),
+            ("pedir al depósito", ns["pedir_al_deposito"], (999999, 1)),
+            ("cargar un código de falla", ns["agregar_dtc"], ("PERMISO1", "prueba", "", "")),
+            ("cargar códigos de falla", ns["importar_dtc_masivo"], ("",)),
+            ("cargar un fabricante del VIN", ns["agregar_fabricante_vin"], ("ZZ9", "PRUEBA", "")),
+            ("enseñar un modelo del VIN", ns["enseniar_modelo_vin"], ("ZZ9", "ZZZZZ", "PRUEBA")),
+            ("enseñar un motor del VIN", ns["enseniar_motor_vin"], ("ZZ9", "Z", "PRUEBA")),
+            ("borrar un modelo del VIN", ns["olvidar_modelo_vin"], ("ZZ9", "ZZZZZ")),
+            ("borrar un motor del VIN", ns["olvidar_motor_vin"], ("ZZ9", "Z")),
+            ("subir un esquema", ns["guardar_esquema"],
+             ("PRUEBA-PERMISO", "X", "Y", "Z", "", b"", "x.png")),
+            ("precargar un vehículo de esquemas", ns["agregar_vehiculo_catalogo"],
+             ("PRUEBA-PERMISO", "Y")),
+            ("eliminar un esquema", ns["eliminar_esquema"], (999999,)),
+            ("marcar una pieza en un esquema", ns["agregar_punto_esquema"], (999999, "1", "x", "")),
+            ("sacar una pieza de un esquema", ns["eliminar_punto_esquema"], (999999,)),
+            ("la tarea en segundo plano", ns["prender_tarea_de_fondo"],
+             ("fotos", "fotos_automaticas", False)),
+            ("cortar vínculos", ns["borrar_equivalencias_dudosas"], ([],)),
+            ("anotar una devolución", ns["registrar_devolucion"], (999999, "X", "PERMISO")),
+            ("anotar que anduvo", ns["registrar_que_anduvo"], (999999, "X")),
+            ("autorizar un retiro a cuenta", ns["autorizar_retiro"], (999999, "000000")),
+            ("sacar un vehículo de los esquemas", ns["eliminar_vehiculo_catalogo"],
+             ("PRUEBA-PERMISO", "Y")),
+        )
+        for nivel, entra in (("", False), ("mecanico", False), ("operador", True), ("admin", True)):
+            g["_nivel_de_quien_esta_adentro"] = lambda n=nivel: n
+            for nombre, funcion, args in _al_mirar:
+                try:
+                    funcion(*args)
+                    entro = True
+                except PermissionError:
+                    entro = False
+                except Exception:
+                    entro = True
+                esperar(f"nivel «{nivel or 'invitado'}»: {nombre}", entro, entra)
+        c.execute("DELETE FROM codigos_dtc WHERE codigo = 'PERMISO1'")
+        c.execute("DELETE FROM fabricantes_vin WHERE wmi = 'ZZ9'")
+        c.execute("DELETE FROM esquemas WHERE titulo = 'PRUEBA-PERMISO'")
+        c.execute("DELETE FROM esquemas_catalogo WHERE marca = 'PRUEBA-PERMISO'")
+        conn.commit()
         # Y lo que guardan hace lo que dice (antes lo escribían las pantallas a mano).
         g["_nivel_de_quien_esta_adentro"] = lambda: "operador"
         esperar("el número de motor, con la patente en minúsculas",
@@ -798,6 +847,19 @@ def probar(L):
                   (_auto, _pieza, _km, _vida, _nota))
     conn.commit()
     _v = dict(c.execute("SELECT * FROM vehiculos WHERE id = ?", (_auto,)).fetchone())
+    # Cargada con espacios, se encuentra junta y con guiones; y guardarla escrita de otra forma
+    # actualiza esa ficha en vez de crear otra (ver buscar_vehiculo()).
+    c.execute("""INSERT INTO vehiculos (patente, marca_auto) VALUES ('AF 555 GH', 'FORD')""")
+    _otra_forma = ns["get_or_create_vehiculo"]("af-555-gh", modelo_auto="Ka")
+    esperar("la patente como esté escrita: se encuentra, y no se duplica la ficha",
+            (ns["buscar_vehiculo"]("af555gh")["marca_auto"], ns["buscar_vehiculo"]("AF-555-GH")["id"],
+             _otra_forma == ns["buscar_vehiculo"]("AF555GH")["id"],
+             c.execute("SELECT COUNT(*), MAX(modelo_auto) FROM vehiculos WHERE "
+                       "REPLACE(patente, ' ', '') = 'AF555GH'").fetchone()[:],
+             ns["guardar_numero_de_motor"]("af555gh", "M-9"),
+             ns["buscar_vehiculo"]("ZZ999ZZ")),
+            ("FORD", _otra_forma, True, (1, "Ka"), True, None))
+    c.execute("DELETE FROM vehiculos WHERE marca_auto = 'FORD' AND patente = 'AF 555 GH'")
     _estado = ns["estado_de_cada_pieza"](_v)
     # 10.000 km en 90 días: 111 por día; 10 días después de anotado, hoy tendría 61.111.
     esperar("cuánto le falta a cada pieza: la última vez, con la vida útil de la anterior",

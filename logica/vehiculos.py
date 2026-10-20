@@ -17,6 +17,11 @@ def get_or_create_vehiculo(patente, cliente_nombre="", cliente_telefono="", marc
     with db_lock:
         c.execute("SELECT id FROM vehiculos WHERE patente = ?", (patente,))
         row = c.fetchone()
+        # Escrita de otra forma («AB 123 CD» y «AB123CD»): es la misma ficha, no una nueva.
+        # Ver buscar_vehiculo().
+        if not row:
+            iguales = _vehiculos_por_patente_sin_espacios(patente)
+            row = {"id": iguales[0]["id"]} if iguales else None
         if row:
             vid = row["id"]
             c.execute(
@@ -67,16 +72,19 @@ def guardar_numero_de_motor(patente, numero):
     numero, patente = (numero or "").strip(), (patente or "").strip()
     if not numero or not patente:
         return False
+    # La patente como esté escrita: ver buscar_vehiculo().
+    vehiculo = buscar_vehiculo(patente)
+    if not vehiculo:
+        return False
     with db_lock:
-        c.execute("UPDATE vehiculos SET numero_motor = ? WHERE UPPER(patente) = UPPER(?)",
-                  (numero, patente))
-        cambio = c.rowcount > 0
+        c.execute("UPDATE vehiculos SET numero_motor = ? WHERE id = ?", (numero, vehiculo["id"]))
         conn.commit()
-    return cambio
+    return True
 
 
 def enseniar_motor_vin(wmi, codigo, motor, notas=None):
     """Guarda que en esta marca, ese carácter en la 8ª posición del VIN es ese motor."""
+    exigir_nivel("empleado", "enseñarle un motor al lector de VIN")
     wmi, codigo = wmi.strip().upper(), (codigo or "").strip().upper()[:1]
     if not wmi or not codigo or not (motor or "").strip():
         return False
@@ -90,6 +98,7 @@ def enseniar_motor_vin(wmi, codigo, motor, notas=None):
 
 
 def olvidar_motor_vin(wmi, codigo):
+    exigir_nivel("empleado", "borrar un motor aprendido del VIN")
     with db_lock:
         c.execute("DELETE FROM motores_vin WHERE wmi = ? AND codigo = ?",
                   (wmi.strip().upper(), (codigo or "").strip().upper()[:1]))
@@ -358,9 +367,15 @@ def anio_probable_de_patente(patente):
 
 
 def buscar_vehiculo(patente):
+    """La ficha de esa patente, o None. Como esté escrita: «AE 777 ZZ», «AE-777-ZZ» y «ae777zz»
+    son la misma. Se comparaba tal cual, y un auto cargado con espacios no aparecía en «Por
+    patente» buscándolo junto (pasó probándolo como invitado)."""
     c.execute("SELECT * FROM vehiculos WHERE patente = ?", (patente.strip().upper(),))
     row = c.fetchone()
-    return dict(row) if row else None
+    if row:
+        return dict(row)
+    iguales = _vehiculos_por_patente_sin_espacios(patente)
+    return iguales[0] if iguales else None
 
 
 def calcular_km_recorridos(vehiculo):

@@ -194,6 +194,8 @@ Las pruebas se corren como dice el README, en «Antes de subir un cambio».
 | Cuánto le falta a cada pieza sale de la última vez que se cambió, igual para el negocio y para el cliente | `estado_de_cada_pieza()`, `a_quien_avisar()` | `pruebas_de_los_cambios.py` (9l ter) |
 | Una pieza anotada queda atada al producto del catálogo solo si el código no deja dudas, y sin vida útil usa la de las otras veces | `agregar_pieza_historial()`, `producto_del_codigo_anotado()`, `vida_util_de_las_otras_veces()` | `pruebas_de_los_cambios.py` (9l ter) |
 | El link del cliente anda aunque la patente esté frenada por intentos con los 4 números, y el km que escribe el cliente no se guarda | `abrir_ficha_publica()`, `resumen_publico_del_auto()` | `pruebas_de_los_cambios.py` (9l ter) |
+| Un invitado (y un mecánico externo) no puede anotar ni cambiar nada desde las secciones abiertas: cada función que escribe pide el permiso adentro | `exigir_nivel()`, `solo_mirar()` | `pruebas_de_los_cambios.py` (5), `auditar.py` (control 16) |
+| La patente se encuentra como esté escrita, y guardarla de otra forma no duplica la ficha | `buscar_vehiculo()`, `get_or_create_vehiculo()`, `guardar_numero_de_motor()` | `pruebas_de_los_cambios.py` (9l ter) |
 
 ## Sin prueba automática todavía
 

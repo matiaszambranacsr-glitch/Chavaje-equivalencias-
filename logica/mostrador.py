@@ -226,6 +226,7 @@ def repuestos_por_numero_motor(numero):
 def anotar_consulta_cliente(cliente, telefono, producto_id=None, codigo="", descripcion="",
                             cantidad=1, precio=None, nota=""):
     """Guarda qué pidió un cliente que dijo que lo pensaba. Devuelve (ok, mensaje)."""
+    exigir_nivel("empleado", "anotar la consulta de un cliente")
     if not (cliente or "").strip() and not (telefono or "").strip():
         return False, "Poné al menos el nombre o el teléfono, si no después no sabés de quién era."
     with db_lock:
@@ -358,6 +359,7 @@ def reservar_stock(producto_id, cantidad, cliente="", nota=""):
     Con la lectura adentro de `db_lock` y de `transaccion()`, la segunda espera a la primera y
     recibe el «solo quedan N». BEGIN IMMEDIATE además pide el candado de escritura de SQLite
     desde el arranque, así que tampoco se cuela otro proceso, no solo otro hilo."""
+    exigir_nivel("empleado", "apartar stock")
     cantidad = int(cantidad or 0)
     if cantidad <= 0:
         return False, "La cantidad tiene que ser mayor que cero."

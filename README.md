@@ -6480,6 +6480,18 @@ el botón**:
 - «🔌 Probar las fuentes de afuera» suma la Central de Deudores (con el CUIT de la AFIP, nunca el
   de un cliente) y la inflación de respaldo.
 
+## 🔒 El invitado mira, no toca
+
+El Buscador, la Lista WhatsApp y el Modo Mecánico —con «🔤 Por patente»— siguen abiertos para **mirar** sin contraseña. **Anotar o cambiar** algo pide entrar con contraseña (operador o administrador).
+
+| Qué | Qué pasaba | Qué se hizo |
+|---|---|---|
+| **Lo que un invitado podía cambiar** | Se recorrieron las secciones abiertas entrando como invitado (con contraseñas configuradas), tocando cada botón y cada casilla, y abriendo cada desplegable, con un registro de cada escritura en la base. Sin contraseña se podía: anotar **«🛒 Se llevó»** (pesa en las equivalencias sugeridas), **«📌 Reponer»**, marcar **⭐ favoritos**, **apartar stock** (de a uno y el presupuesto entero), anotar **consultas de clientes** con nombre y teléfono, enseñarle **modelos, motores y fabricantes** al lector de VIN, **confirmar lo de la NHTSA**, «📚 Aprender modelos de las fichas», y prender o retomar las **fotos en segundo plano**. | Para un invitado esos botones se ven **apagados**, con el aviso «🔒 Mirar se puede sin entrar. Para anotar o cambiar algo, entrá con tu contraseña». Repetido el recorrido con el código nuevo: **ninguna escritura**. Con la sesión de operador, «Se llevó» anota la venta como siempre. |
+| **El botón apagado no alcanza** | Cualquier otro camino que llamara a la función la disparaba igual. | Las 24 funciones que escriben y se alcanzan desde una sección abierta piden el permiso **adentro** (`exigir_nivel()`). Por ejemplo, la venta, reponer, favorito, apartar, la consulta, el pedido al depósito, el código de retiro, los códigos de falla, el VIN, los esquemas, cortar vínculos, «anduvo» y «volvió». Un mecánico externo (que entra a su portal) tampoco las puede usar. |
+| **Que no vuelva a pasar** | — | El auditor tiene un control nuevo: sigue lo que llaman esas tres pantallas, y lo que llaman esas funciones, y marca cualquier función que escriba en la base sin pedir el permiso. Contra el código de antes marca 24; contra el de ahora, ninguna. Quedan afuera, a propósito y con el motivo escrito, lo que la app anota sola: el historial de búsquedas, cuántas veces se buscó cada código, lo que no se encontró, el uso de la IA. También lo que corre la tarea de todos los días, que puede arrancar en la visita de un invitado. |
+| **El nombre del cliente, por el VIN** | En «Por patente» el nombre y el teléfono del cliente ya se ocultaban sin contraseña, pero pegando el **VIN** de un auto cargado, un invitado veía «cliente Fulano». | Se oculta igual que en «Por patente». |
+| **La patente con espacios** | Un auto cargado como «AE 777 ZZ» **no aparecía** en «Por patente» buscando «AE777ZZ», y guardarlo escrito de otra forma creaba **otra ficha** del mismo auto (pasaba también con el número de motor). | La patente se compara sin espacios, guiones ni puntos: se encuentra como sea que esté escrita, y guardar actualiza la ficha que ya existe. |
+
 ## 🔧 Lo que se anota en la ficha queda atado al catálogo, y el cliente escribe su km
 
 | Qué | Qué pasaba | Qué se hizo |

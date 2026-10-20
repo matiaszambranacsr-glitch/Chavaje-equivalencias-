@@ -2545,6 +2545,84 @@ for _f in _en_git:
         reportar("ERROR", 0, f"{_f} está en el repositorio: ahí van claves. Sacarlo de git "
                              "(git rm --cached) y cambiar las claves que tenía")
 
+# ============ 16. Lo que se escribe desde una sección abierta pide permiso adentro ============
+# El Buscador, la lista de WhatsApp y el Modo Mecánico se abren sin contraseña: un invitado mira
+# y no cambia nada (ver «EL INVITADO MIRA, NO TOCA» en logica/base.py). Recorriendo esas tres
+# pantallas como invitado y tocando cada botón se encontró que se podía anotar «Se llevó» y
+# «Reponer», marcar favoritos, apartar stock, anotar consultas de clientes, enseñarle modelos al
+# lector de VIN... El botón apagado en la pantalla no alcanza: cualquier otro camino que llame a
+# la función la dispara igual.
+# Se sigue lo que esas pantallas llaman (y lo que pasan a on_click y on_change), y lo que llaman
+# esas funciones, hasta una que pida el permiso con exigir_nivel(). Cada función de logica/ con
+# un UPDATE/INSERT/DELETE propio que se alcanza así sin pasar por exigir_nivel() se marca, salvo
+# las de _SE_ESCRIBE_SOLA: lo que la app anota sola, y lo que también corren las tareas del día
+# (esas pueden arrancar en la visita de un invitado: un permiso adentro las cortaría).
+_PANTALLAS_ABIERTAS = ("pantallas/buscador.py", "pantallas/whatsapp.py", "pantallas/mecanico.py")
+_SE_ESCRIBE_SOLA = {
+    "guardar_busqueda": "el historial de búsquedas",
+    "incrementar_veces_buscado": "cuántas veces se buscó cada código",
+    "registrar_busqueda_sin_resultado": "lo que se buscó y no estaba",
+    "registrar_uso_ia": "el contador de uso de la IA",
+    "guardar_config": "la configuración: la usan el ingreso y las tareas de fondo",
+    "migrar_imagenes_pendientes": "la corre también la tarea del día",
+    "aplicar_aplicaciones_deducidas": "la corre también la tarea del día",
+    "aprender_modelo_de_vin": "la corre también la tarea del día",
+}
+# El ingreso y los candados: escriben (los intentos fallidos), y son justamente el permiso.
+_PARADAS_DEL_PERMISO = {"candado", "pedir_password_admin", "pedir_password_operador_o_admin",
+                        "validar_password", "es_empleado_o_abierto", "hay_claves_configuradas",
+                        "solo_mirar", "mostrar_login_inicial", "arrancar_tanda_de_fondo",
+                        "exigir_nivel"}
+if DE_DONDE:
+    def _archivo_de(n):
+        return DE_DONDE[n.lineno - 1][0]
+
+    def _lo_que_llama(nodo):
+        salida = set()
+        for x in ast.walk(nodo):
+            if isinstance(x, ast.Call) and isinstance(x.func, ast.Name):
+                salida.add(x.func.id)
+            elif (isinstance(x, ast.keyword) and x.arg in ("on_click", "on_change")
+                  and isinstance(x.value, ast.Name)):
+                salida.add(x.value.id)
+        return salida
+
+    def _escribe_por_su_cuenta(f):
+        for x in ast.walk(f):
+            _t = (x.value if isinstance(x, ast.Constant) and isinstance(x.value, str) else
+                  x.values[0].value if isinstance(x, ast.JoinedStr) and x.values
+                  and isinstance(x.values[0], ast.Constant) else "")
+            if str(_t).upper().lstrip().startswith(("UPDATE ", "INSERT ", "DELETE ", "REPLACE ")):
+                return True
+        return False
+
+    _de_la_logica = {f.name: f for f in ARBOL.body if isinstance(f, ast.FunctionDef)
+                     and _archivo_de(f).startswith("logica/")}
+    _piden = {n for n, f in _de_la_logica.items() if "exigir_nivel" in _lo_que_llama(f)}
+    _por_donde, _faltan = {}, []
+    for _s in ARBOL.body:
+        if _archivo_de(_s) in _PANTALLAS_ABIERTAS:
+            for _nombre in _lo_que_llama(_s) & set(_de_la_logica):
+                if _nombre not in _por_donde:
+                    _por_donde[_nombre] = (_s.lineno, [_nombre])
+                    _faltan.append(_nombre)
+    while _faltan:
+        _n = _faltan.pop()
+        if _n in _piden or _n in _PARADAS_DEL_PERMISO:
+            continue
+        for _m in _lo_que_llama(_de_la_logica[_n]) & set(_de_la_logica):
+            if _m not in _por_donde:
+                _por_donde[_m] = (_por_donde[_n][0], _por_donde[_n][1] + [_m])
+                _faltan.append(_m)
+    for _n, (_linea, _camino) in sorted(_por_donde.items()):
+        if (_n not in _piden and _n not in _PARADAS_DEL_PERMISO and _n not in _SE_ESCRIBE_SOLA
+                and _escribe_por_su_cuenta(_de_la_logica[_n])):
+            reportar("REVISAR", _de_la_logica[_n].lineno,
+                     f"{_n}() escribe en la base y se llega desde una sección abierta "
+                     f"({' → '.join(_camino[:4])}) sin exigir_nivel(): un invitado la puede "
+                     "disparar. Si es lo que la app anota sola, va en _SE_ESCRIBE_SOLA")
+
+
 # ============ El paquete nucleo/ al día con logica/ ============
 # nucleo/ se genera desde logica/ (nucleo/generar.py). Si alguien cambia logica/ y no lo
 # regenera, nucleo/pruebas.py sigue en verde —prueba lo viejo— y el paquete queda atrasado sin

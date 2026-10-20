@@ -1462,6 +1462,7 @@ def borrar_equivalencias_dudosas(pares):
 
     Y borrar las dos direcciones no es de más: si la relación está espejada hay que llevarse
     las dos filas, porque la que quede sigue siendo el mismo vínculo para el buscador."""
+    exigir_nivel("empleado", "cortar vínculos")
     if not pares:
         return 0
     with db_lock:
