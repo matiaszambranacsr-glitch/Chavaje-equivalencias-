@@ -799,9 +799,16 @@ if pagina == PAGINAS[3]:
             st.caption("✅ Este alias ya tiene un QR real cargado. Subí uno nuevo para reemplazarlo.")
 
         cbtn1, cbtn2, cbtn3 = st.columns(3)
-        if cbtn1.button("💾 Guardar alias"):
+        # Con candado de administrador, como borrar el alias o sacarle el QR: es adónde va la
+        # plata de los clientes. Ver guardar_alias_transferencia().
+        if problema_del_cbu(cbu_in):
+            st.error(f"⚠️ El CBU/CVU no está bien: {problema_del_cbu(cbu_in)}. Así no se guarda.")
+        if candado('cambiar los datos de cobro', cbtn1.button("💾 Guardar alias"),
+                   'cambiar_los_datos_de_cobro'):
             if not nombre_alias_in.strip() or not alias_in.strip():
                 st.warning("Completá al menos el nombre y el alias.")
+            elif problema_del_cbu(cbu_in):
+                st.warning("Corregí el CBU/CVU antes de guardar.")
             else:
                 guardar_alias_transferencia(
                     nombre_alias_in, alias_in, cbu_in, titular_in,

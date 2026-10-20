@@ -6480,6 +6480,14 @@ el botón**:
 - «🔌 Probar las fuentes de afuera» suma la Central de Deudores (con el CUIT de la AFIP, nunca el
   de un cliente) y la inflación de respaldo.
 
+## 💳 Adónde va la plata: el CBU de cobro y quién lo puede cambiar
+
+| Qué | Qué pasaba | Qué se hizo |
+|---|---|---|
+| **Guardar el alias, el CBU o el QR de cobro** («🗂️ Administrar → 💬 Mensajería y cobros») | Borrar el alias y sacarle el QR pedían la contraseña de administrador; **guardarlo no**. «Administrar» lo abre cualquier empleado, así que un operador podía cambiar el CBU o subir otro QR, y la cotización le mandaba al cliente a transferir a esa cuenta. | Guardar pide la contraseña de administrador, y la función lo vuelve a mirar adentro (también borrar y sacar el QR). Probado en la pantalla, entrando como operador: pide la contraseña y no guarda nada. |
+| **El CBU o CVU mal copiado** | Se guardaba lo que se escribiera y salía impreso en el QR. | Se controlan los **22 números y sus dos dígitos verificadores** (pesos 7-1-3-9 por bloque; el CVU de las billeteras tiene la misma estructura). Verificado contra el ejemplo de python-stdnum. Mal copiado, la pantalla lo marca y no se guarda; bien, se guarda sin espacios ni guiones. |
+| **Otras que cambian plata o accesos** | El coeficiente de una lista (reescribe todos sus precios) y reactivar un taller (le devuelve la cuenta corriente) tenían el control solo en la pantalla. Confirmar una equivalencia sugerida no tenía ninguno. | El control va también adentro de la función: administrador para las dos primeras, empleado para la tercera. Confirmar una sugerencia, que no tenía prueba, ahora la tiene. |
+
 ## 🧷 Una alerta que no se iba nunca, y lo que se borraba antes de escribir lo nuevo
 
 | Qué | Qué pasaba (medido en la base del 12/10) | Qué se hizo |

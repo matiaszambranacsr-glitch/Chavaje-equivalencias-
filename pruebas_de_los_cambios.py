@@ -120,7 +120,16 @@ def probar(L):
                      ("aplicar los precios frenados", ns["aplicar_precios_frenados"], ([],)),
                      ("ajustar los precios de una marca", ns["aumentar_precios_por_marca"], (999999, 5)),
                      ("corregir un código con la marca pegada",
-                      ns["corregir_codigo_con_la_marca_pegada"], (999999, "123")))
+                      ns["corregir_codigo_con_la_marca_pegada"], (999999, "123")),
+                     # Adónde transfieren los clientes: lo podía cambiar cualquier empleado.
+                     ("cambiar los datos de cobro", ns["guardar_alias_transferencia"],
+                      ("PRUEBA-PERMISO", "alias.prueba", "", "")),
+                     ("eliminar los datos de cobro", ns["eliminar_alias_transferencia"], (999999,)),
+                     ("sacar el QR de cobro", ns["eliminar_qr_real"], (999999,)),
+                     ("cambiar el coeficiente de una lista", ns["guardar_coeficiente_de_lista"],
+                      (999999, 1.0, False)),
+                     ("activar o desactivar un taller", ns["activar_desactivar_mecanico"],
+                      (999999, True)))
         _de_empleado = (("aprobar", ns["aprobar_pendientes"], ("NO-EXISTE", [])),
                         ("registrar un pago", ns["registrar_pago_de_cuenta"], (999999, 0, "Efectivo")),
                         ("un remito", ns["aplicar_carga_remito"], ([],)),
@@ -129,7 +138,9 @@ def probar(L):
                         ("restaurar de la papelera", ns["restaurar_de_papelera"], (999999,)),
                         ("la ficha de un vehículo", ns["get_or_create_vehiculo"], ("AB123CD",)),
                         ("el número de motor", ns["guardar_numero_de_motor"], ("AB123CD", "M1")),
-                        ("el link de una marca", ns["guardar_plantilla_de_ficha"], (999999, None)))
+                        ("el link de una marca", ns["guardar_plantilla_de_ficha"], (999999, None)),
+                        ("confirmar una equivalencia sugerida", ns["confirmar_candidata"],
+                         ("NOEXISTE", 999999, "NOEXISTE")))
         for nivel, entran in (("", ()), ("operador", ("empleado",)),
                               ("admin", ("empleado", "admin"))):
             g["_nivel_de_quien_esta_adentro"] = lambda n=nivel: n
@@ -683,6 +694,51 @@ def probar(L):
                                          "reemplazos_codigo WHERE codigo_viejo_clean LIKE 'REEMP%'")],
             [("REEMPA", "REEMPC")])
     c.execute("DELETE FROM reemplazos_codigo WHERE codigo_viejo_clean LIKE 'REEMP%'")
+    conn.commit()
+
+    # 9l. El CBU/CVU de cobro (ver problema_del_cbu()): 22 números y sus dos dígitos
+    # verificadores. Va impreso en el QR de cada cotización.
+    c.execute("DELETE FROM alias_transferencia WHERE nombre = 'PRUEBA-PERMISO'")
+    c.execute("DELETE FROM configuracion WHERE clave = 'coeficiente_lista_999999'")
+    _cbu_bien = "2850590940090418135201"
+    esperar("el CBU: bien, con espacios, mal copiado, corto, vacío",
+            [bool(ns["problema_del_cbu"](x)) for x in
+             (_cbu_bien, "285 0590-9 40090418135201", "2850590940090418135202",
+              "2850590940090418135", "")],
+            [False, False, True, True, False])
+    try:
+        ns["guardar_alias_transferencia"]("PRUEBA-CBU", "alias.mal", "2850590940090418135202", "")
+        _guardo_mal = True
+    except ValueError:
+        _guardo_mal = False
+    ns["guardar_alias_transferencia"]("PRUEBA-CBU", "alias.bien", "285 0590-9 40090418135201", "")
+    esperar("con el CBU mal no se guarda; bien, se guarda solo con los números",
+            (_guardo_mal, c.execute("SELECT cbu FROM alias_transferencia WHERE nombre = "
+                                    "'PRUEBA-CBU'").fetchone()[0]), (False, _cbu_bien))
+    c.execute("DELETE FROM alias_transferencia WHERE nombre LIKE 'PRUEBA-%'")
+    conn.commit()
+
+    # 9m. Confirmar una sugerencia (ver confirmar_candidata()). No tenía prueba: si el código
+    # que pedía el cliente no existe, lo crea con la marca elegida y los vincula en UNA fila;
+    # sin marca no inventa nada, y dos veces no duplica.
+    c.execute("INSERT INTO productos (codigo_raw, codigo_clean, descripcion, marca_id) "
+              "VALUES ('CAND1', 'CAND1', 'FILTRO DE PRUEBA', ?)", (marca,))
+    _cand = c.lastrowid
+    conn.commit()
+    _sin_marca = ns["confirmar_candidata"]("PEDIDO9", _cand, "pedido-9")
+    _con_marca = ns["confirmar_candidata"]("PEDIDO9", _cand, "pedido-9", "FABRICA PRUEBA")
+    _otra_vez = ns["confirmar_candidata"]("PEDIDO9", _cand, "pedido-9", "FABRICA PRUEBA")
+    _mismo = ns["confirmar_candidata"]("CAND1", _cand, "CAND1")
+    _pedido = c.execute("SELECT id, descripcion FROM productos WHERE codigo_clean = 'PEDIDO9'").fetchall()
+    esperar("confirmar una sugerencia: crea, vincula una vez, sin inventar",
+            (_sin_marca[0], _con_marca, _otra_vez[0], _mismo[0], len(_pedido),
+             _pedido[0]["descripcion"] if _pedido else None,
+             c.execute("SELECT COUNT(*) FROM equivalencias WHERE ? IN (producto_a_id, producto_b_id)",
+                       (_cand,)).fetchone()[0]),
+            (False, (True, None), True, False, 1, "FILTRO DE PRUEBA", 1))
+    c.execute("DELETE FROM equivalencias WHERE ? IN (producto_a_id, producto_b_id)", (_cand,))
+    c.execute("DELETE FROM productos WHERE codigo_clean IN ('CAND1', 'PEDIDO9')")
+    c.execute("DELETE FROM marcas WHERE nombre = 'FABRICA PRUEBA'")
     conn.commit()
 
     # 10. «Borrar los productos vacíos» (ver depurar_huerfanos()). Borraba todos los que no

@@ -961,7 +961,9 @@ def guardar_coeficiente_de_lista(marca_id, coeficiente, aplicar_a_lo_cargado=Tru
     """Guarda el coeficiente de la lista de una marca, que se aplica en cada importación. Con
     aplicar_a_lo_cargado, lleva también los precios que ya están —y su historial— a la nueva
     escala: es la misma lista en otra unidad, no un aumento, así que «Cuánto te aumentó cada
-    proveedor» no tiene que verlo como uno. Devuelve cuántos precios cambió."""
+    proveedor» no tiene que verlo como uno. Devuelve cuántos precios cambió.
+    Solo administrador: reescribe los precios de una lista entera (la pantalla ya lo pedía)."""
+    exigir_nivel("admin", "cambiar el coeficiente de una lista")
     coeficiente = float(coeficiente)
     if coeficiente <= 0:
         raise ValueError("El coeficiente tiene que ser mayor que cero.")

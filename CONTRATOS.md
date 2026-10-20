@@ -187,6 +187,8 @@ Las pruebas se corren como dice el README, en «Antes de subir un cambio».
 | La alerta del «.0» cuenta lo mismo que arregla su botón | `_RE_DECIMAL_DE_EXCEL`, `contar_codigos_con_decimal()` | `pruebas_de_los_cambios.py` (9j) |
 | Un código viejo tiene un reemplazo vigente, sin círculos, y cambiarlo es todo o nada | `guardar_reemplazo()` | `pruebas_de_los_cambios.py` (9k) |
 | Lo que borra y vuelve a escribir en una tabla va en una transacción | — | `auditar.py` (control 15) |
+| Los datos de cobro (alias, CBU, QR) los cambia solo un administrador, y el CBU/CVU cierra con sus dígitos verificadores | `guardar_alias_transferencia()`, `problema_del_cbu()` | `pruebas_de_los_cambios.py` (5, 9l) |
+| El coeficiente de una lista, activar un taller y confirmar una sugerencia miran el permiso adentro | `guardar_coeficiente_de_lista()`, `activar_desactivar_mecanico()`, `confirmar_candidata()` | `pruebas_de_los_cambios.py` (5, 9m) |
 
 ## Sin prueba automática todavía
 

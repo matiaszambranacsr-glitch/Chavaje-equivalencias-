@@ -1060,6 +1060,9 @@ def validar_password_mecanico(password):
 
 
 def activar_desactivar_mecanico(mecanico_id, activo):
+    # Solo administrador, como crearlo o borrarlo: reactivar un taller le devuelve la cuenta
+    # corriente. La pantalla ya estaba en la sección de administrador.
+    exigir_nivel("admin", "activar o desactivar un taller")
     with db_lock:
         c.execute("UPDATE mecanicos SET activo=? WHERE id=?", (1 if activo else 0, mecanico_id))
         conn.commit()

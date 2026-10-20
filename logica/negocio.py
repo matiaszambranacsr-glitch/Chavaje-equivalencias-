@@ -2725,7 +2725,45 @@ def listar_alias_transferencia():
     return filas_a_listas(c)
 
 
+# EL CBU Y EL CVU SE PUEDEN CONTROLAR SIN CONSULTAR NADA. Son 22 dígitos en dos bloques —banco
+# y sucursal (8) y cuenta (14)— y cada bloque termina en un dígito verificador: los anteriores
+# por estos pesos, y lo que falta para la decena. El CVU de las billeteras (empieza con 000)
+# tiene la misma estructura. Verificado contra el ejemplo de python-stdnum
+# (2850590940090418135201). Un número mal copiado acá no es un detalle: va impreso en el QR de
+# la cotización, y el cliente transfiere a una cuenta que no existe —o que es de otro—.
+_PESOS_CBU_BLOQUE_1 = (7, 1, 3, 9, 7, 1, 3)
+_PESOS_CBU_BLOQUE_2 = (3, 9, 7, 1, 3, 9, 7, 1, 3, 9, 7, 1, 3)
+
+
+def _digito_del_cbu(digitos, pesos):
+    return (10 - sum(int(d) * p for d, p in zip(digitos, pesos)) % 10) % 10
+
+
+def problema_del_cbu(cbu):
+    """'' si el CBU/CVU está bien o no se cargó; si no, qué tiene. Ver _PESOS_CBU_BLOQUE_1."""
+    limpio = re.sub(r"[\s.\-]", "", str(cbu or ""))
+    if not limpio:
+        return ""
+    if not limpio.isdigit() or len(limpio) != 22:
+        _cuantos = len(re.sub(r"\D", "", limpio))
+        return f"un CBU o CVU tiene 22 números y este tiene {_cuantos}"
+    if (_digito_del_cbu(limpio[:7], _PESOS_CBU_BLOQUE_1) != int(limpio[7])
+            or _digito_del_cbu(limpio[8:21], _PESOS_CBU_BLOQUE_2) != int(limpio[21])):
+        return "los dígitos verificadores no dan: hay un número mal copiado"
+    return ""
+
+
 def guardar_alias_transferencia(nombre, alias, cbu, titular, alias_id=None, qr_real_bytes=None):
+    """Guarda adónde le transfieren al negocio. Solo administrador.
+
+    Es la cuenta que sale en el QR de cada cotización: quien la cambia decide adónde va la plata
+    de los clientes. Borrarla o sacarle el QR ya pedían la contraseña de administrador, pero
+    guardarla —cambiar el CBU o subir otro QR— no: lo podía hacer cualquier empleado."""
+    exigir_nivel("admin", "cambiar los datos de cobro")
+    _problema = problema_del_cbu(cbu)
+    if _problema:
+        raise ValueError(f"El CBU/CVU no se guardó: {_problema}.")
+    cbu = re.sub(r"[\s.\-]", "", str(cbu or ""))
     with db_lock:
         if alias_id:
             if qr_real_bytes is not None:
@@ -2753,12 +2791,14 @@ def obtener_qr_real(alias_id):
 
 
 def eliminar_qr_real(alias_id):
+    exigir_nivel("admin", "sacar el QR de cobro")
     with db_lock:
         c.execute("UPDATE alias_transferencia SET qr_real_blob = NULL WHERE id = ?", (alias_id,))
         conn.commit()
 
 
 def eliminar_alias_transferencia(alias_id):
+    exigir_nivel("admin", "eliminar los datos de cobro")
     c.execute("SELECT nombre, alias, cbu, titular, qr_real_blob FROM alias_transferencia WHERE id = ?", (alias_id,))
     fila = c.fetchone()
     if fila:

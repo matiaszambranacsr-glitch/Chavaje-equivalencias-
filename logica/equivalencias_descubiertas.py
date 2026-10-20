@@ -4939,6 +4939,8 @@ def confirmar_candidata(codigo_clean, producto_id, codigo_original, marca_para_n
     """Convierte una sugerencia en una equivalencia real. Si el código que pedía el cliente
     todavía no existe como producto (caso típico: un código de fábrica que no tenés cargado),
     lo crea con la marca elegida y recién ahí los vincula."""
+    # Como aprobar desde la cola: lo hace un empleado, no cualquiera con el link.
+    exigir_nivel("empleado", "confirmar una equivalencia sugerida")
     # Todo o nada: puede crear un producto nuevo, vincularlo y sacar el descarte. Cortado en el
     # medio deja un producto inventado sin ningún vínculo, que después aparece en las búsquedas.
     with db_lock, transaccion():
