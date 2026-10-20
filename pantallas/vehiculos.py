@@ -23,7 +23,8 @@ if pagina == PAGINAS[6]:
             "**estimado** con lo que anda ese auto por día (entre que se cargó la ficha y la última "
             "vez que se anotó el km). Aparecen las piezas que ya pasaron su vida útil o que llegan "
             "en los próximos 30 días. Sin ritmo conocido, las que están a menos del 15% de su "
-            "vida útil."
+            "vida útil. Si la pieza tiene «cada cuántos meses», vence también por fecha: lo que "
+            "llegue primero."
         )
         if not _avisar:
             st.caption("Nadie por ahora. Hace falta que los autos tengan km cargado y piezas con "
@@ -40,14 +41,16 @@ if pagina == PAGINAS[6]:
     with st.expander(f"⚠️ Vehículos con mantenimiento atrasado ({len(vehiculos_atrasados)})"):
         if not vehiculos_atrasados:
             st.caption(
-                "Ninguno detectado por ahora (o todavía no cargaste km de registro/actual en los vehículos)."
+                "Ninguno por ahora: no hay piezas a las que ya les haya tocado el cambio (por km o "
+                "por tiempo, desde el último cambio anotado)."
             )
         else:
-            st.caption("Ordenados por urgencia — el que tiene la pieza más atrasada aparece primero.")
+            st.caption("El que tiene más piezas vencidas, primero. Misma cuenta que «A quién "
+                       "avisar» y que el link del cliente.")
             for item in vehiculos_atrasados:
                 v = item["vehiculo"]
                 nombre_auto = f"{v.get('marca_auto') or ''} {v.get('modelo_auto') or ''}".strip()
-                piezas_txt = ", ".join(f"{p['Pieza']} (x{p['Atraso estimado']})" for p in item["piezas_atrasadas"])
+                piezas_txt = ", ".join(f"{p['Pieza']} ({p['Le falta']})" for p in item["piezas_atrasadas"])
                 colv1, colv2 = st.columns([4, 1])
                 colv1.write(f"**{v['patente']}** {nombre_auto} — {v.get('cliente_nombre') or 'sin nombre'}")
                 colv1.caption(f"Atrasado: {piezas_txt}")
@@ -240,14 +243,23 @@ if pagina == PAGINAS[6]:
                     avisar("success", "Km de registro actualizado.")
                     st.rerun()
 
-            alertas = []
-            if km_actual is not None:
-                alertas = calcular_alertas_vehiculo(vehiculo["id"], km_actual)
+            # CUÁNTO LE FALTA A CADA PIEZA, con la misma cuenta que ve el cliente en su link y
+            # que usa «A quién avisar»: por km o por tiempo, lo que llegue primero (ver
+            # estado_de_cada_pieza()). Acá había otra, vieja —solo km, «85% de la vida útil»—,
+            # y la ficha decía una cosa y el link del cliente otra.
+            _estado_piezas = estado_de_cada_pieza(vehiculo)
+            alertas = [p for p in _estado_piezas if p["_toca"]]
+            if _estado_piezas:
                 if alertas:
-                    st.warning(f"⚠️ {len(alertas)} pieza(s) cerca de cumplir su vida útil estimada:")
-                    st.dataframe(alertas, width="stretch", hide_index=True)
+                    st.warning(f"⚠️ {len(alertas)} pieza(s) a las que ya les toca o les toca "
+                               "pronto:")
                 else:
                     st.info("Sin alertas de mantenimiento por ahora.")
+                st.dataframe([{k: v for k, v in p.items() if not k.startswith("_")}
+                              for p in _estado_piezas], width="stretch", hide_index=True,
+                             column_order=["Estado", "Pieza", "Le falta", "Marca", "Código",
+                                           "Km al cambiarla", "Cuándo", "Vida útil (km)",
+                                           "Cada (meses)"])
 
             st.markdown("---")
             st.markdown("**➕ Agregar pieza al historial**")
@@ -255,7 +267,7 @@ if pagina == PAGINAS[6]:
                 cp1, cp2 = st.columns(2)
                 desc_pieza = cp1.text_input("Descripción de la pieza", placeholder="Ej: Kit de distribución")
                 marca_pieza = cp2.text_input("Marca de la pieza", placeholder="Ej: SKF")
-                cp3, cp4, cp5 = st.columns(3)
+                cp3, cp4, cp5, cp6 = cols(4)
                 codigo_pieza = cp3.text_input(
                     "Código (opcional)",
                     help="Si está en el catálogo, la pieza queda atada al producto: se ven su "
@@ -265,6 +277,11 @@ if pagina == PAGINAS[6]:
                 vida_util = cp5.number_input(
                     "Vida útil estimada (km, opcional)", min_value=0, step=5000, value=0,
                     help="Vacía, se usa la que anotaste otras veces para esa misma pieza.")
+                vida_meses = cp6.number_input(
+                    "Cada cuántos meses (opcional)", min_value=0, max_value=240, step=6, value=0,
+                    help="Lo que vence por tiempo aunque el auto ande poco (el aceite, el líquido "
+                         "de frenos): vence lo que llegue primero, los km o los meses. Vacío, se "
+                         "usa el que anotaste otras veces para esa pieza.")
                 nota_pieza = st.text_input("Nota (opcional)")
                 agregar_pieza = st.form_submit_button("➕ Agregar al historial", type="primary")
             if agregar_pieza:
@@ -273,13 +290,16 @@ if pagina == PAGINAS[6]:
                 else:
                     _anotada = agregar_pieza_historial(
                         vehiculo["id"], desc_pieza, marca_pieza, codigo_pieza,
-                        km_instalacion or None, vida_util or None, nota_pieza)
+                        km_instalacion or None, vida_util or None, nota_pieza,
+                        vida_util_meses=vida_meses or None)
                     avisar("success", "Pieza agregada al historial."
                            + (" Quedó atada al producto del catálogo (precio y stock de hoy)."
                               if _anotada["producto_id"] else "")
                            + (f" Sin vida útil: se usó la de las otras veces, "
                               f"{miles(_anotada['vida_util'])} km."
-                              if _anotada["vida_de_otras_veces"] else ""))
+                              if _anotada["vida_de_otras_veces"] else "")
+                           + (f" Sin meses: se usaron los de las otras veces, cada "
+                              f"{_anotada['meses']}." if _anotada["meses_de_otras_veces"] else ""))
                     st.rerun()
 
             st.markdown("---")
@@ -291,18 +311,17 @@ if pagina == PAGINAS[6]:
                 st.caption("Todavía no hay piezas registradas para este vehículo.")
 
             st.markdown("---")
-            st.markdown("**🔧 Proyección de mantenimiento**")
+            st.markdown("**📊 Cuántas veces se cambió cada pieza**")
+            # ES HISTORIA, NO UN AVISO. Esta cuenta (cambios hechos contra los que corresponden
+            # a los km totales) era la que mandaba «tenés atrasado el cambio de…» por WhatsApp:
+            # con un filtro cambiado la semana pasada, decía «atrasado» si antes se había
+            # salteado uno. Si hoy le toca o no, lo dice «cuánto le falta» de arriba.
             ayuda(
-                "Compara, para cada tipo de pieza con vida útil cargada, cuántas veces se cambió "
-                "realmente contra cuántas veces debería haberse cambiado según los km recorridos "
-                "totales desde que se registró el vehículo."
+                "Compara, para cada pieza con vida útil cargada, cuántas veces se cambió contra "
+                "cuántas corresponden a los km recorridos desde que se registró el vehículo. Sirve "
+                "para ver cambios salteados o que no se anotaron. **No dice si hoy le toca**: eso "
+                "está arriba, en «cuánto le falta a cada pieza»."
             )
-            proyeccion = []
-            # 'atrasadas' también se inicializa acá aunque más abajo siempre se asigne en las dos
-            # ramas del else: si km_recorridos es None, nunca se asignaba, y el único motivo por
-            # el que no explotaba es que "if proyeccion and atrasadas" corta antes de leerla.
-            # Alcanzaba con dar vuelta esa condición para romper la ficha del vehículo.
-            atrasadas = []
             if km_calc["km_recorridos"] is None:
                 st.info(
                     "Para calcular esto hace falta el km de registro y el km actual del vehículo "
@@ -311,13 +330,9 @@ if pagina == PAGINAS[6]:
             else:
                 proyeccion = calcular_proyeccion_mantenimiento(vehiculo["id"], km_calc["km_recorridos"])
                 if proyeccion:
-                    atrasadas = [p for p in proyeccion if p["Atraso estimado"] > 0]
-                    if atrasadas:
-                        st.warning(f"⚠️ {len(atrasadas)} pieza(s) con cambios atrasados según el kilometraje:")
                     st.dataframe(proyeccion, width="stretch", hide_index=True)
                 else:
                     st.caption("Todavía no hay piezas con vida útil cargada para proyectar.")
-                    atrasadas = []
 
             st.markdown("---")
             st.markdown("**📤 Compartir con el cliente**")
@@ -354,28 +369,31 @@ if pagina == PAGINAS[6]:
                 st.download_button(
                     "📄 Descargar ficha en PDF",
                     data=pdf_con_cache("ficha_vehiculo", generar_pdf_ficha_vehiculo,
-                                        vehiculo, km_calc, alertas, proyeccion, historial_vehiculo,
+                                        vehiculo, km_calc, alertas, historial_vehiculo,
                                         link_cliente),
                     file_name=f"ficha_{vehiculo['patente']}.pdf",
                     mime="application/pdf",
                     width="stretch"
                 )
             with col_wa:
-                if proyeccion and atrasadas:
+                # Lo que le toca según «cuánto le falta a cada pieza» (ver alertas, arriba): lo
+                # mismo que el cliente ve en su link.
+                if alertas:
                     nombre_cliente = vehiculo.get("cliente_nombre") or ""
                     nombre_auto_msg = f"{vehiculo.get('marca_auto') or ''} {vehiculo.get('modelo_auto') or ''}".strip()
-                    piezas_atrasadas_txt = ", ".join(p["Pieza"] for p in atrasadas)
+                    piezas_atrasadas_txt = ", ".join(f"{p['Pieza']} ({p['Le falta']})"
+                                                     for p in alertas)
                     mensaje_wa = (
-                        f"Hola {nombre_cliente}! Te escribimos de El Chavo. Revisando el kilometraje de tu "
-                        f"{nombre_auto_msg} ({vehiculo['patente']}), notamos que tenés atrasado el cambio de: "
-                        f"{piezas_atrasadas_txt}. ¿Coordinamos un turno? Acá ves cuánto le falta "
-                        f"a cada cosa: {link_cliente}"
-                    ).strip()
+                        f"Hola {nombre_cliente}! Te escribimos de El Chavo. Revisando lo que le "
+                        f"pusimos a tu {nombre_auto_msg} ({vehiculo['patente']}), le toca o le "
+                        f"toca pronto: {piezas_atrasadas_txt}. ¿Coordinamos un turno? Acá ves "
+                        f"cuánto le falta a cada cosa: {link_cliente}"
+                    ).replace("Hola !", "Hola!").strip()
                     tel_limpio = re.sub(r"\D", "", vehiculo.get("cliente_telefono") or "")
                     url_wa_vehiculo = (
                         f"https://wa.me/{tel_limpio}" if tel_limpio else "https://wa.me/"
                     ) + "?text=" + quote(mensaje_wa)
-                    st.link_button("📲 Avisar atraso por WhatsApp", url_wa_vehiculo,
+                    st.link_button("📲 Avisarle lo que le toca por WhatsApp", url_wa_vehiculo,
                                     type="primary", width="stretch")
                 else:
-                    st.caption("Sin atrasos detectados todavía para avisar por WhatsApp.")
+                    st.caption("No le toca nada todavía: no hay qué avisarle.")

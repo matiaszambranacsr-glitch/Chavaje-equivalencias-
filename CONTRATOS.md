@@ -196,6 +196,9 @@ Las pruebas se corren como dice el README, en «Antes de subir un cambio».
 | El link del cliente anda aunque la patente esté frenada por intentos con los 4 números, y el km que escribe el cliente no se guarda | `abrir_ficha_publica()`, `resumen_publico_del_auto()` | `pruebas_de_los_cambios.py` (9l ter) |
 | Un invitado (y un mecánico externo) no puede anotar ni cambiar nada desde las secciones abiertas: cada función que escribe pide el permiso adentro | `exigir_nivel()`, `solo_mirar()` | `pruebas_de_los_cambios.py` (5), `auditar.py` (control 16) |
 | La patente se encuentra como esté escrita, y guardarla de otra forma no duplica la ficha | `buscar_vehiculo()`, `get_or_create_vehiculo()`, `guardar_numero_de_motor()` | `pruebas_de_los_cambios.py` (9l ter) |
+| Una pieza vence por km o por tiempo, lo que llegue primero, desde su último cambio (aunque se haya anotado sin km) | `estado_de_cada_pieza()`, `a_quien_avisar()`, `_sumar_meses()` | `pruebas_de_los_cambios.py` (9l ter) |
+| Los atrasados, el aviso por WhatsApp y el PDF de la ficha usan la misma cuenta que el link del cliente | `listar_vehiculos_atrasados()`, `generar_pdf_ficha_vehiculo()` | `pruebas_de_los_cambios.py` (9l ter) |
+| Descartar una lista entera de pendientes es de administrador; los pares elegidos, de empleado | `rechazar_pendientes()` | `pruebas_de_los_cambios.py` (5) |
 
 ## Sin prueba automática todavía
 

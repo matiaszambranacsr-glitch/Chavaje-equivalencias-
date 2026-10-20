@@ -1004,6 +1004,10 @@ def _esquema_vehiculos_y_mecanico(c):
         vida_util_km INTEGER,
         nota TEXT
     )""")
+    # Cada cuántos meses se cambia, además de los km: vence lo que llegue primero. Ver
+    # estado_de_cada_pieza().
+    if "vida_util_meses" not in [f[1] for f in c.execute("PRAGMA table_info(historial_piezas)")]:
+        c.execute("ALTER TABLE historial_piezas ADD COLUMN vida_util_meses INTEGER")
 
     # Auditoría diaria de stock por muestreo aleatorio
     c.execute("""CREATE TABLE IF NOT EXISTS auditoria_diaria (

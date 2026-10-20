@@ -419,23 +419,25 @@ def producto_del_codigo_anotado(codigo, marca=""):
     return (filas[0]["id"], filas[0]["nombre"]) if len(filas) == 1 else (None, "")
 
 
-def vida_util_de_las_otras_veces(descripcion, vehiculo_id=None):
+def vida_util_de_las_otras_veces(descripcion, vehiculo_id=None, columna="vida_util_km"):
     """La vida útil que se anotó otras veces para esa pieza, o None: la última de este auto, y
     si no, la que más se usó en los demás. Así una pieza anotada sin vida útil igual dice
-    cuánto le falta."""
+    cuánto le falta. `columna`: «vida_util_km» o «vida_util_meses»."""
+    if columna not in ("vida_util_km", "vida_util_meses"):
+        raise ValueError(columna)
     clave = " ".join(str(descripcion or "").upper().split())
     if not clave:
         return None
-    c.execute("""SELECT descripcion_pieza, vida_util_km, vehiculo_id FROM historial_piezas
-                 WHERE vida_util_km > 0 ORDER BY id DESC LIMIT 20000""")
+    c.execute(f"""SELECT descripcion_pieza, {columna} AS vida, vehiculo_id FROM historial_piezas
+                  WHERE {columna} > 0 ORDER BY id DESC LIMIT 20000""")
     de_este, de_otros = None, {}
     for f in c.fetchall():
         if " ".join((f["descripcion_pieza"] or "").upper().split()) != clave:
             continue
         if vehiculo_id is not None and f["vehiculo_id"] == vehiculo_id:
-            de_este = de_este or f["vida_util_km"]
+            de_este = de_este or f["vida"]
         else:
-            de_otros[f["vida_util_km"]] = de_otros.get(f["vida_util_km"], 0) + 1
+            de_otros[f["vida"]] = de_otros.get(f["vida"], 0) + 1
     if de_este:
         return de_este
     # La que más se usó; si empatan, la más reciente (el diccionario guarda el orden, y el
@@ -443,9 +445,10 @@ def vida_util_de_las_otras_veces(descripcion, vehiculo_id=None):
     return max(de_otros, key=lambda v: de_otros[v]) if de_otros else None
 
 
-def agregar_pieza_historial(vehiculo_id, descripcion, marca_pieza, codigo_pieza, km_instalacion, vida_util_km, nota):
+def agregar_pieza_historial(vehiculo_id, descripcion, marca_pieza, codigo_pieza, km_instalacion, vida_util_km, nota,
+                            vida_util_meses=None):
     """Anota una pieza en la ficha del auto. Devuelve {"producto_id", "marca", "vida_util",
-    "vida_de_otras_veces"} con lo que completó solo.
+    "vida_de_otras_veces", "meses", "meses_de_otras_veces"} con lo que completó solo.
 
     LA PIEZA QUEDA ATADA AL CATÁLOGO si el código está y no hay duda de cuál es (ver
     producto_del_codigo_anotado()). Nunca se guardaba el producto: la columna estaba, y la
@@ -455,26 +458,33 @@ def agregar_pieza_historial(vehiculo_id, descripcion, marca_pieza, codigo_pieza,
     exigir_nivel("empleado", "anotar una pieza en la ficha de un vehículo")
     producto_id, marca_del_catalogo = producto_del_codigo_anotado(codigo_pieza, marca_pieza)
     marca_pieza = marca_pieza.strip() or marca_del_catalogo
-    vida_de_otras_veces = False
+    vida_de_otras_veces = meses_de_otras_veces = False
     if not vida_util_km:
         vida_util_km = vida_util_de_las_otras_veces(descripcion, vehiculo_id)
         vida_de_otras_veces = bool(vida_util_km)
+    if not vida_util_meses:
+        vida_util_meses = vida_util_de_las_otras_veces(descripcion, vehiculo_id,
+                                                       "vida_util_meses")
+        meses_de_otras_veces = bool(vida_util_meses)
     with db_lock:
         c.execute(
             "INSERT INTO historial_piezas (vehiculo_id, producto_id, descripcion_pieza, marca_pieza, "
-            "codigo_pieza, km_instalacion, vida_util_km, nota) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            "codigo_pieza, km_instalacion, vida_util_km, vida_util_meses, nota) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (vehiculo_id, producto_id, descripcion.strip(), marca_pieza, codigo_pieza.strip(),
-             km_instalacion, vida_util_km, nota.strip())
+             km_instalacion, vida_util_km, vida_util_meses, nota.strip())
         )
         conn.commit()
     return {"producto_id": producto_id, "marca": marca_pieza, "vida_util": vida_util_km,
-            "vida_de_otras_veces": vida_de_otras_veces}
+            "vida_de_otras_veces": vida_de_otras_veces, "meses": vida_util_meses,
+            "meses_de_otras_veces": meses_de_otras_veces}
 
 
 def listar_historial_vehiculo(vehiculo_id):
     c.execute("""SELECT id AS "ID", descripcion_pieza AS "Pieza", marca_pieza AS "Marca",
                  codigo_pieza AS "Código", km_instalacion AS "Km instalación",
-                 vida_util_km AS "Vida útil (km)", fecha_instalacion AS "Fecha", nota AS "Nota"
+                 vida_util_km AS "Vida útil (km)", vida_util_meses AS "Cada (meses)",
+                 fecha_instalacion AS "Fecha", nota AS "Nota"
                  FROM historial_piezas WHERE vehiculo_id = ? ORDER BY fecha_instalacion DESC""", (vehiculo_id,))
     return filas_a_listas(c)
 
@@ -505,25 +515,23 @@ def calcular_proyeccion_mantenimiento(vehiculo_id, km_recorridos):
 
 
 def listar_vehiculos_atrasados():
-    """Recorre todos los vehículos con km cargado y arma un ranking de los que tienen
-    mantenimiento atrasado, ordenados por urgencia (el atraso más grande primero)."""
+    """Los autos con alguna pieza a la que YA le toca (🔴), el más atrasado primero. [dict con
+    «vehiculo» y «piezas_atrasadas» (filas de estado_de_cada_pieza())].
+
+    Contaba cuántas veces se cambió cada pieza contra cuántas debería según los km totales: un
+    filtro cambiado la semana pasada salía «atrasado» si antes se había salteado un cambio, y
+    «Avisar atraso» le escribía eso al cliente. Ahora es la misma cuenta del link del cliente y
+    de «A quién avisar»: desde el último cambio, por km o por tiempo."""
     c.execute("""SELECT id, patente, cliente_nombre, cliente_telefono, marca_auto, modelo_auto,
-                 km_registro, km_actual, created_at FROM vehiculos""")
-    vehiculos = [dict(r) for r in c.fetchall()]
+                        km_registro, km_actual, km_actualizado_fecha, created_at FROM vehiculos
+                 WHERE id IN (SELECT vehiculo_id FROM historial_piezas)""")
     resultado = []
-    for v in vehiculos:
-        km_calc = calcular_km_recorridos(v)
-        if km_calc["km_recorridos"] is None:
-            continue
-        proyeccion = calcular_proyeccion_mantenimiento(v["id"], km_calc["km_recorridos"])
-        atrasadas = [p for p in proyeccion if p["Atraso estimado"] > 0]
+    for v in [dict(r) for r in c.fetchall()]:
+        atrasadas = [p for p in estado_de_cada_pieza(v) if p["Estado"].startswith("🔴")]
         if atrasadas:
-            resultado.append({
-                "vehiculo": v,
-                "piezas_atrasadas": atrasadas,
-                "atraso_max": max(p["Atraso estimado"] for p in atrasadas),
-            })
-    resultado.sort(key=lambda r: -r["atraso_max"])
+            resultado.append({"vehiculo": v, "piezas_atrasadas": atrasadas})
+    # El que tiene más piezas vencidas, primero.
+    resultado.sort(key=lambda r: (-len(r["piezas_atrasadas"]), r["vehiculo"]["patente"]))
     return resultado
 
 
@@ -556,6 +564,18 @@ def km_estimado_hoy(vehiculo):
     return round(km_act + por_dia * max((datetime.now() - hasta).days, 0)), por_dia
 
 
+def _sumar_meses(fecha, meses):
+    """La misma fecha, `meses` después. El 31 de un mes que no lo tiene cae en el último día."""
+    total = fecha.month - 1 + int(meses)
+    anio, mes = fecha.year + total // 12, total % 12 + 1
+    ultimo = (datetime(anio + (mes == 12), mes % 12 + 1, 1) - timedelta(days=1)).day
+    return fecha.replace(year=anio, month=mes, day=min(fecha.day, ultimo))
+
+
+# Del más urgente al que no se sabe: así se ordenan las piezas del auto.
+_ORDEN_DEL_ESTADO = {"🔴": 0, "🟡": 1, "🟢": 2, "⚪": 3}
+
+
 def estado_de_cada_pieza(vehiculo, dias_de_aviso=30, km_hoy=None):
     """Cuánto le falta a cada pieza del auto, una fila por pieza. [dict], lo más urgente primero.
 
@@ -565,73 +585,110 @@ def estado_de_cada_pieza(vehiculo, dias_de_aviso=30, km_hoy=None):
     anotó la vida útil, vale la de la vez anterior: es la misma pieza. Es la misma cuenta para
     el negocio (a_quien_avisar()) y para el cliente (resumen_publico_del_auto()).
 
-    «Le toca pronto» es dentro de `dias_de_aviso` días al ritmo del auto, o sin ritmo conocido,
-    a menos del 15% de su vida útil. Con km_hoy, la cuenta va con ese y no con el estimado."""
+    POR KM O POR TIEMPO, LO QUE LLEGUE PRIMERO. Un auto que anda poco igual tiene que cambiar el
+    aceite al año: con los km solos nunca le tocaba. Si la pieza tiene «cada cuántos meses»,
+    vence también por fecha, contada desde que se cambió.
+
+    «Le toca pronto» es dentro de `dias_de_aviso` días: al ritmo del auto, o por la fecha. Sin
+    ritmo conocido, a menos del 15% de su vida útil en km. Con km_hoy, la cuenta va con ese y no
+    con el estimado."""
     km_estimado, por_dia = km_estimado_hoy(vehiculo)
     km_hoy = km_estimado if km_hoy is None else km_hoy
+    hoy = datetime.now()
     c.execute("""SELECT descripcion_pieza, marca_pieza, codigo_pieza, km_instalacion,
-                        vida_util_km, fecha_instalacion
+                        vida_util_km, vida_util_meses, fecha_instalacion
                  FROM historial_piezas WHERE vehiculo_id = ?
-                 ORDER BY km_instalacion IS NULL, km_instalacion DESC, id DESC""",
+                 ORDER BY km_instalacion IS NULL, km_instalacion DESC,
+                          fecha_instalacion DESC, id DESC""",
               (vehiculo["id"],))
-    por_pieza = {}
+    grupos = {}
     for fila in c.fetchall():
-        clave = " ".join((fila["descripcion_pieza"] or "").upper().split())
-        if clave not in por_pieza:
-            por_pieza[clave] = {"ultima": fila, "vida": None}
-        if por_pieza[clave]["vida"] is None and (fila["vida_util_km"] or 0) > 0:
-            por_pieza[clave]["vida"] = fila["vida_util_km"]
+        grupos.setdefault(" ".join((fila["descripcion_pieza"] or "").upper().split()),
+                          []).append(fila)
     salida = []
-    for datos in por_pieza.values():
-        p, vida = datos["ultima"], datos["vida"]
+    for lista in grupos.values():
+        # EL ÚLTIMO CAMBIO: el de más km. Pero uno anotado sin km y con fecha más nueva es
+        # posterior: tomando el de km, se avisaba de un cambio que ya se había hecho.
+        con_km = [f for f in lista if f["km_instalacion"] is not None]
+        sin_km = [f for f in lista if f["km_instalacion"] is None]
+        p = con_km[0] if con_km else sin_km[0]
+        if con_km and sin_km and ((_fecha_de(sin_km[0]["fecha_instalacion"]) or datetime.min)
+                                  > (_fecha_de(con_km[0]["fecha_instalacion"]) or datetime.min)):
+            p = sin_km[0]
+        # La vida útil y los meses, del último que los tenga anotados.
+        orden = [p] + [f for f in lista if f is not p]
+        vida = next((f["vida_util_km"] for f in orden if (f["vida_util_km"] or 0) > 0), None)
+        meses = next((f["vida_util_meses"] for f in orden if (f["vida_util_meses"] or 0) > 0),
+                     None)
         km_inst = p["km_instalacion"]
+        cambiada = _fecha_de(p["fecha_instalacion"])
         fila = {"Pieza": p["descripcion_pieza"], "Marca": p["marca_pieza"] or "",
                 "Código": p["codigo_pieza"] or "", "Km al cambiarla": km_inst,
                 "Cuándo": str(p["fecha_instalacion"] or "")[:10], "Vida útil (km)": vida,
-                "_faltan": None, "_dias": None, "_margen": None}
-        if km_hoy is None or km_inst is None or not vida:
+                "Cada (meses)": meses,
+                "_faltan": None, "_dias": None, "_margen": None, "_vence": None,
+                "_dias_fecha": None, "_toca": False}
+        textos = []
+        if km_hoy is not None and km_inst is not None and vida:
+            faltan = km_inst + vida - km_hoy
+            fila["_faltan"] = faltan
+            fila["_margen"] = (por_dia * dias_de_aviso) if por_dia else 0.15 * vida
+            if por_dia and faltan > 0:
+                fila["_dias"] = max(round(faltan / por_dia), 1)
+            textos.append((0 if faltan <= 0 else fila["_dias"] or 10**6,
+                           f"ya pasó {miles(-faltan)} km" if faltan <= 0 else
+                           f"{miles(faltan)} km" + (f" (unos {fila['_dias']} días)"
+                                                    if fila["_dias"] else "")))
+        if cambiada and meses:
+            fila["_vence"] = _sumar_meses(cambiada, meses)
+            fila["_dias_fecha"] = (fila["_vence"].date() - hoy.date()).days
+            textos.append((max(fila["_dias_fecha"], 0),
+                           f"venció el {fila['_vence']:%d/%m/%Y}" if fila["_dias_fecha"] <= 0
+                           else f"por tiempo, hasta el {fila['_vence']:%d/%m/%Y}"))
+        if not textos:
             fila["Estado"] = "⚪ Sin datos"
             fila["Le falta"] = ("falta la vida útil" if not vida else
                                 "falta el km del auto" if km_hoy is None else
                                 "falta el km al cambiarla")
             salida.append(fila)
             continue
-        faltan = km_inst + vida - km_hoy
-        margen = (por_dia * dias_de_aviso) if por_dia else 0.15 * vida
-        fila["_faltan"], fila["_margen"] = faltan, margen
-        if por_dia and faltan > 0:
-            fila["_dias"] = max(round(faltan / por_dia), 1)
-        if faltan <= 0:
-            fila["Estado"] = "🔴 Ya le toca"
-            fila["Le falta"] = f"ya pasó {miles(-faltan)} km"
-        else:
-            fila["Estado"] = "🟡 Le toca pronto" if faltan <= margen else "🟢 Bien"
-            fila["Le falta"] = (f"{miles(faltan)} km" + (f" (unos {fila['_dias']} días)"
-                                                         if fila["_dias"] else ""))
+        paso = ((fila["_faltan"] is not None and fila["_faltan"] <= 0)
+                or (fila["_dias_fecha"] is not None and fila["_dias_fecha"] <= 0))
+        cerca = ((fila["_faltan"] is not None and fila["_faltan"] <= fila["_margen"])
+                 or (fila["_dias_fecha"] is not None and fila["_dias_fecha"] <= dias_de_aviso))
+        fila["_toca"] = paso or cerca
+        fila["Estado"] = ("🔴 Ya le toca" if paso else "🟡 Le toca pronto" if cerca else "🟢 Bien")
+        # Lo que vence primero, adelante.
+        fila["Le falta"] = " · ".join(t for _, t in sorted(textos, key=lambda x: x[0]))
         salida.append(fila)
-    salida.sort(key=lambda x: (x["_faltan"] is None, x["_faltan"] if x["_faltan"] is not None else 0))
+    salida.sort(key=lambda x: (_ORDEN_DEL_ESTADO[x["Estado"][:1]],
+                               min([d for d in (x["_dias"], x["_dias_fecha"]) if d is not None],
+                                   default=10**6),
+                               x["_faltan"] if x["_faltan"] is not None else 10**9))
     return salida
 
 
 def a_quien_avisar(dias_de_aviso=30, limite=100):
     """Los clientes a los que ya les toca —o les va a tocar en `dias_de_aviso` días— cambiar una
-    pieza, con el mensaje de WhatsApp armado. [dict]. La cuenta de cada pieza es la de
-    estado_de_cada_pieza()."""
+    pieza, por km o por tiempo, con el mensaje de WhatsApp armado. [dict]. La cuenta de cada
+    pieza es la de estado_de_cada_pieza()."""
     c.execute("""SELECT id, patente, cliente_nombre, cliente_telefono, marca_auto, modelo_auto,
                         km_registro, km_actual, km_actualizado_fecha, created_at FROM vehiculos
-                 WHERE km_actual IS NOT NULL""")
+                 WHERE id IN (SELECT vehiculo_id FROM historial_piezas)""")
     vehiculos = [dict(r) for r in c.fetchall()]
     salida = []
     for v in vehiculos:
         km_hoy, por_dia = km_estimado_hoy(v)
-        if km_hoy is None:
-            continue
         for p in estado_de_cada_pieza(v, dias_de_aviso):
-            faltan_km = p["_faltan"]
-            if faltan_km is None or faltan_km > p["_margen"]:
+            if not p["_toca"]:
                 continue
-            if faltan_km <= 0:
+            faltan_km = p["_faltan"]
+            if faltan_km is not None and faltan_km <= 0:
                 cuando = f"ya pasó {miles(-faltan_km)} km"
+            elif p["_dias_fecha"] is not None and p["_dias_fecha"] <= 0:
+                cuando = f"venció el {p['_vence']:%d/%m/%Y}"
+            elif p["_dias_fecha"] is not None and p["_dias_fecha"] <= dias_de_aviso:
+                cuando = f"vence el {p['_vence']:%d/%m/%Y}"
             elif p["_dias"]:
                 cuando = f"en unos {p['_dias']} días"
             else:
@@ -639,41 +696,25 @@ def a_quien_avisar(dias_de_aviso=30, limite=100):
             auto = f"{v.get('marca_auto') or ''} {v.get('modelo_auto') or ''}".strip()
             # Con el link de su auto: ahí ve qué le toca y cuánto le falta a lo demás.
             mensaje = (f"Hola {v.get('cliente_nombre') or ''}! Te escribimos de El Chavo. "
-                       f"Según el kilometraje de tu {auto} ({v['patente']}), le toca cambiar: "
+                       f"Según lo que anotamos de tu {auto} ({v['patente']}), le toca cambiar: "
                        f"{p['Pieza']}. ¿Coordinamos? Acá ves cuánto le falta a cada cosa: "
                        f"{link_publico_del_auto(v['id'])}").replace("Hola !", "Hola!")
             tel = re.sub(r"\D", "", v.get("cliente_telefono") or "")
+            # Lo más urgente primero: lo vencido (por km o por fecha) adelante.
+            _urgencia = min([d for d in (
+                0 if faltan_km is not None and faltan_km <= 0 else p["_dias"],
+                p["_dias_fecha"]) if d is not None], default=10**6)
             salida.append({
                 "Patente": v["patente"], "Cliente": v.get("cliente_nombre") or "",
                 "Auto": auto, "Pieza": p["Pieza"],
                 "Código": p["Código"], "Le toca": cuando,
-                "Km hoy (estimado)": km_hoy, "_faltan": faltan_km,
+                "Km hoy (estimado)": km_hoy, "_faltan": faltan_km, "_urgencia": _urgencia,
                 "_whatsapp": (f"https://wa.me/{tel}" if tel else "https://wa.me/")
                              + "?text=" + quote(mensaje),
                 "_vehiculo": v["patente"]})
-    salida.sort(key=lambda x: x["_faltan"])
+    salida.sort(key=lambda x: (x["_urgencia"],
+                               x["_faltan"] if x["_faltan"] is not None else 10**9))
     return salida[:limite]
-
-
-def calcular_alertas_vehiculo(vehiculo_id, km_actual):
-    """Piezas que ya recorrieron el 85% o más de su vida útil estimada."""
-    c.execute("""SELECT descripcion_pieza, marca_pieza, codigo_pieza, km_instalacion, vida_util_km
-                 FROM historial_piezas
-                 WHERE vehiculo_id = ? AND vida_util_km IS NOT NULL AND km_instalacion IS NOT NULL""",
-              (vehiculo_id,))
-    alertas = []
-    for row in c.fetchall():
-        recorridos = km_actual - row["km_instalacion"]
-        if recorridos < 0 or not row["vida_util_km"]:
-            continue
-        porcentaje = recorridos / row["vida_util_km"]
-        if porcentaje >= 0.85:
-            alertas.append({
-                "Pieza": row["descripcion_pieza"], "Marca": row["marca_pieza"], "Código": row["codigo_pieza"],
-                "Km recorridos": recorridos, "Vida útil estimada": row["vida_util_km"],
-                "% consumido": round(porcentaje * 100)
-            })
-    return sorted(alertas, key=lambda a: -a["% consumido"])
 
 
 # ============================================================
@@ -826,12 +867,14 @@ def resumen_publico_del_auto(vehiculo, km_de_hoy=None):
                     if (x or "").strip())
     estado = estado_de_cada_pieza(vehiculo, km_hoy=km_de_hoy)
     proximo = next(({"Pieza": p["Pieza"], "Estado": p["Estado"], "Le falta": p["Le falta"]}
-                    for p in estado if p["_faltan"] is not None), None)
+                    for p in estado if not p["Estado"].startswith("⚪")), None)
     piezas = [{k: v for k, v in p.items() if not k.startswith("_")} for p in estado]
     for p in piezas:
         p["Cuándo"] = _dia_mes_anio(p["Cuándo"])
         p["Km al cambiarla"] = miles(p["Km al cambiarla"]) if p["Km al cambiarla"] is not None else ""
         p["Vida útil (km)"] = miles(p["Vida útil (km)"]) if p["Vida útil (km)"] else ""
+        # Texto, como las otras columnas: números y vacíos mezclados no se pueden dibujar.
+        p["Cada (meses)"] = str(p["Cada (meses)"]) if p["Cada (meses)"] else ""
     c.execute("""SELECT fecha_instalacion, descripcion_pieza, marca_pieza, codigo_pieza,
                         km_instalacion
                  FROM historial_piezas WHERE vehiculo_id = ?

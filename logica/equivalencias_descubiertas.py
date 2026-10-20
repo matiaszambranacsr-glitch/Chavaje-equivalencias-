@@ -4859,6 +4859,15 @@ def aprobar_pendientes(lote, solo_estos_pares=None, en_bloque=False):
 
 
 def rechazar_pendientes(lote, solo_estos_pares=None, motivo=None):
+    """Descarta vínculos pendientes: los pares dados, o sin pares la lista ENTERA.
+
+    La lista entera, solo administrador: es descartar a ciegas lo que nadie miró —miles de
+    vínculos de una— y no tenía ningún control adentro (aprobar sí). Recorriendo la app como
+    operador, «🚫 Descartar toda esta lista» y «🧹 Descartar todo» borraban los pendientes de
+    todas las listas de un toque."""
+    exigir_nivel("admin" if solo_estos_pares is None else "empleado",
+                 "descartar una lista entera de vínculos pendientes" if solo_estos_pares is None
+                 else "descartar vínculos pendientes")
     with db_lock:
         if solo_estos_pares is None:
             # Hay que leer los pares ANTES de borrarlos, si no queda sin registrar el rechazo

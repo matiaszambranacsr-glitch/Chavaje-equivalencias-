@@ -12,6 +12,7 @@ CAMBIOS» en logica/base.py.
 Corre en una carpeta temporal: nunca toca la base de trabajo.
 """
 import json
+from datetime import date, datetime, timedelta
 import os
 import shutil
 import sys
@@ -129,7 +130,11 @@ def probar(L):
                      ("cambiar el coeficiente de una lista", ns["guardar_coeficiente_de_lista"],
                       (999999, 1.0, False)),
                      ("activar o desactivar un taller", ns["activar_desactivar_mecanico"],
-                      (999999, True)))
+                      (999999, True)),
+                     # La lista entera de pendientes, sin mirarla: la descartaba cualquier
+                     # operador de un toque (ver rechazar_pendientes()).
+                     ("descartar una lista entera de pendientes", ns["rechazar_pendientes"],
+                      ("NO-EXISTE", None)))
         _de_empleado = (("aprobar", ns["aprobar_pendientes"], ("NO-EXISTE", [])),
                         ("registrar un pago", ns["registrar_pago_de_cuenta"], (999999, 0, "Efectivo")),
                         ("un remito", ns["aplicar_carga_remito"], ([],)),
@@ -140,7 +145,9 @@ def probar(L):
                         ("el número de motor", ns["guardar_numero_de_motor"], ("AB123CD", "M1")),
                         ("el link de una marca", ns["guardar_plantilla_de_ficha"], (999999, None)),
                         ("confirmar una equivalencia sugerida", ns["confirmar_candidata"],
-                         ("NOEXISTE", 999999, "NOEXISTE")))
+                         ("NOEXISTE", 999999, "NOEXISTE")),
+                        ("descartar pendientes elegidos", ns["rechazar_pendientes"],
+                         ("NO-EXISTE", [])))
         for nivel, entran in (("", ()), ("operador", ("empleado",)),
                               ("admin", ("empleado", "admin"))):
             g["_nivel_de_quien_esta_adentro"] = lambda n=nivel: n
@@ -938,7 +945,9 @@ def probar(L):
     _todos_bloqueados, _ = ns["abrir_ficha_publica"]("AB123CD", ultimos_del_telefono="8901")
     esperar("con teléfono corto solo entra con el link; con 60 intentos en la hora, nadie",
             (_tel_corto, _todos_bloqueados), (None, None))
-    _pdf_ficha = ns["generar_pdf_ficha_vehiculo"](_v, {}, [], [], [], _nuevo)
+    # Con las alertas de estado_de_cada_pieza(): la misma cuenta que el link del cliente.
+    _pdf_ficha = ns["generar_pdf_ficha_vehiculo"](_v, {}, [p for p in _estado if p["_toca"]],
+                                                  [], _nuevo)
     esperar("la ficha en PDF lleva el link tocable",
             f"/URI ({_nuevo})".encode() in _pdf_ficha, True)
     # Anotar una pieza: queda atada al producto del catálogo si el código no deja dudas, y sin
@@ -954,8 +963,70 @@ def probar(L):
             (_con_codigo, _otra_marca["producto_id"], _otra_marca["vida_util"],
              sorted((f["Código"], f["Marca"]) for f in _por_motor if f["Código"])),
             ({"producto_id": b, "marca": "PRUEBA", "vida_util": 10000,
-              "vida_de_otras_veces": True}, None, None,
+              "vida_de_otras_veces": True, "meses": None, "meses_de_otras_veces": False}, None, None,
              [("P1", "OTRA MARCA"), ("P1", "PRUEBA")]))
+    # POR KM O POR TIEMPO (ver estado_de_cada_pieza()): un auto que anda poco y sin km anotado
+    # igual vence por fecha. El aceite cambiado hace 13 meses con «cada 12» ya venció aunque le
+    # falten km; el líquido de frenos vence dentro de 20 días.
+    c.execute("INSERT INTO vehiculos (patente, cliente_telefono) VALUES ('AG 100 HH', '1155550000')")
+    _quieto = c.lastrowid
+    _hoy = datetime.now()
+    for _pieza, _hace_dias, _km, _vida, _meses in (
+            ("Aceite", 396, 1000, 10000, 12), ("Líquido de frenos", 710, None, None, 24),
+            ("Correa", 30, None, None, 48), ("Escobillas", 10, None, None, None)):
+        c.execute("""INSERT INTO historial_piezas (vehiculo_id, descripcion_pieza, km_instalacion,
+                     vida_util_km, vida_util_meses, fecha_instalacion)
+                     VALUES (?, ?, ?, ?, ?, ?)""",
+                  (_quieto, _pieza, _km, _vida, _meses,
+                   (_hoy - timedelta(days=_hace_dias)).strftime("%Y-%m-%d %H:%M:%S")))
+    conn.commit()
+    _por_tiempo = ns["estado_de_cada_pieza"](dict(c.execute(
+        "SELECT * FROM vehiculos WHERE id = ?", (_quieto,)).fetchone()))
+    _avisos_quieto = [x for x in ns["a_quien_avisar"](30) if x["Patente"] == "AG 100 HH"]
+    # «Vehículos con mantenimiento atrasado» con la misma cuenta: solo lo que YA le toca (🔴).
+    # Contaba cambios hechos contra los km totales y decía «atrasado» aunque recién se hubiera
+    # cambiado (ver listar_vehiculos_atrasados()).
+    esperar("los atrasados: lo que ya le toca, por km o por tiempo",
+            {x["vehiculo"]["patente"]: [p["Pieza"] for p in x["piezas_atrasadas"]]
+             for x in ns["listar_vehiculos_atrasados"]()
+             if x["vehiculo"]["patente"] in ("AG 100 HH", "AB 123 CD")},
+            {"AG 100 HH": ["Aceite"], "AB 123 CD": ["Correa de distribución"]})
+    esperar("por tiempo: vencido, por vencer y bien, aunque el auto no tenga km",
+            ([(p["Pieza"], p["Estado"], p["Le falta"].split(" el ")[0]) for p in _por_tiempo],
+             sorted((x["Pieza"], x["Le toca"].split(" el ")[0]) for x in _avisos_quieto)),
+            ([("Aceite", "🔴 Ya le toca", "venció"),
+              ("Líquido de frenos", "🟡 Le toca pronto", "por tiempo, hasta"),
+              ("Correa", "🟢 Bien", "por tiempo, hasta"),
+              ("Escobillas", "⚪ Sin datos", "falta la vida útil")],
+             [("Aceite", "venció"), ("Líquido de frenos", "vence")]))
+    esperar("sumar meses: el 31 cae en el último día del mes, y pasa de año",
+            (ns["_sumar_meses"](datetime(2025, 1, 31), 1).date(),
+             ns["_sumar_meses"](datetime(2024, 1, 31), 1).date(),
+             ns["_sumar_meses"](datetime(2025, 11, 15), 3).date()),
+            (date(2025, 2, 28), date(2024, 2, 29), date(2026, 2, 15)))
+    # Cada columna de la página del cliente de un solo tipo: con meses en unas piezas y en otras
+    # no, números y vacíos mezclados no se pueden dibujar (pyarrow: «Expected bytes, got a
+    # 'int' object») y la tabla no salía.
+    _res_quieto = ns["resumen_publico_del_auto"](dict(c.execute(
+        "SELECT * FROM vehiculos WHERE id = ?", (_quieto,)).fetchone()))
+    esperar("las tablas del cliente, cada columna de un solo tipo",
+            [k for tabla in (_res_quieto["piezas"], _res_quieto["historial"]) for k in tabla[0]
+             if len({type(f[k]) for f in tabla if f[k] is not None}) > 1], [])
+    # Cambiado de nuevo hace 10 días, anotado sin km ni meses: es el último cambio aunque el
+    # anterior tenga km, y vale el «cada 12» de la vez anterior, contado desde este.
+    c.execute("""INSERT INTO historial_piezas (vehiculo_id, descripcion_pieza, fecha_instalacion)
+                 VALUES (?, 'ACEITE', ?)""",
+              (_quieto, (_hoy - timedelta(days=10)).strftime("%Y-%m-%d %H:%M:%S")))
+    _aceite = next(p for p in ns["estado_de_cada_pieza"](dict(c.execute(
+        "SELECT * FROM vehiculos WHERE id = ?", (_quieto,)).fetchone())) if p["Pieza"].upper() == "ACEITE")
+    esperar("el último cambio, sin km ni meses: es el último, con los meses de la vez anterior",
+            (_aceite["Pieza"], _aceite["Estado"], _aceite["Cada (meses)"]),
+            ("ACEITE", "🟢 Bien", 12))
+    _sin_meses = ns["agregar_pieza_historial"](_quieto, "aceite", "", "", None, None, "")
+    esperar("sin meses, los de las otras veces", (_sin_meses["meses"],
+                                                  _sin_meses["meses_de_otras_veces"]), (12, True))
+    c.execute("DELETE FROM historial_piezas WHERE vehiculo_id = ?", (_quieto,))
+    c.execute("DELETE FROM vehiculos WHERE id = ?", (_quieto,))
     c.execute("DELETE FROM intentos_consulta_publica")
     c.execute("DELETE FROM historial_piezas WHERE vehiculo_id = ?", (_auto,))
     c.execute("DELETE FROM vehiculos WHERE patente IN ('AB 123 CD', 'AC456DE')")

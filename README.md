@@ -6480,6 +6480,24 @@ el botón**:
 - «🔌 Probar las fuentes de afuera» suma la Central de Deudores (con el CUIT de la AFIP, nunca el
   de un cliente) y la inflación de respaldo.
 
+## 🧑‍🔧 Lo que puede hacer un operador
+
+Se recorrieron como **operador** las secciones con contraseña (Vehículos, Depósito, Vincular, Cargar Excel, las 7 de Estadísticas y Marcas), tocando cada botón con un registro de lo que se escribe en la base. Las de Productos y Mantenimiento tienen botones que recorren el catálogo entero y tardan minutos cada uno: esas se revisaron leyendo el código, botón por botón. Casi todo lo que hace es trabajo de empleado (anotar, mandar a revisión, cerrar una reserva, el conteo de stock), y la sección de copias ya pedía la contraseña de administrador entera.
+
+| Qué | Qué pasaba | Qué se hizo |
+|---|---|---|
+| **«🧹 Descartar TODO lo pendiente»** (📊 Estadísticas → 🔗 Equivalencias sugeridas) | Con tildar una casilla, cualquier operador borraba los vínculos pendientes de **todas** las listas: hoy, **7.827**. | Pide la contraseña de administrador. |
+| **«🚫 Descartar toda esta lista» y «✅ Aprobar sin muestra»** | Una lista entera, a ciegas, de un toque. Descartar no tenía ningún control adentro (aprobar sí). | Las dos piden la de administrador. `rechazar_pendientes()` lo mira adentro: la lista entera, administrador; los pares elegidos (después de una muestra, los 🔴 del análisis), empleado. Probado en pantalla con la base real: como operador no se descarta nada; con la contraseña de administrador, sí. |
+
+## 📅 Lo que vence por tiempo, aunque el auto ande poco
+
+| Qué | Qué pasaba | Qué se hizo |
+|---|---|---|
+| **«Cuánto le falta» miraba solo los km** | Un auto que anda poco nunca llegaba a los 10.000 km del aceite, y la app decía «🟢 Bien» años seguidos. Lo mismo el líquido de frenos o una correa: se cambian por tiempo aunque no se usen. | Cada pieza puede llevar **«cada cuántos meses»** además de los km: vence **lo que llegue primero**. La ficha, «A quién avisar» (ahora también con autos sin km anotado), la página del cliente y su «Lo próximo» lo dicen: «venció el 12/09/2026» o «7.889 km (unos 71 días) · por tiempo, hasta el 20/10/2027». Si se deja vacío, se usa el que se anotó otras veces para esa pieza. |
+| **El último cambio, cuando se anotó sin km** | Se tomaba como último el cambio de más km. Uno anotado después sin km (no se sabía el kilometraje ese día) quedaba atrás, y la app avisaba de un cambio que ya estaba hecho. | Si el anotado sin km es más nuevo por fecha, ese es el último. La vida útil y los meses salen del último que los tenga anotados. |
+| **La ficha decía una cosa y el cliente veía otra** | La ficha del vehículo tenía sus propias alertas («85% de la vida útil», solo km). «⚠️ Vehículos con mantenimiento atrasado», «📲 Avisar atraso por WhatsApp» y el PDF usaban otra cuenta: cuántas veces se cambió cada pieza contra cuántas corresponden a los km totales. Con un filtro cambiado la semana pasada, si antes se había salteado un cambio, le escribía al cliente «tenés atrasado el cambio de filtro». | Todo usa la misma cuenta que el link del cliente y «A quién avisar»: desde el último cambio, por km o por tiempo. La ficha muestra la tabla de «cuánto le falta» con 🔴🟡🟢. El WhatsApp dice qué le toca y cuánto («Correa (ya pasó 1.111 km)»). El PDF lista lo que le toca. La cuenta vieja queda como historia («📊 Cuántas veces se cambió cada pieza»), con la aclaración de que no dice si hoy le toca. |
+| **La tabla del cliente con meses** | Con meses en unas piezas y en otras no, la columna mezclaba números y vacíos y la tabla no se podía dibujar (pyarrow: «Expected bytes, got a 'int' object»). Apareció probando la pantalla. | Va como texto, como las demás. La prueba mira que cada columna de las tablas del cliente sea de un solo tipo. |
+
 ## 🔒 El invitado mira, no toca
 
 El Buscador, la Lista WhatsApp y el Modo Mecánico —con «🔤 Por patente»— siguen abiertos para **mirar** sin contraseña. **Anotar o cambiar** algo pide entrar con contraseña (operador o administrador).

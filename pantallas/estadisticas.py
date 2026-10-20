@@ -1044,7 +1044,11 @@ a traer solas desde Administrar → Mantenimiento.
                 )
                 confirmar_todo = st.checkbox("Confirmo que quiero descartar todo lo pendiente",
                                               key="confirmar_descartar_todo")
-                if st.button("🧹 Descartar todo", disabled=not confirmar_todo, type="primary"):
+                # Con candado de administrador: ver rechazar_pendientes().
+                if candado("descartar todo lo pendiente",
+                           st.button("🧹 Descartar todo", disabled=not confirmar_todo,
+                                     type="primary"),
+                           "descartar_todo_lo_pendiente"):
                     borrados = 0
                     for l in lotes_pendientes:
                         borrados += rechazar_pendientes(l["lote"], None)
@@ -1612,17 +1616,31 @@ a traer solas desde Administrar → Mantenimiento.
                 st.caption("Aprobar sin muestra es aprobar a ciegas: nadie sabe cuántos están "
                            "mal. Conviene usar la muestra de arriba.")
                 bl1, bl2 = st.columns(2)
-                bl1.button(f"✅ Aprobar los {len(limpias)} sin alarmas, sin muestra",
-                            key=f"apr_limpias_{lote_info['lote']}",
-                            disabled=not limpias,
-                            on_click=aprobar_pendientes, args=(lote_info["lote"], pares_limpios),
-                            kwargs={"en_bloque": True},
-                            help="Las piezas de seguridad y lo que une redes grandes no entran: "
-                                 "quedan para mirarlos de a uno.")
-                bl2.button("🚫 Descartar toda esta lista",
-                            key=f"rec_lote_{lote_info['lote']}",
-                            on_click=rechazar_pendientes, args=(lote_info["lote"], None),
-                            help="Los productos y precios quedan; solo se descartan los vínculos")
+                # A CIEGAS, SOLO ADMINISTRADOR: aprobar o descartar la lista entera sin mirar
+                # una muestra. Lo podía hacer cualquier operador de un toque (ver
+                # rechazar_pendientes()).
+                if candado("aprobar una lista entera sin muestra",
+                           bl1.button(f"✅ Aprobar los {len(limpias)} sin alarmas, sin muestra",
+                                      key=f"apr_limpias_{lote_info['lote']}",
+                                      disabled=not limpias,
+                                      help="Las piezas de seguridad y lo que une redes grandes no "
+                                           "entran: quedan para mirarlos de a uno. Pide la "
+                                           "contraseña de administrador."),
+                           f"aprobar_sin_muestra_{lote_info['lote']}"):
+                    _n_sin = aprobar_pendientes(lote_info["lote"], pares_limpios, en_bloque=True)
+                    invalidar_salud()
+                    avisar("success", f"Se aprobaron {miles(_n_sin)} vínculo(s) sin muestra.")
+                    st.rerun()
+                if candado("descartar una lista entera",
+                           bl2.button("🚫 Descartar toda esta lista",
+                                      key=f"rec_lote_{lote_info['lote']}",
+                                      help="Los productos y precios quedan; solo se descartan "
+                                           "los vínculos. Pide la contraseña de administrador."),
+                           f"descartar_lista_{lote_info['lote']}"):
+                    _n_desc = rechazar_pendientes(lote_info["lote"], None)
+                    invalidar_salud()
+                    avisar("success", f"Se descartaron {miles(_n_desc)} vínculo(s).")
+                    st.rerun()
 
             # Descartar en bloque los que el análisis ya dio por perdidos. Sin esto, la app
             # marcaba cientos como «casi seguro mal» y después te los hacía resolver de a uno,

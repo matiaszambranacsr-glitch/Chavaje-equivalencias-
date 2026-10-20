@@ -639,7 +639,7 @@ def generar_pdf_cotizacion(lista_productos, incluir_precio=True, incluir_stock=F
     return bytes(pdf.output())
 
 
-def generar_pdf_ficha_vehiculo(vehiculo, km_calc, alertas, proyeccion, historial, link_cliente=None):
+def generar_pdf_ficha_vehiculo(vehiculo, km_calc, alertas, historial, link_cliente=None):
     """Genera un PDF con el resumen de la ficha digital del vehículo, para entregarle al cliente.
     Con link_cliente, al final va el QR que abre su auto en el celular: ver
     link_publico_del_auto()."""
@@ -682,20 +682,13 @@ def generar_pdf_ficha_vehiculo(vehiculo, km_calc, alertas, proyeccion, historial
 
     if alertas:
         pdf.set_font("Helvetica", "B", 12)
-        pdf.cell(0, 7, "Alertas de mantenimiento", new_x="LMARGIN", new_y="NEXT")
+        pdf.cell(0, 7, "Le toca o le toca pronto", new_x="LMARGIN", new_y="NEXT")
         pdf.set_font("Helvetica", "", 10)
+        # Las filas de estado_de_cada_pieza() a las que les toca: la misma cuenta del link del
+        # cliente y de «A quién avisar».
         for a in alertas:
-            linea = f"- {a['Pieza']} ({a.get('Marca') or 's/marca'}): {a['% consumido']}% de su vida util consumida"
-            pdf.multi_cell(0, 6, limpiar(linea), new_x="LMARGIN", new_y="NEXT")
-        pdf.ln(2)
-
-    if proyeccion:
-        pdf.set_font("Helvetica", "B", 12)
-        pdf.cell(0, 7, "Proyeccion de mantenimiento", new_x="LMARGIN", new_y="NEXT")
-        pdf.set_font("Helvetica", "", 10)
-        for p in proyeccion:
-            linea = (f"- {p['Pieza']}: cambiada {p['Veces cambiada']} vez/veces, "
-                      f"deberia {p['Veces que debería (según km)']} - atraso: {p['Atraso estimado']}")
+            linea = (f"- {a['Pieza']} ({a.get('Marca') or 's/marca'}): "
+                     f"{str(a.get('Estado', ''))[2:]}, {a.get('Le falta', '')}")
             pdf.multi_cell(0, 6, limpiar(linea), new_x="LMARGIN", new_y="NEXT")
         pdf.ln(2)
 

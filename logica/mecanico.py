@@ -2152,11 +2152,13 @@ def mostrar_consulta_publica_del_auto(patente="", clave=""):
     if resumen["piezas"]:
         st.dataframe(resumen["piezas"], width="stretch", hide_index=True,
                      column_order=["Estado", "Pieza", "Le falta", "Marca", "Código",
-                                   "Km al cambiarla", "Cuándo", "Vida útil (km)"])
+                                   "Km al cambiarla", "Cuándo", "Vida útil (km)", "Cada (meses)"])
         if resumen["le_toca"]:
             st.info("🔴 y 🟡: ya le toca o le toca pronto. Escribinos y coordinamos.")
-        st.caption("Es una estimación con el km anotado y lo que anda tu auto. La vida útil de "
-                   "cada pieza depende del uso: ante la duda, que lo revise un mecánico.")
+        st.caption("Es una estimación con el km anotado y lo que anda tu auto, o con la fecha "
+                   "del cambio si la pieza también vence por tiempo: lo que llegue primero. La "
+                   "vida útil de cada pieza depende del uso: ante la duda, que lo revise un "
+                   "mecánico.")
     else:
         st.caption("Todavía no hay piezas anotadas para tu auto.")
 
