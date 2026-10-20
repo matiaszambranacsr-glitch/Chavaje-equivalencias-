@@ -310,12 +310,41 @@ if pagina == PAGINAS[6]:
 
             st.markdown("---")
             st.markdown("**📤 Compartir con el cliente**")
+            # EL LINK DEL CLIENTE: con eso ve su auto desde el celular, sin entrar a la app ni ver
+            # nada más. Ver «LO QUE VE EL CLIENTE DE SU AUTO» en logica/vehiculos.py.
+            link_cliente = link_publico_del_auto(vehiculo["id"])
+            with st.expander("🔗 Link para que el cliente vea su auto"):
+                ayuda(
+                    "Con este link el cliente ve, desde el celular y sin entrar a la app, qué le "
+                    "pusieron a su auto y cuánto le falta a cada cosa. No ve su nombre ni su "
+                    "teléfono, ni las notas. Va también en el QR de la ficha en PDF. Sin el link "
+                    "puede entrar con la patente y los últimos 4 números del teléfono de la ficha."
+                )
+                st.code(link_cliente, language=None)
+                _ql, _qb = st.columns([1, 2])
+                _ql.image(generar_qr_bytes(link_cliente), width=150)
+                _tel_cliente = re.sub(r"\D", "", vehiculo.get("cliente_telefono") or "")
+                _msj_link = (f"Hola {vehiculo.get('cliente_nombre') or ''}! Acá podés ver lo que "
+                             f"le pusimos a tu auto ({vehiculo['patente']}) y cuánto le falta a "
+                             f"cada cosa: {link_cliente}").replace("Hola !", "Hola!")
+                _qb.link_button("📲 Mandárselo por WhatsApp",
+                                (f"https://wa.me/{_tel_cliente}" if _tel_cliente else "https://wa.me/")
+                                + "?text=" + quote(_msj_link), width="stretch")
+                _qb.caption(f"Para un cartel en el mostrador: {link_general_de_consulta()} "
+                            "(pide la patente y los últimos 4 números del teléfono).")
+                if _qb.button("🔄 Cambiar el link", key="cambiar_link_cliente",
+                              help="El link anterior deja de andar. Para cuando se lo mandaste a "
+                                   "quien no era, o el auto cambió de dueño."):
+                    link_publico_del_auto(vehiculo["id"], nueva=True)
+                    avisar("success", "Listo: el link anterior ya no anda.")
+                    st.rerun()
             col_pdf, col_wa = st.columns(2)
             with col_pdf:
                 st.download_button(
                     "📄 Descargar ficha en PDF",
                     data=pdf_con_cache("ficha_vehiculo", generar_pdf_ficha_vehiculo,
-                                        vehiculo, km_calc, alertas, proyeccion, historial_vehiculo),
+                                        vehiculo, km_calc, alertas, proyeccion, historial_vehiculo,
+                                        link_cliente),
                     file_name=f"ficha_{vehiculo['patente']}.pdf",
                     mime="application/pdf",
                     width="stretch"

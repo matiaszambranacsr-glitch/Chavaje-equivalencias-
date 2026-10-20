@@ -189,6 +189,9 @@ Las pruebas se corren como dice el README, en «Antes de subir un cambio».
 | Lo que borra y vuelve a escribir en una tabla va en una transacción | — | `auditar.py` (control 15) |
 | Los datos de cobro (alias, CBU, QR) los cambia solo un administrador, y el CBU/CVU cierra con sus dígitos verificadores | `guardar_alias_transferencia()`, `problema_del_cbu()` | `pruebas_de_los_cambios.py` (5, 9l) |
 | El coeficiente de una lista, activar un taller y confirmar una sugerencia miran el permiso adentro | `guardar_coeficiente_de_lista()`, `activar_desactivar_mecanico()`, `confirmar_candidata()` | `pruebas_de_los_cambios.py` (5, 9m) |
+| El QR de cobro abre el link de pago si hay, el link se controla (https, sin usuario adentro) y va al final del mensaje | `problema_del_link_de_pago()`, `texto_para_pagar()`, `generar_pdf_cotizacion()` | `pruebas_de_los_cambios.py` (9l bis) |
+| El cliente ve su auto solo con la clave del link o los 4 números del teléfono, sin datos personales y con tope de intentos | `abrir_ficha_publica()`, `resumen_publico_del_auto()`, `link_publico_del_auto()` | `pruebas_de_los_cambios.py` (9l ter) |
+| Cuánto le falta a cada pieza sale de la última vez que se cambió, igual para el negocio y para el cliente | `estado_de_cada_pieza()`, `a_quien_avisar()` | `pruebas_de_los_cambios.py` (9l ter) |
 
 ## Sin prueba automática todavía
 

@@ -2469,8 +2469,10 @@ def restaurar_de_papelera(item_id):
                                   (datos["disparador"], item))
                 elif tipo == "alias":
                     c.execute(
-                        "INSERT INTO alias_transferencia (nombre, alias, cbu, titular) VALUES (?, ?, ?, ?)",
-                        (datos["nombre"], datos["alias"], datos["cbu"], datos["titular"])
+                        """INSERT INTO alias_transferencia (nombre, alias, cbu, titular, link_pago)
+                           VALUES (?, ?, ?, ?, ?)""",
+                        (datos["nombre"], datos["alias"], datos["cbu"], datos["titular"],
+                         datos.get("link_pago"))
                     )
                 elif tipo == "producto":
                     # Los de antes de este cambio no traen vínculos ni historia: se restauran igual.
@@ -2719,7 +2721,7 @@ def to_excel_bytes(filas, columnas=None):
 # ============================================================================================
 def listar_alias_transferencia():
     c.execute("""SELECT id AS "ID", nombre AS "Nombre", alias AS "Alias",
-                 cbu AS "CBU", titular AS "Titular",
+                 cbu AS "CBU", titular AS "Titular", COALESCE(link_pago, '') AS "Link",
                  CASE WHEN qr_real_blob IS NOT NULL THEN 1 ELSE 0 END AS "TieneQrReal"
                  FROM alias_transferencia ORDER BY nombre""")
     return filas_a_listas(c)
@@ -2753,35 +2755,85 @@ def problema_del_cbu(cbu):
     return ""
 
 
-def guardar_alias_transferencia(nombre, alias, cbu, titular, alias_id=None, qr_real_bytes=None):
+# EL QR QUE ABRE LA PÁGINA PARA PAGAR. Con el alias y el CBU solos no hay un link que abra la
+# transferencia en cualquier banco: el QR de texto muestra los datos y el cliente los copia. Lo
+# que sí abre la página de pago es el QR que da la billetera o el banco (se sube como imagen) o
+# un link de pago: el «link de pago» de Mercado Pago, el de MODO o el del banco. Ese link va en
+# el QR de la cotización y en el mensaje de WhatsApp, y al escanearlo con la cámara se abre ahí.
+# Como lo que se escanea es adónde va la plata, se controla como el CBU.
+LARGO_MAXIMO_DEL_LINK_DE_PAGO = 500
+
+
+def problema_del_link_de_pago(link):
+    """'' si el link está bien o no se cargó; si no, qué tiene. Ver «EL QR QUE ABRE LA PÁGINA»."""
+    from urllib.parse import urlsplit
+    link = str(link or "").strip()
+    if not link:
+        return ""
+    if re.search(r"\s", link):
+        return "tiene espacios en el medio"
+    if len(link) > LARGO_MAXIMO_DEL_LINK_DE_PAGO:
+        return f"tiene más de {LARGO_MAXIMO_DEL_LINK_DE_PAGO} letras: el QR no se leería bien"
+    try:
+        partes = urlsplit(link)
+        sitio = partes.hostname or ""
+    except ValueError:
+        return "no es una dirección de internet"
+    if partes.scheme.lower() != "https":
+        return "tiene que empezar con https://"
+    # «https://mercadopago.com.ar@otro.sitio» abre otro.sitio: lo de antes de la @ es un usuario.
+    if partes.username is not None or partes.password is not None:
+        return f"lleva un usuario adentro y en realidad abre {sitio or 'otra página'}"
+    if "." not in sitio:
+        return "no tiene el nombre de la página (ej: link.mercadopago.com.ar)"
+    return ""
+
+
+def sitio_del_link_de_pago(link):
+    """La página que abre el link, para mostrarla antes de guardarlo: '' si no hay o está mal."""
+    from urllib.parse import urlsplit
+    if not str(link or "").strip() or problema_del_link_de_pago(link):
+        return ""
+    return urlsplit(str(link).strip()).hostname
+
+
+def guardar_alias_transferencia(nombre, alias, cbu, titular, alias_id=None, qr_real_bytes=None,
+                                link_pago=None):
     """Guarda adónde le transfieren al negocio. Solo administrador.
 
     Es la cuenta que sale en el QR de cada cotización: quien la cambia decide adónde va la plata
     de los clientes. Borrarla o sacarle el QR ya pedían la contraseña de administrador, pero
-    guardarla —cambiar el CBU o subir otro QR— no: lo podía hacer cualquier empleado."""
+    guardarla —cambiar el CBU o subir otro QR— no: lo podía hacer cualquier empleado.
+    link_pago=None deja el que tenía; '' lo saca."""
     exigir_nivel("admin", "cambiar los datos de cobro")
     _problema = problema_del_cbu(cbu)
     if _problema:
         raise ValueError(f"El CBU/CVU no se guardó: {_problema}.")
+    _problema = problema_del_link_de_pago(link_pago)
+    if _problema:
+        raise ValueError(f"El link de pago no se guardó: {_problema}.")
     cbu = re.sub(r"[\s.\-]", "", str(cbu or ""))
+    _link = None if link_pago is None else (str(link_pago).strip() or None)
     with db_lock:
-        if alias_id:
-            if qr_real_bytes is not None:
-                c.execute(
-                    "UPDATE alias_transferencia SET nombre=?, alias=?, cbu=?, titular=?, qr_real_blob=? WHERE id=?",
-                    (nombre.strip(), alias.strip(), cbu.strip(), titular.strip(), qr_real_bytes, alias_id)
-                )
-            else:
+        with transaccion():
+            if alias_id:
                 c.execute(
                     "UPDATE alias_transferencia SET nombre=?, alias=?, cbu=?, titular=? WHERE id=?",
                     (nombre.strip(), alias.strip(), cbu.strip(), titular.strip(), alias_id)
                 )
-        else:
-            c.execute(
-                "INSERT INTO alias_transferencia (nombre, alias, cbu, titular, qr_real_blob) VALUES (?, ?, ?, ?, ?)",
-                (nombre.strip(), alias.strip(), cbu.strip(), titular.strip(), qr_real_bytes)
-            )
-        conn.commit()
+                if qr_real_bytes is not None:
+                    c.execute("UPDATE alias_transferencia SET qr_real_blob=? WHERE id=?",
+                              (qr_real_bytes, alias_id))
+                if link_pago is not None:
+                    c.execute("UPDATE alias_transferencia SET link_pago=? WHERE id=?",
+                              (_link, alias_id))
+            else:
+                c.execute(
+                    """INSERT INTO alias_transferencia (nombre, alias, cbu, titular, qr_real_blob,
+                       link_pago) VALUES (?, ?, ?, ?, ?, ?)""",
+                    (nombre.strip(), alias.strip(), cbu.strip(), titular.strip(), qr_real_bytes,
+                     _link)
+                )
 
 
 def obtener_qr_real(alias_id):
@@ -2799,11 +2851,12 @@ def eliminar_qr_real(alias_id):
 
 def eliminar_alias_transferencia(alias_id):
     exigir_nivel("admin", "eliminar los datos de cobro")
-    c.execute("SELECT nombre, alias, cbu, titular, qr_real_blob FROM alias_transferencia WHERE id = ?", (alias_id,))
+    c.execute("SELECT nombre, alias, cbu, titular, link_pago FROM alias_transferencia WHERE id = ?", (alias_id,))
     fila = c.fetchone()
     if fila:
         mover_a_papelera("alias", {
-            "nombre": fila["nombre"], "alias": fila["alias"], "cbu": fila["cbu"], "titular": fila["titular"]
+            "nombre": fila["nombre"], "alias": fila["alias"], "cbu": fila["cbu"], "titular": fila["titular"],
+            "link_pago": fila["link_pago"]
         })
         # El QR real (si tenía) no se puede guardar en la papelera como texto — si restaurás este
         # alias vas a tener que volver a subirlo.
@@ -2860,15 +2913,37 @@ def precio_para_el_cliente(fila, marcas_sin_precio):
     return f"${miles(fila['Precio'], 0)}"
 
 
+def texto_para_pagar(alias):
+    """Los renglones del mensaje con cómo pagar, para el alias elegido (una fila de
+    listar_alias_transferencia()). El link primero: en WhatsApp se toca y abre la página de
+    pago; el alias y el CBU, para el que prefiere transferir desde su banco."""
+    if not alias:
+        return ""
+    renglones = []
+    if alias.get("Link") and not problema_del_link_de_pago(alias["Link"]):
+        renglones.append(f"💳 *Para pagar:* {alias['Link'].strip()}")
+    datos = []
+    if (alias.get("Alias") or "").strip():
+        datos.append(f"alias *{alias['Alias'].strip()}*")
+    if (alias.get("CBU") or "").strip():
+        datos.append(f"CBU/CVU {alias['CBU'].strip()}")
+    if datos:
+        renglones.append("🏦 Transferencia: " + " · ".join(datos)
+                         + (f" (a nombre de {alias['Titular'].strip()})"
+                            if (alias.get("Titular") or "").strip() else ""))
+    return "\n".join(renglones)
+
+
 def armar_mensaje_de_cotizacion(lista, encabezado="", pie="", incluir_precio=True,
                                 incluir_stock=False, para=None, marcar_a_confirmar=True,
-                                marcas_sin_precio=None):
+                                marcas_sin_precio=None, cobro=None):
     """El texto de la cotización para WhatsApp, agrupado por lo que se pidió. `lista` es la de
     la pantalla: [{"codigo_buscado", "resultados": [filas con Marca, Codigo, Descripcion,
     Precio, Stock]}], ya filtrada con filas_para_cotizar(). Separado de la pantalla para poder
     probarlo y usarlo en otros lados (lo propuso una revisión con ChatGPT). Precios de lista:
     el descuento de una cuenta no va nunca acá. Con marcar_a_confirmar, lo que no está
-    confirmado dice «⚠️ a confirmar»: ver hay_que_confirmarla()."""
+    confirmado dice «⚠️ a confirmar»: ver hay_que_confirmarla(). Con `cobro` (un alias de
+    listar_alias_transferencia()), al final va cómo pagar: ver texto_para_pagar()."""
     if marcas_sin_precio is None:
         marcas_sin_precio = marcas_con_precios_fuera_de_escala() if incluir_precio else set()
     partes = [f"{encabezado}\n"] if encabezado else []
@@ -2892,6 +2967,8 @@ def armar_mensaje_de_cotizacion(lista, encabezado="", pie="", incluir_precio=Tru
                                               if es_pieza_de_seguridad(fila.get("Descripcion"))
                                               else "")
             partes.append(linea)
+    if texto_para_pagar(cobro):
+        partes.append("\n" + texto_para_pagar(cobro))
     if (pie or "").strip():
         partes.append(f"\n{pie}")
     return "\n".join(partes)

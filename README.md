@@ -6480,6 +6480,17 @@ el botón**:
 - «🔌 Probar las fuentes de afuera» suma la Central de Deudores (con el CUIT de la AFIP, nunca el
   de un cliente) y la inflación de respaldo.
 
+## 🚗 El QR que abre la página de pago, y el cliente que ve su auto con el link
+
+| Qué | Qué pasaba | Qué se hizo |
+|---|---|---|
+| **El QR de la cotización no abría nada** | Sin subir el QR del banco, el QR del PDF llevaba «Alias: … CBU: … Titular: …» como texto: al escanearlo se veían los datos y había que copiarlos. Con alias y CBU solos no hay un link que abra la transferencia en cualquier banco. | Cada alias puede llevar su **link de pago** (Mercado Pago: «Cobrar» → «Link de pago»; MODO o el banco, su link para cobrar). Si lo tiene, el QR del PDF es ese link: se escanea con la cámara y abre la página para pagar. En el PDF va además tocable, y **al final del mensaje de WhatsApp** va «💳 Para pagar: link» y el alias y el CBU (se puede destildar). El QR del banco subido como imagen sigue teniendo prioridad. |
+| **Un link de pago trucho** | — | Se controla como el CBU: tiene que ser https, sin espacios, con nombre de página, y sin usuario adentro (`https://mercadopago.com.ar@otro.sitio` abre *otro.sitio*). Antes de guardar, la pantalla muestra qué página va a abrir. Solo administrador, como el resto de los datos de cobro. |
+| **El cliente no veía su auto** | La ficha del vehículo pide clave de empleado (tiene nombres y teléfonos). | Cada ficha tiene un **link para el cliente** (🚗 Vehículos → la ficha → «🔗 Link para que el cliente vea su auto», con QR y botón para mandarlo por WhatsApp; también va en el QR de la ficha en PDF). Abre una página aparte, sin el ingreso ni las secciones: el auto, el km anotado y el **estimado de hoy**, **cuánto le falta a cada pieza** (🔴 ya le toca, 🟡 pronto, 🟢 bien) y todo lo que se le puso. Sin el link, `…/?auto=` pide la patente y los **últimos 4 números del teléfono** de la ficha (para un cartel en el mostrador). |
+| **Que no lo vea cualquiera** | La patente se lee en la calle. | La patente sola no alcanza: hace falta la clave del link o los 4 números. Nunca se muestra nombre, teléfono ni notas. Tope de **5 intentos fallidos por patente por día** y **60 en total por hora**; la respuesta es la misma si la patente no existe. Con menos de 6 números de teléfono cargados, ese auto entra solo con el link. «🔄 Cambiar el link» anula el anterior. |
+| **Cuánto le falta a cada pieza** | «A quién avisar» tomaba el km más alto **entre los cambios con vida útil cargada**: si el último cambio no la tenía, avisaba de un cambio viejo (un filtro cambiado a los 59.000 salía «ya pasó»). | Una sola cuenta para el negocio y para el cliente (`estado_de_cada_pieza()`): la última vez que se cambió cada pieza, y si esa vez no se anotó la vida útil, la de la vez anterior. |
+| **«Escribinos»** | No había dónde cargar el WhatsApp del negocio. | En Mensajería y cobros, con control del formato que pide wa.me (54 9 + característica sin 0 + número sin 15). En la página del cliente es el botón «📲 Escribinos por WhatsApp». |
+
 ## 💳 Adónde va la plata: el CBU de cobro y quién lo puede cambiar
 
 | Qué | Qué pasaba | Qué se hizo |

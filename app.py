@@ -97,6 +97,7 @@ específico, y las pantallas quedan todas al final:
     logica/vehiculos.py
         · FICHA DIGITAL DEL VEHÍCULO (patente + historial de piezas)
         · LA PATENTE ARGENTINA: QUÉ SE PUEDE LEER DE ELLA SIN CONSULTAR NADA
+        · LO QUE VE EL CLIENTE DE SU AUTO (sin entrar a la app)
     logica/piezas.py
         · SUSTITUCIÓN POR MEDIDAS MECÁNICAS (retenes, o'rings, bujes)
         · COMPARACIÓN VISUAL DE PIEZAS
@@ -112,6 +113,7 @@ específico, y las pantallas quedan todas al final:
         · CUENTA CORRIENTE DE LOS TALLERES
         · PASAR EL LÍMITE CON PERMISO
         · INTERÉS POR MORA (con la tasa del BCRA)
+        · LA CONSULTA DEL CLIENTE: su auto, sin entrar a la app
     logica/deposito.py
         · EL DEPÓSITO: DEL MOSTRADOR A LA CUENTA
         · CUÁNTO TARDA EL DEPÓSITO
@@ -293,6 +295,18 @@ try:
     vigilar_la_copia()
 except Exception as _err:
     anotar_error("vigilar_la_copia/arranque", _err)
+
+# EL LINK DEL CLIENTE («?auto=…»): ve su auto y nada más —ni el ingreso, ni las secciones—. Va
+# antes de todo lo de la sesión a propósito. Ver «LO QUE VE EL CLIENTE DE SU AUTO» en
+# logica/vehiculos.py.
+if "auto" in st.query_params:
+    try:
+        mostrar_consulta_publica_del_auto(st.query_params.get("auto", ""),
+                                          st.query_params.get("clave", ""))
+    except Exception as _err:
+        mostrar_error_inesperado("consulta del cliente", _err, "AUTO")
+    _actividad_del_mostrador()["termino"] = time.monotonic()      # ver ceder_al_mostrador()
+    st.stop()
 
 # LA SESIÓN CON CONTRASEÑA SE CIERRA SOLA si nadie la usa por un rato. En la computadora del
 # mostrador la pestaña queda abierta días: sin esto, la sesión de administrador que abrió el

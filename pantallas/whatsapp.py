@@ -79,9 +79,39 @@ if pagina == PAGINAS[5]:
         if cuenta_elegida() and st.checkbox(f"Poner «Para: {cuenta_elegida()['nombre']}» en el "
                                             "mensaje", value=True, key="wa_para_la_cuenta"):
             _para_wa = cuenta_elegida()["nombre"]
+        # Con qué cobrar: va en el QR del PDF y al final del mensaje. Se elige antes de armar el
+        # mensaje para que el link de pago llegue también por WhatsApp, donde se toca y abre.
+        alias_disponibles = listar_alias_transferencia()
+        alias_elegido = None
+        qr_real_para_pdf = None
+        if alias_disponibles:
+            opciones_alias = ["Sin QR de transferencia"] + [a["Nombre"] for a in alias_disponibles]
+            alias_sel = st.selectbox("Cómo te pagan (QR del PDF y final del mensaje):",
+                                     opciones_alias, key="alias_para_pdf")
+            if alias_sel != "Sin QR de transferencia":
+                alias_elegido = next(a for a in alias_disponibles if a["Nombre"] == alias_sel)
+                if alias_elegido["TieneQrReal"]:
+                    qr_real_para_pdf = obtener_qr_real(alias_elegido["ID"])
+                    st.caption("✅ Se va a usar el QR real que subiste para este alias.")
+                elif sitio_del_link_de_pago(alias_elegido.get("Link")):
+                    st.caption(f"✅ El QR abre tu link de pago ({sitio_del_link_de_pago(alias_elegido['Link'])}) "
+                               "y en el mensaje va el link para tocar.")
+                else:
+                    st.caption("ℹ️ Este alias no tiene QR real ni link de pago: el QR muestra el "
+                               "alias/CBU como texto. Para que abra la página de pago, cargá el link en "
+                               f"{miga_hasta('Mensajería y cobros')} → 💳 Alias para QR de transferencia.")
+        else:
+            st.caption(
+                "Todavía no cargaste ningún alias/CBU — podés hacerlo en "
+                f"**{miga_hasta('Mensajería y cobros')} → 💳 Alias para QR de transferencia** "
+                "si querés que la cotización incluya uno."
+            )
+        _cobro_en_el_mensaje = alias_elegido and st.checkbox(
+            "Poner cómo pagar al final del mensaje", value=True, key="wa_cobro_en_mensaje")
         mensaje = armar_mensaje_de_cotizacion(lista_cotizar, encabezado_wa, pie_wa,
                                               incluir_precio, incluir_stock, _para_wa,
-                                              marcar_a_confirmar)
+                                              marcar_a_confirmar,
+                                              cobro=alias_elegido if _cobro_en_el_mensaje else None)
 
         _fuera_wa = sorted({f.get("Marca") for item in lista_cotizar for f in item["resultados"]
                             if f.get("Precio")} & marcas_con_precios_fuera_de_escala())
@@ -91,26 +121,6 @@ if pagina == PAGINAS[5]:
                        "«precio a confirmar» hasta que se cargue el coeficiente (ver "
                        f"{miga_hasta('Marcas')} → 📏 Coeficiente de la lista).")
         st.text_area("Vista previa del mensaje:", value=mensaje, height=300)
-
-        alias_disponibles = listar_alias_transferencia()
-        alias_elegido = None
-        qr_real_para_pdf = None
-        if alias_disponibles:
-            opciones_alias = ["Sin QR de transferencia"] + [a["Nombre"] for a in alias_disponibles]
-            alias_sel = st.selectbox("Alias para el QR del PDF (opcional):", opciones_alias, key="alias_para_pdf")
-            if alias_sel != "Sin QR de transferencia":
-                alias_elegido = next(a for a in alias_disponibles if a["Nombre"] == alias_sel)
-                if alias_elegido["TieneQrReal"]:
-                    qr_real_para_pdf = obtener_qr_real(alias_elegido["ID"])
-                    st.caption("✅ Se va a usar el QR real que subiste para este alias.")
-                else:
-                    st.caption("ℹ️ Este alias no tiene QR real cargado — se va a generar uno con el alias/CBU como texto.")
-        else:
-            st.caption(
-                "Todavía no cargaste ningún alias/CBU — podés hacerlo en "
-                f"**{miga_hasta('Mensajería y cobros')} → 💳 Alias para QR de transferencia** "
-                "si querés que la cotización incluya uno."
-            )
 
         import urllib.parse
         url_whatsapp = "https://wa.me/?text=" + urllib.parse.quote(mensaje)

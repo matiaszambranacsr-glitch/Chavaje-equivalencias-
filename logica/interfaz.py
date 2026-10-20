@@ -555,8 +555,8 @@ def pdf_con_cache(nombre, generador, *args):
 def generar_pdf_cotizacion(lista_productos, incluir_precio=True, incluir_stock=False, alias_qr=None, qr_real_bytes=None,
                            marcar_a_confirmar=True, marcas_sin_precio=None):
     """Genera un PDF simple de cotización a partir de la lista armada para WhatsApp.
-    Si se pasa alias_qr (un dict con nombre/alias/cbu/titular), agrega un QR con esos datos
-    para transferencia — el cliente lo escanea y ve el alias/CBU listo para pegar, sin tipear.
+    Si se pasa alias_qr (una fila de listar_alias_transferencia()), agrega un QR para pagar: el
+    real si se subió, el que abre el link de pago si hay, y si no uno con el alias/CBU de texto.
     Con marcar_a_confirmar, lo que no está confirmado dice «(a confirmar)»: ver
     hay_que_confirmarla()."""
     from fpdf import FPDF
@@ -598,19 +598,39 @@ def generar_pdf_cotizacion(lista_productos, incluir_precio=True, incluir_stock=F
         pdf.ln(3)
 
     if alias_qr:
-        qr_bytes = qr_real_bytes if qr_real_bytes else generar_qr_bytes(
-            f"Alias: {alias_qr['Alias']}\nCBU: {alias_qr['CBU']}\nTitular: {alias_qr['Titular']}"
-        )
+        # Lo que abre la página de pago primero: el QR que da la billetera o el banco, y si no
+        # hay, el link de pago. El de texto, solo con alias y CBU, muestra los datos y nada más.
+        # Ver «EL QR QUE ABRE LA PÁGINA PARA PAGAR» en logica/negocio.py.
+        _link = (alias_qr.get("Link") or "").strip()
+        if _link and problema_del_link_de_pago(_link):
+            _link = ""
+        if qr_real_bytes:
+            qr_bytes = qr_real_bytes
+        elif _link:
+            qr_bytes = generar_qr_bytes(_link)
+        else:
+            qr_bytes = generar_qr_bytes(
+                f"Alias: {alias_qr['Alias']}\nCBU: {alias_qr['CBU']}\nTitular: {alias_qr['Titular']}"
+            )
         pdf.ln(4)
         pdf.set_font("Helvetica", "B", 11)
         pdf.cell(0, 7, limpiar(f"Transferir a: {alias_qr['Nombre']}"), new_x="LMARGIN", new_y="NEXT")
         pdf.set_font("Helvetica", "", 9)
         pdf.multi_cell(0, 5, limpiar(f"Alias: {alias_qr['Alias']}  /  CBU: {alias_qr['CBU']}  /  Titular: {alias_qr['Titular']}"),
                        new_x="LMARGIN", new_y="NEXT")
+        if _link:
+            # Tocable: el PDF casi siempre se abre en el mismo celular con el que se paga.
+            pdf.set_text_color(0, 70, 160)
+            pdf.multi_cell(0, 5, limpiar(f"Pagar acá: {_link}"), link=_link,
+                           new_x="LMARGIN", new_y="NEXT")
+            pdf.set_text_color(0, 0, 0)
         pdf.image(io.BytesIO(qr_bytes), w=35)
         pdf.set_font("Helvetica", "I", 8)
         if qr_real_bytes:
             pdf.multi_cell(0, 4, "Escaneá el QR con tu app de Mercado Pago/MODO/banco para transferir.",
+                           new_x="LMARGIN", new_y="NEXT")
+        elif _link:
+            pdf.multi_cell(0, 4, "Escaneá el QR con la cámara del celular: abre la página para pagar.",
                            new_x="LMARGIN", new_y="NEXT")
         else:
             pdf.multi_cell(0, 4, "Escaneá el QR para ver el alias/CBU y transferir desde tu banco o billetera virtual.",
@@ -619,8 +639,10 @@ def generar_pdf_cotizacion(lista_productos, incluir_precio=True, incluir_stock=F
     return bytes(pdf.output())
 
 
-def generar_pdf_ficha_vehiculo(vehiculo, km_calc, alertas, proyeccion, historial):
-    """Genera un PDF con el resumen de la ficha digital del vehículo, para entregarle al cliente."""
+def generar_pdf_ficha_vehiculo(vehiculo, km_calc, alertas, proyeccion, historial, link_cliente=None):
+    """Genera un PDF con el resumen de la ficha digital del vehículo, para entregarle al cliente.
+    Con link_cliente, al final va el QR que abre su auto en el celular: ver
+    link_publico_del_auto()."""
     from fpdf import FPDF
 
     def limpiar(texto):
@@ -684,6 +706,19 @@ def generar_pdf_ficha_vehiculo(vehiculo, km_calc, alertas, proyeccion, historial
         for h in historial:
             linea = f"- {h['Pieza']} ({h.get('Marca') or ''}) - {h.get('Fecha') or ''} - {h.get('Km instalación') or '-'} km"
             pdf.multi_cell(0, 6, limpiar(linea), new_x="LMARGIN", new_y="NEXT")
+
+    if link_cliente:
+        pdf.ln(4)
+        pdf.set_font("Helvetica", "B", 12)
+        pdf.cell(0, 7, "Tu auto en el celular", new_x="LMARGIN", new_y="NEXT")
+        pdf.image(io.BytesIO(generar_qr_bytes(link_cliente)), w=35)
+        pdf.set_font("Helvetica", "I", 8)
+        pdf.multi_cell(0, 4, limpiar("Escaneá el QR con la cámara: ves lo que le pusimos a tu auto "
+                                     "y cuánto le falta a cada cosa."),
+                       new_x="LMARGIN", new_y="NEXT")
+        pdf.set_text_color(0, 70, 160)
+        pdf.multi_cell(0, 4, limpiar(link_cliente), link=link_cliente, new_x="LMARGIN", new_y="NEXT")
+        pdf.set_text_color(0, 0, 0)
 
     return bytes(pdf.output())
 

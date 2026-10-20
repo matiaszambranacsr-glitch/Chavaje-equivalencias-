@@ -749,21 +749,37 @@ if pagina == PAGINAS[3]:
         nuevo_encabezado = st.text_input("Encabezado del mensaje:", value=encabezado_actual, key="wa_encabezado_in")
         nuevo_pie = st.text_area("Pie del mensaje (opcional):", value=pie_actual, key="wa_pie_in",
                                   placeholder="Ej: 📍 Av. Siempreviva 742 - Horario: L a V 9 a 18hs")
+        # Para el botón «Escribinos» de la página que ve el cliente de su auto (ver
+        # mostrar_consulta_publica_del_auto()).
+        nuevo_wa_negocio = st.text_input(
+            "WhatsApp del negocio (opcional):", value=obtener_config("whatsapp_del_negocio", ""),
+            key="wa_negocio_in", placeholder="5491145678901",
+            help="Con 54 9, la característica sin 0 y el número sin 15. Es el botón «Escribinos» "
+                 "de la página donde el cliente ve su auto.")
+        if problema_del_whatsapp_del_negocio(nuevo_wa_negocio):
+            st.error(f"⚠️ El WhatsApp del negocio no está bien: "
+                     f"{problema_del_whatsapp_del_negocio(nuevo_wa_negocio)}.")
         if candado('cambiar los textos que salen en los mensajes', st.button("💾 Guardar textos del mensaje"), 'cambiar_los_textos_que_salen_en_lo'):
-            guardar_config("whatsapp_encabezado", nuevo_encabezado.strip() or "🔧 *Equivalencias El Chavo*")
-            guardar_config("whatsapp_pie", nuevo_pie.strip())
-            avisar("success", "Guardado.")
-            st.rerun()
+            if problema_del_whatsapp_del_negocio(nuevo_wa_negocio):
+                st.warning("Corregí el WhatsApp del negocio antes de guardar.")
+            else:
+                guardar_config("whatsapp_encabezado", nuevo_encabezado.strip() or "🔧 *Equivalencias El Chavo*")
+                guardar_config("whatsapp_pie", nuevo_pie.strip())
+                guardar_config("whatsapp_del_negocio", re.sub(r"\D", "", nuevo_wa_negocio))
+                avisar("success", "Guardado.")
+                st.rerun()
 
         st.markdown("---")
         st.markdown("**💳 Alias para QR de transferencia**")
         explicar(
             "Cargá los alias/CBU que usás (Mercado Pago, distintos bancos, etc.).",
             "Al armar una cotización en 'Lista WhatsApp' vas a poder elegir cuál de estos usar para "
-            "el QR del PDF. Si subís el QR real que te da tu banco/Mercado Pago/MODO, se usa ese "
-            "(funciona de verdad para transferir). Si no subís nada, se genera uno con el alias/CBU "
-            "como texto plano — sirve para no tipear a mano, pero no lo van a reconocer como QR de "
-            "pago."
+            "el QR del PDF y para el final del mensaje. Para que el QR **abra directo la página de "
+            "pago**: subí el QR real que te da tu banco/Mercado Pago/MODO, o pegá tu **link de "
+            "pago** (en la app de Mercado Pago: «Cobrar» → «Link de pago»; en MODO o tu banco, la "
+            "opción de cobrar con link). Con el link, el QR lo abre con la cámara del celular y en "
+            "WhatsApp se toca. Con alias y CBU solos no hay un link que abra la transferencia en "
+            "cualquier banco: el QR muestra los datos para copiarlos y nada más."
         )
         alias_cargados = listar_alias_transferencia()
         if alias_cargados:
@@ -787,6 +803,19 @@ if pagina == PAGINAS[3]:
         cae3, cae4 = st.columns(2)
         cbu_in = cae3.text_input("CBU/CVU (opcional)", value=(alias_actual or {}).get("CBU", ""), key="alias_cbu_in")
         titular_in = cae4.text_input("Titular (opcional)", value=(alias_actual or {}).get("Titular", ""), key="alias_titular_in")
+        link_in = st.text_input(
+            "Link de pago (opcional — lo que abre el QR):", value=(alias_actual or {}).get("Link", ""),
+            key="alias_link_in", placeholder="https://link.mercadopago.com.ar/...",
+            help="El link para cobrar que te da Mercado Pago, MODO o tu banco. Va en el QR de la "
+                 "cotización y en el mensaje: el cliente lo toca o lo escanea y le abre la página "
+                 "para pagar.")
+        if problema_del_link_de_pago(link_in):
+            st.error(f"⚠️ El link de pago no está bien: {problema_del_link_de_pago(link_in)}. "
+                     "Así no se guarda.")
+        elif sitio_del_link_de_pago(link_in):
+            # Lo que se escanea es adónde va la plata: que se vea qué página abre antes de guardar.
+            st.caption(f"🔗 El QR va a abrir **{sitio_del_link_de_pago(link_in)}**. Fijate que "
+                       "sea la de tu billetera o tu banco.")
 
         archivo_qr_real = subir_archivo(
             "QR real (opcional — el que te dio tu banco/Mercado Pago/MODO):",
@@ -809,11 +838,14 @@ if pagina == PAGINAS[3]:
                 st.warning("Completá al menos el nombre y el alias.")
             elif problema_del_cbu(cbu_in):
                 st.warning("Corregí el CBU/CVU antes de guardar.")
+            elif problema_del_link_de_pago(link_in):
+                st.warning("Corregí el link de pago antes de guardar.")
             else:
                 guardar_alias_transferencia(
                     nombre_alias_in, alias_in, cbu_in, titular_in,
                     alias_id=(alias_actual["ID"] if alias_actual else None),
-                    qr_real_bytes=(archivo_qr_real.getvalue() if archivo_qr_real else None)
+                    qr_real_bytes=(archivo_qr_real.getvalue() if archivo_qr_real else None),
+                    link_pago=link_in
                 )
                 avisar("success", "Alias guardado.")
                 st.rerun()

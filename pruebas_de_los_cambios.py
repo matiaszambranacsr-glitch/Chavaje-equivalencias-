@@ -718,6 +718,150 @@ def probar(L):
     c.execute("DELETE FROM alias_transferencia WHERE nombre LIKE 'PRUEBA-%'")
     conn.commit()
 
+    # 9l bis. El link de pago (ver «EL QR QUE ABRE LA PÁGINA PARA PAGAR»): es lo que abre el QR
+    # de la cotización, así que se controla como el CBU. La @ es la trampa: abre la otra página.
+    esperar("el link: bien, http, con @, con espacio, sin https, sin sitio, vacío",
+            [bool(ns["problema_del_link_de_pago"](x)) for x in
+             ("https://link.mercadopago.com.ar/elchavo", "http://link.mercadopago.com.ar/x",
+              "https://mercadopago.com.ar@otro.sitio/x", "https://link.mercado pago.com/x",
+              "link.mercadopago.com.ar/x", "https://localhost/x", "")],
+            [False, True, True, True, True, True, False])
+    esperar("la página que abre, la de después de la @",
+            (ns["sitio_del_link_de_pago"]("https://link.mercadopago.com.ar/elchavo"),
+             "otro.sitio" in ns["problema_del_link_de_pago"]("https://mercadopago.com.ar@otro.sitio/x")),
+            ("link.mercadopago.com.ar", True))
+    try:
+        ns["guardar_alias_transferencia"]("PRUEBA-LINK", "el.chavo", "", "", link_pago="http://x.com")
+        _guardo_mal = True
+    except ValueError:
+        _guardo_mal = False
+    _link = "https://link.mercadopago.com.ar/elchavo"
+    ns["guardar_alias_transferencia"]("PRUEBA-LINK", "el.chavo", _cbu_bien, "El Chavo SRL",
+                                      link_pago=f"  {_link} ")
+    _al = next(a for a in ns["listar_alias_transferencia"]() if a["Nombre"] == "PRUEBA-LINK")
+    ns["guardar_alias_transferencia"]("PRUEBA-LINK", "el.chavo", _cbu_bien, "El Chavo SRL",
+                                      alias_id=_al["ID"])
+    _sigue = next(a for a in ns["listar_alias_transferencia"]() if a["Nombre"] == "PRUEBA-LINK")["Link"]
+    esperar("con el link mal no se guarda; bien, sin espacios; sin pasarlo queda el que tenía",
+            (_guardo_mal, _al["Link"], _sigue), (False, _link, _link))
+    _msj = ns["armar_mensaje_de_cotizacion"](
+        [{"codigo_buscado": "W712", "resultados": [{"Marca": "MANN", "Codigo": "W712"}]}],
+        "ENCABEZADO", "PIE", False, cobro=_al)
+    esperar("el mensaje: link para tocar, alias y CBU, antes del pie",
+            (f"💳 *Para pagar:* {_link}" in _msj, "alias *el.chavo*" in _msj,
+             f"CBU/CVU {_cbu_bien}" in _msj, "a nombre de El Chavo SRL" in _msj,
+             _msj.index(_link) < _msj.index("PIE"),
+             "Para pagar" in ns["armar_mensaje_de_cotizacion"](
+                 [{"codigo_buscado": "W712", "resultados": []}], "", "", False)),
+            (True, True, True, True, True, False))
+    _gi = ns["generar_pdf_cotizacion"].__globals__
+    _qr_original, _textos_qr = _gi["generar_qr_bytes"], []
+    _gi["generar_qr_bytes"] = lambda texto: (_textos_qr.append(texto), _qr_original(texto))[1]
+    try:
+        _pdf_link = ns["generar_pdf_cotizacion"](
+            [{"codigo_buscado": "W712", "resultados": [{"Marca": "MANN", "Codigo": "W712"}]}],
+            False, False, _al, None)
+        ns["generar_pdf_cotizacion"](
+            [{"codigo_buscado": "W712", "resultados": []}], False, False, dict(_al, Link=""), None)
+        ns["generar_pdf_cotizacion"](
+            [{"codigo_buscado": "W712", "resultados": []}], False, False, _al, _qr_original("REAL"))
+    finally:
+        _gi["generar_qr_bytes"] = _qr_original
+    esperar("el QR del PDF: el link si hay; si no, el texto; con el real, ninguno armado acá",
+            (_textos_qr[0], _textos_qr[1].startswith("Alias: el.chavo"), len(_textos_qr),
+             f"/URI ({_link})".encode() in _pdf_link),
+            (_link, True, 2, True))
+    ns["eliminar_alias_transferencia"](_al["ID"])
+    _papelera = c.execute("SELECT id FROM papelera WHERE tipo = 'alias' ORDER BY id DESC").fetchone()[0]
+    ns["restaurar_de_papelera"](_papelera)
+    esperar("borrado y restaurado, vuelve con su link",
+            c.execute("SELECT link_pago FROM alias_transferencia WHERE nombre = 'PRUEBA-LINK'").fetchone()[0],
+            _link)
+    c.execute("DELETE FROM alias_transferencia WHERE nombre LIKE 'PRUEBA-%'")
+    conn.commit()
+
+    # 9l ter. Lo que ve el cliente de su auto (ver «LO QUE VE EL CLIENTE DE SU AUTO»): cuánto
+    # le falta a cada pieza con la ÚLTIMA vez que se cambió, y entrar solo con el link o con
+    # los últimos 4 del teléfono, sin ver nombre, teléfono ni notas, y con tope de intentos.
+    c.execute("""INSERT INTO vehiculos (patente, cliente_nombre, cliente_telefono, marca_auto,
+                 modelo_auto, anio, km_registro, km_actual, created_at, km_actualizado_fecha)
+                 VALUES ('AB 123 CD', 'Juan Prueba', '11 4567-8901', 'VW', 'Gol', '2012',
+                         50000, 60000, datetime('now', '-100 days'), datetime('now', '-10 days'))""")
+    _auto = c.lastrowid
+    for _pieza, _km, _vida, _nota in (("Filtro de aceite", 50000, 10000, ""),
+                                      ("FILTRO DE ACEITE", 59000, None, "debe plata"),
+                                      ("Correa de distribución", 20000, 40000, ""),
+                                      ("Pastillas de freno", 58000, 5000, ""),
+                                      ("Escobillas", 60000, None, "")):
+        c.execute("""INSERT INTO historial_piezas (vehiculo_id, descripcion_pieza, marca_pieza,
+                     km_instalacion, vida_util_km, nota) VALUES (?, ?, 'MARCA', ?, ?, ?)""",
+                  (_auto, _pieza, _km, _vida, _nota))
+    conn.commit()
+    _v = dict(c.execute("SELECT * FROM vehiculos WHERE id = ?", (_auto,)).fetchone())
+    _estado = ns["estado_de_cada_pieza"](_v)
+    # 10.000 km en 90 días: 111 por día; 10 días después de anotado, hoy tendría 61.111.
+    esperar("cuánto le falta a cada pieza: la última vez, con la vida útil de la anterior",
+            [(p["Pieza"], p["Estado"], p["Le falta"]) for p in _estado],
+            [("Correa de distribución", "🔴 Ya le toca", "ya pasó 1.111 km"),
+             ("Pastillas de freno", "🟡 Le toca pronto", "1.889 km (unos 17 días)"),
+             ("FILTRO DE ACEITE", "🟢 Bien", "7.889 km (unos 71 días)"),
+             ("Escobillas", "⚪ Sin datos", "falta la vida útil")])
+    esperar("a quién avisar: la misma cuenta (el filtro se cambió a los 59.000, no toca)",
+            sorted(x["Pieza"] for x in ns["a_quien_avisar"](30) if x["Patente"] == "AB 123 CD"),
+            ["Correa de distribución", "Pastillas de freno"])
+    _link = ns["link_publico_del_auto"](_auto)
+    _clave = _link.rsplit("clave=", 1)[-1]
+    _link_otra_vez = ns["link_publico_del_auto"](_auto)
+    esperar("el link: la app, la patente sin espacios y una clave de 10 que se puede dictar",
+            (_link.startswith(ns["URL_DE_LA_APP"] + "?auto=AB123CD&clave="), len(_clave),
+             set(_clave) <= set(ns["_LETRAS_DE_LA_CLAVE"]), _link_otra_vez == _link),
+            (True, 10, True, True))
+    _con_link, _motivo_link = ns["abrir_ficha_publica"]("ab123cd", clave=_clave.lower())
+    _todo = json.dumps(_con_link, ensure_ascii=False, default=str)
+    # Ya hay una ficha «AB123CD» de una prueba de arriba, sin clave ni teléfono: son dos fichas
+    # de la misma patente escrita distinto, y tiene que encontrar la que coincide.
+    esperar("con el link se ve el auto, sin nombre, teléfono ni notas",
+            (_con_link["auto"], len(_con_link["historial"]), _con_link["km_hoy"],
+             "Juan" in _todo, "4567" in _todo, "8901" in _todo, "debe plata" in _todo,
+             "ID" in _con_link["historial"][0], _con_link["historial"][0]["Km"],
+             _con_link["historial"][0]["Código"], len(_con_link["historial"][0]["Fecha"])),
+            ("VW Gol 2012", 5, 61111, False, False, False, False, False, "60.000", "", 10))
+    esperar("el WhatsApp del negocio: bien, sin 9, con 0 y 15, vacío",
+            [bool(ns["problema_del_whatsapp_del_negocio"](x)) for x in
+             ("+54 9 11 4567-8901", "541145678901", "54 9 011 15 4567 8901", "")],
+            [False, True, True, False])
+    _nuevo = ns["link_publico_del_auto"](_auto, nueva=True)
+    _viejo, _motivo_viejo = ns["abrir_ficha_publica"]("AB123CD", clave=_clave)
+    _tel_bien, _ = ns["abrir_ficha_publica"]("AB-123-CD", ultimos_del_telefono="8901")
+    _tel_mal, _motivo_mal = ns["abrir_ficha_publica"]("AB123CD", ultimos_del_telefono="8900")
+    _no_existe, _motivo_no_existe = ns["abrir_ficha_publica"]("ZZ999ZZ", ultimos_del_telefono="8901")
+    _sin_numeros, _motivo_sin = ns["abrir_ficha_publica"]("AB123CD")
+    esperar("link cambiado no anda; con los 4 del teléfono sí; mal o sin auto, lo mismo",
+            (_nuevo != _link, _viejo, _tel_bien is not None, _tel_mal, _motivo_mal == _motivo_viejo,
+             _no_existe, _motivo_no_existe == _motivo_mal, _sin_numeros, "4 números" in _motivo_sin),
+            (True, None, True, None, True, None, True, None, True))
+    for _ in range(ns["INTENTOS_FALLIDOS_POR_PATENTE_POR_DIA"] - 2):
+        ns["abrir_ficha_publica"]("AB123CD", ultimos_del_telefono="0000")
+    _bloqueado, _motivo_bloqueo = ns["abrir_ficha_publica"]("AB123CD", ultimos_del_telefono="8901")
+    esperar("con 5 intentos mal en el día, ni con los números bien",
+            (_bloqueado, "demasiados intentos" in _motivo_bloqueo), (None, True))
+    c.execute("DELETE FROM intentos_consulta_publica")
+    c.execute("""INSERT INTO vehiculos (patente, cliente_telefono, km_actual)
+                 VALUES ('AC456DE', '1234', 1000)""")
+    _tel_corto, _ = ns["abrir_ficha_publica"]("AC456DE", ultimos_del_telefono="1234")
+    c.executemany("INSERT INTO intentos_consulta_publica (patente) VALUES (?)",
+                  [(f"XX{i:03d}XX",) for i in range(ns["INTENTOS_FALLIDOS_EN_TOTAL_POR_HORA"])])
+    _todos_bloqueados, _ = ns["abrir_ficha_publica"]("AB123CD", ultimos_del_telefono="8901")
+    esperar("con teléfono corto solo entra con el link; con 60 intentos en la hora, nadie",
+            (_tel_corto, _todos_bloqueados), (None, None))
+    _pdf_ficha = ns["generar_pdf_ficha_vehiculo"](_v, {}, [], [], [], _nuevo)
+    esperar("la ficha en PDF lleva el link tocable",
+            f"/URI ({_nuevo})".encode() in _pdf_ficha, True)
+    c.execute("DELETE FROM intentos_consulta_publica")
+    c.execute("DELETE FROM historial_piezas WHERE vehiculo_id = ?", (_auto,))
+    c.execute("DELETE FROM vehiculos WHERE patente IN ('AB 123 CD', 'AC456DE')")
+    conn.commit()
+
     # 9m. Confirmar una sugerencia (ver confirmar_candidata()). No tenía prueba: si el código
     # que pedía el cliente no existe, lo crea con la marca elegida y los vincula en UNA fila;
     # sin marca no inventa nada, y dos veces no duplica.

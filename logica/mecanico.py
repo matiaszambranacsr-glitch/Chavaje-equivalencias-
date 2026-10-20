@@ -2064,3 +2064,73 @@ def mostrar_portal_mecanico():
                 st.write(f"Mano de obra: ${miles(p['Mano de obra'], 0)}")
     else:
         st.caption("Todavía no guardaste ningún presupuesto.")
+
+
+# ============================================================================================
+# LA CONSULTA DEL CLIENTE: su auto, sin entrar a la app
+# ============================================================================================
+def mostrar_consulta_publica_del_auto(patente="", clave=""):
+    """La página que abre el link «?auto=PATENTE&clave=…» (ver link_publico_del_auto()), o
+    «?auto=» solo, para entrar con la patente y los últimos 4 números del teléfono. No muestra
+    nada más del negocio: app.py corta después de esto. Ver «LO QUE VE EL CLIENTE DE SU AUTO»
+    en logica/vehiculos.py."""
+    st.markdown("### 🚗 Tu auto en El Chavo")
+    st.caption("Lo que le pusimos a tu auto y cuánto le falta a cada cosa.")
+    resumen, motivo = None, ""
+    if patente and clave:
+        resumen, motivo = abrir_ficha_publica(patente, clave=clave)
+    if resumen is None:
+        if motivo:
+            st.warning(motivo)
+        with st.form("form_consulta_publica"):
+            _pat = st.text_input("Patente:", value=patente_sin_espacios(patente),
+                                 placeholder="AB123CD", max_chars=10)
+            _ultimos = st.text_input("Últimos 4 números del teléfono que dejaste en el negocio:",
+                                     max_chars=4, placeholder="1234")
+            _ver = st.form_submit_button("🔎 Ver mi auto", type="primary")
+        if _ver:
+            resumen, motivo = abrir_ficha_publica(_pat, ultimos_del_telefono=_ultimos)
+            if resumen is None:
+                st.warning(motivo)
+        if resumen is None:
+            st.caption("Si tenés el link que te mandó el negocio, con eso entrás directo.")
+            return
+
+    st.markdown(f"**{resumen['patente']}**" + (f" — {resumen['auto']}" if resumen["auto"] else ""))
+    if resumen["km_hoy"] is not None:
+        _k1, _k2 = st.columns(2)
+        _k1.metric("Km anotado", miles(resumen["km_anotado"]),
+                   help=f"La última vez que pasó por el negocio ({resumen['km_anotado_el']}).")
+        if resumen["km_por_dia"]:
+            _k2.metric("Km hoy (estimado)", miles(resumen["km_hoy"]),
+                       help=f"Con lo que anda tu auto: unos {miles(round(resumen['km_por_dia']))} "
+                            "km por día.")
+    else:
+        st.caption("Todavía no tenemos anotado el km de tu auto: la próxima vez que pases, lo "
+                   "cargamos y acá vas a ver cuánto le falta a cada cosa.")
+
+    st.markdown("**🔧 Cuánto le falta a cada cosa**")
+    if resumen["piezas"]:
+        st.dataframe(resumen["piezas"], width="stretch", hide_index=True,
+                     column_order=["Estado", "Pieza", "Le falta", "Marca", "Código",
+                                   "Km al cambiarla", "Cuándo", "Vida útil (km)"])
+        if any(p["Estado"].startswith("🔴") or p["Estado"].startswith("🟡")
+               for p in resumen["piezas"]):
+            st.info("🔴 y 🟡: ya le toca o le toca pronto. Escribinos y coordinamos.")
+        st.caption("Es una estimación con el km anotado y lo que anda tu auto. La vida útil de "
+                   "cada pieza depende del uso: ante la duda, que lo revise un mecánico.")
+    else:
+        st.caption("Todavía no hay piezas anotadas para tu auto.")
+
+    st.markdown("**📋 Todo lo que le pusimos**")
+    if resumen["historial"]:
+        st.dataframe(resumen["historial"], width="stretch", hide_index=True)
+    else:
+        st.caption("Todavía nada anotado.")
+
+    _wa_negocio = obtener_config("whatsapp_del_negocio", "")
+    if _wa_negocio and not problema_del_whatsapp_del_negocio(_wa_negocio):
+        st.link_button("📲 Escribinos por WhatsApp",
+                       f"https://wa.me/{_wa_negocio}?text="
+                       + quote(f"Hola! Te escribo por mi auto {resumen['patente']}."),
+                       type="primary", width="stretch")

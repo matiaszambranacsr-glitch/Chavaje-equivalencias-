@@ -971,6 +971,17 @@ def _esquema_vehiculos_y_mecanico(c):
     if "vin" not in columnas_vehiculos_extra:
         c.execute("ALTER TABLE vehiculos ADD COLUMN vin TEXT")
     c.execute("CREATE INDEX IF NOT EXISTS idx_vehiculos_vin ON vehiculos(vin)")
+    # La clave del link que se le manda al cliente para ver su auto sin entrar, y los intentos
+    # fallidos de entrar con la patente. Ver «LO QUE VE EL CLIENTE DE SU AUTO» en vehiculos.py.
+    if "clave_publica" not in columnas_vehiculos_extra:
+        c.execute("ALTER TABLE vehiculos ADD COLUMN clave_publica TEXT")
+    c.execute("""CREATE TABLE IF NOT EXISTS intentos_consulta_publica (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        patente TEXT NOT NULL,
+        cuando TEXT DEFAULT (datetime('now'))
+    )""")
+    c.execute("""CREATE INDEX IF NOT EXISTS idx_intentos_consulta_publica
+                 ON intentos_consulta_publica(patente, cuando)""")
 
     # Migración: instalaciones existentes que no tenían km_registro (km de cuando se cargó
     # el vehículo por primera vez, fijo, para poder calcular km recorridos).
@@ -1144,11 +1155,16 @@ def _esquema_gestion(c):
         alias TEXT,
         cbu TEXT,
         titular TEXT,
-        qr_real_blob BLOB
+        qr_real_blob BLOB,
+        link_pago TEXT
     )""")
     columnas_alias = [f[1] for f in c.execute("PRAGMA table_info(alias_transferencia)").fetchall()]
     if "qr_real_blob" not in columnas_alias:
         c.execute("ALTER TABLE alias_transferencia ADD COLUMN qr_real_blob BLOB")
+    # El link de pago (Mercado Pago, MODO, el banco): lo que abre el QR de la cotización. Ver
+    # problema_del_link_de_pago().
+    if "link_pago" not in columnas_alias:
+        c.execute("ALTER TABLE alias_transferencia ADD COLUMN link_pago TEXT")
 
     # Configuración simple de clave/valor (ej: encabezado/pie del mensaje de WhatsApp).
     c.execute("""CREATE TABLE IF NOT EXISTS configuracion (
