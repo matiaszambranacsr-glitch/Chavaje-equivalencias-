@@ -1672,17 +1672,31 @@ if not BASE_ILEGIBLE:
 # AUDITORÍA DIARIA DE STOCK POR MUESTREO
 # ============================================================
 def generar_auditoria_hoy(cantidad=8):
-    """Genera (si no existe todavía) la muestra aleatoria de hoy, priorizando favoritos y productos con precio cargado."""
+    """Genera (si no existe todavía) la muestra al azar de hoy. Devuelve True si la generó, False
+    si ya estaba, y None si no hay ningún producto con stock cargado para contar.
+
+    SOLO LO QUE TIENE STOCK CARGADO. Una auditoría compara lo que dice el sistema con lo que hay
+    en el estante; sin stock en el sistema no hay nada que comparar. Antes la muestra salía de
+    todo lo que tuviera precio, y en la base del 12/10 ningún producto tenía stock —las listas
+    de proveedor no lo traen—: le pedía al empleado contar ocho repuestos de un proveedor que el
+    negocio quizás nunca tuvo, contra un «sistema: None», y cualquier cosa que contara figuraba
+    como diferencia. Tampoco entran los códigos de fábrica, que no son algo que esté en un
+    estante. La mitad sale de los favoritos (si hay), el resto de todo lo demás, al azar."""
     hoy = datetime.now().strftime("%Y-%m-%d")
     with db_lock:
         c.execute("SELECT COUNT(*) FROM auditoria_diaria WHERE fecha = ?", (hoy,))
         if c.fetchone()[0] > 0:
             return False
-        c.execute(
-            "SELECT id, stock FROM productos WHERE favorito = 1 OR precio IS NOT NULL ORDER BY RANDOM() LIMIT ?",
-            (cantidad,)
-        )
+        _con_stock = """SELECT p.id, p.stock FROM productos p JOIN marcas m ON m.id = p.marca_id
+                        WHERE p.stock IS NOT NULL AND m.tipo <> 'OEM' {} ORDER BY RANDOM() LIMIT ?"""
+        c.execute(_con_stock.format("AND p.favorito = 1"), ((cantidad + 1) // 2,))
         elegidos = c.fetchall()
+        _ya = [r["id"] for r in elegidos] or [0]
+        c.execute(_con_stock.format(f"AND p.id NOT IN ({','.join('?' * len(_ya))})"),
+                  _ya + [cantidad - len(elegidos)])
+        elegidos += c.fetchall()
+        if not elegidos:
+            return None
         for row in elegidos:
             c.execute(
                 "INSERT OR IGNORE INTO auditoria_diaria (fecha, producto_id, stock_sistema) VALUES (?, ?, ?)",
@@ -1706,12 +1720,25 @@ def registrar_conteo_auditoria(auditoria_id, stock_contado):
     with db_lock:
         c.execute("SELECT stock_sistema FROM auditoria_diaria WHERE id = ?", (auditoria_id,))
         row = c.fetchone()
-        diferencia = stock_contado - (row["stock_sistema"] or 0)
+        # Sin stock en el sistema no hay diferencia: hay un dato que falta. Con «or 0» cualquier
+        # cosa contada figuraba como «faltan» o «sobran».
+        diferencia = (None if row["stock_sistema"] is None
+                      else stock_contado - row["stock_sistema"])
         c.execute(
             "UPDATE auditoria_diaria SET stock_contado=?, diferencia=?, resuelto=1 WHERE id=?",
             (stock_contado, diferencia, auditoria_id)
         )
         conn.commit()
+
+
+def texto_del_conteo(diferencia):
+    """Lo que se muestra al lado de un conteo de la auditoría. Con un stock con decimales —un
+    aceite por litro— el «:+d» de antes hacía caer la pantalla."""
+    if diferencia is None:
+        return "sin stock en el sistema para comparar"
+    if diferencia == 0:
+        return "✅ OK"
+    return f"⚠️ Diferencia: {'+' if diferencia > 0 else '−'}{miles(abs(diferencia))}"
 
 
 # ============================================================

@@ -2794,26 +2794,54 @@ def hay_que_confirmarla(fila):
     return veredicto_de_la_equivalencia(fila)[:1] in ("🟡", "🟠", "🔴")
 
 
+def para_el_cliente(texto):
+    """Un código o una descripción como lo va a leer el cliente en la cotización.
+
+    Dos cosas que el mostrador ya no ve pero el cliente sí, medidas en la base del 12/10:
+      · el «?» que dejó un carácter que la lista no pudo guardar: 239 descripciones de FISPA
+        dicen «FIAT LINEA 1 9 16V ? PEUGEOT 206 ? CITROEN C3». Suelto entre palabras era un
+        separador; en la cotización parecía que el negocio preguntaba algo. Va «·».
+      · el «:» colgado al final de un código de JL («CT6KMR :»).
+    Solo para lo que sale: en la base queda como vino."""
+    texto = re.sub(r"(?<=\S) \? (?=\S)", " · ", str(texto or ""))
+    return re.sub(r"\s+:$", "", texto).strip()
+
+
+def precio_para_el_cliente(fila, marcas_sin_precio):
+    """«$1.234», o «precio a confirmar» si la lista de esa marca está en otra escala (ver
+    marcas_con_precios_fuera_de_escala()). Antes la pantalla avisaba pero el mensaje salía
+    igual: en la base del 12/10 una bujía de TARANTO iba a $370 al lado de la misma a $2.213,
+    y el aviso es fácil de no leer. Hasta que se carga el coeficiente, ese número no sale."""
+    if not fila.get("Precio"):
+        return ""
+    if fila.get("Marca") in marcas_sin_precio:
+        return "precio a confirmar"
+    return f"${miles(fila['Precio'], 0)}"
+
+
 def armar_mensaje_de_cotizacion(lista, encabezado="", pie="", incluir_precio=True,
-                                incluir_stock=False, para=None, marcar_a_confirmar=True):
+                                incluir_stock=False, para=None, marcar_a_confirmar=True,
+                                marcas_sin_precio=None):
     """El texto de la cotización para WhatsApp, agrupado por lo que se pidió. `lista` es la de
     la pantalla: [{"codigo_buscado", "resultados": [filas con Marca, Codigo, Descripcion,
     Precio, Stock]}], ya filtrada con filas_para_cotizar(). Separado de la pantalla para poder
     probarlo y usarlo en otros lados (lo propuso una revisión con ChatGPT). Precios de lista:
     el descuento de una cuenta no va nunca acá. Con marcar_a_confirmar, lo que no está
     confirmado dice «⚠️ a confirmar»: ver hay_que_confirmarla()."""
+    if marcas_sin_precio is None:
+        marcas_sin_precio = marcas_con_precios_fuera_de_escala() if incluir_precio else set()
     partes = [f"{encabezado}\n"] if encabezado else []
     if para:
         partes.append(f"Para: *{para}*\n")
     for item in lista:
         partes.append(f"\n📦 *{item['codigo_buscado']}*")
         for fila in item["resultados"]:
-            linea = f"  • {fila['Marca']}: {fila['Codigo']}"
+            linea = f"  • {fila['Marca']}: {para_el_cliente(fila['Codigo'])}"
             if fila.get("Descripcion"):
-                linea += f" - {fila['Descripcion']}"
+                linea += f" - {para_el_cliente(fila['Descripcion'])}"
             extras = []
             if incluir_precio and fila.get("Precio"):
-                extras.append(f"${miles(fila['Precio'], 0)}")
+                extras.append(precio_para_el_cliente(fila, marcas_sin_precio))
             if incluir_stock and fila.get("Stock") is not None:
                 extras.append(f"Stock: {fila['Stock']}")
             if extras:

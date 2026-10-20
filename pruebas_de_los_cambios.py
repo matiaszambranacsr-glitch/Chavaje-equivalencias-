@@ -361,6 +361,22 @@ def probar(L):
              "Stock": 3}]}], "Hola", "Gracias", True, False, para="Taller Ruiz")
     esperar("mensaje", mensaje, "Hola\n\nPara: *Taller Ruiz*\n\n\n📦 *W712*\n"
                                 "  • MANN: W712 - FILTRO ($12.500)\n\nGracias")
+    # Lo que lee el cliente (ver para_el_cliente() y precio_para_el_cliente()): la marca con
+    # los precios en otra escala no sale con un número, el «?» suelto es un separador y el «:»
+    # colgado de un código se va. En el mensaje y en el PDF.
+    _fila_fuera = {"Marca": "TARANTO", "Codigo": "CT6KMR :", "Descripcion": "BUJIA FIAT ? PEUGEOT",
+                   "Precio": 370}
+    _lista_fuera = [{"codigo_buscado": "X", "resultados": [_fila_fuera]}]
+    esperar("cotización con una lista fuera de escala",
+            ns["armar_mensaje_de_cotizacion"](_lista_fuera, marcas_sin_precio={"TARANTO"}),
+            "\n📦 *X*\n  • TARANTO: CT6KMR - BUJIA FIAT · PEUGEOT (precio a confirmar)")
+    esperar("y sin estar fuera de escala, con su precio",
+            ns["armar_mensaje_de_cotizacion"](_lista_fuera, marcas_sin_precio=set()).endswith(
+                "($370)"), True)
+    esperar("un «?» pegado a una palabra no se toca (es otra cosa)",
+            ns["para_el_cliente"]("JUNTA N? 5 ? TAPA"), "JUNTA N? 5 · TAPA")
+    _pdf = ns["generar_pdf_cotizacion"](_lista_fuera, marcas_sin_precio={"TARANTO"})
+    esperar("el PDF se arma igual", _pdf[:4], b"%PDF")
 
     # 9. El registro no crece para siempre.
     g["CAMBIOS_QUE_SE_GUARDAN"] = 10
@@ -539,6 +555,92 @@ def probar(L):
     c.execute("DELETE FROM marcas WHERE nombre LIKE 'ESCALA-%'")
     conn.commit()
     ns["olvidar_la_escala_de_precios"]()
+
+    # 9g. La auditoría de stock (ver generar_auditoria_hoy()): solo lo que tiene stock cargado,
+    # y un conteo sin stock en el sistema no es una diferencia.
+    c.execute("DELETE FROM auditoria_diaria")
+    c.execute("UPDATE productos SET stock = NULL")
+    conn.commit()
+    esperar("sin stock cargado en ningún producto, no hay auditoría", ns["generar_auditoria_hoy"](5),
+            None)
+    c.execute("INSERT INTO productos (codigo_raw, codigo_clean, descripcion, marca_id, precio, "
+              "stock) VALUES ('AUD1', 'AUD1', 'ACEITE POR LITRO', ?, 100, 2.5)", (marca,))
+    conn.commit()
+    esperar("con uno, la muestra es ese", (ns["generar_auditoria_hoy"](5),
+                                          [f["Codigo"] for f in ns["listar_auditoria_hoy"]()]),
+            (True, ["AUD1"]))
+    _aud = ns["listar_auditoria_hoy"]()[0]["ID_auditoria"]
+    ns["registrar_conteo_auditoria"](_aud, 1)
+    _dif = ns["listar_auditoria_hoy"]()[0]["Diferencia"]
+    esperar("la diferencia con decimales se muestra sin romper",
+            [ns["texto_del_conteo"](x) for x in (_dif, 0, 3, None)],
+            ["⚠️ Diferencia: −1,5", "✅ OK", "⚠️ Diferencia: +3",
+             "sin stock en el sistema para comparar"])
+    c.execute("INSERT INTO auditoria_diaria (fecha, producto_id, stock_sistema) "
+              "VALUES ('2000-01-01', (SELECT id FROM productos WHERE codigo_clean = 'AUD1'), NULL)")
+    _vieja = c.lastrowid
+    conn.commit()
+    ns["registrar_conteo_auditoria"](_vieja, 4)
+    esperar("un conteo sin stock en el sistema no es una diferencia",
+            c.execute("SELECT diferencia FROM auditoria_diaria WHERE id = ?", (_vieja,)).fetchone()[0],
+            None)
+    c.execute("DELETE FROM auditoria_diaria")
+    c.execute("DELETE FROM productos WHERE codigo_clean = 'AUD1'")
+    conn.commit()
+
+    # 9h. Las consultas de clientes (ver historial_de_un_cliente()): el teléfono se encuentra
+    # aunque esté anotado de otra forma, una letra suelta no trae a todos, y una consulta se
+    # cierra solo como vendida o cancelada.
+    for _nom, _tel in (("Ruiz", "11 5555-1234"), ("Gómez", "+54 9 351 444-9876"),
+                       ("Alba", "")):
+        ns["anotar_consulta_cliente"](_nom, _tel, codigo="W712", descripcion="FILTRO")
+    _quien = lambda t: sorted(f["Cliente"] for f in ns["historial_de_un_cliente"](t))
+    esperar("el teléfono, como esté anotado",
+            [_quien(t) for t in ("1155551234", "+54 9 11 5555 1234", "15-5555-1234",
+                                 "3514449876", "ruiz", "a", "%")],
+            [["Ruiz"], ["Ruiz"], ["Ruiz"], ["Gómez"], ["Ruiz"], [], []])
+    _una = ns["consultas_de_clientes"]()[0]["_id"]
+    try:
+        ns["cerrar_consulta"](_una, "vendido")
+        _cerro = "aceptó «vendido»"
+    except ValueError:
+        _cerro = "no"
+    esperar("una consulta no se cierra con un estado que no existe", _cerro, "no")
+    esperar("y sí como vendida", ns["cerrar_consulta"](_una, "vendida"), True)
+    c.execute("DELETE FROM consultas_cliente")
+    conn.commit()
+
+    # 9i. Pegar códigos de barras en masa (ver cargar_codigos_de_barras_masivo()). No tenía
+    # prueba. Un código que no cierra no entra (salvo numeración propia); uno que ya tiene otro
+    # producto de la misma lista tampoco; uno que tiene otra lista entra y se avisa.
+    _dv = ns["digito_verificador_gtin"]
+    _ean = lambda cuerpo: cuerpo + _dv(cuerpo)
+    _b1, _b2, _b3 = _ean("779396002694"), _ean("779396002695"), _ean("779396002696")
+    _typo = _b2[:-1] + str((int(_b2[-1]) + 1) % 10)
+    _l = {}
+    for _nom in ("BARRAS-1", "BARRAS-2", "BARRAS-3"):
+        c.execute("INSERT INTO marcas (nombre, tipo) VALUES (?, 'PROVEEDOR')", (_nom,))
+        _l[_nom] = c.lastrowid
+    for _cod, _nom in (("BA1", "BARRAS-1"), ("BA2", "BARRAS-1"), ("BA3", "BARRAS-1"),
+                       ("BB1", "BARRAS-2"), ("BC1", "BARRAS-3"), ("BC2", "BARRAS-3")):
+        c.execute("INSERT INTO productos (codigo_raw, codigo_clean, descripcion, marca_id) "
+                  "VALUES (?, ?, 'PIEZA', ?)", (_cod, _cod, _l[_nom]))
+    conn.commit()
+    _cb = ns["cargar_codigos_de_barras_masivo"]
+    _r1 = _cb([("BA1", _b1), ("BA2", _typo), ("BA3", _b3)], _l["BARRAS-1"])
+    _r2 = _cb([("BA3", _b1)], _l["BARRAS-1"])
+    _r3 = _cb([("BB1", _b1)], _l["BARRAS-2"])
+    _r4 = _cb([("BC1", "1234567890123"), ("BC2", "1234567890124")], _l["BARRAS-3"])
+    _barras = lambda cod: c.execute("SELECT codigo_barras FROM productos WHERE codigo_clean = ?",
+                                    (cod,)).fetchone()[0]
+    esperar("pegar códigos de barras: qué entra y qué no",
+            ([_barras(x) for x in ("BA1", "BA2", "BA3", "BB1", "BC1", "BC2")],
+             [x["Código"] for x in _r1["no_cierran"]], len(_r2["de_otro_de_la_lista"]),
+             len(_r3["tambien_en_otra_lista"]), _r4["puestos"]),
+            ([_b1, None, _b3, _b1, "1234567890123", "1234567890124"], ["BA2"], 1, 1, 2))
+    c.execute("DELETE FROM productos WHERE codigo_clean IN ('BA1','BA2','BA3','BB1','BC1','BC2')")
+    c.execute("DELETE FROM marcas WHERE nombre LIKE 'BARRAS-%'")
+    conn.commit()
 
     # 10. «Borrar los productos vacíos» (ver depurar_huerfanos()). Borraba todos los que no
     # tenían una equivalencia aprobada: en la copia de la base, el 72 % del catálogo, casi

@@ -180,6 +180,10 @@ Las pruebas se corren como dice el README, en «Antes de subir un cambio».
 | Un error de tipeo se corrige solo si la palabra no aparece en ningún producto, y la pantalla lo dice | `palabras_corregidas()`, `texto_con_las_correcciones()` | `pruebas_del_buscador.py` (2c) |
 | La escala de precios de cada lista se ve contra cada proveedor, no solo el promedio | `escala_de_precios_por_marca()` («por_proveedor») | `pruebas_de_los_cambios.py` (9f) |
 | La limpieza de una vez de las aplicaciones se reintenta cada día hasta que sale | `_tareas_automaticas_del_dia()` | `pruebas_de_los_cambios.py` (9e) |
+| El precio de una lista fuera de escala no sale en la cotización (WhatsApp ni PDF) | `precio_para_el_cliente()` | `pruebas_de_los_cambios.py` (8) |
+| La auditoría de stock sortea solo lo que tiene stock cargado, y sin stock no hay diferencia | `generar_auditoria_hoy()`, `registrar_conteo_auditoria()`, `texto_del_conteo()` | `pruebas_de_los_cambios.py` (9g) |
+| Un cliente se encuentra por teléfono como sea que esté anotado | `historial_de_un_cliente()` | `pruebas_de_los_cambios.py` (9h) |
+| Un código de barras que no cierra o que ya tiene otro producto de la misma lista no se pega | `cargar_codigos_de_barras_masivo()` | `pruebas_de_los_cambios.py` (9i) |
 
 ## Sin prueba automática todavía
 

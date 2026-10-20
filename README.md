@@ -6480,6 +6480,28 @@ el botón**:
 - «🔌 Probar las fuentes de afuera» suma la Central de Deudores (con el CUIT de la AFIP, nunca el
   de un cliente) y la inflación de respaldo.
 
+## 📲 Lo que le llega al cliente, la auditoría de stock y los códigos de barras en masa
+
+Salió de armar cotizaciones con la copia de la base del 12/10 y de buscar las funciones que
+escriben stock, precios o datos de clientes y que ninguna prueba llegaba a ejecutar (la
+cobertura de todas las baterías juntas subió al 56 %).
+
+| Qué | Qué pasaba (medido) | Qué se hizo |
+|---|---|---|
+| **El precio de una lista fuera de escala en la cotización** | La pantalla avisaba, pero el mensaje de WhatsApp y el PDF salían igual: una bujía de TARANTO a **$370** al lado de la misma a $2.213. El aviso es fácil de no leer, y el número le llega al cliente. | En el mensaje y en el PDF esa marca dice **«precio a confirmar»** hasta que se carga su coeficiente. El aviso de la pantalla lo explica. |
+| **Lo que ve el cliente en la descripción** | 239 descripciones de FISPA traen un «?» donde la lista perdió un carácter: «FIAT LINEA 1 9 16V **?** PEUGEOT 206 **?** CITROEN C3» parecía una pregunta. Y algunos códigos de JL terminan en « :» («CT6KMR :»). | En la cotización, el «?» suelto entre palabras sale como «·» y el «:» colgado se saca. La base queda como vino. |
+| **La auditoría diaria de stock** | Sorteaba entre todo lo que tuviera precio. En la base **ningún producto tiene stock cargado**, así que pedía contar ocho repuestos de un proveedor contra un «sistema: None», y cualquier cosa contada figuraba como diferencia. Con un stock con decimales (un aceite por litro) la pantalla se caía al mostrar la diferencia. | Sortea solo entre lo que tiene stock (la mitad de los favoritos), sin códigos de fábrica; si no hay nada, lo dice y explica cómo cargar el stock. Sin stock en el sistema, el conteo no es una diferencia. Las diferencias con decimales se muestran bien. |
+| **Buscar un cliente por teléfono** | Se comparaba el texto: anotado «11 5555-1234», no aparecía buscando «1155551234» ni «+54 9 11 5555 1234». Y el control de «muy corto» contaba los dos «%» del patrón: nunca cortaba, y una letra traía a todos. | Se comparan los **últimos ocho dígitos**, que son los mismos en todas las formas de escribirlo. Menos de dos letras no busca. Una consulta se cierra solo como «vendida» o «cancelada». |
+| **Pegar códigos de barras en masa** | Miraba que el archivo no repitiera un número, pero no que **ya lo tuviera otro producto de la misma lista** (escanearlo traería dos repuestos), ni el **dígito verificador** (un número cambiado no lo lee ningún escáner: cargarlo solo esconde el error). No tenía ninguna prueba. | Lo que no cierra no entra y se lista, salvo que no cierre la mitad o más del archivo (numeración propia, como ya decide el control de la base). Lo que ya tiene otro producto de la misma lista no entra; si lo tiene otra lista, entra —puede ser la misma bujía NGK de dos proveedores— y se avisa. |
+
+### Lo que se revisó y estaba bien
+
+- El lector de precios de las listas aguanta «1.234,56», «1,234.56», «$850.-», «1 234,56» y la
+  notación científica de Excel.
+- Las búsquedas sin resultado anotan dos filas (la búsqueda y la falta), pero nada las cuenta
+  dos veces: lo que conviene pedir cuenta solo las faltas.
+- El vínculo de la bujía Lucas LSPKR6E con la NGK BKR6E-11 viene del catálogo de NGK: se deja.
+
 ## 🔤 Los errores de tipeo en el buscador, y la escala de TARANTO contra cada proveedor
 
 ### Lo que se agregó

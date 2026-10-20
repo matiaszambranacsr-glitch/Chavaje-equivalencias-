@@ -202,7 +202,8 @@ def cargar_codigos_de_barras_masivo(pares, marca_id=None, pisar=True):
     Devuelve un resumen con lo que pasó con cada fila, que es lo que hay que poder mirar antes
     de darlo por bueno."""
     resumen = {"puestos": 0, "sin_producto": [], "ya_tenian": [], "repetidos": [],
-               "sin_cambio": 0, "ambiguos": [], "rotos_por_excel": []}
+               "sin_cambio": 0, "ambiguos": [], "rotos_por_excel": [], "no_cierran": [],
+               "de_otro_de_la_lista": [], "tambien_en_otra_lista": []}
     if not pares:
         return resumen
 
@@ -231,13 +232,27 @@ def cargar_codigos_de_barras_masivo(pares, marca_id=None, pisar=True):
     resumen["repetidos"] = [{"Código de barras": b, "Se lo pusiste a": ", ".join(cs[:6])}
                             for b, cs in vistos.items() if len(cs) > 1]
 
+    # LOS QUE NO CIERRAN CON SU DÍGITO VERIFICADOR. El escáner controla ese dígito antes de
+    # leer: un código con un número cambiado no lo va a devolver nunca, así que cargarlo solo
+    # esconde el error. Con la misma regla que codigos_de_barras_que_no_cierran(), y por la
+    # misma razón: si no cierra la mitad o más del archivo no son errores de tipeo, es una
+    # numeración propia del negocio, y ahí no se controla.
+    _con_forma = [(codigo, barras) for codigo, barras in pares if codigo not in rotos
+                  and codigo_de_barras_cierra(barras) is not None]
+    _no_cierran = [(codigo, barras) for codigo, barras in _con_forma
+                   if codigo_de_barras_cierra(barras) is False]
+    mal_copiados = (set(_no_cierran) if _no_cierran and len(_no_cierran) * 2 < len(_con_forma)
+                    else set())
+    resumen["no_cierran"] = [{"Código": codigo, "Código de barras": barras}
+                             for codigo, barras in sorted(mal_copiados)][:200]
+
     with db_lock, transaccion():
         for codigo, barras in pares:
             limpio = sanitizar(codigo)
             barras_limpio = sanitizar(barras)
             if not limpio or not barras_limpio:
                 continue
-            if codigo in rotos or barras_limpio in duplicados:
+            if codigo in rotos or barras_limpio in duplicados or (codigo, barras) in mal_copiados:
                 continue
             if marca_id:
                 c.execute("SELECT id, codigo_barras FROM productos "
@@ -274,6 +289,27 @@ def cargar_codigos_de_barras_masivo(pares, marca_id=None, pisar=True):
                 if (fila["codigo_barras"] or "") == barras_limpio:
                     resumen["sin_cambio"] += 1
                     continue
+                # ¿Ya lo tiene OTRO producto? En la misma lista es un error —escanearlo traería
+                # dos repuestos de un mismo proveedor— y no se pone. En otra lista puede estar
+                # bien —la misma bujía NGK la venden FISPA y TARANTO, con la etiqueta de NGK—:
+                # se pone y se cuenta, para que se vea.
+                c.execute("""SELECT p.codigo_raw AS codigo, m.nombre AS lista,
+                                    p.marca_id = (SELECT marca_id FROM productos WHERE id = ?)
+                                        AS misma_lista
+                             FROM productos p JOIN marcas m ON m.id = p.marca_id
+                             WHERE p.codigo_barras = ? AND p.id <> ?
+                             ORDER BY misma_lista DESC LIMIT 1""",
+                          (fila["id"], barras_limpio, fila["id"]))
+                otro = c.fetchone()
+                if otro and otro["misma_lista"]:
+                    resumen["de_otro_de_la_lista"].append(
+                        {"Código": codigo, "Código de barras": barras_limpio,
+                         "Ya lo tiene": f"{otro['codigo']} ({otro['lista']})"})
+                    continue
+                if otro:
+                    resumen["tambien_en_otra_lista"].append(
+                        {"Código": codigo, "Código de barras": barras_limpio,
+                         "También lo tiene": f"{otro['codigo']} ({otro['lista']})"})
                 c.execute("UPDATE productos SET codigo_barras = ? WHERE id = ?",
                           (barras_limpio, fila["id"]))
                 resumen["puestos"] += 1

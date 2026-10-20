@@ -553,7 +553,7 @@ def pdf_con_cache(nombre, generador, *args):
 
 
 def generar_pdf_cotizacion(lista_productos, incluir_precio=True, incluir_stock=False, alias_qr=None, qr_real_bytes=None,
-                           marcar_a_confirmar=True):
+                           marcar_a_confirmar=True, marcas_sin_precio=None):
     """Genera un PDF simple de cotización a partir de la lista armada para WhatsApp.
     Si se pasa alias_qr (un dict con nombre/alias/cbu/titular), agrega un QR con esos datos
     para transferencia — el cliente lo escanea y ve el alias/CBU listo para pegar, sin tipear.
@@ -573,17 +573,20 @@ def generar_pdf_cotizacion(lista_productos, incluir_precio=True, incluir_stock=F
         # fpdf2 con fuentes básicas no soporta todo unicode; reemplazamos lo problemático
         return str(texto).encode("latin-1", "replace").decode("latin-1")
 
+    # Lo mismo que el mensaje de WhatsApp: ver para_el_cliente() y precio_para_el_cliente().
+    if marcas_sin_precio is None:
+        marcas_sin_precio = marcas_con_precios_fuera_de_escala() if incluir_precio else set()
     for item in lista_productos:
         pdf.set_font("Helvetica", "B", 12)
         pdf.cell(0, 8, limpiar(f"Codigo buscado: {item['codigo_buscado']}"), new_x="LMARGIN", new_y="NEXT")
         pdf.set_font("Helvetica", "", 10)
         for fila in item["resultados"]:
-            linea = f"  - {fila['Marca']}: {fila['Codigo']}"
+            linea = f"  - {fila['Marca']}: {para_el_cliente(fila['Codigo'])}"
             if fila.get("Descripcion"):
-                linea += f" - {fila['Descripcion']}"
+                linea += f" - {para_el_cliente(fila['Descripcion'])}"
             extras = []
             if incluir_precio and fila.get("Precio"):
-                extras.append(f"${miles(fila['Precio'], 0)}")
+                extras.append(precio_para_el_cliente(fila, marcas_sin_precio))
             if incluir_stock and fila.get("Stock") is not None:
                 extras.append(f"Stock: {fila['Stock']}")
             if extras:

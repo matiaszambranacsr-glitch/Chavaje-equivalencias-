@@ -429,8 +429,9 @@ a traer solas desde Administrar → Mantenimiento.
     if sub_stats == SUB_STATS[3]:
         st.markdown("**🧮 Auditoría diaria de stock (muestreo aleatorio)**")
         ayuda(
-            "Todas las mañanas se puede generar una lista corta de productos al azar (priorizando favoritos "
-            "y los que tienen precio cargado) para contarlos a mano en 5 minutos y detectar descalces antes de que se acumulen."
+            "Todas las mañanas se puede generar una lista corta de productos al azar (la mitad de "
+            "los favoritos) para contarlos a mano en 5 minutos y detectar descalces antes de que "
+            "se acumulen. Solo entran los que tienen stock cargado: sin eso no hay con qué comparar."
         )
         cant_auditoria = st.number_input("Cantidad de productos a auditar hoy:", min_value=3, max_value=20, value=8, step=1)
         if st.button("🎲 Generar auditoría de hoy"):
@@ -438,6 +439,10 @@ a traer solas desde Administrar → Mantenimiento.
             if generada:
                 avisar("success", "Auditoría de hoy generada.")
                 st.rerun()
+            elif generada is None:
+                st.warning("No hay ningún producto con stock cargado, así que no hay nada que "
+                           "comparar con el estante. El stock entra con la columna «Stock» de "
+                           "una lista o a mano en la ficha del producto.")
             else:
                 st.info("Ya había una auditoría generada para hoy (ver abajo).")
 
@@ -445,10 +450,12 @@ a traer solas desde Administrar → Mantenimiento.
         if auditoria_hoy:
             for item in auditoria_hoy:
                 colA1, colA2, colA3 = st.columns([3, 1.5, 1])
-                colA1.write(f"**{item['Codigo']}** ({item['Marca']}) — sistema: {item['Stock sistema']}")
+                _sistema = item["Stock sistema"]
+                colA1.write(f"**{item['Codigo']}** ({item['Marca']}) — sistema: "
+                            f"{'—' if _sistema is None else miles(_sistema)}")
                 if item["Resuelto"]:
-                    signo = "✅ OK" if item["Diferencia"] == 0 else f"⚠️ Diferencia: {item['Diferencia']:+d}"
-                    colA2.write(f"Contado: {item['Stock contado']} — {signo}")
+                    colA2.write(f"Contado: {miles(item['Stock contado'])} — "
+                                f"{texto_del_conteo(item['Diferencia'])}")
                 else:
                     contado = colA2.number_input("Contado", min_value=0, step=1, key=f"conteo_{item['ID_auditoria']}",
                                                   label_visibility="collapsed")

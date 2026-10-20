@@ -261,20 +261,35 @@ def historial_de_un_cliente(texto):
     """Todo lo que preguntó o compró un cliente, buscando por nombre o teléfono.
 
     Sirve cuando vuelve: en vez de arrancar de cero, se ve qué le interesaba y a qué precio se
-    lo cotizaron. También cuando llama y dice «soy el del Gol»."""
-    patron = f"%{(texto or '').strip()}%"
-    if len(patron) <= 2:
+    lo cotizaron. También cuando llama y dice «soy el del Gol».
+
+    EL TELÉFONO SE COMPARA POR SUS ÚLTIMOS OCHO DÍGITOS. Se anota como lo dicta cada uno —«11
+    5555-1234», «+54 9 11 5555 1234», «15-5555-1234»— y se busca como aparece en el celular:
+    comparando el texto, el mismo número escrito de dos formas no se encontraba. Los últimos
+    ocho son el número sin característica ni prefijos, iguales en todas las formas.
+    Y el «muy corto» miraba el patrón con sus dos «%»: nunca cortaba, y una letra suelta traía
+    a todos los clientes que la tuvieran."""
+    texto = (texto or "").strip()
+    if len(texto) < 2:
         return []
+    patron = f"%{como_texto_en_like(texto)}%"
+    digitos = re.sub(r"\D", "", texto)
+    _solo_digitos = "cc.telefono"
+    for _signo in (" ", "-", "(", ")", "+", "."):
+        _solo_digitos = f"REPLACE({_solo_digitos}, '{_signo}', '')"
+    por_telefono = (f" OR {_solo_digitos} LIKE ?" if len(digitos) >= 6 else "")
+    params = [patron, patron] + ([f"%{digitos[-8:]}%"] if por_telefono else [])
     try:
-        c.execute("""SELECT cc.cliente AS "Cliente", cc.telefono AS "Teléfono",
+        c.execute(f"""SELECT cc.cliente AS "Cliente", cc.telefono AS "Teléfono",
                             cc.codigo_buscado AS "Pidió", cc.descripcion AS "Descripción",
                             cc.cantidad AS "Cant.", cc.precio_dicho AS "Le dijimos",
                             cc.estado AS "Qué pasó", substr(cc.fecha, 1, 16) AS "Cuándo",
                             p.precio AS "Precio hoy", p.stock AS "Stock hoy"
                      FROM consultas_cliente cc
                      LEFT JOIN productos p ON p.id = cc.producto_id
-                     WHERE cc.cliente LIKE ? OR cc.telefono LIKE ?
-                     ORDER BY cc.fecha DESC LIMIT 100""", (patron, patron))
+                     WHERE cc.cliente LIKE ? ESCAPE '\\' OR cc.telefono LIKE ? ESCAPE '\\'
+                           {por_telefono}
+                     ORDER BY cc.fecha DESC LIMIT 100""", params)
         return filas_a_listas(c)
     except sqlite3.OperationalError as _err:
         anotar_error("historial_de_un_cliente", _err)
@@ -286,7 +301,9 @@ def cerrar_consulta(consulta_id, resultado):
 
     Los estados son los mismos que usan las reservas —'vendida' y 'cancelada'— a propósito:
     tener 'vendido' acá y 'vendida' allá es la clase de diferencia de una letra que después
-    hace que una consulta no encuentre nada y nadie sepa por qué."""
+    hace que una consulta no encuentre nada y nadie sepa por qué. Por eso no se acepta otro."""
+    if resultado not in ("vendida", "cancelada"):
+        raise ValueError(f"Una consulta se cierra como 'vendida' o 'cancelada', no {resultado!r}.")
     with db_lock:
         c.execute("""UPDATE consultas_cliente SET estado = ?, fecha_cierre = datetime('now')
                      WHERE id = ?""", (resultado, consulta_id))

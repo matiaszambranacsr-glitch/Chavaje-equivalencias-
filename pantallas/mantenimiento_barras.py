@@ -156,6 +156,26 @@ if pagina == PAGINAS[3]:
                         "va a traer varios repuestos y no hay forma de saber cuál es. **No se "
                         "cargaron**: corregilos en el archivo y volvé a subirlo.")
                     st.dataframe(_res_b["repetidos"][:50], width="stretch", hide_index=True)
+                if _res_b.get("no_cierran"):
+                    st.error(
+                        f"🔢 {len(_res_b['no_cierran'])} código(s) de barras **no cierran con su "
+                        "dígito verificador**: tienen un número cambiado. El escáner no los va "
+                        "a leer nunca, así que **no se cargaron**: corregilos mirando la caja.")
+                    st.dataframe(_res_b["no_cierran"][:50], width="stretch", hide_index=True)
+                if _res_b.get("de_otro_de_la_lista"):
+                    st.error(
+                        f"⚠️ {len(_res_b['de_otro_de_la_lista'])} código(s) de barras **ya los "
+                        "tiene otro producto de la misma lista**: escanearlos traería dos "
+                        "repuestos. **No se cargaron.**")
+                    st.dataframe(_res_b["de_otro_de_la_lista"][:50], width="stretch",
+                                  hide_index=True)
+                if _res_b.get("tambien_en_otra_lista"):
+                    st.info(
+                        f"ℹ️ {len(_res_b['tambien_en_otra_lista'])} código(s) de barras se "
+                        "cargaron y **también los tiene un producto de otra lista**. Está bien "
+                        "si es la misma pieza que venden dos proveedores; si no, revisalos.")
+                    st.dataframe(_res_b["tambien_en_otra_lista"][:50], width="stretch",
+                                  hide_index=True)
                 if _res_b["ambiguos"]:
                     st.warning(
                         f"{len(_res_b['ambiguos'])} código(s) existen en más de una lista y se "
