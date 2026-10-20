@@ -192,6 +192,8 @@ Las pruebas se corren como dice el README, en «Antes de subir un cambio».
 | El QR de cobro abre el link de pago si hay, el link se controla (https, sin usuario adentro) y va al final del mensaje | `problema_del_link_de_pago()`, `texto_para_pagar()`, `generar_pdf_cotizacion()` | `pruebas_de_los_cambios.py` (9l bis) |
 | El cliente ve su auto solo con la clave del link o los 4 números del teléfono, sin datos personales y con tope de intentos | `abrir_ficha_publica()`, `resumen_publico_del_auto()`, `link_publico_del_auto()` | `pruebas_de_los_cambios.py` (9l ter) |
 | Cuánto le falta a cada pieza sale de la última vez que se cambió, igual para el negocio y para el cliente | `estado_de_cada_pieza()`, `a_quien_avisar()` | `pruebas_de_los_cambios.py` (9l ter) |
+| Una pieza anotada queda atada al producto del catálogo solo si el código no deja dudas, y sin vida útil usa la de las otras veces | `agregar_pieza_historial()`, `producto_del_codigo_anotado()`, `vida_util_de_las_otras_veces()` | `pruebas_de_los_cambios.py` (9l ter) |
+| El link del cliente anda aunque la patente esté frenada por intentos con los 4 números, y el km que escribe el cliente no se guarda | `abrir_ficha_publica()`, `resumen_publico_del_auto()` | `pruebas_de_los_cambios.py` (9l ter) |
 
 ## Sin prueba automática todavía
 

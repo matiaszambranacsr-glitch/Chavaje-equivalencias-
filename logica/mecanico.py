@@ -2076,9 +2076,19 @@ def mostrar_consulta_publica_del_auto(patente="", clave=""):
     en logica/vehiculos.py."""
     st.markdown("### 🚗 Tu auto en El Chavo")
     st.caption("Lo que le pusimos a tu auto y cuánto le falta a cada cosa.")
+    # El km que escribe el cliente se lee antes de dibujar su campo: la cuenta de abajo lo usa.
+    # Ver resumen_publico_del_auto().
+    _km_cliente = st.session_state.get("km_del_cliente")
+    # Con los 4 números, lo que ya entró queda en la sesión: cada toque vuelve a correr la
+    # página, y sin esto el cliente volvía al formulario apenas escribía su km.
+    _entro = st.session_state.get("_consulta_publica")
     resumen, motivo = None, ""
     if patente and clave:
-        resumen, motivo = abrir_ficha_publica(patente, clave=clave)
+        resumen, motivo = abrir_ficha_publica(patente, clave=clave, km_de_hoy=_km_cliente)
+    elif _entro:
+        resumen, motivo = abrir_ficha_publica(_entro["patente"],
+                                              ultimos_del_telefono=_entro["ultimos"],
+                                              km_de_hoy=_km_cliente)
     if resumen is None:
         if motivo:
             st.warning(motivo)
@@ -2092,30 +2102,47 @@ def mostrar_consulta_publica_del_auto(patente="", clave=""):
             resumen, motivo = abrir_ficha_publica(_pat, ultimos_del_telefono=_ultimos)
             if resumen is None:
                 st.warning(motivo)
+            else:
+                st.session_state["_consulta_publica"] = {"patente": _pat, "ultimos": _ultimos}
         if resumen is None:
             st.caption("Si tenés el link que te mandó el negocio, con eso entrás directo.")
             return
 
     st.markdown(f"**{resumen['patente']}**" + (f" — {resumen['auto']}" if resumen["auto"] else ""))
-    if resumen["km_hoy"] is not None:
+    if resumen["km_anotado"] is not None:
         _k1, _k2 = st.columns(2)
         _k1.metric("Km anotado", miles(resumen["km_anotado"]),
                    help=f"La última vez que pasó por el negocio ({resumen['km_anotado_el']}).")
-        if resumen["km_por_dia"]:
+        if resumen["km_del_cliente"]:
+            _k2.metric("Km de hoy", miles(resumen["km_hoy"]), help="El que escribiste abajo.")
+        elif resumen["km_por_dia"]:
             _k2.metric("Km hoy (estimado)", miles(resumen["km_hoy"]),
                        help=f"Con lo que anda tu auto: unos {miles(round(resumen['km_por_dia']))} "
                             "km por día.")
+        st.number_input("¿Cuántos km marca hoy el tablero? (opcional, para afinar la cuenta)",
+                        min_value=0, max_value=2_000_000, step=500, value=None,
+                        key="km_del_cliente", placeholder="Ej: 87500")
+        if resumen["km_de_hoy_no_va"]:
+            st.caption(f"⚠️ {resumen['km_de_hoy_no_va']}")
     else:
         st.caption("Todavía no tenemos anotado el km de tu auto: la próxima vez que pases, lo "
                    "cargamos y acá vas a ver cuánto le falta a cada cosa.")
+
+    # LO PRÓXIMO, arriba y en una línea: en el celular la tabla se corta a lo ancho, y es lo
+    # único que el cliente viene a preguntar.
+    if resumen["proximo"]:
+        _p = resumen["proximo"]
+        _cartel = {"🔴": st.error, "🟡": st.warning}.get(_p["Estado"][:1], st.success)
+        _cartel(f"**Lo próximo: {_p['Pieza']}** — "
+                + (_p["Le falta"] if _p["Estado"].startswith("🔴")
+                   else f"le faltan {_p['Le falta']}"))
 
     st.markdown("**🔧 Cuánto le falta a cada cosa**")
     if resumen["piezas"]:
         st.dataframe(resumen["piezas"], width="stretch", hide_index=True,
                      column_order=["Estado", "Pieza", "Le falta", "Marca", "Código",
                                    "Km al cambiarla", "Cuándo", "Vida útil (km)"])
-        if any(p["Estado"].startswith("🔴") or p["Estado"].startswith("🟡")
-               for p in resumen["piezas"]):
+        if resumen["le_toca"]:
             st.info("🔴 y 🟡: ya le toca o le toca pronto. Escribinos y coordinamos.")
         st.caption("Es una estimación con el km anotado y lo que anda tu auto. La vida útil de "
                    "cada pieza depende del uso: ante la duda, que lo revise un mecánico.")
@@ -2130,7 +2157,9 @@ def mostrar_consulta_publica_del_auto(patente="", clave=""):
 
     _wa_negocio = obtener_config("whatsapp_del_negocio", "")
     if _wa_negocio and not problema_del_whatsapp_del_negocio(_wa_negocio):
+        _texto_wa = f"Hola! Te escribo por mi auto {resumen['patente']}."
+        if resumen["le_toca"]:
+            _texto_wa += f" Le toca: {', '.join(resumen['le_toca'])}. ¿Coordinamos?"
         st.link_button("📲 Escribinos por WhatsApp",
-                       f"https://wa.me/{_wa_negocio}?text="
-                       + quote(f"Hola! Te escribo por mi auto {resumen['patente']}."),
+                       f"https://wa.me/{_wa_negocio}?text=" + quote(_texto_wa),
                        type="primary", width="stretch")

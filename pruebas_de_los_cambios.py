@@ -806,9 +806,12 @@ def probar(L):
              ("Pastillas de freno", "🟡 Le toca pronto", "1.889 km (unos 17 días)"),
              ("FILTRO DE ACEITE", "🟢 Bien", "7.889 km (unos 71 días)"),
              ("Escobillas", "⚪ Sin datos", "falta la vida útil")])
-    esperar("a quién avisar: la misma cuenta (el filtro se cambió a los 59.000, no toca)",
-            sorted(x["Pieza"] for x in ns["a_quien_avisar"](30) if x["Patente"] == "AB 123 CD"),
-            ["Correa de distribución", "Pastillas de freno"])
+    _avisos = [x for x in ns["a_quien_avisar"](30) if x["Patente"] == "AB 123 CD"]
+    esperar("a quién avisar: la misma cuenta (el filtro se cambió a los 59.000, no toca), con "
+            "el link del auto en el mensaje",
+            (sorted(x["Pieza"] for x in _avisos),
+             all("auto%3DAB123CD%26clave%3D" in x["_whatsapp"] for x in _avisos)),
+            (["Correa de distribución", "Pastillas de freno"], True))
     _link = ns["link_publico_del_auto"](_auto)
     _clave = _link.rsplit("clave=", 1)[-1]
     _link_otra_vez = ns["link_publico_del_auto"](_auto)
@@ -826,12 +829,25 @@ def probar(L):
              "ID" in _con_link["historial"][0], _con_link["historial"][0]["Km"],
              _con_link["historial"][0]["Código"], len(_con_link["historial"][0]["Fecha"])),
             ("VW Gol 2012", 5, 61111, False, False, False, False, False, "60.000", "", 10))
+    _con_km, _ = ns["abrir_ficha_publica"]("AB123CD", clave=_clave, km_de_hoy=62000)
+    _km_menor, _ = ns["abrir_ficha_publica"]("AB123CD", clave=_clave, km_de_hoy=55000)
+    esperar("lo próximo, lo que le toca, y el km que escribe el cliente (menor al anotado, no)",
+            (_con_link["proximo"], _con_link["le_toca"], _con_km["km_hoy"],
+             _con_km["km_del_cliente"], _con_km["proximo"]["Le falta"],
+             _km_menor["km_hoy"], _km_menor["km_del_cliente"], bool(_km_menor["km_de_hoy_no_va"])),
+            ({"Pieza": "Correa de distribución", "Estado": "🔴 Ya le toca",
+              "Le falta": "ya pasó 1.111 km"}, ["Correa de distribución", "Pastillas de freno"],
+             62000, True, "ya pasó 2.000 km", 61111, False, True))
+    esperar("el km del cliente no se guarda",
+            c.execute("SELECT km_actual FROM vehiculos WHERE id = ?", (_auto,)).fetchone()[0], 60000)
     esperar("el WhatsApp del negocio: bien, sin 9, con 0 y 15, vacío",
             [bool(ns["problema_del_whatsapp_del_negocio"](x)) for x in
              ("+54 9 11 4567-8901", "541145678901", "54 9 011 15 4567 8901", "")],
             [False, True, True, False])
     _nuevo = ns["link_publico_del_auto"](_auto, nueva=True)
     _viejo, _motivo_viejo = ns["abrir_ficha_publica"]("AB123CD", clave=_clave)
+    esperar("un link que no anda no cuenta como intento fallido (la clave no se adivina)",
+            c.execute("SELECT COUNT(*) FROM intentos_consulta_publica").fetchone()[0], 0)
     _tel_bien, _ = ns["abrir_ficha_publica"]("AB-123-CD", ultimos_del_telefono="8901")
     _tel_mal, _motivo_mal = ns["abrir_ficha_publica"]("AB123CD", ultimos_del_telefono="8900")
     _no_existe, _motivo_no_existe = ns["abrir_ficha_publica"]("ZZ999ZZ", ultimos_del_telefono="8901")
@@ -840,11 +856,17 @@ def probar(L):
             (_nuevo != _link, _viejo, _tel_bien is not None, _tel_mal, _motivo_mal == _motivo_viejo,
              _no_existe, _motivo_no_existe == _motivo_mal, _sin_numeros, "4 números" in _motivo_sin),
             (True, None, True, None, True, None, True, None, True))
-    for _ in range(ns["INTENTOS_FALLIDOS_POR_PATENTE_POR_DIA"] - 2):
+    # El link viejo no cuenta como intento: la clave no se adivina, y si contara, fallando
+    # con links cualquiera se le bloqueaba el link bueno al dueño.
+    for _ in range(ns["INTENTOS_FALLIDOS_POR_PATENTE_POR_DIA"] - 1):
         ns["abrir_ficha_publica"]("AB123CD", ultimos_del_telefono="0000")
+    _antes_del_tope = c.execute("SELECT COUNT(*) FROM intentos_consulta_publica WHERE "
+                                "patente = 'AB123CD'").fetchone()[0]
     _bloqueado, _motivo_bloqueo = ns["abrir_ficha_publica"]("AB123CD", ultimos_del_telefono="8901")
-    esperar("con 5 intentos mal en el día, ni con los números bien",
-            (_bloqueado, "demasiados intentos" in _motivo_bloqueo), (None, True))
+    _con_link_igual, _ = ns["abrir_ficha_publica"]("AB123CD", clave=_nuevo.rsplit("=", 1)[-1])
+    esperar("con 5 intentos mal en el día, ni con los números bien; con el link, sí",
+            (_antes_del_tope, _bloqueado, "demasiados intentos" in _motivo_bloqueo,
+             _con_link_igual is not None), (5, None, True, True))
     c.execute("DELETE FROM intentos_consulta_publica")
     c.execute("""INSERT INTO vehiculos (patente, cliente_telefono, km_actual)
                  VALUES ('AC456DE', '1234', 1000)""")
@@ -857,6 +879,21 @@ def probar(L):
     _pdf_ficha = ns["generar_pdf_ficha_vehiculo"](_v, {}, [], [], [], _nuevo)
     esperar("la ficha en PDF lleva el link tocable",
             f"/URI ({_nuevo})".encode() in _pdf_ficha, True)
+    # Anotar una pieza: queda atada al producto del catálogo si el código no deja dudas, y sin
+    # vida útil usa la de las otras veces (ver agregar_pieza_historial()).
+    _con_codigo = ns["agregar_pieza_historial"](_auto, "filtro  de ACEITE", "", "p-1", 61000,
+                                                None, "")
+    _otra_marca = ns["agregar_pieza_historial"](_auto, "Bujía", "OTRA MARCA", "P1", 61000,
+                                                None, "")
+    c.execute("UPDATE vehiculos SET numero_motor = 'MOTPRUEBA-77' WHERE id = ?", (_auto,))
+    _por_motor = ns["repuestos_por_numero_motor"]("MOTPRUEBA77")
+    esperar("la pieza anotada: atada al catálogo, con su marca y la vida útil de antes; de "
+            "otra marca, suelta; y por número de motor se ve aunque esté suelta",
+            (_con_codigo, _otra_marca["producto_id"], _otra_marca["vida_util"],
+             sorted((f["Código"], f["Marca"]) for f in _por_motor if f["Código"])),
+            ({"producto_id": b, "marca": "PRUEBA", "vida_util": 10000,
+              "vida_de_otras_veces": True}, None, None,
+             [("P1", "OTRA MARCA"), ("P1", "PRUEBA")]))
     c.execute("DELETE FROM intentos_consulta_publica")
     c.execute("DELETE FROM historial_piezas WHERE vehiculo_id = ?", (_auto,))
     c.execute("DELETE FROM vehiculos WHERE patente IN ('AB 123 CD', 'AC456DE')")

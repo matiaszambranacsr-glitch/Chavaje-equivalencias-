@@ -201,8 +201,12 @@ def repuestos_por_numero_motor(numero):
     ids = [v["_id"] for v in exactas]
     marcadores = ",".join("?" for _ in ids)
     try:
-        c.execute(f"""SELECT DISTINCT p.codigo_raw AS "Código", m.nombre AS "Marca",
-                             p.descripcion AS "Descripción", p.precio AS "Precio",
+        # Con lo anotado en la ficha si la pieza no quedó atada a un producto del catálogo:
+        # el JOIN solo dejaba todo vacío (ver agregar_pieza_historial()).
+        c.execute(f"""SELECT DISTINCT COALESCE(p.codigo_raw, hp.codigo_pieza) AS "Código",
+                             COALESCE(m.nombre, hp.marca_pieza) AS "Marca",
+                             COALESCE(p.descripcion, hp.descripcion_pieza) AS "Descripción",
+                             p.precio AS "Precio",
                              p.stock AS "Stock", hp.descripcion_pieza AS "Se puso como",
                              substr(hp.fecha_instalacion, 1, 10) AS "Cuándo"
                       FROM historial_piezas hp

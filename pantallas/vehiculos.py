@@ -256,19 +256,30 @@ if pagina == PAGINAS[6]:
                 desc_pieza = cp1.text_input("Descripción de la pieza", placeholder="Ej: Kit de distribución")
                 marca_pieza = cp2.text_input("Marca de la pieza", placeholder="Ej: SKF")
                 cp3, cp4, cp5 = st.columns(3)
-                codigo_pieza = cp3.text_input("Código (opcional)")
+                codigo_pieza = cp3.text_input(
+                    "Código (opcional)",
+                    help="Si está en el catálogo, la pieza queda atada al producto: se ven su "
+                         "precio y su stock de hoy, y sirve para los autos con el mismo motor.")
                 km_instalacion = cp4.number_input("Km al instalarla", min_value=0, step=1000,
                                                     value=int(km_actual or 0))
-                vida_util = cp5.number_input("Vida útil estimada (km, opcional)", min_value=0, step=5000, value=0)
+                vida_util = cp5.number_input(
+                    "Vida útil estimada (km, opcional)", min_value=0, step=5000, value=0,
+                    help="Vacía, se usa la que anotaste otras veces para esa misma pieza.")
                 nota_pieza = st.text_input("Nota (opcional)")
                 agregar_pieza = st.form_submit_button("➕ Agregar al historial", type="primary")
             if agregar_pieza:
                 if not desc_pieza.strip():
                     st.warning("Completá la descripción de la pieza.")
                 else:
-                    agregar_pieza_historial(vehiculo["id"], desc_pieza, marca_pieza, codigo_pieza,
-                                             km_instalacion or None, vida_util or None, nota_pieza)
-                    avisar("success", "Pieza agregada al historial.")
+                    _anotada = agregar_pieza_historial(
+                        vehiculo["id"], desc_pieza, marca_pieza, codigo_pieza,
+                        km_instalacion or None, vida_util or None, nota_pieza)
+                    avisar("success", "Pieza agregada al historial."
+                           + (" Quedó atada al producto del catálogo (precio y stock de hoy)."
+                              if _anotada["producto_id"] else "")
+                           + (f" Sin vida útil: se usó la de las otras veces, "
+                              f"{miles(_anotada['vida_util'])} km."
+                              if _anotada["vida_de_otras_veces"] else ""))
                     st.rerun()
 
             st.markdown("---")
@@ -357,7 +368,8 @@ if pagina == PAGINAS[6]:
                     mensaje_wa = (
                         f"Hola {nombre_cliente}! Te escribimos de El Chavo. Revisando el kilometraje de tu "
                         f"{nombre_auto_msg} ({vehiculo['patente']}), notamos que tenés atrasado el cambio de: "
-                        f"{piezas_atrasadas_txt}. ¿Coordinamos un turno?"
+                        f"{piezas_atrasadas_txt}. ¿Coordinamos un turno? Acá ves cuánto le falta "
+                        f"a cada cosa: {link_cliente}"
                     ).strip()
                     tel_limpio = re.sub(r"\D", "", vehiculo.get("cliente_telefono") or "")
                     url_wa_vehiculo = (

@@ -389,15 +389,71 @@ def calcular_km_recorridos(vehiculo):
     return resultado
 
 
+def producto_del_codigo_anotado(codigo, marca=""):
+    """(id, marca) del producto del catálogo que es ese código, o (None, '') si no está o no se
+    sabe cuál es: con la marca escrita tiene que ser de esa marca; sin marca, tiene que haber
+    uno solo con ese código."""
+    limpio = sanitizar(codigo or "")
+    if not limpio:
+        return None, ""
+    c.execute("""SELECT p.id, m.nombre FROM productos p JOIN marcas m ON m.id = p.marca_id
+                 WHERE p.codigo_clean = ?""", (limpio,))
+    filas = c.fetchall()
+    if (marca or "").strip():
+        filas = [f for f in filas if normalizar_texto(f["nombre"]) == normalizar_texto(marca)]
+    return (filas[0]["id"], filas[0]["nombre"]) if len(filas) == 1 else (None, "")
+
+
+def vida_util_de_las_otras_veces(descripcion, vehiculo_id=None):
+    """La vida útil que se anotó otras veces para esa pieza, o None: la última de este auto, y
+    si no, la que más se usó en los demás. Así una pieza anotada sin vida útil igual dice
+    cuánto le falta."""
+    clave = " ".join(str(descripcion or "").upper().split())
+    if not clave:
+        return None
+    c.execute("""SELECT descripcion_pieza, vida_util_km, vehiculo_id FROM historial_piezas
+                 WHERE vida_util_km > 0 ORDER BY id DESC LIMIT 20000""")
+    de_este, de_otros = None, {}
+    for f in c.fetchall():
+        if " ".join((f["descripcion_pieza"] or "").upper().split()) != clave:
+            continue
+        if vehiculo_id is not None and f["vehiculo_id"] == vehiculo_id:
+            de_este = de_este or f["vida_util_km"]
+        else:
+            de_otros[f["vida_util_km"]] = de_otros.get(f["vida_util_km"], 0) + 1
+    if de_este:
+        return de_este
+    # La que más se usó; si empatan, la más reciente (el diccionario guarda el orden, y el
+    # orden es del más nuevo al más viejo).
+    return max(de_otros, key=lambda v: de_otros[v]) if de_otros else None
+
+
 def agregar_pieza_historial(vehiculo_id, descripcion, marca_pieza, codigo_pieza, km_instalacion, vida_util_km, nota):
+    """Anota una pieza en la ficha del auto. Devuelve {"producto_id", "marca", "vida_util",
+    "vida_de_otras_veces"} con lo que completó solo.
+
+    LA PIEZA QUEDA ATADA AL CATÁLOGO si el código está y no hay duda de cuál es (ver
+    producto_del_codigo_anotado()). Nunca se guardaba el producto: la columna estaba, y la
+    usan el precio y el stock de hoy en «Por patente», lo que se le puso a los autos con el
+    mismo motor y los autos de cada producto en su evidencia, que así no veían nada de lo que
+    el taller instaló."""
+    exigir_nivel("empleado", "anotar una pieza en la ficha de un vehículo")
+    producto_id, marca_del_catalogo = producto_del_codigo_anotado(codigo_pieza, marca_pieza)
+    marca_pieza = marca_pieza.strip() or marca_del_catalogo
+    vida_de_otras_veces = False
+    if not vida_util_km:
+        vida_util_km = vida_util_de_las_otras_veces(descripcion, vehiculo_id)
+        vida_de_otras_veces = bool(vida_util_km)
     with db_lock:
         c.execute(
-            "INSERT INTO historial_piezas (vehiculo_id, descripcion_pieza, marca_pieza, codigo_pieza, "
-            "km_instalacion, vida_util_km, nota) VALUES (?, ?, ?, ?, ?, ?, ?)",
-            (vehiculo_id, descripcion.strip(), marca_pieza.strip(), codigo_pieza.strip(),
+            "INSERT INTO historial_piezas (vehiculo_id, producto_id, descripcion_pieza, marca_pieza, "
+            "codigo_pieza, km_instalacion, vida_util_km, nota) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (vehiculo_id, producto_id, descripcion.strip(), marca_pieza, codigo_pieza.strip(),
              km_instalacion, vida_util_km, nota.strip())
         )
         conn.commit()
+    return {"producto_id": producto_id, "marca": marca_pieza, "vida_util": vida_util_km,
+            "vida_de_otras_veces": vida_de_otras_veces}
 
 
 def listar_historial_vehiculo(vehiculo_id):
@@ -485,7 +541,7 @@ def km_estimado_hoy(vehiculo):
     return round(km_act + por_dia * max((datetime.now() - hasta).days, 0)), por_dia
 
 
-def estado_de_cada_pieza(vehiculo, dias_de_aviso=30):
+def estado_de_cada_pieza(vehiculo, dias_de_aviso=30, km_hoy=None):
     """Cuánto le falta a cada pieza del auto, una fila por pieza. [dict], lo más urgente primero.
 
     Mira la ÚLTIMA vez que se cambió cada pieza (la de más km: no cuántas veces —si el filtro se
@@ -495,8 +551,9 @@ def estado_de_cada_pieza(vehiculo, dias_de_aviso=30):
     el negocio (a_quien_avisar()) y para el cliente (resumen_publico_del_auto()).
 
     «Le toca pronto» es dentro de `dias_de_aviso` días al ritmo del auto, o sin ritmo conocido,
-    a menos del 15% de su vida útil."""
-    km_hoy, por_dia = km_estimado_hoy(vehiculo)
+    a menos del 15% de su vida útil. Con km_hoy, la cuenta va con ese y no con el estimado."""
+    km_estimado, por_dia = km_estimado_hoy(vehiculo)
+    km_hoy = km_estimado if km_hoy is None else km_hoy
     c.execute("""SELECT descripcion_pieza, marca_pieza, codigo_pieza, km_instalacion,
                         vida_util_km, fecha_instalacion
                  FROM historial_piezas WHERE vehiculo_id = ?
@@ -565,9 +622,11 @@ def a_quien_avisar(dias_de_aviso=30, limite=100):
             else:
                 cuando = f"en {miles(faltan_km)} km"
             auto = f"{v.get('marca_auto') or ''} {v.get('modelo_auto') or ''}".strip()
+            # Con el link de su auto: ahí ve qué le toca y cuánto le falta a lo demás.
             mensaje = (f"Hola {v.get('cliente_nombre') or ''}! Te escribimos de El Chavo. "
                        f"Según el kilometraje de tu {auto} ({v['patente']}), le toca cambiar: "
-                       f"{p['Pieza']}. ¿Coordinamos?").replace("Hola !", "Hola!")
+                       f"{p['Pieza']}. ¿Coordinamos? Acá ves cuánto le falta a cada cosa: "
+                       f"{link_publico_del_auto(v['id'])}").replace("Hola !", "Hola!")
             tel = re.sub(r"\D", "", v.get("cliente_telefono") or "")
             salida.append({
                 "Patente": v["patente"], "Cliente": v.get("cliente_nombre") or "",
@@ -613,7 +672,9 @@ def calcular_alertas_vehiculo(vehiculo_id, km_actual):
 #   · o, sin el link, los últimos 4 números del teléfono que dejó en la ficha.
 # Nunca se muestra el nombre ni el teléfono, ni las notas internas del historial. Con la patente
 # y 4 números hay 10.000 combinaciones: por eso los intentos fallidos tienen tope, por patente y
-# en total, y la respuesta no dice si la patente existe o no.
+# en total, y la respuesta no dice si la patente existe o no. El tope es solo para los 4
+# números: la clave del link tiene 32^10 combinaciones y no se adivina, y si contara, cualquiera
+# que fallara 5 veces con una patente le dejaba el link sin andar al dueño del auto.
 URL_DE_LA_APP = "https://equivalenciasdelchavo.streamlit.app/"   # la de .github/despertar_la_app.py
 INTENTOS_FALLIDOS_POR_PATENTE_POR_DIA = 5
 INTENTOS_FALLIDOS_EN_TOTAL_POR_HORA = 60
@@ -692,13 +753,13 @@ def _anotar_intento_fallido(patente):
         conn.commit()
 
 
-def abrir_ficha_publica(patente, clave="", ultimos_del_telefono=""):
+def abrir_ficha_publica(patente, clave="", ultimos_del_telefono="", km_de_hoy=None):
     """(resumen, motivo): el resumen de resumen_publico_del_auto() si los datos coinciden, o
     None y qué decirle al cliente. Ver «LO QUE VE EL CLIENTE DE SU AUTO».
 
     Con la clave del link, o con los últimos 4 números del teléfono de la ficha. La respuesta es
     la misma si la patente no existe o si los números no coinciden: así no sirve para averiguar
-    qué autos pasaron por el negocio."""
+    qué autos pasaron por el negocio. km_de_hoy: ver resumen_publico_del_auto()."""
     pat = patente_sin_espacios(patente)
     clave = str(clave or "").strip().upper()
     ultimos = re.sub(r"\D", "", str(ultimos_del_telefono or ""))
@@ -706,7 +767,7 @@ def abrir_ficha_publica(patente, clave="", ultimos_del_telefono=""):
         return None, "Escribí la patente completa."
     if not clave and len(ultimos) != 4:
         return None, "Escribí los últimos 4 números del teléfono que dejaste en el negocio."
-    if _demasiados_intentos(pat):
+    if not clave and _demasiados_intentos(pat):
         return None, ("Hubo demasiados intentos con datos que no coinciden. Probá mañana, o "
                       "pedile el link al negocio.")
     coincide = None
@@ -722,23 +783,36 @@ def abrir_ficha_publica(patente, clave="", ultimos_del_telefono=""):
             if len(tel) >= 6 and hmac.compare_digest(ultimos.encode(), tel[-4:].encode()):
                 coincide = v
     if not coincide:
-        try:
-            _anotar_intento_fallido(pat)
-        except sqlite3.Error as _err:
-            anotar_error("abrir_ficha_publica", _err)
+        if not clave:
+            try:
+                _anotar_intento_fallido(pat)
+            except sqlite3.Error as _err:
+                anotar_error("abrir_ficha_publica", _err)
         return None, NO_SE_PUDO_ABRIR_LA_FICHA
-    return resumen_publico_del_auto(coincide), ""
+    return resumen_publico_del_auto(coincide, km_de_hoy), ""
 
 
-def resumen_publico_del_auto(vehiculo):
-    """Lo que ve el cliente de su auto: el auto, el km, cuánto le falta a cada pieza y todo lo
-    que se le puso. Sin nombre, teléfono, notas ni ids."""
+def resumen_publico_del_auto(vehiculo, km_de_hoy=None):
+    """Lo que ve el cliente de su auto: el auto, el km, cuánto le falta a cada pieza, lo próximo
+    que le toca y todo lo que se le puso. Sin nombre, teléfono, notas ni ids.
+
+    km_de_hoy es el que el cliente lee en el tablero: la cuenta se hace con ese en vez del
+    estimado, y NO se guarda —lo escribe cualquiera con el link—. Menor que el anotado en el
+    negocio no puede ser: se ignora y lo dice «km_de_hoy_no_va»."""
     km_hoy, por_dia = km_estimado_hoy(vehiculo)
+    km_de_hoy_no_va = ""
+    if km_de_hoy is not None:
+        if vehiculo.get("km_actual") is not None and km_de_hoy < vehiculo["km_actual"]:
+            km_de_hoy_no_va = (f"Es menos que el que anotamos la última vez "
+                               f"({miles(vehiculo['km_actual'])} km): la cuenta va con el nuestro.")
+            km_de_hoy = None
     auto = " ".join(x for x in (vehiculo.get("marca_auto"), vehiculo.get("modelo_auto"),
                                  vehiculo.get("anio"), vehiculo.get("motorizacion"))
                     if (x or "").strip())
-    piezas = [{k: v for k, v in p.items() if not k.startswith("_")}
-              for p in estado_de_cada_pieza(vehiculo)]
+    estado = estado_de_cada_pieza(vehiculo, km_hoy=km_de_hoy)
+    proximo = next(({"Pieza": p["Pieza"], "Estado": p["Estado"], "Le falta": p["Le falta"]}
+                    for p in estado if p["_faltan"] is not None), None)
+    piezas = [{k: v for k, v in p.items() if not k.startswith("_")} for p in estado]
     for p in piezas:
         p["Cuándo"] = _dia_mes_anio(p["Cuándo"])
         p["Km al cambiarla"] = miles(p["Km al cambiarla"]) if p["Km al cambiarla"] is not None else ""
@@ -755,8 +829,10 @@ def resumen_publico_del_auto(vehiculo):
         "patente": vehiculo["patente"], "auto": auto,
         "km_anotado": vehiculo.get("km_actual"),
         "km_anotado_el": _dia_mes_anio(vehiculo.get("km_actualizado_fecha")),
-        "km_hoy": km_hoy, "km_por_dia": por_dia,
-        "piezas": piezas, "historial": historial,
+        "km_hoy": km_de_hoy if km_de_hoy is not None else km_hoy, "km_por_dia": por_dia,
+        "km_del_cliente": km_de_hoy is not None, "km_de_hoy_no_va": km_de_hoy_no_va,
+        "proximo": proximo, "piezas": piezas, "historial": historial,
+        "le_toca": [p["Pieza"] for p in piezas if p["Estado"][:1] in ("🔴", "🟡")],
     }
 
 

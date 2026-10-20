@@ -6480,6 +6480,16 @@ el botón**:
 - «🔌 Probar las fuentes de afuera» suma la Central de Deudores (con el CUIT de la AFIP, nunca el
   de un cliente) y la inflación de respaldo.
 
+## 🔧 Lo que se anota en la ficha queda atado al catálogo, y el cliente escribe su km
+
+| Qué | Qué pasaba | Qué se hizo |
+|---|---|---|
+| **La pieza anotada en la ficha nunca quedaba atada al producto** | La columna existía, pero `agregar_pieza_historial()` no la llenaba nunca. Así, «Precio hoy» y «Stock» de «🔤 Por patente» salían siempre vacíos; «⚙️ Número de motor → qué se le puso» no mostraba nada (la consulta cruzaba con el catálogo y sin producto daba todo en blanco); y la evidencia de cada producto no sumaba los autos donde el taller lo instaló. | Al anotarla, si el código está en el catálogo y no hay duda de cuál es (con la marca escrita, de esa marca; sin marca, uno solo), queda atada, y si no se escribió la marca se completa. «Número de motor» muestra lo anotado aunque no esté en el catálogo. Anotar una pieza pide permiso de empleado también adentro de la función. |
+| **Una pieza sin vida útil no decía cuánto le faltaba** | Quedaba «⚪ Sin datos» para siempre. | Si se deja vacía, se usa la que se anotó otras veces para esa misma pieza: la última de ese auto, y si no, la que más se usó en los demás. El aviso lo dice («se usó la de las otras veces, 10.000 km»). |
+| **El tope de intentos le bloqueaba el link al dueño** | Fallando 5 veces los 4 números de una patente, también dejaba de andar el link con clave del cliente. | El tope es solo para los 4 números. La clave del link (32^10 combinaciones) no se adivina, y un link equivocado no cuenta como intento. |
+| **La página del cliente** | — | Arriba, **lo próximo que le toca** en una línea (en el celular la tabla se corta a lo ancho). Un campo para el **km que marca el tablero** hoy: la cuenta se rehace con ese, **no se guarda** (lo escribe cualquiera con el link), y si es menor que el anotado en el negocio se ignora y lo dice. «📲 Escribinos» va con lo que le toca ya escrito. Entrando con los 4 números, la sesión lo recuerda: antes, al escribir el km, volvía al formulario. |
+| **Los avisos por WhatsApp** | — | «A quién avisar» y «Avisar atraso» llevan el link del cliente: ahí ve qué le toca y cuánto le falta a lo demás. |
+
 ## 🚗 El QR que abre la página de pago, y el cliente que ve su auto con el link
 
 | Qué | Qué pasaba | Qué se hizo |
