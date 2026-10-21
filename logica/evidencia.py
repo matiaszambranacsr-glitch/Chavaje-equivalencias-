@@ -1580,13 +1580,14 @@ def derivar_equivalencias_por_descripcion(marca_a_id=None, marca_b_id=None,
 
     salida = []
     for familia in set(por_rubro[marca_a_id]) & set(por_rubro[marca_b_id]):
-        for pa in por_rubro[marca_a_id][familia]:
+        for pa, a_comparar in _los_que_pueden_concordar(por_rubro[marca_a_id][familia],
+                                                        por_rubro[marca_b_id][familia]):
             # Los mejores candidatos de ESTE producto, no todos. Un termostato de Ford puede
             # coincidir con quince del otro proveedor, y esos quince tapan al resto del
             # catálogo: se llega al tope mostrando siempre lo mismo. Se guardan los que más
             # autos comparten, que son los más probables.
             candidatos = []
-            for pb in por_rubro[marca_b_id][familia]:
+            for pb in a_comparar:
                 par = (min(pa["id"], pb["id"]), max(pa["id"], pb["id"]))
                 if par in ya_vinculados or par in rechazados:
                     continue
@@ -1612,6 +1613,54 @@ def derivar_equivalencias_por_descripcion(marca_a_id=None, marca_b_id=None,
                 if len(salida) >= limite:
                     return salida
     return salida
+
+
+def _los_que_pueden_concordar(filas_a, filas_b, minimo_nucleo=2):
+    """Da, para cada fila de A, las de B que firmas_compatibles() no rechaza de entrada, en el
+    orden de B: (fila_a, [filas_b]). Cada fila trae su firma en "_firma".
+
+    Comparar cada par era casi todo el tiempo de derivar_equivalencias_por_descripcion():
+    IMPERIAL contra TARANTO son 32 millones de pares dentro de los mismos rubros, de cuatro a
+    siete minutos según la carga. Tres reglas de _comparar_firmas() dicen que no siempre, sin importar lo demás —todas
+    las reglas de antes dicen que no o nada, ninguna dice que sí—, y con ellas quedan 575.000:
+
+      · LOS AUTOS: las dos nombran autos, no comparten ninguno, y las dos son —o las dos no
+        son— solo de motoristas (ver _MARCAS_DE_MOTORES).
+      · LA QUE NO DICE PARA QUÉ AUTO ES contra una que sí (ver nombra_algun_auto()).
+      · Menos de `minimo_nucleo` palabras del núcleo en común.
+
+    Las dos primeras se resuelven con índices, sin mirar par por par; la tercera, par por par,
+    pero sin armar nada. Si una de esas reglas cambia, esto tiene que cambiar con ella:
+    pruebas_de_la_revision.py controla que ningún par que concuerda quede afuera."""
+    no_nombran, nombran, por_auto, por_tipo = [], [], {}, {True: [], False: []}
+    nucleos = [frozenset(pb["_firma"]["nucleo"]) for pb in filas_b]
+    for i, pb in enumerate(filas_b):
+        firma = pb["_firma"]
+        if not nombra_algun_auto(firma):
+            no_nombran.append(i)
+            continue
+        nombran.append(i)
+        if firma["autos"]:
+            por_tipo[firma["autos"] <= _MARCAS_DE_MOTORES].append(i)
+            for auto in firma["autos"]:
+                por_auto.setdefault(auto, []).append(i)
+    sin_autos = [i for i in nombran if not filas_b[i]["_firma"]["autos"]]
+    for pa in filas_a:
+        firma = pa["_firma"]
+        if not nombra_algun_auto(firma):
+            cuales = no_nombran
+        elif not firma["autos"]:
+            cuales = nombran
+        else:
+            # Los que no nombran autos (pero sí otra cosa), los del otro tipo y los que
+            # comparten alguno.
+            juntos = set(sin_autos)
+            juntos.update(por_tipo[not (firma["autos"] <= _MARCAS_DE_MOTORES)])
+            for auto in firma["autos"]:
+                juntos.update(por_auto.get(auto, ()))
+            cuales = sorted(juntos)
+        nucleo = frozenset(firma["nucleo"])
+        yield pa, [filas_b[i] for i in cuales if len(nucleo & nucleos[i]) >= minimo_nucleo]
 
 
 RELLENO_EN_NOMBRE_DE_PIEZA = {"DE", "LA", "EL", "CON", "SIN", "PARA", "POR", "DEL", "EN", "LOS",
@@ -1890,15 +1939,25 @@ def sugerir_entre_todas_las_marcas(limite=TOPE_SUGERENCIAS_TODAS, tope_palabra=2
         ceder_al_mostrador()
         # Los ids vienen en orden (ver firmas_de_todo_el_catalogo()): los nuevos están al final.
         primero_nuevo = bisect.bisect_right(ids, solo_desde_id) if solo_desde_id else 1
+        # LOS FILTROS VAN DEL MÁS BARATO AL MÁS CARO: el mismo proveedor, un auto en común (que
+        # se pide más abajo, ver el porqué ahí), la primera palabra rara en común y recién ahí
+        # firmas_compatibles(). Son todos «si no, se saltea», así que el resultado es el mismo
+        # en cualquier orden; en este, la mayoría de los pares se descarta sin recorrer nada.
         for j in range(max(primero_nuevo, 1), len(ids)):
+            b = ids[j]
+            firma_b, prod_b = ficha[b]
+            autos_b = firma_b["autos"]
+            if not autos_b:
+                continue
             for i in range(j):
-                a, b = ids[i], ids[j]
-                if _primera_en_comun(raras_de[a], raras_de[b]) != rango:
-                    continue
+                a = ids[i]
                 firma_a, prod_a = ficha[a]
-                firma_b, prod_b = ficha[b]
                 # Del mismo proveedor no: son dos productos de su catálogo, no equivalentes.
                 if prod_a["marca_id"] == prod_b["marca_id"]:
+                    continue
+                if not (firma_a["autos"] and (firma_a["autos"] & autos_b)):
+                    continue
+                if _primera_en_comun(raras_de[a], raras_de[b]) != rango:
                     continue
                 ok, motivo = firmas_compatibles(firma_a, firma_b,
                                                 cuenta_palabras=_cuenta_pal,
@@ -1925,9 +1984,8 @@ def sugerir_entre_todas_las_marcas(limite=TOPE_SUGERENCIAS_TODAS, tope_palabra=2
                 # Acá no: el 36% de los productos no nombra ninguna marca de auto, así que esa
                 # excepción se aplicaba a un tercio del catálogo y emparejaba por el nombre de
                 # la pieza sola. De ahí salía un «SENSOR ABS» de VW Golf contra uno de BMW X5.
-                # Con tantos pares candidatos, "no hay dato" tiene que ser un no.
-                if not (firma_a["autos"] and firma_b["autos"] and (firma_a["autos"] & firma_b["autos"])):
-                    continue
+                # Con tantos pares candidatos, "no hay dato" tiene que ser un no. (Se controla
+                # más arriba, antes de firmas_compatibles(), porque es lo más barato.)
                 salida.append({
                     "Código A": prod_a["codigo_raw"], "Marca A": prod_a["marca"],
                     "Descripción A": (prod_a["descripcion"] or "")[:44],

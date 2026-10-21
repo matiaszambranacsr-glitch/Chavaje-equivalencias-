@@ -44,7 +44,7 @@ if pagina == PAGINAS[3]:
             _cd1, _cd2 = cols([2, 3])
             if _cd1.button("🧠 Deducir de mis descripciones", key="deducir_aplic_a_mano",
                             help="Lee las descripciones del catálogo y saca a qué auto le va "
-                                 "cada pieza. Tarda cerca de un minuto."):
+                                 "cada pieza. Tarda unos segundos."):
                 with st.spinner("Leyendo las descripciones..."):
                     try:
                         _ded = aplicaciones_desde_descripciones()

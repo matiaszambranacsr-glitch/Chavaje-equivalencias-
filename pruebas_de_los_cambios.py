@@ -12,6 +12,7 @@ CAMBIOS» en logica/base.py.
 Corre en una carpeta temporal: nunca toca la base de trabajo.
 """
 import json
+import urllib.parse
 from datetime import date, datetime, timedelta
 import os
 import shutil
@@ -203,6 +204,34 @@ def probar(L):
                 except Exception:
                     entro = True
                 esperar(f"nivel «{nivel or 'invitado'}»: {nombre}", entro, entra)
+        # EL PORTAL DEL MECÁNICO: cada taller toca solo lo suyo (ver exigir_que_sea_su_cuenta()).
+        # El portal pasa siempre el de la sesión; esto es la segunda barrera.
+        ns["crear_mecanico"]("Taller Uno", "clave-taller-uno")
+        ns["crear_mecanico"]("Taller Dos", "clave-taller-dos")
+        _uno, _dos = [r[0] for r in c.execute(
+            "SELECT id FROM mecanicos WHERE nombre IN ('Taller Uno', 'Taller Dos') ORDER BY nombre DESC")]
+        _st = ns["st"]
+        _st.session_state["mecanico_id"] = _uno
+        _del_portal = (("guardar un presupuesto", ns["guardar_presupuesto_mecanico"],
+                        lambda m: (m, "Cliente", [], 0)),
+                       ("generar un código de retiro", ns["generar_codigo_de_retiro"], lambda m: (m,)),
+                       ("ver los presupuestos", ns["listar_presupuestos_mecanico"], lambda m: (m,)),
+                       ("ver el estado de la cuenta", ns["estado_de_cuenta"], lambda m: (m,)),
+                       ("ver los movimientos", ns["movimientos_de_cuenta"], lambda m: (m,)))
+        for nivel, cuenta, entran in (("mecanico", _uno, [True] * 5), ("mecanico", _dos, [False] * 5),
+                                      ("", _dos, [False, False, True, True, True]),
+                                      ("operador", _dos, [True] * 5)):
+            g["_nivel_de_quien_esta_adentro"] = lambda n=nivel: n
+            _resultado = []
+            for _nombre, funcion, args in _del_portal:
+                try:
+                    funcion(*args(cuenta))
+                    _resultado.append(True)
+                except PermissionError:
+                    _resultado.append(False)
+            esperar(f"portal: nivel «{nivel or 'invitado'}» con la cuenta "
+                    f"{'propia' if cuenta == _uno else 'de otro'}", _resultado, entran)
+        _st.session_state.pop("mecanico_id", None)
         c.execute("DELETE FROM codigos_dtc WHERE codigo = 'PERMISO1'")
         c.execute("DELETE FROM fabricantes_vin WHERE wmi = 'ZZ9'")
         c.execute("DELETE FROM esquemas WHERE titulo = 'PRUEBA-PERMISO'")
@@ -983,6 +1012,27 @@ def probar(L):
     _por_tiempo = ns["estado_de_cada_pieza"](dict(c.execute(
         "SELECT * FROM vehiculos WHERE id = ?", (_quieto,)).fetchone()))
     _avisos_quieto = [x for x in ns["a_quien_avisar"](30) if x["Patente"] == "AG 100 HH"]
+    # UN AVISO POR CLIENTE, Y UNA VEZ (ver avisos_por_cliente()): un solo mensaje con todo lo
+    # que le toca, y «Ya le avisé» lo saca de la lista hasta que le toque otra cosa.
+    _por_cliente = {x["Patente"]: x for x in ns["avisos_por_cliente"](30)}
+    _ag = _por_cliente.get("AG 100 HH") or {}
+    _msj_ag = urllib.parse.unquote(_ag.get("_whatsapp", ""))
+    esperar("un aviso por cliente, con todo junto",
+            ([p for p, _ in _ag.get("Piezas", [])], _msj_ag.count("le toca cambiar"),
+             "Aceite (venció" in _msj_ag and "Líquido de frenos (vence" in _msj_ag,
+             _ag.get("_whatsapp", "").startswith("https://wa.me/1155550000?text=")),
+            (["Aceite", "Líquido de frenos"], 1, True, True))
+    ns["marcar_avisado"](_quieto, ["Aceite"])
+    _despues = {x["Patente"]: x for x in ns["avisos_por_cliente"](30)}
+    ns["marcar_avisado"](_quieto, ["Líquido de frenos"])
+    esperar("ya avisado: sale lo avisado, queda lo que no; y después nada",
+            ([p for p, _ in _despues["AG 100 HH"]["Piezas"]],
+             "AG 100 HH" in {x["Patente"] for x in ns["avisos_por_cliente"](30)}),
+            (["Líquido de frenos"], False))
+    c.execute("UPDATE avisos_de_mantenimiento SET fecha = datetime('now', '-16 days') "
+              "WHERE vehiculo_id = ?", (_quieto,))
+    esperar("a los 16 días vuelve a la lista",
+            "AG 100 HH" in {x["Patente"] for x in ns["avisos_por_cliente"](30)}, True)
     # «Vehículos con mantenimiento atrasado» con la misma cuenta: solo lo que YA le toca (🔴).
     # Contaba cambios hechos contra los km totales y decía «atrasado» aunque recién se hubiera
     # cambiado (ver listar_vehiculos_atrasados()).

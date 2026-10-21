@@ -754,13 +754,19 @@ def numero_del_conjunto_donde_va(codigo, descripcion):
         if limpio in {sanitizar(t).upper() for t in re.split(r"[\s,;/()]+", texto) if t}:
             return f"«{codigo}» es el número {_que}"
         return ""
+    # Sin un tramo del conjunto no hay nada que decir, y casi ninguna descripción lo tiene: se
+    # mira primero, antes de limpiar palabra por palabra el texto entero. La auditoría de lo
+    # cargado la llama 80.000 veces y eso era la cuarta parte de su tiempo.
+    tramos = tramos_del_conjunto(texto)
+    if not tramos:
+        return ""
     # Si la descripción lo da TAMBIÉN como número propio, fuera del tramo del conjunto, no se
     # puede decir: «SENSOR DE NIVEL 22769A … REF ORIG FIAT 52004841 … Conj Bomba 52004841».
     _afuera = {sanitizar(t).upper()
                for t in re.split(r"[\s,;/()]+", sin_los_tramos_del_conjunto(texto)) if t}
     if limpio in _afuera:
         return ""
-    for desde, hasta, como in tramos_del_conjunto(texto):
+    for desde, hasta, como in tramos:
         numeros = [sanitizar(_t.strip(".-:")).upper()
                    for _t in re.split(r"[\s,;/()]+", texto[desde:hasta]) if _t.strip(".-:")]
         # Y partido en pedazos: «Conj bomba 93 360 915», «Conj Bomba 97FP 9H307 AG».

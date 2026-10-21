@@ -177,7 +177,7 @@ def _renglon_del_error(error):
 # mostrar, código BUS-8F31»: quien está en el mostrador se lo pasa al administrador, que lo
 # encuentra en Estado y papelera → «🐞 Errores» con dónde y en qué renglón (lo propuso una
 # revisión con ChatGPT). El administrador ve además el error completo ahí mismo.
-PREFIJOS_DE_LAS_PANTALLAS = ("BUS", "VIN", "EXC", "ADM", "EST", "WSP", "VEH", "MEC", "DEP")
+PREFIJOS_DE_LAS_PANTALLAS = ("BUS", "VIN", "EXC", "ADM", "EST", "WSP", "VEH", "MEC", "DEP", "VEN")
 
 
 def codigo_de_error(prefijo):
@@ -805,6 +805,25 @@ def exigir_nivel(nivel, accion):
     anotar_error("exigir_nivel", PermissionError(f"{accion}: nivel «{adentro}»"))
     raise PermissionError(f"Para {accion} hace falta entrar como "
                           f"{'administrador' if nivel == 'admin' else 'empleado'}.")
+
+
+def exigir_que_sea_su_cuenta(mecanico_id, accion, si_no_es_mecanico="empleado"):
+    """El portal del mecánico externo: un mecánico solo toca lo de SU cuenta —sus presupuestos,
+    su código de retiro, sus movimientos—. El portal pasa siempre el de la sesión; esto es la
+    segunda barrera, por si otro camino llamara a la función con otro número (como exigir_nivel()
+    para las secciones). Quien no es mecánico necesita `si_no_es_mecanico` («empleado»), o nada
+    (None) para lo que también se lee desde las pantallas de los empleados."""
+    adentro = _nivel_de_quien_esta_adentro()
+    if adentro is None or not hay_claves_configuradas():
+        return
+    if adentro == "mecanico":
+        if st.session_state.get("mecanico_id") != mecanico_id:
+            anotar_error("exigir_que_sea_su_cuenta",
+                         PermissionError(f"{accion}: cuenta {mecanico_id}"))
+            raise PermissionError(f"Para {accion} de otra cuenta hay que ser esa cuenta.")
+        return
+    if si_no_es_mecanico:
+        exigir_nivel(si_no_es_mecanico, accion)
 
 
 # Lo que se guarda en el registro: hasta tantos cambios, los más viejos se van.

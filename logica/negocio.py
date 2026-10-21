@@ -2708,15 +2708,21 @@ def to_excel_bytes(filas, columnas=None):
         return buf.getvalue()
     columnas = columnas or list(filas[0].keys())
     ws.append(columnas)
-    for fila in filas:
-        ws.append([fila.get(col, "") for col in columnas])
+    # EL RENGLÓN SE CUENTA ACÁ, no se le pregunta a la planilla. ws.max_row y ws[n] recorren
+    # todas las celdas cada vez que se los llama: preguntarlo en cada renglón hacía crecer el
+    # tiempo al cuadrado. Medido con la base real, los 62.856 productos sin equivalencias
+    # tardaban 422 s en armarse —el botón «📋 Mostrar productos sin equivalencias» se quedaba
+    # colgado unos 8 minutos—; ws.cell() va directo a la celda.
+    for renglon, fila in enumerate(filas, start=2):
+        valores = [fila.get(col, "") for col in columnas]
+        ws.append(valores)
         # LO QUE EMPIEZA CON «=» ES TEXTO: openpyxl lo guardaba como FÓRMULA, y Excel la
         # calculaba al abrir el archivo. Las descripciones y los códigos vienen de las listas de
         # los proveedores (lo señaló una revisión con ChatGPT: «evitar fórmulas peligrosas en
         # archivos exportados»). Se guarda como texto, sin cambiarle un carácter.
-        for celda in ws[ws.max_row]:
-            if isinstance(celda.value, str) and celda.value.startswith("="):
-                celda.data_type = "s"
+        for columna, valor in enumerate(valores, start=1):
+            if isinstance(valor, str) and valor.startswith("="):
+                ws.cell(row=renglon, column=columna).data_type = "s"
     buf = io.BytesIO()
     wb.save(buf)
     return buf.getvalue()

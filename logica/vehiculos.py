@@ -366,6 +366,13 @@ def anio_probable_de_patente(patente):
             "estimado por la serie de la patente (aproximado: las series se entregan en orden)")
 
 
+def buscar_vehiculo_por_id(vehiculo_id):
+    """La ficha de ese id, o None."""
+    c.execute("SELECT * FROM vehiculos WHERE id = ?", (vehiculo_id,))
+    fila = c.fetchone()
+    return dict(fila) if fila else None
+
+
 def buscar_vehiculo(patente):
     """La ficha de esa patente, o None. Como esté escrita: «AE 777 ZZ», «AE-777-ZZ» y «ae777zz»
     son la misma. Se comparaba tal cual, y un auto cargado con espacios no aparecía en «Por
@@ -487,6 +494,53 @@ def listar_historial_vehiculo(vehiculo_id):
                  fecha_instalacion AS "Fecha", nota AS "Nota"
                  FROM historial_piezas WHERE vehiculo_id = ? ORDER BY fecha_instalacion DESC""", (vehiculo_id,))
     return filas_a_listas(c)
+
+
+# UN AVISO POR CLIENTE, Y UNA VEZ. «A quién avisar» era una fila por pieza: el cliente con la
+# correa y las pastillas recibía dos mensajes, y al otro día los dos volvían a la lista aunque ya
+# se le hubiera escrito. Ahora es un mensaje por auto con todo lo que le toca, y «✅ Ya le avisé»
+# lo saca de la lista por unos días. Si después le toca otra pieza, vuelve, por esa.
+DIAS_SIN_REPETIR_EL_AVISO = 15
+
+
+def avisos_por_cliente(dias_de_aviso=30):
+    """Uno por auto: lo que le toca (o le toca pronto) y todavía no se le avisó en los últimos
+    DIAS_SIN_REPETIR_EL_AVISO días, con el mensaje de WhatsApp de todo junto. [dict], el más
+    urgente primero. La cuenta de cada pieza es la de a_quien_avisar()."""
+    c.execute("""SELECT vehiculo_id, pieza FROM avisos_de_mantenimiento
+                 WHERE fecha > datetime('now', ?)""", (f"-{DIAS_SIN_REPETIR_EL_AVISO} days",))
+    avisadas = {(f["vehiculo_id"], " ".join(f["pieza"].upper().split())) for f in c.fetchall()}
+    por_auto = {}
+    for fila in a_quien_avisar(dias_de_aviso, limite=10**6):
+        if (fila["_vehiculo_id"], " ".join(fila["Pieza"].upper().split())) in avisadas:
+            continue
+        por_auto.setdefault(fila["_vehiculo_id"], []).append(fila)
+    salida = []
+    for vehiculo_id, filas in por_auto.items():
+        f = filas[0]
+        que = ", ".join(f"{x['Pieza']} ({x['Le toca']})" for x in filas)
+        mensaje = (f"Hola {f['Cliente']}! Te escribimos de El Chavo. Según lo que anotamos de tu "
+                   f"{f['Auto']} ({f['Patente']}), le toca cambiar: {que}. ¿Coordinamos? Acá "
+                   f"ves cuánto le falta a cada cosa: {link_publico_del_auto(vehiculo_id)}"
+                   ).replace("Hola !", "Hola!")
+        salida.append({"vehiculo_id": vehiculo_id, "Patente": f["Patente"], "Cliente": f["Cliente"],
+                       "Auto": f["Auto"], "Piezas": [(x["Pieza"], x["Le toca"]) for x in filas],
+                       "_urgencia": min(x["_urgencia"] for x in filas),
+                       "_whatsapp": (f"https://wa.me/{f['_telefono']}" if f["_telefono"]
+                                     else "https://wa.me/") + "?text=" + quote(mensaje)})
+    salida.sort(key=lambda x: (x["_urgencia"], x["Patente"]))
+    return salida
+
+
+def marcar_avisado(vehiculo_id, piezas):
+    """«✅ Ya le avisé»: esas piezas de ese auto no vuelven a la lista por
+    DIAS_SIN_REPETIR_EL_AVISO días. Ver avisos_por_cliente()."""
+    exigir_nivel("empleado", "marcar que se le avisó a un cliente")
+    usuario = obtener_usuario_actual()
+    with db_lock:
+        c.executemany("""INSERT INTO avisos_de_mantenimiento (vehiculo_id, pieza, usuario)
+                         VALUES (?, ?, ?)""", [(vehiculo_id, p, usuario) for p in piezas])
+        conn.commit()
 
 
 def calcular_proyeccion_mantenimiento(vehiculo_id, km_recorridos):
@@ -709,6 +763,7 @@ def a_quien_avisar(dias_de_aviso=30, limite=100):
                 "Auto": auto, "Pieza": p["Pieza"],
                 "Código": p["Código"], "Le toca": cuando,
                 "Km hoy (estimado)": km_hoy, "_faltan": faltan_km, "_urgencia": _urgencia,
+                "_vehiculo_id": v["id"], "_telefono": tel,
                 "_whatsapp": (f"https://wa.me/{tel}" if tel else "https://wa.me/")
                              + "?text=" + quote(mensaje),
                 "_vehiculo": v["patente"]})

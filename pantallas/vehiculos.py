@@ -11,31 +11,35 @@ if pagina == PAGINAS[6]:
         "La app avisa cuándo una pieza ya recorrió casi toda su vida útil estimada."
     )
 
-    # A QUIÉN AVISAR: la última vez que se cambió cada pieza y el km de hoy estimado con el
-    # ritmo de cada auto. Ver a_quien_avisar().
-    _avisar = a_quien_avisar(dias_de_aviso=30)
+    # A QUIÉN AVISAR: un mensaje por cliente con todo lo que le toca, y «✅ Ya le avisé» lo saca
+    # de la lista por unos días. Ver avisos_por_cliente().
+    _avisar = avisos_por_cliente(dias_de_aviso=30)
     # Plegados: abiertos empujaban la búsqueda por patente —lo que se viene a hacer— abajo de
     # todo. El título ya dice cuántos hay (lo señaló la revisión de usabilidad con Gemini).
-    _n_avisar = len({x['Patente'] for x in _avisar})
-    with st.expander(f"📞 A quién avisar ({_n_avisar} cliente(s))" + (" 🔴" if _n_avisar else "")):
+    with st.expander(f"📞 A quién avisar ({len(_avisar)} cliente(s))" + (" 🔴" if _avisar else "")):
         ayuda(
             "Se mira la **última vez** que se cambió cada pieza en cada auto y el km de hoy "
             "**estimado** con lo que anda ese auto por día (entre que se cargó la ficha y la última "
             "vez que se anotó el km). Aparecen las piezas que ya pasaron su vida útil o que llegan "
             "en los próximos 30 días. Sin ritmo conocido, las que están a menos del 15% de su "
             "vida útil. Si la pieza tiene «cada cuántos meses», vence también por fecha: lo que "
-            "llegue primero."
+            "llegue primero.\n\nUn solo mensaje por cliente, con todo lo que le toca. Después de "
+            f"mandarlo, **✅ Ya le avisé** lo saca de la lista por {DIAS_SIN_REPETIR_EL_AVISO} "
+            "días; si mientras tanto le toca otra pieza, vuelve por esa."
         )
         if not _avisar:
-            st.caption("Nadie por ahora. Hace falta que los autos tengan km cargado y piezas con "
-                       "vida útil en su historial.")
-        for _i_av, _x in enumerate(_avisar):
-            _ca, _cb = st.columns([4, 1])
+            st.caption("Nadie por ahora. Hace falta que los autos tengan piezas anotadas con "
+                       "vida útil (en km o en meses), o que ya se les haya avisado.")
+        for _x in _avisar:
+            _ca, _cb, _cc = cols([4, 1, 1])
             _ca.write(f"**{_x['Patente']}** {_x['Auto']} — {_x['Cliente'] or 'sin nombre'}")
-            _ca.caption(f"{_x['Pieza']}{' (' + _x['Código'] + ')' if _x['Código'] else ''}: "
-                        f"le toca {_x['Le toca']} · hoy tendría unos "
-                        f"{miles(_x['Km hoy (estimado)'])} km")
+            _ca.caption(" · ".join(f"{p}: le toca {cuando}" for p, cuando in _x["Piezas"]))
             _cb.link_button("📲 Avisar", _x["_whatsapp"], width="stretch")
+            if _cc.button("✅ Ya le avisé", key=f"ya_avise_{_x['vehiculo_id']}", width="stretch"):
+                marcar_avisado(_x["vehiculo_id"], [p for p, _ in _x["Piezas"]])
+                avisar("success", f"Listo: {_x['Patente']} sale de la lista por "
+                                  f"{DIAS_SIN_REPETIR_EL_AVISO} días.")
+                st.rerun()
 
     vehiculos_atrasados = listar_vehiculos_atrasados()
     with st.expander(f"⚠️ Vehículos con mantenimiento atrasado ({len(vehiculos_atrasados)})"):

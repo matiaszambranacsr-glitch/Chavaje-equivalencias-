@@ -745,6 +745,17 @@ def _marcas_probablemente_duplicadas(limite=40):
     return salida[:limite]
 
 
+def _lo_que_apunta_a_productos():
+    """[(tabla, columna)] de cada clave foránea a productos(id), menos las equivalencias (la
+    fusión las pasa aparte, sin duplicarlas ni vincular el producto consigo mismo)."""
+    salida = []
+    for (tabla,) in c.execute("SELECT name FROM sqlite_master WHERE type = 'table'").fetchall():
+        for fk in c.execute(f'PRAGMA foreign_key_list("{tabla}")').fetchall():
+            if fk["table"] == "productos" and tabla != "equivalencias":
+                salida.append((tabla, fk["from"]))
+    return salida
+
+
 def fusionar_productos(id_perdedor, id_ganador):
     """Junta dos productos que son el mismo en uno solo. Devuelve True si se fusionó.
 
@@ -752,8 +763,10 @@ def fusionar_productos(id_perdedor, id_ganador):
     con el mismo código en la misma marca, la base lo rechaza. Mover a la fuerza uno encima del
     otro tira IntegrityError y la operación se cae entera.
 
-    Lo que NO se pierde: las equivalencias, los pendientes, las fotos y el precio y el stock que
-    tuviera el que se va y le falte al que queda. Se descarta el registro duplicado, no los datos."""
+    Lo que NO se pierde: las equivalencias, los pendientes, todo lo que apunta al que se va
+    (apartados, ventas, pedidos al depósito, fotos, historial de precios, fichas de autos) y el
+    precio y el stock que tuviera el que se va y le falte al que queda. Se descarta el registro
+    duplicado, no los datos."""
     if id_perdedor == id_ganador:
         return False
     # Todo o nada: son varios pasos sobre varias tablas y el estado intermedio es basura.
@@ -779,22 +792,31 @@ def fusionar_productos(id_perdedor, id_ganador):
         c.execute("DELETE FROM equivalencias WHERE producto_a_id = ? OR producto_b_id = ?",
                   (id_perdedor, id_perdedor))
 
-        for tabla, col_a, col_b in (("equivalencias_pendientes", "producto_a_id", "producto_b_id"),):
-            try:
-                c.execute(f"DELETE FROM {tabla} WHERE {col_a} = ? OR {col_b} = ?",
-                          (id_perdedor, id_perdedor))
-            except sqlite3.OperationalError as _err:
-                anotar_error("fusionar_productos", _err)
-                pass
+        # Los pendientes del que se va, al que queda: se borraban, aunque esta función dice que no
+        # se pierden. Sin el par consigo mismo ni lo que ya quedó vinculado.
+        c.execute("""SELECT producto_a_id, producto_b_id, origen, lote, fecha
+                     FROM equivalencias_pendientes WHERE producto_a_id = ? OR producto_b_id = ?""",
+                  (id_perdedor, id_perdedor))
+        for p in c.fetchall():
+            otro = p["producto_b_id"] if p["producto_a_id"] == id_perdedor else p["producto_a_id"]
+            par = (min(otro, id_ganador), max(otro, id_ganador))
+            if otro in (id_ganador, id_perdedor) or c.execute(
+                    "SELECT 1 FROM equivalencias WHERE producto_a_id = ? AND producto_b_id = ?",
+                    par).fetchone():
+                continue
+            c.execute("""INSERT OR IGNORE INTO equivalencias_pendientes
+                            (producto_a_id, producto_b_id, origen, lote, fecha)
+                         VALUES (?, ?, ?, ?, ?)""", par + (p["origen"], p["lote"], p["fecha"]))
 
-        # Datos que el que queda podría no tener
-        for tabla, columna in (("producto_fotos", "producto_id"), ("historial_precios", "producto_id")):
-            try:
-                c.execute(f"UPDATE {tabla} SET {columna} = ? WHERE {columna} = ?",
-                          (id_ganador, id_perdedor))
-            except sqlite3.OperationalError as _err:
-                anotar_error("fusionar_productos", _err)
-                pass
+        # TODO LO DEMÁS QUE APUNTA AL QUE SE VA, al que queda. Solo se pasaban las fotos y el
+        # historial de precios; el resto lo borraba la base junto con el producto (ON DELETE
+        # CASCADE): los APARTADOS ACTIVOS, las ventas que se aprendieron, los pedidos al
+        # depósito, lo que se le puso a cada auto. Se recorren las claves foráneas de la base
+        # misma: una tabla nueva que apunte a productos queda incluida sola. Si el que queda ya
+        # tiene la suya donde va una sola por producto (la reposición), queda esa.
+        for tabla, columna in _lo_que_apunta_a_productos():
+            c.execute(f"UPDATE OR IGNORE {tabla} SET {columna} = ? WHERE {columna} = ?",
+                      (id_ganador, id_perdedor))
         c.execute("""UPDATE productos SET
                         precio = COALESCE(precio, (SELECT precio FROM productos WHERE id = ?)),
                         stock = COALESCE(stock, (SELECT stock FROM productos WHERE id = ?)),

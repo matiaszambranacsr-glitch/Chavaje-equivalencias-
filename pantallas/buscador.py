@@ -144,6 +144,12 @@ if pagina == PAGINAS[0]:
             # mostrar_permiso_si_hace_falta().
             if _pedir_de_a_uno:
                 mostrar_permiso_si_hace_falta("presupuesto")
+            # Cobrarlo: pasa a 🧾 Ventas, que descuenta el stock y al terminar pregunta la
+            # patente y los km (ver pasar_el_presupuesto_a_una_venta()).
+            st.button("🧾 Pasar a una venta", key="pasar_a_venta", type="primary",
+                      disabled=solo_mirar(), on_click=pasar_el_presupuesto_a_una_venta,
+                      help=TEXTO_SOLO_MIRAR if solo_mirar() else
+                      "Lo cobrás en 🧾 Ventas: descuenta el stock y lo anota en la ficha del auto.")
             cb1, cb2 = st.columns(2)
             if cb1.button("🔒 Apartar todo el presupuesto", disabled=solo_mirar(),
                           help=TEXTO_SOLO_MIRAR if solo_mirar() else None):

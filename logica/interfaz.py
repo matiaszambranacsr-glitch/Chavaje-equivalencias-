@@ -75,7 +75,7 @@ def herramientas_que_coinciden(texto):
 # solapa, y el auditor controla que cada miga escrita exista.
 PAGINAS = ["🔍 Buscador", "🔗 Vincular manual", "📁 Cargar Excel", "🗂️ Administrar",
            "📊 Estadísticas", "📋 Lista WhatsApp", "🚗 Vehículos", "🛠️ Modo Mecánico",
-           "📦 Depósito"]
+           "📦 Depósito", "🧾 Ventas"]
 
 # Una línea por pantalla diciendo para qué sirve: se ve debajo de las pastillas. Sin esto hay
 # que entrar a cada una para saber qué hace, y el que atiende el mostrador no tiene tiempo de
@@ -95,6 +95,8 @@ PARA_QUE_SIRVE = {
                        "códigos de falla.",
     "📦 Depósito": "Lo que pidió el mostrador, para buscarlo y darlo de baja; y lo que quedó en "
                   "cada cuenta para facturar.",
+    "🧾 Ventas": "Cobrar lo que se lleva el cliente: descuenta el stock y, al terminar, lo anota "
+                "en la ficha del auto con la patente y los km.",
 }
 
 # Las solapas de cada pantalla. Viven acá y no adentro de la pantalla porque el botón de los

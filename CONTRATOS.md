@@ -199,6 +199,13 @@ Las pruebas se corren como dice el README, en «Antes de subir un cambio».
 | Una pieza vence por km o por tiempo, lo que llegue primero, desde su último cambio (aunque se haya anotado sin km) | `estado_de_cada_pieza()`, `a_quien_avisar()`, `_sumar_meses()` | `pruebas_de_los_cambios.py` (9l ter) |
 | Los atrasados, el aviso por WhatsApp y el PDF de la ficha usan la misma cuenta que el link del cliente | `listar_vehiculos_atrasados()`, `generar_pdf_ficha_vehiculo()` | `pruebas_de_los_cambios.py` (9l ter) |
 | Descartar una lista entera de pendientes es de administrador; los pares elegidos, de empleado | `rechazar_pendientes()` | `pruebas_de_los_cambios.py` (5) |
+| Una venta descuenta el stock sin dejarlo negativo, guarda el precio de ese momento y aprende lo vendido, todo o nada; anular devuelve lo descontado | `cerrar_venta()`, `anular_venta()` | `pruebas_de_las_ventas.py` |
+| Al terminar la venta, la patente y los km anotan cada pieza en la ficha del auto, una sola vez, y frenan los km para atrás | `anotar_la_venta_en_el_auto()`, `nombre_de_la_pieza()` | `pruebas_de_las_ventas.py` |
+| Un aviso por cliente con todo lo que le toca; «Ya le avisé» lo saca de la lista 15 días | `avisos_por_cliente()`, `marcar_avisado()` | `pruebas_de_los_cambios.py` (9l ter) |
+| Un mecánico solo lee y escribe su propia cuenta | `exigir_que_sea_su_cuenta()` | `pruebas_de_los_cambios.py` (5) |
+| Fusionar dos productos no pierde lo que apunta al que se va (apartados, ventas, pedidos, fichas, pendientes) | `fusionar_productos()` | `pruebas_de_la_plata_y_el_stock.py` |
+| Apartar contra el stock libre, pagos y cargos de las cuentas, mejor margen | `reservar_stock()`, `registrar_pago_de_cuenta()`, `mejor_margen_entre_equivalentes()` | `pruebas_de_la_plata_y_el_stock.py` |
+| Las sugerencias por descripción no comparan lo que firmas_compatibles() rechaza siempre, y no dejan afuera ningún par que concuerda ni cambian el orden | `_los_que_pueden_concordar()`, `nombra_algun_auto()` | `pruebas_de_la_revision.py` (el atajo) |
 
 ## Sin prueba automática todavía
 

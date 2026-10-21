@@ -409,7 +409,9 @@ if pagina == PAGINAS[3]:
                 en_expander=True
             )
             if st.button("🔍 Ver qué se podría completar", key="btn_ver_medidas_desc"):
-                st.session_state["medidas_deducidas"] = productos_con_medidas_deducibles()
+                # Lee las descripciones de todo el catálogo: medido con la base real, 5 s.
+                with st.spinner("Leyendo las descripciones de todo el catálogo..."):
+                    st.session_state["medidas_deducidas"] = productos_con_medidas_deducibles()
             _deduc = st.session_state.get("medidas_deducidas")
             if _deduc is not None:
                 if not _deduc:
@@ -716,9 +718,11 @@ if pagina == PAGINAS[3]:
                 pendientes_completo = listar_productos_sin_equivalencias(
                     marca_filtro_huerfanos, limite=None)
                 if pendientes_completo:
+                    # Guardado mientras la lista no cambie (ver pdf_con_cache()): son decenas de
+                    # miles de renglones y se rearmaba en cada toque de esta pantalla.
                     st.download_button(
                         "⬇️ Descargar lista completa (Excel)",
-                        data=to_excel_bytes(quitar_id(pendientes_completo)),
+                        data=pdf_con_cache("huerfanos", to_excel_bytes, quitar_id(pendientes_completo)),
                         file_name="productos_sin_equivalencias.xlsx",
                         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
                     )

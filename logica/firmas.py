@@ -1020,6 +1020,14 @@ def firmas_compatibles(a, b, minimo_nucleo=2, cuenta_palabras=None, total_descri
     return ok, motivo
 
 
+def nombra_algun_auto(firma):
+    """¿La descripción dice para qué auto es, de cualquier forma? Ver «LA QUE NO DICE PARA QUÉ
+    AUTO ES» en _comparar_firmas(), y _los_que_pueden_concordar(), que la usa para no comparar
+    lo que esa regla rechaza siempre."""
+    return bool(firma.get("autos") or firma.get("marcas") or firma.get("motores")
+                or firma.get("modelos_numericos") or firma.get("motores_numericos"))
+
+
 def _comparar_firmas(a, b, minimo_nucleo=2, cuenta_palabras=None, total_descripciones=0,
                      con_dudas=True):
     """Ver firmas_compatibles(). Con con_dudas=False, las reglas que solo dudan no cortan."""
@@ -1337,10 +1345,7 @@ def _comparar_firmas(a, b, minimo_nucleo=2, cuenta_palabras=None, total_descripc
                        f"{'/'.join(sorted(_lugares_a or _lugares_b))}")
     # Y LA QUE NO DICE PARA QUÉ AUTO ES contra una que sí: «Junta Acople Agua» (TARANTO) contra
     # «JTA ACOPLE CAÑO AGUA TOYOTA 1K». Las dos genéricas se comparan igual que siempre.
-    def _nombra_auto(f):
-        return bool(f.get("autos") or f.get("marcas") or f.get("motores")
-                    or f.get("modelos_numericos") or f.get("motores_numericos"))
-    if _nombra_auto(a) != _nombra_auto(b) and con_dudas:
+    if nombra_algun_auto(a) != nombra_algun_auto(b) and con_dudas:
         return False, "una de las dos no dice para qué auto es"
 
     comunes = set(a["nucleo"]) & set(b["nucleo"])

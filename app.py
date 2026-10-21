@@ -118,6 +118,8 @@ específico, y las pantallas quedan todas al final:
         · EL DEPÓSITO: DEL MOSTRADOR A LA CUENTA
         · CUÁNTO TARDA EL DEPÓSITO
         · A QUIÉN SE ESTÁ ATENDIENDO
+    logica/ventas.py
+        · VENTAS DEL MOSTRADOR
     app.py
         · ENCABEZADO
         · NAVEGACIÓN PRINCIPAL
@@ -147,6 +149,8 @@ específico, y las pantallas quedan todas al final:
         · MODO MECÁNICO
     pantallas/deposito.py
         · DEPÓSITO: lo que pidió el mostrador, y lo que queda para facturar
+    pantallas/ventas.py
+        · VENTAS: cobrar, descontar el stock y anotarlo en la ficha del auto
 
 La lógica que no depende de Streamlit está ADEMÁS en el paquete nucleo/, que se puede usar
 desde otro sistema. Se genera desde logica/ con `python3 nucleo/generar.py`, así que si
@@ -639,7 +643,7 @@ _corte("avisos")
 # Ver seccion_permitida(). Adentro, lo que borra o configura sigue pidiendo la de administrador.
 NIVEL_DE_CADA_SECCION = {PAGINAS[1]: "empleado", PAGINAS[3]: "empleado",
                          PAGINAS[4]: "empleado", PAGINAS[6]: "empleado",
-                         PAGINAS[8]: "empleado"}
+                         PAGINAS[8]: "empleado", PAGINAS[9]: "empleado"}
 if (NIVEL_DE_CADA_SECCION.get(pagina)
         and not seccion_permitida(NIVEL_DE_CADA_SECCION[pagina], pagina.split(" ", 1)[-1])):
     _actividad_del_mostrador()["termino"] = time.monotonic()      # ver ceder_al_mostrador()

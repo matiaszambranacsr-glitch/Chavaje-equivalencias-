@@ -1004,6 +1004,17 @@ def _esquema_vehiculos_y_mecanico(c):
         vida_util_km INTEGER,
         nota TEXT
     )""")
+    # A quién ya se le avisó y de qué, para no volver a ponerlo en la lista todos los días. Ver
+    # avisos_por_cliente().
+    c.execute("""CREATE TABLE IF NOT EXISTS avisos_de_mantenimiento (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        vehiculo_id INTEGER NOT NULL REFERENCES vehiculos(id) ON DELETE CASCADE,
+        pieza TEXT NOT NULL,
+        fecha TEXT DEFAULT (datetime('now')),
+        usuario TEXT
+    )""")
+    c.execute("""CREATE INDEX IF NOT EXISTS idx_avisos_de_mantenimiento
+                 ON avisos_de_mantenimiento(vehiculo_id, fecha)""")
     # Cada cuántos meses se cambia, además de los km: vence lo que llegue primero. Ver
     # estado_de_cada_pieza().
     if "vida_util_meses" not in [f[1] for f in c.execute("PRAGMA table_info(historial_piezas)")]:
@@ -2846,12 +2857,47 @@ def _esquema_numeros_que_son_numeros(c):
                           BEGIN SELECT RAISE(ABORT, 'Campo inválido: {et} (no es un número)'); END""")
 
 
+def _esquema_ventas(c):
+    """Las ventas del mostrador (🧾 Ventas): una fila por venta y una por cada cosa vendida, con
+    el precio y la descripción de ese momento. Ver «VENTAS DEL MOSTRADOR» en logica/ventas.py.
+
+    Se llama desde crear_esquema(), en orden: cada parte da por hecho que las anteriores ya
+    corrieron."""
+    c.execute("""CREATE TABLE IF NOT EXISTS ventas (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        fecha TEXT DEFAULT (datetime('now', 'localtime')),
+        usuario TEXT,
+        cliente TEXT,
+        forma_de_pago TEXT,
+        total REAL,
+        vehiculo_id INTEGER REFERENCES vehiculos(id) ON DELETE SET NULL,
+        km INTEGER,
+        anulada INTEGER DEFAULT 0,
+        anulada_por TEXT
+    )""")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_ventas_dia ON ventas(fecha)")
+    c.execute("""CREATE TABLE IF NOT EXISTS ventas_items (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        venta_id INTEGER NOT NULL REFERENCES ventas(id) ON DELETE CASCADE,
+        producto_id INTEGER REFERENCES productos(id) ON DELETE SET NULL,
+        codigo TEXT,
+        marca TEXT,
+        descripcion TEXT,
+        cantidad INTEGER NOT NULL,
+        precio REAL,
+        pedido TEXT,
+        stock_descontado INTEGER DEFAULT 0
+    )""")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_ventas_items_venta ON ventas_items(venta_id)")
+
+
 def crear_esquema(c):
     _esquema_catalogo(c)
     _esquema_mostrador(c)
     _esquema_fotos(c)
     _esquema_vehiculos_y_mecanico(c)
     _esquema_gestion(c)
+    _esquema_ventas(c)
     _datos_precargados_y_migraciones(c)
     _esquema_registro_y_reglas(c)
     _esquema_numeros_que_son_numeros(c)

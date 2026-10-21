@@ -1247,6 +1247,7 @@ def guardar_presupuesto_mecanico(mecanico_id, cliente_nombre, items, mano_obra):
     minutos no se guarda otra vez: un doble toque en «Guardar» (o un toque mientras la pantalla
     todavía se estaba dibujando, que Streamlit vuelve a correr) dejaba dos iguales (lo señaló
     una revisión con ChatGPT)."""
+    exigir_que_sea_su_cuenta(mecanico_id, "guardar un presupuesto", "empleado")
     total = sum(it["precio"] * it["cantidad"] for it in items) + mano_obra
     items_json = json.dumps(items, ensure_ascii=False)
     # Con transaccion() (BEGIN IMMEDIATE) y no solo con db_lock, que es de ESTE proceso: si
@@ -1269,6 +1270,7 @@ def guardar_presupuesto_mecanico(mecanico_id, cliente_nombre, items, mano_obra):
 
 
 def listar_presupuestos_mecanico(mecanico_id):
+    exigir_que_sea_su_cuenta(mecanico_id, "ver los presupuestos", None)
     c.execute("""SELECT id AS "ID", cliente_nombre AS "Cliente", items_json, mano_obra AS "Mano de obra",
                  total AS "Total", creado_en AS "Fecha" FROM presupuestos_mecanico
                  WHERE mecanico_id = ? ORDER BY id DESC""", (mecanico_id,))
@@ -1377,6 +1379,7 @@ def estado_de_cuenta(mecanico_id):
 
     VENCIDO: los pagos se imputan a lo más viejo, así que lo vencido es lo que queda del saldo
     después de descontar los cargos que todavía no vencieron (y nunca más que el saldo)."""
+    exigir_que_sea_su_cuenta(mecanico_id, "ver el estado de la cuenta", None)
     c.execute("""SELECT COALESCE(SUM(importe), 0) AS saldo,
                         COALESCE(SUM(CASE WHEN importe > 0 AND vence >= date('now', 'localtime')
                                           THEN importe END), 0) AS a_vencer
@@ -1399,6 +1402,7 @@ def estado_de_cuenta(mecanico_id):
 
 def movimientos_de_cuenta(mecanico_id, limite=200):
     """Los movimientos, del más nuevo al más viejo, con el saldo después de cada uno."""
+    exigir_que_sea_su_cuenta(mecanico_id, "ver los movimientos de la cuenta", None)
     c.execute("""SELECT id, fecha, concepto, importe, vence, medio, cheque_fecha, usuario, anulado
                  FROM movimientos_de_cuenta WHERE mecanico_id = ? ORDER BY id""", (mecanico_id,))
     filas, saldo = [], 0.0
@@ -1420,6 +1424,7 @@ def movimientos_de_cuenta(mecanico_id, limite=200):
 def generar_codigo_de_retiro(mecanico_id):
     """Un código nuevo de 6 cifras para este taller; los anteriores sin usar dejan de valer.
     Devuelve (código, hasta cuándo vale). El código no se guarda: solo su hash."""
+    exigir_que_sea_su_cuenta(mecanico_id, "generar un código de retiro", "empleado")
     import secrets
     codigo = f"{secrets.randbelow(1_000_000):06d}"
     salt = secrets.token_hex(8)

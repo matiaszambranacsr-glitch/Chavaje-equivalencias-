@@ -344,6 +344,72 @@ def probar_pares_de_muestra(logica, con_catalogo):
     return fallas, probados
 
 
+# Para el atajo de las sugerencias: dos que concuerdan sin nombrar ningún auto, y uno que nombra
+# solo el motor contra otro que nombra la marca. Los pares de muestra no traen ninguno de esos
+# casos, y sin ellos se podía romper el atajo para esos dos sin que nada avisara (se probó
+# rompiéndolo a propósito).
+DESCRIPCIONES_PARA_EL_ATAJO = [
+    "TERMOSTATO CON CARCASA 82 GRADOS", "TERMOSTATO 82 GRADOS CON CARCASA",
+    "JUNTA TAPA DE CILINDROS MOTOR K7M", "JUNTA TAPA DE CILINDROS RENAULT CLIO K7M",
+    "JTA TAPA CILINDROS K7M 1.6 8V", "JUNTA TAPA CILINDROS PEUGEOT 504",
+]
+
+
+def probar_el_atajo_de_las_sugerencias(logica, con_catalogo):
+    """Que el atajo de las sugerencias por descripción —no comparar los pares que
+    firmas_compatibles() rechaza de entrada, ver _los_que_pueden_concordar()— no deje afuera
+    ningún par que concuerda. Todas las descripciones de muestra contra todas las de su rubro, y
+    con --base, además, cada vínculo cargado. Devuelve (fallas, cuántos pares concordaban)."""
+    ns = logica.todo_lo_de_la_logica()
+    cuenta, total = ns["cuantas_veces_aparece_cada_palabra"]()
+    atajo = ns["_los_que_pueden_concordar"]
+
+    def fila(desc, pid=None, codigo=None):
+        firma = logica.firma_de_producto(desc, pid, codigo)
+        if firma and firma["familia"] != "Sin clasificar":
+            return {"descripcion": desc, "_firma": firma}
+        return None
+
+    def los_que_concuerdan(pa, filas_b):
+        return [pb for pb in filas_b if pb is not pa and logica.firmas_compatibles(
+            pa["_firma"], pb["_firma"], cuenta_palabras=cuenta, total_descripciones=total)[0]]
+
+    fallas, concordaban = [], 0
+    por_rubro = {}
+    textos = {d for a, b, *_ in PARES_DE_MUESTRA for d in (a, b)} | set(DESCRIPCIONES_PARA_EL_ATAJO)
+    for f in filter(None, map(fila, sorted(textos))):
+        por_rubro.setdefault(f["_firma"]["familia"], []).append(f)
+    grupos = list(por_rubro.values())
+    if con_catalogo:
+        # Los vínculos que quedaron cargados y los que aprobaste, que para esta prueba esperan
+        # en la cola (ver preparar_la_base_de_aprobaciones()).
+        ns["c"].execute(f"""SELECT pa.id, pa.descripcion, pa.codigo_clean,
+                                   pb.id, pb.descripcion, pb.codigo_clean
+                            FROM (SELECT producto_a_id, producto_b_id FROM equivalencias e
+                                  WHERE {ns['SIN_CONTAR_EL_ESPEJO']}
+                                  UNION SELECT producto_a_id, producto_b_id
+                                  FROM equivalencias_pendientes WHERE lote = ?) e
+                            JOIN productos pa ON pa.id = e.producto_a_id
+                            JOIN productos pb ON pb.id = e.producto_b_id""", (LOTE_DE_LA_PRUEBA,))
+        for ia, da, ca, ib, db, cb in ns["c"].fetchall():
+            a, b = fila(da, ia, ca), fila(db, ib, cb)
+            if a and b:
+                grupos.append([a, b])
+    for filas in grupos:
+        lugar = {id(x): i for i, x in enumerate(filas)}
+        for pa, quedan in atajo(filas, filas):
+            concuerdan = los_que_concuerdan(pa, filas)
+            concordaban += len(concuerdan)
+            afuera = [pb for pb in concuerdan if not any(pb is x for x in quedan)]
+            if afuera:
+                fallas.append(f"el atajo de las sugerencias deja afuera «{pa['descripcion'][:40]}» / "
+                              f"«{afuera[0]['descripcion'][:40]}», que concuerdan")
+            if [lugar[id(x)] for x in quedan] != sorted(lugar[id(x)] for x in quedan):
+                fallas.append(f"el atajo cambia el orden de los candidatos de "
+                              f"«{pa['descripcion'][:40]}»: el desempate sale distinto")
+    return fallas, concordaban
+
+
 def preparar_la_base_de_aprobaciones(ruta_base, destino):
     """Copia la base a `destino` con tus aprobaciones puestas como si recién llegaran: sin tus
     decisiones ni lo aprendido de ellas, para que el análisis no se copie la respuesta. Se hace
@@ -766,6 +832,10 @@ def main():
         print(f"{'✅' if not fallas else '❌'} pares de muestra: {probados - len(fallas)} de "
               f"{probados} bien" + (f" ({salteados} necesitan el catálogo: correlo con --base)"
                                     if salteados else ""))
+        f_atajo, concordaban = probar_el_atajo_de_las_sugerencias(logica, bool(ruta_base))
+        print(f"{'✅' if not f_atajo else '❌'} el atajo de las sugerencias por descripción no "
+              f"deja afuera ninguno de los {concordaban:,} pares que concuerdan")
+        fallas += f_atajo
         fallas += verificar_los_casos_sellados(sellar="--sellar" in sys.argv)
         if ruta_base:
             f2, resumen, conteo_ap = probar_aprobaciones(logica, cuantos)

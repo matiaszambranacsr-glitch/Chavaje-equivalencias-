@@ -6480,9 +6480,57 @@ el botón**:
 - «🔌 Probar las fuentes de afuera» suma la Central de Deudores (con el CUIT de la AFIP, nunca el
   de un cliente) y la inflación de respaldo.
 
+## 🧾 Ventas: cobrar, descontar el stock y anotarlo en la ficha del auto
+
+Una sección nueva, **🧾 Ventas** (con contraseña de empleado). Se busca lo que se lleva el cliente, se suma con «➕», se corrige la cantidad o el precio, se elige la forma de pago y **✅ Terminar la venta**. También se puede pasar el presupuesto del 🔍 Buscador con **«🧾 Pasar a una venta»**.
+
+| Qué hace | Cómo |
+|---|---|
+| **Descuenta el stock** | Como el depósito al entregar: nunca queda negativo, y si no alcanzaba avisa y lo anota para contarlo. Lo que no tiene stock cargado no se toca. |
+| **Guarda lo que se cobró** | El precio y la descripción de ese momento, por ítem. Si mañana cambia la lista, la venta dice lo que se cobró. |
+| **Sigue aprendiendo equivalencias** | Cada cosa vendida queda en las ventas registradas, con lo que pidió el cliente si buscó otro código, igual que «🛒 Se llevó». |
+| **Al terminar: «¿Querés anotar la patente y los km?»** | Con la patente y los km crea la ficha del auto (o la pone al día) y anota cada pieza con un nombre corto y parejo («Filtro aceite», no la descripción entera), que se puede corregir antes de guardar. Usa la vida útil de las otras veces. Después ofrece mandarle al cliente el link de su auto por WhatsApp. Si los km son menos que los de la última vez, frena: casi siempre es un número mal tipeado. Se puede confirmar. |
+| **Todo o nada** | La venta, cada ítem, el stock y lo aprendido van juntos: si algo falla, no queda nada a medias. Anotarla en un auto se hace una sola vez, aunque se toque dos veces. |
+| **Las ventas de hoy** | Con el total del día. **Anular** (solo administrador) devuelve al stock lo que se había descontado y la deja a la vista, tachada. |
+
+Cargarla a la cuenta de un taller sigue yendo por el depósito, con la cuenta elegida: pide el código de retiro y mira el límite de crédito.
+
+## 📞 Un aviso por cliente, y una sola vez
+
+«A quién avisar» era una fila por pieza: el cliente con la correa y las pastillas recibía dos mensajes, y al otro día los dos volvían a la lista. Ahora es **un mensaje por cliente** con todo lo que le toca, y **«✅ Ya le avisé»** lo saca de la lista por 15 días. Si mientras tanto le toca otra pieza, vuelve por esa.
+
+## 🔧 El portal del mecánico, fusionar duplicados y más pruebas de plata y stock
+
+| Qué | Qué pasaba | Qué se hizo |
+|---|---|---|
+| **El portal del mecánico externo** | Se recorrió entrando como mecánico y tocando todo: solo genera su código de retiro y guarda sus presupuestos. No ve los de otro taller, ni su cuenta, ni las secciones, aunque la sesión diga otra página. | Ya andaba bien. Se sumó la segunda barrera: sus funciones controlan que un mecánico solo lea y escriba **su** cuenta, aunque las llamen con otro número. |
+| **Fusionar dos productos duplicados** | Al borrar el que sobraba, la base borraba en cascada lo que apuntaba a él: **los apartados activos**, las ventas aprendidas, los pedidos al depósito, lo que se le puso a cada auto. Y los vínculos pendientes, aunque el comentario de la función decía que no se perdían. | Todo pasa al que queda. Se recorren las claves foráneas de la base misma, así que una tabla nueva queda incluida sola. |
+| **Más pruebas en lo que mueve plata y stock** | Apartar contra el stock libre, cerrar un apartado, el mejor margen, los pagos y cargos de las cuentas corrientes (cheque en cartera, importes que no son números), el resumen de cuentas, el PDF del presupuesto del mecánico: sin prueba. | `pruebas_de_las_ventas.py` y `pruebas_de_la_plata_y_el_stock.py`. Cobertura de esa parte: mostrador del 43% al 54%, cuentas del 50% al 54%, depósito del 72% al 74%, ventas 93%. Lo que queda afuera es sobre todo pantalla y consultas por internet. |
+
+## ⏱️ Los botones que tardaban minutos
+
+Se midió con la base real, botón por botón, cuánto tarda cada uno de **Productos** y **Mantenimiento**. Casi todos tardan menos de 4 segundos. Los que no:
+
+| Botón | Antes | Ahora | Qué pasaba |
+|---|---|---|---|
+| **«📋 Mostrar productos sin equivalencias»** y su Excel | unos 8 minutos | segundos (el Excel, 3,7 s) | Armar el Excel preguntaba en cada renglón cuál era el último, y la planilla para contestarlo recorre todas las celdas: el tiempo crecía al cuadrado. Con los 62.856 productos huérfanos eran 422 s. Ahora el renglón se cuenta, y el Excel se guarda mientras la lista no cambie. **Todas** las descargas de Excel usan esa función, así que las grandes también se aceleraron. |
+| **«🔤 Buscar equivalencias por descripción»** (IMPERIAL contra TARANTO) | entre 4½ y 7 minutos, según la carga | 18 s (40 s la primera vez, que lee las descripciones) | Comparaba 32 millones de pares, uno por uno. Tres reglas dicen que no siempre: autos distintos, una que dice para qué auto es contra otra que no, y menos de dos palabras de la pieza en común. Ahora esos pares ni se miran, y quedan 575.000. |
+| **«🧠 Buscar equivalencias en TODO el catálogo»** | 14 s (más la lectura) | 7 s | Los filtros iban en otro orden: el más caro primero. |
+| **«🔎 Analizar los vínculos cargados»** | 14 s | 9,5 s | Limpiaba palabra por palabra cada descripción buscando el número del conjunto («Conj. bomba …»), que casi ninguna tiene. Ahora primero se fija si lo tiene. |
+
+**El resultado es el mismo**, y se comprobó comparando antes y después con la base real:
+
+- las sugerencias por descripción, byte por byte: 4 pares de proveedores, con y sin tope, 4.262 sugerencias con su orden y su «Por qué»;
+- el barrido de todo el catálogo: 4.868 y 7.306 sugerencias;
+- el número del conjunto: 159.786 llamadas.
+
+`pruebas_de_la_revision.py` controla además que el atajo no deje afuera ningún par que concuerda. Se lo rompió a propósito de siete formas distintas, y las siete veces avisó.
+
+Los que tardan unos segundos («🧠 Deducir de mis descripciones», «🔍 Ver qué se podría completar») ahora muestran que están trabajando, y dicen cuánto tardan de verdad.
+
 ## 🧑‍🔧 Lo que puede hacer un operador
 
-Se recorrieron como **operador** las secciones con contraseña (Vehículos, Depósito, Vincular, Cargar Excel, las 7 de Estadísticas y Marcas), tocando cada botón con un registro de lo que se escribe en la base. Las de Productos y Mantenimiento tienen botones que recorren el catálogo entero y tardan minutos cada uno: esas se revisaron leyendo el código, botón por botón. Casi todo lo que hace es trabajo de empleado (anotar, mandar a revisión, cerrar una reserva, el conteo de stock), y la sección de copias ya pedía la contraseña de administrador entera.
+Se recorrieron como **operador** las secciones con contraseña (Vehículos, Depósito, Vincular, Cargar Excel, las 7 de Estadísticas y Marcas), tocando cada botón con un registro de lo que se escribe en la base. Las de Productos y Mantenimiento tenían botones que recorrían el catálogo entero y tardaban minutos (ver «⏱️ Los botones que tardaban minutos»): esas se revisaron leyendo el código, botón por botón. Casi todo lo que hace es trabajo de empleado (anotar, mandar a revisión, cerrar una reserva, el conteo de stock), y la sección de copias ya pedía la contraseña de administrador entera.
 
 | Qué | Qué pasaba | Qué se hizo |
 |---|---|---|
