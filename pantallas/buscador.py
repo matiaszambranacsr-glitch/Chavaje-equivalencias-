@@ -86,9 +86,13 @@ if pagina == PAGINAS[0]:
                          + (f" · para {cuenta_elegida()['nombre']}" if cuenta_elegida() else ""),
                           expanded=False):
             _pedir_de_a_uno = es_empleado_o_abierto()
+            # «Se lleva»: lo que pasa a la venta. Marcado de entrada, así que sin tocar nada
+            # pasa todo (ver pasar_el_presupuesto_a_una_venta()).
+            st.caption("☑️ = se lleva. Destildá lo que el cliente no se lleva: no pasa a la venta "
+                       "y queda en el presupuesto.")
             for _pid, _item in list(_cart.items()):
                 if _pedir_de_a_uno:
-                    ci1, ci2, ci4, ci3 = st.columns([5, 2, 1, 1])
+                    ci0, ci1, ci2, ci4, ci3 = st.columns([0.4, 5, 2, 1, 1])
                     # De a uno: el que atiende va pidiendo lo que el cliente ya confirmó, sin
                     # mandar el presupuesto entero (ver pedir_uno_del_presupuesto()).
                     ci4.button("📦", key=f"pedir_uno_cart_{_pid}",
@@ -96,7 +100,13 @@ if pagina == PAGINAS[0]:
                                     f"{nombre_de_la_cuenta_elegida()}",
                                on_click=pedir_uno_del_presupuesto, args=(_pid,))
                 else:
-                    ci1, ci2, ci3 = st.columns([5, 2, 1])
+                    ci0, ci1, ci2, ci3 = st.columns([0.4, 5, 2, 1])
+                # Lo marcado se guarda también en el presupuesto: la casilla se olvida de lo suyo
+                # cuando se va a otra pantalla, y lo destildado tiene que seguir destildado.
+                _item["se_lleva"] = ci0.checkbox(
+                    "Se lleva", value=_item.get("se_lleva", True), key=f"se_lleva_{_pid}",
+                    label_visibility="collapsed",
+                    help="Se lleva: pasa a la venta. Destildado, queda en el presupuesto.")
                 ci1.markdown(f"**{_item['marca']} {_item['codigo']}** — "
                               f"{(_item['descripcion'] or '')[:40]}")
                 _nueva_cant = ci2.number_input("Cant.", min_value=1, value=_item["cantidad"],
@@ -146,10 +156,16 @@ if pagina == PAGINAS[0]:
                 mostrar_permiso_si_hace_falta("presupuesto")
             # Cobrarlo: pasa a 🧾 Ventas, que descuenta el stock y al terminar pregunta la
             # patente y los km (ver pasar_el_presupuesto_a_una_venta()).
-            st.button("🧾 Pasar a una venta", key="pasar_a_venta", type="primary",
-                      disabled=solo_mirar(), on_click=pasar_el_presupuesto_a_una_venta,
+            _se_llevan = sum(1 for _pid in _cart if se_lleva(_pid))
+            st.button("🧾 Pasar a una venta" + (f" — {_se_llevan} de {len(_cart)}"
+                                                if _se_llevan < len(_cart) else ""),
+                      key="pasar_a_venta", type="primary",
+                      disabled=solo_mirar() or not _se_llevan,
+                      on_click=pasar_el_presupuesto_a_una_venta,
                       help=TEXTO_SOLO_MIRAR if solo_mirar() else
-                      "Lo cobrás en 🧾 Ventas: descuenta el stock y lo anota en la ficha del auto.")
+                      "Marcá en «Se lleva» lo que se lleva el cliente." if not _se_llevan else
+                      "Lo marcado lo cobrás en 🧾 Ventas: descuenta el stock y lo anota en la "
+                      "ficha del auto. Lo destildado queda en el presupuesto.")
             cb1, cb2 = st.columns(2)
             if cb1.button("🔒 Apartar todo el presupuesto", disabled=solo_mirar(),
                           help=TEXTO_SOLO_MIRAR if solo_mirar() else None):

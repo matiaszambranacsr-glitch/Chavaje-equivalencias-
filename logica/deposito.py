@@ -588,6 +588,10 @@ def sumar_al_presupuesto(fila, cantidad=1):
     if fila["ID"] in carrito:
         carrito[fila["ID"]]["cantidad"] += int(cantidad)
         st.session_state.pop(f"cant_cart_{fila['ID']}", None)
+        # Sumarlo otra vez es que se lo lleva, aunque antes se lo hubiera destildado (ver
+        # pasar_el_presupuesto_a_una_venta()).
+        carrito[fila["ID"]]["se_lleva"] = True
+        st.session_state.pop(f"se_lleva_{fila['ID']}", None)
     else:
         carrito[fila["ID"]] = {"codigo": fila["Codigo"], "marca": fila["Marca"],
                                "descripcion": fila.get("Descripcion") or "",

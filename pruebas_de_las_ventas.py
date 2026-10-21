@@ -145,6 +145,33 @@ def probar(L):
              st.session_state["carrito"], st.session_state["pagina_actual"]),
             ([(ids["F100"], 3), (ids["J200"], 1)], {}, ns["PAGINAS"][9]))
 
+    # Con la casilla «Se lleva»: pasa lo marcado, lo destildado queda en el presupuesto y sigue
+    # destildado; sin nada marcado no se va a Ventas; sumarlo otra vez es que se lo lleva.
+    st.session_state["venta_items"] = []
+    st.session_state["pagina_actual"] = ns["PAGINAS"][0]
+    st.session_state["carrito"] = {ids["F100"]: {"cantidad": 1}, ids["J200"]: {"cantidad": 2},
+                                   ids["B300"]: {"cantidad": 1, "se_lleva": False}}
+    st.session_state[f"se_lleva_{ids['J200']}"] = False
+    ns["pasar_el_presupuesto_a_una_venta"]()
+    esperar("solo lo que se lleva",
+            ([x["producto_id"] for x in st.session_state["venta_items"]],
+             sorted(st.session_state["carrito"]), ns["se_lleva"](ids["J200"]),
+             ns["se_lleva"](ids["B300"]), st.session_state["pagina_actual"]),
+            ([ids["F100"]], sorted([ids["J200"], ids["B300"]]), False, False, ns["PAGINAS"][9]))
+    st.session_state["pagina_actual"] = ns["PAGINAS"][0]
+    st.session_state.pop("_avisos", None)
+    ns["pasar_el_presupuesto_a_una_venta"]()
+    esperar("sin nada marcado, no pasa nada y avisa",
+            (len(st.session_state["venta_items"]), len(st.session_state["carrito"]),
+             st.session_state["pagina_actual"], [t for t, _ in st.session_state.get("_avisos", [])]),
+            (1, 2, ns["PAGINAS"][0], ["warning"]))
+    ns["sumar_al_presupuesto"]({"ID": ids["J200"], "Codigo": "J200", "Marca": "PRUEBA"})
+    esperar("sumarlo otra vez lo marca", (ns["se_lleva"](ids["J200"]), ns["se_lleva"](ids["B300"]),
+                                          st.session_state["carrito"][ids["J200"]]["cantidad"]),
+            (True, False, 3))
+    for clave in ("carrito", "venta_items", "_avisos"):
+        st.session_state.pop(clave, None)
+
     # 7. Quién puede: vender y anotar, empleado; anular, administrador.
     originales = (g["_nivel_de_quien_esta_adentro"], g["hay_claves_configuradas"])
     g["hay_claves_configuradas"] = lambda: True

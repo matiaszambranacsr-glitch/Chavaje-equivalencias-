@@ -443,9 +443,16 @@ def avisar(tipo, texto):
 
 
 def mostrar_avisos_pendientes():
-    """Muestra lo que quedó guardado por avisar() antes del último refresco."""
-    for tipo, texto in st.session_state.pop("_avisos", []):
-        getattr(st, tipo, st.info)(texto)
+    """Muestra lo que quedó guardado por avisar() antes del último refresco.
+
+    Adentro de un contenedor que está SIEMPRE, haya avisos o no. Sin eso, el aviso corría un
+    lugar todo lo de abajo, y en el refresco siguiente —ya sin el aviso— volvía a correrse: para
+    la pantalla eran otros elementos, y lo que estaba abierto se cerraba. Se veía en el
+    presupuesto del buscador: sumabas algo («sumado al presupuesto»), tocabas una casilla o una
+    cantidad, y el presupuesto se cerraba en la cara."""
+    with st.container():
+        for tipo, texto in st.session_state.pop("_avisos", []):
+            getattr(st, tipo, st.info)(texto)
 
 
 def recordar_archivo(archivo, clave):

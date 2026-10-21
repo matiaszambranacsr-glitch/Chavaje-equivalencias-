@@ -6484,6 +6484,10 @@ el botón**:
 
 Una sección nueva, **🧾 Ventas** (con contraseña de empleado). Se busca lo que se lleva el cliente, se suma con «➕», se corrige la cantidad o el precio, se elige la forma de pago y **✅ Terminar la venta**. También se puede pasar el presupuesto del 🔍 Buscador con **«🧾 Pasar a una venta»**.
 
+**Lo que se lleva, y lo que no.** Cada renglón del presupuesto tiene su casilla **«Se lleva»**, marcada de entrada: sin tocar nada pasa todo, como antes. Si el cliente pidió presupuesto de cuatro cosas y se lleva tres, destildás la que no, y el botón dice «Pasar a una venta — 3 de 4». La que no se lleva queda en el presupuesto, destildada, para mandarla o vaciarla después. Si la volvés a sumar desde la búsqueda, se vuelve a marcar.
+
+Y un arreglo que salió probándolo: después de un aviso («sumado al presupuesto»), lo primero que se tocaba —una casilla, una cantidad— cerraba el presupuesto. El aviso corría la pantalla un lugar, y al desaparecer la volvía a correr: para la pantalla eran otros elementos. Ahora el aviso tiene su lugar fijo, y nada se cierra solo.
+
 | Qué hace | Cómo |
 |---|---|
 | **Descuenta el stock** | Como el depósito al entregar: nunca queda negativo, y si no alcanzaba avisa y lo anota para contarlo. Lo que no tiene stock cargado no se toca. |

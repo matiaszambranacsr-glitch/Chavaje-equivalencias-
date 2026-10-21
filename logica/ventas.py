@@ -233,12 +233,32 @@ def ventas_del_dia(dia=None):
     return ventas
 
 
+def se_lleva(producto_id):
+    """¿Está marcada la casilla «Se lleva» de este renglón del presupuesto? Marcada salvo que se
+    la haya destildado. Ver pasar_el_presupuesto_a_una_venta()."""
+    item = (st.session_state.get("carrito") or {}).get(producto_id) or {}
+    return bool(st.session_state.get(f"se_lleva_{producto_id}", item.get("se_lleva", True)))
+
+
 def pasar_el_presupuesto_a_una_venta():
     """Callback de «🧾 Pasar a una venta» en el presupuesto del buscador: lo que se estaba
     armando pasa a la venta, y la pantalla va a 🧾 Ventas. Como callback, porque la sección
-    elegida es la clave de un widget ya dibujado (ver ir_a_donde_dice_el_aviso())."""
+    elegida es la clave de un widget ya dibujado (ver ir_a_donde_dice_el_aviso()).
+
+    SOLO LO QUE SE LLEVA. Cada renglón tiene su casilla «Se lleva», marcada de entrada: si no se
+    toca nada pasa todo, como antes. Lo que se destilda —el cliente pidió presupuesto de cuatro
+    cosas y se lleva tres— no pasa y queda en el presupuesto, destildado, para mandarlo o
+    vaciarlo después. Sin ninguna marcada no se va a Ventas: no hay nada que cobrar."""
+    carrito = st.session_state.get("carrito") or {}
+    elegidos = [pid for pid in carrito if se_lleva(pid)]
+    if not elegidos:
+        avisar("warning", "No hay nada marcado en «Se lleva»: marcá lo que se lleva el cliente.")
+        return
     venta = st.session_state.setdefault("venta_items", [])
-    for producto_id, item in list((st.session_state.get("carrito") or {}).items()):
+    for producto_id in elegidos:
+        item = carrito.pop(producto_id)
+        st.session_state.pop(f"cant_cart_{producto_id}", None)
+        st.session_state.pop(f"se_lleva_{producto_id}", None)
         fila = item_de_venta(producto_id, item.get("cantidad") or 1)
         if not fila:
             continue
@@ -249,5 +269,11 @@ def pasar_el_presupuesto_a_una_venta():
             st.session_state.pop(f"venta_cant_{fila['producto_id']}", None)
         else:
             venta.append(fila)
-    st.session_state["carrito"] = {}
+    # Lo que no se lleva queda destildado: si vuelve a la venta, que sea porque alguien lo marcó.
+    for producto_id, item in carrito.items():
+        item["se_lleva"] = False
+        st.session_state.pop(f"se_lleva_{producto_id}", None)
+    if carrito:
+        avisar("info", f"Pasaron {len(elegidos)} a la venta. {len(carrito)} quedaron en el "
+                       "presupuesto del 🔍 Buscador, sin marcar.")
     st.session_state["pagina_actual"] = PAGINAS[9]

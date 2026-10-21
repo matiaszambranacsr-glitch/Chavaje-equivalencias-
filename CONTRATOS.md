@@ -200,6 +200,7 @@ Las pruebas se corren como dice el README, en «Antes de subir un cambio».
 | Los atrasados, el aviso por WhatsApp y el PDF de la ficha usan la misma cuenta que el link del cliente | `listar_vehiculos_atrasados()`, `generar_pdf_ficha_vehiculo()` | `pruebas_de_los_cambios.py` (9l ter) |
 | Descartar una lista entera de pendientes es de administrador; los pares elegidos, de empleado | `rechazar_pendientes()` | `pruebas_de_los_cambios.py` (5) |
 | Una venta descuenta el stock sin dejarlo negativo, guarda el precio de ese momento y aprende lo vendido, todo o nada; anular devuelve lo descontado | `cerrar_venta()`, `anular_venta()` | `pruebas_de_las_ventas.py` |
+| Del presupuesto a la venta pasa solo lo marcado en «Se lleva» (todo, si no se toca nada); lo destildado queda en el presupuesto, destildado | `pasar_el_presupuesto_a_una_venta()`, `se_lleva()` | `pruebas_de_las_ventas.py` |
 | Al terminar la venta, la patente y los km anotan cada pieza en la ficha del auto, una sola vez, y frenan los km para atrás | `anotar_la_venta_en_el_auto()`, `nombre_de_la_pieza()` | `pruebas_de_las_ventas.py` |
 | Un aviso por cliente con todo lo que le toca; «Ya le avisé» lo saca de la lista 15 días | `avisos_por_cliente()`, `marcar_avisado()` | `pruebas_de_los_cambios.py` (9l ter) |
 | Un mecánico solo lee y escribe su propia cuenta | `exigir_que_sea_su_cuenta()` | `pruebas_de_los_cambios.py` (5) |
