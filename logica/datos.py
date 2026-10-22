@@ -2889,6 +2889,18 @@ def _esquema_ventas(c):
         stock_descontado INTEGER DEFAULT 0
     )""")
     c.execute("CREATE INDEX IF NOT EXISTS idx_ventas_items_venta ON ventas_items(venta_id)")
+    # DE QUÉ VENTA SALIÓ lo que se anotó en la ficha del auto y lo que se aprendió de ella:
+    # anular la venta lo saca de los dos lados (ver anular_venta()). Sin esto, el auto seguía
+    # diciendo que se le puso la pieza, y los avisos contaban desde un cambio que no pasó.
+    # Una por una y escritas enteras: el auditor lee las columnas de acá (ver auditar.py).
+    if "venta_id" not in [f[1] for f in c.execute("PRAGMA table_info(historial_piezas)")]:
+        c.execute("ALTER TABLE historial_piezas ADD COLUMN venta_id INTEGER "
+                  "REFERENCES ventas(id) ON DELETE SET NULL")
+    if "venta_id" not in [f[1] for f in c.execute("PRAGMA table_info(ventas_registradas)")]:
+        c.execute("ALTER TABLE ventas_registradas ADD COLUMN venta_id INTEGER "
+                  "REFERENCES ventas(id) ON DELETE SET NULL")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_ventas_registradas_venta "
+              "ON ventas_registradas(venta_id)")
 
 
 def crear_esquema(c):

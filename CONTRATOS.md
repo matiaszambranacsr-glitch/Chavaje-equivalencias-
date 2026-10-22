@@ -201,6 +201,10 @@ Las pruebas se corren como dice el README, en «Antes de subir un cambio».
 | Descartar una lista entera de pendientes es de administrador; los pares elegidos, de empleado | `rechazar_pendientes()` | `pruebas_de_los_cambios.py` (5) |
 | Una venta descuenta el stock sin dejarlo negativo, guarda el precio de ese momento y aprende lo vendido, todo o nada; anular devuelve lo descontado | `cerrar_venta()`, `anular_venta()` | `pruebas_de_las_ventas.py` |
 | Del presupuesto a la venta pasa solo lo marcado en «Se lleva» (todo, si no se toca nada); lo destildado queda en el presupuesto, destildado | `pasar_el_presupuesto_a_una_venta()`, `se_lleva()` | `pruebas_de_las_ventas.py` |
+| En Ventas, lo 🔴 en lugar de lo pedido se confirma, y el 🔴 de seguridad no se vende como reemplazo; lo vendido se aprende con su veredicto y cómo se vendió | `cerrar_venta()`, `sumar_a_la_venta()` | `pruebas_de_las_ventas.py` (8) |
+| Anular una venta saca de la ficha del auto sus piezas y lo aprendido de ella | `anular_venta()` | `pruebas_de_las_ventas.py` (5) |
+| El cierre de caja de un día: por forma de pago y por quién atendió, sin lo anulado | `cierre_de_caja()` | `pruebas_de_las_ventas.py` (9) |
+| Al vender: lo que suele ir con lo vendido y no está, y lo que se quedó sin stock | `lo_que_suele_ir_con_la_venta()`, `lo_que_se_termino()` | `pruebas_de_las_ventas.py` (9) |
 | Al terminar la venta, la patente y los km anotan cada pieza en la ficha del auto, una sola vez, y frenan los km para atrás | `anotar_la_venta_en_el_auto()`, `nombre_de_la_pieza()` | `pruebas_de_las_ventas.py` |
 | Un aviso por cliente con todo lo que le toca; «Ya le avisé» lo saca de la lista 15 días | `avisos_por_cliente()`, `marcar_avisado()` | `pruebas_de_los_cambios.py` (9l ter) |
 | Un mecánico solo lee y escribe su propia cuenta | `exigir_que_sea_su_cuenta()` | `pruebas_de_los_cambios.py` (5) |

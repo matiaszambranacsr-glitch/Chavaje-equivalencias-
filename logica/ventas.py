@@ -64,7 +64,8 @@ def nombre_de_la_pieza(descripcion):
 
 def item_de_venta(producto_id, cantidad=1, pedido=""):
     """La fila de la venta para un producto del catálogo, con su precio de hoy, o None."""
-    c.execute("""SELECT p.id, p.codigo_raw, p.descripcion, p.precio, p.stock, m.nombre AS marca
+    c.execute("""SELECT p.id, p.codigo_raw, p.descripcion, p.precio, p.precio_costo, p.stock,
+                        m.nombre AS marca
                  FROM productos p JOIN marcas m ON m.id = p.marca_id WHERE p.id = ?""",
               (producto_id,))
     f = c.fetchone()
@@ -72,14 +73,92 @@ def item_de_venta(producto_id, cantidad=1, pedido=""):
         return None
     return {"producto_id": f["id"], "codigo": f["codigo_raw"], "marca": f["marca"],
             "descripcion": f["descripcion"] or "", "precio": float(f["precio"] or 0),
-            "stock": f["stock"], "cantidad": int(cantidad), "pedido": (pedido or "").strip()}
+            "costo": f["precio_costo"], "stock": f["stock"], "cantidad": int(cantidad),
+            "pedido": (pedido or "").strip()}
+
+
+def sumar_a_la_venta(fila, pedido="", veredicto=None, evidencia=None, confirmado=False):
+    """Suma un resultado de la búsqueda a la venta que se está armando (o uno más, si ya
+    estaba). `veredicto` y `evidencia` son los que tenía ese resultado (ver
+    veredicto_de_la_equivalencia()): viajan con el ítem hasta cerrar_venta(), que frena lo 🔴
+    sin confirmar y lo anota como lo anota «Se llevó». Devuelve el ítem, o None."""
+    venta = st.session_state.setdefault("venta_items", [])
+    ya = next((x for x in venta if x["producto_id"] == fila["ID"]), None)
+    if ya:
+        ya["cantidad"] += 1
+        ya["confirmado"] = ya.get("confirmado") or confirmado
+        # El campo de la cantidad guarda lo suyo: sin esto, el «+1» no se veía.
+        st.session_state.pop(f"venta_cant_{fila['ID']}", None)
+        return ya
+    nuevo = item_de_venta(fila["ID"], 1, pedido)
+    if nuevo:
+        nuevo.update(veredicto=veredicto, evidencia=evidencia, confirmado=confirmado)
+        venta.append(nuevo)
+    return nuevo
+
+
+def lo_que_se_termino(venta_id):
+    """Lo vendido en esa venta que quedó con stock 0: [(producto_id, «marca código»)]. Para
+    anotarlo para reponer ahí mismo (ver solicitar_reposicion())."""
+    c.execute("""SELECT DISTINCT vi.producto_id, vi.marca, vi.codigo FROM ventas_items vi
+                 JOIN productos p ON p.id = vi.producto_id
+                 WHERE vi.venta_id = ? AND p.stock = 0 ORDER BY vi.id""", (venta_id,))
+    return [(f["producto_id"], f"{f['marca']} {f['codigo']}") for f in c.fetchall()]
+
+
+def lo_que_suele_ir_con_la_venta(items):
+    """Para cada cosa de la venta, lo que suele cambiarse junto con ella y no está en la venta
+    (ver lo_que_suele_ir_con()): [(«marca código», [nombres])]. Lo mismo que avisa «Se llevó»,
+    antes de que se vaya el cliente."""
+    textos = [normalizar_texto(it.get("descripcion") or "") for it in items]
+    salida = []
+    for it in items:
+        # «Kit de distribución (si la mueve la correa)»: lo de entre paréntesis es para quien
+        # atiende, no está en ninguna descripción.
+        faltan = [n for n in lo_que_suele_ir_con(it["producto_id"])
+                  if not any(normalizar_texto(re.sub(r"\(.*?\)", "", n)).strip() in t
+                             for t in textos)]
+        if faltan:
+            salida.append((f"{it['marca']} {it['codigo']}", faltan))
+    return salida
+
+
+def cierre_de_caja(dia=None):
+    """Lo que entró en un día (hoy, si no se dice): el total, por forma de pago y por quién
+    atendió, y lo anulado aparte. Para cerrar la caja: contar la plata del cajón contra lo que
+    dice «Efectivo», y las transferencias contra el banco. dict."""
+    ventas = ventas_del_dia(dia)
+    validas = [v for v in ventas if not v["anulada"]]
+
+    def agrupar(campo, vacio):
+        grupos = {}
+        for v in validas:
+            g = grupos.setdefault(v[campo] or vacio, [0, 0.0])
+            g[0] += 1
+            g[1] += v["total"] or 0
+        return sorted(((k, n, round(t, 2)) for k, (n, t) in grupos.items()),
+                      key=lambda x: -x[2])
+    anuladas = [v for v in ventas if v["anulada"]]
+    return {"ventas": len(validas), "total": round(sum(v["total"] or 0 for v in validas), 2),
+            "por_forma": agrupar("forma_de_pago", "Sin decir"),
+            "por_usuario": agrupar("usuario", "Sin decir"),
+            "anuladas": len(anuladas),
+            "total_anulado": round(sum(v["total"] or 0 for v in anuladas), 2)}
 
 
 def cerrar_venta(items, cliente="", forma_de_pago="", usuario=None):
     """Cierra la venta. Devuelve (venta_id, avisos). Ver «VENTAS DEL MOSTRADOR».
 
     `items`: filas de item_de_venta() (con la cantidad y el precio que quedaron en la pantalla).
-    Todo o nada: la venta, cada cosa vendida, el stock y lo aprendido van en una transacción."""
+    Todo o nada: la venta, cada cosa vendida, el stock y lo aprendido van en una transacción.
+
+    LO 🔴 COMO REEMPLAZO, IGUAL QUE «SE LLEVÓ». Un ítem que se sumó desde los resultados de otro
+    código trae el veredicto que tenía ahí («veredicto», con su «evidencia»): si la app dice que
+    no es la misma pieza, hay que haberlo confirmado («confirmado»), y si además es una pieza
+    de seguridad no se vende como reemplazo (ver bloqueo_de_venta()). Se mira acá y no solo en
+    la pantalla: si no, cualquier otro camino la vendía igual. Y lo aprendido queda como en
+    registrar_venta(): con el veredicto, si se vendió como equivalente o como alternativa, y la
+    evidencia de ese momento."""
     exigir_nivel("empleado", "cerrar una venta")
     if not items:
         raise ValueError("La venta no tiene nada.")
@@ -94,17 +173,27 @@ def cerrar_venta(items, cliente="", forma_de_pago="", usuario=None):
                              f"{CANTIDAD_MAXIMA_POR_PEDIDO}.")
         if precio < 0:
             raise ValueError(f"{it.get('codigo')}: el precio no puede ser negativo.")
+        veredicto = it.get("veredicto") or None
+        if str(veredicto or "").startswith("🔴"):
+            c.execute("SELECT descripcion FROM productos WHERE id = ?", (it["producto_id"],))
+            _fila = c.fetchone()
+            _bloqueo = bloqueo_de_venta(veredicto, _fila["descripcion"] if _fila else "")
+            if _bloqueo == "bloqueada":
+                raise ValueError(f"{it.get('codigo')}: {TEXTO_DE_VENTA_BLOQUEADA}")
+            if _bloqueo == "confirmar" and not it.get("confirmado"):
+                raise ValueError(f"{it.get('codigo')}: la app dice que no es la misma pieza "
+                                 f"({veredicto}). Confirmalo primero.")
         limpios.append((int(it["producto_id"]), cantidad, round(precio, 2),
-                        (it.get("pedido") or "").strip()))
+                        (it.get("pedido") or "").strip(), veredicto, it.get("evidencia") or None))
     usuario = usuario or obtener_usuario_actual()
     avisos = []
     with db_lock, transaccion():
         c.execute("""INSERT INTO ventas (usuario, cliente, forma_de_pago, total)
                      VALUES (?, ?, ?, ?)""",
                   (usuario, (cliente or "").strip(), forma_de_pago or "",
-                   round(sum(cantidad * precio for _, cantidad, precio, _ in limpios), 2)))
+                   round(sum(x[1] * x[2] for x in limpios), 2)))
         venta_id = c.lastrowid
-        for producto_id, cantidad, precio, pedido in limpios:
+        for producto_id, cantidad, precio, pedido, veredicto, evidencia in limpios:
             c.execute("""SELECT p.stock, p.codigo_raw, p.descripcion, m.nombre AS marca
                          FROM productos p JOIN marcas m ON m.id = p.marca_id WHERE p.id = ?""",
                       (producto_id,))
@@ -135,9 +224,11 @@ def cerrar_venta(items, cliente="", forma_de_pago="", usuario=None):
             # se llevó. Ver descubrir_equivalencias_candidatas().
             _pedido = pedido or f["codigo_raw"]
             c.execute("""INSERT INTO ventas_registradas (producto_id, termino_pedido,
-                                                         codigo_pedido_clean, usuario)
-                         VALUES (?, ?, ?, ?)""",
-                      (producto_id, _pedido, sanitizar(_pedido), usuario))
+                                                         codigo_pedido_clean, usuario, veredicto,
+                                                         como, evidencia, venta_id)
+                         VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                      (producto_id, _pedido, sanitizar(_pedido), usuario, veredicto,
+                       como_se_vende(veredicto), evidencia, venta_id))
     return venta_id, avisos
 
 
@@ -185,7 +276,7 @@ def anotar_la_venta_en_el_auto(venta_id, patente, km, piezas=None, cliente_nombr
         filas.append((vehiculo_id, it["producto_id"], nombre, it["marca"] or "", it["codigo"] or "",
                       km, vida_util_de_las_otras_veces(nombre, vehiculo_id),
                       vida_util_de_las_otras_veces(nombre, vehiculo_id, "vida_util_meses"),
-                      f"Venta #{venta_id}"))
+                      f"Venta #{venta_id}", venta_id))
     # Todo o nada, y el «una sola vez» adentro: dos toques seguidos no la anotan dos veces.
     with db_lock, transaccion():
         c.execute("UPDATE ventas SET vehiculo_id = ?, km = ? WHERE id = ? AND vehiculo_id IS NULL",
@@ -194,15 +285,21 @@ def anotar_la_venta_en_el_auto(venta_id, patente, km, piezas=None, cliente_nombr
             return False, "Esa venta ya está anotada en la ficha de un auto.", None
         c.executemany("""INSERT INTO historial_piezas (vehiculo_id, producto_id, descripcion_pieza,
                                                       marca_pieza, codigo_pieza, km_instalacion,
-                                                      vida_util_km, vida_util_meses, nota)
-                         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""", filas)
+                                                      vida_util_km, vida_util_meses, nota,
+                                                      venta_id)
+                         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""", filas)
     return (True, f"Anotado en la ficha de {pat}: {len(filas)} pieza(s) a los {miles(km)} km.",
             vehiculo_id)
 
 
 def anular_venta(venta_id):
-    """Anula una venta: devuelve al stock lo que se descontó y la marca anulada (no se borra:
-    queda a la vista). Solo administrador. (ok, texto)."""
+    """Anula una venta como si no hubiera pasado: devuelve al stock lo que se descontó, saca de
+    la ficha del auto las piezas que se anotaron con ella y lo que la app aprendió de ella, y la
+    marca anulada (no se borra: queda a la vista). Solo administrador. (ok, texto).
+
+    Antes solo devolvía el stock: el auto seguía diciendo que se le puso la pieza, y «A quién
+    avisar» y el link del cliente contaban desde un cambio que no pasó. Lo anotado antes de que
+    cada pieza supiera de qué venta salió se reconoce por la nota «Venta #N» en ese auto."""
     exigir_nivel("admin", "anular una venta")
     with db_lock, transaccion():
         c.execute("""UPDATE ventas SET anulada = 1, anulada_por = ?
@@ -215,7 +312,18 @@ def anular_venta(venta_id):
         for f in c.fetchall():
             c.execute("UPDATE productos SET stock = COALESCE(stock, 0) + ? WHERE id = ?",
                       (f["stock_descontado"], f["producto_id"]))
-    return True, f"Venta #{venta_id} anulada: lo que se había descontado volvió al stock."
+        c.execute("""SELECT v.vehiculo_id, ve.patente FROM ventas v
+                     LEFT JOIN vehiculos ve ON ve.id = v.vehiculo_id WHERE v.id = ?""",
+                  (venta_id,))
+        auto = c.fetchone()
+        c.execute("""DELETE FROM historial_piezas
+                     WHERE venta_id = ? OR (venta_id IS NULL AND vehiculo_id = ? AND nota = ?)""",
+                  (venta_id, auto["vehiculo_id"], f"Venta #{venta_id}"))
+        sacadas = c.rowcount
+        c.execute("DELETE FROM ventas_registradas WHERE venta_id = ?", (venta_id,))
+    return True, (f"Venta #{venta_id} anulada: lo que se había descontado volvió al stock"
+                  + (f", y se sacaron {sacadas} pieza(s) de la ficha de {auto['patente']}"
+                     if sacadas else "") + ".")
 
 
 def ventas_del_dia(dia=None):

@@ -124,11 +124,25 @@ def probar(L):
              c.execute("SELECT COUNT(*) FROM vehiculos WHERE patente LIKE 'AE%'").fetchone()[0]),
             (False, True, True, auto, 1))
 
-    # 5. Anular devuelve al stock lo que se descontó (no lo que se vendió de más), una vez.
-    ok_an, _ = ns["anular_venta"](venta)
+    # 5. Anular devuelve al stock lo que se descontó (no lo que se vendió de más), una vez. Y
+    # saca de la ficha del auto lo que se anotó con ella —también lo anotado antes de que cada
+    # pieza supiera de qué venta salió, por la nota— y lo que se aprendió de ella.
+    c.execute("UPDATE historial_piezas SET venta_id = NULL WHERE id = (SELECT MIN(id) FROM "
+              "historial_piezas WHERE venta_id = ?)", (venta,))
+    conn.commit()
+    ok_an, texto_an = ns["anular_venta"](venta)
     esperar("anulada: vuelve lo descontado", (ok_an, stock(ids["F100"]), stock(ids["J200"]),
                                               stock(ids["B300"]), ns["anular_venta"](venta)[0]),
             (True, 4, None, 1, False))
+    esperar("anulada: sale de la ficha del auto y de lo aprendido, lo de la otra venta queda",
+            ([r[0] for r in c.execute("SELECT nota FROM historial_piezas WHERE vehiculo_id = ?",
+                                      (auto,))],
+             c.execute("SELECT COUNT(*) FROM ventas_registradas WHERE venta_id = ?",
+                       (venta,)).fetchone()[0],
+             c.execute("SELECT COUNT(*) FROM ventas_registradas WHERE venta_id = ?",
+                       (venta2,)).fetchone()[0],
+             "3 pieza(s) de la ficha de AE777ZZ" in texto_an),
+            ([f"Venta #{venta2}"], 0, 1, True))
     esperar("anulada no se anota en un auto",
             ns["anotar_la_venta_en_el_auto"](venta, "AB123CD", 1000)[0], False)
     _hoy = {v["id"]: v for v in ns["ventas_del_dia"]()}
@@ -171,6 +185,61 @@ def probar(L):
             (True, False, 3))
     for clave in ("carrito", "venta_items", "_avisos"):
         st.session_state.pop(clave, None)
+
+    # 8. LO 🔴 COMO REEMPLAZO, igual que «Se llevó»: sin confirmar no se vende; la pieza de
+    # seguridad, ni confirmada. Y lo aprendido guarda el veredicto y cómo se vendió.
+    c.execute("INSERT INTO productos (codigo_raw, codigo_clean, descripcion, marca_id, precio, "
+              "precio_costo, stock) VALUES ('P400', 'P400', 'PASTILLA FRENO DEL. VW GOL', ?, "
+              "5000, 6000, 2)", (marca,))
+    ids["P400"] = c.lastrowid
+    conn.commit()
+    rojo = "🔴 no es la misma pieza"
+    for nombre, it in (("🔴 sin confirmar", dict(item(ids["F100"]), veredicto=rojo)),
+                       ("🔴 de seguridad, aunque se confirme",
+                        dict(item(ids["P400"]), veredicto=rojo, confirmado=True))):
+        try:
+            ns["cerrar_venta"]([it])
+            esperar(f"no se vende: {nombre}", "se vendió", "ValueError")
+        except ValueError:
+            pass
+    st.session_state["venta_items"] = []
+    ns["sumar_a_la_venta"]({"ID": ids["F100"]}, "OTRO-1", rojo, "cadena x", confirmado=True)
+    ns["sumar_a_la_venta"]({"ID": ids["J200"]}, "OTRO-1", "🟡 probable", "cadena y")
+    ns["sumar_a_la_venta"]({"ID": ids["J200"]}, "OTRO-1", "🟡 probable", "cadena y")
+    esperar("sumar a la venta: con su veredicto, y otra vez suma la cantidad",
+            [(x["producto_id"], x["cantidad"], x["veredicto"], x["confirmado"])
+             for x in st.session_state["venta_items"]],
+            [(ids["F100"], 1, rojo, True), (ids["J200"], 2, "🟡 probable", False)])
+    venta3, _ = ns["cerrar_venta"](st.session_state["venta_items"], "", "Transferencia")
+    esperar("lo aprendido, como «Se llevó»: veredicto, cómo se vendió y la evidencia",
+            [tuple(r) for r in c.execute("SELECT producto_id, termino_pedido, veredicto, como, "
+                                         "evidencia FROM ventas_registradas WHERE venta_id = ? "
+                                         "ORDER BY id", (venta3,))],
+            [(ids["F100"], "OTRO-1", rojo, "alternativa", "cadena x"),
+             (ids["J200"], "OTRO-1", "🟡 probable", "alternativa", "cadena y")])
+
+    # 9. Lo que se terminó con la venta, lo que suele ir con lo vendido, y el cierre de caja.
+    venta4, _ = ns["cerrar_venta"]([dict(item(ids["P400"]), cantidad=2), item(ids["J200"])],
+                                   "", "Efectivo")
+    esperar("lo que se terminó", ns["lo_que_se_termino"](venta4), [(ids["P400"], "PRUEBA P400")])
+    esperar("el costo viaja con el ítem", item(ids["P400"])["costo"], 6000)
+    c.execute("INSERT INTO productos (codigo_raw, codigo_clean, descripcion, marca_id, precio) "
+              "VALUES ('K500', 'K500', 'KIT DE DISTRIBUCION GOL 1.6', ?, 30000), "
+              "('A600', 'A600', 'BOMBA DE AGUA GOL 1.6', ?, 20000)", (marca, marca))
+    conn.commit()
+    kit = c.execute("SELECT id FROM productos WHERE codigo_raw = 'K500'").fetchone()[0]
+    bomba = c.execute("SELECT id FROM productos WHERE codigo_raw = 'A600'").fetchone()[0]
+    esperar("lo que suele ir con: lo que falta, y no lo que ya se lleva",
+            (ns["lo_que_suele_ir_con_la_venta"]([item(kit)]),
+             ns["lo_que_suele_ir_con_la_venta"]([item(kit), item(bomba)])),
+            ([("PRUEBA K500", ["Bomba de agua"])], [("PRUEBA A600", ["Termostato"])]))
+    caja = ns["cierre_de_caja"]()
+    esperar("el cierre de caja: por forma de pago, lo anulado aparte",
+            (caja["ventas"], caja["por_forma"], caja["anuladas"], caja["total_anulado"]),
+            (3, [("Transferencia", 1, 15000.0), ("Efectivo", 1, 12500.0),
+                 ("Sin decir", 1, 10000.0)], 1, 30500.0))
+    esperar("y un día sin ventas", ns["cierre_de_caja"]("2001-01-01")["ventas"], 0)
+    st.session_state.pop("venta_items", None)
 
     # 7. Quién puede: vender y anotar, empleado; anular, administrador.
     originales = (g["_nivel_de_quien_esta_adentro"], g["hay_claves_configuradas"])

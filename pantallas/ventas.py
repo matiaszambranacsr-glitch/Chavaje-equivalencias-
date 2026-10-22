@@ -23,6 +23,18 @@ if pagina == PAGINAS[9]:
         st.success(f"✅ Venta #{recien['id']} terminada: **${miles(recien['total'], 0)}**.")
         for _aviso in recien.get("avisos") or []:
             st.warning(f"⚠️ {_aviso}")
+        # LO QUE SE TERMINÓ con esta venta: anotarlo para reponer ahí mismo, no cuando venga
+        # otro cliente a pedirlo. Ver solicitar_reposicion().
+        _terminados = recien.get("terminados") or []
+        if _terminados and not recien.get("repuestos"):
+            _t1, _t2 = cols([3, 1])
+            _t1.info(f"📦 Se terminó el stock de: **{', '.join(n for _, n in _terminados)}**.")
+            if _t2.button("📋 Anotar para reponer", key="venta_reponer", width="stretch"):
+                for _pid_t, _ in _terminados:
+                    solicitar_reposicion(_pid_t)
+                recien["repuestos"] = True
+                avisar("success", f"📋 Anotado para reponer: {len(_terminados)} producto(s).")
+                st.rerun()
         anotada = recien.get("anotada")
         if not anotada:
             st.markdown("**🚗 ¿Querés anotar la patente y los km?**")
@@ -87,10 +99,17 @@ if pagina == PAGINAS[9]:
         if _buscar_vta and _texto_vta.strip():
             _clean_vta = sanitizar(_texto_vta)
             _res_vta = buscar_con_variantes_del_cero(_clean_vta, "Todas", 3)[0] if _clean_vta else []
+            # Por código, los resultados son lo buscado y sus equivalencias: cada uno con el
+            # veredicto del buscador (🟢🟡🟠🔴), que viaja con lo vendido. Por descripción
+            # no hay nada pedido en lugar de qué: cada uno es lo que es.
+            _filas_vta = [dict(f) for f in _res_vta[:15]]
+            for _f in _filas_vta:
+                _f["_veredicto"] = veredicto_de_la_equivalencia(_f)
+                _f["_evidencia"] = evidencia_de_la_fila(_f)
             if not _res_vta:
-                _res_vta = buscar_por_texto(_texto_vta)
-            st.session_state["venta_resultados"] = ([dict(f) for f in _res_vta[:15]],
-                                                    _texto_vta.strip())
+                _filas_vta = [dict(f) for f in buscar_por_texto(_texto_vta)[:15]]
+            st.session_state["venta_resultados"] = (_filas_vta, _texto_vta.strip())
+            st.session_state.pop("venta_a_confirmar", None)
         _resultados_vta, _pedido_vta = st.session_state.get("venta_resultados", ([], ""))
         if _resultados_vta:
             st.caption(f"{len(_resultados_vta)} resultado(s) para «{_pedido_vta}»: «➕» lo suma "
@@ -101,17 +120,34 @@ if pagina == PAGINAS[9]:
                 _r1.write(f"**{_f['Marca']} {_f['Codigo']}** — {(_f.get('Descripcion') or '')[:60]}"
                           f" · ${miles(_f.get('Precio') or 0, 0)}"
                           f" · stock {_stock_f if _stock_f is not None else 's/d'}")
-                if _r2.button("➕", key=f"sumar_venta_{_f['ID']}"):
-                    _ya = next((x for x in venta_items if x["producto_id"] == _f["ID"]), None)
-                    if _ya:
-                        _ya["cantidad"] += 1
-                        # El campo de la cantidad guarda lo suyo: sin esto, el «+1» no se veía.
-                        st.session_state.pop(f"venta_cant_{_f['ID']}", None)
+                _ver_f = _f.get("_veredicto")
+                if _ver_f and _ver_f != "el que buscaste":
+                    _r1.caption(_ver_f)
+                # LO 🔴, COMO EN «SE LLEVÓ»: la pieza de seguridad no se vende en lugar de lo
+                # pedido, y lo demás pide confirmarlo. Ver bloqueo_de_venta().
+                _bloq_f = bloqueo_de_venta(_ver_f, _f.get("Descripcion"))
+                _args_f = (_f, _pedido_vta, _ver_f, _f.get("_evidencia"))
+                if _bloq_f == "bloqueada":
+                    _r2.button("🛑", key=f"sumar_venta_{_f['ID']}", disabled=True,
+                               help=TEXTO_DE_VENTA_BLOQUEADA)
+                elif _r2.button("➕", key=f"sumar_venta_{_f['ID']}",
+                                help=("La app dice que no es la misma pieza: pide confirmarlo."
+                                      if _bloq_f else "Sumarlo a la venta.")):
+                    if _bloq_f == "confirmar":
+                        st.session_state["venta_a_confirmar"] = _f["ID"]
                     else:
-                        _nuevo = item_de_venta(_f["ID"], 1, _pedido_vta)
-                        if _nuevo:
-                            venta_items.append(_nuevo)
+                        sumar_a_la_venta(*_args_f)
                     st.rerun()
+                if st.session_state.get("venta_a_confirmar") == _f["ID"]:
+                    st.warning(f"⚠️ {_f['Marca']} {_f['Codigo']}: {_ver_f}. ¿Se la lleva igual?")
+                    _cf1, _cf2 = cols([1, 1], apilar_en_celular=False)
+                    if _cf1.button("Sí, se la lleva igual", key=f"confirmar_venta_{_f['ID']}"):
+                        sumar_a_la_venta(*_args_f, confirmado=True)
+                        st.session_state.pop("venta_a_confirmar", None)
+                        st.rerun()
+                    if _cf2.button("No", key=f"no_confirmar_venta_{_f['ID']}"):
+                        st.session_state.pop("venta_a_confirmar", None)
+                        st.rerun()
         elif _buscar_vta:
             st.info("No encontré ese código ni esa descripción.")
 
@@ -132,6 +168,11 @@ if pagina == PAGINAS[9]:
                 _it["precio"] = float(_c3.number_input(
                     "Precio", min_value=0.0, value=float(_it["precio"]), step=100.0,
                     key=f"venta_precio_{_k}", label_visibility="collapsed"))
+                # Por debajo del costo: un precio mal tipeado, o un descuento que hace perder
+                # plata. El costo lo ve el administrador; los demás, el aviso.
+                if _it.get("costo") and _it["precio"] < float(_it["costo"]):
+                    _c1.caption("⚠️ Por debajo del costo" + (
+                        f" (${miles(_it['costo'], 0)})" if es_admin() else "") + ".")
                 if _c4.button("🗑️", key=f"venta_quitar_{_k}"):
                     venta_items.remove(_it)
                     st.session_state.pop(f"venta_cant_{_k}", None)
@@ -139,6 +180,10 @@ if pagina == PAGINAS[9]:
                     st.rerun()
             _total_vta = sum(x["cantidad"] * x["precio"] for x in venta_items)
             st.markdown(f"### Total: ${miles(_total_vta, 0)}")
+            # LA VENTA INCOMPLETA, como avisa «Se llevó»: antes de que se vaya el cliente.
+            for _que, _faltan in lo_que_suele_ir_con_la_venta(venta_items):
+                st.info(f"💡 {_que} suele cambiarse junto con **{', '.join(_faltan)}**. "
+                        "Preguntale al cliente si ya lo tiene.")
             _p1, _p2 = cols([1, 1])
             _cliente_vta = _p1.text_input("Cliente (opcional):", key="venta_cliente")
             _forma_vta = _p2.selectbox("Forma de pago:", FORMAS_DE_PAGO, key="venta_forma")
@@ -153,7 +198,8 @@ if pagina == PAGINAS[9]:
                                  WHERE venta_id = ? ORDER BY id""", (_id_vta,))
                     st.session_state["venta_recien_cerrada"] = {
                         "id": _id_vta, "total": _total_vta, "avisos": _avisos_vta,
-                        "cliente": _cliente_vta, "items": [dict(f) for f in c.fetchall()]}
+                        "cliente": _cliente_vta, "items": [dict(f) for f in c.fetchall()],
+                        "terminados": lo_que_se_termino(_id_vta)}
                     for _it in venta_items:
                         st.session_state.pop(f"venta_cant_{_it['producto_id']}", None)
                         st.session_state.pop(f"venta_precio_{_it['producto_id']}", None)
@@ -161,25 +207,47 @@ if pagina == PAGINAS[9]:
                     st.session_state.pop("venta_resultados", None)
                     st.rerun()
 
-    # LAS VENTAS DE HOY
-    _hoy_vta = ventas_del_dia()
-    _validas = [v for v in _hoy_vta if not v["anulada"]]
-    with st.expander(f"📋 Ventas de hoy ({len(_validas)}) — ${miles(sum(v['total'] or 0 for v in _validas), 0)}"):
-        if not _hoy_vta:
-            st.caption("Todavía ninguna.")
+    # LAS VENTAS DEL DÍA Y EL CIERRE DE CAJA: hoy, o el día que se elija.
+    _caja_hoy = cierre_de_caja()
+    with st.expander(f"📋 Ventas y cierre de caja — hoy: {_caja_hoy['ventas']} · "
+                     f"${miles(_caja_hoy['total'], 0)}"):
+        _dia_vta = st.date_input("Día:", value=datetime.now().date(), key="venta_dia",
+                                 max_value=datetime.now().date(), format="DD/MM/YYYY")
+        _dia_txt = _dia_vta.strftime("%Y-%m-%d")
+        _del_dia = ventas_del_dia(_dia_txt)
+        _validas = [v for v in _del_dia if not v["anulada"]]
+        _caja = cierre_de_caja(_dia_txt)
+        if not _del_dia:
+            st.caption("Ese día no hubo ventas.")
         else:
-            st.dataframe([{"#": v["id"], "Hora": v["hora"], "Total": f"${miles(v['total'] or 0, 0)}",
+            st.markdown(f"**Total: ${miles(_caja['total'], 0)}** en {_caja['ventas']} venta(s)"
+                        + (f" · {_caja['anuladas']} anulada(s) por ${miles(_caja['total_anulado'], 0)},"
+                           " que no cuentan" if _caja["anuladas"] else ""))
+            _k1, _k2 = cols([1, 1])
+            _k1.caption("Por forma de pago — «Efectivo» es lo que tiene que haber en el cajón:")
+            _k1.dataframe([{"Forma de pago": f, "Ventas": n, "Total": f"${miles(t, 0)}"}
+                           for f, n, t in _caja["por_forma"]], width="stretch", hide_index=True)
+            _k2.caption("Por quién atendió:")
+            _k2.dataframe([{"Atendió": u, "Ventas": n, "Total": f"${miles(t, 0)}"}
+                           for u, n, t in _caja["por_usuario"]], width="stretch", hide_index=True)
+            _filas_dia = [{"#": v["id"], "Hora": v["hora"], "Total": v["total"] or 0,
                            "Pago": v["forma_de_pago"], "Cliente": v["cliente"] or "",
                            "Patente": v["patente"] or "", "Km": v["km"] or "",
                            "Qué": ", ".join(f"{i['cantidad']}× {i['marca']} {i['codigo']}"
                                             for i in v["items"]),
                            "Estado": "🚫 anulada" if v["anulada"] else "",
-                           "Atendió": v["usuario"] or ""} for v in _hoy_vta],
+                           "Atendió": v["usuario"] or ""} for v in _del_dia]
+            st.dataframe([dict(f, Total=f"${miles(f['Total'], 0)}") for f in _filas_dia],
                          width="stretch", hide_index=True)
+            st.download_button("⬇️ Descargar las ventas del día (Excel)",
+                               data=to_excel_bytes(_filas_dia),
+                               file_name=f"ventas_{_dia_txt}.xlsx", key="venta_excel",
+                               mime="application/vnd.openxmlformats-officedocument."
+                                    "spreadsheetml.sheet")
             if _validas:
                 _a1, _a2 = cols([3, 1])
-                _anular = _a1.selectbox("Anular una venta (devuelve el stock):",
-                                        [v["id"] for v in _validas],
+                _anular = _a1.selectbox("Anular una venta (devuelve el stock y la saca de la "
+                                        "ficha del auto):", [v["id"] for v in _validas],
                                         format_func=lambda i: f"#{i}", key="venta_a_anular")
                 if candado("anular una venta", _a2.button("🚫 Anular", key="venta_anular"),
                            "anular_una_venta"):

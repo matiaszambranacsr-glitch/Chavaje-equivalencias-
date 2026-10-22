@@ -6495,9 +6495,18 @@ Y un arreglo que salió probándolo: después de un aviso («sumado al presupues
 | **Sigue aprendiendo equivalencias** | Cada cosa vendida queda en las ventas registradas, con lo que pidió el cliente si buscó otro código, igual que «🛒 Se llevó». |
 | **Al terminar: «¿Querés anotar la patente y los km?»** | Con la patente y los km crea la ficha del auto (o la pone al día) y anota cada pieza con un nombre corto y parejo («Filtro aceite», no la descripción entera), que se puede corregir antes de guardar. Usa la vida útil de las otras veces. Después ofrece mandarle al cliente el link de su auto por WhatsApp. Si los km son menos que los de la última vez, frena: casi siempre es un número mal tipeado. Se puede confirmar. |
 | **Todo o nada** | La venta, cada ítem, el stock y lo aprendido van juntos: si algo falla, no queda nada a medias. Anotarla en un auto se hace una sola vez, aunque se toque dos veces. |
-| **Las ventas de hoy** | Con el total del día. **Anular** (solo administrador) devuelve al stock lo que se había descontado y la deja a la vista, tachada. |
+| **Las ventas del día** | Con el cierre de caja (ver «🧾 Ventas: el freno del 🔴…», más abajo). **Anular** (solo administrador) devuelve al stock lo que se había descontado, la saca de la ficha del auto y la deja a la vista, tachada. |
 
 Cargarla a la cuenta de un taller sigue yendo por el depósito, con la cuenta elegida: pide el código de retiro y mira el límite de crédito.
+
+## 🧾 Ventas: el freno del 🔴, anular de verdad y el cierre de caja
+
+| Qué | Qué pasaba | Qué se hizo |
+|---|---|---|
+| **Vender un 🔴 en lugar de lo pedido** | En el 🔍 Buscador, «Se llevó» no deja anotar como reemplazo una pieza de seguridad que la app da por otra pieza, y pide confirmar las demás 🔴. En 🧾 Ventas la búsqueda por código trae también las equivalencias, pero sin semáforo y sin freno: se podía vender un 🔴 sin ningún aviso. | Cada resultado dice su veredicto (🟢🟡🟠🔴). Un 🔴 pregunta «¿Se la lleva igual?» antes de sumarlo, y un 🔴 de seguridad no se suma (🛑): se busca por su propio código y se vende como lo que es. El freno está también al cerrar la venta, no solo en el botón. Lo vendido queda anotado como en «Se llevó»: con el veredicto, como equivalente o como alternativa, y lo que lo sostenía. |
+| **Anular una venta** | Devolvía el stock, pero el auto seguía diciendo que se le puso la pieza: «A quién avisar» y el link del cliente contaban desde un cambio que no pasó. Y la app seguía aprendiendo de esa venta. | Anular saca de la ficha del auto las piezas de esa venta (también las anotadas antes de este cambio, por la nota «Venta #N») y lo que se aprendió de ella. |
+| **Cerrar la caja** | Solo «Ventas de hoy», con un total. | **📋 Ventas y cierre de caja**: el día que elijas, el total por forma de pago («Efectivo» es lo que tiene que haber en el cajón) y por quién atendió, las anuladas aparte, y el Excel del día. |
+| **Antes de que se vaya el cliente** | — | Si algo de la venta suele cambiarse junto con otra pieza que no está («Kit de distribución» → «Bomba de agua»), lo avisa. Si un precio quedó por debajo del costo, también (el costo lo ve solo el administrador). Al terminar, lo que se quedó sin stock se anota para reponer con un toque. |
 
 ## 📞 Un aviso por cliente, y una sola vez
 
