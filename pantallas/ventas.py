@@ -8,7 +8,8 @@
 if pagina == PAGINAS[9]:
     ayuda(
         "Buscá lo que se lleva el cliente y sumalo; corregí la cantidad o el precio si hace "
-        "falta. **✅ Terminar la venta** descuenta el stock (nunca queda negativo: si no "
+        "falta. Con el lector de códigos de barras, escaneá la caja: si el código es de un solo "
+        "producto, se suma solo. **✅ Terminar la venta** descuenta el stock (nunca queda negativo: si no "
         "alcanzaba, avisa para contarlo) y anota lo vendido, que es con lo que la app aprende "
         "qué se vende en lugar de qué. Al terminar te pregunta **la patente y los km**: con eso "
         "cada pieza queda en la ficha del auto, y el cliente ve en su link cuánto le falta a "
@@ -21,6 +22,18 @@ if pagina == PAGINAS[9]:
     if recien:
         # LA VENTA RECIÉN TERMINADA: lo que pidió el dueño, la patente y los km.
         st.success(f"✅ Venta #{recien['id']} terminada: **${miles(recien['total'], 0)}**.")
+        # EL COMPROBANTE para el cliente: por WhatsApp (a su número, si ya se anotó en la
+        # ficha) o en PDF para imprimir. No es una factura y lo dice.
+        _tel_comp = re.sub(r"\D", "", (buscar_vehiculo_por_id(recien["anotada"]["vehiculo_id"])
+                                        or {}).get("cliente_telefono") or ""
+                           ) if recien.get("anotada") else ""
+        _cp1, _cp2 = cols([1, 1])
+        _cp1.link_button("📲 Mandarle el comprobante por WhatsApp",
+                         f"https://wa.me/{_tel_comp}?text=" + quote(texto_del_comprobante(recien["id"])),
+                         width="stretch")
+        _cp2.download_button("📄 Comprobante (PDF)", data=comprobante_para_descargar(recien["id"]),
+                             file_name=f"comprobante_{recien['id']}.pdf", mime="application/pdf",
+                             key="venta_comprobante_pdf", width="stretch")
         for _aviso in recien.get("avisos") or []:
             st.warning(f"⚠️ {_aviso}")
         # LO QUE SE TERMINÓ con esta venta: anotarlo para reponer ahí mismo, no cuando venga
@@ -91,11 +104,22 @@ if pagina == PAGINAS[9]:
                 st.rerun()
     else:
         # ARMAR LA VENTA
-        with st.form("form_buscar_para_vender", clear_on_submit=False):
+        # Se limpia al buscar: el lector de códigos de barras escribe encima de lo que haya.
+        with st.form("form_buscar_para_vender", clear_on_submit=True):
             _q1, _q2 = cols([4, 1])
             _texto_vta = _q1.text_input("Código o descripción:", key="venta_buscar",
                                         placeholder="Ej: W712/94 o filtro aceite gol")
             _buscar_vta = _q2.form_submit_button("🔍 Buscar")
+        # ESCANEAR Y LISTO: el código de barras de un solo producto se suma directo, sin
+        # elegirlo de una lista. Ver producto_por_codigo_de_barras().
+        _por_barras = producto_por_codigo_de_barras(_texto_vta) if _buscar_vta else None
+        if _por_barras:
+            _sumado = sumar_a_la_venta({"ID": _por_barras})
+            if _sumado:
+                avisar("success", f"📷 Sumado: {_sumado['marca']} {_sumado['codigo']} "
+                                  f"(van {_sumado['cantidad']}).")
+            st.session_state.pop("venta_resultados", None)
+            st.rerun()
         if _buscar_vta and _texto_vta.strip():
             _clean_vta = sanitizar(_texto_vta)
             _res_vta = buscar_con_variantes_del_cero(_clean_vta, "Todas", 3)[0] if _clean_vta else []
@@ -161,10 +185,11 @@ if pagina == PAGINAS[9]:
                 _k = _it["producto_id"]
                 _c1, _c2, _c3, _c4 = cols([4, 1.2, 1.6, 0.7], apilar_en_celular=False)
                 _c1.write(f"**{_it['marca']} {_it['codigo']}** — {(_it['descripcion'] or '')[:50]}")
+                # Lo que cambió por atrás (escanear o «➕» otra vez): ver valor_del_campo().
                 _it["cantidad"] = int(_c2.number_input(
-                    "Cant.", min_value=1, max_value=CANTIDAD_MAXIMA_POR_PEDIDO,
-                    value=int(_it["cantidad"]), step=1, key=f"venta_cant_{_k}",
-                    label_visibility="collapsed"))
+                    "Cant.", min_value=1, max_value=CANTIDAD_MAXIMA_POR_PEDIDO, step=1,
+                    value=valor_del_campo(f"venta_cant_{_k}", int(_it["cantidad"])),
+                    key=f"venta_cant_{_k}", label_visibility="collapsed"))
                 _it["precio"] = float(_c3.number_input(
                     "Precio", min_value=0.0, value=float(_it["precio"]), step=100.0,
                     key=f"venta_precio_{_k}", label_visibility="collapsed"))
@@ -223,6 +248,12 @@ if pagina == PAGINAS[9]:
             st.markdown(f"**Total: ${miles(_caja['total'], 0)}** en {_caja['ventas']} venta(s)"
                         + (f" · {_caja['anuladas']} anulada(s) por ${miles(_caja['total_anulado'], 0)},"
                            " que no cuentan" if _caja["anuladas"] else ""))
+            # La ganancia la ve el administrador, como el margen del buscador.
+            if es_admin() and _caja["items_con_costo"]:
+                st.markdown(f"💰 **Ganancia estimada: ${miles(_caja['ganancia'], 0)}**"
+                            + (f" — de {_caja['items_con_costo']} de {_caja['items']} cosas "
+                               "vendidas, las que tienen costo cargado"
+                               if _caja["items_con_costo"] < _caja["items"] else ""))
             _k1, _k2 = cols([1, 1])
             _k1.caption("Por forma de pago — «Efectivo» es lo que tiene que haber en el cajón:")
             _k1.dataframe([{"Forma de pago": f, "Ventas": n, "Total": f"${miles(t, 0)}"}
@@ -244,6 +275,12 @@ if pagina == PAGINAS[9]:
                                file_name=f"ventas_{_dia_txt}.xlsx", key="venta_excel",
                                mime="application/vnd.openxmlformats-officedocument."
                                     "spreadsheetml.sheet")
+            _cv1, _cv2 = cols([3, 1])
+            _comp_de = _cv1.selectbox("Comprobante de la venta:", [v["id"] for v in _del_dia],
+                                      format_func=lambda i: f"#{i}", key="venta_comprobante_de")
+            _cv2.download_button("📄 PDF", data=comprobante_para_descargar(_comp_de),
+                                 file_name=f"comprobante_{_comp_de}.pdf", mime="application/pdf",
+                                 key="venta_comprobante_dia", width="stretch")
             if _validas:
                 _a1, _a2 = cols([3, 1])
                 _anular = _a1.selectbox("Anular una venta (devuelve el stock y la saca de la "
@@ -254,3 +291,40 @@ if pagina == PAGINAS[9]:
                     _ok_an, _texto_an = anular_venta(_anular)
                     avisar("success" if _ok_an else "warning", _texto_an)
                     st.rerun()
+
+    # LO QUE MÁS SE VENDE: el período que se elija, el total, el ticket promedio, las ventas de
+    # cada día y lo que más sale, por unidades y por plata. La ganancia, solo el administrador.
+    with st.expander("📊 Lo que más se vende"):
+        _dias_mv = st.selectbox("Período:", [7, 30, 90, 365], index=1, key="venta_periodo",
+                                format_func=lambda d: {7: "Última semana", 30: "Últimos 30 días",
+                                                       90: "Últimos 3 meses",
+                                                       365: "Último año"}[d])
+        _mv = lo_mas_vendido(_dias_mv)
+        if not _mv["ventas"]:
+            st.caption("En ese período no hubo ventas.")
+        else:
+            _m = cols([1, 1, 1, 1] if es_admin() else [1, 1, 1])
+            _m[0].metric("Ventas", miles(_mv["ventas"]))
+            _m[1].metric("Total", f"${miles(_mv['total'], 0)}")
+            _m[2].metric("Ticket promedio", f"${miles(_mv['ticket_promedio'], 0)}")
+            if es_admin():
+                _m[3].metric("Ganancia estimada", f"${miles(_mv['ganancia'], 0)}",
+                             help="Con el costo que tenía cada cosa al venderla, y solo de lo "
+                                  "que tiene costo cargado.")
+            st.caption("Lo que entró cada día:")
+            st.bar_chart({"Día": [datetime.strptime(d, "%Y-%m-%d") for d, _ in _mv["por_dia"]],
+                          "Total": [t for _, t in _mv["por_dia"]]}, x="Día", y="Total",
+                         height=220)
+
+            def _tabla_mv(filas):
+                return [dict({"Producto": f"{f['marca']} {f['codigo']}",
+                              "Descripción": (f["descripcion"] or "")[:40],
+                              "Unidades": f["unidades"], "Plata": f"${miles(f['plata'], 0)}"},
+                             **({"Ganancia": (f"${miles(f['ganancia'], 0)}"
+                                              if f["ganancia"] is not None else "sin costo")}
+                                if es_admin() else {})) for f in filas]
+            _t1, _t2 = cols([1, 1])
+            _t1.caption("Lo que más unidades vende:")
+            _t1.dataframe(_tabla_mv(_mv["por_unidades"]), width="stretch", hide_index=True)
+            _t2.caption("Lo que más plata trae:")
+            _t2.dataframe(_tabla_mv(_mv["por_plata"]), width="stretch", hide_index=True)

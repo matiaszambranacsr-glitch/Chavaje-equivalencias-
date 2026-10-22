@@ -87,8 +87,9 @@ def sumar_a_la_venta(fila, pedido="", veredicto=None, evidencia=None, confirmado
     if ya:
         ya["cantidad"] += 1
         ya["confirmado"] = ya.get("confirmado") or confirmado
-        # El campo de la cantidad guarda lo suyo: sin esto, el «+1» no se veía.
-        st.session_state.pop(f"venta_cant_{fila['ID']}", None)
+        # El campo de la cantidad guarda lo suyo: se pone al día antes de dibujarse (ver «LO
+        # QUE CAMBIA POR ATRÁS» en logica/interfaz.py). Sin esto, el «+1» no se veía.
+        poner_en_el_campo(f"venta_cant_{fila['ID']}", ya["cantidad"])
         return ya
     nuevo = item_de_venta(fila["ID"], 1, pedido)
     if nuevo:
@@ -139,7 +140,14 @@ def cierre_de_caja(dia=None):
         return sorted(((k, n, round(t, 2)) for k, (n, t) in grupos.items()),
                       key=lambda x: -x[2])
     anuladas = [v for v in ventas if v["anulada"]]
+    # LA GANANCIA, con el costo que tenía cada cosa al venderla, y solo de lo que tiene costo
+    # cargado: cuántos lo tienen va al lado, para no leer «ganancia del día» donde es una parte.
+    items = [it for v in validas for it in v["items"]]
+    con_costo = [it for it in items if it.get("costo") is not None]
     return {"ventas": len(validas), "total": round(sum(v["total"] or 0 for v in validas), 2),
+            "ganancia": round(sum((it["precio"] - it["costo"]) * it["cantidad"]
+                                  for it in con_costo), 2),
+            "items": len(items), "items_con_costo": len(con_costo),
             "por_forma": agrupar("forma_de_pago", "Sin decir"),
             "por_usuario": agrupar("usuario", "Sin decir"),
             "anuladas": len(anuladas),
@@ -194,7 +202,8 @@ def cerrar_venta(items, cliente="", forma_de_pago="", usuario=None):
                    round(sum(x[1] * x[2] for x in limpios), 2)))
         venta_id = c.lastrowid
         for producto_id, cantidad, precio, pedido, veredicto, evidencia in limpios:
-            c.execute("""SELECT p.stock, p.codigo_raw, p.descripcion, m.nombre AS marca
+            c.execute("""SELECT p.stock, p.codigo_raw, p.descripcion, p.precio_costo,
+                                m.nombre AS marca
                          FROM productos p JOIN marcas m ON m.id = p.marca_id WHERE p.id = ?""",
                       (producto_id,))
             f = c.fetchone()
@@ -216,10 +225,10 @@ def cerrar_venta(items, cliente="", forma_de_pago="", usuario=None):
                                   f"{f['stock']} en stock. Quedó en 0: conviene contarlo.")
             c.execute("""INSERT INTO ventas_items (venta_id, producto_id, codigo, marca,
                                                    descripcion, cantidad, precio, pedido,
-                                                   stock_descontado)
-                         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                                                   stock_descontado, costo)
+                         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                       (venta_id, producto_id, f["codigo_raw"], f["marca"], f["descripcion"],
-                       cantidad, precio, pedido, descontado))
+                       cantidad, precio, pedido, descontado, f["precio_costo"]))
             # Lo que aprende de las ventas, como «Se llevó»: lo que pidió el cliente y lo que
             # se llevó. Ver descubrir_equivalencias_candidatas().
             _pedido = pedido or f["codigo_raw"]
@@ -335,7 +344,7 @@ def ventas_del_dia(dia=None):
                  WHERE substr(v.fecha, 1, 10) = ? ORDER BY v.id DESC""", (dia,))
     ventas = [dict(f) for f in c.fetchall()]
     for v in ventas:
-        c.execute("""SELECT codigo, marca, descripcion, cantidad, precio FROM ventas_items
+        c.execute("""SELECT codigo, marca, descripcion, cantidad, precio, costo FROM ventas_items
                      WHERE venta_id = ? ORDER BY id""", (v["id"],))
         v["items"] = [dict(f) for f in c.fetchall()]
     return ventas
@@ -374,7 +383,7 @@ def pasar_el_presupuesto_a_una_venta():
         if ya:
             ya["cantidad"] += fila["cantidad"]
             # El campo de la cantidad en la pantalla guarda lo suyo: sin esto no se sumaba.
-            st.session_state.pop(f"venta_cant_{fila['producto_id']}", None)
+            poner_en_el_campo(f"venta_cant_{fila['producto_id']}", ya["cantidad"])
         else:
             venta.append(fila)
     # Lo que no se lleva queda destildado: si vuelve a la venta, que sea porque alguien lo marcó.
@@ -385,3 +394,143 @@ def pasar_el_presupuesto_a_una_venta():
         avisar("info", f"Pasaron {len(elegidos)} a la venta. {len(carrito)} quedaron en el "
                        "presupuesto del 🔍 Buscador, sin marcar.")
     st.session_state["pagina_actual"] = PAGINAS[9]
+
+
+def una_venta(venta_id):
+    """Una venta con sus ítems y la patente, o None. Ver texto_del_comprobante()."""
+    c.execute("""SELECT v.id, v.fecha, v.usuario, v.cliente, v.forma_de_pago, v.total, v.anulada,
+                        v.km, ve.patente
+                 FROM ventas v LEFT JOIN vehiculos ve ON ve.id = v.vehiculo_id WHERE v.id = ?""",
+              (venta_id,))
+    venta = c.fetchone()
+    if not venta:
+        return None
+    venta = dict(venta)
+    c.execute("""SELECT codigo, marca, descripcion, cantidad, precio FROM ventas_items
+                 WHERE venta_id = ? ORDER BY id""", (venta_id,))
+    venta["items"] = [dict(f) for f in c.fetchall()]
+    return venta
+
+
+# EL COMPROBANTE PARA EL CLIENTE: lo que se llevó y lo que pagó, por WhatsApp o en PDF. No es
+# una factura y lo dice: la factura sale del sistema de facturación de la AFIP.
+NO_ES_FACTURA = "Comprobante interno: no válido como factura."
+
+
+def texto_del_comprobante(venta_id):
+    """El comprobante de una venta, para mandarlo por WhatsApp. "" si no existe."""
+    venta = una_venta(venta_id)
+    if not venta:
+        return ""
+    lineas = [f"Tu compra en El Chavo — #{venta['id']} — {venta['fecha'][:16]}"]
+    lineas += [f"{it['cantidad']}× {it['marca']} {it['codigo']} — "
+               f"{(it['descripcion'] or '')[:40]} — ${miles(it['cantidad'] * it['precio'], 0)}"
+               for it in venta["items"]]
+    lineas.append(f"TOTAL: ${miles(venta['total'] or 0, 0)}"
+                  + (f" ({venta['forma_de_pago']})" if venta["forma_de_pago"] else ""))
+    if venta["anulada"]:
+        lineas.append("ANULADA")
+    lineas += ["", "¡Gracias por tu compra!", NO_ES_FACTURA]
+    return "\n".join(lineas)
+
+
+def comprobante_para_descargar(venta_id):
+    """Para el botón de descarga: los datos de la venta se leen ahora, y el PDF se arma recién
+    al tocar el botón (Streamlit lo corre en otro hilo, que no tiene que tocar la base). Así no
+    se arma un PDF en cada toque de la pantalla, y si armarlo fallara, no se cae Ventas."""
+    venta = una_venta(venta_id)
+    return lambda: pdf_del_comprobante(venta)
+
+
+def pdf_del_comprobante(venta):
+    """El comprobante de una venta ya leída (ver una_venta()) en PDF, para imprimirlo o
+    mandarlo. b"" si no hay venta."""
+    from fpdf import FPDF
+    if not venta:
+        return b""
+
+    def limpiar(texto):
+        # Las fuentes básicas de fpdf2 no traen todo unicode: ver generar_pdf_cotizacion().
+        return str(texto).replace("×", "x").encode("latin-1", "replace").decode("latin-1")
+
+    pdf = FPDF()
+    pdf.add_page()
+    pdf.set_font("Helvetica", "B", 16)
+    pdf.cell(0, 10, limpiar(f"El Chavo - Comprobante de venta #{venta['id']}"),
+             new_x="LMARGIN", new_y="NEXT")
+    pdf.set_font("Helvetica", "", 10)
+    _fecha = datetime.strptime(venta["fecha"][:16], "%Y-%m-%d %H:%M")
+    pdf.cell(0, 6, limpiar(f"Fecha: {_fecha:%d/%m/%Y %H:%M}"
+                           + (f"   Cliente: {venta['cliente']}" if venta["cliente"] else "")
+                           + (f"   Patente: {venta['patente']}" if venta["patente"] else "")),
+             new_x="LMARGIN", new_y="NEXT")
+    pdf.ln(3)
+    pdf.set_font("Helvetica", "B", 10)
+    for texto, ancho in (("Cant.", 15), ("Producto", 125), ("Importe", 40)):
+        pdf.cell(ancho, 7, texto, border="B", align="R" if texto == "Importe" else "L")
+    pdf.ln()
+    pdf.set_font("Helvetica", "", 10)
+    for it in venta["items"]:
+        pdf.cell(15, 7, str(it["cantidad"]))
+        pdf.cell(125, 7, limpiar(f"{it['marca']} {it['codigo']} - {(it['descripcion'] or '')[:55]}"))
+        pdf.cell(40, 7, limpiar(f"${miles(it['cantidad'] * it['precio'], 0)}"), align="R")
+        pdf.ln()
+    pdf.set_font("Helvetica", "B", 12)
+    pdf.cell(140, 9, limpiar("TOTAL" + (f" ({venta['forma_de_pago']})"
+                                         if venta["forma_de_pago"] else "")), border="T")
+    pdf.cell(40, 9, limpiar(f"${miles(venta['total'] or 0, 0)}"), border="T", align="R")
+    pdf.ln(12)
+    pdf.set_font("Helvetica", "I", 9)
+    if venta["anulada"]:
+        pdf.cell(0, 6, "ANULADA", new_x="LMARGIN", new_y="NEXT")
+    pdf.cell(0, 6, limpiar(NO_ES_FACTURA), new_x="LMARGIN", new_y="NEXT")
+    return bytes(pdf.output())
+
+
+def producto_por_codigo_de_barras(texto):
+    """El id del producto si `texto` es un código de barras que cierra (ver
+    codigo_de_barras_cierra()) y lo tiene uno solo; si no, None. Para escanear en 🧾 Ventas y
+    que se sume solo: el lector de la caja escribe los números y un Enter, como un teclado.
+    Que cierre, y no solo que sean números: un código de fábrica tipeado a mano («19011403»)
+    tiene que mostrar sus equivalencias, no sumarse solo porque algún producto tenga ese número
+    mal cargado como código de barras."""
+    numeros = re.sub(r"\s", "", str(texto or ""))
+    if not (numeros.isdigit() and codigo_de_barras_cierra(numeros)):
+        return None
+    c.execute("SELECT id FROM productos WHERE codigo_barras = ? LIMIT 2", (numeros,))
+    filas = c.fetchall()
+    return filas[0]["id"] if len(filas) == 1 else None
+
+
+def lo_mas_vendido(dias=30, tope=10):
+    """Lo que entró en los últimos `dias` días (hoy incluido) y qué se vendió más, por unidades
+    y por plata, sin las anuladas. La ganancia, con el costo de cada venta y solo de lo que lo
+    tiene. dict."""
+    hoy = datetime.now().date()
+    desde = hoy - timedelta(days=int(dias) - 1)
+    c.execute("""SELECT substr(fecha, 1, 10) AS dia, COUNT(*) AS ventas, SUM(total) AS total
+                 FROM ventas WHERE anulada = 0 AND substr(fecha, 1, 10) >= ?
+                 GROUP BY dia""", (desde.isoformat(),))
+    del_dia = {f["dia"]: (f["ventas"], f["total"] or 0) for f in c.fetchall()}
+    # Todos los días del período, también los que no hubo ventas: sin ellos el gráfico junta
+    # un martes con el viernes y parece que se vendió todos los días.
+    por_dia = [((desde + timedelta(days=i)).isoformat(),
+                del_dia.get((desde + timedelta(days=i)).isoformat(), (0, 0))[1])
+               for i in range(int(dias))]
+    c.execute("""SELECT vi.marca, vi.codigo, MAX(vi.descripcion) AS descripcion,
+                        SUM(vi.cantidad) AS unidades, SUM(vi.cantidad * vi.precio) AS plata,
+                        SUM(CASE WHEN vi.costo IS NOT NULL
+                                 THEN vi.cantidad * (vi.precio - vi.costo) END) AS ganancia,
+                        COUNT(DISTINCT vi.venta_id) AS ventas
+                 FROM ventas_items vi JOIN ventas v ON v.id = vi.venta_id
+                 WHERE v.anulada = 0 AND substr(v.fecha, 1, 10) >= ?
+                 GROUP BY vi.producto_id, vi.marca, vi.codigo""", (desde.isoformat(),))
+    productos = [dict(f) for f in c.fetchall()]
+    ventas = sum(n for n, _ in del_dia.values())
+    total = round(sum(t for _, t in del_dia.values()), 2)
+    return {"desde": desde.isoformat(), "ventas": ventas, "total": total,
+            "ticket_promedio": round(total / ventas, 2) if ventas else 0,
+            "ganancia": round(sum(p["ganancia"] or 0 for p in productos), 2),
+            "por_dia": por_dia,
+            "por_unidades": sorted(productos, key=lambda p: (-p["unidades"], -p["plata"]))[:tope],
+            "por_plata": sorted(productos, key=lambda p: (-p["plata"], -p["unidades"]))[:tope]}

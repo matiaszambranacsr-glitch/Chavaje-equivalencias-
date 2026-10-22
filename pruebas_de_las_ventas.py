@@ -210,6 +210,15 @@ def probar(L):
             [(x["producto_id"], x["cantidad"], x["veredicto"], x["confirmado"])
              for x in st.session_state["venta_items"]],
             [(ids["F100"], 1, rojo, True), (ids["J200"], 2, "🟡 probable", False)])
+    # Y el campo de la cantidad se entera ANTES de dibujarse: si no, el navegador seguía
+    # mostrando 1 y lo mandaba de vuelta (ver «LO QUE CAMBIA POR ATRÁS» en logica/interfaz.py).
+    _campo = f"venta_cant_{ids['J200']}"
+    st.session_state[_campo] = 1
+    esperar("lo que cambia por atrás llega al campo",
+            (ns["valor_del_campo"](_campo, 5), st.session_state[_campo],
+             ns["valor_del_campo"](_campo, 5), ns["valor_del_campo"]("campo_nuevo_x", 7)),
+            (None, 2, None, 7))
+    st.session_state.pop(_campo, None)
     venta3, _ = ns["cerrar_venta"](st.session_state["venta_items"], "", "Transferencia")
     esperar("lo aprendido, como «Se llevó»: veredicto, cómo se vendió y la evidencia",
             [tuple(r) for r in c.execute("SELECT producto_id, termino_pedido, veredicto, como, "
@@ -239,6 +248,46 @@ def probar(L):
             (3, [("Transferencia", 1, 15000.0), ("Efectivo", 1, 12500.0),
                  ("Sin decir", 1, 10000.0)], 1, 30500.0))
     esperar("y un día sin ventas", ns["cierre_de_caja"]("2001-01-01")["ventas"], 0)
+
+    # 10. La ganancia, con el costo de ESE momento: si mañana cambia, la de hoy no se mueve.
+    # Solo de lo que tiene costo cargado, y dice cuántos son.
+    _ganancia = lambda: tuple(ns["cierre_de_caja"]()[k] for k in ("ganancia", "items_con_costo",
+                                                                     "items"))
+    esperar("la ganancia del día", _ganancia(), (-2000.0, 1, 5))
+    c.execute("UPDATE productos SET precio_costo = 1 WHERE id = ?", (ids["P400"],))
+    conn.commit()
+    esperar("y no cambia con el costo de mañana", _ganancia(), (-2000.0, 1, 5))
+
+    # 11. El comprobante para el cliente, en texto y en PDF; dice que no es una factura.
+    _texto = ns["texto_del_comprobante"](venta4)
+    esperar("el comprobante", (f"#{venta4}" in _texto, "TOTAL: $12.500 (Efectivo)" in _texto,
+                               ns["NO_ES_FACTURA"] in _texto, "2× PRUEBA P400" in _texto,
+                               ns["comprobante_para_descargar"](venta4)()[:5],
+                               ns["texto_del_comprobante"](999999),
+                               ns["comprobante_para_descargar"](999999)()),
+            (True, True, True, True, b"%PDF-", "", b""))
+
+    # 12. Escanear: el código de barras de UN producto se suma solo. Corto, con letras,
+    # repetido en dos productos, o que no cierra (un número de fábrica mal cargado ahí), no.
+    c.execute("UPDATE productos SET codigo_barras = '7791234567898' WHERE id = ?", (ids["F100"],))
+    c.execute("UPDATE productos SET codigo_barras = '7790000000010' WHERE id IN (?, ?)",
+              (ids["J200"], ids["B300"]))
+    c.execute("UPDATE productos SET codigo_barras = '19011403' WHERE id = ?", (ids["P400"],))
+    c.execute("UPDATE productos SET codigo_barras = '779123' WHERE id = ?", (kit,))
+    conn.commit()
+    barras = ns["producto_por_codigo_de_barras"]
+    esperar("escanear", [barras(x) for x in ("7791234567898", " 7791234567898 ", "779123",
+                                             "77912345678AB", "7790000000010", "19011403", "")],
+            [ids["F100"], ids["F100"], None, None, None, None, None])
+
+    # 13. Lo que más se vende: sin las anuladas, por unidades y por plata, día por día.
+    mv = ns["lo_mas_vendido"](7)
+    esperar("lo que más se vende",
+            (mv["ventas"], mv["total"], mv["ticket_promedio"], mv["ganancia"], len(mv["por_dia"]),
+             mv["por_dia"][-1][1], [p["codigo"] for p in mv["por_unidades"]],
+             [p["codigo"] for p in mv["por_plata"]]),
+            (3, 37500.0, 12500.0, -2000.0, 7, 37500.0, ["J200", "F100", "P400"],
+             ["F100", "P400", "J200"]))
     st.session_state.pop("venta_items", None)
 
     # 7. Quién puede: vender y anotar, empleado; anular, administrador.

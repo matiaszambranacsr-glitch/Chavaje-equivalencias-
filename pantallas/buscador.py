@@ -102,16 +102,18 @@ if pagina == PAGINAS[0]:
                 else:
                     ci0, ci1, ci2, ci3 = st.columns([0.4, 5, 2, 1])
                 # Lo marcado se guarda también en el presupuesto: la casilla se olvida de lo suyo
-                # cuando se va a otra pantalla, y lo destildado tiene que seguir destildado.
+                # cuando se va a otra pantalla, y lo destildado tiene que seguir destildado. Lo
+                # que cambia por atrás (sumarlo otra vez), ver valor_del_campo().
                 _item["se_lleva"] = ci0.checkbox(
-                    "Se lleva", value=_item.get("se_lleva", True), key=f"se_lleva_{_pid}",
-                    label_visibility="collapsed",
+                    "Se lleva", key=f"se_lleva_{_pid}", label_visibility="collapsed",
+                    value=bool(valor_del_campo(f"se_lleva_{_pid}", _item.get("se_lleva", True))),
                     help="Se lleva: pasa a la venta. Destildado, queda en el presupuesto.")
                 ci1.markdown(f"**{_item['marca']} {_item['codigo']}** — "
                               f"{(_item['descripcion'] or '')[:40]}")
-                _nueva_cant = ci2.number_input("Cant.", min_value=1, value=_item["cantidad"],
-                                                step=1, key=f"cant_cart_{_pid}",
-                                                label_visibility="collapsed")
+                _nueva_cant = ci2.number_input(
+                    "Cant.", min_value=1, step=1, key=f"cant_cart_{_pid}",
+                    value=valor_del_campo(f"cant_cart_{_pid}", _item["cantidad"]),
+                    label_visibility="collapsed")
                 if _nueva_cant != _item["cantidad"]:
                     st.session_state["carrito"][_pid]["cantidad"] = int(_nueva_cant)
                     st.rerun()

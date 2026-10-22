@@ -2886,9 +2886,14 @@ def _esquema_ventas(c):
         cantidad INTEGER NOT NULL,
         precio REAL,
         pedido TEXT,
-        stock_descontado INTEGER DEFAULT 0
+        stock_descontado INTEGER DEFAULT 0,
+        costo REAL
     )""")
     c.execute("CREATE INDEX IF NOT EXISTS idx_ventas_items_venta ON ventas_items(venta_id)")
+    # EL COSTO DE ESE MOMENTO, como el precio: la ganancia de una venta vieja no puede cambiar
+    # porque mañana llegó otra lista con otro costo. Ver cierre_de_caja().
+    if "costo" not in [f[1] for f in c.execute("PRAGMA table_info(ventas_items)")]:
+        c.execute("ALTER TABLE ventas_items ADD COLUMN costo REAL")
     # DE QUÉ VENTA SALIÓ lo que se anotó en la ficha del auto y lo que se aprendió de ella:
     # anular la venta lo saca de los dos lados (ver anular_venta()). Sin esto, el auto seguía
     # diciendo que se le puso la pieza, y los avisos contaban desde un cambio que no pasó.

@@ -442,6 +442,29 @@ def avisar(tipo, texto):
     st.session_state.setdefault("_avisos", []).append((tipo, texto))
 
 
+# LO QUE CAMBIA POR ATRÁS: cuando algo cambia lo que tiene que mostrar un campo desde afuera del
+# campo —sumar otra vez algo que ya estaba en el presupuesto o en la venta, escanear dos veces la
+# misma caja—, el valor nuevo se le pone al campo ANTES de dibujarlo. Borrar la clave del campo
+# no alcanzaba: el navegador seguía mostrando el número viejo y lo mandaba de vuelta en el toque
+# siguiente, y la cantidad volvía para atrás —se escanearon dos y se vendió una—. Se vio en un
+# navegador de verdad; las pruebas sin navegador no lo ven, porque no tienen un campo que se
+# acuerde de lo suyo.
+def poner_en_el_campo(clave, valor):
+    """Anota `valor` para el campo `clave`: lo toma la próxima vez que se dibuja (ver
+    valor_del_campo())."""
+    st.session_state.setdefault("_a_los_campos", {})[clave] = valor
+
+
+def valor_del_campo(clave, valor):
+    """El `value=` para dibujar el campo `clave`: `valor` la primera vez, y después None, porque
+    el campo ya tiene lo suyo (pasarle los dos hace que Streamlit avise). Si se le puso algo
+    desde afuera (ver poner_en_el_campo()), lo toma acá, antes de dibujarse."""
+    pendientes = st.session_state.get("_a_los_campos") or {}
+    if clave in pendientes:
+        st.session_state[clave] = pendientes.pop(clave)
+    return valor if clave not in st.session_state else None
+
+
 def mostrar_avisos_pendientes():
     """Muestra lo que quedó guardado por avisar() antes del último refresco.
 

@@ -592,6 +592,10 @@ def sumar_al_presupuesto(fila, cantidad=1):
         # pasar_el_presupuesto_a_una_venta()).
         carrito[fila["ID"]]["se_lleva"] = True
         st.session_state.pop(f"se_lleva_{fila['ID']}", None)
+        # Y los campos de la pantalla se ponen al día antes de dibujarse: ver «LO QUE CAMBIA
+        # POR ATRÁS» en logica/interfaz.py.
+        poner_en_el_campo(f"cant_cart_{fila['ID']}", carrito[fila["ID"]]["cantidad"])
+        poner_en_el_campo(f"se_lleva_{fila['ID']}", True)
     else:
         carrito[fila["ID"]] = {"codigo": fila["Codigo"], "marca": fila["Marca"],
                                "descripcion": fila.get("Descripcion") or "",

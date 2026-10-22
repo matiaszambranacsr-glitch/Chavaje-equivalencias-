@@ -6508,6 +6508,19 @@ Cargarla a la cuenta de un taller sigue yendo por el depósito, con la cuenta el
 | **Cerrar la caja** | Solo «Ventas de hoy», con un total. | **📋 Ventas y cierre de caja**: el día que elijas, el total por forma de pago («Efectivo» es lo que tiene que haber en el cajón) y por quién atendió, las anuladas aparte, y el Excel del día. |
 | **Antes de que se vaya el cliente** | — | Si algo de la venta suele cambiarse junto con otra pieza que no está («Kit de distribución» → «Bomba de agua»), lo avisa. Si un precio quedó por debajo del costo, también (el costo lo ve solo el administrador). Al terminar, lo que se quedó sin stock se anota para reponer con un toque. |
 
+## 🧾 Ventas: escanear, el comprobante, la ganancia y lo que más se vende
+
+| Qué | Cómo |
+|---|---|
+| **Escanear y listo** | Con el lector de códigos de barras, se escanea la caja en el buscador de Ventas: si el código es de un solo producto, se suma solo (otra vez, suma uno más), y el campo queda limpio para el próximo. Tiene que ser un código de barras que cierre con su dígito verificador: un código de fábrica tipeado a mano muestra sus equivalencias, no se suma solo. |
+| **El comprobante para el cliente** | Al terminar la venta: **📲 por WhatsApp** (a su número, si ya se anotó la patente con el teléfono) o **📄 en PDF** para imprimir. Y el de cualquier venta del día, desde el cierre de caja. Dice que no es una factura: la factura sale del sistema de facturación de la AFIP. |
+| **La ganancia del día** | En el cierre de caja, solo para el administrador: con el costo que tenía cada cosa **al venderla** (si mañana cambia la lista, la ganancia de hoy no se mueve), y dice de cuántas cosas vendidas hay costo cargado. |
+| **📊 Lo que más se vende** | La última semana, el mes, tres meses o el año: cuántas ventas, el total, el ticket promedio, lo que entró cada día (también los días sin ventas, para no juntar un martes con el viernes) y lo que más sale, por unidades y por plata. La ganancia, solo el administrador. |
+
+### Un error que solo se veía en un navegador de verdad
+
+Al sumar algo que ya estaba —escanear dos veces la misma caja, «➕» otra vez en Ventas, o **«➕ Sumar» otra vez al presupuesto del buscador**— la cuenta subía, pero **el casillero de la cantidad seguía mostrando el número viejo**, y con el siguiente toque lo mandaba de vuelta: se escanearon dos y se vendió uno. En el presupuesto pasaba desde antes: sumar dos veces lo mismo dejaba 1, y volver a sumar algo destildado no lo marcaba. Las pruebas sin navegador no lo veían, porque no tienen un casillero que se acuerde de lo suyo. Ahora lo que cambia por atrás se escribe en el casillero antes de dibujarlo; probado en un navegador de verdad: 2 escaneos, 2 vendidos; sumado dos veces, 2; destildado y sumado otra vez, 3 y marcado.
+
 ## 📞 Un aviso por cliente, y una sola vez
 
 «A quién avisar» era una fila por pieza: el cliente con la correa y las pastillas recibía dos mensajes, y al otro día los dos volvían a la lista. Ahora es **un mensaje por cliente** con todo lo que le toca, y **«✅ Ya le avisé»** lo saca de la lista por 15 días. Si mientras tanto le toca otra pieza, vuelve por esa.
