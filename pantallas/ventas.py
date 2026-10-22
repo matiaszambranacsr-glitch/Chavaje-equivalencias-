@@ -242,12 +242,16 @@ if pagina == PAGINAS[9]:
         _del_dia = ventas_del_dia(_dia_txt)
         _validas = [v for v in _del_dia if not v["anulada"]]
         _caja = cierre_de_caja(_dia_txt)
-        if not _del_dia:
+        _devs_dia = devoluciones_del_dia(_dia_txt)
+        if not _del_dia and not _devs_dia:
             st.caption("Ese día no hubo ventas.")
         else:
             st.markdown(f"**Total: ${miles(_caja['total'], 0)}** en {_caja['ventas']} venta(s)"
                         + (f" · {_caja['anuladas']} anulada(s) por ${miles(_caja['total_anulado'], 0)},"
-                           " que no cuentan" if _caja["anuladas"] else ""))
+                           " que no cuentan" if _caja["anuladas"] else "")
+                        + (f" · {_caja['devoluciones']} devolución(es) por "
+                           f"${miles(_caja['total_devuelto'], 0)}, ya descontadas"
+                           if _caja["devoluciones"] else ""))
             # La ganancia la ve el administrador, como el margen del buscador.
             if es_admin() and _caja["items_con_costo"]:
                 st.markdown(f"💰 **Ganancia estimada: ${miles(_caja['ganancia'], 0)}**"
@@ -268,19 +272,32 @@ if pagina == PAGINAS[9]:
                                             for i in v["items"]),
                            "Estado": "🚫 anulada" if v["anulada"] else "",
                            "Atendió": v["usuario"] or ""} for v in _del_dia]
-            st.dataframe([dict(f, Total=f"${miles(f['Total'], 0)}") for f in _filas_dia],
-                         width="stretch", hide_index=True)
+            if _filas_dia:
+                st.dataframe([dict(f, Total=f"${miles(f['Total'], 0)}") for f in _filas_dia],
+                             width="stretch", hide_index=True)
+            if _devs_dia:
+                st.caption("↩️ Lo devuelto ese día:")
+                st.dataframe([{"Hora": d["hora"], "De la venta": f"#{d['venta_id']}",
+                               "Qué": f"{d['cantidad']}× {d['marca']} {d['codigo']}",
+                               "Importe": f"-${miles(d['importe'], 0)}",
+                               "Pago": d["forma_de_pago"],
+                               "Por qué": MOTIVOS_DE_DEVOLUCION.get(d["motivo"], d["motivo"]),
+                               "Devolvió": d["usuario"] or ""} for d in _devs_dia],
+                             width="stretch", hide_index=True)
             st.download_button("⬇️ Descargar las ventas del día (Excel)",
                                data=to_excel_bytes(_filas_dia),
                                file_name=f"ventas_{_dia_txt}.xlsx", key="venta_excel",
                                mime="application/vnd.openxmlformats-officedocument."
                                     "spreadsheetml.sheet")
-            _cv1, _cv2 = cols([3, 1])
-            _comp_de = _cv1.selectbox("Comprobante de la venta:", [v["id"] for v in _del_dia],
-                                      format_func=lambda i: f"#{i}", key="venta_comprobante_de")
-            _cv2.download_button("📄 PDF", data=comprobante_para_descargar(_comp_de),
-                                 file_name=f"comprobante_{_comp_de}.pdf", mime="application/pdf",
-                                 key="venta_comprobante_dia", width="stretch")
+            if _del_dia:
+                _cv1, _cv2 = cols([3, 1])
+                _comp_de = _cv1.selectbox("Comprobante de la venta:", [v["id"] for v in _del_dia],
+                                          format_func=lambda i: f"#{i}",
+                                          key="venta_comprobante_de")
+                _cv2.download_button("📄 PDF", data=comprobante_para_descargar(_comp_de),
+                                     file_name=f"comprobante_{_comp_de}.pdf",
+                                     mime="application/pdf", key="venta_comprobante_dia",
+                                     width="stretch")
             if _validas:
                 _a1, _a2 = cols([3, 1])
                 _anular = _a1.selectbox("Anular una venta (devuelve el stock y la saca de la "
@@ -291,6 +308,108 @@ if pagina == PAGINAS[9]:
                     _ok_an, _texto_an = anular_venta(_anular)
                     avisar("success" if _ok_an else "warning", _texto_an)
                     st.rerun()
+        # EL ARQUEO: lo que hay en el cajón contra lo que dice el sistema. Ver arquear_la_caja().
+        st.markdown("**🧮 Arqueo: ¿cuánto efectivo hay en el cajón?**")
+        st.caption(f"Según las ventas en efectivo (menos lo devuelto), tendría que haber "
+                   f"**${miles(efectivo_esperado(_dia_txt), 0)}**, sin contar el cambio con el "
+                   "que se abrió.")
+        with st.form("form_arqueo"):
+            _q1, _q2 = cols([1, 2])
+            _contado = _q1.number_input("Efectivo contado:", min_value=0.0, step=100.0,
+                                        value=None, placeholder="Ej: 45000",
+                                        help="Sin el cambio con el que abriste la caja.")
+            _nota_arq = _q2.text_input("Nota (opcional):", placeholder="Ej: faltan $500 de un vuelto")
+            _arquear = st.form_submit_button("🧮 Guardar el arqueo")
+        if _arquear:
+            if _contado is None:
+                st.warning("Escribí cuánto efectivo contaste.")
+            else:
+                _ok_arq, _texto_arq = arquear_la_caja(_dia_txt, _contado, _nota_arq)
+                avisar("success" if _ok_arq else "warning", f"🧮 {_texto_arq}")
+                st.rerun()
+        _arqueos = arqueos_del_dia(_dia_txt)
+        if _arqueos:
+            st.dataframe([{"Hora": a["hora"], "Esperado": f"${miles(a['efectivo_esperado'], 0)}",
+                           "Contado": f"${miles(a['efectivo_contado'], 0)}",
+                           "Diferencia": (f"{'+' if a['diferencia'] > 0 else '-' if a['diferencia'] < 0 else ''}"
+                                          f"${miles(abs(a['diferencia']), 0)}"),
+                           "Nota": a["nota"] or "", "Contó": a["usuario"] or ""}
+                          for a in _arqueos], width="stretch", hide_index=True)
+
+    # BUSCAR UNA VENTA Y DEVOLVER: ver «DEVOLVER ALGO DE UNA VENTA» en logica/ventas.py.
+    with st.expander("↩️ Buscar una venta y devolver"):
+        _q_dev = st.text_input("Número de venta, cliente, patente o teléfono:",
+                               key="venta_buscar_dev", placeholder="Ej: 12, Juan, AB123CD")
+        if _q_dev.strip():
+            _encontradas = buscar_ventas(_q_dev)
+            if not _encontradas:
+                st.caption("No encontré ninguna venta de los últimos 6 meses con eso.")
+            else:
+                _por_id = {v["id"]: v for v in _encontradas}
+                _vsel = st.selectbox(
+                    "Venta:", list(_por_id), key="venta_dev_sel",
+                    format_func=lambda i: (f"#{i} — {_por_id[i]['fecha'][8:10]}/"
+                                           f"{_por_id[i]['fecha'][5:7]} {_por_id[i]['fecha'][11:16]}"
+                                           f" — {_por_id[i]['cliente'] or _por_id[i]['patente'] or 'sin nombre'}"
+                                           f" — ${miles(_por_id[i]['total'] or 0, 0)}"))
+                _v = _por_id[_vsel]
+                st.dataframe([{"Qué": f"{it['marca']} {it['codigo']}",
+                               "Descripción": (it["descripcion"] or "")[:40],
+                               "Cantidad": it["cantidad"], "Devuelto": it["devuelto"] or "",
+                               "Precio": f"${miles(it['precio'], 0)}"} for it in _v["items"]],
+                             width="stretch", hide_index=True)
+                _devolvibles = {it["id"]: it for it in _v["items"]
+                                if it["cantidad"] - it["devuelto"] > 0}
+                if not _devolvibles:
+                    st.caption("De esta venta ya se devolvió todo.")
+                else:
+                    with st.form("form_devolver"):
+                        _d1, _d2 = cols([3, 1])
+                        _it_dev = _d1.selectbox(
+                            "Qué vuelve:", list(_devolvibles),
+                            format_func=lambda i: (f"{_devolvibles[i]['marca']} "
+                                                   f"{_devolvibles[i]['codigo']} (quedan "
+                                                   f"{_devolvibles[i]['cantidad'] - _devolvibles[i]['devuelto']})"))
+                        _cant_dev = _d2.number_input("Cuántos:", min_value=1, value=1, step=1)
+                        _mot_dev = st.selectbox("¿Por qué volvió?", list(MOTIVOS_DE_DEVOLUCION),
+                                                format_func=MOTIVOS_DE_DEVOLUCION.get)
+                        _det_dev = st.text_input("Qué pasó (opcional):",
+                                                 placeholder="Ej.: la rosca era más chica")
+                        st.caption("Vuelve al stock salvo que no se pueda volver a vender "
+                                   "(fallada, dañada o modificada), y la plata sale de la caja "
+                                   "de hoy. Si se vendió en lugar de otro código y no le iba, la "
+                                   "app lo aprende.")
+                        _devolver = st.form_submit_button("↩️ Devolver", type="primary")
+                    if _devolver:
+                        _ok_dev, _texto_dev = devolver_de_una_venta(_it_dev, _cant_dev, _mot_dev,
+                                                                   _det_dev)
+                        if _ok_dev:
+                            avisar("success", f"↩️ {_texto_dev}")
+                            st.rerun()
+                        st.warning(_texto_dev)
+
+    # LO QUE SE VA A TERMINAR, con lo que se vende: para anotarlo antes de que falte. Ver
+    # lo_que_se_va_a_terminar().
+    _por_terminar = lo_que_se_va_a_terminar()
+    with st.expander(f"📦 Lo que se va a terminar ({len(_por_terminar)})"):
+        if not _por_terminar:
+            st.caption("Con lo que se vendió en los últimos 30 días, nada se termina esta semana.")
+        else:
+            st.caption("Con lo que se vendió en los últimos 30 días (sin lo devuelto) y el stock "
+                       "de hoy, esto alcanza para menos de una semana:")
+            st.dataframe([{"Producto": f["nombre"], "Descripción": f["descripcion"][:40],
+                           "Stock": f["stock"], "Se venden por semana": f["por_semana"],
+                           "Alcanza para": ("ya no hay" if not f["alcanza_dias"] and not f["stock"]
+                                            else f"{f['alcanza_dias']} día(s)"),
+                           "Para reponer": "✅ anotado" if f["anotado"] else ""}
+                          for f in _por_terminar], width="stretch", hide_index=True)
+            _faltan_anotar = [f for f in _por_terminar if not f["anotado"]]
+            if _faltan_anotar and st.button(f"📋 Anotar para reponer ({len(_faltan_anotar)})",
+                                            key="venta_reponer_todo"):
+                for f in _faltan_anotar:
+                    solicitar_reposicion(f["producto_id"])
+                avisar("success", f"📋 Anotado para reponer: {len(_faltan_anotar)} producto(s).")
+                st.rerun()
 
     # LO QUE MÁS SE VENDE: el período que se elija, el total, el ticket promedio, las ventas de
     # cada día y lo que más sale, por unidades y por plata. La ganancia, solo el administrador.

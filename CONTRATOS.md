@@ -209,6 +209,10 @@ Las pruebas se corren como dice el README, en «Antes de subir un cambio».
 | El comprobante de una venta, en texto y PDF, dice que no es factura | `texto_del_comprobante()`, `pdf_del_comprobante()` | `pruebas_de_las_ventas.py` (11) |
 | La ganancia usa el costo de cuando se vendió, y solo lo que tiene costo | `cierre_de_caja()`, `lo_mas_vendido()` | `pruebas_de_las_ventas.py` (10, 13) |
 | Lo que más se vende: sin anuladas, todos los días del período | `lo_mas_vendido()` | `pruebas_de_las_ventas.py` (13) |
+| Devolver una cosa de una venta: el stock (salvo lo que no se puede volver a vender), la plata del cierre de ese día, lo aprendido si se vendió en lugar de otro código; una venta con devoluciones no se anula | `devolver_de_una_venta()`, `cierre_de_caja()`, `anular_venta()` | `pruebas_de_las_ventas.py` (14) |
+| Buscar una venta por número, cliente, patente o teléfono | `buscar_ventas()` | `pruebas_de_las_ventas.py` (14) |
+| El arqueo: lo contado contra el efectivo esperado | `arquear_la_caja()`, `efectivo_esperado()` | `pruebas_de_las_ventas.py` (15, 16) |
+| Lo que se va a terminar con lo que se vende | `lo_que_se_va_a_terminar()` | `pruebas_de_las_ventas.py` (16) |
 | Al terminar la venta, la patente y los km anotan cada pieza en la ficha del auto, una sola vez, y frenan los km para atrás | `anotar_la_venta_en_el_auto()`, `nombre_de_la_pieza()` | `pruebas_de_las_ventas.py` |
 | Un aviso por cliente con todo lo que le toca; «Ya le avisé» lo saca de la lista 15 días | `avisos_por_cliente()`, `marcar_avisado()` | `pruebas_de_los_cambios.py` (9l ter) |
 | Un mecánico solo lee y escribe su propia cuenta | `exigir_que_sea_su_cuenta()` | `pruebas_de_los_cambios.py` (5) |

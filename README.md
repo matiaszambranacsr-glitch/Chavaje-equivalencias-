@@ -6521,6 +6521,14 @@ Cargarla a la cuenta de un taller sigue yendo por el depósito, con la cuenta el
 
 Al sumar algo que ya estaba —escanear dos veces la misma caja, «➕» otra vez en Ventas, o **«➕ Sumar» otra vez al presupuesto del buscador**— la cuenta subía, pero **el casillero de la cantidad seguía mostrando el número viejo**, y con el siguiente toque lo mandaba de vuelta: se escanearon dos y se vendió uno. En el presupuesto pasaba desde antes: sumar dos veces lo mismo dejaba 1, y volver a sumar algo destildado no lo marcaba. Las pruebas sin navegador no lo veían, porque no tienen un casillero que se acuerde de lo suyo. Ahora lo que cambia por atrás se escribe en el casillero antes de dibujarlo; probado en un navegador de verdad: 2 escaneos, 2 vendidos; sumado dos veces, 2; destildado y sumado otra vez, 3 y marcado.
 
+## 🧾 Ventas: devolver una cosa, el arqueo y lo que se va a terminar
+
+| Qué | Cómo |
+|---|---|
+| **↩️ Buscar una venta y devolver** | Se busca la venta por su número, el cliente, la patente o el teléfono, y se devuelve **una cosa y una cantidad**, con el motivo. Hasta ahora lo que volvía se anotaba solo en la ficha de prueba de una equivalencia: no volvía al stock ni salía de la caja, y desde Ventas lo único posible era anular la venta entera (y eso es de administrador). Ahora: **vuelve al stock**, salvo que no se pueda volver a vender (fallada, llegó dañada o la modificaron); **la plata sale del cierre de caja del día en que se devuelve**, por la misma forma de pago; si se había vendido **en lugar de otro código y no le iba**, la app lo aprende como con la ficha de prueba y ese vínculo baja; y si vuelve entero, sale de la ficha del auto y de lo aprendido de la venta. Una venta con devoluciones ya no se anula: se devuelve lo que queda. El comprobante dice lo devuelto. |
+| **🧮 Arqueo** | En el cierre de caja: la app dice cuánto efectivo tendría que haber (lo cobrado en efectivo menos lo devuelto, sin el cambio con el que se abrió), se escribe lo que se contó, y queda guardado con la diferencia, quién contó y una nota. |
+| **📦 Lo que se va a terminar** | Con lo que se vendió en los últimos 30 días (sin lo devuelto) y el stock de hoy, lo que alcanza para menos de una semana, lo que ya no hay primero, y un botón para anotar todo para reponer. |
+
 ## 📞 Un aviso por cliente, y una sola vez
 
 «A quién avisar» era una fila por pieza: el cliente con la correa y las pastillas recibía dos mensajes, y al otro día los dos volvían a la lista. Ahora es **un mensaje por cliente** con todo lo que le toca, y **«✅ Ya le avisé»** lo saca de la lista por 15 días. Si mientras tanto le toca otra pieza, vuelve por esa.

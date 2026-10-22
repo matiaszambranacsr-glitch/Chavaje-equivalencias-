@@ -288,6 +288,87 @@ def probar(L):
              [p["codigo"] for p in mv["por_plata"]]),
             (3, 37500.0, 12500.0, -2000.0, 7, 37500.0, ["J200", "F100", "P400"],
              ["F100", "P400", "J200"]))
+
+    # 14. DEVOLVER ALGO DE UNA VENTA: una cosa y una cantidad. Vuelve al stock salvo que no se
+    # pueda volver a vender; la plata sale del cierre de hoy, por donde entró; lo vendido EN
+    # LUGAR DE otro código y que no le iba baja ese vínculo; lo devuelto entero sale de lo
+    # aprendido.
+    def item_de(venta_id, pid):
+        return c.execute("SELECT id FROM ventas_items WHERE venta_id = ? AND producto_id = ?",
+                         (venta_id, pid)).fetchone()[0]
+    devolver = ns["devolver_de_una_venta"]
+    c.execute("INSERT INTO productos (codigo_raw, codigo_clean, descripcion, marca_id) "
+              "VALUES ('OTRO-1', 'OTRO1', 'FILTRO ACEITE', ?)", (marca,))
+    otro_1 = c.lastrowid
+    c.execute("INSERT INTO equivalencias (producto_a_id, producto_b_id, confianza) "
+              "VALUES (?, ?, 90)", (min(otro_1, ids["F100"]), max(otro_1, ids["F100"])))
+    conn.commit()
+    _stock_f, _stock_p = stock(ids["F100"]), stock(ids["P400"])
+    _j_v4, _p_v4 = item_de(venta4, ids["J200"]), item_de(venta4, ids["P400"])
+    esperar("lo que no se puede devolver",
+            ["de 1 a 1" in devolver(_j_v4, 2, "no_le_iba")[1], devolver(_j_v4, 0, "no_le_iba")[0],
+             devolver(_j_v4, 1, "inventado")[0], devolver(999999, 1, "otro")[0]],
+            [True, False, False, False])
+    ok_j, _ = devolver(_j_v4, 1, "no_le_iba")
+    ok_p1, texto_p1 = devolver(_p_v4, 1, "fallada")
+    ok_p2, _ = devolver(_p_v4, 1, "medida")
+    ok_f, texto_f = devolver(item_de(venta3, ids["F100"]), 1, "medida", "otra rosca")
+    esperar("devolver: el stock (lo fallado no vuelve; el sin stock cargado no se toca)",
+            (ok_j, ok_p1, ok_p2, ok_f, stock(ids["J200"]), stock(ids["P400"]) - _stock_p,
+             stock(ids["F100"]) - _stock_f, "no vuelve al stock" in texto_p1,
+             devolver(_j_v4, 1, "otro")[0]),
+            (True, True, True, True, None, 1, 1, True, False))
+    esperar("devolver: lo vendido en lugar de otro código y que no le iba baja ese vínculo",
+            (c.execute("SELECT confianza FROM equivalencias WHERE producto_a_id = ? AND "
+                       "producto_b_id = ?", (min(otro_1, ids["F100"]),
+                                             max(otro_1, ids["F100"]))).fetchone()[0]
+             <= ns["TOPE_CON_VETO"], "bajó" in texto_f,
+             c.execute("SELECT COUNT(*) FROM devoluciones WHERE codigo_pedido_clean = 'OTRO1'")
+             .fetchone()[0],
+             c.execute("SELECT COUNT(*) FROM ventas_registradas WHERE venta_id = ?",
+                       (venta4,)).fetchone()[0]),
+            (True, True, 1, 0))
+    caja = ns["cierre_de_caja"]()
+    esperar("devolver: la plata sale del cierre de hoy, por donde entró",
+            (caja["total"], caja["devoluciones"], caja["total_devuelto"], caja["por_forma"],
+             caja["ganancia"]),
+            (37500.0 - 22500.0, 4, 22500.0,
+             [("Sin decir", 1, 10000.0), ("Transferencia", 1, 5000.0), ("Efectivo", 1, 0.0)],
+             -2000.0 + 2000.0))
+    esperar("con devoluciones no se anula", ns["anular_venta"](venta4)[0], False)
+    esperar("lo devuelto, en el comprobante",
+            "(devueltos: 2)" in ns["texto_del_comprobante"](venta4), True)
+    esperar("buscar una venta: por número, por el cliente de la ficha, por patente; nada con "
+            "nada, y la anulada no",
+            ([v["id"] for v in ns["buscar_ventas"](f"#{venta4}")],
+             [v["id"] for v in ns["buscar_ventas"]("Juan")],
+             [v["id"] for v in ns["buscar_ventas"]("ae 777 zz")], ns["buscar_ventas"]("  ")),
+            ([venta4], [venta2], [venta2], []))
+
+    # 15. El arqueo: lo contado contra el efectivo que dice el sistema.
+    esperar("efectivo esperado", ns["efectivo_esperado"](), 0.0)
+    _arq = ns["arquear_la_caja"](None, 100, "un vuelto de más")
+    esperar("el arqueo", (_arq, ns["arquear_la_caja"](None, -1)[0],
+                          ns["arquear_la_caja"](None, "mucho")[0],
+                          [(a["efectivo_contado"], a["diferencia"], a["nota"])
+                           for a in ns["arqueos_del_dia"]()]),
+            ((True, "Sobran $100."), False, False, [(100.0, 100.0, "un vuelto de más")]))
+
+    # 16. Lo que se va a terminar con lo que se vende: lo que quedó en 0 primero, lo que
+    # alcanza para unos días después, lo que alcanza para más de una semana no; y si ya se
+    # anotó para reponer. Con más efectivo en la caja, el arqueo cuenta la diferencia.
+    c.execute("UPDATE productos SET stock = 6 WHERE id = ?", (kit,))
+    conn.commit()
+    ns["cerrar_venta"]([item(ids["B300"]), dict(item(kit), cantidad=5)], "", "Efectivo")
+    _por_terminar = lambda: [(f["nombre"], f["stock"], f["alcanza_dias"], f["anotado"])
+                             for f in ns["lo_que_se_va_a_terminar"]()]
+    esperar("lo que se va a terminar", _por_terminar(),
+            [("PRUEBA B300", 0, 0, False), ("PRUEBA K500", 1, 6, False)])
+    ns["solicitar_reposicion"](ids["B300"])
+    esperar("y ya anotado para reponer", _por_terminar()[0], ("PRUEBA B300", 0, 0, True))
+    esperar("el arqueo con efectivo", (ns["efectivo_esperado"](),
+                                       ns["arquear_la_caja"](None, 152500)),
+            (153000.0, (True, "Faltan $500.")))
     st.session_state.pop("venta_items", None)
 
     # 7. Quién puede: vender y anotar, empleado; anular, administrador.

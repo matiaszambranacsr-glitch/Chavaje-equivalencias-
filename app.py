@@ -120,6 +120,7 @@ específico, y las pantallas quedan todas al final:
         · A QUIÉN SE ESTÁ ATENDIENDO
     logica/ventas.py
         · VENTAS DEL MOSTRADOR
+        · DEVOLVER ALGO DE UNA VENTA
     app.py
         · ENCABEZADO
         · NAVEGACIÓN PRINCIPAL

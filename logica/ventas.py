@@ -130,13 +130,18 @@ def cierre_de_caja(dia=None):
     dice «Efectivo», y las transferencias contra el banco. dict."""
     ventas = ventas_del_dia(dia)
     validas = [v for v in ventas if not v["anulada"]]
+    # LO DEVUELTO ESE DÍA sale de ese día, por donde entró (la forma de pago de la venta) y de
+    # quien lo devolvió: es lo que tiene que faltar en el cajón. Ver devolver_de_una_venta().
+    devueltas = devoluciones_del_dia(dia)
 
-    def agrupar(campo, vacio):
+    def agrupar(campo, vacio, campo_devolucion):
         grupos = {}
         for v in validas:
             g = grupos.setdefault(v[campo] or vacio, [0, 0.0])
             g[0] += 1
             g[1] += v["total"] or 0
+        for d in devueltas:
+            grupos.setdefault(d[campo_devolucion] or vacio, [0, 0.0])[1] -= d["importe"]
         return sorted(((k, n, round(t, 2)) for k, (n, t) in grupos.items()),
                       key=lambda x: -x[2])
     anuladas = [v for v in ventas if v["anulada"]]
@@ -144,12 +149,17 @@ def cierre_de_caja(dia=None):
     # cargado: cuántos lo tienen va al lado, para no leer «ganancia del día» donde es una parte.
     items = [it for v in validas for it in v["items"]]
     con_costo = [it for it in items if it.get("costo") is not None]
-    return {"ventas": len(validas), "total": round(sum(v["total"] or 0 for v in validas), 2),
+    total_devuelto = round(sum(d["importe"] for d in devueltas), 2)
+    return {"ventas": len(validas),
+            "total": round(sum(v["total"] or 0 for v in validas) - total_devuelto, 2),
             "ganancia": round(sum((it["precio"] - it["costo"]) * it["cantidad"]
-                                  for it in con_costo), 2),
+                                  for it in con_costo)
+                              - sum((d["precio"] - d["costo"]) * d["cantidad"]
+                                    for d in devueltas if d["costo"] is not None), 2),
             "items": len(items), "items_con_costo": len(con_costo),
-            "por_forma": agrupar("forma_de_pago", "Sin decir"),
-            "por_usuario": agrupar("usuario", "Sin decir"),
+            "por_forma": agrupar("forma_de_pago", "Sin decir", "forma_de_pago"),
+            "por_usuario": agrupar("usuario", "Sin decir", "usuario"),
+            "devoluciones": len(devueltas), "total_devuelto": total_devuelto,
             "anuladas": len(anuladas),
             "total_anulado": round(sum(v["total"] or 0 for v in anuladas), 2)}
 
@@ -311,6 +321,12 @@ def anular_venta(venta_id):
     cada pieza supiera de qué venta salió se reconoce por la nota «Venta #N» en ese auto."""
     exigir_nivel("admin", "anular una venta")
     with db_lock, transaccion():
+        # Con algo ya devuelto no: la plata de esa devolución ya salió de la caja de otro día,
+        # y anularla la sacaría dos veces. Se devuelve lo que queda.
+        if c.execute("SELECT 1 FROM ventas_devoluciones WHERE venta_id = ? LIMIT 1",
+                     (venta_id,)).fetchone():
+            return False, (f"La venta #{venta_id} tiene devoluciones: no se anula. Devolvé lo "
+                           "que queda desde «↩️ Buscar una venta y devolver».")
         c.execute("""UPDATE ventas SET anulada = 1, anulada_por = ?
                      WHERE id = ? AND anulada = 0""", (obtener_usuario_actual(), venta_id))
         if c.rowcount != 1:
@@ -344,10 +360,24 @@ def ventas_del_dia(dia=None):
                  WHERE substr(v.fecha, 1, 10) = ? ORDER BY v.id DESC""", (dia,))
     ventas = [dict(f) for f in c.fetchall()]
     for v in ventas:
-        c.execute("""SELECT codigo, marca, descripcion, cantidad, precio, costo FROM ventas_items
-                     WHERE venta_id = ? ORDER BY id""", (v["id"],))
+        c.execute("""SELECT id, codigo, marca, descripcion, cantidad, precio, costo,
+                            COALESCE(devuelto, 0) AS devuelto
+                     FROM ventas_items WHERE venta_id = ? ORDER BY id""", (v["id"],))
         v["items"] = [dict(f) for f in c.fetchall()]
     return ventas
+
+
+def devoluciones_del_dia(dia=None):
+    """Lo que se devolvió en un día (hoy, si no se dice), de ventas no anuladas: con la forma de
+    pago de la venta (la plata vuelve por donde entró) y el precio y el costo del ítem. [dict]."""
+    dia = dia or datetime.now().strftime("%Y-%m-%d")
+    c.execute("""SELECT d.id, d.venta_id, d.cantidad, d.importe, d.motivo, d.usuario,
+                        substr(d.fecha, 12, 5) AS hora, v.forma_de_pago, vi.marca, vi.codigo,
+                        vi.precio, vi.costo
+                 FROM ventas_devoluciones d JOIN ventas v ON v.id = d.venta_id
+                 JOIN ventas_items vi ON vi.id = d.venta_item_id
+                 WHERE substr(d.fecha, 1, 10) = ? AND v.anulada = 0 ORDER BY d.id""", (dia,))
+    return [dict(f) for f in c.fetchall()]
 
 
 def se_lleva(producto_id):
@@ -406,8 +436,9 @@ def una_venta(venta_id):
     if not venta:
         return None
     venta = dict(venta)
-    c.execute("""SELECT codigo, marca, descripcion, cantidad, precio FROM ventas_items
-                 WHERE venta_id = ? ORDER BY id""", (venta_id,))
+    c.execute("""SELECT id, codigo, marca, descripcion, cantidad, precio,
+                        COALESCE(devuelto, 0) AS devuelto
+                 FROM ventas_items WHERE venta_id = ? ORDER BY id""", (venta_id,))
     venta["items"] = [dict(f) for f in c.fetchall()]
     return venta
 
@@ -425,6 +456,7 @@ def texto_del_comprobante(venta_id):
     lineas = [f"Tu compra en El Chavo — #{venta['id']} — {venta['fecha'][:16]}"]
     lineas += [f"{it['cantidad']}× {it['marca']} {it['codigo']} — "
                f"{(it['descripcion'] or '')[:40]} — ${miles(it['cantidad'] * it['precio'], 0)}"
+               + (f" (devueltos: {it['devuelto']})" if it["devuelto"] else "")
                for it in venta["items"]]
     lineas.append(f"TOTAL: ${miles(venta['total'] or 0, 0)}"
                   + (f" ({venta['forma_de_pago']})" if venta["forma_de_pago"] else ""))
@@ -472,7 +504,10 @@ def pdf_del_comprobante(venta):
     pdf.set_font("Helvetica", "", 10)
     for it in venta["items"]:
         pdf.cell(15, 7, str(it["cantidad"]))
-        pdf.cell(125, 7, limpiar(f"{it['marca']} {it['codigo']} - {(it['descripcion'] or '')[:55]}"))
+        # Más corta si lleva lo devuelto: la celda no corta, se pisaría con el importe.
+        _largo = 40 if it["devuelto"] else 55
+        pdf.cell(125, 7, limpiar(f"{it['marca']} {it['codigo']} - {(it['descripcion'] or '')[:_largo]}"
+                                 + (f" (devueltos: {it['devuelto']})" if it["devuelto"] else "")))
         pdf.cell(40, 7, limpiar(f"${miles(it['cantidad'] * it['precio'], 0)}"), align="R")
         pdf.ln()
     pdf.set_font("Helvetica", "B", 12)
@@ -511,16 +546,25 @@ def lo_mas_vendido(dias=30, tope=10):
     c.execute("""SELECT substr(fecha, 1, 10) AS dia, COUNT(*) AS ventas, SUM(total) AS total
                  FROM ventas WHERE anulada = 0 AND substr(fecha, 1, 10) >= ?
                  GROUP BY dia""", (desde.isoformat(),))
-    del_dia = {f["dia"]: (f["ventas"], f["total"] or 0) for f in c.fetchall()}
+    del_dia = {f["dia"]: [f["ventas"], f["total"] or 0] for f in c.fetchall()}
+    # Lo devuelto, el día que se devolvió: ver cierre_de_caja().
+    c.execute("""SELECT substr(d.fecha, 1, 10) AS dia, SUM(d.importe) AS importe
+                 FROM ventas_devoluciones d JOIN ventas v ON v.id = d.venta_id
+                 WHERE v.anulada = 0 AND substr(d.fecha, 1, 10) >= ? GROUP BY dia""",
+              (desde.isoformat(),))
+    for f in c.fetchall():
+        del_dia.setdefault(f["dia"], [0, 0])[1] -= f["importe"] or 0
     # Todos los días del período, también los que no hubo ventas: sin ellos el gráfico junta
     # un martes con el viernes y parece que se vendió todos los días.
     por_dia = [((desde + timedelta(days=i)).isoformat(),
                 del_dia.get((desde + timedelta(days=i)).isoformat(), (0, 0))[1])
                for i in range(int(dias))]
     c.execute("""SELECT vi.marca, vi.codigo, MAX(vi.descripcion) AS descripcion,
-                        SUM(vi.cantidad) AS unidades, SUM(vi.cantidad * vi.precio) AS plata,
+                        SUM(vi.cantidad - COALESCE(vi.devuelto, 0)) AS unidades,
+                        SUM((vi.cantidad - COALESCE(vi.devuelto, 0)) * vi.precio) AS plata,
                         SUM(CASE WHEN vi.costo IS NOT NULL
-                                 THEN vi.cantidad * (vi.precio - vi.costo) END) AS ganancia,
+                                 THEN (vi.cantidad - COALESCE(vi.devuelto, 0))
+                                      * (vi.precio - vi.costo) END) AS ganancia,
                         COUNT(DISTINCT vi.venta_id) AS ventas
                  FROM ventas_items vi JOIN ventas v ON v.id = vi.venta_id
                  WHERE v.anulada = 0 AND substr(v.fecha, 1, 10) >= ?
@@ -534,3 +578,172 @@ def lo_mas_vendido(dias=30, tope=10):
             "por_dia": por_dia,
             "por_unidades": sorted(productos, key=lambda p: (-p["unidades"], -p["plata"]))[:tope],
             "por_plata": sorted(productos, key=lambda p: (-p["plata"], -p["unidades"]))[:tope]}
+
+
+# ============================================================================================
+# DEVOLVER ALGO DE UNA VENTA
+# ============================================================================================
+# Hasta acá, lo que volvía se anotaba solo en la ficha de prueba de una equivalencia: no volvía
+# al stock, no salía de la caja, y desde 🧾 Ventas lo único que había era anular la venta entera
+# (y eso es de administrador). Ahora se devuelve una cosa y una cantidad:
+#   · vuelve al stock, salvo que no se pueda volver a vender (fallada, llegó dañada, la
+#     modificaron): ver NO_VUELVE_AL_STOCK;
+#   · la plata sale del cierre de caja del día en que se devuelve, por donde entró;
+#   · si se vendió EN LUGAR DE otro código, la app aprende como con «↩️ Anotar la devolución»
+#     de la ficha de prueba: si no le iba, ese vínculo baja (ver registrar_devolucion());
+#   · si vuelve todo lo de ese ítem, sale de la ficha del auto y de lo aprendido de la venta.
+NO_VUELVE_AL_STOCK = frozenset({"fallada", "transporte", "modificacion"})
+
+
+def buscar_ventas(texto, dias=180, tope=20):
+    """Las ventas no anuladas de los últimos `dias` días que coinciden con `texto`: el número
+    («#12» o «12»), el cliente, la patente o el teléfono del auto. La última primero, con sus
+    ítems. [dict]."""
+    t = (texto or "").strip()
+    if not t:
+        return []
+    desde = (datetime.now().date() - timedelta(days=int(dias))).isoformat()
+    numero = t.lstrip("#").strip()
+    digitos = re.sub(r"\D", "", t)
+    c.execute("""SELECT v.id FROM ventas v LEFT JOIN vehiculos ve ON ve.id = v.vehiculo_id
+                 WHERE v.anulada = 0 AND substr(v.fecha, 1, 10) >= ?
+                   AND (CAST(v.id AS TEXT) = ? OR v.cliente LIKE ? OR ve.cliente_nombre LIKE ?
+                        OR ve.patente = ?
+                        OR (length(?) >= 6 AND REPLACE(REPLACE(REPLACE(REPLACE(
+                                ve.cliente_telefono, ' ', ''), '-', ''), '+', ''), '.', '')
+                            LIKE '%' || ? || '%'))
+                 ORDER BY v.id DESC LIMIT ?""",
+              (desde, numero, f"%{t}%", f"%{t}%", patente_sin_espacios(t), digitos, digitos,
+               int(tope)))
+    return [una_venta(venta_id) for (venta_id,) in [tuple(f) for f in c.fetchall()]]
+
+
+def devolver_de_una_venta(venta_item_id, cantidad, motivo, detalle=""):
+    """Devuelve `cantidad` de un ítem de una venta, por `motivo` (uno de
+    MOTIVOS_DE_DEVOLUCION). (ok, texto). Ver «DEVOLVER ALGO DE UNA VENTA»."""
+    exigir_nivel("empleado", "devolver algo de una venta")
+    if motivo not in MOTIVOS_DE_DEVOLUCION:
+        return False, "Elegí por qué volvió."
+    try:
+        cantidad = int(cantidad)
+    except (TypeError, ValueError):
+        return False, "La cantidad tiene que ser un número."
+    c.execute("""SELECT vi.id, vi.venta_id, vi.producto_id, vi.codigo, vi.marca, vi.cantidad,
+                        vi.precio, vi.pedido, COALESCE(vi.devuelto, 0) AS devuelto, v.anulada,
+                        p.codigo_clean, p.stock
+                 FROM ventas_items vi JOIN ventas v ON v.id = vi.venta_id
+                 LEFT JOIN productos p ON p.id = vi.producto_id WHERE vi.id = ?""",
+              (venta_item_id,))
+    it = c.fetchone()
+    if not it:
+        return False, "Ese ítem no existe."
+    if it["anulada"]:
+        return False, "Esa venta está anulada."
+    queda = it["cantidad"] - it["devuelto"]
+    if not 1 <= cantidad <= queda:
+        return False, (f"De {it['marca']} {it['codigo']} se puede devolver de 1 a {queda}."
+                       if queda else f"{it['marca']} {it['codigo']} ya se devolvió entero.")
+    al_stock = (cantidad if it["producto_id"] is not None and it["stock"] is not None
+                and motivo not in NO_VUELVE_AL_STOCK else 0)
+    importe = round(cantidad * it["precio"], 2)
+    entero = cantidad == queda
+    with db_lock, transaccion():
+        c.execute("""UPDATE ventas_items SET devuelto = COALESCE(devuelto, 0) + ?
+                     WHERE id = ? AND COALESCE(devuelto, 0) + ? <= cantidad""",
+                  (cantidad, venta_item_id, cantidad))
+        if c.rowcount != 1:
+            return False, "Eso ya se devolvió."
+        c.execute("""INSERT INTO ventas_devoluciones (venta_id, venta_item_id, cantidad, importe,
+                                                      motivo, detalle, stock_devuelto, usuario)
+                     VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                  (it["venta_id"], venta_item_id, cantidad, importe, motivo,
+                   (detalle or "").strip(), al_stock, obtener_usuario_actual()))
+        if al_stock:
+            c.execute("UPDATE productos SET stock = stock + ? WHERE id = ?",
+                      (al_stock, it["producto_id"]))
+        if entero and it["producto_id"] is not None:
+            # No se le puso al auto, y no se vendió: sale de la ficha y de lo aprendido.
+            c.execute("DELETE FROM historial_piezas WHERE venta_id = ? AND producto_id = ?",
+                      (it["venta_id"], it["producto_id"]))
+            c.execute("DELETE FROM ventas_registradas WHERE venta_id = ? AND producto_id = ?",
+                      (it["venta_id"], it["producto_id"]))
+    # LO QUE APRENDE, después y aparte (db_lock no se puede tomar dos veces): lo pedido solo si
+    # se vendió EN LUGAR DE otro código; si era lo pedido mismo, cuenta para la calidad de la
+    # marca pero no baja ningún vínculo. Ver registrar_devolucion().
+    bajados = 0
+    if it["producto_id"] is not None:
+        pedido = it["pedido"] if sanitizar(it["pedido"] or "") not in ("", it["codigo_clean"]) else ""
+        try:
+            bajados = registrar_devolucion(it["producto_id"], pedido, motivo, detalle)
+        except (PermissionError, ValueError) as _err:
+            anotar_error("devolver_de_una_venta", _err)
+    return True, (f"Devuelto: {cantidad} × {it['marca']} {it['codigo']} (${miles(importe, 0)}"
+                  " sale de la caja de hoy)"
+                  + ("" if al_stock or it["stock"] is None else
+                     ", y no vuelve al stock: no se puede volver a vender")
+                  + (". El vínculo con lo que se había pedido bajó a «muy débil»"
+                     if bajados else "") + ".")
+
+
+def arquear_la_caja(dia, efectivo_contado, nota=""):
+    """Anota lo que se contó en el cajón contra el efectivo que dice el cierre de caja de ese
+    día (ver cierre_de_caja()). (ok, texto)."""
+    exigir_nivel("empleado", "arquear la caja")
+    try:
+        contado = round(float(efectivo_contado), 2)
+    except (TypeError, ValueError):
+        return False, "Escribí cuánto efectivo hay."
+    if contado < 0:
+        return False, "El efectivo no puede ser negativo."
+    dia = dia or datetime.now().strftime("%Y-%m-%d")
+    esperado = efectivo_esperado(dia)
+    with db_lock, transaccion():
+        c.execute("""INSERT INTO arqueos_de_caja (dia, efectivo_esperado, efectivo_contado, nota,
+                                                  usuario) VALUES (?, ?, ?, ?, ?)""",
+                  (dia, esperado, contado, (nota or "").strip(), obtener_usuario_actual()))
+    diferencia = round(contado - esperado, 2)
+    return True, ("✅ Cierra justo." if not diferencia else
+                  f"{'Sobran' if diferencia > 0 else 'Faltan'} ${miles(abs(diferencia), 0)}.")
+
+
+def efectivo_esperado(dia=None):
+    """Lo que tiene que haber en el cajón por las ventas de ese día: lo cobrado en efectivo
+    menos lo devuelto de ventas en efectivo. Sin el cambio con el que se abrió."""
+    return next((t for f, _, t in cierre_de_caja(dia)["por_forma"] if f == "Efectivo"), 0.0)
+
+
+def arqueos_del_dia(dia=None):
+    """Los arqueos de un día, el último primero. [dict]."""
+    dia = dia or datetime.now().strftime("%Y-%m-%d")
+    c.execute("""SELECT substr(fecha, 12, 5) AS hora, efectivo_esperado, efectivo_contado,
+                        efectivo_contado - efectivo_esperado AS diferencia, nota, usuario
+                 FROM arqueos_de_caja WHERE dia = ? ORDER BY id DESC""", (dia,))
+    return [dict(f) for f in c.fetchall()]
+
+
+def lo_que_se_va_a_terminar(dias=30, alcanza_menos_de=7):
+    """Lo que se vende y se va a terminar: con lo vendido en los últimos `dias` días (sin lo
+    devuelto) y el stock de hoy, para cuántos días alcanza. Solo lo que alcanza para menos de
+    `alcanza_menos_de` días, lo que se termina antes primero. [dict]."""
+    desde = (datetime.now().date() - timedelta(days=int(dias) - 1)).isoformat()
+    c.execute("""SELECT vi.producto_id, MAX(vi.marca) AS marca, MAX(vi.codigo) AS codigo,
+                        SUM(vi.cantidad - COALESCE(vi.devuelto, 0)) AS unidades, p.stock,
+                        p.descripcion,
+                        EXISTS (SELECT 1 FROM pedidos_reposicion pr
+                                WHERE pr.producto_id = vi.producto_id
+                                  AND pr.estado = 'pendiente') AS anotado
+                 FROM ventas_items vi JOIN ventas v ON v.id = vi.venta_id
+                 JOIN productos p ON p.id = vi.producto_id
+                 WHERE v.anulada = 0 AND substr(v.fecha, 1, 10) >= ? AND p.stock IS NOT NULL
+                 GROUP BY vi.producto_id HAVING unidades > 0""", (desde,))
+    salida = []
+    for f in c.fetchall():
+        por_dia = f["unidades"] / int(dias)
+        alcanza = max(f["stock"], 0) / por_dia
+        if alcanza < alcanza_menos_de:
+            salida.append({"producto_id": f["producto_id"],
+                           "nombre": f"{f['marca']} {f['codigo']}",
+                           "descripcion": f["descripcion"] or "", "stock": f["stock"],
+                           "por_semana": round(por_dia * 7, 1), "alcanza_dias": int(alcanza),
+                           "anotado": bool(f["anotado"])})
+    return sorted(salida, key=lambda x: (x["alcanza_dias"], -x["por_semana"]))

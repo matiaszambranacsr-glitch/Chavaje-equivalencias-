@@ -2906,6 +2906,35 @@ def _esquema_ventas(c):
                   "REFERENCES ventas(id) ON DELETE SET NULL")
     c.execute("CREATE INDEX IF NOT EXISTS idx_ventas_registradas_venta "
               "ON ventas_registradas(venta_id)")
+    # LO QUE SE DEVUELVE DE UNA VENTA, de a una cosa y una cantidad (ver devolver_de_una_venta()):
+    # cuánto ya volvió de cada ítem, y cada devolución con su plata, que sale del cierre de caja
+    # del día en que se devuelve, no del día de la venta.
+    if "devuelto" not in [f[1] for f in c.execute("PRAGMA table_info(ventas_items)")]:
+        c.execute("ALTER TABLE ventas_items ADD COLUMN devuelto INTEGER DEFAULT 0")
+    c.execute("""CREATE TABLE IF NOT EXISTS ventas_devoluciones (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        venta_id INTEGER NOT NULL REFERENCES ventas(id) ON DELETE CASCADE,
+        venta_item_id INTEGER NOT NULL REFERENCES ventas_items(id) ON DELETE CASCADE,
+        cantidad INTEGER NOT NULL,
+        importe REAL NOT NULL,
+        motivo TEXT,
+        detalle TEXT,
+        stock_devuelto INTEGER DEFAULT 0,
+        usuario TEXT,
+        fecha TEXT DEFAULT (datetime('now', 'localtime'))
+    )""")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_ventas_devoluciones_dia "
+              "ON ventas_devoluciones(fecha)")
+    # EL ARQUEO: lo que se contó en el cajón contra lo que dice el sistema. Ver arquear_la_caja().
+    c.execute("""CREATE TABLE IF NOT EXISTS arqueos_de_caja (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        dia TEXT NOT NULL,
+        efectivo_esperado REAL,
+        efectivo_contado REAL,
+        nota TEXT,
+        usuario TEXT,
+        fecha TEXT DEFAULT (datetime('now', 'localtime'))
+    )""")
 
 
 def crear_esquema(c):
