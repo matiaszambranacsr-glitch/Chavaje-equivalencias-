@@ -6529,6 +6529,20 @@ Al sumar algo que ya estaba —escanear dos veces la misma caja, «➕» otra ve
 | **🧮 Arqueo** | En el cierre de caja: la app dice cuánto efectivo tendría que haber (lo cobrado en efectivo menos lo devuelto, sin el cambio con el que se abrió), se escribe lo que se contó, y queda guardado con la diferencia, quién contó y una nota. |
 | **📦 Lo que se va a terminar** | Con lo que se vendió en los últimos 30 días (sin lo devuelto) y el stock de hoy, lo que alcanza para menos de una semana, lo que ya no hay primero, y un botón para anotar todo para reponer. |
 
+## 📦 Lo que se pide y no se vende: cada uno responde por lo suyo
+
+Lo pidió el dueño: «cuando se pida algo y no se venda, que quede cargado en la cuenta de cada persona que lo pidió y lo tenga que devolver con su código». Hasta acá, **entregar era vender**: el stock bajaba y lo entregado para Mostrador se daba por vendido, aunque el cliente se fuera sin llevarlo. La pieza quedaba afuera sin que nadie supiera quién la tenía. Y había un error más: si el vendedor la cobraba después en 🧾 Ventas, **el stock bajaba otra vez**.
+
+| Qué | Cómo |
+|---|---|
+| **Lo entregado para Mostrador queda a nombre de quien lo pidió** | Hasta que lo vende en 🧾 Ventas, se factura en «🧾 Para facturar» o vuelve al depósito. En Ventas le aparece arriba «📦 Tenés del depósito sin vender: …». |
+| **Venderlo no lo descuenta dos veces** | Al cobrar, Ventas usa primero lo que el vendedor ya tiene del depósito: eso ya bajó del stock al entregarlo. Si vende más de lo que tiene, el resto sí baja del stock. Anular la venta lo vuelve a poner a su nombre. Lo aprendido no se anota dos veces. |
+| **Vuelve al depósito con SU código** | En 📦 Depósito → «📦 Lo que está afuera»: quién tiene qué y desde hace cuánto (🔴 más de 24 horas), y **↩️ Volvió al depósito**, que pide el código de quien lo tiene: la **contraseña del empleado** que lo pidió, o el **código de retiro del taller** (que se gasta) o **su clave**. La de un administrador también sirve, y queda anotado quién fue. Así nadie descarga lo que tiene otro. El stock sube. |
+| **Un taller que devuelve** | Lo que se llevó ya está cargado en su cuenta: si lo devuelve (hasta 30 días después), se le acredita lo que se le había cargado, y sale de «Para facturar». |
+| **👥 Cada cuenta** | En 🧾 Ventas: de un empleado, lo que vendió en el período, lo que le devolvieron y lo que tiene del depósito; de un taller, los retiros, lo que se llevó, lo que devolvió y lo que debe hoy. El administrador ve a todos; un empleado, lo suyo. |
+
+Probado en un navegador de verdad: el depósito le entregó 2 a Ana (el stock bajó de 3 a 1), Ana vendió 1 en Ventas (el stock siguió en 1) y devolvió el otro con su contraseña (volvió a 2). Con un código que no es suyo, no vuelve.
+
 ## 📞 Un aviso por cliente, y una sola vez
 
 «A quién avisar» era una fila por pieza: el cliente con la correa y las pastillas recibía dos mensajes, y al otro día los dos volvían a la lista. Ahora es **un mensaje por cliente** con todo lo que le toca, y **«✅ Ya le avisé»** lo saca de la lista por 15 días. Si mientras tanto le toca otra pieza, vuelve por esa.

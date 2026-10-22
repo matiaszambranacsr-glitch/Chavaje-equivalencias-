@@ -18,6 +18,17 @@ if pagina == PAGINAS[9]:
     )
     venta_items = st.session_state.setdefault("venta_items", [])
     recien = st.session_state.get("venta_recien_cerrada")
+    # LO QUE TENÉS DEL DEPÓSITO sin vender: está a tu nombre hasta que lo vendas acá o vuelva
+    # al depósito con tu contraseña. Ver «LO QUE QUEDA AFUERA» en logica/deposito.py.
+    _tengo = lo_que_tiene(persona=obtener_usuario_actual())
+    _tengo_por_producto = {}
+    for _r in _tengo:
+        _tengo_por_producto[_r["producto_id"]] = _tengo_por_producto.get(_r["producto_id"], 0) + _r["queda"]
+    if _tengo:
+        st.info("📦 **Tenés del depósito sin vender:** "
+                + ", ".join(f"{_r['queda']}× {_r['marca']} {_r['codigo_raw']}" for _r in _tengo)
+                + ". Si se venden acá, no se descuentan del stock otra vez; si no, devolvelos en "
+                  "📦 Depósito con tu contraseña.")
 
     if recien:
         # LA VENTA RECIÉN TERMINADA: lo que pidió el dueño, la patente y los km.
@@ -193,6 +204,9 @@ if pagina == PAGINAS[9]:
                 _it["precio"] = float(_c3.number_input(
                     "Precio", min_value=0.0, value=float(_it["precio"]), step=100.0,
                     key=f"venta_precio_{_k}", label_visibility="collapsed"))
+                if _tengo_por_producto.get(_k):
+                    _c1.caption(f"📦 Tenés {_tengo_por_producto[_k]} del depósito: no se "
+                                "descuentan del stock otra vez.")
                 # Por debajo del costo: un precio mal tipeado, o un descuento que hace perder
                 # plata. El costo lo ve el administrador; los demás, el aviso.
                 if _it.get("costo") and _it["precio"] < float(_it["costo"]):
@@ -447,3 +461,52 @@ if pagina == PAGINAS[9]:
             _t1.dataframe(_tabla_mv(_mv["por_unidades"]), width="stretch", hide_index=True)
             _t2.caption("Lo que más plata trae:")
             _t2.dataframe(_tabla_mv(_mv["por_plata"]), width="stretch", hide_index=True)
+
+    # CADA CUENTA: lo de un empleado (lo que vendió y lo que tiene del depósito) o de un taller
+    # (lo que se llevó, lo que devolvió y lo que debe). El administrador ve a todos; un
+    # empleado, lo suyo. Ver resumen_de_la_cuenta().
+    with st.expander("👥 Cada cuenta"):
+        _cuentas = cuentas_para_mirar()
+        _ca1, _ca2 = cols([2, 1])
+        _cual = _ca1.selectbox("Cuenta:", range(len(_cuentas)), key="venta_cuenta_sel",
+                               format_func=lambda i: _cuentas[i][0])
+        _dias_cta = _ca2.selectbox("Período:", [7, 30, 90, 365], index=1,
+                                   key="venta_cuenta_periodo",
+                                   format_func=lambda d: {7: "Última semana", 30: "Últimos 30 días",
+                                                          90: "Últimos 3 meses",
+                                                          365: "Último año"}[d])
+        _, _persona_cta, _taller_cta = _cuentas[_cual]
+        _cta = resumen_de_la_cuenta(persona=_persona_cta, mecanico_id=_taller_cta, dias=_dias_cta)
+        if _taller_cta is None:
+            _q = cols([1, 1, 1])
+            _q[0].metric("Ventas", miles(len(_cta["ventas"])))
+            _q[1].metric("Vendió", f"${miles(_cta['total'], 0)}")
+            _q[2].metric("Le devolvieron", f"${miles(_cta['devuelto'], 0)}")
+            if _cta["ventas"]:
+                st.dataframe([{"#": v["id"], "Cuándo": f"{v['fecha'][8:10]}/{v['fecha'][5:7]} "
+                                                       f"{v['fecha'][11:16]}",
+                               "Cliente": v["cliente"] or "", "Pago": v["forma_de_pago"],
+                               "Total": f"${miles(v['total'] or 0, 0)}"} for v in _cta["ventas"]],
+                             width="stretch", hide_index=True)
+        else:
+            _q = cols([1, 1, 1, 1])
+            _q[0].metric("Retiros", miles(len(_cta["entregas"])))
+            _q[1].metric("Se llevó", f"${miles(_cta['total'], 0)}")
+            _q[2].metric("Devolvió", f"${miles(_cta['devuelto'], 0)}")
+            _q[3].metric("Debe hoy", f"${miles(_cta['saldo'], 0)}")
+            if _cta["entregas"]:
+                st.dataframe([{"Cuándo": f"{e['resuelto_en'][8:10]}/{e['resuelto_en'][5:7]} "
+                                         f"{e['resuelto_en'][11:16]}",
+                               "Qué": f"{e['cantidad']}× {e['marca']} {e['codigo_raw']}",
+                               "Devolvió": e["devueltos"] or "",
+                               "Importe": f"${miles(e['importe'] or 0, 0)}"}
+                              for e in _cta["entregas"]], width="stretch", hide_index=True)
+        if _cta["afuera"]:
+            st.caption("📦 Lo que tiene del depósito sin vender ni devolver:")
+            st.dataframe([{"Qué": f"{r['queda']}× {r['marca']} {r['codigo_raw']}",
+                           "Descripción": (r["descripcion"] or "")[:40],
+                           "Desde": ("🔴 " if r["horas"] >= HORAS_PARA_AVISAR_LO_QUE_QUEDO_AFUERA
+                                     else "") + "hace " + cuanto_hace(r["horas"])}
+                          for r in _cta["afuera"]], width="stretch", hide_index=True)
+        elif not (_cta.get("ventas") or _cta.get("entregas")):
+            st.caption("En ese período no tiene movimientos, y no tiene nada del depósito afuera.")

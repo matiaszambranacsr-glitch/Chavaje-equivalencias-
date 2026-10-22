@@ -116,6 +116,7 @@ específico, y las pantallas quedan todas al final:
         · LA CONSULTA DEL CLIENTE: su auto, sin entrar a la app
     logica/deposito.py
         · EL DEPÓSITO: DEL MOSTRADOR A LA CUENTA
+        · LO QUE QUEDA AFUERA: CADA UNO RESPONDE POR LO QUE PIDIÓ
         · CUÁNTO TARDA EL DEPÓSITO
         · A QUIÉN SE ESTÁ ATENDIENDO
     logica/ventas.py

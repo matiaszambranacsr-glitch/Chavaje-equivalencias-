@@ -219,19 +219,28 @@ def cerrar_venta(items, cliente="", forma_de_pago="", usuario=None):
             f = c.fetchone()
             if not f:
                 raise ValueError("Uno de los productos ya no está en el catálogo.")
+            # LO QUE EL VENDEDOR YA TIENE DEL DEPÓSITO se vende primero: ya bajó del stock al
+            # entregarlo, y bajarlo otra vez era vender dos y descontar cuatro. Deja de estar a su
+            # nombre. Ver «LO QUE QUEDA AFUERA» en logica/deposito.py.
+            de_la_mano, resto = [], cantidad
+            for pedido_id, queda in lo_que_tiene_para_vender(usuario, producto_id):
+                if resto <= 0:
+                    break
+                de_la_mano.append((pedido_id, min(queda, resto)))
+                resto -= min(queda, resto)
             # EL STOCK, COMO EL DEPÓSITO: nunca negativo, y si no alcanzaba se anota para
             # contarlo. Si se vendió, estaba: el número estaba mal.
             descontado = 0
-            if f["stock"] is not None:
-                descontado = min(cantidad, max(f["stock"], 0))
+            if f["stock"] is not None and resto:
+                descontado = min(resto, max(f["stock"], 0))
                 c.execute("UPDATE productos SET stock = MAX(0, stock - ?) WHERE id = ?",
-                          (cantidad, producto_id))
-                if descontado < cantidad:
+                          (resto, producto_id))
+                if descontado < resto:
                     anotar_cambio("vendió con stock de menos", "producto", producto_id,
                                   {"stock": f["stock"]}, {"stock": 0},
-                                  f"se vendieron {cantidad} y figuraban {f['stock']}: conviene "
+                                  f"se vendieron {resto} y figuraban {f['stock']}: conviene "
                                   "contarlo", usuario=usuario)
-                    avisos.append(f"{f['codigo_raw']}: se vendieron {cantidad} y figuraban "
+                    avisos.append(f"{f['codigo_raw']}: se vendieron {resto} y figuraban "
                                   f"{f['stock']} en stock. Quedó en 0: conviene contarlo.")
             c.execute("""INSERT INTO ventas_items (venta_id, producto_id, codigo, marca,
                                                    descripcion, cantidad, precio, pedido,
@@ -239,15 +248,36 @@ def cerrar_venta(items, cliente="", forma_de_pago="", usuario=None):
                          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                       (venta_id, producto_id, f["codigo_raw"], f["marca"], f["descripcion"],
                        cantidad, precio, pedido, descontado, f["precio_costo"]))
+            item_id = c.lastrowid
             # Lo que aprende de las ventas, como «Se llevó»: lo que pidió el cliente y lo que
-            # se llevó. Ver descubrir_equivalencias_candidatas().
+            # se llevó. Ver descubrir_equivalencias_candidatas(). Lo que salió de la mano del
+            # vendedor ya se había anotado al entregarlo: ese renglón pasa a ser el de esta
+            # venta, en vez de anotarlo dos veces.
             _pedido = pedido or f["codigo_raw"]
-            c.execute("""INSERT INTO ventas_registradas (producto_id, termino_pedido,
-                                                         codigo_pedido_clean, usuario, veredicto,
-                                                         como, evidencia, venta_id)
-                         VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
-                      (producto_id, _pedido, sanitizar(_pedido), usuario, veredicto,
-                       como_se_vende(veredicto), evidencia, venta_id))
+            _aprendido = (_pedido, sanitizar(_pedido), usuario, veredicto,
+                          como_se_vende(veredicto), evidencia, venta_id)
+            for pedido_id, n in de_la_mano:
+                c.execute("UPDATE pedidos_deposito SET vendidos = COALESCE(vendidos, 0) + ? "
+                          "WHERE id = ?", (n, pedido_id))
+                c.execute("""INSERT INTO ventas_del_deposito (venta_item_id, pedido_id, cantidad)
+                             VALUES (?, ?, ?)""", (item_id, pedido_id, n))
+                # Solo el renglón que todavía no es de ninguna venta: si una parte del pedido ya
+                # se vendió antes, ese renglón es de aquella venta, y anular esta se lo llevaría.
+                c.execute("""UPDATE ventas_registradas SET termino_pedido = ?,
+                                    codigo_pedido_clean = ?, usuario = ?, veredicto = ?, como = ?,
+                                    evidencia = ?, venta_id = ?
+                             WHERE pedido_id = ? AND venta_id IS NULL""", _aprendido + (pedido_id,))
+                if not c.rowcount:
+                    c.execute("""INSERT INTO ventas_registradas
+                                    (producto_id, termino_pedido, codigo_pedido_clean, usuario,
+                                     veredicto, como, evidencia, venta_id, pedido_id)
+                                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                              (producto_id,) + _aprendido + (pedido_id,))
+            if resto:
+                c.execute("""INSERT INTO ventas_registradas (producto_id, termino_pedido,
+                                                             codigo_pedido_clean, usuario,
+                                                             veredicto, como, evidencia, venta_id)
+                             VALUES (?, ?, ?, ?, ?, ?, ?, ?)""", (producto_id,) + _aprendido)
     return venta_id, avisos
 
 
@@ -337,6 +367,16 @@ def anular_venta(venta_id):
         for f in c.fetchall():
             c.execute("UPDATE productos SET stock = COALESCE(stock, 0) + ? WHERE id = ?",
                       (f["stock_descontado"], f["producto_id"]))
+        # Lo que había salido de lo que el vendedor tenía del depósito vuelve a estar a su
+        # nombre, no al stock: el stock no se había tocado. Ver «LO QUE QUEDA AFUERA».
+        c.execute("""SELECT dd.pedido_id, dd.cantidad FROM ventas_del_deposito dd
+                     JOIN ventas_items vi ON vi.id = dd.venta_item_id WHERE vi.venta_id = ?""",
+                  (venta_id,))
+        for f in c.fetchall():
+            c.execute("UPDATE pedidos_deposito SET vendidos = MAX(0, COALESCE(vendidos, 0) - ?) "
+                      "WHERE id = ?", (f["cantidad"], f["pedido_id"]))
+        c.execute("""DELETE FROM ventas_del_deposito WHERE venta_item_id IN
+                         (SELECT id FROM ventas_items WHERE venta_id = ?)""", (venta_id,))
         c.execute("""SELECT v.vehiculo_id, ve.patente FROM ventas v
                      LEFT JOIN vehiculos ve ON ve.id = v.vehiculo_id WHERE v.id = ?""",
                   (venta_id,))

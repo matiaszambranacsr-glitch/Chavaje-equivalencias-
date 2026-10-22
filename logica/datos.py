@@ -2925,6 +2925,36 @@ def _esquema_ventas(c):
     )""")
     c.execute("CREATE INDEX IF NOT EXISTS idx_ventas_devoluciones_dia "
               "ON ventas_devoluciones(fecha)")
+    # LO QUE QUEDA AFUERA (ver ese título en logica/deposito.py): de cada pedido entregado,
+    # cuánto se vendió y cuánto volvió; cada vuelta al depósito, con quién la trajo y cómo se
+    # identificó; qué unidades de una venta salieron de lo que el vendedor ya tenía del
+    # depósito; y de qué pedido salió lo que se aprendió al entregarlo. Una por una y escritas
+    # enteras: el auditor lee las columnas de acá.
+    if "vendidos" not in [f[1] for f in c.execute("PRAGMA table_info(pedidos_deposito)")]:
+        c.execute("ALTER TABLE pedidos_deposito ADD COLUMN vendidos INTEGER DEFAULT 0")
+    if "devueltos" not in [f[1] for f in c.execute("PRAGMA table_info(pedidos_deposito)")]:
+        c.execute("ALTER TABLE pedidos_deposito ADD COLUMN devueltos INTEGER DEFAULT 0")
+    if "pedido_id" not in [f[1] for f in c.execute("PRAGMA table_info(ventas_registradas)")]:
+        c.execute("ALTER TABLE ventas_registradas ADD COLUMN pedido_id INTEGER")
+    c.execute("""CREATE TABLE IF NOT EXISTS devoluciones_al_deposito (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        pedido_id INTEGER NOT NULL REFERENCES pedidos_deposito(id) ON DELETE CASCADE,
+        cantidad INTEGER NOT NULL,
+        acreditado REAL DEFAULT 0,
+        movimiento_id INTEGER,
+        devolvio TEXT,
+        como TEXT,
+        recibio TEXT,
+        fecha TEXT DEFAULT (datetime('now', 'localtime'))
+    )""")
+    c.execute("""CREATE TABLE IF NOT EXISTS ventas_del_deposito (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        venta_item_id INTEGER NOT NULL REFERENCES ventas_items(id) ON DELETE CASCADE,
+        pedido_id INTEGER NOT NULL REFERENCES pedidos_deposito(id) ON DELETE CASCADE,
+        cantidad INTEGER NOT NULL
+    )""")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_ventas_registradas_pedido "
+              "ON ventas_registradas(pedido_id)")
     # EL ARQUEO: lo que se contó en el cajón contra lo que dice el sistema. Ver arquear_la_caja().
     c.execute("""CREATE TABLE IF NOT EXISTS arqueos_de_caja (
         id INTEGER PRIMARY KEY AUTOINCREMENT,

@@ -213,6 +213,10 @@ Las pruebas se corren como dice el README, en «Antes de subir un cambio».
 | Buscar una venta por número, cliente, patente o teléfono | `buscar_ventas()` | `pruebas_de_las_ventas.py` (14) |
 | El arqueo: lo contado contra el efectivo esperado | `arquear_la_caja()`, `efectivo_esperado()` | `pruebas_de_las_ventas.py` (15, 16) |
 | Lo que se va a terminar con lo que se vende | `lo_que_se_va_a_terminar()` | `pruebas_de_las_ventas.py` (16) |
+| Lo entregado para Mostrador queda a nombre de quien lo pidió hasta venderlo, facturarlo o devolverlo | `lo_que_tiene()`, `quien_tiene_que_devolver()` | `pruebas_de_lo_que_queda_afuera.py` |
+| Vender lo que ya se tiene del depósito no baja el stock otra vez ni anota dos veces lo aprendido; anular lo vuelve a su nombre | `cerrar_venta()`, `anular_venta()` | `pruebas_de_lo_que_queda_afuera.py` |
+| Vuelve al depósito solo con el código de quien lo tiene (su clave; el código de retiro o la clave del taller; o un administrador); al taller se le acredita | `devolver_al_deposito()` | `pruebas_de_lo_que_queda_afuera.py` |
+| Lo de cada cuenta: un empleado ve lo suyo, el administrador todas | `resumen_de_la_cuenta()`, `cuentas_para_mirar()` | `pruebas_de_lo_que_queda_afuera.py` |
 | Al terminar la venta, la patente y los km anotan cada pieza en la ficha del auto, una sola vez, y frenan los km para atrás | `anotar_la_venta_en_el_auto()`, `nombre_de_la_pieza()` | `pruebas_de_las_ventas.py` |
 | Un aviso por cliente con todo lo que le toca; «Ya le avisé» lo saca de la lista 15 días | `avisos_por_cliente()`, `marcar_avisado()` | `pruebas_de_los_cambios.py` (9l ter) |
 | Un mecánico solo lee y escribe su propia cuenta | `exigir_que_sea_su_cuenta()` | `pruebas_de_los_cambios.py` (5) |

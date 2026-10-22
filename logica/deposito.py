@@ -197,10 +197,13 @@ def entregar_pedido(pedido_id, usuario=""):
                               {"stock": f["stock"]}, {"stock": 0},
                               f"se entregaron {f['cantidad']} y figuraban {f['stock']}: "
                               "conviene contarlo", usuario=usuario)
+        # Con el pedido: si vuelve al depósito, lo aprendido se va con él; si se vende en
+        # 🧾 Ventas, pasa a ser lo de esa venta. Ver «LO QUE QUEDA AFUERA».
         c.execute("""INSERT INTO ventas_registradas (producto_id, termino_pedido,
-                                                     codigo_pedido_clean, usuario)
-                     VALUES (?, ?, ?, ?)""",
-                  (f["producto_id"], f["codigo_raw"], sanitizar(f["codigo_raw"]), usuario))
+                                                     codigo_pedido_clean, usuario, pedido_id)
+                     VALUES (?, ?, ?, ?, ?)""",
+                  (f["producto_id"], f["codigo_raw"], sanitizar(f["codigo_raw"]), usuario,
+                   pedido_id))
         precio_lista = float(f["precio"] or 0)
         descuento, importe, movimiento_id = 0.0, precio_lista * f["cantidad"], None
         if f["mecanico_id"]:
@@ -254,20 +257,27 @@ def cancelar_pedido_del_deposito(pedido_id, usuario=""):
 
 def para_facturar():
     """{cuenta: [renglones]} de lo entregado y todavía no facturado, cuenta por cuenta (la de
-    Mostrador incluida). Cada renglón trae el precio de lista, el descuento y lo cobrado."""
+    Mostrador incluida). Cada renglón trae el precio de lista, el descuento y lo cobrado. Sin
+    lo que volvió al depósito: lo que volvió entero no figura, y lo que volvió en parte figura
+    con lo que queda (ver devolver_al_deposito())."""
     c.execute("""SELECT d.id, d.cantidad, d.resuelto_en, d.precio_lista, d.descuento, d.importe,
-                        d.mecanico_id, p.codigo_raw, p.descripcion, m.nombre AS marca,
-                        k.nombre AS cuenta
+                        d.mecanico_id, COALESCE(d.devueltos, 0) AS devueltos, p.codigo_raw,
+                        p.descripcion, m.nombre AS marca, k.nombre AS cuenta
                  FROM pedidos_deposito d
                  JOIN productos p ON p.id = d.producto_id
                  JOIN marcas m ON m.id = p.marca_id
                  LEFT JOIN mecanicos k ON k.id = d.mecanico_id
                  WHERE d.estado = 'entregado' AND d.facturado_en IS NULL
+                   AND d.cantidad > COALESCE(d.devueltos, 0)
                  ORDER BY k.nombre IS NULL, k.nombre, d.resuelto_en""")
     salida = {}
     for r in c.fetchall():
-        salida.setdefault((r["mecanico_id"], r["cuenta"] or NOMBRE_DEL_MOSTRADOR), []).append(
-            dict(r))
+        r = dict(r)
+        if r["devueltos"]:
+            queda = r["cantidad"] - r["devueltos"]
+            r["importe"] = round(float(r["importe"] or 0) * queda / r["cantidad"], 2)
+            r["cantidad"] = queda
+        salida.setdefault((r["mecanico_id"], r["cuenta"] or NOMBRE_DEL_MOSTRADOR), []).append(r)
     return salida
 
 
@@ -297,6 +307,236 @@ def ultimos_pedidos_del_deposito(limite=30):
                  WHERE d.estado <> 'pendiente'
                  ORDER BY d.resuelto_en DESC LIMIT ?""", (limite,))
     return [dict(r) for r in c.fetchall()]
+
+
+# ============================================================================================
+# LO QUE QUEDA AFUERA: CADA UNO RESPONDE POR LO QUE PIDIÓ
+# ============================================================================================
+# Lo pidió el dueño: «cuando se pida algo y no se venda, que quede cargado en la cuenta de cada
+# persona que lo pidió y lo tenga que devolver con su código». Hasta acá, entregar era vender:
+# el stock bajaba y lo entregado para Mostrador se daba por vendido, aunque el cliente se fuera
+# sin llevarlo. La pieza quedaba afuera sin que nadie supiera quién la tenía. Y si el vendedor
+# la cobraba después en 🧾 Ventas, el stock bajaba otra vez.
+#
+#   · Lo que el depósito entrega para Mostrador queda A NOMBRE DE QUIEN LO PIDIÓ hasta que se
+#     vende en 🧾 Ventas (que usa primero lo que el vendedor ya tiene, sin bajar el stock otra
+#     vez: ver cerrar_venta()), se factura («🧾 Para facturar») o vuelve al depósito.
+#   · Lo que se entrega para un taller ya queda cargado en su cuenta; si no lo usa, lo devuelve
+#     y se le acredita lo que se le había cargado.
+#   · Para que vuelva hace falta el código de quien lo tiene: la contraseña del empleado que lo
+#     pidió; el código de retiro del taller o su clave; o la de un administrador, y queda
+#     anotado quién fue. Así nadie descarga lo que tiene otro.
+# Lo de un taller se puede devolver hasta DIAS_PARA_DEVOLVER_UN_TALLER días después de
+# entregado; lo de un empleado no vence: responde por eso hasta que lo vende o lo devuelve.
+DIAS_PARA_DEVOLVER_UN_TALLER = 30
+# Desde cuándo lo que sigue afuera se marca en rojo.
+HORAS_PARA_AVISAR_LO_QUE_QUEDO_AFUERA = 24
+
+
+def lo_que_tiene(persona=None, mecanico_id=None):
+    """Lo entregado que sigue afuera, lo más viejo primero: de todos, de un empleado
+    (`persona`, el que lo pidió para Mostrador) o de un taller. [dict] con «queda» (lo que falta
+    vender o devolver), «horas» desde que se entregó y «quien»."""
+    filtros, args = [], [DIAS_PARA_DEVOLVER_UN_TALLER]
+    if persona is not None:
+        filtros.append("d.mecanico_id IS NULL AND d.pedido_por = ?")
+        args.append(persona)
+    if mecanico_id is not None:
+        filtros.append("d.mecanico_id = ?")
+        args.append(mecanico_id)
+    c.execute(f"""SELECT d.id, d.producto_id, d.cantidad, COALESCE(d.vendidos, 0) AS vendidos,
+                         COALESCE(d.devueltos, 0) AS devueltos, d.mecanico_id, d.pedido_por,
+                         d.resuelto_en, d.importe, p.codigo_raw, p.descripcion, p.precio,
+                         m.nombre AS marca, k.nombre AS cuenta
+                  FROM pedidos_deposito d
+                  JOIN productos p ON p.id = d.producto_id
+                  JOIN marcas m ON m.id = p.marca_id
+                  LEFT JOIN mecanicos k ON k.id = d.mecanico_id
+                  WHERE d.estado = 'entregado'
+                    AND d.cantidad - COALESCE(d.vendidos, 0) - COALESCE(d.devueltos, 0) > 0
+                    AND ((d.mecanico_id IS NULL AND d.facturado_en IS NULL)
+                         OR (d.mecanico_id IS NOT NULL
+                             AND d.resuelto_en >= datetime('now', 'localtime',
+                                                           '-' || ? || ' days')))
+                    {''.join(' AND ' + f for f in filtros)}
+                  ORDER BY d.resuelto_en, d.id""", args)
+    salida = []
+    for r in c.fetchall():
+        r = dict(r)
+        r["queda"] = r["cantidad"] - r["vendidos"] - r["devueltos"]
+        r["horas"] = round((minutos_entre(r["resuelto_en"]) or 0) / 60, 1)
+        r["quien"] = r["cuenta"] or r["pedido_por"] or "¿?"
+        salida.append(r)
+    return salida
+
+
+def cuanto_hace(horas):
+    """«menos de 1 h», «5 h», «3 días»: hace cuánto se entregó lo que sigue afuera."""
+    horas = float(horas or 0)
+    if horas < 1:
+        return "menos de 1 h"
+    return f"{int(horas)} h" if horas < 48 else f"{int(horas // 24)} días"
+
+
+def quien_tiene_que_devolver():
+    """Lo que está afuera, por persona o taller: [dict] con cuántas cosas, cuántas unidades, lo
+    que valen a precio de lista y cuántas horas tiene la más vieja. Lo que tiene más horas,
+    primero."""
+    grupos = {}
+    for r in lo_que_tiene():
+        g = grupos.setdefault((r["mecanico_id"], r["quien"]),
+                              {"quien": r["quien"], "mecanico_id": r["mecanico_id"],
+                               "persona": None if r["mecanico_id"] else r["pedido_por"],
+                               "cosas": 0, "unidades": 0, "valor": 0.0, "horas": 0.0})
+        g["cosas"] += 1
+        g["unidades"] += r["queda"]
+        g["valor"] += float(r["precio"] or 0) * r["queda"]
+        g["horas"] = max(g["horas"], r["horas"])
+    return sorted(grupos.values(), key=lambda g: -g["horas"])
+
+
+def _quien_devuelve(pedido, codigo):
+    """(cómo se identificó, quién) si `codigo` alcanza para que vuelva este pedido, o
+    (None, por qué no). Ver «LO QUE QUEDA AFUERA». Para un taller, el código de retiro se
+    devuelve como tercer valor, para gastarlo adentro de la misma transacción."""
+    codigo = str(codigo or "").strip()
+    if not hay_claves_configuradas():
+        return "sin claves configuradas", obtener_usuario_actual(), None
+    if not codigo:
+        return None, "Falta el código de quien lo tiene.", None
+    if pedido["mecanico_id"]:
+        codigo_id = _codigo_de_retiro_vigente(pedido["mecanico_id"], codigo)
+        if codigo_id:
+            return "código de retiro", pedido["cuenta"], codigo_id
+    nombre, nivel, error = validar_password(codigo, con_mecanicos=bool(pedido["mecanico_id"]))
+    if error:
+        return None, error, None
+    if nivel == "admin":
+        return "clave de administrador", nombre, None
+    if pedido["mecanico_id"] and nivel == "mecanico" and nombre == pedido["cuenta"]:
+        return "clave del taller", nombre, None
+    if not pedido["mecanico_id"] and nivel and nombre == pedido["pedido_por"]:
+        return "su clave", nombre, None
+    return None, (f"Ese código no es de {pedido['cuenta'] or pedido['pedido_por']}, que es "
+                  "quien lo tiene (ni de un administrador)."), None
+
+
+def devolver_al_deposito(pedido_id, cantidad, codigo):
+    """Vuelve al depósito `cantidad` de un pedido entregado que no se vendió, con el código de
+    quien lo tiene. (ok, texto). El stock sube; si era de un taller, se le acredita lo que se le
+    había cargado; si vuelve todo, lo aprendido al entregarlo se va. Ver «LO QUE QUEDA AFUERA»."""
+    exigir_nivel("empleado", "recibir algo que vuelve al depósito")
+    try:
+        cantidad = int(cantidad)
+    except (TypeError, ValueError):
+        return False, "La cantidad tiene que ser un número."
+    pedido = next((r for r in lo_que_tiene() if r["id"] == pedido_id), None)
+    if not pedido:
+        return False, ("Ese pedido no está afuera: ya volvió, se vendió, se facturó o pasaron "
+                       f"más de {DIAS_PARA_DEVOLVER_UN_TALLER} días.")
+    if not 1 <= cantidad <= pedido["queda"]:
+        return False, f"Se puede devolver de 1 a {pedido['queda']}."
+    como, quien, codigo_id = _quien_devuelve(pedido, codigo)
+    if not como:
+        return False, quien
+    rotulo = f"{pedido['marca']} {pedido['codigo_raw']}"
+    recibio = obtener_usuario_actual()
+    try:
+        with db_lock, transaccion():
+            c.execute("""UPDATE pedidos_deposito SET devueltos = COALESCE(devueltos, 0) + ?
+                         WHERE id = ? AND estado = 'entregado'
+                           AND cantidad - COALESCE(vendidos, 0) - COALESCE(devueltos, 0) >= ?""",
+                      (cantidad, pedido_id, cantidad))
+            if c.rowcount != 1:
+                return False, "Eso ya volvió o se vendió (lo resolvió otra persona)."
+            if codigo_id:
+                c.execute("UPDATE codigos_de_retiro SET usado_en = datetime('now', 'localtime') "
+                          "WHERE id = ? AND usado_en IS NULL", (codigo_id,))
+                if c.rowcount != 1:
+                    raise ValueError("El código de retiro se usó recién en otra pantalla.")
+            c.execute("UPDATE productos SET stock = stock + ? WHERE id = ? AND stock IS NOT NULL",
+                      (cantidad, pedido["producto_id"]))
+            acreditado, movimiento_id = 0.0, None
+            if pedido["mecanico_id"] and pedido["importe"]:
+                acreditado = round(float(pedido["importe"]) * cantidad / pedido["cantidad"], 2)
+                c.execute("""INSERT INTO movimientos_de_cuenta (mecanico_id, concepto, importe, medio,
+                                                                 usuario)
+                             VALUES (?, ?, ?, 'Devolución', ?)""",
+                          (pedido["mecanico_id"], f"Devolución: {pedido['codigo_raw']} x{cantidad}",
+                           -acreditado, recibio))
+                movimiento_id = c.lastrowid
+            c.execute("""INSERT INTO devoluciones_al_deposito (pedido_id, cantidad, acreditado,
+                                                               movimiento_id, devolvio, como, recibio)
+                         VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                      (pedido_id, cantidad, acreditado, movimiento_id, quien, como, recibio))
+            if cantidad == pedido["cantidad"] - pedido["devueltos"] and not pedido["vendidos"]:
+                c.execute("DELETE FROM ventas_registradas WHERE pedido_id = ? AND venta_id IS NULL",
+                          (pedido_id,))
+    except ValueError as _err:
+        # Lo que no pudo terminarse adentro deshace todo: no queda medio devuelto.
+        return False, str(_err)
+    return True, (f"↩️ Volvió al depósito: {rotulo} x{cantidad}, de {pedido['quien']}"
+                  + (f" ({como})" if como != "su clave" else "")
+                  + (f". Se le acreditaron {formato_precio(acreditado)} en la cuenta."
+                     if acreditado else "."))
+
+
+def lo_que_tiene_para_vender(persona, producto_id):
+    """[(pedido_id, cuántos)] de ese producto que `persona` tiene del depósito para Mostrador,
+    lo más viejo primero: lo que 🧾 Ventas usa antes de bajar el stock (ver cerrar_venta())."""
+    return [(r["id"], r["queda"]) for r in lo_que_tiene(persona=persona)
+            if r["producto_id"] == producto_id]
+
+
+def resumen_de_la_cuenta(persona=None, mecanico_id=None, dias=30):
+    """Lo de una cuenta en los últimos `dias` días: de un empleado, lo que vendió en 🧾 Ventas
+    y lo que tiene del depósito; de un taller, lo que se llevó del depósito, lo que devolvió y
+    lo que debe. dict."""
+    desde = (datetime.now() - timedelta(days=int(dias))).strftime("%Y-%m-%d %H:%M:%S")
+    salida = {"afuera": lo_que_tiene(persona=persona, mecanico_id=mecanico_id)}
+    if mecanico_id is not None:
+        c.execute("""SELECT d.id, d.resuelto_en, d.cantidad, COALESCE(d.devueltos, 0) AS devueltos,
+                            d.importe, p.codigo_raw, p.descripcion, m.nombre AS marca
+                     FROM pedidos_deposito d JOIN productos p ON p.id = d.producto_id
+                     JOIN marcas m ON m.id = p.marca_id
+                     WHERE d.mecanico_id = ? AND d.estado = 'entregado' AND d.resuelto_en >= ?
+                     ORDER BY d.resuelto_en DESC""", (mecanico_id, desde))
+        entregas = [dict(r) for r in c.fetchall()]
+        c.execute("""SELECT COALESCE(SUM(dv.acreditado), 0) FROM devoluciones_al_deposito dv
+                     JOIN pedidos_deposito d ON d.id = dv.pedido_id
+                     WHERE d.mecanico_id = ? AND dv.fecha >= ?""", (mecanico_id, desde))
+        salida.update(entregas=entregas,
+                      total=round(sum(float(e["importe"] or 0) for e in entregas), 2),
+                      devuelto=round(float(c.fetchone()[0]), 2),
+                      saldo=estado_de_cuenta(mecanico_id)["saldo"])
+    else:
+        c.execute("""SELECT id, fecha, cliente, forma_de_pago, total FROM ventas
+                     WHERE usuario = ? AND anulada = 0 AND fecha >= ? ORDER BY id DESC""",
+                  (persona, desde))
+        ventas = [dict(r) for r in c.fetchall()]
+        c.execute("""SELECT COALESCE(SUM(d.importe), 0) FROM ventas_devoluciones d
+                     JOIN ventas v ON v.id = d.venta_id
+                     WHERE v.usuario = ? AND v.anulada = 0 AND d.fecha >= ?""", (persona, desde))
+        salida.update(ventas=ventas,
+                      total=round(sum(float(v["total"] or 0) for v in ventas), 2),
+                      devuelto=round(float(c.fetchone()[0]), 2))
+    return salida
+
+
+def cuentas_para_mirar():
+    """Las cuentas que se pueden mirar en «👥 Cada cuenta»: [(etiqueta, persona, mecanico_id)].
+    El administrador ve a todos los empleados y talleres; un empleado, solo lo suyo."""
+    yo = obtener_usuario_actual()
+    if not es_admin():
+        return [(f"👤 {yo} (vos)", yo, None)]
+    c.execute("""SELECT nombre FROM usuarios WHERE activo = 1
+                 UNION SELECT DISTINCT usuario FROM ventas WHERE usuario IS NOT NULL
+                 UNION SELECT DISTINCT pedido_por FROM pedidos_deposito
+                       WHERE mecanico_id IS NULL AND pedido_por IS NOT NULL""")
+    personas = sorted({r[0] for r in c.fetchall() if r[0] and r[0] != "Invitado"} | {yo},
+                      key=str.lower)
+    return ([(f"👤 {p}" + (" (vos)" if p == yo else ""), p, None) for p in personas]
+            + [(f"🔧 {nombre}", None, mid) for mid, nombre in cuentas_para_pedir()])
 
 
 # ============================================================================================
