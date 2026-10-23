@@ -117,6 +117,7 @@ específico, y las pantallas quedan todas al final:
     logica/deposito.py
         · EL DEPÓSITO: DEL MOSTRADOR A LA CUENTA
         · LO QUE QUEDA AFUERA: CADA UNO RESPONDE POR LO QUE PIDIÓ
+        · EL CÓDIGO DE BARRAS NUESTRO
         · CUÁNTO TARDA EL DEPÓSITO
         · A QUIÉN SE ESTÁ ATENDIENDO
     logica/ventas.py
@@ -153,6 +154,8 @@ específico, y las pantallas quedan todas al final:
         · DEPÓSITO: lo que pidió el mostrador, y lo que queda para facturar
     pantallas/ventas.py
         · VENTAS: cobrar, descontar el stock y anotarlo en la ficha del auto
+    pantallas/devoluciones.py
+        · DEVOLUCIONES: lo que vuelve al depósito, lo que devuelve un cliente y las etiquetas
 
 La lógica que no depende de Streamlit está ADEMÁS en el paquete nucleo/, que se puede usar
 desde otro sistema. Se genera desde logica/ con `python3 nucleo/generar.py`, así que si
@@ -633,6 +636,27 @@ if puede_autorizar_limites() and hay_claves_configuradas():
         _pe2.button("Contestar →", key="ir_a_los_permisos", on_click=ir_a_donde_dice_el_aviso,
                     args=("🗂️ Administrar → 💳 Cuentas corrientes",))
 
+# LO QUE TENÉS DEL DEPÓSITO HACE MÁS DE UN DÍA, a quien lo tiene, en cualquier pantalla: o se
+# vende o vuelve. En 🧾 Ventas ya lo dice arriba, con el botón para sumarlo a la venta. Ver «LO
+# QUE QUEDA AFUERA» en logica/deposito.py.
+if es_operador_o_admin() and pagina not in (PAGINAS[9], PAGINAS[10]):
+    try:
+        _viejo_afuera = [r for r in lo_que_tiene(persona=obtener_usuario_actual())
+                         if r["horas"] >= HORAS_PARA_AVISAR_LO_QUE_QUEDO_AFUERA]
+    except sqlite3.Error as _err:
+        anotar_error("lo_que_tiene", _err)
+        _viejo_afuera = []
+    if _viejo_afuera:
+        _va1, _va2 = st.columns([5, 2])
+        _va1.warning(f"📦 Tenés del depósito hace más de {HORAS_PARA_AVISAR_LO_QUE_QUEDO_AFUERA} h "
+                     "sin vender: "
+                     + ", ".join(f"{r['queda']}× {r['marca']} {r['codigo_raw']}"
+                                 for r in _viejo_afuera[:4])
+                     + (f" y {len(_viejo_afuera) - 4} más" if len(_viejo_afuera) > 4 else "")
+                     + ". Vendelo en 🧾 Ventas o llevalo al depósito para que lo reciba.")
+        _va2.button("🧾 Venderlo →", key="ir_a_vender_lo_que_tengo",
+                    on_click=ir_a_donde_dice_el_aviso, args=("🧾 Ventas",))
+
 # Los avisos que quedaron guardados antes del último refresco. Van acá, arriba del contenido
 # de la página, para que se vean sí o sí — sin esto, cada "Guardado" se perdía en el refresco.
 mostrar_avisos_pendientes()
@@ -645,7 +669,8 @@ _corte("avisos")
 # Ver seccion_permitida(). Adentro, lo que borra o configura sigue pidiendo la de administrador.
 NIVEL_DE_CADA_SECCION = {PAGINAS[1]: "empleado", PAGINAS[3]: "empleado",
                          PAGINAS[4]: "empleado", PAGINAS[6]: "empleado",
-                         PAGINAS[8]: "empleado", PAGINAS[9]: "empleado"}
+                         PAGINAS[8]: "empleado", PAGINAS[9]: "empleado",
+                         PAGINAS[10]: "empleado"}
 if (NIVEL_DE_CADA_SECCION.get(pagina)
         and not seccion_permitida(NIVEL_DE_CADA_SECCION[pagina], pagina.split(" ", 1)[-1])):
     _actividad_del_mostrador()["termino"] = time.monotonic()      # ver ceder_al_mostrador()

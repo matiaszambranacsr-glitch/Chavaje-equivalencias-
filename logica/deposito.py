@@ -224,6 +224,8 @@ def entregar_pedido(pedido_id, usuario=""):
                             movimiento_id = ? WHERE id = ?""",
                   (precio_lista, descuento, round(importe, 2), movimiento_id, pedido_id))
     olvidar_la_escala_de_precios()
+    # Si con esto se terminó, queda anotado para reponer solo. Ver anotar_lo_que_se_termino().
+    anotar_lo_que_se_termino([f["producto_id"]])
     return True, (f"✅ Entregado: {f['codigo_raw']} x{f['cantidad']}"
                   + (" — cargado en la cuenta." if movimiento_id else ".")
                   + (f" ⚠️ El stock decía {f['stock']}: quedó en 0, conviene contarlo."
@@ -259,7 +261,7 @@ def para_facturar():
     """{cuenta: [renglones]} de lo entregado y todavía no facturado, cuenta por cuenta (la de
     Mostrador incluida). Cada renglón trae el precio de lista, el descuento y lo cobrado. Sin
     lo que volvió al depósito: lo que volvió entero no figura, y lo que volvió en parte figura
-    con lo que queda (ver devolver_al_deposito())."""
+    con lo que queda (ver devolver_lo_escaneado())."""
     c.execute("""SELECT d.id, d.cantidad, d.resuelto_en, d.precio_lista, d.descuento, d.importe,
                         d.mecanico_id, COALESCE(d.devueltos, 0) AS devueltos, p.codigo_raw,
                         p.descripcion, m.nombre AS marca, k.nombre AS cuenta
@@ -321,51 +323,40 @@ def ultimos_pedidos_del_deposito(limite=30):
 #   · Lo que el depósito entrega para Mostrador queda A NOMBRE DE QUIEN LO PIDIÓ hasta que se
 #     vende en 🧾 Ventas (que usa primero lo que el vendedor ya tiene, sin bajar el stock otra
 #     vez: ver cerrar_venta()), se factura («🧾 Para facturar») o vuelve al depósito.
-#   · Lo que se entrega para un taller ya queda cargado en su cuenta; si no lo usa, lo devuelve
-#     y se le acredita lo que se le había cargado.
-#   · Para que vuelva hace falta el código de quien lo tiene: la contraseña del empleado que lo
-#     pidió; el código de retiro del taller o su clave; o la de un administrador, y queda
-#     anotado quién fue. Así nadie descarga lo que tiene otro.
-# Lo de un taller se puede devolver hasta DIAS_PARA_DEVOLVER_UN_TALLER días después de
-# entregado; lo de un empleado no vence: responde por eso hasta que lo vende o lo devuelve.
-DIAS_PARA_DEVOLVER_UN_TALLER = 30
-# Desde cuándo lo que sigue afuera se marca en rojo.
+#   · Para que vuelva hacen falta dos cosas: que el depósito ESCANEE EL CÓDIGO DE BARRAS
+#     NUESTRO de cada unidad (ver «EL CÓDIGO DE BARRAS NUESTRO»), y la contraseña de quien lo
+#     tiene, o la de un administrador, que queda anotado. Así nadie descarga lo que tiene otro, y
+#     no vuelve al stock lo que no está en la mano.
+#   · LO DE UN TALLER NO VUELVE. Lo pidió el dueño: «el mecánico no puede devolver, se van a
+#     aprovechar y van a devolver cosas que nunca trajeron». Lo que se le entrega queda cargado
+#     en su cuenta y es suyo; si algo está mal, lo arregla un administrador en la cuenta.
+# Desde cuándo lo que sigue afuera se marca en rojo, y se le avisa a quien lo tiene en cualquier
+# pantalla (ver app.py).
 HORAS_PARA_AVISAR_LO_QUE_QUEDO_AFUERA = 24
 
 
-def lo_que_tiene(persona=None, mecanico_id=None):
-    """Lo entregado que sigue afuera, lo más viejo primero: de todos, de un empleado
-    (`persona`, el que lo pidió para Mostrador) o de un taller. [dict] con «queda» (lo que falta
-    vender o devolver), «horas» desde que se entregó y «quien»."""
-    filtros, args = [], [DIAS_PARA_DEVOLVER_UN_TALLER]
-    if persona is not None:
-        filtros.append("d.mecanico_id IS NULL AND d.pedido_por = ?")
-        args.append(persona)
-    if mecanico_id is not None:
-        filtros.append("d.mecanico_id = ?")
-        args.append(mecanico_id)
+def lo_que_tiene(persona=None):
+    """Lo entregado para Mostrador que sigue afuera, lo más viejo primero: de todos o de un
+    empleado (`persona`, el que lo pidió). [dict] con «queda» (lo que falta vender o devolver),
+    «horas» desde que se entregó y «quien»."""
+    filtro, args = ("AND d.pedido_por = ?", (persona,)) if persona is not None else ("", ())
     c.execute(f"""SELECT d.id, d.producto_id, d.cantidad, COALESCE(d.vendidos, 0) AS vendidos,
-                         COALESCE(d.devueltos, 0) AS devueltos, d.mecanico_id, d.pedido_por,
-                         d.resuelto_en, d.importe, p.codigo_raw, p.descripcion, p.precio,
-                         m.nombre AS marca, k.nombre AS cuenta
+                         COALESCE(d.devueltos, 0) AS devueltos, d.pedido_por, d.resuelto_en,
+                         p.codigo_raw, p.descripcion, p.precio, m.nombre AS marca
                   FROM pedidos_deposito d
                   JOIN productos p ON p.id = d.producto_id
                   JOIN marcas m ON m.id = p.marca_id
-                  LEFT JOIN mecanicos k ON k.id = d.mecanico_id
-                  WHERE d.estado = 'entregado'
+                  WHERE d.estado = 'entregado' AND d.mecanico_id IS NULL
+                    AND d.facturado_en IS NULL
                     AND d.cantidad - COALESCE(d.vendidos, 0) - COALESCE(d.devueltos, 0) > 0
-                    AND ((d.mecanico_id IS NULL AND d.facturado_en IS NULL)
-                         OR (d.mecanico_id IS NOT NULL
-                             AND d.resuelto_en >= datetime('now', 'localtime',
-                                                           '-' || ? || ' days')))
-                    {''.join(' AND ' + f for f in filtros)}
+                    {filtro}
                   ORDER BY d.resuelto_en, d.id""", args)
     salida = []
     for r in c.fetchall():
         r = dict(r)
         r["queda"] = r["cantidad"] - r["vendidos"] - r["devueltos"]
         r["horas"] = round((minutos_entre(r["resuelto_en"]) or 0) / 60, 1)
-        r["quien"] = r["cuenta"] or r["pedido_por"] or "¿?"
+        r["quien"] = r["pedido_por"] or "¿?"
         salida.append(r)
     return salida
 
@@ -379,106 +370,17 @@ def cuanto_hace(horas):
 
 
 def quien_tiene_que_devolver():
-    """Lo que está afuera, por persona o taller: [dict] con cuántas cosas, cuántas unidades, lo
-    que valen a precio de lista y cuántas horas tiene la más vieja. Lo que tiene más horas,
-    primero."""
+    """Lo que está afuera, por persona: [dict] con cuántas cosas, cuántas unidades, lo que valen
+    a precio de lista y cuántas horas tiene la más vieja. Lo que tiene más horas, primero."""
     grupos = {}
     for r in lo_que_tiene():
-        g = grupos.setdefault((r["mecanico_id"], r["quien"]),
-                              {"quien": r["quien"], "mecanico_id": r["mecanico_id"],
-                               "persona": None if r["mecanico_id"] else r["pedido_por"],
-                               "cosas": 0, "unidades": 0, "valor": 0.0, "horas": 0.0})
+        g = grupos.setdefault(r["quien"], {"quien": r["quien"], "cosas": 0, "unidades": 0,
+                                           "valor": 0.0, "horas": 0.0})
         g["cosas"] += 1
         g["unidades"] += r["queda"]
         g["valor"] += float(r["precio"] or 0) * r["queda"]
         g["horas"] = max(g["horas"], r["horas"])
     return sorted(grupos.values(), key=lambda g: -g["horas"])
-
-
-def _quien_devuelve(pedido, codigo):
-    """(cómo se identificó, quién) si `codigo` alcanza para que vuelva este pedido, o
-    (None, por qué no). Ver «LO QUE QUEDA AFUERA». Para un taller, el código de retiro se
-    devuelve como tercer valor, para gastarlo adentro de la misma transacción."""
-    codigo = str(codigo or "").strip()
-    if not hay_claves_configuradas():
-        return "sin claves configuradas", obtener_usuario_actual(), None
-    if not codigo:
-        return None, "Falta el código de quien lo tiene.", None
-    if pedido["mecanico_id"]:
-        codigo_id = _codigo_de_retiro_vigente(pedido["mecanico_id"], codigo)
-        if codigo_id:
-            return "código de retiro", pedido["cuenta"], codigo_id
-    nombre, nivel, error = validar_password(codigo, con_mecanicos=bool(pedido["mecanico_id"]))
-    if error:
-        return None, error, None
-    if nivel == "admin":
-        return "clave de administrador", nombre, None
-    if pedido["mecanico_id"] and nivel == "mecanico" and nombre == pedido["cuenta"]:
-        return "clave del taller", nombre, None
-    if not pedido["mecanico_id"] and nivel and nombre == pedido["pedido_por"]:
-        return "su clave", nombre, None
-    return None, (f"Ese código no es de {pedido['cuenta'] or pedido['pedido_por']}, que es "
-                  "quien lo tiene (ni de un administrador)."), None
-
-
-def devolver_al_deposito(pedido_id, cantidad, codigo):
-    """Vuelve al depósito `cantidad` de un pedido entregado que no se vendió, con el código de
-    quien lo tiene. (ok, texto). El stock sube; si era de un taller, se le acredita lo que se le
-    había cargado; si vuelve todo, lo aprendido al entregarlo se va. Ver «LO QUE QUEDA AFUERA»."""
-    exigir_nivel("empleado", "recibir algo que vuelve al depósito")
-    try:
-        cantidad = int(cantidad)
-    except (TypeError, ValueError):
-        return False, "La cantidad tiene que ser un número."
-    pedido = next((r for r in lo_que_tiene() if r["id"] == pedido_id), None)
-    if not pedido:
-        return False, ("Ese pedido no está afuera: ya volvió, se vendió, se facturó o pasaron "
-                       f"más de {DIAS_PARA_DEVOLVER_UN_TALLER} días.")
-    if not 1 <= cantidad <= pedido["queda"]:
-        return False, f"Se puede devolver de 1 a {pedido['queda']}."
-    como, quien, codigo_id = _quien_devuelve(pedido, codigo)
-    if not como:
-        return False, quien
-    rotulo = f"{pedido['marca']} {pedido['codigo_raw']}"
-    recibio = obtener_usuario_actual()
-    try:
-        with db_lock, transaccion():
-            c.execute("""UPDATE pedidos_deposito SET devueltos = COALESCE(devueltos, 0) + ?
-                         WHERE id = ? AND estado = 'entregado'
-                           AND cantidad - COALESCE(vendidos, 0) - COALESCE(devueltos, 0) >= ?""",
-                      (cantidad, pedido_id, cantidad))
-            if c.rowcount != 1:
-                return False, "Eso ya volvió o se vendió (lo resolvió otra persona)."
-            if codigo_id:
-                c.execute("UPDATE codigos_de_retiro SET usado_en = datetime('now', 'localtime') "
-                          "WHERE id = ? AND usado_en IS NULL", (codigo_id,))
-                if c.rowcount != 1:
-                    raise ValueError("El código de retiro se usó recién en otra pantalla.")
-            c.execute("UPDATE productos SET stock = stock + ? WHERE id = ? AND stock IS NOT NULL",
-                      (cantidad, pedido["producto_id"]))
-            acreditado, movimiento_id = 0.0, None
-            if pedido["mecanico_id"] and pedido["importe"]:
-                acreditado = round(float(pedido["importe"]) * cantidad / pedido["cantidad"], 2)
-                c.execute("""INSERT INTO movimientos_de_cuenta (mecanico_id, concepto, importe, medio,
-                                                                 usuario)
-                             VALUES (?, ?, ?, 'Devolución', ?)""",
-                          (pedido["mecanico_id"], f"Devolución: {pedido['codigo_raw']} x{cantidad}",
-                           -acreditado, recibio))
-                movimiento_id = c.lastrowid
-            c.execute("""INSERT INTO devoluciones_al_deposito (pedido_id, cantidad, acreditado,
-                                                               movimiento_id, devolvio, como, recibio)
-                         VALUES (?, ?, ?, ?, ?, ?, ?)""",
-                      (pedido_id, cantidad, acreditado, movimiento_id, quien, como, recibio))
-            if cantidad == pedido["cantidad"] - pedido["devueltos"] and not pedido["vendidos"]:
-                c.execute("DELETE FROM ventas_registradas WHERE pedido_id = ? AND venta_id IS NULL",
-                          (pedido_id,))
-    except ValueError as _err:
-        # Lo que no pudo terminarse adentro deshace todo: no queda medio devuelto.
-        return False, str(_err)
-    return True, (f"↩️ Volvió al depósito: {rotulo} x{cantidad}, de {pedido['quien']}"
-                  + (f" ({como})" if como != "su clave" else "")
-                  + (f". Se le acreditaron {formato_precio(acreditado)} en la cuenta."
-                     if acreditado else "."))
 
 
 def lo_que_tiene_para_vender(persona, producto_id):
@@ -488,39 +390,283 @@ def lo_que_tiene_para_vender(persona, producto_id):
             if r["producto_id"] == producto_id]
 
 
+# ============================================================================================
+# EL CÓDIGO DE BARRAS NUESTRO
+# ============================================================================================
+# Lo pidió el dueño: que para que algo vuelva al stock, los del depósito «tengan que hacer un
+# control escaneando el código de barras nuestro, no el original». El original de la caja no
+# sirve de control: el mismo número está en cualquier caja igual, comprada en cualquier lado.
+# El nuestro sale del número del producto en la app: «CH» + el número + un dígito verificador
+# («CH1400-5»), en Code 39, que lee cualquier lector sin configurar nada. Existe solo para cada
+# producto —no hay que cargar nada— y se imprime en etiquetas (ver pdf_de_etiquetas()): en el
+# depósito, al entregar, y en «↩️ Devoluciones» para lo que ya está en el estante. El dígito
+# verificador frena un número mal leído o mal tipeado: «CH1400-4» no es nada.
+PREFIJO_DEL_CODIGO_NUESTRO = "CH"
+
+
+def codigo_nuestro(producto_id):
+    """El código de barras nuestro de un producto: «CH1400-5». Ver «EL CÓDIGO DE BARRAS
+    NUESTRO»."""
+    return f"{PREFIJO_DEL_CODIGO_NUESTRO}{int(producto_id)}-{digito_verificador_gtin(str(int(producto_id)))}"
+
+
+def producto_por_codigo_nuestro(texto):
+    """El id del producto si `texto` es un código nuestro bien leído —el lector puede mandar
+    los asteriscos del Code 39, minúsculas o espacios—, y el producto existe. Si no, None."""
+    m = re.fullmatch(rf"\*?\s*{PREFIJO_DEL_CODIGO_NUESTRO}\s*0*(\d{{1,9}})\s*-\s*(\d)\s*\*?",
+                     str(texto or "").strip(), re.IGNORECASE)
+    if not m or digito_verificador_gtin(m.group(1)) != m.group(2):
+        return None
+    c.execute("SELECT id FROM productos WHERE id = ?", (int(m.group(1)),))
+    fila = c.fetchone()
+    return fila["id"] if fila else None
+
+
+def que_es_lo_escaneado(texto, ya_escaneados=()):
+    """Lo que el depósito escaneó para devolver: (producto_id, "") si es un código nuestro de
+    algo que alguien tiene afuera, y no se escanearon ya todas las que hay afuera
+    (`ya_escaneados`, lo de antes en la misma tanda); si no, (None, por qué no)."""
+    texto = str(texto or "").strip()
+    if not texto:
+        return None, ""
+    producto_id = producto_por_codigo_nuestro(texto)
+    if not producto_id:
+        if producto_por_codigo_de_barras(texto) or re.fullmatch(r"\d{8,14}", texto):
+            return None, ("Ese es el código ORIGINAL de la caja: para que vuelva al stock hay "
+                          "que escanear la etiqueta nuestra (la que empieza con "
+                          f"{PREFIJO_DEL_CODIGO_NUESTRO}).")
+        return None, f"«{texto}» no es un código nuestro: revisá la etiqueta."
+    afuera = sum(r["queda"] for r in lo_que_tiene() if r["producto_id"] == producto_id)
+    ya = sum(1 for t in ya_escaneados or () if producto_por_codigo_nuestro(t) == producto_id)
+    if ya < afuera:
+        return producto_id, ""
+    c.execute("""SELECT m.nombre AS marca, p.codigo_raw FROM productos p
+                 JOIN marcas m ON m.id = p.marca_id WHERE p.id = ?""", (producto_id,))
+    f = c.fetchone()
+    if not afuera:
+        return None, (f"Nadie tiene {f['marca']} {f['codigo_raw']} del depósito: no hay nada "
+                      "que vuelva al stock.")
+    # Una unidad de más es justo lo que no tiene que pasar: algo que no salió del depósito a
+    # nombre de nadie volviendo al stock.
+    return None, (f"Ya se escanearon las {afuera} de {f['marca']} {f['codigo_raw']} que hay "
+                  "afuera: esta unidad no salió del depósito a nombre de nadie.")
+
+
+def quienes_tienen_lo_escaneado(escaneos):
+    """Quiénes tienen afuera TODO lo escaneado, con las cantidades: [persona]. De ahí sale de
+    quién es lo que vuelve, sin elegirlo a mano cuando es uno solo."""
+    por_producto = {}
+    for texto in escaneos or []:
+        producto_id = producto_por_codigo_nuestro(texto)
+        if producto_id:
+            por_producto[producto_id] = por_producto.get(producto_id, 0) + 1
+    if not por_producto:
+        return []
+    tiene = {}
+    for r in lo_que_tiene():
+        tiene[(r["quien"], r["producto_id"])] = tiene.get((r["quien"], r["producto_id"]), 0) + r["queda"]
+    return [persona for persona in sorted({q for q, _ in tiene}, key=str.lower)
+            if all(tiene.get((persona, p), 0) >= n for p, n in por_producto.items())]
+
+
+def _quien_devuelve(persona, codigo):
+    """(cómo se identificó, quién) si `codigo` es la contraseña de `persona` o la de un
+    administrador; (None, por qué no) si no. Ver «LO QUE QUEDA AFUERA»."""
+    codigo = str(codigo or "").strip()
+    if not hay_claves_configuradas():
+        return "sin claves configuradas", obtener_usuario_actual()
+    if not codigo:
+        return None, f"Falta la contraseña de {persona}."
+    nombre, nivel, error = validar_password(codigo)
+    if error:
+        return None, error
+    if nivel == "admin":
+        return "clave de administrador", nombre
+    if nivel and nombre == persona:
+        return "su clave", nombre
+    return None, f"Esa contraseña no es de {persona}, que es quien lo tiene (ni de un administrador)."
+
+
+def _devolver_lo_planeado(plan, persona, como, recibio):
+    """La parte de devolver_lo_escaneado() que toca la base, todo o nada: ValueError si
+    mientras tanto otro vendió o devolvió algo de eso."""
+    with db_lock, transaccion():
+        for r, n in plan:
+            c.execute("""UPDATE pedidos_deposito SET devueltos = COALESCE(devueltos, 0) + ?
+                         WHERE id = ? AND estado = 'entregado'
+                           AND cantidad - COALESCE(vendidos, 0) - COALESCE(devueltos, 0) >= ?""",
+                      (n, r["id"], n))
+            if c.rowcount != 1:
+                raise ValueError("Mientras tanto otra persona vendió o devolvió algo de eso: "
+                                 "no volvió nada, probá de nuevo.")
+            c.execute("UPDATE productos SET stock = stock + ? WHERE id = ? AND stock IS NOT NULL",
+                      (n, r["producto_id"]))
+            c.execute("""INSERT INTO devoluciones_al_deposito (pedido_id, cantidad, devolvio,
+                                                               como, recibio)
+                         VALUES (?, ?, ?, ?, ?)""", (r["id"], n, persona, como, recibio))
+            # Lo aprendido al entregarlo se va con lo que vuelve entero sin haberse vendido.
+            if n == r["cantidad"] - r["devueltos"] and not r["vendidos"]:
+                c.execute("DELETE FROM ventas_registradas WHERE pedido_id = ? AND venta_id IS NULL",
+                          (r["id"],))
+
+
+def devolver_lo_escaneado(escaneos, persona, codigo):
+    """Vuelve al stock lo que el depósito escaneó (una unidad por escaneo, con el código de
+    barras nuestro) de lo que `persona` tiene afuera, con su contraseña o la de un
+    administrador. Todo o nada: si una unidad no es de lo que tiene, no vuelve ninguna.
+    (ok, texto). Ver «LO QUE QUEDA AFUERA»."""
+    exigir_nivel("empleado", "recibir algo que vuelve al depósito")
+    por_producto = {}
+    for texto in escaneos or []:
+        producto_id = producto_por_codigo_nuestro(texto)
+        if not producto_id:
+            return False, f"«{texto}» no es un código de barras nuestro: no vuelve nada."
+        por_producto[producto_id] = por_producto.get(producto_id, 0) + 1
+    if not por_producto:
+        return False, "No se escaneó nada: escaneá la etiqueta nuestra de cada unidad."
+    suyo = lo_que_tiene(persona=persona)
+    plan = []
+    for producto_id, n in por_producto.items():
+        pedidos = [r for r in suyo if r["producto_id"] == producto_id]
+        tiene = sum(r["queda"] for r in pedidos)
+        if n > tiene:
+            nombre = (f"{pedidos[0]['marca']} {pedidos[0]['codigo_raw']}" if pedidos
+                      else codigo_nuestro(producto_id))
+            return False, (f"{persona} tiene {tiene} de {nombre} y se escanearon {n}: no "
+                           "vuelve nada. Revisá lo escaneado.")
+        for r in pedidos:
+            if n <= 0:
+                break
+            plan.append((r, min(r["queda"], n)))
+            n -= min(r["queda"], n)
+    como, quien = _quien_devuelve(persona, codigo)
+    if not como:
+        return False, quien
+    recibio = obtener_usuario_actual()
+    # Lo recibe OTRA persona: el que lo tiene no se lo devuelve a sí mismo desde su pantalla,
+    # que es justo el control que no tiene que faltar. Un administrador sí puede.
+    if como == "su clave" and recibio == persona:
+        return False, (f"Lo tiene que recibir el depósito, no {persona}: que lo escanee alguien "
+                       "del depósito con su usuario (o que ponga la contraseña un "
+                       "administrador).")
+    try:
+        _devolver_lo_planeado(plan, persona, como, recibio)
+    except ValueError as e:
+        return False, str(e)
+    unidades = sum(n for _, n in plan)
+    return True, (f"↩️ Volvieron al stock {unidades} unidad(es) de {persona}: "
+                  + ", ".join(f"{n}× {r['marca']} {r['codigo_raw']}" for r, n in plan)
+                  + (f" ({como})." if como != "su clave" else "."))
+
+
+def pdf_de_etiquetas(items):
+    """Las etiquetas con el código de barras nuestro, para pegar en cada unidad: `items` es
+    [(producto_id, cuántas)]. A4, tres columnas por ocho filas. b"" si no hay nada."""
+    from fpdf import FPDF
+    etiquetas = []
+    for producto_id, cuantas in items:
+        c.execute("""SELECT p.id, p.codigo_raw, p.descripcion, m.nombre AS marca
+                     FROM productos p JOIN marcas m ON m.id = p.marca_id WHERE p.id = ?""",
+                  (producto_id,))
+        f = c.fetchone()
+        if f:
+            etiquetas += [dict(f)] * max(0, min(int(cuantas), CANTIDAD_MAXIMA_POR_PEDIDO * 4))
+    if not etiquetas:
+        return b""
+
+    def limpiar(texto):
+        return str(texto).encode("latin-1", "replace").decode("latin-1")
+
+    pdf = FPDF(format="A4")
+    pdf.set_auto_page_break(False)
+    ancho, alto, columnas, filas = 66, 35, 3, 8
+    for n, e in enumerate(etiquetas):
+        if n % (columnas * filas) == 0:
+            pdf.add_page()
+        x = 6 + (n % columnas) * (ancho + 2)
+        y = 8 + ((n // columnas) % filas) * (alto + 1)
+        pdf.set_xy(x, y)
+        pdf.set_font("Helvetica", "B", 9)
+        pdf.cell(ancho, 4, limpiar(f"{e['marca']} {e['codigo_raw']}")[:34])
+        pdf.set_xy(x, y + 4)
+        pdf.set_font("Helvetica", "", 7)
+        pdf.cell(ancho, 4, limpiar((e["descripcion"] or "")[:44]))
+        # LO QUE LEE UN LECTOR: fpdf toma `w` como la barra GRUESA (la fina es un tercio). Con
+        # w=0.3 la fina quedaba en 0,1 mm y ningún lector la levantaba (probado decodificando el
+        # PDF). Cada carácter de Code 39 ocupa 16 barras finas, más 10 de margen blanco a cada
+        # lado: la fina, lo más cerca de 0,33 mm que entre en la etiqueta, y centrado.
+        texto = f"*{codigo_nuestro(e['id'])}*"
+        fina = min(0.33, (ancho - 2) / (16 * len(texto) + 20))
+        largo = 16 * len(texto) * fina - fina
+        pdf.code39(texto, x=x + (ancho - largo) / 2, y=y + 9, w=3 * fina, h=16)
+        pdf.set_xy(x, y + 27)
+        pdf.set_font("Helvetica", "B", 9)
+        pdf.cell(ancho, 4, codigo_nuestro(e["id"]))
+    return bytes(pdf.output())
+
+
+def productos_para_etiquetar(texto, tope=20):
+    """Los productos para imprimirles la etiqueta nuestra: por su código (o el principio), por
+    el código de barras ORIGINAL de la caja —se escanea la caja y sale la etiqueta— o por el
+    nuestro. [dict] con id, marca, codigo_raw, descripcion y stock."""
+    texto = str(texto or "").strip()
+    if not texto:
+        return []
+    ids = [producto_por_codigo_nuestro(texto) or producto_por_codigo_de_barras(texto)]
+    if not ids[0]:
+        limpio = sanitizar(texto)
+        if not limpio:
+            return []
+        # Por rango y no con LIKE: así usa el índice del código (LIKE no distingue mayúsculas
+        # y no lo puede usar).
+        c.execute("""SELECT id FROM productos WHERE codigo_clean >= ? AND codigo_clean < ?
+                     ORDER BY codigo_clean = ? DESC, codigo_clean LIMIT ?""",
+                  (limpio, limpio + "\uffff", limpio, int(tope)))
+        ids = [r["id"] for r in c.fetchall()]
+    salida = []
+    for producto_id in ids:
+        c.execute("""SELECT p.id, p.codigo_raw, p.descripcion, p.stock, m.nombre AS marca
+                     FROM productos p JOIN marcas m ON m.id = p.marca_id WHERE p.id = ?""",
+                  (producto_id,))
+        f = c.fetchone()
+        if f:
+            salida.append(dict(f))
+    return salida
+
+
+def etiquetas_para_descargar(items):
+    """Para el botón de descarga: el PDF se arma al tocarlo (ver comprobante_para_descargar())."""
+    datos = [(int(p), int(n)) for p, n in items]
+    return lambda: pdf_de_etiquetas(datos)
+
+
 def resumen_de_la_cuenta(persona=None, mecanico_id=None, dias=30):
     """Lo de una cuenta en los últimos `dias` días: de un empleado, lo que vendió en 🧾 Ventas
-    y lo que tiene del depósito; de un taller, lo que se llevó del depósito, lo que devolvió y
-    lo que debe. dict."""
+    y lo que tiene del depósito; de un taller, lo que se llevó del depósito y lo que debe.
+    dict."""
     desde = (datetime.now() - timedelta(days=int(dias))).strftime("%Y-%m-%d %H:%M:%S")
-    salida = {"afuera": lo_que_tiene(persona=persona, mecanico_id=mecanico_id)}
     if mecanico_id is not None:
-        c.execute("""SELECT d.id, d.resuelto_en, d.cantidad, COALESCE(d.devueltos, 0) AS devueltos,
-                            d.importe, p.codigo_raw, p.descripcion, m.nombre AS marca
+        c.execute("""SELECT d.id, d.resuelto_en, d.cantidad, d.importe, p.codigo_raw,
+                            p.descripcion, m.nombre AS marca
                      FROM pedidos_deposito d JOIN productos p ON p.id = d.producto_id
                      JOIN marcas m ON m.id = p.marca_id
                      WHERE d.mecanico_id = ? AND d.estado = 'entregado' AND d.resuelto_en >= ?
                      ORDER BY d.resuelto_en DESC""", (mecanico_id, desde))
         entregas = [dict(r) for r in c.fetchall()]
-        c.execute("""SELECT COALESCE(SUM(dv.acreditado), 0) FROM devoluciones_al_deposito dv
-                     JOIN pedidos_deposito d ON d.id = dv.pedido_id
-                     WHERE d.mecanico_id = ? AND dv.fecha >= ?""", (mecanico_id, desde))
-        salida.update(entregas=entregas,
-                      total=round(sum(float(e["importe"] or 0) for e in entregas), 2),
-                      devuelto=round(float(c.fetchone()[0]), 2),
-                      saldo=estado_de_cuenta(mecanico_id)["saldo"])
-    else:
-        c.execute("""SELECT id, fecha, cliente, forma_de_pago, total FROM ventas
-                     WHERE usuario = ? AND anulada = 0 AND fecha >= ? ORDER BY id DESC""",
-                  (persona, desde))
-        ventas = [dict(r) for r in c.fetchall()]
-        c.execute("""SELECT COALESCE(SUM(d.importe), 0) FROM ventas_devoluciones d
-                     JOIN ventas v ON v.id = d.venta_id
-                     WHERE v.usuario = ? AND v.anulada = 0 AND d.fecha >= ?""", (persona, desde))
-        salida.update(ventas=ventas,
-                      total=round(sum(float(v["total"] or 0) for v in ventas), 2),
-                      devuelto=round(float(c.fetchone()[0]), 2))
-    return salida
+        return {"afuera": [], "entregas": entregas,
+                "total": round(sum(float(e["importe"] or 0) for e in entregas), 2),
+                "saldo": estado_de_cuenta(mecanico_id)["saldo"]}
+    c.execute("""SELECT id, fecha, cliente, forma_de_pago, total FROM ventas
+                 WHERE usuario = ? AND anulada = 0 AND fecha >= ? ORDER BY id DESC""",
+              (persona, desde))
+    ventas = [dict(r) for r in c.fetchall()]
+    c.execute("""SELECT COALESCE(SUM(d.importe), 0) FROM ventas_devoluciones d
+                 JOIN ventas v ON v.id = d.venta_id
+                 WHERE v.usuario = ? AND v.anulada = 0 AND d.fecha >= ?""", (persona, desde))
+    devuelto = round(float(c.fetchone()[0]), 2)
+    return {"afuera": lo_que_tiene(persona=persona), "ventas": ventas,
+            "total": round(sum(float(v["total"] or 0) for v in ventas), 2),
+            "devuelto": devuelto}
 
 
 def cuentas_para_mirar():

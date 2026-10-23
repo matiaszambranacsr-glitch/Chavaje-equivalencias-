@@ -1706,6 +1706,40 @@ def solicitar_reposicion(producto_id):
         conn.commit()
 
 
+def anotar_lo_que_se_termino(producto_ids, usuario=None):
+    """Lo de esa lista que quedó con stock 0 se anota solo para reponer («📊 Estadísticas → 📌
+    Para pedir»). Lo llaman cerrar_venta() y entregar_pedido() después de bajar el stock: antes
+    había que acordarse de tocar «📋 Anotar para reponer» con el cliente adelante, y lo que se
+    terminaba un sábado a la tarde nadie lo anotaba. Lo que ya estaba anotado y sin resolver no
+    suma otra vez: «veces» es cuántas veces faltó, no cuántas se vendió la última. Lo que no
+    lleva stock no se toca. Devuelve los ids que se anotaron recién.
+
+    Nunca corta lo que la llamó: la venta o la entrega ya quedaron guardadas, y un error acá
+    las mostraba como fallidas (y se cobraban dos veces). Si falla, queda en «Los errores»."""
+    quien = f"{usuario or obtener_usuario_actual()} (se terminó)"
+    anotados = []
+    try:
+        with db_lock:
+            for producto_id in dict.fromkeys(int(p) for p in producto_ids):
+                c.execute("""INSERT INTO pedidos_reposicion (producto_id, veces_solicitado,
+                                                             ultimo_solicitado_por, ultima_fecha,
+                                                             estado)
+                             SELECT id, 1, ?, datetime('now'), 'pendiente' FROM productos
+                             WHERE id = ? AND stock = 0
+                             ON CONFLICT(producto_id) DO UPDATE SET
+                                 veces_solicitado = veces_solicitado + 1,
+                                 ultimo_solicitado_por = excluded.ultimo_solicitado_por,
+                                 ultima_fecha = excluded.ultima_fecha, estado = 'pendiente'
+                             WHERE pedidos_reposicion.estado != 'pendiente'""",
+                          (quien, producto_id))
+                if c.rowcount:
+                    anotados.append(producto_id)
+            conn.commit()
+    except sqlite3.Error as _err:
+        anotar_error("anotar_lo_que_se_termino", _err)
+    return anotados
+
+
 def bloqueo_de_venta(veredicto, descripcion):
     """Qué hace falta para anotar como vendida EN LUGAR DE LO PEDIDO una fila con este veredicto:
     «» nada; «confirmar» si la app dice que no es la misma pieza (🔴); «bloqueada» si además es

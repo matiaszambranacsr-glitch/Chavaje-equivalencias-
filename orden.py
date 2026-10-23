@@ -67,6 +67,7 @@ PANTALLAS = [
     "mecanico.py",
     "deposito.py",
     "ventas.py",
+    "devoluciones.py",
 ]
 
 # En app.py, la línea donde se ejecutan las pantallas. fuente_completa() pone ahí su texto.

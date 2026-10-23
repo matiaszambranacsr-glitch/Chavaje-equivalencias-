@@ -356,16 +356,17 @@ def probar(L):
 
     # 16. Lo que se va a terminar con lo que se vende: lo que quedó en 0 primero, lo que
     # alcanza para unos días después, lo que alcanza para más de una semana no; y si ya se
-    # anotó para reponer. Con más efectivo en la caja, el arqueo cuenta la diferencia.
+    # anotó para reponer: lo que la venta dejó en 0 se anota solo (ver
+    # anotar_lo_que_se_termino()). Con más efectivo en la caja, el arqueo cuenta la diferencia.
     c.execute("UPDATE productos SET stock = 6 WHERE id = ?", (kit,))
     conn.commit()
     ns["cerrar_venta"]([item(ids["B300"]), dict(item(kit), cantidad=5)], "", "Efectivo")
     _por_terminar = lambda: [(f["nombre"], f["stock"], f["alcanza_dias"], f["anotado"])
                              for f in ns["lo_que_se_va_a_terminar"]()]
     esperar("lo que se va a terminar", _por_terminar(),
-            [("PRUEBA B300", 0, 0, False), ("PRUEBA K500", 1, 6, False)])
-    ns["solicitar_reposicion"](ids["B300"])
-    esperar("y ya anotado para reponer", _por_terminar()[0], ("PRUEBA B300", 0, 0, True))
+            [("PRUEBA B300", 0, 0, True), ("PRUEBA K500", 1, 6, False)])
+    ns["solicitar_reposicion"](kit)
+    esperar("y ya anotado para reponer", _por_terminar()[1], ("PRUEBA K500", 1, 6, True))
     esperar("el arqueo con efectivo", (ns["efectivo_esperado"](),
                                        ns["arquear_la_caja"](None, 152500)),
             (153000.0, (True, "Faltan $500.")))

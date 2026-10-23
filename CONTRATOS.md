@@ -215,7 +215,12 @@ Las pruebas se corren como dice el README, en «Antes de subir un cambio».
 | Lo que se va a terminar con lo que se vende | `lo_que_se_va_a_terminar()` | `pruebas_de_las_ventas.py` (16) |
 | Lo entregado para Mostrador queda a nombre de quien lo pidió hasta venderlo, facturarlo o devolverlo | `lo_que_tiene()`, `quien_tiene_que_devolver()` | `pruebas_de_lo_que_queda_afuera.py` |
 | Vender lo que ya se tiene del depósito no baja el stock otra vez ni anota dos veces lo aprendido; anular lo vuelve a su nombre | `cerrar_venta()`, `anular_venta()` | `pruebas_de_lo_que_queda_afuera.py` |
-| Vuelve al depósito solo con el código de quien lo tiene (su clave; el código de retiro o la clave del taller; o un administrador); al taller se le acredita | `devolver_al_deposito()` | `pruebas_de_lo_que_queda_afuera.py` |
+| Vuelve al stock solo lo escaneado con la etiqueta nuestra (no el código original de la caja), una unidad por escaneo, nunca más de lo que la persona tiene, con su contraseña o la de un administrador, recibido por otra persona; todo o nada | `devolver_lo_escaneado()`, `que_es_lo_escaneado()`, `quienes_tienen_lo_escaneado()` | `pruebas_de_lo_que_queda_afuera.py` |
+| Lo de un taller no vuelve: no está afuera y nadie lo descarga | `lo_que_tiene()`, `devolver_lo_escaneado()` | `pruebas_de_lo_que_queda_afuera.py` (9) |
+| El código nuestro: «CH» + número + dígito verificador; un dígito mal leído no es nada | `codigo_nuestro()`, `producto_por_codigo_nuestro()` | `pruebas_de_lo_que_queda_afuera.py` (1) |
+| Las etiquetas se pueden leer (barra fina de 0,25 mm o más) y entran en la etiqueta | `pdf_de_etiquetas()`, `productos_para_etiquetar()` | `pruebas_de_lo_que_queda_afuera.py` (12) |
+| Lo que llega a 0 al vender o al entregar se anota solo para reponer, una vez | `anotar_lo_que_se_termino()` | `pruebas_de_lo_que_queda_afuera.py` (13), `pruebas_de_las_ventas.py` (16) |
+| «Sumar a la venta» lo que se tiene del depósito, con su cantidad | `sumar_lo_que_tengo_a_la_venta()` | `pruebas_de_lo_que_queda_afuera.py` (11) |
 | Lo de cada cuenta: un empleado ve lo suyo, el administrador todas | `resumen_de_la_cuenta()`, `cuentas_para_mirar()` | `pruebas_de_lo_que_queda_afuera.py` |
 | Al terminar la venta, la patente y los km anotan cada pieza en la ficha del auto, una sola vez, y frenan los km para atrás | `anotar_la_venta_en_el_auto()`, `nombre_de_la_pieza()` | `pruebas_de_las_ventas.py` |
 | Un aviso por cliente con todo lo que le toca; «Ya le avisé» lo saca de la lista 15 días | `avisos_por_cliente()`, `marcar_avisado()` | `pruebas_de_los_cambios.py` (9l ter) |

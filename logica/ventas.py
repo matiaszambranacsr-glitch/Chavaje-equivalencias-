@@ -98,9 +98,35 @@ def sumar_a_la_venta(fila, pedido="", veredicto=None, evidencia=None, confirmado
     return nuevo
 
 
+def sumar_lo_que_tengo_a_la_venta(persona=None):
+    """«➕ Sumar a la venta» lo que `persona` (quien atiende) tiene del depósito sin vender: lo
+    pidió para un cliente, y al cobrarlo no hace falta buscarlo otra vez. Cada producto queda en
+    la venta con, por lo menos, lo que tiene (lo que ya estaba con más, queda como estaba). Al
+    cerrarla sale de lo que tiene, sin bajar el stock otra vez (ver cerrar_venta()). Devuelve
+    cuántos productos se sumaron o cambiaron."""
+    por_producto = {}
+    for r in lo_que_tiene(persona=persona or obtener_usuario_actual()):
+        por_producto[r["producto_id"]] = por_producto.get(r["producto_id"], 0) + r["queda"]
+    venta = st.session_state.setdefault("venta_items", [])
+    cambiados = 0
+    for producto_id, tiene in por_producto.items():
+        tiene = min(tiene, CANTIDAD_MAXIMA_POR_PEDIDO)
+        ya = next((x for x in venta if x["producto_id"] == producto_id), None)
+        if ya is None:
+            nuevo = item_de_venta(producto_id, tiene)
+            if nuevo:
+                venta.append(nuevo)
+                cambiados += 1
+        elif ya["cantidad"] < tiene:
+            ya["cantidad"] = tiene
+            poner_en_el_campo(f"venta_cant_{producto_id}", tiene)
+            cambiados += 1
+    return cambiados
+
+
 def lo_que_se_termino(venta_id):
     """Lo vendido en esa venta que quedó con stock 0: [(producto_id, «marca código»)]. Para
-    anotarlo para reponer ahí mismo (ver solicitar_reposicion())."""
+    decir que se terminó y que ya quedó anotado para reponer (ver anotar_lo_que_se_termino())."""
     c.execute("""SELECT DISTINCT vi.producto_id, vi.marca, vi.codigo FROM ventas_items vi
                  JOIN productos p ON p.id = vi.producto_id
                  WHERE vi.venta_id = ? AND p.stock = 0 ORDER BY vi.id""", (venta_id,))
@@ -278,6 +304,9 @@ def cerrar_venta(items, cliente="", forma_de_pago="", usuario=None):
                                                              codigo_pedido_clean, usuario,
                                                              veredicto, como, evidencia, venta_id)
                              VALUES (?, ?, ?, ?, ?, ?, ?, ?)""", (producto_id,) + _aprendido)
+    # Lo que se terminó con esta venta queda anotado para reponer solo (ver
+    # anotar_lo_que_se_termino()).
+    anotar_lo_que_se_termino([x[0] for x in limpios], usuario)
     return venta_id, avisos
 
 

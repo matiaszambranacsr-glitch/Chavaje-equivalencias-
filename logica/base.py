@@ -177,7 +177,8 @@ def _renglon_del_error(error):
 # mostrar, código BUS-8F31»: quien está en el mostrador se lo pasa al administrador, que lo
 # encuentra en Estado y papelera → «🐞 Errores» con dónde y en qué renglón (lo propuso una
 # revisión con ChatGPT). El administrador ve además el error completo ahí mismo.
-PREFIJOS_DE_LAS_PANTALLAS = ("BUS", "VIN", "EXC", "ADM", "EST", "WSP", "VEH", "MEC", "DEP", "VEN")
+PREFIJOS_DE_LAS_PANTALLAS = ("BUS", "VIN", "EXC", "ADM", "EST", "WSP", "VEH", "MEC", "DEP", "VEN",
+                             "DVL")
 
 
 def codigo_de_error(prefijo):
@@ -500,6 +501,13 @@ hr { border-color: var(--border) !important; margin: 1.1rem 0 !important; }
   background: rgba(232, 163, 61, 0.14) !important; border-color: rgba(232, 163, 61, 0.45) !important;
 }
 .st-key-nav_principal [role="radiogroup"] label p { white-space: nowrap; font-weight: 600; }
+/* En la computadora no hay dedo para deslizar ni barra que se vea: con once secciones, la
+   última («↩️ Devoluciones») quedaba escondida a la derecha a 1300 px. Ahí, si no entran, van
+   en dos renglones; en el celular siguen deslizándose. */
+@media (min-width: 768px) {
+  .st-key-nav_principal [role="radiogroup"] { flex-wrap: wrap !important; overflow-x: visible; }
+  .st-key-nav_principal [role="radiogroup"] label { padding: 7px 11px !important; }
+}
 
 /* Las ayudas plegadas (ver ayuda()): un renglón gris, sin caja, que se abre con una línea de
    color al costado. Se distinguen de los desplegables que son parte de la pantalla. */

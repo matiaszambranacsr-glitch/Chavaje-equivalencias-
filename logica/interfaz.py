@@ -75,7 +75,7 @@ def herramientas_que_coinciden(texto):
 # solapa, y el auditor controla que cada miga escrita exista.
 PAGINAS = ["🔍 Buscador", "🔗 Vincular manual", "📁 Cargar Excel", "🗂️ Administrar",
            "📊 Estadísticas", "📋 Lista WhatsApp", "🚗 Vehículos", "🛠️ Modo Mecánico",
-           "📦 Depósito", "🧾 Ventas"]
+           "📦 Depósito", "🧾 Ventas", "↩️ Devoluciones"]
 
 # Una línea por pantalla diciendo para qué sirve: se ve debajo de las pastillas. Sin esto hay
 # que entrar a cada una para saber qué hace, y el que atiende el mostrador no tiene tiempo de
@@ -97,6 +97,8 @@ PARA_QUE_SIRVE = {
                   "cada cuenta para facturar.",
     "🧾 Ventas": "Cobrar lo que se lleva el cliente: descuenta el stock y, al terminar, lo anota "
                 "en la ficha del auto con la patente y los km.",
+    "↩️ Devoluciones": "Lo que vuelve al depósito (escaneando la etiqueta nuestra), lo que "
+                      "devuelve un cliente, y las etiquetas para imprimir.",
 }
 
 # Las solapas de cada pantalla. Viven acá y no adentro de la pantalla porque el botón de los
@@ -109,11 +111,15 @@ SUB_ADMIN = ["🏷️ Marcas", "📦 Productos", "💬 Mensajería y cobros", "�
 # consultarlo. Antes «Códigos DTC» quedaba segundo, entre dos formas de identificar el auto.
 SUB_MEC = ["🔤 Por patente", "🔢 Chasis / VIN", "⚙️ Número de motor", "🚙 Repuestos por vehículo",
            "📖 Códigos DTC", "🗺️ Esquemas", "🧮 Conversor de unidades"]
+# Las devoluciones, aparte de 🧾 Ventas y 📦 Depósito: con muchos pedidos, adentro de ellas
+# hacían la pantalla eterna (lo pidió el dueño).
+SUB_DEVOLUCIONES = ["📦 Al depósito", "🧾 De un cliente", "🏷️ Etiquetas"]
 # Qué solapas tiene cada pantalla, y con qué clave de la sesión se elige.
 SOLAPAS_DE_LA_PAGINA = {
     "📊 Estadísticas": (SUB_STATS, "sub_stats"),
     "🗂️ Administrar": (SUB_ADMIN, "sub_admin"),
     "🛠️ Modo Mecánico": (SUB_MEC, "sub_mec"),
+    "↩️ Devoluciones": (SUB_DEVOLUCIONES, "sub_devoluciones"),
 }
 
 
@@ -150,6 +156,12 @@ PARA_QUE_SIRVE_LA_SOLAPA = {
     "📖 Códigos DTC": "Qué significa un código de falla del escáner y qué pieza revisar.",
     "🗺️ Esquemas": "Los despieces que subiste, por marca, vehículo y sistema, y subir uno nuevo.",
     "🧮 Conversor de unidades": "Torque, presión y medidas de manuales viejos o importados.",
+    "📦 Al depósito": "Lo que alguien pidió y no vendió: vuelve al stock escaneando la etiqueta "
+                     "nuestra de cada pieza, con la contraseña de quien lo tiene.",
+    "🧾 De un cliente": "Buscar la venta y devolver una cosa: vuelve al stock si se puede "
+                       "vender, y la plata sale de la caja de hoy.",
+    "🏷️ Etiquetas": "Imprimir la etiqueta nuestra de un producto (también escaneando la caja) "
+                   "o de lo que está afuera.",
 }
 
 

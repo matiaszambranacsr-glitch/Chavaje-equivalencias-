@@ -19,16 +19,23 @@ if pagina == PAGINAS[9]:
     venta_items = st.session_state.setdefault("venta_items", [])
     recien = st.session_state.get("venta_recien_cerrada")
     # LO QUE TENÉS DEL DEPÓSITO sin vender: está a tu nombre hasta que lo vendas acá o vuelva
-    # al depósito con tu contraseña. Ver «LO QUE QUEDA AFUERA» en logica/deposito.py.
+    # al depósito, escaneado por el depósito. Ver «LO QUE QUEDA AFUERA» en logica/deposito.py.
     _tengo = lo_que_tiene(persona=obtener_usuario_actual())
     _tengo_por_producto = {}
     for _r in _tengo:
         _tengo_por_producto[_r["producto_id"]] = _tengo_por_producto.get(_r["producto_id"], 0) + _r["queda"]
     if _tengo:
-        st.info("📦 **Tenés del depósito sin vender:** "
-                + ", ".join(f"{_r['queda']}× {_r['marca']} {_r['codigo_raw']}" for _r in _tengo)
-                + ". Si se venden acá, no se descuentan del stock otra vez; si no, devolvelos en "
-                  "📦 Depósito con tu contraseña.")
+        _tg1, _tg2 = cols([3, 1])
+        _tg1.info("📦 **Tenés del depósito sin vender:** "
+                  + ", ".join(f"{_r['queda']}× {_r['marca']} {_r['codigo_raw']}" for _r in _tengo[:8])
+                  + (f" y {len(_tengo) - 8} más" if len(_tengo) > 8 else "")
+                  + ". Si se venden acá, no se descuentan del stock otra vez; si no, llevalos al "
+                    "depósito: lo recibe escaneando la etiqueta en ↩️ Devoluciones.")
+        if _tg2.button("➕ Sumar a la venta", key="venta_sumar_lo_que_tengo", width="stretch",
+                       help="Suma a esta venta todo lo que tenés del depósito, con su cantidad."):
+            st.session_state.pop("venta_recien_cerrada", None)
+            sumar_lo_que_tengo_a_la_venta()
+            st.rerun()
 
     if recien:
         # LA VENTA RECIÉN TERMINADA: lo que pidió el dueño, la patente y los km.
@@ -47,18 +54,12 @@ if pagina == PAGINAS[9]:
                              key="venta_comprobante_pdf", width="stretch")
         for _aviso in recien.get("avisos") or []:
             st.warning(f"⚠️ {_aviso}")
-        # LO QUE SE TERMINÓ con esta venta: anotarlo para reponer ahí mismo, no cuando venga
-        # otro cliente a pedirlo. Ver solicitar_reposicion().
+        # LO QUE SE TERMINÓ con esta venta ya quedó anotado para reponer, solo: ver
+        # anotar_lo_que_se_termino().
         _terminados = recien.get("terminados") or []
-        if _terminados and not recien.get("repuestos"):
-            _t1, _t2 = cols([3, 1])
-            _t1.info(f"📦 Se terminó el stock de: **{', '.join(n for _, n in _terminados)}**.")
-            if _t2.button("📋 Anotar para reponer", key="venta_reponer", width="stretch"):
-                for _pid_t, _ in _terminados:
-                    solicitar_reposicion(_pid_t)
-                recien["repuestos"] = True
-                avisar("success", f"📋 Anotado para reponer: {len(_terminados)} producto(s).")
-                st.rerun()
+        if _terminados:
+            st.info(f"📦 Se terminó el stock de: **{', '.join(n for _, n in _terminados)}**. Ya "
+                    "quedó anotado para reponer (📊 Estadísticas → 📌 Para pedir).")
         anotada = recien.get("anotada")
         if not anotada:
             st.markdown("**🚗 ¿Querés anotar la patente y los km?**")
@@ -350,57 +351,9 @@ if pagina == PAGINAS[9]:
                            "Nota": a["nota"] or "", "Contó": a["usuario"] or ""}
                           for a in _arqueos], width="stretch", hide_index=True)
 
-    # BUSCAR UNA VENTA Y DEVOLVER: ver «DEVOLVER ALGO DE UNA VENTA» en logica/ventas.py.
-    with st.expander("↩️ Buscar una venta y devolver"):
-        _q_dev = st.text_input("Número de venta, cliente, patente o teléfono:",
-                               key="venta_buscar_dev", placeholder="Ej: 12, Juan, AB123CD")
-        if _q_dev.strip():
-            _encontradas = buscar_ventas(_q_dev)
-            if not _encontradas:
-                st.caption("No encontré ninguna venta de los últimos 6 meses con eso.")
-            else:
-                _por_id = {v["id"]: v for v in _encontradas}
-                _vsel = st.selectbox(
-                    "Venta:", list(_por_id), key="venta_dev_sel",
-                    format_func=lambda i: (f"#{i} — {_por_id[i]['fecha'][8:10]}/"
-                                           f"{_por_id[i]['fecha'][5:7]} {_por_id[i]['fecha'][11:16]}"
-                                           f" — {_por_id[i]['cliente'] or _por_id[i]['patente'] or 'sin nombre'}"
-                                           f" — ${miles(_por_id[i]['total'] or 0, 0)}"))
-                _v = _por_id[_vsel]
-                st.dataframe([{"Qué": f"{it['marca']} {it['codigo']}",
-                               "Descripción": (it["descripcion"] or "")[:40],
-                               "Cantidad": it["cantidad"], "Devuelto": it["devuelto"] or "",
-                               "Precio": f"${miles(it['precio'], 0)}"} for it in _v["items"]],
-                             width="stretch", hide_index=True)
-                _devolvibles = {it["id"]: it for it in _v["items"]
-                                if it["cantidad"] - it["devuelto"] > 0}
-                if not _devolvibles:
-                    st.caption("De esta venta ya se devolvió todo.")
-                else:
-                    with st.form("form_devolver"):
-                        _d1, _d2 = cols([3, 1])
-                        _it_dev = _d1.selectbox(
-                            "Qué vuelve:", list(_devolvibles),
-                            format_func=lambda i: (f"{_devolvibles[i]['marca']} "
-                                                   f"{_devolvibles[i]['codigo']} (quedan "
-                                                   f"{_devolvibles[i]['cantidad'] - _devolvibles[i]['devuelto']})"))
-                        _cant_dev = _d2.number_input("Cuántos:", min_value=1, value=1, step=1)
-                        _mot_dev = st.selectbox("¿Por qué volvió?", list(MOTIVOS_DE_DEVOLUCION),
-                                                format_func=MOTIVOS_DE_DEVOLUCION.get)
-                        _det_dev = st.text_input("Qué pasó (opcional):",
-                                                 placeholder="Ej.: la rosca era más chica")
-                        st.caption("Vuelve al stock salvo que no se pueda volver a vender "
-                                   "(fallada, dañada o modificada), y la plata sale de la caja "
-                                   "de hoy. Si se vendió en lugar de otro código y no le iba, la "
-                                   "app lo aprende.")
-                        _devolver = st.form_submit_button("↩️ Devolver", type="primary")
-                    if _devolver:
-                        _ok_dev, _texto_dev = devolver_de_una_venta(_it_dev, _cant_dev, _mot_dev,
-                                                                   _det_dev)
-                        if _ok_dev:
-                            avisar("success", f"↩️ {_texto_dev}")
-                            st.rerun()
-                        st.warning(_texto_dev)
+    # DEVOLVER ALGO DE UNA VENTA: en su propia pantalla, «↩️ Devoluciones». Acá solo el botón.
+    st.button("↩️ Devolver algo de una venta →", key="venta_ir_a_devolver",
+              on_click=ir_a_donde_dice_el_aviso, args=("↩️ Devoluciones → 🧾 De un cliente",))
 
     # LO QUE SE VA A TERMINAR, con lo que se vende: para anotarlo antes de que falte. Ver
     # lo_que_se_va_a_terminar().
@@ -463,8 +416,8 @@ if pagina == PAGINAS[9]:
             _t2.dataframe(_tabla_mv(_mv["por_plata"]), width="stretch", hide_index=True)
 
     # CADA CUENTA: lo de un empleado (lo que vendió y lo que tiene del depósito) o de un taller
-    # (lo que se llevó, lo que devolvió y lo que debe). El administrador ve a todos; un
-    # empleado, lo suyo. Ver resumen_de_la_cuenta().
+    # (lo que se llevó y lo que debe: lo de un taller no vuelve). El administrador ve a todos;
+    # un empleado, lo suyo. Ver resumen_de_la_cuenta().
     with st.expander("👥 Cada cuenta"):
         _cuentas = cuentas_para_mirar()
         _ca1, _ca2 = cols([2, 1])
@@ -489,16 +442,14 @@ if pagina == PAGINAS[9]:
                                "Total": f"${miles(v['total'] or 0, 0)}"} for v in _cta["ventas"]],
                              width="stretch", hide_index=True)
         else:
-            _q = cols([1, 1, 1, 1])
+            _q = cols([1, 1, 1])
             _q[0].metric("Retiros", miles(len(_cta["entregas"])))
             _q[1].metric("Se llevó", f"${miles(_cta['total'], 0)}")
-            _q[2].metric("Devolvió", f"${miles(_cta['devuelto'], 0)}")
-            _q[3].metric("Debe hoy", f"${miles(_cta['saldo'], 0)}")
+            _q[2].metric("Debe hoy", f"${miles(_cta['saldo'], 0)}")
             if _cta["entregas"]:
                 st.dataframe([{"Cuándo": f"{e['resuelto_en'][8:10]}/{e['resuelto_en'][5:7]} "
                                          f"{e['resuelto_en'][11:16]}",
                                "Qué": f"{e['cantidad']}× {e['marca']} {e['codigo_raw']}",
-                               "Devolvió": e["devueltos"] or "",
                                "Importe": f"${miles(e['importe'] or 0, 0)}"}
                               for e in _cta["entregas"]], width="stretch", hide_index=True)
         if _cta["afuera"]:

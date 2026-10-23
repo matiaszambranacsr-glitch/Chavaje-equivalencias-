@@ -10,9 +10,11 @@ if pagina == PAGINAS[8]:
         "Acá llega lo que el mostrador pide con «📦 Pedir al depósito» en el buscador. Está "
         "ordenado por **ubicación**, para juntarlo todo en una vuelta. **✅ Entregado** lo da de "
         "baja: descuenta el stock y, si es para la cuenta de un taller o un mayorista, lo carga "
-        "en su cuenta; si es para Mostrador, queda **a nombre de quien lo pidió** hasta que lo "
-        "venda en 🧾 Ventas o vuelva acá con su contraseña («📦 Lo que está afuera»). **❌ No hay** "
-        "lo manda a 📊 Estadísticas → 📌 Para "
+        "en su cuenta (lo de un taller no vuelve); si es para Mostrador, queda **a nombre de "
+        "quien lo pidió** hasta que lo venda en 🧾 Ventas o vuelva: lo recibe el depósito "
+        "**escaneando la etiqueta nuestra** en ↩️ Devoluciones. Imprimí las etiquetas con "
+        "**🏷️ Etiquetas** y pegá una en cada pieza que sale. Si se termina el stock, queda "
+        "anotado para reponer solo. **❌ No hay** lo manda a 📊 Estadísticas → 📌 Para "
         "pedir. Se mide cuánto tarda cada uno, desde que se pide hasta que se da de baja: 🟡 "
         f"desde {MINUTOS_PARA_AVISAR[0]} minutos de espera, 🔴 desde {MINUTOS_PARA_AVISAR[1]}. "
         "Acá no se ven precios."
@@ -91,6 +93,19 @@ if pagina == PAGINAS[8]:
                        if _esperas else ""))
         if not _pendientes:
             st.caption("Nada pendiente. Lo que pidan desde el buscador aparece acá solo.")
+        # LAS ETIQUETAS de lo que sale para Mostrador, una por unidad: sin la etiqueta nuestra
+        # no puede volver al stock. Lo de un taller no vuelve: no lleva. Ver «EL CÓDIGO DE
+        # BARRAS NUESTRO» en logica/deposito.py.
+        _para_etiquetar = [(_p["producto_id"], _p["cantidad"]) for _p in _pendientes
+                           if not _p["mecanico_id"]]
+        if _para_etiquetar:
+            st.download_button(
+                f"🏷️ Etiquetas de lo que sale para Mostrador "
+                f"({sum(n for _, n in _para_etiquetar)})",
+                data=etiquetas_para_descargar(_para_etiquetar), file_name="etiquetas.pdf",
+                mime="application/pdf", key="deposito_etiquetas",
+                help="Una por pieza, para pegarle antes de entregarla: si no se vende, vuelve "
+                     "al stock escaneando esa etiqueta en ↩️ Devoluciones.")
         if _vista_cola == "📍 Por ubicación":
             for _p in _pendientes:
                 _renglon_del_pedido(_p)
@@ -147,53 +162,19 @@ if pagina == PAGINAS[8]:
                              "A tiempo": f"{_tiempos['periodo']['a_tiempo']}%"}],
                          hide_index=True, width="stretch")
 
-    # LO QUE ESTÁ AFUERA: lo entregado que no se vendió ni volvió, a nombre de quien lo pidió (o
-    # del taller), y la vuelta al depósito con el código de quien lo tiene. Ver «LO QUE QUEDA
-    # AFUERA» en logica/deposito.py. Sin precios, como el resto de esta pantalla.
+    # LO QUE ESTÁ AFUERA, en una línea: el detalle y la vuelta al stock están en «↩️
+    # Devoluciones», para que con muchos pedidos esta pantalla no se haga eterna.
     _quienes = quien_tiene_que_devolver()
-    if seccion_plegable(f"📦 Lo que está afuera ({sum(g['unidades'] for g in _quienes)})",
-                        key="deposito_afuera"):
-        st.caption("Lo que se entregó y no se vendió ni volvió, a nombre de quien lo pidió. Lo "
-                   "de Mostrador sale de acá cuando se vende en 🧾 Ventas, se factura o vuelve; lo "
-                   f"de un taller se puede devolver hasta {DIAS_PARA_DEVOLVER_UN_TALLER} días "
-                   f"después. 🔴: hace más de {HORAS_PARA_AVISAR_LO_QUE_QUEDO_AFUERA} horas.")
-        if not _quienes:
-            st.caption("Nada afuera.")
-        else:
-            st.dataframe([{"Quién": ("🔧 " if g["mecanico_id"] else "👤 ") + g["quien"],
-                           "Cosas": g["cosas"], "Unidades": g["unidades"],
-                           "La más vieja": ("🔴 " if g["horas"] >= HORAS_PARA_AVISAR_LO_QUE_QUEDO_AFUERA
-                                            else "") + "hace " + cuanto_hace(g["horas"])}
-                          for g in _quienes], hide_index=True, width="stretch")
-            st.markdown("**↩️ Vuelve al depósito**")
-            _por_quien = {f"{'🔧' if g['mecanico_id'] else '👤'} {g['quien']}": g for g in _quienes}
-            _quien_vuelve = st.selectbox("De quién:", list(_por_quien), key="deposito_vuelve_quien")
-            _g = _por_quien[_quien_vuelve]
-            _suyo = {r["id"]: r for r in (lo_que_tiene(mecanico_id=_g["mecanico_id"])
-                                          if _g["mecanico_id"]
-                                          else lo_que_tiene(persona=_g["persona"]))}
-            with st.form("form_vuelve_al_deposito"):
-                _v1, _v2 = st.columns([3, 1])
-                _que_vuelve = _v1.selectbox(
-                    "Qué vuelve:", list(_suyo),
-                    format_func=lambda i: (f"{_suyo[i]['marca']} {_suyo[i]['codigo_raw']} — "
-                                           f"tiene {_suyo[i]['queda']} · entregado "
-                                           f"{_hora_corta(_suyo[i]['resuelto_en'])}"))
-                _cuantos_vuelven = _v2.number_input("Cuántos:", min_value=1, value=1, step=1)
-                _codigo_vuelve = st.text_input(
-                    "Código de quien lo tiene:", type="password",
-                    help=("El código de retiro del taller (lo genera en su portal) o su clave."
-                          if _g["mecanico_id"] else
-                          f"La contraseña de {_g['quien']}: así nadie descarga lo que tiene otro.")
-                    + " La de un administrador también sirve, y queda anotado.")
-                _vuelve = st.form_submit_button("↩️ Volvió al depósito", type="primary")
-            if _vuelve:
-                _ok_v, _texto_v = devolver_al_deposito(_que_vuelve, _cuantos_vuelven,
-                                                       _codigo_vuelve)
-                if _ok_v:
-                    st.session_state["_aviso_del_deposito"] = (True, _texto_v)
-                    st.rerun()
-                st.warning(_texto_v)
+    if _quienes:
+        _af1, _af2 = st.columns([3, 1])
+        _af1.caption(f"📦 Afuera sin vender: {sum(g['unidades'] for g in _quienes)} unidad(es) "
+                     f"a nombre de {len(_quienes)} persona(s)"
+                     + (" · 🔴 hay cosas de hace más de "
+                        f"{HORAS_PARA_AVISAR_LO_QUE_QUEDO_AFUERA} h"
+                        if max(g["horas"] for g in _quienes) >= HORAS_PARA_AVISAR_LO_QUE_QUEDO_AFUERA
+                        else "") + ".")
+        _af2.button("↩️ Recibir →", key="deposito_ir_a_devoluciones", width="stretch",
+                    on_click=ir_a_donde_dice_el_aviso, args=("↩️ Devoluciones → 📦 Al depósito",))
 
     # PARA FACTURAR: con precios, y con el descuento de cada cuenta. Plegado: la pantalla del
     # depósito puede estar a la vista de un cliente, y el descuento no lo tiene que ver.

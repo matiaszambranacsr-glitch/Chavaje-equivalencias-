@@ -2424,7 +2424,11 @@ def _constante_del_modulo(nombre):
 
 
 _PAGINAS_M = _constante_del_modulo("PAGINAS") or []
-_SOLAPAS_M = sum((_constante_del_modulo(_x) or [] for _x in ("SUB_STATS", "SUB_ADMIN", "SUB_MEC")), [])
+# Todas las listas de solapas: SUB_STATS, SUB_ADMIN, SUB_MEC... y la que se sume (con la lista
+# escrita a mano, «↩️ Devoluciones → 🧾 De un cliente» quedaba como una miga que no lleva).
+_SOLAPAS_M = sum((literal(_n.value) or [] for _n in ARBOL.body
+                  if isinstance(_n, ast.Assign) and isinstance(_n.value, ast.List)
+                  and any(str(getattr(_t, "id", "")).startswith("SUB_") for _t in _n.targets)), [])
 _GRUPOS_M = _constante_del_modulo("GRUPOS_MANTENIMIENTO") or []
 _HERRAMIENTAS_M = [_h[0] for _h in (_constante_del_modulo("HERRAMIENTAS_MANTENIMIENTO") or [])]
 _DESTINOS_M = [_sin_emoji_miga(_x) for _x in _PAGINAS_M + _SOLAPAS_M + _GRUPOS_M + _HERRAMIENTAS_M]
