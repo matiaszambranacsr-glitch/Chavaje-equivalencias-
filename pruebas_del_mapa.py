@@ -346,6 +346,100 @@ def probar(L):
             (pdf[:4], len(barras), barras[:2], barras[-1], vacio), (b"%PDF", 20, ["*B-1-1*", "*B-1-2*"],
                                                                    "*B-5-4*", b""))
 
+    # 18b. LOS CUATRO LADOS: cada lado de la B con su código. «N1-3-2» es el lado de arriba,
+    # módulo 3, estante 2, y se llega por el pasillo de arriba, no por el de abajo.
+    b_id, lados = est["B"]["id"], ns["guardar_lados"]
+    esperar("lados que no", [lados(b_id, {"arriba": "N 1"})[0], lados(b_id, {"arriba": "C"})[0],
+                             lados(b_id, {"arriba": "B"})[0],
+                             lados(b_id, {"arriba": "Q1", "abajo": "q1"})[0],
+                             lados(b_id, {"costado": "Q"})[0], lados(999999, {"arriba": "Q"})[0],
+                             uno("SELECT COUNT(*) FROM lados_de_las_estanterias")],
+            [False, False, False, False, False, False, 0])
+    esperar("el código de la estantería de otro piso, tampoco",
+            lados(b_id, {"abajo": "b2"})[1], "⬇️ Abajo: ya hay otra estantería (o lado) con el "
+                                             "código B2.")
+    ok_l, _ = lados(b_id, {"arriba": "N1", "abajo": "s1", "izquierda": " ", "derecha": "E1"})
+    d1, d2, d4 = donde("n1-3-2"), donde("S1-3"), donde("E1-1")
+    esperar("el lado de arriba de la B", (ok_l, d1["texto"], d1["lado"], d1["celdas"],
+                                          d1["frente"], d1["modulos"], d1["se_lee"]),
+            (True, "N1-3-2", "arriba", ((10, 2),), ((10, 1),), 5,
+             "Central · Planta baja · estantería B, lado N1 (el de arriba en el plano), "
+             "módulo 3, estante 2 (desde abajo)"))
+    esperar("la cabecera de la derecha: un módulo, enfrente su pasillo",
+            (d4["celdas"], d4["frente"], d4["modulos"], donde("E1-2"), donde("E1-1-5")),
+            (((12, 2),), ((13, 2),), 1, None, None))
+    # Desde la entrada (7, 8): al pasillo de abajo de la B son 8 pasos, al de arriba 10.
+    esperar("se llega por el pasillo de cada lado",
+            (ns["planear_el_recorrido"](d1["plano"], [d2["frente"]])[2],
+             ns["planear_el_recorrido"](d1["plano"], [d1["frente"]])[2],
+             ns["planear_el_recorrido"](d1["plano"], [d1["frente"]])[1][-1]),
+            (8, 10, (10, 1)))
+    esperar("la cola va al pasillo de arriba aunque el de abajo quede más cerca",
+            ns["la_cola_por_piso"]([{"ubicacion": "N1-5-1", "pedido_en": ""}])[0]["camino"][-1],
+            (12, 1))
+    esperar("los códigos de la B", ns["codigos_de"](ns["estanterias_del_piso"](piso1)["B"]),
+            ["B", "N1", "S1", "E1"])
+    esperar("el código de un lado no lo puede usar otra estantería",
+            ns["guardar_estanteria"](est["C"]["id"], "E1", 4)[0], False)
+    # Lo ubicado en un lado: cambia con el código; si se intercambian, no se mezcla; si se le
+    # saca el código, pasa a la estantería, al módulo donde está.
+    ubicar(ids["W714"], "n1 3 2")
+    ubicar(ids["W713"], "S1-5-1")
+    ubicar(ids["W715"], "E1-1-1")
+    lugar = lambda codigo: uno("SELECT ubicacion FROM productos WHERE id = ?", ids[codigo])
+    antes = (lugar("W714"), [f["codigo_raw"] for f in ns["productos_en"]("N1")])
+    lados(b_id, {"arriba": "Z1", "abajo": "S1", "derecha": "E1"})
+    renombrado = lugar("W714")
+    lados(b_id, {"arriba": "S1", "abajo": "Z1", "derecha": "E1"})
+    intercambiado = (lugar("W714"), lugar("W713"))
+    ok_s, texto_s = lados(b_id, {"abajo": "Z1"})
+    esperar("lo ubicado sigue a su lado",
+            (antes, renombrado, intercambiado, ok_s, lugar("W714"), lugar("W715"), lugar("W713"),
+             "2 producto(s)" in texto_s, lados(b_id, {"abajo": "z1"})[1]),
+            (("N1-3-2", ["W714"]), "Z1-3-2", ("S1-3-2", "Z1-5-1"), True, "B-3-2", "B-5-1",
+             "Z1-5-1", True, "La B ya tenía esos lados."))
+    # Sacar la B del plano se lleva lo de sus lados también; el dibujo y las etiquetas.
+    sin_b = ns["sacar_estanteria"](d1["plano"], "B")
+    esperar("sacar la B: también lo de su lado", sorted(ns["lo_que_se_pierde_con"](piso1, sin_b)),
+            [("B", 2, "se saca del plano"), ("Z1", 1, "se saca del plano")])
+    svg_l = ns["svg_del_piso"](d1["plano"], lados={"B": {"abajo": "Z1"}})
+    barras = []
+    FPDF.code39 = lambda self, texto, x, y, w=1.5, h=5: (barras.append(texto),
+                                                         original(self, texto, x, y, w, h))
+    try:
+        ns["pdf_de_etiquetas_de_ubicaciones"]([b_id])
+    finally:
+        FPDF.code39 = original
+    esperar("el dibujo y las etiquetas, con el lado", (">Z1</text>" in svg_l, len(barras),
+                                                      barras[0], barras[-1]),
+            (True, 20, "*Z1-1-1*", "*Z1-5-4*"))
+    cola_z = ns["la_cola_por_piso"]([{"ubicacion": "Z1-5-1", "pedido_en": ""}])
+    esperar("la cola llega por el pasillo de abajo", cola_z[0]["camino"][-1], (12, 3))
+    ns["guardar_plano"](piso1, sin_b, aunque_se_pierdan=True)
+    esperar("sacada la B, sus lados también",
+            (uno("SELECT COUNT(*) FROM lados_de_las_estanterias"), donde("Z1-5-1")), (0, None))
+    ns["guardar_plano"](piso1, d1["plano"])
+    # Una línea de dos de fondo contra la pared: el lado de arriba es la fila de arriba, el de
+    # la izquierda tiene un módulo por casillero de fondo y, contra la pared, no tiene pasillo
+    # enfrente. Si la línea queda de uno de fondo, lo del segundo módulo de ese lado se pierde.
+    piso3, _ = ns["crear_piso"](dep1, "Entrepiso")
+    ns["guardar_plano"](piso3, "#####\n#GG.#\n#GG.#\n#.@.#\n#####")
+    g_id = ns["estanterias_del_piso"](piso3)["G"]["id"]
+    lados(g_id, {"izquierda": "W9", "arriba": "W8", "derecha": "W7"})
+    d9, d8, d7 = donde("W9-2"), donde("W8-1"), donde("W7-2")
+    ubicar(ids["W713"], "W9-2-1")
+    c.execute("INSERT INTO lados_de_las_estanterias (estanteria_id, lado, codigo) "
+              "VALUES (?, 'centro', 'Q8')", (g_id,))
+    esperar("dos de fondo contra la pared",
+            (d9["celdas"], d9["frente"], d9["modulos"], d8["celdas"], d8["frente"], d7["frente"],
+             ns["lo_que_se_pierde_con"](piso3, "#####\n#GG.#\n#...#\n#.@.#\n#####"),
+             donde("Q8")),
+            (((1, 2),), (), 2, ((1, 1),), (), ((3, 2),),
+             [("W9", 1, "queda de 1 módulos y hay cosas más allá")], None))
+    ns["borrar_piso"](piso3)
+    esperar("borrado el piso, sus lados también",
+            uno("SELECT COUNT(*) FROM lados_de_las_estanterias WHERE estanteria_id = ?", g_id), 0)
+
     # 19. Los del depósito: entran directo al depósito; el administrador nunca.
     ns["crear_usuario"]("dep", "clave-dep-1", "operador", solo_deposito=True)
     ns["crear_usuario"]("jefa", "clave-jefa-1", "admin", solo_deposito=True)
@@ -393,12 +487,15 @@ def probar(L):
     finally:
         g["_nivel_de_quien_esta_adentro"], g["hay_claves_configuradas"] = originales
 
-    # 21. Borrar el depósito se lleva sus pisos y estanterías; lo ubicado conserva su texto.
+    # 21. Borrar el depósito se lleva sus pisos, estanterías y lados; lo ubicado conserva su
+    # texto.
+    ns["guardar_lados"](ns["estanterias_del_piso"](piso1)["B"]["id"], {"abajo": "S9"})
     ns["borrar_deposito"](dep1)
     esperar("borrado el depósito", (uno("SELECT COUNT(*) FROM pisos"), uno("SELECT COUNT(*) FROM estanterias"),
+                                    uno("SELECT COUNT(*) FROM lados_de_las_estanterias"),
                                     uno("SELECT ubicacion FROM productos WHERE id = ?", ids["W712"]),
                                     ns["lugar_en_el_mapa"]("X-3-2"), ns["hay_mapa"]()),
-            (0, 0, "X-3-2", None, False))
+            (0, 0, 0, "X-3-2", None, False))
     return fallas
 
 

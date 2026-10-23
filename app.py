@@ -92,6 +92,7 @@ específico, y las pantallas quedan todas al final:
     logica/interfaz.py
         · PIEZAS DE INTERFAZ QUE SE REPITEN
         · NAVEGACIÓN: DÓNDE ESTÁ CADA COSA
+        · EL CLICK DERECHO Y LAS TECLAS DE LA CAJA (en la computadora)
         · PDF: cotización y ficha del vehículo
         · LEER EL ARCHIVO: encabezado, hojas y codificación
     logica/vehiculos.py
@@ -123,9 +124,11 @@ específico, y las pantallas quedan todas al final:
     logica/ventas.py
         · VENTAS DEL MOSTRADOR
         · DEVOLVER ALGO DE UNA VENTA
+        · LA CAJA APARTE
     logica/mapa.py
         · EL MAPA DEL DEPÓSITO
         · DEPÓSITOS, PISOS Y ESTANTERÍAS
+        · LOS CUATRO LADOS DE CADA ESTANTERÍA
         · ARMAR EL PLANO SIN DIBUJAR
         · DÓNDE ESTÁ CADA COSA
         · LA COLA POR PISO
@@ -165,6 +168,8 @@ específico, y las pantallas quedan todas al final:
         · VENTAS: cobrar, descontar el stock y anotarlo en la ficha del auto
     pantallas/devoluciones.py
         · DEVOLUCIONES: lo que vuelve al depósito, lo que devuelve un cliente y las etiquetas
+    pantallas/caja.py
+        · CAJA: lo que mandan los vendedores, para cobrarlo o ponerlo a cuenta, y el cierre
 
 La lógica que no depende de Streamlit está ADEMÁS en el paquete nucleo/, que se puede usar
 desde otro sistema. Se genera desde logica/ con `python3 nucleo/generar.py`, así que si
@@ -273,6 +278,8 @@ if es_celular():
     .stRadio [role="radiogroup"] { gap: 4px; }
     .stRadio [role="radiogroup"] label { padding: 4px 10px 4px 6px !important; font-size: 0.82rem; }
     .stRadio [role="radiogroup"] label p { font-size: 0.82rem !important; }
+    /* En el celular los botones de cada producto se ven: lo del click derecho no va. */
+    [data-testid="stLayoutWrapper"]:has(> [class*="st-key-pista_del_menu_"]) { display: none !important; }
     </style>
     """, unsafe_allow_html=True)
 else:
@@ -280,8 +287,20 @@ else:
     <style>
     .block-container { padding: 1rem 3rem 4rem 3rem !important; max-width: 1500px !important; }
     [data-testid="stDataFrame"] { font-size: 0.88rem; }
+    /* El click derecho (ver logica/interfaz.py): con el script andando, los botones de cada
+       producto no se ven —ni su columna— y salen en el menú. */
+    body.con-menu-clic-derecho [class*="st-key-acciones_"],
+    body.con-menu-clic-derecho [data-testid="stColumn"]:has(> [data-testid="stVerticalBlock"] > [data-testid="stLayoutWrapper"] > [class*="st-key-acciones_"]),
+    body.con-menu-clic-derecho [data-testid="stLayoutWrapper"]:has(> [class*="st-key-pista_sin_menu_"]),
+    body:not(.con-menu-clic-derecho) [data-testid="stLayoutWrapper"]:has(> [class*="st-key-pista_del_menu_"]) {
+      display: none !important;
+    }
+    body.con-menu-clic-derecho [class*="st-key-conmenu_"] { cursor: context-menu; border-radius: 8px; }
+    body.con-menu-clic-derecho [class*="st-key-conmenu_"]:hover { background: rgba(232, 163, 61, 0.07); }
     </style>
     """, unsafe_allow_html=True)
+# El script del click derecho y de F10/F11 en 💵 Caja: ver logica/interfaz.py.
+poner_las_ayudas_del_navegador()
 
 
 # ============================================================
@@ -419,9 +438,15 @@ try:
 except sqlite3.Error as _err:
     anotar_error("es_del_deposito", _err)
     _es_del_deposito = False
-_paginas_a_la_vista = PAGINAS_DEL_DEPOSITO if _es_del_deposito else PAGINAS
+# En el orden de lo que más se usa (ver ORDEN_DE_LAS_PAGINAS). Quien entra sin contraseña
+# arranca en el Buscador: lo primero de la barra le pediría una.
+_paginas_a_la_vista = PAGINAS_DEL_DEPOSITO if _es_del_deposito else ORDEN_DE_LAS_PAGINAS
+if st.session_state.pop("_al_principio_de_la_barra", False):        # recién entró: ver
+    st.session_state["pagina_actual"] = _paginas_a_la_vista[0]       # mostrar_login_inicial()
 if st.session_state.get("pagina_actual") not in _paginas_a_la_vista:
-    st.session_state["pagina_actual"] = _paginas_a_la_vista[0]
+    st.session_state["pagina_actual"] = (
+        PAGINAS[0] if hay_claves_configuradas() and not es_operador_o_admin()
+        else _paginas_a_la_vista[0])
 recordar_lo_elegido_al_cambiar_de_pantalla()
 
 # El menú va ANTES que los avisos del día. Iba después, y con cuatro avisos abiertos quedaba
@@ -657,7 +682,7 @@ if puede_autorizar_limites() and hay_claves_configuradas():
 # LO QUE TENÉS DEL DEPÓSITO HACE MÁS DE UN DÍA, a quien lo tiene, en cualquier pantalla: o se
 # vende o vuelve. En 🧾 Ventas ya lo dice arriba, con el botón para sumarlo a la venta. Ver «LO
 # QUE QUEDA AFUERA» en logica/deposito.py.
-if es_operador_o_admin() and pagina not in (PAGINAS[9], PAGINAS[10]):
+if es_operador_o_admin() and pagina not in (PAGINAS[9], PAGINAS[10], PAGINAS[11]):
     try:
         _viejo_afuera = [r for r in lo_que_tiene(persona=obtener_usuario_actual())
                          if r["horas"] >= HORAS_PARA_AVISAR_LO_QUE_QUEDO_AFUERA]
@@ -688,7 +713,7 @@ _corte("avisos")
 NIVEL_DE_CADA_SECCION = {PAGINAS[1]: "empleado", PAGINAS[3]: "empleado",
                          PAGINAS[4]: "empleado", PAGINAS[6]: "empleado",
                          PAGINAS[8]: "empleado", PAGINAS[9]: "empleado",
-                         PAGINAS[10]: "empleado"}
+                         PAGINAS[10]: "empleado", PAGINAS[11]: "empleado"}
 if (NIVEL_DE_CADA_SECCION.get(pagina)
         and not seccion_permitida(NIVEL_DE_CADA_SECCION[pagina], pagina.split(" ", 1)[-1])):
     _actividad_del_mostrador()["termino"] = time.monotonic()      # ver ceder_al_mostrador()

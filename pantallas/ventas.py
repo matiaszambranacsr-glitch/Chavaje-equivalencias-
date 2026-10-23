@@ -13,8 +13,9 @@ if pagina == PAGINAS[9]:
         "alcanzaba, avisa para contarlo) y anota lo vendido, que es con lo que la app aprende "
         "qué se vende en lugar de qué. Al terminar te pregunta **la patente y los km**: con eso "
         "cada pieza queda en la ficha del auto, y el cliente ve en su link cuánto le falta a "
-        "cada cosa. Para cargarlo a la cuenta de un taller, pedilo al depósito con la cuenta "
-        "elegida."
+        "cada cosa. Con la **caja aparte**, la venta va a 💵 Caja con un cartel —quién vendió, "
+        "a qué cuenta, el total y la hora— y la cobra el cajero; la cuenta es la de **«🧾 "
+        "Atendiendo a»**."
     )
     venta_items = st.session_state.setdefault("venta_items", [])
     recien = st.session_state.get("venta_recien_cerrada")
@@ -38,8 +39,14 @@ if pagina == PAGINAS[9]:
             st.rerun()
 
     if recien:
-        # LA VENTA RECIÉN TERMINADA: lo que pidió el dueño, la patente y los km.
-        st.success(f"✅ Venta #{recien['id']} terminada: **${miles(recien['total'], 0)}**.")
+        # LA VENTA RECIÉN TERMINADA: lo que pidió el dueño, la patente y los km. Con la caja
+        # aparte, va a la caja: ahí la cobran (ver «LA CAJA APARTE»).
+        if recien.get("a_la_caja"):
+            st.success(f"📤 Venta #{recien['id']} mandada a la caja: **${miles(recien['total'], 0)}**"
+                       + (f" para {recien['cuenta']}" if recien.get("cuenta") else "")
+                       + ". La cobra la caja.")
+        else:
+            st.success(f"✅ Venta #{recien['id']} terminada: **${miles(recien['total'], 0)}**.")
         # EL COMPROBANTE para el cliente: por WhatsApp (a su número, si ya se anotó en la
         # ficha) o en PDF para imprimir. No es una factura y lo dice.
         _tel_comp = re.sub(r"\D", "", (buscar_vehiculo_por_id(recien["anotada"]["vehiculo_id"])
@@ -115,7 +122,11 @@ if pagina == PAGINAS[9]:
                 st.session_state.pop("venta_recien_cerrada", None)
                 st.rerun()
     else:
-        # ARMAR LA VENTA
+        # ARMAR LA VENTA. A quién: Mostrador o la cuenta de un taller, la misma que en el
+        # buscador (ver mostrar_cuenta_elegida()); va en el cartel de la caja.
+        mostrar_cuenta_elegida("venta")
+        # «📍 ¿Dónde está?» en el menú de cada producto, si el depósito tiene su mapa.
+        _con_mapa = hay_mapa()
         # Se limpia al buscar: el lector de códigos de barras escribe encima de lo que haya.
         with st.form("form_buscar_para_vender", clear_on_submit=True):
             _q1, _q2 = cols([4, 1])
@@ -148,32 +159,48 @@ if pagina == PAGINAS[9]:
             st.session_state.pop("venta_a_confirmar", None)
         _resultados_vta, _pedido_vta = st.session_state.get("venta_resultados", ([], ""))
         if _resultados_vta:
-            st.caption(f"{len(_resultados_vta)} resultado(s) para «{_pedido_vta}»: «➕» lo suma "
-                       "a la venta.")
+            st.caption(f"{len(_resultados_vta)} resultado(s) para «{_pedido_vta}».")
+            # Cada renglón con su menú: en la computadora los botones salen con el click
+            # derecho (ver «EL CLICK DERECHO» en logica/interfaz.py); en el celular, se ven.
+            pista_del_click_derecho(
+                "vta", "Click derecho sobre un producto: sumarlo a la venta, ver dónde está o "
+                       "anotarlo para reponer.", "«➕» lo suma a la venta.")
             for _f in _resultados_vta:
-                _r1, _r2 = cols([5, 1], apilar_en_celular=False)
-                _stock_f = _f.get("Stock")
-                _r1.write(f"**{_f['Marca']} {_f['Codigo']}** — {(_f.get('Descripcion') or '')[:60]}"
-                          f" · ${miles(_f.get('Precio') or 0, 0)}"
-                          f" · stock {_stock_f if _stock_f is not None else 's/d'}")
-                _ver_f = _f.get("_veredicto")
-                if _ver_f and _ver_f != "el que buscaste":
-                    _r1.caption(_ver_f)
                 # LO 🔴, COMO EN «SE LLEVÓ»: la pieza de seguridad no se vende en lugar de lo
                 # pedido, y lo demás pide confirmarlo. Ver bloqueo_de_venta().
+                _ver_f = _f.get("_veredicto")
                 _bloq_f = bloqueo_de_venta(_ver_f, _f.get("Descripcion"))
                 _args_f = (_f, _pedido_vta, _ver_f, _f.get("_evidencia"))
-                if _bloq_f == "bloqueada":
-                    _r2.button("🛑", key=f"sumar_venta_{_f['ID']}", disabled=True,
-                               help=TEXTO_DE_VENTA_BLOQUEADA)
-                elif _r2.button("➕", key=f"sumar_venta_{_f['ID']}",
-                                help=("La app dice que no es la misma pieza: pide confirmarlo."
-                                      if _bloq_f else "Sumarlo a la venta.")):
-                    if _bloq_f == "confirmar":
-                        st.session_state["venta_a_confirmar"] = _f["ID"]
-                    else:
-                        sumar_a_la_venta(*_args_f)
-                    st.rerun()
+                with renglon_con_menu(f"vta_{_f['ID']}"):
+                    _r1, _r2 = cols([5, 1], apilar_en_celular=False)
+                    _stock_f = _f.get("Stock")
+                    _r1.write(f"**{_f['Marca']} {_f['Codigo']}** — {(_f.get('Descripcion') or '')[:60]}"
+                              f" · ${miles(_f.get('Precio') or 0, 0)}"
+                              f" · stock {_stock_f if _stock_f is not None else 's/d'}")
+                    if _ver_f and _ver_f != "el que buscaste":
+                        _r1.caption(_ver_f)
+                    with acciones_del_renglon(_r2, f"vta_{_f['ID']}"):
+                        if _bloq_f == "bloqueada":
+                            st.button(rotulo_de_accion("🛑", "🛑 No se vende en lugar de lo pedido"),
+                                      key=f"sumar_venta_{_f['ID']}", disabled=True,
+                                      help=TEXTO_DE_VENTA_BLOQUEADA)
+                        elif st.button(rotulo_de_accion("➕", "➕ Sumar a la venta"),
+                                       key=f"sumar_venta_{_f['ID']}",
+                                       help=("La app dice que no es la misma pieza: pide confirmarlo."
+                                             if _bloq_f else "Sumarlo a la venta.")):
+                            if _bloq_f == "confirmar":
+                                st.session_state["venta_a_confirmar"] = _f["ID"]
+                            else:
+                                sumar_a_la_venta(*_args_f)
+                            st.rerun()
+                        # Lo que en el celular no entra en el renglón, solo en el menú.
+                        if not es_celular():
+                            if _con_mapa:
+                                st.button("📍 ¿Dónde está?", key=f"donde_venta_{_f['ID']}",
+                                          on_click=ver_donde_esta, args=(_f["ID"],))
+                            st.button("📌 Anotar para reponer", key=f"repo_venta_{_f['ID']}",
+                                      disabled=solo_mirar(), on_click=pedir_reposicion_y_avisar,
+                                      args=(_f["ID"], f"{_f['Marca']} - {_f['Codigo']}", "venta"))
                 if st.session_state.get("venta_a_confirmar") == _f["ID"]:
                     st.warning(f"⚠️ {_f['Marca']} {_f['Codigo']}: {_ver_f}. ¿Se la lleva igual?")
                     _cf1, _cf2 = cols([1, 1], apilar_en_celular=False)
@@ -184,6 +211,7 @@ if pagina == PAGINAS[9]:
                     if _cf2.button("No", key=f"no_confirmar_venta_{_f['ID']}"):
                         st.session_state.pop("venta_a_confirmar", None)
                         st.rerun()
+            mostrar_lo_anotado("venta")
         elif _buscar_vta:
             st.info("No encontré ese código ni esa descripción.")
 
@@ -193,31 +221,43 @@ if pagina == PAGINAS[9]:
                     "presupuesto del 🔍 Buscador con «🧾 Pasar a una venta».")
         else:
             st.markdown(f"**🧾 La venta ({len(venta_items)} ítem(s))**")
+            pista_del_click_derecho("carrito_vta", "Click derecho sobre un ítem: uno más, uno "
+                                                   "menos, dónde está o quitarlo.")
             for _it in list(venta_items):
                 _k = _it["producto_id"]
-                _c1, _c2, _c3, _c4 = cols([4, 1.2, 1.6, 0.7], apilar_en_celular=False)
-                _c1.write(f"**{_it['marca']} {_it['codigo']}** — {(_it['descripcion'] or '')[:50]}")
-                # Lo que cambió por atrás (escanear o «➕» otra vez): ver valor_del_campo().
-                _it["cantidad"] = int(_c2.number_input(
-                    "Cant.", min_value=1, max_value=CANTIDAD_MAXIMA_POR_PEDIDO, step=1,
-                    value=valor_del_campo(f"venta_cant_{_k}", int(_it["cantidad"])),
-                    key=f"venta_cant_{_k}", label_visibility="collapsed"))
-                _it["precio"] = float(_c3.number_input(
-                    "Precio", min_value=0.0, value=float(_it["precio"]), step=100.0,
-                    key=f"venta_precio_{_k}", label_visibility="collapsed"))
-                if _tengo_por_producto.get(_k):
-                    _c1.caption(f"📦 Tenés {_tengo_por_producto[_k]} del depósito: no se "
-                                "descuentan del stock otra vez.")
-                # Por debajo del costo: un precio mal tipeado, o un descuento que hace perder
-                # plata. El costo lo ve el administrador; los demás, el aviso.
-                if _it.get("costo") and _it["precio"] < float(_it["costo"]):
-                    _c1.caption("⚠️ Por debajo del costo" + (
-                        f" (${miles(_it['costo'], 0)})" if es_admin() else "") + ".")
-                if _c4.button("🗑️", key=f"venta_quitar_{_k}"):
-                    venta_items.remove(_it)
-                    st.session_state.pop(f"venta_cant_{_k}", None)
-                    st.session_state.pop(f"venta_precio_{_k}", None)
-                    st.rerun()
+                with renglon_con_menu(f"carrito_vta_{_k}"):
+                    _c1, _c2, _c3, _c4 = cols([4, 1.2, 1.6, 0.7], apilar_en_celular=False)
+                    _c1.write(f"**{_it['marca']} {_it['codigo']}** — {(_it['descripcion'] or '')[:50]}")
+                    # Lo que cambió por atrás (escanear o «➕» otra vez): ver valor_del_campo().
+                    _it["cantidad"] = int(_c2.number_input(
+                        "Cant.", min_value=1, max_value=CANTIDAD_MAXIMA_POR_PEDIDO, step=1,
+                        value=valor_del_campo(f"venta_cant_{_k}", int(_it["cantidad"])),
+                        key=f"venta_cant_{_k}", label_visibility="collapsed"))
+                    _it["precio"] = float(_c3.number_input(
+                        "Precio", min_value=0.0, value=float(_it["precio"]), step=100.0,
+                        key=f"venta_precio_{_k}", label_visibility="collapsed"))
+                    if _tengo_por_producto.get(_k):
+                        _c1.caption(f"📦 Tenés {_tengo_por_producto[_k]} del depósito: no se "
+                                    "descuentan del stock otra vez.")
+                    # Por debajo del costo: un precio mal tipeado, o un descuento que hace perder
+                    # plata. El costo lo ve el administrador; los demás, el aviso.
+                    if _it.get("costo") and _it["precio"] < float(_it["costo"]):
+                        _c1.caption("⚠️ Por debajo del costo" + (
+                            f" (${miles(_it['costo'], 0)})" if es_admin() else "") + ".")
+                    with acciones_del_renglon(_c4, f"carrito_vta_{_k}"):
+                        if not es_celular():
+                            st.button("➕ Uno más", key=f"venta_mas_{_k}",
+                                      disabled=_it["cantidad"] >= CANTIDAD_MAXIMA_POR_PEDIDO,
+                                      on_click=cambiar_cantidad_en_la_venta, args=(_k, 1))
+                            st.button("➖ Uno menos", key=f"venta_menos_{_k}",
+                                      disabled=_it["cantidad"] <= 1,
+                                      on_click=cambiar_cantidad_en_la_venta, args=(_k, -1))
+                            if _con_mapa:
+                                st.button("📍 ¿Dónde está?", key=f"venta_donde_{_k}",
+                                          on_click=ver_donde_esta, args=(_k,))
+                        st.button(rotulo_de_accion("🗑️", "🗑️ Quitar de la venta"),
+                                  key=f"venta_quitar_{_k}", on_click=quitar_de_la_venta,
+                                  args=(_k,))
             _total_vta = sum(x["cantidad"] * x["precio"] for x in venta_items)
             st.markdown(f"### Total: ${miles(_total_vta, 0)}")
             # LA VENTA INCOMPLETA, como avisa «Se llevó»: antes de que se vaya el cliente.
@@ -226,20 +266,46 @@ if pagina == PAGINAS[9]:
                         "Preguntale al cliente si ya lo tiene.")
             _p1, _p2 = cols([1, 1])
             _cliente_vta = _p1.text_input("Cliente (opcional):", key="venta_cliente")
-            _forma_vta = _p2.selectbox("Forma de pago:", FORMAS_DE_PAGO, key="venta_forma")
-            if st.button("✅ Terminar la venta", type="primary", key="venta_terminar",
-                         width="stretch"):
+            # CON LA CAJA APARTE el vendedor no cobra: manda la venta a 💵 Caja, con la cuenta
+            # de «🧾 Atendiendo a». Sin la caja aparte cobra él, como antes; con una cuenta
+            # elegida, también puede ponerla a cuenta. Ver «LA CAJA APARTE».
+            _cuenta_vta = cuenta_elegida()
+            _con_caja = caja_aparte()
+            if _con_caja:
+                _forma_vta = ""
+                _p2.caption("💵 **La cobra la caja**"
+                            + (f", para {_cuenta_vta['nombre']}" if _cuenta_vta else "")
+                            + ": ahí eligen cómo paga.")
+            else:
+                _forma_vta = _p2.selectbox(
+                    "Forma de pago:", FORMAS_DE_PAGO + ([A_CUENTA] if _cuenta_vta else []),
+                    key="venta_forma",
+                    format_func=lambda f: (f"📒 A la cuenta de {_cuenta_vta['nombre']}"
+                                           if f == A_CUENTA else f))
+            if st.button("📤 Mandar a la caja" if _con_caja else "✅ Terminar la venta",
+                         type="primary", key="venta_terminar", width="stretch"):
                 try:
-                    _id_vta, _avisos_vta = cerrar_venta(venta_items, _cliente_vta, _forma_vta)
+                    _id_vta, _avisos_vta = cerrar_venta(
+                        venta_items, _cliente_vta, _forma_vta,
+                        mecanico_id=_cuenta_vta["id"] if _cuenta_vta else None,
+                        a_la_caja=_con_caja or _forma_vta == A_CUENTA)
                 except (ValueError, PermissionError) as _err:
                     st.error(str(_err))
                 else:
+                    if _forma_vta == A_CUENTA:
+                        _ok_cta, _texto_cta = poner_a_cuenta(_id_vta)
+                        if not _ok_cta:
+                            _avisos_vta.append(f"No se pudo poner a cuenta: {_texto_cta} "
+                                               "Quedó esperando en 💵 Caja.")
+                    c.execute("SELECT COALESCE(cobrada, 1) FROM ventas WHERE id = ?", (_id_vta,))
+                    _sin_cobrar = not c.fetchone()[0]
                     c.execute("""SELECT id, codigo, marca, descripcion FROM ventas_items
                                  WHERE venta_id = ? ORDER BY id""", (_id_vta,))
                     st.session_state["venta_recien_cerrada"] = {
                         "id": _id_vta, "total": _total_vta, "avisos": _avisos_vta,
                         "cliente": _cliente_vta, "items": [dict(f) for f in c.fetchall()],
-                        "terminados": lo_que_se_termino(_id_vta)}
+                        "terminados": lo_que_se_termino(_id_vta), "a_la_caja": _sin_cobrar,
+                        "cuenta": _cuenta_vta["nombre"] if _cuenta_vta else ""}
                     for _it in venta_items:
                         st.session_state.pop(f"venta_cant_{_it['producto_id']}", None)
                         st.session_state.pop(f"venta_precio_{_it['producto_id']}", None)
@@ -247,109 +313,10 @@ if pagina == PAGINAS[9]:
                     st.session_state.pop("venta_resultados", None)
                     st.rerun()
 
-    # LAS VENTAS DEL DÍA Y EL CIERRE DE CAJA: hoy, o el día que se elija.
-    _caja_hoy = cierre_de_caja()
-    with st.expander(f"📋 Ventas y cierre de caja — hoy: {_caja_hoy['ventas']} · "
-                     f"${miles(_caja_hoy['total'], 0)}"):
-        _dia_vta = st.date_input("Día:", value=datetime.now().date(), key="venta_dia",
-                                 max_value=datetime.now().date(), format="DD/MM/YYYY")
-        _dia_txt = _dia_vta.strftime("%Y-%m-%d")
-        _del_dia = ventas_del_dia(_dia_txt)
-        _validas = [v for v in _del_dia if not v["anulada"]]
-        _caja = cierre_de_caja(_dia_txt)
-        _devs_dia = devoluciones_del_dia(_dia_txt)
-        if not _del_dia and not _devs_dia:
-            st.caption("Ese día no hubo ventas.")
-        else:
-            st.markdown(f"**Total: ${miles(_caja['total'], 0)}** en {_caja['ventas']} venta(s)"
-                        + (f" · {_caja['anuladas']} anulada(s) por ${miles(_caja['total_anulado'], 0)},"
-                           " que no cuentan" if _caja["anuladas"] else "")
-                        + (f" · {_caja['devoluciones']} devolución(es) por "
-                           f"${miles(_caja['total_devuelto'], 0)}, ya descontadas"
-                           if _caja["devoluciones"] else ""))
-            # La ganancia la ve el administrador, como el margen del buscador.
-            if es_admin() and _caja["items_con_costo"]:
-                st.markdown(f"💰 **Ganancia estimada: ${miles(_caja['ganancia'], 0)}**"
-                            + (f" — de {_caja['items_con_costo']} de {_caja['items']} cosas "
-                               "vendidas, las que tienen costo cargado"
-                               if _caja["items_con_costo"] < _caja["items"] else ""))
-            _k1, _k2 = cols([1, 1])
-            _k1.caption("Por forma de pago — «Efectivo» es lo que tiene que haber en el cajón:")
-            _k1.dataframe([{"Forma de pago": f, "Ventas": n, "Total": f"${miles(t, 0)}"}
-                           for f, n, t in _caja["por_forma"]], width="stretch", hide_index=True)
-            _k2.caption("Por quién atendió:")
-            _k2.dataframe([{"Atendió": u, "Ventas": n, "Total": f"${miles(t, 0)}"}
-                           for u, n, t in _caja["por_usuario"]], width="stretch", hide_index=True)
-            _filas_dia = [{"#": v["id"], "Hora": v["hora"], "Total": v["total"] or 0,
-                           "Pago": v["forma_de_pago"], "Cliente": v["cliente"] or "",
-                           "Patente": v["patente"] or "", "Km": v["km"] or "",
-                           "Qué": ", ".join(f"{i['cantidad']}× {i['marca']} {i['codigo']}"
-                                            for i in v["items"]),
-                           "Estado": "🚫 anulada" if v["anulada"] else "",
-                           "Atendió": v["usuario"] or ""} for v in _del_dia]
-            if _filas_dia:
-                st.dataframe([dict(f, Total=f"${miles(f['Total'], 0)}") for f in _filas_dia],
-                             width="stretch", hide_index=True)
-            if _devs_dia:
-                st.caption("↩️ Lo devuelto ese día:")
-                st.dataframe([{"Hora": d["hora"], "De la venta": f"#{d['venta_id']}",
-                               "Qué": f"{d['cantidad']}× {d['marca']} {d['codigo']}",
-                               "Importe": f"-${miles(d['importe'], 0)}",
-                               "Pago": d["forma_de_pago"],
-                               "Por qué": MOTIVOS_DE_DEVOLUCION.get(d["motivo"], d["motivo"]),
-                               "Devolvió": d["usuario"] or ""} for d in _devs_dia],
-                             width="stretch", hide_index=True)
-            st.download_button("⬇️ Descargar las ventas del día (Excel)",
-                               data=to_excel_bytes(_filas_dia),
-                               file_name=f"ventas_{_dia_txt}.xlsx", key="venta_excel",
-                               mime="application/vnd.openxmlformats-officedocument."
-                                    "spreadsheetml.sheet")
-            if _del_dia:
-                _cv1, _cv2 = cols([3, 1])
-                _comp_de = _cv1.selectbox("Comprobante de la venta:", [v["id"] for v in _del_dia],
-                                          format_func=lambda i: f"#{i}",
-                                          key="venta_comprobante_de")
-                _cv2.download_button("📄 PDF", data=comprobante_para_descargar(_comp_de),
-                                     file_name=f"comprobante_{_comp_de}.pdf",
-                                     mime="application/pdf", key="venta_comprobante_dia",
-                                     width="stretch")
-            if _validas:
-                _a1, _a2 = cols([3, 1])
-                _anular = _a1.selectbox("Anular una venta (devuelve el stock y la saca de la "
-                                        "ficha del auto):", [v["id"] for v in _validas],
-                                        format_func=lambda i: f"#{i}", key="venta_a_anular")
-                if candado("anular una venta", _a2.button("🚫 Anular", key="venta_anular"),
-                           "anular_una_venta"):
-                    _ok_an, _texto_an = anular_venta(_anular)
-                    avisar("success" if _ok_an else "warning", _texto_an)
-                    st.rerun()
-        # EL ARQUEO: lo que hay en el cajón contra lo que dice el sistema. Ver arquear_la_caja().
-        st.markdown("**🧮 Arqueo: ¿cuánto efectivo hay en el cajón?**")
-        st.caption(f"Según las ventas en efectivo (menos lo devuelto), tendría que haber "
-                   f"**${miles(efectivo_esperado(_dia_txt), 0)}**, sin contar el cambio con el "
-                   "que se abrió.")
-        with st.form("form_arqueo"):
-            _q1, _q2 = cols([1, 2])
-            _contado = _q1.number_input("Efectivo contado:", min_value=0.0, step=100.0,
-                                        value=None, placeholder="Ej: 45000",
-                                        help="Sin el cambio con el que abriste la caja.")
-            _nota_arq = _q2.text_input("Nota (opcional):", placeholder="Ej: faltan $500 de un vuelto")
-            _arquear = st.form_submit_button("🧮 Guardar el arqueo")
-        if _arquear:
-            if _contado is None:
-                st.warning("Escribí cuánto efectivo contaste.")
-            else:
-                _ok_arq, _texto_arq = arquear_la_caja(_dia_txt, _contado, _nota_arq)
-                avisar("success" if _ok_arq else "warning", f"🧮 {_texto_arq}")
-                st.rerun()
-        _arqueos = arqueos_del_dia(_dia_txt)
-        if _arqueos:
-            st.dataframe([{"Hora": a["hora"], "Esperado": f"${miles(a['efectivo_esperado'], 0)}",
-                           "Contado": f"${miles(a['efectivo_contado'], 0)}",
-                           "Diferencia": (f"{'+' if a['diferencia'] > 0 else '-' if a['diferencia'] < 0 else ''}"
-                                          f"${miles(abs(a['diferencia']), 0)}"),
-                           "Nota": a["nota"] or "", "Contó": a["usuario"] or ""}
-                          for a in _arqueos], width="stretch", hide_index=True)
+    # LA CAJA: el cierre de caja, el arqueo y lo que espera para cobrarse están en «💵 Caja».
+    # Ver «LA CAJA APARTE» en logica/ventas.py.
+    st.button("💵 La caja: cobrar y el cierre", key="venta_ir_a_la_caja",
+              on_click=ir_a_donde_dice_el_aviso, args=("💵 Caja",))
 
     # DEVOLVER ALGO DE UNA VENTA: en su propia pantalla, «↩️ Devoluciones». Acá solo el botón.
     st.button("↩️ Devolver algo de una venta →", key="venta_ir_a_devolver",

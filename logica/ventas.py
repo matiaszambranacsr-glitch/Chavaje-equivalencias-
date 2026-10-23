@@ -124,6 +124,25 @@ def sumar_lo_que_tengo_a_la_venta(persona=None):
     return cambiados
 
 
+def cambiar_cantidad_en_la_venta(producto_id, cuanto):
+    """«➕ Uno más» y «➖ Uno menos» de un ítem de la venta (el menú del click derecho), entre 1
+    y el máximo de un pedido. Va como on_click."""
+    ya = next((x for x in st.session_state.get("venta_items") or []
+               if x["producto_id"] == producto_id), None)
+    if ya:
+        ya["cantidad"] = max(1, min(CANTIDAD_MAXIMA_POR_PEDIDO, int(ya["cantidad"]) + cuanto))
+        poner_en_el_campo(f"venta_cant_{producto_id}", ya["cantidad"])
+
+
+def quitar_de_la_venta(producto_id):
+    """«🗑️ Quitar» un ítem de la venta, con lo que guardan sus campos: si se vuelve a sumar,
+    arranca de 1 y con su precio. Va como on_click."""
+    venta = st.session_state.setdefault("venta_items", [])
+    venta[:] = [x for x in venta if x["producto_id"] != producto_id]
+    st.session_state.pop(f"venta_cant_{producto_id}", None)
+    st.session_state.pop(f"venta_precio_{producto_id}", None)
+
+
 def lo_que_se_termino(venta_id):
     """Lo vendido en esa venta que quedó con stock 0: [(producto_id, «marca código»)]. Para
     decir que se terminó y que ya quedó anotado para reponer (ver anotar_lo_que_se_termino())."""
@@ -155,7 +174,9 @@ def cierre_de_caja(dia=None):
     atendió, y lo anulado aparte. Para cerrar la caja: contar la plata del cajón contra lo que
     dice «Efectivo», y las transferencias contra el banco. dict."""
     ventas = ventas_del_dia(dia)
-    validas = [v for v in ventas if not v["anulada"]]
+    # Lo que espera en la caja todavía no entró: va aparte (ver «LA CAJA APARTE»).
+    validas = [v for v in ventas if not v["anulada"] and v["cobrada"]]
+    a_cobrar = [v for v in ventas if not v["anulada"] and not v["cobrada"]]
     # LO DEVUELTO ESE DÍA sale de ese día, por donde entró (la forma de pago de la venta) y de
     # quien lo devolvió: es lo que tiene que faltar en el cajón. Ver devolver_de_una_venta().
     devueltas = devoluciones_del_dia(dia)
@@ -187,11 +208,18 @@ def cierre_de_caja(dia=None):
             "por_usuario": agrupar("usuario", "Sin decir", "usuario"),
             "devoluciones": len(devueltas), "total_devuelto": total_devuelto,
             "anuladas": len(anuladas),
-            "total_anulado": round(sum(v["total"] or 0 for v in anuladas), 2)}
+            "total_anulado": round(sum(v["total"] or 0 for v in anuladas), 2),
+            "a_cobrar": len(a_cobrar),
+            "total_a_cobrar": round(sum(v["total"] or 0 for v in a_cobrar), 2)}
 
 
-def cerrar_venta(items, cliente="", forma_de_pago="", usuario=None):
+def cerrar_venta(items, cliente="", forma_de_pago="", usuario=None, mecanico_id=None,
+                 a_la_caja=False):
     """Cierra la venta. Devuelve (venta_id, avisos). Ver «VENTAS DEL MOSTRADOR».
+
+    `a_la_caja`: la venta queda esperando en la caja, sin forma de pago, hasta que el cajero
+    la cobra o la pone a cuenta (ver «LA CAJA APARTE»). `mecanico_id`: la cuenta a la que se
+    vendió (None: Mostrador). El stock baja igual ahora: el cliente se lleva la pieza.
 
     `items`: filas de item_de_venta() (con la cantidad y el precio que quedaron en la pantalla).
     Todo o nada: la venta, cada cosa vendida, el stock y lo aprendido van en una transacción.
@@ -232,10 +260,12 @@ def cerrar_venta(items, cliente="", forma_de_pago="", usuario=None):
     usuario = usuario or obtener_usuario_actual()
     avisos = []
     with db_lock, transaccion():
-        c.execute("""INSERT INTO ventas (usuario, cliente, forma_de_pago, total)
-                     VALUES (?, ?, ?, ?)""",
-                  (usuario, (cliente or "").strip(), forma_de_pago or "",
-                   round(sum(x[1] * x[2] for x in limpios), 2)))
+        total = round(sum(x[1] * x[2] for x in limpios), 2)
+        c.execute("""INSERT INTO ventas (usuario, cliente, forma_de_pago, total, cobrada,
+                                         mecanico_id, total_de_lista)
+                     VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                  (usuario, (cliente or "").strip(), "" if a_la_caja else (forma_de_pago or ""),
+                   total, 0 if a_la_caja else 1, mecanico_id or None, total))
         venta_id = c.lastrowid
         for producto_id, cantidad, precio, pedido, veredicto, evidencia in limpios:
             c.execute("""SELECT p.stock, p.codigo_raw, p.descripcion, p.precio_costo,
@@ -390,6 +420,10 @@ def anular_venta(venta_id):
                      WHERE id = ? AND anulada = 0""", (obtener_usuario_actual(), venta_id))
         if c.rowcount != 1:
             return False, "Esa venta no existe o ya estaba anulada."
+        # Si se había puesto a cuenta, el cargo de la cuenta también queda anulado: si no, el
+        # taller seguía debiendo algo que no se llevó. Ver poner_a_cuenta().
+        c.execute("""UPDATE movimientos_de_cuenta SET anulado = 1
+                     WHERE id = (SELECT movimiento_id FROM ventas WHERE id = ?)""", (venta_id,))
         c.execute("""SELECT producto_id, stock_descontado FROM ventas_items
                      WHERE venta_id = ? AND stock_descontado > 0 AND producto_id IS NOT NULL""",
                   (venta_id,))
@@ -423,10 +457,17 @@ def anular_venta(venta_id):
 def ventas_del_dia(dia=None):
     """Las ventas de un día (hoy, si no se dice), la última primero, con sus ítems. [dict]."""
     dia = dia or datetime.now().strftime("%Y-%m-%d")
+    # El día de la caja es el día en que se cobró (la plata entra ese día); lo que espera en la
+    # caja, el día en que se vendió.
     c.execute("""SELECT v.id, substr(v.fecha, 12, 5) AS hora, v.usuario, v.cliente,
-                        v.forma_de_pago, v.total, v.anulada, v.km, ve.patente
+                        v.forma_de_pago, v.total, v.anulada, v.km, ve.patente,
+                        COALESCE(v.cobrada, 1) AS cobrada, v.cuotas,
+                        COALESCE(v.descuento, 0) AS descuento, v.cobrada_por,
+                        k.nombre AS cuenta
                  FROM ventas v LEFT JOIN vehiculos ve ON ve.id = v.vehiculo_id
-                 WHERE substr(v.fecha, 1, 10) = ? ORDER BY v.id DESC""", (dia,))
+                 LEFT JOIN mecanicos k ON k.id = v.mecanico_id
+                 WHERE substr(COALESCE(v.cobrada_en, v.fecha), 1, 10) = ?
+                 ORDER BY v.id DESC""", (dia,))
     ventas = [dict(f) for f in c.fetchall()]
     for v in ventas:
         c.execute("""SELECT id, codigo, marca, descripcion, cantidad, precio, costo,
@@ -498,8 +539,11 @@ def pasar_el_presupuesto_a_una_venta():
 def una_venta(venta_id):
     """Una venta con sus ítems y la patente, o None. Ver texto_del_comprobante()."""
     c.execute("""SELECT v.id, v.fecha, v.usuario, v.cliente, v.forma_de_pago, v.total, v.anulada,
-                        v.km, ve.patente
-                 FROM ventas v LEFT JOIN vehiculos ve ON ve.id = v.vehiculo_id WHERE v.id = ?""",
+                        v.km, ve.patente, COALESCE(v.cobrada, 1) AS cobrada, v.cuotas,
+                        COALESCE(v.descuento, 0) AS descuento, v.total_de_lista, v.mecanico_id,
+                        k.nombre AS cuenta
+                 FROM ventas v LEFT JOIN vehiculos ve ON ve.id = v.vehiculo_id
+                 LEFT JOIN mecanicos k ON k.id = v.mecanico_id WHERE v.id = ?""",
               (venta_id,))
     venta = c.fetchone()
     if not venta:
@@ -527,8 +571,13 @@ def texto_del_comprobante(venta_id):
                f"{(it['descripcion'] or '')[:40]} — ${miles(it['cantidad'] * it['precio'], 0)}"
                + (f" (devueltos: {it['devuelto']})" if it["devuelto"] else "")
                for it in venta["items"]]
+    if venta["descuento"]:
+        lineas.append(f"Descuento {como_porcentaje(venta['descuento'])}% (era "
+                      f"${miles(venta['total_de_lista'] or 0, 0)})")
     lineas.append(f"TOTAL: ${miles(venta['total'] or 0, 0)}"
-                  + (f" ({venta['forma_de_pago']})" if venta["forma_de_pago"] else ""))
+                  + (f" ({como_se_pago(venta)})" if venta["forma_de_pago"] else ""))
+    if not venta["cobrada"] and not venta["anulada"]:
+        lineas.append("PENDIENTE DE COBRO")
     if venta["anulada"]:
         lineas.append("ANULADA")
     lineas += ["", "¡Gracias por tu compra!", NO_ES_FACTURA]
@@ -580,11 +629,19 @@ def pdf_del_comprobante(venta):
         pdf.cell(40, 7, limpiar(f"${miles(it['cantidad'] * it['precio'], 0)}"), align="R")
         pdf.ln()
     pdf.set_font("Helvetica", "B", 12)
-    pdf.cell(140, 9, limpiar("TOTAL" + (f" ({venta['forma_de_pago']})"
+    if venta.get("descuento"):
+        pdf.set_font("Helvetica", "", 10)
+        pdf.cell(140, 7, limpiar(f"Descuento {como_porcentaje(venta['descuento'])}% (era "
+                                 f"${miles(venta.get('total_de_lista') or 0, 0)})"))
+        pdf.ln()
+        pdf.set_font("Helvetica", "B", 12)
+    pdf.cell(140, 9, limpiar("TOTAL" + (f" ({como_se_pago(venta)})"
                                          if venta["forma_de_pago"] else "")), border="T")
     pdf.cell(40, 9, limpiar(f"${miles(venta['total'] or 0, 0)}"), border="T", align="R")
     pdf.ln(12)
     pdf.set_font("Helvetica", "I", 9)
+    if not venta.get("cobrada", 1) and not venta["anulada"]:
+        pdf.cell(0, 6, "PENDIENTE DE COBRO", new_x="LMARGIN", new_y="NEXT")
     if venta["anulada"]:
         pdf.cell(0, 6, "ANULADA", new_x="LMARGIN", new_y="NEXT")
     pdf.cell(0, 6, limpiar(NO_ES_FACTURA), new_x="LMARGIN", new_y="NEXT")
@@ -699,6 +756,7 @@ def devolver_de_una_venta(venta_item_id, cantidad, motivo, detalle=""):
         return False, "La cantidad tiene que ser un número."
     c.execute("""SELECT vi.id, vi.venta_id, vi.producto_id, vi.codigo, vi.marca, vi.cantidad,
                         vi.precio, vi.pedido, COALESCE(vi.devuelto, 0) AS devuelto, v.anulada,
+                        COALESCE(v.cobrada, 1) AS cobrada, v.movimiento_id, v.mecanico_id,
                         p.codigo_clean, p.stock
                  FROM ventas_items vi JOIN ventas v ON v.id = vi.venta_id
                  LEFT JOIN productos p ON p.id = vi.producto_id WHERE vi.id = ?""",
@@ -708,6 +766,9 @@ def devolver_de_una_venta(venta_item_id, cantidad, motivo, detalle=""):
         return False, "Ese ítem no existe."
     if it["anulada"]:
         return False, "Esa venta está anulada."
+    if not it["cobrada"]:
+        return False, ("Esa venta todavía no se cobró: está esperando en la caja. Si no la va a "
+                       "pagar, que la anule un administrador.")
     queda = it["cantidad"] - it["devuelto"]
     if not 1 <= cantidad <= queda:
         return False, (f"De {it['marca']} {it['codigo']} se puede devolver de 1 a {queda}."
@@ -730,6 +791,14 @@ def devolver_de_una_venta(venta_item_id, cantidad, motivo, detalle=""):
         if al_stock:
             c.execute("UPDATE productos SET stock = stock + ? WHERE id = ?",
                       (al_stock, it["producto_id"]))
+        # Lo que se había puesto a cuenta vuelve a la cuenta, no al cajón: se le acredita.
+        if it["movimiento_id"] and it["mecanico_id"]:
+            c.execute("""INSERT INTO movimientos_de_cuenta (mecanico_id, concepto, importe,
+                                                           medio, usuario)
+                         VALUES (?, ?, ?, 'Devolución', ?)""",
+                      (it["mecanico_id"], f"Devolución de la venta #{it['venta_id']}: "
+                                          f"{cantidad}× {it['marca']} {it['codigo']}",
+                       -importe, obtener_usuario_actual()))
         if entero and it["producto_id"] is not None:
             # No se le puso al auto, y no se vendió: sale de la ficha y de lo aprendido.
             c.execute("DELETE FROM historial_piezas WHERE venta_id = ? AND producto_id = ?",
@@ -747,7 +816,8 @@ def devolver_de_una_venta(venta_item_id, cantidad, motivo, detalle=""):
         except (PermissionError, ValueError) as _err:
             anotar_error("devolver_de_una_venta", _err)
     return True, (f"Devuelto: {cantidad} × {it['marca']} {it['codigo']} (${miles(importe, 0)}"
-                  " sale de la caja de hoy)"
+                  + (" se le acredita a la cuenta)" if it["movimiento_id"] else
+                     " sale de la caja de hoy)")
                   + ("" if al_stock or it["stock"] is None else
                      ", y no vuelve al stock: no se puede volver a vender")
                   + (". El vínculo con lo que se había pedido bajó a «muy débil»"
@@ -816,3 +886,208 @@ def lo_que_se_va_a_terminar(dias=30, alcanza_menos_de=7):
                            "por_semana": round(por_dia * 7, 1), "alcanza_dias": int(alcanza),
                            "anotado": bool(f["anotado"])})
     return sorted(salida, key=lambda x: (x["alcanza_dias"], -x["por_semana"]))
+
+
+# ============================================================================================
+# LA CAJA APARTE
+# ============================================================================================
+# Lo pidió el dueño: «dividí la caja de las ventas: cada vez que se realiza una venta, al cajero
+# le sale un cartel diciendo quién vendió, a qué cuenta se lo vendió, el monto total y la hora;
+# con F10, que elija si lo pagó en efectivo, débito, crédito (con la cantidad de cuotas) o
+# transferencia, con un descuento por porcentaje; y con F11, si estás seguro que querés
+# ponérselo a cuenta a ese cliente».
+#   · El vendedor arma la venta en 🧾 Ventas y la manda a la caja: el stock baja ahí (el cliente
+#     se lleva la pieza) y la venta queda esperando, sin forma de pago, con la cuenta a la que se
+#     vendió (la de «🧾 Atendiendo a», o Mostrador).
+#   · En 💵 Caja aparece con su cartel. El cajero la cobra (ver cobrar_venta()) o la pone a
+#     cuenta (ver poner_a_cuenta(), con el límite de crédito como en el depósito). Recién ahí
+#     cuenta en el cierre de caja, el día que se cobró. Si se anula, el cargo de la cuenta
+#     también; si se devuelve algo de una venta a cuenta, se le acredita a la cuenta.
+#   · EL DESCUENTO baja el precio de cada cosa de la venta en ese porcentaje: así las
+#     devoluciones, la ganancia y lo más vendido ya lo cuentan, sin hacer nada más. Lo que
+#     costaba sin descuento queda en la venta y sale en el comprobante.
+#   · Se puede apagar (💵 Caja → «La caja cobra aparte», el administrador): entonces el
+#     vendedor cobra al terminar la venta, como antes.
+FORMAS_DE_COBRO = ["Efectivo", "Tarjeta de débito", "Tarjeta de crédito", "Transferencia"]
+CUOTAS_POSIBLES = [1, 2, 3, 6, 9, 12, 18, 24]
+A_CUENTA = "A cuenta"
+# Más descuento que esto en la caja es casi seguro un error de tipeo (50 en vez de 5). A cuenta,
+# lo que tenga la cuenta, si es más.
+DESCUENTO_MAXIMO_EN_LA_CAJA = 50.0
+
+
+def caja_aparte():
+    """¿La caja cobra aparte? Ver «LA CAJA APARTE»."""
+    return obtener_config("caja_aparte", "1") == "1"
+
+
+def cambiar_caja_aparte(valor):
+    """Prende o apaga la caja aparte. Solo el administrador."""
+    exigir_nivel("admin", "cambiar cómo se cobran las ventas")
+    guardar_config("caja_aparte", "1" if valor else "0")
+    anotar_cambio("prendió la caja aparte" if valor else "apagó la caja aparte", "caja", "")
+
+
+def como_porcentaje(valor):
+    """«10» y no «10,0»; «12,5» si tiene decimales."""
+    valor = float(valor or 0)
+    return miles(valor, 0 if valor.is_integer() else 1)
+
+
+def como_se_pago(venta):
+    """«Tarjeta de crédito, 3 cuotas», «a la cuenta de Taller Norte», «Efectivo»."""
+    forma = venta.get("forma_de_pago") or ""
+    if forma == "Tarjeta de crédito" and (venta.get("cuotas") or 1) > 1:
+        return f"{forma}, {venta['cuotas']} cuotas"
+    if forma == A_CUENTA and venta.get("cuenta"):
+        return f"a la cuenta de {venta['cuenta']}"
+    return forma
+
+
+def ventas_a_cobrar():
+    """Lo que espera en la caja, lo más viejo primero: [dict] con quién vendió, a qué cuenta,
+    el total, la hora y lo que se lleva."""
+    c.execute("""SELECT v.id, v.fecha, substr(v.fecha, 12, 5) AS hora, v.usuario, v.cliente,
+                        v.total, v.mecanico_id, k.nombre AS cuenta
+                 FROM ventas v LEFT JOIN mecanicos k ON k.id = v.mecanico_id
+                 WHERE COALESCE(v.cobrada, 1) = 0 AND v.anulada = 0 ORDER BY v.id""")
+    ventas = [dict(f) for f in c.fetchall()]
+    for v in ventas:
+        c.execute("""SELECT codigo, marca, descripcion, cantidad, precio FROM ventas_items
+                     WHERE venta_id = ? ORDER BY id""", (v["id"],))
+        v["items"] = [dict(f) for f in c.fetchall()]
+    return ventas
+
+
+def el_cartel_de(venta):
+    """Lo que le dice el cartel al cajero: quién vendió, a qué cuenta, el total y la hora."""
+    para = (venta.get("cuenta") or (f"{venta['cliente']}, de Mostrador" if venta.get("cliente")
+                                    else "Mostrador"))
+    return (f"🧾 Venta #{venta['id']} — vendió {venta.get('usuario') or '¿?'} · para {para} · "
+            f"${miles(venta.get('total') or 0, 0)} · {venta.get('hora') or ''}")
+
+
+def total_con_descuento(venta_id, descuento):
+    """Lo que queda la venta con ese descuento, redondeado como al cobrarla."""
+    c.execute("SELECT cantidad, precio FROM ventas_items WHERE venta_id = ?", (venta_id,))
+    return round(sum(f["cantidad"] * round(float(f["precio"] or 0)
+                                           * (1 - float(descuento or 0) / 100), 2)
+                     for f in c.fetchall()), 2)
+
+
+def _descuento_valido(descuento, tope):
+    try:
+        descuento = round(float(descuento or 0), 2)
+    except (TypeError, ValueError):
+        raise ValueError("El descuento tiene que ser un número.")
+    if not 0 <= descuento <= tope:
+        raise ValueError(f"El descuento va de 0 a {miles(tope, 0)}%.")
+    return descuento
+
+
+def _aplicar_el_descuento(venta_id, descuento):
+    """Adentro de la transacción del cobro: el precio de cada cosa, con el descuento; devuelve
+    el total nuevo (el que llama lo guarda en la venta)."""
+    if descuento:
+        c.execute("""UPDATE ventas_items SET precio = ROUND(precio * (1 - ? / 100.0), 2)
+                     WHERE venta_id = ?""", (descuento, venta_id))
+    c.execute("SELECT COALESCE(SUM(cantidad * precio), 0) FROM ventas_items WHERE venta_id = ?",
+              (venta_id,))
+    return round(float(c.fetchone()[0]), 2)
+
+
+def cobrar_venta(venta_id, forma_de_pago, cuotas=1, descuento=0):
+    """F10: cobra una venta que espera en la caja. (ok, texto). Ver «LA CAJA APARTE»."""
+    exigir_nivel("empleado", "cobrar una venta")
+    if forma_de_pago not in FORMAS_DE_COBRO:
+        return False, "Elegí cómo pagó."
+    try:
+        cuotas = int(cuotas or 1) if forma_de_pago == "Tarjeta de crédito" else 1
+    except (TypeError, ValueError):
+        return False, "Las cuotas tienen que ser un número."
+    if cuotas not in CUOTAS_POSIBLES:
+        return False, "Esa cantidad de cuotas no está."
+    try:
+        descuento = _descuento_valido(descuento, DESCUENTO_MAXIMO_EN_LA_CAJA)
+    except ValueError as e:
+        return False, str(e)
+    with db_lock, transaccion():
+        # Se marca cobrada SOLO si seguía esperando: dos cajeros con la misma venta en pantalla
+        # no la cobran dos veces.
+        c.execute("""UPDATE ventas SET cobrada = 1, forma_de_pago = ?, cuotas = ?, descuento = ?,
+                            cobrada_por = ?, cobrada_en = datetime('now', 'localtime')
+                     WHERE id = ? AND COALESCE(cobrada, 1) = 0 AND anulada = 0""",
+                  (forma_de_pago, cuotas, descuento, obtener_usuario_actual(), venta_id))
+        if c.rowcount != 1:
+            return False, "Esa venta ya no está esperando en la caja (¿la cobró otro o se anuló?)."
+        total = _aplicar_el_descuento(venta_id, descuento)
+        c.execute("UPDATE ventas SET total = ? WHERE id = ?", (total, venta_id))
+        if descuento:
+            anotar_cambio("cobró con descuento", "venta", venta_id,
+                          despues={"descuento": descuento, "total": total})
+    return True, (f"💵 Venta #{venta_id} cobrada: ${miles(total, 0)} "
+                  f"({como_se_pago({'forma_de_pago': forma_de_pago, 'cuotas': cuotas})}"
+                  + (f", con {como_porcentaje(descuento)}% de descuento" if descuento else "") + ").")
+
+
+def poner_a_cuenta(venta_id, mecanico_id=None, descuento=None):
+    """F11: pone a cuenta una venta que espera en la caja (la cuenta a la que se vendió, o
+    `mecanico_id`). Con el descuento de la cuenta si no se dice otro, el plazo de la cuenta y
+    su límite de crédito, como al entregar el depósito. (ok, texto)."""
+    exigir_nivel("empleado", "poner una venta a cuenta")
+    c.execute("""SELECT mecanico_id FROM ventas
+                 WHERE id = ? AND COALESCE(cobrada, 1) = 0 AND anulada = 0""", (venta_id,))
+    fila = c.fetchone()
+    if not fila:
+        return False, "Esa venta ya no está esperando en la caja (¿la cobró otro o se anuló?)."
+    mecanico_id = mecanico_id or fila["mecanico_id"]
+    if not mecanico_id:
+        return False, "Es de Mostrador: elegí a qué cuenta va."
+    c.execute("SELECT nombre FROM mecanicos WHERE id = ? AND activo = 1", (mecanico_id,))
+    cuenta = c.fetchone()
+    if not cuenta:
+        return False, "Esa cuenta no existe o está desactivada."
+    config = configuracion_de_cuenta(mecanico_id)
+    try:
+        descuento = _descuento_valido(config["descuento"] if descuento is None else descuento,
+                                      max(DESCUENTO_MAXIMO_EN_LA_CAJA, config["descuento"]))
+    except ValueError as e:
+        return False, str(e)
+    usuario = obtener_usuario_actual()
+    vence = (date.today() + timedelta(days=config["dias_de_plazo"])).isoformat()
+    try:
+        with db_lock, transaccion():
+            c.execute("""UPDATE ventas SET cobrada = 1, forma_de_pago = ?, mecanico_id = ?,
+                                descuento = ?, cobrada_por = ?,
+                                cobrada_en = datetime('now', 'localtime')
+                         WHERE id = ? AND COALESCE(cobrada, 1) = 0 AND anulada = 0""",
+                      (A_CUENTA, mecanico_id, descuento, usuario, venta_id))
+            if c.rowcount != 1:
+                raise ValueError("Esa venta ya no está esperando en la caja (¿la cobró otro?).")
+            total = _aplicar_el_descuento(venta_id, descuento)
+            c.execute("UPDATE ventas SET total = ? WHERE id = ?", (total, venta_id))
+            # EL LÍMITE, adentro del candado, como pedir_al_deposito(): con lo que ya debe y lo
+            # que tiene pedido al depósito sin entregar, más los permisos vigentes.
+            if config["limite"]:
+                saldo = estado_de_cuenta(mecanico_id)["saldo"]
+                pedido = _pendiente_de_la_cuenta(mecanico_id, config["descuento"])
+                margen = margen_autorizado(mecanico_id)[0]
+                if saldo + pedido + total > config["limite"] + margen + 0.005:
+                    raise ValueError(f"{PASA_EL_LIMITE} de {cuenta['nombre']}: debe "
+                                     f"{formato_precio(saldo)}, el límite es "
+                                     f"{formato_precio(config['limite'])}"
+                                     + (f" (más {formato_precio(margen)} de un permiso)"
+                                        if margen else "")
+                                     + f" y la venta es de {formato_precio(total)}. "
+                                       f"{SE_PUEDE_PEDIR_PERMISO}")
+            c.execute("""INSERT INTO movimientos_de_cuenta (mecanico_id, concepto, importe, vence,
+                                                           usuario)
+                         VALUES (?, ?, ?, ?, ?)""",
+                      (mecanico_id, f"Venta #{venta_id}", total, vence, usuario))
+            c.execute("UPDATE ventas SET movimiento_id = ? WHERE id = ?", (c.lastrowid, venta_id))
+    except ValueError as e:
+        return False, str(e)
+    return True, (f"📒 Venta #{venta_id} a la cuenta de {cuenta['nombre']}: "
+                  f"${miles(total, 0)}" + (f" (con {como_porcentaje(descuento)}% de descuento)"
+                                           if descuento else "")
+                  + f", vence el {vence[8:10]}/{vence[5:7]}.")

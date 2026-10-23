@@ -962,6 +962,34 @@ def _sumar_desde_el_recuadro(fila, cantidad, clave):
     st.session_state[f"_sumado_{clave}"] = True
 
 
+def sumar_al_presupuesto_y_avisar(fila):
+    """«🛒 Sumar al presupuesto» del menú del click derecho. Va como on_click."""
+    sumar_al_presupuesto(fila)
+    avisar("success", f"🛒 {fila['Marca']} {fila['Codigo']} sumado al presupuesto (arriba de "
+                      "todo, en «Presupuesto en armado»).")
+
+
+def quitar_del_presupuesto(producto_id):
+    """«🗑️» de un ítem del presupuesto. También la cantidad que guardaba su campo: sin eso,
+    volver a sumarlo lo traía con la cantidad vieja en vez de 1. Va como on_click."""
+    st.session_state.get("carrito", {}).pop(producto_id, None)
+    st.session_state.pop(f"cant_cart_{producto_id}", None)
+
+
+def mostrar_mas_acciones_del_producto(fila, clave):
+    """Lo que en el celular no entra en el renglón de un resultado, y en la computadora va en
+    el menú del click derecho (ver «EL CLICK DERECHO» en logica/interfaz.py): sumarlo al
+    presupuesto y ver dónde está. Va adentro de acciones_del_renglon()."""
+    if es_celular():
+        return
+    if es_empleado_o_abierto() and not modo_solo_lectura():
+        st.button("🛒 Sumar al presupuesto", key=f"al_presupuesto_{clave}",
+                  on_click=sumar_al_presupuesto_y_avisar, args=(dict(fila),))
+    if hay_mapa():
+        st.button("📍 ¿Dónde está?", key=f"donde_{clave}", on_click=ver_donde_esta,
+                  args=(fila["ID"],))
+
+
 def pedir_uno_del_presupuesto(producto_id):
     """«📦» al lado de un ítem del presupuesto: pide solo ese, y sale del presupuesto. Para no
     mandarle al depósito diez productos de golpe cuando el cliente todavía está decidiendo."""

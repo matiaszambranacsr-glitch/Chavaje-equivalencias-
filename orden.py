@@ -70,6 +70,7 @@ PANTALLAS = [
     "deposito_mapa.py",
     "ventas.py",
     "devoluciones.py",
+    "caja.py",
 ]
 
 # En app.py, la línea donde se ejecutan las pantallas. fuente_completa() pone ahí su texto.

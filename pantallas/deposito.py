@@ -139,10 +139,13 @@ if pagina == PAGINAS[8]:
                 _numeros = {}
                 for _p in _g["items"]:
                     _numeros.setdefault(_p["donde"]["celdas"], []).append(str(_p["paso"]))
-                _codigos = {l_: e["codigo"] for l_, e in estanterias_del_piso(_pid).items()}
-                st.markdown(svg_del_piso(_g["plano"], _codigos,
+                _est_del_piso = estanterias_del_piso(_pid)
+                st.markdown(svg_del_piso(_g["plano"],
+                                         {l_: e["codigo"] for l_, e in _est_del_piso.items()},
                                          [(cel, ",".join(n)) for cel, n in _numeros.items()],
-                                         _g["camino"]), unsafe_allow_html=True)
+                                         _g["camino"],
+                                         lados={l_: e["lados"] for l_, e in _est_del_piso.items()}),
+                            unsafe_allow_html=True)
                 st.caption(LEYENDA_DEL_MAPA)
             for _p in _g["items"]:
                 _renglon_del_pedido(_p, hay_un_mapa=hay_un_mapa)

@@ -178,7 +178,7 @@ def _renglon_del_error(error):
 # encuentra en Estado y papelera → «🐞 Errores» con dónde y en qué renglón (lo propuso una
 # revisión con ChatGPT). El administrador ve además el error completo ahí mismo.
 PREFIJOS_DE_LAS_PANTALLAS = ("BUS", "VIN", "EXC", "ADM", "EST", "WSP", "VEH", "MEC", "DEP", "VEN",
-                             "DVL")
+                             "DVL", "CAJ")
 
 
 def codigo_de_error(prefijo):
@@ -550,6 +550,26 @@ hr { border-color: var(--border) !important; margin: 1.1rem 0 !important; }
 }
 [data-testid="stMetric"] { border-radius: 14px; }
 h1, h2, h3 { font-family: 'Space Grotesk', sans-serif !important; letter-spacing: -0.01em; }
+
+/* EL MENÚ DEL CLICK DERECHO: ver «EL CLICK DERECHO Y LAS TECLAS DE LA CAJA» en
+   logica/interfaz.py. Lo que esconde los botones va en app.py, solo en la vista de computadora.
+   La caja del script no se ve (ni deja el hueco de su renglón). */
+[data-testid="stLayoutWrapper"]:has(> .st-key-ayudas_del_navegador),
+.st-key-ayudas_del_navegador { display: none; }
+.menu-del-renglon {
+  position: fixed; z-index: 1000100; min-width: 230px; max-width: 360px; padding: 4px;
+  background: var(--bg-panel-2); border: 1px solid var(--border); border-radius: 10px;
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.5);
+}
+.menu-del-renglon button {
+  display: block; width: 100%; text-align: left; padding: 8px 12px; border: 0;
+  border-radius: 7px; background: none; color: var(--text); font: inherit; font-size: 0.92rem;
+  cursor: pointer;
+}
+.menu-del-renglon button:hover:not([disabled]), .menu-del-renglon button:focus-visible {
+  background: rgba(232, 163, 61, 0.18); outline: none;
+}
+.menu-del-renglon button[disabled] { opacity: 0.45; cursor: not-allowed; }
 </style>
 """
 
@@ -1498,6 +1518,10 @@ def mostrar_login_inicial():
         elif nivel:
             st.session_state.nivel_usuario = nivel
             st.session_state.admin_nombre = nombre
+            # Al entrar, a lo primero de la barra (🧾 Ventas: ver ORDEN_DE_LAS_PAGINAS), salvo que
+            # ya estuviera buscando algo: eso no se le saca de abajo.
+            if not str(st.session_state.get("busqueda_input") or "").strip():
+                st.session_state["_al_principio_de_la_barra"] = True
             st.rerun()
         elif error:
             st.error(error)

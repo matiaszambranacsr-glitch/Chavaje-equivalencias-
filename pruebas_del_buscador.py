@@ -29,6 +29,9 @@ def probar():
 
     at = AppTest.from_file(os.path.join(RAIZ, "app.py"), default_timeout=300)
     at.run()
+    # La app arranca en lo primero de la barra (🧾 Ventas: ver ORDEN_DE_LAS_PAGINAS).
+    at.session_state["pagina_actual"] = "🔍 Buscador"
+    at.run()
     ns = sys.modules["logica"].todo_lo_de_la_logica()
     c, conn = ns["c"], ns["conn"]
     c.execute("INSERT INTO marcas (nombre, tipo) VALUES ('PRUEBA', 'PROVEEDOR')")

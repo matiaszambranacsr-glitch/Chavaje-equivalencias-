@@ -2965,6 +2965,27 @@ def _esquema_ventas(c):
         usuario TEXT,
         fecha TEXT DEFAULT (datetime('now', 'localtime'))
     )""")
+    # LA CAJA APARTE: la venta que arma el vendedor queda esperando en la caja hasta que el
+    # cajero la cobra (con la forma de pago, las cuotas y el descuento) o la pone a cuenta. Ver
+    # «LA CAJA APARTE» en logica/ventas.py. Una por una y escritas enteras: el auditor lee las
+    # columnas de acá. Las ventas de antes ya están cobradas.
+    if "cobrada" not in [f[1] for f in c.execute("PRAGMA table_info(ventas)")]:
+        c.execute("ALTER TABLE ventas ADD COLUMN cobrada INTEGER DEFAULT 1")
+    if "mecanico_id" not in [f[1] for f in c.execute("PRAGMA table_info(ventas)")]:
+        c.execute("ALTER TABLE ventas ADD COLUMN mecanico_id INTEGER")
+    if "cuotas" not in [f[1] for f in c.execute("PRAGMA table_info(ventas)")]:
+        c.execute("ALTER TABLE ventas ADD COLUMN cuotas INTEGER")
+    if "descuento" not in [f[1] for f in c.execute("PRAGMA table_info(ventas)")]:
+        c.execute("ALTER TABLE ventas ADD COLUMN descuento REAL DEFAULT 0")
+    if "total_de_lista" not in [f[1] for f in c.execute("PRAGMA table_info(ventas)")]:
+        c.execute("ALTER TABLE ventas ADD COLUMN total_de_lista REAL")
+    if "cobrada_por" not in [f[1] for f in c.execute("PRAGMA table_info(ventas)")]:
+        c.execute("ALTER TABLE ventas ADD COLUMN cobrada_por TEXT")
+    if "cobrada_en" not in [f[1] for f in c.execute("PRAGMA table_info(ventas)")]:
+        c.execute("ALTER TABLE ventas ADD COLUMN cobrada_en TEXT")
+    if "movimiento_id" not in [f[1] for f in c.execute("PRAGMA table_info(ventas)")]:
+        c.execute("ALTER TABLE ventas ADD COLUMN movimiento_id INTEGER")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_ventas_a_cobrar ON ventas(cobrada, anulada)")
 
 
 def _esquema_del_mapa(c):
@@ -2992,6 +3013,15 @@ def _esquema_del_mapa(c):
         codigo TEXT NOT NULL UNIQUE COLLATE NOCASE,
         niveles INTEGER DEFAULT 4,
         UNIQUE(piso_id, letra)
+    )""")
+    # LOS CUATRO LADOS de cada línea de estanterías, cada uno con su código pintado (ver «LOS
+    # CUATRO LADOS» en logica/mapa.py). Un lado sin código no está en la tabla.
+    c.execute("""CREATE TABLE IF NOT EXISTS lados_de_las_estanterias (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        estanteria_id INTEGER NOT NULL REFERENCES estanterias(id) ON DELETE CASCADE,
+        lado TEXT NOT NULL,
+        codigo TEXT NOT NULL UNIQUE COLLATE NOCASE,
+        UNIQUE(estanteria_id, lado)
     )""")
     # Para encontrar lo que hay en una estantería («A%») sin recorrer todo el catálogo: LIKE no
     # distingue mayúsculas, y así puede usar el índice. Ver productos_en().

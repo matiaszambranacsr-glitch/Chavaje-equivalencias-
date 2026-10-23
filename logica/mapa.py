@@ -31,6 +31,8 @@ se usan sin importarlos los nombres que definen las partes anteriores."""
 #     se escribe la ubicación de un producto: «A-3-2» es la estantería A, módulo 3, estante 2.
 #     Cada estantería tiene un código único en todos los depósitos («A», o «A2» si la A ya
 #     está en otro piso), y la ubicación sigue siendo el mismo texto de siempre del producto.
+#     Cada uno de sus CUATRO LADOS puede tener, además, su propio código: ver «LOS CUATRO
+#     LADOS DE CADA ESTANTERÍA».
 #   · Las distancias son CAMINANDO por el pasillo (las estanterías y las paredes no se
 #     atraviesan), no en línea recta: dos estanterías espalda con espalda están cerca en el
 #     dibujo y lejos para el que camina.
@@ -155,7 +157,10 @@ def _pasos_hasta(plano_texto, fuentes, celdas):
     igual, pero después de todo lo demás."""
     filas = leer_plano(plano_texto)["filas"]
     pasos = _recorrido_desde(plano_texto, fuentes)
-    llegadas = [a for a in _accesos(filas, celdas) if a in pasos]
+    # Si lo que se pide ya es pasillo (el frente de un lado: ver lugar_en_el_mapa()), se llega
+    # ahí mismo, y no por cualquier pasillo pegado a la estantería.
+    llegadas = [a for a in (tuple(c_ for c_ in celdas if _se_camina(filas, c_))
+                            or _accesos(filas, celdas)) if a in pasos]
     if not llegadas:
         recta = min((abs(x - fx) + abs(y - fy) for x, y in celdas for fx, fy in fuentes),
                     default=0)
@@ -285,6 +290,8 @@ def borrar_piso(piso_id):
     with db_lock, transaccion():
         c.execute("SELECT nombre, plano FROM pisos WHERE id = ?", (piso_id,))
         antes = c.fetchone()
+        c.execute("DELETE FROM lados_de_las_estanterias WHERE estanteria_id IN "
+                  "(SELECT id FROM estanterias WHERE piso_id = ?)", (piso_id,))
         c.execute("DELETE FROM estanterias WHERE piso_id = ?", (piso_id,))
         c.execute("DELETE FROM pisos WHERE id = ?", (piso_id,))
         anotar_cambio("borró un piso", "piso", piso_id, antes=dict(antes) if antes else None)
@@ -296,6 +303,9 @@ def borrar_deposito(deposito_id):
     with db_lock, transaccion():
         c.execute("SELECT nombre FROM depositos WHERE id = ?", (deposito_id,))
         antes = c.fetchone()
+        c.execute("DELETE FROM lados_de_las_estanterias WHERE estanteria_id IN (SELECT e.id "
+                  "FROM estanterias e JOIN pisos p ON p.id = e.piso_id WHERE p.deposito_id = ?)",
+                  (deposito_id,))
         c.execute("DELETE FROM estanterias WHERE piso_id IN (SELECT id FROM pisos "
                   "WHERE deposito_id = ?)", (deposito_id,))
         c.execute("DELETE FROM pisos WHERE deposito_id = ?", (deposito_id,))
@@ -305,9 +315,22 @@ def borrar_deposito(deposito_id):
 
 
 def estanterias_del_piso(piso_id):
-    """{letra: {id, codigo, niveles}} de las estanterías de ese piso."""
+    """{letra: {id, codigo, niveles, lados: {lado: código}}} de las estanterías de ese piso."""
     c.execute("SELECT id, letra, codigo, niveles FROM estanterias WHERE piso_id = ?", (piso_id,))
-    return {r["letra"]: dict(r) for r in c.fetchall()}
+    salida = {r["letra"]: dict(r, lados={}) for r in c.fetchall()}
+    por_id = {e["id"]: e for e in salida.values()}
+    c.execute("""SELECT l.estanteria_id, l.lado, l.codigo FROM lados_de_las_estanterias l
+                 JOIN estanterias e ON e.id = l.estanteria_id WHERE e.piso_id = ?""", (piso_id,))
+    for r in c.fetchall():
+        por_id[r["estanteria_id"]]["lados"][r["lado"]] = r["codigo"]
+    return salida
+
+
+def codigos_de(estanteria):
+    """El código de una estantería (de estanterias_del_piso()) y los de sus lados: todo lo que
+    se puede escribir como ubicación en ella."""
+    return [estanteria["codigo"]] + [estanteria["lados"][l_] for l_ in LADOS
+                                     if l_ in estanteria["lados"]]
 
 
 def _codigo_libre(letra):
@@ -315,8 +338,7 @@ def _codigo_libre(letra):
     piso («A2»). Los códigos no se repiten en ningún depósito: la ubicación de un producto es
     solo el código, el módulo y el estante."""
     for sufijo in [""] + [str(n) for n in range(2, 100)]:
-        c.execute("SELECT 1 FROM estanterias WHERE codigo = ?", (letra + sufijo,))
-        if c.fetchone() is None:
+        if not _codigo_ocupado(letra + sufijo):
             return letra + sufijo
     return letra + uuid.uuid4().hex[:3].upper()
 
@@ -358,17 +380,21 @@ def lo_que_se_pierde_con(piso_id, texto):
     plano = leer_plano(texto)
     salida = []
     for letra, e in estanterias_del_piso(piso_id).items():
-        adentro = productos_en(e["codigo"])
-        if not adentro:
-            continue
         nueva = plano["estanterias"].get(letra)
-        if nueva is None:
-            salida.append((e["codigo"], len(adentro), "se saca del plano"))
-            continue
-        afuera = [p for p in adentro if (p["modulo"] or 0) > len(nueva["modulos"])]
-        if afuera:
-            salida.append((e["codigo"], len(afuera),
-                           f"queda de {len(nueva['modulos'])} módulos y hay cosas más allá"))
+        # La estantería y cada lado con código, cada uno con sus módulos.
+        for codigo, lado in [(e["codigo"], None)] + [(e["lados"][l_], l_) for l_ in LADOS
+                                                    if l_ in e["lados"]]:
+            adentro = productos_en(codigo)
+            if not adentro:
+                continue
+            if nueva is None:
+                salida.append((codigo, len(adentro), "se saca del plano"))
+                continue
+            modulos = len(modulos_del_lado(nueva, lado) if lado else nueva["modulos"])
+            afuera = [p for p in adentro if (p["modulo"] or 0) > modulos]
+            if afuera:
+                salida.append((codigo, len(afuera),
+                               f"queda de {modulos} módulos y hay cosas más allá"))
     return salida
 
 
@@ -396,6 +422,8 @@ def guardar_plano(piso_id, texto, aunque_se_pierdan=False):
         c.execute("UPDATE pisos SET plano = ? WHERE id = ?", (limpio, piso_id))
         for letra, e in antes.items():
             if letra not in plano["estanterias"]:
+                c.execute("DELETE FROM lados_de_las_estanterias WHERE estanteria_id = ?",
+                          (e["id"],))
                 c.execute("DELETE FROM estanterias WHERE id = ?", (e["id"],))
         for letra in plano["estanterias"]:
             if letra not in antes:
@@ -415,11 +443,9 @@ def guardar_estanteria(estanteria_id, codigo, niveles):
     ubicados ahí pasan al código nuevo («A-3-2» → «X-3-2»), todo junto. (ok, texto)."""
     exigir_nivel("empleado", "armar el depósito")
     codigo = str(codigo or "").strip().upper()
-    if not re.fullmatch(r"[A-Z0-9]{1,6}", codigo):
-        return False, "El código va con letras y números, sin espacios ni guiones (hasta 6)."
-    if re.fullmatch(rf"{PREFIJO_DEL_CODIGO_NUESTRO}\d.*", codigo):
-        return False, (f"Un código que empieza con {PREFIJO_DEL_CODIGO_NUESTRO} y un número se "
-                       "confunde con la etiqueta de un producto: elegí otro.")
+    problema = _problema_del_codigo(codigo)
+    if problema:
+        return False, problema
     try:
         niveles = int(niveles)
     except (TypeError, ValueError):
@@ -432,6 +458,8 @@ def guardar_estanteria(estanteria_id, codigo, niveles):
         return False, "Esa estantería ya no está."
     viejo = fila["codigo"]
     adentro = productos_en(viejo) if viejo.upper() != codigo else []
+    if _codigo_ocupado(codigo, salvo_estanteria=estanteria_id):
+        return False, f"Ya hay otra estantería (o el lado de una) con el código {codigo}."
     with db_lock, transaccion():
         try:
             c.execute("UPDATE estanterias SET codigo = ?, niveles = ? WHERE id = ?",
@@ -471,6 +499,142 @@ def elegir_orden_de_la_cola(piso_id, modo, minutos=1):
                   (modo, minutos, piso_id))
         conn.commit()
     return True, f"Ordenado: {ORDENES_DE_LA_COLA[modo]}."
+
+
+# ============================================================================================
+# LOS CUATRO LADOS DE CADA ESTANTERÍA
+# ============================================================================================
+# Lo pidió el dueño: las ubicaciones son líneas de estanterías (de las metálicas, de 90 × 42),
+# y cada línea tiene «distintos números o letras en cada uno de sus cuatro lados». Cada lado
+# —en el dibujo: el de arriba, el de abajo, el de la izquierda y el de la derecha— puede tener
+# su propio código, y entonces es un lugar más: «B-3-2» es el lado que se llama B, módulo 3,
+# estante 2. El código de la estantería sigue valiendo para la línea entera.
+#   · Los MÓDULOS de un lado son los casilleros pegados a ese lado, de izquierda a derecha (o de
+#     arriba a abajo), igual que los de la estantería: en una línea de un casillero de fondo,
+#     el módulo 3 del lado de arriba y el del lado de abajo son el mismo mueble visto de los
+#     dos pasillos. Los lados cortos (las cabeceras) tienen uno por casillero de fondo.
+#   · Se llega por el PASILLO DE ESE LADO: buscar algo del lado B no manda al pasillo del A,
+#     aunque en el dibujo estén pegados (ver lugar_en_el_mapa(), «frente»).
+#   · Los códigos no se repiten en ningún lado: ni entre estanterías, ni entre lados.
+LADOS = {"arriba": "⬆️ Arriba", "abajo": "⬇️ Abajo", "izquierda": "⬅️ Izquierda",
+         "derecha": "➡️ Derecha"}
+_HACIA_DONDE_MIRA = {"arriba": (0, -1), "abajo": (0, 1), "izquierda": (-1, 0),
+                     "derecha": (1, 0)}
+_EL_LADO = {"arriba": "el de arriba", "abajo": "el de abajo", "izquierda": "el de la izquierda",
+            "derecha": "el de la derecha"}
+
+
+def modulos_del_lado(estanteria, lado):
+    """Los módulos de un lado de una estantería del plano (de leer_plano()): una tupla de
+    celdas por módulo, en orden. Sin `lado`, los de la estantería."""
+    if not lado:
+        return estanteria["modulos"]
+    x0, y0, x1, y1 = estanteria["caja"]
+    borde = {"arriba": lambda c_: c_[1] == y0, "abajo": lambda c_: c_[1] == y1,
+             "izquierda": lambda c_: c_[0] == x0, "derecha": lambda c_: c_[0] == x1}[lado]
+    # Un lado es una sola fila (o columna): ordenadas, quedan de izquierda a derecha (o de
+    # arriba a abajo).
+    return tuple((c_,) for c_ in sorted(c_ for c_ in estanteria["celdas"] if borde(c_)))
+
+
+def _frente(filas, celdas, lado):
+    """Los casilleros de pasillo enfrente de esas celdas, del lado que se mira."""
+    dx, dy = _HACIA_DONDE_MIRA[lado]
+    return tuple(sorted({(x + dx, y + dy) for x, y in celdas
+                         if _se_camina(filas, (x + dx, y + dy))}))
+
+
+def _problema_del_codigo(codigo):
+    """Por qué no sirve un código de estantería o de lado, o "" si sirve."""
+    if not re.fullmatch(r"[A-Z0-9]{1,6}", codigo):
+        return "El código va con letras y números, sin espacios ni guiones (hasta 6)."
+    if re.fullmatch(rf"{PREFIJO_DEL_CODIGO_NUESTRO}\d.*", codigo):
+        return (f"Un código que empieza con {PREFIJO_DEL_CODIGO_NUESTRO} y un número se "
+                "confunde con la etiqueta de un producto: elegí otro.")
+    return ""
+
+
+def _codigo_ocupado(codigo, salvo_estanteria=None, salvo_lados_de=None):
+    """¿Ya lo usa una estantería (que no sea `salvo_estanteria`) o un lado (que no sea de la
+    estantería `salvo_lados_de`)?"""
+    c.execute("SELECT 1 FROM estanterias WHERE codigo = ? AND id IS NOT ?",
+              (codigo, salvo_estanteria))
+    if c.fetchone():
+        return True
+    c.execute("SELECT 1 FROM lados_de_las_estanterias WHERE codigo = ? AND estanteria_id IS NOT ?",
+              (codigo, salvo_lados_de))
+    return c.fetchone() is not None
+
+
+def guardar_lados(estanteria_id, codigos):
+    """Los códigos de los lados de una estantería: {lado: código}, vacío si ese lado no tiene.
+    Lo ubicado en un lado que cambia de código pasa al código nuevo («B-3-2» → «X-3-2»); en uno
+    al que se le saca, pasa a la estantería, al módulo donde está («B-3-2» → «A-3-2»). Todo
+    junto. (ok, texto)."""
+    exigir_nivel("empleado", "armar el depósito")
+    nuevos = {}
+    for lado, codigo in (codigos or {}).items():
+        if lado not in LADOS:
+            return False, f"«{lado}» no es un lado."
+        codigo = str(codigo or "").strip().upper()
+        if codigo:
+            problema = _problema_del_codigo(codigo)
+            if problema:
+                return False, f"{LADOS[lado]}: {problema}"
+            nuevos[lado] = codigo
+    repetidos = {x for x in nuevos.values() if list(nuevos.values()).count(x) > 1}
+    if repetidos:
+        return False, f"Dos lados con el mismo código ({', '.join(sorted(repetidos))})."
+    c.execute("""SELECT e.codigo, e.letra, p.plano FROM estanterias e
+                 JOIN pisos p ON p.id = e.piso_id WHERE e.id = ?""", (estanteria_id,))
+    e = c.fetchone()
+    if e is None:
+        return False, "Esa estantería ya no está."
+    estanteria = leer_plano(e["plano"])["estanterias"].get(e["letra"])
+    if estanteria is None:
+        return False, "Esa estantería no está en el plano guardado."
+    for lado, codigo in nuevos.items():
+        if _codigo_ocupado(codigo, salvo_lados_de=estanteria_id):
+            return False, f"{LADOS[lado]}: ya hay otra estantería (o lado) con el código {codigo}."
+    c.execute("SELECT lado, codigo FROM lados_de_las_estanterias WHERE estanteria_id = ?",
+              (estanteria_id,))
+    actuales = {r["lado"]: r["codigo"] for r in c.fetchall()}
+    # Primero qué cambia y adónde va cada producto, todo leído antes de escribir nada: si se
+    # intercambian dos códigos (B ↔ C), lo de B no se mezcla con lo de C.
+    cambiados, cambios, movimientos = [], [], []
+    for lado in LADOS:
+        viejo, nuevo = actuales.get(lado), nuevos.get(lado)
+        if (viejo or "").upper() == (nuevo or ""):
+            continue
+        cambiados.append(lado)
+        cambios.append(f"{LADOS[lado]}: {viejo or '—'} → {nuevo or '—'}")
+        # Lo ubicado en ese lado: al código nuevo, o a la estantería si se le saca.
+        for p_ in (productos_en(viejo) if viejo else []):
+            modulo = p_["modulo"]
+            if not nuevo and modulo:
+                celda = modulos_del_lado(estanteria, lado)[modulo - 1][0]
+                modulo = next(i for i, m in enumerate(estanteria["modulos"], start=1)
+                              if celda in m)
+            movimientos.append((texto_de_ubicacion(nuevo or e["codigo"], modulo, p_["nivel"]),
+                                p_["id"]))
+    if cambiados:
+        with db_lock, transaccion():
+            c.executemany("DELETE FROM lados_de_las_estanterias WHERE estanteria_id = ? AND lado = ?",
+                          [(estanteria_id, l_) for l_ in cambiados])
+            c.executemany("""INSERT INTO lados_de_las_estanterias (estanteria_id, lado, codigo)
+                             VALUES (?, ?, ?)""",
+                          [(estanteria_id, l_, nuevos[l_]) for l_ in cambiados if nuevos.get(l_)])
+            c.executemany("UPDATE productos SET ubicacion = ? WHERE id = ?", movimientos)
+            anotar_cambio("cambió los lados de una estantería", "estanteria", estanteria_id,
+                          antes=actuales, despues=nuevos,
+                          detalle=(f"{len(movimientos)} producto(s) cambiaron de código"
+                                   if movimientos else ""))
+    movidos = len(movimientos)
+    if not cambios:
+        return True, f"La {e['codigo']} ya tenía esos lados."
+    return True, (f"💾 Lados de la {e['codigo']}: " + "; ".join(cambios)
+                  + (f". {movidos} producto(s) pasaron al código que corresponde." if movidos
+                     else "."))
 
 
 # ============================================================================================
@@ -615,32 +779,49 @@ def texto_de_ubicacion(codigo, modulo=None, nivel=None):
 
 def lugar_en_el_mapa(texto):
     """Dónde queda en el mapa una ubicación escrita: dict con el depósito, el piso (y su plano),
-    la estantería, el módulo, el estante, las celdas para resaltar, cómo se guarda («A-3-2») y
-    cómo se lee («Central · Planta baja · estantería A, módulo 3, estante 2»). None si no es un
-    lugar del mapa (o el módulo o el estante no existen)."""
+    la estantería, el lado (si el código es el de un lado: ver «LOS CUATRO LADOS»), el módulo,
+    el estante, las celdas para resaltar, el «frente» (el pasillo desde donde se saca, si es un
+    lado), cómo se guarda («A-3-2») y cómo se lee («Central · Planta baja · estantería A,
+    módulo 3, estante 2»). None si no es un lugar del mapa (o el módulo o el estante no
+    existen)."""
     leida = leer_ubicacion(texto)
     if not leida:
         return None
     codigo, modulo, nivel = leida
-    c.execute("""SELECT e.id, e.letra, e.codigo, e.niveles, p.id AS piso_id, p.nombre AS piso,
-                        p.plano, d.id AS deposito_id, d.nombre AS deposito
-                 FROM estanterias e JOIN pisos p ON p.id = e.piso_id
-                 JOIN depositos d ON d.id = p.deposito_id
-                 WHERE e.codigo = ?""", (codigo,))
+    consulta = """SELECT e.id, e.letra, e.codigo AS de_la_estanteria, e.niveles,
+                         p.id AS piso_id, p.nombre AS piso, p.plano, d.id AS deposito_id,
+                         d.nombre AS deposito, {lado} AS lado, {codigo} AS codigo
+                  FROM {desde} JOIN pisos p ON p.id = e.piso_id
+                  JOIN depositos d ON d.id = p.deposito_id WHERE {codigo} = ?"""
+    c.execute(consulta.format(lado="NULL", codigo="e.codigo", desde="estanterias e"), (codigo,))
     f = c.fetchone()
     if not f:
+        c.execute(consulta.format(lado="l.lado", codigo="l.codigo",
+                                  desde="lados_de_las_estanterias l JOIN estanterias e "
+                                        "ON e.id = l.estanteria_id"), (codigo,))
+        f = c.fetchone()
+    if not f:
         return None
-    estanteria = leer_plano(f["plano"])["estanterias"].get(f["letra"])
-    if (not estanteria or (modulo and modulo > len(estanteria["modulos"]))
-            or (nivel and nivel > (f["niveles"] or 1))):
+    plano = leer_plano(f["plano"])
+    estanteria = plano["estanterias"].get(f["letra"])
+    if f["lado"] not in (None, *LADOS) or not estanteria:
         return None
-    detalle = f"estantería {f['codigo']}" + (f", módulo {modulo}" if modulo else "") + (
-        f", estante {nivel} (desde abajo)" if nivel else "")
+    modulos = modulos_del_lado(estanteria, f["lado"])
+    if (modulo and modulo > len(modulos)) or (nivel and nivel > (f["niveles"] or 1)):
+        return None
+    celdas = (modulos[modulo - 1] if modulo else
+              tuple(c_ for m in modulos for c_ in m) if f["lado"] else estanteria["celdas"])
+    detalle = (f"estantería {f['de_la_estanteria']}"
+               + (f", lado {f['codigo']} ({_EL_LADO[f['lado']]} en el plano)" if f["lado"]
+                  else "")
+               + (f", módulo {modulo}" if modulo else "")
+               + (f", estante {nivel} (desde abajo)" if nivel else ""))
     return {"deposito": f["deposito"], "deposito_id": f["deposito_id"], "piso": f["piso"],
             "piso_id": f["piso_id"], "plano": f["plano"], "estanteria_id": f["id"],
-            "codigo": f["codigo"], "letra": f["letra"], "modulo": modulo, "nivel": nivel,
-            "niveles": f["niveles"], "modulos": len(estanteria["modulos"]),
-            "celdas": estanteria["modulos"][modulo - 1] if modulo else estanteria["celdas"],
+            "codigo": f["codigo"], "estanteria": f["de_la_estanteria"], "letra": f["letra"],
+            "lado": f["lado"], "modulo": modulo, "nivel": nivel, "niveles": f["niveles"],
+            "modulos": len(modulos), "celdas": celdas,
+            "frente": _frente(plano["filas"], celdas, f["lado"]) if f["lado"] else (),
             "texto": texto_de_ubicacion(f["codigo"], modulo, nivel),
             "se_lee": f"{f['deposito']} · {f['piso']} · {detalle}"}
 
@@ -741,21 +922,29 @@ def ubicar_de_una_lista(texto, guardar=False):
 def pdf_de_etiquetas_de_ubicaciones(estanteria_ids):
     """Las etiquetas para pegar en cada estante: una por módulo y estante de esas estanterías,
     con el código de barras del lugar («A-3-2»). Escaneando la del estante y después lo que hay
-    en él, «📍 Ubicar» pone todo en su lugar. b"" si no hay nada."""
+    en él, «📍 Ubicar» pone todo en su lugar. Si la estantería tiene códigos en sus lados, las
+    de cada lado («B-3-2»), que es lo que se lee parado en cada pasillo. b"" si no hay nada."""
     etiquetas = []
     for estanteria_id in estanteria_ids:
         c.execute("SELECT codigo FROM estanterias WHERE id = ?", (estanteria_id,))
         f = c.fetchone()
-        donde = lugar_en_el_mapa(f["codigo"]) if f else None
-        if not donde:
+        if not f:
             continue
-        for modulo in range(1, donde["modulos"] + 1):
-            for nivel in range(1, (donde["niveles"] or 1) + 1):
-                lugar = texto_de_ubicacion(donde["codigo"], modulo, nivel)
-                etiquetas.append({"titulo": lugar,
-                                  "detalle": f"{donde['deposito']} - {donde['piso']} - "
-                                             f"modulo {modulo}, estante {nivel}",
-                                  "barras": lugar})
+        c.execute("SELECT lado, codigo FROM lados_de_las_estanterias WHERE estanteria_id = ?",
+                  (estanteria_id,))
+        de_los_lados = {r["lado"]: r["codigo"] for r in c.fetchall()}
+        for codigo in ([de_los_lados[l_] for l_ in LADOS if l_ in de_los_lados]
+                       or [f["codigo"]]):
+            donde = lugar_en_el_mapa(codigo)
+            if not donde:
+                continue
+            for modulo in range(1, donde["modulos"] + 1):
+                for nivel in range(1, (donde["niveles"] or 1) + 1):
+                    lugar = texto_de_ubicacion(donde["codigo"], modulo, nivel)
+                    etiquetas.append({"titulo": lugar,
+                                      "detalle": f"{donde['deposito']} - {donde['piso']} - "
+                                                 f"modulo {modulo}, estante {nivel}",
+                                      "barras": lugar})
     return pdf_de_etiquetas_con_barras(etiquetas)
 
 
@@ -884,15 +1073,16 @@ def la_cola_por_piso(pendientes, usuario=None):
         if modo == "cercania":
             ultimo = _lo_ultimo_que_entrego(usuario, piso["minutos_de_cercania"])
             if ultimo and ultimo[0]["piso_id"] == piso_id:
-                desde = ultimo[0]["celdas"]
+                desde = ultimo[0]["frente"] or ultimo[0]["celdas"]
                 desde_texto = (f"desde {ultimo[0]['texto']}, lo último que entregaste (hace "
                                f"{ultimo[1]} s)")
         else:
             items = sorted(items, key=lambda i: (clave_de_ubicacion(i["donde"]["texto"]),
                                                  i.get("pedido_en") or ""))
-        orden, camino, total = planear_el_recorrido(piso["plano"],
-                                                    [i["donde"]["celdas"] for i in items],
-                                                    desde, por_cercania=modo == "cercania")
+        # A lo que está en un lado se llega por su pasillo: ver «LOS CUATRO LADOS».
+        orden, camino, total = planear_el_recorrido(
+            piso["plano"], [i["donde"]["frente"] or i["donde"]["celdas"] for i in items],
+            desde, por_cercania=modo == "cercania")
         items = [dict(items[i], paso=n) for n, i in enumerate(orden, start=1)]
         grupos.append({"piso_id": piso_id, "piso": piso["nombre"], "deposito": piso["deposito"],
                        "plano": piso["plano"], "modo": modo,
@@ -922,15 +1112,17 @@ COLORES_DEL_MAPA = {"fondo": "#1D2126", "pasillo": "#242830", "pared": "#4A4F57"
                     "entrada": "#3FA34D"}
 
 
-def svg_del_piso(plano_texto, codigos=None, resaltados=(), camino=(), celda=26):
+def svg_del_piso(plano_texto, codigos=None, resaltados=(), camino=(), celda=26, lados=None):
     """El dibujo de un piso como texto SVG, para st.markdown(..., unsafe_allow_html=True).
     `codigos`: {letra: código de la estantería} (sin eso, la letra); `resaltados`: [(celdas,
-    rótulo)] —lo que hay que buscar, con su número—; `camino`: las celdas del recorrido."""
+    rótulo)] —lo que hay que buscar, con su número—; `camino`: las celdas del recorrido;
+    `lados`: {letra: {lado: código}}, que se escriben chicos afuera de cada lado."""
     plano = leer_plano(plano_texto)
     if not plano["filas"]:
         return ""
     k = COLORES_DEL_MAPA
     codigos = codigos or {}
+    lados = lados or {}
     margen = 18
     ancho, alto = margen + plano["ancho"] * celda + 2, margen + plano["alto"] * celda + 2
 
@@ -987,6 +1179,17 @@ def svg_del_piso(plano_texto, codigos=None, resaltados=(), camino=(), celda=26):
                       f'style="fill:{k["texto"]};font-weight:700;font-size:{int(celda * 0.6)}px;'
                       f'paint-order:stroke;stroke:{k["fondo"]};stroke-width:3px">'
                       f'{html.escape(codigos.get(letra, letra))}</text>')
+        # El código de cada lado, en el pasillo pegado a ese lado (ver «LOS CUATRO LADOS»).
+        for lado, codigo in (lados.get(letra) or {}).items():
+            if lado not in _HACIA_DONDE_MIRA:
+                continue
+            dx, dy = _HACIA_DONDE_MIRA[lado]
+            lx = cx + dx * ((x1 - x0 + 1) * celda / 2 + celda * 0.45)
+            ly = cy + dy * ((y1 - y0 + 1) * celda / 2 + celda * 0.45) + celda * 0.18
+            letras.append(f'<text x="{lx:.0f}" y="{ly:.0f}" text-anchor="middle" '
+                          f'style="fill:{k["camino"]};font-weight:700;'
+                          f'font-size:{int(celda * 0.52)}px;paint-order:stroke;'
+                          f'stroke:{k["fondo"]};stroke-width:3px">{html.escape(codigo)}</text>')
     if len(camino) > 1:
         puntos = " ".join(f"{centro(x, y)[0]:.0f},{centro(x, y)[1]:.0f}" for x, y in camino)
         partes.append(f'<polyline points="{puntos}" style="fill:none;stroke:{k["camino"]};'

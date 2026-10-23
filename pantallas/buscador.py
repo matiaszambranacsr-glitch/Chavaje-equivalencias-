@@ -76,6 +76,8 @@ if pagina == PAGINAS[0]:
     # logica/deposito.py.
     if es_empleado_o_abierto():
         mostrar_cuenta_elegida("buscador")
+    # «📍 ¿Dónde está?» en el menú de cada producto, si el depósito tiene su mapa.
+    _con_mapa = hay_mapa()
 
     # El carrito arriba de todo: si está armándose un presupuesto, tiene que estar a la vista.
     # Escondido en otra pantalla, la gente se olvida de lo que ya sumó y lo suma dos veces.
@@ -90,39 +92,43 @@ if pagina == PAGINAS[0]:
             # pasa todo (ver pasar_el_presupuesto_a_una_venta()).
             st.caption("☑️ = se lleva. Destildá lo que el cliente no se lleva: no pasa a la venta "
                        "y queda en el presupuesto.")
+            pista_del_click_derecho("presupuesto", "Click derecho sobre un ítem: pedirlo al "
+                                                   "depósito, dónde está o quitarlo.")
             for _pid, _item in list(_cart.items()):
-                if _pedir_de_a_uno:
-                    ci0, ci1, ci2, ci4, ci3 = st.columns([0.4, 5, 2, 1, 1])
-                    # De a uno: el que atiende va pidiendo lo que el cliente ya confirmó, sin
-                    # mandar el presupuesto entero (ver pedir_uno_del_presupuesto()).
-                    ci4.button("📦", key=f"pedir_uno_cart_{_pid}",
-                               help=f"Pedir solo este al depósito, para "
-                                    f"{nombre_de_la_cuenta_elegida()}",
-                               on_click=pedir_uno_del_presupuesto, args=(_pid,))
-                else:
-                    ci0, ci1, ci2, ci3 = st.columns([0.4, 5, 2, 1])
-                # Lo marcado se guarda también en el presupuesto: la casilla se olvida de lo suyo
-                # cuando se va a otra pantalla, y lo destildado tiene que seguir destildado. Lo
-                # que cambia por atrás (sumarlo otra vez), ver valor_del_campo().
-                _item["se_lleva"] = ci0.checkbox(
-                    "Se lleva", key=f"se_lleva_{_pid}", label_visibility="collapsed",
-                    value=bool(valor_del_campo(f"se_lleva_{_pid}", _item.get("se_lleva", True))),
-                    help="Se lleva: pasa a la venta. Destildado, queda en el presupuesto.")
-                ci1.markdown(f"**{_item['marca']} {_item['codigo']}** — "
-                              f"{(_item['descripcion'] or '')[:40]}")
-                _nueva_cant = ci2.number_input(
-                    "Cant.", min_value=1, step=1, key=f"cant_cart_{_pid}",
-                    value=valor_del_campo(f"cant_cart_{_pid}", _item["cantidad"]),
-                    label_visibility="collapsed")
-                if _nueva_cant != _item["cantidad"]:
-                    st.session_state["carrito"][_pid]["cantidad"] = int(_nueva_cant)
-                    st.rerun()
-                if ci3.button("🗑️", key=f"quitar_cart_{_pid}"):
-                    st.session_state["carrito"].pop(_pid, None)
-                    # También la cantidad que quedó guardada del widget: sin esto, volver a
-                    # sumar el mismo producto lo traía con la cantidad vieja en vez de 1.
-                    st.session_state.pop(f"cant_cart_{_pid}", None)
-                    st.rerun()
+                with renglon_con_menu(f"presupuesto_{_pid}"):
+                    ci0, ci1, ci2, ci3 = st.columns([0.4, 5, 2, 2 if _pedir_de_a_uno else 1])
+                    # Lo marcado se guarda también en el presupuesto: la casilla se olvida de lo
+                    # suyo cuando se va a otra pantalla, y lo destildado tiene que seguir
+                    # destildado. Lo que cambia por atrás (sumarlo otra vez), ver
+                    # valor_del_campo().
+                    _item["se_lleva"] = ci0.checkbox(
+                        "Se lleva", key=f"se_lleva_{_pid}", label_visibility="collapsed",
+                        value=bool(valor_del_campo(f"se_lleva_{_pid}", _item.get("se_lleva", True))),
+                        help="Se lleva: pasa a la venta. Destildado, queda en el presupuesto.")
+                    ci1.markdown(f"**{_item['marca']} {_item['codigo']}** — "
+                                  f"{(_item['descripcion'] or '')[:40]}")
+                    _nueva_cant = ci2.number_input(
+                        "Cant.", min_value=1, step=1, key=f"cant_cart_{_pid}",
+                        value=valor_del_campo(f"cant_cart_{_pid}", _item["cantidad"]),
+                        label_visibility="collapsed")
+                    if _nueva_cant != _item["cantidad"]:
+                        st.session_state["carrito"][_pid]["cantidad"] = int(_nueva_cant)
+                        st.rerun()
+                    with acciones_del_renglon(ci3, f"presupuesto_{_pid}"):
+                        if _pedir_de_a_uno:
+                            # De a uno: el que atiende va pidiendo lo que el cliente ya confirmó,
+                            # sin mandar el presupuesto entero (ver pedir_uno_del_presupuesto()).
+                            st.button(rotulo_de_accion("📦", "📦 Pedir solo este al depósito"),
+                                      key=f"pedir_uno_cart_{_pid}",
+                                      help=f"Pedir solo este al depósito, para "
+                                           f"{nombre_de_la_cuenta_elegida()}",
+                                      on_click=pedir_uno_del_presupuesto, args=(_pid,))
+                        if not es_celular() and _con_mapa:
+                            st.button("📍 ¿Dónde está?", key=f"donde_cart_{_pid}",
+                                      on_click=ver_donde_esta, args=(_pid,))
+                        st.button(rotulo_de_accion("🗑️", "🗑️ Quitar del presupuesto"),
+                                  key=f"quitar_cart_{_pid}", on_click=quitar_del_presupuesto,
+                                  args=(_pid,))
 
             _lineas = [f"{x['marca']} {x['codigo']} x{x['cantidad']} — "
                        f"${miles((x['precio'] or 0) * x['cantidad'], 0)}" for x in _cart.values()]
@@ -1456,24 +1462,32 @@ if pagina == PAGINAS[0]:
                         # En el celular las columnas se apilan: cada fila eran dos botones a lo
                         # ancho, y con cinco resultados, diez botones. Ahí el selector va desde dos.
                         if len(res) <= (1 if es_celular() else 5):
+                            # En la computadora, los botones de cada uno salen con el click
+                            # derecho (ver «EL CLICK DERECHO» en logica/interfaz.py).
+                            pista_del_click_derecho(
+                                f"stock_{clean}", "Click derecho sobre un producto: se llevó, "
+                                                  "reponer, presupuesto o dónde está.")
                             for fila_stock in res:
-                                colr1, colr2, colr3 = st.columns([3, 1, 1])
-                                colr1.write(_rotulo_stock(fila_stock))
-                                # Directo, con confirmación (🔴) o apagado (🔴 de seguridad):
-                                # ver mostrar_boton_de_venta().
-                                mostrar_boton_de_venta(
-                                    colr2, fila_stock,
-                                    (fila_stock["ID"], codigo_individual,
-                                     f"{fila_stock['Marca']} - {fila_stock['Codigo']}",
-                                     f"stock_{clean}", veredicto_de_la_equivalencia(fila_stock),
-                                     evidencia_de_la_fila(fila_stock, _reco["recomendada"])),
-                                    f"vendido_{fila_stock['ID']}_{clean}")
-                                colr3.button("📌 Reponer", key=f"pedir_repo_{fila_stock['ID']}_{clean}",
-                                              disabled=solo_mirar(),
-                                              on_click=pedir_reposicion_y_avisar,
-                                              args=(fila_stock["ID"], f"{fila_stock['Marca']} - {fila_stock['Codigo']}",
-                                                    f"stock_{clean}"),
-                                              help="Marcar para reposición")
+                                with renglon_con_menu(f"stock_{fila_stock['ID']}_{clean}"):
+                                    colr1, colr2 = st.columns([3, 2])
+                                    colr1.write(_rotulo_stock(fila_stock))
+                                    with acciones_del_renglon(colr2, f"stock_{fila_stock['ID']}_{clean}"):
+                                        # Directo, con confirmación (🔴) o apagado (🔴 de
+                                        # seguridad): ver mostrar_boton_de_venta().
+                                        mostrar_boton_de_venta(
+                                            st, fila_stock,
+                                            (fila_stock["ID"], codigo_individual,
+                                             f"{fila_stock['Marca']} - {fila_stock['Codigo']}",
+                                             f"stock_{clean}", veredicto_de_la_equivalencia(fila_stock),
+                                             evidencia_de_la_fila(fila_stock, _reco["recomendada"])),
+                                            f"vendido_{fila_stock['ID']}_{clean}")
+                                        st.button("📌 Reponer", key=f"pedir_repo_{fila_stock['ID']}_{clean}",
+                                                  disabled=solo_mirar(),
+                                                  on_click=pedir_reposicion_y_avisar,
+                                                  args=(fila_stock["ID"], f"{fila_stock['Marca']} - {fila_stock['Codigo']}",
+                                                        f"stock_{clean}"),
+                                                  help="Marcar para reposición")
+                                        mostrar_mas_acciones_del_producto(fila_stock, f"{fila_stock['ID']}_{clean}")
                         else:
                             # Se elige por ID y no por el rótulo: dos productos con la misma
                             # marca, código y stock darían el mismo texto y uno taparía al otro.
@@ -2022,19 +2036,25 @@ if pagina == PAGINAS[0]:
                         )
                         if solo_mirar():
                             st.caption(TEXTO_SOLO_MIRAR)
+                        pista_del_click_derecho(
+                            f"txt_{fila_txt['ID']}", "Click derecho sobre un producto: se llevó, "
+                                                     "presupuesto o dónde está.")
                         for f in (equivalentes or [fila_txt]):
-                            cv1, cv2 = st.columns([4, 1])
-                            precio_txt = f"${miles(f['Precio'], 0)}" if f.get("Precio") else "s/precio"
-                            cv1.write(f"{f['Marca']} - {f['Codigo']} ({precio_txt}, "
-                                       f"stock: {f.get('Stock') if f.get('Stock') is not None else 's/d'})")
-                            cv2.button(rotulo_del_boton_de_venta(f),
-                                        key=f"vendido_txt_{fila_txt['ID']}_{f['ID']}",
-                                        disabled=solo_mirar(),
-                                        on_click=anotar_venta_y_avisar,
-                                        args=(f["ID"], texto_pedido, f"{f['Marca']} - {f['Codigo']}",
-                                              f"txt_{fila_txt['ID']}",
-                                              veredicto_de_la_equivalencia(f),
-                                              evidencia_de_la_fila(f)))
+                            with renglon_con_menu(f"txt_{fila_txt['ID']}_{f['ID']}"):
+                                cv1, cv2 = st.columns([4, 1])
+                                precio_txt = f"${miles(f['Precio'], 0)}" if f.get("Precio") else "s/precio"
+                                cv1.write(f"{f['Marca']} - {f['Codigo']} ({precio_txt}, "
+                                           f"stock: {f.get('Stock') if f.get('Stock') is not None else 's/d'})")
+                                with acciones_del_renglon(cv2, f"txt_{fila_txt['ID']}_{f['ID']}"):
+                                    st.button(rotulo_del_boton_de_venta(f),
+                                              key=f"vendido_txt_{fila_txt['ID']}_{f['ID']}",
+                                              disabled=solo_mirar(),
+                                              on_click=anotar_venta_y_avisar,
+                                              args=(f["ID"], texto_pedido, f"{f['Marca']} - {f['Codigo']}",
+                                                    f"txt_{fila_txt['ID']}",
+                                                    veredicto_de_la_equivalencia(f),
+                                                    evidencia_de_la_fila(f)))
+                                    mostrar_mas_acciones_del_producto(f, f"txt_{fila_txt['ID']}_{f['ID']}")
                         mostrar_lo_anotado(f"txt_{fila_txt['ID']}")
                 if len(res_texto) > 15:
                     st.caption(f"(mostrando las primeras 15 de {len(res_texto)} — afiná la búsqueda "

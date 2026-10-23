@@ -75,7 +75,13 @@ def herramientas_que_coinciden(texto):
 # solapa, y el auditor controla que cada miga escrita exista.
 PAGINAS = ["🔍 Buscador", "🔗 Vincular manual", "📁 Cargar Excel", "🗂️ Administrar",
            "📊 Estadísticas", "📋 Lista WhatsApp", "🚗 Vehículos", "🛠️ Modo Mecánico",
-           "📦 Depósito", "🧾 Ventas", "↩️ Devoluciones"]
+           "📦 Depósito", "🧾 Ventas", "↩️ Devoluciones", "💵 Caja"]
+# EN QUÉ ORDEN SE VEN, por lo que más se usa: lo pidió el dueño («ventas y depósito son más
+# importantes que las equivalencias»). Es solo el orden de la barra: PAGINAS[n] sigue siendo
+# la misma pantalla en todo el código.
+ORDEN_DE_LAS_PAGINAS = ["🧾 Ventas", "💵 Caja", "📦 Depósito", "↩️ Devoluciones", "🔍 Buscador",
+                        "📋 Lista WhatsApp", "🚗 Vehículos", "🛠️ Modo Mecánico", "📊 Estadísticas",
+                        "🗂️ Administrar", "📁 Cargar Excel", "🔗 Vincular manual"]
 # Lo único que ven los «del depósito» (ver es_del_deposito()): entran directo al depósito, sin
 # el buscador, las estadísticas ni los avisos de administración en el medio.
 PAGINAS_DEL_DEPOSITO = [PAGINAS[8], PAGINAS[10]]
@@ -102,6 +108,8 @@ PARA_QUE_SIRVE = {
                 "en la ficha del auto con la patente y los km.",
     "↩️ Devoluciones": "Lo que vuelve al depósito (escaneando la etiqueta nuestra), lo que "
                       "devuelve un cliente, y las etiquetas para imprimir.",
+    "💵 Caja": "Lo que mandan los vendedores: cobrarlo (F10) o ponerlo a cuenta (F11), y el "
+              "cierre de caja.",
 }
 
 # Las solapas de cada pantalla. Viven acá y no adentro de la pantalla porque el botón de los
@@ -584,6 +592,169 @@ def archivo_listo(archivo, etiqueta="archivo"):
     detalle = f" ({miles(tamano/1024, 0)} KB)" if tamano else ""
     st.caption(f"✅ Recibido: {getattr(archivo, 'name', etiqueta)}{detalle}")
     return True
+
+
+# ============================================================================================
+# EL CLICK DERECHO Y LAS TECLAS DE LA CAJA (en la computadora)
+# ============================================================================================
+# Lo pidió el dueño: en la computadora, los botones de cada producto se despliegan con el click
+# derecho, y en 💵 Caja F10 cobra y F11 pone a cuenta. Streamlit no tiene ninguna de las dos
+# cosas enteras: las completa un script chico en el navegador (AYUDAS_DEL_NAVEGADOR), que app.py
+# pone en cada pasada. El script no inventa botones: el menú copia los botones de verdad del
+# renglón, y elegir una opción toca el botón de verdad —hace lo mismo y pasa por los mismos
+# permisos—. Sin el script, o en la vista de celular, los botones se ven como siempre: el CSS
+# los esconde solo si el script avisó que está (la clase «con-menu-clic-derecho» del body) y la
+# vista es la de computadora (la regla va en app.py).
+#
+# Cómo se arma un renglón con menú (las claves son las que busca el script):
+#     with renglon_con_menu(f"vta_{id}"):
+#         _texto, _botones = st.columns([5, 1])
+#         with acciones_del_renglon(_botones, f"vta_{id}"):
+#             st.button(...)
+AYUDAS_DEL_NAVEGADOR = """
+<script>
+(function () {
+  // Una vez por pestaña: si el elemento se vuelve a dibujar (otra pantalla), no se repite.
+  if (window.__ayudasDelChavo) { return; }
+  window.__ayudasDelChavo = true;
+  var doc = window.document;
+
+  // LAS TECLAS DE LA CAJA. Streamlit las atiende solo (shortcut= del botón), salvo con el
+  // cursor en un campo: escribías el descuento, apretabas F10 y no pasaba nada. Acá se
+  // atienden antes que nadie, estés donde estés. Si en la pantalla no está el botón, la tecla
+  // sigue de largo: F11 vuelve a ser la pantalla completa del navegador.
+  var TECLAS = {F10: "caja_f10", F11: "caja_f11"};
+  window.addEventListener("keydown", function (e) {
+    var clave = TECLAS[e.key];
+    var boton = clave && doc.querySelector(".st-key-" + clave + " button");
+    if (!boton) { return; }
+    e.preventDefault();
+    e.stopImmediatePropagation();
+    // Con la ventana de cobrar abierta no se abre otra encima.
+    if (e.repeat || boton.disabled || doc.querySelector('[role="dialog"]')) { return; }
+    // Soltar el campo primero: así lo escrito queda tomado antes del toque.
+    var foco = doc.activeElement;
+    if (foco && foco !== doc.body && foco.blur) { foco.blur(); }
+    window.setTimeout(function () { boton.click(); }, 80);
+  }, true);
+
+  // EL MENÚ DEL CLICK DERECHO, solo con mouse: en una pantalla táctil los botones se ven.
+  if (!(window.matchMedia && window.matchMedia("(pointer: fine)").matches)) { return; }
+  doc.body.classList.add("con-menu-clic-derecho");
+  var menu = null, abiertoEn = 0;
+  function cerrar() { if (menu) { menu.remove(); menu = null; } }
+  function botonesDe(renglon) {
+    // Los del renglón, no los de otro renglón que haya adentro. Y uno por botón: el que tiene
+    // ayuda (help=) Streamlit lo dibuja dos veces, y el menú lo mostraba repetido.
+    var vistos = [];
+    return Array.prototype.filter.call(
+      renglon.querySelectorAll('[class*="st-key-acciones_"] button'),
+      function (b) {
+        var caja = b.closest(".stButton") || b;
+        if (b.closest('[class*="st-key-conmenu_"]') !== renglon || vistos.indexOf(caja) >= 0) {
+          return false;
+        }
+        vistos.push(caja);
+        return true;
+      });
+  }
+  function abrir(renglon, x, y) {
+    var botones = botonesDe(renglon);
+    if (!botones.length) { return false; }
+    cerrar();
+    menu = doc.createElement("div");
+    menu.className = "menu-del-renglon";
+    menu.setAttribute("role", "menu");
+    botones.forEach(function (b) {
+      var opcion = doc.createElement("button");
+      opcion.type = "button";
+      opcion.setAttribute("role", "menuitem");
+      opcion.textContent = b.textContent.trim();
+      opcion.disabled = b.disabled;
+      opcion.addEventListener("click", function () { cerrar(); b.click(); });
+      menu.appendChild(opcion);
+    });
+    doc.body.appendChild(menu);
+    abiertoEn = Date.now();
+    // Donde se hizo el click, sin salirse de la ventana.
+    menu.style.left = Math.max(4, Math.min(x, window.innerWidth - menu.offsetWidth - 8)) + "px";
+    menu.style.top = Math.max(4, Math.min(y, window.innerHeight - menu.offsetHeight - 8)) + "px";
+    var primera = menu.querySelector("button:not([disabled])");
+    if (primera) { primera.focus(); }
+    return true;
+  }
+  doc.addEventListener("contextmenu", function (e) {
+    var renglon = e.target.closest && e.target.closest('[class*="st-key-conmenu_"]');
+    // Sobre un campo, el menú de siempre: copiar y pegar.
+    if (!renglon || e.target.closest("input, textarea, select")) { cerrar(); return; }
+    if (abrir(renglon, e.clientX, e.clientY)) { e.preventDefault(); }
+  });
+  doc.addEventListener("pointerdown", function (e) {
+    if (menu && !menu.contains(e.target)) { cerrar(); }
+  }, true);
+  // Con el teclado: flechas para moverse, Enter para elegir, Escape para cerrar.
+  window.addEventListener("keydown", function (e) {
+    if (!menu) { return; }
+    if (e.key === "Escape") { cerrar(); e.preventDefault(); return; }
+    if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+      var opciones = Array.prototype.slice.call(menu.querySelectorAll("button:not([disabled])"));
+      var i = opciones.indexOf(doc.activeElement);
+      var j = (i + (e.key === "ArrowDown" ? 1 : -1) + opciones.length) % opciones.length;
+      if (opciones[j]) { opciones[j].focus(); }
+      e.preventDefault();
+    }
+  }, true);
+  // Al mover la página se cierra, como el menú de siempre. Salvo en el primer instante: el
+  // scroll que el navegador termina de avisar después del click lo cerraba apenas abierto.
+  window.addEventListener("scroll", function () {
+    if (Date.now() - abiertoEn > 300) { cerrar(); }
+  }, true);
+  window.addEventListener("resize", cerrar);
+  window.addEventListener("blur", cerrar);
+})();
+</script>
+"""
+
+
+def poner_las_ayudas_del_navegador():
+    """El script de arriba, en una caja que no se ve. Lo llama app.py en cada pasada."""
+    with st.container(key="ayudas_del_navegador"):
+        st.html(AYUDAS_DEL_NAVEGADOR, unsafe_allow_javascript=True)
+
+
+def renglon_con_menu(clave):
+    """La caja de un renglón de producto: el click derecho adentro abre el menú con sus
+    botones (los de acciones_del_renglon() con la misma clave). Va con «with»."""
+    return st.container(key=f"conmenu_{clave}")
+
+
+def acciones_del_renglon(lugar, clave):
+    """Donde van los botones de un renglón con menú: en la computadora no se ven, salen con el
+    click derecho. `lugar` es la columna del renglón; los botones van de costado."""
+    return lugar.container(key=f"acciones_{clave}", horizontal=True)
+
+
+def pista_del_click_derecho(clave, en_la_computadora, sin_menu=""):
+    """Lo que se explica arriba de una lista de renglones con menú: `en_la_computadora` donde
+    se usa el click derecho, y `sin_menu` (si hay) donde los botones se ven."""
+    with st.container(key=f"pista_del_menu_{clave}"):
+        st.caption(f"🖱️ {en_la_computadora}")
+    if sin_menu:
+        with st.container(key=f"pista_sin_menu_{clave}"):
+            st.caption(sin_menu)
+
+
+def rotulo_de_accion(corto, largo):
+    """El rótulo de un botón de renglón: el corto, que entra en la columna del celular, o el
+    largo, que es lo que se lee en el menú del click derecho."""
+    return corto if es_celular() else largo
+
+
+def ver_donde_esta(producto_id):
+    """«📍 ¿Dónde está?»: lleva a 📦 Depósito → 🗺️ Mapa con ese producto buscado, por el
+    código nuestro, que es de uno solo. Va como on_click."""
+    st.session_state["mapa_buscar"] = codigo_nuestro(producto_id)
+    ir_a_donde_dice_el_aviso(f"{PAGINAS[8]} → {SUB_DEPOSITO[1]}")
 
 
 # ============================================================================================

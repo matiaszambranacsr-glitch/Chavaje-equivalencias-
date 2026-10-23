@@ -183,7 +183,39 @@ def probar(L):
     esperar("sumarlo otra vez lo marca", (ns["se_lleva"](ids["J200"]), ns["se_lleva"](ids["B300"]),
                                           st.session_state["carrito"][ids["J200"]]["cantidad"]),
             (True, False, 3))
+    # El menú del click derecho: quitar del presupuesto (con la cantidad que guardaba su campo)
+    # y sumar avisando.
+    st.session_state[f"cant_cart_{ids['J200']}"] = 3
+    ns["quitar_del_presupuesto"](ids["J200"])
+    ns["sumar_al_presupuesto_y_avisar"]({"ID": ids["J200"], "Codigo": "J200", "Marca": "PRUEBA"})
+    esperar("quitar y volver a sumar al presupuesto",
+            (st.session_state["carrito"][ids["J200"]]["cantidad"],
+             f"cant_cart_{ids['J200']}" in st.session_state,
+             [t for t, _ in st.session_state.get("_avisos", [])][-1:]),
+            (1, False, ["success"]))
     for clave in ("carrito", "venta_items", "_avisos"):
+        st.session_state.pop(clave, None)
+
+    # 7b. Uno más, uno menos y quitar, en la venta (el menú del click derecho): entre 1 y el
+    # máximo de un pedido, y el campo de la cantidad se pone al día.
+    st.session_state["venta_items"] = [item(ids["F100"], 1), item(ids["J200"], 2)]
+    cambiar = ns["cambiar_cantidad_en_la_venta"]
+    cambiar(ids["F100"], -1)
+    menos = st.session_state["venta_items"][0]["cantidad"]
+    cambiar(ids["F100"], 1)
+    cambiar(ids["J200"], ns["CANTIDAD_MAXIMA_POR_PEDIDO"] + 5)
+    cambiar(999999, 1)
+    st.session_state[f"venta_precio_{ids['F100']}"] = 1.0
+    esperar("uno más, uno menos",
+            (menos, [x["cantidad"] for x in st.session_state["venta_items"]],
+             st.session_state["_a_los_campos"].get(f"venta_cant_{ids['F100']}")),
+            (1, [2, ns["CANTIDAD_MAXIMA_POR_PEDIDO"]], 2))
+    ns["quitar_de_la_venta"](ids["F100"])
+    esperar("quitar de la venta",
+            ([x["producto_id"] for x in st.session_state["venta_items"]],
+             f"venta_precio_{ids['F100']}" in st.session_state),
+            ([ids["J200"]], False))
+    for clave in ("venta_items", "_a_los_campos"):
         st.session_state.pop(clave, None)
 
     # 8. LO 🔴 COMO REEMPLAZO, igual que «Se llevó»: sin confirmar no se vende; la pieza de
@@ -311,6 +343,10 @@ def probar(L):
             [True, False, False, False])
     ok_j, _ = devolver(_j_v4, 1, "no_le_iba")
     ok_p1, texto_p1 = devolver(_p_v4, 1, "fallada")
+    # Devuelto una de dos: lo otro se vendió igual, y sigue en lo aprendido.
+    esperar("devolver una parte no saca lo aprendido",
+            c.execute("SELECT COUNT(*) FROM ventas_registradas WHERE venta_id = ? AND "
+                      "producto_id = ?", (venta4, ids["P400"])).fetchone()[0], 1)
     ok_p2, _ = devolver(_p_v4, 1, "medida")
     ok_f, texto_f = devolver(item_de(venta3, ids["F100"]), 1, "medida", "otra rosca")
     esperar("devolver: el stock (lo fallado no vuelve; el sin stock cargado no se toca)",

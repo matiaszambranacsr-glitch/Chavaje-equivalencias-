@@ -232,6 +232,12 @@ Las pruebas se corren como dice el README, en «Antes de subir un cambio».
 | Dónde poner lo que no tiene lugar: lugares libres, primero la planta baja, cerca de la entrada y a la altura de la cintura | `lugares_sugeridos()` | `pruebas_del_mapa.py` (17) |
 | Los del depósito ven solo el depósito; el administrador nunca queda limitado | `es_del_deposito()`, `cambiar_solo_deposito()` | `pruebas_del_mapa.py` (19) |
 | Armar y ubicar, un empleado; borrar un piso o un depósito, el administrador | `exigir_nivel()` | `pruebas_del_mapa.py` (20) |
+| Los lados de una estantería: códigos únicos en todo (estanterías y lados); se llega por el pasillo de ese lado; cambiar o sacar un código mueve lo ubicado sin mezclarlo; sacar la estantería o borrar el piso se lleva sus lados | `guardar_lados()`, `lugar_en_el_mapa()`, `la_cola_por_piso()`, `lo_que_se_pierde_con()` | `pruebas_del_mapa.py` (18b, 21) |
+| Lo que manda el vendedor espera en la caja: el stock baja ya, no cuenta en el cierre hasta cobrarlo y no se devuelve sin cobrar | `cerrar_venta(a_la_caja=True)`, `ventas_a_cobrar()`, `cierre_de_caja()` | `pruebas_de_la_caja.py` (2, 4) |
+| F10: la forma de pago, cuotas solo con crédito, descuento de 0 a 50% en cada cosa de la venta; se cobra una sola vez | `cobrar_venta()`, `total_con_descuento()` | `pruebas_de_la_caja.py` (3, 9b) |
+| F11: a la cuenta de la venta (o la elegida, si era de Mostrador), activa, con su descuento, su plazo y su límite; si no entra no cambia nada; anular anula el cargo y devolver se le acredita | `poner_a_cuenta()`, `anular_venta()`, `devolver_de_una_venta()` | `pruebas_de_la_caja.py` (5, 6, 7, 9b) |
+| El día de la caja es el día que se cobró; apagada la caja aparte, se cobra al terminar | `ventas_del_dia()`, `cierre_de_caja()`, `caja_aparte()` | `pruebas_de_la_caja.py` (8, 9) |
+| Uno más, uno menos y quitar, en la venta y en el presupuesto (el menú del click derecho) | `cambiar_cantidad_en_la_venta()`, `quitar_de_la_venta()`, `quitar_del_presupuesto()` | `pruebas_de_las_ventas.py` (7, 7b) |
 | Lo de cada cuenta: un empleado ve lo suyo, el administrador todas | `resumen_de_la_cuenta()`, `cuentas_para_mirar()` | `pruebas_de_lo_que_queda_afuera.py` |
 | Al terminar la venta, la patente y los km anotan cada pieza en la ficha del auto, una sola vez, y frenan los km para atrás | `anotar_la_venta_en_el_auto()`, `nombre_de_la_pieza()` | `pruebas_de_las_ventas.py` |
 | Un aviso por cliente con todo lo que le toca; «Ya le avisé» lo saca de la lista 15 días | `avisos_por_cliente()`, `marcar_avisado()` | `pruebas_de_los_cambios.py` (9l ter) |
@@ -242,5 +248,8 @@ Las pruebas se corren como dice el README, en «Antes de subir un cambio».
 
 ## Sin prueba automática todavía
 
+- El menú del click derecho y F10/F11 desde un campo: son JavaScript en el navegador
+  (`AYUDAS_DEL_NAVEGADOR`); se probaron con un navegador de verdad, no hay prueba que lo corra
+  sola.
 - Lo que necesita la base real (`pruebas_de_la_revision.py --base`, `pruebas_de_compatibilidad.py`)
   no corre en GitHub: se corre a mano antes de publicar.

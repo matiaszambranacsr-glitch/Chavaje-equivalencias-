@@ -19,8 +19,10 @@ if pagina == PAGINAS[8] and sub_deposito in SUB_DEPOSITO[1:]:
 
     def _dibujar_piso(piso_id, resaltados=(), camino=()):
         """El plano de un piso con lo resaltado (ver svg_del_piso())."""
-        _codigos = {l_: e["codigo"] for l_, e in estanterias_del_piso(piso_id).items()}
-        st.markdown(svg_del_piso(_por_id[piso_id]["plano"], _codigos, resaltados, camino),
+        _est = estanterias_del_piso(piso_id)
+        st.markdown(svg_del_piso(_por_id[piso_id]["plano"],
+                                 {l_: e["codigo"] for l_, e in _est.items()}, resaltados, camino,
+                                 lados={l_: e["lados"] for l_, e in _est.items()}),
                     unsafe_allow_html=True)
         if resaltados:
             st.caption(LEYENDA_DEL_MAPA)
@@ -114,7 +116,9 @@ if pagina == PAGINAS[8] and sub_deposito in SUB_DEPOSITO[1:]:
         _estantes = estanterias_del_piso(_piso_mapa)
         if _estantes:
             with st.expander("📚 Qué hay en cada estantería"):
-                _est_elegida = st.selectbox("Estantería:", sorted(e["codigo"] for e in _estantes.values()),
+                _est_elegida = st.selectbox("Estantería (o lado):",
+                                            sorted(cod for e in _estantes.values()
+                                                   for cod in codigos_de(e)),
                                             key="mapa_estanteria")
                 _adentro = productos_en(_est_elegida)
                 if not _adentro:
@@ -200,6 +204,8 @@ if pagina == PAGINAS[8] and sub_deposito in SUB_DEPOSITO[1:]:
             st.caption("Una por módulo y estante, con su código de barras: pegala en el estante "
                        "y escaneándola arriba todo lo que escanees después queda ahí.")
             _todas_est = {e["id"]: f"{_nombre_del_piso(p_['id'])} · {e['codigo']}"
+                                   + (f" (lados {', '.join(codigos_de(e)[1:])})"
+                                      if e["lados"] else "")
                           for p_ in _pisos for e in estanterias_del_piso(p_["id"]).values()}
             _elegidas_et = st.multiselect("Estanterías:", list(_todas_est),
                                           format_func=_todas_est.get, key="ubicar_etiquetas",
@@ -332,8 +338,11 @@ if pagina == PAGINAS[8] and sub_deposito in SUB_DEPOSITO[1:]:
             st.markdown("**El plano**" + (" — ✏️ con cambios sin guardar"
                                           if _borrador != _guardado else ""))
             if _leido["filas"]:
-                _codigos_armar = {l_: e["codigo"] for l_, e in estanterias_del_piso(_piso_id).items()}
-                st.markdown(svg_del_piso(_borrador, _codigos_armar), unsafe_allow_html=True)
+                _est_armar = estanterias_del_piso(_piso_id)
+                _codigos_armar = {l_: e["codigo"] for l_, e in _est_armar.items()}
+                st.markdown(svg_del_piso(_borrador, _codigos_armar,
+                                         lados={l_: e["lados"] for l_, e in _est_armar.items()}),
+                            unsafe_allow_html=True)
                 st.caption(f"{_leido['ancho']} columnas × {_leido['alto']} filas · "
                            f"{len(_leido['estanterias'])} estantería(s)"
                            + ("" if _leido["entrada"] else " · ⚠️ sin entrada («@»): se arranca "
@@ -439,7 +448,7 @@ if pagina == PAGINAS[8] and sub_deposito in SUB_DEPOSITO[1:]:
                         _h3.caption("Estantes")
                         for l_, e in sorted(_est_guardadas.items()):
                             _x1, _x2, _x3 = cols([2, 2, 2], apilar_en_celular=False)
-                            _x1.markdown(f"**{l_}** · {miles(_cuantos.get(e['codigo'].upper(), 0))} "
+                            _x1.markdown(f"**{l_}** · {miles(sum(_cuantos.get(cod.upper(), 0) for cod in codigos_de(e)))} "
                                          "producto(s)")
                             _valores[l_] = (
                                 _x2.text_input("Código", e["codigo"], key=f"armar_cod_{e['id']}",
@@ -457,6 +466,47 @@ if pagina == PAGINAS[8] and sub_deposito in SUB_DEPOSITO[1:]:
                         for _ok_t, _texto_t in _mensajes:
                             (st.success if _ok_t else st.warning)(_texto_t)
                         if not _mensajes:
+                            st.caption("No había nada distinto para guardar.")
+
+                # LOS CUATRO LADOS: cada lado de una línea con su propio código, como está
+                # pintado en el depósito. Ver «LOS CUATRO LADOS» en logica/mapa.py.
+                with st.expander("🧭 Los cuatro lados de cada estantería"):
+                    explicar("Si cada lado de una línea tiene su número o su letra, escribilo "
+                             "acá (arriba, abajo, izquierda y derecha son los del dibujo).",
+                             "Cada lado con código es un lugar más («B-3-2»): se llega por el "
+                             "pasillo de ese lado y tiene sus propias etiquetas. Vacío: ese lado "
+                             "no tiene. Si cambiás uno, lo ubicado ahí pasa al código nuevo; si "
+                             "lo borrás, a la estantería, en el mismo módulo.",
+                             en_expander=True)
+                    with st.form(f"form_armar_lados_{_piso_id}"):
+                        _lados_nuevos = {}
+                        _encabezado = cols([1.4, 1, 1, 1, 1], apilar_en_celular=False)
+                        _encabezado[0].caption("Estantería")
+                        for _col_l, _nombre_l in zip(_encabezado[1:], LADOS.values()):
+                            _col_l.caption(_nombre_l)
+                        for l_, e in sorted(_est_guardadas.items()):
+                            _fila_l = cols([1.4, 1, 1, 1, 1], apilar_en_celular=False)
+                            _fila_l[0].markdown(f"**{e['codigo']}**")
+                            _lados_nuevos[l_] = {
+                                lado: _col_l.text_input(
+                                    _nombre_l, e["lados"].get(lado, ""), max_chars=6,
+                                    key=f"armar_lado_{e['id']}_{lado}",
+                                    label_visibility="collapsed")
+                                for _col_l, (lado, _nombre_l) in zip(_fila_l[1:], LADOS.items())}
+                        _guardar_lados = st.form_submit_button("💾 Guardar los lados")
+                    if _guardar_lados:
+                        _mensajes_l = [guardar_lados(_est_guardadas[l_]["id"], cods)
+                                       for l_, cods in _lados_nuevos.items()
+                                       if {k_: v_.strip().upper() for k_, v_ in cods.items() if v_.strip()}
+                                       != {k_: v_.upper() for k_, v_ in _est_guardadas[l_]["lados"].items()}]
+                        # Todo bien: de nuevo, para que el dibujo de arriba ya los muestre.
+                        if _mensajes_l and all(_ok_l for _ok_l, _ in _mensajes_l):
+                            for _, _texto_l in _mensajes_l:
+                                avisar("success", _texto_l)
+                            st.rerun()
+                        for _ok_l, _texto_l in _mensajes_l:
+                            (st.success if _ok_l else st.warning)(_texto_l)
+                        if not _mensajes_l:
                             st.caption("No había nada distinto para guardar.")
 
                 # Cómo ordena la cola este piso (también se elige en «⏳ Para buscar»).
@@ -479,8 +529,9 @@ if pagina == PAGINAS[8] and sub_deposito in SUB_DEPOSITO[1:]:
             if es_admin():
                 with st.expander("🗑️ Borrar este piso o el depósito"):
                     _cuantos_b = cuantos_hay_en_cada_estanteria()
-                    _ubicados = sum(_cuantos_b.get(e["codigo"].upper(), 0)
-                                    for e in estanterias_del_piso(_piso_id).values())
+                    _ubicados = sum(_cuantos_b.get(cod.upper(), 0)
+                                    for e in estanterias_del_piso(_piso_id).values()
+                                    for cod in codigos_de(e))
                     st.caption(f"Los {miles(_ubicados)} producto(s) ubicados en este piso "
                                "conservan lo que tienen escrito, pero deja de estar en el mapa.")
                     _b1, _b2 = cols([1, 1])
