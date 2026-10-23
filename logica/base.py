@@ -501,6 +501,10 @@ hr { border-color: var(--border) !important; margin: 1.1rem 0 !important; }
   background: rgba(232, 163, 61, 0.14) !important; border-color: rgba(232, 163, 61, 0.45) !important;
 }
 .st-key-nav_principal [role="radiogroup"] label p { white-space: nowrap; font-weight: 600; }
+/* El plano del depósito escrito a mano: cada letra tiene que ocupar lo mismo, como en una hoja
+   cuadriculada (ver «EL MAPA DEL DEPÓSITO» en logica/mapa.py). */
+[class*="st-key-plano_a_mano"] textarea { font-family: 'IBM Plex Mono', monospace !important;
+  letter-spacing: .08em; line-height: 1.25 !important; }
 /* En la computadora no hay dedo para deslizar ni barra que se vea: con once secciones, la
    última («↩️ Devoluciones») quedaba escondida a la derecha a 1300 px. Ahí, si no entran, van
    en dos renglones; en el celular siguen deslizándose. */
@@ -985,23 +989,55 @@ def clave_ya_usada(password, excepto_usuario=None, excepto_mecanico=None):
     return False
 
 
-def crear_usuario(nombre, password, rol="operador"):
+def crear_usuario(nombre, password, rol="operador", solo_deposito=False):
     exigir_nivel("admin", "crear empleados")
     if clave_ya_usada(password):
         raise ValueError(TEXTO_CLAVE_REPETIDA)
     h, salt = hash_password(password)
     with db_lock:
-        c.execute("INSERT INTO usuarios (nombre, password_hash, salt, rol) VALUES (?, ?, ?, ?)",
-                   (nombre.strip(), h, salt, rol))
-        anotar_cambio("creó empleado", "usuario", nombre.strip(), despues={"rol": rol})
+        c.execute("""INSERT INTO usuarios (nombre, password_hash, salt, rol, solo_deposito)
+                     VALUES (?, ?, ?, ?, ?)""",
+                  (nombre.strip(), h, salt, rol, 1 if solo_deposito and rol != "admin" else 0))
+        anotar_cambio("creó empleado", "usuario", nombre.strip(),
+                      despues={"rol": rol, "solo_deposito": bool(solo_deposito)})
         conn.commit()
 
 
 def listar_usuarios():
     c.execute("""SELECT id AS "ID", nombre AS "Nombre", rol AS "Rol",
+                 CASE WHEN COALESCE(solo_deposito, 0) = 1 THEN '📦 Sí' ELSE '' END
+                     AS "Del depósito",
                  CASE WHEN activo=1 THEN 'Sí' ELSE 'No' END AS "Activo", creado_en AS "Creado"
                  FROM usuarios ORDER BY nombre""")
     return filas_a_listas(c)
+
+
+# LOS DEL DEPÓSITO. Lo pidió el dueño: «el depósito separalo, así los chicos del depósito se
+# meten ahí y no reniegan». Un empleado marcado «del depósito» entra directo a 📦 Depósito y
+# ve solo eso y ↩️ Devoluciones (ver PAGINAS_DEL_DEPOSITO): sin el buscador, las estadísticas
+# ni los avisos de administración en el medio. Es un operador como cualquiera —puede entregar,
+# recibir y armar el mapa—; el administrador nunca queda limitado.
+def es_del_deposito():
+    """¿Quien está adentro es «del depósito»? Ver «LOS DEL DEPÓSITO»."""
+    if st.session_state.get("nivel_usuario") != "operador":
+        return False
+    c.execute("SELECT solo_deposito FROM usuarios WHERE nombre = ? AND activo = 1",
+              (st.session_state.get("admin_nombre") or "",))
+    fila = c.fetchone()
+    return bool(fila and fila["solo_deposito"])
+
+
+def cambiar_solo_deposito(usuario_id, valor):
+    """Marca (o desmarca) a un empleado como «del depósito». Solo el administrador."""
+    exigir_nivel("admin", "cambiar lo que ve un empleado")
+    with db_lock:
+        c.execute("UPDATE usuarios SET solo_deposito = ? WHERE id = ? AND rol != 'admin'",
+                  (1 if valor else 0, usuario_id))
+        cambio = c.rowcount
+        anotar_cambio("lo marcó del depósito" if valor else "le sacó lo del depósito", "usuario",
+                      usuario_id)
+        conn.commit()
+    return bool(cambio)
 
 
 def validar_password_usuario(password):

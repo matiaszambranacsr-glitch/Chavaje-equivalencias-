@@ -375,6 +375,7 @@ MOTIVOS_DE_CAMBIO_DE_MEDIDA = {
     "cambio": "🔧 la pieza cambió (otra versión del fabricante)",
     "descripcion": "📄 leída de la descripción",
     "descartada": "🧹 lectura descartada (el lector la había leído mal)",
+    "ubicado": "📍 lo ubicó el depósito",
 }
 # Quién figura en el historial cuando la medida la escribió la app y no una persona.
 LECTOR_DE_DESCRIPCIONES = "lector de descripciones"

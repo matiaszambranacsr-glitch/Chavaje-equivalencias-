@@ -918,12 +918,19 @@ if pagina == PAGINAS[3]:
             nombre_nuevo_usuario = cu1.text_input("Nombre:", key="nuevo_usuario_nombre")
             password_nuevo_usuario = cu2.text_input("Contraseña:", type="password", key="nuevo_usuario_pass")
             rol_nuevo_usuario = st.selectbox("Rol:", ["operador", "admin"], key="nuevo_usuario_rol")
+            # Ver «LOS DEL DEPÓSITO» en logica/base.py.
+            del_deposito_nuevo = st.checkbox(
+                "📦 Es del depósito: entra directo al depósito y ve solo eso",
+                key="nuevo_usuario_deposito", disabled=rol_nuevo_usuario == "admin",
+                help="Ve 📦 Depósito y ↩️ Devoluciones, sin el buscador ni las estadísticas. "
+                     "Un administrador ve siempre todo.")
             if st.button("➕ Crear empleado"):
                 if not nombre_nuevo_usuario.strip() or not password_nuevo_usuario:
                     st.warning("Completá nombre y contraseña.")
                 else:
                     try:
-                        crear_usuario(nombre_nuevo_usuario, password_nuevo_usuario, rol_nuevo_usuario)
+                        crear_usuario(nombre_nuevo_usuario, password_nuevo_usuario, rol_nuevo_usuario,
+                                      solo_deposito=del_deposito_nuevo)
                         avisar("success", f"Empleado '{nombre_nuevo_usuario}' creado.")
                         st.rerun()
                     except sqlite3.IntegrityError as _err:
@@ -956,6 +963,18 @@ if pagina == PAGINAS[3]:
                     eliminar_usuario(usuario_id_sel)
                     avisar("success", "Empleado eliminado.")
                     st.rerun()
+                _u_sel = next(u for u in usuarios_actuales if u["ID"] == usuario_id_sel)
+                if _u_sel["Rol"] != "admin":
+                    _es_del_dep = bool(_u_sel["Del depósito"])
+                    if st.button("👀 Que vea todo" if _es_del_dep else "📦 Que vea solo el depósito",
+                                 key="usuario_solo_deposito",
+                                 help="«Del depósito»: entra directo al depósito y ve solo eso y "
+                                      "↩️ Devoluciones."):
+                        cambiar_solo_deposito(usuario_id_sel, not _es_del_dep)
+                        avisar("success", f"{usuario_elegido}: "
+                               + ("ahora ve todo." if _es_del_dep else
+                                  "ahora entra directo al depósito y ve solo eso."))
+                        st.rerun()
 
             st.markdown("---")
             st.markdown("**🔧 Mecánicos externos**")

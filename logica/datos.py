@@ -2967,6 +2967,41 @@ def _esquema_ventas(c):
     )""")
 
 
+def _esquema_del_mapa(c):
+    """EL MAPA DEL DEPÓSITO: depósitos, sus pisos con el plano dibujado en letras, y qué código
+    tiene cada estantería del plano. Ver «EL MAPA DEL DEPÓSITO» en logica/mapa.py."""
+    c.execute("""CREATE TABLE IF NOT EXISTS depositos (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        nombre TEXT NOT NULL UNIQUE,
+        orden INTEGER DEFAULT 0
+    )""")
+    c.execute("""CREATE TABLE IF NOT EXISTS pisos (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        deposito_id INTEGER NOT NULL REFERENCES depositos(id) ON DELETE CASCADE,
+        nombre TEXT NOT NULL,
+        orden INTEGER DEFAULT 0,
+        plano TEXT NOT NULL DEFAULT '',
+        orden_de_la_cola TEXT DEFAULT 'ubicacion',
+        minutos_de_cercania REAL DEFAULT 1,
+        UNIQUE(deposito_id, nombre)
+    )""")
+    c.execute("""CREATE TABLE IF NOT EXISTS estanterias (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        piso_id INTEGER NOT NULL REFERENCES pisos(id) ON DELETE CASCADE,
+        letra TEXT NOT NULL,
+        codigo TEXT NOT NULL UNIQUE COLLATE NOCASE,
+        niveles INTEGER DEFAULT 4,
+        UNIQUE(piso_id, letra)
+    )""")
+    # Para encontrar lo que hay en una estantería («A%») sin recorrer todo el catálogo: LIKE no
+    # distingue mayúsculas, y así puede usar el índice. Ver productos_en().
+    c.execute("CREATE INDEX IF NOT EXISTS idx_productos_ubicacion "
+              "ON productos(ubicacion COLLATE NOCASE)")
+    # LOS DEL DEPÓSITO: entran directo al depósito y ven solo lo suyo. Ver es_del_deposito().
+    if "solo_deposito" not in [f[1] for f in c.execute("PRAGMA table_info(usuarios)")]:
+        c.execute("ALTER TABLE usuarios ADD COLUMN solo_deposito INTEGER DEFAULT 0")
+
+
 def crear_esquema(c):
     _esquema_catalogo(c)
     _esquema_mostrador(c)
@@ -2974,6 +3009,7 @@ def crear_esquema(c):
     _esquema_vehiculos_y_mecanico(c)
     _esquema_gestion(c)
     _esquema_ventas(c)
+    _esquema_del_mapa(c)
     _datos_precargados_y_migraciones(c)
     _esquema_registro_y_reglas(c)
     _esquema_numeros_que_son_numeros(c)

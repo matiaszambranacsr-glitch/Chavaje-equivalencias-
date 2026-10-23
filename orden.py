@@ -44,6 +44,7 @@ PARTES_DE_LA_LOGICA = [
     "mecanico.py",
     "deposito.py",
     "ventas.py",
+    "mapa.py",
 ]
 
 # En el orden en que estaban: cada una empieza con su «if pagina == PAGINAS[n]:», así que
@@ -66,6 +67,7 @@ PANTALLAS = [
     "vehiculos.py",
     "mecanico.py",
     "deposito.py",
+    "deposito_mapa.py",
     "ventas.py",
     "devoluciones.py",
 ]

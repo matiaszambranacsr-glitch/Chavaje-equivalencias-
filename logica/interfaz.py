@@ -76,6 +76,9 @@ def herramientas_que_coinciden(texto):
 PAGINAS = ["🔍 Buscador", "🔗 Vincular manual", "📁 Cargar Excel", "🗂️ Administrar",
            "📊 Estadísticas", "📋 Lista WhatsApp", "🚗 Vehículos", "🛠️ Modo Mecánico",
            "📦 Depósito", "🧾 Ventas", "↩️ Devoluciones"]
+# Lo único que ven los «del depósito» (ver es_del_deposito()): entran directo al depósito, sin
+# el buscador, las estadísticas ni los avisos de administración en el medio.
+PAGINAS_DEL_DEPOSITO = [PAGINAS[8], PAGINAS[10]]
 
 # Una línea por pantalla diciendo para qué sirve: se ve debajo de las pastillas. Sin esto hay
 # que entrar a cada una para saber qué hace, y el que atiende el mostrador no tiene tiempo de
@@ -93,8 +96,8 @@ PARA_QUE_SIRVE = {
     "🚗 Vehículos": "Fichas de los autos: qué se le puso a cada uno y cuándo.",
     "🛠️ Modo Mecánico": "Identificar un auto por patente, chasis o número de motor, y los "
                        "códigos de falla.",
-    "📦 Depósito": "Lo que pidió el mostrador, para buscarlo y darlo de baja; y lo que quedó en "
-                  "cada cuenta para facturar.",
+    "📦 Depósito": "Lo que pidió el mostrador, para buscarlo y darlo de baja; el mapa con dónde "
+                  "está cada cosa; y lo que quedó en cada cuenta para facturar.",
     "🧾 Ventas": "Cobrar lo que se lleva el cliente: descuenta el stock y, al terminar, lo anota "
                 "en la ficha del auto con la patente y los km.",
     "↩️ Devoluciones": "Lo que vuelve al depósito (escaneando la etiqueta nuestra), lo que "
@@ -114,12 +117,16 @@ SUB_MEC = ["🔤 Por patente", "🔢 Chasis / VIN", "⚙️ Número de motor", "
 # Las devoluciones, aparte de 🧾 Ventas y 📦 Depósito: con muchos pedidos, adentro de ellas
 # hacían la pantalla eterna (lo pidió el dueño).
 SUB_DEVOLUCIONES = ["📦 Al depósito", "🧾 De un cliente", "🏷️ Etiquetas"]
+# El depósito, separado en lo de todos los días (buscar lo pedido) y el mapa: dónde está cada
+# cosa, ubicar lo que no tiene lugar y armar las estanterías.
+SUB_DEPOSITO = ["⏳ Para buscar", "🗺️ Mapa", "📍 Ubicar", "🏗️ Armar el depósito"]
 # Qué solapas tiene cada pantalla, y con qué clave de la sesión se elige.
 SOLAPAS_DE_LA_PAGINA = {
     "📊 Estadísticas": (SUB_STATS, "sub_stats"),
     "🗂️ Administrar": (SUB_ADMIN, "sub_admin"),
     "🛠️ Modo Mecánico": (SUB_MEC, "sub_mec"),
     "↩️ Devoluciones": (SUB_DEVOLUCIONES, "sub_devoluciones"),
+    "📦 Depósito": (SUB_DEPOSITO, "sub_deposito"),
 }
 
 
@@ -162,6 +169,12 @@ PARA_QUE_SIRVE_LA_SOLAPA = {
                        "vender, y la plata sale de la caja de hoy.",
     "🏷️ Etiquetas": "Imprimir la etiqueta nuestra de un producto (también escaneando la caja) "
                    "o de lo que está afuera.",
+    "⏳ Para buscar": "Lo que pidió el mostrador, en el orden de cada piso, con dónde está cada "
+                     "cosa resaltado en el mapa.",
+    "🗺️ Mapa": "Dónde está un repuesto: escribí o escaneá el código y se resalta en el plano.",
+    "📍 Ubicar": "Ponerle lugar a lo que no tiene: escaneá el estante y después lo que hay en él.",
+    "🏗️ Armar el depósito": "Los depósitos, sus pisos y sus estanterías: armalo en un minuto y "
+                           "retocalo.",
 }
 
 

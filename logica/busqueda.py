@@ -483,7 +483,17 @@ def armar_lista_picking(codigos_texto):
                       FROM productos p JOIN marcas m ON m.id = p.marca_id
                       WHERE p.codigo_clean IN ({marcadores})''', tanda)
         resultado.extend(filas_a_listas(c))
-    resultado.sort(key=lambda r: (not r["Ubicación"], r["Ubicación"] or ""))
+    # Con el mapa del depósito: por piso, y adentro de cada uno por ubicación con los números
+    # como números (A2 antes que A10; como texto, «A10» iba antes). Ver «EL MAPA DEL DEPÓSITO».
+    pisos = [p["id"] for d in depositos_y_pisos() for p in d["pisos"]]
+    claves = {}
+    for r in resultado:
+        donde = lugar_en_el_mapa(r["Ubicación"])
+        if donde:
+            r["Dónde"] = f"{donde['deposito']} · {donde['piso']}"
+        claves[id(r)] = (not r["Ubicación"], pisos.index(donde["piso_id"]) if donde else len(pisos),
+                         clave_de_ubicacion(r["Ubicación"]))
+    resultado.sort(key=lambda r: claves[id(r)])
     return resultado
 
 

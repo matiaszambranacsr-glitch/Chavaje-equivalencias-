@@ -123,6 +123,13 @@ específico, y las pantallas quedan todas al final:
     logica/ventas.py
         · VENTAS DEL MOSTRADOR
         · DEVOLVER ALGO DE UNA VENTA
+    logica/mapa.py
+        · EL MAPA DEL DEPÓSITO
+        · DEPÓSITOS, PISOS Y ESTANTERÍAS
+        · ARMAR EL PLANO SIN DIBUJAR
+        · DÓNDE ESTÁ CADA COSA
+        · LA COLA POR PISO
+        · EL DIBUJO DEL PISO
     app.py
         · ENCABEZADO
         · NAVEGACIÓN PRINCIPAL
@@ -152,6 +159,8 @@ específico, y las pantallas quedan todas al final:
         · MODO MECÁNICO
     pantallas/deposito.py
         · DEPÓSITO: lo que pidió el mostrador, y lo que queda para facturar
+    pantallas/deposito_mapa.py
+        · DEPÓSITO → EL MAPA: dónde está cada cosa, ubicar y armar las estanterías
     pantallas/ventas.py
         · VENTAS: cobrar, descontar el stock y anotarlo en la ficha del auto
     pantallas/devoluciones.py
@@ -404,8 +413,15 @@ _corte("sesión y encabezado")
 #     arma la sección que estás viendo, así que la app responde bastante más rápido.
 # PAGINAS, SUB_STATS y PARA_QUE_SIRVE viven en logica/interfaz.py, con las demás listas de
 # navegación: ver «NAVEGACIÓN: DÓNDE ESTÁ CADA COSA».
-if st.session_state.get("pagina_actual") not in PAGINAS:
-    st.session_state["pagina_actual"] = PAGINAS[0]
+# LOS DEL DEPÓSITO entran directo al depósito y ven solo lo suyo (ver es_del_deposito()).
+try:
+    _es_del_deposito = es_del_deposito()
+except sqlite3.Error as _err:
+    anotar_error("es_del_deposito", _err)
+    _es_del_deposito = False
+_paginas_a_la_vista = PAGINAS_DEL_DEPOSITO if _es_del_deposito else PAGINAS
+if st.session_state.get("pagina_actual") not in _paginas_a_la_vista:
+    st.session_state["pagina_actual"] = _paginas_a_la_vista[0]
 recordar_lo_elegido_al_cambiar_de_pantalla()
 
 # El menú va ANTES que los avisos del día. Iba después, y con cuatro avisos abiertos quedaba
@@ -418,7 +434,7 @@ recordar_lo_elegido_al_cambiar_de_pantalla()
 # El CSS los muestra como pastillas, en un solo renglón: en el celular se deslizan de costado
 # (ver «La navegación principal» en logica/base.py).
 with st.container(key="nav_principal"):
-    st.radio("Sección:", PAGINAS, key="pagina_actual", horizontal=True,
+    st.radio("Sección:", _paginas_a_la_vista, key="pagina_actual", horizontal=True,
              label_visibility="collapsed")
 
 pagina = st.session_state["pagina_actual"]
@@ -534,7 +550,9 @@ if not es_admin() and hay_claves_configuradas():
     _problemas = [p for p in _problemas if not p.get("solo_admin")]
 # Los avisos de salud son del negocio (cuántos productos, qué está roto, clientes esperando):
 # no se le muestran a quien entró sin contraseña. Ver seccion_permitida().
-if _problemas and (es_operador_o_admin() or not hay_claves_configuradas()):
+# Los del depósito tampoco: son tareas de administración, y ellos entran a buscar lo pedido.
+if (_problemas and (es_operador_o_admin() or not hay_claves_configuradas())
+        and not _es_del_deposito):
     # Se separa por urgencia en vez de mostrar una lista pareja. Antes todo se veía igual y
     # «hay clientes esperando algo que ya tenés» quedaba mezclado con «hay descripciones
     # pegadas». Lo que da plata va arriba y sin plegar; el resto, plegado.

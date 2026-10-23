@@ -561,8 +561,7 @@ def devolver_lo_escaneado(escaneos, persona, codigo):
 
 def pdf_de_etiquetas(items):
     """Las etiquetas con el código de barras nuestro, para pegar en cada unidad: `items` es
-    [(producto_id, cuántas)]. A4, tres columnas por ocho filas. b"" si no hay nada."""
-    from fpdf import FPDF
+    [(producto_id, cuántas)]. b"" si no hay nada."""
     etiquetas = []
     for producto_id, cuantas in items:
         c.execute("""SELECT p.id, p.codigo_raw, p.descripcion, m.nombre AS marca
@@ -570,9 +569,21 @@ def pdf_de_etiquetas(items):
                   (producto_id,))
         f = c.fetchone()
         if f:
-            etiquetas += [dict(f)] * max(0, min(int(cuantas), CANTIDAD_MAXIMA_POR_PEDIDO * 4))
+            etiquetas += [{"titulo": f"{f['marca']} {f['codigo_raw']}",
+                           "detalle": f["descripcion"] or "",
+                           "barras": codigo_nuestro(f["id"])}
+                          ] * max(0, min(int(cuantas), CANTIDAD_MAXIMA_POR_PEDIDO * 4))
+    return pdf_de_etiquetas_con_barras(etiquetas)
+
+
+def pdf_de_etiquetas_con_barras(etiquetas):
+    """Una hoja A4 de etiquetas, tres columnas por ocho filas: cada una con su título, una línea
+    de detalle y un código de barras Code 39 con el texto abajo. `etiquetas`: [{titulo,
+    detalle, barras}]. La usan las de los productos y las de los estantes (ver
+    pdf_de_etiquetas_de_ubicaciones()). b"" si no hay nada."""
     if not etiquetas:
         return b""
+    from fpdf import FPDF
 
     def limpiar(texto):
         return str(texto).encode("latin-1", "replace").decode("latin-1")
@@ -587,21 +598,21 @@ def pdf_de_etiquetas(items):
         y = 8 + ((n // columnas) % filas) * (alto + 1)
         pdf.set_xy(x, y)
         pdf.set_font("Helvetica", "B", 9)
-        pdf.cell(ancho, 4, limpiar(f"{e['marca']} {e['codigo_raw']}")[:34])
+        pdf.cell(ancho, 4, limpiar(e["titulo"])[:34])
         pdf.set_xy(x, y + 4)
         pdf.set_font("Helvetica", "", 7)
-        pdf.cell(ancho, 4, limpiar((e["descripcion"] or "")[:44]))
+        pdf.cell(ancho, 4, limpiar(e["detalle"])[:44])
         # LO QUE LEE UN LECTOR: fpdf toma `w` como la barra GRUESA (la fina es un tercio). Con
         # w=0.3 la fina quedaba en 0,1 mm y ningún lector la levantaba (probado decodificando el
         # PDF). Cada carácter de Code 39 ocupa 16 barras finas, más 10 de margen blanco a cada
         # lado: la fina, lo más cerca de 0,33 mm que entre en la etiqueta, y centrado.
-        texto = f"*{codigo_nuestro(e['id'])}*"
+        texto = f"*{e['barras']}*"
         fina = min(0.33, (ancho - 2) / (16 * len(texto) + 20))
         largo = 16 * len(texto) * fina - fina
         pdf.code39(texto, x=x + (ancho - largo) / 2, y=y + 9, w=3 * fina, h=16)
         pdf.set_xy(x, y + 27)
         pdf.set_font("Helvetica", "B", 9)
-        pdf.cell(ancho, 4, codigo_nuestro(e["id"]))
+        pdf.cell(ancho, 4, limpiar(e["barras"]))
     return bytes(pdf.output())
 
 

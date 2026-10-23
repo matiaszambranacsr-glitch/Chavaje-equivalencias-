@@ -221,6 +221,17 @@ Las pruebas se corren como dice el README, en «Antes de subir un cambio».
 | Las etiquetas se pueden leer (barra fina de 0,25 mm o más) y entran en la etiqueta | `pdf_de_etiquetas()`, `productos_para_etiquetar()` | `pruebas_de_lo_que_queda_afuera.py` (12) |
 | Lo que llega a 0 al vender o al entregar se anota solo para reponer, una vez | `anotar_lo_que_se_termino()` | `pruebas_de_lo_que_queda_afuera.py` (13), `pruebas_de_las_ventas.py` (16) |
 | «Sumar a la venta» lo que se tiene del depósito, con su cantidad | `sumar_lo_que_tengo_a_la_venta()` | `pruebas_de_lo_que_queda_afuera.py` (11) |
+| El plano en letras: estanterías, módulos, entrada, y lo que no se entiende dicho en palabras | `leer_plano()` | `pruebas_del_mapa.py` (1) |
+| Armado rápido, sumar, mover y sacar estanterías, sin pisar otra cosa | `armado_rapido()`, `sumar_estanteria()`, `mover_estanteria()`, `sacar_estanteria()` | `pruebas_del_mapa.py` (2, 3) |
+| Las distancias son caminando por el pasillo; lo que no se alcanza va al final | `planear_el_recorrido()` | `pruebas_del_mapa.py` (4) |
+| Una ubicación es un lugar del mapa que existe (módulo y estante incluidos), y se guarda escrita como en el mapa | `leer_ubicacion()`, `lugar_en_el_mapa()`, `ubicar_producto()` | `pruebas_del_mapa.py` (5, 8, 9) |
+| Las estanterías tienen código único en todos los depósitos; cambiarlo pasa lo ubicado al código nuevo | `guardar_plano()`, `guardar_estanteria()` | `pruebas_del_mapa.py` (7, 13) |
+| Guardar un plano que deja productos fuera del mapa se avisa antes | `lo_que_se_pierde_con()`, `guardar_plano()` | `pruebas_del_mapa.py` (12) |
+| La cola por piso: por ubicación, o la más cerca de lo último que entregó ESE usuario en ese piso dentro de los minutos del piso | `la_cola_por_piso()`, `elegir_orden_de_la_cola()` | `pruebas_del_mapa.py` (14, 15) |
+| Ubicar escaneando, o pegando una lista: solo lo que está bien | `que_es_lo_escaneado_al_ubicar()`, `ubicar_de_una_lista()` | `pruebas_del_mapa.py` (10, 11) |
+| Dónde poner lo que no tiene lugar: lugares libres, primero la planta baja, cerca de la entrada y a la altura de la cintura | `lugares_sugeridos()` | `pruebas_del_mapa.py` (17) |
+| Los del depósito ven solo el depósito; el administrador nunca queda limitado | `es_del_deposito()`, `cambiar_solo_deposito()` | `pruebas_del_mapa.py` (19) |
+| Armar y ubicar, un empleado; borrar un piso o un depósito, el administrador | `exigir_nivel()` | `pruebas_del_mapa.py` (20) |
 | Lo de cada cuenta: un empleado ve lo suyo, el administrador todas | `resumen_de_la_cuenta()`, `cuentas_para_mirar()` | `pruebas_de_lo_que_queda_afuera.py` |
 | Al terminar la venta, la patente y los km anotan cada pieza en la ficha del auto, una sola vez, y frenan los km para atrás | `anotar_la_venta_en_el_auto()`, `nombre_de_la_pieza()` | `pruebas_de_las_ventas.py` |
 | Un aviso por cliente con todo lo que le toca; «Ya le avisé» lo saca de la lista 15 días | `avisos_por_cliente()`, `marcar_avisado()` | `pruebas_de_los_cambios.py` (9l ter) |

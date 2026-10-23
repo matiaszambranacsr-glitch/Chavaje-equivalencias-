@@ -2100,7 +2100,7 @@ if pagina == PAGINAS[0]:
                     if sin_ubicacion:
                         st.caption(
                             f"⚠️ {len(sin_ubicacion)} producto(s) todavía no tienen ubicación cargada "
-                            f"(aparecen al final) — cargala en {miga_hasta('Productos')} para que la próxima vez "
+                            f"(aparecen al final) — cargala en {miga_hasta('Ubicar')} para que la próxima vez "
                             "el orden sea completo."
                         )
                 else:
