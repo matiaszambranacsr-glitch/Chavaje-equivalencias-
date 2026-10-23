@@ -1027,8 +1027,8 @@ if pagina == PAGINAS[0]:
                                 st.info(
                                     f"💰 **Mejor margen entre los que tenés en stock:** "
                                     f"{mejor_marg['marca']} {mejor_marg['codigo']} — te deja "
-                                    f"${miles(mejor_marg['ganancia'], 0)} "
-                                    f"(${miles(mejor_marg['diferencia'], 0)} más que el peor de la lista)."
+                                    f"\\${miles(mejor_marg['ganancia'], 0)} "
+                                    f"(\\${miles(mejor_marg['diferencia'], 0)} más que el peor de la lista)."
                                 )
                         puentes_res = puentes_en_el_resultado([f["ID"] for f in res])
 

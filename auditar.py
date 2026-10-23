@@ -611,6 +611,43 @@ for nodo in ast.walk(ARBOL):
                  f"st.{nodo.func.attr} con {len(texto)} caracteres fijos — conviene explicar() "
                  "(resumen corto + detalle desplegable)")
 
+# ============ 8e. Dos «$» en un mismo texto: Streamlit lo lee como una fórmula ============
+# El markdown de Streamlit toma lo que queda entre dos «$» como una fórmula matemática: «Total:
+# $25.000 · 2 esperando por $37.500» salía como «Total: 0** en 0 venta(s)…», con los montos
+# comidos y las negritas a la vista. Pasó en el cierre de la caja, en la ventana de F11, en el
+# permiso del límite y en el mejor margen del buscador. Con dos o más, van escapados («\\$»).
+# Se cuentan los «$» que el texto puede llegar a tener a la vez: en un «a if x else b», los de
+# la rama que más tiene; en una suma de pedazos, todos.
+def _dolares_a_la_vez(n):
+    if isinstance(n, ast.IfExp):
+        return max(_dolares_a_la_vez(n.body), _dolares_a_la_vez(n.orelse))
+    if isinstance(n, ast.BinOp) and isinstance(n.op, ast.Add):
+        return _dolares_a_la_vez(n.left) + _dolares_a_la_vez(n.right)
+    if isinstance(n, ast.Constant) and isinstance(n.value, str):
+        return n.value.count("$") - n.value.count("\\$")
+    if isinstance(n, ast.JoinedStr):
+        return sum(_dolares_a_la_vez(v) for v in n.values)
+    if isinstance(n, ast.FormattedValue):
+        return _dolares_a_la_vez(n.value)
+    return 0
+
+
+for nodo in ast.walk(ARBOL):
+    if not (isinstance(nodo, ast.Call) and isinstance(nodo.func, ast.Attribute)
+            and nodo.func.attr in ("markdown", "caption", "warning", "success", "info", "error",
+                                   "write", "toast", "subheader", "header", "title", "expander",
+                                   "button", "toggle", "checkbox", "radio", "selectbox",
+                                   "metric")
+            and nodo.args):
+        continue
+    # Con unsafe_allow_html es HTML armado a mano (el plano, las tarjetas): ahí no hay fórmulas.
+    if any(k.arg == "unsafe_allow_html" for k in nodo.keywords):
+        continue
+    if _dolares_a_la_vez(nodo.args[0]) >= 2:
+        reportar("ERROR", nodo.lineno,
+                 f"st.{nodo.func.attr} con dos «$» o más: Streamlit lo lee como una fórmula y se "
+                 "come los montos — escapalos («\\$»)")
+
 # El resumen de explicar() tiene que entrar en una línea del celular
 for nodo in ast.walk(ARBOL):
     if isinstance(nodo, ast.Call) and isinstance(nodo.func, ast.Name) and nodo.func.id == "explicar":

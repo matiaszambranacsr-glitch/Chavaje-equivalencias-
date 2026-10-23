@@ -101,8 +101,8 @@ if pagina == PAGINAS[11]:
         _total = total_con_descuento(venta_id, _desc)
         st.warning(f"**¿Estás seguro que querés ponérselo a cuenta a {_nombre}?** "
                    f"${miles(_total, 0)}")
-        st.caption(f"Debe hoy ${miles(_estado['saldo'], 0)}"
-                   + (f" · límite ${miles(_estado['limite'], 0)}" if _estado["limite"] else
+        st.caption(f"Debe hoy \\${miles(_estado['saldo'], 0)}"
+                   + (f" · límite \\${miles(_estado['limite'], 0)}" if _estado["limite"] else
                       " · sin límite")
                    + f" · vence en {_config['dias_de_plazo']} días")
         _s1, _s2 = cols([1, 1], apilar_en_celular=False)
@@ -169,14 +169,14 @@ if pagina == PAGINAS[11]:
         if not _del_dia and not _devs_dia:
             st.caption("Ese día no hubo ventas.")
         else:
-            st.markdown(f"**Total: ${miles(_caja['total'], 0)}** en {_caja['ventas']} venta(s)"
-                        + (f" · {_caja['anuladas']} anulada(s) por ${miles(_caja['total_anulado'], 0)},"
+            st.markdown(f"**Total: \\${miles(_caja['total'], 0)}** en {_caja['ventas']} venta(s)"
+                        + (f" · {_caja['anuladas']} anulada(s) por \\${miles(_caja['total_anulado'], 0)},"
                            " que no cuentan" if _caja["anuladas"] else "")
                         + (f" · {_caja['devoluciones']} devolución(es) por "
-                           f"${miles(_caja['total_devuelto'], 0)}, ya descontadas"
+                           f"\\${miles(_caja['total_devuelto'], 0)}, ya descontadas"
                            if _caja["devoluciones"] else "")
                         + (f" · ⏳ {_caja['a_cobrar']} esperando en la caja por "
-                           f"${miles(_caja['total_a_cobrar'], 0)}, que todavía no cuentan"
+                           f"\\${miles(_caja['total_a_cobrar'], 0)}, que todavía no cuentan"
                            if _caja["a_cobrar"] else ""))
             # La ganancia la ve el administrador, como el margen del buscador.
             if es_admin() and _caja["items_con_costo"]:

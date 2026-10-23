@@ -1800,10 +1800,10 @@ def mostrar_permisos_de_limite():
                             f"${miles(p['importe'], 0)} de más · lo pidió "
                             f"{p['pedido_por'] or 'alguien'} a las "
                             f"{_hora_del_permiso(p['pedido_en'])}")
-                st.caption(f"Por qué: {p['motivo']}  \nHoy debe ${miles(_estado['saldo'], 0)} "
-                           f"(vencido ${miles(_estado['vencido'], 0)}), el límite es "
-                           f"${miles(_config['limite'], 0)} y tiene pedido sin entregar "
-                           f"${miles(_pendiente_de_la_cuenta(p['mecanico_id'], _config['descuento']), 0)}.")
+                st.caption(f"Por qué: {p['motivo']}  \nHoy debe \\${miles(_estado['saldo'], 0)} "
+                           f"(vencido \\${miles(_estado['vencido'], 0)}), el límite es "
+                           f"\\${miles(_config['limite'], 0)} y tiene pedido sin entregar "
+                           f"\\${miles(_pendiente_de_la_cuenta(p['mecanico_id'], _config['descuento']), 0)}.")
                 if puede_autorizar_limites():
                     mostrar_contestar_permiso(p, f"lista_{p['id']}")
                 else:
