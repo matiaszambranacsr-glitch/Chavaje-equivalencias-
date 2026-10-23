@@ -1132,8 +1132,10 @@ def svg_del_piso(plano_texto, codigos=None, resaltados=(), camino=(), celda=26, 
     def centro(x, y):
         return margen + x * celda + celda / 2, margen + y * celda + celda / 2
 
+    # Hasta el doble de su tamaño: en la computadora se veía chico, en una esquina; en el
+    # celular igual ocupa el ancho de la pantalla.
     partes = [f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {ancho} {alto}" '
-              f'style="width:100%;max-width:{ancho}px;height:auto;display:block" role="img" '
+              f'style="width:100%;max-width:{min(ancho * 2, 980)}px;height:auto;display:block" role="img" '
               f'aria-label="Plano del piso">',
               f'<rect x="0" y="0" width="{ancho}" height="{alto}" rx="8" style="fill:{k["fondo"]}"/>',
               f'<rect {caja(0, 0, plano["ancho"], plano["alto"])} style="fill:{k["pasillo"]}"/>']

@@ -299,103 +299,191 @@ def cols(pesos, apilar_en_celular=True):
 
 CSS_CUSTOM = """
 <style>
-@import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap');
 
+/* ==== LOS COLORES Y LAS MEDIDAS ====
+   Oscuro y sobrio: grises azulados, un solo color de acento (el ámbar de la marca) para lo que
+   hay que hacer, y verde, ámbar y rojo solo para decir cómo está algo. Los mismos colores van
+   en .streamlit/config.toml: si se cambia uno, cambiar el otro. */
 :root {
-  --bg: #14171B;
-  --bg-panel: #1D2126;
-  --bg-panel-2: #242830;
-  --border: #2D3239;
-  --text: #ECEEF0;
-  --text-muted: #9BA3AC;
+  --bg: #0F1216;
+  --bg-panel: #161A1F;
+  --bg-panel-2: #1C2127;
+  --bg-input: #0C0F12;
+  --border: #252B33;
+  --border-strong: #323943;
+  --text: #E8EBEE;
+  --text-muted: #94A0AC;
   --accent: #E8A33D;
-  --accent-hover: #F2B658;
-  --accent-2: #4C8BF5;
+  --accent-hover: #F0B456;
+  --accent-soft: rgba(232, 163, 61, 0.12);
+  --accent-2: #5B9BF7;
+  --ok: #3FB27F;
+  --bad: #E5534B;
+  --radius: 12px;
+  --radius-sm: 9px;
+  --shadow: 0 1px 2px rgba(0, 0, 0, 0.35), 0 10px 30px rgba(0, 0, 0, 0.22);
 }
 
-html, body, [class*="css"] { font-family: 'Inter', -apple-system, sans-serif; }
-
+html, body, [class*="css"], .stApp, button, input, textarea, select {
+  font-family: 'Inter', -apple-system, 'Segoe UI', sans-serif;
+  font-feature-settings: "cv11", "ss01";
+}
 [data-testid="stAppViewContainer"] {
-  background: radial-gradient(circle at 15% 0%, #1A1E24 0%, var(--bg) 45%) fixed;
+  background:
+    radial-gradient(1200px 380px at 50% -140px, rgba(232, 163, 61, 0.07), transparent 70%),
+    var(--bg);
   color: var(--text);
 }
-[data-testid="stHeader"] { background: transparent; }
+/* Menos aire arriba: la barra de Streamlit queda vacía (ver toolbarMode en config.toml). */
+[data-testid="stHeader"] { background: transparent; height: 0 !important; min-height: 0 !important; }
+.block-container { padding-top: 1rem !important; }
+h1, h2, h3, h4 { font-family: 'Inter', sans-serif !important; font-weight: 700 !important;
+  letter-spacing: -0.02em; color: var(--text); }
+h3 { font-size: 1.25rem !important; }
+p, li { line-height: 1.55; }
+[data-testid="stCaptionContainer"], [data-testid="stCaptionContainer"] p { color: var(--text-muted) !important; }
+code { font-family: 'IBM Plex Mono', monospace; color: var(--accent-2); background: rgba(91, 155, 247, 0.08);
+  padding: 0.05em 0.35em; border-radius: 5px; }
+hr { border-color: var(--border) !important; margin: 1.1rem 0 !important; }
 
-/* Encabezado tipo ficha/etiqueta de repuesto */
-.app-header {
-  display: flex; flex-direction: column; gap: 2px;
-  padding: 18px 22px; margin-bottom: 10px;
-  background: linear-gradient(135deg, var(--bg-panel) 0%, var(--bg-panel-2) 100%);
-  border: 1px solid var(--border); border-left: 3px solid var(--accent);
-  border-radius: 10px;
+/* ==== EL ENCABEZADO ====
+   Un solo renglón: la marca a la izquierda y, a la derecha, los avisos y quién está adentro
+   (ver «ENCABEZADO» en app.py). Antes eran dos: la tarjeta y otro con la sesión, la vista y
+   «Salir», que en el celular ocupaba todo el ancho. */
+.st-key-barra_superior {
+  padding: 8px 10px 8px 12px !important; margin-bottom: 6px;
+  background: linear-gradient(180deg, var(--bg-panel-2) 0%, var(--bg-panel) 100%);
+  border: 1px solid var(--border); border-radius: 16px; box-shadow: var(--shadow);
 }
-.app-header__eyebrow {
-  font-family: 'IBM Plex Mono', monospace; font-size: 0.68rem;
-  letter-spacing: 0.14em; color: var(--accent); text-transform: uppercase; margin: 0 0 4px 0;
+.st-key-barra_superior [data-testid="stPopoverButton"] { min-height: 2.35rem; }
+.app-bar { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.app-bar__logo {
+  width: 38px; height: 38px; border-radius: 11px; flex: 0 0 auto;
+  display: flex; align-items: center; justify-content: center; font-size: 1.15rem;
+  background: linear-gradient(135deg, var(--accent) 0%, #C47719 100%);
+  box-shadow: 0 2px 10px rgba(232, 163, 61, 0.30), inset 0 1px 0 rgba(255, 255, 255, 0.25);
 }
-.app-header h1 {
-  font-family: 'Space Grotesk', sans-serif; font-weight: 700; font-size: 1.9rem;
-  margin: 0; color: var(--text); letter-spacing: -0.01em;
-}
-.app-header p { margin: 4px 0 0 0; color: var(--text-muted); font-size: 0.92rem; }
+.app-bar__title { font-weight: 700; font-size: 1.08rem; color: var(--text); line-height: 1.15;
+  letter-spacing: -0.015em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.app-bar__sub { font-size: 0.76rem; color: var(--text-muted); line-height: 1.25; white-space: nowrap;
+  overflow: hidden; text-overflow: ellipsis; }
 
-/* Pestañas (nivel principal) */
-.stTabs [data-baseweb="tab-list"] { gap: 4px; border-bottom: 1px solid var(--border); }
-.stTabs [data-baseweb="tab"] {
-  font-family: 'Space Grotesk', sans-serif; font-weight: 600; font-size: 0.86rem;
-  color: var(--text-muted); background: transparent; border-radius: 8px 8px 0 0; padding: 10px 14px;
-}
-.stTabs [aria-selected="true"] { color: var(--accent) !important; border-bottom: 2px solid var(--accent) !important; }
+/* El título de cada sección, con para qué sirve abajo (ver «Para qué sirve» en app.py). */
+.titulo-seccion { margin: 2px 0 6px 2px; }
+.titulo-seccion__nombre { font-size: 1.55rem; font-weight: 700; letter-spacing: -0.025em;
+  color: var(--text); line-height: 1.2; }
+.titulo-seccion__para { font-size: 0.9rem; color: var(--text-muted); margin-top: 3px; }
 
-/* Sub-pestañas anidadas (ej: dentro de Administrar o Modo Mecánico) — más chicas y sutiles,
-   para que se note la jerarquía: esto es una subdivisión de la pestaña principal, no otra más. */
-.stTabs .stTabs [data-baseweb="tab-list"] {
-  border-bottom: 1px solid var(--border); gap: 2px; margin-top: 4px; margin-bottom: 8px;
+/* ==== LA NAVEGACIÓN ====
+   Las opciones de un radio como pastillas, sin el puntito de formulario. Se esconde el aro
+   entero (label > div > div), no solo el punto de adentro: con el punto solo, en cada pastilla
+   quedaba un circulito vacío al lado del nombre. */
+[data-testid="stRadioOption"] > div > div:not([data-testid="stMarkdownContainer"]) {
+  display: none !important;
 }
-.stTabs .stTabs [data-baseweb="tab"] {
-  font-size: 0.78rem; padding: 7px 11px; color: var(--text-muted); opacity: 0.85;
-}
-.stTabs .stTabs [aria-selected="true"] { opacity: 1; }
-
-/* Botones */
-.stButton > button, .stDownloadButton > button, .stLinkButton > a, .stFormSubmitButton > button {
-  border-radius: 8px; border: 1px solid var(--border); font-family: 'Inter', sans-serif;
-  font-weight: 600; transition: all 0.15s ease;
-}
-.stButton > button[kind="primary"], .stFormSubmitButton > button[kind="primary"] {
-  background: var(--accent); color: #1A1300; border: none;
-}
-.stButton > button[kind="primary"]:hover, .stFormSubmitButton > button[kind="primary"]:hover { background: var(--accent-hover); }
-.stButton > button:hover { border-color: var(--accent); color: var(--accent); }
-.stButton > button:disabled { opacity: 0.4; }
-
-/* Radios usados como selector de modo (ej: Código/Descripción, Foto real/IA) —
-   look de pastillas en vez del radio suelto por defecto, para que se sienta como
-   un selector de vista, no como un formulario más. */
-.stRadio [role="radiogroup"] { gap: 6px; flex-wrap: wrap; }
 /* [role="radiogroup"] y no «.stRadio label» a secas: así agarraba también el TÍTULO del grupo
    —«Buscar por:», «Qué tan lejos buscar:»— y lo dibujaba como una opción más, con su pastilla.
    Se vio en capturas de la app en un celular. */
+.stRadio [role="radiogroup"] { gap: 6px; flex-wrap: wrap; }
 .stRadio [role="radiogroup"] label {
-  background: var(--bg-panel); border: 1px solid var(--border); border-radius: 999px;
-  padding: 5px 14px 5px 10px !important; transition: all 0.15s ease;
+  background: var(--bg-panel); border: 1px solid var(--border); border-radius: 10px !important;
+  padding: 6px 14px !important; transition: background 0.15s ease, border-color 0.15s ease;
 }
-.stRadio [role="radiogroup"] label:has(input:checked) { border-color: var(--accent); background: rgba(232, 163, 61, 0.12); }
+.stRadio [role="radiogroup"] label:hover { border-color: var(--border-strong); background: var(--bg-panel-2); }
+.stRadio [role="radiogroup"] label:has(input:checked) { border-color: rgba(232, 163, 61, 0.55);
+  background: var(--accent-soft); }
+.stRadio [role="radiogroup"] label:has(input:checked) p { color: var(--accent); font-weight: 600; }
 
-/* Inputs */
-.stTextInput input, .stNumberInput input, .stTextArea textarea,
-.stSelectbox div[data-baseweb="select"] > div {
-  background: var(--bg-panel) !important; border: 1px solid var(--border) !important;
-  border-radius: 7px !important; color: var(--text) !important;
+/* La barra de secciones: un renglón. En el celular se desliza de costado. Todo a lo ancho de
+   la pantalla y no más: sin esto la barra se estiraba al largo de sus botones y la PÁGINA
+   entera se corría de costado en el celular. */
+.st-key-nav_principal, .st-key-nav_principal [data-testid="stElementContainer"],
+.st-key-nav_principal .stRadio, .st-key-nav_principal .stRadio > div {
+  max-width: 100% !important; min-width: 0 !important;
 }
-.stTextInput input:focus, .stNumberInput input:focus, .stTextArea textarea:focus {
-  border-color: var(--accent) !important; box-shadow: 0 0 0 1px var(--accent) !important;
+.st-key-nav_principal [role="radiogroup"] {
+  flex-wrap: nowrap !important; overflow-x: auto; gap: 2px !important;
+  max-width: 100%; box-sizing: border-box;
+  /* Los botones de radio escondidos de cada opción van con position: absolute. Sin esto se
+     ubicaban contra el contenedor principal y lo ensanchaban: la página entera se corría de
+     costado al tocar una sección de la derecha. */
+  position: relative;
+  padding: 4px; background: var(--bg-panel); border: 1px solid var(--border);
+  border-radius: 14px; scrollbar-width: none;
 }
+.st-key-nav_principal [role="radiogroup"]::-webkit-scrollbar { display: none; }
+.st-key-nav_principal [role="radiogroup"] label {
+  flex: 0 0 auto; background: transparent !important; border: 1px solid transparent !important;
+  padding: 7px 12px !important;
+}
+.st-key-nav_principal [role="radiogroup"] label:hover { background: var(--bg-panel-2) !important; }
+.st-key-nav_principal [role="radiogroup"] label:has(input:checked) {
+  background: var(--accent-soft) !important; border-color: rgba(232, 163, 61, 0.45) !important;
+  box-shadow: inset 0 -2px 0 var(--accent);
+}
+.st-key-nav_principal [role="radiogroup"] label p { white-space: nowrap; font-weight: 600; font-size: 0.9rem; }
+/* En la computadora no hay dedo para deslizar ni barra que se vea: si no entran, van en dos
+   renglones; en el celular siguen deslizándose. */
+@media (min-width: 768px) {
+  .st-key-nav_principal [role="radiogroup"] { flex-wrap: wrap !important; overflow-x: visible; }
+  .st-key-nav_principal [role="radiogroup"] label { padding: 6px 8px !important; }
+  .st-key-nav_principal [role="radiogroup"] label p { font-size: 0.85rem; }
+}
+
+/* Los renglones de productos (los del menú del click derecho): una lista con separadores,
+   como una tabla, en vez de texto suelto. */
+[class*="st-key-conmenu_"] { border-bottom: 1px solid var(--border); padding: 4px 6px 6px 6px;
+  border-radius: 0 !important; }
+[class*="st-key-conmenu_"]:last-of-type { border-bottom: none; }
+
+/* ==== LOS BOTONES ====
+   Por su data-testid: «.stButton > button» no agarraba los que tienen ayuda (help=), que van
+   un nivel más adentro, y unos quedaban de un color y otros de otro. */
+[data-testid="stBaseButton-secondary"], [data-testid="stBaseButton-secondaryFormSubmit"],
+[data-testid="stPopoverButton"], .stDownloadButton button, .stLinkButton a {
+  background: var(--bg-panel-2) !important; border: 1px solid var(--border-strong) !important;
+  border-radius: var(--radius-sm) !important; color: var(--text) !important; font-weight: 500 !important;
+  transition: background 0.15s ease, border-color 0.15s ease, transform 0.05s ease;
+}
+[data-testid="stBaseButton-secondary"]:hover, [data-testid="stBaseButton-secondaryFormSubmit"]:hover,
+[data-testid="stPopoverButton"]:hover, .stDownloadButton button:hover, .stLinkButton a:hover {
+  border-color: rgba(232, 163, 61, 0.6) !important; background: #222831 !important;
+}
+[data-testid="stBaseButton-primary"], [data-testid="stBaseButton-primaryFormSubmit"],
+[data-testid="stPopoverButton"][kind="primary"] {
+  background: var(--accent) !important; border: 1px solid var(--accent) !important;
+  color: #17120A !important; font-weight: 600 !important; border-radius: var(--radius-sm) !important;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.22), 0 4px 14px rgba(232, 163, 61, 0.16);
+}
+[data-testid="stBaseButton-primary"] p, [data-testid="stBaseButton-primaryFormSubmit"] p { color: #17120A !important; }
+[data-testid="stBaseButton-primary"]:hover, [data-testid="stBaseButton-primaryFormSubmit"]:hover {
+  background: var(--accent-hover) !important; border-color: var(--accent-hover) !important;
+}
+button:active { transform: translateY(1px); }
+button:disabled { opacity: 0.45 !important; }
+
+/* ==== LOS CAMPOS ==== */
+[data-testid="stTextInputRootElement"], [data-testid="stNumberInputContainer"],
+.stTextArea [data-baseweb="textarea"], .stSelectbox [data-baseweb="select"] > div,
+.stMultiSelect [data-baseweb="select"] > div, .stDateInput [data-baseweb="input"] {
+  background: var(--bg-input) !important; border: 1px solid var(--border-strong) !important;
+  border-radius: var(--radius-sm) !important;
+}
+[data-testid="stTextInputRootElement"] input, [data-testid="stNumberInputContainer"] input,
+.stTextArea textarea, .stDateInput input { background: transparent !important; color: var(--text) !important; }
+[data-testid="stTextInputRootElement"]:focus-within, [data-testid="stNumberInputContainer"]:focus-within,
+.stTextArea [data-baseweb="textarea"]:focus-within, .stSelectbox [data-baseweb="select"] > div:focus-within {
+  border-color: var(--accent) !important; box-shadow: 0 0 0 3px rgba(232, 163, 61, 0.15) !important;
+}
+[data-testid="stNumberInputStepDown"], [data-testid="stNumberInputStepUp"] { background: transparent !important; }
+[data-testid="stWidgetLabel"] p { font-weight: 500; color: #C9D0D7; }
 .stCheckbox input:checked, .stCheckbox [data-baseweb="checkbox"] svg { accent-color: var(--accent); }
 
 /* Subida de archivos */
 [data-testid="stFileUploaderDropzone"] {
-  background: var(--bg-panel) !important; border: 1px dashed var(--border) !important; border-radius: 8px !important;
+  background: var(--bg-panel) !important; border: 1px dashed var(--border-strong) !important;
+  border-radius: var(--radius) !important;
 }
 /* Los textos de la caja de subir archivos vienen en inglés y Streamlit no deja cambiarlos:
    «Upload» y «200MB per file • PNG, JPG», en cinco pantallas. Se tapan y se escriben en
@@ -416,102 +504,51 @@ html, body, [class*="css"] { font-family: 'Inter', -apple-system, sans-serif; }
 [data-testid="stCameraInputButton"]:has(span)::after { content: "🔄 Sacar otra"; }
 [data-testid="stCameraInputButton"] svg { display: none; }
 
-/* Expanders */
-[data-testid="stExpander"] { border: 1px solid var(--border) !important; border-radius: 8px !important; margin-bottom: 4px; }
-.streamlit-expanderHeader, [data-testid="stExpander"] summary {
-  background: var(--bg-panel) !important; border-radius: 8px !important; font-weight: 600;
+/* ==== TARJETAS, DESPLEGABLES Y VENTANAS ==== */
+[data-testid="stVerticalBlockBorderWrapper"], .stForm, [data-testid="stForm"] {
+  border-radius: var(--radius) !important; border-color: var(--border) !important;
 }
+[data-testid="stForm"] { background: var(--bg-panel); }
+[data-testid="stExpander"] details {
+  border: 1px solid var(--border) !important; border-radius: var(--radius) !important;
+  background: var(--bg-panel); overflow: hidden;
+}
+[data-testid="stExpander"] { margin-bottom: 6px; }
+[data-testid="stExpander"] summary { background: transparent !important; font-weight: 600; padding-top: 0.7rem;
+  padding-bottom: 0.7rem; }
+[data-testid="stExpander"] summary:hover { background: var(--bg-panel-2) !important; }
+[data-testid="stExpander"] details[open] > summary { border-bottom: 1px solid var(--border); }
+[data-testid="stDialog"] [role="dialog"] {
+  background: var(--bg-panel) !important; border: 1px solid var(--border-strong);
+  border-radius: 18px !important; box-shadow: 0 24px 80px rgba(0, 0, 0, 0.55) !important;
+}
+[data-baseweb="popover"] > div { border-radius: var(--radius) !important; }
+[data-testid="stToast"] { background: var(--bg-panel-2) !important; border: 1px solid var(--border-strong);
+  border-left: 3px solid var(--accent); border-radius: var(--radius) !important; box-shadow: var(--shadow); }
 
-/* Métricas */
+/* Métricas: una tarjeta con el número grande. */
 [data-testid="stMetric"] {
-  background: var(--bg-panel); border: 1px solid var(--border); border-radius: 10px; padding: 10px 14px;
+  background: var(--bg-panel); border: 1px solid var(--border); border-radius: var(--radius);
+  padding: 12px 16px;
 }
-[data-testid="stMetricValue"] { font-family: 'IBM Plex Mono', monospace; color: var(--accent); }
+[data-testid="stMetricLabel"] p { color: var(--text-muted) !important; font-size: 0.82rem !important; font-weight: 500; }
+[data-testid="stMetricValue"] { font-family: 'Inter', sans-serif; font-weight: 700; letter-spacing: -0.02em;
+  color: var(--text); font-variant-numeric: tabular-nums; }
 
-/* Alertas y tablas */
-[data-testid="stAlert"] { border-radius: 8px; border: 1px solid var(--border); }
-[data-testid="stDataFrame"] { border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
-
-code { font-family: 'IBM Plex Mono', monospace; color: var(--accent-2); }
-hr { border-color: var(--border) !important; margin: 1.1rem 0 !important; }
+/* Avisos: un borde de color al costado y el fondo apenas teñido. */
+[data-testid="stAlert"] > div, [data-testid="stAlertContainer"] { border-radius: var(--radius) !important; }
+[data-testid="stAlertContainer"] { border: 1px solid var(--border); }
+[data-testid="stDataFrame"] { border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; }
 
 /* Los gráficos (st.bar_chart / Vega-Lite) muestran un tooltip flotante al tocar una barra.
    En celular no hay evento que lo "suelte" al hacer scroll con el dedo, y queda pegado en
    pantalla tapando el contenido de abajo. Se desactiva: el dato ya se ve en las barras. */
 #vg-tooltip-element, .vg-tooltip { display: none !important; }
 
-/* ===== Diseño moderno ===== */
-/* Menos aire arriba: la barra de Streamlit queda vacía (ver toolbarMode en config.toml). */
-[data-testid="stHeader"] { height: 0 !important; min-height: 0 !important; }
-.block-container { padding-top: 1rem !important; }
-
-/* Encabezado compacto: una barra, no una tarjeta que ocupa media pantalla del celular. */
-.app-bar {
-  display: flex; align-items: center; gap: 12px; padding: 10px 14px; margin-bottom: 8px;
-  background: linear-gradient(135deg, var(--bg-panel) 0%, var(--bg-panel-2) 100%);
-  border: 1px solid var(--border); border-radius: 14px;
-  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.25);
-}
-.app-bar__logo {
-  width: 40px; height: 40px; border-radius: 11px; flex: 0 0 auto;
-  display: flex; align-items: center; justify-content: center; font-size: 1.25rem;
-  background: linear-gradient(135deg, var(--accent) 0%, #C97B1C 100%);
-  box-shadow: 0 2px 10px rgba(232, 163, 61, 0.35);
-}
-.app-bar__title {
-  font-family: 'Space Grotesk', sans-serif; font-weight: 700; font-size: 1.2rem;
-  color: var(--text); line-height: 1.15; letter-spacing: -0.01em;
-}
-.app-bar__sub { font-size: 0.78rem; color: var(--text-muted); line-height: 1.2; }
-
-/* Las opciones de un radio como pastillas, sin el puntito de formulario. Se esconde el aro
-   entero (label > div > div), no solo el punto de adentro: con el punto solo, en cada pastilla
-   quedaba un circulito vacío al lado del nombre. */
-[data-testid="stRadioOption"] > div > div:not([data-testid="stMarkdownContainer"]) {
-  display: none !important;
-}
-.stRadio [role="radiogroup"] label { padding: 6px 14px !important; border-radius: 10px !important; }
-.stRadio [role="radiogroup"] label:has(input:checked) p { color: var(--accent); font-weight: 600; }
-
-/* La navegación principal: una barra de pestañas en un solo renglón. En el celular se desliza
-   de costado en vez de ocupar tres renglones. */
-/* Todo a lo ancho de la pantalla y no más: sin esto la barra se estiraba al largo de sus
-   ocho botones y la PÁGINA entera se corría de costado en el celular. */
-.st-key-nav_principal, .st-key-nav_principal [data-testid="stElementContainer"],
-.st-key-nav_principal .stRadio, .st-key-nav_principal .stRadio > div {
-  max-width: 100% !important; min-width: 0 !important;
-}
-.st-key-nav_principal [role="radiogroup"] {
-  flex-wrap: nowrap !important; overflow-x: auto; gap: 2px !important;
-  max-width: 100%; box-sizing: border-box;
-  /* Los botones de radio escondidos de cada opción van con position: absolute. Sin esto se
-     ubicaban contra el contenedor principal y lo ensanchaban: la página entera se corría de
-     costado al tocar una sección de la derecha. */
-  position: relative;
-  padding: 4px; background: var(--bg-panel); border: 1px solid var(--border);
-  border-radius: 14px; scrollbar-width: none;
-}
-.st-key-nav_principal [role="radiogroup"]::-webkit-scrollbar { display: none; }
-.st-key-nav_principal [role="radiogroup"] label {
-  flex: 0 0 auto; background: transparent !important; border: 1px solid transparent !important;
-  padding: 7px 13px !important;
-}
-.st-key-nav_principal [role="radiogroup"] label:hover { background: var(--bg-panel-2) !important; }
-.st-key-nav_principal [role="radiogroup"] label:has(input:checked) {
-  background: rgba(232, 163, 61, 0.14) !important; border-color: rgba(232, 163, 61, 0.45) !important;
-}
-.st-key-nav_principal [role="radiogroup"] label p { white-space: nowrap; font-weight: 600; }
 /* El plano del depósito escrito a mano: cada letra tiene que ocupar lo mismo, como en una hoja
    cuadriculada (ver «EL MAPA DEL DEPÓSITO» en logica/mapa.py). */
 [class*="st-key-plano_a_mano"] textarea { font-family: 'IBM Plex Mono', monospace !important;
   letter-spacing: .08em; line-height: 1.25 !important; }
-/* En la computadora no hay dedo para deslizar ni barra que se vea: con once secciones, la
-   última («↩️ Devoluciones») quedaba escondida a la derecha a 1300 px. Ahí, si no entran, van
-   en dos renglones; en el celular siguen deslizándose. */
-@media (min-width: 768px) {
-  .st-key-nav_principal [role="radiogroup"] { flex-wrap: wrap !important; overflow-x: visible; }
-  .st-key-nav_principal [role="radiogroup"] label { padding: 7px 11px !important; }
-}
 
 /* Las ayudas plegadas (ver ayuda()): un renglón gris, sin caja, que se abre con una línea de
    color al costado. Se distinguen de los desplegables que son parte de la pantalla. */
@@ -541,33 +578,23 @@ hr { border-color: var(--border) !important; margin: 1.1rem 0 !important; }
   font-size: 0.88rem; color: var(--text-muted);
 }
 
-/* Tarjetas, desplegables y botones un poco más redondeados y con algo de profundidad. */
-[data-testid="stVerticalBlockBorderWrapper"] { border-radius: 14px !important; }
-[data-testid="stExpander"] { border-radius: 12px !important; }
-.stButton > button, .stDownloadButton > button, .stFormSubmitButton > button { border-radius: 10px; }
-.stButton > button[kind="primary"], .stFormSubmitButton > button[kind="primary"] {
-  box-shadow: 0 2px 12px rgba(232, 163, 61, 0.25);
-}
-[data-testid="stMetric"] { border-radius: 14px; }
-h1, h2, h3 { font-family: 'Space Grotesk', sans-serif !important; letter-spacing: -0.01em; }
-
-/* EL MENÚ DEL CLICK DERECHO: ver «EL CLICK DERECHO Y LAS TECLAS DE LA CAJA» en
+/* EL MENÚ DEL CLICK DERECHO: ver «EL CLICK DERECHO, LAS TECLAS Y EL PITIDO» en
    logica/interfaz.py. Lo que esconde los botones va en app.py, solo en la vista de computadora.
    La caja del script no se ve (ni deja el hueco de su renglón). */
 [data-testid="stLayoutWrapper"]:has(> .st-key-ayudas_del_navegador),
 .st-key-ayudas_del_navegador { display: none; }
 .menu-del-renglon {
-  position: fixed; z-index: 1000100; min-width: 230px; max-width: 360px; padding: 4px;
-  background: var(--bg-panel-2); border: 1px solid var(--border); border-radius: 10px;
-  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.5);
+  position: fixed; z-index: 1000100; min-width: 230px; max-width: 360px; padding: 5px;
+  background: var(--bg-panel-2); border: 1px solid var(--border-strong); border-radius: 12px;
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.55);
 }
 .menu-del-renglon button {
   display: block; width: 100%; text-align: left; padding: 8px 12px; border: 0;
-  border-radius: 7px; background: none; color: var(--text); font: inherit; font-size: 0.92rem;
+  border-radius: 8px; background: none; color: var(--text); font: inherit; font-size: 0.92rem;
   cursor: pointer;
 }
 .menu-del-renglon button:hover:not([disabled]), .menu-del-renglon button:focus-visible {
-  background: rgba(232, 163, 61, 0.18); outline: none;
+  background: var(--accent-soft); outline: none;
 }
 .menu-del-renglon button[disabled] { opacity: 0.45; cursor: not-allowed; }
 </style>

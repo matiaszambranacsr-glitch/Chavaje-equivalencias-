@@ -3001,7 +3001,7 @@ def mostrar_panel_de_carga_automatica():
     n_term = sum(f["Estado"].startswith("✅") for f in filas)
     n_corr = sum(f["Estado"].startswith(("🟢", "⏳")) for f in filas)
     with st.expander(f"⚡ Carga automática — {n_term} terminada(s)"
-                     + (f", {n_corr} en curso" if n_corr else "")):
+                     + (f", {n_corr} en curso" if n_corr else ""), key="exp_carga_automatica_terminada_s"):
         ayuda(
             "Fotos, fichas, catálogos de fabricantes y Mercado Libre se bajan solos en segundo "
             "plano, **sin tope por día**, hasta terminar.\n\n"

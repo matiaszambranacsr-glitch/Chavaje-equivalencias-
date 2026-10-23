@@ -115,7 +115,7 @@ if pagina == PAGINAS[8] and sub_deposito in SUB_DEPOSITO[1:]:
         # Qué hay en cada estantería: para ordenar, contar o buscar algo sin el código.
         _estantes = estanterias_del_piso(_piso_mapa)
         if _estantes:
-            with st.expander("📚 Qué hay en cada estantería"):
+            with st.expander("📚 Qué hay en cada estantería", key="exp_hay_cada_estanteria"):
                 _est_elegida = st.selectbox("Estantería (o lado):",
                                             sorted(cod for e in _estantes.values()
                                                    for cod in codigos_de(e)),
@@ -182,7 +182,7 @@ if pagina == PAGINAS[8] and sub_deposito in SUB_DEPOSITO[1:]:
                     st.rerun()
                 st.warning(_texto_d)
 
-        with st.expander("📋 Pegar una lista (de Excel)"):
+        with st.expander("📋 Pegar una lista (de Excel)", key="exp_pegar_lista_excel"):
             st.caption("Un renglón por producto: el código y al final el lugar, por ejemplo "
                        "«W712 A-3-2». Sirve copiar dos columnas de Excel y pegarlas acá.")
             _lista_u = st.text_area("Lista:", key="ubicar_lista", height=150,
@@ -200,7 +200,7 @@ if pagina == PAGINAS[8] and sub_deposito in SUB_DEPOSITO[1:]:
                            f"{sum(1 for f in _hecho_lista if f.get('Guardado'))} producto(s).")
                     st.rerun()
 
-        with st.expander("🏷️ Etiquetas de los estantes"):
+        with st.expander("🏷️ Etiquetas de los estantes", key="exp_etiquetas_estantes"):
             st.caption("Una por módulo y estante, con su código de barras: pegala en el estante "
                        "y escaneándola arriba todo lo que escanees después queda ahí.")
             _todas_est = {e["id"]: f"{_nombre_del_piso(p_['id'])} · {e['codigo']}"
@@ -216,7 +216,7 @@ if pagina == PAGINAS[8] and sub_deposito in SUB_DEPOSITO[1:]:
                                    file_name="etiquetas_de_los_estantes.pdf",
                                    mime="application/pdf", key="ubicar_etiquetas_pdf")
 
-        with st.expander("💡 Dónde poner lo que no tiene lugar"):
+        with st.expander("💡 Dónde poner lo que no tiene lugar", key="exp_donde_poner_lo_no"):
             st.caption("Lo que más se vende (y si no, lo que tiene stock), en los lugares libres "
                        "más a mano: cerca de la entrada y a la altura de la cintura. Llevalo ahí "
                        "y confirmalo.")
@@ -311,7 +311,7 @@ if pagina == PAGINAS[8] and sub_deposito in SUB_DEPOSITO[1:]:
             for _error in _leido["errores"]:
                 st.warning(_error)
 
-            with st.expander("⚡ Armado rápido", expanded=not _leido["estanterias"]):
+            with st.expander("⚡ Armado rápido", expanded=not _leido["estanterias"], key="exp_armado_rapido"):
                 st.caption("Filas de estanterías paralelas, con pasillo alrededor de cada una, "
                            "paredes y la entrada abajo. Después lo retocás.")
                 with st.form("form_armado_rapido"):
@@ -351,7 +351,7 @@ if pagina == PAGINAS[8] and sub_deposito in SUB_DEPOSITO[1:]:
                 st.caption("Vacío: armalo con «⚡ Armado rápido» o sumá estanterías.")
 
             _t1, _t2 = cols([1, 1])
-            with _t1.expander("➕ Sumar una estantería"):
+            with _t1.expander("➕ Sumar una estantería", key="exp_sumar_estanteria"):
                 with st.form("form_sumar_estanteria"):
                     _e1, _e2 = cols([1, 1], apilar_en_celular=False)
                     _col_e = _e1.number_input("Columna:", 1, TAMANO_MAXIMO_DEL_PLANO[0], 2,
@@ -375,7 +375,7 @@ if pagina == PAGINAS[8] and sub_deposito in SUB_DEPOSITO[1:]:
                         st.rerun()
                     except ValueError as _err:
                         st.warning(str(_err))
-            with _t2.expander("↔️ Mover o sacar una"):
+            with _t2.expander("↔️ Mover o sacar una", key="exp_mover_o_sacar"):
                 if not _leido["estanterias"]:
                     st.caption("Todavía no hay estanterías.")
                 else:
@@ -396,7 +396,7 @@ if pagina == PAGINAS[8] and sub_deposito in SUB_DEPOSITO[1:]:
                         _cambiar_borrador(sacar_estanteria(_borrador, _letra_m))
                         st.rerun()
 
-            with st.expander("✏️ Dibujarlo a mano"):
+            with st.expander("✏️ Dibujarlo a mano", key="exp_dibujarlo_mano"):
                 st.caption("Una letra por estantería (A–Z, 1–9), «.» pasillo, «#» pared, «@» "
                            "entrada. Cada renglón es una fila del depósito.")
                 _clave_mano = f"plano_a_mano_{_piso_id}"
@@ -435,7 +435,7 @@ if pagina == PAGINAS[8] and sub_deposito in SUB_DEPOSITO[1:]:
             # Los códigos y los estantes de cada estantería guardada.
             _est_guardadas = estanterias_del_piso(_piso_id)
             if _est_guardadas:
-                with st.expander(f"🔤 Códigos y estantes ({len(_est_guardadas)} estantería(s))"):
+                with st.expander(f"🔤 Códigos y estantes ({len(_est_guardadas)} estantería(s))", key="exp_codigos_estantes_estanteria_s"):
                     st.caption("El código es lo que se escribe en la ubicación («A» en «A-3-2»): "
                                "si lo cambiás, lo que estaba ubicado ahí pasa al código nuevo. "
                                "Los estantes se cuentan de abajo hacia arriba.")
@@ -470,7 +470,7 @@ if pagina == PAGINAS[8] and sub_deposito in SUB_DEPOSITO[1:]:
 
                 # LOS CUATRO LADOS: cada lado de una línea con su propio código, como está
                 # pintado en el depósito. Ver «LOS CUATRO LADOS» en logica/mapa.py.
-                with st.expander("🧭 Los cuatro lados de cada estantería"):
+                with st.expander("🧭 Los cuatro lados de cada estantería", key="exp_cuatro_lados_cada_estanteria"):
                     explicar("Si cada lado de una línea tiene su número o su letra, escribilo "
                              "acá (arriba, abajo, izquierda y derecha son los del dibujo).",
                              "Cada lado con código es un lugar más («B-3-2»): se llega por el "
@@ -527,7 +527,7 @@ if pagina == PAGINAS[8] and sub_deposito in SUB_DEPOSITO[1:]:
 
             # Borrar, solo el administrador, y diciendo qué pasa con lo ubicado.
             if es_admin():
-                with st.expander("🗑️ Borrar este piso o el depósito"):
+                with st.expander("🗑️ Borrar este piso o el depósito", key="exp_borrar_este_piso_o"):
                     _cuantos_b = cuantos_hay_en_cada_estanteria()
                     _ubicados = sum(_cuantos_b.get(cod.upper(), 0)
                                     for e in estanterias_del_piso(_piso_id).values()

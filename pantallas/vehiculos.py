@@ -5,7 +5,7 @@
 # VEHÍCULOS (ficha digital / historial de piezas)
 # ============================================================
 if pagina == PAGINAS[6]:
-    st.subheader("🚗 Ficha digital del vehículo")
+    # El título de la sección lo pone app.py («EL TÍTULO DE LA SECCIÓN»).
     ayuda(
         "Registrá la patente de un cliente frecuente junto con las piezas que le fuiste cambiando. "
         "La app avisa cuándo una pieza ya recorrió casi toda su vida útil estimada."
@@ -16,7 +16,7 @@ if pagina == PAGINAS[6]:
     _avisar = avisos_por_cliente(dias_de_aviso=30)
     # Plegados: abiertos empujaban la búsqueda por patente —lo que se viene a hacer— abajo de
     # todo. El título ya dice cuántos hay (lo señaló la revisión de usabilidad con Gemini).
-    with st.expander(f"📞 A quién avisar ({len(_avisar)} cliente(s))" + (" 🔴" if _avisar else "")):
+    with st.expander(f"📞 A quién avisar ({len(_avisar)} cliente(s))" + (" 🔴" if _avisar else ""), key="exp_quien_avisar_cliente_s"):
         ayuda(
             "Se mira la **última vez** que se cambió cada pieza en cada auto y el km de hoy "
             "**estimado** con lo que anda ese auto por día (entre que se cargó la ficha y la última "
@@ -42,7 +42,7 @@ if pagina == PAGINAS[6]:
                 st.rerun()
 
     vehiculos_atrasados = listar_vehiculos_atrasados()
-    with st.expander(f"⚠️ Vehículos con mantenimiento atrasado ({len(vehiculos_atrasados)})"):
+    with st.expander(f"⚠️ Vehículos con mantenimiento atrasado ({len(vehiculos_atrasados)})", key="exp_vehiculos_mantenimiento_atrasado"):
         if not vehiculos_atrasados:
             st.caption(
                 "Ninguno por ahora: no hay piezas a las que ya les haya tocado el cambio (por km o "
@@ -67,7 +67,7 @@ if pagina == PAGINAS[6]:
     st.markdown("---")
     st.markdown("**Buscar / registrar un vehículo**")
 
-    with st.expander("📷 Cargar por foto de cédula/título (con IA)"):
+    with st.expander("📷 Cargar por foto de cédula/título (con IA)", key="exp_cargar_foto_cedula_titulo"):
         ayuda(
             "Sacale una foto a la cédula verde/azul o al título. La IA lee patente, marca, modelo, "
             "año y motorización — **siempre revisá los datos antes de guardar**, un OCR puede "
@@ -158,7 +158,7 @@ if pagina == PAGINAS[6]:
                            "**AB 123 CD** (Mercosur), **ABC 123** (vieja) o **B 123 456** "
                            "(provincial, hasta 1994).")
 
-        with st.expander("✏️ Datos del cliente / vehículo", expanded=(vehiculo is None)):
+        with st.expander("✏️ Datos del cliente / vehículo", expanded=(vehiculo is None), key="exp_datos_del_cliente_vehiculo"):
             with st.form("form_vehiculo"):
                 cv1, cv2 = st.columns(2)
                 cliente_nombre = cv1.text_input("Nombre del cliente", value=(vehiculo or {}).get("cliente_nombre") or "")
@@ -233,7 +233,7 @@ if pagina == PAGINAS[6]:
                     f"(en base a {km_calc['dias_transcurridos']} día(s) desde que se registró el vehículo)."
                 )
 
-            with st.expander("✏️ Corregir km de registro (solo si se cargó mal la primera vez)"):
+            with st.expander("✏️ Corregir km de registro (solo si se cargó mal la primera vez)", key="exp_corregir_km_registro_solo"):
                 ayuda(
                     "El km de registro queda fijo automáticamente la primera vez que cargás el vehículo. "
                     "Usá esto solo para corregir un error de tipeo — cambiarlo afecta los cálculos de abajo."
@@ -343,7 +343,7 @@ if pagina == PAGINAS[6]:
             # EL LINK DEL CLIENTE: con eso ve su auto desde el celular, sin entrar a la app ni ver
             # nada más. Ver «LO QUE VE EL CLIENTE DE SU AUTO» en logica/vehiculos.py.
             link_cliente = link_publico_del_auto(vehiculo["id"])
-            with st.expander("🔗 Link para que el cliente vea su auto"):
+            with st.expander("🔗 Link para que el cliente vea su auto", key="exp_link_cliente_vea_su"):
                 ayuda(
                     "Con este link el cliente ve, desde el celular y sin entrar a la app, qué le "
                     "pusieron a su auto y cuánto le falta a cada cosa. No ve su nombre ni su "

@@ -5,7 +5,7 @@
 # ESTADÍSTICAS
 # ============================================================
 if pagina == PAGINAS[4]:
-    st.subheader("📊 Estadísticas")
+    # El título de la sección lo pone app.py («EL TÍTULO DE LA SECCIÓN»).
 
     sub_stats = elegir_solapa(PAGINAS[4])
 
@@ -650,7 +650,7 @@ a traer solas desde Administrar → Mantenimiento.
                         f"quedan {stock_it if stock_it is not None else 's/d'}"
                     )
                 mensaje_reposicion = "\n".join(lineas_msg)
-                with st.expander(f"📨 {marca} ({len(items)} ítem(s))"):
+                with st.expander(f"📨 {marca} ({len(items)} ítem(s))", key=f"exp_envio_{marca}"):
                     st.text_area("Mensaje:", value=mensaje_reposicion, height=120, key=f"msg_repo_{marca}")
                     url_wa_repo = "https://wa.me/?text=" + quote(mensaje_reposicion)
                     st.link_button(f"📲 Abrir WhatsApp para {marca}", url_wa_repo, key=f"wa_repo_{marca}")
@@ -1035,7 +1035,7 @@ a traer solas desde Administrar → Mantenimiento.
             )
 
             with st.expander(f"🧹 Descartar TODO lo pendiente ({miles(total_pendientes)} vínculos de "
-                              f"{len(lotes_pendientes)} lista(s))"):
+                              f"{len(lotes_pendientes)} lista(s))", key="exp_descartar_todo_lo_pendiente"):
                 st.warning(
                     "Borra de una todos los vínculos que están esperando revisión, de todas las listas. "
                     "**Los productos y precios no se tocan** — solo se descartan las equivalencias "
@@ -1180,7 +1180,7 @@ a traer solas desde Administrar → Mantenimiento.
                     "otra— así que no te los pongo a decidir de a uno. El buscador te ofrece "
                     "el kit igual cuando buscás la pieza suelta."
                 )
-                with st.expander(f"Ver los {len(relacionadas)}"):
+                with st.expander(f"Ver los {len(relacionadas)}", key="exp_ver"):
                     st.dataframe(
                         [{"Código A": x.get("cod_a"), "Marca A": x.get("marca_a"),
                           "Código B": x.get("cod_b"), "Marca B": x.get("marca_b"),
@@ -1213,7 +1213,7 @@ a traer solas desde Administrar → Mantenimiento.
             # lleva cada paso, para no tener que descubrirlo recorriendo la pantalla.
             _plan = plan_de_la_lista(limpias, sospechosas, relacionadas)
             if _plan:
-                with st.expander("🧭 Cómo resolver esta lista, paso a paso", expanded=True):
+                with st.expander("🧭 Cómo resolver esta lista, paso a paso", expanded=True, key="exp_como_resolver_esta_lista"):
                     st.dataframe(_plan, width="stretch", hide_index=True)
                     ayuda("De arriba hacia abajo: cada paso achica lo que queda para los "
                           "siguientes. Los que dicen «1 toque» no necesitan mirar par por "
@@ -1252,7 +1252,7 @@ a traer solas desde Administrar → Mantenimiento.
 
             if por_nivel["🔴"]:
                 muestra_mal = por_nivel["🔴"][:8]
-                with st.expander(f"🔴 Ver por qué las {len(por_nivel['🔴'])} peores están mal"):
+                with st.expander(f"🔴 Ver por qué las {len(por_nivel['🔴'])} peores están mal", key="exp_ver_peores_estan_mal"):
                     for x in muestra_mal:
                         st.markdown(f"**{x['cod_a']}** ({x['marca_a']}) ↔ "
                                      f"**{x['cod_b']}** ({x['marca_b']}) — {x['confianza']:.0f}/100")
@@ -1612,7 +1612,7 @@ a traer solas desde Administrar → Mantenimiento.
             pares_limpios = []
             for x in limpias:
                 pares_limpios.extend([(x["a"], x["b"]), (x["b"], x["a"])])
-            with st.expander("Otras acciones sobre toda la lista"):
+            with st.expander("Otras acciones sobre toda la lista", key="exp_otras_acciones_sobre_toda"):
                 st.caption("Aprobar sin muestra es aprobar a ciegas: nadie sabe cuántos están "
                            "mal. Conviene usar la muestra de arriba.")
                 bl1, bl2 = st.columns(2)
@@ -1688,7 +1688,7 @@ a traer solas desde Administrar → Mantenimiento.
                 break   # de a una combinación por vez, para no llenar la pantalla
 
             if limpias:
-                with st.expander(f"Ver los {len(limpias)} sin alarmas"):
+                with st.expander(f"Ver los {len(limpias)} sin alarmas", key="exp_ver_sin_alarmas"):
                     st.dataframe(
                         [{"Código A": x["cod_a"], "Marca A": x["marca_a"],
                            "Código B": x["cod_b"], "Marca B": x["marca_b"]} for x in limpias[:500]],
@@ -1878,7 +1878,7 @@ a traer solas desde Administrar → Mantenimiento.
                                    f"sin decidir {len(items) - _b_g - _m_g}")
 
                     with st.expander(f"Ver los {len(items)} uno por uno" if len(items) > 1
-                                     else "Ver el detalle"):
+                                     else "Ver el detalle", key=f"exp_{_clave_g}"):
                         for s in items:
                             st.markdown(f"**{s['marca_a']} {s['cod_a']} ↔ "
                                          f"{s['marca_b']} {s['cod_b']}** · {s['confianza']:.0f}/100")
@@ -1919,7 +1919,7 @@ a traer solas desde Administrar → Mantenimiento.
 
         # QUÉ TAN BIEN ACIERTA LA APP, con tus decisiones. Plegado: se mira de vez en cuando,
         # y lo que se viene a hacer acá es revisar. Ver aciertos_de_la_revision().
-        with st.expander("📏 ¿Qué tan bien acierta la app? (medido con lo que decidiste)"):
+        with st.expander("📏 ¿Qué tan bien acierta la app? (medido con lo que decidiste)", key="exp_tan_bien_acierta_app"):
             _ac = aciertos_de_la_revision()
             if _ac["muestras"]:
                 st.markdown("**Muestras de control** — pares «limpios» sorteados al azar que "
@@ -2388,8 +2388,7 @@ a traer solas desde Administrar → Mantenimiento.
                                     else "deducida: se vendió justo después de buscar eso sin resultado")
                 with st.expander(
                     f"{cand['confianza']}  ·  {cand['codigo_pedido']} → {cand['codigo_vendido']} "
-                    f"({cand['marca_vendida']}) — pasó {cand['veces']} vez/veces"
-                ):
+                    f"({cand['marca_vendida']}) — pasó {cand['veces']} vez/veces", key=f"exp_cand_{cand['codigo_clean']}_{cand['producto_id']}"):
                     st.write(f"**Pidieron:** {cand['codigo_pedido']}")
                     st.write(f"**Se llevaron:** {cand['codigo_vendido']} ({cand['marca_vendida']}) "
                               f"{cand['descripcion']}")

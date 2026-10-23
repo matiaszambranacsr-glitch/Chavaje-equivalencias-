@@ -32,7 +32,7 @@ def exportar_configuracion_txt():
 
 
 if pagina == PAGINAS[3]:
-    st.subheader("🗂️ Administrar")
+    # El título de la sección lo pone app.py («EL TÍTULO DE LA SECCIÓN»).
 
     # SUB_ADMIN está en logica/interfaz.py, con las demás listas de navegación.
     if st.session_state.get("sub_admin") not in SUB_ADMIN:
@@ -393,7 +393,7 @@ if pagina == PAGINAS[3]:
         # Cargar medidas a mano, una por una, no lo hace nadie con 20.000 productos; y
         # sin medidas cargadas el veto por medidas —la única prueba física que tiene el
         # sistema— no se usa nunca.
-        with st.expander("🪄 Leer medidas de las descripciones"):
+        with st.expander("🪄 Leer medidas de las descripciones", key="exp_leer_medidas_descripciones"):
             explicar(
                 "En retenes, rulemanes y bujes la medida ya está escrita en la "
                 "descripción. Esto la lee y completa los campos vacíos.",
@@ -1239,7 +1239,7 @@ if pagina == PAGINAS[3]:
                             avisar("success" if _ok else "warning", _aviso)
                             st.rerun()
 
-            with st.expander(f"⚙️ Configuración de la cuenta de {_taller}"):
+            with st.expander(f"⚙️ Configuración de la cuenta de {_taller}", key="exp_configuracion_cuenta"):
                 _limite = st.number_input("Límite de crédito ($, 0 = sin límite):", min_value=0.0,
                                           step=1000.0, value=float(_config["limite"]),
                                           key=f"cc_limite_{_mid}")

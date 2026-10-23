@@ -198,6 +198,14 @@ def probar(L):
     c.execute("UPDATE mecanicos SET activo = 1 WHERE id = ?", (taller,))
     conn.commit()
 
+    # 9c. Lo de arriba de la caja: el cajón, otros medios, lo puesto a cuenta (que no es plata
+    # que entró) y lo que espera.
+    v_a, _ = ns["cerrar_venta"]([item("A1")], mecanico_id=taller, a_la_caja=True)
+    ns["poner_a_cuenta"](v_a)
+    esperar("lo de arriba de la caja", ns["resumen_de_la_caja"](),
+            {"efectivo": 999.0, "otros_medios": 5150.0, "a_cuenta": 900.0, "ventas": 6,
+             "esperando": 1, "total_esperando": 1000.0})
+
     # 10. Quién puede: cobrar y poner a cuenta, un empleado; prender o apagar la caja, el
     # administrador.
     originales = (g["_nivel_de_quien_esta_adentro"], g["hay_claves_configuradas"])

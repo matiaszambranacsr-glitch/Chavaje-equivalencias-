@@ -15,13 +15,19 @@ if pagina == PAGINAS[11]:
         "crédito. Recién cobrada cuenta en el cierre de caja. Si el navegador usa F11 para la "
         "pantalla completa, tocá el botón."
     )
-    # La caja aparte se puede apagar: entonces cobra cada vendedor al terminar la venta.
-    if es_admin():
-        _caja_on = st.toggle("💵 La caja cobra aparte", value=caja_aparte(), key="caja_aparte_toggle",
-                             help="Apagada, cada vendedor cobra al terminar la venta en 🧾 Ventas.")
-        if _caja_on != caja_aparte():
-            cambiar_caja_aparte(_caja_on)
-            st.rerun()
+    # La caja aparte se puede apagar: entonces cobra cada vendedor al terminar la venta. Y el
+    # sonido de lo que llega (ver «EL CLICK DERECHO, LAS TECLAS Y EL PITIDO» en logica/interfaz.py).
+    with st.container(horizontal=True, gap="medium"):
+        if es_admin():
+            _caja_on = st.toggle("💵 La caja cobra aparte", value=caja_aparte(),
+                                 key="caja_aparte_toggle",
+                                 help="Apagada, cada vendedor cobra al terminar la venta en 🧾 "
+                                      "Ventas.")
+            if _caja_on != caja_aparte():
+                cambiar_caja_aparte(_caja_on)
+                st.rerun()
+        st.toggle("🔊 Sonido", value=True, key="con_sonido_caja",
+                  help="Un pitido cuando llega una venta a la caja.")
     if not caja_aparte():
         st.info("La caja no cobra aparte: cada vendedor cobra al terminar la venta en 🧾 Ventas. "
                 "Lo que haya quedado esperando se cobra igual acá.")
@@ -66,6 +72,7 @@ if pagina == PAGINAS[11]:
             _ok_c, _texto_c = cobrar_venta(venta_id, _forma, _cuotas, _desc)
             if _ok_c:
                 avisar("success", _texto_c)
+                st.session_state["caja_recien"] = venta_id
                 st.rerun()
             st.error(_texto_c)
 
@@ -111,6 +118,7 @@ if pagina == PAGINAS[11]:
             _ok_a, _texto_a = poner_a_cuenta(venta_id, _mid, _desc)
             if _ok_a:
                 avisar("success", _texto_a)
+                st.session_state["caja_recien"] = venta_id
                 st.rerun()
             st.error(_texto_a)
         if _s2.button("No", key=f"cta_no_{venta_id}", width="stretch"):
@@ -120,6 +128,16 @@ if pagina == PAGINAS[11]:
     # con un cartel que aparece arriba, aunque estés mirando otra cosa de esta pantalla.
     @st.fragment(run_every=5)
     def _lo_que_espera():
+        # EL DÍA, DE UN VISTAZO: lo que tiene que haber en el cajón, lo que entró por otros
+        # medios, lo puesto a cuenta y lo que espera. Ver resumen_de_la_caja().
+        _r = resumen_de_la_caja()
+        _m = cols([1, 1, 1, 1])
+        _m[0].metric("💵 En el cajón", f"${miles(_r['efectivo'], 0)}",
+                     help="Lo cobrado hoy en efectivo, menos lo devuelto: lo que tiene que haber "
+                          "(sin el cambio con el que se abrió).")
+        _m[1].metric("💳 Tarjeta y transferencia", f"${miles(_r['otros_medios'], 0)}")
+        _m[2].metric("📒 A cuenta hoy", f"${miles(_r['a_cuenta'], 0)}")
+        _m[3].metric("⏳ Esperando", f"{_r['esperando']} · ${miles(_r['total_esperando'], 0)}")
         _pendientes = ventas_a_cobrar()
         _vistas = st.session_state.setdefault("caja_vistas", [])
         for _v in _pendientes:
@@ -146,19 +164,38 @@ if pagina == PAGINAS[11]:
                           for it in _elegida["items"]], hide_index=True, width="stretch",
                          height=min(36 * (len(_elegida["items"]) + 1) + 3, 260))
             _b1, _b2 = cols([1, 1], apilar_en_celular=False)
-            if _b1.button("💳 Cobrar (F10)", type="primary", key="caja_f10", shortcut="F10",
-                          width="stretch"):
+            # La tecla va en el botón (shortcut=): Streamlit la dibuja al lado del nombre.
+            # En el celular, sin tecla: no hay teclado.
+            if _b1.button("💳 Cobrar", type="primary", key="caja_f10",
+                          shortcut=None if es_celular() else "F10", width="stretch"):
                 _dialogo_cobrar(_elegida["id"])
-            if _b2.button("📒 A cuenta (F11)", key="caja_f11", shortcut="F11", width="stretch"):
+            if _b2.button("📒 A cuenta", key="caja_f11",
+                          shortcut=None if es_celular() else "F11", width="stretch"):
                 _dialogo_a_cuenta(_elegida["id"])
 
     _lo_que_espera()
+
+    # EL COMPROBANTE DE LA QUE SE ACABA DE COBRAR: el cajero es el que se lo da al cliente.
+    _recien = st.session_state.get("caja_recien")
+    if _recien:
+        with st.container(border=True, key="caja_comprobante"):
+            st.markdown(f"**🧾 Comprobante de la venta #{_recien}**")
+            _cc1, _cc2, _cc3 = cols([2, 2, 1])
+            _cc1.download_button("📄 PDF para imprimir", data=comprobante_para_descargar(_recien),
+                                 file_name=f"comprobante_{_recien}.pdf", mime="application/pdf",
+                                 key="caja_comprobante_pdf", width="stretch")
+            _cc2.link_button("📲 Mandarlo por WhatsApp",
+                             "https://wa.me/?text=" + quote(texto_del_comprobante(_recien)),
+                             width="stretch")
+            if _cc3.button("Listo", key="caja_comprobante_listo", width="stretch"):
+                st.session_state.pop("caja_recien", None)
+                st.rerun()
 
     # LAS VENTAS DEL DÍA Y EL CIERRE DE CAJA: hoy, o el día que se elija. Lo cobrado cuenta
     # el día que se cobró; lo que espera, aparte.
     _caja_hoy = cierre_de_caja()
     with st.expander(f"📋 Ventas y cierre de caja — hoy: {_caja_hoy['ventas']} · "
-                     f"${miles(_caja_hoy['total'], 0)}"):
+                     f"${miles(_caja_hoy['total'], 0)}", key="exp_ventas_cierre_caja_hoy"):
         _dia_vta = st.date_input("Día:", value=datetime.now().date(), key="venta_dia",
                                  max_value=datetime.now().date(), format="DD/MM/YYYY")
         _dia_txt = _dia_vta.strftime("%Y-%m-%d")

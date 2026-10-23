@@ -62,7 +62,7 @@ if pagina == PAGINAS[3]:
                                   FROM puentes_aprobados pa JOIN productos p ON p.id = pa.producto_id
                                   ORDER BY pa.fecha DESC""")
                     lista_ap = filas_a_listas(c)
-                    with st.expander(f"✅ Códigos puente aprobados ({len(lista_ap)})"):
+                    with st.expander(f"✅ Códigos puente aprobados ({len(lista_ap)})", key="exp_codigos_puente_aprobados"):
                         st.dataframe(quitar_id(lista_ap), width="stretch", hide_index=True)
                         quitar_ap = st.text_input("Código a desaprobar (volver a vigilarlo):",
                                                    key="cod_desaprobar").strip()
@@ -476,7 +476,7 @@ if pagina == PAGINAS[3]:
             if cantidad_basura:
                 st.warning(f"⚠️ Hay {cantidad_basura} producto(s) con un código así.")
                 muestra_basura = listar_codigos_basura(limite=200)
-                with st.expander(f"👀 Ver los primeros {len(muestra_basura)} antes de borrar"):
+                with st.expander(f"👀 Ver los primeros {len(muestra_basura)} antes de borrar", key="exp_ver_primeros_antes_borrar"):
                     st.dataframe(muestra_basura, width="stretch", hide_index=True)
                     st.download_button(
                         "⬇️ Descargar la lista completa",
@@ -589,7 +589,7 @@ if pagina == PAGINAS[3]:
                     st.warning(f"**{len(_pf)} código(s) sospechoso(s).** Mirá los ejemplos de "
                                "cada uno: si lo que une no tiene nada que ver entre sí, borralo.")
                     for _p in _pf:
-                        with st.expander(f"🔗 {_p['Código']} — {_p['Por qué sospecha']}"):
+                        with st.expander(f"🔗 {_p['Código']} — {_p['Por qué sospecha']}", key=f"exp_puente_falso_{_p['Código']}"):
                             st.caption(f"Familias que toca: {_p['Familias']}")
                             st.write(_p["Ejemplos"])
                             if candado('borrar un código de fábrica falso', st.button("🗑️ Borrar este puente y sus vínculos", key=f"borrar_puente_{_p['pid']}"), 'borrar_un_c_digo_de_f_brica_falso'):

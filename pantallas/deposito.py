@@ -39,8 +39,13 @@ if pagina == PAGINAS[8]:
             st.session_state["_aviso_del_deposito"] = (
                 ok, f"🚫 Cancelado: {rotulo}." if ok else f"{rotulo}: ya no estaba pendiente.")
 
-        _sola = st.toggle("🔄 Que se actualice sola", value=True, key="deposito_actualizar_sola",
-                          help="Cada 20 segundos mira si llegaron pedidos nuevos, sin tocar nada.")
+        with st.container(horizontal=True, gap="medium"):
+            _sola = st.toggle("🔄 Que se actualice sola", value=True,
+                              key="deposito_actualizar_sola",
+                              help="Cada 20 segundos mira si llegaron pedidos nuevos, sin tocar "
+                                   "nada.")
+            st.toggle("🔊 Sonido", value=True, key="con_sonido_deposito",
+                      help="Un pitido cuando llega un pedido nuevo.")
 
         def _entregar_todo(tanda, rotulo):
             hechos, no = entregar_la_tanda(tanda)
@@ -79,7 +84,7 @@ if pagina == PAGINAS[8]:
                     _ca.info(f"📝 {_p['nota']}")
                 # SIN LUGAR EN EL MAPA: el que lo va a buscar sabe dónde está; se anota ahí mismo.
                 if hay_un_mapa and not _donde:
-                    with _ca.popover("📍 ¿Dónde está?"):
+                    with _ca.popover("📍 ¿Dónde está?", key=f"pop_donde_{_p['id']}"):
                         st.text_input("Lugar (estantería-módulo-estante):",
                                       key=f"dep_lugar_{_p['id']}", placeholder="A-3-2")
                         st.button("💾 Guardar el lugar", key=f"dep_lugar_ok_{_p['id']}",
@@ -167,6 +172,14 @@ if pagina == PAGINAS[8]:
             if _aviso:
                 (st.success if _aviso[0] else st.warning)(_aviso[1])
             _pendientes = pedidos_pendientes()
+            # LO QUE LLEGA, CON SU CARTEL: como en la caja, cada pedido nuevo avisa arriba
+            # (y con un pitido, si está prendido). Lo que ya estaba al entrar no avisa: se ve
+            # en la lista.
+            _vistos = st.session_state.get("deposito_vistos")
+            for _p in _pendientes:
+                if _vistos is not None and _p["id"] not in _vistos:
+                    st.toast(el_aviso_del_pedido(_p), icon="📦", duration="long")
+            st.session_state["deposito_vistos"] = (_vistos or set()) | {_p["id"] for _p in _pendientes}
             _grupos = pendientes_por_pedido(_pendientes)
             _esperas = [minutos_entre(_p["pedido_en"]) or 0 for _p in _pendientes]
             st.markdown(f"#### ⏳ Para buscar: {len(_pendientes)}"

@@ -419,7 +419,7 @@ def panel_vin(clave="vin", mostrar_ensenar=True):
     if mostrar_ensenar and solo_mirar():
         st.caption(TEXTO_SOLO_MIRAR)
     elif mostrar_ensenar:
-        with st.expander("✏️ Enseñarle a la app este auto (para que la próxima salga solo)"):
+        with st.expander("✏️ Enseñarle a la app este auto (para que la próxima salga solo)", key="exp_ensenarle_app_este_auto"):
             _formulario_ensenar_vin(d, clave)
     return d
 

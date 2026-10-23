@@ -12,7 +12,7 @@ if pagina == PAGINAS[0]:
         salud abiertos y el encabezado completo iban antes. Quien atiende el mostrador entra
         a buscar un código, y el cartel de lo que espera aprobación explica los resultados:
         abajo de ellos también se entiende."""
-        with st.expander("❓ Guía rápida — cómo usar esta app"):
+        with st.expander("❓ Guía rápida — cómo usar esta app", key="exp_guia_rapida_como_usar"):
             # Las secciones salen de PARA_QUE_SIRVE, el mismo renglón que se ve debajo del menú:
             # escritas aparte, la guía decía que Cargar Excel «arma las equivalencias sola»,
             # cuando quedan esperando aprobación —que es justo lo que explica que un código
@@ -86,7 +86,7 @@ if pagina == PAGINAS[0]:
         _total = sum((x["precio"] or 0) * x["cantidad"] for x in _cart.values())
         with st.expander(f"🛒 Presupuesto en armado — {len(_cart)} ítem(s) · ${miles(_total, 0)}"
                          + (f" · para {cuenta_elegida()['nombre']}" if cuenta_elegida() else ""),
-                          expanded=False):
+                          expanded=False, key="exp_presupuesto_armado_item_s"):
             _pedir_de_a_uno = es_empleado_o_abierto()
             # «Se lleva»: lo que pasa a la venta. Marcado de entrada, así que sin tocar nada
             # pasa todo (ver pasar_el_presupuesto_a_una_venta()).
@@ -205,7 +205,7 @@ if pagina == PAGINAS[0]:
     # el código de barras es exacto, y todo lo demás —comparar siluetas, leer un grabado
     # gastado, medir— es aproximar. Poner primero lo confiable evita que alguien resuelva con
     # una adivinanza algo que la caja tenía escrito.
-    with st.expander("📷 Escanear el código de barras de la caja"):
+    with st.expander("📷 Escanear el código de barras de la caja", key="exp_escanear_codigo_barras_caja"):
         explicar(
             "La forma más segura de identificar un repuesto: no hay nada que adivinar.",
             "El código de la caja es exacto. A diferencia de comparar fotos o leer un grabado, "
@@ -292,7 +292,7 @@ if pagina == PAGINAS[0]:
                                      f"{ajeno_barra['cantidad_autos']} auto(s).")
 
     if es_operador_o_admin():
-        with st.expander("🖼️ Buscar por parecido visual (experimental)"):
+        with st.expander("🖼️ Buscar por parecido visual (experimental)", key="exp_buscar_parecido_visual_experimental"):
             explicar(
                 "Compará una foto contra el catálogo. Sirve para acortar candidatos, nunca para "
                 "confirmar una venta.",
@@ -697,7 +697,7 @@ if pagina == PAGINAS[0]:
             )
             buscar_click = st.form_submit_button("🔍 Buscar Equivalencias", type="primary",
                                                  width="stretch")
-            with st.expander(f"⚙️ Opciones: {_resumen_opciones}"):
+            with st.expander(f"⚙️ Opciones: {_resumen_opciones}", key="exp_opciones"):
                 marca_filtro = st.selectbox("Filtrar por marca:", lista_marcas,
                                             key="marca_filtro_busqueda")
                 # La búsqueda encadena: el código buscado trae sus equivalentes, y los
@@ -862,7 +862,7 @@ if pagina == PAGINAS[0]:
                 else:
                     etiqueta_resultado = f"🔎 {codigo_individual} — sin equivalencias todavía"
 
-                with st.expander(etiqueta_resultado, expanded=(total_codigos_buscados == 1)):
+                with st.expander(etiqueta_resultado, expanded=(total_codigos_buscados == 1), key=f"exp_resultado_{clean}"):
                     if item.get("aviso"):
                         st.warning(item["aviso"])
                     # Una patente escrita en el buscador. Pasa: el cliente la dice y el que
@@ -1769,7 +1769,7 @@ if pagina == PAGINAS[0]:
         # La voz la transcribe la IA, que se paga por uso: para empleados, como el resto de la
         # IA de la app. Ver es_empleado_o_abierto().
         if es_empleado_o_abierto():
-            with st.expander("🎙️ Buscar por voz"):
+            with st.expander("🎙️ Buscar por voz", key="exp_buscar_voz"):
                 ayuda(
                     "Grabá diciendo lo que buscás — la IA lo transcribe y lo busca con el buscador de "
                     "siempre. No es un asistente que entienda pedidos complejos, es simplemente hablar "
@@ -1907,7 +1907,7 @@ if pagina == PAGINAS[0]:
                                     if e.get("Tipo") != "OEM" or e["ID"] == fila_txt["ID"]]
                     otros = [e for e in equivalentes if e["ID"] != fila_txt["ID"]]
                     resumen = (f"{len(otros)} equivalencia(s)" if otros else "sin equivalencias cargadas")
-                    with st.expander(f"🔎 {fila_txt['Marca']} · {fila_txt['Codigo']} — {resumen}"):
+                    with st.expander(f"🔎 {fila_txt['Marca']} · {fila_txt['Codigo']} — {resumen}", key=f"exp_txt_{fila_txt['ID']}"):
                         if fila_txt.get("Descripcion"):
                             st.caption(fila_txt["Descripcion"])
                         if equivalentes:
@@ -2099,7 +2099,7 @@ if pagina == PAGINAS[0]:
                             st.dataframe(quitar_id(sin_familia[:20]),
                                           width="stretch", hide_index=True)
 
-    with st.expander("📦 Armar pedido (ordenado por ubicación en depósito)"):
+    with st.expander("📦 Armar pedido (ordenado por ubicación en depósito)", key="exp_armar_pedido_ordenado_ubicacion"):
         ayuda(
             "Pegá varios códigos separados por coma — te devuelve la lista ordenada por ubicación "
             "en el depósito, para juntar todo en un solo recorrido en vez de ir y volver."
@@ -2126,7 +2126,7 @@ if pagina == PAGINAS[0]:
                 else:
                     st.warning("No encontré ninguno de esos códigos en el catálogo.")
 
-    with st.expander("📐 Buscar por medidas mecánicas (cuando no hay código ni equivalencia cargada)"):
+    with st.expander("📐 Buscar por medidas mecánicas (cuando no hay código ni equivalencia cargada)", key="exp_buscar_medidas_mecanicas_cuando"):
         ayuda(
             "Para piezas de autos antiguos, importados o fuera de catálogo: medí la pieza rota con un "
             "calibre y buscá alternativas que compartan esas cotas, aunque no tengan equivalencia registrada."
@@ -2188,7 +2188,7 @@ if pagina == PAGINAS[0]:
                 )
 
     if es_operador_o_admin():
-        with st.expander("📷 Identificar pieza por foto (con IA)"):
+        with st.expander("📷 Identificar pieza por foto (con IA)", key="exp_identificar_pieza_foto_ia"):
             st.caption(
                 "Sacale una foto a la pieza o subí una que ya tengas. La IA busca un código visible "
                 "y, si lo encuentra, lo busca directo en tu catálogo."
@@ -2312,7 +2312,7 @@ if pagina == PAGINAS[0]:
 
     favoritos = listar_favoritos()
     if favoritos:
-        with st.expander(f"⭐ Favoritos ({len(favoritos)})"):
+        with st.expander(f"⭐ Favoritos ({len(favoritos)})", key="exp_favoritos"):
             for fila_fav in favoritos[:8]:
                 colf1, colf2 = st.columns([4, 1])
                 colf1.write(f"{fila_fav.get('Codigo') or ''} — {fila_fav.get('Marca') or ''}")

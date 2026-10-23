@@ -45,7 +45,7 @@ if pagina == PAGINAS[3]:
                     barra.empty()
                     st.success(f"Se bajaron {bajadas} foto(s).")
                     if fallidas:
-                        with st.expander(f"⚠️ {len(fallidas)} no se pudieron bajar"):
+                        with st.expander(f"⚠️ {len(fallidas)} no se pudieron bajar", key="exp_no_pudieron_bajar"):
                             for url_f, motivo in fallidas[:30]:
                                 st.caption(f"- {str(url_f)[:60]}: {motivo}")
             else:
@@ -200,7 +200,7 @@ if pagina == PAGINAS[3]:
                             f"{en_curso['fallos']} con error de red."
                         )
                         if fallidas2:
-                            with st.expander(f"Ver los últimos {min(len(fallidas2), 30)} que no salieron"):
+                            with st.expander(f"Ver los últimos {min(len(fallidas2), 30)} que no salieron", key="exp_ver_ultimos_no_salieron"):
                                 for cod_f, motivo in fallidas2[:30]:
                                     st.caption(f"- {cod_f}: {motivo}")
                     else:

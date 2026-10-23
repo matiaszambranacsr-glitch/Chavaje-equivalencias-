@@ -98,7 +98,7 @@ if pagina == PAGINAS[10]:
                         st.warning(_texto_dvl)
             # El detalle de una persona, aparte: con muchos pedidos, la lista entera de todos
             # era la pantalla que «explota».
-            with st.expander("🔎 Qué tiene cada uno"):
+            with st.expander("🔎 Qué tiene cada uno", key="exp_tiene_cada_uno"):
                 _de_quien = st.selectbox("Persona:", [g["quien"] for g in _quienes],
                                          key="dvl_detalle_de")
                 _suyo = lo_que_tiene(persona=_de_quien)

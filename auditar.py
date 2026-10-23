@@ -648,6 +648,20 @@ for nodo in ast.walk(ARBOL):
                  f"st.{nodo.func.attr} con dos «$» o más: Streamlit lo lee como una fórmula y se "
                  "come los montos — escapalos («\\$»)")
 
+# ============ 8f. Desplegables y recuadros sin clave: se cierran solos ============
+# Sin clave, Streamlit reconoce un st.expander o un st.popover por su título y por su lugar en
+# la pantalla. Si el título cambia («🛒 Presupuesto en armado — 2 ítem(s) · $X» al sumar uno,
+# «📋 Ventas y cierre de caja — hoy: 3» al cobrar) o aparece algo arriba (un aviso), es otro:
+# se cierra en la cara y la pantalla vuelve para arriba. El dueño lo vio como «muchas ventanas
+# me mandan al inicio». Con clave queda abierto (medido en el navegador).
+for nodo in ast.walk(ARBOL):
+    if (isinstance(nodo, ast.Call) and isinstance(nodo.func, ast.Attribute)
+            and nodo.func.attr in ("expander", "popover") and nodo.args
+            and not any(k.arg == "key" for k in nodo.keywords)):
+        reportar("ERROR", nodo.lineno,
+                 f"st.{nodo.func.attr} sin key=: se cierra solo cuando cambia su título o "
+                 "aparece algo arriba, y la pantalla vuelve al principio")
+
 # El resumen de explicar() tiene que entrar en una línea del celular
 for nodo in ast.walk(ARBOL):
     if isinstance(nodo, ast.Call) and isinstance(nodo.func, ast.Name) and nodo.func.id == "explicar":

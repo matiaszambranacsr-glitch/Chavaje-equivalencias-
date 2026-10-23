@@ -41,7 +41,7 @@ if pagina == PAGINAS[1]:
     # Antes de vincular a mano conviene saber POR QUÉ no están relacionados: puede que ya lo
     # estén y no se vean por el límite de saltos, que el vínculo esté esperando aprobación, o
     # que alguien lo haya rechazado. Vincular a mano sin mirar eso tapa el problema de fondo.
-    with st.expander("🔎 ¿Por qué estos dos códigos no se relacionan?"):
+    with st.expander("🔎 ¿Por qué estos dos códigos no se relacionan?", key="exp_estos_dos_codigos_no"):
         st.caption("Poné un código de cada proveedor y te digo qué está pasando con ese par.")
         dg1, dg2 = cols(2)
         _diag_a = dg1.text_input("Un código:", key="diag_a", placeholder="El de un proveedor")

@@ -130,7 +130,9 @@ if pagina == PAGINAS[9]:
         # Se limpia al buscar: el lector de códigos de barras escribe encima de lo que haya.
         with st.form("form_buscar_para_vender", clear_on_submit=True):
             _q1, _q2 = cols([4, 1])
-            _texto_vta = _q1.text_input("Código o descripción:", key="venta_buscar",
+            _texto_vta = _q1.text_input(rotulo_de_accion("Código o descripción:",
+                                                         "Código o descripción (F2):"),
+                                        key="venta_buscar",
                                         placeholder="Ej: W712/94 o filtro aceite gol")
             _buscar_vta = _q2.form_submit_button("🔍 Buscar")
         # ESCANEAR Y LISTO: el código de barras de un solo producto se suma directo, sin
@@ -283,7 +285,8 @@ if pagina == PAGINAS[9]:
                     format_func=lambda f: (f"📒 A la cuenta de {_cuenta_vta['nombre']}"
                                            if f == A_CUENTA else f))
             if st.button("📤 Mandar a la caja" if _con_caja else "✅ Terminar la venta",
-                         type="primary", key="venta_terminar", width="stretch"):
+                         type="primary", key="venta_terminar", width="stretch",
+                         shortcut=None if es_celular() else "F9"):
                 try:
                     _id_vta, _avisos_vta = cerrar_venta(
                         venta_items, _cliente_vta, _forma_vta,
@@ -325,7 +328,7 @@ if pagina == PAGINAS[9]:
     # LO QUE SE VA A TERMINAR, con lo que se vende: para anotarlo antes de que falte. Ver
     # lo_que_se_va_a_terminar().
     _por_terminar = lo_que_se_va_a_terminar()
-    with st.expander(f"📦 Lo que se va a terminar ({len(_por_terminar)})"):
+    with st.expander(f"📦 Lo que se va a terminar ({len(_por_terminar)})", key="exp_lo_va_terminar"):
         if not _por_terminar:
             st.caption("Con lo que se vendió en los últimos 30 días, nada se termina esta semana.")
         else:
@@ -347,7 +350,7 @@ if pagina == PAGINAS[9]:
 
     # LO QUE MÁS SE VENDE: el período que se elija, el total, el ticket promedio, las ventas de
     # cada día y lo que más sale, por unidades y por plata. La ganancia, solo el administrador.
-    with st.expander("📊 Lo que más se vende"):
+    with st.expander("📊 Lo que más se vende", key="exp_lo_mas_vende"):
         _dias_mv = st.selectbox("Período:", [7, 30, 90, 365], index=1, key="venta_periodo",
                                 format_func=lambda d: {7: "Última semana", 30: "Últimos 30 días",
                                                        90: "Últimos 3 meses",
@@ -385,7 +388,7 @@ if pagina == PAGINAS[9]:
     # CADA CUENTA: lo de un empleado (lo que vendió y lo que tiene del depósito) o de un taller
     # (lo que se llevó y lo que debe: lo de un taller no vuelve). El administrador ve a todos;
     # un empleado, lo suyo. Ver resumen_de_la_cuenta().
-    with st.expander("👥 Cada cuenta"):
+    with st.expander("👥 Cada cuenta", key="exp_cada_cuenta"):
         _cuentas = cuentas_para_mirar()
         _ca1, _ca2 = cols([2, 1])
         _cual = _ca1.selectbox("Cuenta:", range(len(_cuentas)), key="venta_cuenta_sel",

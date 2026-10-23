@@ -2073,7 +2073,7 @@ def mostrar_portal_mecanico():
     anteriores = listar_presupuestos_mecanico(mecanico_id)
     if anteriores:
         for p in anteriores[:20]:
-            with st.expander(f"{p['Fecha']} — {p['Cliente'] or 'sin nombre'} — ${miles(p['Total'], 0)}"):
+            with st.expander(f"{p['Fecha']} — {p['Cliente'] or 'sin nombre'} — ${miles(p['Total'], 0)}", key=f"exp_presupuesto_{p['ID']}"):
                 items_p = json.loads(p["items_json"])
                 for it in items_p:
                     st.write(f"- {it['codigo']} ({it['marca']}) x{it['cantidad']} — ${miles(it['precio']*it['cantidad'], 0)}")

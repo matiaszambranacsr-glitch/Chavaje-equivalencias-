@@ -73,6 +73,14 @@ def probar(L):
             False)
     id_filtro = next(p["id"] for p in pend if p["producto_id"] == filtro)
     id_junta = next(p["id"] for p in pend if p["producto_id"] == junta)
+    # El cartel de lo que llega: qué, cuánto, para quién y quién lo pidió; sin precios.
+    _avisos = [ns["el_aviso_del_pedido"](p) for p in pend]
+    esperar("el cartel del pedido nuevo",
+            (["para Taller" in a or "Mostrador" in a for a in _avisos],
+             all("pidió mostrador" in a and a.startswith("📦 ") for a in _avisos),
+             any("$" in a for a in _avisos),
+             sorted(a.split(" · ")[0].split("× ")[0] for a in _avisos)),
+            ([True, True], True, False, ["📦 1", "📦 2"]))
 
     # Entregar: stock, venta, movimiento con descuento; y no dos veces.
     ventas_antes = c.execute("SELECT COUNT(*) FROM ventas_registradas").fetchone()[0]

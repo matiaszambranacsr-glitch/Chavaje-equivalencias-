@@ -313,7 +313,7 @@ if pagina == PAGINAS[3]:
             # ➕ CARGAR UN PORTAL: pegar el link de la ficha de un producto. Ver
             # plantilla_desde_un_ejemplo() y probar_plantilla_de_portal().
             with st.expander("➕ Cargar un portal", expanded=not any(
-                    config_portal(x["nombre"]) for x in _marcas_portal)):
+                    config_portal(x["nombre"]) for x in _marcas_portal), key="exp_cargar_portal"):
                 _faltan_conocidos = [m for m in PORTALES_CONOCIDOS
                                      if not any(portal_conocido(x["nombre"])
                                                 == PORTALES_CONOCIDOS[m]
@@ -903,7 +903,7 @@ if pagina == PAGINAS[3]:
                                        "la próxima consulta vuelve a ingresar."):
                         olvidar_sesion_de_catalogo()
                         avisar("ok", "Listo: la próxima consulta vuelve a ingresar al catálogo.")
-                with st.expander("🔐 ¿El catálogo pide usuario y contraseña?"):
+                with st.expander("🔐 ¿El catálogo pide usuario y contraseña?", key="exp_catalogo_pide_usuario_contrasena"):
                     st.markdown(
                         "Se puede, y **la contraseña no se guarda en la app**: va en los "
                         "secretos de Streamlit. Es a propósito — todo lo que se guarda en la "

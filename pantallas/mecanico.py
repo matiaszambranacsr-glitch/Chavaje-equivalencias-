@@ -5,7 +5,7 @@
 # MODO MECÁNICO
 # ============================================================
 if pagina == PAGINAS[7]:
-    st.subheader("🛠️ Modo Mecánico")
+    # El título de la sección lo pone app.py («EL TÍTULO DE LA SECCIÓN»).
 
     # SUB_MEC está en logica/interfaz.py, con las demás listas de navegación.
     sub_mec = elegir_solapa(PAGINAS[7])
@@ -45,7 +45,7 @@ if pagina == PAGINAS[7]:
                     )
                     for _grupo in _reps_dtc:
                         with st.expander(f"{_grupo['pieza']} — {len(_grupo['productos'])} "
-                                          f"en tu catálogo"):
+                                          f"en tu catálogo", key=f"exp_dtc_{codigo_buscar}_{_grupo['pieza']}"):
                             st.dataframe(_grupo["productos"], width="stretch", hide_index=True)
                 elif _auto_dtc or _modelo_dtc:
                     st.caption("No encontré en tu catálogo ninguna de las piezas que nombra "
@@ -54,7 +54,7 @@ if pagina == PAGINAS[7]:
                 st.warning("No tengo ese código cargado todavía (con ese filtro de fabricante). Podés agregarlo abajo.")
 
         if es_empleado_o_abierto():
-            with st.expander("➕ Agregar / corregir un código"):
+            with st.expander("➕ Agregar / corregir un código", key="exp_agregar_corregir_codigo"):
                 st.caption("Dejá 'Fabricante' vacío si es un código genérico (P0xxx). Completalo si es específico de una marca (ej: Ford, Toyota).")
                 with st.form("form_dtc", clear_on_submit=True):
                     cd1, cd2, cd3 = st.columns(3)
@@ -73,7 +73,7 @@ if pagina == PAGINAS[7]:
                         avisar("success", f"Código {nuevo_codigo.upper()}{etiqueta_fab} guardado.")
                         st.rerun()
 
-            with st.expander("📋 Carga masiva de códigos (pegar texto)"):
+            with st.expander("📋 Carga masiva de códigos (pegar texto)", key="exp_carga_masiva_codigos_pegar"):
                 ayuda(
                     "Un código por línea, formato: `codigo;descripción;sistema;causas;fabricante` "
                     "(sistema, causas y fabricante son opcionales — dejá fabricante vacío para códigos genéricos)."
@@ -99,7 +99,7 @@ if pagina == PAGINAS[7]:
             return
         for esq in lista_esq:
             titulo_expander = f"🗺️ {esq['titulo']}" + (" 🤖 (orientativo, generado por IA)" if esq.get("generado_ia") else "")
-            with st.expander(titulo_expander):
+            with st.expander(titulo_expander, key=f"exp_esquema_{esq['id']}"):
                 if esq.get("generado_ia"):
                     st.warning(
                         "🤖 Esta imagen fue generada por IA como referencia orientativa — "
@@ -491,7 +491,7 @@ if pagina == PAGINAS[7]:
                 st.rerun()
 
         fabricantes_cargados = listar_fabricantes_vin()
-        with st.expander(f"🏭 Fabricantes por WMI ({len(fabricantes_cargados)})"):
+        with st.expander(f"🏭 Fabricantes por WMI ({len(fabricantes_cargados)})", key="exp_fabricantes_wmi"):
             st.caption(
                 "Los 3 primeros caracteres del VIN. Vienen 328 cargados de la lista pública "
                 "internacional; podés corregir o agregar los que falten."
@@ -515,7 +515,7 @@ if pagina == PAGINAS[7]:
                 st.caption('🔒 Para cargar fabricantes hace falta entrar con contraseña de empleado.')
 
         modelos_cargados = listar_modelos_vin()
-        with st.expander(f"🚗 Modelos aprendidos ({len(modelos_cargados)})"):
+        with st.expander(f"🚗 Modelos aprendidos ({len(modelos_cargados)})", key="exp_modelos_aprendidos"):
             if modelos_cargados:
                 st.dataframe(modelos_cargados, width="stretch", hide_index=True)
                 cbm1, cbm2 = st.columns(2)
@@ -535,7 +535,7 @@ if pagina == PAGINAS[7]:
                 )
 
         motores_cargados = listar_motores_vin()
-        with st.expander(f"⚙️ Motores aprendidos ({len(motores_cargados)})"):
+        with st.expander(f"⚙️ Motores aprendidos ({len(motores_cargados)})", key="exp_motores_aprendidos"):
             ayuda(
                 "La 8ª posición del VIN es el código de motor. Es el patrón que mejor rinde: el "
                 "mismo código se repite en toda la gama de la marca, así que enseñarlo una vez "
@@ -571,7 +571,7 @@ if pagina == PAGINAS[7]:
         # Guardar lo que dicen las descripciones, en vez de releerlas cada vez. Además de que
         # buscar por vehículo pase a andar para esos productos, la app ya cruza los que le
         # sirven a los mismos autos: llenar esta tabla genera equivalencias nuevas sola.
-        with st.expander("🪄 Leer de las descripciones a qué auto le va cada repuesto"):
+        with st.expander("🪄 Leer de las descripciones a qué auto le va cada repuesto", key="exp_leer_descripciones_auto_le"):
             explicar(
                 "Las listas ya dicen el auto («JUNTA TAPA FORD TAUNUS 1969/78»). Esto lo guarda "
                 "para poder buscar por vehículo.",
@@ -747,7 +747,7 @@ if pagina == PAGINAS[7]:
 
                 if sin_dato_anio:
                     with st.expander(f"❔ {len(sin_dato_anio)} repuesto(s) que no aclaran el año "
-                                      "(pueden servir igual)"):
+                                      "(pueden servir igual)", key="exp_repuesto_s_no_aclaran"):
                         st.caption(
                             "La descripción no dice para qué años es, así que no se puede afirmar "
                             "ni descartar. Se muestran aparte para que decidas vos."
@@ -833,7 +833,7 @@ if pagina == PAGINAS[7]:
 
             precargados = listar_catalogo_precargado()
             if precargados:
-                with st.expander(f"📋 Ver / borrar precargados sin esquema todavía ({len(precargados)})"):
+                with st.expander(f"📋 Ver / borrar precargados sin esquema todavía ({len(precargados)})", key="exp_ver_borrar_precargados_sin"):
                     for pv in precargados:
                         colp1, colp2 = st.columns([4, 1])
                         colp1.write(f"{pv['marca']} — {pv['modelo']}")

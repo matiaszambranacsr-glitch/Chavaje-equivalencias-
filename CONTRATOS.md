@@ -238,6 +238,10 @@ Las pruebas se corren como dice el README, en «Antes de subir un cambio».
 | F11: a la cuenta de la venta (o la elegida, si era de Mostrador), activa, con su descuento, su plazo y su límite; si no entra no cambia nada; anular anula el cargo y devolver se le acredita | `poner_a_cuenta()`, `anular_venta()`, `devolver_de_una_venta()` | `pruebas_de_la_caja.py` (5, 6, 7, 9b) |
 | El día de la caja es el día que se cobró; apagada la caja aparte, se cobra al terminar | `ventas_del_dia()`, `cierre_de_caja()`, `caja_aparte()` | `pruebas_de_la_caja.py` (8, 9) |
 | Uno más, uno menos y quitar, en la venta y en el presupuesto (el menú del click derecho) | `cambiar_cantidad_en_la_venta()`, `quitar_de_la_venta()`, `quitar_del_presupuesto()` | `pruebas_de_las_ventas.py` (7, 7b) |
+| Lo de arriba de la caja: el cajón (efectivo menos lo devuelto), tarjeta y transferencia, lo puesto a cuenta aparte y lo que espera | `resumen_de_la_caja()` | `pruebas_de_la_caja.py` (9c) |
+| El cartel de un pedido nuevo del depósito: qué, cuánto, para quién y quién lo pidió, sin precios | `el_aviso_del_pedido()` | `pruebas_del_deposito.py` |
+| Los desplegables y recuadros tienen clave: no se cierran solos cuando cambia su título | — | `auditar.py` (8f) |
+| Ningún texto muestra dos «$» sin escapar (Streamlit los toma como una fórmula) | — | `auditar.py` (8e) |
 | Lo de cada cuenta: un empleado ve lo suyo, el administrador todas | `resumen_de_la_cuenta()`, `cuentas_para_mirar()` | `pruebas_de_lo_que_queda_afuera.py` |
 | Al terminar la venta, la patente y los km anotan cada pieza en la ficha del auto, una sola vez, y frenan los km para atrás | `anotar_la_venta_en_el_auto()`, `nombre_de_la_pieza()` | `pruebas_de_las_ventas.py` |
 | Un aviso por cliente con todo lo que le toca; «Ya le avisé» lo saca de la lista 15 días | `avisos_por_cliente()`, `marcar_avisado()` | `pruebas_de_los_cambios.py` (9l ter) |
@@ -248,8 +252,8 @@ Las pruebas se corren como dice el README, en «Antes de subir un cambio».
 
 ## Sin prueba automática todavía
 
-- El menú del click derecho y F10/F11 desde un campo: son JavaScript en el navegador
-  (`AYUDAS_DEL_NAVEGADOR`); se probaron con un navegador de verdad, no hay prueba que lo corra
-  sola.
+- El menú del click derecho, las teclas (F2, F9, F10, F11) y el pitido: son JavaScript en el
+  navegador (`AYUDAS_DEL_NAVEGADOR`); se probaron con un navegador de verdad, no hay prueba que
+  los corra sola.
 - Lo que necesita la base real (`pruebas_de_la_revision.py --base`, `pruebas_de_compatibilidad.py`)
   no corre en GitHub: se corre a mano antes de publicar.

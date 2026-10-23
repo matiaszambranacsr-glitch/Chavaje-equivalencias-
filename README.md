@@ -6600,6 +6600,27 @@ Lo pidió el dueño: «dividí la caja de las ventas: que al cajero le salga un 
 
 Probado en un navegador de verdad: el cajero entró y arrancó en Ventas; en 💵 Caja salieron los dos carteles; con el cursor en un campo, F10 abrió la ventana; crédito en 3 cuotas con 10% cobró $22.500 (3 de $7.500) y F10 de nuevo no abrió otra encima; F11 preguntó «¿Estás seguro que querés ponérselo a cuenta a Taller Norte? $11.250» y la puso a cuenta con el 10% de la cuenta. La vendedora, en la computadora, no veía los botones: click derecho → «➕ Sumar a la venta», «➕ Uno más» (quedaron 2), Escape cerró el menú, «📍 ¿Dónde está?» la llevó al mapa con «está en A-2-3»; mandó la venta a la caja y al cajero le apareció el cartel. En el buscador, el menú trajo «🛒 Se llevó, 📌 Reponer, 🛒 Sumar al presupuesto, 📍 ¿Dónde está?» y sumó al presupuesto. En 🏗️ Armar se cargaron los lados 1, 2 y 3 de la A y el mapa encontró «2-3-1» en el lado de abajo.
 
+## 🎨 Las ventanas que mandaban al inicio, la interfaz nueva y lo que se sumó
+
+Lo pidió el dueño: «muchas ventanas, por ejemplo lo de a cuentas, cuando las apreto me mandan al inicio; mejorá la interfaz, que sea agradable a la vista, moderna y seria; y seguí mejorando».
+
+**Por qué mandaban al inicio.** Streamlit reconoce un desplegable (o un recuadro que se abre) por su título y por su lugar en la pantalla. Si el título cambia —«🛒 Presupuesto en armado — 2 ítem(s) · $X» al cambiar una cantidad, «📋 Ventas y cierre de caja — hoy: 3 · $X» al cobrar, «📦 Lo que se va a terminar (4)»— o aparece algo arriba, para Streamlit es otro: se cierra en la cara y la pantalla vuelve para arriba. Eran 36 desplegables con título que cambia, de 75. Medido en un navegador: con la versión publicada, cambiar una cantidad del presupuesto lo cerraba; ahora los 75 tienen su clave y quedan abiertos (el presupuesto, el cierre de caja al cobrar). El auditor marca como error cualquier desplegable o recuadro sin clave (control 8f).
+
+| Qué | Cómo |
+|---|---|
+| **El encabezado, en un renglón** | La marca a la izquierda y, a la derecha, **🔔 los avisos del día** (en todas las secciones, en vez del renglón rojo entre la barra y lo que uno vino a hacer) y **👤 quién está adentro**, con la vista y **Salir** adentro. Antes eran dos renglones, y en el celular «Salir» ocupaba todo el ancho. |
+| **El título de cada sección** | En la computadora la pantalla arranca diciendo dónde estás («🧾 Ventas») y para qué sirve, abajo, en gris. Se sacaron los títulos repetidos de Administrar, Estadísticas, Modo Mecánico y Vehículos. |
+| **Más sobria** | Un gris azulado oscuro, un solo color de acento (el ámbar) para lo que hay que hacer, letra Inter en todo. Los botones principales en ámbar con letra oscura (antes unos salían con letra blanca y otros no, según tuvieran ayuda); los demás, grises con borde. Los campos más oscuros que las tarjetas, con el borde ámbar al escribir. Desplegables, formularios, métricas, ventanas y carteles con las mismas esquinas y el mismo borde. Los renglones de productos, separados como en una tabla. La barra de secciones entra en un renglón a 1366 px. |
+| **Menos ruido** | «🧠 Búsqueda automática de relaciones» y «🔧 Mantenimiento automático de hoy» salen solo en el Buscador, Cargar Excel, Administrar y Estadísticas: en Ventas, la Caja o el Depósito no le dicen nada a quien cobra. |
+| **El plano del depósito** | En la computadora crece hasta el doble: se veía chico, en una esquina. |
+| **💵 Lo del día, arriba de la caja** | **En el cajón** (lo cobrado en efectivo menos lo devuelto: lo que tiene que haber), **tarjeta y transferencia**, **a cuenta hoy** (no es plata que entró) y **lo que espera**. Se pone al día solo. |
+| **El comprobante al cobrar** | Recién cobrada (o puesta a cuenta), la caja ofrece el comprobante: **📄 PDF** para imprimir o **📲 por WhatsApp**. El que se lo da al cliente es el cajero. |
+| **📦 El cartel del pedido nuevo** | En el depósito, cada pedido que llega avisa arriba, como la venta en la caja: «📦 1× IMPERIAL LUSQ-LG-07 · para Mostrador · pidió Ana». Sin precios. Lo que ya estaba al entrar no avisa. |
+| **🔊 El pitido** | En la caja y en el depósito, cada cartel nuevo suena (dos tonos cortos, sin archivo de sonido). Se apaga con «🔊 Sonido». |
+| **Más teclas** | **F2** va a la caja de búsqueda de la pantalla (Ventas, Buscador, el mapa, ubicar, devoluciones) y la deja lista para escanear encima; **F9** manda la venta a la caja (o la termina). Andan aunque el cursor esté en otro campo. En el celular los botones no muestran la tecla. |
+
+Probado en un navegador de verdad: el presupuesto quedó abierto cambiando cantidades y el cierre de caja abierto al cobrar (con la versión anterior, el presupuesto se cerraba); todas las pantallas y solapas se dibujan sin errores; F2 llevó a la búsqueda de Ventas, F9 mandó la venta a la caja; la caja mostró el día arriba y, al cobrar, el comprobante (con «Listo» se va); Ana pidió algo al depósito y, en la pantalla del depósito, apareció el cartel y sonó el pitido. En el celular el encabezado entra en un renglón.
+
 ## 📞 Un aviso por cliente, y una sola vez
 
 «A quién avisar» era una fila por pieza: el cliente con la correa y las pastillas recibía dos mensajes, y al otro día los dos volvían a la lista. Ahora es **un mensaje por cliente** con todo lo que le toca, y **«✅ Ya le avisé»** lo saca de la lista por 15 días. Si mientras tanto le toca otra pieza, vuelve por esa.

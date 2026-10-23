@@ -851,6 +851,19 @@ def efectivo_esperado(dia=None):
     return next((t for f, _, t in cierre_de_caja(dia)["por_forma"] if f == "Efectivo"), 0.0)
 
 
+def resumen_de_la_caja(dia=None):
+    """Lo de arriba de 💵 Caja, del día (hoy, si no se dice): lo que tiene que haber en el
+    cajón, lo que entró por tarjeta o transferencia, lo puesto a cuenta (no es plata que entró)
+    y lo que espera para cobrarse. dict."""
+    caja = cierre_de_caja(dia)
+    por_forma = {f: t for f, _, t in caja["por_forma"]}
+    efectivo = por_forma.pop("Efectivo", 0.0)
+    a_cuenta = por_forma.pop(A_CUENTA, 0.0)
+    return {"efectivo": round(efectivo, 2), "otros_medios": round(sum(por_forma.values()), 2),
+            "a_cuenta": round(a_cuenta, 2), "ventas": caja["ventas"],
+            "esperando": caja["a_cobrar"], "total_esperando": caja["total_a_cobrar"]}
+
+
 def arqueos_del_dia(dia=None):
     """Los arqueos de un día, el último primero. [dict]."""
     dia = dia or datetime.now().strftime("%Y-%m-%d")

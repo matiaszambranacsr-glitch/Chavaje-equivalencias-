@@ -8,9 +8,9 @@
 [theme]
 base = "dark"
 primaryColor = "#E8A33D"
-backgroundColor = "#14171B"
-secondaryBackgroundColor = "#1D2126"
-textColor = "#ECEEF0"
+backgroundColor = "#0F1216"
+secondaryBackgroundColor = "#161A1F"
+textColor = "#E8EBEE"
 
 # Streamlit corre el recolector de basura de Python COMPLETO después de cada toque de cada
 # persona. Con una app de este tamaño eso es caro: con 15 personas a la vez era la cuarta parte

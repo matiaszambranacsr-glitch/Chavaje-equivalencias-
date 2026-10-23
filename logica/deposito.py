@@ -120,6 +120,13 @@ def pedir_al_deposito(producto_id, cantidad=1, mecanico_id=None, codigo_de_retir
     return True, "📦 Pedido al depósito. Lo ven en «📦 Depósito»."
 
 
+def el_aviso_del_pedido(pedido):
+    """El cartel de un pedido que acaba de llegar al depósito: qué, cuánto, para quién y quién lo
+    pidió. Sin precios, como todo lo del depósito."""
+    return (f"📦 {pedido['cantidad']}× {pedido['marca']} {pedido['codigo_raw']} · para "
+            f"{pedido.get('cuenta') or NOMBRE_DEL_MOSTRADOR} · pidió {pedido.get('pedido_por') or '¿?'}")
+
+
 def pedidos_pendientes():
     """Lo que el depósito tiene que buscar, ordenado por ubicación (lo que no tiene ubicación,
     al final) para juntarlo en un solo recorrido. Sin precios: no le hacen falta al depósito,

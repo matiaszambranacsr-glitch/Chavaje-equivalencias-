@@ -92,7 +92,7 @@ específico, y las pantallas quedan todas al final:
     logica/interfaz.py
         · PIEZAS DE INTERFAZ QUE SE REPITEN
         · NAVEGACIÓN: DÓNDE ESTÁ CADA COSA
-        · EL CLICK DERECHO Y LAS TECLAS DE LA CAJA (en la computadora)
+        · EL CLICK DERECHO, LAS TECLAS Y EL PITIDO (en el navegador)
         · PDF: cotización y ficha del vehículo
         · LEER EL ARCHIVO: encabezado, hojas y codificación
     logica/vehiculos.py
@@ -267,7 +267,8 @@ if es_celular():
     [data-testid="stDataFrame"] { font-size: 0.78rem; }
     /* En el celular el encabezado va con el nombre solo: el subtítulo empujaba la caja de
        búsqueda hacia abajo. */
-    .app-bar { padding: 8px 10px !important; margin-bottom: 6px !important; gap: 10px !important; }
+    .st-key-barra_superior { padding: 6px 8px 6px 10px !important; margin-bottom: 4px !important; }
+    .app-bar { gap: 10px !important; }
     .app-bar__logo { width: 32px !important; height: 32px !important; font-size: 1rem !important; }
     .app-bar__title { font-size: 1.05rem !important; }
     .app-bar__sub { display: none !important; }
@@ -285,7 +286,7 @@ if es_celular():
 else:
     st.markdown("""
     <style>
-    .block-container { padding: 1rem 3rem 4rem 3rem !important; max-width: 1500px !important; }
+    .block-container { padding: 1rem 2.5rem 4rem 2.5rem !important; max-width: 1400px !important; }
     [data-testid="stDataFrame"] { font-size: 0.88rem; }
     /* El click derecho (ver logica/interfaz.py): con el script andando, los botones de cada
        producto no se ven —ni su columna— y salen en el menú. */
@@ -295,7 +296,7 @@ else:
     body:not(.con-menu-clic-derecho) [data-testid="stLayoutWrapper"]:has(> [class*="st-key-pista_del_menu_"]) {
       display: none !important;
     }
-    body.con-menu-clic-derecho [class*="st-key-conmenu_"] { cursor: context-menu; border-radius: 8px; }
+    body.con-menu-clic-derecho [class*="st-key-conmenu_"] { cursor: context-menu; }
     body.con-menu-clic-derecho [class*="st-key-conmenu_"]:hover { background: rgba(232, 163, 61, 0.07); }
     </style>
     """, unsafe_allow_html=True)
@@ -306,17 +307,22 @@ poner_las_ayudas_del_navegador()
 # ============================================================
 # ENCABEZADO
 # ============================================================
-st.markdown(
+# Un solo renglón: la marca a la izquierda y, a la derecha, los avisos del día y quién está
+# adentro (lo de la derecha se suma más abajo, en la misma caja). Antes eran dos renglones: la
+# tarjeta y otro con la sesión, la vista y «Salir», que en el celular ocupaba todo el ancho.
+_barra_superior = st.container(key="barra_superior", horizontal=True, wrap=False,
+                               vertical_alignment="center", gap="small")
+_barra_superior.markdown(
     """
     <div class="app-bar">
         <div class="app-bar__logo">🔧</div>
-        <div>
+        <div style="min-width:0">
             <div class="app-bar__title">Equivalencias El Chavo</div>
-            <div class="app-bar__sub">Búsqueda de repuestos por equivalencia</div>
+            <div class="app-bar__sub">Repuestos, ventas y depósito</div>
         </div>
     </div>
     """,
-    unsafe_allow_html=True
+    unsafe_allow_html=True, width="stretch"
 )
 
 # La copia a GitHub cuando hay cambios, en su propio hilo. Ver vigilar_la_copia().
@@ -390,27 +396,29 @@ def selector_de_vista(donde, **extra):
                     help="Se elige sola según desde dónde entres. Cambiala si no acertó.", **extra)
 
 
-# En el celular el selector de vista va al pie de la página: las columnas se apilan y ocupaba
-# un renglón entero arriba de la caja de búsqueda, para algo que se elige solo.
+# En el celular el selector de vista va al pie de la página, para algo que se elige solo; en
+# la computadora, adentro del recuadro de quién está adentro.
 _VISTA_AL_PIE = es_celular()
-if es_admin() or es_operador_o_admin() or st.session_state.get("nivel_usuario") == "mecanico":
-    col_estado, col_modo, col_salir = st.columns([3, 1.4, 1])
-    nombre_sesion = st.session_state.get("admin_nombre", "")
-    etiquetas_nivel = {"admin": "administrador", "operador": "operador", "mecanico": "mecánico"}
-    etiqueta_nivel = etiquetas_nivel.get(st.session_state.get("nivel_usuario"), "administrador")
-    col_estado.caption(f"🔓 Sesión de {etiqueta_nivel} activa ({nombre_sesion}).")
-    if not _VISTA_AL_PIE:
-        selector_de_vista(col_modo, label_visibility="collapsed")
-    if col_salir.button("Salir"):
-        cerrar_sesion()
-        st.rerun()
-else:
-    col_estado, col_modo, col_ingresar = st.columns([3, 1.4, 1])
-    col_estado.caption(f"👤 {obtener_usuario_actual()}")
-    if not _VISTA_AL_PIE:
-        selector_de_vista(col_modo, label_visibility="collapsed")
-    with col_ingresar.popover("🔑 Ingresar"):
-        mostrar_login_inicial()
+with _barra_superior:
+    # Los avisos del día van acá, en un botón chico: ver más abajo «Chequeo de salud».
+    _hueco_de_los_avisos = st.container(key="hueco_de_los_avisos", width="content")
+    if es_admin() or es_operador_o_admin() or st.session_state.get("nivel_usuario") == "mecanico":
+        nombre_sesion = st.session_state.get("admin_nombre", "")
+        etiquetas_nivel = {"admin": "administrador", "operador": "operador", "mecanico": "mecánico"}
+        etiqueta_nivel = etiquetas_nivel.get(st.session_state.get("nivel_usuario"), "administrador")
+        with st.popover(f"👤 {nombre_sesion or etiqueta_nivel}", key="pop_usuario"):
+            st.caption(f"🔓 Sesión de {etiqueta_nivel} activa ({nombre_sesion}).")
+            if not _VISTA_AL_PIE:
+                selector_de_vista(st)
+            if st.button("Salir", width="stretch"):
+                cerrar_sesion()
+                st.rerun()
+    else:
+        with st.popover("🔑 Ingresar", key="pop_ingresar"):
+            st.caption(f"👤 Ahora: {obtener_usuario_actual()}")
+            mostrar_login_inicial()
+            if not _VISTA_AL_PIE:
+                selector_de_vista(st)
 
 if st.session_state.get("nivel_usuario") == "mecanico":
     mostrar_portal_mecanico()
@@ -471,8 +479,17 @@ pagina = st.session_state["pagina_actual"]
 # A la vista y no plegada: plegada ocupaba el mismo renglón («ℹ️ ¿Para qué sirve esta
 # sección?») y escondía justo la respuesta. Las ayudas largas sí van plegadas (ver ayuda());
 # esta es de una línea.
-if PARA_QUE_SIRVE.get(pagina) and not (es_celular() and pagina == PAGINAS[0]):
-    st.caption(f"ℹ️ {PARA_QUE_SIRVE[pagina]}")
+# EL TÍTULO DE LA SECCIÓN, con para qué sirve abajo: en la computadora la pantalla arranca
+# diciendo dónde estás. En el celular, solo el renglón chico (la barra ya marca la sección).
+if es_celular():
+    if PARA_QUE_SIRVE.get(pagina) and pagina != PAGINAS[0]:
+        st.caption(f"ℹ️ {PARA_QUE_SIRVE[pagina]}")
+else:
+    st.markdown(f"<div class='titulo-seccion'><div class='titulo-seccion__nombre'>"
+                f"{texto_para_html(pagina)}</div>"
+                + (f"<div class='titulo-seccion__para'>{texto_para_html(PARA_QUE_SIRVE[pagina])}"
+                   "</div>" if PARA_QUE_SIRVE.get(pagina) else "") + "</div>",
+                unsafe_allow_html=True)
 
 # Aviso fuerte si la base quedó vacía: Streamlit Cloud borra el disco al redesplegar, y sin
 # este cartel uno se entera recién cuando busca un código y no aparece nada.
@@ -543,8 +560,12 @@ except Exception as _err:
 
 
 # Los partes del mantenimiento y del descubrimiento son para quien administra, no para el
-# mostrador: en el celular eran dos o tres renglones técnicos arriba de la caja de búsqueda.
-_hecho_hoy = st.session_state.pop("_aviso_tareas", None)
+# mostrador: en el celular eran dos o tres renglones técnicos arriba de la caja de búsqueda. Y
+# solo en las pantallas de las equivalencias: en Ventas, la Caja o el Depósito eran un renglón
+# que no le dice nada a quien está cobrando. Lo que no se mostró queda para cuando se entre ahí.
+_PANTALLAS_DE_LOS_PARTES = (PAGINAS[0], PAGINAS[2], PAGINAS[3], PAGINAS[4])
+_hecho_hoy = (st.session_state.pop("_aviso_tareas", None)
+              if pagina in _PANTALLAS_DE_LOS_PARTES else None)
 if _hecho_hoy and es_operador_o_admin():
     st.caption("🔧 Mantenimiento automático de hoy: " + " · ".join(_hecho_hoy))
 
@@ -553,7 +574,7 @@ if _hecho_hoy and es_operador_o_admin():
 try:
     _desc_txt = obtener_config("descubrimiento_ultimo", "")
     _desc_fec = obtener_config("descubrimiento_fecha", "")
-    if not es_operador_o_admin():
+    if not es_operador_o_admin() or pagina not in _PANTALLAS_DE_LOS_PARTES:
         pass
     elif _desc_txt and st.session_state.get("_desc_visto") != _desc_fec:
         st.session_state["_desc_visto"] = _desc_fec
@@ -580,88 +601,46 @@ if (_problemas and (es_operador_o_admin() or not hay_claves_configuradas())
         and not _es_del_deposito):
     # Se separa por urgencia en vez de mostrar una lista pareja. Antes todo se veía igual y
     # «hay clientes esperando algo que ya tenés» quedaba mezclado con «hay descripciones
-    # pegadas». Lo que da plata va arriba y sin plegar; el resto, plegado.
+    # pegadas». Lo que da plata va arriba.
     _graves = [p for p in _problemas if p["nivel"] == "alto"]
     _resto = [p for p in _problemas if p["nivel"] != "alto"]
 
-    # PLEGADO en el celular, y en la computadora para quien no es administrador. Abierto, cada
-    # aviso trae su texto y su botón: con los seis de la base real la caja de búsqueda quedaba
-    # TRES pantallas más abajo en el celular, y casi DOS en una computadora de 1366x768 —se vio
-    # sacando capturas de las dos—. Quien atiende el mostrador entra a buscar un código, y estos
-    # avisos son tareas de administración: «Ir a arreglarlo» igual le pide la clave. Siguen
-    # arriba de todo, en rojo, con el número, y se abren con un toque. Abiertos quedan solo para
-    # el administrador en la computadora, que es quien los arregla, y solo en el Buscador, que
-    # es donde se arranca: en las demás secciones ya se vieron, y abiertos tapaban la pantalla
-    # a la que uno acababa de entrar.
-    _plegar_avisos = es_celular() or not es_admin() or pagina != PAGINAS[0]
-    # EN EL BUSCADOR, UN BOTÓN CHICO. Plegados seguían siendo un renglón rojo entre el
-    # encabezado y la caja de búsqueda, y quien atiende entra a buscar un código, no a
-    # administrar. Ahí van en un «🔔 N avisos» que se abre encima, cuando uno quiere (lo
-    # sugirió una revisión de la interfaz con ChatGPT). En las demás secciones, como antes.
-    _en_el_buscador = pagina == PAGINAS[0]
-    if _en_el_buscador:
-        _plegar_avisos = True
-        _caja_graves = _caja_resto = st.popover(
-            f"🔔 {len(_problemas)} aviso(s)" + (f" · 🔴 {len(_graves)}" if _graves else ""))
-
-    if _graves:
-        if _en_el_buscador:
-            pass
-        elif _plegar_avisos:
-            _caja_graves = st.expander(
-                f"🔴 {len(_graves)} cosa(s) que conviene mirar hoy"
-                + (f" · 🟡 {len(_resto)} sin apuro" if _resto else ""), expanded=False)
-        else:
-            st.markdown(
-                "<div style='background:rgba(255,75,75,.08);border-left:4px solid #ff4b4b;"
-                "border-radius:6px;padding:.7rem .9rem;margin-bottom:.6rem'>"
-                f"<b>🔴 {len(_graves)} cosa(s) que conviene mirar hoy</b></div>",
-                unsafe_allow_html=True
-            )
-            _caja_graves = st.container()
-        with _caja_graves:
-            for _i_p, _p in enumerate(_graves):
-                cS1, cS2 = st.columns([5, 2])
-                # Escapados: el título y el detalle llevan nombres de marcas y códigos que
-                # vienen de las listas importadas, y acá van adentro de HTML (lo señaló una
-                # revisión con ChatGPT). Ver texto_para_html().
-                cS1.markdown(f"**{texto_para_html(_p['titulo'])}**  \n<span style='opacity:.75;"
-                              f"font-size:.87em'>{texto_para_html(_p['detalle'])}</span>",
-                              unsafe_allow_html=True)
-                cS2.button("Ir a arreglarlo →", key=f"ir_salud_alto_{_i_p}",
-                            on_click=ir_a_donde_dice_el_aviso, args=(_p["donde"],),
-                            help=_p["donde"])
-                cS2.caption(f"📍 {_p['donde']}")
-
-    if _resto:
-        # Plegados, con avisos graves, los «sin apuro» van en el MISMO plegable: dos renglones
-        # plegados uno abajo del otro eran otro renglón entre el encabezado y la caja de
-        # búsqueda. Sin graves, o abiertos, quedan en el suyo como antes.
-        if _graves and _plegar_avisos:
-            with _caja_graves:
-                st.markdown("**🟡 Sin apuro**")
-            _caja_resto = _caja_graves
-        elif _en_el_buscador:
-            pass
-        else:
-            _caja_resto = st.expander(f"🟡 {len(_resto)} cosa(s) más, sin apuro", expanded=False)
-        with _caja_resto:
-            for _i_p, _p in enumerate(_resto):
-                st.markdown(f"**{_p['titulo']}**")
-                st.caption(_p["detalle"])
-                st.button(f"Ir a {_p['donde'].split('→')[-1].strip()} →",
-                           key=f"ir_salud_resto_{_i_p}",
-                           on_click=ir_a_donde_dice_el_aviso, args=(_p["donde"],),
-                           help=_p["donde"])
-
-    # En el celular va adentro del aviso plegado: suelto era una fila más entre el encabezado y
-    # la caja de búsqueda. Si no hay avisos graves, queda donde estaba.
-    with (_caja_graves if ((_graves and _plegar_avisos) or _en_el_buscador) else st.container()):
+    # EN UN BOTÓN CHICO, ARRIBA A LA DERECHA, en todas las secciones: «🔔 7 · 🔴 5», y se
+    # abre cuando uno quiere. Eran un renglón rojo plegado entre la barra y lo que uno vino a
+    # hacer, en cada pantalla (y abiertos, para el administrador, media pantalla). Quien atiende
+    # entra a vender o a buscar, y estos avisos son tareas de administración: «Ir a arreglarlo»
+    # igual le pide la clave. En el buscador ya iban así (lo sugirió una revisión de la
+    # interfaz con ChatGPT); ahora en todas.
+    with _hueco_de_los_avisos:
+        _caja_avisos = st.popover(
+            f"🔔 {len(_problemas)}" + (f" · 🔴 {len(_graves)}" if _graves and not es_celular()
+                                       else ""),
+            key="pop_aviso_s", help="Lo que conviene mirar: tocalo para ver qué es.")
+    with _caja_avisos:
+        if _graves:
+            st.markdown(f"**🔴 {len(_graves)} cosa(s) que conviene mirar hoy**")
+        for _i_p, _p in enumerate(_graves):
+            # Escapados: el título y el detalle llevan nombres de marcas y códigos que vienen
+            # de las listas importadas, y acá van adentro de HTML (lo señaló una revisión con
+            # ChatGPT). Ver texto_para_html().
+            st.markdown(f"**{texto_para_html(_p['titulo'])}**  \n<span style='opacity:.75;"
+                        f"font-size:.87em'>{texto_para_html(_p['detalle'])}</span>",
+                        unsafe_allow_html=True)
+            st.button("Ir a arreglarlo →", key=f"ir_salud_alto_{_i_p}",
+                      on_click=ir_a_donde_dice_el_aviso, args=(_p["donde"],), help=_p["donde"])
+        if _resto:
+            st.markdown(f"**🟡 {len(_resto)} sin apuro**")
+        for _i_p, _p in enumerate(_resto):
+            st.markdown(f"**{_p['titulo']}**")
+            st.caption(_p["detalle"])
+            st.button(f"Ir a {_p['donde'].split('→')[-1].strip()} →",
+                      key=f"ir_salud_resto_{_i_p}",
+                      on_click=ir_a_donde_dice_el_aviso, args=(_p["donde"],),
+                      help=_p["donde"])
         if st.button("🔄 Volver a revisar", key="refrescar_salud"):
             if revisar_la_salud_a_mano():
                 st.rerun()
             st.caption("Recién revisado: esto ya es lo de ahora.")
-    st.markdown("")
 
 
 # LOS PERMISOS PARA PASAR EL LÍMITE que esperan respuesta, a quien puede darlos, en cualquier

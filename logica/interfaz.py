@@ -444,8 +444,9 @@ def ayuda(texto, titulo="ℹ️ Cómo funciona", abierto=False):
     —sin borde, en gris, como un «más información»— y se distinga de los desplegables que son
     parte de la pantalla. Por eso también se puede usar adentro de otro desplegable: no suma
     una segunda caja pesada, suma un renglón."""
-    with st.container(key=_clave_de_ayuda(texto)):
-        with st.expander(titulo, expanded=abierto):
+    _clave = _clave_de_ayuda(texto)
+    with st.container(key=_clave):
+        with st.expander(titulo, expanded=abierto, key=f"{_clave}_x"):
             st.markdown(texto)
 
 
@@ -595,12 +596,13 @@ def archivo_listo(archivo, etiqueta="archivo"):
 
 
 # ============================================================================================
-# EL CLICK DERECHO Y LAS TECLAS DE LA CAJA (en la computadora)
+# EL CLICK DERECHO, LAS TECLAS Y EL PITIDO (en el navegador)
 # ============================================================================================
 # Lo pidió el dueño: en la computadora, los botones de cada producto se despliegan con el click
 # derecho, y en 💵 Caja F10 cobra y F11 pone a cuenta. Streamlit no tiene ninguna de las dos
 # cosas enteras: las completa un script chico en el navegador (AYUDAS_DEL_NAVEGADOR), que app.py
-# pone en cada pasada. El script no inventa botones: el menú copia los botones de verdad del
+# pone en cada pasada. Ya que está, también F2 (a la búsqueda) y F9 (a la caja), y el pitido
+# cuando llega una venta a la caja o un pedido al depósito. El script no inventa botones: el menú copia los botones de verdad del
 # renglón, y elegir una opción toca el botón de verdad —hace lo mismo y pasa por los mismos
 # permisos—. Sin el script, o en la vista de celular, los botones se ven como siempre: el CSS
 # los esconde solo si el script avisó que está (la clase «con-menu-clic-derecho» del body) y la
@@ -619,24 +621,74 @@ AYUDAS_DEL_NAVEGADOR = """
   window.__ayudasDelChavo = true;
   var doc = window.document;
 
-  // LAS TECLAS DE LA CAJA. Streamlit las atiende solo (shortcut= del botón), salvo con el
-  // cursor en un campo: escribías el descuento, apretabas F10 y no pasaba nada. Acá se
-  // atienden antes que nadie, estés donde estés. Si en la pantalla no está el botón, la tecla
-  // sigue de largo: F11 vuelve a ser la pantalla completa del navegador.
-  var TECLAS = {F10: "caja_f10", F11: "caja_f11"};
+  // LAS TECLAS. Streamlit atiende las de sus botones (shortcut=), salvo con el cursor en un
+  // campo: escribías el descuento, apretabas F10 y no pasaba nada. Acá se atienden antes que
+  // nadie, estés donde estés: F2 va a la caja de búsqueda de la pantalla (y la deja lista para
+  // escanear encima), F9 manda la venta a la caja (o la termina), F10 cobra y F11 pone a
+  // cuenta. Si en la pantalla no está lo que la tecla toca, sigue de largo: F11 vuelve a ser la
+  // pantalla completa del navegador.
+  var BOTONES = {F9: ".st-key-venta_terminar button", F10: ".st-key-caja_f10 button",
+                 F11: ".st-key-caja_f11 button"};
+  var BUSQUEDAS = [".st-key-venta_buscar input", ".st-key-busqueda_input input",
+                   ".st-key-mapa_buscar input", ".st-key-ubicar_escaneo input",
+                   ".st-key-dvl_escaneo input", ".st-key-venta_buscar_dev input"];
   window.addEventListener("keydown", function (e) {
-    var clave = TECLAS[e.key];
-    var boton = clave && doc.querySelector(".st-key-" + clave + " button");
+    if (e.key === "F2") {
+      var caja = BUSQUEDAS.map(function (s) { return doc.querySelector(s); })
+                          .filter(Boolean)[0];
+      if (!caja) { return; }
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      caja.focus();
+      caja.select();
+      return;
+    }
+    var boton = BOTONES[e.key] && doc.querySelector(BOTONES[e.key]);
     if (!boton) { return; }
     e.preventDefault();
     e.stopImmediatePropagation();
-    // Con la ventana de cobrar abierta no se abre otra encima.
+    // Con una ventana abierta (la de cobrar) no se abre otra encima.
     if (e.repeat || boton.disabled || doc.querySelector('[role="dialog"]')) { return; }
     // Soltar el campo primero: así lo escrito queda tomado antes del toque.
     var foco = doc.activeElement;
     if (foco && foco !== doc.body && foco.blur) { foco.blur(); }
     window.setTimeout(function () { boton.click(); }, 80);
   }, true);
+
+  // EL PITIDO de lo que llega: cada cartel nuevo (una venta a la caja, un pedido al depósito)
+  // suena una vez, si en esa pantalla está prendido «🔊 Sonido». Sin archivo de sonido: lo arma
+  // el navegador. El navegador no deja sonar nada hasta que se tocó la página una vez; después
+  // de entrar con la contraseña, ya se tocó.
+  var audio = null, sonados = new WeakSet();
+  function pitido() {
+    try {
+      audio = audio || new (window.AudioContext || window.webkitAudioContext)();
+      if (audio.state === "suspended") { audio.resume(); }
+      [0, 0.18].forEach(function (desde) {
+        var o = audio.createOscillator(), g = audio.createGain(), t = audio.currentTime + desde;
+        o.type = "sine";
+        o.frequency.value = desde ? 1175 : 880;
+        g.gain.setValueAtTime(0.0001, t);
+        g.gain.exponentialRampToValueAtTime(0.2, t + 0.02);
+        g.gain.exponentialRampToValueAtTime(0.0001, t + 0.16);
+        o.connect(g);
+        g.connect(audio.destination);
+        o.start(t);
+        o.stop(t + 0.18);
+      });
+    } catch (err) { /* sin sonido: el cartel igual se ve */ }
+  }
+  new MutationObserver(function () {
+    var carteles = doc.querySelectorAll('[data-testid="stToast"]');
+    if (!carteles.length) { return; }
+    var prendido = doc.querySelector('[class*="st-key-con_sonido_"] input:checked');
+    carteles.forEach(function (t) {
+      if (!sonados.has(t)) {
+        sonados.add(t);
+        if (prendido) { pitido(); }
+      }
+    });
+  }).observe(doc.body, {childList: true, subtree: true});
 
   // EL MENÚ DEL CLICK DERECHO, solo con mouse: en una pantalla táctil los botones se ven.
   if (!(window.matchMedia && window.matchMedia("(pointer: fine)").matches)) { return; }
