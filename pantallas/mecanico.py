@@ -12,7 +12,7 @@ if pagina == PAGINAS[7]:
 
     # -------- Diccionario de códigos OBD2 / DTC --------
     if sub_mec == SUB_MEC[4]:
-        st.caption(
+        ayuda(
             f"Diccionario de códigos de falla OBD2/DTC. Arranca con {contar_dtc()} códigos genéricos "
             "estándar (no específicos de marca) — sumá los que te falten con el formulario de abajo. "
             "Los códigos P1xxx u otros específicos de fabricante se cargan indicando la marca, porque "
@@ -37,12 +37,11 @@ if pagina == PAGINAS[7]:
                                                placeholder="Ej: PALIO").strip()
                 _reps_dtc = repuestos_para_el_dtc(codigo_buscar, _auto_dtc, _modelo_dtc)
                 if _reps_dtc:
-                    st.markdown("**🔧 Lo que tenés para arreglar eso**")
-                    ayuda(
-                        "Sale de cruzar las piezas que nombra el código con las descripciones "
-                        "de tu catálogo. Es una ayuda para no ir a buscar cada una a mano, no "
-                        "un diagnóstico: el código dice por dónde empezar, no qué cambiar."
-                    )
+                    st.markdown("**🔧 Lo que tenés para arreglar eso**",
+                                help="Sale de cruzar las piezas que nombra el código con las "
+                                     "descripciones de tu catálogo. Es una ayuda para no ir a buscar "
+                                     "cada una a mano, no un diagnóstico: el código dice por dónde "
+                                     "empezar, no qué cambiar.")
                     for _grupo in _reps_dtc:
                         with st.expander(f"{_grupo['pieza']} — {len(_grupo['productos'])} "
                                           f"en tu catálogo", key=f"exp_dtc_{codigo_buscar}_{_grupo['pieza']}"):
@@ -449,12 +448,10 @@ if pagina == PAGINAS[7]:
                 if _ex or _par:
                     _fam = autos_con_la_misma_familia_de_motor(_nm)
                     if _fam:
-                        st.markdown("**🔩 Otros autos con un motor de la misma familia:**")
-                        ayuda(
-                            "El número arranca con el modelo de motor y sigue con el serial de "
-                            "esa unidad. Si el modelo es el mismo, los repuestos son los mismos "
-                            "aunque sea otro auto."
-                        )
+                        st.markdown("**🔩 Otros autos con un motor de la misma familia:**",
+                                    help="El número arranca con el modelo de motor y sigue con el "
+                                         "serial de esa unidad. Si el modelo es el mismo, los "
+                                         "repuestos son los mismos aunque sea otro auto.")
                         st.dataframe(_fam, width="stretch", hide_index=True)
                 if not _ex and not _par:
                     st.warning(
@@ -472,11 +469,10 @@ if pagina == PAGINAS[7]:
         panel_vin(clave="vin_mec")
 
         st.markdown("---")
-        st.markdown("**⚙️ Lo que la app fue aprendiendo**")
-        ayuda(
-            "Estas tablas son tuyas: se llenan solas con cada ficha de vehículo que cargues con "
-            "VIN, y con lo que le enseñes arriba. Acá se revisan y se corrigen."
-        )
+        st.markdown("**⚙️ Lo que la app fue aprendiendo**",
+                    help="Estas tablas son tuyas: se llenan solas con cada ficha de vehículo que "
+                         "cargues con VIN, y con lo que le enseñes arriba. Acá se revisan y se "
+                         "corrigen.")
 
         c.execute("""SELECT COUNT(*) FROM vehiculos WHERE vin IS NOT NULL AND LENGTH(vin) = 17
                      AND ((modelo_auto IS NOT NULL AND modelo_auto <> '')
@@ -558,12 +554,10 @@ if pagina == PAGINAS[7]:
                 st.caption("Todavía ninguno.")
 
     if sub_mec == SUB_MEC[3]:
-        st.markdown("**🚙 Repuestos por vehículo**")
-        ayuda(
-            "Buscá lo que le entra a un auto entrando por marca y modelo, en vez de por código. "
-            "Sale de las descripciones de tus propias listas — o sea que crece solo cada vez que "
-            "importás un proveedor nuevo."
-        )
+        st.markdown("**🚙 Repuestos por vehículo**",
+                    help="Buscá lo que le entra a un auto entrando por marca y modelo, en vez de por "
+                         "código. Sale de las descripciones de tus propias listas — o sea que crece "
+                         "solo cada vez que importás un proveedor nuevo.")
 
         version_catalogo = version_del_catalogo()
         disponibles = marcas_vehiculo_disponibles(version_catalogo)
@@ -614,13 +608,12 @@ if pagina == PAGINAS[7]:
             etiquetas_marcas = [f"{m} ({n} productos)" for m, n in disponibles]
             mapa_marcas = {f"{m} ({n} productos)": m for m, n in disponibles}
 
-            st.info(
-                "🔢 ¿Tenés el número de chasis? En **🔢 Chasis / VIN** pegás el VIN y te da "
-                "directamente los repuestos que lleva ese auto, sin tener que elegir marca y "
-                "modelo acá a mano."
-            )
-            st.button("🔢 Ir a Chasis / VIN →", key="ir_vin_desde_vehiculo",
-                      on_click=ir_a_donde_dice_el_aviso, args=(miga_hasta("Chasis / VIN"),))
+            # En un renglón, con el botón al lado: era un cartel azul de tres líneas.
+            with st.container(horizontal=True, vertical_alignment="center", gap="small"):
+                st.markdown("🔢 ¿Tenés el número de chasis? Con el VIN salen directo los "
+                            "repuestos de ese auto.", width="content")
+                st.button("🔢 Ir a Chasis / VIN →", key="ir_vin_desde_vehiculo",
+                          on_click=ir_a_donde_dice_el_aviso, args=(miga_hasta("Chasis / VIN"),))
 
             etiqueta_elegida = st.selectbox("Marca del vehículo:", etiquetas_marcas,
                                              key="sel_marca_vehiculo")
@@ -808,11 +801,10 @@ if pagina == PAGINAS[7]:
         else:
             marcas_existentes = listar_marcas_esquemas()
 
-            st.markdown("**🚗 Precargar marca / vehículo (sin imagen todavía)**")
-            ayuda(
-                "Dejá lista la estructura del árbol aunque todavía no tengas ningún esquema para subir — "
-                "va a aparecer en 'Explorar por categoría' apenas la guardes."
-            )
+            st.markdown("**🚗 Precargar marca / vehículo (sin imagen todavía)**",
+                        help="Dejá lista la estructura del árbol aunque todavía no tengas ningún "
+                             "esquema para subir — va a aparecer en 'Explorar por categoría' apenas "
+                             "la guardes.")
             cp1, cp2 = st.columns(2)
             if marcas_existentes:
                 marca_pre_opcion = cp1.selectbox("Marca", marcas_existentes + ["➕ Nueva marca..."], key="pre_marca_opcion")
@@ -926,7 +918,8 @@ if pagina == PAGINAS[7]:
 
     # -------- Conversor de unidades --------
     if sub_mec == SUB_MEC[6]:
-        st.caption("Conversiones rápidas de unidades que se usan seguido en manuales de taller antiguos o importados.")
+        ayuda("Conversiones rápidas de unidades que se usan seguido en manuales de taller antiguos o "
+              "importados.")
 
         categoria_conv = st.radio("Categoría:", list(CONVERSIONES_DE_TALLER), horizontal=True,
                                   key="conv_categoria")

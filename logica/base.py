@@ -373,7 +373,6 @@ hr { border-color: var(--border) !important; margin: 1.1rem 0 !important; }
 .titulo-seccion { margin: 2px 0 6px 2px; }
 .titulo-seccion__nombre { font-size: 1.55rem; font-weight: 700; letter-spacing: -0.025em;
   color: var(--text); line-height: 1.2; }
-.titulo-seccion__para { font-size: 0.9rem; color: var(--text-muted); margin-top: 3px; }
 
 /* ==== LA NAVEGACIÓN ====
    Las opciones de un radio como pastillas, sin el puntito de formulario. Se esconde el aro

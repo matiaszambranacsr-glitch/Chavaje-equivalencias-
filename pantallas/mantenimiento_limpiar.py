@@ -497,12 +497,11 @@ if pagina == PAGINAS[3]:
                         st.rerun()
             else:
                 st.caption("✅ Ningún código de 1 o 2 dígitos en la base.")
-            st.markdown("**🔢 Códigos que quedaron con '.0'**")
-            ayuda(
-                "Cuando una lista de Excel trae el código como número, llega con un decimal pegado "
-                "(2776400.0). Además de verse mal, eso los volvía imposibles de encontrar: al buscarlos "
-                "quedaban con un cero de más. Esto los deja como corresponde."
-            )
+            st.markdown("**🔢 Códigos que quedaron con '.0'**",
+                        help="Cuando una lista de Excel trae el código como número, llega con un "
+                             "decimal pegado (2776400.0). Además de verse mal, eso los volvía "
+                             "imposibles de encontrar: al buscarlos quedaban con un cero de más. "
+                             "Esto los deja como corresponde.")
             cantidad_decimal = contar_codigos_con_decimal()
             # Códigos que no se encuentran ni tipeándolos exactos, porque el codigo_clean
             # guardado quedó viejo. Va antes que el del '.0' porque es el que más duele: el

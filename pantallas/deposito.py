@@ -113,9 +113,9 @@ if pagina == PAGINAS[8]:
             POR PISO» en logica/mapa.py."""
             if _g["piso_id"] is None:
                 if hay_un_mapa:
-                    st.markdown(f"##### ❓ Sin lugar en el mapa: {len(_g['items'])}")
-                    st.caption("Al entregarlo, poné dónde estaba con «📍 ¿Dónde está?»: la "
-                               "próxima vez sale en el mapa.")
+                    st.markdown(f"##### ❓ Sin lugar en el mapa: {len(_g['items'])}",
+                                help="Al entregarlo, poné dónde estaba con «📍 ¿Dónde está?»: la "
+                                     "próxima vez sale en el mapa.")
                 for _p in _g["items"]:
                     _renglon_del_pedido(_p, hay_un_mapa=hay_un_mapa)
                 return

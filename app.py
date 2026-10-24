@@ -92,7 +92,9 @@ específico, y las pantallas quedan todas al final:
     logica/interfaz.py
         · PIEZAS DE INTERFAZ QUE SE REPITEN
         · NAVEGACIÓN: DÓNDE ESTÁ CADA COSA
+        · LA AYUDA DE CADA PANTALLA
         · EL CLICK DERECHO, LAS TECLAS Y EL PITIDO (en el navegador)
+        · LOS GRÁFICOS, CON LOS NÚMEROS Y LAS FECHAS COMO SE ESCRIBEN ACÁ
         · PDF: cotización y ficha del vehículo
         · LEER EL ARCHIVO: encabezado, hojas y codificación
     logica/vehiculos.py
@@ -247,7 +249,7 @@ if es_celular():
        de uno por renglón cada uno de su tamaño. La regla era «.stButton > button», pero en esta
        versión de Streamlit el botón está uno o dos niveles más adentro (más todavía si tiene
        ayuda, que lo envuelve en el globito) y la caja de afuera se achica al texto: medido en el
-       celular, «🔍 Buscar Equivalencias» ocupaba 169 px de 336. Nunca se había aplicado. */
+       celular, «🔍 Buscar equivalencias» ocupaba 169 px de 336. Nunca se había aplicado. */
     [data-testid="stElementContainer"]:has(.stButton, .stDownloadButton, .stFormSubmitButton, .stLinkButton),
     [data-testid="stElementContainer"]:has(.stButton, .stDownloadButton, .stFormSubmitButton, .stLinkButton) > div,
     .stButton, .stDownloadButton, .stFormSubmitButton, .stLinkButton,
@@ -472,24 +474,16 @@ with st.container(key="nav_principal"):
 
 pagina = st.session_state["pagina_actual"]
 
-# Debajo de las pastillas, una línea que dice para qué sirve la sección elegida. Es lo que
-# convierte una fila de ocho botones en algo que se entiende sin que nadie te lo explique.
-# En el celular, en el buscador no: es la pantalla que se explica sola, y cada renglón arriba de
-# la caja de búsqueda es un renglón que hay que bajar para llegar a ella.
-# A la vista y no plegada: plegada ocupaba el mismo renglón («ℹ️ ¿Para qué sirve esta
-# sección?») y escondía justo la respuesta. Las ayudas largas sí van plegadas (ver ayuda());
-# esta es de una línea.
-# EL TÍTULO DE LA SECCIÓN, con para qué sirve abajo: en la computadora la pantalla arranca
-# diciendo dónde estás. En el celular, solo el renglón chico (la barra ya marca la sección).
-if es_celular():
-    if PARA_QUE_SIRVE.get(pagina) and pagina != PAGINAS[0]:
-        st.caption(f"ℹ️ {PARA_QUE_SIRVE[pagina]}")
-else:
-    st.markdown(f"<div class='titulo-seccion'><div class='titulo-seccion__nombre'>"
-                f"{texto_para_html(pagina)}</div>"
-                + (f"<div class='titulo-seccion__para'>{texto_para_html(PARA_QUE_SIRVE[pagina])}"
-                   "</div>" if PARA_QUE_SIRVE.get(pagina) else "") + "</div>",
-                unsafe_allow_html=True)
+# EL TÍTULO DE LA SECCIÓN: en la computadora la pantalla arranca diciendo dónde estás (en el
+# celular no: la barra ya marca la sección, y es un renglón menos para bajar). Para qué sirve
+# va plegado en el «ℹ️ Cómo funciona» de la pantalla, junto con lo de la solapa y la ayuda de
+# la pantalla: antes eran tres explicaciones a la vista, una abajo de la otra, y el dueño pidió
+# menos ruido (ver «LA AYUDA DE CADA PANTALLA» en logica/interfaz.py). Al pasar el mouse por el
+# título también se lee.
+if not es_celular():
+    st.markdown(f"<div class='titulo-seccion'><div class='titulo-seccion__nombre' "
+                f"title='{texto_para_html(PARA_QUE_SIRVE.get(pagina, ''))}'>"
+                f"{texto_para_html(pagina)}</div></div>", unsafe_allow_html=True)
 
 # Aviso fuerte si la base quedó vacía: Streamlit Cloud borra el disco al redesplegar, y sin
 # este cartel uno se entera recién cuando busca un código y no aparece nada.
@@ -578,7 +572,10 @@ try:
         pass
     elif _desc_txt and st.session_state.get("_desc_visto") != _desc_fec:
         st.session_state["_desc_visto"] = _desc_fec
-        st.caption(f"🧠 Búsqueda automática de relaciones ({_desc_fec}): {_desc_txt}")
+        # Los números con punto de miles: los resultados guardados antes de miles() decían
+        # «1,380 par(es) de motores», que acá se lee uno coma tres.
+        st.caption(f"🧠 Búsqueda automática de relaciones ({_desc_fec}): "
+                   + re.sub(r"(?<=\d),(?=\d{3}\b)", ".", _desc_txt))
     elif obtener_config("descubrimiento_pendiente", "") == "1":
         st.caption("🧠 Buscando relaciones nuevas en todo el catálogo, por atrás…")
 except Exception as _err:
@@ -705,6 +702,13 @@ if (NIVEL_DE_CADA_SECCION.get(pagina)
 # «AQUÍ CORREN LAS PANTALLAS»
 # Un error que se escapa de una pantalla: un código para dictar en vez del error técnico (ver
 # mostrar_error_inesperado()). st.stop() y st.rerun() no son Exception: pasan de largo.
+# La ayuda de la pantalla: el lugar, justo antes de la pantalla; al terminar —también si
+# cortó con st.stop()— se dibuja, si la pantalla no la puso con su propia ayuda (ver «LA
+# AYUDA DE CADA PANTALLA» en logica/interfaz.py). En el celular, en el buscador no: es la
+# pantalla que se explica sola, y cada renglón arriba de la caja de búsqueda es un renglón que
+# hay que bajar para llegar a ella.
+if not (es_celular() and pagina == PAGINAS[0]):
+    empezar_la_ayuda_de_la_pantalla(pagina)
 try:
     for _pantalla in pantallas.PANTALLAS:
         exec(pantallas.codigo_de_la_pantalla(_pantalla), globals())
@@ -712,6 +716,8 @@ except Exception as _err_de_la_pantalla:
     mostrar_error_inesperado(
         f"pantalla {pagina}", _err_de_la_pantalla,
         PREFIJOS_DE_LAS_PANTALLAS[PAGINAS.index(pagina)] if pagina in PAGINAS else "APP")
+finally:
+    poner_la_ayuda_de_la_pantalla()
 
 if _VISTA_AL_PIE:
     st.markdown("---")

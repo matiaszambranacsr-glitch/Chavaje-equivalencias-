@@ -655,7 +655,7 @@ if pagina == PAGINAS[2]:
         if _problemas_del_mapeo and not _graves:
             _importar_igual = st.checkbox("Revisé los avisos del mapeo y quiero importar igual",
                                           key="importar_con_dudas")
-        procesar = st.button("📥 Procesar e Importar Lista", type="primary",
+        procesar = st.button("📥 Procesar e importar la lista", type="primary",
                              disabled=bool(_graves) or not _importar_igual)
         if _graves:
             st.caption("🛑 Corregí el mapeo de columnas de arriba para poder importar.")

@@ -76,7 +76,7 @@ def probar():
     at.session_state["pagina_actual"] = "🔍 Buscador"
     at.run()
     at.text_input(key="busqueda_input").set_value("W712/94")
-    [b for b in at.button if "Buscar Equivalencias" in b.label][0].click().run()
+    [b for b in at.button if "Buscar equivalencias" in b.label][0].click().run()
     at.session_state["pagina_actual"] = "📊 Estadísticas"
     at.run()
     at.radio(key="sub_stats").set_value("📌 Para pedir").run()
@@ -90,6 +90,35 @@ def probar():
     esperar("y en Estadísticas, la solapa que estaba", at.radio(key="sub_stats").value,
             "📌 Para pedir")
     esperar("sin errores al ir y venir", [e.value for e in at.exception], [])
+
+    # 2d. La ayuda de cada pantalla: UN «ℹ️ Cómo funciona» plegado arriba, con para qué sirve
+    # la sección, la solapa y la ayuda de la pantalla adentro, y nada de eso a la vista. La
+    # ayuda de una parte de más abajo se queda en su parte. Lo pidió el dueño: menos ruido, todo
+    # plegado. Ver «LA AYUDA DE CADA PANTALLA» en logica/interfaz.py.
+    def _ayudas():
+        return [e for e in at.expander if e.label == ns["TITULO_DE_LA_AYUDA"]]
+
+    _solapa = ns["SUB_DEPOSITO"][0]
+    at.session_state["pagina_actual"] = "📦 Depósito"
+    at.session_state["sub_deposito"] = _solapa
+    at.run()
+    _arriba = _ayudas()[0].markdown[0].value if _ayudas() and _ayudas()[0].markdown else ""
+    esperar("depósito: una sola ayuda", len(_ayudas()), 1)
+    esperar("con la sección, la solapa y la pantalla adentro",
+            [ns["PARA_QUE_SIRVE"]["📦 Depósito"] in _arriba,
+             ns["PARA_QUE_SIRVE_LA_SOLAPA"][_solapa] in _arriba,
+             "Acá llega lo que el mostrador pide" in _arriba], [True, True, True])
+    esperar("y en ningún otro lado", sum(ns["PARA_QUE_SIRVE_LA_SOLAPA"][_solapa] in x.value
+                                         for x in list(at.caption) + list(at.markdown)), 1)
+    esperar("plegada", _ayudas()[0].proto.expanded if _ayudas() else None, False)
+    at.session_state["pagina_actual"] = "📊 Estadísticas"
+    at.run()
+    at.radio(key="sub_stats").set_value("📌 Para pedir").run()
+    _de_una_parte = "Hace falta haber importado precios de una misma marca"
+    esperar("la de una parte no sube arriba", _de_una_parte in _ayudas()[0].markdown[0].value, False)
+    esperar("se queda en su parte", any(_de_una_parte in a.markdown[0].value
+                                        for a in _ayudas()[1:] if a.markdown), True)
+    esperar("sin errores con las ayudas", [e.value for e in at.exception], [])
 
     # 2c. Una importación que se corta a la mitad no deja nada: corre entera adentro de una
     # transacción (ver pantallas/cargar_excel.py). No tenía prueba. Se corta en la segunda fila.
@@ -120,11 +149,11 @@ def probar():
     [t for t in at.text_input if "Ruta completa" in t.label][0].set_value(
         os.path.abspath("corte.csv")).run()
     at.text_input(key="nombre_prov_carga").set_value("PRUEBACORTE").run()
-    [b for b in at.button if "Procesar e Importar" in b.label][0].click().run()
+    [b for b in at.button if "Procesar e importar" in b.label][0].click().run()
     esperar("cortada a la mitad, no queda nada de la lista", (len(_llamadas), _lo_que_hay()),
             (2, _antes))
     _g["poner_precio_y_stock_de_la_lista"] = _original
-    [b for b in at.button if "Procesar e Importar" in b.label][0].click().run()
+    [b for b in at.button if "Procesar e importar" in b.label][0].click().run()
     esperar("y entera, entra entera", _lo_que_hay(), (3, _antes[1] + 1, _antes[2] + 3))
     esperar("sin errores al importar", [e.value for e in at.exception], [])
     # En la app de internet la ruta se leería en el servidor, no en el teléfono: no se ofrece.

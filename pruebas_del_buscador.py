@@ -42,7 +42,7 @@ def probar():
 
     def buscar(texto):
         at.text_input(key="busqueda_input").set_value(texto)
-        [b for b in at.button if "Buscar Equivalencias" in b.label][0].click().run()
+        [b for b in at.button if "Buscar equivalencias" in b.label][0].click().run()
 
     # 1. Una búsqueda que anda: queda medida.
     buscar("F100")

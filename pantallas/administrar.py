@@ -145,11 +145,10 @@ if pagina == PAGINAS[3]:
                 )
                 st.markdown("---")
 
-            st.markdown("**🔀 Fusionar marcas duplicadas**")
-            ayuda(
-                "Útil cuando una marca quedó cargada con nombres distintos por error de tipeo "
-                "(ej: 'MANN' y 'MANN FILTER'). Mueve todos los productos de una a la otra."
-            )
+            st.markdown("**🔀 Fusionar marcas duplicadas**",
+                        help="Útil cuando una marca quedó cargada con nombres distintos por error de "
+                             "tipeo (ej: 'MANN' y 'MANN FILTER'). Mueve todos los productos de una "
+                             "a la otra.")
             nombres_para_fusion = [m["nombre"] for m in marcas_info]
             colOrig, colDest = st.columns(2)
             marca_origen = colOrig.selectbox("Marca a eliminar (origen):", nombres_para_fusion, key="fusion_origen")
@@ -360,8 +359,8 @@ if pagina == PAGINAS[3]:
                     else:
                         st.caption("No figura en el registro.")
 
-        st.markdown("**Catálogos externos**")
-        st.caption("Agregá los sitios de proveedores que querés que aparezcan como botones al buscar un código.")
+        st.markdown("**Catálogos externos**",
+                    help="Los sitios de proveedores que aparecen como botones al buscar un código.")
 
         catalogos = listar_catalogos_externos()
         if catalogos:
@@ -496,11 +495,10 @@ if pagina == PAGINAS[3]:
                 e_ubicacion = em6.text_input("Ubicación en depósito", value=actual["ubicacion"] or "",
                                               placeholder="Ej: Pasillo 3, estante B", key="e_ubic")
 
-                st.markdown("**↔️ Segunda cara (opcional)**")
-                ayuda(
-                    "Para piezas con distinta medida de cada lado — retenes con labio interior/exterior "
-                    "escalonado, tensores con el interior de un diámetro de un lado y otro del otro, etc."
-                )
+                st.markdown("**↔️ Segunda cara (opcional)**",
+                            help="Para piezas con distinta medida de cada lado — retenes con labio "
+                                 "interior/exterior escalonado, tensores con el interior de un "
+                                 "diámetro de un lado y otro del otro, etc.")
                 eb1, eb2 = st.columns(2)
                 e_diam_int_b = eb1.number_input("Diám. interno cara B (mm)", min_value=0.0, step=0.1,
                                                  value=float(actual["diametro_interno_cara_b"] or 0), key="e_di_b")
@@ -684,10 +682,8 @@ if pagina == PAGINAS[3]:
             else:
                 st.info("Sin resultados.")
 
-        st.markdown("**🧩 Productos sin equivalencias**")
-        st.caption(
-            "Esta sección puede ser pesada, así que se calcula solo cuando la pedís (no en cada búsqueda)."
-        )
+        st.markdown("**🧩 Productos sin equivalencias**",
+                    help="Se calcula solo cuando la pedís, no en cada búsqueda: es pesada.")
 
         if "mostrar_huerfanos" not in st.session_state:
             st.session_state.mostrar_huerfanos = False
@@ -743,11 +739,10 @@ if pagina == PAGINAS[3]:
                     st.info("Sin resultados para esa marca.")
 
     if sub_admin == SUB_ADMIN[2]:
-        st.markdown("**💬 Texto del mensaje de WhatsApp**")
-        ayuda(
-            "Personalizá el encabezado y el pie del mensaje que se arma en 'Lista WhatsApp' — por "
-            "ejemplo para poner el nombre real de tu local, un teléfono de contacto, horarios, etc."
-        )
+        st.markdown("**💬 Texto del mensaje de WhatsApp**",
+                    help="Personalizá el encabezado y el pie del mensaje que se arma en 'Lista "
+                         "WhatsApp' — por ejemplo para poner el nombre real de tu local, un teléfono "
+                         "de contacto, horarios, etc.")
         encabezado_actual = obtener_config("whatsapp_encabezado", "🔧 *Equivalencias El Chavo*")
         pie_actual = obtener_config("whatsapp_pie", "")
         nuevo_encabezado = st.text_input("Encabezado del mensaje:", value=encabezado_actual, key="wa_encabezado_in")
@@ -863,12 +858,11 @@ if pagina == PAGINAS[3]:
             st.rerun()
 
     if sub_admin == SUB_ADMIN[3]:
-        st.markdown("**🧩 Combos de repuestos relacionados**")
-        ayuda(
-            "Cuando alguien busca un producto cuya descripción contenga el 'disparador', la app va a "
-            "sugerir estos ítems relacionados con un botón para buscarlos también. Ej: disparador "
-            "'correa de distribucion' → ítems 'Kit de distribución', 'Tensor', 'Bomba de agua'."
-        )
+        st.markdown("**🧩 Combos de repuestos relacionados**",
+                    help="Cuando alguien busca un producto cuya descripción contenga el "
+                         "'disparador', la app va a sugerir estos ítems relacionados con un botón "
+                         "para buscarlos también. Ej: disparador 'correa de distribucion' → ítems "
+                         "'Kit de distribución', 'Tensor', 'Bomba de agua'.")
         combos_actuales = listar_combos()
         if combos_actuales:
             st.dataframe(
@@ -977,11 +971,10 @@ if pagina == PAGINAS[3]:
                         st.rerun()
 
             st.markdown("---")
-            st.markdown("**🔧 Mecánicos externos**")
-            ayuda(
-                "Cuentas separadas para mecánicos que no son empleados tuyos — solo ven su propio "
-                "portal para armar presupuestos con su mano de obra, nunca las secciones internas."
-            )
+            st.markdown("**🔧 Mecánicos externos**",
+                        help="Cuentas separadas para mecánicos que no son empleados tuyos — solo ven "
+                             "su propio portal para armar presupuestos con su mano de obra, nunca "
+                             "las secciones internas.")
             mecanicos_actuales = listar_mecanicos()
             if mecanicos_actuales:
                 st.dataframe(mecanicos_actuales, width="stretch", hide_index=True)
@@ -1107,7 +1100,8 @@ if pagina == PAGINAS[3]:
                                              key=f"cc_importe_pago_{_mid}")
                 _medio = st.selectbox("Cómo pagó:", MEDIOS_DE_PAGO)
                 _fecha_cheque = st.date_input("Fecha del cheque (si es cheque):",
-                                              value=date.today(), key=f"cc_fecha_cheque_{_mid}")
+                                              value=date.today(), key=f"cc_fecha_cheque_{_mid}",
+                                              format="DD/MM/YYYY")
                 _concepto_p = st.text_input("Nota (opcional):", key=f"cc_nota_pago_{_mid}")
                 if st.form_submit_button("💵 Registrar pago"):
                     _ok, _aviso = registrar_pago_de_cuenta(_mid, _importe_p, _medio, _concepto_p,
@@ -1122,9 +1116,10 @@ if pagina == PAGINAS[3]:
             # VERIFICAR UN CHEQUE antes de recibirlo: ver consultar_cheque(). Afuera del
             # formulario del pago porque un formulario no admite otro botón.
             with st.container(border=True):
-                st.markdown("**🔎 Verificar un cheque en el BCRA**")
-                st.caption("Antes de recibirlo: si está denunciado como robado, extraviado o "
-                           "adulterado. No dice si tiene fondos. Consulta oficial y gratuita.")
+                st.markdown("**🔎 Verificar un cheque en el BCRA**",
+                            help="Antes de recibirlo: si está denunciado como robado, extraviado "
+                                 "o adulterado. No dice si tiene fondos. Consulta oficial y "
+                                 "gratuita.")
                 _bancos = bancos_del_bcra()
                 _vc1, _vc2 = st.columns([3, 2])
                 if _bancos:

@@ -41,10 +41,11 @@ if pagina == PAGINAS[3]:
             # se moría a la mitad —que es lo que venía pasando— la tabla quedaba en cero para
             # siempre y el usuario no tenía ningún botón que apretar.
             st.caption("O sin subir nada, deduciéndolas de las descripciones que ya tenés:")
-            _cd1, _cd2 = cols([2, 3])
+            _cd1 = cols([2, 3])[0]
             if _cd1.button("🧠 Deducir de mis descripciones", key="deducir_aplic_a_mano",
                             help="Lee las descripciones del catálogo y saca a qué auto le va "
-                                 "cada pieza. Tarda unos segundos."):
+                                 "cada pieza. Tarda unos segundos. Complementa al catálogo del "
+                                 "fabricante, no lo reemplaza."):
                 with st.spinner("Leyendo las descripciones..."):
                     try:
                         _ded = aplicaciones_desde_descripciones()
@@ -60,8 +61,6 @@ if pagina == PAGINAS[3]:
                         anotar_error("deducir_aplicaciones_a_mano", _err)
                         st.error(f"No se pudo: {type(_err).__name__}: {_err}")
                 st.rerun()
-            _cd2.caption("Son las que la app puede sacar sola de lo que ya importaste. "
-                         "No reemplazan al catálogo del fabricante: lo complementan.")
 
             arch_aplic = subir_archivo("Catálogo de aplicaciones (.pdf o .xlsx):",
                                         ["pdf", "xlsx", "csv"], "aplicaciones")
@@ -131,7 +130,9 @@ if pagina == PAGINAS[3]:
             # Un índice arriba de todo: son seis formas distintas de generar equivalencias y
             # cada una necesita cosas distintas. Sin este resumen hay que bajar leyendo panel
             # por panel para saber cuál se puede usar hoy.
-            st.markdown("### 🔗 Generar equivalencias")
+            st.markdown("### 🔗 Generar equivalencias",
+                        help="Cada método está en un panel más abajo. Todos mandan a revisión: "
+                             "ninguno carga equivalencias directo.")
             # Con valor inicial: si la consulta falla, el índice tiene que dibujarse igual en
             # vez de tumbar la pantalla entera por un contador.
             marcas_con_tipo = 0
@@ -182,8 +183,6 @@ if pagina == PAGINAS[3]:
                  "Qué necesita": "usar «Se llevó» en el mostrador",
                  "Estado": "corre solo, una vez por día"},
             ], width="stretch", hide_index=True)
-            st.caption("Cada método está en un panel más abajo. Todos mandan a revisión: "
-                       "ninguno carga equivalencias directo.")
             st.markdown("---")
 
             # Cada panel con SU condición. Estaban los cinco dentro de «si hay 2 catálogos
@@ -292,11 +291,6 @@ if pagina == PAGINAS[3]:
                 "de programación podría mandar un pedido. Y las direcciones que dicen "
                 "carrito, pedido, comprar o checkout se rechazan aunque sean de solo "
                 "consulta, porque hay portales que agregan al carrito con un simple enlace."
-            )
-            st.info(
-                "🔒 **La app solo puede leer fichas.** No puede hacer pedidos, ni reservas, "
-                "ni modificar nada en el portal del proveedor. Está bloqueado por diseño, "
-                "no por configuración: nadie puede activarlo sin querer."
             )
             try:
                 c.execute("""SELECT m.id, m.nombre, COUNT(p.id) AS n,

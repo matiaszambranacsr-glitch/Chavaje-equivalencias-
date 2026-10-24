@@ -32,23 +32,20 @@ if pagina == PAGINAS[4]:
         if top_marcas:
             st.markdown("---")
             st.markdown("**📊 Top marcas por cantidad de códigos cargados**")
-            chart_data = {"Marca": [t["nombre"] for t in top_marcas],
-                           "Productos": [t["productos"] for t in top_marcas]}
-            # Horizontal y de mayor a menor: parado, los nombres salían girados y cortados
-            # («MANNOL LUBRIC…»). Lo señaló la revisión con Gemini.
-            st.bar_chart(chart_data, x="Marca", y="Productos", horizontal=True,
-                         sort="-Productos")
+            # Horizontal y de mayor a menor (como vienen): parado, los nombres salían girados
+            # y cortados («MANNOL LUBRIC…»). Lo señaló la revisión con Gemini.
+            grafico_de_barras([t["nombre"] for t in top_marcas], [t["productos"] for t in top_marcas],
+                              "Marca", "Productos", horizontal=True)
 
         # Solo si se usó: una sección entera para decir «todavía nada» era ruido.
         uso_ia_actual = resumen_uso_ia()
         if uso_ia_actual:
             st.markdown("---")
-            st.markdown("**🤖 Uso de las funciones de IA (últimos 30 días)**")
-            ayuda(
-                "Cada fila es una función que usó la IA, con cuántas veces falló. Un error casi "
-                "siempre es el límite de uso de la clave: se reintenta más tarde. «Generar imagen "
-                "orientativa» usa una clave aparte, que se configura por separado."
-            )
+            st.markdown("**🤖 Uso de las funciones de IA (últimos 30 días)**",
+                        help="Cada fila es una función que usó la IA, con cuántas veces falló. Un "
+                             "error casi siempre es el límite de uso de la clave: se reintenta más "
+                             "tarde. «Generar imagen orientativa» usa una clave aparte, que se "
+                             "configura por separado.")
             st.dataframe(uso_ia_actual, width="stretch", hide_index=True)
 
     if sub_stats == SUB_STATS[1]:
@@ -325,12 +322,11 @@ if pagina == PAGINAS[4]:
                                mime="application/zip", key="bajar_zip_catalogo")
 
         st.markdown("---")
-        st.markdown("**📦 Exportar configuración (sin el catálogo de productos)**")
-        ayuda(
-            "Combos de repuestos, códigos DTC y fabricantes por WMI en un solo archivo de texto — útil "
-            "como respaldo liviano aparte del backup completo, o para copiarle la configuración a otra "
-            "sucursal sin duplicar todo el catálogo de productos."
-        )
+        st.markdown("**📦 Exportar configuración (sin el catálogo de productos)**",
+                    help="Combos de repuestos, códigos DTC y fabricantes por WMI en un solo archivo "
+                         "de texto — útil como respaldo liviano aparte del backup completo, o para "
+                         "copiarle la configuración a otra sucursal sin duplicar todo el catálogo de "
+                         "productos.")
         st.download_button(
             "⬇️ Descargar configuración (.txt)",
             data=exportar_configuracion_txt(),
@@ -427,12 +423,11 @@ a traer solas desde Administrar → Mantenimiento.
                 st.rerun()
 
     if sub_stats == SUB_STATS[3]:
-        st.markdown("**🧮 Auditoría diaria de stock (muestreo aleatorio)**")
-        ayuda(
-            "Todas las mañanas se puede generar una lista corta de productos al azar (la mitad de "
-            "los favoritos) para contarlos a mano en 5 minutos y detectar descalces antes de que "
-            "se acumulen. Solo entran los que tienen stock cargado: sin eso no hay con qué comparar."
-        )
+        st.markdown("**🧮 Auditoría diaria de stock (muestreo aleatorio)**",
+                    help="Todas las mañanas se puede generar una lista corta de productos al azar "
+                         "(la mitad de los favoritos) para contarlos a mano en 5 minutos y detectar "
+                         "descalces antes de que se acumulen. Solo entran los que tienen stock "
+                         "cargado: sin eso no hay con qué comparar.")
         cant_auditoria = st.number_input("Cantidad de productos a auditar hoy:", min_value=3, max_value=20, value=8, step=1)
         if st.button("🎲 Generar auditoría de hoy"):
             generada = generar_auditoria_hoy(cant_auditoria)
@@ -470,14 +465,13 @@ a traer solas desde Administrar → Mantenimiento.
         ayuda(
             "Lo que más rota (A) conviene tenerlo más a mano. La rotación sale de lo que se "
             "vendió en los últimos seis meses —lo que se anota con «🛒 Se llevó» en el "
-            "buscador— y, entre los que se vendieron igual, de cuántas veces se buscó."
+            "buscador— y, entre los que se vendieron igual, de cuántas veces se buscó.\n\n"
+            f"Para cargar o corregir la ubicación de un producto: {miga_hasta('Productos')} → "
+            "buscalo → «📐 Cargar medidas mecánicas / ubicación en depósito»."
         )
         matriz = calcular_matriz_abc()
         if matriz:
             st.dataframe(quitar_id(matriz), width="stretch", hide_index=True)
-            st.caption("Para cargar o corregir la ubicación de un producto: "
-                       f"{miga_hasta('Productos')} → buscalo → «📐 Cargar medidas mecánicas / "
-                       "ubicación en depósito».")
         else:
             st.caption("Todavía no hay ventas ni búsquedas registradas para armar la matriz.")
 
@@ -571,11 +565,9 @@ a traer solas desde Administrar → Mantenimiento.
         # Lo que marcaron para pedir va acá arriba, pegado a «lo que se va a acabar»: es lo
         # que se viene a buscar a esta pantalla. Estaba al final, después de los aumentos,
         # los clavos y los códigos reemplazados; en el celular, casi cinco pantallas abajo.
-        st.markdown("**🙋 Pedidos marcados por empleados**")
-        st.caption(
-            "Cuando alguien busca algo y toca '📌 Pedir' en el buscador, aparece acá para que decidas "
-            "qué comprarle a cada proveedor."
-        )
+        st.markdown("**🙋 Pedidos marcados por empleados**",
+                    help="Lo que alguien marcó con «📌 Pedir» en el buscador, para decidir qué "
+                         "comprarle a cada proveedor.")
         pedidos = listar_pedidos_reposicion("pendiente")
         seleccionados = []
         # ANTES DE COMPRAR, lo que ya hay: una equivalente confirmada en stock puede hacer
@@ -933,11 +925,9 @@ a traer solas desde Administrar → Mantenimiento.
                 data=to_excel_bytes([{k: v for k, v in x.items() if not k.startswith("_")}
                                       for x in discont]),
                 file_name="posibles_discontinuados.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-            )
-            st.caption(
-                "Antes de dar de baja alguno, confirmalo con el proveedor: puede haberle "
-                "cambiado el número y seguir existiendo con otro código."
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                help="Antes de dar de baja alguno, confirmalo con el proveedor: puede haberle "
+                     "cambiado el número y seguir existiendo con otro código."
             )
 
         st.markdown("---")
@@ -2200,12 +2190,11 @@ a traer solas desde Administrar → Mantenimiento.
             # 1) Códigos que no parecen códigos: lo que deja una importación mal mapeada.
             #    Va primero porque un solo producto basura ensucia decenas de vínculos.
             if resultado_aud.get("codigos_malos"):
-                st.markdown("**🚫 Códigos que no parecen códigos de repuesto**")
-                ayuda(
-                    "Suelen venir de una importación donde la columna del código en realidad tenía "
-                    "medidas, cantidades o pedazos de la descripción. Cortarles los vínculos limpia "
-                    "el problema; el producto queda por si lo querés corregir a mano."
-                )
+                st.markdown("**🚫 Códigos que no parecen códigos de repuesto**",
+                            help="Suelen venir de una importación donde la columna del código en "
+                                 "realidad tenía medidas, cantidades o pedazos de la descripción. "
+                                 "Cortarles los vínculos limpia el problema; el producto queda por "
+                                 "si lo querés corregir a mano.")
                 for cm in resultado_aud["codigos_malos"][:25]:
                     cc1, cc2 = st.columns([3, 1])
                     cc1.markdown(f"**{texto_para_html(cm['marca'])}** · `{cm['codigo']}` "

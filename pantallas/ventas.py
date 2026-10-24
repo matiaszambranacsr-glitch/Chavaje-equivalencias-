@@ -368,9 +368,8 @@ if pagina == PAGINAS[9]:
                              help="Con el costo que tenía cada cosa al venderla, y solo de lo "
                                   "que tiene costo cargado.")
             st.caption("Lo que entró cada día:")
-            st.bar_chart({"Día": [datetime.strptime(d, "%Y-%m-%d") for d, _ in _mv["por_dia"]],
-                          "Total": [t for _, t in _mv["por_dia"]]}, x="Día", y="Total",
-                         height=220)
+            grafico_de_barras([d for d, _ in _mv["por_dia"]], [t for _, t in _mv["por_dia"]],
+                              "Día", "Total", fechas=True, plata=True, alto=220)
 
             def _tabla_mv(filas):
                 return [dict({"Producto": f"{f['marca']} {f['codigo']}",

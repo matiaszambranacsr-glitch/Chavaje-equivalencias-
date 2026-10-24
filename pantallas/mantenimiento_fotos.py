@@ -10,12 +10,11 @@ en que se muestran. Corre después de pantallas/mantenimiento.py, que elige el g
 if pagina == PAGINAS[3]:
     if sub_admin == SUB_ADMIN[4]:
         if _grupo_mant == GRUPOS_MANTENIMIENTO[4]:
-            st.markdown("**📷 Traer fotos de productos en tanda**")
-            ayuda(
-                "En vez de cargarlas de a una. No existe ninguna base pública y gratuita de fotos por "
-                "número de parte (la del rubro, TecDoc, es paga), así que las dos fuentes confiables son: "
-                "el link que ya venga en tu lista, o la ficha del propio proveedor."
-            )
+            st.markdown("**📷 Traer fotos de productos en tanda**",
+                        help="En vez de cargarlas de a una. No existe ninguna base pública y "
+                             "gratuita de fotos por número de parte (la del rubro, TecDoc, es paga), "
+                             "así que las dos fuentes confiables son: el link que ya venga en tu "
+                             "lista, o la ficha del propio proveedor.")
 
             modo_liviano = st.checkbox(
                 "Modo liviano (recomendado): guardar el link de la foto, no la foto entera",

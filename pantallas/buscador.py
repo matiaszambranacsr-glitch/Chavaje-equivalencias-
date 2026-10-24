@@ -12,27 +12,30 @@ if pagina == PAGINAS[0]:
         salud abiertos y el encabezado completo iban antes. Quien atiende el mostrador entra
         a buscar un código, y el cartel de lo que espera aprobación explica los resultados:
         abajo de ellos también se entiende."""
-        with st.expander("❓ Guía rápida — cómo usar esta app", key="exp_guia_rapida_como_usar"):
-            # Las secciones salen de PARA_QUE_SIRVE, el mismo renglón que se ve debajo del menú:
-            # escritas aparte, la guía decía que Cargar Excel «arma las equivalencias sola»,
-            # cuando quedan esperando aprobación —que es justo lo que explica que un código
-            # recién importado no traiga sus equivalentes—.
-            st.markdown(
-                "**Cómo se trabaja, en tres pasos:**\n\n"
-                "1. **📁 Cargar Excel** — subís la lista de precios de cada proveedor (Excel, CSV "
-                "o PDF con tabla). Los productos y precios quedan buscables enseguida.\n"
-                "2. **📊 Estadísticas → 🔗 Equivalencias sugeridas** — la app propone qué códigos "
-                "de distintos proveedores son la misma pieza, y vos las aprobás (en bloque las "
-                "limpias). **Hasta que no se aprueban, no aparecen al buscar.**\n"
-                "3. **🔍 Buscador** — escribís el código que te piden y ves todas las marcas que "
-                "sirven en su lugar, con precio, stock y qué tan segura es cada una (🟢 "
-                "confirmada, 🟡 probable, 🟠 revisar). También sirve escribir palabras —«filtro "
-                "aceite gol», «mannol»—: busca solo en las descripciones y las marcas.\n\n"
-                "**Cada sección:**\n\n"
-                + "\n".join(f"- **{_p}** — {PARA_QUE_SIRVE[_p]}" for _p in PAGINAS
-                             if PARA_QUE_SIRVE.get(_p))
-                + "\n\nLo que borra o configura algo pide la contraseña de administrador."
-            )
+        # Arriba, la guía va adentro del «ℹ️ Cómo funciona» de la pantalla (ver «LA AYUDA DE
+        # CADA PANTALLA»): era un desplegable más, aparte, arriba de la caja de búsqueda. Al
+        # final de la página, con su nombre de siempre.
+        # Las secciones salen de PARA_QUE_SIRVE, el mismo texto de la ayuda de cada sección:
+        # escritas aparte, la guía decía que Cargar Excel «arma las equivalencias sola», cuando
+        # quedan esperando aprobación —que es justo lo que explica que un código recién
+        # importado no traiga sus equivalentes—.
+        ayuda(
+            "**Cómo se trabaja, en tres pasos:**\n\n"
+            "1. **📁 Cargar Excel** — subís la lista de precios de cada proveedor (Excel, CSV "
+            "o PDF con tabla). Los productos y precios quedan buscables enseguida.\n"
+            "2. **📊 Estadísticas → 🔗 Equivalencias sugeridas** — la app propone qué códigos "
+            "de distintos proveedores son la misma pieza, y vos las aprobás (en bloque las "
+            "limpias). **Hasta que no se aprueban, no aparecen al buscar.**\n"
+            "3. **🔍 Buscador** — escribís el código que te piden y ves todas las marcas que "
+            "sirven en su lugar, con precio, stock y qué tan segura es cada una (🟢 "
+            "confirmada, 🟡 probable, 🟠 revisar). También sirve escribir palabras —«filtro "
+            "aceite gol», «mannol»—: busca solo en las descripciones y las marcas.\n\n"
+            "**Cada sección:**\n\n"
+            + "\n".join(f"- **{_p}** — {PARA_QUE_SIRVE[_p]}" for _p in PAGINAS
+                         if PARA_QUE_SIRVE.get(_p))
+            + "\n\nLo que borra o configura algo pide la contraseña de administrador.",
+            titulo=TITULO_DE_LA_AYUDA if _guia_arriba else "❓ Guía rápida — cómo usar esta app"
+        )
 
         # Lo que está esperando aprobación se avisa ACÁ, no solo en Estadísticas. Mientras haya
         # vínculos sin aprobar, la búsqueda no cruza marcas: se busca un código de un proveedor y no
@@ -40,22 +43,16 @@ if pagina == PAGINAS[0]:
         # «la app no relaciona proveedores», y no había nada en esta pantalla que lo explicara.
         # Solo a quien las puede aprobar: el que entró sin contraseña no llega a Estadísticas, y
         # para él era un cartel más sin nada que hacer. Ver es_empleado_o_abierto().
+        # En un renglón, con el botón al lado: era un cartel amarillo de tres líneas y el botón
+        # abajo, arriba de la caja de búsqueda, en cada búsqueda.
         _esperando = equivalencias_esperando_revision() if es_empleado_o_abierto() else 0
-        if _esperando and es_celular():
-            # Lo mismo en una línea: en el celular este cartel ocupaba media pantalla justo arriba
-            # de la caja de búsqueda.
-            st.warning(f"🔒 **{miles(_esperando)} equivalencia(s) esperando aprobación**: todavía no "
-                       "aparecen al buscar. Se aprueban en Estadísticas → 🔗 Equivalencias sugeridas.")
-        elif _esperando:
-            st.warning(
-                f"🔒 Hay **{miles(_esperando)} equivalencia(s) esperando aprobación**. Hasta que las "
-                "apruebes no se usan: buscar un código no va a traer los equivalentes de las otras "
-                "marcas. Se aprueban en bloque desde **Estadísticas → 🔗 Equivalencias sugeridas**."
-            )
         if _esperando:
-            st.button("🔗 Ir a aprobarlas →", key="ir_a_aprobar_sugeridas",
-                      on_click=ir_a_donde_dice_el_aviso,
-                      args=(miga_hasta("Equivalencias sugeridas"),))
+            with st.container(horizontal=True, vertical_alignment="center", gap="small"):
+                st.markdown(f"🔒 **{miles(_esperando)} equivalencia(s) esperando aprobación**: "
+                            "hasta que se aprueban, no aparecen al buscar.", width="content")
+                st.button("🔗 Ir a aprobarlas →", key="ir_a_aprobar_sugeridas",
+                          on_click=ir_a_donde_dice_el_aviso,
+                          args=(miga_hasta("Equivalencias sugeridas"),))
 
     # Arriba de la caja de búsqueda solo para el administrador en la computadora: para quien
     # atiende el mostrador —en el celular o en la computadora— van al final. Medido en una
@@ -437,11 +434,10 @@ if pagina == PAGINAS[0]:
             # respuesta EXACTA. Comparar siluetas es adivinar. Tener las dos cosas separadas en
             # pantallas distintas hacía que se usara la peor sin necesidad.
             if bytes_consulta is not None:
-                st.markdown("**Paso 1 — buscar un código en la foto**")
-                ayuda(
-                    "Casi todas las piezas traen el código grabado, impreso en una etiqueta o "
-                    "moldeado. Si se llega a leer, la respuesta es exacta y no hay nada que adivinar."
-                )
+                st.markdown("**Paso 1 — buscar un código en la foto**",
+                            help="Casi todas las piezas traen el código grabado, impreso en una "
+                                 "etiqueta o moldeado. Si se llega a leer, la respuesta es exacta y "
+                                 "no hay nada que adivinar.")
                 if st.button("🔤 Leer el código de la foto", key="leer_codigo_visual"):
                     with st.spinner("Leyendo la pieza..."):
                         datos_ocr, err_ocr = identificar_pieza_por_foto(bytes_consulta)
@@ -695,7 +691,7 @@ if pagina == PAGINAS[0]:
                 help="Con un código busca sus equivalencias. Si escribís palabras —«filtro "
                      "aceite gol», «mannol»— busca en las descripciones y en las marcas."
             )
-            buscar_click = st.form_submit_button("🔍 Buscar Equivalencias", type="primary",
+            buscar_click = st.form_submit_button("🔍 Buscar equivalencias", type="primary",
                                                  width="stretch")
             with st.expander(f"⚙️ Opciones: {_resumen_opciones}", key="exp_opciones"):
                 marca_filtro = st.selectbox("Filtrar por marca:", lista_marcas,
@@ -1431,12 +1427,10 @@ if pagina == PAGINAS[0]:
                             st.dataframe([{k: v for k, v in f.items() if not k.startswith("_")}
                                           for f in _kits], width="stretch", hide_index=True)
                         if _contenido:
-                            st.markdown("**🧩 Lo que trae el kit por separado — tampoco es lo mismo**")
-                            ayuda(
-                                "Si el cliente no quiere el kit entero, estas son las piezas "
-                                "sueltas que nombra la descripción. Cada una es **una parte** "
-                                "del kit, no un reemplazo del kit."
-                            )
+                            st.markdown("**🧩 Lo que trae el kit por separado — tampoco es lo mismo**",
+                                        help="Si el cliente no quiere el kit entero, estas son las "
+                                             "piezas sueltas que nombra la descripción. Cada una es "
+                                             "**una parte** del kit, no un reemplazo del kit.")
                             st.dataframe([{k: v for k, v in f.items() if not k.startswith("_")}
                                           for f in _contenido], width="stretch", hide_index=True)
 
@@ -1797,7 +1791,7 @@ if pagina == PAGINAS[0]:
                 placeholder="Ej: ruleman delantero gol (no hace falta el orden exacto)",
                 key="texto_input"
             )
-            buscar_texto_click = st.form_submit_button("🔍 Buscar por Descripción", type="primary")
+            buscar_texto_click = st.form_submit_button("🔍 Buscar por descripción", type="primary")
 
         # Igual que en la búsqueda por código: los resultados se guardan en la sesión en vez de
         # depender de que el botón "Buscar" haya sido lo último que se tocó. Si no, al apretar
@@ -2140,11 +2134,10 @@ if pagina == PAGINAS[0]:
         m_estrias = cm5.number_input("Cantidad de estrías (opcional)", min_value=0, step=1, value=0, key="med_estrias")
         m_tolerancia = cm6.slider("Tolerancia (%)", min_value=1, max_value=15, value=5, key="med_tol")
 
-        st.markdown("**↔️ Segunda cara (opcional, para piezas con distinta medida de cada lado)**")
-        ayuda(
-            "Ej: un retén con labio interior de un diámetro de un lado y otro del otro, o un tensor "
-            "con el interior escalonado (17mm de una cara, 8mm de la otra)."
-        )
+        st.markdown("**↔️ Segunda cara (opcional, para piezas con distinta medida de cada lado)**",
+                    help="Ej: un retén con labio interior de un diámetro de un lado y otro del otro, "
+                         "o un tensor con el interior escalonado (17mm de una cara, 8mm de la "
+                         "otra).")
         cb1, cb2 = st.columns(2)
         m_diam_int_b = cb1.number_input("Diámetro interno cara B (mm)", min_value=0.0, step=0.1, value=0.0, key="med_di_b")
         m_diam_ext_b = cb2.number_input("Diámetro externo / labio exterior cara B (mm)", min_value=0.0, step=0.1,

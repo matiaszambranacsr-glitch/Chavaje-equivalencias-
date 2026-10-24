@@ -11,11 +11,9 @@ las herramientas de un mismo grupo repartidas en tramos intercalados con las de 
 # ============================================================
 if pagina == PAGINAS[3]:
     if sub_admin == SUB_ADMIN[4]:
-        st.markdown("**🗑️ Eliminar un producto puntual**")
-        ayuda(
-            "Separado a propósito de la edición de medidas/fotos, para que buscar y editar un producto "
-            "no te deje el botón de borrar a mano por accidente."
-        )
+        st.markdown("**🗑️ Eliminar un producto puntual**",
+                    help="Separado a propósito de la edición de medidas/fotos, para que buscar y "
+                         "editar un producto no te deje el botón de borrar a mano por accidente.")
         texto_prod_borrar = st.text_input("Buscar el producto a borrar (por código o descripción):", key="mant_buscar_borrar")
         if texto_prod_borrar.strip():
             res_borrar = buscar_por_texto(texto_prod_borrar)

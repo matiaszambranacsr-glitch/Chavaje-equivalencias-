@@ -209,16 +209,21 @@ def recordar_lo_elegido_al_cambiar_de_pantalla():
 
 
 def elegir_solapa(pagina):
-    """Las solapas de una pantalla, con el renglón de para qué sirve la elegida. Devuelve la
-    elegida. Las tres pantallas con solapas repetían las mismas cuatro líneas —validar lo que
-    hay en la sesión, dibujar las pastillas, leerlas—, cada una con su lista."""
+    """Las solapas de una pantalla. Devuelve la elegida. Las tres pantallas con solapas
+    repetían las mismas cuatro líneas —validar lo que hay en la sesión, dibujar las pastillas,
+    leerlas—, cada una con su lista. Para qué sirve la elegida va en la ayuda de la pantalla,
+    que se muda abajo de las solapas (ver «LA AYUDA DE CADA PANTALLA»)."""
     solapas, clave = SOLAPAS_DE_LA_PAGINA[pagina]
     if st.session_state.get(clave) not in solapas:
         st.session_state[clave] = solapas[0]
     st.radio("Sub-sección:", solapas, key=clave, horizontal=True, label_visibility="collapsed")
     elegida = st.session_state[clave]
-    if PARA_QUE_SIRVE_LA_SOLAPA.get(elegida):
-        st.caption(f"ℹ️ {PARA_QUE_SIRVE_LA_SOLAPA[elegida]}")
+    _de_la_pantalla = st.session_state.get("_ayuda_de_la_pantalla")
+    if _de_la_pantalla:
+        _guardar_el_lugar_de_la_ayuda(_de_la_pantalla)
+        _de_la_pantalla["clave"] += f" → {elegida}"
+        if PARA_QUE_SIRVE_LA_SOLAPA.get(elegida):
+            _de_la_pantalla["textos"].append(f"**{elegida}** — {PARA_QUE_SIRVE_LA_SOLAPA[elegida]}")
     return elegida
 
 
@@ -433,7 +438,67 @@ def _clave_de_ayuda(texto):
     return f"ayuda_{base}_{vistas[base]}"
 
 
-def ayuda(texto, titulo="ℹ️ Cómo funciona", abierto=False):
+# ============================================================================================
+# LA AYUDA DE CADA PANTALLA
+# ============================================================================================
+# Arriba de cada pantalla había tres explicaciones, una abajo de la otra: para qué sirve la
+# sección (a la vista, abajo del título), para qué sirve la solapa (a la vista, abajo de las
+# solapas) y el «ℹ️ Cómo funciona» de la pantalla (plegado). El dueño pidió menos ruido y
+# todas plegadas: ahora es UN solo «ℹ️ Cómo funciona» plegado, abajo de las solapas, con las
+# tres cosas adentro.
+#   - app.py, justo antes de la pantalla: empezar_la_ayuda_de_la_pantalla(), que guarda el
+#     lugar y para qué sirve la sección.
+#   - elegir_solapa(): muda el lugar abajo de las solapas y suma para qué sirve la elegida.
+#   - La ayuda de la pantalla —un ayuda() con el título de siempre pegado a ese lugar, sin
+#     nada dibujado en el medio— se suma ahí en vez de dibujarse aparte. Las demás quedan donde
+#     están: explican lo que tienen al lado (las de más abajo, aunque sean las primeras de la
+#     pantalla, son de una parte: «exportar la configuración», «los aumentos»).
+#   - app.py, al terminar la pantalla: poner_la_ayuda_de_la_pantalla(), por si no hubo ninguna.
+TITULO_DE_LA_AYUDA = "ℹ️ Cómo funciona"
+
+
+def _donde_se_dibuja():
+    """El lugar donde va a ir lo próximo que se dibuje: la caja y la posición adentro de ella.
+    Streamlit no lo ofrece de forma pública: si un día cambia, devuelve None y cada ayuda queda
+    donde se la llamó, como antes."""
+    try:
+        from streamlit.delta_generator_singletons import context_dg_stack
+        cursor = context_dg_stack.get()[-1]._cursor
+        return (cursor.root_container, tuple(cursor.parent_path), cursor.index)
+    except Exception:
+        return None
+
+
+def _guardar_el_lugar_de_la_ayuda(de_la_pantalla):
+    de_la_pantalla["hueco"] = st.empty()
+    de_la_pantalla["lugar"] = _donde_se_dibuja()
+
+
+def empezar_la_ayuda_de_la_pantalla(pagina):
+    """El lugar de la ayuda de la pantalla, con para qué sirve la sección. La llama app.py
+    justo antes de dibujar la pantalla."""
+    st.session_state["_ayuda_de_la_pantalla"] = _de_la_pantalla = {
+        "clave": pagina,
+        "textos": [f"**{pagina}** — {PARA_QUE_SIRVE[pagina]}"] if PARA_QUE_SIRVE.get(pagina) else []}
+    _guardar_el_lugar_de_la_ayuda(_de_la_pantalla)
+
+
+def poner_la_ayuda_de_la_pantalla(texto=None):
+    """Dibuja la ayuda de la pantalla en su lugar, con `texto` al final si hay. Una sola vez
+    por pasada: la segunda llamada no hace nada."""
+    _de_la_pantalla = st.session_state.pop("_ayuda_de_la_pantalla", None)
+    if not _de_la_pantalla:
+        return
+    textos = _de_la_pantalla["textos"] + ([texto] if texto else [])
+    if not textos:
+        return
+    _clave = f"ayuda_de_la_pantalla_{abs(hash(_de_la_pantalla['clave'])) % 10**10}"
+    with _de_la_pantalla["hueco"].container(key=_clave):
+        with st.expander(TITULO_DE_LA_AYUDA, key=f"{_clave}_x"):
+            st.markdown("\n\n".join(textos))
+
+
+def ayuda(texto, titulo=TITULO_DE_LA_AYUDA, abierto=False):
     """Una explicación plegada: se ve solo el título, y el texto a un toque.
 
     La app tenía decenas de explicaciones fijas —para qué sirve cada opción, qué hace cada
@@ -443,7 +508,16 @@ def ayuda(texto, titulo="ℹ️ Cómo funciona", abierto=False):
     Va en una caja con clave propia (ver _clave_de_ayuda()) para que el CSS la dibuje liviana
     —sin borde, en gris, como un «más información»— y se distinga de los desplegables que son
     parte de la pantalla. Por eso también se puede usar adentro de otro desplegable: no suma
-    una segunda caja pesada, suma un renglón."""
+    una segunda caja pesada, suma un renglón.
+
+    La primera de la pantalla se suma a la ayuda de la pantalla (ver «LA AYUDA DE CADA
+    PANTALLA»)."""
+    _de_la_pantalla = st.session_state.get("_ayuda_de_la_pantalla")
+    if (_de_la_pantalla and titulo == TITULO_DE_LA_AYUDA and not abierto
+            and _de_la_pantalla["lugar"] is not None
+            and _donde_se_dibuja() == _de_la_pantalla["lugar"]):
+        poner_la_ayuda_de_la_pantalla(texto)
+        return
     _clave = _clave_de_ayuda(texto)
     with st.container(key=_clave):
         with st.expander(titulo, expanded=abierto, key=f"{_clave}_x"):
@@ -601,8 +675,9 @@ def archivo_listo(archivo, etiqueta="archivo"):
 # Lo pidió el dueño: en la computadora, los botones de cada producto se despliegan con el click
 # derecho, y en 💵 Caja F10 cobra y F11 pone a cuenta. Streamlit no tiene ninguna de las dos
 # cosas enteras: las completa un script chico en el navegador (AYUDAS_DEL_NAVEGADOR), que app.py
-# pone en cada pasada. Ya que está, también F2 (a la búsqueda) y F9 (a la caja), y el pitido
-# cuando llega una venta a la caja o un pedido al depósito. El script no inventa botones: el menú copia los botones de verdad del
+# pone en cada pasada. Ya que está, también F2 (a la búsqueda) y F9 (a la caja), el pitido
+# cuando llega una venta a la caja o un pedido al depósito, y los textos que Streamlit escribe
+# en inglés, pasados al castellano. El script no inventa botones: el menú copia los botones de verdad del
 # renglón, y elegir una opción toca el botón de verdad —hace lo mismo y pasa por los mismos
 # permisos—. Sin el script, o en la vista de celular, los botones se ven como siempre: el CSS
 # los esconde solo si el script avisó que está (la clase «con-menu-clic-derecho» del body) y la
@@ -613,7 +688,7 @@ def archivo_listo(archivo, etiqueta="archivo"):
 #         _texto, _botones = st.columns([5, 1])
 #         with acciones_del_renglon(_botones, f"vta_{id}"):
 #             st.button(...)
-AYUDAS_DEL_NAVEGADOR = """
+AYUDAS_DEL_NAVEGADOR = r"""
 <script>
 (function () {
   // Una vez por pestaña: si el elemento se vuelve a dibujar (otra pantalla), no se repite.
@@ -678,7 +753,7 @@ AYUDAS_DEL_NAVEGADOR = """
       });
     } catch (err) { /* sin sonido: el cartel igual se ve */ }
   }
-  new MutationObserver(function () {
+  function sonarLoNuevo() {
     var carteles = doc.querySelectorAll('[data-testid="stToast"]');
     if (!carteles.length) { return; }
     var prendido = doc.querySelector('[class*="st-key-con_sonido_"] input:checked');
@@ -688,7 +763,146 @@ AYUDAS_DEL_NAVEGADOR = """
         if (prendido) { pitido(); }
       }
     });
-  }).observe(doc.body, {childList: true, subtree: true});
+  }
+
+  // EL CASTELLANO. Los textos que pone Streamlit por su cuenta vienen en inglés y no hay forma
+  // de cambiarlos desde Python: «Choose an option» en cada lista para elegir, «Press Enter to
+  // apply» al escribir, los botones de las tablas («Download as CSV», «Search»), el
+  // calendario... Acá se cambian por los nuestros apenas aparecen. Solo el texto entero y
+  // exacto, y nunca adentro de lo que escribe la app o viene de la base (los textos con
+  // formato, las opciones de una lista, las tablas, los íconos): un producto que se llame
+  // «Search» sigue diciendo «Search».
+  var TEXTOS = {
+    "Choose an option": "Elegí una opción", "Choose options": "Elegí una o más",
+    "Choose or add an option": "Elegí o escribí una", "Choose or add options": "Elegí o escribí",
+    "Select...": "Elegí…", "No results": "No hay nada con eso", "No options": "No hay opciones",
+    "No options to select": "No hay opciones", "Selectbox options": "Opciones",
+    "Press Enter to apply": "Enter para confirmar", "Press Enter to submit form": "Enter para confirmar",
+    "Press Ctrl+Enter to apply": "Ctrl+Enter para confirmar",
+    "Press ⌘+Enter to apply": "⌘+Enter para confirmar",
+    "Press Ctrl+Enter to submit form": "Ctrl+Enter para confirmar",
+    "Press ⌘+Enter to submit form": "⌘+Enter para confirmar",
+    "Download as CSV": "Bajar la tabla (CSV, se abre con Excel)", "Search": "Buscar en la tabla",
+    "Fullscreen": "Pantalla completa", "Close fullscreen": "Salir de la pantalla completa",
+    "Show/hide columns": "Mostrar u ocultar columnas",
+    "Sort ascending": "Ordenar de menor a mayor", "Sort descending": "Ordenar de mayor a menor",
+    "Format": "Formato", "Autosize": "Ancho justo", "Pin column": "Dejar fija",
+    "Unpin column": "Soltar", "Hide column": "Ocultar la columna",
+    "Show data": "Ver los números", "Download as PNG": "Bajar como imagen",
+    "Copy Vega-Lite spec": "Copiar cómo está hecho", "Copied!": "¡Copiado!", "Copied": "Copiado",
+    "Copy to clipboard": "Copiar", "Clear all": "Borrar todo", "Clear entry": "Borrar",
+    "Open": "Abrir", "Close": "Cerrar", "Increment": "Uno más", "Decrement": "Uno menos",
+    "Show password": "Mostrar la contraseña", "Hide password": "Ocultar la contraseña",
+    "Link to heading": "Link a este título", "file upload": "Subir un archivo", "Help": "Ayuda",
+    "Drag and drop file here": "Arrastrá el archivo acá",
+    "Drag and drop files here": "Arrastrá los archivos acá", "Browse files": "Elegir archivo",
+    "Uploading...": "Subiendo…", "File type not allowed.": "Ese tipo de archivo no va acá.",
+    "This app would like to use your camera.": "Hace falta darle permiso a la cámara.",
+    "Learn how to allow access.": "Cómo darlo.",
+    "Running...": "Trabajando…", "Stop": "Frenar", "Connecting": "Conectando…",
+    "Please wait...": "Un momento…",
+    "Previous month": "Mes anterior", "Next month": "Mes siguiente",
+    "Vega visualization": "Gráfico", "Upload": "Elegir archivo",
+    "Choose date": "Elegí el día", "Choose date range": "Elegí desde y hasta",
+    "Clear date": "Borrar la fecha", "Clear dates": "Borrar las fechas",
+    "Use arrow keys to navigate dates. Enter to select. Escape to close.":
+      "Con las flechas te movés, con Enter elegís y con Escape cerrás."
+  };
+  var PATRONES = [
+    [/^Help for ([\s\S]+)$/, "Ayuda: $1"],
+    [/^Shortcut (.+)$/, "Atajo: $1"],
+    [/^Remove (.+)$/, "Sacar $1"],
+    [/^(\S+) per file(.*)$/, "Hasta $1 por archivo$2"],
+    [/^(.+) files are not allowed\.$/, "Los archivos $1 no van acá."],
+    [/^File is too large\. Maximum size is (.+)\.$/, "El archivo es muy grande: el máximo es $1."],
+    [/^You can only select up to (\d+) options?\. Remove an option first\.$/,
+     "Se pueden elegir hasta $1: sacá una primero."],
+    [/^Choose date, (.+)$/, "Elegí el día: $1"],
+    [/^day, (.+)$/, "día, $1"], [/^month, (.+)$/, "mes, $1"], [/^year, (.+)$/, "año, $1"]
+  ];
+  // El calendario de los días. Con el navegador en castellano ya sale en castellano; con uno
+  // en inglés salían los meses («October») y los días («Sunday») en inglés.
+  var CALENDARIO = '[data-testid="stDateInputCalendar"]';
+  var PALABRAS = {January: "enero", February: "febrero", March: "marzo", April: "abril",
+                  May: "mayo", June: "junio", July: "julio", August: "agosto",
+                  September: "septiembre", October: "octubre", November: "noviembre",
+                  December: "diciembre", Sunday: "domingo", Monday: "lunes", Tuesday: "martes",
+                  Wednesday: "miércoles", Thursday: "jueves", Friday: "viernes",
+                  Saturday: "sábado", month: "mes", year: "año"};
+  var RE_PALABRAS = new RegExp("\\b(" + Object.keys(PALABRAS).join("|") + ")\\b", "g");
+  // Las iniciales de arriba de los días, según en qué día empiece la semana.
+  var INICIALES = {SMTWTFS: "DLMMJVS", MTWTFSS: "LMMJVSD"};
+  function traducirIniciales() {
+    doc.querySelectorAll(CALENDARIO + " thead tr").forEach(function (fila) {
+      var textos = [];
+      fila.querySelectorAll("th").forEach(function (th) {
+        var r = doc.createTreeWalker(th, NodeFilter.SHOW_TEXT), n;
+        while ((n = r.nextNode())) { if (n.nodeValue.trim()) { textos.push(n); break; } }
+      });
+      var nuevas = INICIALES[textos.map(function (n) { return n.nodeValue.trim(); }).join("")];
+      if (nuevas) {
+        textos.forEach(function (n, i) { n.nodeValue = n.nodeValue.replace(/\S/, nuevas[i]); });
+      }
+    });
+  }
+  var NO_TOCAR = '[data-testid="stMarkdownContainer"], [role="option"], [data-baseweb="tag"], ' +
+                 '[data-testid="stDataFrameResizable"], [data-testid="stTable"], ' +
+                 '[data-testid="stCode"], [data-testid="stIconMaterial"], ' +
+                 '[data-testid="stVegaLiteChart"], .menu-del-renglon, script, style, textarea';
+  var ATRIBUTOS = ["placeholder", "aria-label", "title"];
+  function enCastellano(texto, lugar) {
+    var limpio = texto.trim();
+    if (!limpio || limpio.length > 160 || !/[A-Za-z]/.test(limpio)) { return null; }
+    var nuevo = null;
+    if (Object.prototype.hasOwnProperty.call(TEXTOS, limpio)) { nuevo = TEXTOS[limpio]; }
+    for (var i = 0; nuevo === null && i < PATRONES.length; i++) {
+      if (PATRONES[i][0].test(limpio)) { nuevo = limpio.replace(PATRONES[i][0], PATRONES[i][1]); }
+    }
+    if (nuevo === null && lugar && lugar.closest(CALENDARIO)) {
+      var cambiado = limpio.replace(RE_PALABRAS, function (m) { return PALABRAS[m]; });
+      if (cambiado !== limpio) { nuevo = cambiado; }
+    }
+    return nuevo === null ? null : texto.replace(limpio, nuevo);
+  }
+  function traducirTexto(nodo) {
+    var padre = nodo.parentElement;
+    // El cartelito de los botones de las tablas y los gráficos, y el botón de subir un
+    // archivo, sí: Streamlit los escribe con formato, pero lo que dicen es suyo («Download as
+    // CSV», «Upload»). Y el calendario entero: sus meses son opciones de una lista, pero no
+    // son de la base.
+    if (!padre || (padre.closest(NO_TOCAR) && !padre.closest(CALENDARIO) &&
+                   !padre.closest('[data-testid="stTooltipContent"], ' +
+                                  '[data-testid="stFileUploaderDropzone"]'))) { return; }
+    var nuevo = enCastellano(nodo.nodeValue, padre);
+    if (nuevo !== null) { nodo.nodeValue = nuevo; }
+  }
+  function traducirAtributos(el) {
+    if (el.closest(".menu-del-renglon")) { return; }
+    ATRIBUTOS.forEach(function (a) {
+      var valor = el.getAttribute(a);
+      var nuevo = valor && enCastellano(valor, el);
+      if (nuevo) { el.setAttribute(a, nuevo); }
+    });
+  }
+  function traducirTodo(raiz) {
+    if (raiz.nodeType === 3) { traducirTexto(raiz); return; }
+    if (raiz.nodeType !== 1) { return; }
+    traducirAtributos(raiz);
+    raiz.querySelectorAll("[placeholder], [aria-label], [title]").forEach(traducirAtributos);
+    var recorrido = doc.createTreeWalker(raiz, NodeFilter.SHOW_TEXT), nodo;
+    while ((nodo = recorrido.nextNode())) { traducirTexto(nodo); }
+    if (raiz.closest(CALENDARIO) || raiz.querySelector(CALENDARIO)) { traducirIniciales(); }
+  }
+  traducirTodo(doc.body);
+  new MutationObserver(function (cambios) {
+    sonarLoNuevo();
+    cambios.forEach(function (c) {
+      if (c.type === "childList") { c.addedNodes.forEach(traducirTodo); }
+      else if (c.type === "characterData") { traducirTexto(c.target); }
+      else { traducirAtributos(c.target); }
+    });
+  }).observe(doc.body, {childList: true, subtree: true, characterData: true,
+                        attributes: true, attributeFilter: ATRIBUTOS});
 
   // EL MENÚ DEL CLICK DERECHO, solo con mouse: en una pantalla táctil los botones se ven.
   if (!(window.matchMedia && window.matchMedia("(pointer: fine)").matches)) { return; }
@@ -807,6 +1021,47 @@ def ver_donde_esta(producto_id):
     código nuestro, que es de uno solo. Va como on_click."""
     st.session_state["mapa_buscar"] = codigo_nuestro(producto_id)
     ir_a_donde_dice_el_aviso(f"{PAGINAS[8]} → {SUB_DEPOSITO[1]}")
+
+
+# ============================================================================================
+# LOS GRÁFICOS, CON LOS NÚMEROS Y LAS FECHAS COMO SE ESCRIBEN ACÁ
+# ============================================================================================
+# st.bar_chart no deja elegir cómo se escriben los ejes, y los escribe en inglés: el de
+# 🧾 Ventas decía «Oct 19» y el de 📊 Estadísticas «45,000» (que acá se lee cuarenta y cinco).
+def grafico_de_barras(etiquetas, valores, titulo_etiquetas, titulo_valores, horizontal=False,
+                      fechas=False, plata=False, alto=None):
+    """Un gráfico de barras en el orden en que vienen las `etiquetas`.
+
+    `fechas`: las etiquetas son días «AAAA-MM-DD» y el eje dice «23/10». `plata`: los valores
+    son pesos y llevan «$». Los números van con punto de miles, en el eje y en el cartelito
+    que sale al pasar el mouse."""
+    import altair as alt
+    filas = [{"e": e, "v": v, "t": f"${miles(v, 0)}" if plata else miles(v),
+              "f": f"{e[8:10]}/{e[5:7]}/{e[:4]}" if fechas else e}
+             for e, v in zip(etiquetas, valores)]
+    if fechas:
+        # «2026-10-24» → «24/10», cortando el texto: sin pasar por las fechas del navegador, que
+        # leen el día en otra hora y lo corren. Con muchos días se saltean los que no entran.
+        rotulos = alt.Axis(labelExpr="slice(datum.value, 8, 10) + '/' + slice(datum.value, 5, 7)",
+                           labelOverlap=True, labelAngle=0, aria=False)
+    else:
+        rotulos = alt.Axis(labelLimit=200, aria=False)
+    eje = alt.Y if horizontal else alt.X
+    eje_e = eje("e:O" if fechas else "e:N", sort=None, title=titulo_etiquetas, axis=rotulos)
+    # El formato de Vega pone coma de miles; se la cambia por punto. Sin la descripción para
+    # los lectores de pantalla que arma Vega: es en inglés y con los números a la inglesa
+    # («X-axis titled 'Total' … from 0 to 120,000»).
+    numero = "replace(format(datum.value, ',.0f'), regexp(',', 'g'), '.')"
+    eje = alt.X if horizontal else alt.Y
+    eje_v = eje("v:Q", title=titulo_valores,
+                axis=alt.Axis(labelExpr=f"'$' + {numero}" if plata else numero, aria=False))
+    codificacion = {"x": eje_v, "y": eje_e} if horizontal else {"x": eje_e, "y": eje_v}
+    grafico = (alt.Chart(alt.Data(values=filas)).mark_bar(color="#E8A33D", aria=False)
+               .encode(**codificacion, tooltip=[alt.Tooltip("f:N", title=titulo_etiquetas),
+                                                alt.Tooltip("t:N", title=titulo_valores)]))
+    if alto:
+        grafico = grafico.properties(height=alto)
+    st.altair_chart(grafico, width="stretch")
 
 
 # ============================================================================================

@@ -163,9 +163,9 @@ if pagina == PAGINAS[10]:
 
     # ---------- LAS ETIQUETAS: ver «EL CÓDIGO DE BARRAS NUESTRO» ----------
     if sub_dvl == SUB_DEVOLUCIONES[2]:
-        st.caption("Para pegar en cada pieza que sale del depósito para Mostrador: sin la "
-                   "etiqueta nuestra no puede volver al stock. Las de lo que el depósito tiene "
-                   "para buscar salen también en 📦 Depósito.")
+        ayuda("Para pegar en cada pieza que sale del depósito para Mostrador: sin la etiqueta "
+              "nuestra no puede volver al stock. Las de lo que el depósito tiene para buscar "
+              "salen también en 📦 Depósito.")
         st.markdown("**De un producto**")
         _q_et = st.text_input("Código del producto, o escaneá la caja:",
                               key="dvl_etiqueta_buscar", placeholder="Ej: W712, 7891234567895")

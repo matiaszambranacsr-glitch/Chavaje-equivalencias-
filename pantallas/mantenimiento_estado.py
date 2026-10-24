@@ -284,11 +284,10 @@ if pagina == PAGINAS[3]:
                         "código y se actualizan, no se cargan de nuevo."
                     )
 
-            st.markdown("**🔍 Salud de los datos**")
-            ayuda(
-                "Revisa la base en busca de cosas rotas o inconsistentes — útil para detectar corrupción "
-                "de datos antes de encontrártela buscando un producto."
-            )
+            st.markdown("**🔍 Salud de los datos**",
+                        help="Revisa la base en busca de cosas rotas o inconsistentes — útil para "
+                             "detectar corrupción de datos antes de encontrártela buscando un "
+                             "producto.")
             if st.button("🔍 Revisar salud de los datos"):
                 reporte_salud = chequear_integridad_bd()
                 total_problemas = sum(r["Problemas"] for r in reporte_salud)
