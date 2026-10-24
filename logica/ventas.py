@@ -1104,3 +1104,46 @@ def poner_a_cuenta(venta_id, mecanico_id=None, descuento=None):
                   f"${miles(total, 0)}" + (f" (con {como_porcentaje(descuento)}% de descuento)"
                                            if descuento else "")
                   + f", vence el {vence[8:10]}/{vence[5:7]}.")
+
+
+# ============================================================================================
+# LO QUE LE AVISA LA APP A QUIEN VENDE
+# ============================================================================================
+# Con la caja aparte y el depósito, lo que arma el vendedor lo termina otro: el cajero cobra la
+# venta (o la pone a cuenta) y el depósito entrega lo pedido, o no lo encuentra. El vendedor no
+# se enteraba hasta ir a preguntar. Ahora le llega un cartel en la pantalla en la que esté, al
+# rato (app.py pregunta cada 20 segundos: ver «LOS AVISOS DE LO QUE TERMINÓ OTRO»).
+def novedades_de(usuario, desde):
+    """Lo de `usuario` que terminó OTRO desde `desde` («AAAA-MM-DD HH:MM:SS», hora local, la de
+    la base): sus ventas cobradas o puestas a cuenta en la caja, y lo que pidió al depósito y
+    se entregó o no había. [(clave, momento, texto)], lo más viejo primero. Lo que hizo él
+    mismo no se avisa: ya lo sabe."""
+    if not usuario:
+        return []
+    novedades = []
+    c.execute("""SELECT v.id, v.total, v.forma_de_pago, v.cuotas, v.cobrada_en,
+                        m.nombre AS cuenta
+                 FROM ventas v LEFT JOIN mecanicos m ON m.id = v.mecanico_id
+                 WHERE v.usuario = ? AND v.cobrada = 1 AND v.anulada = 0 AND v.cobrada_en >= ?
+                   AND COALESCE(v.cobrada_por, '') <> v.usuario""", (usuario, desde))
+    for v in c.fetchall():
+        if v["forma_de_pago"] == A_CUENTA:
+            texto = (f"📒 Tu venta #{v['id']} quedó a cuenta de {v['cuenta'] or '¿?'}: "
+                     f"${miles(v['total'], 0)}")
+        else:
+            texto = (f"💵 Se cobró tu venta #{v['id']}: ${miles(v['total'], 0)} "
+                     f"({como_se_pago(dict(v))})")
+        novedades.append((f"venta {v['id']}", v["cobrada_en"], texto))
+    c.execute("""SELECT d.id, d.cantidad, d.estado, d.resuelto_en, d.resuelto_por,
+                        p.codigo_raw, m.nombre AS marca
+                 FROM pedidos_deposito d JOIN productos p ON p.id = d.producto_id
+                 LEFT JOIN marcas m ON m.id = p.marca_id
+                 WHERE d.pedido_por = ? AND d.estado IN ('entregado', 'no_hay')
+                   AND d.resuelto_en >= ? AND COALESCE(d.resuelto_por, '') <> d.pedido_por""",
+              (usuario, desde))
+    for d in c.fetchall():
+        que = f"{d['cantidad']}× {d['marca'] or ''} {d['codigo_raw']}".replace("  ", " ")
+        texto = (f"📦 Ya salió del depósito: {que} (lo dio {d['resuelto_por'] or 'el depósito'})"
+                 if d["estado"] == "entregado" else f"❌ El depósito no lo encontró: {que}")
+        novedades.append((f"pedido {d['id']}", d["resuelto_en"], texto))
+    return sorted(novedades, key=lambda n: n[1])

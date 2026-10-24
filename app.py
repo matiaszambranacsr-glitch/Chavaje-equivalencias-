@@ -127,6 +127,7 @@ específico, y las pantallas quedan todas al final:
         · VENTAS DEL MOSTRADOR
         · DEVOLVER ALGO DE UNA VENTA
         · LA CAJA APARTE
+        · LO QUE LE AVISA LA APP A QUIEN VENDE
     logica/mapa.py
         · EL MAPA DEL DEPÓSITO
         · DEPÓSITOS, PISOS Y ESTANTERÍAS
@@ -448,6 +449,34 @@ try:
 except sqlite3.Error as _err:
     anotar_error("es_del_deposito", _err)
     _es_del_deposito = False
+
+
+# LOS AVISOS DE LO QUE TERMINÓ OTRO: a quien vende le llega un cartel cuando el cajero cobra su
+# venta (o la pone a cuenta) o el depósito entrega lo que pidió (o no lo encuentra), esté en la
+# pantalla que esté. Es una parte que se pregunta sola cada 20 segundos, sin redibujar nada más
+# (ver novedades_de()). Avisa lo que pasó desde que entró, una vez cada cosa.
+@st.fragment(run_every=20)
+def _lo_que_termino_otro():
+    try:
+        _vistas = st.session_state.setdefault("_novedades_vistas", set())
+        if "_novedades_desde" not in st.session_state:
+            st.session_state["_novedades_desde"] = c.execute(
+                "SELECT datetime('now', 'localtime')").fetchone()[0]
+        for _clave, _momento, _texto in novedades_de(obtener_usuario_actual(),
+                                                      st.session_state["_novedades_desde"]):
+            if _clave not in _vistas:
+                _vistas.add(_clave)
+                st.toast(_texto, duration="long")
+            # Desde lo último que llegó: «>=» y lo ya visto cubren lo del mismo segundo.
+            st.session_state["_novedades_desde"] = max(st.session_state["_novedades_desde"],
+                                                       _momento)
+    except sqlite3.Error as _err:
+        anotar_error("novedades_de", _err)
+
+
+if es_operador_o_admin() and not _es_del_deposito and obtener_usuario_actual():
+    with st.container(key="novedades_para_mi"):
+        _lo_que_termino_otro()
 # En el orden de lo que más se usa (ver ORDEN_DE_LAS_PAGINAS). Quien entra sin contraseña
 # arranca en el Buscador: lo primero de la barra le pediría una.
 _paginas_a_la_vista = PAGINAS_DEL_DEPOSITO if _es_del_deposito else ORDEN_DE_LAS_PAGINAS

@@ -206,6 +206,37 @@ def probar(L):
             {"efectivo": 999.0, "otros_medios": 5150.0, "a_cuenta": 900.0, "ventas": 6,
              "esperando": 1, "total_esperando": 1000.0})
 
+    # 9d. Lo que le avisa la app a quien vende: su venta cobrada o puesta a cuenta por el
+    # cajero, y lo que pidió al depósito, entregado o que no había. Lo que hizo él mismo, no.
+    # Ver novedades_de().
+    nov = ns["novedades_de"]
+    desde = uno("SELECT datetime('now', 'localtime', '-1 second')")
+    v_n1, _ = ns["cerrar_venta"]([item("A1")], "Juan", a_la_caja=True)
+    v_n2, _ = ns["cerrar_venta"]([item("B1")], mecanico_id=taller, a_la_caja=True)
+    v_n3, _ = ns["cerrar_venta"]([item("A1")], "Pepe", a_la_caja=True)
+    pedidos = []
+    for codigo in ("A1", "B1"):
+        ns["pedir_al_deposito"](ids[codigo], 1)
+        pedidos.append(uno("SELECT MAX(id) FROM pedidos_deposito"))
+    esperar("sin novedades mientras nadie hizo nada", nov("ana", desde), [])
+    cobrar(v_n3, "Efectivo")                                   # la cobró ella misma
+    st.session_state["admin_nombre"] = "beto"
+    cobrar(v_n1, "Tarjeta de débito")
+    ns["poner_a_cuenta"](v_n2)
+    ns["entregar_pedido"](pedidos[0], "depo")
+    ns["no_hay_en_el_deposito"](pedidos[1], "depo")
+    st.session_state["admin_nombre"] = "ana"
+    textos = [t for _, _, t in nov("ana", desde)]
+    esperar("lo que terminó otro, una vez cada cosa",
+            (len(textos), any(f"Se cobró tu venta #{v_n1}" in t for t in textos),
+             any(f"Tu venta #{v_n2} quedó a cuenta de Taller Norte" in t for t in textos),
+             any("Ya salió del depósito: 1× PRUEBA A1 (lo dio depo)" in t for t in textos),
+             any("El depósito no lo encontró: 1× PRUEBA B1" in t for t in textos),
+             any(f"#{v_n3}" in t for t in textos)),
+            (4, True, True, True, True, False))
+    esperar("al cajero no le llega lo de ana", nov("beto", desde), [])
+    esperar("lo de antes de entrar, no", nov("ana", "2999-01-01 00:00:00"), [])
+
     # 10. Quién puede: cobrar y poner a cuenta, un empleado; prender o apagar la caja, el
     # administrador.
     originales = (g["_nivel_de_quien_esta_adentro"], g["hay_claves_configuradas"])

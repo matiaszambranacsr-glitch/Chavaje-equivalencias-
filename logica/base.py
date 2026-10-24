@@ -582,6 +582,10 @@ button:disabled { opacity: 0.45 !important; }
    La caja del script no se ve (ni deja el hueco de su renglón). */
 [data-testid="stLayoutWrapper"]:has(> .st-key-ayudas_del_navegador),
 .st-key-ayudas_del_navegador { display: none; }
+/* Lo mismo la parte que pregunta si hay avisos para quien vende (ver «LOS AVISOS DE LO QUE
+   TERMINÓ OTRO» en app.py): sus carteles salen arriba, la caja no se ve. */
+[data-testid="stLayoutWrapper"]:has(> .st-key-novedades_para_mi),
+.st-key-novedades_para_mi { display: none; }
 .menu-del-renglon {
   position: fixed; z-index: 1000100; min-width: 230px; max-width: 360px; padding: 5px;
   background: var(--bg-panel-2); border: 1px solid var(--border-strong); border-radius: 12px;
@@ -596,6 +600,44 @@ button:disabled { opacity: 0.45 !important; }
   background: var(--accent-soft); outline: none;
 }
 .menu-del-renglon button[disabled] { opacity: 0.45; cursor: not-allowed; }
+
+/* ==== LO QUE SE MUEVE ====
+   El dueño pidió una página más dinámica. Que se note que la app responde, sin marear:
+   - Mientras trabaja, una barra ámbar finita arriba de todo. Recién después de un instante:
+     un toque que se resuelve rápido no la muestra.
+   - Lo que queda viejo mientras se redibuja se apaga un poco y despacio, no de golpe (Streamlit
+     lo marca con data-stale).
+   - Lo que aparece entra suave, y un número que cambia —los de la caja, el 🔔— se ilumina un
+     momento (la clase la pone el script del navegador: ver «EL CLICK DERECHO, LAS TECLAS Y EL
+     PITIDO» en logica/interfaz.py).
+   - Los botones se levantan apenas al pasarles el mouse.
+   Con «reducir movimiento» prendido en el teléfono o la computadora, nada de esto se mueve. */
+body:has([data-testid="stStatusWidget"])::before {
+  content: ""; position: fixed; top: 0; left: 0; right: 0; height: 3px; z-index: 1000200;
+  background: linear-gradient(90deg, transparent, var(--accent), transparent) no-repeat;
+  background-size: 40% 100%;
+  animation: trabajando 1.1s ease-in-out infinite, aparecer 0.2s ease 0.35s both;
+}
+@keyframes trabajando { from { background-position: -60% 0; } to { background-position: 160% 0; } }
+@keyframes aparecer { from { opacity: 0; } to { opacity: 1; } }
+[data-testid="stElementContainer"][data-stale="true"] {
+  opacity: 0.6 !important; transition: opacity 0.25s ease 0.3s !important;
+}
+.stMainBlockContainer [data-testid="stElementContainer"] { animation: entrar 0.22s ease-out both; }
+@keyframes entrar { from { opacity: 0; transform: translateY(3px); } to { opacity: 1; transform: none; } }
+.recien-cambiado { animation: destello 1.2s ease-out; }
+@keyframes destello {
+  0% { color: var(--accent); text-shadow: 0 0 14px rgba(232, 163, 61, 0.6); }
+  100% { text-shadow: 0 0 0 rgba(232, 163, 61, 0); }
+}
+[data-testid="stBaseButton-primary"]:hover:not(:disabled),
+[data-testid="stBaseButton-primaryFormSubmit"]:hover:not(:disabled) {
+  transform: translateY(-1px); box-shadow: 0 6px 18px rgba(232, 163, 61, 0.28);
+}
+[data-testid="stBaseButton-secondary"]:hover:not(:disabled) { transform: translateY(-1px); }
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation: none !important; transition: none !important; }
+}
 </style>
 """
 

@@ -133,6 +133,8 @@ Las pruebas se corren como dice el README, en «Antes de subir un cambio».
 | Un empleado desactivado o con otro rol pierde los permisos al instante | `nivel_vigente_de_la_sesion()` | `pruebas_de_la_sesion.py` |
 | Después de «Salir» no queda nada del anterior | `cerrar_sesion()` | `pruebas_de_la_sesion.py` |
 | Ir a otra pantalla y volver no borra la búsqueda, los filtros ni la solapa elegida | `recordar_lo_elegido_al_cambiar_de_pantalla()` | `pruebas_de_la_sesion.py` (2b), `auditar.py` (6d) |
+| A quien vende le llega un aviso cuando otro cobra o pone a cuenta su venta, o el depósito entrega o no encuentra lo que pidió; lo que hizo él mismo, no | `novedades_de()` | `pruebas_de_la_caja.py` (9d) |
+| Todas las pantallas y solapas se dibujan sin errores, sin contraseña, como operador y como administrador | — | `pruebas_de_las_pantallas.py` |
 | Un solo «ℹ️ Cómo funciona» plegado arriba de cada pantalla, con para qué sirve la sección, la solapa y la ayuda de la pantalla; la ayuda de una parte queda en su parte | `empezar_la_ayuda_de_la_pantalla()`, `elegir_solapa()`, `ayuda()` | `pruebas_de_la_sesion.py` (2d) |
 | Con la base dañada, los empleados solo pueden buscar | `modo_solo_lectura()` | `pruebas_de_los_frenos.py` (1) |
 
@@ -256,6 +258,8 @@ Las pruebas se corren como dice el README, en «Antes de subir un cambio».
 - El menú del click derecho, las teclas (F2, F9, F10, F11), el pitido y los textos de Streamlit
   pasados al castellano: son JavaScript en el navegador (`AYUDAS_DEL_NAVEGADOR`); se probaron con
   un navegador de verdad, no hay prueba que los corra sola. Lo mismo el formato de los gráficos
-  (`grafico_de_barras()`): lo dibuja el navegador.
+  (`grafico_de_barras()`), lo que se mueve en la pantalla (la barra que trabaja, los números que
+  se iluminan: «LO QUE SE MUEVE» en `logica/base.py`) y que el aviso al vendedor llegue solo cada
+  20 segundos: lo hace el navegador.
 - Lo que necesita la base real (`pruebas_de_la_revision.py --base`, `pruebas_de_compatibilidad.py`)
   no corre en GitHub: se corre a mano antes de publicar.

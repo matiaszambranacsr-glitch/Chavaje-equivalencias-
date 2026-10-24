@@ -6636,6 +6636,22 @@ Lo pidió el dueño: «seguí mejorando la redacción de los textos, ponelos tod
 
 Probado en un navegador de verdad, en inglés y en castellano: las listas dicen «Elegí una opción», las tablas «Pantalla completa», «Buscar en la tabla» y «Bajar la tabla», el cartelito de la barra de los gráficos «Ver los números», al escribir «Enter para confirmar», y el calendario de 💵 Caja «octubre 2026» con «D L M M J V S». Los gráficos, «23/10» y «$120.000». En cada pantalla queda un solo «ℹ️ Cómo funciona» arriba (en Depósito: la sección, «⏳ Para buscar» y cómo funciona la cola), y las ayudas de una parte siguen en su parte. `pruebas_de_la_sesion.py` (2d) lo controla: rompiéndolo a propósito, avisa.
 
+## ⚡ Una página más dinámica, y menos tokens para trabajar en ella
+
+Lo pidió el dueño: «mejorá muchísimo más todo, optimizá también el uso de tokens acá de Claude y hacé más dinámica la página».
+
+| Qué | Cómo |
+|---|---|
+| **🔔 Lo que terminó otro, en vivo** | A quien vende le llega un cartel, esté en la pantalla que esté, cuando el cajero **cobra su venta** («💵 Se cobró tu venta #7: $12.500 (Efectivo)») o **la pone a cuenta**, y cuando el depósito **entrega lo que pidió** («📦 Ya salió del depósito: 1× IMPERIAL LUSQ-LG-07 (lo dio ana)») o **no lo encuentra**. Antes había que ir a preguntar. La app pregunta sola cada 20 segundos, sin redibujar la pantalla; avisa una vez cada cosa, y lo que hizo uno mismo no. |
+| **La barra que trabaja** | Mientras la app trabaja, una barra ámbar finita corre arriba de todo. Sale recién después de un instante: un toque que se resuelve rápido no la muestra. |
+| **Sin parpadeos** | Lo que queda viejo mientras se redibuja se apaga un poco y despacio, en vez de ponerse gris de golpe en cada toque. Lo que aparece entra suave. |
+| **Los números que cambian se ven** | Lo del día en la 💵 Caja (que se pone al día solo) y el 🔔 de los avisos se iluminan un momento cuando cambian. |
+| **Botones** | Se levantan apenas al pasarles el mouse. |
+| **Reducir movimiento** | Con esa opción prendida en el teléfono o la computadora, nada de esto se mueve. |
+| **Menos tokens** | `CLAUDE.md`: una guía corta que cada sesión de Claude lee al empezar (dónde está cada cosa, cómo validar, las reglas del auditor, que el README se busca y no se lee entero), en vez de recorrer el código para orientarse. El recorrido por todas las pantallas, que se rearmaba a mano en cada revisión, ahora es una prueba más: `pruebas_de_las_pantallas.py` (120 pantallas y solapas, sin contraseña, como operador y como administrador, en 6 segundos). La lista de tareas viejas de la sesión, que se repetía entera en cada aviso, se borró. |
+
+Probado en un navegador de verdad, con la base de 86.946 productos: Ana estaba en el Buscador; el cajero cobró su venta en 💵 Caja y a Ana le llegó «💵 Se cobró tu venta #7: $12.500 (Efectivo)» a los 6 segundos; los números de la caja se iluminaron al cambiar. Buscar en Ventas tardó 0,28 s, sumar a la venta 0,19 s, buscar «W712/94» en el Buscador 0,16 s.
+
 ## 📞 Un aviso por cliente, y una sola vez
 
 «A quién avisar» era una fila por pieza: el cliente con la correa y las pastillas recibía dos mensajes, y al otro día los dos volvían a la lista. Ahora es **un mensaje por cliente** con todo lo que le toca, y **«✅ Ya le avisé»** lo saca de la lista por 15 días. Si mientras tanto le toca otra pieza, vuelve por esa.

@@ -893,9 +893,27 @@ AYUDAS_DEL_NAVEGADOR = r"""
     while ((nodo = recorrido.nextNode())) { traducirTexto(nodo); }
     if (raiz.closest(CALENDARIO) || raiz.querySelector(CALENDARIO)) { traducirIniciales(); }
   }
+  // LOS NÚMEROS QUE CAMBIAN se iluminan un momento (la animación está en el CSS: ver «LO QUE
+  // SE MUEVE» en logica/base.py): lo del día en la caja, lo que espera, el 🔔 de los avisos.
+  // Solo si cambió: al aparecer por primera vez, no.
+  var NUMEROS = '[data-testid="stMetricValue"], .st-key-hueco_de_los_avisos [data-testid="stPopoverButton"] p';
+  var vistos = new WeakMap();
+  function destellarLoQueCambio() {
+    doc.querySelectorAll(NUMEROS).forEach(function (n) {
+      var ahora = n.textContent, antes = vistos.get(n);
+      vistos.set(n, ahora);
+      if (antes === undefined || antes === ahora) { return; }
+      n.classList.remove("recien-cambiado");
+      void n.offsetWidth;                        // para que la animación vuelva a empezar
+      n.classList.add("recien-cambiado");
+      window.setTimeout(function () { n.classList.remove("recien-cambiado"); }, 1300);
+    });
+  }
   traducirTodo(doc.body);
+  destellarLoQueCambio();
   new MutationObserver(function (cambios) {
     sonarLoNuevo();
+    destellarLoQueCambio();
     cambios.forEach(function (c) {
       if (c.type === "childList") { c.addedNodes.forEach(traducirTodo); }
       else if (c.type === "characterData") { traducirTexto(c.target); }
