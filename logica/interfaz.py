@@ -909,11 +909,56 @@ AYUDAS_DEL_NAVEGADOR = r"""
       window.setTimeout(function () { n.classList.remove("recien-cambiado"); }, 1300);
     });
   }
+  // LA BÚSQUEDA, LISTA AL ENTRAR: al cambiar de sección o de solapa, el cursor va a la caja de
+  // búsqueda de esa pantalla, así el lector de códigos de barras escanea derecho, sin tocar
+  // antes la caja. Solo con mouse —en el teléfono abriría el teclado encima de todo—, si no se
+  // está escribiendo en otro lado, y sin mover la pantalla. Cada pantalla dice cuál es su caja
+  // y se espera a que aparezca: mientras se redibuja sigue a la vista la de la pantalla
+  // anterior, y buscando «la que haya» se la agarraba.
+  var CAJA_DE_CADA_PANTALLA = [
+    ["🗺️ Mapa", ".st-key-mapa_buscar input"], ["📍 Ubicar", ".st-key-ubicar_escaneo input"],
+    ["📦 Al depósito", ".st-key-dvl_escaneo input"],
+    ["🧾 De un cliente", ".st-key-venta_buscar_dev input"],
+    ["🧾 Ventas", ".st-key-venta_buscar input"], ["🔍 Buscador", ".st-key-busqueda_input input"]];
+  var conMouse = !!(window.matchMedia && window.matchMedia("(pointer: fine)").matches);
+  var dondeEstaba = null;
+  function dondeEstoy() {
+    return Array.prototype.map.call(
+      doc.querySelectorAll('.st-key-nav_principal label:has(input:checked), ' +
+                           '[class*="st-key-sub_"] label:has(input:checked)'),
+      function (l) { return l.textContent; }).join("|");
+  }
+  function buscarAlEntrar() {
+    var aca = dondeEstoy();
+    if (!aca || aca === dondeEstaba) { return; }
+    dondeEstaba = aca;
+    var cual = CAJA_DE_CADA_PANTALLA.filter(function (p) { return aca.indexOf(p[0]) >= 0; })[0];
+    if (!cual) { return; }
+    var desde = Date.now();
+    (function probar() {
+      if (dondeEstaba !== aca) { return; }
+      var caja = doc.querySelector(cual[1]);
+      if (!caja || caja.disabled || !caja.offsetParent || caja.closest('[data-stale="true"]')) {
+        // Hasta 40 segundos: la primera vez que se abre el buscador, con el servidor recién
+        // arrancado, tarda.
+        if (Date.now() - desde < 40000) { window.setTimeout(probar, 150); }
+        return;
+      }
+      // Escribiendo en otro campo, no. Las pastillas de la barra y las casillas también son
+      // «input», pero ahí no se escribe.
+      var foco = doc.activeElement;
+      if (foco && foco !== caja && foco.offsetParent &&
+          foco.matches('input:not([type="radio"]):not([type="checkbox"]), textarea, ' +
+                       '[contenteditable="true"]')) { return; }
+      caja.focus({preventScroll: true});
+    })();
+  }
   traducirTodo(doc.body);
   destellarLoQueCambio();
   new MutationObserver(function (cambios) {
     sonarLoNuevo();
     destellarLoQueCambio();
+    if (conMouse) { buscarAlEntrar(); }
     cambios.forEach(function (c) {
       if (c.type === "childList") { c.addedNodes.forEach(traducirTodo); }
       else if (c.type === "characterData") { traducirTexto(c.target); }
@@ -923,7 +968,7 @@ AYUDAS_DEL_NAVEGADOR = r"""
                         attributes: true, attributeFilter: ATRIBUTOS});
 
   // EL MENÚ DEL CLICK DERECHO, solo con mouse: en una pantalla táctil los botones se ven.
-  if (!(window.matchMedia && window.matchMedia("(pointer: fine)").matches)) { return; }
+  if (!conMouse) { return; }
   doc.body.classList.add("con-menu-clic-derecho");
   var menu = null, abiertoEn = 0;
   function cerrar() { if (menu) { menu.remove(); menu = null; } }

@@ -259,7 +259,7 @@ Las pruebas se corren como dice el README, en «Antes de subir un cambio».
   pasados al castellano: son JavaScript en el navegador (`AYUDAS_DEL_NAVEGADOR`); se probaron con
   un navegador de verdad, no hay prueba que los corra sola. Lo mismo el formato de los gráficos
   (`grafico_de_barras()`), lo que se mueve en la pantalla (la barra que trabaja, los números que
-  se iluminan: «LO QUE SE MUEVE» en `logica/base.py`) y que el aviso al vendedor llegue solo cada
-  20 segundos: lo hace el navegador.
+  se iluminan: «LO QUE SE MUEVE» en `logica/base.py`) que el aviso al vendedor llegue solo cada
+  20 segundos y el cursor en la caja de búsqueda al entrar a cada pantalla: lo hace el navegador.
 - Lo que necesita la base real (`pruebas_de_la_revision.py --base`, `pruebas_de_compatibilidad.py`)
   no corre en GitHub: se corre a mano antes de publicar.

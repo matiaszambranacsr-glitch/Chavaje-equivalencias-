@@ -6647,6 +6647,8 @@ Lo pidió el dueño: «mejorá muchísimo más todo, optimizá también el uso d
 | **Sin parpadeos** | Lo que queda viejo mientras se redibuja se apaga un poco y despacio, en vez de ponerse gris de golpe en cada toque. Lo que aparece entra suave. |
 | **Los números que cambian se ven** | Lo del día en la 💵 Caja (que se pone al día solo) y el 🔔 de los avisos se iluminan un momento cuando cambian. |
 | **Botones** | Se levantan apenas al pasarles el mouse. |
+| **La búsqueda, lista al entrar** | En la computadora, al entrar a 🧾 Ventas, al 🔍 Buscador, a 📦 Depósito → 🗺️ Mapa o 📍 Ubicar, o a las dos de ↩️ Devoluciones, el cursor ya está en la caja de búsqueda: el lector de códigos de barras escanea derecho, sin tocar antes la caja. No mueve la pantalla, no se mete si se está escribiendo en otro campo, y en el teléfono no (abriría el teclado). |
+| **El Buscador, más corto** | «📷 Escanear el código de barras» y «🖼️ Buscar por parecido visual», lado a lado: un renglón menos antes de la caja. |
 | **Reducir movimiento** | Con esa opción prendida en el teléfono o la computadora, nada de esto se mueve. |
 | **Menos tokens** | `CLAUDE.md`: una guía corta que cada sesión de Claude lee al empezar (dónde está cada cosa, cómo validar, las reglas del auditor, que el README se busca y no se lee entero), en vez de recorrer el código para orientarse. El recorrido por todas las pantallas, que se rearmaba a mano en cada revisión, ahora es una prueba más: `pruebas_de_las_pantallas.py` (120 pantallas y solapas, sin contraseña, como operador y como administrador, en 6 segundos). La lista de tareas viejas de la sesión, que se repetía entera en cada aviso, se borró. |
 

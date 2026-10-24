@@ -202,7 +202,12 @@ if pagina == PAGINAS[0]:
     # el código de barras es exacto, y todo lo demás —comparar siluetas, leer un grabado
     # gastado, medir— es aproximar. Poner primero lo confiable evita que alguien resuelva con
     # una adivinanza algo que la caja tenía escrito.
-    with st.expander("📷 Escanear el código de barras de la caja", key="exp_escanear_codigo_barras_caja"):
+    # Lado a lado con «🖼️ Buscar por parecido visual», en la computadora: un renglón menos
+    # entre el encabezado y la caja de búsqueda, que es a lo que se viene.
+    _escanear_aca, _parecido_aca = (st.columns(2) if es_operador_o_admin()
+                                    else (st.container(), None))
+    with _escanear_aca.expander("📷 Escanear el código de barras de la caja",
+                                key="exp_escanear_codigo_barras_caja"):
         explicar(
             "La forma más segura de identificar un repuesto: no hay nada que adivinar.",
             "El código de la caja es exacto. A diferencia de comparar fotos o leer un grabado, "
@@ -288,8 +293,9 @@ if pagina == PAGINAS[0]:
                                      f"{ajeno_barra['tipo'] or 'una pieza'} para "
                                      f"{ajeno_barra['cantidad_autos']} auto(s).")
 
-    if es_operador_o_admin():
-        with st.expander("🖼️ Buscar por parecido visual (experimental)", key="exp_buscar_parecido_visual_experimental"):
+    if _parecido_aca is not None:
+        with _parecido_aca.expander("🖼️ Buscar por parecido visual (experimental)",
+                                    key="exp_buscar_parecido_visual_experimental"):
             explicar(
                 "Compará una foto contra el catálogo. Sirve para acortar candidatos, nunca para "
                 "confirmar una venta.",
