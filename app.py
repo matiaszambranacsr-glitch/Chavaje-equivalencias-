@@ -477,9 +477,14 @@ def _lo_que_termino_otro():
 if es_operador_o_admin() and not _es_del_deposito and obtener_usuario_actual():
     with st.container(key="novedades_para_mi"):
         _lo_que_termino_otro()
-# En el orden de lo que más se usa (ver ORDEN_DE_LAS_PAGINAS). Quien entra sin contraseña
-# arranca en el Buscador: lo primero de la barra le pediría una.
-_paginas_a_la_vista = PAGINAS_DEL_DEPOSITO if _es_del_deposito else ORDEN_DE_LAS_PAGINAS
+# En el orden de lo que más se usa (ver ORDEN_DE_LAS_PAGINAS). Quien entra sin sesión ve solo lo
+# abierto (ver PAGINAS_ABIERTAS) y arranca en el Buscador.
+if _es_del_deposito:
+    _paginas_a_la_vista = PAGINAS_DEL_DEPOSITO
+elif solo_mirar():
+    _paginas_a_la_vista = [p for p in ORDEN_DE_LAS_PAGINAS if p in PAGINAS_ABIERTAS]
+else:
+    _paginas_a_la_vista = ORDEN_DE_LAS_PAGINAS
 if st.session_state.pop("_al_principio_de_la_barra", False):        # recién entró: ver
     st.session_state["pagina_actual"] = _paginas_a_la_vista[0]       # mostrar_login_inicial()
 if st.session_state.get("pagina_actual") not in _paginas_a_la_vista:

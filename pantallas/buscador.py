@@ -19,23 +19,24 @@ if pagina == PAGINAS[0]:
         # escritas aparte, la guía decía que Cargar Excel «arma las equivalencias sola», cuando
         # quedan esperando aprobación —que es justo lo que explica que un código recién
         # importado no traiga sus equivalentes—.
-        ayuda(
-            "**Cómo se trabaja, en tres pasos:**\n\n"
-            "1. **📁 Cargar Excel** — subís la lista de precios de cada proveedor (Excel, CSV "
-            "o PDF con tabla). Los productos y precios quedan buscables enseguida.\n"
-            "2. **📊 Estadísticas → 🔗 Equivalencias sugeridas** — la app propone qué códigos "
-            "de distintos proveedores son la misma pieza, y vos las aprobás (en bloque las "
-            "limpias). **Hasta que no se aprueban, no aparecen al buscar.**\n"
-            "3. **🔍 Buscador** — escribís el código que te piden y ves todas las marcas que "
-            "sirven en su lugar, con precio, stock y qué tan segura es cada una (🟢 "
-            "confirmada, 🟡 probable, 🟠 revisar). También sirve escribir palabras —«filtro "
-            "aceite gol», «mannol»—: busca solo en las descripciones y las marcas.\n\n"
-            "**Cada sección:**\n\n"
-            + "\n".join(f"- **{_p}** — {PARA_QUE_SIRVE[_p]}" for _p in PAGINAS
-                         if PARA_QUE_SIRVE.get(_p))
-            + "\n\nLo que borra o configura algo pide la contraseña de administrador.",
-            titulo=TITULO_DE_LA_AYUDA if _guia_arriba else "❓ Guía rápida — cómo usar esta app"
-        )
+        if not solo_mirar():          # es la guía del negocio, no del cliente
+            ayuda(
+                "**Cómo se trabaja, en tres pasos:**\n\n"
+                "1. **📁 Cargar Excel** — subís la lista de precios de cada proveedor (Excel, CSV "
+                "o PDF con tabla). Los productos y precios quedan buscables enseguida.\n"
+                "2. **📊 Estadísticas → 🔗 Equivalencias sugeridas** — la app propone qué códigos "
+                "de distintos proveedores son la misma pieza, y vos las aprobás (en bloque las "
+                "limpias). **Hasta que no se aprueban, no aparecen al buscar.**\n"
+                "3. **🔍 Buscador** — escribís el código que te piden y ves todas las marcas que "
+                "sirven en su lugar, con precio, stock y qué tan segura es cada una (🟢 "
+                "confirmada, 🟡 probable, 🟠 revisar). También sirve escribir palabras —«filtro "
+                "aceite gol», «mannol»—: busca solo en las descripciones y las marcas.\n\n"
+                "**Cada sección:**\n\n"
+                + "\n".join(f"- **{_p}** — {PARA_QUE_SIRVE[_p]}" for _p in PAGINAS
+                             if PARA_QUE_SIRVE.get(_p))
+                + "\n\nLo que borra o configura algo pide la contraseña de administrador.",
+                titulo=TITULO_DE_LA_AYUDA if _guia_arriba else "❓ Guía rápida — cómo usar esta app"
+            )
 
         # Lo que está esperando aprobación se avisa ACÁ, no solo en Estadísticas. Mientras haya
         # vínculos sin aprobar, la búsqueda no cruza marcas: se busca un código de un proveedor y no
@@ -78,7 +79,7 @@ if pagina == PAGINAS[0]:
 
     # El carrito arriba de todo: si está armándose un presupuesto, tiene que estar a la vista.
     # Escondido en otra pantalla, la gente se olvida de lo que ya sumó y lo suma dos veces.
-    if st.session_state.get("carrito"):
+    if st.session_state.get("carrito") and not solo_mirar():
         _cart = st.session_state["carrito"]
         _total = sum((x["precio"] or 0) * x["cantidad"] for x in _cart.values())
         with st.expander(f"🛒 Presupuesto en armado — {len(_cart)} ítem(s) · ${miles(_total, 0)}"
@@ -165,15 +166,13 @@ if pagina == PAGINAS[0]:
             st.button("🧾 Pasar a una venta" + (f" — {_se_llevan} de {len(_cart)}"
                                                 if _se_llevan < len(_cart) else ""),
                       key="pasar_a_venta", type="primary",
-                      disabled=solo_mirar() or not _se_llevan,
+                      disabled=not _se_llevan,
                       on_click=pasar_el_presupuesto_a_una_venta,
-                      help=TEXTO_SOLO_MIRAR if solo_mirar() else
-                      "Marcá en «Se lleva» lo que se lleva el cliente." if not _se_llevan else
+                      help="Marcá en «Se lleva» lo que se lleva el cliente." if not _se_llevan else
                       "Lo marcado lo cobrás en 🧾 Ventas: descuenta el stock y lo anota en la "
                       "ficha del auto. Lo destildado queda en el presupuesto.")
             cb1, cb2 = st.columns(2)
-            if cb1.button("🔒 Apartar todo el presupuesto", disabled=solo_mirar(),
-                          help=TEXTO_SOLO_MIRAR if solo_mirar() else None):
+            if cb1.button("🔒 Apartar todo el presupuesto"):
                 _apartados, _fallaron = 0, []
                 for _pid, _item in list(_cart.items()):
                     _ok, _msg = reservar_stock(_pid, _item["cantidad"], "presupuesto")
@@ -718,7 +717,9 @@ if pagina == PAGINAS[0]:
                 # Cortar por saltos y cortar por confianza son dos cosas distintas: la primera
                 # mira cuán largo es el camino, la segunda cuánto vale. Un resultado a dos saltos
                 # por vínculos sólidos es mejor que uno directo colgado de un vínculo malo.
-                solo_confiables = st.checkbox(
+                # Sin sesión no se elige: van solo los confiables. Al cliente no se le muestra
+                # lo que cuelga de un vínculo dudoso, ni la casilla que lo explica.
+                solo_confiables = solo_mirar() or st.checkbox(
                     "Esconder los que llegan por vínculos flojos", key="solo_confiables",
                     help="Deja fuera los resultados cuyo camino pasa por algún vínculo que el "
                          "análisis puntuó por debajo de 50 — códigos puente cortos o genéricos, "
@@ -1094,7 +1095,7 @@ if pagina == PAGINAS[0]:
                             # Debajo de los precios, que es donde se mira antes de cotizar.
                             _fuera_aca = sorted({f.get("Marca") for f in res
                                                  if f.get("Precio")} & _fuera_escala)
-                            if _fuera_aca:
+                            if _fuera_aca and not solo_mirar():       # avisos del negocio
                                 st.warning(
                                     f"⚠️ Los precios de **{', '.join(_fuera_aca)}** están en "
                                     "otra escala que los de las demás marcas (unas "
@@ -1112,7 +1113,7 @@ if pagina == PAGINAS[0]:
                             except sqlite3.Error as _err:
                                 anotar_error("texto_de_la_fecha_de_los_precios", _err)
                                 _fecha_precios = ""
-                            if _fecha_precios:
+                            if _fecha_precios and not solo_mirar():
                                 st.caption(_fecha_precios)
                             # UNA MARCA QUE VIENE FALLADA más que antes: se avisa al venderla.
                             # No cambia el veredicto: es calidad, no equivalencia. Ver
@@ -1171,7 +1172,7 @@ if pagina == PAGINAS[0]:
                         # se contradecían (pasó con LRSC030140LUCAS, que cita 52 de Bosch).
                         if not alternativas:
                             puentes_res = []
-                        if puentes_res or _hay_indirectos:
+                        if (puentes_res or _hay_indirectos) and not solo_mirar():
                             if seccion_plegable(
                                 "⚠️ Revisar la calidad de estos resultados" if puentes_res
                                 else "🧭 ¿Por qué apareció alguno de estos?",
@@ -1282,7 +1283,7 @@ if pagina == PAGINAS[0]:
                                            if f.get("Cadena") == "— el buscado"]
                         _para_ficha = [f for f in res if f.get("Cadena") != "— el buscado"
                                        and not f.get("_sin_salida")]
-                        if _origenes_ficha and _para_ficha and seccion_plegable(
+                        if _origenes_ficha and _para_ficha and not solo_mirar() and seccion_plegable(
                                 "🧾 Ficha de prueba: ¿por qué es equivalente?",
                                 key=f"ficha_prueba_{clean}"):
                             _opciones_ficha = {
@@ -1440,183 +1441,182 @@ if pagina == PAGINAS[0]:
                             st.dataframe([{k: v for k, v in f.items() if not k.startswith("_")}
                                           for f in _contenido], width="stretch", hide_index=True)
 
-                        st.markdown("**🛒 ¿Se lo llevó? / 📌 ¿Falta stock?**")
-                        ayuda(
-                            "Marcá cuál se llevó el cliente: con eso el sistema va aprendiendo qué "
-                            "sirve para qué, y después te propone equivalencias nuevas en "
-                            "📊 Estadísticas → 🔗 Equivalencias sugeridas. Si falta stock, «📌 Reponer» lo "
-                            "anota en 📊 Estadísticas → 📌 Para pedir. «📦 Pedir al depósito» "
-                            "le avisa al depósito que lo busque, y al entregarlo queda en la cuenta "
-                            "del que se lo lleva."
-                        )
-                        if solo_mirar():
-                            st.caption(TEXTO_SOLO_MIRAR)
-                        def _rotulo_stock(f):
-                            _s = f.get("Stock")
-                            return (f"{f['Marca']} - {f['Codigo']} "
-                                    f"(stock: {_s if _s is not None else 's/d'})")
-                        # Hasta cinco, un par de botones por resultado: es un toque. Con más, un
-                        # selector y los dos botones una sola vez. Mirado en un celular de verdad,
-                        # una búsqueda de 62 resultados dejaba 124 botones del ancho de la
-                        # pantalla uno abajo del otro, y la página medía 17 pantallas.
-                        # En el celular las columnas se apilan: cada fila eran dos botones a lo
-                        # ancho, y con cinco resultados, diez botones. Ahí el selector va desde dos.
-                        if len(res) <= (1 if es_celular() else 5):
-                            # En la computadora, los botones de cada uno salen con el click
-                            # derecho (ver «EL CLICK DERECHO» en logica/interfaz.py).
-                            pista_del_click_derecho(
-                                f"stock_{clean}", "Click derecho sobre un producto: se llevó, "
-                                                  "reponer, presupuesto o dónde está.")
-                            for fila_stock in res:
-                                with renglon_con_menu(f"stock_{fila_stock['ID']}_{clean}"):
-                                    colr1, colr2 = st.columns([3, 2])
-                                    colr1.write(_rotulo_stock(fila_stock))
-                                    with acciones_del_renglon(colr2, f"stock_{fila_stock['ID']}_{clean}"):
-                                        # Directo, con confirmación (🔴) o apagado (🔴 de
-                                        # seguridad): ver mostrar_boton_de_venta().
-                                        mostrar_boton_de_venta(
-                                            st, fila_stock,
-                                            (fila_stock["ID"], codigo_individual,
-                                             f"{fila_stock['Marca']} - {fila_stock['Codigo']}",
-                                             f"stock_{clean}", veredicto_de_la_equivalencia(fila_stock),
-                                             evidencia_de_la_fila(fila_stock, _reco["recomendada"])),
-                                            f"vendido_{fila_stock['ID']}_{clean}")
-                                        st.button("📌 Reponer", key=f"pedir_repo_{fila_stock['ID']}_{clean}",
-                                                  disabled=solo_mirar(),
-                                                  on_click=pedir_reposicion_y_avisar,
-                                                  args=(fila_stock["ID"], f"{fila_stock['Marca']} - {fila_stock['Codigo']}",
-                                                        f"stock_{clean}"),
-                                                  help="Marcar para reposición")
-                                        mostrar_mas_acciones_del_producto(fila_stock, f"{fila_stock['ID']}_{clean}")
-                        else:
-                            # Se elige por ID y no por el rótulo: dos productos con la misma
-                            # marca, código y stock darían el mismo texto y uno taparía al otro.
-                            _rotulos = {f["ID"]: _rotulo_stock(f) for f in res}
-                            _elegido = st.selectbox(f"¿Cuál? ({len(res)} resultados)",
-                                                    list(_rotulos), format_func=_rotulos.get,
-                                                    key=f"cual_vendido_{clean}")
-                            # Lo que no está confirmado se avisa antes de venderlo: queda como
-                            # alternativa comercial, no como equivalente (ver registrar_venta()).
-                            _fila_elegida = next((f for f in res if f["ID"] == _elegido), {})
-                            if como_se_vende(veredicto_de_la_equivalencia(_fila_elegida)) == "alternativa":
-                                st.warning("⚠️ Esta referencia no está confirmada como equivalente "
-                                           f"({veredicto_de_la_equivalencia(_fila_elegida)}). Se "
-                                           "anota como alternativa comercial.")
-                            colr2, colr3 = st.columns(2)
-                            mostrar_boton_de_venta(
-                                colr2, _fila_elegida,
-                                (_elegido, codigo_individual, _rotulos[_elegido], f"stock_{clean}",
-                                 veredicto_de_la_equivalencia(_fila_elegida),
-                                 evidencia_de_la_fila(_fila_elegida, _reco["recomendada"])),
-                                f"vendido_elegido_{clean}")
-                            colr3.button("📌 Reponer", key=f"pedir_elegido_{clean}",
-                                          disabled=solo_mirar(),
-                                          on_click=pedir_reposicion_y_avisar,
-                                          args=(_elegido, _rotulos[_elegido], f"stock_{clean}"),
-                                          help="Marcar para reposición")
+                        # Anotar la venta, reponer, pedir al depósito, editar precio y stock:
+                        # es del mostrador. Sin sesión no se ve (antes se veía apagado, con un
+                        # candado, y al cliente o al taller que mira lo mareaba).
+                        if not solo_mirar():
+                            st.markdown("**🛒 ¿Se lo llevó? / 📌 ¿Falta stock?**")
+                            ayuda(
+                                "Marcá cuál se llevó el cliente: con eso el sistema va aprendiendo qué "
+                                "sirve para qué, y después te propone equivalencias nuevas en "
+                                "📊 Estadísticas → 🔗 Equivalencias sugeridas. Si falta stock, «📌 Reponer» lo "
+                                "anota en 📊 Estadísticas → 📌 Para pedir. «📦 Pedir al depósito» "
+                                "le avisa al depósito que lo busque, y al entregarlo queda en la cuenta "
+                                "del que se lo lleva."
+                            )
+                            def _rotulo_stock(f):
+                                _s = f.get("Stock")
+                                return (f"{f['Marca']} - {f['Codigo']} "
+                                        f"(stock: {_s if _s is not None else 's/d'})")
+                            # Hasta cinco, un par de botones por resultado: es un toque. Con más, un
+                            # selector y los dos botones una sola vez. Mirado en un celular de verdad,
+                            # una búsqueda de 62 resultados dejaba 124 botones del ancho de la
+                            # pantalla uno abajo del otro, y la página medía 17 pantallas.
+                            # En el celular las columnas se apilan: cada fila eran dos botones a lo
+                            # ancho, y con cinco resultados, diez botones. Ahí el selector va desde dos.
+                            if len(res) <= (1 if es_celular() else 5):
+                                # En la computadora, los botones de cada uno salen con el click
+                                # derecho (ver «EL CLICK DERECHO» en logica/interfaz.py).
+                                pista_del_click_derecho(
+                                    f"stock_{clean}", "Click derecho sobre un producto: se llevó, "
+                                                      "reponer, presupuesto o dónde está.")
+                                for fila_stock in res:
+                                    with renglon_con_menu(f"stock_{fila_stock['ID']}_{clean}"):
+                                        colr1, colr2 = st.columns([3, 2])
+                                        colr1.write(_rotulo_stock(fila_stock))
+                                        with acciones_del_renglon(colr2, f"stock_{fila_stock['ID']}_{clean}"):
+                                            # Directo, con confirmación (🔴) o apagado (🔴 de
+                                            # seguridad): ver mostrar_boton_de_venta().
+                                            mostrar_boton_de_venta(
+                                                st, fila_stock,
+                                                (fila_stock["ID"], codigo_individual,
+                                                 f"{fila_stock['Marca']} - {fila_stock['Codigo']}",
+                                                 f"stock_{clean}", veredicto_de_la_equivalencia(fila_stock),
+                                                 evidencia_de_la_fila(fila_stock, _reco["recomendada"])),
+                                                f"vendido_{fila_stock['ID']}_{clean}")
+                                            st.button("📌 Reponer", key=f"pedir_repo_{fila_stock['ID']}_{clean}",
+                                                      on_click=pedir_reposicion_y_avisar,
+                                                      args=(fila_stock["ID"], f"{fila_stock['Marca']} - {fila_stock['Codigo']}",
+                                                            f"stock_{clean}"),
+                                                      help="Marcar para reposición")
+                                            mostrar_mas_acciones_del_producto(fila_stock, f"{fila_stock['ID']}_{clean}")
+                            else:
+                                # Se elige por ID y no por el rótulo: dos productos con la misma
+                                # marca, código y stock darían el mismo texto y uno taparía al otro.
+                                _rotulos = {f["ID"]: _rotulo_stock(f) for f in res}
+                                _elegido = st.selectbox(f"¿Cuál? ({len(res)} resultados)",
+                                                        list(_rotulos), format_func=_rotulos.get,
+                                                        key=f"cual_vendido_{clean}")
+                                # Lo que no está confirmado se avisa antes de venderlo: queda como
+                                # alternativa comercial, no como equivalente (ver registrar_venta()).
+                                _fila_elegida = next((f for f in res if f["ID"] == _elegido), {})
+                                if como_se_vende(veredicto_de_la_equivalencia(_fila_elegida)) == "alternativa":
+                                    st.warning("⚠️ Esta referencia no está confirmada como equivalente "
+                                               f"({veredicto_de_la_equivalencia(_fila_elegida)}). Se "
+                                               "anota como alternativa comercial.")
+                                colr2, colr3 = st.columns(2)
+                                mostrar_boton_de_venta(
+                                    colr2, _fila_elegida,
+                                    (_elegido, codigo_individual, _rotulos[_elegido], f"stock_{clean}",
+                                     veredicto_de_la_equivalencia(_fila_elegida),
+                                     evidencia_de_la_fila(_fila_elegida, _reco["recomendada"])),
+                                    f"vendido_elegido_{clean}")
+                                colr3.button("📌 Reponer", key=f"pedir_elegido_{clean}",
+                                              on_click=pedir_reposicion_y_avisar,
+                                              args=(_elegido, _rotulos[_elegido], f"stock_{clean}"),
+                                              help="Marcar para reposición")
 
-                        mostrar_ventas_a_confirmar(f"_{clean}")
-                        mostrar_lo_anotado(f"stock_{clean}")
-                        if es_empleado_o_abierto():
-                            mostrar_pedir_al_deposito(res, clean)
+                            mostrar_ventas_a_confirmar(f"_{clean}")
+                            mostrar_lo_anotado(f"stock_{clean}")
+                            if es_empleado_o_abierto():
+                                mostrar_pedir_al_deposito(res, clean)
 
-                        # Marcar favoritos / editar precio y stock
-                        if seccion_plegable("✏️ Marcar favorito / editar precio, costo y stock",
-                                             key=f"editar_{clean}"):
-                            for fila in res:
-                                colF, colC, colP, colS, colG, colH = cols([0.5, 1.7, 1.1, 0.9, 0.7, 0.7])
-                                es_fav = bool(fila.get("Favorito"))
-                                nuevo_fav = colF.checkbox("⭐", value=es_fav, key=f"fav_{fila['ID']}_{clean}",
-                                                          disabled=solo_mirar())
-                                if nuevo_fav != es_fav and not solo_mirar():
-                                    alternar_favorito(fila["ID"], nuevo_fav)
-                                colC.write(f"{fila['Marca']} - {fila['Codigo']}")
-                                # Con qué valores se abrió el editor: ver valor_con_que_se_abrio().
-                                _k_precio = f"precio_{fila['ID']}_{clean}"
-                                _k_stock = f"stock_{fila['ID']}_{clean}"
-                                _k_costo = f"costo_{fila['ID']}_{clean}"
-                                # De la base y no de `fila`: los resultados de la búsqueda
-                                # quedan en memoria y pueden ser de hace un rato.
-                                c.execute("SELECT precio, stock FROM productos WHERE id = ?",
-                                          (fila["ID"],))
-                                _en_la_base = c.fetchone() or {"precio": 0, "stock": 0}
-                                _precio_visto = valor_con_que_se_abrio(
-                                    _k_precio, float(_en_la_base["precio"] or 0))
-                                _stock_visto = valor_con_que_se_abrio(
-                                    _k_stock, int(_en_la_base["stock"] or 0))
-                                nuevo_precio = colP.number_input(
-                                    "Precio", key=_k_precio, min_value=0.0, step=100.0,
-                                    label_visibility="collapsed"
-                                )
-                                nuevo_stock = colS.number_input(
-                                    "Stock", key=_k_stock, min_value=0, step=1,
-                                    label_visibility="collapsed"
-                                )
-                                if candado('tocar precios y stock', colG.button("💾", key=f"save_{fila['ID']}_{clean}"), 'tocar_precios_y_stock', nivel="empleado"):
-                                    _nuevo_costo = st.session_state.get(_k_costo)
-                                    _guardado = actualizar_precio_stock(
-                                        fila["ID"], nuevo_precio, nuevo_stock, _nuevo_costo,
-                                        stock_mostrado=_stock_visto, precio_mostrado=_precio_visto,
-                                        costo_mostrado=st.session_state.get(f"_abierto_con_{_k_costo}"))
-                                    if isinstance(_guardado, str):
-                                        # Lo que otro cambió mientras se editaba NO se pisó. Lo
-                                        # que hay ahora pasa a ser lo «mostrado»: guardar de nuevo
-                                        # después del aviso es corregirlo a sabiendas.
-                                        c.execute("SELECT precio, stock, precio_costo FROM productos "
-                                                  "WHERE id = ?", (fila["ID"],))
-                                        _ahora = c.fetchone()
-                                        _que = {"precio_cambio": f"el precio (ahora {formato_precio(_ahora['precio'] or 0)})",
-                                                "stock_cambio": f"el stock (ahora hay {_ahora['stock']})",
-                                                "costo_cambio": f"el costo (ahora {formato_precio(_ahora['precio_costo'] or 0)})"}
-                                        for _clave_ed in (_k_precio, _k_stock, _k_costo):
-                                            ya_se_guardo(_clave_ed)
-                                        st.warning(
-                                            "Mientras editabas, alguien cambió "
-                                            + " y ".join(_que[x] for x in _guardado.split(","))
-                                            + ": eso NO se guardó, para no pisarlo. Lo demás sí. "
-                                            "Al tocar algo el editor muestra lo que hay ahora; si "
-                                            "igual querés tu valor, escribilo otra vez y guardá.")
-                                    elif _guardado:
-                                        for _clave_ed in (_k_precio, _k_stock, _k_costo):
-                                            ya_se_guardo(_clave_ed)
-                                        st.success("Guardado.")
-                                    else:
-                                        # Decirlo y no mentir un «Guardado»: el producto lo
-                                        # borró la otra sesión mientras esta pantalla estaba
-                                        # abierta.
-                                        st.error("Ese producto ya no está en el catálogo: "
-                                                 "alguien lo borró mientras tenías esta "
-                                                 "pantalla abierta. Refrescá y fijate.")
-                                if es_admin():
-                                    c.execute("SELECT precio_costo FROM productos WHERE id = ?",
+                            # Marcar favoritos / editar precio y stock
+                            if seccion_plegable("✏️ Marcar favorito / editar precio, costo y stock",
+                                                 key=f"editar_{clean}"):
+                                for fila in res:
+                                    colF, colC, colP, colS, colG, colH = cols([0.5, 1.7, 1.1, 0.9, 0.7, 0.7])
+                                    es_fav = bool(fila.get("Favorito"))
+                                    nuevo_fav = colF.checkbox("⭐", value=es_fav, key=f"fav_{fila['ID']}_{clean}")
+                                    if nuevo_fav != es_fav:
+                                        alternar_favorito(fila["ID"], nuevo_fav)
+                                    colC.write(f"{fila['Marca']} - {fila['Codigo']}")
+                                    # Con qué valores se abrió el editor: ver valor_con_que_se_abrio().
+                                    _k_precio = f"precio_{fila['ID']}_{clean}"
+                                    _k_stock = f"stock_{fila['ID']}_{clean}"
+                                    _k_costo = f"costo_{fila['ID']}_{clean}"
+                                    # De la base y no de `fila`: los resultados de la búsqueda
+                                    # quedan en memoria y pueden ser de hace un rato.
+                                    c.execute("SELECT precio, stock FROM productos WHERE id = ?",
                                               (fila["ID"],))
-                                    _fc = c.fetchone()
-                                    valor_con_que_se_abrio(
-                                        f"costo_{fila['ID']}_{clean}",
-                                        float((_fc["precio_costo"] if _fc else 0) or 0))
-                                    cc1, cc2 = st.columns([2, 3])
-                                    cc1.number_input(
-                                        "Costo", min_value=0.0, step=100.0,
-                                        key=f"costo_{fila['ID']}_{clean}",
-                                        help="Lo que te cuesta a vos. Solo lo ve el administrador."
+                                    _en_la_base = c.fetchone() or {"precio": 0, "stock": 0}
+                                    _precio_visto = valor_con_que_se_abrio(
+                                        _k_precio, float(_en_la_base["precio"] or 0))
+                                    _stock_visto = valor_con_que_se_abrio(
+                                        _k_stock, int(_en_la_base["stock"] or 0))
+                                    nuevo_precio = colP.number_input(
+                                        "Precio", key=_k_precio, min_value=0.0, step=100.0,
+                                        label_visibility="collapsed"
                                     )
-                                    _pct, _pesos = margen_de(nuevo_precio,
-                                                              st.session_state.get(
-                                                                  f"costo_{fila['ID']}_{clean}"))
-                                    if _pct is not None:
-                                        cc2.caption(f"Margen: **{_pct:.0f}%** "
-                                                     f"(${miles(_pesos, 0)} por unidad)")
-                                    else:
-                                        cc2.caption("Cargá el costo para ver el margen.")
+                                    nuevo_stock = colS.number_input(
+                                        "Stock", key=_k_stock, min_value=0, step=1,
+                                        label_visibility="collapsed"
+                                    )
+                                    if candado('tocar precios y stock', colG.button("💾", key=f"save_{fila['ID']}_{clean}"), 'tocar_precios_y_stock', nivel="empleado"):
+                                        _nuevo_costo = st.session_state.get(_k_costo)
+                                        _guardado = actualizar_precio_stock(
+                                            fila["ID"], nuevo_precio, nuevo_stock, _nuevo_costo,
+                                            stock_mostrado=_stock_visto, precio_mostrado=_precio_visto,
+                                            costo_mostrado=st.session_state.get(f"_abierto_con_{_k_costo}"))
+                                        if isinstance(_guardado, str):
+                                            # Lo que otro cambió mientras se editaba NO se pisó. Lo
+                                            # que hay ahora pasa a ser lo «mostrado»: guardar de nuevo
+                                            # después del aviso es corregirlo a sabiendas.
+                                            c.execute("SELECT precio, stock, precio_costo FROM productos "
+                                                      "WHERE id = ?", (fila["ID"],))
+                                            _ahora = c.fetchone()
+                                            _que = {"precio_cambio": f"el precio (ahora {formato_precio(_ahora['precio'] or 0)})",
+                                                    "stock_cambio": f"el stock (ahora hay {_ahora['stock']})",
+                                                    "costo_cambio": f"el costo (ahora {formato_precio(_ahora['precio_costo'] or 0)})"}
+                                            for _clave_ed in (_k_precio, _k_stock, _k_costo):
+                                                ya_se_guardo(_clave_ed)
+                                            st.warning(
+                                                "Mientras editabas, alguien cambió "
+                                                + " y ".join(_que[x] for x in _guardado.split(","))
+                                                + ": eso NO se guardó, para no pisarlo. Lo demás sí. "
+                                                "Al tocar algo el editor muestra lo que hay ahora; si "
+                                                "igual querés tu valor, escribilo otra vez y guardá.")
+                                        elif _guardado:
+                                            for _clave_ed in (_k_precio, _k_stock, _k_costo):
+                                                ya_se_guardo(_clave_ed)
+                                            st.success("Guardado.")
+                                        else:
+                                            # Decirlo y no mentir un «Guardado»: el producto lo
+                                            # borró la otra sesión mientras esta pantalla estaba
+                                            # abierta.
+                                            st.error("Ese producto ya no está en el catálogo: "
+                                                     "alguien lo borró mientras tenías esta "
+                                                     "pantalla abierta. Refrescá y fijate.")
+                                    if es_admin():
+                                        c.execute("SELECT precio_costo FROM productos WHERE id = ?",
+                                                  (fila["ID"],))
+                                        _fc = c.fetchone()
+                                        valor_con_que_se_abrio(
+                                            f"costo_{fila['ID']}_{clean}",
+                                            float((_fc["precio_costo"] if _fc else 0) or 0))
+                                        cc1, cc2 = st.columns([2, 3])
+                                        cc1.number_input(
+                                            "Costo", min_value=0.0, step=100.0,
+                                            key=f"costo_{fila['ID']}_{clean}",
+                                            help="Lo que te cuesta a vos. Solo lo ve el administrador."
+                                        )
+                                        _pct, _pesos = margen_de(nuevo_precio,
+                                                                  st.session_state.get(
+                                                                      f"costo_{fila['ID']}_{clean}"))
+                                        if _pct is not None:
+                                            cc2.caption(f"Margen: **{_pct:.0f}%** "
+                                                         f"(${miles(_pesos, 0)} por unidad)")
+                                        else:
+                                            cc2.caption("Cargá el costo para ver el margen.")
 
-                                if colH.button("📈", key=f"hist_precio_{fila['ID']}_{clean}", help="Ver historial de precio"):
-                                    st.session_state[f"mostrar_hist_{fila['ID']}"] = True
-                                if st.session_state.get(f"mostrar_hist_{fila['ID']}"):
-                                    historial_p = historial_precio_producto(fila["ID"])
-                                    if historial_p:
-                                        st.dataframe(historial_p, width="stretch", hide_index=True)
-                                    else:
-                                        st.caption("Todavía no hay cambios de precio registrados para este producto.")
+                                    if colH.button("📈", key=f"hist_precio_{fila['ID']}_{clean}", help="Ver historial de precio"):
+                                        st.session_state[f"mostrar_hist_{fila['ID']}"] = True
+                                    if st.session_state.get(f"mostrar_hist_{fila['ID']}"):
+                                        historial_p = historial_precio_producto(fila["ID"])
+                                        if historial_p:
+                                            st.dataframe(historial_p, width="stretch", hide_index=True)
+                                        else:
+                                            st.caption("Todavía no hay cambios de precio registrados para este producto.")
 
                         if catalogos:
                             st.caption("Buscar este código también en:")
@@ -1922,140 +1922,137 @@ if pagina == PAGINAS[0]:
                         else:
                             st.caption("Este producto todavía no tiene equivalencias cargadas.")
 
-                        # Carrito: ir juntando de varias búsquedas y armar el presupuesto al
-                        # final. Sin esto había que anotar los códigos aparte y volver a
-                        # buscarlos uno por uno.
-                        # Mismos nombres que el resto de esta rama: acá el resultado de la
-                        # vuelta es fila_txt y sus equivalentes están en 'otros'. Estaba escrito
-                        # con 'res' y 'clean', que son de la búsqueda por CÓDIGO y acá no
-                        # existen: entrar a "Descripción" tiraba NameError.
-                        st.session_state.setdefault("carrito", {})
-                        opciones_carrito = [fila_txt] + otros
-                        cc1, cc2 = st.columns([3, 2])
-                        agregar_cod = cc1.selectbox(
-                            "🛒 Sumar al presupuesto:",
-                            ["(elegir)"] + [f"{f['Marca']} {f['Codigo']}"
-                                            for f in opciones_carrito],
-                            key=f"al_carrito_{fila_txt['ID']}")
-                        if agregar_cod != "(elegir)" and cc2.button(
-                                "➕ Sumar", key=f"btn_carrito_{fila_txt['ID']}"):
-                            elegido_c = next((f for f in opciones_carrito
-                                               if f"{f['Marca']} {f['Codigo']}" == agregar_cod), None)
-                            if elegido_c:
-                                sumar_al_presupuesto(elegido_c)
-                                avisar("success", f"{elegido_c['Codigo']} sumado al presupuesto.")
-                                st.rerun()
-
-                        # Anotar al cliente que se lo lleva pensando. Va acá porque el momento
-                        # de anotarlo es este: si hay que ir a otra pantalla, no se hace.
-                        # OJO con los nombres, lo mismo que avisa el bloque de abajo: acá
-                        # estamos en la búsqueda por DESCRIPCIÓN, donde la fila de esta vuelta es
-                        # fila_txt y sus equivalentes están en 'otros'. Este bloque estaba escrito
-                        # con los nombres de la búsqueda por CÓDIGO ('res', 'clean'), que acá no
-                        # existen: abrir esta sección tiraba NameError y se cortaba la pantalla.
-                        # Las keys van por ID y no por código limpio, porque dos filas distintas
-                        # pueden limpiar al mismo texto y ahí Streamlit corta por clave repetida.
-                        if seccion_plegable("📞 El cliente lo va a pensar",
-                                             key=f"consulta_{fila_txt['ID']}"):
-                            st.caption(
-                                "Queda anotado qué pidió y a qué precio se le dijo. Cuando "
-                                "vuelva o llame, lo buscás por nombre o teléfono."
-                            )
-                            etq_cc = {f"{f['Marca']} {f['Codigo']}": f
-                                      for f in [fila_txt] + otros}
-                            cual_cc = st.selectbox("¿Qué le interesó?", list(etq_cc.keys()),
-                                                    key=f"cual_cc_{fila_txt['ID']}")
-                            k1, k2, k3 = st.columns([3, 3, 1])
-                            nom_cc = k1.text_input("Nombre:", key=f"nom_cc_{fila_txt['ID']}",
-                                                    placeholder="Cómo se llama")
-                            tel_cc = k2.text_input("Teléfono:", key=f"tel_cc_{fila_txt['ID']}",
-                                                    placeholder="Para avisarle")
-                            cant_cc = k3.number_input("Cant.", min_value=1, value=1, step=1,
-                                                       key=f"cant_cc_{fila_txt['ID']}")
-                            nota_cc = st.text_input("Nota:", key=f"nota_cc_{fila_txt['ID']}",
-                                                     placeholder="Ej: tiene un Gol 2012, "
-                                                                 "consulta con el mecánico")
-                            if st.button("📞 Anotar la consulta",
-                                          key=f"btn_cc_{fila_txt['ID']}", disabled=solo_mirar(),
-                                          help=TEXTO_SOLO_MIRAR if solo_mirar() else None):
-                                _f = etq_cc[cual_cc]
-                                ok_cc, msg_cc = anotar_consulta_cliente(
-                                    nom_cc, tel_cc, _f["ID"], _f["Codigo"],
-                                    _f.get("Descripcion") or "", cant_cc,
-                                    _f.get("Precio"), nota_cc)
-                                if ok_cc:
-                                    avisar("success", msg_cc)
+                        # El presupuesto, la consulta del cliente, apartar y «¿cuál se llevó?»:
+                        # es del mostrador. Sin sesión no se ve (ver PAGINAS_ABIERTAS).
+                        if not solo_mirar():
+                            # Carrito: ir juntando de varias búsquedas y armar el presupuesto al
+                            # final. Sin esto había que anotar los códigos aparte y volver a
+                            # buscarlos uno por uno.
+                            # Mismos nombres que el resto de esta rama: acá el resultado de la
+                            # vuelta es fila_txt y sus equivalentes están en 'otros'. Estaba escrito
+                            # con 'res' y 'clean', que son de la búsqueda por CÓDIGO y acá no
+                            # existen: entrar a "Descripción" tiraba NameError.
+                            st.session_state.setdefault("carrito", {})
+                            opciones_carrito = [fila_txt] + otros
+                            cc1, cc2 = st.columns([3, 2])
+                            agregar_cod = cc1.selectbox(
+                                "🛒 Sumar al presupuesto:",
+                                ["(elegir)"] + [f"{f['Marca']} {f['Codigo']}"
+                                                for f in opciones_carrito],
+                                key=f"al_carrito_{fila_txt['ID']}")
+                            if agregar_cod != "(elegir)" and cc2.button(
+                                    "➕ Sumar", key=f"btn_carrito_{fila_txt['ID']}"):
+                                elegido_c = next((f for f in opciones_carrito
+                                                   if f"{f['Marca']} {f['Codigo']}" == agregar_cod), None)
+                                if elegido_c:
+                                    sumar_al_presupuesto(elegido_c)
+                                    avisar("success", f"{elegido_c['Codigo']} sumado al presupuesto.")
                                     st.rerun()
-                                else:
-                                    st.error(msg_cc)
 
-                        # Apartar mientras el cliente lo piensa. Va acá y no en otra pantalla
-                        # porque el momento de reservar es este: con el presupuesto recién hecho.
-                        # OJO con los nombres: acá el código limpio es clean_txt y la lista es
-                        # 'equivalentes'. Usar los de la búsqueda por código ('clean', 'res')
-                        # tira NameError y corta el renderizado de toda la pantalla.
-                        _para_apartar = equivalentes or [fila_txt]
-                        if seccion_plegable("🔒 Apartar para un presupuesto",
-                                             key=f"apartar_txt_{fila_txt['ID']}"):
-                            # Una sola consulta para todos: preguntarlo de a uno eran dos
-                            # consultas por fila para filtrar y dos más por fila para la etiqueta.
-                            libres_ap = stock_libre_de_varios([f["ID"] for f in _para_apartar])
-                            con_stock_ap = [f for f in _para_apartar
-                                             if (libres_ap.get(f["ID"]) or 0) > 0]
-                            if not con_stock_ap:
-                                st.caption("Ninguno de estos tiene stock libre para apartar.")
-                            else:
-                                etq_ap = {
-                                    f"{f['Marca']} {f['Codigo']} — {libres_ap[f['ID']]} libre(s)":
-                                        f["ID"] for f in con_stock_ap
-                                }
-                                elegido_ap = st.selectbox("¿Cuál?", list(etq_ap.keys()),
-                                                           key=f"cual_apartar_txt_{fila_txt['ID']}")
-                                ap1, ap2 = st.columns([1, 3])
-                                cant_ap = ap1.number_input(
-                                    "Cantidad", min_value=1, value=1, step=1,
-                                    key=f"cant_apartar_txt_{fila_txt['ID']}")
-                                cliente_ap = ap2.text_input(
-                                    "¿Para quién?", key=f"cliente_apartar_txt_{fila_txt['ID']}",
-                                    placeholder="Nombre o patente, para saber a quién reclamarle")
-                                if st.button("🔒 Apartar", key=f"btn_apartar_txt_{fila_txt['ID']}",
-                                             disabled=solo_mirar(),
-                                             help=TEXTO_SOLO_MIRAR if solo_mirar() else None):
-                                    ok_ap, msg_ap = reservar_stock(
-                                        etq_ap[elegido_ap], cant_ap, cliente_ap)
-                                    if ok_ap:
-                                        avisar("success", msg_ap)
+                            # Anotar al cliente que se lo lleva pensando. Va acá porque el momento
+                            # de anotarlo es este: si hay que ir a otra pantalla, no se hace.
+                            # OJO con los nombres, lo mismo que avisa el bloque de abajo: acá
+                            # estamos en la búsqueda por DESCRIPCIÓN, donde la fila de esta vuelta es
+                            # fila_txt y sus equivalentes están en 'otros'. Este bloque estaba escrito
+                            # con los nombres de la búsqueda por CÓDIGO ('res', 'clean'), que acá no
+                            # existen: abrir esta sección tiraba NameError y se cortaba la pantalla.
+                            # Las keys van por ID y no por código limpio, porque dos filas distintas
+                            # pueden limpiar al mismo texto y ahí Streamlit corta por clave repetida.
+                            if seccion_plegable("📞 El cliente lo va a pensar",
+                                                 key=f"consulta_{fila_txt['ID']}"):
+                                st.caption(
+                                    "Queda anotado qué pidió y a qué precio se le dijo. Cuando "
+                                    "vuelva o llame, lo buscás por nombre o teléfono."
+                                )
+                                etq_cc = {f"{f['Marca']} {f['Codigo']}": f
+                                          for f in [fila_txt] + otros}
+                                cual_cc = st.selectbox("¿Qué le interesó?", list(etq_cc.keys()),
+                                                        key=f"cual_cc_{fila_txt['ID']}")
+                                k1, k2, k3 = st.columns([3, 3, 1])
+                                nom_cc = k1.text_input("Nombre:", key=f"nom_cc_{fila_txt['ID']}",
+                                                        placeholder="Cómo se llama")
+                                tel_cc = k2.text_input("Teléfono:", key=f"tel_cc_{fila_txt['ID']}",
+                                                        placeholder="Para avisarle")
+                                cant_cc = k3.number_input("Cant.", min_value=1, value=1, step=1,
+                                                           key=f"cant_cc_{fila_txt['ID']}")
+                                nota_cc = st.text_input("Nota:", key=f"nota_cc_{fila_txt['ID']}",
+                                                         placeholder="Ej: tiene un Gol 2012, "
+                                                                     "consulta con el mecánico")
+                                if st.button("📞 Anotar la consulta",
+                                              key=f"btn_cc_{fila_txt['ID']}"):
+                                    _f = etq_cc[cual_cc]
+                                    ok_cc, msg_cc = anotar_consulta_cliente(
+                                        nom_cc, tel_cc, _f["ID"], _f["Codigo"],
+                                        _f.get("Descripcion") or "", cant_cc,
+                                        _f.get("Precio"), nota_cc)
+                                    if ok_cc:
+                                        avisar("success", msg_cc)
                                         st.rerun()
                                     else:
-                                        st.error(msg_ap)
+                                        st.error(msg_cc)
 
-                        st.markdown("**🛒 ¿Cuál se llevó el cliente?**")
-                        st.caption(
-                            "Marcá el que se lleva — vale también si se lleva un equivalente y no "
-                            "el que apareció en la búsqueda. Así el sistema aprende esa relación."
-                        )
-                        if solo_mirar():
-                            st.caption(TEXTO_SOLO_MIRAR)
-                        pista_del_click_derecho(
-                            f"txt_{fila_txt['ID']}", "Click derecho sobre un producto: se llevó, "
-                                                     "presupuesto o dónde está.")
-                        for f in (equivalentes or [fila_txt]):
-                            with renglon_con_menu(f"txt_{fila_txt['ID']}_{f['ID']}"):
-                                cv1, cv2 = st.columns([4, 1])
-                                precio_txt = f"${miles(f['Precio'], 0)}" if f.get("Precio") else "s/precio"
-                                cv1.write(f"{f['Marca']} - {f['Codigo']} ({precio_txt}, "
-                                           f"stock: {f.get('Stock') if f.get('Stock') is not None else 's/d'})")
-                                with acciones_del_renglon(cv2, f"txt_{fila_txt['ID']}_{f['ID']}"):
-                                    st.button(rotulo_del_boton_de_venta(f),
-                                              key=f"vendido_txt_{fila_txt['ID']}_{f['ID']}",
-                                              disabled=solo_mirar(),
-                                              on_click=anotar_venta_y_avisar,
-                                              args=(f["ID"], texto_pedido, f"{f['Marca']} - {f['Codigo']}",
-                                                    f"txt_{fila_txt['ID']}",
-                                                    veredicto_de_la_equivalencia(f),
-                                                    evidencia_de_la_fila(f)))
-                                    mostrar_mas_acciones_del_producto(f, f"txt_{fila_txt['ID']}_{f['ID']}")
-                        mostrar_lo_anotado(f"txt_{fila_txt['ID']}")
+                            # Apartar mientras el cliente lo piensa. Va acá y no en otra pantalla
+                            # porque el momento de reservar es este: con el presupuesto recién hecho.
+                            # OJO con los nombres: acá el código limpio es clean_txt y la lista es
+                            # 'equivalentes'. Usar los de la búsqueda por código ('clean', 'res')
+                            # tira NameError y corta el renderizado de toda la pantalla.
+                            _para_apartar = equivalentes or [fila_txt]
+                            if seccion_plegable("🔒 Apartar para un presupuesto",
+                                                 key=f"apartar_txt_{fila_txt['ID']}"):
+                                # Una sola consulta para todos: preguntarlo de a uno eran dos
+                                # consultas por fila para filtrar y dos más por fila para la etiqueta.
+                                libres_ap = stock_libre_de_varios([f["ID"] for f in _para_apartar])
+                                con_stock_ap = [f for f in _para_apartar
+                                                 if (libres_ap.get(f["ID"]) or 0) > 0]
+                                if not con_stock_ap:
+                                    st.caption("Ninguno de estos tiene stock libre para apartar.")
+                                else:
+                                    etq_ap = {
+                                        f"{f['Marca']} {f['Codigo']} — {libres_ap[f['ID']]} libre(s)":
+                                            f["ID"] for f in con_stock_ap
+                                    }
+                                    elegido_ap = st.selectbox("¿Cuál?", list(etq_ap.keys()),
+                                                               key=f"cual_apartar_txt_{fila_txt['ID']}")
+                                    ap1, ap2 = st.columns([1, 3])
+                                    cant_ap = ap1.number_input(
+                                        "Cantidad", min_value=1, value=1, step=1,
+                                        key=f"cant_apartar_txt_{fila_txt['ID']}")
+                                    cliente_ap = ap2.text_input(
+                                        "¿Para quién?", key=f"cliente_apartar_txt_{fila_txt['ID']}",
+                                        placeholder="Nombre o patente, para saber a quién reclamarle")
+                                    if st.button("🔒 Apartar", key=f"btn_apartar_txt_{fila_txt['ID']}"):
+                                        ok_ap, msg_ap = reservar_stock(
+                                            etq_ap[elegido_ap], cant_ap, cliente_ap)
+                                        if ok_ap:
+                                            avisar("success", msg_ap)
+                                            st.rerun()
+                                        else:
+                                            st.error(msg_ap)
+
+                            st.markdown("**🛒 ¿Cuál se llevó el cliente?**")
+                            st.caption(
+                                "Marcá el que se lleva — vale también si se lleva un equivalente y no "
+                                "el que apareció en la búsqueda. Así el sistema aprende esa relación."
+                            )
+                            pista_del_click_derecho(
+                                f"txt_{fila_txt['ID']}", "Click derecho sobre un producto: se llevó, "
+                                                         "presupuesto o dónde está.")
+                            for f in (equivalentes or [fila_txt]):
+                                with renglon_con_menu(f"txt_{fila_txt['ID']}_{f['ID']}"):
+                                    cv1, cv2 = st.columns([4, 1])
+                                    precio_txt = f"${miles(f['Precio'], 0)}" if f.get("Precio") else "s/precio"
+                                    cv1.write(f"{f['Marca']} - {f['Codigo']} ({precio_txt}, "
+                                               f"stock: {f.get('Stock') if f.get('Stock') is not None else 's/d'})")
+                                    with acciones_del_renglon(cv2, f"txt_{fila_txt['ID']}_{f['ID']}"):
+                                        st.button(rotulo_del_boton_de_venta(f),
+                                                  key=f"vendido_txt_{fila_txt['ID']}_{f['ID']}",
+                                                  on_click=anotar_venta_y_avisar,
+                                                  args=(f["ID"], texto_pedido, f"{f['Marca']} - {f['Codigo']}",
+                                                        f"txt_{fila_txt['ID']}",
+                                                        veredicto_de_la_equivalencia(f),
+                                                        evidencia_de_la_fila(f)))
+                                        mostrar_mas_acciones_del_producto(f, f"txt_{fila_txt['ID']}_{f['ID']}")
+                            mostrar_lo_anotado(f"txt_{fila_txt['ID']}")
                 if len(res_texto) > 15:
                     st.caption(f"(mostrando las primeras 15 de {len(res_texto)} — afiná la búsqueda "
                                 "para ver menos resultados)")
@@ -2099,32 +2096,34 @@ if pagina == PAGINAS[0]:
                             st.dataframe(quitar_id(sin_familia[:20]),
                                           width="stretch", hide_index=True)
 
-    with st.expander("📦 Armar pedido (ordenado por ubicación en depósito)", key="exp_armar_pedido_ordenado_ubicacion"):
-        ayuda(
-            "Pegá varios códigos separados por coma — te devuelve la lista ordenada por ubicación "
-            "en el depósito, para juntar todo en un solo recorrido en vez de ir y volver."
-        )
-        codigos_picking = st.text_input(
-            "Códigos del pedido (separados por coma):",
-            placeholder="Ej: W712/94, 036115561G, 24427...", key="picking_codigos"
-        )
-        if st.button("📦 Ordenar para picking"):
-            if not codigos_picking.strip():
-                st.info("Pegá al menos un código.")
-            else:
-                res_picking = armar_lista_picking(codigos_picking)
-                if res_picking:
-                    sin_ubicacion = [r for r in res_picking if not r["Ubicación"]]
-                    st.success(f"Se encontraron {len(res_picking)} de los códigos pedidos:")
-                    st.dataframe(res_picking, width="stretch", hide_index=True)
-                    if sin_ubicacion:
-                        st.caption(
-                            f"⚠️ {len(sin_ubicacion)} producto(s) todavía no tienen ubicación cargada "
-                            f"(aparecen al final) — cargala en {miga_hasta('Ubicar')} para que la próxima vez "
-                            "el orden sea completo."
-                        )
+    # Armar el pedido del depósito es del negocio: sin sesión no se ve (ver PAGINAS_ABIERTAS).
+    if not solo_mirar():
+        with st.expander("📦 Armar pedido (ordenado por ubicación en depósito)", key="exp_armar_pedido_ordenado_ubicacion"):
+            ayuda(
+                "Pegá varios códigos separados por coma — te devuelve la lista ordenada por ubicación "
+                "en el depósito, para juntar todo en un solo recorrido en vez de ir y volver."
+            )
+            codigos_picking = st.text_input(
+                "Códigos del pedido (separados por coma):",
+                placeholder="Ej: W712/94, 036115561G, 24427...", key="picking_codigos"
+            )
+            if st.button("📦 Ordenar para picking"):
+                if not codigos_picking.strip():
+                    st.info("Pegá al menos un código.")
                 else:
-                    st.warning("No encontré ninguno de esos códigos en el catálogo.")
+                    res_picking = armar_lista_picking(codigos_picking)
+                    if res_picking:
+                        sin_ubicacion = [r for r in res_picking if not r["Ubicación"]]
+                        st.success(f"Se encontraron {len(res_picking)} de los códigos pedidos:")
+                        st.dataframe(res_picking, width="stretch", hide_index=True)
+                        if sin_ubicacion:
+                            st.caption(
+                                f"⚠️ {len(sin_ubicacion)} producto(s) todavía no tienen ubicación cargada "
+                                f"(aparecen al final) — cargala en {miga_hasta('Ubicar')} para que la próxima vez "
+                                "el orden sea completo."
+                            )
+                    else:
+                        st.warning("No encontré ninguno de esos códigos en el catálogo.")
 
     with st.expander("📐 Buscar por medidas mecánicas (cuando no hay código ni equivalencia cargada)", key="exp_buscar_medidas_mecanicas_cuando"):
         ayuda(
@@ -2310,7 +2309,7 @@ if pagina == PAGINAS[0]:
                 st.rerun()
 
     favoritos = listar_favoritos()
-    if favoritos:
+    if favoritos and not solo_mirar():          # los marca el negocio: sin sesión no se ven
         with st.expander(f"⭐ Favoritos ({len(favoritos)})", key="exp_favoritos"):
             for fila_fav in favoritos[:8]:
                 colf1, colf2 = st.columns([4, 1])

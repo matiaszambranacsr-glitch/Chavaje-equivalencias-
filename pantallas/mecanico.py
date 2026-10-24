@@ -468,90 +468,92 @@ if pagina == PAGINAS[7]:
     if sub_mec == SUB_MEC[1]:
         panel_vin(clave="vin_mec")
 
-        st.markdown("---")
-        st.markdown("**⚙️ Lo que la app fue aprendiendo**",
-                    help="Estas tablas son tuyas: se llenan solas con cada ficha de vehículo que "
-                         "cargues con VIN, y con lo que le enseñes arriba. Acá se revisan y se "
-                         "corrigen.")
+        # Las tablas que aprende el lector de VIN son del negocio: sin sesión no se ven
+        # (ver PAGINAS_ABIERTAS en logica/interfaz.py).
+        if not solo_mirar():
+            st.markdown("---")
+            st.markdown("**⚙️ Lo que la app fue aprendiendo**",
+                        help="Estas tablas son tuyas: se llenan solas con cada ficha de vehículo que "
+                             "cargues con VIN, y con lo que le enseñes arriba. Acá se revisan y se "
+                             "corrigen.")
 
-        c.execute("""SELECT COUNT(*) FROM vehiculos WHERE vin IS NOT NULL AND LENGTH(vin) = 17
-                     AND ((modelo_auto IS NOT NULL AND modelo_auto <> '')
-                          OR (motorizacion IS NOT NULL AND motorizacion <> ''))""")
-        fichas_con_vin = c.fetchone()[0]
-        if fichas_con_vin:
-            st.caption(f"Tenés {fichas_con_vin} ficha(s) de vehículo con VIN cargado.")
-            if st.button("📚 Aprender modelos y motores de esas fichas", disabled=solo_mirar(),
-                         help=TEXTO_SOLO_MIRAR if solo_mirar() else None):
-                n_mod, n_mot = aprender_modelos_de_fichas_existentes()
-                avisar("success", f"Se aprendieron {n_mod} modelo(s) y {n_mot} motor(es) de tus fichas.")
-                st.rerun()
-
-        fabricantes_cargados = listar_fabricantes_vin()
-        with st.expander(f"🏭 Fabricantes por WMI ({len(fabricantes_cargados)})", key="exp_fabricantes_wmi"):
-            st.caption(
-                "Los 3 primeros caracteres del VIN. Vienen 328 cargados de la lista pública "
-                "internacional; podés corregir o agregar los que falten."
-            )
-            if fabricantes_cargados:
-                st.dataframe(fabricantes_cargados, width="stretch", hide_index=True)
-            if es_empleado_o_abierto():
-                with st.form("form_wmi_admin", clear_on_submit=True):
-                    cw1, cw2, cw3 = st.columns(3)
-                    nuevo_wmi = cw1.text_input("WMI (3 caracteres)", max_chars=3)
-                    nuevo_fabricante = cw2.text_input("Fabricante")
-                    nuevo_pais_vin = cw3.text_input("País")
-                    if st.form_submit_button("💾 Guardar WMI"):
-                        if len(nuevo_wmi.strip()) != 3 or not nuevo_fabricante.strip():
-                            st.warning("El WMI debe tener 3 caracteres y el fabricante es obligatorio.")
-                        else:
-                            agregar_fabricante_vin(nuevo_wmi, nuevo_fabricante, nuevo_pais_vin)
-                            avisar("success", f"WMI {nuevo_wmi.upper()} guardado.")
-                            st.rerun()
-            else:
-                st.caption('🔒 Para cargar fabricantes hace falta entrar con contraseña de empleado.')
-
-        modelos_cargados = listar_modelos_vin()
-        with st.expander(f"🚗 Modelos aprendidos ({len(modelos_cargados)})", key="exp_modelos_aprendidos"):
-            if modelos_cargados:
-                st.dataframe(modelos_cargados, width="stretch", hide_index=True)
-                cbm1, cbm2 = st.columns(2)
-                wmi_borrar = cbm1.text_input("WMI a borrar", max_chars=3, key="wmi_borrar_modelo")
-                vds_borrar = cbm2.text_input("Patrón (VDS) a borrar", max_chars=5, key="vds_borrar_modelo")
-                if candado("borrar un modelo aprendido",
-                           st.button("🗑️ Borrar ese patrón", disabled=not (wmi_borrar and vds_borrar)),
-                           "borrar_patron_vin"):
-                    if olvidar_modelo_vin(wmi_borrar, vds_borrar):
-                        st.success("Patrón borrado.")
-                    else:
-                        st.warning("No encontré ese patrón.")
+            c.execute("""SELECT COUNT(*) FROM vehiculos WHERE vin IS NOT NULL AND LENGTH(vin) = 17
+                         AND ((modelo_auto IS NOT NULL AND modelo_auto <> '')
+                              OR (motorizacion IS NOT NULL AND motorizacion <> ''))""")
+            fichas_con_vin = c.fetchone()[0]
+            if fichas_con_vin:
+                st.caption(f"Tenés {fichas_con_vin} ficha(s) de vehículo con VIN cargado.")
+                if st.button("📚 Aprender modelos y motores de esas fichas"):
+                    n_mod, n_mot = aprender_modelos_de_fichas_existentes()
+                    avisar("success", f"Se aprendieron {n_mod} modelo(s) y {n_mot} motor(es) de tus fichas.")
                     st.rerun()
-            else:
+
+            fabricantes_cargados = listar_fabricantes_vin()
+            with st.expander(f"🏭 Fabricantes por WMI ({len(fabricantes_cargados)})", key="exp_fabricantes_wmi"):
                 st.caption(
-                    "Todavía ninguno. Cada ficha de vehículo que cargues con VIN y modelo suma uno."
+                    "Los 3 primeros caracteres del VIN. Vienen 328 cargados de la lista pública "
+                    "internacional; podés corregir o agregar los que falten."
                 )
+                if fabricantes_cargados:
+                    st.dataframe(fabricantes_cargados, width="stretch", hide_index=True)
+                if es_empleado_o_abierto():
+                    with st.form("form_wmi_admin", clear_on_submit=True):
+                        cw1, cw2, cw3 = st.columns(3)
+                        nuevo_wmi = cw1.text_input("WMI (3 caracteres)", max_chars=3)
+                        nuevo_fabricante = cw2.text_input("Fabricante")
+                        nuevo_pais_vin = cw3.text_input("País")
+                        if st.form_submit_button("💾 Guardar WMI"):
+                            if len(nuevo_wmi.strip()) != 3 or not nuevo_fabricante.strip():
+                                st.warning("El WMI debe tener 3 caracteres y el fabricante es obligatorio.")
+                            else:
+                                agregar_fabricante_vin(nuevo_wmi, nuevo_fabricante, nuevo_pais_vin)
+                                avisar("success", f"WMI {nuevo_wmi.upper()} guardado.")
+                                st.rerun()
+                else:
+                    st.caption('🔒 Para cargar fabricantes hace falta entrar con contraseña de empleado.')
 
-        motores_cargados = listar_motores_vin()
-        with st.expander(f"⚙️ Motores aprendidos ({len(motores_cargados)})", key="exp_motores_aprendidos"):
-            ayuda(
-                "La 8ª posición del VIN es el código de motor. Es el patrón que mejor rinde: el "
-                "mismo código se repite en toda la gama de la marca, así que enseñarlo una vez "
-                "sirve para los otros modelos."
-            )
-            if motores_cargados:
-                st.dataframe(motores_cargados, width="stretch", hide_index=True)
-                cbt1, cbt2 = st.columns(2)
-                wmi_bm = cbt1.text_input("WMI a borrar", max_chars=3, key="wmi_borrar_motor")
-                cod_bm = cbt2.text_input("Código (8ª posición)", max_chars=1, key="cod_borrar_motor")
-                if candado("borrar un motor aprendido",
-                           st.button("🗑️ Borrar ese motor", disabled=not (wmi_bm and cod_bm)),
-                           "borrar_motor_vin"):
-                    if olvidar_motor_vin(wmi_bm, cod_bm):
-                        st.success("Borrado.")
-                    else:
-                        st.warning("No encontré ese código.")
-                    st.rerun()
-            else:
-                st.caption("Todavía ninguno.")
+            modelos_cargados = listar_modelos_vin()
+            with st.expander(f"🚗 Modelos aprendidos ({len(modelos_cargados)})", key="exp_modelos_aprendidos"):
+                if modelos_cargados:
+                    st.dataframe(modelos_cargados, width="stretch", hide_index=True)
+                    cbm1, cbm2 = st.columns(2)
+                    wmi_borrar = cbm1.text_input("WMI a borrar", max_chars=3, key="wmi_borrar_modelo")
+                    vds_borrar = cbm2.text_input("Patrón (VDS) a borrar", max_chars=5, key="vds_borrar_modelo")
+                    if candado("borrar un modelo aprendido",
+                               st.button("🗑️ Borrar ese patrón", disabled=not (wmi_borrar and vds_borrar)),
+                               "borrar_patron_vin"):
+                        if olvidar_modelo_vin(wmi_borrar, vds_borrar):
+                            st.success("Patrón borrado.")
+                        else:
+                            st.warning("No encontré ese patrón.")
+                        st.rerun()
+                else:
+                    st.caption(
+                        "Todavía ninguno. Cada ficha de vehículo que cargues con VIN y modelo suma uno."
+                    )
+
+            motores_cargados = listar_motores_vin()
+            with st.expander(f"⚙️ Motores aprendidos ({len(motores_cargados)})", key="exp_motores_aprendidos"):
+                ayuda(
+                    "La 8ª posición del VIN es el código de motor. Es el patrón que mejor rinde: el "
+                    "mismo código se repite en toda la gama de la marca, así que enseñarlo una vez "
+                    "sirve para los otros modelos."
+                )
+                if motores_cargados:
+                    st.dataframe(motores_cargados, width="stretch", hide_index=True)
+                    cbt1, cbt2 = st.columns(2)
+                    wmi_bm = cbt1.text_input("WMI a borrar", max_chars=3, key="wmi_borrar_motor")
+                    cod_bm = cbt2.text_input("Código (8ª posición)", max_chars=1, key="cod_borrar_motor")
+                    if candado("borrar un motor aprendido",
+                               st.button("🗑️ Borrar ese motor", disabled=not (wmi_bm and cod_bm)),
+                               "borrar_motor_vin"):
+                        if olvidar_motor_vin(wmi_bm, cod_bm):
+                            st.success("Borrado.")
+                        else:
+                            st.warning("No encontré ese código.")
+                        st.rerun()
+                else:
+                    st.caption("Todavía ninguno.")
 
     if sub_mec == SUB_MEC[3]:
         st.markdown("**🚙 Repuestos por vehículo**",
@@ -565,39 +567,41 @@ if pagina == PAGINAS[7]:
         # Guardar lo que dicen las descripciones, en vez de releerlas cada vez. Además de que
         # buscar por vehículo pase a andar para esos productos, la app ya cruza los que le
         # sirven a los mismos autos: llenar esta tabla genera equivalencias nuevas sola.
-        with st.expander("🪄 Leer de las descripciones a qué auto le va cada repuesto", key="exp_leer_descripciones_auto_le"):
-            explicar(
-                "Las listas ya dicen el auto («JUNTA TAPA FORD TAUNUS 1969/78»). Esto lo guarda "
-                "para poder buscar por vehículo.",
-                "El modelo no se adivina: tiene que ser uno que la app ya reconoce como modelo "
-                "de esa marca, mirando en cuántas marcas distintas aparece cada palabra en TU "
-                "catálogo. Un ASTRA aparece casi solo en Chevrolet y es un modelo; un BOMBA "
-                "aparece en todas y no lo es. Si el modelo no está confirmado así, esa fila no "
-                "se genera — con un modelo inventado la app cruzaría piezas que no van "
-                "juntas.\n\nQuedan marcadas como **deducidas**, para distinguirlas de las que "
-                "vinieron del catálogo de un fabricante y poder revisarlas aparte.",
-                en_expander=True
-            )
-            if st.button("🔍 Ver qué se podría cargar", key="btn_ver_aplic_desc"):
-                st.session_state["aplic_deducidas"] = aplicaciones_desde_descripciones()
-            _apl = st.session_state.get("aplic_deducidas")
-            if _apl is not None:
-                if not _apl:
-                    st.info("No encontré descripciones con una marca y un modelo reconocibles "
-                            "que no estén ya cargados.")
-                else:
-                    st.success(f"Se pueden cargar **{len(_apl)} aplicación(es)**. Revisá la "
-                               "muestra antes de aplicar:")
-                    st.dataframe([{k: v for k, v in f.items() if not k.startswith("_")}
-                                  for f in _apl[:50]],
-                                 width="stretch", hide_index=True)
-                    if es_empleado_o_abierto() and st.button(
-                            "✅ Cargar esas aplicaciones", type="primary",
-                            key="btn_aplicar_aplic_desc"):
-                        _n = aplicar_aplicaciones_deducidas(_apl)
-                        st.session_state.pop("aplic_deducidas", None)
-                        avisar("success", f"Se cargaron {_n} aplicación(es) deducidas.")
-                        st.rerun()
+        # Llenar la tabla de aplicaciones es mantenimiento: sin sesión no se ve.
+        if not solo_mirar():
+            with st.expander("🪄 Leer de las descripciones a qué auto le va cada repuesto", key="exp_leer_descripciones_auto_le"):
+                explicar(
+                    "Las listas ya dicen el auto («JUNTA TAPA FORD TAUNUS 1969/78»). Esto lo guarda "
+                    "para poder buscar por vehículo.",
+                    "El modelo no se adivina: tiene que ser uno que la app ya reconoce como modelo "
+                    "de esa marca, mirando en cuántas marcas distintas aparece cada palabra en TU "
+                    "catálogo. Un ASTRA aparece casi solo en Chevrolet y es un modelo; un BOMBA "
+                    "aparece en todas y no lo es. Si el modelo no está confirmado así, esa fila no "
+                    "se genera — con un modelo inventado la app cruzaría piezas que no van "
+                    "juntas.\n\nQuedan marcadas como **deducidas**, para distinguirlas de las que "
+                    "vinieron del catálogo de un fabricante y poder revisarlas aparte.",
+                    en_expander=True
+                )
+                if st.button("🔍 Ver qué se podría cargar", key="btn_ver_aplic_desc"):
+                    st.session_state["aplic_deducidas"] = aplicaciones_desde_descripciones()
+                _apl = st.session_state.get("aplic_deducidas")
+                if _apl is not None:
+                    if not _apl:
+                        st.info("No encontré descripciones con una marca y un modelo reconocibles "
+                                "que no estén ya cargados.")
+                    else:
+                        st.success(f"Se pueden cargar **{len(_apl)} aplicación(es)**. Revisá la "
+                                   "muestra antes de aplicar:")
+                        st.dataframe([{k: v for k, v in f.items() if not k.startswith("_")}
+                                      for f in _apl[:50]],
+                                     width="stretch", hide_index=True)
+                        if es_empleado_o_abierto() and st.button(
+                                "✅ Cargar esas aplicaciones", type="primary",
+                                key="btn_aplicar_aplic_desc"):
+                            _n = aplicar_aplicaciones_deducidas(_apl)
+                            st.session_state.pop("aplic_deducidas", None)
+                            avisar("success", f"Se cargaron {_n} aplicación(es) deducidas.")
+                            st.rerun()
 
         if not disponibles:
             st.info(
@@ -795,8 +799,10 @@ if pagina == PAGINAS[7]:
             filtro_esq = st.text_input("Buscar esquema (título, marca, modelo o sistema):", key="esq_filtro")
             mostrar_lista_esquemas(listar_esquemas(filtro_esq))
 
-        st.markdown("---")
-        if not pedir_password_admin("subir esquemas nuevos"):
+        # Subir esquemas es del administrador: sin sesión ni se ofrece.
+        if solo_mirar():
+            pass
+        elif not pedir_password_admin("subir esquemas nuevos"):
             pass
         else:
             marcas_existentes = listar_marcas_esquemas()

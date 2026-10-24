@@ -1855,10 +1855,10 @@ def mostrar_boton_de_venta(columna, fila, argumentos, clave):
     bloqueo = bloqueo_de_venta(argumentos[4] if len(argumentos) > 4 else None,
                                fila.get("Descripcion"))
     if solo_mirar():
-        # Ver «EL INVITADO MIRA, NO TOCA» en logica/base.py.
-        columna.button(rotulo_del_boton_de_venta(fila), key=clave, disabled=True,
-                       help=TEXTO_SOLO_MIRAR)
-    elif bloqueo == "bloqueada":
+        # Sin sesión no se ve: ver «EL INVITADO MIRA, NO TOCA» en logica/base.py y
+        # PAGINAS_ABIERTAS en logica/interfaz.py.
+        return
+    if bloqueo == "bloqueada":
         columna.button("🛑 No se anota", key=clave, disabled=True, help=TEXTO_DE_VENTA_BLOQUEADA)
     elif bloqueo == "confirmar":
         columna.button(rotulo_del_boton_de_venta(fila), key=clave,
@@ -2637,6 +2637,10 @@ def detectar_posibles_duplicados(marca_id, umbral=0.87, limite_productos=1500):
 # tres columnas sin deslizar, y antes eran Código y Descripción: la marca, el precio y el stock
 # —lo que se le contesta al cliente— quedaban afuera de la pantalla. La descripción es la más
 # larga y va después.
+# Lo que ve el negocio y no el que mira sin sesión: el análisis de cada equivalencia, dónde está
+# en el depósito, lo apartado, la ganancia y el link a la página del proveedor.
+COLUMNAS_DEL_NEGOCIO = ("Veredicto", "Cadena", "Confianza", "Nivel", "Nota", "Verificada",
+                        "Respaldo", "Ubicación", "Libre", "💰", "Ficha")
 COLUMNAS_PRIMERO = ["Codigo", "Marca", "Precio", "Stock", "Libre", "Ubicación", "💰", "Veredicto", "Cadena", "Confianza",
                     "Fabricante", "Descripcion"]
 
@@ -2663,6 +2667,12 @@ def columnas_que_dicen_algo(filas):
         if col in ("Tipo", "Favorito") and len({str(v) for v in valores}) == 1:
             continue
         utiles.append(col)
+    # Sin sesión, sin lo que es del negocio: al cliente o al taller que mira, «🟠 revisar antes
+    # de vender: solo una pista», los saltos de la cadena, la confianza o dónde está en el
+    # depósito lo marean, y el link al proveedor le dice dónde comprarlo (ver PAGINAS_ABIERTAS
+    # en logica/interfaz.py).
+    if solo_mirar():
+        utiles = [c for c in utiles if c not in COLUMNAS_DEL_NEGOCIO]
     return ([c for c in COLUMNAS_PRIMERO if c in utiles]
             + [c for c in utiles if c not in COLUMNAS_PRIMERO])
 

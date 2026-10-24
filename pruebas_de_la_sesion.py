@@ -187,6 +187,10 @@ def probar():
     # 4. Un taller ve su portal y nada más, aunque la sesión diga que está en Administrar.
     ns["crear_mecanico"]("Taller Sesión", "clave-taller-sesion-1")
     taller = ns["c"].execute("SELECT id FROM mecanicos WHERE nombre = 'Taller Sesión'").fetchone()[0]
+    # En una sesión nueva: la barra de un taller ya no tiene Administrar (ver
+    # PAGINAS_ABIERTAS), y AppTest no deja poner a mano un valor que la barra no ofrece.
+    at = AppTest.from_file(os.path.join(RAIZ, "app.py"), default_timeout=300)
+    at.secrets["admin_passwords"] = {"duenio": "clave-duenio-1"}
     at.session_state["nivel_usuario"] = "mecanico"
     at.session_state["admin_nombre"] = "Taller Sesión"
     at.session_state["mecanico_id"] = taller

@@ -6636,6 +6636,19 @@ Lo pidió el dueño: «seguí mejorando la redacción de los textos, ponelos tod
 
 Probado en un navegador de verdad, en inglés y en castellano: las listas dicen «Elegí una opción», las tablas «Pantalla completa», «Buscar en la tabla» y «Bajar la tabla», el cartelito de la barra de los gráficos «Ver los números», al escribir «Enter para confirmar», y el calendario de 💵 Caja «octubre 2026» con «D L M M J V S». Los gráficos, «23/10» y «$120.000». En cada pantalla queda un solo «ℹ️ Cómo funciona» arriba (en Depósito: la sección, «⏳ Para buscar» y cómo funciona la cola), y las ayudas de una parte siguen en su parte. `pruebas_de_la_sesion.py` (2d) lo controla: rompiéndolo a propósito, avisa.
 
+## 🔐 Sin sesión, solo lo del cliente
+
+Lo pidió el dueño: «que todas las opciones, tanto de administrador como de empleado, queden escondidas hasta que se inicie sesión, así no mareamos a los clientes y a los talleres».
+
+| Qué | Antes | Ahora |
+|---|---|---|
+| **La barra** | Las 12 secciones, y cada una de las cerradas pedía la contraseña al tocarla. | Sin sesión, solo **🔍 Buscador, 📋 Lista WhatsApp y 🛠️ Modo Mecánico**. Las demás aparecen al entrar con «🔑 Ingresar». |
+| **Los resultados del Buscador** | «🛒 Se llevó», «📌 Reponer», apartar, el presupuesto y «🧾 Pasar a una venta» se veían apagados, con un candado; también «✏️ Marcar favorito / editar precio, costo y stock», la ficha de prueba, «¿por qué apareció?» y la calidad de los resultados. | No se ven. Sin sesión van solo los resultados confiables (sin los que cuelgan de un vínculo flojo), y la tabla dice **código, marca, precio, stock y descripción**: sin veredicto, cadena, confianza, ubicación en el depósito, ni el link a la página del proveedor. En el celular, lo mismo en las tarjetas. |
+| **Lo demás del Buscador** | «📦 Armar pedido» para el depósito, los ⭐ favoritos, la guía del negocio y los avisos de la escala y la fecha de cada lista. | Solo con sesión. |
+| **🛠️ Modo Mecánico** | Las tablas que aprende el lector de VIN, «Enseñarle a la app este auto», guardar lo de la base ajena, «🪄 Leer de las descripciones…» y subir esquemas (con su formulario de contraseña). | Solo con sesión. El cliente o el taller consultan la patente, el VIN, el motor, los repuestos por vehículo, los códigos de falla, los esquemas y el conversor. |
+
+Las funciones que escriben siguen pidiendo el permiso adentro (ver «🔒 El invitado mira, no toca»): esconder es para no marear, no la única barrera. `pruebas_de_las_pantallas.py` controla que sin sesión la barra tenga solo esas tres secciones y que una búsqueda con resultados no muestre nada del mostrador; rompiéndolo a propósito, avisa. Probado en un navegador de verdad sin sesión y con sesión (las 12 secciones).
+
 ## ⚡ Una página más dinámica, y menos tokens para trabajar en ella
 
 Lo pidió el dueño: «mejorá muchísimo más todo, optimizá también el uso de tokens acá de Claude y hacé más dinámica la página».

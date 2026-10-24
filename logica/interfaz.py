@@ -85,6 +85,11 @@ ORDEN_DE_LAS_PAGINAS = ["🧾 Ventas", "💵 Caja", "📦 Depósito", "↩️ De
 # Lo único que ven los «del depósito» (ver es_del_deposito()): entran directo al depósito, sin
 # el buscador, las estadísticas ni los avisos de administración en el medio.
 PAGINAS_DEL_DEPOSITO = [PAGINAS[8], PAGINAS[10]]
+# Lo único que ve quien entra SIN SESIÓN (un cliente o un taller con el link): el Buscador, la
+# lista de WhatsApp y el Modo Mecánico, que se pueden mirar sin contraseña (ver «EL INVITADO
+# MIRA, NO TOCA» en logica/base.py). Las demás secciones aparecen al entrar: antes estaban todas
+# en la barra y cada una pedía la contraseña, y al cliente lo mareaban. Lo pidió el dueño.
+PAGINAS_ABIERTAS = [PAGINAS[0], PAGINAS[5], PAGINAS[7]]
 
 # Una línea por pantalla diciendo para qué sirve: se ve debajo de las pastillas. Sin esto hay
 # que entrar a cada una para saber qué hace, y el que atiende el mostrador no tiene tiempo de
@@ -2225,13 +2230,16 @@ def mostrar_tarjetas_de_resultados(filas, tope=40):
         else:
             _semaforo = "🔴 sin stock"
         _precio = formato_precio(f.get("Precio")) if f.get("Precio") else "sin precio"
+        # Sin sesión, sin el análisis ni dónde está en el depósito: igual que en la tabla (ver
+        # COLUMNAS_DEL_NEGOCIO).
+        _del_negocio = not solo_mirar()
         _extra = " · ".join(str(x) for x in (f.get("💰"), veredicto_de_la_equivalencia(f),
-                                             f.get("Nota")) if x)
+                                             f.get("Nota")) if x) if _del_negocio else ""
         with st.container(border=True):
             st.markdown(f"**{texto_para_markdown(f.get('Marca'))}** · `{f.get('Codigo', '')}`  \n"
                         f"**{_precio}**" + (f" · {_semaforo}" if _semaforo else "")
                         + (f" · 📍 {texto_para_markdown(f['Ubicación'])}"
-                           if f.get("Ubicación") else ""))
+                           if f.get("Ubicación") and _del_negocio else ""))
             _desc = texto_para_markdown((f.get("Descripcion") or "")[:140])
             st.caption(_desc + (f"  \n{texto_para_markdown(_extra)}" if _extra else ""))
     if len(filas) > tope:

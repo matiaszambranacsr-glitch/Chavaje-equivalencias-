@@ -339,13 +339,14 @@ def panel_vin(clave="vin", mostrar_ensenar=True):
                     + (f" · {_dn['carroceria']}" if _dn["carroceria"] else "")
                     + (f"\n\nFabricado en {_dn['planta']}." if _dn["planta"] else "")
                 )
-                st.caption(
-                    "Esto viene de una base ajena y **no se guardó**. Si es correcto, "
-                    "confirmalo y queda aprendido para todos los VIN de ese patrón."
-                )
-                if st.button("✅ Es correcto, guardarlo", key=f"nhtsa_ok_{clave}",
-                             disabled=solo_mirar(),
-                             help=TEXTO_SOLO_MIRAR if solo_mirar() else None):
+                # Confirmarlo y guardarlo es del negocio: sin sesión, solo se ve el dato.
+                if not solo_mirar():
+                    st.caption(
+                        "Esto viene de una base ajena y **no se guardó**. Si es correcto, "
+                        "confirmalo y queda aprendido para todos los VIN de ese patrón."
+                    )
+                if not solo_mirar() and st.button("✅ Es correcto, guardarlo",
+                                                  key=f"nhtsa_ok_{clave}"):
                     # aprender_modelo_de_vin() no lo mira adentro: también la usa la tarea de
                     # todos los días, que puede correr en la visita de un invitado.
                     exigir_nivel("empleado", "enseñarle un modelo al lector de VIN")
@@ -416,9 +417,8 @@ def panel_vin(clave="vin", mostrar_ensenar=True):
         )
         _mostrar_repuestos_del_auto(r, marca_para_buscar, modelo_manual, anio_usar, clave)
 
-    if mostrar_ensenar and solo_mirar():
-        st.caption(TEXTO_SOLO_MIRAR)
-    elif mostrar_ensenar:
+    # Enseñarle un auto es del negocio: sin sesión ni se ofrece (antes, un candado).
+    if mostrar_ensenar and not solo_mirar():
         with st.expander("✏️ Enseñarle a la app este auto (para que la próxima salga solo)", key="exp_ensenarle_app_este_auto"):
             _formulario_ensenar_vin(d, clave)
     return d

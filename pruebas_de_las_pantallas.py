@@ -1,5 +1,5 @@
 """Todas las pantallas y solapas se dibujan sin errores, para el administrador, un operador y
-quien entra sin contraseña (AppTest).
+quien entra sin contraseña (AppTest); y sin sesión la barra tiene solo las secciones abiertas.
 
 Uso:
     python3 pruebas_de_las_pantallas.py
@@ -41,7 +41,8 @@ def probar():
             fallas.append(f"{quien}: {donde}: {e.value[:200]}")
 
     def recorrer(quien):
-        for pagina in ns["PAGINAS"]:
+        # Las de la barra de cada uno: sin sesión, solo las abiertas (ver PAGINAS_ABIERTAS).
+        for pagina in at.radio(key="pagina_actual").options:
             at.session_state["pagina_actual"] = pagina
             if pagina not in ns["SOLAPAS_DE_LA_PAGINA"]:
                 mirar(quien, pagina)
@@ -56,8 +57,27 @@ def probar():
                 else:
                     mirar(quien, f"{pagina} → {solapa}")
 
+    if at.radio(key="pagina_actual").options != ns["PAGINAS_ABIERTAS"]:
+        fallas.append(f"sin sesión, la barra: {at.radio(key='pagina_actual').options}")
+    # Y en una búsqueda con resultados, nada de lo del mostrador: ni apagado ni con candado.
+    c, conn = ns["c"], ns["conn"]
+    c.execute("INSERT INTO marcas (nombre, tipo) VALUES ('PRUEBA', 'PROVEEDOR')")
+    c.execute("INSERT INTO productos (codigo_raw, codigo_clean, descripcion, marca_id, precio, "
+              "stock) VALUES ('F100', 'F100', 'FILTRO DE ACEITE', ?, 1000, 3)", (c.lastrowid,))
+    conn.commit()
+    at.session_state["pagina_actual"] = ns["PAGINAS"][0]
+    at.run()
+    at.text_input(key="busqueda_input").set_value("F100")
+    [b for b in at.button if "Buscar equivalencias" in b.label][0].click().run()
+    del_mostrador = [b.label for b in at.button
+                     if any(x in b.label for x in ("Se llevó", "Reponer", "Apartar", "Pedir al"))]
+    con_candado = [x.value for x in at.caption if x.value == ns["TEXTO_SOLO_MIRAR"]]
+    if del_mostrador or con_candado or not any("F100" in m.value for m in at.markdown):
+        fallas.append(f"sin sesión, en el buscador: {del_mostrador} {con_candado}")
     recorrer("sin contraseña")
     entrar("clave-ana-1")
+    if len(at.radio(key="pagina_actual").options) != len(ns["PAGINAS"]):
+        fallas.append("con sesión, la barra no tiene todas las secciones")
     recorrer("operador")
     [b for b in at.button if b.label == "Salir"][0].click().run()
     entrar("clave-duenio-1")
