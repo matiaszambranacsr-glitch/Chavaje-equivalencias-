@@ -754,7 +754,8 @@ if pagina == PAGINAS[3]:
             "WhatsApp del negocio (opcional):", value=obtener_config("whatsapp_del_negocio", ""),
             key="wa_negocio_in", placeholder="5491145678901",
             help="Con 54 9, la característica sin 0 y el número sin 15. Es el botón «Escribinos» "
-                 "de la página donde el cliente ve su auto.")
+                 "de la página donde el cliente ve su auto, y «📲 Consultar por WhatsApp» del "
+                 "buscador para quien mira sin entrar.")
         if problema_del_whatsapp_del_negocio(nuevo_wa_negocio):
             st.error(f"⚠️ El WhatsApp del negocio no está bien: "
                      f"{problema_del_whatsapp_del_negocio(nuevo_wa_negocio)}.")

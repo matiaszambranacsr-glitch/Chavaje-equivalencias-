@@ -100,6 +100,18 @@ def probar():
     at.session_state["modo_busqueda"] = "Código"
     at.run()
 
+    # 2d. En la tabla, «s/d» donde no se sabe el stock, y no el «None» de Streamlit; si todos
+    # tienen dato, quedan números. Y el mensaje de «📲 Consultar por WhatsApp».
+    _legible = ns["con_stock_legible"]
+    esperar("stock legible", ([f["Stock"] for f in _legible([{"Stock": 0}, {"Stock": None},
+                                                             {"Stock": 1500}])],
+                              _legible([{"Stock": 3}])), (["0", "s/d", "1.500"], [{"Stock": 3}]))
+    esperar("el mensaje para consultar",
+            (ns["texto_para_consultar"]("02400", [{"Marca": "FISPA", "Codigo": "LEICJ010"}]),
+             ns["texto_para_consultar"]("XYZ")),
+            ("Hola! Busqué *02400* en la página y vi: FISPA LEICJ010. ¿Tienen alguno? ¿A cuánto?",
+             "Hola! ¿Tienen *XYZ*? En la página no me apareció."))
+
     # 3. Los números: mediana y P95 de lo anotado.
     g["del_proceso"]("mediciones_de_busqueda", list).clear()
     for ms in range(1, 101):

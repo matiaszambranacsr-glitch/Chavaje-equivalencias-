@@ -6636,6 +6636,15 @@ Lo pidió el dueño: «seguí mejorando la redacción de los textos, ponelos tod
 
 Probado en un navegador de verdad, en inglés y en castellano: las listas dicen «Elegí una opción», las tablas «Pantalla completa», «Buscar en la tabla» y «Bajar la tabla», el cartelito de la barra de los gráficos «Ver los números», al escribir «Enter para confirmar», y el calendario de 💵 Caja «octubre 2026» con «D L M M J V S». Los gráficos, «23/10» y «$120.000». En cada pantalla queda un solo «ℹ️ Cómo funciona» arriba (en Depósito: la sección, «⏳ Para buscar» y cómo funciona la cola), y las ayudas de una parte siguen en su parte. `pruebas_de_la_sesion.py` (2d) lo controla: rompiéndolo a propósito, avisa.
 
+## 📲 El cliente le pregunta al negocio, y el stock que no se sabe
+
+| Qué | Cómo |
+|---|---|
+| **📲 Consultar por WhatsApp** | Quien mira sin sesión (un cliente, un taller) tiene, debajo de los resultados del Buscador, un botón que abre un chat con el negocio con lo que buscó ya escrito: «Hola! Busqué *02400* en la página y vi: CRI-FA 02-400, FISPA LEICJ010LUCAS… ¿Tienen alguno? ¿A cuánto?». Sin precios: el precio lo dice el negocio. Si no apareció nada, también: «Hola! ¿Tienen *XYZ*? En la página no me apareció». Sale solo si está cargado el WhatsApp del negocio (🗂️ Administrar → 💬 Mensajería y cobros); el que atiende no lo ve. |
+| **«s/d» en el stock** | En las tablas de resultados, donde no se sabe el stock decía «None», en inglés y en gris (así escribe Streamlit un vacío), y con las listas que no traen stock era casi toda la columna. Ahora dice «s/d», y los números con punto de miles. Si todos tienen dato, quedan números. |
+
+`pruebas_de_las_pantallas.py` controla que el botón salga sin sesión (con resultados y sin ellos, con el número y el código en el link) y que con sesión no; `pruebas_del_buscador.py`, el «s/d» y el mensaje. Probado en un navegador de verdad sin sesión.
+
 ## 🔐 Sin sesión, solo lo del cliente
 
 Lo pidió el dueño: «que todas las opciones, tanto de administrador como de empleado, queden escondidas hasta que se inicie sesión, así no mareamos a los clientes y a los talleres».

@@ -61,6 +61,7 @@ def probar():
         fallas.append(f"sin sesión, la barra: {at.radio(key='pagina_actual').options}")
     # Y en una búsqueda con resultados, nada de lo del mostrador: ni apagado ni con candado.
     c, conn = ns["c"], ns["conn"]
+    ns["guardar_config"]("whatsapp_del_negocio", "5491145678901")
     c.execute("INSERT INTO marcas (nombre, tipo) VALUES ('PRUEBA', 'PROVEEDOR')")
     c.execute("INSERT INTO productos (codigo_raw, codigo_clean, descripcion, marca_id, precio, "
               "stock) VALUES ('F100', 'F100', 'FILTRO DE ACEITE', ?, 1000, 3)", (c.lastrowid,))
@@ -74,10 +75,30 @@ def probar():
     con_candado = [x.value for x in at.caption if x.value == ns["TEXTO_SOLO_MIRAR"]]
     if del_mostrador or con_candado or not any("F100" in m.value for m in at.markdown):
         fallas.append(f"sin sesión, en el buscador: {del_mostrador} {con_candado}")
+
+    def consultar():
+        """Los «📲 Consultar por WhatsApp» que hay en la pantalla: [(rótulo, link)]."""
+        return [(e.proto.label, e.proto.url) for e in at.get("link_button")
+                if "Consultar por WhatsApp" in e.proto.label]
+    # Sin sesión, preguntarle al negocio por WhatsApp, con lo que buscó ya escrito; y si no
+    # hay nada con ese código, también.
+    _wa = consultar()
+    if len(_wa) != 1 or "wa.me/5491145678901" not in _wa[0][1] or "F100" not in _wa[0][1]:
+        fallas.append(f"sin sesión, consultar por WhatsApp: {_wa}")
+    at.text_input(key="busqueda_input").set_value("ZZ999")
+    [b for b in at.button if "Buscar equivalencias" in b.label][0].click().run()
+    if len(consultar()) != 1:
+        fallas.append(f"sin sesión y sin resultados, consultar por WhatsApp: {consultar()}")
     recorrer("sin contraseña")
     entrar("clave-ana-1")
     if len(at.radio(key="pagina_actual").options) != len(ns["PAGINAS"]):
         fallas.append("con sesión, la barra no tiene todas las secciones")
+    at.session_state["pagina_actual"] = ns["PAGINAS"][0]
+    at.run()
+    at.text_input(key="busqueda_input").set_value("F100")
+    [b for b in at.button if "Buscar equivalencias" in b.label][0].click().run()
+    if consultar():
+        fallas.append("con sesión no hace falta «Consultar por WhatsApp»")
     recorrer("operador")
     [b for b in at.button if b.label == "Salir"][0].click().run()
     entrar("clave-duenio-1")

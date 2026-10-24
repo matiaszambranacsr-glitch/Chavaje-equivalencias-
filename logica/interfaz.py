@@ -1091,6 +1091,32 @@ def ver_donde_esta(producto_id):
     ir_a_donde_dice_el_aviso(f"{PAGINAS[8]} → {SUB_DEPOSITO[1]}")
 
 
+def texto_para_consultar(buscado, filas=None):
+    """El mensaje de «📲 Consultar por WhatsApp»: el código que buscó y, si salió algo, hasta
+    cinco de lo que vio (marca y código, sin precios: el precio lo dice el negocio)."""
+    vistos = [f"{f.get('Marca') or ''} {f.get('Codigo') or ''}".strip()
+              for f in (filas or [])[:5]]
+    if vistos:
+        return (f"Hola! Busqué *{buscado}* en la página y vi: " + ", ".join(vistos)
+                + ". ¿Tienen alguno? ¿A cuánto?")
+    return f"Hola! ¿Tienen *{buscado}*? En la página no me apareció."
+
+
+def boton_para_consultar(buscado, filas=None, clave=""):
+    """«📲 Consultar por WhatsApp» para quien mira sin sesión (un cliente, un taller): le abre un
+    chat con el negocio con lo que buscó ya escrito. Solo si el WhatsApp del negocio está
+    cargado (🗂️ Administrar → 💬 Mensajería y cobros) y bien escrito. El que atiende no lo
+    necesita: tiene el mostrador."""
+    if not solo_mirar():
+        return
+    numero = obtener_config("whatsapp_del_negocio", "")
+    if not numero or problema_del_whatsapp_del_negocio(numero):
+        return
+    st.link_button("📲 Consultar por WhatsApp",
+                   f"https://wa.me/{numero}?text=" + quote(texto_para_consultar(buscado, filas)),
+                   type="primary", key=f"consultar_wa_{clave}" if clave else None)
+
+
 # ============================================================================================
 # LOS GRÁFICOS, CON LOS NÚMEROS Y LAS FECHAS COMO SE ESCRIBEN ACÁ
 # ============================================================================================

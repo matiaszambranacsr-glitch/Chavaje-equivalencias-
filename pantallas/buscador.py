@@ -1088,7 +1088,7 @@ if pagina == PAGINAS[0]:
                                 mostrar_tarjetas_de_resultados(mostrar)
                             else:
                                 st.dataframe(
-                                    mostrar, width="stretch", hide_index=True,
+                                    con_stock_legible(mostrar), width="stretch", hide_index=True,
                                     column_order=columnas_que_dicen_algo(mostrar),
                                     column_config=CONFIG_COLUMNAS_RESULTADO,
                                 )
@@ -1115,6 +1115,8 @@ if pagina == PAGINAS[0]:
                                 _fecha_precios = ""
                             if _fecha_precios and not solo_mirar():
                                 st.caption(_fecha_precios)
+                            # Al cliente o al taller que mira sin sesión: preguntarle al negocio.
+                            boton_para_consultar(codigo_individual, mostrar, f"cod_{clean}")
                             # UNA MARCA QUE VIENE FALLADA más que antes: se avisa al venderla.
                             # No cambia el veredicto: es calidad, no equivalencia. Ver
                             # calidad_por_marca().
@@ -1125,7 +1127,7 @@ if pagina == PAGINAS[0]:
                                 _fallan = set()
                             _fallan_aca = sorted({f.get("Fabricante") or f.get("Marca")
                                                   for f in res} & _fallan)
-                            if _fallan_aca:
+                            if _fallan_aca and not solo_mirar():    # aviso del negocio
                                 st.warning(f"💥 De **{', '.join(_fallan_aca)}** vienen más piezas "
                                            "falladas que el mes pasado: revisala antes de "
                                            "entregarla. La equivalencia no cambia; es la calidad.")
@@ -1645,6 +1647,7 @@ if pagina == PAGINAS[0]:
                         mostrar_lista_clickeable(_de_la_marca, f"marca_{clean}", limite=12)
                     else:
                         st.warning("No hay ningún producto con ese código exacto.")
+                        boton_para_consultar(codigo_individual, None, f"nada_{clean}")
 
                         # ¿Este código fue reemplazado por otro? Es la causa más tonta de
                         # perder una venta: la pieza existe, cambió de número, y se le dice al
@@ -1887,7 +1890,7 @@ if pagina == PAGINAS[0]:
                     if _marca_txt != "Todas":
                         _res_vista = [f for f in res_texto if f["Marca"] == _marca_txt]
                 _tabla_txt = para_mostrar(quitar_id(_res_vista))
-                st.dataframe(_tabla_txt, width="stretch", hide_index=True,
+                st.dataframe(con_stock_legible(_tabla_txt), width="stretch", hide_index=True,
                              column_order=columnas_que_dicen_algo(_tabla_txt),
                              column_config=CONFIG_COLUMNAS_RESULTADO,
                              key="tabla_resultados_texto", selection_mode="single-row",
@@ -1916,7 +1919,7 @@ if pagina == PAGINAS[0]:
                                 equivalentes, marcas_con_precios_fuera_de_escala())
                             mostrar_la_recomendacion(_reco_txt)
                             _tabla_eq = para_mostrar(quitar_id(equivalentes))
-                            st.dataframe(_tabla_eq, width="stretch", hide_index=True,
+                            st.dataframe(con_stock_legible(_tabla_eq), width="stretch", hide_index=True,
                                          column_order=columnas_que_dicen_algo(_tabla_eq),
                                          column_config=CONFIG_COLUMNAS_RESULTADO)
                         else:
@@ -2056,8 +2059,10 @@ if pagina == PAGINAS[0]:
                 if len(res_texto) > 15:
                     st.caption(f"(mostrando las primeras 15 de {len(res_texto)} — afiná la búsqueda "
                                 "para ver menos resultados)")
+                boton_para_consultar(texto_pedido, res_texto, "txt")
             else:
                 st.warning("No se encontraron productos con esa descripción.")
+                boton_para_consultar(texto_pedido, None, "txt_nada")
 
                 # Antes de rendirse: entender qué pidió el cliente. En el mostrador nadie dice
                 # un código, dice «pastillas para un Gol 1.6». De esa frase se puede sacar el

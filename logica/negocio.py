@@ -2687,7 +2687,9 @@ CONFIG_COLUMNAS_RESULTADO = {
     # Las claves van sin tilde porque así las usa todo el código; el título, con tilde.
     "Codigo": st.column_config.TextColumn("Código"),
     "Descripcion": st.column_config.TextColumn("Descripción"),
-    "Stock": st.column_config.NumberColumn("Stock", format="%d"),
+    # Texto y no número: donde no se sabe dice «s/d» (ver con_stock_legible()).
+    "Stock": st.column_config.TextColumn("Stock"),
+    "Libre": st.column_config.TextColumn("Libre"),
     "Imagen": st.column_config.ImageColumn("Imagen", width="small"),
     "Ficha": st.column_config.LinkColumn("Ficha", display_text="Ver en proveedor ↗"),
     "Favorito": st.column_config.CheckboxColumn("⭐"),
@@ -2709,6 +2711,26 @@ def para_mostrar(filas):
                 g[k] = ""
         if isinstance(g.get("Precio"), float):
             g["Precio"] = round(g["Precio"])
+        salida.append(g)
+    return salida
+
+
+def con_stock_legible(filas):
+    """La copia de las filas para la TABLA, con «s/d» donde no se sabe el stock. Streamlit
+    escribe un vacío como «None», en inglés y en gris, y en una lista sin stock cargado era
+    casi toda la columna: el cliente que mira sin entrar no sabe qué es. Solo si en esa tabla
+    hay alguno sin dato; si no, los números quedan números (y se ordenan como números). Las
+    tarjetas del celular no pasan por acá: comparan el stock."""
+    columnas = [k for k in ("Stock", "Libre")
+                if any(k in f and f[k] in (None, "") for f in filas or [])]
+    if not columnas:
+        return filas
+    salida = []
+    for f in filas:
+        g = dict(f)
+        for k in columnas:
+            if k in g:
+                g[k] = "s/d" if g[k] in (None, "") else miles(g[k], 0)
         salida.append(g)
     return salida
 
