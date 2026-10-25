@@ -424,8 +424,9 @@ hr { border-color: var(--border) !important; margin: 1.1rem 0 !important; }
 .st-key-nav_principal [role="radiogroup"] label p { white-space: nowrap; font-weight: 600; font-size: 0.9rem; }
 /* Con pocas secciones —sin sesión son tres: Buscador, Lista WhatsApp y Modo Mecánico— van en
    uno o dos renglones también en el celular. Deslizándose, al elegir la de la derecha la primera
-   quedaba cortada («r» de «Buscador»), y el cliente no veía cómo volver. */
-.st-key-nav_principal [role="radiogroup"]:not(:has(label:nth-of-type(5))) {
+   quedaba cortada («r» de «Buscador»), y el cliente no veía cómo volver. Cada opción va en su
+   propia caja: se cuentan las cajas (con «label:nth-of-type» se aplicaba también a las doce). */
+.st-key-nav_principal [role="radiogroup"]:not(:has(> div:nth-child(5))) {
   flex-wrap: wrap !important; overflow-x: visible;
 }
 /* En la computadora no hay dedo para deslizar ni barra que se vea: si no entran, van en dos
