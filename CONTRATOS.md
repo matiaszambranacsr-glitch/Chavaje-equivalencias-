@@ -146,6 +146,7 @@ cambio» (todas juntas: `python .github/correr_las_pruebas.py`).
 | En las tablas de resultados, «s/d» donde no se sabe el stock | `con_stock_legible()` | `pruebas_del_buscador.py` (2d) |
 | Lo que se dibuja debajo de los resultados se calcula una vez por clave y otra vez si entra un producto o cambia un vínculo; de cada cosa, las últimas 24 | `recordado_mientras_no_cambie()`, `testigo_de_los_vinculos()` | `pruebas_del_buscador.py` (2e) |
 | Sin sesión, la barra tiene solo las secciones abiertas y los resultados no muestran nada del mostrador (ni apagado ni con candado) | `PAGINAS_ABIERTAS`, `solo_mirar()`, `COLUMNAS_DEL_NEGOCIO` | `pruebas_de_las_pantallas.py` |
+| Sin sesión, ni los links al sitio del proveedor ni sus catálogos, y las búsquedas recientes son las de esa visita (no las de otros clientes) | `solo_mirar()`, `historial_reciente()` | `pruebas_de_las_pantallas.py` |
 | Un solo «ℹ️ Cómo funciona» plegado arriba de cada pantalla, con para qué sirve la sección, la solapa y la ayuda de la pantalla; la ayuda de una parte queda en su parte | `empezar_la_ayuda_de_la_pantalla()`, `elegir_solapa()`, `ayuda()` | `pruebas_de_la_sesion.py` (2d) |
 | Con la base dañada, los empleados solo pueden buscar | `modo_solo_lectura()` | `pruebas_de_los_frenos.py` (1) |
 
@@ -271,6 +272,7 @@ cambio» (todas juntas: `python .github/correr_las_pruebas.py`).
   un navegador de verdad, no hay prueba que los corra sola. Lo mismo el formato de los gráficos
   (`grafico_de_barras()`), lo que se mueve en la pantalla (la barra que trabaja, los números que
   se iluminan: «LO QUE SE MUEVE» en `logica/base.py`) que el aviso al vendedor llegue solo cada
-  20 segundos y el cursor en la caja de búsqueda al entrar a cada pantalla: lo hace el navegador.
+  20 segundos, el cursor en la caja de búsqueda al entrar a cada pantalla y, en el teléfono, que
+  la pantalla baje sola hasta lo encontrado después de buscar: lo hace el navegador.
 - Lo que necesita la base real (`pruebas_de_la_revision.py --base`, `pruebas_de_compatibilidad.py`)
   no corre en GitHub: se corre a mano antes de publicar.

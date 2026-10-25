@@ -1334,7 +1334,10 @@ if pagina == PAGINAS[0]:
                         # La key incluye el código buscado (clean) además del ID: si se buscan varios códigos
                         # a la vez y dos están vinculados entre sí, el mismo producto puede aparecer en más de
                         # un resultado — sin el prefijo de clean, la key se repetiría y Streamlit tira error.
-                        con_ficha = [f for f in res if f.get("Ficha")]
+                        # Sin sesión, no: le dice al cliente a quién le comprás y lo manda al
+                        # proveedor. La columna «Ficha» ya no se le mostraba (ver
+                        # COLUMNAS_DEL_NEGOCIO), pero estos botones sí, uno por resultado.
+                        con_ficha = [] if solo_mirar() else [f for f in res if f.get("Ficha")]
                         if con_ficha:
                             for f in con_ficha:
                                 st.link_button(
@@ -1656,7 +1659,8 @@ if pagina == PAGINAS[0]:
                                         else:
                                             st.caption("Todavía no hay cambios de precio registrados para este producto.")
 
-                        if catalogos:
+                        # Los catálogos de los proveedores, lo mismo: son del mostrador.
+                        if catalogos and not solo_mirar():
                             st.caption("Buscar este código también en:")
                             # OJO con el nombre: 'cols' es una función de esta app (arma columnas
                             # que se apilan bien en el celular). Llamar a la variable igual la

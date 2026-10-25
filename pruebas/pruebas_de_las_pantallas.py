@@ -76,7 +76,13 @@ def probar():
     # Y en una búsqueda con resultados, nada de lo del mostrador: ni apagado ni con candado.
     c, conn = ns["c"], ns["conn"]
     ns["guardar_config"]("whatsapp_del_negocio", "5491145678901")
-    c.execute("INSERT INTO marcas (nombre, tipo) VALUES ('PRUEBA', 'PROVEEDOR')")
+    # Con la ficha del proveedor y un catálogo cargados, para ver que sin sesión no salen. Y
+    # una búsqueda de otro visitante, para ver que no se le muestra a este.
+    c.execute("INSERT INTO marcas (nombre, tipo, url_ficha_template) VALUES "
+              "('PRUEBA', 'PROVEEDOR', 'https://proveedor.example/{codigo}')")
+    c.execute("INSERT INTO catalogos_externos (nombre, url) VALUES "
+              "('Catálogo de prueba', 'https://catalogo.example/?q={codigo}')")
+    c.execute("INSERT INTO historial_busquedas (termino, usuario) VALUES ('OTRO777', 'Invitado')")
     c.execute("INSERT INTO productos (codigo_raw, codigo_clean, descripcion, marca_id, precio, "
               "stock) VALUES ('F100', 'F100', 'FILTRO DE ACEITE', ?, 1000, 3)", (c.lastrowid,))
     conn.commit()
@@ -89,6 +95,17 @@ def probar():
     con_candado = [x.value for x in at.caption if x.value == ns["TEXTO_SOLO_MIRAR"]]
     if del_mostrador or con_candado or not any("F100" in m.value for m in at.markdown):
         fallas.append(f"sin sesión, en el buscador: {del_mostrador} {con_candado}")
+
+    def del_proveedor():
+        """Lo que le dice al que mira a quién le compra el negocio: [rótulos]."""
+        return ([e.proto.label for e in at.get("link_button")
+                 if "sitio del proveedor" in e.proto.label]
+                + [x.value for x in at.caption if "Buscar este código también en" in x.value])
+    if del_proveedor():
+        fallas.append(f"sin sesión, los links al proveedor: {del_proveedor()}")
+    _recientes = [b.label for b in at.button if (b.key or "").startswith("sugerencia_hist_")]
+    if "OTRO777" in _recientes or "F100" not in _recientes:
+        fallas.append(f"sin sesión, las búsquedas recientes de esta visita: {_recientes}")
 
     def consultar():
         """Los «📲 Consultar por WhatsApp» que hay en la pantalla: [(rótulo, link)]."""
@@ -124,6 +141,8 @@ def probar():
     [b for b in at.button if "Buscar equivalencias" in b.label][0].click().run()
     if consultar():
         fallas.append("con sesión no hace falta «Consultar por WhatsApp»")
+    if not del_proveedor():
+        fallas.append("con sesión tienen que estar los links al proveedor")
     # El presupuesto se manda derecho por WhatsApp, con lo que tiene y el total.
     _f100 = c.execute("SELECT id FROM productos WHERE codigo_clean = 'F100'").fetchone()[0]
     at.session_state["carrito"] = {_f100: {"codigo": "F100", "marca": "PRUEBA", "descripcion": "",

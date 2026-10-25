@@ -2591,6 +2591,13 @@ def restaurar_de_papelera(item_id):
 # HISTORIAL, DUPLICADOS Y EXPORTAR A EXCEL
 # ============================================================================================
 def guardar_busqueda(termino):
+    # Quien mira sin sesión (un cliente, un taller) ve en «🕘 Búsquedas recientes» lo que buscó
+    # ÉL en esta visita. Todos los que entran sin sesión son «Invitado» para la base, así que
+    # cada cliente veía lo que habían buscado los otros. En la base se anota igual: cuenta para
+    # lo que se busca y no se encuentra.
+    if solo_mirar():
+        _antes = [t for t in st.session_state.get("_busquedas_de_esta_visita", []) if t != termino]
+        st.session_state["_busquedas_de_esta_visita"] = [termino] + _antes[:9]
     with db_lock:
         c.execute("INSERT INTO historial_busquedas (termino, usuario) VALUES (?, ?)",
                    (termino, obtener_usuario_actual()))
@@ -2598,7 +2605,10 @@ def guardar_busqueda(termino):
 
 
 def historial_reciente(limite=10):
-    """Solo las búsquedas de la persona actual — antes mezclaba las de todos los empleados."""
+    """Solo las búsquedas de la persona actual — antes mezclaba las de todos los empleados. Sin
+    sesión, las de esta visita (ver guardar_busqueda())."""
+    if solo_mirar():
+        return list(st.session_state.get("_busquedas_de_esta_visita", []))[:limite]
     c.execute("""SELECT DISTINCT termino FROM historial_busquedas WHERE usuario = ?
                  ORDER BY id DESC LIMIT ?""", (obtener_usuario_actual(), limite))
     return [r["termino"] for r in c.fetchall()]

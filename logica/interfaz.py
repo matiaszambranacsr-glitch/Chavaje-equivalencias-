@@ -958,12 +958,61 @@ AYUDAS_DEL_NAVEGADOR = r"""
       caja.focus({preventScroll: true});
     })();
   }
+  // DESPUÉS DE BUSCAR, EN EL TELÉFONO, LA PANTALLA BAJA SOLA HASTA LO ENCONTRADO. En el celular
+  // el formulario ocupa la pantalla entera y los resultados quedaban abajo, sin nada que dijera
+  // que estaban: el cliente tocaba «Buscar» y veía la misma pantalla. Solo después de tocar
+  // «Buscar» (no al volver a la sección), solo si lo encontrado no está ya a la vista, y solo en
+  // pantallas táctiles: con mouse, la caja de búsqueda tiene el cursor para el lector de
+  // códigos, y mover la pantalla molesta.
+  var RESULTADOS = '[class*="st-key-exp_resultado_"], .st-key-tabla_resultados_texto';
+  var buscoA = 0, antesDeBuscar = "";
+  function huellaDeLoEncontrado() {
+    return Array.prototype.map.call(doc.querySelectorAll(RESULTADOS), function (r) {
+      return r.textContent.slice(0, 80); }).join("|");
+  }
+  function quiereBuscar(e) {
+    var t = e.target;
+    if (!t || !t.closest) { return; }
+    var boton = t.closest("button");
+    if ((boton && /Buscar equivalencias|Buscar por descripción/.test(boton.textContent)) ||
+        (e.type === "keydown" && e.key === "Enter" &&
+         t.closest(".st-key-busqueda_input, .st-key-texto_input"))) {
+      buscoA = Date.now();
+      antesDeBuscar = huellaDeLoEncontrado();
+    }
+  }
+  function bajarALoEncontrado() {
+    if (!buscoA || Date.now() - buscoA > 30000) { buscoA = 0; return; }
+    // Recién cuando terminó de dibujar: mientras corre, lo de la vuelta anterior sigue a la vista
+    // y se va al final, y todo cambia de lugar. Bajando antes, quedaba a mitad de camino.
+    if (doc.querySelector('[data-testid="stStatusWidget"], [data-stale="true"]')) { return; }
+    var primero = doc.querySelector(RESULTADOS);
+    if (!primero || huellaDeLoEncontrado() === antesDeBuscar) { return; }
+    buscoA = 0;
+    var arriba = primero.getBoundingClientRect().top;
+    if (arriba >= 0 && arriba < window.innerHeight * 0.6) { return; }   // ya se ve
+    // De un salto, sobre la caja que se desplaza: scrollIntoView suave se cortaba sin moverse
+    // (probado en un teléfono simulado). Y otra vez un instante después, por lo que termine de
+    // acomodarse.
+    var caja = primero.closest('[data-testid="stMain"]') || doc.scrollingElement;
+    function llevar() {
+      var falta = primero.getBoundingClientRect().top - caja.getBoundingClientRect().top - 8;
+      if (Math.abs(falta) > 4) { caja.scrollTop += falta; }
+    }
+    llevar();
+    window.setTimeout(llevar, 350);
+  }
+  if (!conMouse) {
+    doc.addEventListener("click", quiereBuscar, true);
+    doc.addEventListener("keydown", quiereBuscar, true);
+  }
   traducirTodo(doc.body);
   destellarLoQueCambio();
   new MutationObserver(function (cambios) {
     sonarLoNuevo();
     destellarLoQueCambio();
     if (conMouse) { buscarAlEntrar(); }
+    if (!conMouse) { bajarALoEncontrado(); }
     cambios.forEach(function (c) {
       if (c.type === "childList") { c.addedNodes.forEach(traducirTodo); }
       else if (c.type === "characterData") { traducirTexto(c.target); }

@@ -6636,6 +6636,18 @@ Lo pidió el dueño: «seguí mejorando la redacción de los textos, ponelos tod
 
 Probado en un navegador de verdad, en inglés y en castellano: las listas dicen «Elegí una opción», las tablas «Pantalla completa», «Buscar en la tabla» y «Bajar la tabla», el cartelito de la barra de los gráficos «Ver los números», al escribir «Enter para confirmar», y el calendario de 💵 Caja «octubre 2026» con «D L M M J V S». Los gráficos, «23/10» y «$120.000». En cada pantalla queda un solo «ℹ️ Cómo funciona» arriba (en Depósito: la sección, «⏳ Para buscar» y cómo funciona la cola), y las ayudas de una parte siguen en su parte. `pruebas_de_la_sesion.py` (2d) lo controla: rompiéndolo a propósito, avisa.
 
+## 📱 Lo que ve un cliente en el celular
+
+Lo pidió el dueño: «seguí mejorando». Se recorrió la app como la ve un cliente o un taller desde el teléfono, sin sesión, y salieron tres cosas:
+
+| Qué | Antes | Ahora |
+|---|---|---|
+| **Después de tocar «Buscar»** | El formulario ocupa la pantalla entera del teléfono y lo encontrado quedaba abajo, sin nada que dijera que estaba: el cliente tocaba «Buscar» y veía la misma pantalla. | **La pantalla baja sola hasta lo encontrado.** Solo después de tocar «Buscar» (no al volver a la sección), solo si no está ya a la vista y solo en pantallas táctiles: con mouse, la caja de búsqueda tiene el cursor para el lector de códigos y mover la pantalla molestaría. |
+| **Los links al proveedor** | Sin sesión se veían «🔗 Ver LEICJ010LUCAS (FISPA) en el sitio del proveedor», uno por resultado, y «Buscar este código también en: Fispa, cauplas, scyzoryk, taranto, wega»: le decían al cliente a quién le comprás y lo mandaban al proveedor. La columna «Ficha» ya no se le mostraba, pero estos botones sí. | Sin sesión, no salen. Con sesión, como siempre. |
+| **«🕘 Búsquedas recientes»** | Todos los que entran sin sesión son «Invitado» para la base, así que cada cliente veía lo que habían buscado los otros clientes. | Sin sesión, las de **esta visita**. En la base se anotan igual: cuentan para lo que se busca y no se encuentra. |
+
+`pruebas_de_las_pantallas.py` controla que sin sesión no salgan los links al proveedor ni los catálogos (y que con sesión sí) y que las búsquedas recientes sean las de la visita; rompiendo cada una a propósito, avisa. Lo de bajar solo no tiene prueba automática (es del navegador): probado en un teléfono simulado (390 × 844, táctil), lo encontrado queda arriba de todo después de buscar, y al ir a otra sección y volver no se mueve.
+
 ## ⚡ Con los resultados a la vista, cada toque más liviano
 
 Lo pidió el dueño: «mejorá más». Después de los desplegables, se midió lo que pasa **después** de buscar: los resultados quedan a la vista, y cada toque (sumar al presupuesto, abrir una ficha, «se llevó»…) vuelve a dibujar la pantalla. Con la copia de la base (86.946 productos), el toque siguiente a una búsqueda:
