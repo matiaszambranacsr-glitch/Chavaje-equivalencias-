@@ -139,6 +139,41 @@ def probar():
         _recordado("_prueba_memo", ("otro", i), lambda: 0)
     esperar("de cada cosa, las últimas 24", len(ns["st"].session_state["_prueba_memo"]), 24)
 
+    # 2f. El número de la caja encuentra el código que la lista guardó con la marca pegada
+    # («LEICJ057» → «LEICJ057LUCAS»), y lo dice. Si el número pelado es otro producto, se
+    # muestra ese y sin aviso: pueden ser piezas distintas (ver buscar_con_variantes_del_cero()).
+    _buscar = ns["buscar_con_variantes_del_cero"]
+
+    def _el_buscado(r):
+        return [f["Codigo"] for f in r if f.get("Cadena") == "— el buscado"]
+    c.execute("INSERT INTO productos (codigo_raw, codigo_clean, descripcion, marca_id) VALUES "
+              "('LEICJ057LUCAS', 'LEICJ057LUCAS', 'INYECTOR', (SELECT id FROM marcas LIMIT 1))")
+    conn.commit()
+    _r, _aviso = _buscar("LEICJ057")
+    esperar("con la marca pegada: lo encuentra y lo dice",
+            (_el_buscado(_r), "marca LUCAS pegada" in (_aviso or "")), (["LEICJ057LUCAS"], True))
+    c.execute("INSERT INTO productos (codigo_raw, codigo_clean, descripcion, marca_id) VALUES "
+              "('LEICJ057', 'LEICJ057', 'OTRA PIEZA', (SELECT id FROM marcas LIMIT 1))")
+    conn.commit()
+    _r, _aviso = _buscar("LEICJ057")
+    esperar("si el número pelado existe, ese y sin aviso", (_el_buscado(_r), _aviso),
+            (["LEICJ057"], None))
+    # Y la marca escrita con el código, adelante o atrás: «NGK BKR6E», «6205 SKF», «LUCAS
+    # LEICJ010» (con la marca que la lista pega atrás) y el nombre de una lista de dos letras.
+    # Si lo que queda no es un código, nada: «SKF» puede ser el principio de un código real.
+    c.execute("INSERT INTO marcas (nombre, tipo) VALUES ('JL', 'PROVEEDOR')")
+    for _cod in ("BKR6E", "6205", "LEICJ010LUCAS", "MTA0030"):
+        c.execute("INSERT INTO productos (codigo_raw, codigo_clean, descripcion, marca_id) "
+                  "VALUES (?, ?, 'PIEZA', (SELECT id FROM marcas WHERE nombre = "
+                  "CASE WHEN ? = 'MTA0030' THEN 'JL' ELSE 'PRUEBA' END))", (_cod, _cod, _cod))
+    conn.commit()
+    esperar("la marca escrita con el código",
+            [(_el_buscado(_buscar(ns["sanitizar"](t))[0]),
+              "es la marca" in (_buscar(ns["sanitizar"](t))[1] or ""))
+             for t in ("NGK BKR6E", "6205 SKF", "lucas LEICJ010", "JL MTA 0030", "SKF 9999")],
+            [(["BKR6E"], True), (["6205"], True), (["LEICJ010LUCAS"], True),
+             (["MTA0030"], True), ([], False)])
+
     # 3. Los números: mediana y P95 de lo anotado.
     g["del_proceso"]("mediciones_de_busqueda", list).clear()
     for ms in range(1, 101):

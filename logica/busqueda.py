@@ -14,7 +14,9 @@ def filas_a_listas(cursor):
 
 def buscar_con_variantes_del_cero(clean_code, marca_filtro="Todas", max_saltos=None,
                                   confianza_minima=None):
-    """Busca el código y, SOLO si no encuentra nada, reintenta con y sin el cero de adelante.
+    """Busca el código y, SOLO si no encuentra nada, reintenta con y sin el cero de adelante,
+    con la marca pegada atrás («LEICJ057» → «LEICJ057LUCAS») y sin la marca escrita con el
+    código («NGK BKR6E» → «BKR6E»): ver más abajo.
 
     Devuelve (resultados, aviso). El aviso es para poder decirle a la persona que lo que está
     viendo no es exactamente lo que escribió.
@@ -45,7 +47,71 @@ def buscar_con_variantes_del_cero(clean_code, marca_filtro="Todas", max_saltos=N
                     f"No hay nada cargado como «{clean_code}», pero sí como "
                     f"«{variante}» — los códigos que empiezan con cero se escriben "
                     "de las dos formas. Confirmá que sea el mismo repuesto.")
+    # LA MARCA PEGADA ATRÁS. Las listas guardan el número con la marca pegada para que dos
+    # proveedores no se pisen («LEICJ057LUCAS», «26001FISPA»), y en el mostrador se escribe el
+    # número de la caja, pelado: «LEICJ057» no encontraba nada. En la base real son 4.879
+    # códigos así (3.400 de FISPA, 1.395 de LUCAS, 84 de SKF). Mismo cuidado que el cero: solo
+    # si lo escrito no está, y con aviso, porque el número interno de un proveedor puede chocar
+    # con el de otro (ver _es_el_codigo_propio_sin_la_marca()); en 171 casos el número pelado
+    # es otro producto, y ahí la búsqueda exacta lo encuentra y esto no llega a correr.
+    for marca in _MARCAS_QUE_SE_PEGAN_AL_CODIGO:
+        variante = clean_code + marca
+        if len(clean_code) >= 4 and existe_el_codigo(variante):
+            res = buscar_por_codigo(variante, marca_filtro, max_saltos, confianza_minima)
+            if res:
+                return anotar_el_respaldo(res, variante), (
+                    f"No hay nada cargado como «{clean_code}», pero sí «{variante}»: la lista "
+                    f"lo guarda con la marca {marca} pegada atrás. Confirmá que sea el mismo "
+                    "repuesto: dos proveedores pueden usar el mismo número para piezas distintas.")
+    # LA MARCA ESCRITA CON EL CÓDIGO. En el mostrador se escribe como se dice: «NGK BKR6E»,
+    # «bosch 0280156020», «SKF 6205», «mann w712/94», o al revés, «6205 SKF». Limpio queda todo
+    # junto —«NGKBKR6E»— y no encontraba nada: probado con 564 productos reales escritos con el
+    # nombre de su lista adelante, ninguno aparecía. Se saca la marca de adelante o de atrás y
+    # se busca lo que queda, solo si lo que queda existe como código (si no, «SKF» podría ser el
+    # principio de un código de verdad), y con aviso. Si la marca es de las que las listas pegan
+    # atrás, también así: «LUCAS LEICJ057» es el «LEICJ057LUCAS».
+    for marca in marcas_que_se_escriben_con_el_codigo():
+        restos = []
+        if clean_code.startswith(marca):
+            restos.append(clean_code[len(marca):])
+        if clean_code.endswith(marca):
+            restos.append(clean_code[:-len(marca)])
+        for resto in restos:
+            if len(resto) < 3:
+                continue
+            # Lo que queda, tal cual o con alguna de las marcas que las listas pegan atrás:
+            # «FISPA LRSC107015» es el «LRSC107015LUCAS» de la lista de FISPA.
+            for variante in [resto] + [resto + m for m in _MARCAS_QUE_SE_PEGAN_AL_CODIGO]:
+                if not existe_el_codigo(variante):
+                    continue
+                res = buscar_por_codigo(variante, marca_filtro, max_saltos, confianza_minima)
+                if res:
+                    return anotar_el_respaldo(res, variante), (
+                        f"Se buscó «{variante}»: {marca} es la marca, escrita junto con el "
+                        "código. Confirmá que sea el repuesto que se pidió.")
     return [], None
+
+
+def marcas_que_se_escriben_con_el_codigo():
+    """Los nombres de marca que se pueden escribir pegados al código en el buscador, limpios
+    (sin espacios ni signos), de más largo a más corto: los fabricantes de MARCAS_DE_REPUESTO,
+    los de los productos (marca_repuesto) y los de las listas cargadas. De los fabricantes,
+    menos de tres letras no: «VW» o «GM» son el principio de demasiados códigos; de las listas
+    sí, porque es como se las nombra («JL 007 008 012»). Corre solo cuando lo escrito no
+    encontró nada, y lo que queda tiene que existir como código."""
+    nombres = set(MARCAS_DE_REPUESTO) | set(_MARCAS_QUE_SE_PEGAN_AL_CODIGO)
+    listas = set()
+    try:
+        c.execute("SELECT nombre FROM marcas")
+        listas = {sanitizar(r[0]) for r in c.fetchall()}
+        c.execute("""SELECT DISTINCT marca_repuesto FROM productos
+                     WHERE marca_repuesto IS NOT NULL AND marca_repuesto <> ''""")
+        nombres |= {sanitizar(r[0]) for r in c.fetchall()}
+    except sqlite3.OperationalError as _err:
+        anotar_error("marcas_que_se_escriben_con_el_codigo", _err)
+    return sorted({n for n in nombres if n and len(n) >= 3 and n.isalpha()}
+                  | {n for n in listas if n and len(n) >= 2 and n.isalpha()},
+                  key=lambda n: (-len(n), n))
 
 
 # Motor + índice: K4M700, F4R770, G9U630. Ver el corte de puentes en buscar_por_codigo().

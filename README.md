@@ -6636,6 +6636,24 @@ Lo pidió el dueño: «seguí mejorando la redacción de los textos, ponelos tod
 
 Probado en un navegador de verdad, en inglés y en castellano: las listas dicen «Elegí una opción», las tablas «Pantalla completa», «Buscar en la tabla» y «Bajar la tabla», el cartelito de la barra de los gráficos «Ver los números», al escribir «Enter para confirmar», y el calendario de 💵 Caja «octubre 2026» con «D L M M J V S». Los gráficos, «23/10» y «$120.000». En cada pantalla queda un solo «ℹ️ Cómo funciona» arriba (en Depósito: la sección, «⏳ Para buscar» y cómo funciona la cola), y las ayudas de una parte siguen en su parte. `pruebas_de_la_sesion.py` (2d) lo controla: rompiéndolo a propósito, avisa.
 
+## 🔍 El Buscador encuentra el código como se escribe en el mostrador
+
+Lo pidió el dueño: «seguí mejorando la parte del buscador, que sea una locura». Se midió con productos reales de la base (86.946), buscándolos escritos como se escriben de verdad:
+
+| Escrito así | Antes | Ahora |
+|---|---|---|
+| Tal cual, o en minúsculas con espacios | 600 de 600 | 600 de 600 |
+| **Con la marca adelante**: «IMPERIAL 801598A», «NGK BKR6E», «bosch 0280156020», «JL MTA 0030» | **0 de 564** | **564 de 564** |
+| **Sin la marca que la lista pega atrás**: «LEICJ057» por «LEICJ057LUCAS» | 0 de 36 | 35 de 36 |
+| Con la marca adelante del número pelado: «FISPA LRSC107015» | 0 de 36 | 35 de 36 |
+
+- **La marca pegada atrás.** Las listas guardan el número con la marca pegada para que dos proveedores no se pisen, y en la base son **4.879 códigos así** (3.400 de FISPA, 1.395 de LUCAS, 84 de SKF): ninguno aparecía por el número que trae la caja. Ahora, si lo escrito no está, se prueba con cada una de esas marcas atrás.
+- **La marca escrita con el código**, adelante o atrás («6205 SKF»): se saca y se busca lo que queda. Las marcas son las de los fabricantes (`MARCAS_DE_REPUESTO`), las de los productos y los nombres de las listas (estas, aunque tengan dos letras, como JL).
+- **Con el mismo cuidado que el cero de adelante:** solo si lo escrito no encontró nada, solo si lo que queda existe como código —si no, «SKF» podría ser el principio de un código de verdad— y **siempre con aviso**, porque el número interno de un proveedor puede ser el de otra pieza en otro (el MAF126 de FISPA es de un Renault Master y el de Masser, de un Mercedes). En 171 casos el número pelado es otro producto: ahí la búsqueda exacta lo encuentra y esto no corre. El que falta en la tabla es uno de esos, a propósito.
+- Vale para el 🔍 Buscador, 🧾 Ventas y 📋 Lista WhatsApp, que buscan igual (`buscar_con_variantes_del_cero()`).
+
+`pruebas_del_buscador.py` (2f) lo controla: rompiéndolo a propósito, avisa.
+
 ## 📱 Lo que ve un cliente en el celular
 
 Lo pidió el dueño: «seguí mejorando». Se recorrió la app como la ve un cliente o un taller desde el teléfono, sin sesión, y salieron tres cosas:
