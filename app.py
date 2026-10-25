@@ -128,6 +128,7 @@ específico, y las pantallas quedan todas al final:
         · DEVOLVER ALGO DE UNA VENTA
         · LA CAJA APARTE
         · LO QUE LE AVISA LA APP A QUIEN VENDE
+        · LA VENTA A MEDIO ARMAR, A SALVO DE UNA RECARGA
     logica/mapa.py
         · EL MAPA DEL DEPÓSITO
         · DEPÓSITOS, PISOS Y ESTANTERÍAS
@@ -477,6 +478,15 @@ def _lo_que_termino_otro():
 if es_operador_o_admin() and not _es_del_deposito and obtener_usuario_actual():
     with st.container(key="novedades_para_mi"):
         _lo_que_termino_otro()
+    # Si se recargó la página con una venta a medias, se avisa una vez dónde recuperarla (ver
+    # «LA VENTA A MEDIO ARMAR, A SALVO DE UNA RECARGA» en logica/ventas.py).
+    if "_venta_a_medio_armar_avisada" not in st.session_state:
+        st.session_state["_venta_a_medio_armar_avisada"] = True
+        _guardada = None if st.session_state.get("venta_items") else la_venta_a_medio_armar()
+        if _guardada:
+            st.toast(f"🧾 Quedó una venta a medio armar ({len(_guardada['items'])} ítem(s), "
+                     f"${miles(_guardada['total'], 0)}): recuperala en 🧾 Ventas.",
+                     duration="long")
 # En el orden de lo que más se usa (ver ORDEN_DE_LAS_PAGINAS). Quien entra sin sesión ve solo lo
 # abierto (ver PAGINAS_ABIERTAS) y arranca en el Buscador.
 if _es_del_deposito:
@@ -752,6 +762,8 @@ except Exception as _err_de_la_pantalla:
         PREFIJOS_DE_LAS_PANTALLAS[PAGINAS.index(pagina)] if pagina in PAGINAS else "APP")
 finally:
     poner_la_ayuda_de_la_pantalla()
+    # La venta que se está armando, a salvo de una recarga: solo escribe si cambió.
+    guardar_la_venta_a_medio_armar()
 
 if _VISTA_AL_PIE:
     st.markdown("---")

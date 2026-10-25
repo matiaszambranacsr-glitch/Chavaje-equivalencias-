@@ -218,7 +218,23 @@ if pagina == PAGINAS[9]:
             st.info("No encontré ese código ni esa descripción.")
 
         st.markdown("---")
-        if not venta_items:
+        # LA VENTA QUE SE PERDIÓ CON UNA RECARGA: ver «LA VENTA A MEDIO ARMAR, A SALVO DE UNA
+        # RECARGA» en logica/ventas.py.
+        _guardada_vta = None if venta_items else la_venta_a_medio_armar()
+        if _guardada_vta:
+            _g1, _g2, _g3 = cols([4, 1, 1])
+            _g1.warning(f"🧾 **Quedó una venta a medio armar**, de las {_guardada_vta['hora']}: "
+                        f"{len(_guardada_vta['items'])} ítem(s) por "
+                        f"${miles(_guardada_vta['total'], 0)}"
+                        + (f", de {_guardada_vta['cliente']}" if _guardada_vta["cliente"] else "")
+                        + ".")
+            _g2.button("↩️ Recuperarla", key="venta_recuperar", type="primary", width="stretch",
+                       on_click=recuperar_la_venta_a_medio_armar,
+                       help="Vuelve con las cantidades, los precios y el cliente que tenía.")
+            _g3.button("🗑️ Descartarla", key="venta_descartar", width="stretch",
+                       on_click=descartar_la_venta_a_medio_armar,
+                       help="Si empezás otra venta sin recuperarla, también se descarta.")
+        elif not venta_items:
             st.info("La venta está vacía: buscá lo que se lleva el cliente, o pasá un "
                     "presupuesto del 🔍 Buscador con «🧾 Pasar a una venta».")
         else:

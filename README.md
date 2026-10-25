@@ -6636,6 +6636,44 @@ Lo pidió el dueño: «seguí mejorando la redacción de los textos, ponelos tod
 
 Probado en un navegador de verdad, en inglés y en castellano: las listas dicen «Elegí una opción», las tablas «Pantalla completa», «Buscar en la tabla» y «Bajar la tabla», el cartelito de la barra de los gráficos «Ver los números», al escribir «Enter para confirmar», y el calendario de 💵 Caja «octubre 2026» con «D L M M J V S». Los gráficos, «23/10» y «$120.000». En cada pantalla queda un solo «ℹ️ Cómo funciona» arriba (en Depósito: la sección, «⏳ Para buscar» y cómo funciona la cola), y las ayudas de una parte siguen en su parte. `pruebas_de_la_sesion.py` (2d) lo controla: rompiéndolo a propósito, avisa.
 
+## 🏎️ «Que sea un Ferrari F2002»: la segunda tanda de Gemini, medida
+
+El dueño le pidió a Gemini «lo mejor de lo mejor» y trajo otra tanda. Antes de tocar nada se midió dónde se va el tiempo de verdad, con la copia de la base (86.946 productos):
+
+| Qué | Antes | Ahora |
+|---|---|---|
+| **Buscar un código con muchos vínculos** (LRSNT61671LUCAS, LRAC03043LUCAS…) | 230 a 300 ms, y 3.588 consultas a la base por búsqueda | **100 a 135 ms**, 1.245 consultas |
+| **Buscar «02400»** | 106 ms | **36 ms** |
+
+Lo lento no era buscar el código (eso ya va por índice, en microsegundos), sino **la ficha de prueba de cada resultado**, que decide su estado (✅, ⚠️, 🔴…): por cada uno volvía a preguntar lo mismo. El camino de vínculos desde el buscado se recorría de nuevo para cada resultado (2.278 de las 3.588 consultas); se traían **todos** los vínculos de la base y **todos** los códigos con aplicaciones de fábrica para mirar un par; la cuenta de palabras del catálogo se copiaba entera en cada búsqueda; y la descripción del buscado se leía una vez por resultado. Ahora cada cosa se pregunta una vez por búsqueda. **Controlado sobre 404 códigos reales y 5.874 resultados: dan exactamente lo mismo que antes** (estado, motivo, respaldo, confianza, cadena).
+
+| Propuesta | Qué hay / qué se hizo |
+|---|---|
+| **Persistencia del carrito si se recarga el navegador** | **Hecho.** Ver «🧾 La venta a medio armar, a salvo de una recarga» abajo. |
+| **Todo el catálogo en la memoria (diccionarios en RAM)** | No: la búsqueda del código ya tarda microsegundos con los índices; el tiempo estaba en la ficha de cada resultado (arreglado arriba). Copiar la base a la memoria duplica lo que ocupa la app en un servidor chico, y obliga a acordarse de actualizarla con cada precio, stock, vínculo o lista nueva: el olvido que no se ve. |
+| **Importar con pandas vectorizado** | Medido: una lista de **20.000 filas entra en 5 segundos**. Cada fila decide cosas que no son una operación de tabla (códigos sin dígitos que no se vinculan, saltos de precio que se frenan, dos códigos en la misma celda), y todo va en una transacción. Reescribirla arriesga lo más delicado para ganar segundos una vez por semana. |
+| **Paginación de las tablas** | Ya está: las tablas de Streamlit dibujan solo las filas que se ven, y en el celular las tarjetas van de a 40. |
+| **`re.compile` en `codigos.py`** | No hace falta: Python ya guarda compiladas las expresiones, y `sanitizar()` tarda **0,1 µs** por código (medido con 100.000). |
+| **Modo WAL en SQLite** | Ya está, con `busy_timeout`: `get_connection()`. |
+| **Medir el tiempo de cada búsqueda** | Ya está: cada búsqueda anota cuánto tardó, y 🧹 Mantenimiento muestra la mediana, el P95 y las más lentas. |
+| **Registro de cambios con usuario y hora** | Ya está: `registro_de_cambios` (quién, cuándo, qué, antes y después; vínculos, cuentas, empleados, ventas con stock de menos…) y `historial_precios`. **Quién cambió un precio no se anota a propósito**: se probó y el dueño no lo quiso. |
+| **Detectar solas las columnas del Excel** | Ya está: `adivinar_columnas()` por el encabezado y `adivinar_columnas_por_datos()` por lo que hay adentro, con el mapeo a la vista para corregirlo. |
+| **Tablero de márgenes y rentabilidad** | Ya está: «Ganancia estimada» en 🧾 Ventas y en 💵 Caja (solo el administrador) y el 💰 margen en el buscador. |
+| **Línea premium contra económica** | En parte: la calidad por marca sale de lo que vuelve fallado (`calidad_por_marca()`), separada de «no era la pieza». |
+| **API REST con FastAPI**, **Docker**, **`tests/`**, **Alembic**, **SQLAlchemy** | No: ver la tanda anterior, abajo. Streamlit Cloud corre la app como está; una API aparte sería otro servidor que mantener sin que nadie la use. |
+
+## 🧾 La venta a medio armar, a salvo de una recarga
+
+La venta que se está armando en 🧾 Ventas vivía solo en la pestaña del navegador: si se recargaba la página, el teléfono cerraba la pestaña para hacer lugar o se cortaba la conexión, se perdía entera, con el cliente esperando adelante. Ahora:
+
+- Se guarda la de cada persona, sola y solo cuando cambia (un ítem más, otra cantidad, otro precio, el cliente).
+- Al volver a entrar, un aviso: «🧾 Quedó una venta a medio armar (3 ítems, $12.500): recuperala en 🧾 Ventas».
+- En 🧾 Ventas, **↩️ Recuperarla** la trae con las cantidades, los precios y el cliente que tenía (y el stock de ahora; lo que ya no está en el catálogo queda afuera, y se dice). **🗑️ Descartarla** la borra; empezar otra sin recuperarla, también.
+- Al terminarla, no queda nada guardado. Se ofrece solo la del día y solo a quien la armaba.
+- El veredicto de cada ítem viaja con ella: una pieza que la app frena (🔴) sigue pidiendo confirmación después de recuperarla.
+
+`pruebas_de_la_sesion.py` (5) lo controla con una sesión nueva sobre la misma base, que es lo que es una recarga para la app; rompiéndolo a propósito de tres maneras, avisa. Probado en un navegador de verdad: armada una venta, recargada la página y vuelto a entrar, salió el aviso y volvió con el cliente y el total.
+
 ## 🔎 Las 17 propuestas de Gemini, contra el código
 
 El dueño le pasó el código a Gemini y trajo sus propuestas. Cada una se miró contra lo que hay:

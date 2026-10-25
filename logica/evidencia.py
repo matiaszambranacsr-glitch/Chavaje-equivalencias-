@@ -53,23 +53,34 @@ class _NadaQueBuscar(Exception):
     """Para saltear una consulta que se sabe vacía sin anidar otro nivel de if."""
 
 
-def _codigos_con_aplicaciones_de_fabrica():
-    """Los códigos que tienen alguna aplicación que NO sea deducida. Ver evidencia_cruzada()."""
+def _tiene_aplicaciones_de_fabrica(codigo_clean):
+    """¿Este código tiene alguna aplicación que NO sea deducida? Ver evidencia_cruzada().
+
+    Se pregunta código por código, recordado mientras dura la búsqueda. Antes se traían TODOS
+    los códigos con aplicaciones de fábrica para mirar dos: 34 ms en cada búsqueda con
+    resultados (110.943 aplicaciones), contra menos de uno así."""
     try:
-        return {r[0] for r in c.execute("""SELECT DISTINCT codigo_clean FROM aplicaciones
-                                           WHERE COALESCE(origen, '') <> 'deducida'""")}
+        c.execute("""SELECT 1 FROM aplicaciones
+                     WHERE codigo_clean = ? AND COALESCE(origen, '') <> 'deducida' LIMIT 1""",
+                  (codigo_clean,))
+        return c.fetchone() is not None
     except sqlite3.OperationalError as _err:
-        anotar_error("_codigos_con_aplicaciones_de_fabrica", _err)
-        return set()
+        anotar_error("_tiene_aplicaciones_de_fabrica", _err)
+        return False
 
 
-def _pares_vinculados():
+def _estan_vinculados(id_a, id_b):
+    """¿Hay un vínculo directo entre los dos? Por par y no trayendo todos los vínculos de la
+    base para mirar uno: eran 26 ms en cada búsqueda con resultados (20.037 vínculos)."""
     try:
-        return {(min(r[0], r[1]), max(r[0], r[1]))
-                for r in c.execute("SELECT producto_a_id, producto_b_id FROM equivalencias")}
+        c.execute("""SELECT 1 FROM equivalencias
+                     WHERE (producto_a_id = ? AND producto_b_id = ?)
+                        OR (producto_a_id = ? AND producto_b_id = ?) LIMIT 1""",
+                  (id_a, id_b, id_b, id_a))
+        return c.fetchone() is not None
     except sqlite3.OperationalError as _err:
-        anotar_error("_pares_vinculados", _err)
-        return set()
+        anotar_error("_estan_vinculados", _err)
+        return False
 
 
 def _codigos_con_reemplazo():
@@ -327,10 +338,11 @@ def evidencia_cruzada(id_a, id_b, cuenta_palabras=None, total_descripciones=None
             aviso_desc = motivo_desc
 
     # 3. El catálogo del fabricante: ¿los da para el mismo auto?
-    _con_fabrica = _recordado(("codigos_con_aplicaciones_de_fabrica",),
-                              _codigos_con_aplicaciones_de_fabrica)
+    def _con_fabrica(codigo):
+        return _recordado(("con_aplicaciones_de_fabrica", codigo),
+                          lambda: _tiene_aplicaciones_de_fabrica(codigo))
     try:
-        if pa["codigo_clean"] not in _con_fabrica or pb["codigo_clean"] not in _con_fabrica:
+        if not _con_fabrica(pa["codigo_clean"]) or not _con_fabrica(pb["codigo_clean"]):
             raise _NadaQueBuscar()
         # Las deducidas quedan afuera por lo mismo que en analizar_lote_pendiente(): esta vía
         # cuenta como UNA de las tres evidencias que fuerzan el puntaje a 90, y una aplicación
@@ -365,7 +377,8 @@ def evidencia_cruzada(id_a, id_b, cuenta_palabras=None, total_descripciones=None
         vetos.append(f"↩️ lo devolvieron {_devuelto} vez(ces) porque no le iba")
 
     # 5. Un código de fábrica compartido
-    if (min(id_a, id_b), max(id_a, id_b)) in _recordado(("vinculados_ev",), _pares_vinculados):
+    if _recordado(("vinculados_ev", min(id_a, id_b), max(id_a, id_b)),
+                  lambda: _estan_vinculados(id_a, id_b)):
         a_favor.append("🔗 ya están vinculados en la base")
 
     # 6. Reemplazo de código declarado. Solo se sigue la cadena de los códigos que figuran en
@@ -795,7 +808,10 @@ def ficha_de_prueba(id_a, id_b, tolerancia_pct=3, liviana=False):
     for _pid, _p in ((id_a, pa), (id_b, pb)):
         # Lo cargado antes de que existiera el historial: si es lo que el lector de hoy saca
         # de la descripción, salió de ahí (las importaciones no cargan medidas).
-        _leidas = medidas_desde_descripcion(_p["descripcion"])
+        # Con el caché de _medidas_del_texto(): el buscado es el lado A de la ficha de cada
+        # resultado, y se leía su descripción una vez por resultado (650 lecturas en seis
+        # búsquedas, la mitad de la misma). Solo se consulta, así que un dict de la tupla alcanza.
+        _leidas = dict(_medidas_del_texto(_p["descripcion"]))
         for _cp, _v in (medidas.get(_pid) or {}).items():
             if (_v not in (None, "", 0) and _cp not in _origen[_pid]
                     and _leidas.get(_cp) is not None and str(_leidas[_cp]) == str(_v)):
@@ -1213,11 +1229,14 @@ def _lo_que_dicen_las_descripciones(desc_a, desc_b):
 def autos_de_los_dos(clean_a, clean_b, tope=8):
     """{"comun": [(marca, modelo)…], "solo_a": n, "solo_b": n, "ejemplos_a", "ejemplos_b"}: los
     autos que nombran las aplicaciones de cada código (leídas de las descripciones)."""
-    autos = {}
-    for lado, clean in (("a", clean_a), ("b", clean_b)):
+    def de_la_base(clean):
         c.execute("SELECT DISTINCT UPPER(marca_auto) AS ma, UPPER(modelo_auto) AS mo "
                   "FROM aplicaciones WHERE codigo_clean = ?", (clean or "",))
-        autos[lado] = {(r["ma"], r["mo"]) for r in c.fetchall()}
+        return {(r["ma"], r["mo"]) for r in c.fetchall()}
+    # El buscado es el lado «a» de la ficha de cada resultado: recordado mientras dura la
+    # búsqueda, se pregunta una vez y no una por resultado (ver recordando_lo_de_cada_producto).
+    autos = {lado: _recordado(("autos_de_aplicaciones", clean or ""), lambda: de_la_base(clean))
+             for lado, clean in (("a", clean_a), ("b", clean_b))}
     comun = sorted(autos["a"] & autos["b"])
 
     def _ej(conjunto):

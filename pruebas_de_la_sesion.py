@@ -202,6 +202,68 @@ def probar():
                                                               "Usuarios", "Backup")), False)
     esperar("ni las pestañas del negocio", [b.label for b in at.button if "Administrar" in b.label], [])
     esperar("sin errores", [e.value for e in at.exception], [])
+
+    # 5. La venta a medio armar sobrevive a una recarga, que para la app es una sesión nueva
+    # sobre la misma base: al entrar se avisa, 🧾 Ventas ofrece recuperarla —con la cantidad, el
+    # precio y el cliente que tenía— y, terminada, no queda nada guardado. A otro no se le
+    # ofrece, y la de ayer tampoco. Ver «LA VENTA A MEDIO ARMAR, A SALVO DE UNA RECARGA».
+    c, conn = ns["c"], ns["conn"]
+    for nombre in ("rita", "beto"):
+        ns["crear_usuario"](nombre, f"clave-{nombre}-1", "operador")
+    c.execute("INSERT INTO marcas (nombre, tipo) VALUES ('PRUEBA VENTA', 'PROVEEDOR')")
+    c.execute("INSERT INTO productos (codigo_raw, codigo_clean, descripcion, marca_id, precio, "
+              "stock) VALUES ('V100', 'V100', 'FILTRO', ?, 1000, 5)", (c.lastrowid,))
+    pid = c.lastrowid
+    conn.commit()
+    ventas = ns["PAGINAS"][9]
+
+    def sesion_nueva(clave, pagina=None):
+        nueva = AppTest.from_file(os.path.join(RAIZ, "app.py"), default_timeout=300)
+        nueva.secrets["admin_passwords"] = {"duenio": "clave-duenio-1"}
+        nueva.run()
+        _entrar(nueva, clave)
+        if pagina:
+            nueva.session_state["pagina_actual"] = pagina
+            nueva.run()
+        return nueva
+
+    def guardada(quien):
+        return c.execute("SELECT cliente FROM ventas_a_medio_armar WHERE usuario = ?",
+                         (quien,)).fetchone()
+
+    def ofrecida(sesion):
+        return ([b.label for b in sesion.button if b.label == "↩️ Recuperarla"],
+                [t.value for t in sesion.toast if "venta a medio armar" in t.value])
+
+    vta = sesion_nueva("clave-rita-1", ventas)
+    vta.session_state["venta_items"] = [dict(ns["item_de_venta"](pid, 3), precio=900.0)]
+    vta.session_state["venta_cliente"] = "Juan"
+    vta.run()
+    esperar("se guarda la venta a medio armar", tuple(guardada("rita") or ()), ("Juan",))
+    vta = sesion_nueva("clave-rita-1")                       # recargó la página
+    esperar("al entrar, el aviso", len(ofrecida(vta)[1]), 1)
+    vta.session_state["pagina_actual"] = ventas
+    vta.run()
+    esperar("una sesión nueva no la borra antes de contestar", bool(guardada("rita")), True)
+    if not ofrecida(vta)[0]:
+        fallas.append("🧾 Ventas no ofrece recuperar la venta a medio armar")
+        return fallas
+    [b for b in vta.button if b.label == "↩️ Recuperarla"][0].click().run()
+    esperar("recuperada con su cantidad, su precio y el cliente",
+            ([(x["producto_id"], x["cantidad"], x["precio"])
+              for x in vta.session_state["venta_items"]], vta.session_state["venta_cliente"]),
+            ([(pid, 3, 900.0)], "Juan"))
+    otro = sesion_nueva("clave-beto-1", ventas)
+    esperar("a otro no se le ofrece", ofrecida(otro), ([], []))
+    [b for b in vta.button if b.label in ("✅ Terminar la venta", "📤 Mandar a la caja")][0] \
+        .click().run()
+    esperar("terminada, no queda guardada", guardada("rita"), None)
+    c.execute("""INSERT INTO ventas_a_medio_armar (usuario, items, cliente, guardada)
+                 VALUES ('rita', ?, '', datetime('now', 'localtime', '-1 day'))""",
+              (f'[{{"producto_id": {pid}, "cantidad": 1, "precio": 1}}]',))
+    conn.commit()
+    esperar("la de ayer no se ofrece", ofrecida(sesion_nueva("clave-rita-1", ventas)), ([], []))
+    esperar("sin errores en la venta", [e.value for s_ in (vta, otro) for e in s_.exception], [])
     return fallas
 
 

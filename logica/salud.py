@@ -1029,6 +1029,19 @@ def diagnostico_par(codigo_a, codigo_b):
     return pasos
 
 
+def _vecinos_con_su_confianza(nodo):
+    """Los vínculos de un producto, para camino_entre(). Aparte para recordarlos mientras dura
+    una búsqueda: la ficha de cada resultado busca su camino desde el mismo buscado, y cada una
+    volvía a preguntar por los mismos productos. Medido sobre la base real, con LRSNT61671LUCAS:
+    2.278 de las 3.588 consultas de una búsqueda eran ésta, repetida."""
+    c.execute("""SELECT CASE WHEN producto_a_id = ? THEN producto_b_id ELSE producto_a_id END
+                        AS otro, COALESCE(confianza, 50) AS conf, lote,
+                        COALESCE(verificada, 0) AS verif
+                 FROM equivalencias
+                 WHERE producto_a_id = ? OR producto_b_id = ?""", (nodo, nodo, nodo))
+    return c.fetchall()
+
+
 def camino_entre(origen_id, destino_id, tope_nodos=3000):
     """Por qué cadena de vínculos este resultado llegó hasta acá. Devuelve la lista de pasos.
 
@@ -1055,12 +1068,7 @@ def camino_entre(origen_id, destino_id, tope_nodos=3000):
         visitados.add(nodo)
         if nodo == destino_id:
             break
-        c.execute("""SELECT CASE WHEN producto_a_id = ? THEN producto_b_id ELSE producto_a_id END
-                            AS otro, COALESCE(confianza, 50) AS conf, lote,
-                            COALESCE(verificada, 0) AS verif
-                     FROM equivalencias
-                     WHERE producto_a_id = ? OR producto_b_id = ?""", (nodo, nodo, nodo))
-        for fila in c.fetchall():
+        for fila in _recordado(("vecinos", nodo), lambda: _vecinos_con_su_confianza(nodo)):
             otro, conf = fila["otro"], fila["conf"]
             if otro in visitados:
                 continue

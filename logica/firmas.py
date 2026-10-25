@@ -810,6 +810,14 @@ def cuantas_veces_aparece_cada_palabra():
     """(conteo por palabra, total de descripciones). Lo que necesita firmas_compatibles() para
     saber qué palabra distingue y cuál está en todos lados. Va cacheado por versión."""
     version = version_del_catalogo()
+    # La cuenta ya armada, de la última versión del catálogo de esta base. descripciones_por_
+    # palabra() viene de st.cache_data, que devuelve una COPIA en cada llamada, y después se le
+    # volvían a sumar las abreviaturas: 38 ms en cada búsqueda con resultados, por armar lo
+    # mismo. Quien la usa solo la lee (palabras_que_dicen_algo()).
+    armadas = del_proceso("cuenta_de_palabras", dict).setdefault(DB_PATH, {})
+    ya_armada = armadas.get(version)
+    if ya_armada is not None:
+        return ya_armada
     # Cada cosa por separado y en este orden, a propósito. Escrito como
     # `return descripciones_por_palabra(version), c.fetchone()[0]` no anda: Python evalúa
     # primero la función, que hace sus propias consultas sobre el MISMO cursor, y para cuando
@@ -830,6 +838,9 @@ def cuantas_veces_aparece_cada_palabra():
     for abreviatura, expandida in ABREVIATURAS_DE_PIEZA.items():
         if cuenta.get(abreviatura):
             completo[expandida] = completo.get(expandida, 0) + cuenta[abreviatura]
+    if total:                     # vacía (una base sin productos, o un error): no se guarda
+        armadas.clear()
+        armadas[version] = (completo, total)
     return completo, total
 
 

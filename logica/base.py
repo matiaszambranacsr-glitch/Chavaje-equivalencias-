@@ -66,8 +66,8 @@ def del_proceso(nombre, crear):
 # CHAS hasta que se reiniciara el servidor. Ver olvidar_lo_guardado_de_la_base(). Cada
 # del_proceso() de la app está en una de las dos listas: pruebas_de_la_recuperacion.py falla si
 # aparece uno nuevo sin decidir de cuál es.
-MEMORIAS_DE_LA_BASE = ("autos_contra_el_catalogo", "cobertura_del_catalogo", "escala_de_precios",
-                       "marca_del_modelo", "marcas_con_chas", "red_de_equivalencias",
+MEMORIAS_DE_LA_BASE = ("autos_contra_el_catalogo", "cobertura_del_catalogo", "cuenta_de_palabras",
+                       "escala_de_precios", "marca_del_modelo", "marcas_con_chas", "red_de_equivalencias",
                        "salud_compartida")
 MEMORIAS_QUE_NO_SON_DE_LA_BASE = (
     # Candados, sesiones con los sitios de afuera, lo bajado de internet y lo que se midió.

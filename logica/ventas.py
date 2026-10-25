@@ -1150,3 +1150,106 @@ def novedades_de(usuario, desde):
                  if d["estado"] == "entregado" else f"❌ El depósito no lo encontró: {que}")
         novedades.append((f"pedido {d['id']}", d["resuelto_en"], texto))
     return sorted(novedades, key=lambda n: n[1])
+
+
+# ============================================================================================
+# LA VENTA A MEDIO ARMAR, A SALVO DE UNA RECARGA
+# ============================================================================================
+# La venta que se está armando vivía solo en la sesión del navegador: recargar la página, que el
+# teléfono cierre la pestaña para hacer lugar o que se corte la conexión, y se perdía entera, con
+# el cliente esperando adelante. Lo propuso una revisión con Gemini («persistencia del carrito»).
+# Se guarda la de cada persona —la última—, solo cuando cambia; al volver a entrar se avisa una
+# vez y 🧾 Ventas ofrece recuperarla. Solo la del día: la de ayer, con los precios de ayer, ya
+# no es un cliente esperando.
+
+# Lo que se guarda de cada ítem: lo que tiene la fila de la venta (ver item_de_venta() y
+# sumar_a_la_venta()). El veredicto y si se confirmó van también: sin ellos, una pieza que la app
+# frena (🔴) se vendería sin preguntar después de recuperarla.
+CAMPOS_DEL_ITEM_QUE_SE_GUARDAN = ("producto_id", "codigo", "marca", "descripcion", "precio",
+                                  "cantidad", "pedido", "veredicto", "evidencia", "confirmado")
+
+
+def guardar_la_venta_a_medio_armar():
+    """Guarda la venta de la sesión si cambió desde la última vez, o la borra si quedó vacía (se
+    terminó o se quitó todo). Una sesión que todavía no armó nada no borra nada: es la que se
+    recargó y todavía no recuperó la anterior. Va al final de cada vuelta (ver app.py)."""
+    if solo_mirar():
+        return
+    items = [{k: it.get(k) for k in CAMPOS_DEL_ITEM_QUE_SE_GUARDAN}
+             for it in st.session_state.get("venta_items") or []]
+    cliente = str(st.session_state.get("venta_cliente") or "")
+    firma = json.dumps([items, cliente], ensure_ascii=False, default=str, sort_keys=True)
+    anterior = st.session_state.get("_venta_guardada")
+    if firma == anterior or (anterior is None and not items):
+        return
+    try:
+        with db_lock, transaccion():
+            if items:
+                c.execute("""INSERT OR REPLACE INTO ventas_a_medio_armar (usuario, items, cliente,
+                                                                          guardada)
+                             VALUES (?, ?, ?, datetime('now', 'localtime'))""",
+                          (obtener_usuario_actual(),
+                           json.dumps(items, ensure_ascii=False, default=str), cliente))
+            else:
+                c.execute("DELETE FROM ventas_a_medio_armar WHERE usuario = ?",
+                          (obtener_usuario_actual(),))
+    except sqlite3.Error as _err:
+        anotar_error("guardar_la_venta_a_medio_armar", _err)
+        return
+    st.session_state["_venta_guardada"] = firma
+
+
+def la_venta_a_medio_armar():
+    """La que dejó guardada quien está adentro, si es de hoy: {"items", "cliente", "hora",
+    "total"}, o None."""
+    try:
+        c.execute("""SELECT items, cliente, substr(guardada, 12, 5) AS hora
+                     FROM ventas_a_medio_armar
+                     WHERE usuario = ? AND date(guardada) = date('now', 'localtime')""",
+                  (obtener_usuario_actual(),))
+        fila = c.fetchone()
+        items = json.loads(fila["items"]) if fila else []
+    except (sqlite3.Error, ValueError) as _err:
+        anotar_error("la_venta_a_medio_armar", _err)
+        return None
+    if not items:
+        return None
+    return {"items": items, "cliente": fila["cliente"] or "", "hora": fila["hora"],
+            "total": sum(float(x.get("precio") or 0) * int(x.get("cantidad") or 1)
+                         for x in items)}
+
+
+def recuperar_la_venta_a_medio_armar():
+    """«↩️ Recuperarla»: vuelve a la venta de la sesión con la cantidad, el precio y el cliente
+    que tenía, y el stock de ahora. Lo que ya no está en el catálogo queda afuera, y se dice.
+    Va como on_click."""
+    guardada = la_venta_a_medio_armar()
+    if not guardada:
+        return
+    venta = st.session_state.setdefault("venta_items", [])
+    afuera = []
+    for it in guardada["items"]:
+        if any(x["producto_id"] == it.get("producto_id") for x in venta):
+            continue
+        nuevo = item_de_venta(it.get("producto_id"), it.get("cantidad") or 1, it.get("pedido"))
+        if not nuevo:
+            afuera.append(f"{it.get('marca') or ''} {it.get('codigo') or ''}".strip())
+            continue
+        nuevo.update(precio=float(it.get("precio") or nuevo["precio"]),
+                     veredicto=it.get("veredicto"), evidencia=it.get("evidencia"),
+                     confirmado=bool(it.get("confirmado")))
+        venta.append(nuevo)
+        # Los campos de cantidad y precio arrancan de lo recuperado, no de lo que quedó en ellos.
+        st.session_state.pop(f"venta_cant_{nuevo['producto_id']}", None)
+        st.session_state.pop(f"venta_precio_{nuevo['producto_id']}", None)
+    if guardada["cliente"] and not st.session_state.get("venta_cliente"):
+        st.session_state["venta_cliente"] = guardada["cliente"]
+    if afuera:
+        avisar("warning", "Ya no están en el catálogo, quedaron afuera: " + ", ".join(afuera))
+
+
+def descartar_la_venta_a_medio_armar():
+    """«🗑️ Descartarla». Va como on_click."""
+    with db_lock, transaccion():
+        c.execute("DELETE FROM ventas_a_medio_armar WHERE usuario = ?", (obtener_usuario_actual(),))
+

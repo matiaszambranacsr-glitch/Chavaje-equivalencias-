@@ -2994,6 +2994,14 @@ def _esquema_ventas(c):
     # Lo mismo con las ventas que le cobraron a cada vendedor: (cobrada, anulada) son casi
     # todas las ventas, así que el índice de arriba no achicaba nada para esa pregunta.
     c.execute("CREATE INDEX IF NOT EXISTS idx_ventas_de_quien ON ventas(usuario, cobrada_en)")
+    # LA VENTA A MEDIO ARMAR de cada uno, para que una recarga no la borre. Ver «LA VENTA A MEDIO
+    # ARMAR, A SALVO DE UNA RECARGA» en logica/ventas.py.
+    c.execute("""CREATE TABLE IF NOT EXISTS ventas_a_medio_armar (
+        usuario TEXT PRIMARY KEY,
+        items TEXT NOT NULL,
+        cliente TEXT,
+        guardada TEXT DEFAULT (datetime('now', 'localtime'))
+    )""")
 
 
 def _esquema_del_mapa(c):
