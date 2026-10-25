@@ -226,448 +226,458 @@ if pagina == PAGINAS[0]:
     # entre el encabezado y la caja de búsqueda, que es a lo que se viene.
     _escanear_aca, _parecido_aca = (st.columns(2) if es_operador_o_admin()
                                     else (st.container(), None))
-    with _escanear_aca.expander("📷 Escanear el código de barras de la caja",
-                                key="exp_escanear_codigo_barras_caja"):
-        explicar(
-            "La forma más segura de identificar un repuesto: no hay nada que adivinar.",
-            "El código de la caja es exacto. A diferencia de comparar fotos o leer un grabado, "
-            "acá no hay interpretación posible: o lo lee o no lo lee.\n\nSacá la foto de cerca, "
-            "con buena luz y el código derecho, ocupando buena parte de la pantalla. Sirve "
-            "también para QR.", en_expander=True
-        )
-        foto_barras = st.camera_input("Apuntá al código de barras", key="cam_barras")
-        if foto_barras is None:
-            foto_barras = subir_archivo("...o subí una foto ya sacada:",
-                                         ["jpg", "jpeg", "png"], "barras_archivo")
-        if foto_barras is not None:
-            datos_foto = foto_barras.getvalue() if hasattr(foto_barras, "getvalue") else foto_barras
-            with st.spinner("Leyendo el código..."):
-                codigos_leidos, err_barras = leer_codigo_de_barras(datos_foto)
-            if err_barras:
-                st.warning(err_barras)
-            else:
-                for cod_barra in codigos_leidos:
-                    st.success(f"📷 Código leído: **`{cod_barra}`**")
-                    # De dónde es se sabe sin consultar nada: lo dice el prefijo. Sirve para
-                    # decidir si el repuesto lo consigue un proveedor local o hay que traerlo.
-                    _pais_barra = pais_del_codigo_de_barras(cod_barra)
-                    if _pais_barra and _pais_barra not in GS1_NO_ES_UN_PAIS:
-                        st.caption(f"🌍 El código lo registró una empresa de **{_pais_barra}** "
-                                    "(el país de quien lo emitió, no necesariamente el de la "
-                                    "fábrica).")
-                    res_barra, nota_barra = buscar_por_codigo_de_barras(cod_barra)
-                    if nota_barra:
-                        st.caption(nota_barra)
-                    if res_barra:
-                        st.success(f"✅ {len(res_barra)} coincidencia(s) — es una coincidencia "
-                                    "exacta de código, no un parecido:")
-                        st.dataframe(quitar_id(res_barra), width="stretch",
-                                      hide_index=True)
-                    elif _pais_barra in GS1_NO_ES_UN_PAIS:
-                        # Qué decir acá depende de quién imprime las etiquetas, y es lo
-                        # contrario en cada caso. Ver el_negocio_etiqueta_con_codigos_propios().
-                        if el_negocio_etiqueta_con_codigos_propios():
-                            st.warning(
-                                f"El código `{cod_barra}` **no está cargado**. Es un código de "
-                                "uso interno, del rango que usás para tus propias etiquetas, "
-                                "así que lo más probable es que sea una etiqueta tuya que "
-                                "todavía no le pegaste a ningún producto. Se cargan de a "
-                                f"muchos en {miga_hasta('Cargar códigos de barras en masa')}."
-                            )
+    # Perezoso: lo de adentro corre solo abierto (ver el de «📐 Buscar por medidas» en el Buscador).
+    _exp_escanear = _escanear_aca.expander("📷 Escanear el código de barras de la caja",
+                                           key="exp_escanear_codigo_barras_caja",
+                                           on_change="rerun")
+    if _exp_escanear.open:
+        with _exp_escanear:
+            explicar(
+                "La forma más segura de identificar un repuesto: no hay nada que adivinar.",
+                "El código de la caja es exacto. A diferencia de comparar fotos o leer un grabado, "
+                "acá no hay interpretación posible: o lo lee o no lo lee.\n\nSacá la foto de cerca, "
+                "con buena luz y el código derecho, ocupando buena parte de la pantalla. Sirve "
+                "también para QR.", en_expander=True
+            )
+            foto_barras = st.camera_input("Apuntá al código de barras", key="cam_barras")
+            if foto_barras is None:
+                foto_barras = subir_archivo("...o subí una foto ya sacada:",
+                                             ["jpg", "jpeg", "png"], "barras_archivo")
+            if foto_barras is not None:
+                datos_foto = foto_barras.getvalue() if hasattr(foto_barras, "getvalue") else foto_barras
+                with st.spinner("Leyendo el código..."):
+                    codigos_leidos, err_barras = leer_codigo_de_barras(datos_foto)
+                if err_barras:
+                    st.warning(err_barras)
+                else:
+                    for cod_barra in codigos_leidos:
+                        st.success(f"📷 Código leído: **`{cod_barra}`**")
+                        # De dónde es se sabe sin consultar nada: lo dice el prefijo. Sirve para
+                        # decidir si el repuesto lo consigue un proveedor local o hay que traerlo.
+                        _pais_barra = pais_del_codigo_de_barras(cod_barra)
+                        if _pais_barra and _pais_barra not in GS1_NO_ES_UN_PAIS:
+                            st.caption(f"🌍 El código lo registró una empresa de **{_pais_barra}** "
+                                        "(el país de quien lo emitió, no necesariamente el de la "
+                                        "fábrica).")
+                        res_barra, nota_barra = buscar_por_codigo_de_barras(cod_barra)
+                        if nota_barra:
+                            st.caption(nota_barra)
+                        if res_barra:
+                            st.success(f"✅ {len(res_barra)} coincidencia(s) — es una coincidencia "
+                                        "exacta de código, no un parecido:")
+                            st.dataframe(quitar_id(res_barra), width="stretch",
+                                          hide_index=True)
+                        elif _pais_barra in GS1_NO_ES_UN_PAIS:
+                            # Qué decir acá depende de quién imprime las etiquetas, y es lo
+                            # contrario en cada caso. Ver el_negocio_etiqueta_con_codigos_propios().
+                            if el_negocio_etiqueta_con_codigos_propios():
+                                st.warning(
+                                    f"El código `{cod_barra}` **no está cargado**. Es un código de "
+                                    "uso interno, del rango que usás para tus propias etiquetas, "
+                                    "así que lo más probable es que sea una etiqueta tuya que "
+                                    "todavía no le pegaste a ningún producto. Se cargan de a "
+                                    f"muchos en {miga_hasta('Cargar códigos de barras en masa')}."
+                                )
+                            else:
+                                st.warning(
+                                    f"El código `{cod_barra}` no es el de un producto: es "
+                                    f"**{_pais_barra}**. Si es de uso interno lo imprimió un "
+                                    "comercio para sí mismo y no vale afuera; si es un libro o una "
+                                    "revista, escaneaste otra cosa. Buscá el código de barras del "
+                                    "repuesto, que suele estar en otra cara de la caja."
+                                )
                         else:
                             st.warning(
-                                f"El código `{cod_barra}` no es el de un producto: es "
-                                f"**{_pais_barra}**. Si es de uso interno lo imprimió un "
-                                "comercio para sí mismo y no vale afuera; si es un libro o una "
-                                "revista, escaneaste otra cosa. Buscá el código de barras del "
-                                "repuesto, que suele estar en otra cara de la caja."
+                                f"El código `{cod_barra}` no está cargado en tu catálogo."
                             )
-                    else:
-                        st.warning(
-                            f"El código `{cod_barra}` no está cargado en tu catálogo."
-                        )
-                        # El dígito verificador SOLO se menciona acá: cuando no se encontró.
-                        # Si el repuesto apareció, el número está bien por definición —coincide
-                        # con el cargado— cierre la cuenta o no, y avisar ahí sería decirle
-                        # «está mal tipeado» a alguien que acaba de escanear su propia etiqueta
-                        # y encontró lo que buscaba. Con un negocio que etiqueta su mercadería,
-                        # eso sería un cartel de error en CADA escaneo.
-                        if codigo_de_barras_cierra(cod_barra) is False:
-                            st.caption(
-                                "🔢 Además, ese número **no cierra con su dígito verificador**. "
-                                "Si la etiqueta es del fabricante, está mal leída o mal "
-                                "tipeada: probá de nuevo más cerca y con mejor luz. Si es una "
-                                "etiqueta tuya, es normal que no cierre y no significa nada."
-                            )
-                        parecidos_barra = codigos_por_tipeo(sanitizar(cod_barra))
-                        if parecidos_barra:
-                            st.caption("Códigos parecidos que sí tenés:")
-                            st.dataframe(
-                                [{"Código": x["Codigo"], "Marca": x["Marca"],
-                                  "Descripción": x["Descripcion"], "Stock": x["Stock"]}
-                                 for x in parecidos_barra],
-                                width="stretch", hide_index=True)
-                        ajeno_barra = identificar_codigo_ajeno(sanitizar(cod_barra))
-                        if ajeno_barra:
-                            st.info(f"🏭 Según el catálogo de {ajeno_barra['marca']}, es "
-                                     f"{ajeno_barra['tipo'] or 'una pieza'} para "
-                                     f"{ajeno_barra['cantidad_autos']} auto(s).")
+                            # El dígito verificador SOLO se menciona acá: cuando no se encontró.
+                            # Si el repuesto apareció, el número está bien por definición —coincide
+                            # con el cargado— cierre la cuenta o no, y avisar ahí sería decirle
+                            # «está mal tipeado» a alguien que acaba de escanear su propia etiqueta
+                            # y encontró lo que buscaba. Con un negocio que etiqueta su mercadería,
+                            # eso sería un cartel de error en CADA escaneo.
+                            if codigo_de_barras_cierra(cod_barra) is False:
+                                st.caption(
+                                    "🔢 Además, ese número **no cierra con su dígito verificador**. "
+                                    "Si la etiqueta es del fabricante, está mal leída o mal "
+                                    "tipeada: probá de nuevo más cerca y con mejor luz. Si es una "
+                                    "etiqueta tuya, es normal que no cierre y no significa nada."
+                                )
+                            parecidos_barra = codigos_por_tipeo(sanitizar(cod_barra))
+                            if parecidos_barra:
+                                st.caption("Códigos parecidos que sí tenés:")
+                                st.dataframe(
+                                    [{"Código": x["Codigo"], "Marca": x["Marca"],
+                                      "Descripción": x["Descripcion"], "Stock": x["Stock"]}
+                                     for x in parecidos_barra],
+                                    width="stretch", hide_index=True)
+                            ajeno_barra = identificar_codigo_ajeno(sanitizar(cod_barra))
+                            if ajeno_barra:
+                                st.info(f"🏭 Según el catálogo de {ajeno_barra['marca']}, es "
+                                         f"{ajeno_barra['tipo'] or 'una pieza'} para "
+                                         f"{ajeno_barra['cantidad_autos']} auto(s).")
 
     if _parecido_aca is not None:
-        with _parecido_aca.expander("🖼️ Buscar por parecido visual (experimental)",
-                                    key="exp_buscar_parecido_visual_experimental"):
-            explicar(
-                "Compará una foto contra el catálogo. Sirve para acortar candidatos, nunca para "
-                "confirmar una venta.",
-                "No hace falta que sea la misma foto: aguanta otro ángulo, otro fondo y otro color "
-                "de pieza — se compara en blanco y negro, recortando el fondo.\n\nAun así es "
-                "**mucho** menos confiable que un código exacto. Con piezas lisas sin marcas ni "
-                "grabado (rótulas, rulemanes, bulones) rinde mal por más buena que sea la foto. "
-                "Para esas, **📐 Buscar por medidas mecánicas** anda mucho mejor.", en_expander=True
-            )
+        # Perezoso (ver el de «📐 Buscar por medidas»). Acá además importaba: con fotos pendientes,
+        # lo de adentro procesaba 25 fotos en CADA toque del Buscador, aunque nadie lo abriera —el
+        # comentario de más abajo dice «cada vez que se abre este panel», y no era así—.
+        _exp_parecido = _parecido_aca.expander("🖼️ Buscar por parecido visual (experimental)",
+                                               key="exp_buscar_parecido_visual_experimental",
+                                               on_change="rerun")
+        if _exp_parecido.open:
+            with _exp_parecido:
+                explicar(
+                    "Compará una foto contra el catálogo. Sirve para acortar candidatos, nunca para "
+                    "confirmar una venta.",
+                    "No hace falta que sea la misma foto: aguanta otro ángulo, otro fondo y otro color "
+                    "de pieza — se compara en blanco y negro, recortando el fondo.\n\nAun así es "
+                    "**mucho** menos confiable que un código exacto. Con piezas lisas sin marcas ni "
+                    "grabado (rótulas, rulemanes, bulones) rinde mal por más buena que sea la foto. "
+                    "Para esas, **📐 Buscar por medidas mecánicas** anda mucho mejor.", en_expander=True
+                )
 
-            fotos_listas, prod_con_foto, fotos_pendientes, fotos_no_sirven = contar_fotos_comparables()
-            fotos_pendientes = max(fotos_pendientes, contar_fotos_pendientes_de_firma())
-            st.caption(
-                f"📊 {fotos_listas} foto(s) listas para comparar, sobre {prod_con_foto} producto(s)" +
-                (f" — {fotos_pendientes} pendiente(s) de procesar" if fotos_pendientes else "") +
-                (f" — {fotos_no_sirven} sin detalle suficiente" if fotos_no_sirven else "")
-            )
-
-            if fotos_listas == 0 and fotos_pendientes == 0:
-                st.info(_mensaje_catalogo_visual_vacio())
-
-            # Se procesa una tanda chica sola, cada vez que se abre este panel. Antes había que
-            # acordarse de tocar el botón, y como el comparador fue mejorando, las fotos viejas
-            # quedaban con la firma vieja sin que nadie se enterara: la mejora no llegaba nunca
-            # al catálogo que ya estaba cargado. La tanda es de 25 a propósito, para que abrir
-            # el panel no se cuelgue.
-            if fotos_pendientes and not solo_mirar():
-                with st.spinner(f"Poniendo al día {min(fotos_pendientes, 25)} foto(s)..."):
-                    _r = migrar_imagenes_pendientes(limite=25)
-                if _r["listas"]:
-                    st.caption(f"🔄 Se pusieron al día {_r['listas']} foto(s) automáticamente.")
                 fotos_listas, prod_con_foto, fotos_pendientes, fotos_no_sirven = contar_fotos_comparables()
                 fotos_pendientes = max(fotos_pendientes, contar_fotos_pendientes_de_firma())
-
-            st.checkbox(
-                "🤖 Traer fotos solas, en segundo plano",
-                value=obtener_config("fotos_automaticas", "0") == "1",
-                key="fotos_auto_check", disabled=solo_mirar(),
-                on_change=lambda: prender_tarea_de_fondo(
-                    "fotos", "fotos_automaticas", st.session_state["fotos_auto_check"]),
-                help="Mientras la app esté abierta, va trayendo fotos de las fichas del "
-                     "proveedor en un hilo aparte: nadie espera. Sale a internet, por eso lo "
-                     "elegís vos."
-            )
-            if obtener_config("fotos_automaticas", "0") == "1":
-                mostrar_avance_de_tanda("fotos", "foto(s)")
-
-            if fotos_pendientes and st.button(
-                    f"🔄 Procesar las {fotos_pendientes} que faltan ahora", disabled=solo_mirar()):
-                with st.spinner("Procesando fotos..."):
-                    r = migrar_imagenes_pendientes()
-                partes = []
-                if r["listas"]:
-                    partes.append(f"{r['listas']} lista(s) para comparar")
-                if r["sin_detalle"]:
-                    partes.append(f"{r['sin_detalle']} sin detalle suficiente")
-                if r["links"]:
-                    partes.append(f"{r['links']} son links externos (se bajan en "
-                                  f"{miga_hasta('Fotos')})")
-                if r["error"]:
-                    partes.append(f"{r['error']} con error")
-                avisar("success", "Procesadas: " + (", ".join(partes) if partes else "no había nada pendiente") + ".")
-                st.rerun()
-
-            origen_visual = st.radio(
-                "¿De dónde sale la foto a buscar?",
-                ["📷 Subir una foto", "🔗 Pegar una dirección web"],
-                horizontal=True, key="origen_foto_visual"
-            )
-
-            bytes_consulta = None
-
-            if origen_visual.startswith("📷"):
-                foto_visual = subir_archivo(
-                    "Foto de la pieza:", ["png", "jpg", "jpeg"], "foto_visual",
-                    label_visibility="collapsed"
+                st.caption(
+                    f"📊 {fotos_listas} foto(s) listas para comparar, sobre {prod_con_foto} producto(s)" +
+                    (f" — {fotos_pendientes} pendiente(s) de procesar" if fotos_pendientes else "") +
+                    (f" — {fotos_no_sirven} sin detalle suficiente" if fotos_no_sirven else "")
                 )
-                if archivo_listo(foto_visual, "foto"):
-                    bytes_consulta = foto_visual.getvalue()
-                if foto_visual:
-                    if st.button("🗑️ Usar otra foto", key="otra_foto_visual"):
-                        olvidar_archivo("foto_visual")
-                        st.session_state.pop("ocr_visual", None)
-                        st.session_state.pop("resultado_visual", None)
-                        st.rerun()
-            else:
-                ayuda(
-                    "Pegá la dirección de la ficha del producto (la de tu proveedor, la de Mercado "
-                    "Libre, la que sea) o la de la imagen sola. Se bajan las fotos de esa página y "
-                    "elegís cuál usar — no hace falta guardar nada en el teléfono."
+
+                if fotos_listas == 0 and fotos_pendientes == 0:
+                    st.info(_mensaje_catalogo_visual_vacio())
+
+                # Se procesa una tanda chica sola, cada vez que se abre este panel. Antes había que
+                # acordarse de tocar el botón, y como el comparador fue mejorando, las fotos viejas
+                # quedaban con la firma vieja sin que nadie se enterara: la mejora no llegaba nunca
+                # al catálogo que ya estaba cargado. La tanda es de 25 a propósito, para que abrir
+                # el panel no se cuelgue.
+                if fotos_pendientes and not solo_mirar():
+                    with st.spinner(f"Poniendo al día {min(fotos_pendientes, 25)} foto(s)..."):
+                        _r = migrar_imagenes_pendientes(limite=25)
+                    if _r["listas"]:
+                        st.caption(f"🔄 Se pusieron al día {_r['listas']} foto(s) automáticamente.")
+                    fotos_listas, prod_con_foto, fotos_pendientes, fotos_no_sirven = contar_fotos_comparables()
+                    fotos_pendientes = max(fotos_pendientes, contar_fotos_pendientes_de_firma())
+
+                st.checkbox(
+                    "🤖 Traer fotos solas, en segundo plano",
+                    value=obtener_config("fotos_automaticas", "0") == "1",
+                    key="fotos_auto_check", disabled=solo_mirar(),
+                    on_change=lambda: prender_tarea_de_fondo(
+                        "fotos", "fotos_automaticas", st.session_state["fotos_auto_check"]),
+                    help="Mientras la app esté abierta, va trayendo fotos de las fichas del "
+                         "proveedor en un hilo aparte: nadie espera. Sale a internet, por eso lo "
+                         "elegís vos."
                 )
-                url_visual = st.text_input(
-                    "Dirección web:", placeholder="https://...", key="url_foto_visual"
-                ).strip()
-                if st.button("⬇️ Traer fotos de esa dirección", disabled=not url_visual):
-                    with st.spinner("Bajando..."):
-                        encontradas, error_url = imagenes_de_una_direccion(url_visual)
-                    if error_url:
-                        st.error(error_url)
-                        st.session_state.pop("fotos_de_url", None)
-                    else:
-                        st.session_state["fotos_de_url"] = encontradas
-                        st.session_state.pop("foto_url_elegida", None)
+                if obtener_config("fotos_automaticas", "0") == "1":
+                    mostrar_avance_de_tanda("fotos", "foto(s)")
 
-                encontradas = st.session_state.get("fotos_de_url")
-                if encontradas:
-                    st.caption(f"Se encontraron {len(encontradas)} foto(s). Elegí la de la pieza:")
-                    filas_img = st.columns(min(len(encontradas), 4))
-                    for idx, (url_img, datos_img) in enumerate(encontradas[:8]):
-                        with filas_img[idx % len(filas_img)]:
-                            st.image(datos_img, width="stretch")
-                            if st.button("Usar esta", key=f"usar_img_url_{idx}"):
-                                st.session_state["foto_url_elegida"] = idx
-                                st.rerun()
-                    elegida = st.session_state.get("foto_url_elegida")
-                    if elegida is not None and elegida < len(encontradas):
-                        bytes_consulta = encontradas[elegida][1]
-                        st.success(f"✅ Foto {elegida + 1} elegida.")
+                if fotos_pendientes and st.button(
+                        f"🔄 Procesar las {fotos_pendientes} que faltan ahora", disabled=solo_mirar()):
+                    with st.spinner("Procesando fotos..."):
+                        r = migrar_imagenes_pendientes()
+                    partes = []
+                    if r["listas"]:
+                        partes.append(f"{r['listas']} lista(s) para comparar")
+                    if r["sin_detalle"]:
+                        partes.append(f"{r['sin_detalle']} sin detalle suficiente")
+                    if r["links"]:
+                        partes.append(f"{r['links']} son links externos (se bajan en "
+                                      f"{miga_hasta('Fotos')})")
+                    if r["error"]:
+                        partes.append(f"{r['error']} con error")
+                    avisar("success", "Procesadas: " + (", ".join(partes) if partes else "no había nada pendiente") + ".")
+                    st.rerun()
 
-            # Si la IA ya reconoció qué tipo de pieza es, se propone solo. Es la señal que más
-            # mejora la comparación y es la que menos cuesta: la foto ya se mandó igual.
-            _datos_ocr = (st.session_state.get("ocr_visual") or (None, None))[0]
-            _familias = ["No sé / buscar en todo"] + sorted(FAMILIAS_REPUESTO.keys())
-            if _datos_ocr and _datos_ocr.get("tipo_pieza"):
-                _sugerida = clasificar_repuesto(_datos_ocr["tipo_pieza"])
-                if _sugerida in _familias and not st.session_state.get("familia_visual"):
-                    st.session_state["familia_visual"] = _sugerida
-                    st.caption(f"🤖 La IA vio que es «{_datos_ocr['tipo_pieza']}», así que preseleccioné "
-                                f"**{_sugerida}**. Cambialo si no acertó.")
+                origen_visual = st.radio(
+                    "¿De dónde sale la foto a buscar?",
+                    ["📷 Subir una foto", "🔗 Pegar una dirección web"],
+                    horizontal=True, key="origen_foto_visual"
+                )
 
-            familia_elegida = st.selectbox(
-                "¿Qué tipo de pieza es? (recomendado)", _familias,
-                key="familia_visual",
-                help="Es lo que más mejora el resultado, y no sale de la foto: vos ya sabés qué "
-                     "pieza tenés en la mano. Diciéndolo, la app deja de ofrecerte cosas de otro "
-                     "rubro que apenas se parecen de silueta."
-            )
-            familia_filtro = None if familia_elegida.startswith("No sé") else familia_elegida
+                bytes_consulta = None
 
-            # PRIMERO leer el código grabado, después comparar formas. El orden importa: casi
-            # todo repuesto trae el código estampado, impreso o troquelado, y leerlo da una
-            # respuesta EXACTA. Comparar siluetas es adivinar. Tener las dos cosas separadas en
-            # pantallas distintas hacía que se usara la peor sin necesidad.
-            if bytes_consulta is not None:
-                st.markdown("**Paso 1 — buscar un código en la foto**",
-                            help="Casi todas las piezas traen el código grabado, impreso en una "
-                                 "etiqueta o moldeado. Si se llega a leer, la respuesta es exacta y "
-                                 "no hay nada que adivinar.")
-                if st.button("🔤 Leer el código de la foto", key="leer_codigo_visual"):
-                    with st.spinner("Leyendo la pieza..."):
-                        datos_ocr, err_ocr = identificar_pieza_por_foto(bytes_consulta)
-                    st.session_state["ocr_visual"] = (datos_ocr, err_ocr)
-
-                datos_ocr, err_ocr = st.session_state.get("ocr_visual", (None, None))
-                if err_ocr:
-                    st.info(f"{err_ocr} — igual podés comparar por parecido más abajo.")
-                elif datos_ocr:
-                    cod_leido = (datos_ocr.get("codigo") or "").strip()
-                    conf_ocr = (datos_ocr.get("confianza") or "s/d").strip().lower()
-                    if not cod_leido:
-                        st.warning(
-                            "No se pudo leer ningún código en la foto. Probá con más luz y de más "
-                            "cerca, buscando el lado donde esté grabado. Si la pieza no tiene "
-                            "código visible, usá la comparación por parecido de acá abajo."
-                        )
-                    else:
-                        st.success(f"Código leído: **`{cod_leido}`** (la IA lo da con confianza "
-                                    f"{conf_ocr})")
-                        res_ocr = con_veredicto(buscar_por_codigo(sanitizar(cod_leido)),
-                                                sanitizar(cod_leido))
-                        if res_ocr:
-                            st.success(f"✅ Está en tu catálogo — {len(res_ocr)} coincidencia(s):")
-                            st.dataframe(quitar_id(res_ocr), width="stretch", hide_index=True)
-                            st.caption("Esto es una coincidencia exacta de código, no un parecido.")
+                if origen_visual.startswith("📷"):
+                    foto_visual = subir_archivo(
+                        "Foto de la pieza:", ["png", "jpg", "jpeg"], "foto_visual",
+                        label_visibility="collapsed"
+                    )
+                    if archivo_listo(foto_visual, "foto"):
+                        bytes_consulta = foto_visual.getvalue()
+                    if foto_visual:
+                        if st.button("🗑️ Usar otra foto", key="otra_foto_visual"):
+                            olvidar_archivo("foto_visual")
+                            st.session_state.pop("ocr_visual", None)
+                            st.session_state.pop("resultado_visual", None)
+                            st.rerun()
+                else:
+                    ayuda(
+                        "Pegá la dirección de la ficha del producto (la de tu proveedor, la de Mercado "
+                        "Libre, la que sea) o la de la imagen sola. Se bajan las fotos de esa página y "
+                        "elegís cuál usar — no hace falta guardar nada en el teléfono."
+                    )
+                    url_visual = st.text_input(
+                        "Dirección web:", placeholder="https://...", key="url_foto_visual"
+                    ).strip()
+                    if st.button("⬇️ Traer fotos de esa dirección", disabled=not url_visual):
+                        with st.spinner("Bajando..."):
+                            encontradas, error_url = imagenes_de_una_direccion(url_visual)
+                        if error_url:
+                            st.error(error_url)
+                            st.session_state.pop("fotos_de_url", None)
                         else:
-                            # El OCR se come una letra seguido: es exactamente el caso que
-                            # resuelve la búsqueda por tipeo.
-                            parecidos_ocr = codigos_por_tipeo(sanitizar(cod_leido),
-                                                              de_una_foto=True)
-                            if parecidos_ocr:
-                                mostrar_parecidos_de_una_lectura(cod_leido, parecidos_ocr)
+                            st.session_state["fotos_de_url"] = encontradas
+                            st.session_state.pop("foto_url_elegida", None)
+
+                    encontradas = st.session_state.get("fotos_de_url")
+                    if encontradas:
+                        st.caption(f"Se encontraron {len(encontradas)} foto(s). Elegí la de la pieza:")
+                        filas_img = st.columns(min(len(encontradas), 4))
+                        for idx, (url_img, datos_img) in enumerate(encontradas[:8]):
+                            with filas_img[idx % len(filas_img)]:
+                                st.image(datos_img, width="stretch")
+                                if st.button("Usar esta", key=f"usar_img_url_{idx}"):
+                                    st.session_state["foto_url_elegida"] = idx
+                                    st.rerun()
+                        elegida = st.session_state.get("foto_url_elegida")
+                        if elegida is not None and elegida < len(encontradas):
+                            bytes_consulta = encontradas[elegida][1]
+                            st.success(f"✅ Foto {elegida + 1} elegida.")
+
+                # Si la IA ya reconoció qué tipo de pieza es, se propone solo. Es la señal que más
+                # mejora la comparación y es la que menos cuesta: la foto ya se mandó igual.
+                _datos_ocr = (st.session_state.get("ocr_visual") or (None, None))[0]
+                _familias = ["No sé / buscar en todo"] + sorted(FAMILIAS_REPUESTO.keys())
+                if _datos_ocr and _datos_ocr.get("tipo_pieza"):
+                    _sugerida = clasificar_repuesto(_datos_ocr["tipo_pieza"])
+                    if _sugerida in _familias and not st.session_state.get("familia_visual"):
+                        st.session_state["familia_visual"] = _sugerida
+                        st.caption(f"🤖 La IA vio que es «{_datos_ocr['tipo_pieza']}», así que preseleccioné "
+                                    f"**{_sugerida}**. Cambialo si no acertó.")
+
+                familia_elegida = st.selectbox(
+                    "¿Qué tipo de pieza es? (recomendado)", _familias,
+                    key="familia_visual",
+                    help="Es lo que más mejora el resultado, y no sale de la foto: vos ya sabés qué "
+                         "pieza tenés en la mano. Diciéndolo, la app deja de ofrecerte cosas de otro "
+                         "rubro que apenas se parecen de silueta."
+                )
+                familia_filtro = None if familia_elegida.startswith("No sé") else familia_elegida
+
+                # PRIMERO leer el código grabado, después comparar formas. El orden importa: casi
+                # todo repuesto trae el código estampado, impreso o troquelado, y leerlo da una
+                # respuesta EXACTA. Comparar siluetas es adivinar. Tener las dos cosas separadas en
+                # pantallas distintas hacía que se usara la peor sin necesidad.
+                if bytes_consulta is not None:
+                    st.markdown("**Paso 1 — buscar un código en la foto**",
+                                help="Casi todas las piezas traen el código grabado, impreso en una "
+                                     "etiqueta o moldeado. Si se llega a leer, la respuesta es exacta y "
+                                     "no hay nada que adivinar.")
+                    if st.button("🔤 Leer el código de la foto", key="leer_codigo_visual"):
+                        with st.spinner("Leyendo la pieza..."):
+                            datos_ocr, err_ocr = identificar_pieza_por_foto(bytes_consulta)
+                        st.session_state["ocr_visual"] = (datos_ocr, err_ocr)
+
+                    datos_ocr, err_ocr = st.session_state.get("ocr_visual", (None, None))
+                    if err_ocr:
+                        st.info(f"{err_ocr} — igual podés comparar por parecido más abajo.")
+                    elif datos_ocr:
+                        cod_leido = (datos_ocr.get("codigo") or "").strip()
+                        conf_ocr = (datos_ocr.get("confianza") or "s/d").strip().lower()
+                        if not cod_leido:
+                            st.warning(
+                                "No se pudo leer ningún código en la foto. Probá con más luz y de más "
+                                "cerca, buscando el lado donde esté grabado. Si la pieza no tiene "
+                                "código visible, usá la comparación por parecido de acá abajo."
+                            )
+                        else:
+                            st.success(f"Código leído: **`{cod_leido}`** (la IA lo da con confianza "
+                                        f"{conf_ocr})")
+                            res_ocr = con_veredicto(buscar_por_codigo(sanitizar(cod_leido)),
+                                                    sanitizar(cod_leido))
+                            if res_ocr:
+                                st.success(f"✅ Está en tu catálogo — {len(res_ocr)} coincidencia(s):")
+                                st.dataframe(quitar_id(res_ocr), width="stretch", hide_index=True)
+                                st.caption("Esto es una coincidencia exacta de código, no un parecido.")
                             else:
-                                st.info(f"«{cod_leido}» no figura en tu catálogo ni se parece a nada "
-                                         "cargado. Podés probar la comparación por parecido.")
-                _fotos_hay, _, _fotos_sin_procesar, _fotos_lisas = contar_fotos_comparables()
-                st.markdown("**Paso 2 — comparar por parecido** (si no se pudo leer el código)")
-                if not _fotos_hay:
-                    # Decirlo ACÁ y no después de apretar el botón. El paso 2 compara contra las
-                    # fotos del catálogo: con cero cargadas no puede dar nada, nunca, y dejar el
-                    # botón como si fuera a servir hace perder el tiempo dos veces — una
-                    # apretándolo y otra entendiendo por qué no salió nada.
-                    # Y decir cuál de los tres casos es: «no hay ninguna» era mentira cuando
-                    # había fotos sin procesar o que no sirven para comparar.
-                    if _fotos_sin_procesar:
-                        st.caption(f"⚠️ Hay {_fotos_sin_procesar} foto(s) en el catálogo que "
-                                   "todavía no se procesaron: tocá «🔄 Procesar las … que faltan "
-                                   "ahora», más arriba en este panel.")
-                    elif _fotos_lisas:
-                        st.caption(f"⚠️ Las {_fotos_lisas} foto(s) del catálogo no sirven para "
-                                   "comparar: no tienen detalles para agarrarse (pieza lisa, "
-                                   "fondo del mismo color, poca luz). Saltá al **paso 3**.")
-                    else:
-                        st.caption("⚠️ No hay ninguna foto cargada en el catálogo, así que este "
-                                   "paso no va a encontrar nada. Saltá al **paso 3**, que no "
-                                   "necesita fotos cargadas. Si ya habías subido fotos y no "
-                                   "están, se perdieron en un reinicio de la app: desde esta "
-                                   "versión las que subís vos quedan en la copia de seguridad.")
+                                # El OCR se come una letra seguido: es exactamente el caso que
+                                # resuelve la búsqueda por tipeo.
+                                parecidos_ocr = codigos_por_tipeo(sanitizar(cod_leido),
+                                                                  de_una_foto=True)
+                                if parecidos_ocr:
+                                    mostrar_parecidos_de_una_lectura(cod_leido, parecidos_ocr)
+                                else:
+                                    st.info(f"«{cod_leido}» no figura en tu catálogo ni se parece a nada "
+                                             "cargado. Podés probar la comparación por parecido.")
+                    _fotos_hay, _, _fotos_sin_procesar, _fotos_lisas = contar_fotos_comparables()
+                    st.markdown("**Paso 2 — comparar por parecido** (si no se pudo leer el código)")
+                    if not _fotos_hay:
+                        # Decirlo ACÁ y no después de apretar el botón. El paso 2 compara contra las
+                        # fotos del catálogo: con cero cargadas no puede dar nada, nunca, y dejar el
+                        # botón como si fuera a servir hace perder el tiempo dos veces — una
+                        # apretándolo y otra entendiendo por qué no salió nada.
+                        # Y decir cuál de los tres casos es: «no hay ninguna» era mentira cuando
+                        # había fotos sin procesar o que no sirven para comparar.
+                        if _fotos_sin_procesar:
+                            st.caption(f"⚠️ Hay {_fotos_sin_procesar} foto(s) en el catálogo que "
+                                       "todavía no se procesaron: tocá «🔄 Procesar las … que faltan "
+                                       "ahora», más arriba en este panel.")
+                        elif _fotos_lisas:
+                            st.caption(f"⚠️ Las {_fotos_lisas} foto(s) del catálogo no sirven para "
+                                       "comparar: no tienen detalles para agarrarse (pieza lisa, "
+                                       "fondo del mismo color, poca luz). Saltá al **paso 3**.")
+                        else:
+                            st.caption("⚠️ No hay ninguna foto cargada en el catálogo, así que este "
+                                       "paso no va a encontrar nada. Saltá al **paso 3**, que no "
+                                       "necesita fotos cargadas. Si ya habías subido fotos y no "
+                                       "están, se perdieron en un reinicio de la app: desde esta "
+                                       "versión las que subís vos quedan en la copia de seguridad.")
 
-            if st.button("🖼️ Comparar con el catálogo", disabled=bytes_consulta is None,
-                         type="primary", key="btn_comparar_visual"):
-                barra_v = st.progress(0.0, text="Comparando...")
-                res_visual, error_visual = buscar_por_similitud_visual(
-                    bytes_consulta, familia=familia_filtro,
-                    progreso=lambda i, t: barra_v.progress(min(i / max(t, 1), 1.0),
-                                                           text=f"Comparando {i} de {t} fotos...")
-                )
-                barra_v.empty()
-                st.session_state["resultado_visual"] = (res_visual, error_visual)
+                if st.button("🖼️ Comparar con el catálogo", disabled=bytes_consulta is None,
+                             type="primary", key="btn_comparar_visual"):
+                    barra_v = st.progress(0.0, text="Comparando...")
+                    res_visual, error_visual = buscar_por_similitud_visual(
+                        bytes_consulta, familia=familia_filtro,
+                        progreso=lambda i, t: barra_v.progress(min(i / max(t, 1), 1.0),
+                                                               text=f"Comparando {i} de {t} fotos...")
+                    )
+                    barra_v.empty()
+                    st.session_state["resultado_visual"] = (res_visual, error_visual)
 
-            res_visual, error_visual = st.session_state.get("resultado_visual", (None, None))
-            if error_visual:
-                st.info(error_visual)
-            elif res_visual:
-                st.warning(
-                    f"⚠️ {len(res_visual)} candidato(s) ordenados de más a menos parecido. "
-                    "NINGUNO está confirmado: hay repuestos que de foto son idénticos y no son "
-                    "intercambiables (cambia el paso de rosca, la altura, el lado). "
-                    "Verificá por código o comparando la pieza en la mano antes de vender."
-                )
-                filas_visual = []
-                for r in res_visual:
-                    filas_visual.append({
-                        "Código": r["Codigo"], "Descripción": r["Descripcion"], "Marca": r["Marca"],
-                        "Confianza": nivel_de_parecido(r), "Parecido": f"{r['Parecido']:.0f}",
-                        "Detalles que coinciden": r["Coincidencias"],
-                        "Precio": r["Precio"], "Stock": r["Stock"],
-                    })
-                st.dataframe(filas_visual, width="stretch", hide_index=True)
-                explicar(
-                    "Mirá sobre todo «Detalles que coinciden»: es el número que más dice.",
-                    "Son los puntos de la pieza que además dieron geométricamente coherentes entre las "
-                    "dos fotos. Muchos detalles y parecido alto = vale la pena "
-                    "revisarla. Si el que buscabas no aparece, cargale a ese producto una segunda foto del "
-                    "ángulo que usás vos y la próxima vez lo encuentra.", en_expander=True
-                )
+                res_visual, error_visual = st.session_state.get("resultado_visual", (None, None))
+                if error_visual:
+                    st.info(error_visual)
+                elif res_visual:
+                    st.warning(
+                        f"⚠️ {len(res_visual)} candidato(s) ordenados de más a menos parecido. "
+                        "NINGUNO está confirmado: hay repuestos que de foto son idénticos y no son "
+                        "intercambiables (cambia el paso de rosca, la altura, el lado). "
+                        "Verificá por código o comparando la pieza en la mano antes de vender."
+                    )
+                    filas_visual = []
+                    for r in res_visual:
+                        filas_visual.append({
+                            "Código": r["Codigo"], "Descripción": r["Descripcion"], "Marca": r["Marca"],
+                            "Confianza": nivel_de_parecido(r), "Parecido": f"{r['Parecido']:.0f}",
+                            "Detalles que coinciden": r["Coincidencias"],
+                            "Precio": r["Precio"], "Stock": r["Stock"],
+                        })
+                    st.dataframe(filas_visual, width="stretch", hide_index=True)
+                    explicar(
+                        "Mirá sobre todo «Detalles que coinciden»: es el número que más dice.",
+                        "Son los puntos de la pieza que además dieron geométricamente coherentes entre las "
+                        "dos fotos. Muchos detalles y parecido alto = vale la pena "
+                        "revisarla. Si el que buscabas no aparece, cargale a ese producto una segunda foto del "
+                        "ángulo que usás vos y la próxima vez lo encuentra.", en_expander=True
+                    )
 
-            # ---- Paso 3: preguntarle a internet ----
-            # Va último a propósito, y es el que más falta hacía. Los dos pasos de arriba
-            # dependen de algo que puede no estar: el código tiene que llegar a leerse, y la
-            # comparación necesita que ALGUIEN haya cargado antes una foto de esa misma pieza.
-            # Con el catálogo sin fotos, el paso 2 no puede encontrar nada nunca — y así está
-            # una base recién armada.
-            if bytes_consulta is not None:
-                st.markdown("---")
-                st.markdown("**Paso 3 — preguntarle a internet** (si no se pudo leer el código "
-                            "ni hay foto para comparar)")
-                explicar(
-                    "Busca la pieza en internet a partir de la foto y después cruza lo que "
-                    "encuentra contra TU catálogo.",
-                    "Sale a buscar afuera —catálogos, tiendas, foros— por la forma, el material, "
-                    "la cantidad de vías de la ficha, los caños, los dientes, los logos "
-                    "parciales. Vuelve con qué pieza es, para qué autos, y con qué números se "
-                    "vende, y te muestra las páginas que usó para que puedas chequearlo.\n\n"
-                    "**Lo importante es qué se hace con esa respuesta.** Una IA inventa números "
-                    "de pieza con total seguridad, y por el texto no hay forma de distinguir uno "
-                    "inventado de uno real. Por los datos sí: como respuesta solo se muestran "
-                    "los códigos que **están en tu catálogo** — si está cargado, alguien lo "
-                    "vende. Los que no están van aparte, marcados como pista para chequear, "
-                    "nunca mezclados con lo que tenés.\n\n"
-                    "Sigue sin ser una confirmación. Es el punto de partida para buscar, no el "
-                    "número para facturar.", en_expander=True
-                )
-                _pista = st.text_input(
-                    "¿Sabés algo de la pieza? (opcional, pero ayuda mucho)",
-                    placeholder="Ej: es de un Gol 1.6 nafta, va arriba del motor",
-                    key="pista_internet",
-                    help="Sin esto la IA tiene que adivinar también de qué auto es, que es la "
-                         "mitad del problema."
-                )
-                if st.button("🌐 Buscar esta pieza en internet", key="btn_internet"):
-                    with st.spinner("Buscando en internet..."):
-                        _d_net, _e_net = identificar_pieza_por_internet(bytes_consulta, _pista)
-                    st.session_state["net_visual"] = (_d_net, _e_net)
+                # ---- Paso 3: preguntarle a internet ----
+                # Va último a propósito, y es el que más falta hacía. Los dos pasos de arriba
+                # dependen de algo que puede no estar: el código tiene que llegar a leerse, y la
+                # comparación necesita que ALGUIEN haya cargado antes una foto de esa misma pieza.
+                # Con el catálogo sin fotos, el paso 2 no puede encontrar nada nunca — y así está
+                # una base recién armada.
+                if bytes_consulta is not None:
+                    st.markdown("---")
+                    st.markdown("**Paso 3 — preguntarle a internet** (si no se pudo leer el código "
+                                "ni hay foto para comparar)")
+                    explicar(
+                        "Busca la pieza en internet a partir de la foto y después cruza lo que "
+                        "encuentra contra TU catálogo.",
+                        "Sale a buscar afuera —catálogos, tiendas, foros— por la forma, el material, "
+                        "la cantidad de vías de la ficha, los caños, los dientes, los logos "
+                        "parciales. Vuelve con qué pieza es, para qué autos, y con qué números se "
+                        "vende, y te muestra las páginas que usó para que puedas chequearlo.\n\n"
+                        "**Lo importante es qué se hace con esa respuesta.** Una IA inventa números "
+                        "de pieza con total seguridad, y por el texto no hay forma de distinguir uno "
+                        "inventado de uno real. Por los datos sí: como respuesta solo se muestran "
+                        "los códigos que **están en tu catálogo** — si está cargado, alguien lo "
+                        "vende. Los que no están van aparte, marcados como pista para chequear, "
+                        "nunca mezclados con lo que tenés.\n\n"
+                        "Sigue sin ser una confirmación. Es el punto de partida para buscar, no el "
+                        "número para facturar.", en_expander=True
+                    )
+                    _pista = st.text_input(
+                        "¿Sabés algo de la pieza? (opcional, pero ayuda mucho)",
+                        placeholder="Ej: es de un Gol 1.6 nafta, va arriba del motor",
+                        key="pista_internet",
+                        help="Sin esto la IA tiene que adivinar también de qué auto es, que es la "
+                             "mitad del problema."
+                    )
+                    if st.button("🌐 Buscar esta pieza en internet", key="btn_internet"):
+                        with st.spinner("Buscando en internet..."):
+                            _d_net, _e_net = identificar_pieza_por_internet(bytes_consulta, _pista)
+                        st.session_state["net_visual"] = (_d_net, _e_net)
 
-                _d_net, _e_net = st.session_state.get("net_visual", (None, None))
-                if _e_net:
-                    st.info(_e_net)
-                elif _d_net:
-                    _conf = str(_d_net.get("confianza") or "s/d").lower()
-                    _icono = {"alta": "🟢", "media": "🟡", "baja": "🟠"}.get(_conf, "⚪")
-                    st.markdown(f"**{_icono} La IA dice que es: "
-                                f"{_d_net.get('tipo_pieza') or 'no lo pudo determinar'}** "
-                                f"(confianza {_conf})")
-                    if _d_net.get("descripcion"):
-                        st.caption(_d_net["descripcion"])
-                    if _d_net.get("por_que"):
-                        st.caption(f"Por qué: {_d_net['por_que']}")
-                    if _d_net.get("autos"):
-                        st.caption("Autos: " + ", ".join(str(a) for a in _d_net["autos"][:8]))
+                    _d_net, _e_net = st.session_state.get("net_visual", (None, None))
+                    if _e_net:
+                        st.info(_e_net)
+                    elif _d_net:
+                        _conf = str(_d_net.get("confianza") or "s/d").lower()
+                        _icono = {"alta": "🟢", "media": "🟡", "baja": "🟠"}.get(_conf, "⚪")
+                        st.markdown(f"**{_icono} La IA dice que es: "
+                                    f"{_d_net.get('tipo_pieza') or 'no lo pudo determinar'}** "
+                                    f"(confianza {_conf})")
+                        if _d_net.get("descripcion"):
+                            st.caption(_d_net["descripcion"])
+                        if _d_net.get("por_que"):
+                            st.caption(f"Por qué: {_d_net['por_que']}")
+                        if _d_net.get("autos"):
+                            st.caption("Autos: " + ", ".join(str(a) for a in _d_net["autos"][:8]))
 
-                    _cruce = cruzar_con_el_catalogo_lo_de_internet(_d_net, familia=familia_filtro)
+                        _cruce = cruzar_con_el_catalogo_lo_de_internet(_d_net, familia=familia_filtro)
 
-                    if _cruce["exactos"]:
-                        st.success(
-                            f"✅ **{len(_cruce['exactos'])} de esos números están en tu "
-                            "catálogo.** Son códigos cargados, no una suposición de la IA — "
-                            "pero que el número exista no prueba que sea ESTA pieza: "
-                            "comparala en la mano antes de vender."
-                        )
-                        st.dataframe(quitar_id(_cruce["exactos"]), width="stretch", hide_index=True)
-                    if _cruce["por_tipeo"]:
-                        st.warning(
-                            "🟡 Estos no están escritos igual, pero tenés códigos casi idénticos. "
-                            "Suele ser el mismo número con los espacios puestos distinto "
-                            "(«0 280 155 786» y «0280155786») o un dígito de diferencia:"
-                        )
-                        st.dataframe(
-                            [{"Lo que dijo internet": x.get("_pedido", ""), "Código que tenés": x["Codigo"],
-                              "Marca": x["Marca"], "Descripción": x["Descripcion"],
-                              "Precio": x["Precio"], "Stock": x["Stock"]}
-                             for x in _cruce["por_tipeo"]],
-                            width="stretch", hide_index=True
-                        )
-                    if _cruce["por_texto"]:
-                        st.info(
-                            "Ningún código pegó, así que busqué en tu catálogo por la "
-                            "descripción. Esto es lo más flojo de la pantalla — coincide el tipo "
-                            "de pieza y el auto, nada más:"
-                        )
-                        st.dataframe(quitar_id(_cruce["por_texto"]), width="stretch", hide_index=True)
-                    if not any((_cruce["exactos"], _cruce["por_tipeo"], _cruce["por_texto"])):
-                        st.warning(
-                            "No encontré nada tuyo que se corresponda. Si la identificación de "
-                            "arriba te cierra, es una pieza que no tenés cargada."
-                        )
-                    if _cruce["no_los_tenes"]:
-                        st.caption(
-                            "**No los tenés cargados** (pista para pedirle al proveedor, sin "
-                            "verificar): " + ", ".join(f"`{x}`" for x in _cruce["no_los_tenes"][:15])
-                        )
-                    if _d_net.get("fuentes"):
-                        # seccion_plegable y no st.expander: todo esto ya vive adentro de uno,
-                        # y Streamlit corta el renderizado si se anidan. Ver seccion_plegable().
-                        if seccion_plegable(f"🔗 Las {len(_d_net['fuentes'])} página(s) que consultó",
-                                            key="fuentes_internet"):
-                            if _d_net.get("consultas"):
-                                st.caption("Buscó: " + " · ".join(_d_net["consultas"][:6]))
-                            for _f in _d_net["fuentes"][:12]:
-                                st.markdown(f"- [{_f['titulo']}]({_f['url']})")
-                    else:
-                        st.caption("⚠️ No devolvió ninguna página de respaldo, así que esta "
-                                    "identificación no se puede verificar. Tomala con pinzas.")
+                        if _cruce["exactos"]:
+                            st.success(
+                                f"✅ **{len(_cruce['exactos'])} de esos números están en tu "
+                                "catálogo.** Son códigos cargados, no una suposición de la IA — "
+                                "pero que el número exista no prueba que sea ESTA pieza: "
+                                "comparala en la mano antes de vender."
+                            )
+                            st.dataframe(quitar_id(_cruce["exactos"]), width="stretch", hide_index=True)
+                        if _cruce["por_tipeo"]:
+                            st.warning(
+                                "🟡 Estos no están escritos igual, pero tenés códigos casi idénticos. "
+                                "Suele ser el mismo número con los espacios puestos distinto "
+                                "(«0 280 155 786» y «0280155786») o un dígito de diferencia:"
+                            )
+                            st.dataframe(
+                                [{"Lo que dijo internet": x.get("_pedido", ""), "Código que tenés": x["Codigo"],
+                                  "Marca": x["Marca"], "Descripción": x["Descripcion"],
+                                  "Precio": x["Precio"], "Stock": x["Stock"]}
+                                 for x in _cruce["por_tipeo"]],
+                                width="stretch", hide_index=True
+                            )
+                        if _cruce["por_texto"]:
+                            st.info(
+                                "Ningún código pegó, así que busqué en tu catálogo por la "
+                                "descripción. Esto es lo más flojo de la pantalla — coincide el tipo "
+                                "de pieza y el auto, nada más:"
+                            )
+                            st.dataframe(quitar_id(_cruce["por_texto"]), width="stretch", hide_index=True)
+                        if not any((_cruce["exactos"], _cruce["por_tipeo"], _cruce["por_texto"])):
+                            st.warning(
+                                "No encontré nada tuyo que se corresponda. Si la identificación de "
+                                "arriba te cierra, es una pieza que no tenés cargada."
+                            )
+                        if _cruce["no_los_tenes"]:
+                            st.caption(
+                                "**No los tenés cargados** (pista para pedirle al proveedor, sin "
+                                "verificar): " + ", ".join(f"`{x}`" for x in _cruce["no_los_tenes"][:15])
+                            )
+                        if _d_net.get("fuentes"):
+                            # seccion_plegable y no st.expander: todo esto ya vive adentro de uno,
+                            # y Streamlit corta el renderizado si se anidan. Ver seccion_plegable().
+                            if seccion_plegable(f"🔗 Las {len(_d_net['fuentes'])} página(s) que consultó",
+                                                key="fuentes_internet"):
+                                if _d_net.get("consultas"):
+                                    st.caption("Buscó: " + " · ".join(_d_net["consultas"][:6]))
+                                for _f in _d_net["fuentes"][:12]:
+                                    st.markdown(f"- [{_f['titulo']}]({_f['url']})")
+                        else:
+                            st.caption("⚠️ No devolvió ninguna página de respaldo, así que esta "
+                                        "identificación no se puede verificar. Tomala con pinzas.")
 
     def _ver_toda_la_cadena():
         """«Mostrarlas»: la misma búsqueda otra vez, con «Toda la cadena» (ver más abajo)."""
@@ -1929,152 +1939,158 @@ if pagina == PAGINAS[0]:
                                     if e.get("Tipo") != "OEM" or e["ID"] == fila_txt["ID"]]
                     otros = [e for e in equivalentes if e["ID"] != fila_txt["ID"]]
                     resumen = (f"{len(otros)} equivalencia(s)" if otros else "sin equivalencias cargadas")
-                    with st.expander(f"🔎 {fila_txt['Marca']} · {fila_txt['Codigo']} — {resumen}", key=f"exp_txt_{fila_txt['ID']}"):
-                        if fila_txt.get("Descripcion"):
-                            st.caption(fila_txt["Descripcion"])
-                        if equivalentes:
-                            anotar_el_respaldo(equivalentes, clean_txt)
-                            equivalentes, _reco_txt = coronar_la_recomendada(
-                                equivalentes, marcas_con_precios_fuera_de_escala())
-                            mostrar_la_recomendacion(_reco_txt)
-                            _tabla_eq = para_mostrar(quitar_id(equivalentes))
-                            st.dataframe(con_stock_legible(_tabla_eq), width="stretch", hide_index=True,
-                                         column_order=columnas_que_dicen_algo(_tabla_eq),
-                                         column_config=CONFIG_COLUMNAS_RESULTADO)
-                        else:
-                            st.caption("Este producto todavía no tiene equivalencias cargadas.")
+                    # Perezoso (ver el de «📐 Buscar por medidas»): son hasta 15, y cada uno armaba la ficha de
+                    # cada equivalente aunque estuviera cerrado. Después de buscar «filtro aceite gol», cada toque
+                    # tardaba 220 ms; ahora, 75.
+                    _exp_txt = st.expander(f"🔎 {fila_txt['Marca']} · {fila_txt['Codigo']} — {resumen}",
+                                           key=f"exp_txt_{fila_txt['ID']}", on_change="rerun")
+                    if _exp_txt.open:
+                        with _exp_txt:
+                            if fila_txt.get("Descripcion"):
+                                st.caption(fila_txt["Descripcion"])
+                            if equivalentes:
+                                anotar_el_respaldo(equivalentes, clean_txt)
+                                equivalentes, _reco_txt = coronar_la_recomendada(
+                                    equivalentes, marcas_con_precios_fuera_de_escala())
+                                mostrar_la_recomendacion(_reco_txt)
+                                _tabla_eq = para_mostrar(quitar_id(equivalentes))
+                                st.dataframe(con_stock_legible(_tabla_eq), width="stretch", hide_index=True,
+                                             column_order=columnas_que_dicen_algo(_tabla_eq),
+                                             column_config=CONFIG_COLUMNAS_RESULTADO)
+                            else:
+                                st.caption("Este producto todavía no tiene equivalencias cargadas.")
 
-                        # El presupuesto, la consulta del cliente, apartar y «¿cuál se llevó?»:
-                        # es del mostrador. Sin sesión no se ve (ver PAGINAS_ABIERTAS).
-                        if not solo_mirar():
-                            # Carrito: ir juntando de varias búsquedas y armar el presupuesto al
-                            # final. Sin esto había que anotar los códigos aparte y volver a
-                            # buscarlos uno por uno.
-                            # Mismos nombres que el resto de esta rama: acá el resultado de la
-                            # vuelta es fila_txt y sus equivalentes están en 'otros'. Estaba escrito
-                            # con 'res' y 'clean', que son de la búsqueda por CÓDIGO y acá no
-                            # existen: entrar a "Descripción" tiraba NameError.
-                            st.session_state.setdefault("carrito", {})
-                            opciones_carrito = [fila_txt] + otros
-                            cc1, cc2 = st.columns([3, 2])
-                            agregar_cod = cc1.selectbox(
-                                "🛒 Sumar al presupuesto:",
-                                ["(elegir)"] + [f"{f['Marca']} {f['Codigo']}"
-                                                for f in opciones_carrito],
-                                key=f"al_carrito_{fila_txt['ID']}")
-                            if agregar_cod != "(elegir)" and cc2.button(
-                                    "➕ Sumar", key=f"btn_carrito_{fila_txt['ID']}"):
-                                elegido_c = next((f for f in opciones_carrito
-                                                   if f"{f['Marca']} {f['Codigo']}" == agregar_cod), None)
-                                if elegido_c:
-                                    sumar_al_presupuesto(elegido_c)
-                                    avisar("success", f"{elegido_c['Codigo']} sumado al presupuesto.")
-                                    st.rerun()
-
-                            # Anotar al cliente que se lo lleva pensando. Va acá porque el momento
-                            # de anotarlo es este: si hay que ir a otra pantalla, no se hace.
-                            # OJO con los nombres, lo mismo que avisa el bloque de abajo: acá
-                            # estamos en la búsqueda por DESCRIPCIÓN, donde la fila de esta vuelta es
-                            # fila_txt y sus equivalentes están en 'otros'. Este bloque estaba escrito
-                            # con los nombres de la búsqueda por CÓDIGO ('res', 'clean'), que acá no
-                            # existen: abrir esta sección tiraba NameError y se cortaba la pantalla.
-                            # Las keys van por ID y no por código limpio, porque dos filas distintas
-                            # pueden limpiar al mismo texto y ahí Streamlit corta por clave repetida.
-                            if seccion_plegable("📞 El cliente lo va a pensar",
-                                                 key=f"consulta_{fila_txt['ID']}"):
-                                st.caption(
-                                    "Queda anotado qué pidió y a qué precio se le dijo. Cuando "
-                                    "vuelva o llame, lo buscás por nombre o teléfono."
-                                )
-                                etq_cc = {f"{f['Marca']} {f['Codigo']}": f
-                                          for f in [fila_txt] + otros}
-                                cual_cc = st.selectbox("¿Qué le interesó?", list(etq_cc.keys()),
-                                                        key=f"cual_cc_{fila_txt['ID']}")
-                                k1, k2, k3 = st.columns([3, 3, 1])
-                                nom_cc = k1.text_input("Nombre:", key=f"nom_cc_{fila_txt['ID']}",
-                                                        placeholder="Cómo se llama")
-                                tel_cc = k2.text_input("Teléfono:", key=f"tel_cc_{fila_txt['ID']}",
-                                                        placeholder="Para avisarle")
-                                cant_cc = k3.number_input("Cant.", min_value=1, value=1, step=1,
-                                                           key=f"cant_cc_{fila_txt['ID']}")
-                                nota_cc = st.text_input("Nota:", key=f"nota_cc_{fila_txt['ID']}",
-                                                         placeholder="Ej: tiene un Gol 2012, "
-                                                                     "consulta con el mecánico")
-                                if st.button("📞 Anotar la consulta",
-                                              key=f"btn_cc_{fila_txt['ID']}"):
-                                    _f = etq_cc[cual_cc]
-                                    ok_cc, msg_cc = anotar_consulta_cliente(
-                                        nom_cc, tel_cc, _f["ID"], _f["Codigo"],
-                                        _f.get("Descripcion") or "", cant_cc,
-                                        _f.get("Precio"), nota_cc)
-                                    if ok_cc:
-                                        avisar("success", msg_cc)
+                            # El presupuesto, la consulta del cliente, apartar y «¿cuál se llevó?»:
+                            # es del mostrador. Sin sesión no se ve (ver PAGINAS_ABIERTAS).
+                            if not solo_mirar():
+                                # Carrito: ir juntando de varias búsquedas y armar el presupuesto al
+                                # final. Sin esto había que anotar los códigos aparte y volver a
+                                # buscarlos uno por uno.
+                                # Mismos nombres que el resto de esta rama: acá el resultado de la
+                                # vuelta es fila_txt y sus equivalentes están en 'otros'. Estaba escrito
+                                # con 'res' y 'clean', que son de la búsqueda por CÓDIGO y acá no
+                                # existen: entrar a "Descripción" tiraba NameError.
+                                st.session_state.setdefault("carrito", {})
+                                opciones_carrito = [fila_txt] + otros
+                                cc1, cc2 = st.columns([3, 2])
+                                agregar_cod = cc1.selectbox(
+                                    "🛒 Sumar al presupuesto:",
+                                    ["(elegir)"] + [f"{f['Marca']} {f['Codigo']}"
+                                                    for f in opciones_carrito],
+                                    key=f"al_carrito_{fila_txt['ID']}")
+                                if agregar_cod != "(elegir)" and cc2.button(
+                                        "➕ Sumar", key=f"btn_carrito_{fila_txt['ID']}"):
+                                    elegido_c = next((f for f in opciones_carrito
+                                                       if f"{f['Marca']} {f['Codigo']}" == agregar_cod), None)
+                                    if elegido_c:
+                                        sumar_al_presupuesto(elegido_c)
+                                        avisar("success", f"{elegido_c['Codigo']} sumado al presupuesto.")
                                         st.rerun()
-                                    else:
-                                        st.error(msg_cc)
 
-                            # Apartar mientras el cliente lo piensa. Va acá y no en otra pantalla
-                            # porque el momento de reservar es este: con el presupuesto recién hecho.
-                            # OJO con los nombres: acá el código limpio es clean_txt y la lista es
-                            # 'equivalentes'. Usar los de la búsqueda por código ('clean', 'res')
-                            # tira NameError y corta el renderizado de toda la pantalla.
-                            _para_apartar = equivalentes or [fila_txt]
-                            if seccion_plegable("🔒 Apartar para un presupuesto",
-                                                 key=f"apartar_txt_{fila_txt['ID']}"):
-                                # Una sola consulta para todos: preguntarlo de a uno eran dos
-                                # consultas por fila para filtrar y dos más por fila para la etiqueta.
-                                libres_ap = stock_libre_de_varios([f["ID"] for f in _para_apartar])
-                                con_stock_ap = [f for f in _para_apartar
-                                                 if (libres_ap.get(f["ID"]) or 0) > 0]
-                                if not con_stock_ap:
-                                    st.caption("Ninguno de estos tiene stock libre para apartar.")
-                                else:
-                                    etq_ap = {
-                                        f"{f['Marca']} {f['Codigo']} — {libres_ap[f['ID']]} libre(s)":
-                                            f["ID"] for f in con_stock_ap
-                                    }
-                                    elegido_ap = st.selectbox("¿Cuál?", list(etq_ap.keys()),
-                                                               key=f"cual_apartar_txt_{fila_txt['ID']}")
-                                    ap1, ap2 = st.columns([1, 3])
-                                    cant_ap = ap1.number_input(
-                                        "Cantidad", min_value=1, value=1, step=1,
-                                        key=f"cant_apartar_txt_{fila_txt['ID']}")
-                                    cliente_ap = ap2.text_input(
-                                        "¿Para quién?", key=f"cliente_apartar_txt_{fila_txt['ID']}",
-                                        placeholder="Nombre o patente, para saber a quién reclamarle")
-                                    if st.button("🔒 Apartar", key=f"btn_apartar_txt_{fila_txt['ID']}"):
-                                        ok_ap, msg_ap = reservar_stock(
-                                            etq_ap[elegido_ap], cant_ap, cliente_ap)
-                                        if ok_ap:
-                                            avisar("success", msg_ap)
+                                # Anotar al cliente que se lo lleva pensando. Va acá porque el momento
+                                # de anotarlo es este: si hay que ir a otra pantalla, no se hace.
+                                # OJO con los nombres, lo mismo que avisa el bloque de abajo: acá
+                                # estamos en la búsqueda por DESCRIPCIÓN, donde la fila de esta vuelta es
+                                # fila_txt y sus equivalentes están en 'otros'. Este bloque estaba escrito
+                                # con los nombres de la búsqueda por CÓDIGO ('res', 'clean'), que acá no
+                                # existen: abrir esta sección tiraba NameError y se cortaba la pantalla.
+                                # Las keys van por ID y no por código limpio, porque dos filas distintas
+                                # pueden limpiar al mismo texto y ahí Streamlit corta por clave repetida.
+                                if seccion_plegable("📞 El cliente lo va a pensar",
+                                                     key=f"consulta_{fila_txt['ID']}"):
+                                    st.caption(
+                                        "Queda anotado qué pidió y a qué precio se le dijo. Cuando "
+                                        "vuelva o llame, lo buscás por nombre o teléfono."
+                                    )
+                                    etq_cc = {f"{f['Marca']} {f['Codigo']}": f
+                                              for f in [fila_txt] + otros}
+                                    cual_cc = st.selectbox("¿Qué le interesó?", list(etq_cc.keys()),
+                                                            key=f"cual_cc_{fila_txt['ID']}")
+                                    k1, k2, k3 = st.columns([3, 3, 1])
+                                    nom_cc = k1.text_input("Nombre:", key=f"nom_cc_{fila_txt['ID']}",
+                                                            placeholder="Cómo se llama")
+                                    tel_cc = k2.text_input("Teléfono:", key=f"tel_cc_{fila_txt['ID']}",
+                                                            placeholder="Para avisarle")
+                                    cant_cc = k3.number_input("Cant.", min_value=1, value=1, step=1,
+                                                               key=f"cant_cc_{fila_txt['ID']}")
+                                    nota_cc = st.text_input("Nota:", key=f"nota_cc_{fila_txt['ID']}",
+                                                             placeholder="Ej: tiene un Gol 2012, "
+                                                                         "consulta con el mecánico")
+                                    if st.button("📞 Anotar la consulta",
+                                                  key=f"btn_cc_{fila_txt['ID']}"):
+                                        _f = etq_cc[cual_cc]
+                                        ok_cc, msg_cc = anotar_consulta_cliente(
+                                            nom_cc, tel_cc, _f["ID"], _f["Codigo"],
+                                            _f.get("Descripcion") or "", cant_cc,
+                                            _f.get("Precio"), nota_cc)
+                                        if ok_cc:
+                                            avisar("success", msg_cc)
                                             st.rerun()
                                         else:
-                                            st.error(msg_ap)
+                                            st.error(msg_cc)
 
-                            st.markdown("**🛒 ¿Cuál se llevó el cliente?**")
-                            st.caption(
-                                "Marcá el que se lleva — vale también si se lleva un equivalente y no "
-                                "el que apareció en la búsqueda. Así el sistema aprende esa relación."
-                            )
-                            pista_del_click_derecho(
-                                f"txt_{fila_txt['ID']}", "Click derecho sobre un producto: se llevó, "
-                                                         "presupuesto o dónde está.")
-                            for f in (equivalentes or [fila_txt]):
-                                with renglon_con_menu(f"txt_{fila_txt['ID']}_{f['ID']}"):
-                                    cv1, cv2 = st.columns([4, 1])
-                                    precio_txt = f"${miles(f['Precio'], 0)}" if f.get("Precio") else "s/precio"
-                                    cv1.write(f"{f['Marca']} - {f['Codigo']} ({precio_txt}, "
-                                               f"stock: {f.get('Stock') if f.get('Stock') is not None else 's/d'})")
-                                    with acciones_del_renglon(cv2, f"txt_{fila_txt['ID']}_{f['ID']}"):
-                                        st.button(rotulo_del_boton_de_venta(f),
-                                                  key=f"vendido_txt_{fila_txt['ID']}_{f['ID']}",
-                                                  on_click=anotar_venta_y_avisar,
-                                                  args=(f["ID"], texto_pedido, f"{f['Marca']} - {f['Codigo']}",
-                                                        f"txt_{fila_txt['ID']}",
-                                                        veredicto_de_la_equivalencia(f),
-                                                        evidencia_de_la_fila(f)))
-                                        mostrar_mas_acciones_del_producto(f, f"txt_{fila_txt['ID']}_{f['ID']}")
-                            mostrar_lo_anotado(f"txt_{fila_txt['ID']}")
+                                # Apartar mientras el cliente lo piensa. Va acá y no en otra pantalla
+                                # porque el momento de reservar es este: con el presupuesto recién hecho.
+                                # OJO con los nombres: acá el código limpio es clean_txt y la lista es
+                                # 'equivalentes'. Usar los de la búsqueda por código ('clean', 'res')
+                                # tira NameError y corta el renderizado de toda la pantalla.
+                                _para_apartar = equivalentes or [fila_txt]
+                                if seccion_plegable("🔒 Apartar para un presupuesto",
+                                                     key=f"apartar_txt_{fila_txt['ID']}"):
+                                    # Una sola consulta para todos: preguntarlo de a uno eran dos
+                                    # consultas por fila para filtrar y dos más por fila para la etiqueta.
+                                    libres_ap = stock_libre_de_varios([f["ID"] for f in _para_apartar])
+                                    con_stock_ap = [f for f in _para_apartar
+                                                     if (libres_ap.get(f["ID"]) or 0) > 0]
+                                    if not con_stock_ap:
+                                        st.caption("Ninguno de estos tiene stock libre para apartar.")
+                                    else:
+                                        etq_ap = {
+                                            f"{f['Marca']} {f['Codigo']} — {libres_ap[f['ID']]} libre(s)":
+                                                f["ID"] for f in con_stock_ap
+                                        }
+                                        elegido_ap = st.selectbox("¿Cuál?", list(etq_ap.keys()),
+                                                                   key=f"cual_apartar_txt_{fila_txt['ID']}")
+                                        ap1, ap2 = st.columns([1, 3])
+                                        cant_ap = ap1.number_input(
+                                            "Cantidad", min_value=1, value=1, step=1,
+                                            key=f"cant_apartar_txt_{fila_txt['ID']}")
+                                        cliente_ap = ap2.text_input(
+                                            "¿Para quién?", key=f"cliente_apartar_txt_{fila_txt['ID']}",
+                                            placeholder="Nombre o patente, para saber a quién reclamarle")
+                                        if st.button("🔒 Apartar", key=f"btn_apartar_txt_{fila_txt['ID']}"):
+                                            ok_ap, msg_ap = reservar_stock(
+                                                etq_ap[elegido_ap], cant_ap, cliente_ap)
+                                            if ok_ap:
+                                                avisar("success", msg_ap)
+                                                st.rerun()
+                                            else:
+                                                st.error(msg_ap)
+
+                                st.markdown("**🛒 ¿Cuál se llevó el cliente?**")
+                                st.caption(
+                                    "Marcá el que se lleva — vale también si se lleva un equivalente y no "
+                                    "el que apareció en la búsqueda. Así el sistema aprende esa relación."
+                                )
+                                pista_del_click_derecho(
+                                    f"txt_{fila_txt['ID']}", "Click derecho sobre un producto: se llevó, "
+                                                             "presupuesto o dónde está.")
+                                for f in (equivalentes or [fila_txt]):
+                                    with renglon_con_menu(f"txt_{fila_txt['ID']}_{f['ID']}"):
+                                        cv1, cv2 = st.columns([4, 1])
+                                        precio_txt = f"${miles(f['Precio'], 0)}" if f.get("Precio") else "s/precio"
+                                        cv1.write(f"{f['Marca']} - {f['Codigo']} ({precio_txt}, "
+                                                   f"stock: {f.get('Stock') if f.get('Stock') is not None else 's/d'})")
+                                        with acciones_del_renglon(cv2, f"txt_{fila_txt['ID']}_{f['ID']}"):
+                                            st.button(rotulo_del_boton_de_venta(f),
+                                                      key=f"vendido_txt_{fila_txt['ID']}_{f['ID']}",
+                                                      on_click=anotar_venta_y_avisar,
+                                                      args=(f["ID"], texto_pedido, f"{f['Marca']} - {f['Codigo']}",
+                                                            f"txt_{fila_txt['ID']}",
+                                                            veredicto_de_la_equivalencia(f),
+                                                            evidencia_de_la_fila(f)))
+                                            mostrar_mas_acciones_del_producto(f, f"txt_{fila_txt['ID']}_{f['ID']}")
+                                mostrar_lo_anotado(f"txt_{fila_txt['ID']}")
                 if len(res_texto) > 15:
                     st.caption(f"(mostrando las primeras 15 de {len(res_texto)} — afiná la búsqueda "
                                 "para ver menos resultados)")
@@ -2149,179 +2165,191 @@ if pagina == PAGINAS[0]:
                     else:
                         st.warning("No encontré ninguno de esos códigos en el catálogo.")
 
-    with st.expander("📐 Buscar por medidas mecánicas (cuando no hay código ni equivalencia cargada)", key="exp_buscar_medidas_mecanicas_cuando"):
-        ayuda(
-            "Para piezas de autos antiguos, importados o fuera de catálogo: medí la pieza rota con un "
-            "calibre y buscá alternativas que compartan esas cotas, aunque no tengan equivalencia registrada."
-        )
-        cm1, cm2, cm3 = cols(3)
-        m_diam_int = cm1.number_input("Diámetro interno (mm)", min_value=0.0, step=0.1, value=0.0, key="med_di")
-        m_diam_ext = cm2.number_input("Diámetro externo (mm)", min_value=0.0, step=0.1, value=0.0, key="med_de")
-        m_ancho = cm3.number_input("Ancho (mm)", min_value=0.0, step=0.1, value=0.0, key="med_an")
-        cm4, cm5, cm6 = cols(3)
-        m_paso = cm4.text_input("Paso de rosca (opcional)", key="med_paso", placeholder="Ej: M12x1.5")
-        m_estrias = cm5.number_input("Cantidad de estrías (opcional)", min_value=0, step=1, value=0, key="med_estrias")
-        m_tolerancia = cm6.slider("Tolerancia (%)", min_value=1, max_value=15, value=5, key="med_tol")
-
-        st.markdown("**↔️ Segunda cara (opcional, para piezas con distinta medida de cada lado)**",
-                    help="Ej: un retén con labio interior de un diámetro de un lado y otro del otro, "
-                         "o un tensor con el interior escalonado (17mm de una cara, 8mm de la "
-                         "otra).")
-        cb1, cb2 = st.columns(2)
-        m_diam_int_b = cb1.number_input("Diámetro interno cara B (mm)", min_value=0.0, step=0.1, value=0.0, key="med_di_b")
-        m_diam_ext_b = cb2.number_input("Diámetro externo / labio exterior cara B (mm)", min_value=0.0, step=0.1,
-                                         value=0.0, key="med_de_b")
-
-        st.markdown("**🔩 Homocinéticas (opcional)**")
-        ch1, ch2 = st.columns(2)
-        m_estrias_int = ch1.number_input("Estrías internas", min_value=0, step=1, value=0, key="med_estrias_int")
-        m_estrias_ext = ch2.number_input("Estrías externas", min_value=0, step=1, value=0, key="med_estrias_ext")
-        ch3, ch4 = st.columns(2)
-        m_seguro = ch3.text_input("Posición del seguro", key="med_seguro", placeholder="Ej: 1er ranura, a 12mm")
-        m_abs = ch4.selectbox("¿Tiene ABS?", ["Cualquiera", "Sí", "No"], key="med_abs")
-        ch5, ch6 = st.columns(2)
-        m_rosca_homo = ch5.number_input("Diámetro de rosca (mm)", min_value=0.0, step=0.1, value=0.0, key="med_rosca_homo")
-        m_largo_total = ch6.number_input(
-            "Largo total (mm)", min_value=0.0, step=0.5, value=0.0, key="med_largo_total",
-            help="De punta a punta — es la medida que más rápido descarta."
-        )
-        st.caption("La copa es cónica: cargá los dos diámetros si los tenés (base y boca).")
-        ch7, ch8 = st.columns(2)
-        m_copa = ch7.number_input("Diám. copa — base (mm)", min_value=0.0, step=0.1, value=0.0, key="med_copa")
-        m_copa_sup = ch8.number_input("Diám. copa — boca / superior (mm)", min_value=0.0, step=0.1,
-                                       value=0.0, key="med_copa_sup")
-
-        if st.button("📐 Buscar por medidas"):
-            res_medidas = buscar_por_medidas(
-                m_diam_int or None, m_diam_ext or None, m_ancho or None,
-                m_paso or None, m_estrias or None, m_tolerancia,
-                m_estrias_int or None, m_estrias_ext or None, m_seguro or None, m_abs,
-                m_diam_int_b or None, m_diam_ext_b or None,
-                m_rosca_homo or None, m_copa or None,
-                m_copa_sup or None, m_largo_total or None
+    # PEREZOSO: Streamlit ejecuta lo de adentro de un desplegable aunque esté cerrado, en cada
+    # toque. Con on_change="rerun" sabe si está abierto y lo de adentro se salta cerrado (ver
+    # «⚡ Los desplegables cerrados no trabajan» en el README). Lo que se escriba adentro se
+    # olvida al cerrarlo: no va en uno con campos que se leen afuera (⚙️ Opciones, 🛒 Presupuesto).
+    _exp_medidas = st.expander("📐 Buscar por medidas mecánicas (cuando no hay código ni "
+                               "equivalencia cargada)", key="exp_buscar_medidas_mecanicas_cuando",
+                               on_change="rerun")
+    if _exp_medidas.open:
+        with _exp_medidas:
+            ayuda(
+                "Para piezas de autos antiguos, importados o fuera de catálogo: medí la pieza rota con un "
+                "calibre y buscá alternativas que compartan esas cotas, aunque no tengan equivalencia registrada."
             )
-            if res_medidas:
-                st.success(f"Se encontraron {len(res_medidas)} pieza(s) con medidas compatibles:")
-                st.dataframe(quitar_id(res_medidas), width="stretch", hide_index=True)
-            else:
-                st.warning(
-                    "Sin resultados. Puede ser que no haya piezas con esas medidas cargadas todavía — "
-                    f"cargalas en {miga_hasta('Productos')} a medida que las vayas midiendo."
+            cm1, cm2, cm3 = cols(3)
+            m_diam_int = cm1.number_input("Diámetro interno (mm)", min_value=0.0, step=0.1, value=0.0, key="med_di")
+            m_diam_ext = cm2.number_input("Diámetro externo (mm)", min_value=0.0, step=0.1, value=0.0, key="med_de")
+            m_ancho = cm3.number_input("Ancho (mm)", min_value=0.0, step=0.1, value=0.0, key="med_an")
+            cm4, cm5, cm6 = cols(3)
+            m_paso = cm4.text_input("Paso de rosca (opcional)", key="med_paso", placeholder="Ej: M12x1.5")
+            m_estrias = cm5.number_input("Cantidad de estrías (opcional)", min_value=0, step=1, value=0, key="med_estrias")
+            m_tolerancia = cm6.slider("Tolerancia (%)", min_value=1, max_value=15, value=5, key="med_tol")
+
+            st.markdown("**↔️ Segunda cara (opcional, para piezas con distinta medida de cada lado)**",
+                        help="Ej: un retén con labio interior de un diámetro de un lado y otro del otro, "
+                             "o un tensor con el interior escalonado (17mm de una cara, 8mm de la "
+                             "otra).")
+            cb1, cb2 = st.columns(2)
+            m_diam_int_b = cb1.number_input("Diámetro interno cara B (mm)", min_value=0.0, step=0.1, value=0.0, key="med_di_b")
+            m_diam_ext_b = cb2.number_input("Diámetro externo / labio exterior cara B (mm)", min_value=0.0, step=0.1,
+                                             value=0.0, key="med_de_b")
+
+            st.markdown("**🔩 Homocinéticas (opcional)**")
+            ch1, ch2 = st.columns(2)
+            m_estrias_int = ch1.number_input("Estrías internas", min_value=0, step=1, value=0, key="med_estrias_int")
+            m_estrias_ext = ch2.number_input("Estrías externas", min_value=0, step=1, value=0, key="med_estrias_ext")
+            ch3, ch4 = st.columns(2)
+            m_seguro = ch3.text_input("Posición del seguro", key="med_seguro", placeholder="Ej: 1er ranura, a 12mm")
+            m_abs = ch4.selectbox("¿Tiene ABS?", ["Cualquiera", "Sí", "No"], key="med_abs")
+            ch5, ch6 = st.columns(2)
+            m_rosca_homo = ch5.number_input("Diámetro de rosca (mm)", min_value=0.0, step=0.1, value=0.0, key="med_rosca_homo")
+            m_largo_total = ch6.number_input(
+                "Largo total (mm)", min_value=0.0, step=0.5, value=0.0, key="med_largo_total",
+                help="De punta a punta — es la medida que más rápido descarta."
+            )
+            st.caption("La copa es cónica: cargá los dos diámetros si los tenés (base y boca).")
+            ch7, ch8 = st.columns(2)
+            m_copa = ch7.number_input("Diám. copa — base (mm)", min_value=0.0, step=0.1, value=0.0, key="med_copa")
+            m_copa_sup = ch8.number_input("Diám. copa — boca / superior (mm)", min_value=0.0, step=0.1,
+                                           value=0.0, key="med_copa_sup")
+
+            if st.button("📐 Buscar por medidas"):
+                res_medidas = buscar_por_medidas(
+                    m_diam_int or None, m_diam_ext or None, m_ancho or None,
+                    m_paso or None, m_estrias or None, m_tolerancia,
+                    m_estrias_int or None, m_estrias_ext or None, m_seguro or None, m_abs,
+                    m_diam_int_b or None, m_diam_ext_b or None,
+                    m_rosca_homo or None, m_copa or None,
+                    m_copa_sup or None, m_largo_total or None
                 )
+                if res_medidas:
+                    st.success(f"Se encontraron {len(res_medidas)} pieza(s) con medidas compatibles:")
+                    st.dataframe(quitar_id(res_medidas), width="stretch", hide_index=True)
+                else:
+                    st.warning(
+                        "Sin resultados. Puede ser que no haya piezas con esas medidas cargadas todavía — "
+                        f"cargalas en {miga_hasta('Productos')} a medida que las vayas midiendo."
+                    )
 
     if es_operador_o_admin():
-        with st.expander("📷 Identificar pieza por foto (con IA)", key="exp_identificar_pieza_foto_ia"):
-            st.caption(
-                "Sacale una foto a la pieza o subí una que ya tengas. La IA busca un código visible "
-                "y, si lo encuentra, lo busca directo en tu catálogo."
-            )
-            foto = recordar_archivo(st.file_uploader(
-                "Foto de la pieza:", type=["png", "jpg", "jpeg"], key="foto_identificar_pieza",
-                label_visibility="collapsed"
-            ), "foto_pieza")
-            foto_ok = archivo_listo(foto, "foto")
-            if foto and st.button("🗑️ Usar otra foto", key="otra_foto_pieza"):
-                olvidar_archivo("foto_pieza")
-                st.rerun()
-            if st.button("🔍 Identificar", disabled=not foto_ok):
-                with st.spinner("Consultando..."):
-                    datos_pieza, error = identificar_pieza_por_foto(foto.getvalue())
-                if error:
-                    st.error(error)
-                elif datos_pieza:
-                    st.session_state["datos_pieza_foto"] = datos_pieza
-                    st.session_state["buscar_tipo_pieza_click"] = False
+        # Perezoso: lo de adentro corre solo abierto (ver el de «📐 Buscar por medidas» en el Buscador).
+        _exp_foto_ia = st.expander("📷 Identificar pieza por foto (con IA)",
+                                   key="exp_identificar_pieza_foto_ia", on_change="rerun")
+        if _exp_foto_ia.open:
+            with _exp_foto_ia:
+                st.caption(
+                    "Sacale una foto a la pieza o subí una que ya tengas. La IA busca un código visible "
+                    "y, si lo encuentra, lo busca directo en tu catálogo."
+                )
+                foto = recordar_archivo(st.file_uploader(
+                    "Foto de la pieza:", type=["png", "jpg", "jpeg"], key="foto_identificar_pieza",
+                    label_visibility="collapsed"
+                ), "foto_pieza")
+                foto_ok = archivo_listo(foto, "foto")
+                if foto and st.button("🗑️ Usar otra foto", key="otra_foto_pieza"):
+                    olvidar_archivo("foto_pieza")
+                    st.rerun()
+                if st.button("🔍 Identificar", disabled=not foto_ok):
+                    with st.spinner("Consultando..."):
+                        datos_pieza, error = identificar_pieza_por_foto(foto.getvalue())
+                    if error:
+                        st.error(error)
+                    elif datos_pieza:
+                        st.session_state["datos_pieza_foto"] = datos_pieza
+                        st.session_state["buscar_tipo_pieza_click"] = False
 
-            if st.session_state.get("datos_pieza_foto"):
-                datos_pieza = st.session_state["datos_pieza_foto"]
-                codigo_detectado = (datos_pieza.get("codigo") or "").strip()
-                confianza = (datos_pieza.get("confianza") or "").strip().lower()
+                if st.session_state.get("datos_pieza_foto"):
+                    datos_pieza = st.session_state["datos_pieza_foto"]
+                    codigo_detectado = (datos_pieza.get("codigo") or "").strip()
+                    confianza = (datos_pieza.get("confianza") or "").strip().lower()
 
-                if codigo_detectado:
-                    st.success(f"**Código detectado: `{codigo_detectado}`** (confianza de la IA: {confianza or 's/d'})")
-                    if confianza in ("media", "baja"):
-                        st.caption(
-                            "⚠️ La propia IA no está muy segura de haber leído bien el código — "
-                            "confirmalo mirando la pieza antes de vender."
-                        )
-                else:
-                    st.warning("No se distinguió ningún código legible en la foto.")
-                if datos_pieza.get("marca_visible"):
-                    st.caption(f"Marca visible en la pieza: {datos_pieza['marca_visible']}")
-                if datos_pieza.get("tipo_pieza"):
-                    st.caption(f"Tipo de pieza (según la IA): {datos_pieza['tipo_pieza']}")
-
-                if codigo_detectado:
-                    clean_foto = sanitizar(codigo_detectado)
-                    res_foto = (con_veredicto(buscar_por_codigo(clean_foto), clean_foto)
-                                if clean_foto else [])
-                    if res_foto:
-                        incrementar_veces_buscado(clean_foto)
-                        st.success(f"✅ El código está en tu catálogo — {len(res_foto)} resultado(s):")
-                        st.caption(
-                            "Esto es un match exacto por código, con las equivalencias que ya tenés "
-                            "cargadas — no es una suposición de la IA."
-                        )
-                        st.dataframe(quitar_id(res_foto), width="stretch", hide_index=True)
+                    if codigo_detectado:
+                        st.success(f"**Código detectado: `{codigo_detectado}`** (confianza de la IA: {confianza or 's/d'})")
+                        if confianza in ("media", "baja"):
+                            st.caption(
+                                "⚠️ La propia IA no está muy segura de haber leído bien el código — "
+                                "confirmalo mirando la pieza antes de vender."
+                            )
                     else:
-                        st.info(
-                            f"El código `{codigo_detectado}` no coincide con nada cargado — puede que la "
-                            "IA haya leído mal algún carácter, o que sea un código que todavía no tenés."
-                        )
-                        # Los que se escriben casi igual, primero los que solo difieren en lo que
-                        # se confunde al leer. Ver es_confusion_de_lectura().
-                        _parecidos_foto = codigos_por_tipeo(clean_foto, de_una_foto=True)
-                        if _parecidos_foto:
-                            mostrar_parecidos_de_una_lectura(codigo_detectado, _parecidos_foto)
-                        if datos_pieza.get("tipo_pieza") and st.button("🔍 Buscar por el tipo de pieza en vez del código"):
-                            st.session_state["buscar_tipo_pieza_click"] = True
+                        st.warning("No se distinguió ningún código legible en la foto.")
+                    if datos_pieza.get("marca_visible"):
+                        st.caption(f"Marca visible en la pieza: {datos_pieza['marca_visible']}")
+                    if datos_pieza.get("tipo_pieza"):
+                        st.caption(f"Tipo de pieza (según la IA): {datos_pieza['tipo_pieza']}")
 
-                if (not codigo_detectado or (codigo_detectado and st.session_state.get("buscar_tipo_pieza_click"))) \
-                        and datos_pieza.get("tipo_pieza"):
-                    if not codigo_detectado:
-                        mostrar_tipo = st.button("🔍 Buscar por el tipo de pieza")
-                    else:
-                        mostrar_tipo = True
-                    if mostrar_tipo:
-                        tipo_pieza_texto = datos_pieza["tipo_pieza"]
-                        res_tipo = buscar_por_texto(tipo_pieza_texto)
-                        busqueda_usada = tipo_pieza_texto
-                        if not res_tipo:
-                            # La frase completa no encontró nada — reintenta con menos palabras
-                            # (más amplio), por si tus descripciones no usan las mismas palabras
-                            # exactas que eligió la IA (ej: "rótula de suspensión" vs "ROTULA DERECHA").
-                            palabras_tipo = tipo_pieza_texto.split()
-                            for n in range(len(palabras_tipo) - 1, 0, -1):
-                                intento = " ".join(palabras_tipo[:n])
-                                res_tipo = buscar_por_texto(intento)
-                                if res_tipo:
-                                    busqueda_usada = intento
-                                    break
-                        if res_tipo:
-                            if busqueda_usada != tipo_pieza_texto:
-                                st.caption(
-                                    f"No encontré nada con \"{tipo_pieza_texto}\" completo — probé de nuevo "
-                                    f"solo con \"{busqueda_usada}\" y esto apareció (todavía menos preciso, "
-                                    "revisá con más cuidado):"
-                                )
-                            if len(res_tipo) > 1:
-                                st.warning(
-                                    f"⚠️ Encontré {len(res_tipo)} pieza(s) parecida(s) por palabras clave — "
-                                    "NINGUNA está confirmada como la exacta, es solo una búsqueda por texto. "
-                                    "Si son piezas como rótulas, retenes, etc. que varían por modelo de auto, "
-                                    "comparalas físicamente (o por medidas, en '📐 Buscar por medidas mecánicas') "
-                                    "antes de vender la que sea."
-                                )
-                            else:
-                                st.info(
-                                    "Encontré 1 coincidencia por palabras clave — tampoco está confirmada, "
-                                    "revisala antes de vender."
-                                )
-                            st.dataframe(quitar_id(res_tipo)[:15], width="stretch", hide_index=True)
-                            if len(res_tipo) > 15:
-                                st.caption(f"Mostrando las primeras 15 de {len(res_tipo)} coincidencias.")
+                    if codigo_detectado:
+                        clean_foto = sanitizar(codigo_detectado)
+                        res_foto = (con_veredicto(buscar_por_codigo(clean_foto), clean_foto)
+                                    if clean_foto else [])
+                        if res_foto:
+                            incrementar_veces_buscado(clean_foto)
+                            st.success(f"✅ El código está en tu catálogo — {len(res_foto)} resultado(s):")
+                            st.caption(
+                                "Esto es un match exacto por código, con las equivalencias que ya tenés "
+                                "cargadas — no es una suposición de la IA."
+                            )
+                            st.dataframe(quitar_id(res_foto), width="stretch", hide_index=True)
                         else:
-                            st.caption("No encontré nada parecido en la base por ese tipo de pieza.")
+                            st.info(
+                                f"El código `{codigo_detectado}` no coincide con nada cargado — puede que la "
+                                "IA haya leído mal algún carácter, o que sea un código que todavía no tenés."
+                            )
+                            # Los que se escriben casi igual, primero los que solo difieren en lo que
+                            # se confunde al leer. Ver es_confusion_de_lectura().
+                            _parecidos_foto = codigos_por_tipeo(clean_foto, de_una_foto=True)
+                            if _parecidos_foto:
+                                mostrar_parecidos_de_una_lectura(codigo_detectado, _parecidos_foto)
+                            if datos_pieza.get("tipo_pieza") and st.button("🔍 Buscar por el tipo de pieza en vez del código"):
+                                st.session_state["buscar_tipo_pieza_click"] = True
+
+                    if (not codigo_detectado or (codigo_detectado and st.session_state.get("buscar_tipo_pieza_click"))) \
+                            and datos_pieza.get("tipo_pieza"):
+                        if not codigo_detectado:
+                            mostrar_tipo = st.button("🔍 Buscar por el tipo de pieza")
+                        else:
+                            mostrar_tipo = True
+                        if mostrar_tipo:
+                            tipo_pieza_texto = datos_pieza["tipo_pieza"]
+                            res_tipo = buscar_por_texto(tipo_pieza_texto)
+                            busqueda_usada = tipo_pieza_texto
+                            if not res_tipo:
+                                # La frase completa no encontró nada — reintenta con menos palabras
+                                # (más amplio), por si tus descripciones no usan las mismas palabras
+                                # exactas que eligió la IA (ej: "rótula de suspensión" vs "ROTULA DERECHA").
+                                palabras_tipo = tipo_pieza_texto.split()
+                                for n in range(len(palabras_tipo) - 1, 0, -1):
+                                    intento = " ".join(palabras_tipo[:n])
+                                    res_tipo = buscar_por_texto(intento)
+                                    if res_tipo:
+                                        busqueda_usada = intento
+                                        break
+                            if res_tipo:
+                                if busqueda_usada != tipo_pieza_texto:
+                                    st.caption(
+                                        f"No encontré nada con \"{tipo_pieza_texto}\" completo — probé de nuevo "
+                                        f"solo con \"{busqueda_usada}\" y esto apareció (todavía menos preciso, "
+                                        "revisá con más cuidado):"
+                                    )
+                                if len(res_tipo) > 1:
+                                    st.warning(
+                                        f"⚠️ Encontré {len(res_tipo)} pieza(s) parecida(s) por palabras clave — "
+                                        "NINGUNA está confirmada como la exacta, es solo una búsqueda por texto. "
+                                        "Si son piezas como rótulas, retenes, etc. que varían por modelo de auto, "
+                                        "comparalas físicamente (o por medidas, en '📐 Buscar por medidas mecánicas') "
+                                        "antes de vender la que sea."
+                                    )
+                                else:
+                                    st.info(
+                                        "Encontré 1 coincidencia por palabras clave — tampoco está confirmada, "
+                                        "revisala antes de vender."
+                                    )
+                                st.dataframe(quitar_id(res_tipo)[:15], width="stretch", hide_index=True)
+                                if len(res_tipo) > 15:
+                                    st.caption(f"Mostrando las primeras 15 de {len(res_tipo)} coincidencias.")
+                            else:
+                                st.caption("No encontré nada parecido en la base por ese tipo de pieza.")
 
     historial = historial_reciente()
     if historial:

@@ -21,7 +21,7 @@ RAIZ = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 def probar():
     from streamlit.testing.v1 import AppTest
-    fallas, tiempos = [], []
+    fallas, tiempos, abiertos = [], [], set()
 
     at = AppTest.from_file(os.path.join(RAIZ, "app.py"), default_timeout=300)
     at.secrets["admin_passwords"] = {"duenio": "clave-duenio-1"}
@@ -39,6 +39,20 @@ def probar():
         tiempos.append((time.time() - inicio, f"{quien}: {donde}"))
         for e in at.exception:
             fallas.append(f"{quien}: {donde}: {e.value[:200]}")
+        # Lo de adentro de un desplegable perezoso (on_change="rerun") no corre mientras está
+        # cerrado: se abren todos y se mira otra vez, para que no quede código sin recorrer.
+        # Se reconocen porque guardan si están abiertos en su clave («exp_…»), en False.
+        cerrados = [k for k in at.session_state
+                    if str(k).startswith("exp_") and at.session_state[k] is False]
+        if cerrados:
+            for k in cerrados:
+                at.session_state[k] = True
+            at.run()
+            abiertos.update(cerrados)
+            for e in at.exception:
+                fallas.append(f"{quien}: {donde} (con lo plegado abierto): {e.value[:200]}")
+            for k in cerrados:
+                at.session_state[k] = False
 
     def recorrer(quien):
         # Las de la barra de cada uno: sin sesión, solo las abiertas (ver PAGINAS_ABIERTAS).
@@ -125,6 +139,8 @@ def probar():
     entrar("clave-duenio-1")
     recorrer("administrador")
     tiempos.sort(reverse=True)
+    if len(abiertos) < 5:
+        fallas.append(f"se abrieron pocos desplegables perezosos: {sorted(abiertos)}")
     return fallas, len(tiempos), tiempos[:3]
 
 

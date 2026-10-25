@@ -6636,6 +6636,25 @@ Lo pidió el dueño: «seguí mejorando la redacción de los textos, ponelos tod
 
 Probado en un navegador de verdad, en inglés y en castellano: las listas dicen «Elegí una opción», las tablas «Pantalla completa», «Buscar en la tabla» y «Bajar la tabla», el cartelito de la barra de los gráficos «Ver los números», al escribir «Enter para confirmar», y el calendario de 💵 Caja «octubre 2026» con «D L M M J V S». Los gráficos, «23/10» y «$120.000». En cada pantalla queda un solo «ℹ️ Cómo funciona» arriba (en Depósito: la sección, «⏳ Para buscar» y cómo funciona la cola), y las ayudas de una parte siguen en su parte. `pruebas_de_la_sesion.py` (2d) lo controla: rompiéndolo a propósito, avisa.
 
+## ⚡ Los desplegables cerrados no trabajan
+
+Lo pidió el dueño: «más». Se midió cuánto tarda cada pantalla con la copia de la base (86.946 productos), y lo que más pesaba en las más usadas no se veía: **Streamlit ejecuta todo lo de adentro de un desplegable aunque esté cerrado**, en cada toque. Con Streamlit 1.65 el desplegable puede saber si está abierto (`on_change="rerun"` y `.open`), y lo de adentro se salta mientras está cerrado.
+
+| Cada toque (mediana) | Antes | Ahora |
+|---|---|---|
+| 🔍 Buscador | 140 ms | **66 ms** |
+| Después de buscar por descripción («filtro aceite gol», 15 resultados) | 220 ms | **75 ms** |
+| 🧾 Ventas | 77 ms | **50 ms** |
+| 💵 Caja | 49 ms | 46 ms |
+
+Los que pasaron a perezosos: en el Buscador, **📐 Buscar por medidas** (doce campos), **🖼️ Buscar por parecido visual**, **📷 Escanear el código de barras**, **📷 Identificar pieza por foto** y **cada resultado de la búsqueda por descripción** (eran hasta 15, y cada uno armaba la ficha de cada equivalente estando cerrado); en Ventas, **📊 Lo que más se vende** y **👥 Cada cuenta**; en Caja, **📋 Ventas y cierre de caja**.
+
+**De paso, un error que no se veía:** el de parecido visual, con fotos pendientes, procesaba 25 fotos en **cada toque del Buscador**, aunque nadie lo abriera. El comentario del código decía «cada vez que se abre este panel», y no era así. Ahora sí.
+
+Al abrir uno, la pantalla se redibuja (la barra ámbar de arriba) y aparece lo de adentro. Lo que se escribió adentro se olvida al cerrarlo, así que no se usa en los que tienen campos que se leen afuera: ⚙️ Opciones de la búsqueda y 🛒 Presupuesto quedan como estaban.
+
+`pruebas_de_las_pantallas.py` abre todos los perezosos de cada pantalla y la mira otra vez, para que no quede código sin recorrer (rompiendo uno a propósito, avisa), y `auditar.py` (8e) los reconoce al buscar desplegables anidados. Probado en un navegador de verdad: cerrado no dibuja nada; abierto, la búsqueda por medidas encontró 22 piezas; cerrado otra vez, se va.
+
 ## 🔧 A fondo: lo que quedaba de las tres tandas de Gemini
 
 Lo pidió el dueño: «dale a fondo con todas las mejoras».

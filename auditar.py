@@ -691,9 +691,22 @@ for nodo in ast.walk(ARBOL):
 # Igual conviene verlo: los dos expanders pueden estar a 200 líneas de distancia y así, leyendo,
 # no hay forma de darse cuenta.
 def _es_contenedor(item, nombre):
+    if (nombre == "expander" and isinstance(item.context_expr, ast.Name)
+            and item.context_expr.id in _DESPLEGABLES_CON_NOMBRE):
+        return True
     return (isinstance(item.context_expr, ast.Call)
             and isinstance(item.context_expr.func, ast.Attribute)
             and item.context_expr.func.attr == nombre)
+
+
+# Los desplegables perezosos se abren en dos pasos —`_exp = st.expander(..., on_change="rerun")`
+# y después `if _exp.open: with _exp:`— así que el `with` no dice «expander»: se reconocen por el
+# nombre que recibió el desplegable. Sin esto, uno anidado adentro de uno perezoso no se veía.
+_DESPLEGABLES_CON_NOMBRE = {
+    t.id for n in ast.walk(ARBOL)
+    if isinstance(n, ast.Assign) and isinstance(n.value, ast.Call)
+    and isinstance(n.value.func, ast.Attribute) and n.value.func.attr == "expander"
+    for t in n.targets if isinstance(t, ast.Name)}
 
 
 def _funciones_que_abren(nombre):

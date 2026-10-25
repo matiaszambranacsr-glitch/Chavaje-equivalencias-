@@ -141,7 +141,7 @@ cambio» (todas juntas: `python .github/correr_las_pruebas.py`).
 | Un código que no aparece ofrece como botón los que se escriben casi igual, y tocarlo los busca | `codigos_por_tipeo()`, `mostrar_lista_clickeable()` | `pruebas_de_las_pantallas.py` |
 | Ajustar los precios de una marca solo en lo que dice ciertas palabras (sin acentos ni mayúsculas); un «%» tipeado no toca nada | `aumentar_precios_por_marca(…, que_dice)`, `_solo_la_linea()` | `pruebas_de_los_cambios.py` |
 | El presupuesto del Buscador se manda derecho por WhatsApp, con lo que tiene y el total | — | `pruebas_de_las_pantallas.py` |
-| Todas las pantallas y solapas se dibujan sin errores, sin contraseña, como operador y como administrador | — | `pruebas_de_las_pantallas.py` |
+| Todas las pantallas y solapas se dibujan sin errores, sin contraseña, como operador y como administrador, también con los desplegables perezosos abiertos | — | `pruebas_de_las_pantallas.py` |
 | Sin sesión, «📲 Consultar por WhatsApp» le escribe al negocio con lo que se buscó (si el número está cargado); con sesión no sale | `boton_para_consultar()`, `texto_para_consultar()` | `pruebas_de_las_pantallas.py`, `pruebas_del_buscador.py` (2d) |
 | En las tablas de resultados, «s/d» donde no se sabe el stock | `con_stock_legible()` | `pruebas_del_buscador.py` (2d) |
 | Sin sesión, la barra tiene solo las secciones abiertas y los resultados no muestran nada del mostrador (ni apagado ni con candado) | `PAGINAS_ABIERTAS`, `solo_mirar()`, `COLUMNAS_DEL_NEGOCIO` | `pruebas_de_las_pantallas.py` |

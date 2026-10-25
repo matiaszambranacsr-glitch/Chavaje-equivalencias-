@@ -194,110 +194,114 @@ if pagina == PAGINAS[11]:
     # LAS VENTAS DEL DÍA Y EL CIERRE DE CAJA: hoy, o el día que se elija. Lo cobrado cuenta
     # el día que se cobró; lo que espera, aparte.
     _caja_hoy = cierre_de_caja()
-    with st.expander(f"📋 Ventas y cierre de caja — hoy: {_caja_hoy['ventas']} · "
-                     f"${miles(_caja_hoy['total'], 0)}", key="exp_ventas_cierre_caja_hoy"):
-        _dia_vta = st.date_input("Día:", value=datetime.now().date(), key="venta_dia",
-                                 max_value=datetime.now().date(), format="DD/MM/YYYY")
-        _dia_txt = _dia_vta.strftime("%Y-%m-%d")
-        _del_dia = ventas_del_dia(_dia_txt)
-        _validas = [v for v in _del_dia if not v["anulada"]]
-        _caja = cierre_de_caja(_dia_txt)
-        _devs_dia = devoluciones_del_dia(_dia_txt)
-        if not _del_dia and not _devs_dia:
-            st.caption("Ese día no hubo ventas.")
-        else:
-            st.markdown(f"**Total: \\${miles(_caja['total'], 0)}** en {_caja['ventas']} venta(s)"
-                        + (f" · {_caja['anuladas']} anulada(s) por \\${miles(_caja['total_anulado'], 0)},"
-                           " que no cuentan" if _caja["anuladas"] else "")
-                        + (f" · {_caja['devoluciones']} devolución(es) por "
-                           f"\\${miles(_caja['total_devuelto'], 0)}, ya descontadas"
-                           if _caja["devoluciones"] else "")
-                        + (f" · ⏳ {_caja['a_cobrar']} esperando en la caja por "
-                           f"\\${miles(_caja['total_a_cobrar'], 0)}, que todavía no cuentan"
-                           if _caja["a_cobrar"] else ""))
-            # La ganancia la ve el administrador, como el margen del buscador.
-            if es_admin() and _caja["items_con_costo"]:
-                st.markdown(f"💰 **Ganancia estimada: ${miles(_caja['ganancia'], 0)}**"
-                            + (f" — de {_caja['items_con_costo']} de {_caja['items']} cosas "
-                               "vendidas, las que tienen costo cargado"
-                               if _caja["items_con_costo"] < _caja["items"] else ""))
-            _k1, _k2 = cols([1, 1])
-            _k1.caption("Por forma de pago — «Efectivo» es lo que tiene que haber en el cajón:")
-            _k1.dataframe([{"Forma de pago": f, "Ventas": n, "Total": f"${miles(t, 0)}"}
-                           for f, n, t in _caja["por_forma"]], width="stretch", hide_index=True)
-            _k2.caption("Por quién atendió:")
-            _k2.dataframe([{"Atendió": u, "Ventas": n, "Total": f"${miles(t, 0)}"}
-                           for u, n, t in _caja["por_usuario"]], width="stretch", hide_index=True)
-            _filas_dia = [{"#": v["id"], "Hora": v["hora"], "Total": v["total"] or 0,
-                           "Pago": como_se_pago(v) if v["cobrada"] else "⏳ en la caja",
-                           "Para": v["cuenta"] or v["cliente"] or "",
-                           "Patente": v["patente"] or "", "Km": v["km"] or "",
-                           "Qué": ", ".join(f"{i['cantidad']}× {i['marca']} {i['codigo']}"
-                                            for i in v["items"]),
-                           "Estado": "🚫 anulada" if v["anulada"] else "",
-                           "Atendió": v["usuario"] or "",
-                           "Cobró": v["cobrada_por"] or ""} for v in _del_dia]
-            if _filas_dia:
-                st.dataframe([dict(f, Total=f"${miles(f['Total'], 0)}") for f in _filas_dia],
-                             width="stretch", hide_index=True)
-            if _devs_dia:
-                st.caption("↩️ Lo devuelto ese día:")
-                st.dataframe([{"Hora": d["hora"], "De la venta": f"#{d['venta_id']}",
-                               "Qué": f"{d['cantidad']}× {d['marca']} {d['codigo']}",
-                               "Importe": f"-${miles(d['importe'], 0)}",
-                               "Pago": d["forma_de_pago"],
-                               "Por qué": MOTIVOS_DE_DEVOLUCION.get(d["motivo"], d["motivo"]),
-                               "Devolvió": d["usuario"] or ""} for d in _devs_dia],
-                             width="stretch", hide_index=True)
-            st.download_button("⬇️ Descargar las ventas del día (Excel)",
-                               data=to_excel_bytes(_filas_dia),
-                               file_name=f"ventas_{_dia_txt}.xlsx", key="venta_excel",
-                               mime="application/vnd.openxmlformats-officedocument."
-                                    "spreadsheetml.sheet")
-            if _del_dia:
-                _cv1, _cv2 = cols([3, 1])
-                _comp_de = _cv1.selectbox("Comprobante de la venta:", [v["id"] for v in _del_dia],
-                                          format_func=lambda i: f"#{i}",
-                                          key="venta_comprobante_de")
-                _cv2.download_button("📄 PDF", data=comprobante_para_descargar(_comp_de),
-                                     file_name=f"comprobante_{_comp_de}.pdf",
-                                     mime="application/pdf", key="venta_comprobante_dia",
-                                     width="stretch")
-            if _validas:
-                _a1, _a2 = cols([3, 1])
-                _anular = _a1.selectbox("Anular una venta (devuelve el stock y la saca de la "
-                                        "ficha del auto):", [v["id"] for v in _validas],
-                                        format_func=lambda i: f"#{i}", key="venta_a_anular")
-                if candado("anular una venta", _a2.button("🚫 Anular", key="venta_anular"),
-                           "anular_una_venta"):
-                    _ok_an, _texto_an = anular_venta(_anular)
-                    avisar("success" if _ok_an else "warning", _texto_an)
-                    st.rerun()
-        # EL ARQUEO: lo que hay en el cajón contra lo que dice el sistema. Ver arquear_la_caja().
-        st.markdown("**🧮 Arqueo: ¿cuánto efectivo hay en el cajón?**")
-        st.caption(f"Según las ventas en efectivo (menos lo devuelto), tendría que haber "
-                   f"**${miles(efectivo_esperado(_dia_txt), 0)}**, sin contar el cambio con el "
-                   "que se abrió.")
-        with st.form("form_arqueo"):
-            _q1, _q2 = cols([1, 2])
-            _contado = _q1.number_input("Efectivo contado:", min_value=0.0, step=100.0,
-                                        value=None, placeholder="Ej: 45000",
-                                        help="Sin el cambio con el que abriste la caja.")
-            _nota_arq = _q2.text_input("Nota (opcional):", placeholder="Ej: faltan $500 de un vuelto")
-            _arquear = st.form_submit_button("🧮 Guardar el arqueo")
-        if _arquear:
-            if _contado is None:
-                st.warning("Escribí cuánto efectivo contaste.")
+    # Perezoso: lo de adentro corre solo abierto (ver el de «📐 Buscar por medidas» en el Buscador).
+    _exp_cierre = st.expander(f"📋 Ventas y cierre de caja — hoy: {_caja_hoy['ventas']} · "
+                              f"${miles(_caja_hoy['total'], 0)}", key="exp_ventas_cierre_caja_hoy",
+                              on_change="rerun")
+    if _exp_cierre.open:
+        with _exp_cierre:
+            _dia_vta = st.date_input("Día:", value=datetime.now().date(), key="venta_dia",
+                                     max_value=datetime.now().date(), format="DD/MM/YYYY")
+            _dia_txt = _dia_vta.strftime("%Y-%m-%d")
+            _del_dia = ventas_del_dia(_dia_txt)
+            _validas = [v for v in _del_dia if not v["anulada"]]
+            _caja = cierre_de_caja(_dia_txt)
+            _devs_dia = devoluciones_del_dia(_dia_txt)
+            if not _del_dia and not _devs_dia:
+                st.caption("Ese día no hubo ventas.")
             else:
-                _ok_arq, _texto_arq = arquear_la_caja(_dia_txt, _contado, _nota_arq)
-                avisar("success" if _ok_arq else "warning", f"🧮 {_texto_arq}")
-                st.rerun()
-        _arqueos = arqueos_del_dia(_dia_txt)
-        if _arqueos:
-            st.dataframe([{"Hora": a["hora"], "Esperado": f"${miles(a['efectivo_esperado'], 0)}",
-                           "Contado": f"${miles(a['efectivo_contado'], 0)}",
-                           "Diferencia": (f"{'+' if a['diferencia'] > 0 else '-' if a['diferencia'] < 0 else ''}"
-                                          f"${miles(abs(a['diferencia']), 0)}"),
-                           "Nota": a["nota"] or "", "Contó": a["usuario"] or ""}
-                          for a in _arqueos], width="stretch", hide_index=True)
+                st.markdown(f"**Total: \\${miles(_caja['total'], 0)}** en {_caja['ventas']} venta(s)"
+                            + (f" · {_caja['anuladas']} anulada(s) por \\${miles(_caja['total_anulado'], 0)},"
+                               " que no cuentan" if _caja["anuladas"] else "")
+                            + (f" · {_caja['devoluciones']} devolución(es) por "
+                               f"\\${miles(_caja['total_devuelto'], 0)}, ya descontadas"
+                               if _caja["devoluciones"] else "")
+                            + (f" · ⏳ {_caja['a_cobrar']} esperando en la caja por "
+                               f"\\${miles(_caja['total_a_cobrar'], 0)}, que todavía no cuentan"
+                               if _caja["a_cobrar"] else ""))
+                # La ganancia la ve el administrador, como el margen del buscador.
+                if es_admin() and _caja["items_con_costo"]:
+                    st.markdown(f"💰 **Ganancia estimada: ${miles(_caja['ganancia'], 0)}**"
+                                + (f" — de {_caja['items_con_costo']} de {_caja['items']} cosas "
+                                   "vendidas, las que tienen costo cargado"
+                                   if _caja["items_con_costo"] < _caja["items"] else ""))
+                _k1, _k2 = cols([1, 1])
+                _k1.caption("Por forma de pago — «Efectivo» es lo que tiene que haber en el cajón:")
+                _k1.dataframe([{"Forma de pago": f, "Ventas": n, "Total": f"${miles(t, 0)}"}
+                               for f, n, t in _caja["por_forma"]], width="stretch", hide_index=True)
+                _k2.caption("Por quién atendió:")
+                _k2.dataframe([{"Atendió": u, "Ventas": n, "Total": f"${miles(t, 0)}"}
+                               for u, n, t in _caja["por_usuario"]], width="stretch", hide_index=True)
+                _filas_dia = [{"#": v["id"], "Hora": v["hora"], "Total": v["total"] or 0,
+                               "Pago": como_se_pago(v) if v["cobrada"] else "⏳ en la caja",
+                               "Para": v["cuenta"] or v["cliente"] or "",
+                               "Patente": v["patente"] or "", "Km": v["km"] or "",
+                               "Qué": ", ".join(f"{i['cantidad']}× {i['marca']} {i['codigo']}"
+                                                for i in v["items"]),
+                               "Estado": "🚫 anulada" if v["anulada"] else "",
+                               "Atendió": v["usuario"] or "",
+                               "Cobró": v["cobrada_por"] or ""} for v in _del_dia]
+                if _filas_dia:
+                    st.dataframe([dict(f, Total=f"${miles(f['Total'], 0)}") for f in _filas_dia],
+                                 width="stretch", hide_index=True)
+                if _devs_dia:
+                    st.caption("↩️ Lo devuelto ese día:")
+                    st.dataframe([{"Hora": d["hora"], "De la venta": f"#{d['venta_id']}",
+                                   "Qué": f"{d['cantidad']}× {d['marca']} {d['codigo']}",
+                                   "Importe": f"-${miles(d['importe'], 0)}",
+                                   "Pago": d["forma_de_pago"],
+                                   "Por qué": MOTIVOS_DE_DEVOLUCION.get(d["motivo"], d["motivo"]),
+                                   "Devolvió": d["usuario"] or ""} for d in _devs_dia],
+                                 width="stretch", hide_index=True)
+                st.download_button("⬇️ Descargar las ventas del día (Excel)",
+                                   data=to_excel_bytes(_filas_dia),
+                                   file_name=f"ventas_{_dia_txt}.xlsx", key="venta_excel",
+                                   mime="application/vnd.openxmlformats-officedocument."
+                                        "spreadsheetml.sheet")
+                if _del_dia:
+                    _cv1, _cv2 = cols([3, 1])
+                    _comp_de = _cv1.selectbox("Comprobante de la venta:", [v["id"] for v in _del_dia],
+                                              format_func=lambda i: f"#{i}",
+                                              key="venta_comprobante_de")
+                    _cv2.download_button("📄 PDF", data=comprobante_para_descargar(_comp_de),
+                                         file_name=f"comprobante_{_comp_de}.pdf",
+                                         mime="application/pdf", key="venta_comprobante_dia",
+                                         width="stretch")
+                if _validas:
+                    _a1, _a2 = cols([3, 1])
+                    _anular = _a1.selectbox("Anular una venta (devuelve el stock y la saca de la "
+                                            "ficha del auto):", [v["id"] for v in _validas],
+                                            format_func=lambda i: f"#{i}", key="venta_a_anular")
+                    if candado("anular una venta", _a2.button("🚫 Anular", key="venta_anular"),
+                               "anular_una_venta"):
+                        _ok_an, _texto_an = anular_venta(_anular)
+                        avisar("success" if _ok_an else "warning", _texto_an)
+                        st.rerun()
+            # EL ARQUEO: lo que hay en el cajón contra lo que dice el sistema. Ver arquear_la_caja().
+            st.markdown("**🧮 Arqueo: ¿cuánto efectivo hay en el cajón?**")
+            st.caption(f"Según las ventas en efectivo (menos lo devuelto), tendría que haber "
+                       f"**${miles(efectivo_esperado(_dia_txt), 0)}**, sin contar el cambio con el "
+                       "que se abrió.")
+            with st.form("form_arqueo"):
+                _q1, _q2 = cols([1, 2])
+                _contado = _q1.number_input("Efectivo contado:", min_value=0.0, step=100.0,
+                                            value=None, placeholder="Ej: 45000",
+                                            help="Sin el cambio con el que abriste la caja.")
+                _nota_arq = _q2.text_input("Nota (opcional):", placeholder="Ej: faltan $500 de un vuelto")
+                _arquear = st.form_submit_button("🧮 Guardar el arqueo")
+            if _arquear:
+                if _contado is None:
+                    st.warning("Escribí cuánto efectivo contaste.")
+                else:
+                    _ok_arq, _texto_arq = arquear_la_caja(_dia_txt, _contado, _nota_arq)
+                    avisar("success" if _ok_arq else "warning", f"🧮 {_texto_arq}")
+                    st.rerun()
+            _arqueos = arqueos_del_dia(_dia_txt)
+            if _arqueos:
+                st.dataframe([{"Hora": a["hora"], "Esperado": f"${miles(a['efectivo_esperado'], 0)}",
+                               "Contado": f"${miles(a['efectivo_contado'], 0)}",
+                               "Diferencia": (f"{'+' if a['diferencia'] > 0 else '-' if a['diferencia'] < 0 else ''}"
+                                              f"${miles(abs(a['diferencia']), 0)}"),
+                               "Nota": a["nota"] or "", "Contó": a["usuario"] or ""}
+                              for a in _arqueos], width="stretch", hide_index=True)
 

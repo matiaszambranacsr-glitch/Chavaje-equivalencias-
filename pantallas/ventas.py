@@ -366,102 +366,109 @@ if pagina == PAGINAS[9]:
 
     # LO QUE MÁS SE VENDE: el período que se elija, el total, el ticket promedio, las ventas de
     # cada día y lo que más sale, por unidades y por plata. La ganancia, solo el administrador.
-    with st.expander("📊 Lo que más se vende", key="exp_lo_mas_vende"):
-        _dias_mv = st.selectbox("Período:", [7, 30, 90, 365], index=1, key="venta_periodo",
-                                format_func=lambda d: {7: "Última semana", 30: "Últimos 30 días",
-                                                       90: "Últimos 3 meses",
-                                                       365: "Último año"}[d])
-        _mv = lo_mas_vendido(_dias_mv)
-        if not _mv["ventas"]:
-            st.caption("En ese período no hubo ventas.")
-        else:
-            _m = cols([1, 1, 1, 1] if es_admin() else [1, 1, 1])
-            _m[0].metric("Ventas", miles(_mv["ventas"]))
-            _m[1].metric("Total", f"${miles(_mv['total'], 0)}")
-            _m[2].metric("Ticket promedio", f"${miles(_mv['ticket_promedio'], 0)}")
-            if es_admin():
-                _m[3].metric("Ganancia estimada", f"${miles(_mv['ganancia'], 0)}",
-                             help="Con el costo que tenía cada cosa al venderla, y solo de lo "
-                                  "que tiene costo cargado.")
-            st.caption("Lo que entró cada día:")
-            grafico_de_barras([d for d, _ in _mv["por_dia"]], [t for _, t in _mv["por_dia"]],
-                              "Día", "Total", fechas=True, plata=True, alto=220)
+    # Perezoso: lo de adentro corre solo abierto (ver el de «📐 Buscar por medidas» en el Buscador).
+    _exp_mas_vendido = st.expander("📊 Lo que más se vende", key="exp_lo_mas_vende",
+                                   on_change="rerun")
+    if _exp_mas_vendido.open:
+        with _exp_mas_vendido:
+            _dias_mv = st.selectbox("Período:", [7, 30, 90, 365], index=1, key="venta_periodo",
+                                    format_func=lambda d: {7: "Última semana", 30: "Últimos 30 días",
+                                                           90: "Últimos 3 meses",
+                                                           365: "Último año"}[d])
+            _mv = lo_mas_vendido(_dias_mv)
+            if not _mv["ventas"]:
+                st.caption("En ese período no hubo ventas.")
+            else:
+                _m = cols([1, 1, 1, 1] if es_admin() else [1, 1, 1])
+                _m[0].metric("Ventas", miles(_mv["ventas"]))
+                _m[1].metric("Total", f"${miles(_mv['total'], 0)}")
+                _m[2].metric("Ticket promedio", f"${miles(_mv['ticket_promedio'], 0)}")
+                if es_admin():
+                    _m[3].metric("Ganancia estimada", f"${miles(_mv['ganancia'], 0)}",
+                                 help="Con el costo que tenía cada cosa al venderla, y solo de lo "
+                                      "que tiene costo cargado.")
+                st.caption("Lo que entró cada día:")
+                grafico_de_barras([d for d, _ in _mv["por_dia"]], [t for _, t in _mv["por_dia"]],
+                                  "Día", "Total", fechas=True, plata=True, alto=220)
 
-            def _tabla_mv(filas):
-                return [dict({"Producto": f"{f['marca']} {f['codigo']}",
-                              "Descripción": (f["descripcion"] or "")[:40],
-                              "Unidades": f["unidades"], "Plata": f"${miles(f['plata'], 0)}"},
-                             **({"Ganancia": (f"${miles(f['ganancia'], 0)}"
-                                              if f["ganancia"] is not None else "sin costo")}
-                                if es_admin() else {})) for f in filas]
-            _t1, _t2 = cols([1, 1])
-            _t1.caption("Lo que más unidades vende:")
-            _t1.dataframe(_tabla_mv(_mv["por_unidades"]), width="stretch", hide_index=True)
-            _t2.caption("Lo que más plata trae:")
-            _t2.dataframe(_tabla_mv(_mv["por_plata"]), width="stretch", hide_index=True)
-            # LA GANANCIA POR MARCA, solo el administrador: ver ganancia_por_marca().
-            if es_admin() and _mv["por_marca"]:
-                st.markdown("**💰 La ganancia por marca**",
-                            help="Con el costo que tenía cada cosa al venderla. El margen es "
-                                 "sobre lo vendido que tiene costo; «Sin costo» es lo vendido "
-                                 "sin costo cargado, que no entra en la cuenta. «A costo de "
-                                 "hoy» es lo que queda si hubiera que reponerlo al costo cargado "
-                                 "hoy: con los precios subiendo, la ganancia de verdad.")
-                st.dataframe([{"Marca": m["marca"], "Unidades": m["unidades"],
-                               "Vendido": f"${miles(m['plata'], 0)}",
-                               "Ganancia": f"${miles(m['ganancia'], 0)}",
-                               "Margen": (f"{miles(m['margen'], 1)} %"
-                                          if m["margen"] is not None else "sin costo"),
-                               "Sin costo": (f"${miles(m['sin_costo'], 0)}"
-                                             if m["sin_costo"] else ""),
-                               "A costo de hoy": (f"${miles(m['ganancia_hoy'], 0)}"
-                                                  if m["ganancia_hoy"] is not None
-                                                  else "sin costo")}
-                              for m in _mv["por_marca"]], width="stretch", hide_index=True)
+                def _tabla_mv(filas):
+                    return [dict({"Producto": f"{f['marca']} {f['codigo']}",
+                                  "Descripción": (f["descripcion"] or "")[:40],
+                                  "Unidades": f["unidades"], "Plata": f"${miles(f['plata'], 0)}"},
+                                 **({"Ganancia": (f"${miles(f['ganancia'], 0)}"
+                                                  if f["ganancia"] is not None else "sin costo")}
+                                    if es_admin() else {})) for f in filas]
+                _t1, _t2 = cols([1, 1])
+                _t1.caption("Lo que más unidades vende:")
+                _t1.dataframe(_tabla_mv(_mv["por_unidades"]), width="stretch", hide_index=True)
+                _t2.caption("Lo que más plata trae:")
+                _t2.dataframe(_tabla_mv(_mv["por_plata"]), width="stretch", hide_index=True)
+                # LA GANANCIA POR MARCA, solo el administrador: ver ganancia_por_marca().
+                if es_admin() and _mv["por_marca"]:
+                    st.markdown("**💰 La ganancia por marca**",
+                                help="Con el costo que tenía cada cosa al venderla. El margen es "
+                                     "sobre lo vendido que tiene costo; «Sin costo» es lo vendido "
+                                     "sin costo cargado, que no entra en la cuenta. «A costo de "
+                                     "hoy» es lo que queda si hubiera que reponerlo al costo cargado "
+                                     "hoy: con los precios subiendo, la ganancia de verdad.")
+                    st.dataframe([{"Marca": m["marca"], "Unidades": m["unidades"],
+                                   "Vendido": f"${miles(m['plata'], 0)}",
+                                   "Ganancia": f"${miles(m['ganancia'], 0)}",
+                                   "Margen": (f"{miles(m['margen'], 1)} %"
+                                              if m["margen"] is not None else "sin costo"),
+                                   "Sin costo": (f"${miles(m['sin_costo'], 0)}"
+                                                 if m["sin_costo"] else ""),
+                                   "A costo de hoy": (f"${miles(m['ganancia_hoy'], 0)}"
+                                                      if m["ganancia_hoy"] is not None
+                                                      else "sin costo")}
+                                  for m in _mv["por_marca"]], width="stretch", hide_index=True)
 
     # CADA CUENTA: lo de un empleado (lo que vendió y lo que tiene del depósito) o de un taller
     # (lo que se llevó y lo que debe: lo de un taller no vuelve). El administrador ve a todos;
     # un empleado, lo suyo. Ver resumen_de_la_cuenta().
-    with st.expander("👥 Cada cuenta", key="exp_cada_cuenta"):
-        _cuentas = cuentas_para_mirar()
-        _ca1, _ca2 = cols([2, 1])
-        _cual = _ca1.selectbox("Cuenta:", range(len(_cuentas)), key="venta_cuenta_sel",
-                               format_func=lambda i: _cuentas[i][0])
-        _dias_cta = _ca2.selectbox("Período:", [7, 30, 90, 365], index=1,
-                                   key="venta_cuenta_periodo",
-                                   format_func=lambda d: {7: "Última semana", 30: "Últimos 30 días",
-                                                          90: "Últimos 3 meses",
-                                                          365: "Último año"}[d])
-        _, _persona_cta, _taller_cta = _cuentas[_cual]
-        _cta = resumen_de_la_cuenta(persona=_persona_cta, mecanico_id=_taller_cta, dias=_dias_cta)
-        if _taller_cta is None:
-            _q = cols([1, 1, 1])
-            _q[0].metric("Ventas", miles(len(_cta["ventas"])))
-            _q[1].metric("Vendió", f"${miles(_cta['total'], 0)}")
-            _q[2].metric("Le devolvieron", f"${miles(_cta['devuelto'], 0)}")
-            if _cta["ventas"]:
-                st.dataframe([{"#": v["id"], "Cuándo": f"{v['fecha'][8:10]}/{v['fecha'][5:7]} "
-                                                       f"{v['fecha'][11:16]}",
-                               "Cliente": v["cliente"] or "", "Pago": v["forma_de_pago"],
-                               "Total": f"${miles(v['total'] or 0, 0)}"} for v in _cta["ventas"]],
-                             width="stretch", hide_index=True)
-        else:
-            _q = cols([1, 1, 1])
-            _q[0].metric("Retiros", miles(len(_cta["entregas"])))
-            _q[1].metric("Se llevó", f"${miles(_cta['total'], 0)}")
-            _q[2].metric("Debe hoy", f"${miles(_cta['saldo'], 0)}")
-            if _cta["entregas"]:
-                st.dataframe([{"Cuándo": f"{e['resuelto_en'][8:10]}/{e['resuelto_en'][5:7]} "
-                                         f"{e['resuelto_en'][11:16]}",
-                               "Qué": f"{e['cantidad']}× {e['marca']} {e['codigo_raw']}",
-                               "Importe": f"${miles(e['importe'] or 0, 0)}"}
-                              for e in _cta["entregas"]], width="stretch", hide_index=True)
-        if _cta["afuera"]:
-            st.caption("📦 Lo que tiene del depósito sin vender ni devolver:")
-            st.dataframe([{"Qué": f"{r['queda']}× {r['marca']} {r['codigo_raw']}",
-                           "Descripción": (r["descripcion"] or "")[:40],
-                           "Desde": ("🔴 " if r["horas"] >= HORAS_PARA_AVISAR_LO_QUE_QUEDO_AFUERA
-                                     else "") + "hace " + cuanto_hace(r["horas"])}
-                          for r in _cta["afuera"]], width="stretch", hide_index=True)
-        elif not (_cta.get("ventas") or _cta.get("entregas")):
-            st.caption("En ese período no tiene movimientos, y no tiene nada del depósito afuera.")
+    # Perezoso: lo de adentro corre solo abierto (ver el de «📐 Buscar por medidas» en el Buscador).
+    _exp_cada_cuenta = st.expander("👥 Cada cuenta", key="exp_cada_cuenta", on_change="rerun")
+    if _exp_cada_cuenta.open:
+        with _exp_cada_cuenta:
+            _cuentas = cuentas_para_mirar()
+            _ca1, _ca2 = cols([2, 1])
+            _cual = _ca1.selectbox("Cuenta:", range(len(_cuentas)), key="venta_cuenta_sel",
+                                   format_func=lambda i: _cuentas[i][0])
+            _dias_cta = _ca2.selectbox("Período:", [7, 30, 90, 365], index=1,
+                                       key="venta_cuenta_periodo",
+                                       format_func=lambda d: {7: "Última semana", 30: "Últimos 30 días",
+                                                              90: "Últimos 3 meses",
+                                                              365: "Último año"}[d])
+            _, _persona_cta, _taller_cta = _cuentas[_cual]
+            _cta = resumen_de_la_cuenta(persona=_persona_cta, mecanico_id=_taller_cta, dias=_dias_cta)
+            if _taller_cta is None:
+                _q = cols([1, 1, 1])
+                _q[0].metric("Ventas", miles(len(_cta["ventas"])))
+                _q[1].metric("Vendió", f"${miles(_cta['total'], 0)}")
+                _q[2].metric("Le devolvieron", f"${miles(_cta['devuelto'], 0)}")
+                if _cta["ventas"]:
+                    st.dataframe([{"#": v["id"], "Cuándo": f"{v['fecha'][8:10]}/{v['fecha'][5:7]} "
+                                                           f"{v['fecha'][11:16]}",
+                                   "Cliente": v["cliente"] or "", "Pago": v["forma_de_pago"],
+                                   "Total": f"${miles(v['total'] or 0, 0)}"} for v in _cta["ventas"]],
+                                 width="stretch", hide_index=True)
+            else:
+                _q = cols([1, 1, 1])
+                _q[0].metric("Retiros", miles(len(_cta["entregas"])))
+                _q[1].metric("Se llevó", f"${miles(_cta['total'], 0)}")
+                _q[2].metric("Debe hoy", f"${miles(_cta['saldo'], 0)}")
+                if _cta["entregas"]:
+                    st.dataframe([{"Cuándo": f"{e['resuelto_en'][8:10]}/{e['resuelto_en'][5:7]} "
+                                             f"{e['resuelto_en'][11:16]}",
+                                   "Qué": f"{e['cantidad']}× {e['marca']} {e['codigo_raw']}",
+                                   "Importe": f"${miles(e['importe'] or 0, 0)}"}
+                                  for e in _cta["entregas"]], width="stretch", hide_index=True)
+            if _cta["afuera"]:
+                st.caption("📦 Lo que tiene del depósito sin vender ni devolver:")
+                st.dataframe([{"Qué": f"{r['queda']}× {r['marca']} {r['codigo_raw']}",
+                               "Descripción": (r["descripcion"] or "")[:40],
+                               "Desde": ("🔴 " if r["horas"] >= HORAS_PARA_AVISAR_LO_QUE_QUEDO_AFUERA
+                                         else "") + "hace " + cuanto_hace(r["horas"])}
+                              for r in _cta["afuera"]], width="stretch", hide_index=True)
+            elif not (_cta.get("ventas") or _cta.get("entregas")):
+                st.caption("En ese período no tiene movimientos, y no tiene nada del depósito afuera.")
