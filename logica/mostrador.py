@@ -1022,9 +1022,28 @@ AJUSTE_DE_PRECIOS_MINIMO = -99.0
 AJUSTE_DE_PRECIOS_MAXIMO = 1000.0
 
 
-def aumentar_precios_por_marca(marca_id, porcentaje):
-    """Sube (o baja, con porcentaje negativo) todos los precios cargados de una marca.
-    Devuelve cuántos cambiaron.
+def _solo_la_linea(que_dice):
+    """(condición, parámetros) para «solo los que dicen…» de un ajuste de precios: cada palabra
+    tiene que estar en la descripción, sin importar acentos ni mayúsculas. Vacío: todos.
+
+    Lo propuso una revisión con Gemini («aumentar 5 % la línea de suspensión»): el proveedor
+    no siempre aumenta la lista entera, a veces manda «amortiguadores +8 %». Solo letras y
+    números de cada palabra: así un «%» o un «_» tipeados no son comodines que agarran todo."""
+    palabras = re.findall(r"[A-Z0-9Ñ]+", normalizar_texto(que_dice or ""))
+    if str(que_dice or "").strip() and not palabras:
+        return " AND 0", []            # pidió una línea y no dijo ninguna palabra: ninguno
+    condiciones, parametros = [], []
+    for palabra in palabras:
+        condicion, params = like_en_descripcion(f"%{palabra}%")
+        condiciones.append(f" AND {condicion}")
+        parametros += params
+    return "".join(condiciones), parametros
+
+
+def aumentar_precios_por_marca(marca_id, porcentaje, que_dice=""):
+    """Sube (o baja, con porcentaje negativo) todos los precios cargados de una marca, o solo
+    los que dicen `que_dice` en la descripción (ver _solo_la_linea()). Devuelve cuántos
+    cambiaron.
 
     Tenía tres agujeros, encontrados al medir qué funciones no probaba ninguna batería:
       · no anotaba el historial de precios, que es la regla de cualquier otro cambio de
@@ -1038,11 +1057,12 @@ def aumentar_precios_por_marca(marca_id, porcentaje):
     if not AJUSTE_DE_PRECIOS_MINIMO <= porcentaje <= AJUSTE_DE_PRECIOS_MAXIMO:
         raise ValueError(f"El ajuste tiene que estar entre {AJUSTE_DE_PRECIOS_MINIMO:g} % y "
                          f"{AJUSTE_DE_PRECIOS_MAXIMO:g} %: {porcentaje:g} % no.")
+    linea, params_linea = _solo_la_linea(que_dice)
     with db_lock, transaccion():
-        c.execute("""SELECT id, ROUND(precio * (1 + ? / 100.0), 2) AS nuevo FROM productos
-                     WHERE marca_id = ? AND precio > 0
-                       AND ROUND(precio * (1 + ? / 100.0), 2) <> precio""",
-                  (porcentaje, marca_id, porcentaje))
+        c.execute(f"""SELECT p.id, ROUND(p.precio * (1 + ? / 100.0), 2) AS nuevo FROM productos p
+                      WHERE p.marca_id = ? AND p.precio > 0
+                        AND ROUND(p.precio * (1 + ? / 100.0), 2) <> p.precio{linea}""",
+                  [porcentaje, marca_id, porcentaje] + params_linea)
         cambios = [(r["nuevo"], r["id"]) for r in c.fetchall() if r["nuevo"] > 0]
         c.executemany("UPDATE productos SET precio = ? WHERE id = ?", cambios)
         c.executemany("INSERT INTO historial_precios (producto_id, precio) VALUES (?, ?)",
@@ -1051,10 +1071,23 @@ def aumentar_precios_por_marca(marca_id, porcentaje):
     return len(cambios)
 
 
-def productos_con_precio_de_la_marca(marca_id):
-    """Cuántos productos de la marca tienen precio: los que tocaría un ajuste por porcentaje."""
-    c.execute("SELECT COUNT(*) FROM productos WHERE marca_id = ? AND precio > 0", (marca_id,))
+def productos_con_precio_de_la_marca(marca_id, que_dice=""):
+    """Cuántos productos de la marca tienen precio (y dicen `que_dice`, si se pide): los que
+    tocaría un ajuste por porcentaje."""
+    linea, params_linea = _solo_la_linea(que_dice)
+    c.execute(f"SELECT COUNT(*) FROM productos p WHERE p.marca_id = ? AND p.precio > 0{linea}",
+              [marca_id] + params_linea)
     return c.fetchone()[0]
+
+
+def ejemplos_de_la_linea(marca_id, que_dice, tope=3):
+    """Algunas descripciones de lo que tocaría el ajuste, para ver antes de aplicarlo que la
+    palabra agarra lo que se quería (y no, por ejemplo, «BUJE DE AMORTIGUADOR»)."""
+    linea, params_linea = _solo_la_linea(que_dice)
+    c.execute(f"""SELECT p.codigo_raw, p.descripcion FROM productos p
+                  WHERE p.marca_id = ? AND p.precio > 0{linea} ORDER BY p.id LIMIT ?""",
+              [marca_id] + params_linea + [tope])
+    return [f"{r['codigo_raw']} — {(r['descripcion'] or '')[:50]}" for r in c.fetchall()]
 
 
 def listar_favoritos_stock_bajo(umbral=2):

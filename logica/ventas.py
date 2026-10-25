@@ -691,6 +691,9 @@ def lo_mas_vendido(dias=30, tope=10):
                         SUM(CASE WHEN vi.costo IS NOT NULL
                                  THEN (vi.cantidad - COALESCE(vi.devuelto, 0))
                                       * (vi.precio - vi.costo) END) AS ganancia,
+                        SUM(CASE WHEN vi.costo IS NOT NULL
+                                 THEN (vi.cantidad - COALESCE(vi.devuelto, 0)) * vi.precio
+                            END) AS plata_con_costo,
                         COUNT(DISTINCT vi.venta_id) AS ventas
                  FROM ventas_items vi JOIN ventas v ON v.id = vi.venta_id
                  WHERE v.anulada = 0 AND substr(v.fecha, 1, 10) >= ?
@@ -703,7 +706,35 @@ def lo_mas_vendido(dias=30, tope=10):
             "ganancia": round(sum(p["ganancia"] or 0 for p in productos), 2),
             "por_dia": por_dia,
             "por_unidades": sorted(productos, key=lambda p: (-p["unidades"], -p["plata"]))[:tope],
-            "por_plata": sorted(productos, key=lambda p: (-p["plata"], -p["unidades"]))[:tope]}
+            "por_plata": sorted(productos, key=lambda p: (-p["plata"], -p["unidades"]))[:tope],
+            "por_marca": ganancia_por_marca(productos)}
+
+
+def ganancia_por_marca(productos):
+    """Lo vendido y lo ganado por cada marca, la que más ganó primero: [{marca, unidades, plata,
+    ganancia, margen, sin_costo}]. Lo pidió una revisión con Gemini («margen real por marca y
+    proveedor»): el total del período no dice qué marca deja plata y cuál se vende mucho para
+    ganar poco. La ganancia es con el costo que tenía cada cosa AL VENDERLA (queda guardado en
+    la venta), así que un aumento de costo después no la cambia. El margen es sobre lo vendido
+    que tiene costo; lo que se vendió sin costo cargado va aparte («sin_costo», en plata): con
+    mucho de eso, el margen de la marca dice poco."""
+    marcas = {}
+    for p in productos:
+        m = marcas.setdefault(p["marca"] or "—", {"marca": p["marca"] or "—", "unidades": 0,
+                                                    "plata": 0.0, "ganancia": 0.0,
+                                                    "con_costo": 0.0})
+        m["unidades"] += p["unidades"] or 0
+        m["plata"] += p["plata"] or 0
+        m["ganancia"] += p["ganancia"] or 0
+        m["con_costo"] += p["plata_con_costo"] or 0
+    salida = []
+    for m in marcas.values():
+        salida.append({"marca": m["marca"], "unidades": m["unidades"],
+                       "plata": round(m["plata"], 2), "ganancia": round(m["ganancia"], 2),
+                       "margen": (round(m["ganancia"] / m["con_costo"] * 100, 1)
+                                  if m["con_costo"] else None),
+                       "sin_costo": round(m["plata"] - m["con_costo"], 2)})
+    return sorted(salida, key=lambda m: (-m["ganancia"], -m["plata"]))
 
 
 # ============================================================================================

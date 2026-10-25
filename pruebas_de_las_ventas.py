@@ -320,6 +320,23 @@ def probar(L):
              [p["codigo"] for p in mv["por_plata"]]),
             (3, 37500.0, 12500.0, -2000.0, 7, 37500.0, ["J200", "F100", "P400"],
              ["F100", "P400", "J200"]))
+    # La ganancia por marca (ver ganancia_por_marca()): la que más ganó primero, el margen sobre
+    # lo vendido que tiene costo, y lo vendido sin costo aparte.
+    esperar("la ganancia por marca, del período",
+            [(m["marca"], m["unidades"], m["plata"], m["ganancia"], m["margen"], m["sin_costo"])
+             for m in mv["por_marca"]], [("PRUEBA", 7, 37500.0, -2000.0, -20.0, 27500.0)])
+    esperar("la ganancia por marca, varias",
+            [(m["marca"], m["ganancia"], m["margen"], m["sin_costo"]) for m in
+             ns["ganancia_por_marca"]([
+                 {"marca": "A", "unidades": 2, "plata": 1000, "ganancia": 300,
+                  "plata_con_costo": 1000},
+                 {"marca": "B", "unidades": 1, "plata": 5000, "ganancia": None,
+                  "plata_con_costo": None},
+                 {"marca": "A", "unidades": 1, "plata": 500, "ganancia": None,
+                  "plata_con_costo": None},
+                 {"marca": "C", "unidades": 3, "plata": 2000, "ganancia": 500,
+                  "plata_con_costo": 2000}])],
+            [("C", 500.0, 25.0, 0.0), ("A", 300.0, 30.0, 500.0), ("B", 0.0, None, 5000.0)])
 
     # 14. DEVOLVER ALGO DE UNA VENTA: una cosa y una cantidad. Vuelve al stock salvo que no se
     # pueda volver a vender; la plata sale del cierre de hoy, por donde entró; lo vendido EN

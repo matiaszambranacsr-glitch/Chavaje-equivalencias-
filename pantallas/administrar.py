@@ -261,17 +261,32 @@ if pagina == PAGINAS[3]:
             porcentaje = st.number_input("Porcentaje (usá negativo para bajar, ej: -5):", value=0.0, step=1.0,
                                          min_value=AJUSTE_DE_PRECIOS_MINIMO,
                                          max_value=AJUSTE_DE_PRECIOS_MAXIMO)
+            # Solo una línea de la marca: ver _solo_la_linea().
+            linea_precio = st.text_input(
+                "Solo los que dicen (opcional):", key="linea_ajuste_precio",
+                placeholder="Ej: amortiguador",
+                help="Para cuando el proveedor aumenta una línea y no la lista entera: el ajuste "
+                     "toca solo los productos de la marca cuya descripción dice todas estas "
+                     "palabras. Vacío, toda la marca.")
             id_marca_precio = next(m["id"] for m in marcas_info if m["nombre"] == marca_precio)
+            _toca_precio = productos_con_precio_de_la_marca(id_marca_precio, linea_precio)
             # Lo que va a pasar, antes de apretar: un cero de más o un signo olvidado se ven acá.
             if porcentaje:
-                st.caption(f"Toca {miles(productos_con_precio_de_la_marca(id_marca_precio))} "
-                           f"producto(s) con precio de '{marca_precio}'. Por ejemplo, uno de "
-                           f"{formato_precio(10000)} queda en "
-                           f"{formato_precio(round(10000 * (1 + porcentaje / 100), 2))}. Cada "
+                st.caption(f"Toca {miles(_toca_precio)} producto(s) con precio de "
+                           f"'{marca_precio}'" + (f" que dicen «{linea_precio.strip()}»"
+                                                  if linea_precio.strip() else "")
+                           + f". Por ejemplo, uno de {formato_precio(10000, en_markdown=True)} "
+                           "queda en "
+                           f"{formato_precio(round(10000 * (1 + porcentaje / 100), 2), en_markdown=True)}. Cada "
                            "precio queda anotado en su historial.")
-            if candado('ajustar precios masivamente', st.button("💲 Aplicar ajuste de precios", disabled=(porcentaje == 0)), 'ajustar_precios_masivamente'):
-                afectados = aumentar_precios_por_marca(id_marca_precio, porcentaje)
-                st.success(f"Se ajustaron {afectados} precio(s) de '{marca_precio}' en {porcentaje:+.1f}%.")
+            if linea_precio.strip() and _toca_precio:
+                st.caption("Por ejemplo: " + " · ".join(
+                    ejemplos_de_la_linea(id_marca_precio, linea_precio)))
+            if candado('ajustar precios masivamente', st.button("💲 Aplicar ajuste de precios", disabled=(porcentaje == 0 or not _toca_precio)), 'ajustar_precios_masivamente'):
+                afectados = aumentar_precios_por_marca(id_marca_precio, porcentaje, linea_precio)
+                st.success(f"Se ajustaron {afectados} precio(s) de '{marca_precio}'"
+                           + (f" que dicen «{linea_precio.strip()}»" if linea_precio.strip()
+                              else "") + f" en {porcentaje:+.1f}%.")
 
             st.markdown("---")
             st.markdown("**Eliminar una marca** (borra también sus productos y equivalencias asociadas)")
@@ -1259,8 +1274,9 @@ if pagina == PAGINAS[3]:
                          "sobre lo vencido. Apagado, a esta cuenta no se le calcula ni se le "
                          "carga nada.")
                 if _descuento:
-                    st.caption(f"Ejemplo: un repuesto de lista {formato_precio(10000)} se le "
-                               f"carga a {formato_precio(precio_de_la_cuenta(10000, _descuento))}.")
+                    st.caption(f"Ejemplo: un repuesto de lista "
+                               f"{formato_precio(10000, en_markdown=True)} se le carga a "
+                               f"{formato_precio(precio_de_la_cuenta(10000, _descuento), en_markdown=True)}.")
                 if candado("cambiar la configuración de una cuenta corriente",
                            st.button("💾 Guardar configuración", key=f"cc_guardar_{_mid}"),
                            f"cc_guardar_{_mid}"):

@@ -136,6 +136,9 @@ Las pruebas se corren como dice el README, en «Antes de subir un cambio».
 | A quien vende le llega un aviso cuando otro cobra o pone a cuenta su venta, o el depósito entrega o no encuentra lo que pidió; lo que hizo él mismo, no | `novedades_de()` | `pruebas_de_la_caja.py` (9d) |
 | Lo que corre solo cada pocos segundos (lo que espera en la caja, los avisos a quien vende) va por un índice que achica, sin recorrer las ventas ni los pedidos de la historia | `ventas_a_cobrar()`, `novedades_de()`, `idx_ventas_de_quien`, `idx_pedidos_deposito_de_quien` | `pruebas_de_la_caja.py` (9e) |
 | La venta a medio armar sobrevive a una recarga: se avisa al entrar, se recupera con cantidades, precios y cliente, y terminada no queda guardada; solo la del día y solo a quien la armaba | `guardar_la_venta_a_medio_armar()`, `la_venta_a_medio_armar()`, `recuperar_la_venta_a_medio_armar()` | `pruebas_de_la_sesion.py` (5) |
+| La ganancia por marca del período: la que más ganó primero, el margen sobre lo vendido con costo y lo vendido sin costo aparte | `ganancia_por_marca()` | `pruebas_de_las_ventas.py` (13) |
+| Ajustar los precios de una marca solo en lo que dice ciertas palabras (sin acentos ni mayúsculas); un «%» tipeado no toca nada | `aumentar_precios_por_marca(…, que_dice)`, `_solo_la_linea()` | `pruebas_de_los_cambios.py` |
+| El presupuesto del Buscador se manda derecho por WhatsApp, con lo que tiene y el total | — | `pruebas_de_las_pantallas.py` |
 | Todas las pantallas y solapas se dibujan sin errores, sin contraseña, como operador y como administrador | — | `pruebas_de_las_pantallas.py` |
 | Sin sesión, «📲 Consultar por WhatsApp» le escribe al negocio con lo que se buscó (si el número está cargado); con sesión no sale | `boton_para_consultar()`, `texto_para_consultar()` | `pruebas_de_las_pantallas.py`, `pruebas_del_buscador.py` (2d) |
 | En las tablas de resultados, «s/d» donde no se sabe el stock | `con_stock_legible()` | `pruebas_del_buscador.py` (2d) |
@@ -249,7 +252,7 @@ Las pruebas se corren como dice el README, en «Antes de subir un cambio».
 | Lo de arriba de la caja: el cajón (efectivo menos lo devuelto), tarjeta y transferencia, lo puesto a cuenta aparte y lo que espera | `resumen_de_la_caja()` | `pruebas_de_la_caja.py` (9c) |
 | El cartel de un pedido nuevo del depósito: qué, cuánto, para quién y quién lo pidió, sin precios | `el_aviso_del_pedido()` | `pruebas_del_deposito.py` |
 | Los desplegables y recuadros tienen clave: no se cierran solos cuando cambia su título | — | `auditar.py` (8f) |
-| Ningún texto muestra dos «$» sin escapar (Streamlit los toma como una fórmula) | — | `auditar.py` (8e) |
+| Ningún texto muestra dos «$» sin escapar (Streamlit los toma como una fórmula), tampoco los que pone `formato_precio()` | `formato_precio(…, en_markdown=True)` | `auditar.py` (8e) |
 | Lo de cada cuenta: un empleado ve lo suyo, el administrador todas | `resumen_de_la_cuenta()`, `cuentas_para_mirar()` | `pruebas_de_lo_que_queda_afuera.py` |
 | Al terminar la venta, la patente y los km anotan cada pieza en la ficha del auto, una sola vez, y frenan los km para atrás | `anotar_la_venta_en_el_auto()`, `nombre_de_la_pieza()` | `pruebas_de_las_ventas.py` |
 | Un aviso por cliente con todo lo que le toca; «Ya le avisé» lo saca de la lista 15 días | `avisos_por_cliente()`, `marcar_avisado()` | `pruebas_de_los_cambios.py` (9l ter) |

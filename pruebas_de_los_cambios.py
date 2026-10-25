@@ -319,6 +319,22 @@ def probar(L):
         esperar("y los precios quedan como estaban", _precios_aj(), [1100.0, 0.0, None])
         esperar("bajar 99 % se puede", (ns["aumentar_precios_por_marca"](_m_aj, -99), _precios_aj()[0]),
                 (1, 11.0))
+        # Solo una línea de la marca (ver _solo_la_linea()): lo que dice todas las palabras, sin
+        # importar acentos ni mayúsculas; un «%» tipeado no agarra todo, no agarra nada.
+        with ns["db_lock"], ns["transaccion"]():
+            _ln = [ns["get_or_create_producto"](f"LN-{i}", f"LN{i}", _d, _m_aj) for i, _d in
+                   enumerate(("AMORTIGUADOR DEL. GOL", "Amortiguadór tras. Corsa", "BUJE PARRILLA"))]
+        c.executemany("UPDATE productos SET precio = 1000 WHERE id = ?", [(p,) for p in _ln])
+        ns["conn"].commit()
+        _cuantos = ns["productos_con_precio_de_la_marca"]
+        esperar("solo una línea: cuántos toca",
+                [_cuantos(_m_aj, x) for x in ("amortiguador", "amortiguador del", "%", "", "  ")],
+                [2, 1, 0, 4, 4])
+        esperar("y sube solo esos", (ns["aumentar_precios_por_marca"](_m_aj, 10, "AMORTIGUADOR"),
+                                     [c.execute("SELECT precio FROM productos WHERE id = ?",
+                                                (p,)).fetchone()[0] for p in _ln]),
+                (2, [1100.0, 1100.0, 1000.0]))
+        esperar("un «%» no ajusta nada", ns["aumentar_precios_por_marca"](_m_aj, 10, "%"), 0)
 
         # EL MARGEN, sobre el precio de venta (ver margen_de()). Tampoco tenía prueba.
         esperar("el margen, sobre el precio de venta", ns["margen_de"](1000, 650), (35.0, 350))

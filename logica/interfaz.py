@@ -1918,10 +1918,11 @@ def texto_para_markdown(valor):
     return texto
 
 
-def formato_precio(valor):
-    """$ 18.375, con punto de miles como se escribe acá."""
+def formato_precio(valor, en_markdown=False):
+    """$ 18.375, con punto de miles como se escribe acá. Con en_markdown, el «$» escapado: dos
+    en el mismo texto de la pantalla se leen como una fórmula (ver el control 8e de auditar.py)."""
     try:
-        return "$ " + f"{miles(float(valor), 0)}".replace(",", ".")
+        return ("\\$ " if en_markdown else "$ ") + f"{miles(float(valor), 0)}".replace(",", ".")
     except (TypeError, ValueError):
         return ""
 

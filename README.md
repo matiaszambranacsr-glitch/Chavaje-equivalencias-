@@ -6636,6 +6636,21 @@ Lo pidió el dueño: «seguí mejorando la redacción de los textos, ponelos tod
 
 Probado en un navegador de verdad, en inglés y en castellano: las listas dicen «Elegí una opción», las tablas «Pantalla completa», «Buscar en la tabla» y «Bajar la tabla», el cartelito de la barra de los gráficos «Ver los números», al escribir «Enter para confirmar», y el calendario de 💵 Caja «octubre 2026» con «D L M M J V S». Los gráficos, «23/10» y «$120.000». En cada pantalla queda un solo «ℹ️ Cómo funciona» arriba (en Depósito: la sección, «⏳ Para buscar» y cómo funciona la cola), y las ayudas de una parte siguen en su parte. `pruebas_de_la_sesion.py` (2d) lo controla: rompiéndolo a propósito, avisa.
 
+## 💰 La tercera tanda de Gemini: la ganancia por marca, aumentar una línea, el presupuesto por WhatsApp
+
+| Propuesta | Qué se hizo / qué hay |
+|---|---|
+| **Margen real por marca y proveedor** | **Hecho.** En 🧾 Ventas → «📊 Lo que más se vende», el administrador ve **💰 La ganancia por marca**: unidades, lo vendido, la ganancia, el **margen** (sobre lo vendido que tiene costo) y lo vendido **sin costo** cargado, aparte (con mucho de eso, el margen de la marca dice poco). La que más ganó, primero. La ganancia es con el costo que tenía cada cosa **al venderla** —queda guardado en la venta—, así que la inflación no la cambia después. Los impuestos no entran: la app no lleva la parte impositiva. |
+| **Aumentar un % «la línea de suspensión»** | **Hecho.** En 🗂️ Administrar → 🏷️ Marcas → «💲 Aumentar/bajar precios por porcentaje» hay **«Solo los que dicen»**: con «amortiguador», el ajuste toca solo los productos de la marca cuya descripción lo dice (sin importar acentos ni mayúsculas; con varias palabras, todas). Antes de aplicarlo dice cuántos toca y muestra tres de ejemplo, para ver que la palabra agarra lo que se quería. Vacío, toda la marca, como antes. Cada precio queda en su historial. |
+| **Presupuestos con enlace directo a WhatsApp** | **Hecho** en el «🛒 Presupuesto en armado» del Buscador: **📲 Mandar el presupuesto por WhatsApp** lo abre ya escrito (antes había que copiarlo y pegarlo). La cotización en PDF con el QR para pagar ya estaba en 📋 Lista WhatsApp. |
+| **Consulta por patente para filtrar repuestos** | Ya está: 🛠️ Modo Mecánico → «🔤 Todo lo de un auto, por la patente». |
+| **Detectar los encabezados del Excel** | Ya está: ver la tanda anterior. |
+| **WAL, transacciones, regex, búsqueda difusa, paginación** | Ya está o no conviene: ver las tandas anteriores. |
+
+**De paso:** el aviso del ajuste de precios decía «uno de 10.000 queda en 10.500» con los montos en letra de fórmula: los dos «$» que pone `formato_precio()` se leían como matemática, y el control del auditor no los veía porque no estaban escritos en el texto. Pasaba también en el ejemplo del descuento de una cuenta corriente. Ahora `formato_precio(…, en_markdown=True)` los escapa y el auditor (8e) cuenta los «$» de `formato_precio()`: encontró justo esos dos.
+
+Probado en un navegador de verdad: la tabla de la ganancia por marca, y el ajuste con «inyector» sobre CRI-FA (toca 92, con tres ejemplos: «02-400 — Inyector de combustible Fiat Palio Siena…»).
+
 ## 🏎️ «Que sea un Ferrari F2002»: la segunda tanda de Gemini, medida
 
 El dueño le pidió a Gemini «lo mejor de lo mejor» y trajo otra tanda. Antes de tocar nada se midió dónde se va el tiempo de verdad, con la copia de la base (86.946 productos):

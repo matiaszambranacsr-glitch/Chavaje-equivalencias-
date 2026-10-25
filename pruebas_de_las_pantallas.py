@@ -99,6 +99,16 @@ def probar():
     [b for b in at.button if "Buscar equivalencias" in b.label][0].click().run()
     if consultar():
         fallas.append("con sesión no hace falta «Consultar por WhatsApp»")
+    # El presupuesto se manda derecho por WhatsApp, con lo que tiene y el total.
+    _f100 = c.execute("SELECT id FROM productos WHERE codigo_clean = 'F100'").fetchone()[0]
+    at.session_state["carrito"] = {_f100: {"codigo": "F100", "marca": "PRUEBA", "descripcion": "",
+                                           "precio": 1000, "cantidad": 2}}
+    at.run()
+    _presu = [e.proto.url for e in at.get("link_button")
+              if e.proto.label == "📲 Mandar el presupuesto por WhatsApp"]
+    if len(_presu) != 1 or "F100" not in _presu[0] or "TOTAL" not in _presu[0]:
+        fallas.append(f"el presupuesto por WhatsApp: {_presu}")
+    at.session_state["carrito"] = {}
     recorrer("operador")
     [b for b in at.button if b.label == "Salir"][0].click().run()
     entrar("clave-duenio-1")

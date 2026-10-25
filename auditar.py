@@ -629,6 +629,12 @@ def _dolares_a_la_vez(n):
         return sum(_dolares_a_la_vez(v) for v in n.values)
     if isinstance(n, ast.FormattedValue):
         return _dolares_a_la_vez(n.value)
+    # formato_precio() pone su «$»: «uno de {formato_precio(10000)} queda en {formato_precio(…)}»
+    # salía «uno de 10.000 queda en 10.500» como fórmula, en Marcas y en las cuentas. Con
+    # en_markdown=True lo pone escapado.
+    if (isinstance(n, ast.Call) and isinstance(n.func, ast.Name) and n.func.id == "formato_precio"
+            and not any(k.arg == "en_markdown" for k in n.keywords)):
+        return 1
     return 0
 
 

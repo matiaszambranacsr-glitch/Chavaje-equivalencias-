@@ -399,6 +399,20 @@ if pagina == PAGINAS[9]:
             _t1.dataframe(_tabla_mv(_mv["por_unidades"]), width="stretch", hide_index=True)
             _t2.caption("Lo que más plata trae:")
             _t2.dataframe(_tabla_mv(_mv["por_plata"]), width="stretch", hide_index=True)
+            # LA GANANCIA POR MARCA, solo el administrador: ver ganancia_por_marca().
+            if es_admin() and _mv["por_marca"]:
+                st.markdown("**💰 La ganancia por marca**",
+                            help="Con el costo que tenía cada cosa al venderla. El margen es "
+                                 "sobre lo vendido que tiene costo; «Sin costo» es lo vendido "
+                                 "sin costo cargado, que no entra en la cuenta.")
+                st.dataframe([{"Marca": m["marca"], "Unidades": m["unidades"],
+                               "Vendido": f"${miles(m['plata'], 0)}",
+                               "Ganancia": f"${miles(m['ganancia'], 0)}",
+                               "Margen": (f"{miles(m['margen'], 1)} %"
+                                          if m["margen"] is not None else "sin costo"),
+                               "Sin costo": (f"${miles(m['sin_costo'], 0)}"
+                                             if m["sin_costo"] else "")}
+                              for m in _mv["por_marca"]], width="stretch", hide_index=True)
 
     # CADA CUENTA: lo de un empleado (lo que vendió y lo que tiene del depósito) o de un taller
     # (lo que se llevó y lo que debe: lo de un taller no vuelve). El administrador ve a todos;

@@ -134,7 +134,12 @@ if pagina == PAGINAS[0]:
             # lista: el descuento de la cuenta no se ve (ver «EL DESCUENTO NO SE VE»).
             _texto = ((f"Para: {cuenta_elegida()['nombre']}\n\n" if cuenta_elegida() else "")
                       + "\n".join(_lineas) + f"\n\nTOTAL: ${miles(_total, 0)}")
-            st.caption("Para copiar y mandar por WhatsApp:")
+            # Mandarlo derecho, sin copiar y pegar: WhatsApp pregunta a quién (lo propuso una
+            # revisión con Gemini, «presupuestos con enlace directo para mandar al cliente»).
+            st.link_button("📲 Mandar el presupuesto por WhatsApp",
+                           "https://wa.me/?text=" + quote(_texto), key="presupuesto_por_wa",
+                           help="Abre WhatsApp con el presupuesto escrito: elegís a quién.")
+            st.caption("O para copiar:")
             st.code(_texto, language=None)
             # Pedir todo junto al depósito, para la cuenta elegida arriba (o Mostrador). Lo
             # pedido sale del presupuesto: tocarlo dos veces no lo pide dos veces.
