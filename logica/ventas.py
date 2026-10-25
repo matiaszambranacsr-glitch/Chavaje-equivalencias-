@@ -963,7 +963,10 @@ def ventas_a_cobrar():
     c.execute("""SELECT v.id, v.fecha, substr(v.fecha, 12, 5) AS hora, v.usuario, v.cliente,
                         v.total, v.mecanico_id, k.nombre AS cuenta
                  FROM ventas v LEFT JOIN mecanicos k ON k.id = v.mecanico_id
-                 WHERE COALESCE(v.cobrada, 1) = 0 AND v.anulada = 0 ORDER BY v.id""")
+                 WHERE v.cobrada = 0 AND v.anulada = 0 ORDER BY v.id""")
+    # «v.cobrada = 0» y no «COALESCE(v.cobrada, 1) = 0» (dan lo mismo: la vieja sin el dato
+    # cuenta como cobrada): con el COALESCE la base recorría todas las ventas de la historia
+    # cada 5 segundos, mientras la caja está abierta, en vez de usar idx_ventas_a_cobrar.
     ventas = [dict(f) for f in c.fetchall()]
     for v in ventas:
         c.execute("""SELECT codigo, marca, descripcion, cantidad, precio FROM ventas_items

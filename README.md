@@ -6636,6 +6636,28 @@ Lo pidió el dueño: «seguí mejorando la redacción de los textos, ponelos tod
 
 Probado en un navegador de verdad, en inglés y en castellano: las listas dicen «Elegí una opción», las tablas «Pantalla completa», «Buscar en la tabla» y «Bajar la tabla», el cartelito de la barra de los gráficos «Ver los números», al escribir «Enter para confirmar», y el calendario de 💵 Caja «octubre 2026» con «D L M M J V S». Los gráficos, «23/10» y «$120.000». En cada pantalla queda un solo «ℹ️ Cómo funciona» arriba (en Depósito: la sección, «⏳ Para buscar» y cómo funciona la cola), y las ayudas de una parte siguen en su parte. `pruebas_de_la_sesion.py` (2d) lo controla: rompiéndolo a propósito, avisa.
 
+## 🔎 Las 17 propuestas de Gemini, contra el código
+
+El dueño le pasó el código a Gemini y trajo sus propuestas. Cada una se miró contra lo que hay:
+
+| Propuesta | Qué hay / qué se hizo |
+|---|---|
+| **Índices en SQLite** | Ya estaban en lo que se busca (código limpio, código de barras, marca, los dos lados de cada vínculo, ventas por día, pedidos por estado, ubicación). Se midió el plan de cada consulta: dos de las que corren solas hacían de más. **La caja** (cada 5 segundos mientras está abierta) recorría todas las ventas de la historia por un `COALESCE` en el WHERE; ahora va por su índice, con el mismo resultado. **Los avisos a quien vende** (cada 20 segundos, por cada uno con la app abierta) iban por (cobrada, anulada), que son casi todas las ventas, y por estado en el depósito, que con los meses son casi todos «entregado»: ahora hay índices por quién vendió y por quién pidió. `pruebas_de_la_caja.py` (9e) mira el plan: rompiéndolo a propósito, avisa. |
+| **`st.cache_data`**, **logging centralizado**, **claves en `st.secrets`** | Ya estaban: la caché en lo pesado que no cambia en cada toque; `anotar_error()` y el historial de cambios; las contraseñas y la `clave_copia` en Secrets, nunca en el código. |
+| **Alertas de stock mínimo** | Ya estaban: «Lo que se va a terminar», «📌 Para pedir» y el ABC. |
+| **Búsquedas recientes y favoritos** | Ya estaban: las «🕘 Búsquedas recientes» de cada usuario (no solo de la sesión) y los ⭐ favoritos. |
+| **Plantillas de WhatsApp** | Ya estaban, en 🗂️ Administrar → 💬 Mensajería y cobros. |
+| **Normalizar códigos con expresiones regulares** | Ya está: `sanitizar()`, con su prueba. |
+| **Repuestos complementarios** | Ya estaban: «🧩 ¿Qué más lleva este trabajo?», el «va con» y los combos. |
+| **Transacciones ACID** | Ya están: `with db_lock, transaccion():`, con una prueba que corta a la mitad y mira que no quede nada a medias. |
+| **Componentes de interfaz reutilizables**, **exportar sin trabar** | Ya están: `logica/interfaz.py` (`ayuda()`, `grafico_de_barras()`, las solapas…); las exportaciones grandes ya se aceleraron. |
+| **Buscar códigos «parecidos» (rapidfuzz)** | No: dos códigos que difieren en una letra son dos repuestos distintos, y mostrarlo como equivalencia es vender mal. Lo que cada lista escribe distinto es la descripción («Jta.Tapa», «JTA T.C.»), y la búsqueda por descripción ya entiende esas abreviaturas. Los códigos casi iguales dentro de una misma marca (posibles errores de tipeo) ya se avisan al importar la lista, en las marcas de hasta 1.500 códigos. |
+| **Detectar homologaciones circulares** | No hace falta: A=B=C=A es válido (son la misma pieza); el recorrido ya tiene tope de saltos y no repite, y los puentes dudosos ya se revisan. |
+| **Subcarpetas por tema en `logica/` y `pantallas/`** | No: las partes de `logica/` corren en un solo espacio de nombres, en el orden de `orden.py`; el mapa del docstring de `app.py` ya dice dónde está cada cosa. |
+| **Ruff/Black/flake8, type hints y mypy** | No: con el espacio de nombres compartido marcarían miles de nombres «sin definir» que sí existen, y reformatear 60.000 renglones rompe la historia de cada línea. Lo que importa acá lo controla `auditar.py` (claves repetidas, `$`, expanders sin clave, ayudas, números con punto). |
+| **`pyproject.toml`**, **Docker**, **Alembic / SQLAlchemy** | No: Streamlit Cloud lee `requirements.txt`; la base se migra sola sumando columnas, y `pruebas_de_compatibilidad.py` controla que la versión nueva abra la base vieja y la vieja la migrada. |
+| **Las pruebas a una carpeta `tests/` con pytest** | No por ahora: cada prueba corre sola y `.github/correr_las_pruebas.py` las toma todas; moverlas no cambia nada de lo que hacen. |
+
 ## 📲 El cliente le pregunta al negocio, y el stock que no se sabe
 
 | Qué | Cómo |

@@ -237,6 +237,24 @@ def probar(L):
     esperar("al cajero no le llega lo de ana", nov("beto", desde), [])
     esperar("lo de antes de entrar, no", nov("ana", "2999-01-01 00:00:00"), [])
 
+    # 9e. Lo que corre solo, cada pocos segundos (la caja cada 5, los avisos cada 20 por cada
+    # vendedor), va por un índice que achica: con un COALESCE en el WHERE, la base recorría
+    # todas las ventas de la historia a cada vuelta; y por (cobrada, anulada), que son casi
+    # todas, tampoco achicaba. Se mira el plan de cada consulta que hacen.
+    def pasos(hacer):
+        hechas = []
+        conn.conexion_real().set_trace_callback(hechas.append)
+        hacer()
+        conn.conexion_real().set_trace_callback(None)
+        return [paso for sql in hechas if sql.lstrip().upper().startswith("SELECT")
+                for *_, paso in c.execute("EXPLAIN QUERY PLAN " + sql).fetchall()]
+    _caja, _avisos = pasos(ns["ventas_a_cobrar"]), pasos(lambda: nov("ana", desde))
+    esperar("lo que corre solo, sin recorrer tablas enteras",
+            [p for p in _caja + _avisos if p.startswith("SCAN")], [])
+    esperar("los avisos, por quién vendió o pidió",
+            [i for i in ("idx_ventas_de_quien", "idx_pedidos_deposito_de_quien")
+             if not any(i in p for p in _avisos)], [])
+
     # 10. Quién puede: cobrar y poner a cuenta, un empleado; prender o apagar la caja, el
     # administrador.
     originales = (g["_nivel_de_quien_esta_adentro"], g["hay_claves_configuradas"])

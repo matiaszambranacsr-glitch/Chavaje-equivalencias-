@@ -1630,6 +1630,11 @@ def _esquema_gestion(c):
     if "tanda" not in [f[1] for f in c.execute("PRAGMA table_info(pedidos_deposito)")]:
         c.execute("ALTER TABLE pedidos_deposito ADD COLUMN tanda TEXT")
     c.execute("CREATE INDEX IF NOT EXISTS idx_pedidos_deposito_estado ON pedidos_deposito(estado)")
+    # «Lo que le avisa la app a quien vende» pregunta cada 20 segundos, por cada vendedor con la
+    # app abierta, qué le resolvió el depósito: por estado solo, con los meses, recorría todos
+    # los entregados de la historia.
+    c.execute("""CREATE INDEX IF NOT EXISTS idx_pedidos_deposito_de_quien
+                 ON pedidos_deposito(pedido_por, resuelto_en)""")
     c.execute("""CREATE TABLE IF NOT EXISTS movimientos_de_cuenta (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         mecanico_id INTEGER NOT NULL,
@@ -2986,6 +2991,9 @@ def _esquema_ventas(c):
     if "movimiento_id" not in [f[1] for f in c.execute("PRAGMA table_info(ventas)")]:
         c.execute("ALTER TABLE ventas ADD COLUMN movimiento_id INTEGER")
     c.execute("CREATE INDEX IF NOT EXISTS idx_ventas_a_cobrar ON ventas(cobrada, anulada)")
+    # Lo mismo con las ventas que le cobraron a cada vendedor: (cobrada, anulada) son casi
+    # todas las ventas, así que el índice de arriba no achicaba nada para esa pregunta.
+    c.execute("CREATE INDEX IF NOT EXISTS idx_ventas_de_quien ON ventas(usuario, cobrada_en)")
 
 
 def _esquema_del_mapa(c):
