@@ -1101,6 +1101,21 @@ def _elegir_un_kit_por_descripcion(candidatos, mia, limite):
     return list(por_descripcion.values())[:limite]
 
 
+def kits_de_los_resultados(ids):
+    """kits_que_traen_a_varios(), recordado mientras los resultados son los mismos (ver
+    recordado_mientras_no_cambie()).
+
+    El barrido de las descripciones es uno solo por búsqueda, pero los resultados quedan a la
+    vista y la pantalla se vuelve a dibujar en cada toque: tocar cualquier botón debajo de los
+    resultados volvía a barrer las 86.946 descripciones. Medido: 76 ms de cada toque. Una lista
+    nueva trae ids nuevos y lo vuelve a calcular; reparar descripciones a mano, no, hasta la
+    búsqueda siguiente. Devuelve una copia: quien la usa no toca lo guardado."""
+    kits = recordado_mientras_no_cambie(
+        "_kits_de_los_resultados", (tuple(ids), testigo_de_los_vinculos()),
+        lambda: kits_que_traen_a_varios(ids))
+    return {pid: [dict(k) for k in lista] for pid, lista in kits.items()}
+
+
 def kits_que_traen_a_varios(ids, limite=8):
     """Los kits del catálogo que traen adentro alguno de ESTOS repuestos, en UNA consulta.
 

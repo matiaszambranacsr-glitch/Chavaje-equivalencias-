@@ -397,6 +397,49 @@ def el_mismo_numero_en_dos_piezas(res):
     return buscados
 
 
+def recordado_mientras_no_cambie(nombre, clave, calcular, cuantos=24):
+    """calcular(), recordado en la sesión mientras `clave` siga siendo la misma.
+
+    Para lo que se dibuja debajo de los resultados de una búsqueda: los resultados quedan a la
+    vista y la pantalla se vuelve a dibujar en cada toque (sumar al presupuesto, abrir una
+    ficha…), y lo que se calculaba a partir de ellos se volvía a calcular cada vez. La clave
+    lleva lo buscado y testigo_de_los_vinculos(): si entra una lista o cambia un vínculo, se
+    calcula de nuevo. Guarda las últimas `cuantos` claves de cada `nombre` —una búsqueda puede
+    ser una lista de códigos— y la más vieja se va."""
+    guardados = st.session_state.get(nombre)
+    if not isinstance(guardados, dict):
+        guardados = {}
+    if clave not in guardados:
+        if len(guardados) >= cuantos:
+            guardados.pop(next(iter(guardados)))
+        guardados[clave] = calcular()
+        st.session_state[nombre] = guardados
+    return guardados[clave]
+
+
+def testigo_de_los_vinculos():
+    """Cambia cuando entra un producto, o se agrega o se corta un vínculo: (último producto,
+    cuántos vínculos, último vínculo). Las tres salen de índices: 0,8 ms con 86.946 productos y
+    20.037 vínculos. Un cambio de confianza no lo mueve: eso se ve en la búsqueda siguiente."""
+    c.execute("""SELECT (SELECT MAX(id) FROM productos),
+                        (SELECT COUNT(*) FROM equivalencias),
+                        (SELECT MAX(rowid) FROM equivalencias)""")
+    return tuple(c.fetchone())
+
+
+def mas_alla_del_tope_de_los_resultados(clean_code, max_saltos, marca_filtro="Todas",
+                                        confianza_minima=None):
+    """equivalentes_mas_alla_del_tope() para el aviso «🔗 Hay N más» debajo de los resultados,
+    recordado (ver recordado_mientras_no_cambie()). Eran dos búsquedas enteras —con el tope y
+    sin él— en cada toque mientras los resultados estaban a la vista: 55 ms con LRSNT61671LUCAS."""
+    mas, marcas = recordado_mientras_no_cambie(
+        "_mas_alla_del_tope",
+        (clean_code, max_saltos, marca_filtro, confianza_minima, testigo_de_los_vinculos()),
+        lambda: equivalentes_mas_alla_del_tope(clean_code, max_saltos, marca_filtro,
+                                               confianza_minima))
+    return mas, list(marcas)
+
+
 def equivalentes_mas_alla_del_tope(clean_code, max_saltos, marca_filtro="Todas",
                                    confianza_minima=None):
     """Cuántos equivalentes quedan FUERA del límite de saltos elegido, y de qué marcas.

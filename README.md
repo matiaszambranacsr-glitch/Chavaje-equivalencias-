@@ -6636,6 +6636,25 @@ Lo pidió el dueño: «seguí mejorando la redacción de los textos, ponelos tod
 
 Probado en un navegador de verdad, en inglés y en castellano: las listas dicen «Elegí una opción», las tablas «Pantalla completa», «Buscar en la tabla» y «Bajar la tabla», el cartelito de la barra de los gráficos «Ver los números», al escribir «Enter para confirmar», y el calendario de 💵 Caja «octubre 2026» con «D L M M J V S». Los gráficos, «23/10» y «$120.000». En cada pantalla queda un solo «ℹ️ Cómo funciona» arriba (en Depósito: la sección, «⏳ Para buscar» y cómo funciona la cola), y las ayudas de una parte siguen en su parte. `pruebas_de_la_sesion.py` (2d) lo controla: rompiéndolo a propósito, avisa.
 
+## ⚡ Con los resultados a la vista, cada toque más liviano
+
+Lo pidió el dueño: «mejorá más». Después de los desplegables, se midió lo que pasa **después** de buscar: los resultados quedan a la vista, y cada toque (sumar al presupuesto, abrir una ficha, «se llevó»…) vuelve a dibujar la pantalla. Con la copia de la base (86.946 productos), el toque siguiente a una búsqueda:
+
+| Lo buscado | Antes | Ahora |
+|---|---|---|
+| 02400 | 237 ms | **72 ms** |
+| LRSNT61671LUCAS | 170 ms | **89 ms** |
+| Un código que no está (W712/94 en la copia) | 137 ms | **60 ms** |
+
+Cada toque volvía a calcular lo que se dibuja debajo de los resultados, aunque nada hubiera cambiado:
+
+- **Los kits que traen a los resultados** (`kits_de_los_resultados()`): un barrido de todas las descripciones, 76 ms.
+- **El aviso «🔗 Hay N más»** (`mas_alla_del_tope_de_los_resultados()`): dos búsquedas enteras, con el tope y sin él, 55 ms.
+- **La planilla de «⬇️ Descargar (Excel)»**: 29 ms para armar un archivo que casi nunca se baja. Ahora se arma al tocar el botón.
+- **Lo del «no lo encontré»**: el catálogo ajeno, los códigos casi iguales, las familias (con una búsqueda por cada una) y lo parecido por texto.
+
+Ahora se recuerdan en la sesión (`recordado_mientras_no_cambie()`) con un testigo que se lee en 0,8 ms (`testigo_de_los_vinculos()`: el último producto y la cantidad y el último de los vínculos). Si entra una lista o se agrega o corta un vínculo, se calcula de nuevo; un cambio de confianza se ve en la búsqueda siguiente. De cada cosa se guardan las últimas 24 (una búsqueda puede ser una lista de códigos). `pruebas_del_buscador.py` (2e) lo controla: rompiéndolo a propósito, avisa.
+
 ## ⚡ Los desplegables cerrados no trabajan
 
 Lo pidió el dueño: «más». Se midió cuánto tarda cada pantalla con la copia de la base (86.946 productos), y lo que más pesaba en las más usadas no se veía: **Streamlit ejecuta todo lo de adentro de un desplegable aunque esté cerrado**, en cada toque. Con Streamlit 1.65 el desplegable puede saber si está abierto (`on_change="rerun"` y `.open`), y lo de adentro se salta mientras está cerrado.

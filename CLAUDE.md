@@ -32,6 +32,8 @@ Todo —pantallas, nombres, comentarios, mensajes de commit— va en castellano 
 - Streamlit corre lo de adentro de un expander aunque esté cerrado: si adentro hay trabajo, va
   perezoso, `x = st.expander(..., key=..., on_change="rerun")` y `if x.open: with x:` (ver «📐
   Buscar por medidas» en `pantallas/buscador.py`). No si adentro hay campos que se leen afuera.
+- Lo que se calcula a partir de resultados que quedan a la vista se recuerda con
+  `recordado_mientras_no_cambie(nombre, (lo buscado, testigo_de_los_vinculos()), calcular)`.
 - Dos «$» en un mismo texto de markdown se leen como fórmula: escapar `\\$`.
 - Las claves de los widgets no se repiten entre pantallas.
 - Explicaciones: `ayuda()` / `explicar()` o `help=`, no `st.caption` largos a la vista. Una sola

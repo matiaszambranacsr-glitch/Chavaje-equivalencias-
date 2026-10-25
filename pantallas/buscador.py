@@ -975,7 +975,7 @@ if pagina == PAGINAS[0]:
                         # cada lista cita sus propios códigos de fábrica, esos se encadenan, y con
                         # 3 saltos se ve el proveedor propio y uno más. El resto existe y no se
                         # muestra. Así que se avisa y se ofrece verlo.
-                        _mas, _marcas_mas = equivalentes_mas_alla_del_tope(
+                        _mas, _marcas_mas = mas_alla_del_tope_de_los_resultados(
                             clean, max_saltos, marca_filtro,
                             50 if solo_confiables else None)
                         if _mas:
@@ -1419,7 +1419,12 @@ if pagina == PAGINAS[0]:
                         with col_dl:
                             st.download_button(
                                 "⬇️ Descargar (Excel)",
-                                data=to_excel_bytes(mostrar),
+                                # Se arma al tocar el botón y no en cada toque de la pantalla:
+                                # eran 29 ms por toque mientras los resultados estaban a la vista,
+                                # para una planilla que casi nunca se baja. Con una copia, por si
+                                # la lista cambia más abajo en esta misma vuelta.
+                                data=functools.partial(to_excel_bytes,
+                                                       [dict(_m) for _m in mostrar]),
                                 file_name=f"equivalencias_{clean}.xlsx",
                                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                                 key=f"dl_{clean}"
@@ -1447,7 +1452,7 @@ if pagina == PAGINAS[0]:
                         # cada una es un LIKE que barre las 70.888 descripciones, y esto corre
                         # en cada búsqueda del mostrador. Ver kits_que_traen_a_varios().
                         _kits, _contenido = [], []
-                        _kits_por_producto = kits_que_traen_a_varios([_f["ID"] for _f in res[:12]])
+                        _kits_por_producto = kits_de_los_resultados([_f["ID"] for _f in res[:12]])
                         for _f in res[:12]:
                             for _k in _kits_por_producto.get(_f["ID"], []):
                                 if _k["ID"] not in {x["ID"] for x in _kits}:
@@ -1679,6 +1684,17 @@ if pagina == PAGINAS[0]:
                     else:
                         st.warning("No hay ningún producto con ese código exacto.")
                         boton_para_consultar(codigo_individual, None, f"nada_{clean}")
+                        # Lo de abajo —catálogos ajenos, códigos casi iguales, familias, texto—
+                        # queda a la vista y cada toque lo volvía a calcular: con un código que
+                        # no está, el toque siguiente tardaba el doble. Se recuerda mientras no
+                        # cambien los vínculos (ver recordado_mientras_no_cambie()).
+                        _testigo_nr = testigo_de_los_vinculos()
+
+                        def _recordar_nr(nombre, calcular, *clave):
+                            valor = recordado_mientras_no_cambie(nombre, clave + (_testigo_nr,),
+                                                                 calcular)
+                            return ([dict(x) for x in valor] if isinstance(valor, list)
+                                    else valor)
 
                         # ¿Este código fue reemplazado por otro? Es la causa más tonta de
                         # perder una venta: la pieza existe, cambió de número, y se le dice al
@@ -1707,7 +1723,8 @@ if pagina == PAGINAS[0]:
                         # Antes de darse por vencido: ¿lo conoce algún catálogo de fabricante?
                         # Ahí figura qué pieza es y a qué autos le va, y con eso se puede
                         # ofrecer un equivalente en vez de perder la venta.
-                        ajeno = identificar_codigo_ajeno(clean)
+                        ajeno = _recordar_nr("_nr_ajeno", lambda: identificar_codigo_ajeno(clean),
+                                             clean)
                         if ajeno:
                             st.info(
                                 f"🏭 **Ese código existe: es {ajeno['tipo'] or 'una pieza'} de "
@@ -1727,7 +1744,9 @@ if pagina == PAGINAS[0]:
                                          for a in ajeno["autos"]],
                                         width="stretch", hide_index=True
                                     )
-                            reemplazos = equivalentes_para_los_mismos_autos(clean)
+                            reemplazos = _recordar_nr(
+                                "_nr_reemplazos", lambda: equivalentes_para_los_mismos_autos(clean),
+                                clean)
                             if reemplazos:
                                 st.success(
                                     f"✅ **Tenés {len(reemplazos)} repuesto(s) que sirven para los "
@@ -1744,7 +1763,7 @@ if pagina == PAGINAS[0]:
                         # probable: en el mostrador se tipea rápido y se dan vuelta dos dígitos.
                         # Lo que ya había solo encontraba códigos que empiezan igual, así que
                         # W71249 por W71294 no daba nada aunque fuera el mismo filtro.
-                        tipeos = codigos_por_tipeo(clean)
+                        tipeos = _recordar_nr("_nr_tipeos", lambda: codigos_por_tipeo(clean), clean)
                         if tipeos:
                             # Son OTROS códigos: un 6205 y un 6206 son rulemanes distintos.
                             # Se ofrecen por si fue un error de tipeo, nunca como equivalencia
@@ -1762,14 +1781,17 @@ if pagina == PAGINAS[0]:
 
                         # Familias de códigos: pedís "TC-421" y en la base están "TC-421-15",
                         # "TC-421-20", etc. Antes esto no aparecía por ningún lado.
-                        parecidos = buscar_codigos_parecidos(clean)
+                        parecidos = _recordar_nr("_nr_parecidos",
+                                                 lambda: buscar_codigos_parecidos(clean), clean)
                         if parecidos:
                             st.info(
                                 f"🔎 Pero hay {len(parecidos)} código(s) que empiezan igual o lo "
                                 "contienen — puede ser una familia con variantes (espesor, lado, medida):"
                             )
                             for p in parecidos[:12]:
-                                equivalentes_p = buscar_por_codigo(p["_clean"])
+                                equivalentes_p = _recordar_nr(
+                                    "_nr_familia", lambda: buscar_por_codigo(p["_clean"]),
+                                    p["_clean"])
                                 otros_p = [e for e in equivalentes_p if e["ID"] != p["ID"]]
                                 resumen_p = (f"{len(otros_p)} equivalencia(s)" if otros_p
                                               else "sin equivalencias cargadas")
@@ -1793,7 +1815,10 @@ if pagina == PAGINAS[0]:
                             # limpio es «FILTRO24058», que no está en ningún lado; con las dos
                             # palabras aparece el 24058FISPA. Y sin aflojar: con una sola de las
                             # palabras, «kit 22382» traía 200 productos cualesquiera.
-                            parcial = buscar_por_texto(codigo_individual, aflojar=False)
+                            parcial = _recordar_nr(
+                                "_nr_texto",
+                                lambda: buscar_por_texto(codigo_individual, aflojar=False),
+                                codigo_individual)
                             if parcial:
                                 st.info("¿Quisiste decir alguno de estos? Tocá el código para ver sus equivalencias:")
                                 mostrar_lista_clickeable(parcial, f"sug_{clean}", limite=12)

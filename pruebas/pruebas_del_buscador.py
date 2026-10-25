@@ -112,6 +112,33 @@ def probar():
             ("Hola! Busqué *02400* en la página y vi: FISPA LEICJ010. ¿Tienen alguno? ¿A cuánto?",
              "Hola! ¿Tienen *XYZ*? En la página no me apareció."))
 
+    # 2e. Lo que se dibuja debajo de los resultados se recuerda mientras no cambien los
+    # vínculos (ver recordado_mientras_no_cambie()): no se recalcula en cada toque, sí cuando
+    # entra un producto o se agrega un vínculo, y de cada cosa se guardan las últimas 24.
+    _veces = []
+    _recordado = ns["recordado_mientras_no_cambie"]
+    _testigo = ns["testigo_de_los_vinculos"]
+
+    def _calcular():
+        _veces.append(1)
+        return [{"n": len(_veces)}]
+    _antes = _testigo()
+    _uno = _recordado("_prueba_memo", ("F100", _antes), _calcular)
+    _dos = _recordado("_prueba_memo", ("F100", _antes), _calcular)
+    c.execute("INSERT INTO productos (codigo_raw, codigo_clean, descripcion, marca_id) "
+              "VALUES ('F200', 'F200', 'FILTRO DE AIRE', (SELECT id FROM marcas LIMIT 1))")
+    c.execute("INSERT INTO equivalencias (producto_a_id, producto_b_id) VALUES "
+              "((SELECT id FROM productos WHERE codigo_clean = 'F100'), ?)", (c.lastrowid,))
+    conn.commit()
+    _despues = _testigo()
+    _tres = _recordado("_prueba_memo", ("F100", _despues), _calcular)
+    esperar("recordado: una vez por clave, otra vez si cambian los vínculos",
+            (_uno, _dos, _tres, len(_veces), _antes != _despues),
+            ([{"n": 1}], [{"n": 1}], [{"n": 2}], 2, True))
+    for i in range(30):
+        _recordado("_prueba_memo", ("otro", i), lambda: 0)
+    esperar("de cada cosa, las últimas 24", len(ns["st"].session_state["_prueba_memo"]), 24)
+
     # 3. Los números: mediana y P95 de lo anotado.
     g["del_proceso"]("mediciones_de_busqueda", list).clear()
     for ms in range(1, 101):
