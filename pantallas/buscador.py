@@ -684,6 +684,103 @@ if pagina == PAGINAS[0]:
         st.session_state["saltos_busqueda"] = "Toda la cadena"
         st.session_state["_buscar_codigo_ya"] = True
 
+    def _decidir_lo_que_espera(item, filas, aprobar, rehacer):
+        """Aprueba o descarta esos vínculos de la cola (cada uno con su lista) y rehace los
+        resultados a la vista. Rehacerlos con «Buscar» anotaba la búsqueda otra vez y le sumaba
+        una a «veces buscado»: se vuelve a buscar sin eso. Devuelve cuántos se decidieron."""
+        por_lote = {}
+        for f in filas:
+            por_lote.setdefault(f["lote"], []).append((f["a"], f["b"]))
+        n = sum(aprobar_pendientes(lote, pares) if aprobar else rechazar_pendientes(lote, pares)
+                for lote, pares in por_lote.items())
+        invalidar_salud()
+        if aprobar and n:
+            try:
+                item["res"], _ = rehacer(item["clean"])
+            except sqlite3.Error as _err:
+                anotar_error("buscador", _err)
+        return n
+
+    def _lo_que_espera_aprobacion_aca(item, ids, cuantos, rehacer):
+        """Los vínculos de la cola del código buscado, para decidirlos acá: ver «LO QUE ESPERA
+        APROBACIÓN, DESDE EL BUSCADOR». Los que el análisis da casi seguro mal van juntos, con
+        un toque para descartarlos: en la copia de la base real son 6 de cada 10."""
+        clean = item["clean"]
+        filas = [dict(f) for f in recordado_mientras_no_cambie(
+            "_lo_que_espera_aprobacion", (tuple(sorted(ids)), cuantos, testigo_de_los_vinculos()),
+            lambda: lo_que_espera_aprobacion(ids))]
+        rojas = [f for f in filas if f["nivel"].startswith("🔴")]
+
+        def _hasta(texto, n):
+            # Cortado en una palabra: «como mucho uno es el equival» se leía como un error.
+            return texto if len(texto) <= n else texto[:n].rsplit(" ", 1)[0] + "…"
+        para_decidir = [f for f in filas if not f["nivel"].startswith("🔴")]
+        por_marca = {}
+        for f in para_decidir:
+            por_marca[f["Marca"]] = por_marca.get(f["Marca"], 0) + 1
+        _ver_todas = st.session_state.get(f"esp_todas_{clean}")
+        for f in para_decidir if _ver_todas else para_decidir[:6]:
+            with st.container(border=True):
+                st.markdown(f"{f['nivel'][:1]} **{texto_para_markdown(f['Marca'])} "
+                            f"{texto_para_markdown(f['Codigo'])}** — "
+                            f"{texto_para_markdown(_hasta(f['Descripcion'], 90))}")
+                _datos = [formato_precio(f["Precio"], en_markdown=True) if f["Precio"] else "",
+                          f"stock {miles(f['Stock'])}" if f["Stock"] is not None else "",
+                          f"{f['nivel'][2:]}: {texto_para_markdown(_hasta(f['motivo'], 140))}"
+                          if f["motivo"] else f["nivel"][2:]]
+                # Los avisos que cambian la decisión: el abanico visto desde el que se buscó, el
+                # que ya aparece por otro camino y el que encadena redes enteras (un error ahí
+                # no es un vínculo malo, son cientos: ver pares_que_unen_redes()).
+                if por_marca[f["Marca"]] > 1 and not f["motivo"].startswith(("🪭", "🪞")):
+                    _datos.append(f"🪭 hay {por_marca[f['Marca']]} de {f['Marca']}: como mucho "
+                                  "una es la misma pieza")
+                if f["ya_unidos"]:
+                    _datos.append("ya aparece en los resultados por otro camino")
+                elif f["une"] >= UNE_REDES_GRANDES:
+                    _datos.append(f"🔥 aprobarla encadena {miles(f['une'])} pares: mirala bien")
+                st.caption(" · ".join(d for d in _datos if d))
+                with st.container(horizontal=True, gap="small"):
+                    _si = st.button("✅ Es la misma", key=f"esp_si_{f['a']}_{f['b']}_{clean}",
+                                    help="Queda aprobada: desde ahora aparece al buscar "
+                                         "cualquiera de los dos.")
+                    _no = st.button("🚫 No es", key=f"esp_no_{f['a']}_{f['b']}_{clean}",
+                                    help="Se descarta y queda anotado: si se vuelve a importar "
+                                         "la lista, no vuelve a la cola.")
+                if _si or _no:
+                    _n = _decidir_lo_que_espera(item, [f], bool(_si), rehacer)
+                    avisar("success", (f"✅ {f['Marca']} {f['Codigo']} quedó como equivalente."
+                                       if _si else f"🚫 {f['Marca']} {f['Codigo']} descartada.")
+                           if _n else "Ya la había decidido otra persona.")
+                    st.rerun()
+        if len(para_decidir) > 6 and not _ver_todas:
+            st.button(f"Ver las {len(para_decidir) - 6} restantes", key=f"esp_todas_{clean}_b",
+                      on_click=lambda k=f"esp_todas_{clean}": st.session_state.update({k: True}))
+        # El abanico entero de un toque: en el barrido real, lo más común es que ninguna de las
+        # de la otra lista sea (TC-517-07 tiene 4 juntas de TARANTO «HONDA ACCORD PRELUDE»).
+        for _marca_ab, _cuantas_ab in por_marca.items():
+            if _cuantas_ab > 1 and st.button(
+                    f"🚫 Ninguna de las {_cuantas_ab} de {_marca_ab}",
+                    key=f"esp_ninguna_{sanitizar(_marca_ab)}_{clean}",
+                    help="Las descarta a todas. Si una es, aprobala primero con «✅ Es la "
+                         "misma»."):
+                _n = _decidir_lo_que_espera(
+                    item, [f for f in para_decidir if f["Marca"] == _marca_ab], False, rehacer)
+                avisar("success", f"🚫 Se descartaron {miles(_n)} de {_marca_ab}.")
+                st.rerun()
+        if rojas:
+            st.markdown(f"🔴 **{len(rojas)} que el análisis da casi seguro mal**")
+            st.caption(" · ".join(f"{texto_para_markdown(f['Marca'])} "
+                                  f"{texto_para_markdown(f['Codigo'])}: "
+                                  f"{texto_para_markdown(_hasta(f['motivo'], 70))}"
+                                  for f in rojas[:5])
+                       + (f" · y {len(rojas) - 5} más" if len(rojas) > 5 else ""))
+            if st.button(f"🚫 Descartar las {len(rojas)}", key=f"esp_rojas_{clean}",
+                         help="Lo mismo que «Descartar los casi seguro mal» de Equivalencias "
+                              "sugeridas, solo con los de este código."):
+                _n = _decidir_lo_que_espera(item, rojas, False, rehacer)
+                avisar("success", f"🚫 Se descartaron {miles(_n)} vínculo(s).")
+                st.rerun()
+
     # UN SOLO BUSCADOR. Lo que se escribe en el de códigos y son solo palabras —«filtro aceite
     # gol», «rótula»— se busca por descripción, sin hacer cambiar de modo a nadie (ver
     # parece_una_descripcion()). El cambio se pide en una vuelta y se hace en la siguiente,
@@ -895,6 +992,15 @@ if pagina == PAGINAS[0]:
                                           f"equivalencia" + ("s" if len(alternativas) != 1 else ""))
                 else:
                     etiqueta_resultado = f"🔎 {codigo_individual} — sin equivalencias todavía"
+                # Cuántos vínculos de lo buscado esperan en la cola: el que atiende los puede
+                # decidir acá (ver «LO QUE ESPERA APROBACIÓN, DESDE EL BUSCADOR»). Un conteo
+                # con índice; el análisis, recién al abrirlo.
+                _ids_buscados = [f["ID"] for f in res or []
+                                 if f.get("Cadena") == "— el buscado" and f.get("ID") is not None]
+                _n_esperan = (cuantos_esperan_aprobacion(_ids_buscados)
+                              if _ids_buscados and not solo_mirar() else 0)
+                if _n_esperan:
+                    etiqueta_resultado += f" · 🔒 {_n_esperan} esperando aprobación"
 
                 with st.expander(etiqueta_resultado, expanded=(total_codigos_buscados == 1), key=f"exp_resultado_{clean}"):
                     if item.get("aviso"):
@@ -952,8 +1058,10 @@ if pagina == PAGINAS[0]:
                                     + (", …" if len(_de_fabrica) > 1 else "")
                                     + "), pero por ahora ninguno está en la lista de otro "
                                     "proveedor.") if _de_fabrica else "")
-                                + "\n\nSe puede cargar a mano desde **🔗 Vincular manual**, y "
-                                "queda para siempre."
+                                + (f"\n\nHay **{_n_esperan} esperando aprobación**: se deciden "
+                                   "acá abajo, al final de los resultados (🔒)." if _n_esperan
+                                   else "\n\nSe puede cargar a mano desde **🔗 Vincular "
+                                   "manual**, y queda para siempre.")
                             )
 
                         # Llegar al tope de 400 no es solo "hay muchos": según el criterio de la
@@ -1658,6 +1766,18 @@ if pagina == PAGINAS[0]:
                                             st.dataframe(historial_p, width="stretch", hide_index=True)
                                         else:
                                             st.caption("Todavía no hay cambios de precio registrados para este producto.")
+
+                        # Lo que espera aprobación de este código, para decidirlo acá: ver
+                        # «LO QUE ESPERA APROBACIÓN, DESDE EL BUSCADOR». Plegado y perezoso: el
+                        # análisis tarda 200 ms y el título sale de un conteo con índice.
+                        if _n_esperan and seccion_plegable(
+                                f"🔒 {_n_esperan} posible(s) equivalente(s) esperando aprobación",
+                                key=f"esp_ver_{clean}"):
+                            _lo_que_espera_aprobacion_aca(
+                                item, _ids_buscados, _n_esperan,
+                                lambda _cod: buscar_con_variantes_del_cero(
+                                    _cod, marca_filtro, max_saltos,
+                                    confianza_minima=50 if solo_confiables else None))
 
                         # Los catálogos de los proveedores, lo mismo: son del mostrador.
                         if catalogos and not solo_mirar():

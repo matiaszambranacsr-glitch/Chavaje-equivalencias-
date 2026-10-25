@@ -41,6 +41,7 @@ específico, y las pantallas quedan todas al final:
         · EQUIVALENCIAS DESCUBIERTAS DESDE LAS VENTAS
         · APROBAR POR GRUPOS, CON UNA MUESTRA DE CONTROL
         · PARA REVISAR, POR MOTIVO
+        · LO QUE ESPERA APROBACIÓN, DESDE EL BUSCADOR
     logica/importar.py
         · IMPORTAR UNA LISTA: leer el archivo y adivinar qué es cada columna
         · AVISOS DE BACKUP Y HUELLA DEL ARCHIVO IMPORTADO

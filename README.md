@@ -6636,6 +6636,22 @@ Lo pidió el dueño: «seguí mejorando la redacción de los textos, ponelos tod
 
 Probado en un navegador de verdad, en inglés y en castellano: las listas dicen «Elegí una opción», las tablas «Pantalla completa», «Buscar en la tabla» y «Bajar la tabla», el cartelito de la barra de los gráficos «Ver los números», al escribir «Enter para confirmar», y el calendario de 💵 Caja «octubre 2026» con «D L M M J V S». Los gráficos, «23/10» y «$120.000». En cada pantalla queda un solo «ℹ️ Cómo funciona» arriba (en Depósito: la sección, «⏳ Para buscar» y cómo funciona la cola), y las ayudas de una parte siguen en su parte. `pruebas_de_la_sesion.py` (2d) lo controla: rompiéndolo a propósito, avisa.
 
+## 🔒 Lo que espera aprobación se decide desde el Buscador
+
+Lo pidió el dueño: «que sea una locura lo de las equivalencias también». Se midió dónde está el trabajo en la cola (copia de la base, 7.827 vínculos esperando): la revisión es **por lista**, en 📊 Estadísticas → 🔗 Equivalencias sugeridas, y mientras tanto el mostrador no ve nada. **4.549 productos tienen vínculos esperando**: se busca uno, la pantalla dice «sin equivalencias todavía», y la que el cliente necesitaba estaba en la cola, en una lista de miles.
+
+Ahora, buscando un código (con sesión):
+
+- **El título lo dice**: «🔎 TC-853-07 — sin equivalencias todavía · 🔒 3 esperando aprobación». Es un conteo con índice (0,01 ms); nada más se calcula hasta abrirlo.
+- **Al abrir «🔒 N posible(s) equivalente(s) esperando aprobación»**, cada candidato con su precio, su stock y **lo que dice el análisis** (🟢 🟡 🟠 y el motivo), y dos botones: **✅ Es la misma** y **🚫 No es**. Al aprobar, la tabla de arriba la trae enseguida (TC-853-07 pasó de «sin equivalencias» a «1 equivalencia» en un toque), sin volver a anotar la búsqueda.
+- **Lo que el análisis da casi seguro mal (🔴) va junto**, con el motivo de cada uno y **un toque para descartarlo todo**: en la copia son 6 de cada 10 de lo que espera (267 de 442 en una muestra de 120 productos).
+- **El abanico**: si hay varios de la misma lista —«hay 4 de TARANTO: como mucho una es la misma pieza»—, un botón **🚫 Ninguna de las 4 de TARANTO**, que es lo que más pasa en el barrido.
+- **Y avisa** cuando aprobar uno encadena redes enteras (🔥, ver `pares_que_unen_redes()`) o cuando ya aparece en los resultados por otro camino.
+
+**El veredicto es el mismo que en la revisión de la lista.** Se analiza con el análisis de la cola (`_analizar_filas()`), sobre los vínculos del producto **y los de cada candidato**: sin los del otro lado, la junta de IMPERIAL que tiene dos de TARANTO no se veía como abanico. Medido sobre 80 productos al azar: con solo los del producto, 18 de 294 pares salían 🟢 cuando su lista los da 🟠; con los de los candidatos, **los 294 iguales** (y 442 de 442 en otra muestra de 120), en **200 ms** de mediana, recordado mientras no cambie la cola de ese producto (`lo_que_espera_aprobacion()`). Aprobar y descartar son los de siempre (`aprobar_pendientes()`, `rechazar_pendientes()`, nivel empleado): lo descartado queda anotado y no vuelve con la próxima importación. Sin sesión no se ve nada de esto.
+
+`pruebas_del_buscador.py` (2g) lo controla: el título, aprobar (y que la tabla lo traiga), descartar lo rojo, que la búsqueda no se anote dos veces y que el invitado no lo vea; rompiendo el refresco de la tabla a propósito, avisa. Probado en el navegador con la copia de la base, en la computadora y en un teléfono (390 de ancho, sin correrse de costado).
+
 ## 🔍 El Buscador encuentra el código como se escribe en el mostrador
 
 Lo pidió el dueño: «seguí mejorando la parte del buscador, que sea una locura». Se midió con productos reales de la base (86.946), buscándolos escritos como se escriben de verdad:

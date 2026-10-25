@@ -5041,3 +5041,94 @@ def listar_busquedas_sin_resultado(limite=50):
                  FROM historial_busquedas WHERE sin_resultado = 1
                  GROUP BY termino ORDER BY COUNT(*) DESC, MAX(fecha) DESC LIMIT ?""", (limite,))
     return filas_a_listas(c)
+
+
+# ======================================================================
+# LO QUE ESPERA APROBACIÓN, DESDE EL BUSCADOR
+# ======================================================================
+# La cola se revisa por listas, en Estadísticas, y mientras tanto el mostrador no la ve: se busca
+# un código, la pantalla dice «sin equivalencias todavía», y la que el cliente necesitaba estaba
+# esperando en la cola. En la copia de la base real hay 4.549 productos con vínculos esperando
+# (de 7.827), y la cola se recorre por lista, no por lo que se pide. Acá se muestran los del
+# código que se está buscando, con lo que dice el análisis, para decidirlos ahí: lo que la gente
+# pide se resuelve primero, sin ir a buscarlo entre miles.
+
+_LA_COLA_CON_SUS_PRODUCTOS = """
+    SELECT ep.producto_a_id AS a, ep.producto_b_id AS b, ep.lote AS lote,
+           pa.codigo_raw AS cod_a, ma.nombre AS marca_a, ma.tipo AS tipo_a,
+           pa.descripcion AS desc_a, pa.precio AS precio_a, pa.stock AS stock_a,
+           pb.codigo_raw AS cod_b, mb.nombre AS marca_b, mb.tipo AS tipo_b,
+           pb.descripcion AS desc_b, pb.precio AS precio_b, pb.stock AS stock_b
+    FROM equivalencias_pendientes ep
+    JOIN productos pa ON pa.id = ep.producto_a_id
+    JOIN productos pb ON pb.id = ep.producto_b_id
+    JOIN marcas ma ON ma.id = pa.marca_id
+    JOIN marcas mb ON mb.id = pb.marca_id"""
+
+
+def _la_cola_de(ids):
+    """Las filas de la cola donde está alguno de estos productos, a < b, sin repetir."""
+    filas = {}
+    for tanda, marcadores in en_tandas(sorted(ids), usos_por_consulta=2):
+        c.execute(f"""{_LA_COLA_CON_SUS_PRODUCTOS}
+                      WHERE (ep.producto_a_id IN ({marcadores})
+                             OR ep.producto_b_id IN ({marcadores}))
+                        AND ep.producto_a_id < ep.producto_b_id""", tanda + tanda)
+        filas.update({(r["a"], r["b"]): dict(r) for r in c.fetchall()})
+    return list(filas.values())
+
+
+def cuantos_esperan_aprobacion(ids):
+    """Cuántos vínculos de estos productos están en la cola. Para el título del desplegable:
+    sale de los dos índices de la cola (idx_pend_a, idx_pend_b), sin analizar nada."""
+    ids = sorted({int(i) for i in ids if i is not None})
+    if not ids:
+        return 0
+    marcadores = ",".join("?" * len(ids))
+    c.execute(f"""SELECT COUNT(*) FROM equivalencias_pendientes
+                  WHERE (producto_a_id IN ({marcadores}) OR producto_b_id IN ({marcadores}))
+                    AND producto_a_id < producto_b_id""", ids + ids)
+    return c.fetchone()[0]
+
+
+def lo_que_espera_aprobacion(ids):
+    """Los vínculos de la cola de estos productos, con lo que dice el análisis de cada uno, del
+    más probable al menos: [{"a", "b", "lote", "yo", "otro", "Marca", "Codigo", "Descripcion",
+    "Precio", "Stock", "Tipo", "confianza", "nivel", "motivo", "une", "ya_unidos"}].
+
+    El análisis es el de la cola (_analizar_filas()), sobre los vínculos de estos productos Y los
+    de cada candidato: el abanico se ve desde los dos lados —la junta de IMPERIAL que tiene dos
+    de TARANTO también es «como mucho una»—, y sin los del otro lado el análisis no lo veía.
+    Medido sobre la copia de la base real, 80 productos al azar: con solo los vínculos del
+    producto, 18 de 294 pares daban 🟢 cuando la revisión de su lista los da 🟠; con los de los
+    candidatos, los 294 dan lo mismo que en la lista, en 200 ms (mediana)."""
+    ids = {int(i) for i in ids if i is not None}
+    filas = _la_cola_de(ids)
+    if not filas:
+        return []
+    vecinos = {f["a"] for f in filas} | {f["b"] for f in filas}
+    contexto = _la_cola_de(vecinos)
+    lote_de = {(f["a"], f["b"]): f["lote"] for f in filas}
+    with recordando_lo_de_cada_producto():
+        limpias, sospechosas, relacionadas = _analizar_filas(
+            [{k: v for k, v in f.items() if k not in ("lote", "stock_a", "stock_b")}
+             for f in contexto], _LO_YA_CARGADO)
+    veredicto = {(f["a"], f["b"]): (f.get("confianza", 50), (f.get("alarmas") or [""])[0])
+                 for f in limpias + sospechosas}
+    veredicto.update({(f["a"], f["b"]): (15.0, f"📦 {f.get('relacion') or 'no es una equivalencia'}")
+                      for f in relacionadas})
+    une = cuanto_une_cada_par(list(lote_de))
+    salida = []
+    for f in filas:
+        par = (f["a"], f["b"])
+        yo, lado = (f["a"], "b") if f["a"] in ids else (f["b"], "a")
+        confianza, motivo = veredicto.get(par, (50.0, ""))
+        salida.append({
+            "a": f["a"], "b": f["b"], "lote": lote_de[par], "yo": yo, "otro": f[lado],
+            "Marca": f[f"marca_{lado}"], "Codigo": f[f"cod_{lado}"], "Tipo": f[f"tipo_{lado}"],
+            "Descripcion": f[f"desc_{lado}"] or "", "Precio": f[f"precio_{lado}"],
+            "Stock": f[f"stock_{lado}"], "confianza": confianza,
+            "nivel": nivel_de_confianza(confianza)[0], "motivo": motivo,
+            "une": une.get(par, 0), "ya_unidos": une.get(par) == 0})
+    salida.sort(key=lambda x: (-x["confianza"], x["Marca"] or "", x["Codigo"] or ""))
+    return salida

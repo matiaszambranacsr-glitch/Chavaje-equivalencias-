@@ -174,6 +174,57 @@ def probar():
             [(["BKR6E"], True), (["6205"], True), (["LEICJ010LUCAS"], True),
              (["MTA0030"], True), ([], False)])
 
+    # 2g. Lo que espera aprobación del código buscado se decide en el Buscador (ver «LO QUE
+    # ESPERA APROBACIÓN, DESDE EL BUSCADOR»): el título lo cuenta, lo dudoso va de a uno con
+    # «✅ Es la misma» —y la tabla lo trae enseguida—, lo casi seguro mal se descarta junto, y
+    # el invitado no lo ve.
+    _f100 = c.execute("SELECT id FROM productos WHERE codigo_clean = 'F100'").fetchone()[0]
+    c.execute("INSERT INTO marcas (nombre, tipo) VALUES ('OTRA', 'PROVEEDOR')")
+    _otra = c.lastrowid
+    c.execute("INSERT INTO productos (codigo_raw, codigo_clean, descripcion, marca_id) "
+              "VALUES ('OF1', 'OF1', 'FILTRO DE ACEITE', ?)", (_otra,))
+    _of1 = c.lastrowid
+    c.execute("INSERT INTO productos (codigo_raw, codigo_clean, descripcion, marca_id) "
+              "VALUES ('OB7', 'OB7', 'BUJIA DE ENCENDIDO', ?)", (_otra,))
+    _ob7 = c.lastrowid
+    conn.commit()
+    g["guardar_equivalencias_pendientes"]([(_f100, _of1), (_f100, _ob7)], "PRUEBA", "PRUEBA · 1")
+    _esperan = g["lo_que_espera_aprobacion"]([_f100])
+    esperar("lo que espera, con lo que dice el análisis",
+            [(f["Codigo"], f["nivel"][:1], f["yo"]) for f in _esperan],
+            [("OF1", "🟠", _f100), ("OB7", "🔴", _f100)])
+    buscar("F100")
+    esperar("el título lo cuenta",
+            any("🔒 2 esperando aprobación" in x.label for x in at.expander), True)
+    at.session_state["esp_ver_F100"] = True
+    at.run()
+    [b for b in at.button if b.key == f"esp_si_{_f100}_{_of1}_F100"][0].click().run()
+    esperar("aprobada desde el Buscador, y la tabla la trae",
+            (c.execute("SELECT COUNT(*) FROM equivalencias WHERE producto_a_id = ? AND "
+                       "producto_b_id = ?", (_f100, _of1)).fetchone()[0],
+             g["cuantos_esperan_aprobacion"]([_f100]),
+             [e.value for e in at.exception],
+             "OF1" in [f["Codigo"] for f in at.session_state["ultima_busqueda_codigo"][0]["res"]]),
+            (1, 1, [], True))
+    [b for b in at.button if b.key == "esp_rojas_F100"][0].click().run()
+    esperar("lo casi seguro mal, descartado y anotado",
+            (g["cuantos_esperan_aprobacion"]([_f100]),
+             c.execute("SELECT decision FROM equivalencias_revisadas WHERE producto_a_id = ? AND "
+                       "producto_b_id = ?", (_f100, _ob7)).fetchone()[0]),
+            (0, "rechazada"))
+    esperar("la búsqueda no se anotó dos veces",
+            c.execute("SELECT COUNT(*) FROM historial_busquedas WHERE termino = 'F100'"
+                      ).fetchone()[0], 2)
+    g["guardar_equivalencias_pendientes"]([(_f100, _ob7 + 0)], "PRUEBA", "PRUEBA · 2")
+    c.execute("INSERT INTO productos (codigo_raw, codigo_clean, descripcion, marca_id) "
+              "VALUES ('OF2', 'OF2', 'FILTRO DE ACEITE', ?)", (_otra,))
+    g["guardar_equivalencias_pendientes"]([(_f100, c.lastrowid)], "PRUEBA", "PRUEBA · 2")
+    at.secrets["admin_passwords"] = {"duenio": "clave-duenio-1"}
+    buscar("F100")
+    esperar("el invitado no lo ve",
+            [x.label for x in at.expander if "esperando" in x.label]
+            + [b.key for b in at.button if str(b.key).startswith("esp_")], [])
+
     # 3. Los números: mediana y P95 de lo anotado.
     g["del_proceso"]("mediciones_de_busqueda", list).clear()
     for ms in range(1, 101):
