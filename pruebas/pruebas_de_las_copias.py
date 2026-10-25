@@ -1,7 +1,7 @@
 """Pruebas de la copia de seguridad: qué fotos sobreviven a un reinicio de la app.
 
 Uso:
-    python3 pruebas_de_las_copias.py
+    python3 pruebas/pruebas_de_las_copias.py
 
 Por qué existe: la copia que la app sube a GitHub —con la que arranca después de cada reinicio
 o actualización— les sacaba TODAS las fotos para no pasarse de los 100 MB. Las de internet se
@@ -20,7 +20,7 @@ import tempfile
 
 
 def _cargar_la_logica(carpeta):
-    raiz = os.path.dirname(os.path.abspath(__file__))
+    raiz = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     sys.path.insert(0, raiz)
     os.chdir(carpeta)
     import logica
@@ -115,7 +115,7 @@ def main():
         print("✅ copias: todo en verde" if not fallas else f"{len(fallas)} falla(s)")
         return 1 if fallas else 0
     finally:
-        os.chdir(os.path.dirname(os.path.abspath(__file__)))
+        os.chdir(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
         shutil.rmtree(carpeta, ignore_errors=True)
 
 

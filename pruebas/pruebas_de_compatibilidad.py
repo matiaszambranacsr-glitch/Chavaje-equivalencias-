@@ -1,7 +1,7 @@
 """Pruebas de compatibilidad entre versiones: la base nueva con el programa anterior.
 
 Uso:
-    python3 pruebas_de_compatibilidad.py --base copia.db [--contra HEAD~1]
+    python3 pruebas/pruebas_de_compatibilidad.py --base copia.db [--contra HEAD~1]
 
 Qué prueba: la versión de hoy abre la base (y la migra: columnas, tablas y disparadores
 nuevos); después, la versión `--contra` (por defecto, la anterior en git) abre ESA base
@@ -27,7 +27,7 @@ import subprocess
 import sys
 import tempfile
 
-RAIZ = os.path.dirname(os.path.abspath(__file__))
+RAIZ = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 PASOS = ("buscar", "ficha", "aprobar", "medidas", "venta", "tablero", "exportar")
 
 

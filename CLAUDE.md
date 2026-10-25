@@ -13,15 +13,17 @@ Todo —pantallas, nombres, comentarios, mensajes de commit— va en castellano 
 - `pantallas/*.py`: cada una es un bloque `if pagina == PAGINAS[n]:` (PAGINAS y las solapas
   están en `logica/interfaz.py`).
 - `nucleo/` se genera con `python nucleo/generar.py` (no editar a mano lo generado).
+- `pruebas/`: una batería por tema (`pruebas_*.py`, cada una corre sola desde la raíz:
+  `python pruebas/pruebas_de_la_caja.py`) y `casos_sellados.txt`.
 - `README.md` tiene 8.500 renglones (675 KB): **no leerlo entero**; buscar con grep.
   `CONTRATOS.md` dice qué está garantizado y qué prueba lo controla.
 
 ## Validar antes de subir (salidas cortas)
 
-- `python .github/correr_las_pruebas.py` → auditor + todas las `pruebas_*.py` (~1 min, una línea
+- `python .github/correr_las_pruebas.py` → auditor + todas las `pruebas/pruebas_*.py` (~1 min, una línea
   por prueba). Es lo mismo que corre GitHub.
 - `python auditar.py` solo, cuando se toca código de pantallas (tiene que dar 0 / 0 / 0).
-- `python pruebas_de_compatibilidad.py --base <copia de la base real> --contra origin/main`.
+- `python pruebas/pruebas_de_compatibilidad.py --base <copia de la base real> --contra origin/main`.
 - Probar en el navegador: Chromium y Playwright ya están instalados (`/opt/pw-browsers/chromium`).
 
 ## Reglas que el auditor hace cumplir

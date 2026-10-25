@@ -1,7 +1,7 @@
 """Pruebas de «Repuestos por auto»: qué productos le van a un auto según la descripción.
 
 Uso:
-    python3 pruebas_de_repuestos_por_auto.py
+    python3 pruebas/pruebas_de_repuestos_por_auto.py
 
 Por qué existe: la búsqueda era «la descripción contiene la marca y contiene el modelo», y con
 los modelos cortos eso no sirve. Sobre el catálogo real, VW Gol traía 241 productos del Golf, el
@@ -42,7 +42,7 @@ _UP = [
 
 
 def _cargar_la_logica(carpeta):
-    raiz = os.path.dirname(os.path.abspath(__file__))
+    raiz = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     sys.path.insert(0, raiz)
     os.chdir(carpeta)
     import logica
@@ -118,7 +118,7 @@ def main():
         print("✅ repuestos por auto: todo en verde" if not fallas else f"{len(fallas)} falla(s)")
         return 1 if fallas else 0
     finally:
-        os.chdir(os.path.dirname(os.path.abspath(__file__)))
+        os.chdir(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
         shutil.rmtree(carpeta, ignore_errors=True)
 
 

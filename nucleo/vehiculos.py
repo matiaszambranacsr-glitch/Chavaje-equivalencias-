@@ -781,7 +781,7 @@ PALABRAS_NO_MODELO = {
     "DIFERENCIAL", "COLECTOR", "FILTRO",
     # Las marcas de carburador dicen QUÉ junta es: ver _MARCAS_DE_CARBURADOR.
     "WEBER", "SOLEX", "HOLLEY", "STROMBERG", "ZENITH", "CARESA", "BROSOL", "GALILEO", "IAVA",
-    "EIES", "CARTER", "MOTORCRAFT", "ROCHESTER", "AUTOLITE", "DELLORTO",
+    "EIES", "MOTORCRAFT", "ROCHESTER", "AUTOLITE", "DELLORTO",
     "CHUPADOR", "INTERMEDIA", "V", "L", "S", "R", "AX", "DD", "F",
     # EL VOCABULARIO DE PIEZA QUE FALTABA, y que la firma estaba contando como si dijera para
     # qué auto es. Salió de contar las palabras que entraban en la aplicación de las 30.000
@@ -790,8 +790,7 @@ PALABRAS_NO_MODELO = {
     # DIENTES) y relleno del proveedor (REF 11.421 veces, TODOS, DESDE, LIVIANA, PESADA).
     # Con esas del lado de la aplicación, dos sensores de detonación de autos distintos
     # «coincidían en para qué auto es» porque los dos decían SENSOR y DETONACION.
-    "SENSOR", "SENSORES", "BULBO", "BOBINA", "IGNICION", "INYECTOR", "POLEA", "FILTRO",
-    "FICHA", "CONECTOR", "SONDA", "LAMBDA", "INTERRUPTOR", "RESISTOR", "RELAY", "REGULADOR",
+    "SENSOR", "SENSORES", "BULBO", "BOBINA", "IGNICION", "INYECTOR", "POLEA", "FICHA", "CONECTOR", "SONDA", "LAMBDA", "INTERRUPTOR", "RESISTOR", "RELAY", "REGULADOR",
     "ALTERNADOR", "ALTERNADORES", "ARRANQUE", "ROTACION", "DETONACION", "TEMPERATURA",
     "PRESION", "RADIADOR", "CALEFACTOR", "ELECTROVENTILADOR", "EGR", "MAP", "ABS", "MASA",
     "AIRE", "CANO", "CANOS", "TUBO", "CORREA", "DISTRIBUCION", "DIST", "SURTIDOR", "AFORADOR",

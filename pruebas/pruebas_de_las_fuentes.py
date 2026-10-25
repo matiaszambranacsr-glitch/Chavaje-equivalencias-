@@ -1,7 +1,7 @@
 """Pruebas de las FUENTES DE AFUERA: el INDEC, el BCRA, el DNRPA y la NHTSA, sin salir a internet.
 
 Uso:
-    python3 pruebas_de_las_fuentes.py
+    python3 pruebas/pruebas_de_las_fuentes.py
 
 Por qué existe: la app lee tres APIs públicas (ver «FUENTES OFICIALES DE AFUERA» en
 logica/salud.py y consultar_vin_en_nhtsa() en logica/mecanico.py), y la única forma de saber si
@@ -21,7 +21,7 @@ import tempfile
 
 
 def _cargar_la_logica(carpeta):
-    raiz = os.path.dirname(os.path.abspath(__file__))
+    raiz = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     sys.path.insert(0, raiz)
     os.chdir(carpeta)
     import logica
@@ -521,7 +521,7 @@ def main():
         print("✅ fuentes de afuera: todo en verde" if not fallas else f"{len(fallas)} falla(s)")
         return 1 if fallas else 0
     finally:
-        os.chdir(os.path.dirname(os.path.abspath(__file__)))
+        os.chdir(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
         shutil.rmtree(carpeta, ignore_errors=True)
 
 

@@ -3,7 +3,8 @@
 Cada regla dice qué prueba la sostiene. Si una prueba falla, se rompió la regla: no se
 «arregla» la prueba, se arregla el código. Una regla sin prueba lo dice.
 
-Las pruebas se corren como dice el README, en «Antes de subir un cambio».
+Las pruebas están en la carpeta `pruebas/` y se corren como dice el README, en «Antes de subir un
+cambio» (todas juntas: `python .github/correr_las_pruebas.py`).
 
 ## Las equivalencias
 
@@ -135,8 +136,9 @@ Las pruebas se corren como dice el README, en «Antes de subir un cambio».
 | Ir a otra pantalla y volver no borra la búsqueda, los filtros ni la solapa elegida | `recordar_lo_elegido_al_cambiar_de_pantalla()` | `pruebas_de_la_sesion.py` (2b), `auditar.py` (6d) |
 | A quien vende le llega un aviso cuando otro cobra o pone a cuenta su venta, o el depósito entrega o no encuentra lo que pidió; lo que hizo él mismo, no | `novedades_de()` | `pruebas_de_la_caja.py` (9d) |
 | Lo que corre solo cada pocos segundos (lo que espera en la caja, los avisos a quien vende) va por un índice que achica, sin recorrer las ventas ni los pedidos de la historia | `ventas_a_cobrar()`, `novedades_de()`, `idx_ventas_de_quien`, `idx_pedidos_deposito_de_quien` | `pruebas_de_la_caja.py` (9e) |
-| La venta a medio armar sobrevive a una recarga: se avisa al entrar, se recupera con cantidades, precios y cliente, y terminada no queda guardada; solo la del día y solo a quien la armaba | `guardar_la_venta_a_medio_armar()`, `la_venta_a_medio_armar()`, `recuperar_la_venta_a_medio_armar()` | `pruebas_de_la_sesion.py` (5) |
-| La ganancia por marca del período: la que más ganó primero, el margen sobre lo vendido con costo y lo vendido sin costo aparte | `ganancia_por_marca()` | `pruebas_de_las_ventas.py` (13) |
+| La venta y el presupuesto a medio armar sobreviven a una recarga: se avisa al entrar, se recuperan con cantidades, precios, cliente y lo destildado, y terminada la venta no queda guardada; solo lo del día y solo a quien lo armaba | `guardar_lo_que_se_esta_armando()`, `recuperar_la_venta_a_medio_armar()`, `recuperar_el_presupuesto_a_medio_armar()` | `pruebas_de_la_sesion.py` (5) |
+| La ganancia por marca del período: la que más ganó primero, el margen sobre lo vendido con costo, lo vendido sin costo aparte y la ganancia a costo de hoy (reposición) | `ganancia_por_marca()` | `pruebas_de_las_ventas.py` (13) |
+| Un código que no aparece ofrece como botón los que se escriben casi igual, y tocarlo los busca | `codigos_por_tipeo()`, `mostrar_lista_clickeable()` | `pruebas_de_las_pantallas.py` |
 | Ajustar los precios de una marca solo en lo que dice ciertas palabras (sin acentos ni mayúsculas); un «%» tipeado no toca nada | `aumentar_precios_por_marca(…, que_dice)`, `_solo_la_linea()` | `pruebas_de_los_cambios.py` |
 | El presupuesto del Buscador se manda derecho por WhatsApp, con lo que tiene y el total | — | `pruebas_de_las_pantallas.py` |
 | Todas las pantallas y solapas se dibujan sin errores, sin contraseña, como operador y como administrador | — | `pruebas_de_las_pantallas.py` |

@@ -1,7 +1,7 @@
 """Pruebas del registro de CHAS (autopartes de seguridad homologadas).
 
 Uso:
-    python3 pruebas_de_las_homologaciones.py
+    python3 pruebas/pruebas_de_las_homologaciones.py
 
 El formato del archivo oficial no está documentado en ningún lado que se pudiera leer desde
 donde se programó, así que se prueba con varias formas razonables de escribir el encabezado
@@ -17,7 +17,7 @@ import tempfile
 
 
 def _cargar_la_logica(carpeta):
-    raiz = os.path.dirname(os.path.abspath(__file__))
+    raiz = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     sys.path.insert(0, raiz)
     os.chdir(carpeta)
     import logica
@@ -191,7 +191,7 @@ def main():
         print("✅ CHAS: todo en verde" if not fallas else f"{len(fallas)} falla(s)")
         return 1 if fallas else 0
     finally:
-        os.chdir(os.path.dirname(os.path.abspath(__file__)))
+        os.chdir(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
         shutil.rmtree(carpeta, ignore_errors=True)
 
 

@@ -2,7 +2,7 @@
 y sin internet) y la marca pegada al código en la dirección de la ficha.
 
 Uso:
-    python3 pruebas_de_los_certificados.py
+    python3 pruebas/pruebas_de_los_certificados.py
 
 Por qué existe: las 5.063 búsquedas de foto de FISPA fallaron con «SSLError» desde el
 servidor. Lo más común es que el sitio no mande el certificado intermedio: el navegador lo baja
@@ -67,7 +67,7 @@ def _servir(d, tls=False):
 
 def main():
     d = tempfile.mkdtemp(prefix="pruebas_cert_")
-    raiz = os.path.dirname(os.path.abspath(__file__))
+    raiz = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     fallas = []
     try:
         aia = _servir(d)                         # sirve inter.der por http

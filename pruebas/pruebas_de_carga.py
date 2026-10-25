@@ -1,7 +1,7 @@
 """Prueba de carga: diez personas usando la app a la vez, más el mantenimiento y la copia.
 
 Uso:
-    python3 pruebas_de_carga.py            (unos 30 segundos)
+    python3 pruebas/pruebas_de_carga.py            (unos 30 segundos)
 
 Lo propuso una revisión con ChatGPT: «en vez de seguir agregando funciones, una prueba de
 estrés». Diez hilos —uno por persona, cada uno con su propia conexión a la base, como cada
@@ -32,7 +32,7 @@ VUELTAS_POR_PERSONA = 250
 
 
 def _cargar_la_logica(carpeta):
-    raiz = os.path.dirname(os.path.abspath(__file__))
+    raiz = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     sys.path.insert(0, raiz)
     os.chdir(carpeta)
     import logica
@@ -201,7 +201,7 @@ def main():
         print("✅ carga: todo en verde" if not fallas else f"{len(fallas)} falla(s)")
         return 1 if fallas else 0
     finally:
-        os.chdir(os.path.dirname(os.path.abspath(__file__)))
+        os.chdir(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
         shutil.rmtree(carpeta, ignore_errors=True)
 
 

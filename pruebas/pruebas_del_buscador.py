@@ -2,7 +2,7 @@
 «no hay», una letra sola no busca, y cada búsqueda queda medida con su código.
 
 Uso:
-    python3 pruebas_del_buscador.py
+    python3 pruebas/pruebas_del_buscador.py
 
 Lo propuso una revisión con ChatGPT: «distinguir “no hay datos” de “falló la búsqueda”», un
 «request_id» por operación y métricas del buscador. Antes, una búsqueda que fallaba cortaba la
@@ -16,7 +16,7 @@ import sqlite3
 import sys
 import tempfile
 
-RAIZ = os.path.dirname(os.path.abspath(__file__))
+RAIZ = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
 def probar():

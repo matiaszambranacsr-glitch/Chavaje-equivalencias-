@@ -8,8 +8,9 @@ a la app sin pasar por nada (lo señaló una revisión con ChatGPT: «toda la ba
 publicar»). Las pruebas van de a varias a la vez, las más largas primero; cada una corre en su
 propia carpeta temporal y no toca la base de trabajo.
 
-Lo que necesita la base real (pruebas_de_la_revision.py --base, pruebas_de_compatibilidad.py)
-no corre acá: GitHub no tiene la base. Eso se sigue corriendo antes de publicar.
+Lo que necesita la base real (pruebas/pruebas_de_la_revision.py --base,
+pruebas/pruebas_de_compatibilidad.py) no corre acá: GitHub no tiene la base. Eso se sigue
+corriendo antes de publicar.
 """
 import glob
 import os
@@ -24,17 +25,17 @@ RENGLONES_DE_LO_QUE_FALLO = 40
 
 
 def _las_pruebas():
-    """[(nombre, comando)]: el auditor, cada pruebas_*.py y las del núcleo. Las más largas
+    """[(nombre, comando)]: el auditor, cada pruebas/pruebas_*.py y las del núcleo. Las más largas
     primero (el tamaño del archivo alcanza como estimación): así no queda la más larga sola al
     final. Las que necesitan la base real corren sin ella."""
-    pruebas = sorted(glob.glob(os.path.join(RAIZ, "pruebas_*.py")),
+    pruebas = sorted(glob.glob(os.path.join(RAIZ, "pruebas", "pruebas_*.py")),
                      key=lambda p: -os.path.getsize(p))
     comandos = [("auditar.py", [sys.executable, "auditar.py"])]
     for ruta in pruebas:
         nombre = os.path.basename(ruta)
         if nombre == "pruebas_de_compatibilidad.py":
             continue            # sin --base no tiene con qué: necesita una copia de la base real
-        comandos.append((nombre, [sys.executable, nombre]))
+        comandos.append((nombre, [sys.executable, os.path.join("pruebas", nombre)]))
     comandos.append(("nucleo.pruebas", [sys.executable, "-m", "nucleo.pruebas"]))
     return comandos
 

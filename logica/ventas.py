@@ -694,8 +694,12 @@ def lo_mas_vendido(dias=30, tope=10):
                         SUM(CASE WHEN vi.costo IS NOT NULL
                                  THEN (vi.cantidad - COALESCE(vi.devuelto, 0)) * vi.precio
                             END) AS plata_con_costo,
+                        SUM(CASE WHEN p.precio_costo IS NOT NULL
+                                 THEN (vi.cantidad - COALESCE(vi.devuelto, 0))
+                                      * (vi.precio - p.precio_costo) END) AS ganancia_hoy,
                         COUNT(DISTINCT vi.venta_id) AS ventas
                  FROM ventas_items vi JOIN ventas v ON v.id = vi.venta_id
+                      LEFT JOIN productos p ON p.id = vi.producto_id
                  WHERE v.anulada = 0 AND substr(v.fecha, 1, 10) >= ?
                  GROUP BY vi.producto_id, vi.marca, vi.codigo""", (desde.isoformat(),))
     productos = [dict(f) for f in c.fetchall()]
@@ -717,23 +721,32 @@ def ganancia_por_marca(productos):
     ganar poco. La ganancia es con el costo que tenía cada cosa AL VENDERLA (queda guardado en
     la venta), así que un aumento de costo después no la cambia. El margen es sobre lo vendido
     que tiene costo; lo que se vendió sin costo cargado va aparte («sin_costo», en plata): con
-    mucho de eso, el margen de la marca dice poco."""
+    mucho de eso, el margen de la marca dice poco.
+
+    «ganancia_hoy» es la otra cara, la que pidió la misma revisión («descontando las variaciones
+    de costo por inflación»): lo que queda si hubiera que REPONER lo vendido al costo cargado
+    hoy. Con precios que suben todos los meses, vender a $10.000 algo que costó $7.000 parece
+    ganar $3.000; si reponerlo hoy cuesta $9.500, se ganó $500. None si no hay costo de hoy."""
     marcas = {}
     for p in productos:
         m = marcas.setdefault(p["marca"] or "—", {"marca": p["marca"] or "—", "unidades": 0,
                                                     "plata": 0.0, "ganancia": 0.0,
-                                                    "con_costo": 0.0})
+                                                    "con_costo": 0.0, "ganancia_hoy": None})
         m["unidades"] += p["unidades"] or 0
         m["plata"] += p["plata"] or 0
         m["ganancia"] += p["ganancia"] or 0
         m["con_costo"] += p["plata_con_costo"] or 0
+        if p.get("ganancia_hoy") is not None:
+            m["ganancia_hoy"] = (m["ganancia_hoy"] or 0) + p["ganancia_hoy"]
     salida = []
     for m in marcas.values():
         salida.append({"marca": m["marca"], "unidades": m["unidades"],
                        "plata": round(m["plata"], 2), "ganancia": round(m["ganancia"], 2),
                        "margen": (round(m["ganancia"] / m["con_costo"] * 100, 1)
                                   if m["con_costo"] else None),
-                       "sin_costo": round(m["plata"] - m["con_costo"], 2)})
+                       "sin_costo": round(m["plata"] - m["con_costo"], 2),
+                       "ganancia_hoy": (round(m["ganancia_hoy"], 2)
+                                        if m["ganancia_hoy"] is not None else None)})
     return sorted(salida, key=lambda m: (-m["ganancia"], -m["plata"]))
 
 
@@ -1184,70 +1197,95 @@ def novedades_de(usuario, desde):
 
 
 # ============================================================================================
-# LA VENTA A MEDIO ARMAR, A SALVO DE UNA RECARGA
+# LA VENTA Y EL PRESUPUESTO A MEDIO ARMAR, A SALVO DE UNA RECARGA
 # ============================================================================================
-# La venta que se está armando vivía solo en la sesión del navegador: recargar la página, que el
-# teléfono cierre la pestaña para hacer lugar o que se corte la conexión, y se perdía entera, con
-# el cliente esperando adelante. Lo propuso una revisión con Gemini («persistencia del carrito»).
-# Se guarda la de cada persona —la última—, solo cuando cambia; al volver a entrar se avisa una
-# vez y 🧾 Ventas ofrece recuperarla. Solo la del día: la de ayer, con los precios de ayer, ya
-# no es un cliente esperando.
+# La venta que se está armando, y el presupuesto del Buscador, vivían solo en la sesión del
+# navegador: recargar la página, que el teléfono cierre la pestaña para hacer lugar o que se
+# corte la conexión, y se perdían enteros, con el cliente esperando adelante. Lo propuso una
+# revisión con Gemini («persistencia del carrito»). Se guarda lo de cada persona —lo último—,
+# solo cuando cambia; al volver a entrar se avisa una vez, y 🧾 Ventas y el 🔍 Buscador ofrecen
+# recuperarlo. Solo lo del día: lo de ayer, con los precios de ayer, ya no es un cliente
+# esperando. La venta y el presupuesto van en tablas aparte a propósito: recuperar uno no tiene
+# que borrar el otro, que todavía no se ofreció.
 
-# Lo que se guarda de cada ítem: lo que tiene la fila de la venta (ver item_de_venta() y
+# Lo que se guarda de cada ítem de la venta: lo que tiene la fila (ver item_de_venta() y
 # sumar_a_la_venta()). El veredicto y si se confirmó van también: sin ellos, una pieza que la app
 # frena (🔴) se vendería sin preguntar después de recuperarla.
 CAMPOS_DEL_ITEM_QUE_SE_GUARDAN = ("producto_id", "codigo", "marca", "descripcion", "precio",
                                   "cantidad", "pedido", "veredicto", "evidencia", "confirmado")
+# Y del presupuesto (ver sumar_al_presupuesto()): «se_lleva» es lo destildado, que tiene que
+# seguir destildado.
+CAMPOS_DEL_PRESUPUESTO_QUE_SE_GUARDAN = ("codigo", "marca", "descripcion", "precio", "cantidad",
+                                         "se_lleva")
+# Dónde va cada cosa: (tabla, la firma de lo último guardado en la sesión).
+_LO_QUE_SE_ARMA = {"venta": ("ventas_a_medio_armar", "_venta_guardada"),
+                   "presupuesto": ("presupuestos_a_medio_armar", "_presupuesto_guardado")}
 
 
-def guardar_la_venta_a_medio_armar():
-    """Guarda la venta de la sesión si cambió desde la última vez, o la borra si quedó vacía (se
+def _guardar_lo_armado(que, items, cliente=""):
+    """Guarda `items` si cambiaron desde la última vez, o los borra si quedaron vacíos (se
     terminó o se quitó todo). Una sesión que todavía no armó nada no borra nada: es la que se
-    recargó y todavía no recuperó la anterior. Va al final de cada vuelta (ver app.py)."""
-    if solo_mirar():
-        return
-    items = [{k: it.get(k) for k in CAMPOS_DEL_ITEM_QUE_SE_GUARDAN}
-             for it in st.session_state.get("venta_items") or []]
-    cliente = str(st.session_state.get("venta_cliente") or "")
+    recargó y todavía no recuperó lo anterior."""
+    tabla, clave = _LO_QUE_SE_ARMA[que]
     firma = json.dumps([items, cliente], ensure_ascii=False, default=str, sort_keys=True)
-    anterior = st.session_state.get("_venta_guardada")
+    anterior = st.session_state.get(clave)
     if firma == anterior or (anterior is None and not items):
         return
     try:
         with db_lock, transaccion():
             if items:
-                c.execute("""INSERT OR REPLACE INTO ventas_a_medio_armar (usuario, items, cliente,
-                                                                          guardada)
-                             VALUES (?, ?, ?, datetime('now', 'localtime'))""",
+                c.execute(f"""INSERT OR REPLACE INTO {tabla} (usuario, items, cliente, guardada)
+                              VALUES (?, ?, ?, datetime('now', 'localtime'))""",
                           (obtener_usuario_actual(),
                            json.dumps(items, ensure_ascii=False, default=str), cliente))
             else:
-                c.execute("DELETE FROM ventas_a_medio_armar WHERE usuario = ?",
-                          (obtener_usuario_actual(),))
+                c.execute(f"DELETE FROM {tabla} WHERE usuario = ?", (obtener_usuario_actual(),))
     except sqlite3.Error as _err:
-        anotar_error("guardar_la_venta_a_medio_armar", _err)
+        anotar_error(f"guardar {que} a medio armar", _err)
         return
-    st.session_state["_venta_guardada"] = firma
+    st.session_state[clave] = firma
 
 
-def la_venta_a_medio_armar():
-    """La que dejó guardada quien está adentro, si es de hoy: {"items", "cliente", "hora",
+def guardar_lo_que_se_esta_armando():
+    """La venta y el presupuesto de la sesión, si cambiaron. Va al final de cada vuelta (ver
+    app.py)."""
+    if solo_mirar():
+        return
+    _guardar_lo_armado("venta", [{k: it.get(k) for k in CAMPOS_DEL_ITEM_QUE_SE_GUARDAN}
+                                 for it in st.session_state.get("venta_items") or []],
+                       str(st.session_state.get("venta_cliente") or ""))
+    _guardar_lo_armado("presupuesto",
+                       [dict({k: it.get(k) for k in CAMPOS_DEL_PRESUPUESTO_QUE_SE_GUARDAN},
+                             producto_id=pid)
+                        for pid, it in (st.session_state.get("carrito") or {}).items()])
+
+
+def _lo_armado(que):
+    """Lo que dejó guardado quien está adentro, si es de hoy: {"items", "cliente", "hora",
     "total"}, o None."""
+    tabla, _ = _LO_QUE_SE_ARMA[que]
     try:
-        c.execute("""SELECT items, cliente, substr(guardada, 12, 5) AS hora
-                     FROM ventas_a_medio_armar
-                     WHERE usuario = ? AND date(guardada) = date('now', 'localtime')""",
+        c.execute(f"""SELECT items, cliente, substr(guardada, 12, 5) AS hora FROM {tabla}
+                      WHERE usuario = ? AND date(guardada) = date('now', 'localtime')""",
                   (obtener_usuario_actual(),))
         fila = c.fetchone()
         items = json.loads(fila["items"]) if fila else []
     except (sqlite3.Error, ValueError) as _err:
-        anotar_error("la_venta_a_medio_armar", _err)
+        anotar_error(f"{que} a medio armar", _err)
         return None
     if not items:
         return None
     return {"items": items, "cliente": fila["cliente"] or "", "hora": fila["hora"],
             "total": sum(float(x.get("precio") or 0) * int(x.get("cantidad") or 1)
                          for x in items)}
+
+
+def la_venta_a_medio_armar():
+    return _lo_armado("venta")
+
+
+def el_presupuesto_a_medio_armar():
+    return _lo_armado("presupuesto")
 
 
 def recuperar_la_venta_a_medio_armar():
@@ -1279,8 +1317,42 @@ def recuperar_la_venta_a_medio_armar():
         avisar("warning", "Ya no están en el catálogo, quedaron afuera: " + ", ".join(afuera))
 
 
+def recuperar_el_presupuesto_a_medio_armar():
+    """«↩️ Recuperarlo»: vuelve al «🛒 Presupuesto en armado» con la cantidad y el precio que
+    tenía (el que se le pasó al cliente) y lo destildado destildado. Lo que ya no está en el
+    catálogo queda afuera, y se dice. Va como on_click."""
+    guardado = el_presupuesto_a_medio_armar()
+    if not guardado:
+        return
+    carrito = st.session_state.setdefault("carrito", {})
+    afuera = []
+    for it in guardado["items"]:
+        pid = it.get("producto_id")
+        if pid in carrito:
+            continue
+        if not item_de_venta(pid):
+            afuera.append(f"{it.get('marca') or ''} {it.get('codigo') or ''}".strip())
+            continue
+        carrito[pid] = {k: it.get(k) for k in CAMPOS_DEL_PRESUPUESTO_QUE_SE_GUARDAN
+                        if k != "se_lleva" or it.get(k) is not None}
+        carrito[pid]["cantidad"] = int(it.get("cantidad") or 1)
+        st.session_state.pop(f"cant_cart_{pid}", None)
+        st.session_state.pop(f"se_lleva_{pid}", None)
+    if afuera:
+        avisar("warning", "Ya no están en el catálogo, quedaron afuera: " + ", ".join(afuera))
+
+
 def descartar_la_venta_a_medio_armar():
     """«🗑️ Descartarla». Va como on_click."""
+    exigir_nivel("empleado", "descartar una venta a medio armar")
     with db_lock, transaccion():
         c.execute("DELETE FROM ventas_a_medio_armar WHERE usuario = ?", (obtener_usuario_actual(),))
 
+
+def descartar_el_presupuesto_a_medio_armar():
+    """«🗑️ Descartarlo». Va como on_click. El Buscador está abierto sin sesión: el botón no
+    se le muestra a quien mira, y esto lo vuelve a mirar (ver «🔒 El invitado mira, no toca»)."""
+    exigir_nivel("empleado", "descartar un presupuesto a medio armar")
+    with db_lock, transaccion():
+        c.execute("DELETE FROM presupuestos_a_medio_armar WHERE usuario = ?",
+                  (obtener_usuario_actual(),))

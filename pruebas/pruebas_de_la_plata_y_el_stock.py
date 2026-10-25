@@ -1,7 +1,7 @@
 """Pruebas de lo que mueve plata y stock y no tenía prueba.
 
 Uso:
-    python3 pruebas_de_la_plata_y_el_stock.py
+    python3 pruebas/pruebas_de_la_plata_y_el_stock.py
 
 Apartar contra el stock libre, cerrar un apartado vendido o caído, fusionar dos productos
 duplicados sin perder lo que apunta al que se va (los apartados activos, las ventas, los pedidos
@@ -17,7 +17,7 @@ import tempfile
 
 
 def _cargar_la_logica(carpeta):
-    raiz = os.path.dirname(os.path.abspath(__file__))
+    raiz = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     sys.path.insert(0, raiz)
     os.chdir(carpeta)
     import logica
@@ -169,7 +169,7 @@ def main():
         print("✅ plata y stock: todo en verde" if not fallas else f"{len(fallas)} falla(s)")
         return 1 if fallas else 0
     finally:
-        os.chdir(os.path.dirname(os.path.abspath(__file__)))
+        os.chdir(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
         shutil.rmtree(carpeta, ignore_errors=True)
 
 

@@ -1,7 +1,7 @@
 """Cuánto tarda el buscador con mucha gente buscando a la vez, sobre una copia de la base real.
 
 Uso:
-    python3 medir_el_buscador.py --base copia.db [--personas 10,50,100] [--busquedas 20]
+    python3 pruebas/medir_el_buscador.py --base copia.db [--personas 10,50,100] [--busquedas 20]
 
 Lo propuso una revisión con ChatGPT: «no asumir que porque ahora responde rápido seguirá
 respondiendo rápido con el catálogo completo». Cada «persona» es un hilo —como cada sesión de
@@ -68,7 +68,7 @@ def main():
     args.add_argument("--personas", default="10,50,100")
     args.add_argument("--busquedas", type=int, default=20)
     a = args.parse_args()
-    raiz = os.path.dirname(os.path.abspath(__file__))
+    raiz = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     carpeta = tempfile.mkdtemp(prefix="medir_buscador_")
     try:
         shutil.copy(a.base, os.path.join(carpeta, "equivalencias_app.db"))

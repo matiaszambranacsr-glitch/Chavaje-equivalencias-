@@ -77,6 +77,22 @@ if pagina == PAGINAS[0]:
     # «📍 ¿Dónde está?» en el menú de cada producto, si el depósito tiene su mapa.
     _con_mapa = hay_mapa()
 
+    # EL PRESUPUESTO QUE SE PERDIÓ CON UNA RECARGA: ver «LA VENTA Y EL PRESUPUESTO A MEDIO ARMAR,
+    # A SALVO DE UNA RECARGA» en logica/ventas.py.
+    _presu_guardado = (None if solo_mirar() or st.session_state.get("carrito")
+                       else el_presupuesto_a_medio_armar())
+    if _presu_guardado:
+        _pg1, _pg2, _pg3 = cols([4, 1, 1])
+        _pg1.warning(f"🛒 **Quedó un presupuesto a medio armar**, de las {_presu_guardado['hora']}: "
+                     f"{len(_presu_guardado['items'])} ítem(s) por "
+                     f"${miles(_presu_guardado['total'], 0)}.")
+        _pg2.button("↩️ Recuperarlo", key="presupuesto_recuperar", type="primary",
+                    width="stretch", on_click=recuperar_el_presupuesto_a_medio_armar,
+                    help="Vuelve con las cantidades y los precios que tenía.")
+        _pg3.button("🗑️ Descartarlo", key="presupuesto_descartar", width="stretch",
+                    on_click=descartar_el_presupuesto_a_medio_armar,
+                    help="Si empezás otro presupuesto sin recuperarlo, también se descarta.")
+
     # El carrito arriba de todo: si está armándose un presupuesto, tiene que estar a la vista.
     # Escondido en otra pantalla, la gente se olvida de lo que ya sumó y lo suma dos veces.
     if st.session_state.get("carrito") and not solo_mirar():
@@ -1727,14 +1743,12 @@ if pagina == PAGINAS[0]:
                                      f"pusiste ({len(tipeos)} encontrado(s)). **Son códigos "
                                      "distintos, no equivalencias**: confirmá que sea el que "
                                      "quería el cliente.")
-                            st.dataframe(
-                                [{"Código": t["Codigo"], "Marca": t["Marca"],
-                                  "Descripción": t["Descripcion"], "Precio": t["Precio"],
-                                  "Stock": t["Stock"],
-                                  "Diferencia": "1 carácter" if t["_dist"] == 1 else "2 caracteres"}
-                                 for t in tipeos],
-                                width="stretch", hide_index=True
-                            )
+                            # Con el código como botón: tocarlo lo busca. Era una tabla, y
+                            # había que volver a tipear el código bien para ver sus equivalencias.
+                            mostrar_lista_clickeable(
+                                tipeos, f"tipeo_{clean}", limite=10,
+                                detalle=lambda t: ("1 carácter distinto" if t["_dist"] == 1
+                                                   else "2 caracteres distintos"))
 
                         # Familias de códigos: pedís "TC-421" y en la base están "TC-421-15",
                         # "TC-421-20", etc. Antes esto no aparecía por ningún lado.

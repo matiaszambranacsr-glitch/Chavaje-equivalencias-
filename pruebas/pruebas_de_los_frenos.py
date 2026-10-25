@@ -1,7 +1,7 @@
 """Pruebas de los frenos: lo que la app hace cuando algo anda mal.
 
 Uso:
-    python3 pruebas_de_los_frenos.py
+    python3 pruebas/pruebas_de_los_frenos.py
 
 De la revisión con ChatGPT (puntos 59 a 78):
   · la base con daño: solo el administrador cambia cosas (ver TEXTO_DE_SOLO_LECTURA);
@@ -22,7 +22,7 @@ from datetime import date, datetime, timedelta
 
 
 def _cargar_la_logica(carpeta):
-    raiz = os.path.dirname(os.path.abspath(__file__))
+    raiz = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     sys.path.insert(0, raiz)
     os.chdir(carpeta)
     import logica
@@ -428,7 +428,7 @@ def main():
         print("✅ frenos: todo en verde" if not fallas else f"{len(fallas)} falla(s)")
         return 1 if fallas else 0
     finally:
-        os.chdir(os.path.dirname(os.path.abspath(__file__)))
+        os.chdir(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
         shutil.rmtree(carpeta, ignore_errors=True)
 
 

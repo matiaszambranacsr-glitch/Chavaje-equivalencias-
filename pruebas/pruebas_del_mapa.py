@@ -2,7 +2,7 @@
 el recorrido caminando por el pasillo, la cola por piso y los del depósito.
 
 Uso:
-    python3 pruebas_del_mapa.py
+    python3 pruebas/pruebas_del_mapa.py
 
 Ver «EL MAPA DEL DEPÓSITO» en logica/mapa.py. Corre en una carpeta temporal: nunca toca la base
 de trabajo.
@@ -14,7 +14,7 @@ import tempfile
 
 
 def _cargar_la_logica(carpeta):
-    raiz = os.path.dirname(os.path.abspath(__file__))
+    raiz = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     sys.path.insert(0, raiz)
     os.chdir(carpeta)
     import logica
@@ -508,7 +508,7 @@ def main():
         print("✅ mapa del depósito: todo en verde" if not fallas else f"{len(fallas)} falla(s)")
         return 1 if fallas else 0
     finally:
-        os.chdir(os.path.dirname(os.path.abspath(__file__)))
+        os.chdir(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
         shutil.rmtree(carpeta, ignore_errors=True)
 
 

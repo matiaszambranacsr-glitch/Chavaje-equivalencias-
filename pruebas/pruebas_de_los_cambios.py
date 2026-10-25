@@ -1,7 +1,7 @@
 """Pruebas del registro de cambios, los permisos adentro de las funciones y las reglas de la base.
 
 Uso:
-    python3 pruebas_de_los_cambios.py
+    python3 pruebas/pruebas_de_los_cambios.py
 
 De la revisión con ChatGPT (puntos 43 a 58): quién cambió qué y qué había antes; que la función
 que borra vuelva a mirar quién está adentro; que un vínculo no pueda guardarse al revés; que el
@@ -21,7 +21,7 @@ import tempfile
 
 
 def _cargar_la_logica(carpeta):
-    raiz = os.path.dirname(os.path.abspath(__file__))
+    raiz = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     sys.path.insert(0, raiz)
     os.chdir(carpeta)
     import logica
@@ -1176,7 +1176,7 @@ def main():
         print("✅ cambios: todo en verde" if not fallas else f"{len(fallas)} falla(s)")
         return 1 if fallas else 0
     finally:
-        os.chdir(os.path.dirname(os.path.abspath(__file__)))
+        os.chdir(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
         shutil.rmtree(carpeta, ignore_errors=True)
 
 

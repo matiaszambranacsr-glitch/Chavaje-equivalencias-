@@ -2,7 +2,7 @@
 quien entra sin contraseña (AppTest); y sin sesión la barra tiene solo las secciones abiertas.
 
 Uso:
-    python3 pruebas_de_las_pantallas.py
+    python3 pruebas/pruebas_de_las_pantallas.py
 
 Antes este recorrido se armaba a mano en cada revisión, fuera del repositorio. Un error que
 corta una pantalla poco usada (una solapa de Estadísticas, un grupo de Mantenimiento) no lo
@@ -16,7 +16,7 @@ import sys
 import tempfile
 import time
 
-RAIZ = os.path.dirname(os.path.abspath(__file__))
+RAIZ = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
 def probar():
@@ -89,6 +89,17 @@ def probar():
     [b for b in at.button if "Buscar equivalencias" in b.label][0].click().run()
     if len(consultar()) != 1:
         fallas.append(f"sin sesión y sin resultados, consultar por WhatsApp: {consultar()}")
+    # Un error de tipeo: el código que se escribe casi igual se ofrece como botón, y tocarlo
+    # lo busca (ver codigos_por_tipeo()).
+    at.text_input(key="busqueda_input").set_value("F101")
+    [b for b in at.button if "Buscar equivalencias" in b.label][0].click().run()
+    _tipeo = [b for b in at.button if (b.key or "").startswith("tipeo_F101_")]
+    if [b.label for b in _tipeo] != ["🔎 F100"]:
+        fallas.append(f"el código casi igual, como botón: {[b.label for b in _tipeo]}")
+    else:
+        _tipeo[0].click().run()
+        if not any("F100" in str(m.value) for m in list(at.markdown) + list(at.caption)):
+            fallas.append("tocar el código casi igual no lo busca")
     recorrer("sin contraseña")
     entrar("clave-ana-1")
     if len(at.radio(key="pagina_actual").options) != len(ns["PAGINAS"]):

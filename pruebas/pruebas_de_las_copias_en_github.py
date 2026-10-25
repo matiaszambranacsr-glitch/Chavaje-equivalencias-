@@ -1,7 +1,7 @@
 """Pruebas de la copia en GitHub con las fotos en bloques, contra un GitHub de mentira.
 
 Uso:
-    python3 pruebas_de_las_copias_en_github.py
+    python3 pruebas/pruebas_de_las_copias_en_github.py
 
 Levanta en esta máquina un servidor que contesta como la API de GitHub (lo justo: blobs,
 árboles, commits, ramas y bajar un archivo) y apunta la app ahí con EQUIVALENCIAS_API_DE_GITHUB.
@@ -419,7 +419,7 @@ def main():
     os.environ["EQUIVALENCIAS_API_DE_GITHUB"] = f"http://127.0.0.1:{servidor.server_port}"
     os.environ["NO_PROXY"] = os.environ["no_proxy"] = "127.0.0.1,localhost"
     carpeta = tempfile.mkdtemp(prefix="pruebas_github_")
-    raiz = os.path.dirname(os.path.abspath(__file__))
+    raiz = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     try:
         sys.path.insert(0, raiz)
         os.chdir(carpeta)

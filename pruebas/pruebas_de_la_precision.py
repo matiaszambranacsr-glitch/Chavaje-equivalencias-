@@ -1,7 +1,7 @@
 """Pruebas de la precisión de las equivalencias: cuándo una equivalencia se da por verificada.
 
 Uso:
-    python3 pruebas_de_la_precision.py
+    python3 pruebas/pruebas_de_la_precision.py
 
 De la revisión con ChatGPT sobre la precisión:
   · «limpia» no es «confirmada»: sin una fuente que la declare no se confirma (ver
@@ -22,7 +22,7 @@ import tempfile
 
 
 def _cargar_la_logica(carpeta):
-    raiz = os.path.dirname(os.path.abspath(__file__))
+    raiz = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     sys.path.insert(0, raiz)
     os.chdir(carpeta)
     import logica
@@ -1909,7 +1909,7 @@ def main():
         print("✅ precisión: todo en verde" if not fallas else f"{len(fallas)} falla(s)")
         return 1 if fallas else 0
     finally:
-        os.chdir(os.path.dirname(os.path.abspath(__file__)))
+        os.chdir(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
         shutil.rmtree(carpeta, ignore_errors=True)
 
 

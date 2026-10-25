@@ -1,7 +1,7 @@
 """Pruebas del modo recuperación: la app con la base dañada.
 
 Uso:
-    python3 pruebas_de_la_recuperacion.py
+    python3 pruebas/pruebas_de_la_recuperacion.py
 
 Antes, con el archivo de la base dañado, la lógica no llegaba a cargar y la app no abría. Ver
 «MODO RECUPERACIÓN» en logica/copias_y_mantenimiento.py. Corre en carpetas temporales: nunca
@@ -14,7 +14,7 @@ import subprocess
 import sys
 import tempfile
 
-RAIZ = os.path.dirname(os.path.abspath(__file__))
+RAIZ = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 _CARGAR = ("import sys; sys.path.insert(0, %r); import logica; "
            "print('ILEGIBLE=' + repr(logica.todo_lo_de_la_logica()['BASE_ILEGIBLE']))" % RAIZ)
 

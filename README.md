@@ -13,23 +13,23 @@ qué proveedores, son el mismo repuesto. Corre con Streamlit sobre una base SQLi
 | `orden.py` | En qué orden corren las partes de `logica/` y las pantallas. Lo leen la app y las herramientas. |
 | `nucleo/` | La misma lógica pero **sin Streamlit**, para poder usarla desde otro sistema. Se genera desde `logica/`. |
 | `auditar.py` | Revisa la app entera y busca los errores que ya pasaron alguna vez. Correlo antes de subir un cambio. |
-| `pruebas_del_buscador.py` | Una búsqueda que falla no se confunde con «no hay», y cada búsqueda queda medida. |
-| `pruebas_de_la_sesion.py` | Salir no deja nada del anterior, y los permisos siguen a la cuenta. |
-| `pruebas_de_carga.py` | Diez personas a la vez con el mantenimiento y la copia corriendo: sin errores, sin dobles entregas ni cobros, sin ventas perdidas. |
-| `pruebas_de_la_recuperacion.py` | La app con la base dañada: abre en modo recuperación y se puede volver a una copia sin perder el archivo dañado. |
-| `pruebas_de_las_cuentas.py` | El interés por mora de las cuentas corrientes, con fechas fijas, y que se cobre solo en las cuentas que lo tienen prendido. |
-| `pruebas_de_los_frenos.py` | Lo que hace la app cuando algo anda mal: la base con daño queda de solo lectura, los avisos técnicos solo al administrador, el descanso de un proveedor caído, el catálogo que se achica de golpe, la prueba de que la copia de GitHub se puede recuperar, el freno de intentos también para los mecánicos, los errores (sin datos sensibles, con categoría y código), las búsquedas viejas, el doble toque y la consistencia del catálogo. |
-| `pruebas_de_las_homologaciones.py` | El registro oficial de CHAS (autopartes de seguridad): leerlo en varios formatos y cruzarlo con tus marcas. |
-| `pruebas_del_deposito.py` | El circuito del depósito y el descuento de cada cuenta: pedir, entregar, cargar en la cuenta y facturar. |
-| `pruebas_del_mapa.py` | El mapa del depósito: el plano en letras, armarlo sin dibujar, dónde está cada cosa, los cuatro lados de cada estantería, el recorrido caminando por el pasillo, la cola por piso y los del depósito. |
-| `pruebas_de_la_caja.py` | La caja aparte: lo que espera, el cartel, cobrar con su forma de pago, cuotas y descuento, ponerlo a cuenta con el límite, el cierre del día que se cobró y quién puede. |
-| `pruebas_de_lo_que_queda_afuera.py` | Lo que sale del depósito para Mostrador queda a nombre de quien lo pidió, y vuelve al stock solo escaneando la etiqueta nuestra, con su contraseña; lo de un taller no vuelve; las etiquetas se pueden leer. |
-| `pruebas_de_la_revision.py` | Que el análisis de equivalencias no se equivoque con pares ya revisados a mano, y (con `--base`) que no baje a rojo lo que aprobaste ni deje limpio lo que rechazaste. Con `--reglas`, qué reglas aparecen más en lo rechazado; con `--linea-base archivo.json`, la prueba de regresión (falla si algo rechazado pasa a limpio). |
-| `pruebas_de_la_precision.py` | Cuándo una equivalencia se da por verificada: la fuente de cada vínculo, la ficha de prueba, el veto que gana siempre, la comprobación en la mano, el proveedor que cambia de equivalente sin avisar, las devoluciones, el riesgo, la deriva al cambiar las reglas y que un rechazo no se pise. |
-| `pruebas_de_los_cambios.py` | El registro de quién cambió qué (sin los precios), los permisos adentro de las funciones, el orden de los vínculos en la base, la entrega con stock de menos, el vistazo de un backup y el mensaje de WhatsApp. |
+| `pruebas/pruebas_del_buscador.py` | Una búsqueda que falla no se confunde con «no hay», y cada búsqueda queda medida. |
+| `pruebas/pruebas_de_la_sesion.py` | Salir no deja nada del anterior, y los permisos siguen a la cuenta. |
+| `pruebas/pruebas_de_carga.py` | Diez personas a la vez con el mantenimiento y la copia corriendo: sin errores, sin dobles entregas ni cobros, sin ventas perdidas. |
+| `pruebas/pruebas_de_la_recuperacion.py` | La app con la base dañada: abre en modo recuperación y se puede volver a una copia sin perder el archivo dañado. |
+| `pruebas/pruebas_de_las_cuentas.py` | El interés por mora de las cuentas corrientes, con fechas fijas, y que se cobre solo en las cuentas que lo tienen prendido. |
+| `pruebas/pruebas_de_los_frenos.py` | Lo que hace la app cuando algo anda mal: la base con daño queda de solo lectura, los avisos técnicos solo al administrador, el descanso de un proveedor caído, el catálogo que se achica de golpe, la prueba de que la copia de GitHub se puede recuperar, el freno de intentos también para los mecánicos, los errores (sin datos sensibles, con categoría y código), las búsquedas viejas, el doble toque y la consistencia del catálogo. |
+| `pruebas/pruebas_de_las_homologaciones.py` | El registro oficial de CHAS (autopartes de seguridad): leerlo en varios formatos y cruzarlo con tus marcas. |
+| `pruebas/pruebas_del_deposito.py` | El circuito del depósito y el descuento de cada cuenta: pedir, entregar, cargar en la cuenta y facturar. |
+| `pruebas/pruebas_del_mapa.py` | El mapa del depósito: el plano en letras, armarlo sin dibujar, dónde está cada cosa, los cuatro lados de cada estantería, el recorrido caminando por el pasillo, la cola por piso y los del depósito. |
+| `pruebas/pruebas_de_la_caja.py` | La caja aparte: lo que espera, el cartel, cobrar con su forma de pago, cuotas y descuento, ponerlo a cuenta con el límite, el cierre del día que se cobró y quién puede. |
+| `pruebas/pruebas_de_lo_que_queda_afuera.py` | Lo que sale del depósito para Mostrador queda a nombre de quien lo pidió, y vuelve al stock solo escaneando la etiqueta nuestra, con su contraseña; lo de un taller no vuelve; las etiquetas se pueden leer. |
+| `pruebas/pruebas_de_la_revision.py` | Que el análisis de equivalencias no se equivoque con pares ya revisados a mano, y (con `--base`) que no baje a rojo lo que aprobaste ni deje limpio lo que rechazaste. Con `--reglas`, qué reglas aparecen más en lo rechazado; con `--linea-base archivo.json`, la prueba de regresión (falla si algo rechazado pasa a limpio). |
+| `pruebas/pruebas_de_la_precision.py` | Cuándo una equivalencia se da por verificada: la fuente de cada vínculo, la ficha de prueba, el veto que gana siempre, la comprobación en la mano, el proveedor que cambia de equivalente sin avisar, las devoluciones, el riesgo, la deriva al cambiar las reglas y que un rechazo no se pise. |
+| `pruebas/pruebas_de_los_cambios.py` | El registro de quién cambió qué (sin los precios), los permisos adentro de las funciones, el orden de los vínculos en la base, la entrega con stock de menos, el vistazo de un backup y el mensaje de WhatsApp. |
 | `CONTRATOS.md` | Lo que no se puede romper, regla por regla, con la prueba que sostiene cada una. |
 | `.github/correr_las_pruebas.py` | El auditor y todas las pruebas de una, de a cuatro a la vez, y qué falló. Es lo que corre GitHub en cada subida (`.github/workflows/pruebas.yml`). |
-| `medir_el_buscador.py` | Cuánto tarda el buscador con 10, 50 y 100 personas buscando a la vez, sobre una copia de la base real. |
+| `pruebas/medir_el_buscador.py` | Cuánto tarda el buscador con 10, 50 y 100 personas buscando a la vez, sobre una copia de la base real. |
 | `requirements.txt` | Lo que hay que instalar, con los rangos de versiones con que se probó (ver el comentario de arriba del archivo). |
 | `Equivalencias` | El prototipo original, de antes de `app.py`. No lo usa nadie; queda por si querés mirarlo. Se puede borrar. |
 
@@ -42,17 +42,17 @@ vieja y ni se podía importar.
 ```bash
 python3 -m venv .venv && .venv/bin/pip install -r requirements.txt   # una vez
 source .venv/bin/activate
-python3 .github/correr_las_pruebas.py   # todo de una: el auditor, las 15 baterías y el núcleo (menos de un minuto)
+python3 .github/correr_las_pruebas.py   # todo de una: el auditor, las 23 baterías de pruebas/ y el núcleo (menos de un minuto)
 python3 auditar.py               # tiene que dar ERROR 0 (revisa la app entera, y que nucleo/ esté al día)
 python3 nucleo/generar.py        # regenerar el paquete desde logica/
 python3 -m nucleo.pruebas        # tiene que decir "todo en verde"
-python3 pruebas_de_la_revision.py   # si tocaste el análisis: "todo en verde"
-python3 pruebas_de_la_revision.py --sellar   # si agregaste pares de muestra: quedan sellados
-python3 pruebas_de_la_precision.py  # y cuándo se da por verificada una equivalencia
-python3 pruebas_de_la_revision.py --base copia.db   # y contra tus aprobaciones
-python3 pruebas_de_la_revision.py --base copia.db --linea-base antes.json   # y contra la vez anterior:
+python3 pruebas/pruebas_de_la_revision.py   # si tocaste el análisis: "todo en verde"
+python3 pruebas/pruebas_de_la_revision.py --sellar   # si agregaste pares de muestra: quedan sellados
+python3 pruebas/pruebas_de_la_precision.py  # y cuándo se da por verificada una equivalencia
+python3 pruebas/pruebas_de_la_revision.py --base copia.db   # y contra tus aprobaciones
+python3 pruebas/pruebas_de_la_revision.py --base copia.db --linea-base antes.json   # y contra la vez anterior:
                                  # termina con «✅ SE PUEDE PUBLICAR» o «❌ NO PUBLICAR»
-python3 pruebas_de_compatibilidad.py --base copia.db   # y la versión anterior con la base migrada
+python3 pruebas/pruebas_de_compatibilidad.py --base copia.db   # y la versión anterior con la base migrada
 python3 revisar_con_gemini.py    # opcional: una segunda opinión sobre el diff
 ```
 
@@ -6636,6 +6636,18 @@ Lo pidió el dueño: «seguí mejorando la redacción de los textos, ponelos tod
 
 Probado en un navegador de verdad, en inglés y en castellano: las listas dicen «Elegí una opción», las tablas «Pantalla completa», «Buscar en la tabla» y «Bajar la tabla», el cartelito de la barra de los gráficos «Ver los números», al escribir «Enter para confirmar», y el calendario de 💵 Caja «octubre 2026» con «D L M M J V S». Los gráficos, «23/10» y «$120.000». En cada pantalla queda un solo «ℹ️ Cómo funciona» arriba (en Depósito: la sección, «⏳ Para buscar» y cómo funciona la cola), y las ayudas de una parte siguen en su parte. `pruebas_de_la_sesion.py` (2d) lo controla: rompiéndolo a propósito, avisa.
 
+## 🔧 A fondo: lo que quedaba de las tres tandas de Gemini
+
+Lo pidió el dueño: «dale a fondo con todas las mejoras».
+
+| Qué | Cómo |
+|---|---|
+| **El presupuesto, a salvo de una recarga** | Como la venta (ver «🧾 La venta y el presupuesto a medio armar»): el «🛒 Presupuesto en armado» del Buscador se guarda solo y, después de recargar, se ofrece recuperarlo con las cantidades, los precios y lo destildado. |
+| **La ganancia con el costo de hoy** | En «💰 La ganancia por marca», la columna **«A costo de hoy»**: lo que queda si hubiera que reponer lo vendido al costo cargado hoy. Con los precios subiendo todos los meses, vender a $10.000 algo que costó $7.000 parece ganar $3.000; si reponerlo hoy cuesta $9.500, se ganó $500. Es lo que Gemini llamaba «descontar las variaciones de costo por inflación». |
+| **El código casi igual, con un toque** | Cuando un código no aparece y hay uno que se escribe casi igual (un error de tipeo), ahora es un botón que lo busca; antes era una tabla y había que volver a tipearlo bien. |
+| **Un linter sobre los 60.000 renglones** | Se pasó `ruff` con las reglas que encuentran errores de verdad (variables de un bucle usadas en funciones, claves repetidas, comparaciones con `is`, valores por defecto que se comparten, excepciones mal armadas…). No apareció ningún error real: solo palabras repetidas en dos listas de palabras (sin efecto), que se sacaron. Lo que más riesgo tiene acá —dos partes de `logica/` que definen la misma función y la de abajo pisa a la de arriba— ya lo controla `auditar.py` (12b y 36). |
+| **Las pruebas a su carpeta** | Las 23 baterías, los casos sellados y `medir_el_buscador.py` pasaron de la raíz a `pruebas/`, como marcaba Gemini en las tres tandas. Cada una sigue corriendo sola (`python3 pruebas/pruebas_de_la_caja.py`, desde cualquier carpeta) y `.github/correr_las_pruebas.py` las toma de ahí. |
+
 ## 💰 La tercera tanda de Gemini: la ganancia por marca, aumentar una línea, el presupuesto por WhatsApp
 
 | Propuesta | Qué se hizo / qué hay |
@@ -6675,11 +6687,11 @@ Lo lento no era buscar el código (eso ya va por índice, en microsegundos), sin
 | **Detectar solas las columnas del Excel** | Ya está: `adivinar_columnas()` por el encabezado y `adivinar_columnas_por_datos()` por lo que hay adentro, con el mapeo a la vista para corregirlo. |
 | **Tablero de márgenes y rentabilidad** | Ya está: «Ganancia estimada» en 🧾 Ventas y en 💵 Caja (solo el administrador) y el 💰 margen en el buscador. |
 | **Línea premium contra económica** | En parte: la calidad por marca sale de lo que vuelve fallado (`calidad_por_marca()`), separada de «no era la pieza». |
-| **API REST con FastAPI**, **Docker**, **`tests/`**, **Alembic**, **SQLAlchemy** | No: ver la tanda anterior, abajo. Streamlit Cloud corre la app como está; una API aparte sería otro servidor que mantener sin que nadie la use. |
+| **API REST con FastAPI**, **Docker**, **Alembic**, **SQLAlchemy** | No: ver la tanda anterior, abajo. Streamlit Cloud corre la app como está; una API aparte sería otro servidor que mantener sin que nadie la use. Las pruebas, en cambio, sí se pasaron a su carpeta: ver «🔧 A fondo». |
 
-## 🧾 La venta a medio armar, a salvo de una recarga
+## 🧾 La venta y el presupuesto a medio armar, a salvo de una recarga
 
-La venta que se está armando en 🧾 Ventas vivía solo en la pestaña del navegador: si se recargaba la página, el teléfono cerraba la pestaña para hacer lugar o se cortaba la conexión, se perdía entera, con el cliente esperando adelante. Ahora:
+La venta que se está armando en 🧾 Ventas (y, desde «🔧 A fondo», el «🛒 Presupuesto en armado» del Buscador) vivía solo en la pestaña del navegador: si se recargaba la página, el teléfono cerraba la pestaña para hacer lugar o se cortaba la conexión, se perdía entera, con el cliente esperando adelante. Ahora:
 
 - Se guarda la de cada persona, sola y solo cuando cambia (un ítem más, otra cantidad, otro precio, el cliente).
 - Al volver a entrar, un aviso: «🧾 Quedó una venta a medio armar (3 ítems, $12.500): recuperala en 🧾 Ventas».
@@ -6687,7 +6699,9 @@ La venta que se está armando en 🧾 Ventas vivía solo en la pestaña del nave
 - Al terminarla, no queda nada guardado. Se ofrece solo la del día y solo a quien la armaba.
 - El veredicto de cada ítem viaja con ella: una pieza que la app frena (🔴) sigue pidiendo confirmación después de recuperarla.
 
-`pruebas_de_la_sesion.py` (5) lo controla con una sesión nueva sobre la misma base, que es lo que es una recarga para la app; rompiéndolo a propósito de tres maneras, avisa. Probado en un navegador de verdad: armada una venta, recargada la página y vuelto a entrar, salió el aviso y volvió con el cliente y el total.
+- El presupuesto, igual: aviso al entrar, y en el 🔍 Buscador **↩️ Recuperarlo** / **🗑️ Descartarlo**, con las cantidades, los precios que se le pasaron al cliente y lo destildado destildado. Va en una tabla aparte de la venta: recuperar una no borra el otro, que todavía no se ofreció.
+
+`pruebas_de_la_sesion.py` (5) lo controla con una sesión nueva sobre la misma base, que es lo que es una recarga para la app; rompiéndolo a propósito de cuatro maneras, avisa. Probado en un navegador de verdad: armada una venta, recargada la página y vuelto a entrar, salió el aviso y volvió con el cliente y el total.
 
 ## 🔎 Las 17 propuestas de Gemini, contra el código
 
@@ -6704,12 +6718,12 @@ El dueño le pasó el código a Gemini y trajo sus propuestas. Cada una se miró
 | **Repuestos complementarios** | Ya estaban: «🧩 ¿Qué más lleva este trabajo?», el «va con» y los combos. |
 | **Transacciones ACID** | Ya están: `with db_lock, transaccion():`, con una prueba que corta a la mitad y mira que no quede nada a medias. |
 | **Componentes de interfaz reutilizables**, **exportar sin trabar** | Ya están: `logica/interfaz.py` (`ayuda()`, `grafico_de_barras()`, las solapas…); las exportaciones grandes ya se aceleraron. |
-| **Buscar códigos «parecidos» (rapidfuzz)** | No: dos códigos que difieren en una letra son dos repuestos distintos, y mostrarlo como equivalencia es vender mal. Lo que cada lista escribe distinto es la descripción («Jta.Tapa», «JTA T.C.»), y la búsqueda por descripción ya entiende esas abreviaturas. Los códigos casi iguales dentro de una misma marca (posibles errores de tipeo) ya se avisan al importar la lista, en las marcas de hasta 1.500 códigos. |
+| **Buscar códigos «parecidos» (rapidfuzz)** | Ya estaba, bien hecho: si un código no aparece, el buscador ofrece los que se escriben a uno o dos caracteres (`codigos_por_tipeo()`: W71249 por W71294), las familias (TC-421 → TC-421-15) y lo que se parece por texto, **como otros códigos y nunca como equivalencias** (un 6205 y un 6206 son rulemanes distintos). Desde «🔧 A fondo», los de un error de tipeo son botones que los buscan. |
 | **Detectar homologaciones circulares** | No hace falta: A=B=C=A es válido (son la misma pieza); el recorrido ya tiene tope de saltos y no repite, y los puentes dudosos ya se revisan. |
 | **Subcarpetas por tema en `logica/` y `pantallas/`** | No: las partes de `logica/` corren en un solo espacio de nombres, en el orden de `orden.py`; el mapa del docstring de `app.py` ya dice dónde está cada cosa. |
 | **Ruff/Black/flake8, type hints y mypy** | No: con el espacio de nombres compartido marcarían miles de nombres «sin definir» que sí existen, y reformatear 60.000 renglones rompe la historia de cada línea. Lo que importa acá lo controla `auditar.py` (claves repetidas, `$`, expanders sin clave, ayudas, números con punto). |
 | **`pyproject.toml`**, **Docker**, **Alembic / SQLAlchemy** | No: Streamlit Cloud lee `requirements.txt`; la base se migra sola sumando columnas, y `pruebas_de_compatibilidad.py` controla que la versión nueva abra la base vieja y la vieja la migrada. |
-| **Las pruebas a una carpeta `tests/` con pytest** | No por ahora: cada prueba corre sola y `.github/correr_las_pruebas.py` las toma todas; moverlas no cambia nada de lo que hacen. |
+| **Las pruebas a una carpeta `tests/` con pytest** | Hecho en «🔧 A fondo», sin pytest: las 23 baterías están en `pruebas/`. |
 
 ## 📲 El cliente le pregunta al negocio, y el stock que no se sabe
 
@@ -8159,7 +8173,7 @@ mano no tienen link, así que se perdían.
   lleva las fotos propias adentro, con un tope de 35 MB.
 - El mensaje del paso 2 ahora distingue los tres casos: no hay fotos, hay fotos sin procesar
   (antes decía «no hay ninguna») o las que hay no sirven para comparar.
-- Pruebas: `python3 pruebas_de_las_copias.py` y `python3 pruebas_de_las_copias_en_github.py`,
+- Pruebas: `python3 pruebas/pruebas_de_las_copias.py` y `python3 pruebas/pruebas_de_las_copias_en_github.py`,
   que levanta un GitHub de mentira en la máquina y prueba el ciclo entero: subir, «reiniciar»
   con el disco vacío y recuperar las fotos; que subir la base no borre los bloques; que una
   foto nueva suba un solo bloque; y que sin poder bajarlas no se borre nada.
@@ -8195,7 +8209,7 @@ tienen autos con ese nombre— y, si todavía no se bajó, con el catálogo. Sol
 lleva el 90%: sobre 51 modelos comunes acertó 38 y en los otros 13 no dijo nada (Corsa aparece
 como Chevrolet, GM y Opel; Ducato como Fiat y Peugeot); **ninguno mal**.
 
-Pruebas: `python3 pruebas_de_repuestos_por_auto.py`.
+Pruebas: `python3 pruebas/pruebas_de_repuestos_por_auto.py`.
 
 ## 🔗 Revisar sugeridas: primero lo que hay que hacer
 

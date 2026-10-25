@@ -376,7 +376,7 @@ def buscar_por_texto(texto, aflojar=True):
 PALABRAS_DE_RELLENO = {"NECESITO", "NECESITA", "NECESITAN", "QUIERO", "BUSCO", "BUSCA", "TENES",
                        "TENGO", "TIENE", "TIENEN", "HAY", "PARA", "POR", "CON", "UN", "UNA", "EL",
                        "LA", "LOS", "LAS", "DE", "DEL", "AL", "A", "Y", "O", "QUE", "ME", "MI",
-                       "SE", "LE", "LO", "ES", "SI", "TE", "QUE", "CUAL", "CUANTO", "ALGUN",
+                       "SE", "LE", "LO", "ES", "SI", "TE", "CUAL", "CUANTO", "ALGUN",
                        "ALGUNA", "DAME", "PASAME", "FAVOR", "HOLA"}
 
 

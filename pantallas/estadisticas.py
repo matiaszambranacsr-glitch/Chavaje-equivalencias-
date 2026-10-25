@@ -2146,7 +2146,7 @@ a traer solas desde Administrar → Mantenimiento.
                 if _contra["ejemplos"] and st.toggle("Ver cuáles", key="tablero_contra_reco"):
                     st.dataframe(_contra["ejemplos"], width="stretch", hide_index=True)
             st.caption("Los falsos positivos y negativos con todo lo decidido se miden fuera de "
-                       "la app, con `pruebas_de_la_revision.py --base` (ver el README).")
+                       "la app, con `pruebas/pruebas_de_la_revision.py --base` (ver el README).")
             # Las reglas versionadas: qué cambió en cada una. Ver VERSIONES_DE_LAS_REGLAS.
             if st.toggle(f"📜 Versiones de las reglas (hoy: v{VERSION_CONFIANZA})",
                          key="tablero_versiones"):
@@ -2156,7 +2156,7 @@ a traer solas desde Administrar → Mantenimiento.
                 st.caption("Cada vínculo se vuelve a puntuar al cambiar la versión, y cada "
                            "decisión del historial dice con qué versión se tomó. Antes de subir "
                            "una versión se simula sobre todo lo ya decidido "
-                           "(`pruebas_de_la_revision.py --base copia.db --linea-base`).")
+                           "(`pruebas/pruebas_de_la_revision.py --base copia.db --linea-base`).")
 
         # LOS CONTROLES DE LO YA CARGADO VAN DESPUÉS de la revisión de las listas. Estaban
         # arriba de todo, y lo que se viene a hacer a esta pantalla —revisar lo que espera

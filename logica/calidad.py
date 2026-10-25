@@ -799,9 +799,10 @@ def cb_ver_equivalencias(codigo_raw):
     st.session_state["modo_busqueda"] = "Código"   # por si se tocó desde la búsqueda por texto
 
 
-def mostrar_lista_clickeable(filas, prefijo_key, limite=15, nota=None):
+def mostrar_lista_clickeable(filas, prefijo_key, limite=15, nota=None, detalle=None):
     """Muestra resultados con el código como botón: al tocarlo se abren sus equivalencias.
-    Antes esto era una tabla y había que ir copiando los códigos de a uno para buscarlos."""
+    Antes esto era una tabla y había que ir copiando los códigos de a uno para buscarlos.
+    `detalle(fila)`, si se pasa, agrega un texto corto al renglón («1 carácter distinto»)."""
     if nota:
         st.caption(nota)
     for f in filas[:limite]:
@@ -812,7 +813,8 @@ def mostrar_lista_clickeable(filas, prefijo_key, limite=15, nota=None):
         descripcion = (f.get("Descripcion") or "")[:90]
         precio = f"${miles(f['Precio'], 0)}" if f.get("Precio") else ""
         stock = f" · stock {f['Stock']}" if f.get("Stock") is not None else ""
-        col_desc.caption(f"**{f.get('Marca', '')}** {descripcion}  \n{precio}{stock}")
+        extra = f" · {detalle(f)}" if detalle else ""
+        col_desc.caption(f"**{f.get('Marca', '')}** {descripcion}  \n{precio}{stock}{extra}")
     if len(filas) > limite:
         st.caption(f"(mostrando {limite} de {len(filas)})")
 

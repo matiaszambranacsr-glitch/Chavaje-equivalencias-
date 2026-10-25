@@ -1,7 +1,7 @@
 """Pruebas de lo que queda afuera: cada uno responde por lo que pidió, y vuelve escaneado.
 
 Uso:
-    python3 pruebas_de_lo_que_queda_afuera.py
+    python3 pruebas/pruebas_de_lo_que_queda_afuera.py
 
 Lo que el depósito entrega para Mostrador queda a nombre de quien lo pidió hasta que lo vende
 en 🧾 Ventas (sin bajar el stock otra vez), se factura o vuelve al depósito: escaneando la
@@ -19,7 +19,7 @@ import tempfile
 
 
 def _cargar_la_logica(carpeta):
-    raiz = os.path.dirname(os.path.abspath(__file__))
+    raiz = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     sys.path.insert(0, raiz)
     os.chdir(carpeta)
     import logica
@@ -333,7 +333,7 @@ def main():
         print("✅ lo que queda afuera: todo en verde" if not fallas else f"{len(fallas)} falla(s)")
         return 1 if fallas else 0
     finally:
-        os.chdir(os.path.dirname(os.path.abspath(__file__)))
+        os.chdir(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
         shutil.rmtree(carpeta, ignore_errors=True)
 
 

@@ -1,7 +1,7 @@
 """Pruebas del interés por mora de las cuentas corrientes (con la tasa del BCRA).
 
 Uso:
-    python3 pruebas_de_las_cuentas.py
+    python3 pruebas/pruebas_de_las_cuentas.py
 
 Con fechas fijas, para que las cuentas se puedan hacer a mano. Ver «INTERÉS POR MORA» en
 logica/mecanico.py. Corre en una carpeta temporal: nunca toca la base de trabajo.
@@ -15,7 +15,7 @@ from datetime import date, datetime
 
 
 def _cargar_la_logica(carpeta):
-    raiz = os.path.dirname(os.path.abspath(__file__))
+    raiz = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     sys.path.insert(0, raiz)
     os.chdir(carpeta)
     import logica
@@ -262,7 +262,7 @@ def main():
         print("✅ cuentas: todo en verde" if not fallas else f"{len(fallas)} falla(s)")
         return 1 if fallas else 0
     finally:
-        os.chdir(os.path.dirname(os.path.abspath(__file__)))
+        os.chdir(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
         shutil.rmtree(carpeta, ignore_errors=True)
 
 

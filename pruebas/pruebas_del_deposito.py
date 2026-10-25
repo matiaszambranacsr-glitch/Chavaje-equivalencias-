@@ -1,7 +1,7 @@
 """Pruebas del depósito y del descuento de cada cuenta.
 
 Uso:
-    python3 pruebas_del_deposito.py
+    python3 pruebas/pruebas_del_deposito.py
 
 El circuito, como lo trabaja el negocio: el mostrador pide desde el buscador, el depósito lo
 busca y lo da de baja, y queda en la cuenta del que se lo lleva para facturarlo. Con el
@@ -16,7 +16,7 @@ import tempfile
 
 
 def _cargar_la_logica(carpeta):
-    raiz = os.path.dirname(os.path.abspath(__file__))
+    raiz = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     sys.path.insert(0, raiz)
     os.chdir(carpeta)
     import logica
@@ -368,7 +368,7 @@ def main():
         print("✅ depósito: todo en verde" if not fallas else f"{len(fallas)} falla(s)")
         return 1 if fallas else 0
     finally:
-        os.chdir(os.path.dirname(os.path.abspath(__file__)))
+        os.chdir(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
         shutil.rmtree(carpeta, ignore_errors=True)
 
 

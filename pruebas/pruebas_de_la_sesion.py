@@ -2,7 +2,7 @@
 la cuenta.
 
 Uso:
-    python3 pruebas_de_la_sesion.py
+    python3 pruebas/pruebas_de_la_sesion.py
 
 Las dos las propuso una revisión con ChatGPT:
   · «login A → seleccionar cosas → logout → login B → comprobar que no aparece nada de A»;
@@ -16,7 +16,7 @@ import shutil
 import sys
 import tempfile
 
-RAIZ = os.path.dirname(os.path.abspath(__file__))
+RAIZ = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
 def _entrar(at, clave):
@@ -206,7 +206,8 @@ def probar():
     # 5. La venta a medio armar sobrevive a una recarga, que para la app es una sesión nueva
     # sobre la misma base: al entrar se avisa, 🧾 Ventas ofrece recuperarla —con la cantidad, el
     # precio y el cliente que tenía— y, terminada, no queda nada guardado. A otro no se le
-    # ofrece, y la de ayer tampoco. Ver «LA VENTA A MEDIO ARMAR, A SALVO DE UNA RECARGA».
+    # ofrece, y la de ayer tampoco. Ver «LA VENTA Y EL PRESUPUESTO A MEDIO ARMAR, A SALVO DE UNA
+    # RECARGA».
     c, conn = ns["c"], ns["conn"]
     for nombre in ("rita", "beto"):
         ns["crear_usuario"](nombre, f"clave-{nombre}-1", "operador")
@@ -263,6 +264,28 @@ def probar():
               (f'[{{"producto_id": {pid}, "cantidad": 1, "precio": 1}}]',))
     conn.commit()
     esperar("la de ayer no se ofrece", ofrecida(sesion_nueva("clave-rita-1", ventas)), ([], []))
+    # Y el presupuesto del Buscador, igual: lo destildado sigue destildado. Recuperar la venta
+    # no lo borra: va aparte.
+    presu = sesion_nueva("clave-rita-1", ns["PAGINAS"][0])
+    presu.session_state["carrito"] = {pid: {"codigo": "V100", "marca": "PRUEBA VENTA",
+                                            "descripcion": "FILTRO", "precio": 950,
+                                            "cantidad": 2, "se_lleva": False}}
+    presu.run()
+    presu = sesion_nueva("clave-rita-1")                     # recargó la página
+    esperar("al entrar, el aviso del presupuesto",
+            len([t for t in presu.toast if "presupuesto a medio armar" in t.value]), 1)
+    presu.session_state["pagina_actual"] = ns["PAGINAS"][0]
+    presu.run()
+    _rec = [b for b in presu.button if b.label == "↩️ Recuperarlo"]
+    if not _rec:
+        fallas.append("el 🔍 Buscador no ofrece recuperar el presupuesto a medio armar")
+        return fallas
+    _rec[0].click().run()
+    esperar("el presupuesto recuperado, con su cantidad, su precio y lo destildado",
+            {k: dict(v) for k, v in presu.session_state["carrito"].items()},
+            {pid: {"codigo": "V100", "marca": "PRUEBA VENTA", "descripcion": "FILTRO",
+                   "precio": 950, "cantidad": 2, "se_lleva": False}})
+    esperar("sin errores en el presupuesto", [e.value for e in presu.exception], [])
     esperar("sin errores en la venta", [e.value for s_ in (vta, otro) for e in s_.exception], [])
     return fallas
 

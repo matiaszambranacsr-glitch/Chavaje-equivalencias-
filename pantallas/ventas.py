@@ -404,14 +404,19 @@ if pagina == PAGINAS[9]:
                 st.markdown("**💰 La ganancia por marca**",
                             help="Con el costo que tenía cada cosa al venderla. El margen es "
                                  "sobre lo vendido que tiene costo; «Sin costo» es lo vendido "
-                                 "sin costo cargado, que no entra en la cuenta.")
+                                 "sin costo cargado, que no entra en la cuenta. «A costo de "
+                                 "hoy» es lo que queda si hubiera que reponerlo al costo cargado "
+                                 "hoy: con los precios subiendo, la ganancia de verdad.")
                 st.dataframe([{"Marca": m["marca"], "Unidades": m["unidades"],
                                "Vendido": f"${miles(m['plata'], 0)}",
                                "Ganancia": f"${miles(m['ganancia'], 0)}",
                                "Margen": (f"{miles(m['margen'], 1)} %"
                                           if m["margen"] is not None else "sin costo"),
                                "Sin costo": (f"${miles(m['sin_costo'], 0)}"
-                                             if m["sin_costo"] else "")}
+                                             if m["sin_costo"] else ""),
+                               "A costo de hoy": (f"${miles(m['ganancia_hoy'], 0)}"
+                                                  if m["ganancia_hoy"] is not None
+                                                  else "sin costo")}
                               for m in _mv["por_marca"]], width="stretch", hide_index=True)
 
     # CADA CUENTA: lo de un empleado (lo que vendió y lo que tiene del depósito) o de un taller

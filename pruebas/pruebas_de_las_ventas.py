@@ -1,7 +1,7 @@
 """Pruebas de las ventas del mostrador (🧾 Ventas).
 
 Uso:
-    python3 pruebas_de_las_ventas.py
+    python3 pruebas/pruebas_de_las_ventas.py
 
 Cerrar una venta descuenta el stock sin dejarlo negativo, guarda el precio de ese momento y
 anota lo vendido para aprender equivalencias; todo o nada. Al terminar, con la patente y los km,
@@ -17,7 +17,7 @@ import tempfile
 
 
 def _cargar_la_logica(carpeta):
-    raiz = os.path.dirname(os.path.abspath(__file__))
+    raiz = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     sys.path.insert(0, raiz)
     os.chdir(carpeta)
     import logica
@@ -325,6 +325,8 @@ def probar(L):
     esperar("la ganancia por marca, del período",
             [(m["marca"], m["unidades"], m["plata"], m["ganancia"], m["margen"], m["sin_costo"])
              for m in mv["por_marca"]], [("PRUEBA", 7, 37500.0, -2000.0, -20.0, 27500.0)])
+    # Con el costo de HOY (el de P400 bajó a 1 en la 10): lo que queda si hubiera que reponerlo.
+    esperar("la ganancia a costo de hoy", [m["ganancia_hoy"] for m in mv["por_marca"]], [9998.0])
     esperar("la ganancia por marca, varias",
             [(m["marca"], m["ganancia"], m["margen"], m["sin_costo"]) for m in
              ns["ganancia_por_marca"]([
@@ -335,8 +337,14 @@ def probar(L):
                  {"marca": "A", "unidades": 1, "plata": 500, "ganancia": None,
                   "plata_con_costo": None},
                  {"marca": "C", "unidades": 3, "plata": 2000, "ganancia": 500,
-                  "plata_con_costo": 2000}])],
+                  "plata_con_costo": 2000, "ganancia_hoy": 100}])],
             [("C", 500.0, 25.0, 0.0), ("A", 300.0, 30.0, 500.0), ("B", 0.0, None, 5000.0)])
+    esperar("a costo de hoy, solo donde hay costo de hoy",
+            [m["ganancia_hoy"] for m in ns["ganancia_por_marca"]([
+                {"marca": "C", "unidades": 3, "plata": 2000, "ganancia": 500,
+                 "plata_con_costo": 2000, "ganancia_hoy": 100},
+                {"marca": "B", "unidades": 1, "plata": 5000, "ganancia": None,
+                 "plata_con_costo": None, "ganancia_hoy": None}])], [100.0, None])
 
     # 14. DEVOLVER ALGO DE UNA VENTA: una cosa y una cantidad. Vuelve al stock salvo que no se
     # pueda volver a vender; la plata sale del cierre de hoy, por donde entró; lo vendido EN
@@ -457,7 +465,7 @@ def main():
         print("✅ ventas: todo en verde" if not fallas else f"{len(fallas)} falla(s)")
         return 1 if fallas else 0
     finally:
-        os.chdir(os.path.dirname(os.path.abspath(__file__)))
+        os.chdir(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
         shutil.rmtree(carpeta, ignore_errors=True)
 
 

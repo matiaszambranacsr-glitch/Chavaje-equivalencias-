@@ -1,13 +1,13 @@
 """Pruebas de la REVISIÓN de equivalencias: que las reglas no se equivoquen con pares conocidos.
 
 Uso:
-    python3 pruebas_de_la_revision.py                 # los pares de muestra, siempre
-    python3 pruebas_de_la_revision.py --base copia.db # además, tus aprobaciones de esa base
-    python3 pruebas_de_la_revision.py --base copia.db --reglas   # y qué reglas dejan pasar más
-    python3 pruebas_de_la_revision.py --base copia.db --linea-base antes.json [--actualizar]
+    python3 pruebas/pruebas_de_la_revision.py                 # los pares de muestra, siempre
+    python3 pruebas/pruebas_de_la_revision.py --base copia.db # además, tus aprobaciones de esa base
+    python3 pruebas/pruebas_de_la_revision.py --base copia.db --reglas   # y qué reglas dejan pasar más
+    python3 pruebas/pruebas_de_la_revision.py --base copia.db --linea-base antes.json [--actualizar]
         # la primera vez guarda cómo quedó cada par; las siguientes compara, y falla si algo
         # que rechazaste pasa a limpio. Con --actualizar, la vuelve a guardar.
-    python3 pruebas_de_la_revision.py --sellar
+    python3 pruebas/pruebas_de_la_revision.py --sellar
         # agrega a casos_sellados.txt los pares de muestra nuevos (ver CASOS SELLADOS)
 
 Por qué existe: cada regla nueva del análisis («modelos distintos», «años distintos», «motores
@@ -308,7 +308,7 @@ def verificar_los_casos_sellados(sellar=False):
 
 def _cargar_la_logica(carpeta):
     """La lógica de la app, con una base vacía en `carpeta`."""
-    raiz = os.path.dirname(os.path.abspath(__file__))
+    raiz = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     sys.path.insert(0, raiz)
     os.chdir(carpeta)
     import logica
@@ -591,7 +591,7 @@ def _solo_una_sola_verdad(ruta_base):
               "comparados" if not fallas else f"❌ {fallas[0][:300]}")
         return 1 if fallas else 0
     finally:
-        os.chdir(os.path.dirname(os.path.abspath(__file__)))
+        os.chdir(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
         shutil.rmtree(carpeta, ignore_errors=True)
 
 
@@ -881,7 +881,7 @@ def main():
         print("todo en verde" if not fallas else f"{len(fallas)} falla(s)")
         return 1 if fallas else 0
     finally:
-        os.chdir(os.path.dirname(os.path.abspath(__file__)))
+        os.chdir(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
         shutil.rmtree(carpeta, ignore_errors=True)
 
 
