@@ -5,7 +5,9 @@
 # LISTA PARA WHATSAPP
 # ============================================================
 if pagina == PAGINAS[5]:
-    st.subheader("Armar lista de productos para enviar por WhatsApp")
+    # Sin subtítulo: repetía el título de la sección («Armar lista de productos para enviar por
+    # WhatsApp» debajo de «📋 Lista WhatsApp»), y con él esta ayuda quedaba como la de una parte:
+    # dos «ℹ️ Cómo funciona», uno abajo del otro. Así va adentro del de arriba.
     ayuda(
         "Pegá los códigos que te pidió el cliente, o sumalos de a uno desde el 🔍 Buscador con "
         "«📋 Agregar a lista de WhatsApp». Acá se arma un mensaje agrupado por producto, con las "

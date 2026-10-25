@@ -6646,6 +6646,8 @@ Lo pidió el dueño: «seguí mejorando». Se recorrió la app como la ve un cli
 | **Los links al proveedor** | Sin sesión se veían «🔗 Ver LEICJ010LUCAS (FISPA) en el sitio del proveedor», uno por resultado, y «Buscar este código también en: Fispa, cauplas, scyzoryk, taranto, wega»: le decían al cliente a quién le comprás y lo mandaban al proveedor. La columna «Ficha» ya no se le mostraba, pero estos botones sí. | Sin sesión, no salen. Con sesión, como siempre. |
 | **«🕘 Búsquedas recientes»** | Todos los que entran sin sesión son «Invitado» para la base, así que cada cliente veía lo que habían buscado los otros clientes. | Sin sesión, las de **esta visita**. En la base se anotan igual: cuentan para lo que se busca y no se encuentra. |
 
+Y dos detalles de lo mismo: **la barra de secciones**, con pocas secciones (sin sesión son tres), va en uno o dos renglones también en el celular —deslizándose, al elegir «Modo Mecánico» el «Buscador» quedaba cortado en una «r»—; y **📋 Lista WhatsApp** tenía dos «ℹ️ Cómo funciona», uno abajo del otro, por un subtítulo que repetía el de la sección: ahora uno solo.
+
 `pruebas_de_las_pantallas.py` controla que sin sesión no salgan los links al proveedor ni los catálogos (y que con sesión sí) y que las búsquedas recientes sean las de la visita; rompiendo cada una a propósito, avisa. Lo de bajar solo no tiene prueba automática (es del navegador): probado en un teléfono simulado (390 × 844, táctil), lo encontrado queda arriba de todo después de buscar, y al ir a otra sección y volver no se mueve.
 
 ## ⚡ Con los resultados a la vista, cada toque más liviano
