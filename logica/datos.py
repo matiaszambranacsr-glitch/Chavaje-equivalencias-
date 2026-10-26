@@ -2296,6 +2296,10 @@ def _datos_precargados_y_migraciones(c):
     if (_fila_conf["valor"] if _fila_conf else None) != VERSION_CONFIANZA:
         c.execute("INSERT INTO configuracion (clave, valor) VALUES ('confianza_pendiente', '1') "
                   "ON CONFLICT(clave) DO UPDATE SET valor = excluded.valor")
+        # Y las bujías que calzan: las reglas nuevas pueden leer más códigos (ver «LAS BUJÍAS
+        # QUE CALZAN, RELACIONADAS SOLAS»).
+        c.execute("INSERT INTO configuracion (clave, valor) VALUES ('bujias_pendiente', '1') "
+                  "ON CONFLICT(clave) DO UPDATE SET valor = excluded.valor")
         c.execute("INSERT INTO configuracion (clave, valor) VALUES ('version_confianza', ?) "
                   "ON CONFLICT(clave) DO UPDATE SET valor = excluded.valor",
                   (VERSION_CONFIANZA,))

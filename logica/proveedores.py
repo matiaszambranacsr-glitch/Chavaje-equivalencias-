@@ -2570,6 +2570,16 @@ def _trabajo_de_fondo():
         except Exception as _err:
             anotar_error("_trabajo_de_fondo/descarte_automatico", _err)
 
+    # LAS BUJÍAS QUE CALZAN, aprobadas y unidas solas (ver «LAS BUJÍAS QUE CALZAN, RELACIONADAS
+    # SOLAS»). El descarte de arriba no las toca: el análisis ya no las da en rojo.
+    if bujias_automaticas_prendido() and _hay_que_hacerlo("bujias_pendiente"):
+        try:
+            ceder_al_mostrador()
+            relacionar_las_bujias_que_calzan()
+            _quedo_hecho("bujias_pendiente")
+        except Exception as _err:
+            anotar_error("_trabajo_de_fondo/bujias", _err)
+
     # El análisis de la lista que «Equivalencias sugeridas» muestra primero, para que al abrirla
     # ya esté hecho (ver preparar_el_analisis_del_primer_lote()). Va después del descubrimiento
     # porque ese agrega pares, y antes de las descargas porque es lo que alguien va a mirar.
@@ -2851,6 +2861,8 @@ def arrancar_tanda_de_fondo():
             and obtener_config("descubrimiento_pendiente", "") != "1"
             and not (descarte_automatico_prendido()
                      and obtener_config("descarte_automatico_pendiente", "") == "1")
+            and not (bujias_automaticas_prendido()
+                     and obtener_config("bujias_pendiente", "") == "1")
             # El repuntaje pendiente también la larga, aunque esté todo lo demás apagado: si no,
             # después de cambiar las reglas de confianza el puntaje viejo se quedaría para
             # siempre en la base de quien no tiene prendida ninguna tanda automática — que es

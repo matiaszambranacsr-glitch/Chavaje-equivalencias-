@@ -43,6 +43,7 @@ específico, y las pantallas quedan todas al final:
         · PARA REVISAR, POR MOTIVO
         · LO QUE ESPERA APROBACIÓN, DESDE EL BUSCADOR
         · LO QUE LA APP DESCARTA SOLA
+        · LAS BUJÍAS QUE CALZAN, RELACIONADAS SOLAS
     logica/importar.py
         · IMPORTAR UNA LISTA: leer el archivo y adivinar qué es cada columna
         · AVISOS DE BACKUP Y HUELLA DEL ARCHIVO IMPORTADO
@@ -66,6 +67,7 @@ específico, y las pantallas quedan todas al final:
     logica/descripciones.py
         · AÑOS, MODELOS Y FAMILIAS DE REPUESTO
         · CATÁLOGOS DE APLICACIONES (qué repuesto le va a cada auto)
+        · LA BUJÍA POR SU CÓDIGO: ROSCA, LARGO, HEXÁGONO Y MATERIAL
     logica/firmas.py
         · LA FICHA DE CADA PIEZA Y LA COMPARACIÓN ENTRE DOS
     logica/evidencia.py

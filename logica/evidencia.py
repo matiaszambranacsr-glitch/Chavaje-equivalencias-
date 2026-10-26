@@ -135,7 +135,8 @@ def numero_de_fabrica_en_comun(pa, pb):
 
 def los_une_un_numero(pa, pb):
     """¿Los une un número, para que lo del auto no cuente? El código de uno escrito en la
-    descripción del otro, el mismo número de NGK o el mismo número de fábrica. Es la pregunta de
+    descripción del otro, el mismo número de NGK, dos bujías que por su código calzan igual o el
+    mismo número de fábrica. Es la pregunta de
     evidencia_cruzada() y del buscador (ver marcar_cadenas_que_no_aguantan()): si la ficha y la
     tabla contestaran distinto, una diría «equivalente» y la otra «no es lo mismo».
 
@@ -148,6 +149,10 @@ def los_une_un_numero(pa, pb):
     _ngk_a, _ngk_b = _codigo_ngk(pa), _codigo_ngk(pb)
     return bool(_unidos_por_codigo(pa, pb)
                 or (_ngk_a and _ngk_b and (_ngk_a.startswith(_ngk_b) or _ngk_b.startswith(_ngk_a)))
+                # Dos bujías que calzan igual: el código dice todo lo que importa (ver «LA BUJÍA
+                # POR SU CÓDIGO»), y una bujía va en decenas de autos.
+                or campos_distintos_de_la_bujia(medidas_de_la_bujia(pa),
+                                                medidas_de_la_bujia(pb)) == []
                 or ((pa.get("marca") or "") != (pb.get("marca") or "")
                     and numero_de_fabrica_en_comun(pa, pb)))
 
@@ -271,7 +276,10 @@ def evidencia_cruzada(id_a, id_b, cuenta_palabras=None, total_descripciones=None
         if _sin_digitos:
             vetos.append(f"🏷️ los dos son de {pa['marca']} y «{_sin_digitos[0]}» no tiene ningún "
                           "número: es un pedazo de la descripción que quedó como código")
-        elif (pa["descripcion"] or "").strip() == (pb["descripcion"] or "").strip():
+        elif ((pa["descripcion"] or "").strip() == (pb["descripcion"] or "").strip()
+              # Salvo dos bujías con su código de verdad: TARANTO describe a muchas «Bujias
+              # NGK Japon», y el código dice cuál es cada una (ver «LA BUJÍA POR SU CÓDIGO»).
+              and not (medidas_de_la_bujia(pa) and medidas_de_la_bujia(pb))):
             vetos.append(f"🏷️ los dos son de {pa['marca']} y tienen la misma descripción: es "
                           "una fila de la lista leída dos veces, no dos repuestos equivalentes")
         elif (pa.get("tipo") or "").upper() != "OEM":
@@ -321,13 +329,25 @@ def evidencia_cruzada(id_a, id_b, cuenta_palabras=None, total_descripciones=None
     _ngk_a, _ngk_b = _codigo_ngk(pa), _codigo_ngk(pb)
     _mismo_ngk = bool(_ngk_a and _ngk_b
                       and (_ngk_a.startswith(_ngk_b) or _ngk_b.startswith(_ngk_a)))
-    if _ngk_a and _ngk_b and not _mismo_ngk:
-        vetos.append(f"🔤 bujías distintas: NGK {_ngk_a} vs NGK {_ngk_b}")
-    elif _mismo_ngk:
+    # Y por sus MEDIDAS (ver «LA BUJÍA POR SU CÓDIGO»): lo pidió el dueño, en el mostrador se da
+    # una por otra si calzan igual —rosca, largo, hexágono, asiento y material—, aunque cambie el
+    # grado térmico. La que no entra (otra rosca, otro largo, otro hexágono) no es la misma.
+    # Si solo cambia el material, como antes: decide el número de NGK.
+    _bujia_a, _bujia_b = medidas_de_la_bujia(pa), medidas_de_la_bujia(pb)
+    _distinto_en_la_bujia = campos_distintos_de_la_bujia(_bujia_a, _bujia_b)
+    if _mismo_ngk:
         # El mismo número de NGK es la misma bujía, y cada lista anota los autos que quiere:
         # «ZFR6F» (TARANTO, Fiat E.Torq) contra «NGK= ZFR6F11» (FISPA, Honda) salía en rojo por
         # «autos distintos». Como con un código en común, lo del auto no la contradice.
         a_favor.append(f"🔢 el mismo número de NGK ({_ngk_a})")
+    elif _distinto_en_la_bujia == []:
+        a_favor.append(f"🕯️ calzan igual ({texto_de_la_bujia(_bujia_a)}), "
+                       f"{grados_de_las_bujias(_bujia_a, _bujia_b)}: se da una por otra")
+    elif _distinto_en_la_bujia and set(_distinto_en_la_bujia) != {"material"}:
+        vetos.append(f"🕯️ una no entra donde va la otra: "
+                     f"{bujias_que_calzan(_bujia_a, _bujia_b)[1]}")
+    elif _ngk_a and _ngk_b:
+        vetos.append(f"🔤 bujías distintas: NGK {_ngk_a} vs NGK {_ngk_b}")
     # El número de uno es el del CONJUNTO donde va el otro: el kit de reparación y la bomba que
     # repara, la tapa de flotante y la bomba que la lleva. Ver numero_del_conjunto_donde_va().
     _del_conjunto = el_numero_de_uno_es_el_conjunto_del_otro(
@@ -427,6 +447,12 @@ def evidencia_cruzada(id_a, id_b, cuenta_palabras=None, total_descripciones=None
               and "OEM" in {(pa.get("tipo") or "").upper(), (pb.get("tipo") or "").upper()}):
             if motivo_desc.startswith(_MOTIVOS_QUE_AVISAN):
                 aviso_desc = motivo_desc
+        # Dos bujías que calzan igual por su código: el texto no tiene nada que agregar. Cada
+        # lista nombra los autos que quiere, y «BUJIA APLICACION TOYOTA» contra «BUJIAS
+        # CHRYSLER» ni siquiera se parecen en el nombre de la pieza.
+        elif (motivo_desc.startswith(_MOTIVOS_DEL_AUTO + _AVISOS_DEL_AUTO)
+              and _distinto_en_la_bujia == []):
+            pass
         elif (motivo_desc.startswith(_MOTIVOS_DEL_AUTO + _AVISOS_DEL_AUTO)
               and los_une_un_numero(pa, pb)):
             _de_la_pieza = lo_que_vale_sin_el_auto(fa, fb, motivo_desc, _cuenta, _total)

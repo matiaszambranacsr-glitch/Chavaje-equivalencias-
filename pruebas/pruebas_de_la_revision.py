@@ -422,8 +422,11 @@ def preparar_la_base_de_aprobaciones(ruta_base, destino):
     FECHA_DE_LA_DECISION.update({(min(a, b), max(a, b)): (f or "")[:10] for a, b, f in con.execute(
         "SELECT producto_a_id, producto_b_id, MAX(fecha) FROM equivalencias_revisadas "
         "GROUP BY producto_a_id, producto_b_id")})
+    # Sin lo que aprobó la app sola (las bujías que calzan, ver «LAS BUJÍAS QUE CALZAN,
+    # RELACIONADAS SOLAS»): no lo aprobó una persona, y lo aprobó porque las reglas dicen que sí.
     aprobados = {(min(a, b), max(a, b)) for a, b in con.execute(
-        "SELECT producto_a_id, producto_b_id FROM equivalencias_revisadas WHERE decision = 'ok'")}
+        "SELECT producto_a_id, producto_b_id FROM equivalencias_revisadas WHERE decision = 'ok' "
+        "AND COALESCE(revisado_por, '') <> '🤖 la app'")}
     pares = [(a, b) for a, b in sorted(aprobados)
              if con.execute("SELECT COUNT(*) FROM productos WHERE id IN (?, ?)",
                             (a, b)).fetchone()[0] == 2]

@@ -1058,6 +1058,63 @@ a traer solas desde Administrar → Mantenimiento.
         # Lo ya cargado que hoy se vetaría va antes que lo que falta revisar: eso ya está
         # saliendo en el buscador.
         mostrar_aviso_de_lo_aprobado()
+
+        # 🕯️ LAS BUJÍAS QUE CALZAN, relacionadas solas. Ver relacionar_las_bujias_que_calzan().
+        # Afuera de la cola: se ve aunque no quede nada pendiente.
+        _bujias_on = bujias_automaticas_prendido()
+        _exp_bujias = st.expander(
+            "🕯️ Bujías que calzan igual, relacionadas solas — "
+            + ("prendido" if _bujias_on else "apagado")
+            + (f" ({miles(cuantas_bujias_relaciono())} pares)" if _bujias_on else ""),
+            key="exp_bujias_que_calzan", on_change="rerun")
+        if _exp_bujias.open:
+            with _exp_bujias:
+                explicar(
+                    "Las bujías que tienen la misma rosca, largo, hexágono, asiento y material "
+                    "quedan como equivalentes aunque cambie el grado térmico: en el mostrador se "
+                    "da una por otra.",
+                    "Las medidas salen del código: NGK y Bosch escriben la rosca, el hexágono, "
+                    "el largo y el material en cada letra (BKR6E: rosca 14, hexágono 16, largo "
+                    "19, común). Lo que no se sabe leer (Marelli, LFR, ZKR…) queda como estaba.\n\n"
+                    "Las que esperan en la cola se aprueban; las que no estaban en ningún lado se "
+                    "unen. También las que alguien había rechazado antes de esto; lo que se "
+                    "rechace de ahora en más, no se toca. Queda firmado «🤖 la app» y no cuenta "
+                    "para lo que la app aprende de tus decisiones. En el buscador, cada una dice "
+                    "su grado térmico al lado del de lo buscado.\n\n"
+                    "Apagarlo y deshacer piden la contraseña de administrador. Deshacer devuelve "
+                    "cada par a como estaba: a la cola, rechazado o sin vínculo.", en_expander=True)
+                _ult_b = obtener_config("bujias_que_calzan_ultimo", "")
+                if _ult_b:
+                    try:
+                        _ub = json.loads(_ult_b)
+                        st.caption(f"La última vez, {_ub.get('fecha', '')}: "
+                                   f"{miles(_ub.get('cola', 0))} aprobadas de la cola, "
+                                   f"{miles(_ub.get('rechazadas', 0))} que estaban rechazadas y "
+                                   f"{miles(_ub.get('nuevos', 0))} unidas nuevas.")
+                    except ValueError:
+                        pass
+                st.dataframe(grupos_de_bujias(), width="stretch", hide_index=True)
+                _bj1, _bj2 = st.columns(2)
+                if candado("prender o apagar las bujías que calzan",
+                           _bj1.button("⏸️ Apagarlo" if _bujias_on else "🕯️ Prenderlo",
+                                       key="btn_bujias_que_calzan"),
+                           "bujias_que_calzan"):
+                    guardar_config(BUJIAS_AUTOMATICAS, "0" if _bujias_on else "1")
+                    if not _bujias_on:
+                        guardar_config("bujias_pendiente", "1")
+                        arrancar_tanda_de_fondo()
+                    avisar("success", "Bujías que calzan " + ("apagado: lo ya unido queda." if
+                                                              _bujias_on else
+                                                              "prendido: corre por atrás."))
+                    st.rerun()
+                if candado("deshacer lo que la app relacionó por las bujías",
+                           _bj2.button("↩️ Deshacer todo y apagarlo",
+                                       key="btn_deshacer_bujias"),
+                           "deshacer_bujias"):
+                    _n_bj = deshacer_lo_de_las_bujias()
+                    invalidar_salud()
+                    avisar("success", f"Se deshicieron {miles(_n_bj)} par(es) de bujías.")
+                    st.rerun()
         lotes_pendientes = resumen_lotes_pendientes()
         if lotes_pendientes:
             total_pendientes = sum(l["cantidad"] for l in lotes_pendientes)

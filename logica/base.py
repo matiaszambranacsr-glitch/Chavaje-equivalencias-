@@ -26,6 +26,7 @@ import time
 import requests          # se usa en varias funciones; importarlo una vez evita repetirlo
 import sys
 import collections
+import itertools
 import types
 from datetime import datetime, timedelta, date, time as dtime
 from urllib.parse import quote
@@ -691,7 +692,7 @@ VERSION_NORMALIZACION = "2"
 # reglas de hoy están mal. Sin esta marca, eso no se entera nadie hasta tropezárselo.
 # Subir el número cuando cambien las reglas de evaluar_equivalencia(). El recálculo NO corre al
 # abrir la app —son 12,8 s— sino en la tarea de fondo, igual que el descubrimiento.
-VERSION_CONFIANZA = "18"   # ver VERSIONES_DE_LAS_REGLAS
+VERSION_CONFIANZA = "19"   # ver VERSIONES_DE_LAS_REGLAS
 
 # LAS REGLAS VERSIONADAS, con la fecha y qué cambió en cada una. Lo pidió una revisión con
 # ChatGPT («versionar reglas como datos» y «comparar versiones»): cada vínculo guarda con qué
@@ -700,6 +701,9 @@ VERSION_CONFIANZA = "18"   # ver VERSIONES_DE_LAS_REGLAS
 # nueva sobre todo lo que ya se decidió. Volver atrás una regla es volver atrás el cambio en
 # git y subir el número otra vez (el repuntaje lo hace la tarea de fondo).
 VERSIONES_DE_LAS_REGLAS = [
+    ("19", "2026-10-26", "dos bujías que por su código calzan igual (rosca, largo, hexágono, "
+                         "asiento y material) se dan una por otra aunque cambie el grado térmico; "
+                         "la que no entra no es la misma"),
     ("18", "2026-10-26", "si dos listas distintas citan el mismo número de fábrica, que nombren "
                          "otros autos u otro motor no las separa; lo que contradice la pieza sí"),
     ("17", "2026-10-26", "lo que solo se alcanza pasando por otra pieza de la misma lista queda "

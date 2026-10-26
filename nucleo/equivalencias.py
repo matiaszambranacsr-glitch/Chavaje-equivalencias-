@@ -217,18 +217,32 @@ def buscar_por_codigo(cur, clean_code, marca_filtro="Todas", max_saltos=None, co
             SELECT 1 FROM productos px JOIN marcas mx ON mx.id = px.marca_id
             WHERE px.id = re.id AND mx.tipo = 'OEM'
               AND px.codigo_clean GLOB '{GLOB_DE_MOTOR_CON_INDICE}'))"""
+    # LAS BUJÍAS QUE CALZAN NO SE ENCADENAN. La app une todas las bujías que calzan igual (ver
+    # relacionar_las_bujias_que_calzan()): grupos de 65 unidas entre sí. Seguidas como cualquier
+    # vínculo, cada una abría las cadenas de las otras 64, y buscar la BKR6E traía 190
+    # resultados hasta a 6 saltos —cables, bujías Marelli— en 5 segundos. Se siguen solo desde
+    # lo buscado, y lo que se alcanza por ahí no sigue: «final».
+    # Una base sin la columna del lote (la del paquete nucleo) no tiene de esos vínculos.
+    try:
+        _con_lote = any((f["name"] if isinstance(f, sqlite3.Row) else f[1]) == "lote"
+                        for f in cur.execute("PRAGMA table_info(equivalencias)").fetchall())
+    except sqlite3.Error:
+        _con_lote = False
+    _de_bujias = "COALESCE(eq.lote, '') GLOB 'BUJÍAS QUE CALZAN*'" if _con_lote else "0"
     query = f'''
-    WITH RECURSIVE Red(id, saltos, peor, por_codigo) AS (
-        SELECT id, 0, 100, 0 FROM productos WHERE codigo_clean = ? OR codigo_barras = ?
+    WITH RECURSIVE Red(id, saltos, peor, por_codigo, final) AS (
+        SELECT id, 0, 100, 0, 0 FROM productos WHERE codigo_clean = ? OR codigo_barras = ?
         UNION
         SELECT CASE WHEN eq.producto_a_id = re.id THEN eq.producto_b_id ELSE eq.producto_a_id END,
                re.saltos + 1,
                MIN(re.peor, COALESCE(eq.confianza, 50)),
-               0
+               0,
+               {_de_bujias}
         FROM equivalencias eq JOIN Red re ON (eq.producto_a_id = re.id OR eq.producto_b_id = re.id)
-        WHERE re.saltos < ? AND {_no_es_puente}
+        WHERE re.saltos < ? AND re.final = 0 AND {_no_es_puente}
+          AND (re.saltos = 0 OR NOT {_de_bujias})
         UNION
-        SELECT p2.id, re.saltos, re.peor, 1
+        SELECT p2.id, re.saltos, re.peor, 1, re.final
         FROM Red re JOIN productos p1 ON p1.id = re.id
                     JOIN productos p2 ON p2.codigo_clean = p1.codigo_clean AND p2.id <> p1.id
         WHERE re.saltos <= ? AND {_no_es_puente}

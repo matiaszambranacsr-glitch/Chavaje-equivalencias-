@@ -1107,6 +1107,7 @@ if pagina == PAGINAS[2]:
                     # Lo levanta el hilo de fondo, que ya existe. Ver _trabajo_de_fondo().
                     try:
                         guardar_config("descubrimiento_pendiente", "1")
+                        guardar_config("bujias_pendiente", "1")   # bujías nuevas: ver relacionar_las_bujias_que_calzan()
                         # Las fotos y fichas de lo nuevo: solo si lo elegiste (ver
                         # lo_nuevo_al_importar()). Lo que ya terminó no arranca solo.
                         lo_nuevo_al_importar()

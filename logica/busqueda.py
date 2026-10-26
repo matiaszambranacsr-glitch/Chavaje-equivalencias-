@@ -197,18 +197,32 @@ def buscar_por_codigo(clean_code, marca_filtro="Todas", max_saltos=None, confian
             SELECT 1 FROM productos px JOIN marcas mx ON mx.id = px.marca_id
             WHERE px.id = re.id AND mx.tipo = 'OEM'
               AND px.codigo_clean GLOB '{GLOB_DE_MOTOR_CON_INDICE}'))"""
+    # LAS BUJÍAS QUE CALZAN NO SE ENCADENAN. La app une todas las bujías que calzan igual (ver
+    # relacionar_las_bujias_que_calzan()): grupos de 65 unidas entre sí. Seguidas como cualquier
+    # vínculo, cada una abría las cadenas de las otras 64, y buscar la BKR6E traía 190
+    # resultados hasta a 6 saltos —cables, bujías Marelli— en 5 segundos. Se siguen solo desde
+    # lo buscado, y lo que se alcanza por ahí no sigue: «final».
+    # Una base sin la columna del lote (la del paquete nucleo) no tiene de esos vínculos.
+    try:
+        _con_lote = any((f["name"] if isinstance(f, sqlite3.Row) else f[1]) == "lote"
+                        for f in c.execute("PRAGMA table_info(equivalencias)").fetchall())
+    except sqlite3.Error:
+        _con_lote = False
+    _de_bujias = "COALESCE(eq.lote, '') GLOB 'BUJÍAS QUE CALZAN*'" if _con_lote else "0"
     query = f'''
-    WITH RECURSIVE Red(id, saltos, peor, por_codigo) AS (
-        SELECT id, 0, 100, 0 FROM productos WHERE codigo_clean = ? OR codigo_barras = ?
+    WITH RECURSIVE Red(id, saltos, peor, por_codigo, final) AS (
+        SELECT id, 0, 100, 0, 0 FROM productos WHERE codigo_clean = ? OR codigo_barras = ?
         UNION
         SELECT CASE WHEN eq.producto_a_id = re.id THEN eq.producto_b_id ELSE eq.producto_a_id END,
                re.saltos + 1,
                MIN(re.peor, COALESCE(eq.confianza, 50)),
-               0
+               0,
+               {_de_bujias}
         FROM equivalencias eq JOIN Red re ON (eq.producto_a_id = re.id OR eq.producto_b_id = re.id)
-        WHERE re.saltos < ? AND {_no_es_puente}
+        WHERE re.saltos < ? AND re.final = 0 AND {_no_es_puente}
+          AND (re.saltos = 0 OR NOT {_de_bujias})
         UNION
-        SELECT p2.id, re.saltos, re.peor, 1
+        SELECT p2.id, re.saltos, re.peor, 1, re.final
         FROM Red re JOIN productos p1 ON p1.id = re.id
                     JOIN productos p2 ON p2.codigo_clean = p1.codigo_clean AND p2.id <> p1.id
         WHERE re.saltos <= ? AND {_no_es_puente}
@@ -421,6 +435,11 @@ def marcar_cadenas_que_no_aguantan(res):
         # Si los une un número, lo del auto no cuenta, y lo que queda de la pieza sí: lo mismo
         # que la ficha (ver «EL NÚMERO DE FÁBRICA MANDA SOBRE EL AUTO» en evidencia_cruzada()).
         if motivo.startswith(_MOTIVOS_DEL_AUTO):
+            # Dos bujías que calzan igual: el código lo dice todo, como en la ficha.
+            if campos_distintos_de_la_bujia(
+                    medidas_de_la_bujia(_como_en_la_evidencia(buscado)),
+                    medidas_de_la_bujia(_como_en_la_evidencia(f))) == []:
+                continue
             with db_lock:
                 _unidos = los_une_un_numero(_como_en_la_evidencia(buscado),
                                             _como_en_la_evidencia(f))
@@ -840,6 +859,9 @@ _ORIGENES_SECUNDARIOS = (
 )
 _ORIGENES_PRIMARIOS = (
     ("CATÁLOGOS DE FABRICANTE", "🏭 lo publica el catálogo del fabricante"),
+    # El código de cada bujía dice su rosca, largo, hexágono y material: lo publica el fabricante
+    # en el código mismo. Ver relacionar_las_bujias_que_calzan().
+    ("BUJÍAS QUE CALZAN", "🕯️ los códigos dicen la misma rosca, largo, hexágono y material"),
     ("CATÁLOGO ", "🏭 lo publica el catálogo de {resto}"),
     ("PORTAL ", "🏭 lo publica el portal de {resto}"),
     ("CÓDIGO ESCRITO EN LA DESCRIPCIÓN", "📄 el proveedor escribe el código en la descripción"),
@@ -869,7 +891,7 @@ def respaldo_del_origen(lote, verificada=False):
 
 # Con qué empieza el texto de una fuente que declara (ver respaldo_del_origen()). El buscador lo
 # lee de la columna «Respaldo» porque las tarjetas reciben las filas sin las claves internas.
-_EMOJIS_DE_FUENTE = ("📋", "🏭", "📄", "🔁", "👤")
+_EMOJIS_DE_FUENTE = ("📋", "🏭", "📄", "🔁", "👤", "🕯️")
 
 
 def es_respaldo_primario(texto):
@@ -943,7 +965,47 @@ def anotar_el_respaldo(res, clean_code, quitar_lo_dudoso=False):
     for f in res:
         if f["ID"] in rechazadas and f["ID"] not in origenes:
             f["Rechazada"] = rechazadas[f["ID"]]
+    anotar_el_grado_de_las_bujias(res)
     return anotar_el_estado(res, origenes, quitar_lo_dudoso)
+
+
+def anotar_el_grado_de_las_bujias(res):
+    """Buscando una bujía, a cada una que calza igual con otro grado térmico le agrega el grado a
+    la cadena: «🕯️ grado 7 (lo buscado: 6)», o «🕯️ Bosch 7 (lo buscado: NGK 5)» —NGK y Bosch los
+    numeran al revés—. Se dan una por otra (ver «LA BUJÍA POR SU CÓDIGO»), pero en el mostrador
+    conviene ver cuál es la del mismo grado."""
+    def _como_producto(f):
+        return {"codigo_raw": f.get("Codigo"), "descripcion": f.get("Descripcion"),
+                "marca": f.get("Marca"), "tipo": f.get("Tipo")}
+
+    buscadas = [medidas_de_la_bujia(_como_producto(f)) for f in res
+                if f.get("Cadena") == "— el buscado"]
+    buscada = next((m for m in buscadas if m), None)
+    if not buscada:
+        return res
+
+    def _grados(m):
+        if m["sistema"] == buscada["sistema"]:
+            return f"grado {m['grado']} (lo buscado: {buscada['grado']})"
+        return (f"{m['sistema']} {m['grado']} "
+                f"(lo buscado: {buscada['sistema']} {buscada['grado']})")
+
+    # Para ordenar y para la 🏆 (ver ordenar_por_seguridad_y_disponibilidad()): a cuántos grados
+    # está, en la escala de NGK. Bosch va al revés: la FR7DC es la BKR5E y la WR7DC la BPR6EY;
+    # con las listas de FISPA, NGK ≈ 13 − Bosch.
+    def _en_escala_ngk(m):
+        return m["grado"] if m["sistema"] == "NGK" else 13 - m["grado"]
+
+    for f in res:
+        if f.get("Cadena") == "— el buscado":
+            continue
+        medidas = medidas_de_la_bujia(_como_producto(f))
+        if (campos_distintos_de_la_bujia(buscada, medidas) == []
+                and (medidas["sistema"], medidas["grado"]) != (buscada["sistema"], buscada["grado"])):
+            f["Cadena"] = f"{f['Cadena']} · 🕯️ {_grados(medidas)}"
+            f["_grado_texto"] = _grados(medidas)
+            f["_grado_distinto"] = abs(_en_escala_ngk(medidas) - _en_escala_ngk(buscada))
+    return res
 
 
 # Lo que dice el estado cuando no se pudo calcular: no se recomienda (ver anotar_el_estado()).
@@ -1421,6 +1483,12 @@ def recalcular_confianzas(limite=20000, progreso=None, solo_faltantes=True, de_p
             familia_a=rubro_del_codigo_frente_a(rubros_oem, f["a"], f["desc_a"], f["desc_b"]),
             familia_b=rubro_del_codigo_frente_a(rubros_oem, f["b"], f["desc_b"], f["desc_a"])
         )
+        # Dos bujías que calzan igual: lo que el dueño da una por otra (ver «LA BUJÍA POR SU
+        # CÓDIGO»). Las descripciones nombran autos distintos y el texto solo no llega.
+        if campos_distintos_de_la_bujia(*(medidas_de_la_bujia(
+                {"codigo_raw": f[f"cod_{x}"], "descripcion": f[f"desc_{x}"],
+                 "marca": f[f"marca_{x}"], "tipo": f[f"tipo_{x}"]}) for x in "ab")) == []:
+            puntaje = max(puntaje, 80.0)
         if f["a"] not in aprobados and f["b"] not in aprobados:
             for lado in ("a", "b"):
                 malo, _ = codigo_sospechoso(f[f"cod_{lado}"], f.get(f"desc_{lado}") or "")

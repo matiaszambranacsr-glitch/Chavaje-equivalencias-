@@ -447,6 +447,7 @@ COMO_SE_DECIDIO = {
     "deshacer": "↩️ al deshacer una importación",
     "todo_el_producto": "✂️ todos los de un producto de una vez",
     "automatico": "🤖 sola, porque el análisis la daba casi seguro mal",
+    "bujias": "🕯️ sola, porque las dos bujías calzan igual",
 }
 
 # Quién firma lo que la app descarta sola (ver descartar_solos_los_casi_seguro_mal()). Lo que
@@ -1752,8 +1753,9 @@ def guardar_equivalencias_pendientes(pares, origen, lote):
         conn.commit()
     if entraron > 0:
         # Hay pendientes nuevos: si está prendido, la tarea de fondo descarta lo casi seguro
-        # mal (ver «LO QUE LA APP DESCARTA SOLA»).
+        # mal (ver «LO QUE LA APP DESCARTA SOLA») y relaciona las bujías que calzan.
         guardar_config("descarte_automatico_pendiente", "1")
+        guardar_config("bujias_pendiente", "1")
     return max(entraron, 0)
 
 
@@ -3276,7 +3278,8 @@ def otra_pieza_de_la_misma_lista(marca, cod_a, desc_a, cod_b, desc_b):
         272008»). Es el único par de una misma lista que se aprobó a mano;
       · los dos citan el mismo número de fábrica (8 dígitos o más): «INYECTOR LEICJ021 … REF
         ORIG BOSCH 0280155929» de LUCAS es la «FI-0280155929» de FISPA, escrita de otra forma,
-        y las palabras en común no alcanzaban para verlo.
+        y las palabras en común no alcanzaban para verlo;
+      · dos bujías que calzan igual (ver medidas_de_la_bujia()): cambia el grado térmico.
     Dos de la misma línea con la misma descripción no se salvan: IMPERIAL describe por el auto
     («M.BENZ OM904 LA 12valv.-OM906» son la VS5614 y la VS5615), y la ficha ya las daba por dos
     filas distintas (ver evidencia_cruzada())."""
@@ -3284,6 +3287,12 @@ def otra_pieza_de_la_misma_lista(marca, cod_a, desc_a, cod_b, desc_b):
     if not cod_a or not cod_b or sanitizar(cod_a) == sanitizar(cod_b):
         return ""
     if son_variantes_de_la_misma_pieza([cod_a, cod_b]):
+        return ""
+    # Dos bujías que calzan igual son la misma con otro grado térmico: la BKR5E y la BKR6E de
+    # TARANTO. Lo pidió el dueño (ver «LA BUJÍA POR SU CÓDIGO»).
+    if campos_distintos_de_la_bujia(
+            medidas_de_la_bujia({"codigo_raw": cod_a, "descripcion": desc_a, "marca": marca}),
+            medidas_de_la_bujia({"codigo_raw": cod_b, "descripcion": desc_b, "marca": marca})) == []:
         return ""
     sub_a, sub_b = _submarca_del_codigo(cod_a), _submarca_del_codigo(cod_b)
     if sub_a and sub_b and sub_a != sub_b:
@@ -4466,6 +4475,11 @@ def _analizar_filas(filas, lote):
                     alarmas.append(v)
         elif len(a_favor) >= 3:
             puntaje = max(puntaje, 90.0)
+        # DOS BUJÍAS QUE CALZAN IGUAL van juntas aunque las descripciones nombren otros autos:
+        # el código dice la rosca, el largo, el hexágono y el material (ver «LA BUJÍA POR SU
+        # CÓDIGO»). Una sola señal, pero la que el dueño pidió que alcance.
+        elif any(x.startswith("🕯️") for x in a_favor):
+            puntaje = max(puntaje, 80.0)
         elif len(a_favor) == 2:
             puntaje = max(puntaje, 72.0)
         elif not a_favor and not _unidos_por_codigo(
@@ -5333,3 +5347,218 @@ def devolver_lo_que_descarto_sola():
                       (f["a"], f["b"], obtener_usuario_actual(), f["lote"], VERSION_CONFIANZA))
     guardar_config("descarte_automatico_ultimo", "")
     return len(pares)
+
+
+
+# ======================================================================
+# LAS BUJÍAS QUE CALZAN, RELACIONADAS SOLAS
+# ======================================================================
+# Lo pidió el dueño: «aprobá todas las bujías que sean de distintos grados térmicos; si es de
+# platino o del material que tengamos, que coincida largo, rosca y hexágono, y el resto lo
+# relacionamos: en sí son distintas, pero en la casa de repuestos le das una por otra y no pasa
+# nada». Las medidas salen del código de cada bujía (ver «LA BUJÍA POR SU CÓDIGO»): las que
+# calzan igual se aprueban si esperan en la cola y se unen si no estaban en ningún lado. Incluye
+# lo que alguien había rechazado ANTES de esto (en la copia de la base, 8 pares de TARANTO con
+# LUCAS que solo cambiaban de grado térmico); lo que se rechace después, no se toca.
+# Viene prendido porque lo pidió él. Queda firmado QUIEN_DESCARTA_SOLA —no cuenta para lo que se
+# aprende de las decisiones— y se deshace con un toque, que devuelve cada par a como estaba.
+# Los códigos de fábrica no se unen entre sí: ya están unidos a sus bujías, y así serían puentes.
+
+BUJIAS_AUTOMATICAS = "bujias_que_calzan_automatico"
+LOTE_DE_LAS_BUJIAS = "BUJÍAS QUE CALZAN"
+# Desde cuándo las relaciona la app: lo que una persona rechaza después, manda la persona.
+_BUJIAS_DESDE = "bujias_que_calzan_desde"
+_RE_ANTES_RECHAZADA = re.compile(r"^antes: rechazada por (.*?)(?: · motivo: (.*))?$")
+
+
+def bujias_automaticas_prendido():
+    return obtener_config(BUJIAS_AUTOMATICAS, "1") == "1"
+
+
+def bujias_con_medidas():
+    """{id: (fila, medidas)} de las bujías de encendido del catálogo que se saben leer."""
+    c.execute("""SELECT p.id, p.codigo_raw, p.descripcion, m.nombre AS marca, m.tipo AS tipo
+                 FROM productos p JOIN marcas m ON m.id = p.marca_id
+                 WHERE p.descripcion LIKE '%BUJ%'""")
+    salida = {}
+    for r in c.fetchall():
+        fila = dict(r)
+        medidas = medidas_de_la_bujia(fila)
+        if medidas:
+            salida[fila["id"]] = (fila, medidas)
+    return salida
+
+
+def pares_de_bujias_que_calzan(bujias=None):
+    """{(a, b): (de dónde viene, lote, cómo estaba)} de las bujías de proveedor que calzan igual
+    y no están unidas. De dónde viene: «cola», «rechazada» (antes de que existiera esto, o por
+    la app) o «nuevo»."""
+    bujias = bujias if bujias is not None else bujias_con_medidas()
+    grupos = {}
+    for pid, (fila, medidas) in bujias.items():
+        if (fila["tipo"] or "").upper() != "OEM":
+            grupos.setdefault(tuple(medidas[k] for k in CAMPOS_DE_LA_BUJIA), []).append(pid)
+    ids = sorted(pid for grupo in grupos.values() for pid in grupo)
+    unidos, en_cola, rechazados = set(), {}, {}
+    for tanda, marcadores in en_tandas(ids, usos_por_consulta=2):
+        c.execute(f"""SELECT producto_a_id AS a, producto_b_id AS b FROM equivalencias
+                      WHERE producto_a_id IN ({marcadores}) OR producto_b_id IN ({marcadores})""",
+                  tanda + tanda)
+        unidos |= {(min(r["a"], r["b"]), max(r["a"], r["b"])) for r in c.fetchall()}
+        c.execute(f"""SELECT producto_a_id AS a, producto_b_id AS b, lote
+                      FROM equivalencias_pendientes
+                      WHERE producto_a_id IN ({marcadores}) OR producto_b_id IN ({marcadores})""",
+                  tanda + tanda)
+        for r in c.fetchall():
+            en_cola[(min(r["a"], r["b"]), max(r["a"], r["b"]))] = r["lote"]
+        c.execute(f"""SELECT producto_a_id AS a, producto_b_id AS b, revisado_por AS quien,
+                             motivo, fecha
+                      FROM equivalencias_revisadas
+                      WHERE decision = 'rechazada' AND producto_a_id < producto_b_id
+                        AND (producto_a_id IN ({marcadores}) OR producto_b_id IN ({marcadores}))""",
+                  tanda + tanda)
+        for r in c.fetchall():
+            rechazados[(r["a"], r["b"])] = dict(r)
+    desde = obtener_config(_BUJIAS_DESDE, "")
+    salida = {}
+    for grupo in grupos.values():
+        for a, b in itertools.combinations(sorted(grupo), 2):
+            if (a, b) in unidos:
+                continue
+            rechazo = rechazados.get((a, b))
+            if rechazo:
+                if (rechazo["quien"] != QUIEN_DESCARTA_SOLA and desde
+                        and (rechazo["fecha"] or "") >= desde):
+                    continue
+                antes = (f"antes: rechazada por {rechazo['quien'] or 'alguien'}"
+                         + (f" · motivo: {rechazo['motivo']}" if rechazo["motivo"] else ""))
+                salida[(a, b)] = ("rechazada", None, antes)
+            elif (a, b) in en_cola:
+                salida[(a, b)] = ("cola", en_cola[(a, b)], "antes: en la cola")
+            else:
+                salida[(a, b)] = ("nuevo", None, "antes: sin vínculo")
+    return salida
+
+
+def relacionar_las_bujias_que_calzan():
+    """Aprueba las bujías que calzan igual y esperan en la cola, y une las que no estaban en
+    ningún lado. Devuelve {"cola", "rechazadas", "nuevos"}. Solo si está prendido."""
+    salida = {"cola": 0, "rechazadas": 0, "nuevos": 0}
+    if not bujias_automaticas_prendido():
+        return salida
+    bujias = bujias_con_medidas()
+    pares = pares_de_bujias_que_calzan(bujias)
+    if pares:
+        lote_nuevo = f"{LOTE_DE_LAS_BUJIAS} · {datetime.now().strftime('%d/%m')}"
+        como_estaba = {}
+        for (a, b), (_de, _lote, antes) in pares.items():
+            m_a, m_b = bujias[a][1], bujias[b][1]
+            como_estaba[(a, b)] = (80.0, (f"🕯️ calzan igual ({texto_de_la_bujia(m_a)}), "
+                                          f"{grados_de_las_bujias(m_a, m_b)}")[:200], antes)
+        with db_lock, transaccion():
+            cola = _lo_que_dice_la_cola(list(pares))
+            c.executemany(
+                "INSERT OR IGNORE INTO equivalencias (producto_a_id, producto_b_id, created_at, lote) "
+                "VALUES (?, ?, datetime('now'), ?)",
+                [(a, b, lote if de == "cola" and lote else lote_nuevo)
+                 for (a, b), (de, lote, _antes) in pares.items()])
+            c.executemany(_BORRAR_PENDIENTE_EN_LOS_DOS_SENTIDOS,
+                          [(a, b, b, a) for (a, b), (de, _l, _x) in pares.items() if de == "cola"])
+        marcar_revision(list(pares), "ok", como="bujias", cola=cola, quien=QUIEN_DESCARTA_SOLA,
+                        como_estaba=como_estaba)
+        for de, _lote, _antes in pares.values():
+            salida["cola" if de == "cola" else "rechazadas" if de == "rechazada" else "nuevos"] += 1
+        guardar_config("bujias_que_calzan_ultimo", json.dumps(dict(
+            salida, fecha=datetime.now().strftime("%Y-%m-%d %H:%M"))))
+        # Los vínculos nuevos se puntúan ya: sin puntaje, el buscador los cuenta como neutros.
+        # Solo los que faltan (ver recalcular_confianzas()).
+        recalcular_confianzas(limite=len(pares) + 1000, solo_faltantes=True)
+    if not obtener_config(_BUJIAS_DESDE, ""):
+        guardar_config(_BUJIAS_DESDE, c.execute("SELECT datetime('now')").fetchone()[0])
+    return salida
+
+
+def cuantas_bujias_relaciono():
+    """Cuántos pares unió o aprobó la app por las bujías (barato: para el título de la pantalla)."""
+    c.execute("""SELECT COUNT(*) FROM equivalencias_revisadas
+                 WHERE decision = 'ok' AND revisado_por = ? AND producto_a_id < producto_b_id""",
+              (QUIEN_DESCARTA_SOLA,))
+    return c.fetchone()[0]
+
+
+def grupos_de_bujias():
+    """Las bujías que se saben leer, agrupadas por cómo calzan: [{"Calzan igual", "Bujías",
+    "Grados", "Listas"}], de la más grande a la más chica. Sin los códigos de fábrica."""
+    grupos = {}
+    for fila, medidas in bujias_con_medidas().values():
+        if (fila["tipo"] or "").upper() == "OEM":
+            continue
+        g = grupos.setdefault(texto_de_la_bujia(medidas), {"n": 0, "grados": set(),
+                                                             "listas": set()})
+        g["n"] += 1
+        g["grados"].add(f"{medidas['sistema']} {medidas['grado']}")
+        g["listas"].add(fila["marca"])
+    return [{"Calzan igual": k, "Bujías": g["n"], "Grados": ", ".join(sorted(g["grados"])),
+             "Listas": ", ".join(sorted(g["listas"]))}
+            for k, g in sorted(grupos.items(), key=lambda x: -x[1]["n"])]
+
+
+def lo_que_relaciono_con_las_bujias():
+    """Lo que la app relacionó por las bujías y nadie volvió a decidir: [{"a", "b", "lote",
+    "desde", "antes"}]. Ver deshacer_lo_de_las_bujias()."""
+    c.execute("""SELECT h.producto_a_id AS a, h.producto_b_id AS b, h.lote,
+                        h.pendiente_desde AS desde, h.por_que AS antes
+                 FROM historial_de_revisiones h
+                 JOIN equivalencias_revisadas r ON r.producto_a_id = h.producto_a_id
+                                                AND r.producto_b_id = h.producto_b_id
+                 WHERE h.como = 'bujias' AND h.decision = 'ok'
+                   AND r.decision = 'ok' AND r.revisado_por = ?
+                   AND h.producto_a_id < h.producto_b_id
+                   AND h.id = (SELECT MAX(x.id) FROM historial_de_revisiones x
+                               WHERE x.producto_a_id = h.producto_a_id
+                                 AND x.producto_b_id = h.producto_b_id AND x.como = 'bujias')""",
+              (QUIEN_DESCARTA_SOLA,))
+    return [dict(r) for r in c.fetchall()]
+
+
+def deshacer_lo_de_las_bujias():
+    """Apaga el relacionado de las bujías y devuelve cada par a como estaba: a la cola con su
+    lista, rechazado por quien lo había rechazado, o sin vínculo. Devuelve cuántos. Pide
+    administrador: deshace muchas decisiones de una."""
+    exigir_nivel("admin", "deshacer lo que la app relacionó por las bujías")
+    # Primero se apaga: si no, la tarea de fondo lo volvería a hacer.
+    guardar_config(BUJIAS_AUTOMATICAS, "0")
+    pares = lo_que_relaciono_con_las_bujias()
+    if not pares:
+        return 0
+    usuario = obtener_usuario_actual()
+    with db_lock, transaccion():
+        for f in pares:
+            a, b, antes = f["a"], f["b"], f["antes"] or ""
+            c.execute("DELETE FROM equivalencias WHERE (producto_a_id = ? AND producto_b_id = ?) "
+                      "OR (producto_a_id = ? AND producto_b_id = ?)", (a, b, b, a))
+            c.execute("""DELETE FROM equivalencias_revisadas
+                         WHERE ((producto_a_id = ? AND producto_b_id = ?)
+                             OR (producto_a_id = ? AND producto_b_id = ?)) AND revisado_por = ?""",
+                      (a, b, b, a, QUIEN_DESCARTA_SOLA))
+            rechazo = _RE_ANTES_RECHAZADA.match(antes)
+            if antes.startswith("antes: en la cola"):
+                c.execute("""INSERT OR IGNORE INTO equivalencias_pendientes
+                                 (producto_a_id, producto_b_id, origen, lote, fecha)
+                             VALUES (?, ?, 'devuelto a la cola', ?,
+                                     COALESCE(?, datetime('now', 'localtime')))""",
+                          (a, b, f["lote"] or "DEVUELTO A LA COLA", f["desde"]))
+            elif rechazo:
+                c.executemany("""INSERT OR REPLACE INTO equivalencias_revisadas
+                                     (producto_a_id, producto_b_id, decision, revisado_por, motivo)
+                                 VALUES (?, ?, 'rechazada', ?, ?)""",
+                              [(a, b, rechazo.group(1), rechazo.group(2)),
+                               (b, a, rechazo.group(1), rechazo.group(2))])
+            c.execute("""INSERT INTO historial_de_revisiones
+                             (producto_a_id, producto_b_id, decision, revisado_por, lote,
+                              version_reglas, como, por_que)
+                         VALUES (?, ?, 'deshecha', ?, ?, ?, 'bujias', ?)""",
+                      (a, b, usuario, f["lote"], VERSION_CONFIANZA, antes))
+    guardar_config("bujias_que_calzan_ultimo", "")
+    return len(pares)
+

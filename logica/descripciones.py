@@ -2049,3 +2049,221 @@ def aplicar_aplicaciones_deducidas(filas):
                             f["Código"], f["_clean"], f["Marca"],
                             f.get("Pieza") or "") for f in tanda])
     return len(filas)
+
+
+# ============================================================================================
+# LA BUJÍA POR SU CÓDIGO: ROSCA, LARGO, HEXÁGONO Y MATERIAL
+# ============================================================================================
+# Lo pidió el dueño: «aprobá todas las bujías que sean de distintos grados térmicos si coinciden
+# el largo, la rosca, el hexágono y el material; en sí son distintas, pero en la casa de
+# repuestos se da una por otra y no pasa nada». Lo que dice todo eso es el CÓDIGO: NGK y Bosch
+# escriben la rosca, el hexágono, el largo, el asiento y el material en cada letra.
+# Se leen solo las familias que se pudieron comprobar con tus listas: las LUCAS de FISPA citan el
+# NGK y el Bosch de la misma bujía («NGK= BKR6E BOSCH = FR6DC»), y de esos pares los 16 que se
+# leen de los dos lados coinciden en todo. Lo que no se sabe leer (LFR, ZKR, LZKAR, PFR, las
+# Marelli, las de moto de rosca 18…) queda como estaba: sin medidas no se relaciona nada.
+
+# NGK, la serie común: la letra de adelante dice la rosca y el hexágono (en mm). Las de asiento
+# cónico («F», «EF») llevan hexágono de 16 aunque empiecen con B. La M («compacta») cambia el
+# hexágono y no se lee.
+_NGK_ROSCA_Y_HEXAGONO = {"B": (14, 20.8), "BC": (14, 16.0), "BK": (14, 16.0), "C": (10, 16.0),
+                         "D": (12, 18.0), "DC": (12, 16.0)}
+# El largo de la rosca, por la letra que sigue al grado térmico. Sin letra, 9,5 mm, solo en las B.
+_NGK_LARGO = {"E": 19.0, "H": 12.7, "L": 11.2, "EF": 17.5, "F": 11.2}
+_RE_NGK_COMUN = re.compile(r"^(BC|BK|DC|B|C|D)([PRUZ]*)(\d{1,2})(EF|EH|E|H|L|F)?([A-Z]*)(\d{0,2})$")
+# Dos series que no siguen esa regla: ZFR (rosca 14, hexágono 16, largo 19, como la ZFR6F-11 =
+# Bosch FR7LCX) y TR (rosca 14 de asiento cónico, hexágono 16, largo 17,5, como la TR6B-13 =
+# Bosch HR8MCV). Con P adelante son de platino; con I o IL, de iridio.
+_RE_NGK_ZFR = re.compile(r"^(P|I|IL)?ZFR(\d{1,2})([A-Z]*)(\d{0,2})$")
+_RE_NGK_TR = re.compile(r"^(P|I)?TR(\d{1,2})([A-Z]*)(\d{0,2})$")
+# Bosch: rosca, hexágono y asiento por la primera letra (W: 14 con hexágono 20,8; F: 14 con 16;
+# H: 14 de asiento cónico con 16; U: 10 con 16), R de resistencia, el grado, el largo, la
+# cantidad de electrodos y el material (C cobre, E níquel, P/PP platino, I/II iridio).
+_BOSCH_ROSCA = {"W": (14, 20.8, "plano"), "F": (14, 16.0, "plano"), "H": (14, 16.0, "cónico"),
+                "U": (10, 16.0, "plano")}
+_BOSCH_LARGO_PLANO = {"A": 12.7, "B": 12.7, "C": 19.0, "D": 19.0, "L": 19.0, "H": 19.0}
+_BOSCH_LARGO_CONICO = {"D": 17.5, "M": 17.5, "K": 17.5}
+_BOSCH_MATERIAL = {"": "común", "C": "común", "E": "común", "P": "platino", "PP": "platino",
+                   "I": "iridio", "II": "iridio"}
+_RE_BOSCH = re.compile(r"^([WFHU])(R?)(\d{1,2})([ABCDHLMK])([DTQ]?)(PP|II|C|E|P|I)?(?:X|V|R)?(?:PLUS)?$")
+# «BOSCH = FR 7 HC+ 0 242 236 565», «BOSCH = W8BC»: el Bosch que cita la descripción.
+_RE_BOSCH_CITADA = re.compile(r"BOSCH\s*=?\s*([WFHU]\s?R?\s?\d{1,2}\s?[A-Z]{1,4}\+?)")
+# Lo que se compara para decir que una va donde va la otra. El grado térmico, la resistencia, la
+# forma del electrodo y la luz no: eso es lo que el dueño dice que se cambia en el mostrador.
+CAMPOS_DE_LA_BUJIA = ("rosca", "largo", "hexagono", "asiento", "material")
+
+
+def _material_ngk(prefijo, resto):
+    if (prefijo or "").startswith("I") or "IX" in resto:
+        return "iridio"
+    if prefijo == "P" or "GP" in resto or "VX" in resto or resto.endswith("P"):
+        return "platino"
+    # V (oro y paladio) o G (de carrera): no se sabe con qué se cambian.
+    if "V" in resto or "G" in resto:
+        return None
+    return "común"
+
+
+def _bujia_ngk(codigo):
+    codigo = re.sub(r"[^A-Z0-9]", "", (codigo or "").upper())
+    m = _RE_NGK_COMUN.match(codigo)
+    if m:
+        base, construccion, grado, letra_largo, resto, _luz = m.groups()
+        rosca, hexagono = _NGK_ROSCA_Y_HEXAGONO[base]
+        asiento = "cónico" if letra_largo in ("F", "EF") else "plano"
+        if asiento == "cónico" and base != "B":
+            return None
+        largo = _NGK_LARGO.get(letra_largo) if letra_largo else (9.5 if base == "B" else None)
+        material = _material_ngk("", resto)
+        if not largo or not material:
+            return None
+        return {"rosca": rosca, "largo": largo, "hexagono": 16.0 if asiento == "cónico" else hexagono,
+                "asiento": asiento, "material": material, "grado": _grado_ngk(grado),
+                "sistema": "NGK", "codigo": codigo}
+    for patron, largo, asiento in ((_RE_NGK_ZFR, 19.0, "plano"), (_RE_NGK_TR, 17.5, "cónico")):
+        m = patron.match(codigo)
+        if m:
+            prefijo, grado, resto, _luz = m.groups()
+            # En estas series las letras que siguen al grado son de la forma («ZFR6PG» es la Bosch
+            # FR7HC, de cobre): el platino lo dice la P de adelante, el iridio la I.
+            material = ("iridio" if (prefijo or "").startswith("I") or "IX" in resto else
+                        "platino" if prefijo == "P" or "GP" in resto or "VX" in resto else
+                        "común")
+            return {"rosca": 14, "largo": largo, "hexagono": 16.0, "asiento": asiento,
+                    "material": material, "grado": _grado_ngk(grado), "sistema": "NGK",
+                    "codigo": codigo}
+    return None
+
+
+def _grado_ngk(digitos):
+    """El grado térmico de NGK va de 2 a 11: en «TR55» es el 5, y el otro 5 es de la forma."""
+    return int(digitos) if int(digitos) <= 12 else int(digitos[0])
+
+
+def _bujia_bosch(codigo):
+    codigo = re.sub(r"[^A-Z0-9]", "", (codigo or "").upper())
+    m = _RE_BOSCH.match(codigo)
+    if not m:
+        return None
+    base, _resistencia, grado, letra_largo, _electrodos, material = m.groups()
+    rosca, hexagono, asiento = _BOSCH_ROSCA[base]
+    largo = (_BOSCH_LARGO_PLANO if asiento == "plano" else _BOSCH_LARGO_CONICO).get(letra_largo)
+    if not largo:
+        return None
+    return {"rosca": rosca, "largo": largo, "hexagono": hexagono, "asiento": asiento,
+            "material": _BOSCH_MATERIAL[material or ""], "grado": int(grado), "sistema": "Bosch",
+            "codigo": codigo}
+
+
+def medidas_de_la_bujia(producto):
+    """Rosca, largo, hexágono, asiento y material de una bujía de encendido, por su código o por
+    el que cita la descripción; None si no es una bujía o no se sabe leer. producto: un dict con
+    codigo_raw, descripcion, marca y tipo (como las filas de evidencia_cruzada()).
+
+    Si lo que dicen dos códigos del mismo producto no coincide —el NGK y el Bosch que cita, el
+    código y lo que dice el texto—, None: no se relaciona lo que no se sabe.
+
+    Se recuerda por producto: en una búsqueda de bujía se pregunta por cada fila de cada camino
+    que mira la ficha (11.590 veces, 0,6 s, en la primera versión). Devuelve una copia: quien la
+    reciba puede tocarla sin cambiarle la respuesta al siguiente."""
+    medidas = _medidas_de_la_bujia_recordadas(
+        producto.get("codigo_raw") or "", producto.get("descripcion") or "",
+        producto.get("marca") or "", producto.get("tipo") or "")
+    return dict(medidas) if medidas else None
+
+
+@functools.lru_cache(maxsize=50000)
+def _medidas_de_la_bujia_recordadas(codigo_raw, descripcion, marca, tipo):
+    producto = {"codigo_raw": codigo_raw, "descripcion": descripcion, "marca": marca,
+                "tipo": tipo}
+    # Primero lo barato: se pregunta por cada resultado del buscador y por cada par de la cola.
+    if "BUJ" not in descripcion.upper():
+        return None
+    texto = _normalizar_desc(descripcion)
+    if not re.match(r"\s*BUJIAS?\b", texto) or _RE_BUJIA_PRECALENTAMIENTO.search(texto):
+        return None
+    if (producto.get("tipo") or "").upper() == "OEM":
+        # El número de fábrica es el código: su descripción la copió la fila que lo trajo, y
+        # puede citar otra bujía.
+        lecturas = [_bujia_ngk(producto.get("codigo_raw")) or _bujia_bosch(producto.get("codigo_raw"))]
+    else:
+        lecturas = [_bujia_ngk(_codigo_ngk(producto))]
+        mayus = descripcion.upper()
+        # El código propio, cuando es el de NGK: TARANTO las vende con ese código («BKR6E | BUJIA
+        # NISSAN»), y cualquier lista que diga NGK en la descripción. TARANTO pone una J adelante
+        # cuando es el juego de 4: «JC9E» es la C9E.
+        propio = sanitizar(producto.get("codigo_raw") or "")
+        de_taranto = (producto.get("marca") or "").upper().startswith("TARANTO")
+        if de_taranto or re.search(r"\bN(?:GK|KG)\b", mayus):
+            lecturas.append(_bujia_ngk(propio) or (
+                _bujia_ngk(propio[1:]) if de_taranto and propio.startswith("J") else None))
+        lecturas += [_bujia_bosch(m.group(1)) for m in _RE_BOSCH_CITADA.finditer(mayus)]
+        # JL vende las Bosch con su código: «FR 7 DC | BUJIA ENCEND Bosch …».
+        if "BOSCH" in mayus:
+            lecturas.append(_bujia_bosch(producto.get("codigo_raw")))
+    lecturas = [x for x in lecturas if x]
+    if not lecturas:
+        return None
+    if any(any(x[k] != lecturas[0][k] for k in CAMPOS_DE_LA_BUJIA) for x in lecturas[1:]):
+        return None
+    medidas = dict(lecturas[0])
+    # El texto puede decir el material que el código no («BPR6EX … PUNTA PLATINO»); si dice
+    # otro, no se sabe cuál es.
+    dice = ("iridio" if re.search(r"IRIDI", texto) else
+            "platino" if re.search(r"PLATIN", texto) else None)
+    if dice and dice != medidas["material"]:
+        if medidas["material"] != "común":
+            return None
+        medidas["material"] = dice
+    return medidas
+
+
+def campos_distintos_de_la_bujia(medidas_a, medidas_b):
+    """Lo que no coincide entre dos bujías (de CAMPOS_DE_LA_BUJIA): [] si calzan igual, None si
+    de alguna no se saben las medidas."""
+    if not medidas_a or not medidas_b:
+        return None
+    return [k for k in CAMPOS_DE_LA_BUJIA if medidas_a[k] != medidas_b[k]]
+
+
+def bujias_que_calzan(medidas_a, medidas_b):
+    """¿Una va donde va la otra? (True, "") si coinciden rosca, largo, hexágono, asiento y
+    material; (False, lo que no coincide) si no; (None, "") si de alguna no se saben."""
+    distinto = campos_distintos_de_la_bujia(medidas_a, medidas_b)
+    if distinto is None:
+        return None, ""
+    if not distinto:
+        return True, ""
+    return False, "; ".join(f"{_NOMBRE_DEL_CAMPO_DE_BUJIA[k]} {_valor_de_bujia(k, medidas_a[k])} "
+                            f"vs {_valor_de_bujia(k, medidas_b[k])}" for k in distinto)
+
+
+_NOMBRE_DEL_CAMPO_DE_BUJIA = {"rosca": "rosca", "largo": "largo", "hexagono": "hexágono",
+                              "asiento": "asiento", "material": "material"}
+
+
+def _valor_de_bujia(campo, valor):
+    if campo == "rosca":
+        return f"M{valor}"
+    if campo in ("largo", "hexagono"):
+        return f"{valor:g} mm".replace(".", ",")
+    return str(valor)
+
+
+def texto_de_la_bujia(medidas):
+    """«M14, largo 19 mm, hexágono 16 mm, asiento plano, común»."""
+    return ", ".join([_valor_de_bujia("rosca", medidas["rosca"]),
+                      f"largo {_valor_de_bujia('largo', medidas['largo'])}",
+                      f"hexágono {_valor_de_bujia('hexagono', medidas['hexagono'])}",
+                      f"asiento {medidas['asiento']}", medidas["material"]])
+
+
+def grados_de_las_bujias(medidas_a, medidas_b):
+    """«grado térmico 5 y 6», «grado térmico NGK 5 y Bosch 7» o «el mismo grado térmico»: NGK y
+    Bosch los numeran al revés (la BKR5E es la Bosch FR7DC), así que se dice de quién es cada uno."""
+    if medidas_a["sistema"] == medidas_b["sistema"]:
+        if medidas_a["grado"] == medidas_b["grado"]:
+            return "el mismo grado térmico"
+        return f"grado térmico {medidas_a['grado']} y {medidas_b['grado']}"
+    return (f"grado térmico {medidas_a['sistema']} {medidas_a['grado']} y "
+            f"{medidas_b['sistema']} {medidas_b['grado']}")

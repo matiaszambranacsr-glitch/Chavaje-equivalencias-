@@ -6636,6 +6636,33 @@ Lo pidió el dueño: «seguí mejorando la redacción de los textos, ponelos tod
 
 Probado en un navegador de verdad, en inglés y en castellano: las listas dicen «Elegí una opción», las tablas «Pantalla completa», «Buscar en la tabla» y «Bajar la tabla», el cartelito de la barra de los gráficos «Ver los números», al escribir «Enter para confirmar», y el calendario de 💵 Caja «octubre 2026» con «D L M M J V S». Los gráficos, «23/10» y «$120.000». En cada pantalla queda un solo «ℹ️ Cómo funciona» arriba (en Depósito: la sección, «⏳ Para buscar» y cómo funciona la cola), y las ayudas de una parte siguen en su parte. `pruebas_de_la_sesion.py` (2d) lo controla: rompiéndolo a propósito, avisa.
 
+## 🕯️ Las bujías que calzan, una por otra
+
+Lo pidió el dueño: «aprobá todas las bujías que sean de distintos grados térmicos; si es de platino o del material que tengamos, hacé que coincida largo, rosca y hexágono, y el resto lo relacionamos: en sí son distintas, pero en la casa de repuestos le das una por otra y no pasa nada».
+
+**De dónde salen las medidas: del código.** NGK y Bosch escriben la rosca, el hexágono, el largo, el asiento y el material en las letras del código. La BKR6E es rosca 14, hexágono 16, largo 19, asiento plano, común, grado 6; la Bosch FR 7 DC es lo mismo con grado 7 (Bosch numera al revés). La app lee el código propio (TARANTO vende las NGK con su número, con una J adelante si es el juego de 4), el NGK y el Bosch que cita la descripción («NGK= BKR6E BOSCH = FR6DC», como en las LUCAS de FISPA) y el Bosch de JL.
+
+- **Comprobado con tus listas:** las LUCAS de FISPA citan el NGK y el Bosch de la misma bujía. De esos pares, los 16 que se leen de los dos lados coinciden en todo, sin ninguno en contra.
+- **Lo que se lee:** 271 de las 463 bujías de encendido de la copia de la base (TARANTO 193 de 250, FISPA 37 de 71, JL 21 de 82, y 20 códigos de fábrica). No se leen las Marelli, las NGK de series especiales (LFR, ZKR, LZKAR, PFR, DILKAR…), las de moto de rosca 18 ni las incandescentes. Esas quedan como estaban: sin medidas no se relaciona nada.
+- **Si dos códigos del mismo producto no coinciden** (el NGK y el Bosch que cita), no se toma ninguno.
+
+**Qué cambia:**
+
+- **Las que calzan van juntas.** Misma rosca, largo, hexágono, asiento y material: suman a favor («🕯️ calzan igual… grado térmico 5 y 6: se da una por otra»), y ni los autos que nombra cada lista ni el grado las separan. Tampoco son «otra pieza» dos de la misma lista: la BKR5E y la BKR6E de TARANTO.
+- **La que no entra, no.** Otra rosca, otro largo, otro hexágono u otro asiento: en rojo («🕯️ una no entra donde va la otra: hexágono 20,8 mm vs 16 mm»). Si solo cambia el material (platino contra común), no se relacionan, y decide el número de NGK, como antes.
+- **🕯️ La app las relaciona sola** (📊 Estadísticas → 🔗 Equivalencias sugeridas → «🕯️ Bujías que calzan igual»). Las que esperan en la cola se aprueban; las que no estaban en ningún lado se unen. Corre por atrás al subir esta versión y cada vez que entra una lista. En la copia de la base:
+  - 14 aprobadas de la cola;
+  - 8 que «Chavo» había rechazado y solo cambiaban de grado térmico (TARANTO BP6ES contra LUCAS LSP5P02, que es la BP5ES);
+  - 4.792 unidas nuevas;
+  - en 6 segundos; los vínculos pasan de 20.037 a 24.851.
+- **Lo que se rechace de ahora en más, no se toca.** Queda firmado «🤖 la app» y no cuenta para lo que la app aprende de tus decisiones. Viene prendido porque lo pediste. Apagarlo y «↩️ Deshacer todo» piden la contraseña de administrador: deshacer devuelve cada par a como estaba (a la cola, rechazado por quien lo rechazó, o sin vínculo). Los códigos de fábrica no se unen entre sí.
+- **En el buscador**, cada una dice su grado al lado del de lo buscado: «🟢 directo · 🕯️ grado 5 (lo buscado: 6)», «🕯️ Bosch 7 (lo buscado: NGK 6)». Buscar la BKR6E antes traía solo a ella misma; ahora trae 72, 65 confirmadas, en 0,1 a 0,5 segundos.
+- **Las bujías que calzan no se encadenan.** En la primera versión, cada una abría las cadenas de las otras 64: buscar la BKR6E traía 190 resultados, hasta a 6 saltos (cables, bujías Marelli), en 5 segundos. Ahora ese vínculo se sigue solo desde lo buscado.
+- **🏆 Primero la del mismo grado.** En la tabla, entre las confirmadas, van primero las del mismo grado térmico (o el más cercano: Bosch numera al revés, y con tus listas NGK ≈ 13 − Bosch), después lo que hay en stock y lo más barato. La recomendada sigue esa misma regla, y si la más barata es de otro grado lo dice: «La más barata, LUCAS LSPKR5E, es de otro grado térmico: grado 5 (lo buscado: 6). Se da igual, pero primero va la del grado más cercano».
+- **Más rápido:** las medidas de cada bujía se recuerdan; en una búsqueda se preguntaban 11.590 veces (0,6 s).
+
+Reglas v19. La revisión contra todo lo decidido (`pruebas_de_la_revision.py --base`) da lo mismo que antes: de 20.037 aprobados, 10 en rojo; de 2.633 rechazados, 3 pasarían limpios. Con las reglas nuevas cambia un solo aprobado, y para bien: la FR 7 DC de JL con la LUCAS LSPKR6E pasa de revisión a limpia. `pruebas_de_compatibilidad.py --base` da verde en los dos sentidos. `pruebas_de_la_precision.py` (82) lo controla: el decodificador, la evidencia, la misma lista, el relacionado (cola, rechazos viejos y nuevos), el buscador, la 🏆 y el deshacer; rompiendo cada parte a propósito, avisa. `pruebas_de_la_sesion.py` (6) abre la pantalla.
+
 ## 🔢 El número de fábrica manda sobre el auto
 
 Lo pidió el dueño: «si ya coincide exactamente el código original y no coincide solamente el auto o el motor que dice la descripción, ponelo como equivalencia igual, ya que capaz que algún proveedor no sabe o no pudo poner que le va para algún auto que otro proveedor sí».

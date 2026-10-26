@@ -535,7 +535,10 @@ def ordenar_por_seguridad_y_disponibilidad(filas):
         if f.get("Cadena") == "— el buscado":
             return (0, 0, 0)
         tecnica = _ORDEN_POR_SEGURIDAD.get(veredicto_de_la_equivalencia(f)[:1], 7)
-        return (tecnica, 0 if (f.get("Stock") or 0) > 0 else 1, f.get("Precio") or float("inf"))
+        # La bujía de otro grado térmico, después de las del mismo grado (ver
+        # anotar_el_grado_de_las_bujias()): se da una por otra, pero primero la del mismo.
+        return (tecnica, f.get("_grado_distinto") or 0,
+                0 if (f.get("Stock") or 0) > 0 else 1, f.get("Precio") or float("inf"))
     return sorted(filas, key=clave)
 
 
@@ -592,7 +595,9 @@ def la_recomendacion_explicada(filas, fuera_de_escala=()):
                                     f"{la_mas_barata.get('Codigo', '')}: "
                                     f"{por_que_no_se_recomienda(la_mas_barata)}.")
         return salida
-    mejor = min(candidatas, key=lambda f: f["Precio"])
+    # La bujía del mismo grado térmico antes que una más barata de otro grado; si no hay del
+    # mismo, la del grado más cercano. Ver anotar_el_grado_de_las_bujias().
+    mejor = min(candidatas, key=lambda f: (f.get("_grado_distinto") or 0, f["Precio"]))
     salida["recomendada"] = mejor
     if mejor in buscado:
         por_que = "es lo que pidió el cliente"
@@ -610,7 +615,14 @@ def la_recomendacion_explicada(filas, fuera_de_escala=()):
                        + f"**Recomendada: {mejor.get('Marca', '')} {mejor.get('Codigo', '')}** — "
                        f"{por_que}, hay {miles(mejor.get('Stock') or 0, 0)} en stock{ahorro}.")
     la_mas_barata = min(con_precio, key=lambda f: f["Precio"])
-    if la_mas_barata is not mejor and la_mas_barata["Precio"] < mejor["Precio"]:
+    if (la_mas_barata is not mejor and la_mas_barata["Precio"] < mejor["Precio"]
+            and la_mas_barata in candidatas):
+        # Se podía recomendar: quedó atrás por el grado térmico, y se dice así.
+        salida["por_que_no"] = (f"La más barata, {la_mas_barata.get('Marca', '')} "
+                                f"{la_mas_barata.get('Codigo', '')}, es de otro grado térmico: "
+                                f"{la_mas_barata.get('_grado_texto', '')}. Se da igual, pero "
+                                "primero va la del grado más cercano.")
+    elif la_mas_barata is not mejor and la_mas_barata["Precio"] < mejor["Precio"]:
         salida["por_que_no"] = (f"La más barata, {la_mas_barata.get('Marca', '')} "
                                 f"{la_mas_barata.get('Codigo', '')}, no se recomienda: "
                                 f"{por_que_no_se_recomienda(la_mas_barata)}.")

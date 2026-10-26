@@ -2114,6 +2114,118 @@ def probar(L):
             ("30081" in _res_n, str(_res_n.get("30081", {}).get("_estado", "")).startswith("🔴"),
              "contra lo buscado" in str(_res_n.get("30081", {}).get("Cadena", ""))),
             (True, False, False))
+
+    # 82. 🕯️ LAS BUJÍAS QUE CALZAN (ver «LA BUJÍA POR SU CÓDIGO» y «LAS BUJÍAS QUE CALZAN,
+    # RELACIONADAS SOLAS»): por el código, la rosca, el largo, el hexágono, el asiento y el
+    # material; las que calzan se dan una por otra aunque cambie el grado térmico.
+    _med = ns["medidas_de_la_bujia"]
+    def _fisico(codigo, desc, marca_n="TARANTO", tipo="PROVEEDOR"):
+        m = _med({"codigo_raw": codigo, "descripcion": desc, "marca": marca_n, "tipo": tipo})
+        return m and tuple(m[k] for k in ns["CAMPOS_DE_LA_BUJIA"]) + (m["sistema"], m["grado"])
+    esperar("NGK y Bosch, por su código",
+            [_fisico("BKR6E", "BUJIAS NGK Fiat Palio 1.6"),
+             _fisico("JBKR5E", "BUJIAS NGK"),
+             _fisico("FR 7 DC", "BUJIA ENCEND Bosch CHEVROLET - FIAT", "JL"),
+             _fisico("W 8 BC", "BUJIA ENCEND Bosch RENAULT 4/6/12", "JL"),
+             _fisico("BPR5EFS", "BUJIA FORD SIERRA"),
+             _fisico("TR55", "BUJIA APLICACION CHEVROLET S10"),
+             _fisico("JPTR6F-13", "BUJIAS NGK"),
+             _fisico("JBKR6EIX", "BUJIAS NGK"),
+             _fisico("LSPP4ESLUCAS", "BUJIA NAFTA LSPP4ES Fiat 147 NGK= BP4ES BOSCH = W9DC", "FISPA")],
+            [(14, 19.0, 16.0, "plano", "común", "NGK", 6),
+             (14, 19.0, 16.0, "plano", "común", "NGK", 5),
+             (14, 19.0, 16.0, "plano", "común", "Bosch", 7),
+             (14, 12.7, 20.8, "plano", "común", "Bosch", 8),
+             (14, 17.5, 16.0, "cónico", "común", "NGK", 5),
+             (14, 17.5, 16.0, "cónico", "común", "NGK", 5),
+             (14, 17.5, 16.0, "cónico", "platino", "NGK", 6),
+             (14, 19.0, 16.0, "plano", "iridio", "NGK", 6),
+             (14, 19.0, 20.8, "plano", "común", "NGK", 4)])
+    esperar("lo que no se sabe leer, ni lo que no es una bujía de encendido, no tiene medidas",
+            [_fisico("LFR5B", "BUJIA NGK"), _fisico("CT6QM :", "BUJIA NAFTA Ford Marelli", "JL"),
+             _fisico("CY03", "Bujia encandescente Chevrolet"),
+             _fisico("L215LUCAS", "CABLE DE BUJIA L215 NGK= BKR6E", "FISPA"),
+             # El NGK y el Bosch que cita no calzan: no se sabe cuál es.
+             _fisico("LSPX1LUCAS", "BUJIA NAFTA NGK= BKR6E BOSCH = WR7DC", "FISPA")],
+            [None, None, None, None, None])
+    mt4, mj4 = marca("TARANTO CUATRO"), marca("JL CUATRO")
+    _bk5 = producto("BKR5E", "BUJIAS NGK Fiat Palio 1.6, Chrysler Neon 2.0", mt4)
+    _bk6 = producto("BKR6E", "BUJIAS NGK Honda Civic", mt4)
+    _bp6 = producto("BPR6E", "BUJIAS NGK VW Gol", mt4)
+    # Otro grado y de platino: no calzan (el material), y el número de NGK es otro.
+    _gp6 = producto("LSPKR5EGP", "BUJIA NAFTA PLATINO NGK= BKR5EGP Honda Civic", marca("FISPA CUATRO"))
+    _fr6 = producto("FR 6 DC", "BUJIA ENCEND Bosch FIAT LINEA - PEUGEOT 206", mj4)
+    _fr8 = producto("FR 8 DC", "BUJIA ENCEND Bosch RENAULT CLIO", mj4)
+    _otra = producto("CAB77", "CABLE DE BUJIA RENAULT CLIO", mj4)
+    vincular(_fr8, _otra, "JL CUATRO · 26/10")
+    conn.commit()
+    _ev = ns["evidencia_cruzada"]
+    _a_favor, _vetos, _ = _ev(_bk5, _fr6)
+    esperar("NGK contra Bosch que calzan, con otros autos: a favor y sin vetos",
+            ([x[:15] for x in _a_favor if x.startswith("🕯️")], _vetos),
+            (["🕯️ calzan igual"], []))
+    esperar("otro hexágono: no entra",
+            [v.startswith("🕯️ una no entra donde va la otra: hexágono") for v in _ev(_bk6, _bp6)[1]
+             if v.startswith("🕯️")], [True])
+    _cu6 = producto("LSPKR6E", "BUJIA NAFTA NGK= BKR6E Honda Civic", marca("LUCAS CUATRO"))
+    esperar("solo otro material: decide el número de NGK, como antes",
+            [v for v in _ev(_cu6, _gp6)[1]], ["🔤 bujías distintas: NGK BKR6E vs NGK BKR5EGP"])
+    _otra_pieza = ns["otra_pieza_de_la_misma_lista"]
+    esperar("dos de TARANTO que calzan no son «otra pieza»; las que no calzan, sí",
+            (_otra_pieza("TARANTO CUATRO", "BKR5E", "BUJIAS NGK Fiat Palio", "BKR6E", "BUJIAS NGK Honda"),
+             bool(_otra_pieza("TARANTO CUATRO", "BKR6E", "BUJIAS NGK Honda", "BPR6E", "BUJIAS NGK VW Gol"))),
+            ("", True))
+    # La cola, un rechazo de antes y uno de después.
+    _antes_pend = c.execute("SELECT COUNT(*) FROM equivalencias_pendientes").fetchone()[0]
+    c.execute("INSERT INTO equivalencias_pendientes (producto_a_id, producto_b_id, origen, lote) "
+              "VALUES (?, ?, 'lista_proveedor', 'TARANTO CUATRO · 26/10')", (min(_bk5, _fr6), max(_bk5, _fr6)))
+    for _x, _y in ((_bk6, _fr6), (_bk6, _fr6)[::-1]):
+        c.execute("INSERT INTO equivalencias_revisadas (producto_a_id, producto_b_id, decision, "
+                  "revisado_por, motivo, fecha) VALUES (?, ?, 'rechazada', 'Chavo', NULL, "
+                  "'2026-01-01 10:00:00')", (_x, _y))
+    conn.commit()
+    _par = lambda a, b: (min(a, b), max(a, b))
+    _r1 = ns["relacionar_las_bujias_que_calzan"]()
+    _de_bujias = lambda: {(a, b) for a, b in c.execute(
+        "SELECT producto_a_id, producto_b_id FROM equivalencias WHERE "
+        "producto_a_id IN (?, ?, ?, ?, ?) AND producto_b_id IN (?, ?, ?, ?, ?)",
+        (_bk5, _bk6, _fr6, _fr8, _bp6) * 2)}
+    esperar("aprueba la de la cola, la rechazada antes y une las nuevas; las que no calzan, no",
+            (_r1["cola"] >= 1, _r1["rechazadas"],
+             _de_bujias() >= {_par(_bk5, _fr6), _par(_bk6, _fr6), _par(_bk5, _bk6), _par(_fr6, _fr8)},
+             any(_bp6 in p for p in _de_bujias())),
+            (True, 1, True, False))
+    esperar("la segunda vez no hace nada", ns["relacionar_las_bujias_que_calzan"](),
+            {"cola": 0, "rechazadas": 0, "nuevos": 0})
+    # Buscando la BKR5E: la FR 8 DC con su grado, y el cable unido a la FR 8 DC no viene por ahí.
+    _res_b = {f["Codigo"]: f for f in ns["buscar_con_variantes_del_cero"]("BKR5E")[0]}
+    esperar("en el buscador: el grado al lado, sin encadenar",
+            ("FR 8 DC" in _res_b, "🕯️ Bosch 8 (lo buscado: NGK 5)" in _res_b.get("FR 8 DC", {}).get("Cadena", ""),
+             bool(_res_b.get("FR 8 DC", {}).get("_complementario")), "CAB77" in _res_b),
+            (True, True, False, False))
+    # La 🏆: la del grado más cercano antes que la más barata (la Bosch FR 8 DC es la NGK 5).
+    for _pid, _st, _pr in ((_fr6, 3, 100.0), (_fr8, 2, 300.0), (_bk6, 5, 200.0)):
+        c.execute("UPDATE productos SET stock = ?, precio = ? WHERE id = ?", (_st, _pr, _pid))
+    conn.commit()
+    _filas_c, _reco = ns["coronar_la_recomendada"](ns["buscar_con_variantes_del_cero"]("BKR5E")[0])
+    esperar("la 🏆, la del grado más cercano, y por qué no la más barata",
+            (_reco["recomendada"] and _reco["recomendada"]["Codigo"],
+             "es de otro grado térmico" in _reco["por_que_no"],
+             [f["Codigo"] for f in _filas_c if f["Codigo"] in ("FR 8 DC", "BKR6E", "FR 6 DC")]),
+            ("FR 8 DC", True, ["FR 8 DC", "BKR6E", "FR 6 DC"]))
+    # Lo que una persona rechace de ahora en más, no se toca.
+    ns["marcar_revision"]([(_bk6, _fr8)], "rechazada", quien="Chavo")
+    c.execute("DELETE FROM equivalencias WHERE producto_a_id = ? AND producto_b_id = ?", _par(_bk6, _fr8))
+    conn.commit()
+    esperar("un rechazo nuevo manda", ns["relacionar_las_bujias_que_calzan"](),
+            {"cola": 0, "rechazadas": 0, "nuevos": 0})
+    _n_desh = ns["deshacer_lo_de_las_bujias"]()
+    esperar("deshacer: todo a como estaba, y apagado",
+            (_n_desh > 0, c.execute("SELECT COUNT(*) FROM equivalencias_pendientes").fetchone()[0] - _antes_pend,
+             c.execute("SELECT revisado_por FROM equivalencias_revisadas WHERE producto_a_id = ? "
+                       "AND producto_b_id = ?", (_bk6, _fr6)).fetchone()[0],
+             _par(_bk5, _bk6) in _de_bujias(), ns["bujias_automaticas_prendido"]()),
+            (True, 1, "Chavo", False, False))
     return fallas
 
 

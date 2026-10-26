@@ -334,6 +334,25 @@ def probar():
              ns["obtener_config"]("descarte_automatico_pendiente", "")), ("1", "1"))
     [b for b in rev.button if b.key == "btn_descarte_automatico"][0].click().run()
     esperar("y apagado", ns["obtener_config"]("descarte_automatico_rojos", ""), "0")
+    # 🕯️ Las bujías que calzan: abierto muestra los grupos y se apaga desde ahí. Ver «LAS
+    # BUJÍAS QUE CALZAN, RELACIONADAS SOLAS».
+    _mb = [r[0] for r in c.execute("SELECT id FROM marcas WHERE nombre = 'LISTA UNO'")][0]
+    for cod_b, desc_b in (("BKR5E", "BUJIA NGK FIAT"), ("BKR6E", "BUJIA NGK FORD")):
+        c.execute("INSERT INTO productos (codigo_raw, codigo_clean, descripcion, marca_id) "
+                  "VALUES (?, ?, ?, ?)", (cod_b, cod_b, desc_b, _mb))
+    conn.commit()
+    rev.session_state["exp_bujias_que_calzan"] = True
+    rev.run()
+    esperar("el grupo de las dos bujías, a la vista",
+            [(f["Calzan igual"], f["Bujías"]) for f in ns["grupos_de_bujias"]()],
+            [("M14, largo 19 mm, hexágono 16 mm, asiento plano, común", 2)])
+    # El clic del botón de adentro no se prueba acá: el simulador de Streamlit vuelve a cerrar
+    # el desplegable perezoso al tocarlo. Lo que hace lo prueba pruebas_de_la_precision.py (82).
+    _exp_b = [x for x in rev.expander if "Bujías que calzan" in x.label][0]
+    esperar("abierto, con la tabla de los grupos y los dos botones",
+            ("Calzan igual" in list(_exp_b.dataframe[0].value.columns),
+             {b.key for b in _exp_b.button} >= {"btn_bujias_que_calzan", "btn_deshacer_bujias"}),
+            (True, True))
     esperar("sin errores en la revisión", [e.value for e in rev.exception], [])
 
     # 7. 🕸️ Unidos a varias piezas distintas de una misma lista: se buscan, se mira uno y se le
