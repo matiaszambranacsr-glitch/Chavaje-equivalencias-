@@ -157,6 +157,45 @@ def probar(L):
     esperar("sumar al presupuesto: dos veces el mismo suma la cantidad",
             (len(st.session_state["carrito"]), st.session_state["carrito"][a]["cantidad"]), (1, 3))
     st.session_state.pop("carrito", None)
+
+    # 6. EL COSTO CON LA BONIFICACIÓN DEL PROVEEDOR (ver datos.py): se calcula para lo que no
+    # tiene costo, sigue al precio cuando entra un aumento, lo nuevo entra con su costo, lo
+    # cargado a mano no se toca nunca, y sacarla saca solo lo calculado.
+    c.execute("INSERT INTO marcas (nombre, tipo) VALUES ('BONIF', 'PROVEEDOR')")
+    _mb = c.lastrowid
+    _pb = {}
+    for codigo, precio in (("BO1", 1000), ("BO2", 2000), ("BO3", None)):
+        c.execute("INSERT INTO productos (codigo_raw, codigo_clean, descripcion, marca_id, precio) "
+                  "VALUES (?, ?, 'JUNTA', ?, ?)", (codigo, codigo, _mb, precio))
+        _pb[codigo] = c.lastrowid
+    conn.commit()
+    ns["actualizar_precio_stock"](_pb["BO2"], 2000, None, costo=1500)
+    _costo = lambda cod: tuple(c.execute("SELECT precio_costo, costo_origen FROM productos "
+                                         "WHERE id = ?", (_pb[cod],)).fetchone())
+    esperar("calcula lo que no tiene costo, y no toca lo cargado a mano",
+            (ns["guardar_bonificacion_del_proveedor"](_mb, 30), _costo("BO1"), _costo("BO2"),
+             _costo("BO3")),
+            (1, (700.0, "bonificacion"), (1500.0, "mano"), (None, None)))
+    ns["aumentar_precios_por_marca"](_mb, 10)
+    c.execute("INSERT INTO productos (codigo_raw, codigo_clean, descripcion, marca_id, precio) "
+              "VALUES ('BO4', 'BO4', 'JUNTA', ?, 500)", (_mb,))
+    _pb["BO4"] = c.lastrowid
+    conn.commit()
+    esperar("sigue al aumento, y lo nuevo entra con su costo",
+            (_costo("BO1"), _costo("BO2"), _costo("BO4")),
+            ((770.0, "bonificacion"), (1500.0, "mano"), (350.0, "bonificacion")))
+    esperar("sacarla saca solo lo calculado",
+            (ns["guardar_bonificacion_del_proveedor"](_mb, None), _costo("BO1"), _costo("BO2")),
+            (2, (None, None), (1500.0, "mano")))
+
+    # 7. Qué tan completo está el catálogo (ver que_tan_completo_esta_el_catalogo()): por lista,
+    # con la fila «Todas» al final. BONIF tiene 4 productos, 3 con precio y 1 con costo a mano.
+    _completo = ns["que_tan_completo_esta_el_catalogo"]()
+    _bonif = next(f for f in _completo if f["Marca"] == "BONIF")
+    esperar("qué tan completo: lo de una lista, y «Todas» al final",
+            ((_bonif["Productos"], _bonif["Precio"], _bonif["Costo"]), _completo[-1]["Marca"],
+             _completo[-1]["Productos"] == sum(f["Productos"] for f in _completo[:-1])),
+            ((4, 3, 1), "Todas", True))
     return fallas
 
 

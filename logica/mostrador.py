@@ -984,6 +984,130 @@ def coeficiente_de_lista(marca_id):
         return 1.0
 
 
+def bonificacion_del_proveedor(marca_id):
+    """Lo que el proveedor descuenta sobre su lista, en %, o None si no se cargó. Ver «EL COSTO
+    CON LA BONIFICACIÓN DEL PROVEEDOR» en datos.py."""
+    try:
+        valor = obtener_config(f"bonificacion_proveedor_{marca_id}", "")
+        return float(valor) if valor not in ("", None) else None
+    except ValueError:
+        return None
+
+
+def guardar_bonificacion_del_proveedor(marca_id, porcentaje):
+    """Guarda la bonificación de un proveedor y calcula con ella el costo de sus productos que no
+    tienen uno cargado a mano (y recalcula los que ya eran calculados). None la saca, y con ella
+    los costos calculados. Devuelve cuántos costos quedaron calculados (o se sacaron).
+    Solo administrador: cambia el costo de una lista entera."""
+    exigir_nivel("admin", "cambiar la bonificación de un proveedor")
+    clave = f"bonificacion_proveedor_{marca_id}"
+    with db_lock, transaccion():
+        if porcentaje is None:
+            c.execute("DELETE FROM configuracion WHERE clave = ?", (clave,))
+            c.execute("""UPDATE productos SET precio_costo = NULL, costo_origen = NULL
+                         WHERE marca_id = ? AND costo_origen = 'bonificacion'""", (marca_id,))
+            return c.rowcount
+        porcentaje = float(porcentaje)
+        if not 0 <= porcentaje < 100:
+            raise ValueError("La bonificación va de 0 a menos de 100 %.")
+        c.execute("INSERT INTO configuracion (clave, valor) VALUES (?, ?) "
+                  "ON CONFLICT(clave) DO UPDATE SET valor = excluded.valor",
+                  (clave, repr(porcentaje)))
+        # Un costo cargado antes de que existiera costo_origen (vacío, con costo) es de una
+        # persona: no se toca.
+        c.execute("""UPDATE productos
+                        SET precio_costo = ROUND(precio * (1 - ? / 100.0), 2),
+                            costo_origen = 'bonificacion'
+                      WHERE marca_id = ? AND precio > 0
+                        AND (costo_origen = 'bonificacion'
+                             OR (costo_origen IS NULL AND COALESCE(precio_costo, 0) = 0))""",
+                  (porcentaje, marca_id))
+        return c.rowcount
+
+
+# Lo que se mide en «qué tan completo está el catálogo»: (columna, condición SQL sobre p).
+_LO_QUE_SE_SABE_DE_CADA_PRODUCTO = (
+    ("Precio", "p.precio > 0"),
+    ("Costo", "COALESCE(p.precio_costo, 0) > 0"),
+    ("Stock", "p.stock IS NOT NULL"),
+    ("Foto", "COALESCE(p.imagen_thumb, p.imagen_url, '') <> ''"),
+    ("Fabricante", "COALESCE(p.marca_repuesto, '') <> ''"),
+    ("Medidas", "COALESCE(p.diametro_interno, p.diametro_externo, p.largo_total, p.ancho, "
+                "p.espesor, p.cantidad_vias, p.paso_rosca, p.cantidad_estrias, "
+                "p.cantidad_canales) IS NOT NULL"),
+    ("Autos", "a.codigo_clean IS NOT NULL"),
+    ("Cód. de barras", "COALESCE(p.codigo_barras, '') <> ''"),
+    ("Ubicación", "COALESCE(p.ubicacion, '') <> ''"),
+)
+
+
+def que_tan_completo_esta_el_catalogo():
+    """Qué sabe la app de cada producto, por lista: [{"Marca", "Productos", "Precio", "Costo",
+    …, "Equivalente"}] con el porcentaje de cada cosa, y la fila «Todas» al final.
+
+    No había ningún lugar que lo dijera, y los huecos eran grandes: en la copia de la base real,
+    de 71.659 productos de proveedor, 0 tenían costo, 1 stock, 0 foto y 1.971 fabricante. Con eso
+    a la vista se sabe por qué una pantalla no muestra nada (la ganancia sin costo, la cámara sin
+    fotos) y qué conviene completar primero. «Equivalente» es que encuentra alguno de OTRA lista
+    al buscarlo, por la red de lo aprobado."""
+    columnas = ",\n".join(f"SUM(CASE WHEN {cond} THEN 1 ELSE 0 END) AS \"{nombre}\""
+                          for nombre, cond in _LO_QUE_SE_SABE_DE_CADA_PRODUCTO)
+    c.execute(f"""SELECT m.nombre AS marca, COUNT(*) AS productos, {columnas}
+                  FROM productos p JOIN marcas m ON m.id = p.marca_id
+                  LEFT JOIN (SELECT DISTINCT codigo_clean FROM aplicaciones) a
+                         ON a.codigo_clean = p.codigo_clean
+                  WHERE m.tipo <> 'OEM'
+                  GROUP BY m.nombre ORDER BY COUNT(*) DESC""")
+    filas = [dict(r) for r in c.fetchall()]
+    # El equivalente de otra lista, por la red de lo aprobado (ver _red_de_equivalencias()).
+    raiz, _tamano = _red_de_equivalencias()
+    c.execute("""SELECT p.id, m.nombre FROM productos p JOIN marcas m ON m.id = p.marca_id
+                 WHERE m.tipo <> 'OEM' AND p.id IN (SELECT producto_a_id FROM equivalencias
+                                                    UNION SELECT producto_b_id FROM equivalencias)""")
+    de_la_marca = {r[0]: r[1] for r in c.fetchall()}
+    marcas_de_la_red = {}
+    for pid, marca in de_la_marca.items():
+        marcas_de_la_red.setdefault(raiz.get(pid, pid), set()).add(marca)
+    con_equivalente = {}
+    for pid, marca in de_la_marca.items():
+        if marcas_de_la_red.get(raiz.get(pid, pid), set()) - {marca}:
+            con_equivalente[marca] = con_equivalente.get(marca, 0) + 1
+    salida, totales = [], {"Productos": 0}
+    for f in filas:
+        fila = {"Marca": f["marca"], "Productos": f["productos"]}
+        for nombre, _cond in _LO_QUE_SE_SABE_DE_CADA_PRODUCTO:
+            fila[nombre] = f[nombre] or 0
+        fila["Equivalente"] = con_equivalente.get(f["marca"], 0)
+        for k, v in fila.items():
+            if k != "Marca":
+                totales[k] = totales.get(k, 0) + v
+        salida.append(fila)
+    if salida:
+        salida.append(dict({"Marca": "Todas"}, **totales))
+    return salida
+
+
+def costos_por_marca():
+    """Por marca de proveedor: cuántos productos tienen costo cargado a mano, cuántos calculado
+    con la bonificación y cuántos ninguno, con la bonificación de hoy. Para la pantalla de
+    Marcas. [{"id", "Marca", "Bonificación", "A mano", "Calculado", "Sin costo"}]."""
+    c.execute("""SELECT m.id, m.nombre,
+                        SUM(CASE WHEN p.costo_origen = 'bonificacion' THEN 1 ELSE 0 END) AS calc,
+                        SUM(CASE WHEN COALESCE(p.costo_origen, '') <> 'bonificacion'
+                                  AND COALESCE(p.precio_costo, 0) > 0 THEN 1 ELSE 0 END) AS mano,
+                        SUM(CASE WHEN COALESCE(p.precio_costo, 0) = 0 THEN 1 ELSE 0 END) AS sin
+                 FROM productos p JOIN marcas m ON m.id = p.marca_id
+                 WHERE m.tipo <> 'OEM' GROUP BY m.id, m.nombre ORDER BY m.nombre""")
+    salida = []
+    for r in c.fetchall():
+        bonif = bonificacion_del_proveedor(r["id"])
+        salida.append({"id": r["id"], "Marca": r["nombre"],
+                       "Bonificación": f"{miles(bonif, 1)} %" if bonif is not None else "—",
+                       "A mano": r["mano"] or 0, "Calculado": r["calc"] or 0,
+                       "Sin costo": r["sin"] or 0})
+    return salida
+
+
 def guardar_coeficiente_de_lista(marca_id, coeficiente, aplicar_a_lo_cargado=True,
                                  en_dolares=None):
     """Guarda el coeficiente de la lista de una marca, que se aplica en cada importación. Con

@@ -22,7 +22,51 @@ if pagina == PAGINAS[4]:
         m1, m2, m3 = st.columns(3)
         m1.metric("Marcas registradas", miles(total_marcas))
         m2.metric("Códigos cargados", miles(total_productos))
-        m3.metric("Vínculos de equivalencia", miles(total_equiv // 2 if total_equiv else 0))
+        # Cada par se guarda UNA vez (el menor primero: ver aprobar_pendientes()). Se dividía
+        # por dos, de cuando se guardaban la ida y la vuelta, y con 20.037 vínculos decía 10.018.
+        m3.metric("Vínculos de equivalencia", miles(total_equiv))
+
+        # 🧾 QUÉ SABE LA APP DE CADA PRODUCTO, por lista. Ver que_tan_completo_esta_el_catalogo().
+        _exp_completo = st.expander("🧾 Qué tan completo está tu catálogo",
+                                    key="exp_que_tan_completo", on_change="rerun")
+        if _exp_completo.open:
+            with _exp_completo:
+                # Sin recordar: son 0,25 s y solo con esto abierto, y lo que mide —costos,
+                # fotos, stock, ubicaciones— cambia por muchos lados que el testigo de los
+                # vínculos no ve (cargar una bonificación cambia 8.708 costos de una).
+                _completo = que_tan_completo_esta_el_catalogo()
+                if _completo:
+                    st.dataframe([{k: (v if k == "Marca" else miles(v) if k == "Productos" else
+                                       f"{round(100 * v / f['Productos'])} %" if f["Productos"]
+                                       else "—") for k, v in f.items()} for f in _completo],
+                                 width="stretch", hide_index=True)
+                    _todas = _completo[-1]
+                    _pct = {k: (100 * v / _todas["Productos"] if _todas["Productos"] else 0)
+                            for k, v in _todas.items() if k not in ("Marca", "Productos")}
+                    # Lo que más conviene completar, con dónde se hace: solo lo que falta.
+                    _consejos = [
+                        (_pct["Costo"] < 50, "**Costo**: cargá la bonificación de cada proveedor "
+                         f"en {miga_hasta('Marcas')} → 💸, y la app lo calcula para toda la "
+                         "lista. Sin costo no hay ganancia ni márgenes."),
+                        (_pct["Equivalente"] < 50, "**Equivalentes**: la cola de "
+                         f"{miga_hasta('Equivalencias sugeridas')} es lo que más suma; con «🤖 "
+                         "Que la app descarte sola» queda solo lo que hay que mirar."),
+                        (_pct["Foto"] < 50, f"**Fotos**: prendé «📷 Fotos de las fichas del "
+                         "proveedor» en Mantenimiento; las baja sola, por atrás."),
+                        (_pct["Stock"] < 50, "**Stock**: viene con la lista si trae la columna "
+                         "(existencia, saldo, disponible); si no, se carga en el Buscador."),
+                        (_pct["Ubicación"] < 50, "**Ubicación**: se carga desde el mapa del "
+                         "📦 Depósito; con eso el Buscador dice dónde está cada cosa."),
+                    ]
+                    _que_hacer = [texto for falta, texto in _consejos if falta]
+                    if _que_hacer:
+                        st.markdown("**Lo que más conviene completar:**\n\n"
+                                    + "\n".join(f"- {t}" for t in _que_hacer))
+                    ayuda("«Autos» es que se sabe a qué autos va (de la descripción o de un "
+                          "catálogo de aplicaciones). «Equivalente» es que, al buscarlo, "
+                          "encuentra alguno de otra lista por lo aprobado. Precio, fabricante y "
+                          "medidas salen de la lista y de su descripción: la app ya lee todo lo "
+                          "que la descripción dice.")
 
         st.markdown("---")
         c.execute("""SELECT m.nombre, COUNT(p.id) AS productos

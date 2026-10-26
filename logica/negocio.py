@@ -903,7 +903,15 @@ def actualizar_precio_stock(producto_id, precio, stock, costo=None, stock_mostra
             return False
         precio_anterior = fila["precio"]
         if costo is not None:
+            _costo_antes = c.execute("SELECT precio_costo FROM productos WHERE id = ?",
+                                     (producto_id,)).fetchone()[0]
             escribir("precio_costo", costo, costo_mostrado, "costo_cambio")
+            # Lo cargó una persona: el calculado con la bonificación ya no lo pisa (ver «EL
+            # COSTO CON LA BONIFICACIÓN DEL PROVEEDOR» en datos.py).
+            if c.execute("SELECT precio_costo FROM productos WHERE id = ?",
+                         (producto_id,)).fetchone()[0] != _costo_antes:
+                c.execute("UPDATE productos SET costo_origen = 'mano' WHERE id = ?",
+                          (producto_id,))
         escribir("precio", precio, precio_mostrado, "precio_cambio")
         escribir("stock", stock, stock_mostrado, "stock_cambio")
         # Solo se guarda un registro nuevo en el historial si el precio realmente cambió

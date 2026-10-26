@@ -6636,6 +6636,25 @@ Lo pidió el dueño: «seguí mejorando la redacción de los textos, ponelos tod
 
 Probado en un navegador de verdad, en inglés y en castellano: las listas dicen «Elegí una opción», las tablas «Pantalla completa», «Buscar en la tabla» y «Bajar la tabla», el cartelito de la barra de los gráficos «Ver los números», al escribir «Enter para confirmar», y el calendario de 💵 Caja «octubre 2026» con «D L M M J V S». Los gráficos, «23/10» y «$120.000». En cada pantalla queda un solo «ℹ️ Cómo funciona» arriba (en Depósito: la sección, «⏳ Para buscar» y cómo funciona la cola), y las ayudas de una parte siguen en su parte. `pruebas_de_la_sesion.py` (2d) lo controla: rompiéndolo a propósito, avisa.
 
+## 💸 El costo, calculado solo, y qué tan completo está el catálogo
+
+Lo pidió el dueño: «automatizá más cosas y conseguí más info para toda la app». Primero se midió qué sabe la app de cada producto. En la copia de la base real, de **71.659 productos de proveedor**: precio el 100 %, **costo 0**, **stock 1**, foto 0, fabricante el 2,8 %, medidas el 2,7 %, autos (a qué autos va) el 39 %, código de barras el 12 % y **equivalente de otra lista el 4 %**. El fabricante y las medidas ya se leen solos de la descripción, y está todo leído: lo guardado es exactamente lo que el texto dice. El resto no lo decía ningún lado.
+
+**1. 💸 Bonificación del proveedor (para el costo)** (🗂️ Administrar → 🏷️ Marcas). Sin costo, «Ganancia por marca», el «a costo de hoy» y el mejor margen entre equivalentes no tenían con qué calcular, y cargarlo producto por producto no lo hace nadie. Lo que sí se sabe es lo que cada proveedor descuenta sobre su lista. Con ese número, la app calcula el costo de todos sus productos: precio × (1 − bonificación). Probado sobre la copia: con 30 % a TARANTO, **8.708 costos en 0,04 s**.
+
+- **Se mantiene solo.** Dos disparadores de la base lo siguen, entre por donde entre el precio: un aumento del 10 % lleva un costo de 1.183 a 1.301,3, y un producto que entra en la lista nueva entra con su costo.
+- **Lo cargado a mano no se toca nunca.** Queda marcado de dónde salió cada costo (`costo_origen`: «mano» o «bonificacion»). Los costos cargados antes de existir esa marca cuentan como cargados a mano.
+- **Sacar la bonificación saca solo los costos calculados.** Pide la contraseña de administrador.
+- La tabla de arriba dice, por marca, cuántos tienen costo a mano, cuántos calculado y cuántos ninguno.
+
+**2. 🧾 Qué tan completo está tu catálogo** (📊 Estadísticas → 📈 Resumen). Esa misma tabla, lista por lista, y **lo que más conviene completar con dónde se hace**: la bonificación para el costo, la cola de equivalencias (con «🤖 Que la app descarte sola»), las fotos por atrás, el stock y la ubicación. Se calcula al abrirla (0,25 s) y se recuerda mientras no cambien los vínculos.
+
+**3. Un error del Resumen.** «Vínculos de equivalencia» dividía por dos, de cuando se guardaban la ida y la vuelta. Hoy cada par se guarda una sola vez, así que con 20.037 vínculos decía 10.018. Ahora dice 20.037.
+
+Lo que se intentó y no se hizo: traer equivalencias y aplicaciones de catálogos de fabricante nuevos (INA, Valeo, Dayco, Delphi y Gates, que tus listas citan entre 58 y 119 veces). El servidor donde se armó esto no tiene salida a internet: el proxy rechaza los sitios de afuera. Sin poder ver una ficha de verdad no se agrega un catálogo, por lo mismo que en «CATÁLOGOS DE FABRICANTE, SOLOS». Tampoco se heredan los autos de un equivalente: medido, sumaría solo 369 productos.
+
+Es un cambio de la base (una columna y dos disparadores): `pruebas_de_compatibilidad.py --base` da verde en los dos sentidos. `pruebas_de_la_plata_y_el_stock.py` (6 y 7) lo controla.
+
 ## 🤖 La app descarta sola lo que ya sabe que está mal
 
 Lo pidió el dueño: «automatizá más cosas». Lo más grande de la cola de revisión es lo que el análisis ya da por malo: en la copia de la base real, **4.187 de los 7.827 pendientes salen 🔴 «casi seguro mal», y 276 son un kit con la pieza que trae adentro**. Igual había que entrar, mirarlos y tocar «Descartar», lista por lista.

@@ -254,6 +254,52 @@ if pagina == PAGINAS[3]:
                                      "Se aplica desde la próxima importación."))
                 st.rerun()
 
+            # EL COSTO CON LA BONIFICACIÓN DEL PROVEEDOR: ver datos.py.
+            st.markdown("---")
+            st.markdown("**💸 Bonificación del proveedor (para el costo)**")
+            explicar(
+                "Lo que cada proveedor te descuenta sobre su lista. Con eso la app calcula sola "
+                "el costo de sus productos, y la ganancia y los márgenes tienen con qué calcular.",
+                "Las listas traen el precio, no el costo, y cargarlo producto por producto no lo "
+                "hace nadie: en la copia de la base real ningún producto de proveedor tenía "
+                "costo. Sin costo, «Ganancia por marca», el «a costo de hoy» y el mejor margen "
+                "entre equivalentes no tienen con qué calcular.\n\n"
+                "El costo calculado es el precio por (1 − bonificación), y se mantiene solo: si "
+                "entra la lista nueva, sube un precio o cambia el coeficiente, el costo lo "
+                "sigue. **Lo que se cargó a mano no se toca nunca.** Sacar la bonificación saca "
+                "los costos calculados."
+            )
+            _costos = costos_por_marca()
+            if _costos:
+                st.dataframe([{k: (miles(v) if isinstance(v, int) else v)
+                               for k, v in x.items() if k != "id"} for x in _costos],
+                             width="stretch", hide_index=True)
+                _por_marca_b = {x["Marca"]: x for x in _costos}
+                _marca_b = st.selectbox("Marca:", list(_por_marca_b), key="marca_bonificacion")
+                _id_b = _por_marca_b[_marca_b]["id"]
+                _bonif_hoy = bonificacion_del_proveedor(_id_b)
+                _nueva_b = st.number_input("Bonificación (%):", min_value=0.0, max_value=99.0,
+                                           value=float(_bonif_hoy or 0.0), step=1.0,
+                                           key=f"bonif_valor_{_id_b}")
+                _b1, _b2 = st.columns(2)
+                if candado("cambiar la bonificación de un proveedor",
+                           _b1.button("💸 Guardar y calcular los costos", key="btn_bonificacion",
+                                      disabled=_bonif_hoy is not None
+                                      and abs(_nueva_b - _bonif_hoy) < 1e-9),
+                           "cambiar_la_bonificacion"):
+                    _n_b = guardar_bonificacion_del_proveedor(_id_b, _nueva_b)
+                    avisar("success", f"{_marca_b}: bonificación {miles(_nueva_b, 1)} %. "
+                                      f"{miles(_n_b)} costo(s) calculados.")
+                    st.rerun()
+                if candado("sacar la bonificación de un proveedor",
+                           _b2.button("Sacar la bonificación", key="btn_sacar_bonificacion",
+                                      disabled=_bonif_hoy is None),
+                           "sacar_la_bonificacion"):
+                    _n_b = guardar_bonificacion_del_proveedor(_id_b, None)
+                    avisar("success", f"{_marca_b}: sin bonificación. Se sacaron "
+                                      f"{miles(_n_b)} costo(s) calculados.")
+                    st.rerun()
+
             st.markdown("---")
             st.markdown("**💲 Aumentar/bajar precios por porcentaje**")
             st.caption("Aplica el ajuste a todos los productos con precio cargado de la marca elegida.")

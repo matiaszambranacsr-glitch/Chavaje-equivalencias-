@@ -876,6 +876,11 @@ def _esquema_fotos(c):
     # conviene el más barato para el cliente.
     if "precio_costo" not in columnas_productos:
         c.execute("ALTER TABLE productos ADD COLUMN precio_costo REAL")
+    # De dónde salió el costo: «mano» (lo cargó alguien) o «bonificacion» (lo calcula la app con
+    # la bonificación del proveedor; ver _esquema_costo_por_bonificacion()). Vacío con un costo
+    # cargado es de antes de esta columna, y cuenta como cargado a mano: no se pisa.
+    if "costo_origen" not in columnas_productos:
+        c.execute("ALTER TABLE productos ADD COLUMN costo_origen TEXT")
 
     if "diametro_copa_superior" not in columnas_productos:
         c.execute("ALTER TABLE productos ADD COLUMN diametro_copa_superior REAL")
@@ -3054,6 +3059,46 @@ def _esquema_del_mapa(c):
         c.execute("ALTER TABLE usuarios ADD COLUMN solo_deposito INTEGER DEFAULT 0")
 
 
+# EL COSTO CON LA BONIFICACIÓN DEL PROVEEDOR. Las listas traen el precio de lista y no el
+# costo, y cargarlo a mano producto por producto no lo hizo nadie: en la copia de la base real,
+# 0 de 71.659 productos de proveedor tenían costo, así que la ganancia por marca, el «a costo de
+# hoy» y el mejor margen entre equivalentes no tenían con qué calcular. Lo que sí se sabe es la
+# bonificación de cada proveedor (lo que descuenta sobre su lista): con ese número, el costo es
+# el precio por (1 − bonificación). Se guarda en la configuración por marca y estos dos
+# disparadores lo mantienen al día SOLOS, entre por donde entre el precio —una importación, un
+# aumento por marca, el coeficiente, un cambio a mano—. Nunca tocan un costo cargado a mano.
+_BONIFICACION_DE_LA_MARCA = ("(SELECT CAST(valor AS REAL) FROM configuracion "
+                             "WHERE clave = 'bonificacion_proveedor_' || NEW.marca_id "
+                             "AND valor <> '')")
+
+
+def _esquema_costo_por_bonificacion(c):
+    """Los disparadores del costo calculado. Ver «EL COSTO CON LA BONIFICACIÓN DEL PROVEEDOR».
+    Se borran y se crean de nuevo, como los de la búsqueda: con IF NOT EXISTS una base ya creada
+    se quedaría con la versión vieja."""
+    c.execute("DROP TRIGGER IF EXISTS productos_costo_al_crear")
+    c.execute("DROP TRIGGER IF EXISTS productos_costo_con_el_precio")
+    c.execute(f"""CREATE TRIGGER productos_costo_al_crear AFTER INSERT ON productos
+                  WHEN NEW.precio > 0 AND COALESCE(NEW.precio_costo, 0) = 0
+                   AND {_BONIFICACION_DE_LA_MARCA} IS NOT NULL
+                  BEGIN
+                    UPDATE productos
+                       SET precio_costo = ROUND(NEW.precio * (1 - {_BONIFICACION_DE_LA_MARCA}
+                                                                  / 100.0), 2),
+                           costo_origen = 'bonificacion'
+                     WHERE id = NEW.id;
+                  END""")
+    c.execute(f"""CREATE TRIGGER productos_costo_con_el_precio AFTER UPDATE OF precio ON productos
+                  WHEN NEW.costo_origen = 'bonificacion' AND NEW.precio > 0
+                   AND {_BONIFICACION_DE_LA_MARCA} IS NOT NULL
+                  BEGIN
+                    UPDATE productos
+                       SET precio_costo = ROUND(NEW.precio * (1 - {_BONIFICACION_DE_LA_MARCA}
+                                                                  / 100.0), 2)
+                     WHERE id = NEW.id;
+                  END""")
+
+
 def crear_esquema(c):
     _esquema_catalogo(c)
     _esquema_mostrador(c)
@@ -3065,6 +3110,7 @@ def crear_esquema(c):
     _datos_precargados_y_migraciones(c)
     _esquema_registro_y_reglas(c)
     _esquema_numeros_que_son_numeros(c)
+    _esquema_costo_por_bonificacion(c)
 
 
 
