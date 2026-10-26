@@ -6636,6 +6636,28 @@ Lo pidió el dueño: «seguí mejorando la redacción de los textos, ponelos tod
 
 Probado en un navegador de verdad, en inglés y en castellano: las listas dicen «Elegí una opción», las tablas «Pantalla completa», «Buscar en la tabla» y «Bajar la tabla», el cartelito de la barra de los gráficos «Ver los números», al escribir «Enter para confirmar», y el calendario de 💵 Caja «octubre 2026» con «D L M M J V S». Los gráficos, «23/10» y «$120.000». En cada pantalla queda un solo «ℹ️ Cómo funciona» arriba (en Depósito: la sección, «⏳ Para buscar» y cómo funciona la cola), y las ayudas de una parte siguen en su parte. `pruebas_de_la_sesion.py` (2d) lo controla: rompiéndolo a propósito, avisa.
 
+## 🔢 El número de fábrica manda sobre el auto
+
+Lo pidió el dueño: «si ya coincide exactamente el código original y no coincide solamente el auto o el motor que dice la descripción, ponelo como equivalencia igual, ya que capaz que algún proveedor no sabe o no pudo poner que le va para algún auto que otro proveedor sí».
+
+**Cómo queda.** Si dos productos de **listas distintas** citan el mismo número de fábrica, que una descripción nombre otros autos, otro motor, otra cilindrada, otros años u otro combustible ya no los da en rojo. Vale el número que citan:
+
+- el mismo nodo de fábrica en las dos, aprobado o esperando aprobación, si lo trajo la lista o el catálogo del fabricante («REF ORIG …»). Lo que la app propuso por parecido de texto no cuenta como número;
+- o el mismo número largo (8 dígitos o más) escrito en las dos.
+
+Ya pasaba con el código de uno escrito en la descripción del otro y con el mismo número de NGK. Ahora vale también para lo que cada lista dice del número, y lo mismo en la ficha, en la tabla del buscador y en la cola de revisión.
+
+**Lo que sigue separando:**
+
+- **Lo que contradice la pieza.** Se vuelve a comparar sin el auto, porque la primera regla que cortaba tapaba las demás: la válvula EGR contra la PCV con el mismo número citado sigue en rojo.
+- **El nombre de la pieza.** Si sin el auto lo que queda es que una es un cable y la otra una bujía, vale lo del auto, como antes. Un juego de cables de LUCAS y una bujía Bosch de JL los une un mismo código, y pasaban de rojo a «candidata».
+- **Con el número de fábrica de un lado, como siempre.** El auto no cuenta, pero tampoco se vuelve a comparar sin él: la descripción del nodo la copió la fila que lo trajo, y a veces es otra pieza que cita el número. El 8200699627 dice «CAPUCHONES PARA BOBINA 79016» y es la bobina 70164 de FISPA. En la primera versión se comparaba igual, y 21 vínculos aprobados a mano pasaban a rojo.
+- **Dos productos de la misma lista.** Si la propia lista tiene dos productos con el mismo número y otros motores, son dos piezas que esa lista conoce: la TC-594-15 (1,7) y la TC-595-15 (1,8/2,0) de ILLINOIS citan las dos el 7700713860. Medido en 1.500 búsquedas: sin esta condición dejaban de salir en rojo 41 resultados, y 34 eran de la misma lista.
+
+**Medido en la copia de la base real.** En 1.500 búsquedas al azar, 7 resultados dejan de salir en rojo y quedan 🟡 «probable». Son todos bujías Bosch de JL contra NGK de TARANTO o LUCAS de FISPA, unidas por un mismo código de referencia. En la cola cambian 2 pares de 7.551: la bujía LUCAS LSPP4ES contra las Bosch WR 8 DC y WR 9 DC, del catálogo de NGK, que pasan de 🔴 a 🟠 y 🟡. No se aprueba nada solo: dejan de vetarse, y el descarte automático ya no los tira. Y al revés, la tabla del buscador ahora dice lo mismo que la ficha en 31 resultados de la misma lista (dos sondas de FISPA, dos juntas de ILLINOIS) que la ficha ya daba en rojo: antes la tabla salteaba el auto con cualquier número en común, aunque fuera de la misma lista.
+
+Reglas v18. La revisión contra todo lo decidido (`pruebas_de_la_revision.py --base`) da, par por par, lo mismo que con v17: de 20.037 aprobados, 10 en rojo; de 2.633 rechazados, 3 pasarían limpios; buscador y ficha dicen lo mismo en los 755 resultados comparados. `pruebas_de_la_precision.py` (81) lo controla, y rompiendo cada parte a propósito avisa.
+
 ## 💸 El costo, calculado solo, y qué tan completo está el catálogo
 
 Lo pidió el dueño: «automatizá más cosas y conseguí más info para toda la app». Primero se midió qué sabe la app de cada producto. En la copia de la base real, de **71.659 productos de proveedor**: precio el 100 %, **costo 0**, **stock 1**, foto 0, fabricante el 2,8 %, medidas el 2,7 %, autos (a qué autos va) el 39 %, código de barras el 12 % y **equivalente de otra lista el 4 %**. El fabricante y las medidas ya se leen solos de la descripción, y está todo leído: lo guardado es exactamente lo que el texto dice. El resto no lo decía ningún lado.

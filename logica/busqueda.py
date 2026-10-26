@@ -381,9 +381,9 @@ def marcar_cadenas_que_no_aguantan(res):
     contradicen con lo buscado —DANA 70 contra 30, 4 contra 3 cilindros, la bujía APR6F contra
     la BP6EFS—. Cuesta 0,1 a 0,7 ms por búsqueda.
 
-    Es la regla de la cola (firmas_compatibles()) sobre las dos descripciones, sin tocar la
-    base salvo una consulta. Si el camino pasa por un número de fábrica que los dos tienen, lo
-    del auto no cuenta, igual que en la cola: el número manda."""
+    Es la regla de la cola (firmas_compatibles()) sobre las dos descripciones. Si los une un
+    número —el mismo número de fábrica, el código de uno en la descripción del otro—, lo del
+    auto no cuenta, igual que en la ficha: el número manda (ver los_une_un_numero())."""
     buscados = [f for f in res if f.get("Cadena") == "— el buscado" and f.get("Tipo") != "OEM"]
     lejanos = [f for f in res if f.get("Tipo") != "OEM" and f.get("Confianza")
                and str(f.get("Cadena") or "").startswith(("🟡", "🔴"))]
@@ -392,27 +392,12 @@ def marcar_cadenas_que_no_aguantan(res):
     buscado = buscados[0]
     # Sin firma igual se sigue: lo de la misma lista no la necesita (ver más abajo).
     firma_buscado = firma_de_producto(buscado.get("Descripcion") or "")
-    # Los números de fábrica de cada uno, para saber si el camino pasa por uno compartido.
-    ids = [buscado["ID"]] + [f["ID"] for f in lejanos]
-    numeros_de = {}
-    with db_lock:
-        for tanda, marcadores in en_tandas(ids, usos_por_consulta=2):
-            c.execute(f"""-- FILA Y NO PAR: arma el conjunto de números de cada producto, y la
-                          -- fila anotada de ida y de vuelta cae en el mismo conjunto.
-                          SELECT e.producto_a_id AS a, e.producto_b_id AS b,
-                                 ma.tipo AS ta, mb.tipo AS tb
-                          FROM equivalencias e
-                          JOIN productos pa ON pa.id = e.producto_a_id
-                          JOIN marcas ma ON ma.id = pa.marca_id
-                          JOIN productos pb ON pb.id = e.producto_b_id
-                          JOIN marcas mb ON mb.id = pb.marca_id
-                          WHERE e.producto_a_id IN ({marcadores})
-                             OR e.producto_b_id IN ({marcadores})""", tanda + tanda)
-            for r in c.fetchall():
-                if r["tb"] == "OEM":
-                    numeros_de.setdefault(r["a"], set()).add(r["b"])
-                if r["ta"] == "OEM":
-                    numeros_de.setdefault(r["b"], set()).add(r["a"])
+    # Lo que necesitan los_une_un_numero() y numero_de_fabrica_en_comun(), con los nombres de
+    # la evidencia.
+    def _como_en_la_evidencia(f):
+        return {"id": f["ID"], "codigo_raw": f.get("Codigo"),
+                "codigo_clean": sanitizar(f.get("Codigo") or ""),
+                "descripcion": f.get("Descripcion"), "marca": f.get("Marca"), "tipo": f.get("Tipo")}
     rotas = set()
     for f in lejanos:
         # Otro producto de la MISMA lista que lo buscado es otra pieza, diga lo que diga el
@@ -433,9 +418,18 @@ def marcar_cadenas_que_no_aguantan(res):
                                         firma_de_producto(f.get("Descripcion") or ""))
         if ok or not motivo.startswith(_MOTIVOS_QUE_CONTRADICEN):
             continue
-        if (numeros_de.get(buscado["ID"], set()) & numeros_de.get(f["ID"], set())
-                and motivo.startswith(_MOTIVOS_DEL_AUTO)):
-            continue
+        # Si los une un número, lo del auto no cuenta, y lo que queda de la pieza sí: lo mismo
+        # que la ficha (ver «EL NÚMERO DE FÁBRICA MANDA SOBRE EL AUTO» en evidencia_cruzada()).
+        if motivo.startswith(_MOTIVOS_DEL_AUTO):
+            with db_lock:
+                _unidos = los_une_un_numero(_como_en_la_evidencia(buscado),
+                                            _como_en_la_evidencia(f))
+            if _unidos:
+                motivo = lo_que_vale_sin_el_auto(firma_buscado,
+                                                 firma_de_producto(f.get("Descripcion") or ""),
+                                                 motivo)
+                if not motivo.startswith(_MOTIVOS_QUE_CONTRADICEN):
+                    continue
         f["Confianza"] = "🔴 no es lo mismo"
         f["Cadena"] = f"{f['Cadena']} · ⚠️ contra lo buscado: {motivo}"
         # Como el kit: no cuenta como equivalencia ni compite por «el más barato en stock».

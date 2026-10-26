@@ -83,6 +83,75 @@ def _estan_vinculados(id_a, id_b):
         return False
 
 
+def _numeros_de_fabrica_de(pid):
+    """Los códigos de fábrica que declara un producto: los nodos de fábrica a los que está unido,
+    aprobado o esperando aprobación. Lo que espera también vale porque lo trajo la lista del
+    proveedor o el catálogo del fabricante («REF ORIG 0281006325»), no un parecido de texto:
+    lo que la app propone por descripciones («descripcion-todas») queda afuera. Y los códigos
+    que hoy ya no se tomarían como de fábrica («PVC», «16V»), también."""
+    try:
+        c.execute("""SELECT x.id, x.codigo_raw FROM (
+                         SELECT producto_b_id AS otro FROM equivalencias WHERE producto_a_id = ?
+                         UNION SELECT producto_a_id FROM equivalencias WHERE producto_b_id = ?
+                         UNION SELECT producto_b_id FROM equivalencias_pendientes
+                               WHERE producto_a_id = ? AND COALESCE(origen, '') <> 'descripcion-todas'
+                         UNION SELECT producto_a_id FROM equivalencias_pendientes
+                               WHERE producto_b_id = ? AND COALESCE(origen, '') <> 'descripcion-todas')
+                     JOIN productos x ON x.id = otro
+                     JOIN marcas m ON m.id = x.marca_id AND m.tipo = 'OEM'""",
+                  (pid, pid, pid, pid))
+        return {r["id"]: r["codigo_raw"] for r in c.fetchall()
+                if len(sanitizar(r["codigo_raw"] or "")) >= 6
+                and re.search(r"\d", r["codigo_raw"] or "")
+                and not codigo_que_hoy_no_se_tomaria(r["codigo_raw"])}
+    except sqlite3.OperationalError as _err:
+        anotar_error("_numeros_de_fabrica_de", _err)
+        return {}
+
+
+def numero_de_fabrica_en_comun(pa, pb):
+    """El código de fábrica que citan los dos, o "". pa y pb son las filas de
+    evidencia_cruzada() (id, codigo_clean, descripcion).
+
+    Dos proveedores que dan el mismo número original para su pieza hablan de la misma pieza,
+    aunque cada uno anote autos distintos: el proveedor anota los autos que conoce o los que le
+    entran en la celda. Ver «EL NÚMERO DE FÁBRICA MANDA SOBRE EL AUTO» en evidencia_cruzada(), y
+    los_une_un_numero(), que lo pide entre listas distintas.
+
+    También vale el mismo número largo escrito en los dos lados (ocho dígitos o más, como los de
+    Bosch): «FI-0280155929» contra «… 0280155929» no necesita el nodo de fábrica para decirlo."""
+    _de = {p["id"]: _recordado(("numeros_de_fabrica", p["id"]),
+                               lambda p=p: _numeros_de_fabrica_de(p["id"]))
+           for p in (pa, pb)}
+    comunes = set(_de[pa["id"]]) & set(_de[pb["id"]])
+    if comunes:
+        return _de[pa["id"]][min(comunes)]
+    _largos = [set(_RE_NUMERO_DE_FABRICA.findall(f"{p.get('codigo_clean') or ''} "
+                                                 f"{p.get('descripcion') or ''}"))
+               for p in (pa, pb)]
+    comunes = _largos[0] & _largos[1]
+    return min(comunes) if comunes else ""
+
+
+def los_une_un_numero(pa, pb):
+    """¿Los une un número, para que lo del auto no cuente? El código de uno escrito en la
+    descripción del otro, el mismo número de NGK o el mismo número de fábrica. Es la pregunta de
+    evidencia_cruzada() y del buscador (ver marcar_cadenas_que_no_aguantan()): si la ficha y la
+    tabla contestaran distinto, una diría «equivalente» y la otra «no es lo mismo».
+
+    El mismo número de fábrica cuenta solo entre listas DISTINTAS. Es el caso que lo motivó: un
+    proveedor no anotó un auto que otro sí. Dentro de una misma lista, dos productos que citan el
+    mismo número y nombran otros motores son dos piezas que esa lista conoce: «TC-594-15» (1,7
+    F3N) y «TC-595-15» (1,8/2,0 F3P) de ILLINOIS citan los dos el 7700713860, y son juntas de
+    tapa de motores con otro diámetro. Medido en 1.500 búsquedas: sin esta condición dejaban de
+    salir en rojo 41 resultados, y 34 eran de la misma lista; quedan los 7 de listas distintas."""
+    _ngk_a, _ngk_b = _codigo_ngk(pa), _codigo_ngk(pb)
+    return bool(_unidos_por_codigo(pa, pb)
+                or (_ngk_a and _ngk_b and (_ngk_a.startswith(_ngk_b) or _ngk_b.startswith(_ngk_a)))
+                or ((pa.get("marca") or "") != (pb.get("marca") or "")
+                    and numero_de_fabrica_en_comun(pa, pb)))
+
+
 def _codigos_con_reemplazo():
     try:
         return {r[0] for r in c.execute("SELECT codigo_viejo_clean FROM reemplazos_codigo")}
@@ -338,9 +407,34 @@ def evidencia_cruzada(id_a, id_b, cuenta_palabras=None, total_descripciones=None
             and _unidos_por_codigo(pa, pb)
         if fa["familia"] != fb["familia"] and not _citado:
             vetos.append(f"🧩 rubros distintos: «{fa['familia']}» y «{fb['familia']}»")
-        elif (motivo_desc.startswith(_MOTIVOS_QUE_CONTRADICEN)
-              and not (motivo_desc.startswith(_MOTIVOS_DEL_AUTO)
-                       and (_unidos_por_codigo(pa, pb) or _mismo_ngk))):
+        # EL NÚMERO DE FÁBRICA MANDA SOBRE EL AUTO. Si los une un número —el código de uno en la
+        # descripción del otro, el mismo de NGK, o dos listas citan el mismo número original—,
+        # que cada lista nombre otros autos u otro motor no dice que sean piezas distintas: cada
+        # proveedor anota los que conoce o los que le entran en la celda. Lo pidió el dueño:
+        # «capaz que algún proveedor no sabe o no pudo poner que le va para algún auto que otro
+        # sí». La «FR 7 DC» de Bosch en la lista de JL (Chevrolet, Fiat, Ford…) y la «BKR5E-11»
+        # de NGK en la de TARANTO (Nissan Sentra, Hyundai Atos) las une el LEIHTR13SC, y salían
+        # en rojo por «autos distintos».
+        # Lo que contradice la PIEZA sigue vetando: se compara otra vez sin el auto (ver
+        # lo_que_vale_sin_el_auto()), porque la primera regla que corta tapaba las demás.
+        # Con el código de fábrica de un lado, el auto no cuenta como siempre, pero no se vuelve
+        # a comparar: la descripción del nodo la copió la fila que lo trajo, que a veces es otra
+        # pieza que cita el número. El 8200699627 dice «CAPUCHONES PARA BOBINA 79016» y es la
+        # bobina de FISPA 70164; el IWP210, «MICROFILTRO DE INYECCION». Comparándolos, 21
+        # vínculos aprobados a mano pasaban a rojo en la revisión (pruebas_de_la_revision.py
+        # --base). Las dudas del auto avisan, como antes.
+        elif (motivo_desc.startswith(_MOTIVOS_DEL_AUTO + _AVISOS_DEL_AUTO)
+              and "OEM" in {(pa.get("tipo") or "").upper(), (pb.get("tipo") or "").upper()}):
+            if motivo_desc.startswith(_MOTIVOS_QUE_AVISAN):
+                aviso_desc = motivo_desc
+        elif (motivo_desc.startswith(_MOTIVOS_DEL_AUTO + _AVISOS_DEL_AUTO)
+              and los_une_un_numero(pa, pb)):
+            _de_la_pieza = lo_que_vale_sin_el_auto(fa, fb, motivo_desc, _cuenta, _total)
+            if _de_la_pieza.startswith(_MOTIVOS_QUE_CONTRADICEN):
+                vetos.append(f"🔤 {_de_la_pieza}")
+            elif _de_la_pieza:
+                aviso_desc = _de_la_pieza
+        elif motivo_desc.startswith(_MOTIVOS_QUE_CONTRADICEN):
             vetos.append(f"🔤 {motivo_desc}")
         elif motivo_desc.startswith(_MOTIVOS_QUE_AVISAN):
             aviso_desc = motivo_desc

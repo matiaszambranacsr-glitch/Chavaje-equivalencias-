@@ -691,7 +691,7 @@ VERSION_NORMALIZACION = "2"
 # reglas de hoy están mal. Sin esta marca, eso no se entera nadie hasta tropezárselo.
 # Subir el número cuando cambien las reglas de evaluar_equivalencia(). El recálculo NO corre al
 # abrir la app —son 12,8 s— sino en la tarea de fondo, igual que el descubrimiento.
-VERSION_CONFIANZA = "17"   # ver VERSIONES_DE_LAS_REGLAS
+VERSION_CONFIANZA = "18"   # ver VERSIONES_DE_LAS_REGLAS
 
 # LAS REGLAS VERSIONADAS, con la fecha y qué cambió en cada una. Lo pidió una revisión con
 # ChatGPT («versionar reglas como datos» y «comparar versiones»): cada vínculo guarda con qué
@@ -700,6 +700,8 @@ VERSION_CONFIANZA = "17"   # ver VERSIONES_DE_LAS_REGLAS
 # nueva sobre todo lo que ya se decidió. Volver atrás una regla es volver atrás el cambio en
 # git y subir el número otra vez (el repuntaje lo hace la tarea de fondo).
 VERSIONES_DE_LAS_REGLAS = [
+    ("18", "2026-10-26", "si dos listas distintas citan el mismo número de fábrica, que nombren "
+                         "otros autos u otro motor no las separa; lo que contradice la pieza sí"),
     ("17", "2026-10-26", "lo que solo se alcanza pasando por otra pieza de la misma lista queda "
                          "para revisar; dos de la misma lista que citan el mismo número de "
                          "fábrica son la misma pieza"),

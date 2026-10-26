@@ -1717,6 +1717,46 @@ _MOTIVOS_QUE_AVISAN = ("un nombre de modelo de marcas distintas", "el mismo auto
 _MOTIVOS_DEL_AUTO = ("autos distintos", "marcas distintas", "modelos distintos",
                      "cilindradas distintas", "motores de distintas válvulas", "años distintos",
                      "motores distintos", "combustibles distintos")
+# Y las dudas que hablan del auto: mandan a revisión, pero con un número en común tampoco.
+_AVISOS_DEL_AUTO = ("un nombre de modelo de marcas distintas", "el mismo auto con otra cilindrada",
+                    "una de las dos no dice para qué auto es")
+# Lo que en una firma dice el AUTO y el MOTOR, no la pieza. Ver lo_que_vale_sin_el_auto().
+# La cantidad de cilindros queda: una junta de tapa de 4 cilindros no es la de 6, sea del auto
+# que sea.
+_SIN_EL_AUTO = {"autos": _CONJUNTO_VACIO, "modelos": _CONJUNTO_VACIO, "marcas": _CONJUNTO_VACIO,
+                "modelos_numericos": _CONJUNTO_VACIO, "motores": _CONJUNTO_VACIO,
+                "motores_numericos": _CONJUNTO_VACIO, "deutz": _CONJUNTO_VACIO,
+                "dana": _CONJUNTO_VACIO, "cilindradas": _CONJUNTO_VACIO,
+                "valvulas": _CONJUNTO_VACIO, "marca_auto": None, "motor_ford": None,
+                "combustible": None, "anios": ()}
+
+
+def lo_que_vale_sin_el_auto(fa, fb, motivo, cuenta_palabras=None, total_descripciones=0):
+    """Si a dos productos los une un número, el motivo que vale en lugar de `motivo` —que habla
+    del auto o del motor—: lo que contradice o hace dudar de la PIEZA, o "" si nada.
+
+    Cuando dos productos están unidos por un número, que nombren autos distintos no cuenta
+    (ver _unidos_por_codigo() y los_une_un_numero()). Pero las reglas de firmas_compatibles()
+    corren en orden y devuelven la primera que dice algo: si la primera era «modelos distintos»,
+    no se veía lo que venía después. Acá se vuelve a comparar con lo del auto vacío, y lo que
+    quede es de la pieza: la válvula EGR contra la PCV con el mismo número citado sigue siendo
+    otra pieza.
+
+    Y si sin el auto lo único que se ve es que el NOMBRE de la pieza es otro, vale lo del auto,
+    como antes. «Piezas distintas» no veta solo (BULBO y SENSOR son la misma), pero tampoco deja
+    decir que «solo cambia el auto»: un juego de cables de bujía de LUCAS y una bujía Bosch de JL
+    los une el «SC-G101», y pasaban de rojo a «candidata» en la cola."""
+    if not fa or not fb:
+        return ""
+    ok, sin_el_auto = firmas_compatibles(dict(fa, **_SIN_EL_AUTO), dict(fb, **_SIN_EL_AUTO),
+                                         cuenta_palabras=cuenta_palabras,
+                                         total_descripciones=total_descripciones)
+    if ok or sin_el_auto.startswith(_MOTIVOS_DEL_AUTO + _AVISOS_DEL_AUTO):
+        return ""
+    if sin_el_auto.startswith(("piezas distintas", "no coinciden en qué pieza es")):
+        return motivo
+    return (sin_el_auto if sin_el_auto.startswith(_MOTIVOS_QUE_CONTRADICEN + _MOTIVOS_QUE_AVISAN)
+            else "")
 
 
 def _unidos_por_codigo(pa, pb):

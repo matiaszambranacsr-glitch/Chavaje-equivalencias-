@@ -2051,6 +2051,69 @@ def probar(L):
             (ns["devolver_lo_que_descarto_sola"](), _en_cola(), ns["lo_que_descarto_sola"]()),
             (1, sorted([max(_bujia, _bujia2), max(_bujia, _filtro)]), []))
     ns["guardar_config"](ns["DESCARTE_AUTOMATICO"], "0")
+
+    # 81. EL NÚMERO DE FÁBRICA MANDA SOBRE EL AUTO (ver evidencia_cruzada()): dos listas que
+    # citan el mismo número original son la misma pieza aunque nombren otros autos. Lo que
+    # espera aprobación vale si lo trajo la lista, no si lo propuso la app por el texto. Y lo
+    # que contradice la pieza sigue vetando aunque la primera regla que cortaba fuera la del auto.
+    ml3, mf3, mo3 = marca("LUCAS TRES"), marca("FISPA TRES"), marca("OEM TRES", "OEM")
+    _del_auto = tuple(f"🔤 {m}" for m in ns["_MOTIVOS_DEL_AUTO"])
+    def _vetos_de_texto(a, b):
+        return [v for v in ns["evidencia_cruzada"](a, b)[1] if v.startswith("🔤")]
+    def _pendiente(a, b, origen):
+        c.execute("INSERT INTO equivalencias_pendientes (producto_a_id, producto_b_id, origen, lote) "
+                  "VALUES (?, ?, ?, 'TRES · 26/10')", (min(a, b), max(a, b), origen))
+        conn.commit()
+    _lu = producto("LEMSR027", "SONDA LAMBDA CHEVROLET AVEO 1.6", ml3)
+    _fi = producto("30081", "SONDA LAMBDA CHEVROLET CORSA 2.0", mf3)
+    _nodo = producto("0258006028", "SONDA LAMBDA", mo3)
+    vincular(_lu, _nodo, "LUCAS TRES · 26/10")
+    esperar("sin un número en común, el auto veta",
+            [v.startswith(_del_auto) for v in _vetos_de_texto(_lu, _fi)], [True])
+    _pendiente(_fi, _nodo, "descripcion-todas")
+    esperar("lo que la app propuso por el texto no cuenta como número de la lista",
+            [v.startswith(_del_auto) for v in _vetos_de_texto(_lu, _fi)], [True])
+    c.execute("UPDATE equivalencias_pendientes SET origen = 'lista_proveedor' WHERE lote = 'TRES · 26/10'")
+    conn.commit()
+    esperar("con el mismo número de fábrica (aunque espere aprobación), el auto no cuenta",
+            _vetos_de_texto(_lu, _fi), [])
+    _egr = producto("EGR27", "VALVULA EGR CHEVROLET AVEO 1.6", ml3)
+    _pcv = producto("PCV81", "VALVULA PCV CHEVROLET CORSA 2.0", mf3)
+    _nodo2 = producto("96325842", "VALVULA", mo3)
+    vincular(_egr, _nodo2, "LUCAS TRES · 26/10")
+    vincular(_pcv, _nodo2, "FISPA TRES · 26/10")
+    esperar("la pieza sigue vetando, aunque primero cortara la cilindrada",
+            _vetos_de_texto(_egr, _pcv), ["🔤 siglas distintas: EGR vs PCV"])
+    _cable = producto("LEIHTG101", "CABLE DE BUJIA CHEVROLET ONIX 1.4", ml3)
+    _buj = producto("WR7DC", "BUJIA CHEVROLET CORSA 2.0", mf3)
+    _nodo3 = producto("SC-G101", "CABLE DE BUJIA", mo3)
+    vincular(_cable, _nodo3, "LUCAS TRES · 26/10")
+    vincular(_buj, _nodo3, "FISPA TRES · 26/10")
+    esperar("si sin el auto lo que cambia es el nombre de la pieza, vale lo del auto",
+            [v.startswith(_del_auto) for v in _vetos_de_texto(_cable, _buj)], [True])
+    _lu2 = producto("LEMSR024", "SONDA LAMBDA CHEVROLET CORSA 2.0", ml3)
+    vincular(_lu2, _nodo, "LUCAS TRES · 26/10")
+    esperar("dos productos de la misma lista con el mismo número: el auto sigue contando",
+            [v.startswith(_del_auto) for v in _vetos_de_texto(_lu, _lu2)], [True])
+    # Con el número de fábrica de un lado, como siempre: su descripción la copió la fila que lo
+    # trajo, y a veces es otra pieza que lo cita.
+    _nodo4 = producto("8200699627", "CAPUCHONES PARA BOBINA NISSAN TIIDA 1.6", mo3)
+    _bob = producto("70164", "BOBINA DE IGNICION RENAULT MEGANE 2.0", mf3)
+    vincular(_bob, _nodo4, "FISPA TRES · 26/10")
+    esperar("el nodo de fábrica con la descripción de otra pieza no veta por el auto",
+            _vetos_de_texto(_nodo4, _bob), [])
+    _iny1 = producto("FI0280155929", "INYECTOR FIAT PALIO 1.4", ml3)
+    _iny2 = producto("IN455", "INYECTOR FIAT PALIO 1.6 REF 0280155929", mf3)
+    esperar("el mismo número largo escrito en los dos, sin nodo de fábrica",
+            _vetos_de_texto(_iny1, _iny2), [])
+    # Y el buscador dice lo mismo que la ficha: la sonda de FISPA, a dos saltos, no sale como
+    # «no es lo mismo».
+    vincular(_fi, _nodo, "FISPA TRES · 26/10")
+    _res_n = {f["Codigo"]: f for f in ns["buscar_con_variantes_del_cero"]("LEMSR027")[0]}
+    esperar("en el buscador, la otra sonda sale como equivalente",
+            ("30081" in _res_n, str(_res_n.get("30081", {}).get("_estado", "")).startswith("🔴"),
+             "contra lo buscado" in str(_res_n.get("30081", {}).get("Cadena", ""))),
+            (True, False, False))
     return fallas
 
 
