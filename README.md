@@ -6636,6 +6636,12 @@ Lo pidió el dueño: «seguí mejorando la redacción de los textos, ponelos tod
 
 Probado en un navegador de verdad, en inglés y en castellano: las listas dicen «Elegí una opción», las tablas «Pantalla completa», «Buscar en la tabla» y «Bajar la tabla», el cartelito de la barra de los gráficos «Ver los números», al escribir «Enter para confirmar», y el calendario de 💵 Caja «octubre 2026» con «D L M M J V S». Los gráficos, «23/10» y «$120.000». En cada pantalla queda un solo «ℹ️ Cómo funciona» arriba (en Depósito: la sección, «⏳ Para buscar» y cómo funciona la cola), y las ayudas de una parte siguen en su parte. `pruebas_de_la_sesion.py` (2d) lo controla: rompiéndolo a propósito, avisa.
 
+## 🔎 Cuántas de cada clase, y medir sin escribir nada
+
+- **El título de cada búsqueda dice cuántas de cada clase:** «🔎 BKR6E — 72 equivalencias (65 🟢 · 3 🟡 · 4 a revisar)». Antes decía «72 equivalencias» y contaba igual lo confirmado que lo que hay que revisar. En 1.500 búsquedas al azar de la copia de la base, de 5.302 resultados la mayoría no está confirmada.
+- **Bujías:** también se leen las NGK ZFR con una letra después de la luz (IZFR6K-11S de iridio, ZFR6T-11G). Reglas v20.
+- **`python pruebas/medir.py --base copia.db busquedas --guardar antes.json`** (y después `--comparar antes.json`; también `cola`): mide el buscador o la cola en pocos renglones (en la copia: 1.500 búsquedas, 0,034 s de promedio, p95 0,063 s) y dice qué cambió entre dos versiones de las reglas. Es lo que antes se escribía a mano en cada cambio.
+
 ## 🕯️ Las bujías que calzan, una por otra
 
 Lo pidió el dueño: «aprobá todas las bujías que sean de distintos grados térmicos; si es de platino o del material que tengamos, hacé que coincida largo, rosca y hexágono, y el resto lo relacionamos: en sí son distintas, pero en la casa de repuestos le das una por otra y no pasa nada».

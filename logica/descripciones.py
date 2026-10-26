@@ -2074,7 +2074,8 @@ _RE_NGK_COMUN = re.compile(r"^(BC|BK|DC|B|C|D)([PRUZ]*)(\d{1,2})(EF|EH|E|H|L|F)?
 # Dos series que no siguen esa regla: ZFR (rosca 14, hexágono 16, largo 19, como la ZFR6F-11 =
 # Bosch FR7LCX) y TR (rosca 14 de asiento cónico, hexágono 16, largo 17,5, como la TR6B-13 =
 # Bosch HR8MCV). Con P adelante son de platino; con I o IL, de iridio.
-_RE_NGK_ZFR = re.compile(r"^(P|I|IL)?ZFR(\d{1,2})([A-Z]*)(\d{0,2})$")
+# La letra después de la luz es de la forma: «IZFR6K-11S», «ZFR6T-11G».
+_RE_NGK_ZFR = re.compile(r"^(P|I|IL)?ZFR(\d{1,2})([A-Z]*)(\d{0,2})[A-Z]?$")
 _RE_NGK_TR = re.compile(r"^(P|I)?TR(\d{1,2})([A-Z]*)(\d{0,2})$")
 # Bosch: rosca, hexágono y asiento por la primera letra (W: 14 con hexágono 20,8; F: 14 con 16;
 # H: 14 de asiento cónico con 16; U: 10 con 16), R de resistencia, el grado, el largo, la

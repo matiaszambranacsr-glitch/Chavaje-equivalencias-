@@ -988,8 +988,19 @@ if pagina == PAGINAS[0]:
                 elif not res:
                     etiqueta_resultado = f"🔎 {codigo_individual} — sin resultados"
                 elif alternativas:
+                    # Cuántas de cada clase: «12 equivalencias» contaba igual lo confirmado que lo
+                    # que hay que revisar o la ficha da en rojo (en 1.500 búsquedas al azar de la
+                    # copia de la base, la mayoría de lo que sale no está confirmado).
+                    _clases = collections.Counter(
+                        veredicto_de_la_equivalencia(f)[:1] for f in alternativas)
+                    _desglose = " · ".join(x for x in (
+                        f"{_clases['🟢']} 🟢" if _clases["🟢"] else "",
+                        f"{_clases['🟡']} 🟡" if _clases["🟡"] else "",
+                        (f"{len(alternativas) - _clases['🟢'] - _clases['🟡']} a revisar"
+                         if len(alternativas) > _clases["🟢"] + _clases["🟡"] else "")) if x)
                     etiqueta_resultado = (f"🔎 {codigo_individual} — {len(alternativas)} "
-                                          f"equivalencia" + ("s" if len(alternativas) != 1 else ""))
+                                          f"equivalencia" + ("s" if len(alternativas) != 1 else "")
+                                          + f" ({_desglose})")
                 else:
                     etiqueta_resultado = f"🔎 {codigo_individual} — sin equivalencias todavía"
                 # Cuántos vínculos de lo buscado esperan en la cola: el que atiende los puede

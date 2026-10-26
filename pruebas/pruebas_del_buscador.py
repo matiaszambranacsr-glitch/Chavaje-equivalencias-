@@ -196,6 +196,9 @@ def probar():
     buscar("F100")
     esperar("el título lo cuenta",
             any("🔒 2 esperando aprobación" in x.label for x in at.expander), True)
+    esperar("y dice cuántas de cada clase",
+            [x.label.split(" — ", 1)[1].split(" · 🔒")[0] for x in at.expander
+             if x.label.startswith("🔎 F100")], ["1 equivalencia (1 a revisar)"])
     at.session_state["esp_ver_F100"] = True
     at.run()
     [b for b in at.button if b.key == f"esp_si_{_f100}_{_of1}_F100"][0].click().run()
