@@ -2559,6 +2559,17 @@ def _trabajo_de_fondo():
         except Exception as _err:
             anotar_error("_trabajo_de_fondo/descubrimiento", _err)
 
+    # LO CASI SEGURO MAL, DESCARTADO SOLO, si el administrador lo prendió (ver «LO QUE LA APP
+    # DESCARTA SOLA»). Después del descubrimiento, que es el que trae pares nuevos, y antes del
+    # análisis de la pantalla, así lo que se abre ya está sin eso.
+    if descarte_automatico_prendido() and _hay_que_hacerlo("descarte_automatico_pendiente"):
+        try:
+            ceder_al_mostrador()
+            descartar_solos_los_casi_seguro_mal()
+            _quedo_hecho("descarte_automatico_pendiente")
+        except Exception as _err:
+            anotar_error("_trabajo_de_fondo/descarte_automatico", _err)
+
     # El análisis de la lista que «Equivalencias sugeridas» muestra primero, para que al abrirla
     # ya esté hecho (ver preparar_el_analisis_del_primer_lote()). Va después del descubrimiento
     # porque ese agrega pares, y antes de las descargas porque es lo que alguien va a mirar.
@@ -2838,6 +2849,8 @@ def arrancar_tanda_de_fondo():
     if (not _tarea_prendida("fotos")
             and not _tarea_prendida("equiv")
             and obtener_config("descubrimiento_pendiente", "") != "1"
+            and not (descarte_automatico_prendido()
+                     and obtener_config("descarte_automatico_pendiente", "") == "1")
             # El repuntaje pendiente también la larga, aunque esté todo lo demás apagado: si no,
             # después de cambiar las reglas de confianza el puntaje viejo se quedaría para
             # siempre en la base de quien no tiene prendida ninguna tanda automática — que es

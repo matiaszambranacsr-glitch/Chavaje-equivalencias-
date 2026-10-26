@@ -2023,6 +2023,34 @@ def probar(L):
     ns["aprobar_puente"](_uni, "universal")
     esperar("aprobada como universal, ya no sale",
             "14-R7834" in {x["Código"] for x in ns["unidos_a_piezas_distintas"](limite=None)}, False)
+
+    # 80. 🤖 Lo que la app descarta sola (ver «LO QUE LA APP DESCARTA SOLA»): apagado no hace
+    # nada; prendido descarta lo 🔴 y el kit con su pieza, deja lo dudoso, lo firma «🤖 la app»,
+    # no cuenta para lo aprendido, y se devuelve todo a la cola con su lista.
+    md1, md2 = marca("AUTO UNO"), marca("AUTO DOS")
+    _bujia = producto("AU1", "BUJIA NGK BKR6E FIAT PALIO 1.4", md1)
+    _filtro = producto("AD1", "FILTRO DE ACEITE FIAT PALIO 1.4", md2)
+    _bujia2 = producto("AD2", "BUJIA NGK BKR6E FIAT PALIO 1.4", md2)
+    for _x, _y in ((_bujia, _filtro), (_bujia, _bujia2)):
+        c.execute("INSERT INTO equivalencias_pendientes (producto_a_id, producto_b_id, origen, lote) "
+                  "VALUES (?, ?, 'x', 'AUTO · 26/10')", (min(_x, _y), max(_x, _y)))
+    conn.commit()
+    _en_cola = lambda: sorted(r[0] for r in c.execute(
+        "SELECT producto_b_id FROM equivalencias_pendientes WHERE lote = 'AUTO · 26/10'"))
+    _antes_ap = ns["aprender_de_las_decisiones"]()
+    esperar("apagado, nada", ns["descartar_solos_los_casi_seguro_mal"](["AUTO · 26/10"])["descartados"], 0)
+    ns["guardar_config"](ns["DESCARTE_AUTOMATICO"], "1")
+    _r_auto = ns["descartar_solos_los_casi_seguro_mal"](["AUTO · 26/10"])
+    esperar("prendido: la bujía contra el filtro se va, la bujía con la bujía queda",
+            (_r_auto["descartados"], _en_cola(),
+             c.execute("SELECT revisado_por FROM equivalencias_revisadas WHERE producto_a_id = ? "
+                       "AND producto_b_id = ?", (min(_bujia, _filtro), max(_bujia, _filtro))).fetchone()[0],
+             ns["aprender_de_las_decisiones"]() == _antes_ap),
+            (1, [max(_bujia, _bujia2)], "🤖 la app", True))
+    esperar("se devuelve a la cola, con su lista",
+            (ns["devolver_lo_que_descarto_sola"](), _en_cola(), ns["lo_que_descarto_sola"]()),
+            (1, sorted([max(_bujia, _bujia2), max(_bujia, _filtro)]), []))
+    ns["guardar_config"](ns["DESCARTE_AUTOMATICO"], "0")
     return fallas
 
 

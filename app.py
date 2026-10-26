@@ -42,6 +42,7 @@ específico, y las pantallas quedan todas al final:
         · APROBAR POR GRUPOS, CON UNA MUESTRA DE CONTROL
         · PARA REVISAR, POR MOTIVO
         · LO QUE ESPERA APROBACIÓN, DESDE EL BUSCADOR
+        · LO QUE LA APP DESCARTA SOLA
     logica/importar.py
         · IMPORTAR UNA LISTA: leer el archivo y adivinar qué es cada columna
         · AVISOS DE BACKUP Y HUELLA DEL ARCHIVO IMPORTADO

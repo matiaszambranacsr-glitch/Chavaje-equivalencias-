@@ -6636,6 +6636,21 @@ Lo pidió el dueño: «seguí mejorando la redacción de los textos, ponelos tod
 
 Probado en un navegador de verdad, en inglés y en castellano: las listas dicen «Elegí una opción», las tablas «Pantalla completa», «Buscar en la tabla» y «Bajar la tabla», el cartelito de la barra de los gráficos «Ver los números», al escribir «Enter para confirmar», y el calendario de 💵 Caja «octubre 2026» con «D L M M J V S». Los gráficos, «23/10» y «$120.000». En cada pantalla queda un solo «ℹ️ Cómo funciona» arriba (en Depósito: la sección, «⏳ Para buscar» y cómo funciona la cola), y las ayudas de una parte siguen en su parte. `pruebas_de_la_sesion.py` (2d) lo controla: rompiéndolo a propósito, avisa.
 
+## 🤖 La app descarta sola lo que ya sabe que está mal
+
+Lo pidió el dueño: «automatizá más cosas». Lo más grande de la cola de revisión es lo que el análisis ya da por malo: en la copia de la base real, **4.187 de los 7.827 pendientes salen 🔴 «casi seguro mal», y 276 son un kit con la pieza que trae adentro**. Igual había que entrar, mirarlos y tocar «Descartar», lista por lista.
+
+Ahora, en 📊 Estadísticas → 🔗 Equivalencias sugeridas → **«🤖 Que la app descarte sola lo casi seguro mal»**, el administrador lo prende y la tarea de fondo los descarta sola cada vez que entran pendientes nuevos (y, al prenderlo, lo que ya está en la cola). Probado sobre la copia: **la cola baja de 7.827 a 3.364 en 8,8 segundos**.
+
+- **Viene apagado.** Prenderlo, apagarlo y deshacerlo piden la contraseña de administrador.
+- **Nunca aprueba nada.** Solo descarta el 🔴 y el kit con su pieza; lo dudoso (🟠) queda para mirar.
+- **El 🔴 es de fiar**: de los 20.037 vínculos que se aprobaron a mano, el análisis pone en 🔴 a 10 (0,05 %) (`pruebas_de_la_revision.py --base`).
+- **Queda firmado «🤖 la app»**, con su lista, su puntaje y su motivo, y no vuelve con la próxima importación.
+- **No se enseña a sí misma**: lo que aprende la app de tus decisiones (por par de listas), la calibración del puntaje y las muestras de lo revisado cuentan solo lo que decidió una persona. La prueba de la revisión tampoco lo cuenta como «rechazado a mano».
+- **Se deshace con un toque**: «↩️ Devolver a la cola» vuelve a poner todo lo que descartó sola —y nadie volvió a decidir— en su lista. Probado: la cola vuelve exactamente a 7.827.
+
+`pruebas_de_la_precision.py` (80) y `pruebas_de_la_sesion.py` (6) lo controlan; si lo descartado contara para lo aprendido, avisa.
+
 ## 🕸️ Las cadenas que pasan por otra pieza, y dónde limpiarlas
 
 Lo pidió el dueño: «más cosas mejora de las equivalencias». Sigue de la regla de abajo (dos productos de una misma lista son dos piezas), medido con la copia de la base real y las mismas 1.500 búsquedas al azar.

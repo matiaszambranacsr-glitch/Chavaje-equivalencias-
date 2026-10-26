@@ -1045,6 +1045,58 @@ a traer solas desde Administrar → Mantenimiento.
                     avisar("success", f"Se descartaron {miles(borrados)} vínculo(s) pendientes.")
                     st.rerun()
 
+            # 🤖 LO QUE LA APP DESCARTA SOLA. Ver descartar_solos_los_casi_seguro_mal().
+            _auto = descarte_automatico_prendido()
+            _descartados_solos = lo_que_descarto_sola()
+            with st.expander("🤖 Que la app descarte sola lo casi seguro mal — "
+                             + ("prendido" if _auto else "apagado")
+                             + (f" ({miles(len(_descartados_solos))} descartados)"
+                                if _descartados_solos else ""),
+                             key="exp_descarte_automatico"):
+                explicar(
+                    "Cuando entran pendientes nuevos, la app descarta sola lo que el análisis da "
+                    "🔴 casi seguro mal y los kits con su pieza. Nunca aprueba nada.",
+                    "Es lo más grande de la cola: en la copia de la base real, 4.187 de los 7.827 "
+                    "pendientes salen 🔴 y 241 son un kit con la pieza que trae adentro. Y el 🔴 "
+                    "es de fiar: de los 20.037 vínculos que se aprobaron a mano, el análisis pone "
+                    "en 🔴 a 10 (0,05 %).\n\n"
+                    "Lo que descarta queda anotado como rechazado por «🤖 la app» —no vuelve con "
+                    "la próxima lista— y no cuenta para lo que la app aprende de tus decisiones. "
+                    "Se puede devolver todo a la cola con un toque. Prenderlo, apagarlo y "
+                    "devolver piden la contraseña de administrador.", en_expander=True)
+                _ultimo = obtener_config("descarte_automatico_ultimo", "")
+                if _ultimo:
+                    try:
+                        _u = json.loads(_ultimo)
+                        st.caption(f"La última vez, {_u.get('fecha', '')}: "
+                                   f"{miles(_u.get('descartados', 0))} casi seguro mal y "
+                                   f"{miles(_u.get('kits', 0))} kits, en "
+                                   f"{_u.get('listas', 0)} lista(s).")
+                    except ValueError:
+                        pass
+                _da1, _da2 = st.columns(2)
+                if candado("prender o apagar el descarte automático",
+                           _da1.button("⏸️ Apagarlo" if _auto else "🤖 Prenderlo",
+                                       key="btn_descarte_automatico"),
+                           "descarte_automatico"):
+                    guardar_config(DESCARTE_AUTOMATICO, "0" if _auto else "1")
+                    if not _auto:
+                        # Al prenderlo, lo que ya está en la cola también.
+                        guardar_config("descarte_automatico_pendiente", "1")
+                        arrancar_tanda_de_fondo()
+                    avisar("success", "Descarte automático " + ("apagado." if _auto else
+                                                                 "prendido: corre por atrás."))
+                    st.rerun()
+                if candado("devolver a la cola lo que la app descartó sola",
+                           _da2.button(f"↩️ Devolver los {miles(len(_descartados_solos))} a la "
+                                       "cola", disabled=not _descartados_solos,
+                                       key="btn_devolver_descartados_solos"),
+                           "devolver_descartados_solos"):
+                    _n_dev = devolver_lo_que_descarto_sola()
+                    invalidar_salud()
+                    avisar("success", f"Volvieron {miles(_n_dev)} vínculo(s) a la cola.")
+                    st.rerun()
+
             # Una lista por vez, elegida con un selector. Antes cada lista estaba dentro de un
             # desplegable, y como Streamlit los cierra al refrescar la pantalla, cada botón que
             # tocabas te cerraba la ventana entera — imposible revisar 300 vínculos así.

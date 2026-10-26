@@ -326,6 +326,14 @@ def probar():
     finally:
         _g["plan_de_la_lista"] = _plan_original
     esperar("lo que sale del análisis no se rearma en cada toque", len(_veces_plan), 0)
+    # 🤖 El descarte automático: el administrador lo prende (y pide pasar la cola que ya está)
+    # y lo apaga. Ver «LO QUE LA APP DESCARTA SOLA».
+    [b for b in rev.button if b.key == "btn_descarte_automatico"][0].click().run()
+    esperar("prendido, con la cola de ahora pedida",
+            (ns["obtener_config"]("descarte_automatico_rojos", ""),
+             ns["obtener_config"]("descarte_automatico_pendiente", "")), ("1", "1"))
+    [b for b in rev.button if b.key == "btn_descarte_automatico"][0].click().run()
+    esperar("y apagado", ns["obtener_config"]("descarte_automatico_rojos", ""), "0")
     esperar("sin errores en la revisión", [e.value for e in rev.exception], [])
 
     # 7. 🕸️ Unidos a varias piezas distintas de una misma lista: se buscan, se mira uno y se le

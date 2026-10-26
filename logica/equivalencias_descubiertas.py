@@ -446,7 +446,15 @@ COMO_SE_DECIDIO = {
     "reglas_de_hoy": "🔁 al repasar con las reglas de hoy",
     "deshacer": "↩️ al deshacer una importación",
     "todo_el_producto": "✂️ todos los de un producto de una vez",
+    "automatico": "🤖 sola, porque el análisis la daba casi seguro mal",
 }
+
+# Quién firma lo que la app descarta sola (ver descartar_solos_los_casi_seguro_mal()). Lo que
+# se aprende de las decisiones —el aprendizaje por par de listas, la calibración, las
+# muestras de lo revisado— cuenta solo lo que decidió una persona: si contara esto, la app se
+# estaría enseñando a sí misma que lo que da por malo está mal.
+QUIEN_DESCARTA_SOLA = "🤖 la app"
+_SOLO_DE_PERSONAS = f"COALESCE(r.revisado_por, '') <> '{QUIEN_DESCARTA_SOLA}'"
 
 
 def _lo_que_dice_la_cola(pares):
@@ -472,19 +480,22 @@ def _lo_que_dice_la_cola(pares):
     return salida
 
 
-def marcar_revision(pares, decision, motivo=None, como=None, cola=None):
+def marcar_revision(pares, decision, motivo=None, como=None, cola=None, quien=None,
+                    como_estaba=None):
     """Recuerda la decisión tomada sobre un vínculo, en los dos sentidos. 'ok' = ya lo miré y
     está bien (no volver a marcarlo en la auditoría). 'rechazada' = no es equivalente (además
     de borrarlo, no se vuelve a crear aunque se reimporte la lista del proveedor).
     'motivo' es una clave de MOTIVOS_DE_RECHAZO, cuando la persona dijo por qué.
     'como' es una clave de COMO_SE_DECIDIO; si no se dice, «de a uno» o «en grupo».
-    'cola' es lo que devolvió _lo_que_dice_la_cola() antes de sacar los pares de la cola."""
+    'cola' es lo que devolvió _lo_que_dice_la_cola() antes de sacar los pares de la cola.
+    'quien' y 'como_estaba', para lo que decide la app sola sin una pantalla abierta (ver
+    descartar_solos_los_casi_seguro_mal())."""
     if not pares:
         return
     filas = []
     historial = []
-    usuario = obtener_usuario_actual()
-    como_estaba = _como_estaba_en_la_revision()
+    usuario = quien or obtener_usuario_actual()
+    como_estaba = como_estaba if como_estaba is not None else _como_estaba_en_la_revision()
     cola = cola or {}
     # Una fila de historial por par aunque la pantalla mande la ida y la vuelta.
     normalizados = sorted({(min(a, b), max(a, b)) for a, b in pares})
@@ -577,8 +588,9 @@ def aciertos_de_la_revision():
             "Mal en la muestra": f"{100 * malos / total:.0f} %",
             "Mal en el grupo (hasta)": f"{100 * techo:.0f} %"})
 
-    c.execute("""SELECT confianza, senal, decision FROM equivalencias_revisadas
-                 WHERE confianza IS NOT NULL AND producto_a_id < producto_b_id""")
+    c.execute("""SELECT confianza, senal, decision FROM equivalencias_revisadas r
+                 WHERE confianza IS NOT NULL AND producto_a_id < producto_b_id AND """
+              + _SOLO_DE_PERSONAS)
     filas = c.fetchall()
     salida["con_datos"] = len(filas)
     bandas, alarmas = {}, {}
@@ -620,7 +632,7 @@ def tablero_de_calidad(minimo_por_grupo=30, tope=10):
                  JOIN productos pb ON pb.id = r.producto_b_id
                  JOIN marcas ma ON ma.id = pa.marca_id
                  JOIN marcas mb ON mb.id = pb.marca_id
-                 WHERE r.producto_a_id < r.producto_b_id""")
+                 WHERE r.producto_a_id < r.producto_b_id AND """ + _SOLO_DE_PERSONAS)
     filas = c.fetchall()
     aprobadas = sum(1 for f in filas if f["decision"] == "ok")
     rechazadas = len(filas) - aprobadas
@@ -761,7 +773,7 @@ def casos_para_practicar(cuantos=10, semilla=None):
                  JOIN productos pa ON pa.id = r.producto_a_id
                  JOIN productos pb ON pb.id = r.producto_b_id
                  WHERE r.producto_a_id < r.producto_b_id
-                   AND r.decision IN ('ok', 'rechazada')
+                   AND r.decision IN ('ok', 'rechazada') AND """ + _SOLO_DE_PERSONAS + """
                  ORDER BY r.producto_a_id, r.producto_b_id""")
     filas = [dict(r) for r in c.fetchall()]
     rechazadas = [f for f in filas if f["decision"] == "rechazada"]
@@ -1738,6 +1750,10 @@ def guardar_equivalencias_pendientes(pares, origen, lote):
         # 8.654 pares cada vez, y sin esto la app iba a anunciar 8.654 nuevos todas las veces.
         entraron = c.rowcount
         conn.commit()
+    if entraron > 0:
+        # Hay pendientes nuevos: si está prendido, la tarea de fondo descarta lo casi seguro
+        # mal (ver «LO QUE LA APP DESCARTA SOLA»).
+        guardar_config("descarte_automatico_pendiente", "1")
     return max(entraron, 0)
 
 
@@ -2096,8 +2112,9 @@ def aprender_de_las_decisiones():
                      JOIN productos pb ON pb.id = r.producto_b_id
                      JOIN marcas ma ON ma.id = pa.marca_id
                      JOIN marcas mb ON mb.id = pb.marca_id
-                     WHERE r.producto_a_id < r.producto_b_id
-                     GROUP BY ma.nombre, mb.nombre, r.decision""")
+                     WHERE r.producto_a_id < r.producto_b_id AND {_SOLO_DE_PERSONAS}
+                     GROUP BY ma.nombre, mb.nombre, r.decision""".format(
+            _SOLO_DE_PERSONAS=_SOLO_DE_PERSONAS))
         crudo = c.fetchall()
     except sqlite3.OperationalError as _err:
         anotar_error("aprender_de_las_decisiones", _err)
@@ -4946,7 +4963,8 @@ def aprobar_pendientes(lote, solo_estos_pares=None, en_bloque=False):
     return len(pares)
 
 
-def rechazar_pendientes(lote, solo_estos_pares=None, motivo=None):
+def rechazar_pendientes(lote, solo_estos_pares=None, motivo=None, como=None, quien=None,
+                        como_estaba=None):
     """Descarta vínculos pendientes: los pares dados, o sin pares la lista ENTERA.
 
     La lista entera, solo administrador: es descartar a ciegas lo que nadie miró —miles de
@@ -4976,7 +4994,8 @@ def rechazar_pendientes(lote, solo_estos_pares=None, motivo=None):
         conn.commit()
     # Se recuerda el rechazo para que no vuelva a aparecer si se reimporta la misma lista
     marcar_revision(marcar_para_recordar, "rechazada", motivo,
-                    como="bloque" if solo_estos_pares is None else None, cola=cola)
+                    como=como or ("bloque" if solo_estos_pares is None else None), cola=cola,
+                    quien=quien, como_estaba=como_estaba)
     return borrados
 
 
@@ -5220,3 +5239,97 @@ def lo_que_espera_aprobacion(ids):
             "une": une.get(par, 0), "ya_unidos": une.get(par) == 0})
     salida.sort(key=lambda x: (-x["confianza"], x["Marca"] or "", x["Codigo"] or ""))
     return salida
+
+
+
+# ======================================================================
+# LO QUE LA APP DESCARTA SOLA
+# ======================================================================
+# Lo más grande de la cola es lo que el análisis ya da por malo: en la copia de la base real,
+# 4.187 de los 7.827 pendientes salen 🔴 «casi seguro mal» y 241 son un kit y su pieza. Igual
+# había que entrar, mirar y tocar «Descartar» lista por lista. Y el 🔴 es de fiar: de los 20.037
+# vínculos que se aprobaron a mano, el análisis pone en 🔴 a 10 (0,05 %) —ver
+# pruebas_de_la_revision.py --base—. Si se prende (apagado de entrada: lo decide el
+# administrador), la tarea de fondo los descarta sola cada vez que entran pendientes nuevos.
+# No aprueba nada nunca. Queda firmado QUIEN_DESCARTA_SOLA, no cuenta para lo que se aprende
+# de las decisiones, y se devuelve todo a la cola con un toque.
+
+DESCARTE_AUTOMATICO = "descarte_automatico_rojos"
+
+
+def descarte_automatico_prendido():
+    return obtener_config(DESCARTE_AUTOMATICO, "0") == "1"
+
+
+def descartar_solos_los_casi_seguro_mal(lotes=None):
+    """Descarta de la cola lo que el análisis da 🔴 casi seguro mal y los kits con su pieza,
+    lista por lista. Devuelve {"descartados", "kits", "listas"}. Solo si está prendido."""
+    salida = {"descartados": 0, "kits": 0, "listas": 0}
+    if not descarte_automatico_prendido():
+        return salida
+    for lote in (lotes if lotes is not None else
+                 [x["lote"] for x in resumen_lotes_pendientes()]):
+        _limpias, sospechosas, relacionadas = analizar_lote_pendiente(lote)
+        rojos = [f for f in sospechosas
+                 if nivel_de_confianza(f.get("confianza", 50))[0].startswith("🔴")]
+        if not rojos and not relacionadas:
+            continue
+        como_estaba = {(min(f["a"], f["b"]), max(f["a"], f["b"])): (
+            f.get("confianza"), ((f.get("alarmas") or [None])[0] or "")[:200] or None,
+            None) for f in rojos}
+        como_estaba.update({(min(f["a"], f["b"]), max(f["a"], f["b"])): (
+            15.0, f"📦 {f.get('relacion') or 'no es una equivalencia'}"[:200], None)
+            for f in relacionadas})
+        salida["descartados"] += rechazar_pendientes(
+            lote, [(f["a"], f["b"]) for f in rojos], como="automatico",
+            quien=QUIEN_DESCARTA_SOLA, como_estaba=como_estaba) if rojos else 0
+        salida["kits"] += rechazar_pendientes(
+            lote, [(f["a"], f["b"]) for f in relacionadas], como="automatico",
+            quien=QUIEN_DESCARTA_SOLA, como_estaba=como_estaba) if relacionadas else 0
+        salida["listas"] += 1
+    if salida["descartados"] or salida["kits"]:
+        guardar_config("descarte_automatico_ultimo", json.dumps(dict(
+            salida, fecha=datetime.now().strftime("%Y-%m-%d %H:%M"))))
+    return salida
+
+
+def lo_que_descarto_sola():
+    """Lo que la app descartó sola y nadie volvió a decidir: [{"a", "b", "lote", "desde",
+    "confianza", "motivo"}]. Ver devolver_lo_que_descarto_sola()."""
+    c.execute("""SELECT h.producto_a_id AS a, h.producto_b_id AS b, h.lote,
+                        h.pendiente_desde AS desde, h.confianza, h.senal AS motivo
+                 FROM historial_de_revisiones h
+                 JOIN equivalencias_revisadas r ON r.producto_a_id = h.producto_a_id
+                                                AND r.producto_b_id = h.producto_b_id
+                 WHERE h.como = 'automatico' AND h.decision = 'rechazada'
+                   AND r.decision = 'rechazada' AND r.revisado_por = ?
+                   AND h.producto_a_id < h.producto_b_id
+                 GROUP BY h.producto_a_id, h.producto_b_id""", (QUIEN_DESCARTA_SOLA,))
+    return [dict(r) for r in c.fetchall()]
+
+
+def devolver_lo_que_descarto_sola():
+    """Vuelve a poner en la cola, con su lista, todo lo que la app descartó sola y nadie volvió
+    a decidir. Devuelve cuántos. Pide administrador: deshace muchas decisiones de una."""
+    exigir_nivel("admin", "devolver a la cola lo que la app descartó sola")
+    pares = lo_que_descarto_sola()
+    if not pares:
+        return 0
+    with db_lock, transaccion():
+        for f in pares:
+            c.execute("""DELETE FROM equivalencias_revisadas
+                         WHERE ((producto_a_id = ? AND producto_b_id = ?)
+                             OR (producto_a_id = ? AND producto_b_id = ?)) AND revisado_por = ?""",
+                      (f["a"], f["b"], f["b"], f["a"], QUIEN_DESCARTA_SOLA))
+            c.execute("""INSERT OR IGNORE INTO equivalencias_pendientes
+                             (producto_a_id, producto_b_id, origen, lote, fecha)
+                         VALUES (?, ?, 'devuelto a la cola', ?,
+                                 COALESCE(?, datetime('now', 'localtime')))""",
+                      (f["a"], f["b"], f["lote"] or "DEVUELTO A LA COLA", f["desde"]))
+            c.execute("""INSERT INTO historial_de_revisiones
+                             (producto_a_id, producto_b_id, decision, revisado_por, lote,
+                              version_reglas, como)
+                         VALUES (?, ?, 'devuelta a la cola', ?, ?, ?, 'automatico')""",
+                      (f["a"], f["b"], obtener_usuario_actual(), f["lote"], VERSION_CONFIANZA))
+    guardar_config("descarte_automatico_ultimo", "")
+    return len(pares)

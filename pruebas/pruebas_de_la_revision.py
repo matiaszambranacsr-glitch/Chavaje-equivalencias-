@@ -430,9 +430,11 @@ def preparar_la_base_de_aprobaciones(ruta_base, destino):
     # Y LO QUE RECHAZASTE, en otra tanda: es lo que dice cuántos vínculos malos dejaría pasar
     # el puntaje (los falsos positivos). Un par rechazado que el análisis pone entre las
     # «limpias» es uno que se hubiera aprobado en grupo con la muestra.
+    # Sin lo que descartó la app sola («🤖 la app»): no lo rechazó una persona, y como es lo que
+    # el análisis ya daba por malo, contarlo inflaría los aciertos.
     rechazados = {(min(a, b), max(a, b)) for a, b in con.execute(
         "SELECT producto_a_id, producto_b_id FROM equivalencias_revisadas "
-        "WHERE decision = 'rechazada'")} - aprobados
+        "WHERE decision = 'rechazada' AND COALESCE(revisado_por, '') <> '🤖 la app'")} - aprobados
     rechazados = [(a, b) for a, b in sorted(rechazados)
                   if con.execute("SELECT COUNT(*) FROM productos WHERE id IN (?, ?)",
                                  (a, b)).fetchone()[0] == 2]
