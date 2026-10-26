@@ -287,6 +287,46 @@ def probar():
                    "precio": 950, "cantidad": 2, "se_lleva": False}})
     esperar("sin errores en el presupuesto", [e.value for e in presu.exception], [])
     esperar("sin errores en la venta", [e.value for s_ in (vta, otro) for e in s_.exception], [])
+
+    # 6. 🔗 Equivalencias sugeridas: cada lista arranca analizándose ENTERA —la tanda se fijaba
+    # con la primera que se abría y al pasar al barrido quedaba en 400 de 6.586—, y lo que sale
+    # del análisis (el plan, los abanicos, los grupos por motivo) no se vuelve a armar en cada
+    # toque: con el barrido entero eran 899 ms por tildar una casilla.
+    for nombre_l in ("LISTA UNO", "LISTA DOS"):
+        c.execute("INSERT INTO marcas (nombre, tipo) VALUES (?, 'PROVEEDOR')", (nombre_l,))
+    _m1, _m2 = [r[0] for r in c.execute("SELECT id FROM marcas WHERE nombre IN ('LISTA UNO', "
+                                        "'LISTA DOS') ORDER BY nombre DESC")]
+    for lote_s, cuantos_s, fecha_s in (("GRANDE · 01/10", 450, "2026-10-01"),
+                                       ("CHICA · 02/10", 260, "2026-10-02")):
+        for i in range(cuantos_s):
+            ids_s = []
+            for m_s, pref in ((_m1, "U"), (_m2, "D")):
+                cod_s = f"{pref}{lote_s[:1]}{i}"
+                c.execute("INSERT INTO productos (codigo_raw, codigo_clean, descripcion, marca_id) "
+                          "VALUES (?, ?, ?, ?)", (cod_s, cod_s, f"FILTRO DE ACEITE MOTOR {i}", m_s))
+                ids_s.append(c.lastrowid)
+            c.execute("INSERT INTO equivalencias_pendientes (producto_a_id, producto_b_id, origen, "
+                      "lote, fecha) VALUES (?, ?, 'x', ?, ?)", (*sorted(ids_s), lote_s, fecha_s))
+    conn.commit()
+    rev = sesion_nueva("clave-duenio-1", [p for p in ns["PAGINAS"] if "Estadísticas" in p][0])
+    rev.session_state["sub_stats"] = "🔗 Equivalencias sugeridas"
+    rev.run()
+    esperar("la primera lista, entera", rev.session_state["cuantos_pendientes"], 400)
+    _sel = [s_ for s_ in rev.selectbox if s_.key == "lote_en_revision"][0]
+    _sel.set_value([o for o in _sel.options if o.startswith("GRANDE")][0]).run()
+    esperar("al pasar a la grande, también entera",
+            (rev.session_state["cuantos_pendientes"],
+             any("Analizados 450 de 450" in str(x.value) for x in rev.caption)), (1000, True))
+    _g = ns["plan_de_la_lista"].__globals__
+    _plan_original, _veces_plan = _g["plan_de_la_lista"], []
+    _g["plan_de_la_lista"] = lambda *a, **k: _veces_plan.append(1) or _plan_original(*a, **k)
+    try:
+        rev.run()
+        rev.run()
+    finally:
+        _g["plan_de_la_lista"] = _plan_original
+    esperar("lo que sale del análisis no se rearma en cada toque", len(_veces_plan), 0)
+    esperar("sin errores en la revisión", [e.value for e in rev.exception], [])
     return fallas
 
 

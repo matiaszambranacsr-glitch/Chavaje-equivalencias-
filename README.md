@@ -6636,6 +6636,31 @@ Lo pidió el dueño: «seguí mejorando la redacción de los textos, ponelos tod
 
 Probado en un navegador de verdad, en inglés y en castellano: las listas dicen «Elegí una opción», las tablas «Pantalla completa», «Buscar en la tabla» y «Bajar la tabla», el cartelito de la barra de los gráficos «Ver los números», al escribir «Enter para confirmar», y el calendario de 💵 Caja «octubre 2026» con «D L M M J V S». Los gráficos, «23/10» y «$120.000». En cada pantalla queda un solo «ℹ️ Cómo funciona» arriba (en Depósito: la sección, «⏳ Para buscar» y cómo funciona la cola), y las ayudas de una parte siguen en su parte. `pruebas_de_la_sesion.py` (2d) lo controla: rompiéndolo a propósito, avisa.
 
+## 🔗 Las equivalencias, más ciertas y más rápidas de revisar
+
+Lo pidió el dueño: «mejorate todo lo de las equivalencias». Se midió con la copia de la base real (86.946 productos, 20.037 vínculos aprobados, 7.827 esperando).
+
+**1. Otro producto de la misma lista no es una equivalencia.** Un proveedor no vende dos veces la misma pieza con dos códigos: si los dos están en su lista, son dos repuestos. Pero por la cadena se llegaba igual de uno al otro. Una sonda «universal» de CRI-FA está unida a muchas sondas distintas de FISPA, y buscando la LECS018 de LUCAS (Sportage) salía la 80056 de FISPA (Kangoo) como «🟢 sólida». En **1.500 búsquedas al azar, 1.147 resultados lejanos eran otro producto de la misma lista que lo buscado, en 510 búsquedas (una de cada tres), y ninguno decía nada.**
+
+Ahora salen marcados («⚠️ contra lo buscado: otro producto de FISPA, otra pieza»), en rojo, no cuentan entre las equivalencias y, con «solo confiables» (y para quien entra sin sesión), no salen. La ficha de prueba dice lo mismo (`otra_pieza_de_la_misma_lista()`, adentro de `evidencia_cruzada()`): es una sola regla para el buscador, la ficha y la cola. No se marcan:
+
+- las **variantes** de un mismo código (los espesores y materiales de una junta);
+- los **mellizos de FISPA y LUCAS**: esa lista sí vende la misma pieza dos veces, una con cada marca. Se reconocen por la descripción: con la mitad de las palabras en común o más, son la misma. En la muestra, de los 448 de dos líneas, 384 tenían menos del 40 % en común (la sonda del Sportage contra la del Kangoo), y los mellizos, del 60 % para arriba;
+- un **reemplazo**, cuando uno nombra el código del otro («Reemplazada por 272008»): es el único par de una misma lista que se aprobó a mano.
+
+Con la regla: 2.054 resultados marcados en esas 1.500 búsquedas (los de descripción idéntica de IMPERIAL, como VS5614 y VS5615, la ficha ya los daba en rojo, y ahora el buscador también). La revisión contra todo lo decidido (`pruebas_de_la_revision.py --base`) da igual que antes: de 20.037 aprobados, 10 en rojo (0,0 %); de 2.633 rechazados, 3 pasarían limpios (0,1 %); el buscador y la ficha dicen lo mismo en los 755 resultados comparados. Reglas v16.
+
+**2. Revisar la lista grande, sin esperar.** En 📊 Estadísticas → 🔗 Equivalencias sugeridas, con el barrido entero (6.586 vínculos), **cada toque tardaba 899 ms**: tildar una casilla o pasar de página volvía a armar el orden de los abanicos, los grupos por motivo y el plan, aunque el análisis no había cambiado. Ahora se recuerdan con el análisis (su clave, la hora y los recortes, y los vínculos): **254 ms**. Lo que se cuenta sobre la lista entera —lo que une redes, lo que ya está unido— también, mientras no cambien sus pendientes.
+
+Y un error: el tamaño de la tanda se fijaba con la primera lista que se abría —la más nueva, «todas», con 254: 400— y al pasar al barrido quedaba en 400 de 6.586, con 17 tandas para recorrer. Ahora cada lista arranca analizándose entera.
+
+**3. Los abanicos («🪭 Elegí cuál es la equivalente»).**
+
+- **Se preguntan desde el lado con más opciones**, no con más filas. TARANTO 230512 con dos de IMPERIAL (la misma junta en dos materiales) empataba con IMPERIAL 25516AC3 con dos de TARANTO, y ganaba el primero: «elegí entre una sola opción». Pasaba en 13 de 514; ahora en 0.
+- **La ⭐ también sale de los vínculos aprobados**: si uno de los candidatos ya es su equivalente por otro camino (ya se encuentran al buscar), viene elegido y la tabla lo dice con «🔗 ya equivalente». Antes ninguno de los 514 traía una sugerida; ahora 23. Y 106 abanicos tienen dos o más candidatos ya unidos al producto: no es una duda de la cola, es una red que juntó piezas distintas (la regla del punto 1 es la que lo frena al buscar).
+
+`pruebas_de_la_precision.py` (75 a 77) lo controla: la regla con sus excepciones, el buscador y la ficha, «solo confiables», el lado del abanico y la ⭐. Rompiendo cada cosa a propósito, avisa.
+
 ## 🔒 Lo que espera aprobación se decide desde el Buscador
 
 Lo pidió el dueño: «que sea una locura lo de las equivalencias también». Se midió dónde está el trabajo en la cola (copia de la base, 7.827 vínculos esperando): la revisión es **por lista**, en 📊 Estadísticas → 🔗 Equivalencias sugeridas, y mientras tanto el mostrador no ve nada. **4.549 productos tienen vínculos esperando**: se busca uno, la pantalla dice «sin equivalencias todavía», y la que el cliente necesitaba estaba en la cola, en una lista de miles.

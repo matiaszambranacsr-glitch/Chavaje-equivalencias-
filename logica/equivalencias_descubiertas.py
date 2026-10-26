@@ -3229,6 +3229,53 @@ def _palabras_sin_el_codigo(desc, cod):
     return frozenset(salida)
 
 
+def otra_pieza_de_la_misma_lista(marca, cod_a, desc_a, cod_b, desc_b):
+    """Si dos productos de UNA MISMA lista (no de fábrica) son dos piezas, el motivo; si no, "".
+
+    Un proveedor no vende dos veces la misma pieza con dos códigos para que elijas: si los dos
+    están en su lista, son dos repuestos. Por la cadena se llegaba igual de uno al otro —una
+    sonda «universal» de CRI-FA unida a 51 sondas distintas de FISPA—, y buscando la LECS018 de
+    LUCAS (Sportage) salía la 80056 de FISPA (Kangoo) como «🟢 sólida». En 1.500 búsquedas al
+    azar de la copia de la base real, 1.147 resultados lejanos eran otro producto de la misma
+    lista que lo buscado, en 510 búsquedas, y ninguno decía nada.
+
+    No son dos piezas, y no se dice nada, cuando son:
+      · variantes de un mismo código (son_variantes_de_la_misma_pieza(): los espesores, los
+        materiales);
+      · la misma pieza para el abanico (pieza_para_el_abanico(): los mellizos de FISPA con el
+        número de LUCAS y la misma descripción sin el código);
+      · de dos líneas de la lista —lo de FISPA y lo de LUCAS que vende FISPA— con la mitad de
+        las palabras en común o más: esa lista SÍ vende dos veces la misma pieza, una con cada
+        marca, y la descripción no siempre es igual («BOMBA ELECTRICA 20509… CHEVROLET ASTRA -
+        CORSA- VECTRA» y «BOMBA DE COMBUSTIBLE LEFS054… CHEVROLET ASTRA - CORSA- V…»). En la
+        misma muestra, de los 448 de dos líneas, 384 tenían menos del 40 % en común (la sonda
+        del Sportage contra la del Kangoo) y los mellizos, del 60 % para arriba;
+      · un reemplazo: uno nombra el código del otro («Junta tapa de cilindros - Reemplazada por
+        272008»). Es el único par de una misma lista que se aprobó a mano.
+    Dos de la misma línea con la misma descripción no se salvan: IMPERIAL describe por el auto
+    («M.BENZ OM904 LA 12valv.-OM906» son la VS5614 y la VS5615), y la ficha ya las daba por dos
+    filas distintas (ver evidencia_cruzada())."""
+    cod_a, cod_b = (cod_a or "").strip(), (cod_b or "").strip()
+    if not cod_a or not cod_b or sanitizar(cod_a) == sanitizar(cod_b):
+        return ""
+    if son_variantes_de_la_misma_pieza([cod_a, cod_b]):
+        return ""
+    sub_a, sub_b = _submarca_del_codigo(cod_a), _submarca_del_codigo(cod_b)
+    if sub_a and sub_b and sub_a != sub_b:
+        if pieza_para_el_abanico(cod_a, desc_a) == pieza_para_el_abanico(cod_b, desc_b):
+            return ""
+        pa = _palabras_sin_el_codigo(desc_a or "", cod_a)
+        pb = _palabras_sin_el_codigo(desc_b or "", cod_b)
+        if pa and pb and len(pa & pb) / len(pa | pb) >= 0.5:
+            return ""
+    for cod, desc in ((cod_a, desc_b), (cod_b, desc_a)):
+        limpio = sanitizar(cod)
+        if len(limpio) >= 4 and limpio in sanitizar(desc or ""):
+            return ""
+    return (f"🏷️ los dos son de {marca} y la lista los vende como dos productos distintos "
+            f"({cod_a} y {cod_b}): no son la misma pieza")
+
+
 def _descripciones_mellizas(desc_a, cod_a, desc_b, cod_b):
     """¿Dos descripciones de la MISMA lista dicen lo mismo salvo el código?
 
@@ -3371,13 +3418,29 @@ def abanicos_para_elegir(limpias, sospechosas):
     for f in todas:
         for clave in ((f["a"], f.get("marca_b")), (f["b"], f.get("marca_a"))):
             por_clave.setdefault(clave, []).append(f)
+    # El lado con más OPCIONES, no con más filas. Contando filas, TARANTO 230512 con dos de
+    # IMPERIAL —25516AC3 y 25517AC3, la misma junta en dos materiales— empataba con IMPERIAL
+    # 25516AC3 con dos de TARANTO, y ganaba el primero: «elegí entre una sola opción», cuando la
+    # pregunta era cuál de las dos de TARANTO es la de IMPERIAL. Pasaba en 13 de los 514.
+    opciones = {}
+
+    def _opciones(clave):
+        if clave not in opciones:
+            otros = [(f["cod_b"], f.get("desc_b")) if f["a"] == clave[0]
+                     else (f["cod_a"], f.get("desc_a")) for f in por_clave.get(clave, ())]
+            opciones[clave] = len(set(piezas_del_abanico(otros).values())) if otros else 0
+        return opciones[clave]
+
     elegidas = {}
     for f in sospechosas:
         if not es_de_un_abanico(f):
             continue
         claves = [(f["a"], f.get("marca_b")), (f["b"], f.get("marca_a"))]
-        clave = max(claves, key=lambda k: len(por_clave.get(k, ())))
+        clave = max(claves, key=lambda k: (_opciones(k), len(por_clave.get(k, ()))))
         elegidas.setdefault(clave, None)
+    # Lo que ya está unido por vínculos aprobados: ver pieza_sugerida_del_abanico(). La red se
+    # pide una vez acá y no por abanico: su firma son 2 ms, y con 468 abanicos era un segundo.
+    raiz, _tamano = _red_de_equivalencias()
     salida = []
     for (pid, marca_otra) in elegidas:
         candidatos = por_clave.get((pid, marca_otra), [])
@@ -3388,7 +3451,9 @@ def abanicos_para_elegir(limpias, sospechosas):
         salida.append({"producto": {"id": pid, "cod": f0[f"cod_{lado}"],
                                     "marca": f0[f"marca_{lado}"], "desc": f0.get(f"desc_{lado}")},
                        "marca_otra": marca_otra,
-                       "candidatos": sorted(candidatos, key=lambda f: -f.get("confianza", 0))})
+                       "candidatos": sorted(candidatos, key=lambda f: -f.get("confianza", 0)),
+                       "ya_unidos": {(f["a"], f["b"]) for f in candidatos
+                                     if raiz.get(f["a"], f["a"]) == raiz.get(f["b"], f["b"])}})
     salida.sort(key=lambda x: -len(x["candidatos"]))
     return salida
 
@@ -3458,8 +3523,10 @@ def tabla_del_abanico(abanico):
         f = filas_b[0]
         lado = "b" if f["a"] == pid else "a"
         suyo = rasgos(f.get(f"desc_{lado}"))
+        # 🔗: ya es su equivalente por vínculos aprobados (ver pieza_sugerida_del_abanico()).
+        _ya = any((g["a"], g["b"]) in (abanico.get("ya_unidos") or ()) for g in filas_b)
         fila = {"Opción": f[f"cod_{lado}"] + (f" (+{len(filas_b) - 1})" if len(filas_b) > 1
-                                              else ""),
+                                              else "") + (" 🔗 ya equivalente" if _ya else ""),
                 "Modelos en común": "/".join(sorted(propio["modelos"] & suyo["modelos"])[:3])
                                     or ("⚠️ ninguno" if propio["modelos"] and suyo["modelos"]
                                         else "")}
@@ -3493,11 +3560,20 @@ def pieza_sugerida_del_abanico(abanico):
 
     Solo cuando hay UNA que le gana a todas: la que el análisis dejó limpia (55 o más) y todas
     las demás en revisión. Es la que mejor coincide en modelo, motor y cilindrada (ver
-    fuerza_de_la_coincidencia()); si empatan dos, no se sugiere ninguna."""
+    fuerza_de_la_coincidencia()); si empatan dos, no se sugiere ninguna.
+
+    O la que YA ES su equivalente por vínculos aprobados (🔗, ver abanicos_para_elegir()): el
+    producto y ella ya se encuentran al buscar, así que la pregunta ya está contestada. En la
+    copia de la base real ninguno de los 514 abanicos traía una sugerida, y 121 tenían una así.
+    Si las dos cosas dicen opciones distintas, ninguna."""
     grupos = candidatos_por_pieza(abanico)
     limpias = [base for base, filas in grupos
                if max(f.get("confianza", 0) for f in filas) >= 55]
-    return limpias[0] if len(limpias) == 1 else None
+    unidos = abanico.get("ya_unidos") or ()
+    ya = [base for base, filas in grupos if any((f["a"], f["b"]) in unidos for f in filas)]
+    if len(limpias) > 1 or len(ya) > 1 or (limpias and ya and limpias != ya):
+        return None
+    return (limpias or ya or [None])[0]
 
 
 def parecidos_de_varios(rechazados, candidatas, tope=60):

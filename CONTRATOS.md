@@ -264,6 +264,8 @@ cambio» (todas juntas: `python .github/correr_las_pruebas.py`).
 | Un mecánico solo lee y escribe su propia cuenta | `exigir_que_sea_su_cuenta()` | `pruebas_de_los_cambios.py` (5) |
 | Fusionar dos productos no pierde lo que apunta al que se va (apartados, ventas, pedidos, fichas, pendientes) | `fusionar_productos()` | `pruebas_de_la_plata_y_el_stock.py` |
 | Apartar contra el stock libre, pagos y cargos de las cuentas, mejor margen | `reservar_stock()`, `registrar_pago_de_cuenta()`, `mejor_margen_entre_equivalentes()` | `pruebas_de_la_plata_y_el_stock.py` |
+| Otro producto de la misma lista que lo buscado es otra pieza (salvo variantes, mellizos FISPA/LUCAS y reemplazos): el buscador lo marca y no lo cuenta, la ficha lo da en rojo, «solo confiables» lo saca | `otra_pieza_de_la_misma_lista()`, `evidencia_cruzada()`, `marcar_cadenas_que_no_aguantan()` | `pruebas_de_la_precision.py` (75) |
+| El abanico se pregunta desde el lado con más opciones, y trae ⭐ la que ya es su equivalente por vínculos aprobados (🔗) | `abanicos_para_elegir()`, `pieza_sugerida_del_abanico()`, `tabla_del_abanico()` | `pruebas_de_la_precision.py` (76, 77) |
 | Buscando un código, lo que espera aprobación de ese producto: contado en el título, con el mismo veredicto que la revisión de su lista, aprobar lo trae a la tabla sin anotar la búsqueda otra vez, lo rojo se descarta junto y el invitado no lo ve | `cuantos_esperan_aprobacion()`, `lo_que_espera_aprobacion()` | `pruebas_del_buscador.py` (2g) |
 | Las sugerencias por descripción no comparan lo que firmas_compatibles() rechaza siempre, y no dejan afuera ningún par que concuerda ni cambian el orden | `_los_que_pueden_concordar()`, `nombra_algun_auto()` | `pruebas_de_la_revision.py` (el atajo) |
 

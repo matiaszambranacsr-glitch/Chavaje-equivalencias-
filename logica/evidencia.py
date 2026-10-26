@@ -205,6 +205,14 @@ def evidencia_cruzada(id_a, id_b, cuenta_palabras=None, total_descripciones=None
         elif (pa["descripcion"] or "").strip() == (pb["descripcion"] or "").strip():
             vetos.append(f"🏷️ los dos son de {pa['marca']} y tienen la misma descripción: es "
                           "una fila de la lista leída dos veces, no dos repuestos equivalentes")
+        elif (pa.get("tipo") or "").upper() != "OEM":
+            # Y si no, dos productos de la lista son dos piezas: ver
+            # otra_pieza_de_la_misma_lista(). La cadena los unía por un tercero.
+            _dos_piezas = otra_pieza_de_la_misma_lista(
+                pa["marca"], pa["codigo_raw"], pa["descripcion"], pb["codigo_raw"],
+                pb["descripcion"])
+            if _dos_piezas:
+                vetos.append(_dos_piezas)
 
     # 1. Medidas. Es el único método que puede VETAR: si las medidas se contradicen, no hay
     # descripción ni catálogo que lo arregle.

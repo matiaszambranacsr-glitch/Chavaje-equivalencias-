@@ -1889,6 +1889,97 @@ def probar(L):
             (True, 0, 1, "rechazada"))
     esperar("y ya no quedan", [x for x in ns["codigos_de_fabrica_con_la_marca_pegada"]()
                                if x["Código"] in ("POWER836120129", "BENZ3120150080")], [])
+
+    # 75. Dos productos de una misma lista son dos piezas (ver otra_pieza_de_la_misma_lista()):
+    # por la cadena —una sonda «universal» de otra lista unida a las dos— la LECS018 (Sportage)
+    # salía como «🟢 sólida» buscando la 80056 (Kangoo). Salvo los mellizos de FISPA y LUCAS, las
+    # variantes y el reemplazo que nombra al otro.
+    _dos = ns["otra_pieza_de_la_misma_lista"]
+    esperar("cuándo son dos piezas de la misma lista",
+            [bool(_dos("FISPA", *x)) for x in (
+                ("LECS018LUCAS", "SONDA LAMBDA LECS018 FIAT SPORTAGE 2 0 TODO TERRENO",
+                 "80056FISPA", "SONDA LAMBDA 80056 RENAULT KANGOO 1 4 98 - CLIO 1 2"),
+                ("70060FISPA", "BOBINA DE IGNICION 70060 CITROEN C4 2 0 C5 1 8 XSARA",
+                 "70193FISPA", "BOBINA DE IGNICION 70193 PEUGEOT 307 2 0 16V 307 SW"),
+                ("LEIG039LUCAS", "BOBINA DE IGNICION LEIG039POLO CLASSIC 1 6I 1 8I GOLF 1 4I",
+                 "70027FISPA", "BOBINA DE IGNICION 70027POLO CLASSIC 1 6I 1 8I GOLF 1 4I"),
+                ("20509FISPA", "BOMBA ELECTRICA 20509BOMBA CHEVROLET ASTRA - CORSA- VECTRA OMEGA",
+                 "LEFS054LUCAS", "BOMBA DE COMBUSTIBLE LEFS054BOMBA CHEVROLET ASTRA - CORSA- "
+                 "VECTRA OMEGA"),
+                ("TC-882-20 1M", "Junta Tapa de Cilindros S10", "TC-882-MG 1M",
+                 "Junta Tapa de Cilindros S10 MG"),
+                ("981308", "Junta tapa de cilindros - Reemplazada por 272008", "272008",
+                 "Junta tapa de cilindros FIAT E-TORQ 16V 1.6L"))],
+            [True, True, False, False, False, False])
+    mf = marca("FISPA DOS")
+    cf = marca("CRI-FA DOS")
+    _s18 = producto("LECS018LUCAS", "SONDA LAMBDA LECS018 FIAT SPORTAGE 2 0 TODO TERRENO", mf)
+    _s56 = producto("80056FISPA", "SONDA LAMBDA 80056 RENAULT KANGOO 1 4 98 - CLIO 1 2", mf)
+    _s15 = producto("80015FISPA", "SONDA LAMBDA 80015 FIAT SPORTAGE 2 0 TODO TERRENO", mf)
+    _uni = producto("14-R7834", "Sonda Lambda universal Fiat Renault", cf)
+    for _x in (_s18, _s56, _s15):
+        vincular(_x, _uni, "CRI-FA DOS · 05/10")
+    conn.commit()
+    _res = {f["Codigo"]: f for f in ns["buscar_por_codigo"]("LECS018LUCAS", "Todas", 3)}
+    esperar("la otra sonda de la lista sale marcada y no cuenta; el mellizo, no",
+            [(cod, "otro producto de" in _res[cod]["Cadena"], bool(_res[cod].get("_complementario")))
+             for cod in ("80056FISPA", "80015FISPA")],
+            [("80056FISPA", True, True), ("80015FISPA", False, False)])
+    # Y donde el texto no dice nada en contra —dos bulbos de FISPA del Aveo—, lo dice la regla,
+    # en el buscador y en la ficha.
+    _b349 = producto("349FISPA", "BULBO DE PRESION DE ACEITE 349 CHEVROLET AVEO", mf)
+    _b344 = producto("344FISPA", "BULBO DE PRESION DE ACEITE 344 CHEVROLET AVEO ASTRA", mf)
+    _bcf = producto("53-1099", "Bulbo presion de aceite Chevrolet Aveo", cf)
+    vincular(_b349, _bcf, "CRI-FA DOS · 05/10")
+    vincular(_b344, _bcf, "CRI-FA DOS · 05/10")
+    conn.commit()
+    _res_b = {f["Codigo"]: f for f in ns["buscar_por_codigo"]("349FISPA", "Todas", 3)}
+    esperar("el otro bulbo de la lista, marcado en el buscador y en la ficha",
+            ("otro producto de" in _res_b["344FISPA"]["Cadena"],
+             ns["ficha_de_prueba"](_b349, _b344)["estado"][:1],
+             ns["ficha_de_prueba"](_s18, _s15)["estado"][:1] != "🔴"), (True, "🔴", True))
+    esperar("con «solo confiables», no sale",
+            "80056FISPA" in {f["Codigo"] for f in ns["buscar_por_codigo"](
+                "LECS018LUCAS", "Todas", 3, confianza_minima=50)}, False)
+
+    # 76. El abanico se pregunta desde el lado con más OPCIONES (ver abanicos_para_elegir()):
+    # TARANTO 230512 con dos de IMPERIAL —la misma junta en dos materiales— empataba en filas
+    # con IMPERIAL 25516AC3 con dos de TARANTO, y se preguntaba «elegí entre una sola opción».
+    def _fila(a, b, cod_a, desc_a, ma, cod_b, desc_b, mb, conf=50.0):
+        return {"a": a, "b": b, "cod_a": cod_a, "desc_a": desc_a, "marca_a": ma, "tipo_a": "PROVEEDOR",
+                "cod_b": cod_b, "desc_b": desc_b, "marca_b": mb, "tipo_b": "PROVEEDOR",
+                "confianza": conf, "alarmas": ["🪭 Uno de los dos está emparejado con 2"]}
+    _t1, _t2, _i1, _i2 = 900001, 900002, 900003, 900004
+    _filas_ab = [
+        _fila(_t1, _i1, "230512", "Junta Distribucion VW GOL 1000", "TARANTO",
+              "25516AC3", "JTA T.DIST VOLKSWAGEN GOL 1000", "IMPERIAL"),
+        _fila(_t1, _i2, "230512", "Junta Distribucion VW GOL 1000", "TARANTO",
+              "25517AC3", "JTA T.DIST VOLKSWAGEN GOL 1000", "IMPERIAL"),
+        _fila(_t2, _i1, "230612", "Jta. de distribucion VW Gol 1000 con reten", "TARANTO",
+              "25516AC3", "JTA T.DIST VOLKSWAGEN GOL 1000", "IMPERIAL"),
+        _fila(_t2, _i2, "230612", "Jta. de distribucion VW Gol 1000 con reten", "TARANTO",
+              "25517AC3", "JTA T.DIST VOLKSWAGEN GOL 1000", "IMPERIAL")]
+    _abs = ns["abanicos_para_elegir"]([], _filas_ab)
+    esperar("desde IMPERIAL, con las dos de TARANTO para elegir",
+            sorted((a["producto"]["marca"], len(ns["candidatos_por_pieza"](a))) for a in _abs),
+            [("IMPERIAL", 2), ("IMPERIAL", 2)])
+
+    # 77. La ⭐ del abanico también es la que ya es su equivalente por vínculos aprobados (🔗):
+    # en la copia de la base real, ninguno de los 514 traía una sugerida.
+    _ab = {"producto": {"id": _t1, "cod": "230512", "marca": "TARANTO",
+                        "desc": "Junta Distribucion VW GOL 1000"}, "marca_otra": "IMPERIAL",
+           "candidatos": [_fila(_t1, 900005, "230512", "Junta Distribucion VW GOL 1000", "TARANTO",
+                                "25516AC3", "JTA T.DIST VOLKSWAGEN GOL 1000", "IMPERIAL"),
+                          _fila(_t1, 900006, "230512", "Junta Distribucion VW GOL 1000", "TARANTO",
+                                "3363AC3", "JTA T. DEL. BLOCK M.BENZ OM447", "IMPERIAL")]}
+    esperar("sin nada unido, ninguna", ns["pieza_sugerida_del_abanico"](dict(_ab, ya_unidos=set())),
+            None)
+    esperar("la que ya es su equivalente",
+            ns["pieza_sugerida_del_abanico"](dict(_ab, ya_unidos={(_t1, 900006)})),
+            ns["pieza_para_el_abanico"]("3363AC3", "JTA T. DEL. BLOCK M.BENZ OM447"))
+    esperar("y en la tabla dice 🔗",
+            ["🔗" in f["Opción"] for f in ns["tabla_del_abanico"](dict(_ab, ya_unidos={(_t1, 900006)}))],
+            [False, False, True])
     return fallas
 
 

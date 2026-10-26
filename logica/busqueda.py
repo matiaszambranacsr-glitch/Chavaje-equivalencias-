@@ -390,9 +390,8 @@ def marcar_cadenas_que_no_aguantan(res):
     if len(buscados) != 1 or not lejanos:
         return set()
     buscado = buscados[0]
+    # Sin firma igual se sigue: lo de la misma lista no la necesita (ver más abajo).
     firma_buscado = firma_de_producto(buscado.get("Descripcion") or "")
-    if not firma_buscado:
-        return set()
     # Los números de fábrica de cada uno, para saber si el camino pasa por uno compartido.
     ids = [buscado["ID"]] + [f["ID"] for f in lejanos]
     numeros_de = {}
@@ -416,6 +415,20 @@ def marcar_cadenas_que_no_aguantan(res):
                     numeros_de.setdefault(r["b"], set()).add(r["a"])
     rotas = set()
     for f in lejanos:
+        # Otro producto de la MISMA lista que lo buscado es otra pieza, diga lo que diga el
+        # texto: ver otra_pieza_de_la_misma_lista(). Lo mismo dice la ficha (evidencia_cruzada()).
+        _dos_piezas = (otra_pieza_de_la_misma_lista(
+            f["Marca"], buscado.get("Codigo"), buscado.get("Descripcion"), f.get("Codigo"),
+            f.get("Descripcion")) if f.get("Marca") == buscado.get("Marca") else "")
+        if _dos_piezas:
+            f["Confianza"] = "🔴 no es lo mismo"
+            f["Cadena"] = (f"{f['Cadena']} · ⚠️ contra lo buscado: otro producto de "
+                           f"{f['Marca']}, otra pieza")
+            f["_complementario"] = True
+            rotas.add(f["ID"])
+            continue
+        if not firma_buscado:
+            continue
         ok, motivo = firmas_compatibles(firma_buscado,
                                         firma_de_producto(f.get("Descripcion") or ""))
         if ok or not motivo.startswith(_MOTIVOS_QUE_CONTRADICEN):

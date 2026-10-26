@@ -1056,10 +1056,17 @@ a traer solas desde Administrar → Mantenimiento.
             _anomalia = anomalia_de_la_tanda(lote_info["lote"])
             if _anomalia:
                 st.warning(_anomalia)
+            total_lote = contar_pendientes_del_lote(lote_info["lote"])
+            # Lo que se cuenta sobre la lista entera —lo que une redes, lo que ya está unido— se
+            # recuerda mientras no cambien sus pendientes ni los vínculos: eran 50 ms por toque
+            # en el barrido (6.586 pendientes), y no cambia por tildar una casilla.
+            _clave_de_la_lista = (lote_info["lote"], total_lote, testigo_de_los_vinculos())
             # LO QUE UNE REDES GRANDES, primero y de a uno: no entra en la aprobación en bloque.
             # Ver puentes_del_lote().
             try:
-                _puentes = puentes_del_lote(lote_info["lote"], tope=None)
+                _puentes = recordado_mientras_no_cambie(
+                    "_puentes_del_lote", _clave_de_la_lista,
+                    lambda: puentes_del_lote(lote_info["lote"], tope=None), cuantos=4)
             except sqlite3.Error as _err:
                 anotar_error("puentes_del_lote", _err)
                 _puentes = []
@@ -1074,7 +1081,9 @@ a traer solas desde Administrar → Mantenimiento.
                                   for x in _puentes[:50]], width="stretch", hide_index=True)
             # Y LOS QUE YA ESTÁN UNIDOS por otro camino. Ver cuantos_ya_estan_unidos().
             try:
-                _ya_unidos = cuantos_ya_estan_unidos(lote_info["lote"])
+                _ya_unidos = recordado_mientras_no_cambie(
+                    "_ya_unidos_del_lote", _clave_de_la_lista,
+                    lambda: cuantos_ya_estan_unidos(lote_info["lote"]), cuantos=4)
             except sqlite3.Error as _err:
                 anotar_error("cuantos_ya_estan_unidos", _err)
                 _ya_unidos = 0
@@ -1083,14 +1092,18 @@ a traer solas desde Administrar → Mantenimiento.
                            "encuentran por otro camino: aprobarlos suma un vínculo directo, no "
                            "búsquedas nuevas.")
 
-            total_lote = contar_pendientes_del_lote(lote_info["lote"])
             ca1, ca2 = st.columns([2, 1])
             with ca1:
                 # Arranca en la opción que cubre la lista ENTERA. Estaba fijo en 1.000, y
                 # con 3.185 pendientes eso son tres vueltas para ver una lista que se analiza
                 # entera en 6,6 s — y dos tercios que, si nadie cambia de tanda, no se miran.
+                # En CADA lista, no solo en la primera: se fijaba con la que abría la pantalla
+                # —la más nueva, «todas» con 254, o sea 400— y al pasar al barrido (6.586) se
+                # analizaban 400 y había que recorrer 17 tandas.
                 _opciones_tanda = OPCIONES_DE_TANDA_DEL_LOTE
-                st.session_state.setdefault("cuantos_pendientes", tanda_que_cubre(total_lote))
+                if st.session_state.get("_tanda_de_la_lista") != lote_info["lote"]:
+                    st.session_state["_tanda_de_la_lista"] = lote_info["lote"]
+                    st.session_state["cuantos_pendientes"] = tanda_que_cubre(total_lote)
                 cuantos = st.select_slider(
                     "¿Cuántos analizar por vez?",
                     options=_opciones_tanda,
@@ -1154,6 +1167,22 @@ a traer solas desde Administrar → Mantenimiento.
                     "clave": _clave_analisis,
                     "resultado": (limpias, sospechosas, relacionadas),
                 })
+            # LO QUE SALE DEL ANÁLISIS SE RECUERDA CON ÉL. El análisis ya se guardaba, pero lo
+            # que la pantalla arma con él —el orden de los abanicos, los grupos por motivo, el
+            # plan— se volvía a armar en cada toque: con el barrido entero, 900 ms por tildar
+            # una casilla o pasar de página. Vale lo que vale el análisis guardado: su clave,
+            # la hora en que se hizo y los recortes; y los vínculos, por las ⭐ que salen de la
+            # red (ver pieza_sugerida_del_abanico()).
+            _ag = analisis_de_lote_guardado() or {}
+            _version_del_analisis = (
+                (_clave_analisis, _ag.get("_hecho"), _ag.get("recortes", 0),
+                 testigo_de_los_vinculos()) if _ag.get("clave") == _clave_analisis else None)
+
+            def _del_analisis(nombre, calcular):
+                if _version_del_analisis is None:
+                    return calcular()
+                return recordado_mientras_no_cambie(nombre, _version_del_analisis, calcular,
+                                                    cuantos=2)
             analizados = len(limpias) + len(sospechosas) + len(relacionadas)
             st.caption(f"Analizados {miles(analizados)} de {miles(total_lote)} vínculo(s) de esta lista." +
                        (f" Quedan {miles(total_lote - analizados)} — cambiá de tanda para verlos."
@@ -1201,7 +1230,8 @@ a traer solas desde Administrar → Mantenimiento.
 
             # 🧭 EL PLAN. Ver plan_de_la_lista(): qué conviene hacer primero y cuánto trabajo
             # lleva cada paso, para no tener que descubrirlo recorriendo la pantalla.
-            _plan = plan_de_la_lista(limpias, sospechosas, relacionadas)
+            _plan = _del_analisis("_plan_de_la_lista",
+                                  lambda: plan_de_la_lista(limpias, sospechosas, relacionadas))
             if _plan:
                 with st.expander("🧭 Cómo resolver esta lista, paso a paso", expanded=True, key="exp_como_resolver_esta_lista"):
                     st.dataframe(_plan, width="stretch", hide_index=True)
@@ -1517,12 +1547,13 @@ a traer solas desde Administrar → Mantenimiento.
 
             # 🪭 LOS ABANICOS: un producto con varios candidatos distintos en otra lista. Se
             # eligen a mano, de a un producto: ver abanicos_para_elegir().
-            _abanicos = abanicos_para_elegir(limpias, sospechosas)
             # Primero los fáciles: los que ya tienen una sugerida (ver pieza_sugerida_del_abanico())
             # y, entre esos, los de menos opciones. Antes iban primero los de más candidatos, que
             # son justo los más difíciles, y el avance se sentía nulo.
-            _abanicos.sort(key=lambda a: (pieza_sugerida_del_abanico(a) is None,
-                                          len(candidatos_por_pieza(a))))
+            _abanicos = _del_analisis("_abanicos_ordenados", lambda: sorted(
+                abanicos_para_elegir(limpias, sospechosas),
+                key=lambda a: (pieza_sugerida_del_abanico(a) is None,
+                               len(candidatos_por_pieza(a)))))
             if _abanicos:
                 st.markdown(f"**🪭 Elegí cuál es la equivalente** — {len(_abanicos)} producto(s)")
                 explicar(
@@ -1537,7 +1568,9 @@ a traer solas desde Administrar → Mantenimiento.
                     "descartar las demás. Si no tildás, solo se aprueba la marcada y el resto "
                     "queda para después.\n\n"
                     "La marcada con ⭐ viene ya elegida: es la que mejor coincide —más modelo, "
-                    "motor y cilindrada en común— y le gana a todas las demás. Si no es, sacala."
+                    "motor y cilindrada en común— y le gana a todas las demás, o la que ya es "
+                    "su equivalente por vínculos aprobados (🔗 en la tabla: ya se encuentran al "
+                    "buscar). Si no es, sacala."
                 )
                 _por_pag_ab = 5
                 _pags_ab = (len(_abanicos) - 1) // _por_pag_ab + 1
@@ -1694,7 +1727,7 @@ a traer solas desde Administrar → Mantenimiento.
                                                             for a in x["alarmas"]))]
             # 📋 PARA REVISAR, POR MOTIVO. Ver grupos_por_motivo(). Antes la única forma era la
             # lista de abajo, de a 10 por página: con 8.000 pares en revisión, eso no se termina.
-            _grupos_mot = grupos_por_motivo(sospechosas)
+            _grupos_mot = _del_analisis("_grupos_por_motivo", lambda: grupos_por_motivo(sospechosas))
             if _grupos_mot:
                 st.markdown("---")
                 st.markdown(f"**📋 Para revisar, por motivo** — {miles(len(sospechosas))} par(es) "
@@ -1798,13 +1831,17 @@ a traer solas desde Administrar → Mantenimiento.
                 # a 52. El tamaño de la página sigue siendo el que eligió el que revisa.
                 def _tipo(x):
                     return tipo_de_alarma(x["alarmas"][0] if x["alarmas"] else "")
-                _peor_del_tipo, _total_del_tipo = {}, {}
-                for x in sospechosas:
-                    _t = _tipo(x)
-                    _peor_del_tipo[_t] = min(_peor_del_tipo.get(_t, 100), x["confianza"])
-                    _total_del_tipo[_t] = _total_del_tipo.get(_t, 0) + 1
-                _por_tipo = sorted(sospechosas, key=lambda x: (_peor_del_tipo[_tipo(x)], _tipo(x),
-                                                                x["confianza"]))
+
+                def _ordenadas_por_tipo():
+                    tipos = {id(x): _tipo(x) for x in sospechosas}
+                    peor, total = {}, {}
+                    for x in sospechosas:
+                        peor[tipos[id(x)]] = min(peor.get(tipos[id(x)], 100), x["confianza"])
+                        total[tipos[id(x)]] = total.get(tipos[id(x)], 0) + 1
+                    return sorted(sospechosas, key=lambda x: (peor[tipos[id(x)]], tipos[id(x)],
+                                                              x["confianza"])), total
+                _por_tipo, _total_del_tipo = _del_analisis("_por_tipo_de_alarma",
+                                                           _ordenadas_por_tipo)
                 pagina_actual = _por_tipo[desde:desde + por_pagina]
 
                 por_motivo = {}

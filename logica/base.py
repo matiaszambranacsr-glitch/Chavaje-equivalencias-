@@ -691,7 +691,7 @@ VERSION_NORMALIZACION = "2"
 # reglas de hoy están mal. Sin esta marca, eso no se entera nadie hasta tropezárselo.
 # Subir el número cuando cambien las reglas de evaluar_equivalencia(). El recálculo NO corre al
 # abrir la app —son 12,8 s— sino en la tarea de fondo, igual que el descubrimiento.
-VERSION_CONFIANZA = "15"   # ver VERSIONES_DE_LAS_REGLAS
+VERSION_CONFIANZA = "16"   # ver VERSIONES_DE_LAS_REGLAS
 
 # LAS REGLAS VERSIONADAS, con la fecha y qué cambió en cada una. Lo pidió una revisión con
 # ChatGPT («versionar reglas como datos» y «comparar versiones»): cada vínculo guarda con qué
@@ -700,6 +700,8 @@ VERSION_CONFIANZA = "15"   # ver VERSIONES_DE_LAS_REGLAS
 # nueva sobre todo lo que ya se decidió. Volver atrás una regla es volver atrás el cambio en
 # git y subir el número otra vez (el repuntaje lo hace la tarea de fondo).
 VERSIONES_DE_LAS_REGLAS = [
+    ("16", "2026-10-26", "dos productos distintos de una misma lista son dos piezas, salvo "
+                         "variantes, mellizos de FISPA y LUCAS y el reemplazo que nombra al otro"),
     ("15", "2026-10-12", "lo aprendido de las marcas y de las ventas no hace pasar ninguna franja "
                          "(tampoco la de «sólida», 70); y de lo vendido solo suma la instalación "
                          "que alguien confirmó que anduvo, no el silencio"),
