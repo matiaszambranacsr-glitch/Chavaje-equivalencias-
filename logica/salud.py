@@ -1470,8 +1470,15 @@ def _dolar_oficial():
         return {}
     hoy_f, hoy_v = serie[-1]
     salida = {"fecha": hoy_f, "venta": hoy_v, "variacion": {}, "fuente": fuente}
+    # Los días se cuentan desde la ÚLTIMA COTIZACIÓN, no desde hoy: si la fuente no se puso al
+    # día, contando desde hoy se comparaba la cotización consigo misma. El 26/10, con la última
+    # del 26/09, «30 días» daba 0 %.
+    try:
+        desde = datetime.strptime(hoy_f, "%Y-%m-%d")
+    except ValueError:
+        desde = datetime.now()
     for dias in (30, 60, 90):
-        objetivo = (datetime.now() - timedelta(days=dias)).strftime("%Y-%m-%d")
+        objetivo = (desde - timedelta(days=dias)).strftime("%Y-%m-%d")
         # El último día con cotización ANTERIOR o igual al objetivo: los fines de semana y
         # feriados no cotizan, y buscar la fecha exacta no devolvería nada uno de cada tres días.
         previos = [v for f, v in serie if f <= objetivo and v > 0]
