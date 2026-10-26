@@ -32,7 +32,7 @@ def buscar_con_variantes_del_cero(clean_code, marca_filtro="Todas", max_saltos=N
     encuentra algo, así que el reintento no llega a correr nunca."""
     res = buscar_por_codigo(clean_code, marca_filtro, max_saltos, confianza_minima)
     if res or not clean_code:
-        return anotar_el_respaldo(res, clean_code), None
+        return anotar_el_respaldo(res, clean_code, bool(confianza_minima)), None
     # Con filtro de marca, que no haya resultado puede ser solo que el código es de otra marca.
     # Reintentar ahí traía OTRA pieza: «041064» (una lente de CRI-FA) filtrando por IMPERIAL
     # devolvía el 41064 de IMPERIAL, un repuesto de Toyota, diciendo «no hay nada cargado como
@@ -43,7 +43,7 @@ def buscar_con_variantes_del_cero(clean_code, marca_filtro="Todas", max_saltos=N
         if variante and variante != clean_code:
             res = buscar_por_codigo(variante, marca_filtro, max_saltos, confianza_minima)
             if res:
-                return anotar_el_respaldo(res, variante), (
+                return anotar_el_respaldo(res, variante, bool(confianza_minima)), (
                     f"No hay nada cargado como «{clean_code}», pero sí como "
                     f"«{variante}» — los códigos que empiezan con cero se escriben "
                     "de las dos formas. Confirmá que sea el mismo repuesto.")
@@ -59,7 +59,7 @@ def buscar_con_variantes_del_cero(clean_code, marca_filtro="Todas", max_saltos=N
         if len(clean_code) >= 4 and existe_el_codigo(variante):
             res = buscar_por_codigo(variante, marca_filtro, max_saltos, confianza_minima)
             if res:
-                return anotar_el_respaldo(res, variante), (
+                return anotar_el_respaldo(res, variante, bool(confianza_minima)), (
                     f"No hay nada cargado como «{clean_code}», pero sí «{variante}»: la lista "
                     f"lo guarda con la marca {marca} pegada atrás. Confirmá que sea el mismo "
                     "repuesto: dos proveedores pueden usar el mismo número para piezas distintas.")
@@ -86,7 +86,7 @@ def buscar_con_variantes_del_cero(clean_code, marca_filtro="Todas", max_saltos=N
                     continue
                 res = buscar_por_codigo(variante, marca_filtro, max_saltos, confianza_minima)
                 if res:
-                    return anotar_el_respaldo(res, variante), (
+                    return anotar_el_respaldo(res, variante, bool(confianza_minima)), (
                         f"Se buscó «{variante}»: {marca} es la marca, escrita junto con el "
                         "código. Confirmá que sea el repuesto que se pidió.")
     return [], None
@@ -545,7 +545,10 @@ def equivalentes_mas_alla_del_tope(clean_code, max_saltos, marca_filtro="Todas",
     except sqlite3.OperationalError as _err:
         anotar_error("equivalentes_mas_alla_del_tope", _err)
         return 0, []
-    fuera = [f for f in todos if f["ID"] not in con_tope and f.get("Tipo") != "OEM"]
+    # Sin lo que la búsqueda ya marca como otra cosa (ver marcar_cadenas_que_no_aguantan()):
+    # buscando la sonda LECS018 decía «hay 58 más», y la mayoría eran otras sondas de FISPA.
+    fuera = [f for f in todos if f["ID"] not in con_tope and f.get("Tipo") != "OEM"
+             and not f.get("_complementario")]
     return len(fuera), sorted({f["Marca"] for f in fuera})
 
 
@@ -880,14 +883,15 @@ def es_respaldo_primario(texto):
     return str(texto or "").startswith(_EMOJIS_DE_FUENTE)
 
 
-def anotar_el_respaldo(res, clean_code):
+def anotar_el_respaldo(res, clean_code, quitar_lo_dudoso=False):
     """Pone en cada resultado DIRECTO quién declara su vínculo con el buscado: «Respaldo».
 
     Va acá y no adentro de buscar_por_codigo() porque esa se lleva tal cual al paquete nucleo,
     que no guarda de qué lista salió cada vínculo. Si el buscado aparece bajo dos marcas y las
     dos lo vinculan, gana el mejor respaldo: una fuente le gana a una pista.
     Los orígenes se consultan igual que en buscar_por_codigo() y no se toman de las filas: con
-    el filtro de marca, el buscado de otra marca no está entre ellas."""
+    el filtro de marca, el buscado de otra marca no está entre ellas.
+    `quitar_lo_dudoso` es «solo confiables»: ver anotar_el_estado()."""
     if not res:
         return res
     c.execute("SELECT id FROM productos WHERE codigo_clean = ? OR codigo_barras = ?",
@@ -945,14 +949,14 @@ def anotar_el_respaldo(res, clean_code):
     for f in res:
         if f["ID"] in rechazadas and f["ID"] not in origenes:
             f["Rechazada"] = rechazadas[f["ID"]]
-    return anotar_el_estado(res, origenes)
+    return anotar_el_estado(res, origenes, quitar_lo_dudoso)
 
 
 # Lo que dice el estado cuando no se pudo calcular: no se recomienda (ver anotar_el_estado()).
 ESTADO_SIN_COMPROBAR = "⚠️ NO SE PUDO COMPROBAR"
 
 
-def anotar_el_estado(res, origenes):
+def anotar_el_estado(res, origenes, quitar_lo_dudoso=False):
     """Pone en cada resultado el ESTADO TÉCNICO de su ficha de prueba: «Estado» y, en pocas
     palabras, por qué («_por_que_estado»). El veredicto del buscador, WhatsApp, el PDF y la
     venta salen de acá (ver veredicto_de_la_equivalencia()), así que la ficha y el mostrador
@@ -979,6 +983,15 @@ def anotar_el_estado(res, origenes):
                 f["_estado"], f["_por_que_estado"] = ESTADO_SIN_COMPROBAR, ""
                 continue
             f["_estado"], f["_por_que_estado"] = ficha["estado"], motivo_corto(ficha)
+            # Lo que solo se alcanza pasando por otra pieza de la misma lista (ver
+            # ficha_de_prueba()): se dice en la cadena y, como el kit, no cuenta como
+            # equivalencia ni compite por «el más barato en stock».
+            if ficha.get("por_otra_pieza"):
+                f["Cadena"] = f"{f.get('Cadena') or ''} · ⚠️ {ficha['por_otra_pieza']}"
+                f["_complementario"] = True
+                f["_por_otra_pieza"] = True
+    if quitar_lo_dudoso:
+        res = [f for f in res if not f.get("_por_otra_pieza")]
     return res
 
 

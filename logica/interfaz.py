@@ -1865,6 +1865,10 @@ HERRAMIENTAS_MANTENIMIENTO = [
     ("🧯 Puentes que hoy ya no se generarían", 1,
      "Puentes falsos que quedaron cargados antes de que las reglas mejoraran.",
      "puentes viejos falsos limpiar reglas nuevas"),
+    ("🕸️ Unidos a varias piezas distintas de una misma lista", 1,
+     "Productos unidos a piezas que una lista vende por separado: cortar lo que está mal o "
+     "aprobarlo como universal.",
+     "universal mezcla redes piezas distintas misma lista sondas cortar vinculos"),
     ("🏷️ Códigos de fábrica con la marca pegada", 1,
      "Números como «POWER836120129» o «DEERER43413»: se les saca la marca, no se borran.",
      "marca pegada power deere benz ferguson codigo mal escrito corregir"),

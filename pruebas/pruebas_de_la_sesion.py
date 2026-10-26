@@ -327,6 +327,42 @@ def probar():
         _g["plan_de_la_lista"] = _plan_original
     esperar("lo que sale del análisis no se rearma en cada toque", len(_veces_plan), 0)
     esperar("sin errores en la revisión", [e.value for e in rev.exception], [])
+
+    # 7. 🕸️ Unidos a varias piezas distintas de una misma lista: se buscan, se mira uno y se le
+    # corta un vínculo, que queda anotado como rechazado (ver unidos_a_piezas_distintas()).
+    for nombre_l in ("HUB LISTA", "HUB OTRA"):
+        c.execute("INSERT INTO marcas (nombre, tipo) VALUES (?, 'PROVEEDOR')", (nombre_l,))
+    _ml, _mo = [r[0] for r in c.execute("SELECT id FROM marcas WHERE nombre IN ('HUB LISTA', "
+                                        "'HUB OTRA') ORDER BY nombre")]
+    c.execute("INSERT INTO productos (codigo_raw, codigo_clean, descripcion, marca_id) VALUES "
+              "('U-1', 'U1', 'SONDA LAMBDA UNIVERSAL', ?)", (_mo,))
+    _hub = c.lastrowid
+    _piezas_l = []
+    for cod_l, desc_l in (("H100", "SONDA LAMBDA FIAT SPORTAGE"), ("H200", "SONDA LAMBDA RENAULT KANGOO"),
+                          ("H300", "SONDA LAMBDA FORD KA ZETEC")):
+        c.execute("INSERT INTO productos (codigo_raw, codigo_clean, descripcion, marca_id) "
+                  "VALUES (?, ?, ?, ?)", (cod_l, cod_l, desc_l, _ml))
+        _piezas_l.append(c.lastrowid)
+        c.execute("INSERT INTO equivalencias (producto_a_id, producto_b_id, lote, confianza) "
+                  "VALUES (?, ?, 'BARRIDO (automático) · 25/09', 84)", tuple(sorted((_hub, c.lastrowid))))
+    conn.commit()
+    adm = sesion_nueva("clave-duenio-1", [p for p in ns["PAGINAS"] if "Administrar" in p][0])
+    adm.session_state["sub_admin"] = ns["SUB_ADMIN"][4]
+    adm.session_state["sub_mantenimiento"] = ns["GRUPOS_MANTENIMIENTO"][1]
+    adm.run()
+    [b for b in adm.button if b.key == "btn_unidos_a_piezas"][0].click().run()
+    esperar("los encuentra", any("1 producto(s)" in w.value for w in adm.warning), True)
+    _corte = [m for m in adm.multiselect if str(m.key).startswith("cortar_unido_")][0]
+    _corte.set_value([_piezas_l[1]]).run()
+    [b for b in adm.button if b.key == "btn_cortar_unido"][0].click().run()
+    _par = tuple(sorted((_hub, _piezas_l[1])))
+    esperar("cortado y anotado como rechazado",
+            (c.execute("SELECT COUNT(*) FROM equivalencias WHERE producto_a_id = ? AND "
+                       "producto_b_id = ?", _par).fetchone()[0],
+             (c.execute("SELECT decision FROM equivalencias_revisadas WHERE producto_a_id = ? AND "
+                        "producto_b_id = ?", _par).fetchone() or [None])[0],
+             adm.session_state["unidos_a_piezas"]), (0, "rechazada", []))
+    esperar("sin errores en la limpieza", [e.value for e in adm.exception], [])
     return fallas
 
 

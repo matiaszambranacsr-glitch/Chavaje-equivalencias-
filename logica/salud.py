@@ -1042,7 +1042,7 @@ def _vecinos_con_su_confianza(nodo):
     return c.fetchall()
 
 
-def camino_entre(origen_id, destino_id, tope_nodos=3000):
+def camino_entre(origen_id, destino_id, tope_nodos=3000, evitar=None):
     """Por qué cadena de vínculos este resultado llegó hasta acá. Devuelve la lista de pasos.
 
     Es lo que faltaba para que todo lo demás sirva. El buscador ya avisaba «el camino es débil»,
@@ -1052,7 +1052,10 @@ def camino_entre(origen_id, destino_id, tope_nodos=3000):
 
     Se busca el camino MÁS CONFIABLE, no el más corto: si hay dos maneras de llegar, la que
     pasa por vínculos sólidos es la que hay que mostrar — es la que decide si el resultado
-    sirve o no."""
+    sirve o no.
+
+    `evitar(id)`, si viene, dice por qué productos NO pasar (el destino siempre se alcanza):
+    ver «la cadena que pasa por otra pieza de la misma lista» en ficha_de_prueba()."""
     if origen_id == destino_id:
         return []
     import heapq
@@ -1070,7 +1073,7 @@ def camino_entre(origen_id, destino_id, tope_nodos=3000):
             break
         for fila in _recordado(("vecinos", nodo), lambda: _vecinos_con_su_confianza(nodo)):
             otro, conf = fila["otro"], fila["conf"]
-            if otro in visitados:
+            if otro in visitados or (evitar and otro != destino_id and evitar(otro)):
                 continue
             nuevo_peor = min(-peor_neg, conf)
             if nuevo_peor > mejor.get(otro, -1):
@@ -1278,6 +1281,67 @@ def codigos_puente(minimo=15, limite=100):
                    AND p.id NOT IN (SELECT producto_id FROM puentes_aprobados)
                  ORDER BY "Marcas distintas" DESC, "Vínculos" DESC LIMIT ?""", (minimo, limite))
     return filas_a_listas(c)
+
+
+def unidos_a_piezas_distintas(minimo=3, limite=80):
+    """Los productos unidos DIRECTO a varias piezas distintas de una misma lista, de los que más
+    a los que menos: [{"id", "Código", "Marca", "Descripción", "Lista", "Piezas distintas",
+    "vinculos": [{"a", "b", "Código", "Descripción", "Confianza", "Vino de"}]}].
+
+    Es lo que mezcla las redes sin que ningún código tenga muchos vínculos, y por eso
+    codigos_puente() no lo ve: la sonda «universal» 14-R7810.10.040 de CRI-FA está unida a
+    sondas de FISPA para autos distintos —la del Sportage, la del Kangoo…—, y como FISPA las
+    vende como productos distintos, no pueden ser todas la misma pieza (ver
+    otra_pieza_de_la_misma_lista()). El buscador ya no las muestra como equivalentes entre sí;
+    acá se limpia el origen: o se cortan los vínculos que están mal, o se aprueba el producto
+    como uno que sirve para todas (aprobar_puente(), y deja de salir acá). En la copia de la
+    base real son 522 productos con 3 piezas distintas o más de una lista, y 70 con 5 o más.
+
+    Las piezas se cuentan con representantes: una que ya es la misma que otra contada no suma."""
+    aprobados = set(puentes_aprobados_ids())
+    c.execute("""SELECT producto_a_id AS a, producto_b_id AS b, COALESCE(confianza, 50) AS conf,
+                        lote FROM equivalencias""")
+    vinculos = collections.defaultdict(list)
+    for r in c.fetchall():
+        vinculos[r["a"]].append((r["b"], r["conf"], r["lote"]))
+        vinculos[r["b"]].append((r["a"], r["conf"], r["lote"]))
+    candidatos = [p for p, vs in vinculos.items() if len(vs) >= minimo and p not in aprobados]
+    if not candidatos:
+        return []
+    info = {}
+    ids = sorted({x for p in candidatos for x in [p] + [v for v, _c, _l in vinculos[p]]})
+    for tanda, marcadores in en_tandas(ids):
+        c.execute(f"""SELECT p.id, p.codigo_raw, p.descripcion, m.nombre AS marca, m.tipo
+                      FROM productos p JOIN marcas m ON m.id = p.marca_id
+                      WHERE p.id IN ({marcadores})""", tanda)
+        info.update({r["id"]: dict(r) for r in c.fetchall()})
+    salida = []
+    for p in candidatos:
+        por_lista = collections.defaultdict(list)
+        for v, conf, lote in vinculos[p]:
+            if v in info and (info[v]["tipo"] or "").upper() != "OEM":
+                por_lista[info[v]["marca"]].append((v, conf, lote))
+        for lista, filas in por_lista.items():
+            if len(filas) < minimo:
+                continue
+            piezas = []
+            for v, _conf, _lote in filas:
+                if all(otra_pieza_de_la_misma_lista(lista, info[v]["codigo_raw"],
+                                                    info[v]["descripcion"], info[r]["codigo_raw"],
+                                                    info[r]["descripcion"]) for r in piezas):
+                    piezas.append(v)
+            if len(piezas) < minimo:
+                continue
+            salida.append({
+                "id": p, "Código": info[p]["codigo_raw"], "Marca": info[p]["marca"],
+                "Descripción": info[p]["descripcion"] or "", "Lista": lista,
+                "Piezas distintas": len(piezas),
+                "vinculos": sorted(({"a": p, "b": v, "Código": info[v]["codigo_raw"],
+                                     "Descripción": (info[v]["descripcion"] or "")[:90],
+                                     "Confianza": conf, "Vino de": de_donde_y_cuando(lote)}
+                                    for v, conf, lote in filas), key=lambda x: x["Confianza"])})
+    salida.sort(key=lambda x: (-x["Piezas distintas"], x["Código"] or ""))
+    return salida[:limite] if limite else salida
 
 
 def puentes_en_el_resultado(ids_resultado, umbral=15):

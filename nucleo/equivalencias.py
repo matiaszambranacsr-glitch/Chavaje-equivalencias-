@@ -411,5 +411,8 @@ def equivalentes_mas_alla_del_tope(cur, clean_code, max_saltos, marca_filtro="To
     except sqlite3.OperationalError as _err:
         anotar_error("equivalentes_mas_alla_del_tope", _err)
         return 0, []
-    fuera = [f for f in todos if f["ID"] not in con_tope and f.get("Tipo") != "OEM"]
+    # Sin lo que la búsqueda ya marca como otra cosa (ver marcar_cadenas_que_no_aguantan()):
+    # buscando la sonda LECS018 decía «hay 58 más», y la mayoría eran otras sondas de FISPA.
+    fuera = [f for f in todos if f["ID"] not in con_tope and f.get("Tipo") != "OEM"
+             and not f.get("_complementario")]
     return len(fuera), sorted({f["Marca"] for f in fuera})

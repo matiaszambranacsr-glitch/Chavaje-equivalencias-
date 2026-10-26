@@ -3229,6 +3229,11 @@ def _palabras_sin_el_codigo(desc, cod):
     return frozenset(salida)
 
 
+# Un número de fábrica escrito en el código o en la descripción: 8 dígitos seguidos o más
+# (Bosch 0280155929, GM 93275197, el 032906031 de VW). Ver otra_pieza_de_la_misma_lista().
+_RE_NUMERO_DE_FABRICA = re.compile(r"(?<!\d)\d{8,}(?!\d)")
+
+
 def otra_pieza_de_la_misma_lista(marca, cod_a, desc_a, cod_b, desc_b):
     """Si dos productos de UNA MISMA lista (no de fábrica) son dos piezas, el motivo; si no, "".
 
@@ -3251,7 +3256,10 @@ def otra_pieza_de_la_misma_lista(marca, cod_a, desc_a, cod_b, desc_b):
         misma muestra, de los 448 de dos líneas, 384 tenían menos del 40 % en común (la sonda
         del Sportage contra la del Kangoo) y los mellizos, del 60 % para arriba;
       · un reemplazo: uno nombra el código del otro («Junta tapa de cilindros - Reemplazada por
-        272008»). Es el único par de una misma lista que se aprobó a mano.
+        272008»). Es el único par de una misma lista que se aprobó a mano;
+      · los dos citan el mismo número de fábrica (8 dígitos o más): «INYECTOR LEICJ021 … REF
+        ORIG BOSCH 0280155929» de LUCAS es la «FI-0280155929» de FISPA, escrita de otra forma,
+        y las palabras en común no alcanzaban para verlo.
     Dos de la misma línea con la misma descripción no se salvan: IMPERIAL describe por el auto
     («M.BENZ OM904 LA 12valv.-OM906» son la VS5614 y la VS5615), y la ficha ya las daba por dos
     filas distintas (ver evidencia_cruzada())."""
@@ -3272,6 +3280,10 @@ def otra_pieza_de_la_misma_lista(marca, cod_a, desc_a, cod_b, desc_b):
         limpio = sanitizar(cod)
         if len(limpio) >= 4 and limpio in sanitizar(desc or ""):
             return ""
+    if (_RE_NUMERO_DE_FABRICA.findall(f"{cod_a} {desc_a or ''}")
+            and set(_RE_NUMERO_DE_FABRICA.findall(f"{cod_a} {desc_a or ''}"))
+            & set(_RE_NUMERO_DE_FABRICA.findall(f"{cod_b} {desc_b or ''}"))):
+        return ""
     return (f"🏷️ los dos son de {marca} y la lista los vende como dos productos distintos "
             f"({cod_a} y {cod_b}): no son la misma pieza")
 

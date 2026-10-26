@@ -169,6 +169,74 @@ if pagina == PAGINAS[3]:
                             st.rerun()
             st.markdown("---")
 
+            # LOS UNIDOS A VARIAS PIEZAS DE UNA MISMA LISTA: lo que mezcla las redes sin tener
+            # muchos vínculos. Ver unidos_a_piezas_distintas().
+            st.markdown("**🕸️ Unidos a varias piezas distintas de una misma lista**")
+            explicar(
+                "Productos unidos a varias piezas que una misma lista vende por separado: o hay "
+                "vínculos mal puestos, o es una pieza universal.",
+                "Una lista no vende dos veces la misma pieza: si FISPA tiene la sonda del Sportage "
+                "y la del Kangoo, son dos sondas. Un producto unido a las dos sirve, como mucho, "
+                "para una —o es universal y sirve para las dos, pero entonces ellas no son "
+                "equivalentes entre sí—.\n\n"
+                "El buscador ya no las muestra como equivalentes entre sí ni da por buena lo que "
+                "cuelga de la otra. Acá se limpia el origen: **cortá los vínculos que están mal** "
+                "(quedan anotados como rechazados y no vuelven con la próxima lista) o, si es "
+                "universal, **aprobalo** y deja de salir acá."
+            )
+            if st.button("🕸️ Buscarlos", key="btn_unidos_a_piezas"):
+                with st.spinner("Mirando cada producto con sus vínculos..."):
+                    st.session_state["unidos_a_piezas"] = unidos_a_piezas_distintas(limite=None)
+            _up = st.session_state.get("unidos_a_piezas")
+            if _up is not None:
+                if not _up:
+                    st.success("Ninguno: ningún producto está unido a tres piezas distintas de "
+                               "una misma lista.")
+                else:
+                    st.warning(f"**{miles(len(_up))} producto(s)** unidos a tres piezas distintas o "
+                               "más de una misma lista" + (", de los que más a los que menos: se "
+                                                           "muestran los primeros 80"
+                                                           if len(_up) > 80 else "") + ".")
+                    st.dataframe([{k: v for k, v in x.items() if k not in ("id", "vinculos")}
+                                  for x in _up[:80]], width="stretch", hide_index=True)
+                    _por_rotulo = {f"{x['Marca']} {x['Código']} — {x['Piezas distintas']} piezas "
+                                   f"de {x['Lista']}": x for x in _up[:80]}
+                    _el = _por_rotulo[st.selectbox("¿Cuál mirar?", list(_por_rotulo),
+                                                   key="sel_unido_a_piezas")]
+                    st.caption(texto_para_markdown(_el["Descripción"][:160]))
+                    st.dataframe([{k: v for k, v in x.items() if k not in ("a", "b")}
+                                  for x in _el["vinculos"]], width="stretch", hide_index=True)
+                    _de = {x["b"]: x for x in _el["vinculos"]}
+                    _cortar = st.multiselect(
+                        "Vínculos a cortar (los que no son la misma pieza):", list(_de),
+                        placeholder="Elegí los que no son la misma pieza…",
+                        format_func=lambda b: f"{_de[b]['Código']} — {_de[b]['Descripción'][:60]}",
+                        key=f"cortar_unido_{_el['id']}_{_el['Lista']}")
+                    _cu1, _cu2 = st.columns(2)
+                    if candado("cortar vínculos",
+                               _cu1.button(f"✂️ Cortar {len(_cortar)}", disabled=not _cortar,
+                                           key="btn_cortar_unido",
+                                           help="Los productos quedan; solo se corta el vínculo, "
+                                                "y queda anotado como rechazado."),
+                               "cortar_unidos_a_piezas"):
+                        _n = cortar_vinculos_cargados([(_el["id"], b) for b in _cortar])
+                        st.session_state["unidos_a_piezas"] = unidos_a_piezas_distintas(
+                            limite=None)
+                        invalidar_salud()
+                        avisar("success", f"Se cortaron {_n} vínculo(s) de {_el['Código']}.")
+                        st.rerun()
+                    if _cu2.button("✅ Es universal: sirve para todas", key="btn_universal_unido",
+                                   help="Sus vínculos quedan y deja de salir acá. Las piezas a "
+                                        "las que está unido siguen sin ser equivalentes entre sí."):
+                        aprobar_puente(_el["id"], f"sirve para {_el['Piezas distintas']} piezas "
+                                                  f"de {_el['Lista']}")
+                        st.session_state["unidos_a_piezas"] = [
+                            x for x in _up if x["id"] != _el["id"]]
+                        invalidar_salud()
+                        avisar("success", f"{_el['Código']} quedó como universal.")
+                        st.rerun()
+            st.markdown("---")
+
             # El número de verdad con la marca pegada adelante. No es un puente falso —el número
             # es el de la pieza— así que no se borra: se le saca la marca. Ver
             # codigos_de_fabrica_con_la_marca_pegada().

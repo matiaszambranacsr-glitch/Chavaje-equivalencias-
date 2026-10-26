@@ -1909,8 +1909,11 @@ def probar(L):
                 ("TC-882-20 1M", "Junta Tapa de Cilindros S10", "TC-882-MG 1M",
                  "Junta Tapa de Cilindros S10 MG"),
                 ("981308", "Junta tapa de cilindros - Reemplazada por 272008", "272008",
-                 "Junta tapa de cilindros FIAT E-TORQ 16V 1.6L"))],
-            [True, True, False, False, False, False])
+                 "Junta tapa de cilindros FIAT E-TORQ 16V 1.6L"),
+                ("LEICJ021LUCAS", "INYECTOR LEICJ021 CHEVROLET ASTRA ZAFIRA 1 8 2 0 8V 00 REF ORIG "
+                 "BOSCH 0280155929 OEM 93275197", "FI-0280155929FISPA",
+                 "INYECTOR FI-0280155929Chevrolet Astra 1.8 MPFI (1998-2001) - Chevrolet Zafira"))],
+            [True, True, False, False, False, False, False])
     mf = marca("FISPA DOS")
     cf = marca("CRI-FA DOS")
     _s18 = producto("LECS018LUCAS", "SONDA LAMBDA LECS018 FIAT SPORTAGE 2 0 TODO TERRENO", mf)
@@ -1941,6 +1944,30 @@ def probar(L):
     esperar("con «solo confiables», no sale",
             "80056FISPA" in {f["Codigo"] for f in ns["buscar_por_codigo"](
                 "LECS018LUCAS", "Todas", 3, confianza_minima=50)}, False)
+
+    # 78. Lo que solo se alcanza pasando por OTRA pieza de la misma lista es el equivalente de
+    # esa, no del buscado: la sonda de TARANTO del Kangoo, colgada de la 80056, no es la del
+    # Sportage. Queda para revisar, no cuenta y con «solo confiables» no sale (ver «la cadena
+    # que pasa por otra pieza» en ficha_de_prueba()). Si hay otro camino que no pasa por ahí,
+    # nada.
+    mt = marca("TARANTO DOS")
+    # Sin auto en la descripción: así lo único en contra es el camino.
+    _t56 = producto("ST56", "SONDA LAMBDA 4 CABLES", mt)
+    vincular(_t56, _s56, "TARANTO DOS · 05/10")
+    conn.commit()
+    _res_t = {f["Codigo"]: f for f in ns["buscar_con_variantes_del_cero"]("LECS018LUCAS")[0]}
+    _ficha_t = ns["ficha_de_prueba"](_s18, _t56)
+    esperar("pasando por otra pieza: a revisar, dicho, y sin contar",
+            (_ficha_t["estado"], _ficha_t["por_otra_pieza"], bool(_res_t["ST56"].get("_complementario")),
+             "otra pieza de FISPA DOS" in _res_t["ST56"]["Cadena"]),
+            ("🟠 CANDIDATA", "llega por 80056FISPA, otra pieza de FISPA DOS", True, True))
+    esperar("con «solo confiables», no sale",
+            "ST56" in {f["Codigo"] for f in ns["buscar_con_variantes_del_cero"](
+                "LECS018LUCAS", confianza_minima=50)[0]}, False)
+    vincular(_t56, _uni, "TARANTO DOS · 05/10")
+    conn.commit()
+    esperar("con otro camino que no pasa por ahí, nada",
+            ns["ficha_de_prueba"](_s18, _t56)["por_otra_pieza"], "")
 
     # 76. El abanico se pregunta desde el lado con más OPCIONES (ver abanicos_para_elegir()):
     # TARANTO 230512 con dos de IMPERIAL —la misma junta en dos materiales— empataba en filas
@@ -1980,6 +2007,22 @@ def probar(L):
     esperar("y en la tabla dice 🔗",
             ["🔗" in f["Opción"] for f in ns["tabla_del_abanico"](dict(_ab, ya_unidos={(_t1, 900006)}))],
             [False, False, True])
+
+    # 79. 🕸️ Los unidos a varias piezas distintas de una misma lista (ver
+    # unidos_a_piezas_distintas()), y el «🔗 Hay N más» sin lo que la búsqueda ya marcó como
+    # otra cosa: buscando la LECS018 decía «hay 58 más», casi todas otras sondas de FISPA.
+    esperar("«hay N más» no cuenta las otras piezas de la lista",
+            ns["equivalentes_mas_alla_del_tope"]("LECS018LUCAS", 1), (2, ["FISPA DOS", "TARANTO DOS"]))
+    _s99 = producto("80099FISPA", "SONDA LAMBDA 80099 FORD KA 1 0 ZETEC ROCAM", mf)
+    vincular(_s99, _uni, "CRI-FA DOS · 05/10")
+    conn.commit()
+    _unidos = {x["Código"]: (x["Lista"], x["Piezas distintas"], len(x["vinculos"]))
+               for x in ns["unidos_a_piezas_distintas"](limite=None)}
+    esperar("la sonda universal, con tres sondas distintas de FISPA (el mellizo no suma)",
+            _unidos.get("14-R7834"), ("FISPA DOS", 3, 4))
+    ns["aprobar_puente"](_uni, "universal")
+    esperar("aprobada como universal, ya no sale",
+            "14-R7834" in {x["Código"] for x in ns["unidos_a_piezas_distintas"](limite=None)}, False)
     return fallas
 
 

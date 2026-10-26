@@ -6636,6 +6636,23 @@ Lo pidió el dueño: «seguí mejorando la redacción de los textos, ponelos tod
 
 Probado en un navegador de verdad, en inglés y en castellano: las listas dicen «Elegí una opción», las tablas «Pantalla completa», «Buscar en la tabla» y «Bajar la tabla», el cartelito de la barra de los gráficos «Ver los números», al escribir «Enter para confirmar», y el calendario de 💵 Caja «octubre 2026» con «D L M M J V S». Los gráficos, «23/10» y «$120.000». En cada pantalla queda un solo «ℹ️ Cómo funciona» arriba (en Depósito: la sección, «⏳ Para buscar» y cómo funciona la cola), y las ayudas de una parte siguen en su parte. `pruebas_de_la_sesion.py` (2d) lo controla: rompiéndolo a propósito, avisa.
 
+## 🕸️ Las cadenas que pasan por otra pieza, y dónde limpiarlas
+
+Lo pidió el dueño: «más cosas mejora de las equivalencias». Sigue de la regla de abajo (dos productos de una misma lista son dos piezas), medido con la copia de la base real y las mismas 1.500 búsquedas al azar.
+
+**1. Lo que se alcanza pasando por otra pieza de la misma lista es el equivalente de esa, no del buscado.** Si para llegar de la sonda LECS018 (Sportage) a una de TARANTO hay que pasar por la 80056 —otra sonda de FISPA, la del Kangoo—, la de TARANTO es la del Kangoo. La junta de 1M de TARANTO traía las de 2M, 3M y 4M de ILLINOIS pasando por la 472308-2M, -3M y -4M. Ahora la ficha busca otro camino que no pase por ahí, y si no hay, queda **🟠 para revisar** («llega por 80056FISPA, otra pieza de FISPA»). No va en rojo, porque no se sabe de qué lado de la otra pieza está el eslabón malo. Con «solo confiables» (y sin sesión) no sale, y no cuenta entre las equivalencias. En la muestra: de 2.742 equivalencias contadas pasan a 2.492, y solo 2 búsquedas quedan sin ninguna. Mirando 30 al azar, dos de cada tres estaban claramente mal (otro espesor, otro motor, otra bobina); las otras son plausibles, pero llegan por una cadena que se contradice. Es la misma regla para el buscador y la ficha (`ficha_de_prueba()`, con `camino_entre(…, evitar=…)`).
+
+**2. Dos de la misma lista que citan el mismo número de fábrica son la misma pieza.** «INYECTOR LEICJ021 … REF ORIG BOSCH 0280155929» de LUCAS es la «FI-0280155929» de FISPA, escrita de otra forma, y la regla de las palabras en común no alcanzaba para verlo. Con esto, los marcados como otra pieza de la misma lista bajan de 2.054 a 1.917: 137 mellizos que ya no se marcan.
+
+**3. «🔗 Hay N más, más lejos en la cadena» cuenta solo lo que sirve.** Buscando la LECS018 decía «hay 58 más», y eran otras sondas de FISPA y cosas ya marcadas: ahora, 0.
+
+**4. 🕸️ Unidos a varias piezas distintas de una misma lista** (🗂️ Administrar → 🧹 Mantenimiento → Limpiar y corregir). Son los productos que mezclan las redes sin tener muchos vínculos, y por eso «🌉 Códigos puente» no los veía. En la copia hay 490 con tres piezas distintas o más de una lista, y 62 con cinco o más. El primero es la sonda LECS033 de LUCAS, unida a 14 sondas distintas de CRI-FA. Para cada uno se ven sus vínculos con esa lista, del más flojo al más fuerte, y hay dos salidas:
+
+- **✂️ cortar los que están mal**: quedan anotados como rechazados y no vuelven con la próxima lista; pide la contraseña;
+- **✅ es universal**: sirve para todas y deja de salir acá. Las piezas a las que está unido siguen sin ser equivalentes entre sí.
+
+Reglas v17. La revisión contra todo lo decidido (`pruebas_de_la_revision.py --base`) da igual: de 20.037 aprobados, 10 en rojo; de 2.633 rechazados, 3 pasarían limpios; buscador y ficha dicen lo mismo en los 755 resultados comparados. `pruebas_de_la_precision.py` (75, 78 y 79) lo controla; rompiendo cada cosa a propósito, avisa.
+
 ## 🔗 Las equivalencias, más ciertas y más rápidas de revisar
 
 Lo pidió el dueño: «mejorate todo lo de las equivalencias». Se midió con la copia de la base real (86.946 productos, 20.037 vínculos aprobados, 7.827 esperando).
@@ -6648,7 +6665,7 @@ Ahora salen marcados («⚠️ contra lo buscado: otro producto de FISPA, otra p
 - los **mellizos de FISPA y LUCAS**: esa lista sí vende la misma pieza dos veces, una con cada marca. Se reconocen por la descripción: con la mitad de las palabras en común o más, son la misma. En la muestra, de los 448 de dos líneas, 384 tenían menos del 40 % en común (la sonda del Sportage contra la del Kangoo), y los mellizos, del 60 % para arriba;
 - un **reemplazo**, cuando uno nombra el código del otro («Reemplazada por 272008»): es el único par de una misma lista que se aprobó a mano.
 
-Con la regla: 2.054 resultados marcados en esas 1.500 búsquedas (los de descripción idéntica de IMPERIAL, como VS5614 y VS5615, la ficha ya los daba en rojo, y ahora el buscador también). La revisión contra todo lo decidido (`pruebas_de_la_revision.py --base`) da igual que antes: de 20.037 aprobados, 10 en rojo (0,0 %); de 2.633 rechazados, 3 pasarían limpios (0,1 %); el buscador y la ficha dicen lo mismo en los 755 resultados comparados. Reglas v16.
+Con la regla: 2.054 resultados marcados en esas 1.500 búsquedas (los de descripción idéntica de IMPERIAL, como VS5614 y VS5615, la ficha ya los daba en rojo, y ahora el buscador también). La revisión contra todo lo decidido (`pruebas_de_la_revision.py --base`) da igual que antes: de 20.037 aprobados, 10 en rojo (0,0 %); de 2.633 rechazados, 3 pasarían limpios (0,1 %); el buscador y la ficha dicen lo mismo en los 755 resultados comparados. Reglas v16 (ver arriba la v17).
 
 **2. Revisar la lista grande, sin esperar.** En 📊 Estadísticas → 🔗 Equivalencias sugeridas, con el barrido entero (6.586 vínculos), **cada toque tardaba 899 ms**: tildar una casilla o pasar de página volvía a armar el orden de los abanicos, los grupos por motivo y el plan, aunque el análisis no había cambiado. Ahora se recuerdan con el análisis (su clave, la hora y los recortes, y los vínculos): **254 ms**. Lo que se cuenta sobre la lista entera —lo que une redes, lo que ya está unido— también, mientras no cambien sus pendientes.
 

@@ -701,6 +701,36 @@ _ORDEN_DE_LOS_ESTADOS = ("✅ VERIFICADA", "🟡 PROBABLE", "🟠 CANDIDATA", "�
                          "🔴 CON CONTRADICCIONES")
 
 
+def _otra_pieza_de_los_extremos(pa, pb):
+    """Para camino_entre(): ¿este producto es otra pieza de la lista de A o de la de B? Devuelve
+    el porqué en pocas palabras, o "". Ver «la cadena que pasa por otra pieza» en
+    ficha_de_prueba()."""
+    extremos = [p for p in (pa, pb) if (p.get("tipo") or "").upper() != "OEM"]
+    memo = {}
+
+    def _producto(pid):
+        c.execute("""SELECT p.codigo_raw, p.descripcion, m.nombre AS marca, m.tipo
+                     FROM productos p JOIN marcas m ON m.id = p.marca_id WHERE p.id = ?""",
+                  (pid,))
+        return c.fetchone()
+
+    def evitar(pid):
+        if pid not in memo:
+            memo[pid] = ""
+            fila = (_recordado(("producto_del_camino", pid), lambda: _producto(pid))
+                    if extremos else None)
+            if fila and (fila["tipo"] or "").upper() != "OEM":
+                for e in extremos:
+                    if (e["id"] != pid and e["marca"] == fila["marca"]
+                            and otra_pieza_de_la_misma_lista(
+                                e["marca"], e["codigo_raw"], e["descripcion"],
+                                fila["codigo_raw"], fila["descripcion"])):
+                        memo[pid] = f"llega por {fila['codigo_raw']}, otra pieza de {fila['marca']}"
+                        break
+        return memo[pid]
+    return evitar
+
+
 def _evaluar_la_cadena(pasos):
     """(estado, falta) de una cadena de vínculos, sin mirar todavía lo que la contradice."""
     falta = []
@@ -774,6 +804,25 @@ def ficha_de_prueba(id_a, id_b, tolerancia_pct=3, liviana=False):
                          "_lote": directo["lote"], "_verificada": bool(directo["v"]),
                          "_a": id_a, "_b": id_b}])
     mejor_camino = camino_entre(id_a, id_b)
+    # LA CADENA QUE PASA POR OTRA PIEZA DE LA MISMA LISTA. Si para llegar de la sonda LECS018
+    # (Sportage) a una de TARANTO hay que pasar por la 80056 —otra sonda de la misma lista, la
+    # del Kangoo—, la de TARANTO es el equivalente de la 80056, no de la LECS018: en el medio
+    # hay un eslabón mal puesto. Se busca otro camino que no pase por ahí; si no hay, queda para
+    # revisar (no en rojo: no se sabe de qué lado de la 80056 está el eslabón malo). En 1.500
+    # búsquedas al azar de la copia de la base real, 218 resultados solo se alcanzaban así —la
+    # junta de 1M de TARANTO traía las de 2M, 3M y 4M de ILLINOIS— y no tenían ningún aviso.
+    # Ver otra_pieza_de_la_misma_lista().
+    ficha["por_otra_pieza"] = ""
+    if mejor_camino and len(mejor_camino) > 1:
+        _evitar = _otra_pieza_de_los_extremos(pa, pb)
+        _por_otra = next((_evitar(paso["_b"]) for paso in mejor_camino[:-1]
+                          if _evitar(paso["_b"])), "")
+        if _por_otra:
+            _sin_ella = camino_entre(id_a, id_b, evitar=_evitar)
+            if _sin_ella:
+                mejor_camino = _sin_ella
+            else:
+                ficha["por_otra_pieza"] = _por_otra
     if mejor_camino and len(mejor_camino) > 1:
         cadenas.append(mejor_camino)
     for paso in (p for pasos in cadenas for p in pasos):
@@ -800,6 +849,12 @@ def ficha_de_prueba(id_a, id_b, tolerancia_pct=3, liviana=False):
         ("⚪ SIN CADENA", ["es el mismo número en otra marca, pero ninguna lista ni catálogo "
                           "dice que sea la misma pieza" if pa["codigo_clean"] == pb["codigo_clean"]
                           else "no hay ningún vínculo entre los dos"]), [])
+    if ficha["por_otra_pieza"] and len(pasos) > 1:
+        falta.insert(0, f"que no pase por otra pieza: {ficha['por_otra_pieza']}")
+        if estado in ("✅ VERIFICADA", "🟡 PROBABLE"):
+            estado = "🟠 CANDIDATA"
+    else:
+        ficha["por_otra_pieza"] = ""
     ficha["pasos"] = pasos
     ficha["numeros_en_comun"] = [] if liviana else numeros_en_comun(id_a, id_b)
     ficha["fuentes"] = sorted({_fuente_del_paso(p["_lote"], p["_verificada"])
@@ -1113,6 +1168,8 @@ def motivo_corto(ficha):
         return ""
     if estado.startswith("🔴"):
         return (ficha["contradicciones"] or [""])[0]
+    if estado.startswith("🟠") and ficha.get("por_otra_pieza"):
+        return ficha["por_otra_pieza"]
     if estado.startswith("🟠"):
         sin_fuente = [p for p in ficha["pasos"] if not p["_primaria"]]
         return f"solo una pista ({sin_fuente[0]['Respaldo']})" if sin_fuente else ""
