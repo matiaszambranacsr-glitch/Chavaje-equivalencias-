@@ -192,6 +192,21 @@ def probar():
     if not any("BAPAL" in str(d.value) for d in at.dataframe):
         fallas.append("por descripción, abrir «Otros … que no dicen» no muestra la tabla")
     at.session_state["exp_texto_aparte"] = False
+    # Y el filtro por rubro, con cuántos de cada uno: «clio k4m» trae la bomba y el filtro.
+    c.execute("INSERT INTO productos (codigo_raw, codigo_clean, descripcion, marca_id) VALUES "
+              "('FAK4M', 'FAK4M', 'FILTRO DE AIRE RENAULT CLIO K4M', ?)", (_marca_prueba,))
+    conn.commit()
+    at.text_input(key="texto_input").set_value("clio k4m")
+    [b for b in at.button if "Buscar por descripción" in b.label][0].click().run()
+    _rubros = [x for x in at.selectbox if x.key == "filtro_rubro_texto"]
+    if not _rubros or not any(o.startswith("Filtros (") for o in _rubros[0].options):
+        fallas.append(f"por descripción, el filtro por rubro: {[x.options for x in _rubros]}")
+    else:
+        _rubros[0].set_value("Filtros").run()
+        _tabla = [d for d in at.dataframe if "FAK4M" in str(d.value)]
+        if not _tabla or "BAK4M" in str(_tabla[0].value):
+            fallas.append("por descripción, elegir el rubro no deja solo los de ese rubro")
+        at.session_state["filtro_rubro_texto"] = "Todos"
     at.session_state["modo_busqueda"] = "Código"
     recorrer("sin contraseña")
     entrar(clave_ana)

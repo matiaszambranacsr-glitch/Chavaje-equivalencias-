@@ -593,11 +593,16 @@ def buscar_por_texto(texto, aflojar=True):
     # mostrarlo, porque las descripciones de proveedor son un desastre y muchas piezas legítimas
     # no caen en ninguna familia.
     familia_pedida = clasificar_repuesto(texto)
+    de_la_pieza = palabras_de_la_pieza(texto)
     if familia_pedida != "Sin clasificar":
         del_rubro, sin_clasificar, de_otro_rubro = [], [], []
         for f in filas:
             fam = clasificar_repuesto(f.get("Descripcion") or "")
-            if fam == familia_pedida:
+            # El rubro sale de la PRIMERA pieza que se nombra, y el orden cambia: «porta bancada
+            # reten» es de Motor (BANCADA) y «PORTA RETEN BANCADA MAXION» de Retenes (RETEN), y
+            # se descartaba diciendo las tres palabras. Lo que dice la pieza pedida es del rubro.
+            if fam == familia_pedida or (de_la_pieza and all(dice_la_palabra(f, p)
+                                                             for p in de_la_pieza)):
                 del_rubro.append(f)
             elif fam == "Sin clasificar":
                 sin_clasificar.append(f)
@@ -646,7 +651,6 @@ def buscar_por_texto(texto, aflojar=True):
             filas = [f for f, n in zip(filas, nombran) if n]
             no_dicen.append(" ni ".join(f"«{p.lower()}»" for p in del_auto))
     # Lo que no nombra la pieza pedida (ver palabras_de_la_pieza()).
-    de_la_pieza = palabras_de_la_pieza(texto)
     if de_la_pieza:
         la_dicen = [all(dice_la_palabra(f, p) for p in de_la_pieza) for f in filas]
         if any(la_dicen) and not all(la_dicen):

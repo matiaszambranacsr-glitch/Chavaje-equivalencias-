@@ -2413,6 +2413,14 @@ def probar(L):
     conn.commit()
     esperar("lo apartado, en orden de parecido",
             [f["ID"] for f in ns["buscar_por_texto"]("filtro nafta gol").aparte][:1], [_sin_pieza])
+    # 91. EL RUBRO NO DESCARTA LO QUE DICE LA PIEZA PEDIDA: «porta bancada reten» es de Motor
+    # (BANCADA va primero) y «PORTA RETEN BANCADA MAXION» de Retenes (RETEN va primero).
+    m13 = marca("TRECE PORTA")
+    _porta = producto("PR91", "PORTA RETEN BANCADA MAXION", m13)
+    producto("PC91", "PORTA COJINETE BANCADA FIAT", m13)      # este sí es de Motor
+    conn.commit()
+    esperar("«porta bancada reten» encuentra «PORTA RETEN BANCADA», primero",
+            [f["ID"] for f in ns["buscar_por_texto"]("porta bancada reten")][:1], [_porta])
     return fallas
 
 

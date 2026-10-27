@@ -2082,20 +2082,38 @@ if pagina == PAGINAS[0]:
                 # Filtro por marca cuando el resultado mezcla varias: «sensor rotacion ford» son
                 # 197 filas de cinco listas, y lo que se busca suele ser «¿qué tengo de FISPA?».
                 # Lo sugirió la revisión de usabilidad con Gemini.
-                _marcas_txt = {}
-                for _f in res_texto:
-                    _marcas_txt[_f["Marca"]] = _marcas_txt.get(_f["Marca"], 0) + 1
+                # Y por RUBRO: buscando solo el auto («gol 1.6») salen 200 cosas de todos los
+                # rubros mezcladas. Con cuántos de cada uno, como el de la marca.
                 _res_vista = res_texto
+                _rubros_txt = {}
+                for _f in res_texto:
+                    _rub = clasificar_repuesto(_f.get("Descripcion") or "")
+                    _rubros_txt[_rub] = _rubros_txt.get(_rub, 0) + 1
+                if len(_rubros_txt) > 2 or (len(_rubros_txt) == 2
+                                            and "Sin clasificar" not in _rubros_txt):
+                    _opciones_rub = ["Todos"] + sorted(_rubros_txt, key=lambda r: -_rubros_txt[r])
+                    if st.session_state.get("filtro_rubro_texto") not in _opciones_rub:
+                        st.session_state.pop("filtro_rubro_texto", None)
+                    _rubro_txt = st.selectbox(
+                        "Rubro:", _opciones_rub, key="filtro_rubro_texto",
+                        format_func=lambda r: (f"Todos ({len(res_texto)})" if r == "Todos"
+                                               else f"{r} ({_rubros_txt[r]})"))
+                    if _rubro_txt != "Todos":
+                        _res_vista = [f for f in res_texto if clasificar_repuesto(
+                            f.get("Descripcion") or "") == _rubro_txt]
+                _marcas_txt = {}
+                for _f in _res_vista:
+                    _marcas_txt[_f["Marca"]] = _marcas_txt.get(_f["Marca"], 0) + 1
                 if len(_marcas_txt) > 1:
                     _opciones_mt = ["Todas"] + sorted(_marcas_txt, key=lambda m: -_marcas_txt[m])
                     if st.session_state.get("filtro_marca_texto") not in _opciones_mt:
                         st.session_state.pop("filtro_marca_texto", None)
                     _marca_txt = st.selectbox(
                         "Marca:", _opciones_mt, key="filtro_marca_texto",
-                        format_func=lambda m: (f"Todas ({len(res_texto)})" if m == "Todas"
+                        format_func=lambda m: (f"Todas ({len(_res_vista)})" if m == "Todas"
                                                else f"{m} ({_marcas_txt[m]})"))
                     if _marca_txt != "Todas":
-                        _res_vista = [f for f in res_texto if f["Marca"] == _marca_txt]
+                        _res_vista = [f for f in _res_vista if f["Marca"] == _marca_txt]
                 _tabla_txt = para_mostrar(quitar_id(_res_vista))
                 st.dataframe(con_stock_legible(_tabla_txt), width="stretch", hide_index=True,
                              column_order=columnas_que_dicen_algo(_tabla_txt),

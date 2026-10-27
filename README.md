@@ -6698,6 +6698,13 @@ Lo pidió el dueño: «más, seguí mejorando».
 
 `medir.py texto` igual (262 / 499 / 648 / 22; con plural 240 / 470 / 632 / 29).
 
+### Quinta vuelta: el rubro ya no descarta lo que dice la pieza, y el filtro por rubro
+
+Lo pidió el dueño: «seguí mejorando». Se miraron las 22 consultas de `medir.py texto` que no encontraban su propio producto: casi todas son empates entre cientos de descripciones casi iguales («MECHA CONICA HSS Ø …»), pero tres no.
+
+- **El rubro no descarta lo que dice la pieza pedida.** El rubro sale de la PRIMERA pieza que se nombra, y el orden cambia: «porta bancada reten» es de Motor (BANCADA) y «PORTA RETEN BANCADA MAXION» de Retenes (RETEN), así que se descartaba diciendo las tres palabras. Lo mismo «kit fiat válvula» contra «Kit Reten guía de válvula FIAT ARGO» y «tapón caño metálico» contra «Tapón q/anula … caño metálico». Ahora lo que dice la pieza pedida (ver `dice_la_palabra()`) cuenta como del rubro. `medir.py texto`: primero 262 → 265, entre los 5 primeros 499 → 502, entre los 20 648 → 653, sin aparecer 22 → 17; con la pieza en plural, 240 → 242, 470 → 472, 632 → 636, 29 → 23.
+- **Filtro por rubro en los resultados**, con cuántos de cada uno, como el de la marca: buscando solo el auto («gol 1.6») salen 200 cosas de todos los rubros mezcladas, y ahora se elige «Embrague (12)». La marca cuenta sobre el rubro elegido.
+
 ## 🔁 Otra versión de la misma lista, y las búsquedas largas más rápidas
 
 Lo pidió el dueño: «mejorá más todavía todo». Medido con `python pruebas/medir.py --base copia busquedas` (1.500 búsquedas de la copia de la base).
