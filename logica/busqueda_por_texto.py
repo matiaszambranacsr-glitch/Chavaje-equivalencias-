@@ -325,12 +325,19 @@ def formas_de_la_palabra(palabra):
 _RE_CILINDRADA_O_VALVULAS = re.compile(r"\d[.,]\d|\d{1,2}V")
 
 
+# Los modelos de dos letras, que MODELOS_CONOCIDOS deja afuera (pide tres): «ford ka embrague»
+# traía el embrague de la Transit, porque sin el Ka lo único del auto era «FORD». Contados como
+# palabra entera en la copia de la base: KA 865, C3 838, A3 1.145. «UP» no: es «pick up».
+MODELOS_CORTOS = {"KA", "C3", "C4", "C5", "A3", "A4", "A5", "A6", "Q3", "Q5", "X1", "X3", "X5"}
+
+
 def nivel_del_auto(palabra):
     """Cuánto dice `palabra` de qué auto es: 3 el modelo o el motor (GOL, CLIO, K4M, F8Q), 2 la
     marca (RENAULT, VW), 1 la cilindrada o las válvulas (1.6, 16V), 0 nada."""
     if marcas_vehiculo_en(palabra):
         return 2           # antes que el modelo: MODELOS_CONOCIDOS tiene también las marcas
-    if parece_designacion_de_motor(palabra) or palabra in MODELOS_CONOCIDOS:
+    if (parece_designacion_de_motor(palabra) or palabra in MODELOS_CONOCIDOS
+            or palabra in MODELOS_CORTOS):
         return 3
     return 1 if _RE_CILINDRADA_O_VALVULAS.fullmatch(palabra) else 0
 
@@ -482,13 +489,30 @@ def buscar_por_texto(texto, aflojar=True):
         # porque SQLite tomaba el % y el _ como comodines. Ver como_texto_en_like().
         ramas, suyos, abreviadas, de_abreviadas = [], [], [], []
         limpia = sanitizar(palabra)
-        for columna, valor in (("p.busqueda", palabra), ("p.codigo_clean", limpia)):
-            # Un LIKE '%%' coincide con TODO. Pasaba al buscar «%» o «_»: sanitizar() los deja
-            # en nada, el patrón quedaba vacío y la búsqueda devolvía el catálogo entero.
-            if not valor:
-                continue
-            ramas.append(f"{columna} LIKE ? ESCAPE '\\'")
-            suyos.append(f"%{como_texto_en_like(valor)}%")
+        en_like = como_texto_en_like(palabra)
+        # LAS PALABRAS DE UNA O DOS LETRAS, ENTERAS: «mb 0151» traía bulones de IMPERIAL porque
+        # «MB» está adentro de CAMBA. En la copia de la base, «MB» está adentro de 9.916
+        # productos y como palabra en 229; «KA» 3.211 y 865; «4» (de «ficha 4 vías») 54.790 y
+        # 11.756. Tampoco se las busca adentro de los códigos.
+        if len(palabra) <= 2:
+            ramas.append(f"(p.busqueda LIKE ? ESCAPE '\\' AND {_BUSQUEDA_CON_ESPACIOS} LIKE ? "
+                         "ESCAPE '\\')")
+            suyos.extend([f"%{en_like}%", f"% {en_like} %"])
+            limpia = ""
+        # Y LOS NÚMEROS, NO ADENTRO DEL CÓDIGO DE BARRAS: «0151» estaba en el EAN de seis
+        # productos que no tenían nada que ver. El código de barras entero, sí.
+        elif palabra.isdigit():
+            ramas.append("(p.descripcion LIKE ? ESCAPE '\\' OR p.codigo_raw LIKE ? ESCAPE '\\' "
+                         "OR p.codigo_barras = ?)")
+            suyos.extend([f"%{en_like}%", f"%{en_like}%", palabra])
+        # Un LIKE '%%' coincide con TODO. Pasaba al buscar «%» o «_»: sanitizar() los deja
+        # en nada, el patrón quedaba vacío y la búsqueda devolvía el catálogo entero.
+        elif palabra:
+            ramas.append("p.busqueda LIKE ? ESCAPE '\\'")
+            suyos.append(f"%{en_like}%")
+        if limpia:
+            ramas.append("p.codigo_clean LIKE ? ESCAPE '\\'")
+            suyos.append(f"%{como_texto_en_like(limpia)}%")
         # Y COMO LO ABREVIAN LAS LISTAS: «junta» busca también JTA y JTAS, «juego» JGO, «bomba»
         # BBA, y al revés. Ver formas_de_la_palabra().
         for forma, entera in formas_de_la_palabra(palabra):

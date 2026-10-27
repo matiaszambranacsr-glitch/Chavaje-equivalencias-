@@ -2421,6 +2421,25 @@ def probar(L):
     conn.commit()
     esperar("«porta bancada reten» encuentra «PORTA RETEN BANCADA», primero",
             [f["ID"] for f in ns["buscar_por_texto"]("porta bancada reten")][:1], [_porta])
+    # 92. LAS PALABRAS DE UNA O DOS LETRAS, ENTERAS («MB» no está en CAMBA); LOS NÚMEROS, NO
+    # ADENTRO DEL CÓDIGO DE BARRAS (el entero sí); Y LOS MODELOS CORTOS («ka» es un modelo).
+    m14 = marca("CATORCE CORTAS")
+    _mb = producto("KT92", "KIT TTC MB 1114", m14)
+    _camba = producto("CAMBA92", "BULON CAMBA ZINCADO", m14)
+    _ean = producto("FX92", "FILTRO EXTRA", m14, codigo_barras="7793960050151")
+    _f0151 = producto("FY92", "FILTRO 0151 ESPECIAL", m14)
+    _eka = producto("EK92", "EMBRAGUE FORD KA", m14)
+    _etr = producto("ET92", "EMBRAGUE FORD TRANSIT", m14)
+    conn.commit()
+    _ids92 = {f["ID"] for f in ns["buscar_por_texto"]("mb")}
+    esperar("«mb» entera: el MB sí, CAMBA no", (_mb in _ids92, _camba in _ids92), (True, False))
+    _ids92b = {f["ID"] for f in ns["buscar_por_texto"]("filtro 0151")}
+    esperar("«0151» no adentro del código de barras; el código de barras entero sí",
+            (_f0151 in _ids92b, _ean in _ids92b,
+             _ean in {f["ID"] for f in ns["buscar_por_texto"]("7793960050151")}), (True, False, True))
+    _r92 = ns["buscar_por_texto"]("embrague ford ka")
+    esperar("«ka» es un modelo: el de la Transit, aparte",
+            (_eka in {f["ID"] for f in _r92}, _etr in {f["ID"] for f in _r92.aparte}), (True, True))
     return fallas
 
 

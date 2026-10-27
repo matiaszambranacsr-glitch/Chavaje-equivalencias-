@@ -6705,6 +6705,17 @@ Lo pidió el dueño: «seguí mejorando». Se miraron las 22 consultas de `medir
 - **El rubro no descarta lo que dice la pieza pedida.** El rubro sale de la PRIMERA pieza que se nombra, y el orden cambia: «porta bancada reten» es de Motor (BANCADA) y «PORTA RETEN BANCADA MAXION» de Retenes (RETEN), así que se descartaba diciendo las tres palabras. Lo mismo «kit fiat válvula» contra «Kit Reten guía de válvula FIAT ARGO» y «tapón caño metálico» contra «Tapón q/anula … caño metálico». Ahora lo que dice la pieza pedida (ver `dice_la_palabra()`) cuenta como del rubro. `medir.py texto`: primero 262 → 265, entre los 5 primeros 499 → 502, entre los 20 648 → 653, sin aparecer 22 → 17; con la pieza en plural, 240 → 242, 470 → 472, 632 → 636, 29 → 23.
 - **Filtro por rubro en los resultados**, con cuántos de cada uno, como el de la marca: buscando solo el auto («gol 1.6») salen 200 cosas de todos los rubros mezcladas, y ahora se elige «Embrague (12)». La marca cuenta sobre el rubro elegido.
 
+### Sexta vuelta: las palabras cortas, enteras; los números, no adentro del código de barras
+
+Lo pidió el dueño: «seguí mejorando». Se pasaron por el buscador las búsquedas reales del historial («mb 0151», «Ficha 4 viaa», «mfla 260», «38 8007»…).
+
+- **Las palabras de una o dos letras cuentan enteras**: «mb 0151» traía bulones de IMPERIAL porque «MB» está adentro de CAMBA. En la copia de la base, «MB» está adentro de 9.916 productos y como palabra en 229; «KA» 3.211 y 865; el «4» de «ficha 4 vías» 54.790 y 11.756. Tampoco se las busca adentro de los códigos.
+- **Los números no se buscan adentro del código de barras** (8.708 productos lo tienen): «0151» estaba en el EAN de seis productos que no tenían nada que ver. El código de barras entero, sí.
+- **Los modelos de dos letras** (`MODELOS_CORTOS`: Ka, C3, C4, C5, A3, A4, A5, A6, Q3, Q5, X1, X3, X5): «ford ka embrague» traía el embrague de la Transit, porque sin el Ka lo único del auto era «FORD». «UP» no: es «pick up».
+- No hay stock ni favoritos cargados en la base (stock vacío en los 71.658 productos de listas), así que ordenar lo que empata por «lo que hay» queda para cuando se cargue.
+
+`medir.py texto` igual (265 / 502 / 653 / 17).
+
 ## 🔁 Otra versión de la misma lista, y las búsquedas largas más rápidas
 
 Lo pidió el dueño: «mejorá más todavía todo». Medido con `python pruebas/medir.py --base copia busquedas` (1.500 búsquedas de la copia de la base).
