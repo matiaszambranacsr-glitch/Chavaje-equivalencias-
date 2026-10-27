@@ -6636,6 +6636,16 @@ Lo pidió el dueño: «seguí mejorando la redacción de los textos, ponelos tod
 
 Probado en un navegador de verdad, en inglés y en castellano: las listas dicen «Elegí una opción», las tablas «Pantalla completa», «Buscar en la tabla» y «Bajar la tabla», el cartelito de la barra de los gráficos «Ver los números», al escribir «Enter para confirmar», y el calendario de 💵 Caja «octubre 2026» con «D L M M J V S». Los gráficos, «23/10» y «$120.000». En cada pantalla queda un solo «ℹ️ Cómo funciona» arriba (en Depósito: la sección, «⏳ Para buscar» y cómo funciona la cola), y las ayudas de una parte siguen en su parte. `pruebas_de_la_sesion.py` (2d) lo controla: rompiéndolo a propósito, avisa.
 
+## ⏱️ Las pantallas, medidas con la base real
+
+Lo pidió el dueño: «mejorá absolutamente todo». Primero se midió dónde la app es lenta de verdad: la prueba de pantallas corría sobre una base chica, donde todas tardan poco. Ahora `python pruebas/pruebas_de_las_pantallas.py --base copia.db` recorre las 89 pantallas con una copia de la base real (sin la tarea de fondo, que ensucia los tiempos) y dice las 10 más lentas.
+
+- **🚙 Repuestos por vehículo** (Modo Mecánico, se abre sin contraseña) era la más lenta: **4,1 s**. Contar las marcas de auto lee las 87.000 descripciones (3 s), y quedaba guardado solo en la memoria del proceso: después de cada reinicio, el primero que la abría esperaba. Ahora el conteo se guarda en la base con la versión del catálogo (después de un reinicio: 0,001 s), y la tarea de fondo lo deja hecho cuando entra una lista. Si cambia el catálogo, se vuelve a contar.
+- Las que siguen (Mantenimiento 1-2 s, «Para pedir» y «Equivalencias sugeridas» 1,2 s) no tienen un cálculo lento: lo que calculan responde en milisegundos, y el resto es dibujar la pantalla.
+- La prueba de pantallas tenía un error escondido: tomaba el id de una búsqueda recién guardada como si fuera el de la marca de prueba. Con la base vacía coincidían por casualidad; con la base real fallaba.
+
+`pruebas_de_repuestos_por_auto.py` controla que el conteo guardado se use después de un reinicio y que se rehaga con otro catálogo.
+
 ## ✅ Verificada por el número de fábrica, y los espesores aparte
 
 Lo pidió el dueño: «mejorá más la equivalencia y la búsqueda de productos». Medido sobre la copia de la base con `pruebas/medir.py`.

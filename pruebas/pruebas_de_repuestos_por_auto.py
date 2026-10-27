@@ -106,6 +106,24 @@ def probar(L):
     esperar("marca por el registro", [ns["marca_del_modelo"](m) for m in
                                       ("Gol Trend 1.6", "ka", "Palio", "Corsa", "500")],
             ["VOLKSWAGEN", "FORD", "FIAT", None, None])
+    # Las marcas del desplegable quedan guardadas con la versión del catálogo: después de un
+    # reinicio no se vuelven a contar (eran 3 s con la base real), y con otra versión sí.
+    _version = ns["version_del_catalogo"]()
+    _marcas = ns["marcas_vehiculo_disponibles"](_version)
+    ns["marcas_vehiculo_disponibles"].clear()
+    _g = ns["marcas_vehiculo_disponibles"].__wrapped__.__globals__
+    _leer_original, _leidas = _g["marcas_vehiculo_en"], []
+    _g["marcas_vehiculo_en"] = lambda d: _leidas.append(d) or _leer_original(d)
+    try:
+        esperar("después de un reinicio, lo guardado y sin volver a leer",
+                (ns["marcas_vehiculo_disponibles"](_version) == _marcas, len(_leidas)), (True, 0))
+        c.execute("INSERT INTO productos (codigo_raw, codigo_clean, descripcion, marca_id) "
+                  "VALUES ('G99', 'G99', 'FILTRO VW GOL 1.4', ?)", (mid,))
+        esperar("con otra versión del catálogo, se vuelve a contar",
+                dict(ns["marcas_vehiculo_disponibles"](ns["version_del_catalogo"]())).get("VOLKSWAGEN", 0)
+                == dict(_marcas).get("VOLKSWAGEN", 0) + 1, True)
+    finally:
+        _g["marcas_vehiculo_en"] = _leer_original
     return fallas
 
 

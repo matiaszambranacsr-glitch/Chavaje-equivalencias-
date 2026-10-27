@@ -2580,6 +2580,16 @@ def _trabajo_de_fondo():
         except Exception as _err:
             anotar_error("_trabajo_de_fondo/bujias", _err)
 
+    # LAS MARCAS DE «🚙 REPUESTOS POR VEHÍCULO», que se abre sin contraseña: contarlas son 3 s
+    # sobre la base real, y quedan guardadas con la versión del catálogo (ver
+    # marcas_vehiculo_disponibles()). Si la tarea corre es porque algo entró o cambió: así el
+    # primero que la abre no espera.
+    try:
+        ceder_al_mostrador()
+        marcas_vehiculo_disponibles(version_del_catalogo())
+    except Exception as _err:
+        anotar_error("_trabajo_de_fondo/marcas_vehiculo", _err)
+
     # El análisis de la lista que «Equivalencias sugeridas» muestra primero, para que al abrirla
     # ya esté hecho (ver preparar_el_analisis_del_primer_lote()). Va después del descubrimiento
     # porque ese agrega pares, y antes de las descargas porque es lo que alguien va a mirar.
@@ -2855,6 +2865,10 @@ def arrancar_tanda_de_fondo():
 
     Se llama en cada dibujo de pantalla y casi siempre no hace nada: si ya hay una corriendo,
     si está todo apagado o descansando, vuelve enseguida."""
+    # Para medir las pantallas con una copia de la base real (pruebas_de_las_pantallas.py
+    # --base): sin esto la copia arranca el repuntaje entero por atrás y los tiempos no dicen nada.
+    if os.environ.get("EQUIVALENCIAS_SIN_TAREAS_DE_FONDO") == "1":
+        return False
     _cupo_de_hoy("tanda_fondo_fotos", 0)     # reinicia los contadores de «hoy van» con el día
     if (not _tarea_prendida("fotos")
             and not _tarea_prendida("equiv")

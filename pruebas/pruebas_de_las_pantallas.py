@@ -27,7 +27,10 @@ def probar():
     at.secrets["admin_passwords"] = {"duenio": "clave-duenio-1"}
     at.run()
     ns = sys.modules["logica"].todo_lo_de_la_logica()
-    ns["crear_usuario"]("ana", "clave-ana-1", "operador")
+    # Con --base, la copia puede tener ya esa contraseña (de una medición anterior).
+    clave_ana = ("clave-ana-1" if "--base" not in sys.argv
+                 else f"clave-medir-{os.urandom(4).hex()}")
+    ns["crear_usuario"](f"ana{clave_ana[-4:]}", clave_ana, "operador")
 
     def entrar(clave):
         at.text_input(key="login_inicial_clave").set_value(clave)
@@ -78,13 +81,15 @@ def probar():
     ns["guardar_config"]("whatsapp_del_negocio", "5491145678901")
     # Con la ficha del proveedor y un catálogo cargados, para ver que sin sesión no salen. Y
     # una búsqueda de otro visitante, para ver que no se le muestra a este.
-    c.execute("INSERT INTO marcas (nombre, tipo, url_ficha_template) VALUES "
+    # OR IGNORE y el id buscado: con --base la copia puede tener ya una marca PRUEBA.
+    c.execute("INSERT OR IGNORE INTO marcas (nombre, tipo, url_ficha_template) VALUES "
               "('PRUEBA', 'PROVEEDOR', 'https://proveedor.example/{codigo}')")
+    _marca_prueba = c.execute("SELECT id FROM marcas WHERE nombre = 'PRUEBA'").fetchone()[0]
     c.execute("INSERT INTO catalogos_externos (nombre, url) VALUES "
               "('Catálogo de prueba', 'https://catalogo.example/?q={codigo}')")
     c.execute("INSERT INTO historial_busquedas (termino, usuario) VALUES ('OTRO777', 'Invitado')")
     c.execute("INSERT INTO productos (codigo_raw, codigo_clean, descripcion, marca_id, precio, "
-              "stock) VALUES ('F100', 'F100', 'FILTRO DE ACEITE', ?, 1000, 3)", (c.lastrowid,))
+              "stock) VALUES ('F100', 'F100', 'FILTRO DE ACEITE', ?, 1000, 3)", (_marca_prueba,))
     conn.commit()
     at.session_state["pagina_actual"] = ns["PAGINAS"][0]
     at.run()
@@ -125,14 +130,16 @@ def probar():
     at.text_input(key="busqueda_input").set_value("F101")
     [b for b in at.button if "Buscar equivalencias" in b.label][0].click().run()
     _tipeo = [b for b in at.button if (b.key or "").startswith("tipeo_F101_")]
-    if [b.label for b in _tipeo] != ["🔎 F100"]:
+    # Con --base, la base real tiene otros códigos parecidos a F101: alcanza con que F100 esté.
+    if ([b.label for b in _tipeo] != ["🔎 F100"] if "--base" not in sys.argv
+            else "🔎 F100" not in [b.label for b in _tipeo]):
         fallas.append(f"el código casi igual, como botón: {[b.label for b in _tipeo]}")
     else:
         _tipeo[0].click().run()
         if not any("F100" in str(m.value) for m in list(at.markdown) + list(at.caption)):
             fallas.append("tocar el código casi igual no lo busca")
     recorrer("sin contraseña")
-    entrar("clave-ana-1")
+    entrar(clave_ana)
     if len(at.radio(key="pagina_actual").options) != len(ns["PAGINAS"]):
         fallas.append("con sesión, la barra no tiene todas las secciones")
     at.session_state["pagina_actual"] = ns["PAGINAS"][0]
@@ -160,11 +167,18 @@ def probar():
     tiempos.sort(reverse=True)
     if len(abiertos) < 5:
         fallas.append(f"se abrieron pocos desplegables perezosos: {sorted(abiertos)}")
-    return fallas, len(tiempos), tiempos[:3]
+    return fallas, len(tiempos), tiempos[:10 if "--base" in sys.argv else 3]
 
 
 def main():
     carpeta = tempfile.mkdtemp(prefix="pruebas_pantallas_")
+    # Con --base, una copia de la base real: para ver cuáles son las lentas de verdad (con la
+    # base chica de la prueba todas tardan poco). Sin la tarea de fondo, que con una base
+    # recién copiada se pone a repuntuar todo y ensucia los tiempos.
+    if "--base" in sys.argv:
+        shutil.copy(os.path.abspath(sys.argv[sys.argv.index("--base") + 1]),
+                    os.path.join(carpeta, "equivalencias_app.db"))
+        os.environ["EQUIVALENCIAS_SIN_TAREAS_DE_FONDO"] = "1"
     os.chdir(carpeta)
     sys.path.insert(0, RAIZ)
     try:

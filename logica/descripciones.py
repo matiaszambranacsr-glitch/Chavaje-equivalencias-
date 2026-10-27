@@ -630,14 +630,30 @@ def marcas_vehiculo_disponibles(version):   # ver descripciones_por_palabra()
         RAM decía 519 y tenía 15 (RAMPA);
         22 marcas del desplegable daban la pantalla vacía.
     Y costaba 118 recorridas enteras de la tabla, una por marca: 3,8 s. Ahora es una sola
-    pasada de 2,1 s que además cuenta bien."""
+    pasada de 2,1 s que además cuenta bien.
+
+    Y se guarda en la base con la versión del catálogo. El caché de arriba es del proceso, y la
+    app se reinicia seguido: el primero que abría «🚙 Repuestos por vehículo» —que se abre sin
+    contraseña— esperaba 3 s cada vez (medido con la copia de la base real, 87.000 productos).
+    Además se lee cada descripción distinta una sola vez: son 54.430 de 86.946."""
     from collections import Counter
+    _version = json.dumps(version, default=str)
+    try:
+        _guardado = json.loads(obtener_config("marcas_vehiculo_disponibles", "") or "null")
+    except ValueError:
+        _guardado = None
+    if _guardado and _guardado.get("version") == _version:
+        return [tuple(x) for x in _guardado["marcas"]]
     cuenta = Counter()
-    c.execute("SELECT descripcion FROM productos WHERE descripcion IS NOT NULL")
+    c.execute("SELECT descripcion, COUNT(*) AS n FROM productos WHERE descripcion IS NOT NULL "
+              "GROUP BY descripcion")
     for fila in c.fetchall():
         for marca, _categoria, _resto in marcas_vehiculo_en(fila["descripcion"]):
-            cuenta[marca] += 1
-    return sorted(cuenta.items(), key=lambda x: -x[1])
+            cuenta[marca] += fila["n"]
+    salida = sorted(cuenta.items(), key=lambda x: -x[1])
+    guardar_config("marcas_vehiculo_disponibles", json.dumps({"version": _version,
+                                                               "marcas": salida}))
+    return salida
 
 
 # Familias de repuestos. Gana la palabra clave MÁS LARGA que aparezca en la descripción, así
