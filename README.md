@@ -6656,6 +6656,7 @@ Lo pidió el dueño: «mejorá más la equivalencia y la búsqueda de productos�
   - son listas distintas;
   - el número lo citan 6 productos o menos y no está aprobado como universal.
   Lo que contradiga (medidas, rubro, otra pieza) la tumba igual. En 1.500 búsquedas, 12 resultados pasan de 🟡 a ✅. De los 1.749 pares que rechazaste, mirados como si nadie los hubiera decidido, ninguno queda ✅ ni 🟡.
+- **Y los mellizos de una misma lista también.** FISPA vende lo suyo y lo de LUCAS, y las dos filas citan el mismo número: «SENSOR MAP 40068…» y «SENSOR MAP LEMSM057…» son la misma pieza en dos marcas. Quedan ✅ si cada una es la única de su marca con ese número. Con dos LUCAS para una FISPA, no se sabe cuál es y quedan 🟡. En las 1.500 búsquedas, 243 resultados pasan de 🟡 a ✅. De los pares que rechazaste, ninguno cambia.
 - **Otro espesor de la misma junta es una variante, no «🔴 no es lo mismo».** La junta de tapa de 1,20 y la de 1,40 del mismo motor se encadenan, y lo único que las separa es el espesor. Ahora dicen «📏 otro espesor: 1.4 vs 1.5» y no cuentan como equivalencia «a revisar» en el título. En las 1.500 búsquedas son 215. Si hay otra contradicción, sigue en rojo.
 - **`medir.py` mide dos cosas más:**
   - `fichas`: el estado de lo que aprobaste y rechazaste, como si nadie lo hubiera decidido. Es la prueba de que una regla nueva no da por buena una equivalencia que rechazaste.

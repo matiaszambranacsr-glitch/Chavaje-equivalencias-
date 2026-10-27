@@ -898,6 +898,23 @@ def _numero_de_fabrica_que_verifica(pid):
     return _recordado(("numero_que_verifica", pid), calcular)
 
 
+def _mellizos_por_el_numero(medio, pa, pb):
+    """¿pa y pb son de la misma lista, de distinta marca de adentro (FISPA y la LUCAS que vende
+    FISPA), y cada uno el único de su marca de adentro que cita el número `medio`?"""
+    sub_a = _submarca_del_codigo(pa.get("codigo_raw"))
+    sub_b = _submarca_del_codigo(pb.get("codigo_raw"))
+    if not sub_a or not sub_b or sub_a == sub_b:
+        return False
+    c.execute("""SELECT p.codigo_raw FROM equivalencias e
+                 JOIN productos p ON p.id = CASE WHEN e.producto_a_id = ? THEN e.producto_b_id
+                                                 ELSE e.producto_a_id END
+                 JOIN marcas m ON m.id = p.marca_id
+                 WHERE (e.producto_a_id = ? OR e.producto_b_id = ?) AND m.nombre = ?""",
+              (medio, medio, medio, pa.get("marca")))
+    de_cada_una = collections.Counter(_submarca_del_codigo(r[0]) for r in c.fetchall())
+    return de_cada_una[sub_a] == 1 and de_cada_una[sub_b] == 1
+
+
 def ficha_de_prueba(id_a, id_b, tolerancia_pct=3, liviana=False):
     """Todo lo que sostiene —o no— que A y B son la misma pieza, y el estado que sale de eso.
 
@@ -1008,15 +1025,22 @@ def ficha_de_prueba(id_a, id_b, tolerancia_pct=3, liviana=False):
     # resultados en 1.500 búsquedas de la copia de la base). Lo que la contradiga la tumba igual
     # más abajo. Un número citado por muchos (una sonda universal) o aprobado como universal no
     # alcanza: ahí cada lista nombra otra pieza (ver aprobar_puente()).
+    # Y LOS MELLIZOS DE UNA MISMA LISTA: FISPA vende lo suyo y lo de LUCAS, y las dos filas citan
+    # el mismo número («SENSOR MAP 40068…» y «SENSOR MAP LEMSM057…»). Es la misma pieza en dos
+    # marcas, si cada una es la única de su marca con ese número: con dos LUCAS para una FISPA
+    # (la MAF010 con la LEMSA010 y la LEMSA011) no se sabe cuál es. En las 1.500 búsquedas, 488
+    # resultados eran mellizos así y quedaban 🟡.
     ficha["por_numero_de_fabrica"] = ""
     # «o comprobarla con la pieza en la mano» es otra forma de llegar, no algo que falte.
     if (estado == "🟡 PROBABLE" and len(pasos) == 2 and falta
             and falta[0].startswith("una fuente que nombre los dos códigos juntos")
-            and all(x.startswith("o comprobarla") for x in falta[1:])
-            and (pa.get("marca") or "") != (pb.get("marca") or "")):
+            and all(x.startswith("o comprobarla") for x in falta[1:])):
         _medio = (({pasos[0]["_a"], pasos[0]["_b"]} & {pasos[1]["_a"], pasos[1]["_b"]})
                   - {id_a, id_b})
-        _numero = _numero_de_fabrica_que_verifica(next(iter(_medio))) if len(_medio) == 1 else ""
+        _medio = next(iter(_medio)) if len(_medio) == 1 else None
+        _numero = (_numero_de_fabrica_que_verifica(_medio)
+                   if _medio and ((pa.get("marca") or "") != (pb.get("marca") or "")
+                                  or _mellizos_por_el_numero(_medio, pa, pb)) else "")
         if _numero:
             estado, falta = "✅ VERIFICADA", []
             ficha["por_numero_de_fabrica"] = _numero

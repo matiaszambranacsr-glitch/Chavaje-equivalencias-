@@ -2246,6 +2246,21 @@ def probar(L):
     conn.commit()
     esperar("si el número lo citan muchos, no alcanza",
             ns["ficha_de_prueba"](_ra, _rb)["estado"], "🟡 PROBABLE")
+    # Los mellizos de una misma lista: la FISPA y la LUCAS que vende FISPA, con el mismo número.
+    m5f = marca("FISPA SEIS")
+    _mf = producto("40068FISPA", "SENSOR MAP 40068 FORD FIESTA 1.6", m5f)
+    _ml = producto("LEMSM057LUCAS", "SENSOR MAP LEMSM057 FORD FIESTA 1.6", m5f)
+    _nm = producto("98AB9F479AA", "SENSOR MAP", m5o)
+    vincular(_mf, _nm, "FISPA SEIS · 27/10")
+    vincular(_ml, _nm, "FISPA SEIS · 27/10")
+    conn.commit()
+    esperar("mellizos de una lista, únicos con ese número: verificados",
+            ns["ficha_de_prueba"](_mf, _ml)["estado"], "✅ VERIFICADA")
+    vincular(producto("LEMSM058LUCAS", "SENSOR MAP LEMSM058 FORD FIESTA 1.6", m5f), _nm,
+             "FISPA SEIS · 27/10")
+    conn.commit()
+    esperar("con dos LUCAS para una FISPA, no se sabe cuál",
+            ns["ficha_de_prueba"](_mf, _ml)["estado"], "🟡 PROBABLE")
     _ja = producto("JT120", "JUNTA TAPA DE CILINDROS FIAT 128 1.20MM", m5a, espesor=1.2)
     _jb = producto("JT140", "JUNTA TAPA DE CILINDROS FIAT 128 1.40MM", m5b, espesor=1.4)
     _nj = producto("4401212", "JUNTA TAPA DE CILINDROS", m5o)
