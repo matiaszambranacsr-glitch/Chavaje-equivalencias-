@@ -2047,6 +2047,9 @@ if pagina == PAGINAS[0]:
                     st.session_state["ultima_busqueda_texto"] = {
                         "texto": texto_con_las_correcciones(texto.strip(), _correcciones),
                         "res": _res_texto, "correcciones": _correcciones,
+                        # Lo que no nombra el auto pedido (ver ResultadosDeTexto).
+                        "aparte": list(getattr(_res_texto, "aparte", [])),
+                        "del_auto": list(getattr(_res_texto, "del_auto", [])),
                     }
 
         busqueda_texto_guardada = st.session_state.get("ultima_busqueda_texto")
@@ -2058,9 +2061,12 @@ if pagina == PAGINAS[0]:
                 st.caption("🔤 " + "; ".join(
                     f"«{mal.lower()}» no está en ningún producto: se buscó «{bien.lower()}»"
                     for mal, bien in _corregidas.items()) + ".")
+            _aparte = busqueda_texto_guardada.get("aparte") or []
+            _dicen = " o ".join(f"«{x.lower()}»" for x in busqueda_texto_guardada.get("del_auto") or [])
             if res_texto:
-                st.success(f"Se encontraron {len(res_texto)} coincidencia(s). 👆 Tocá una fila "
-                           "para abrir ese código con todas sus equivalencias.")
+                st.success(f"Se encontraron {len(res_texto)} coincidencia(s)"
+                           + (f" que dicen {_dicen}" if _aparte else "")
+                           + ". 👆 Tocá una fila para abrir ese código con todas sus equivalencias.")
                 # Lo pedido que ningún resultado dice: «necesito pastillas delanteras para un
                 # Corsa Classic 2012» trae cosas del Corsa Classic, y sin esto parecía que eran
                 # pastillas. Ver palabras_que_no_aparecen().
@@ -2096,6 +2102,25 @@ if pagina == PAGINAS[0]:
                              key="tabla_resultados_texto", selection_mode="single-row",
                              on_select=functools.partial(
                                  abrir_la_fila_elegida, "tabla_resultados_texto", _res_vista))
+                # Lo que solo coincide en la pieza y no nombra el auto pedido: «bomba de agua
+                # k4m» traía 199 bombas de cualquier auto debajo de la única del K4M. Plegado y
+                # perezoso, para el que igual quiera mirarlas.
+                if _aparte:
+                    _exp_aparte = st.expander(
+                        f"🔧 Otros {miles(len(_aparte))} que no dicen {_dicen}",
+                        key="exp_texto_aparte", on_change="rerun")
+                    if _exp_aparte.open:
+                        with _exp_aparte:
+                            _tabla_ap = para_mostrar(quitar_id(_aparte))
+                            st.dataframe(con_stock_legible(_tabla_ap), width="stretch",
+                                         hide_index=True,
+                                         column_order=columnas_que_dicen_algo(_tabla_ap),
+                                         column_config=CONFIG_COLUMNAS_RESULTADO,
+                                         key="tabla_resultados_texto_aparte",
+                                         selection_mode="single-row",
+                                         on_select=functools.partial(
+                                             abrir_la_fila_elegida,
+                                             "tabla_resultados_texto_aparte", _aparte))
 
                 # La búsqueda por descripción solo hace coincidir texto: encuentra el producto,
                 # pero no sus equivalentes. Acá se abre la red de equivalencias de cada resultado,

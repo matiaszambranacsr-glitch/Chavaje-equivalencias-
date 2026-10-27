@@ -173,6 +173,26 @@ def probar():
         _tipeo[0].click().run()
         if not any("F100" in str(m.value) for m in list(at.markdown) + list(at.caption)):
             fallas.append("tocar el código casi igual no lo busca")
+    # Por descripción, lo que no nombra el auto pedido va aparte y plegado (ver
+    # nivel_del_auto()): «bomba de agua k4m» no mezcla las bombas de cualquier auto.
+    c.execute("INSERT INTO productos (codigo_raw, codigo_clean, descripcion, marca_id) VALUES "
+              "('BAK4M', 'BAK4M', 'BOMBA DE AGUA RENAULT CLIO 1.6 16V K4M', ?), "
+              "('BAPAL', 'BAPAL', 'BOMBA DE AGUA FIAT PALIO 1.3', ?)", (_marca_prueba,) * 2)
+    conn.commit()
+    at.session_state["modo_busqueda"] = "Descripción"
+    at.run()
+    at.text_input(key="texto_input").set_value("bomba de agua k4m")
+    [b for b in at.button if "Buscar por descripción" in b.label][0].click().run()
+    _aparte = [e for e in at.expander if "que no dicen «k4m»" in e.label]
+    if (not any("que dicen «k4m»" in x.value for x in at.success) or len(_aparte) != 1
+            or any("BAPAL" in str(d.value) for d in at.dataframe)):
+        fallas.append(f"por descripción, lo que no nombra el auto: {[e.label for e in _aparte]}")
+    at.session_state["exp_texto_aparte"] = True
+    at.run()
+    if not any("BAPAL" in str(d.value) for d in at.dataframe):
+        fallas.append("por descripción, abrir «Otros … que no dicen» no muestra la tabla")
+    at.session_state["exp_texto_aparte"] = False
+    at.session_state["modo_busqueda"] = "Código"
     recorrer("sin contraseña")
     entrar(clave_ana)
     if len(at.radio(key="pagina_actual").options) != len(ns["PAGINAS"]):

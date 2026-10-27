@@ -2325,6 +2325,32 @@ def probar(L):
         return bool(f.get("_complementario")), "🔁 otra versión" in (f.get("Cadena") or "")
     esperar("otro código y otro precio: otra versión, aparte",
             (_version86("JV-175-30"), _version86("JV-175-31")), ((True, True), (False, False)))
+    # 87. LO QUE NOMBRA EL AUTO MANDA (ver nivel_del_auto()): «bomba de agua k4m» trae la del
+    # K4M, y las bombas de cualquier auto van aparte; si ninguna nombra el auto, todas, como
+    # antes; «gol» no es GOLF.
+    m9 = marca("NUEVE BOMBAS")
+    _k4m = producto("BA87K", "BOMBA DE AGUA RENAULT CLIO MEGANE 1.6 16V K4M-700", m9)
+    _otra = producto("BA87F", "BOMBA DE AGUA FIAT PALIO 1.3 FIRE", m9)
+    _sola = producto("BA87S", "BOMBA DE AGUA", m9)
+    _golf = producto("BA87G", "BOMBA DE AGUA VW GOLF 2.0", m9)
+    conn.commit()
+    _r87 = ns["buscar_por_texto"]("bomba de agua k4m")
+    _aparte87 = {f["ID"] for f in _r87.aparte}
+    esperar("«bomba de agua k4m»: la del K4M, y las otras aparte",
+            ([f["ID"] for f in _r87 if f["ID"] in (_k4m, _otra, _sola, _golf)],
+             {_otra, _sola, _golf} <= _aparte87, _r87.del_auto), ([_k4m], True, ["K4M"]))
+    _r87b = ns["buscar_por_texto"]("bomba de agua siena")
+    esperar("si ninguna nombra el auto, todas y nada aparte",
+            ({_k4m, _otra, _sola} <= {f["ID"] for f in _r87b}, _r87b.aparte), (True, []))
+    _gol = producto("BA87L", "BOMBA DE AGUA VW GOL/PARATI 1.6", m9)
+    # Que GOL sea un modelo conocido, como en la base real (sale de las aplicaciones).
+    c.execute("INSERT INTO aplicaciones (marca_auto, modelo_auto, codigo, codigo_clean, origen) "
+              "VALUES ('VOLKSWAGEN', 'GOL', 'BA87L', 'BA87L', 'deducida')")
+    conn.commit()
+    ns["_MODELOS_CACHE"]["lista"] = None
+    _r87c = ns["buscar_por_texto"]("bomba de agua gol")
+    esperar("«gol» no es GOLF", (_gol in {f["ID"] for f in _r87c},
+                                 _golf in {f["ID"] for f in _r87c.aparte}), (True, True))
     return fallas
 
 

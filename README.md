@@ -6656,6 +6656,17 @@ Las listas abrevian y el mostrador escribe la palabra entera: buscando «juego j
 
 Medido con `python pruebas/medir.py --base copia texto` (794 búsquedas como se escriben en el mostrador): primero 259 → 263, entre los 5 primeros 488 → 499, entre los 20 641 → 648, sin aparecer 23 → 22; el promedio de 54 a 69 ms. «junta tapa corsa» encuentra las 25 «JTA … TAPA … CORSA», «bomba nafta» las 27 «BBA … NAFTA», «jgo juntas ford falcon» las 22. Los REPLACE de la palabra entera corren solo en las filas que ya tienen esas letras: todos juntos subían una búsqueda a 760 ms. `--comparar` ahora también dice, para `texto`, cuántas suben o bajan de puesto.
 
+## 🚗 «bomba de agua k4m»: lo que no nombra el auto va aparte
+
+Lo pidió el dueño: «cuando pongo por descripción bomba de agua k4m me tira más de 200 resultados (…) llega un momento que no tienen nada que ver los productos más que ser bombas de agua». Con tres palabras alcanza con que coincidan dos, y «bomba» y «agua» las dice cualquier bomba de agua: de los 200, uno solo decía K4M.
+
+- **Las palabras que dicen el auto mandan** (`nivel_del_auto()`): el modelo o el motor (GOL, CLIO, K4M, F8Q); si no hay, la marca (RENAULT, VW); si no, la cilindrada o las válvulas (1.6, 16V). Lo que no nombra ninguna de las del nivel más alto va **aparte**, en «🔧 Otros N que no dicen «k4m»», plegado y sin calcular hasta que se abre.
+- **Sin otra letra pegada** (`nombra_alguna()`): «gol» no es GOLF; sí cuenta «GOL/PARATI», «K4M-700», K4M700 y «FIS-202003Galloper», que es como lo escriben las listas. Si la palabra empieza o termina en número, tampoco otro número: «F100» no es F1000.
+- **Nunca la pantalla vacía**: si ningún resultado nombra el auto, se muestra todo como antes, con el aviso de siempre («Ninguno de estos dice…»).
+- También lo usan las otras búsquedas por descripción (Modo Mecánico, Ventas): `buscar_por_texto()` devuelve la lista de siempre, sin lo de aparte, y lo de aparte en `.aparte`.
+
+Con la copia de la base: «bomba de agua k4m» da 1 y aparta 200; «kit distribucion gol 1.6», 86 y aparta 162; «filtro de aire peugeot 206», 52 y aparta 200; «bomba de agua renault clio», 174 y aparta 29. En las 794 búsquedas de `medir.py texto` el producto buscado sale en el mismo puesto que antes (siempre nombra sus propias palabras), y el filtro cuesta 1,5 ms por búsqueda. Se probó también ofrecer las bombas que dicen «Clio 1.6 16V» sin decir K4M, aprendiendo de tus listas qué autos van con cada motor: no encontró ninguna del K4M y para el F8Q trajo una del N7Q. Se dejó afuera.
+
 ## 🔁 Otra versión de la misma lista, y las búsquedas largas más rápidas
 
 Lo pidió el dueño: «mejorá más todavía todo». Medido con `python pruebas/medir.py --base copia busquedas` (1.500 búsquedas de la copia de la base).

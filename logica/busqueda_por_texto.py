@@ -245,6 +245,57 @@ def formas_de_la_palabra(palabra):
     return sorted((f, len(f) < 5) for f in formas if palabra not in f)
 
 
+# LO QUE NOMBRA EL AUTO MANDA. «bomba de agua k4m» traía 200 resultados y uno solo decía K4M:
+# con tres palabras alcanza con dos, y «bomba» y «agua» las dice cualquier bomba de agua. Lo que
+# pidió el dueño: «llega un momento que no tienen nada que ver los productos más que ser bombas
+# de agua». Ahora, si lo pedido nombra el auto, lo que no lo nombra va aparte (ver
+# ResultadosDeTexto); si nada lo nombra, se muestra todo como antes: nunca la pantalla vacía.
+_RE_CILINDRADA_O_VALVULAS = re.compile(r"\d[.,]\d|\d{1,2}V")
+
+
+def nivel_del_auto(palabra):
+    """Cuánto dice `palabra` de qué auto es: 3 el modelo o el motor (GOL, CLIO, K4M, F8Q), 2 la
+    marca (RENAULT, VW), 1 la cilindrada o las válvulas (1.6, 16V), 0 nada."""
+    if marcas_vehiculo_en(palabra):
+        return 2           # antes que el modelo: MODELOS_CONOCIDOS tiene también las marcas
+    if parece_designacion_de_motor(palabra) or palabra in MODELOS_CONOCIDOS:
+        return 3
+    return 1 if _RE_CILINDRADA_O_VALVULAS.fullmatch(palabra) else 0
+
+
+def palabras_del_auto(palabras):
+    """Las palabras pedidas que dicen el auto, las más precisas: el modelo o el motor; si no
+    hay, la marca; si no, la cilindrada. «bomba de agua renault clio 1.6» → [CLIO]."""
+    niveles = {p: nivel_del_auto(p) for p in palabras}
+    tope = max(niveles.values(), default=0)
+    return [p for p, n in niveles.items() if n == tope] if tope else []
+
+
+def nombra_alguna(fila, palabras):
+    """¿La descripción o el código dicen alguna de `palabras` sin otra letra pegada? «GOL» no
+    está en GOLF; sí en «GOL/PARATI» y en «GOL1.6», «K4M» en K4M700 y «GALLOPER» en
+    «FIS-202003Galloper», que es como lo escribe la lista. Si la palabra empieza o termina en
+    número, tampoco otro número: «F100» no es F1000, ni «1.6» es 11.6."""
+    crudo = normalizar_texto(f"{fila.get('Descripcion') or ''} {fila.get('Codigo') or ''}")
+    return bool(_patron_de_palabras_del_auto(tuple(palabras)).search(crudo))
+
+
+@functools.lru_cache(maxsize=64)
+def _patron_de_palabras_del_auto(palabras):
+    return re.compile("|".join(
+        ("(?<![A-Z0-9.])" if p[:1].isdigit() else "(?<![A-Z])") + re.escape(p)
+        + ("(?![0-9])" if p[-1:].isdigit() else "(?![A-Z])") for p in palabras))
+
+
+class ResultadosDeTexto(list):
+    """Lo que devuelve buscar_por_texto(): la lista de siempre, y aparte (`.aparte`) lo que solo
+    coincide en la pieza y no nombra el auto pedido (`.del_auto`). Es una lista para que los
+    que ya la usaban sigan igual; ellos también dejan de ver las bombas de cualquier auto."""
+    def __init__(self, filas=(), aparte=(), del_auto=()):
+        super().__init__(filas)
+        self.aparte, self.del_auto = list(aparte), list(del_auto)
+
+
 def buscar_por_texto(texto, aflojar=True):
     """Busca por descripción de forma flexible: cada palabra tiene que aparecer en algún lado
     (descripción o código), sin importar el orden ni las tildes. Así 'ruleman delantero gol'
@@ -422,12 +473,19 @@ def buscar_por_texto(texto, aflojar=True):
                    or any(f" {forma} " in sin_puntos for forma, _ in formas_de_la_palabra(p)))
     filas.sort(key=lambda f: (-f.get("_coincidencias", 0), -_enteras(f), -f.get("_tal_cual", 0),
                               f.get("_largo") or 0))
-    filas = filas[:200]
-    for f in filas:
+    # Lo que no nombra el auto pedido, aparte (ver nivel_del_auto()).
+    del_auto, aparte = palabras_del_auto(palabras), []
+    if del_auto:
+        nombran = [nombra_alguna(f, del_auto) for f in filas]
+        if any(nombran):
+            aparte = [f for f, n in zip(filas, nombran) if not n]
+            filas = [f for f, n in zip(filas, nombran) if n]
+    filas, aparte = filas[:200], aparte[:200]
+    for f in filas + aparte:
         f.pop("_coincidencias", None)
         f.pop("_tal_cual", None)
         f.pop("_largo", None)
-    return filas
+    return ResultadosDeTexto(filas, aparte, del_auto if aparte else ())
 
 
 # Las palabras que no buscan nada: «necesito pastillas delanteras para un Corsa Classic
