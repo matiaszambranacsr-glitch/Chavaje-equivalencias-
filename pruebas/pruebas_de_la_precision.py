@@ -2272,6 +2272,26 @@ def probar(L):
             (bool(_res83.get("JT140", {}).get("_complementario")),
              "📏 otro espesor" in _res83.get("JT140", {}).get("Cadena", "")),
             (True, True))
+    # 84. LAS ABREVIATURAS DE LAS LISTAS, EN LA BÚSQUEDA POR TEXTO (ver formas_de_la_palabra()):
+    # «junta tapa» encuentra la «JTA.TAPA CIL. CORSA»; «ESC» cuenta como ESCAPE solo como
+    # palabra entera (no adentro de DESCARGA); y a igual cantidad, primero lo escrito tal cual.
+    m6 = marca("SEIS JUNTAS")
+    _jta = producto("JT84", "JTA.TAPA CIL. CORSA 1.6 8V", m6)
+    _esc = producto("JE84", "JTA ESC. CORSA 1.6", m6)
+    _desc = producto("JD84", "JUNTA DESCARGA TURBO CORSA", m6)
+    _jgo = producto("JG84", "JGO.DESCARBONIZACION FIAT PALIO 1.3 FIRE 8V", m6)
+    _juego = producto("JU84", "JUEGO DESCARBONIZACION PALIO", m6)
+    conn.commit()
+
+    def _ids84(texto):
+        return [f["ID"] for f in ns["buscar_por_texto"](texto)]
+    esperar("«junta tapa» encuentra la JTA.TAPA", _jta in _ids84("junta tapa"), True)
+    esperar("«junta escape»: la JTA ESC sí, la DESCARGA no",
+            (_esc in _ids84("junta escape"), _desc in _ids84("junta escape")),
+            (True, False))
+    _orden84 = _ids84("jgo descarbonizacion palio")
+    esperar("lo escrito tal cual va antes que el sinónimo más corto",
+            _orden84.index(_jgo) < _orden84.index(_juego) if _juego in _orden84 else None, True)
     return fallas
 
 

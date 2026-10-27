@@ -151,7 +151,21 @@ def texto(ns, n):
     return salida
 
 
+def comparar_puestos(antes, ahora):
+    """Lo de «texto»: [puesto, consulta], con 0 si no aparece. Mejor es salir más arriba."""
+    def peso(puesto):
+        return puesto or 10 ** 6
+    mejor = [k for k in ahora if k in antes and peso(ahora[k][0]) < peso(antes[k][0])]
+    peor = [k for k in ahora if k in antes and peso(ahora[k][0]) > peso(antes[k][0])]
+    print(f"mejoran {len(mejor)}, empeoran {len(peor)}, igual {len(ahora) - len(mejor) - len(peor)}")
+    for nombre, claves in (("mejora", mejor), ("empeora", peor)):
+        for k in claves[:4]:
+            print(f"   {nombre}: «{ahora[k][1]}» del puesto {antes[k][0] or '—'} al {ahora[k][0] or '—'}")
+
+
 def comparar(antes, ahora):
+    if ahora and len(next(iter(ahora.values()))) == 2:
+        return comparar_puestos(antes, ahora)
     cambios = collections.Counter()
     ejemplos = collections.defaultdict(list)
     for k, v in ahora.items():

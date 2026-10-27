@@ -6646,6 +6646,16 @@ Lo pidió el dueño: «funciones nuevas que mejoren toda la página». En el mos
 
 Se leen NGK y Bosch, que son las que se pudieron comprobar con tus listas (ver «LA BUJÍA POR SU CÓDIGO»). Champion y Denso casi no aparecen en tus listas, y sin comprobarlas no se leen. Cada consulta tarda 0,03 s. `pruebas_del_buscador.py` (3) lo controla.
 
+## ✂️ «junta escape» encuentra las «JTA ESC.»
+
+Las listas abrevian y el mostrador escribe la palabra entera: buscando «juego juntas motor» no salía ninguno de los 779 «Jgo.Jtas.P/Motor» de la copia de la base, ni las 301 «JTA … ESC» buscando «junta escape», ni las 27 «BBA … NAFTA» buscando «bomba nafta». Ahora cada palabra busca también sus abreviaturas, y al revés (`formas_de_la_palabra()`, con las de `ABREVIATURAS_DE_PIEZA`, contadas en tus listas):
+
+- **Las cortas, como palabra entera**, con el punto, la barra y el guion como espacios: «ESC» es ESCAPE en «JTA ESC.» pero no adentro de DESCARGA. Las de cinco letras o más, como pedazo.
+- **A igual cantidad de palabras, primero lo escrito tal cual**: «jgo descarbonizacion palio» trae primero la «Jgo.Descarbonizacion» y después los «Juego de…». Una sola cuenta en SQLite da las dos cosas (cada palabra vale 1000 si está y 1001 si está tal cual), sin recorrer la tabla dos veces.
+- **El corte en 200 va después del orden**, que sabe de palabras enteras y abreviaturas.
+
+Medido con `python pruebas/medir.py --base copia texto` (794 búsquedas como se escriben en el mostrador): primero 259 → 263, entre los 5 primeros 488 → 499, entre los 20 641 → 648, sin aparecer 23 → 22; el promedio de 54 a 69 ms. «junta tapa corsa» encuentra las 25 «JTA … TAPA … CORSA», «bomba nafta» las 27 «BBA … NAFTA», «jgo juntas ford falcon» las 22. Los REPLACE de la palabra entera corren solo en las filas que ya tienen esas letras: todos juntos subían una búsqueda a 760 ms. `--comparar` ahora también dice, para `texto`, cuántas suben o bajan de puesto.
+
 ## ⏱️ Las pantallas, medidas con la base real
 
 Lo pidió el dueño: «mejorá absolutamente todo». Primero se midió dónde la app es lenta de verdad: la prueba de pantallas corría sobre una base chica, donde todas tardan poco. Ahora `python pruebas/pruebas_de_las_pantallas.py --base copia.db` recorre las 89 pantallas con una copia de la base real (sin la tarea de fondo, que ensucia los tiempos) y dice las 10 más lentas.

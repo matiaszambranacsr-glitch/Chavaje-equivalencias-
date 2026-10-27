@@ -218,6 +218,33 @@ def marcas_que_nombra(palabra):
     return salida
 
 
+# LAS ABREVIATURAS DE LAS LISTAS, EN LA BÚSQUEDA POR TEXTO. El mostrador escribe «juego juntas
+# motor» y la lista dice «Jgo.Jtas.P/Motor»: con la palabra entera como pedazo de texto no se
+# encontraba ninguno de los 779 juegos escritos así en la copia de la base real, ni ninguna de
+# las 301 «JTA … ESC» buscando «junta escape», ni las 27 «BBA … NAFTA» buscando «bomba nafta».
+# Las formas salen de ABREVIATURAS_DE_PIEZA, contadas en tus listas. Las cortas se buscan como
+# palabra entera (con el punto, la barra y el guion como espacios): «ESC» no es DESCARGA ni
+# «RET» es CARRETERA. Las de cinco letras o más, como pedazo: ESCAP solo está en ESCAPE.
+_BUSQUEDA_CON_ESPACIOS = ("(' ' || REPLACE(REPLACE(REPLACE(REPLACE(p.busqueda, '.', ' '), "
+                          "'/', ' '), '-', ' '), ',', ' ') || ' ')")
+
+
+@functools.lru_cache(maxsize=1)
+def _formas_por_palabra():
+    por_pieza = {}
+    for corta, pieza in ABREVIATURAS_DE_PIEZA.items():
+        por_pieza.setdefault(pieza, {pieza}).add(corta)
+    return {forma: formas for formas in por_pieza.values() for forma in formas}
+
+
+def formas_de_la_palabra(palabra):
+    """Las otras formas de escribir `palabra` en las listas: [(forma, si va como palabra
+    entera)]. «JUNTA» → JTA y JTAS enteras, JUNTAS como pedazo. Sin la palabra misma."""
+    formas = _formas_por_palabra().get(palabra, set()) - {palabra}
+    # La que contiene a la palabra ya la encuentra el LIKE de la palabra: «JUNTAS» con «JUNTA».
+    return sorted((f, len(f) < 5) for f in formas if palabra not in f)
+
+
 def buscar_por_texto(texto, aflojar=True):
     """Busca por descripción de forma flexible: cada palabra tiene que aparecer en algún lado
     (descripción o código), sin importar el orden ni las tildes. Así 'ruleman delantero gol'
@@ -246,7 +273,7 @@ def buscar_por_texto(texto, aflojar=True):
         # "TC421" o "tc-421", tiene que encontrar igual el producto cargado como "TC-421-15".
         # ESCAPE: sin esto, escribir «100%» o «f_ltro» devolvía 200 filas cualesquiera,
         # porque SQLite tomaba el % y el _ como comodines. Ver como_texto_en_like().
-        ramas, suyos = [], []
+        ramas, suyos, abreviadas, de_abreviadas = [], [], [], []
         limpia = sanitizar(palabra)
         for columna, valor in (("p.busqueda", palabra), ("p.codigo_clean", limpia)):
             # Un LIKE '%%' coincide con TODO. Pasaba al buscar «%» o «_»: sanitizar() los deja
@@ -255,13 +282,33 @@ def buscar_por_texto(texto, aflojar=True):
                 continue
             ramas.append(f"{columna} LIKE ? ESCAPE '\\'")
             suyos.append(f"%{como_texto_en_like(valor)}%")
+        # Y COMO LO ABREVIAN LAS LISTAS: «junta» busca también JTA y JTAS, «juego» JGO, «bomba»
+        # BBA, y al revés. Ver formas_de_la_palabra().
+        for forma, entera in formas_de_la_palabra(palabra):
+            if entera:
+                # Primero el pedazo, que es barato: los REPLACE corren solo en las filas que
+                # tienen «JTA» en algún lado. Todos juntos en cada fila subían «juego juntas
+                # motor» de 50 a 760 ms.
+                abreviadas.append(f"(p.busqueda LIKE ? ESCAPE '\\' AND "
+                                  f"{_BUSQUEDA_CON_ESPACIOS} LIKE ? ESCAPE '\\')")
+                de_abreviadas.extend([f"%{como_texto_en_like(forma)}%",
+                                      f"% {como_texto_en_like(forma)} %"])
+            else:
+                abreviadas.append("p.busqueda LIKE ? ESCAPE '\\'")
+                de_abreviadas.append(f"%{como_texto_en_like(forma)}%")
         if _marcas_por_palabra.get(palabra):
             ramas.append(f"p.marca_id IN ({','.join('?' * len(_marcas_por_palabra[palabra]))})")
             suyos.extend(_marcas_por_palabra[palabra])
         if not ramas:
             continue        # la palabra era solo símbolos: no aporta nada para buscar
-        puntajes.append("(CASE WHEN " + " OR ".join(ramas) + " THEN 1 ELSE 0 END)")
-        params.extend(suyos)
+        # Cada palabra vale 1000 si está, y 1 más si está tal cual se escribió: así una sola
+        # cuenta da las coincidencias (÷ 1000) y cuántas no hizo falta adivinar (el resto), sin
+        # recorrer la tabla dos veces. «jgo descarbonizacion palio» sacaba la «JGO DESCARB…»
+        # del puesto 2 al 42, debajo de los «JUEGO …» más cortos.
+        puntajes.append("(CASE WHEN " + " OR ".join(ramas) + " THEN 1001"
+                        + (" WHEN " + " OR ".join(abreviadas) + " THEN 1000" if abreviadas else "")
+                        + " ELSE 0 END)")
+        params.extend(suyos + de_abreviadas)
     if not puntajes:
         return []
     suma = " + ".join(puntajes)
@@ -294,7 +341,7 @@ def buscar_por_texto(texto, aflojar=True):
            -- tiene la columna, nombrarla acá tumba el buscador entero.
            {_fabricante},
            p.precio AS "Precio", p.stock AS "Stock", {_ubicacion},
-           p.favorito AS "Favorito", ({suma}) AS _coincidencias,
+           p.favorito AS "Favorito", ({suma}) AS _puntaje,
            LENGTH(p.descripcion) AS _largo
     FROM productos p JOIN marcas m ON m.id = p.marca_id
     WHERE 1
@@ -302,14 +349,19 @@ def buscar_por_texto(texto, aflojar=True):
       -- «motor de arranque corsa» salía el arranque y, abajo, sus veinte números de Bosch con
       -- la misma descripción. No son algo que se venda: solo si se escribe el código exacto.
       AND (m.tipo <> 'OEM' OR p.codigo_clean IN ({",".join("?" * len(_codigos_escritos))}))
-    ) WHERE _coincidencias >= ?
-    ORDER BY _coincidencias DESC, _largo, "Marca" LIMIT 400;
+    ) WHERE _puntaje >= ?
+    ORDER BY _puntaje DESC, _largo, "Marca" LIMIT 400;
     '''
     with db_lock:
-        c.execute(query, params + _codigos_escritos + [minimo_flojo])
+        c.execute(query, params + _codigos_escritos + [minimo_flojo * 1000])
         todas = filas_a_listas(c)
+        for f in todas:
+            f["_coincidencias"], f["_tal_cual"] = divmod(f.pop("_puntaje"), 1000)
         # Lo que llega al mínimo va primero por el orden; si no hay nada, queda lo aflojado.
-        filas = [f for f in todas if f["_coincidencias"] >= minimo][:200]
+        # Sin cortar en 200 todavía: el corte va después del orden de abajo, que sabe de
+        # palabras enteras y abreviaturas. Cortando acá, las «Jta mult. Adm.» quedaban afuera
+        # buscando «junta multiple admision», detrás de 141 que dicen «JUNTA» adentro de otra.
+        filas = [f for f in todas if f["_coincidencias"] >= minimo]
         # Si pidiendo TODAS las palabras no aparece nada, se afloja y se pide una menos.
         # Con dos palabras se exigían las dos, y «rótula suspensión» devolvía CERO resultados
         # sobre un catálogo lleno de rótulas: ninguna descripción dice las dos cosas juntas.
@@ -321,7 +373,7 @@ def buscar_por_texto(texto, aflojar=True):
         # aflojar=False es para el buscador de CÓDIGOS (ver «kit 22382» en buscador.py): ahí
         # una sola de las dos palabras traía 200 productos cualesquiera.
         if aflojar and not filas and utiles >= 2 and minimo > 1:
-            filas = todas[:200]
+            filas = todas
 
     # Filtro por RUBRO. Contar palabras coincidentes no alcanza: buscando «bujía golf 1.4 tsi»
     # aparecían juntas de tapa y juegos de motor, porque coinciden en «golf», «1.4» y «tsi» —
@@ -359,13 +411,21 @@ def buscar_por_texto(texto, aflojar=True):
     # gol» traía primero las del Golf, y «filtro de aceite para Gol 1.6» un «Filtro para
     # aceite sellado» que no dice ningún auto. Ahora, a igual cantidad de palabras, va primero
     # la que las tiene como palabra entera.
+    # Una abreviatura de las listas cuenta como la palabra: «JTA TAPA GOL» va antes que «JUNTA
+    # TAPA GOLF» buscando «junta tapa gol». Y a igual cantidad, la que la tiene tal cual.
     def _enteras(f):
-        texto_fila = " " + re.sub(r"[^A-Z0-9.]+", " ", normalizar_texto(
-            f"{f.get('Descripcion') or ''} {f.get('Codigo') or ''}")) + " "
-        return sum(1 for p in palabras if f" {p} " in texto_fila)
-    filas.sort(key=lambda f: (-f.get("_coincidencias", 0), -_enteras(f), f.get("_largo") or 0))
+        crudo = normalizar_texto(f"{f.get('Descripcion') or ''} {f.get('Codigo') or ''}")
+        texto_fila = " " + re.sub(r"[^A-Z0-9.]+", " ", crudo) + " "
+        sin_puntos = " " + re.sub(r"[^A-Z0-9]+", " ", crudo) + " "
+        # El punto pegado también separa: «Jgo.Descarbonizacion» tiene las dos enteras.
+        return sum(1 for p in palabras if f" {p} " in texto_fila or f" {p} " in sin_puntos
+                   or any(f" {forma} " in sin_puntos for forma, _ in formas_de_la_palabra(p)))
+    filas.sort(key=lambda f: (-f.get("_coincidencias", 0), -_enteras(f), -f.get("_tal_cual", 0),
+                              f.get("_largo") or 0))
+    filas = filas[:200]
     for f in filas:
         f.pop("_coincidencias", None)
+        f.pop("_tal_cual", None)
         f.pop("_largo", None)
     return filas
 
