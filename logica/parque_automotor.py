@@ -225,8 +225,11 @@ def _cuantos_productos_nombran(modelos):
     for marca, palabra in modelos:
         por_palabra.setdefault(palabra, []).append(marca)
     cuenta = collections.Counter()
-    c.execute("SELECT descripcion FROM productos WHERE descripcion IS NOT NULL")
-    for (desc,) in c.fetchall():
+    # Cada descripción distinta una vez, con cuántos productos la tienen: son 54.430 de 87.000
+    # (el producto de fábrica copia la descripción de la fila que lo nombró). De 0,7 a 0,4 s.
+    c.execute("SELECT descripcion, COUNT(*) FROM productos WHERE descripcion IS NOT NULL "
+              "GROUP BY descripcion")
+    for desc, cuantos in c.fetchall():
         texto = normalizar_texto(desc)
         palabras = set(re.findall(r"[A-Z0-9]+", texto)) & por_palabra.keys()
         if not palabras:
@@ -236,7 +239,7 @@ def _cuantos_productos_nombran(modelos):
             for marca in por_palabra[palabra]:
                 propia = len(palabra) >= 4 and not palabra.isdigit()
                 if marca in marcas or propia:
-                    cuenta[(marca, palabra)] += 1
+                    cuenta[(marca, palabra)] += cuantos
     return cuenta
 
 

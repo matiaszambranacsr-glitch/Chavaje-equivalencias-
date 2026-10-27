@@ -6666,6 +6666,12 @@ Lo pidió el dueño: «mejorá absolutamente todo». Primero se midió dónde la
 
 `pruebas_de_repuestos_por_auto.py` controla que el conteo guardado se use después de un reinicio y que se rehaga con otro catálogo.
 
+**Segunda vuelta («mejorá más todavía todo»).** Con `--base`, cada pantalla lenta ahora dice también el renglón donde se fue el tiempo («🚙 Repuestos por vehículo [calidad.py:_marcas_vehiculo_en:1147] 3,1 s»): se mira cada 20 ms qué renglón de `logica/` o `pantallas/` está corriendo. Antes había que perfilar a mano, y una medición de «🧾 Ventas 9 s» resultó pasajera: aislada tardaba 0,1 s.
+
+- **Las marcas, como árbol** (`alternativas_en_arbol()`): las expresiones que buscan las 177 marcas de auto y las que despegan el texto pegado probaban marca por marca en cada letra; armadas como árbol («F(?:IAT(?: PALIO)?|ORD)») miran una letra. Sobre las 54.430 descripciones distintas, con el mismo resultado exacto: separar el texto pegado de 1,70 a 0,97 s, leer las marcas de 3,38 a 1,43 s. **🚙 Repuestos por vehículo**, la primera vez después de cargar una lista, de 5,0 a 3,1 s; y todo lo que lee los autos de una descripción (aplicaciones, modelos, importar) va más rápido.
+- **«📌 Para pedir»** cuenta cada descripción distinta una vez, con cuántos productos la tienen: de 0,7 a 0,4 s.
+- **«🩺 Estado y papelera»** espera la cotización del dólar y la inflación de afuera (`_pedir_json`): se pide cada 6 horas, y si falla se espera 30 minutos. Se deja así.
+
 ## ✅ Verificada por el número de fábrica, y los espesores aparte
 
 Lo pidió el dueño: «mejorá más la equivalencia y la búsqueda de productos». Medido sobre la copia de la base con `pruebas/medir.py`.

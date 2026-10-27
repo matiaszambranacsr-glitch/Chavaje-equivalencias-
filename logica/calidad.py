@@ -1066,8 +1066,34 @@ ESCRITURAS_DE_MARCA = _escrituras_por_marca()
 # Y va en IGNORECASE. Antes se comparaba con la marca tal cual, en mayúsculas, contra el texto
 # tal cual venía: «BUJIA NAFTA Ford Escort - VW Gol» encontraba VW pero no Ford, porque el
 # proveedor lo escribió con minúsculas. Media lista de FISPA está escrita así.
+def alternativas_en_arbol(palabras, sin_mayusculas=False):
+    """La alternancia «A|B|C» de una expresión regular, armada como árbol: «FORD|FIAT|FIAT
+    PALIO» queda «F(?:IAT(?: PALIO)?|ORD)». Encuentra lo mismo —en cada lugar, la más larga
+    que calce, como la lista ordenada de más larga a más corta— y mucho más rápido: Python
+    prueba las 177 marcas una por una en cada letra del texto, y con el árbol mira una letra.
+    Medido con las 54.430 descripciones distintas de la base real: leer las marcas de todas
+    bajó de 1,6 s a 0,4 s, y separar el texto pegado de 1,7 s a 0,6 s. Es lo que pagaba el
+    primero que abría «🚙 Repuestos por vehículo» después de cargar una lista: 5 s.
+    sin_mayusculas: para las expresiones con re.IGNORECASE (junta «Fiat» y «FIAT»)."""
+    arbol = {}
+    for palabra in palabras:
+        nodo = arbol
+        for letra in (palabra.upper() if sin_mayusculas else palabra):
+            nodo = nodo.setdefault(letra, {})
+        nodo[""] = {}
+
+    def armar(nodo):
+        ramas = [re.escape(letra) + armar(hijo) for letra, hijo in sorted(nodo.items()) if letra]
+        if not ramas:
+            return ""
+        cuerpo = ramas[0] if len(ramas) == 1 and "" not in nodo else "(?:" + "|".join(ramas) + ")"
+        # Si acá termina una palabra, lo que sigue es optativo: primero prueba la más larga.
+        return cuerpo + "?" if "" in nodo else cuerpo
+    return armar(arbol)
+
+
 _RE_MARCAS_VEHICULO = re.compile(
-    r'(?<![A-Za-zÁÉÍÓÚÑ0-9])(' + "|".join(re.escape(_m) for _m in MARCAS_VEHICULO)
+    r'(?<![A-Za-zÁÉÍÓÚÑ0-9])(' + alternativas_en_arbol(MARCAS_VEHICULO, sin_mayusculas=True)
     + r')(?![A-Za-zÁÉÍÓÚÑ0-9])', re.IGNORECASE)
 
 

@@ -165,7 +165,8 @@ from datetime import datetime
 from .errores import anotar_error
 from .codigos import _RE_REF_PEGADO, normalizar_texto, posicion_desde_descripcion, sanitizar
 ''', ["MARCAS_VEHICULO", "ALIAS_MARCA_VEHICULO", "_escrituras_por_marca",
-      "ESCRITURAS_DE_MARCA", "_RE_MARCAS_VEHICULO",
+      # Las expresiones de marcas se arman con alternativas_en_arbol(): va antes que ellas.
+      "ESCRITURAS_DE_MARCA", "alternativas_en_arbol", "_RE_MARCAS_VEHICULO",
       # El tope del caché va PRIMERO: los dos decoradores que el ajuste de más abajo
       # vuelve a poner lo nombran, y en el paquete el orden del archivo es el orden de
       # esta lista. Si queda después, el módulo no importa: NameError al arrancar.

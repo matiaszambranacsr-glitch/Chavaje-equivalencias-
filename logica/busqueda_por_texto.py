@@ -33,7 +33,7 @@ _RE_PEGADO_MAYUS = re.compile(r'(?<=[a-záéíóúñ])(?=[A-ZÁÉÍÓÚÑ])')
 # que separar por IZQUIERDA y por DERECHA a la vez, y una condición sola nunca cubre las dos.
 # El orden es de marca más larga a más corta, así "VOLKSWAGEN" gana antes de que pruebe "VW".
 _RE_MARCAS_PEGADAS = re.compile(
-    "(" + "|".join(re.escape(m) for m in sorted(MARCAS_PARA_DESPEGAR, key=len, reverse=True)) + ")"
+    "(" + alternativas_en_arbol(MARCAS_PARA_DESPEGAR) + ")"   # la más larga primero
 ) if MARCAS_PARA_DESPEGAR else None
 _RE_ESPACIOS = re.compile(r'\s{2,}')
 
@@ -50,7 +50,7 @@ _RE_ESPACIOS = re.compile(r'\s{2,}')
 _MARCAS_CORTAS_PEGADAS = sorted(
     [m for m in MARCAS_VEHICULO if 2 <= len(m) <= 3 and " " not in m], key=len, reverse=True)
 _RE_MARCA_CORTA_TRAS_NUMERO = re.compile(
-    r'(?<=\d)(' + "|".join(re.escape(m) for m in _MARCAS_CORTAS_PEGADAS)
+    r'(?<=\d)(' + alternativas_en_arbol(_MARCAS_CORTAS_PEGADAS)
     + r')(?=[^A-Za-zÁÉÍÓÚÑ]|[A-ZÁÉÍÓÚÑ][a-záéíóúñ])'
 ) if _MARCAS_CORTAS_PEGADAS else None
 

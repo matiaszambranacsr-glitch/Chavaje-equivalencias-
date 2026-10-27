@@ -2292,6 +2292,21 @@ def probar(L):
     _orden84 = _ids84("jgo descarbonizacion palio")
     esperar("lo escrito tal cual va antes que el sinónimo más corto",
             _orden84.index(_jgo) < _orden84.index(_juego) if _juego in _orden84 else None, True)
+    # 85. Las marcas como árbol (ver alternativas_en_arbol()) encuentran lo mismo que la lista
+    # de la más larga a la más corta: la más larga que calce, y si no calza, la más corta.
+    import re as _re
+    _palabras85 = ["FIAT", "FIAT PALIO", "LAND ROVER", "ROVER", "M.BENZ", "MERCEDES",
+                   "MERCEDES BENZ", "VW", "VOLKSWAGEN"]
+    _textos85 = ["Bomba FIAT PALIOS 1.3", "fiat palio fire", "Kit LAND ROVER y Rover 75",
+                 "M.BENZ 1114 - Mercedes Benz Sprinter", "VOLKSWAGENGOL vw", "MERCEDESX"]
+    for _ign in (True, False):
+        _flags = _re.IGNORECASE if _ign else 0
+        _lista = _re.compile(r"(?<![A-Z0-9])(" + "|".join(_re.escape(p) for p in sorted(
+            _palabras85, key=len, reverse=True)) + r")(?![A-Z0-9])", _flags)
+        _arbol = _re.compile(r"(?<![A-Z0-9])(" + ns["alternativas_en_arbol"](
+            _palabras85, sin_mayusculas=_ign) + r")(?![A-Z0-9])", _flags)
+        esperar(f"el árbol de marcas encuentra lo mismo (mayúsculas {'no ' if _ign else ''}importan)",
+                [_arbol.findall(t) for t in _textos85], [_lista.findall(t) for t in _textos85])
     return fallas
 
 

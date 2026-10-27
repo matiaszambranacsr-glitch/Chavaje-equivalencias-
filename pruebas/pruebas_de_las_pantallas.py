@@ -14,14 +14,48 @@ import os
 import shutil
 import sys
 import tempfile
+import threading
 import time
+from collections import Counter
 
 RAIZ = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+
+class Muestreo:
+    """Con --base, dónde se va el tiempo de cada pantalla: cada 20 ms se mira qué renglón del
+    código de la app está corriendo el guion (el más adentro de logica/ o pantallas/). La
+    medición decía «🧾 Ventas 9,0 s» y no por qué: había que perfilar a mano, y aislada tardaba
+    0,1 s. Ahora cada lenta dice su renglón."""
+    def __init__(self):
+        self.cuenta, self.prendido = Counter(), "--base" in sys.argv
+        if self.prendido:
+            threading.Thread(target=self._mirar, daemon=True).start()
+
+    def _mirar(self):
+        propio = threading.get_ident()
+        while True:
+            for hilo, marco in sys._current_frames().items():
+                if hilo == propio:
+                    continue
+                while marco and not marco.f_code.co_filename.startswith(
+                        (os.path.join(RAIZ, "logica"), os.path.join(RAIZ, "pantallas"), "<")):
+                    marco = marco.f_back
+                if marco:
+                    self.cuenta[f"{os.path.basename(marco.f_code.co_filename)}:"
+                                f"{marco.f_code.co_name}:{marco.f_lineno}"] += 1
+            time.sleep(0.02)
+
+    def donde(self):
+        """El renglón que más se vio desde la última vez, y vuelve a contar."""
+        lo_mas = self.cuenta.most_common(1)
+        self.cuenta.clear()
+        return f" [{lo_mas[0][0]}]" if lo_mas else ""
 
 
 def probar():
     from streamlit.testing.v1 import AppTest
     fallas, tiempos, abiertos = [], [], set()
+    muestreo = Muestreo()
 
     at = AppTest.from_file(os.path.join(RAIZ, "app.py"), default_timeout=300)
     at.secrets["admin_passwords"] = {"duenio": "clave-duenio-1"}
@@ -37,9 +71,10 @@ def probar():
         [b for b in at.button if "Ingresar con contraseña" in b.label][0].click().run()
 
     def mirar(quien, donde):
+        muestreo.donde()
         inicio = time.time()
         at.run()
-        tiempos.append((time.time() - inicio, f"{quien}: {donde}"))
+        tiempos.append((time.time() - inicio, f"{quien}: {donde}{muestreo.donde()}"))
         for e in at.exception:
             fallas.append(f"{quien}: {donde}: {e.value[:200]}")
         # Lo de adentro de un desplegable perezoso (on_change="rerun") no corre mientras está
