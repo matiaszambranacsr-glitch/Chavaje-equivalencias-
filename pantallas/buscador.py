@@ -2066,7 +2066,7 @@ if pagina == PAGINAS[0]:
             _dicen = " o ".join(f"«{x.lower()}»" for x in busqueda_texto_guardada.get("del_auto") or [])
             if res_texto:
                 st.success(f"Se encontraron {len(res_texto)} coincidencia(s)"
-                           + (f" que dicen {_dicen}" if _aparte else "")
+                           + (" con todo lo pedido" if _aparte else "")
                            + ". 👆 Tocá una fila para abrir ese código con todas sus equivalencias.")
                 # Lo pedido que ningún resultado dice: «necesito pastillas delanteras para un
                 # Corsa Classic 2012» trae cosas del Corsa Classic, y sin esto parecía que eran

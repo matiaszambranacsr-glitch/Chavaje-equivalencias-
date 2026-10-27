@@ -253,8 +253,30 @@ def singulares_de(palabra):
     return [x for x in candidatos if not any(y != x and y in x for y in candidatos)]
 
 
-# La cilindrada como la escriben las listas: «1.6», «1,6», «1 6» (FISPA) y «1.4/1.6».
+# La cilindrada como la escriben las listas: «1.6», «1,6», «1 6» (FISPA) y «1.4/1.6». Y las
+# válvulas: «16V», «16 V», «16VALV».
 _RE_CILINDRADA = re.compile(r"\d[.,]\d")
+_RE_VALVULAS = re.compile(r"(8|12|16|20|24|32)V")
+
+# LA MARCA DEL AUTO, COMO LA ESCRIBA LA LISTA. En la copia de la base, «VW» está en 3.518 productos
+# y «VOLKSWAGEN» en 2.476; «CHEVROLET» en 4.672, «GM» en 1.221 y «CHEV» en 719. Buscando
+# «volkswagen gol» no salía ningún «VW GOL». Las formas son las de ESCRITURAS_DE_MARCA, y para
+# buscar, además, GM es Chevrolet (Corsa, Astra, Meriva): no se toca la marca guardada, que
+# decide equivalencias.
+_SINONIMOS_DE_MARCA_PARA_BUSCAR = {"CHEVROLET": ("GM",), "GM": ("CHEVROLET", "CHEV")}
+
+
+def escrituras_de_la_marca(palabra):
+    """Las otras formas de la marca de auto `palabra`, con espacios donde la lista pone punto o
+    guion: «VW» → [VOLKSWAGEN]; «CHEVROLET» → [CHEV, GM]; «MERCEDES» → [M BENZ, …]. [] si
+    no es una marca."""
+    marcas = marcas_vehiculo_en(palabra)
+    if len(marcas) != 1:
+        return []
+    canonica = marcas[0][0]
+    formas = ({canonica} | set(ESCRITURAS_DE_MARCA.get(canonica, ()))
+              | set(_SINONIMOS_DE_MARCA_PARA_BUSCAR.get(canonica, ())))
+    return sorted({re.sub(r"[.\-/,]+", " ", f).strip() for f in formas} - {palabra})
 
 
 def formas_de_la_palabra(palabra):
@@ -264,10 +286,14 @@ def formas_de_la_palabra(palabra):
     escrita de las tres maneras: «1.6» busca también «1 6» entera, que con el punto, la coma
     y la barra como espacios encuentra «1,6», «1 6» y «1.4/1.6»."""
     formas = set(_formas_por_palabra().get(palabra, set()))
-    for singular in singulares_de(palabra):
+    # Sin el singular de una marca o un modelo: «MERCEDES» no es el plural de nada.
+    for singular in (singulares_de(palabra) if not nivel_del_auto(palabra) else ()):
         formas |= {singular} | _formas_por_palabra().get(singular, set())
     if _RE_CILINDRADA.fullmatch(palabra):
         formas.add(f"{palabra[0]} {palabra[2]}")
+    if _RE_VALVULAS.fullmatch(palabra):
+        formas.add(f"{palabra[:-1]} V")
+    formas |= set(escrituras_de_la_marca(palabra))
     formas.discard(palabra)
     # La que contiene a la palabra ya la encuentra el LIKE de la palabra: «JUNTAS» con «JUNTA».
     return sorted((f, len(f) < 5 or " " in f) for f in formas if palabra not in f)
@@ -310,17 +336,21 @@ def nombra_alguna(fila, palabras):
 
 @functools.lru_cache(maxsize=64)
 def _patron_de_palabras_del_auto(palabras):
+    # Con las otras formas de la marca: buscando «volkswagen», «VW GOL» la nombra.
+    todas = [x for p in palabras for x in [p] + escrituras_de_la_marca(p)]
     return re.compile("|".join(
         ("(?<![A-Z0-9.])" if p[:1].isdigit() else "(?<![A-Z])")
-        + (f"{p[0]}[., ]{p[2]}" if _RE_CILINDRADA.fullmatch(p) else re.escape(p))
-        + ("(?![0-9])" if p[-1:].isdigit() else "(?![A-Z])") for p in palabras))
+        + (f"{p[0]}[., ]{p[2]}" if _RE_CILINDRADA.fullmatch(p)
+           else re.escape(p).replace("\\ ", "[ .\\-]+"))
+        + ("(?![0-9])" if p[-1:].isdigit() else "(?![A-Z])") for p in todas))
 
 
 # LA CILINDRADA PEDIDA. «embrague gol 1.6» traía también el del Gol 1.0, el del 1.8 y el del 1.9
 # diesel: nombran el auto, pero declaran OTRA cilindrada. Como el año (ver sirve_para_anio()),
 # lo que no declara ninguna se deja; lo que declara otras y no la pedida va aparte. Con la copia
 # de la base: 8 de 104 en ese, 35 de 69 en «junta tapa cilindros palio 1.3» (las del 1.4).
-_RE_CILINDRADA_DECLARADA = re.compile(r"(?<![0-9.,])(\d)[., ](\d)(?![0-9])")
+# Sin una letra antes: en «AUDI A3 1.6», «3 1» no es una cilindrada.
+_RE_CILINDRADA_DECLARADA = re.compile(r"(?<![A-Z0-9.,])(\d)[., ](\d)(?![0-9])")
 
 
 def cilindradas_que_declara(fila):
@@ -328,6 +358,69 @@ def cilindradas_que_declara(fila):
     (FISPA). Entre 0.8 y 6.0: «2.30MM» de un espesor no es una cilindrada."""
     return {f"{a}.{b}" for a, b in _RE_CILINDRADA_DECLARADA.findall(
         normalizar_texto(fila.get("Descripcion") or "")) if "0.8" <= f"{a}.{b}" <= "6.0"}
+
+
+# Las válvulas, igual: «kit distribucion clio 16v» traía los del Clio 8V.
+_RE_VALVULAS_DECLARADAS = re.compile(r"(?<![0-9.,])(8|12|16|20|24|32) ?V(?:ALV[A-Z]*)?(?![A-Z0-9])")
+
+
+def valvulas_que_declara(fila):
+    """{"16V", "8V"}: las válvulas que dice la descripción («16V», «16 V», «16VALV»)."""
+    return {f"{n}V" for n in _RE_VALVULAS_DECLARADAS.findall(
+        normalizar_texto(fila.get("Descripcion") or ""))}
+
+
+# LA PIEZA PEDIDA, LO MISMO. «filtro de aire chevrolet corsa» traía, entre los que dicen Corsa,
+# filtros de combustible, juegos de juntas del carburador y 95 de IMPERIAL que dicen solo
+# «CHEVROLET CORSA 1.6»: algo del Corsa, pero no se sabe qué. La pieza es la clave de rubro que
+# se lee en lo pedido (ver clasificar_repuesto()): «FILTRO DE AIRE». Lo que no la dice va
+# aparte, como lo que no dice el auto; con abreviaturas y singular (ver dice_la_palabra()).
+_PALABRAS_DE_UNION = {"DE", "DEL", "LA", "EL", "LOS", "LAS", "PARA", "P", "C", "CON", "Y"}
+
+
+def _sin_uniones(texto):
+    return " ".join(w for w in _normalizar_desc(texto).split() if w not in _PALABRAS_DE_UNION)
+
+
+@functools.lru_cache(maxsize=1)
+def _claves_de_pieza():
+    """{clave sin «de» ni «para»: la clave}, de la más larga a la más corta."""
+    claves = {}
+    for lista in FAMILIAS_REPUESTO.values():
+        for clave in lista:
+            claves.setdefault(_sin_uniones(clave), clave)
+    return sorted(claves.items(), key=lambda x: -len(x[0]))
+
+
+def pieza_que_nombra(texto):
+    """La pieza que nombra lo pedido, con las claves de rubro (ver clasificar_repuesto()): la
+    que aparece primero y, en el mismo lugar, la más larga. Sin contar «de» ni «para»: «filtro
+    aire chevrolet corsa» es «FILTRO DE AIRE», no solo «FILTRO» (y entonces los filtros de
+    aceite pasaban). "" si no se reconoce ninguna."""
+    limpio = f" {_sin_uniones(texto or '')} "
+    mejor = None
+    for sin, clave in _claves_de_pieza():
+        lugar = limpio.find(f" {sin} ")
+        if lugar >= 0 and (mejor is None or lugar < mejor[0]):
+            mejor = (lugar, clave)
+    return mejor[1] if mejor else ""
+
+
+def palabras_de_la_pieza(texto):
+    """Las palabras de la pieza que nombra lo pedido: «filtro de aire chevrolet corsa» →
+    [FILTRO, AIRE]. [] si no se reconoce ninguna."""
+    return [w for w in _sin_uniones(pieza_que_nombra(texto)).split() if len(w) >= 3]
+
+
+def dice_la_palabra(fila, palabra):
+    """¿La fila dice `palabra`, como la encuentra la búsqueda: adentro de otra («JUNTA» en
+    JUNTAS), abreviada (JTA) o en singular (CILINDRO por CILINDROS)?"""
+    crudo = normalizar_texto(f"{fila.get('Descripcion') or ''} {fila.get('Codigo') or ''}")
+    if palabra in crudo:
+        return True
+    sin_puntos = " " + re.sub(r"[^A-Z0-9]+", " ", crudo) + " "
+    return any((f" {forma} " in sin_puntos) if entera else (forma in crudo)
+               for forma, entera in formas_de_la_palabra(palabra))
 
 
 class ResultadosDeTexto(list):
@@ -520,29 +613,45 @@ def buscar_por_texto(texto, aflojar=True):
     filas.sort(key=lambda f: (-f.get("_coincidencias", 0), -_enteras(f), -f.get("_tal_cual", 0),
                               f.get("_largo") or 0))
     # Lo que no nombra el auto pedido, aparte (ver nivel_del_auto()).
-    del_auto, aparte, motivos = palabras_del_auto(palabras), [], []
+    del_auto, aparte, no_dicen, motivos = palabras_del_auto(palabras), [], [], []
     if del_auto:
         nombran = [nombra_alguna(f, del_auto) for f in filas]
         if any(nombran) and not all(nombran):
             aparte = [f for f, n in zip(filas, nombran) if not n]
             filas = [f for f, n in zip(filas, nombran) if n]
-            motivos.append("no dicen " + " ni ".join(f"«{p.lower()}»" for p in del_auto))
-    # Y lo que declara otra cilindrada (ver cilindradas_que_declara()).
-    pedida = next((f"{p[0]}.{p[2]}" for p in palabras if _RE_CILINDRADA.fullmatch(p)), None)
-    # Si lo único del auto era la cilindrada, la regla de arriba ya apartó lo que no la dice.
-    if pedida and not any(_RE_CILINDRADA.fullmatch(p) for p in del_auto):
-        otra = [bool(d) and pedida not in d for d in map(cilindradas_que_declara, filas)]
+            no_dicen.append(" ni ".join(f"«{p.lower()}»" for p in del_auto))
+    # Lo que no nombra la pieza pedida (ver palabras_de_la_pieza()).
+    de_la_pieza = palabras_de_la_pieza(texto)
+    if de_la_pieza:
+        la_dicen = [all(dice_la_palabra(f, p) for p in de_la_pieza) for f in filas]
+        if any(la_dicen) and not all(la_dicen):
+            aparte += [f for f, d in zip(filas, la_dicen) if not d]
+            filas = [f for f, d in zip(filas, la_dicen) if d]
+            no_dicen.append(f"«{pieza_que_nombra(texto).lower()}»")
+    # Y lo que declara otra cilindrada u otras válvulas (ver cilindradas_que_declara()).
+    for patron, declara, que, como in (
+            (_RE_CILINDRADA, cilindradas_que_declara, "otra cilindrada",
+             lambda p: f"{p[0]}.{p[2]}"),
+            (_RE_VALVULAS, valvulas_que_declara, "otras válvulas", lambda p: p)):
+        pedida = next((como(p) for p in palabras if patron.fullmatch(p)), None)
+        # Si lo único del auto era esto, la regla de arriba ya apartó lo que no lo dice.
+        if not pedida or any(patron.fullmatch(p) for p in del_auto):
+            continue
+        otra = [bool(d) and pedida not in d for d in map(declara, filas)]
         if any(otra) and not all(otra):
             aparte += [f for f, o in zip(filas, otra) if o]
             filas = [f for f, o in zip(filas, otra) if not o]
-            motivos.append(f"son de otra cilindrada, no {pedida}")
+            motivos.append(f"son de {que}, no {pedida}")
     filas, aparte = filas[:200], aparte[:200]
     for f in filas + aparte:
         f.pop("_coincidencias", None)
         f.pop("_tal_cual", None)
         f.pop("_largo", None)
-    return ResultadosDeTexto(filas, aparte, del_auto if motivos and del_auto and aparte else (),
-                             " o ".join(motivos))
+    # «no dicen «gol» o «embrague», o son de otra cilindrada, no 1.6»
+    if no_dicen:
+        motivos.insert(0, "no dicen " + " o ".join(no_dicen))
+    return ResultadosDeTexto(filas, aparte, del_auto if no_dicen and del_auto and aparte else (),
+                             ", o ".join(motivos))
 
 
 # Las palabras que no buscan nada: «necesito pastillas delanteras para un Corsa Classic

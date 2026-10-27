@@ -184,7 +184,7 @@ def probar():
     at.text_input(key="texto_input").set_value("bomba de agua k4m")
     [b for b in at.button if "Buscar por descripción" in b.label][0].click().run()
     _aparte = [e for e in at.expander if "que no dicen «k4m»" in e.label]
-    if (not any("que dicen «k4m»" in x.value for x in at.success) or len(_aparte) != 1
+    if (not any("con todo lo pedido" in x.value for x in at.success) or len(_aparte) != 1
             or any("BAPAL" in str(d.value) for d in at.dataframe)):
         fallas.append(f"por descripción, lo que no nombra el auto: {[e.label for e in _aparte]}")
     at.session_state["exp_texto_aparte"] = True

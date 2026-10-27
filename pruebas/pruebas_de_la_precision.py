@@ -2375,6 +2375,25 @@ def probar(L):
     esperar("«embrague gol 1.6»: el 1.0 aparte, el que no dice cilindrada no",
             ({_e16, _esin} <= {f["ID"] for f in _r88}, _e10 in {f["ID"] for f in _r88.aparte},
              "otra cilindrada" in _r88.por_que_aparte), (True, True, True))
+    # 89. LA MARCA COMO LA ESCRIBA LA LISTA (VW es VOLKSWAGEN; para buscar, GM es Chevrolet), LA
+    # PIEZA PEDIDA (lo que no la dice va aparte) Y LAS VÁLVULAS (las otras, aparte).
+    m11 = marca("ONCE FILTROS")
+    _fvw = producto("FA89A", "FILTRO AIRE VW GOL", m11)
+    _fvolks = producto("FA89B", "FILTRO DE AIRE VOLKSWAGEN GOL", m11)
+    _jgo = producto("JC89", "VW GOL 1.6 NAFTA MULTIPUNTO", m11)     # como IMPERIAL: sin pieza
+    _fgm = producto("FA89C", "FILTRO AIRE GM CORSA", m11)
+    _k8 = producto("KD89A", "KIT DISTRIBUCION VW GOL 8V", m11)
+    _k16 = producto("KD89B", "KIT DISTRIBUCION VW GOL 16 V", m11)
+    conn.commit()
+    _r89 = ns["buscar_por_texto"]("filtro aire volkswagen gol")
+    esperar("«volkswagen» encuentra «VW»; lo que no dice la pieza, aparte",
+            ({_fvw, _fvolks} <= {f["ID"] for f in ns["buscar_por_texto"]("volkswagen gol")},
+             _jgo in {f["ID"] for f in _r89.aparte}), (True, True))
+    esperar("«chevrolet» encuentra «GM»",
+            _fgm in {f["ID"] for f in ns["buscar_por_texto"]("chevrolet corsa")}, True)
+    _r89b = ns["buscar_por_texto"]("kit distribucion gol 16v")
+    esperar("«16v»: el «16 V» sí, el 8V aparte",
+            (_k16 in {f["ID"] for f in _r89b}, _k8 in {f["ID"] for f in _r89b.aparte}), (True, True))
     return fallas
 
 

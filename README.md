@@ -6677,6 +6677,17 @@ Lo pidió el dueño: «seguí mejorando esas búsquedas».
 
 Las 794 consultas con las palabras exactas quedan igual (263 / 499 / 648 / 22).
 
+### Tercera vuelta: la marca como la escriba la lista, la pieza pedida y las válvulas
+
+Lo pidió el dueño: «seguí».
+
+- **La marca del auto, como la escriba la lista** (`escrituras_de_la_marca()`): en la copia de la base «VW» está en 3.518 productos y «VOLKSWAGEN» en 2.476; «CHEVROLET» en 4.672, «GM» en 1.221 y «CHEV» en 719. Buscando «volkswagen gol» no salía ningún «VW GOL». Ahora cada marca busca sus otras formas (las de `ESCRITURAS_DE_MARCA`: «M.BENZ» es Mercedes, «REN» Renault, «PEU» Peugeot) y, para buscar, GM es Chevrolet. La marca guardada no se toca: decide equivalencias.
+- **La pieza pedida manda, como el auto** (`pieza_que_nombra()`): «filtro de aire chevrolet corsa» traía filtros de combustible, juegos de juntas del carburador y 95 de IMPERIAL que dicen solo «CHEVROLET CORSA 1.6». Lo que no dice la pieza (con sus abreviaturas y en singular, ver `dice_la_palabra()`) va aparte. La pieza se reconoce sin los «de» y «para»: «filtro aire» es «FILTRO DE AIRE» y no solo «FILTRO», que dejaba pasar los de aceite. Con «gm» y con «chevrolet» la búsqueda ahora da lo mismo (antes 7 y 102).
+- **Las válvulas, como la cilindrada**: «16v» busca también «16 V», y lo que declara otras válvulas va aparte («kit distribucion clio 16v» sin los del Clio 8V).
+- El desplegable lo dice todo junto: «🔧 Otros N que no dicen «clio» o «kit de distribucion», o son de otras válvulas, no 16V», y arriba «con todo lo pedido».
+
+Las 794 consultas de `medir.py texto` quedan casi igual (262 / 499 / 648 / 22; con la pieza en plural, 240 / 470 / 632 / 29).
+
 ## 🔁 Otra versión de la misma lista, y las búsquedas largas más rápidas
 
 Lo pidió el dueño: «mejorá más todavía todo». Medido con `python pruebas/medir.py --base copia busquedas` (1.500 búsquedas de la copia de la base).
