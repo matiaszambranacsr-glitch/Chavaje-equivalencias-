@@ -3253,6 +3253,9 @@ def _palabras_sin_el_codigo(desc, cod):
 _RE_NUMERO_DE_FABRICA = re.compile(r"(?<!\d)\d{8,}(?!\d)")
 
 
+# Se recuerda, como pieza_para_el_abanico(): depende solo de lo que recibe, y el camino entre
+# dos productos la pide por cada paso (5.018 veces buscando LECS033LUCAS, 0,6 s).
+@functools.lru_cache(maxsize=50000)
 def otra_pieza_de_la_misma_lista(marca, cod_a, desc_a, cod_b, desc_b):
     """Si dos productos de UNA MISMA lista (no de fábrica) son dos piezas, el motivo; si no, "".
 
@@ -3338,6 +3341,10 @@ def _descripciones_mellizas(desc_a, cod_a, desc_b, cod_b):
     return len(pa & pb) / len(pa | pb) >= 0.75
 
 
+# Se recuerda: es una cuenta fija de (código, descripción), y buscando LECS033LUCAS se pedía
+# 5.516 veces —una por paso del camino entre dos productos— sobre descripciones de LUCAS con
+# veinte autos: 2,4 millones de sanitizar() y 1,1 de los 2,5 s de la búsqueda.
+@functools.lru_cache(maxsize=50000)     # el mismo tope que MAXIMO_DESCRIPCIONES_RECORDADAS
 def pieza_para_el_abanico(codigo, descripcion):
     """Qué cuenta como UNA opción del abanico. Las variantes de un código son una sola
     (codigo_base_sin_variante(): «TC-882-MG 1M» y «TC-882-20» son la misma junta), y también
@@ -3348,8 +3355,9 @@ def pieza_para_el_abanico(codigo, descripcion):
     número del código."""
     if _submarca_del_codigo(codigo):
         limpio = sanitizar(codigo)
-        sin_codigo = [w for w in normalizar_texto(descripcion or "").split()
-                      if not (sanitizar(w) and len(sanitizar(w)) >= 3 and sanitizar(w) in limpio)]
+        sin_codigo = [w for w, sw in ((w, sanitizar(w))
+                                      for w in normalizar_texto(descripcion or "").split())
+                      if not (sw and len(sw) >= 3 and sw in limpio)]
         if sin_codigo:
             return "MELLIZOS:" + " ".join(sin_codigo)
     return codigo_base_sin_variante(codigo) or sanitizar(codigo or "")

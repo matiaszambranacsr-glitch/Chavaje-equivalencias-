@@ -6656,6 +6656,13 @@ Las listas abrevian y el mostrador escribe la palabra entera: buscando «juego j
 
 Medido con `python pruebas/medir.py --base copia texto` (794 búsquedas como se escriben en el mostrador): primero 259 → 263, entre los 5 primeros 488 → 499, entre los 20 641 → 648, sin aparecer 23 → 22; el promedio de 54 a 69 ms. «junta tapa corsa» encuentra las 25 «JTA … TAPA … CORSA», «bomba nafta» las 27 «BBA … NAFTA», «jgo juntas ford falcon» las 22. Los REPLACE de la palabra entera corren solo en las filas que ya tienen esas letras: todos juntos subían una búsqueda a 760 ms. `--comparar` ahora también dice, para `texto`, cuántas suben o bajan de puesto.
 
+## 🔁 Otra versión de la misma lista, y las búsquedas largas más rápidas
+
+Lo pidió el dueño: «mejorá más todavía todo». Medido con `python pruebas/medir.py --base copia busquedas` (1.500 búsquedas de la copia de la base).
+
+- **La misma pieza en otra versión ya no sale como equivalencia mala.** ILLINOIS vende la JVS-175-23 a \$11.900 y la JVS-175-30 a \$7.070, con la misma descripción: la misma junta en otro material. La ficha decía «es una fila de la lista leída dos veces» y el buscador la mostraba 🔴 entre las equivalencias. Ahora, si tienen otro precio, la ficha dice «otra versión de la misma pieza» y el buscador la pone aparte, como variante: «🔁 otra versión de la misma lista: mismo nombre, otro código y otro precio». Eran 79 de los 106 rojos que no estaban marcados como variante. Con el mismo precio sigue siendo una fila leída dos veces, y sigue roja. Lo decidido no cambia (`medir.py fichas`) y la revisión dice «se puede publicar».
+- **Las búsquedas con muchos resultados, más rápidas.** Buscando LECS033LUCAS (183 resultados) se armaba 5.516 veces la misma cuenta sobre descripciones de LUCAS con veinte autos —2,4 millones de pasadas—, una por paso del camino entre dos productos. Ahora se recuerda (`pieza_para_el_abanico()`, `otra_pieza_de_la_misma_lista()`): de 1,16 a 0,51 s, con los mismos resultados.
+
 ## ⏱️ Las pantallas, medidas con la base real
 
 Lo pidió el dueño: «mejorá absolutamente todo». Primero se midió dónde la app es lenta de verdad: la prueba de pantallas corría sobre una base chica, donde todas tardan poco. Ahora `python pruebas/pruebas_de_las_pantallas.py --base copia.db` recorre las 89 pantallas con una copia de la base real (sin la tarea de fondo, que ensucia los tiempos) y dice las 10 más lentas.

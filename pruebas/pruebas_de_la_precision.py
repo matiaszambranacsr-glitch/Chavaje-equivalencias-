@@ -2307,6 +2307,24 @@ def probar(L):
             _palabras85, sin_mayusculas=_ign) + r")(?![A-Z0-9])", _flags)
         esperar(f"el árbol de marcas encuentra lo mismo (mayúsculas {'no ' if _ign else ''}importan)",
                 [_arbol.findall(t) for t in _textos85], [_lista.findall(t) for t in _textos85])
+    # 86. OTRA VERSIÓN DE LA MISMA LISTA (ver VETO_OTRA_VERSION): la misma descripción con otro
+    # código y otro precio es una variante en el buscador; con el mismo precio, una fila leída
+    # dos veces, que sigue roja.
+    m8, m8o = marca("OCHO JUNTAS"), marca("OEM OCHO", "OEM")
+    _v1 = producto("JV-175-23", "JUNTA TAPA DE VALVULAS PERKINS 6-305", m8, precio=11900)
+    _v2 = producto("JV-175-30", "JUNTA TAPA DE VALVULAS PERKINS 6-305", m8, precio=7070)
+    _v3 = producto("JV-175-31", "JUNTA TAPA DE VALVULAS PERKINS 6-305", m8, precio=11900)
+    _n8 = producto("0490760", "JUNTA TAPA DE VALVULAS", m8o)
+    for _v in (_v1, _v2, _v3):
+        vincular(_v, _n8, "OCHO JUNTAS · 27/10")
+    conn.commit()
+    _res86 = {f["Codigo"]: f for f in ns["buscar_con_variantes_del_cero"]("JV17523")[0]}
+
+    def _version86(codigo):
+        f = _res86.get(codigo, {})
+        return bool(f.get("_complementario")), "🔁 otra versión" in (f.get("Cadena") or "")
+    esperar("otro código y otro precio: otra versión, aparte",
+            (_version86("JV-175-30"), _version86("JV-175-31")), ((True, True), (False, False)))
     return fallas
 
 

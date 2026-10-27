@@ -228,6 +228,10 @@ def precargar_para_evidencia(ids, medidas=None):
         memoria[("autos", p["id"], p.get("codigo_clean"))] = frozenset(autos)
 
 
+# El comienzo del veto de dos versiones de una misma lista: el buscador lo reconoce por esto.
+VETO_OTRA_VERSION = "otra versión de la misma pieza"
+
+
 def evidencia_cruzada(id_a, id_b, cuenta_palabras=None, total_descripciones=None,
                       rubros_oem=None):
     """Corre TODOS los métodos sobre un mismo par y cuenta cuántos coinciden.
@@ -280,8 +284,17 @@ def evidencia_cruzada(id_a, id_b, cuenta_palabras=None, total_descripciones=None
               # Salvo dos bujías con su código de verdad: TARANTO describe a muchas «Bujias
               # NGK Japon», y el código dice cuál es cada una (ver «LA BUJÍA POR SU CÓDIGO»).
               and not (medidas_de_la_bujia(pa) and medidas_de_la_bujia(pb))):
-            vetos.append(f"🏷️ los dos son de {pa['marca']} y tienen la misma descripción: es "
-                          "una fila de la lista leída dos veces, no dos repuestos equivalentes")
+            # Con otro precio no es una fila leída dos veces: son dos versiones que la lista
+            # vende, con el mismo nombre —ILLINOIS JVS-175-23 a $11.900 y JVS-175-30 a $7.070,
+            # la misma junta en otro material—. Sigue sin ser una equivalencia, pero el
+            # buscador la muestra como variante (ver anotar_el_estado()).
+            if (pa.get("precio") and pb.get("precio")
+                    and abs(pa["precio"] - pb["precio"]) > 0.005 * max(pa["precio"], pb["precio"])):
+                vetos.append(f"🏷️ {VETO_OTRA_VERSION} de {pa['marca']}: misma descripción, "
+                             "otro código y otro precio")
+            else:
+                vetos.append(f"🏷️ los dos son de {pa['marca']} y tienen la misma descripción: es "
+                             "una fila de la lista leída dos veces, no dos repuestos equivalentes")
         elif (pa.get("tipo") or "").upper() != "OEM":
             # Y si no, dos productos de la lista son dos piezas: ver
             # otra_pieza_de_la_misma_lista(). La cadena los unía por un tercero.

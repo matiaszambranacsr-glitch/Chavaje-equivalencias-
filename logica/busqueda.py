@@ -1055,6 +1055,16 @@ def anotar_el_estado(res, origenes, quitar_lo_dudoso=False):
                                f"{_contra[0].split(':', 2)[-1].strip()}")
                 f["_complementario"] = True
                 f["_otro_espesor"] = True
+            # OTRA VERSIÓN DE LA MISMA LISTA: el mismo nombre, otro código y otro precio
+            # (ILLINOIS JVS-175-23 y JVS-175-30, la misma junta en otro material). No es una
+            # equivalencia, pero en el mostrador es la otra opción: eran 90 de los 106 rojos
+            # sin marcar en 1.500 búsquedas de la copia de la base.
+            elif (ficha["estado"].startswith("🔴") and _contra
+                    and all(VETO_OTRA_VERSION in x for x in _contra)):
+                f["Cadena"] = (f"{f.get('Cadena') or ''} · 🔁 otra versión de la misma lista: "
+                               "mismo nombre, otro código y otro precio")
+                f["_complementario"] = True
+                f["_otra_version"] = True
     if quitar_lo_dudoso:
         res = [f for f in res if not f.get("_por_otra_pieza")]
     return res
