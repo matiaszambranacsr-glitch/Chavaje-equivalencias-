@@ -873,6 +873,31 @@ def _evaluar_la_cadena(pasos):
     return ("🟠 CANDIDATA" if sin_fuente else "🟡 PROBABLE" if falta else "✅ VERIFICADA"), falta
 
 
+# Hasta cuántos productos puede citar un número de fábrica para que dos listas que lo citan
+# queden verificadas por él. Ver «EL MISMO NÚMERO DE FÁBRICA, CITADO POR DOS LISTAS».
+CITAS_DE_UN_NUMERO_QUE_VERIFICA = 6
+
+
+def _numero_de_fabrica_que_verifica(pid):
+    """El código del producto `pid` si es un número de fábrica que alcanza para verificar a los
+    dos que lo citan: de fábrica, de los que hoy se tomarían como tal, no aprobado como universal
+    y citado por pocos productos. "" si no."""
+    def calcular():
+        c.execute("""SELECT p.codigo_raw, m.tipo,
+                            (SELECT COUNT(*) FROM equivalencias e
+                              WHERE e.producto_a_id = p.id OR e.producto_b_id = p.id) AS citas
+                     FROM productos p JOIN marcas m ON m.id = p.marca_id WHERE p.id = ?""",
+                  (pid,))
+        fila = c.fetchone()
+        if (not fila or (fila["tipo"] or "").upper() != "OEM"
+                or fila["citas"] > CITAS_DE_UN_NUMERO_QUE_VERIFICA
+                or codigo_que_hoy_no_se_tomaria(fila["codigo_raw"])
+                or pid in puentes_aprobados_ids()):
+            return ""
+        return fila["codigo_raw"]
+    return _recordado(("numero_que_verifica", pid), calcular)
+
+
 def ficha_de_prueba(id_a, id_b, tolerancia_pct=3, liviana=False):
     """Todo lo que sostiene —o no— que A y B son la misma pieza, y el estado que sale de eso.
 
@@ -975,6 +1000,26 @@ def ficha_de_prueba(id_a, id_b, tolerancia_pct=3, liviana=False):
             estado = "🟠 CANDIDATA"
     else:
         ficha["por_otra_pieza"] = ""
+    # EL MISMO NÚMERO DE FÁBRICA, CITADO POR DOS LISTAS. Un camino de dos pasos por un código de
+    # fábrica es la forma más común de una equivalencia entre proveedores: cada lista declara su
+    # número original, y es el mismo. Con las dos mitades declaradas por una fuente, sólidas, y
+    # el número citado por pocos productos, es la misma pieza: dos fuentes independientes que
+    # dicen lo mismo. Quedaba «🟡 probable, llega por 1 código en el medio» (523 de 5.302
+    # resultados en 1.500 búsquedas de la copia de la base). Lo que la contradiga la tumba igual
+    # más abajo. Un número citado por muchos (una sonda universal) o aprobado como universal no
+    # alcanza: ahí cada lista nombra otra pieza (ver aprobar_puente()).
+    ficha["por_numero_de_fabrica"] = ""
+    # «o comprobarla con la pieza en la mano» es otra forma de llegar, no algo que falte.
+    if (estado == "🟡 PROBABLE" and len(pasos) == 2 and falta
+            and falta[0].startswith("una fuente que nombre los dos códigos juntos")
+            and all(x.startswith("o comprobarla") for x in falta[1:])
+            and (pa.get("marca") or "") != (pb.get("marca") or "")):
+        _medio = (({pasos[0]["_a"], pasos[0]["_b"]} & {pasos[1]["_a"], pasos[1]["_b"]})
+                  - {id_a, id_b})
+        _numero = _numero_de_fabrica_que_verifica(next(iter(_medio))) if len(_medio) == 1 else ""
+        if _numero:
+            estado, falta = "✅ VERIFICADA", []
+            ficha["por_numero_de_fabrica"] = _numero
     ficha["pasos"] = pasos
     ficha["numeros_en_comun"] = [] if liviana else numeros_en_comun(id_a, id_b)
     ficha["fuentes"] = sorted({_fuente_del_paso(p["_lote"], p["_verificada"])

@@ -24,7 +24,7 @@ Todo —pantallas, nombres, comentarios, mensajes de commit— va en castellano 
   por prueba). Es lo mismo que corre GitHub.
 - `python auditar.py` solo, cuando se toca código de pantallas (tiene que dar 0 / 0 / 0).
 - `python pruebas/pruebas_de_compatibilidad.py --base <copia de la base real> --contra origin/main`.
-- Medir antes y después de tocar reglas: `python pruebas/medir.py --base <copia> busquedas --guardar antes.json`, y después `--comparar antes.json` (también `cola`). Salida de pocos renglones; no escribir scripts sueltos para eso.
+- Medir antes y después de tocar reglas: `python pruebas/medir.py --base <copia> busquedas --guardar antes.json`, y después `--comparar antes.json` (también `cola`, `fichas` y `texto`). Salida de pocos renglones; no escribir scripts sueltos para eso.
 - Probar en el navegador: Chromium y Playwright ya están instalados (`/opt/pw-browsers/chromium`).
 
 ## Reglas que el auditor hace cumplir

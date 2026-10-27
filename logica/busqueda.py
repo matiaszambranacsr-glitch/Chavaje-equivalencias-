@@ -1046,6 +1046,19 @@ def anotar_el_estado(res, origenes, quitar_lo_dudoso=False):
                 f["Cadena"] = f"{f.get('Cadena') or ''} · ⚠️ {ficha['por_otra_pieza']}"
                 f["_complementario"] = True
                 f["_por_otra_pieza"] = True
+            # OTRO ESPESOR DE LA MISMA JUNTA. La junta de tapa de 1,20 y la de 1,40 del mismo motor
+            # se encadenan, y lo único que las separa es el espesor: no es «🔴 no es lo mismo» sino
+            # otra variante, que se elige midiendo. Contaba como equivalencia «a revisar»: en
+            # 1.500 búsquedas de la copia de la base eran 201 de los 321 rojos que no estaban
+            # marcados. Si hay otra contradicción, sigue siendo rojo.
+            _contra = ficha.get("contradicciones") or []
+            if (ficha["estado"].startswith("🔴") and _contra
+                    and all(x.startswith(("📐 NO coinciden: espesor", "📐 NO coinciden: muescas"))
+                            for x in _contra)):
+                f["Cadena"] = (f"{f.get('Cadena') or ''} · 📏 otro espesor: "
+                               f"{_contra[0].split(':', 2)[-1].strip()}")
+                f["_complementario"] = True
+                f["_otro_espesor"] = True
     if quitar_lo_dudoso:
         res = [f for f in res if not f.get("_por_otra_pieza")]
     return res

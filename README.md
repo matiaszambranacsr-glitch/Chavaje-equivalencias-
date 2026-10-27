@@ -6636,6 +6636,23 @@ Lo pidió el dueño: «seguí mejorando la redacción de los textos, ponelos tod
 
 Probado en un navegador de verdad, en inglés y en castellano: las listas dicen «Elegí una opción», las tablas «Pantalla completa», «Buscar en la tabla» y «Bajar la tabla», el cartelito de la barra de los gráficos «Ver los números», al escribir «Enter para confirmar», y el calendario de 💵 Caja «octubre 2026» con «D L M M J V S». Los gráficos, «23/10» y «$120.000». En cada pantalla queda un solo «ℹ️ Cómo funciona» arriba (en Depósito: la sección, «⏳ Para buscar» y cómo funciona la cola), y las ayudas de una parte siguen en su parte. `pruebas_de_la_sesion.py` (2d) lo controla: rompiéndolo a propósito, avisa.
 
+## ✅ Verificada por el número de fábrica, y los espesores aparte
+
+Lo pidió el dueño: «mejorá más la equivalencia y la búsqueda de productos». Medido sobre la copia de la base con `pruebas/medir.py`.
+
+- **Dos listas que citan el mismo número de fábrica quedan ✅ verificadas.** Antes, todo lo que llegaba por un código en el medio quedaba como mucho 🟡 «probable», aunque las dos listas declararan el mismo número original. Ahora queda ✅ si se cumple todo esto:
+  - las dos mitades las declara una fuente (la lista o el catálogo);
+  - las dos son sólidas;
+  - son listas distintas;
+  - el número lo citan 6 productos o menos y no está aprobado como universal.
+  Lo que contradiga (medidas, rubro, otra pieza) la tumba igual. En 1.500 búsquedas, 12 resultados pasan de 🟡 a ✅. De los 1.749 pares que rechazaste, mirados como si nadie los hubiera decidido, ninguno queda ✅ ni 🟡.
+- **Otro espesor de la misma junta es una variante, no «🔴 no es lo mismo».** La junta de tapa de 1,20 y la de 1,40 del mismo motor se encadenan, y lo único que las separa es el espesor. Ahora dicen «📏 otro espesor: 1.4 vs 1.5» y no cuentan como equivalencia «a revisar» en el título. En las 1.500 búsquedas son 215. Si hay otra contradicción, sigue en rojo.
+- **`medir.py` mide dos cosas más:**
+  - `fichas`: el estado de lo que aprobaste y rechazaste, como si nadie lo hubiera decidido. Es la prueba de que una regla nueva no da por buena una equivalencia que rechazaste.
+  - `texto`: la búsqueda por descripción como se escribe en el mostrador. Hoy, de 794 consultas, el producto sale primero en 259, entre los 5 primeros en 488 y entre los 20 primeros en 641. Lo que no aparece son consultas ambiguas, como «juego retén válvulas», que la tienen decenas de productos.
+
+`pruebas_de_la_precision.py` (83) lo controla; rompiendo cada regla a propósito, avisa.
+
 ## 🔎 Cuántas de cada clase, y medir sin escribir nada
 
 - **El título de cada búsqueda dice cuántas de cada clase:** «🔎 BKR6E — 72 equivalencias (65 🟢 · 3 🟡 · 4 a revisar)». Antes decía «72 equivalencias» y contaba igual lo confirmado que lo que hay que revisar. En 1.500 búsquedas al azar de la copia de la base, de 5.302 resultados la mayoría no está confirmada.

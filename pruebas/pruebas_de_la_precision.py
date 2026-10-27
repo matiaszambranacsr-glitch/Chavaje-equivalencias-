@@ -134,12 +134,13 @@ def probar(L):
     esperar("la próxima comprobación es medir lo que falta", ficha["proxima_comprobacion"],
             "medí ancho en las dos")
 
-    # Sin el vínculo del barrido, llega por el número de fábrica: probable.
+    # Sin el vínculo del barrido, llega por el número de fábrica que citan las dos listas:
+    # verificada (ver «EL MISMO NÚMERO DE FÁBRICA, CITADO POR DOS LISTAS»; era «probable»).
     c.execute("DELETE FROM equivalencias WHERE lote LIKE 'BARRIDO%'")
     conn.commit()
     ficha = ns["ficha_de_prueba"](ret_f, ret_i)
-    esperar("por el número de fábrica, con las dos mitades con fuente: probable",
-            ficha["estado"], "🟡 PROBABLE")
+    esperar("por el número de fábrica que citan las dos listas: verificada",
+            (ficha["estado"], ficha["por_numero_de_fabrica"]), ("✅ VERIFICADA", "1234567890"))
     # Directo y declarado por una lista: verificada.
     vincular(ret_f, ret_i, "FISPA · otra.xlsx · 02/10/2026 10:00:00")
     conn.commit()
@@ -2226,6 +2227,36 @@ def probar(L):
                        "AND producto_b_id = ?", (_bk6, _fr6)).fetchone()[0],
              _par(_bk5, _bk6) in _de_bujias(), ns["bujias_automaticas_prendido"]()),
             (True, 1, "Chavo", False, False))
+    # 83. EL MISMO NÚMERO DE FÁBRICA, CITADO POR DOS LISTAS (ver ficha_de_prueba()): dos
+    # listas que declaran el mismo número original, con las dos mitades sólidas, quedan
+    # verificadas; si el número lo citan muchos o es universal, no. Y OTRO ESPESOR DE LA MISMA
+    # JUNTA, en el buscador, es una variante y no cuenta como equivalencia (anotar_el_estado()).
+    m5a, m5b, m5o = marca("CINCO A"), marca("CINCO B"), marca("OEM CINCO", "OEM")
+    _ra = producto("RA55", "RETEN DE CIGUENAL FIAT 128", m5a)
+    _rb = producto("RB55", "RETEN CIGUENAL FIAT 128 1.1", m5b)
+    _num = producto("4402551", "RETEN DE CIGUENAL", m5o)
+    vincular(_ra, _num, "CINCO A · 27/10")
+    vincular(_rb, _num, "CINCO B · 27/10")
+    conn.commit()
+    _f83 = ns["ficha_de_prueba"](_ra, _rb)
+    esperar("dos listas con el mismo número: verificada, y dice cuál",
+            (_f83["estado"], _f83["por_numero_de_fabrica"]), ("✅ VERIFICADA", "4402551"))
+    for _i in range(5):
+        vincular(producto(f"RX{_i}", "RETEN DE CIGUENAL", m5a), _num, "CINCO A · 27/10")
+    conn.commit()
+    esperar("si el número lo citan muchos, no alcanza",
+            ns["ficha_de_prueba"](_ra, _rb)["estado"], "🟡 PROBABLE")
+    _ja = producto("JT120", "JUNTA TAPA DE CILINDROS FIAT 128 1.20MM", m5a, espesor=1.2)
+    _jb = producto("JT140", "JUNTA TAPA DE CILINDROS FIAT 128 1.40MM", m5b, espesor=1.4)
+    _nj = producto("4401212", "JUNTA TAPA DE CILINDROS", m5o)
+    vincular(_ja, _nj, "CINCO A · 27/10")
+    vincular(_jb, _nj, "CINCO B · 27/10")
+    conn.commit()
+    _res83 = {f["Codigo"]: f for f in ns["buscar_con_variantes_del_cero"]("JT120")[0]}
+    esperar("otro espesor: una variante, dicha, que no cuenta",
+            (bool(_res83.get("JT140", {}).get("_complementario")),
+             "📏 otro espesor" in _res83.get("JT140", {}).get("Cadena", "")),
+            (True, True))
     return fallas
 
 
