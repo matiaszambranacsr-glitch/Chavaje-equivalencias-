@@ -2400,6 +2400,9 @@ def probar(L):
     _pal = producto("PA90", "PALIER LADO IZQUIERDO SURAN", m12)
     _bc = producto("BC90", "BOMBA DE COMBUSTIBLE SURAN", m12)
     conn.commit()
+    esperar("el aviso de lo que no aparece entiende los sinónimos: «semieje» es PALIER",
+            ns["palabras_que_no_aparecen"]("semieje suran", ns["buscar_por_texto"]("semieje suran")),
+            [])
     esperar("«semieje» encuentra el PALIER y «nafta» la de COMBUSTIBLE, primeros",
             ([f["ID"] for f in ns["buscar_por_texto"]("semieje suran")][:1],
              [f["ID"] for f in ns["buscar_por_texto"]("nafta suran")][:1]), ([_pal], [_bc]))
@@ -2437,6 +2440,14 @@ def probar(L):
     esperar("«0151» no adentro del código de barras; el código de barras entero sí",
             (_f0151 in _ids92b, _ean in _ids92b,
              _ean in {f["ID"] for f in ns["buscar_por_texto"]("7793960050151")}), (True, False, True))
+    # Y el corrector de tipeo no pisa un sinónimo: «sopapa» no es SOLAPA (ver palabras_corregidas()).
+    producto("SO92A", "SOLAPA DE PUERTA", m14)
+    producto("SO92B", "SOLAPA DE CAPOT", m14)
+    producto("SO92C", "SOLAPA DE BAUL", m14)
+    producto("VA92", "VALVULA ESCAPE FIAT 128", m14)
+    conn.commit()
+    ns["vocabulario_de_busqueda"].clear()
+    esperar("«sopapa» no se corrige a SOLAPA", ns["palabras_corregidas"]("sopapa escape"), {})
     _r92 = ns["buscar_por_texto"]("embrague ford ka")
     esperar("«ka» es un modelo: el de la Transit, aparte",
             (_eka in {f["ID"] for f in _r92}, _etr in {f["ID"] for f in _r92.aparte}), (True, True))

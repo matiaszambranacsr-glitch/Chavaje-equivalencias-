@@ -6716,6 +6716,15 @@ Lo pidió el dueño: «seguí mejorando». Se pasaron por el buscador las búsqu
 
 `medir.py texto` igual (265 / 502 / 653 / 17).
 
+### Séptima vuelta: el corrector no pisa los sinónimos, el aviso tampoco, y las equivalencias abiertas
+
+Lo pidió el dueño: «seguí mejorando».
+
+- **El corrector de tipeo no pisa un sinónimo** (`palabras_corregidas()`): «sopapa» no está en ninguna lista y a un tecleo está «SOLAPA», así que se buscaba «solapa» y nunca se llegaba a VALVULA. Ahora no se corrige lo que se encuentra por otra forma (sinónimo, abreviatura, singular, otra escritura de la marca).
+- **El aviso «Ninguno de estos dice…» entiende las mismas formas** (`palabras_que_no_aparecen()`): «semieje gol» trae palieres y avisaba que ninguno dice «semieje»; lo mismo «rulemanes» con RULEMAN.
+- **Con uno o dos resultados, sus equivalencias se abren solas**: «bomba de agua k4m» deja uno con todo lo pedido, y lo que sigue es ver las otras marcas que sirven.
+- Se probó subir de lo apartado lo que ya es equivalente de lo de arriba (la «BOMBA DE AGUA» de otra lista, unida a la del K4M): en seis búsquedas de prueba subían 2. Los equivalentes casi nunca entran por las palabras; para eso están las equivalencias abiertas.
+
 ## 🔁 Otra versión de la misma lista, y las búsquedas largas más rápidas
 
 Lo pidió el dueño: «mejorá más todavía todo». Medido con `python pruebas/medir.py --base copia busquedas` (1.500 búsquedas de la copia de la base).

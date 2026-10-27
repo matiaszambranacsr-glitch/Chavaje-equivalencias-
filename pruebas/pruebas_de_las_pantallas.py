@@ -179,10 +179,20 @@ def probar():
               "('BAK4M', 'BAK4M', 'BOMBA DE AGUA RENAULT CLIO 1.6 16V K4M', ?), "
               "('BAPAL', 'BAPAL', 'BOMBA DE AGUA FIAT PALIO 1.3', ?)", (_marca_prueba,) * 2)
     conn.commit()
+    # Con su equivalente de otra lista: con uno o dos resultados, sus equivalencias se abren solas.
+    _bak4m = c.execute("SELECT id FROM productos WHERE codigo_clean = 'BAK4M'").fetchone()[0]
+    c.execute("INSERT INTO marcas (nombre, tipo) VALUES ('OTRA PRUEBA', 'PROVEEDOR')")
+    c.execute("INSERT INTO productos (codigo_raw, codigo_clean, descripcion, marca_id) VALUES "
+              "('EQK4M', 'EQK4M', 'BOMBA DE AGUA', ?)", (c.lastrowid,))
+    c.execute("INSERT INTO equivalencias (producto_a_id, producto_b_id) VALUES (?, ?)",
+              (min(_bak4m, c.lastrowid), max(_bak4m, c.lastrowid)))
+    conn.commit()
     at.session_state["modo_busqueda"] = "Descripción"
     at.run()
     at.text_input(key="texto_input").set_value("bomba de agua k4m")
     [b for b in at.button if "Buscar por descripción" in b.label][0].click().run()
+    if "--base" not in sys.argv and not any("EQK4M" in str(d.value) for d in at.dataframe):
+        fallas.append("por descripción, con un solo resultado sus equivalencias no se abren")
     _aparte = [e for e in at.expander if "que no dicen «k4m»" in e.label]
     if (not any("con todo lo pedido" in x.value for x in at.success) or len(_aparte) != 1
             or any("BAPAL" in str(d.value) for d in at.dataframe)):

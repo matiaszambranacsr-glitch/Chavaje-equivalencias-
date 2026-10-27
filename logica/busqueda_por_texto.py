@@ -793,6 +793,8 @@ def palabras_corregidas(texto):
             continue           # está, aunque sea adentro de otra: el LIKE la encuentra
         if marcas_que_nombra(palabra):
             continue           # es el nombre de una lista («mannol»)
+        if any(forma in vocabulario for forma, _ in formas_de_la_palabra(palabra)):
+            continue           # la encuentra otra forma: «sopapa» es VALVULA, no SOLAPA
         opciones = [(vocabulario[w], w) for w in _a_un_tecleo(palabra)
                     if vocabulario.get(w, 0) >= MINIMO_DE_PRODUCTOS_PARA_CORREGIR]
         if opciones:
@@ -819,4 +821,7 @@ def palabras_que_no_aparecen(texto, filas):
     palabras, _ = palabras_de_la_busqueda(texto)
     juntos = " ".join(normalizar_texto(f"{f.get('Descripcion') or ''} {f.get('Codigo') or ''} "
                                        f"{f.get('Marca') or ''}") for f in filas)
-    return [p for p in palabras if len(p) >= 3 and p not in juntos]
+    # Con las otras formas, como las encuentra la búsqueda (ver dice_la_palabra()): «semieje
+    # gol» trae palieres, y el aviso decía que ninguno dice «semieje».
+    return [p for p in palabras if len(p) >= 3 and p not in juntos
+            and not any(dice_la_palabra(f, p) for f in filas)]

@@ -2158,8 +2158,11 @@ if pagina == PAGINAS[0]:
                     # Perezoso (ver el de «📐 Buscar por medidas»): son hasta 15, y cada uno armaba la ficha de
                     # cada equivalente aunque estuviera cerrado. Después de buscar «filtro aceite gol», cada toque
                     # tardaba 220 ms; ahora, 75.
+                    # Con uno o dos resultados, abiertos: «bomba de agua k4m» deja uno solo con
+                    # todo lo pedido, y lo que sigue es ver las otras marcas que sirven.
                     _exp_txt = st.expander(f"🔎 {fila_txt['Marca']} · {fila_txt['Codigo']} — {resumen}",
-                                           key=f"exp_txt_{fila_txt['ID']}", on_change="rerun")
+                                           key=f"exp_txt_{fila_txt['ID']}", on_change="rerun",
+                                           expanded=len(res_texto) <= 2 and bool(otros))
                     if _exp_txt.open:
                         with _exp_txt:
                             if fila_txt.get("Descripcion"):
