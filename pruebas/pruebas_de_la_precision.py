@@ -2351,6 +2351,30 @@ def probar(L):
     _r87c = ns["buscar_por_texto"]("bomba de agua gol")
     esperar("«gol» no es GOLF", (_gol in {f["ID"] for f in _r87c},
                                  _golf in {f["ID"] for f in _r87c.aparte}), (True, True))
+    # 88. EL PLURAL Y LA CILINDRADA COMO LA ESCRIBEN LAS LISTAS (ver formas_de_la_palabra()):
+    # «rulemanes» encuentra el RULEMAN; «1.6» también «1 6» y «1,6», pero no «11.6».
+    m10 = marca("DIEZ RUEDAS")
+    _rul = producto("RU88", "RULEMAN RUEDA DELANTERA VW SURAN", m10)
+    _b16 = producto("BU88A", "BUJIA CORSA 1 6 8V", m10)
+    _b16c = producto("BU88B", "BUJIA CORSA 1,6 16V", m10)
+    _b116 = producto("BU88C", "BUJIA CORSA 11.6", m10)
+    conn.commit()
+    producto("FA88", "FARO SURAN", m10)        # sin el singular, el aflojado lo pone primero
+    conn.commit()
+    esperar("«rulemanes» encuentra el RULEMAN, primero",
+            [f["ID"] for f in ns["buscar_por_texto"]("rulemanes suran")][:1], [_rul])
+    _ids88 = {f["ID"] for f in ns["buscar_por_texto"]("bujia 1.6")}
+    esperar("«1.6» es también «1 6» y «1,6», no «11.6»",
+            (_b16 in _ids88, _b16c in _ids88, _b116 in _ids88), (True, True, False))
+    # Y lo que declara OTRA cilindrada va aparte; lo que no declara ninguna, no (como el año).
+    _e16 = producto("EM88A", "EMBRAGUE VW GOL 1.6", m10)
+    _e10 = producto("EM88B", "EMBRAGUE VW GOL POWER 1 0 8V", m10)
+    _esin = producto("EM88C", "EMBRAGUE VW GOL", m10)
+    conn.commit()
+    _r88 = ns["buscar_por_texto"]("embrague gol 1.6")
+    esperar("«embrague gol 1.6»: el 1.0 aparte, el que no dice cilindrada no",
+            ({_e16, _esin} <= {f["ID"] for f in _r88}, _e10 in {f["ID"] for f in _r88.aparte},
+             "otra cilindrada" in _r88.por_que_aparte), (True, True, True))
     return fallas
 
 

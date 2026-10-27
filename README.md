@@ -6667,6 +6667,16 @@ Lo pidió el dueño: «cuando pongo por descripción bomba de agua k4m me tira m
 
 Con la copia de la base: «bomba de agua k4m» da 1 y aparta 200; «kit distribucion gol 1.6», 86 y aparta 162; «filtro de aire peugeot 206», 52 y aparta 200; «bomba de agua renault clio», 174 y aparta 29. En las 794 búsquedas de `medir.py texto` el producto buscado sale en el mismo puesto que antes (siempre nombra sus propias palabras), y el filtro cuesta 1,5 ms por búsqueda. Se probó también ofrecer las bombas que dicen «Clio 1.6 16V» sin decir K4M, aprendiendo de tus listas qué autos van con cada motor: no encontró ninguna del K4M y para el F8Q trajo una del N7Q. Se dejó afuera.
 
+### Segunda vuelta: el plural, la cilindrada como la escriben las listas, y la otra cilindrada aparte
+
+Lo pidió el dueño: «seguí mejorando esas búsquedas».
+
+- **El plural** (`singulares_de()`): «rulemanes rueda gol» buscaba RULEMANES y las listas dicen RULEMAN (9 productos, 1 en plural). Ahora cada palabra en plural busca también su singular: PASTILLAS → PASTILLA, CABLES → CABLE, PEDALES → PEDAL, RULEMANES → RULEMAN. Medido con las 794 consultas de `medir.py texto` con la pieza en plural: primero 207 → 240, entre los 5 primeros 415 → 467, entre los 20 598 → 631, sin aparecer 36 → 30 (los que quedan son plurales que nadie escribe, como «fordes»).
+- **La cilindrada como la escriben las listas**: «1.6» busca también «1,6», «1 6» (FISPA) y «1.4/1.6», y no «11.6». En las bujías del Corsa eran 12 que no aparecían.
+- **Lo que declara otra cilindrada va aparte** (`cilindradas_que_declara()`): «embrague gol 1.6» traía el del Gol 1.0, el del 1.8 y el del 1.9 diesel. Como el año: lo que no declara ninguna cilindrada se deja, y si ninguno declara la pedida no se aparta nada. Con la copia de la base: 8 de 104 en ese, 35 de 69 en «junta tapa cilindros palio 1.3» (las del 1.4). El desplegable dice por qué: «🔧 Otros N que no dicen «gol» o son de otra cilindrada, no 1.6».
+
+Las 794 consultas con las palabras exactas quedan igual (263 / 499 / 648 / 22).
+
 ## 🔁 Otra versión de la misma lista, y las búsquedas largas más rápidas
 
 Lo pidió el dueño: «mejorá más todavía todo». Medido con `python pruebas/medir.py --base copia busquedas` (1.500 búsquedas de la copia de la base).

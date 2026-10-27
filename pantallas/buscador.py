@@ -2050,6 +2050,7 @@ if pagina == PAGINAS[0]:
                         # Lo que no nombra el auto pedido (ver ResultadosDeTexto).
                         "aparte": list(getattr(_res_texto, "aparte", [])),
                         "del_auto": list(getattr(_res_texto, "del_auto", [])),
+                        "por_que_aparte": getattr(_res_texto, "por_que_aparte", ""),
                     }
 
         busqueda_texto_guardada = st.session_state.get("ultima_busqueda_texto")
@@ -2107,7 +2108,8 @@ if pagina == PAGINAS[0]:
                 # perezoso, para el que igual quiera mirarlas.
                 if _aparte:
                     _exp_aparte = st.expander(
-                        f"🔧 Otros {miles(len(_aparte))} que no dicen {_dicen}",
+                        f"🔧 Otros {miles(len(_aparte))} que "
+                        + (busqueda_texto_guardada.get("por_que_aparte") or f"no dicen {_dicen}"),
                         key="exp_texto_aparte", on_change="rerun")
                     if _exp_aparte.open:
                         with _exp_aparte:
