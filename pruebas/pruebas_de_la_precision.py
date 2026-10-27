@@ -2394,6 +2394,25 @@ def probar(L):
     _r89b = ns["buscar_por_texto"]("kit distribucion gol 16v")
     esperar("«16v»: el «16 V» sí, el 8V aparte",
             (_k16 in {f["ID"] for f in _r89b}, _k8 in {f["ID"] for f in _r89b.aparte}), (True, True))
+    # 90. LOS SINÓNIMOS DEL MOSTRADOR (ver SINONIMOS_DEL_MOSTRADOR) y lo apartado, con su motivo
+    # y en orden de parecido.
+    m12 = marca("DOCE MOSTRADOR")
+    _pal = producto("PA90", "PALIER LADO IZQUIERDO SURAN", m12)
+    _bc = producto("BC90", "BOMBA DE COMBUSTIBLE SURAN", m12)
+    conn.commit()
+    esperar("«semieje» encuentra el PALIER y «nafta» la de COMBUSTIBLE, primeros",
+            ([f["ID"] for f in ns["buscar_por_texto"]("semieje suran")][:1],
+             [f["ID"] for f in ns["buscar_por_texto"]("nafta suran")][:1]), ([_pal], [_bc]))
+    esperar("cada apartado dice por qué",
+            {f.get("Por qué") for f in _r87.aparte if f["ID"] in (_otra, _sola)}, {"no dice «k4m»"})
+    # Lo apartado por no decir la pieza y por no decir el auto, mezclado por parecido: «VW GOL
+    # NAFTA» (sin pieza, la más corta) antes que el filtro de otro auto.
+    producto("FN90A", "FILTRO NAFTA VW GOL", m12)
+    _sin_pieza = producto("FN90B", "VW GOL NAFTA", m12)
+    producto("FN90C", "FILTRO DE NAFTA FIAT UNO", m12)
+    conn.commit()
+    esperar("lo apartado, en orden de parecido",
+            [f["ID"] for f in ns["buscar_por_texto"]("filtro nafta gol").aparte][:1], [_sin_pieza])
     return fallas
 
 

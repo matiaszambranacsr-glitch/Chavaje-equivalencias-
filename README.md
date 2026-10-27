@@ -6688,6 +6688,16 @@ Lo pidió el dueño: «seguí».
 
 Las 794 consultas de `medir.py texto` quedan casi igual (262 / 499 / 648 / 22; con la pieza en plural, 240 / 470 / 632 / 29).
 
+### Cuarta vuelta: los sinónimos del mostrador, y lo apartado con su motivo y en orden
+
+Lo pidió el dueño: «más, seguí mejorando».
+
+- **Cómo se dice en el mostrador y cómo lo escribe la lista** (`SINONIMOS_DEL_MOSTRADOR`): «bomba de nafta» está en 204 productos y «bomba de combustible» en 711; «palier» 36 y «semieje» 13; «termostato» 875 y «termostática» 114; nadie escribe «burro» (es el motor de arranque, 1.486), ni «dínamo» (alternador, 892), ni «sopapa» (válvula), ni «émbolo» (pistón). «bomba nafta gol» pasó de 3 a 18 resultados con todo lo pedido; «filtro de nafta corsa» ahora trae arriba los 7 filtros de combustible del Corsa. «Cojinete» no se tomó por rulemán: acá también son los de biela y bancada.
+- **Lo apartado, con su motivo y en orden de parecido**: cada fila del desplegable dice por qué quedó abajo (columna «Por qué»: «no dice «embrague»», «es 1.0»), y van en el orden de parecido con lo pedido. Antes se cortaba en 200 por regla, y lo más parecido —el kit de embrague de TARANTO «KIT SENDA/GACEL/GOL 1.6/1.8», que no dice «embrague»— quedaba afuera hasta del desplegable; ahora es el cuarto.
+- Se probó deducir la pieza de los productos que no la nombran (el 58 % del catálogo: 41.607, 34.915 de IMPERIAL). Por el comienzo del código de cada lista, en TARANTO funciona (EK y EC son embragues), pero en IMPERIAL el comienzo es la marca del fabricante: URANGA salía «cojinete» y son machos de roscar, DIMAF «caño» y son mechas. Por las equivalencias se deducían 18. Se dejó afuera.
+
+`medir.py texto` igual (262 / 499 / 648 / 22; con plural 240 / 470 / 632 / 29).
+
 ## 🔁 Otra versión de la misma lista, y las búsquedas largas más rápidas
 
 Lo pidió el dueño: «mejorá más todavía todo». Medido con `python pruebas/medir.py --base copia busquedas` (1.500 búsquedas de la copia de la base).

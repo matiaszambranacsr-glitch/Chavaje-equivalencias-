@@ -279,6 +279,22 @@ def escrituras_de_la_marca(palabra):
     return sorted({re.sub(r"[.\-/,]+", " ", f).strip() for f in formas} - {palabra})
 
 
+# COMO SE DICE EN EL MOSTRADOR Y COMO LO ESCRIBE LA LISTA. Contados en la copia de la base:
+# «bomba de nafta» en 204 productos y «bomba de combustible» en 711; «palier» 36 y «semieje» 13;
+# «termostato» 875 y «termostática» 114; «motor de arranque» 1.486 y nadie escribe «burro»;
+# «alternador» 892 y «dínamo» 2; «válvula» 2.134 y «sopapa» 0; «pistón» 153 y «émbolo» 0.
+# «Cojinete» no: acá también son los de biela y bancada, no un rulemán.
+SINONIMOS_DEL_MOSTRADOR = {
+    "NAFTA": ("COMBUSTIBLE",), "COMBUSTIBLE": ("NAFTA",),
+    "PALIER": ("SEMIEJE",), "SEMIEJE": ("PALIER",),
+    "TERMOSTATO": ("TERMOSTATICA",), "TERMOSTATICA": ("TERMOSTATO",),
+    "RULEMAN": ("RODAMIENTO",), "RODAMIENTO": ("RULEMAN",),
+    "PATIN": ("PASTILLA",), "PASTILLA": ("PATIN",),
+    "BURRO": ("ARRANQUE",), "DINAMO": ("ALTERNADOR",), "SOPAPA": ("VALVULA",),
+    "EMBOLO": ("PISTON",),
+}
+
+
 def formas_de_la_palabra(palabra):
     """Las otras formas de escribir `palabra` en las listas: [(forma, si va como palabra
     entera)]. «JUNTA» → JTA y JTAS enteras, JUNTAS como pedazo. Sin la palabra misma. Y el
@@ -294,6 +310,8 @@ def formas_de_la_palabra(palabra):
     if _RE_VALVULAS.fullmatch(palabra):
         formas.add(f"{palabra[:-1]} V")
     formas |= set(escrituras_de_la_marca(palabra))
+    for base in [palabra] + singulares_de(palabra):
+        formas |= set(SINONIMOS_DEL_MOSTRADOR.get(base, ()))
     formas.discard(palabra)
     # La que contiene a la palabra ya la encuentra el LIKE de la palabra: «JUNTAS» con «JUNTA».
     return sorted((f, len(f) < 5 or " " in f) for f in formas if palabra not in f)
@@ -612,12 +630,19 @@ def buscar_por_texto(texto, aflojar=True):
                    or any(f" {forma} " in sin_puntos for forma, _ in formas_de_la_palabra(p)))
     filas.sort(key=lambda f: (-f.get("_coincidencias", 0), -_enteras(f), -f.get("_tal_cual", 0),
                               f.get("_largo") or 0))
-    # Lo que no nombra el auto pedido, aparte (ver nivel_del_auto()).
+    # Lo que no nombra el auto pedido, aparte (ver nivel_del_auto()). Cada fila apartada dice
+    # por qué («Por qué»), y lo apartado va en el orden de antes, el de parecido: antes se cortaba
+    # en 200 por regla y lo más parecido —«CHEVROLET CORSA NAFTA» buscando «filtro de nafta
+    # corsa»— quedaba afuera hasta del desplegable.
+    for puesto, f in enumerate(filas):
+        f["_puesto"] = puesto
     del_auto, aparte, no_dicen, motivos = palabras_del_auto(palabras), [], [], []
     if del_auto:
         nombran = [nombra_alguna(f, del_auto) for f in filas]
         if any(nombran) and not all(nombran):
             aparte = [f for f, n in zip(filas, nombran) if not n]
+            for f in aparte:
+                f["Por qué"] = "no dice " + " ni ".join(f"«{p.lower()}»" for p in del_auto)
             filas = [f for f, n in zip(filas, nombran) if n]
             no_dicen.append(" ni ".join(f"«{p.lower()}»" for p in del_auto))
     # Lo que no nombra la pieza pedida (ver palabras_de_la_pieza()).
@@ -625,7 +650,10 @@ def buscar_por_texto(texto, aflojar=True):
     if de_la_pieza:
         la_dicen = [all(dice_la_palabra(f, p) for p in de_la_pieza) for f in filas]
         if any(la_dicen) and not all(la_dicen):
-            aparte += [f for f, d in zip(filas, la_dicen) if not d]
+            for f, d in zip(filas, la_dicen):
+                if not d:
+                    f["Por qué"] = f"no dice «{pieza_que_nombra(texto).lower()}»"
+                    aparte.append(f)
             filas = [f for f, d in zip(filas, la_dicen) if d]
             no_dicen.append(f"«{pieza_que_nombra(texto).lower()}»")
     # Y lo que declara otra cilindrada u otras válvulas (ver cilindradas_que_declara()).
@@ -637,13 +665,19 @@ def buscar_por_texto(texto, aflojar=True):
         # Si lo único del auto era esto, la regla de arriba ya apartó lo que no lo dice.
         if not pedida or any(patron.fullmatch(p) for p in del_auto):
             continue
-        otra = [bool(d) and pedida not in d for d in map(declara, filas)]
+        declaradas = [declara(f) for f in filas]
+        otra = [bool(d) and pedida not in d for d in declaradas]
         if any(otra) and not all(otra):
-            aparte += [f for f, o in zip(filas, otra) if o]
+            for f, o, d in zip(filas, otra, declaradas):
+                if o:
+                    f["Por qué"] = f"es {' / '.join(sorted(d))}"
+                    aparte.append(f)
             filas = [f for f, o in zip(filas, otra) if not o]
             motivos.append(f"son de {que}, no {pedida}")
+    aparte.sort(key=lambda f: f["_puesto"])
     filas, aparte = filas[:200], aparte[:200]
     for f in filas + aparte:
+        f.pop("_puesto", None)
         f.pop("_coincidencias", None)
         f.pop("_tal_cual", None)
         f.pop("_largo", None)
