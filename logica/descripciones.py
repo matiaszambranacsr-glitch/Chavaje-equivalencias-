@@ -2284,3 +2284,60 @@ def grados_de_las_bujias(medidas_a, medidas_b):
         return f"grado térmico {medidas_a['grado']} y {medidas_b['grado']}"
     return (f"grado térmico {medidas_a['sistema']} {medidas_a['grado']} y "
             f"{medidas_b['sistema']} {medidas_b['grado']}")
+
+
+def medidas_de_un_codigo_de_bujia(texto):
+    """Las medidas de una bujía por el código como lo escribe el cliente —«BKR6E», «bkr 6e»,
+    «FR 7 DC», «WR7DC+»—, aunque no esté en ninguna lista. NGK y Bosch, las dos familias que se
+    comprobaron con tus listas (ver «LA BUJÍA POR SU CÓDIGO»). None si no se sabe leer."""
+    limpio = re.sub(r"[^A-Z0-9]", "", (texto or "").upper())
+    if len(limpio) < 4:
+        return None
+    return _bujia_ngk(limpio) or _bujia_bosch(limpio)
+
+
+def grado_en_escala_ngk(medidas):
+    """El grado térmico en la escala de NGK. Bosch numera al revés: con tus listas (la FR7DC es
+    la BKR5E, la WR7DC la BPR6EY), NGK ≈ 13 − Bosch. Para ordenar, no para mostrar."""
+    return medidas["grado"] if medidas["sistema"] == "NGK" else 13 - medidas["grado"]
+
+
+def bujias_que_calzan_con(medidas, limite=60):
+    """Las bujías del catálogo que calzan con `medidas` (rosca, largo, hexágono, asiento y
+    material), sin los números de fábrica: primero la del grado más cercano, y en cada grado lo
+    que hay en stock y lo más barato. Cada fila trae lo que pide mostrar_lista_clickeable() y
+    «Grado» («NGK 6», «Bosch 7»). Para «🕯️ ¿Qué bujía le va?»: el cliente trae una bujía que no
+    está en tus listas, o la pieza en la mano."""
+    referencia = grado_en_escala_ngk(medidas)
+    filas = []
+    for fila, m in bujias_con_medidas().values():
+        if (fila["tipo"] or "").upper() == "OEM" or campos_distintos_de_la_bujia(medidas, m) != []:
+            continue
+        filas.append({"ID": fila["id"], "Codigo": fila["codigo_raw"], "Marca": fila["marca"],
+                      "Descripcion": fila["descripcion"], "Precio": fila.get("precio"),
+                      "Stock": fila.get("stock"), "Grado": f"{m['sistema']} {m['grado']}",
+                      "_distancia": abs(grado_en_escala_ngk(m) - referencia)})
+    filas.sort(key=lambda f: (f["_distancia"], 0 if (f["Stock"] or 0) > 0 else 1,
+                              f["Precio"] or float("inf")))
+    return filas[:limite]
+
+
+def tabla_de_cruce_de_bujias():
+    """La tabla de cruce para imprimir: una fila por cómo es la bujía y su grado (en la escala de
+    NGK), una columna por lista con sus códigos. «M14, largo 19 mm, hexágono 16 mm… | 6 |
+    TARANTO: BKR6E, BCPR6ES | JL: FR 7 DC». Sin los números de fábrica. Ver «🕯️ ¿Qué bujía le
+    va?» en el Buscador."""
+    filas, listas = {}, set()
+    for fila, m in bujias_con_medidas().values():
+        if (fila["tipo"] or "").upper() == "OEM":
+            continue
+        clave = (texto_de_la_bujia(m), grado_en_escala_ngk(m))
+        listas.add(fila["marca"])
+        filas.setdefault(clave, {}).setdefault(fila["marca"], []).append(fila["codigo_raw"])
+    salida = []
+    for (como, grado), por_lista in sorted(filas.items()):
+        salida.append({"Cómo es": como, "Grado (NGK)": grado,
+                       **{lista: ", ".join(sorted(set(por_lista.get(lista, []))))
+                          for lista in sorted(listas)}})
+    return salida
+

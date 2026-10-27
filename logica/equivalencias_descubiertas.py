@@ -5377,7 +5377,8 @@ def bujias_automaticas_prendido():
 
 def bujias_con_medidas():
     """{id: (fila, medidas)} de las bujías de encendido del catálogo que se saben leer."""
-    c.execute("""SELECT p.id, p.codigo_raw, p.descripcion, m.nombre AS marca, m.tipo AS tipo
+    c.execute("""SELECT p.id, p.codigo_raw, p.descripcion, p.precio, p.stock,
+                        m.nombre AS marca, m.tipo AS tipo
                  FROM productos p JOIN marcas m ON m.id = p.marca_id
                  WHERE p.descripcion LIKE '%BUJ%'""")
     salida = {}

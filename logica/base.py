@@ -810,7 +810,7 @@ CLAVES_QUE_QUEDAN_AL_SALIR = ("modo_vista",)
 # Los campos de texto del buscador (ver cerrar_sesion()). auditar.py controla que estén todos.
 CAMPOS_DEL_BUSCADOR_QUE_SE_VACIAN_AL_SALIR = ("busqueda_input", "texto_input", "pista_internet",
                                              "picking_codigos", "url_foto_visual",
-                                             "med_paso", "med_seguro")
+                                             "med_paso", "med_seguro", "bujia_codigo_libre")
 
 
 def cerrar_sesion():

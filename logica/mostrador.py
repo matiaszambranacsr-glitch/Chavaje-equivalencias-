@@ -641,6 +641,21 @@ def coronar_la_recomendada(filas, fuera_de_escala=()):
     return filas, reco
 
 
+def mostrar_bujias_que_calzan(medidas, clave, titulo):
+    """Las bujías tuyas que calzan con `medidas` (ver bujias_que_calzan_con()), con el código
+    como botón para ver sus equivalencias, y su grado al lado. `titulo` va arriba."""
+    filas = bujias_que_calzan_con(medidas)
+    if not filas:
+        st.info(f"{titulo}\n\nNo tenés ninguna que calce así en tus listas.")
+        return filas
+    en_stock = sum(1 for f in filas if (f["Stock"] or 0) > 0)
+    st.info(f"{titulo}\n\nTe calzan **{miles(len(filas))}**"
+            + (f", **{miles(en_stock)} con stock**" if en_stock else "")
+            + ": primero las del grado más cercano.")
+    mostrar_lista_clickeable(filas, clave, limite=15, detalle=lambda f: f"grado {f['Grado']}")
+    return filas
+
+
 def mostrar_la_recomendacion(reco):
     """La recomendación y su porqué, arriba de la tabla. Ver la_recomendacion_explicada()."""
     if reco["texto"]:

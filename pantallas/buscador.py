@@ -1032,6 +1032,17 @@ if pagina == PAGINAS[0]:
                               "patente**: si el auto está cargado, de ahí salen los repuestos "
                               "que le entran. Y si no está, se carga con una foto de la cédula."
                         )
+                    # 🕯️ UNA BUJÍA QUE NO ESTÁ EN TUS LISTAS: el cliente trae una NGK o una Bosch que
+                    # no vendés con ese código. Por el código se sabe cómo es, y cuáles de las tuyas
+                    # calzan (ver medidas_de_un_codigo_de_bujia()).
+                    _bujia_pedida = (medidas_de_un_codigo_de_bujia(codigo_individual)
+                                     if not res else None)
+                    if _bujia_pedida:
+                        mostrar_bujias_que_calzan(
+                            _bujia_pedida, f"bujia_nr_{clean}",
+                            f"🕯️ Si es una bujía, es una **{_bujia_pedida['sistema']} "
+                            f"{_bujia_pedida['codigo']}**: {texto_de_la_bujia(_bujia_pedida)}, "
+                            f"grado {_bujia_pedida['grado']}.")
                     # El mismo número en dos piezas distintas. Ver el_mismo_numero_en_dos_piezas().
                     _choque = el_mismo_numero_en_dos_piezas(res)
                     if _choque:
@@ -2324,6 +2335,45 @@ if pagina == PAGINAS[0]:
                             )
                     else:
                         st.warning("No encontré ninguno de esos códigos en el catálogo.")
+
+    # 🕯️ ¿QUÉ BUJÍA LE VA? Por el código de cualquier lista (NGK o Bosch, aunque no lo vendas)
+    # o, con la bujía en la mano, por cómo es: rosca, largo, hexágono, asiento y material. Ver
+    # bujias_que_calzan_con(). Perezoso, como el de las medidas de abajo.
+    _exp_bujias = st.expander("🕯️ ¿Qué bujía le va? (por el código de cualquier marca o por "
+                              "cómo es)", key="exp_que_bujia_le_va", on_change="rerun")
+    if _exp_bujias.open:
+        with _exp_bujias:
+            ayuda("Escribí el código de la bujía que trae el cliente (NGK o Bosch, aunque no la "
+                  "vendas) o elegí cómo es. Salen las tuyas que calzan: misma rosca, largo, "
+                  "hexágono, asiento y material; primero las del grado térmico más cercano.")
+            _cod_bujia = st.text_input("Código de la bujía", key="bujia_codigo_libre",
+                                       placeholder="BKR6E, FR 7 DC, BPR5ES…")
+            _grupos_b = {f"{g['Calzan igual']} — {miles(g['Bujías'])} bujía(s)": g
+                         for g in grupos_de_bujias()}
+            _grupo_b = st.selectbox("O cómo es", ["—"] + list(_grupos_b), key="bujia_grupo",
+                                    placeholder="Elegí una opción")
+            if _cod_bujia.strip():
+                _med_b = medidas_de_un_codigo_de_bujia(_cod_bujia)
+                if _med_b:
+                    mostrar_bujias_que_calzan(
+                        _med_b, "bujia_libre",
+                        f"🕯️ **{_med_b['sistema']} {_med_b['codigo']}**: "
+                        f"{texto_de_la_bujia(_med_b)}, grado {_med_b['grado']}.")
+                else:
+                    st.warning("No sé leer ese código: se leen las NGK y las Bosch (BKR6E, "
+                               "FR7DC, WR8DC…). Probá eligiendo cómo es.")
+            elif _grupo_b != "—":
+                _ej_b = next(m for _f, m in bujias_con_medidas().values()
+                             if texto_de_la_bujia(m) == _grupos_b[_grupo_b]["Calzan igual"])
+                mostrar_bujias_que_calzan(_ej_b, "bujia_grupo_l",
+                                          f"🕯️ {_grupos_b[_grupo_b]['Calzan igual']}.")
+            # La tabla de cruce para imprimir: cada clase de bujía por grado, con los códigos de
+            # cada lista. Se arma recién al tocar (lee todas las bujías del catálogo).
+            if st.button("📥 Armar la tabla de cruce de bujías (Excel)", key="btn_cruce_bujias"):
+                st.session_state["cruce_bujias"] = to_excel_bytes(tabla_de_cruce_de_bujias())
+            if st.session_state.get("cruce_bujias"):
+                st.download_button("Bajar la tabla de cruce", st.session_state["cruce_bujias"],
+                                   file_name="cruce_de_bujias.xlsx", key="dl_cruce_bujias")
 
     # PEREZOSO: Streamlit ejecuta lo de adentro de un desplegable aunque esté cerrado, en cada
     # toque. Con on_change="rerun" sabe si está abierto y lo de adentro se salta cerrado (ver

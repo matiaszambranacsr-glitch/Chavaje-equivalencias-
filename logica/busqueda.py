@@ -990,11 +990,6 @@ def anotar_el_grado_de_las_bujias(res):
         return (f"{m['sistema']} {m['grado']} "
                 f"(lo buscado: {buscada['sistema']} {buscada['grado']})")
 
-    # Para ordenar y para la 🏆 (ver ordenar_por_seguridad_y_disponibilidad()): a cuántos grados
-    # está, en la escala de NGK. Bosch va al revés: la FR7DC es la BKR5E y la WR7DC la BPR6EY;
-    # con las listas de FISPA, NGK ≈ 13 − Bosch.
-    def _en_escala_ngk(m):
-        return m["grado"] if m["sistema"] == "NGK" else 13 - m["grado"]
 
     for f in res:
         if f.get("Cadena") == "— el buscado":
@@ -1004,7 +999,8 @@ def anotar_el_grado_de_las_bujias(res):
                 and (medidas["sistema"], medidas["grado"]) != (buscada["sistema"], buscada["grado"])):
             f["Cadena"] = f"{f['Cadena']} · 🕯️ {_grados(medidas)}"
             f["_grado_texto"] = _grados(medidas)
-            f["_grado_distinto"] = abs(_en_escala_ngk(medidas) - _en_escala_ngk(buscada))
+            # Para ordenar y para la 🏆: a cuántos grados está (ver grado_en_escala_ngk()).
+            f["_grado_distinto"] = abs(grado_en_escala_ngk(medidas) - grado_en_escala_ngk(buscada))
     return res
 
 

@@ -237,6 +237,42 @@ def probar():
     esperar("P95", round(r["p95_ms"]), 95)
     esperar("sin resultados", r["sin_resultados"], 25)
     esperar("la más lenta primero", round(r["lentas"][0]["ms"]), 100)
+
+    # 3. 🕯️ ¿Qué bujía le va?: una Bosch que no está en las listas dice cómo es y trae las que
+    # calzan, la del grado más cercano primero (la FR 7 DC es la NGK 6: la BKR5E está a uno, la BKR8E a dos); y lo mismo desde el
+    # desplegable, por el código o por cómo es. Ver bujias_que_calzan_con().
+    c.execute("INSERT INTO marcas (nombre, tipo) VALUES ('TARANTO', 'PROVEEDOR')")
+    _mt = c.lastrowid
+    for cod_b in ("BKR8E", "BKR5E", "BPR5E"):
+        c.execute("INSERT INTO productos (codigo_raw, codigo_clean, descripcion, marca_id, stock) "
+                  "VALUES (?, ?, 'BUJIA NGK', ?, 2)", (cod_b, cod_b, _mt))
+    conn.commit()
+    buscar("FR 7 DC")
+    esperar("buscando una bujía que no está, dice cuál es",
+            any("es una **Bosch FR7DC**" in str(x.value) for x in at.info), True)
+    esperar("y las que calzan, la del grado más cercano primero",
+            [b.label for b in at.button if (b.key or "").startswith("bujia_nr_")],
+            ["🔎 BKR5E", "🔎 BKR8E"])
+    # El simulador vuelve a cerrar el desplegable perezoso en cada toque: se abre antes de cada uno.
+    at.session_state["exp_que_bujia_le_va"] = True
+    at.run()
+    at.session_state["exp_que_bujia_le_va"] = True
+    at.text_input(key="bujia_codigo_libre").set_value("bpr 6 e").run()
+    esperar("desde el desplegable, por el código",
+            [b.label for b in at.button if (b.key or "").startswith("bujia_libre_")], ["🔎 BPR5E"])
+    at.session_state["exp_que_bujia_le_va"] = True
+    at.text_input(key="bujia_codigo_libre").set_value("").run()
+    _opcion = [o for o in at.selectbox(key="bujia_grupo").options if "hexágono 16" in o][0]
+    at.session_state["exp_que_bujia_le_va"] = True
+    at.selectbox(key="bujia_grupo").set_value(_opcion).run()
+    esperar("y por cómo es",
+            sorted(b.label for b in at.button if (b.key or "").startswith("bujia_grupo_l_")),
+            ["🔎 BKR5E", "🔎 BKR8E"])
+    esperar("la tabla de cruce, por cómo es y grado, con los códigos de cada lista",
+            [(f["Cómo es"][:22], f["Grado (NGK)"], f.get("TARANTO")) for f in g["tabla_de_cruce_de_bujias"]()],
+            [("M14, largo 19 mm, hexá", 5, "BKR5E"), ("M14, largo 19 mm, hexá", 8, "BKR8E"),
+             ("M14, largo 19 mm, hexá", 5, "BPR5E")])
+    esperar("sin errores", [e.value for e in at.exception], [])
     return fallas
 
 

@@ -6636,6 +6636,16 @@ Lo pidió el dueño: «seguí mejorando la redacción de los textos, ponelos tod
 
 Probado en un navegador de verdad, en inglés y en castellano: las listas dicen «Elegí una opción», las tablas «Pantalla completa», «Buscar en la tabla» y «Bajar la tabla», el cartelito de la barra de los gráficos «Ver los números», al escribir «Enter para confirmar», y el calendario de 💵 Caja «octubre 2026» con «D L M M J V S». Los gráficos, «23/10» y «$120.000». En cada pantalla queda un solo «ℹ️ Cómo funciona» arriba (en Depósito: la sección, «⏳ Para buscar» y cómo funciona la cola), y las ayudas de una parte siguen en su parte. `pruebas_de_la_sesion.py` (2d) lo controla: rompiéndolo a propósito, avisa.
 
+## 🕯️ ¿Qué bujía le va?
+
+Lo pidió el dueño: «funciones nuevas que mejoren toda la página». En el mostrador, el cliente trae una bujía de una marca o con un código que no está en tus listas.
+
+- **Buscando un código que no está**, si es una NGK o una Bosch, la app dice qué bujía es («🕯️ Si es una bujía, es una Bosch FR7DC: M14, largo 19 mm, hexágono 16 mm, asiento plano, común, grado 7») y debajo las tuyas que calzan. Salen primero las del grado térmico más cercano y, en cada grado, lo que hay en stock y lo más barato. Cada código es un botón que abre sus equivalencias.
+- **En el Buscador, «🕯️ ¿Qué bujía le va?»**: se escribe el código como venga («bkr 6 e», «FR 7 DC», «WR7DC+») o, con la bujía en la mano, se elige cómo es (rosca, largo, hexágono, asiento y material, con cuántas tenés de cada clase).
+- **📥 La tabla de cruce de bujías, en Excel**, para imprimir: una fila por clase de bujía y grado, y una columna por lista con sus códigos. Con la copia de la base son 53 filas.
+
+Se leen NGK y Bosch, que son las que se pudieron comprobar con tus listas (ver «LA BUJÍA POR SU CÓDIGO»). Champion y Denso casi no aparecen en tus listas, y sin comprobarlas no se leen. Cada consulta tarda 0,03 s. `pruebas_del_buscador.py` (3) lo controla.
+
 ## ⏱️ Las pantallas, medidas con la base real
 
 Lo pidió el dueño: «mejorá absolutamente todo». Primero se midió dónde la app es lenta de verdad: la prueba de pantallas corría sobre una base chica, donde todas tardan poco. Ahora `python pruebas/pruebas_de_las_pantallas.py --base copia.db` recorre las 89 pantallas con una copia de la base real (sin la tarea de fondo, que ensucia los tiempos) y dice las 10 más lentas.
