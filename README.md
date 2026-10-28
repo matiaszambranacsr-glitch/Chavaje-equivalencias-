@@ -6902,6 +6902,20 @@ Lo pidió el dueño: «mejorá absolutamente todo». Primero se midió dónde la
 - **«📌 Para pedir»** cuenta cada descripción distinta una vez, con cuántos productos la tienen: de 0,7 a 0,4 s.
 - **«🩺 Estado y papelera»** espera la cotización del dólar y la inflación de afuera (`_pedir_json`): se pide cada 6 horas, y si falla se espera 30 minutos. Se deja así.
 
+**Tercera vuelta («seguí mejorando la app»): lo de la primera vez, armado de antemano.** Con la copia real, en un proceso recién arrancado:
+
+| | Antes | Ahora |
+|---|---|---|
+| La primera búsqueda por texto («bomba de agua»), solo en la ayuda de los errores de tipeo | 0,94 s | 0,03 s |
+| 🚙 Repuestos por vehículo, la primera vez | 3,1 s | 0,5 s |
+| Contar las palabras de todas las descripciones | 0,67 s | 0,45 s |
+
+- **La ayuda de los errores de tipeo** («agau» → «agua») necesita saber qué palabras usa el catálogo, y lo armaba la primera búsqueda con una palabra de cuatro letras o más, o sea casi todas, aunque no hubiera nada mal escrito. El servidor se reinicia seguido, y esa primera búsqueda es la de alguien que está en el mostrador.
+- **Ahora se arma por atrás al entrar** (`dejar_listo_de_antemano()`), una vez por proceso: primero esa lista de palabras y después las marcas de auto de «🚙 Repuestos por vehículo», que se guardan en la base pero se rehacen después de cargar una lista (1,3 s). Las palabras quedan medio segundo después de dibujarse la entrada, y las marcas, cuando hay que rehacerlas, unos 2 s después. Antes de cada paso espera a que no haya una pantalla dibujándose. Si alguien busca mientras tanto, no se arma dos veces: espera al que ya se está armando.
+- **Contar las palabras** lee cada descripción distinta una sola vez, con cuántos productos la tienen (54.289 de 86.946), como ya hacía «📌 Para pedir». Da exactamente lo mismo: comparado palabra por palabra con la copia real.
+
+`pruebas_del_buscador.py` controla que se arme al entrar, una sola vez, y que la búsqueda no lo tenga que armar. Sin la llamada de la app, falla.
+
 ## ✅ Verificada por el número de fábrica, y los espesores aparte
 
 Lo pidió el dueño: «mejorá más la equivalencia y la búsqueda de productos». Medido sobre la copia de la base con `pruebas/medir.py`.

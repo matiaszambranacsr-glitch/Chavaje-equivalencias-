@@ -1236,6 +1236,41 @@ def vocabulario_de_busqueda(version):   # ver descripciones_por_palabra(): sin g
     return salida
 
 
+def dejar_listo_de_antemano():
+    """Arma por atrás, una vez por proceso y apenas arranca la app, lo que si no paga la primera
+    persona que lo pide.
+
+    1. vocabulario_de_busqueda(). Lo pedía palabras_corregidas() en cada búsqueda con una
+       palabra de cuatro letras o más, o sea en casi todas, aunque no hubiera nada mal escrito.
+       Medido con la copia de la base real: la primera búsqueda después de cada reinicio
+       («bomba de agua») tardaba 0,94 s solo en esto, y la segunda 0,03. El servidor se
+       reinicia seguido, y la primera búsqueda es la de alguien que está en el mostrador. De
+       paso queda el conteo de palabras que usa «🚙 Repuestos por vehículo».
+    2. marcas_vehiculo_disponibles(), que se guarda en la base pero se rehace cuando cambió el
+       catálogo: con la copia real, 1,3 s del primero que abría «🚙 Repuestos por vehículo»
+       —que se abre sin contraseña— después de cargar una lista.
+
+    Antes de cada paso espera a que termine de dibujarse la pantalla (ver ceder_al_mostrador()),
+    así no le quita el procesador a nadie. Si alguien lo pide mientras se arma, Streamlit no lo
+    hace dos veces: espera al que ya está armándose. Y si falla, lo arma quien lo pida."""
+    lanzado = del_proceso("lo_de_antemano_lanzado", threading.Event)
+    if lanzado.is_set():
+        return
+    lanzado.set()
+
+    def _armar():
+        _HILO_DE_FONDO.corriendo = True
+        try:
+            ceder_al_mostrador()
+            version = version_del_catalogo()
+            vocabulario_de_busqueda(version)
+            ceder_al_mostrador()
+            marcas_vehiculo_disponibles(version)
+        except Exception as _err:     # noqa: BLE001 — es una ayuda: si falla, lo arma quien lo pida
+            anotar_error("dejar_listo_de_antemano", _err)
+    threading.Thread(target=_armar, daemon=True, name="de_antemano").start()
+
+
 def _a_un_tecleo(palabra):
     """Las palabras a un tecleo de distancia: una letra de menos, una de más, una cambiada, o dos
     vecinas al revés («AGAU» → «AGUA», que es el error más común escribiendo rápido)."""

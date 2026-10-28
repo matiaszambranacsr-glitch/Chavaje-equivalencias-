@@ -15,6 +15,7 @@ import shutil
 import sqlite3
 import sys
 import tempfile
+import threading
 
 RAIZ = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -34,11 +35,32 @@ def probar():
     at.run()
     ns = sys.modules["logica"].todo_lo_de_la_logica()
     c, conn = ns["c"], ns["conn"]
+    g = ns["inflacion_desde"].__globals__
+
+    # 0. Lo que pediría la primera búsqueda se armó por atrás al entrar, y una sola vez por
+    # proceso (ver dejar_listo_de_antemano()). Si la búsqueda tuviera que armarlo, contar las
+    # palabras falla: con la copia real, eran 0,94 s de la primera búsqueda después de reiniciar.
+    # Se mira la marca y no el hilo: con la base chica, el hilo ya puede haber terminado.
+    _lanzado = g["del_proceso"]("lo_de_antemano_lanzado", threading.Event).is_set()
+    for _h in [h for h in threading.enumerate() if h.name == "de_antemano"]:
+        _h.join(60)
+    ns["dejar_listo_de_antemano"]()
+    esperar("se arma por atrás al entrar, una sola vez",
+            (_lanzado, [h.name for h in threading.enumerate()].count("de_antemano")), (True, 0))
+    # Se anota en vez de fallar: palabras_corregidas() ataja los errores y seguiría como si nada.
+    _contar, _contadas = g["descripciones_por_palabra"], []
+    g["descripciones_por_palabra"] = lambda version: _contadas.append(version) or _contar(version)
+    try:
+        ns["palabras_corregidas"]("bomba de agau")
+    finally:
+        g["descripciones_por_palabra"] = _contar
+    esperar("y la búsqueda no lo arma de nuevo", _contadas, [])
+    esperar("sin errores al armarlo", [e for e in g["_ULTIMOS_ERRORES"]
+                                       if "antemano" in str(e)], [])
     c.execute("INSERT INTO marcas (nombre, tipo) VALUES ('PRUEBA', 'PROVEEDOR')")
     c.execute("INSERT INTO productos (codigo_raw, codigo_clean, descripcion, marca_id) "
               "VALUES ('F100', 'F100', 'FILTRO DE ACEITE', ?)", (c.lastrowid,))
     conn.commit()
-    g = ns["inflacion_desde"].__globals__
 
     def buscar(texto):
         at.text_input(key="busqueda_input").set_value(texto)

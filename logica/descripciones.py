@@ -402,6 +402,10 @@ def es_nombre_de_modelo(token):
     return sum(ch.isdigit() for ch in token) <= 3
 
 
+# Una palabra de una descripción, para descripciones_por_palabra().
+_RE_PALABRA_DEL_CATALOGO = re.compile(r"[A-ZÁÉÍÓÚÑ0-9][A-ZÁÉÍÓÚÑ0-9\-]*")
+
+
 # EL PARÁMETRO NO PUEDE EMPEZAR CON GUION BAJO. Streamlit NO hashea los parámetros que
 # arrancan con «_» —es su forma de decir «esto no entra en la clave del caché»— así que
 # `f(_version)` se calcula UNA vez y después devuelve siempre lo mismo, pase lo que pase con el
@@ -420,14 +424,19 @@ def descripciones_por_palabra(version):
     el resultado entre todas las marcas lo deja en una sola pasada.
 
     Además cuenta por PALABRA y no por subcadena, que es lo que se quería desde el principio:
-    con LIKE '%GOL%' entraban GOLF y ARREGLO."""
+    con LIKE '%GOL%' entraban GOLF y ARREGLO.
+
+    Cada descripción distinta se lee UNA vez, con cuántos productos la tienen: son 54.289 de
+    86.946 en la base real, porque el producto OEM se crea copiando la del proveedor. Pasó de
+    0,67 s a 0,4 s, y lo pagaba la primera búsqueda por texto después de cada reinicio (ver
+    dejar_listo_de_antemano())."""
     from collections import Counter
     cuenta = Counter()
-    c.execute("SELECT descripcion FROM productos WHERE descripcion IS NOT NULL")
-    for fila in c.fetchall():
-        for palabra in set(re.findall(r"[A-ZÁÉÍÓÚÑ0-9][A-ZÁÉÍÓÚÑ0-9\-]*",
-                                      (fila["descripcion"] or "").upper())):
-            cuenta[palabra] += 1
+    c.execute("SELECT descripcion, COUNT(*) FROM productos WHERE descripcion IS NOT NULL "
+              "GROUP BY descripcion")
+    for descripcion, cuantos in c.fetchall():
+        for palabra in set(_RE_PALABRA_DEL_CATALOGO.findall(descripcion.upper())):
+            cuenta[palabra] += cuantos
     return cuenta
 
 
@@ -647,7 +656,9 @@ def marcas_vehiculo_disponibles(version):   # ver descripciones_por_palabra()
     cuenta = Counter()
     c.execute("SELECT descripcion, COUNT(*) AS n FROM productos WHERE descripcion IS NOT NULL "
               "GROUP BY descripcion")
-    for fila in c.fetchall():
+    for i, fila in enumerate(c.fetchall()):
+        if i % 500 == 0:          # la arma también dejar_listo_de_antemano(), por atrás
+            ceder_al_mostrador()
         for marca, _categoria, _resto in marcas_vehiculo_en(fila["descripcion"]):
             cuenta[marca] += fila["n"]
     salida = sorted(cuenta.items(), key=lambda x: -x[1])

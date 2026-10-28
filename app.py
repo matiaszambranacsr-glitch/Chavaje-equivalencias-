@@ -608,6 +608,11 @@ try:
     arrancar_tanda_de_fondo()
 except Exception as _err:
     anotar_error("arrancar_tanda_de_fondo/arranque", _err)
+# Lo que si no pagaría la primera búsqueda, armado por atrás: ver dejar_listo_de_antemano().
+try:
+    dejar_listo_de_antemano()
+except Exception as _err:
+    anotar_error("dejar_listo_de_antemano/arranque", _err)
 
 
 # Los partes del mantenimiento y del descubrimiento son para quien administra, no para el
