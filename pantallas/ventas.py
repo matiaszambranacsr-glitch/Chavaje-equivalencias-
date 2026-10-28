@@ -332,11 +332,6 @@ if pagina == PAGINAS[9]:
                     st.session_state.pop("venta_resultados", None)
                     st.rerun()
 
-    # LA CAJA: el cierre de caja, el arqueo y lo que espera para cobrarse están en «💵 Caja».
-    # Ver «LA CAJA APARTE» en logica/ventas.py.
-    st.button("💵 La caja: cobrar y el cierre", key="venta_ir_a_la_caja",
-              on_click=ir_a_donde_dice_el_aviso, args=("💵 Caja",))
-
     # DEVOLVER ALGO DE UNA VENTA: en su propia pantalla, «↩️ Devoluciones». Acá solo el botón.
     st.button("↩️ Devolver algo de una venta →", key="venta_ir_a_devolver",
               on_click=ir_a_donde_dice_el_aviso, args=("↩️ Devoluciones → 🧾 De un cliente",))
