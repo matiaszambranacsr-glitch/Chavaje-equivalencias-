@@ -1923,7 +1923,10 @@ if pagina == PAGINAS[0]:
                         # Lo que ya había solo encontraba códigos que empiezan igual, así que
                         # W71249 por W71294 no daba nada aunque fuera el mismo filtro.
                         tipeos = _recordar_nr("_nr_tipeos", lambda: codigos_por_tipeo(clean), clean)
-                        if tipeos:
+                        # Si una descripción ya lo cita, eso es la respuesta: los parecidos, plegados.
+                        if tipeos and (not citan or seccion_plegable(
+                                f"⌨️ Otros {len(tipeos)} que se escriben casi igual",
+                                key=f"tipeos_plegados_{clean}")):
                             # Son OTROS códigos: un 6205 y un 6206 son rulemanes distintos.
                             # Se ofrecen por si fue un error de tipeo, nunca como equivalencia
                             # (lo señaló una revisión con ChatGPT).
@@ -1978,6 +1981,10 @@ if pagina == PAGINAS[0]:
                                 "_nr_texto",
                                 lambda: buscar_por_texto(codigo_individual, aflojar=False),
                                 codigo_individual)
+                            # Sin repetir lo que ya está arriba como «lo nombran en la
+                            # descripción»: buscando P716, eran los mismos dos filtros de FISPA.
+                            _ya_citados = {f["ID"] for f in citan}
+                            parcial = [f for f in parcial if f["ID"] not in _ya_citados]
                             if parcial:
                                 st.info("¿Quisiste decir alguno de estos? Tocá el código para ver sus equivalencias:")
                                 mostrar_lista_clickeable(parcial, f"sug_{clean}", limite=12)
@@ -2114,7 +2121,8 @@ if pagina == PAGINAS[0]:
                 for _f in res_texto:
                     _rub = clasificar_repuesto(_f.get("Descripcion") or "")
                     _rubros_txt[_rub] = _rubros_txt.get(_rub, 0) + 1
-                if len(_rubros_txt) > 2 or (len(_rubros_txt) == 2
+                # Con pocos resultados no hace falta filtrar: con dos, eran dos selectores más.
+                if len(res_texto) >= 6 and (len(_rubros_txt) > 2 or len(_rubros_txt) == 2
                                             and "Sin clasificar" not in _rubros_txt):
                     _opciones_rub = ["Todos"] + sorted(_rubros_txt, key=lambda r: -_rubros_txt[r])
                     if st.session_state.get("filtro_rubro_texto") not in _opciones_rub:
@@ -2129,7 +2137,7 @@ if pagina == PAGINAS[0]:
                 _marcas_txt = {}
                 for _f in _res_vista:
                     _marcas_txt[_f["Marca"]] = _marcas_txt.get(_f["Marca"], 0) + 1
-                if len(_marcas_txt) > 1:
+                if len(_marcas_txt) > 1 and len(_res_vista) >= 6:
                     _opciones_mt = ["Todas"] + sorted(_marcas_txt, key=lambda m: -_marcas_txt[m])
                     if st.session_state.get("filtro_marca_texto") not in _opciones_mt:
                         st.session_state.pop("filtro_marca_texto", None)

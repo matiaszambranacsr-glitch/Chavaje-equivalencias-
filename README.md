@@ -6733,6 +6733,15 @@ Lo pidió el dueño: «más cosas». Se pasaron por el buscador las 10 búsqueda
 - **El error de tipeo es de teclado** (`_distancia_de_tipeo()`, `_tipeo_creible()`): para «W712/94» se sugería «¿Error de tipeo? TARANTO 271224, 271295…», juntas, porque de W a 2 hay un solo cambio. Ahora cambiar una letra por un número (o al revés) no es tipeo, salvo que se parezcan a la vista (O y 0, I y 1, S y 5, B y 8, Z y 2, G y 6), que es lo que confunden también las fotos. Vale para el «¿Quisiste decir…?» del Buscador.
 - La medición de pantallas con `--base` ahora dice quién hace la consulta lenta y no `datos.py:execute`: «🧹 Limpiar y corregir [mostrador.py:codigos_con_dos_precios_en_la_misma_lista]». Esa consulta tarda 0,23 s con la base en memoria; el 1,8 s de la medición es la primera lectura del disco de una copia recién hecha.
 
+### 👀 Mirado en el navegador: la pieza antes que su junta, y sin ruido
+
+Lo pidió el dueño: «más todavía quiero que mejores». Se miró lo nuevo con Chromium, en computadora y en celular, con la copia de la base, y salieron cuatro cosas:
+
+- **La pieza antes que su accesorio**: «bomba de agua k4m» traía «JTA BBA AGUA RENAULT K4M», la junta de la bomba, que dice las tres cosas. Ahora, a igual cantidad de palabras, lo que arranca con un accesorio (junta, retén, despiece, tornillo… la lista del Modo Mecánico, `_ACCESORIO_DE_LA_PIEZA`) va después de la pieza, salvo que se pida el accesorio («junta tapa»). `medir.py texto`: primero 265 → 268, entre los 5 primeros 502 → 506.
+- **Sin filtros de más**: «Rubro» y «Marca» aparecían con dos resultados. Ahora, desde seis.
+- **El tipeo de un código corto, de a un cambio**: buscando P716, «¿No será alguno de estos?» ofrecía un conector «714», una lámpara «H7 12» y un «F-715»: a dos cambios de un código de cuatro está la mitad del catálogo. Con cinco caracteres o menos, un cambio. Y si una descripción ya cita el código (ver «🔗 Lo que tus listas ya dicen de otras marcas»), los parecidos van plegados.
+- **Sin repetir**: debajo de «🔗 lo nombran en la descripción» volvían a salir los mismos dos filtros como «¿Quisiste decir…?». Ya no.
+
 ### 🚀 La búsqueda por descripción, cuatro veces más rápida
 
 Lo pidió el dueño («hacé 3, 4, 5 y 6»; esta es la 6). Cada palabra se buscaba con un LIKE «%…%» sobre los 87.000 productos, unos 20 ms por palabra y por cada forma (abreviatura, sinónimo, singular): una búsqueda de cuatro palabras pasaba los 100 ms. Ahora hay un **índice por trigramas** de SQLite (FTS5) que encuentra exactamente lo mismo que el LIKE —medido palabra por palabra con la copia de la base: JUNTA 5.182, K4M 269, «1.6» 3.438, iguales— en 0,4 a 3 ms.

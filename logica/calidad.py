@@ -967,6 +967,9 @@ def codigos_por_tipeo(clean_code, limite=10, de_una_foto=False):
     if not clean_code or len(clean_code) < 4:
         return []
     largo = len(clean_code)
+    # Con cinco caracteres o menos, un cambio: a dos cambios de «P716» estaban un conector
+    # «714», una lámpara «H7 12» y un «F-715»; la mitad del código.
+    tope = 1 if largo <= 5 else 2
     tercio = max(largo // 3, 1)
     # Los tres pedazos van SIEMPRE, aunque alguno quede de un solo carácter. Descartar los
     # cortos rompía la garantía: con 'OC9O' quedaba solo el pedazo '9O', y el código correcto
@@ -998,7 +1001,7 @@ def codigos_por_tipeo(clean_code, limite=10, de_una_foto=False):
     for trozo in juntos.split("\x1f") if juntos else ():
         pid, cod = trozo.split("\x1e", 1)
         d = _distancia_de_tipeo(clean_code, cod)
-        if d <= 2 and _tipeo_creible(clean_code, cod):
+        if d <= tope and _tipeo_creible(clean_code, cod):
             cerca.append((int(pid), d))
     if not cerca:
         return []

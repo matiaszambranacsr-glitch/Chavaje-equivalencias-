@@ -2551,6 +2551,21 @@ def probar(L):
         _otro.execute("UPDATE datos SET valor = '1' WHERE clave = 'productos'")
     ns["_estado_del_indice"]().clear()
     esperar("con otros productos que la base, no se usa", ns["indice_al_dia"](), None)
+    # 98. LA PIEZA ANTES QUE SU ACCESORIO (ver _ACCESORIO_DE_LA_PIEZA): la junta de la bomba va
+    # después de la bomba, salvo que se pida la junta; y el tipeo de un código corto, de a uno.
+    m19 = marca("DIECINUEVE BOMBAS")
+    _jbba = producto("JB98", "JTA BBA AGUA RENAULT ZQ5M", m19)
+    _bba = producto("BB98", "BBA AGUA RENAULT ZQ5M LINEA PESADA", m19)      # más larga, igual de abreviada
+    producto("P714", "CONECTOR FORD KA", m19)
+    conn.commit()
+    _orden98 = [f["ID"] for f in ns["buscar_por_texto"]("bomba agua renault zq5m")]
+    esperar("la bomba antes que la junta de la bomba",
+            _orden98.index(_bba) < _orden98.index(_jbba) if _jbba in _orden98 else None, True)
+    _orden98b = [f["ID"] for f in ns["buscar_por_texto"]("junta bomba agua zq5m")]
+    esperar("pidiendo la junta, la junta primero", _orden98b[:1], [_jbba])
+    esperar("un código de 4: a un cambio sí (P715), a dos no (Q716)",
+            ("P714" in [f["Codigo"] for f in ns["codigos_por_tipeo"]("P715")],
+             "P714" in [f["Codigo"] for f in ns["codigos_por_tipeo"]("Q716")]), (True, False))
     _r92 = ns["buscar_por_texto"]("embrague ford ka")
     esperar("«ka» es un modelo: el de la Transit, aparte",
             (_eka in {f["ID"] for f in _r92}, _etr in {f["ID"] for f in _r92.aparte}), (True, True))

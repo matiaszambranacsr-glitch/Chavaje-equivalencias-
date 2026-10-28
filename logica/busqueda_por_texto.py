@@ -981,8 +981,16 @@ def buscar_por_texto(texto, aflojar=True):
         # El punto pegado también separa: «Jgo.Descarbonizacion» tiene las dos enteras.
         return sum(1 for p in palabras if f" {p} " in texto_fila or f" {p} " in sin_puntos
                    or any(f" {forma} " in sin_puntos for forma, _ in formas_de_la_palabra(p)))
-    filas.sort(key=lambda f: (-f.get("_coincidencias", 0), -_enteras(f), -f.get("_tal_cual", 0),
-                              f.get("_largo") or 0))
+    # Y A IGUAL CANTIDAD, LA PIEZA ANTES QUE SU ACCESORIO: «bomba de agua k4m» traía primero
+    # «JTA BBA AGUA RENAULT K4M», la junta de la bomba, que dice las tres cosas. Como en el
+    # Modo Mecánico (ver _ACCESORIO_DE_LA_PIEZA): no se esconde, va después; salvo que el
+    # accesorio sea lo pedido («junta tapa»).
+    def _es_accesorio(f):
+        hallado = _RE_ACCESORIO.match(normalizar_texto(f.get("Descripcion") or "").lstrip())
+        return bool(hallado) and not any(
+            dice_la_palabra({"Descripcion": hallado.group(1)}, p) for p in palabras)
+    filas.sort(key=lambda f: (-f.get("_coincidencias", 0), _es_accesorio(f), -_enteras(f),
+                              -f.get("_tal_cual", 0), f.get("_largo") or 0))
     # Lo que no nombra el auto pedido, aparte (ver nivel_del_auto()). Cada fila apartada dice
     # por qué («Por qué»), y lo apartado va en el orden de antes, el de parecido: antes se cortaba
     # en 200 por regla y lo más parecido —«CHEVROLET CORSA NAFTA» buscando «filtro de nafta

@@ -208,8 +208,11 @@ def probar():
         fallas.append("por descripción, abrir «Otros … que no dicen» no muestra la tabla")
     at.session_state["exp_texto_aparte"] = False
     # Y el filtro por rubro, con cuántos de cada uno: «clio k4m» trae la bomba y el filtro.
-    c.execute("INSERT INTO productos (codigo_raw, codigo_clean, descripcion, marca_id) VALUES "
-              "('FAK4M', 'FAK4M', 'FILTRO DE AIRE RENAULT CLIO K4M', ?)", (_marca_prueba,))
+    # Seis o más: con menos no se ofrece filtrar.
+    c.executemany("INSERT INTO productos (codigo_raw, codigo_clean, descripcion, marca_id) VALUES "
+                  "(?, ?, ?, ?)", [("FAK4M", "FAK4M", "FILTRO DE AIRE RENAULT CLIO K4M", _marca_prueba)]
+                  + [(f"FK{i}", f"FK{i}", f"FILTRO DE ACEITE RENAULT CLIO K4M {i}", _marca_prueba)
+                     for i in range(4)])
     conn.commit()
     at.text_input(key="texto_input").set_value("clio k4m")
     [b for b in at.button if "Buscar por descripción" in b.label][0].click().run()
@@ -244,7 +247,7 @@ def probar():
     at.session_state["modo_busqueda"] = "Código"
     # Un código que no está, pero que una descripción tuya nombra: «REF ORIG MANN P716».
     c.execute("INSERT INTO productos (codigo_raw, codigo_clean, descripcion, marca_id) VALUES "
-              "('FC14100', 'FC14100', 'FILTRO COMBUSTIBLE REF ORIG MANN P 716', ?)", (_marca_prueba,))
+              "('FC14100', 'FC14100', 'FILTRO COMBUSTIBLE REF ORIG MANN P716', ?)", (_marca_prueba,))
     conn.commit()
     at.session_state["pagina_actual"] = ns["PAGINAS"][0]
     at.run()
@@ -253,6 +256,8 @@ def probar():
     if (not any("lo nombran en la descripción" in x.value for x in at.success)
             or not [b for b in at.button if (b.key or "").startswith("citan_P716_")]):
         fallas.append("un código que una descripción nombra: no se ofrece")
+    elif [b for b in at.button if (b.key or "").startswith("sug_P716_")]:
+        fallas.append("un código que una descripción nombra: aparece dos veces")
     recorrer("sin contraseña")
     entrar(clave_ana)
     if len(at.radio(key="pagina_actual").options) != len(ns["PAGINAS"]):
