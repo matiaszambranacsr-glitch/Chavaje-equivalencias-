@@ -6733,6 +6733,14 @@ Lo pidió el dueño: «más cosas». Se pasaron por el buscador las 10 búsqueda
 - **El error de tipeo es de teclado** (`_distancia_de_tipeo()`, `_tipeo_creible()`): para «W712/94» se sugería «¿Error de tipeo? TARANTO 271224, 271295…», juntas, porque de W a 2 hay un solo cambio. Ahora cambiar una letra por un número (o al revés) no es tipeo, salvo que se parezcan a la vista (O y 0, I y 1, S y 5, B y 8, Z y 2, G y 6), que es lo que confunden también las fotos. Vale para el «¿Quisiste decir…?» del Buscador.
 - La medición de pantallas con `--base` ahora dice quién hace la consulta lenta y no `datos.py:execute`: «🧹 Limpiar y corregir [mostrador.py:codigos_con_dos_precios_en_la_misma_lista]». Esa consulta tarda 0,23 s con la base en memoria; el 1,8 s de la medición es la primera lectura del disco de una copia recién hecha.
 
+### ⚡ La cola, de a uno y con el teclado
+
+Lo pidió el dueño («hacé 3, 4, 5 y 6»; esta es la 4). La cola tiene 7.827 pendientes y la tabla se revisa tildando casillas. En «📊 Estadísticas → 🔗 Equivalencias sugeridas», con la lista elegida, el interruptor **«⚡ Revisar de a uno, con el teclado»** muestra un par por vez: los dos productos (marca, código, precio y descripción) y lo que dice la app de ellos (la ficha), con tres botones y su tecla: **S** son la misma pieza, **N** no son, **P** pasar (vuelve al final de la cola).
+
+- **El orden** (`cola_de_revision_de_a_uno()`): primero lo que une redes grandes (🔥, «aprobarlo encadena 312 pares: miralo bien»), de la que más encadena a la que menos; después, de a tandas parecidas —las mismas dos listas y el mismo rubro, «FISPA ↔ ILLINOIS · Filtros»—, la tanda más grande primero y adentro de la más segura a la menos. Así se mira lo mismo muchas veces seguidas, que es lo que más rinde.
+- **Rápido**: la cola se arma una vez (analizar 300 pendientes tarda 1,6 s) y queda en la sesión; cada decisión la achica sin volver a analizar. Si otra persona ya resolvió ese par, avisa y sigue.
+- **Nunca en bloque**: cada toque es la decisión de una persona sobre un par, igual que en la tabla (en los dos sentidos, `decidir_de_a_uno()`), y queda en lo revisado como siempre. Sin sesión no aparece; en el celular, sin teclas.
+
 ### 🔗 Lo que tus listas ya dicen de otras marcas
 
 Lo pidió el dueño («hacé 3, 4, 5 y 6»; esta es la 3, las referencias cruzadas). FISPA describe sus filtros con las referencias de otras marcas —«FILTROS PARA COMBUSTIBLE 14100 PEUGEOT REF ORIG MANN P716 - FRAM C5563»—, y buscando P716 no aparecía nada: el código no está cargado como código, solo escrito. En la copia de la base hay unas 2.800 citas así (Bosch 1.278, Marelli 347, Valeo 283, SKF 102, MANN 42, FRAM 40…). Las de Bosch, Marelli y NGK ya son códigos de fábrica y se encuentran; las de MANN y FRAM no.

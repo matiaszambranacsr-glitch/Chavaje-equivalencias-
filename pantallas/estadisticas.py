@@ -1232,6 +1232,51 @@ a traer solas desde Administrar → Mantenimiento.
                 if st.toggle("Ver cuáles", key=f"ver_puentes_{lote_info['lote']}"):
                     st.dataframe([{k: v for k, v in x.items() if k not in ("a", "b")}
                                   for x in _puentes[:50]], width="stretch", hide_index=True)
+            # ⚡ DE A UNO, CON EL TECLADO (ver cola_de_revision_de_a_uno()): un par por vez, los
+            # 🔥 primero y después de a tandas parecidas. La cola se arma una vez y queda en la
+            # sesión: cada decisión la achica, sin volver a analizar la lista (1,6 s).
+            if not solo_mirar() and st.toggle(
+                    "⚡ Revisar de a uno, con el teclado", key=f"de_a_uno_{lote_info['lote']}",
+                    help="Un par por vez. S: son la misma pieza; N: no son; P: pasar (vuelve al "
+                         "final). Primero lo que une redes (🔥), después de a tandas parecidas: "
+                         "las mismas dos listas y el mismo rubro."):
+                _clave_cola = f"_cola_de_a_uno_{lote_info['lote']}"
+                if not st.session_state.get(_clave_cola):
+                    with st.spinner("Armando la cola…"):
+                        st.session_state[_clave_cola] = cola_de_revision_de_a_uno(lote_info["lote"])
+                _cola_u = st.session_state[_clave_cola]
+                _aviso_u = st.session_state.pop("_de_a_uno_aviso", None)
+                if _aviso_u:
+                    st.info(_aviso_u)
+                if not _cola_u:
+                    st.success("✅ No queda nada pendiente en esta lista.")
+                else:
+                    _par_u = _cola_u[0]
+                    _pa, _pb, _ficha_u = par_para_revisar(_par_u["a"], _par_u["b"])
+                    _hechos_u = st.session_state.get("_de_a_uno_hechos", 0)
+                    st.markdown(f"**{_par_u['tanda']}** · quedan {miles(len(_cola_u))} en la cola"
+                                + (f" · llevás {miles(_hechos_u)}" if _hechos_u else ""))
+                    if _par_u["encadena"]:
+                        st.warning(f"🔥 Aprobarlo encadena {miles(_par_u['encadena'])} pares: "
+                                   "miralo bien.")
+                    for _col_u, _p_u in zip(st.columns(2), (_pa, _pb)):
+                        if _p_u:
+                            _col_u.markdown(f"**{_p_u['marca']} · {_p_u['codigo_raw']}**"
+                                            + (f" — \\${miles(_p_u['precio'], 0)}"
+                                               if _p_u.get("precio") else ""))
+                            _col_u.caption(_p_u["descripcion"] or "")
+                    if _ficha_u:
+                        st.markdown(f"La app dice: **{_ficha_u['estado']}** — "
+                                    f"{motivo_corto(_ficha_u)}")
+                    _sin_teclas = es_celular()
+                    for _col_u, (_rotulo, _decision, _tecla) in zip(st.columns(3), (
+                            ("✅ Son la misma pieza", "si", "S"), ("❌ No son", "no", "N"),
+                            ("⏭️ Pasar", "pasar", "P"))):
+                        _col_u.button(_rotulo, key=f"de_a_uno_{_decision}", width="stretch",
+                                      type="primary" if _decision == "si" else "secondary",
+                                      shortcut=None if _sin_teclas else _tecla,
+                                      on_click=cb_de_a_uno,
+                                      args=(lote_info["lote"], _clave_cola, _decision))
             # Y LOS QUE YA ESTÁN UNIDOS por otro camino. Ver cuantos_ya_estan_unidos().
             try:
                 _ya_unidos = recordado_mientras_no_cambie(

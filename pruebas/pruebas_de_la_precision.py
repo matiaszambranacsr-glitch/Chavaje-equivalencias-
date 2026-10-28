@@ -2490,6 +2490,29 @@ def probar(L):
             [f["ID"] for f in ns["productos_que_citan_el_codigo"]("P716")], [_cita])
     esperar("y dice dónde", ns["fragmento_que_cita"]({"Descripcion": "REF ORIG MANN P 716 - FRAM"},
                                                       "P716"), "REF ORIG MANN P 716 - FRAM")
+    # 96. LA REVISIÓN DE A UNO (ver cola_de_revision_de_a_uno()): de a tandas parecidas —las
+    # mismas dos listas y el mismo rubro—, la más grande primero; cada decisión, un par.
+    m18a, m18b, m18c = marca("DIECIOCHO A"), marca("DIECIOCHO B"), marca("DIECIOCHO C")
+    _pares96 = [(producto("FA96", "FILTRO ACEITE VW GOL", m18a), producto("FB96", "FILTRO ACEITE VW GOL 1.6", m18b)),
+                (producto("FC96", "FILTRO ACEITE CORSA", m18a), producto("FD96", "FILTRO ACEITE CORSA 1.4", m18b)),
+                (producto("DA96", "DISCO FRENO PALIO", m18a), producto("DC96", "DISCO FRENO PALIO DEL", m18c))]
+    c.executemany("INSERT INTO equivalencias_pendientes (producto_a_id, producto_b_id, origen, lote) "
+                  "VALUES (?, ?, 'lista_proveedor', 'DE A UNO')", [(min(p), max(p)) for p in _pares96])
+    conn.commit()
+    _cola96 = ns["cola_de_revision_de_a_uno"]("DE A UNO")
+    esperar("la tanda más grande primero (los dos filtros), después la de frenos",
+            [{(x["a"], x["b"]) for x in _cola96[:2]}, (_cola96[2]["a"], _cola96[2]["b"])],
+            [{(min(p), max(p)) for p in _pares96[:2]}, (min(_pares96[2]), max(_pares96[2]))])
+    _a96, _b96 = _pares96[0]
+    esperar("decidir de a uno: aprueba ese par, y otra vez no hace nada",
+            (ns["decidir_de_a_uno"]("DE A UNO", _a96, _b96, True) > 0,
+             ns["decidir_de_a_uno"]("DE A UNO", _a96, _b96, True),
+             c.execute("SELECT COUNT(*) FROM equivalencias WHERE producto_a_id = ? AND producto_b_id = ?",
+                       (min(_a96, _b96), max(_a96, _b96))).fetchone()[0]), (True, 0, 1))
+    _d96 = _pares96[2]
+    ns["decidir_de_a_uno"]("DE A UNO", _d96[0], _d96[1], False)
+    esperar("descartar de a uno: sale de la cola y no se aprueba", c.execute(
+        "SELECT COUNT(*) FROM equivalencias_pendientes WHERE lote = 'DE A UNO'").fetchone()[0], 1)
     _r92 = ns["buscar_por_texto"]("embrague ford ka")
     esperar("«ka» es un modelo: el de la Transit, aparte",
             (_eka in {f["ID"] for f in _r92}, _etr in {f["ID"] for f in _r92.aparte}), (True, True))

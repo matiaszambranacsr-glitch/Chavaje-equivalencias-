@@ -275,6 +275,42 @@ def probar():
     if len(_presu) != 1 or "F100" not in _presu[0] or "TOTAL" not in _presu[0]:
         fallas.append(f"el presupuesto por WhatsApp: {_presu}")
     at.session_state["carrito"] = {}
+    # ⚡ La revisión de a uno: la tarjeta con los dos productos, y «✅ Son la misma pieza»
+    # aprueba ese par y pasa al siguiente (ver cola_de_revision_de_a_uno()).
+    c.execute("INSERT INTO marcas (nombre, tipo) VALUES ('UNO A UNO', 'PROVEEDOR')")
+    _m_u = c.lastrowid
+    _ids_u = []
+    for _cod, _desc in (("UA1", "FILTRO ACEITE FIAT DUNA"), ("UB1", "FILTRO ACEITE FIAT DUNA 1.4"),
+                        ("UA2", "FILTRO ACEITE FIAT UNO"), ("UB2", "FILTRO ACEITE FIAT UNO 1.3")):
+        c.execute("INSERT INTO productos (codigo_raw, codigo_clean, descripcion, marca_id) "
+                  "VALUES (?, ?, ?, ?)", (_cod, _cod, _desc, _marca_prueba if _cod[1] == "A" else _m_u))
+        _ids_u.append(c.lastrowid)
+    c.executemany("INSERT INTO equivalencias_pendientes (producto_a_id, producto_b_id, origen, lote) "
+                  "VALUES (?, ?, 'lista_proveedor', 'DE A UNO EN PANTALLA')",
+                  [(_ids_u[0], _ids_u[1]), (_ids_u[2], _ids_u[3])])
+    conn.commit()
+    at.session_state["pagina_actual"] = "📊 Estadísticas"
+    at.session_state["sub_stats"] = "🔗 Equivalencias sugeridas"
+    at.run()
+    _lotes_u = [o for o in (at.selectbox(key="lote_en_revision").options
+                            if any(x.key == "lote_en_revision" for x in at.selectbox) else [])
+                if o.startswith("DE A UNO EN PANTALLA")]
+    if not _lotes_u:
+        fallas.append("de a uno: la lista de prueba no aparece para revisar")
+    else:
+        at.selectbox(key="lote_en_revision").set_value(_lotes_u[0]).run()
+        at.toggle(key="de_a_uno_DE A UNO EN PANTALLA").set_value(True).run()
+        _si = [b for b in at.button if b.key == "de_a_uno_si"]
+        if not _si or not any("FILTRO ACEITE FIAT" in x.value for x in at.caption):
+            fallas.append("de a uno: no se ve la tarjeta con los dos productos")
+        else:
+            _si[0].click().run()
+            if c.execute("SELECT COUNT(*) FROM equivalencias_pendientes WHERE lote = "
+                         "'DE A UNO EN PANTALLA'").fetchone()[0] != 1:
+                fallas.append("de a uno: «Son la misma pieza» no aprobó el par")
+            elif not any("quedan 1 en la cola" in x.value for x in at.markdown):
+                fallas.append("de a uno: después de decidir no pasa al siguiente")
+    at.session_state["pagina_actual"] = ns["PAGINAS"][0]
     recorrer("operador")
     [b for b in at.button if b.label == "Salir"][0].click().run()
     entrar("clave-duenio-1")

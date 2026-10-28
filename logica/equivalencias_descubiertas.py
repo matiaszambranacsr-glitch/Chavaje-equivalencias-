@@ -4937,6 +4937,65 @@ def cuantos_ya_estan_unidos(lote):
                if n == 0)
 
 
+# LA REVISIÓN DE A UNO, CON EL TECLADO. La cola tiene 7.827 pendientes y la tabla se revisa
+# tildando casillas. Lo pidió el dueño («una revisión más rápida: de a tandas parecidas, con
+# teclas para aprobar o descartar, empezando por los 🔥»). Nunca aprueba en bloque: cada par es
+# una decisión de una persona, como en la tabla.
+def cola_de_revision_de_a_uno(lote, ventana=300):
+    """[{"a", "b", "encadena", "tanda"}] en el orden en que conviene mirarlos: primero lo que une
+    redes grandes (🔥, ver puentes_del_lote()), de la que más encadena a la que menos; después,
+    de a tandas parecidas —el mismo par de listas y el mismo rubro—, de la tanda más grande a la
+    más chica, y adentro de la más segura a la menos. Mira los primeros `ventana` pendientes de
+    la lista (analizarlos tarda: 1,6 s los 300); cuando se terminan, se arma otra."""
+    puentes = sorted(puentes_del_lote(lote, tope=None), key=lambda p: -p["Encadena"])
+    cola = [{"a": p["a"], "b": p["b"], "encadena": p["Encadena"], "tanda": "🔥 une redes"}
+            for p in puentes]
+    vistos = {(p["a"], p["b"]) for p in puentes} | {(p["b"], p["a"]) for p in puentes}
+    limpias, sospechosas, _relacionadas = analizar_lote_pendiente(lote, limite=ventana)
+    tandas = {}
+    for f in list(limpias) + list(sospechosas):
+        if (f["a"], f["b"]) in vistos:
+            continue
+        rubro = clasificar_repuesto(f.get("desc_a") or f.get("desc_b") or "")
+        tandas.setdefault((f.get("marca_a") or "", f.get("marca_b") or "", rubro), []).append(f)
+    for (marca_a, marca_b, rubro), filas in sorted(tandas.items(), key=lambda kv: -len(kv[1])):
+        for f in sorted(filas, key=lambda f: -(f.get("confianza") or 0)):
+            cola.append({"a": f["a"], "b": f["b"], "encadena": 0,
+                         "tanda": f"{marca_a} ↔ {marca_b} · {rubro}"})
+    return cola
+
+
+def decidir_de_a_uno(lote, a, b, son_la_misma):
+    """Aprueba o descarta un par de la cola, en los dos sentidos como la tabla. Devuelve cuántos
+    cambió: 0 si ya no estaba pendiente (lo resolvió otra persona mientras tanto)."""
+    pares = [(a, b), (b, a)]
+    return aprobar_pendientes(lote, pares) if son_la_misma else rechazar_pendientes(lote, pares)
+
+
+def par_para_revisar(a, b):
+    """(producto A, producto B, ficha) para la tarjeta de la revisión de a uno."""
+    c.execute("""SELECT p.id, p.codigo_raw, p.descripcion, p.precio, m.nombre AS marca
+                 FROM productos p JOIN marcas m ON m.id = p.marca_id WHERE p.id IN (?, ?)""",
+              (a, b))
+    por_id = {r["id"]: dict(r) for r in c.fetchall()}
+    return por_id.get(a), por_id.get(b), ficha_de_prueba(a, b, liviana=True)
+
+
+def cb_de_a_uno(lote, clave_cola, decision):
+    """Callback de los botones de la revisión de a uno: «si», «no» o «pasar» (al final)."""
+    cola = st.session_state.get(clave_cola) or []
+    if not cola:
+        return
+    par = cola.pop(0)
+    if decision == "pasar":
+        cola.append(par)
+        return
+    hecho = decidir_de_a_uno(lote, par["a"], par["b"], decision == "si")
+    st.session_state["_de_a_uno_hechos"] = st.session_state.get("_de_a_uno_hechos", 0) + bool(hecho)
+    if not hecho:
+        st.session_state["_de_a_uno_aviso"] = "Ese ya no estaba pendiente: lo resolvió otra persona."
+
+
 def aprobar_pendientes(lote, solo_estos_pares=None, en_bloque=False):
     """Pasa los vínculos pendientes a equivalencias reales.
 
