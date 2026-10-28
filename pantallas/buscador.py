@@ -2071,6 +2071,8 @@ if pagina == PAGINAS[0]:
                         "aparte": list(getattr(_res_texto, "aparte", [])),
                         "del_auto": list(getattr(_res_texto, "del_auto", [])),
                         "por_que_aparte": getattr(_res_texto, "por_que_aparte", ""),
+                        # Un código que no está, de una familia que sí («mfla 260»).
+                        "cercanos": list(getattr(_res_texto, "cercanos", [])),
                     }
 
         busqueda_texto_guardada = st.session_state.get("ultima_busqueda_texto")
@@ -2084,6 +2086,30 @@ if pagina == PAGINAS[0]:
                     for mal, bien in _corregidas.items()) + ".")
             _aparte = busqueda_texto_guardada.get("aparte") or []
             _dicen = " o ".join(f"«{x.lower()}»" for x in busqueda_texto_guardada.get("del_auto") or [])
+
+            def _lo_apartado():
+                # Lo que solo coincide en la pieza y no nombra el auto pedido: «bomba de agua
+                # k4m» traía 199 bombas de cualquier auto debajo de la única del K4M. Plegado y
+                # perezoso, para el que igual quiera mirarlas. Va también sin resultados: «kit
+                # 22382» no tiene ninguno, y lo que dice solo «kit» queda acá.
+                if not _aparte:
+                    return
+                _exp_aparte = st.expander(
+                    f"🔧 Otros {miles(len(_aparte))} que "
+                    + (busqueda_texto_guardada.get("por_que_aparte") or f"no dicen {_dicen}"),
+                    key="exp_texto_aparte", on_change="rerun")
+                if _exp_aparte.open:
+                    with _exp_aparte:
+                        _tabla_ap = para_mostrar(quitar_id(_aparte))
+                        st.dataframe(con_stock_legible(_tabla_ap), width="stretch",
+                                     hide_index=True,
+                                     column_order=columnas_que_dicen_algo(_tabla_ap),
+                                     column_config=CONFIG_COLUMNAS_RESULTADO,
+                                     key="tabla_resultados_texto_aparte",
+                                     selection_mode="single-row",
+                                     on_select=functools.partial(
+                                         abrir_la_fila_elegida,
+                                         "tabla_resultados_texto_aparte", _aparte))
             if res_texto:
                 st.success(f"Se encontraron {len(res_texto)} coincidencia(s)"
                            + (" con todo lo pedido" if _aparte else "")
@@ -2154,26 +2180,7 @@ if pagina == PAGINAS[0]:
                              key="tabla_resultados_texto", selection_mode="single-row",
                              on_select=functools.partial(
                                  abrir_la_fila_elegida, "tabla_resultados_texto", _res_vista))
-                # Lo que solo coincide en la pieza y no nombra el auto pedido: «bomba de agua
-                # k4m» traía 199 bombas de cualquier auto debajo de la única del K4M. Plegado y
-                # perezoso, para el que igual quiera mirarlas.
-                if _aparte:
-                    _exp_aparte = st.expander(
-                        f"🔧 Otros {miles(len(_aparte))} que "
-                        + (busqueda_texto_guardada.get("por_que_aparte") or f"no dicen {_dicen}"),
-                        key="exp_texto_aparte", on_change="rerun")
-                    if _exp_aparte.open:
-                        with _exp_aparte:
-                            _tabla_ap = para_mostrar(quitar_id(_aparte))
-                            st.dataframe(con_stock_legible(_tabla_ap), width="stretch",
-                                         hide_index=True,
-                                         column_order=columnas_que_dicen_algo(_tabla_ap),
-                                         column_config=CONFIG_COLUMNAS_RESULTADO,
-                                         key="tabla_resultados_texto_aparte",
-                                         selection_mode="single-row",
-                                         on_select=functools.partial(
-                                             abrir_la_fila_elegida,
-                                             "tabla_resultados_texto_aparte", _aparte))
+                _lo_apartado()
 
                 # La búsqueda por descripción solo hace coincidir texto: encuentra el producto,
                 # pero no sus equivalentes. Acá se abre la red de equivalencias de cada resultado,
@@ -2349,6 +2356,15 @@ if pagina == PAGINAS[0]:
                 boton_para_consultar(texto_pedido, res_texto, "txt")
             else:
                 st.warning("No se encontraron productos con esa descripción.")
+                # Un código que no está, de una familia que sí: «no tengo el MFLA 260; tengo el
+                # 258». Otros códigos, no el pedido (ver ResultadosDeTexto.cercanos).
+                _cercanos = busqueda_texto_guardada.get("cercanos") or []
+                if _cercanos:
+                    st.info("🔢 De esa familia, lo más cercano. **Son otros códigos**: confirmá "
+                            "que sirva antes de ofrecerlo.")
+                    mostrar_lista_clickeable(_cercanos, "cercano_txt", limite=8,
+                                             detalle=lambda f: f.get("Por qué") or "")
+                _lo_apartado()
                 boton_para_consultar(texto_pedido, None, "txt_nada")
 
                 # Antes de rendirse: entender qué pidió el cliente. En el mostrador nadie dice

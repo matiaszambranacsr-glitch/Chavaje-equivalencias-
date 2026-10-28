@@ -6777,6 +6777,19 @@ Lo pidió el dueño («hacé 3, 4, 5 y 6»; esta es la 5). «bomba de agua k4m»
 
 `autos_del_motor()` lo aprende de las descripciones que nombran el motor (con cinco o más): los modelos que aparecen en el 5 % o más, y la cilindrada y las válvulas solo si las dicen tres o más y el 60 % de los que dicen alguna (el F8Q tenía 9 «16V» y 9 «8V», y no dice ninguna). Se recuerda por versión del catálogo. «bomba agua clio 1.6 16v» trae 11 con todo lo pedido.
 
+## 🔢 Un código que no está, y el código escrito con espacio
+
+Lo pidió el dueño («seguí lo último y mejorá toda la app»). Se miraron las 57 búsquedas reales de la base: diez dieron vacío alguna vez, y varias eran códigos escritos con un espacio. Por descripción, «kit 22382» traía 200 kits cualesquiera, «mfla 260» 191 productos que dicen 260 (un motor Ford 225/260/289) y cuatro conectores MFLA que no son el 260, y «mb 0151» kits de Mercedes.
+
+- **Un número que no dice ningún resultado ya no llena la pantalla.** Lo que coincide en el resto va plegado («🔧 Otros 200 que no dicen «22382»»), y adelante no queda nada: la pantalla dice que no está. Un número no vale adentro de otro: «0151» no está en C12015120. Solo si se vio todo lo que lo dice (la consulta corta en 400). No toca el número del auto («ford 260» es el motor), ni la cilindrada ni las válvulas.
+- **Si es un código de una familia del catálogo, lo más cercano.** «mfla 260» ofrece **MFLA 258** (a 2), 272, 276… como botones, aclarando que son otros códigos. «kit 22382» ofrece primero el KIT 22482, a un dígito: puede ser un error de tipeo. Con dos palabras tiene que decir el código junto, no el número suelto. Con tres no hay familia: en «sensor maf 320» o «bobina bosch 500», MAF y BOSCH son descripción.
+- **El código escrito con espacio, primero.** Por descripción, «oc 305» es el OC305. De 150 códigos así sacados de las listas, salían primeros 91; ahora 146, y aparecen 149 (antes 132).
+- **El tipeo de un código, por cercanía del número.** Pidiendo MFLA260, a dos caracteres estaban MFLA 020, 030, 040… antes que el MFLA 258. Ahora va primero el más cercano.
+- **La viscosidad.** «aceite 10w40» no encontraba nada: las listas escriben «10W-40». Ahora sí (10 productos; «5w30», 11; «15w40», 6).
+- **La palabra más rara, primero.** Cuando ningún producto dice todo, entraban los 400 más cortos de la palabra más común: «aceite 10w40» traía aceites solubles. Ahora va primero lo de la palabra más rara («Classic 10W-40 - 1L»). Lo dice el índice de búsqueda; sin índice, como antes.
+
+Medido en la copia de la base real. Las 794 búsquedas por descripción y las 1.500 por código dan exactamente lo mismo. De 77 códigos vecinos que no existen, 69 quedan sin resultados adelante y con lo más cercano de la familia. De 265 búsquedas armadas con la pieza, otra palabra y un número de la descripción, ninguna pierde su producto. `pruebas_de_la_precision.py` (100) y `pruebas_de_las_pantallas.py` lo controlan; rompiendo a propósito cada una de las diez partes, avisan.
+
 ## 🧠 Lo que decidiste enseña
 
 Lo pidió el dueño («¿cuál sería nuestra próxima gran mejora?» y después «mejorá más todavía»). La app ya tenía 23.000 decisiones tuyas: 20.037 aprobados y unos 3.000 rechazados. Hasta ahora servían para probar las reglas antes de publicarlas, pero no para corregirlas. Primero se midió, sobre la copia de la base real, cuántas veces aprobaste cada aviso. Sin contar lo aprobado a ciegas: 19.515 de las 20.037 aprobaciones se hicieron el 28/09 entre las 6:48 y las 6:55, de a 800 por segundo. Fue el «aprobar todas» de cuando la cola no mostraba avisos, y nadie miró esos avisos (contados, decían «🪭: 1.369 de 1.374»). Los rechazos sí cuentan, aunque vengan de a muchos: de a muchos solo se descarta por motivo («🚫 Descartar los 27»), y eso es decidir sobre ese motivo.

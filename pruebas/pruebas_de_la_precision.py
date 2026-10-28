@@ -2635,6 +2635,44 @@ def probar(L):
 
     esperar("si el juego contra la junta siempre se aprobó, va primero, con lo decidido a la vista",
             _primero99({_juego99: [50, 0]}), (_juego_p, [(_juego99, 50, 50)]))
+    # 100. UN NÚMERO PEDIDO QUE NO DICE NINGUNO, LA FAMILIA DEL CÓDIGO Y EL CÓDIGO CON ESPACIO
+    # (ver esas reglas en buscar_por_texto()): las búsquedas reales «kit 22382», «mfla 260»,
+    # «oc 305»; y lo que no tiene que cambiar: «ford 260» (el motor), «bobina bosch 500».
+    m100 = marca("CIEN CODIGOS")
+    for _cod, _desc in (("KIT 22482", "KIT DISTRIBUCION VW"), ("KIT 22300", "KIT EMBRAGUE FIAT"),
+                        ("KT100A", "KIT REPARACION BOMBA"), ("MFLA 258", "CONECTOR MASSER"),
+                        ("MFLA 272", "CONECTOR MASSER"), ("FM100A", "JUNTA MOTOR FORD 225/260/289"),
+                        ("FORD 250", "TAPA FORD"), ("OC 305", "FILTRO ACEITE MAHLE"),
+                        ("OC 306", "FILTRO ACEITE MAHLE"), ("BOSCH 0221", "BOBINA BOSCH"),
+                        ("BB500X", "BOBINA BOSCH FIAT 500"), ("CLX1L", "Classic 10W-40 - 1L"),
+                        # Señuelos: más corto y con las dos palabras; antes por el abecedario.
+                        ("RF305X", "REF OC 305"), ("MFLA 150", "CONECTOR MASSER")):
+        producto(_cod, _desc, m100)
+    for _n in range(6):
+        producto(f"AC{_n}100", "ACEITE", m100)
+    conn.commit()
+    ns["armar_el_indice_de_busqueda"]()
+    ns["_estado_del_indice"]().clear()
+
+    def _busca100(texto):
+        _r = ns["buscar_por_texto"](texto)
+        return ([f["Codigo"] for f in _r][:2], len(_r.aparte) > 0,
+                [ns["sanitizar"](f["Codigo"]) for f in _r.cercanos][:2])
+
+    esperar("«kit 22382»: no está; nada adelante, lo que dice «kit» aparte, la familia por cercanía",
+            _busca100("kit 22382"), ([], True, ["KIT22300", "KIT22482"]))
+    esperar("«mfla 260»: lo que dice 260 suelto (un motor Ford) no es el código",
+            _busca100("mfla 260"), ([], True, ["MFLA258", "MFLA272"]))
+    esperar("«oc 305»: el código escrito con espacio, primero",
+            _busca100("oc 305")[0][:1], ["OC 305"])
+    esperar("«ford 260»: una marca de auto no es una familia de códigos",
+            _busca100("ford 260")[0][:1], ["FM100A"])
+    esperar("«bobina bosch 500»: con tres palabras, BOSCH es descripción",
+            _busca100("bobina bosch 500")[0][:1], ["BB500X"])
+    esperar("«aceite 10w40»: «10W-40» se encuentra, y la palabra más rara va primero",
+            _busca100("aceite 10w40")[0][:1], ["CLX1L"])
+    esperar("el tipeo de un código: el número más cercano primero (MFLA 258 antes que 272)",
+            [f["Codigo"] for f in ns["codigos_por_tipeo"]("MFLA260")][:1], ["MFLA 258"])
     return fallas
 
 

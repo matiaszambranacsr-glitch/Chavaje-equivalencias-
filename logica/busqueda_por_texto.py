@@ -309,6 +309,9 @@ def formas_de_la_palabra(palabra):
         formas.add(f"{palabra[0]} {palabra[2]}")
     if _RE_VALVULAS.fullmatch(palabra):
         formas.add(f"{palabra[:-1]} V")
+    # La viscosidad: «aceite 10w40» no encontraba nada, y las listas escriben «10W-40».
+    if re.fullmatch(r"\d{1,2}W\d{2}", palabra):
+        formas.add(f"{palabra[:palabra.index('W') + 1]} {palabra[palabra.index('W') + 1:]}")
     formas |= set(escrituras_de_la_marca(palabra))
     for base in [palabra] + singulares_de(palabra):
         formas |= set(SINONIMOS_DEL_MOSTRADOR.get(base, ()))
@@ -437,6 +440,57 @@ def palabras_de_la_pieza(texto):
     return [w for w in _sin_uniones(pieza_que_nombra(texto)).split() if len(w) >= 3]
 
 
+def _dice_el_numero(fila, palabra):
+    """Como dice_la_palabra(), pero un número no vale adentro de otro: «0151» no está en
+    C12015120, ni «260» en 12600. Sí entre letras: MFLA260."""
+    if not palabra.isdigit():
+        return dice_la_palabra(fila, palabra)
+    if fila.get("_barras") == palabra:       # el código de barras entero (ver más arriba)
+        return True
+    crudo = normalizar_texto(f"{fila.get('Descripcion') or ''} {fila.get('Codigo') or ''}")
+    return bool(re.search(rf"(?<!\d){palabra}(?!\d)", crudo))
+
+
+def familia_de_codigos(prefijo, numero, limite=8):
+    """Los productos cuyo código es `prefijo` y un número (OC305, MFLA 258), del número más
+    cercano a `numero` al más lejano, con «_a» (a cuánto está) y «Por qué». Sin los códigos de
+    fábrica, que no se venden. Con la columna del código indexada: 0,1 ms."""
+    c.execute("""SELECT p.id, p.codigo_clean FROM productos p JOIN marcas m ON m.id = p.marca_id
+                 WHERE p.codigo_clean GLOB ? AND m.tipo <> 'OEM'""", (f"{prefijo}[0-9]*",))
+    distancia = {}
+    for pid, codigo in c.fetchall():
+        hallado = re.match(r"\d+", codigo[len(prefijo):])
+        distancia[pid] = abs(int(hallado.group()) - numero)
+    elegidos = sorted(distancia, key=lambda pid: (distancia[pid], pid))[:limite]
+    if not elegidos:
+        return []
+    c.execute(f"""SELECT p.id AS "ID", p.codigo_raw AS "Codigo", p.descripcion AS "Descripcion",
+                         m.nombre AS "Marca", p.precio AS "Precio", p.stock AS "Stock"
+                  FROM productos p JOIN marcas m ON m.id = p.marca_id
+                  WHERE p.id IN ({",".join("?" * len(elegidos))})""", elegidos)
+    salida = filas_a_listas(c)
+    for f in salida:
+        f["_a"] = distancia[f["ID"]]
+        f["Por qué"] = f"es otro: a {f['_a']} del {numero}"
+    return sorted(salida, key=lambda f: (f["_a"], f["ID"]))
+
+
+def _dice_el_codigo(fila, familias, numero):
+    """¿La fila dice el código pedido —las letras y el número juntos: «MFLA 260», «OC-306»,
+    «SP0451»—, en el código o en la descripción?"""
+    crudo = normalizar_texto(f"{fila.get('Descripcion') or ''} {fila.get('Codigo') or ''}")
+    sin_ceros = numero.lstrip("0") or "0"
+    return any(re.search(rf"(?<![A-Z0-9]){q}[\s.\-/]*0*{sin_ceros}(?!\d)", crudo)
+               for q in familias)
+
+
+def _numero_en_la_familia(fila, prefijo):
+    """El número del código de la fila si es de la familia `prefijo` (MFLA 258 → 258), o None."""
+    codigo = re.sub(r"[^A-Z0-9]", "", normalizar_texto(fila.get("Codigo") or ""))
+    numero = re.match(r"\d+", codigo[len(prefijo):]) if codigo.startswith(prefijo) else None
+    return int(numero.group()) if numero else None
+
+
 def dice_la_palabra(fila, palabra):
     """¿La fila dice `palabra`, como la encuentra la búsqueda: adentro de otra («JUNTA» en
     JUNTAS), abreviada (JTA) o en singular (CILINDRO por CILINDROS)?"""
@@ -517,11 +571,13 @@ class ResultadosDeTexto(list):
     """Lo que devuelve buscar_por_texto(): la lista de siempre, y aparte (`.aparte`) lo que no
     nombra el auto pedido (`.del_auto`) o declara otra cilindrada; `.por_que_aparte` lo dice
     para la pantalla. Es una lista para que los que ya la usaban sigan igual; ellos también
-    dejan de ver las bombas de cualquier auto."""
-    def __init__(self, filas=(), aparte=(), del_auto=(), por_que_aparte=""):
+    dejan de ver las bombas de cualquier auto. `.cercanos`: si lo pedido es un código que no
+    está («mfla 260»), los de esa familia con el número más cercano."""
+    def __init__(self, filas=(), aparte=(), del_auto=(), por_que_aparte="", cercanos=()):
         super().__init__(filas)
         self.aparte, self.del_auto = list(aparte), list(del_auto)
         self.por_que_aparte = por_que_aparte
+        self.cercanos = list(cercanos)
 
 
 # ======================================================================================
@@ -778,7 +834,7 @@ def buscar_por_texto(texto, aflojar=True):
     # con 81 productos de MANNOL LUBRICANTES cargados: sus descripciones dicen «Extreme 5W-40 -
     # 4L», no la marca. Ver marcas_que_nombra().
     _marcas_por_palabra = {p: marcas_que_nombra(p) for p in palabras}
-    pedidos_al_indice = []
+    pedidos_al_indice, con_pedido = [], []      # con_pedido: la palabra de cada pedido
     for palabra in palabras:
         # También se compara contra el código sin guiones ni espacios: si alguien escribe
         # "TC421" o "tc-421", tiene que encontrar igual el producto cargado como "TC-421-15".
@@ -841,6 +897,7 @@ def buscar_por_texto(texto, aflojar=True):
             ids_de_la_lista = productos_de_las_listas(tuple(_marcas_por_palabra[palabra]))
         if not ramas:
             continue        # la palabra era solo símbolos: no aporta nada para buscar
+        con_pedido.append(palabra)
         pedidos_al_indice.append(None if frases is None
                                  else {"frases": frases, "ids": ids_de_la_lista})
         # Cada palabra vale 1000 si está, y 1 más si está tal cual se escribió: así una sola
@@ -865,7 +922,10 @@ def buscar_por_texto(texto, aflojar=True):
     # revisión con ChatGPT («ubicación física del repuesto, y desde la búsqueda»).
     _ubicacion = campo_opcional_de_producto(c, "ubicacion", "Ubicación")
     # Siempre al menos uno, para que el IN () no quede vacío.
-    _codigos_escritos = [sanitizar(p) for p in palabras if sanitizar(p)] or [""]
+    # Y el código escrito con espacio, entero: «oc 305» es OC305 (ver «EL CÓDIGO ESCRITO CON
+    # ESPACIO, PRIMERO»), también si es de fábrica.
+    _junto = sanitizar("".join(palabras))
+    _codigos_escritos = [sanitizar(p) for p in palabras if sanitizar(p)] + [_junto]
     # UNA pasada por la tabla: las coincidencias se cuentan una vez (antes se calculaban en el
     # SELECT y otra vez en el WHERE), y se trae de una lo que llega al mínimo aflojado; el
     # mínimo de verdad se aplica después, sin volver a recorrer (ver el aflojado más abajo).
@@ -889,7 +949,7 @@ def buscar_por_texto(texto, aflojar=True):
            {_fabricante},
            p.precio AS "Precio", p.stock AS "Stock", {_ubicacion},
            p.favorito AS "Favorito", ({suma}) AS _puntaje,
-           LENGTH(p.descripcion) AS _largo
+           LENGTH(p.descripcion) AS _largo, p.codigo_barras AS _barras
     FROM productos p JOIN marcas m ON m.id = p.marca_id
     WHERE 1 {{por_el_indice}}
       -- Los códigos de fábrica copian la descripción de la fila que los nombró: buscando
@@ -899,12 +959,13 @@ def buscar_por_texto(texto, aflojar=True):
     ) WHERE _puntaje >= ?
     ORDER BY _puntaje DESC, _largo, "Marca" LIMIT 400;
     '''
-    def _consultar(candidatos):
+    def _consultar(candidatos, umbral=None):
         with db_lock:
             c.execute(query.replace("{por_el_indice}", "" if candidatos is None else
                                     "AND p.id IN (SELECT value FROM json_each(?))"),
                       params + ([] if candidatos is None else [json.dumps(sorted(candidatos))])
-                      + _codigos_escritos + [minimo_flojo * 1000])
+                      + _codigos_escritos
+                      + [minimo_flojo * 1000 if umbral is None else umbral])
             salida = filas_a_listas(c)
         for f in salida:
             f["_coincidencias"], f["_tal_cual"] = divmod(f.pop("_puntaje"), 1000)
@@ -918,6 +979,16 @@ def buscar_por_texto(texto, aflojar=True):
     # palabras enteras y abreviaturas. Cortando acá, las «Jta mult. Adm.» quedaban afuera
     # buscando «junta multiple admision», detrás de 141 que dicen «JUNTA» adentro de otra.
     filas = [f for f in todas if f["_coincidencias"] >= minimo]
+    # El código escrito con espacio (ver «EL CÓDIGO ESCRITO CON ESPACIO, PRIMERO»).
+    exactos = []
+    if len(palabras) >= 2 and re.search(r"\d", _junto) and re.search(r"[A-Z]", _junto):
+        c.execute("SELECT id FROM productos WHERE codigo_clean = ?", (_junto,))
+        _ids_exactos = {r[0] for r in c.fetchall()}
+        if _ids_exactos:
+            exactos = _consultar(_ids_exactos, umbral=0)
+    # Las palabras de las que se vio TODO lo que las dice: la consulta corta en 400, y lo que
+    # quedó afuera puede decirlas (ver «UN NÚMERO PEDIDO QUE NO DICE NINGUNO»).
+    vistas_enteras = set(palabras) if len(todas) < 400 else set()
     # Si pidiendo TODAS las palabras no aparece nada, se afloja y se pide una menos.
     # Con dos palabras se exigían las dos, y «rótula suspensión» devolvía CERO resultados
     # sobre un catálogo lleno de rótulas: ninguna descripción dice las dos cosas juntas.
@@ -929,6 +1000,24 @@ def buscar_por_texto(texto, aflojar=True):
     # aflojar=False es para el buscador de CÓDIGOS (ver «kit 22382» en buscador.py): ahí
     # una sola de las dos palabras traía 200 productos cualesquiera.
     if aflojar and not filas and utiles >= 2 and minimo > 1:
+        # LA PALABRA MÁS RARA, PRIMERO. Aflojado, cada fila dice una palabra menos, y entraban las
+        # 400 más cortas: «aceite 10w40» traía aceites y ninguno de los diez «Classic 10W-40»
+        # (que no dicen «aceite»), porque hay miles que dicen «aceite» y esos van tal cual. Ahora
+        # se trae palabra por palabra, la más rara primero (lo dice el índice: sin índice, como
+        # antes).
+        _por_palabra = [] if _candidatos is None or None in pedidos_al_indice else [
+            candidatos_del_indice([pedido], 1) for pedido in pedidos_al_indice]
+        if _por_palabra and None not in _por_palabra:
+            _vistos, todas = set(), []
+            for _palabra, _ids in sorted(zip(con_pedido, _por_palabra), key=lambda x: len(x[1])):
+                _de_esta = _consultar(_ids)
+                if len(_de_esta) < 400:
+                    vistas_enteras.add(_palabra)
+                for f in _de_esta:
+                    if f["ID"] not in _vistos:
+                        _vistos.add(f["ID"])
+                        f["_rareza"] = len(_ids)
+                        todas.append(f)
         filas = todas
 
     # Filtro por RUBRO. Contar palabras coincidentes no alcanza: buscando «bujía golf 1.4 tsi»
@@ -989,7 +1078,8 @@ def buscar_por_texto(texto, aflojar=True):
         hallado = _RE_ACCESORIO.match(normalizar_texto(f.get("Descripcion") or "").lstrip())
         return bool(hallado) and not any(
             dice_la_palabra({"Descripcion": hallado.group(1)}, p) for p in palabras)
-    filas.sort(key=lambda f: (-f.get("_coincidencias", 0), _es_accesorio(f), -_enteras(f),
+    filas.sort(key=lambda f: (-f.get("_coincidencias", 0), f.get("_rareza", 0),
+                              _es_accesorio(f), -_enteras(f),
                               -f.get("_tal_cual", 0), f.get("_largo") or 0))
     # Lo que no nombra el auto pedido, aparte (ver nivel_del_auto()). Cada fila apartada dice
     # por qué («Por qué»), y lo apartado va en el orden de antes, el de parecido: antes se cortaba
@@ -1034,18 +1124,70 @@ def buscar_por_texto(texto, aflojar=True):
                     aparte.append(f)
             filas = [f for f, o in zip(filas, otra) if not o]
             motivos.append(f"son de {que}, no {pedida}")
-    aparte.sort(key=lambda f: f["_puesto"])
+    # UN NÚMERO PEDIDO QUE NO DICE NINGUNO. En las búsquedas reales: «kit 22382» traía 200 kits,
+    # «mb 0151» kits de Mercedes, «rodamiento 6205» extractores de rulemán. El número es lo que
+    # identifica lo pedido: si ningún resultado lo dice, lo que queda va aparte y adelante no
+    # queda nada: la pantalla dice que no está. No el número del auto (un modelo, un motor: ver
+    # nivel_del_auto()), ni la cilindrada o las válvulas, que tienen su regla. Y solo si se vio
+    # todo lo que dice el número (`vistas_enteras`): si no, lo que lo dice puede haber quedado
+    # afuera.
+    # Si lo pedido es un código de una familia del catálogo —«mfla 260»: hay MFLA 258, 272,
+    # 276—, tiene que decir el código, no el número suelto: traía 191 cosas que dicen 260 (un
+    # motor Ford 225/260/289). Solo con una familia: «aceite 10w40» encuentra «Classic 10W-40 -
+    # 1L», que no dice «aceite»; una marca de auto no es una familia («ford 260» es el motor); y
+    # solo con dos palabras: en «sensor maf 320» o «bobina bosch 500», MAF y BOSCH son parte de
+    # la descripción, aunque también haya códigos MAF y BOSCH.
+    _cercano, cercanos = {}, []
+    for p in palabras:
+        if (len(p) < 3 or not re.search(r"\d", p) or p in del_auto
+                or _RE_CILINDRADA.fullmatch(p) or _RE_VALVULAS.fullmatch(p)):
+            continue
+        familia = {q: familia_de_codigos(q, int(p)) for q in palabras
+                   if len(palabras) == 2 and p.isdigit() and q.isalpha() and len(q) >= 2
+                   and not nivel_del_auto(q)}
+        familia = {q: cerca for q, cerca in familia.items() if cerca}
+        if not familia and p not in vistas_enteras:
+            continue
+        if not filas or any(_dice_el_codigo(f, familia, p) if familia else _dice_el_numero(f, p)
+                            for f in filas + aparte + exactos):
+            continue
+        pedido = " ".join([*familia, p]).lower()
+        for f in filas:
+            f["Por qué"] = f"no dice «{pedido}»"
+        # De la familia, primero lo más cercano: «no tengo el MFLA 260; tengo el 258». Se ofrece
+        # en la pantalla como otros códigos (ver .cercanos), nunca como el pedido.
+        cercanos = sorted((f for cerca in familia.values() for f in cerca),
+                          key=lambda f: f["_a"])[:8]
+        for q in familia:
+            for f in filas + aparte:
+                n = _numero_en_la_familia(f, q)
+                if n is not None and id(f) not in _cercano:
+                    _cercano[id(f)] = abs(n - int(p))
+                    f["Por qué"] = f"es otro: a {_cercano[id(f)]} del {int(p)}"
+        aparte, filas = filas + aparte, []
+        no_dicen.append(f"«{pedido}»")
+        break
+    aparte.sort(key=lambda f: (_cercano.get(id(f), float("inf")), f["_puesto"]))
+    # EL CÓDIGO ESCRITO CON ESPACIO, PRIMERO. «oc 305» o «mfla 258» por descripción: es un
+    # código. De 150 así sacados de las listas, 59 no salían primero y 18 ni aparecían («oc» lo
+    # dicen miles de descripciones).
+    if exactos:
+        _ya = {f["ID"] for f in exactos}
+        filas = exactos + [f for f in filas if f["ID"] not in _ya]
+        aparte = [f for f in aparte if f["ID"] not in _ya]
     filas, aparte = filas[:200], aparte[:200]
     for f in filas + aparte:
         f.pop("_puesto", None)
         f.pop("_coincidencias", None)
+        f.pop("_rareza", None)
+        f.pop("_barras", None)
         f.pop("_tal_cual", None)
         f.pop("_largo", None)
     # «no dicen «gol» o «embrague», o son de otra cilindrada, no 1.6»
     if no_dicen:
         motivos.insert(0, "no dicen " + " o ".join(no_dicen))
     return ResultadosDeTexto(filas, aparte, del_auto if no_dicen and del_auto and aparte else (),
-                             ", o ".join(motivos))
+                             ", o ".join(motivos), cercanos)
 
 
 # Las palabras que no buscan nada: «necesito pastillas delanteras para un Corsa Classic

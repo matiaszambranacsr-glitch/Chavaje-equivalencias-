@@ -950,6 +950,15 @@ def es_confusion_de_lectura(leido, codigo):
     return ""
 
 
+def _cercania_del_numero(pedido, codigo):
+    """Si los dos son las mismas letras con otro número (MFLA260 y MFLA258), cuánto se alejan
+    los números; si no, infinito."""
+    if re.sub(r"\d", "", pedido) != re.sub(r"\d", "", codigo):
+        return float("inf")
+    a, b = re.sub(r"\D", "", pedido), re.sub(r"\D", "", codigo)
+    return abs(int(a) - int(b)) if a and b else float("inf")
+
+
 def codigos_por_tipeo(clean_code, limite=10, de_una_foto=False):
     """Códigos que se escriben casi igual al que buscaste. Es para el error de tipeo.
 
@@ -1025,7 +1034,11 @@ def codigos_por_tipeo(clean_code, limite=10, de_una_foto=False):
     # El código al final no es cosmético: sin él, entre empatados —misma distancia, sin stock,
     # que es lo común— el orden era el que se le ocurría a SQLite al recorrer la tabla, y al
     # cortar en diez quedaban unos u otros según el plan de la consulta.
-    candidatos.sort(key=lambda f: (f["_dist"], -(f["Stock"] or 0), f["Codigo"] or ""))
+    # Y entre los que solo cambian el número, el más cercano: pidiendo MFLA260 (que no está),
+    # a dos caracteres estaban MFLA 020, 030, 040… antes que el MFLA 258.
+    candidatos.sort(key=lambda f: (f["_dist"], -(f["Stock"] or 0),
+                                   _cercania_del_numero(clean_code, f.get("_clean") or ""),
+                                   f["Codigo"] or ""))
     # Leído de una foto: primero los que difieren solo en lo que se confunde al leer (ver
     # es_confusion_de_lectura()), y se dice cuál fue.
     if de_una_foto:

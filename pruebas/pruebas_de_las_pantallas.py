@@ -253,6 +253,21 @@ def probar():
         if (at.session_state["texto_input"] != _otra
                 or not any("coincidencia" in x.value for x in at.success)):
             fallas.append(f"por descripción, el botón del motor no busca «{_otra}»")
+    # Y un código que no está, de una familia que sí: «mfla 260» no trae lo que dice 260 suelto
+    # (un motor Ford); ofrece los de la familia, el más cercano primero (ver «UN NÚMERO PEDIDO
+    # QUE NO DICE NINGUNO» en buscar_por_texto()).
+    c.executemany("INSERT INTO productos (codigo_raw, codigo_clean, descripcion, marca_id) VALUES "
+                  "(?, ?, ?, ?)", [("MFLA 258", "MFLA258", "CONECTOR MASSER", _marca_prueba),
+                                   ("MFLA 272", "MFLA272", "CONECTOR MASSER", _marca_prueba),
+                                   ("FM260", "FM260", "JUNTA MOTOR FORD 225/260/289", _marca_prueba)])
+    conn.commit()
+    at.text_input(key="texto_input").set_value("mfla 260")
+    [b for b in at.button if "Buscar por descripción" in b.label][0].click().run()
+    _cerca = [b for b in at.button if (b.key or "").startswith("cercano_txt_")]
+    if (not _cerca or "MFLA 258" not in _cerca[0].label
+            or any("coincidencia" in x.value for x in at.success)
+            or not any("que no dicen «mfla 260»" in e.label for e in at.expander)):
+        fallas.append(f"por descripción, un código que no está: {[b.label for b in _cerca]}")
     at.session_state["modo_busqueda"] = "Código"
     # Un código que no está, pero que una descripción tuya nombra: «REF ORIG MANN P716».
     c.execute("INSERT INTO productos (codigo_raw, codigo_clean, descripcion, marca_id) VALUES "
