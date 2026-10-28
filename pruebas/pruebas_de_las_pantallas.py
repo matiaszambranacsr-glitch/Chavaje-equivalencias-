@@ -308,7 +308,8 @@ def probar():
     _avisos_u = {a for f in sum(ns["analizar_lote_pendiente"]("DE A UNO EN PANTALLA")[:2], [])
                  for a in ns["_avisos_que_cuentan"](f)}
     ns["guardar_config"](ns["LO_DECIDIDO_CON_CADA_AVISO"], ns["json"].dumps(
-        {"version": ns["VERSION_CONFIANZA"], "avisos": {a: [7, 1] for a in _avisos_u}}))
+        {"version": ns["VERSION_CONFIANZA"], "forma": ns["FORMA_DE_LO_DECIDIDO"],
+         "avisos": {a: [7, 1] for a in _avisos_u}}))
     at.session_state["pagina_actual"] = "📊 Estadísticas"
     at.session_state["sub_stats"] = "🔗 Equivalencias sugeridas"
     at.run()

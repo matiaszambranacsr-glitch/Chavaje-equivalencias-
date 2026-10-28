@@ -5249,19 +5249,30 @@ def listar_busquedas_sin_resultado(limite=50):
 # ======================================================================
 # La cola dice «🪭 uno de los dos está emparejado con varios de la otra lista», «🎚️ no dice el
 # espesor»…, y cada vez había que volver a pensar qué hacer con eso. Ya estaba decidido: medido
-# sobre la copia de la base real, de 1.374 pares con 🪭 que decidió una persona se aprobaron
-# 1.369, y de 62 con el juego de juntas contra la junta suelta, ninguno (por eso ese ya va en
-# rojo: ver firmas_compatibles()). Esto lo cuenta en la app y lo muestra al revisar: en la
-# tarjeta de «⚡ Revisar de a uno» y en cada grupo de «para revisar».
+# sobre la copia de la base real, de 258 pares con 🪭 que una persona miró se aprobaron 253, y de
+# 62 con el juego de juntas contra la junta suelta, ninguno (por eso ese ya va en rojo: ver
+# firmas_compatibles()). Esto lo cuenta en la app y lo muestra al revisar: en la tarjeta de «⚡
+# Revisar de a uno» y en cada grupo de «para revisar».
 # No aprueba ni descarta nada: es lo que una persona decidió antes, a la vista.
+#
+# LO APROBADO A CIEGAS NO CUENTA. De las 20.037 aprobaciones de la base real, 19.515 se hicieron
+# el 28/09 entre las 6:48 y las 6:55, de a 800 por segundo: el «aprobar todas» de cuando la cola
+# no mostraba avisos. Contadas, decían «🪭: aprobaste 1.369 de 1.374», y nadie había mirado esos
+# avisos. Una aprobación que comparte el segundo con más de TANDA_A_CIEGAS no cuenta. Los
+# rechazos sí, aunque vengan de a muchos: en la cola solo se descarta de a muchos por motivo
+# («🚫 Descartar los 27»), y eso es decidir sobre ese motivo.
 #
 # Tarda: es el análisis de la cola sobre todo lo decidido (20 s sobre 22.670 pares). Lo hace la
 # tarea de fondo cuando cambian las reglas, y una vez por día si desde la última vez se
 # decidieron CAMBIOS_PARA_APRENDER_DE_NUEVO pares más. Queda en la configuración.
 LO_DECIDIDO_CON_CADA_AVISO = "lo_decidido_con_cada_aviso"
 CAMBIOS_PARA_APRENDER_DE_NUEVO = 100
-# Lo que el análisis no encuentra nada en contra también es una clase: de 18.453 así, se
-# aprobaron 18.446. Sin contarla, en la cola de a uno quedaba detrás de los 🟠 con 🪭.
+TANDA_A_CIEGAS = 100
+# Cambia cuando cambia QUÉ se cuenta: lo guardado con otra forma no se muestra y se cuenta de
+# nuevo. La 1 contaba lo aprobado a ciegas.
+FORMA_DE_LO_DECIDIDO = "2"
+# Lo que el análisis no encuentra nada en contra también es una clase: de 428 así que se
+# miraron, se aprobaron 421. Sin contarla, en la cola de a uno quedaba detrás de los 🟠 con 🪭.
 SIN_AVISOS = "✅ Nada en contra"
 
 
@@ -5284,11 +5295,16 @@ def decisiones_de_personas():
     return c.fetchone()[0]
 
 
-def calcular_lo_decidido_con_cada_aviso(minimo=MINIMO_PARA_APRENDER):
+def calcular_lo_decidido_con_cada_aviso(minimo=MINIMO_PARA_APRENDER, a_ciegas=TANDA_A_CIEGAS):
     """Analiza los pares que decidió una persona como si recién llegaran y cuenta, por aviso,
     cuántos se aprobaron y cuántos se rechazaron. Guarda {aviso: [aprobados, rechazados]} de los
-    que tienen `minimo` decisiones o más, y lo devuelve."""
-    c.execute(f"""SELECT r.producto_a_id AS a, r.producto_b_id AS b, r.decision,
+    que tienen `minimo` decisiones o más, y lo devuelve. Las aprobaciones que comparten el
+    segundo con más de `a_ciegas` no cuentan (ver «LO APROBADO A CIEGAS NO CUENTA»)."""
+    c.execute(f"""SELECT r.decision, r.fecha, COUNT(*) FROM equivalencias_revisadas r
+                  WHERE r.producto_a_id < r.producto_b_id AND {_SOLO_DE_PERSONAS}
+                  GROUP BY r.decision, r.fecha""")
+    del_mismo_segundo = {(r[0], r[1]): r[2] for r in c.fetchall()}
+    c.execute(f"""SELECT r.producto_a_id AS a, r.producto_b_id AS b, r.decision, r.fecha,
                          pa.codigo_raw AS cod_a, ma.nombre AS marca_a, ma.tipo AS tipo_a,
                          pa.descripcion AS desc_a, pa.precio AS precio_a,
                          pb.codigo_raw AS cod_b, mb.nombre AS marca_b, mb.tipo AS tipo_b,
@@ -5301,18 +5317,26 @@ def calcular_lo_decidido_con_cada_aviso(minimo=MINIMO_PARA_APRENDER):
                   WHERE r.producto_a_id < r.producto_b_id AND {_SOLO_DE_PERSONAS}
                   ORDER BY r.producto_a_id, r.producto_b_id""")
     filas = [dict(r) for r in c.fetchall()]
-    decision = {(f["a"], f["b"]): f.pop("decision") for f in filas}
+    # Lo aprobado a ciegas se analiza igual —🪭 mira todos los pares juntos—, pero no se cuenta.
+    decision = {}
+    for f in filas:
+        _d, _fecha = f.pop("decision"), f.pop("fecha")
+        decision[(f["a"], f["b"])] = (None if _d == "ok" and del_mismo_segundo.get((_d, _fecha), 0)
+                                      > a_ciegas else _d)
     cuentas = {}
     if filas:
         with recordando_lo_de_cada_producto():
             limpias, sospechosas, _relacionadas = _analizar_filas(filas, _LO_YA_CARGADO)
         for f in list(limpias) + list(sospechosas):
-            aprobado = decision.get((f["a"], f["b"])) == "ok"
+            if not decision.get((f["a"], f["b"])):
+                continue
+            aprobado = decision[(f["a"], f["b"])] == "ok"
             for aviso in _avisos_que_cuentan(f):
                 cuentas.setdefault(aviso, [0, 0])[0 if aprobado else 1] += 1
     avisos = {k: v for k, v in cuentas.items() if sum(v) >= minimo}
     guardar_config(LO_DECIDIDO_CON_CADA_AVISO, json.dumps({
-        "version": VERSION_CONFIANZA, "decisiones": decisiones_de_personas(),
+        "version": VERSION_CONFIANZA, "forma": FORMA_DE_LO_DECIDIDO,
+        "decisiones": decisiones_de_personas(),
         "fecha": datetime.now().strftime("%Y-%m-%d %H:%M"), "avisos": avisos},
         ensure_ascii=False))
     return avisos
@@ -5324,6 +5348,8 @@ def lo_decidido_con_cada_aviso():
         guardado = json.loads(obtener_config(LO_DECIDIDO_CON_CADA_AVISO, "") or "{}")
     except ValueError:
         return {}
+    if guardado.get("forma") != FORMA_DE_LO_DECIDIDO:
+        return {}
     return {k: tuple(v) for k, v in (guardado.get("avisos") or {}).items()}
 
 
@@ -5334,6 +5360,7 @@ def hay_que_aprender_de_nuevo():
     except ValueError:
         guardado = {}
     return (guardado.get("version") != VERSION_CONFIANZA
+            or guardado.get("forma") != FORMA_DE_LO_DECIDIDO
             or abs(decisiones_de_personas() - (guardado.get("decisiones") or 0))
             >= CAMBIOS_PARA_APRENDER_DE_NUEVO)
 

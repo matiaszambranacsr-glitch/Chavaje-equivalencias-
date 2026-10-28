@@ -6779,13 +6779,13 @@ Lo pidió el dueño («hacé 3, 4, 5 y 6»; esta es la 5). «bomba de agua k4m»
 
 ## 🧠 Lo que decidiste enseña
 
-Lo pidió el dueño («¿cuál sería nuestra próxima gran mejora?» y después «mejorá más todavía»). La app ya tenía 23.000 decisiones tuyas: 20.037 aprobados y unos 3.000 rechazados. Hasta ahora servían para probar las reglas antes de publicarlas, pero no para corregirlas. Primero se midió, sobre la copia de la base real, cuántas veces aprobaste cada aviso de la franja «a revisar» (1.827 pares decididos):
+Lo pidió el dueño («¿cuál sería nuestra próxima gran mejora?» y después «mejorá más todavía»). La app ya tenía 23.000 decisiones tuyas: 20.037 aprobados y unos 3.000 rechazados. Hasta ahora servían para probar las reglas antes de publicarlas, pero no para corregirlas. Primero se midió, sobre la copia de la base real, cuántas veces aprobaste cada aviso. Sin contar lo aprobado a ciegas: 19.515 de las 20.037 aprobaciones se hicieron el 28/09 entre las 6:48 y las 6:55, de a 800 por segundo. Fue el «aprobar todas» de cuando la cola no mostraba avisos, y nadie miró esos avisos (contados, decían «🪭: 1.369 de 1.374»). Los rechazos sí cuentan, aunque vengan de a muchos: de a muchos solo se descarta por motivo («🚫 Descartar los 27»), y eso es decidir sobre ese motivo.
 
-| Aviso | Aprobaste |
+| Aviso | Aprobaste, de los que miraste |
 |---|---|
-| 🪭 emparejado con varios de la otra lista | 1.378 de 1.410 (98 %) |
-| 🎚️ el mismo número de fábrica, otra medida | 263 de 263 |
-| 🪞 la otra lista tiene varios iguales | 130 de 130 |
+| ✅ nada en contra | 421 de 428 |
+| 🪭 emparejado con varios de la otra lista | 253 de 258 |
+| 🚫 uno de los códigos parece una medida | 36 de 36 |
 | 🔤 un juego de juntas de un lugar contra la junta suelta de ese lugar | **0 de 62** |
 
 **1. El juego contra la junta suelta, a rojo.** «Jgo.Jtas.Carter PERKINS 4-203» contra «JTA CARTER PERKINS 4-203», «Jgo.Jtas.Mult.Adm. y Esc. RENAULT» contra «JTA ADM y ESC RENAULT 19 1.8». Avisaba, en vez de tumbar el par, porque algunas listas podrían llamar «junta» al juego (la de cárter del Perkins 4.203 viene en varias piezas). Tus decisiones dicen otra cosa: de 62 que miraste (cárter 40, admisión 13, escape 7, aceite y salida uno cada uno), no aprobaste ninguno. Ahora son «juegos distintos», con el lugar a la vista: «juego de juntas de CARTER vs junta suelta de CARTER».
@@ -6797,16 +6797,17 @@ Reglas v21. `pruebas_de_la_revision.py` (pares de muestra) lo controla: volviend
 
 **2. 📒 Lo que decidiste antes, a la vista al revisar.** La misma cuenta, hecha por la app y al día: para cada aviso, cuántos aprobaste y cuántos rechazaste de los que decidió una persona (lo que la app descartó o relacionó sola no cuenta). Se muestra en dos lugares de 📊 Estadísticas → 🔗 Equivalencias sugeridas:
 
-- **En la tarjeta de «⚡ Revisar de a uno»**, debajo de lo que dice la app: «📒 Antes, con «🪭 Uno de los dos está emparejado con varios…»: **aprobaste 1.369 de 1.374**».
-- **Al lado de cada grupo de «para revisar»**: «🔴 💲 Los precios no cierran — 10 vínculo(s) · 📒 antes aprobaste 3 de 209».
+- **En la tarjeta de «⚡ Revisar de a uno»**, debajo de lo que dice la app: «📒 Antes, con «🪭 Uno de los dos está emparejado con varios…»: **aprobaste 253 de 258**».
+- **Al lado de cada grupo de «para revisar»**: «🔴 💲 Los precios no cierran — 10 vínculo(s) · 📒 antes aprobaste 1 de 207».
 
-Y ordena la cola de a uno. Adentro de cada tanda, primero va lo que con esos avisos casi siempre aprobaste, y los parecidos quedan juntos para decidirlos de corrido. Después va lo que no tiene historia, y al final lo que casi siempre rechazaste. Lo que no tiene ningún aviso cuenta como «✅ Nada en contra»: de 18.453 así, aprobaste 18.446. En la copia de la base real, de los 3.149 🟠 que quedan para mirar, 1.079 tienen solo el aviso 🪭, el que aprobaste 1.369 de 1.374 veces.
+Y ordena la cola de a uno. Adentro de cada tanda, primero va lo que con esos avisos casi siempre aprobaste, y los parecidos quedan juntos para decidirlos de corrido. Después va lo que no tiene historia, y al final lo que casi siempre rechazaste. Lo que no tiene ningún aviso cuenta como «✅ Nada en contra»: de 428 así que miraste, aprobaste 421. En la copia de la base real, de los 3.149 🟠 que quedan para mirar, 1.079 tienen solo el aviso 🪭, el que aprobaste 253 de 258 veces.
 
 - **No decide nada.** No aprueba ni descarta; es lo que una persona ya decidió, para decidir más rápido.
 - **En rojo cuenta el primer aviso**, el que se ve como motivo. Un par con 🪭 y además un veto se descartó por el veto: no cuenta contra 🪭.
+- **Lo aprobado a ciegas no cuenta**: una aprobación que comparte el segundo con más de 100 (`TANDA_A_CIEGAS`) es un «aprobar todas». Se analiza igual, porque 🪭 mira todos los pares juntos, pero no suma.
 - **Se cuenta por atrás.** Es el análisis de la cola sobre todo lo decidido: 21 s sobre 22.670 pares. Lo hace la tarea de fondo cuando cambian las reglas, y una vez por día si desde la última vez se decidieron 100 pares más. Queda guardado en la configuración (se muestra solo con 12 decisiones o más).
 
-`pruebas_de_la_precision.py` (99) y `pruebas_de_las_pantallas.py` lo controlan. Rompiendo a propósito cada parte —contar lo que hizo la app sola, contar todos los avisos de un rojo, olvidar «nada en contra», ordenar al revés o sacar la línea 📒 de la tarjeta—, avisan.
+`pruebas_de_la_precision.py` (99) y `pruebas_de_las_pantallas.py` lo controlan. Rompiendo a propósito cada parte —contar lo que hizo la app sola, contar lo aprobado a ciegas, contar todos los avisos de un rojo, olvidar «nada en contra», ordenar al revés o sacar la línea 📒 de la tarjeta—, avisan.
 
 ## 🔁 Otra versión de la misma lista, y las búsquedas largas más rápidas
 

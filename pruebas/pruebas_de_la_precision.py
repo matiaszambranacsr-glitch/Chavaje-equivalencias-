@@ -2578,27 +2578,38 @@ def probar(L):
                producto(f"JS{n}99", f"JTA CARTER PERKINS 4-{n}", m99b, precio=precio_b))
               for n, precio_a, precio_b in ((203, None, None), (236, None, None),
                                             (248, None, None), (254, 100, 90000))]
-    # Y un filtro aprobado, sin nada en contra: cuenta como «nada en contra».
+    # Y un filtro aprobado, sin nada en contra: cuenta como «nada en contra». Y tres aprobados
+    # en el mismo segundo, que con a_ciegas=2 son el «aprobar todas»: no cuentan.
     _limpio99 = (producto("FA99X", "FILTRO ACEITE VW GOL", m99a),
                  producto("FB99X", "FILTRO ACEITE VW GOL 1.6", m99b))
-    _antes99 = ns["calcular_lo_decidido_con_cada_aviso"](minimo=1)
+    _ciegas99 = [(producto(f"FC{n}99", f"FILTRO ACEITE FORD KA {n}", m99a),
+                  producto(f"FD{n}99", f"FILTRO ACEITE FORD KA {n} 1.0", m99b)) for n in (1, 2, 3)]
+    _antes99 = ns["calcular_lo_decidido_con_cada_aviso"](minimo=1, a_ciegas=2)
     c.executemany("INSERT INTO equivalencias_revisadas (producto_a_id, producto_b_id, decision, "
-                  "revisado_por) VALUES (?, ?, ?, ?)",
-                  [(a, b, "rechazada", quien) for (a, b), quien
+                  "revisado_por, fecha) VALUES (?, ?, ?, ?, ?)",
+                  [(a, b, "rechazada", quien, "2026-01-01 00:00:00") for (a, b), quien
                    in zip(_dec99, ("Chavo", "Chavo", ns["QUIEN_DESCARTA_SOLA"], "Chavo"))]
-                  + [(*_limpio99, "ok", "Chavo")])
+                  + [(*_limpio99, "ok", "Chavo", "2026-01-01 00:00:01")]
+                  + [(a, b, "ok", "Chavo", "2026-01-01 00:00:02") for a, b in _ciegas99])
     conn.commit()
-    _ahora99 = ns["calcular_lo_decidido_con_cada_aviso"](minimo=1)
+    _ahora99 = ns["calcular_lo_decidido_con_cada_aviso"](minimo=1, a_ciegas=2)
 
     def _cuanto99(clave):
         return [x - y for x, y in zip(_ahora99.get(clave, [0, 0]), _antes99.get(clave, [0, 0]))]
 
     _juego99 = next((k for k in _ahora99 if "juego de juntas de CARTER vs junta suelta" in k), None)
     esperar("el juego contra la junta: 2 rechazados por una persona (el de la app no cuenta); "
-            "el filtro, aprobado sin nada en contra",
+            "el filtro, aprobado sin nada en contra (los tres a ciegas no cuentan)",
             (_cuanto99(_juego99), _cuanto99(ns["SIN_AVISOS"])), ([0, 2], [1, 0]))
     esperar("en rojo cuenta solo el primer aviso: cuatro decisiones, cuatro cuentas",
             sum(map(sum, _ahora99.values())) - sum(map(sum, _antes99.values())), 4)
+    esperar("lo contado con otra forma (la 1 contaba lo aprobado a ciegas) no se muestra",
+            (bool(ns["lo_decidido_con_cada_aviso"]()),
+             ns["guardar_config"](ns["LO_DECIDIDO_CON_CADA_AVISO"], _json.dumps(dict(
+                 _json.loads(ns["obtener_config"](ns["LO_DECIDIDO_CON_CADA_AVISO"])), forma="1")))
+             or ns["lo_decidido_con_cada_aviso"](), ns["hay_que_aprender_de_nuevo"]()),
+            (True, {}, True))
+    ns["calcular_lo_decidido_con_cada_aviso"]()
     esperar("recién contado no hay que contar de nuevo; con 100 decisiones más, sí",
             (ns["hay_que_aprender_de_nuevo"](),
              ns["guardar_config"](ns["LO_DECIDIDO_CON_CADA_AVISO"], _json.dumps(dict(
@@ -2617,7 +2628,8 @@ def probar(L):
 
     def _primero99(avisos):
         ns["guardar_config"](ns["LO_DECIDIDO_CON_CADA_AVISO"], _json.dumps(
-            {"version": ns["VERSION_CONFIANZA"], "avisos": avisos}))
+            {"version": ns["VERSION_CONFIANZA"], "forma": ns["FORMA_DE_LO_DECIDIDO"],
+             "avisos": avisos}))
         _cola = ns["cola_de_revision_de_a_uno"]("NOVENTA Y NUEVE")
         return (_cola[0]["a"], _cola[0]["b"]) if _cola else None, (_cola[0]["decidido"] if _cola else None)
 
