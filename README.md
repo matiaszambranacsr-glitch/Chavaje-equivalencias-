@@ -6725,6 +6725,14 @@ Lo pidió el dueño: «seguí mejorando».
 - **Con uno o dos resultados, sus equivalencias se abren solas**: «bomba de agua k4m» deja uno con todo lo pedido, y lo que sigue es ver las otras marcas que sirven.
 - Se probó subir de lo apartado lo que ya es equivalente de lo de arriba (la «BOMBA DE AGUA» de otra lista, unida a la del K4M): en seis búsquedas de prueba subían 2. Los equivalentes casi nunca entran por las palabras; para eso están las equivalencias abiertas.
 
+### Octava vuelta: «Búsquedas sin resultado» y el error de tipeo, con las búsquedas reales
+
+Lo pidió el dueño: «más cosas». Se pasaron por el buscador las 10 búsquedas reales sin resultado del historial: casi todas son códigos que no están en ninguna lista (W712/94 es un filtro Mann que no está cargado).
+
+- **«Búsquedas sin resultado» no pide resolver lo que hoy ya se encuentra** (`ya_se_encuentra_el_codigo()`): LEICJ057 decía «🔗 Lo tenés con otro número: vincularlo», y el buscador ya lo trae (es LEICJ057LUCAS de FISPA). Se mira el código exacto, sin o con un cero adelante, o con la marca pegada al final, por el índice: la búsqueda completa tardaba 1,1 s por código. Lo que no es un código se pasa por la búsqueda por descripción («mannol», «piso» ya encuentran).
+- **El error de tipeo es de teclado** (`_distancia_de_tipeo()`, `_tipeo_creible()`): para «W712/94» se sugería «¿Error de tipeo? TARANTO 271224, 271295…», juntas, porque de W a 2 hay un solo cambio. Ahora cambiar una letra por un número (o al revés) no es tipeo, salvo que se parezcan a la vista (O y 0, I y 1, S y 5, B y 8, Z y 2, G y 6), que es lo que confunden también las fotos. Vale para el «¿Quisiste decir…?» del Buscador.
+- La medición de pantallas con `--base` ahora dice quién hace la consulta lenta y no `datos.py:execute`: «🧹 Limpiar y corregir [mostrador.py:codigos_con_dos_precios_en_la_misma_lista]». Esa consulta tarda 0,23 s con la base en memoria; el 1,8 s de la medición es la primera lectura del disco de una copia recién hecha.
+
 ## 🔁 Otra versión de la misma lista, y las búsquedas largas más rápidas
 
 Lo pidió el dueño: «mejorá más todavía todo». Medido con `python pruebas/medir.py --base copia busquedas` (1.500 búsquedas de la copia de la base).

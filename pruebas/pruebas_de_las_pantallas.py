@@ -37,8 +37,10 @@ class Muestreo:
             for hilo, marco in sys._current_frames().items():
                 if hilo == propio:
                     continue
-                while marco and not marco.f_code.co_filename.startswith(
-                        (os.path.join(RAIZ, "logica"), os.path.join(RAIZ, "pantallas"), "<")):
+                # Sin el envoltorio de la base (datos.py:execute): lo que sirve es quién consulta.
+                while marco and (not marco.f_code.co_filename.startswith(
+                        (os.path.join(RAIZ, "logica"), os.path.join(RAIZ, "pantallas"), "<"))
+                        or marco.f_code.co_name in ("execute", "executemany", "fetchall")):
                     marco = marco.f_back
                 if marco:
                     self.cuenta[f"{os.path.basename(marco.f_code.co_filename)}:"
@@ -197,9 +199,12 @@ def probar():
     if (not any("con todo lo pedido" in x.value for x in at.success) or len(_aparte) != 1
             or any("BAPAL" in str(d.value) for d in at.dataframe)):
         fallas.append(f"por descripción, lo que no nombra el auto: {[e.label for e in _aparte]}")
+    _tablas_antes = len(at.dataframe)
     at.session_state["exp_texto_aparte"] = True
     at.run()
-    if not any("BAPAL" in str(d.value) for d in at.dataframe):
+    # Con --base, lo apartado son 200 de la base real y el de prueba puede no entrar.
+    if (len(at.dataframe) <= _tablas_antes if "--base" in sys.argv
+            else not any("BAPAL" in str(d.value) for d in at.dataframe)):
         fallas.append("por descripción, abrir «Otros … que no dicen» no muestra la tabla")
     at.session_state["exp_texto_aparte"] = False
     # Y el filtro por rubro, con cuántos de cada uno: «clio k4m» trae la bomba y el filtro.

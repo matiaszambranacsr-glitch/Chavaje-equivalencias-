@@ -2448,6 +2448,25 @@ def probar(L):
     conn.commit()
     ns["vocabulario_de_busqueda"].clear()
     esperar("«sopapa» no se corrige a SOLAPA", ns["palabras_corregidas"]("sopapa escape"), {})
+    # 93. EL TIPEO ES DE TECLADO: una letra por un número no, salvo que se parezcan (O y 0);
+    # y «Búsquedas sin resultado» no pide resolver lo que el buscador hoy ya encuentra.
+    m15 = marca("QUINCE CODIGOS")
+    producto("271294", "JUNTA TAPA", m15)
+    producto("0280156020", "INYECTOR", m15)
+    producto("KIT22482", "KIT", m15)
+    producto("LEICJ057LUCAS", "INYECTOR LEICJ057", m15)
+    c.executemany("INSERT INTO historial_busquedas (termino, usuario, sin_resultado) VALUES (?, ?, 1)",
+                  [("LEICJ057", "ana"), ("LEICJ057", "beto"), ("W712/94", "ana"), ("W712/94", "beto")])
+    conn.commit()
+
+    def _tipeo93(codigo):
+        return [f["Codigo"] for f in ns["codigos_por_tipeo"](codigo)]
+    esperar("tipeo: W→2 no; O→0 sí; un dígito por otro sí",
+            ("271294" in _tipeo93("W71294"), "0280156020" in _tipeo93("028015602O"),
+             "KIT22482" in _tipeo93("KIT22382")), (False, True, True))
+    esperar("«Búsquedas sin resultado» no muestra lo que hoy se encuentra (LEICJ057LUCAS)",
+            [f["Buscado"] for f in ns["que_conviene_cargar_o_pedir"]()
+             if f["Buscado"] in ("LEICJ057", "W712/94")], ["W712/94"])
     _r92 = ns["buscar_por_texto"]("embrague ford ka")
     esperar("«ka» es un modelo: el de la Transit, aparte",
             (_eka in {f["ID"] for f in _r92}, _etr in {f["ID"] for f in _r92.aparte}), (True, True))

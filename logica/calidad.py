@@ -864,6 +864,46 @@ def _distancia_edicion(a, b, tope=2):
 _CONFUSIONES_DE_LECTURA = {frozenset(p) for p in ("0O", "0D", "1I", "1L", "5S", "8B", "2Z", "6G")}
 
 
+def _distancia_de_tipeo(a, b, tope=2):
+    """Como _distancia_edicion(), pero cambiar una letra por un número (o al revés) no es un
+    error de tipeo, salvo que se parezcan a la vista (ver _CONFUSIONES_DE_LECTURA): buscando el
+    filtro Mann «W712/94», que no está en tus listas, se sugería TARANTO 271294 —una junta—
+    porque de W a 2 hay un solo cambio. Un dígito por otro, una letra por otra, una de más o de
+    menos, siguen costando uno."""
+    if abs(len(a) - len(b)) > tope:
+        return tope + 1
+    anterior = list(range(len(b) + 1))
+    for i, ca in enumerate(a, 1):
+        actual = [i]
+        for j, cb in enumerate(b, 1):
+            if ca == cb:
+                cambio = 0
+            elif ca.isdigit() == cb.isdigit() or frozenset((ca, cb)) in _CONFUSIONES_DE_LECTURA:
+                cambio = 1
+            else:
+                cambio = tope + 1
+            actual.append(min(anterior[j] + 1, actual[j - 1] + 1, anterior[j - 1] + cambio))
+        if min(actual) > tope:
+            return tope + 1
+        anterior = actual
+    return anterior[-1]
+
+
+def _tipeo_creible(a, b):
+    """¿Pasar de `a` a `b` es un error de tipeo creíble? Si cambia la cantidad de letras por la
+    de números —una letra menos y un número más—, solo cuando es en el mismo lugar y se parecen
+    (ver _CONFUSIONES_DE_LECTURA): borrar la W de «W71294» y agregar un 2 también eran dos
+    cambios, y salía TARANTO 271294."""
+    if _distancia_de_tipeo(a, b) > 2:
+        return False
+    letras_a, letras_b = sum(ch.isalpha() for ch in a), sum(ch.isalpha() for ch in b)
+    if (letras_a - letras_b) * ((len(a) - letras_a) - (len(b) - letras_b)) >= 0:
+        return True
+    return len(a) == len(b) and all(
+        x == y or x.isdigit() == y.isdigit() or frozenset((x, y)) in _CONFUSIONES_DE_LECTURA
+        for x, y in zip(a, b))
+
+
 def es_confusion_de_lectura(leido, codigo):
     """«O↔0, I↔1» si los dos códigos difieren SOLO en caracteres que se confunden al leer; si no,
     "". Mismo largo: lo que lee mal una foto es la forma de un carácter, no la cantidad."""
@@ -922,8 +962,8 @@ def codigos_por_tipeo(clean_code, limite=10, de_una_foto=False):
     cerca = []
     for trozo in juntos.split("\x1f") if juntos else ():
         pid, cod = trozo.split("\x1e", 1)
-        d = _distancia_edicion(clean_code, cod)
-        if d <= 2:
+        d = _distancia_de_tipeo(clean_code, cod)
+        if d <= 2 and _tipeo_creible(clean_code, cod):
             cerca.append((int(pid), d))
     if not cerca:
         return []

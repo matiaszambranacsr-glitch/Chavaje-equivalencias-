@@ -1486,6 +1486,20 @@ def reemplazos_escritos_en_las_descripciones():
     return [next(iter(v.values())) for v in por_viejo.values() if len(v) == 1]
 
 
+def ya_se_encuentra_el_codigo(clave):
+    """¿El buscador de códigos hoy lo encuentra? El código exacto, sin o con un cero adelante,
+    o con la marca pegada al final (LEICJ057 → LEICJ057LUCAS de FISPA). Por el índice del
+    código, sin armar la red: la búsqueda completa tardaba 1,1 s por código."""
+    for variante in {clave, clave.lstrip("0"), "0" + clave} - {""}:
+        c.execute("SELECT codigo_clean FROM productos WHERE codigo_clean >= ? AND "
+                  "codigo_clean < ? LIMIT 50", (variante, variante + "\x7f"))
+        for (codigo,) in c.fetchall():
+            resto = codigo[len(variante):]
+            if not resto or (resto.isalpha() and len(resto) >= 3):
+                return True
+    return False
+
+
 def que_conviene_cargar_o_pedir(dias=90, limite=40):
     """Lo que te pidieron y no tenías, con qué hacer en cada caso. [dict].
 
@@ -1519,15 +1533,20 @@ def que_conviene_cargar_o_pedir(dias=90, limite=40):
     # Primero lo más pedido y, a igual cantidad, lo más reciente.
     orden = sorted(sorted(grupos.items(), key=lambda kv: kv[1]["ultima"], reverse=True),
                    key=lambda kv: -kv[1]["veces"])
-    salida = []
+    salida, textos_mirados = [], 0
     for clave, g in orden:
         if len(salida) >= limite:
             break
         es_codigo = any(ch.isdigit() for ch in clave) and len(clave) >= 4
-        if es_codigo:
-            c.execute("SELECT 1 FROM productos WHERE codigo_clean = ? LIMIT 1", (clave,))
-            if c.fetchone():
-                continue          # ya entró con alguna lista: eso lo muestra la otra tabla
+        # Lo que hoy ya se encuentra no es para hacer nada: LEICJ057 decía «🔗 vincularlo» y el
+        # buscador ya lo trae (es LEICJ057LUCAS); «mannol» y «piso», con la búsqueda por
+        # descripción de ahora, también. Ver ya_se_encuentra_el_codigo().
+        if es_codigo and ya_se_encuentra_el_codigo(clave):
+            continue          # ya entró con alguna lista: eso lo muestra la otra tabla
+        if not es_codigo and textos_mirados < 30:
+            textos_mirados += 1
+            if buscar_por_texto(g["termino"]):
+                continue
         que_hacer, detalle = "", ""
         if es_codigo:
             c.execute("""SELECT p.codigo_raw, m.nombre FROM productos p
