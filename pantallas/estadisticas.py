@@ -1283,6 +1283,17 @@ a traer solas desde Administrar → Mantenimiento.
                                             + (f" — \\${miles(_p_u['precio'], 0)}"
                                                if _p_u.get("precio") else ""))
                             _col_u.caption(_p_u["descripcion"] or "")
+                    # Lo que dice una sola de las dos (ver lo_que_dice_uno_solo()): la diferencia
+                    # sin tener que encontrarla a ojo.
+                    if _pa and _pb:
+                        _solo_a, _solo_b = lo_que_dice_uno_solo(_pa["descripcion"],
+                                                                _pb["descripcion"])
+                        _quien = ((_pa["marca"], _pb["marca"]) if _pa["marca"] != _pb["marca"]
+                                  else (_pa["codigo_raw"], _pb["codigo_raw"]))
+                        st.markdown("🔍 " + (" · ".join(
+                            f"Solo en {q}: **{', '.join(x.lower() for x in solo)}**"
+                            for q, solo in zip(_quien, (_solo_a, _solo_b)) if solo)
+                            or "Las dos descripciones dicen lo mismo."))
                     if _ficha_u:
                         st.markdown(f"La app dice: **{_ficha_u['estado']}** — "
                                     f"{motivo_corto(_ficha_u)}")

@@ -6788,6 +6788,8 @@ Lo pidió el dueño («seguí con más cosas»). En «⚡ Revisar de a uno» se 
 
 `pruebas_de_la_precision.py` (101) y `pruebas_de_las_pantallas.py` lo controlan; rompiendo a propósito cada parte —no devolverlo a la cola, borrar un vínculo que ya estaba, pisar lo que decidió otro, dejar la decisión anotada—, avisan.
 
+**Y lo que dice uno solo.** Debajo de las dos descripciones, la tarjeta dice la diferencia, que antes había que encontrar a ojo: «🔍 Solo en TARANTO: **juego, multiple** · Solo en ILLINOIS: **9, 11, 18**». Las abreviaturas de las listas van a la palabra entera (JTA es JUNTA, CIL es CILINDRO), las marcas a la suya (VW es VOLKSWAGEN), la cilindrada a «1.8» aunque diga «1 8» o «1,8» (pero «A3 1 8» es el A3 1.8, no un «A3.1»), y una palabra cortada por el largo de la columna («PRELUD») es la entera. Si no hay diferencia, lo dice. `pruebas_de_la_precision.py` (102) lo controla.
+
 ## 🩹 Lo que fallaba con la base real
 
 Lo pidió el dueño («mejorá toda la app»). La prueba de pantallas con la copia de la base real (`pruebas_de_las_pantallas.py --base`) tenía tres fallas que con la base chica de la prueba no aparecían, y no decía cuáles eran las pantallas lentas cuando algo fallaba. Ahora da las 89 en verde también con la base real.

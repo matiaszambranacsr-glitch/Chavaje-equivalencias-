@@ -2714,6 +2714,19 @@ def probar(L):
     esperar("queda anotado en el historial",
             c.execute("SELECT COUNT(*) FROM historial_de_revisiones WHERE decision = 'deshecha' "
                       "AND producto_a_id = ? AND producto_b_id = ?", _ida).fetchone()[0], 2)
+    # 102. LO QUE DICE UNO SOLO (ver lo_que_dice_uno_solo()): la diferencia entre las dos
+    # descripciones, con las abreviaturas, las marcas y la cilindrada en la misma forma.
+    _uno = ns["lo_que_dice_uno_solo"]
+    esperar("el juego contra la junta: JUEGO y MULTIPLE, y los modelos de la otra",
+            _uno("Jgo.Jtas.Mult.Adm.y Esc. RENAULT", "JTA ADM y ESC RENAULT 9/11/18"),
+            (["JUEGO", "MULTIPLE"], ["9", "11", "18"]))
+    esperar("JTA es JUNTA, CIL es CILINDRO, VW es VOLKSWAGEN",
+            _uno("JTA TAPA CIL VW GOL", "JUNTA TAPA CILINDRO VOLKSWAGEN GOL"), ([], []))
+    esperar("«1 6» y «1,6» son 1.6; en «A3 1 8», el 1.8 y no un «A3.1»",
+            (_uno("FORD FIESTA 1 6", "FORD FIESTA 1,6"), _uno("AUDI A3 1 8", "AUDI A3 1.8")),
+            (([], []), ([], [])))
+    esperar("una palabra cortada por la columna es la misma",
+            _uno("HONDA ACCORD PRELUD", "HONDA ACCORD PRELUDE"), ([], []))
     return fallas
 
 

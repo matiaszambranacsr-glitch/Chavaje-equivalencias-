@@ -360,6 +360,8 @@ def probar():
             fallas.append("de a uno: no se ve la tarjeta con los dos productos")
         elif not any("📒 Antes" in x.value and "aprobaste 7 de 8" in x.value for x in at.markdown):
             fallas.append("de a uno: la tarjeta no dice lo que decidiste antes con esos avisos")
+        elif not any("🔍 Solo en" in x.value and "1.4" in x.value for x in at.markdown):
+            fallas.append("de a uno: la tarjeta no dice lo que dice uno solo (el 1.4)")
         else:
             _si[0].click().run()
             if c.execute("SELECT COUNT(*) FROM equivalencias_pendientes WHERE lote = "

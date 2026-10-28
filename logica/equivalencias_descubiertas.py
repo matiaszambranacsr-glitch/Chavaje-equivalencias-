@@ -5035,6 +5035,41 @@ def deshacer_de_a_uno(lote, a, b, son_la_misma, antes):
     return True
 
 
+# LO QUE DICE UNO SOLO. En la tarjeta de a uno había que leer las dos descripciones y encontrar
+# la diferencia a ojo: «Jgo.Jtas.Mult.Adm.y Esc. RENAULT» contra «JTA ADM y ESC RENAULT 9/11/18»
+# son lo mismo salvo JUEGO y MULTIPLE, que es justo por qué no lo son. Con las abreviaturas de
+# las listas llevadas a la palabra entera (JTA → JUNTA) y las marcas a la suya (VW →
+# VOLKSWAGEN); la cilindrada como «1.8» aunque diga «1 8» o «1,8»; y una palabra cortada
+# («PRELUD» por el largo de la columna) es la misma que la entera.
+_VACIAS_DE_LA_DESCRIPCION = {"DE", "DEL", "LA", "EL", "LOS", "LAS", "CON", "PARA", "EN", "SIN",
+                             "POR", "REF", "ORIG"}
+
+
+def _palabras_para_comparar(descripcion):
+    texto = separar_texto_pegado(normalizar_texto(descripcion or ""))
+    texto = re.sub(r"(\d),(\d)", r"\1.\2", texto)                 # «1,55MM» es 1.55
+    texto = re.sub(r"(?<![A-Z\d.])(\d) (\d)(?![\d.])", r"\1.\2", texto)  # «1 8», no «A3 1»
+    salida = []
+    for palabra in re.findall(r"\d+(?:\.\d+)+|[A-Z0-9]+", texto):
+        palabra = ALIAS_MARCA_VEHICULO.get(palabra, ABREVIATURAS_DE_PIEZA.get(palabra, palabra))
+        if palabra in _VACIAS_DE_LA_DESCRIPCION or (len(palabra) < 2 and not palabra.isdigit()):
+            continue
+        salida.append(palabra)
+    return list(dict.fromkeys(salida))
+
+
+def lo_que_dice_uno_solo(desc_a, desc_b, tope=8):
+    """(lo que dice A y B no, lo que dice B y A no): las palabras, en el orden en que aparecen,
+    hasta `tope` de cada una. Ver «LO QUE DICE UNO SOLO»."""
+    a, b = _palabras_para_comparar(desc_a), _palabras_para_comparar(desc_b)
+
+    def esta(palabra, otras):
+        return any(palabra == o or (min(len(palabra), len(o)) >= 4 and
+                                    (palabra.startswith(o) or o.startswith(palabra)))
+                   for o in otras)
+    return ([p for p in a if not esta(p, b)][:tope], [p for p in b if not esta(p, a)][:tope])
+
+
 def par_para_revisar(a, b):
     """(producto A, producto B, ficha) para la tarjeta de la revisión de a uno."""
     c.execute("""SELECT p.id, p.codigo_raw, p.descripcion, p.precio, m.nombre AS marca
