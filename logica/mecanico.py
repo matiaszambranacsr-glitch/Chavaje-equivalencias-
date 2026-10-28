@@ -757,6 +757,8 @@ URL_NHTSA_RECLAMOS = ("https://api.nhtsa.gov/complaints/complaintsByVehicle?make
 URL_NHTSA_MODELOS = ("https://api.nhtsa.gov/products/vehicle/models?modelYear={anio}"
                      "&make={marca}&issueType=c")
 HORAS_DE_LO_TRAIDO_DE_LA_NHTSA = 24
+# Corto: el botón «🌐 Consultar» dice «probá en un rato», y un rato son cinco minutos.
+MINUTOS_SIN_REINTENTAR_LA_NHTSA = 5
 # Cómo se llaman allá las marcas que acá se escriben distinto.
 MARCAS_PARA_LA_NHTSA = {"VW": "VOLKSWAGEN", "MERCEDES BENZ": "MERCEDES-BENZ",
                         "MERCEDES": "MERCEDES-BENZ", "CHEV": "CHEVROLET", "CHEVY": "CHEVROLET"}
@@ -809,14 +811,20 @@ def marca_para_la_nhtsa(marca):
 
 
 def _de_la_nhtsa(url):
-    """Lo mismo que _pedir_json(), guardado un día por URL: la NHTSA es un servidor ajeno."""
+    """Lo mismo que _pedir_json(), guardado un día por URL: la NHTSA es un servidor ajeno.
+
+    Si no contestó, eso también se recuerda, MINUTOS_SIN_REINTENTAR_LA_NHTSA. La lista de
+    modelos se pide al dibujar la pantalla con «🇺🇸 Campañas…» abierto, y sin esto, con la
+    NHTSA sin contestar, cada toque en «🚙 Repuestos por vehículo» esperaba los 10 s otra vez
+    (lo mismo pasaba con los bancos del BCRA: ver bancos_del_bcra())."""
     guardado = del_proceso("lo_traido_de_la_nhtsa", dict)
     previo = guardado.get(url)
-    if previo and time.time() - previo[0] < HORAS_DE_LO_TRAIDO_DE_LA_NHTSA * 3600:
+    if previo and time.time() - previo[0] < (HORAS_DE_LO_TRAIDO_DE_LA_NHTSA * 3600
+                                             if previo[1] is not None
+                                             else MINUTOS_SIN_REINTENTAR_LA_NHTSA * 60):
         return previo[1]
     respuesta = _pedir_json(url, tiempo_maximo=10)
-    if respuesta is not None:
-        guardado[url] = (time.time(), respuesta)
+    guardado[url] = (time.time(), respuesta)
     return respuesta
 
 

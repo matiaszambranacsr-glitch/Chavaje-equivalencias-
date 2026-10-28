@@ -548,7 +548,11 @@ a traer solas desde Administrar → Mantenimiento.
         st.session_state.setdefault("dias_que_conviene", 90)
         _dias_qc = st.select_slider("De los últimos:", options=[30, 90, 180, 365],
                                     format_func=lambda x: f"{x} días", key="dias_que_conviene")
-        _qc = que_conviene_cargar_o_pedir(_dias_qc)
+        # Recordado mientras no se anote otra búsqueda ni cambie un producto o un vínculo: con
+        # la base real son 0,6 s, y se rehacía en cada toque de la pantalla.
+        _qc = recordado_mientras_no_cambie(
+            "_que_conviene", (_dias_qc, testigo_de_las_busquedas(), testigo_de_los_vinculos()),
+            lambda: que_conviene_cargar_o_pedir(_dias_qc), cuantos=4)
         if _qc:
             st.dataframe(_qc, width="stretch", hide_index=True)
         else:

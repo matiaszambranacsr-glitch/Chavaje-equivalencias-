@@ -196,6 +196,38 @@ def probar(L):
             ((_bonif["Productos"], _bonif["Precio"], _bonif["Costo"]), _completo[-1]["Marca"],
              _completo[-1]["Productos"] == sum(f["Productos"] for f in _completo[:-1])),
             ((4, 3, 1), "Todas", True))
+
+    # 8. El historial de precios: lo atrasada que está cada lista (envejecimiento_de_precios())
+    # y los códigos que vinieron dos veces con dos precios en la misma lista
+    # (codigos_con_dos_precios_en_la_misma_lista()). Las dos miran solo los productos con dos
+    # precios anotados o más; los de uno solo, que son casi todos, tienen que dar lo mismo.
+    c.execute("INSERT INTO marcas (nombre, tipo) VALUES ('HISTO', 'PROVEEDOR')")
+    _mh = c.lastrowid
+
+    def _con_historial(codigo, *precios_y_dias):
+        c.execute("INSERT INTO productos (codigo_raw, codigo_clean, descripcion, marca_id, precio) "
+                  "VALUES (?, ?, 'BUJIA', ?, ?)", (codigo, codigo, _mh, precios_y_dias[-1][0]))
+        _pid = c.lastrowid
+        for _precio, _hace in precios_y_dias:
+            c.execute("INSERT INTO historial_precios (producto_id, precio, fecha) "
+                      "VALUES (?, ?, datetime('now', ?))", (_pid, _precio, _hace))
+        return _pid
+    for i in range(25):          # subieron 10% de una lista a la otra, 30 días después
+        _con_historial(f"H{i}", (1000, "-31 days"), (1100, "-1 days"))
+    for i in range(5):           # un solo precio: no dicen nada del ritmo
+        _con_historial(f"U{i}", (5000, "-1 days"))
+    # La misma lista lo trajo dos veces, con dos precios: queda el último y se avisa. Y otro
+    # con dos precios pero de dos listas distintas, que no es eso.
+    _doble = _con_historial("D9", (100, "-1 days"), (500, "-1 days"))
+    _con_historial("E9", (100, "-40 days"), (300, "-1 days"))
+    conn.commit()
+    _histo = next(f for f in ns["envejecimiento_de_precios"]() if f["Lista"] == "HISTO")
+    esperar("la lista sube 10% por mes, con su propio historial",
+            (round(_histo["_ritmo"] or 0, 3), _histo["_dias"]), (0.1, 1))
+    esperar("dos precios en la misma lista: solo ese",
+            [(f["ID"], f["Precios en la lista"]) for f in
+             ns["codigos_con_dos_precios_en_la_misma_lista"]() if f["Marca"] == "HISTO"],
+            [(_doble, " / ".join(ns["formato_precio"](x) for x in (100, 500)))])
     return fallas
 
 

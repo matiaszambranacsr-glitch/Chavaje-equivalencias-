@@ -457,6 +457,18 @@ def probar(L):
         _n = len(_llamadas)
         g["tasas_de_referencia"]()
         esperar("tasas: después de un fallo espera antes de reintentar", len(_llamadas), _n)
+        # La lista de bancos de los cheques, igual: se pide al dibujar «💳 Cuentas corrientes».
+        g["guardar_config"]("bancos_del_bcra", "{}")
+        _llamadas.clear()
+        g["bancos_del_bcra"]()
+        g["bancos_del_bcra"]()
+        esperar("bancos: después de un fallo espera antes de reintentar", len(_llamadas), 1)
+        g["guardar_config"]("bancos_del_bcra", json.dumps(
+            {"bancos": [[7, "GALICIA"]], "traido": "2020-01-01 00:00:00"}))
+        esperar("bancos: sin internet queda la lista vieja", g["bancos_del_bcra"](),
+                [(7, "GALICIA")])
+        esperar("bancos: y también espera", (g["bancos_del_bcra"](), len(_llamadas)),
+                ([(7, "GALICIA")], 2))
     finally:
         g["_pedir_al_bcra"] = _pedir_al_bcra_original
 
@@ -519,10 +531,15 @@ def probar(L):
     ns["fallas_reportadas"]("MERCEDES BENZ", "SPRINTER", 2019)
     esperar("fallas: Mercedes como la escribe la NHTSA",
             any("make=MERCEDES-BENZ" in u for u in pedidas), True)
-    g["_pedir_json"] = lambda url, tiempo_maximo=4: None
+    _sin_respuesta = []
+    g["_pedir_json"] = lambda url, tiempo_maximo=4: _sin_respuesta.append(url)
     ns["del_proceso"]("lo_traido_de_la_nhtsa", dict).clear()
     esperar("fallas: sin internet, el error", bool(ns["fallas_reportadas"]("FORD", "RANGER", 2019)[1]),
             True)
+    ns["modelos_en_la_nhtsa"]("FORD", 2019)
+    _n = len(_sin_respuesta)
+    ns["modelos_en_la_nhtsa"]("FORD", 2019)
+    esperar("sin internet, el toque siguiente no la espera de nuevo", len(_sin_respuesta), _n)
     esperar("fallas: sin año", bool(ns["fallas_reportadas"]("FORD", "RANGER", "")[1]), True)
     return fallas
 

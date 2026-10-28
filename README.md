@@ -6916,6 +6916,22 @@ Lo pidió el dueño: «mejorá absolutamente todo». Primero se midió dónde la
 
 `pruebas_del_buscador.py` controla que se arme al entrar, una sola vez, y que la búsqueda no lo tenga que armar. Sin la llamada de la app, falla.
 
+**Cuarta vuelta («y mejorá más»): cada toque, y lo de afuera que no contesta.** Esta vez se midió el segundo dibujo de cada pantalla —un toque cualquiera, que es lo que se repite todo el día— con la copia real. Las del mostrador (Ventas, Caja, Buscador, Depósito) ya respondían en menos de 0,1 s. Lo que se arregló:
+
+| | Antes | Ahora |
+|---|---|---|
+| 🔎 Búsquedas sin resultado, cada toque | 0,6 s | 0,05 s |
+| Los códigos con dos precios en la misma lista (🧹 Limpiar y corregir, y la salud) | 0,17 s | 0,01 s |
+| El atraso de cada lista (🩺 Estado y papelera) | 0,11 s | 0,01 s |
+| 💳 Cuentas corrientes con el BCRA sin contestar | hasta 8 s en cada toque | una vez cada 30 minutos |
+
+- **«Qué hacer con lo que no se encontró»** se rehacía en cada toque. Ahora se recuerda mientras no se anote otra búsqueda ni cambie un producto o un vínculo.
+- **El historial de precios** tiene 71.813 renglones para 71.636 productos: casi todos tienen un solo precio. Las dos consultas que comparan precios ahora miran solo los 155 que tienen dos o más, y dan lo mismo (comparado fila por fila con la copia real; `pruebas_de_la_plata_y_el_stock.py` (8) arma un historial a mano y pasa con la versión vieja y la nueva).
+- **La lista de bancos del BCRA** para verificar un cheque se pide al abrir «💳 Cuentas corrientes». Si el BCRA no contestaba —está caído, o no le contesta a un servidor de afuera del país—, lo volvía a intentar en cada toque, esperando hasta 8 s. Las tasas del BCRA ya esperaban 30 minutos después de un fallo; los bancos ahora también, y si había una lista vieja queda esa. En la copia de la base real la lista no está: nunca se pudo traer. Mientras no esté, la pantalla pide el código del banco a mano, como antes.
+- **La NHTSA**, igual: la lista de modelos de «🇺🇸 Campañas de seguridad…» se pide en cada toque con la sección abierta. Si no contestó, se recuerda 5 minutos.
+
+`pruebas_de_las_fuentes.py` controla las esperas: con la versión vieja, falla.
+
 ## ✅ Verificada por el número de fábrica, y los espesores aparte
 
 Lo pidió el dueño: «mejorá más la equivalencia y la búsqueda de productos». Medido sobre la copia de la base con `pruebas/medir.py`.

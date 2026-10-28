@@ -24,6 +24,9 @@ def envejecimiento_de_precios():
     error de carga, y con el promedio esos pocos deciden el número de toda la lista.
 
     Devuelve una lista por proveedor, ordenada por lo que más atrasado está."""
+    # Solo los productos con dos precios anotados o más: con uno, no hay «antes». En la base
+    # real son 155 de 71.636, y comparar todo el historial costaba 0,25 s en cada toque de
+    # «🩺 Estado y papelera». Como en variacion_de_precios_por_marca(), da lo mismo.
     try:
         c.execute("""
             WITH cambios AS (
@@ -32,6 +35,8 @@ def envejecimiento_de_precios():
                        LAG(hp.fecha)  OVER (PARTITION BY hp.producto_id ORDER BY hp.fecha) AS fecha_antes
                 FROM historial_precios hp
                 JOIN productos p ON p.id = hp.producto_id
+                WHERE hp.producto_id IN (SELECT producto_id FROM historial_precios
+                                         GROUP BY producto_id HAVING COUNT(*) >= 2)
             )
             SELECT marca_id,
                    precio, antes,
@@ -1992,17 +1997,28 @@ def cuit_valido(cuit):
 
 def bancos_del_bcra():
     """[(código, nombre)] de las entidades que emiten cheques, según el BCRA. Se recuerda 30
-    días en la configuración; [] si nunca se pudo traer."""
+    días en la configuración; [] si nunca se pudo traer.
+
+    Después de un intento fallido espera MINUTOS_ANTES_DE_REINTENTAR, como las tasas (ver
+    tasas_de_referencia()). Se pide al dibujar «💳 Cuentas corrientes», y sin la espera, con
+    el BCRA caído o sin contestarle al servidor, cada toque en esa pantalla esperaba hasta 8 s.
+    En la copia de la base real la lista no está: nunca se trajo. Mientras tanto la pantalla
+    pide el código del banco a mano."""
     try:
         guardado = json.loads(obtener_config("bancos_del_bcra", "") or "{}")
     except (ValueError, TypeError):
         guardado = {}
-    fresco = False
-    try:
-        fresco = (datetime.now() - datetime.strptime(guardado.get("traido", "")[:19],
-                                                     "%Y-%m-%d %H:%M:%S")) < timedelta(days=30)
-    except ValueError:
-        pass
+
+    def _hace(clave):
+        try:
+            return datetime.now() - datetime.strptime(str(guardado.get(clave))[:19],
+                                                      "%Y-%m-%d %H:%M:%S")
+        except ValueError:
+            return None
+    traido, intentado = _hace("traido"), _hace("intentado")
+    fresco = ((traido is not None and traido < timedelta(days=30))
+              or (intentado is not None
+                  and intentado < timedelta(minutes=MINUTOS_ANTES_DE_REINTENTAR)))
     if not fresco:
         estado, cuerpo = _pedir_al_bcra(URL_BCRA_BANCOS)
         bancos = []
@@ -2014,7 +2030,9 @@ def bancos_del_bcra():
         if bancos:
             guardado = {"bancos": sorted(bancos, key=lambda x: x[1]),
                         "traido": datetime.now().strftime("%Y-%m-%d %H:%M:%S")}
-            guardar_config("bancos_del_bcra", json.dumps(guardado))
+        else:              # se queda con la lista vieja, si había, y anota el intento
+            guardado = dict(guardado, intentado=datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+        guardar_config("bancos_del_bcra", json.dumps(guardado))
     return [tuple(b) for b in guardado.get("bancos") or []]
 
 

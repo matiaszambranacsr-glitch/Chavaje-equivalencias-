@@ -961,10 +961,15 @@ def codigos_con_dos_precios_en_la_misma_lista(limite=500):
     se escriben casi igual y que, sin los signos, quedan en el mismo código. Se avisaba solo en
     el momento de importar."""
     # FILA Y NO PAR: es el historial de cada producto, no una relación.
+    # Primero los productos con dos precios anotados o más: en la base real son 155 de 71.636,
+    # y la pregunta de la última importación se hacía para todos. Corre en cada clic de «🧹
+    # Limpiar y corregir» y en el diagnóstico de salud: de 0,17 s a 0,01 s, con las mismas filas.
     c.execute("""SELECT p.id AS "ID", m.nombre AS "Marca", p.codigo_raw AS "Código",
                         p.descripcion AS "Descripción", p.precio AS "Precio que quedó",
                         GROUP_CONCAT(DISTINCT h.precio) AS "Precios en la lista"
                  FROM historial_precios h
+                 JOIN (SELECT producto_id FROM historial_precios GROUP BY producto_id
+                       HAVING COUNT(*) >= 2) varios ON varios.producto_id = h.producto_id
                  JOIN productos p ON p.id = h.producto_id
                  JOIN marcas m ON m.id = p.marca_id
                  WHERE h.fecha >= datetime((SELECT MAX(h2.fecha) FROM historial_precios h2
@@ -972,7 +977,7 @@ def codigos_con_dos_precios_en_la_misma_lista(limite=500):
                  GROUP BY h.producto_id
                  HAVING COUNT(DISTINCT h.precio) >= 2
                     AND MAX(h.precio) > MIN(h.precio) * 1.05
-                 ORDER BY MAX(h.precio) / MIN(h.precio) DESC
+                 ORDER BY MAX(h.precio) / MIN(h.precio) DESC, p.id
                  LIMIT ?""", (limite,))
     filas = filas_a_listas(c)
     for f in filas:

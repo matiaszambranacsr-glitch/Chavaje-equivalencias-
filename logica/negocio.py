@@ -1572,6 +1572,13 @@ def que_conviene_cargar_o_pedir(dias=90, limite=40):
     return salida
 
 
+def testigo_de_las_busquedas():
+    """Cambia cuando se anota una búsqueda, y con el día: lo de «los últimos N días» se corre
+    solo a medianoche. Para recordar que_conviene_cargar_o_pedir() entre toques."""
+    c.execute("SELECT MAX(id) FROM historial_busquedas")
+    return c.fetchone()[0], datetime.now().strftime("%Y-%m-%d")
+
+
 def cargar_reemplazos_de_las_descripciones():
     """Carga los reemplazos escritos en las descripciones. Devuelve cuántos entraron.
 
