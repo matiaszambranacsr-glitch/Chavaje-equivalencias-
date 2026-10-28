@@ -130,7 +130,8 @@ if pagina == PAGINAS[4]:
                 st.warning(
                     f"⚠️ **{miles(_riesgo['en_riesgo'])} producto(s) y "
                     f"{miles(_riesgo['equivalencias_en_riesgo'])} vínculo(s) viven solo en el disco.**\n\n"
-                    f"La copia del repositorio es del {_riesgo['fecha_semilla']} y tiene "
+                    f"La copia del repositorio es del {fecha_legible(_riesgo['fecha_semilla'])} "
+                    "y tiene "
                     f"{miles(_riesgo['productos_semilla'])} productos; hoy tenés "
                     f"{miles(_riesgo['productos_ahora'])}. Si el servidor reinicia, esa diferencia "
                     "se pierde."
@@ -140,21 +141,22 @@ if pagina == PAGINAS[4]:
                 # el disco. Ver cuanto_perderias_si_reinicia().
                 st.error(
                     f"🔴 **La copia de GitHub está atrasada: la última que subió es del "
-                    f"{_riesgo['fecha_semilla']}.** Lo cargado después vive solo en el disco del "
-                    "servidor, y si se reinicia —también al publicar una versión nueva de la "
-                    f"app— se pierde.\n\nPor qué no sube: {_riesgo['por_que']}"
+                    f"{fecha_legible(_riesgo['fecha_semilla'])}.** Lo cargado después vive solo "
+                    "en el disco del servidor, y si se reinicia —también al publicar una versión "
+                    f"nueva de la app— se pierde.\n\nPor qué no sube: {_riesgo['por_que']}"
                 )
             elif _riesgo.get("en_github"):
                 st.success(
                     f"✅ **La copia en GitHub se actualiza sola.** Cada {MINUTOS_ENTRE_COPIAS} "
                     "minutos la app mira si cambió algo y, si cambió, la sube. Si el servidor se "
                     f"reinicia, se pierde como mucho lo de los últimos {MINUTOS_ENTRE_COPIAS} "
-                    f"minutos. Última copia subida: {_riesgo['fecha_semilla']}."
+                    f"minutos. Última copia subida: {fecha_legible(_riesgo['fecha_semilla'])}."
                 )
             else:
                 st.success(
                     f"✅ La copia del repositorio está al día ({miles(_riesgo['productos_semilla'])} "
-                    f"productos, del {_riesgo['fecha_semilla']}). Un reinicio no te haría perder nada."
+                    f"productos, del {fecha_legible(_riesgo['fecha_semilla'])}). Un reinicio no te "
+                    "haría perder nada."
                 )
             # Si están los secretos de GitHub, se puede resolver de un botón en vez de a mano.
             _cfg_gh = config_github()
@@ -816,9 +818,10 @@ a traer solas desde Administrar → Mantenimiento.
             else:
                 st.dataframe(quitar_id(_autos), width="stretch", hide_index=True)
                 _mes = str(_info_parque.get("mes") or "")
-                _dias = (f", trámites del {_info_parque['desde']} al {_info_parque['hasta']}"
+                _dias = (f", trámites del {fecha_legible(_info_parque['desde'])} al "
+                         f"{fecha_legible(_info_parque['hasta'])}"
                          if _info_parque.get("desde") else "")
-                st.caption(f"DNRPA, {_que} de {_mes[:4]}-{_mes[4:]}{_dias} "
+                st.caption(f"DNRPA, {_que} de {_mes[4:]}/{_mes[:4]}{_dias} "
                            f"({miles(_info_parque.get('autos', 0))} autos en todo el país"
                            + ("; el archivo era más largo y se leyó hasta el tope"
                               if _info_parque.get("cortado") else "") + ").")
@@ -1090,7 +1093,7 @@ a traer solas desde Administrar → Mantenimiento.
                 if _ult_b:
                     try:
                         _ub = json.loads(_ult_b)
-                        st.caption(f"La última vez, {_ub.get('fecha', '')}: "
+                        st.caption(f"La última vez, {fecha_legible(_ub.get('fecha', ''))}: "
                                    f"{miles(_ub.get('cola', 0))} aprobadas de la cola, "
                                    f"{miles(_ub.get('rechazadas', 0))} que estaban rechazadas y "
                                    f"{miles(_ub.get('nuevos', 0))} unidas nuevas.")
@@ -1172,7 +1175,7 @@ a traer solas desde Administrar → Mantenimiento.
                 if _ultimo:
                     try:
                         _u = json.loads(_ultimo)
-                        st.caption(f"La última vez, {_u.get('fecha', '')}: "
+                        st.caption(f"La última vez, {fecha_legible(_u.get('fecha', ''))}: "
                                    f"{miles(_u.get('descartados', 0))} casi seguro mal y "
                                    f"{miles(_u.get('kits', 0))} kits, en "
                                    f"{_u.get('listas', 0)} lista(s).")
@@ -2344,7 +2347,7 @@ a traer solas desde Administrar → Mantenimiento.
                 def _pct(n_, d_):
                     return 100 * (n_ or 0) / max(d_ or 0, 1)
                 st.markdown(
-                    f"**Contra el {_mes['fecha']}:** rechazado "
+                    f"**Contra el {fecha_legible(_mes['fecha'])}:** rechazado "
                     f"{_pct(_mes['rechazados'], _mes['decididos']):.1f} % → "
                     f"{_pct(_n['rechazados'], _n['decididos']):.1f} % · con fuente "
                     f"{_pct(_mes['con_fuente'], _mes['vinculos']):.1f} % → "

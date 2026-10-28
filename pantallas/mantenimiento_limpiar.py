@@ -405,14 +405,15 @@ if pagina == PAGINAS[3]:
                 st.caption(
                     f"Puntajes guardados al día: se repuntuaron "
                     f"{miles(int(obtener_config('confianza_repuntuada', '0') or 0))} vínculo(s) el "
-                    f"{obtener_config('confianza_fecha', '')}."
+                    f"{fecha_legible(obtener_config('confianza_fecha', ''))}."
                 )
             # LA DERIVA: qué cambió la última vez que se volvió a puntuar todo. Ver
             # anotar_la_deriva().
             _deriva = la_ultima_deriva()
             if _deriva and (_deriva["bajaron"] or _deriva["subieron"]):
                 st.caption(
-                    f"🧭 Con las reglas v{_deriva['version']} ({_deriva['fecha']}), de "
+                    f"🧭 Con las reglas v{_deriva['version']} "
+                    f"({fecha_legible(_deriva['fecha'])}), de "
                     f"{miles(_deriva['total'])} vínculos **{miles(_deriva['bajaron'])} bajaron** y "
                     f"**{miles(_deriva['subieron'])} subieron** de franja en el buscador: "
                     + ", ".join(f"{k}: {miles(v)}" for k, v in sorted(
@@ -422,7 +423,8 @@ if pagina == PAGINAS[3]:
                 if seccion_plegable("Ver los que más cambiaron", key="ver_deriva"):
                     st.dataframe(_deriva["ejemplos"], width="stretch", hide_index=True)
             elif _deriva:
-                st.caption(f"🧭 Con las reglas v{_deriva['version']} ({_deriva['fecha']}) ningún "
+                st.caption(f"🧭 Con las reglas v{_deriva['version']} "
+                           f"({fecha_legible(_deriva['fecha'])}) ningún "
                            "vínculo cambió de franja en el buscador.")
             # Lo que ya se midió solo después de la última importación. Sin esto, el número
             # existía pero no lo veía nadie hasta apretar un botón que tarda 11 s.
@@ -432,7 +434,8 @@ if pagina == PAGINAS[3]:
                 _fec_prev = obtener_config("dudosos_fecha", "")
                 if _dud_prev == "0":
                     st.success(f"✅ En la última importación se revisaron {miles(int(_rev_prev))} "
-                                f"vínculos y ninguno quedó por debajo del umbral ({_fec_prev}).")
+                                f"vínculos y ninguno quedó por debajo del umbral "
+                                f"({fecha_legible(_fec_prev)}).")
                 else:
                     st.warning(f"⚠️ En la última importación ({_fec_prev}) quedaron "
                                 f"**{int(_dud_prev)} vínculo(s) con evidencia en contra** de "

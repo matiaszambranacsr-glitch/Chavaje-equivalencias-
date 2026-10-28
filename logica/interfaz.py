@@ -2119,7 +2119,7 @@ def mostrar_ficha_de_prueba(id_a, id_b, clave):
             st.link_button(f"🔎 Buscar «{_q}» en la web",
                            "https://www.google.com/search?q=" + urllib.parse.quote_plus(_q))
     if ficha["ultima_revision"]:
-        st.caption(f"🕰️ Última revisión: {ficha['ultima_revision']}"
+        st.caption(f"🕰️ Última revisión: {fecha_legible(ficha['ultima_revision'])}"
                    + (f" (hace {ficha['meses_sin_revisar']} meses)"
                       if ficha["meses_sin_revisar"] else ""))
     # Las fotos, una al lado de la otra. La foto no confirma la equivalencia: sirve para ver una

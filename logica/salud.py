@@ -881,7 +881,8 @@ def diagnostico_de_salud():
                   miga_hasta("Backup y config"))
         elif riesgo and riesgo["en_riesgo"] > 200:
             sumar_tecnico("alto", f"{miles(riesgo['en_riesgo'])} productos viven solo en el disco",
-                  f"La copia del repositorio es del {riesgo['fecha_semilla']} y tiene "
+                  f"La copia del repositorio es del {fecha_legible(riesgo['fecha_semilla'])} "
+                  "y tiene "
                   f"{miles(riesgo['productos_semilla'])}; hoy tenés {miles(riesgo['productos_ahora'])}. "
                   "Si el servidor reinicia, la diferencia se pierde.",
                   miga_hasta("Backup y config"))

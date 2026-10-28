@@ -631,7 +631,7 @@ try:
         st.session_state["_desc_visto"] = _desc_fec
         # Los números con punto de miles: los resultados guardados antes de miles() decían
         # «1,380 par(es) de motores», que acá se lee uno coma tres.
-        st.caption(f"🧠 Búsqueda automática de relaciones ({_desc_fec}): "
+        st.caption(f"🧠 Búsqueda automática de relaciones ({fecha_legible(_desc_fec)}): "
                    + re.sub(r"(?<=\d),(?=\d{3}\b)", ".", _desc_txt))
     elif obtener_config("descubrimiento_pendiente", "") == "1":
         st.caption("🧠 Buscando relaciones nuevas en todo el catálogo, por atrás…")

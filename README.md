@@ -6805,7 +6805,9 @@ Lo pidió el dueño («mejorá más en español»). Primero se midió: un recorr
 
 Ahora dicen «25/09/2026 20:33» y quedan en blanco. Son cien tablas, así que en vez de arreglarlas de a una, `st.dataframe()` recibe las filas ya legibles (`filas_legibles()`). Solo los textos: una columna de números con huecos sigue siendo de números, para que se ordene bien. Esa la arregla quien la arma: «Días desde la última carga» ahora dice «—», como las de al lado. Las fechas se siguen ordenando igual en la lógica, porque se cambian recién al mostrarlas.
 
-`pruebas_de_la_precision.py` (103) controla los errores y `pruebas_de_las_pantallas.py` las tablas: ninguna de las 89 pantallas puede mostrar una fecha de la base ni un «None». Sacando el arreglo de las tablas, avisa en 8 con la base de prueba.
+**3. Las fechas en los textos.** Lo mismo pasaba fuera de las tablas, en los avisos y renglones grises: la fecha del dólar, la «última vez» de cada fuente de precios, la de las reglas de la revisión, la de las patentes del DNRPA (y el mes como «2026-09»). La prueba de pantallas ahora lee también los textos (markdown, avisos, renglones grises) y encontró 6 con la copia de la base real y 1 con la de prueba. Se arreglaron con `fecha_legible()`, y de paso otros 12 que arman el texto con una fecha de la base y que esta vez no se vieron porque no tenían dato (cheques denunciados, la fecha de la copia, la última revisión de un vínculo).
+
+`pruebas_de_la_precision.py` (103) controla los errores y `pruebas_de_las_pantallas.py` las tablas y los textos: ninguna de las 89 pantallas puede mostrar una fecha de la base ni un «None». Sacando el arreglo de las tablas, avisa en 8 con la base de prueba.
 
 ## ↩️ Deshacer la última, en la revisión de a uno
 

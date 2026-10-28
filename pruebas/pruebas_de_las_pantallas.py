@@ -65,6 +65,7 @@ class Muestreo:
 
 
 _RE_FECHA_CRUDA = re.compile(r"^\d{4}-\d{2}-\d{2}([ T]\d{2}:\d{2}(:\d{2})?(\.\d+)?)?$")
+_RE_FECHA_EN_TEXTO = re.compile(r"\b\d{4}-\d{2}-\d{2}\b")
 _tablas_vistas = set()
 
 
@@ -135,6 +136,15 @@ def probar():
                         fallas.append(f"{quien}: {donde}: la columna «{_col}» muestra {_mal} "
                                       f"({_v!r})")
                         break
+        # Y en los textos: «última vez: 2026-10-25 22:21» (ver fecha_legible()).
+        for _tipo in ("markdown", "caption", "info", "warning", "error", "success"):
+            for _el in getattr(at, _tipo, []):
+                _txt = str(getattr(_el, "value", ""))
+                _hay = None if _txt.lstrip().startswith("<") else _RE_FECHA_EN_TEXTO.search(_txt)
+                if _hay and (donde.split(" (")[0], _tipo, _txt[:40]) not in _tablas_vistas:
+                    _tablas_vistas.add((donde.split(" (")[0], _tipo, _txt[:40]))
+                    fallas.append(f"{quien}: {donde}: un {_tipo} dice la fecha como la base: "
+                                  f"«…{_txt[max(0, _hay.start() - 40):_hay.end()]}»")
 
     def recorrer(quien):
         # Las de la barra de cada uno: sin sesión, solo las abiertas (ver PAGINAS_ABIERTAS).

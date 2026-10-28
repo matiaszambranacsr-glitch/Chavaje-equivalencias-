@@ -138,7 +138,7 @@ if pagina == PAGINAS[1]:
             st.warning(
                 "🚫 **Alguien ya dijo que estos no son equivalentes:**\n"
                 + "\n".join(f"- `{r['cod_a']}` ↔ `{r['cod_b']}`: lo rechazó "
-                            f"{r['revisado_por'] or 'alguien'} el {r['fecha']}"
+                            f"{r['revisado_por'] or 'alguien'} el {fecha_legible(r['fecha'])}"
                             + (f" ({MOTIVOS_DE_RECHAZO.get(r['motivo'], r['motivo'])})"
                                if r["motivo"] else "")
                             for r in _rechazos))

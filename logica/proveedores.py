@@ -2995,7 +2995,7 @@ def mostrar_avance_de_tanda(que, unidad):
         f"Faltan **{miles(faltan)}** {unidad} · hoy van {miles(hoy)} · ⚡ sin tope por día"
         + (" · 🟢 corriendo ahora" if resumen.get("corriendo") else "")
         + (f" · 😴 retoma {_fecha_corta(descanso)}" if descanso else "")
-        + (f" · última vez: {resumen['ultima']}" if resumen.get("ultima") else "")
+        + (f" · última vez: {fecha_legible(resumen['ultima'])}" if resumen.get("ultima") else "")
     )
     if descanso and st.button("▶️ Retomar ahora", key=f"retomar_tanda_{que}",
                               disabled=solo_mirar()):

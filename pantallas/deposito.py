@@ -137,7 +137,7 @@ if pagina == PAGINAS[8]:
                                  args=(_pid, _clave_modo, _clave_min),
                                  help="Si lo último que entregaste en este piso fue hace menos "
                                       "que esto, seguís desde ahí; si no, desde la entrada.")
-            st.caption(f"Arranca {_g['desde']}"
+            st.caption(f"Arranca {fecha_legible(_g['desde'])}"
                        + (f" · el recorrido: unos {_g['pasos']} paso{'s' if _g['pasos'] != 1 else ''}"
                           if _g["pasos"] else ""))
             if st.toggle("🗺️ Ver en el mapa", value=True, key=f"dep_mapa_{_pid}"):

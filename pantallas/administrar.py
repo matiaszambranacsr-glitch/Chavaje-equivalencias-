@@ -1205,7 +1205,8 @@ if pagina == PAGINAS[3]:
                     elif _ch["denunciado"]:
                         st.error(
                             f"🚫 **El cheque {_nro_cheque} está DENUNCIADO** en el BCRA"
-                            + (f" ({_ch['banco']}, {_ch['fecha']})" if _ch["banco"] else "")
+                            + (f" ({_ch['banco']}, {fecha_legible(_ch['fecha'])})"
+                               if _ch["banco"] else "")
                             + ". " + "; ".join(str(_causal) for _suc, _cta, _causal in _ch["detalles"] if _causal)
                             + ". No lo recibas.")
                     else:

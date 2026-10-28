@@ -159,7 +159,7 @@ if pagina == PAGINAS[3]:
                             f"{miles(_var['30'] * 100, 1)}% en los últimos 30 días"
                             + (f" y {miles(_var['90'] * 100, 1)}% en 90"
                                if _var.get("90") is not None else "")
-                            + f" (al {_d.get('fecha', 'sin fecha')}"
+                            + f" (al {fecha_legible(_d.get('fecha', 'sin fecha'))}"
                             + (f"; {_d['fuente']}" if _d.get("fuente") else "") + ").")
                     _i = _ctx.get("ipc") or {}
                     if _i.get("variacion") is not None:
