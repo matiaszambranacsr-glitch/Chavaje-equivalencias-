@@ -2673,6 +2673,47 @@ def probar(L):
             _busca100("aceite 10w40")[0][:1], ["CLX1L"])
     esperar("el tipeo de un código: el número más cercano primero (MFLA 258 antes que 272)",
             [f["Codigo"] for f in ns["codigos_por_tipeo"]("MFLA260")][:1], ["MFLA 258"])
+    # 101. DESHACER LA ÚLTIMA DE A UNO (ver deshacer_de_a_uno()): el par vuelve exactamente a
+    # como estaba —a la cola de las dos listas, con su fecha—, un vínculo que ya existía queda, y
+    # si después lo decidió otra persona no se toca.
+    m101 = marca("CIENTO UNO")
+    _p101 = [(producto(f"DA{n}101", f"BOMBA AGUA GOL {n}", m101),
+              producto(f"DB{n}101", f"BOMBA AGUA GOL {n} 1.6", m101)) for n in range(3)]
+    _ida, _vuelta = _p101[0], _p101[0][::-1]
+    c.executemany("INSERT INTO equivalencias_pendientes (producto_a_id, producto_b_id, origen, "
+                  "lote, fecha) VALUES (?, ?, 'x', ?, ?)",
+                  [(*_ida, "DESHACER", "2026-01-02 10:00:00"),
+                   (*_vuelta, "OTRA DESHACER", "2026-01-03 10:00:00"),
+                   (*_p101[1], "DESHACER", "2026-01-02 10:00:00"),
+                   (*_p101[2], "DESHACER", "2026-01-02 10:00:00")])
+    c.execute("INSERT INTO equivalencias (producto_a_id, producto_b_id) VALUES (?, ?)", _p101[1])
+    conn.commit()
+
+    def _foto101(a, b):
+        _f = ns["como_esta_el_par"](a, b)
+        return (sorted(tuple(sorted(x.items())) for x in _f["pendientes"]),
+                sorted(tuple(sorted(x.items())) for x in _f["revisadas"]), _f["vinculado"])
+
+    for _par, _si in ((_ida, True), (_ida, False), (_p101[1], True)):
+        _antes = ns["como_esta_el_par"](*_par)
+        _foto_antes = _foto101(*_par)
+        ns["decidir_de_a_uno"]("DESHACER", *_par, _si)
+        _decidido = _foto101(*_par)
+        esperar(f"deshacer ({'misma' if _si else 'no'}, vinculado={_antes['vinculado']}): "
+                "vuelve a como estaba",
+                (_decidido != _foto_antes,
+                 ns["deshacer_de_a_uno"]("DESHACER", *_par, _si, _antes), _foto101(*_par)),
+                (True, True, _foto_antes))
+    _antes = ns["como_esta_el_par"](*_p101[2])
+    ns["decidir_de_a_uno"]("DESHACER", *_p101[2], True)
+    ns["marcar_revision"]([_p101[2]], "rechazada")        # otra persona, después
+    esperar("si después lo decidió otra persona, no se deshace",
+            (ns["deshacer_de_a_uno"]("DESHACER", *_p101[2], True, _antes),
+             {x["decision"] for x in ns["como_esta_el_par"](*_p101[2])["revisadas"]}),
+            (False, {"rechazada"}))
+    esperar("queda anotado en el historial",
+            c.execute("SELECT COUNT(*) FROM historial_de_revisiones WHERE decision = 'deshecha' "
+                      "AND producto_a_id = ? AND producto_b_id = ?", _ida).fetchone()[0], 2)
     return fallas
 
 

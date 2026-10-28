@@ -4985,6 +4985,56 @@ def decidir_de_a_uno(lote, a, b, son_la_misma):
     return aprobar_pendientes(lote, pares) if son_la_misma else rechazar_pendientes(lote, pares)
 
 
+# DESHACER LA ÚLTIMA. Con el teclado, una N por una S es un toque: antes no había vuelta atrás de
+# una decisión suelta (solo deshacer una lista entera). Se guarda cómo estaba el par antes de
+# decidir —en la cola de todas las listas, porque un rechazo lo saca de todas; en lo revisado;
+# y si ya era equivalencia— y se vuelve exactamente a eso.
+_DEL_PAR = ("(producto_a_id = ? AND producto_b_id = ?) OR (producto_a_id = ? AND producto_b_id = ?)")
+
+
+def como_esta_el_par(a, b):
+    """Lo que decidir el par de a uno puede cambiar: {"pendientes", "revisadas", "vinculado",
+    "codigos"}. Ver deshacer_de_a_uno()."""
+    pares = (a, b, b, a)
+    c.execute(f"SELECT * FROM equivalencias_pendientes WHERE {_DEL_PAR}", pares)
+    pendientes = [dict(r) for r in c.fetchall()]
+    c.execute(f"SELECT * FROM equivalencias_revisadas WHERE {_DEL_PAR}", pares)
+    revisadas = [dict(r) for r in c.fetchall()]
+    c.execute(f"SELECT 1 FROM equivalencias WHERE {_DEL_PAR}", pares)
+    vinculado = c.fetchone() is not None
+    c.execute("SELECT id, codigo_raw FROM productos WHERE id IN (?, ?)", (a, b))
+    codigos = {r[0]: r[1] for r in c.fetchall()}
+    return {"pendientes": pendientes, "revisadas": revisadas, "vinculado": vinculado,
+            "codigos": (codigos.get(a) or "?", codigos.get(b) or "?")}
+
+
+def deshacer_de_a_uno(lote, a, b, son_la_misma, antes):
+    """Vuelve el par a como estaba antes de decidirlo de a uno (`antes`: ver como_esta_el_par()).
+    Devuelve True, o False si después lo cambió otra persona: ahí manda lo último."""
+    exigir_nivel("empleado", "deshacer una decisión")
+    pares = (a, b, b, a)
+    with db_lock, transaccion():
+        c.execute("SELECT decision FROM equivalencias_revisadas WHERE producto_a_id = ? "
+                  "AND producto_b_id = ?", (a, b))
+        fila = c.fetchone()
+        if not fila or fila[0] != ("ok" if son_la_misma else "rechazada"):
+            return False
+        if son_la_misma and not antes["vinculado"]:
+            c.execute(f"DELETE FROM equivalencias WHERE {_DEL_PAR}", pares)
+        c.execute(f"DELETE FROM equivalencias_revisadas WHERE {_DEL_PAR}", pares)
+        for tabla, filas, como in (("equivalencias_revisadas", antes["revisadas"], "INSERT OR REPLACE"),
+                                   ("equivalencias_pendientes", antes["pendientes"], "INSERT OR IGNORE")):
+            for fila in filas:
+                c.execute(f"{como} INTO {tabla} ({', '.join(fila)}) "
+                          f"VALUES ({', '.join('?' * len(fila))})", list(fila.values()))
+        c.execute("""INSERT INTO historial_de_revisiones
+                         (producto_a_id, producto_b_id, decision, revisado_por, lote,
+                          version_reglas, como)
+                     VALUES (?, ?, 'deshecha', ?, ?, ?, 'uno')""",
+                  (min(a, b), max(a, b), obtener_usuario_actual(), lote, VERSION_CONFIANZA))
+    return True
+
+
 def par_para_revisar(a, b):
     """(producto A, producto B, ficha) para la tarjeta de la revisión de a uno."""
     c.execute("""SELECT p.id, p.codigo_raw, p.descripcion, p.precio, m.nombre AS marca
@@ -5003,10 +5053,36 @@ def cb_de_a_uno(lote, clave_cola, decision):
     if decision == "pasar":
         cola.append(par)
         return
+    antes = como_esta_el_par(par["a"], par["b"])
     hecho = decidir_de_a_uno(lote, par["a"], par["b"], decision == "si")
     st.session_state["_de_a_uno_hechos"] = st.session_state.get("_de_a_uno_hechos", 0) + bool(hecho)
     if not hecho:
         st.session_state["_de_a_uno_aviso"] = "Ese ya no estaba pendiente: lo resolvió otra persona."
+        return
+    # Para «↩️ Deshacer» (ver deshacer_de_a_uno()): las últimas veinte, la más nueva al final.
+    pila = st.session_state.setdefault("_de_a_uno_deshacer", [])
+    pila.append({"lote": lote, "clave_cola": clave_cola, "par": par, "si": decision == "si",
+                 "antes": antes})
+    del pila[:-20]
+
+
+def cb_deshacer_de_a_uno():
+    """Callback de «↩️ Deshacer»: la última decisión de a uno vuelve a la cola, primera."""
+    pila = st.session_state.get("_de_a_uno_deshacer") or []
+    if not pila:
+        return
+    ultima = pila.pop()
+    par = ultima["par"]
+    if not deshacer_de_a_uno(ultima["lote"], par["a"], par["b"], ultima["si"], ultima["antes"]):
+        st.session_state["_de_a_uno_aviso"] = ("No se deshizo: después de vos lo decidió otra "
+                                               "persona, y vale lo último.")
+        return
+    cola = st.session_state.get(ultima["clave_cola"])
+    if cola is not None:
+        cola.insert(0, par)
+    st.session_state["_de_a_uno_hechos"] = max(0, st.session_state.get("_de_a_uno_hechos", 0) - 1)
+    st.session_state["_de_a_uno_aviso"] = (f"↩️ Deshecho: {' ↔ '.join(ultima['antes']['codigos'])} "
+                                           "volvió a la cola.")
 
 
 def aprobar_pendientes(lote, solo_estos_pares=None, en_bloque=False):

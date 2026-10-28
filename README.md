@@ -6777,6 +6777,17 @@ Lo pidió el dueño («hacé 3, 4, 5 y 6»; esta es la 5). «bomba de agua k4m»
 
 `autos_del_motor()` lo aprende de las descripciones que nombran el motor (con cinco o más): los modelos que aparecen en el 5 % o más, y la cilindrada y las válvulas solo si las dicen tres o más y el 60 % de los que dicen alguna (el F8Q tenía 9 «16V» y 9 «8V», y no dice ninguna). Se recuerda por versión del catálogo. «bomba agua clio 1.6 16v» trae 11 con todo lo pedido.
 
+## ↩️ Deshacer la última, en la revisión de a uno
+
+Lo pidió el dueño («seguí con más cosas»). En «⚡ Revisar de a uno» se decide con el teclado, y una N por una S es un toque. Antes no había vuelta atrás de una decisión suelta: solo deshacer una lista entera. Ahora, después de cada decisión, arriba de la tarjeta aparece **«↩️ Deshacer: 330536 ↔ 25682AC3 (eran la misma)»**, con la tecla **D**:
+
+- **Vuelve exactamente a como estaba.** Antes de decidir se anota dónde estaba el par: en la cola de cada lista (un rechazo lo saca de todas), con su lista y su fecha, en lo revisado, y si ya era equivalencia. Deshacer vuelve a eso, y el par queda primero en la cola para decidirlo de nuevo.
+- **Las últimas veinte**, una por toque, de la más nueva a la más vieja.
+- **Si después lo decidió otra persona, no se toca**: vale lo último, y la pantalla lo dice.
+- **Queda en el historial** como «deshecha», con quién y cuándo.
+
+`pruebas_de_la_precision.py` (101) y `pruebas_de_las_pantallas.py` lo controlan; rompiendo a propósito cada parte —no devolverlo a la cola, borrar un vínculo que ya estaba, pisar lo que decidió otro, dejar la decisión anotada—, avisan.
+
 ## 🩹 Lo que fallaba con la base real
 
 Lo pidió el dueño («mejorá toda la app»). La prueba de pantallas con la copia de la base real (`pruebas_de_las_pantallas.py --base`) tenía tres fallas que con la base chica de la prueba no aparecían, y no decía cuáles eran las pantallas lentas cuando algo fallaba. Ahora da las 89 en verde también con la base real.

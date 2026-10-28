@@ -1243,7 +1243,7 @@ a traer solas desde Administrar → Mantenimiento.
             if not solo_mirar() and st.toggle(
                     "⚡ Revisar de a uno, con el teclado", key=f"de_a_uno_{lote_info['lote']}",
                     help="Un par por vez. S: son la misma pieza; N: no son; P: pasar (vuelve al "
-                         "final). Primero lo que une redes (🔥), después de a tandas parecidas: "
+                         "final); D: deshacer la última. Primero lo que une redes (🔥), después de a tandas parecidas: "
                          "las mismas dos listas y el mismo rubro; adentro, primero lo que con "
                          "esos avisos casi siempre aprobaste (📒 dice cuántos)."):
                 _clave_cola = f"_cola_de_a_uno_{lote_info['lote']}"
@@ -1254,6 +1254,15 @@ a traer solas desde Administrar → Mantenimiento.
                 _aviso_u = st.session_state.pop("_de_a_uno_aviso", None)
                 if _aviso_u:
                     st.info(_aviso_u)
+                # Deshacer la última (ver deshacer_de_a_uno()): con el teclado, una N por una S
+                # es un toque. Va antes de la tarjeta, así está también cuando no queda nada.
+                _pila_u = st.session_state.get("_de_a_uno_deshacer") or []
+                if _pila_u:
+                    _ult_u = _pila_u[-1]
+                    st.button(f"↩️ Deshacer: {' ↔ '.join(_ult_u['antes']['codigos'])} "
+                              + ("(eran la misma)" if _ult_u["si"] else "(no eran)"),
+                              key="de_a_uno_deshacer", on_click=cb_deshacer_de_a_uno,
+                              shortcut=None if es_celular() else "D")
                 if not _cola_u:
                     st.success("✅ No queda nada pendiente en esta lista.")
                 else:

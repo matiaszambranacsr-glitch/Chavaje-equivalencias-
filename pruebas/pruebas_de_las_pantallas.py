@@ -367,6 +367,17 @@ def probar():
                 fallas.append("de a uno: «Son la misma pieza» no aprobó el par")
             elif not any("quedan 1 en la cola" in x.value for x in at.markdown):
                 fallas.append("de a uno: después de decidir no pasa al siguiente")
+            else:
+                # Y «↩️ Deshacer» lo vuelve a la cola, primero (ver deshacer_de_a_uno()).
+                _deshacer = [b for b in at.button if b.key == "de_a_uno_deshacer"]
+                if _deshacer:
+                    _deshacer[0].click().run()
+                if (not _deshacer or c.execute(
+                        "SELECT COUNT(*) FROM equivalencias_pendientes WHERE lote = "
+                        "'DE A UNO EN PANTALLA'").fetchone()[0] != 2
+                        or not any("quedan 2 en la cola" in x.value for x in at.markdown)
+                        or not any("Deshecho" in x.value for x in at.info)):
+                    fallas.append("de a uno: «↩️ Deshacer» no vuelve el par a la cola")
     at.session_state["pagina_actual"] = ns["PAGINAS"][0]
     recorrer("operador")
     [b for b in at.button if b.label == "Salir"][0].click().run()
