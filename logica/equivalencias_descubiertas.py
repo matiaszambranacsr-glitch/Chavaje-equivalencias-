@@ -408,7 +408,7 @@ def verificar_en_catalogo_oficial(codigo_a_buscar, url_ficha, tiempo_maximo=8):
                         "proveedor no lo liste, o que la página cargue los datos aparte.")
     except Exception as e:
         anotar_error("verificar_en_catalogo_oficial", e)
-        return None, f"No se pudo consultar la página ({type(e).__name__})."
+        return None, f"No se pudo consultar la página ({el_error_en_castellano(e)})."
 
 
 def nivel_por_evidencias(evidencias):

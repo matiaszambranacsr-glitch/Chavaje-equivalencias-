@@ -46,7 +46,7 @@ if pagina == PAGINAS[3]:
                     if fallidas:
                         with st.expander(f"⚠️ {len(fallidas)} no se pudieron bajar", key="exp_no_pudieron_bajar"):
                             for url_f, motivo in fallidas[:30]:
-                                st.caption(f"- {str(url_f)[:60]}: {motivo}")
+                                st.caption(f"- {str(url_f)[:60]}: {el_error_en_castellano(motivo)}")
             else:
                 st.caption("✅ No hay fotos pendientes de bajar desde links.")
 
@@ -87,15 +87,16 @@ if pagina == PAGINAS[3]:
                     if _motivo.startswith("SSLError"):
                         st.warning(
                             f"⚠️ **{miles(_cuantas)} foto(s) fallaron por el certificado de "
-                            f"seguridad del sitio** ({_motivo}). Si le falta el certificado "
+                            "seguridad del sitio**. Si le falta el certificado "
                             "intermedio —lo más común—, desde esta versión la app lo completa "
                             "sola, como hace el navegador, y se vuelven a probar solas al otro "
                             "día. Si es otra cosa (vencido, de otro sitio), lo tiene que arreglar "
                             "el proveedor: la app no se saltea la verificación.")
                     else:
                         st.caption("Fallaron por la red o el sitio, y se reintentan solas hasta "
-                                   "tres días: " + ", ".join(f"{miles(n)} por «{m}»"
-                                                             for m, n in _fallas_fotos[:3]) + ".")
+                                   "tres días: " + ", ".join(
+                                       f"{miles(n)} porque {el_error_en_castellano(m)}"
+                                       for m, n in _fallas_fotos[:3]) + ".")
 
                 explicar(
                     "Entra a la ficha de cada código y busca la foto ahí.",

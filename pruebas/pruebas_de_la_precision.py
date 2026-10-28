@@ -2732,6 +2732,38 @@ def probar(L):
             (["SALIDA"], []))
     esperar("pero «S 1.6» no se pega: la cilindrada sigue entera",
             _uno("BOMBA FORD S 1.6", "BOMBA FORD 1.6"), ([], []))
+    # 103. LOS ERRORES, EN CASTELLANO (ver el_error_en_castellano()): lo de las bibliotecas dice
+    # qué quiere decir; lo que ya está en castellano, tal cual; nunca un texto con una dirección.
+    import requests as _req
+    import sqlite3 as _sql103
+    import zipfile as _zip103
+    _cast = ns["el_error_en_castellano"]
+    esperar("los de afuera, en castellano", [_cast(e) for e in (
+        _req.exceptions.SSLError("Max retries exceeded (Caused by SSLError(CERTIFICATE_VERIFY_FAILED))"),
+        _req.exceptions.ProxyError("Unable to connect to proxy"),
+        _req.exceptions.ReadTimeout("Read timed out"),
+        _req.exceptions.ConnectionError("HTTPSConnectionPool(host='x'): Max retries exceeded"),
+        _zip103.BadZipFile("File is not a zip file"),
+        _sql103.OperationalError("database is locked"),
+        _sql103.IntegrityError("UNIQUE constraint failed: productos.codigo_clean"))], [
+        "el sitio tiene un certificado que no se pudo verificar",
+        "no se pudo salir a internet: lo frenó el proxy de la red",
+        "el sitio tardó demasiado en contestar",
+        "no se pudo conectar con el sitio: puede que no haya internet o que el sitio esté caído",
+        "el archivo no es un Excel que se pueda abrir: puede estar dañado, o ser otro formato "
+        "con el nombre cambiado",
+        "la base estaba ocupada: probá de nuevo en unos segundos",
+        "eso ya estaba cargado: se repite"])
+    esperar("lo de la app, tal cual; lo que no se reconoce, sin el inglés; el nombre guardado",
+            (_cast(ValueError("Esa clave ya está usada por otra persona.")),
+             _cast(ValueError("Lo tiene que recibir el deposito, no la caja")),
+             _cast(RuntimeError("something weird happened")), _cast("SSLError")),
+            ("Esa clave ya está usada por otra persona.",
+             "Lo tiene que recibir el deposito, no la caja", "falló algo adentro (RuntimeError)",
+             "el sitio tiene un certificado que no se pudo verificar"))
+    esperar("nunca el texto con una dirección o una clave, aunque parezca castellano",
+            _cast(ValueError("no se pudo entrar a https://portal.com/?usuario=ana&clave=secreta")),
+            "falló algo adentro (ValueError)")
     return fallas
 
 

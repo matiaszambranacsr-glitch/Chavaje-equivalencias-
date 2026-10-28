@@ -333,7 +333,7 @@ if pagina == PAGINAS[8] and sub_deposito in SUB_DEPOSITO[1:]:
                         st.session_state[f"armar_estantes_{_piso_id}"] = int(_estantes_rapido)
                         st.rerun()
                     except ValueError as _err:
-                        st.warning(str(_err))
+                        st.warning(el_error_en_castellano(_err))
 
             st.markdown("**El plano**" + (" — ✏️ con cambios sin guardar"
                                           if _borrador != _guardado else ""))
@@ -374,7 +374,7 @@ if pagina == PAGINAS[8] and sub_deposito in SUB_DEPOSITO[1:]:
                         avisar("success", f"➕ Estantería {_letra_e} sumada (falta guardar).")
                         st.rerun()
                     except ValueError as _err:
-                        st.warning(str(_err))
+                        st.warning(el_error_en_castellano(_err))
             with _t2.expander("↔️ Mover o sacar una", key="exp_mover_o_sacar"):
                 if not _leido["estanterias"]:
                     st.caption("Todavía no hay estanterías.")
@@ -390,7 +390,7 @@ if pagina == PAGINAS[8] and sub_deposito in SUB_DEPOSITO[1:]:
                                 _cambiar_borrador(mover_estanteria(_borrador, _letra_m, _dx, _dy))
                                 st.rerun()
                             except ValueError as _err:
-                                st.warning(str(_err))
+                                st.warning(el_error_en_castellano(_err))
                     if _flechas[4].button("🗑️", key="armar_sacar", width="stretch",
                                           help="Sacarla del plano (queda pasillo)."):
                         _cambiar_borrador(sacar_estanteria(_borrador, _letra_m))

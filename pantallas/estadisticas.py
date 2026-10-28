@@ -456,7 +456,7 @@ a traer solas desde Administrar → Mantenimiento.
             try:
                 _control = restaurar_backup(archivo_restaurar)
             except ValueError as _err_rest:
-                st.error(f"No se restauró nada: {_err_rest}.")
+                st.error(f"No se restauró nada: {el_error_en_castellano(_err_rest)}.")
             else:
                 if _control["sana"]:
                     avisar("success", f"Backup restaurado y controlado: base sana, "

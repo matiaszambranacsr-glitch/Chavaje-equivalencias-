@@ -2702,6 +2702,45 @@ if DE_DONDE:
                      "disparar. Si es lo que la app anota sola, va en _SE_ESCRIBE_SOLA")
 
 
+# ============ Los errores, en castellano ============
+# Lo que falla adentro de una biblioteca trae su texto en inglés, y se mostraba tal cual: «No se
+# pudo leer el archivo: File is not a zip file», «No se pudo: ConnectionError: HTTPSConnection…».
+# Un error agarrado con `except … as e` que llega a la pantalla —st.error, st.warning, avisar…—
+# pasa por el_error_en_castellano() (ver «LOS ERRORES, EN CASTELLANO» en logica/base.py), que
+# deja tal cual lo que ya está en castellano. st.exception() no: es el detalle técnico, para el
+# administrador.
+_A_LA_VISTA = {"error", "warning", "info", "success", "caption", "markdown", "write", "toast",
+               "avisar"}
+_LO_TRADUCEN = {"el_error_en_castellano", "traducir_error_gemini", "anotar_error",
+                "tapar_lo_sensible", "mostrar_error_inesperado", "anotar_busqueda"}
+
+
+def _usa_sin_traducir(nodo, nombre):
+    """¿`nodo` usa la variable del error `nombre` fuera de una función que lo traduce?"""
+    if isinstance(nodo, ast.Call):
+        _fn = nodo.func.attr if isinstance(nodo.func, ast.Attribute) else getattr(nodo.func, "id", "")
+        if _fn in _LO_TRADUCEN:
+            return False
+    if isinstance(nodo, ast.Name) and nodo.id == nombre:
+        return True
+    return any(_usa_sin_traducir(h, nombre) for h in ast.iter_child_nodes(nodo))
+
+
+for _h in ast.walk(ARBOL):
+    if not isinstance(_h, ast.ExceptHandler) or not _h.name:
+        continue
+    for _sent in _h.body:
+        for _c in _sin_entrar_a_funciones(_sent):
+            if not isinstance(_c, ast.Call):
+                continue
+            _fn = _c.func.attr if isinstance(_c.func, ast.Attribute) else getattr(_c.func, "id", "")
+            if _fn in _A_LA_VISTA and any(_usa_sin_traducir(_a, _h.name)
+                                          for _a in list(_c.args) + [k.value for k in _c.keywords]):
+                reportar("REVISAR", _c.lineno,
+                         f"el error «{_h.name}» llega a la pantalla sin traducir: en inglés si "
+                         "viene de una biblioteca. Pasalo por el_error_en_castellano()")
+
+
 # ============ El paquete nucleo/ al día con logica/ ============
 # nucleo/ se genera desde logica/ (nucleo/generar.py). Si alguien cambia logica/ y no lo
 # regenera, nucleo/pruebas.py sigue en verde —prueba lo viejo— y el paquete queda atrasado sin

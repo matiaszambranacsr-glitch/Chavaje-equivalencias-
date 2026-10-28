@@ -782,6 +782,7 @@ AYUDAS_DEL_NAVEGADOR = r"""
     "Choose or add an option": "Elegí o escribí una", "Choose or add options": "Elegí o escribí",
     "Select...": "Elegí…", "No results": "No hay nada con eso", "No options": "No hay opciones",
     "No options to select": "No hay opciones", "Selectbox options": "Opciones",
+    "Selected values": "Lo elegido",
     "Press Enter to apply": "Enter para confirmar", "Press Enter to submit form": "Enter para confirmar",
     "Press Ctrl+Enter to apply": "Ctrl+Enter para confirmar",
     "Press ⌘+Enter to apply": "⌘+Enter para confirmar",
@@ -2212,7 +2213,7 @@ def mostrar_ficha_de_prueba(id_a, id_b, clave):
                     try:
                         rechazar_por_la_comprobacion(id_a, id_b, _texto_guiado)
                     except (PermissionError, ValueError) as _err:
-                        st.error(str(_err))
+                        st.error(el_error_en_castellano(_err))
                     else:
                         avisar("success", "Quedó rechazada, con lo que difiere anotado: el "
                                           "buscador ya no la ofrece como equivalente.")
@@ -2235,7 +2236,7 @@ def mostrar_ficha_de_prueba(id_a, id_b, clave):
             try:
                 comprobar_en_la_mano(id_a, id_b, como)
             except (PermissionError, ValueError) as _err:
-                st.error(str(_err))
+                st.error(el_error_en_castellano(_err))
             else:
                 avisar("success", "Quedó anotada como comprobada en la mano. Buscala de nuevo "
                                   "para verla verificada en los resultados.")
@@ -2261,7 +2262,7 @@ def mostrar_ficha_de_prueba(id_a, id_b, clave):
         try:
             registrar_que_anduvo(id_b, a["codigo_raw"], _nota_anduvo)
         except (PermissionError, ValueError) as _err:
-            st.error(str(_err))
+            st.error(el_error_en_castellano(_err))
         else:
             avisar("success", "Anotado: se instaló y anduvo. Cuenta como lo que vio el mostrador, "
                               "no como prueba técnica.")
@@ -2280,7 +2281,7 @@ def mostrar_ficha_de_prueba(id_a, id_b, clave):
         try:
             bajados = registrar_devolucion(id_b, a["codigo_raw"], motivo, detalle)
         except (PermissionError, ValueError) as _err:
-            st.error(str(_err))
+            st.error(el_error_en_castellano(_err))
         else:
             avisar("success", "Devolución anotada."
                    + (" El vínculo bajó a «muy débil»: el buscador ya no lo ofrece como seguro."

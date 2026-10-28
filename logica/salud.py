@@ -100,7 +100,9 @@ def envejecimiento_de_precios():
         inflacion, _hasta = inflacion_desde(m["ultima"], ipc)
         salida.append({
             "Lista": m["nombre"], "Productos con precio": m["con_precio"],
-            "Días desde la última carga": dias,
+            # «—» como las de al lado: una lista que nunca se cargó decía «None» (ver «LAS
+            # TABLAS, COMO SE LEEN ACÁ»). Para ordenar está «_dias».
+            "Días desde la última carga": miles(dias) if dias is not None else "—",
             "Sube por mes": (f"{miles(ritmo * 100, 1)}%" if ritmo is not None else "—"),
             "Estarían atrasados": (f"{atraso * 100:.0f}%" if atraso else
                                    f"≈{inflacion * 100:.0f}% (inflación)" if inflacion else "—"),

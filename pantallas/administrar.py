@@ -386,7 +386,8 @@ if pagina == PAGINAS[3]:
                     except Exception as _err:
                         anotar_error("actualizar_el_registro_chas", _err)
                         st.warning("No se pudo bajar el registro "
-                                   f"({type(_err).__name__}). Probá subiendo el CSV a mano: "
+                                   f"({el_error_en_castellano(_err)}). Probá subiendo el CSV "
+                                   "a mano: "
                                    "se baja de datos.produccion.gob.ar, «Registro de CHAS "
                                    "Emitidos».")
             if es_empleado_o_abierto():
@@ -993,7 +994,7 @@ if pagina == PAGINAS[3]:
                         anotar_error("nivel principal", _err)
                         st.error("Ya existe un empleado con ese nombre.")
                     except ValueError as _err:          # ver clave_ya_usada()
-                        st.error(str(_err))
+                        st.error(el_error_en_castellano(_err))
 
             if usuarios_actuales:
                 st.markdown("**Gestionar un empleado existente**")
@@ -1008,7 +1009,7 @@ if pagina == PAGINAS[3]:
                             cambiar_password_usuario(usuario_id_sel, nueva_pass_usuario)
                             st.success("Contraseña actualizada.")
                         except ValueError as _err:      # ver clave_ya_usada()
-                            st.error(str(_err))
+                            st.error(el_error_en_castellano(_err))
                     else:
                         st.warning("Escribí la nueva contraseña primero.")
                 usuario_activo_actual = next(u["Activo"] == "Sí" for u in usuarios_actuales if u["ID"] == usuario_id_sel)
@@ -1056,7 +1057,7 @@ if pagina == PAGINAS[3]:
                         anotar_error("nivel principal", _err)
                         st.error("Ya existe un mecánico con ese nombre.")
                     except ValueError as _err:          # ver clave_ya_usada()
-                        st.error(str(_err))
+                        st.error(el_error_en_castellano(_err))
 
             if mecanicos_actuales:
                 st.markdown("**Gestionar un mecánico existente**")
@@ -1141,7 +1142,7 @@ if pagina == PAGINAS[3]:
                                                          usuario=obtener_usuario_actual(),
                                                          pasar_el_limite=_pasar)
                     except PermissionError as _err:
-                        _ok, _aviso = False, str(_err)
+                        _ok, _aviso = False, el_error_en_castellano(_err)
                     if _ok:
                         st.session_state.pop(f"_limite_cc_{_mid}", None)
                         avisar("success", _aviso)

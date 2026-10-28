@@ -93,6 +93,7 @@ específico, y las pantallas quedan todas al final:
         · CONFIGURACIÓN, USUARIO Y USO DE IA
         · PAPELERA (borrar con red)
         · HISTORIAL, DUPLICADOS Y EXPORTAR A EXCEL
+        · LAS TABLAS, COMO SE LEEN ACÁ
         · COBROS: alias de transferencia y QR
         · COTIZAR: lo que se le puede ofrecer al cliente
     logica/interfaz.py

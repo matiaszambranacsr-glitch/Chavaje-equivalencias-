@@ -6777,6 +6777,36 @@ Lo pidió el dueño («hacé 3, 4, 5 y 6»; esta es la 5). «bomba de agua k4m»
 
 `autos_del_motor()` lo aprende de las descripciones que nombran el motor (con cinco o más): los modelos que aparecen en el 5 % o más, y la cilindrada y las válvulas solo si las dicen tres o más y el 60 % de los que dicen alguna (el F8Q tenía 9 «16V» y 9 «8V», y no dice ninguna). Se recuerda por versión del catálogo. «bomba agua clio 1.6 16v» trae 11 con todo lo pedido.
 
+## 🗣️ Más en castellano: los errores y las tablas
+
+Lo pidió el dueño («mejorá más en español»). Primero se midió: un recorrido con el navegador por las 46 pantallas y solapas, buscando inglés en lo que se ve y en los rótulos ocultos, encontró solo «Selected values» (lo que lee un lector de pantalla en las listas de varias opciones; ya traducido). Los textos de Streamlit ya se traducían. El inglés estaba en dos lugares que ese recorrido no ve:
+
+**1. Los errores de las bibliotecas.** Lo que falla al leer un Excel, al salir a internet o en la base traía su texto en inglés y se mostraba tal cual: «No se pudo leer el archivo: File is not a zip file», «No se pudo: ConnectionError: HTTPSConnectionPool(host=…): Max retries exceeded…», «No se pudo entrar al portal (SSLError)», y las fotos de FISPA «fallaron por SSLError». Ahora `el_error_en_castellano()` dice qué quiere decir:
+
+| Antes | Ahora |
+|---|---|
+| SSLError | el sitio tiene un certificado que no se pudo verificar |
+| ProxyError | no se pudo salir a internet: lo frenó el proxy de la red |
+| ReadTimeout | el sitio tardó demasiado en contestar |
+| ConnectionError: … Max retries exceeded | no se pudo conectar con el sitio: puede que no haya internet o que el sitio esté caído |
+| File is not a zip file | el archivo no es un Excel que se pueda abrir: puede estar dañado, o ser otro formato con el nombre cambiado |
+| database is locked | la base estaba ocupada: probá de nuevo en unos segundos |
+| UNIQUE constraint failed | eso ya estaba cargado: se repite |
+
+- **Lo que ya está en castellano queda tal cual**: los errores de la app («Esa clave ya está usada»).
+- **Lo que no se reconoce** dice «falló algo adentro (KeyError)», sin el texto en inglés.
+- **Nunca un texto con una dirección o un «clave=…»**, aunque parezca castellano: los errores de red traen la URL entera, con lo que se mandó.
+- **El texto técnico sigue en «🐞 Errores»**, que ahora tiene al lado la columna «Qué quiere decir».
+- **El auditor no deja que vuelva**: un error agarrado con `except … as e` que llega a st.error, st.warning, avisar…, sin pasar por `el_error_en_castellano()`, es un REVISAR. Había 18; quedan 0. Y otros 11 mensajes armados en la lógica («No se pudo leer: {tipo}: {texto}») también se arreglaron.
+
+**2. Las tablas.** El navegador las dibuja como imagen, así que el recorrido no las lee. Se miraron con la prueba de pantallas, celda por celda, en las 89 pantallas y con la copia de la base real. Había 16 columnas mal:
+- 10 mostraban la fecha como la guarda la base: «2026-09-25 20:33:56» en las importaciones, los usuarios, los movimientos de cuenta, «Sin aparecer desde», «Última vez»…
+- 6 mostraban «None», en gris y en inglés, donde no había dato.
+
+Ahora dicen «25/09/2026 20:33» y quedan en blanco. Son cien tablas, así que en vez de arreglarlas de a una, `st.dataframe()` recibe las filas ya legibles (`filas_legibles()`). Solo los textos: una columna de números con huecos sigue siendo de números, para que se ordene bien. Esa la arregla quien la arma: «Días desde la última carga» ahora dice «—», como las de al lado. Las fechas se siguen ordenando igual en la lógica, porque se cambian recién al mostrarlas.
+
+`pruebas_de_la_precision.py` (103) controla los errores y `pruebas_de_las_pantallas.py` las tablas: ninguna de las 89 pantallas puede mostrar una fecha de la base ni un «None». Sacando el arreglo de las tablas, avisa en 8 con la base de prueba.
+
 ## ↩️ Deshacer la última, en la revisión de a uno
 
 Lo pidió el dueño («seguí con más cosas»). En «⚡ Revisar de a uno» se decide con el teclado, y una N por una S es un toque. Antes no había vuelta atrás de una decisión suelta: solo deshacer una lista entera. Ahora, después de cada decisión, arriba de la tarjeta aparece **«↩️ Deshacer: 330536 ↔ 25682AC3 (eran la misma)»**, con la tecla **D**:

@@ -233,6 +233,76 @@ def anotar_error(donde, error, codigo=""):
         # mejor que voltear la pantalla del usuario por no poder escribirlo en una lista.
         pass      # anotar un error jamás puede romper nada
 
+
+# LOS ERRORES, EN CASTELLANO. Lo que falla adentro de una biblioteca —leer un Excel, salir a
+# internet, la base— trae su texto en inglés, y se mostraba tal cual: «No se pudo leer el
+# archivo: File is not a zip file», «No se pudo: ConnectionError: HTTPSConnectionPool(host=…):
+# Max retries exceeded…», y las fotos de FISPA que fallaban decían «SSLError». Ahora la
+# pantalla dice qué quiere decir; el texto técnico sigue en «🐞 Errores», para quien lo busque.
+# (pedazos del tipo o del texto, en minúscula; qué quiere decir). Va el primero que coincida.
+_ERRORES_CONOCIDOS = (
+    (("sslerror", "certificate verify failed", "ssl:"),
+     "el sitio tiene un certificado que no se pudo verificar"),
+    (("proxyerror", "tunnel connection failed"),
+     "no se pudo salir a internet: lo frenó el proxy de la red"),
+    (("timeout", "timed out"), "el sitio tardó demasiado en contestar"),
+    (("connectionerror", "max retries", "failed to establish", "name or service not known",
+      "temporary failure in name resolution", "connection refused", "connection reset"),
+     "no se pudo conectar con el sitio: puede que no haya internet o que el sitio esté caído"),
+    (("jsondecodeerror", "expecting value"), "lo que contestó el sitio no se pudo leer"),
+    (("badzipfile", "file is not a zip file"),
+     "el archivo no es un Excel que se pueda abrir: puede estar dañado, o ser otro formato "
+     "con el nombre cambiado"),
+    (("excel file format cannot be determined", "unsupported format", "not supported"),
+     "no se reconoce qué tipo de archivo es: guardalo como Excel (.xlsx) o como CSV"),
+    (("unicodedecodeerror", "codec can't decode"),
+     "el archivo tiene letras que no se pudieron leer: guardalo como Excel, o como CSV en UTF-8"),
+    (("database is locked",), "la base estaba ocupada: probá de nuevo en unos segundos"),
+    (("unique constraint failed",), "eso ya estaba cargado: se repite"),
+    (("no such table", "no such column"),
+     "a la base le falta algo que esta versión de la app espera: reiniciala"),
+    (("disk i/o error", "malformed", "file is not a database", "file is encrypted"),
+     "la base no se pudo leer bien: mirá «🩺 Estado y papelera»"),
+    (("permissionerror", "permission denied"), "no hay permiso para usar ese archivo"),
+    (("memoryerror",), "no alcanzó la memoria: probá con un archivo más chico"),
+    (("not a gzipped file", "badgzipfile", "invalid tag", "invalidtag"),
+     "no es una copia de esta app, o está dañada, o la clave no es la misma"),
+    (("filenotfounderror", "no such file"), "no se encontró el archivo"),
+    (("httperror", "status code"), "el sitio contestó con un error"),
+)
+# Para saber si un texto ya está en castellano (los de la app: «Esa clave ya está usada»).
+_PALABRAS_DEL_CASTELLANO = {"de", "la", "el", "que", "no", "es", "se", "un", "una", "los", "las",
+                            "con", "para", "por", "ya", "hay", "está", "esa", "ese", "del", "al"}
+_PALABRAS_DEL_INGLES = {"the", "of", "to", "is", "not", "can", "for", "with", "and", "was", "file",
+                        "could", "failed", "error", "invalid", "must", "be", "an", "in", "on"}
+
+
+def el_error_en_castellano(error):
+    """Qué quiere decir un error, para mostrarlo en pantalla. `error` es la excepción, o su
+    nombre guardado («SSLError»). Lo reconocido, en castellano; lo que ya está en castellano (los
+    errores de la app), tal cual; lo demás, «falló algo adentro (Tipo)», sin el texto en
+    inglés. Ver «LOS ERRORES, EN CASTELLANO»."""
+    try:
+        tipo = error if isinstance(error, str) else type(error).__name__
+        texto = "" if isinstance(error, str) else str(error)
+        junto = f"{tipo} {texto}".lower()
+        for pedazos, explicacion in _ERRORES_CONOCIDOS:
+            if any(p in junto for p in pedazos):
+                return explicacion
+        palabras = re.findall(r"[a-záéíóúñü]+", texto.lower())
+        castellano = sum(p in _PALABRAS_DEL_CASTELLANO for p in palabras)
+        # Nunca el texto con una dirección o un «clave=…»: los errores de red traen la URL
+        # entera, con lo que se mandó (ver _html_de_la_ficha_del_portal()).
+        if (texto and not re.search(r"://|\w=\S", texto)
+                and (castellano > sum(p in _PALABRAS_DEL_INGLES for p in palabras)
+                     or re.search(r"[áéíóúñ¿¡]", texto.lower()))):
+            return texto
+        if re.fullmatch(r"\w+", tipo or ""):
+            return f"falló algo adentro ({tipo})"
+        return "falló algo adentro"
+    except Exception:          # explicar un error tampoco puede fallar (ver anotar_error())
+        return "falló algo adentro"
+
 # ============================================================
 # CONFIGURACIÓN DE PÁGINA
 # ============================================================

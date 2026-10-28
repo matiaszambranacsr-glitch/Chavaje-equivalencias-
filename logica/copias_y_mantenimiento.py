@@ -1732,7 +1732,7 @@ def vistazo_de_un_backup(contenido):
         if contenido[:2] == b"\x1f\x8b":
             contenido = gzip.decompress(contenido)
     except (ValueError, OSError) as _err:
-        return {"error": str(_err)}
+        return {"error": el_error_en_castellano(_err)}
     temporal = f"{DB_PATH}.{uuid.uuid4().hex}.vistazo"
     try:
         with open(temporal, "wb") as f:
@@ -2430,7 +2430,7 @@ def _subir_backup_a_github(cfg, datos_db, mensaje):
         return False, f"GitHub respondió {r.status_code}. {detalle}"
     except Exception as e:
         anotar_error("subir_backup_a_github", e)
-        return False, f"No se pudo conectar con GitHub: {type(e).__name__}: {e}"
+        return False, f"No se pudo conectar con GitHub: {el_error_en_castellano(e)}"
 
 
 def cuanto_perderias_si_reinicia():

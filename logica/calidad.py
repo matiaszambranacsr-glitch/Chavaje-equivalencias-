@@ -453,7 +453,7 @@ def verificar_la_copia_de_github():
                 prueba.close()
     except Exception as _err:
         anotar_error("verificar_la_copia_de_github", _err)
-        ok, detalle = False, f"{type(_err).__name__}: {_err}"
+        ok, detalle = False, f"{el_error_en_castellano(_err)}"
     finally:
         try:
             os.remove(temporal)

@@ -519,7 +519,7 @@ def consultar_vin_en_nhtsa(vin, tiempo_maximo=12):
         cuerpo = r.json()
     except Exception as e:
         anotar_error("consultar_vin_en_nhtsa", e)
-        return None, f"No se pudo consultar ({type(e).__name__}). Puede ser la conexión."
+        return None, f"No se pudo consultar ({el_error_en_castellano(e)}). Puede ser la conexión."
 
     filas = (cuerpo or {}).get("Results") or []
     if not filas:

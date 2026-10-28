@@ -490,7 +490,8 @@ if pagina == PAGINAS[3]:
                 st.markdown(" · ".join(f"{cat}: **{n}**" for cat, n in _por_categoria.most_common()))
                 _repetidos = _Cnt((e["donde"], e["tipo"]) for e in _ULTIMOS_ERRORES)
                 st.dataframe(
-                    [{"Veces": v, "Dónde": d, "Tipo": t} for (d, t), v in _repetidos.most_common(15)],
+                    [{"Veces": v, "Dónde": d, "Qué quiere decir": el_error_en_castellano(t),
+                      "Tipo": t} for (d, t), v in _repetidos.most_common(15)],
                     width="stretch", hide_index=True)
                 # El código que dictó quien estaba en el mostrador: ver mostrar_error_inesperado().
                 _cod_err = st.text_input("Buscar un código de error (ej. BUS-8F31):",

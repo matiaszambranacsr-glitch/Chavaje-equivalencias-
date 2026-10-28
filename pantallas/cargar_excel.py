@@ -167,7 +167,7 @@ if pagina == PAGINAS[2]:
                     archivo.seek(0)
             except Exception as e:
                 anotar_error("nivel principal", e)
-                st.error(f"No se pudo leer el archivo: {e}")
+                st.error(f"No se pudo leer el archivo: {el_error_en_castellano(e)}.")
                 todas_filas = None
 
         if todas_filas:
@@ -1219,7 +1219,7 @@ if pagina == PAGINAS[2]:
                         st.dataframe(sospechosos, width="stretch", hide_index=True)
                 except Exception as e:
                     anotar_error("nivel principal", e)
-                    st.error(f"Error procesando la lista: {e}")
+                    st.error(f"No se pudo procesar la lista: {el_error_en_castellano(e)}.")
 
         _frenados = st.session_state.get("precios_frenados_de_la_carga")
         if _frenados:

@@ -32,7 +32,7 @@ def direccion_interna(url):
                     or ip.is_multicast or ip.is_unspecified):
                 return f"la dirección apunta a una red interna ({ip})"
     except ValueError as _err:
-        return f"la dirección no es válida ({type(_err).__name__})"
+        return f"la dirección no es válida ({el_error_en_castellano(_err)})"
     except OSError:
         # No resuelve acá: o no existe —y el pedido va a fallar solo— o se sale por un proxy,
         # que es el que resuelve. En los dos casos no hay nada interno que proteger.
@@ -451,7 +451,8 @@ def sesion_de_portal(nombre_marca):
         anotar_error("sesion_de_portal", e)
         # Solo el TIPO de error, nunca el detalle: los mensajes de las librerías de red suelen
         # incluir la URL completa con los datos enviados, y ahí va la clave.
-        return None, (f"No se pudo entrar al portal ({type(e).__name__}). Revisá la dirección "
+        return None, (f"No se pudo entrar al portal ({el_error_en_castellano(e)}). "
+                      "Revisá la dirección "
                       "de acceso y la conexión.")
 
 
@@ -481,7 +482,7 @@ def _html_de_la_ficha_del_portal(nombre_marca, codigo, tiempo_maximo=20):
         return r.text or "", None
     except Exception as e:
         anotar_error("_html_de_la_ficha_del_portal", e)
-        return "", f"No se pudo leer la ficha: {type(e).__name__}"
+        return "", f"No se pudo leer la ficha: {el_error_en_castellano(e)}"
 
 
 def _texto_visible(html):
@@ -638,7 +639,7 @@ def probar_plantilla_de_portal(plantilla, codigos, tiempo_maximo=15):
             r = solo_lectura.get(url, timeout=tiempo_maximo)
         except Exception as e:
             anotar_error("probar_plantilla_de_portal", e)
-            fila["Resultado"] = f"❌ no se pudo abrir ({type(e).__name__})"
+            fila["Resultado"] = f"❌ no se pudo abrir ({el_error_en_castellano(e)})"
             salida.append(fila)
             continue
         if r.status_code != 200:
@@ -1079,7 +1080,7 @@ def token_de_mercado_libre():
         datos = r.json() if r.content else {}
     except Exception as e:
         anotar_error("token_de_mercado_libre", e)
-        return None, f"No se pudo pedir el token ({type(e).__name__})."
+        return None, f"No se pudo pedir el token ({el_error_en_castellano(e)})."
     if r.status_code != 200 or not datos.get("access_token"):
         # El mensaje de Mercado Libre, sin los datos que se mandaron.
         return None, (f"Mercado Libre no dio el token ({r.status_code}: "
@@ -1101,7 +1102,7 @@ def buscar_en_mercado_libre(texto, limite=20):
                          headers={"Authorization": f"Bearer {token}"})
     except Exception as e:
         anotar_error("buscar_en_mercado_libre", e)
-        return [], f"No se pudo buscar ({type(e).__name__})."
+        return [], f"No se pudo buscar ({el_error_en_castellano(e)})."
     if r.status_code in (401, 403):
         _TOKEN_DE_MERCADO_LIBRE.clear()
         return [], f"Mercado Libre rechazó la búsqueda ({r.status_code})."

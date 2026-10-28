@@ -914,7 +914,7 @@ def leer_codigo_de_barras(imagen_bytes):
         return salida, None
     except Exception as e:
         anotar_error("leer_codigo_de_barras", e)
-        return [], f"No se pudo leer: {type(e).__name__}: {e}"
+        return [], f"No se pudo leer: {el_error_en_castellano(e)}"
 
 
 # El prefijo de un código de barras dice EN QUÉ PAÍS se registró la empresa que lo emitió.

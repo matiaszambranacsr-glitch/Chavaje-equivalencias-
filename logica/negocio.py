@@ -2837,6 +2837,63 @@ def to_excel_bytes(filas, columnas=None):
 
 
 # ============================================================================================
+# LAS TABLAS, COMO SE LEEN ACÁ
+# ============================================================================================
+# Streamlit dibuja un vacío como «None», en gris y en inglés, y una fecha como la guarda la base:
+# «2026-09-25 20:33:56». Recorriendo las 89 pantallas con la copia de la base real eran 16
+# columnas así: la fecha de cada importación, de cada usuario, de cada movimiento de cuenta, «Sin
+# aparecer desde», «Última vez»… y «None» en la ubicación, en lo de antes y después de cada
+# cambio. Son cien tablas: en vez de arreglarlas de a una, st.dataframe() recibe las filas ya
+# legibles. Solo las listas de filas, y solo los textos: una columna de números con huecos
+# sigue siendo de números (si no, se ordenaría como texto) y la arregla quien la arma —con
+# miles(), o «s/d» como con_stock_legible()—. Las fechas se ordenan igual en la lógica: se
+# cambian recién al mostrarlas. pruebas_de_las_pantallas.py controla las 89.
+_RE_FECHA_DE_LA_BASE = re.compile(
+    r"^(\d{4})-(\d{2})-(\d{2})(?:[ T](\d{2}):(\d{2})(?::\d{2}(?:\.\d+)?)?)?$")
+
+
+def fecha_legible(valor):
+    """«2026-09-25 20:33:56» → «25/09/2026 20:33», «2026-09-25» → «25/09/2026». Lo demás, tal
+    cual."""
+    hallada = _RE_FECHA_DE_LA_BASE.match(valor.strip()) if isinstance(valor, str) else None
+    if not hallada:
+        return valor
+    anio, mes, dia, hora, minuto = hallada.groups()
+    return f"{dia}/{mes}/{anio}" + (f" {hora}:{minuto}" if hora else "")
+
+
+def _vacio(valor):
+    return valor is None or (isinstance(valor, float) and valor != valor)
+
+
+def filas_legibles(filas):
+    """Copia de las filas para una tabla: las fechas de la base como 25/09/2026 20:33, y lo
+    vacío en blanco en las columnas que no son de números. Ver «LAS TABLAS, COMO SE LEEN ACÁ»."""
+    claves = list(dict.fromkeys(k for f in filas for k in f))
+    de_numeros = {k for k in claves
+                  if any(isinstance(f.get(k), (int, float)) and not isinstance(f.get(k), bool)
+                         and not _vacio(f.get(k)) for f in filas)}
+    return [{k: ("" if _vacio(v) and k not in de_numeros else fecha_legible(v))
+             for k, v in f.items()} for f in filas]
+
+
+def _tabla_legible(dataframe_de_streamlit):
+    def dataframe(data=None, *args, **kwargs):
+        if (isinstance(data, (list, tuple)) and data
+                and all(isinstance(f, dict) for f in data)):
+            data = filas_legibles(data)
+        return dataframe_de_streamlit(data, *args, **kwargs)
+    dataframe.__doc__ = dataframe_de_streamlit.__doc__
+    dataframe.de_streamlit = dataframe_de_streamlit
+    return dataframe
+
+
+# Una sola vez por proceso: la lógica se vuelve a cargar cuando cambia el código, y envolver la
+# envoltura haría el trabajo dos veces.
+st.dataframe = _tabla_legible(getattr(st.dataframe, "de_streamlit", st.dataframe))
+
+
+# ============================================================================================
 # COBROS: alias de transferencia y QR
 # ============================================================================================
 def listar_alias_transferencia():

@@ -309,7 +309,7 @@ if pagina == PAGINAS[9]:
                         mecanico_id=_cuenta_vta["id"] if _cuenta_vta else None,
                         a_la_caja=_con_caja or _forma_vta == A_CUENTA)
                 except (ValueError, PermissionError) as _err:
-                    st.error(str(_err))
+                    st.error(el_error_en_castellano(_err))
                 else:
                     if _forma_vta == A_CUENTA:
                         _ok_cta, _texto_cta = poner_a_cuenta(_id_vta)

@@ -59,7 +59,7 @@ if pagina == PAGINAS[3]:
                                           "descripciones.")
                     except Exception as _err:
                         anotar_error("deducir_aplicaciones_a_mano", _err)
-                        st.error(f"No se pudo: {type(_err).__name__}: {_err}")
+                        st.error(f"No se pudo: {el_error_en_castellano(_err)}.")
                 st.rerun()
 
             arch_aplic = subir_archivo("Catálogo de aplicaciones (.pdf o .xlsx):",
@@ -96,7 +96,7 @@ if pagina == PAGINAS[3]:
                         except Exception as e:
                             anotar_error("nivel principal", e)
                             apps = []
-                            st.error(f"No se pudo leer: {type(e).__name__}: {e}")
+                            st.error(f"No se pudo leer: {el_error_en_castellano(e)}.")
                     if apps:
                         st.session_state["aplic_leidas"] = apps
                         if len({a["marca_auto"] for a in apps}) < 2:
@@ -989,7 +989,7 @@ if pagina == PAGINAS[3]:
                         )
                         if _ec["fallidas"]:
                             st.dataframe(
-                                [{"Código": cod, "Qué pasó": err}
+                                [{"Código": cod, "Qué pasó": el_error_en_castellano(err)}
                                  for cod, err in _ec["fallidas"][:30]],
                                 width="stretch", hide_index=True)
                     else:

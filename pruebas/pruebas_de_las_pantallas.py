@@ -11,6 +11,7 @@ agarraba ninguna otra prueba: cada una mira lo suyo. Dice además cuáles tardar
 Corre en una carpeta temporal: nunca toca la base de trabajo.
 """
 import os
+import re
 import shutil
 import sys
 import tempfile
@@ -63,6 +64,10 @@ class Muestreo:
         return f" [{lo_mas[0][0]}]" if lo_mas else ""
 
 
+_RE_FECHA_CRUDA = re.compile(r"^\d{4}-\d{2}-\d{2}([ T]\d{2}:\d{2}(:\d{2})?(\.\d+)?)?$")
+_tablas_vistas = set()
+
+
 def _ids_de_los_botones(at, prefijo):
     """Los productos de los botones cuya clave empieza con `prefijo` («citan_P716_123» → «123»)."""
     return {(b.key or "").rsplit("_", 1)[-1] for b in at.button
@@ -94,6 +99,7 @@ def probar():
         tiempos.append((time.time() - inicio, f"{quien}: {donde}{muestreo.donde()}"))
         for e in at.exception:
             fallas.append(f"{quien}: {donde}: {e.value[:200]}")
+        _tablas_en_castellano(quien, donde)
         # Lo de adentro de un desplegable perezoso (on_change="rerun") no corre mientras está
         # cerrado: se abren todos y se mira otra vez, para que no quede código sin recorrer.
         # Se reconocen porque guardan si están abiertos en su clave («exp_…»), en False.
@@ -104,10 +110,31 @@ def probar():
                 at.session_state[k] = True
             at.run()
             abiertos.update(cerrados)
+            _tablas_en_castellano(quien, f"{donde} (con lo plegado abierto)")
             for e in at.exception:
                 fallas.append(f"{quien}: {donde} (con lo plegado abierto): {e.value[:200]}")
             for k in cerrados:
                 at.session_state[k] = False
+
+    def _tablas_en_castellano(quien, donde):
+        # Lo que el navegador dibuja como imagen y nadie lee en voz alta: un vacío sale «None»,
+        # en gris y en inglés, y una fecha como la guarda la base (ver «LAS TABLAS, COMO SE
+        # LEEN ACÁ»). Una vez por tabla y columna.
+        for _d in at.dataframe:
+            try:
+                _df = _d.value
+            except Exception:
+                continue
+            for _col in getattr(_df, "columns", []):
+                for _v in list(_df[_col].head(200)):
+                    _mal = ("«None»" if _v is None or (isinstance(_v, float) and _v != _v)
+                            else "la fecha como la base"
+                            if isinstance(_v, str) and _RE_FECHA_CRUDA.match(_v.strip()) else "")
+                    if _mal and (donde.split(" (")[0], _col) not in _tablas_vistas:
+                        _tablas_vistas.add((donde.split(" (")[0], _col))
+                        fallas.append(f"{quien}: {donde}: la columna «{_col}» muestra {_mal} "
+                                      f"({_v!r})")
+                        break
 
     def recorrer(quien):
         # Las de la barra de cada uno: sin sesión, solo las abiertas (ver PAGINAS_ABIERTAS).
