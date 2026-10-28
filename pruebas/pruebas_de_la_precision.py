@@ -2727,6 +2727,11 @@ def probar(L):
             (([], []), ([], [])))
     esperar("una palabra cortada por la columna es la misma",
             _uno("HONDA ACCORD PRELUD", "HONDA ACCORD PRELUDE"), ([], []))
+    esperar("«V-8» es V8 y «F-100» es F100 (ILLINOIS contra IMPERIAL)",
+            _uno("Junta Salida de Escape FORD F-100 V-8 ETC.", "JTA S.ESC. FORD F100 V8"),
+            (["SALIDA"], []))
+    esperar("pero «S 1.6» no se pega: la cilindrada sigue entera",
+            _uno("BOMBA FORD S 1.6", "BOMBA FORD 1.6"), ([], []))
     return fallas
 
 

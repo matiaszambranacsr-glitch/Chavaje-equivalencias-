@@ -5042,12 +5042,13 @@ def deshacer_de_a_uno(lote, a, b, son_la_misma, antes):
 # VOLKSWAGEN); la cilindrada como «1.8» aunque diga «1 8» o «1,8»; y una palabra cortada
 # («PRELUD» por el largo de la columna) es la misma que la entera.
 _VACIAS_DE_LA_DESCRIPCION = {"DE", "DEL", "LA", "EL", "LOS", "LAS", "CON", "PARA", "EN", "SIN",
-                             "POR", "REF", "ORIG"}
+                             "POR", "REF", "ORIG", "ETC"}
 
 
 def _palabras_para_comparar(descripcion):
     texto = separar_texto_pegado(normalizar_texto(descripcion or ""))
     texto = re.sub(r"(\d),(\d)", r"\1.\2", texto)                 # «1,55MM» es 1.55
+    texto = re.sub(r"\b([A-Z])[- ](\d{1,4})(?![\d.])", r"\1\2", texto)  # «V-8» es V8, «F-100» F100
     texto = re.sub(r"(?<![A-Z\d.])(\d) (\d)(?![\d.])", r"\1.\2", texto)  # «1 8», no «A3 1»
     salida = []
     for palabra in re.findall(r"\d+(?:\.\d+)+|[A-Z0-9]+", texto):
