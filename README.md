@@ -6733,6 +6733,15 @@ Lo pidió el dueño: «más cosas». Se pasaron por el buscador las 10 búsqueda
 - **El error de tipeo es de teclado** (`_distancia_de_tipeo()`, `_tipeo_creible()`): para «W712/94» se sugería «¿Error de tipeo? TARANTO 271224, 271295…», juntas, porque de W a 2 hay un solo cambio. Ahora cambiar una letra por un número (o al revés) no es tipeo, salvo que se parezcan a la vista (O y 0, I y 1, S y 5, B y 8, Z y 2, G y 6), que es lo que confunden también las fotos. Vale para el «¿Quisiste decir…?» del Buscador.
 - La medición de pantallas con `--base` ahora dice quién hace la consulta lenta y no `datos.py:execute`: «🧹 Limpiar y corregir [mostrador.py:codigos_con_dos_precios_en_la_misma_lista]». Esa consulta tarda 0,23 s con la base en memoria; el 1,8 s de la medición es la primera lectura del disco de una copia recién hecha.
 
+### 🔧 El motor, con sus autos
+
+Lo pidió el dueño («hacé 3, 4, 5 y 6»; esta es la 5). «bomba de agua k4m» encuentra lo que dice K4M, y las bombas que dicen «Clio 1.6 16V» sin nombrar el motor quedan abajo: meterlas solas no fue confiable (para el F8Q traía una del N7Q). Ahora, debajo de los resultados, la app dice de qué autos es el motor según tus listas y ofrece la misma búsqueda con el auto, para que la persona elija:
+
+> 🔧 **K4M**: Renault Clio, Megane, Scenic, Kangoo, Laguna 1.6 16V, según 245 productos de tus listas.
+> [🔎 bomba agua clio 1.6 16v] [🔎 bomba agua megane 1.6 16v] [🔎 bomba agua scenic 1.6 16v]
+
+`autos_del_motor()` lo aprende de las descripciones que nombran el motor (con cinco o más): los modelos que aparecen en el 5 % o más, y la cilindrada y las válvulas solo si las dicen tres o más y el 60 % de los que dicen alguna (el F8Q tenía 9 «16V» y 9 «8V», y no dice ninguna). Se recuerda por versión del catálogo. «bomba agua clio 1.6 16v» trae 11 con todo lo pedido.
+
 ## 🔁 Otra versión de la misma lista, y las búsquedas largas más rápidas
 
 Lo pidió el dueño: «mejorá más todavía todo». Medido con `python pruebas/medir.py --base copia busquedas` (1.500 búsquedas de la copia de la base).

@@ -2772,6 +2772,13 @@ def con_stock_legible(filas):
     return salida
 
 
+def buscar_por_descripcion_esto(texto):
+    """Callback de un botón que busca `texto` por descripción (ver «_pasar_a_descripcion» en
+    el Buscador), sin el aviso de «eso no es un código»."""
+    st.session_state["_pasar_a_descripcion"] = texto
+    st.session_state["_sin_aviso_de_codigo"] = True
+
+
 def abrir_la_fila_elegida(clave_tabla, filas):
     """Callback de una tabla con selección: la fila tocada se abre como búsqueda por código,
     con todas sus equivalencias (ver cb_ver_equivalencias())."""

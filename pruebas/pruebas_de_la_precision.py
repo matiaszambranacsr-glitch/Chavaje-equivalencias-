@@ -2467,6 +2467,18 @@ def probar(L):
     esperar("«Búsquedas sin resultado» no muestra lo que hoy se encuentra (LEICJ057LUCAS)",
             [f["Buscado"] for f in ns["que_conviene_cargar_o_pedir"]()
              if f["Buscado"] in ("LEICJ057", "W712/94")], ["W712/94"])
+    # 94. DE QUÉ AUTOS ES UN MOTOR, SEGÚN LAS LISTAS (ver autos_del_motor()): la misma búsqueda
+    # con el auto en vez del motor; con menos de cinco productos, nada.
+    m16 = marca("DIECISEIS MOTORES")
+    for _i in range(5):
+        producto(f"ZX9{_i}", f"BOMBA DE AGUA VW GOL 1.6 16V ZX9M LADO {_i}", m16)
+    for _i in range(3):
+        producto(f"QW8{_i}", f"BOMBA DE AGUA VW GOL QW8M {_i}", m16)
+    conn.commit()
+    esperar("«bomba de agua zx9m» ofrece «bomba agua gol 1.6 16v»",
+            [(m, b) for m, _a, b in ns["sugerencias_por_el_motor"]("bomba de agua zx9m")],
+            [("ZX9M", ["bomba agua gol 1.6 16v"])])
+    esperar("con menos de cinco productos, nada", ns["sugerencias_por_el_motor"]("bomba qw8m"), [])
     _r92 = ns["buscar_por_texto"]("embrague ford ka")
     esperar("«ka» es un modelo: el de la Transit, aparte",
             (_eka in {f["ID"] for f in _r92}, _etr in {f["ID"] for f in _r92.aparte}), (True, True))

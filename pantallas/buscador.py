@@ -2014,7 +2014,7 @@ if pagina == PAGINAS[0]:
             st.session_state.pop("ultima_busqueda_texto", None)
             st.rerun()
         _desde_codigos = st.session_state.pop("_buscar_texto_ya", False)
-        if _desde_codigos:
+        if _desde_codigos and not st.session_state.pop("_sin_aviso_de_codigo", False):
             st.caption("🔤 Eso no es un código, así que se buscó en las descripciones y las "
                        "marcas.")
         if buscar_texto_click or _desde_codigos:
@@ -2076,6 +2076,18 @@ if pagina == PAGINAS[0]:
                     st.warning("⚠️ Ninguno de estos dice " + " ni ".join(
                         f"«{x.lower()}»" for x in _faltan[:3]) + ": puede que no lo tengas "
                         "cargado. Se muestra lo que coincide con el resto.")
+                # De qué autos es el motor pedido, según tus listas, y la misma búsqueda con el
+                # auto: lo que dice «Clio 1.6 16V» sin decir K4M (ver sugerencias_por_el_motor()).
+                for _i_m, (_motor, _autos, _otras) in enumerate(
+                        sugerencias_por_el_motor(texto_pedido)):
+                    st.caption(f"🔧 **{_motor}**: {(_autos['marca'] or '').title()} "
+                               + ", ".join(m.title() for m in _autos["modelos"][:5])
+                               + " " + " ".join(x for x in (_autos["cilindrada"],
+                                                            _autos["valvulas"]) if x)
+                               + f", según {miles(_autos['productos'])} productos de tus listas.")
+                    for _col, _otra in zip(st.columns(len(_otras)), _otras):
+                        _col.button(f"🔎 {_otra}", key=f"motor_sug_{_i_m}_{_otra}",
+                                    on_click=buscar_por_descripcion_esto, args=(_otra,))
                 # La fila se toca en la misma tabla. Antes abajo se repetía la lista entera como
                 # botones —uno por resultado, con su descripción—, y en el celular la página
                 # medía tres pantallas más para mostrar lo que la tabla ya decía.

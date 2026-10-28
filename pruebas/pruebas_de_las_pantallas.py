@@ -222,6 +222,25 @@ def probar():
         if not _tabla or "BAK4M" in str(_tabla[0].value):
             fallas.append("por descripción, elegir el rubro no deja solo los de ese rubro")
         at.session_state["filtro_rubro_texto"] = "Todos"
+    # Y el motor: «termostato tu5jp4» ofrece la misma búsqueda con el auto, y el botón la hace.
+    c.execute("INSERT INTO aplicaciones (marca_auto, modelo_auto, codigo, codigo_clean, origen) "
+              "VALUES ('PEUGEOT', 'PARTNER', 'TU0', 'TU0', 'deducida')")
+    c.executemany("INSERT INTO productos (codigo_raw, codigo_clean, descripcion, marca_id) VALUES "
+                  "(?, ?, ?, ?)", [(f"TU{i}", f"TU{i}", f"TERMOSTATO PEUGEOT PARTNER 1.6 16V "
+                                    f"TU5JP4 {i}", _marca_prueba) for i in range(1, 6)])
+    conn.commit()
+    ns["_MODELOS_CACHE"]["lista"] = None
+    at.text_input(key="texto_input").set_value("termostato tu5jp4")
+    [b for b in at.button if "Buscar por descripción" in b.label][0].click().run()
+    _por_motor = [b for b in at.button if (b.key or "").startswith("motor_sug_")]
+    if not _por_motor:
+        fallas.append("por descripción, el motor no ofrece buscar por el auto")
+    else:
+        _otra = _por_motor[0].label.replace("🔎 ", "")
+        _por_motor[0].click().run()
+        if (at.session_state["texto_input"] != _otra
+                or not any("coincidencia" in x.value for x in at.success)):
+            fallas.append(f"por descripción, el botón del motor no busca «{_otra}»")
     at.session_state["modo_busqueda"] = "Código"
     recorrer("sin contraseña")
     entrar(clave_ana)

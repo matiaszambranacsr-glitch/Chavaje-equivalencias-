@@ -448,6 +448,71 @@ def dice_la_palabra(fila, palabra):
                for forma, entera in formas_de_la_palabra(palabra))
 
 
+# DE QUÉ AUTOS ES UN MOTOR, SEGÚN TUS LISTAS. «bomba de agua k4m» encuentra lo que dice K4M, y
+# las bombas que dicen «Clio 1.6 16V» sin nombrar el motor quedan abajo: se probó meterlas solas
+# y no fue confiable (para el F8Q trajo una del N7Q). Como AYUDA sí: «K4M: Clio, Megane, Scenic,
+# Kangoo… 1.6 16V», con un botón para buscar así y que la persona elija.
+def autos_del_motor(motor):
+    """{"marca", "modelos", "cilindrada", "valvulas", "productos"} de lo que dicen las
+    descripciones que nombran el motor, o None si son menos de cinco. Los modelos, los que
+    aparecen en el 5 % o más (y al menos dos veces); la cilindrada y las válvulas, la más común
+    si la dicen tres o más y el 60 % de los que dicen alguna: el F8Q tenía 9 «16V» y 9 «8V»."""
+    memoria = del_proceso("autos_del_motor", dict)
+    clave = (motor, version_del_catalogo())
+    if clave in memoria:
+        return memoria[clave]
+    if len(memoria) > 50:
+        memoria.clear()
+    c.execute("SELECT descripcion FROM productos WHERE busqueda LIKE ? LIMIT 3000",
+              (f"%{como_texto_en_like(motor)}%",))
+    filas = [{"Descripcion": r[0]} for r in c.fetchall()]
+    filas = [f for f in filas if nombra_alguna(f, [motor])]
+    salida = None
+    if len(filas) >= 5:
+        marcas, modelos, cilindradas, valvulas = (collections.Counter() for _ in range(4))
+        for f in filas:
+            texto = normalizar_texto(f["Descripcion"] or "")
+            marcas.update({m for m, _cat, _resto in marcas_vehiculo_en(f["Descripcion"] or "")})
+            modelos.update({w for w in re.findall(r"[A-Z0-9]+", texto)
+                            if w != motor and nivel_del_auto(w) == 3
+                            and not parece_designacion_de_motor(w)})
+            cilindradas.update(cilindradas_que_declara(f))
+            valvulas.update(valvulas_que_declara(f))
+
+        def la_mas_comun(cuenta):
+            if not cuenta:
+                return None
+            valor, veces = cuenta.most_common(1)[0]
+            return valor if veces >= 3 and veces >= 0.6 * sum(cuenta.values()) else None
+        salida = {"marca": marcas.most_common(1)[0][0] if marcas else None,
+                  "modelos": [m for m, n in modelos.most_common(8)
+                              if n >= max(2, len(filas) * 0.05)],
+                  "cilindrada": la_mas_comun(cilindradas), "valvulas": la_mas_comun(valvulas),
+                  "productos": len(filas)}
+        if not salida["modelos"]:
+            salida = None
+    memoria[clave] = salida
+    return salida
+
+
+def sugerencias_por_el_motor(texto):
+    """[(motor, autos_del_motor(), [búsquedas])]: para cada motor pedido, lo mismo con el auto en
+    vez del motor: «bomba de agua k4m» → «bomba de agua clio 1.6 16v», «… megane 1.6 16v»…"""
+    palabras, _ = palabras_de_la_busqueda(texto)
+    salida = []
+    for motor in palabras:
+        if not parece_designacion_de_motor(motor) or nivel_del_auto(motor) != 3:
+            continue
+        autos = autos_del_motor(motor)
+        if not autos:
+            continue
+        resto = " ".join(p.lower() for p in palabras if p != motor)
+        extra = " ".join(x.lower() for x in (autos["cilindrada"], autos["valvulas"]) if x)
+        salida.append((motor, autos, [" ".join(x for x in (resto, m.lower(), extra) if x)
+                                      for m in autos["modelos"][:3]]))
+    return salida
+
+
 class ResultadosDeTexto(list):
     """Lo que devuelve buscar_por_texto(): la lista de siempre, y aparte (`.aparte`) lo que no
     nombra el auto pedido (`.del_auto`) o declara otra cilindrada; `.por_que_aparte` lo dice
