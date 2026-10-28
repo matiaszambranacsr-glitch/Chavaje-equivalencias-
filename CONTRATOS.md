@@ -21,6 +21,7 @@ cambio» (todas juntas: `python .github/correr_las_pruebas.py`).
 | Comprobar en la mano no borra de qué lista vino el vínculo | `comprobar_en_la_mano()` | `pruebas_de_la_precision.py` (5) |
 | Si el proveedor cambia de equivalente, se avisa y no se borra nada | `equivalentes_que_la_lista_dejo_de_declarar()` | `pruebas_de_la_precision.py` (8) |
 | Con y sin ABS, aire o sensor son piezas distintas | `firmas_compatibles()`, `equipamiento_declarado()` | `pruebas_de_la_revision.py` (pares de muestra), `pruebas_de_la_precision.py` (9) |
+| El juego de juntas de un lugar (cárter, admisión, escape, caja) contra la junta suelta de ese lugar son piezas distintas (rojo): de 62 decididos a mano, ninguno aprobado | `firmas_compatibles()` | `pruebas_de_la_revision.py` (pares de muestra) |
 | Las medidas que salen del mismo texto no suman dos veces | `evaluar_equivalencia()` | `pruebas_de_la_precision.py` (10) |
 | Lo que volvió porque no le iba baja el vínculo y gana sobre cualquier fuente | `registrar_devolucion()`, `pares_devueltos()` | `pruebas_de_la_precision.py` (11) |
 | La limpieza de productos borra solo los vacíos (sin vínculos, decisiones, precio, stock ni historia) | `depurar_huerfanos()` | `pruebas_de_los_cambios.py` (10) |

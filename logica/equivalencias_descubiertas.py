@@ -3810,9 +3810,6 @@ def tipo_de_alarma(alarma):
         return "🔤 Una de las dos no dice para qué auto es: puede ir en ese o no"
     if alarma.startswith("🔤 el largo de cable se parece"):
         return "🔤 El largo de cable se parece pero no es el mismo: puede ser cómo lo mide cada lista"
-    if alarma.startswith("🔤 un juego de juntas de"):
-        return ("🔤 Un juego de juntas de un lugar contra la junta de ese lugar: algunas listas "
-                "llaman «junta» al juego")
     if alarma.startswith("🔤 el mismo auto con otra cilindrada"):
         return ("🔤 Un sensor del mismo auto con otra cilindrada: puede servir para las dos, o no")
     if alarma.startswith("🔤 un nombre de modelo de marcas distintas"):

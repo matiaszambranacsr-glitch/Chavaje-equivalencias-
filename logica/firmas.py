@@ -1063,11 +1063,14 @@ def _comparar_firmas(a, b, minimo_nucleo=2, cuenta_palabras=None, total_descripc
     # El juego de juntas del motor contra una junta suelta, o dos juegos distintos (completo
     # contra superior). Ver tipo_de_juego_de_motor().
     if juegos_que_chocan(a.get("juego"), b.get("juego")):
-        # EL JUEGO DE UN LUGAR CONTRA LA JUNTA DE ESE LUGAR no es seguro que sean distintos:
-        # la junta de cárter de un Perkins 4.203 viene en varias piezas, y TARANTO la llama
-        # «Jgo.Jtas.Carter PERKINS 4-203» e ILLINOIS «Junta para Cárter PERKINS … 4.203». Lo
-        # mismo con «Jgo.Jtas.Mult.Adm. y Esc.» contra «JTA ADM y ESC». Solo cuando el juego no
-        # es de motor, comparten el lugar y la suelta no es una parte («CARTER CHICO», «BASE»).
+        # EL JUEGO DE UN LUGAR CONTRA LA JUNTA DE ESE LUGAR parecía no ser seguro: la junta de
+        # cárter de un Perkins 4.203 viene en varias piezas, y TARANTO la llama «Jgo.Jtas.Carter
+        # PERKINS 4-203» e ILLINOIS «Junta para Cárter PERKINS … 4.203». Por eso avisaba y
+        # mandaba el par a revisión, en vez de tumbarlo. Lo que decidiste dijo otra cosa: de los
+        # 62 pares así que miraste —cárter 40, admisión 13, escape 7, aceite y salida uno cada
+        # uno— no aprobaste ninguno. Ahora es un motivo más de «juegos distintos», con el lugar
+        # a la vista. Solo cuando el juego no es de motor, comparten el lugar y la suelta no es
+        # una parte («CARTER CHICO», «BASE»): lo demás ya lo cortaba la línea de abajo.
         _juego, _suelta = ((a, b) if a.get("juego") else (b, a))
         _lugar_comun = (set(a.get("pieza") or ()) & set(b.get("pieza") or ())
                         & _LUGARES_DE_LA_PIEZA)
@@ -1075,8 +1078,8 @@ def _comparar_firmas(a, b, minimo_nucleo=2, cuenta_palabras=None, total_descripc
                 and _lugar_comun
                 and not re.search(r"\b(CHICO|CHICA|GRANDE|BASE|BSE|SOBRE|TAPA)\b",
                                   _suelta.get("texto") or "")):
-            return False, (f"un juego de juntas de {'/'.join(sorted(_lugar_comun))} contra una "
-                           "junta suelta del mismo lugar: algunas listas llaman «junta» al juego")
+            _lugar = "/".join(sorted(_lugar_comun))
+            return False, f"juegos distintos: juego de juntas de {_lugar} vs junta suelta de {_lugar}"
         return False, (f"juegos distintos: {a.get('juego') or 'junta suelta'} vs "
                        f"{b.get('juego') or 'junta suelta'}")
 
@@ -1710,8 +1713,7 @@ _MOTIVOS_QUE_CONTRADICEN = ("posiciones distintas", "siglas distintas", "autos d
 # Los que no alcanzan para decir que son piezas distintas pero sí para desconfiar: no vetan
 # (el par va a revisión, no a rojo) y se muestran como el porqué. Ver evidencia_cruzada().
 _MOTIVOS_QUE_AVISAN = ("un nombre de modelo de marcas distintas", "el mismo auto con otra cilindrada",
-                       "un juego de juntas de", "el largo de cable se parece",
-                       "una de las dos no dice")
+                       "el largo de cable se parece", "una de las dos no dice")
 # Los que hablan del AUTO. Esos no cuentan cuando el par está unido por un código: ver
 # _unidos_por_codigo().
 _MOTIVOS_DEL_AUTO = ("autos distintos", "marcas distintas", "modelos distintos",

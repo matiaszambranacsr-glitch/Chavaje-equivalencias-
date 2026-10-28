@@ -6777,6 +6777,24 @@ Lo pidió el dueño («hacé 3, 4, 5 y 6»; esta es la 5). «bomba de agua k4m»
 
 `autos_del_motor()` lo aprende de las descripciones que nombran el motor (con cinco o más): los modelos que aparecen en el 5 % o más, y la cilindrada y las válvulas solo si las dicen tres o más y el 60 % de los que dicen alguna (el F8Q tenía 9 «16V» y 9 «8V», y no dice ninguna). Se recuerda por versión del catálogo. «bomba agua clio 1.6 16v» trae 11 con todo lo pedido.
 
+## 🧠 Lo que decidiste enseña
+
+Lo pidió el dueño («¿cuál sería nuestra próxima gran mejora?» y después «mejorá más todavía»). La app ya tenía 23.000 decisiones tuyas: 20.037 aprobados y unos 3.000 rechazados. Hasta ahora servían para probar las reglas antes de publicarlas, pero no para corregirlas. Primero se midió, sobre la copia de la base real, cuántas veces aprobaste cada aviso de la franja «a revisar» (1.827 pares decididos):
+
+| Aviso | Aprobaste |
+|---|---|
+| 🪭 emparejado con varios de la otra lista | 1.378 de 1.410 (98 %) |
+| 🎚️ el mismo número de fábrica, otra medida | 263 de 263 |
+| 🪞 la otra lista tiene varios iguales | 130 de 130 |
+| 🔤 un juego de juntas de un lugar contra la junta suelta de ese lugar | **0 de 62** |
+
+**1. El juego contra la junta suelta, a rojo.** «Jgo.Jtas.Carter PERKINS 4-203» contra «JTA CARTER PERKINS 4-203», «Jgo.Jtas.Mult.Adm. y Esc. RENAULT» contra «JTA ADM y ESC RENAULT 19 1.8». Avisaba, en vez de tumbar el par, porque algunas listas podrían llamar «junta» al juego (la de cárter del Perkins 4.203 viene en varias piezas). Tus decisiones dicen otra cosa: de 62 que miraste (cárter 40, admisión 13, escape 7, aceite y salida uno cada uno), no aprobaste ninguno. Ahora son «juegos distintos», con el lugar a la vista: «juego de juntas de CARTER vs junta suelta de CARTER».
+
+- **En la cola:** 214 pares pasan de 🟠 a 🔴. Los que más, juntas de caja de velocidad (57) y de admisión (44). Mirados al azar, son productos distintos: «Junta Caja Velocidades» de $55 contra «Juego de juntas para Caja de Velocidad FIAT UNO» de $5.650. Con «🤖 Que la app descarte sola» prendido, son 214 menos para mirar a mano.
+- **Lo aprobado no cambia:** de 20.037 aprobados siguen 10 en rojo, sin ninguna regresión. En las fichas, 42 rechazados que salían ⚪ ahora salen 🔴, y ningún aprobado cambia. En 1.500 búsquedas al azar, ningún resultado cambia.
+
+Reglas v21. `pruebas_de_la_revision.py` (pares de muestra) lo controla: volviendo a la regla vieja, avisa en los tres casos.
+
 ## 🔁 Otra versión de la misma lista, y las búsquedas largas más rápidas
 
 Lo pidió el dueño: «mejorá más todavía todo». Medido con `python pruebas/medir.py --base copia busquedas` (1.500 búsquedas de la copia de la base).

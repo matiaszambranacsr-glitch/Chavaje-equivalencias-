@@ -93,6 +93,14 @@ PARES_DE_MUESTRA = [
      "juego de juntas contra junta suelta"),
     ("Juego de juntas para Caja de Velocidad FORD F350", "Jta.Tapa Valvulas FORD F350", "distinta",
      "juego contra junta suelta"),
+    # El juego de un lugar contra la junta de ese lugar: avisaba (algunas listas podían llamar
+    # «junta» al juego) y de los 62 así que se miraron a mano no se aprobó ninguno. Ver v21.
+    ("Jgo.Jtas.Carter PERKINS 4-203", "JTA CARTER PERKINS 4-203", "distinta",
+     "juego de cárter contra la junta de cárter"),
+    ("Jgo.Jtas.Mult.Adm. y Esc. RENAULT", "JTA ADM y ESC RENAULT 19 1.8", "distinta",
+     "juego de admisión y escape contra la junta"),
+    ("Junta Caja Velocidades", "Juego de juntas para Caja de Velocidad FIAT UNO DUNA - 1,7 D",
+     "distinta", "juego de caja contra la junta de caja"),
     ("Sonda Lambda Planar Volkswagen Gol Fox Voyage 1.0 16 Saveiro 1.6 Suran",
      "SONDA LAMBDA LECS012 GM ASTRA 1 8 - CELTA 1 4 GLS - CORSA 1 0 - VW GOLF REF ORIG", "distinta",
      "misma marca, ningún modelo en común", NECESITA_EL_CATALOGO),
