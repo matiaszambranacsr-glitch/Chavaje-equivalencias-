@@ -2589,6 +2589,16 @@ def _tareas_automaticas_del_dia(hoy, presupuesto_segundos):
             anotar_error("tareas_automaticas_del_dia", _err)
             pass
 
+    # 1b. Lo decidido con cada aviso: si desde la última cuenta se decidieron bastantes pares,
+    # se vuelve a contar por atrás (tarda 20 s, no entra acá). Ver «LO QUE DECIDISTE CON CADA
+    # AVISO».
+    if queda_tiempo():
+        try:
+            if hay_que_aprender_de_nuevo():
+                guardar_config("lo_decidido_pendiente", "1")
+        except Exception as _err:
+            anotar_error("tareas/lo_decidido", _err)
+
     # 2. Procesar fotos pendientes, de a poco
     if queda_tiempo():
         try:

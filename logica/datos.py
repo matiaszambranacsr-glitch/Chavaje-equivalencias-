@@ -2315,6 +2315,10 @@ def _datos_precargados_y_migraciones(c):
         # QUE CALZAN, RELACIONADAS SOLAS»).
         c.execute("INSERT INTO configuracion (clave, valor) VALUES ('bujias_pendiente', '1') "
                   "ON CONFLICT(clave) DO UPDATE SET valor = excluded.valor")
+        # Y lo decidido con cada aviso: con otras reglas, los avisos son otros (ver «LO QUE
+        # DECIDISTE CON CADA AVISO»).
+        c.execute("INSERT INTO configuracion (clave, valor) VALUES ('lo_decidido_pendiente', '1') "
+                  "ON CONFLICT(clave) DO UPDATE SET valor = excluded.valor")
         c.execute("INSERT INTO configuracion (clave, valor) VALUES ('version_confianza', ?) "
                   "ON CONFLICT(clave) DO UPDATE SET valor = excluded.valor",
                   (VERSION_CONFIANZA,))

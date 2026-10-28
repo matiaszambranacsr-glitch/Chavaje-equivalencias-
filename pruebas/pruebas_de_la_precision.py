@@ -2569,6 +2569,60 @@ def probar(L):
     _r92 = ns["buscar_por_texto"]("embrague ford ka")
     esperar("«ka» es un modelo: el de la Transit, aparte",
             (_eka in {f["ID"] for f in _r92}, _etr in {f["ID"] for f in _r92.aparte}), (True, True))
+    # 99. LO QUE DECIDISTE CON CADA AVISO (ver esa sección): cuenta por aviso lo que decidió una
+    # persona —en rojo, solo el aviso que lo tumba—, no lo que la app descartó sola; y en la cola
+    # de a uno, adentro de la tanda, va primero lo que con esos avisos aprobaste.
+    m99a, m99b = marca("NOVENTA Y NUEVE A"), marca("NOVENTA Y NUEVE B")
+    # El último, con precios que no cierran: en rojo dice primero el precio, y cuenta ese.
+    _dec99 = [(producto(f"JC{n}99", f"Jgo.Jtas.Carter PERKINS 4-{n}", m99a, precio=precio_a),
+               producto(f"JS{n}99", f"JTA CARTER PERKINS 4-{n}", m99b, precio=precio_b))
+              for n, precio_a, precio_b in ((203, None, None), (236, None, None),
+                                            (248, None, None), (254, 100, 90000))]
+    # Y un filtro aprobado, sin nada en contra: cuenta como «nada en contra».
+    _limpio99 = (producto("FA99X", "FILTRO ACEITE VW GOL", m99a),
+                 producto("FB99X", "FILTRO ACEITE VW GOL 1.6", m99b))
+    _antes99 = ns["calcular_lo_decidido_con_cada_aviso"](minimo=1)
+    c.executemany("INSERT INTO equivalencias_revisadas (producto_a_id, producto_b_id, decision, "
+                  "revisado_por) VALUES (?, ?, ?, ?)",
+                  [(a, b, "rechazada", quien) for (a, b), quien
+                   in zip(_dec99, ("Chavo", "Chavo", ns["QUIEN_DESCARTA_SOLA"], "Chavo"))]
+                  + [(*_limpio99, "ok", "Chavo")])
+    conn.commit()
+    _ahora99 = ns["calcular_lo_decidido_con_cada_aviso"](minimo=1)
+
+    def _cuanto99(clave):
+        return [x - y for x, y in zip(_ahora99.get(clave, [0, 0]), _antes99.get(clave, [0, 0]))]
+
+    _juego99 = next((k for k in _ahora99 if "juego de juntas de CARTER vs junta suelta" in k), None)
+    esperar("el juego contra la junta: 2 rechazados por una persona (el de la app no cuenta); "
+            "el filtro, aprobado sin nada en contra",
+            (_cuanto99(_juego99), _cuanto99(ns["SIN_AVISOS"])), ([0, 2], [1, 0]))
+    esperar("en rojo cuenta solo el primer aviso: cuatro decisiones, cuatro cuentas",
+            sum(map(sum, _ahora99.values())) - sum(map(sum, _antes99.values())), 4)
+    esperar("recién contado no hay que contar de nuevo; con 100 decisiones más, sí",
+            (ns["hay_que_aprender_de_nuevo"](),
+             ns["guardar_config"](ns["LO_DECIDIDO_CON_CADA_AVISO"], _json.dumps(dict(
+                 _json.loads(ns["obtener_config"](ns["LO_DECIDIDO_CON_CADA_AVISO"])),
+                 decisiones=ns["decisiones_de_personas"]() - ns["CAMBIOS_PARA_APRENDER_DE_NUEVO"])))
+             or ns["hay_que_aprender_de_nuevo"]()), (False, True))
+    # En la cola, el juego contra la junta (en rojo, 15) y dos juntas iguales que no une ningún
+    # código (🤷, 50), en la misma tanda. Lo que manda es lo decidido antes, no el puntaje.
+    _juego_p = (producto("JC99P", "Jgo.Jtas.Carter PERKINS 4-212", m99a),
+                producto("JS99P", "JTA CARTER PERKINS 4-212", m99b))
+    _igual_p = (producto("TC99P", "JTA TAPA CILINDROS PERKINS 4-212", m99a),
+                producto("TD99P", "JTA TAPA CILINDROS PERKINS 4-212", m99b))
+    c.executemany("INSERT INTO equivalencias_pendientes (producto_a_id, producto_b_id, origen, lote) "
+                  "VALUES (?, ?, 'lista_proveedor', 'NOVENTA Y NUEVE')", [_juego_p, _igual_p])
+    conn.commit()
+
+    def _primero99(avisos):
+        ns["guardar_config"](ns["LO_DECIDIDO_CON_CADA_AVISO"], _json.dumps(
+            {"version": ns["VERSION_CONFIANZA"], "avisos": avisos}))
+        _cola = ns["cola_de_revision_de_a_uno"]("NOVENTA Y NUEVE")
+        return (_cola[0]["a"], _cola[0]["b"]) if _cola else None, (_cola[0]["decidido"] if _cola else None)
+
+    esperar("si el juego contra la junta siempre se aprobó, va primero, con lo decidido a la vista",
+            _primero99({_juego99: [50, 0]}), (_juego_p, [(_juego99, 50, 50)]))
     return fallas
 
 

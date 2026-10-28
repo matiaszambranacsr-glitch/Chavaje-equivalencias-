@@ -2537,6 +2537,16 @@ def _trabajo_de_fondo():
             # La bandera sigue prendida: se reintenta en el próximo arranque, hasta el tope.
             anotar_error("_trabajo_de_fondo/confianza", _err)
 
+    # Lo decidido con cada aviso, después del repuntaje: es el mismo análisis sobre lo ya
+    # decidido (20 s). Ver «LO QUE DECIDISTE CON CADA AVISO».
+    if _hay_que_hacerlo("lo_decidido_pendiente"):
+        try:
+            ceder_al_mostrador()
+            calcular_lo_decidido_con_cada_aviso()
+            _quedo_hecho("lo_decidido_pendiente")
+        except Exception as _err:
+            anotar_error("_trabajo_de_fondo/lo_decidido", _err)
+
     # Una lista enorme recién importada: su análisis va ANTES del descubrimiento (que puede
     # tardar dos minutos), porque quien la importó es probable que vaya derecho a revisarla.
     if obtener_config("lote_a_analizar", ""):
@@ -2882,6 +2892,7 @@ def arrancar_tanda_de_fondo():
             # siempre en la base de quien no tiene prendida ninguna tanda automática — que es
             # justo el caso normal. Ver VERSION_CONFIANZA.
             and obtener_config("confianza_pendiente", "") != "1"
+            and obtener_config("lo_decidido_pendiente", "") != "1"
             and obtener_config("medidas_pendientes", "") != "1"
             and obtener_config("aplicaciones_pendientes", "") != "1"
             and obtener_config("marcas_repuesto_pendientes", "") != "1"

@@ -37,6 +37,15 @@ class Muestreo:
             for hilo, marco in sys._current_frames().items():
                 if hilo == propio:
                     continue
+                # Solo el hilo que corre la pantalla (el que viene de app.py). El índice de la
+                # búsqueda por texto se arma en otro hilo la primera vez, y sus renglones se le
+                # anotaban a la pantalla que estuviera abierta («Repuestos por vehículo
+                # [armar_el_indice_de_busqueda] 3,6 s»).
+                _arriba = marco
+                while _arriba and _arriba.f_code.co_filename != os.path.join(RAIZ, "app.py"):
+                    _arriba = _arriba.f_back
+                if not _arriba:
+                    continue
                 # Sin el envoltorio de la base (datos.py:execute): lo que sirve es quién consulta.
                 while marco and (not marco.f_code.co_filename.startswith(
                         (os.path.join(RAIZ, "logica"), os.path.join(RAIZ, "pantallas"), "<"))
@@ -294,6 +303,12 @@ def probar():
                   "VALUES (?, ?, 'lista_proveedor', 'DE A UNO EN PANTALLA')",
                   [(_ids_u[0], _ids_u[1]), (_ids_u[2], _ids_u[3])])
     conn.commit()
+    # Lo decidido antes con los avisos de esos pares (ver «LO QUE DECIDISTE CON CADA AVISO»):
+    # la tarjeta lo tiene que mostrar.
+    _avisos_u = {a for f in sum(ns["analizar_lote_pendiente"]("DE A UNO EN PANTALLA")[:2], [])
+                 for a in ns["_avisos_que_cuentan"](f)}
+    ns["guardar_config"](ns["LO_DECIDIDO_CON_CADA_AVISO"], ns["json"].dumps(
+        {"version": ns["VERSION_CONFIANZA"], "avisos": {a: [7, 1] for a in _avisos_u}}))
     at.session_state["pagina_actual"] = "📊 Estadísticas"
     at.session_state["sub_stats"] = "🔗 Equivalencias sugeridas"
     at.run()
@@ -308,6 +323,8 @@ def probar():
         _si = [b for b in at.button if b.key == "de_a_uno_si"]
         if not _si or not any("FILTRO ACEITE FIAT" in x.value for x in at.caption):
             fallas.append("de a uno: no se ve la tarjeta con los dos productos")
+        elif not any("📒 Antes" in x.value and "aprobaste 7 de 8" in x.value for x in at.markdown):
+            fallas.append("de a uno: la tarjeta no dice lo que decidiste antes con esos avisos")
         else:
             _si[0].click().run()
             if c.execute("SELECT COUNT(*) FROM equivalencias_pendientes WHERE lote = "
@@ -341,9 +358,12 @@ def main():
         fallas, cuantas, lentas = probar()
         for f in fallas:
             print("   ✗", f)
-        print(f"✅ pantallas: las {cuantas} en verde (las más lentas: "
-              + ", ".join(f"{d} {s:.1f} s" for s, d in lentas) + ")"
-              if not fallas else f"{len(fallas)} falla(s) en {cuantas} pantallas")
+        # Las más lentas también cuando algo falla: con --base es lo que se viene a buscar, y
+        # algunas pruebas de la base chica no se cumplen con la base real (P716 aparece en más
+        # listas), así que antes no se veían nunca.
+        _lentas = ", ".join(f"{d} {s:.1f} s" for s, d in lentas)
+        print(f"✅ pantallas: las {cuantas} en verde (las más lentas: {_lentas})" if not fallas
+              else f"{len(fallas)} falla(s) en {cuantas} pantallas (las más lentas: {_lentas})")
         return 1 if fallas else 0
     finally:
         os.chdir(RAIZ)

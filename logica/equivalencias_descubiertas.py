@@ -4942,23 +4942,39 @@ def cola_de_revision_de_a_uno(lote, ventana=300):
     """[{"a", "b", "encadena", "tanda"}] en el orden en que conviene mirarlos: primero lo que une
     redes grandes (🔥, ver puentes_del_lote()), de la que más encadena a la que menos; después,
     de a tandas parecidas —el mismo par de listas y el mismo rubro—, de la tanda más grande a la
-    más chica, y adentro de la más segura a la menos. Mira los primeros `ventana` pendientes de
-    la lista (analizarlos tarda: 1,6 s los 300); cuando se terminan, se arma otra."""
+    más chica, y adentro primero lo que con esos avisos casi siempre aprobaste (ver «LO QUE
+    DECIDISTE CON CADA AVISO»): así los parecidos quedan juntos y se deciden de corrido. Después,
+    de la más segura a la menos. Mira los primeros `ventana` pendientes de la lista (analizarlos
+    tarda: 1,6 s los 300); cuando se terminan, se arma otra. Cada par lleva lo que decidiste
+    antes con sus avisos («decidido»)."""
     puentes = sorted(puentes_del_lote(lote, tope=None), key=lambda p: -p["Encadena"])
-    cola = [{"a": p["a"], "b": p["b"], "encadena": p["Encadena"], "tanda": "🔥 une redes"}
-            for p in puentes]
+    cola = [{"a": p["a"], "b": p["b"], "encadena": p["Encadena"], "tanda": "🔥 une redes",
+             "decidido": []} for p in puentes]
     vistos = {(p["a"], p["b"]) for p in puentes} | {(p["b"], p["a"]) for p in puentes}
     limpias, sospechosas, _relacionadas = analizar_lote_pendiente(lote, limite=ventana)
+    aprendido = lo_decidido_con_cada_aviso()
+    decidido = {(f["a"], f["b"]): lo_que_decidiste_antes(f, aprendido)
+                for f in list(limpias) + list(sospechosas)}
+    for x in cola:      # los 🔥 que entraron en lo analizado
+        x["decidido"] = decidido.get((min(x["a"], x["b"]), max(x["a"], x["b"]))) or []
     tandas = {}
     for f in list(limpias) + list(sospechosas):
         if (f["a"], f["b"]) in vistos:
             continue
         rubro = clasificar_repuesto(f.get("desc_a") or f.get("desc_b") or "")
         tandas.setdefault((f.get("marca_a") or "", f.get("marca_b") or "", rubro), []).append(f)
+
+    def _orden(f):
+        # El aviso que menos aprobaste manda; sin nada decidido antes, en el medio.
+        _antes = decidido[(f["a"], f["b"])]
+        _tasa = min((ok / total for _aviso, ok, total in _antes), default=0.5)
+        return (-_tasa, tuple(sorted(a for a, _ok, _t in _antes)), -(f.get("confianza") or 0))
+
     for (marca_a, marca_b, rubro), filas in sorted(tandas.items(), key=lambda kv: -len(kv[1])):
-        for f in sorted(filas, key=lambda f: -(f.get("confianza") or 0)):
+        for f in sorted(filas, key=_orden):
             cola.append({"a": f["a"], "b": f["b"], "encadena": 0,
-                         "tanda": f"{marca_a} ↔ {marca_b} · {rubro}"})
+                         "tanda": f"{marca_a} ↔ {marca_b} · {rubro}",
+                         "decidido": decidido[(f["a"], f["b"])]})
     return cola
 
 
@@ -5226,6 +5242,117 @@ def listar_busquedas_sin_resultado(limite=50):
                  FROM historial_busquedas WHERE sin_resultado = 1
                  GROUP BY termino ORDER BY COUNT(*) DESC, MAX(fecha) DESC LIMIT ?""", (limite,))
     return filas_a_listas(c)
+
+
+# ======================================================================
+# LO QUE DECIDISTE CON CADA AVISO
+# ======================================================================
+# La cola dice «🪭 uno de los dos está emparejado con varios de la otra lista», «🎚️ no dice el
+# espesor»…, y cada vez había que volver a pensar qué hacer con eso. Ya estaba decidido: medido
+# sobre la copia de la base real, de 1.374 pares con 🪭 que decidió una persona se aprobaron
+# 1.369, y de 62 con el juego de juntas contra la junta suelta, ninguno (por eso ese ya va en
+# rojo: ver firmas_compatibles()). Esto lo cuenta en la app y lo muestra al revisar: en la
+# tarjeta de «⚡ Revisar de a uno» y en cada grupo de «para revisar».
+# No aprueba ni descarta nada: es lo que una persona decidió antes, a la vista.
+#
+# Tarda: es el análisis de la cola sobre todo lo decidido (20 s sobre 22.670 pares). Lo hace la
+# tarea de fondo cuando cambian las reglas, y una vez por día si desde la última vez se
+# decidieron CAMBIOS_PARA_APRENDER_DE_NUEVO pares más. Queda en la configuración.
+LO_DECIDIDO_CON_CADA_AVISO = "lo_decidido_con_cada_aviso"
+CAMBIOS_PARA_APRENDER_DE_NUEVO = 100
+# Lo que el análisis no encuentra nada en contra también es una clase: de 18.453 así, se
+# aprobaron 18.446. Sin contarla, en la cola de a uno quedaba detrás de los 🟠 con 🪭.
+SIN_AVISOS = "✅ Nada en contra"
+
+
+def _avisos_que_cuentan(f):
+    """Los avisos de un par analizado que explican lo que se decidió: en rojo, el primero —el que
+    lo tumba; con 🪭 y un veto, lo descartaste por el veto—; si no, todos. Los tipos de
+    tipo_de_alarma(), sin repetir; SIN_AVISOS si no tiene ninguno."""
+    alarmas = [a for a in (f.get("alarmas") or []) if a]
+    if not alarmas:
+        return [SIN_AVISOS]
+    if nivel_de_confianza(f.get("confianza", 50))[0].startswith("🔴"):
+        alarmas = alarmas[:1]
+    return list(dict.fromkeys(tipo_de_alarma(a) for a in alarmas))
+
+
+def decisiones_de_personas():
+    """Cuántos pares decidió una persona (lo que la app hizo sola no cuenta)."""
+    c.execute(f"""SELECT COUNT(*) FROM equivalencias_revisadas r
+                  WHERE r.producto_a_id < r.producto_b_id AND {_SOLO_DE_PERSONAS}""")
+    return c.fetchone()[0]
+
+
+def calcular_lo_decidido_con_cada_aviso(minimo=MINIMO_PARA_APRENDER):
+    """Analiza los pares que decidió una persona como si recién llegaran y cuenta, por aviso,
+    cuántos se aprobaron y cuántos se rechazaron. Guarda {aviso: [aprobados, rechazados]} de los
+    que tienen `minimo` decisiones o más, y lo devuelve."""
+    c.execute(f"""SELECT r.producto_a_id AS a, r.producto_b_id AS b, r.decision,
+                         pa.codigo_raw AS cod_a, ma.nombre AS marca_a, ma.tipo AS tipo_a,
+                         pa.descripcion AS desc_a, pa.precio AS precio_a,
+                         pb.codigo_raw AS cod_b, mb.nombre AS marca_b, mb.tipo AS tipo_b,
+                         pb.descripcion AS desc_b, pb.precio AS precio_b
+                  FROM equivalencias_revisadas r
+                  JOIN productos pa ON pa.id = r.producto_a_id
+                  JOIN productos pb ON pb.id = r.producto_b_id
+                  JOIN marcas ma ON ma.id = pa.marca_id
+                  JOIN marcas mb ON mb.id = pb.marca_id
+                  WHERE r.producto_a_id < r.producto_b_id AND {_SOLO_DE_PERSONAS}
+                  ORDER BY r.producto_a_id, r.producto_b_id""")
+    filas = [dict(r) for r in c.fetchall()]
+    decision = {(f["a"], f["b"]): f.pop("decision") for f in filas}
+    cuentas = {}
+    if filas:
+        with recordando_lo_de_cada_producto():
+            limpias, sospechosas, _relacionadas = _analizar_filas(filas, _LO_YA_CARGADO)
+        for f in list(limpias) + list(sospechosas):
+            aprobado = decision.get((f["a"], f["b"])) == "ok"
+            for aviso in _avisos_que_cuentan(f):
+                cuentas.setdefault(aviso, [0, 0])[0 if aprobado else 1] += 1
+    avisos = {k: v for k, v in cuentas.items() if sum(v) >= minimo}
+    guardar_config(LO_DECIDIDO_CON_CADA_AVISO, json.dumps({
+        "version": VERSION_CONFIANZA, "decisiones": decisiones_de_personas(),
+        "fecha": datetime.now().strftime("%Y-%m-%d %H:%M"), "avisos": avisos},
+        ensure_ascii=False))
+    return avisos
+
+
+def lo_decidido_con_cada_aviso():
+    """{aviso: (aprobados, rechazados)} de la última cuenta, o {} si todavía no se hizo."""
+    try:
+        guardado = json.loads(obtener_config(LO_DECIDIDO_CON_CADA_AVISO, "") or "{}")
+    except ValueError:
+        return {}
+    return {k: tuple(v) for k, v in (guardado.get("avisos") or {}).items()}
+
+
+def hay_que_aprender_de_nuevo():
+    """¿Se decidieron CAMBIOS_PARA_APRENDER_DE_NUEVO pares o más desde la última cuenta?"""
+    try:
+        guardado = json.loads(obtener_config(LO_DECIDIDO_CON_CADA_AVISO, "") or "{}")
+    except ValueError:
+        guardado = {}
+    return (guardado.get("version") != VERSION_CONFIANZA
+            or abs(decisiones_de_personas() - (guardado.get("decisiones") or 0))
+            >= CAMBIOS_PARA_APRENDER_DE_NUEVO)
+
+
+def lo_que_decidiste_antes(f, aprendido=None):
+    """[(aviso, aprobados, de cuántos)] de los avisos de un par analizado que ya se decidieron
+    antes. Ver _avisos_que_cuentan()."""
+    aprendido = lo_decidido_con_cada_aviso() if aprendido is None else aprendido
+    salida = []
+    for aviso in _avisos_que_cuentan(f):
+        if aviso in aprendido:
+            ok, mal = aprendido[aviso]
+            salida.append((aviso, ok, ok + mal))
+    return salida
+
+
+def texto_de_lo_decidido(ok, total):
+    """«aprobaste 1.369 de 1.374»: para mostrar al lado del aviso."""
+    return f"aprobaste {miles(ok)} de {miles(total)}"
 
 
 # ======================================================================

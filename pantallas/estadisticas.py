@@ -1239,7 +1239,8 @@ a traer solas desde Administrar → Mantenimiento.
                     "⚡ Revisar de a uno, con el teclado", key=f"de_a_uno_{lote_info['lote']}",
                     help="Un par por vez. S: son la misma pieza; N: no son; P: pasar (vuelve al "
                          "final). Primero lo que une redes (🔥), después de a tandas parecidas: "
-                         "las mismas dos listas y el mismo rubro."):
+                         "las mismas dos listas y el mismo rubro; adentro, primero lo que con "
+                         "esos avisos casi siempre aprobaste (📒 dice cuántos)."):
                 _clave_cola = f"_cola_de_a_uno_{lote_info['lote']}"
                 if not st.session_state.get(_clave_cola):
                     with st.spinner("Armando la cola…"):
@@ -1268,6 +1269,12 @@ a traer solas desde Administrar → Mantenimiento.
                     if _ficha_u:
                         st.markdown(f"La app dice: **{_ficha_u['estado']}** — "
                                     f"{motivo_corto(_ficha_u)}")
+                    # Lo que decidiste antes con los mismos avisos (ver «LO QUE DECIDISTE CON
+                    # CADA AVISO»): no decide nada, ayuda a decidir.
+                    for _aviso_u, _ok_u, _total_u in _par_u.get("decidido") or []:
+                        _aviso_u = _aviso_u.replace("$", "\\$")
+                        st.markdown(f"📒 Antes, con «{_aviso_u}»: "
+                                    f"**{texto_de_lo_decidido(_ok_u, _total_u)}**")
                     _sin_teclas = es_celular()
                     for _col_u, (_rotulo, _decision, _tecla) in zip(st.columns(3), (
                             ("✅ Son la misma pieza", "si", "S"), ("❌ No son", "no", "N"),
@@ -2067,12 +2074,19 @@ a traer solas desde Administrar → Mantenimiento.
                                    "aunque cambies de página.")
 
                 _boton_aplicar("arriba")
+                _lo_decidido = lo_decidido_con_cada_aviso()
                 for motivo, items in por_motivo.items():
                     peor_grupo = min(x["confianza"] for x in items)
                     icono = "🔴" if peor_grupo < 30 else "🟠" if peor_grupo < 55 else "🟡"
                     _de_cuantos = (f" (de {_total_del_tipo[motivo]} con este motivo)"
                                    if _total_del_tipo[motivo] > len(items) else "")
-                    st.markdown(f"{icono} **{motivo}** — {len(items)} vínculo(s){_de_cuantos}")
+                    # Lo que decidiste antes con este mismo motivo (ver «LO QUE DECIDISTE CON
+                    # CADA AVISO»).
+                    _antes_g = _lo_decidido.get(motivo)
+                    _antes_g = (f" · 📒 antes {texto_de_lo_decidido(_antes_g[0], sum(_antes_g))}"
+                                if _antes_g else "")
+                    st.markdown(f"{icono} **{motivo}** — {len(items)} vínculo(s){_de_cuantos}"
+                                f"{_antes_g}")
 
                     _pares_grupo = [(x["a"], x["b"]) for x in items]
                     # El selector del grupo muestra lo que tienen sus pares: si todos tienen lo

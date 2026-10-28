@@ -6795,6 +6795,19 @@ Lo pidió el dueño («¿cuál sería nuestra próxima gran mejora?» y después
 
 Reglas v21. `pruebas_de_la_revision.py` (pares de muestra) lo controla: volviendo a la regla vieja, avisa en los tres casos.
 
+**2. 📒 Lo que decidiste antes, a la vista al revisar.** La misma cuenta, hecha por la app y al día: para cada aviso, cuántos aprobaste y cuántos rechazaste de los que decidió una persona (lo que la app descartó o relacionó sola no cuenta). Se muestra en dos lugares de 📊 Estadísticas → 🔗 Equivalencias sugeridas:
+
+- **En la tarjeta de «⚡ Revisar de a uno»**, debajo de lo que dice la app: «📒 Antes, con «🪭 Uno de los dos está emparejado con varios…»: **aprobaste 1.369 de 1.374**».
+- **Al lado de cada grupo de «para revisar»**: «🔴 💲 Los precios no cierran — 10 vínculo(s) · 📒 antes aprobaste 3 de 209».
+
+Y ordena la cola de a uno. Adentro de cada tanda, primero va lo que con esos avisos casi siempre aprobaste, y los parecidos quedan juntos para decidirlos de corrido. Después va lo que no tiene historia, y al final lo que casi siempre rechazaste. Lo que no tiene ningún aviso cuenta como «✅ Nada en contra»: de 18.453 así, aprobaste 18.446. En la copia de la base real, de los 3.149 🟠 que quedan para mirar, 1.079 tienen solo el aviso 🪭, el que aprobaste 1.369 de 1.374 veces.
+
+- **No decide nada.** No aprueba ni descarta; es lo que una persona ya decidió, para decidir más rápido.
+- **En rojo cuenta el primer aviso**, el que se ve como motivo. Un par con 🪭 y además un veto se descartó por el veto: no cuenta contra 🪭.
+- **Se cuenta por atrás.** Es el análisis de la cola sobre todo lo decidido: 21 s sobre 22.670 pares. Lo hace la tarea de fondo cuando cambian las reglas, y una vez por día si desde la última vez se decidieron 100 pares más. Queda guardado en la configuración (se muestra solo con 12 decisiones o más).
+
+`pruebas_de_la_precision.py` (99) y `pruebas_de_las_pantallas.py` lo controlan. Rompiendo a propósito cada parte —contar lo que hizo la app sola, contar todos los avisos de un rojo, olvidar «nada en contra», ordenar al revés o sacar la línea 📒 de la tarjeta—, avisan.
+
 ## 🔁 Otra versión de la misma lista, y las búsquedas largas más rápidas
 
 Lo pidió el dueño: «mejorá más todavía todo». Medido con `python pruebas/medir.py --base copia busquedas` (1.500 búsquedas de la copia de la base).
