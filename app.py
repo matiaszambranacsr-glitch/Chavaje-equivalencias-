@@ -76,6 +76,7 @@ específico, y las pantallas quedan todas al final:
         · REPUESTOS POR AUTO Y LECTOR DE VIN
     logica/busqueda_por_texto.py
         · DESCRIPCIONES PEGADAS Y BÚSQUEDA POR TEXTO
+        · EL ÍNDICE DE LA BÚSQUEDA POR TEXTO
     logica/parque_automotor.py
         · EL PARQUE AUTOMOTOR: QUÉ AUTOS CIRCULAN (DNRPA)
     logica/homologaciones.py

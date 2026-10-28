@@ -68,14 +68,15 @@ def del_proceso(nombre, crear):
 # del_proceso() de la app está en una de las dos listas: pruebas_de_la_recuperacion.py falla si
 # aparece uno nuevo sin decidir de cuál es.
 MEMORIAS_DE_LA_BASE = ("autos_contra_el_catalogo", "autos_del_motor", "cobertura_del_catalogo",
-                       "cuenta_de_palabras",
+                       "cuenta_de_palabras", "indice_de_busqueda",
                        "escala_de_precios", "marca_del_modelo", "marcas_con_chas", "red_de_equivalencias",
                        "salud_compartida")
 MEMORIAS_QUE_NO_SON_DE_LA_BASE = (
     # Candados, sesiones con los sitios de afuera, lo bajado de internet y lo que se midió.
     "candado_de_la_copia_a_github", "candado_de_la_salud_compartida",
     "candado_de_la_tanda_de_fondo", "candado_de_las_tareas_del_dia",
-    "candado_de_paginas_recientes", "candado_de_sesiones_de_catalogo", "intentos_en_recuperacion",
+    "candado_de_paginas_recientes", "candado_de_sesiones_de_catalogo",
+    "candado_del_indice_de_busqueda", "intentos_en_recuperacion",
     "libros_de_excel_leidos", "lo_traido_de_la_nhtsa", "mediciones_de_busqueda",
     "paginas_recientes", "paquetes_de_certificados", "sesiones_de_catalogo",
     "sesiones_de_portal", "token_de_mercado_libre", "ultimos_errores")

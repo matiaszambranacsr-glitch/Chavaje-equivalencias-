@@ -6733,6 +6733,16 @@ Lo pidió el dueño: «más cosas». Se pasaron por el buscador las 10 búsqueda
 - **El error de tipeo es de teclado** (`_distancia_de_tipeo()`, `_tipeo_creible()`): para «W712/94» se sugería «¿Error de tipeo? TARANTO 271224, 271295…», juntas, porque de W a 2 hay un solo cambio. Ahora cambiar una letra por un número (o al revés) no es tipeo, salvo que se parezcan a la vista (O y 0, I y 1, S y 5, B y 8, Z y 2, G y 6), que es lo que confunden también las fotos. Vale para el «¿Quisiste decir…?» del Buscador.
 - La medición de pantallas con `--base` ahora dice quién hace la consulta lenta y no `datos.py:execute`: «🧹 Limpiar y corregir [mostrador.py:codigos_con_dos_precios_en_la_misma_lista]». Esa consulta tarda 0,23 s con la base en memoria; el 1,8 s de la medición es la primera lectura del disco de una copia recién hecha.
 
+### 🚀 La búsqueda por descripción, cuatro veces más rápida
+
+Lo pidió el dueño («hacé 3, 4, 5 y 6»; esta es la 6). Cada palabra se buscaba con un LIKE «%…%» sobre los 87.000 productos, unos 20 ms por palabra y por cada forma (abreviatura, sinónimo, singular): una búsqueda de cuatro palabras pasaba los 100 ms. Ahora hay un **índice por trigramas** de SQLite (FTS5) que encuentra exactamente lo mismo que el LIKE —medido palabra por palabra con la copia de la base: JUNTA 5.182, K4M 269, «1.6» 3.438, iguales— en 0,4 a 3 ms.
+
+- **Solo achica** (`candidatos_del_indice()`): dice qué productos pueden llegar al mínimo de palabras, y el puntaje, el orden y lo apartado siguen saliendo de la consulta de siempre, sobre esos. Primero pide los que pueden llegar al mínimo de verdad; si con eso no queda ninguno, los que pueden llegar al aflojado. Lo que el índice no sabe buscar (las palabras de una o dos letras, o un código de dos) cuenta como «puede estar».
+- **Mismo resultado**: comparadas una por una 816 búsquedas (las 794 de `medir.py texto` y las del mostrador), con y sin índice: cero diferencias. `medir.py texto`: los mismos puestos (265 / 502 / 653 / 17), y el tiempo de 87 a **20 ms** en promedio, de 140 a 51 ms el p95.
+- **En un archivo aparte** (`indice_de_busqueda.db`, 28 MB con la copia de la base), al lado de la base: la copia de seguridad no crece. Si no está, o no tiene los mismos productos que la base (una copia restaurada), se vuelve a armar solo en otro hilo (1,6 s) y mientras tanto se busca como antes.
+- **Al día**: la base anota cada producto agregado, cambiado o borrado (`cambios_para_el_indice`, con tres disparadores) y antes de cada búsqueda se ponen al día solo esos. Con más de 2.000 juntos (una lista recién importada) se arma de nuevo.
+- `EQUIVALENCIAS_SIN_INDICE=1` lo apaga, para comparar.
+
 ### ⚡ La cola, de a uno y con el teclado
 
 Lo pidió el dueño («hacé 3, 4, 5 y 6»; esta es la 4). La cola tiene 7.827 pendientes y la tabla se revisa tildando casillas. En «📊 Estadísticas → 🔗 Equivalencias sugeridas», con la lista elegida, el interruptor **«⚡ Revisar de a uno, con el teclado»** muestra un par por vez: los dos productos (marca, código, precio y descripción) y lo que dice la app de ellos (la ficha), con tres botones y su tecla: **S** son la misma pieza, **N** no son, **P** pasar (vuelve al final de la cola).

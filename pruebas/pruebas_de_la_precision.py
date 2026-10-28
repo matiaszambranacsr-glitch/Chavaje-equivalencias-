@@ -2513,6 +2513,44 @@ def probar(L):
     ns["decidir_de_a_uno"]("DE A UNO", _d96[0], _d96[1], False)
     esperar("descartar de a uno: sale de la cola y no se aprueba", c.execute(
         "SELECT COUNT(*) FROM equivalencias_pendientes WHERE lote = 'DE A UNO'").fetchone()[0], 1)
+    # 97. EL ÍNDICE DE LA BÚSQUEDA POR TEXTO (ver «EL ÍNDICE DE LA BÚSQUEDA POR TEXTO»): con el
+    # índice, exactamente lo mismo que sin él; lo que se agrega o se borra después, al día; y si
+    # no tiene los mismos productos que la base (una copia restaurada), no se usa.
+    producto("VM97", "VOLANTE MOTOR 16-V", m14)      # «16v» lo encuentra por «16 V» con guion
+    producto("VN97", "VOLANTE MOTOR 16V", m14)        # y este, tal cual: no hace falta aflojar
+    conn.commit()
+    ns["armar_el_indice_de_busqueda"]()
+    ns["_estado_del_indice"]().clear()
+    _consultas97 = ["volante 16v", "bomba de agua k4m", "filtro aire volkswagen gol", "embrague gol 1.6",
+                    "junta tapa", "mb", "semieje suran", "porta bancada reten", "filtro 0151",
+                    "7793960050151", "bujia 1.6", "jta tapa", "rulemanes suran", "kit distribucion gol 16v"]
+
+    def _todas97(sin_indice):
+        if sin_indice:
+            os.environ["EQUIVALENCIAS_SIN_INDICE"] = "1"
+        else:
+            os.environ.pop("EQUIVALENCIAS_SIN_INDICE", None)
+        salida = [([f["ID"] for f in r], [f["ID"] for f in r.aparte])
+                  for r in map(ns["buscar_por_texto"], _consultas97)]
+        os.environ.pop("EQUIVALENCIAS_SIN_INDICE", None)
+        return salida
+    esperar("con el índice, lo mismo que sin él", _todas97(False), _todas97(True))
+    _nuevo97 = producto("ZZ97", "TENSOR CORREA ZAPHIRA 97", m14)
+    conn.commit()
+
+    def _en_el_indice(frase):
+        return ns["candidatos_del_indice"]([{"frases": [frase], "ids": set()}], 1)
+    esperar("lo que se agrega después está en el índice", _en_el_indice("ZAPHIRA"), {_nuevo97})
+    c.execute("DELETE FROM productos WHERE id = ?", (_nuevo97,))
+    conn.commit()
+    esperar("lo que se borra, deja de estar", _en_el_indice("ZAPHIRA"), set())
+    # Una copia restaurada: el índice tiene otros productos que la base. Al abrirlo de nuevo no
+    # se usa, y se manda a armar.
+    import sqlite3 as _sqlite97
+    with _sqlite97.connect(ns["_ruta_del_indice"]()) as _otro:
+        _otro.execute("UPDATE datos SET valor = '1' WHERE clave = 'productos'")
+    ns["_estado_del_indice"]().clear()
+    esperar("con otros productos que la base, no se usa", ns["indice_al_dia"](), None)
     _r92 = ns["buscar_por_texto"]("embrague ford ka")
     esperar("«ka» es un modelo: el de la Transit, aparte",
             (_eka in {f["ID"] for f in _r92}, _etr in {f["ID"] for f in _r92.aparte}), (True, True))

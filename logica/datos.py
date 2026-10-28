@@ -816,6 +816,18 @@ def _esquema_mostrador(c):
                  AFTER UPDATE OF descripcion, codigo_raw, codigo_barras ON productos BEGIN
                    UPDATE productos SET busqueda = """ + _expr_busqueda + """ WHERE id = NEW.id;
                  END""")
+    # LO QUE CAMBIÓ, PARA EL ÍNDICE DE LA BÚSQUEDA POR TEXTO (ver «EL ÍNDICE DE LA BÚSQUEDA POR
+    # TEXTO» en busqueda_por_texto.py): el número de cada producto agregado, cambiado o borrado.
+    # Antes de buscar se ponen al día solo esos, sin volver a armar el índice entero.
+    c.execute("CREATE TABLE IF NOT EXISTS cambios_para_el_indice "
+              "(producto_id INTEGER PRIMARY KEY)")
+    c.execute("""CREATE TRIGGER IF NOT EXISTS productos_indice_alta AFTER INSERT ON productos
+                 BEGIN INSERT OR IGNORE INTO cambios_para_el_indice VALUES (NEW.id); END""")
+    c.execute("""CREATE TRIGGER IF NOT EXISTS productos_indice_cambio
+                 AFTER UPDATE OF busqueda, codigo_clean ON productos
+                 BEGIN INSERT OR IGNORE INTO cambios_para_el_indice VALUES (NEW.id); END""")
+    c.execute("""CREATE TRIGGER IF NOT EXISTS productos_indice_baja AFTER DELETE ON productos
+                 BEGIN INSERT OR IGNORE INTO cambios_para_el_indice VALUES (OLD.id); END""")
     # Los productos que ya estaban cargados antes de que existiera esta columna.
     # OJO: acá va SOLO el caso «nunca se calculó». Volver a calcularla porque cambió la
     # normalización se hace en _datos_precargados_y_migraciones(), que corre al final: esto

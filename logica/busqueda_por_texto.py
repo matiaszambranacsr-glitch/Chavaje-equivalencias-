@@ -524,6 +524,233 @@ class ResultadosDeTexto(list):
         self.por_que_aparte = por_que_aparte
 
 
+# ======================================================================================
+# EL ÍNDICE DE LA BÚSQUEDA POR TEXTO
+# ======================================================================================
+# Lo pidió el dueño («hacé 3, 4, 5 y 6»; esta es la 6). Cada palabra se buscaba con un LIKE
+# '%…%' sobre los 87.000 productos: unos 20 ms por palabra y por cada forma (abreviatura,
+# sinónimo, singular), y una búsqueda de cuatro palabras con sus formas pasaba los 100 ms. Un
+# índice por trigramas de SQLite (FTS5) encuentra exactamente lo mismo que el LIKE —medido
+# palabra por palabra con la copia de la base: JUNTA 5.182, K4M 269, «1.6» 3.438, iguales— en
+# 0,4 a 3 ms. Se usa solo para ACHICAR: dice qué productos pueden llegar al mínimo de palabras,
+# y el puntaje y el orden siguen saliendo de la consulta de siempre, sobre esos.
+# Va en un archivo aparte (28 MB con la copia de la base), al lado de la base: la copia de
+# seguridad no crece, y si se pierde se vuelve a armar sola, en otro hilo (1,6 s); mientras
+# tanto se busca como antes. Lo que cambia en los productos lo anota la base
+# (cambios_para_el_indice, ver _esquema_busqueda) y se pone al día antes de cada búsqueda.
+ARCHIVO_DEL_INDICE = "indice_de_busqueda.db"
+VERSION_DEL_INDICE = "1"
+# Con más cambios juntos que esto (una lista entera recién importada), conviene armarlo de nuevo.
+CAMBIOS_PARA_ARMAR_DE_NUEVO = 2000
+_SEPARADORES_DE_LA_BUSQUEDA = (" ", ".", "/", "-", ",")
+
+
+def _estado_del_indice():
+    return del_proceso("indice_de_busqueda", dict)
+
+
+def _candado_del_indice():
+    return del_proceso("candado_del_indice_de_busqueda", threading.Lock)
+
+
+def _ruta_del_indice(ruta_base=None):
+    return os.path.join(os.path.dirname(os.path.abspath(ruta_base or DB_PATH)), ARCHIVO_DEL_INDICE)
+
+
+def armar_el_indice_de_busqueda(ruta_base=None):
+    """Arma el índice entero desde la base, en un archivo nuevo que después reemplaza al de
+    antes. Devuelve cuántos productos indexó. Lo anotado en cambios_para_el_indice se borra
+    ANTES de leer los productos: lo que cambie mientras se arma queda anotado para después."""
+    ruta_base = os.path.abspath(ruta_base or DB_PATH)
+    ruta = _ruta_del_indice(ruta_base)
+    nuevo = ruta[:-3] + ".nuevo.db"
+    if os.path.exists(nuevo):
+        os.remove(nuevo)
+    base = sqlite3.connect(ruta_base, timeout=30)
+    try:
+        base.execute("DELETE FROM cambios_para_el_indice")
+        base.commit()
+        filas = base.execute("SELECT id, COALESCE(busqueda, ''), COALESCE(codigo_clean, '') "
+                             "FROM productos").fetchall()
+    finally:
+        base.close()
+    con = sqlite3.connect(nuevo)
+    try:
+        con.execute("CREATE VIRTUAL TABLE indice USING fts5(busqueda, codigo, tokenize='trigram', "
+                    "content='', contentless_delete=1)")
+        con.execute("CREATE TABLE datos (clave TEXT PRIMARY KEY, valor TEXT)")
+        con.executemany("INSERT INTO indice(rowid, busqueda, codigo) VALUES (?, ?, ?)", filas)
+        con.executemany("INSERT INTO datos VALUES (?, ?)", [
+            ("version", VERSION_DEL_INDICE), ("productos", str(len(filas))),
+            ("ultimo", str(max((f[0] for f in filas), default=0)))])
+        con.commit()
+    finally:
+        con.close()
+    os.replace(nuevo, ruta)
+    return len(filas)
+
+
+def _armar_en_otro_hilo():
+    """Lo arma sin hacer esperar a nadie: mientras tanto se busca como antes."""
+    estado = _estado_del_indice()
+    if estado.get("armando"):
+        return
+    estado["armando"] = True
+    ruta_base = os.path.abspath(DB_PATH)
+
+    def trabajo():
+        try:
+            armar_el_indice_de_busqueda(ruta_base)
+        except Exception as _err:     # noqa: BLE001 — sin índice se busca igual, más lento
+            anotar_error("armar_el_indice_de_busqueda", _err)
+        finally:
+            with _candado_del_indice():
+                vieja = estado.pop("conn", None)
+                if vieja is not None:
+                    vieja.close()
+                estado["armando"] = False
+    threading.Thread(target=trabajo, daemon=True, name="indice_de_busqueda").start()
+
+
+def _poner_al_dia(con):
+    """Pasa al índice lo anotado en cambios_para_el_indice. False si son demasiados."""
+    with db_lock:
+        c.execute(f"SELECT producto_id FROM cambios_para_el_indice "
+                  f"LIMIT {CAMBIOS_PARA_ARMAR_DE_NUEVO + 1}")
+        ids = [r[0] for r in c.fetchall()]
+        if not ids:
+            return True
+        if len(ids) > CAMBIOS_PARA_ARMAR_DE_NUEVO:
+            return False
+        nuevas = []
+        for tanda, marcadores in en_tandas(ids):
+            c.execute(f"SELECT id, COALESCE(busqueda, ''), COALESCE(codigo_clean, '') "
+                      f"FROM productos WHERE id IN ({marcadores})", tanda)
+            nuevas.extend(tuple(r) for r in c.fetchall())
+        cuantos, ultimo = c.execute("SELECT COUNT(*), COALESCE(MAX(id), 0) FROM productos").fetchone()
+        con.executemany("DELETE FROM indice WHERE rowid = ?", [(i,) for i in ids])
+        con.executemany("INSERT INTO indice(rowid, busqueda, codigo) VALUES (?, ?, ?)", nuevas)
+        con.executemany("INSERT OR REPLACE INTO datos VALUES (?, ?)",
+                        [("productos", str(cuantos)), ("ultimo", str(ultimo))])
+        con.commit()
+        c.executemany("DELETE FROM cambios_para_el_indice WHERE producto_id = ?",
+                      [(i,) for i in ids])
+        conn.commit()
+    return True
+
+
+def indice_al_dia():
+    """La conexión al índice, al día con la base; o None si todavía no hay (y lo manda a
+    armar). Al abrirlo se controla que tenga los mismos productos que la base: después de
+    restaurar una copia no los tiene, y se arma de nuevo."""
+    if os.environ.get("EQUIVALENCIAS_SIN_INDICE"):
+        return None
+    estado = _estado_del_indice()
+    try:
+        with _candado_del_indice():
+            if estado.get("armando"):
+                return None
+            con = estado.get("conn")
+            recien_abierto = con is None
+            if recien_abierto:
+                ruta = _ruta_del_indice()
+                if not os.path.exists(ruta):
+                    _armar_en_otro_hilo()
+                    return None
+                con = sqlite3.connect(ruta, check_same_thread=False)
+            if not _poner_al_dia(con):
+                con.close()
+                estado.pop("conn", None)
+                _armar_en_otro_hilo()
+                return None
+            if recien_abierto:
+                datos = dict(con.execute("SELECT clave, valor FROM datos"))
+                with db_lock:
+                    cuantos, ultimo = c.execute(
+                        "SELECT COUNT(*), COALESCE(MAX(id), 0) FROM productos").fetchone()
+                if (datos.get("version"), datos.get("productos"), datos.get("ultimo")) != (
+                        VERSION_DEL_INDICE, str(cuantos), str(ultimo)):
+                    con.close()
+                    _armar_en_otro_hilo()
+                    return None
+                estado["conn"] = con
+            return con
+    except sqlite3.Error as _err:
+        anotar_error("indice_al_dia", _err)
+        return None
+
+
+def _frases_para(texto):
+    """Lo que hay que pedirle al índice para cubrir un LIKE '%texto%' (con tres letras o más),
+    o None si no se puede: los trigramas no ven menos de tres."""
+    return [texto] if len(texto) >= 3 else None
+
+
+def _frases_para_entera(forma):
+    """Una forma que va como palabra entera, con el punto, la barra, el guion y la coma como
+    espacios (ver _BUSQUEDA_CON_ESPACIOS): «1 6» se pide como «1 6», «1.6», «1/6», «1-6» y
+    «1,6». Con más de dos espacios, o muy corta, None."""
+    if " " not in forma:
+        return _frases_para(forma)
+    partes = forma.split(" ")
+    if len(partes) > 3 or len(forma) < 3:
+        return None
+    salida = [partes[0]]
+    for parte in partes[1:]:
+        salida = [antes + sep + parte for antes in salida for sep in _SEPARADORES_DE_LA_BUSQUEDA]
+    return salida
+
+
+def _juntar_frases(frases, mas):
+    return None if frases is None or mas is None else frases + mas
+
+
+def productos_de_las_listas(marca_ids):
+    """Los productos de esas listas (para la rama «la palabra es el nombre de la lista»)."""
+    c.execute(f"SELECT id FROM productos WHERE marca_id IN ({','.join('?' * len(marca_ids))})",
+              marca_ids)
+    return {r[0] for r in c.fetchall()}
+
+
+def candidatos_del_indice(pedidos_por_palabra, minimo):
+    """Los productos que pueden llegar a `minimo` palabras según el índice, o None si no se
+    puede achicar: sin índice, o cuando las palabras que el índice no sabe buscar (las de una
+    o dos letras) ya alcanzan para llegar al mínimo. Cada palabra es {"frases", "ids"} o None."""
+    desconocidas = sum(1 for p in pedidos_por_palabra if p is None)
+    hace_falta = minimo - desconocidas
+    if hace_falta <= 0:
+        return None
+    con = indice_al_dia()
+    if con is None:
+        return None
+    # La cuenta la hace el índice: cada palabra es UNA consulta con sus formas unidas por OR
+    # (cada producto una vez), y se juntan todas contando en cuántas aparece. Contarlo en Python
+    # eran 3 millones de filas en 200 búsquedas: la mitad del tiempo.
+    partes, valores = [], []
+    for pedido in pedidos_por_palabra:
+        if pedido is None:
+            continue
+        if not pedido["frases"] and not pedido["ids"]:
+            continue
+        de_la_palabra = []
+        if pedido["frases"]:
+            de_la_palabra.append("SELECT rowid AS r FROM indice WHERE indice MATCH ?")
+            valores.append(" OR ".join('"' + f.replace('"', '""') + '"' for f in pedido["frases"]))
+        if pedido["ids"]:
+            de_la_palabra.append("SELECT value FROM json_each(?)")
+            valores.append(json.dumps(sorted(pedido["ids"])))
+        partes.append("SELECT r FROM (" + " UNION ".join(de_la_palabra) + ")")
+    if not partes:
+        return None
+    try:
+        return {r[0] for r in con.execute(
+            "SELECT r FROM (" + " UNION ALL ".join(partes) + ") GROUP BY r HAVING COUNT(*) >= ?",
+            valores + [hace_falta])}
+    except sqlite3.Error as _err:
+        anotar_error("candidatos_del_indice", _err)
+        return None
+
+
 def buscar_por_texto(texto, aflojar=True):
     """Busca por descripción de forma flexible: cada palabra tiene que aparecer en algún lado
     (descripción o código), sin importar el orden ni las tildes. Así 'ruleman delantero gol'
@@ -547,6 +774,7 @@ def buscar_por_texto(texto, aflojar=True):
     # con 81 productos de MANNOL LUBRICANTES cargados: sus descripciones dicen «Extreme 5W-40 -
     # 4L», no la marca. Ver marcas_que_nombra().
     _marcas_por_palabra = {p: marcas_que_nombra(p) for p in palabras}
+    pedidos_al_indice = []
     for palabra in palabras:
         # También se compara contra el código sin guiones ni espacios: si alguien escribe
         # "TC421" o "tc-421", tiene que encontrar igual el producto cargado como "TC-421-15".
@@ -555,6 +783,9 @@ def buscar_por_texto(texto, aflojar=True):
         ramas, suyos, abreviadas, de_abreviadas = [], [], [], []
         limpia = sanitizar(palabra)
         en_like = como_texto_en_like(palabra)
+        # Lo que hay que pedirle al índice para cubrir cada rama (ver candidatos_del_indice()):
+        # None en cuanto una rama no se puede pedir.
+        frases = []
         # LAS PALABRAS DE UNA O DOS LETRAS, ENTERAS: «mb 0151» traía bulones de IMPERIAL porque
         # «MB» está adentro de CAMBA. En la copia de la base, «MB» está adentro de 9.916
         # productos y como palabra en 229; «KA» 3.211 y 865; «4» (de «ficha 4 vías») 54.790 y
@@ -564,20 +795,24 @@ def buscar_por_texto(texto, aflojar=True):
                          "ESCAPE '\\')")
             suyos.extend([f"%{en_like}%", f"% {en_like} %"])
             limpia = ""
+            frases = None
         # Y LOS NÚMEROS, NO ADENTRO DEL CÓDIGO DE BARRAS: «0151» estaba en el EAN de seis
         # productos que no tenían nada que ver. El código de barras entero, sí.
         elif palabra.isdigit():
             ramas.append("(p.descripcion LIKE ? ESCAPE '\\' OR p.codigo_raw LIKE ? ESCAPE '\\' "
                          "OR p.codigo_barras = ?)")
             suyos.extend([f"%{en_like}%", f"%{en_like}%", palabra])
+            frases = _juntar_frases(frases, _frases_para(palabra))
         # Un LIKE '%%' coincide con TODO. Pasaba al buscar «%» o «_»: sanitizar() los deja
         # en nada, el patrón quedaba vacío y la búsqueda devolvía el catálogo entero.
         elif palabra:
             ramas.append("p.busqueda LIKE ? ESCAPE '\\'")
             suyos.append(f"%{en_like}%")
+            frases = _juntar_frases(frases, _frases_para(palabra))
         if limpia:
             ramas.append("p.codigo_clean LIKE ? ESCAPE '\\'")
             suyos.append(f"%{como_texto_en_like(limpia)}%")
+            frases = _juntar_frases(frases, _frases_para(limpia))
         # Y COMO LO ABREVIAN LAS LISTAS: «junta» busca también JTA y JTAS, «juego» JGO, «bomba»
         # BBA, y al revés. Ver formas_de_la_palabra().
         for forma, entera in formas_de_la_palabra(palabra):
@@ -590,14 +825,20 @@ def buscar_por_texto(texto, aflojar=True):
                 # El espacio de «1 6», en el pedazo barato, es cualquier letra: «1.6», «1,6».
                 de_abreviadas.extend([f"%{como_texto_en_like(forma).replace(' ', '_')}%",
                                       f"% {como_texto_en_like(forma)} %"])
+                frases = _juntar_frases(frases, _frases_para_entera(forma))
             else:
                 abreviadas.append("p.busqueda LIKE ? ESCAPE '\\'")
                 de_abreviadas.append(f"%{como_texto_en_like(forma)}%")
+                frases = _juntar_frases(frases, _frases_para(forma))
+        ids_de_la_lista = set()
         if _marcas_por_palabra.get(palabra):
             ramas.append(f"p.marca_id IN ({','.join('?' * len(_marcas_por_palabra[palabra]))})")
             suyos.extend(_marcas_por_palabra[palabra])
+            ids_de_la_lista = productos_de_las_listas(tuple(_marcas_por_palabra[palabra]))
         if not ramas:
             continue        # la palabra era solo símbolos: no aporta nada para buscar
+        pedidos_al_indice.append(None if frases is None
+                                 else {"frases": frases, "ids": ids_de_la_lista})
         # Cada palabra vale 1000 si está, y 1 más si está tal cual se escribió: así una sola
         # cuenta da las coincidencias (÷ 1000) y cuántas no hizo falta adivinar (el resto), sin
         # recorrer la tabla dos veces. «jgo descarbonizacion palio» sacaba la «JGO DESCARB…»
@@ -627,6 +868,11 @@ def buscar_por_texto(texto, aflojar=True):
     # Medido con 63 proveedores (659.000 productos), mismos resultados: la mediana de 365 a
     # 333 ms y la peor de 594 a 450 ms (la que no encuentra todas las palabras: eran 2 pasadas).
     minimo_flojo = minimo - 1 if (utiles >= 2 and minimo > 1) else minimo
+    # El índice achica (ver candidatos_del_indice()): primero a los que pueden llegar al mínimo
+    # DE VERDAD; si con eso no queda ninguno con el mínimo, a los que pueden llegar al flojo,
+    # que es el corte de la consulta. Lo que se muestra sale igual que sin índice: lo que llega
+    # al mínimo está en los dos, y va primero en el orden. Sin índice, la consulta de siempre.
+    _candidatos = candidatos_del_indice(pedidos_al_indice, minimo)
     query = f'''
     SELECT * FROM (
     SELECT p.id AS "ID", p.codigo_raw AS "Codigo", p.descripcion AS "Descripcion",
@@ -641,7 +887,7 @@ def buscar_por_texto(texto, aflojar=True):
            p.favorito AS "Favorito", ({suma}) AS _puntaje,
            LENGTH(p.descripcion) AS _largo
     FROM productos p JOIN marcas m ON m.id = p.marca_id
-    WHERE 1
+    WHERE 1 {{por_el_indice}}
       -- Los códigos de fábrica copian la descripción de la fila que los nombró: buscando
       -- «motor de arranque corsa» salía el arranque y, abajo, sus veinte números de Bosch con
       -- la misma descripción. No son algo que se venda: solo si se escribe el código exacto.
@@ -649,28 +895,37 @@ def buscar_por_texto(texto, aflojar=True):
     ) WHERE _puntaje >= ?
     ORDER BY _puntaje DESC, _largo, "Marca" LIMIT 400;
     '''
-    with db_lock:
-        c.execute(query, params + _codigos_escritos + [minimo_flojo * 1000])
-        todas = filas_a_listas(c)
-        for f in todas:
+    def _consultar(candidatos):
+        with db_lock:
+            c.execute(query.replace("{por_el_indice}", "" if candidatos is None else
+                                    "AND p.id IN (SELECT value FROM json_each(?))"),
+                      params + ([] if candidatos is None else [json.dumps(sorted(candidatos))])
+                      + _codigos_escritos + [minimo_flojo * 1000])
+            salida = filas_a_listas(c)
+        for f in salida:
             f["_coincidencias"], f["_tal_cual"] = divmod(f.pop("_puntaje"), 1000)
-        # Lo que llega al mínimo va primero por el orden; si no hay nada, queda lo aflojado.
-        # Sin cortar en 200 todavía: el corte va después del orden de abajo, que sabe de
-        # palabras enteras y abreviaturas. Cortando acá, las «Jta mult. Adm.» quedaban afuera
-        # buscando «junta multiple admision», detrás de 141 que dicen «JUNTA» adentro de otra.
-        filas = [f for f in todas if f["_coincidencias"] >= minimo]
-        # Si pidiendo TODAS las palabras no aparece nada, se afloja y se pide una menos.
-        # Con dos palabras se exigían las dos, y «rótula suspensión» devolvía CERO resultados
-        # sobre un catálogo lleno de rótulas: ninguna descripción dice las dos cosas juntas.
-        # Cero resultados es la peor respuesta posible —el de adelante concluye que no hay, y
-        # hay— así que es mejor mostrar lo que coincide en parte y que decida la persona.
-        # Con las palabras que CUENTAN, no con todas las escritas: «QQQZZZ °» son dos palabras
-        # pero una sola útil, y aflojar a «0 coincidencias» devolvía 200 productos cualquiera
-        # (lo encontró la revisión independiente del buscador). Nunca se pide menos de una.
-        # aflojar=False es para el buscador de CÓDIGOS (ver «kit 22382» en buscador.py): ahí
-        # una sola de las dos palabras traía 200 productos cualesquiera.
-        if aflojar and not filas and utiles >= 2 and minimo > 1:
-            filas = todas
+        return salida
+    todas = _consultar(_candidatos)
+    if (_candidatos is not None and minimo_flojo < minimo
+            and not any(f["_coincidencias"] >= minimo for f in todas)):
+        todas = _consultar(candidatos_del_indice(pedidos_al_indice, minimo_flojo))
+    # Lo que llega al mínimo va primero por el orden; si no hay nada, queda lo aflojado.
+    # Sin cortar en 200 todavía: el corte va después del orden de abajo, que sabe de
+    # palabras enteras y abreviaturas. Cortando acá, las «Jta mult. Adm.» quedaban afuera
+    # buscando «junta multiple admision», detrás de 141 que dicen «JUNTA» adentro de otra.
+    filas = [f for f in todas if f["_coincidencias"] >= minimo]
+    # Si pidiendo TODAS las palabras no aparece nada, se afloja y se pide una menos.
+    # Con dos palabras se exigían las dos, y «rótula suspensión» devolvía CERO resultados
+    # sobre un catálogo lleno de rótulas: ninguna descripción dice las dos cosas juntas.
+    # Cero resultados es la peor respuesta posible —el de adelante concluye que no hay, y
+    # hay— así que es mejor mostrar lo que coincide en parte y que decida la persona.
+    # Con las palabras que CUENTAN, no con todas las escritas: «QQQZZZ °» son dos palabras
+    # pero una sola útil, y aflojar a «0 coincidencias» devolvía 200 productos cualquiera
+    # (lo encontró la revisión independiente del buscador). Nunca se pide menos de una.
+    # aflojar=False es para el buscador de CÓDIGOS (ver «kit 22382» en buscador.py): ahí
+    # una sola de las dos palabras traía 200 productos cualesquiera.
+    if aflojar and not filas and utiles >= 2 and minimo > 1:
+        filas = todas
 
     # Filtro por RUBRO. Contar palabras coincidentes no alcanza: buscando «bujía golf 1.4 tsi»
     # aparecían juntas de tapa y juegos de motor, porque coinciden en «golf», «1.4» y «tsi» —
