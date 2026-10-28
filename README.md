@@ -6733,6 +6733,14 @@ Lo pidió el dueño: «más cosas». Se pasaron por el buscador las 10 búsqueda
 - **El error de tipeo es de teclado** (`_distancia_de_tipeo()`, `_tipeo_creible()`): para «W712/94» se sugería «¿Error de tipeo? TARANTO 271224, 271295…», juntas, porque de W a 2 hay un solo cambio. Ahora cambiar una letra por un número (o al revés) no es tipeo, salvo que se parezcan a la vista (O y 0, I y 1, S y 5, B y 8, Z y 2, G y 6), que es lo que confunden también las fotos. Vale para el «¿Quisiste decir…?» del Buscador.
 - La medición de pantallas con `--base` ahora dice quién hace la consulta lenta y no `datos.py:execute`: «🧹 Limpiar y corregir [mostrador.py:codigos_con_dos_precios_en_la_misma_lista]». Esa consulta tarda 0,23 s con la base en memoria; el 1,8 s de la medición es la primera lectura del disco de una copia recién hecha.
 
+### 🔗 Lo que tus listas ya dicen de otras marcas
+
+Lo pidió el dueño («hacé 3, 4, 5 y 6»; esta es la 3, las referencias cruzadas). FISPA describe sus filtros con las referencias de otras marcas —«FILTROS PARA COMBUSTIBLE 14100 PEUGEOT REF ORIG MANN P716 - FRAM C5563»—, y buscando P716 no aparecía nada: el código no está cargado como código, solo escrito. En la copia de la base hay unas 2.800 citas así (Bosch 1.278, Marelli 347, Valeo 283, SKF 102, MANN 42, FRAM 40…). Las de Bosch, Marelli y NGK ya son códigos de fábrica y se encuentran; las de MANN y FRAM no.
+
+- **Cuando un código no aparece**, el Buscador muestra primero los productos tuyos que lo nombran en la descripción (`productos_que_citan_el_codigo()`): «🔗 2 producto(s) tuyo(s) lo nombran en la descripción: lo tenés con otro número», cada uno como botón y con dónde lo dice («…REF ORIG MANN P 716 - FRAM C 5563»). Aunque esté escrito con un espacio, un punto o un guion en el medio («P 716»), y no pegado a otra letra o número (P7160, AP716 no). Va antes que el «¿error de tipeo?»: no es un código parecido, es ese mismo. Con la copia: P716 → 2 filtros de FISPA, C5563 → 2, PU822X → 3; 0,02 s.
+- «🔎 Búsquedas sin resultado» usa la misma regla para «🔗 Lo tenés con otro número».
+- **Una tabla de cruce de un fabricante** (MANN ↔ FRAM ↔ WEGA, en Excel) ya se puede cargar con «📁 Cargar Excel» como una lista más: la columna del código de la marca como código, y la de la otra marca como «código de fábrica». Cada fila une los dos códigos, y lo que ya esté unido a ese código de fábrica queda conectado.
+
 ### 🔧 El motor, con sus autos
 
 Lo pidió el dueño («hacé 3, 4, 5 y 6»; esta es la 5). «bomba de agua k4m» encuentra lo que dice K4M, y las bombas que dicen «Clio 1.6 16V» sin nombrar el motor quedan abajo: meterlas solas no fue confiable (para el F8Q traía una del N7Q). Ahora, debajo de los resultados, la app dice de qué autos es el motor según tus listas y ofrece la misma búsqueda con el auto, para que la persona elija:

@@ -799,6 +799,41 @@ def cb_ver_equivalencias(codigo_raw):
     st.session_state["modo_busqueda"] = "Código"   # por si se tocó desde la búsqueda por texto
 
 
+# LO QUE TUS LISTAS YA DICEN DE OTRAS MARCAS. FISPA describe sus filtros con las referencias de
+# otras marcas —«FILTROS PARA COMBUSTIBLE 14100 PEUGEOT REF ORIG MANN P716 - FRAM C5563»—, y
+# buscando P716 no aparecía nada: el código no está cargado como código, solo escrito. En la
+# copia de la base hay unas 2.800 citas así (Bosch 1.278, Marelli 347, Valeo 283, SKF 102,
+# MANN 42, FRAM 40…); las de Bosch y Marelli ya son códigos de fábrica, las de MANN y FRAM no.
+def productos_que_citan_el_codigo(codigo, limite=20):
+    """Los productos de tus listas que nombran `codigo` en la descripción, aunque esté escrito
+    con un espacio, un punto o un guion en el medio («P 716», «C-5563»), y no pegado a otra
+    letra o número. Sin los que ya tienen ese código."""
+    limpio = sanitizar(codigo)
+    if len(limpio) < 4 or not any(ch.isdigit() for ch in limpio):
+        return []
+    patron = re.compile(r"(?<![A-Z0-9])" + r"[\s.\-/]?".join(map(re.escape, limpio))
+                        + r"(?![A-Z0-9])")
+    c.execute("""SELECT p.id AS "ID", p.codigo_raw AS "Codigo", p.descripcion AS "Descripcion",
+                        m.nombre AS "Marca", p.precio AS "Precio", p.stock AS "Stock"
+                 FROM productos p JOIN marcas m ON m.id = p.marca_id
+                 WHERE m.tipo <> 'OEM' AND p.busqueda LIKE ? LIMIT 5000""",
+              (f"%{como_texto_en_like(limpio[-3:])}%",))
+    return [f for f in filas_a_listas(c)
+            if patron.search(normalizar_texto(f["Descripcion"] or ""))
+            and sanitizar(f["Codigo"] or "") != limpio][:limite]
+
+
+def fragmento_que_cita(fila, codigo, ancho=28):
+    """«…REF ORIG MANN P716 - FRAM C5…»: dónde lo nombra la descripción."""
+    limpio = sanitizar(codigo)
+    texto = normalizar_texto(fila.get("Descripcion") or "")
+    hallado = re.search(r"[\s.\-/]?".join(map(re.escape, limpio)), texto)
+    if not hallado:
+        return ""
+    desde, hasta = max(0, hallado.start() - ancho), hallado.end() + ancho
+    return ("…" if desde else "") + texto[desde:hasta].strip() + ("…" if hasta < len(texto) else "")
+
+
 def mostrar_lista_clickeable(filas, prefijo_key, limite=15, nota=None, detalle=None):
     """Muestra resultados con el código como botón: al tocarlo se abren sus equivalencias.
     Antes esto era una tabla y había que ir copiando los códigos de a uno para buscarlos.

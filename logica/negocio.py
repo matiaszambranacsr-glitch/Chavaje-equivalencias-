@@ -1549,12 +1549,10 @@ def que_conviene_cargar_o_pedir(dias=90, limite=40):
                 continue
         que_hacer, detalle = "", ""
         if es_codigo:
-            c.execute("""SELECT p.codigo_raw, m.nombre FROM productos p
-                         JOIN marcas m ON m.id = p.marca_id
-                         WHERE m.tipo <> 'OEM' AND UPPER(p.descripcion) LIKE ?""",
-                      (f"%{g['termino'].strip().upper()}%",))
+            # Como el Buscador (ver productos_que_citan_el_codigo()): también «P 716» por P716.
             # Tres alcanzan para mostrar quién lo nombra.
-            citado = [f"{r[1]} {r[0]}" for r in c.fetchmany(3)]
+            citado = [f"{f['Marca']} {f['Codigo']}"
+                      for f in productos_que_citan_el_codigo(clave, limite=3)]
             if citado:
                 que_hacer = "🔗 Lo tenés con otro número: vincularlo"
                 detalle = "Lo nombra " + ", ".join(citado)

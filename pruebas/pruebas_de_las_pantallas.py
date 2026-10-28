@@ -242,6 +242,17 @@ def probar():
                 or not any("coincidencia" in x.value for x in at.success)):
             fallas.append(f"por descripción, el botón del motor no busca «{_otra}»")
     at.session_state["modo_busqueda"] = "Código"
+    # Un código que no está, pero que una descripción tuya nombra: «REF ORIG MANN P716».
+    c.execute("INSERT INTO productos (codigo_raw, codigo_clean, descripcion, marca_id) VALUES "
+              "('FC14100', 'FC14100', 'FILTRO COMBUSTIBLE REF ORIG MANN P 716', ?)", (_marca_prueba,))
+    conn.commit()
+    at.session_state["pagina_actual"] = ns["PAGINAS"][0]
+    at.run()
+    at.text_input(key="busqueda_input").set_value("P716")
+    [b for b in at.button if "Buscar equivalencias" in b.label][0].click().run()
+    if (not any("lo nombran en la descripción" in x.value for x in at.success)
+            or not [b for b in at.button if (b.key or "").startswith("citan_P716_")]):
+        fallas.append("un código que una descripción nombra: no se ofrece")
     recorrer("sin contraseña")
     entrar(clave_ana)
     if len(at.radio(key="pagina_actual").options) != len(ns["PAGINAS"]):

@@ -2479,6 +2479,17 @@ def probar(L):
             [(m, b) for m, _a, b in ns["sugerencias_por_el_motor"]("bomba de agua zx9m")],
             [("ZX9M", ["bomba agua gol 1.6 16v"])])
     esperar("con menos de cinco productos, nada", ns["sugerencias_por_el_motor"]("bomba qw8m"), [])
+    # 95. LO QUE LAS LISTAS YA DICEN DE OTRAS MARCAS (ver productos_que_citan_el_codigo()): «P716»
+    # encuentra el filtro que dice «REF ORIG MANN P 716», no el que dice P7160.
+    m17 = marca("DIECISIETE FILTROS")
+    _cita = producto("14100F", "FILTRO COMBUSTIBLE PEUGEOT REF ORIG MANN P 716 - FRAM C5563", m17)
+    producto("14199F", "FILTRO COMBUSTIBLE REF MANN P7160", m17)
+    producto("14198F", "FILTRO COMBUSTIBLE REF AP716", m17)
+    conn.commit()
+    esperar("«P716» lo citan: el de «MANN P 716», no el de P7160 ni el de AP716",
+            [f["ID"] for f in ns["productos_que_citan_el_codigo"]("P716")], [_cita])
+    esperar("y dice dónde", ns["fragmento_que_cita"]({"Descripcion": "REF ORIG MANN P 716 - FRAM"},
+                                                      "P716"), "REF ORIG MANN P 716 - FRAM")
     _r92 = ns["buscar_por_texto"]("embrague ford ka")
     esperar("«ka» es un modelo: el de la Transit, aparte",
             (_eka in {f["ID"] for f in _r92}, _etr in {f["ID"] for f in _r92.aparte}), (True, True))

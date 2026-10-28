@@ -1905,6 +1905,19 @@ if pagina == PAGINAS[0]:
                                     "autos le va la pieza, no si es exactamente la que traía."
                                 )
 
+                        # Lo que tus listas ya dicen de otras marcas: «REF ORIG MANN P716» en un
+                        # filtro de FISPA (ver productos_que_citan_el_codigo()). Va antes que el
+                        # tipeo: no es un código parecido, es ese mismo, escrito en la ficha.
+                        citan = _recordar_nr("_nr_citan",
+                                             lambda: productos_que_citan_el_codigo(clean), clean)
+                        if citan:
+                            st.success(f"🔗 **{len(citan)} producto(s) tuyo(s) lo nombran en la "
+                                       "descripción**: lo tenés con otro número. Confirmá que "
+                                       "sea la misma pieza.")
+                            mostrar_lista_clickeable(
+                                citan, f"citan_{clean}", limite=10,
+                                detalle=lambda f, _c=clean: fragmento_que_cita(f, _c))
+
                         # Error de tipeo. Se muestra ANTES que las familias porque es lo más
                         # probable: en el mostrador se tipea rápido y se dan vuelta dos dígitos.
                         # Lo que ya había solo encontraba códigos que empiezan igual, así que
