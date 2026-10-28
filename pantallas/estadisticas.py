@@ -1201,10 +1201,15 @@ a traer solas desde Administrar → Mantenimiento.
             # Una lista por vez, elegida con un selector. Antes cada lista estaba dentro de un
             # desplegable, y como Streamlit los cierra al refrescar la pantalla, cada botón que
             # tocabas te cerraba la ventana entera — imposible revisar 300 vínculos así.
-            opciones_lotes = {f"{l['lote']} — {l['cantidad']} vínculo(s)": l for l in lotes_pendientes}
-            etiqueta_lote = st.selectbox("Lista a revisar:", list(opciones_lotes.keys()),
-                                          key="lote_en_revision")
-            lote_info = opciones_lotes[etiqueta_lote]
+            # Lo elegido es el NOMBRE de la lista, y la cantidad solo se muestra. Era el rótulo
+            # entero, con la cantidad adentro: cada decisión la cambiaba, Streamlit no encontraba
+            # lo elegido entre las opciones y volvía a la primera lista. Con las 10 listas de la
+            # base real, aprobar un par en «⚡ Revisar de a uno» te mandaba a otra lista.
+            opciones_lotes = {l["lote"]: l for l in lotes_pendientes}
+            _lote_elegido = st.selectbox(
+                "Lista a revisar:", list(opciones_lotes), key="lote_en_revision",
+                format_func=lambda x: f"{x} — {opciones_lotes[x]['cantidad']} vínculo(s)")
+            lote_info = opciones_lotes[_lote_elegido]
             # Una tanda automática que trajo demasiado de una vez: ver anomalia_de_la_tanda().
             _anomalia = anomalia_de_la_tanda(lote_info["lote"])
             if _anomalia:

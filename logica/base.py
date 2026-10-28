@@ -76,7 +76,8 @@ MEMORIAS_QUE_NO_SON_DE_LA_BASE = (
     "candado_de_la_copia_a_github", "candado_de_la_salud_compartida",
     "candado_de_la_tanda_de_fondo", "candado_de_las_tareas_del_dia",
     "candado_de_paginas_recientes", "candado_de_sesiones_de_catalogo",
-    "candado_del_indice_de_busqueda", "intentos_en_recuperacion",
+    "candado_del_indice_de_busqueda", "candado_del_contexto_de_precios",
+    "intentos_en_recuperacion",
     "libros_de_excel_leidos", "lo_traido_de_la_nhtsa", "mediciones_de_busqueda",
     "paginas_recientes", "paquetes_de_certificados", "sesiones_de_catalogo",
     "sesiones_de_portal", "token_de_mercado_libre", "ultimos_errores")

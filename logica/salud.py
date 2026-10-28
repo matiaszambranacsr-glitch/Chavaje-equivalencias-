@@ -1755,8 +1755,10 @@ def inflacion_desde(fecha, ipc=None):
     return acumulada - 1, meses[-1]
 
 
-def contexto_de_precios():
+def contexto_de_precios(sin_esperar=False):
     """El dólar oficial y la inflación, juntos y sin poder fallar. {} si no hay nada que decir.
+    Con `sin_esperar` (las pantallas), lo guardado, y si está viejo se trae de nuevo en otro
+    hilo: «🩺 Estado y papelera» esperaba hasta cuatro segundos por API cada seis horas.
 
     Es lo único que esta app va a buscar afuera además de los catálogos de los proveedores, y
     no decide nada: lo que dice a qué ritmo aumenta un proveedor sigue siendo TU historial de
@@ -1803,7 +1805,9 @@ def contexto_de_precios():
     espera = obtener_config("contexto_reintentar_despues", "")
     en_penitencia = bool(espera) and espera > ahora.strftime("%Y-%m-%d %H:%M:%S")
 
-    if not frescos and not en_penitencia:
+    if not frescos and not en_penitencia and sin_esperar:
+        _traer_el_contexto_en_otro_hilo()
+    elif not frescos and not en_penitencia:
         fallo = False
         for clave, config, traer in (("dolar", "ultimo_dolar", _dolar_oficial),
                                      ("ipc", "ultimo_ipc", _inflacion_mensual_indec)):
@@ -1831,6 +1835,23 @@ def contexto_de_precios():
             if not esta_fresco(_guardados[clave]):
                 salida.setdefault("viejos", []).append(clave)
     return salida
+
+
+def _traer_el_contexto_en_otro_hilo():
+    """contexto_de_precios() por atrás, uno a la vez: lo que trae queda en la configuración y lo
+    ve el próximo dibujo de la pantalla."""
+    candado = del_proceso("candado_del_contexto_de_precios", threading.Lock)
+    if not candado.acquire(blocking=False):
+        return
+
+    def _traer():
+        try:
+            contexto_de_precios()
+        except Exception as _err:          # nada de acá puede romper nada
+            anotar_error("contexto_de_precios", _err)
+        finally:
+            candado.release()
+    threading.Thread(target=_traer, daemon=True, name="contexto_de_precios").start()
 
 
 # LOS CHEQUES DENUNCIADOS Y LA CENTRAL DE DEUDORES DEL BCRA. Dos APIs oficiales, públicas y

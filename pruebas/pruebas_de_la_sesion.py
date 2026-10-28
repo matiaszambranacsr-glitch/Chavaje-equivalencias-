@@ -313,7 +313,7 @@ def probar():
     rev.run()
     esperar("la primera lista, entera", rev.session_state["cuantos_pendientes"], 400)
     _sel = [s_ for s_ in rev.selectbox if s_.key == "lote_en_revision"][0]
-    _sel.set_value([o for o in _sel.options if o.startswith("GRANDE")][0]).run()
+    _sel.set_value([o for o in _sel.options if o.startswith("GRANDE")][0].split(" — ")[0]).run()
     esperar("al pasar a la grande, también entera",
             (rev.session_state["cuantos_pendientes"],
              any("Analizados 450 de 450" in str(x.value) for x in rev.caption)), (1000, True))

@@ -168,6 +168,21 @@ def probar(L):
     esperar("dólar sin el BCRA: minorista", g["_dolar_oficial"]().get("venta"), 1545.0)
     _con_respuestas(g, {})
     esperar("dólar sin ninguna", g["_dolar_oficial"](), {})
+    # Y la pantalla no espera a internet (ver contexto_de_precios(sin_esperar=True)): con lo
+    # guardado viejo, lo devuelve al toque marcado como viejo, y lo nuevo lo trae otro hilo.
+    import threading as _hilos
+    _viejo = {"venta": 1400.0, "fecha": "2026-08-01", "_traido": "2026-08-01 10:00:00"}
+    g["guardar_config"]("ultimo_dolar", json.dumps(_viejo))
+    g["guardar_config"]("contexto_reintentar_despues", "")
+    _con_respuestas(g, {url_bcra: _BCRA, url_min: _MINORISTA, url_ipc: _INDICE})
+    _ctx = g["contexto_de_precios"](sin_esperar=True)
+    esperar("la pantalla no espera: lo guardado, marcado viejo",
+            ((_ctx.get("dolar") or {}).get("venta"), "dolar" in (_ctx.get("viejos") or [])),
+            (1400.0, True))
+    for _h in [h for h in _hilos.enumerate() if h.name == "contexto_de_precios"]:
+        _h.join(10)
+    esperar("y lo nuevo lo trae otro hilo",
+            json.loads(g["obtener_config"]("ultimo_dolar")).get("venta"), 1545.0)
 
     # 5. Una lista en dólares toma el dólar guardado como coeficiente.
     g["c"].execute("INSERT INTO marcas (nombre, tipo) VALUES ('PRUEBA USD', 'PROVEEDOR')")

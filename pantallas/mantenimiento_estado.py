@@ -145,7 +145,7 @@ if pagina == PAGINAS[3]:
                 # el historial propio no puede contestar: si el proveedor viene subiendo por
                 # debajo de la inflación —o sea que está quedando barato y conviene comprarle
                 # ahora— y cuánto se movió el dólar, que es lo que manda en lo importado.
-                _ctx = contexto_de_precios()
+                _ctx = contexto_de_precios(sin_esperar=True)
                 if _ctx:
                     _lineas = []
                     _d = _ctx.get("dolar") or {}

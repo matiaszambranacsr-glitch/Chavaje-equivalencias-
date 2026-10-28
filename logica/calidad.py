@@ -1194,9 +1194,13 @@ _RE_MARCAS_VEHICULO = re.compile(
 # entero—. Medido sobre las 70.888 descripciones reales: separar todas cuesta 2,70 s y hay
 # 27.201 repetidas (el 38%), porque el producto OEM se crea copiando la descripción de la fila
 # del proveedor. Esas 27.201 se estaban separando de nuevo cada vez.
-# El tope de 50.000 entradas cubre las 43.687 descripciones distintas de esta base con lugar de
-# sobra, y si alguna vez se pasa, lru_cache tira las más viejas: no crece sin control.
-MAXIMO_DESCRIPCIONES_RECORDADAS = 50000
+# El tope cubre las descripciones distintas con lugar de sobra, y si alguna vez se pasa,
+# lru_cache tira las más viejas: no crece sin control. ERA 50.000, para las 43.687 de entonces, y
+# la base llegó a 54.430: recorrerlas todas en orden —lo que hace marcas_vehiculo_disponibles()—
+# con un tope menor que la cantidad tira cada una justo antes de volver a necesitarla, y no
+# acertaba NINGUNA. «🚙 Repuestos por vehículo» tardaba 1,7 s cada vez que cambiaba el catálogo;
+# con lugar para todas, la segunda vez 0,26 s, con la misma memoria.
+MAXIMO_DESCRIPCIONES_RECORDADAS = 120000
 
 
 @functools.lru_cache(maxsize=MAXIMO_DESCRIPCIONES_RECORDADAS)

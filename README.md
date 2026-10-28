@@ -6777,6 +6777,17 @@ Lo pidió el dueño («hacé 3, 4, 5 y 6»; esta es la 5). «bomba de agua k4m»
 
 `autos_del_motor()` lo aprende de las descripciones que nombran el motor (con cinco o más): los modelos que aparecen en el 5 % o más, y la cilindrada y las válvulas solo si las dicen tres o más y el 60 % de los que dicen alguna (el F8Q tenía 9 «16V» y 9 «8V», y no dice ninguna). Se recuerda por versión del catálogo. «bomba agua clio 1.6 16v» trae 11 con todo lo pedido.
 
+## 🩹 Lo que fallaba con la base real
+
+Lo pidió el dueño («mejorá toda la app»). La prueba de pantallas con la copia de la base real (`pruebas_de_las_pantallas.py --base`) tenía tres fallas que con la base chica de la prueba no aparecían, y no decía cuáles eran las pantallas lentas cuando algo fallaba. Ahora da las 89 en verde también con la base real.
+
+- **Revisar sugeridas te mandaba a otra lista.** El selector «Lista a revisar» elegía por el rótulo, «todas-29/09 01:18 — 254 vínculo(s)», y cada aprobación o descarte cambiaba la cantidad. Streamlit no encontraba lo elegido y volvía a la primera lista. Con una sola lista no se nota; con las 10 de la base real, cada «✅ Son la misma pieza» en «⚡ Revisar de a uno», cada grupo y cada tabla te sacaban de la lista que estabas revisando. Ahora se elige por el nombre, y la cantidad solo se muestra.
+- **🚙 Repuestos por vehículo, 1,7 s cada vez que cambia el catálogo.** La memoria de cada descripción tenía lugar para 50.000, y la base ya tiene 54.430 distintas. Recorriéndolas en orden, cada una echaba a la que se iba a necesitar, y no acertaba ninguna. Con lugar para 120.000, la segunda vez tarda 0,26 s, con la misma memoria. Las demás memorias de la app no se llenan (la que más, 27.000 de 50.000).
+- **🩺 Estado y papelera esperaba a internet.** Cada seis horas, el dólar y la inflación se traían mientras la pantalla esperaba, hasta cuatro segundos por consulta. Ahora la pantalla muestra lo guardado y lo nuevo se trae en otro hilo.
+- **La prueba de pantallas** dice las más lentas aunque algo falle, y mide solo la pantalla, no lo que corre por atrás. Dos de sus pruebas pedían lo que solo pasa con la base chica: el F100 a un carácter de F101, que en la real queda plegado porque dos descripciones nombran F101; y nada abajo de «lo nombran», cuando lo que importa es que no se repita el mismo producto.
+
+`pruebas_de_las_pantallas.py` (con una lista más nueva, que va primera) y `pruebas_de_las_fuentes.py` lo controlan; volviendo a lo de antes, avisan.
+
 ## 🔢 Un código que no está, y el código escrito con espacio
 
 Lo pidió el dueño («seguí lo último y mejorá toda la app»). Se miraron las 57 búsquedas reales de la base: diez dieron vacío alguna vez, y varias eran códigos escritos con un espacio. Por descripción, «kit 22382» traía 200 kits cualesquiera, «mfla 260» 191 productos que dicen 260 (un motor Ford 225/260/289) y cuatro conectores MFLA que no son el 260, y «mb 0151» kits de Mercedes.

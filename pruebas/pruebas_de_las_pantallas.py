@@ -63,6 +63,12 @@ class Muestreo:
         return f" [{lo_mas[0][0]}]" if lo_mas else ""
 
 
+def _ids_de_los_botones(at, prefijo):
+    """Los productos de los botones cuya clave empieza con `prefijo` («citan_P716_123» → «123»)."""
+    return {(b.key or "").rsplit("_", 1)[-1] for b in at.button
+            if (b.key or "").startswith(prefijo)}
+
+
 def probar():
     from streamlit.testing.v1 import AppTest
     fallas, tiempos, abiertos = [], [], set()
@@ -176,13 +182,19 @@ def probar():
     at.text_input(key="busqueda_input").set_value("F101")
     [b for b in at.button if "Buscar equivalencias" in b.label][0].click().run()
     _tipeo = [b for b in at.button if (b.key or "").startswith("tipeo_F101_")]
-    # Con --base, la base real tiene otros códigos parecidos a F101: alcanza con que F100 esté.
+    # Con --base, en la base real dos descripciones nombran F101 («Despiece FIAT F101»): eso es
+    # la respuesta, y los que se escriben casi igual quedan plegados. Se abren y ahí está.
+    if "--base" in sys.argv and not _tipeo:
+        for _plegado in [t for t in at.toggle if t.key == "tipeos_plegados_F101"]:
+            _plegado.set_value(True).run()
+        _tipeo = [b for b in at.button if (b.key or "").startswith("tipeo_F101_")]
     if ([b.label for b in _tipeo] != ["🔎 F100"] if "--base" not in sys.argv
             else "🔎 F100" not in [b.label for b in _tipeo]):
         fallas.append(f"el código casi igual, como botón: {[b.label for b in _tipeo]}")
     else:
+        _elegido = _tipeo[0].label.replace("🔎 ", "")
         _tipeo[0].click().run()
-        if not any("F100" in str(m.value) for m in list(at.markdown) + list(at.caption)):
+        if not any(_elegido in str(m.value) for m in list(at.markdown) + list(at.caption)):
             fallas.append("tocar el código casi igual no lo busca")
     # Por descripción, lo que no nombra el auto pedido va aparte y plegado (ver
     # nivel_del_auto()): «bomba de agua k4m» no mezcla las bombas de cualquier auto.
@@ -280,7 +292,9 @@ def probar():
     if (not any("lo nombran en la descripción" in x.value for x in at.success)
             or not [b for b in at.button if (b.key or "").startswith("citan_P716_")]):
         fallas.append("un código que una descripción nombra: no se ofrece")
-    elif [b for b in at.button if (b.key or "").startswith("sug_P716_")]:
+    elif _ids_de_los_botones(at, "citan_P716_") & _ids_de_los_botones(at, "sug_P716_"):
+        # El mismo producto en «lo nombran» y en «¿quisiste decir?». Con la base real, abajo
+        # puede haber OTROS productos que dicen P716 de otra forma: esos sí van.
         fallas.append("un código que una descripción nombra: aparece dos veces")
     recorrer("sin contraseña")
     entrar(clave_ana)
@@ -317,6 +331,11 @@ def probar():
     c.executemany("INSERT INTO equivalencias_pendientes (producto_a_id, producto_b_id, origen, lote) "
                   "VALUES (?, ?, 'lista_proveedor', 'DE A UNO EN PANTALLA')",
                   [(_ids_u[0], _ids_u[1]), (_ids_u[2], _ids_u[3])])
+    # Y otra lista más nueva, que va primera en el selector: decidir no tiene que mandar ahí
+    # (el selector elegía por el rótulo con la cantidad, y cada decisión la cambiaba).
+    c.execute("INSERT INTO equivalencias_pendientes (producto_a_id, producto_b_id, origen, lote, "
+              "fecha) VALUES (?, ?, 'lista_proveedor', 'OTRA LISTA MAS NUEVA', '2099-01-01')",
+              (_ids_u[0], _ids_u[3]))
     conn.commit()
     # Lo decidido antes con los avisos de esos pares (ver «LO QUE DECIDISTE CON CADA AVISO»):
     # la tarjeta lo tiene que mostrar.
@@ -334,7 +353,7 @@ def probar():
     if not _lotes_u:
         fallas.append("de a uno: la lista de prueba no aparece para revisar")
     else:
-        at.selectbox(key="lote_en_revision").set_value(_lotes_u[0]).run()
+        at.selectbox(key="lote_en_revision").set_value("DE A UNO EN PANTALLA").run()
         at.toggle(key="de_a_uno_DE A UNO EN PANTALLA").set_value(True).run()
         _si = [b for b in at.button if b.key == "de_a_uno_si"]
         if not _si or not any("FILTRO ACEITE FIAT" in x.value for x in at.caption):
