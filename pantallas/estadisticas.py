@@ -595,13 +595,16 @@ a traer solas desde Administrar → Mantenimiento.
             if sin_stock:
                 st.error(f"🔴 {len(sin_stock)} producto(s) que se venden seguido están **en cero**.")
             st.dataframe(quitar_id(por_quebrar), width="stretch", hide_index=True)
-            etiquetas_q = {f"{x['Código']} ({x['Marca']}) — {x['Se acaba en']}": x["_id"]
+            # Por el producto, y el «se acaba en» solo se muestra: cambia con cada venta, y lo ya
+            # elegido se perdía (ver «Lista a revisar»).
+            etiquetas_q = {x["_id"]: f"{x['Código']} ({x['Marca']}) — {x['Se acaba en']}"
                            for x in por_quebrar}
-            elegidos_q = st.multiselect("Marcar para pedir:", list(etiquetas_q.keys()),
-                                         key="quiebre_a_pedir", placeholder="Elegí uno o más")
+            elegidos_q = st.multiselect("Marcar para pedir:", list(etiquetas_q),
+                                         key="quiebre_a_pedir", placeholder="Elegí uno o más",
+                                         format_func=etiquetas_q.get)
             if elegidos_q and st.button(f"📌 Marcar {len(elegidos_q)} para reposición"):
                 for e in elegidos_q:
-                    solicitar_reposicion(etiquetas_q[e])
+                    solicitar_reposicion(e)
                 avisar("success", f"{len(elegidos_q)} producto(s) marcados para pedir.")
                 st.rerun()
 

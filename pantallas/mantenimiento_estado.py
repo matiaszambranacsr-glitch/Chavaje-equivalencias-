@@ -200,15 +200,19 @@ if pagina == PAGINAS[3]:
             importaciones = listar_importaciones_deshacibles()
             if importaciones:
                 st.dataframe(quitar_id(importaciones), width="stretch", hide_index=True)
+                # Se elige la LISTA, y las cantidades solo se muestran. Eran parte de lo
+                # elegido: si alguien revisaba vínculos de esa lista desde otra sesión, cambiaba
+                # el rótulo, el selector volvía a la primera, y «Deshacer» iba contra otra lista
+                # (lo mismo que pasaba en «Lista a revisar»).
                 etiquetas_imp = {
-                    f"{i['Marca']} · {i['Archivo']} · {i['Fecha']} "
-                    f"({i['Vínculos vivos']} vivos, {i['Sin revisar']} sin revisar)": i["_lote"]
+                    i["_lote"]: (f"{i['Marca']} · {i['Archivo']} · {i['Fecha']} "
+                                 f"({i['Vínculos vivos']} vivos, {i['Sin revisar']} sin revisar)")
                     for i in importaciones if (i["Vínculos vivos"] or i["Sin revisar"])
                 }
                 if etiquetas_imp:
-                    elegida_imp = st.selectbox("¿Cuál deshacer?", list(etiquetas_imp.keys()),
-                                                key="importacion_deshacer")
-                    lote_elegido = etiquetas_imp[elegida_imp]
+                    lote_elegido = st.selectbox("¿Cuál deshacer?", list(etiquetas_imp),
+                                                key="importacion_deshacer",
+                                                format_func=etiquetas_imp.get)
                     previo = previsualizar_deshacer(lote_elegido)
                     st.warning(
                         f"Se van a borrar **{previo['vinculos']} vínculo(s) ya cargados** y "
