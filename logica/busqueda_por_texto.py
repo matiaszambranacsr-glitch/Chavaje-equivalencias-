@@ -615,7 +615,7 @@ def _armar_en_otro_hilo():
 def _poner_al_dia(con):
     """Pasa al índice lo anotado en cambios_para_el_indice. False si son demasiados."""
     with db_lock:
-        c.execute(f"SELECT producto_id FROM cambios_para_el_indice "
+        c.execute(f"SELECT producto_id FROM cambios_para_el_indice ORDER BY producto_id "
                   f"LIMIT {CAMBIOS_PARA_ARMAR_DE_NUEVO + 1}")
         ids = [r[0] for r in c.fetchall()]
         if not ids:
@@ -628,14 +628,18 @@ def _poner_al_dia(con):
                       f"FROM productos WHERE id IN ({marcadores})", tanda)
             nuevas.extend(tuple(r) for r in c.fetchall())
         cuantos, ultimo = c.execute("SELECT COUNT(*), COALESCE(MAX(id), 0) FROM productos").fetchone()
-        con.executemany("DELETE FROM indice WHERE rowid = ?", [(i,) for i in ids])
-        con.executemany("INSERT INTO indice(rowid, busqueda, codigo) VALUES (?, ?, ?)", nuevas)
-        con.executemany("INSERT OR REPLACE INTO datos VALUES (?, ?)",
-                        [("productos", str(cuantos)), ("ultimo", str(ultimo))])
-        con.commit()
-        c.executemany("DELETE FROM cambios_para_el_indice WHERE producto_id = ?",
-                      [(i,) for i in ids])
-        conn.commit()
+        # Todo o nada en el índice: cortado entre el borrar y el volver a escribir, esos
+        # productos quedarían sin indexar.
+        with con:
+            con.executemany("DELETE FROM indice WHERE rowid = ?", [(i,) for i in ids])
+            con.executemany("INSERT INTO indice(rowid, busqueda, codigo) VALUES (?, ?, ?)", nuevas)
+            con.executemany("INSERT OR REPLACE INTO datos VALUES (?, ?)",
+                            [("productos", str(cuantos)), ("ultimo", str(ultimo))])
+        # Recién después se borra lo anotado: cortado acá, la próxima vez se vuelven a pasar
+        # (pasarlos dos veces da lo mismo).
+        with transaccion():
+            c.executemany("DELETE FROM cambios_para_el_indice WHERE producto_id = ?",
+                          [(i,) for i in ids])
     return True
 
 

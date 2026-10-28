@@ -1385,9 +1385,11 @@ for _cuerpo in _bloques:
 _TABLAS_SQL = re.compile(
     r'\b(?:insert\s+(?:or\s+\w+\s+)?into|update|delete\s+from|replace\s+into)\s+'
     r'([a-z_][a-z_0-9]*)', re.I)
+# armar_el_indice: arma un archivo NUEVO y recién al final reemplaza al de antes (os.replace):
+# queda el índice viejo entero o el nuevo entero, nunca uno a medias.
 _SIN_TRANSACCION_OK = ("_esquema_", "_datos_precargados", "crear_esquema", "_migracion",
                        "generar_backup", "restaurar_", "_sacar_las_fotos",
-                       "pedir_de_nuevo_las_fotos", "copia_para_github")
+                       "pedir_de_nuevo_las_fotos", "copia_para_github", "armar_el_indice")
 
 def _tablas_que_escribe(nodo):
     tablas = {}
@@ -2641,6 +2643,9 @@ _SE_ESCRIBE_SOLA = {
     "migrar_imagenes_pendientes": "la corre también la tarea del día",
     "aplicar_aplicaciones_deducidas": "la corre también la tarea del día",
     "aprender_modelo_de_vin": "la corre también la tarea del día",
+    "armar_el_indice_de_busqueda": "el índice de la búsqueda por texto: solo borra lo anotado "
+                                   "para él (cambios_para_el_indice)",
+    "_poner_al_dia": "el índice de la búsqueda por texto: solo borra lo ya pasado al índice",
 }
 # El ingreso y los candados: escriben (los intentos fallidos), y son justamente el permiso.
 _PARADAS_DEL_PERMISO = {"candado", "pedir_password_admin", "pedir_password_operador_o_admin",

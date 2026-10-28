@@ -821,12 +821,15 @@ def _esquema_mostrador(c):
     # Antes de buscar se ponen al día solo esos, sin volver a armar el índice entero.
     c.execute("CREATE TABLE IF NOT EXISTS cambios_para_el_indice "
               "(producto_id INTEGER PRIMARY KEY)")
-    c.execute("""CREATE TRIGGER IF NOT EXISTS productos_indice_alta AFTER INSERT ON productos
+    # DROP y CREATE, no IF NOT EXISTS, por lo mismo que productos_busqueda_alta.
+    for _nombre in ("productos_indice_alta", "productos_indice_cambio", "productos_indice_baja"):
+        c.execute(f"DROP TRIGGER IF EXISTS {_nombre}")
+    c.execute("""CREATE TRIGGER productos_indice_alta AFTER INSERT ON productos
                  BEGIN INSERT OR IGNORE INTO cambios_para_el_indice VALUES (NEW.id); END""")
-    c.execute("""CREATE TRIGGER IF NOT EXISTS productos_indice_cambio
+    c.execute("""CREATE TRIGGER productos_indice_cambio
                  AFTER UPDATE OF busqueda, codigo_clean ON productos
                  BEGIN INSERT OR IGNORE INTO cambios_para_el_indice VALUES (NEW.id); END""")
-    c.execute("""CREATE TRIGGER IF NOT EXISTS productos_indice_baja AFTER DELETE ON productos
+    c.execute("""CREATE TRIGGER productos_indice_baja AFTER DELETE ON productos
                  BEGIN INSERT OR IGNORE INTO cambios_para_el_indice VALUES (OLD.id); END""")
     # Los productos que ya estaban cargados antes de que existiera esta columna.
     # OJO: acá va SOLO el caso «nunca se calculó». Volver a calcularla porque cambió la
