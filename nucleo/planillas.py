@@ -12,8 +12,6 @@ import hashlib
 import os
 import re
 import unicodedata
-
-from openpyxl import load_workbook
 from datetime import date, datetime, time as dtime, timedelta
 
 from .errores import anotar_error

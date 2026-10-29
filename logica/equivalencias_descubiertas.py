@@ -1336,7 +1336,7 @@ def _por_que_chocan(productos):
         return "mezcla un juego con una pieza suelta"
     for i in range(len(firmas)):
         for j in range(i + 1, len(firmas)):
-            (pa, fa), (pb, fb) = firmas[i], firmas[j]
+            fa, fb = firmas[i][1], firmas[j][1]
             if not fa or not fb:
                 continue
             ok, motivo = firmas_compatibles(fa, fb)

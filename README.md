@@ -6959,6 +6959,14 @@ Lo pidió el dueño: «sacá el límite de lectura de 200 tandas de catálogo, q
 
 `pruebas_de_las_pantallas.py` lo controla con lecturas de mentira (sin salir a internet): las tres terminan solas, el catálogo manda las dos equivalencias a una sola lista, el portal usa la misma lista en todas las tandas, y al terminar dice cuántas leyó y deja de decir «sigue sola». Si «todas» hiciera una sola tanda, falla.
 
+## 🔎 Los vínculos dudosos, de a un motivo
+
+En «🧹 Limpiar y corregir → 🔎 Analizar los vínculos cargados», los dudosos quedan casi todos con la misma confianza (15, la que deja un veto), y la única forma de cortar era «los N peores». Con la base real son 72: los 61 de los kits de cable y bujía y otros 11 de otras cosas, así que cortar «los 61 peores» se llevaba 61 cualesquiera.
+
+Ahora hay un «Cuáles mirar:» con cada motivo y cuántos tiene —📦 kits (61), 🔤 descripciones de otra pieza (5), 🔎 número sacado del medio de la descripción (3), 🧩 rubros distintos (2), ⚠️ un número que une piezas distintas (1)—, y elegido uno, la tabla, el Excel y «✂️ Cortar» van solo con esos. El del kit manda aunque no sea la primera señal: «ese código cuelga 6 productos» es lo que se ve de afuera; «es el número de los cables del kit» es lo que pasa.
+
+De paso, el motivo ya no sale repetido (el de los rubros salía dos veces, uno por cada lado), y el paquete `nucleo/` ya no carga la biblioteca de Excel al arrancar, igual que la app. `pruebas_de_las_pantallas.py` lo controla; sin el filtro, falla.
+
 ## 📦 Los kits que dicen de qué pieza es cada número
 
 Siguiendo el pendiente del SC-G101: buscando la bujía NGK **BKR6E-11** salían seis números de juegos de cables (LEIHTT06SC, F00099C110, LEIHTT09SC, LEIHTG03SC, LEIHTG78SC, F00099C015) como ✅ verificados o 🟡 probables.

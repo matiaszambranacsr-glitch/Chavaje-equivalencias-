@@ -1223,6 +1223,37 @@ def origenes_de_los_vinculos_directos(producto_id, ids_resultado):
 # ============================================================================================
 # CONFIANZA DE CADA VÍNCULO
 # ============================================================================================
+# LOS DUDOSOS, POR MOTIVO. Todos los que la auditoría encuentra suelen quedar con la misma
+# confianza (15, la del veto), así que «cortar los N peores» no elegía nada: con los 61 vínculos
+# de los kits de cable y bujía entre 72 dudosos, cortar «los 61 peores» se llevaba 61
+# cualesquiera. Se agrupan por el motivo que pesa más, para mirar y cortar de a un tipo.
+_MOTIVOS_DE_LOS_DUDOSOS = {
+    "📦": "📦 Un kit y lo que trae, u otra pieza del mismo kit",
+    "🔤": "🔤 Las descripciones dicen que es otra pieza",
+    "🧩": "🧩 De rubros distintos",
+    "🔎": "🔎 Un número sacado del medio de la descripción",
+    "⚠️": "⚠️ Un número que une piezas distintas del mismo proveedor",
+    "🕸️": "🕸️ Un código que cuelga a demasiados productos",
+    "🧯": "🧯 Un código que las reglas de hoy ya no tomarían",
+    "🧰": "🧰 El número del conjunto donde va la pieza",
+    "🏷️": "🏷️ Dos productos del mismo proveedor",
+    "📐": "📐 Las medidas no coinciden",
+    "↩️": "↩️ Volvió porque no le iba",
+}
+
+
+def motivo_de_un_vinculo_dudoso(malas):
+    """El grupo de un vínculo dudoso, por la primera señal en contra; el kit va primero aunque
+    no sea la primera, porque dice qué es y no solo que algo no cierra («🕸️ ese código cuelga
+    6 productos» es lo que se ve de afuera; que es el número de los cables, lo de adentro)."""
+    malas = [str(m).strip() for m in malas if str(m).strip()]
+    if not malas:
+        return "Otros motivos"
+    primera = next((m for m in malas if m.startswith("📦")), malas[0])
+    return next((etiqueta for emoji, etiqueta in _MOTIVOS_DE_LOS_DUDOSOS.items()
+                 if primera.startswith(emoji)), "Otros motivos")
+
+
 def auditar_equivalencias_cargadas(limite=2000, tope_confianza=35, revisar=None):
     """Pasa el mismo análisis de confianza por las equivalencias YA cargadas.
 
@@ -1368,13 +1399,16 @@ def auditar_equivalencias_cargadas(limite=2000, tope_confianza=35, revisar=None)
                        "dicen exactamente lo mismo: es una fila leída dos veces")))
         puntaje = max(0.0, puntaje)
         if puntaje <= tope_confianza:
+            # Sin repetir: el rubro venía dos veces, una por cada lado («🧩 Son de rubros
+            # distintos: «Embrague» y «Juntas y retenes» · 🧩 Son de rubros distintos: …»).
+            _malas = list(dict.fromkeys(t for tipo, t in senales if tipo == "mal"))
             dudosas.append({
                 "Confianza": round(puntaje),
                 "Código A": f["cod_a"], "Marca A": f["marca_a"],
                 "Código B": f["cod_b"], "Marca B": f["marca_b"],
-                "Por qué": " · ".join(t for tipo, t in senales if tipo == "mal") or
-                            "el código no parece un código",
+                "Por qué": " · ".join(_malas) or "el código no parece un código",
                 "Vino de": (f["lote"] or "").split(" · ")[0],
+                "_motivo": motivo_de_un_vinculo_dudoso(_malas),
                 "_a": f["a"], "_b": f["b"],
             })
     dudosas.sort(key=lambda x: x["Confianza"])

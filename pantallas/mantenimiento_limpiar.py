@@ -471,6 +471,22 @@ if pagina == PAGINAS[3]:
                         f"⚠️ De {miles(revisadas)} vínculos revisados, **{len(dudosas)} tienen evidencia en "
                         "contra**. Están ordenados de peor a mejor, con el motivo al lado."
                     )
+                    # De a un motivo: casi todos quedan con la misma confianza, y «los N peores»
+                    # no separaba los 61 de los kits de los otros 11. Ver
+                    # motivo_de_un_vinculo_dudoso().
+                    _por_motivo = collections.Counter(x.get("_motivo") or "Otros motivos"
+                                                      for x in dudosas)
+                    if len(_por_motivo) > 1:
+                        _todos = f"Todos ({miles(len(dudosas))})"
+                        _motivo = st.selectbox(
+                            "Cuáles mirar:",
+                            [_todos] + [m for m, _n in _por_motivo.most_common()],
+                            format_func=lambda m: m if m.startswith("Todos")
+                            else f"{m} ({miles(_por_motivo[m])})",
+                            key="dudosas_por_motivo")
+                        if _motivo != _todos:
+                            dudosas = [x for x in dudosas
+                                       if (x.get("_motivo") or "Otros motivos") == _motivo]
                     st.dataframe(quitar_id(dudosas), width="stretch", hide_index=True)
                     st.download_button(
                         "⬇️ Bajarlos en Excel antes de decidir",
@@ -487,9 +503,9 @@ if pagina == PAGINAS[3]:
                     st.session_state.setdefault("cuantos_dudosos", opciones_cortar[0])
                     if st.session_state["cuantos_dudosos"] not in opciones_cortar:
                         st.session_state["cuantos_dudosos"] = opciones_cortar[0]
-                    cuantos_cortar = st.select_slider(
+                    cuantos_cortar = (st.select_slider(
                         "Cortar los peores:", options=opciones_cortar, key="cuantos_dudosos"
-                    )
+                    ) if len(opciones_cortar) > 1 else opciones_cortar[0])
                     st.caption(
                         "Se cortan los vínculos, NO los productos: precios, stock e historial quedan "
                         "como están. Y quedan anotados como rechazados, así que una reimportación de "

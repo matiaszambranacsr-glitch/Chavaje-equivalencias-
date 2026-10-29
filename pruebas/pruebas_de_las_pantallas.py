@@ -445,6 +445,34 @@ def probar():
               or not any("Cambió a" in x.value and "No queda ninguno" in x.value
                          for x in at.success)):
             fallas.append("💲 dos precios: después de elegir sigue en la lista, o no lo dice")
+    # 🔎 Los vínculos dudosos, de a un motivo (ver motivo_de_un_vinculo_dudoso()): todos
+    # quedan con la misma confianza, y «cortar los N peores» no separaba los de los kits de los
+    # otros. Con dos de kits y uno de rubros, elegir el de los kits deja dos en la tabla y el
+    # botón corta esos dos. Sin cortar nada: corre también con la base real.
+    def _dudoso(a, *motivos):
+        return {"Confianza": 15, "Código A": f"DUD{a}", "Marca A": "X", "Código B": "Y",
+                "Marca B": "Z", "Por qué": " · ".join(motivos), "Vino de": "",
+                "_motivo": ns["motivo_de_un_vinculo_dudoso"](motivos), "_a": a, "_b": a + 1}
+    at.session_state["dudosas_cargadas"] = (
+        [_dudoso(1, "📦 no son equivalentes: otra pieza del mismo kit"),
+         _dudoso(3, "🧩 Son de rubros distintos: «Filtros» y «Juntas y retenes»"),
+         _dudoso(5, "🕸️ Ese mismo código cuelga 6 productos", "📦 «KIT» lo trae adentro")],
+        100)
+    at.run()
+    _por_motivo = [x for x in at.selectbox if x.key == "dudosas_por_motivo"]
+    _kits = "📦 Un kit y lo que trae, u otra pieza del mismo kit"
+    if not _por_motivo:
+        fallas.append("🔎 dudosos: no se puede elegir el motivo")
+    else:
+        _por_motivo[0].set_value(_kits).run()
+        _tabla = [c for x in at.dataframe if "Código A" in x.value.columns
+                  for c in x.value["Código A"].tolist()]
+        at.checkbox(key="confirmar_dudosas").check().run()
+        if sorted(c for c in _tabla if c.startswith("DUD")) != ["DUD1", "DUD5"]:
+            fallas.append("🔎 dudosos: elegido un motivo, la tabla no muestra solo esos")
+        elif not any(b.label == "✂️ Cortar los 2 peores" for b in at.button):
+            fallas.append("🔎 dudosos: el botón no corta solo los del motivo elegido")
+    at.session_state["dudosas_cargadas"] = None
     # 📖 «Todas» las fichas del catálogo del proveedor, y todas las fotos por link: de a
     # tandas, una por dibujo, hasta que no quede nada (ver seguir_de_a_tandas()). Lo encontrado
     # va a revisión en cada tanda y a una sola lista. Sin salir a internet: la lectura se

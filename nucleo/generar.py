@@ -406,8 +406,7 @@ e = e.replace("    import sqlite3\n    conexion.row_factory", "    conexion.row_
 open(D + "equivalencias.py", "w", encoding="utf-8").write(e)
 
 p = open(D + "planillas.py", encoding="utf-8").read()
-p = p.replace("import re\nimport unicodedata\n",
-              "import re\nimport unicodedata\n\nfrom openpyxl import load_workbook\n", 1)
+# openpyxl ya no va arriba: leer_excel() lo importa recién al leer (ver logica/base.py).
 p = p.replace("                      valor_o_vacio)", "                      valor_codigo, valor_o_vacio)", 1)
 open(D + "planillas.py", "w", encoding="utf-8").write(p)
 print("  ajustes de paquete aplicados")

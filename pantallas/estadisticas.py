@@ -51,7 +51,7 @@ if pagina == PAGINAS[4]:
                         (_pct["Equivalente"] < 50, "**Equivalentes**: la cola de "
                          f"{miga_hasta('Equivalencias sugeridas')} es lo que más suma; con «🤖 "
                          "Que la app descarte sola» queda solo lo que hay que mirar."),
-                        (_pct["Foto"] < 50, f"**Fotos**: prendé «📷 Fotos de las fichas del "
+                        (_pct["Foto"] < 50, "**Fotos**: prendé «📷 Fotos de las fichas del "
                          "proveedor» en Mantenimiento; las baja sola, por atrás."),
                         (_pct["Stock"] < 50, "**Stock**: viene con la lista si trae la columna "
                          "(existencia, saldo, disponible); si no, se carga en el Buscador."),
