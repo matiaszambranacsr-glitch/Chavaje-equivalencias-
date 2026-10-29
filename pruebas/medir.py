@@ -5,10 +5,13 @@
     python pruebas/medir.py --base copia.db cola [--guardar antes.json | --comparar antes.json]
     python pruebas/medir.py --base copia.db fichas [--n 2000] [--guardar … | --comparar …]
     python pruebas/medir.py --base copia.db texto [--n 1000] [--guardar … | --comparar …]
+    python pruebas/medir.py --base copia.db toques [--n 10] [--guardar … | --comparar …]
 
 «busquedas»: N búsquedas al azar (siempre las mismas: semilla fija) entre los productos de redes
 de 3 o más; cuenta los resultados por estado de la ficha, el tiempo (promedio, p95, máximo) y
-las más lentas. «cola»: el análisis de todas las listas pendientes, por nivel.
+las más lentas. «cola»: el análisis de todas las listas pendientes, por nivel. «toques»: cuánto
+tarda cada pantalla en un toque cualquiera (el segundo dibujo, que es lo que se repite todo el
+día), como empleado, y la función donde más se va el tiempo en las N más lentas.
 Con --guardar deja cada resultado en un json; con --comparar dice qué cambió y da ejemplos.
 Es lo que antes se escribía a mano en cada cambio de reglas (ver «Para gastar pocos tokens» en
 CLAUDE.md). Trabaja sobre una copia temporal: la base que se le pasa no se toca."""
@@ -151,6 +154,97 @@ def texto(ns, n):
     return salida
 
 
+def toques(base, n):
+    """{pantalla: segundos del segundo dibujo}, e imprime las n más lentas con dónde se va el
+    tiempo (muestreando cada 10 ms el hilo que dibuja, como Muestreo en pruebas_de_las_pantallas).
+    Se escribía a mano cada vez que se quería saber qué pantalla anda lenta con la base real."""
+    import threading
+    carpeta = tempfile.mkdtemp(prefix="medir_")
+    shutil.copy(base, os.path.join(carpeta, "equivalencias_app.db"))
+    os.environ["EQUIVALENCIAS_SIN_TAREAS_DE_FONDO"] = "1"
+    os.chdir(carpeta)
+    sys.path.insert(0, RAIZ)
+    from streamlit.testing.v1 import AppTest
+    at = AppTest.from_file(os.path.join(RAIZ, "app.py"), default_timeout=300)
+    at.run()
+    for hilo in [h for h in threading.enumerate() if h.name in ("de_antemano",
+                                                                 "indice_de_busqueda")]:
+        hilo.join()
+    ns = sys.modules["logica"].todo_lo_de_la_logica()
+    # Un empleado de prueba, solo en esta copia (que se borra al terminar).
+    clave = f"clave-medir-{os.urandom(4).hex()}"
+    ns["crear_usuario"](f"medir{clave[-4:]}", clave, "operador")
+    at.text_input(key="login_inicial_clave").set_value(clave)
+    [b for b in at.button if "Ingresar con contraseña" in b.label][0].click().run()
+    cuenta, mirando, propio = collections.Counter(), [True], threading.get_ident()
+
+    def mirar():
+        # Solo el hilo que dibuja (el que viene de app.py): los de atrás —el índice de búsqueda,
+        # el dólar— no son de la pantalla. Y la función más de adentro de logica/ o pantallas/,
+        # sin el envoltorio de la base (datos.py:execute): lo que sirve es quién consulta.
+        app, adentro = os.path.join(RAIZ, "app.py"), (os.path.join(RAIZ, "logica"),
+                                                      os.path.join(RAIZ, "pantallas"))
+        while mirando[0]:
+            for hilo, marco in sys._current_frames().items():
+                if hilo in (propio, threading.get_ident()):
+                    continue
+                arriba = marco
+                while arriba and arriba.f_code.co_filename != app:
+                    arriba = arriba.f_back
+                if not arriba:
+                    continue
+                while marco and (not marco.f_code.co_filename.startswith(adentro)
+                                 or marco.f_code.co_name in ("execute", "executemany",
+                                                             "fetchall", "fetchone")):
+                    marco = marco.f_back
+                if marco:
+                    cuenta[f"{os.path.basename(marco.f_code.co_filename)}:"
+                           f"{marco.f_code.co_name}"] += 1
+            time.sleep(0.01)
+    threading.Thread(target=mirar, daemon=True).start()
+    tiempos, donde = {}, {}
+
+    def medir(nombre):
+        at.run()
+        cuenta.clear()
+        inicio = time.perf_counter()
+        at.run()
+        tiempos[nombre] = round(time.perf_counter() - inicio, 2)
+        donde[nombre] = cuenta.most_common(1)[0][0] if cuenta else ""
+    try:
+        for pagina in at.radio(key="pagina_actual").options:
+            at.session_state["pagina_actual"] = pagina
+            if pagina not in ns["SOLAPAS_DE_LA_PAGINA"]:
+                medir(pagina)
+                continue
+            solapas, clave_solapa = ns["SOLAPAS_DE_LA_PAGINA"][pagina]
+            for solapa in solapas:
+                at.session_state[clave_solapa] = solapa
+                if solapa == ns["SUB_ADMIN"][4]:
+                    for grupo in ns["GRUPOS_MANTENIMIENTO"]:
+                        at.session_state["sub_mantenimiento"] = grupo
+                        medir(f"{pagina} → {solapa} → {grupo}")
+                else:
+                    medir(f"{pagina} → {solapa}")
+    finally:
+        mirando[0] = False
+        os.chdir(RAIZ)
+        shutil.rmtree(carpeta, ignore_errors=True)
+    for nombre, segundos in sorted(tiempos.items(), key=lambda x: -x[1])[:n]:
+        print(f"{segundos:5.2f} s  {nombre}  [{donde[nombre]}]")
+    print(f"{len(tiempos)} pantallas, en total {sum(tiempos.values()):.1f} s")
+    return tiempos
+
+
+def comparar_toques(antes, ahora):
+    cambios = sorted(((ahora[k] - antes[k], k) for k in ahora if k in antes
+                      and abs(ahora[k] - antes[k]) >= 0.1), reverse=True)
+    for dif, nombre in cambios[:10]:
+        print(f"{dif:+5.2f} s  {nombre} ({antes[nombre]} → {ahora[nombre]})")
+    print(f"en total: {sum(antes.values()):.1f} s → {sum(ahora.values()):.1f} s"
+          + ("" if cambios else " · ninguna cambió 0,1 s o más"))
+
+
 def comparar_puestos(antes, ahora):
     """Lo de «texto»: [puesto, consulta], con 0 si no aparece. Mejor es salir más arriba."""
     def peso(puesto):
@@ -183,12 +277,21 @@ def comparar(antes, ahora):
 
 def main():
     base = _argumento("--base")
-    if not base or not ({"busquedas", "cola", "fichas", "texto"} & set(sys.argv)):
+    if not base or not ({"busquedas", "cola", "fichas", "texto", "toques"} & set(sys.argv)):
         print(__doc__)
         return 2
     guardar, contra = _argumento("--guardar"), _argumento("--comparar")
     guardar = guardar and os.path.abspath(guardar)
     contra = contra and os.path.abspath(contra)
+    if "toques" in sys.argv:
+        datos = toques(os.path.abspath(base), int(_argumento("--n", "10")))
+        if guardar:
+            with open(guardar, "w", encoding="utf-8") as f:
+                json.dump(datos, f, ensure_ascii=False)
+        if contra:
+            with open(contra, encoding="utf-8") as f:
+                comparar_toques(json.load(f), datos)
+        return 0
     ns, carpeta = _cargar(os.path.abspath(base))
     try:
         datos = (busquedas(ns, int(_argumento("--n", "1500"))) if "busquedas" in sys.argv

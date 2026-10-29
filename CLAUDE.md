@@ -25,6 +25,7 @@ Todo —pantallas, nombres, comentarios, mensajes de commit— va en castellano 
 - `python auditar.py` solo, cuando se toca código de pantallas (tiene que dar 0 / 0 / 0).
 - `python pruebas/pruebas_de_compatibilidad.py --base <copia de la base real> --contra origin/main`.
 - Medir antes y después de tocar reglas: `python pruebas/medir.py --base <copia> busquedas --guardar antes.json`, y después `--comparar antes.json` (también `cola`, `fichas` y `texto`). Salida de pocos renglones; no escribir scripts sueltos para eso.
+- Cuánto tarda cada pantalla en un toque y dónde se va el tiempo: `python pruebas/medir.py --base <copia> toques` (con `--guardar`/`--comparar` igual).
 - Las pantallas más lentas con la base real: `python pruebas/pruebas_de_las_pantallas.py --base <copia>`.
 - Probar en el navegador: Chromium y Playwright ya están instalados (`/opt/pw-browsers/chromium`).
 
@@ -55,5 +56,6 @@ Todo —pantallas, nombres, comentarios, mensajes de commit— va en castellano 
 ## Para gastar pocos tokens
 
 - `grep -n` antes que leer; leer con `offset`/`limit` el tramo que hace falta.
-- Las salidas largas, a un archivo, y mostrar solo `tail` o lo que falló.
+- Las salidas largas, a un archivo, y mostrar solo `tail` o lo que falló. Las pruebas ya no
+  repiten «missing ScriptRunContext» (ver `logica/__init__.py`): no hace falta filtrarlo.
 - No imprimir tablas de la base ni el README; no releer lo que ya se leyó.

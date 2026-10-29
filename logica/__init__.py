@@ -17,9 +17,42 @@ y la pantalla.
 Lo que tiene que sobrevivir a una recarga (candados, sesiones con proveedores) sigue en
 del_proceso(), que vive aparte.
 """
+import logging
 import os
 
 from orden import PARTES_DE_LA_LOGICA as _PARTES
+
+
+# SIN «streamlit run» —las pruebas, los scripts de medir— Streamlit avisa en cada llamada que no
+# hay pantalla. Eran 306 de los 313 renglones de pruebas_del_buscador.py y 3.270 en
+# pruebas_de_carga.py: tapaban lo que importa y había que filtrarlos a mano cada vez (y leerlos
+# cuesta). Se callan esos tres y nada más: los otros avisos —que algo de Streamlit va a dejar de
+# existir, por ejemplo— siguen saliendo. Con la app de verdad no se toca nada: se reconoce porque
+# «streamlit run» carga su arranque (bootstrap); la app simulada de las pruebas (AppTest), no. No
+# sirve preguntar si hay «runtime»: adentro de AppTest dice que sí.
+_AVISOS_SIN_PANTALLA = ("missing ScriptRunContext", "No runtime found",
+                        "Session state does not function")
+
+
+def _callar_los_avisos_sin_pantalla():
+    try:
+        import sys
+        if "streamlit.web.bootstrap" in sys.modules:
+            return
+        import importlib
+        filtro = logging.Filter()
+        filtro.filter = lambda registro: not any(
+            aviso in registro.getMessage() for aviso in _AVISOS_SIN_PANTALLA)
+        for modulo in ("streamlit.runtime.scriptrunner_utils.script_run_context",
+                       "streamlit.runtime.state.session_state_proxy",
+                       "streamlit.runtime.caching.cache_data_api"):
+            importlib.import_module(modulo)      # crea su registro, que es al que se filtra
+            logging.getLogger(modulo).addFilter(filtro)
+    except Exception:        # noqa: BLE001 — es comodidad de las pruebas: nunca rompe nada
+        pass
+
+
+_callar_los_avisos_sin_pantalla()
 
 _CARPETA = os.path.dirname(os.path.abspath(__file__))
 

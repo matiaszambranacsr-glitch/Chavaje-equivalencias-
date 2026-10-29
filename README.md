@@ -6970,6 +6970,13 @@ La única que cobra de verdad, «Generar imagen orientativa», ya no gastaba de 
 
 `pruebas_de_las_fuentes.py` (10) lo controla con un Gemini de mentira (nada sale de la máquina): la foto achicada y derecha, JSON y sin razonar en la cédula, la segunda vez sin preguntar y con 0 tokens, el modelo que no deja apagar el razonamiento, y la de internet a 1.024 y razonando. Con la foto sin achicar o sin recordar la respuesta, falla.
 
+## 🪙 Menos tokens trabajando en el código
+
+La otra mitad de «mejorá el consumo de tokens»: lo que se gasta cada vez que se trabaja en este repositorio con un asistente, que lee lo que imprimen las pruebas y las mediciones.
+
+- **Las pruebas ya no repiten «missing ScriptRunContext»**. Corriendo sin `streamlit run`, Streamlit avisaba en cada llamada que no había pantalla: eran 306 de los 313 renglones de `pruebas_del_buscador.py`, 2.145 de `pruebas_de_los_cambios.py` y 3.270 de `pruebas_de_carga.py`, y había que filtrarlos a mano cada vez. Ahora salen de 1 a 6 renglones. Se callan esos tres avisos y nada más (los demás, como que algo de Streamlit va a dejar de existir, siguen), y solo fuera de la app de verdad: ver `logica/__init__.py`.
+- **`python pruebas/medir.py --base copia.db toques`**: cuánto tarda cada pantalla en un toque cualquiera y la función donde se va el tiempo, con `--guardar` y `--comparar` como las otras mediciones. Era un script que se escribía de nuevo cada vez.
+
 ## ✅ Verificada por el número de fábrica, y los espesores aparte
 
 Lo pidió el dueño: «mejorá más la equivalencia y la búsqueda de productos». Medido sobre la copia de la base con `pruebas/medir.py`.
