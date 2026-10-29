@@ -1249,6 +1249,9 @@ def dejar_listo_de_antemano():
     2. marcas_vehiculo_disponibles(), que se guarda en la base pero se rehace cuando cambió el
        catálogo: con la copia real, 1,3 s del primero que abría «🚙 Repuestos por vehículo»
        —que se abre sin contraseña— después de cargar una lista.
+    3. Y en esa pantalla, lo de la marca que aparece elegida al entrar (la primera, la que más
+       productos tiene: FIAT): sus productos por rubro y sus modelos. Con lo de arriba ya
+       hecho eran otros 0,4 s del primero que la abría (0,12 el catálogo y 0,3 los modelos).
     0. Antes que todo, las bibliotecas de las tablas (pandas y pyarrow). La app no las usa
        directamente: Streamlit las carga recién con la primera tabla que dibuja, y esa primera
        tabla —la de los resultados de la primera búsqueda por texto, casi siempre— tardaba
@@ -1272,7 +1275,12 @@ def dejar_listo_de_antemano():
             version = version_del_catalogo()
             vocabulario_de_busqueda(version)
             ceder_al_mostrador()
-            marcas_vehiculo_disponibles(version)
+            disponibles = marcas_vehiculo_disponibles(version)
+            if disponibles:
+                ceder_al_mostrador()
+                catalogo_por_vehiculo(disponibles[0][0], version)
+                ceder_al_mostrador()
+                modelos_de_marca(disponibles[0][0], version)
         except Exception as _err:     # noqa: BLE001 — es una ayuda: si falla, lo arma quien lo pida
             anotar_error("dejar_listo_de_antemano", _err)
     threading.Thread(target=_armar, daemon=True, name="de_antemano").start()

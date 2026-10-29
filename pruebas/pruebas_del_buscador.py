@@ -58,8 +58,28 @@ def probar():
     esperar("sin errores al armarlo", [e for e in g["_ULTIMOS_ERRORES"]
                                        if "antemano" in str(e)], [])
     c.execute("INSERT INTO marcas (nombre, tipo) VALUES ('PRUEBA', 'PROVEEDOR')")
+    _marca_prueba = c.lastrowid
+    # Y lo de «🚙 Repuestos por vehículo» de la marca que aparece elegida al entrar (la
+    # primera): sus productos y sus modelos. Con un producto de FIAT, el que vuelve a armarlo
+    # pide los de FIAT. Después se borra: las búsquedas de abajo cuentan resultados.
+    _de_fiat = c.execute("INSERT INTO productos (codigo_raw, codigo_clean, descripcion, marca_id) "
+                         "VALUES ('BAF1', 'BAF1', 'BOMBA DE AGUA FIAT PALIO 1.6', ?)",
+                         (_marca_prueba,)).lastrowid
+    conn.commit()
+    _modelos_de, _pedidos = g["modelos_de_marca"], []
+    g["modelos_de_marca"] = lambda m, v, *a: _pedidos.append(m) or _modelos_de(m, v, *a)
+    try:
+        g["del_proceso"]("lo_de_antemano_lanzado", threading.Event).clear()
+        ns["dejar_listo_de_antemano"]()
+        for _h in [h for h in threading.enumerate() if h.name == "de_antemano"]:
+            _h.join(60)
+    finally:
+        g["modelos_de_marca"] = _modelos_de
+    esperar("y los modelos de la marca que aparece elegida en 🚙 Repuestos por vehículo",
+            _pedidos, ["FIAT"])
+    c.execute("DELETE FROM productos WHERE id = ?", (_de_fiat,))
     c.execute("INSERT INTO productos (codigo_raw, codigo_clean, descripcion, marca_id) "
-              "VALUES ('F100', 'F100', 'FILTRO DE ACEITE', ?)", (c.lastrowid,))
+              "VALUES ('F100', 'F100', 'FILTRO DE ACEITE', ?)", (_marca_prueba,))
     conn.commit()
 
     def buscar(texto):

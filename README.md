@@ -6959,6 +6959,10 @@ Lo pidió el dueño: «sacá el límite de lectura de 200 tandas de catálogo, q
 
 `pruebas_de_las_pantallas.py` lo controla con lecturas de mentira (sin salir a internet): las tres terminan solas, el catálogo manda las dos equivalencias a una sola lista, el portal usa la misma lista en todas las tandas, y al terminar dice cuántas leyó y deja de decir «sigue sola». Si «todas» hiciera una sola tanda, falla.
 
+## 🚙 Repuestos por vehículo, listo al entrar
+
+Lo que más tardaba la primera vez con la base real, medido pantalla por pantalla, era «🛠️ Modo Mecánico → 🚙 Repuestos por vehículo»: se abre sin contraseña y aparece con FIAT elegida (la marca con más productos). Con lo que ya se armaba por atrás al arrancar (el conteo de palabras y las marcas), le quedaban 0,4 s: 0,12 s los productos de FIAT por rubro y 0,3 s sus modelos. Ahora el mismo hilo de atrás (`dejar_listo_de_antemano()`) arma también eso, después de lo demás y cediéndole el lugar a quien esté usando la app. `pruebas_del_buscador.py` lo controla; sin el cambio, falla.
+
 ## 💲 Los precios que no cierran, sin el ruido de TARANTO
 
 El diagnóstico decía «14 par(es) de equivalentes con precios muy distintos», y en «🧹 Limpiar y corregir → 💲 Precios que no cierran entre equivalentes» se veían 200 (el tope), todos de TARANTO. A la lista de TARANTO le falta el coeficiente: cuesta unas 15 veces menos que las demás, parejo, así que contra cualquier otra da «16 veces», «33 veces». Eran 1.529 pares así, y los 14 de verdad quedaban atrás del tope. El diagnóstico dejaba TARANTO afuera; la tabla no.
