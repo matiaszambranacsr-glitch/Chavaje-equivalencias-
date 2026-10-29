@@ -752,7 +752,7 @@ if pagina == PAGINAS[3]:
                     _cols_dp[-1].button("⏭️ Después", key="dos_precios_despues",
                                         on_click=cb_saltear_el_precio_doble, args=(_f_dp["ID"],),
                                         width="stretch")
-                st.dataframe(quitar_id(_dos_precios[:200]), width="stretch", hide_index=True)
+                st.dataframe(quitar_id(_dos_precios), width="stretch", hide_index=True)
                 st.download_button("⬇️ Bajar la lista (Excel)",
                                    data=to_excel_bytes(quitar_id(_dos_precios)),
                                    file_name="codigos_con_dos_precios.xlsx",

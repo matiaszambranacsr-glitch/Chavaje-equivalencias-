@@ -1408,8 +1408,12 @@ def estado_de_cuenta(mecanico_id):
             "cheques_en_cartera": float(ch["total"]), "cheques_cuantos": int(ch["cuantos"])}
 
 
-def movimientos_de_cuenta(mecanico_id, limite=200):
-    """Los movimientos, del más nuevo al más viejo, con el saldo después de cada uno."""
+def movimientos_de_cuenta(mecanico_id, limite=None):
+    """Los movimientos, del más nuevo al más viejo, con el saldo después de cada uno.
+
+    Todos, salvo que se pida un tope: el resumen de la cuenta en «💳 Cuentas corrientes»
+    mostraba los 200 más nuevos sin decirlo, y a un taller con mucho movimiento se le perdían
+    los viejos de la vista (el saldo sí estaba bien: se calcula con todos)."""
     exigir_que_sea_su_cuenta(mecanico_id, "ver los movimientos de la cuenta", None)
     c.execute("""SELECT id, fecha, concepto, importe, vence, medio, cheque_fecha, usuario, anulado
                  FROM movimientos_de_cuenta WHERE mecanico_id = ? ORDER BY id""", (mecanico_id,))

@@ -6959,6 +6959,17 @@ Lo pidió el dueño: «sacá el límite de lectura de 200 tandas de catálogo, q
 
 `pruebas_de_las_pantallas.py` lo controla con lecturas de mentira (sin salir a internet): las tres terminan solas, el catálogo manda las dos equivalencias a una sola lista, el portal usa la misma lista en todas las tandas, y al terminar dice cuántas leyó y deja de decir «sigue sola». Si «todas» hiciera una sola tanda, falla.
 
+## 📋 Las listas, enteras
+
+Siguiendo con «que sean todas las que se pueda»: varias tablas mostraban las primeras 200 filas sin decirlo, y así parecía que no había más.
+
+- **El resumen de la cuenta corriente** (💳 Cuentas corrientes) mostraba los 200 movimientos más nuevos: a un taller con mucho movimiento se le perdían los viejos de la vista. El saldo sí estaba bien, porque se calcula con todos. Ahora muestra todos.
+- **Los apartados y las consultas de clientes** cortaban en 200, y el selector para cerrar un apartado sale de esa lista: pasando los 200, los más viejos no se podían cerrar desde la pantalla. Ahora salen todos.
+- **«Ver los N» de las relacionadas** (kits y piezas sueltas) decía N y mostraba 200, mientras el botón de al lado descartaba los N. Lo mismo los «parecidos» de un rechazo, las medidas mal leídas, los códigos con dos precios, los repuestos por auto y la lista de reemplazos de código: ahora se ven enteros (las tablas aguantan miles de filas).
+- **El registro de cambios** sigue mostrando los 200 más nuevos, porque crece sin fin, pero ahora lo dice y explica cómo ver otros: buscando.
+
+`pruebas_de_la_plata_y_el_stock.py` lo controla con 250 movimientos y 205 apartados; con la versión vieja da 200 y 199.
+
 ## 🤖 Gemini, gastando menos tokens
 
 Lo pidió el dueño: «mejorá el consumo de tokens». La app le pregunta a Gemini en seis lugares: leer el código de una pieza por foto (dos pantallas), buscarla en internet, leer la cédula (dos) y el remito, y pasar un audio a texto. En la copia de la base real todavía no se usó ninguno, así que esto es para que, cuando se use, gaste lo menos posible. Todo pasa ahora por `preguntar_a_gemini()`:

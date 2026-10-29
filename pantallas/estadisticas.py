@@ -903,7 +903,7 @@ a traer solas desde Administrar → Mantenimiento.
                                 codigo_nuevo AS "Lo reemplaza", nota AS "Nota",
                                 COALESCE(cargado_por, '') AS "Cargó",
                                 substr(fecha, 1, 10) AS "Cargado"
-                         FROM reemplazos_codigo ORDER BY fecha DESC LIMIT 200""")
+                         FROM reemplazos_codigo ORDER BY fecha DESC""")
             _lista_r = filas_a_listas(c)
         except sqlite3.OperationalError as _err:
             anotar_error("nivel principal", _err)
@@ -1446,7 +1446,7 @@ a traer solas desde Administrar → Mantenimiento.
                     st.dataframe(
                         [{"Código A": x.get("cod_a"), "Marca A": x.get("marca_a"),
                           "Código B": x.get("cod_b"), "Marca B": x.get("marca_b"),
-                          "Relación": x.get("relacion", "")} for x in relacionadas[:200]],
+                          "Relación": x.get("relacion", "")} for x in relacionadas],
                         width="stretch", hide_index=True)
                 if st.button(f"🚫 Descartar esos {len(relacionadas)}",
                               key=f"desc_rel_{lote_info['lote']}"):
@@ -1566,7 +1566,7 @@ a traer solas desde Administrar → Mantenimiento.
                                    "Descripción A": (f.get("desc_a") or "")[:60],
                                    "Código B": f["cod_b"], "Marca B": f["marca_b"],
                                    "Descripción B": (f.get("desc_b") or "")[:60]}
-                                  for f in grupo_p["filas"][:200]],
+                                  for f in grupo_p["filas"]],
                                  width="stretch", hide_index=True)
                 _pp1, _pp2 = st.columns(2)
                 if _pp1.button(f"🚫 Descartar esos {len(_filas_par)} también", type="primary",

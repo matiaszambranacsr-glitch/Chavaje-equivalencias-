@@ -435,6 +435,10 @@ if pagina == PAGINAS[3]:
                 _cambios = cambios_registrados(_q_cambios, limite=200)
                 if _cambios:
                     st.dataframe(_cambios, width="stretch", hide_index=True)
+                    # El registro crece sin fin: se muestran los 200 más nuevos, y se dice.
+                    if len(_cambios) == 200:
+                        st.caption("Son los 200 más nuevos. Para ver otros, buscá un código, un "
+                                   "nombre o una acción.")
                 else:
                     st.caption("Nada registrado todavía." if not _q_cambios.strip()
                                else "Nada con eso.")

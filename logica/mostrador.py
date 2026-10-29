@@ -242,7 +242,7 @@ def anotar_consulta_cliente(cliente, telefono, producto_id=None, codigo="", desc
     return True, "Anotado. Aparece en «Consultas de clientes»."
 
 
-def consultas_de_clientes(estado="activa", limite=200):
+def consultas_de_clientes(estado="activa", limite=-1):     # -1: todas (SQLite)
     """Lo que pidieron los clientes y todavía no se resolvió."""
     try:
         c.execute("""SELECT cc.id AS "_id", cc.cliente AS "Cliente", cc.telefono AS "Teléfono",
@@ -425,7 +425,9 @@ def stock_libre_de_varios(ids):
     return libres
 
 
-def reservas_activas(limite=200):
+# -1: todas (en SQLite, LIMIT -1 es sin tope). Con 200, pasando los 200 apartados los más
+# viejos no salían en la lista ni en el selector para cerrarlos.
+def reservas_activas(limite=-1):
     """Lo que está apartado ahora mismo."""
     try:
         c.execute("""SELECT r.id AS "_id", p.codigo_raw AS "Código", m.nombre AS "Marca",

@@ -358,7 +358,7 @@ if pagina == PAGINAS[7]:
                         st.caption(_ayuda + (
                             f" Mostrando {len(_filas_fuente)} de {_cuantos}."
                             if _palabras_pieza else f" {_cuantos} repuesto(s)."))
-                        st.dataframe(quitar_id(_filas_fuente[:200]), width="stretch",
+                        st.dataframe(quitar_id(_filas_fuente), width="stretch",
                                      hide_index=True)
                     if _palabras_pieza and not any(
                             _filtrar_por_pieza(_sug.get(k) or []) for k, _t, _a in _fuentes):

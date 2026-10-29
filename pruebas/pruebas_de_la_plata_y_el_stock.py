@@ -144,6 +144,21 @@ def probar(L):
     esperar("el resumen: primero el que debe vencido",
             [(x["Taller"], x["Vencido"] > 0) for x in ns["resumen_de_cuentas"]()],
             [("Taller Norte", True), ("Taller Sur", False)])
+    # Todos los movimientos y todos los apartados, no los primeros 200: el resumen de la cuenta
+    # escondía los viejos, y pasando los 200 apartados los más viejos no se podían cerrar.
+    c.executemany("INSERT INTO movimientos_de_cuenta (mecanico_id, concepto, importe, usuario) "
+                  "VALUES (?, 'repuesto', 100, 'x')", [(sur,)] * 250)
+    c.executemany("INSERT INTO reservas_stock (producto_id, cantidad, cliente) VALUES (?, 1, ?)",
+                  [(uno("SELECT MIN(id) FROM productos"), f"cliente {i}") for i in range(205)])
+    conn.commit()
+    _movs_sur = ns["movimientos_de_cuenta"](sur)
+    esperar("la cuenta muestra todos los movimientos, y el saldo de arriba es el de todos",
+            (len(_movs_sur), _movs_sur[0]["Saldo"]), (251, 80000.0 + 250 * 100))
+    esperar("todos los apartados",
+            sum(1 for r in ns["reservas_activas"]() if (r["Cliente"] or "").startswith("cliente ")),
+            205)
+    c.execute("DELETE FROM reservas_stock WHERE cliente LIKE 'cliente %'")
+    conn.commit()
 
     # 5. El presupuesto del mecánico en PDF, y sumar al presupuesto del mostrador.
     _pdf = ns["generar_pdf_presupuesto_mecanico"](

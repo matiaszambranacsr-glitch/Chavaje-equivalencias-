@@ -504,7 +504,7 @@ if pagina == PAGINAS[3]:
                                "descripción y que el lector de hoy no lee así (nunca se toca lo "
                                "cargado a mano):")
                     st.dataframe([{k: v for k, v in f.items() if not k.startswith("_")}
-                                  for f in _mal[:200]], width="stretch", hide_index=True)
+                                  for f in _mal], width="stretch", hide_index=True)
                     if st.button("🧹 Descartar esas lecturas", type="primary",
                                  key="btn_descartar_mal_leidas"):
                         _tocados = descartar_medidas_mal_leidas(_mal)
