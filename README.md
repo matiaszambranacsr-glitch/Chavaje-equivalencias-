@@ -6959,6 +6959,19 @@ Lo pidió el dueño: «sacá el límite de lectura de 200 tandas de catálogo, q
 
 `pruebas_de_las_pantallas.py` lo controla con lecturas de mentira (sin salir a internet): las tres terminan solas, el catálogo manda las dos equivalencias a una sola lista, el portal usa la misma lista en todas las tandas, y al terminar dice cuántas leyó y deja de decir «sigue sola». Si «todas» hiciera una sola tanda, falla.
 
+## ⚡ Lo que se pagaba sin que nadie lo pidiera
+
+Lo pidió el dueño («seguí mejorando»). Medido con la copia de la base real:
+
+| | Antes | Ahora |
+|---|---|---|
+| La primera búsqueda por texto después de un reinicio («bomba de agua gol») | 0,9 a 1,2 s | 0,4 s |
+| 🧹 Limpiar y corregir, cada toque | 0,56 s | 0,38 s |
+
+- **La primera tabla del proceso.** La app no usa pandas directamente: Streamlit lo carga recién con la primera tabla que dibuja (0,37 s; las siguientes, 2 ms), y esa tabla suele ser la de la primera búsqueda por texto, la de alguien en el mostrador. Ahora se carga de antemano, en el hilo de atrás que ya preparaba lo de la búsqueda (`dejar_listo_de_antemano()`).
+- **Los Excel que nadie bajaba.** Once botones «⬇️ Bajar … (Excel)» armaban el archivo en cada dibujo de la pantalla, aunque nadie lo tocara: en «🧹 Limpiar y corregir» eran seis. Desde Streamlit 1.65 el botón puede armarlo recién al tocarlo, en otro hilo, y así quedó. Probado en un navegador con la copia real: el Excel de los códigos con dos precios bajó con sus 150 filas.
+- **Lo que se midió y no hacía falta tocar**: la versión del catálogo se calcula una vez por búsqueda (16 ms), y la búsqueda por código sigue en 0,03 s de promedio con exactamente los mismos resultados que antes de los cambios de estos días (`medir.py busquedas --comparar`: ningún cambio).
+
 ## 📋 Las listas, enteras
 
 Siguiendo con «que sean todas las que se pueda»: varias tablas mostraban las primeras 200 filas sin decirlo, y así parecía que no había más.

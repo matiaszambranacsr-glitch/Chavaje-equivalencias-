@@ -141,7 +141,7 @@ if pagina == PAGINAS[3]:
                                   width="stretch", hide_index=True)
                     st.download_button(
                         "⬇️ Bajarlos en Excel antes de decidir",
-                        data=to_excel_bytes([{k: v for k, v in x.items() if k != "pid"}
+                        data=lambda: to_excel_bytes([{k: v for k, v in x.items() if k != "pid"}
                                               for x in _pv]),
                         file_name="puentes_viejos.xlsx",
                         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
@@ -312,7 +312,7 @@ if pagina == PAGINAS[3]:
                                   width="stretch", hide_index=True)
                     st.download_button(
                         "⬇️ Bajarlos en Excel antes de decidir",
-                        data=to_excel_bytes([{k: v for k, v in x.items() if k != "pid"}
+                        data=lambda: to_excel_bytes([{k: v for k, v in x.items() if k != "pid"}
                                               for x in _adv]),
                         file_name="codigos_adivinados.xlsx",
                         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -474,7 +474,7 @@ if pagina == PAGINAS[3]:
                     st.dataframe(quitar_id(dudosas), width="stretch", hide_index=True)
                     st.download_button(
                         "⬇️ Bajarlos en Excel antes de decidir",
-                        data=to_excel_bytes(quitar_id(dudosas)),
+                        data=lambda: to_excel_bytes(quitar_id(dudosas)),
                         file_name="vinculos_dudosos.xlsx",
                         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
                     )
@@ -522,7 +522,7 @@ if pagina == PAGINAS[3]:
                 st.dataframe(quitar_id(incoherentes), width="stretch", hide_index=True)
                 st.download_button(
                     "⬇️ Bajar la lista en Excel",
-                    data=to_excel_bytes(quitar_id(incoherentes)),
+                    data=lambda: to_excel_bytes(quitar_id(incoherentes)),
                     file_name="precios_incoherentes.xlsx",
                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
                 )
@@ -551,7 +551,7 @@ if pagina == PAGINAS[3]:
                     st.dataframe(muestra_basura, width="stretch", hide_index=True)
                     st.download_button(
                         "⬇️ Descargar la lista completa",
-                        data=to_excel_bytes(listar_codigos_basura(limite=100000)),
+                        data=lambda: to_excel_bytes(listar_codigos_basura(limite=100000)),
                         file_name="codigos_basura.xlsx",
                         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
                     )
@@ -754,7 +754,7 @@ if pagina == PAGINAS[3]:
                                         width="stretch")
                 st.dataframe(quitar_id(_dos_precios), width="stretch", hide_index=True)
                 st.download_button("⬇️ Bajar la lista (Excel)",
-                                   data=to_excel_bytes(quitar_id(_dos_precios)),
+                                   data=lambda: to_excel_bytes(quitar_id(_dos_precios)),
                                    file_name="codigos_con_dos_precios.xlsx",
                                    mime="application/vnd.openxmlformats-officedocument."
                                         "spreadsheetml.sheet")

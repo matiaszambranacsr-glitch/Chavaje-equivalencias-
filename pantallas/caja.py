@@ -254,7 +254,7 @@ if pagina == PAGINAS[11]:
                                    "Devolvió": d["usuario"] or ""} for d in _devs_dia],
                                  width="stretch", hide_index=True)
                 st.download_button("⬇️ Descargar las ventas del día (Excel)",
-                                   data=to_excel_bytes(_filas_dia),
+                                   data=lambda: to_excel_bytes(_filas_dia),
                                    file_name=f"ventas_{_dia_txt}.xlsx", key="venta_excel",
                                    mime="application/vnd.openxmlformats-officedocument."
                                         "spreadsheetml.sheet")

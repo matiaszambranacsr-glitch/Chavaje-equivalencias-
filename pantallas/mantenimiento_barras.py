@@ -186,7 +186,7 @@ if pagina == PAGINAS[3]:
                     st.dataframe(_res_b["sin_producto"][:50], width="stretch", hide_index=True)
                     st.download_button(
                         "⬇️ Bajar los que no encontró",
-                        data=to_excel_bytes(_res_b["sin_producto"]),
+                        data=lambda: to_excel_bytes(_res_b["sin_producto"]),
                         file_name="codigos_sin_producto.xlsx",
                         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
                 if st.button("Listo", key="bm_cerrar"):

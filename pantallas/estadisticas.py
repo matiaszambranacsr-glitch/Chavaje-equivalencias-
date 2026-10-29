@@ -979,7 +979,7 @@ a traer solas desde Administrar → Mantenimiento.
                           width="stretch", hide_index=True)
             st.download_button(
                 "⬇️ Bajar la lista en Excel",
-                data=to_excel_bytes([{k: v for k, v in x.items() if not k.startswith("_")}
+                data=lambda: to_excel_bytes([{k: v for k, v in x.items() if not k.startswith("_")}
                                       for x in discont]),
                 file_name="posibles_discontinuados.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",

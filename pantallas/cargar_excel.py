@@ -1199,7 +1199,7 @@ if pagina == PAGINAS[2]:
                         st.dataframe(filas_omitidas, width="stretch")
                         st.download_button(
                             "⬇️ Descargar filas omitidas",
-                            data=to_excel_bytes(filas_omitidas),
+                            data=lambda: to_excel_bytes(filas_omitidas),
                             file_name="filas_omitidas.xlsx",
                             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
                         )
@@ -1233,7 +1233,7 @@ if pagina == PAGINAS[2]:
                          column_config={"_id": None})
             st.download_button(
                 "⬇️ Bajar la lista completa de precios frenados",
-                data=to_excel_bytes([{k: v for k, v in f.items() if k != "_id"}
+                data=lambda: to_excel_bytes([{k: v for k, v in f.items() if k != "_id"}
                                      for f in _filas_fr]),
                 file_name="precios_frenados.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
