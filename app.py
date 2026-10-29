@@ -644,8 +644,12 @@ except Exception as _err:
     anotar_error("nivel principal", _err)
 
 _corte("tareas automáticas")
+# Solo si se va a mostrar (ver abajo): a quien entra sin contraseña o es del depósito no se
+# le muestran los avisos, y el chequeo le costaba igual medio segundo de la entrada.
+_se_muestra_la_salud = ((es_operador_o_admin() or not hay_claves_configuradas())
+                        and not _es_del_deposito)
 try:
-    _cache_salud = salud_compartida()
+    _cache_salud = salud_compartida() if _se_muestra_la_salud else {"problemas": []}
 except Exception as _err:             # los avisos no pueden impedir que la app abra
     anotar_error("nivel principal/salud", _err)
     _cache_salud = {"problemas": []}
@@ -656,8 +660,7 @@ if not es_admin() and hay_claves_configuradas():
 # Los avisos de salud son del negocio (cuántos productos, qué está roto, clientes esperando):
 # no se le muestran a quien entró sin contraseña. Ver seccion_permitida().
 # Los del depósito tampoco: son tareas de administración, y ellos entran a buscar lo pedido.
-if (_problemas and (es_operador_o_admin() or not hay_claves_configuradas())
-        and not _es_del_deposito):
+if _problemas and _se_muestra_la_salud:
     # Se separa por urgencia en vez de mostrar una lista pareja. Antes todo se veía igual y
     # «hay clientes esperando algo que ya tenés» quedaba mezclado con «hay descripciones
     # pegadas». Lo que da plata va arriba.

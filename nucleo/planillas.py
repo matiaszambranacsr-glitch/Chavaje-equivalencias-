@@ -120,6 +120,7 @@ def _libro_de_excel(archivo):
         return guardados[clave]
     if not isinstance(archivo, str):
         archivo.seek(0)
+    from openpyxl import load_workbook      # recién acá: ver el comentario en base.py
     wb = load_workbook(archivo, data_only=True, read_only=True)
     try:
         libro = {}

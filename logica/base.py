@@ -30,7 +30,9 @@ import itertools
 import types
 from datetime import datetime, timedelta, date, time as dtime
 from urllib.parse import quote
-from openpyxl import load_workbook, Workbook
+# openpyxl NO va acá arriba: cargarlo (con numpy, que trae adentro) costaba 0,17 s en cada
+# arranque, y solo se usa al leer o bajar un Excel. Se importa adentro de leer_excel() y de
+# to_excel_bytes().
 
 
 # Los últimos errores que la app se tragó. Hay 142 lugares donde algo puede fallar y la app

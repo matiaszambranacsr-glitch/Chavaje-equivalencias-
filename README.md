@@ -6959,6 +6959,16 @@ Lo pidió el dueño: «sacá el límite de lectura de 200 tandas de catálogo, q
 
 `pruebas_de_las_pantallas.py` lo controla con lecturas de mentira (sin salir a internet): las tres terminan solas, el catálogo manda las dos equivalencias a una sola lista, el portal usa la misma lista en todas las tandas, y al terminar dice cuántas leyó y deja de decir «sigue sola». Si «todas» hiciera una sola tanda, falla.
 
+## 🚪 La entrada, más rápida
+
+Lo pidió el dueño («seguí mejorando»). Lo que espera el primero que entra después de que el servidor se reinicia —que pasa seguido—, medido con la copia de la base real: **de 1,8–2,2 s a 1,05–1,25 s**.
+
+- **El diagnóstico de salud, solo si se va a mostrar.** Se calculaba para todos, también para quien entra sin contraseña (un cliente) o es del depósito, a los que no se les muestra: medio segundo de la entrada para nada.
+- **Vencido, se rehace por atrás.** El chequeo dura tres minutos; pasados, el toque siguiente de cualquiera esperaba el chequeo entero. Ahora ese toque recibe el de antes y el nuevo se arma en otro hilo. Lo que se invalida porque alguien cambió algo —importar, cortar un vínculo, elegir un precio— se sigue rehaciendo en el momento, para que el aviso cambie enseguida. Y si alguien cambia algo mientras se rehacía por atrás, lo viejo no pisa la invalidación.
+- **El Excel, recién cuando hace falta.** La biblioteca de Excel (openpyxl, que trae numpy adentro) se cargaba en cada arranque: 0,17 s. Ahora se carga al leer o bajar un Excel.
+
+`pruebas_de_carga.py` controla el chequeo compartido (vencido sin esperar, invalidado en el momento, y la carrera entre los dos); con la versión vieja falla.
+
 ## ⚡ Lo que se pagaba sin que nadie lo pidiera
 
 Lo pidió el dueño («seguí mejorando»). Medido con la copia de la base real:

@@ -1850,10 +1850,19 @@ def salud_compartida(segundos_de_vida=180):
     costaba 1,4 s de procesador y el 40% era esto. Llegando juntas, la última esperaba 25 s.
     Ahora lo calcula la primera; las que llegan mientras tanto esperan ESE resultado en vez de
     calcular el suyo, y las siguientes lo reciben hecho hasta que pasen los tres minutos de
-    siempre o alguien cambie algo (invalidar_salud())."""
+    siempre o alguien cambie algo (invalidar_salud()).
+
+    VENCIDA POR TIEMPO, SE REHACE POR ATRÁS. Pasados los tres minutos, el toque siguiente de
+    cualquiera esperaba el chequeo entero: con la copia de la base real, medio segundo cada
+    tres minutos. Ahora ese toque recibe el de antes y el nuevo se arma en otro hilo (lo ve el
+    toque siguiente). Lo que se invalida porque alguien cambió algo se sigue rehaciendo en el
+    momento: el aviso tiene que cambiar enseguida, si no uno no sabe si lo que hizo funcionó."""
     guardado = del_proceso("salud_compartida", dict)
     candado = del_proceso("candado_de_la_salud_compartida", threading.Lock)
     vigente = lambda: guardado.get("momento") and time.time() - guardado["momento"] <= segundos_de_vida
+    if not vigente() and "problemas" in guardado:
+        _rehacer_la_salud_por_atras(guardado, candado)
+        return dict(guardado)
     if not vigente():
         with candado:
             if not vigente():         # otro la calculó mientras se esperaba el candado
@@ -1864,6 +1873,30 @@ def salud_compartida(segundos_de_vida=180):
                     problemas = []
                 guardado.update(momento=time.time(), problemas=problemas)
     return dict(guardado)
+
+
+def _rehacer_la_salud_por_atras(guardado, candado):
+    """El chequeo de salud en otro hilo, uno a la vez (ver salud_compartida()). Si mientras
+    tanto alguien invalidó —cambió algo—, lo que se calculó acá ya es viejo y no se guarda:
+    la marca «rehaciendo» se va con el clear() de invalidar_salud()."""
+    if not candado.acquire(blocking=False):
+        return
+    marca = object()
+    guardado["rehaciendo"] = marca
+
+    def _rehacer():
+        _HILO_DE_FONDO.corriendo = True       # le cede el paso a la pantalla que se dibuja
+        try:
+            ceder_al_mostrador()
+            problemas = diagnostico_de_salud()
+            if guardado.get("rehaciendo") is marca:
+                guardado.update(momento=time.time(), problemas=problemas)
+                guardado.pop("rehaciendo", None)
+        except Exception as _err:      # noqa: BLE001 — queda el de antes, y se reintenta
+            anotar_error("salud_compartida/por_atras", _err)
+        finally:
+            candado.release()
+    threading.Thread(target=_rehacer, daemon=True, name="salud_por_atras").start()
 
 
 def productos_con_vinculos_esperando():

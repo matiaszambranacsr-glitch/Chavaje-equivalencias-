@@ -189,6 +189,43 @@ def probar(L):
     print(f"   {PERSONAS} personas × {VUELTAS_POR_PERSONA} acciones, con copia, salud y "
           f"mantenimiento a la vez: {duro:.1f} s; {pedidos} pedidos, {len(pagos)} pagos, "
           f"{ventas} ventas")
+
+    # EL CHEQUEO DE SALUD COMPARTIDO (ver salud_compartida()). Vencido por tiempo: el toque
+    # recibe el de antes, sin esperar, y el nuevo se arma por atrás. Invalidado porque alguien
+    # cambió algo: se rehace en el momento. Y uno que se estaba rehaciendo por atrás cuando
+    # alguien invalidó no pisa la invalidación con lo viejo.
+    import time as _t
+    g = ns["inflacion_desde"].__globals__
+    _diagnostico, _pedidos_salud, _soltar = g["diagnostico_de_salud"], [], threading.Event()
+
+    def _diagnostico_lento():
+        _pedidos_salud.append(threading.current_thread().name)
+        _soltar.wait(10)
+        return [{"titulo": f"chequeo {len(_pedidos_salud)}", "nivel": "bajo"}]
+    g["diagnostico_de_salud"] = _diagnostico_lento
+    try:
+        ns["invalidar_salud"]()
+        _soltar.set()
+        esperar("sin chequeo, se hace en el momento",
+                [p_["titulo"] for p_ in ns["salud_compartida"]()["problemas"]], ["chequeo 1"])
+        _soltar.clear()
+        ns["del_proceso"]("salud_compartida", dict)["momento"] -= 1000      # venció
+        _inicio = _t.time()
+        _vieja = ns["salud_compartida"]()
+        esperar("vencido: devuelve el de antes, sin esperar",
+                ([p_["titulo"] for p_ in _vieja["problemas"]], _t.time() - _inicio < 1),
+                (["chequeo 1"], True))
+        _hilo = [h for h in threading.enumerate() if h.name == "salud_por_atras"]
+        ns["invalidar_salud"]()          # alguien cambió algo mientras se rehacía
+        _soltar.set()
+        for _h in _hilo:
+            _h.join(10)
+        esperar("lo rehecho por atrás no pisa la invalidación",
+                "problemas" in ns["del_proceso"]("salud_compartida", dict), False)
+        esperar("y el siguiente lo rehace en el momento",
+                [p_["titulo"] for p_ in ns["salud_compartida"]()["problemas"]], ["chequeo 3"])
+    finally:
+        g["diagnostico_de_salud"] = _diagnostico
     return fallas
 
 

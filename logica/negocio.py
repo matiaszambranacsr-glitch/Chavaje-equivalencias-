@@ -2895,6 +2895,7 @@ def quitar_id(filas):
 
 def to_excel_bytes(filas, columnas=None):
     """Genera un archivo .xlsx en memoria a partir de una lista de diccionarios."""
+    from openpyxl import Workbook           # recién acá: ver el comentario en base.py
     wb = Workbook()
     ws = wb.active
     ws.title = "Resultados"
