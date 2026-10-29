@@ -320,12 +320,14 @@ cambio» (todas juntas: `python .github/correr_las_pruebas.py`).
 
 ## Sin prueba automática todavía
 
-- El menú del click derecho, las teclas (F2, F9, F10, F11), el pitido y los textos de Streamlit
-  pasados al castellano: son JavaScript en el navegador (`AYUDAS_DEL_NAVEGADOR`); se probaron con
-  un navegador de verdad, no hay prueba que los corra sola. Lo mismo el formato de los gráficos
+- Las teclas F9, F10 y F11 y el pitido: son JavaScript en el navegador (`AYUDAS_DEL_NAVEGADOR`)
+  y se probaron con un navegador de verdad. El cursor en la caja de búsqueda al entrar a Ventas y
+  al Buscador, F2, el menú del click derecho y los textos de Streamlit pasados al castellano ya
+  tienen prueba: `python3 pruebas/navegador.py`, que levanta la app con un Chromium (se corre a
+  mano: en GitHub no hay navegador; sin Playwright, se saltea). Lo mismo el formato de los gráficos
   (`grafico_de_barras()`), lo que se mueve en la pantalla (la barra que trabaja, los números que
   se iluminan: «LO QUE SE MUEVE» en `logica/base.py`) que el aviso al vendedor llegue solo cada
-  20 segundos, el cursor en la caja de búsqueda al entrar a cada pantalla y, en el teléfono, que
+  20 segundos, el cursor en la caja de búsqueda de las demás pantallas y, en el teléfono, que
   la pantalla baje sola hasta lo encontrado después de buscar: lo hace el navegador.
 - Lo que necesita la base real (`pruebas_de_la_revision.py --base`, `pruebas_de_compatibilidad.py`)
   no corre en GitHub: se corre a mano antes de publicar.

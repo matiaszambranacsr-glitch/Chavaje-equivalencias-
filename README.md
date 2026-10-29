@@ -6959,6 +6959,17 @@ Lo pidió el dueño: «sacá el límite de lectura de 200 tandas de catálogo, q
 
 `pruebas_de_las_pantallas.py` lo controla con lecturas de mentira (sin salir a internet): las tres terminan solas, el catálogo manda las dos equivalencias a una sola lista, el portal usa la misma lista en todas las tandas, y al terminar dice cuántas leyó y deja de decir «sigue sola». Si «todas» hiciera una sola tanda, falla.
 
+## 🖱️ Lo del navegador, con prueba
+
+Lo que corre en el navegador —el JavaScript de `AYUDAS_DEL_NAVEGADOR`— no lo ve ninguna de las pruebas de siempre: AppTest corre la app sin navegador. Se probaba a mano, y estaba en «Sin prueba automática todavía» de CONTRATOS.md. Ahora `python3 pruebas/navegador.py` levanta la app con una base de prueba, entra con un Chromium y controla:
+
+- al entrar a 🧾 Ventas y al 🔍 Buscador, el cursor queda en la caja de búsqueda (el lector de códigos de barras escanea derecho);
+- F2 vuelve a la caja desde cualquier lado;
+- el click derecho sobre un resultado abre el menú con «Sumar a la venta», y Escape lo cierra;
+- el recuadro para subir un archivo está en castellano («Elegir archivo», «Hasta 200MB por archivo»).
+
+Se corre a mano (en GitHub no hay navegador; si falta Playwright, avisa y no falla), y tarda unos 40 segundos. Probada contra un JavaScript roto a propósito: con F2 cambiado por F3 y sin la traducción de «Upload», falla en las dos. De paso se vio que Streamlit 1.65 ya no dice «Drag and drop file here» ni «Browse files» sino «Upload»: la app lo traducía igual.
+
 ## 🚪 La entrada, más rápida
 
 Lo pidió el dueño («seguí mejorando»). Lo que espera el primero que entra después de que el servidor se reinicia —que pasa seguido—, medido con la copia de la base real: **de 1,8–2,2 s a 1,05–1,25 s**.

@@ -28,6 +28,8 @@ Todo —pantallas, nombres, comentarios, mensajes de commit— va en castellano 
 - Cuánto tarda cada pantalla en un toque y dónde se va el tiempo: `python pruebas/medir.py --base <copia> toques` (con `--guardar`/`--comparar` igual).
 - Las pantallas más lentas con la base real: `python pruebas/pruebas_de_las_pantallas.py --base <copia>`.
 - Probar en el navegador: Chromium y Playwright ya están instalados (`/opt/pw-browsers/chromium`).
+  `python3 pruebas/navegador.py --python <el Python con Streamlit>` prueba el JavaScript (cursor,
+  F2, click derecho, castellano) con la app de verdad; correrlo si se toca `AYUDAS_DEL_NAVEGADOR`.
 
 ## Reglas que el auditor hace cumplir
 
