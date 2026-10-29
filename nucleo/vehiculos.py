@@ -538,6 +538,17 @@ def _armar_buscador_de_familias():
 _BUSCADOR_DE_FAMILIAS = _armar_buscador_de_familias()
 
 
+# EL CABLE DE BUJÍA TIENE VARIOS NOMBRES. FISPA escribe «CABLE DE BUJIA», TARANTO «CABLE
+# ENCENDIDO» y otras listas «CABLES BUJIA» o «JUEGO CABLES DE BUJIA»: es la misma pieza. Solo la
+# primera forma estaba entre las claves de Eléctrico y encendido; las otras caían en «CABLE», de
+# Cables y comandos (el del acelerador, el del velocímetro), y con rubros distintos las reglas
+# no podían vincular nunca el mismo cable de dos listas. Pasó con el del Onix y el Prisma:
+# TARANTO SC-G101 y FISPA LEIHTG101SC son el mismo cable, unidos por su número de fábrica.
+# En la base real, 24 cables de TARANTO.
+_RE_CABLE_DE_BUJIA = re.compile(
+    r" (?:(?:JUEGO|JGO|KIT) (?:DE )?)?CABLES? (?:DE |P |PARA )?(?:BUJIAS?|ENCENDIDO) ")
+
+
 def clasificar_repuesto(descripcion):
     """Devuelve a qué familia pertenece un repuesto, mirando su descripción.
 
@@ -562,6 +573,7 @@ def clasificar_repuesto(descripcion):
     texto = _normalizar_desc(descripcion)
     if not texto.strip():
         return "Sin clasificar"
+    texto = _RE_CABLE_DE_BUJIA.sub(" CABLE DE BUJIA ", texto)
     patron, familia_de_la_forma = _BUSCADOR_DE_FAMILIAS
     hallado = patron.search(texto)
     return familia_de_la_forma[hallado.group(1)] if hallado else "Sin clasificar"

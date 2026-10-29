@@ -2764,6 +2764,21 @@ def probar(L):
     esperar("nunca el texto con una dirección o una clave, aunque parezca castellano",
             _cast(ValueError("no se pudo entrar a https://portal.com/?usuario=ana&clave=secreta")),
             "falló algo adentro (ValueError)")
+
+    # 104. EL CABLE DE BUJÍA CON SUS NOMBRES (ver _RE_CABLE_DE_BUJIA): «CABLE ENCENDIDO» de
+    # TARANTO y «CABLE DE BUJIA» de FISPA son la misma pieza y caen en el mismo rubro; el cable
+    # del acelerador sigue en el suyo, y un cable contra una bujía del mismo auto no se vinculan.
+    _rubro = ns["clasificar_repuesto"]
+    esperar("los nombres del cable de bujía, el mismo rubro",
+            {_rubro(d) for d in ("CABLE DE BUJIA ONIX", "CABLE ENCENDIDO GM ONIX",
+                                 "CABLES BUJIA FIAT PALIO", "JUEGO CABLES DE BUJIA GOL")},
+            {"Eléctrico y encendido"})
+    esperar("el del acelerador, en el suyo", _rubro("CABLE DE ACELERADOR GOL"),
+            "Cables y comandos")
+    esperar("un cable y una bujía del mismo auto no son la misma pieza",
+            ns["firmas_compatibles"](ns["firma_de_producto"]("CABLE ENCENDIDO GM ONIX 1.4", None),
+                                     ns["firma_de_producto"]("BUJIA NGK GM ONIX 1.4", None))[0],
+            False)
     return fallas
 
 

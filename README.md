@@ -6959,6 +6959,14 @@ Lo pidió el dueño: «sacá el límite de lectura de 200 tandas de catálogo, q
 
 `pruebas_de_las_pantallas.py` lo controla con lecturas de mentira (sin salir a internet): las tres terminan solas, el catálogo manda las dos equivalencias a una sola lista, el portal usa la misma lista en todas las tandas, y al terminar dice cuántas leyó y deja de decir «sigue sola». Si «todas» hiciera una sola tanda, falla.
 
+## 🔌 El cable de bujía, con todos sus nombres
+
+Mirando el pendiente «SC-G101 une un juego de cables con bujías». El cable del Onix y el Prisma aparece en TARANTO como «CABLE ENCENDIDO GM ONIX, PRISMA» (SC-G101) y en FISPA como «CABLE DE BUJIA … Onix - Prisma» (LEIHTG101SC): es la misma pieza, unida por su número de fábrica. Pero las reglas lo leían en dos rubros distintos: «CABLE DE BUJIA» era de Eléctrico y encendido, y «CABLE ENCENDIDO», «CABLES BUJIA» o «JUEGO CABLES DE BUJIA» caían en «CABLE», el rubro del cable del acelerador. Con rubros distintos, las reglas no podían vincular nunca el mismo cable de dos listas.
+
+Ahora las cuatro formas caen en Eléctrico y encendido (`_RE_CABLE_DE_BUJIA`). El cable del acelerador sigue en su rubro, y un cable contra una bujía del mismo auto sigue dando «piezas distintas». En la base real son 24 cables de TARANTO, sin vínculos ni pares pendientes todavía: el cambio corrige lo que se arme de acá en adelante, y por eso no se cambió la versión de las reglas (eso recalcularía todos los vínculos para nada). Medido con `medir.py` antes y después: búsquedas, cola, fichas y texto, ningún cambio. `pruebas_de_la_precision.py` (104) lo controla; con la versión vieja falla.
+
+Lo que sí sigue para mirar a mano: el código de fábrica SC-G101 quedó vinculado con dos bujías de JL (WR 7 DC y 14 R 7DU), y en la cola esperan dos bujías NGK y un kit de cables y bujías.
+
 ## 🖱️ Lo del navegador, con prueba
 
 Lo que corre en el navegador —el JavaScript de `AYUDAS_DEL_NAVEGADOR`— no lo ve ninguna de las pruebas de siempre: AppTest corre la app sin navegador. Se probaba a mano, y estaba en «Sin prueba automática todavía» de CONTRATOS.md. Ahora `python3 pruebas/navegador.py` levanta la app con una base de prueba, entra con un Chromium y controla:
