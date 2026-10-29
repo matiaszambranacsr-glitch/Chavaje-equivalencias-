@@ -618,6 +618,51 @@ def probar(L):
                 ((1024, 768), True, None))
     finally:
         g["_cliente_de_gemini"], g["secretos_app"] = _originales_ia
+
+    # 11. LA SESIÓN DEL PORTAL (ver sesion_de_portal()). Se guardaba 60 minutos pero se cierra
+    # sola a los 20: del 20 al 60 todo fallaba y «volver a entrar» daba la misma cerrada. Y el
+    # tope de consultas es por sesión: «todas las fichas» se cortaba a las 400. Un portal
+    # público (una marca con dirección de catálogo): abrir la sesión no sale a internet.
+    _c = g["c"]
+    _c.execute("INSERT INTO marcas (nombre, tipo, url_ficha_template) VALUES "
+               "('PORTALPRUEBA', 'PROVEEDOR', 'https://ejemplo.invalid/{codigo}')")
+    _mp = _c.lastrowid
+    _c.executemany("INSERT INTO productos (codigo_raw, codigo_clean, descripcion, marca_id) "
+                   "VALUES (?, ?, 'X', ?)", [(f"PP{i}", f"PP{i}", _mp) for i in range(3)])
+    g["conn"].commit()
+    ns["del_proceso"]("sesiones_de_portal", dict).pop("PORTALPRUEBA", None)
+    _s1 = ns["sesion_de_portal"]("PORTALPRUEBA")[0]
+    esperar("portal: la sesión se reusa", ns["sesion_de_portal"]("PORTALPRUEBA")[0] is _s1, True)
+    _s1._abierta -= 25 * 60
+    _s2 = ns["sesion_de_portal"]("PORTALPRUEBA")[0]
+    esperar("portal: la que se cerró sola a los 20 minutos se cambia", _s2 is not _s1, True)
+    _s2._consultas = ns["TOPE_CONSULTAS_PORTAL"] - 10
+    _s3 = ns["sesion_de_portal"]("PORTALPRUEBA", consultas=50)[0]
+    esperar("portal: si a la tanda no le alcanza, otra", _s3 is not _s2, True)
+    _s3._consultas = ns["TOPE_CONSULTAS_PORTAL"]
+    try:
+        _s3.get("https://ejemplo.invalid/PP0")
+        esperar("portal: el tope sigue frenando adentro de una sesión", "no frenó", "frenó")
+    except PermissionError:
+        pass
+
+    class _Pagina:
+        status_code, text, headers, content = 200, "<html><body>nada</body></html>", {}, b""
+    _pedidas_portal, _sesiones_pedidas = [], []
+    _abrir_sesion = g["sesion_de_portal"]
+
+    def _contar_sesiones(nombre, consultas=0):
+        _sesiones_pedidas.append(consultas)
+        _ses, _err = _abrir_sesion(nombre, consultas)
+        _ses._sesion.get = lambda url, **k: _pedidas_portal.append(url) or _Pagina()
+        return _ses, _err
+    g["sesion_de_portal"] = _contar_sesiones
+    try:
+        ns["leer_fichas_del_portal"](_mp, "PORTALPRUEBA", 3, pausa=0)
+    finally:
+        g["sesion_de_portal"] = _abrir_sesion
+    esperar("portal: una sola sesión por tanda, pedida para las fichas de la tanda",
+            (_sesiones_pedidas, len(_pedidas_portal)), ([6], 3))
     return fallas
 
 

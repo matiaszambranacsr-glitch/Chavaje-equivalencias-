@@ -332,6 +332,12 @@ class SesionSoloLectura:
         self._abierta = time.time()
         self.visitadas = []          # queda el registro de todo lo que se abrió
 
+    def le_alcanza(self, consultas=0, minutos=2):
+        """¿Le entran `consultas` más antes del tope, y le quedan `minutos` de vida? Si no, hay
+        que abrir otra (ver sesion_de_portal())."""
+        return (self._consultas + consultas <= TOPE_CONSULTAS_PORTAL
+                and time.time() - self._abierta < (MINUTOS_VIDA_SESION - minutos) * 60)
+
     def _revisar(self, url, salto=""):
         ok, palabra = _url_solo_de_consulta(url)
         if not ok:
@@ -392,12 +398,18 @@ class SesionSoloLectura:
         )
 
 
-def sesion_de_portal(nombre_marca):
+def sesion_de_portal(nombre_marca, consultas=0):
     """Entra al portal del proveedor y devuelve la sesión abierta. (sesion, error).
 
     La sesión se guarda en memoria: entrar una vez por marca y reusarla. Hacer login en cada
     producto es maltratar el servidor del proveedor y la forma más rápida de que te bloqueen.
-    """
+
+    Se reusa solo si le alcanza para `consultas` más y no está por cerrarse (le_alcanza()).
+    Antes se guardaba 60 minutos, pero se cierra sola a los 20: del minuto 20 al 60 cada
+    lectura fallaba con «volvé a entrar», y volver a entrar devolvía la misma sesión cerrada.
+    Y el tope de TOPE_CONSULTAS_PORTAL es por sesión: frena un bucle que se dispara solo dentro
+    de una tanda, pero «todas las que falten» —que lee solo lo pendiente y termina sola— se
+    cortaba a las 400 fichas. Ahora cada tanda que no entra arranca con otra sesión."""
     cfg = config_portal(nombre_marca)
     if not cfg:
         return None, ("No hay portal configurado para esa marca. Se carga en "
@@ -405,7 +417,8 @@ def sesion_de_portal(nombre_marca):
     if cfg.get("_bloqueado"):
         return None, cfg["_bloqueado"]
     _guardada = _SESIONES_PORTAL.get(nombre_marca)
-    if _guardada and time.time() - _guardada[1] < MINUTOS_DE_SESION_DE_PORTAL * 60:
+    if (_guardada and time.time() - _guardada[1] < MINUTOS_DE_SESION_DE_PORTAL * 60
+            and _guardada[0].le_alcanza(consultas)):
         return _guardada[0], None
     if cfg.get("publico"):
         # Sin usuario ni clave: no hay login que hacer. Si el catálogo tiene su usuario en
@@ -456,12 +469,17 @@ def sesion_de_portal(nombre_marca):
                       "de acceso y la conexión.")
 
 
-def _html_de_la_ficha_del_portal(nombre_marca, codigo, tiempo_maximo=20):
+def _html_de_la_ficha_del_portal(nombre_marca, codigo, tiempo_maximo=20, sesion=None):
     """La página de la ficha de ese código en el portal del proveedor. (html, error).
 
     Una sola visita sirve para todo lo que se lee de la ficha —los autos y los productos que el
-    portal muestra al lado—: pedirla dos veces sería el doble de consultas contra el portal."""
-    sesion, error = sesion_de_portal(nombre_marca)
+    portal muestra al lado—: pedirla dos veces sería el doble de consultas contra el portal.
+
+    `sesion`: la de la tanda (ver leer_fichas_del_portal()). Pedirla de nuevo en cada ficha
+    abriría otra al llegar al tope, y el tope no frenaría nunca nada."""
+    error = None
+    if sesion is None:
+        sesion, error = sesion_de_portal(nombre_marca)
     if error:
         return "", error
     cfg = config_portal(nombre_marca)
@@ -688,7 +706,8 @@ def leer_fichas_del_portal(marca_id, nombre_marca, cuantos=25, progreso=None, pa
     cada minuto armaba una lista nueva y una lectura de una hora dejaba sesenta."""
     resumen = {"leidas": 0, "con_autos": 0, "con_productos": 0, "listados": 0,
                "sin_ficha": 0, "pares": 0, "nuevos": 0, "lote": "", "error": ""}
-    _sesion, error = sesion_de_portal(nombre_marca)
+    # Hasta dos pedidos por ficha (el buscador y la ficha): ver sesion_de_portal().
+    _sesion, error = sesion_de_portal(nombre_marca, consultas=2 * int(cuantos))
     if error:
         resumen["error"] = error
         return resumen
@@ -704,7 +723,8 @@ def leer_fichas_del_portal(marca_id, nombre_marca, cuantos=25, progreso=None, pa
     pares, leidas = [], []
     fallas_seguidas = 0
     for i, prod in enumerate(pendientes):
-        html, err = _html_de_la_ficha_del_portal(nombre_marca, prod["codigo_raw"])
+        html, err = _html_de_la_ficha_del_portal(nombre_marca, prod["codigo_raw"],
+                                                 sesion=_sesion)
         if err and ("tope" in err or "cerró sola" in err or "PermissionError" in err):
             resumen["error"] = err
             break

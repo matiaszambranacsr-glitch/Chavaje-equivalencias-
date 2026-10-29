@@ -6954,6 +6954,8 @@ Lo pidió el dueño: «sacá el límite de lectura de 200 tandas de catálogo, q
 - **Todo a una sola lista** («CATÁLOGO …» o «PORTAL …» con la hora en que empezó). Antes cada minuto armaba una lista nueva: una lectura de una hora habría dejado sesenta.
 - **Termina sola**: cuando una tanda no encuentra nada por leer. Lo que falla queda marcado y no se vuelve a pedir ese día, así que no gira sobre lo mismo. Si el sitio falla en más de la mitad de una tanda, se corta para no insistirle: insistirle a un sitio caído es la forma más rápida de que te bloquee.
 - **«Volver a leer» con «todas»** olvida qué fichas de esa marca ya se leyeron y las lee de nuevo (`volver_a_leer_las_fichas()`).
+- **El portal ya no se corta a las 400.** La sesión con el portal tiene un tope de 400 consultas: es un freno por si algo se dispara solo, y «todas» se habría cortado ahí. Ahora cada tanda que no entra en lo que le queda a la sesión arranca con otra; adentro de una tanda el freno sigue igual, porque todas sus fichas usan la misma.
+- **Y un error que ya estaba**: la sesión se guardaba 60 minutos, pero se cierra sola a los 20. Del minuto 20 al 60 cada lectura fallaba con «volvé a entrar», y volver a entrar devolvía la misma sesión cerrada. Ahora se cambia por otra antes de que se cierre (`le_alcanza()`). `pruebas_de_las_fuentes.py` (11) lo controla, y con la versión vieja falla.
 
 `pruebas_de_las_pantallas.py` lo controla con lecturas de mentira (sin salir a internet): las tres terminan solas, el catálogo manda las dos equivalencias a una sola lista, el portal usa la misma lista en todas las tandas, y al terminar dice cuántas leyó y deja de decir «sigue sola». Si «todas» hiciera una sola tanda, falla.
 
