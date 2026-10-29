@@ -700,16 +700,58 @@ if pagina == PAGINAS[3]:
 
         if _grupo_mant == GRUPOS_MANTENIMIENTO[1]:
             _dos_precios = codigos_con_dos_precios_en_la_misma_lista()
+            # Lo que dijo el último botón de la tarjeta de abajo. Afuera de la sección: después
+            # de elegir el último, la sección ya no se dibuja y el aviso se perdía.
+            _aviso_dp = st.session_state.pop("_dos_precios_aviso", None)
+            if _aviso_dp and not _dos_precios:
+                getattr(st, _aviso_dp[0])("💲 " + _aviso_dp[1] + " No queda ninguno para decidir.")
             if _dos_precios:
                 st.markdown("---")
                 st.markdown("**💲 Códigos que vinieron dos veces con precios distintos**")
+                if _aviso_dp:
+                    getattr(st, _aviso_dp[0])(_aviso_dp[1])
                 explicar(
                     f"{miles(len(_dos_precios))} código(s) vinieron en dos renglones de la misma "
                     "lista con dos precios distintos, y quedó el último sin que nadie eligiera.",
                     "Puede ser la unidad y la caja, o —más seguido cuando la diferencia es "
                     "enorme— dos productos que se escriben casi igual y que, sin los signos, "
-                    "quedan en el mismo código. Mirá la descripción y corregí el precio a mano "
-                    f"en {miga_hasta('Productos')} si el que quedó no es el que vendés.")
+                    "quedan en el mismo código. Mirá la descripción y elegí abajo, de a uno, el "
+                    "precio que vendés. Lo elegido no vuelve a aparecer, salvo que otra lista "
+                    "lo traiga doble de nuevo.")
+                # De a uno, con un botón por precio (ver elegir_el_precio_doble()).
+                _salteados_dp = st.session_state.get("dos_precios_salteados", [])
+                _pend_dp = [f for f in _dos_precios if f["ID"] not in _salteados_dp]
+                if not _pend_dp:            # se dieron vuelta todos: de nuevo desde el primero
+                    st.session_state["dos_precios_salteados"] = []
+                    _pend_dp = _dos_precios
+                _f_dp = _pend_dp[0]
+                with st.container(border=True):
+                    st.markdown(f"**{_f_dp['Marca']} {_f_dp['Código']}** — "
+                                f"{_f_dp['Descripción'] or 'sin descripción'}")
+                    # Cuántas veces más: en la base real va de poco más de 1 a 100 (la mayoría
+                    # de IMPERIAL: ×17, ×55, ×41…). Ayuda a ver si es la unidad contra la caja,
+                    # otro producto que se escribe igual, o un precio con la coma corrida.
+                    _veces_dp = (_f_dp["_precios"][-1] / _f_dp["_precios"][0]
+                                 if _f_dp["_precios"][0] > 0 else None)
+                    _cuantas_veces_dp = (
+                        f"; el más caro es {miles(_veces_dp, 0 if _veces_dp >= 10 else 1)} veces "
+                        "el más barato" if _veces_dp else "")
+                    st.caption(f"Quedó {formato_precio(_f_dp['Precio que quedó'])}"
+                               f"{_cuantas_veces_dp}. "
+                               f"Quedan {miles(len(_dos_precios))} para decidir.")
+                    _cols_dp = st.columns(len(_f_dp["_precios"]) + 1)
+                    for _k_dp, _p_dp in enumerate(_f_dp["_precios"]):
+                        _es_el_que_quedo = (_f_dp["Precio que quedó"] is not None and abs(
+                            _p_dp - float(_f_dp["Precio que quedó"])) < 0.005)
+                        _cols_dp[_k_dp].button(
+                            ("✅ Dejar " if _es_el_que_quedo else "Cambiar a ")
+                            + formato_precio(_p_dp), key=f"dos_precios_{_k_dp}",
+                            on_click=cb_elegir_el_precio_doble,
+                            args=(_f_dp["ID"], _p_dp, _f_dp["Precio que quedó"]),
+                            width="stretch")
+                    _cols_dp[-1].button("⏭️ Después", key="dos_precios_despues",
+                                        on_click=cb_saltear_el_precio_doble, args=(_f_dp["ID"],),
+                                        width="stretch")
                 st.dataframe(quitar_id(_dos_precios[:200]), width="stretch", hide_index=True)
                 st.download_button("⬇️ Bajar la lista (Excel)",
                                    data=to_excel_bytes(quitar_id(_dos_precios)),

@@ -6932,6 +6932,19 @@ Lo pidió el dueño: «mejorá absolutamente todo». Primero se midió dónde la
 
 `pruebas_de_las_fuentes.py` controla las esperas: con la versión vieja, falla.
 
+## 💲 Los códigos con dos precios, de a uno
+
+Lo pidió el dueño («seguí mejorando»), y estaba en la lista de pendientes: «150 códigos con dos precios». Son códigos que una lista trajo en dos renglones con dos precios distintos, y quedó el último sin que nadie eligiera. Casi todos de IMPERIAL: la junta «SWI-316D-1/2"» vino a \$ 1.839 y a \$ 183.747.
+
+Antes «🧹 Limpiar y corregir» mostraba la tabla y decía «corregí el precio a mano en Productos»: buscar cada código, abrirlo y escribir el número, 150 veces. Ahora arriba de la tabla hay una tarjeta con el primero:
+
+- **Un botón por precio**: «Cambiar a \$ 1.839» o «✅ Dejar \$ 183.747» (el que quedó). Y «⏭️ Después», que pasa al siguiente sin decidir.
+- **Cuántas veces más caro** es uno que el otro. En la base real va de poco más de 1 a 100 (×17, ×55, ×41…): ayuda a ver si es la unidad contra la caja, otro producto que se escribe igual o una coma corrida.
+- **Cambiar** se guarda como un cambio de precio a mano, con su renglón en el historial, y solo si el precio sigue siendo el que se mostraba: si otro lo cambió mientras tanto, no se pisa y se avisa. El stock no se toca.
+- **Lo elegido no vuelve**, salvo que otra lista lo traiga doble de nuevo. Se anota con la fecha del último precio del producto (`elegir_el_precio_doble()`), y baja el número del aviso en la salud.
+
+Probado en un navegador con la copia de la base real: «⏭️ Después» pasó al segundo, «✅ Dejar» dijo «Queda \$ 236.234» y quedaron 149. `pruebas_de_la_plata_y_el_stock.py` (9) controla cambiar, dejar, el precio que otro cambió y que vuelva con otra lista; `pruebas_de_las_pantallas.py`, la tarjeta y el botón (si el botón no guarda, falla). La prueba encontró un error antes de publicar: al elegir el último, la sección dejaba de dibujarse y el aviso no se veía.
+
 ## ✅ Verificada por el número de fábrica, y los espesores aparte
 
 Lo pidió el dueño: «mejorá más la equivalencia y la búsqueda de productos». Medido sobre la copia de la base con `pruebas/medir.py`.

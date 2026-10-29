@@ -417,6 +417,34 @@ def probar():
                         or not any("quedan 2 en la cola" in x.value for x in at.markdown)
                         or not any("Deshecho" in x.value for x in at.info)):
                     fallas.append("de a uno: «↩️ Deshacer» no vuelve el par a la cola")
+    # 💲 Los códigos que vinieron dos veces con dos precios: la tarjeta con un botón por precio
+    # (ver elegir_el_precio_doble()). «Cambiar a» guarda ese precio y el código sale de la
+    # lista. Con la base real hay otros antes, y no se toca nada: solo que esté la tarjeta.
+    c.execute("INSERT INTO productos (codigo_raw, codigo_clean, descripcion, marca_id, precio) "
+              "VALUES ('DOBLE1', 'DOBLE1', 'JUNTA TAPA DE CILINDROS', ?, 500)", (_marca_prueba,))
+    _doble = c.lastrowid
+    c.executemany("INSERT INTO historial_precios (producto_id, precio) VALUES (?, ?)",
+                  [(_doble, 100), (_doble, 500)])
+    conn.commit()
+    _solapas_adm, _clave_adm = ns["SOLAPAS_DE_LA_PAGINA"]["🗂️ Administrar"]
+    at.session_state["pagina_actual"] = "🗂️ Administrar"
+    at.session_state[_clave_adm] = ns["SUB_ADMIN"][4]
+    at.session_state["sub_mantenimiento"] = ns["GRUPOS_MANTENIMIENTO"][1]
+    at.run()
+    _cambiar = [b for b in at.button
+                if (b.key or "").startswith("dos_precios_") and "Cambiar a" in b.label]
+    if not _cambiar:
+        fallas.append("💲 dos precios: no está la tarjeta para elegir el precio")
+    elif "--base" not in sys.argv:
+        if not any("DOBLE1" in x.value for x in at.markdown):
+            fallas.append("💲 dos precios: la tarjeta no muestra el código")
+        _cambiar[0].click().run()
+        if c.execute("SELECT precio FROM productos WHERE id = ?", (_doble,)).fetchone()[0] != 100:
+            fallas.append("💲 dos precios: «Cambiar a» no guardó el precio")
+        elif (any("DOBLE1" in x.value for x in at.markdown)
+              or not any("Cambió a" in x.value and "No queda ninguno" in x.value
+                         for x in at.success)):
+            fallas.append("💲 dos precios: después de elegir sigue en la lista, o no lo dice")
     at.session_state["pagina_actual"] = ns["PAGINAS"][0]
     recorrer("operador")
     [b for b in at.button if b.label == "Salir"][0].click().run()

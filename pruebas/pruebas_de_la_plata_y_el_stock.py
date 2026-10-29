@@ -228,6 +228,35 @@ def probar(L):
             [(f["ID"], f["Precios en la lista"]) for f in
              ns["codigos_con_dos_precios_en_la_misma_lista"]() if f["Marca"] == "HISTO"],
             [(_doble, " / ".join(ns["formato_precio"](x) for x in (100, 500)))])
+
+    # 9. Elegir el precio de los que vinieron dos veces (ver elegir_el_precio_doble()):
+    # cambiarlo lo guarda como un cambio a mano; dejar el que quedó no toca nada; los dos salen
+    # de la lista. Si otro lo cambió mientras tanto, no se pisa. Y si otra lista lo vuelve a
+    # traer doble, vuelve.
+    _otro = _con_historial("D8", (200, "-1 days"), (900, "-1 days"))
+    _tercero = _con_historial("D7", (50, "-1 days"), (70, "-1 days"))
+    conn.commit()
+
+    def _en_la_lista():
+        return sorted(f["ID"] for f in ns["codigos_con_dos_precios_en_la_misma_lista"]()
+                      if f["Marca"] == "HISTO")
+    _precio = lambda pid: uno("SELECT precio FROM productos WHERE id = ?", pid)
+    esperar("los tres para elegir", _en_la_lista(), sorted([_doble, _otro, _tercero]))
+    esperar("cambiar a otro precio", ns["elegir_el_precio_doble"](_doble, 100, 500)[0], True)
+    esperar("queda ese precio, con su renglón en el historial",
+            (_precio(_doble), uno("SELECT COUNT(*) FROM historial_precios WHERE producto_id = ?",
+                                  _doble)), (100, 3))
+    esperar("dejar el que quedó", ns["elegir_el_precio_doble"](_otro, 900, 900)[0], True)
+    esperar("no lo toca", (_precio(_otro), uno(
+        "SELECT COUNT(*) FROM historial_precios WHERE producto_id = ?", _otro)), (900, 2))
+    esperar("si otro lo cambió mientras tanto, no se pisa",
+            (ns["elegir_el_precio_doble"](_tercero, 50, 60)[0], _precio(_tercero)), (False, 70))
+    esperar("los elegidos salen de la lista", _en_la_lista(), [_tercero])
+    c.execute("INSERT INTO historial_precios (producto_id, precio, fecha) VALUES "
+              "(?, 500, datetime('now', '+1 hours')), (?, 990, datetime('now', '+1 hours'))",
+              (_otro, _otro))
+    conn.commit()
+    esperar("otra lista lo trae doble: vuelve", _en_la_lista(), sorted([_otro, _tercero]))
     return fallas
 
 

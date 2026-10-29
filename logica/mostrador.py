@@ -960,13 +960,17 @@ def codigos_con_dos_precios_en_la_misma_lista(limite=500):
     junta «H21A1/2"RF1,5» vino a $643 y a $48.209 —75 veces—, que es más bien dos productos que
     se escriben casi igual y que, sin los signos, quedan en el mismo código. Se avisaba solo en
     el momento de importar."""
+    # Lo que ya se eligió no vuelve, hasta que otra importación lo traiga doble de nuevo (ver
+    # elegir_el_precio_doble()).
+    decididos = _precios_dobles_decididos()
     # FILA Y NO PAR: es el historial de cada producto, no una relación.
     # Primero los productos con dos precios anotados o más: en la base real son 155 de 71.636,
     # y la pregunta de la última importación se hacía para todos. Corre en cada clic de «🧹
     # Limpiar y corregir» y en el diagnóstico de salud: de 0,17 s a 0,01 s, con las mismas filas.
     c.execute("""SELECT p.id AS "ID", m.nombre AS "Marca", p.codigo_raw AS "Código",
                         p.descripcion AS "Descripción", p.precio AS "Precio que quedó",
-                        GROUP_CONCAT(DISTINCT h.precio) AS "Precios en la lista"
+                        GROUP_CONCAT(DISTINCT h.precio) AS "Precios en la lista",
+                        MAX(h.fecha) AS "_importado"
                  FROM historial_precios h
                  JOIN (SELECT producto_id FROM historial_precios GROUP BY producto_id
                        HAVING COUNT(*) >= 2) varios ON varios.producto_id = h.producto_id
@@ -978,12 +982,76 @@ def codigos_con_dos_precios_en_la_misma_lista(limite=500):
                  HAVING COUNT(DISTINCT h.precio) >= 2
                     AND MAX(h.precio) > MIN(h.precio) * 1.05
                  ORDER BY MAX(h.precio) / MIN(h.precio) DESC, p.id
-                 LIMIT ?""", (limite,))
-    filas = filas_a_listas(c)
+                 LIMIT ?""", (limite + len(decididos),))
+    filas = [f for f in filas_a_listas(c)
+             if decididos.get(str(f["ID"])) != f["_importado"]][:limite]
     for f in filas:
-        f["Precios en la lista"] = " / ".join(
-            formato_precio(x) for x in sorted(float(v) for v in str(f["Precios en la lista"]).split(",")))
+        f["_precios"] = sorted(float(v) for v in str(f["Precios en la lista"]).split(","))
+        f["Precios en la lista"] = " / ".join(formato_precio(x) for x in f["_precios"])
     return filas
+
+
+# EL PRECIO QUE SE ELIGIÓ, de los códigos que vinieron dos veces. Antes la pantalla mostraba la
+# lista y decía «corregí el precio a mano en Productos»: en la base real son 150, cada uno
+# buscarlo, abrirlo y escribir el número. Ahora cada uno tiene un botón por precio.
+# Lo decidido se anota con la fecha del último renglón del historial del producto, que es la
+# importación que lo trajo doble (o el cambio de precio recién hecho): si otra lista lo vuelve a
+# traer con dos precios, la fecha cambia y es otra pregunta.
+PRECIOS_DOBLES_DECIDIDOS = "precios_dobles_decididos"
+
+
+def _precios_dobles_decididos():
+    """{id del producto (texto): fecha de su último precio cuando se decidió}."""
+    try:
+        decididos = json.loads(obtener_config(PRECIOS_DOBLES_DECIDIDOS, "") or "{}")
+    except ValueError:
+        return {}
+    return decididos if isinstance(decididos, dict) else {}
+
+
+def elegir_el_precio_doble(producto_id, precio, precio_mostrado):
+    """Deja `precio` en un código que vino con dos precios, y lo saca de la lista. (ok, texto).
+
+    Si es el que ya quedó, no se toca nada: solo se anota que alguien lo eligió. Si es otro, se
+    guarda como un cambio a mano (actualizar_precio_stock(), con su renglón en el historial), y
+    solo si en la base sigue el precio que se mostraba: si otro lo cambió mientras tanto, no se
+    pisa. El stock no se toca."""
+    exigir_nivel("empleado", "elegir el precio")
+    precio = float(precio)
+    if precio_mostrado is None or abs(precio - float(precio_mostrado)) >= 0.005:
+        # 0 y 0: «el stock que se mostró es el que se manda», así que no se escribe.
+        resultado = actualizar_precio_stock(producto_id, precio, 0, stock_mostrado=0,
+                                            precio_mostrado=precio_mostrado)
+        if resultado is False:
+            return False, "Ese producto ya no está."
+        if resultado is not True:
+            return False, ("Otro cambió el precio mientras tanto: no se tocó. Fijate cuál "
+                           "quedó.")
+        # Con el «$» escapado: dos en el mismo aviso se leen como una fórmula.
+        texto = (f"Cambió a {formato_precio(precio, en_markdown=True)} "
+                 f"(antes {formato_precio(precio_mostrado, en_markdown=True)}).")
+    else:
+        texto = f"Queda {formato_precio(precio, en_markdown=True)}."
+    # Un candado propio y no db_lock, que no es reentrante: guardar_config() ya lo toma. Sin
+    # candado, dos personas decidiendo a la vez podían perder una de las dos anotaciones.
+    with del_proceso("candado_de_los_precios_dobles", threading.Lock):
+        c.execute("SELECT MAX(fecha) FROM historial_precios WHERE producto_id = ?", (producto_id,))
+        ultimo = c.fetchone()[0]
+        decididos = _precios_dobles_decididos()
+        decididos[str(producto_id)] = ultimo
+        guardar_config(PRECIOS_DOBLES_DECIDIDOS, json.dumps(decididos))
+    return True, texto
+
+
+def cb_elegir_el_precio_doble(producto_id, precio, precio_mostrado):
+    """El botón de cada precio en «💲 Códigos que vinieron dos veces» (on_click)."""
+    ok, texto = elegir_el_precio_doble(producto_id, precio, precio_mostrado)
+    st.session_state["_dos_precios_aviso"] = ("success" if ok else "warning", texto)
+
+
+def cb_saltear_el_precio_doble(producto_id):
+    """«⏭️ Después»: pasa al siguiente sin decidir, hasta que se den vuelta todos."""
+    st.session_state.setdefault("dos_precios_salteados", []).append(producto_id)
 
 
 def lista_en_dolares(marca_id):
