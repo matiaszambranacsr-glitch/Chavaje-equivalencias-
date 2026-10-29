@@ -1060,6 +1060,24 @@ def _comparar_firmas(a, b, minimo_nucleo=2, cuenta_palabras=None, total_descripc
     if a["familia"] != b["familia"]:
         return False, "rubros distintos"
 
+    # EL CABLE O EL CAPUCHÓN DE LA BUJÍA NO SON LA BUJÍA. Comparten el rubro y el auto, y lo que
+    # los separa es el nombre de la pieza, que solo no veta (BULBO y SENSOR son la misma pieza).
+    # Entre dos listas salían en rojo por otra cosa —«cilindradas distintas»—, pero con un código
+    # de fábrica de un lado el auto no cuenta, y no quedaba nada: el SC-G101 (el juego de cables
+    # del Onix, con la descripción del cable de LUCAS) quedó vinculado con las bujías WR 7 DC y
+    # 14 R 7DU de JL, y buscando la WR 7 DC salía ✅ verificado, con otros dos números de cables.
+    # Va antes que lo del auto para que se vea el porqué de verdad. El cable del acelerador no
+    # es de este rubro, así que no entra. Ni el kit de cable y bujía, que se lee «CABLE» y trae
+    # la bujía: ese lo separa _otra_pieza_del_mismo_kit(), que sabe de qué pieza es cada número
+    # (el LSPKR5E, con la descripción del kit, es la bujía, y salía «el cable no es la bujía»).
+    for _x, _y in ((a, b), (b, a)):
+        if _y.get("cabeza") != "BUJIA" or _x.get("kit"):
+            continue
+        if _x.get("cabeza") == "CABLE":
+            return False, "accesorio de la bujía contra la bujía: el cable no es la bujía"
+        if _x.get("cabeza") == "CAPUCHON" and "BUJIA" in (_x.get("pieza") or ()):
+            return False, "accesorio de la bujía contra la bujía: el capuchón no es la bujía"
+
     # El juego de juntas del motor contra una junta suelta, o dos juegos distintos (completo
     # contra superior). Ver tipo_de_juego_de_motor().
     if juegos_que_chocan(a.get("juego"), b.get("juego")):
@@ -1817,7 +1835,8 @@ _MOTIVOS_QUE_CONTRADICEN = ("posiciones distintas", "siglas distintas", "autos d
                             "sobremedida distinta", "presiones distintas",
                             "aros de distinto color", "medidas distintas",
                             "versiones distintas",
-                            "combustibles distintos")
+                            "combustibles distintos",
+                            "accesorio de la bujía contra la bujía")
 # Los que no alcanzan para decir que son piezas distintas pero sí para desconfiar: no vetan
 # (el par va a revisión, no a rojo) y se muestran como el porqué. Ver evidencia_cruzada().
 _MOTIVOS_QUE_AVISAN = ("un nombre de modelo de marcas distintas", "el mismo auto con otra cilindrada",

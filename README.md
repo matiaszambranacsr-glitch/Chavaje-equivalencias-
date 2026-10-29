@@ -6959,6 +6959,14 @@ Lo pidió el dueño: «sacá el límite de lectura de 200 tandas de catálogo, q
 
 `pruebas_de_las_pantallas.py` lo controla con lecturas de mentira (sin salir a internet): las tres terminan solas, el catálogo manda las dos equivalencias a una sola lista, el portal usa la misma lista en todas las tandas, y al terminar dice cuántas leyó y deja de decir «sigue sola». Si «todas» hiciera una sola tanda, falla.
 
+## 🔌 El cable y el capuchón de la bujía no son la bujía
+
+El pendiente del SC-G101 tenía la misma raíz que lo de los kits: buscando la bujía **WR 7 DC** de JL salían como ✅ verificados tres números de juegos de cables (SC-G101, F0099C612 y XS10638). Los juntó el catálogo de NGK: la ficha de NGK del juego de cables SC-G101 nombra las bujías que lleva ese auto, y el lector unió «lo que cita NGK SC-G101» —el cable de LUCAS y los códigos de fábrica que tienen copiada su descripción— con esas bujías.
+
+Entre dos listas, un cable contra una bujía ya salía en rojo, pero por otra cosa («cilindradas distintas»). Con un código de fábrica de un lado el auto no cuenta (cada lista anota los autos que conoce), y lo único que quedaba era «piezas distintas: CABLE y BUJIA», que a propósito no veta (BULBO y SENSOR son la misma pieza). Ahora «el cable no es la bujía» y «el capuchón no es la bujía» son una contradicción de la pieza, y se miran antes que lo del auto, así que también se ve el porqué de verdad. El kit de cable y bujía no entra: ese lo separa la regla de los kits, que sabe de qué pieza es cada número (sin esa excepción, el número de la bujía del kit LUCAS salía «el cable no es la bujía»: se vio en la simulación y se corrigió antes de publicar).
+
+En la base real cambian 6 vínculos aprobados —los tres números de cables con las dos bujías de JL— y nada más; ningún rechazado cambia. Búsquedas, cola, fichas y texto, medidos antes y después: sin cambios en las muestras. Reglas versión 23. `pruebas_de_la_precision.py` (107) lo controla; sin la regla, falla.
+
 ## 🚙 Repuestos por vehículo, listo al entrar
 
 Lo que más tardaba la primera vez con la base real, medido pantalla por pantalla, era «🛠️ Modo Mecánico → 🚙 Repuestos por vehículo»: se abre sin contraseña y aparece con FIAT elegida (la marca con más productos). Con lo que ya se armaba por atrás al arrancar (el conteo de palabras y las marcas), le quedaban 0,4 s: 0,12 s los productos de FIAT por rubro y 0,3 s sus modelos. Ahora el mismo hilo de atrás (`dejar_listo_de_antemano()`) arma también eso, después de lo demás y cediéndole el lugar a quien esté usando la app. `pruebas_del_buscador.py` lo controla; sin el cambio, falla.

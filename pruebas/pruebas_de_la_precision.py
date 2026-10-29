@@ -2090,8 +2090,17 @@ def probar(L):
     _nodo3 = producto("SC-G101", "CABLE DE BUJIA", mo3)
     vincular(_cable, _nodo3, "LUCAS TRES · 26/10")
     vincular(_buj, _nodo3, "FISPA TRES · 26/10")
+    # El cable contra la bujía ya no llega a lo del auto: veta por lo que son (ver la 107).
+    esperar("el cable contra la bujía veta por lo que son, aunque los una un número",
+            _vetos_de_texto(_cable, _buj),
+            ["🔤 accesorio de la bujía contra la bujía: el cable no es la bujía"])
+    _capuchon = producto("CAPB1", "CAPUCHON BOBINA CHEVROLET ONIX 1.4", ml3)
+    _bobina = producto("BOB1", "BOBINA DE ENCENDIDO CHEVROLET CORSA 2.0", mf3)
+    _nodo4 = producto("BOBNUM1", "BOBINA DE ENCENDIDO", mo3)
+    vincular(_capuchon, _nodo4, "LUCAS TRES · 26/10")
+    vincular(_bobina, _nodo4, "FISPA TRES · 26/10")
     esperar("si sin el auto lo que cambia es el nombre de la pieza, vale lo del auto",
-            [v.startswith(_del_auto) for v in _vetos_de_texto(_cable, _buj)], [True])
+            [v.startswith(_del_auto) for v in _vetos_de_texto(_capuchon, _bobina)], [True])
     _lu2 = producto("LEMSR024", "SONDA LAMBDA CHEVROLET CORSA 2.0", ml3)
     vincular(_lu2, _nodo, "LUCAS TRES · 26/10")
     esperar("dos productos de la misma lista con el mismo número: el auto sigue contando",
@@ -2850,6 +2859,32 @@ def probar(L):
     finally:
         _g["escala_de_precios_por_marca"] = _escala_real
         _g["marcas_con_precios_fuera_de_escala"] = _fuera_real
+
+    # 107. EL CABLE O EL CAPUCHÓN DE LA BUJÍA NO SON LA BUJÍA, también sin contar el auto (es lo
+    # que se mira con un código de fábrica de un lado): el SC-G101 salía ✅ con la WR 7 DC. El
+    # kit de cable y bujía no entra —lo separa _otra_pieza_del_mismo_kit()— y dos cables pueden
+    # ser el mismo.
+    def _motivo_107(x, y, sin_el_auto=False):
+        fx, fy = ns["firma_de_producto"](x, None), ns["firma_de_producto"](y, None)
+        if sin_el_auto:
+            fx, fy = dict(fx, **ns["_SIN_EL_AUTO"]), dict(fy, **ns["_SIN_EL_AUTO"])
+        return ns["firmas_compatibles"](fx, fy)[1]
+    _cable_107 = "accesorio de la bujía contra la bujía: el cable no es la bujía"
+    esperar("el cable de bujía contra la bujía, aunque no cuente el auto",
+            _motivo_107("CABLE DE BUJIA LEIHTG101SC Chevrolet Onix - Prisma 1 4 8v",
+                        "BUJIA ENCEND Bosch AGILE-ASTRA-CORSA-BERLINGO", True), _cable_107)
+    esperar("con el otro nombre del cable, y al revés",
+            _motivo_107("BUJIAS NGK Alfa Romeo 155 2.0", "CABLE ENCENDIDO GM ONIX, PRISMA 1.4 8V"),
+            _cable_107)
+    esperar("el capuchón", _motivo_107("CAPUCHON BUJIA VW GOL", "BUJIA NGK VW GOL 1.6"),
+            "accesorio de la bujía contra la bujía: el capuchón no es la bujía")
+    esperar("y es una contradicción", _cable_107.startswith(ns["_MOTIVOS_QUE_CONTRADICEN"]), True)
+    esperar("el kit de cable y bujía no entra acá",
+            _motivo_107(_kit, "Bujia NGK Honda Fit 1.4, Rover 416", True).startswith("accesorio"),
+            False)
+    esperar("dos cables pueden ser el mismo",
+            _motivo_107("CABLE DE BUJIA ONIX PRISMA", "CABLE ENCENDIDO GM ONIX, PRISMA").startswith(
+                "accesorio"), False)
     return fallas
 
 
