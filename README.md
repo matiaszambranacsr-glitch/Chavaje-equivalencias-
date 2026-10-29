@@ -6959,6 +6959,25 @@ Lo pidió el dueño: «sacá el límite de lectura de 200 tandas de catálogo, q
 
 `pruebas_de_las_pantallas.py` lo controla con lecturas de mentira (sin salir a internet): las tres terminan solas, el catálogo manda las dos equivalencias a una sola lista, el portal usa la misma lista en todas las tandas, y al terminar dice cuántas leyó y deja de decir «sigue sola». Si «todas» hiciera una sola tanda, falla.
 
+## 📦 Los kits que dicen de qué pieza es cada número
+
+Siguiendo el pendiente del SC-G101: buscando la bujía NGK **BKR6E-11** salían seis números de juegos de cables (LEIHTT06SC, F00099C110, LEIHTT09SC, LEIHTG03SC, LEIHTG78SC, F00099C015) como ✅ verificados o 🟡 probables.
+
+De dónde salían. FISPA escribe sus kits de cable y bujía así: «KIT CAB Y BUJ (LEIHTT06SC/LSPKR6E) FIAT PALIO… REF CABLES NGK SC-T06 BOSCH F00099C110… REF BUJIAS NGK BKR6E BOSCH FR6DC». El primer número del paréntesis es el de los cables, el segundo el de la bujía, y cada «REF» nombra los de otras marcas de una de las dos piezas. Cada número citado se vuelve un código de fábrica con la descripción del kit copiada. Después, el lector del catálogo de NGK juntó «los productos que citan NGK BKR6E» con las bujías que nombra la ficha de NGK, y entre los que la citan estaban los números de los cables: tienen la descripción del kit. Así quedaron 42 vínculos aprobados de bujías con números de cables, y otros 19 de kits enteros con los números de sus piezas (el L215 de FISPA con el F00099C110).
+
+Las reglas no lo veían porque un código de fábrica nunca se tomaba como pieza de un kit: el juego de juntas que termina con su propio número original es el mismo juego, no una pieza que trae adentro. Ahora, cuando el kit dice de qué pieza es cada número (`_otra_pieza_del_mismo_kit()`):
+
+- el número de los cables contra una bujía es «otra pieza del mismo kit»: 🔴 en la ficha, y en el buscador «🧩 otra pieza del mismo kit — NO es lo mismo»;
+- el kit entero contra el número de una de sus piezas: «lo trae adentro», como ya pasaba con los kits de los proveedores;
+- el número de los cables contra el cable suelto (el LEIHTT06SCLUCAS) o un juego de cables de otra marca: la misma pieza, como siempre;
+- el juego de juntas que cita su propio número, como estaba.
+
+Son 30 kits (29 de cable y bujía y uno de bobina y cable). En la base real, 61 vínculos cargados pasan a rojo —todos de estos kits— y aparecen en «🧹 Limpiar y corregir → 🔎 Analizar los vínculos cargados» para cortarlos; 46 pares de la cola ya no se preguntan (se apartan como kit y pieza). Lo que se arme de acá en adelante, también: el catálogo de NGK y las listas ya no los mandan a la cola. Las reglas pasan a la versión 22.
+
+Medido con `medir.py` antes y después: búsquedas (1.500) y texto, ningún cambio; cola, 9 pares menos para decidir; fichas, solo estos kits pasan a rojo. Con `pruebas_de_la_revision.py --base … --linea-base`: de los 20.037 aprobados cambian esos 61 y nada más, y ningún rechazado. `pruebas_de_la_precision.py` (105) lo controla; rompiendo la regla de dos formas distintas, falla en las dos.
+
+De paso, las pruebas sueltas ya no imprimen el aviso de Streamlit «to view this Streamlit app on a browser…» (cinco renglones por prueba).
+
 ## 🔌 El cable de bujía, con todos sus nombres
 
 Mirando el pendiente «SC-G101 une un juego de cables con bujías». El cable del Onix y el Prisma aparece en TARANTO como «CABLE ENCENDIDO GM ONIX, PRISMA» (SC-G101) y en FISPA como «CABLE DE BUJIA … Onix - Prisma» (LEIHTG101SC): es la misma pieza, unida por su número de fábrica. Pero las reglas lo leían en dos rubros distintos: «CABLE DE BUJIA» era de Eléctrico y encendido, y «CABLE ENCENDIDO», «CABLES BUJIA» o «JUEGO CABLES DE BUJIA» caían en «CABLE», el rubro del cable del acelerador. Con rubros distintos, las reglas no podían vincular nunca el mismo cable de dos listas.

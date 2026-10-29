@@ -417,6 +417,12 @@ def evidencia_cruzada(id_a, id_b, cuenta_palabras=None, total_descripciones=None
     if ("OEM" not in {(pa.get("tipo") or "").upper(), (pb.get("tipo") or "").upper()}
             and _unidos_por_codigo(pa, pb) and not _kit_de):
         a_favor.append("🔢 el código de uno está escrito en la descripción del otro")
+    # Con un código de fábrica de un lado, lo que encuentra _uno_trae_al_otro() sale de un kit
+    # que dice de qué pieza es cada número, y la descripción del número es la del kit, que
+    # nombra todas: «concuerda» con la bujía y con el kit entero (es la misma, letra por
+    # letra). Ver _otra_pieza_del_mismo_kit().
+    if _kit_de and "OEM" in {(pa.get("tipo") or "").upper(), (pb.get("tipo") or "").upper()}:
+        ok_desc = False
     if ok_desc:
         a_favor.append(f"🔤 las descripciones concuerdan ({motivo_desc})")
         # El espesor solo no prueba que sea la misma pieza (ver el final de
@@ -428,8 +434,9 @@ def evidencia_cruzada(id_a, id_b, cuenta_palabras=None, total_descripciones=None
         if coinciden is None and detalle_med.startswith("Solo coinciden en espesor:"):
             a_favor.append("📐 el espesor coincide: es la misma variante")
     elif _kit_de:
-        vetos.append(f"📦 no son equivalentes: {_kit_de}. El buscador te lo ofrece igual, "
-                      "como kit, cuando buscás la pieza suelta")
+        vetos.append(f"📦 no son equivalentes: {_kit_de}" + (
+            "" if _kit_de.startswith("otra pieza") else
+            ". El buscador te lo ofrece igual, como kit, cuando buscás la pieza suelta"))
     elif fa and fb and fa["familia"] != "Sin clasificar" and fb["familia"] != "Sin clasificar":
         # Con el código de uno escrito en la descripción del otro, el rubro no contradice: el
         # número dice cuál es. «Despiece JOHN DEERE TAPA CAJA DE VELOCIDAD // T36042» (ILLINOIS)

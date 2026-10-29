@@ -48,6 +48,10 @@ def _callar_los_avisos_sin_pantalla():
                        "streamlit.runtime.caching.cache_data_api"):
             importlib.import_module(modulo)      # crea su registro, que es al que se filtra
             logging.getLogger(modulo).addFilter(filtro)
+        # Y el de «to view this Streamlit app on a browser, run it with…», cinco renglones una
+        # vez por prueba: Streamlit tiene una opción para no decirlo.
+        from streamlit import config as _config
+        _config.set_option("global.showWarningOnDirectExecution", False)
     except Exception:        # noqa: BLE001 — es comodidad de las pruebas: nunca rompe nada
         pass
 

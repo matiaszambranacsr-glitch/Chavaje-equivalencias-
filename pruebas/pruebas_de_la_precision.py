@@ -2779,6 +2779,44 @@ def probar(L):
             ns["firmas_compatibles"](ns["firma_de_producto"]("CABLE ENCENDIDO GM ONIX 1.4", None),
                                      ns["firma_de_producto"]("BUJIA NGK GM ONIX 1.4", None))[0],
             False)
+
+    # 105. EL KIT QUE DICE DE QUÉ PIEZA ES CADA NÚMERO (ver _otra_pieza_del_mismo_kit()): el
+    # código de fábrica de los cables, con la descripción del kit copiada, no es la bujía ni el
+    # kit entero; sí es el cable suelto. Buscando la BKR6E-11 salían seis números de juegos de
+    # cables como ✅ verificados. Y el juego de juntas que cita su propio número sigue igual.
+    _trae = ns["_uno_trae_al_otro"]
+    _kit = ("KIT CAB Y BUJ (LEIHTT06SC/LSPKR6E) FIAT PALIO-SIENA 1 3 DOBLE BOBINAREF CABLES NGK "
+            "SC-T06 BOSCH F00099C110 MARELLI CVMT0602 DELPHI XS10056 REF BUJIAS NGK BKR6E BOSCH "
+            "FR6DC F000KE0P02")
+    esperar("el número de los cables contra la bujía: otra pieza del kit",
+            _trae(_kit, "LEIHTT06SC", "Bujia NGK Honda Fit 1.4, Rover 416", "BKR6E-11", "OEM",
+                  "PROVEEDOR").startswith("otra pieza del mismo kit"), True)
+    esperar("el de una «REF CABLES» contra una bujía de otra marca, también",
+            _trae("BUJIA ENCEND Bosch FIAT LINEA 1.9", "FR 6 DC", _kit, "F00099C110",
+                  "PROVEEDOR", "OEM").startswith("otra pieza del mismo kit"), True)
+    esperar("el kit entero contra el número de sus cables: lo trae adentro",
+            _trae(_kit, "L215LUCAS", _kit, "F00099C110", "PROVEEDOR", "OEM").endswith(
+                "lo trae adentro"), True)
+    esperar("el número de los cables y el cable suelto (con la marca pegada): la misma pieza",
+            _trae(_kit, "LEIHTT06SC", "CABLE DE BUJIA LEIHTT06SCFiat Fiorino 1 3 8v Fire",
+                  "LEIHTT06SCLUCAS", "OEM", "PROVEEDOR"), "")
+    esperar("el juego de cables de otra marca contra el número de los cables, tampoco",
+            _trae(_kit, "LEIHTT06SC", "JUEGO CABLES DE BUJIA FIAT PALIO 1.3", "SCT06NGK", "OEM",
+                  "PROVEEDOR"), "")
+    esperar("el número de la bujía del kit contra la bujía: la misma pieza",
+            _trae(_kit, "LSPKR6E", "Bujia NGK Honda Fit 1.4, Rover 416", "BKR6E-11", "OEM",
+                  "PROVEEDOR"), "")
+    esperar("el juego de juntas que cita su propio número, como siempre",
+            _trae("Juego de juntas para Carburador PEUGEOT 405 SOLEX 1433630", "1433630",
+                  "Juego de juntas para Carburador PEUGEOT 405 SOLEX 1433630", "J1433", "OEM",
+                  "PROVEEDOR"), "")
+    _res = [{"Cadena": "— el buscado", "Codigo": "BKR6E-11", "Tipo": "PROVEEDOR",
+             "Descripcion": "Bujia NGK Honda Fit 1.4, Rover 416"},
+            {"Cadena": "🟢 directo", "Codigo": "LEIHTT06SC", "Tipo": "OEM", "Descripcion": _kit}]
+    ns["marcar_lo_que_no_es_lo_mismo"](_res)
+    esperar("en el buscador lo dice así, y no como un kit que la trae",
+            (_res[1].get("Cadena"), bool(_res[1].get("_complementario"))),
+            ("🧩 otra pieza del mismo kit — NO es lo mismo", True))
     return fallas
 
 

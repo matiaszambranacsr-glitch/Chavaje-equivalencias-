@@ -3276,8 +3276,12 @@ def marcar_lo_que_no_es_lo_mismo(res):
             if not _rel:
                 continue
             f["_complementario"] = True
-            f["Cadena"] = ("📦 kit que la trae adentro — NO es lo mismo"
-                           if es_un_kit(f.get("Descripcion") or "")
+            # El número de una pieza de un kit trae copiada la descripción del kit: no es
+            # el kit. Ver _otra_pieza_del_mismo_kit().
+            f["Cadena"] = ("🧩 otra pieza del mismo kit — NO es lo mismo"
+                           if _rel.startswith("otra pieza")
+                           else "📦 kit que la trae adentro — NO es lo mismo"
+                           if es_un_kit(f.get("Descripcion") or "") and f.get("Tipo") != "OEM"
                            else "🧩 va adentro del kit — NO es lo mismo")
             # Sin confianza: no hay nada que confiar, la pregunta «¿es la
             # misma pieza?» ya está contestada y es que no.

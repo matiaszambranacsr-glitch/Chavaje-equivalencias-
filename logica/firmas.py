@@ -1604,6 +1604,113 @@ def fuerza_de_la_coincidencia(a, b):
     return (apl, cil, pieza, autos)
 
 
+# LOS KITS QUE DICEN DE QUÉ PIEZA ES CADA NÚMERO. FISPA escribe así los suyos de cable y bujía:
+# «KIT CAB Y BUJ (LEIHTT06SC/LSPKR6E) FIAT PALIO-SIENA 1 3 DOBLE BOBINAREF CABLES NGK SC-T06
+# BOSCH F00099C110 … REF BUJIAS NGK BKR6E BOSCH FR6DC F000KE0P02». El primer número del
+# paréntesis es el del juego de cables, el segundo el de la bujía, y cada «REF» nombra los de
+# otras marcas de UNA de las dos piezas. Son 30 kits (29 de cable y bujía, uno de bobina y cable)
+# y de ellos salieron 58 códigos de fábrica, cada uno con la descripción del kit copiada.
+_RE_KIT_DE_VARIAS_PIEZAS = re.compile(
+    r"\b(?:KIT|JUEGO|JGO|COMBO|SET)\s+([A-Z]{3,}(?:\s*(?:\bY\b|\+|/)\s*[A-Z]{3,})+)\s*"
+    r"\(\s*([A-Z0-9][A-Z0-9.\-]*(?:\s*/\s*[A-Z0-9][A-Z0-9.\-]*)+)\s*\)")
+
+
+def _piezas_de_un_kit(descripcion):
+    """(piezas, números del paréntesis, tramos de cada «REF») de un kit que dice de qué pieza
+    es cada número, o ((), [], []). Las piezas, como las escribe el kit («CAB», «BUJ»); los
+    números, como los deja sanitizar(); cada tramo, (cuál pieza, cómo la nombra, el texto
+    sanitizado)."""
+    texto = normalizar_texto(str(descripcion or ""))
+    m = _RE_KIT_DE_VARIAS_PIEZAS.search(texto)
+    if not m:
+        return (), [], []
+    piezas = tuple(re.split(r"\s*(?:\bY\b|\+|/)\s*", m.group(1)))
+    numeros = [sanitizar(x) for x in m.group(2).split("/")]
+    if len(piezas) != len(numeros) or len({p[:3] for p in piezas}) < len(piezas):
+        return (), [], []
+    # El «REF» viene a veces pegado a la palabra de antes («DOBLE BOBINAREF CABLES»), y un
+    # número de otra marca a veces partido («BOSCH = F 000KE0P03»): se corta sin mirar dónde
+    # empieza la palabra y se busca en el tramo entero, sin espacios.
+    tramos = []
+    for tramo in re.split(r"REF\s+", texto[m.end():])[1:]:
+        palabras = tramo.split()
+        i = _cual_pieza_del_kit(palabras[0] if palabras else "", piezas)
+        if i is not None:
+            tramos.append((i, palabras[0], sanitizar(" ".join(palabras[1:]))))
+    return piezas, numeros, tramos
+
+
+def _cual_pieza_del_kit(palabra, piezas):
+    """Cuál de las piezas del kit nombra la palabra («CABLES» o «CABLE» es «CAB»), o None."""
+    palabra = normalizar_texto(palabra)
+    if len(palabra) < 3:
+        return None
+    cuales = [i for i, p in enumerate(piezas) if palabra.startswith(p) or p.startswith(palabra)]
+    return cuales[0] if len(cuales) == 1 else None
+
+
+def _de_que_pieza_es_el_numero(codigo, numeros, tramos):
+    """En qué pieza del kit está el número —en el paréntesis o en la «REF» de una—, o
+    None. También sin la marca pegada atrás: el cable de LUCAS es «LEIHTT06SCLUCAS» y en el
+    kit es «LEIHTT06SC»."""
+    formas = {sanitizar(codigo)}
+    for marca in _MARCAS_QUE_SE_PEGAN_AL_CODIGO:
+        limpio = sanitizar(codigo)
+        if limpio.endswith(marca):
+            formas.add(limpio[:-len(marca)])
+    formas = {f for f in formas if len(f) >= LARGO_MINIMO_CODIGO_EN_KIT}
+    cuales = {i for i, n in enumerate(numeros) if n in formas}
+    if not cuales:
+        cuales = {i for i, _nombre, junto in tramos if any(f in junto for f in formas)}
+    return next(iter(cuales)) if len(cuales) == 1 else None
+
+
+def _otra_pieza_del_mismo_kit(desc_a, cod_a, desc_b, cod_b, tipo_a="", tipo_b=""):
+    """Con un código de fábrica de un lado que es el número de UNA de las piezas de un kit de
+    varias: ¿el otro es el kit entero, u otra de las piezas? Devuelve el texto, o "".
+
+    El caso que lo mostró: buscando la bujía BKR6E-11 salían el LEIHTT06SC, el F00099C110 y
+    otros cuatro números de juegos de cables como ✅ verificados. El catálogo de NGK juntó «los
+    productos que citan NGK BKR6E» con las bujías de la ficha de NGK, y entre los que lo citan
+    estaban los códigos de fábrica de los cables, que tienen copiada la descripción del kit
+    —donde «REF BUJIAS NGK BKR6E» habla de la bujía del kit, no del cable—. Eran 44 vínculos
+    aprobados así, más 6 en la cola. Y el kit entero contra el número de sus cables (el L215
+    de FISPA con el F00099C110, que lo trae la lista misma) tampoco es una equivalencia.
+
+    Solo cuando el kit lo dice: el número tiene que estar en el paréntesis o en la «REF» de una
+    pieza, y el otro tiene que nombrar otra pieza del kit —por su número o por la primera
+    palabra de su descripción, «BUJIA NAFTA…» o «CABLE DE BUJIA…»—. El juego de juntas
+    que termina con su propio número original («… SOLEX 1433630») no dice nada de esto y sigue
+    como estaba: ver _uno_trae_al_otro()."""
+    lados = [(desc_a, cod_a, (tipo_a or "").upper()), (desc_b, cod_b, (tipo_b or "").upper())]
+    if [t for _d, _c, t in lados].count("OEM") != 1:
+        return ""
+    (desc_n, cod_n, _t), (desc_x, cod_x, _tx) = sorted(lados, key=lambda lado: lado[2] != "OEM")
+    piezas, numeros, tramos = _piezas_de_un_kit(desc_n)
+    if not piezas or not desc_x:
+        return ""
+    i = _de_que_pieza_es_el_numero(cod_n, numeros, tramos)
+    if i is None:
+        return ""
+    if _piezas_de_un_kit(desc_x)[0]:
+        return f"«{str(desc_x)[:40]}» lo trae adentro"
+    j = _de_que_pieza_es_el_numero(cod_x, numeros, tramos)
+    if j is None:
+        # La primera palabra que no sea la del juego: «JUEGO CABLES BUJIA…» es de cables.
+        palabras = [p for p in _normalizar_desc(desc_x).split()
+                    if p not in ("KIT", "JUEGO", "JGO", "SET", "COMBO", "DE")]
+        j = _cual_pieza_del_kit(palabras[0], piezas) if palabras else None
+    if j is None or j == i:
+        return ""
+    # Con el nombre entero de la «REF» si lo hay: «CABLES» se entiende, «CAB» no tanto.
+    nombres = list(piezas)
+    for k, nombre, _junto in tramos:
+        if len(nombre) > len(nombres[k]):
+            nombres[k] = nombre
+    return (f"otra pieza del mismo kit «{str(desc_n)[:40].strip()}»: el {cod_n} es de "
+            f"«{nombres[i]}» y el otro, de «{nombres[j]}»")
+
+
 def _uno_trae_al_otro(desc_a, cod_a, desc_b, cod_b, tipo_a="", tipo_b=""):
     """¿Uno de los dos es un kit que nombra al otro adentro? Devuelve el texto de la relación.
 
@@ -1634,9 +1741,10 @@ def _uno_trae_al_otro(desc_a, cod_a, desc_b, cod_b, tipo_a="", tipo_b=""):
     de fábrica no es ni un kit ni una pieza suelta, es el número con el que la fábrica llama a
     una de las dos. Por eso alcanza con que UNO de los dos lados sea OEM para que no haya nada
     que mirar: del otro lado siempre está el producto del que salió ese número, con su misma
-    descripción."""
+    descripción. Salvo cuando el kit dice de qué pieza es cada número: ver
+    _otra_pieza_del_mismo_kit()."""
     if "OEM" in {(tipo_a or "").upper(), (tipo_b or "").upper()}:
-        return ""
+        return _otra_pieza_del_mismo_kit(desc_a, cod_a, desc_b, cod_b, tipo_a, tipo_b)
     for kit_desc, pieza_cod in ((desc_a, cod_b), (desc_b, cod_a)):
         if not kit_desc or not pieza_cod or not es_un_kit(kit_desc):
             continue

@@ -769,7 +769,7 @@ VERSION_NORMALIZACION = "2"
 # reglas de hoy están mal. Sin esta marca, eso no se entera nadie hasta tropezárselo.
 # Subir el número cuando cambien las reglas de evaluar_equivalencia(). El recálculo NO corre al
 # abrir la app —son 12,8 s— sino en la tarea de fondo, igual que el descubrimiento.
-VERSION_CONFIANZA = "21"   # ver VERSIONES_DE_LAS_REGLAS
+VERSION_CONFIANZA = "22"   # ver VERSIONES_DE_LAS_REGLAS
 
 # LAS REGLAS VERSIONADAS, con la fecha y qué cambió en cada una. Lo pidió una revisión con
 # ChatGPT («versionar reglas como datos» y «comparar versiones»): cada vínculo guarda con qué
@@ -778,6 +778,9 @@ VERSION_CONFIANZA = "21"   # ver VERSIONES_DE_LAS_REGLAS
 # nueva sobre todo lo que ya se decidió. Volver atrás una regla es volver atrás el cambio en
 # git y subir el número otra vez (el repuntaje lo hace la tarea de fondo).
 VERSIONES_DE_LAS_REGLAS = [
+    ("22", "2026-10-29", "en los kits que dicen de qué pieza es cada número (KIT CAB Y BUJ "
+                         "de FISPA), el número de los cables no es la bujía ni el kit "
+                         "entero: 61 vínculos cargados y 46 de la cola"),
     ("21", "2026-10-28", "el juego de juntas de un lugar (cárter, admisión, escape) contra la "
                          "junta suelta de ese lugar son juegos distintos: de 62 que miraste "
                          "no aprobaste ninguno"),
