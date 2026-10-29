@@ -90,9 +90,14 @@ def _hasta(condicion, segundos=8):
     return condicion()
 
 
-def probar(url, clave):
+def probar(url, clave, carpeta):
     from playwright.sync_api import sync_playwright
+    import sqlite3
     fallas = []
+
+    def _base(consulta):
+        with sqlite3.connect(os.path.join(carpeta, "equivalencias_app.db")) as con:
+            return con.execute(consulta).fetchone()[0]
     with sync_playwright() as pw:
         navegador = pw.chromium.launch(
             **({"executable_path": CHROMIUM} if os.path.exists(CHROMIUM) else {}))
@@ -136,13 +141,49 @@ def probar(url, clave):
         if not _hasta(lambda: _foco(pagina) == "st-key-venta_buscar", 3):
             fallas.append(f"F2 no lleva el cursor a la búsqueda: {_foco(pagina)}")
 
-        # 4. En el Buscador, el cursor también en su caja.
+        # 4. La venta de todos los días, con el teclado: sumar F100 con el click derecho, F9
+        # con el cursor en la búsqueda (Streamlit solo no atiende sus teclas ahí) la manda a la
+        # caja; en la caja, F10 abre «Cobrar la venta», otro F10 no abre otra encima, y cobrar
+        # la deja cobrada.
+        _ir(pagina, "🧾 Ventas")
+        caja = pagina.locator(".st-key-venta_buscar input")
+        caja.fill("F100")
+        caja.press("Enter")
+        _esperar(pagina, 2)
+        pagina.locator('[class*="st-key-conmenu_vta_"]').first.click(
+            button="right", position={"x": 30, "y": 12})
+        pagina.locator(".menu-del-renglon button").filter(has_text="Sumar a la venta").first.click()
+        _esperar(pagina, 2)
+        pagina.keyboard.press("F2")
+        pagina.keyboard.press("F9")
+        _esperar(pagina, 3)
+        if not _hasta(lambda: _base("SELECT COUNT(*) FROM ventas WHERE cobrada = 0") == 1):
+            fallas.append("F9 no mandó la venta a la caja")
+        else:
+            _ir(pagina, "💵 Caja")
+            pagina.keyboard.press("F10")
+            _esperar(pagina, 2)
+            dialogos = pagina.locator('[role="dialog"]')
+            if not dialogos.count() or "Cobrar la venta" not in dialogos.first.inner_text():
+                fallas.append("F10 no abre «Cobrar la venta» en la caja")
+            else:
+                pagina.keyboard.press("F10")
+                _esperar(pagina, 1)
+                if pagina.locator('[role="dialog"]').count() > 1:
+                    fallas.append("un segundo F10 abre otra ventana encima")
+                dialogos.first.get_by_role("button", name="Cobrar").last.click()
+                _esperar(pagina, 3)
+                if not _hasta(lambda: _base("SELECT COUNT(*) FROM ventas WHERE cobrada = 1")
+                              == 1):
+                    fallas.append("cobrar desde la ventana de F10 no deja la venta cobrada")
+
+        # 5. En el Buscador, el cursor también en su caja.
         _ir(pagina, "🔍 Buscador")
         if not _hasta(lambda: _foco(pagina) == "st-key-busqueda_input"):
             fallas.append(f"al entrar al Buscador el cursor no está en la búsqueda: "
                           f"{_foco(pagina)}")
 
-        # 5. Los textos de Streamlit en castellano: el recuadro para subir un archivo, que en
+        # 6. Los textos de Streamlit en castellano: el recuadro para subir un archivo, que en
         # Streamlit 1.65 dice «Upload» y «200MB per file» (antes, «Browse files» y «Drag and
         # drop file here»). El ícono se llama «upload», en minúscula: ese queda.
         _ir(pagina, "📁 Cargar Excel")
@@ -184,10 +225,11 @@ def main():
                 break
             except OSError:
                 time.sleep(1)
-        fallas = probar(url, clave)
+        fallas = probar(url, clave, carpeta)
         for f in fallas:
             print("   ✗", f)
-        print("✅ navegador: el cursor al entrar, el click derecho, F2 y los textos en castellano"
+        print("✅ navegador: el cursor al entrar, el click derecho, F2, F9, F10 y los textos "
+              "en castellano"
               if not fallas else f"{len(fallas)} falla(s)")
         return 1 if fallas else 0
     finally:

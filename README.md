@@ -6966,7 +6966,8 @@ Lo que corre en el navegador —el JavaScript de `AYUDAS_DEL_NAVEGADOR`— no lo
 - al entrar a 🧾 Ventas y al 🔍 Buscador, el cursor queda en la caja de búsqueda (el lector de códigos de barras escanea derecho);
 - F2 vuelve a la caja desde cualquier lado;
 - el click derecho sobre un resultado abre el menú con «Sumar a la venta», y Escape lo cierra;
-- el recuadro para subir un archivo está en castellano («Elegir archivo», «Hasta 200MB por archivo»).
+- el recuadro para subir un archivo está en castellano («Elegir archivo», «Hasta 200MB por archivo»);
+- la venta de todos los días con el teclado: sumar F100 con el click derecho, F9 con el cursor en la búsqueda la manda a la caja (Streamlit solo no atiende sus teclas con el cursor en un campo), y en 💵 Caja F10 abre «Cobrar la venta», otro F10 no abre una segunda ventana, y cobrar la deja cobrada en la base. Con F9 roto en el JavaScript, falla.
 
 Se corre a mano (en GitHub no hay navegador; si falta Playwright, avisa y no falla), y tarda unos 40 segundos. Probada contra un JavaScript roto a propósito: con F2 cambiado por F3 y sin la traducción de «Upload», falla en las dos. De paso se vio que Streamlit 1.65 ya no dice «Drag and drop file here» ni «Browse files» sino «Upload»: la app lo traducía igual.
 

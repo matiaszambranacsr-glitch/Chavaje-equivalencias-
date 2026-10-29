@@ -320,10 +320,11 @@ cambio» (todas juntas: `python .github/correr_las_pruebas.py`).
 
 ## Sin prueba automática todavía
 
-- Las teclas F9, F10 y F11 y el pitido: son JavaScript en el navegador (`AYUDAS_DEL_NAVEGADOR`)
-  y se probaron con un navegador de verdad. El cursor en la caja de búsqueda al entrar a Ventas y
-  al Buscador, F2, el menú del click derecho y los textos de Streamlit pasados al castellano ya
-  tienen prueba: `python3 pruebas/navegador.py`, que levanta la app con un Chromium (se corre a
+- La tecla F11 (poner a cuenta) y el pitido: son JavaScript en el navegador
+  (`AYUDAS_DEL_NAVEGADOR`) y se probaron con un navegador de verdad. El cursor en la caja de
+  búsqueda al entrar a Ventas y al Buscador, F2, F9 (mandar a la caja con el cursor en un campo),
+  F10 (cobrar, sin abrir otra ventana encima), el menú del click derecho y los textos de Streamlit
+  pasados al castellano ya tienen prueba: `python3 pruebas/navegador.py`, que levanta la app con un Chromium (se corre a
   mano: en GitHub no hay navegador; sin Playwright, se saltea). Lo mismo el formato de los gráficos
   (`grafico_de_barras()`), lo que se mueve en la pantalla (la barra que trabaja, los números que
   se iluminan: «LO QUE SE MUEVE» en `logica/base.py`) que el aviso al vendedor llegue solo cada
