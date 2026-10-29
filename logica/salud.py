@@ -737,19 +737,11 @@ def diagnostico_de_salud():
         # las columnas dadas vuelta.
         # Una lista entera en otra escala va en su propio aviso (abajo), con el remedio que le
         # corresponde: contada acá, eran 1.570 «pares» de TARANTO que tapaban los de verdad.
+        # La cuenta es la de la tabla, con esa lista corregida por su escala: antes la dejaba
+        # afuera y decía 14 que en la tabla no se veían (ver
+        # precios_incoherentes_entre_equivalentes()).
         _fuera = sorted(marcas_con_precios_fuera_de_escala())
-        _sin_fuera = (" AND ma.nombre NOT IN (" + ",".join("?" * len(_fuera)) + ")"
-                      " AND mb.nombre NOT IN (" + ",".join("?" * len(_fuera)) + ")"
-                      if _fuera else "")
-        c.execute(f"""SELECT COUNT(*) FROM equivalencias e
-                     JOIN productos pa ON pa.id = e.producto_a_id
-                     JOIN productos pb ON pb.id = e.producto_b_id
-                     JOIN marcas ma ON ma.id = pa.marca_id
-                     JOIN marcas mb ON mb.id = pb.marca_id
-                     WHERE {SIN_CONTAR_EL_ESPEJO} AND pa.precio > 0 AND pb.precio > 0
-                       AND MAX(pa.precio, pb.precio) / MIN(pa.precio, pb.precio) >= 8
-                       {_sin_fuera}""", _fuera + _fuera)
-        precios = c.fetchone()[0]
+        precios = len(precios_incoherentes_entre_equivalentes(8, limite=-1))
         for _marca in _fuera:
             _d = escala_de_precios_por_marca()[_marca]
             _cuanto = (f"{miles(1 / _d['factor'], 0)} veces menos" if _d["factor"] < 1

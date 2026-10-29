@@ -535,6 +535,12 @@ if pagina == PAGINAS[3]:
             incoherentes = precios_incoherentes_entre_equivalentes(int(factor_precio))
             if incoherentes:
                 st.warning(f"⚠️ {len(incoherentes)} par(es) de equivalentes con precios muy distintos.")
+                # La lista sin coeficiente se compara corregida: ver
+                # precios_incoherentes_entre_equivalentes().
+                _fuera_p = sorted(marcas_con_precios_fuera_de_escala())
+                if _fuera_p:
+                    st.caption(f"«Veces», con {', '.join(_fuera_p)} corregida por su escala (a "
+                               "su lista le falta el coeficiente).")
                 st.dataframe(quitar_id(incoherentes), width="stretch", hide_index=True)
                 st.download_button(
                     "⬇️ Bajar la lista en Excel",
@@ -544,11 +550,23 @@ if pagina == PAGINAS[3]:
                 )
                 ayuda(
                     "Revisá primero los de arriba. Si el precio está bien, entonces lo que está mal "
-                    "es el vínculo: buscá uno de los dos códigos en el 🔍 Buscador, abrí «🧭 ¿Por qué "
-                    "apareció alguno de estos?» y tocá «✂️ Cortar ese vínculo». Si el mismo código "
-                    "aparece en muchos pares, es un puente: "
-                    f"{miga_hasta('Códigos puente')}."
+                    "es el vínculo: cortalo acá abajo. Si el mismo código aparece en muchos pares, "
+                    f"es un puente: {miga_hasta('Códigos puente')}."
                 )
+                # Cortarlo acá mismo: antes había que buscar el código en el 🔍 Buscador, abrir
+                # «🧭 ¿Por qué apareció…?» y cortarlo ahí, par por par.
+                _pares_p = {
+                    f"{x['Código A']} ({x['Marca A']}) ↔ {x['Código B']} ({x['Marca B']}): "
+                    f"{miles(x['Veces'], 1)} veces": (x["_ida"], x["_idb"]) for x in incoherentes}
+                _par_p = st.selectbox("¿Cuál cortar?", list(_pares_p), key="precio_raro_a_cortar")
+                if candado('cortar vínculos', st.button("✂️ Cortar ese vínculo",
+                                                        key="btn_cortar_precio_raro"),
+                           'cortar_v_nculos_precio'):
+                    borrar_equivalencias_dudosas([_pares_p[_par_p]])
+                    invalidar_salud()
+                    avisar("success", f"Se cortó el vínculo {_par_p.split(':')[0]}. Los productos "
+                                      "quedaron intactos.")
+                    st.rerun()
             else:
                 st.caption(f"✅ Ningún par de equivalentes se diferencia más de {factor_precio} veces.")
             st.markdown("**🗑️ Códigos que son solo un número suelto**")

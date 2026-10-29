@@ -445,6 +445,38 @@ def probar():
               or not any("Cambió a" in x.value and "No queda ninguno" in x.value
                          for x in at.success)):
             fallas.append("💲 dos precios: después de elegir sigue en la lista, o no lo dice")
+    # 💲 Los precios que no cierran entre equivalentes: el vínculo se corta ahí mismo, sin ir
+    # al Buscador. Dos de distinta marca, 100 contra 5.000: elegido el par, «✂️ Cortar ese
+    # vínculo» lo corta y lo deja rechazado.
+    if "--base" not in sys.argv:
+        _otra_m = c.execute("INSERT INTO marcas (nombre, tipo) VALUES ('PRECIO RARO', "
+                            "'PROVEEDOR')").lastrowid
+        _raros = [c.execute("INSERT INTO productos (codigo_raw, codigo_clean, descripcion, "
+                            "marca_id, precio) VALUES (?, ?, 'JUNTA CARTER', ?, ?)",
+                            (cod, cod, m, pr)).lastrowid
+                  for cod, m, pr in (("RARO1", _marca_prueba, 100), ("RARO2", _otra_m, 5000))]
+        c.execute("INSERT INTO equivalencias (producto_a_id, producto_b_id) VALUES (?, ?)",
+                  (min(_raros), max(_raros)))
+        conn.commit()
+        at.run()
+        _cual = [x for x in at.selectbox if x.key == "precio_raro_a_cortar"]
+        _opcion = [o for o in (_cual[0].options if _cual else []) if o.startswith("RARO1")]
+        if not _opcion:
+            fallas.append("💲 precios que no cierran: no se puede elegir el par para cortarlo")
+        else:
+            _cual[0].set_value(_opcion[0]).run()
+            [b for b in at.button if b.key == "btn_cortar_precio_raro"][0].click().run()
+            # Acá se está como operador: el candado pide la del administrador, y se pone.
+            _candado = [x for x in at.text_input if x.label == "Contraseña de administrador:"]
+            if _candado:
+                _candado[0].set_value("clave-duenio-1")
+                [b for b in at.button if b.label == "Ingresar"][0].click().run()
+                at.run()
+            if c.execute("SELECT COUNT(*) FROM equivalencias WHERE producto_a_id = ? AND "
+                         "producto_b_id = ?", (min(_raros), max(_raros))).fetchone()[0]:
+                fallas.append("💲 precios que no cierran: «✂️ Cortar ese vínculo» no lo cortó")
+            # Y de vuelta a operador, como venía: lo que sigue se recorre así.
+            at.session_state["nivel_usuario"] = "operador"
     # 🔎 Los vínculos dudosos, de a un motivo (ver motivo_de_un_vinculo_dudoso()): todos
     # quedan con la misma confianza, y «cortar los N peores» no separaba los de los kits de los
     # otros. Con dos de kits y uno de rubros, elegir el de los kits deja dos en la tabla y el

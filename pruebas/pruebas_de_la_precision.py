@@ -2817,6 +2817,39 @@ def probar(L):
     esperar("en el buscador lo dice así, y no como un kit que la trae",
             (_res[1].get("Cadena"), bool(_res[1].get("_complementario"))),
             ("🧩 otra pieza del mismo kit — NO es lo mismo", True))
+
+    # 106. LOS PRECIOS QUE NO CIERRAN, CON LA LISTA EN OTRA ESCALA CORREGIDA (ver
+    # precios_incoherentes_entre_equivalentes()): a la de TARANTO le falta el coeficiente y
+    # cuesta 15 veces menos, parejo. Sus pares no son incoherentes por eso; sí el que no cierra
+    # ni corregido. Y el diagnóstico de salud cuenta lo mismo que muestra la tabla.
+    _g = ns["precios_incoherentes_entre_equivalentes"].__globals__
+    _escala_real, _fuera_real = (_g["escala_de_precios_por_marca"],
+                                 _g["marcas_con_precios_fuera_de_escala"])
+    _g["escala_de_precios_por_marca"] = lambda *a, **k: {"PZBARATA": {
+        "factor": 0.06, "contra": ["PZNORMAL"], "comparaciones": 40}}
+    _g["marcas_con_precios_fuera_de_escala"] = lambda: {"PZBARATA"}
+    try:
+        _pz_a, _pz_b, _pz_c = marca("PZNORMAL"), marca("PZOTRA"), marca("PZBARATA")
+        _pzs = {}
+        for _cod, _m, _precio in (("PZ1", _pz_a, 100), ("PZ2", _pz_c, 6), ("PZ3", _pz_a, 100),
+                                  ("PZ4", _pz_c, 60), ("PZ5", _pz_a, 100), ("PZ6", _pz_b, 1000)):
+            _pzs[_cod] = producto(_cod, "JUNTA TAPA DE CILINDROS", _m)
+            c.execute("UPDATE productos SET precio = ? WHERE id = ?", (_precio, _pzs[_cod]))
+        for _x, _y in (("PZ1", "PZ2"), ("PZ3", "PZ4"), ("PZ5", "PZ6")):
+            vincular(_pzs[_x], _pzs[_y], "PRUEBA")
+        conn.commit()
+        _inc = [(f["Código A"], f["Código B"], f["Veces"])
+                for f in ns["precios_incoherentes_entre_equivalentes"](8, limite=-1)
+                if f["Código A"].startswith("PZ")]
+        esperar("la lista sin coeficiente se compara corregida; lo que no cierra igual, sale",
+                sorted(_inc), [("PZ3", "PZ4", 10.0), ("PZ5", "PZ6", 10.0)])
+        esperar("el diagnóstico cuenta lo mismo que la tabla",
+                any(str(x).find(f"{len(ns['precios_incoherentes_entre_equivalentes'](8, -1))} "
+                                "par(es) de equivalentes con precios muy distintos") >= 0
+                    for x in ns["diagnostico_de_salud"]()), True)
+    finally:
+        _g["escala_de_precios_por_marca"] = _escala_real
+        _g["marcas_con_precios_fuera_de_escala"] = _fuera_real
     return fallas
 
 

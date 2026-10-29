@@ -1055,10 +1055,34 @@ def precios_incoherentes_entre_equivalentes(factor=8, limite=200):
     distinto. Cuando pasa eso, una de dos cosas está mal, y las dos importan:
       - el precio (se importó una columna equivocada o el separador de decimales al revés), o
       - la equivalencia (los vinculó una lista mal cargada y no son la misma pieza).
-    Cualquiera de las dos que sea, es plata: o cotizás mal, o vendés lo que no entra."""
+    Cualquiera de las dos que sea, es plata: o cotizás mal, o vendés lo que no entra.
+
+    LA LISTA EN OTRA ESCALA SE COMPARA CORREGIDA. A la de TARANTO le falta el coeficiente: cuesta
+    unas 15 veces menos que las demás, parejo. Sin corregirla, eran 1.529 pares y la tabla
+    mostraba 200, todos de TARANTO; los de verdad quedaban atrás del tope, y el diagnóstico de
+    salud —que la dejaba afuera— decía «14 pares» que en la tabla no se veían. Ahora se divide
+    su precio por su escala (ver escala_de_precios_por_marca()) y quedan 24: los 14, y otros 10
+    de TARANTO que no cierran ni corregidos (las tres juntas del MWM Sprint con la misma de
+    IMPERIAL). «Veces» es la diferencia corregida; los precios, los cargados. `limite=-1`, todos:
+    es lo que cuenta el diagnóstico."""
+    try:
+        _escalas = escala_de_precios_por_marca()
+        _fuera = sorted(marcas_con_precios_fuera_de_escala())
+    except sqlite3.OperationalError as _err:
+        anotar_error("precios_incoherentes_entre_equivalentes", _err)
+        _escalas, _fuera = {}, []
+
+    def _corregido(lado):
+        if not _fuera:
+            return f"p{lado}.precio"
+        cuando = " ".join("WHEN ? THEN ?" for _m in _fuera)
+        return f"(p{lado}.precio / CASE m{lado}.nombre {cuando} ELSE 1.0 END)"
+    # Cada lado se usa cuatro veces en la consulta (dos en «Veces», dos en el filtro).
+    _por_marca = [x for m in _fuera for x in (m, _escalas[m]["factor"])]
+    a, b = _corregido("a"), _corregido("b")
     c.execute(f"""SELECT pa.codigo_raw AS "Código A", ma.nombre AS "Marca A", pa.precio AS "Precio A",
                         pb.codigo_raw AS "Código B", mb.nombre AS "Marca B", pb.precio AS "Precio B",
-                        ROUND(MAX(pa.precio, pb.precio) / MIN(pa.precio, pb.precio), 1) AS "Veces",
+                        ROUND(MAX({a}, {b}) / MIN({a}, {b}), 1) AS "Veces",
                         pa.descripcion AS "Descripción",
                         pa.id AS "_ida", pb.id AS "_idb"
                  FROM equivalencias e
@@ -1067,8 +1091,8 @@ def precios_incoherentes_entre_equivalentes(factor=8, limite=200):
                  JOIN marcas ma ON ma.id = pa.marca_id
                  JOIN marcas mb ON mb.id = pb.marca_id
                  WHERE {SIN_CONTAR_EL_ESPEJO} AND pa.precio > 0 AND pb.precio > 0
-                   AND MAX(pa.precio, pb.precio) / MIN(pa.precio, pb.precio) >= ?
-                 ORDER BY "Veces" DESC LIMIT ?""", (factor, limite))
+                   AND MAX({a}, {b}) / MIN({a}, {b}) >= ?
+                 ORDER BY "Veces" DESC LIMIT ?""", _por_marca * 8 + [factor, limite])
     return filas_a_listas(c)
 
 

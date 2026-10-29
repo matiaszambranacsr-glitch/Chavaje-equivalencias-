@@ -6959,6 +6959,16 @@ Lo pidió el dueño: «sacá el límite de lectura de 200 tandas de catálogo, q
 
 `pruebas_de_las_pantallas.py` lo controla con lecturas de mentira (sin salir a internet): las tres terminan solas, el catálogo manda las dos equivalencias a una sola lista, el portal usa la misma lista en todas las tandas, y al terminar dice cuántas leyó y deja de decir «sigue sola». Si «todas» hiciera una sola tanda, falla.
 
+## 💲 Los precios que no cierran, sin el ruido de TARANTO
+
+El diagnóstico decía «14 par(es) de equivalentes con precios muy distintos», y en «🧹 Limpiar y corregir → 💲 Precios que no cierran entre equivalentes» se veían 200 (el tope), todos de TARANTO. A la lista de TARANTO le falta el coeficiente: cuesta unas 15 veces menos que las demás, parejo, así que contra cualquier otra da «16 veces», «33 veces». Eran 1.529 pares así, y los 14 de verdad quedaban atrás del tope. El diagnóstico dejaba TARANTO afuera; la tabla no.
+
+Ahora los dos hacen la misma cuenta, con la lista que está en otra escala corregida por su escala (la misma que ya usaba el aviso «Los precios de TARANTO están en otra escala»): quedan **24 pares**, los 14 y otros 10 de TARANTO que no cierran ni corregidos —entre ellos tres juntas del MWM Sprint (330513, 330536 y 330537) contra la misma 25692AC3 de IMPERIAL—. La columna «Veces» es la diferencia corregida, y la pantalla lo dice. Cuando cargues el coeficiente, TARANTO deja de estar en otra escala y se compara como las demás.
+
+Y el vínculo se corta ahí mismo: «¿Cuál cortar?» y «✂️ Cortar ese vínculo», con la contraseña de administrador. Antes había que buscar el código en el 🔍 Buscador, abrir «🧭 ¿Por qué apareció…?» y cortarlo ahí, par por par.
+
+`pruebas_de_la_precision.py` (106) controla la cuenta y que el diagnóstico diga lo mismo que la tabla; `pruebas_de_las_pantallas.py`, el corte. Con la versión vieja, fallan.
+
 ## 🔎 Los vínculos dudosos, de a un motivo
 
 En «🧹 Limpiar y corregir → 🔎 Analizar los vínculos cargados», los dudosos quedan casi todos con la misma confianza (15, la que deja un veto), y la única forma de cortar era «los N peores». Con la base real son 72: los 61 de los kits de cable y bujía y otros 11 de otras cosas, así que cortar «los 61 peores» se llevaba 61 cualesquiera.
