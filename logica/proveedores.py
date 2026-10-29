@@ -672,7 +672,8 @@ def cuantos_juntos_en_portales():
         return 0
 
 
-def leer_fichas_del_portal(marca_id, nombre_marca, cuantos=25, progreso=None, pausa=0.7):
+def leer_fichas_del_portal(marca_id, nombre_marca, cuantos=25, progreso=None, pausa=0.7,
+                           lote=None):
     """Recorre las fichas del portal de esa marca que todavía no se leyeron. De cada ficha saca
     los autos (como hasta ahora) y los productos de tu catálogo que la ficha muestra al lado.
 
@@ -681,7 +682,10 @@ def leer_fichas_del_portal(marca_id, nombre_marca, cuantos=25, progreso=None, pa
     el análisis lo cuenta como una prueba más a favor (ver evidencia_cruzada()).
 
     Devuelve un resumen: fichas leídas, con autos, con productos, listados descartados, pares
-    nuevos para revisar, el nombre de la lista y el primer error si no se pudo entrar."""
+    nuevos para revisar, el nombre de la lista y el primer error si no se pudo entrar.
+
+    `lote`: la lista donde van los pares. Leyendo «todas», cada tanda pasa la misma: si no,
+    cada minuto armaba una lista nueva y una lectura de una hora dejaba sesenta."""
     resumen = {"leidas": 0, "con_autos": 0, "con_productos": 0, "listados": 0,
                "sin_ficha": 0, "pares": 0, "nuevos": 0, "lote": "", "error": ""}
     _sesion, error = sesion_de_portal(nombre_marca)
@@ -749,7 +753,7 @@ def leer_fichas_del_portal(marca_id, nombre_marca, cuantos=25, progreso=None, pa
                       [(a, b, nombre_marca, o) for a, b, o in pares])
     resumen["pares"] = len({(a, b) for a, b, _o in pares})
     if pares:
-        resumen["lote"] = f"PORTAL {nombre_marca} · {datetime.now():%d/%m %H:%M}"
+        resumen["lote"] = lote or f"PORTAL {nombre_marca} · {datetime.now():%d/%m %H:%M}"
         resumen["nuevos"] = guardar_equivalencias_pendientes(
             [(a, b) for a, b, _o in pares], "portal", resumen["lote"])
     return resumen
@@ -2120,11 +2124,23 @@ def equivalencias_desde_catalogo(marca_id, limite=50, progreso=None, cancelado=N
     return propuestas, fallidas, len(pendientes)
 
 
-def guardar_equivalencias_de_catalogo(propuestas, marca):
-    """Manda a revisión lo que se leyó de las fichas. Devuelve cuántas quedaron pendientes."""
+def volver_a_leer_las_fichas(marca_id):
+    """Olvida qué fichas del catálogo de esa marca ya se leyeron, para leerlas todas de nuevo
+    («Volver a leer» con «todas»). Devuelve cuántas. La tarea de fondo también las relee."""
+    exigir_nivel("empleado", "volver a leer el catálogo")
+    with db_lock:
+        c.execute("UPDATE productos SET ficha_equiv_leida = NULL "
+                  "WHERE marca_id = ? AND ficha_equiv_leida IS NOT NULL", (marca_id,))
+        conn.commit()
+        return c.rowcount
+
+
+def guardar_equivalencias_de_catalogo(propuestas, marca, lote=None):
+    """Manda a revisión lo que se leyó de las fichas. Devuelve cuántas quedaron pendientes.
+    `lote`, como en leer_fichas_del_portal(): leyendo «todas», la misma lista en cada tanda."""
     if not propuestas:
         return 0
-    lote = f"CATÁLOGO {marca} · {datetime.now():%d/%m %H:%M}"
+    lote = lote or f"CATÁLOGO {marca} · {datetime.now():%d/%m %H:%M}"
     rechazados = pares_rechazados()
     nuevas = [(p["_a"], p["_b"]) for p in propuestas
               if (p["_a"], p["_b"]) not in rechazados]

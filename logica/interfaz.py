@@ -18,6 +18,44 @@ def seccion_plegable(titulo, key, abierto=False):
     return st.toggle(titulo, key=key, value=abierto)
 
 
+# DE A TANDAS, HASTA TERMINAR. Leer «todas» las fichas de un catálogo de un saque son horas
+# con la pantalla colgada, y el navegador o el servidor cortan mucho antes. Es lo que ya hacía
+# «♾️ Seguir hasta terminar» en las fotos: una tanda por dibujo de la pantalla, y entre una y
+# otra se puede tocar «⏹️ Detener». Si se corta, se pierde a lo sumo la tanda en curso.
+def seguir_de_a_tandas(clave, paso, avance):
+    """Corre paso(estado) una vez por dibujo mientras st.session_state[clave] exista.
+
+    paso(estado) hace UNA tanda, suma lo suyo en `estado` (un dict) y devuelve True si queda
+    más. avance(estado) es el renglón de cómo va. Devuelve el estado cuando termina —por
+    terminar, por «⏹️ Detener» o por un error, que queda en estado["error"]— o None mientras
+    sigue (en ese caso no vuelve: pide otro dibujo)."""
+    estado = st.session_state.get(clave)
+    if estado is None:
+        return None
+    # En un lugar que se borra al terminar: si no, el resumen salía al lado de «sigue sola».
+    lugar = st.empty()
+    with lugar.container():
+        detener = st.button("⏹️ Detener", key=f"{clave}_detener", type="primary")
+        if not detener:
+            st.caption(f"{avance(estado)} Dejá esta pantalla abierta: sigue sola.")
+    if detener:
+        estado["detenido"] = True
+        sigue = False
+    else:
+        try:
+            sigue = paso(estado)
+        except Exception as _err:
+            anotar_error(f"seguir_de_a_tandas/{clave}", _err)
+            estado["error"] = el_error_en_castellano(_err)
+            sigue = False
+    if sigue:
+        st.session_state[clave] = estado
+        st.rerun()
+    lugar.empty()
+    st.session_state.pop(clave, None)
+    return estado
+
+
 def herramientas_del_grupo(indice_grupo):
     """Las herramientas de un grupo de mantenimiento, en el orden en que se dibujan."""
     return [h for h in HERRAMIENTAS_MANTENIMIENTO if h[1] == indice_grupo]

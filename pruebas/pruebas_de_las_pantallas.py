@@ -445,6 +445,96 @@ def probar():
               or not any("Cambió a" in x.value and "No queda ninguno" in x.value
                          for x in at.success)):
             fallas.append("💲 dos precios: después de elegir sigue en la lista, o no lo dice")
+    # 📖 «Todas» las fichas del catálogo del proveedor, y todas las fotos por link: de a
+    # tandas, una por dibujo, hasta que no quede nada (ver seguir_de_a_tandas()). Lo encontrado
+    # va a revisión en cada tanda y a una sola lista. Sin salir a internet: la lectura se
+    # cambia por una de mentira, que da una equivalencia por tanda y a la tercera se termina.
+    if "--base" not in sys.argv:
+        g = ns["inflacion_desde"].__globals__
+        c.execute("UPDATE marcas SET url_ficha_template = 'https://ejemplo.invalid/{codigo}' "
+                  "WHERE id = ?", (_marca_prueba,))
+        c.executemany("INSERT INTO productos (codigo_raw, codigo_clean, descripcion, marca_id, "
+                      "imagen_url) VALUES (?, ?, 'FOTO', ?, ?)",
+                      [(f"FT{i}", f"FT{i}", _marca_prueba, f"https://ejemplo.invalid/{i}.jpg")
+                       for i in range(2)])
+        conn.commit()
+        _tandas_cat, _tandas_fotos = [], []
+
+        def _catalogo_de_mentira(marca_id, limite=50, progreso=None, solo_no_leidos=False, **k):
+            _tandas_cat.append((limite, solo_no_leidos))
+            if len(_tandas_cat) > 2:
+                return [], [], 0
+            _otro = _ids_u[len(_tandas_cat) + 1]
+            return ([{"Código": "F100", "Marca": "PRUEBA", "Equivale a": "U", "Marca del otro":
+                      "UNO A UNO", "_a": min(_f100, _otro), "_b": max(_f100, _otro)}],
+                    [("Z1", "sin códigos")], limite)
+
+        def _fotos_de_mentira(limite=200, progreso=None, hilos=6, liviano=True):
+            _tandas_fotos.append(limite)
+            c.execute("UPDATE productos SET foto_busqueda_estado = 'link_roto' WHERE id = "
+                      "(SELECT MIN(id) FROM productos WHERE codigo_raw LIKE 'FT%' "
+                      "AND foto_busqueda_estado IS NULL)")
+            conn.commit()
+            return 1, []
+        _tandas_portal = []
+
+        def _portal_de_mentira(marca_id, nombre_marca, cuantos=25, progreso=None, pausa=0.7,
+                               lote=None):
+            _tandas_portal.append(lote)
+            _leidas = cuantos if len(_tandas_portal) <= 2 else 0
+            return {"leidas": _leidas, "con_autos": 0, "con_productos": 1 if _leidas else 0,
+                    "listados": 0, "sin_ficha": 0, "pares": 1 if _leidas else 0,
+                    "nuevos": 1 if _leidas else 0, "lote": lote or "", "error": ""}
+        _originales = (g["equivalencias_desde_catalogo"], g["bajar_fotos_pendientes"],
+                       g["leer_fichas_del_portal"])
+        g["equivalencias_desde_catalogo"] = _catalogo_de_mentira
+        g["bajar_fotos_pendientes"] = _fotos_de_mentira
+        g["leer_fichas_del_portal"] = _portal_de_mentira
+        try:
+            at.session_state["sub_mantenimiento"] = ns["GRUPOS_MANTENIMIENTO"][0]
+            at.session_state["tanda_equiv_catalogo"] = "Todas"
+            at.run()
+            [b for b in at.button if "Leer las fichas y proponer" in b.label][0].click().run()
+            _lotes_cat = c.execute(
+                "SELECT lote, COUNT(*) FROM equivalencias_pendientes WHERE lote LIKE "
+                "'CATÁLOGO PRUEBA%' GROUP BY lote").fetchall()
+            if (len(_tandas_cat), {t for t in _tandas_cat}) != (3, {(50, True)}):
+                fallas.append(f"📖 todas las fichas: las tandas fueron {_tandas_cat}")
+            elif [n for _l, n in _lotes_cat] != [2]:
+                fallas.append("📖 todas las fichas: a revisión fueron "
+                              f"{list(map(tuple, _lotes_cat))}")
+            # (Streamlit pone el emoji del principio como ícono: el texto empieza en «Listo».)
+            elif (not any(x.value.startswith("Listo: 100 ficha(s)") for x in at.success)
+                  or any("sigue sola" in x.value for x in at.caption)):
+                fallas.append("📖 todas las fichas: al terminar no dice cuántas leyó, o sigue "
+                              "diciendo «sigue sola»")
+            # El portal de la misma marca (una con dirección de catálogo es un portal público):
+            # todas las tandas a la misma lista.
+            at.session_state["portal_marca"] = [o for o in at.selectbox(key="portal_marca").options
+                                                if o.startswith("PRUEBA")][0]
+            at.session_state["portal_cuantos"] = "Todas"
+            at.run()
+            [b for b in at.button if "Entrar y leer las fichas" in b.label][0].click().run()
+            if (len(_tandas_portal) != 3 or len(set(_tandas_portal)) != 1
+                    or not str(_tandas_portal[0]).startswith("PORTAL PRUEBA")
+                    or not any(x.value.startswith("Listo: 50 ficha(s)") for x in at.success)):
+                fallas.append(f"🔐 todas las fichas del portal: tandas {_tandas_portal}, o al "
+                              "terminar no lo dice")
+            at.session_state["sub_mantenimiento"] = ns["GRUPOS_MANTENIMIENTO"][4]
+            at.session_state["cuantas_fotos_url"] = "Todas"
+            at.run()
+            [b for b in at.button if "Bajar las 2 fotos" in b.label][0].click().run()
+            if (len(_tandas_fotos), "fotos_url_todas" in at.session_state) != (2, False) or \
+                    not any("se bajaron 2 foto(s)" in x.value for x in at.success):
+                fallas.append(f"📷 todas las fotos: tandas {_tandas_fotos}, sin terminar o sin "
+                              "decirlo")
+        except IndexError:
+            fallas.append("📖 «todas»: no está el botón")
+        finally:
+            (g["equivalencias_desde_catalogo"], g["bajar_fotos_pendientes"],
+             g["leer_fichas_del_portal"]) = _originales
+            c.execute("UPDATE marcas SET url_ficha_template = NULL WHERE id = ?", (_marca_prueba,))
+            conn.commit()
     at.session_state["pagina_actual"] = ns["PAGINAS"][0]
     recorrer("operador")
     [b for b in at.button if b.label == "Salir"][0].click().run()

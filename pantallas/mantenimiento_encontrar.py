@@ -436,16 +436,66 @@ if pagina == PAGINAS[3]:
                         f"{miles(int(_leidas_p[1] or 0))} mostraban otros productos tuyos · "
                         f"{miles(_pares_p)} pares vistos juntos"
                         + (f" · {miles(int(_leidas_p[2]))} sin ficha" if _leidas_p[2] else ""))
-                _cuantos = st.select_slider("Leer fichas de:", options=[10, 25, 50, 100, 200],
-                                             format_func=lambda x: f"{x} productos",
-                                             key="portal_cuantos")
+                # «Todas»: de a tandas de 25, una por dibujo, hasta que no quede ninguna (ver
+                # seguir_de_a_tandas()). Antes el tope era 200 por vez.
+                _cuantos = st.select_slider(
+                    "Leer fichas de:", options=[10, 25, 50, 100, 200, "Todas"],
+                    format_func=lambda x: ("todas las que falten" if x == "Todas"
+                                           else f"{x} productos"),
+                    key="portal_cuantos")
                 ayuda(
                     "Se hace de a tandas chicas y con una pausa entre pedidos. No es "
                     "lentitud: golpear el servidor del proveedor a máxima velocidad es la "
                     "forma más rápida de que te bloqueen la cuenta. Cada tanda sigue donde "
-                    "quedó la anterior."
+                    "quedó la anterior. Con «todas las que falten» sigue sola, tanda tras "
+                    "tanda, hasta terminar o hasta que toques «⏹️ Detener»."
                 )
-                if st.button("🔐 Entrar y leer las fichas"):
+                _todas_p = st.session_state.get("portal_todas")
+
+                def _paso_portal(estado):
+                    _barra_t = st.progress(0.0, text="Leyendo fichas del portal...")
+                    _r = leer_fichas_del_portal(
+                        estado["id"], estado["marca"], 25, lote=estado["lote"],
+                        progreso=lambda f, t: _barra_t.progress(f, text=t))
+                    _barra_t.empty()
+                    for _k in ("leidas", "con_autos", "con_productos", "nuevos", "pares",
+                               "sin_ficha", "listados"):
+                        estado[_k] = estado.get(_k, 0) + _r[_k]
+                    if _r["error"]:
+                        estado["error"] = _r["error"]
+                    return bool(_r["leidas"]) and not _r["error"]
+
+                if _todas_p and _todas_p["marca"] != _marca_p["nombre"]:
+                    st.warning(f"Hay una lectura de todas las fichas de **{_todas_p['marca']}** "
+                               "en curso: volvé a elegir ese proveedor para que siga, o tocá "
+                               "Detener.")
+                    if st.button("⏹️ Detener", key="portal_todas_detener_otra"):
+                        st.session_state.pop("portal_todas", None)
+                        st.rerun()
+                elif _todas_p:
+                    _fin_p = seguir_de_a_tandas(
+                        "portal_todas", _paso_portal,
+                        lambda e: f"📖 Van {miles(e.get('leidas', 0))} fichas leídas y "
+                                  f"{miles(e.get('nuevos', 0))} pares nuevos para revisar.")
+                    if _fin_p:
+                        invalidar_salud()
+                        st.success(
+                            ("⏹️ Detenido" if _fin_p.get("detenido") else "✅ Listo")
+                            + f": {miles(_fin_p.get('leidas', 0))} ficha(s) leídas, "
+                            f"{miles(_fin_p.get('con_autos', 0))} con autos y "
+                            f"{miles(_fin_p.get('con_productos', 0))} que muestran otros "
+                            "productos tuyos."
+                            + (f" **{miles(_fin_p['nuevos'])} par(es) nuevos para revisar** en "
+                               f"«{_fin_p['lote']}»." if _fin_p.get("nuevos") else ""))
+                        if _fin_p.get("error"):
+                            st.warning(f"Se cortó antes: {_fin_p['error']}")
+                elif st.button("🔐 Entrar y leer las fichas"):
+                    if _cuantos == "Todas":
+                        st.session_state["portal_todas"] = {
+                            "id": _marca_p["id"], "marca": _marca_p["nombre"],
+                            "lote": f"PORTAL {_marca_p['nombre']} · "
+                                    f"{datetime.now():%d/%m %H:%M}"}
+                        st.rerun()
                     _barra = st.progress(0.0, text="Entrando al portal...")
                     _res = leer_fichas_del_portal(
                         _marca_p["id"], _marca_p["nombre"], int(_cuantos),
@@ -951,17 +1001,82 @@ if pagina == PAGINAS[3]:
                 # "no obedece". Es la misma forma que usa el resto de la app.
                 st.session_state.setdefault("tanda_equiv_catalogo", 25)
                 cuantos_mf = st.select_slider(
-                    "Cuántas fichas consultar en esta tanda:", options=[10, 25, 50, 100, 200],
+                    "Cuántas fichas consultar en esta tanda:",
+                    options=[10, 25, 50, 100, 200, "Todas"],
+                    format_func=lambda x: "todas las que falten" if x == "Todas" else str(x),
                     key="tanda_equiv_catalogo",
                     help="Cada ficha es una consulta al sitio del proveedor. De a poco primero, "
-                         "para ver si ese catálogo se deja leer antes de pedirle 200 páginas.")
+                         "para ver si ese catálogo se deja leer antes de pedirle todas. Con "
+                         "«todas las que falten» sigue sola de a 50, hasta terminar o hasta que "
+                         "toques «⏹️ Detener», y lo que encuentra va a revisión en cada tanda.")
                 # Lo ya leído no se vuelve a pedir, salvo que lo pidas: antes a mano se releían
                 # siempre las primeras fichas (las de stock), y cada tanda bajaba lo mismo.
                 _releer_mf = st.checkbox(
                     "Volver a leer también las fichas ya leídas", key="releer_equiv_catalogo",
                     help="Solo si el proveedor actualizó su catálogo. Si no, cada tanda sigue "
                          "donde quedó la anterior.")
-                if st.button("🌐 Leer las fichas y proponer equivalencias"):
+                _todas_mf = st.session_state.get("catalogo_todas")
+
+                def _paso_catalogo(estado):
+                    _barra_t = st.progress(0.0, text="Consultando el catálogo del proveedor...")
+                    _props, _falla, _consult = equivalencias_desde_catalogo(
+                        estado["id"], limite=50, solo_no_leidos=True,
+                        progreso=lambda hechos, total: _barra_t.progress(
+                            min(hechos / max(total, 1), 1.0)))
+                    _barra_t.empty()
+                    # A revisión en cada tanda, y no al final como a mano: las fichas quedan
+                    # marcadas como leídas, y si la lectura se corta lo encontrado se perdía.
+                    estado["guardadas"] = estado.get("guardadas", 0) + \
+                        guardar_equivalencias_de_catalogo(_props, estado["marca"],
+                                                          lote=estado["lote"])
+                    estado["consultadas"] = estado.get("consultadas", 0) + _consult
+                    estado["encontradas"] = estado.get("encontradas", 0) + len(_props)
+                    _red = sum(1 for _cod, _err in _falla if _falla_de_la_red(_err))
+                    estado["fallidas"] = estado.get("fallidas", 0) + _red
+                    # Si el sitio falla en más de la mitad, se corta: insistirle a un sitio
+                    # caído es la forma más rápida de que te bloquee.
+                    if _consult and _red * 2 > _consult:
+                        estado["error"] = ("el sitio del proveedor está fallando: se cortó "
+                                           "para no insistirle. Probá más tarde.")
+                        return False
+                    return _consult > 0
+
+                if _todas_mf and _todas_mf["id"] != opciones_mf[elegida_mf]:
+                    st.warning(f"Hay una lectura de todas las fichas de **{_todas_mf['marca']}** "
+                               "en curso: volvé a elegir esa marca para que siga, o tocá "
+                               "Detener.")
+                    if st.button("⏹️ Detener", key="catalogo_todas_detener_otra"):
+                        st.session_state.pop("catalogo_todas", None)
+                        st.rerun()
+                elif _todas_mf:
+                    _fin_mf = seguir_de_a_tandas(
+                        "catalogo_todas", _paso_catalogo,
+                        lambda e: f"📖 Van {miles(e.get('consultadas', 0))} fichas consultadas "
+                                  f"y {miles(e.get('guardadas', 0))} equivalencias a revisión.")
+                    if _fin_mf:
+                        invalidar_salud()
+                        st.success(
+                            ("⏹️ Detenido" if _fin_mf.get("detenido") else "✅ Listo")
+                            + f": {miles(_fin_mf.get('consultadas', 0))} ficha(s) consultadas, "
+                            f"{miles(_fin_mf.get('encontradas', 0))} equivalencia(s) "
+                            "encontradas"
+                            + (f"; **{miles(_fin_mf['guardadas'])} nuevas para revisar** en "
+                               f"«{_fin_mf['lote']}»." if _fin_mf.get("guardadas") else "."))
+                        if _fin_mf.get("fallidas"):
+                            st.caption(f"{miles(_fin_mf['fallidas'])} no se pudieron leer por "
+                                       "la red: se reintentan otro día.")
+                        if _fin_mf.get("error"):
+                            st.warning(f"Se cortó antes: {_fin_mf['error']}")
+                elif st.button("🌐 Leer las fichas y proponer equivalencias"):
+                    if cuantos_mf == "Todas":
+                        if _releer_mf:
+                            volver_a_leer_las_fichas(opciones_mf[elegida_mf])
+                        _marca_mf = elegida_mf.split(" (")[0]
+                        st.session_state.pop("equiv_catalogo", None)
+                        st.session_state["catalogo_todas"] = {
+                            "id": opciones_mf[elegida_mf], "marca": _marca_mf,
+                            "lote": f"CATÁLOGO {_marca_mf} · {datetime.now():%d/%m %H:%M}"}
+                        st.rerun()
                     barra_mf = st.progress(0.0)
                     with st.spinner("Consultando el catálogo del proveedor..."):
                         _props, _falla, _consult = equivalencias_desde_catalogo(

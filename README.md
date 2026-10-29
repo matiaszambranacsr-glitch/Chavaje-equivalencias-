@@ -6945,6 +6945,18 @@ Antes «🧹 Limpiar y corregir» mostraba la tabla y decía «corregí el preci
 
 Probado en un navegador con la copia de la base real: «⏭️ Después» pasó al segundo, «✅ Dejar» dijo «Queda \$ 236.234» y quedaron 149. `pruebas_de_la_plata_y_el_stock.py` (9) controla cambiar, dejar, el precio que otro cambió y que vuelva con otra lista; `pruebas_de_las_pantallas.py`, la tarjeta y el botón (si el botón no guarda, falla). La prueba encontró un error antes de publicar: al elegir el último, la sección dejaba de dibujarse y el aviso no se veía.
 
+## 📖 Leer «todas» las fichas, sin el tope de 200
+
+Lo pidió el dueño: «sacá el límite de lectura de 200 tandas de catálogo, que sean todas las que se pueda». En «🔎 Encontrar equivalencias» había dos selectores que llegaban hasta 200 fichas por vez —el portal del proveedor y el catálogo web—, y en «📷 Fotos» los links llegaban hasta 2.000. Ahora los tres tienen **«todas las que falten»**.
+
+- **De a tandas, una tras otra, solas** (`seguir_de_a_tandas()`): de a 25 fichas en el portal, de a 50 en el catálogo y de a 200 fotos. Entre tanda y tanda la pantalla se vuelve a dibujar, dice cómo va y se puede tocar «⏹️ Detener». Es lo que ya hacía «♾️ Seguir hasta terminar» en las fotos de la ficha: leer miles de un saque son horas con la pantalla colgada, y el navegador o el servidor cortan mucho antes. Si se corta, se pierde a lo sumo la tanda en curso.
+- **Lo encontrado va a revisión en cada tanda**, y no al final. Del catálogo, a mano, las equivalencias quedaban en la pantalla hasta tocar «📥 Mandar a revisión», pero las fichas ya quedaban marcadas como leídas: si la lectura se cortaba, lo encontrado se perdía. Leyendo todas, cada tanda lo manda sola.
+- **Todo a una sola lista** («CATÁLOGO …» o «PORTAL …» con la hora en que empezó). Antes cada minuto armaba una lista nueva: una lectura de una hora habría dejado sesenta.
+- **Termina sola**: cuando una tanda no encuentra nada por leer. Lo que falla queda marcado y no se vuelve a pedir ese día, así que no gira sobre lo mismo. Si el sitio falla en más de la mitad de una tanda, se corta para no insistirle: insistirle a un sitio caído es la forma más rápida de que te bloquee.
+- **«Volver a leer» con «todas»** olvida qué fichas de esa marca ya se leyeron y las lee de nuevo (`volver_a_leer_las_fichas()`).
+
+`pruebas_de_las_pantallas.py` lo controla con lecturas de mentira (sin salir a internet): las tres terminan solas, el catálogo manda las dos equivalencias a una sola lista, el portal usa la misma lista en todas las tandas, y al terminar dice cuántas leyó y deja de decir «sigue sola». Si «todas» hiciera una sola tanda, falla.
+
 ## ✅ Verificada por el número de fábrica, y los espesores aparte
 
 Lo pidió el dueño: «mejorá más la equivalencia y la búsqueda de productos». Medido sobre la copia de la base con `pruebas/medir.py`.

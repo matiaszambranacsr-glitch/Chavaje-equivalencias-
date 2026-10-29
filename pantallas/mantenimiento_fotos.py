@@ -31,11 +31,44 @@ if pagina == PAGINAS[3]:
                 # OJO: en select_slider el value TIENE que ser uno de los options. Antes acá iba
                 # min(500, pendientes) y con 347 pendientes tiraba excepción y se caía toda la
                 # pestaña de Mantenimiento — de ahí que la carga de fotos apareciera "rota".
-                opciones_url = [100, 250, 500, 1000, 2000]
+                opciones_url = [100, 250, 500, 1000, 2000, "Todas"]
                 st.session_state.setdefault("cuantas_fotos_url", 500)
-                cuantas_url = st.select_slider("¿Cuántas bajar?", options=opciones_url,
-                                                key="cuantas_fotos_url")
-                if st.button(f"⬇️ Bajar {cuantas_url} fotos de esos links"):
+                cuantas_url = st.select_slider(
+                    "¿Cuántas bajar?", options=opciones_url, key="cuantas_fotos_url",
+                    format_func=lambda x: "todas" if x == "Todas" else miles(x))
+                _todas_url = st.session_state.get("fotos_url_todas")
+
+                def _paso_fotos_url(estado):
+                    _barra_t = st.progress(0.0, text="Bajando fotos...")
+                    _baj, _fall = bajar_fotos_pendientes(
+                        200, liviano=modo_liviano,
+                        progreso=lambda i, t: _barra_t.progress(i / max(t, 1),
+                                                                text=f"Foto {i} de {t}..."))
+                    _barra_t.empty()
+                    estado["bajadas"] = estado.get("bajadas", 0) + _baj
+                    estado["fallidas"] = estado.get("fallidas", 0) + len(_fall)
+                    # Las que fallan quedan marcadas (link roto, o falló hoy) y no se vuelven a
+                    # elegir: cuando una tanda no hace nada, no queda nada. Y se termina en esta
+                    # misma vuelta si ya no queda ninguna: con cero, esta sección no se dibuja,
+                    # y lo «en curso» quedaba colgado hasta la próxima foto por bajar.
+                    return bool(_baj or _fall) and contar_fotos_por_bajar() > 0
+
+                if _todas_url is not None:
+                    _fin_url = seguir_de_a_tandas(
+                        "fotos_url_todas", _paso_fotos_url,
+                        lambda e: f"📷 Van {miles(e.get('bajadas', 0))} foto(s) bajadas.")
+                    if _fin_url:
+                        st.success(("⏹️ Detenido" if _fin_url.get("detenido") else "✅ Listo")
+                                   + f": se bajaron {miles(_fin_url.get('bajadas', 0))} foto(s)"
+                                   + (f"; {miles(_fin_url['fallidas'])} no se pudieron bajar."
+                                      if _fin_url.get("fallidas") else "."))
+                        if _fin_url.get("error"):
+                            st.warning(f"Se cortó antes: {_fin_url['error']}")
+                elif cuantas_url == "Todas":
+                    if st.button(f"⬇️ Bajar las {miles(pendientes_url)} fotos de esos links"):
+                        st.session_state["fotos_url_todas"] = {}
+                        st.rerun()
+                elif st.button(f"⬇️ Bajar {cuantas_url} fotos de esos links"):
                     barra = st.progress(0.0, text="Bajando fotos...")
                     bajadas, fallidas = bajar_fotos_pendientes(
                         int(cuantas_url), liviano=modo_liviano,
