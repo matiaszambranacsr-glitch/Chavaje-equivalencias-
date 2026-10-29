@@ -89,7 +89,10 @@ if pagina == PAGINAS[4]:
                         help="Cada fila es una función que usó la IA, con cuántas veces falló. Un "
                              "error casi siempre es el límite de uso de la clave: se reintenta más "
                              "tarde. «Generar imagen orientativa» usa una clave aparte, que se "
-                             "configura por separado.")
+                             "configura por separado.\n\n«Tokens» es lo que gastó (lo que se "
+                             "descuenta del cupo, o lo que se cobra). «Sin volver a preguntar» son "
+                             "las que se contestaron con la respuesta de la última hora a la misma "
+                             "foto: esas no gastan nada.")
             st.dataframe(uso_ia_actual, width="stretch", hide_index=True)
 
     if sub_stats == SUB_STATS[1]:

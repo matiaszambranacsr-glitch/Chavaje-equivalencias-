@@ -6957,6 +6957,19 @@ Lo pidió el dueño: «sacá el límite de lectura de 200 tandas de catálogo, q
 
 `pruebas_de_las_pantallas.py` lo controla con lecturas de mentira (sin salir a internet): las tres terminan solas, el catálogo manda las dos equivalencias a una sola lista, el portal usa la misma lista en todas las tandas, y al terminar dice cuántas leyó y deja de decir «sigue sola». Si «todas» hiciera una sola tanda, falla.
 
+## 🤖 Gemini, gastando menos tokens
+
+Lo pidió el dueño: «mejorá el consumo de tokens». La app le pregunta a Gemini en seis lugares: leer el código de una pieza por foto (dos pantallas), buscarla en internet, leer la cédula (dos) y el remito, y pasar un audio a texto. En la copia de la base real todavía no se usó ninguno, así que esto es para que, cuando se use, gaste lo menos posible. Todo pasa ahora por `preguntar_a_gemini()`:
+
+- **La foto, achicada** (`foto_para_gemini()`): una de celular viene de 4.000 × 3.000 y se mandaba entera. Ahora va con el lado más largo en 1.600 px, derecha (como se sacó) y en JPEG; para buscar la pieza en internet, que mira la forma y no letras chicas, en 1.024. En los modelos que cuentan la imagen por pedazos de 768 px eso es pasar de unos 6.200 tokens por foto a unos 1.550 (y a unos 1.000 la de internet), y con datos móviles sube en un segundo y no en diez.
+- **Copiar datos, sin razonar y en JSON**: la cédula, el remito y el audio piden la respuesta directa. El razonamiento previo del modelo se cobra como respuesta, y para copiar lo que dice un papel no hace falta. Si algún modelo no deja apagarlo, se pregunta de nuevo como antes: ningún cambio de modelo deja sin respuesta. Leer un código grabado y buscar en internet siguen razonando: ahí sí sirve.
+- **Lo repetido no se vuelve a preguntar**: la misma foto con la misma pregunta, dentro de una hora, se contesta con lo de antes (tocar dos veces el botón, o leer el código en las dos pantallas que lo hacen).
+- **Cada uso anota sus tokens**, y la tabla de 📊 Estadísticas → «🤖 Uso de las funciones de IA» suma dos columnas: «Tokens» y «Sin volver a preguntar». Lo que no se mide no se puede bajar. Los usos de antes dicen «—».
+
+La única que cobra de verdad, «Generar imagen orientativa», ya no gastaba de más: se genera solo al tocar el botón, se ve antes de guardarla y queda guardada.
+
+`pruebas_de_las_fuentes.py` (10) lo controla con un Gemini de mentira (nada sale de la máquina): la foto achicada y derecha, JSON y sin razonar en la cédula, la segunda vez sin preguntar y con 0 tokens, el modelo que no deja apagar el razonamiento, y la de internet a 1.024 y razonando. Con la foto sin achicar o sin recordar la respuesta, falla.
+
 ## ✅ Verificada por el número de fábrica, y los espesores aparte
 
 Lo pidió el dueño: «mejorá más la equivalencia y la búsqueda de productos». Medido sobre la copia de la base con `pruebas/medir.py`.

@@ -1214,8 +1214,12 @@ def _esquema_gestion(c):
         funcion TEXT NOT NULL,
         usuario TEXT,
         exito INTEGER,
-        fecha TEXT DEFAULT (datetime('now'))
+        fecha TEXT DEFAULT (datetime('now')),
+        tokens INTEGER
     )""")
+    # Cuántos tokens gastó cada uso (ver preguntar_a_gemini()). Vacío en los de antes.
+    if "tokens" not in [f[1] for f in c.execute("PRAGMA table_info(uso_ia)").fetchall()]:
+        c.execute("ALTER TABLE uso_ia ADD COLUMN tokens INTEGER")
 
     # Papelera: guarda una copia de lo que se borra (marcas, productos, combos, alias) para
     # poder restaurarlo si fue un error. No reemplaza el backup completo, es para el día a día.

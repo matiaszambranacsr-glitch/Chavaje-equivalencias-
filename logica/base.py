@@ -81,7 +81,7 @@ MEMORIAS_QUE_NO_SON_DE_LA_BASE = (
     "intentos_en_recuperacion",
     "libros_de_excel_leidos", "lo_traido_de_la_nhtsa", "mediciones_de_busqueda",
     "paginas_recientes", "paquetes_de_certificados", "sesiones_de_catalogo",
-    "sesiones_de_portal", "token_de_mercado_libre", "ultimos_errores",
+    "sesiones_de_portal", "token_de_mercado_libre", "ultimos_errores", "respuestas_de_gemini",
     "lo_de_antemano_lanzado")
 
 

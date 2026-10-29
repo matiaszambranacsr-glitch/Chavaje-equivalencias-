@@ -541,6 +541,83 @@ def probar(L):
     ns["modelos_en_la_nhtsa"]("FORD", 2019)
     esperar("sin internet, el toque siguiente no la espera de nuevo", len(_sin_respuesta), _n)
     esperar("fallas: sin año", bool(ns["fallas_reportadas"]("FORD", "RANGER", "")[1]), True)
+
+    # 10. GEMINI, GASTANDO MENOS (ver preguntar_a_gemini()). Con un Gemini de mentira: nada
+    # sale de la máquina. La foto va achicada y derecha, las que copian datos van en JSON y sin
+    # razonar, la misma pregunta no se repite, y cada uso anota sus tokens.
+    import io as _io
+    from PIL import Image as _Imagen
+    _salida = _io.BytesIO()
+    _Imagen.new("RGB", (4000, 3000), "white").save(_salida, "PNG")
+    _grande = _salida.getvalue()
+    _chica = _io.BytesIO()
+    _Imagen.new("RGB", (800, 600), "white").save(_chica, "JPEG")
+    _girada = _io.BytesIO()
+    _exif = _Imagen.Exif()
+    _exif[0x0112] = 6                    # sacada con el celular de costado
+    _Imagen.new("RGB", (400, 300), "white").save(_girada, "JPEG", exif=_exif)
+    _tam = lambda b: _Imagen.open(_io.BytesIO(b)).size
+    _achicada = ns["foto_para_gemini"](_grande)
+    esperar("foto: achicada a 1.600 y en JPEG",
+            (_tam(_achicada), _Imagen.open(_io.BytesIO(_achicada)).format), ((1600, 1200), "JPEG"))
+    esperar("foto: la chica va tal cual", ns["foto_para_gemini"](_chica.getvalue()),
+            _chica.getvalue())
+    esperar("foto: la sacada de costado, derecha", _tam(ns["foto_para_gemini"](_girada.getvalue())),
+            (300, 400))
+    esperar("foto: lo que no es una foto va tal cual", ns["foto_para_gemini"](b"no es foto"),
+            b"no es foto")
+
+    _pedidos, _fallar_si_no_piensa = [], [False]
+
+    class _Respuesta:
+        text = '{"patente": "AB123CD", "marca": "FIAT", "modelo": "PALIO", "anio": "2010", ' \
+               '"motorizacion": null}'
+
+        class usage_metadata:
+            total_token_count = 1234
+
+    class _Modelos:
+        def generate_content(self, model, contents, config=None):
+            _pedidos.append((contents, config))
+            if _fallar_si_no_piensa[0] and getattr(config, "thinking_config", None):
+                raise RuntimeError("400 Budget 0 is invalid. This model only works in "
+                                   "thinking mode.")
+            return _Respuesta()
+
+    class _Cliente:
+        models = _Modelos()
+    _originales_ia = (g["_cliente_de_gemini"], g["secretos_app"])
+    g["_cliente_de_gemini"] = lambda api_key: _Cliente()
+    g["secretos_app"] = lambda: {"gemini_api_key": "de-mentira"}
+    try:
+        ns["del_proceso"]("respuestas_de_gemini", dict).clear()
+        _datos, _err = ns["extraer_datos_cedula"](_grande)
+        esperar("cédula: los datos", (_err, (_datos or {}).get("patente")), (None, "AB123CD"))
+        _partes, _config = _pedidos[-1]
+        esperar("cédula: foto achicada, JSON y sin razonar",
+                (_tam(_partes[1].inline_data.data), _config.response_mime_type,
+                 _config.thinking_config.thinking_budget), ((1600, 1200), "application/json", 0))
+        ns["extraer_datos_cedula"](_grande)
+        esperar("la misma foto no se vuelve a preguntar", len(_pedidos), 1)
+        esperar("cada uso con sus tokens (0 el repetido)",
+                [r[0] for r in g["c"].execute(
+                    "SELECT tokens FROM uso_ia ORDER BY id DESC LIMIT 2")],
+                [0, 1234])
+        _fila = next(f for f in ns["resumen_uso_ia"]() if f["Función"] == "Leer cédula/título")
+        esperar("el resumen: tokens y las que no se preguntaron",
+                (_fila["Tokens"], _fila["Sin volver a preguntar"]), ("1.234", 1))
+        _fallar_si_no_piensa[0] = True
+        ns["extraer_datos_cedula"](_chica.getvalue())
+        esperar("un modelo que no deja apagar el razonamiento: se pregunta como antes",
+                (len(_pedidos), _pedidos[-1][1].thinking_config), (3, None))
+        _fallar_si_no_piensa[0] = False
+        ns["identificar_pieza_por_internet"](_grande, "gol")
+        _partes, _config = _pedidos[-1]
+        esperar("por internet: foto a 1.024, con búsqueda y razonando",
+                (_tam(_partes[1].inline_data.data), bool(_config.tools), _config.thinking_config),
+                ((1024, 768), True, None))
+    finally:
+        g["_cliente_de_gemini"], g["secretos_app"] = _originales_ia
     return fallas
 
 

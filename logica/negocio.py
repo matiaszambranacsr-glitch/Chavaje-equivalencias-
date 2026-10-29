@@ -327,10 +327,100 @@ def eliminar_combo(disparador):
 # ============================================================================================
 # INTELIGENCIA ARTIFICIAL: fotos, audio y remitos
 # ============================================================================================
+# LO QUE SE LE MANDA A GEMINI, LO MÁS CHICO QUE SIRVA. Se cobra (o se descuenta del cupo gratis)
+# por lo que entra y por lo que sale:
+#   · La foto. Una de celular viene de 4.000 × 3.000 y se mandaba entera. En los modelos que
+#     cuentan la imagen por pedazos de 768 px eso son 24 pedazos, unos 6.200 tokens; a 1.600 px
+#     de lado son 6, unos 1.550. Las letras de un código o de una cédula se siguen leyendo, y con
+#     datos móviles sube en un segundo y no en diez. Ver foto_para_gemini().
+#   · La respuesta. Las que solo copian datos —cédula, remito, audio— piden el JSON directo y sin
+#     razonar antes: ese razonamiento se cobra como respuesta, y para copiar no hace falta.
+#   · Lo repetido. La misma foto con la misma pregunta, dentro de una hora, no se vuelve a mandar
+#     (tocar dos veces el botón, o leer el código en las dos pantallas que lo hacen).
+# Y cada uso anota cuántos tokens gastó, que se ve en 📊 Estadísticas: lo que no se mide no se
+# puede bajar. Pedido del dueño: «mejorá el consumo de tokens».
+MODELO_GEMINI = "gemini-flash-latest"
+LADO_MAXIMO_PARA_GEMINI = 1600
+MINUTOS_QUE_SE_RECUERDA_UNA_RESPUESTA = 60
+_GASTO_DE_GEMINI = threading.local()      # lo de la última llamada de este hilo (de esta sesión)
+
+
+def foto_para_gemini(imagen_bytes, lado=LADO_MAXIMO_PARA_GEMINI):
+    """La foto con su lado más largo en `lado` px, derecha (como se sacó) y en JPEG. Si ya es
+    chica, va como está. Si no se puede abrir, va la original: Gemini la lee igual, y un error
+    acá no puede dejar sin respuesta a quien está en el mostrador."""
+    try:
+        from PIL import Image, ImageOps
+        with Image.open(io.BytesIO(imagen_bytes)) as original:
+            if (max(original.size) <= lado and original.format == "JPEG"
+                    and original.getexif().get(0x0112, 1) == 1):
+                return imagen_bytes
+            foto = ImageOps.exif_transpose(original).convert("RGB")
+        foto.thumbnail((lado, lado))
+        salida = io.BytesIO()
+        foto.save(salida, "JPEG", quality=85)
+        return salida.getvalue()
+    except Exception as _err:
+        anotar_error("foto_para_gemini", _err)
+        return imagen_bytes
+
+
+def _cliente_de_gemini(api_key):
+    """Aparte para que las pruebas lo puedan cambiar por uno de mentira (sin salir a internet)."""
+    from google import genai
+    return genai.Client(api_key=api_key)
+
+
+def preguntar_a_gemini(partes, sin_razonar=False, en_json=False, herramientas=None,
+                       temperatura=None):
+    """La respuesta de Gemini a `partes` (textos y types.Part), con lo de arriba: recordada una
+    hora, y para copiar datos sin razonar y en JSON. Deja en _GASTO_DE_GEMINI los tokens que
+    gastó (0 si era repetida), que registrar_uso_ia() anota. Los errores siguen de largo: cada
+    función ya los traduce."""
+    from google.genai import types
+    huella = hashlib.sha256(repr((MODELO_GEMINI, sin_razonar, en_json, bool(herramientas),
+                                  temperatura)).encode())
+    for parte in partes:
+        datos = getattr(getattr(parte, "inline_data", None), "data", None)
+        huella.update(datos if datos is not None else str(parte).encode())
+    huella = huella.hexdigest()
+    recordadas = del_proceso("respuestas_de_gemini", dict)
+    previa = recordadas.get(huella)
+    if previa and time.time() - previa[0] < MINUTOS_QUE_SE_RECUERDA_UNA_RESPUESTA * 60:
+        _GASTO_DE_GEMINI.tokens = 0
+        return previa[1]
+    api_key = secretos_app().get("gemini_api_key")
+    if not api_key:
+        raise RuntimeError("No configuraste 'gemini_api_key' en Streamlit Cloud (Settings → "
+                           "Secrets).")
+    config = types.GenerateContentConfig(
+        tools=herramientas, temperature=temperatura,
+        response_mime_type="application/json" if en_json else None,
+        thinking_config=types.ThinkingConfig(thinking_budget=0) if sin_razonar else None)
+    cliente = _cliente_de_gemini(api_key)
+    try:
+        respuesta = cliente.models.generate_content(model=MODELO_GEMINI, contents=partes,
+                                                    config=config)
+    except Exception as _err:
+        # Un modelo que no deja apagar el razonamiento («only works in thinking mode»): se
+        # pregunta de nuevo como antes. Así ningún cambio de modelo deja sin respuesta.
+        if not sin_razonar or not re.search(r"think|budget", str(_err), re.IGNORECASE):
+            raise
+        config.thinking_config = None
+        respuesta = cliente.models.generate_content(model=MODELO_GEMINI, contents=partes,
+                                                    config=config)
+    _GASTO_DE_GEMINI.tokens = getattr(getattr(respuesta, "usage_metadata", None),
+                                      "total_token_count", None)
+    if len(recordadas) >= 30:                # las más viejas se van
+        for _vieja in sorted(recordadas, key=lambda k: recordadas[k][0])[:10]:
+            recordadas.pop(_vieja, None)
+    recordadas[huella] = (time.time(), respuesta)
+    return respuesta
+
+
 def identificar_pieza_por_foto(imagen_bytes):
     """Le manda una foto a Gemini y le pide que identifique la pieza, extrayendo el código
     de forma estructurada (no solo texto libre) para poder buscarlo directo en el catálogo."""
-    from google import genai
     from google.genai import types
 
     api_key = secretos_app().get("gemini_api_key")
@@ -338,7 +428,6 @@ def identificar_pieza_por_foto(imagen_bytes):
         return None, "No configuraste 'gemini_api_key' en Streamlit Cloud (Settings → Secrets)."
 
     try:
-        client = genai.Client(api_key=api_key)
         prompt = (
             "Esta es una foto de un repuesto de auto tomada en un taller o local de repuestos. Tu "
             "tarea principal es ENCONTRAR EL CÓDIGO — mirá con mucha atención toda la superficie de "
@@ -352,13 +441,9 @@ def identificar_pieza_por_foto(imagen_bytes):
             'serio no hay ningún código legible, dejá "codigo" como null — no inventes ni completes un '
             "código que no se vea con claridad."
         )
-        response = client.models.generate_content(
-            model="gemini-flash-latest",
-            contents=[
-                prompt,
-                types.Part.from_bytes(data=imagen_bytes, mime_type="image/jpeg"),
-            ],
-        )
+        response = preguntar_a_gemini(
+            [prompt, types.Part.from_bytes(data=foto_para_gemini(imagen_bytes),
+                                           mime_type="image/jpeg")], en_json=True)
         texto = response.text.strip()
         if texto.startswith("```"):
             texto = texto.split("```")[1]
@@ -435,7 +520,6 @@ def identificar_pieza_por_internet(imagen_bytes, pista=""):
 
     'pista' es lo que sepa la persona —«es de un Gol 1.6», «va en el motor»— y cambia mucho el
     resultado: sin ella el modelo tiene que adivinar también el auto."""
-    from google import genai
     from google.genai import types
 
     api_key = secretos_app().get("gemini_api_key")
@@ -443,7 +527,6 @@ def identificar_pieza_por_internet(imagen_bytes, pista=""):
         return None, "No configuraste 'gemini_api_key' en Streamlit Cloud (Settings → Secrets)."
 
     try:
-        client = genai.Client(api_key=api_key)
         prompt = (
             "Sos un vendedor de repuestos de auto con muchos años de mostrador, en Argentina. "
             "En la foto hay un repuesto que un cliente trajo en la mano. NO tiene el código "
@@ -470,16 +553,14 @@ def identificar_pieza_por_internet(imagen_bytes, pista=""):
             "- Si de la foto no se puede saber ni qué tipo de pieza es, poné confianza baja y "
             "«codigos» vacío. Decir «no sé» es una respuesta válida y útil."
         )
-        respuesta = client.models.generate_content(
-            model="gemini-flash-latest",
-            contents=[prompt, types.Part.from_bytes(data=imagen_bytes, mime_type="image/jpeg")],
-            config=types.GenerateContentConfig(
-                tools=[types.Tool(google_search=types.GoogleSearch())],
-                # Cero temperatura: acá no se quiere creatividad, se quiere que repita lo que
-                # encontró. Con el valor por omisión inventaba más números.
-                temperature=0.0,
-            ),
-        )
+        # La forma de la pieza se ve con menos detalle que un código grabado: 1.024 px.
+        respuesta = preguntar_a_gemini(
+            [prompt, types.Part.from_bytes(data=foto_para_gemini(imagen_bytes, lado=1024),
+                                           mime_type="image/jpeg")],
+            herramientas=[types.Tool(google_search=types.GoogleSearch())],
+            # Cero temperatura: acá no se quiere creatividad, se quiere que repita lo que
+            # encontró. Con el valor por omisión inventaba más números.
+            temperatura=0.0)
         datos = _json_de_una_respuesta(respuesta.text)
 
         # Las páginas que consultó. Sin esto la respuesta no se puede verificar, y una
@@ -587,7 +668,6 @@ def extraer_datos_cedula(imagen_bytes):
     """Lee una foto de cédula verde/azul o título del auto y extrae patente, marca, modelo, año
     y motorización con Gemini. SIEMPRE hay que revisar antes de guardar — el OCR puede confundir
     caracteres parecidos (0/O, 1/I) y en la patente o el VIN eso es grave."""
-    from google import genai
     from google.genai import types
     import json
 
@@ -596,17 +676,16 @@ def extraer_datos_cedula(imagen_bytes):
         return None, "No configuraste 'gemini_api_key' en Streamlit Cloud (Settings → Secrets)."
 
     try:
-        client = genai.Client(api_key=api_key)
         prompt = (
             "Esta es una foto de una cédula verde/azul o título de un vehículo argentino. Extraé "
             "ÚNICAMENTE un JSON válido (sin texto extra, sin markdown), con esta forma exacta: "
             '{"patente": "...", "marca": "...", "modelo": "...", "anio": "...", "motorizacion": "..."}. '
             "Si no podés leer algún campo con claridad, dejalo como null en vez de adivinar. No inventes datos."
         )
-        response = client.models.generate_content(
-            model="gemini-flash-latest",
-            contents=[prompt, types.Part.from_bytes(data=imagen_bytes, mime_type="image/jpeg")],
-        )
+        response = preguntar_a_gemini(
+            [prompt, types.Part.from_bytes(data=foto_para_gemini(imagen_bytes),
+                                           mime_type="image/jpeg")],
+            sin_razonar=True, en_json=True)
         texto = response.text.strip()
         if texto.startswith("```"):
             texto = texto.split("```")[1]
@@ -627,7 +706,6 @@ def extraer_datos_cedula(imagen_bytes):
 def transcribir_audio(audio_bytes, mime_type="audio/wav"):
     """Transcribe un audio a texto con Gemini — esto es solo 'hablar en vez de tipear', no un
     asistente conversacional: el texto transcripto se busca con el buscador normal de siempre."""
-    from google import genai
     from google.genai import types
 
     api_key = secretos_app().get("gemini_api_key")
@@ -635,12 +713,10 @@ def transcribir_audio(audio_bytes, mime_type="audio/wav"):
         return None, "No configuraste 'gemini_api_key' en Streamlit Cloud (Settings → Secrets)."
 
     try:
-        client = genai.Client(api_key=api_key)
         prompt = "Transcribí exactamente lo que se dice en este audio, en español. Devolvé solo el texto transcripto, nada más — sin comillas, sin comentarios."
-        response = client.models.generate_content(
-            model="gemini-flash-latest",
-            contents=[prompt, types.Part.from_bytes(data=audio_bytes, mime_type=mime_type)],
-        )
+        response = preguntar_a_gemini(
+            [prompt, types.Part.from_bytes(data=audio_bytes, mime_type=mime_type)],
+            sin_razonar=True)
         registrar_uso_ia("Búsqueda por voz", True)
         return response.text.strip(), None
     except Exception as e:
@@ -653,7 +729,6 @@ def leer_remito_por_foto(imagen_bytes):
     """Le pide a Gemini que lea un remito/factura de proveedor y devuelva los ítems en JSON.
     Devuelve (lista_items, error) — lista_items siempre queda para revisión manual antes de
     tocar el stock, la IA nunca actualiza nada por sí sola."""
-    from google import genai
     from google.genai import types
     import json
 
@@ -662,7 +737,6 @@ def leer_remito_por_foto(imagen_bytes):
         return None, "No configuraste 'gemini_api_key' en Streamlit Cloud (Settings → Secrets)."
 
     try:
-        client = genai.Client(api_key=api_key)
         prompt = (
             "Esta es una foto de un remito o factura de un proveedor de repuestos. Extraé cada ítem "
             "listado y devolvé ÚNICAMENTE un JSON válido (sin texto extra, sin markdown), con esta forma "
@@ -670,10 +744,10 @@ def leer_remito_por_foto(imagen_bytes):
             "Si no podés leer algún campo con claridad, dejalo como null. No inventes datos que no estén "
             "visibles en la imagen."
         )
-        response = client.models.generate_content(
-            model="gemini-flash-latest",
-            contents=[prompt, types.Part.from_bytes(data=imagen_bytes, mime_type="image/jpeg")],
-        )
+        response = preguntar_a_gemini(
+            [prompt, types.Part.from_bytes(data=foto_para_gemini(imagen_bytes),
+                                           mime_type="image/jpeg")],
+            sin_razonar=True, en_json=True)
         texto = response.text.strip()
         if texto.startswith("```"):
             texto = texto.split("```")[1]
@@ -706,7 +780,6 @@ def leer_cedula_por_foto(imagen_bytes):
     están en ninguna consulta gratuita, y son los que después dejan buscar por VIN.
 
     Devuelve (datos, error). Nada se guarda solo: los datos van a un formulario para revisar."""
-    from google import genai
     from google.genai import types
     import json
 
@@ -715,7 +788,6 @@ def leer_cedula_por_foto(imagen_bytes):
         return None, "No configuraste 'gemini_api_key' en Streamlit Cloud (Settings → Secrets)."
 
     try:
-        client = genai.Client(api_key=api_key)
         prompt = (
             "Esta es una foto de una cédula de identificación del automotor argentina (cédula "
             "verde o azul) o de un título del automotor. Extraé los datos del vehículo y devolvé "
@@ -729,10 +801,10 @@ def leer_cedula_por_foto(imagen_bytes):
             "nada, un número de chasis inventado hace que después se busquen repuestos de otro "
             "auto."
         )
-        response = client.models.generate_content(
-            model="gemini-flash-latest",
-            contents=[prompt, types.Part.from_bytes(data=imagen_bytes, mime_type="image/jpeg")],
-        )
+        response = preguntar_a_gemini(
+            [prompt, types.Part.from_bytes(data=foto_para_gemini(imagen_bytes),
+                                           mime_type="image/jpeg")],
+            sin_razonar=True, en_json=True)
         texto = response.text.strip()
         if texto.startswith("```"):
             texto = texto.split("```")[1]
@@ -2038,9 +2110,13 @@ def obtener_usuario_actual():
 
 
 def registrar_uso_ia(funcion, exito):
+    """Anota un uso, con los tokens que gastó la llamada que lo precedió en esta sesión (ver
+    preguntar_a_gemini()): 0 si la respuesta era repetida, vacío si no se llegó a preguntar."""
+    tokens = getattr(_GASTO_DE_GEMINI, "tokens", None)
+    _GASTO_DE_GEMINI.tokens = None
     with db_lock:
-        c.execute("INSERT INTO uso_ia (funcion, usuario, exito) VALUES (?, ?, ?)",
-                   (funcion, obtener_usuario_actual(), 1 if exito else 0))
+        c.execute("INSERT INTO uso_ia (funcion, usuario, exito, tokens) VALUES (?, ?, ?, ?)",
+                   (funcion, obtener_usuario_actual(), 1 if exito else 0, tokens))
         conn.commit()
 
 
@@ -2059,11 +2135,15 @@ def traducir_error_gemini(e):
 
 
 def resumen_uso_ia(dias=30):
-    c.execute("""SELECT funcion, COUNT(*) AS total, SUM(exito) AS exitosos
+    c.execute("""SELECT funcion, COUNT(*) AS total, SUM(exito) AS exitosos,
+                        SUM(tokens) AS tokens, SUM(tokens = 0) AS repetidas
                  FROM uso_ia WHERE fecha >= datetime('now', ?) GROUP BY funcion ORDER BY total DESC""",
               (f"-{dias} days",))
     return [{"Función": r["funcion"], "Usos": r["total"], "Exitosos": r["exitosos"],
-              "Con error": r["total"] - r["exitosos"]} for r in c.fetchall()]
+             "Con error": r["total"] - r["exitosos"],
+             # Los usos de antes de anotarlos no tienen tokens: «—», no cero.
+             "Tokens": miles(r["tokens"]) if r["tokens"] is not None else "—",
+             "Sin volver a preguntar": r["repetidas"] or 0} for r in c.fetchall()]
 
 
 # ============================================================================================
