@@ -872,6 +872,65 @@ def codigos_citados_en_tu_catalogo(nombre_catalogo):
     return salida
 
 
+# LO QUE LA FICHA NOMBRA Y ES OTRA PIEZA. La ficha de un fabricante nombra también lo que va
+# con la pieza: la del juego de cables SC-G101 de NGK nombra las bujías de ese auto, y la de la
+# bujía BKR6E la cita un kit de cable y bujía de FISPA («… REF BUJIAS NGK BKR6E»). El lector
+# juntaba todo lo que cita el código con todo lo que nombra la página, y del catálogo de NGK
+# salieron 158 pares: 104 eran un kit contra una pieza y 16 un cable contra una bujía —de ahí
+# los 61 vínculos de los kits y los 6 del SC-G101—. En la página de MANN, además, cualquier
+# número suelto engancha un producto: filtros de combustible juntos con una grasa de
+# molibdeno, un papel o una junta de tapa de cilindros. Con esto quedan 36 de NGK (bujía con
+# bujía) y 4 de MANN (filtro con filtro).
+_VERSION_DEL_FILTRO_DE_CATALOGOS = "1"
+
+
+def otra_pieza_que_la_que_cita(desc_cita, desc_nombrado):
+    """Por qué lo que nombra la ficha del fabricante no es la pieza que cita el código, o "".
+
+    Un kit contra una pieza suelta; otro rubro, o uno que no se sabe qué pieza es; o algo de la
+    pieza que contradice (el cable contra la bujía). El auto no cuenta: la ficha del fabricante
+    nombra los suyos, y cada lista los que conoce."""
+    if bool(es_un_kit(desc_cita)) != bool(es_un_kit(desc_nombrado)):
+        return "un kit contra una pieza suelta"
+    rubro_a, rubro_b = familia_para_comparar(desc_cita), familia_para_comparar(desc_nombrado)
+    if "Sin clasificar" in (rubro_a, rubro_b):
+        return "no se sabe qué pieza es"
+    if rubro_a != rubro_b:
+        return f"otro rubro: {rubro_a} y {rubro_b}"
+    fa, fb = firma_de_producto(desc_cita, None), firma_de_producto(desc_nombrado, None)
+    if fa and fb:
+        ok, motivo = firmas_compatibles(dict(fa, **_SIN_EL_AUTO), dict(fb, **_SIN_EL_AUTO))
+        if (not ok and motivo.startswith(_MOTIVOS_QUE_CONTRADICEN)
+                and not motivo.startswith(_MOTIVOS_DEL_AUTO)):
+            return motivo
+    return ""
+
+
+def olvidar_pares_de_catalogo_de_otra_pieza():
+    """Una vez por versión del filtro: saca de los pares que ya juntó un catálogo de fabricante
+    los que son otra pieza (ver otra_pieza_que_la_que_cita()). Contaban a favor —«🌐 el
+    catálogo de NGK los muestra juntos»— justo en los vínculos que estaban mal. Lo que ya
+    entró a la cola o se aprobó no se toca: eso lo marcan las reglas. Devuelve cuántos sacó."""
+    if obtener_config("filtro_de_catalogos", "") == _VERSION_DEL_FILTRO_DE_CATALOGOS:
+        return 0
+    c.execute("""SELECT j.producto_a_id AS a, j.producto_b_id AS b, j.portal,
+                        j.producto_origen_id AS o, pa.descripcion AS da, pb.descripcion AS db
+                 FROM productos_juntos_en_portal j
+                 JOIN productos pa ON pa.id = j.producto_a_id
+                 JOIN productos pb ON pb.id = j.producto_b_id
+                 WHERE j.portal LIKE 'CATÁLOGO %'""")
+    sacar = []
+    for r in c.fetchall():
+        _cita, _nombrado = (r["da"], r["db"]) if r["o"] != r["b"] else (r["db"], r["da"])
+        if otra_pieza_que_la_que_cita(_cita or "", _nombrado or ""):
+            sacar.append((r["a"], r["b"], r["portal"]))
+    with transaccion():
+        c.executemany("""DELETE FROM productos_juntos_en_portal
+                         WHERE producto_a_id = ? AND producto_b_id = ? AND portal = ?""", sacar)
+    guardar_config("filtro_de_catalogos", _VERSION_DEL_FILTRO_DE_CATALOGOS)
+    return len(sacar)
+
+
 def leer_catalogo_de_fabricante(nombre_catalogo, cuantos=20, pausa=PAUSA_ENTRE_FICHAS_DE_CATALOGO,
                                 progreso=None, sesion=None):
     """Lee las fichas del fabricante para los códigos que tus descripciones citan y todavía no
@@ -884,7 +943,12 @@ def leer_catalogo_de_fabricante(nombre_catalogo, cuantos=20, pausa=PAUSA_ENTRE_F
     cat = CATALOGOS_DE_FABRICANTE[nombre_catalogo]
     portal = f"CATÁLOGO {nombre_catalogo}"
     resumen = {"leidas": 0, "con_productos": 0, "listados": 0, "sin_ficha": 0, "pares": 0,
-               "nuevos": 0, "lote": "", "error": "", "pendientes": 0, "fallidas": 0}
+               "nuevos": 0, "lote": "", "error": "", "pendientes": 0, "fallidas": 0,
+               "otra_pieza": 0}
+    try:
+        olvidar_pares_de_catalogo_de_otra_pieza()
+    except sqlite3.OperationalError as _err:
+        anotar_error("olvidar_pares_de_catalogo_de_otra_pieza", _err)
     citados = codigos_citados_en_tu_catalogo(nombre_catalogo)
     c.execute("SELECT codigo FROM fichas_de_catalogo_leidas WHERE catalogo = ?",
               (nombre_catalogo,))
@@ -950,7 +1014,17 @@ def leer_catalogo_de_fabricante(nombre_catalogo, cuantos=20, pausa=PAUSA_ENTRE_F
                 nombrados = []
             elif nombrados:
                 resumen["con_productos"] += 1
-            pares.extend((min(a, b), max(a, b), a) for a in los_que_citan for b in nombrados)
+            # Sin lo que la ficha nombra y es otra pieza: ver otra_pieza_que_la_que_cita().
+            _descs = dict(c.execute(
+                f"SELECT id, descripcion FROM productos WHERE id IN "
+                f"({','.join('?' * len(los_que_citan + nombrados))})",
+                los_que_citan + nombrados).fetchall()) if nombrados else {}
+            for a in los_que_citan:
+                for b in nombrados:
+                    if otra_pieza_que_la_que_cita(_descs.get(a) or "", _descs.get(b) or ""):
+                        resumen["otra_pieza"] += 1
+                    else:
+                        pares.append((min(a, b), max(a, b), a))
             leidas.append((nombre_catalogo, cod, len(nombrados)))
             # La foto del fabricante, para los productos tuyos que citan el código y todavía no
             # tienen: es la misma pieza, y le sirve a la búsqueda por cámara.

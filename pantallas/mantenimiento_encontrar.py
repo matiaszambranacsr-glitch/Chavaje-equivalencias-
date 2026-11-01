@@ -559,13 +559,13 @@ if pagina == PAGINAS[3]:
                 anotar_error("panel de catálogos de fabricante", _err)
             if st.button("🏭 Leer una tanda ahora", key="leer_catalogos_ahora"):
                 _barra_c = st.progress(0.0, text="Leyendo catálogos...")
-                _res_c = {"leidas": 0, "pares": 0, "nuevos": 0, "errores": []}
+                _res_c = {"leidas": 0, "pares": 0, "nuevos": 0, "otra_pieza": 0, "errores": []}
                 for _i_c, _nombre_c in enumerate(CATALOGOS_DE_FABRICANTE):
                     _barra_c.progress(_i_c / len(CATALOGOS_DE_FABRICANTE),
                                       text=f"{_nombre_c}...")
                     _r_c = leer_catalogo_de_fabricante(_nombre_c, cuantos=10)
-                    for _k in ("leidas", "pares", "nuevos"):
-                        _res_c[_k] += _r_c[_k]
+                    for _k in ("leidas", "pares", "nuevos", "otra_pieza"):
+                        _res_c[_k] += _r_c.get(_k, 0)
                     if _r_c["error"]:
                         _res_c["errores"].append(f"{_nombre_c}: {_r_c['error']}")
                 _barra_c.empty()
@@ -574,6 +574,9 @@ if pagina == PAGINAS[3]:
                 avisar("success" if not _res_c["errores"] else "warning",
                        f"Se leyeron {_res_c['leidas']} ficha(s); {_res_c['pares']} par(es) "
                        f"vistos juntos, {_res_c['nuevos']} nuevos para revisar."
+                       # Ver otra_pieza_que_la_que_cita(): el kit, el cable, otro rubro.
+                       + (f" {_res_c['otra_pieza']} que la ficha nombraba y son otra pieza "
+                          "quedaron afuera." if _res_c["otra_pieza"] else "")
                        + (" No respondieron: " + "; ".join(_res_c["errores"])
                           if _res_c["errores"] else ""))
                 st.rerun()

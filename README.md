@@ -6959,6 +6959,14 @@ Lo pidió el dueño: «sacá el límite de lectura de 200 tandas de catálogo, q
 
 `pruebas_de_las_pantallas.py` lo controla con lecturas de mentira (sin salir a internet): las tres terminan solas, el catálogo manda las dos equivalencias a una sola lista, el portal usa la misma lista en todas las tandas, y al terminar dice cuántas leyó y deja de decir «sigue sola». Si «todas» hiciera una sola tanda, falla.
 
+## 🏭 Los catálogos de fabricante, sin lo que la ficha nombra y es otra pieza
+
+Las dos familias de errores de estos días (los kits de cable y bujía, y el SC-G101) salieron del mismo lugar: el lector de los catálogos de fabricante. Para cada código que tus descripciones citan («… REF NGK BKR6E»), abre la ficha del fabricante y junta **todo lo que cita ese código** con **todo lo que nombra la página**. Pero la ficha nombra también lo que va con la pieza: la del juego de cables SC-G101 nombra las bujías de ese auto, y la bujía BKR6E la cita un kit de cable y bujía. Del catálogo de NGK habían salido 158 pares: 104 eran un kit contra una pieza y 16 un cable contra una bujía. En la de MANN, además, cualquier número suelto de la página enganchaba un producto: filtros de combustible juntos con una grasa de molibdeno, un papel o una junta de tapa de cilindros.
+
+Ahora el lector deja afuera lo que la ficha nombra y es otra pieza (`otra_pieza_que_la_que_cita()`): un kit contra una pieza suelta, otro rubro o uno que no se sabe qué pieza es, o algo de la pieza que contradice (el cable contra la bujía). El auto no cuenta: la ficha nombra los suyos. Y lo que ya había guardado se limpia una vez, la próxima vez que se lean catálogos: eran 150 pares que contaban a favor («🌐 el catálogo de NGK los muestra juntos») justo en vínculos que estaban mal. Quedan 36 de NGK (bujía con bujía) y 22 de MANN. Lo que ya entró a la cola o se aprobó no se toca: eso lo marcan las reglas. «🏭 Leer una tanda ahora» dice cuántos dejó afuera.
+
+Medido con la copia de la base, con y sin la limpieza: cola, fichas y búsquedas sin ningún cambio (lo que se saca solo sumaba en pares que ya estaban en rojo). `pruebas_de_las_fuentes.py` (12) lo controla con una ficha de mentira; sin el filtro o sin la limpieza, falla.
+
 ## 🔌 El cable y el capuchón de la bujía no son la bujía
 
 El pendiente del SC-G101 tenía la misma raíz que lo de los kits: buscando la bujía **WR 7 DC** de JL salían como ✅ verificados tres números de juegos de cables (SC-G101, F0099C612 y XS10638). Los juntó el catálogo de NGK: la ficha de NGK del juego de cables SC-G101 nombra las bujías que lleva ese auto, y el lector unió «lo que cita NGK SC-G101» —el cable de LUCAS y los códigos de fábrica que tienen copiada su descripción— con esas bujías.

@@ -663,6 +663,44 @@ def probar(L):
         g["sesion_de_portal"] = _abrir_sesion
     esperar("portal: una sola sesión por tanda, pedida para las fichas de la tanda",
             (_sesiones_pedidas, len(_pedidas_portal)), ([6], 3))
+
+    # 12. EL CATÁLOGO DEL FABRICANTE, SIN LO QUE LA FICHA NOMBRA Y ES OTRA PIEZA (ver
+    # otra_pieza_que_la_que_cita()). La bujía y el kit de cable y bujía citan «NGK BKR6E»; la
+    # ficha de NGK nombra la BKR6E-11 y una grasa. Se junta la bujía con la bujía, y nada más.
+    # Con una página de mentira: no sale a internet.
+    _m_f, _m_t = [_c.execute("INSERT INTO marcas (nombre, tipo) VALUES (?, 'PROVEEDOR')",
+                             (_nombre,)).lastrowid for _nombre in ("FISPA12", "TARANTO12")]
+
+    def _prod12(cod, desc, marca):
+        return _c.execute("INSERT INTO productos (codigo_raw, codigo_clean, descripcion, marca_id) "
+                          "VALUES (?, ?, ?, ?)", (cod, ns["sanitizar"](cod), desc, marca)).lastrowid
+    _buj12 = _prod12("LSPKR6E12", "BUJIA NAFTA LSPKR6E FIAT PALIO 1.3 REF NGK BKR6E", _m_f)
+    _kit12 = _prod12("L215X12", "KIT CAB Y BUJ (LEIHTT06SC/LSPKR6E) FIAT PALIO REF CABLES NGK "
+                                "SC-T06 REF BUJIAS NGK BKR6E", _m_f)
+    _ngk12 = _prod12("BKR6E-11", "BUJIA NGK HONDA FIT 1.4", _m_t)
+    _grasa12 = _prod12("GRASA8115", "GRASA DE MOLIBDENO EP-2", _m_t)
+    # Y uno que ya había quedado guardado de antes, de los que ahora no entran: se saca una vez.
+    _c.execute("INSERT INTO productos_juntos_en_portal (producto_a_id, producto_b_id, portal, "
+               "producto_origen_id) VALUES (?, ?, 'CATÁLOGO NGK', ?)",
+               (min(_kit12, _ngk12), max(_kit12, _ngk12), _kit12))
+    g["conn"].commit()
+
+    class _FichaNGK:
+        status_code, headers, content = 200, {}, b""
+        text = "<html><body>NGK BKR6E · BKR6E-11 · GRASA8115</body></html>"
+
+    class _SesionNGK:
+        def get(self, url, **k):
+            return _FichaNGK()
+    _res12 = ns["leer_catalogo_de_fabricante"]("NGK", cuantos=5, pausa=0, sesion=_SesionNGK())
+    _juntos12 = {tuple(sorted(r)) for r in _c.execute(
+        "SELECT producto_a_id, producto_b_id FROM productos_juntos_en_portal "
+        "WHERE portal = 'CATÁLOGO NGK'")}
+    esperar("catálogo: se junta la bujía con la bujía, y nada más",
+            _juntos12 & {tuple(sorted(p)) for p in ((_buj12, _ngk12), (_kit12, _ngk12),
+                                                    (_buj12, _grasa12), (_kit12, _grasa12))},
+            {tuple(sorted((_buj12, _ngk12)))})
+    esperar("catálogo: y cuenta lo que dejó afuera", _res12["otra_pieza"], 3)
     return fallas
 
 
