@@ -463,7 +463,10 @@ FAMILIAS_REPUESTO = {
         "SONDA LAMBDA", "MULTIPLE DE ESCAPE", "ESCAPE",
     ],
     "Eléctrico y encendido": [
-        "CABLE DE BUJIA", "BUJIA", "BUJIAS", "BOBINA DE ENCENDIDO", "ALTERNADOR",
+        # «BUJAI», como escribe FISPA la LSP7R03 de LUCAS: sin rubro, el control de los
+        # catálogos (ver otra_pieza_que_la_que_cita()) la daba por «no se sabe qué pieza es»
+        # contra la BKR5E de NGK.
+        "CABLE DE BUJIA", "BUJIA", "BUJIAS", "BUJAI", "BOBINA DE ENCENDIDO", "ALTERNADOR",
         "MOTOR DE ARRANQUE", "BURRO DE ARRANQUE", "BATERIA", "REGULADOR DE VOLTAJE",
         "DISTRIBUIDOR", "PLATINO", "SENSOR", "MODULO", "RELE", "FUSIBLE", "BOBINA",
         "CAPUCHON DE BUJIA", "BULBO", "INTERRUPTOR", "INTERRUP", "LLAVE TECLA",

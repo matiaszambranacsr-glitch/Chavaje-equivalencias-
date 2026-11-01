@@ -2885,6 +2885,38 @@ def probar(L):
     esperar("dos cables pueden ser el mismo",
             _motivo_107("CABLE DE BUJIA ONIX PRISMA", "CABLE ENCENDIDO GM ONIX, PRISMA").startswith(
                 "accesorio"), False)
+
+    # 108. LO QUE YA ENTRÓ DE UN CATÁLOGO DE FABRICANTE Y ES OTRA PIEZA (ver
+    # vinculo_de_catalogo_que_es_otra_pieza()): el papel de TARANTO con un filtro de combustible,
+    # aprobado de una vez desde el catálogo de MANN, salía 🟡 buscando el filtro. Solo con un
+    # lote de catálogo de fabricante; y el número de la bujía de un kit, con la descripción del
+    # kit copiada, es la bujía (decide la regla de los kits).
+    _cat = ns["vinculo_de_catalogo_que_es_otra_pieza"]
+    _mann = "CATÁLOGO MANN-FILTER · 28/09 06:45"
+    _papel, _filtro = "PAPEL ESPAÑA ROLLOS 1000 X 135", "FILTRO PARA COMBUSTIBLE SEAT TOLEDO"
+    esperar("el papel contra el filtro, si lo juntó el catálogo",
+            _cat(_mann, _papel, _filtro).startswith("🏭 lo juntó el catálogo de MANN-FILTER"), True)
+    esperar("si lo cargó una lista, no es cosa de esto",
+            _cat("FISPA · lista.xlsx · 25/09 20:33", _papel, _filtro), "")
+    _kit5 = ("KIT CAB Y BUJ (LEIHTR13SC/LSPKR5E) RENAULT CLIO REF CABLES NGK SC-R13 REF BUJIAS "
+             "NGK BKR5E")
+    esperar("el número de la bujía del kit contra una bujía: es la bujía",
+            _cat("CATÁLOGO NGK · 28/09 06:45", _kit5, "BUJIA APLICACION BENTLEY", "LSPKR5E",
+                 "OEM", "BKR5ES", "PROVEEDOR"), "")
+    esperar("el de los cables del mismo kit contra una bujía: otra pieza",
+            _cat("CATÁLOGO NGK · 28/09 06:45", _kit5, "BUJIA APLICACION BENTLEY", "LEIHTR13SC",
+                 "OEM", "BKR5ES", "PROVEEDOR").startswith("🏭"), True)
+    _m_papel, _m_filtro = marca("PAPELERA108"), marca("FILTROS108")
+    _p108 = producto("PAP108", _papel, _m_papel)
+    _f108 = producto("FIL108", _filtro, _m_filtro)
+    vincular(_p108, _f108, _mann, 69)
+    conn.commit()
+    _ficha108 = ns["ficha_de_prueba"](_f108, _p108)
+    esperar("y la ficha lo dice en rojo, con el porqué",
+            (_ficha108["estado"], (_ficha108["contradicciones"] or [""])[0][:30]),
+            ("🔴 CON CONTRADICCIONES", "🏭 lo juntó el catálogo de MANN"))
+    esperar("«BUJAI» también es una bujía", ns["clasificar_repuesto"]("BUJAI NAFTA LSP7R03 VW"),
+            "Eléctrico y encendido")
     return fallas
 
 

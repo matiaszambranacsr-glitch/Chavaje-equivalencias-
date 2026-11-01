@@ -1239,6 +1239,7 @@ _MOTIVOS_DE_LOS_DUDOSOS = {
     "🏷️": "🏷️ Dos productos del mismo proveedor",
     "📐": "📐 Las medidas no coinciden",
     "↩️": "↩️ Volvió porque no le iba",
+    "🏭": "🏭 Lo juntó un catálogo de fabricante y es otra pieza",
 }
 
 
@@ -1249,7 +1250,8 @@ def motivo_de_un_vinculo_dudoso(malas):
     malas = [str(m).strip() for m in malas if str(m).strip()]
     if not malas:
         return "Otros motivos"
-    primera = next((m for m in malas if m.startswith("📦")), malas[0])
+    primera = next((m for m in malas if m.startswith("📦")),
+                   next((m for m in malas if m.startswith("🏭")), malas[0]))
     return next((etiqueta for emoji, etiqueta in _MOTIVOS_DE_LOS_DUDOSOS.items()
                  if primera.startswith(emoji)), "Otros motivos")
 
@@ -1370,6 +1372,13 @@ def auditar_equivalencias_cargadas(limite=2000, tope_confianza=35, revisar=None)
                 break
         # El número del conjunto donde va la pieza: el kit de reparación unido a la bomba que
         # repara. Ver numero_del_conjunto_donde_va().
+        # Lo que juntó un catálogo de fabricante y es otra pieza (el papel de TARANTO con un
+        # filtro). Ver vinculo_de_catalogo_que_es_otra_pieza().
+        _de_catalogo = vinculo_de_catalogo_que_es_otra_pieza(
+            f["lote"], f["desc_a"], f["desc_b"], f["cod_a"], f["tipo_a"], f["cod_b"], f["tipo_b"])
+        if _de_catalogo:
+            puntaje = min(puntaje, 15.0)
+            senales.append(("mal", _de_catalogo))
         _del_conjunto = el_numero_de_uno_es_el_conjunto_del_otro(
             f["cod_a"], f["desc_a"], f["tipo_a"], f["cod_b"], f["desc_b"], f["tipo_b"])
         if _del_conjunto:
@@ -1477,6 +1486,7 @@ def recalcular_confianzas(limite=20000, progreso=None, solo_faltantes=True, de_p
                   -- la que quede sin puntuar cuenta como neutra en el buscador. Descartar el
                   -- espejo acá dejaría la mitad de los vínculos en NULL para siempre.
                   SELECT e.producto_a_id AS a, e.producto_b_id AS b, e.confianza AS antes,
+                        e.lote,
                         pa.codigo_raw AS cod_a, pa.descripcion AS desc_a, pa.precio AS precio_a,
                         ma.nombre AS marca_a,
                         pb.codigo_raw AS cod_b, pb.descripcion AS desc_b, pb.precio AS precio_b,
@@ -1570,6 +1580,11 @@ def recalcular_confianzas(limite=20000, progreso=None, solo_faltantes=True, de_p
         _veto = vetos_del_analisis.get((min(f["a"], f["b"]), max(f["a"], f["b"])))
         if _veto and f["a"] not in aprobados and f["b"] not in aprobados:
             puntaje = min(puntaje, _veto[0])
+        # Lo que juntó un catálogo de fabricante y es otra pieza, igual que en la auditoría:
+        # ver vinculo_de_catalogo_que_es_otra_pieza().
+        if vinculo_de_catalogo_que_es_otra_pieza(f.get("lote"), f["desc_a"], f["desc_b"],
+                                                 f["cod_a"], f["tipo_a"], f["cod_b"], f["tipo_b"]):
+            puntaje = min(puntaje, 15.0)
         valores.append((max(0, min(100, round(puntaje))), f["a"], f["b"]))
         if progreso and i % 500 == 0:
             progreso(i, len(filas))

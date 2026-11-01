@@ -884,12 +884,24 @@ def codigos_citados_en_tu_catalogo(nombre_catalogo):
 _VERSION_DEL_FILTRO_DE_CATALOGOS = "1"
 
 
-def otra_pieza_que_la_que_cita(desc_cita, desc_nombrado):
+def otra_pieza_que_la_que_cita(desc_cita, desc_nombrado, cod_cita="", tipo_cita="",
+                               cod_nombrado="", tipo_nombrado=""):
     """Por qué lo que nombra la ficha del fabricante no es la pieza que cita el código, o "".
 
     Un kit contra una pieza suelta; otro rubro, o uno que no se sabe qué pieza es; o algo de la
     pieza que contradice (el cable contra la bujía). El auto no cuenta: la ficha del fabricante
-    nombra los suyos, y cada lista los que conoce."""
+    nombra los suyos, y cada lista los que conoce.
+
+    El código de fábrica que es el número de UNA pieza de un kit de varias tiene copiada la
+    descripción del kit, y no es un kit: el LSPKR5E es la bujía del «KIT CAB Y BUJ
+    (LEIHTR13SC/LSPKR5E)». Ahí decide _otra_pieza_del_mismo_kit(), que sabe de qué pieza es
+    cada número; sin eso, el LSPKR5E contra las bujías NGK salía «un kit contra una pieza»."""
+    for _desc, _cod, _tipo in ((desc_cita, cod_cita, tipo_cita),
+                               (desc_nombrado, cod_nombrado, tipo_nombrado)):
+        if (str(_tipo or "").upper() == "OEM" and _cod
+                and _de_que_pieza_es_el_numero(_cod, *_piezas_de_un_kit(_desc)[1:]) is not None):
+            return _otra_pieza_del_mismo_kit(desc_cita, cod_cita, desc_nombrado, cod_nombrado,
+                                             tipo_cita, tipo_nombrado)
     if bool(es_un_kit(desc_cita)) != bool(es_un_kit(desc_nombrado)):
         return "un kit contra una pieza suelta"
     rubro_a, rubro_b = familia_para_comparar(desc_cita), familia_para_comparar(desc_nombrado)
@@ -906,6 +918,25 @@ def otra_pieza_que_la_que_cita(desc_cita, desc_nombrado):
     return ""
 
 
+def vinculo_de_catalogo_que_es_otra_pieza(lote, desc_a, desc_b, cod_a="", tipo_a="", cod_b="",
+                                          tipo_b=""):
+    """Si el vínculo lo cargó un catálogo de fabricante y lo que juntó es otra pieza, el texto
+    para decirlo; si no, "". Es el control de otra_pieza_que_la_que_cita(), para lo que entró
+    antes de que existiera: los 74 vínculos de los catálogos de NGK y MANN se aprobaron de una
+    vez el 30/09, y entre ellos el papel «PAPEL ESPAÑA ROLLOS» de TARANTO con un filtro de
+    combustible (🟡 probable buscando el filtro), y el DW10TD —un motor de Peugeot, no un número
+    de pieza— con dos filtros (✅)."""
+    lote = str(lote or "")
+    nombre = next((n for n in CATALOGOS_DE_FABRICANTE if lote.startswith(f"CATÁLOGO {n} ")), "")
+    if not nombre:
+        return ""
+    motivo = (otra_pieza_que_la_que_cita(desc_a or "", desc_b or "", cod_a, tipo_a, cod_b, tipo_b)
+              or otra_pieza_que_la_que_cita(desc_b or "", desc_a or "", cod_b, tipo_b, cod_a,
+                                            tipo_a))
+    return (f"🏭 lo juntó el catálogo de {nombre}, y es otra pieza ({motivo}): la ficha del "
+            "fabricante nombra también lo que no es la pieza") if motivo else ""
+
+
 def olvidar_pares_de_catalogo_de_otra_pieza():
     """Una vez por versión del filtro: saca de los pares que ya juntó un catálogo de fabricante
     los que son otra pieza (ver otra_pieza_que_la_que_cita()). Contaban a favor —«🌐 el
@@ -914,15 +945,20 @@ def olvidar_pares_de_catalogo_de_otra_pieza():
     if obtener_config("filtro_de_catalogos", "") == _VERSION_DEL_FILTRO_DE_CATALOGOS:
         return 0
     c.execute("""SELECT j.producto_a_id AS a, j.producto_b_id AS b, j.portal,
-                        j.producto_origen_id AS o, pa.descripcion AS da, pb.descripcion AS db
+                        j.producto_origen_id AS o, pa.descripcion AS da, pb.descripcion AS db,
+                        pa.codigo_raw AS ca, pb.codigo_raw AS cb, ma.tipo AS ta, mb.tipo AS tb
                  FROM productos_juntos_en_portal j
                  JOIN productos pa ON pa.id = j.producto_a_id
                  JOIN productos pb ON pb.id = j.producto_b_id
+                 JOIN marcas ma ON ma.id = pa.marca_id
+                 JOIN marcas mb ON mb.id = pb.marca_id
                  WHERE j.portal LIKE 'CATÁLOGO %'""")
     sacar = []
     for r in c.fetchall():
-        _cita, _nombrado = (r["da"], r["db"]) if r["o"] != r["b"] else (r["db"], r["da"])
-        if otra_pieza_que_la_que_cita(_cita or "", _nombrado or ""):
+        _a = (r["da"] or "", r["ca"], r["ta"])
+        _b = (r["db"] or "", r["cb"], r["tb"])
+        (_dc, _cc, _tc), (_dn, _cn, _tn) = (_a, _b) if r["o"] != r["b"] else (_b, _a)
+        if otra_pieza_que_la_que_cita(_dc, _dn, _cc, _tc, _cn, _tn):
             sacar.append((r["a"], r["b"], r["portal"]))
     with transaccion():
         c.executemany("""DELETE FROM productos_juntos_en_portal
@@ -1015,13 +1051,16 @@ def leer_catalogo_de_fabricante(nombre_catalogo, cuantos=20, pausa=PAUSA_ENTRE_F
             elif nombrados:
                 resumen["con_productos"] += 1
             # Sin lo que la ficha nombra y es otra pieza: ver otra_pieza_que_la_que_cita().
-            _descs = dict(c.execute(
-                f"SELECT id, descripcion FROM productos WHERE id IN "
+            _datos = {r[0]: (r[1] or "", r[2], r[3]) for r in c.execute(
+                f"SELECT p.id, p.descripcion, p.codigo_raw, m.tipo FROM productos p "
+                f"JOIN marcas m ON m.id = p.marca_id WHERE p.id IN "
                 f"({','.join('?' * len(los_que_citan + nombrados))})",
-                los_que_citan + nombrados).fetchall()) if nombrados else {}
+                los_que_citan + nombrados).fetchall()} if nombrados else {}
             for a in los_que_citan:
                 for b in nombrados:
-                    if otra_pieza_que_la_que_cita(_descs.get(a) or "", _descs.get(b) or ""):
+                    _da, _ca, _ta = _datos.get(a, ("", "", ""))
+                    _db, _cb, _tb = _datos.get(b, ("", "", ""))
+                    if otra_pieza_que_la_que_cita(_da, _db, _ca, _ta, _cb, _tb):
                         resumen["otra_pieza"] += 1
                     else:
                         pares.append((min(a, b), max(a, b), a))

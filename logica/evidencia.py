@@ -1196,6 +1196,27 @@ def ficha_de_prueba(id_a, id_b, tolerancia_pct=3, liviana=False):
     # Del más nuevo al más viejo; en el mismo minuto, el último anotado primero.
     ficha["historial"] = [h for _orden, h in sorted(_historial, key=lambda x: x[0], reverse=True)]
 
+    # UN PASO QUE PUSO UN CATÁLOGO DE FABRICANTE Y ES OTRA PIEZA: la cadena entera se apoya en
+    # él. Ver vinculo_de_catalogo_que_es_otra_pieza().
+    _pasos_cat = [p for p in pasos if str(p.get("_lote") or "").startswith("CATÁLOGO ")]
+    if _pasos_cat:
+        _de = {x["id"]: (x["descripcion"], x["codigo_raw"], x["tipo"]) for x in (pa, pb)}
+        _faltan = sorted({x for p in _pasos_cat for x in (p["_a"], p["_b"])} - set(_de))
+        if _faltan:
+            c.execute(f"""SELECT p.id, p.descripcion, p.codigo_raw, m.tipo FROM productos p
+                          JOIN marcas m ON m.id = p.marca_id
+                          WHERE p.id IN ({','.join('?' * len(_faltan))})""", _faltan)
+            _de.update({r["id"]: (r["descripcion"], r["codigo_raw"], r["tipo"])
+                        for r in c.fetchall()})
+        for p in _pasos_cat:
+            (_da, _ca, _ta), (_db, _cb, _tb) = (_de.get(p["_a"], ("", "", "")),
+                                                _de.get(p["_b"], ("", "", "")))
+            _de_catalogo = vinculo_de_catalogo_que_es_otra_pieza(p["_lote"], _da, _db, _ca, _ta,
+                                                                 _cb, _tb)
+            if _de_catalogo:
+                ficha["contradicciones"].append(_de_catalogo)
+                break
+
     if ficha["contradicciones"]:
         estado = "🔴 CON CONTRADICCIONES"
         falta = ["que no haya nada en contra: con esto, no es la misma pieza hasta que alguien "
