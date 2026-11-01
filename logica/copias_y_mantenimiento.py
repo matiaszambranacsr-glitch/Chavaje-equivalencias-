@@ -3013,7 +3013,10 @@ def descubrimiento_post_importacion(presupuesto_segundos=PRESUPUESTO_DESCUBRIMIE
     # búsqueda está devolviendo AHORA: los demás miran lo que todavía no entró. Acá se mide
     # nada más —cortar un vínculo es destructivo y lo decide una persona—, pero medirlo solo
     # es lo que hacía falta: hasta ahora había que apretar un botón para enterarse de que la
-    # búsqueda venía devolviendo un resultado equivocado.
+    # búsqueda venía devolviendo un resultado equivocado. Lo que es seguro otra pieza lo corta
+    # la tarea de fondo, si el administrador lo prendió (ver «LO CARGADO QUE ES SEGURO OTRA
+    # PIEZA, CORTADO SOLO»).
+    guardar_config("corte_automatico_pendiente", "1")
     if queda_tiempo():
         try:
             _dudosas, _revisadas = auditar_equivalencias_cargadas()

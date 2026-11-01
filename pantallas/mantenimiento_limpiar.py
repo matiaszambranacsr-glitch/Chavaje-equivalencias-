@@ -519,6 +519,54 @@ if pagina == PAGINAS[3]:
                             invalidar_salud()
                             avisar("success", f"Se cortaron {n} vínculo(s). Los productos quedaron intactos.")
                             st.rerun()
+            st.markdown("**🤖 Que la app corte sola lo que es seguro otra pieza**")
+            explicar(
+                "Corta sola, por atrás, los vínculos cargados que seguro no son la misma pieza.",
+                "Son dos clases, que no se adivinan: un kit contra lo que trae, y lo que juntó un "
+                "catálogo de fabricante entre piezas distintas.\n\n"
+                "Lo demás de la lista de arriba —descripciones que no concuerdan, rubros— lo "
+                "sigue decidiendo una persona. Viene apagado: lo prende el administrador.\n\n"
+                "Lo que corta queda rechazado por «🤖 la app» —no vuelve con la próxima lista— "
+                "y no cuenta para lo que la app aprende de tus decisiones. No toca lo comprobado "
+                "en la mano, ni lo que una persona vuelva a aprobar después de prenderlo. Y se "
+                "devuelve todo con un toque: cada vínculo con su lista y su confianza, y la "
+                "decisión de antes.", en_expander=True)
+            _corte_auto = corte_automatico_prendido()
+            # Lo que cortaría, recordado mientras no cambien los vínculos: son 0,36 s con la
+            # base real y la pantalla se dibuja en cada toque.
+            _cortaria = recordado_mientras_no_cambie(
+                "corte_automatico_cortaria", ("", testigo_de_los_vinculos()),
+                vinculos_que_son_seguro_otra_pieza)
+            _cortados_solos = lo_que_corto_sola()
+            if _corte_auto:
+                st.caption(f"🟢 Prendido. Cortó {miles(len(_cortados_solos))} hasta ahora"
+                           + (f"; le quedan {miles(len(_cortaria))} por cortar en la próxima "
+                              "pasada." if _cortaria else "."))
+            elif _cortaria:
+                st.caption(f"Apagado. Prendido, cortaría {miles(len(_cortaria))}: "
+                           + ", ".join(f"{x['cod_a']} ↔ {x['cod_b']}" for x in _cortaria[:4])
+                           + ("…" if len(_cortaria) > 4 else "") + ".")
+            _ca1, _ca2 = st.columns(2)
+            if candado("prender o apagar el corte automático",
+                       _ca1.button("⏸️ Apagarlo" if _corte_auto else "🤖 Prenderlo",
+                                   key="btn_corte_automatico"),
+                       "corte_automatico"):
+                prender_el_corte_automatico(not _corte_auto)
+                if not _corte_auto:
+                    arrancar_tanda_de_fondo()
+                avisar("success", "Corte automático " + ("apagado." if _corte_auto else
+                                                          "prendido: corre por atrás."))
+                st.rerun()
+            if candado("devolver lo que la app cortó sola",
+                       _ca2.button(f"↩️ Devolver los {miles(len(_cortados_solos))}",
+                                   disabled=not _cortados_solos,
+                                   key="btn_devolver_cortados_solos"),
+                       "devolver_cortados_solos"):
+                _n_dev = devolver_lo_que_corto_sola()
+                invalidar_salud()
+                avisar("success", f"Volvieron {miles(_n_dev)} vínculo(s), como estaban. El corte "
+                                  "automático quedó apagado.")
+                st.rerun()
             st.markdown("**💲 Precios que no cierran entre equivalentes**")
             explicar(
                 "Dos repuestos que hacen lo mismo pueden costar distinto según la marca, pero no ocho "

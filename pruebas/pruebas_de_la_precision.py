@@ -2917,6 +2917,74 @@ def probar(L):
             ("🔴 CON CONTRADICCIONES", "🏭 lo juntó el catálogo de MANN"))
     esperar("«BUJAI» también es una bujía", ns["clasificar_repuesto"]("BUJAI NAFTA LSP7R03 VW"),
             "Eléctrico y encendido")
+
+    # 109. LO CARGADO QUE ES SEGURO OTRA PIEZA, CORTADO SOLO (ver
+    # cortar_solos_los_que_son_seguro_otra_pieza()): apagado no hace nada; prendido corta el
+    # kit contra el número de sus cables y el papel con el filtro (el 108), y nada más; lo
+    # comprobado en la mano no se toca; «devolver» deja cada vínculo con su lista, su confianza y
+    # la decisión de antes, y lo apaga.
+    _m109, _o109 = marca("FISPA109"), marca("OEM109", "OEM")
+    _kit109 = producto("L215X109", _kit, _m109)
+    _cab109 = producto("F00099C110", _kit, _o109)
+    _buj109 = producto("LSPKR6EX109", "BUJIA NAFTA LSPKR6E FIAT PALIO", _m109)
+    _num109 = producto("LSPKR6E", _kit, _o109)
+    vincular(_kit109, _cab109, "FISPA109 · lista.xlsx · 25/09 20:33", 84)
+    vincular(_buj109, _num109, "FISPA109 · lista.xlsx · 25/09 20:33", 90)
+    _verif109 = producto("L216X109", _kit, _m109)
+    vincular(_verif109, _cab109, "FISPA109 · lista.xlsx · 25/09 20:33", 84)
+    c.execute("UPDATE equivalencias SET verificada = 1 WHERE producto_a_id = ? AND "
+              "producto_b_id = ?", (min(_verif109, _cab109), max(_verif109, _cab109)))
+    c.executemany("INSERT OR REPLACE INTO equivalencias_revisadas (producto_a_id, producto_b_id, "
+                  "decision, revisado_por, fecha) VALUES (?, ?, 'ok', 'Chavo', "
+                  "'2026-09-30 12:55:22')", [(_kit109, _cab109), (_cab109, _kit109)])
+    conn.commit()
+
+    def _vinculo109(a, b):
+        return c.execute("SELECT lote, confianza FROM equivalencias WHERE producto_a_id = ? AND "
+                         "producto_b_id = ?", (min(a, b), max(a, b))).fetchone()
+    _de109 = {(min(_kit109, _cab109), max(_kit109, _cab109)),
+              (min(_p108, _f108), max(_p108, _f108))}
+
+    def _decision109():
+        _fila = c.execute("SELECT decision, revisado_por FROM equivalencias_revisadas WHERE "
+                          "producto_a_id = ? AND producto_b_id = ?", (_kit109, _cab109)).fetchone()
+        return tuple(_fila) if _fila else None
+    esperar("lo que cortaría: el kit con sus cables y el papel con el filtro",
+            {(min(x["a"], x["b"]), max(x["a"], x["b"]))
+             for x in ns["vinculos_que_son_seguro_otra_pieza"]()} & (_de109 | {
+                 (min(_buj109, _num109), max(_buj109, _num109)),
+                 (min(_verif109, _cab109), max(_verif109, _cab109))}), _de109)
+    esperar("apagado, no corta nada", ns["cortar_solos_los_que_son_seguro_otra_pieza"](), 0)
+    _g109 = ns["cortar_solos_los_que_son_seguro_otra_pieza"].__globals__
+    _exigir109 = _g109["exigir_nivel"]
+    _g109["exigir_nivel"] = lambda *a, **k: None
+    try:
+        ns["prender_el_corte_automatico"](True)
+        ns["cortar_solos_los_que_son_seguro_otra_pieza"]()
+        esperar("prendido, corta esos dos y deja el de la bujía y el comprobado en la mano",
+                (_vinculo109(_kit109, _cab109), _vinculo109(_p108, _f108),
+                 bool(_vinculo109(_buj109, _num109)), bool(_vinculo109(_verif109, _cab109))),
+                (None, None, True, True))
+        esperar("y queda rechazado por la app", _decision109(), ("rechazada", "🤖 la app"))
+        ns["devolver_lo_que_corto_sola"]()
+        esperar("devolver: cada vínculo con su lista y su confianza",
+                (tuple(_vinculo109(_kit109, _cab109)), tuple(_vinculo109(_p108, _f108))),
+                (("FISPA109 · lista.xlsx · 25/09 20:33", 84), (_mann, 69)))
+        esperar("y la decisión de antes, y se apaga",
+                (_decision109(), ns["corte_automatico_prendido"]()), (("ok", "Chavo"), False))
+        # Y lo que una persona vuelve a aprobar después de prenderlo, manda la persona.
+        ns["prender_el_corte_automatico"](True)
+        c.executemany("INSERT OR REPLACE INTO equivalencias_revisadas (producto_a_id, "
+                      "producto_b_id, decision, revisado_por, fecha) VALUES (?, ?, 'ok', 'Ana', "
+                      "datetime('now', 'localtime', '+1 minute'))",
+                      [(_kit109, _cab109), (_cab109, _kit109)])
+        conn.commit()
+        ns["cortar_solos_los_que_son_seguro_otra_pieza"]()
+        esperar("lo que alguien aprueba después de prenderlo no se corta",
+                (bool(_vinculo109(_kit109, _cab109)), _vinculo109(_p108, _f108)), (True, None))
+        ns["devolver_lo_que_corto_sola"]()
+    finally:
+        _g109["exigir_nivel"] = _exigir109
     return fallas
 
 

@@ -2319,6 +2319,10 @@ def _datos_precargados_y_migraciones(c):
         # QUE CALZAN, RELACIONADAS SOLAS»).
         c.execute("INSERT INTO configuracion (clave, valor) VALUES ('bujias_pendiente', '1') "
                   "ON CONFLICT(clave) DO UPDATE SET valor = excluded.valor")
+        # Y lo cargado que es seguro otra pieza: las reglas nuevas pueden ver más (ver «LO
+        # CARGADO QUE ES SEGURO OTRA PIEZA, CORTADO SOLO»). Solo corre si está prendido.
+        c.execute("INSERT INTO configuracion (clave, valor) VALUES ('corte_automatico_pendiente', "
+                  "'1') ON CONFLICT(clave) DO UPDATE SET valor = excluded.valor")
         # Y lo decidido con cada aviso: con otras reglas, los avisos son otros (ver «LO QUE
         # DECIDISTE CON CADA AVISO»).
         c.execute("INSERT INTO configuracion (clave, valor) VALUES ('lo_decidido_pendiente', '1') "

@@ -477,6 +477,25 @@ def probar():
                 fallas.append("💲 precios que no cierran: «✂️ Cortar ese vínculo» no lo cortó")
             # Y de vuelta a operador, como venía: lo que sigue se recorre así.
             at.session_state["nivel_usuario"] = "operador"
+    # 🤖 El corte automático de lo cargado que es seguro otra pieza: «Prenderlo» pide la
+    # contraseña del administrador y lo deja prendido. Se apaga enseguida: corre por atrás y
+    # en las pruebas no hay tarea de fondo.
+    if "--base" not in sys.argv:
+        at.run()
+        _prender = [b for b in at.button if b.key == "btn_corte_automatico"]
+        if not _prender:
+            fallas.append("🤖 corte automático: no está el botón para prenderlo")
+        else:
+            _prender[0].click().run()
+            _candado_c = [x for x in at.text_input if x.label == "Contraseña de administrador:"]
+            if _candado_c:
+                _candado_c[0].set_value("clave-duenio-1")
+                [b for b in at.button if b.label == "Ingresar"][0].click().run()
+                at.run()
+            if not ns["corte_automatico_prendido"]():
+                fallas.append("🤖 corte automático: «Prenderlo» no lo prendió")
+            ns["guardar_config"](ns["CORTE_AUTOMATICO"], "0")
+            at.session_state["nivel_usuario"] = "operador"
     # 🔎 Los vínculos dudosos, de a un motivo (ver motivo_de_un_vinculo_dudoso()): todos
     # quedan con la misma confianza, y «cortar los N peores» no separaba los de los kits de los
     # otros. Con dos de kits y uno de rubros, elegir el de los kits deja dos en la tabla y el

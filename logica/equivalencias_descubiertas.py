@@ -448,6 +448,7 @@ COMO_SE_DECIDIO = {
     "todo_el_producto": "✂️ todos los de un producto de una vez",
     "automatico": "🤖 sola, porque el análisis la daba casi seguro mal",
     "bujias": "🕯️ sola, porque las dos bujías calzan igual",
+    "corte_automatico": "✂️ sola, porque es seguro otra pieza",
 }
 
 # Quién firma lo que la app descarta sola (ver descartar_solos_los_casi_seguro_mal()). Lo que
@@ -5678,6 +5679,168 @@ def devolver_lo_que_descarto_sola():
     guardar_config("descarte_automatico_ultimo", "")
     return len(pares)
 
+
+
+# ======================================================================
+# LO CARGADO QUE ES SEGURO OTRA PIEZA, CORTADO SOLO
+# ======================================================================
+# El descarte automático de arriba mira la cola; lo que ya está cargado había que cortarlo a
+# mano, de a un motivo, en «🔎 Analizar los vínculos cargados». En la copia de la base real son
+# 72 que no son una equivalencia y se sabe por qué: 61 de los kits de cable y bujía de FISPA
+# (el kit contra lo que trae, o el número de los cables contra la bujía) y 11 que juntó un
+# catálogo de fabricante entre piezas distintas (el papel de TARANTO con un filtro, el motor
+# DW10TD con dos filtros). Ninguno lo decidió nadie mirándolo: los de catálogos se aprobaron de
+# una vez, y los de los kits los cargó la lista.
+# Solo esas dos clases, que no se adivinan: el kit dice qué trae (ver _uno_trae_al_otro()) y el
+# control del catálogo es el que ya frena lo nuevo (ver vinculo_de_catalogo_que_es_otra_pieza()).
+# Lo demás de la auditoría —descripciones que no concuerdan, rubros— sigue siendo de una persona.
+# Viene apagado: cortar es destructivo y lo decide el administrador al prenderlo. Queda firmado
+# QUIEN_DESCARTA_SOLA, no cuenta para lo que se aprende, y se devuelve todo con un toque: cada
+# vínculo, con su lista y su confianza, y la decisión de antes. Lo comprobado en la mano no se
+# toca, ni lo que una persona vuelve a aprobar después de prenderlo.
+
+CORTE_AUTOMATICO = "corte_automatico_otra_pieza"
+_CORTE_DESDE = "corte_automatico_desde"
+
+
+def corte_automatico_prendido():
+    return obtener_config(CORTE_AUTOMATICO, "0") == "1"
+
+
+def vinculos_que_son_seguro_otra_pieza():
+    """Los vínculos cargados que la app cortaría sola: [{"a", "b", "cod_a", "cod_b", "por_que",
+    "fila"}]. «fila» es lo que hace falta para devolverlo tal cual."""
+    desde = obtener_config(_CORTE_DESDE, "")
+    c.execute(f"""SELECT e.producto_a_id AS a, e.producto_b_id AS b, e.lote, e.nivel, e.nota,
+                         e.confianza, e.created_at,
+                         pa.codigo_raw AS cod_a, pa.descripcion AS desc_a, ma.tipo AS tipo_a,
+                         pb.codigo_raw AS cod_b, pb.descripcion AS desc_b, mb.tipo AS tipo_b,
+                         r.decision, r.revisado_por, r.fecha AS decidido, r.motivo
+                  FROM equivalencias e
+                  JOIN productos pa ON pa.id = e.producto_a_id
+                  JOIN productos pb ON pb.id = e.producto_b_id
+                  JOIN marcas ma ON ma.id = pa.marca_id
+                  JOIN marcas mb ON mb.id = pb.marca_id
+                  LEFT JOIN equivalencias_revisadas r
+                    ON r.producto_a_id = e.producto_a_id AND r.producto_b_id = e.producto_b_id
+                  WHERE {SIN_CONTAR_EL_ESPEJO} AND COALESCE(e.verificada, 0) = 0""")
+    filas = c.fetchall()
+    puentes = puentes_aprobados_ids()      # después: usa el mismo cursor
+    salida = []
+    for f in filas:
+        if f["a"] in puentes or f["b"] in puentes:
+            continue
+        # Lo que una persona aprobó después de prender esto, manda la persona.
+        if (desde and f["decision"] == "ok" and f["revisado_por"] != QUIEN_DESCARTA_SOLA
+                and (f["decidido"] or "") >= desde):
+            continue
+        _kit = _uno_trae_al_otro(f["desc_a"], f["cod_a"], f["desc_b"], f["cod_b"],
+                                 f["tipo_a"], f["tipo_b"])
+        por_que = (f"📦 no son equivalentes: {_kit}" if _kit else
+                   vinculo_de_catalogo_que_es_otra_pieza(f["lote"], f["desc_a"], f["desc_b"],
+                                                         f["cod_a"], f["tipo_a"], f["cod_b"],
+                                                         f["tipo_b"]))
+        if por_que:
+            salida.append({"a": f["a"], "b": f["b"], "cod_a": f["cod_a"], "cod_b": f["cod_b"],
+                           "por_que": por_que, "fila": {
+                               k: f[k] for k in ("lote", "nivel", "nota", "confianza",
+                                                 "created_at", "decision", "revisado_por",
+                                                 "motivo")}})
+    return salida
+
+
+def cortar_solos_los_que_son_seguro_otra_pieza():
+    """Corta lo que da vinculos_que_son_seguro_otra_pieza() y lo deja rechazado por la app.
+    Devuelve cuántos. Solo si está prendido."""
+    if not corte_automatico_prendido():
+        return 0
+    cortar = vinculos_que_son_seguro_otra_pieza()
+    if cortar:
+        pares = [(f["a"], f["b"]) for f in cortar]
+        como_estaba = {(min(f["a"], f["b"]), max(f["a"], f["b"])): (
+            f["fila"]["confianza"], f["por_que"][:200],
+            json.dumps(dict(f["fila"], a=f["a"], b=f["b"]), ensure_ascii=False)) for f in cortar}
+        with db_lock:
+            c.executemany("""DELETE FROM equivalencias
+                             WHERE (producto_a_id = ? AND producto_b_id = ?)
+                                OR (producto_a_id = ? AND producto_b_id = ?)""",
+                          [(a, b, b, a) for a, b in pares])
+            conn.commit()
+        marcar_revision(pares, "rechazada", como="corte_automatico", quien=QUIEN_DESCARTA_SOLA,
+                        como_estaba=como_estaba)
+        guardar_config("corte_automatico_ultimo", json.dumps(dict(
+            cortados=len(cortar), fecha=datetime.now().strftime("%Y-%m-%d %H:%M"))))
+    return len(cortar)
+
+
+def lo_que_corto_sola():
+    """Lo que la app cortó sola y nadie volvió a decidir: [{"a", "b", "antes"}], con «antes» el
+    JSON de cómo estaba. Ver devolver_lo_que_corto_sola()."""
+    c.execute("""SELECT h.producto_a_id AS a, h.producto_b_id AS b, h.por_que AS antes
+                 FROM historial_de_revisiones h
+                 JOIN equivalencias_revisadas r ON r.producto_a_id = h.producto_a_id
+                                                AND r.producto_b_id = h.producto_b_id
+                 WHERE h.como = 'corte_automatico' AND h.decision = 'rechazada'
+                   AND r.decision = 'rechazada' AND r.revisado_por = ?
+                   AND h.producto_a_id < h.producto_b_id
+                   AND h.id = (SELECT MAX(x.id) FROM historial_de_revisiones x
+                               WHERE x.producto_a_id = h.producto_a_id
+                                 AND x.producto_b_id = h.producto_b_id
+                                 AND x.como = 'corte_automatico')""", (QUIEN_DESCARTA_SOLA,))
+    return [dict(r) for r in c.fetchall()]
+
+
+def devolver_lo_que_corto_sola():
+    """Apaga el corte automático y vuelve a poner cada vínculo como estaba: con su lista, su
+    confianza y la decisión de antes. Devuelve cuántos. Pide administrador."""
+    exigir_nivel("admin", "devolver lo que la app cortó sola")
+    # Primero se apaga: si no, la tarea de fondo lo volvería a cortar.
+    guardar_config(CORTE_AUTOMATICO, "0")
+    pares = lo_que_corto_sola()
+    usuario = obtener_usuario_actual()
+    with db_lock, transaccion():
+        for f in pares:
+            try:
+                antes = json.loads(f["antes"] or "{}")
+            except ValueError:
+                antes = {}
+            a, b = antes.get("a", f["a"]), antes.get("b", f["b"])
+            c.execute("""INSERT OR IGNORE INTO equivalencias
+                             (producto_a_id, producto_b_id, lote, nivel, nota, confianza,
+                              created_at)
+                         VALUES (?, ?, ?, ?, ?, ?, COALESCE(?, datetime('now')))""",
+                      (a, b, antes.get("lote"), antes.get("nivel"), antes.get("nota"),
+                       antes.get("confianza"), antes.get("created_at")))
+            c.execute("""DELETE FROM equivalencias_revisadas
+                         WHERE ((producto_a_id = ? AND producto_b_id = ?)
+                             OR (producto_a_id = ? AND producto_b_id = ?)) AND revisado_por = ?""",
+                      (a, b, b, a, QUIEN_DESCARTA_SOLA))
+            if antes.get("decision"):
+                c.executemany("""INSERT OR REPLACE INTO equivalencias_revisadas
+                                     (producto_a_id, producto_b_id, decision, revisado_por, motivo)
+                                 VALUES (?, ?, ?, ?, ?)""",
+                              [(a, b, antes["decision"], antes.get("revisado_por"),
+                                antes.get("motivo")),
+                               (b, a, antes["decision"], antes.get("revisado_por"),
+                                antes.get("motivo"))])
+            c.execute("""INSERT INTO historial_de_revisiones
+                             (producto_a_id, producto_b_id, decision, revisado_por, lote,
+                              version_reglas, como, por_que)
+                         VALUES (?, ?, 'deshecha', ?, ?, ?, 'corte_automatico', ?)""",
+                      (min(a, b), max(a, b), usuario, antes.get("lote"), VERSION_CONFIANZA,
+                       f["antes"]))
+    guardar_config("corte_automatico_ultimo", "")
+    return len(pares)
+
+
+def prender_el_corte_automatico(prendido):
+    """El interruptor. Al prenderlo queda anotado desde cuándo (lo que una persona apruebe
+    después, manda) y se pide la primera pasada a la tarea de fondo."""
+    exigir_nivel("admin", "prender o apagar el corte automático")
+    guardar_config(CORTE_AUTOMATICO, "1" if prendido else "0")
+    if prendido:
+        guardar_config(_CORTE_DESDE, c.execute("SELECT datetime('now', 'localtime')").fetchone()[0])
+        guardar_config("corte_automatico_pendiente", "1")
 
 
 # ======================================================================

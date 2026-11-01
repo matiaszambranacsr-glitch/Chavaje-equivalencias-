@@ -44,6 +44,7 @@ específico, y las pantallas quedan todas al final:
         · LO QUE DECIDISTE CON CADA AVISO
         · LO QUE ESPERA APROBACIÓN, DESDE EL BUSCADOR
         · LO QUE LA APP DESCARTA SOLA
+        · LO CARGADO QUE ES SEGURO OTRA PIEZA, CORTADO SOLO
         · LAS BUJÍAS QUE CALZAN, RELACIONADAS SOLAS
     logica/importar.py
         · IMPORTAR UNA LISTA: leer el archivo y adivinar qué es cada columna

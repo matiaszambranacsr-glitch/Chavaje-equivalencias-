@@ -6959,6 +6959,19 @@ Lo pidió el dueño: «sacá el límite de lectura de 200 tandas de catálogo, q
 
 `pruebas_de_las_pantallas.py` lo controla con lecturas de mentira (sin salir a internet): las tres terminan solas, el catálogo manda las dos equivalencias a una sola lista, el portal usa la misma lista en todas las tandas, y al terminar dice cuántas leyó y deja de decir «sigue sola». Si «todas» hiciera una sola tanda, falla.
 
+## ✂️ Lo cargado que es seguro otra pieza, cortado solo
+
+Lo pidió el dueño («automatizá más cosas»). La cola ya tenía su automatización —«🤖 Que la app descarte sola»—, pero lo que ya está cargado había que cortarlo a mano en «🔎 Analizar los vínculos cargados». Ahora, en «🧹 Limpiar y corregir», hay **«🤖 Que la app corte sola lo que es seguro otra pieza»**:
+
+- **Solo dos clases, que no se adivinan**: un kit contra lo que trae (o el número de los cables contra la bujía del mismo kit), y lo que juntó un catálogo de fabricante entre piezas distintas. Lo demás de la auditoría —descripciones que no concuerdan, rubros— lo sigue decidiendo una persona. En la copia de la base real son 72: 61 de los kits de FISPA y 11 de catálogos (el SC-G101, el papel, el DW10TD…).
+- **Viene apagado**: cortar es destructivo, y lo decide el administrador al prenderlo (con su contraseña). Apagado, la pantalla dice cuántos cortaría y cuáles.
+- **Corre por atrás**: al prenderlo, después de cada importación y cuando cambian las reglas.
+- **Firmado «🤖 la app»**: no vuelve con la próxima lista y no cuenta para lo que la app aprende de tus decisiones.
+- **No toca** lo comprobado en la mano, ni lo que una persona vuelva a aprobar después de prenderlo.
+- **Se deshace con un toque**: «↩️ Devolver» pone cada vínculo como estaba —su lista, su confianza y la decisión de antes— y lo apaga.
+
+Probado con la copia de la base real: corta los 72 en una pasada (la lista sale en 0,36 s), la segunda no corta nada, y «devolver» deja los 20.037 vínculos y las decisiones como estaban. `pruebas_de_la_precision.py` (109) y `pruebas_de_las_pantallas.py` lo controlan; rompiéndolo de tres formas (sin devolver la decisión de antes, sin respetar lo aprobado después, con el botón sin efecto), fallan.
+
 ## 🧻 Lo que ya entró de los catálogos y es otra pieza, en rojo
 
 Revisando fuente por fuente cuántos vínculos tienen hoy evidencia en contra, las listas de los proveedores dan entre 0 y 0,3 %; el catálogo de NGK, 74 %. Y de los 9 que aprobaste del catálogo de MANN (los 74 de catálogos se aprobaron de una vez el 30/09), 5 eran basura que la auditoría no marcaba: el **PAPEL ESPAÑA ROLLOS** de TARANTO unido a un filtro de combustible —buscando el filtro LFDN012, el papel salía 🟡 probable—, un «DE CARLO 700 MOTOR BMW» con otro filtro, y el **DW10TD**, que es un motor de Peugeot y no un número de pieza, uniendo dos filtros con confianza 100 (✅).
