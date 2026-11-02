@@ -30,7 +30,9 @@ if pagina == PAGINAS[0]:
                 "3. **🔍 Buscador** — escribís el código que te piden y ves todas las marcas que "
                 "sirven en su lugar, con precio, stock y qué tan segura es cada una (🟢 "
                 "confirmada, 🟡 probable, 🟠 revisar). También sirve escribir palabras —«filtro "
-                "aceite gol», «mannol»—: busca solo en las descripciones y las marcas.\n\n"
+                "aceite gol», «mannol»—: busca solo en las descripciones y las marcas. Si el "
+                "código no está, ofrece los que se escriben casi igual, su familia, lo que lo "
+                "nombra y, si es de MANN o SKF, «🌐 Buscarlo en la ficha» del fabricante.\n\n"
                 "**Cada sección:**\n\n"
                 + "\n".join(f"- **{_p}** — {PARA_QUE_SIRVE[_p]}" for _p in PAGINAS
                              if PARA_QUE_SIRVE.get(_p))
