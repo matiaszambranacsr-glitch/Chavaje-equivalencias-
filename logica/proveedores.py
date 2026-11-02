@@ -1111,10 +1111,10 @@ def leer_catalogo_de_fabricante(nombre_catalogo, cuantos=20, pausa=PAUSA_ENTRE_F
     return resumen
 
 
-# EL CÓDIGO QUE NO TENÉS, EN LA FICHA DE SU FABRICANTE. El 24/10 buscaron «W712/94» —un
-# filtro de MANN— y el buscador no tenía nada que ofrecer: ninguna lista lo tiene ni lo cita.
-# Pero la ficha de MANN lista los números originales del filtro, y alguno puede ser tuyo: un
-# número de fábrica que citan tus listas, o el filtro de otra marca. Es lo mismo que hace
+# EL CÓDIGO QUE NO TENÉS, EN LA FICHA DE SU FABRICANTE. Si piden «W712/94» —un filtro de
+# MANN—, el buscador no tenía nada que ofrecer: ninguna lista lo tiene ni lo cita. Pero la
+# ficha de MANN lista los números originales del filtro, y alguno puede ser tuyo: un número
+# de fábrica que citan tus listas, o el filtro de otra marca. Es lo mismo que hace
 # leer_catalogo_de_fabricante() con los códigos que tus listas citan, para un código suelto.
 # Va con un botón y no solo: sale a internet, y lo decide el que está atendiendo.
 # Las formas de cada fabricante como se tipean: «W 712/94», «HU 719/7 X», «C 25 114/1», «VKMA
