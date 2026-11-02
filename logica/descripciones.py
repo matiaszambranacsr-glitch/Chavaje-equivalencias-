@@ -1388,9 +1388,15 @@ def filtro_con_el_numero_de_su_pieza(desc_filtro, cod_numero, marca_filtro, id_n
     c.execute("""SELECT p.codigo_raw, p.descripcion FROM productos p
                  JOIN marcas m ON m.id = p.marca_id
                  WHERE m.nombre = ? AND p.id <> ? AND p.id IN (
-                     SELECT producto_b_id FROM equivalencias WHERE producto_a_id = ?
-                     UNION SELECT producto_a_id FROM equivalencias WHERE producto_b_id = ?)""",
-              (marca_filtro, id_filtro or -1, id_numero, id_numero))
+                     -- Cargados o esperando en la cola: lo que cuenta es que la misma lista le
+                     -- pone ese número a la pieza (el 0580453507 de la bomba 20507 espera).
+                     SELECT producto_b_id FROM equivalencias WHERE producto_a_id = ?1
+                     UNION SELECT producto_a_id FROM equivalencias WHERE producto_b_id = ?1
+                     UNION SELECT producto_b_id FROM equivalencias_pendientes
+                           WHERE producto_a_id = ?1
+                     UNION SELECT producto_a_id FROM equivalencias_pendientes
+                           WHERE producto_b_id = ?1)""".replace("?1", "?3"),
+              (marca_filtro, id_filtro or -1, id_numero))
     for r in c.fetchall():
         _desc = _normalizar_desc(r["descripcion"])
         if (_desc.startswith(f" {pieza}") and not _RE_FILTRO_DE_UNA_PIEZA.match(_desc)

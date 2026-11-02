@@ -6965,7 +6965,7 @@ El pendiente de los filtros de bomba de FISPA tenía una forma que se repite: «
 
 Ahora, si un filtro de una pieza (bomba, inyector, aforador…) cita un número que otro producto de su misma lista, de esa pieza, también cita, el número es de la pieza: el filtro contra él sale en rojo («🪛 el 2H0919050B es el número de la bomba…»), en la auditoría tiene su grupo («🪛 Un filtro con el número de la pieza que filtra») y su confianza baja. La bomba contra su número sigue ✅, y el filtro con su propio número —que no cita nadie más de la lista— no se toca. Solo filtros: «Junta tapa de válvulas» contra un «Despiece … TAPA» de ILLINOIS parecían el mismo caso y son dos juntas.
 
-En la base real son 8 vínculos (Amarok, Qubo, C4, Peugeot 205 y una moto Yamaha); en las muestras de búsquedas y de la cola, ningún cambio, y en la de fichas cambia uno, de los filtros. Reglas versión 25. `pruebas_de_la_precision.py` (110) lo controla; sin la regla, falla.
+En la base real son 8 vínculos (Amarok, Qubo, C4, Peugeot 205 y una moto Yamaha). La pieza que cita el número cuenta esté su par cargado o esperando en la cola: la bomba 20507, con el 0580453507, todavía espera. En la muestra de búsquedas, ningún cambio, y en la de fichas cambian dos, los dos de filtros. Reglas versión 25. `pruebas_de_la_precision.py` (110) lo controla; sin la regla, falla.
 
 ## ✂️ Lo cargado que es seguro otra pieza, cortado solo
 
