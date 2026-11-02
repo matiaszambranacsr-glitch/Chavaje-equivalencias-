@@ -424,6 +424,29 @@ def _familia_de_motor_ford(texto):
     return next(iter(familias)) if len(familias) == 1 else None
 
 
+# EL SPRINT DE MWM NO ES EL CHEVROLET SPRINT. Sprint se llaman dos cosas que Chevrolet vendió acá:
+# el motor diésel MWM Sprint de las camionetas (4.07 de 4 cilindros, 6.07 de 6) y el auto, el
+# Sprint que es el Suzuki Swift (1.0, motor G10). TARANTO anota el motor como «Jta.Carter
+# CHEVROLET SPRINT 4.07T», con la misma marca y el mismo modelo que el auto, y el barrido lo
+# vinculó con la «Junta para Cárter CHEVROLET SPRINT SWIFT - 1,0 - 61 G10» de ILLINOIS: salía
+# 🟠 sin un solo porqué en contra. Las que dicen MWM ya iban a revisión por «un nombre de modelo
+# de marcas distintas»; esto las manda a rojo a todas, y cubre las que dicen CHEVROLET. Si una
+# misma descripción tiene señas de las dos cosas, no se decide (None).
+_RE_SPRINT_EL_MOTOR = re.compile(r"\bM\W?W\W?M\b|\b[46]\.07|\b[46] ?CIL")
+_RE_SPRINT_EL_AUTO = re.compile(r"\bSWIFT\b|\bCULTUS\b|\bSUZUKI\b|\bG1[03][A-Z]?\b"
+                                r"|\b99\d ?CC\b|\b1\.[03]\b")
+
+
+def _cual_sprint(texto):
+    """«motor» (el MWM Sprint), «auto» (el Chevrolet Sprint, Swift) o None si no dice SPRINT o
+    no se sabe cuál. Ver _RE_SPRINT_EL_MOTOR."""
+    if "SPRINT" not in texto or not re.search(r"\bSPRINT\b", texto):
+        return None
+    motor = bool(_RE_SPRINT_EL_MOTOR.search(texto))
+    auto = bool(_RE_SPRINT_EL_AUTO.search(texto))
+    return "motor" if motor and not auto else "auto" if auto and not motor else None
+
+
 def _termostato_con_carcasa(texto):
     """True si es el termostato con su carcasa, False si es solo el termostato, None si no dice.
     «Termostato para carcaza Volkswagen Up Fox» (CRI-FA) es el termostato solo; «TERMOSTATO
@@ -766,6 +789,7 @@ def _firma_armada(descripcion, producto_id=None, codigo_clean=None):
             "parametros": tuple(sorted(parametros_declarados(limpio).items())),
             "aire_exterior": bool(_RE_AIRE_EXTERIOR.search(limpio)),
             "motor_ford": _familia_de_motor_ford(limpio),
+            "sprint": _cual_sprint(limpio),
             "termostato_con_carcasa": _termostato_con_carcasa(limpio),
             "kit": bool(es_un_kit(texto)),
             "esparragos": frozenset(_RE_ESPARRAGOS_MM.findall(limpio)),
@@ -1167,6 +1191,9 @@ def _comparar_firmas(a, b, minimo_nucleo=2, cuenta_palabras=None, total_descripc
     if (a.get("motor_ford") and b.get("motor_ford") and a["motor_ford"] != b["motor_ford"]
             and not (a.get("sensor") or b.get("sensor"))):
         return False, f"motores distintos: {a['motor_ford']} vs {b['motor_ford']}"
+    if a.get("sprint") and b.get("sprint") and a["sprint"] != b["sprint"]:
+        return False, ("motores distintos: el Sprint de MWM (4.07/6.07, diésel) vs el Chevrolet "
+                       "Sprint (Swift, 1.0)")
     _tc_a, _tc_b = a.get("termostato_con_carcasa"), b.get("termostato_con_carcasa")
     if _tc_a is not None and _tc_b is not None and _tc_a != _tc_b:
         return False, "juegos distintos: el termostato solo vs el termostato con su carcasa"
@@ -1857,6 +1884,7 @@ _SIN_EL_AUTO = {"autos": _CONJUNTO_VACIO, "modelos": _CONJUNTO_VACIO, "marcas": 
                 "motores_numericos": _CONJUNTO_VACIO, "deutz": _CONJUNTO_VACIO,
                 "dana": _CONJUNTO_VACIO, "cilindradas": _CONJUNTO_VACIO,
                 "valvulas": _CONJUNTO_VACIO, "marca_auto": None, "motor_ford": None,
+                "sprint": None,
                 "combustible": None, "anios": ()}
 
 

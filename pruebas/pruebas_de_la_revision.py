@@ -158,11 +158,14 @@ PARES_DE_MUESTRA = [
      "Aro verde.", "BULBO DE TEMPERATURA RELOJ 206 CITROEN Berlingo - Xantia - Xsara - ZX - "
      "PEUGEOT 106 - 306 - 405", "distinta", "CRI-FA / FISPA: el de la luz contra el del reloj"),
 
-    # --- dudosas: no se descartan de una, pero tampoco pasan sin mirarlas ---
+    # Era «dudosa» (se sabía solo que eran marcas distintas); desde las reglas v26 la firma sabe
+    # cuál Sprint es cada una (ver _cual_sprint() en logica/firmas.py), y es rojo.
     ("Junta Tapa Valvulas MWM SPRINT 4.07",
      "Junta Tapa de Válvulas CHEVROLET SPRINT SWIFT CULTUS VAN TURBO 1984/… - 1,0 - 61 G10 G10T "
-     "50 HP", "dudosa", "TARANTO 330510/1 / ILLINOIS JVS-324-30: SPRINT es un motor MWM y un "
-     "Chevrolet", NECESITA_EL_CATALOGO),
+     "50 HP", "distinta", "TARANTO 330510/1 / ILLINOIS JVS-324-30: el motor MWM Sprint no es el "
+     "Chevrolet Sprint (Swift 1.0)"),
+
+    # --- dudosas: no se descartan de una, pero tampoco pasan sin mirarlas ---
     ("Junta Tapa Valvulas MWM SPRINT 4.07",
      "Junta Tapa de Válvulas FORD FALCON PICK UP - 2,8/3,1/3,6 - 170 187 188 MAX ECONO 221 221 "
      "SPRINT 4/7B (CODE6584B)", "dudosa", "TARANTO 330510/1 / ILLINOIS JVS-142-30: el Falcon "

@@ -3007,6 +3007,23 @@ def probar(L):
     esperar("el filtro contra el número de la bomba, en rojo", _vetos110(_fil110, _num110), ["🪛"])
     esperar("la bomba contra su número, no", _vetos110(_bom110, _num110), [])
     esperar("el filtro con su propio número, tampoco", _vetos110(_solo110, _num2_110), [])
+
+    # 111. EL SPRINT DE MWM NO ES EL CHEVROLET SPRINT (ver _cual_sprint()): la junta de cárter
+    # del motor MWM Sprint 4.07, que TARANTO anota «CHEVROLET SPRINT», contra la del Sprint que
+    # es el Suzuki Swift 1.0, en rojo. Dos del motor (una dice MWM, otra «4 CIL») no chocan, y
+    # el «FORD FALCON … SPRINT» no es ninguno de los dos.
+    def _sprint111(x, y):
+        return ns["firmas_compatibles"](ns["firma_de_producto"](x), ns["firma_de_producto"](y))
+    _motor111 = "Jta.Carter CHEVROLET SPRINT 4.07T"
+    _auto111 = "Junta para Cárter CHEVROLET SPRINT SWIFT - 1,0 - 61 G10 G10T"
+    _ok111, _por111 = _sprint111(_motor111, _auto111)
+    esperar("el motor MWM Sprint contra el auto Sprint, en rojo",
+            (_ok111, _por111.startswith(ns["_MOTIVOS_QUE_CONTRADICEN"]),
+             "Sprint de MWM" in _por111), (False, True, True))
+    esperar("dos del motor Sprint no chocan por eso",
+            "Sprint de MWM" in _sprint111(_motor111, "JTA CARTER MWM SPRINT 4 CIL.")[1], False)
+    esperar("el Falcon Sprint no es ninguno de los dos",
+            ns["firma_de_producto"]("JUNTA CARTER FORD FALCON 221 SPRINT").get("sprint"), None)
     return fallas
 
 

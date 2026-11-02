@@ -34,7 +34,6 @@ d40ff1ea7259cff5 distinta: JUNTA MPI FIAT TEMPRA 2.0 16V . / JTA T.C. FIAT TEMPR
 666e2b6a7aec3b8c distinta: JUNTA DE CARTER TOYOTA HILUX 2779CC / JTA CARTER TOYOTA HILUX 2200 D
 0771ed83da9f7d4f distinta: Juntas para diferencial CHEVROLET / FORD DANA / JTA DIFERENCIAL DANA 44 FORD
 fcc5a33020b72855 distinta: Bulbo de temperatura crítica. Citroen Evasion / BULBO DE TEMPERATURA RELOJ 206 CITROEN Berlin
-c18f925ab88a14a6 dudosa: Junta Tapa Valvulas MWM SPRINT 4.07 / Junta Tapa de Válvulas CHEVROLET SPRINT SWIFT
 059b441559724d99 dudosa: Junta Tapa Valvulas MWM SPRINT 4.07 / Junta Tapa de Válvulas FORD FALCON PICK UP - 
 04b128400e140c56 distinta: JUNTAS JEEP IKA CARTER YF / Junta para Cárter JEEP IKA BERGANTIN 57/78 - 
 f1e046822a50c38b distinta: JTA LAT.CARTER DEUTZ 514 2 C. / Junta para Cárter DEUTZ 514 1114 2 CIL. - 2,7
@@ -75,3 +74,7 @@ d0fcb14f1cc092c7 distinta: JUNTA TAPA DE VALVULAS FIAT PALIO FASE II 1.4 / JUNTA
 22ac62102130e386 distinta: BOMBA DE AGUA VW GOL 1.6 NAFTA / BOMBA DE AGUA VW GOL 1.9 DIESEL
 7cf4fedf336e12d7 distinta: Junta Tapa de Cilindros RENAULT (ESP 1.20MM)  / Junta Tapa de Cilindros RENAULT (ESP 1.30MM) 
 5e6150a4eb6cdfb8 distinta: PASTILLA DE FRENO DELANTERA VW GOL TREND / PASTILLA DE FRENO TRASERA VW GOL TREND
+2e19d52ac3ddae38 distinta: Jgo.Jtas.Carter PERKINS 4-203 / JTA CARTER PERKINS 4-203
+4165d7932a2a0bea distinta: Jgo.Jtas.Mult.Adm. y Esc. RENAULT / JTA ADM y ESC RENAULT 19 1.8
+dcfae2488f280acb distinta: Junta Caja Velocidades / Juego de juntas para Caja de Velocidad FIAT U
+a2594894d7942dd6 distinta: Junta Tapa Valvulas MWM SPRINT 4.07 / Junta Tapa de Válvulas CHEVROLET SPRINT SWIFT

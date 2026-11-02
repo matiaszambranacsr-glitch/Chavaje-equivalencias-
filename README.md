@@ -6967,6 +6967,14 @@ Ahora, si un filtro de una pieza (bomba, inyector, aforador…) cita un número 
 
 En la base real son 8 vínculos (Amarok, Qubo, C4, Peugeot 205 y una moto Yamaha). La pieza que cita el número cuenta esté su par cargado o esperando en la cola: la bomba 20507, con el 0580453507, todavía espera. En la muestra de búsquedas, ningún cambio, y en la de fichas cambian dos, los dos de filtros. Reglas versión 25. `pruebas_de_la_precision.py` (110) lo controla; sin la regla, falla.
 
+## 🚚 El Sprint de MWM no es el Chevrolet Sprint
+
+Revisando los pares de Sprint apareció uno que salía 🟠 sin ningún porqué en contra: la «Jta.Carter CHEVROLET SPRINT 4.07T» de TARANTO, vinculada por el barrido con la «Junta para Cárter CHEVROLET SPRINT SWIFT - 1,0 - 61 G10» de ILLINOIS. Sprint se llaman dos cosas que vendió Chevrolet: el motor diésel MWM Sprint de las camionetas (4.07 de 4 cilindros, 6.07 de 6) y el auto, el Sprint que es el Suzuki Swift 1.0. TARANTO anota el motor con la marca y el modelo del auto, así que las dos descripciones «coincidían» en CHEVROLET y SPRINT.
+
+Ahora la firma de cada descripción sabe de cuál habla (`_cual_sprint()` en `logica/firmas.py`): MWM, 4.07/6.07 o «4 CIL»/«6 CIL» es el motor; SWIFT, CULTUS, SUZUKI, G10/G13, 993 CC o 1.0/1.3 es el auto. Si una es el motor y la otra el auto, es rojo: «motores distintos: el Sprint de MWM (4.07/6.07, diésel) vs el Chevrolet Sprint (Swift, 1.0)». Si una misma descripción tiene señas de los dos, o no dice ninguna (el «FORD FALCON … SPRINT»), no se decide nada. Como habla del motor, con un número de fábrica en común no cuenta (igual que el resto de lo del auto).
+
+En la copia de la base real: 3 vínculos cargados (330511, 330611 y 331111 con el JC-350-30, que se aprobaron en grupo el 28/09) quedan en «🔎 Analizar los vínculos cargados», en «🔤 Las descripciones dicen que es otra pieza», para cortarlos a mano; y 13 pares de la cola pasan de revisar a rojo (los que decían MWM ya iban a revisión por «un nombre de modelo de marcas distintas»). En la muestra de búsquedas y en la de fichas, ningún otro cambio; ningún rechazado cambia y ninguna pieza de seguridad. El caso sellado de la tapa de válvulas MWM Sprint contra la del Swift esperaba «dudosa» y ahora espera «distinta» (renglón cambiado en `casos_sellados.txt`). Reglas versión 26. `pruebas_de_la_precision.py` (111) lo controla; sin la regla, falla.
+
 ## ✂️ Lo cargado que es seguro otra pieza, cortado solo
 
 Lo pidió el dueño («automatizá más cosas»). La cola ya tenía su automatización —«🤖 Que la app descarte sola»—, pero lo que ya está cargado había que cortarlo a mano en «🔎 Analizar los vínculos cargados». Ahora, en «🧹 Limpiar y corregir», hay **«🤖 Que la app corte sola lo que es seguro otra pieza»**:
