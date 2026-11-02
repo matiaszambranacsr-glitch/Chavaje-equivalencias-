@@ -1240,6 +1240,7 @@ _MOTIVOS_DE_LOS_DUDOSOS = {
     "📐": "📐 Las medidas no coinciden",
     "↩️": "↩️ Volvió porque no le iba",
     "🏭": "🏭 Lo juntó un catálogo de fabricante y es otra pieza",
+    "🪛": "🪛 Un filtro con el número de la pieza que filtra",
 }
 
 
@@ -1254,6 +1255,16 @@ def motivo_de_un_vinculo_dudoso(malas):
                    next((m for m in malas if m.startswith("🏭")), malas[0]))
     return next((etiqueta for emoji, etiqueta in _MOTIVOS_DE_LOS_DUDOSOS.items()
                  if primera.startswith(emoji)), "Otros motivos")
+
+
+def _filtro_de_la_fila(f):
+    """filtro_con_el_numero_de_su_pieza() para una fila de vínculo (a, b, cod_, desc_, tipo_,
+    marca_): el lado del proveedor contra el código de fábrica."""
+    for x, y in (("a", "b"), ("b", "a")):
+        if f.get(f"tipo_{x}") != "OEM" and f.get(f"tipo_{y}") == "OEM":
+            return filtro_con_el_numero_de_su_pieza(f[f"desc_{x}"], f[f"cod_{y}"],
+                                                    f[f"marca_{x}"], f[y], f[x])
+    return ""
 
 
 def auditar_equivalencias_cargadas(limite=2000, tope_confianza=35, revisar=None):
@@ -1379,6 +1390,10 @@ def auditar_equivalencias_cargadas(limite=2000, tope_confianza=35, revisar=None)
         if _de_catalogo:
             puntaje = min(puntaje, 15.0)
             senales.append(("mal", _de_catalogo))
+        _filtro = _filtro_de_la_fila(f)
+        if _filtro:
+            puntaje = min(puntaje, 15.0)
+            senales.append(("mal", _filtro))
         _del_conjunto = el_numero_de_uno_es_el_conjunto_del_otro(
             f["cod_a"], f["desc_a"], f["tipo_a"], f["cod_b"], f["desc_b"], f["tipo_b"])
         if _del_conjunto:
@@ -1582,8 +1597,9 @@ def recalcular_confianzas(limite=20000, progreso=None, solo_faltantes=True, de_p
             puntaje = min(puntaje, _veto[0])
         # Lo que juntó un catálogo de fabricante y es otra pieza, igual que en la auditoría:
         # ver vinculo_de_catalogo_que_es_otra_pieza().
-        if vinculo_de_catalogo_que_es_otra_pieza(f.get("lote"), f["desc_a"], f["desc_b"],
-                                                 f["cod_a"], f["tipo_a"], f["cod_b"], f["tipo_b"]):
+        if (vinculo_de_catalogo_que_es_otra_pieza(f.get("lote"), f["desc_a"], f["desc_b"],
+                                                  f["cod_a"], f["tipo_a"], f["cod_b"], f["tipo_b"])
+                or _filtro_de_la_fila(f)):
             puntaje = min(puntaje, 15.0)
         valores.append((max(0, min(100, round(puntaje))), f["a"], f["b"]))
         if progreso and i % 500 == 0:

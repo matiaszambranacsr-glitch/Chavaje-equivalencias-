@@ -1361,6 +1361,46 @@ def rubros_de_los_codigos_de_fabrica(ids=None):
     return salida
 
 
+# EL FILTRO CON EL NÚMERO DE LA PIEZA QUE FILTRA. FISPA escribe «FILTRO BOMBA DE COMBUSTIBLE
+# 24075 VW amarok … REF ORIG 2H0919050B», y el 2H0919050B es el número de la bomba: la misma
+# lista se lo pone a dos bombas de la Amarok (64051 y LEFS045). El filtro lo cita porque es el
+# de esa bomba, no porque sea ella, y quedaba unido al número —y por él a las bombas— como si
+# fuera la misma pieza: 8 vínculos así en la base real (Amarok, Qubo, C4, Peugeot 205, una moto
+# Yamaha). El número de fábrica del filtro, con la descripción del filtro copiada, no dice nada:
+# lo dice que otro producto de la MISMA lista, de la pieza que el filtro nombra, cite el mismo
+# número. Solo filtros: «JUNTA TAPA …» contra un «Despiece … TAPA» de ILLINOIS son dos juntas.
+_RE_FILTRO_DE_UNA_PIEZA = re.compile(r"^ FILTROS? (?:(?:DE|DEL|P|PARA) )?([A-Z]{4,}) ")
+_PIEZAS_QUE_SE_FILTRAN = ("BOMBA", "INYECTOR", "AFORADOR", "CARBURADOR", "TANQUE")
+
+
+def filtro_con_el_numero_de_su_pieza(desc_filtro, cod_numero, marca_filtro, id_numero,
+                                     id_filtro=None):
+    """Si `desc_filtro` es un filtro de una pieza («FILTRO BOMBA …») que cita el número
+    `cod_numero`, y otro producto de su misma lista, de esa pieza, cita el mismo número, el
+    texto para decirlo; si no, ""."""
+    m = _RE_FILTRO_DE_UNA_PIEZA.match(_normalizar_desc(desc_filtro))
+    if not m or not m.group(1).startswith(_PIEZAS_QUE_SE_FILTRAN):
+        return ""
+    numero = sanitizar(cod_numero)
+    if len(numero) < 6 or numero not in sanitizar(desc_filtro):
+        return ""
+    pieza = m.group(1)[:4]
+    c.execute("""SELECT p.codigo_raw, p.descripcion FROM productos p
+                 JOIN marcas m ON m.id = p.marca_id
+                 WHERE m.nombre = ? AND p.id <> ? AND p.id IN (
+                     SELECT producto_b_id FROM equivalencias WHERE producto_a_id = ?
+                     UNION SELECT producto_a_id FROM equivalencias WHERE producto_b_id = ?)""",
+              (marca_filtro, id_filtro or -1, id_numero, id_numero))
+    for r in c.fetchall():
+        _desc = _normalizar_desc(r["descripcion"])
+        if (_desc.startswith(f" {pieza}") and not _RE_FILTRO_DE_UNA_PIEZA.match(_desc)
+                and numero in sanitizar(r["descripcion"])):
+            return (f"🪛 el {cod_numero} es el número de la {m.group(1).lower()}: la misma lista "
+                    f"se lo pone a «{str(r['descripcion'])[:35]}» ({r['codigo_raw']}), y el "
+                    "filtro lo cita por ser el suyo")
+    return ""
+
+
 def rubro_del_codigo_frente_a(rubros_oem, producto_id, su_descripcion, descripcion_del_otro):
     """El rubro por mayoría de rubros_de_los_codigos_de_fabrica(), o None para usar el de la
     descripción.

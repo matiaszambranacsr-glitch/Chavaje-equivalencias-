@@ -2985,6 +2985,28 @@ def probar(L):
         ns["devolver_lo_que_corto_sola"]()
     finally:
         _g109["exigir_nivel"] = _exigir109
+
+    # 110. EL FILTRO CON EL NÚMERO DE LA PIEZA QUE FILTRA (ver filtro_con_el_numero_de_su_pieza()):
+    # el filtro de la bomba de la Amarok cita el número que la misma lista le pone a la bomba.
+    # El filtro contra ese número, en rojo; la bomba contra el número, no; y un filtro con su
+    # propio número (nadie más de la lista lo cita) tampoco.
+    _m110, _o110 = marca("FISPA110"), marca("OEM110", "OEM")
+    _fil110 = producto("24075X", "FILTRO BOMBA DE COMBUSTIBLE 24075 VW AMAROK REF ORIG 2H0919050B",
+                       _m110)
+    _bom110 = producto("64051X", "BOMBA DE COMBUSTIBLE 64051 VW AMAROK REF ORIG 2H0919050B", _m110)
+    _num110 = producto("2H0919050B", "FILTRO BOMBA DE COMBUSTIBLE 24075 VW AMAROK", _o110)
+    _solo110 = producto("24050X", "FILTRO BOMBA DE COMBUSTIBLE 24050 FORD COURIER REF 1582804037",
+                        _m110)
+    _num2_110 = producto("1582804037", "FILTRO BOMBA DE COMBUSTIBLE 24050 FORD COURIER", _o110)
+    for _x, _y in ((_fil110, _num110), (_bom110, _num110), (_solo110, _num2_110)):
+        vincular(_x, _y, "FISPA110 · lista.xlsx · 25/09 20:33")
+    conn.commit()
+
+    def _vetos110(a, b):
+        return [v[:1] for v in ns["evidencia_cruzada"](a, b)[1] if v.startswith("🪛")]
+    esperar("el filtro contra el número de la bomba, en rojo", _vetos110(_fil110, _num110), ["🪛"])
+    esperar("la bomba contra su número, no", _vetos110(_bom110, _num110), [])
+    esperar("el filtro con su propio número, tampoco", _vetos110(_solo110, _num2_110), [])
     return fallas
 
 

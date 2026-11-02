@@ -571,6 +571,13 @@ def evidencia_cruzada(id_a, id_b, cuenta_palabras=None, total_descripciones=None
         _verbo = "muestran" if len(_de) > 1 or _de[0].startswith("las ") else "muestra"
         a_favor.append(f"🌐 {', '.join(_de)} los {_verbo} juntos")
 
+    # El filtro con el número de la pieza que filtra (ver filtro_con_el_numero_de_su_pieza()).
+    for _p, _n in ((pa, pb), (pb, pa)):
+        if (_p.get("tipo") or "").upper() != "OEM" and (_n.get("tipo") or "").upper() == "OEM":
+            _filtro = filtro_con_el_numero_de_su_pieza(_p.get("descripcion"), _n.get("codigo_raw"),
+                                                       _p.get("marca"), _n.get("id"), _p.get("id"))
+            if _filtro:
+                vetos.append(_filtro)
     if vetos:
         veredicto = "🔴 hay evidencia en contra"
     elif len(a_favor) >= 3:
